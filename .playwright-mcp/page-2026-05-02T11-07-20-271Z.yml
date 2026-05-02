@@ -1,0 +1,811 @@
+- generic [active] [ref=e1]:
+  - navigation [ref=e2]:
+    - generic [ref=e3]: ◆
+    - link "☀" [ref=e4] [cursor=pointer]:
+      - /url: /
+    - link "📡" [ref=e5] [cursor=pointer]:
+      - /url: /signals
+    - link "🎯" [ref=e6] [cursor=pointer]:
+      - /url: /actions
+    - link "🔍" [ref=e7] [cursor=pointer]:
+      - /url: /explorer
+    - link "📊" [ref=e8] [cursor=pointer]:
+      - /url: /portfolio
+    - link "🔄" [ref=e9] [cursor=pointer]:
+      - /url: /sectors
+    - link "🧮" [ref=e10] [cursor=pointer]:
+      - /url: /model
+    - link "🔗" [ref=e11] [cursor=pointer]:
+      - /url: /flow
+    - link "⚡" [ref=e12] [cursor=pointer]:
+      - /url: /system
+  - main [ref=e13]:
+    - generic [ref=e14]: Signals That Fired
+    - generic [ref=e15]:
+      - generic [ref=e16]:
+        - button "All" [ref=e17] [cursor=pointer]
+        - button "Promoter Buying (20)" [ref=e18] [cursor=pointer]
+        - button "Consensus Upgrade (20)" [ref=e19] [cursor=pointer]
+        - button "Forensic Alert (20)" [ref=e20] [cursor=pointer]
+        - button "Insider Activity (20)" [ref=e21] [cursor=pointer]
+        - button "Smart Money (2)" [ref=e22] [cursor=pointer]
+        - button "Regulatory (15)" [ref=e23] [cursor=pointer]
+      - generic [ref=e24]:
+        - generic [ref=e25]: PROMOTER BUYING
+        - generic [ref=e26]:
+          - generic [ref=e28]:
+            - generic [ref=e29]:
+              - generic [ref=e30]:
+                - link "ZSANMCOM" [ref=e31] [cursor=pointer]:
+                  - /url: /explorer/ZSAN
+                - generic [ref=e32]: Tandhan Industries Ltd
+              - generic [ref=e33]: "Promoters increased stake by +64.11% QoQ. Trend: ACCUMULATING"
+            - generic [ref=e35]: SMALL
+          - generic [ref=e39]:
+            - generic [ref=e40]:
+              - generic [ref=e41]:
+                - link "KSSMART" [ref=e42] [cursor=pointer]:
+                  - /url: /explorer/SOMAP
+                - generic [ref=e43]: KS Smart Technologies Ltd
+              - generic [ref=e44]: "Promoters increased stake by +56.04% QoQ. Trend: ACCUMULATING"
+            - generic [ref=e46]: SMALL
+          - generic [ref=e50]:
+            - generic [ref=e51]:
+              - generic [ref=e52]:
+                - link "SADHNANIQ" [ref=e53] [cursor=pointer]:
+                  - /url: /explorer/SADH
+                - generic [ref=e54]: Sadhana Nitro Chem Ltd
+              - generic [ref=e55]: "Promoters increased stake by +35.88% QoQ. Trend: ACCUMULATING"
+            - generic [ref=e57]: SMALL
+          - generic [ref=e61]:
+            - generic [ref=e62]:
+              - generic [ref=e63]:
+                - link "INLCM" [ref=e64] [cursor=pointer]:
+                  - /url: /explorer/INLC
+                - generic [ref=e65]: RRP Electronics India Ltd
+              - generic [ref=e66]: "Promoters increased stake by +28.72% QoQ. Trend: MIXED"
+            - generic [ref=e68]: SMALL
+          - generic [ref=e72]:
+            - generic [ref=e73]:
+              - generic [ref=e74]:
+                - link "SUDARCOLOR" [ref=e75] [cursor=pointer]:
+                  - /url: /explorer/CLAC
+                - generic [ref=e76]: Sudarshan Colorants India Ltd
+              - generic [ref=e77]: "Promoters increased stake by +15.89% QoQ. Trend: ACCUMULATING"
+            - generic [ref=e79]: SMALL
+          - generic [ref=e83]:
+            - generic [ref=e84]:
+              - generic [ref=e85]:
+                - link "TREJHARA" [ref=e86] [cursor=pointer]:
+                  - /url: /explorer/TREJ
+                - generic [ref=e87]: Trejhara Solutions Ltd
+              - generic [ref=e88]: "Promoters increased stake by +10.80% QoQ. Trend: ACCUMULATING"
+            - generic [ref=e90]: SMALL
+          - generic [ref=e94]:
+            - generic [ref=e95]:
+              - generic [ref=e96]:
+                - link "SALSTEEL" [ref=e97] [cursor=pointer]:
+                  - /url: /explorer/SALS
+                - generic [ref=e98]: SAL Steel Ltd
+              - generic [ref=e99]: "Promoters increased stake by +9.52% QoQ. Trend: ACCUMULATING"
+            - generic [ref=e101]: SMALL
+          - generic [ref=e105]:
+            - generic [ref=e106]:
+              - generic [ref=e107]:
+                - link "RRECL" [ref=e108] [cursor=pointer]:
+                  - /url: /explorer/RRE
+                - generic [ref=e109]: RDB Real Estate Constructions Ltd
+              - generic [ref=e110]: "Promoters increased stake by +9.34% QoQ. Trend: MIXED"
+            - generic [ref=e112]: SMALL
+          - generic [ref=e116]:
+            - generic [ref=e117]:
+              - generic [ref=e118]:
+                - link "KAVDEFENCE" [ref=e119] [cursor=pointer]:
+                  - /url: /explorer/KATL
+                - generic [ref=e120]: Kavveri Defence & Wireless Technologies
+              - generic [ref=e121]: "Promoters increased stake by +9.15% QoQ. Trend: ACCUMULATING"
+            - generic [ref=e123]: SMALL
+          - generic [ref=e127]:
+            - generic [ref=e128]:
+              - generic [ref=e129]:
+                - link "VIYASH" [ref=e130] [cursor=pointer]:
+                  - /url: /explorer/SEQU
+                - generic [ref=e131]: Viyash Scientific Ltd
+              - generic [ref=e132]: "Promoters increased stake by +9.09% QoQ. Trend: ACCUMULATING"
+            - generic [ref=e134]: SMALL
+          - generic [ref=e138]:
+            - generic [ref=e139]:
+              - generic [ref=e140]:
+                - link "BAJAJST" [ref=e141] [cursor=pointer]:
+                  - /url: /explorer/BAJAJ
+                - generic [ref=e142]: Bajaj Steel Industries Ltd
+              - generic [ref=e143]: "Promoters increased stake by +8.35% QoQ. Trend: ACCUMULATING"
+            - generic [ref=e145]: SMALL
+          - generic [ref=e149]:
+            - generic [ref=e150]:
+              - generic [ref=e151]:
+                - link "BOSCH-HCIL" [ref=e152] [cursor=pointer]:
+                  - /url: /explorer/JCHA
+                - generic [ref=e153]: Bosch Home Comfort India Ltd
+              - generic [ref=e154]: "Promoters increased stake by +7.97% QoQ. Trend: ACCUMULATING"
+            - generic [ref=e156]: SMALL
+          - generic [ref=e160]:
+            - generic [ref=e161]:
+              - generic [ref=e162]:
+                - link "ASHIKA" [ref=e163] [cursor=pointer]:
+                  - /url: /explorer/ASHI
+                - generic [ref=e164]: Ashika Credit Capital Ltd
+              - generic [ref=e165]: "Promoters increased stake by +7.11% QoQ. Trend: MIXED"
+            - generic [ref=e167]: SMALL
+          - generic [ref=e171]:
+            - generic [ref=e172]:
+              - generic [ref=e173]:
+                - link "NECLIFE" [ref=e174] [cursor=pointer]:
+                  - /url: /explorer/NECT
+                - generic [ref=e175]: Nectar Lifesciences Ltd
+              - generic [ref=e176]: "Promoters increased stake by +6.93% QoQ. Trend: ACCUMULATING"
+            - generic [ref=e178]: SMALL
+          - generic [ref=e182]:
+            - generic [ref=e183]:
+              - generic [ref=e184]:
+                - link "SOMATEX" [ref=e185] [cursor=pointer]:
+                  - /url: /explorer/SOMA
+                - generic [ref=e186]: Soma Textiles & Industries Ltd
+              - generic [ref=e187]: "Promoters increased stake by +5.62% QoQ. Trend: ACCUMULATING"
+            - generic [ref=e189]: SMALL
+          - generic [ref=e193]:
+            - generic [ref=e194]:
+              - generic [ref=e195]:
+                - link "ASIANTILES" [ref=e196] [cursor=pointer]:
+                  - /url: /explorer/ASGI
+                - generic [ref=e197]: Asian Granito India Ltd
+              - generic [ref=e198]: "Promoters increased stake by +5.08% QoQ. Trend: ACCUMULATING"
+            - generic [ref=e200]: SMALL
+          - generic [ref=e204]:
+            - generic [ref=e205]:
+              - generic [ref=e206]:
+                - link "SUNDROP" [ref=e207] [cursor=pointer]:
+                  - /url: /explorer/AGRO
+                - generic [ref=e208]: Sundrop Brands Ltd
+              - generic [ref=e209]: "Promoters increased stake by +4.99% QoQ. Trend: ACCUMULATING"
+            - generic [ref=e211]: SMALL
+          - generic [ref=e215]:
+            - generic [ref=e216]:
+              - generic [ref=e217]:
+                - link "VISASTEEL" [ref=e218] [cursor=pointer]:
+                  - /url: /explorer/VISA
+                - generic [ref=e219]: Visa Steel Ltd
+              - generic [ref=e220]: "Promoters increased stake by +4.94% QoQ. Trend: ACCUMULATING"
+            - generic [ref=e222]: SMALL
+          - generic [ref=e226]:
+            - generic [ref=e227]:
+              - generic [ref=e228]:
+                - link "AMCL" [ref=e229] [cursor=pointer]:
+                  - /url: /explorer/AMCL
+                - generic [ref=e230]: ANB Metal Cast Ltd
+              - generic [ref=e231]: "Promoters increased stake by +4.89% QoQ. Trend: MIXED"
+            - generic [ref=e233]: SMALL
+          - generic [ref=e237]:
+            - generic [ref=e238]:
+              - generic [ref=e239]:
+                - link "SUDTIND-B" [ref=e240] [cursor=pointer]:
+                  - /url: /explorer/SUDI
+                - generic [ref=e241]: Suditi Industries Ltd
+              - generic [ref=e242]: "Promoters increased stake by +4.79% QoQ. Trend: MIXED"
+            - generic [ref=e244]: SMALL
+      - generic [ref=e247]:
+        - generic [ref=e248]: CONSENSUS UPGRADE
+        - generic [ref=e249]:
+          - generic [ref=e251]:
+            - generic [ref=e252]:
+              - generic [ref=e253]:
+                - link "TMCV" [ref=e254] [cursor=pointer]:
+                  - /url: /explorer/TMC
+                - generic [ref=e255]: Tata Motors Ltd
+              - generic [ref=e256]: "Strong analyst consensus (0.96). EPS growth: nan%"
+            - generic [ref=e258]: LARGE
+          - generic [ref=e262]:
+            - generic [ref=e263]:
+              - generic [ref=e264]:
+                - link "ACUTAAS" [ref=e265] [cursor=pointer]:
+                  - /url: /explorer/AMIO
+                - generic [ref=e266]: Acutaas Chemicals Ltd
+              - generic [ref=e267]: "Strong analyst consensus (0.93). EPS growth: 129%"
+            - generic [ref=e269]: SMALL
+          - generic [ref=e273]:
+            - generic [ref=e274]:
+              - generic [ref=e275]:
+                - link "IRB" [ref=e276] [cursor=pointer]:
+                  - /url: /explorer/IRBI
+                - generic [ref=e277]: IRB Infrastructure Developers Ltd
+              - generic [ref=e278]: "Strong analyst consensus (0.92). EPS growth: 970%"
+            - generic [ref=e280]: SMALL
+          - generic [ref=e284]:
+            - generic [ref=e285]:
+              - generic [ref=e286]:
+                - link "ASTERDM" [ref=e287] [cursor=pointer]:
+                  - /url: /explorer/ATRD
+                - generic [ref=e288]: Aster DM Healthcare Ltd
+              - generic [ref=e289]: "Strong analyst consensus (0.91). EPS growth: 4060%"
+            - generic [ref=e291]: MID
+          - generic [ref=e295]:
+            - generic [ref=e296]:
+              - generic [ref=e297]:
+                - link "NATIONALUM" [ref=e298] [cursor=pointer]:
+                  - /url: /explorer/NALU
+                - generic [ref=e299]: National Aluminium Co Ltd
+              - generic [ref=e300]: "Strong analyst consensus (0.90). EPS growth: 165%"
+            - generic [ref=e302]: MID
+          - generic [ref=e306]:
+            - generic [ref=e307]:
+              - generic [ref=e308]:
+                - link "LENSKART" [ref=e309] [cursor=pointer]:
+                  - /url: /explorer/LEN
+                - generic [ref=e310]: Lenskart Solutions Ltd
+              - generic [ref=e311]: "Strong analyst consensus (0.89). EPS growth: 1784%"
+            - generic [ref=e313]: MID
+          - generic [ref=e317]:
+            - generic [ref=e318]:
+              - generic [ref=e319]:
+                - link "SWIGGY" [ref=e320] [cursor=pointer]:
+                  - /url: /explorer/SWIG
+                - generic [ref=e321]: Swiggy Ltd
+              - generic [ref=e322]: "Strong analyst consensus (0.89). EPS growth: 97%"
+            - generic [ref=e324]: MID
+          - generic [ref=e328]:
+            - generic [ref=e329]:
+              - generic [ref=e330]:
+                - link "BHARTIHEXA" [ref=e331] [cursor=pointer]:
+                  - /url: /explorer/BHARI
+                - generic [ref=e332]: Bharti Hexacom Ltd
+              - generic [ref=e333]: "Strong analyst consensus (0.89). EPS growth: 196%"
+            - generic [ref=e335]: MID
+          - generic [ref=e339]:
+            - generic [ref=e340]:
+              - generic [ref=e341]:
+                - link "AETHER" [ref=e342] [cursor=pointer]:
+                  - /url: /explorer/AET
+                - generic [ref=e343]: Aether Industries Ltd
+              - generic [ref=e344]: "Strong analyst consensus (0.89). EPS growth: 86%"
+            - generic [ref=e346]: SMALL
+          - generic [ref=e350]:
+            - generic [ref=e351]:
+              - generic [ref=e352]:
+                - link "BLACKBUCK" [ref=e353] [cursor=pointer]:
+                  - /url: /explorer/BLACK
+                - generic [ref=e354]: Blackbuck Ltd
+              - generic [ref=e355]: "Strong analyst consensus (0.88). EPS growth: 100%"
+            - generic [ref=e357]: SMALL
+          - generic [ref=e361]:
+            - generic [ref=e362]:
+              - generic [ref=e363]:
+                - link "AVALON" [ref=e364] [cursor=pointer]:
+                  - /url: /explorer/AVAL
+                - generic [ref=e365]: Avalon Technologies Ltd
+              - generic [ref=e366]: "Strong analyst consensus (0.86). EPS growth: 113%"
+            - generic [ref=e368]: SMALL
+          - generic [ref=e372]:
+            - generic [ref=e373]:
+              - generic [ref=e374]:
+                - link "AVL" [ref=e375] [cursor=pointer]:
+                  - /url: /explorer/AVL
+                - generic [ref=e376]: Aditya Vision Ltd
+              - generic [ref=e377]: "Strong analyst consensus (0.86). EPS growth: 141%"
+            - generic [ref=e379]: SMALL
+          - generic [ref=e383]:
+            - generic [ref=e384]:
+              - generic [ref=e385]:
+                - link "BIRET" [ref=e386] [cursor=pointer]:
+                  - /url: /explorer/BIRE
+                - generic [ref=e387]: Brookfield India Real Estate Trust
+              - generic [ref=e388]: "Strong analyst consensus (0.85). EPS growth: 479%"
+            - generic [ref=e390]: SMALL
+          - generic [ref=e394]:
+            - generic [ref=e395]:
+              - generic [ref=e396]:
+                - link "LUPIN" [ref=e397] [cursor=pointer]:
+                  - /url: /explorer/LUPN
+                - generic [ref=e398]: Lupin Ltd
+              - generic [ref=e399]: "Strong analyst consensus (0.85). EPS growth: 71%"
+            - generic [ref=e401]: LARGE
+          - generic [ref=e405]:
+            - generic [ref=e406]:
+              - generic [ref=e407]:
+                - link "GVT&D" [ref=e408] [cursor=pointer]:
+                  - /url: /explorer/GETD
+                - generic [ref=e409]: GE Vernova T&D India Ltd
+              - generic [ref=e410]: "Strong analyst consensus (0.85). EPS growth: 236%"
+            - generic [ref=e412]: LARGE
+          - generic [ref=e416]:
+            - generic [ref=e417]:
+              - generic [ref=e418]:
+                - link "PIRAMALFIN" [ref=e419] [cursor=pointer]:
+                  - /url: /explorer/DWNH
+                - generic [ref=e420]: Piramal Finance Ltd
+              - generic [ref=e421]: "Strong analyst consensus (0.84). EPS growth: 103%"
+            - generic [ref=e423]: MID
+          - generic [ref=e427]:
+            - generic [ref=e428]:
+              - generic [ref=e429]:
+                - link "VEDL" [ref=e430] [cursor=pointer]:
+                  - /url: /explorer/VDAN
+                - generic [ref=e431]: Vedanta Ltd
+              - generic [ref=e432]: "Strong analyst consensus (0.84). EPS growth: 245%"
+            - generic [ref=e434]: LARGE
+          - generic [ref=e438]:
+            - generic [ref=e439]:
+              - generic [ref=e440]:
+                - link "GODIGIT" [ref=e441] [cursor=pointer]:
+                  - /url: /explorer/GODIG
+                - generic [ref=e442]: Go Digit General Insurance Ltd
+              - generic [ref=e443]: "Strong analyst consensus (0.83). EPS growth: 128%"
+            - generic [ref=e445]: SMALL
+          - generic [ref=e449]:
+            - generic [ref=e450]:
+              - generic [ref=e451]:
+                - link "MEDPLUS" [ref=e452] [cursor=pointer]:
+                  - /url: /explorer/MEDP
+                - generic [ref=e453]: MedPlus Health Services Ltd
+              - generic [ref=e454]: "Strong analyst consensus (0.82). EPS growth: 129%"
+            - generic [ref=e456]: SMALL
+          - generic [ref=e460]:
+            - generic [ref=e461]:
+              - generic [ref=e462]:
+                - link "NIVABUPA" [ref=e463] [cursor=pointer]:
+                  - /url: /explorer/NIVA
+                - generic [ref=e464]: Niva Bupa Health Insurance Company Ltd
+              - generic [ref=e465]: "Strong analyst consensus (0.82). EPS growth: 137%"
+            - generic [ref=e467]: SMALL
+      - generic [ref=e470]:
+        - generic [ref=e471]: FORENSIC ALERT
+        - generic [ref=e472]:
+          - generic [ref=e474]:
+            - generic [ref=e475]:
+              - generic [ref=e476]:
+                - link "HMT" [ref=e477] [cursor=pointer]:
+                  - /url: /explorer/HMTL
+                - generic [ref=e478]: HMT Ltd
+              - generic [ref=e479]: "M-Score: -0.6716 (LIKELY_MANIPULATOR), Z-Score: -9.0378 (DISTRESS)"
+            - generic [ref=e481]: SMALL
+          - generic [ref=e485]:
+            - generic [ref=e486]:
+              - generic [ref=e487]:
+                - link "IBULLSLTD" [ref=e488] [cursor=pointer]:
+                  - /url: /explorer/IIAB
+                - generic [ref=e489]: Indiabulls Ltd
+              - generic [ref=e490]: "M-Score: 2.2556 (LIKELY_MANIPULATOR), Z-Score: -4.0768 (DISTRESS)"
+            - generic [ref=e492]: SMALL
+          - generic [ref=e496]:
+            - generic [ref=e497]:
+              - generic [ref=e498]:
+                - link "STCINDIA" [ref=e499] [cursor=pointer]:
+                  - /url: /explorer/STCI
+                - generic [ref=e500]: State Trading Corporation of India Ltd
+              - generic [ref=e501]: "M-Score: 1.5895 (LIKELY_MANIPULATOR), Z-Score: -8.4313 (DISTRESS)"
+            - generic [ref=e503]: SMALL
+          - generic [ref=e507]:
+            - generic [ref=e508]:
+              - generic [ref=e509]:
+                - link "SUPREMEINF" [ref=e510] [cursor=pointer]:
+                  - /url: /explorer/SIIL
+                - generic [ref=e511]: Supreme Infrastructure India Ltd
+              - generic [ref=e512]: "M-Score: 4.7917 (LIKELY_MANIPULATOR), Z-Score: -3.8429 (DISTRESS)"
+            - generic [ref=e514]: SMALL
+          - generic [ref=e518]:
+            - generic [ref=e519]:
+              - generic [ref=e520]:
+                - link "NAGAFERT" [ref=e521] [cursor=pointer]:
+                  - /url: /explorer/NGFR
+                - generic [ref=e522]: Nagarjuna Fertilizers and Chemicals Ltd
+              - generic [ref=e523]: "M-Score: 1.6775 (LIKELY_MANIPULATOR), Z-Score: -10.4291 (DISTRESS)"
+            - generic [ref=e525]: SMALL
+          - generic [ref=e529]:
+            - generic [ref=e530]:
+              - generic [ref=e531]:
+                - link "SPARC" [ref=e532] [cursor=pointer]:
+                  - /url: /explorer/SPRC
+                - generic [ref=e533]: Sun Pharma Advanced Research Co Ltd
+              - generic [ref=e534]: "M-Score: -1.4308 (POSSIBLE_MANIPULATOR), Z-Score: -9.7516 (DISTRESS)"
+            - generic [ref=e536]: SMALL
+          - generic [ref=e540]:
+            - generic [ref=e541]:
+              - generic [ref=e542]:
+                - link "HEMIPROP" [ref=e543] [cursor=pointer]:
+                  - /url: /explorer/HEMI
+                - generic [ref=e544]: Hemisphere Properties India Ltd
+              - generic [ref=e545]: "M-Score: -1.6566 (POSSIBLE_MANIPULATOR), Z-Score: 0.4804 (DISTRESS)"
+            - generic [ref=e547]: SMALL
+          - generic [ref=e551]:
+            - generic [ref=e552]:
+              - generic [ref=e553]:
+                - link "TAKE" [ref=e554] [cursor=pointer]:
+                  - /url: /explorer/TAKE
+                - generic [ref=e555]: Take Solutions Ltd
+              - generic [ref=e556]: "M-Score: -1.0089 (LIKELY_MANIPULATOR), Z-Score: 1.2019 (GREY_ZONE)"
+            - generic [ref=e558]: SMALL
+          - generic [ref=e562]:
+            - generic [ref=e563]:
+              - generic [ref=e564]:
+                - link "HINDMOTORS" [ref=e565] [cursor=pointer]:
+                  - /url: /explorer/HMTR
+                - generic [ref=e566]: Hindustan Motors Ltd
+              - generic [ref=e567]: "M-Score: -1.2744 (LIKELY_MANIPULATOR), Z-Score: 2.4783 (GREY_ZONE)"
+            - generic [ref=e569]: SMALL
+          - generic [ref=e573]:
+            - generic [ref=e574]:
+              - generic [ref=e575]:
+                - link "GVKPIL" [ref=e576] [cursor=pointer]:
+                  - /url: /explorer/GVKP
+                - generic [ref=e577]: GVK Power & Infrastructure Ltd
+              - generic [ref=e578]: "M-Score: -1.5891 (POSSIBLE_MANIPULATOR), Z-Score: -2.1992 (DISTRESS)"
+            - generic [ref=e580]: SMALL
+          - generic [ref=e584]:
+            - generic [ref=e585]:
+              - generic [ref=e586]:
+                - link "VARDMNPOLY" [ref=e587] [cursor=pointer]:
+                  - /url: /explorer/VARP
+                - generic [ref=e588]: Vardhman Polytex Ltd
+              - generic [ref=e589]: "M-Score: 2.7136 (LIKELY_MANIPULATOR), Z-Score: 1.6516 (GREY_ZONE)"
+            - generic [ref=e591]: SMALL
+          - generic [ref=e595]:
+            - generic [ref=e596]:
+              - generic [ref=e597]:
+                - link "HDFCBANK" [ref=e598] [cursor=pointer]:
+                  - /url: /explorer/HDBK
+                - generic [ref=e599]: HDFC Bank Ltd
+              - generic [ref=e600]: "M-Score: -2.8289 (CLEAN), Z-Score: 0.7706 (DISTRESS)"
+            - generic [ref=e602]: LARGE
+          - generic [ref=e606]:
+            - generic [ref=e607]:
+              - generic [ref=e608]:
+                - link "SBIN" [ref=e609] [cursor=pointer]:
+                  - /url: /explorer/SBI
+                - generic [ref=e610]: State Bank of India
+              - generic [ref=e611]: "M-Score: -2.7237 (CLEAN), Z-Score: -0.3876 (DISTRESS)"
+            - generic [ref=e613]: LARGE
+          - generic [ref=e617]:
+            - generic [ref=e618]:
+              - generic [ref=e619]:
+                - link "ICICIBANK" [ref=e620] [cursor=pointer]:
+                  - /url: /explorer/ICBK
+                - generic [ref=e621]: ICICI Bank Ltd
+              - generic [ref=e622]: "M-Score: -2.8704 (CLEAN), Z-Score: 0.9647 (DISTRESS)"
+            - generic [ref=e624]: LARGE
+          - generic [ref=e628]:
+            - generic [ref=e629]:
+              - generic [ref=e630]:
+                - link "AXISBANK" [ref=e631] [cursor=pointer]:
+                  - /url: /explorer/AXBK
+                - generic [ref=e632]: Axis Bank Ltd
+              - generic [ref=e633]: "M-Score: -2.8276 (CLEAN), Z-Score: 0.0753 (DISTRESS)"
+            - generic [ref=e635]: LARGE
+          - generic [ref=e639]:
+            - generic [ref=e640]:
+              - generic [ref=e641]:
+                - link "UNIONBANK" [ref=e642] [cursor=pointer]:
+                  - /url: /explorer/UNBK
+                - generic [ref=e643]: Union Bank of India Ltd
+              - generic [ref=e644]: "M-Score: -2.8305 (CLEAN), Z-Score: -1.0344 (DISTRESS)"
+            - generic [ref=e646]: LARGE
+          - generic [ref=e650]:
+            - generic [ref=e651]:
+              - generic [ref=e652]:
+                - link "BANKBARODA" [ref=e653] [cursor=pointer]:
+                  - /url: /explorer/BOB
+                - generic [ref=e654]: Bank of Baroda Ltd
+              - generic [ref=e655]: "M-Score: -2.8027 (CLEAN), Z-Score: -0.6913 (DISTRESS)"
+            - generic [ref=e657]: LARGE
+          - generic [ref=e661]:
+            - generic [ref=e662]:
+              - generic [ref=e663]:
+                - link "PNB" [ref=e664] [cursor=pointer]:
+                  - /url: /explorer/PNBK
+                - generic [ref=e665]: Punjab National Bank
+              - generic [ref=e666]: "M-Score: -2.7524 (CLEAN), Z-Score: -1.0187 (DISTRESS)"
+            - generic [ref=e668]: LARGE
+          - generic [ref=e672]:
+            - generic [ref=e673]:
+              - generic [ref=e674]:
+                - link "INDIANB" [ref=e675] [cursor=pointer]:
+                  - /url: /explorer/INBA
+                - generic [ref=e676]: Indian Bank
+              - generic [ref=e677]: "M-Score: -2.7756 (CLEAN), Z-Score: -0.9154 (DISTRESS)"
+            - generic [ref=e679]: LARGE
+          - generic [ref=e683]:
+            - generic [ref=e684]:
+              - generic [ref=e685]:
+                - link "CANBK" [ref=e686] [cursor=pointer]:
+                  - /url: /explorer/CNBK
+                - generic [ref=e687]: Canara Bank Ltd
+              - generic [ref=e688]: "M-Score: -2.9342 (CLEAN), Z-Score: -0.6437 (DISTRESS)"
+            - generic [ref=e690]: LARGE
+      - generic [ref=e693]:
+        - generic [ref=e694]: INSIDER ACTIVITY
+        - generic [ref=e695]:
+          - generic [ref=e697]:
+            - generic [ref=e698]:
+              - generic [ref=e699]:
+                - link "AADHARHFC" [ref=e700] [cursor=pointer]:
+                  - /url: /explorer/AADH
+                - generic [ref=e701]: Aadhar Housing Finance Ltd
+              - generic [ref=e702]: Promoters sold ₹2772627L
+            - generic [ref=e704]: SMALL
+          - generic [ref=e708]:
+            - generic [ref=e709]:
+              - generic [ref=e710]:
+                - link "BHEL" [ref=e711] [cursor=pointer]:
+                  - /url: /explorer/BHEL
+                - generic [ref=e712]: Bharat Heavy Electricals Ltd
+              - generic [ref=e713]: Promoters sold ₹894011L
+            - generic [ref=e715]: MID
+          - generic [ref=e719]:
+            - generic [ref=e720]:
+              - generic [ref=e721]:
+                - link "BAJFINANCE" [ref=e722] [cursor=pointer]:
+                  - /url: /explorer/BJFN
+                - generic [ref=e723]: Bajaj Finance Ltd
+              - generic [ref=e724]: Promoter Group bought ₹23889L
+            - generic [ref=e726]: LARGE
+          - generic [ref=e730]:
+            - generic [ref=e731]:
+              - generic [ref=e732]:
+                - link "ELECTCAST" [ref=e733] [cursor=pointer]:
+                  - /url: /explorer/ELST
+                - generic [ref=e734]: Electrosteel Castings Ltd
+              - generic [ref=e735]: Promoter Group bought ₹34637L
+            - generic [ref=e737]: SMALL
+          - generic [ref=e741]:
+            - generic [ref=e742]:
+              - generic [ref=e743]:
+                - link "GMRAIRPORT" [ref=e744] [cursor=pointer]:
+                  - /url: /explorer/GMRI
+                - generic [ref=e745]: GMR Airports Ltd
+              - generic [ref=e746]: Promoter Group bought ₹92536L
+            - generic [ref=e748]: MID
+          - generic [ref=e752]:
+            - generic [ref=e753]:
+              - generic [ref=e754]:
+                - link "EMBDL" [ref=e755] [cursor=pointer]:
+                  - /url: /explorer/INRL
+                - generic [ref=e756]: Embassy Developments Ltd
+              - generic [ref=e757]: Promoter Group pledge activity (6); Director bought ₹21L; Immediate Relative bought ₹65L
+            - generic [ref=e759]: SMALL
+          - generic [ref=e763]:
+            - generic [ref=e764]:
+              - generic [ref=e765]:
+                - link "IRFC" [ref=e766] [cursor=pointer]:
+                  - /url: /explorer/IRF
+                - generic [ref=e767]: Indian Railway Finance Corp Ltd
+              - generic [ref=e768]: Promoters sold ₹466527L
+            - generic [ref=e770]: LARGE
+          - generic [ref=e774]:
+            - generic [ref=e775]:
+              - generic [ref=e776]:
+                - link "JSL" [ref=e777] [cursor=pointer]:
+                  - /url: /explorer/JIST
+                - generic [ref=e778]: Jindal Stainless Ltd
+              - generic [ref=e779]: Promoter Group bought ₹96565L
+            - generic [ref=e781]: MID
+          - generic [ref=e785]:
+            - generic [ref=e786]:
+              - generic [ref=e787]:
+                - link "KPIGREEN" [ref=e788] [cursor=pointer]:
+                  - /url: /explorer/KPI
+                - generic [ref=e789]: KPI Green Energy Ltd
+              - generic [ref=e790]: Promoter Group bought ₹23750L
+            - generic [ref=e792]: SMALL
+          - generic [ref=e796]:
+            - generic [ref=e797]:
+              - generic [ref=e798]:
+                - link "SWANDEF" [ref=e799] [cursor=pointer]:
+                  - /url: /explorer/RELV
+                - generic [ref=e800]: Swan Defence and Heavy Industries Ltd
+              - generic [ref=e801]: Promoters sold ₹98028L
+            - generic [ref=e803]: SMALL
+          - generic [ref=e807]:
+            - generic [ref=e808]:
+              - generic [ref=e809]:
+                - link "RKFORGE" [ref=e810] [cursor=pointer]:
+                  - /url: /explorer/RKFO
+                - generic [ref=e811]: Ramkrishna Forgings Ltd
+              - generic [ref=e812]: Promoters bought ₹44246L; Promoters sold ₹17308L
+            - generic [ref=e814]: SMALL
+          - generic [ref=e818]:
+            - generic [ref=e819]:
+              - generic [ref=e820]:
+                - link "SUVEN" [ref=e821] [cursor=pointer]:
+                  - /url: /explorer/SUVP
+                - generic [ref=e822]: Suven Life Sciences Ltd
+              - generic [ref=e823]: Promoter Group bought ₹85140L
+            - generic [ref=e825]: SMALL
+          - generic [ref=e829]:
+            - generic [ref=e830]:
+              - generic [ref=e831]:
+                - link "VPRPL" [ref=e832] [cursor=pointer]:
+                  - /url: /explorer/VPR
+                - generic [ref=e833]: Vishnu Prakash R Punglia Ltd
+              - generic [ref=e834]: Promoters sold ₹282L; Promoters pledge activity (12); Promoter Group bought ₹942L; Promoter Group sold ₹4826L; Promoter
+            - generic [ref=e836]: SMALL
+          - generic [ref=e840]:
+            - generic [ref=e841]:
+              - generic [ref=e842]:
+                - link "BFINVEST" [ref=e843] [cursor=pointer]:
+                  - /url: /explorer/BFIN
+                - generic [ref=e844]: BF Investment Ltd
+              - generic [ref=e845]: Promoter Group bought ₹36210L; Promoter Group sold ₹36210L
+            - generic [ref=e847]: SMALL
+          - generic [ref=e851]:
+            - generic [ref=e852]:
+              - generic [ref=e853]:
+                - link "SHREDIGCEM" [ref=e854] [cursor=pointer]:
+                  - /url: /explorer/SRDC
+                - generic [ref=e855]: Shree Digvijay Cement Co Ltd
+              - generic [ref=e856]: Promoters bought ₹20526L
+            - generic [ref=e858]: SMALL
+          - generic [ref=e862]:
+            - generic [ref=e863]:
+              - generic [ref=e864]:
+                - link "NITCO" [ref=e865] [cursor=pointer]:
+                  - /url: /explorer/NCOT
+                - generic [ref=e866]: Nitco Ltd
+              - generic [ref=e867]: Promoters bought ₹15775L
+            - generic [ref=e869]: SMALL
+          - generic [ref=e873]:
+            - generic [ref=e874]:
+              - generic [ref=e875]:
+                - link "DALBHARAT" [ref=e876] [cursor=pointer]:
+                  - /url: /explorer/DALB
+                - generic [ref=e877]: Dalmia Bharat Ltd
+              - generic [ref=e878]: Promoter Group bought ₹25955L; Promoter Group sold ₹25955L
+            - generic [ref=e880]: MID
+          - generic [ref=e884]:
+            - generic [ref=e885]:
+              - generic [ref=e886]:
+                - link "KODYTECH" [ref=e887] [cursor=pointer]:
+                  - /url: /explorer/KOD
+                - generic [ref=e888]: Kody Technolab Ltd
+              - generic [ref=e889]: Promoters bought ₹15232L
+            - generic [ref=e891]: SMALL
+          - generic [ref=e895]:
+            - generic [ref=e896]:
+              - generic [ref=e897]:
+                - link "RELIGARE" [ref=e898] [cursor=pointer]:
+                  - /url: /explorer/RELG
+                - generic [ref=e899]: Religare Enterprises Ltd
+              - generic [ref=e900]: Promoter Group bought ₹14528L
+            - generic [ref=e902]: SMALL
+          - generic [ref=e906]:
+            - generic [ref=e907]:
+              - generic [ref=e908]:
+                - link "SALSTEEL" [ref=e909] [cursor=pointer]:
+                  - /url: /explorer/SALS
+                - generic [ref=e910]: SAL Steel Ltd
+              - generic [ref=e911]: Promoter Group bought ₹12870L; Promoter Group sold ₹3218L
+            - generic [ref=e913]: SMALL
+      - generic [ref=e916]:
+        - generic [ref=e917]: SMART MONEY
+        - generic [ref=e918]:
+          - generic [ref=e920]:
+            - generic [ref=e921]:
+              - generic [ref=e922]:
+                - link "DELHIVERY" [ref=e923] [cursor=pointer]:
+                  - /url: /explorer/DELH
+                - generic [ref=e924]: Delhivery Ltd
+              - generic [ref=e925]: "Smart money score: 86/100. Delivery: 64"
+            - generic [ref=e927]: MID
+          - generic [ref=e931]:
+            - generic [ref=e932]:
+              - generic [ref=e933]:
+                - link "BHEL" [ref=e934] [cursor=pointer]:
+                  - /url: /explorer/BHEL
+                - generic [ref=e935]: Bharat Heavy Electricals Ltd
+              - generic [ref=e936]: "Smart money score: 76/100. Delivery: 39"
+            - generic [ref=e938]: MID
+      - generic [ref=e941]:
+        - generic [ref=e942]: REGULATORY
+        - generic [ref=e943]:
+          - generic [ref=e945]:
+            - generic [ref=e946]:
+              - generic [ref=e947]:
+                - generic [ref=e948]: Energy
+                - generic [ref=e949]: Sebi proposes mandatory additional discl
+              - generic [ref=e950]: Adani Group energy companies directly impacted by enhanced FPI oversight following the saga
+            - generic [ref=e952]: MODERATE
+          - generic [ref=e956]:
+            - generic [ref=e957]:
+              - generic [ref=e958]:
+                - generic [ref=e959]: Utilities
+                - generic [ref=e960]: Sebi proposes mandatory additional discl
+              - generic [ref=e961]: Adani Group utilities companies likely to face increased scrutiny and potential FPI exit due to new disclosure norms
+            - generic [ref=e963]: MODERATE
+          - generic [ref=e967]:
+            - generic [ref=e968]:
+              - generic [ref=e969]:
+                - generic [ref=e970]: Energy
+                - generic [ref=e971]: Coal India shares plunge as Centre likel
+              - generic [ref=e972]: Coal India stake sale creates immediate selling pressure and potential supply overhang in largest coal sector stock
+            - generic [ref=e974]: MODERATE
+          - generic [ref=e978]:
+            - generic [ref=e979]:
+              - generic [ref=e980]:
+                - generic [ref=e981]: Industrials
+                - generic [ref=e982]: Deloitte flags Adani Ports transactions,
+              - generic [ref=e983]: Adani Ports audit concerns revive governance doubts across Adani Group infrastructure companies
+            - generic [ref=e985]: MODERATE
+          - generic [ref=e989]:
+            - generic [ref=e990]:
+              - generic [ref=e991]:
+                - generic [ref=e992]: Communication Services
+                - generic [ref=e993]: Govt may propose up to Rs 500 crore fine
+              - generic [ref=e994]: Telecom and digital platform companies face increased regulatory burden and potential hefty penalties
+            - generic [ref=e996]: MODERATE
+          - generic [ref=e1000]:
+            - generic [ref=e1001]:
+              - generic [ref=e1002]:
+                - generic [ref=e1003]: IT
+                - generic [ref=e1004]: Govt may propose up to Rs 500 crore fine
+              - generic [ref=e1005]: Rs 500 crore penalty cap creates significant compliance costs and operational risks for tech companies
+            - generic [ref=e1007]: MODERATE
+          - generic [ref=e1011]:
+            - generic [ref=e1012]:
+              - generic [ref=e1013]:
+                - generic [ref=e1014]: IT
+                - generic [ref=e1015]: High-quality standards to help India bec
+              - generic [ref=e1016]: BIS standardization in AI, blockchain, and smart manufacturing creates compliance opportunities for IT companies
+            - generic [ref=e1018]: MODERATE
+          - generic [ref=e1022]:
+            - generic [ref=e1023]:
+              - generic [ref=e1024]:
+                - generic [ref=e1025]: Industrials
+                - generic [ref=e1026]: High-quality standards to help India bec
+              - generic [ref=e1027]: Smart manufacturing and e-mobility standards will drive industrial automation and EV component standardization
+            - generic [ref=e1029]: MODERATE
+          - generic [ref=e1033]:
+            - generic [ref=e1034]:
+              - generic [ref=e1035]:
+                - generic [ref=e1036]: Energy
+                - generic [ref=e1037]: Government exempts IGST on ocean freight
+              - generic [ref=e1038]: Lower freight tax burden benefits oil & gas companies importing crude oil and petroleum products
+            - generic [ref=e1040]: MODERATE
+          - generic [ref=e1044]:
+            - generic [ref=e1045]:
+              - generic [ref=e1046]:
+                - generic [ref=e1047]: Materials
+                - generic [ref=e1048]: Government exempts IGST on ocean freight
+              - generic [ref=e1049]: IGST exemption on ocean freight reduces import costs for steel, cement, chemicals and other material companies
+            - generic [ref=e1051]: MODERATE
+          - generic [ref=e1055]:
+            - generic [ref=e1056]:
+              - generic [ref=e1057]:
+                - generic [ref=e1058]: Consumer Discretionary
+                - generic [ref=e1059]: Diamond industry associations ask member
+              - generic [ref=e1060]: Temporary halt in rough diamond imports directly impacts gems and jewellery companies' production and revenue
+            - generic [ref=e1062]: MODERATE
+          - generic [ref=e1066]:
+            - generic [ref=e1067]:
+              - generic [ref=e1068]:
+                - generic [ref=e1069]: Industrials
+                - generic [ref=e1070]: Infra development is key for making Indi
+              - generic [ref=e1071]: Infrastructure development focus benefits construction, engineering and capital goods companies
+            - generic [ref=e1073]: MODERATE
+          - generic [ref=e1077]:
+            - generic [ref=e1078]:
+              - generic [ref=e1079]:
+                - generic [ref=e1080]: Utilities
+                - generic [ref=e1081]: Infra development is key for making Indi
+              - generic [ref=e1082]: Emphasis on power and water infrastructure development directly benefits utility sector
+            - generic [ref=e1084]: MODERATE
+          - generic [ref=e1088]:
+            - generic [ref=e1089]:
+              - generic [ref=e1090]:
+                - generic [ref=e1091]: Consumer Staples
+                - generic [ref=e1092]: Canada's lentil sales to India slow afte
+              - generic [ref=e1093]: Reduced Canadian lentil imports could increase domestic food prices affecting FMCG companies' input costs and margins
+            - generic [ref=e1095]: MODERATE
+          - generic [ref=e1099]:
+            - generic [ref=e1100]:
+              - generic [ref=e1101]:
+                - generic [ref=e1102]: Financial Services
+                - generic [ref=e1103]: Centre sticks to target, to borrow Rs 6.
+              - generic [ref=e1104]: Banks will benefit from government bond issuances as primary dealers and through trading opportunities
+            - generic [ref=e1106]: MODERATE

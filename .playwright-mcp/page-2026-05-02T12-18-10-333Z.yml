@@ -1,0 +1,279 @@
+- generic [active] [ref=e1]:
+  - navigation [ref=e2]:
+    - generic [ref=e3]: ◆
+    - link "☀" [ref=e4] [cursor=pointer]:
+      - /url: /
+    - link "📡" [ref=e5] [cursor=pointer]:
+      - /url: /signals
+    - link "🎯" [ref=e6] [cursor=pointer]:
+      - /url: /actions
+    - link "🔍" [ref=e7] [cursor=pointer]:
+      - /url: /explorer
+    - link "📊" [ref=e8] [cursor=pointer]:
+      - /url: /portfolio
+    - link "🔄" [ref=e9] [cursor=pointer]:
+      - /url: /sectors
+    - link "🧮" [ref=e10] [cursor=pointer]:
+      - /url: /model
+    - link "🔗" [ref=e11] [cursor=pointer]:
+      - /url: /flow
+    - link "⚡" [ref=e12] [cursor=pointer]:
+      - /url: /system
+    - link "💾" [ref=e13] [cursor=pointer]:
+      - /url: /sql
+  - main [ref=e14]:
+    - generic [ref=e15]:
+      - generic [ref=e16]: Pipeline Flow
+      - link "System →" [ref=e17] [cursor=pointer]:
+        - /url: /system
+    - generic [ref=e18]: 24 steps that run daily at 03:30 UTC (09:00 IST). Each card shows the latest run status. Click a step to inspect the table it writes; data flows top-to-bottom.
+    - generic [ref=e19]:
+      - generic [ref=e20]:
+        - generic [ref=e21]:
+          - generic [ref=e22]: Sources
+          - generic [ref=e23]: fetch external data → raw tables
+        - generic [ref=e24]: 7 steps
+      - generic [ref=e25]:
+        - link "fetch_macro_market sources.macro_yfinance → macro_history yfinance (20 tickers) SUCCESS 87.0 rows" [ref=e26] [cursor=pointer]:
+          - /url: /sql?table=macro_history
+          - generic [ref=e28]: fetch_macro_market
+          - generic [ref=e29]: sources.macro_yfinance
+          - generic [ref=e30]: → macro_history
+          - generic [ref=e31]: yfinance (20 tickers)
+          - generic [ref=e32]:
+            - generic [ref=e33]: SUCCESS
+            - generic [ref=e34]: 87.0 rows
+        - link "fetch_macro_gov sources.macro_gov · weekly → macro_history data.gov.in + FRED SUCCESS 2,942.0 rows" [ref=e35] [cursor=pointer]:
+          - /url: /sql?table=macro_history
+          - generic [ref=e37]: fetch_macro_gov
+          - generic [ref=e38]: sources.macro_gov · weekly
+          - generic [ref=e39]: → macro_history
+          - generic [ref=e40]: data.gov.in + FRED
+          - generic [ref=e41]:
+            - generic [ref=e42]: SUCCESS
+            - generic [ref=e43]: 2,942.0 rows
+        - link "fetch_insider sources.nse_insider → insider_trades NSE PIT API SUCCESS 0.0 rows" [ref=e44] [cursor=pointer]:
+          - /url: /sql?table=insider_trades
+          - generic [ref=e46]: fetch_insider
+          - generic [ref=e47]: sources.nse_insider
+          - generic [ref=e48]: → insider_trades
+          - generic [ref=e49]: NSE PIT API
+          - generic [ref=e50]:
+            - generic [ref=e51]: SUCCESS
+            - generic [ref=e52]: 0.0 rows
+        - link "fetch_bulk_deals sources.nse_bulk → bulk_deals NSE archives CSV SUCCESS 0.0 rows" [ref=e53] [cursor=pointer]:
+          - /url: /sql?table=bulk_deals
+          - generic [ref=e55]: fetch_bulk_deals
+          - generic [ref=e56]: sources.nse_bulk
+          - generic [ref=e57]: → bulk_deals
+          - generic [ref=e58]: NSE archives CSV
+          - generic [ref=e59]:
+            - generic [ref=e60]: SUCCESS
+            - generic [ref=e61]: 0.0 rows
+        - link "fetch_bhavcopy CRITICAL sources.nse → stock_prices NSE Archives bhavcopy SUCCESS 0.0 rows" [ref=e62] [cursor=pointer]:
+          - /url: /sql?table=stock_prices
+          - generic [ref=e63]:
+            - generic [ref=e64]: fetch_bhavcopy
+            - generic "Critical step — pipeline aborts on failure" [ref=e65]: CRITICAL
+          - generic [ref=e66]: sources.nse
+          - generic [ref=e67]: → stock_prices
+          - generic [ref=e68]: NSE Archives bhavcopy
+          - generic [ref=e69]:
+            - generic [ref=e70]: SUCCESS
+            - generic [ref=e71]: 0.0 rows
+        - link "universe_liveness sources.universe → stocks stock_prices (recent activity) SUCCESS 1,814.0 rows" [ref=e72] [cursor=pointer]:
+          - /url: /sql?table=stocks
+          - generic [ref=e74]: universe_liveness
+          - generic [ref=e75]: sources.universe
+          - generic [ref=e76]: → stocks
+          - generic [ref=e77]: stock_prices (recent activity)
+          - generic [ref=e78]:
+            - generic [ref=e79]: SUCCESS
+            - generic [ref=e80]: 1,814.0 rows
+        - link "fetch_news sources.rss → news_articles RSS feeds (8 sources) SUCCESS 10.0 rows" [ref=e81] [cursor=pointer]:
+          - /url: /sql?table=news_articles
+          - generic [ref=e83]: fetch_news
+          - generic [ref=e84]: sources.rss
+          - generic [ref=e85]: → news_articles
+          - generic [ref=e86]: RSS feeds (8 sources)
+          - generic [ref=e87]:
+            - generic [ref=e88]: SUCCESS
+            - generic [ref=e89]: 10.0 rows
+    - generic [ref=e90]: ▾
+    - generic [ref=e91]:
+      - generic [ref=e92]:
+        - generic [ref=e93]:
+          - generic [ref=e94]: Signals
+          - generic [ref=e95]: raw tables → per-stock signals
+        - generic [ref=e96]: 10 steps
+      - generic [ref=e97]:
+        - link "signal_sentiment signals.sentiment → sentiment_scores news_articles SUCCESS 2,448.0 rows" [ref=e98] [cursor=pointer]:
+          - /url: /sql?table=sentiment_scores
+          - generic [ref=e100]: signal_sentiment
+          - generic [ref=e101]: signals.sentiment
+          - generic [ref=e102]: → sentiment_scores
+          - generic [ref=e103]: news_articles
+          - generic [ref=e104]:
+            - generic [ref=e105]: SUCCESS
+            - generic [ref=e106]: 2,448.0 rows
+        - link "signal_insider signals.insider_signal → insider_signals insider_trades (NSE PIT) SUCCESS 2,448.0 rows" [ref=e107] [cursor=pointer]:
+          - /url: /sql?table=insider_signals
+          - generic [ref=e109]: signal_insider
+          - generic [ref=e110]: signals.insider_signal
+          - generic [ref=e111]: → insider_signals
+          - generic [ref=e112]: insider_trades (NSE PIT)
+          - generic [ref=e113]:
+            - generic [ref=e114]: SUCCESS
+            - generic [ref=e115]: 2,448.0 rows
+        - link "signal_forensic signals.forensic → forensic_scores quarterly_income + annual_balance_sheet + annual_cash_flow SUCCESS 2,448.0 rows" [ref=e116] [cursor=pointer]:
+          - /url: /sql?table=forensic_scores
+          - generic [ref=e118]: signal_forensic
+          - generic [ref=e119]: signals.forensic
+          - generic [ref=e120]: → forensic_scores
+          - generic [ref=e121]: quarterly_income + annual_balance_sheet + annual_cash_flow
+          - generic [ref=e122]:
+            - generic [ref=e123]: SUCCESS
+            - generic [ref=e124]: 2,448.0 rows
+        - link "signal_piotroski signals.piotroski → piotroski_scores quarterly_income + annual_balance_sheet + annual_cash_flow SUCCESS 2,448.0 rows" [ref=e125] [cursor=pointer]:
+          - /url: /sql?table=piotroski_scores
+          - generic [ref=e127]: signal_piotroski
+          - generic [ref=e128]: signals.piotroski
+          - generic [ref=e129]: → piotroski_scores
+          - generic [ref=e130]: quarterly_income + annual_balance_sheet + annual_cash_flow
+          - generic [ref=e131]:
+            - generic [ref=e132]: SUCCESS
+            - generic [ref=e133]: 2,448.0 rows
+        - link "signal_accruals signals.accruals → accruals_scores quarterly_income + annual_balance_sheet + annual_cash_flow SUCCESS 2,448.0 rows" [ref=e134] [cursor=pointer]:
+          - /url: /sql?table=accruals_scores
+          - generic [ref=e136]: signal_accruals
+          - generic [ref=e137]: signals.accruals
+          - generic [ref=e138]: → accruals_scores
+          - generic [ref=e139]: quarterly_income + annual_balance_sheet + annual_cash_flow
+          - generic [ref=e140]:
+            - generic [ref=e141]: SUCCESS
+            - generic [ref=e142]: 2,448.0 rows
+        - link "signal_consensus signals.consensus → consensus_signals analyst_consensus + forecast_history + stock_prices SUCCESS 2,448.0 rows" [ref=e143] [cursor=pointer]:
+          - /url: /sql?table=consensus_signals
+          - generic [ref=e145]: signal_consensus
+          - generic [ref=e146]: signals.consensus
+          - generic [ref=e147]: → consensus_signals
+          - generic [ref=e148]: analyst_consensus + forecast_history + stock_prices
+          - generic [ref=e149]:
+            - generic [ref=e150]: SUCCESS
+            - generic [ref=e151]: 2,448.0 rows
+        - link "signal_promoter signals.promoter → promoter_signals shareholding SUCCESS 2,448.0 rows" [ref=e152] [cursor=pointer]:
+          - /url: /sql?table=promoter_signals
+          - generic [ref=e154]: signal_promoter
+          - generic [ref=e155]: signals.promoter
+          - generic [ref=e156]: → promoter_signals
+          - generic [ref=e157]: shareholding
+          - generic [ref=e158]:
+            - generic [ref=e159]: SUCCESS
+            - generic [ref=e160]: 2,448.0 rows
+        - link "signal_smart_money signals.smart_money → smart_money_scores bulk_deals + stock_prices SUCCESS 2,448.0 rows" [ref=e161] [cursor=pointer]:
+          - /url: /sql?table=smart_money_scores
+          - generic [ref=e163]: signal_smart_money
+          - generic [ref=e164]: signals.smart_money
+          - generic [ref=e165]: → smart_money_scores
+          - generic [ref=e166]: bulk_deals + stock_prices
+          - generic [ref=e167]:
+            - generic [ref=e168]: SUCCESS
+            - generic [ref=e169]: 2,448.0 rows
+        - link "signal_macro signals.macro → macro_sector_signals macro_indicators SUCCESS 18.0 rows" [ref=e170] [cursor=pointer]:
+          - /url: /sql?table=macro_sector_signals
+          - generic [ref=e172]: signal_macro
+          - generic [ref=e173]: signals.macro
+          - generic [ref=e174]: → macro_sector_signals
+          - generic [ref=e175]: macro_indicators
+          - generic [ref=e176]:
+            - generic [ref=e177]: SUCCESS
+            - generic [ref=e178]: 18.0 rows
+        - link "signal_regulatory signals.regulatory → macro_sector_signals regulatory_events + regulatory_signals (AI classified) SUCCESS 12.0 rows" [ref=e179] [cursor=pointer]:
+          - /url: /sql?table=macro_sector_signals
+          - generic [ref=e181]: signal_regulatory
+          - generic [ref=e182]: signals.regulatory
+          - generic [ref=e183]: → macro_sector_signals
+          - generic [ref=e184]: regulatory_events + regulatory_signals (AI classified)
+          - generic [ref=e185]:
+            - generic [ref=e186]: SUCCESS
+            - generic [ref=e187]: 12.0 rows
+    - generic [ref=e188]: ▾
+    - generic [ref=e189]:
+      - generic [ref=e190]:
+        - generic [ref=e191]:
+          - generic [ref=e192]: Scoring
+          - generic [ref=e193]: signals + regime → daily picks
+        - generic [ref=e194]: 3 steps
+      - generic [ref=e195]:
+        - link "quality_gate CRITICAL scoring.quality_gate piotroski + forensic + shareholding SUCCESS 2,198.0 rows" [ref=e196] [cursor=pointer]:
+          - /url: "#"
+          - generic [ref=e197]:
+            - generic [ref=e198]: quality_gate
+            - generic "Critical step — pipeline aborts on failure" [ref=e199]: CRITICAL
+          - generic [ref=e200]: scoring.quality_gate
+          - generic [ref=e201]: piotroski + forensic + shareholding
+          - generic [ref=e202]:
+            - generic [ref=e203]: SUCCESS
+            - generic [ref=e204]: 2,198.0 rows
+        - link "regime_update scoring.regime → regime_state vix_history SUCCESS 1.0 rows" [ref=e205] [cursor=pointer]:
+          - /url: /sql?table=regime_state
+          - generic [ref=e207]: regime_update
+          - generic [ref=e208]: scoring.regime
+          - generic [ref=e209]: → regime_state
+          - generic [ref=e210]: vix_history
+          - generic [ref=e211]:
+            - generic [ref=e212]: SUCCESS
+            - generic [ref=e213]: 1.0 rows
+        - link "screener CRITICAL scoring.screener → daily_picks all signals SUCCESS 2,448.0 rows" [ref=e214] [cursor=pointer]:
+          - /url: /sql?table=daily_picks
+          - generic [ref=e215]:
+            - generic [ref=e216]: screener
+            - generic "Critical step — pipeline aborts on failure" [ref=e217]: CRITICAL
+          - generic [ref=e218]: scoring.screener
+          - generic [ref=e219]: → daily_picks
+          - generic [ref=e220]: all signals
+          - generic [ref=e221]:
+            - generic [ref=e222]: SUCCESS
+            - generic [ref=e223]: 2,448.0 rows
+    - generic [ref=e224]: ▾
+    - generic [ref=e225]:
+      - generic [ref=e226]:
+        - generic [ref=e227]:
+          - generic [ref=e228]: Output
+          - generic [ref=e229]: picks → snapshot, dossier, email
+        - generic [ref=e230]: 4 steps
+      - generic [ref=e231]:
+        - link "snapshot output.snapshot → daily_snapshots all signals + stock_prices SUCCESS 2,448.0 rows" [ref=e232] [cursor=pointer]:
+          - /url: /sql?table=daily_snapshots
+          - generic [ref=e234]: snapshot
+          - generic [ref=e235]: output.snapshot
+          - generic [ref=e236]: → daily_snapshots
+          - generic [ref=e237]: all signals + stock_prices
+          - generic [ref=e238]:
+            - generic [ref=e239]: SUCCESS
+            - generic [ref=e240]: 2,448.0 rows
+        - link "diff_engine output.diff_engine → daily_changes daily_picks + daily_snapshots (diff) SUCCESS 1,940.0 rows" [ref=e241] [cursor=pointer]:
+          - /url: /sql?table=daily_changes
+          - generic [ref=e243]: diff_engine
+          - generic [ref=e244]: output.diff_engine
+          - generic [ref=e245]: → daily_changes
+          - generic [ref=e246]: daily_picks + daily_snapshots (diff)
+          - generic [ref=e247]:
+            - generic [ref=e248]: SUCCESS
+            - generic [ref=e249]: 1,940.0 rows
+        - link "dossier output.dossier daily_picks + all signals (Claude API) SUCCESS 5.0 rows" [ref=e250] [cursor=pointer]:
+          - /url: "#"
+          - generic [ref=e252]: dossier
+          - generic [ref=e253]: output.dossier
+          - generic [ref=e254]: daily_picks + all signals (Claude API)
+          - generic [ref=e255]:
+            - generic [ref=e256]: SUCCESS
+            - generic [ref=e257]: 5.0 rows
+        - link "email output.email_sender daily_picks + dossiers (Gmail SMTP) SUCCESS 1.0 rows" [ref=e258] [cursor=pointer]:
+          - /url: "#"
+          - generic [ref=e260]: email
+          - generic [ref=e261]: output.email_sender
+          - generic [ref=e262]: daily_picks + dossiers (Gmail SMTP)
+          - generic [ref=e263]:
+            - generic [ref=e264]: SUCCESS
+            - generic [ref=e265]: 1.0 rows

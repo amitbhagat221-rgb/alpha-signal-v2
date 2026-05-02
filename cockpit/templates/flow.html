@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">
+    <div class="section-title">Pipeline Flow</div>
+    <a href="/system" style="padding: 8px 16px; background: var(--bg-card-hover); color: var(--text-secondary); border-radius: 8px; text-decoration: none; font-size: 12px; font-weight: 600; letter-spacing: 0.3px;">System &rarr;</a>
+</div>
+<div class="section-desc">
+    {{ step_count }} steps that run daily at 03:30 UTC (09:00 IST). Each card shows the latest run status.
+    Click a step to inspect the table it writes; data flows top-to-bottom.
+</div>
+
+{# ── Layered DAG ── #}
+{% for layer in layers %}
+{% set layer_color = 'var(--accent)' if layer.name == 'Sources' else ('var(--green)' if layer.name == 'Signals' else ('var(--amber)' if layer.name == 'Scoring' else 'var(--blue, #3b82f6)')) %}
+<div class="card" style="margin-bottom: 16px; border-left: 4px solid {{ layer_color }};">
+    <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 12px;">
+        <div>
+            <div style="font-size: 14px; font-weight: 800; letter-spacing: 0.8px; text-transform: uppercase; color: var(--text-primary);">{{ layer.name }}</div>
+            <div class="mono" style="font-size: 11px; color: var(--text-muted); margin-top: 2px;">
+                {% if layer.name == 'Sources' %}fetch external data &rarr; raw tables
+                {% elif layer.name == 'Signals' %}raw tables &rarr; per-stock signals
+                {% elif layer.name == 'Scoring' %}signals + regime &rarr; daily picks
+                {% else %}picks &rarr; snapshot, dossier, email
+                {% endif %}
+            </div>
+        </div>
+        <div class="mono" style="font-size: 11px; color: var(--text-muted);">{{ layer.steps|length }} step{{ '' if layer.steps|length == 1 else 's' }}</div>
+    </div>
+
+    <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px;">
+        {% for s in layer.steps %}
+        {% set status = s.last_status %}
+        {% set status_color = 'var(--green)' if status == 'SUCCESS' else ('var(--red)' if status == 'FAILED' else ('var(--amber)' if status == 'RUNNING' else 'var(--text-muted)')) %}
+        {% set step_link = '/sql?table=' ~ s.table if s.table else '#' %}
+        <a href="{{ step_link }}" style="display: block; background: var(--bg-card); border: 1px solid var(--border); border-left: 3px solid {{ status_color }}; border-radius: 6px; padding: 10px 12px; text-decoration: none; transition: background 0.1s;"
+           onmouseover="this.style.background='var(--bg-card-hover)'"
+           onmouseout="this.style.background='var(--bg-card)'">
+            <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 4px;">
+                <span class="mono" style="font-size: 12px; font-weight: 700; color: var(--text-primary);">{{ s.name }}</span>
+                {% if s.critical %}<span title="Critical step — pipeline aborts on failure" style="font-size: 8px; padding: 1px 5px; background: rgba(245,158,11,0.15); color: var(--amber); border-radius: 3px; font-weight: 700; letter-spacing: 0.4px;">CRITICAL</span>{% endif %}
+            </div>
+            <div style="font-size: 10px; color: var(--text-muted); margin-bottom: 6px;">
+                {{ s.module }}{% if s.frequency and s.frequency != 'daily' %} · <span style="color: var(--amber);">{{ s.frequency }}</span>{% endif %}
+            </div>
+
+            {% if s.table %}
+            <div class="mono" style="font-size: 10px; color: var(--text-secondary); margin-bottom: 4px;">
+                &rarr; <span style="color: var(--accent);">{{ s.table }}</span>
+            </div>
+            {% endif %}
+
+            {% if s.source %}
+            <div style="font-size: 10px; color: var(--text-muted); line-height: 1.4; margin-bottom: 6px;">{{ s.source }}</div>
+            {% endif %}
+
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border);">
+                <span style="font-size: 9px; padding: 2px 6px; color: {{ status_color }}; border: 1px solid {{ status_color }}; border-radius: 3px; font-weight: 700; letter-spacing: 0.4px;">
+                    {{ status or 'NEVER RUN' }}
+                </span>
+                {% if s.last_rows is not none %}
+                <span class="mono" style="font-size: 10px; color: var(--text-muted);">{{ "{:,}".format(s.last_rows) }} rows</span>
+                {% endif %}
+            </div>
+            {% if s.last_error %}
+            <div style="margin-top: 6px; font-size: 10px; color: var(--red); font-family: 'JetBrains Mono', monospace; word-break: break-word;">{{ s.last_error[:100] }}{% if s.last_error|length > 100 %}…{% endif %}</div>
+            {% endif %}
+        </a>
+        {% endfor %}
+    </div>
+</div>
+
+{# Down-arrow between layers (skip after the last) #}
+{% if not loop.last %}
+<div style="text-align: center; color: var(--text-muted); font-size: 18px; margin: -8px 0;">▾</div>
+{% endif %}
+{% endfor %}
+
+{% endblock %}

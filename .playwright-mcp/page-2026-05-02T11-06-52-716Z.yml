@@ -1,0 +1,298 @@
+- generic [active] [ref=e1]:
+  - navigation [ref=e2]:
+    - generic [ref=e3]: ◆
+    - link "☀" [ref=e4] [cursor=pointer]:
+      - /url: /
+    - link "📡" [ref=e5] [cursor=pointer]:
+      - /url: /signals
+    - link "🎯" [ref=e6] [cursor=pointer]:
+      - /url: /actions
+    - link "🔍" [ref=e7] [cursor=pointer]:
+      - /url: /explorer
+    - link "📊" [ref=e8] [cursor=pointer]:
+      - /url: /portfolio
+    - link "🔄" [ref=e9] [cursor=pointer]:
+      - /url: /sectors
+    - link "🧮" [ref=e10] [cursor=pointer]:
+      - /url: /model
+    - link "🔗" [ref=e11] [cursor=pointer]:
+      - /url: /flow
+    - link "⚡" [ref=e12] [cursor=pointer]:
+      - /url: /system
+  - main [ref=e13]:
+    - generic [ref=e14]:
+      - generic [ref=e15]:
+        - generic [ref=e16]: NORMAL
+        - generic [ref=e17]: "India VIX 18.5 20d avg: 22.4"
+      - generic [ref=e18]:
+        - generic [ref=e19]:
+          - text: ALLOCATION
+          - generic [ref=e20]: 40L / 30M / 30S
+        - generic [ref=e21]:
+          - text: 2026-05-02
+          - text: 2448 stocks · 21 sectors tailwind · 3 headwind
+    - generic [ref=e22]:
+      - generic [ref=e23]: What Changed
+      - generic [ref=e24]:
+        - generic [ref=e26]:
+          - generic [ref=e27]: "OMAXAUTO rose 15 positions in SMALL · Rank #33 → #18"
+          - link "View →" [ref=e28] [cursor=pointer]:
+            - /url: /explorer/OMXA
+        - generic [ref=e30]:
+          - generic [ref=e31]: "EY rose 10 positions in SMALL · Rank #925 → #915"
+          - link "View →" [ref=e32] [cursor=pointer]:
+            - /url: /explorer/PUNI
+        - generic [ref=e34]:
+          - generic [ref=e35]: "SCML rose 18 positions in SMALL · Rank #999 → #981"
+          - link "View →" [ref=e36] [cursor=pointer]:
+            - /url: /explorer/SCM
+        - generic [ref=e38]:
+          - generic [ref=e39]: "PIGL rose 109 positions in SMALL · Rank #1125 → #1016"
+          - link "View →" [ref=e40] [cursor=pointer]:
+            - /url: /explorer/POER
+        - generic [ref=e42]:
+          - generic [ref=e43]: "SUNDRMBRAK rose 87 positions in SMALL · Rank #1525 → #1438"
+          - link "View →" [ref=e44] [cursor=pointer]:
+            - /url: /explorer/SBKL
+        - generic [ref=e46]:
+          - generic [ref=e47]: "EMERGENT rose 29 positions in SMALL · Rank #2098 → #2069"
+          - link "View →" [ref=e48] [cursor=pointer]:
+            - /url: /explorer/SRIO
+    - generic [ref=e49]:
+      - generic [ref=e50]: Earnings Coming Up
+      - generic [ref=e51]:
+        - link "📅 LGBBROSLTD 2026-05-02" [ref=e52] [cursor=pointer]:
+          - /url: /explorer/LGB
+          - generic [ref=e53]: 📅
+          - generic [ref=e54]: LGBBROSLTD
+          - generic [ref=e55]: 2026-05-02
+        - link "📅 CAMS 2026-05-04" [ref=e56] [cursor=pointer]:
+          - /url: /explorer/CAMC
+          - generic [ref=e57]: 📅
+          - generic [ref=e58]: CAMS
+          - generic [ref=e59]: 2026-05-04
+        - link "📅 LATENTVIEW 2026-05-04" [ref=e60] [cursor=pointer]:
+          - /url: /explorer/LATE
+          - generic [ref=e61]: 📅
+          - generic [ref=e62]: LATENTVIEW
+          - generic [ref=e63]: 2026-05-04
+        - link "📅 EXIDEIND 2026-05-04" [ref=e64] [cursor=pointer]:
+          - /url: /explorer/EXID
+          - generic [ref=e65]: 📅
+          - generic [ref=e66]: EXIDEIND
+          - generic [ref=e67]: 2026-05-04
+        - link "📅 CSBBANK 2026-05-04" [ref=e68] [cursor=pointer]:
+          - /url: /explorer/CSBB
+          - generic [ref=e69]: 📅
+          - generic [ref=e70]: CSBBANK
+          - generic [ref=e71]: 2026-05-04
+        - link "📅 POONAWALLA 2026-05-05" [ref=e72] [cursor=pointer]:
+          - /url: /explorer/MAGM
+          - generic [ref=e73]: 📅
+          - generic [ref=e74]: POONAWALLA
+          - generic [ref=e75]: 2026-05-05
+        - link "📅 COFORGE 2026-05-05" [ref=e76] [cursor=pointer]:
+          - /url: /explorer/COFO
+          - generic [ref=e77]: 📅
+          - generic [ref=e78]: COFORGE
+          - generic [ref=e79]: 2026-05-05
+        - link "📅 M&M 2026-05-05" [ref=e80] [cursor=pointer]:
+          - /url: /explorer/MAHM
+          - generic [ref=e81]: 📅
+          - generic [ref=e82]: M&M
+          - generic [ref=e83]: 2026-05-05
+        - link "📅 UBL 2026-05-05" [ref=e84] [cursor=pointer]:
+          - /url: /explorer/UBBW
+          - generic [ref=e85]: 📅
+          - generic [ref=e86]: UBL
+          - generic [ref=e87]: 2026-05-05
+        - link "📅 GHCL 2026-05-05" [ref=e88] [cursor=pointer]:
+          - /url: /explorer/GHCH
+          - generic [ref=e89]: 📅
+          - generic [ref=e90]: GHCL
+          - generic [ref=e91]: 2026-05-05
+    - generic [ref=e92]: Top Picks
+    - generic [ref=e93]:
+      - generic [ref=e94]:
+        - generic [ref=e95]: LARGE CAP
+        - 'link "1 VEDL BUY 85 ₹272 → Target ₹649 (+139%) 1M: -62% RSI: 17 Vedanta Ltd presents a compelling turnaround story with exceptional EP..." [ref=e96] [cursor=pointer]':
+          - /url: /explorer/VDAN
+          - generic [ref=e97]:
+            - generic [ref=e98]:
+              - generic [ref=e99]: "1"
+              - generic [ref=e100]: VEDL
+              - generic [ref=e101]: BUY
+            - generic [ref=e102]: "85"
+          - generic [ref=e103]:
+            - generic [ref=e104]: ₹272
+            - generic [ref=e105]: → Target ₹649 (+139%)
+            - generic [ref=e106]: "1M: -62%"
+            - generic [ref=e107]: "RSI: 17"
+          - generic [ref=e111]: Vedanta Ltd presents a compelling turnaround story with exceptional EP...
+        - 'link "2 INDUSTOWER BUY 77 ₹410 → Target ₹426 (+4%) 1M: -9% RSI: 40 Indus Towers presents a compelling investment opportunity as India''s l..." [ref=e112] [cursor=pointer]':
+          - /url: /explorer/BHRI
+          - generic [ref=e113]:
+            - generic [ref=e114]:
+              - generic [ref=e115]: "2"
+              - generic [ref=e116]: INDUSTOWER
+              - generic [ref=e117]: BUY
+            - generic [ref=e118]: "77"
+          - generic [ref=e119]:
+            - generic [ref=e120]: ₹410
+            - generic [ref=e121]: → Target ₹426 (+4%)
+            - generic [ref=e122]: "1M: -9%"
+            - generic [ref=e123]: "RSI: 40"
+          - generic [ref=e127]: Indus Towers presents a compelling investment opportunity as India's l...
+        - 'link "3 NTPC WATCH 76 ₹399 → Target ₹376 (-6%) 1M: +5% RSI: 66 NTPC presents a compelling investment opportunity as India''s largest p..." [ref=e128] [cursor=pointer]':
+          - /url: /explorer/NTPC
+          - generic [ref=e129]:
+            - generic [ref=e130]:
+              - generic [ref=e131]: "3"
+              - generic [ref=e132]: NTPC
+              - generic [ref=e133]: WATCH
+            - generic [ref=e134]: "76"
+          - generic [ref=e135]:
+            - generic [ref=e136]: ₹399
+            - generic [ref=e137]: → Target ₹376 (-6%)
+            - generic [ref=e138]: "1M: +5%"
+            - generic [ref=e139]: "RSI: 66"
+          - generic [ref=e143]: NTPC presents a compelling investment opportunity as India's largest p...
+        - 'link "4 HINDALCO WATCH 75 ₹1038 → Target ₹867 (-16%) 1M: +8% RSI: 71 Hindalco presents a compelling investment opportunity as India''s leadi..." [ref=e144] [cursor=pointer]':
+          - /url: /explorer/HALC
+          - generic [ref=e145]:
+            - generic [ref=e146]:
+              - generic [ref=e147]: "4"
+              - generic [ref=e148]: HINDALCO
+              - generic [ref=e149]: WATCH
+            - generic [ref=e150]: "75"
+          - generic [ref=e151]:
+            - generic [ref=e152]: ₹1038
+            - generic [ref=e153]: → Target ₹867 (-16%)
+            - generic [ref=e154]: "1M: +8%"
+            - generic [ref=e155]: "RSI: 71"
+          - generic [ref=e159]: Hindalco presents a compelling investment opportunity as India's leadi...
+        - 'link "5 TATASTEEL WATCH 73 ₹211 → Target ₹193 (-9%) 1M: +6% RSI: 64 Tata Steel shows strong operational recovery with 176% EPS growth desp..." [ref=e160] [cursor=pointer]':
+          - /url: /explorer/TISC
+          - generic [ref=e161]:
+            - generic [ref=e162]:
+              - generic [ref=e163]: "5"
+              - generic [ref=e164]: TATASTEEL
+              - generic [ref=e165]: WATCH
+            - generic [ref=e166]: "73"
+          - generic [ref=e167]:
+            - generic [ref=e168]: ₹211
+            - generic [ref=e169]: → Target ₹193 (-9%)
+            - generic [ref=e170]: "1M: +6%"
+            - generic [ref=e171]: "RSI: 64"
+          - generic [ref=e175]: Tata Steel shows strong operational recovery with 176% EPS growth desp...
+      - generic [ref=e176]:
+        - generic [ref=e177]: MID CAP
+        - 'link "1 NLCINDIA 81 ₹317 → Target ₹270 (-15%) 1M: +24% RSI: 73 Materials · Piotroski: 7/9 | Accruals: 0.70" [ref=e178] [cursor=pointer]':
+          - /url: /explorer/NLCI
+          - generic [ref=e179]:
+            - generic [ref=e180]:
+              - generic [ref=e181]: "1"
+              - generic [ref=e182]: NLCINDIA
+            - generic [ref=e183]: "81"
+          - generic [ref=e184]:
+            - generic [ref=e185]: ₹317
+            - generic [ref=e186]: → Target ₹270 (-15%)
+            - generic [ref=e187]: "1M: +24%"
+            - generic [ref=e188]: "RSI: 73"
+          - generic [ref=e192]: "Materials · Piotroski: 7/9 | Accruals: 0.70"
+        - 'link "2 NATIONALUM 81 ₹399 → Target ₹371 (-7%) 1M: +1% RSI: 56 Materials · Piotroski: 7/9 | Consensus: 0.90" [ref=e193] [cursor=pointer]':
+          - /url: /explorer/NALU
+          - generic [ref=e194]:
+            - generic [ref=e195]:
+              - generic [ref=e196]: "2"
+              - generic [ref=e197]: NATIONALUM
+            - generic [ref=e198]: "81"
+          - generic [ref=e199]:
+            - generic [ref=e200]: ₹399
+            - generic [ref=e201]: → Target ₹371 (-7%)
+            - generic [ref=e202]: "1M: +1%"
+            - generic [ref=e203]: "RSI: 56"
+          - generic [ref=e207]: "Materials · Piotroski: 7/9 | Consensus: 0.90"
+        - 'link "3 JBCHEPHARM 78 ₹2043 → Target ₹2057 (+1%) 1M: -0% RSI: 53 Health Care · Piotroski: 9/9 | Promoter: 1.00" [ref=e208] [cursor=pointer]':
+          - /url: /explorer/JBCH
+          - generic [ref=e209]:
+            - generic [ref=e210]:
+              - generic [ref=e211]: "3"
+              - generic [ref=e212]: JBCHEPHARM
+            - generic [ref=e213]: "78"
+          - generic [ref=e214]:
+            - generic [ref=e215]: ₹2043
+            - generic [ref=e216]: → Target ₹2057 (+1%)
+            - generic [ref=e217]: "1M: -0%"
+            - generic [ref=e218]: "RSI: 53"
+          - generic [ref=e222]: "Health Care · Piotroski: 9/9 | Promoter: 1.00"
+        - 'link "4 UPL 77 ₹642 → Target ₹596 (-7%) 1M: +2% RSI: 53 Materials · Piotroski: 7/9 | Promoter: 0.86" [ref=e223] [cursor=pointer]':
+          - /url: /explorer/UPLL
+          - generic [ref=e224]:
+            - generic [ref=e225]:
+              - generic [ref=e226]: "4"
+              - generic [ref=e227]: UPL
+            - generic [ref=e228]: "77"
+          - generic [ref=e229]:
+            - generic [ref=e230]: ₹642
+            - generic [ref=e231]: → Target ₹596 (-7%)
+            - generic [ref=e232]: "1M: +2%"
+            - generic [ref=e233]: "RSI: 53"
+          - generic [ref=e237]: "Materials · Piotroski: 7/9 | Promoter: 0.86"
+        - 'link "5 GAIL 75 ₹163 → Target ₹137 (-16%) 1M: +5% RSI: 65 Utilities · Piotroski: 7/9 | Promoter: 0.78" [ref=e238] [cursor=pointer]':
+          - /url: /explorer/GAIL
+          - generic [ref=e239]:
+            - generic [ref=e240]:
+              - generic [ref=e241]: "5"
+              - generic [ref=e242]: GAIL
+            - generic [ref=e243]: "75"
+          - generic [ref=e244]:
+            - generic [ref=e245]: ₹163
+            - generic [ref=e246]: → Target ₹137 (-16%)
+            - generic [ref=e247]: "1M: +5%"
+            - generic [ref=e248]: "RSI: 65"
+          - generic [ref=e252]: "Utilities · Piotroski: 7/9 | Promoter: 0.78"
+      - generic [ref=e253]:
+        - generic [ref=e254]: SMALL CAP
+        - 'link "1 MAJESAUT 94 → Target ₹287 (-10%) Consumer Discretionary · Piotroski: 8/9 | Accruals: 0.64" [ref=e255] [cursor=pointer]':
+          - /url: /explorer/MAJ
+          - generic [ref=e256]:
+            - generic [ref=e257]:
+              - generic [ref=e258]: "1"
+              - generic [ref=e259]: MAJESAUT
+            - generic [ref=e260]: "94"
+          - generic [ref=e262]: → Target ₹287 (-10%)
+          - generic [ref=e266]: "Consumer Discretionary · Piotroski: 8/9 | Accruals: 0.64"
+        - 'link "2 ANONDITA 89 Consumer Staples · Promoter: 0.95 | Insider: 0.00" [ref=e267] [cursor=pointer]':
+          - /url: /explorer/ANO
+          - generic [ref=e268]:
+            - generic [ref=e269]:
+              - generic [ref=e270]: "2"
+              - generic [ref=e271]: ANONDITA
+            - generic [ref=e272]: "89"
+          - generic [ref=e276]: "Consumer Staples · Promoter: 0.95 | Insider: 0.00"
+        - 'link "3 TGVSL 88 Materials · Piotroski: 8/9 | Promoter: 0.94" [ref=e277] [cursor=pointer]':
+          - /url: /explorer/SREER
+          - generic [ref=e278]:
+            - generic [ref=e279]:
+              - generic [ref=e280]: "3"
+              - generic [ref=e281]: TGVSL
+            - generic [ref=e282]: "88"
+          - generic [ref=e286]: "Materials · Piotroski: 8/9 | Promoter: 0.94"
+        - 'link "4 BRRL 87 Real Estate · Accruals: 0.94 | Promoter: 0.83" [ref=e287] [cursor=pointer]':
+          - /url: /explorer/BRR
+          - generic [ref=e288]:
+            - generic [ref=e289]:
+              - generic [ref=e290]: "4"
+              - generic [ref=e291]: BRRL
+            - generic [ref=e292]: "87"
+          - generic [ref=e296]: "Real Estate · Accruals: 0.94 | Promoter: 0.83"
+        - 'link "5 TRANSPEK 87 → Target ₹909 (-23%) Materials · Piotroski: 8/9 | Accruals: 0.77" [ref=e297] [cursor=pointer]':
+          - /url: /explorer/TRANP
+          - generic [ref=e298]:
+            - generic [ref=e299]:
+              - generic [ref=e300]: "5"
+              - generic [ref=e301]: TRANSPEK
+            - generic [ref=e302]: "87"
+          - generic [ref=e304]: → Target ₹909 (-23%)
+          - generic [ref=e308]: "Materials · Piotroski: 8/9 | Accruals: 0.77"

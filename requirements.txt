@@ -1,0 +1,31 @@
+# Alpha Signal v2 — Dependencies
+# Install: pip install -r requirements.txt --break-system-packages
+# Shares venv with v1: ~/alpha-signal/venv/
+
+# Core
+pandas==2.3.3
+numpy==2.4.3
+requests==2.32.5
+
+# Data sources
+yfinance==1.2.0
+beautifulsoup4==4.14.3
+feedparser==6.0.12
+
+# Signals & scoring
+scipy==1.17.1
+scikit-learn==1.8.0
+nltk==3.9.3
+
+# Visualization & notebooks
+matplotlib==3.10.8
+jupytext==1.19.1
+ipykernel==7.2.0
+
+# AI dossier
+anthropic==0.86.0
+
+# Future (install when needed in Phase 5+)
+# vaderSentiment     # sentiment signal
+# xgboost            # D18 per-segment model
+# shap==0.51.0       # SHAP explanations (already installed)

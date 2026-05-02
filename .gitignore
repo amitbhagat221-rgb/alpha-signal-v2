@@ -1,0 +1,86 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+venv/
+ENV/
+env/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Data (local)
+data/
+*.db
+*.sqlite
+*.sqlite3
+*.csv
+*.json
+*.pkl
+*.parquet
+
+# Output (local)
+output/*.html
+output/*.json
+output/dossiers_*.json
+output/email_*.html
+output/*.log
+
+# Notebooks (checkpoints)
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# Credentials
+.env
+*.env
+credentials.json
+config.local.py
+
+# Logs
+*.log
+logs/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temporary
+*.tmp
+temp/
+tmp/
+
+# Shell scripts
+*.sh

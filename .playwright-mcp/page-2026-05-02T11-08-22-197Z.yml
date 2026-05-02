@@ -1,0 +1,484 @@
+- generic [active] [ref=e1]:
+  - navigation [ref=e2]:
+    - generic [ref=e3]: ◆
+    - link "☀" [ref=e4] [cursor=pointer]:
+      - /url: /
+    - link "📡" [ref=e5] [cursor=pointer]:
+      - /url: /signals
+    - link "🎯" [ref=e6] [cursor=pointer]:
+      - /url: /actions
+    - link "🔍" [ref=e7] [cursor=pointer]:
+      - /url: /explorer
+    - link "📊" [ref=e8] [cursor=pointer]:
+      - /url: /portfolio
+    - link "🔄" [ref=e9] [cursor=pointer]:
+      - /url: /sectors
+    - link "🧮" [ref=e10] [cursor=pointer]:
+      - /url: /model
+    - link "🔗" [ref=e11] [cursor=pointer]:
+      - /url: /flow
+    - link "⚡" [ref=e12] [cursor=pointer]:
+      - /url: /system
+  - main [ref=e13]:
+    - generic [ref=e14]: Model Portfolio
+    - generic [ref=e15]:
+      - generic [ref=e16]:
+        - generic [ref=e17]:
+          - generic [ref=e18]: Expected Return
+          - generic [ref=e19]: "-0.7%"
+          - generic [ref=e20]: weighted avg analyst upside (24 stocks)
+        - generic [ref=e21]:
+          - generic [ref=e22]: Portfolio Avg Score
+          - generic [ref=e23]: "79"
+          - generic [ref=e24]: vs universe 47 (+32 premium)
+        - generic [ref=e25]:
+          - generic [ref=e26]: Stocks
+          - generic [ref=e27]: "30"
+          - generic [ref=e28]: "Top 3 weight: 12.0%"
+        - generic [ref=e29]:
+          - generic [ref=e30]: Regime
+          - generic [ref=e31]: NORMAL
+      - generic [ref=e32]: SECTOR ALLOCATION
+      - generic [ref=e33]:
+        - generic [ref=e34]: Materials
+        - generic [ref=e37]: 42%
+      - generic [ref=e38]:
+        - generic [ref=e39]: Health Care
+        - generic [ref=e42]: 20%
+      - generic [ref=e43]:
+        - generic [ref=e44]: Communication Services
+        - generic [ref=e47]: 11%
+      - generic [ref=e48]:
+        - generic [ref=e49]: Utilities
+        - generic [ref=e52]: 7%
+      - generic [ref=e53]:
+        - generic [ref=e54]: Consumer Discretionary
+        - generic [ref=e57]: 7%
+      - generic [ref=e58]:
+        - generic [ref=e59]: Financials
+        - generic [ref=e62]: 4%
+      - generic [ref=e63]:
+        - generic [ref=e64]: Energy
+        - generic [ref=e67]: 3%
+      - generic [ref=e68]:
+        - generic [ref=e69]: Consumer Staples
+        - generic [ref=e72]: 3%
+    - generic [ref=e73]:
+      - generic [ref=e77]:
+        - generic [ref=e78]: "18.5"
+        - generic [ref=e79]: VIX
+      - generic [ref=e80]:
+        - generic [ref=e82]:
+          - generic [ref=e83]: LARGE
+          - generic [ref=e84]: 40% · 10 stocks
+        - generic [ref=e88]:
+          - generic [ref=e89]: MID
+          - generic [ref=e90]: 30% · 10 stocks
+        - generic [ref=e94]:
+          - generic [ref=e95]: SMALL
+          - generic [ref=e96]: 30% · 10 stocks
+    - generic [ref=e99]:
+      - generic [ref=e100]: LARGE CAP
+      - table [ref=e101]:
+        - rowgroup [ref=e102]:
+          - row "# Ticker Sector Score Weight Price Target Upside 1M" [ref=e103]:
+            - columnheader "#" [ref=e104]
+            - columnheader "Ticker" [ref=e105]
+            - columnheader "Sector" [ref=e106]
+            - columnheader "Score" [ref=e107]
+            - columnheader "Weight" [ref=e108]
+            - columnheader "Price" [ref=e109]
+            - columnheader "Target" [ref=e110]
+            - columnheader "Upside" [ref=e111]
+            - columnheader "1M" [ref=e112]
+        - rowgroup [ref=e113]:
+          - row "1 VEDL Materials 85 4.0% ₹272 ₹649 +139% -62%" [ref=e114]:
+            - cell "1" [ref=e115]
+            - cell "VEDL" [ref=e116]:
+              - link "VEDL" [ref=e117] [cursor=pointer]:
+                - /url: /explorer/VDAN
+            - cell "Materials" [ref=e118]
+            - cell "85" [ref=e119]
+            - cell "4.0%" [ref=e120]
+            - cell "₹272" [ref=e121]
+            - cell "₹649" [ref=e122]
+            - cell "+139%" [ref=e123]
+            - cell "-62%" [ref=e124]
+          - row "2 INDUSTOWER Communication Services 77 4.0% ₹410 ₹426 +4% -9%" [ref=e125]:
+            - cell "2" [ref=e126]
+            - cell "INDUSTOWER" [ref=e127]:
+              - link "INDUSTOWER" [ref=e128] [cursor=pointer]:
+                - /url: /explorer/BHRI
+            - cell "Communication Services" [ref=e129]
+            - cell "77" [ref=e130]
+            - cell "4.0%" [ref=e131]
+            - cell "₹410" [ref=e132]
+            - cell "₹426" [ref=e133]
+            - cell "+4%" [ref=e134]
+            - cell "-9%" [ref=e135]
+          - row "3 NTPC Utilities 76 4.0% ₹399 ₹376 -6% +5%" [ref=e136]:
+            - cell "3" [ref=e137]
+            - cell "NTPC" [ref=e138]:
+              - link "NTPC" [ref=e139] [cursor=pointer]:
+                - /url: /explorer/NTPC
+            - cell "Utilities" [ref=e140]
+            - cell "76" [ref=e141]
+            - cell "4.0%" [ref=e142]
+            - cell "₹399" [ref=e143]
+            - cell "₹376" [ref=e144]
+            - cell "-6%" [ref=e145]
+            - cell "+5%" [ref=e146]
+          - row "4 HINDALCO Materials 75 4.0% ₹1038 ₹867 -16% +8%" [ref=e147]:
+            - cell "4" [ref=e148]
+            - cell "HINDALCO" [ref=e149]:
+              - link "HINDALCO" [ref=e150] [cursor=pointer]:
+                - /url: /explorer/HALC
+            - cell "Materials" [ref=e151]
+            - cell "75" [ref=e152]
+            - cell "4.0%" [ref=e153]
+            - cell "₹1038" [ref=e154]
+            - cell "₹867" [ref=e155]
+            - cell "-16%" [ref=e156]
+            - cell "+8%" [ref=e157]
+          - row "5 TATASTEEL Materials 73 4.0% ₹211 ₹193 -9% +6%" [ref=e158]:
+            - cell "5" [ref=e159]
+            - cell "TATASTEEL" [ref=e160]:
+              - link "TATASTEEL" [ref=e161] [cursor=pointer]:
+                - /url: /explorer/TISC
+            - cell "Materials" [ref=e162]
+            - cell "73" [ref=e163]
+            - cell "4.0%" [ref=e164]
+            - cell "₹211" [ref=e165]
+            - cell "₹193" [ref=e166]
+            - cell "-9%" [ref=e167]
+            - cell "+6%" [ref=e168]
+          - row "6 BHARTIARTL Communication Services 72 4.0% ₹1887 ₹1844 -2% +1%" [ref=e169]:
+            - cell "6" [ref=e170]
+            - cell "BHARTIARTL" [ref=e171]:
+              - link "BHARTIARTL" [ref=e172] [cursor=pointer]:
+                - /url: /explorer/BRTI
+            - cell "Communication Services" [ref=e173]
+            - cell "72" [ref=e174]
+            - cell "4.0%" [ref=e175]
+            - cell "₹1887" [ref=e176]
+            - cell "₹1844" [ref=e177]
+            - cell "-2%" [ref=e178]
+            - cell "+1%" [ref=e179]
+          - row "7 PFC Financials 70 4.0% ₹448 ₹396 -12% +10%" [ref=e180]:
+            - cell "7" [ref=e181]
+            - cell "PFC" [ref=e182]:
+              - link "PFC" [ref=e183] [cursor=pointer]:
+                - /url: /explorer/PWFC
+            - cell "Financials" [ref=e184]
+            - cell "70" [ref=e185]
+            - cell "4.0%" [ref=e186]
+            - cell "₹448" [ref=e187]
+            - cell "₹396" [ref=e188]
+            - cell "-12%" [ref=e189]
+            - cell "+10%" [ref=e190]
+          - row "8 HEROMOTOCO Consumer Discretionary 70 4.0% ₹5099 ₹5143 +1% -8%" [ref=e191]:
+            - cell "8" [ref=e192]
+            - cell "HEROMOTOCO" [ref=e193]:
+              - link "HEROMOTOCO" [ref=e194] [cursor=pointer]:
+                - /url: /explorer/HROM
+            - cell "Consumer Discretionary" [ref=e195]
+            - cell "70" [ref=e196]
+            - cell "4.0%" [ref=e197]
+            - cell "₹5099" [ref=e198]
+            - cell "₹5143" [ref=e199]
+            - cell "+1%" [ref=e200]
+            - cell "-8%" [ref=e201]
+          - row "9 LUPIN Health Care 68 4.0% ₹2305 ₹2335 +1% -2%" [ref=e202]:
+            - cell "9" [ref=e203]
+            - cell "LUPIN" [ref=e204]:
+              - link "LUPIN" [ref=e205] [cursor=pointer]:
+                - /url: /explorer/LUPN
+            - cell "Health Care" [ref=e206]
+            - cell "68" [ref=e207]
+            - cell "4.0%" [ref=e208]
+            - cell "₹2305" [ref=e209]
+            - cell "₹2335" [ref=e210]
+            - cell "+1%" [ref=e211]
+            - cell "-2%" [ref=e212]
+          - row "10 TORNTPHARM Health Care 68 4.0% ₹4185 ₹4266 +2% -3%" [ref=e213]:
+            - cell "10" [ref=e214]
+            - cell "TORNTPHARM" [ref=e215]:
+              - link "TORNTPHARM" [ref=e216] [cursor=pointer]:
+                - /url: /explorer/TORP
+            - cell "Health Care" [ref=e217]
+            - cell "68" [ref=e218]
+            - cell "4.0%" [ref=e219]
+            - cell "₹4185" [ref=e220]
+            - cell "₹4266" [ref=e221]
+            - cell "+2%" [ref=e222]
+            - cell "-3%" [ref=e223]
+    - generic [ref=e224]:
+      - generic [ref=e225]: MID CAP
+      - table [ref=e226]:
+        - rowgroup [ref=e227]:
+          - row "# Ticker Sector Score Weight Price Target Upside 1M" [ref=e228]:
+            - columnheader "#" [ref=e229]
+            - columnheader "Ticker" [ref=e230]
+            - columnheader "Sector" [ref=e231]
+            - columnheader "Score" [ref=e232]
+            - columnheader "Weight" [ref=e233]
+            - columnheader "Price" [ref=e234]
+            - columnheader "Target" [ref=e235]
+            - columnheader "Upside" [ref=e236]
+            - columnheader "1M" [ref=e237]
+        - rowgroup [ref=e238]:
+          - row "1 NLCINDIA Materials 81 3.0% ₹317 ₹270 -15% +24%" [ref=e239]:
+            - cell "1" [ref=e240]
+            - cell "NLCINDIA" [ref=e241]:
+              - link "NLCINDIA" [ref=e242] [cursor=pointer]:
+                - /url: /explorer/NLCI
+            - cell "Materials" [ref=e243]
+            - cell "81" [ref=e244]
+            - cell "3.0%" [ref=e245]
+            - cell "₹317" [ref=e246]
+            - cell "₹270" [ref=e247]
+            - cell "-15%" [ref=e248]
+            - cell "+24%" [ref=e249]
+          - row "2 NATIONALUM Materials 81 3.0% ₹399 ₹371 -7% +1%" [ref=e250]:
+            - cell "2" [ref=e251]
+            - cell "NATIONALUM" [ref=e252]:
+              - link "NATIONALUM" [ref=e253] [cursor=pointer]:
+                - /url: /explorer/NALU
+            - cell "Materials" [ref=e254]
+            - cell "81" [ref=e255]
+            - cell "3.0%" [ref=e256]
+            - cell "₹399" [ref=e257]
+            - cell "₹371" [ref=e258]
+            - cell "-7%" [ref=e259]
+            - cell "+1%" [ref=e260]
+          - row "3 JBCHEPHARM Health Care 78 3.0% ₹2043 ₹2057 +1% -0%" [ref=e261]:
+            - cell "3" [ref=e262]
+            - cell "JBCHEPHARM" [ref=e263]:
+              - link "JBCHEPHARM" [ref=e264] [cursor=pointer]:
+                - /url: /explorer/JBCH
+            - cell "Health Care" [ref=e265]
+            - cell "78" [ref=e266]
+            - cell "3.0%" [ref=e267]
+            - cell "₹2043" [ref=e268]
+            - cell "₹2057" [ref=e269]
+            - cell "+1%" [ref=e270]
+            - cell "-0%" [ref=e271]
+          - row "4 UPL Materials 77 3.0% ₹642 ₹596 -7% +2%" [ref=e272]:
+            - cell "4" [ref=e273]
+            - cell "UPL" [ref=e274]:
+              - link "UPL" [ref=e275] [cursor=pointer]:
+                - /url: /explorer/UPLL
+            - cell "Materials" [ref=e276]
+            - cell "77" [ref=e277]
+            - cell "3.0%" [ref=e278]
+            - cell "₹642" [ref=e279]
+            - cell "₹596" [ref=e280]
+            - cell "-7%" [ref=e281]
+            - cell "+2%" [ref=e282]
+          - row "5 GAIL Utilities 75 3.0% ₹163 ₹137 -16% +5%" [ref=e283]:
+            - cell "5" [ref=e284]
+            - cell "GAIL" [ref=e285]:
+              - link "GAIL" [ref=e286] [cursor=pointer]:
+                - /url: /explorer/GAIL
+            - cell "Utilities" [ref=e287]
+            - cell "75" [ref=e288]
+            - cell "3.0%" [ref=e289]
+            - cell "₹163" [ref=e290]
+            - cell "₹137" [ref=e291]
+            - cell "-16%" [ref=e292]
+            - cell "+5%" [ref=e293]
+          - row "6 OIL Energy 75 3.0% ₹491 ₹478 -3% +1%" [ref=e294]:
+            - cell "6" [ref=e295]
+            - cell "OIL" [ref=e296]:
+              - link "OIL" [ref=e297] [cursor=pointer]:
+                - /url: /explorer/OILI
+            - cell "Energy" [ref=e298]
+            - cell "75" [ref=e299]
+            - cell "3.0%" [ref=e300]
+            - cell "₹491" [ref=e301]
+            - cell "₹478" [ref=e302]
+            - cell "-3%" [ref=e303]
+            - cell "+1%" [ref=e304]
+          - row "7 IPCALAB Health Care 74 3.0% ₹1531 ₹1586 +4% +2%" [ref=e305]:
+            - cell "7" [ref=e306]
+            - cell "IPCALAB" [ref=e307]:
+              - link "IPCALAB" [ref=e308] [cursor=pointer]:
+                - /url: /explorer/IPCA
+            - cell "Health Care" [ref=e309]
+            - cell "74" [ref=e310]
+            - cell "3.0%" [ref=e311]
+            - cell "₹1531" [ref=e312]
+            - cell "₹1586" [ref=e313]
+            - cell "+4%" [ref=e314]
+            - cell "+2%" [ref=e315]
+          - row "8 JSL Materials 74 3.0% ₹767 ₹711 -7% +2%" [ref=e316]:
+            - cell "8" [ref=e317]
+            - cell "JSL" [ref=e318]:
+              - link "JSL" [ref=e319] [cursor=pointer]:
+                - /url: /explorer/JIST
+            - cell "Materials" [ref=e320]
+            - cell "74" [ref=e321]
+            - cell "3.0%" [ref=e322]
+            - cell "₹767" [ref=e323]
+            - cell "₹711" [ref=e324]
+            - cell "-7%" [ref=e325]
+            - cell "+2%" [ref=e326]
+          - row "9 ZYDUSLIFE Health Care 74 3.0% ₹892 ₹897 +0% -2%" [ref=e327]:
+            - cell "9" [ref=e328]
+            - cell "ZYDUSLIFE" [ref=e329]:
+              - link "ZYDUSLIFE" [ref=e330] [cursor=pointer]:
+                - /url: /explorer/CADI
+            - cell "Health Care" [ref=e331]
+            - cell "74" [ref=e332]
+            - cell "3.0%" [ref=e333]
+            - cell "₹892" [ref=e334]
+            - cell "₹897" [ref=e335]
+            - cell "+0%" [ref=e336]
+            - cell "-2%" [ref=e337]
+          - row "10 BHARTIHEXA Communication Services 72 3.0% ₹1517 ₹1504 -1% -6%" [ref=e338]:
+            - cell "10" [ref=e339]
+            - cell "BHARTIHEXA" [ref=e340]:
+              - link "BHARTIHEXA" [ref=e341] [cursor=pointer]:
+                - /url: /explorer/BHARI
+            - cell "Communication Services" [ref=e342]
+            - cell "72" [ref=e343]
+            - cell "3.0%" [ref=e344]
+            - cell "₹1517" [ref=e345]
+            - cell "₹1504" [ref=e346]
+            - cell "-1%" [ref=e347]
+            - cell "-6%" [ref=e348]
+    - generic [ref=e349]:
+      - generic [ref=e350]: SMALL CAP
+      - table [ref=e351]:
+        - rowgroup [ref=e352]:
+          - row "# Ticker Sector Score Weight Price Target Upside 1M" [ref=e353]:
+            - columnheader "#" [ref=e354]
+            - columnheader "Ticker" [ref=e355]
+            - columnheader "Sector" [ref=e356]
+            - columnheader "Score" [ref=e357]
+            - columnheader "Weight" [ref=e358]
+            - columnheader "Price" [ref=e359]
+            - columnheader "Target" [ref=e360]
+            - columnheader "Upside" [ref=e361]
+            - columnheader "1M" [ref=e362]
+        - rowgroup [ref=e363]:
+          - row "1 MAJESAUT Consumer Discretionary 94 3.0% ₹287 -10%" [ref=e364]:
+            - cell "1" [ref=e365]
+            - cell "MAJESAUT" [ref=e366]:
+              - link "MAJESAUT" [ref=e367] [cursor=pointer]:
+                - /url: /explorer/MAJ
+            - cell "Consumer Discretionary" [ref=e368]
+            - cell "94" [ref=e369]
+            - cell "3.0%" [ref=e370]
+            - cell [ref=e371]
+            - cell "₹287" [ref=e372]
+            - cell "-10%" [ref=e373]
+            - cell [ref=e374]
+          - row "2 ANONDITA Consumer Staples 89 3.0% ₹704" [ref=e375]:
+            - cell "2" [ref=e376]
+            - cell "ANONDITA" [ref=e377]:
+              - link "ANONDITA" [ref=e378] [cursor=pointer]:
+                - /url: /explorer/ANO
+            - cell "Consumer Staples" [ref=e379]
+            - cell "89" [ref=e380]
+            - cell "3.0%" [ref=e381]
+            - cell [ref=e382]
+            - cell "₹704" [ref=e383]
+            - cell [ref=e384]
+            - cell [ref=e385]
+          - row "3 TGVSL Materials 88 3.0% ₹83" [ref=e386]:
+            - cell "3" [ref=e387]
+            - cell "TGVSL" [ref=e388]:
+              - link "TGVSL" [ref=e389] [cursor=pointer]:
+                - /url: /explorer/SREER
+            - cell "Materials" [ref=e390]
+            - cell "88" [ref=e391]
+            - cell "3.0%" [ref=e392]
+            - cell [ref=e393]
+            - cell "₹83" [ref=e394]
+            - cell [ref=e395]
+            - cell [ref=e396]
+          - row "4 BRRL Real Estate 87 3.0% ₹990" [ref=e397]:
+            - cell "4" [ref=e398]
+            - cell "BRRL" [ref=e399]:
+              - link "BRRL" [ref=e400] [cursor=pointer]:
+                - /url: /explorer/BRR
+            - cell "Real Estate" [ref=e401]
+            - cell "87" [ref=e402]
+            - cell "3.0%" [ref=e403]
+            - cell [ref=e404]
+            - cell "₹990" [ref=e405]
+            - cell [ref=e406]
+            - cell [ref=e407]
+          - row "5 TRANSPEK Materials 87 3.0% ₹909 -23%" [ref=e408]:
+            - cell "5" [ref=e409]
+            - cell "TRANSPEK" [ref=e410]:
+              - link "TRANSPEK" [ref=e411] [cursor=pointer]:
+                - /url: /explorer/TRANP
+            - cell "Materials" [ref=e412]
+            - cell "87" [ref=e413]
+            - cell "3.0%" [ref=e414]
+            - cell [ref=e415]
+            - cell "₹909" [ref=e416]
+            - cell "-23%" [ref=e417]
+            - cell [ref=e418]
+          - row "6 SAPPL Materials 87 3.0% ₹260 -15%" [ref=e419]:
+            - cell "6" [ref=e420]
+            - cell "SAPPL" [ref=e421]:
+              - link "SAPPL" [ref=e422] [cursor=pointer]:
+                - /url: /explorer/SAPP
+            - cell "Materials" [ref=e423]
+            - cell "87" [ref=e424]
+            - cell "3.0%" [ref=e425]
+            - cell [ref=e426]
+            - cell "₹260" [ref=e427]
+            - cell "-15%" [ref=e428]
+            - cell [ref=e429]
+          - row "7 SUNSHIEL Materials 87 3.0% ₹746" [ref=e430]:
+            - cell "7" [ref=e431]
+            - cell "SUNSHIEL" [ref=e432]:
+              - link "SUNSHIEL" [ref=e433] [cursor=pointer]:
+                - /url: /explorer/SUNSH
+            - cell "Materials" [ref=e434]
+            - cell "87" [ref=e435]
+            - cell "3.0%" [ref=e436]
+            - cell [ref=e437]
+            - cell "₹746" [ref=e438]
+            - cell [ref=e439]
+            - cell [ref=e440]
+          - row "8 VISAKAIND Materials 87 3.0% ₹69 ₹55 -20% +15%" [ref=e441]:
+            - cell "8" [ref=e442]
+            - cell "VISAKAIND" [ref=e443]:
+              - link "VISAKAIND" [ref=e444] [cursor=pointer]:
+                - /url: /explorer/VSKI
+            - cell "Materials" [ref=e445]
+            - cell "87" [ref=e446]
+            - cell "3.0%" [ref=e447]
+            - cell "₹69" [ref=e448]
+            - cell "₹55" [ref=e449]
+            - cell "-20%" [ref=e450]
+            - cell "+15%" [ref=e451]
+          - row "9 UNIABEXAL Materials 87 3.0% ₹2744" [ref=e452]:
+            - cell "9" [ref=e453]
+            - cell "UNIABEXAL" [ref=e454]:
+              - link "UNIABEXAL" [ref=e455] [cursor=pointer]:
+                - /url: /explorer/UNIAB
+            - cell "Materials" [ref=e456]
+            - cell "87" [ref=e457]
+            - cell "3.0%" [ref=e458]
+            - cell [ref=e459]
+            - cell "₹2744" [ref=e460]
+            - cell [ref=e461]
+            - cell [ref=e462]
+          - row "10 BDH Health Care 86 3.0% ₹358" [ref=e463]:
+            - cell "10" [ref=e464]
+            - cell "BDH" [ref=e465]:
+              - link "BDH" [ref=e466] [cursor=pointer]:
+                - /url: /explorer/BDH
+            - cell "Health Care" [ref=e467]
+            - cell "86" [ref=e468]
+            - cell "3.0%" [ref=e469]
+            - cell [ref=e470]
+            - cell "₹358" [ref=e471]
+            - cell [ref=e472]
+            - cell [ref=e473]

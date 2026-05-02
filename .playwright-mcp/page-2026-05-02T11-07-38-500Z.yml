@@ -1,0 +1,134 @@
+- generic [active] [ref=e1]:
+  - navigation [ref=e2]:
+    - generic [ref=e3]: ◆
+    - link "☀" [ref=e4] [cursor=pointer]:
+      - /url: /
+    - link "📡" [ref=e5] [cursor=pointer]:
+      - /url: /signals
+    - link "🎯" [ref=e6] [cursor=pointer]:
+      - /url: /actions
+    - link "🔍" [ref=e7] [cursor=pointer]:
+      - /url: /explorer
+    - link "📊" [ref=e8] [cursor=pointer]:
+      - /url: /portfolio
+    - link "🔄" [ref=e9] [cursor=pointer]:
+      - /url: /sectors
+    - link "🧮" [ref=e10] [cursor=pointer]:
+      - /url: /model
+    - link "🔗" [ref=e11] [cursor=pointer]:
+      - /url: /flow
+    - link "⚡" [ref=e12] [cursor=pointer]:
+      - /url: /system
+  - main [ref=e13]:
+    - generic [ref=e14]: Action Queue
+    - generic [ref=e15]:
+      - generic [ref=e18]: Consider Buying
+      - generic [ref=e19]:
+        - 'link "BDH BDH Industries Ltd SMALL 86 BDH entered Top 10 SMALL Cap · Rank #15 → #10 (score 0.865)" [ref=e20] [cursor=pointer]':
+          - /url: /explorer/BDH
+          - generic [ref=e21]:
+            - generic [ref=e22]: BDH BDH Industries Ltd
+            - generic [ref=e23]:
+              - generic [ref=e24]: SMALL
+              - generic [ref=e25]: "86"
+          - generic [ref=e26]: "BDH entered Top 10 SMALL Cap · Rank #15 → #10 (score 0.865)"
+        - 'link "BHARTIHEXA Bharti Hexacom Ltd MID 72 BHARTIHEXA entered Top 10 MID Cap · Rank #11 → #10 (score 0.725)" [ref=e27] [cursor=pointer]':
+          - /url: /explorer/BHARI
+          - generic [ref=e28]:
+            - generic [ref=e29]: BHARTIHEXA Bharti Hexacom Ltd
+            - generic [ref=e30]:
+              - generic [ref=e31]: MID
+              - generic [ref=e32]: "72"
+          - generic [ref=e33]: "BHARTIHEXA entered Top 10 MID Cap · Rank #11 → #10 (score 0.725)"
+        - 'link "GAIL Gail (India) Ltd MID 75 GAIL entered Top 10 MID Cap · Rank #12 → #5 (score 0.751)" [ref=e34] [cursor=pointer]':
+          - /url: /explorer/GAIL
+          - generic [ref=e35]:
+            - generic [ref=e36]: GAIL Gail (India) Ltd
+            - generic [ref=e37]:
+              - generic [ref=e38]: MID
+              - generic [ref=e39]: "75"
+          - generic [ref=e40]: "GAIL entered Top 10 MID Cap · Rank #12 → #5 (score 0.751)"
+        - 'link "SAPPL Shree Ajit Pulp and Paper Ltd SMALL 87 SAPPL entered Top 10 SMALL Cap · Rank #38 → #5 (score 0.871)" [ref=e41] [cursor=pointer]':
+          - /url: /explorer/SAPP
+          - generic [ref=e42]:
+            - generic [ref=e43]: SAPPL Shree Ajit Pulp and Paper Ltd
+            - generic [ref=e44]:
+              - generic [ref=e45]: SMALL
+              - generic [ref=e46]: "87"
+          - generic [ref=e47]: "SAPPL entered Top 10 SMALL Cap · Rank #38 → #5 (score 0.871)"
+        - 'link "MAJESAUT Majestic Auto Ltd SMALL 94 MAJESAUT entered Top 10 SMALL Cap · Rank #93 → #1 (score 0.937)" [ref=e48] [cursor=pointer]':
+          - /url: /explorer/MAJ
+          - generic [ref=e49]:
+            - generic [ref=e50]: MAJESAUT Majestic Auto Ltd
+            - generic [ref=e51]:
+              - generic [ref=e52]: SMALL
+              - generic [ref=e53]: "94"
+          - generic [ref=e54]: "MAJESAUT entered Top 10 SMALL Cap · Rank #93 → #1 (score 0.937)"
+        - 'link "TRANSPEK Transpek Industry Ltd SMALL 87 TRANSPEK entered Top 10 SMALL Cap · Rank #44 → #4 (score 0.872)" [ref=e55] [cursor=pointer]':
+          - /url: /explorer/TRANP
+          - generic [ref=e56]:
+            - generic [ref=e57]: TRANSPEK Transpek Industry Ltd
+            - generic [ref=e58]:
+              - generic [ref=e59]: SMALL
+              - generic [ref=e60]: "87"
+          - generic [ref=e61]: "TRANSPEK entered Top 10 SMALL Cap · Rank #44 → #4 (score 0.872)"
+        - 'link "LUPIN Lupin Ltd LARGE 68 LUPIN entered Top 10 LARGE Cap · Rank #11 → #9 (score 0.680)" [ref=e62] [cursor=pointer]':
+          - /url: /explorer/LUPN
+          - generic [ref=e63]:
+            - generic [ref=e64]: LUPIN Lupin Ltd
+            - generic [ref=e65]:
+              - generic [ref=e66]: LARGE
+              - generic [ref=e67]: "68"
+          - generic [ref=e68]: "LUPIN entered Top 10 LARGE Cap · Rank #11 → #9 (score 0.680)"
+    - generic [ref=e69]:
+      - generic [ref=e72]: Watch Closely
+      - generic [ref=e73]:
+        - 'link "INDIANB Indian Bank #20 LARGE Forensic alert on Top 20 LARGE · Altman Z-Score distress" [ref=e74] [cursor=pointer]':
+          - /url: /explorer/INBA
+          - generic [ref=e75]:
+            - generic [ref=e76]: INDIANB Indian Bank
+            - generic [ref=e77]: "#20 LARGE"
+          - generic [ref=e78]: Forensic alert on Top 20 LARGE · Altman Z-Score distress
+        - 'link "INDIANB Indian Bank #20 LARGE Forensic alert on Top 20 LARGE · Altman Z-Score distress" [ref=e79] [cursor=pointer]':
+          - /url: /explorer/INBA
+          - generic [ref=e80]:
+            - generic [ref=e81]: INDIANB Indian Bank
+            - generic [ref=e82]: "#20 LARGE"
+          - generic [ref=e83]: Forensic alert on Top 20 LARGE · Altman Z-Score distress
+        - 'link "INDIANB Indian Bank #20 LARGE Forensic alert on Top 20 LARGE · Altman Z-Score distress" [ref=e84] [cursor=pointer]':
+          - /url: /explorer/INBA
+          - generic [ref=e85]:
+            - generic [ref=e86]: INDIANB Indian Bank
+            - generic [ref=e87]: "#20 LARGE"
+          - generic [ref=e88]: Forensic alert on Top 20 LARGE · Altman Z-Score distress
+    - generic [ref=e89]:
+      - generic [ref=e92]: Consider Exiting
+      - generic [ref=e93]:
+        - 'link "MUFTI Credo Brands Marketing Ltd MUFTI dropped out of Top 10 SMALL Cap · Rank #10 → #14" [ref=e94] [cursor=pointer]':
+          - /url: /explorer/MUF
+          - generic [ref=e96]: MUFTI Credo Brands Marketing Ltd
+          - generic [ref=e97]: "MUFTI dropped out of Top 10 SMALL Cap · Rank #10 → #14"
+        - 'link "PETRONET Petronet LNG Ltd PETRONET dropped out of Top 10 MID Cap · Rank #5 → #11" [ref=e98] [cursor=pointer]':
+          - /url: /explorer/PLNG
+          - generic [ref=e100]: PETRONET Petronet LNG Ltd
+          - generic [ref=e101]: "PETRONET dropped out of Top 10 MID Cap · Rank #5 → #11"
+        - 'link "TORNTPOWER Torrent Power Ltd TORNTPOWER dropped out of Top 10 MID Cap · Rank #6 → #13" [ref=e102] [cursor=pointer]':
+          - /url: /explorer/TOPO
+          - generic [ref=e104]: TORNTPOWER Torrent Power Ltd
+          - generic [ref=e105]: "TORNTPOWER dropped out of Top 10 MID Cap · Rank #6 → #13"
+        - 'link "HALDYNGL Haldyn Glass Ltd HALDYNGL dropped out of Top 10 SMALL Cap · Rank #10 → #61" [ref=e106] [cursor=pointer]':
+          - /url: /explorer/HALD
+          - generic [ref=e108]: HALDYNGL Haldyn Glass Ltd
+          - generic [ref=e109]: "HALDYNGL dropped out of Top 10 SMALL Cap · Rank #10 → #61"
+        - 'link "PFS PTC India Financial Services L PFS dropped out of Top 10 SMALL Cap · Rank #9 → #35" [ref=e110] [cursor=pointer]':
+          - /url: /explorer/PTCN
+          - generic [ref=e112]: PFS PTC India Financial Services L
+          - generic [ref=e113]: "PFS dropped out of Top 10 SMALL Cap · Rank #9 → #35"
+        - 'link "SKFINDUS SKF India (Industrial) Ltd SKFINDUS dropped out of Top 10 SMALL Cap · Rank #8 → #13" [ref=e114] [cursor=pointer]':
+          - /url: /explorer/SKFI
+          - generic [ref=e116]: SKFINDUS SKF India (Industrial) Ltd
+          - generic [ref=e117]: "SKFINDUS dropped out of Top 10 SMALL Cap · Rank #8 → #13"
+        - 'link "ADANIPORTS Adani Ports and Special Econom ADANIPORTS dropped out of Top 10 LARGE Cap · Rank #8 → #15" [ref=e118] [cursor=pointer]':
+          - /url: /explorer/APSE
+          - generic [ref=e120]: ADANIPORTS Adani Ports and Special Econom
+          - generic [ref=e121]: "ADANIPORTS dropped out of Top 10 LARGE Cap · Rank #8 → #15"

@@ -1,0 +1,140 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<div class="section-title">Model Portfolio</div>
+
+<!-- Analytics Summary -->
+{% if analytics %}
+<div class="card" style="margin-bottom: 16px; padding: 16px 20px; border-left: 4px solid var(--accent);">
+    <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 16px;">
+        {% if analytics.get("expected_return") is not none %}
+        <div>
+            <div style="font-size: 10px; color: var(--text-muted);">Expected Return</div>
+            <div class="mono {% if analytics.expected_return > 0 %}score-green{% else %}score-red{% endif %}" style="font-size: 22px; font-weight: 700;">
+                {{ "%+.1f"|format(analytics.expected_return) }}%
+            </div>
+            <div style="font-size: 10px; color: var(--text-muted);">weighted avg analyst upside ({{ analytics.stocks_with_targets }} stocks)</div>
+        </div>
+        {% endif %}
+        <div>
+            <div style="font-size: 10px; color: var(--text-muted);">Portfolio Avg Score</div>
+            <div class="mono" style="font-size: 22px; font-weight: 700; color: var(--green);">{{ "%.0f"|format(analytics.avg_score) }}</div>
+            <div style="font-size: 10px; color: var(--text-muted);">vs universe {{ "%.0f"|format(analytics.universe_avg_score) }} (+{{ "%.0f"|format(analytics.score_premium) }} premium)</div>
+        </div>
+        <div>
+            <div style="font-size: 10px; color: var(--text-muted);">Stocks</div>
+            <div class="mono" style="font-size: 22px; font-weight: 700;">{{ analytics.total_stocks }}</div>
+            <div style="font-size: 10px; color: var(--text-muted);">Top 3 weight: {{ "%.1f"|format(analytics.top3_weight) }}%</div>
+        </div>
+        <div>
+            <div style="font-size: 10px; color: var(--text-muted);">Regime</div>
+            <div class="regime-badge {{ regime.color }}" style="font-size: 14px; display: inline-block;">{{ regime.regime }}</div>
+        </div>
+    </div>
+
+    <!-- Sector Allocation -->
+    {% if analytics.get("sector_allocation") %}
+    <div style="font-size: 11px; color: var(--text-muted); font-weight: 600; margin-bottom: 8px;">SECTOR ALLOCATION</div>
+    {% for sector, weight in analytics.sector_allocation[:8] %}
+    <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+        <span style="width: 140px; font-size: 11px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ sector }}</span>
+        <div style="flex: 1; height: 6px; border-radius: 3px; background: var(--border);">
+            <div style="height: 100%; border-radius: 3px; width: {{ weight }}%; background: var(--accent);"></div>
+        </div>
+        <span class="mono" style="font-size: 11px; width: 35px; text-align: right;">{{ "%.0f"|format(weight) }}%</span>
+    </div>
+    {% endfor %}
+    {% endif %}
+</div>
+{% endif %}
+
+<!-- Allocation Donut + Tier Weights -->
+<div style="display: grid; grid-template-columns: 250px 1fr; gap: 16px; margin-bottom: 20px;">
+    <div class="card" style="display: flex; flex-direction: column; align-items: center; padding: 20px;">
+        <div style="position: relative; width: 180px; height: 180px;">
+            <canvas id="allocChart"></canvas>
+            <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center;">
+                <div class="mono" style="font-size: 22px; font-weight: 700;">{{ "%.1f"|format(regime.vix_latest) }}</div>
+                <div style="font-size: 10px; color: var(--text-muted);">VIX</div>
+            </div>
+        </div>
+    </div>
+    <div class="card">
+        {% for tier_name, alloc, count, color in [
+            ("LARGE", regime.alloc_large, portfolio.large|length, "blue"),
+            ("MID", regime.alloc_mid, portfolio.mid|length, "accent"),
+            ("SMALL", regime.alloc_small, portfolio.small|length, "green"),
+        ] %}
+        <div style="margin-bottom: 10px;">
+            <div style="display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 4px;">
+                <span style="color: var(--text-secondary);">{{ tier_name }}</span>
+                <span class="mono">{{ "%.0f"|format(alloc * 100) }}% &middot; {{ count }} stocks</span>
+            </div>
+            <div style="height: 6px; border-radius: 3px; background: var(--border);">
+                <div style="height: 100%; border-radius: 3px; width: {{ alloc * 100 }}%; background: var(--{{ color }});"></div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+
+<!-- Model Portfolio Tables -->
+{% for tier_name, stocks in [("LARGE", portfolio.large), ("MID", portfolio.mid), ("SMALL", portfolio.small)] %}
+{% if stocks %}
+<div class="card" style="margin-bottom: 12px; padding: 0; overflow: hidden;">
+    <div class="tier-header" style="padding: 10px 14px; margin-bottom: 0;">{{ tier_name }} CAP</div>
+    <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
+        <thead>
+            <tr style="font-size: 10px; color: var(--text-muted); text-align: left;">
+                <th style="padding: 6px 14px;">#</th>
+                <th style="padding: 6px;">Ticker</th>
+                <th style="padding: 6px;">Sector</th>
+                <th style="padding: 6px; text-align: right;">Score</th>
+                <th style="padding: 6px; text-align: right;">Weight</th>
+                <th style="padding: 6px; text-align: right;">Price</th>
+                <th style="padding: 6px; text-align: right;">Target</th>
+                <th style="padding: 6px; text-align: right;">Upside</th>
+                <th style="padding: 6px; text-align: right;">1M</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for stock in stocks %}
+            <tr style="border-top: 1px solid var(--border);">
+                <td style="padding: 6px 14px;" class="mono">{{ stock.rank|int }}</td>
+                <td style="padding: 6px;"><a href="/explorer/{{ stock.sid }}" style="color: var(--text-primary); text-decoration: none; font-weight: 600;">{{ stock.ticker }}</a></td>
+                <td style="padding: 6px; color: var(--text-muted);">{{ stock.sector }}</td>
+                <td style="padding: 6px; text-align: right;" class="mono
+                    {% if stock.final_score >= 0.7 %} score-green{% elif stock.final_score >= 0.5 %} score-amber{% else %} score-red{% endif %}">
+                    {{ "%.0f"|format(stock.final_score * 100) }}</td>
+                <td style="padding: 6px; text-align: right;" class="mono">{{ "%.1f"|format(stock.weight) }}%</td>
+                <td style="padding: 6px; text-align: right;" class="mono">{% if stock.get("price") %}&#8377;{{ "%.0f"|format(stock.price) }}{% endif %}</td>
+                <td style="padding: 6px; text-align: right;" class="mono">{% if stock.get("price_target") %}&#8377;{{ "%.0f"|format(stock.price_target) }}{% endif %}</td>
+                <td style="padding: 6px; text-align: right;" class="mono
+                    {% if stock.get('pt_upside') and stock.pt_upside > 0 %} score-green{% elif stock.get('pt_upside') %} score-red{% endif %}">
+                    {% if stock.get("pt_upside") is not none %}{{ "%+.0f"|format(stock.pt_upside) }}%{% endif %}</td>
+                <td style="padding: 6px; text-align: right;" class="mono
+                    {% if stock.get('return_1m') and stock.return_1m > 0 %} score-green{% elif stock.get('return_1m') %} score-red{% endif %}">
+                    {% if stock.get("return_1m") is not none %}{{ "%+.0f"|format(stock.return_1m) }}%{% endif %}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+{% endfor %}
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+<script>
+new Chart(document.getElementById('allocChart'), {
+    type: 'doughnut',
+    data: {
+        labels: ['Large', 'Mid', 'Small'],
+        datasets: [{ data: [{{ regime.alloc_large * 100 }}, {{ regime.alloc_mid * 100 }}, {{ regime.alloc_small * 100 }}],
+            backgroundColor: ['#3b82f6', '#8b5cf6', '#22c55e'], borderWidth: 0 }]
+    },
+    options: { cutout: '65%', plugins: { legend: { display: false } }, responsive: true, maintainAspectRatio: true }
+});
+</script>
+
+{% endblock %}

@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<div class="section-title">Signals That Fired</div>
+
+<!-- Signal Type Tabs -->
+<div x-data="{ tab: 'all' }" style="margin-bottom: 20px;">
+    <div style="display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 20px;">
+        <button @click="tab = 'all'" :style="tab === 'all' ? 'background: var(--accent); color: white;' : 'background: var(--bg-card); color: var(--text-secondary);'"
+                style="padding: 6px 14px; border-radius: 8px; border: 1px solid var(--border); font-size: 13px; cursor: pointer; font-family: inherit;">
+            All
+        </button>
+        {% for signal_type in signals.keys() %}
+        <button @click="tab = '{{ signal_type }}'" :style="tab === '{{ signal_type }}' ? 'background: var(--accent); color: white;' : 'background: var(--bg-card); color: var(--text-secondary);'"
+                style="padding: 6px 14px; border-radius: 8px; border: 1px solid var(--border); font-size: 13px; cursor: pointer; font-family: inherit;">
+            {{ signal_type }}
+            <span style="font-size: 10px; opacity: 0.7;">({{ signals[signal_type]|length }})</span>
+        </button>
+        {% endfor %}
+    </div>
+
+    <!-- Signal Cards -->
+    {% for signal_type, cards in signals.items() %}
+    <div x-show="tab === 'all' || tab === '{{ signal_type }}'" style="margin-bottom: 24px;">
+        {% if cards %}
+        <div style="font-size: 12px; font-weight: 600; color: var(--text-muted); letter-spacing: 1px; margin-bottom: 10px;">
+            {{ signal_type|upper }}
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 8px;">
+            {% for card in cards %}
+            <div class="card" style="border-left: 4px solid var(--{{ card.color }}); padding: 14px 16px;">
+                <div style="display: flex; justify-content: space-between; align-items: start;">
+                    <div style="flex: 1;">
+                        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+                            {% if card.sid %}
+                            <a href="/explorer/{{ card.sid }}" class="mono" style="font-weight: 700; font-size: 15px; color: var(--text-primary); text-decoration: none;">
+                                {{ card.ticker }}
+                            </a>
+                            {% else %}
+                            <span style="font-weight: 600; font-size: 14px;">{{ card.ticker }}</span>
+                            {% endif %}
+                            <span style="font-size: 11px; color: var(--text-muted);">{{ card.name[:40] }}</span>
+                        </div>
+                        <div style="font-size: 13px; color: var(--text-secondary);">{{ card.explanation[:120] }}</div>
+                    </div>
+                    <div style="display: flex; gap: 8px; align-items: center; flex-shrink: 0; margin-left: 12px;">
+                        {% if card.cap_tier %}
+                        <span style="font-size: 10px; padding: 2px 8px; border-radius: 4px; background: var(--border); color: var(--text-muted);">{{ card.cap_tier }}</span>
+                        {% endif %}
+                        {% if card.strength %}
+                        <div style="width: 50px; height: 6px; border-radius: 3px; background: var(--border);">
+                            <div style="height: 100%; border-radius: 3px; width: {{ (card.strength * 100)|int }}%; background: var(--{{ card.color }});"></div>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+    </div>
+    {% endfor %}
+</div>
+
+{% endblock %}

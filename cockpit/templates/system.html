@@ -1,0 +1,384 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">
+    <div class="section-title">System Health</div>
+    <a href="/sql"
+       style="padding: 8px 16px; background: var(--accent); color: white;
+              border-radius: 8px; text-decoration: none; font-size: 12px;
+              font-weight: 600; letter-spacing: 0.3px;">
+        SQL Console &rarr;
+    </a>
+</div>
+<div class="section-desc">Pipeline run history, table inventory, and direct database access.</div>
+
+<!-- Database Health Summary -->
+{% if summary %}
+{% set verdict_color = 'var(--red)' if 'NEEDS ATTENTION' in summary.verdict else ('var(--amber)' if 'WATCH' in summary.verdict else 'var(--green)') %}
+<div class="card" style="margin-bottom: 20px; border-left: 4px solid {{ verdict_color }};">
+    <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap;">
+        <div style="flex: 1 1 320px;">
+            <div style="font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px;">Database Health</div>
+            <div style="font-size: 16px; font-weight: 700; color: {{ verdict_color }}; margin-bottom: 8px;">{{ summary.verdict }}</div>
+            <div style="font-size: 12px; color: var(--text-secondary); line-height: 1.6;">
+                {{ "{:,}".format(summary.total_rows) }} rows across {{ summary.total_tables }} tables · {{ summary.db_size_mb }} MB on disk
+                {% if summary.last_run.started_at %}
+                · last pipeline activity: <span class="mono">{{ summary.last_run.started_at[:16].replace('T', ' ') }}</span>
+                ({{ summary.last_run.step_name }}, {{ summary.last_run.status }})
+                {% endif %}
+            </div>
+        </div>
+        <div style="display: flex; gap: 18px; flex-wrap: wrap;">
+            <div style="text-align: center;">
+                <div style="font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Kinds</div>
+                <div style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">
+                    <span style="color: var(--accent); font-weight: 700;">{{ summary.kind_counts.get('RAW', 0) }}</span> raw &nbsp;
+                    <span style="color: var(--green); font-weight: 700;">{{ summary.kind_counts.get('COMPUTED', 0) }}</span> computed &nbsp;
+                    <span style="color: var(--amber); font-weight: 700;">{{ summary.kind_counts.get('LOG', 0) }}</span> log &nbsp;
+                    <span style="color: var(--text-muted); font-weight: 700;">{{ summary.kind_counts.get('STATE', 0) }}</span> state
+                </div>
+            </div>
+            <div style="text-align: center;">
+                <div style="font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Freshness</div>
+                <div style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">
+                    <span style="color: var(--green); font-weight: 700;">{{ summary.fresh_counts.FRESH }}</span> fresh &nbsp;
+                    <span style="color: var(--amber); font-weight: 700;">{{ summary.fresh_counts.STALE }}</span> stale &nbsp;
+                    <span style="color: var(--red); font-weight: 700;">{{ summary.fresh_counts.OUTDATED }}</span> outdated &nbsp;
+                    <span style="color: var(--text-muted); font-weight: 700;">{{ summary.fresh_counts['N/A'] }}</span> n/a
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<!-- Data Health Scores -->
+{% if health_scores %}
+<div class="card" style="margin-bottom: 20px;">
+    <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; margin-bottom: 16px;">
+        <div>
+            <div class="section-title" style="margin-bottom: 4px;">Data Health Scores</div>
+            <div class="section-desc" style="margin-bottom: 0;">
+                Each table is scored 0-100 across 8 factors:
+                freshness (smart — annual data is fresh for ~1 year),
+                completeness, coverage, NULL rate, validity, outliers, backtest sufficiency, duplicates.
+                Sorted worst-first. Click any row to see the per-factor diagnostic and a drill-down query.
+            </div>
+        </div>
+        <div style="display: flex; align-items: center; gap: 16px;">
+            <div style="text-align: right;">
+                <div style="font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px;">Overall</div>
+                <div style="font-size: 36px; font-weight: 900; color: {{ health_scores.overall_color }}; line-height: 1;">{{ health_scores.overall_score }}</div>
+                <div style="font-size: 12px; color: var(--text-muted);">/ 100</div>
+            </div>
+            <div style="font-size: 32px; font-weight: 800; color: {{ health_scores.overall_color }}; padding: 8px 18px; border: 3px solid {{ health_scores.overall_color }}; border-radius: 12px; line-height: 1;">{{ health_scores.overall_grade }}</div>
+        </div>
+    </div>
+
+    {# Per-kind breakdown bar #}
+    <div style="display: flex; gap: 8px; flex-wrap: wrap; padding: 10px 14px; background: var(--bg-primary); border-radius: 8px; margin-bottom: 16px; font-size: 11px; color: var(--text-muted);">
+        <span style="text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600;">By kind:</span>
+        {% for kind, avg in health_scores.kind_summary.items() %}
+            {% set kc = 'var(--green)' if avg >= 80 else ('var(--amber)' if avg >= 60 else 'var(--red)') %}
+            <span><span style="color: {{ kc }}; font-weight: 700;">{{ kind }}</span> {{ avg }}</span>
+            {% if not loop.last %}<span style="color: var(--border);">|</span>{% endif %}
+        {% endfor %}
+        <span style="margin-left: auto;">{{ health_scores.total_issues }} issues across {{ health_scores.tables|length }} tables · computed {{ health_scores.computed_at[11:19] }}</span>
+    </div>
+
+    {# Per-table table #}
+    <div style="overflow-x: auto;">
+    <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
+        <thead>
+            <tr style="color: var(--text-muted); text-align: left; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px;">
+                <th style="padding: 8px 12px; border-bottom: 2px solid var(--border-accent); width: 32px;"></th>
+                <th style="padding: 8px 12px; border-bottom: 2px solid var(--border-accent);">Table</th>
+                <th style="padding: 8px 12px; border-bottom: 2px solid var(--border-accent); width: 220px;">Score</th>
+                <th style="padding: 8px 12px; border-bottom: 2px solid var(--border-accent); width: 60px; text-align: center;">Grade</th>
+                <th style="padding: 8px 12px; border-bottom: 2px solid var(--border-accent); width: 80px; text-align: center;">Issues</th>
+                <th style="padding: 8px 12px; border-bottom: 2px solid var(--border-accent);">Top issue / Status</th>
+            </tr>
+        </thead>
+        {# One <tbody> per table — required so the expand row shares the same Alpine scope as its trigger row. #}
+        {# (Two sibling <tr> elements would each get their own scope, so the expanded row's `open` would never resolve.) #}
+        {% for t in health_scores.tables %}
+        {% set sev_bg = 'rgba(239,68,68,0.04)' if t.score < 60 else ('rgba(251,191,36,0.03)' if t.score < 80 else 'transparent') %}
+        <tbody x-data="{open: false}">
+            <tr style="border-bottom: 1px solid var(--border); background: {{ sev_bg }}; cursor: pointer;" @click="open = !open">
+                {# expand chevron #}
+                <td style="padding: 10px 12px; vertical-align: top; text-align: center; color: var(--text-muted);">
+                    <span x-text="open ? '▼' : '▶'" style="font-size: 10px;"></span>
+                </td>
+                {# table name #}
+                <td style="padding: 10px 12px; vertical-align: top;">
+                    <span class="mono" style="font-size: 12px; font-weight: 700; color: var(--accent);">{{ t.table }}</span>
+                    {% if t.kind and t.kind != '—' %}
+                    <span class="mono" style="font-size: 9px; color: var(--text-muted); margin-left: 6px;">{{ t.kind }}</span>
+                    {% endif %}
+                </td>
+                {# score bar #}
+                <td style="padding: 10px 12px; vertical-align: top;">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <div style="flex: 1; height: 10px; background: var(--bg-primary); border-radius: 5px; overflow: hidden;">
+                            <div style="width: {{ t.score }}%; height: 100%; background: {{ t.grade_color }}; border-radius: 5px;"></div>
+                        </div>
+                        <span class="mono" style="font-size: 12px; font-weight: 700; color: {{ t.grade_color }}; min-width: 28px; text-align: right;">{{ t.score }}</span>
+                    </div>
+                </td>
+                {# grade #}
+                <td style="padding: 10px 12px; vertical-align: top; text-align: center;">
+                    <span style="font-size: 13px; font-weight: 800; color: {{ t.grade_color }};">{{ t.grade }}</span>
+                </td>
+                {# issue count #}
+                <td style="padding: 10px 12px; vertical-align: top; text-align: center;">
+                    {% if t.issue_count > 0 %}
+                    <span class="mono" style="font-size: 12px; font-weight: 700; color: {% if t.score < 60 %}var(--red){% else %}var(--amber){% endif %};">{{ t.issue_count }}</span>
+                    {% else %}
+                    <span style="color: var(--green); font-size: 14px;">&#10003;</span>
+                    {% endif %}
+                </td>
+                {# top issue #}
+                <td style="padding: 10px 12px; vertical-align: top; font-size: 11px; color: var(--text-secondary);">
+                    {% if t.issues %}
+                    {{ t.issues[0].msg }}
+                    {% else %}
+                    <span style="color: var(--green);">All checks pass ({{ t.factors|length }} factors)</span>
+                    {% endif %}
+                </td>
+            </tr>
+            {# expanded row — factor breakdown #}
+            <tr x-show="open" x-cloak style="background: var(--bg-primary);">
+                <td colspan="6" style="padding: 14px 18px;">
+                    <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(420px, 1fr)); gap: 10px;">
+                        {% for f in t.factors %}
+                        {% set fc = 'var(--green)' if f.severity == 'ok' else ('var(--amber)' if f.severity == 'warn' else 'var(--red)') %}
+                        {% set ficon = '&#10003;' if f.severity == 'ok' else ('&#9888;' if f.severity == 'warn' else '&#10007;') %}
+                        <div style="padding: 10px 14px; background: var(--bg-card); border: 1px solid var(--border); border-left: 3px solid {{ fc }}; border-radius: 6px;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                                <div style="font-size: 11px; font-weight: 700; color: var(--text-primary); text-transform: uppercase; letter-spacing: 0.5px;">
+                                    <span style="color: {{ fc }};">{{ ficon|safe }}</span> {{ f.name|replace('_', ' ') }}
+                                </div>
+                                <div class="mono" style="font-size: 11px; font-weight: 700; color: {{ fc }};">{{ f.score }}/100</div>
+                            </div>
+                            <div style="font-size: 11px; color: var(--text-secondary); line-height: 1.5;">{{ f.message }}</div>
+                            {% if f.fix %}
+                            <div style="font-size: 10px; color: var(--text-muted); margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--border);">
+                                <span style="text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600; color: var(--text-secondary);">Fix:</span> {{ f.fix }}
+                            </div>
+                            {% endif %}
+                            {% if f.drill_sql %}
+                            <div style="margin-top: 6px;">
+                                <a href="/sql?q={{ f.drill_sql|urlencode }}"
+                                   @click.stop=""
+                                   style="display: inline-block; padding: 3px 10px; font-size: 10px; background: var(--accent); color: white; border-radius: 4px; text-decoration: none; font-weight: 600; letter-spacing: 0.3px;">
+                                    Drill &rarr; SQL Console
+                                </a>
+                            </div>
+                            {% endif %}
+                        </div>
+                        {% endfor %}
+                    </div>
+                </td>
+            </tr>
+        </tbody>
+        {% endfor %}
+    </table>
+    </div>
+</div>
+{% endif %}
+
+<!-- Pipeline Log -->
+<div class="card" style="margin-bottom: 20px;">
+    <div class="section-title">Pipeline Log (Last 7 Days)</div>
+    <div class="section-desc">
+        One row per (date, step) showing the final state. Stale RUNNING rows from crashed
+        runs are shown as ABORTED. Each pipeline step writes a RUNNING row on start and a
+        SUCCESS/FAILED row on completion — only the final state is displayed here.
+    </div>
+    {% if pipeline %}
+    <div style="overflow-x: auto;">
+    <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+        <thead>
+            <tr style="color: var(--text-muted); text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;">
+                <th style="padding: 8px 10px;">Date</th>
+                <th style="padding: 8px 10px;">Step</th>
+                <th style="padding: 8px 10px;">Status</th>
+                <th style="padding: 8px 10px; text-align: right;">Rows</th>
+                <th style="padding: 8px 10px; text-align: right;">Time</th>
+                <th style="padding: 8px 10px;">Started</th>
+                <th style="padding: 8px 10px;">Error</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in pipeline[:30] %}
+            <tr style="border-top: 1px solid var(--border);">
+                <td class="mono" style="padding: 8px 10px; font-size: 11px;">{{ row.run_date }}</td>
+                <td style="padding: 8px 10px; font-weight: 600;">{{ row.step_name }}</td>
+                <td style="padding: 8px 10px;">
+                    {% if row.status == 'SUCCESS' %}
+                    <span style="color: var(--green); font-weight: 600;">&#10003; {{ row.status }}</span>
+                    {% elif row.status == 'FAILED' %}
+                    <span style="color: var(--red); font-weight: 600;">&#10007; {{ row.status }}</span>
+                    {% elif row.status == 'RUNNING' %}
+                    <span style="color: var(--amber); font-weight: 600;">&#9679; {{ row.status }}</span>
+                    {% elif row.status == 'ABORTED' %}
+                    <span style="color: var(--text-muted); font-weight: 600;">&#9888; ABORTED</span>
+                    {% else %}
+                    <span style="color: var(--text-muted);">{{ row.status }}</span>
+                    {% endif %}
+                </td>
+                <td class="mono" style="padding: 8px 10px; text-align: right;">
+                    {% if row.rows_affected is not none and row.rows_affected == row.rows_affected %}{{ "{:,.0f}".format(row.rows_affected) }}{% else %}<span style="color: var(--text-muted);">—</span>{% endif %}
+                </td>
+                <td class="mono" style="padding: 8px 10px; text-align: right;">{% if row.duration_sec %}{{ "%.1f"|format(row.duration_sec) }}s{% else %}<span style="color: var(--text-muted);">—</span>{% endif %}</td>
+                <td class="mono" style="padding: 8px 10px; font-size: 11px; color: var(--text-muted);">{% if row.started_at %}{{ row.started_at[11:19] }}{% endif %}</td>
+                <td style="padding: 8px 10px; font-size: 11px; color: var(--red); max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="{{ row.error_message or '' }}">{{ (row.error_message or '')[:60] }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% else %}
+    <div style="color: var(--text-muted);">No pipeline runs in the last 7 days.</div>
+    {% endif %}
+</div>
+
+<!-- Data Inventory — grouped by domain, each domain is its own interactive Tabulator grid. -->
+<div class="card">
+    <div class="section-title">Data Inventory</div>
+    <div class="section-desc">
+        {{ health|length }} tables across {{ inventory_groups|length }} domains. Each grid below is sortable
+        (click a column header), columns are draggable to reorder, and your layout per domain
+        is saved in this browser. <b>Kind</b>: RAW = fetched · COMPUTED = derived · LOG = audit · STATE = config.
+    </div>
+
+    {% for group in inventory_groups %}
+    <details open class="inv-domain" data-domain="{{ group.domain }}">
+        <summary>
+            <span class="inv-arrow"></span>
+            <span class="inv-domain-title">{{ group.domain }}</span>
+            <span class="inv-domain-count mono">{{ group.rows|length }} table{{ '' if group.rows|length == 1 else 's' }}</span>
+        </summary>
+        <div class="inv-table-wrap">
+        <table class="inv-table" data-domain-key="{{ group.domain | replace(' & ', '-') | replace(' ', '-') | lower }}">
+            <thead>
+                <tr>
+                    <th data-key="table"              data-sort="string">Table</th>
+                    <th data-key="kind"               data-sort="string">Kind</th>
+                    <th data-key="rows"               data-sort="number" class="num">Rows</th>
+                    <th data-key="stock_coverage_pct" data-sort="number" class="num">Stock Coverage</th>
+                    <th data-key="date_span"          data-sort="string">Span</th>
+                    <th data-key="latest_date"        data-sort="string">Latest</th>
+                    <th data-key="freshness"          data-sort="string">Freshness</th>
+                    <th data-key="age_days"           data-sort="number" class="num">Age</th>
+                    <th data-key="frequency"          data-sort="string">Refresh</th>
+                    <th data-key="source"             data-sort="string">Source</th>
+                    <th data-key="produced_by"        data-sort="string">Producer</th>
+                    <th data-key="consumed_count"    data-sort="number" class="num">Used by</th>
+                    <th data-key="description"        data-sort="string">Description</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in group.rows %}
+                {% set kind_color = 'var(--accent)' if row.kind == 'RAW' else ('var(--green)' if row.kind == 'COMPUTED' else ('var(--amber)' if row.kind == 'LOG' else 'var(--text-muted)')) %}
+                {% set fresh_color = 'var(--green)' if row.freshness == 'FRESH' else ('var(--amber)' if row.freshness == 'STALE' else ('var(--red)' if row.freshness == 'OUTDATED' else 'var(--text-muted)')) %}
+                {% set cov_pct = row.stock_coverage_pct %}
+                {% set cov_color = 'var(--green)' if (cov_pct is not none and cov_pct >= 80) else ('var(--amber)' if (cov_pct is not none and cov_pct >= 30) else ('var(--red)' if cov_pct is not none else 'var(--text-muted)')) %}
+                {% set age_color = 'var(--red)' if (row.age_days is not none and row.threshold_days and row.age_days > row.threshold_days) else ('var(--amber)' if (row.age_days is not none and row.threshold_days and row.age_days > row.threshold_days * 0.7) else 'inherit') %}
+                <tr>
+                    <td data-key="table">
+                        <a href="/sql?table={{ row.table }}" class="mono inv-table-name">{{ row.table }}</a>
+                        {% if row.status == 'EMPTY' %}<span class="inv-badge-empty">EMPTY</span>{% endif %}
+                    </td>
+                    <td data-key="kind"><span class="inv-pill" style="color:{{ kind_color }};border-color:{{ kind_color }}">{{ row.kind }}</span></td>
+                    <td data-key="rows" class="num mono inv-strong">{{ "{:,}".format(row.rows) }}</td>
+                    <td data-key="stock_coverage_pct" class="num mono">
+                        {% if cov_pct is not none %}<span style="color:{{ cov_color }};font-weight:600">{{ "{:,}".format(row.stock_count) }}</span> <span class="inv-faint">{{ cov_pct }}%</span>{% else %}<span class="inv-faint">—</span>{% endif %}
+                    </td>
+                    <td data-key="date_span" class="mono">{{ row.date_span if row.date_span and row.date_span != '—' else (row.depth or '—') }}</td>
+                    <td data-key="latest_date" class="mono">{{ row.latest_date or '—' }}</td>
+                    <td data-key="freshness">
+                        {% if row.freshness != 'N/A' %}<span class="inv-pill" style="color:{{ fresh_color }};border-color:{{ fresh_color }}">{{ row.freshness }}</span>{% else %}<span class="inv-faint">—</span>{% endif %}
+                    </td>
+                    <td data-key="age_days" class="num mono">
+                        {% if row.age_days is not none %}<span style="color:{{ age_color }};font-weight:{{ 600 if age_color != 'inherit' else 400 }}">{{ row.age_days }}d</span><span class="inv-faint">&nbsp;/&nbsp;{{ row.threshold_days }}d</span>{% else %}<span class="inv-faint">—</span>{% endif %}
+                    </td>
+                    <td data-key="frequency">{{ row.frequency or '—' }}</td>
+                    <td data-key="source" class="inv-truncate">{{ row.source or '—' }}</td>
+                    <td data-key="produced_by" class="mono inv-faint inv-truncate">{{ row.produced_by or '—' }}</td>
+                    <td data-key="consumed_count" class="num mono" title="{{ row.consumed_by }}">{{ row.consumed_count if row.consumed_count is defined else '—' }}</td>
+                    <td data-key="description" class="inv-truncate" title="{{ row.description }}">{{ row.description }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        </div>
+    </details>
+    {% endfor %}
+
+    <script src="/static/inventory.js" defer></script>
+
+    <style>
+      /* ── Domain accordion ── */
+      details.inv-domain { margin-top: 18px; }
+      details.inv-domain summary::-webkit-details-marker { display: none; }
+      details.inv-domain summary {
+        display: flex; align-items: center; gap: 10px; padding: 8px 4px;
+        cursor: pointer; border-bottom: 1px solid var(--border); user-select: none; list-style: none;
+      }
+      details.inv-domain[open]  .inv-arrow::before { content: "▾"; }
+      details.inv-domain:not([open]) .inv-arrow::before { content: "▸"; }
+      details.inv-domain .inv-arrow { width: 14px; font-size: 12px; }
+      details.inv-domain .inv-arrow::before { color: var(--text-muted); }
+      details.inv-domain .inv-domain-title {
+        font-size: 13px; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase;
+        color: var(--text-primary);
+      }
+      details.inv-domain .inv-domain-count { font-size: 11px; color: var(--text-muted); }
+
+      /* ── The table itself — flat, muted, no zebra, no vertical lines ── */
+      .inv-table-wrap { overflow-x: auto; margin-top: 8px; }
+      table.inv-table { width: 100%; border-collapse: collapse; font-size: 12px; color: var(--text-secondary); }
+      table.inv-table thead th {
+        text-align: left; font-size: 10px; font-weight: 600; letter-spacing: 0.5px; text-transform: uppercase;
+        color: var(--text-muted); padding: 10px 12px; white-space: nowrap;
+        border-bottom: 2px solid var(--border-accent); cursor: pointer; user-select: none;
+        background: transparent;
+      }
+      table.inv-table thead th:hover { color: var(--text-primary); }
+      table.inv-table thead th.num { text-align: right; }
+      table.inv-table thead th.sort-asc, table.inv-table thead th.sort-desc { color: var(--accent); }
+      table.inv-table thead th.sort-asc::after { content: " ▲"; font-size: 9px; }
+      table.inv-table thead th.sort-desc::after { content: " ▼"; font-size: 9px; }
+      table.inv-table thead th.dragging { opacity: 0.4; }
+      table.inv-table thead th.drag-over { box-shadow: inset 2px 0 0 var(--accent); }
+
+      table.inv-table tbody tr { border-bottom: 1px solid var(--border); }
+      table.inv-table tbody tr:hover { background: var(--bg-card-hover); }
+      table.inv-table tbody td {
+        padding: 10px 12px; vertical-align: middle; color: inherit;
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      }
+      table.inv-table tbody td.num { text-align: right; }
+      table.inv-table tbody td.mono, table.inv-table .mono { font-family: 'JetBrains Mono', monospace; }
+      table.inv-table tbody td.inv-truncate { max-width: 320px; }
+      table.inv-table tbody td.inv-faint { color: var(--text-muted); }
+      table.inv-table .inv-faint { color: var(--text-muted); }
+      table.inv-table .inv-strong { color: var(--text-primary); font-weight: 600; }
+      table.inv-table .inv-table-name {
+        font-family: 'JetBrains Mono', monospace; font-weight: 700; font-size: 12px;
+        color: var(--accent); text-decoration: none;
+      }
+      table.inv-table .inv-pill {
+        display: inline-block; font-size: 9px; padding: 2px 6px; border: 1px solid;
+        border-radius: 4px; font-weight: 700; letter-spacing: 0.5px;
+      }
+      table.inv-table .inv-badge-empty {
+        display: inline-block; font-size: 9px; padding: 1px 6px; margin-left: 4px;
+        background: rgba(239,68,68,0.18); color: var(--red); border-radius: 4px; font-weight: 700;
+      }
+    </style>
+</div>
+
+{% endblock %}

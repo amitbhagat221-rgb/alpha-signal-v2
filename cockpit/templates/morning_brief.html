@@ -1,0 +1,143 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<!-- Regime Banner -->
+<div class="regime-banner {{ regime.color }}">
+    <div style="display: flex; align-items: center; gap: 16px;">
+        <span class="regime-badge {{ regime.color }}">{{ regime.regime }}</span>
+        <div>
+            <span style="color: var(--text-primary); font-weight: 600;">India VIX</span>
+            <span class="mono" style="font-size: 20px; margin-left: 8px;">{{ "%.1f"|format(regime.vix_latest) }}</span>
+            <span class="unit" style="margin-left: 4px;">20d avg: {{ "%.1f"|format(regime.vix_20d_avg) }}</span>
+        </div>
+    </div>
+    <div style="display: flex; align-items: center; gap: 24px;">
+        <div>
+            <span style="color: var(--text-secondary); font-size: 12px;">ALLOCATION</span><br>
+            <span class="mono" style="font-size: 14px;">
+                {{ "%.0f"|format(regime.alloc_large * 100) }}<span class="unit">L</span>
+                / {{ "%.0f"|format(regime.alloc_mid * 100) }}<span class="unit">M</span>
+                / {{ "%.0f"|format(regime.alloc_small * 100) }}<span class="unit">S</span>
+            </span>
+        </div>
+        <div style="text-align: right;">
+            <span style="color: var(--text-muted); font-size: 11px;">{{ pick_date }}</span><br>
+            <span style="color: var(--text-muted); font-size: 11px;">{{ stock_count }} stocks &middot; {{ tailwinds }} sectors tailwind &middot; {{ headwinds }} headwind</span>
+        </div>
+    </div>
+</div>
+
+<!-- What Changed -->
+{% if changes %}
+<div style="margin-bottom: 20px;">
+    <div class="section-title">What Changed</div>
+    <div class="stagger" style="display: flex; flex-direction: column; gap: 6px;">
+        {% for change in changes[:6] %}
+        <div class="card" style="border-left: 4px solid var(--{{ change.color or 'blue' }}); padding: 10px 14px;">
+            <div style="display: flex; justify-content: space-between; align-items: start;">
+                <div>
+                    <span style="font-weight: 600; font-size: 13px;">{{ change.headline }}</span>
+                    {% if change.detail %}<span style="font-size: 12px; color: var(--text-muted);"> &middot; {{ change.detail }}</span>{% endif %}
+                </div>
+                {% if change.sid %}
+                <a href="/explorer/{{ change.sid }}" style="font-size: 10px; color: var(--blue); text-decoration: none; white-space: nowrap; margin-left: 8px;">View &rarr;</a>
+                {% endif %}
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+
+<!-- Earnings This Week -->
+{% if earnings %}
+<div style="margin-bottom: 20px;">
+    <div class="section-title">Earnings Coming Up</div>
+    <div class="card" style="padding: 10px 14px; display: flex; flex-wrap: wrap; gap: 12px;">
+        {% for e in earnings %}
+        <a href="/explorer/{{ e.sid }}" style="font-size: 12px; text-decoration: none; color: var(--text-secondary); display: flex; gap: 6px; align-items: center;">
+            <span style="color: var(--amber);">&#128197;</span>
+            <span class="mono" style="color: var(--text-primary); font-weight: 600;">{{ e.symbol }}</span>
+            <span>{{ e.date }}</span>
+        </a>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+
+<!-- Top Picks by Tier -->
+<div class="section-title">Top Picks</div>
+<div class="tier-grid stagger" style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px;">
+
+    {% for tier_name in ["LARGE", "MID", "SMALL"] %}
+    <div class="card" style="padding: 0; overflow: hidden;">
+        <div class="tier-header" style="padding: 10px 14px; margin-bottom: 0;
+            {% if tier_name == 'LARGE' %}border-left: 3px solid var(--blue);
+            {% elif tier_name == 'MID' %}border-left: 3px solid var(--accent);
+            {% else %}border-left: 3px solid var(--green);{% endif %}">
+            {{ tier_name }} CAP
+        </div>
+
+        {% for stock in picks.get(tier_name, []) %}
+        {% set pm = stock.get("pm", {}) %}
+        {% set ac = stock.get("ac", {}) %}
+        {% set dos = stock.get("dossier", {}) %}
+        <a href="/explorer/{{ stock.sid }}" class="stock-row" style="flex-direction: column; align-items: stretch; gap: 4px;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <div class="rank-badge {% if stock.rank <= 3 %}top3{% endif %}">{{ stock.rank }}</div>
+                    <span style="font-weight: 700; font-size: 14px;">{{ stock.ticker }}</span>
+                    {% if dos.get("action") %}
+                    <span style="font-size: 9px; padding: 1px 6px; border-radius: 4px; font-weight: 700;
+                        {% if dos.action == 'BUY' %}background: var(--green-bg); color: var(--green);
+                        {% elif dos.action == 'AVOID' %}background: var(--red-bg); color: var(--red);
+                        {% else %}background: var(--amber-bg); color: var(--amber);{% endif %}">{{ dos.action }}</span>
+                    {% endif %}
+                </div>
+                <span class="mono" style="font-size: 16px; font-weight: 700;
+                    {% if stock.final_score >= 0.7 %}color: var(--green);
+                    {% elif stock.final_score >= 0.5 %}color: var(--amber);
+                    {% else %}color: var(--red);{% endif %}">
+                    {{ "%.0f"|format(stock.final_score * 100) }}
+                </span>
+            </div>
+
+            <!-- Price + Target + Returns -->
+            <div style="font-size: 11px; color: var(--text-muted); display: flex; gap: 8px; flex-wrap: wrap; padding-left: 36px;">
+                {% if pm.get("close_price") %}<span>&#8377;{{ "%.0f"|format(pm.close_price) }}</span>{% endif %}
+                {% if ac.get("price_target") and ac.get("pt_upside_pct") is not none %}
+                <span>&rarr; Target &#8377;{{ "%.0f"|format(ac.price_target) }}
+                    <span class="{% if ac.pt_upside_pct > 0 %}score-green{% else %}score-red{% endif %}">
+                        ({{ "%+.0f"|format(ac.pt_upside_pct) }}%)
+                    </span>
+                </span>
+                {% endif %}
+                {% if pm.get("return_1m") is not none %}
+                <span>1M: <span class="{% if pm.return_1m > 0 %}score-green{% else %}score-red{% endif %}">{{ "%+.0f"|format(pm.return_1m) }}%</span></span>
+                {% endif %}
+                {% if pm.get("rsi_14") is not none %}
+                <span>RSI: {{ "%.0f"|format(pm.rsi_14) }}</span>
+                {% endif %}
+            </div>
+
+            <!-- Conviction Bar -->
+            <div style="padding-left: 36px; padding-right: 8px;">
+                <div class="conviction-bar" style="margin: 4px 0;">
+                    <div class="conviction-marker" style="left: {{ stock.final_score * 100 }}%;"></div>
+                </div>
+            </div>
+
+            <!-- Dominant signal or thesis -->
+            <div style="font-size: 10px; color: var(--text-muted); padding-left: 36px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                {% if dos.get("thesis") %}{{ dos.thesis[:70] }}...
+                {% else %}{{ stock.sector }}{% if stock.dominant_signal %} &middot; {{ stock.dominant_signal }}{% endif %}
+                {% endif %}
+            </div>
+        </a>
+        {% endfor %}
+    </div>
+    {% endfor %}
+</div>
+
+{% endblock %}

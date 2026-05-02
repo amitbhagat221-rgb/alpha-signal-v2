@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<!-- Search Bar -->
+<div x-data="searchApp()" x-init="$nextTick(() => { window.addEventListener('keydown', (e) => { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); $refs.searchInput.focus(); $refs.searchInput.select(); } }); })" style="margin-bottom: 24px; position: relative;">
+    <div class="section-title">Stock Explorer</div>
+    <div style="position: relative;">
+        <input type="text" x-model="query" @input.debounce.200ms="search()" x-ref="searchInput"
+               placeholder="Search by ticker or company name…"
+               style="width: 100%; padding: 12px 56px 12px 16px; border-radius: 10px;
+                      background: var(--bg-card); border: 1px solid var(--border);
+                      color: var(--text-primary); font-size: 15px; outline: none;
+                      font-family: 'Plus Jakarta Sans', sans-serif;
+                      transition: border-color var(--t-fast) var(--ease-out);"
+               @focus="showResults = query.length >= 2; $event.target.style.borderColor = 'var(--accent)';"
+               @blur="$event.target.style.borderColor = ''"
+               @keydown.escape="showResults = false; $event.target.blur();">
+        <kbd style="position: absolute; right: 12px; top: 50%; transform: translateY(-50%);
+                    font-family: 'JetBrains Mono', monospace; font-size: 10px;
+                    color: var(--text-muted); background: var(--bg-primary);
+                    border: 1px solid var(--border-accent); border-radius: 4px;
+                    padding: 2px 6px; pointer-events: none;">⌘K</kbd>
+    </div>
+
+    <!-- Search Results Dropdown -->
+    <div x-show="showResults && results.length > 0" x-cloak
+         x-transition:enter="transition ease-out duration-150"
+         x-transition:enter-start="opacity-0 -translate-y-1"
+         x-transition:enter-end="opacity-100 translate-y-0"
+         style="position: absolute; top: 100%; left: 0; right: 0; z-index: 40;
+                background: var(--bg-card); border: 1px solid var(--border-accent);
+                border-radius: 10px; margin-top: 6px; max-height: 400px; overflow-y: auto;
+                box-shadow: var(--shadow-lg);">
+        <template x-for="stock in results" :key="stock.sid">
+            <a :href="'/explorer/' + stock.sid"
+               style="display: flex; align-items: center; padding: 10px 16px; gap: 12px;
+                      text-decoration: none; color: var(--text-primary);
+                      border-bottom: 1px solid var(--border);"
+               @mouseenter="$el.style.background='var(--bg-card-hover)'"
+               @mouseleave="$el.style.background='transparent'">
+                <span class="mono" style="font-weight: 700; font-size: 14px; width: 80px;"
+                      x-text="stock.ticker"></span>
+                <span style="flex: 1; font-size: 13px; color: var(--text-secondary);"
+                      x-text="stock.name"></span>
+                <span style="font-size: 10px; padding: 2px 8px; border-radius: 4px;
+                             background: var(--border); color: var(--text-muted);"
+                      x-text="stock.cap_tier"></span>
+            </a>
+        </template>
+    </div>
+</div>
+
+<!-- Tier Heat Maps -->
+<div style="display: flex; flex-direction: column; gap: 20px;">
+    {% for tier_name, tier_stocks in tiers.items() %}
+    <div class="card" style="padding: 16px;">
+        <div class="tier-header" style="margin-bottom: 12px;
+            {% if tier_name == 'LARGE' %}border-left: 3px solid var(--blue); padding-left: 12px;
+            {% elif tier_name == 'MID' %}border-left: 3px solid var(--accent); padding-left: 12px;
+            {% else %}border-left: 3px solid var(--green); padding-left: 12px;{% endif %}">
+            {{ tier_name }} CAP
+            <span style="color: var(--text-muted); font-weight: 400; letter-spacing: 0;">
+                ({{ tier_stocks|length }} stocks)
+            </span>
+        </div>
+        <div style="display: flex; flex-wrap: wrap; gap: 4px;">
+            {% for stock in tier_stocks %}
+            <a href="/explorer/{{ stock.sid }}" title="{{ stock.ticker }} · {{ stock.name }} — Score: {{ '%.0f'|format(stock.score * 100) }}"
+               style="width: 48px; height: 32px; border-radius: 4px; display: flex;
+                      align-items: center; justify-content: center; font-size: 8px;
+                      font-weight: 600; text-decoration: none; color: white;
+                      font-family: 'JetBrains Mono', monospace;
+                      {% if stock.score >= 0.65 %}background: var(--green);
+                      {% elif stock.score >= 0.5 %}background: rgba(34, 197, 94, 0.4);
+                      {% elif stock.score >= 0.4 %}background: var(--border-accent); color: var(--text-secondary);
+                      {% elif stock.score >= 0.3 %}background: rgba(245, 158, 11, 0.4);
+                      {% else %}background: rgba(239, 68, 68, 0.4);{% endif %}">
+                {{ stock.ticker[:5] }}
+            </a>
+            {% endfor %}
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+<script>
+function searchApp() {
+    return {
+        query: '',
+        results: [],
+        showResults: false,
+        async search() {
+            if (this.query.length < 2) { this.results = []; this.showResults = false; return; }
+            const resp = await fetch('/api/search?q=' + encodeURIComponent(this.query));
+            this.results = await resp.json();
+            this.showResults = true;
+        }
+    }
+}
+</script>
+
+{% endblock %}

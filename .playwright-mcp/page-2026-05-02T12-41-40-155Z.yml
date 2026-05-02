@@ -1,0 +1,60 @@
+- generic [active] [ref=e1]:
+  - navigation [ref=e2]:
+    - generic "Alpha Signal" [ref=e3]:
+      - img [ref=e4]
+    - link "Morning Brief" [ref=e6] [cursor=pointer]:
+      - /url: /
+      - img [ref=e7]
+    - link "Signals" [ref=e10] [cursor=pointer]:
+      - /url: /signals
+      - img [ref=e11]
+    - link "Action Queue" [ref=e13] [cursor=pointer]:
+      - /url: /actions
+      - img [ref=e14]
+    - link "Explorer" [ref=e18] [cursor=pointer]:
+      - /url: /explorer
+      - img [ref=e19]
+    - link "Portfolio" [ref=e22] [cursor=pointer]:
+      - /url: /portfolio
+      - img [ref=e23]
+    - link "Sectors" [ref=e26] [cursor=pointer]:
+      - /url: /sectors
+      - img [ref=e27]
+    - link "Model & Backtest" [ref=e31] [cursor=pointer]:
+      - /url: /model
+      - img [ref=e32]
+    - link "Pipeline Flow" [ref=e33] [cursor=pointer]:
+      - /url: /flow
+      - img [ref=e34]
+    - link "System" [ref=e38] [cursor=pointer]:
+      - /url: /system
+      - img [ref=e39]
+    - link "SQL Console" [ref=e41] [cursor=pointer]:
+      - /url: /sql
+      - img [ref=e42]
+  - main [ref=e44]:
+    - generic [ref=e45]: SQL Console
+    - generic [ref=e46]: Read-only SQLite console. SELECT and WITH statements only — no INSERT/UPDATE/DELETE/DROP/etc. Results capped to 500 rows. Query the live database directly.
+    - generic [ref=e47]:
+      - generic [ref=e48]:
+        - textbox "SELECT * FROM stocks WHERE cap_tier = 'LARGE' LIMIT 10" [ref=e49]: SELECT cap_tier, COUNT(*) as n FROM stocks GROUP BY cap_tier
+        - generic [ref=e50]:
+          - generic [ref=e51]:
+            - button "Run (Ctrl+Enter)" [ref=e52] [cursor=pointer]
+            - button "Clear" [ref=e53] [cursor=pointer]
+          - generic [ref=e54]: Ctrl+Enter to run · 500 row cap · SELECT/WITH only
+        - generic [ref=e55]:
+          - generic [ref=e56]: Examples
+          - generic [ref=e57]:
+            - button "Top 10 LARGE picks" [ref=e58] [cursor=pointer]
+            - button "Classifier status" [ref=e59] [cursor=pointer]
+            - button "Recent insider buys" [ref=e60] [cursor=pointer]
+            - button "Sector spread" [ref=e61] [cursor=pointer]
+            - button "Forensic alerts" [ref=e62] [cursor=pointer]
+            - button "NTPC prices" [ref=e63] [cursor=pointer]
+            - button "NTPC quarterly" [ref=e64] [cursor=pointer]
+            - button "Macro by sector" [ref=e65] [cursor=pointer]
+      - generic [ref=e66]:
+        - generic [ref=e67]: Schema
+        - generic [ref=e68]: Click any table to load "SELECT * FROM <table> LIMIT 20" into the query box.
+        - generic [ref=e69]: Loading schema...

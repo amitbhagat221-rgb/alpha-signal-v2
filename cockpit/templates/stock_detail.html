@@ -1,0 +1,1251 @@
+{% extends "base.html" %}
+
+{% block content %}
+{% set s = stock %}
+{% set pm = s.get("pm", {}) %}
+{% set ac = s.get("ac", {}) %}
+{% set dos = s.get("dossier", {}) %}
+{% set sa = s.get("sector_avg", {}) %}
+{% set sc = s.get("sector_comp", {}) %}
+{% set qf = s.get("quarterly", {}) %}
+{% set af = s.get("annual", {}) %}
+{% set fc = s.get("forecasts", {}) %}
+{% set sig_desc = s.get("signal_descriptions", {}) %}
+{% set m_tt = s.get("metric_tooltips", {}) %}
+{% set s_tt = s.get("tooltips", {}) %}
+
+{# ── Reusable tooltip macro ── #}
+{% macro tooltip(text) -%}
+{% if text %}
+<span class="tooltip-wrap" x-data="{ open: false }">
+    <button type="button" class="tooltip-trigger"
+            @mouseenter="open = true" @mouseleave="open = false"
+            @click="open = !open" @click.away="open = false"
+            aria-label="More info">i</button>
+    <span x-show="open" x-cloak x-transition class="tooltip-popover">{{ text }}</span>
+</span>
+{% endif %}
+{%- endmacro %}
+
+{# ─────────── PROMINENT HEADER ─────────── #}
+<div class="stock-header">
+    <div style="flex: 1; min-width: 280px;">
+        <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+            <h1 class="stock-ticker">{{ s.ticker }}</h1>
+            <span class="stock-badge">{{ s.cap_tier }}</span>
+            {% if dos.get("action") %}
+            <span class="stock-badge {% if dos.action == 'BUY' %}buy{% elif dos.action == 'AVOID' %}avoid{% else %}hold{% endif %}">
+                {{ dos.action }}
+            </span>
+            {% endif %}
+            {% if dos.get("conviction") %}
+            <span class="stock-badge">{{ dos.conviction }} CONVICTION</span>
+            {% endif %}
+        </div>
+        <div class="stock-name">{{ s.name }} &middot; <span style="color: var(--accent);">{{ s.sector }}</span>{% if s.industry %} &middot; {{ s.industry }}{% endif %}</div>
+    </div>
+    <div style="text-align: right;">
+        {% if pm.get("close_price") %}
+        <div class="stock-price"><span class="unit">&#8377;</span>{{ "%.2f"|format(pm.close_price) }}</div>
+        <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">
+            {% if pm.get("return_1m") is not none %}
+            <span class="mono {% if pm.return_1m > 0 %}score-green{% elif pm.return_1m < 0 %}score-red{% endif %}">
+                {{ "%+.1f"|format(pm.return_1m) }}%
+            </span> 1M &middot;
+            {% endif %}
+            {{ pm.get("price_date", "") }}
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+{# ─────────── PRICE METRICS BAR ─────────── #}
+{% if pm %}
+<div class="card" style="padding: 14px 18px; margin-bottom: 16px; display: flex; flex-wrap: wrap; gap: 20px; align-items: center;">
+    {% if pm.get("high_52w") %}
+    <div style="font-size: 12px; color: var(--text-muted);">
+        52W: <span class="mono">&#8377;{{ "%.0f"|format(pm.low_52w) }}</span> — <span class="mono">&#8377;{{ "%.0f"|format(pm.high_52w) }}</span>
+        {% if pm.get("pct_from_52w_high") is not none %}
+        <span class="mono {% if pm.pct_from_52w_high > -10 %}score-green{% elif pm.pct_from_52w_high > -25 %}score-amber{% else %}score-red{% endif %}" style="margin-left: 4px;">
+            ({{ "%+.0f"|format(pm.pct_from_52w_high) }}% from high)
+        </span>
+        {% endif %}
+    </div>
+    {% endif %}
+    {% for label, key in [("3M", "return_3m"), ("6M", "return_6m"), ("1Y", "return_1y")] %}
+    {% if pm.get(key) is not none %}
+    <div style="font-size: 12px;">
+        <span style="color: var(--text-muted);">{{ label }}:</span>
+        <span class="mono {% if pm[key] > 0 %}score-green{% elif pm[key] < 0 %}score-red{% endif %}" style="font-weight: 600;">{{ "%+.1f"|format(pm[key]) }}%</span>
+    </div>
+    {% endif %}
+    {% endfor %}
+    {% if pm.get("rsi_14") is not none %}
+    <div style="font-size: 12px;">
+        <span style="color: var(--text-muted);">RSI:</span>
+        <span class="mono {% if pm.rsi_14 < 30 %}score-green{% elif pm.rsi_14 > 70 %}score-red{% endif %}" style="font-weight: 600;">
+            {{ "%.0f"|format(pm.rsi_14) }}{% if pm.rsi_14 < 30 %} oversold{% elif pm.rsi_14 > 70 %} overbought{% endif %}
+        </span>
+        {{ tooltip("Relative Strength Index (14-day). Above 70 = overbought, below 30 = oversold. Wilder smoothing.") }}
+    </div>
+    {% endif %}
+</div>
+{% endif %}
+
+{# ─────────── TAB BAR ─────────── #}
+<div x-data="{ tab: 'overview', loaded: { overview: true } }">
+
+<div class="tab-bar">
+    <button class="tab-button" :class="{ active: tab === 'overview' }" @click="tab = 'overview'; loaded.overview = true">Overview</button>
+    <button class="tab-button" :class="{ active: tab === 'financials' }" @click="tab = 'financials'; loaded.financials = true; $nextTick(() => initFinancialsCharts())">Financials</button>
+    <button class="tab-button" :class="{ active: tab === 'ownership' }" @click="tab = 'ownership'; loaded.ownership = true; $nextTick(() => initOwnershipCharts())">Ownership</button>
+    <button class="tab-button" :class="{ active: tab === 'consensus' }" @click="tab = 'consensus'; loaded.consensus = true; $nextTick(() => initConsensusCharts())">Consensus</button>
+    <button class="tab-button" :class="{ active: tab === 'forensic' }" @click="tab = 'forensic'">Forensic</button>
+    <button class="tab-button" :class="{ active: tab === 'price' }" @click="tab = 'price'; loaded.price = true; $nextTick(() => initPriceChart('1y'))">Price &amp; Technicals</button>
+</div>
+
+{# ════════════════════════════════════════════ #}
+{# ───────────── OVERVIEW TAB ───────────────── #}
+{# ════════════════════════════════════════════ #}
+<div x-show="tab === 'overview'" x-cloak>
+
+{# AI Dossier card #}
+{% if dos.get("thesis") %}
+<div class="card" style="margin-bottom: 16px; border-left: 4px solid var(--accent);">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+        <span style="font-size: 12px; font-weight: 700; letter-spacing: 1.5px; color: var(--accent);">AI INVESTMENT THESIS</span>
+        <div style="display: flex; gap: 10px;">
+            {% if dos.get("target_price") %}
+            <span style="font-size: 13px; color: var(--green);">Target: <span class="mono">&#8377;{{ dos.target_price }}</span>
+                {% if dos.get("target_upside_pct") %} (+{{ dos.target_upside_pct }}%){% endif %}
+            </span>
+            {% endif %}
+            {% if dos.get("stop_loss_price") or dos.get("stop_loss") %}
+            <span style="font-size: 13px; color: var(--red);">Stop: <span class="mono">&#8377;{{ dos.get("stop_loss_price") or dos.get("stop_loss") }}</span></span>
+            {% endif %}
+        </div>
+    </div>
+    <div style="font-size: 14px; color: var(--text-primary); line-height: 1.6; margin-bottom: 12px;">{{ dos.thesis }}</div>
+    {% if dos.get("entry_strategy") %}
+    <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 12px;">
+        <strong>Entry:</strong> {{ dos.entry_strategy }}
+    </div>
+    {% endif %}
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+        {% if dos.get("bull_case") %}
+        <div>
+            <div style="font-size: 11px; color: var(--green); font-weight: 700; margin-bottom: 6px; letter-spacing: 0.5px;">BULL CASE</div>
+            {% if dos.bull_case is string %}
+            <div style="font-size: 12px; color: var(--text-secondary); line-height: 1.5;">{{ dos.bull_case }}</div>
+            {% else %}
+            {% for item in dos.bull_case %}
+            <div style="font-size: 12px; color: var(--text-secondary); line-height: 1.5;">&#8226; {{ item }}</div>
+            {% endfor %}
+            {% endif %}
+        </div>
+        {% endif %}
+        {% if dos.get("bear_case") %}
+        <div>
+            <div style="font-size: 11px; color: var(--red); font-weight: 700; margin-bottom: 6px; letter-spacing: 0.5px;">BEAR CASE</div>
+            {% if dos.bear_case is string %}
+            <div style="font-size: 12px; color: var(--text-secondary); line-height: 1.5;">{{ dos.bear_case }}</div>
+            {% else %}
+            {% for item in dos.bear_case %}
+            <div style="font-size: 12px; color: var(--text-secondary); line-height: 1.5;">&#8226; {{ item }}</div>
+            {% endfor %}
+            {% endif %}
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endif %}
+
+<div style="display: grid; grid-template-columns: 1.4fr 1fr; gap: 16px;">
+
+{# LEFT: Conviction + Signals #}
+<div>
+    {% if s.get("final_score") is not none %}
+    <div class="card" style="margin-bottom: 16px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+            <span class="section-title" style="margin-bottom: 0;">Conviction Score</span>
+            <span class="mono" style="font-size: 28px; font-weight: 800;
+                {% if s.final_score >= 0.7 %}color: var(--green);
+                {% elif s.final_score >= 0.5 %}color: var(--amber);
+                {% else %}color: var(--red);{% endif %}">
+                {{ "%.0f"|format(s.final_score * 100) }}<span class="unit">/100</span>
+            </span>
+        </div>
+        <div class="section-desc">Composite of all validated signals, weighted for {{ s.cap_tier|lower }} cap. Higher = stronger overall conviction.</div>
+        <div class="conviction-bar" style="height: 10px; margin-bottom: 20px;">
+            <div class="conviction-marker" style="left: {{ s.final_score * 100 }}%;"></div>
+        </div>
+
+        {# Signal cards with descriptions and sub-components #}
+        {% set sigs = [
+            ("Consensus", s.get("consensus_signal"), "consensus_signal", "Consensus"),
+            ("Promoter", s.get("promoter_signal"), "promoter_signal", "Promoter"),
+            ("Piotroski F", s.get("f_score"), "piotroski", "Piotroski F"),
+            ("Accruals", s.get("accruals_signal"), "accruals_signal", "Accruals"),
+            ("Smart Money", s.get("smart_money_score"), "smart_money", "Smart Money"),
+            ("Earnings Yield", s.get("earnings_yield"), "ey", "Earnings Yield"),
+        ] %}
+        {% for name, value, key, tt_key in sigs %}
+        {% if value is not none %}
+        {% set normalized = (value / 9 * 100) if key == 'piotroski' else (value * 100 if key not in ['smart_money', 'ey'] else (value if key == 'smart_money' else value * 1000)) %}
+        <div class="signal-card">
+            <div class="signal-card-header">
+                <span class="signal-name">
+                    {{ name }}{{ tooltip(s_tt.get(tt_key, '')) }}
+                </span>
+                <span class="mono" style="font-weight: 700; font-size: 14px;
+                    {% if normalized >= 65 %}color: var(--green);
+                    {% elif normalized >= 40 %}color: var(--amber);
+                    {% else %}color: var(--red);{% endif %}">
+                    {% if key == 'piotroski' %}{{ value|int }}/9
+                    {% elif key == 'smart_money' %}{{ "%.0f"|format(value) }}/100
+                    {% elif key == 'ey' %}{{ "%.1f"|format(value * 100) }}%
+                    {% else %}{{ "%.2f"|format(value) }}{% endif %}
+                </span>
+            </div>
+            <div class="signal-desc">{{ sig_desc.get(name, '') }}</div>
+            <div class="signal-bar-track">
+                <div class="signal-bar-fill" style="width: {{ [normalized, 100]|min if normalized > 0 else 0 }}%;
+                    {% if normalized >= 65 %}background: var(--green);
+                    {% elif normalized >= 40 %}background: var(--amber);
+                    {% else %}background: var(--red);{% endif %}"></div>
+            </div>
+            {# Sub-components per signal #}
+            {% if key == 'consensus_signal' %}
+            <div class="signal-subcomp">
+                {% if s.get('pt_upside') is not none %}<div><span class="label">PT Upside:</span> <span class="val">{{ "%+.1f"|format(s.pt_upside) }}%</span></div>{% endif %}
+                {% if s.get('eps_growth') is not none %}<div><span class="label">EPS Growth:</span> <span class="val">{{ "%+.1f"|format(s.eps_growth) }}%</span></div>{% endif %}
+                {% if s.get('pt_revision_1yr') is not none %}<div><span class="label">PT Revision:</span> <span class="val">{{ "%+.1f"|format(s.pt_revision_1yr) }}%</span></div>{% endif %}
+                {% if s.get('revenue_growth') is not none %}<div><span class="label">Rev Growth:</span> <span class="val">{{ "%+.1f"|format(s.revenue_growth) }}%</span></div>{% endif %}
+            </div>
+            {% elif key == 'promoter_signal' %}
+            <div class="signal-subcomp">
+                {% if s.get('promoter_qoq') is not none %}<div><span class="label">QoQ Change:</span> <span class="val">{{ "%+.2f"|format(s.promoter_qoq) }}%</span></div>{% endif %}
+                {% if s.get('promoter_trend') %}<div><span class="label">Trend:</span> <span class="val">{{ s.promoter_trend|lower }}</span></div>{% endif %}
+                {% if s.get('pledge_quality') is not none %}<div><span class="label">Pledge Quality:</span> <span class="val">{{ "%.2f"|format(s.pledge_quality) }}</span></div>{% endif %}
+            </div>
+            {% elif key == 'accruals_signal' %}
+            <div class="signal-subcomp">
+                {% if s.get('cf_accruals_ratio') is not none %}<div><span class="label">CF Accruals:</span> <span class="val">{{ "%.2f"|format(s.cf_accruals_ratio) }}</span></div>{% endif %}
+                {% if s.get('bs_accruals_ratio') is not none %}<div><span class="label">BS Accruals:</span> <span class="val">{{ "%.2f"|format(s.bs_accruals_ratio) }}</span></div>{% endif %}
+                {% if s.get('earnings_persistence') is not none %}<div><span class="label">Persistence:</span> <span class="val">{{ "%.2f"|format(s.earnings_persistence) }}</span></div>{% endif %}
+            </div>
+            {% endif %}
+        </div>
+        {% endif %}
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    {# News & Sentiment #}
+    {% if s.get("news") or s.get("sentiment_7d") is not none %}
+    <div class="card" style="margin-bottom: 16px;">
+        <div class="section-title">News &amp; Sentiment</div>
+        <div class="section-desc">Recent news headlines from financial publications. Sentiment computed via VADER NLP on article text.</div>
+        {% if s.get("sentiment_7d") is not none %}
+        <div style="font-size: 13px; margin-bottom: 12px; padding: 10px 14px; background: var(--bg-primary); border-radius: 8px;">
+            <span style="color: var(--text-muted);">7-day sentiment:</span>
+            <span class="mono {% if s.sentiment_7d > 0.1 %}score-green{% elif s.sentiment_7d < -0.1 %}score-red{% endif %}" style="font-weight: 700; margin-left: 6px;">{{ "%+.2f"|format(s.sentiment_7d) }}</span>
+            {% if s.get("articles_7d") %} <span style="color: var(--text-muted);">&middot; {{ s.articles_7d|int }} articles</span>{% endif %}
+        </div>
+        {% endif %}
+        {% for article in s.get("news", []) %}
+        <div style="padding: 10px 0; border-top: 1px solid var(--border);">
+            <div style="font-size: 13px; line-height: 1.4;">
+                {% if article.url %}<a href="{{ article.url }}" target="_blank" style="color: var(--text-primary); text-decoration: none;">{% endif %}
+                {{ article.title }}
+                {% if article.url %}</a>{% endif %}
+            </div>
+            <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">{{ article.source }} &middot; {{ article.published_at[:10] if article.published_at else "" }}</div>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+</div>
+
+{# RIGHT: Analyst summary + Regulatory + Forensic snapshot #}
+<div>
+    {# Analyst Consensus snapshot #}
+    {% if ac %}
+    <div class="card" style="margin-bottom: 16px;">
+        <div class="section-title">Analyst Snapshot</div>
+        <div class="section-desc">Aggregated forecasts from sell-side analysts covering this stock.</div>
+        {% if ac.get("price_target") %}
+        <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 12px;">
+            <span style="font-size: 12px; color: var(--text-secondary);">Price Target</span>
+            <div>
+                <span class="mono" style="font-size: 22px; font-weight: 700;">&#8377;{{ "%.0f"|format(ac.price_target) }}</span>
+                {% if ac.get("pt_upside_pct") is not none %}
+                <span class="mono {% if ac.pt_upside_pct > 0 %}score-green{% else %}score-red{% endif %}" style="font-size: 14px; margin-left: 6px;">
+                    ({{ "%+.1f"|format(ac.pt_upside_pct) }}%)
+                </span>
+                {% endif %}
+            </div>
+        </div>
+        {% endif %}
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+            {% if ac.get("total_analysts") is not none %}
+            <div style="padding: 10px; border-radius: 8px; background: var(--bg-primary);">
+                <div style="font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Analysts</div>
+                <div class="mono" style="font-size: 18px; font-weight: 700;">{{ ac.total_analysts|int }}</div>
+            </div>
+            {% endif %}
+            {% if ac.get("buy_pct") is not none %}
+            <div style="padding: 10px; border-radius: 8px; background: var(--bg-primary);">
+                <div style="font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Buy %</div>
+                <div class="mono score-green" style="font-size: 18px; font-weight: 700;">{{ "%.0f"|format(ac.buy_pct) }}%</div>
+            </div>
+            {% endif %}
+        </div>
+        <div style="margin-top: 10px; font-size: 11px; color: var(--text-muted); text-align: center;">See <span style="color: var(--accent); cursor: pointer;" @click="tab = 'consensus'; loaded.consensus = true; $nextTick(() => initConsensusCharts())">Consensus tab</span> for full breakdown</div>
+    </div>
+    {% endif %}
+
+    {# Forensic snapshot #}
+    <div class="card" style="margin-bottom: 16px;">
+        <div class="section-title">Forensic Health</div>
+        <div class="section-desc">Earnings manipulation and bankruptcy risk indicators.</div>
+        {% if s.get("m_score") is not none %}
+        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+            {% if s.m_score_flag == 'CLEAN' %}<span style="color: var(--green); font-size: 16px;">&#10003;</span>
+            {% elif s.m_score_flag == 'LIKELY_MANIPULATOR' %}<span style="color: var(--red); font-size: 16px;">&#10007;</span>
+            {% else %}<span style="color: var(--amber); font-size: 16px;">&#9888;</span>{% endif %}
+            <span style="font-size: 13px;">Beneish M: <span class="mono">{{ "%.2f"|format(s.m_score) }}</span> ({{ s.m_score_flag|lower|replace('_', ' ') }})</span>
+            {{ tooltip(s_tt.get('Forensic — Beneish', '')) }}
+        </div>
+        {% endif %}
+        {% if s.get("z_score") is not none %}
+        <div style="display: flex; align-items: center; gap: 8px;">
+            {% if s.z_score_flag == 'SAFE' %}<span style="color: var(--green); font-size: 16px;">&#10003;</span>
+            {% elif s.z_score_flag == 'DISTRESS' %}<span style="color: var(--red); font-size: 16px;">&#10007;</span>
+            {% else %}<span style="color: var(--amber); font-size: 16px;">&#9888;</span>{% endif %}
+            <span style="font-size: 13px;">Altman Z: <span class="mono">{{ "%.2f"|format(s.z_score) }}</span> ({{ s.z_score_flag|lower|replace('_', ' ') }})</span>
+            {{ tooltip(s_tt.get('Forensic — Altman', '')) }}
+        </div>
+        {% endif %}
+        {% if s.get("m_score") is none and s.get("z_score") is none %}
+        <div style="color: var(--text-muted); font-size: 12px;">Not available (financial sector or insufficient data)</div>
+        {% endif %}
+    </div>
+
+    {# Regulatory #}
+    {% if s.get("regulatory") %}
+    <div class="card" style="margin-bottom: 16px;">
+        <div class="section-title">Regulatory &mdash; {{ s.sector }}</div>
+        <div class="section-desc">AI-classified policy events affecting this sector. Direction shows likely impact.</div>
+        {% for evt in s.regulatory[:4] %}
+        <div style="padding: 10px 0; border-top: 1px solid var(--border);">
+            <div style="display: flex; gap: 6px; align-items: center; margin-bottom: 4px;">
+                <span style="font-size: 14px; {% if evt.direction > 0 %}color: var(--green);{% else %}color: var(--red);{% endif %}">
+                    {% if evt.direction > 0 %}&#9650;{% else %}&#9660;{% endif %}
+                </span>
+                <span style="font-size: 12px; font-weight: 600;">{{ evt.title[:80] }}</span>
+                <span style="font-size: 10px; color: var(--text-muted); margin-left: auto;">{{ evt.magnitude }}</span>
+            </div>
+            {% if evt.ai_reasoning %}
+            <div style="font-size: 11px; color: var(--text-secondary); line-height: 1.5;">{{ evt.ai_reasoning }}</div>
+            {% endif %}
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    {% if s.get("earnings") %}
+    <div class="card" style="border-left: 4px solid var(--amber);">
+        <div style="font-size: 12px; color: var(--amber); font-weight: 700;">
+            UPCOMING EARNINGS
+        </div>
+        {% for e in s.earnings %}
+        <div style="font-size: 13px; margin-top: 6px;">{{ e.purpose }} on <span class="mono">{{ e.date }}</span></div>
+        {% endfor %}
+    </div>
+    {% endif %}
+</div>
+</div>
+</div> {# end overview #}
+
+{# ════════════════════════════════════════════ #}
+{# ──────────── FINANCIALS TAB ──────────────── #}
+{# ════════════════════════════════════════════ #}
+<div x-show="tab === 'financials'" x-cloak>
+
+<div class="card" style="margin-bottom: 16px;">
+    <div class="section-title">Key Metrics</div>
+    <div class="section-desc">Computed from latest annual financials and TTM income statement. Sector averages shown for context.</div>
+
+    {% set ratios = af.get('ratios', {}) %}
+    {% set ttm = qf.get('ttm', {}) %}
+    <div class="metric-grid">
+        {# Market Cap #}
+        {% if s.get("market_cap_cr") %}
+        <div class="metric-card">
+            <div class="metric-label">Market Cap{{ tooltip(m_tt.market_cap) }}</div>
+            <div class="metric-value">&#8377;{{ "{:,.0f}".format(s.market_cap_cr / 1e7) }} <span class="unit">Cr</span></div>
+            <div class="metric-context">{{ s.cap_tier }} cap segment</div>
+        </div>
+        {% endif %}
+
+        {# P/E #}
+        {% if s.get("approx_pe") %}
+        <div class="metric-card">
+            <div class="metric-label">P/E (TTM){{ tooltip(m_tt.pe_ratio) }}</div>
+            <div class="metric-value">{{ "%.1f"|format(s.approx_pe) }}<span class="unit">x</span></div>
+            {% if sa.get("avg_ey") and sa.avg_ey > 0 %}
+            <div class="metric-context">Sector avg: {{ "%.1f"|format(1/sa.avg_ey) }}x</div>
+            {% endif %}
+        </div>
+        {% endif %}
+
+        {# Earnings Yield #}
+        {% if s.get("earnings_yield") is not none %}
+        <div class="metric-card">
+            <div class="metric-label">Earnings Yield{{ tooltip(m_tt.earnings_yield) }}</div>
+            <div class="metric-value
+                {% if s.earnings_yield > 0.08 %}score-green{% elif s.earnings_yield > 0.04 %}score-amber{% else %}score-red{% endif %}">
+                {{ "%.1f"|format(s.earnings_yield * 100) }}<span class="unit">%</span>
+            </div>
+            {% if sa.get("avg_ey") %}<div class="metric-context">Sector avg: {{ "%.1f"|format(sa.avg_ey * 100) }}%</div>{% endif %}
+        </div>
+        {% endif %}
+
+        {# D/E Ratio #}
+        {% if ratios.get("de_ratio") is not none %}
+        <div class="metric-card">
+            <div class="metric-label">Debt/Equity{{ tooltip(m_tt.de_ratio) }}</div>
+            <div class="metric-value
+                {% if ratios.de_ratio < 0.5 %}score-green{% elif ratios.de_ratio < 1.5 %}score-amber{% else %}score-red{% endif %}">
+                {{ "%.2f"|format(ratios.de_ratio) }}
+            </div>
+            {% if sc.get("avg_de") is not none %}<div class="metric-context">Sector avg: {{ "%.2f"|format(sc.avg_de) }}</div>{% endif %}
+        </div>
+        {% endif %}
+
+        {# ROE #}
+        {% if ratios.get("roe") is not none %}
+        <div class="metric-card">
+            <div class="metric-label">ROE (TTM){{ tooltip(m_tt.roe) }}</div>
+            <div class="metric-value
+                {% if ratios.roe > 15 %}score-green{% elif ratios.roe > 8 %}score-amber{% else %}score-red{% endif %}">
+                {{ "%.1f"|format(ratios.roe) }}<span class="unit">%</span>
+            </div>
+            <div class="metric-context">TTM PAT / Equity</div>
+        </div>
+        {% endif %}
+
+        {# ROA #}
+        {% if ratios.get("roa") is not none %}
+        <div class="metric-card">
+            <div class="metric-label">ROA (TTM){{ tooltip(m_tt.roa) }}</div>
+            <div class="metric-value
+                {% if ratios.roa > 5 %}score-green{% elif ratios.roa > 2 %}score-amber{% else %}score-red{% endif %}">
+                {{ "%.1f"|format(ratios.roa) }}<span class="unit">%</span>
+            </div>
+            <div class="metric-context">TTM PAT / Assets</div>
+        </div>
+        {% endif %}
+
+        {# EBITDA Margin #}
+        {% if ttm.get("ebitda_margin") is not none %}
+        <div class="metric-card">
+            <div class="metric-label">EBITDA Margin{{ tooltip(m_tt.ebitda_margin) }}</div>
+            <div class="metric-value
+                {% if ttm.ebitda_margin > 20 %}score-green{% elif ttm.ebitda_margin > 10 %}score-amber{% else %}score-red{% endif %}">
+                {{ "%.1f"|format(ttm.ebitda_margin) }}<span class="unit">%</span>
+            </div>
+            <div class="metric-context">TTM aggregate</div>
+        </div>
+        {% endif %}
+
+        {# PAT Margin #}
+        {% if ttm.get("pat_margin") is not none %}
+        <div class="metric-card">
+            <div class="metric-label">PAT Margin{{ tooltip(m_tt.pat_margin) }}</div>
+            <div class="metric-value
+                {% if ttm.pat_margin > 12 %}score-green{% elif ttm.pat_margin > 5 %}score-amber{% else %}score-red{% endif %}">
+                {{ "%.1f"|format(ttm.pat_margin) }}<span class="unit">%</span>
+            </div>
+            <div class="metric-context">TTM net margin</div>
+        </div>
+        {% endif %}
+
+        {# Book Value #}
+        {% if ratios.get("book_value") %}
+        <div class="metric-card">
+            <div class="metric-label">Book Value/Sh{{ tooltip(m_tt.book_value) }}</div>
+            <div class="metric-value">&#8377;{{ "%.0f"|format(ratios.book_value) }}</div>
+            {% if pm.get("close_price") %}
+            <div class="metric-context">P/B: {{ "%.1f"|format(pm.close_price / ratios.book_value) }}x</div>
+            {% endif %}
+        </div>
+        {% endif %}
+
+        {# Current Ratio #}
+        {% if ratios.get("current_ratio") is not none %}
+        <div class="metric-card">
+            <div class="metric-label">Current Ratio{{ tooltip(m_tt.current_ratio) }}</div>
+            <div class="metric-value
+                {% if ratios.current_ratio > 1.5 %}score-green{% elif ratios.current_ratio > 1 %}score-amber{% else %}score-red{% endif %}">
+                {{ "%.2f"|format(ratios.current_ratio) }}
+            </div>
+            <div class="metric-context">Liquidity buffer</div>
+        </div>
+        {% endif %}
+
+        {# Revenue Growth #}
+        {% if qf.get('yoy', {}).get("revenue_growth") is not none %}
+        <div class="metric-card">
+            <div class="metric-label">Revenue Growth YoY{{ tooltip(m_tt.revenue_growth) }}</div>
+            <div class="metric-value
+                {% if qf.yoy.revenue_growth > 15 %}score-green{% elif qf.yoy.revenue_growth > 5 %}score-amber{% else %}score-red{% endif %}">
+                {{ "%+.1f"|format(qf.yoy.revenue_growth) }}<span class="unit">%</span>
+            </div>
+            <div class="metric-context">Latest quarter vs same quarter prior year</div>
+        </div>
+        {% endif %}
+
+        {# Piotroski #}
+        {% if s.get("f_score") is not none %}
+        <div class="metric-card">
+            <div class="metric-label">Piotroski F{{ tooltip(m_tt.piotroski) }}</div>
+            <div class="metric-value
+                {% if s.f_score >= 7 %}score-green{% elif s.f_score >= 4 %}score-amber{% else %}score-red{% endif %}">
+                {{ s.f_score|int }}<span class="unit">/9</span>
+            </div>
+            <div class="metric-context">Financial health checklist</div>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+{# Quarterly results table #}
+{% if qf.get('quarters') %}
+<div class="card" style="margin-bottom: 16px;">
+    <div class="section-title">Quarterly Results</div>
+    <div class="section-desc">Last {{ qf.quarters|length }} quarters of consolidated income statement. Most recent first.</div>
+    <div class="table-scroll">
+    <table class="quarterly-table">
+        <thead>
+            <tr>
+                <th>Metric</th>
+                {% for q in qf.quarters %}<th>{{ q.period }}</th>{% endfor %}
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td>Revenue (Cr)</td>
+                {% for q in qf.quarters %}<td>{% if q.revenue %}{{ "{:,.0f}".format(q.revenue) }}{% else %}—{% endif %}</td>{% endfor %}
+            </tr>
+            <tr>
+                <td>Rev YoY %</td>
+                {% for q in qf.quarters %}<td class="{% if q.revenue_yoy is not none %}{% if q.revenue_yoy > 0 %}score-green{% elif q.revenue_yoy < 0 %}score-red{% endif %}{% endif %}">
+                    {% if q.revenue_yoy is not none %}{{ "%+.1f"|format(q.revenue_yoy) }}%{% else %}—{% endif %}
+                </td>{% endfor %}
+            </tr>
+            <tr>
+                <td>EBITDA (Cr)</td>
+                {% for q in qf.quarters %}<td>{% if q.ebitda %}{{ "{:,.0f}".format(q.ebitda) }}{% else %}—{% endif %}</td>{% endfor %}
+            </tr>
+            <tr>
+                <td>EBITDA Margin</td>
+                {% for q in qf.quarters %}<td>{% if q.ebitda_margin is not none %}{{ "%.1f"|format(q.ebitda_margin) }}%{% else %}—{% endif %}</td>{% endfor %}
+            </tr>
+            <tr>
+                <td>Net Profit (Cr)</td>
+                {% for q in qf.quarters %}<td>{% if q.net_income %}{{ "{:,.0f}".format(q.net_income) }}{% else %}—{% endif %}</td>{% endfor %}
+            </tr>
+            <tr>
+                <td>PAT YoY %</td>
+                {% for q in qf.quarters %}<td class="{% if q.pat_yoy is not none %}{% if q.pat_yoy > 0 %}score-green{% elif q.pat_yoy < 0 %}score-red{% endif %}{% endif %}">
+                    {% if q.pat_yoy is not none %}{{ "%+.1f"|format(q.pat_yoy) }}%{% else %}—{% endif %}
+                </td>{% endfor %}
+            </tr>
+            <tr>
+                <td>EPS</td>
+                {% for q in qf.quarters %}<td>{% if q.eps %}{{ "%.2f"|format(q.eps) }}{% else %}—{% endif %}</td>{% endfor %}
+            </tr>
+        </tbody>
+    </table>
+    </div>
+</div>
+
+{# Revenue + PAT bar chart #}
+<div class="card" style="margin-bottom: 16px;">
+    <div class="section-title">Revenue &amp; Profit Trend</div>
+    <div class="section-desc">Quarterly revenue (blue) and net profit (green) over time.</div>
+    <div style="position: relative; height: 280px;">
+        <canvas id="quarterlyChart"></canvas>
+    </div>
+</div>
+{% endif %}
+
+{# Annual balance sheet #}
+{% if af.get('balance_sheet') %}
+<div class="card">
+    <div class="section-title">Balance Sheet (Annual)</div>
+    <div class="section-desc">Last {{ af.balance_sheet|length }} years of key balance sheet items.</div>
+    <div class="table-scroll">
+    <table class="quarterly-table">
+        <thead>
+            <tr>
+                <th>Metric</th>
+                {% for r in af.balance_sheet %}<th>{{ r.period }}</th>{% endfor %}
+            </tr>
+        </thead>
+        <tbody>
+            <tr><td>Total Assets (Cr)</td>
+                {% for r in af.balance_sheet %}<td>{% if r.total_assets %}{{ "{:,.0f}".format(r.total_assets) }}{% else %}—{% endif %}</td>{% endfor %}
+            </tr>
+            <tr><td>Total Equity (Cr)</td>
+                {% for r in af.balance_sheet %}<td>{% if r.total_equity %}{{ "{:,.0f}".format(r.total_equity) }}{% else %}—{% endif %}</td>{% endfor %}
+            </tr>
+            <tr><td>Total Debt (Cr)</td>
+                {% for r in af.balance_sheet %}<td>{% if r.total_debt %}{{ "{:,.0f}".format(r.total_debt) }}{% else %}—{% endif %}</td>{% endfor %}
+            </tr>
+            <tr><td>Cash &amp; Equiv (Cr)</td>
+                {% for r in af.balance_sheet %}<td>{% if r.cash_and_equivalents %}{{ "{:,.0f}".format(r.cash_and_equivalents) }}{% else %}—{% endif %}</td>{% endfor %}
+            </tr>
+        </tbody>
+    </table>
+    </div>
+</div>
+{% endif %}
+
+</div> {# end financials #}
+
+{# ════════════════════════════════════════════ #}
+{# ──────────── OWNERSHIP TAB ───────────────── #}
+{# ════════════════════════════════════════════ #}
+<div x-show="tab === 'ownership'" x-cloak>
+
+{% if s.get("shareholding") %}
+{% set sh = s.shareholding[0] if s.shareholding else {} %}
+<div class="card" style="margin-bottom: 16px;">
+    <div class="section-title">Current Ownership ({{ sh.get("end_date", "")[:10] }})</div>
+    <div class="section-desc">Latest quarter shareholding pattern with QoQ change indicators.</div>
+    {% for label, key, color in [("Promoter", "promoter_pct", "accent"), ("FII", "fii_pct", "blue"), ("Mutual Funds", "mf_pct", "green"), ("DII", "dii_pct", "amber"), ("Insurance", "insurance_pct", "blue"), ("Retail/HNI", "retail_hni_pct", "green")] %}
+    {% if sh.get(key) is not none %}
+    <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 10px;">
+        <span style="width: 110px; font-size: 12px; color: var(--text-muted); font-weight: 600;">{{ label }}</span>
+        <div style="flex: 1; height: 8px; border-radius: 4px; background: var(--border);">
+            <div style="height: 100%; border-radius: 4px; width: {{ sh[key] }}%; background: var(--{{ color }});"></div>
+        </div>
+        <span class="mono" style="font-size: 13px; width: 60px; text-align: right; font-weight: 700;">{{ "%.1f"|format(sh[key]) }}%</span>
+        {% set qoq_key = key ~ '_qoq' %}
+        {% if sh.get(qoq_key) is not none %}
+        <span class="mono {% if sh[qoq_key] > 0 %}score-green{% elif sh[qoq_key] < 0 %}score-red{% endif %}" style="font-size: 11px; width: 50px; text-align: right;">
+            {{ "%+.2f"|format(sh[qoq_key]) }}
+        </span>
+        {% else %}
+        <span style="width: 50px;"></span>
+        {% endif %}
+    </div>
+    {% endif %}
+    {% endfor %}
+    {% if sh.get("pledge_pct") is not none and sh.pledge_pct > 0 %}
+    <div style="margin-top: 12px; padding: 10px; background: var(--red-bg); border-left: 3px solid var(--red); border-radius: 6px; font-size: 12px;">
+        &#9888; <strong>Pledge:</strong> {{ "%.1f"|format(sh.pledge_pct) }}% of promoter holding is pledged.
+    </div>
+    {% endif %}
+</div>
+
+{# Shareholding trend chart #}
+<div class="card" style="margin-bottom: 16px;">
+    <div class="section-title">Shareholding Trend</div>
+    <div class="section-desc">Last {{ s.shareholding|length }} quarters showing how each ownership category has evolved.</div>
+    <div style="position: relative; height: 280px;">
+        <canvas id="shareholdingChart"></canvas>
+    </div>
+</div>
+{% endif %}
+
+{# Insider activity #}
+{% set ins = s.get("insider", {}) %}
+{% if ins.get("signal") or ins.get("trades") %}
+<div class="card" style="margin-bottom: 16px;">
+    <div class="section-title">Insider Trades</div>
+    <div class="section-desc">Promoter, KMP, and director transactions reported to NSE in the last 6 months.</div>
+    {% if ins.get("signal") and ins.signal.get("signal_type") %}
+    <div style="font-size: 14px; font-weight: 700; margin-bottom: 6px;
+        {% if 'BUY' in (ins.signal.signal_type or '') %}color: var(--green);
+        {% elif 'SELL' in (ins.signal.signal_type or '') %}color: var(--red);{% endif %}">
+        {{ ins.signal.signal_type|replace("_", " ") }}
+    </div>
+    {% if ins.signal.get("description") %}
+    <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 12px;">{{ ins.signal.description }}</div>
+    {% endif %}
+    {% endif %}
+    {% if ins.get("trades") %}
+    <table style="width: 100%; font-size: 12px; border-collapse: collapse;">
+        <thead>
+            <tr style="text-align: left; color: var(--text-muted); font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px;">
+                <th style="padding: 6px 0;">Date</th>
+                <th style="padding: 6px 0;">Person</th>
+                <th style="padding: 6px 0;">Type</th>
+                <th style="padding: 6px 0; text-align: right;">Shares</th>
+                <th style="padding: 6px 0; text-align: right;">Value (Lakh)</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for t in ins.trades[:10] %}
+        <tr style="border-top: 1px solid var(--border);">
+            <td class="mono" style="padding: 8px 0; color: var(--text-muted);">{{ t.trade_date }}</td>
+            <td style="padding: 8px 6px;">{{ t.person_category }}</td>
+            <td style="padding: 8px 6px; font-weight: 600;
+                {% if t.transaction_type == 'Buy' %}color: var(--green);
+                {% elif t.transaction_type == 'Sell' %}color: var(--red);{% endif %}">{{ t.transaction_type }}</td>
+            <td class="mono" style="padding: 8px 0; text-align: right;">{% if t.shares %}{{ "{:,.0f}".format(t.shares) }}{% endif %}</td>
+            <td class="mono" style="padding: 8px 0; text-align: right;">{% if t.value_lakhs %}&#8377;{{ "%.0f"|format(t.value_lakhs) }}{% endif %}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% endif %}
+</div>
+{% endif %}
+
+{# Insider timeline chart #}
+{% if s.get("insider_timeline") %}
+<div class="card" style="margin-bottom: 16px;">
+    <div class="section-title">Insider Activity Timeline (24 months)</div>
+    <div class="section-desc">Monthly aggregated buy (green) vs sell (red) values in lakhs of rupees.</div>
+    <div style="position: relative; height: 240px;">
+        <canvas id="insiderChart"></canvas>
+    </div>
+</div>
+{% endif %}
+
+{# Bulk deals #}
+{% if s.get("bulk_deals") %}
+<div class="card">
+    <div class="section-title">Bulk &amp; Block Deals</div>
+    <div class="section-desc">Large institutional trades reported to NSE.</div>
+    <table style="width: 100%; font-size: 12px; border-collapse: collapse;">
+        <thead>
+            <tr style="text-align: left; color: var(--text-muted); font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px;">
+                <th style="padding: 6px 0;">Date</th>
+                <th style="padding: 6px 0;">Client</th>
+                <th style="padding: 6px 0;">Type</th>
+                <th style="padding: 6px 0; text-align: right;">Quantity</th>
+                <th style="padding: 6px 0; text-align: right;">Price</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for d in s.bulk_deals[:10] %}
+        <tr style="border-top: 1px solid var(--border);">
+            <td class="mono" style="padding: 8px 0; color: var(--text-muted);">{{ d.deal_date }}</td>
+            <td style="padding: 8px 6px;">{{ d.client_name[:40] }}</td>
+            <td style="padding: 8px 6px; font-weight: 600;
+                {% if d.buy_sell == 'BUY' or d.buy_sell == 'B' %}color: var(--green);
+                {% elif d.buy_sell == 'SELL' or d.buy_sell == 'S' %}color: var(--red);{% endif %}">{{ d.buy_sell }}</td>
+            <td class="mono" style="padding: 8px 0; text-align: right;">{{ "{:,.0f}".format(d.quantity) }}</td>
+            <td class="mono" style="padding: 8px 0; text-align: right;">&#8377;{{ "%.0f"|format(d.price) }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
+</div> {# end ownership #}
+
+{# ════════════════════════════════════════════ #}
+{# ──────────── CONSENSUS TAB ───────────────── #}
+{# ════════════════════════════════════════════ #}
+<div x-show="tab === 'consensus'" x-cloak>
+
+{% if ac %}
+<div class="card" style="margin-bottom: 16px;">
+    <div class="section-title">Analyst Consensus</div>
+    <div class="section-desc">Aggregated forecasts from {{ ac.get('total_analysts', 0)|int }} sell-side analysts covering this stock.</div>
+
+    {% if ac.get("price_target") and pm.get("close_price") %}
+    {# Price target range visualization #}
+    {% set low = pm.close_price * 0.8 %}
+    {% set high = ac.price_target * 1.1 %}
+    {% if ac.price_target < pm.close_price %}{% set high = pm.close_price * 1.1 %}{% endif %}
+    {% set price_pos = ((pm.close_price - low) / (high - low) * 100) %}
+    {% set target_pos = ((ac.price_target - low) / (high - low) * 100) %}
+    <div style="margin: 32px 0;">
+        <div class="range-bar">
+            <span class="range-label" style="left: {{ price_pos }}%;">Price &#8377;{{ "%.0f"|format(pm.close_price) }}</span>
+            <div class="range-marker" style="left: {{ price_pos }}%;"></div>
+            <span class="range-label" style="left: {{ target_pos }}%; top: 16px; bottom: auto; color: var(--green);">Target &#8377;{{ "%.0f"|format(ac.price_target) }} ({{ "%+.1f"|format(ac.pt_upside_pct) }}%)</span>
+            <div class="range-marker" style="left: {{ target_pos }}%; background: var(--green);"></div>
+        </div>
+    </div>
+    {% endif %}
+
+    <div class="metric-grid">
+        {% if ac.get("total_analysts") is not none %}
+        <div class="metric-card">
+            <div class="metric-label">Analyst Coverage</div>
+            <div class="metric-value">{{ ac.total_analysts|int }}</div>
+            <div class="metric-context">Total analysts</div>
+        </div>
+        {% endif %}
+        {% if ac.get("buy_pct") is not none %}
+        <div class="metric-card">
+            <div class="metric-label">Buy Recommendation</div>
+            <div class="metric-value score-green">{{ "%.0f"|format(ac.buy_pct) }}<span class="unit">%</span></div>
+            <div class="metric-context">Of all analysts</div>
+        </div>
+        {% endif %}
+        {% if ac.get("eps_growth_pct") is not none %}
+        <div class="metric-card">
+            <div class="metric-label">EPS Growth Forecast</div>
+            <div class="metric-value {% if ac.eps_growth_pct > 0 %}score-green{% else %}score-red{% endif %}">{{ "%+.1f"|format(ac.eps_growth_pct) }}<span class="unit">%</span></div>
+            <div class="metric-context">FY forward consensus</div>
+        </div>
+        {% endif %}
+        {% if ac.get("revenue_growth_pct") is not none %}
+        <div class="metric-card">
+            <div class="metric-label">Revenue Growth Forecast</div>
+            <div class="metric-value {% if ac.revenue_growth_pct > 0 %}score-green{% else %}score-red{% endif %}">{{ "%+.1f"|format(ac.revenue_growth_pct) }}<span class="unit">%</span></div>
+            <div class="metric-context">FY forward consensus</div>
+        </div>
+        {% endif %}
+        {% if ac.get("forward_eps") %}
+        <div class="metric-card">
+            <div class="metric-label">Forward EPS</div>
+            <div class="metric-value">&#8377;{{ "%.2f"|format(ac.forward_eps) }}</div>
+            {% if pm.get("close_price") %}
+            <div class="metric-context">Forward P/E: {{ "%.1f"|format(pm.close_price / ac.forward_eps) }}x</div>
+            {% endif %}
+        </div>
+        {% endif %}
+        {% if s.get("pt_revision_1yr") is not none %}
+        <div class="metric-card">
+            <div class="metric-label">PT Revision (1yr)</div>
+            <div class="metric-value {% if s.pt_revision_1yr > 0 %}score-green{% else %}score-red{% endif %}">{{ "%+.1f"|format(s.pt_revision_1yr) }}<span class="unit">%</span></div>
+            <div class="metric-context">Target change YoY</div>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endif %}
+
+{% if fc.get('price_target') or fc.get('eps') or fc.get('revenue') %}
+<div class="card">
+    <div class="section-title">Forecast Revisions</div>
+    <div class="section-desc">How analyst price target, EPS, and revenue estimates have evolved over time.</div>
+    <div style="position: relative; height: 280px;">
+        <canvas id="forecastChart"></canvas>
+    </div>
+</div>
+{% endif %}
+
+</div> {# end consensus #}
+
+{# ════════════════════════════════════════════ #}
+{# ──────────── FORENSIC TAB ────────────────── #}
+{# ════════════════════════════════════════════ #}
+<div x-show="tab === 'forensic'" x-cloak>
+
+{# Beneish + Altman summary cards #}
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px;">
+    <div class="card">
+        <div class="section-title">Beneish M-Score</div>
+        <div class="section-desc">Earnings manipulation detector using 6 financial ratios. Score above -1.78 flags likely manipulation.</div>
+        {% if s.get("m_score") is not none %}
+        <div style="display: flex; align-items: center; gap: 16px; margin-top: 16px;">
+            <div class="mono" style="font-size: 36px; font-weight: 800;
+                {% if s.m_score_flag == 'CLEAN' %}color: var(--green);
+                {% elif s.m_score_flag == 'LIKELY_MANIPULATOR' %}color: var(--red);
+                {% else %}color: var(--amber);{% endif %}">{{ "%.2f"|format(s.m_score) }}</div>
+            <div>
+                <div style="font-size: 14px; font-weight: 700;
+                    {% if s.m_score_flag == 'CLEAN' %}color: var(--green);
+                    {% elif s.m_score_flag == 'LIKELY_MANIPULATOR' %}color: var(--red);
+                    {% else %}color: var(--amber);{% endif %}">
+                    {{ s.m_score_flag|lower|replace('_', ' ')|upper }}
+                </div>
+                <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">
+                    {% if s.m_score < -2.22 %}Highly clean. Low manipulation risk.
+                    {% elif s.m_score < -1.78 %}Clean. Within safe zone.
+                    {% else %}Above threshold. Investigate further.{% endif %}
+                </div>
+            </div>
+        </div>
+        {% else %}
+        <div style="color: var(--text-muted); margin-top: 16px;">Not available (financial sector or insufficient quarterly data).</div>
+        {% endif %}
+    </div>
+
+    <div class="card">
+        <div class="section-title">Altman Z-Score</div>
+        <div class="section-desc">Bankruptcy prediction model. Below 1.10 = financial distress. Above 2.60 = safe zone.</div>
+        {% if s.get("z_score") is not none %}
+        <div style="display: flex; align-items: center; gap: 16px; margin-top: 16px;">
+            <div class="mono" style="font-size: 36px; font-weight: 800;
+                {% if s.z_score_flag == 'SAFE' %}color: var(--green);
+                {% elif s.z_score_flag == 'DISTRESS' %}color: var(--red);
+                {% else %}color: var(--amber);{% endif %}">{{ "%.2f"|format(s.z_score) }}</div>
+            <div>
+                <div style="font-size: 14px; font-weight: 700;
+                    {% if s.z_score_flag == 'SAFE' %}color: var(--green);
+                    {% elif s.z_score_flag == 'DISTRESS' %}color: var(--red);
+                    {% else %}color: var(--amber);{% endif %}">
+                    {{ s.z_score_flag|lower|replace('_', ' ')|upper }}
+                </div>
+                <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">
+                    {% if s.z_score > 2.6 %}Strong financial position.
+                    {% elif s.z_score > 1.1 %}Grey zone — monitor.
+                    {% else %}Distress zone — caution.{% endif %}
+                </div>
+            </div>
+        </div>
+        {% else %}
+        <div style="color: var(--text-muted); margin-top: 16px;">Not available (financial sector or insufficient balance sheet data).</div>
+        {% endif %}
+    </div>
+</div>
+
+{# Piotroski 9-factor breakdown #}
+<div class="card" style="margin-bottom: 16px;">
+    <div class="section-title">Piotroski F-Score Breakdown ({% if s.f_score is not none %}{{ s.f_score|int }}/9{% endif %})</div>
+    <div class="section-desc">9-point checklist created by Prof. Joseph Piotroski (Stanford). Each factor scores 1 (pass) or 0 (fail).</div>
+
+    {% set categories = {'Profitability': [], 'Leverage': [], 'Efficiency': []} %}
+    {% for field, label, cat, desc in s.get('piotroski_factors', []) %}
+    {% set _ = categories[cat].append((field, label, desc)) %}
+    {% endfor %}
+
+    {% for cat, factors in categories.items() %}
+    <div style="font-size: 11px; color: var(--accent); font-weight: 700; letter-spacing: 1px; text-transform: uppercase; margin: 16px 0 8px;">{{ cat }}</div>
+    <div class="piotroski-grid">
+        {% for field, label, desc in factors %}
+        {% set passed = s.get(field) == 1 %}
+        <div class="factor-card {% if passed %}pass{% else %}fail{% endif %}">
+            <span class="factor-icon" style="color: {% if passed %}var(--green){% else %}var(--red){% endif %};">
+                {% if passed %}&#10003;{% else %}&#10007;{% endif %}
+            </span>
+            <div>
+                <div class="factor-label">{{ label }}</div>
+                <div class="factor-desc">{{ desc }}</div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% endfor %}
+</div>
+
+{# Accruals quality #}
+{% if s.get("cf_accruals_ratio") is not none or s.get("bs_accruals_ratio") is not none %}
+<div class="card">
+    <div class="section-title">Accruals Quality</div>
+    <div class="section-desc">Measures whether reported earnings are backed by real cash flow. Lower accruals = higher quality.</div>
+    <div class="metric-grid">
+        {% if s.get("cf_accruals_ratio") is not none %}
+        <div class="metric-card">
+            <div class="metric-label">CF Accruals Ratio</div>
+            <div class="metric-value">{{ "%.2f"|format(s.cf_accruals_ratio) }}</div>
+            <div class="metric-context">From cash flow statement</div>
+        </div>
+        {% endif %}
+        {% if s.get("bs_accruals_ratio") is not none %}
+        <div class="metric-card">
+            <div class="metric-label">BS Accruals Ratio</div>
+            <div class="metric-value">{{ "%.2f"|format(s.bs_accruals_ratio) }}</div>
+            <div class="metric-context">From balance sheet</div>
+        </div>
+        {% endif %}
+        {% if s.get("earnings_persistence") is not none %}
+        <div class="metric-card">
+            <div class="metric-label">Earnings Persistence</div>
+            <div class="metric-value">{{ "%.2f"|format(s.earnings_persistence) }}</div>
+            <div class="metric-context">Stability across quarters</div>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endif %}
+
+</div> {# end forensic #}
+
+{# ════════════════════════════════════════════ #}
+{# ────────── PRICE & TECHNICALS TAB ─────────── #}
+{# ════════════════════════════════════════════ #}
+<div x-show="tab === 'price'" x-cloak x-data="{ tf: '1y' }">
+
+<div class="card" style="margin-bottom: 16px;">
+    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+        <div>
+            <div class="section-title" style="margin-bottom: 4px;">Price Chart</div>
+            <div class="section-desc">Daily closing prices with volume overlay. 52W high/low marked as dashed lines.</div>
+        </div>
+        <div class="tf-selector">
+            <button class="tf-button" :class="{ active: tf === '1m' }" @click="tf = '1m'; initPriceChart('1m')">1M</button>
+            <button class="tf-button" :class="{ active: tf === '3m' }" @click="tf = '3m'; initPriceChart('3m')">3M</button>
+            <button class="tf-button" :class="{ active: tf === '6m' }" @click="tf = '6m'; initPriceChart('6m')">6M</button>
+            <button class="tf-button" :class="{ active: tf === '1y' }" @click="tf = '1y'; initPriceChart('1y')">1Y</button>
+            <button class="tf-button" :class="{ active: tf === '3y' }" @click="tf = '3y'; initPriceChart('3y')">3Y</button>
+        </div>
+    </div>
+    <div style="position: relative; height: 320px; margin-top: 16px;">
+        <canvas id="priceChart"></canvas>
+    </div>
+</div>
+
+{# Delivery % chart #}
+<div class="card" style="margin-bottom: 16px;">
+    <div class="section-title">Delivery % Trend (90 Days)</div>
+    <div class="section-desc">% of traded volume taken to delivery. High delivery % indicates accumulation by long-term holders.</div>
+    <div style="position: relative; height: 200px;">
+        <canvas id="deliveryChart"></canvas>
+    </div>
+</div>
+
+{# Momentum metrics #}
+<div class="card">
+    <div class="section-title">Momentum &amp; Technicals</div>
+    <div class="section-desc">Risk-adjusted momentum and key technical levels.</div>
+    <div class="metric-grid">
+        {% if pm.get("rsi_14") is not none %}
+        <div class="metric-card">
+            <div class="metric-label">RSI (14d){{ tooltip("Relative Strength Index. Above 70 = overbought, below 30 = oversold.") }}</div>
+            <div class="metric-value
+                {% if pm.rsi_14 < 30 %}score-green{% elif pm.rsi_14 > 70 %}score-red{% else %}score-amber{% endif %}">
+                {{ "%.0f"|format(pm.rsi_14) }}
+            </div>
+            <div class="metric-context">
+                {% if pm.rsi_14 < 30 %}Oversold{% elif pm.rsi_14 > 70 %}Overbought{% else %}Neutral{% endif %}
+            </div>
+        </div>
+        {% endif %}
+        {% if pm.get("return_6m") is not none %}
+        <div class="metric-card">
+            <div class="metric-label">6-Month Return</div>
+            <div class="metric-value {% if pm.return_6m > 0 %}score-green{% else %}score-red{% endif %}">{{ "%+.1f"|format(pm.return_6m) }}<span class="unit">%</span></div>
+            <div class="metric-context">Last 130 trading days</div>
+        </div>
+        {% endif %}
+        {% if pm.get("return_1y") is not none %}
+        <div class="metric-card">
+            <div class="metric-label">1-Year Return</div>
+            <div class="metric-value {% if pm.return_1y > 0 %}score-green{% else %}score-red{% endif %}">{{ "%+.1f"|format(pm.return_1y) }}<span class="unit">%</span></div>
+            <div class="metric-context">Last 252 trading days</div>
+        </div>
+        {% endif %}
+        {% if pm.get("high_52w") %}
+        <div class="metric-card">
+            <div class="metric-label">52W High</div>
+            <div class="metric-value">&#8377;{{ "%.0f"|format(pm.high_52w) }}</div>
+            <div class="metric-context {% if pm.pct_from_52w_high > -10 %}score-green{% else %}score-red{% endif %}">{{ "%+.1f"|format(pm.pct_from_52w_high) }}% from high</div>
+        </div>
+        {% endif %}
+        {% if pm.get("low_52w") %}
+        <div class="metric-card">
+            <div class="metric-label">52W Low</div>
+            <div class="metric-value">&#8377;{{ "%.0f"|format(pm.low_52w) }}</div>
+            {% if pm.get("close_price") %}
+            <div class="metric-context score-green">{{ "%+.1f"|format((pm.close_price / pm.low_52w - 1) * 100) }}% from low</div>
+            {% endif %}
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+</div> {# end price tab #}
+
+</div> {# end alpine wrapper #}
+
+<div style="margin-top: 24px;">
+    <a href="/explorer" style="font-size: 13px; color: var(--blue); text-decoration: none;">&larr; Back to Explorer</a>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+<script>
+// ───── Chart instances (so we can destroy/recreate) ─────
+const charts = {};
+const SID = '{{ s.sid }}';
+
+const COLORS = {
+    green: '#22c55e', red: '#ef4444', amber: '#f59e0b',
+    blue: '#3b82f6', accent: '#8b5cf6', muted: '#555570',
+    border: '#1e1e2e', cardBg: '#12121a',
+};
+
+const CHART_DEFAULTS = {
+    responsive: true, maintainAspectRatio: false,
+    plugins: { legend: { labels: { color: '#8888a0', font: { size: 11 } } } },
+    scales: {
+        x: { ticks: { color: COLORS.muted, font: { size: 10 } }, grid: { color: COLORS.border, drawBorder: false } },
+        y: { ticks: { color: COLORS.muted, font: { family: 'JetBrains Mono', size: 10 } }, grid: { color: COLORS.border, drawBorder: false } }
+    }
+};
+
+// ───── Price chart with timeframe + volume ─────
+async function initPriceChart(tf) {
+    const dayMap = { '1m': 22, '3m': 65, '6m': 130, '1y': 365, '3y': 780 };
+    const days = dayMap[tf] || 365;
+    const resp = await fetch(`/api/prices-extended/${SID}?days=${days}`);
+    const data = await resp.json();
+    if (!data.length) return;
+    if (charts.price) charts.price.destroy();
+    const ctx = document.getElementById('priceChart').getContext('2d');
+    charts.price = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: data.map(d => d.date),
+            datasets: [
+                {
+                    label: 'Close', data: data.map(d => d.close),
+                    borderColor: COLORS.blue, backgroundColor: 'rgba(59, 130, 246, 0.08)',
+                    fill: true, borderWidth: 1.5, pointRadius: 0, tension: 0.1, yAxisID: 'y',
+                },
+                {
+                    label: 'Volume', data: data.map(d => d.volume / 1e6),
+                    backgroundColor: 'rgba(139, 92, 246, 0.3)',
+                    borderColor: 'rgba(139, 92, 246, 0)', type: 'bar', yAxisID: 'y1',
+                }
+            ]
+        },
+        options: {
+            ...CHART_DEFAULTS,
+            scales: {
+                x: CHART_DEFAULTS.scales.x,
+                y: { ...CHART_DEFAULTS.scales.y, position: 'left', title: { display: true, text: 'Price (₹)', color: COLORS.muted, font: { size: 10 } } },
+                y1: { position: 'right', ticks: { color: COLORS.muted, font: { size: 9 } }, grid: { display: false }, title: { display: true, text: 'Vol (M)', color: COLORS.muted, font: { size: 10 } } }
+            }
+        }
+    });
+}
+
+// ───── Delivery % chart ─────
+async function initDeliveryChart() {
+    const resp = await fetch(`/api/prices-extended/${SID}?days=90`);
+    const data = await resp.json();
+    if (!data.length) return;
+    if (charts.delivery) charts.delivery.destroy();
+    const ctx = document.getElementById('deliveryChart').getContext('2d');
+    charts.delivery = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: data.map(d => d.date),
+            datasets: [{
+                label: 'Delivery %', data: data.map(d => d.delivery_pct),
+                borderColor: COLORS.amber, backgroundColor: 'rgba(245, 158, 11, 0.08)',
+                fill: true, borderWidth: 1.5, pointRadius: 0, tension: 0.2,
+            }]
+        },
+        options: { ...CHART_DEFAULTS, plugins: { legend: { display: false } } }
+    });
+}
+
+// ───── Quarterly revenue + PAT chart ─────
+async function initQuarterlyChart() {
+    const resp = await fetch(`/api/quarterly/${SID}`);
+    const data = await resp.json();
+    if (!data.quarters || !data.quarters.length) return;
+    if (charts.quarterly) charts.quarterly.destroy();
+    const quarters = [...data.quarters].reverse();  // chronological
+    const ctx = document.getElementById('quarterlyChart').getContext('2d');
+    charts.quarterly = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: quarters.map(q => q.period),
+            datasets: [
+                { label: 'Revenue (Cr)', data: quarters.map(q => q.revenue), backgroundColor: 'rgba(59, 130, 246, 0.6)', borderColor: COLORS.blue, borderWidth: 1 },
+                { label: 'Net Profit (Cr)', data: quarters.map(q => q.net_income), backgroundColor: 'rgba(34, 197, 94, 0.6)', borderColor: COLORS.green, borderWidth: 1 }
+            ]
+        },
+        options: CHART_DEFAULTS
+    });
+}
+
+// ───── Shareholding stacked area chart ─────
+async function initShareholdingChart() {
+    const resp = await fetch(`/api/shareholding/${SID}`);
+    const data = await resp.json();
+    if (!data.length) return;
+    if (charts.shareholding) charts.shareholding.destroy();
+    const quarters = [...data].reverse();  // chronological
+    const ctx = document.getElementById('shareholdingChart').getContext('2d');
+    charts.shareholding = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: quarters.map(q => q.end_date.slice(0, 10)),
+            datasets: [
+                { label: 'Promoter', data: quarters.map(q => q.promoter_pct), borderColor: COLORS.accent, backgroundColor: 'rgba(139, 92, 246, 0.4)', fill: true, tension: 0.2 },
+                { label: 'FII', data: quarters.map(q => q.fii_pct), borderColor: COLORS.blue, backgroundColor: 'rgba(59, 130, 246, 0.4)', fill: true, tension: 0.2 },
+                { label: 'Mutual Funds', data: quarters.map(q => q.mf_pct), borderColor: COLORS.green, backgroundColor: 'rgba(34, 197, 94, 0.4)', fill: true, tension: 0.2 },
+                { label: 'DII', data: quarters.map(q => q.dii_pct), borderColor: COLORS.amber, backgroundColor: 'rgba(245, 158, 11, 0.4)', fill: true, tension: 0.2 }
+            ]
+        },
+        options: { ...CHART_DEFAULTS, scales: { ...CHART_DEFAULTS.scales, y: { ...CHART_DEFAULTS.scales.y, beginAtZero: true } } }
+    });
+}
+
+// ───── Insider buy/sell timeline chart ─────
+async function initInsiderChart() {
+    const resp = await fetch(`/api/insider-timeline/${SID}`);
+    const data = await resp.json();
+    if (!data.length) return;
+    if (charts.insider) charts.insider.destroy();
+    const ctx = document.getElementById('insiderChart').getContext('2d');
+    charts.insider = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: data.map(d => d.month),
+            datasets: [
+                { label: 'Buy (Lakh)', data: data.map(d => d.buy_value), backgroundColor: 'rgba(34, 197, 94, 0.7)' },
+                { label: 'Sell (Lakh)', data: data.map(d => -d.sell_value), backgroundColor: 'rgba(239, 68, 68, 0.7)' }
+            ]
+        },
+        options: { ...CHART_DEFAULTS, scales: { x: { ...CHART_DEFAULTS.scales.x, stacked: true }, y: { ...CHART_DEFAULTS.scales.y, stacked: true } } }
+    });
+}
+
+// ───── Forecast revisions chart ─────
+async function initForecastChart() {
+    const resp = await fetch(`/api/forecasts/${SID}`);
+    const data = await resp.json();
+    if (charts.forecast) charts.forecast.destroy();
+    const datasets = [];
+    if (data.price_target && data.price_target.length) {
+        datasets.push({ label: 'Price Target (₹)', data: data.price_target.map(d => ({ x: d.date, y: d.value })), borderColor: COLORS.blue, backgroundColor: 'rgba(59, 130, 246, 0.1)', tension: 0.2, yAxisID: 'y' });
+    }
+    if (data.eps && data.eps.length) {
+        datasets.push({ label: 'EPS (₹)', data: data.eps.map(d => ({ x: d.date, y: d.value })), borderColor: COLORS.green, backgroundColor: 'rgba(34, 197, 94, 0.1)', tension: 0.2, yAxisID: 'y1' });
+    }
+    if (!datasets.length) return;
+    const ctx = document.getElementById('forecastChart').getContext('2d');
+    charts.forecast = new Chart(ctx, {
+        type: 'line',
+        data: { datasets: datasets },
+        options: {
+            ...CHART_DEFAULTS,
+            scales: {
+                x: { type: 'category', ticks: { color: COLORS.muted, font: { size: 10 } }, grid: { color: COLORS.border } },
+                y: { ...CHART_DEFAULTS.scales.y, position: 'left', title: { display: true, text: 'Price Target', color: COLORS.muted } },
+                y1: { ...CHART_DEFAULTS.scales.y, position: 'right', grid: { display: false }, title: { display: true, text: 'EPS', color: COLORS.muted } }
+            }
+        }
+    });
+}
+
+// ───── Lazy init helpers (called from tab switches) ─────
+function initFinancialsCharts() {
+    if (!charts.quarterly && document.getElementById('quarterlyChart')) initQuarterlyChart();
+}
+function initOwnershipCharts() {
+    if (!charts.shareholding && document.getElementById('shareholdingChart')) initShareholdingChart();
+    if (!charts.insider && document.getElementById('insiderChart')) initInsiderChart();
+}
+function initConsensusCharts() {
+    if (!charts.forecast && document.getElementById('forecastChart')) initForecastChart();
+}
+
+// Init delivery chart on price tab too
+const _origInitPrice = initPriceChart;
+initPriceChart = async function(tf) {
+    await _origInitPrice(tf);
+    if (!charts.delivery && document.getElementById('deliveryChart')) initDeliveryChart();
+};
+</script>
+
+{% endblock %}

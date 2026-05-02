@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<div class="section-title">Sector Intelligence</div>
+
+<!-- Sector Grid -->
+<div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; margin-bottom: 24px;">
+    {% for sector in sectors %}
+    <div class="card" style="padding: 14px 16px;
+        {% if sector.macro_signal == 'TAILWIND' %}border-left: 4px solid var(--green);
+        {% elif sector.macro_signal == 'HEADWIND' %}border-left: 4px solid var(--red);
+        {% elif sector.macro_signal == 'FAVORABLE' %}border-left: 4px solid rgba(34, 197, 94, 0.5);
+        {% elif sector.macro_signal == 'ADVERSE' %}border-left: 4px solid rgba(239, 68, 68, 0.5);
+        {% else %}border-left: 4px solid var(--border);{% endif %}">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+            <span style="font-weight: 600; font-size: 14px;">{{ sector.sector }}</span>
+            {% if sector.macro_signal %}
+            <span style="font-size: 10px; padding: 2px 8px; border-radius: 4px;
+                {% if sector.macro_signal == 'TAILWIND' %}background: var(--green-bg); color: var(--green);
+                {% elif sector.macro_signal == 'HEADWIND' %}background: var(--red-bg); color: var(--red);
+                {% elif sector.macro_signal == 'FAVORABLE' %}background: var(--green-bg); color: var(--green);
+                {% elif sector.macro_signal == 'ADVERSE' %}background: var(--red-bg); color: var(--red);
+                {% else %}background: var(--border); color: var(--text-muted);{% endif %}">
+                {{ sector.macro_signal }}
+            </span>
+            {% endif %}
+        </div>
+
+        <div style="display: flex; gap: 16px; font-size: 12px; margin-bottom: 6px;">
+            <span style="color: var(--text-muted);">Stocks: <span class="mono">{{ sector.stocks }}</span></span>
+            <span style="color: var(--text-muted);">Avg score: <span class="mono">{{ "%.0f"|format(sector.avg_score * 100) }}</span></span>
+            {% if sector.macro_score %}
+            <span style="color: var(--text-muted);">Macro: <span class="mono">{{ "%.0f"|format(sector.macro_score) }}</span></span>
+            {% endif %}
+        </div>
+
+        {% if sector.macro_detail %}
+        <div style="font-size: 11px; color: var(--text-muted); line-height: 1.4; overflow: hidden; max-height: 40px;">
+            {{ sector.macro_detail[:120] }}
+        </div>
+        {% endif %}
+    </div>
+    {% endfor %}
+</div>
+
+{% endblock %}

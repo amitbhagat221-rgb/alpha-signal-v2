@@ -1,0 +1,237 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<div class="section-title">SQL Console</div>
+<div class="section-desc">
+    Read-only SQLite console. SELECT and WITH statements only — no INSERT/UPDATE/DELETE/DROP/etc.
+    Results capped to 500 rows. Query the live database directly.
+</div>
+
+{# Single Alpine component containing query box, results, schema browser. #}
+{# Inline x-data — no function lookups, no Alpine.data registration timing risks. #}
+{# initial_query goes through a JSON script tag rather than into x-data directly:
+   tojson emits double quotes, and x-data is also double-quoted, so embedding it
+   inline truncates the attribute and breaks Alpine init. #}
+<script type="application/json" id="sql-initial-query">{{ (initial_query | tojson) if initial_query else 'null' }}</script>
+<div x-data="{
+    query: 'SELECT cap_tier, COUNT(*) as n FROM stocks GROUP BY cap_tier',
+    loading: false,
+    error: null,
+    columns: [],
+    rows: [],
+    rowCount: 0,
+    hasResults: false,
+    schemaLoading: true,
+    schemaTables: [],
+    examples: [
+        { label: 'Top 10 LARGE picks', sql: 'SELECT s.ticker, s.name, dp.final_score, dp.rank FROM daily_picks dp JOIN stocks s ON dp.sid = s.sid WHERE dp.cap_tier = \'LARGE\' AND dp.pick_date = (SELECT MAX(pick_date) FROM daily_picks) ORDER BY dp.rank LIMIT 10' },
+        { label: 'Classifier status', sql: 'SELECT classifier_status, COUNT(*) as n FROM regulatory_events GROUP BY classifier_status ORDER BY n DESC' },
+        { label: 'Recent insider buys', sql: 'SELECT it.trade_date, s.ticker, it.person_category, it.value_lakhs FROM insider_trades it JOIN stocks s ON it.sid = s.sid WHERE it.transaction_type = \'Buy\' AND it.value_lakhs > 100 ORDER BY it.trade_date DESC LIMIT 30' },
+        { label: 'Sector spread', sql: 'SELECT sector, COUNT(*) as n, ROUND(AVG(final_score), 3) as avg_score FROM daily_picks WHERE pick_date = (SELECT MAX(pick_date) FROM daily_picks) GROUP BY sector ORDER BY avg_score DESC' },
+        { label: 'Forensic alerts', sql: 'SELECT s.ticker, s.name, fs.m_score, fs.m_score_flag, fs.z_score, fs.z_score_flag FROM forensic_scores fs JOIN stocks s ON fs.sid = s.sid WHERE fs.m_score_flag = \'LIKELY_MANIPULATOR\' OR fs.z_score_flag = \'DISTRESS\' LIMIT 30' },
+        { label: 'NTPC prices', sql: 'SELECT date, close, volume, delivery_pct FROM stock_prices WHERE sid = \'NTPC\' ORDER BY date DESC LIMIT 30' },
+        { label: 'NTPC quarterly', sql: 'SELECT period, end_date, revenue, ebitda, net_income, eps FROM quarterly_income WHERE sid = \'NTPC\' ORDER BY end_date DESC' },
+        { label: 'Macro by sector', sql: 'SELECT sector, macro_score, macro_signal FROM macro_sector_signals ORDER BY macro_score DESC' }
+    ],
+
+    async runQuery() {
+        if (!this.query || !this.query.trim()) return;
+        this.loading = true;
+        this.error = null;
+        this.hasResults = false;
+        try {
+            const resp = await fetch('/api/sql', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ query: this.query })
+            });
+            const data = await resp.json();
+            this.columns = data.columns || [];
+            this.rows = data.rows || [];
+            this.rowCount = data.row_count || 0;
+            this.error = data.error;
+            this.hasResults = true;
+        } catch (e) {
+            this.error = 'Network error: ' + e.message;
+            this.hasResults = true;
+        } finally {
+            this.loading = false;
+        }
+    },
+
+    async loadSchema() {
+        try {
+            const resp = await fetch('/api/sql', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    query: 'SELECT name FROM sqlite_master WHERE type=\'table\' AND name != \'sqlite_sequence\' ORDER BY name'
+                })
+            });
+            const data = await resp.json();
+            if (!data.rows) { this.schemaLoading = false; return; }
+            const promises = data.rows.map(async (r) => {
+                const name = r.name;
+                const [colData, countData] = await Promise.all([
+                    fetch('/api/sql', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ query: 'SELECT * FROM ' + name + ' LIMIT 1' })
+                    }).then(r => r.json()),
+                    fetch('/api/sql', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ query: 'SELECT COUNT(*) as n FROM ' + name })
+                    }).then(r => r.json())
+                ]);
+                return {
+                    name: name,
+                    columns: colData.columns || [],
+                    row_count: (countData.rows && countData.rows[0]) ? countData.rows[0].n : 0
+                };
+            });
+            this.schemaTables = await Promise.all(promises);
+        } catch (e) {
+            console.error('Schema load error:', e);
+        } finally {
+            this.schemaLoading = false;
+        }
+    }
+}" x-init="
+    const _initEl = document.getElementById('sql-initial-query');
+    const _initial = _initEl ? JSON.parse(_initEl.textContent) : null;
+    if (_initial) { query = _initial; }
+    loadSchema();
+    if (_initial) { runQuery(); }
+">
+
+    <!-- Query box -->
+    <div class="card" style="margin-bottom: 20px;">
+        <textarea x-model="query"
+                  @keydown.ctrl.enter.prevent="runQuery"
+                  @keydown.meta.enter.prevent="runQuery"
+                  placeholder="SELECT * FROM stocks WHERE cap_tier = 'LARGE' LIMIT 10"
+                  style="width: 100%; min-height: 120px; padding: 14px 16px;
+                         background: var(--bg-primary); color: var(--text-primary);
+                         border: 1px solid var(--border); border-radius: 8px;
+                         font-family: 'JetBrains Mono', monospace; font-size: 13px;
+                         resize: vertical; outline: none;"
+                  spellcheck="false"></textarea>
+
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 12px; gap: 12px; flex-wrap: wrap;">
+            <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                <button @click="runQuery" :disabled="loading" :class="{ 'is-loading': loading }" class="btn-primary">
+                    <span x-show="!loading">Run (Ctrl+Enter)</span>
+                    <span x-show="loading" x-cloak style="display: inline-flex; align-items: center; gap: 8px;">
+                        <span class="spinner" style="border-color: rgba(255,255,255,0.3); border-top-color: white;"></span>
+                        Running…
+                    </span>
+                </button>
+                <button @click="query = ''" class="btn-secondary">Clear</button>
+            </div>
+            <div style="font-size: 11px; color: var(--text-muted);">
+                Ctrl+Enter to run · 500 row cap · SELECT/WITH only
+            </div>
+        </div>
+
+        <!-- Examples -->
+        <div style="margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border);">
+            <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px;">Examples</div>
+            <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+                <template x-for="ex in examples" :key="ex.label">
+                    <button @click="query = ex.sql"
+                            x-text="ex.label"
+                            style="padding: 4px 10px; font-size: 11px; background: var(--bg-card-hover);
+                                   color: var(--text-secondary); border: 1px solid var(--border);
+                                   border-radius: 6px; cursor: pointer;
+                                   font-family: 'JetBrains Mono', monospace;"></button>
+                </template>
+            </div>
+        </div>
+    </div>
+
+    <!-- Loading skeleton -->
+    <div x-show="loading && !hasResults" x-cloak class="card" style="margin-bottom: 20px;">
+        <div class="section-title" style="margin-bottom: 12px;">Running query…</div>
+        <div class="skeleton" style="height: 16px; width: 40%; margin-bottom: 10px;"></div>
+        <div class="skeleton" style="height: 16px; width: 75%; margin-bottom: 10px;"></div>
+        <div class="skeleton" style="height: 16px; width: 60%;"></div>
+    </div>
+
+    <!-- Results -->
+    <div x-show="hasResults" x-cloak class="card" style="margin-bottom: 20px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+            <div class="section-title" style="margin-bottom: 0;">Results</div>
+            <div x-show="!error" x-cloak x-text="rowCount.toLocaleString() + ' rows'" style="font-size: 12px; color: var(--text-muted);"></div>
+        </div>
+
+        <div x-show="error" x-cloak
+             style="padding: 12px 16px; background: var(--red-bg); border-left: 3px solid var(--red); border-radius: 6px;">
+            <div style="font-size: 12px; color: var(--red); font-weight: 600; margin-bottom: 4px;">Query Error</div>
+            <div style="font-size: 12px; color: var(--text-primary); font-family: 'JetBrains Mono', monospace;" x-text="error"></div>
+        </div>
+
+        <div x-show="!error && rowCount === 0" x-cloak style="color: var(--text-muted); font-size: 13px;">
+            Query returned 0 rows.
+        </div>
+
+        <div x-show="!error && rowCount > 0" x-cloak style="overflow-x: auto;">
+            <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
+                <thead>
+                    <tr>
+                        <template x-for="col in columns" :key="col">
+                            <th x-text="col"
+                                style="padding: 8px 12px; text-align: left;
+                                       font-size: 11px; text-transform: uppercase;
+                                       letter-spacing: 0.5px; color: var(--text-muted);
+                                       border-bottom: 2px solid var(--border-accent);
+                                       font-weight: 600; white-space: nowrap;"></th>
+                        </template>
+                    </tr>
+                </thead>
+                <tbody>
+                    <template x-for="(row, idx) in rows" :key="idx">
+                        <tr style="border-bottom: 1px solid var(--border);">
+                            <template x-for="col in columns" :key="col">
+                                <td x-text="row[col] === null ? 'NULL' : row[col]"
+                                    :style="row[col] === null ? 'color: var(--text-muted); font-style: italic;' : ''"
+                                    style="padding: 8px 12px; font-family: 'JetBrains Mono', monospace;
+                                           max-width: 400px; overflow: hidden; text-overflow: ellipsis;
+                                           white-space: nowrap;"></td>
+                            </template>
+                        </tr>
+                    </template>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Schema browser -->
+    <div class="card">
+        <div class="section-title">Schema</div>
+        <div class="section-desc">Click any table to load "SELECT * FROM &lt;table&gt; LIMIT 20" into the query box.</div>
+        <div x-show="schemaLoading" style="color: var(--text-muted); font-size: 12px;">Loading schema...</div>
+        <div x-show="!schemaLoading" x-cloak style="display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 10px;">
+            <template x-for="t in schemaTables" :key="t.name">
+                <div style="padding: 10px 12px; background: var(--bg-primary); border: 1px solid var(--border); border-radius: 8px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                        <button @click="query = 'SELECT * FROM ' + t.name + ' LIMIT 20'"
+                                x-text="t.name"
+                                style="background: none; border: none; color: var(--accent);
+                                       font-family: 'JetBrains Mono', monospace; font-size: 12px;
+                                       font-weight: 700; cursor: pointer; padding: 0;"></button>
+                        <span x-text="t.row_count.toLocaleString() + ' rows'"
+                              style="font-size: 10px; color: var(--text-muted); font-family: 'JetBrains Mono', monospace;"></span>
+                    </div>
+                    <div x-text="t.columns.join(', ')"
+                         style="font-size: 10px; color: var(--text-secondary);
+                                font-family: 'JetBrains Mono', monospace; line-height: 1.4;"></div>
+                </div>
+            </template>
+        </div>
+    </div>
+
+</div>
+
+{% endblock %}

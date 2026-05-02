@@ -1,0 +1,264 @@
+- generic [ref=e1]:
+  - navigation [ref=e2]:
+    - generic [ref=e3]: ◆
+    - link "☀" [ref=e4] [cursor=pointer]:
+      - /url: /
+    - link "📡" [ref=e5] [cursor=pointer]:
+      - /url: /signals
+    - link "🎯" [ref=e6] [cursor=pointer]:
+      - /url: /actions
+    - link "🔍" [ref=e7] [cursor=pointer]:
+      - /url: /explorer
+    - link "📊" [ref=e8] [cursor=pointer]:
+      - /url: /portfolio
+    - link "🔄" [ref=e9] [cursor=pointer]:
+      - /url: /sectors
+    - link "🧮" [ref=e10] [cursor=pointer]:
+      - /url: /model
+    - link "🔗" [ref=e11] [cursor=pointer]:
+      - /url: /flow
+    - link "⚡" [ref=e12] [cursor=pointer]:
+      - /url: /system
+    - link "💾" [ref=e13] [cursor=pointer]:
+      - /url: /sql
+  - main [ref=e14]:
+    - generic [ref=e15]:
+      - generic [ref=e16]:
+        - generic [ref=e17]:
+          - heading "VEDL" [level=1] [ref=e18]
+          - generic [ref=e19]: LARGE
+          - generic [ref=e20]: BUY
+          - generic [ref=e21]: HIGH CONVICTION
+        - generic [ref=e22]: Vedanta Ltd · Materials
+      - generic [ref=e23]:
+        - generic [ref=e24]: ₹271.55
+        - generic [ref=e25]: "-62.3% 1M · 2026-05-01"
+    - generic [ref=e26]:
+      - generic [ref=e27]: "52W: ₹272 — ₹766 (-65% from high)"
+      - generic [ref=e28]: "3M: -55.1%"
+      - generic [ref=e29]: "6M: -40.6%"
+      - generic [ref=e30]: "1Y: -41.2%"
+      - generic [ref=e31]:
+        - text: "RSI: 17 oversold"
+        - button "More info" [ref=e33] [cursor=pointer]: i
+    - generic [ref=e34]:
+      - generic [ref=e35]:
+        - button "Overview" [ref=e36] [cursor=pointer]
+        - button "Financials" [active] [ref=e37] [cursor=pointer]
+        - button "Ownership" [ref=e38] [cursor=pointer]
+        - button "Consensus" [ref=e39] [cursor=pointer]
+        - button "Forensic" [ref=e40] [cursor=pointer]
+        - button "Price & Technicals" [ref=e41] [cursor=pointer]
+      - generic [ref=e205]:
+        - generic [ref=e206]:
+          - generic [ref=e207]: Key Metrics
+          - generic [ref=e208]: Computed from latest annual financials and TTM income statement. Sector averages shown for context.
+          - generic [ref=e209]:
+            - generic [ref=e210]:
+              - generic [ref=e211]:
+                - text: Market Cap
+                - button "More info" [ref=e213] [cursor=pointer]: i
+              - generic [ref=e214]: ₹268,745 Cr
+              - generic [ref=e215]: LARGE cap segment
+            - generic [ref=e216]:
+              - generic [ref=e217]:
+                - text: Debt/Equity
+                - button "More info" [ref=e219] [cursor=pointer]: i
+              - generic [ref=e220]: "1.70"
+              - generic [ref=e221]: "Sector avg: 0.48"
+            - generic [ref=e222]:
+              - generic [ref=e223]:
+                - text: ROE (TTM)
+                - button "More info" [ref=e225] [cursor=pointer]: i
+              - generic [ref=e226]: 32.4%
+              - generic [ref=e227]: TTM PAT / Equity
+            - generic [ref=e228]:
+              - generic [ref=e229]:
+                - text: ROA (TTM)
+                - button "More info" [ref=e231] [cursor=pointer]: i
+              - generic [ref=e232]: 8.7%
+              - generic [ref=e233]: TTM PAT / Assets
+            - generic [ref=e234]:
+              - generic [ref=e235]:
+                - text: EBITDA Margin
+                - button "More info" [ref=e237] [cursor=pointer]: i
+              - generic [ref=e238]: 35.2%
+              - generic [ref=e239]: TTM aggregate
+            - generic [ref=e240]:
+              - generic [ref=e241]:
+                - text: PAT Margin
+                - button "More info" [ref=e243] [cursor=pointer]: i
+              - generic [ref=e244]: 14.9%
+              - generic [ref=e245]: TTM net margin
+            - generic [ref=e246]:
+              - generic [ref=e247]:
+                - text: Book Value/Sh
+                - button "More info" [ref=e249] [cursor=pointer]: i
+              - generic [ref=e250]: ₹51
+              - generic [ref=e251]: "P/B: 5.3x"
+            - generic [ref=e252]:
+              - generic [ref=e253]:
+                - text: Current Ratio
+                - button "More info" [ref=e255] [cursor=pointer]: i
+              - generic [ref=e256]: "0.70"
+              - generic [ref=e257]: Liquidity buffer
+            - generic [ref=e258]:
+              - generic [ref=e259]:
+                - text: Revenue Growth YoY
+                - button "More info" [ref=e261] [cursor=pointer]: i
+              - generic [ref=e262]: +54.8%
+              - generic [ref=e263]: Latest quarter vs same quarter prior year
+            - generic [ref=e264]:
+              - generic [ref=e265]:
+                - text: Piotroski F
+                - button "More info" [ref=e267] [cursor=pointer]: i
+              - generic [ref=e268]: 7/9
+              - generic [ref=e269]: Financial health checklist
+        - generic [ref=e270]:
+          - generic [ref=e271]: Quarterly Results
+          - generic [ref=e272]: Last 10 quarters of consolidated income statement. Most recent first.
+          - table [ref=e274]:
+            - rowgroup [ref=e275]:
+              - row "Metric MAR 2026 DEC 2025 SEP 2025 JUN 2025 MAR 2025 DEC 2024 SEP 2024 JUN 2024 MAR 2024 DEC 2023" [ref=e276]:
+                - columnheader "Metric" [ref=e277]
+                - columnheader "MAR 2026" [ref=e278]
+                - columnheader "DEC 2025" [ref=e279]
+                - columnheader "SEP 2025" [ref=e280]
+                - columnheader "JUN 2025" [ref=e281]
+                - columnheader "MAR 2025" [ref=e282]
+                - columnheader "DEC 2024" [ref=e283]
+                - columnheader "SEP 2024" [ref=e284]
+                - columnheader "JUN 2024" [ref=e285]
+                - columnheader "MAR 2024" [ref=e286]
+                - columnheader "DEC 2023" [ref=e287]
+            - rowgroup [ref=e288]:
+              - row "Revenue (Cr) 30,129 25,763 22,062 38,809 19,457 20,265 40,802 36,698 36,095 36,320" [ref=e289]:
+                - cell "Revenue (Cr)" [ref=e290]
+                - cell "30,129" [ref=e291]
+                - cell "25,763" [ref=e292]
+                - cell "22,062" [ref=e293]
+                - cell "38,809" [ref=e294]
+                - cell "19,457" [ref=e295]
+                - cell "20,265" [ref=e296]
+                - cell "40,802" [ref=e297]
+                - cell "36,698" [ref=e298]
+                - cell "36,095" [ref=e299]
+                - cell "36,320" [ref=e300]
+              - row "Rev YoY % +54.8% +27.1% -45.9% +5.8% -46.1% -44.2% +0.0% +0.0% +0.0% +0.0%" [ref=e301]:
+                - cell "Rev YoY %" [ref=e302]
+                - cell "+54.8%" [ref=e303]
+                - cell "+27.1%" [ref=e304]
+                - cell "-45.9%" [ref=e305]
+                - cell "+5.8%" [ref=e306]
+                - cell "-46.1%" [ref=e307]
+                - cell "-44.2%" [ref=e308]
+                - cell "+0.0%" [ref=e309]
+                - cell "+0.0%" [ref=e310]
+                - cell "+0.0%" [ref=e311]
+                - cell "+0.0%" [ref=e312]
+              - row "EBITDA (Cr) 13,079 10,947 6,163 10,903 8,017 8,215 12,996 10,879 9,153 9,310" [ref=e313]:
+                - cell "EBITDA (Cr)" [ref=e314]
+                - cell "13,079" [ref=e315]
+                - cell "10,947" [ref=e316]
+                - cell "6,163" [ref=e317]
+                - cell "10,903" [ref=e318]
+                - cell "8,017" [ref=e319]
+                - cell "8,215" [ref=e320]
+                - cell "12,996" [ref=e321]
+                - cell "10,879" [ref=e322]
+                - cell "9,153" [ref=e323]
+                - cell "9,310" [ref=e324]
+              - row "EBITDA Margin 43.4% 42.5% 27.9% 28.1% 41.2% 40.5% 31.9% 29.6% 25.4% 25.6%" [ref=e325]:
+                - cell "EBITDA Margin" [ref=e326]
+                - cell "43.4%" [ref=e327]
+                - cell "42.5%" [ref=e328]
+                - cell "27.9%" [ref=e329]
+                - cell "28.1%" [ref=e330]
+                - cell "41.2%" [ref=e331]
+                - cell "40.5%" [ref=e332]
+                - cell "31.9%" [ref=e333]
+                - cell "29.6%" [ref=e334]
+                - cell "25.4%" [ref=e335]
+                - cell "25.6%" [ref=e336]
+              - row "Net Profit (Cr) 6,698 5,710 1,798 3,185 3,483 3,547 4,352 3,606 1,369 2,013" [ref=e337]:
+                - cell "Net Profit (Cr)" [ref=e338]
+                - cell "6,698" [ref=e339]
+                - cell "5,710" [ref=e340]
+                - cell "1,798" [ref=e341]
+                - cell "3,185" [ref=e342]
+                - cell "3,483" [ref=e343]
+                - cell "3,547" [ref=e344]
+                - cell "4,352" [ref=e345]
+                - cell "3,606" [ref=e346]
+                - cell "1,369" [ref=e347]
+                - cell "2,013" [ref=e348]
+              - row "PAT YoY % +92.3% +61.0% -58.7% -11.7% +154.4% +76.2% +0.0% +0.0% +0.0% +0.0%" [ref=e349]:
+                - cell "PAT YoY %" [ref=e350]
+                - cell "+92.3%" [ref=e351]
+                - cell "+61.0%" [ref=e352]
+                - cell "-58.7%" [ref=e353]
+                - cell "-11.7%" [ref=e354]
+                - cell "+154.4%" [ref=e355]
+                - cell "+76.2%" [ref=e356]
+                - cell "+0.0%" [ref=e357]
+                - cell "+0.0%" [ref=e358]
+                - cell "+0.0%" [ref=e359]
+                - cell "+0.0%" [ref=e360]
+              - row "EPS 6.42 5.47 1.73 3.05 3.71 3.40 4.21 3.64 1.38 2.03" [ref=e361]:
+                - cell "EPS" [ref=e362]
+                - cell "6.42" [ref=e363]
+                - cell "5.47" [ref=e364]
+                - cell "1.73" [ref=e365]
+                - cell "3.05" [ref=e366]
+                - cell "3.71" [ref=e367]
+                - cell "3.40" [ref=e368]
+                - cell "4.21" [ref=e369]
+                - cell "3.64" [ref=e370]
+                - cell "1.38" [ref=e371]
+                - cell "2.03" [ref=e372]
+        - generic [ref=e373]:
+          - generic [ref=e374]: Revenue & Profit Trend
+          - generic [ref=e375]: Quarterly revenue (blue) and net profit (green) over time.
+        - generic [ref=e378]:
+          - generic [ref=e379]: Balance Sheet (Annual)
+          - generic [ref=e380]: Last 5 years of key balance sheet items.
+          - table [ref=e382]:
+            - rowgroup [ref=e383]:
+              - row "Metric FY 2025 FY 2024 FY 2023 FY 2022 FY 2021" [ref=e384]:
+                - columnheader "Metric" [ref=e385]
+                - columnheader "FY 2025" [ref=e386]
+                - columnheader "FY 2024" [ref=e387]
+                - columnheader "FY 2023" [ref=e388]
+                - columnheader "FY 2022" [ref=e389]
+                - columnheader "FY 2021" [ref=e390]
+            - rowgroup [ref=e391]:
+              - row "Total Assets (Cr) 199,940 188,118 189,455 193,947 183,496" [ref=e392]:
+                - cell "Total Assets (Cr)" [ref=e393]
+                - cell "199,940" [ref=e394]
+                - cell "188,118" [ref=e395]
+                - cell "189,455" [ref=e396]
+                - cell "193,947" [ref=e397]
+                - cell "183,496" [ref=e398]
+              - row "Total Equity (Cr) 53,753 42,069 49,427 82,704 77,418" [ref=e399]:
+                - cell "Total Equity (Cr)" [ref=e400]
+                - cell "53,753" [ref=e401]
+                - cell "42,069" [ref=e402]
+                - cell "49,427" [ref=e403]
+                - cell "82,704" [ref=e404]
+                - cell "77,418" [ref=e405]
+              - row "Total Debt (Cr) 91,479 87,706 80,329 53,583 57,667" [ref=e406]:
+                - cell "Total Debt (Cr)" [ref=e407]
+                - cell "91,479" [ref=e408]
+                - cell "87,706" [ref=e409]
+                - cell "80,329" [ref=e410]
+                - cell "53,583" [ref=e411]
+                - cell "57,667" [ref=e412]
+              - row "Cash & Equiv (Cr) 20,749 15,209 21,890 32,495 33,133" [ref=e413]:
+                - cell "Cash & Equiv (Cr)" [ref=e414]
+                - cell "20,749" [ref=e415]
+                - cell "15,209" [ref=e416]
+                - cell "21,890" [ref=e417]
+                - cell "32,495" [ref=e418]
+                - cell "33,133" [ref=e419]
+    - link "← Back to Explorer" [ref=e204] [cursor=pointer]:
+      - /url: /explorer

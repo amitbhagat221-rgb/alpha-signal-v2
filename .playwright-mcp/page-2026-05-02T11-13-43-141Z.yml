@@ -1,0 +1,47 @@
+- generic [active] [ref=e1]:
+  - navigation [ref=e2]:
+    - generic [ref=e3]: ◆
+    - link "☀" [ref=e4] [cursor=pointer]:
+      - /url: /
+    - link "📡" [ref=e5] [cursor=pointer]:
+      - /url: /signals
+    - link "🎯" [ref=e6] [cursor=pointer]:
+      - /url: /actions
+    - link "🔍" [ref=e7] [cursor=pointer]:
+      - /url: /explorer
+    - link "📊" [ref=e8] [cursor=pointer]:
+      - /url: /portfolio
+    - link "🔄" [ref=e9] [cursor=pointer]:
+      - /url: /sectors
+    - link "🧮" [ref=e10] [cursor=pointer]:
+      - /url: /model
+    - link "🔗" [ref=e11] [cursor=pointer]:
+      - /url: /flow
+    - link "⚡" [ref=e12] [cursor=pointer]:
+      - /url: /system
+  - main [ref=e13]:
+    - generic [ref=e14]: SQL Console
+    - generic [ref=e15]: Read-only SQLite console. SELECT and WITH statements only — no INSERT/UPDATE/DELETE/DROP/etc. Results capped to 500 rows. Query the live database directly.
+    - generic [ref=e16]:
+      - generic [ref=e17]:
+        - textbox "SELECT * FROM stocks WHERE cap_tier = 'LARGE' LIMIT 10" [ref=e18]: SELECT cap_tier, COUNT(*) as n FROM stocks GROUP BY cap_tier
+        - generic [ref=e19]:
+          - generic [ref=e20]:
+            - button "Run (Ctrl+Enter)" [ref=e21] [cursor=pointer]
+            - button "Clear" [ref=e22] [cursor=pointer]
+          - generic [ref=e23]: Ctrl+Enter to run · 500 row cap · SELECT/WITH only
+        - generic [ref=e24]:
+          - generic [ref=e25]: Examples
+          - generic [ref=e26]:
+            - button "Top 10 LARGE picks" [ref=e27] [cursor=pointer]
+            - button "Classifier status" [ref=e28] [cursor=pointer]
+            - button "Recent insider buys" [ref=e29] [cursor=pointer]
+            - button "Sector spread" [ref=e30] [cursor=pointer]
+            - button "Forensic alerts" [ref=e31] [cursor=pointer]
+            - button "NTPC prices" [ref=e32] [cursor=pointer]
+            - button "NTPC quarterly" [ref=e33] [cursor=pointer]
+            - button "Macro by sector" [ref=e34] [cursor=pointer]
+      - generic [ref=e35]:
+        - generic [ref=e36]: Schema
+        - generic [ref=e37]: Click any table to load "SELECT * FROM <table> LIMIT 20" into the query box.
+        - generic [ref=e38]: Loading schema...

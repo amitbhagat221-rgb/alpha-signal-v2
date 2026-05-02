@@ -1,0 +1,125 @@
+- generic [active] [ref=e1]:
+  - navigation [ref=e2]:
+    - generic [ref=e3]: ◆
+    - link "☀" [ref=e4] [cursor=pointer]:
+      - /url: /
+    - link "📡" [ref=e5] [cursor=pointer]:
+      - /url: /signals
+    - link "🎯" [ref=e6] [cursor=pointer]:
+      - /url: /actions
+    - link "🔍" [ref=e7] [cursor=pointer]:
+      - /url: /explorer
+    - link "📊" [ref=e8] [cursor=pointer]:
+      - /url: /portfolio
+    - link "🔄" [ref=e9] [cursor=pointer]:
+      - /url: /sectors
+    - link "🧮" [ref=e10] [cursor=pointer]:
+      - /url: /model
+    - link "🔗" [ref=e11] [cursor=pointer]:
+      - /url: /flow
+    - link "⚡" [ref=e12] [cursor=pointer]:
+      - /url: /system
+    - link "💾" [ref=e13] [cursor=pointer]:
+      - /url: /sql
+  - main [ref=e14]:
+    - generic [ref=e15]: Sector Intelligence
+    - generic [ref=e16]:
+      - generic [ref=e17]:
+        - generic [ref=e18]:
+          - generic [ref=e19]: Materials
+          - generic [ref=e20]: FAVORABLE
+        - generic [ref=e21]:
+          - generic [ref=e22]: "Stocks: 420"
+          - generic [ref=e23]: "Avg score: 51"
+          - generic [ref=e24]: "Macro: 64"
+        - generic [ref=e25]: "core_steel: +6.9% YoY | core_coal: +3.6% YoY | iip_mining: -2.1% YoY | core_cement: +13.5% YoY | Regulatory: FAVORABLE ("
+      - generic [ref=e26]:
+        - generic [ref=e27]:
+          - generic [ref=e28]: Energy
+          - generic [ref=e29]: HEADWIND
+        - generic [ref=e30]:
+          - generic [ref=e31]: "Stocks: 29"
+          - generic [ref=e32]: "Avg score: 49"
+          - generic [ref=e33]: "Macro: 37"
+        - generic [ref=e34]: "core_crude_oil: -5.6% YoY | core_natural_gas: -4.4% YoY | core_refinery: -1.0% YoY | Regulatory: NEUTRAL (73 events, 4 m"
+      - generic [ref=e35]:
+        - generic [ref=e36]:
+          - generic [ref=e37]: Consumer Staples
+          - generic [ref=e38]: FAVORABLE
+        - generic [ref=e39]:
+          - generic [ref=e40]: "Stocks: 161"
+          - generic [ref=e41]: "Avg score: 49"
+          - generic [ref=e42]: "Macro: 58"
+        - generic [ref=e43]: "iip_consumer_nondurables: +2.1% YoY | GST: ₹183,609 Cr | Regulatory: NEUTRAL (52 events, 0 major)"
+      - generic [ref=e44]:
+        - generic [ref=e45]:
+          - generic [ref=e46]: Utilities
+          - generic [ref=e47]: TAILWIND
+        - generic [ref=e48]:
+          - generic [ref=e49]: "Stocks: 72"
+          - generic [ref=e50]: "Avg score: 48"
+          - generic [ref=e51]: "Macro: 72"
+        - generic [ref=e52]: "core_electricity: +5.3% YoY | core_coal: +3.6% YoY | Regulatory: FAVORABLE (29 events, 1 major)"
+      - generic [ref=e53]:
+        - generic [ref=e54]:
+          - generic [ref=e55]: Health Care
+          - generic [ref=e56]: NEUTRAL
+        - generic [ref=e57]:
+          - generic [ref=e58]: "Stocks: 177"
+          - generic [ref=e59]: "Avg score: 48"
+          - generic [ref=e60]: "Macro: 50"
+        - generic [ref=e61]: "iip_manufacturing: +1.5% YoY | GST: ₹183,609 Cr | Regulatory: NEUTRAL (9 events, 0 major)"
+      - generic [ref=e62]:
+        - generic [ref=e63]:
+          - generic [ref=e64]: Consumer Discretionary
+          - generic [ref=e65]: FAVORABLE
+        - generic [ref=e66]:
+          - generic [ref=e67]: "Stocks: 423"
+          - generic [ref=e68]: "Avg score: 48"
+          - generic [ref=e69]: "Macro: 55"
+        - generic [ref=e70]: "iip_consumer_durables: -1.5% YoY | GST: ₹183,609 Cr | Credit Growth: +11.5% YoY | Regulatory: NEUTRAL (47 events, 1 majo"
+      - generic [ref=e71]:
+        - generic [ref=e72]:
+          - generic [ref=e73]: Financials
+          - generic [ref=e74]: FAVORABLE
+        - generic [ref=e75]:
+          - generic [ref=e76]: "Stocks: 248"
+          - generic [ref=e77]: "Avg score: 45"
+          - generic [ref=e78]: "Macro: 58"
+        - generic [ref=e79]: "Credit Growth: +11.5% YoY | GST: ₹183,609 Cr | Regulatory: NEUTRAL (46 events, 0 major)"
+      - generic [ref=e80]:
+        - generic [ref=e81]:
+          - generic [ref=e82]: Real Estate
+          - generic [ref=e83]: TAILWIND
+        - generic [ref=e84]:
+          - generic [ref=e85]: "Stocks: 91"
+          - generic [ref=e86]: "Avg score: 45"
+          - generic [ref=e87]: "Macro: 75"
+        - generic [ref=e88]: "core_cement: +13.5% YoY | core_steel: +6.9% YoY | Credit Growth: +11.5% YoY | Regulatory: NEUTRAL (24 events, 0 major)"
+      - generic [ref=e89]:
+        - generic [ref=e90]:
+          - generic [ref=e91]: Communication Services
+          - generic [ref=e92]: NEUTRAL
+        - generic [ref=e93]:
+          - generic [ref=e94]: "Stocks: 83"
+          - generic [ref=e95]: "Avg score: 45"
+          - generic [ref=e96]: "Macro: 50"
+        - generic [ref=e97]: "GST: ₹183,609 Cr | Regulatory: HEADWIND (21 events, 0 major)"
+      - generic [ref=e98]:
+        - generic [ref=e99]:
+          - generic [ref=e100]: Industrials
+          - generic [ref=e101]: TAILWIND
+        - generic [ref=e102]:
+          - generic [ref=e103]: "Stocks: 569"
+          - generic [ref=e104]: "Avg score: 44"
+          - generic [ref=e105]: "Macro: 72"
+        - generic [ref=e106]: "iip_capital_goods: +3.2% YoY | core_cement: +13.5% YoY | core_steel: +6.9% YoY | Credit Growth: +11.5% YoY | Regulatory:"
+      - generic [ref=e107]:
+        - generic [ref=e108]:
+          - generic [ref=e109]: Information Technology
+          - generic [ref=e110]: NEUTRAL
+        - generic [ref=e111]:
+          - generic [ref=e112]: "Stocks: 175"
+          - generic [ref=e113]: "Avg score: 43"
+          - generic [ref=e114]: "Macro: 50"
+        - generic [ref=e115]: "GST: ₹183,609 Cr"

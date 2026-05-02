@@ -1,0 +1,247 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">
+    <div class="section-title">Model</div>
+    <a href="/system" style="padding: 8px 16px; background: var(--bg-card-hover); color: var(--text-secondary); border-radius: 8px; text-decoration: none; font-size: 12px; font-weight: 600; letter-spacing: 0.3px;">System &rarr;</a>
+</div>
+<div class="section-desc">
+    The within-tier scoring model: signal weights per cap tier, the C13b validation that picked them, the
+    VIX regime that scales the per-tier allocation, and the quality + portfolio guardrails on top.
+</div>
+
+{# ── Active regime header ── #}
+{% if current_regime %}
+<div class="card" style="margin-bottom: 20px; border-left: 4px solid var(--accent);">
+    <div style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap;">
+        <div>
+            <div style="font-size: 10px; font-weight: 600; letter-spacing: 0.5px; text-transform: uppercase; color: var(--text-muted);">Current regime</div>
+            <div style="font-size: 22px; font-weight: 800; color: var(--text-primary); font-family: 'JetBrains Mono', monospace;">{{ current_regime.regime }}</div>
+        </div>
+        <div style="border-left: 1px solid var(--border); padding-left: 16px;">
+            <div style="font-size: 10px; font-weight: 600; letter-spacing: 0.5px; text-transform: uppercase; color: var(--text-muted);">VIX</div>
+            <div style="font-size: 22px; font-weight: 800; color: var(--text-primary); font-family: 'JetBrains Mono', monospace;">{{ "%.1f" | format(current_regime.vix_latest) }}</div>
+        </div>
+        {% for r in regimes if r.regime == current_regime.regime %}
+        <div style="border-left: 1px solid var(--border); padding-left: 16px;">
+            <div style="font-size: 10px; font-weight: 600; letter-spacing: 0.5px; text-transform: uppercase; color: var(--text-muted);">Allocation</div>
+            <div class="mono" style="font-size: 16px; font-weight: 700; color: var(--text-primary);">
+                L {{ "%.0f" | format(r.alloc_large * 100) }}% &nbsp;·&nbsp;
+                M {{ "%.0f" | format(r.alloc_mid * 100) }}% &nbsp;·&nbsp;
+                S {{ "%.0f" | format(r.alloc_small * 100) }}%
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+
+{# ── Per-tier signal weights ── #}
+<div class="card" style="margin-bottom: 20px;">
+    <div class="section-title">Tier Models — Signal Weights</div>
+    <div class="section-desc">Each tier scores stocks using a different weighted combination. Weights sum to 1.0 within each tier; the percentage shown is each signal's share.</div>
+
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 16px; margin-top: 14px;">
+    {% for tier_name, signals in tiers.items() %}
+        {% set tier_color = 'var(--accent)' if tier_name == 'LARGE' else ('var(--amber)' if tier_name == 'MID' else 'var(--green)') %}
+        <div style="background: var(--bg-card); border: 1px solid var(--border); border-left: 4px solid {{ tier_color }}; border-radius: 8px; padding: 16px;">
+            <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 12px;">
+                <div style="font-size: 14px; font-weight: 800; letter-spacing: 0.5px; color: var(--text-primary);">{{ tier_name }}</div>
+                <div class="mono" style="font-size: 11px; color: var(--text-muted);">{{ signals|length }} signals</div>
+            </div>
+            {% for s in signals %}
+            <div style="margin-bottom: 8px;">
+                <div style="display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 3px;">
+                    <span style="color: var(--text-secondary); font-weight: 500;">{{ s.signal }}</span>
+                    <span class="mono" style="color: var(--text-primary); font-weight: 700;">{{ "%.2f" | format(s.weight) }}</span>
+                </div>
+                <div style="height: 6px; background: var(--bg-card-hover); border-radius: 3px; overflow: hidden;">
+                    <div style="height: 100%; width: {{ s.pct }}%; background: {{ tier_color }};"></div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    {% endfor %}
+    </div>
+</div>
+
+{# ── VIX regime allocation ── #}
+<div class="card" style="margin-bottom: 20px;">
+    <div class="section-title">Regime &rarr; Allocation</div>
+    <div class="section-desc">The current VIX level decides how the portfolio is split across tiers. Lower VIX favours mid + small caps; higher VIX shifts to large.</div>
+
+    <table style="width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 12px;">
+        <thead>
+            <tr style="color: var(--text-muted); text-align: left; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px;">
+                <th style="padding: 10px 12px; border-bottom: 2px solid var(--border-accent);">Regime</th>
+                <th style="padding: 10px 12px; border-bottom: 2px solid var(--border-accent);">VIX range</th>
+                <th style="padding: 10px 12px; text-align: right; border-bottom: 2px solid var(--border-accent);">Large</th>
+                <th style="padding: 10px 12px; text-align: right; border-bottom: 2px solid var(--border-accent);">Mid</th>
+                <th style="padding: 10px 12px; text-align: right; border-bottom: 2px solid var(--border-accent);">Small</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for r in regimes %}
+            {% set is_active = current_regime and r.regime == current_regime.regime %}
+            <tr style="border-bottom: 1px solid var(--border); {% if is_active %}background: rgba(139,92,246,0.08);{% endif %}">
+                <td style="padding: 10px 12px;">
+                    <span class="mono" style="font-weight: 700; color: {{ 'var(--accent)' if is_active else 'var(--text-primary)' }};">{{ r.regime }}</span>
+                    {% if is_active %}<span style="font-size: 9px; padding: 1px 6px; background: var(--accent); color: white; border-radius: 4px; margin-left: 6px; font-weight: 700;">ACTIVE</span>{% endif %}
+                </td>
+                <td class="mono" style="padding: 10px 12px; color: var(--text-secondary);">
+                    {{ "%.0f" | format(r.vix_lo) }} &ndash; {% if r.vix_hi >= 999 %}∞{% else %}{{ "%.0f" | format(r.vix_hi) }}{% endif %}
+                </td>
+                <td class="mono" style="padding: 10px 12px; text-align: right; color: var(--text-primary); font-weight: 600;">{{ "%.0f" | format(r.alloc_large * 100) }}%</td>
+                <td class="mono" style="padding: 10px 12px; text-align: right; color: var(--text-primary); font-weight: 600;">{{ "%.0f" | format(r.alloc_mid * 100) }}%</td>
+                <td class="mono" style="padding: 10px 12px; text-align: right; color: var(--text-primary); font-weight: 600;">{{ "%.0f" | format(r.alloc_small * 100) }}%</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+{# ── Backtest validation ── #}
+<div class="card" style="margin-bottom: 20px;">
+    <div class="section-title">Backtest — Signal Validation</div>
+    <div class="section-desc">
+        Source: {{ validation.meta.source or 'n/a' }}. Point-in-time reconstruction across {{ validation.meta.periods or '—' }} monthly periods.
+        <b>t-stat ≥ 2.5</b> = primary (1.0× weight in current model). 1.5–2.5 = secondary (0.5×). 0.5–1.5 = tertiary (0.2×). Below 0.5 = drop.
+        Sortable by clicking column headers.
+    </div>
+
+    {% if validation.rows %}
+    <table id="validation-table" style="width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 12px;">
+        <thead>
+            <tr style="color: var(--text-muted); text-align: left; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px;">
+                <th data-key="signal"      data-sort="string" style="padding: 10px 12px; border-bottom: 2px solid var(--border-accent); cursor: pointer;">Signal</th>
+                <th data-key="cap_tier"    data-sort="string" style="padding: 10px 12px; border-bottom: 2px solid var(--border-accent); cursor: pointer;">Tier</th>
+                <th data-key="t_stat"      data-sort="number" style="padding: 10px 12px; text-align: right; border-bottom: 2px solid var(--border-accent); cursor: pointer;">t-stat</th>
+                <th data-key="mean_ic"     data-sort="number" style="padding: 10px 12px; text-align: right; border-bottom: 2px solid var(--border-accent); cursor: pointer;">Mean IC</th>
+                <th data-key="icir"        data-sort="number" style="padding: 10px 12px; text-align: right; border-bottom: 2px solid var(--border-accent); cursor: pointer;">IC IR</th>
+                <th data-key="n_stocks_avg" data-sort="number" style="padding: 10px 12px; text-align: right; border-bottom: 2px solid var(--border-accent); cursor: pointer;">Avg N</th>
+                <th data-key="verdict"     data-sort="string" style="padding: 10px 12px; border-bottom: 2px solid var(--border-accent); cursor: pointer;">Verdict</th>
+                <th data-key="description" data-sort="string" style="padding: 10px 12px; border-bottom: 2px solid var(--border-accent); cursor: pointer;">Description</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for r in validation.rows %}
+            {% set tier_color = 'var(--accent)' if r.cap_tier == 'LARGE' else ('var(--amber)' if r.cap_tier == 'MID' else 'var(--green)') %}
+            {% set t = r.t_stat or 0 %}
+            {% set t_color = 'var(--green)' if t|abs >= 2.5 else ('var(--amber)' if t|abs >= 1.5 else ('var(--text-secondary)' if t|abs >= 0.5 else 'var(--text-muted)')) %}
+            {% set verdict_color = 'var(--green)' if r.verdict == 'KEEP' else ('var(--amber)' if r.verdict == 'WEAK' else ('var(--red)' if r.verdict == 'DROP' else 'var(--text-muted)')) %}
+            <tr style="border-bottom: 1px solid var(--border);">
+                <td data-key="signal" class="mono" style="padding: 10px 12px; color: var(--text-primary);">{{ r.signal }}</td>
+                <td data-key="cap_tier" style="padding: 10px 12px;">
+                    <span style="font-size: 9px; padding: 2px 6px; color: {{ tier_color }}; border: 1px solid {{ tier_color }}; border-radius: 4px; font-weight: 700; letter-spacing: 0.5px;">{{ r.cap_tier }}</span>
+                </td>
+                <td data-key="t_stat" class="mono num" style="padding: 10px 12px; text-align: right; color: {{ t_color }}; font-weight: 700;">{{ "%.2f" | format(r.t_stat) if r.t_stat is not none else '—' }}</td>
+                <td data-key="mean_ic" class="mono num" style="padding: 10px 12px; text-align: right; color: var(--text-secondary);">{{ "%.4f" | format(r.mean_ic) if r.mean_ic is not none else '—' }}</td>
+                <td data-key="icir" class="mono num" style="padding: 10px 12px; text-align: right; color: var(--text-secondary);">{{ "%.3f" | format(r.icir) if r.icir is not none else '—' }}</td>
+                <td data-key="n_stocks_avg" class="mono num" style="padding: 10px 12px; text-align: right; color: var(--text-muted);">{{ r.n_stocks_avg if r.n_stocks_avg is not none else '—' }}</td>
+                <td data-key="verdict" style="padding: 10px 12px;">
+                    <span style="font-size: 9px; padding: 2px 6px; color: {{ verdict_color }}; border: 1px solid {{ verdict_color }}; border-radius: 4px; font-weight: 700; letter-spacing: 0.5px;">{{ r.verdict or '—' }}</span>
+                </td>
+                <td data-key="description" style="padding: 10px 12px; color: var(--text-secondary); font-size: 11px;">{{ r.description }}</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    <script>
+    // Tiny sort helper (table-scoped to avoid colliding with inventory.js).
+    (function () {
+      const t = document.getElementById('validation-table');
+      if (!t) return;
+      t.querySelectorAll('thead th').forEach((th) => {
+        th.addEventListener('click', () => {
+          const k = th.dataset.key, type = th.dataset.sort || 'string';
+          const dir = t.dataset.sortKey === k && t.dataset.sortDir === 'asc' ? 'desc' : 'asc';
+          const tbody = t.tBodies[0];
+          const rows = Array.from(tbody.rows);
+          const sign = dir === 'asc' ? 1 : -1;
+          rows.sort((a, b) => {
+            const av = (a.querySelector('td[data-key="' + k + '"]').textContent || '').trim();
+            const bv = (b.querySelector('td[data-key="' + k + '"]').textContent || '').trim();
+            if (type === 'number') {
+              const an = parseFloat(av.replace(/,/g, '')) || 0;
+              const bn = parseFloat(bv.replace(/,/g, '')) || 0;
+              return (an - bn) * sign;
+            }
+            return av.localeCompare(bv) * sign;
+          });
+          rows.forEach(r => tbody.appendChild(r));
+          t.dataset.sortKey = k; t.dataset.sortDir = dir;
+          t.querySelectorAll('thead th').forEach(h => { h.style.color = 'var(--text-muted)'; });
+          th.style.color = 'var(--accent)';
+        });
+      });
+    })();
+    </script>
+    {% else %}
+    <div style="margin-top: 12px; color: var(--text-muted); font-size: 12px;">No validation data — file not found at {{ V1_BACKTEST_DIR }}/reconstructed_ic_by_tier.csv.</div>
+    {% endif %}
+</div>
+
+{# ── Quality gate + portfolio rules side-by-side ── #}
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 16px;">
+    <div class="card">
+        <div class="section-title">Quality Gate (Small Caps)</div>
+        <div class="section-desc">Three-tier graduated filter applied before the SMALL screener weights.</div>
+
+        <div style="margin-top: 12px; font-size: 12px; color: var(--text-secondary); line-height: 1.7;">
+            <div style="font-weight: 700; color: var(--red); font-size: 11px; letter-spacing: 0.5px; text-transform: uppercase; margin-top: 8px;">Tier 1 — Hard Exclusion</div>
+            Piotroski F &le; {{ quality_gate.min_piotroski_exclude }} or Altman Z'' &lt; {{ quality_gate.min_altman_z_exclude }}.
+
+            <div style="font-weight: 700; color: var(--amber); font-size: 11px; letter-spacing: 0.5px; text-transform: uppercase; margin-top: 12px;">Tier 2 — Penalty (cap {{ quality_gate.penalty_cap }})</div>
+            <ul style="margin: 4px 0 0 18px;">
+                <li>Loss in 2 of 3 years &rarr; {{ quality_gate.penalty_loss_majority }}</li>
+                <li>Negative 3yr cumulative FCF &rarr; {{ quality_gate.penalty_neg_fcf_3yr }}</li>
+                <li>Pledge &gt; {{ quality_gate.pledge_high_pct }}% &rarr; {{ quality_gate.penalty_pledge_high }}</li>
+                <li>F = 2&ndash;3 &rarr; {{ quality_gate.penalty_low_piotroski }}</li>
+                <li>Altman Z'' = {{ quality_gate.altman_grey_range[0] }}&ndash;{{ quality_gate.altman_grey_range[1] }} &rarr; {{ quality_gate.penalty_altman_grey }}</li>
+                <li>Beneish M &gt; {{ quality_gate.beneish_manipulator }} &rarr; {{ quality_gate.penalty_beneish_flag }}</li>
+            </ul>
+
+            <div style="font-weight: 700; color: var(--green); font-size: 11px; letter-spacing: 0.5px; text-transform: uppercase; margin-top: 12px;">Tier 3 — Quality Composite</div>
+            {% for k, v in quality_gate.composite_weights.items() %}
+                {{ k }}: {{ "%.0f" | format(v * 100) }}%{{ ", " if not loop.last else "" }}
+            {% endfor %}
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="section-title">Portfolio Rules</div>
+        <div class="section-desc">Hard caps applied after scoring to prevent concentration risk.</div>
+
+        <table style="width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 12px;">
+            <tbody>
+                <tr style="border-bottom: 1px solid var(--border);">
+                    <td style="padding: 8px 12px; color: var(--text-secondary);">Picks per tier</td>
+                    <td class="mono num" style="padding: 8px 12px; text-align: right; color: var(--text-primary); font-weight: 600;">
+                        L {{ portfolio.picks_per_tier.LARGE }} · M {{ portfolio.picks_per_tier.MID }} · S {{ portfolio.picks_per_tier.SMALL }}
+                    </td>
+                </tr>
+                <tr style="border-bottom: 1px solid var(--border);">
+                    <td style="padding: 8px 12px; color: var(--text-secondary);">Max picks per day</td>
+                    <td class="mono num" style="padding: 8px 12px; text-align: right; color: var(--text-primary); font-weight: 600;">{{ portfolio.max_daily_picks }}</td>
+                </tr>
+                <tr style="border-bottom: 1px solid var(--border);">
+                    <td style="padding: 8px 12px; color: var(--text-secondary);">Max stocks per sector</td>
+                    <td class="mono num" style="padding: 8px 12px; text-align: right; color: var(--text-primary); font-weight: 600;">{{ portfolio.max_stocks_per_sector }}</td>
+                </tr>
+                <tr style="border-bottom: 1px solid var(--border);">
+                    <td style="padding: 8px 12px; color: var(--text-secondary);">Max weight per stock</td>
+                    <td class="mono num" style="padding: 8px 12px; text-align: right; color: var(--text-primary); font-weight: 600;">{{ portfolio.max_stock_weight_pct }}%</td>
+                </tr>
+                <tr>
+                    <td style="padding: 8px 12px; color: var(--text-secondary);">Transaction cost (bps)</td>
+                    <td class="mono num" style="padding: 8px 12px; text-align: right; color: var(--text-primary); font-weight: 600;">
+                        L {{ transaction_costs_bps.LARGE }} · M {{ transaction_costs_bps.MID }} · S {{ transaction_costs_bps.SMALL }}
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+{% endblock %}

@@ -1,0 +1,200 @@
+- generic [active] [ref=e1]:
+  - navigation [ref=e2]:
+    - generic [ref=e3]: ◆
+    - link "☀" [ref=e4] [cursor=pointer]:
+      - /url: /
+    - link "📡" [ref=e5] [cursor=pointer]:
+      - /url: /signals
+    - link "🎯" [ref=e6] [cursor=pointer]:
+      - /url: /actions
+    - link "🔍" [ref=e7] [cursor=pointer]:
+      - /url: /explorer
+    - link "📊" [ref=e8] [cursor=pointer]:
+      - /url: /portfolio
+    - link "🔄" [ref=e9] [cursor=pointer]:
+      - /url: /sectors
+    - link "🧮" [ref=e10] [cursor=pointer]:
+      - /url: /model
+    - link "🔗" [ref=e11] [cursor=pointer]:
+      - /url: /flow
+    - link "⚡" [ref=e12] [cursor=pointer]:
+      - /url: /system
+    - link "💾" [ref=e13] [cursor=pointer]:
+      - /url: /sql
+  - main [ref=e14]:
+    - generic [ref=e15]:
+      - generic [ref=e16]:
+        - generic [ref=e17]:
+          - heading "VEDL" [level=1] [ref=e18]
+          - generic [ref=e19]: LARGE
+          - generic [ref=e20]: BUY
+          - generic [ref=e21]: HIGH CONVICTION
+        - generic [ref=e22]: Vedanta Ltd · Materials
+      - generic [ref=e23]:
+        - generic [ref=e24]: ₹271.55
+        - generic [ref=e25]: "-62.3% 1M · 2026-05-01"
+    - generic [ref=e26]:
+      - generic [ref=e27]: "52W: ₹272 — ₹766 (-65% from high)"
+      - generic [ref=e28]: "3M: -55.1%"
+      - generic [ref=e29]: "6M: -40.6%"
+      - generic [ref=e30]: "1Y: -41.2%"
+      - generic [ref=e31]:
+        - text: "RSI: 17 oversold"
+        - button "More info" [ref=e33] [cursor=pointer]: i
+    - generic [ref=e34]:
+      - generic [ref=e35]:
+        - button "Overview" [ref=e36] [cursor=pointer]
+        - button "Financials" [ref=e37] [cursor=pointer]
+        - button "Ownership" [ref=e38] [cursor=pointer]
+        - button "Consensus" [ref=e39] [cursor=pointer]
+        - button "Forensic" [ref=e40] [cursor=pointer]
+        - button "Price & Technicals" [ref=e41] [cursor=pointer]
+      - generic [ref=e42]:
+        - generic [ref=e43]:
+          - generic [ref=e44]:
+            - generic [ref=e45]: AI INVESTMENT THESIS
+            - generic [ref=e46]:
+              - generic [ref=e47]: "Target: ₹649"
+              - generic [ref=e48]: "Stop: ₹230"
+          - generic [ref=e49]: "Vedanta Ltd presents a compelling turnaround story with exceptional EPS growth of 245% despite modest revenue growth, indicating significant operational leverage and margin expansion. The stock trades at attractive valuations with strong forensic scores and ranks #1 among large-cap stocks, supported by a high Piotroski F-Score of 7/9."
+          - generic [ref=e50]:
+            - generic [ref=e51]:
+              - generic [ref=e52]: BULL CASE
+              - generic [ref=e53]: • Massive earnings recovery with 244.77% EPS growth demonstrates successful operational restructuring and cost optimization across diversified mining portfolio
+              - generic [ref=e54]: • Strong balance sheet health with Z-Score of 6.69 indicating financial safety, clean M-Score of -3.33, and stable promoter holding with minimal pledging
+            - generic [ref=e55]:
+              - generic [ref=e56]: BEAR CASE
+              - generic [ref=e57]: • Revenue growth of only 5.95% suggests underlying demand challenges in key metals markets despite strong margin expansion
+              - generic [ref=e58]: • Smart Money score of 44.4/100 indicates institutional skepticism, potentially signaling concerns about sustainability of current profitability levels
+        - generic [ref=e59]:
+          - generic [ref=e60]:
+            - generic [ref=e61]:
+              - generic [ref=e62]:
+                - generic [ref=e63]: Conviction Score
+                - generic [ref=e64]: 85/100
+              - generic [ref=e65]: Composite of all validated signals, weighted for large cap. Higher = stronger overall conviction.
+              - generic [ref=e68]:
+                - generic [ref=e69]:
+                  - generic [ref=e70]:
+                    - text: Consensus
+                    - button "More info" [ref=e72] [cursor=pointer]: i
+                  - generic [ref=e73]: "0.84"
+                - generic [ref=e74]: Combines analyst price target upside, EPS growth and revenue growth forecasts.
+                - generic [ref=e77]:
+                  - generic [ref=e78]: "PT Upside: +139.1%"
+                  - generic [ref=e79]: "EPS Growth: +244.8%"
+                  - generic [ref=e80]: "PT Revision: +9.0%"
+                  - generic [ref=e81]: "Rev Growth: +6.0%"
+              - generic [ref=e82]:
+                - generic [ref=e83]:
+                  - generic [ref=e84]:
+                    - text: Promoter
+                    - button "More info" [ref=e86] [cursor=pointer]: i
+                  - generic [ref=e87]: "0.43"
+                - generic [ref=e88]: Tracks promoter shareholding changes. Buying signals insider confidence.
+                - generic [ref=e91]:
+                  - generic [ref=e92]: "QoQ Change: +0.00%"
+                  - generic [ref=e93]: "Trend: stable"
+                  - generic [ref=e94]: "Pledge Quality: 0.00"
+              - generic [ref=e95]:
+                - generic [ref=e96]:
+                  - generic [ref=e97]:
+                    - text: Piotroski F
+                    - button "More info" [ref=e99] [cursor=pointer]: i
+                  - generic [ref=e100]: 7/9
+                - generic [ref=e101]: 9-point checklist covering profitability, leverage, and operating efficiency.
+              - generic [ref=e104]:
+                - generic [ref=e105]:
+                  - generic [ref=e106]:
+                    - text: Accruals
+                    - button "More info" [ref=e108] [cursor=pointer]: i
+                  - generic [ref=e109]: "0.69"
+                - generic [ref=e110]: Measures whether reported earnings are backed by real cash flow.
+                - generic [ref=e113]:
+                  - generic [ref=e114]: "CF Accruals: -0.11"
+                  - generic [ref=e115]: "BS Accruals: -0.10"
+              - generic [ref=e116]:
+                - generic [ref=e117]:
+                  - generic [ref=e118]:
+                    - text: Smart Money
+                    - button "More info" [ref=e120] [cursor=pointer]: i
+                  - generic [ref=e121]: 44/100
+                - generic [ref=e122]: Detects institutional accumulation via bulk deals and delivery percentage.
+            - generic [ref=e125]:
+              - generic [ref=e126]: News & Sentiment
+              - generic [ref=e127]: Recent news headlines from financial publications. Sentiment computed via VADER NLP on article text.
+              - generic [ref=e128]:
+                - 'link "Stocks in news: Torrent Power, GAIL, J&amp;K Bank, Ola Electric, Vedanta, Infosys" [ref=e130] [cursor=pointer]':
+                  - /url: https://economictimes.indiatimes.com/markets/stocks/news/stocks-in-news-torrent-power-gail-jk-bank-ola-electric-vedanta-infosys/articleshow/130099706.cms
+                - generic [ref=e131]: et_markets · 2026-04-08
+              - generic [ref=e132]:
+                - link "JPMorgan assigns overweight tag to Hindalco and Vedanta" [ref=e134] [cursor=pointer]:
+                  - /url: https://economictimes.indiatimes.com/markets/stocks/news/jpmorgan-assigns-overweight-tag-to-hindalco-and-vedanta/articleshow/130099468.cms
+                - generic [ref=e135]: et_markets · 2026-04-08
+              - generic [ref=e136]:
+                - link "Fitch upgrades Vedanta Resources to BB-, outlook stable" [ref=e138] [cursor=pointer]:
+                  - /url: https://economictimes.indiatimes.com/news/economy/indicators/fitch-upgrades-vedanta-resources-to-bb-outlook-stable/articleshow/130069297.cms
+                - generic [ref=e139]: et_economy · 2026-04-06
+              - generic [ref=e140]:
+                - link "SC refuses to interfere with order allowing Adani to acquire Jaiprakash Associates in blow to Vedanta" [ref=e142] [cursor=pointer]:
+                  - /url: https://economictimes.indiatimes.com/news/company/corporate-trends/sc-refuses-to-stay-adanis-resolution-plan-for-jaiprakash-associates-in-blow-to-vedanta/articleshow/130053795.cms
+                - generic [ref=e143]: et_companies · 2026-04-06
+              - generic [ref=e144]:
+                - link "Vedanta moves Supreme Court seeking stay on Adani's JAL resolution plan" [ref=e146] [cursor=pointer]:
+                  - /url: https://economictimes.indiatimes.com/news/company/corporate-trends/vedanta-moves-supreme-court-seeking-stay-on-adanis-jal-resolution-plan/articleshow/129909607.cms
+                - generic [ref=e147]: et_companies · 2026-03-30
+          - generic [ref=e148]:
+            - generic [ref=e149]:
+              - generic [ref=e150]: Analyst Snapshot
+              - generic [ref=e151]: Aggregated forecasts from sell-side analysts covering this stock.
+              - generic [ref=e152]:
+                - generic [ref=e153]: Price Target
+                - generic [ref=e154]: ₹649 (+139.1%)
+              - generic [ref=e155]:
+                - generic [ref=e156]:
+                  - generic [ref=e157]: Analysts
+                  - generic [ref=e158]: "13"
+                - generic [ref=e159]:
+                  - generic [ref=e160]: Buy %
+                  - generic [ref=e161]: 77%
+              - generic [ref=e162]: See Consensus tab for full breakdown
+            - generic [ref=e163]:
+              - generic [ref=e164]: Forensic Health
+              - generic [ref=e165]: Earnings manipulation and bankruptcy risk indicators.
+              - generic [ref=e166]:
+                - generic [ref=e167]: ✓
+                - generic [ref=e168]: "Beneish M: -3.33 (clean)"
+                - button "More info" [ref=e170] [cursor=pointer]: i
+              - generic [ref=e171]:
+                - generic [ref=e172]: ✓
+                - generic [ref=e173]: "Altman Z: 6.69 (safe)"
+                - button "More info" [ref=e175] [cursor=pointer]: i
+            - generic [ref=e176]:
+              - generic [ref=e177]: Regulatory — Materials
+              - generic [ref=e178]: AI-classified policy events affecting this sector. Direction shows likely impact.
+              - generic [ref=e179]:
+                - generic [ref=e180]:
+                  - generic [ref=e181]: ▲
+                  - generic [ref=e182]: Government exempts IGST on ocean freight from October 1
+                  - generic [ref=e183]: moderate
+                - generic [ref=e184]: IGST exemption on ocean freight reduces import costs for steel, cement, chemicals and other material companies
+              - generic [ref=e185]:
+                - generic [ref=e186]:
+                  - generic [ref=e187]: ▲
+                  - generic [ref=e188]: RoDTEP scheme gets extension till June 30
+                  - generic [ref=e189]: moderate
+                - generic [ref=e190]: Scheme extension benefits chemicals, metals and other material exporters through continued tax refunds
+              - generic [ref=e191]:
+                - generic [ref=e192]:
+                  - generic [ref=e193]: ▲
+                  - generic [ref=e194]: "US &amp; EU trade pacts to be concluded soon: Nirmala Sitharaman"
+                  - generic [ref=e195]: moderate
+                - generic [ref=e196]: EU trade deal would boost exports of chemicals, steel and other materials with reduced tariffs
+              - generic [ref=e197]:
+                - generic [ref=e198]:
+                  - generic [ref=e199]: ▼
+                  - generic [ref=e200]: GI tag, carbon tax &amp; intellectual property rights on top for India in Januar
+                  - generic [ref=e201]: moderate
+                - generic [ref=e202]: EU carbon border tax could increase compliance costs and reduce competitiveness of Indian steel exports
+    - link "← Back to Explorer" [ref=e204] [cursor=pointer]:
+      - /url: /explorer
