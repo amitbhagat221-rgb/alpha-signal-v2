@@ -1240,10 +1240,67 @@ def get_flow_overview():
             "last_error": last.get("error_message"),
         })
 
+    layered = [{"name": ln, "steps": layers[ln]} for ln in LAYER_ORDER if layers[ln]]
+
     return {
-        "layers": [{"name": ln, "steps": layers[ln]} for ln in LAYER_ORDER if layers[ln]],
+        "layers": layered,
         "step_count": sum(len(v) for v in layers.values()),
+        "failures": [
+            s for layer in layered for s in layer["steps"]
+            if s.get("last_status") in ("FAILED", "ABORTED")
+        ],
     }
+
+
+# ── Step rerun (UI button on /flow) ──────────────────────────────────────
+
+def rerun_step(step_name: str) -> dict:
+    """Spawn `python pipeline.py --step <name>` as a detached subprocess.
+
+    Returns immediately so the HTTP request doesn't block. The pipeline writes
+    its RUNNING/SUCCESS/FAILED rows to pipeline_log; the /flow page picks them
+    up on its next auto-refresh.
+
+    Refuses if (a) the step name isn't in PIPELINE_STEPS, or (b) a RUNNING row
+    for that step is younger than 5 minutes (treat older as crashed / stale).
+    """
+    import subprocess
+    import sys
+    from datetime import datetime, timedelta
+    from pathlib import Path
+    from config import PIPELINE_STEPS, LOG_PATH
+
+    valid = {s["name"] for s in PIPELINE_STEPS}
+    if step_name not in valid:
+        return {"ok": False, "error": f"unknown step: {step_name}"}
+
+    recent = read_sql(
+        """SELECT started_at FROM pipeline_log
+           WHERE step_name = ? AND status = 'RUNNING'
+           ORDER BY id DESC LIMIT 1""",
+        params=[step_name],
+    )
+    if not recent.empty:
+        try:
+            started = datetime.fromisoformat(recent.iloc[0]["started_at"])
+            if datetime.now() - started < timedelta(minutes=5):
+                return {"ok": False, "error": f"{step_name} is already RUNNING"}
+        except (ValueError, TypeError):
+            pass
+
+    project_root = Path(__file__).resolve().parent.parent
+    rerun_log = project_root / "output" / "rerun.log"
+    rerun_log.parent.mkdir(parents=True, exist_ok=True)
+    log_fp = open(rerun_log, "ab")
+
+    subprocess.Popen(
+        [sys.executable, "pipeline.py", "--step", step_name],
+        cwd=project_root,
+        stdout=log_fp,
+        stderr=subprocess.STDOUT,
+        start_new_session=True,
+    )
+    return {"ok": True, "step": step_name, "log": str(rerun_log)}
 
 
 def get_data_health_scores(force=False):

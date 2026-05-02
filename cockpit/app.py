@@ -281,6 +281,12 @@ async def api_sectors():
 async def api_pipeline(days: int = 7):
     return api.get_pipeline_status(days=days)
 
+@app.post("/api/pipeline/rerun/{step_name}")
+async def api_pipeline_rerun(step_name: str):
+    """Trigger a single pipeline step in the background. Returns immediately."""
+    result = api.rerun_step(step_name)
+    return JSONResponse(result, status_code=200 if result.get("ok") else 409)
+
 @app.get("/api/health")
 async def api_health():
     return api.get_data_freshness()

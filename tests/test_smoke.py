@@ -49,6 +49,26 @@ def test_critical_steps_marked():
         assert by_name[name]["critical"], f"step '{name}' must be critical=True"
 
 
+def test_flow_overview_returns_layers_and_failures():
+    """get_flow_overview() must return the layered structure the /flow page
+    iterates over — and a `failures` list that excludes healthy steps."""
+    from cockpit.api import get_flow_overview
+    overview = get_flow_overview()
+    assert "layers" in overview and isinstance(overview["layers"], list)
+    assert "failures" in overview and isinstance(overview["failures"], list)
+    assert overview["step_count"] == sum(len(l["steps"]) for l in overview["layers"])
+    for f in overview["failures"]:
+        assert f["last_status"] in ("FAILED", "ABORTED")
+
+
+def test_rerun_step_rejects_unknown_step():
+    """rerun_step must refuse to spawn a subprocess for a step name not in PIPELINE_STEPS."""
+    from cockpit.api import rerun_step
+    result = rerun_step("definitely_not_a_real_step")
+    assert result["ok"] is False
+    assert "unknown step" in result["error"].lower()
+
+
 def test_news_published_at_parses():
     """Catches the sentiment bug: published_at can be ISO8601 with 'T' or space-separated."""
     import pandas as pd
@@ -64,6 +84,8 @@ if __name__ == "__main__":
         ("modules import", test_all_pipeline_modules_import),
         ("dry-run executes", test_dry_run_executes),
         ("critical steps marked", test_critical_steps_marked),
+        ("flow overview shape", test_flow_overview_returns_layers_and_failures),
+        ("rerun rejects unknown step", test_rerun_step_rejects_unknown_step),
         ("news published_at parses", test_news_published_at_parses),
     ]
     failed = 0

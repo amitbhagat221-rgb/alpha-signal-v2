@@ -63,7 +63,7 @@ For *why* we made each design choice, see [decisions/](decisions/). For *what* e
 │   ├── nse_bulk.py
 │   ├── regulatory_harvester.py
 │   ├── regulatory_classifier.py
-│   ├── tickertape.py            # manual run only (~4hr); not in cron
+│   ├── tickertape.py            # ~4hr full universe; runs monthly via run_tickertape_monthly.sh cron
 │   └── rss.py
 │
 ├── signals/               # 12 signal modules
@@ -172,9 +172,7 @@ This matters because the same signal has very different predictive power across 
 
 ## What's not built yet
 
-| Module | What it does | Why missing |
-|--------|--------------|-------------|
-| Parallel run | v1 vs v2 for 2–3 days, then disable v1 cron | Pending — v2 ran end-to-end clean on 2026-05-01 |
+For the live, current list of outstanding work see [HANDOFF.md](../HANDOFF.md). At time of this edit (2026-05-02) the headline items are: distill the two implemented plans (regulatory-signal, macro-data) into reference docs; resume the regulatory harvester (paused on Anthropic budget); backtest the three new signals (insider, regulatory, macro sector) for tier-aware weight assignment; PIB scraper incremental-save fix; v1 decommission decisions.
 
 ## Relationship to v1
 

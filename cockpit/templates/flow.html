@@ -2,18 +2,99 @@
 
 {% block content %}
 
+{# ── Phase header colors (used by mini-DAG and detail cards) ── #}
+{% set phase_color = {
+    'Sources': 'var(--accent)',
+    'Signals': 'var(--green)',
+    'Scoring': 'var(--amber)',
+    'Output':  '#3b82f6',
+} %}
+
+{# ── Status helper: maps last_status (with critical override) to color + label ── #}
+{% macro status_bg(s) %}{% if s.last_status == 'SUCCESS' %}var(--green){% elif s.last_status == 'FAILED' and s.critical %}#7f1d1d{% elif s.last_status in ('FAILED', 'ABORTED') %}var(--red){% elif s.last_status == 'RUNNING' %}var(--amber){% else %}var(--bg-card-hover){% endif %}{% endmacro %}
+{% macro status_fg(s) %}{% if s.last_status in ('SUCCESS', 'RUNNING') %}#0b0b14{% elif s.last_status in ('FAILED', 'ABORTED') %}#ffffff{% else %}var(--text-muted){% endif %}{% endmacro %}
+
 <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">
     <div class="section-title">Pipeline Flow</div>
-    <a href="/system" style="padding: 8px 16px; background: var(--bg-card-hover); color: var(--text-secondary); border-radius: 8px; text-decoration: none; font-size: 12px; font-weight: 600; letter-spacing: 0.3px;">System &rarr;</a>
+    <div style="display: flex; gap: 12px; align-items: center;">
+        <span id="flow-toast" class="mono" style="font-size: 11px; color: var(--green); opacity: 0; transition: opacity 0.25s;"></span>
+        <span id="flow-refresh-tick" class="mono" style="font-size: 11px; color: var(--text-muted);">refreshing in 60s</span>
+        <a href="/system" style="padding: 8px 16px; background: var(--bg-card-hover); color: var(--text-secondary); border-radius: 8px; text-decoration: none; font-size: 12px; font-weight: 600; letter-spacing: 0.3px;">System &rarr;</a>
+    </div>
 </div>
 <div class="section-desc">
-    {{ step_count }} steps that run daily at 03:30 UTC (09:00 IST). Each card shows the latest run status.
-    Click a step to inspect the table it writes; data flows top-to-bottom.
+    {{ step_count }} steps that run daily at 03:30 UTC (09:00 IST). Click <span class="mono" style="color: var(--text-secondary);">↻</span> on any step to rerun it; status colors update on the next auto-refresh.
 </div>
 
-{# ── Layered DAG ── #}
+{# ── Failure banner ── #}
+{% if failures %}
+<div class="card" style="margin-bottom: 16px; border-left: 4px solid var(--red); background: var(--red-bg);">
+    <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px;">
+        <div style="font-size: 13px; font-weight: 800; color: var(--red); letter-spacing: 0.5px;">
+            {{ failures|length }} STEP{{ '' if failures|length == 1 else 'S' }} NEEDS ATTENTION
+        </div>
+        <div class="mono" style="font-size: 11px; color: var(--text-muted);">click a chip to jump to its card</div>
+    </div>
+    <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+        {% for f in failures %}
+        <a href="#step-{{ f.name }}" style="display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; background: var(--bg-card); border: 1px solid var(--red); border-radius: 4px; text-decoration: none; font-size: 11px;">
+            <span class="mono" style="color: var(--red); font-weight: 700;">{{ f.last_status }}</span>
+            <span class="mono" style="color: var(--text-primary);">{{ f.name }}</span>
+            {% if f.last_error %}<span style="color: var(--text-muted); font-size: 10px;">— {{ f.last_error[:60] }}{% if f.last_error|length > 60 %}…{% endif %}</span>{% endif %}
+        </a>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+
+{# ── Mini-DAG: 4 phase columns with arrows between them ── #}
+<div class="card" style="margin-bottom: 16px; padding: 18px; overflow-x: auto;">
+    <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 14px;">
+        <div style="font-size: 12px; font-weight: 700; letter-spacing: 0.6px; text-transform: uppercase; color: var(--text-secondary);">Live DAG</div>
+        <div class="mono" style="font-size: 10px; color: var(--text-muted); display: flex; gap: 14px;">
+            <span><span style="display:inline-block;width:9px;height:9px;background:var(--green);border-radius:2px;vertical-align:middle;margin-right:4px;"></span>SUCCESS</span>
+            <span><span style="display:inline-block;width:9px;height:9px;background:var(--red);border-radius:2px;vertical-align:middle;margin-right:4px;"></span>FAILED</span>
+            <span><span style="display:inline-block;width:9px;height:9px;background:#7f1d1d;border-radius:2px;vertical-align:middle;margin-right:4px;"></span>CRITICAL FAIL</span>
+            <span><span style="display:inline-block;width:9px;height:9px;background:var(--amber);border-radius:2px;vertical-align:middle;margin-right:4px;"></span>RUNNING</span>
+            <span><span style="display:inline-block;width:9px;height:9px;background:var(--bg-card-hover);border:1px solid var(--border);border-radius:2px;vertical-align:middle;margin-right:4px;"></span>NEVER RUN</span>
+        </div>
+    </div>
+
+    <div style="display: flex; align-items: stretch; gap: 0; min-width: max-content;">
+        {% for layer in layers %}
+        {% set lc = phase_color.get(layer.name, 'var(--text-muted)') %}
+        <div style="flex: 1 1 0; min-width: 200px; display: flex; flex-direction: column;">
+            <div style="display: flex; justify-content: space-between; align-items: baseline; padding: 6px 10px 8px; border-bottom: 2px solid {{ lc }}; margin-bottom: 8px;">
+                <span style="font-size: 11px; font-weight: 800; letter-spacing: 0.7px; color: {{ lc }}; text-transform: uppercase;">{{ layer.name }}</span>
+                <span class="mono" style="font-size: 10px; color: var(--text-muted);">{{ layer.steps|length }}</span>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 4px; flex: 1;">
+                {% for s in layer.steps %}
+                <a href="#step-{{ s.name }}" class="dag-pill"
+                   style="display: flex; align-items: center; justify-content: space-between; gap: 6px;
+                          padding: 5px 8px; border-radius: 4px; text-decoration: none;
+                          background: {{ status_bg(s) }}; color: {{ status_fg(s) }};
+                          {% if s.last_status == 'FAILED' and s.critical %}border: 2px solid var(--red);{% else %}border: 1px solid transparent;{% endif %}
+                          font-size: 11px; line-height: 1.2;">
+                    <span class="mono" style="font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ s.name }}</span>
+                    <button type="button" class="rerun-btn" data-step="{{ s.name }}" title="Rerun {{ s.name }}"
+                        style="background: rgba(0,0,0,0.18); color: inherit; border: none; cursor: pointer;
+                               width: 18px; height: 18px; border-radius: 3px; padding: 0;
+                               font-size: 12px; line-height: 1; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;">↻</button>
+                </a>
+                {% endfor %}
+            </div>
+        </div>
+        {% if not loop.last %}
+        <div style="display: flex; align-items: center; padding: 0 8px; font-size: 22px; color: var(--text-muted);">→</div>
+        {% endif %}
+        {% endfor %}
+    </div>
+</div>
+
+{# ── Layered card detail ── #}
 {% for layer in layers %}
-{% set layer_color = 'var(--accent)' if layer.name == 'Sources' else ('var(--green)' if layer.name == 'Signals' else ('var(--amber)' if layer.name == 'Scoring' else 'var(--blue, #3b82f6)')) %}
+{% set layer_color = phase_color.get(layer.name, 'var(--text-muted)') %}
 <div class="card" style="margin-bottom: 16px; border-left: 4px solid {{ layer_color }};">
     <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 12px;">
         <div>
@@ -32,49 +113,102 @@
     <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px;">
         {% for s in layer.steps %}
         {% set status = s.last_status %}
-        {% set status_color = 'var(--green)' if status == 'SUCCESS' else ('var(--red)' if status == 'FAILED' else ('var(--amber)' if status == 'RUNNING' else 'var(--text-muted)')) %}
+        {% set status_color = 'var(--green)' if status == 'SUCCESS' else ('var(--red)' if status in ['FAILED', 'ABORTED'] else ('var(--amber)' if status == 'RUNNING' else 'var(--text-muted)')) %}
         {% set step_link = '/sql?table=' ~ s.table if s.table else '#' %}
-        <a href="{{ step_link }}" style="display: block; background: var(--bg-card); border: 1px solid var(--border); border-left: 3px solid {{ status_color }}; border-radius: 6px; padding: 10px 12px; text-decoration: none; transition: background 0.1s;"
-           onmouseover="this.style.background='var(--bg-card-hover)'"
-           onmouseout="this.style.background='var(--bg-card)'">
-            <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 4px;">
-                <span class="mono" style="font-size: 12px; font-weight: 700; color: var(--text-primary);">{{ s.name }}</span>
-                {% if s.critical %}<span title="Critical step — pipeline aborts on failure" style="font-size: 8px; padding: 1px 5px; background: rgba(245,158,11,0.15); color: var(--amber); border-radius: 3px; font-weight: 700; letter-spacing: 0.4px;">CRITICAL</span>{% endif %}
-            </div>
-            <div style="font-size: 10px; color: var(--text-muted); margin-bottom: 6px;">
-                {{ s.module }}{% if s.frequency and s.frequency != 'daily' %} · <span style="color: var(--amber);">{{ s.frequency }}</span>{% endif %}
-            </div>
+        <div id="step-{{ s.name }}" style="position: relative; background: var(--bg-card); border: 1px solid var(--border); border-left: 3px solid {{ status_color }}; border-radius: 6px; padding: 10px 12px;">
+            <button type="button" class="rerun-btn" data-step="{{ s.name }}" title="Rerun {{ s.name }}"
+                style="position: absolute; top: 8px; right: 8px; background: var(--bg-card-hover); color: var(--text-secondary); border: 1px solid var(--border); cursor: pointer; padding: 3px 8px; border-radius: 4px; font-size: 11px; font-family: 'JetBrains Mono', monospace;">↻ Rerun</button>
+            <a href="{{ step_link }}" style="display: block; text-decoration: none; padding-right: 64px;">
+                <div style="display: flex; gap: 6px; align-items: baseline; margin-bottom: 4px;">
+                    <span class="mono" style="font-size: 12px; font-weight: 700; color: var(--text-primary);">{{ s.name }}</span>
+                    {% if s.critical %}<span title="Critical step — pipeline aborts on failure" style="font-size: 8px; padding: 1px 5px; background: rgba(245,158,11,0.15); color: var(--amber); border-radius: 3px; font-weight: 700; letter-spacing: 0.4px;">CRITICAL</span>{% endif %}
+                </div>
+                <div style="font-size: 10px; color: var(--text-muted); margin-bottom: 6px;">
+                    {{ s.module }}{% if s.frequency and s.frequency != 'daily' %} · <span style="color: var(--amber);">{{ s.frequency }}</span>{% endif %}
+                </div>
 
-            {% if s.table %}
-            <div class="mono" style="font-size: 10px; color: var(--text-secondary); margin-bottom: 4px;">
-                &rarr; <span style="color: var(--accent);">{{ s.table }}</span>
-            </div>
-            {% endif %}
-
-            {% if s.source %}
-            <div style="font-size: 10px; color: var(--text-muted); line-height: 1.4; margin-bottom: 6px;">{{ s.source }}</div>
-            {% endif %}
-
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border);">
-                <span style="font-size: 9px; padding: 2px 6px; color: {{ status_color }}; border: 1px solid {{ status_color }}; border-radius: 3px; font-weight: 700; letter-spacing: 0.4px;">
-                    {{ status or 'NEVER RUN' }}
-                </span>
-                {% if s.last_rows is not none %}
-                <span class="mono" style="font-size: 10px; color: var(--text-muted);">{{ "{:,}".format(s.last_rows) }} rows</span>
+                {% if s.table %}
+                <div class="mono" style="font-size: 10px; color: var(--text-secondary); margin-bottom: 4px;">
+                    &rarr; <span style="color: var(--accent);">{{ s.table }}</span>
+                </div>
                 {% endif %}
-            </div>
-            {% if s.last_error %}
-            <div style="margin-top: 6px; font-size: 10px; color: var(--red); font-family: 'JetBrains Mono', monospace; word-break: break-word;">{{ s.last_error[:100] }}{% if s.last_error|length > 100 %}…{% endif %}</div>
-            {% endif %}
-        </a>
+
+                {% if s.source %}
+                <div style="font-size: 10px; color: var(--text-muted); line-height: 1.4; margin-bottom: 6px;">{{ s.source }}</div>
+                {% endif %}
+
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border);">
+                    <span style="font-size: 9px; padding: 2px 6px; color: {{ status_color }}; border: 1px solid {{ status_color }}; border-radius: 3px; font-weight: 700; letter-spacing: 0.4px;">
+                        {{ status or 'NEVER RUN' }}
+                    </span>
+                    {% if s.last_rows is not none %}
+                    <span class="mono" style="font-size: 10px; color: var(--text-muted);">{{ "{:,}".format(s.last_rows) }} rows</span>
+                    {% endif %}
+                </div>
+                {% if s.last_error %}
+                <div style="margin-top: 6px; font-size: 10px; color: var(--red); font-family: 'JetBrains Mono', monospace; word-break: break-word;">{{ s.last_error[:100] }}{% if s.last_error|length > 100 %}…{% endif %}</div>
+                {% endif %}
+            </a>
+        </div>
         {% endfor %}
     </div>
 </div>
 
-{# Down-arrow between layers (skip after the last) #}
 {% if not loop.last %}
 <div style="text-align: center; color: var(--text-muted); font-size: 18px; margin: -8px 0;">▾</div>
 {% endif %}
 {% endfor %}
+
+<script>
+(function () {
+    // ── Auto-refresh countdown ──
+    let remaining = 60;
+    const tick = document.getElementById("flow-refresh-tick");
+    setInterval(() => {
+        remaining -= 1;
+        if (tick) tick.textContent = "refreshing in " + remaining + "s";
+        if (remaining <= 0) location.reload();
+    }, 1000);
+
+    // ── Toast helper ──
+    const toast = document.getElementById("flow-toast");
+    function showToast(msg, color) {
+        if (!toast) return;
+        toast.textContent = msg;
+        toast.style.color = color || "var(--green)";
+        toast.style.opacity = "1";
+        setTimeout(() => { toast.style.opacity = "0"; }, 4000);
+    }
+
+    // ── Rerun handler ──
+    document.querySelectorAll(".rerun-btn").forEach((btn) => {
+        btn.addEventListener("click", async (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const step = btn.dataset.step;
+            if (!confirm("Rerun step '" + step + "' now? It will run in the background; status updates on next refresh.")) return;
+            btn.disabled = true;
+            const oldText = btn.textContent;
+            btn.textContent = "…";
+            try {
+                const res = await fetch("/api/pipeline/rerun/" + encodeURIComponent(step), { method: "POST" });
+                const body = await res.json();
+                if (res.ok && body.ok) {
+                    showToast("✓ " + step + " queued", "var(--green)");
+                    // Speed up the refresh so the user sees state change sooner.
+                    remaining = Math.min(remaining, 8);
+                } else {
+                    showToast("✗ " + (body.error || "rerun failed"), "var(--red)");
+                }
+            } catch (err) {
+                showToast("✗ network error: " + err.message, "var(--red)");
+            } finally {
+                btn.disabled = false;
+                btn.textContent = oldText;
+            }
+        });
+    });
+})();
+</script>
 
 {% endblock %}

@@ -84,3 +84,7 @@ tmp/
 
 # Shell scripts
 *.sh
+
+# Playwright MCP verification artifacts (per-session DOM snapshots + screenshots)
+.playwright-mcp/
+flow-*.png

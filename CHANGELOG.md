@@ -4,6 +4,16 @@ Newest at the top. Skip typos and formatting; only log changes future-you would 
 
 ---
 
+## 2026-05-02
+
+- **`/flow` page rebuilt with a hand-rolled mini-DAG.** Four phase columns (Sources / Signals / Scoring / Output) side-by-side with `→` arrows between them, color-coded step pills (SUCCESS / FAILED / RUNNING / ABORTED / NEVER RUN), critical-fail steps get a thick red border. Sits above the existing detail-card grid in [cockpit/templates/flow.html](cockpit/templates/flow.html). No graph library — pure CSS grid + flexbox.
+- **In-UI step rerun.** `↻` button on every step pill (mini-DAG) and every detail card → POST `/api/pipeline/rerun/{step_name}` → spawns `python pipeline.py --step <name>` as a detached subprocess via `start_new_session=True`. Logs to `output/rerun.log`. Backed by `rerun_step()` in [cockpit/api.py](cockpit/api.py) and a new POST route in [cockpit/app.py](cockpit/app.py). See [docs/decisions/0008-cockpit-write-surface.md](docs/decisions/0008-cockpit-write-surface.md) for the architectural shift (cockpit is now a write-side surface) and the five guardrails every future write endpoint must satisfy.
+- **Duplicate protection on rerun.** Refuses with HTTP 409 `{"ok": false, "error": "<step> is already RUNNING"}` if a `pipeline_log` row for that step is RUNNING and younger than 5 minutes. Stale RUNNING (older) is treated as crashed and the rerun proceeds.
+- **Auto-refresh on `/flow`** every 60s with a visible countdown; rerun click shortens the countdown to 8s so the status flip is visible without a manual reload.
+- **Smoke tests updated.** Replaced the intermediate Mermaid-renderer tests with `test_flow_overview_returns_layers_and_failures` and `test_rerun_step_rejects_unknown_step`. All 6 pass via `python -m tests.test_smoke`.
+- **Mermaid tried and rejected.** Earlier in the session the DAG was rendered via Mermaid (`cockpit/pipeline_dag.py`); its auto-layout collapsed 26 nodes into an unreadable horizontal stripe. The hand-rolled CSS-grid version replaced it; `cockpit/pipeline_dag.py` is deleted.
+- **Dagster considered and rejected.** Conversation started as "should we add Dagster for pipeline visualization and asset-centric observability?" Per [docs/decisions/0002-no-prefect.md](docs/decisions/0002-no-prefect.md) (which explicitly named Dagster as an alternative and rejected it 23 days ago), and given no concrete observability gap that `SELECT * FROM pipeline_log` can't answer, the decision held. The narrower thing that *did* get accepted — cockpit may now mutate state via subprocess spawning — is recorded in ADR 0008.
+
 ## 2026-05-01
 
 - **v2 took over from v1.** Cron daily slot (3:30 UTC = 9 IST) now runs `~/alpha-signal-v2/run_pipeline.sh`. v1 line commented for rollback. Pipeline ran end-to-end clean (1814 bhavcopy rows, 220 news, 2448 picks, 5 dossiers, email sent).

@@ -2,7 +2,7 @@
 
 Daily stock intelligence for Indian retail investors. Computes 12 signals across 2,448 stocks, ranks them within market cap tiers, and emails the top picks with AI-generated investment theses.
 
-**Owner:** Amit Bhagat | **Stack:** Python + SQLite + Jupyter | **Status:** Phase 7 of 9 complete
+**Owner:** Amit Bhagat | **Stack:** Python + SQLite + Jupyter | **Status:** In production (v2 took over from v1 on 2026-05-01)
 
 ---
 
@@ -74,12 +74,12 @@ jupyter notebook notebooks/00_sql_explorer.ipynb
 
 ## Status (high level)
 
-- ✅ Phase 0–7: foundation, data migration, signals, scoring, output — **DONE**
-- 🔄 Phase D: data fetchers — Tickertape/RSS/bhavcopy modules pending
-- ⏳ Phase 8: tests — not started
-- ⏳ Phase 9: parallel run alongside v1 — not started
+- ✅ Foundation, data migration, signals, scoring, output — **DONE**
+- ✅ Data fetchers: bhavcopy + RSS + insider + bulk-deals + macro all on daily cron; Tickertape on monthly cron (`run_tickertape_monthly.sh`)
+- ✅ Smoke tests — [tests/test_smoke.py](tests/test_smoke.py); 6 tests covering imports, dry-run, critical-step config, flow overview, rerun guardrails
+- ✅ Parallel run + cutover — **2026-05-01**: v2 replaced v1 on the 03:30 UTC cron slot; v1 stays installed for rollback only
 
-For full status see [CLAUDE.md](CLAUDE.md) and [CHANGELOG.md](CHANGELOG.md).
+Open items (see [HANDOFF.md](HANDOFF.md) for the live list): distill the regulatory-signal and macro-data plans into reference docs, resume the regulatory harvester (paused 2026-04-10 on Anthropic budget), backtest the three new signals (insider / regulatory / macro sector), decide on v1 weekend-refresh decommission, add PIB scraper incremental-save.
 
 ## Relationship to v1
 
