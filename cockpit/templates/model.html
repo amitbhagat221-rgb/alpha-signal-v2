@@ -101,7 +101,148 @@
     </table>
 </div>
 
-{# ── Backtest validation ── #}
+{# ── Backtest Roster: what's IN the backtest, what's NOT, and why ── #}
+{% if backtest_roster %}
+<div class="card" style="margin-bottom: 20px;">
+    <div class="section-title">Backtest Factor Roster</div>
+    <div class="section-desc">
+        Cross-referenced against v1's full factor inventory. Even DROP-verdict signals stay listed — economic regimes shift; today's noise can be tomorrow's alpha.
+        <b>READY</b> = in PIT, backtest today.
+        <b>PARTIAL</b> = in PIT with a caveat.
+        <b>MISSING</b> = data exists but reconstruction not yet built.
+        <b>PROPOSED</b> = factor known from v1; data available; v2 module not yet written (clear next deliverable).
+        <b>BLOCKED</b> = raw data fundamentally insufficient — wontfix without a new source.
+    </div>
+
+    {# Status summary row — 5 buckets #}
+    <div style="display: flex; gap: 12px; flex-wrap: wrap; margin-top: 12px; margin-bottom: 16px;">
+        {% for st, color, label in [('READY','var(--green)','Ready'), ('PARTIAL','var(--amber)','Partial'), ('MISSING','var(--red)','Missing'), ('PROPOSED','var(--accent)','Proposed'), ('BLOCKED','var(--text-muted)','Blocked')] %}
+        <div style="padding: 10px 14px; background: var(--bg-card-hover); border-left: 3px solid {{ color }}; border-radius: 4px; min-width: 90px;">
+            <div style="font-size: 10px; color: var(--text-muted); letter-spacing: 0.5px; text-transform: uppercase;">{{ label }}</div>
+            <div class="mono" style="font-size: 20px; font-weight: 800; color: {{ color }};">{{ backtest_roster.summary[st] or 0 }}</div>
+        </div>
+        {% endfor %}
+        <div style="padding: 10px 14px; background: var(--bg-card-hover); border-left: 3px solid var(--text-primary); border-radius: 4px; min-width: 90px;">
+            <div style="font-size: 10px; color: var(--text-muted); letter-spacing: 0.5px; text-transform: uppercase;">Total</div>
+            <div class="mono" style="font-size: 20px; font-weight: 800; color: var(--text-primary);">{{ backtest_roster.signals|length }}</div>
+        </div>
+    </div>
+
+    {% set status_color_map = {'READY': 'var(--green)', 'PARTIAL': 'var(--amber)', 'MISSING': 'var(--red)', 'PROPOSED': 'var(--accent)', 'BLOCKED': 'var(--text-muted)'} %}
+    {% set status_icon_map = {'READY': '✓', 'PARTIAL': '!', 'MISSING': '✗', 'PROPOSED': '+', 'BLOCKED': '⊘'} %}
+
+    <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
+        <thead>
+            <tr style="color: var(--text-muted); text-align: left; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px;">
+                <th style="padding: 10px 8px; border-bottom: 2px solid var(--border-accent);">Signal</th>
+                <th style="padding: 10px 8px; border-bottom: 2px solid var(--border-accent);">Status</th>
+                <th style="padding: 10px 8px; border-bottom: 2px solid var(--border-accent);">Source</th>
+                <th style="padding: 10px 8px; border-bottom: 2px solid var(--border-accent);">Filing lag</th>
+                <th style="padding: 10px 8px; text-align: right; border-bottom: 2px solid var(--border-accent);">History</th>
+                <th style="padding: 10px 8px; border-bottom: 2px solid var(--border-accent);">C13b (L / M / S)</th>
+                <th style="padding: 10px 8px; border-bottom: 2px solid var(--border-accent);">Notes</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for grp in backtest_roster.groups %}
+            {# Group header row #}
+            <tr style="background: var(--bg-card-hover);">
+                <td colspan="7" style="padding: 8px 12px; font-size: 11px; font-weight: 700; letter-spacing: 0.8px; color: var(--accent); text-transform: uppercase; border-top: 1px solid var(--border-accent);">
+                    {{ grp.name }}
+                    <span style="color: var(--text-muted); font-weight: 500; margin-left: 8px; letter-spacing: 0.3px;">({{ grp.signals|length }} factor{{ '' if grp.signals|length == 1 else 's' }})</span>
+                </td>
+            </tr>
+        {% for s in grp.signals %}
+            {% set status_color = status_color_map.get(s.status, 'var(--text-muted)') %}
+            {% set status_icon = status_icon_map.get(s.status, '?') %}
+            <tr style="border-bottom: 1px solid var(--border);">
+                <td style="padding: 10px 8px; vertical-align: top;">
+                    <div class="mono" style="color: var(--text-primary); font-weight: 700;">{{ s.signal }}</div>
+                    <div style="color: var(--text-secondary); font-size: 11px; margin-top: 2px;">{{ s.label }}</div>
+                    <div style="color: var(--text-muted); font-size: 11px; margin-top: 2px;">{{ s.description }}</div>
+                </td>
+                <td style="padding: 10px 8px; vertical-align: top;">
+                    <span style="display: inline-block; padding: 3px 8px; background: {{ status_color }}22; color: {{ status_color }}; border-radius: 4px; font-size: 11px; font-weight: 700; letter-spacing: 0.5px; white-space: nowrap;">
+                        {{ status_icon }} {{ s.status }}
+                    </span>
+                </td>
+                <td style="padding: 10px 8px; vertical-align: top; font-size: 11px; color: var(--text-secondary); max-width: 240px;">
+                    <div style="color: var(--text-muted); font-size: 10px; margin-bottom: 3px;">tables: <span class="mono">{{ s.source_tables|join(', ') }}</span></div>
+                    {% for col in s.source_columns %}<span class="mono" style="display: inline-block; padding: 1px 5px; margin: 1px; background: var(--bg-card-hover); border-radius: 3px; font-size: 10px;">{{ col }}</span>{% endfor %}
+                </td>
+                <td style="padding: 10px 8px; vertical-align: top; font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--text-muted);">{{ s.filing_lag or '—' }}</td>
+                <td style="padding: 10px 8px; vertical-align: top; text-align: right; font-family: 'JetBrains Mono', monospace;">
+                    {% if s.max_dates and s.max_dates > 0 %}
+                        <div style="color: var(--text-primary); font-weight: 700;">{{ s.max_dates }}</div>
+                        <div style="color: var(--text-muted); font-size: 10px;">dates</div>
+                        {% if s.first_date and s.last_date %}
+                        <div style="color: var(--text-muted); font-size: 10px;">{{ s.first_date[:7] }} → {{ s.last_date[:7] }}</div>
+                        {% endif %}
+                        <div style="color: var(--text-muted); font-size: 10px; margin-top: 2px;">{{ s.live_source }}</div>
+                    {% else %}
+                        <span style="color: var(--text-muted); font-weight: 600;">—</span>
+                        <div style="color: var(--text-muted); font-size: 10px;">not in PIT</div>
+                    {% endif %}
+                </td>
+                <td style="padding: 10px 8px; vertical-align: top; font-size: 11px;">
+                    {% if s.ic_by_tier %}
+                        {% for tier in ['LARGE', 'MID', 'SMALL'] %}
+                            {% set ic = s.ic_by_tier.get(tier) %}
+                            {% if ic %}
+                                {% set v_color = 'var(--green)' if ic.verdict == 'KEEP' else ('var(--amber)' if ic.verdict == 'WEAK' else 'var(--text-muted)') %}
+                                <div style="display: flex; gap: 6px; align-items: baseline; margin: 1px 0;">
+                                    <span class="mono" style="color: var(--text-muted); font-size: 9px; width: 38px;">{{ tier }}</span>
+                                    <span class="mono" style="color: {{ v_color }}; font-weight: 700; font-size: 10px;">{{ ic.verdict }}</span>
+                                    <span class="mono" style="color: var(--text-secondary); font-size: 10px;">t={{ ic.t_stat or '—' }}</span>
+                                </div>
+                            {% endif %}
+                        {% endfor %}
+                    {% elif s.v1_verdict_summary %}
+                        <div style="color: var(--text-muted); font-size: 10px; line-height: 1.4;">{{ s.v1_verdict_summary }}</div>
+                    {% else %}
+                        <span style="color: var(--text-muted);">—</span>
+                    {% endif %}
+                </td>
+                <td style="padding: 10px 8px; vertical-align: top; font-size: 11px; color: var(--text-secondary); max-width: 320px;">
+                    {{ s.status_reason or '' }}
+                </td>
+            </tr>
+        {% endfor %}
+        {% endfor %}
+        </tbody>
+    </table>
+
+    {# PIT tables and response variable summary #}
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 20px;">
+        <div style="padding: 12px; background: var(--bg-card-hover); border-radius: 6px;">
+            <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; font-weight: 700; margin-bottom: 8px;">PIT Tables (where the backtest dataset lives)</div>
+            {% for t in backtest_roster.pit_tables %}
+            <div style="margin: 6px 0; font-size: 12px;">
+                <span class="mono" style="color: var(--text-primary); font-weight: 700;">{{ t.table }}</span>
+                <span class="mono" style="color: var(--text-muted); font-size: 11px;">
+                    — {{ "{:,}".format(t.rows or 0) }} rows{% if t.n_dates %} · {{ t.n_dates }} dates{% endif %}{% if t.n_stocks %} · {{ t.n_stocks }} sids{% endif %}{% if t.first_date %} · {{ t.first_date[:10] }} → {{ t.last_date[:10] }}{% endif %}
+                </span>
+            </div>
+            {% endfor %}
+        </div>
+        <div style="padding: 12px; background: var(--bg-card-hover); border-radius: 6px;">
+            <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; font-weight: 700; margin-bottom: 8px;">Response variable (the y in IC)</div>
+            <div style="font-size: 12px;">
+                <span class="mono" style="color: var(--text-primary); font-weight: 700;">{{ backtest_roster.response.variable }}</span>
+                <span style="color: var(--text-muted);"> — {{ backtest_roster.response.horizon_days }}-day forward return, computed from <span class="mono">{{ backtest_roster.response.computed_from }}</span></span>
+            </div>
+            {% for r in backtest_roster.response.available_in %}
+            <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">
+                <span class="mono">{{ r.table }}</span>{% if r.rows %} ({{ "{:,}".format(r.rows) }} rows){% endif %}
+                <span style="color: var(--text-muted); font-size: 10px;"> — {{ r.note }}</span>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+{% endif %}
+
+{# ── Backtest validation (detailed t-stat table) ── #}
 <div class="card" style="margin-bottom: 20px;">
     <div class="section-title">Backtest — Signal Validation</div>
     <div class="section-desc">

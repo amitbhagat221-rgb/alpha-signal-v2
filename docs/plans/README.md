@@ -57,3 +57,6 @@ Related ADRs: [comma-separated ADR filenames, or leave blank]
 |------|--------|---------|-------|
 | [0001-regulatory-signal.md](0001-regulatory-signal.md) | Implemented — distillation pending | 2026-04-10 | Amit Bhagat |
 | [0002-macro-data.md](0002-macro-data.md) | Implemented — distillation pending | 2026-04-10 | Amit Bhagat |
+| [0003-mother-plan.md](0003-mother-plan.md) | active | 2026-05-03 | Amit Bhagat |
+| [0004-pit-reconstruction.md](0004-pit-reconstruction.md) | active | 2026-05-03 | Amit Bhagat |
+| [0005-100-factors-and-model.md](0005-100-factors-and-model.md) | active | 2026-05-03 | Amit Bhagat |

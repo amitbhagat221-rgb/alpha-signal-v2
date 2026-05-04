@@ -162,25 +162,56 @@ def insert_df(df, table_name, conn=None):
             return _execute(connection)
 
 
+_PK_CACHE = {}
+
+
+def _table_pk(table_name, connection):
+    """Return list of PK column names for a table. Cached."""
+    if table_name in _PK_CACHE:
+        return _PK_CACHE[table_name]
+    rows = connection.execute(f"PRAGMA table_info([{table_name}])").fetchall()
+    pks = [r[1] for r in rows if r[5] > 0]  # PRAGMA returns (cid, name, type, notnull, dflt, pk)
+    _PK_CACHE[table_name] = pks
+    return pks
+
+
 def upsert_df(df, table_name, conn=None):
     """
-    Insert or replace DataFrame rows (overwrites on PK conflict).
-    Use for tables where you want to UPDATE existing rows.
+    Upsert DataFrame rows: INSERT, or UPDATE only the provided columns on PK conflict.
 
-    Use for: analyst_consensus, stocks, regime_state, signal tables.
+    Uses SQLite's INSERT ... ON CONFLICT(pk) DO UPDATE SET col=excluded.col ...
+    so columns NOT in `df` are preserved (unlike INSERT OR REPLACE which nulls them).
 
-    WARNING: INSERT OR REPLACE internally DELETEs then INSERTs.
-    Current schema has no ON DELETE CASCADE, so this is safe.
-    If cascade deletes are ever added, switch to INSERT ... ON CONFLICT UPDATE.
+    Use for: analyst_consensus, stocks, regime_state, daily_snapshots_pit, signal tables.
+
+    For tables without a declared primary key, falls back to INSERT OR REPLACE
+    with a warning — those callers should be migrated.
     """
     if df.empty:
         return 0
 
-    cols = ", ".join(f"[{c}]" for c in df.columns)
-    placeholders = ", ".join(["?"] * len(df.columns))
-    sql = f"INSERT OR REPLACE INTO [{table_name}] ({cols}) VALUES ({placeholders})"
+    df_cols = list(df.columns)
+    cols = ", ".join(f"[{c}]" for c in df_cols)
+    placeholders = ", ".join(["?"] * len(df_cols))
 
     def _execute(connection):
+        pk_cols = _table_pk(table_name, connection)
+        if not pk_cols:
+            # No PK declared — fall back to OR REPLACE (legacy behavior, all-cols expected)
+            sql = f"INSERT OR REPLACE INTO [{table_name}] ({cols}) VALUES ({placeholders})"
+        else:
+            # ON CONFLICT UPDATE clause for non-PK columns present in df
+            update_cols = [c for c in df_cols if c not in pk_cols]
+            if update_cols:
+                set_clause = ", ".join(f"[{c}]=excluded.[{c}]" for c in update_cols)
+                conflict_cols = ", ".join(f"[{c}]" for c in pk_cols)
+                sql = (
+                    f"INSERT INTO [{table_name}] ({cols}) VALUES ({placeholders}) "
+                    f"ON CONFLICT({conflict_cols}) DO UPDATE SET {set_clause}"
+                )
+            else:
+                # df contains only PK cols — INSERT OR IGNORE (no-op on conflict)
+                sql = f"INSERT OR IGNORE INTO [{table_name}] ({cols}) VALUES ({placeholders})"
         cursor = connection.executemany(sql, df.values.tolist())
         return cursor.rowcount
 
@@ -412,6 +443,26 @@ TABLE_META = {
         "depth": "Growing daily",
         "description": "Output of the diff engine — what changed today vs yesterday. ENTRY/EXIT/UPGRADE/DOWNGRADE/SIGNAL_FIRED/REGIME_CHANGE events.",
         "consumed_by": "morning_brief Today's Changes card",
+    },
+
+    # ── Backtest (PIT) ──
+    "daily_snapshots_pit_v1": {
+        "kind": "RAW",
+        "depth": "35 monthly dates (Apr 2023 → Feb 2026)",
+        "description": "Frozen v1 PIT reconstruction — 1,978 stocks × 35 monthly eval dates × 13 signals + precomputed fwd_return_20d. The canonical historical backtest dataset. Source for the C13b t-stats baked into config.SIGNAL_WEIGHTS. Imported via tools/import_v1_pit.py from /home/ubuntu/alpha-signal/data/backtest/reconstructed_signals.csv.",
+        "consumed_by": "/model Backtest Roster, future tools/backtest_pit.py",
+    },
+    "daily_snapshots_pit": {
+        "kind": "COMPUTED",
+        "depth": "Forward extension (currently 7 monthly dates Nov 2025 → May 2026)",
+        "description": "v2 PIT reconstruction extending forward of the v1 archive. Computed by tools/reconstruct_pit.py with proper filing-lag discipline (75d annual / 60d quarterly / 21d shareholding). Adds m_score and z_score (forensic) which v1 lacks. Use for backtests in dates after 2026-02 where v1 stops.",
+        "consumed_by": "/model Backtest Roster, future tools/backtest_pit.py",
+    },
+    "pit_ic_by_tier_v1": {
+        "kind": "RAW",
+        "depth": "30 rows (10 signals × 3 tiers)",
+        "description": "Canonical IC / t-stat / verdict per signal × cap_tier from v1's 36-period validation. Source-of-truth for every weight in config.SIGNAL_WEIGHTS. Read-only; new t-stats from v2 reconstruction will land in a separate pit_ic_by_tier_v2 table.",
+        "consumed_by": "/model Validation table, /model Backtest Roster",
     },
 
     # ── System ──
@@ -720,10 +771,685 @@ TABLE_DOMAIN = {
     "daily_picks": "Output",
     "daily_snapshots": "Output",
     "daily_changes": "Output",
+    # Backtest (PIT reconstruction)
+    "daily_snapshots_pit": "Backtest (PIT)",
+    "daily_snapshots_pit_v1": "Backtest (PIT)",
+    "pit_ic_by_tier_v1": "Backtest (PIT)",
     # Pipeline / internal
     "pipeline_log": "Pipeline",
     "sqlite_sequence": "Pipeline",
 }
+
+
+
+
+# ── Backtest Signal Registry ──
+#
+# Signal-level view of the backtest universe. Cross-referenced against v1's
+# full factor inventory (scripts/03_screener.py + signal_validation_by_tier.csv +
+# reconstructed_signals.csv) so even DROP-verdict signals stay in the registry —
+# economic regimes shift; today's noise can be tomorrow's alpha. We compute and
+# store everything; we just don't *weight* the dropped ones.
+#
+# `status` taxonomy (5 levels, in order of readiness):
+#   READY    — signal values are in a PIT table; backtest can run today
+#   PARTIAL  — in PIT but with known caveat (data divergence, sparse coverage,
+#              missing in one source — usable with documented limit)
+#   MISSING  — signal NOT in any PIT table, but raw data exists; reconstruction
+#              is additive engineering effort (no data gap blocks it)
+#   PROPOSED — factor exists in v1's inventory; raw data exists in v2 to compute
+#              it but no v2 module has been written yet (clear next deliverable)
+#   BLOCKED  — raw data fundamentally insufficient (e.g. NSE bulk_deals has no
+#              historical archive). Forward-only or wontfix without new source.
+#
+# IC / t-stat / verdict come from pit_ic_by_tier_v1 at runtime — no hardcoding.
+BACKTEST_SIGNALS = [
+
+    # ═══════════════════════════════════════════════════════════════════
+    # GROUP 1 — VALUE
+    # ═══════════════════════════════════════════════════════════════════
+
+    {
+        "signal": "earnings_yield",
+        "label": "Earnings Yield (TTM E/P)",
+        "group": "Value",
+        "description": "Trailing 12-month EPS / current price",
+        "source_tables": ["quarterly_income", "stock_prices"],
+        "source_columns": ["qi.eps", "stock_prices.close"],
+        "filing_lag": "60d quarterly + 0d price",
+        "pit_column_v1": "earnings_yield",
+        "pit_column_v2": "earnings_yield",
+        "v1_verdict_summary": "DROP / DROP / KEEP (t=3.13 SMALL)",
+        "status": "READY",
+        "status_reason": "",
+    },
+    {
+        "signal": "book_to_price",
+        "label": "Book-to-Price",
+        "group": "Value",
+        "description": "Per-share book equity / price",
+        "source_tables": ["annual_balance_sheet", "stock_prices"],
+        "source_columns": ["bs.total_equity", "bs.shares_outstanding", "stock_prices.close"],
+        "filing_lag": "75d annual + 0d price",
+        "pit_column_v1": "book_to_price",
+        "pit_column_v2": "book_to_price",
+        "v1_verdict_summary": "DROP / WEAK / KEEP (t=2.54 SMALL)",
+        "status": "READY",
+        "status_reason": "",
+    },
+    {
+        "signal": "position_52w",
+        "label": "52-Week Range Position",
+        "group": "Value",
+        "description": "(close − 52w_low) / (52w_high − 52w_low) — proximity to lows is value-positive",
+        "source_tables": ["stock_prices"],
+        "source_columns": ["stock_prices.close (rolling 252d high/low)"],
+        "filing_lag": "0d",
+        "pit_column_v1": None,
+        "pit_column_v2": "position_52w",
+        "v1_verdict_summary": "(used as 25% of value composite, not separately validated)",
+        "status": "READY",
+        "status_reason": "",
+    },
+
+    # ═══════════════════════════════════════════════════════════════════
+    # GROUP 2 — QUALITY (profitability + leverage + efficiency)
+    # ═══════════════════════════════════════════════════════════════════
+
+    {
+        "signal": "piotroski_f_score",
+        "label": "Piotroski F-Score",
+        "group": "Quality",
+        "description": "9-factor profitability + leverage + efficiency score (0-9)",
+        "source_tables": ["quarterly_income", "annual_balance_sheet", "annual_cash_flow"],
+        "source_columns": ["qi.{eps,net_income,revenue}", "bs.{total_assets,equity,debt,shares_outstanding}", "cf.operating_cash_flow"],
+        "filing_lag": "75d annual + 60d quarterly",
+        "pit_column_v1": "piotroski_f",
+        "pit_column_v2": "piotroski_f",
+        "v1_verdict_summary": "DROP / WEAK / KEEP (t=2.81 SMALL)",
+        "status": "READY",
+        "status_reason": "",
+    },
+    {
+        "signal": "cf_accruals_ratio",
+        "label": "CF Accruals (Sloan)",
+        "group": "Quality",
+        "description": "(Net income − operating CF) / total assets — earnings backed by cash",
+        "source_tables": ["quarterly_income", "annual_cash_flow", "annual_balance_sheet"],
+        "source_columns": ["qi.net_income", "cf.operating_cash_flow", "bs.total_assets"],
+        "filing_lag": "75d annual + 60d quarterly",
+        "pit_column_v1": "cf_accruals",
+        "pit_column_v2": "cf_accruals",
+        "v1_verdict_summary": "DROP / KEEP / WEAK (t=3.20 MID)",
+        "status": "READY",
+        "status_reason": "",
+    },
+    {
+        "signal": "bs_accruals_ratio",
+        "label": "BS Accruals",
+        "group": "Quality",
+        "description": "ΔWorking capital − capex − depreciation, scaled by assets",
+        "source_tables": ["annual_balance_sheet", "annual_cash_flow"],
+        "source_columns": ["bs.{current_assets,liabilities,cash}", "cf.{capex,depreciation}"],
+        "filing_lag": "75d annual",
+        "pit_column_v1": "bs_accruals",
+        "pit_column_v2": "bs_accruals",
+        "v1_verdict_summary": "DROP / DROP / DROP",
+        "status": "READY",
+        "status_reason": "Kept despite DROP — regimes change",
+    },
+    {
+        "signal": "earnings_persistence",
+        "label": "Earnings Persistence (EPS CV)",
+        "group": "Quality",
+        "description": "Coefficient of variation of trailing-8-quarter EPS — lower = more persistent",
+        "source_tables": ["quarterly_income"],
+        "source_columns": ["qi.eps"],
+        "filing_lag": "60d quarterly",
+        "pit_column_v1": "eps_cv",
+        "pit_column_v2": "earnings_persistence",
+        "v1_verdict_summary": "(diagnostic, sparse coverage)",
+        "status": "READY",
+        "status_reason": "",
+    },
+    {
+        "signal": "earnings_beat_rate",
+        "label": "Earnings Beat Rate",
+        "group": "Quality",
+        "description": "Fraction of last-N quarters where actual EPS beat consensus (proxy: vs prev-quarter run-rate)",
+        "source_tables": ["quarterly_income"],
+        "source_columns": ["qi.eps"],
+        "filing_lag": "60d quarterly",
+        "pit_column_v1": "earnings_beat_rate",
+        "pit_column_v2": "earnings_beat_rate",
+        "v1_verdict_summary": "(diagnostic, used inside accruals composite)",
+        "status": "READY",
+        "status_reason": "v2 reconstruction now writes column. Proxy: fraction of last 8 quarters with positive QoQ EPS growth (v1 used vs-consensus; we lack consensus per quarter). 2,161-2,221 stocks populated across all 7 snapshot dates.",
+    },
+    {
+        "signal": "roe",
+        "label": "Return on Equity",
+        "group": "Quality",
+        "description": "Net income / total equity (TTM)",
+        "source_tables": ["quarterly_income", "annual_balance_sheet"],
+        "source_columns": ["qi.net_income (TTM)", "bs.total_equity"],
+        "filing_lag": "75d annual + 60d quarterly",
+        "pit_column_v1": None,
+        "pit_column_v2": "roe",
+        "v1_verdict_summary": "(45% of quality composite — quality_recon: DROP all tiers)",
+        "status": "READY",
+        "status_reason": "Negative-equity stocks → NaN (D/E meaningless there).",
+    },
+    {
+        "signal": "roa",
+        "label": "Return on Assets",
+        "group": "Quality",
+        "description": "Net income / total assets (TTM)",
+        "source_tables": ["quarterly_income", "annual_balance_sheet"],
+        "source_columns": ["qi.net_income (TTM)", "bs.total_assets"],
+        "filing_lag": "75d annual + 60d quarterly",
+        "pit_column_v1": None,
+        "pit_column_v2": "roa",
+        "v1_verdict_summary": "(component of D15 financial sub-model; not in main C13b)",
+        "status": "READY",
+        "status_reason": "",
+    },
+    {
+        "signal": "debt_to_equity",
+        "label": "Debt-to-Equity",
+        "group": "Quality",
+        "description": "Total debt / total equity (lower better; financial sector excluded)",
+        "source_tables": ["annual_balance_sheet"],
+        "source_columns": ["bs.total_debt", "bs.total_equity"],
+        "filing_lag": "75d annual",
+        "pit_column_v1": None,
+        "pit_column_v2": "debt_to_equity",
+        "v1_verdict_summary": "(30% of quality composite)",
+        "status": "READY",
+        "status_reason": "Financial sector NaN'd (D/E meaningless for banks).",
+    },
+    {
+        "signal": "profit_margin",
+        "label": "Profit Margin",
+        "group": "Quality",
+        "description": "Net income / revenue (TTM)",
+        "source_tables": ["quarterly_income"],
+        "source_columns": ["qi.net_income", "qi.revenue"],
+        "filing_lag": "60d quarterly",
+        "pit_column_v1": None,
+        "pit_column_v2": "profit_margin",
+        "v1_verdict_summary": "(25% of quality composite)",
+        "status": "READY",
+        "status_reason": "",
+    },
+
+    # ═══════════════════════════════════════════════════════════════════
+    # GROUP 3 — GROWTH
+    # ═══════════════════════════════════════════════════════════════════
+
+    {
+        "signal": "revenue_growth_yoy",
+        "label": "Revenue YoY Growth",
+        "group": "Growth",
+        "description": "Trailing 4Q revenue / prior 4Q revenue − 1",
+        "source_tables": ["quarterly_income"],
+        "source_columns": ["qi.revenue (8 quarters)"],
+        "filing_lag": "60d quarterly",
+        "pit_column_v1": None,
+        "pit_column_v2": "revenue_growth_yoy",
+        "v1_verdict_summary": "growth_recon: DROP all tiers (n=16)",
+        "status": "READY",
+        "status_reason": "Kept despite v1 DROP — regimes change.",
+    },
+    {
+        "signal": "eps_growth_yoy",
+        "label": "EPS YoY Growth",
+        "group": "Growth",
+        "description": "Trailing 4Q EPS / prior 4Q EPS − 1",
+        "source_tables": ["quarterly_income"],
+        "source_columns": ["qi.eps (8 quarters)"],
+        "filing_lag": "60d quarterly",
+        "pit_column_v1": None,
+        "pit_column_v2": "eps_growth_yoy",
+        "v1_verdict_summary": "growth_recon: DROP all tiers",
+        "status": "READY",
+        "status_reason": "Kept despite v1 DROP. Tiny base EPS produces high noise — clipped to ±1000% range.",
+    },
+
+    # ═══════════════════════════════════════════════════════════════════
+    # GROUP 4 — MOMENTUM
+    # ═══════════════════════════════════════════════════════════════════
+
+    {
+        "signal": "mom_6m_adj",
+        "label": "Risk-Adj 6M Momentum",
+        "group": "Momentum",
+        "description": "6-month return / 6-month daily-return std, with 22-day skip window",
+        "source_tables": ["stock_prices"],
+        "source_columns": ["stock_prices.close"],
+        "filing_lag": "0d",
+        "pit_column_v1": "mom_6m",
+        "pit_column_v2": "mom_6m",
+        "v1_verdict_summary": "DROP / DROP / WEAK (t=1.32 SMALL)",
+        "status": "READY",
+        "status_reason": "v2 now uses split/bonus-adjusted close (stock_prices.adj_close, populated from split_adjustments). Post-fix v1↔v2 corr 0.66-0.72 across overlap dates. Remaining gap is dividend adjustment (v1 yfinance Adj Close adjusts dividends too; v2 doesn't yet). v1 archive is canonical for pre-2026 backtest reference; v2 is canonical going forward.",
+    },
+    {
+        "signal": "mom_12m_adj",
+        "label": "Risk-Adj 12M Momentum",
+        "group": "Momentum",
+        "description": "12-month return / 12-month daily-return std, with 22-day skip",
+        "source_tables": ["stock_prices"],
+        "source_columns": ["stock_prices.close"],
+        "filing_lag": "0d",
+        "pit_column_v1": "mom_12m",
+        "pit_column_v2": "mom_12m",
+        "v1_verdict_summary": "WEAK / DROP / WEAK (t=−1.64 LARGE, 1.76 SMALL)",
+        "status": "READY",
+        "status_reason": "Same fix as mom_6m_adj — uses adj_close. Post-fix v1↔v2 corr 0.61-0.78 (12m window catches more split events). Remaining gap = dividend adjustment.",
+    },
+    {
+        "signal": "macd_signal",
+        "label": "MACD Bullish Crossover",
+        "group": "Momentum",
+        "description": "12/26 EMA crossover state — binary signal from price",
+        "source_tables": ["stock_prices"],
+        "source_columns": ["stock_prices.close (252d)"],
+        "filing_lag": "0d",
+        "pit_column_v1": None,
+        "pit_column_v2": "macd_bullish",
+        "v1_verdict_summary": "(technical — used in v1 screener but not in C13b validation)",
+        "status": "READY",
+        "status_reason": "",
+    },
+
+    # ═══════════════════════════════════════════════════════════════════
+    # GROUP 5 — OWNERSHIP / INSIDER
+    # ═══════════════════════════════════════════════════════════════════
+
+    {
+        "signal": "promoter_qoq",
+        "label": "Promoter QoQ Change",
+        "group": "Ownership",
+        "description": "Quarter-over-quarter change in promoter holding %",
+        "source_tables": ["shareholding"],
+        "source_columns": ["shareholding.promoter_pct"],
+        "filing_lag": "21d",
+        "pit_column_v1": "promoter_qoq",
+        "pit_column_v2": "promoter_qoq",
+        "v1_verdict_summary": "DROP / DROP / KEEP (t=3.20 SMALL)",
+        "status": "READY",
+        "status_reason": "Diagnostic 2026-05-04: median |v1-v2 diff|=0.000 across 1,896 overlap stocks; when both >0.05 abs, **sign-match=97.4%**. The 0.55 raw correlation was scatter-dominated (most stocks have 0 change, agree trivially); for ranking purposes the signal is directionally sound. Backtest reproduces v1's t=3.20 SMALL exactly (validated 2026-05-03).",
+    },
+    {
+        "signal": "promoter_trend_4q",
+        "label": "Promoter 1-Year Trend",
+        "group": "Ownership",
+        "description": "Latest promoter % minus value 5 quarters ago",
+        "source_tables": ["shareholding"],
+        "source_columns": ["shareholding.promoter_pct (5 quarters)"],
+        "filing_lag": "21d",
+        "pit_column_v1": None,
+        "pit_column_v2": "promoter_trend_4q",
+        "v1_verdict_summary": "(35% of promoter composite, not separately validated)",
+        "status": "READY",
+        "status_reason": "",
+    },
+    {
+        "signal": "pledge_quality",
+        "label": "Pledge Quality",
+        "group": "Ownership",
+        "description": "1 − (promoter pledge %) — higher better",
+        "source_tables": ["shareholding"],
+        "source_columns": ["shareholding.pledge_pct"],
+        "filing_lag": "21d",
+        "pit_column_v1": "pledge_quality",
+        "pit_column_v2": "pledge_quality",
+        "v1_verdict_summary": "DROP all tiers",
+        "status": "READY",
+        "status_reason": "Now in both v1 archive and v2 recompute. Kept despite DROP — regimes change.",
+    },
+    {
+        "signal": "insider_signal",
+        "label": "Insider Trading Signal",
+        "group": "Ownership",
+        "description": "Promoter/KMP buy-vs-sell over trailing 90 days",
+        "source_tables": ["insider_trades"],
+        "source_columns": ["insider_trades.{person_category, transaction_type, value_lakhs, trade_date}"],
+        "filing_lag": "0d (NSE PIT discloses on transaction)",
+        "pit_column_v1": None,
+        "pit_column_v2": None,
+        "external_table": "insider_signals",
+        "v1_verdict_summary": "(not in C13b; new in v2)",
+        "status": "READY",
+        "status_reason": "Lives in insider_signals table — 29 monthly snapshots. Join on (sid, snapshot_date).",
+    },
+
+    # ═══════════════════════════════════════════════════════════════════
+    # GROUP 6 — FORENSIC
+    # ═══════════════════════════════════════════════════════════════════
+
+    {
+        "signal": "m_score",
+        "label": "Beneish M-Score",
+        "group": "Forensic",
+        "description": "Earnings manipulation detector (6-factor reduced model)",
+        "source_tables": ["quarterly_income", "annual_balance_sheet", "annual_cash_flow"],
+        "source_columns": ["qi.revenue", "bs.{receivables,current_assets,total_assets}", "cf.depreciation"],
+        "filing_lag": "75d annual + 60d quarterly",
+        "pit_column_v1": None,
+        "pit_column_v2": "m_score",
+        "v1_verdict_summary": "(not in C13b; new in v2)",
+        "status": "READY",
+        "status_reason": "Computed forward-only (n=7 months, 13,922 rows in daily_snapshots_pit). Backtest n grows monthly with cron. Signal is correct; only the C13b-grade t-stat needs n≥18.",
+    },
+    {
+        "signal": "z_score",
+        "label": "Altman Z'' (emerging market)",
+        "group": "Forensic",
+        "description": "Bankruptcy predictor, 4-factor emerging-market variant",
+        "source_tables": ["annual_balance_sheet", "annual_cash_flow"],
+        "source_columns": ["bs.{current_assets,liabilities,retained_earnings,total_assets}", "cf.operating_cash_flow"],
+        "filing_lag": "75d annual",
+        "pit_column_v1": None,
+        "pit_column_v2": "z_score",
+        "v1_verdict_summary": "(not in C13b; new in v2)",
+        "status": "READY",
+        "status_reason": "Computed forward-only (n=7 months, 15,504 rows). Backtest n grows monthly. Signal is correct; only C13b-grade t-stat needs n≥18.",
+    },
+
+    # ═══════════════════════════════════════════════════════════════════
+    # GROUP 7 — SMART MONEY
+    # ═══════════════════════════════════════════════════════════════════
+
+    {
+        "signal": "avg_delivery_pct_30d",
+        "label": "30-Day Avg Delivery %",
+        "group": "Smart Money",
+        "description": "Mean delivery percentage over trailing 30 days",
+        "source_tables": ["stock_prices"],
+        "source_columns": ["stock_prices.delivery_pct"],
+        "filing_lag": "0d",
+        "pit_column_v1": "avg_delivery_pct_30d",
+        "pit_column_v2": "avg_delivery_pct_30d",
+        "v1_verdict_summary": "DROP / DROP / WEAK (t=2.49 SMALL)",
+        "status": "READY",
+        "status_reason": "Now in both archives.",
+    },
+    {
+        "signal": "delivery_anomaly_z",
+        "label": "Delivery % Anomaly (z-score)",
+        "group": "Smart Money",
+        "description": "Today's delivery % vs 90-day mean, normalized",
+        "source_tables": ["stock_prices"],
+        "source_columns": ["stock_prices.delivery_pct (rolling 90d)"],
+        "filing_lag": "0d",
+        "pit_column_v1": None,
+        "pit_column_v2": "delivery_anomaly_z",
+        "v1_verdict_summary": "(component of v1 smart_money_score)",
+        "status": "READY",
+        "status_reason": "",
+    },
+    {
+        "signal": "bulk_deal_signal",
+        "label": "Bulk/Block Deal Activity",
+        "group": "Smart Money",
+        "description": "Net bulk-deal value over trailing 30 days, normalized by avg close",
+        "source_tables": ["bulk_deals", "stock_prices"],
+        "source_columns": ["bulk_deals.{quantity, price, buy_sell, deal_date}"],
+        "filing_lag": "0d",
+        "pit_column_v1": None,
+        "pit_column_v2": "bulk_deal_signal",
+        "v1_verdict_summary": "(60% weight in v1 smart_money_score)",
+        "status": "READY",
+        "status_reason": "Backfilled to 12 months via nselib (2025-06 → present, 13,652 deals). Was BLOCKED → PARTIAL → READY after discovering nselib.capital_market.bulk_deal_data with date-range support.",
+    },
+    {
+        "signal": "short_selling_signal",
+        "label": "Short-Selling Activity",
+        "group": "Smart Money",
+        "description": "Reported short-sold quantity over trailing 30 days, normalized by 30d avg volume",
+        "source_tables": ["short_selling_data", "stock_prices"],
+        "source_columns": ["short_selling_data.{quantity, short_date}"],
+        "filing_lag": "0d",
+        "pit_column_v1": None,
+        "pit_column_v2": "short_selling_signal",
+        "v1_verdict_summary": "(NEW signal class — not in v1 roster)",
+        "status": "READY",
+        "status_reason": "PIT signal compute function shipped (pit_short_selling_signal). 432-714 stocks/snapshot populated across 7 dates from 2025-11. Coverage limited to F&O-eligible names (only those have reported short-selling). Backtest n=5 monthly periods so far; will mature with cron.",
+    },
+    {
+        "signal": "fii_dii_cash_net",
+        "label": "FII/DII Cash Segment Net Flow",
+        "group": "Macro",
+        "description": "Daily net institutional buying in cash market (FII + DII separately)",
+        "source_tables": ["fii_dii_cash_flow"],
+        "source_columns": ["fii_dii_cash_flow.{net_value_cr, category}"],
+        "filing_lag": "0d (next-day publication)",
+        "pit_column_v1": None,
+        "pit_column_v2": None,
+        "v1_verdict_summary": "(NEW signal class — sector-agnostic macro tilt)",
+        "status": "READY",
+        "status_reason": "Macro-level signal (one row per date per category, not per-stock). Consumed by regime/macro overlay, not daily_snapshots_pit. Daily cron at 14:00 UTC accumulating from 2026-05-03 forward. ~22 trading days of history; will be backtest-grade by 2026-08.",
+    },
+    {
+        "signal": "fii_dii_fno_positioning",
+        "label": "FII/DII F&O Positioning",
+        "group": "Macro",
+        "description": "Participant-wise (Client/DII/FII/Pro) Future + Option long/short positioning",
+        "source_tables": ["fii_dii_positioning"],
+        "source_columns": ["fii_dii_positioning.{future_*, option_*, total_*, client_type}"],
+        "filing_lag": "0d (next-day publication)",
+        "pit_column_v1": None,
+        "pit_column_v2": None,
+        "v1_verdict_summary": "(NEW signal class)",
+        "status": "READY",
+        "status_reason": "Macro-level signal (5 rows/day across Client/DII/FII/Pro/TOTAL). Consumed by regime overlay. 220 rows backfilled (Feb-Apr 2026); accumulating forward via daily cron.",
+    },
+
+    # ═══════════════════════════════════════════════════════════════════
+    # GROUP 8 — CONSENSUS / FORECAST
+    # ═══════════════════════════════════════════════════════════════════
+
+    {
+        "signal": "pt_upside",
+        "label": "Price Target Upside",
+        "group": "Consensus",
+        "description": "(Latest analyst PT − current price) / current price",
+        "source_tables": ["forecast_history", "stock_prices"],
+        "source_columns": ["forecast_history.value WHERE metric='price'", "stock_prices.close"],
+        "filing_lag": "0d (use forecast.date for knowability)",
+        "pit_column_v1": None,
+        "pit_column_v2": "pt_upside",
+        "v1_verdict_summary": "(component of v1 consensus signal)",
+        "status": "READY",
+        "status_reason": "Sourced from forecast_history (annual PT snapshots back to 2015), NOT from analyst_consensus (which is snapshot-only).",
+    },
+    {
+        "signal": "pt_revision_yoy",
+        "label": "PT Revision YoY",
+        "group": "Consensus",
+        "description": "(Latest PT / prior-year PT) − 1, from forecast_history.price snapshots",
+        "source_tables": ["forecast_history"],
+        "source_columns": ["forecast_history.value WHERE metric='price'"],
+        "filing_lag": "0d (use forecast.date as knowability)",
+        "pit_column_v1": None,
+        "pit_column_v2": "pt_revision_yoy",
+        "v1_verdict_summary": "(component of v1 consensus signal)",
+        "status": "READY",
+        "status_reason": "Pattern 6 (annual-snapshot PIT). Coarser than monthly; still produces useful YoY revision signal.",
+    },
+    {
+        "signal": "eps_revision_yoy",
+        "label": "EPS Forecast Revision YoY",
+        "group": "Consensus",
+        "description": "Year-over-year change in consensus FY EPS estimate",
+        "source_tables": ["forecast_history"],
+        "source_columns": ["forecast_history.{value, change} WHERE metric='eps'"],
+        "filing_lag": "0d (use forecast.date as knowability)",
+        "pit_column_v1": None,
+        "pit_column_v2": "eps_revision_yoy",
+        "v1_verdict_summary": "(component of v1 consensus signal)",
+        "status": "READY",
+        "status_reason": "Pattern 6. Small-base-EPS stocks produce noise; combined signal mitigates.",
+    },
+    {
+        "signal": "consensus_signal_combined",
+        "label": "Consensus (PT + EPS revision)",
+        "group": "Consensus",
+        "description": "v1's headline consensus signal — mean of pt_revision_yoy + eps_revision_yoy",
+        "source_tables": ["forecast_history"],
+        "source_columns": ["forecast_history.{value} for metrics price + eps"],
+        "filing_lag": "0d",
+        "pit_column_v1": None,
+        "pit_column_v2": "consensus_signal_combined",
+        "v1_verdict_summary": "KEEP / WEAK / WEAK (t=3.52 LARGE — proxy validation in v1)",
+        "status": "READY",
+        "status_reason": "v2 reconstruction uses Pattern 6 — annual forecast snapshots from forecast_history. v1's t=3.52 was proxy-mode, not pure PIT, so v2 t-stat may differ. Still the headline LARGE-tier signal candidate for D17.",
+    },
+
+    # ═══════════════════════════════════════════════════════════════════
+    # GROUP 9 — SENTIMENT
+    # ═══════════════════════════════════════════════════════════════════
+
+    {
+        "signal": "sentiment_7d",
+        "label": "News Sentiment (VADER 7d)",
+        "group": "Sentiment",
+        "description": "Rolling 7-day mean VADER sentiment across articles tagged for the stock",
+        "source_tables": ["news_articles", "news_article_stocks"],
+        "source_columns": ["news_articles.{title, summary, published_at}", "news_article_stocks.sid"],
+        "filing_lag": "0d",
+        "pit_column_v1": None,
+        "pit_column_v2": None,
+        "v1_verdict_summary": "(used as adjustment in v1 screener, not in C13b)",
+        "status": "PARTIAL",
+        "status_reason": "Blocked on NLP setup. news_articles has no sentiment column — needs FinBERT classifier (see plan 0005 Phase A4). Once added, signal is computable on 2026-03+ data. Other partial fix: news_volume_7d (raw count) is now READY as a working proxy for attention.",
+    },
+    {
+        "signal": "news_volume",
+        "label": "News Article Volume (7d)",
+        "group": "Sentiment",
+        "description": "Count of articles in trailing 7 days — attention proxy",
+        "source_tables": ["news_articles", "news_article_stocks"],
+        "source_columns": ["news_article_stocks.sid (count)"],
+        "filing_lag": "0d",
+        "pit_column_v1": None,
+        "pit_column_v2": "news_volume_7d",
+        "v1_verdict_summary": "(diagnostic)",
+        "status": "READY",
+        "status_reason": "v2 column populated from news_articles ⟕ news_article_stocks. 0 rows for snapshots before news data starts (2024-04 single-day, then continuous from 2026-03). 10-118 stocks/date for 2026-03+. Forward-only — sentiment analysis (sentiment_7d) blocked on FinBERT setup, see plan 0005 Phase A4.",
+    },
+
+    # ═══════════════════════════════════════════════════════════════════
+    # GROUP 10 — SECTOR OVERLAYS (regulatory + macro — sector-level, not stock-level)
+    # ═══════════════════════════════════════════════════════════════════
+
+    {
+        "signal": "regulatory_sector_signal",
+        "label": "Regulatory Sector Tilt",
+        "group": "Regulatory",
+        "description": "Per-sector aggregate of AI-classified regulatory events with 90-day half-life decay",
+        "source_tables": ["regulatory_events", "regulatory_signals"],
+        "source_columns": ["regulatory_events.published_at", "regulatory_signals.{direction, magnitude, confidence}"],
+        "filing_lag": "0d",
+        "pit_column_v1": None,
+        "pit_column_v2": "macro_sector_signals_pit.regulatory_score",
+        "v1_verdict_summary": "(post-v1; Plan 0001)",
+        "status": "READY",
+        "status_reason": "Sector-level (not stock-level) — written to macro_sector_signals_pit. 11 sectors × 7 dates. Coverage limited by classified subset (5,687 of 16,523 events) — older dates have fewer events surviving the published_at filter.",
+    },
+    {
+        "signal": "macro_sector_signal",
+        "label": "Macro Sector Tilt",
+        "group": "Macro",
+        "description": "Per-sector aggregate of macro indicator changes (latest vs 90d-prior, weighted by direction)",
+        "source_tables": ["macro_history", "macro_indicator_meta", "macro_sector_map"],
+        "source_columns": ["macro_history.{value, date}", "macro_sector_map.{sector, direction, weight}"],
+        "filing_lag": "varies (1w to 8w by indicator)",
+        "pit_column_v1": None,
+        "pit_column_v2": "macro_sector_signals_pit.macro_score",
+        "v1_verdict_summary": "(post-v1; Plan 0002)",
+        "status": "READY",
+        "status_reason": "Sector-level — written to macro_sector_signals_pit. 11 sectors × 7 dates. Uses 30-row macro_sector_map for indicator→sector weighting.",
+    },
+
+    # ═══════════════════════════════════════════════════════════════════
+    # GROUP 11 — FACTOR COMPOSITES (v1 screener inputs)
+    # ═══════════════════════════════════════════════════════════════════
+
+    {
+        "signal": "value_composite",
+        "label": "Value Composite",
+        "group": "Composite",
+        "description": "v1 screener: 40% earnings_yield + 35% book_to_price + 25% position_52w (within-tier rank)",
+        "source_tables": ["—"],
+        "source_columns": ["earnings_yield + book_to_price + position_52w"],
+        "filing_lag": "max of components (75d annual)",
+        "pit_column_v1": None,
+        "pit_column_v2": "value_composite",
+        "v1_verdict_summary": "value_recon: DROP / DROP / KEEP (t=3.17 SMALL)",
+        "status": "READY",
+        "status_reason": "Within-tier rank, NaN-tolerant weighted average.",
+    },
+    {
+        "signal": "quality_composite",
+        "label": "Quality Composite",
+        "group": "Composite",
+        "description": "v1 screener: 45% roe + 30% inverse-debt_to_equity + 25% profit_margin (financials' D/E excluded)",
+        "source_tables": ["—"],
+        "source_columns": ["roe + debt_to_equity + profit_margin"],
+        "filing_lag": "75d annual + 60d quarterly",
+        "pit_column_v1": None,
+        "pit_column_v2": "quality_composite",
+        "v1_verdict_summary": "quality_recon: DROP all tiers",
+        "status": "READY",
+        "status_reason": "Within-tier rank. Kept despite v1 DROP.",
+    },
+    {
+        "signal": "growth_composite",
+        "label": "Growth Composite",
+        "group": "Composite",
+        "description": "v1 screener: 50% revenue_growth_yoy + 50% eps_growth_yoy (within-tier rank)",
+        "source_tables": ["—"],
+        "source_columns": ["revenue_growth_yoy + eps_growth_yoy"],
+        "filing_lag": "60d quarterly",
+        "pit_column_v1": None,
+        "pit_column_v2": "growth_composite",
+        "v1_verdict_summary": "growth_recon: DROP all tiers (n=16)",
+        "status": "READY",
+        "status_reason": "Kept despite v1 DROP.",
+    },
+    {
+        "signal": "momentum_composite",
+        "label": "Momentum Composite",
+        "group": "Composite",
+        "description": "v1 screener: 50% mom_6m + 50% mom_12m",
+        "source_tables": ["—"],
+        "source_columns": ["mom_6m + mom_12m"],
+        "filing_lag": "—",
+        "pit_column_v1": None,
+        "pit_column_v2": "mom_composite",
+        "v1_verdict_summary": "momentum_recon: DROP all tiers",
+        "status": "READY",
+        "status_reason": "Equal-weight composite of mom_6m + mom_12m, ranked within cap_tier.",
+    },
+    {
+        "signal": "screener_final_composite",
+        "label": "Final Screener Composite",
+        "group": "Composite",
+        "description": "Full screener output incl. all sub-signals + adjustments (forensic, sentiment, insider, macro)",
+        "source_tables": ["—"],
+        "source_columns": ["all of the above"],
+        "filing_lag": "—",
+        "pit_column_v1": None,
+        "pit_column_v2": None,
+        "v1_verdict_summary": "(insufficient PIT data — n=0 in v1)",
+        "status": "PROPOSED",
+        "status_reason": "End-state composite — built only after all sub-signals are PIT-ready. Tracks D17 portfolio construction work.",
+    },
+]
+
 
 # Display order for the domain sections.
 DOMAIN_ORDER = [
@@ -735,6 +1461,7 @@ DOMAIN_ORDER = [
     "Regulatory",
     "Computed Signals",
     "Output",
+    "Backtest (PIT)",
     "Pipeline",
     "Other",
 ]

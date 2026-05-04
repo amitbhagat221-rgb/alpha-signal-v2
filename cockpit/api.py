@@ -1153,7 +1153,179 @@ def get_model_overview():
         "quality_gate": QUALITY_GATE,
         "portfolio": PORTFOLIO,
         "transaction_costs_bps": TRANSACTION_COSTS_BPS,
+        "backtest_roster": get_backtest_roster(),
     }
+
+
+def get_backtest_roster():
+    """Signal-level backtest readiness for /model.
+
+    For each entry in db.BACKTEST_SIGNALS, enriches with live data:
+      - C13b verdict + t-stat per cap_tier (from pit_ic_by_tier_v1)
+      - Coverage snapshot (max history available, n_periods)
+
+    Returns a dict with:
+      signals: list of enriched signal rows
+      response: info on the response variable (fwd_return_20d)
+      pit_tables: summary of the PIT tables themselves
+      summary: count by status (READY / PARTIAL / MISSING)
+    """
+    from db import BACKTEST_SIGNALS, get_db, read_sql
+
+    # ── Existing PIT tables ──
+    with get_db() as conn:
+        names = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+
+    has_pit_v1 = "daily_snapshots_pit_v1" in names
+    has_pit_v2 = "daily_snapshots_pit" in names
+    has_ic = "pit_ic_by_tier_v1" in names
+
+    # ── IC table — group by signal for fast lookup ──
+    ic_by_signal = {}
+    if has_ic:
+        ic_rows = read_sql("SELECT signal, cap_tier, t_stat, verdict, n_periods FROM pit_ic_by_tier_v1")
+        for _, r in ic_rows.iterrows():
+            sig = r["signal"]
+            ic_by_signal.setdefault(sig, {})[r["cap_tier"]] = {
+                "t_stat": _safe_float(r["t_stat"], 2),
+                "verdict": r["verdict"],
+                "n_periods": _safe_int(r["n_periods"]),
+            }
+
+    # ── Coverage per PIT column ──
+    def _coverage(table, column):
+        if not column or table not in names:
+            return None
+        try:
+            df = read_sql(f"""
+                SELECT COUNT(DISTINCT snapshot_date) AS n_dates,
+                       MIN(snapshot_date) AS first_date,
+                       MAX(snapshot_date) AS last_date,
+                       AVG(CASE WHEN [{column}] IS NOT NULL THEN 1.0 ELSE 0 END) AS pct_filled
+                FROM [{table}]
+                WHERE [{column}] IS NOT NULL
+            """)
+            if df.empty or df.iloc[0]["n_dates"] == 0:
+                return None
+            r = df.iloc[0]
+            return {
+                "n_dates": _safe_int(r["n_dates"]),
+                "first_date": r["first_date"],
+                "last_date": r["last_date"],
+                "pct_filled": round(float(r["pct_filled"]) * 100, 1) if pd.notna(r["pct_filled"]) else None,
+            }
+        except Exception:
+            return None
+
+    # ── Enrich each signal ──
+    signals = []
+    for s in BACKTEST_SIGNALS:
+        cov_v1 = _coverage("daily_snapshots_pit_v1", s.get("pit_column_v1"))
+        cov_v2 = _coverage("daily_snapshots_pit", s.get("pit_column_v2"))
+        cov_ext = None
+        if s.get("external_table"):
+            ext_tbl = s["external_table"]
+            if ext_tbl in names:
+                try:
+                    df = read_sql(f"SELECT COUNT(DISTINCT snapshot_date) AS n, MIN(snapshot_date) AS f, MAX(snapshot_date) AS l FROM [{ext_tbl}]")
+                    if not df.empty and df.iloc[0]["n"] > 0:
+                        cov_ext = {
+                            "n_dates": _safe_int(df.iloc[0]["n"]),
+                            "first_date": df.iloc[0]["f"],
+                            "last_date": df.iloc[0]["l"],
+                            "table": ext_tbl,
+                        }
+                except Exception:
+                    pass
+
+        # Pick the deeper coverage as the headline
+        depths = []
+        if cov_v1 and cov_v1["n_dates"]: depths.append(("v1 archive", cov_v1["n_dates"], cov_v1["first_date"], cov_v1["last_date"]))
+        if cov_v2 and cov_v2["n_dates"]: depths.append(("v2 recompute", cov_v2["n_dates"], cov_v2["first_date"], cov_v2["last_date"]))
+        if cov_ext:                       depths.append((cov_ext["table"], cov_ext["n_dates"], cov_ext["first_date"], cov_ext["last_date"]))
+
+        max_dates = max((d[1] for d in depths), default=0)
+        first_date = min((d[2] for d in depths), default=None)
+        last_date = max((d[3] for d in depths), default=None)
+        sources = ", ".join(d[0] for d in depths) or "—"
+
+        signals.append({
+            **s,
+            "ic_by_tier": ic_by_signal.get(s["signal"], {}),
+            "coverage_v1": cov_v1,
+            "coverage_v2": cov_v2,
+            "coverage_external": cov_ext,
+            "max_dates": max_dates,
+            "first_date": first_date,
+            "last_date": last_date,
+            "live_source": sources,
+        })
+
+    # ── Response variable ──
+    response = {"variable": "fwd_return_20d", "computed_from": "stock_prices.close",
+                "horizon_days": 20, "available_in": []}
+    if has_pit_v1:
+        try:
+            df = read_sql("SELECT COUNT(*) AS n, MIN(snapshot_date) AS f, MAX(snapshot_date) AS l FROM daily_snapshots_pit_v1 WHERE fwd_return_20d IS NOT NULL")
+            if not df.empty and df.iloc[0]["n"] > 0:
+                response["available_in"].append({
+                    "table": "daily_snapshots_pit_v1",
+                    "rows": _safe_int(df.iloc[0]["n"]),
+                    "first_date": df.iloc[0]["f"],
+                    "last_date": df.iloc[0]["l"],
+                    "note": "precomputed",
+                })
+        except Exception:
+            pass
+    response["available_in"].append({
+        "table": "stock_prices",
+        "rows": None,
+        "note": "Compute on the fly: close on (eval_date + 20 trading days) / close on eval_date − 1",
+    })
+
+    # ── PIT table summary ──
+    pit_tables = []
+    for tbl in ["daily_snapshots_pit_v1", "daily_snapshots_pit", "pit_ic_by_tier_v1"]:
+        if tbl not in names:
+            continue
+        try:
+            r = read_sql(f"SELECT COUNT(*) AS rows FROM [{tbl}]").iloc[0]
+            entry = {"table": tbl, "rows": _safe_int(r["rows"])}
+            if tbl != "pit_ic_by_tier_v1":
+                d = read_sql(f"SELECT COUNT(DISTINCT snapshot_date) AS n_dates, MIN(snapshot_date) AS f, MAX(snapshot_date) AS l, COUNT(DISTINCT sid) AS sids FROM [{tbl}]").iloc[0]
+                entry.update({
+                    "n_dates": _safe_int(d["n_dates"]),
+                    "first_date": d["f"],
+                    "last_date": d["l"],
+                    "n_stocks": _safe_int(d["sids"]),
+                })
+            pit_tables.append(entry)
+        except Exception:
+            pass
+
+    # ── Summary counts by status ──
+    summary = {"READY": 0, "PARTIAL": 0, "MISSING": 0, "PROPOSED": 0, "BLOCKED": 0}
+    for s in signals:
+        summary[s["status"]] = summary.get(s["status"], 0) + 1
+
+    # ── Grouped (by signal.group) for the page layout ──
+    from collections import OrderedDict
+    GROUP_ORDER = ["Value", "Quality", "Growth", "Momentum", "Ownership",
+                   "Forensic", "Smart Money", "Consensus", "Sentiment",
+                   "Regulatory", "Macro", "Composite"]
+    grouped = OrderedDict((g, []) for g in GROUP_ORDER)
+    for s in signals:
+        g = s.get("group") or "Other"
+        grouped.setdefault(g, []).append(s)
+
+    return {
+        "signals": signals,
+        "groups": [{"name": g, "signals": gs} for g, gs in grouped.items() if gs],
+        "response": response,
+        "pit_tables": pit_tables,
+        "summary": summary,
+    }
+
 
 
 def _safe_int(v):

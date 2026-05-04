@@ -86,6 +86,7 @@ When working, the following triggers a doc update — these are not optional:
 | What changed recently | `CHANGELOG.md` |
 | Map of all docs | `docs/README.md` |
 | How the system fits together | `docs/architecture.md` |
+| **Data sources, PIT/historical access, reconstruction methods, gotchas** | **`docs/reference/data-playbook.md`** ⚠ READ BEFORE FETCHING |
 | Schema, signals, sources in detail | `docs/reference/` |
 | How to do X | `docs/runbooks/` |
 | Why we chose X | `docs/decisions/` |
