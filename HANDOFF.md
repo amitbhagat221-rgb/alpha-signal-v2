@@ -4,7 +4,7 @@
 
 **Last updated:** 2026-05-06 (Amit Bhagat + Claude Code)
 **Current branch:** `master` (4 commits ahead of origin/master — push blocked by harness policy, see "Open questions" #7)
-**HEAD:** `2fb1742` fix: split parser at 100% + smart-beta indices at 13 (was 9) — *working tree clean*
+**HEAD:** `25f71a2` fix: split parser at 100% + smart-beta indices at 13 (was 9) — *working tree clean*
 
 ---
 
