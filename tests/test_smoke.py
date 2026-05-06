@@ -79,6 +79,43 @@ def test_news_published_at_parses():
     pd.to_datetime(df["published_at"], format="ISO8601")  # raises if any row malformed
 
 
+def test_upsert_df_preserves_untouched_columns():
+    """Catches the upsert_df bug fixed in 88a2fa9: a partial column write
+    (e.g. `reconstruct_pit --signal X`) must not null the other columns
+    sharing the same PK row. Verifies INSERT ... ON CONFLICT DO UPDATE is in
+    effect, not the legacy INSERT OR REPLACE path."""
+    import sqlite3
+    import pandas as pd
+    from db import upsert_df, _PK_CACHE
+
+    conn = sqlite3.connect(":memory:")
+    table = "_upsert_regression_test"
+    _PK_CACHE.pop(table, None)  # avoid stale cache from any prior run
+    conn.executescript(f"""
+        CREATE TABLE {table} (
+            sid TEXT,
+            snapshot_date TEXT,
+            col_a REAL,
+            col_b REAL,
+            PRIMARY KEY (sid, snapshot_date)
+        );
+    """)
+
+    upsert_df(
+        pd.DataFrame([{"sid": "X", "snapshot_date": "2026-05-01", "col_a": 1.0, "col_b": 2.0}]),
+        table, conn=conn,
+    )
+    upsert_df(
+        pd.DataFrame([{"sid": "X", "snapshot_date": "2026-05-01", "col_a": 99.0}]),
+        table, conn=conn,
+    )
+
+    row = conn.execute(f"SELECT col_a, col_b FROM {table}").fetchone()
+    assert row == (99.0, 2.0), f"col_b nulled by partial upsert: got {row}"
+    _PK_CACHE.pop(table, None)
+    conn.close()
+
+
 if __name__ == "__main__":
     tests = [
         ("modules import", test_all_pipeline_modules_import),
@@ -87,6 +124,7 @@ if __name__ == "__main__":
         ("flow overview shape", test_flow_overview_returns_layers_and_failures),
         ("rerun rejects unknown step", test_rerun_step_rejects_unknown_step),
         ("news published_at parses", test_news_published_at_parses),
+        ("upsert_df preserves untouched cols", test_upsert_df_preserves_untouched_columns),
     ]
     failed = 0
     for label, fn in tests:

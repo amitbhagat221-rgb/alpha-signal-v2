@@ -2,9 +2,9 @@
 
 > Overwritten at the end of each session per CLAUDE.md session protocol. If you're starting a new session: read this, then CLAUDE.md, then any plan or ADR linked below.
 
-**Last updated:** 2026-05-04 (Amit Bhagat + Claude Code)
-**Current branch:** `master`
-**HEAD:** `6c91691` feat(cockpit): pipeline DAG viz + in-UI step rerun on /flow — *today's data + plan + factor work is unstaged*
+**Last updated:** 2026-05-05 (Amit Bhagat + Claude Code)
+**Current branch:** `master` (2 commits ahead of origin/master, unpushed)
+**HEAD:** `88a2fa9` feat: PIT reconstruction + factor cleanup (40/42 READY) + F-track project blueprint — *working tree clean*
 
 ---
 
@@ -26,8 +26,7 @@ Multi-day session that crossed PIT reconstruction, paid-data evaluation, the cle
 
 ## What's broken or half-built
 
-- **Nothing committed yet.** `git status` shows: M [CLAUDE.md](CLAUDE.md), [cockpit/api.py](cockpit/api.py), [cockpit/templates/_icons.html](cockpit/templates/_icons.html), [cockpit/templates/model.html](cockpit/templates/model.html), [db.py](db.py), [docs/plans/README.md](docs/plans/README.md), [docs/reference/README.md](docs/reference/README.md). New files: 3 plans, 3 reference docs, [sources/nselib_pull.py](sources/nselib_pull.py), entire `tools/` directory (apply_splits, backtest_pit, compute_splits, import_v1_pit, reconstruct_pit). Diff is **+1025 lines** in db.py alone.
-- **`INSERT OR REPLACE` bug in upsert_df.** Running `python -m tools.reconstruct_pit --signal X` only nulls every other column for that snapshot. Workaround: always run full reconstruction. Long-term fix: switch to `INSERT ... ON CONFLICT UPDATE` ([db.py:181](db.py#L181)). **Caused real data loss mid-session** when I ran `--signal earnings_beat_rate` then `--signal momentum` — both wiped prior columns. Recovered via final full reconstruction.
+- ~~upsert_df fix~~ **Resolved 2026-05-05.** Fix shipped in `88a2fa9`; regression test `test_upsert_df_preserves_untouched_columns` added to [tests/test_smoke.py](tests/test_smoke.py) (uses in-memory SQLite, no real-DB pollution). Audited every upsert_df target table — all 15 (`daily_snapshots_pit`, `daily_picks`, `forensic_scores`, `daily_snapshots`, `piotroski_scores`, `sentiment_scores`, `vix_history`, `macro_indicators`, `smart_money_scores`, `macro_sector_signals`, `insider_signals`, `analyst_consensus`, `stocks`, `regime_state`, `nse_index_history`) resolve real PKs; zero hit the legacy `INSERT OR REPLACE` fallback. Partial reconstructions (`--signal X`) are now safe.
 - **Surveillance parser bugs.** [sources/nselib_pull.py](sources/nselib_pull.py) `pull_surveillance_today()` has `'list' object has no attribute 'get'` for GSM and F&O ban list. ASM works (146 rows). Cron is firing the broken paths nightly; harmless except for noise in `output/daily_forward.log`.
 - **3 of 12 smart-beta indices failed silently.** `nse_index_history` has 9 indices populated; the missing ones (NIFTY100 LOW VOL 30, NIFTY200 QUALITY 30, NIFTY100 ALPHA LOW VOL 30) returned empty — likely symbol-name mismatch with NSE's index master. Worth a 10-min retry with verified symbol strings.
 - **Split adjustment is partial.** [tools/compute_splits.py](tools/compute_splits.py) parsed 104 of 207 corporate-action events (50%). The other 103 had ambiguous "Subject" strings the regex didn't catch. Improving the parser is a lever — likely closes another 15-20% of the v1↔v2 momentum gap.
@@ -38,13 +37,13 @@ Multi-day session that crossed PIT reconstruction, paid-data evaluation, the cle
 
 ## Next 3 actions (in order, concrete)
 
-1. **Commit today's work as ONE feat commit.** Message draft: `feat: PIT reconstruction + factor cleanup (40/42 READY) + F-track project blueprint`. Includes: 3 plans, 3 reference docs, [tools/](tools/) directory, [sources/nselib_pull.py](sources/nselib_pull.py), db.py registry updates, CLAUDE.md edits, plan/reference README index updates. Skip the `tools/__pycache__/` directory. Add CHANGELOG entry (drafted below) in the same commit.
-2. **Fix the upsert_df bug** ([db.py:181](db.py#L181)) before any future partial reconstruction work. Change `INSERT OR REPLACE` → `INSERT ... ON CONFLICT(<pk>) DO UPDATE SET <only-cols-in-df>`. Add a regression test in [tests/test_smoke.py](tests/test_smoke.py) that runs `--signal X` and verifies other columns survive. ~1 hour.
-3. **Subscribe to Screener Premium (₹420/mo) and ship F1.1.** This is the highest-leverage paid-data move per [paid-data-sources.md](docs/reference/paid-data-sources.md). Build [sources/screener_pull.py](sources/screener_pull.py) with the cookie-jar + Excel-export pattern. ~2 dev-days. Unblocks 15 Tier-1 factors (CCC, FCF yield, ROIC, ROIIC, gross margin trend, Sloan accruals, NWC factors).
+1. **Commit the regression test + push to origin/master.** Working tree currently has [HANDOFF.md](HANDOFF.md) and [tests/test_smoke.py](tests/test_smoke.py) modified. Single commit `test: regression test for upsert_df partial-write preservation` covering both. Then `git push` — 3 commits will go up (`88a2fa9` PIT/factor cleanup, `6c91691` cockpit DAG, plus the new test commit).
+2. **Subscribe to Screener Premium (₹420/mo) and ship F1.1.** This is the highest-leverage paid-data move per [paid-data-sources.md](docs/reference/paid-data-sources.md). Build [sources/screener_pull.py](sources/screener_pull.py) with the cookie-jar + Excel-export pattern. ~2 dev-days. Unblocks 15 Tier-1 factors (CCC, FCF yield, ROIC, ROIIC, gross margin trend, Sloan accruals, NWC factors).
+3. **Improve splits regex parser** ([tools/compute_splits.py](tools/compute_splits.py)). Currently catches 104 of 207 corp-action events (50%). The other 103 have ambiguous "Subject" strings. Each 10% improvement closes ~5 bps of the v1↔v2 momentum-correlation gap. ~2 hours.
 
 ## Don't do
 
-- **Don't run `python -m tools.reconstruct_pit --signal X`** until the upsert_df bug is fixed. It will null every other column for the affected snapshot dates. If you must run partial signals, use `--dry-run` to inspect.
+- ~~Don't run `python -m tools.reconstruct_pit --signal X`~~ **Cleared 2026-05-05.** Partial reconstructions are now safe (regression test in [tests/test_smoke.py](tests/test_smoke.py) verifies the upsert_df contract).
 - **Don't subscribe to Sensibull or Trendlyne yet.** Sensibull has no retail API ([paid-data-sources.md](docs/reference/paid-data-sources.md)). Trendlyne lost ~70% of its marginal value when nselib unlocked the historical APIs. Screener Premium is the only paid sub with non-overlapping data; everything else is convenience.
 - **Don't run all 5 nselib backfills concurrently** ([sources/nselib_pull.py](sources/nselib_pull.py) `--source all`). The 2-second rate-limit floor adds up; `all` takes ~45 min sequential, and concurrent calls risk cookie-session issues. Prefer staggered single-source runs.
 - **Don't apply additional splits via [tools/compute_splits.py](tools/compute_splits.py) without re-running [tools/apply_splits.py](tools/apply_splits.py) afterward.** The latter rebuilds `adj_close` from scratch — it's idempotent but fragile if you forget. Sequence: compute → apply → reconstruct.
@@ -56,7 +55,7 @@ Multi-day session that crossed PIT reconstruction, paid-data evaluation, the cle
 
 1. **ADR for the F-track parallel architecture?** The mother plan now describes three concurrent tracks with explicit non-blocking integration points (D17↔F3.3, D18↔F3.2). My take: **yes, propose ADR 0009** — it's a structural decision a future contributor needs context for, and it's load-bearing on resource-allocation calls. Draft below.
 2. **Single commit or split today's work?** Diff is large but tightly coupled (the docs reference the tools, the plans reference the docs, registry status flips reference the new tools). My take: one commit. The pieces don't make sense in isolation.
-3. **Fix upsert_df bug now or after F1.1 ships?** Bug is real but only fires when running partial reconstructions; daily cron does full runs. My take: **fix now**, before the next partial run causes silent data loss. ~1 hour with a smoke test.
+3. ~~Fix upsert_df bug now or after F1.1 ships?~~ **Resolved 2026-05-04.** SQL fix shipped in `88a2fa9`. Regression test still owed — see action #1.
 4. **Should the registry ship a `pit_column_v2` audit?** A few signals had `pit_column_v2: None` while their reconstruction function exists (fixed inline this session for `news_volume`, `short_selling_signal`, `earnings_beat_rate`). Worth a one-shot diagnostic that diffs PIT_COLUMNS in [tools/reconstruct_pit.py](tools/reconstruct_pit.py) against the registry's `pit_column_v2` values? My take: **yes, 5-line `python -m tests.audit_registry`** — catch drift early.
 5. **Plan 0004 status — Implemented or close it?** Today's session executed phases 2 (coverage gaps), 3 (methodology fixes for momentum + promoter_qoq), and 6 (operational — apply_splits, full reconstruction). Phases 4 (depth — extend PIT past 2023) and 5 (backtest harness) are partially done. My take: leave Status: active, add an "Implementation notes" section documenting today's progress, archive when full PIT depth ships.
 6. **Should `output/daily_forward.log` be added to .gitignore?** Currently it appends every cron run forever. Same question as 2026-05-02's `output/rerun.log`. My take: yes, ship a single .gitignore line for `output/*.log`.
@@ -91,7 +90,7 @@ Multi-day session that crossed PIT reconstruction, paid-data evaluation, the cle
 - **Three new reference docs.** [docs/reference/data-playbook.md](docs/reference/data-playbook.md) (43KB strategy + 6 reconstruction patterns), [docs/reference/api-endpoints.md](docs/reference/api-endpoints.md) (per-endpoint catalog), [docs/reference/paid-data-sources.md](docs/reference/paid-data-sources.md) (₹5K/mo budget allocation, Sensibull skip rationale).
 - **Three plans alive.** [0003-mother-plan.md](docs/plans/0003-mother-plan.md) is now the **project blueprint** — three concurrent tracks (Engineering ✅ / Intelligence D-phases / Factor-depth F-phases). [0004-pit-reconstruction.md](docs/plans/0004-pit-reconstruction.md) phases 2/3/6 implemented. [0005-100-factors-and-model.md](docs/plans/0005-100-factors-and-model.md) draft — F1 (data: Screener+F&O+Kite+NLP) → F2 (50 new factors → ~100 total) → F3 (IC weighting + orthogonalization + MVO + Barra-style risk).
 - **Backtest harness validates v1 archive.** [tools/backtest_pit.py](tools/backtest_pit.py) reproduces every C13b headline t-stat (promoter 3.20 SMALL, EY 3.13 SMALL, piotroski 2.81 SMALL, B/P 2.54 SMALL, avg_delivery 2.49 SMALL, cf_accruals 3.20 MID — all within rounding). v1 archive remains canonical reference; v2 is canonical going forward.
-- **Bug found, not fixed.** [db.py:181](db.py#L181) `upsert_df` uses `INSERT OR REPLACE` which nulls non-updated columns. Caused mid-session data loss; recovered with full reconstruction. Fix proposed: switch to `INSERT ... ON CONFLICT UPDATE`. Tracked in next-actions.
+- **upsert_df bug fixed.** [db.py:178-222](db.py#L178-L222) switched from `INSERT OR REPLACE` (DELETE+INSERT, nulls every column not in df) to `INSERT ... ON CONFLICT(pk) DO UPDATE SET col=excluded.col` (update in place, only touches columns present in df). Added `_table_pk()` helper that reads PK columns via `PRAGMA table_info` and caches them. Edge cases: df with only PK cols → `INSERT OR IGNORE`; tables with no declared PK → fallback to `INSERT OR REPLACE` (legacy, should be rare). Regression test still owed.
 
 ### Plan status changes
 
