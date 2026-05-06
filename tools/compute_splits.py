@@ -34,8 +34,13 @@ def parse_split_ratio(subject):
         return None
     s = subject.lower()
 
-    # "From Rs.X to Rs.Y" — most common NSE format
-    m = re.search(r"from\s*(?:rs\.?\s*)?(\d+(?:\.\d+)?)\s*(?:/-)?\s*to\s*(?:rs\.?\s*)?(\d+(?:\.\d+)?)", s)
+    # "From Rs X/- to Rs/Re Y/-" — covers both legacy "Stock Split From Rs.10/- to Rs.5/-"
+    # and the canonical NSE "Face Value Split (Sub-Division) - From Rs 10/- Per Share To Re 1/- Per Share".
+    # `r[se]\.?` matches Rs / Re (NSE writes "Re" when the value is 1).
+    m = re.search(
+        r"from\s+(?:r[se]\.?\s*)?(\d+(?:\.\d+)?)\s*/?-?\s*(?:per\s+share\s*)?to\s+(?:r[se]\.?\s*)?(\d+(?:\.\d+)?)",
+        s,
+    )
     if m:
         old_fv, new_fv = float(m.group(1)), float(m.group(2))
         if old_fv > 0:

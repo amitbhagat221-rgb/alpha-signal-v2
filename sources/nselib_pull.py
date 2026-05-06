@@ -429,17 +429,19 @@ def pull_mf_nav(scheme_codes=None, top=50):
 
 # ───────────────────────── Move 6: NSE Smart-Beta indices history ─────────────────────────
 
-# v1 plan-validated factor benchmark indices
+# v1 plan-validated factor benchmark indices.
+# Names below match NSE's index master exactly (verified via cm.index_data probe).
 SMART_BETA_INDICES = [
-    "NIFTY ALPHA 50",       # Alpha factor benchmark
+    "NIFTY ALPHA 50",                # Alpha factor benchmark
     "NIFTY100 ALPHA 30",
     "NIFTY200 ALPHA 30",
-    "NIFTY100 LOWVOL30",    # Low-vol factor
-    "NIFTY LOW VOL 50",
-    "NIFTY ALPHALOWVOL",
-    "NIFTY200 VALUE 30",    # Value factor
+    "NIFTY100 LOW VOLATILITY 30",    # Low-vol factor
+    "NIFTY ALPHA LOW-VOLATILITY 30",
+    "NIFTY200 QUALITY 30",           # Quality factor
+    "NIFTY100 EQUAL WEIGHT",         # Equal-weight benchmark
+    "NIFTY200 VALUE 30",             # Value factor
     "NIFTY50 VALUE 20",
-    "NIFTY 50",             # Benchmark
+    "NIFTY 50",                      # Benchmark
     "NIFTY 500",
     "NIFTY MIDCAP 150",
     "NIFTY SMALLCAP 250",
