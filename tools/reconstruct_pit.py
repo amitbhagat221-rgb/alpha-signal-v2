@@ -280,6 +280,50 @@ def prices_through(prices, eval_date):
     return prices[prices["date"] <= cutoff].copy()
 
 
+def apply_pit_adjustments(prices_pit, adjustments, eval_date):
+    """Add `adj_close` column to prices_pit using PIT-strict corporate adjustment.
+
+    Only events with ex_date <= eval_date are visible. For each (sid, date),
+    adj_close = close × Π factor[e] for e where e.sid == sid AND date < e.ex_date <= eval_date.
+
+    Vectorized per-sid via reverse cumprod + searchsorted — O(N log M) per sid.
+    """
+    snap_str = eval_date.isoformat()
+    visible = adjustments[adjustments["ex_date"] <= snap_str]
+    out = prices_pit.copy()
+
+    if visible.empty:
+        out["adj_close"] = out["close"]
+        return out
+
+    out["adj_close"] = out["close"].astype(float)
+    events_by_sid = dict(tuple(visible.groupby("sid")))
+
+    closes = out["close"].astype(float).values
+    adj_factors = np.ones(len(out), dtype=float)
+
+    for sid, idxs in out.groupby("sid").indices.items():
+        if sid not in events_by_sid:
+            continue
+        g = events_by_sid[sid].sort_values("ex_date")
+        ex_dates = g["ex_date"].values
+        factors = g["factor"].values.astype(float)
+
+        n = len(factors)
+        rev_cum = np.empty(n + 1)
+        rev_cum[n] = 1.0
+        for i in range(n - 1, -1, -1):
+            rev_cum[i] = factors[i] * rev_cum[i + 1]
+
+        sid_dates = out["date"].values[idxs]
+        # side='right' → first event with ex_date > date; product of factors[idx:] applies
+        idx_arr = np.searchsorted(ex_dates, sid_dates, side="right")
+        adj_factors[idxs] = rev_cum[idx_arr]
+
+    out["adj_close"] = (closes * adj_factors).round(4)
+    return out
+
+
 # ─────────────────────── Per-signal PIT calc ───────────────────────
 
 def pit_close_price(prices_pit):
@@ -394,8 +438,10 @@ def pit_position_52w(prices_pit, eval_date):
     """For each sid, position within trailing 252 trading days.
     Formula: (close - 52w_low) / (52w_high - 52w_low) — values in [0, 1].
     NaN if <60 trading days of price history (insufficient).
+    Uses adj_close so a stock split inside the window doesn't artificially expand the range.
     """
     rows = []
+    price_col = "adj_close" if "adj_close" in prices_pit.columns else "close"
     for sid, group in prices_pit.groupby("sid"):
         g = group.sort_values("date")
         # Take last 252 trading days
@@ -403,7 +449,7 @@ def pit_position_52w(prices_pit, eval_date):
         if len(recent) < 60:
             rows.append({"sid": sid})
             continue
-        closes = recent["close"].values
+        closes = recent[price_col].values
         last = closes[-1]
         lo, hi = closes.min(), closes.max()
         if hi <= lo or hi <= 0:
@@ -495,15 +541,17 @@ def pit_promoter_trend_4q(stocks, sh_pit):
 
 def pit_macd_bullish(prices_pit):
     """MACD bullish state: 12-EMA − 26-EMA > 9-EMA-of-MACD. Binary 1/0.
-    Needs ≥35 days of prices.
+    Needs ≥35 days of prices. Uses adj_close so a split inside the window
+    doesn't fake a trend break.
     """
     rows = []
+    price_col = "adj_close" if "adj_close" in prices_pit.columns else "close"
     for sid, group in prices_pit.groupby("sid"):
         g = group.sort_values("date").tail(252)
         if len(g) < 35:
             rows.append({"sid": sid})
             continue
-        closes = g["close"].astype(float)
+        closes = g[price_col].astype(float)
         ema12 = closes.ewm(span=12, adjust=False).mean()
         ema26 = closes.ewm(span=26, adjust=False).mean()
         macd = ema12 - ema26
@@ -1106,6 +1154,7 @@ def reconstruct_one_date(eval_date, raw, signals_to_run):
     cf_pit = knowable_annual(raw["cf"], eval_date)
     sh_pit = knowable_shareholding(raw["sh"], eval_date)
     px_pit = prices_through(raw["prices"], eval_date)
+    px_pit = apply_pit_adjustments(px_pit, raw["adjustments"], eval_date)
 
     close_df = pit_close_price(px_pit)
 
@@ -1243,9 +1292,11 @@ def load_raw():
         "FROM shareholding ORDER BY sid, end_date"
     )
     prices = read_sql(
-        "SELECT sid, date, close, delivery_pct, "
-        "       COALESCE(adj_close, close) AS adj_close "
+        "SELECT sid, date, close, delivery_pct "
         "FROM stock_prices WHERE close > 0 ORDER BY sid, date"
+    )
+    adjustments = read_sql(
+        "SELECT sid, ex_date, factor FROM corporate_adjustments ORDER BY sid, ex_date"
     )
     fh = read_sql(
         "SELECT sid, metric, date, value, change FROM forecast_history "
@@ -1279,11 +1330,12 @@ def load_raw():
         "SELECT indicator_id, sector, direction, weight FROM macro_sector_map"
     )
     print(f"  stocks={len(stocks)} qi={len(qi)} bs={len(bs)} cf={len(cf)} sh={len(sh)} "
-          f"prices={len(prices)} fh={len(fh)} bulk={len(bulk)} "
+          f"prices={len(prices)} adj={len(adjustments)} fh={len(fh)} bulk={len(bulk)} "
           f"reg_events={len(reg_events)} reg_signals={len(reg_signals)} "
           f"macro_hist={len(macro_hist)} macro_map={len(macro_map)}")
     return {
         "stocks": stocks, "qi": qi, "bs": bs, "cf": cf, "sh": sh, "prices": prices,
+        "adjustments": adjustments,
         "fh": fh, "bulk": bulk, "short": short, "news": news,
         "reg_events": reg_events, "reg_signals": reg_signals,
         "macro_hist": macro_hist, "macro_map": macro_map,

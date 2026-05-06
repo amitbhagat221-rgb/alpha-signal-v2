@@ -1032,7 +1032,7 @@ BACKTEST_SIGNALS = [
         "pit_column_v2": "mom_6m",
         "v1_verdict_summary": "DROP / DROP / WEAK (t=1.32 SMALL)",
         "status": "READY",
-        "status_reason": "v2 now uses split/bonus-adjusted close (stock_prices.adj_close, populated from split_adjustments). Post-fix v1↔v2 corr 0.66-0.72 across overlap dates. Remaining gap is dividend adjustment (v1 yfinance Adj Close adjusts dividends too; v2 doesn't yet). v1 archive is canonical for pre-2026 backtest reference; v2 is canonical going forward.",
+        "status_reason": "v2 uses PIT-strict corporate-action-adjusted close: corporate_adjustments table holds 3,036 (sid, ex_date) factors covering SPLIT+BONUS+DIVIDEND; tools.reconstruct_pit.apply_pit_adjustments composes only events with ex_date <= snapshot_date. Apples-to-apples 12-date diagnostic: raw close 0.745 → PIT-adj 0.862 mean Pearson vs v1 archive (+0.117 lift). v1 is forward-adjusted via yfinance (mildly leaky); v2 is non-leaky and canonical going forward.",
     },
     {
         "signal": "mom_12m_adj",
@@ -1046,7 +1046,7 @@ BACKTEST_SIGNALS = [
         "pit_column_v2": "mom_12m",
         "v1_verdict_summary": "WEAK / DROP / WEAK (t=−1.64 LARGE, 1.76 SMALL)",
         "status": "READY",
-        "status_reason": "Same fix as mom_6m_adj — uses adj_close. Post-fix v1↔v2 corr 0.61-0.78 (12m window catches more split events). Remaining gap = dividend adjustment.",
+        "status_reason": "Same PIT-strict adjustment as mom_6m_adj. 12-date apples-to-apples Pearson lift +0.116; pooled v1↔v2 Pearson 0.71 / Spearman 0.87 (essentially identical to forward-adjusted-splits-only — leakage in v1 is small in practice; correctness benefit is architectural).",
     },
     {
         "signal": "macd_signal",
