@@ -51,3 +51,8 @@ Links to discussions, specs, related ADRs.
 | 0003 | [Bhavcopy over yfinance](0003-bhavcopy-over-yfinance.md) | Accepted | NSE official close prices + delivery % |
 | 0004 | [No base classes, no YAML](0004-no-base-classes-no-yaml.md) | Accepted | Plain functions, Python config dict |
 | 0005 | [Tier-aware scoring](0005-tier-aware-scoring.md) | Accepted | Within-segment ranking, never universe-wide |
+| 0006 | [Classifier status tracking](0006-classifier-status-tracking.md) | Accepted | Regulatory classifier state lives in `regulatory_events.classifier_status` |
+| 0007 | [Fresh rebuild for v2](0007-fresh-rebuild-v2.md) | Accepted | v2 is greenfield, not a v1 refactor |
+| 0008 | [Cockpit as a write-side surface](0008-cockpit-write-surface.md) | Accepted | Cockpit can mutate state (rerun steps), with strict guardrails |
+| 0009 | [F-track parallel to D-track](0009-factor-track-parallel-to-d-track.md) | Accepted | Factor-depth track runs concurrent with intelligence track |
+| 0010 | [PIT-strict corporate-action adjustment](0010-pit-strict-corporate-action-adjustment.md) | Accepted | Splits/bonuses/dividends compose at signal-compute time, not at ingest |
