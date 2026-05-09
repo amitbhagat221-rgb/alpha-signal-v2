@@ -1,10 +1,10 @@
 ---
 Status: active
 Created: 2026-05-03
-Last updated: 2026-05-04
+Last updated: 2026-05-09
 Owner: Amit Bhagat
-Implementation: tools/reconstruct_pit.py, tools/import_v1_pit.py, tools/apply_splits.py, tools/compute_splits.py, tools/backtest_pit.py; tables daily_snapshots_pit, daily_snapshots_pit_v1, pit_ic_by_tier_v1, split_adjustments
-Related ADRs:
+Implementation: tools/reconstruct_pit.py, tools/import_v1_pit.py, tools/compute_corporate_adjustments.py, tools/backtest_pit.py; tables daily_snapshots_pit, daily_snapshots_pit_v1, pit_ic_by_tier_v1, corporate_adjustments
+Related ADRs: 0010-pit-strict-corporate-action-adjustment.md
 ---
 
 # PIT Signal Reconstruction — Backtest-Grade Historical Data
@@ -357,6 +357,7 @@ When all eight hold, this plan is archived to `_archive/`. Permanent learnings d
 
 - **mom_6m / mom_12m split adjustment shipped.** [tools/compute_splits.py](../../tools/compute_splits.py) parsed 104 of 207 `corporate_actions` SPLIT/BONUS events. [tools/apply_splits.py](../../tools/apply_splits.py) populates `stock_prices.adj_close` (new column). [tools/reconstruct_pit.py](../../tools/reconstruct_pit.py) `pit_momentum` switched to use `adj_close` via `COALESCE(adj_close, close)`. **v1↔v2 mom_12m correlation improved 0.67→0.78**, mom_6m 0.70→0.72. Both reclassified READY.
 - **Remaining gap on mom signals: dividend adjustment.** v1's yfinance Adj Close adjusts splits AND dividends; our adj_close only adjusts splits. The remaining 0.22-0.28 correlation gap is plausibly all dividend-driven. Requires a second pass over `corporate_actions` for DIVIDEND events. Tracked but deferred.
+- **2026-05-06 update: dividend gap closed via PIT-strict path.** The leaky pre-bake approach above was replaced by composition at signal-compute time per [ADR 0010](../decisions/0010-pit-strict-corporate-action-adjustment.md). [tools/compute_corporate_adjustments.py](../../tools/compute_corporate_adjustments.py) now produces a unified `corporate_adjustments` table (3,036 rows: SPLIT + BONUS + DIVIDEND, with same-day events pre-multiplied). [tools/reconstruct_pit.py:283-324](../../tools/reconstruct_pit.py#L283-L324) `apply_pit_adjustments()` composes only events with `ex_date <= eval_date`. Three signals switched from raw close to `adj_close`: `pit_momentum`, `pit_position_52w`, `pit_macd_bullish`. 12-date apples-to-apples Pearson lift: raw 0.745 → PIT-adj 0.862. The deprecated `tools/apply_splits.py`, `tools/compute_splits.py`, the `stock_prices.adj_close` column, and the `split_adjustments` table are all removed (the column + table dropped 2026-05-09). The deferred dividend pass is no longer pending.
 - **promoter_qoq diagnostic.** Raw v1↔v2 correlation 0.42-0.63 looked alarming. Diagnostic 2026-05-04: median |v1−v2 diff|=0.000 across 1,896 overlap stocks. On the subset where both signals are >0.05 in absolute value (n=303), **sign-match=97.4%**. The low correlation was scatter-dominated by the agreement-at-zero majority. The signal is directionally clean for ranking. Reclassified READY.
 
 ### Phase 6 (Operational)
