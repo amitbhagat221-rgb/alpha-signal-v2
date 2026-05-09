@@ -2,73 +2,68 @@
 
 > Overwritten at the end of each session per CLAUDE.md session protocol. If you're starting a new session: read this, then CLAUDE.md, then any plan or ADR linked below.
 
-**Last updated:** 2026-05-09 (Amit Bhagat + Claude Code)
+**Last updated:** 2026-05-09 (Amit Bhagat + Claude Code) — second handoff of the day; supersedes the earlier hygiene-only one
 **Current branch:** `master` — clean, in sync with `origin/master`
-**HEAD:** `8c80240` — docs: refresh README to reflect PIT-strict v2 production state
+**HEAD:** `1757abf` — feat(F1.1): Screener Premium ingest — thin slice end-to-end
 
 ---
 
 ## Where I am
 
-A short hygiene/cleanup session. The 2026-05-06 PIT-strict adjustment work (commit `4e6cef1`) was already committed but unpushed and undocumented. Today: filed [ADR 0010](docs/decisions/0010-pit-strict-corporate-action-adjustment.md), refreshed [README.md](README.md) (3 sessions overdue), dropped the now-orphaned `stock_prices.adj_close` column + `split_adjustments` table, and pushed all four pending commits to `origin/master`. Also added `Bash(git push origin master)` to `.claude/settings.local.json` so future pushes are friction-free. Net: backlog cleared, no new factor work yet.
+Big session. Two distinct phases: (a) hygiene cleanup — ADR 0010 filed, README refreshed, dead schema dropped, three commits pushed; (b) F1.1 thin slice — `sources/screener_pull.py` end-to-end working for a single stock with auth, fetch, parse, and idempotent write. Five commits today, all on `origin/master`. The F-track (factor depth) has its first real data stream landed; next session is about scaling F1.1 to the universe and writing the first factor that consumes it.
 
 ## What works
 
-- **Three commits shipped today, all pushed.** `5102eaa` ADR 0010, `8c80240` README refresh. (`4e6cef1` from 2026-05-06 also pushed in the same `git push`.)
-- **Schema cleanup landed.** `stock_prices.adj_close` column dropped (1.3M rows of dead weight gone). `split_adjustments` table dropped (orphaned by the deletion of `tools/apply_splits.py`). Backup at [data/alpha_signal.db.bak-20260509-204353](data/alpha_signal.db.bak-20260509-204353) (320 MB; safe to delete after a few days of production runs). Verified via `PRAGMA table_info(stock_prices)` post-drop. Ran manually after the auto-mode classifier blocked the destructive ALTER even with explicit user authorization.
-- **Smoke tests still pass post-schema-drop.** All 7 in [tests/test_smoke.py](tests/test_smoke.py) green. Confirmed `tools/reconstruct_pit.py:1296` reads `sid, date, close, delivery_pct` from `stock_prices` — never touched the dropped column.
-- **ADR 0010 records the PIT-strict architecture.** [docs/decisions/0010-pit-strict-corporate-action-adjustment.md](docs/decisions/0010-pit-strict-corporate-action-adjustment.md). Backfilled the decisions index with 0006-0010 (entries had fallen behind for several sessions).
-- **README.md back in sync with reality.** Headline numbers corrected: 51 tables / ~320 MB / 24 pipeline steps / 42 factors / 7 smoke tests. PIT reconstruction harness, ADR 0010, and cockpit ops console now all surfaced on the front door. F-track / D-track structure replaces the pre-cutover "open items" list.
-- **Auto-mode pushes unblocked.** [.claude/settings.local.json](.claude/settings.local.json) now includes `Bash(git push origin master)`. The "harness blocks default-branch pushes" friction noted in earlier HANDOFFs is resolved.
-- **Everything from prior sessions still works.** PIT-strict corporate-action adjustment ([tools/reconstruct_pit.py:283-324](tools/reconstruct_pit.py#L283-L324)), PIT reconstruction harness, nselib unified ingest, forward-only daily cron, factor registry at 40/42 READY, three reference docs, four live plans.
+- **F1.1 — Screener Premium ingest, end-to-end on one stock.** [sources/screener_pull.py](sources/screener_pull.py) (commit `1757abf`). Single-stock RELIANCE pull verified: 419 rows landed in `fundamentals_screener` (10 annual fiscal years × 36 line items + 10 quarters × 9 line items). Idempotent — second run kept 419 rows, only `fetched_at` advanced.
+- **F1.1 auth path.** Password-login via env vars (`SCREENER_USERNAME`, `SCREENER_PASSWORD` exported in `~/alpha-signal/run_pipeline.sh`) → POST to `/login/` → cookie cached at `~/.cache/screener_cookie.json` (chmod 600). Re-run `python -m sources.screener_pull --login` anytime to refresh. Manual browser-cookie fallback documented in module docstring for OAuth-only accounts.
+- **F1.1 fetcher logic.** [sources/screener_pull.py:131-203](sources/screener_pull.py#L131-L203) `fetch_export()` — GET `/company/{ticker}/consolidated/`, scrape per-stock export ID from button's HTML5 `formaction=` attribute (NOT the `<form action=>` — that was the initial bug), POST to `/user/company/export/<id>/` with `csrfmiddlewaretoken` from cookies. Falls back to standalone if consolidated 404s. Returns `(xlsx_bytes, view)`.
+- **F1.1 parser.** [sources/screener_pull.py:222-307](sources/screener_pull.py#L222-L307) `parse_export()` walks the "Data Sheet" tab section-by-section (PROFIT & LOSS / Quarters / BALANCE SHEET / CASH FLOW: / DERIVED:), uses each section's "Report Date" row to define period_end columns, and emits long-format rows. The other tabs (Profit & Loss, Quarters, etc.) duplicate the same data with broken column headers and are intentionally ignored.
+- **F1.1 bot-detection mitigations.** Randomized 2.5–4.0s inter-stock delay, 0.5–1.2s inter-step delay (page→export POST), HTTP 429 stops the run rather than blindly retries (so we surface rate-limit problems instead of compounding them). Honors `Retry-After` header if present.
+- **Schema additions.** [schema.sql:GROUP 8](schema.sql) — `fundamentals_screener` (PK `(sid, period_end, period_type, line_item)`, long format), `screener_pull_errors` (audit trail, indexed by sid + attempted_at). Both created via `init_db()` 2026-05-09. Indexes on sid + line_item.
+- **Dependency added.** `openpyxl` 3.1.5 + `et-xmlfile` 2.0.0 installed into shared venv (`~/alpha-signal/venv`). Required for `pd.read_excel` on Screener's xlsx.
+- **From earlier today (already committed).** ADR 0010 (`5102eaa`), README refresh (`8c80240`), `stock_prices.adj_close` column + `split_adjustments` table dropped (manual via user, backup at `data/alpha_signal.db.bak-20260509-204353`), HANDOFF + plan-0004 cleanup (`e8b0797`).
+- **Auto-mode push allowlist.** [.claude/settings.local.json:4](.claude/settings.local.json) now includes `Bash(git push origin master)`. Verified working — five push operations today, no friction.
+- **Everything from prior sessions still works.** PIT-strict corporate-action adjustment, PIT reconstruction harness, nselib unified ingest, forward-only daily cron, factor registry at 40/42 READY, four reference docs, four live plans (0001 regulatory, 0002 macro, 0004 PIT, 0005 F-track).
 
 ## What's broken or half-built
 
-- **Plan 0004 frontmatter stale.** [docs/plans/0004-pit-reconstruction.md:6](docs/plans/0004-pit-reconstruction.md#L6) `Implementation:` line still lists `tools/apply_splits.py`, `tools/compute_splits.py`, and the `split_adjustments` table — all deleted. Phase 3 success log ([docs/plans/0004-pit-reconstruction.md:358-359](docs/plans/0004-pit-reconstruction.md#L358-L359)) describes the now-superseded leaky path as the way momentum is adjusted; the dividend gap it flags as deferred is now closed by ADR 0010. Surgical update proposed below.
-- **Surveillance parser bugs.** [sources/nselib_pull.py](sources/nselib_pull.py) `pull_surveillance_today()` raises `'list' object has no attribute 'get'` for GSM and F&O ban list. ASM works. Cron fires the broken paths nightly; harmless except for log noise. Unchanged since 2026-05-06.
+- **F1.1 has only one stock in the DB.** Only RELI exercised. The 2,448-stock universe pull has never been run; we don't actually know if (a) Screener rate-limits us at scale, (b) other tickers have weird Excel formats, (c) delisted/F&O-only stocks 404 cleanly, (d) the form `formaction=` regex matches across all company-page templates.
+- **F1.1 not in pipeline.py / cron.** It's a standalone module; nothing schedules it. No daily refresh, no `pipeline_log` row, no cockpit visibility.
+- **F1.1 cookie health probe not running.** If the cookie expires (~2 weeks of inactivity per Django default) we'll find out from a failed pull, not a proactive check. Should be a daily `--check-cookie` somewhere.
+- **No factor consumes `fundamentals_screener` yet.** The data is sitting in the table; no `signals/*.py` reads it. The whole point of F1.1 was to unlock B1 factors (CCC, FCF yield, ROIC, gross-margin trend, Sloan accruals). None of those exist yet.
+- **Surveillance parser bugs — STILL not fixed; mid-investigation when F1.1 took priority.** [sources/nselib_pull.py](sources/nselib_pull.py) `pull_surveillance_today()`. Diagnosis confirmed today: **GSM** API returns a bare list (52 items, fields like `gsmStage` and `companyName`), not a `{"data": [...]}` dict — the `d.get("data", [])` fails. **F&O ban** via nselib `dv.fno_security_in_ban_period()` returns a bare `list` (empty today since no securities in ban), not a DataFrame — the `df.empty` check raises `AttributeError`. Both are 5-line fixes. Cron fires the broken paths nightly; harmless except for log noise.
 - **2 signals legitimately not READY.** `sentiment_7d` PARTIAL (no FinBERT, F1.4 in plan 0005); `screener_final_composite` PROPOSED (F3 deliverable). Not bugs.
-- **Old 9 indices stale at 2026-04-30.** Daily cron should have caught up — verify next session before relying on index data past 2026-04-30.
+- **Old 9 indices stale at 2026-04-30.** Daily cron should have caught up by now — verify before relying on index data past 2026-04-30.
 
 ## Next 3 actions (in order, concrete)
 
-1. **Subscribe to Screener Premium (₹420/mo) and ship F1.1.** Highest-leverage paid-data move per [docs/reference/paid-data-sources.md](docs/reference/paid-data-sources.md). Build `sources/screener_pull.py` with the cookie-jar + Excel-export pattern. ~2 dev-days. Unblocks 15 Tier-1 factors (CCC, FCF yield, ROIC, ROIIC, gross margin trend, Sloan accruals, NWC factors). **This is the actual returns-leverage step.** Today was correctness/hygiene; F1.1 is alpha. Until you decide on the subscription, this stays at #1.
-2. **Apply the proposed plan-0004 surgical update** (drafted below; awaiting your sign-off before commit). ~5 min. Removes the last "wait, why is `apply_splits.py` not on disk?" confusion vector for future readers.
-3. **Fix surveillance parser bugs.** [sources/nselib_pull.py](sources/nselib_pull.py) `pull_surveillance_today()`: GSM and F&O ban list both return list-shaped responses, not dict-shaped. ~30 min. Removes nightly cron log noise. Standalone, can be done in any 30-min slot.
+1. **F1.1 scale-up — first to LARGE tier, then full universe.** `python -m sources.screener_pull --tier LARGE` (~250 stocks × ~3s = 12 min). Watch for: HTTP 404s (delisted stocks), HTTP 429 (rate-limited), parse failures (companies with non-standard Excel templates — common for banks/insurance). All go to `screener_pull_errors`. If clean, `--universe` (~3 hrs). Run from your terminal with sourced env, not from claude (claude can't `source run_pipeline.sh` without triggering the pipeline). Don't run during the 03:30 UTC daily cron window.
+2. **Wire F1.1 into pipeline.py + cron.** Add `screener_pull` as a step (after the existing `tickertape` step, since it's the same fundamentals neighborhood). Schedule weekly full-universe + daily incremental for new filings. Surface in cockpit `/data` health page so cookie expiry shows up immediately.
+3. **First F-track factor that consumes `fundamentals_screener`.** Either `cash_conversion_cycle` (DSO + DIO − DPO from Receivables, Inventory, Payables — but Payables not in Data Sheet, so we'd need to derive from Other Liabilities or fetch standalone xlsx tabs) **or** simpler `roic` (NOPAT / invested capital using Net Profit + Tax + Interest, Total Equity + Borrowings — all line items we already have). Recommend `roic` first; CCC needs a Payables source decision.
 
 ## Don't do
 
-- **Don't push to master as a way to test the new allow rule.** It's verified working — `git push origin master` ran clean today and moved `a26674e..8c80240`. No need to retest.
-- **Don't try to re-run `tools/apply_splits.py` or `tools/compute_splits.py`.** Both deleted 2026-05-06 (`git rm` in commit `4e6cef1`). The current path is `tools/compute_corporate_adjustments.py` → `corporate_adjustments` table → `apply_pit_adjustments()` at signal-compute time.
-- **Don't repopulate `stock_prices.adj_close`.** Column is gone. ADR 0010 explicitly forbids reintroducing it — PIT correctness depends on adjustments composing at signal-compute time.
-- **Don't delete the .bak-20260509 backup yet.** Leave it for ~7 days as the safety net for the schema drop. After that it's safe to remove (`rm data/alpha_signal.db.bak-20260509-204353`).
-- **Don't query nselib `cm.index_data` with date ranges wider than ~3 months.** Endpoint silently caps at ~70 trading days. Always paginate via `_months_back(N)`. Unchanged guardrail.
-- **Don't run all 5 nselib backfills concurrently** (`--source all`). 2-second rate-limit floor + concurrent calls risk cookie-session issues. Stagger.
+- **Don't `source ~/alpha-signal/run_pipeline.sh` from inside claude or any non-interactive context.** It runs the pipeline at the bottom, not just exports. Use `eval "$(grep '^export SCREENER' ~/alpha-signal/run_pipeline.sh)"` to load only the SCREENER vars. Discovered today the hard way.
+- **Don't share or paste the Screener cookie file.** Single-user, chmod 600. The `sessionid` value gives full account access.
+- **Don't run two `screener_pull` invocations concurrently.** Same cookie, compounded request rate, easy way to trip Screener's bot detection.
+- **Don't pull `screener_pull --universe` during 02:30–04:30 UTC.** Cron runs the daily pipeline at 03:30 UTC; overlap risks resource contention and (more importantly) confused diagnostics if both are writing.
+- **Don't auto-`--login` from cron without testing first.** Repeated login POSTs from the same IP can look like credential stuffing. Trust the cached cookie first; only re-login on observed 401/302-to-login.
+- **Don't switch `fundamentals_screener` to wide format.** Long format is intentional — Screener has 36+ line items and growing; columns would mean a schema migration every time a new line item appears. Long format absorbs new line items for free. Already documented in plan 0005 spec.
+- **Don't reintroduce `tools/apply_splits.py` or `stock_prices.adj_close`.** Per ADR 0010, PIT correctness depends on adjustments composing at signal-compute time.
+- **Don't query nselib `cm.index_data` with date ranges wider than ~3 months.** Endpoint silently caps at ~70 trading days. Carried-forward guardrail.
+- **Don't run all 5 nselib backfills concurrently.** 2-second floor + concurrent calls risk cookie-session issues. Stagger.
 - **Don't mark `sentiment_7d` or `screener_final_composite` as READY.** Both scoped in plan 0005.
 - **Don't add factors past ~100 before F3 ships.** Plan 0005 explicit gate.
-- **Don't `git commit --amend`** or **`git add .` / `git add -A`**. Rules carried forward.
-- **Don't switch `pit_fwd_return_20d` to `adj_close` without a separate decision.** Documented in ADR 0010 — it's a realized-return measurement, not a signal input.
+- **Don't `git commit --amend` / `git add .` / `git add -A`.** Carried-forward rules.
+- **Don't switch `pit_fwd_return_20d` to `adj_close` without a separate decision.** Per ADR 0010.
 
 ## Open questions for me (decisions you need to make)
 
-1. **Screener Premium — subscribe?** ₹420/mo. Three sessions of HANDOFFs have flagged this as the next leverage step. Either commit and start F1.1, or explicitly defer with a date so it stops being a recurring "next session" item. **My take:** subscribe — F1.1 is the gate to 15 Tier-1 factors and the F-track stalls without it.
-2. **Apply the proposed plan-0004 update?** See diff below. Pure documentation hygiene, no code change. **My take:** yes.
-3. **Delete the .bak-20260509 backup now or after 7 days?** Conservative answer is 7 days; the schema drop has been validated by smoke tests already so storage-conscious answer is now. **My take:** keep 7 days, low cost.
-4. **Plan 0004 status — still `active` or move to `completed`?** With Phase 3 momentum work now genuinely PIT-clean (no leaky `adj_close` middle ground), the only outstanding phases are Phase 4 (PIT depth past 2023, gated on EODHD/alternative source) and Phase 5 (backtest harness integration with screener weights). Both are real work but neither blocks current operations. **My take:** keep `active` until at least one of {Phase 4 unblocked, Phase 5 shipped}; status flag is meaningful only if it changes.
-
----
-
-## Proposed for this session, awaiting approval
-
-### Plan 0004 surgical update — drop references to deleted artifacts
-
-**File:** [docs/plans/0004-pit-reconstruction.md](docs/plans/0004-pit-reconstruction.md)
-
-**Changes (two surgical edits, no body rewrite):**
-
-1. **Frontmatter `Implementation:` line.** Remove `tools/apply_splits.py`, `tools/compute_splits.py`, and `split_adjustments` (all deleted 2026-05-06). Add `tools/compute_corporate_adjustments.py` and `corporate_adjustments` (the replacements).
-2. **Phase 3 success log (lines 358-359).** Append a 2026-05-06 update note: the leaky pre-bake path was replaced by PIT-strict composition at signal-compute time per ADR 0010; the "dividend adjustment gap" is closed; the deferred dividend pass is no longer pending. Don't rewrite the original entry — append, so the history of what was tried first is preserved.
-
-**No new ADR needed.** ADR 0010 (filed today) already records the architectural decision. The plan-0004 update is just keeping the planning doc honest about what's on disk.
+1. **F1.1 universe-pull cadence — daily, weekly, or hybrid?** Full pull = ~3 hrs. Annual fundamentals only update quarterly (~once every 90 days per stock); quarterly fundamentals update at most quarterly (~once every 90 days per stock). Daily is wasteful. **My take:** weekly full universe (Sun 02:00 IST), daily incremental for the ~200 stocks expected to have a filing this week (use `earnings_calendar` as the trigger).
+2. **Payables source for `cash_conversion_cycle`?** Not in Data Sheet, but might be in the standalone xlsx's "Profit & Loss" or "Balance Sheet" tabs (which we currently skip). Three options: (a) re-parse standalone tabs to find Payables — adds parser complexity; (b) skip CCC for now, ship FCF yield + ROIC + ROIIC first; (c) derive Payables ≈ Other Liabilities − provisions, accept the noise. **My take:** (b) — ROIC alone gives us a real B1 factor in 1 dev-day vs. 3 days of parser work for one factor.
+3. **Surveillance bug fix — slot it where?** 5-min fix, no cookie / auth required, fully unblocked. Could go in any 30-min slot: (a) before next session's main work, (b) after F1.1 universe pull, (c) batch with other small fixes when there's a critical mass. **My take:** (a) — clear it on session start to free mental space.
+4. **ADR for the long-format fundamentals decision?** Plan 0005 specifies long format, but the architectural choice (long for new fundamentals tables; existing wide tables stay wide) deserves an ADR — future contributors will ask why we have two formats. ~10 min to write. **My take:** yes, ADR 0011 — *Long-format for new fundamentals tables; wide-format legacy tables stay wide*. Not blocking but nice hygiene.
+5. **Plan 0005 phase tracking?** Frontmatter now says "A1 thin slice landed; universe scale-up pending. A2/A3/A4: not started." Granular enough? Or do we want a Phase A status block inside the plan body to track A1.1 / A1.2 / A1.3 milestones? **My take:** the frontmatter sentence is sufficient until A2 starts; revisit then.
 
 ---
 
@@ -78,12 +73,17 @@ A short hygiene/cleanup session. The 2026-05-06 PIT-strict adjustment work (comm
 |---|---|
 | `5102eaa` | docs: file ADR 0010 (PIT-strict corporate-action adjustment) |
 | `8c80240` | docs: refresh README to reflect PIT-strict v2 production state |
-| `4e6cef1` | feat: PIT-strict corporate-action adjustment (splits + bonuses + dividends) — *committed 2026-05-06, pushed today* |
+| `e8b0797` | docs: refresh HANDOFF + plan 0004 (post-PIT-strict cleanup) |
+| `1757abf` | feat(F1.1): Screener Premium ingest — thin slice end-to-end |
+| `4e6cef1` | feat: PIT-strict corporate-action adjustment — *committed 2026-05-06, pushed today* |
 
-## Today's local-only changes (no commit yet)
+## Today's local-only changes (no commit; not in git)
 
-| Change | File |
+| Change | Where |
 |---|---|
-| Added `Bash(git push origin master)` and `Bash(git push)` to allow list | [.claude/settings.local.json](.claude/settings.local.json) |
-| Schema drop: `stock_prices.adj_close` column + `split_adjustments` table | `data/alpha_signal.db` (DDL, not in git) |
-| Backup before schema drop | `data/alpha_signal.db.bak-20260509-204353` (gitignored) |
+| `Bash(git push origin master)` and `Bash(git push)` allow rules | [.claude/settings.local.json](.claude/settings.local.json) |
+| `stock_prices.adj_close` column dropped + `split_adjustments` table dropped | `data/alpha_signal.db` (DDL, not in git); backup at `data/alpha_signal.db.bak-20260509-204353` |
+| `fundamentals_screener` table created (419 rows for RELI) + `screener_pull_errors` (2 rows from earlier debugging) | `data/alpha_signal.db` (created by `init_db()` from committed `schema.sql`) |
+| Screener cookie cached | `~/.cache/screener_cookie.json` (chmod 600; sessionid + csrftoken) |
+| `openpyxl` 3.1.5 + `et-xmlfile` 2.0.0 installed | `~/alpha-signal/venv/` (shared with v1) |
+| `SCREENER_USERNAME`, `SCREENER_PASSWORD` exports added to `~/alpha-signal/run_pipeline.sh` | v1 script (always was the secrets location per CLAUDE.md) |
