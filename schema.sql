@@ -570,3 +570,39 @@ CREATE TABLE IF NOT EXISTS daily_changes (
 
 CREATE INDEX IF NOT EXISTS idx_changes_date ON daily_changes(change_date);
 CREATE INDEX IF NOT EXISTS idx_changes_sid ON daily_changes(sid);
+
+
+-- ═══════════════════════════════════════════════════
+-- GROUP 8: F-TRACK FUNDAMENTALS (Screener Premium)
+-- ═══════════════════════════════════════════════════
+
+-- Long-format fundamentals from Screener.in Premium Excel exports.
+-- One row per (sid × period_end × period_type × line_item).
+-- Source: sources/screener_pull.py — see ADR/plan 0005 A1.
+CREATE TABLE IF NOT EXISTS fundamentals_screener (
+    sid             TEXT NOT NULL REFERENCES stocks(sid),
+    period_end      TEXT NOT NULL,                -- ISO date (period close)
+    period_type     TEXT NOT NULL,                -- 'quarterly' | 'annual'
+    line_item       TEXT NOT NULL,                -- e.g. 'Revenue', 'COGS', 'Receivables'
+    value           REAL,                         -- numeric value (NULL if Screener showed '—')
+    filing_date     TEXT,                         -- when Screener says it was filed (often NULL)
+    fetched_at      TEXT DEFAULT (datetime('now')),
+    PRIMARY KEY (sid, period_end, period_type, line_item)
+);
+
+CREATE INDEX IF NOT EXISTS idx_fund_screener_sid ON fundamentals_screener(sid);
+CREATE INDEX IF NOT EXISTS idx_fund_screener_item ON fundamentals_screener(line_item);
+
+-- Per-stock pull errors. Append-only audit trail.
+CREATE TABLE IF NOT EXISTS screener_pull_errors (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    sid             TEXT,                         -- nullable if error was pre-lookup
+    ticker          TEXT,
+    error_type      TEXT NOT NULL,                -- 'auth' | 'http' | 'parse' | 'thin' | 'empty' | 'fetch'
+    error_message   TEXT,
+    http_status     INTEGER,
+    attempted_at    TEXT DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_screener_errors_sid ON screener_pull_errors(sid);
+CREATE INDEX IF NOT EXISTS idx_screener_errors_date ON screener_pull_errors(attempted_at);

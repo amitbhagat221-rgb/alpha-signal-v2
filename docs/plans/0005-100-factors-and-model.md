@@ -1,9 +1,9 @@
 ---
 Status: active
 Created: 2026-05-03
-Last updated: 2026-05-04
+Last updated: 2026-05-09
 Owner: Amit Bhagat
-Implementation: Pending — F1.1 (Screener Premium scraper) is next concrete deliverable
+Implementation: A1 (Screener Premium scraper) — thin slice landed 2026-05-09 in sources/screener_pull.py + tables fundamentals_screener, screener_pull_errors. Verified end-to-end on RELI (419 rows: 10 annual + 10 quarterly periods × 36 line items). Auth via password+cookie cache. Universe scale-up pending. A2/A3/A4: not started.
 Related ADRs: 0009-factor-track-parallel-to-d-track.md
 ---
 
