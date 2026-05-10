@@ -195,6 +195,16 @@ async def flow_page(request: Request):
     })
 
 
+@app.get("/command", response_class=HTMLResponse)
+async def command_centre(request: Request):
+    """Command centre — collapsible flow of plans, factor library, data layer,
+    pending actions. Updates whenever HANDOFF / plans / git change."""
+    payload = api.get_command_centre()
+    return templates.TemplateResponse(request, "command.html", {
+        "page": "command", **payload,
+    })
+
+
 @app.get("/system", response_class=HTMLResponse)
 async def system(request: Request, refresh: int = 0):
     """System page. Pass ?refresh=1 to force a recompute of the health model."""

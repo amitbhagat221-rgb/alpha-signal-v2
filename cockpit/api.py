@@ -1482,3 +1482,218 @@ def get_data_health_scores(force=False):
     """
     from health import compute_db_health
     return compute_db_health(force=force)
+
+
+# ═══════════════════════════════════════════════════
+# Command Centre — overview of plans, factors, data layer, pending actions
+# ═══════════════════════════════════════════════════
+
+FACTOR_COUNT_TARGET = 100
+
+
+def _read_md_section(md_path: Path, header: str) -> str | None:
+    """Return the body of an H2 section by header text, or None."""
+    if not md_path.exists():
+        return None
+    text = md_path.read_text()
+    needle = f"\n## {header}"
+    start = text.find(needle)
+    if start < 0:
+        return None
+    body_start = start + len(needle)
+    end = text.find("\n## ", body_start)
+    return text[body_start:end if end > 0 else len(text)].strip()
+
+
+def _parse_plan_frontmatter(md_path: Path) -> dict:
+    """Parse YAML-ish frontmatter at top of a plan or ADR markdown file."""
+    text = md_path.read_text()
+    if not text.startswith("---"):
+        return {}
+    end = text.find("\n---", 3)
+    if end < 0:
+        return {}
+    fm = {}
+    for line in text[3:end].splitlines():
+        if ":" in line and not line.startswith(" "):
+            key, _, val = line.partition(":")
+            fm[key.strip().lower()] = val.strip()
+    return fm
+
+
+def get_command_centre():
+    """Assemble the command-centre payload — plans, factor library, data layer,
+    pending actions. Server-rendered; no live polling."""
+    project_root = Path(__file__).resolve().parent.parent
+
+    # ── Plans ────────────────────────────────────────────────
+    plans = []
+    for p in sorted((project_root / "docs" / "plans").glob("000*.md")):
+        fm = _parse_plan_frontmatter(p)
+        title_match = None
+        for line in p.read_text().splitlines():
+            if line.startswith("# "):
+                title_match = line[2:].strip()
+                break
+        plans.append({
+            "file": p.name,
+            "title": title_match or p.stem,
+            "status": fm.get("status") or "—",
+            "last_updated": fm.get("last updated") or "—",
+            "implementation": fm.get("implementation") or "",
+        })
+
+    # ── ADRs ─────────────────────────────────────────────────
+    adrs = []
+    for a in sorted((project_root / "docs" / "decisions").glob("0*.md")):
+        first_lines = a.read_text().splitlines()[:10]
+        title = next((l[2:].strip() for l in first_lines if l.startswith("# ")), a.stem)
+        status_line = next((l for l in first_lines if l.startswith("**Status:")), "")
+        date_line = next((l for l in first_lines if l.startswith("**Date:")), "")
+        adrs.append({
+            "file": a.name,
+            "title": title,
+            "status": status_line.replace("**Status:**", "").strip().rstrip("*").strip() or "—",
+            "date": date_line.replace("**Date:**", "").strip().rstrip("*").strip() or "—",
+        })
+
+    # ── Factor library ───────────────────────────────────────
+    # Each row is one factor with: name, source table, today's row count,
+    # backtest t-stat (best across cap_tier), in-production flag.
+    factor_specs = [
+        # (display_name, table, ic_signal_name, in_production, source_track)
+        ("Piotroski F-Score",       "piotroski_scores",     "piotroski_f_score",       True,  "legacy"),
+        ("M-Score (forensic)",      "forensic_scores",      "m_score",                 True,  "legacy"),
+        ("Z-Score (forensic)",      "forensic_scores",      "z_score",                 True,  "legacy"),
+        ("CF Accruals",             "accruals_scores",      "cf_accruals_ratio",       True,  "legacy"),
+        ("BS Accruals",             "accruals_scores",      "bs_accruals_ratio",       True,  "legacy"),
+        ("Earnings persistence",    "accruals_scores",      "earnings_persistence",    True,  "legacy"),
+        ("Consensus signal",        "consensus_signals",    "consensus_signal_combined", True, "legacy"),
+        ("Promoter QoQ",            "promoter_signals",     "promoter_qoq",            True,  "legacy"),
+        ("Promoter trend 4q",       "promoter_signals",     "promoter_trend_4q",       True,  "legacy"),
+        ("Smart money",             "smart_money_scores",   None,                      True,  "legacy"),
+        ("Insider",                 "insider_signals",      None,                      True,  "legacy"),
+        ("Macro / sector",          "macro_sector_signals", None,                      True,  "legacy"),
+        ("ROIC (F-track)",          "roic_scores",          None,                      False, "f-track"),
+        ("FCF Yield (F-track)",     "fcf_yield_scores",     None,                      False, "f-track"),
+    ]
+    factors = []
+    with get_db() as conn:
+        try:
+            ic = read_sql(
+                "SELECT signal, cap_tier, t_stat, mean_ic, source FROM pit_ic_by_tier_v2"
+            )
+            best_t_by_signal = (
+                ic.assign(abst=lambda d: d["t_stat"].abs())
+                  .sort_values("abst", ascending=False)
+                  .drop_duplicates("signal", keep="first")
+                  .set_index("signal")
+                  .to_dict("index")
+            )
+        except Exception:
+            best_t_by_signal = {}
+
+        for name, table, ic_signal, in_prod, track in factor_specs:
+            try:
+                cnt_row = conn.execute(
+                    f"SELECT COUNT(DISTINCT sid) AS n FROM {table}"
+                ).fetchone()
+                n = cnt_row[0] if cnt_row else 0
+            except Exception:
+                n = 0
+            t_stat = None
+            if ic_signal and ic_signal in best_t_by_signal:
+                t_stat = best_t_by_signal[ic_signal].get("t_stat")
+            factors.append({
+                "name": name,
+                "table": table,
+                "ic_signal": ic_signal,
+                "stocks": int(n),
+                "t_stat": float(t_stat) if t_stat is not None else None,
+                "in_production": in_prod,
+                "track": track,
+            })
+
+    # "Built" = has scores. "In production" = marked AND built. Library = built but not in production.
+    n_built = len([f for f in factors if f["stocks"] > 0])
+    n_in_prod = len([f for f in factors if f["in_production"] and f["stocks"] > 0])
+    n_in_library = n_built - n_in_prod
+
+    # ── Data layer ───────────────────────────────────────────
+    data_layer = {}
+    with get_db() as conn:
+        for tbl, label in [
+            ("fundamentals_screener", "Fundamentals (Screener)"),
+            ("stock_prices",          "Daily prices"),
+            ("quarterly_income",      "Quarterly income (Tickertape)"),
+            ("annual_balance_sheet",  "Annual balance sheet"),
+            ("annual_cash_flow",      "Annual cash flow"),
+            ("shareholding",          "Shareholding"),
+            ("insider_trades",        "Insider trades"),
+            ("bulk_deals",            "Bulk deals"),
+            ("regulatory_events",     "Regulatory events"),
+            ("news_articles",         "News articles"),
+        ]:
+            try:
+                cnt = conn.execute(f"SELECT COUNT(*) FROM {tbl}").fetchone()[0]
+                stocks_cnt = None
+                try:
+                    stocks_cnt = conn.execute(
+                        f"SELECT COUNT(DISTINCT sid) FROM {tbl}"
+                    ).fetchone()[0]
+                except Exception:
+                    pass
+                data_layer[tbl] = {
+                    "label": label, "rows": int(cnt),
+                    "stocks": int(stocks_cnt) if stocks_cnt is not None else None,
+                }
+            except Exception:
+                data_layer[tbl] = {"label": label, "rows": 0, "stocks": None}
+
+        # Special: how many stocks have Trade Payables (F1.2 progress proxy)
+        try:
+            tp_stocks = conn.execute(
+                "SELECT COUNT(DISTINCT sid) FROM fundamentals_screener "
+                "WHERE line_item='Trade Payables'"
+            ).fetchone()[0]
+            data_layer["fundamentals_screener"]["trade_payables_stocks"] = int(tp_stocks)
+        except Exception:
+            pass
+
+    # ── Pending actions + open questions from HANDOFF ────────
+    handoff = project_root / "HANDOFF.md"
+    next_actions_md = _read_md_section(handoff, "Next 3 actions (in order, concrete)") or ""
+    open_questions_md = _read_md_section(handoff, "Open questions for me (decisions you need to make)") or ""
+    where_md = _read_md_section(handoff, "Where I am") or ""
+
+    # ── Recent commits ───────────────────────────────────────
+    import subprocess
+    try:
+        log_out = subprocess.check_output(
+            ["git", "log", "--pretty=format:%h|%s|%cr", "-15"],
+            cwd=str(project_root), text=True, timeout=5,
+        )
+        commits = [
+            dict(zip(["sha", "subject", "when"], line.split("|", 2)))
+            for line in log_out.splitlines() if line
+        ]
+    except Exception:
+        commits = []
+
+    return {
+        "plans": plans,
+        "adrs": adrs,
+        "factors": factors,
+        "factor_summary": {
+            "built": n_built,
+            "target": FACTOR_COUNT_TARGET,
+            "pct": round(100 * n_built / FACTOR_COUNT_TARGET, 1),
+            "in_production": n_in_prod,
+            "in_library": n_in_library,
+        },
+        "data_layer": data_layer,
+        "next_actions_md": next_actions_md,
+        "open_questions_md": open_questions_md,
+        "where_md": where_md,
+        "commits": commits,
+    }

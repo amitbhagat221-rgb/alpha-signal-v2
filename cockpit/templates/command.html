@@ -1,0 +1,329 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<style>
+    .cc-section { margin-bottom: 14px; }
+    .cc-section > summary {
+        cursor: pointer;
+        padding: 14px 18px;
+        background: var(--card-bg, #181a1f);
+        border: 1px solid var(--border, #2a2d33);
+        border-radius: 10px;
+        font-size: 13px;
+        font-weight: 700;
+        letter-spacing: 0.4px;
+        text-transform: uppercase;
+        color: var(--text-primary, #e6e8eb);
+        list-style: none;
+        position: relative;
+        user-select: none;
+        display: flex; align-items: center; gap: 12px;
+        transition: background 0.15s;
+    }
+    .cc-section > summary:hover { background: var(--card-bg-hover, #1f2128); }
+    .cc-section > summary::-webkit-details-marker { display: none; }
+    .cc-section > summary::after {
+        content: '▾'; margin-left: auto; font-size: 14px;
+        transition: transform 0.2s; color: var(--text-muted, #888);
+    }
+    .cc-section[open] > summary::after { transform: rotate(180deg); }
+    .cc-section > summary .cc-meta {
+        margin-left: auto; font-size: 11px; font-weight: 500;
+        color: var(--text-muted, #888); text-transform: none; letter-spacing: 0;
+    }
+    .cc-body { padding: 16px 18px; border-left: 1px solid var(--border, #2a2d33);
+               margin: 0 0 0 22px; font-size: 13px; line-height: 1.6; }
+    .cc-grid { display: grid; gap: 10px; }
+    .cc-grid-2 { grid-template-columns: repeat(2, 1fr); }
+    .cc-grid-3 { grid-template-columns: repeat(3, 1fr); }
+    @media (max-width: 720px) {
+        .cc-grid-2, .cc-grid-3 { grid-template-columns: 1fr; }
+    }
+    .cc-stat-card { padding: 12px 14px; background: var(--card-bg, #181a1f);
+                    border: 1px solid var(--border, #2a2d33); border-radius: 8px; }
+    .cc-stat-label { font-size: 10px; color: var(--text-muted, #888);
+                     text-transform: uppercase; letter-spacing: 0.7px; margin-bottom: 6px; }
+    .cc-stat-value { font-size: 22px; font-weight: 700; color: var(--text-primary); }
+    .cc-stat-sub { font-size: 11px; color: var(--text-secondary, #aaa); margin-top: 4px; }
+    .cc-progress {
+        height: 8px; background: var(--border, #2a2d33); border-radius: 4px;
+        overflow: hidden; margin-top: 8px;
+    }
+    .cc-progress-bar { height: 100%; background: var(--accent, #4d8eff); transition: width 0.3s; }
+    .cc-pill {
+        display: inline-block; padding: 2px 8px; border-radius: 10px;
+        font-size: 10px; font-weight: 700; letter-spacing: 0.4px;
+        text-transform: uppercase;
+    }
+    .cc-pill.ok    { background: rgba(46,204,113,0.15); color: #2ecc71; }
+    .cc-pill.warn  { background: rgba(241,196,15,0.15); color: #f1c40f; }
+    .cc-pill.muted { background: rgba(140,140,140,0.15); color: #aaa; }
+    .cc-pill.live  { background: rgba(77,142,255,0.15); color: #4d8eff; }
+    table.cc-table { width: 100%; border-collapse: collapse; }
+    table.cc-table th, table.cc-table td {
+        text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border, #2a2d33);
+        font-size: 12px;
+    }
+    table.cc-table th { font-size: 10px; text-transform: uppercase; letter-spacing: 0.6px;
+                        color: var(--text-muted, #888); font-weight: 600; }
+    table.cc-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+    .cc-md { white-space: pre-wrap; font-family: var(--mono, monospace);
+             font-size: 12px; line-height: 1.6; color: var(--text-secondary); }
+    .cc-track-legacy   { color: #aaa; }
+    .cc-track-f-track  { color: #4d8eff; }
+    .cc-tag {
+        display: inline-block; padding: 2px 6px; border-radius: 4px;
+        font-size: 10px; font-weight: 600; letter-spacing: 0.3px;
+        background: rgba(140,140,140,0.12); color: var(--text-secondary);
+        margin-left: 6px;
+    }
+</style>
+
+<div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 18px;">
+    <div>
+        <div class="section-title">Command Centre</div>
+        <div class="section-desc">
+            Plans, factor library, data layer, pending actions — everything in one place.
+            Updates whenever HANDOFF / plans / git change. Click sections to expand.
+        </div>
+    </div>
+    <a href="/command" style="padding: 6px 12px; background: var(--card-bg);
+        border: 1px solid var(--border); border-radius: 6px; text-decoration: none;
+        color: var(--text-secondary); font-size: 11px;">↻ Refresh</a>
+</div>
+
+<!-- ── 1. Mission Control / Top-line numbers ─────────────────── -->
+<details class="cc-section" open>
+    <summary>{{ icon("compass", 16) }} Mission Control
+        <span class="cc-meta">factor count · data layer · plan status</span>
+    </summary>
+    <div class="cc-body">
+        <div class="cc-grid cc-grid-3">
+            <div class="cc-stat-card">
+                <div class="cc-stat-label">Factor Library</div>
+                <div class="cc-stat-value">{{ factor_summary.built }} / {{ factor_summary.target }}</div>
+                <div class="cc-stat-sub">{{ factor_summary.in_production }} in model · {{ factor_summary.in_library }} in library</div>
+                <div class="cc-progress">
+                    <div class="cc-progress-bar" style="width: {{ factor_summary.pct }}%;"></div>
+                </div>
+            </div>
+            <div class="cc-stat-card">
+                <div class="cc-stat-label">Fundamentals (F-track)</div>
+                {% set fs = data_layer.get('fundamentals_screener', {}) %}
+                <div class="cc-stat-value">{{ "{:,}".format(fs.get('rows', 0)) }}</div>
+                <div class="cc-stat-sub">
+                    {{ fs.get('stocks', 0) }} stocks ·
+                    {% if fs.get('trade_payables_stocks', 0) %}{{ fs.get('trade_payables_stocks') }} with Trade Payables{% else %}schedules pending{% endif %}
+                </div>
+            </div>
+            <div class="cc-stat-card">
+                <div class="cc-stat-label">Plans Active</div>
+                {% set active_plans = plans | selectattr('status', 'equalto', 'active') | list %}
+                <div class="cc-stat-value">{{ active_plans | length }}</div>
+                <div class="cc-stat-sub">of {{ plans | length }} total · ADRs filed: {{ adrs | length }}</div>
+            </div>
+        </div>
+
+        {% if where_md %}
+        <div style="margin-top: 18px;">
+            <div class="cc-stat-label" style="margin-bottom: 8px;">Where I am (from HANDOFF)</div>
+            <div class="cc-md">{{ where_md }}</div>
+        </div>
+        {% endif %}
+    </div>
+</details>
+
+<!-- ── 2. Factor Library ──────────────────────────────────────── -->
+<details class="cc-section" open>
+    <summary>{{ icon("sliders", 16) }} Factor Library
+        <span class="cc-meta">{{ factors | length }} factors · validated → model · others → library</span>
+    </summary>
+    <div class="cc-body">
+        <table class="cc-table">
+            <thead>
+            <tr>
+                <th>Factor</th>
+                <th>Track</th>
+                <th class="num">Stocks</th>
+                <th class="num">Best |t|</th>
+                <th>Status</th>
+                <th>Source table</th>
+            </tr>
+            </thead>
+            <tbody>
+            {% for f in factors %}
+            <tr>
+                <td><strong>{{ f.name }}</strong></td>
+                <td><span class="cc-track-{{ f.track }}">{{ f.track }}</span></td>
+                <td class="num">{{ "{:,}".format(f.stocks) if f.stocks else '—' }}</td>
+                <td class="num">
+                    {% if f.t_stat is not none %}{{ '%.2f' | format(f.t_stat) }}{% else %}—{% endif %}
+                </td>
+                <td>
+                    {% if f.in_production %}
+                        <span class="cc-pill ok">in model</span>
+                    {% elif f.stocks > 0 %}
+                        <span class="cc-pill warn">library only</span>
+                    {% else %}
+                        <span class="cc-pill muted">not built</span>
+                    {% endif %}
+                </td>
+                <td><code style="font-size: 11px;">{{ f.table }}</code></td>
+            </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        <div style="margin-top: 12px; font-size: 11px; color: var(--text-muted);">
+            Promotion rule: t ≥ 1.5 in any cap-tier moves a factor from library to model.
+            New factors land in library by default. v1 quality signals are pre-validated and stay in model.
+        </div>
+    </div>
+</details>
+
+<!-- ── 3. Data Layer ──────────────────────────────────────────── -->
+<details class="cc-section">
+    <summary>{{ icon("layers", 16) }} Data Layer
+        <span class="cc-meta">{{ data_layer | length }} core tables</span>
+    </summary>
+    <div class="cc-body">
+        <table class="cc-table">
+            <thead>
+            <tr>
+                <th>Table</th>
+                <th>Source</th>
+                <th class="num">Rows</th>
+                <th class="num">Stocks</th>
+            </tr>
+            </thead>
+            <tbody>
+            {% for tbl, info in data_layer.items() %}
+            <tr>
+                <td><code style="font-size: 11px;">{{ tbl }}</code></td>
+                <td>{{ info.label }}</td>
+                <td class="num">{{ "{:,}".format(info.rows) }}</td>
+                <td class="num">{{ "{:,}".format(info.stocks) if info.stocks is not none else '—' }}</td>
+            </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</details>
+
+<!-- ── 4. Plans ───────────────────────────────────────────────── -->
+<details class="cc-section">
+    <summary>{{ icon("git-branch", 16) }} Plans
+        <span class="cc-meta">{{ plans | length }} plans</span>
+    </summary>
+    <div class="cc-body">
+        {% for p in plans %}
+        <div class="cc-stat-card" style="margin-bottom: 10px;">
+            <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 12px;">
+                <div>
+                    <div style="font-size: 13px; font-weight: 600;">{{ p.title }}</div>
+                    <div class="cc-stat-sub">
+                        <code style="font-size: 10px;">{{ p.file }}</code> · last updated {{ p.last_updated }}
+                    </div>
+                </div>
+                <div>
+                    {% if p.status == 'active' %}
+                        <span class="cc-pill live">{{ p.status }}</span>
+                    {% elif p.status == 'done' or p.status == 'implemented' %}
+                        <span class="cc-pill ok">{{ p.status }}</span>
+                    {% else %}
+                        <span class="cc-pill muted">{{ p.status }}</span>
+                    {% endif %}
+                </div>
+            </div>
+            {% if p.implementation %}
+            <div class="cc-stat-sub" style="margin-top: 8px; line-height: 1.5;">
+                {{ p.implementation[:400] }}{% if p.implementation | length > 400 %}…{% endif %}
+            </div>
+            {% endif %}
+        </div>
+        {% endfor %}
+    </div>
+</details>
+
+<!-- ── 5. Pending Actions (from HANDOFF) ──────────────────────── -->
+<details class="cc-section" open>
+    <summary>{{ icon("target", 16) }} Pending Actions
+        <span class="cc-meta">from HANDOFF.md</span>
+    </summary>
+    <div class="cc-body">
+        {% if next_actions_md %}
+            <div class="cc-md">{{ next_actions_md }}</div>
+        {% else %}
+            <div class="cc-stat-sub">No pending-actions section found in HANDOFF.</div>
+        {% endif %}
+    </div>
+</details>
+
+<!-- ── 6. Open Questions ──────────────────────────────────────── -->
+<details class="cc-section">
+    <summary>{{ icon("activity", 16) }} Open Questions
+        <span class="cc-meta">decisions waiting on you</span>
+    </summary>
+    <div class="cc-body">
+        {% if open_questions_md %}
+            <div class="cc-md">{{ open_questions_md }}</div>
+        {% else %}
+            <div class="cc-stat-sub">No open-questions section found in HANDOFF.</div>
+        {% endif %}
+    </div>
+</details>
+
+<!-- ── 7. ADRs ────────────────────────────────────────────────── -->
+<details class="cc-section">
+    <summary>{{ icon("diamond", 16) }} Decisions (ADRs)
+        <span class="cc-meta">{{ adrs | length }} architectural decisions</span>
+    </summary>
+    <div class="cc-body">
+        <table class="cc-table">
+            <thead>
+            <tr><th>File</th><th>Title</th><th>Status</th><th>Date</th></tr>
+            </thead>
+            <tbody>
+            {% for a in adrs %}
+            <tr>
+                <td><code style="font-size: 11px;">{{ a.file }}</code></td>
+                <td>{{ a.title }}</td>
+                <td>
+                    {% if a.status.lower() == 'accepted' %}
+                        <span class="cc-pill ok">{{ a.status }}</span>
+                    {% else %}
+                        <span class="cc-pill muted">{{ a.status }}</span>
+                    {% endif %}
+                </td>
+                <td>{{ a.date }}</td>
+            </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</details>
+
+<!-- ── 8. Recent Commits ──────────────────────────────────────── -->
+<details class="cc-section">
+    <summary>{{ icon("git-branch", 16) }} Recent Commits
+        <span class="cc-meta">last {{ commits | length }} on master</span>
+    </summary>
+    <div class="cc-body">
+        <table class="cc-table">
+            <thead>
+            <tr><th>SHA</th><th>Subject</th><th>When</th></tr>
+            </thead>
+            <tbody>
+            {% for c in commits %}
+            <tr>
+                <td><code style="font-size: 11px;">{{ c.sha }}</code></td>
+                <td>{{ c.subject }}</td>
+                <td class="cc-stat-sub">{{ c.when }}</td>
+            </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</details>
+
+{% endblock %}
