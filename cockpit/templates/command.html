@@ -135,48 +135,93 @@
 </details>
 
 <!-- ── 2. Factor Library ──────────────────────────────────────── -->
+{% set factor_groups = {} %}
+{% for f in factors %}
+    {% if factor_groups.update({f.group: factor_groups.get(f.group, []) + [f]}) %}{% endif %}
+{% endfor %}
 <details class="cc-section" open>
     <summary>{{ icon("sliders", 16) }} Factor Library
-        <span class="cc-meta">{{ factors | length }} factors · validated → model · others → library</span>
+        <span class="cc-meta">{{ factors | length }} factors · {{ factor_summary.in_production }} in model · {{ factor_summary.in_library }} in library · grouped by category</span>
     </summary>
     <div class="cc-body">
-        <table class="cc-table">
-            <thead>
-            <tr>
-                <th>Factor</th>
-                <th>Track</th>
-                <th class="num">Stocks</th>
-                <th class="num">Best |t|</th>
-                <th>Status</th>
-                <th>Source table</th>
-            </tr>
-            </thead>
-            <tbody>
-            {% for f in factors %}
-            <tr>
-                <td><strong>{{ f.name }}</strong></td>
-                <td><span class="cc-track-{{ f.track }}">{{ f.track }}</span></td>
-                <td class="num">{{ "{:,}".format(f.stocks) if f.stocks else '—' }}</td>
-                <td class="num">
-                    {% if f.t_stat is not none %}{{ '%.2f' | format(f.t_stat) }}{% else %}—{% endif %}
-                </td>
-                <td>
-                    {% if f.in_production %}
-                        <span class="cc-pill ok">in model</span>
-                    {% elif f.stocks > 0 %}
-                        <span class="cc-pill warn">library only</span>
-                    {% else %}
-                        <span class="cc-pill muted">not built</span>
-                    {% endif %}
-                </td>
-                <td><code style="font-size: 11px;">{{ f.table }}</code></td>
-            </tr>
-            {% endfor %}
-            </tbody>
-        </table>
-        <div style="margin-top: 12px; font-size: 11px; color: var(--text-muted);">
-            Promotion rule: t ≥ 1.5 in any cap-tier moves a factor from library to model.
-            New factors land in library by default. v1 quality signals are pre-validated and stay in model.
+        {% for group_name, group_factors in factor_groups.items() %}
+        <details style="margin-bottom: 14px;" {% if loop.index <= 2 %}open{% endif %}>
+            <summary style="cursor: pointer; font-size: 12px; font-weight: 700; letter-spacing: 0.4px; text-transform: uppercase; color: var(--text-secondary, #aaa); padding: 8px 0; border-bottom: 1px solid var(--border, #2a2d33);">
+                {{ group_name }}
+                <span style="font-weight: 400; color: var(--text-muted, #888); margin-left: 8px;">
+                    {{ group_factors | length }} factors · {{ group_factors | selectattr('in_production') | list | length }} in model
+                </span>
+            </summary>
+            <table class="cc-table" style="margin-top: 8px;">
+                <thead>
+                <tr>
+                    <th>Factor</th>
+                    <th>Status</th>
+                    <th class="num">Coverage</th>
+                    <th class="num">Best |t|</th>
+                    <th class="num">n</th>
+                    <th>Source</th>
+                    <th>Bench</th>
+                </tr>
+                </thead>
+                <tbody>
+                {% for f in group_factors %}
+                <tr>
+                    <td>
+                        <strong>{{ f.name }}</strong>
+                        {% if f.track == 'f-track' %}<span class="cc-tag" style="background: rgba(77,142,255,0.15); color: #4d8eff;">F</span>{% endif %}
+                        {% if f.status_reason %}
+                            <div class="cc-stat-sub" style="margin-top: 2px; font-size: 10px;">{{ f.status_reason }}</div>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if f.status == 'READY' %}
+                            <span class="cc-pill ok">{{ f.status }}</span>
+                        {% elif f.status == 'PARTIAL' %}
+                            <span class="cc-pill warn">{{ f.status }}</span>
+                        {% elif f.status == 'PROPOSED' %}
+                            <span class="cc-pill muted">{{ f.status }}</span>
+                        {% elif f.status == 'BLOCKED' %}
+                            <span class="cc-pill warn">{{ f.status }}</span>
+                        {% else %}
+                            <span class="cc-pill muted">{{ f.status or '—' }}</span>
+                        {% endif %}
+                    </td>
+                    <td class="num">{{ "{:,}".format(f.stocks) if f.stocks else '—' }}</td>
+                    <td class="num">
+                        {% if f.t_stat is not none %}
+                            {% if f.t_stat | abs >= 2.5 %}
+                                <strong style="color: #2ecc71;">{{ '%.2f' | format(f.t_stat) }}</strong>
+                            {% elif f.t_stat | abs >= 1.5 %}
+                                <strong style="color: #4d8eff;">{{ '%.2f' | format(f.t_stat) }}</strong>
+                            {% else %}
+                                <span style="color: var(--text-muted);">{{ '%.2f' | format(f.t_stat) }}</span>
+                            {% endif %}
+                        {% else %}—{% endif %}
+                    </td>
+                    <td class="num">{{ f.n_periods if f.n_periods else '—' }}</td>
+                    <td><span style="font-size: 10px; color: var(--text-muted);">{{ f.ic_source }}</span></td>
+                    <td>
+                        {% if f.in_production %}
+                            <span class="cc-pill ok">model</span>
+                        {% else %}
+                            <span class="cc-pill muted">library</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </details>
+        {% endfor %}
+        <div style="margin-top: 14px; font-size: 11px; color: var(--text-muted); line-height: 1.6;">
+            <strong>Promotion rule:</strong> |t| ≥ 1.5 in any cap-tier moves a factor from library to model
+            (preferring v2_recompute over v1_archive when both exist).<br>
+            <strong>t-stat colour key:</strong>
+            <span style="color: #2ecc71;">|t| ≥ 2.5 (KEEP)</span> ·
+            <span style="color: #4d8eff;">1.5–2.5 (WEAK keep)</span> ·
+            <span style="color: var(--text-muted);">&lt; 1.5 (library)</span>.
+            Reference: pit_ic_by_tier_v2.
         </div>
     </div>
 </details>

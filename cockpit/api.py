@@ -1558,65 +1558,150 @@ def get_command_centre():
         })
 
     # ── Factor library ───────────────────────────────────────
-    # Each row is one factor with: name, source table, today's row count,
-    # backtest t-stat (best across cap_tier), in-production flag.
-    factor_specs = [
-        # (display_name, table, ic_signal_name, in_production, source_track)
-        ("Piotroski F-Score",       "piotroski_scores",     "piotroski_f_score",       True,  "legacy"),
-        ("M-Score (forensic)",      "forensic_scores",      "m_score",                 True,  "legacy"),
-        ("Z-Score (forensic)",      "forensic_scores",      "z_score",                 True,  "legacy"),
-        ("CF Accruals",             "accruals_scores",      "cf_accruals_ratio",       True,  "legacy"),
-        ("BS Accruals",             "accruals_scores",      "bs_accruals_ratio",       True,  "legacy"),
-        ("Earnings persistence",    "accruals_scores",      "earnings_persistence",    True,  "legacy"),
-        ("Consensus signal",        "consensus_signals",    "consensus_signal_combined", True, "legacy"),
-        ("Promoter QoQ",            "promoter_signals",     "promoter_qoq",            True,  "legacy"),
-        ("Promoter trend 4q",       "promoter_signals",     "promoter_trend_4q",       True,  "legacy"),
-        ("Smart money",             "smart_money_scores",   None,                      True,  "legacy"),
-        ("Insider",                 "insider_signals",      None,                      True,  "legacy"),
-        ("Macro / sector",          "macro_sector_signals", None,                      True,  "legacy"),
-        ("ROIC (F-track)",          "roic_scores",          None,                      False, "f-track"),
-        ("FCF Yield (F-track)",     "fcf_yield_scores",     None,                      False, "f-track"),
+    # Source of truth: BACKTEST_SIGNALS in db.py (42 v1-derived signals) plus
+    # F-track additions (ROIC, FCF Yield, …). Each factor's t-stat is looked
+    # up from pit_ic_by_tier_v2 by `signal` column.
+    from db import BACKTEST_SIGNALS
+
+    # F-track factors not yet in BACKTEST_SIGNALS (no PIT helper yet, so no
+    # entry in the v1-shaped registry). Same fields shape, so they render
+    # uniformly.
+    F_TRACK_EXTRAS = [
+        {
+            "signal": "roic",
+            "label": "ROIC (F-track)",
+            "group": "F-track / Quality",
+            "status": "READY",
+            "status_reason": "",
+            "track": "f-track",
+            "score_table": "roic_scores",
+        },
+        {
+            "signal": "fcf_yield",
+            "label": "FCF Yield (F-track)",
+            "group": "F-track / Cash",
+            "status": "READY",
+            "status_reason": "",
+            "track": "f-track",
+            "score_table": "fcf_yield_scores",
+        },
     ]
+
+    # Promotion criterion: if pit_ic_by_tier_v2 has a row with |t| >= 1.5 in
+    # any cap-tier (preferring v2_recompute over v1_archive when both exist),
+    # the factor is "in model"; otherwise "library".
+    PROMOTION_T_THRESHOLD = 1.5
+
     factors = []
     with get_db() as conn:
         try:
             ic = read_sql(
-                "SELECT signal, cap_tier, t_stat, mean_ic, source FROM pit_ic_by_tier_v2"
+                "SELECT signal, cap_tier, t_stat, mean_ic, source, n_periods "
+                "FROM pit_ic_by_tier_v2"
             )
-            best_t_by_signal = (
-                ic.assign(abst=lambda d: d["t_stat"].abs())
-                  .sort_values("abst", ascending=False)
+            # Best |t| across cap_tier per signal — prefer v2_recompute over v1_archive.
+            ic = ic.assign(
+                abst=lambda d: d["t_stat"].abs(),
+                src_priority=lambda d: d["source"].map(
+                    {"v2_recompute": 0, "v1_archive": 1}
+                ).fillna(2),
+            )
+            best = (
+                ic.sort_values(["src_priority", "abst"], ascending=[True, False])
                   .drop_duplicates("signal", keep="first")
                   .set_index("signal")
                   .to_dict("index")
             )
         except Exception:
-            best_t_by_signal = {}
+            best = {}
 
-        for name, table, ic_signal, in_prod, track in factor_specs:
+        # Score-table count helper (cached per table in this call)
+        score_table_counts: dict[str, int] = {}
+
+        def _stocks_in(table_name: str | None) -> int:
+            if not table_name:
+                return 0
+            if table_name in score_table_counts:
+                return score_table_counts[table_name]
             try:
-                cnt_row = conn.execute(
-                    f"SELECT COUNT(DISTINCT sid) AS n FROM {table}"
+                row = conn.execute(
+                    f"SELECT COUNT(DISTINCT sid) FROM {table_name}"
                 ).fetchone()
-                n = cnt_row[0] if cnt_row else 0
+                n = int(row[0]) if row and row[0] is not None else 0
             except Exception:
                 n = 0
-            t_stat = None
-            if ic_signal and ic_signal in best_t_by_signal:
-                t_stat = best_t_by_signal[ic_signal].get("t_stat")
+            score_table_counts[table_name] = n
+            return n
+
+        # ── BACKTEST_SIGNALS (42 v1-derived) ──
+        for spec in BACKTEST_SIGNALS:
+            signal = spec["signal"]
+            ic_row = best.get(signal, {})
+            t_stat = ic_row.get("t_stat")
+            n_periods = ic_row.get("n_periods")
+            ic_source = ic_row.get("source")
+
+            # Coverage: prefer the v2 PIT column count over generic table counts
+            v2_col = spec.get("pit_column_v2")
+            stocks = 0
+            if v2_col:
+                try:
+                    row = conn.execute(
+                        f"SELECT COUNT(DISTINCT sid) FROM daily_snapshots_pit "
+                        f"WHERE {v2_col} IS NOT NULL"
+                    ).fetchone()
+                    stocks = int(row[0]) if row and row[0] is not None else 0
+                except Exception:
+                    stocks = 0
+
+            in_production = (
+                spec["status"] == "READY"
+                and t_stat is not None
+                and abs(t_stat) >= PROMOTION_T_THRESHOLD
+            )
+
             factors.append({
-                "name": name,
-                "table": table,
-                "ic_signal": ic_signal,
-                "stocks": int(n),
+                "name": spec["label"],
+                "signal": signal,
+                "group": spec.get("group", "—"),
+                "status": spec.get("status"),
+                "status_reason": spec.get("status_reason", "")[:240],
+                "stocks": stocks,
                 "t_stat": float(t_stat) if t_stat is not None else None,
-                "in_production": in_prod,
-                "track": track,
+                "n_periods": int(n_periods) if n_periods is not None else None,
+                "ic_source": ic_source or "—",
+                "in_production": in_production,
+                "track": "legacy",
+                "table": v2_col or "—",
             })
 
-    # "Built" = has scores. "In production" = marked AND built. Library = built but not in production.
-    n_built = len([f for f in factors if f["stocks"] > 0])
-    n_in_prod = len([f for f in factors if f["in_production"] and f["stocks"] > 0])
+        # ── F-track extras (ROIC, FCF Yield, …) ──
+        for spec in F_TRACK_EXTRAS:
+            signal = spec["signal"]
+            ic_row = best.get(signal, {})
+            t_stat = ic_row.get("t_stat")
+            stocks = _stocks_in(spec.get("score_table"))
+            in_production = (
+                t_stat is not None and abs(t_stat) >= PROMOTION_T_THRESHOLD
+            )
+            factors.append({
+                "name": spec["label"],
+                "signal": signal,
+                "group": spec.get("group", "F-track"),
+                "status": spec.get("status"),
+                "status_reason": spec.get("status_reason", ""),
+                "stocks": stocks,
+                "t_stat": float(t_stat) if t_stat is not None else None,
+                "n_periods": int(ic_row["n_periods"]) if ic_row.get("n_periods") is not None else None,
+                "ic_source": ic_row.get("source") or "—",
+                "in_production": in_production,
+                "track": "f-track",
+                "table": spec.get("score_table"),
+            })
+
+    # "Built" = has scores OR has a t-stat. "In model" = passes promotion.
+    n_built = len([f for f in factors if f["stocks"] > 0 or f["t_stat"] is not None])
+    n_in_prod = len([f for f in factors if f["in_production"]])
     n_in_library = n_built - n_in_prod
 
     # ── Data layer ───────────────────────────────────────────
