@@ -249,6 +249,13 @@ PIPELINE_STEPS = [
      "table": "piotroski_scores",  "source": "quarterly_income + annual_balance_sheet + annual_cash_flow",
      "data_freq": "quarterly",     "frequency": "daily"},
 
+    # ROIC — first F-track factor. Reads fundamentals_screener (sourced
+    # weekly via sources.screener_pull — separate cadence, not in daily
+    # pipeline). Not yet in scoring weights — needs t-stat validation.
+    {"name": "signal_roic",        "module": "signals.roic",        "function": "compute",  "critical": False,
+     "table": "roic_scores",       "source": "fundamentals_screener (Screener Premium)",
+     "data_freq": "annual",        "frequency": "daily"},
+
     {"name": "signal_accruals",    "module": "signals.accruals",    "function": "compute",  "critical": False,
      "table": "accruals_scores",   "source": "quarterly_income + annual_balance_sheet + annual_cash_flow",
      "data_freq": "quarterly",     "frequency": "daily"},
