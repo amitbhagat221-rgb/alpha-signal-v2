@@ -82,6 +82,11 @@ SIGNAL_COLUMN_MAP = {
     "quality_composite":   (None, "quality_composite"),
     "growth_composite":    (None, "growth_composite"),
     "mom_composite":       (None, "mom_composite"),
+    # F-track cluster (plan 0007)
+    "revenue_cv_5y":       (None, "revenue_cv_5y"),
+    "relative_turnover":   (None, "relative_turnover"),
+    "relative_growth":     (None, "relative_growth"),
+    "share_momentum":      (None, "share_momentum"),
     # forward return — same column in both
     "_response": ("fwd_return_20d", "fwd_return_20d"),
 }

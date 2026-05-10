@@ -136,6 +136,8 @@ PIT_COLUMNS = [
     "short_selling_signal",
     # Tier 4 — quality + sentiment
     "earnings_beat_rate", "news_volume_7d",
+    # F-track cluster (plan 0007) — sector-narrative-derived factors
+    "revenue_cv_5y", "relative_turnover", "relative_growth", "share_momentum",
 ]
 
 
@@ -184,6 +186,11 @@ VALIDATION_RANGES = {
     # Tier 4 — quality + sentiment
     "earnings_beat_rate":    (0, 1, True),      # fraction of last-N quarters beating
     "news_volume_7d":        (0, 100, True),    # article count in last 7d
+    # F-track cluster (plan 0007)
+    "revenue_cv_5y":         (0, 50, True),     # CV; >50 means mean ~ 0
+    "relative_turnover":     (0, 20, True),     # ratio vs sector p50
+    "relative_growth":       (-2, 5, True),     # growth − sector_median
+    "share_momentum":        (-1, 5, True),     # share[t]/share[t-90d] − 1
     # Sector signals (separate table)
     "regulatory_score":      (-10, 10, True),
     "macro_score":           (-10, 10, True),
@@ -273,6 +280,12 @@ def knowable_annual(df, eval_date, lag=ANNUAL_LAG):
 def knowable_shareholding(sh, eval_date, lag=SHAREHOLDING_LAG):
     cutoff = (eval_date - timedelta(days=lag)).isoformat()
     return sh[sh["end_date"] <= cutoff].copy()
+
+
+def knowable_screener(fund, eval_date, lag=ANNUAL_LAG):
+    """Filter fundamentals_screener long-format rows knowable at eval_date."""
+    cutoff = (eval_date - timedelta(days=lag)).isoformat()
+    return fund[fund["period_end"] <= cutoff].copy()
 
 
 def prices_through(prices, eval_date):
@@ -1141,6 +1154,134 @@ def pit_momentum(prices_pit):
     return pd.DataFrame(rows)
 
 
+# ───── Plan-0007 cluster: 4 factors derived from fundamentals_screener ─────
+
+_REVCV_MIN_YEARS = 6
+_REVCV_MIN_ABS_MEAN = 0.02
+_FCLUSTER_SMOOTH = 3
+
+
+def pit_revenue_cv(stocks, fund_pit):
+    """Revenue volatility 5y CV — stdev/|mean| of last 5 YoY Sales growth rates."""
+    sales = fund_pit[fund_pit["line_item"] == "Sales"]
+    sales = sales.sort_values(["sid", "period_end"])
+    rows = []
+    for sid, g in sales.groupby("sid"):
+        vals = g["value"].dropna().tolist()
+        if len(vals) < _REVCV_MIN_YEARS:
+            continue
+        window = vals[-_REVCV_MIN_YEARS:]
+        growth = []
+        for i in range(1, len(window)):
+            prev = window[i - 1]
+            if prev is None or prev <= 0:
+                continue
+            growth.append(window[i] / prev - 1)
+        if len(growth) < _REVCV_MIN_YEARS - 1:
+            continue
+        m = float(np.mean(growth))
+        if abs(m) < _REVCV_MIN_ABS_MEAN:
+            continue
+        cv = float(np.std(growth, ddof=1) / abs(m))
+        rows.append({"sid": sid, "revenue_cv_5y": round(cv, 4)})
+    return pd.DataFrame(rows)
+
+
+def pit_inventory_turnover(stocks, fund_pit):
+    """Sales/Inventory, 3-yr median, ranked vs sector p50."""
+    inv_excluded = set(FINANCIAL_SECTORS) | {"Information Technology",
+                                             "Communication Services", "Utilities"}
+    universe = stocks[~stocks["sector"].isin(inv_excluded)][["sid", "sector"]]
+    fp = fund_pit[fund_pit["line_item"].isin(["Sales", "Inventory"])].copy()
+    if fp.empty:
+        return pd.DataFrame(columns=["sid", "relative_turnover"])
+    wide = fp.pivot_table(index=["sid", "period_end"], columns="line_item",
+                          values="value", aggfunc="first").reset_index()
+    for col in ("Sales", "Inventory"):
+        if col not in wide.columns:
+            wide[col] = np.nan
+    wide = wide.dropna(subset=["Sales", "Inventory"])
+    wide = wide[(wide["Inventory"] >= 1.0) & (wide["Sales"] > 0)]
+    wide["turnover_yr"] = wide["Sales"] / wide["Inventory"]
+    wide = wide.sort_values(["sid", "period_end"])
+    last_n = wide.groupby("sid", as_index=False).tail(_FCLUSTER_SMOOTH)
+    agg = last_n.groupby("sid", as_index=False).agg(
+        inventory_turnover=("turnover_yr", "median"),
+        years_used=("turnover_yr", "count"),
+    )
+    agg = agg[agg["years_used"] >= _FCLUSTER_SMOOTH]
+    agg = agg.merge(universe, on="sid", how="inner")
+    if agg.empty:
+        return pd.DataFrame(columns=["sid", "relative_turnover"])
+    p50 = agg.groupby("sector")["inventory_turnover"].median().to_dict()
+    agg["sector_p50"] = agg["sector"].map(p50)
+    agg["relative_turnover"] = agg["inventory_turnover"] / agg["sector_p50"]
+    return agg[["sid", "relative_turnover"]].copy()
+
+
+def pit_sales_growth_relative(stocks, fund_pit):
+    """3-yr median YoY Sales growth minus sector median."""
+    universe = stocks[~stocks["sector"].isin(FINANCIAL_SECTORS)][["sid", "sector"]]
+    sales = fund_pit[fund_pit["line_item"] == "Sales"].copy()
+    sales = sales.sort_values(["sid", "period_end"])
+    sales["prev"] = sales.groupby("sid")["value"].shift(1)
+    sales = sales.dropna(subset=["prev"])
+    sales = sales[sales["prev"] > 0]
+    sales["growth_yr"] = sales["value"] / sales["prev"] - 1
+    last_n = sales.groupby("sid", as_index=False).tail(_FCLUSTER_SMOOTH)
+    agg = last_n.groupby("sid", as_index=False).agg(
+        sales_growth=("growth_yr", "median"),
+        years_used=("growth_yr", "count"),
+    )
+    agg = agg[agg["years_used"] >= _FCLUSTER_SMOOTH]
+    agg = agg.merge(universe, on="sid", how="inner")
+    if agg.empty:
+        return pd.DataFrame(columns=["sid", "relative_growth"])
+    sec_med = agg.groupby("sector")["sales_growth"].median().to_dict()
+    agg["sector_median"] = agg["sector"].map(sec_med)
+    agg["relative_growth"] = agg["sales_growth"] - agg["sector_median"]
+    return agg[["sid", "relative_growth"]].copy()
+
+
+def pit_share_momentum(stocks, fund_pit, prices_pit, eval_date,
+                       window_days=90):
+    """Δ market_cap_share within sector over `window_days` calendar days."""
+    universe = stocks[~stocks["sector"].isin(FINANCIAL_SECTORS)][["sid", "sector"]]
+    shares = fund_pit[fund_pit["line_item"] == "No. of Equity Shares"]
+    if shares.empty or prices_pit.empty:
+        return pd.DataFrame(columns=["sid", "share_momentum"])
+    shares = (shares.sort_values(["sid", "period_end"])
+                    .groupby("sid", as_index=False).tail(1)
+                    [["sid", "value"]].rename(columns={"value": "shares"}))
+
+    price_col = "adj_close" if "adj_close" in prices_pit.columns else "close"
+    cutoff_t = eval_date.isoformat()
+    cutoff_p = (eval_date - timedelta(days=int(window_days * 1.45))).isoformat()
+
+    px = prices_pit[prices_pit["date"] <= cutoff_t]
+    latest = px.sort_values(["sid", "date"]).groupby("sid", as_index=False).tail(1)
+    latest = latest[["sid", price_col]].rename(columns={price_col: "close_t"})
+
+    px_p = prices_pit[prices_pit["date"] <= cutoff_p]
+    past = px_p.sort_values(["sid", "date"]).groupby("sid", as_index=False).tail(1)
+    past = past[["sid", price_col]].rename(columns={price_col: "close_p"})
+
+    df = (latest.merge(past, on="sid", how="inner")
+                .merge(shares, on="sid", how="inner")
+                .merge(universe, on="sid", how="inner"))
+    if df.empty:
+        return pd.DataFrame(columns=["sid", "share_momentum"])
+    df["mc_t"] = df["close_t"] * df["shares"]
+    df["mc_p"] = df["close_p"] * df["shares"]
+    sec_t = df.groupby("sector")["mc_t"].sum().to_dict()
+    sec_p = df.groupby("sector")["mc_p"].sum().to_dict()
+    df["share_t"] = df["mc_t"] / df["sector"].map(sec_t)
+    df["share_p"] = df["mc_p"] / df["sector"].map(sec_p)
+    df = df[(df["share_p"] > 0) & df["share_p"].notna()]
+    df["share_momentum"] = df["share_t"] / df["share_p"] - 1
+    return df[["sid", "share_momentum"]].copy()
+
+
 # ─────────────────────── Driver ───────────────────────
 
 def reconstruct_one_date(eval_date, raw, signals_to_run):
@@ -1238,6 +1379,25 @@ def reconstruct_one_date(eval_date, raw, signals_to_run):
         news_pit = raw["news"][raw["news"]["published_date"] <= eval_date.isoformat()]
         base = base.merge(pit_news_volume(raw["stocks"], news_pit, eval_date), on="sid", how="left")
 
+    # ── F-track cluster (plan 0007) — sector-narrative-derived factors ──
+    fund_pit = (knowable_screener(raw["fund_screener"], eval_date)
+                if "fund_screener" in raw else pd.DataFrame())
+
+    if "revenue_cv" in signals_to_run and not fund_pit.empty:
+        base = base.merge(pit_revenue_cv(raw["stocks"], fund_pit), on="sid", how="left")
+
+    if "inventory_turnover" in signals_to_run and not fund_pit.empty:
+        base = base.merge(pit_inventory_turnover(raw["stocks"], fund_pit), on="sid", how="left")
+
+    if "sales_growth_relative" in signals_to_run and not fund_pit.empty:
+        base = base.merge(pit_sales_growth_relative(raw["stocks"], fund_pit), on="sid", how="left")
+
+    if "share_momentum" in signals_to_run and not fund_pit.empty:
+        base = base.merge(
+            pit_share_momentum(raw["stocks"], fund_pit, px_pit, eval_date),
+            on="sid", how="left",
+        )
+
     # Composite: needs mom_6m + mom_12m already computed in `base`
     if "mom_composite" in signals_to_run and "mom_6m" in base.columns and "mom_12m" in base.columns:
         base = base.merge(pit_mom_composite(base), on="sid", how="left")
@@ -1329,14 +1489,21 @@ def load_raw():
     macro_map = read_sql(
         "SELECT indicator_id, sector, direction, weight FROM macro_sector_map"
     )
+    # F-track fundamentals (long-format) — annual rows only for the cluster
+    fund_screener = read_sql(
+        "SELECT sid, period_end, line_item, value FROM fundamentals_screener "
+        "WHERE period_type = 'annual'"
+    )
     print(f"  stocks={len(stocks)} qi={len(qi)} bs={len(bs)} cf={len(cf)} sh={len(sh)} "
           f"prices={len(prices)} adj={len(adjustments)} fh={len(fh)} bulk={len(bulk)} "
           f"reg_events={len(reg_events)} reg_signals={len(reg_signals)} "
-          f"macro_hist={len(macro_hist)} macro_map={len(macro_map)}")
+          f"macro_hist={len(macro_hist)} macro_map={len(macro_map)} "
+          f"fund_screener={len(fund_screener)}")
     return {
         "stocks": stocks, "qi": qi, "bs": bs, "cf": cf, "sh": sh, "prices": prices,
         "adjustments": adjustments,
         "fh": fh, "bulk": bulk, "short": short, "news": news,
+        "fund_screener": fund_screener,
         "reg_events": reg_events, "reg_signals": reg_signals,
         "macro_hist": macro_hist, "macro_map": macro_map,
     }
@@ -1359,7 +1526,9 @@ def main():
                                  "value_composite", "quality_composite", "growth_composite",
                                  "pt_upside", "bulk_deal", "sector_overlays",
                                  "short_selling",
-                                 "earnings_beat_rate", "news_volume"],
+                                 "earnings_beat_rate", "news_volume",
+                                 "revenue_cv", "inventory_turnover",
+                                 "sales_growth_relative", "share_momentum"],
                         help="Compute only this signal (repeatable)")
     parser.add_argument("--skip-existing", action="store_true",
                         help="Skip eval dates that already have a SUCCESS row in pit_reconstruction_log")
@@ -1379,6 +1548,9 @@ def main():
         "short_selling",
         # Tier 4 quality + sentiment
         "earnings_beat_rate", "news_volume",
+        # F-track cluster (plan 0007)
+        "revenue_cv", "inventory_turnover",
+        "sales_growth_relative", "share_momentum",
     }
     signals_to_run = set(args.signal) if args.signal else DEFAULT_SIGNALS
     signals_label = ",".join(sorted(signals_to_run))
