@@ -39,6 +39,14 @@ REQUIRED_ITEMS = [
     "Borrowings",
 ]
 
+# Robustness:
+#   - Median ROIC across last N years suppresses one-off PBT spikes
+#     (debt write-backs, asset sales).
+#   - IC floor drops shell-sized stocks where the ratio is mathematically
+#     valid but financially meaningless.
+SMOOTH_YEARS = 3
+MIN_INVESTED_CAPITAL_CR = 50.0
+
 
 def _load_data():
     placeholders = ",".join("?" for _ in FINANCIAL_SECTORS)
@@ -67,33 +75,39 @@ def _compute(stocks, fund):
         index=["sid", "period_end"], columns="line_item", values="value", aggfunc="first"
     ).reset_index()
 
-    # Need every required line item present and non-null
     for item in REQUIRED_ITEMS:
         if item not in wide.columns:
             wide[item] = np.nan
     wide = wide.dropna(subset=REQUIRED_ITEMS)
 
     pbt = wide["Profit before tax"]
-    wide = wide[pbt > 0].copy()
-    if wide.empty:
-        return pd.DataFrame(columns=["sid", "period_end", "nopat", "invested_capital", "roic"])
-
-    pbt = wide["Profit before tax"]
-    tax = wide["Tax"]
     interest = wide["Interest"]
-    eq_cap = wide["Equity Share Capital"]
-    reserves = wide["Reserves"]
-    borrowings = wide["Borrowings"]
-
-    tax_rate = (tax / pbt).clip(lower=0.0, upper=1.0)
+    tax = wide["Tax"]
+    # Tax adjustment only meaningful when PBT > 0; loss years use raw EBIT.
+    tax_rate = np.where(pbt > 0, (tax / pbt.replace(0, np.nan)).clip(0.0, 1.0), 0.0)
     wide["nopat"] = (pbt + interest) * (1 - tax_rate)
-    wide["invested_capital"] = eq_cap + reserves + borrowings
-    wide = wide[wide["invested_capital"] > 0].copy()
-    wide["roic"] = wide["nopat"] / wide["invested_capital"]
+    wide["invested_capital"] = (
+        wide["Equity Share Capital"] + wide["Reserves"] + wide["Borrowings"]
+    )
+    wide = wide[wide["invested_capital"] >= MIN_INVESTED_CAPITAL_CR].copy()
+    wide["roic_yr"] = wide["nopat"] / wide["invested_capital"]
 
-    # Latest annual period per stock
-    wide = wide.sort_values(["sid", "period_end"]).groupby("sid", as_index=False).tail(1)
-    return wide[["sid", "period_end", "nopat", "invested_capital", "roic"]].reset_index(drop=True)
+    # Last SMOOTH_YEARS calendar years per stock (regardless of PBT sign).
+    # Loss years pull the median down; one-off PBT spikes are middle-ranked,
+    # not extreme. Require all SMOOTH_YEARS slots filled — short-history
+    # stocks are filtered out rather than scored on a fragile sample.
+    wide = wide.sort_values(["sid", "period_end"])
+    last_n = wide.groupby("sid", as_index=False).tail(SMOOTH_YEARS)
+
+    agg = last_n.groupby("sid", as_index=False).agg(
+        period_end=("period_end", "max"),
+        nopat=("nopat", "median"),
+        invested_capital=("invested_capital", "median"),
+        roic=("roic_yr", "median"),
+        years_used=("roic_yr", "count"),
+    )
+    agg = agg[(agg["years_used"] >= SMOOTH_YEARS) & (agg["roic"] > 0)]
+    return agg[["sid", "period_end", "nopat", "invested_capital", "roic"]].reset_index(drop=True)
 
 
 def compute(dry_run=False):
