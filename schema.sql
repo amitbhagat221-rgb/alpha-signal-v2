@@ -606,3 +606,17 @@ CREATE TABLE IF NOT EXISTS screener_pull_errors (
 
 CREATE INDEX IF NOT EXISTS idx_screener_errors_sid ON screener_pull_errors(sid);
 CREATE INDEX IF NOT EXISTS idx_screener_errors_date ON screener_pull_errors(attempted_at);
+
+-- ROIC (Return on Invested Capital) — first F-track factor sourced from fundamentals_screener.
+-- NOPAT = (PBT + Interest) × (1 − Tax/PBT); Invested Capital = Equity + Reserves + Borrowings.
+CREATE TABLE IF NOT EXISTS roic_scores (
+    sid             TEXT NOT NULL REFERENCES stocks(sid),
+    snapshot_date   TEXT NOT NULL,
+    period_end      TEXT,                         -- annual period used
+    nopat           REAL,
+    invested_capital REAL,
+    roic            REAL,                         -- NOPAT / Invested Capital
+    PRIMARY KEY (sid, snapshot_date)
+);
+
+CREATE INDEX IF NOT EXISTS idx_roic_date ON roic_scores(snapshot_date);
