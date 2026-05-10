@@ -1,0 +1,42 @@
+{# Reusable cockpit components — Jinja macros.
+   Import in any template with:
+       {% from "_components.html" import tab_bar, radio_group %}
+   The tab_bar relies on the page setting Alpine state at the parent:
+       <div x-data="{ tab: 'first', loaded: { first: true } }">
+   The radio_group sets its own scoped Alpine state, name-keyed.
+#}
+
+{# ─────────────── tab_bar ───────────────
+   tabs: list of (key, label) tuples — first tuple is the default active tab.
+   Use inside a parent `x-data="{ tab: '<first key>', loaded: { '<first key>': true } }"`.
+   Each panel below the tab-bar should be `<div x-show="tab === '<key>'" x-cloak>...</div>`.
+#}
+{% macro tab_bar(tabs) -%}
+<div class="tab-bar">
+    {% for key, label in tabs %}
+    <button class="tab-button" :class="{ active: tab === '{{ key }}' }"
+            @click="tab = '{{ key }}'; loaded['{{ key }}'] = true">{{ label }}</button>
+    {% endfor %}
+</div>
+{%- endmacro %}
+
+
+{# ─────────────── radio_group ───────────────
+   name: local Alpine state key for the toggle (e.g. "viewMode").
+   options: list of (key, label) tuples — first tuple is the default.
+   Use the chosen value via `x-bind` / `x-show` / `:class` on sibling elements
+   inside the same Alpine scope.
+
+   Wrap the radio_group **and** the elements it controls in a single
+   `<div x-data="{ <name>: '<first key>' }">...</div>`.
+#}
+{% macro radio_group(name, options) -%}
+<div class="radio-group" role="radiogroup">
+    {% for key, label in options %}
+    <button type="button" class="radio-btn"
+            :class="{ active: {{ name }} === '{{ key }}' }"
+            @click="{{ name }} = '{{ key }}'"
+            role="radio" :aria-checked="{{ name }} === '{{ key }}'">{{ label }}</button>
+    {% endfor %}
+</div>
+{%- endmacro %}

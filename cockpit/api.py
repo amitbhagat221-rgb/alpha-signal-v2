@@ -1899,6 +1899,7 @@ def get_command_centre():
                     "rows": rows,
                     "stocks": stocks,
                     "latest": latest,
+                    "group": group_name,
                 })
             if group_tables:
                 data_model.append({
