@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_components.html" import tab_bar %}
 
 {% block content %}
 
@@ -51,10 +52,19 @@
     </div>
 </div>
 
+<div x-data="{ tab: 'all', loaded: { all: true } }" x-cloak>
+
+{{ tab_bar([
+    ('all',   'All Tiers'),
+    ('LARGE', 'Large Cap'),
+    ('MID',   'Mid Cap'),
+    ('SMALL', 'Small Cap'),
+]) }}
+
 <!-- Tier Heat Maps -->
 <div style="display: flex; flex-direction: column; gap: 20px;">
     {% for tier_name, tier_stocks in tiers.items() %}
-    <div class="card" style="padding: 16px;">
+    <div class="card" x-show="tab === 'all' || tab === '{{ tier_name }}'" style="padding: 16px;">
         <div class="tier-header" style="margin-bottom: 12px;
             {% if tier_name == 'LARGE' %}border-left: 3px solid var(--blue); padding-left: 12px;
             {% elif tier_name == 'MID' %}border-left: 3px solid var(--accent); padding-left: 12px;
@@ -83,6 +93,8 @@
     </div>
     {% endfor %}
 </div>
+
+</div>{# / tabs root #}
 
 <script>
 function searchApp() {
