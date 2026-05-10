@@ -1,8 +1,24 @@
 {% extends "base.html" %}
+{% from "_components.html" import tab_bar %}
 
 {% block content %}
 
 <div class="section-title">Action Queue</div>
+
+{% set buy_n   = (actions.buy   or []) | length %}
+{% set watch_n = (actions.watch or []) | length %}
+{% set exit_n  = (actions.exit  or []) | length %}
+
+<div x-data="{ tab: 'buy', loaded: { buy: true } }" x-cloak>
+
+{{ tab_bar([
+    ('buy',   'Buy ('   ~ buy_n   ~ ')'),
+    ('watch', 'Watch (' ~ watch_n ~ ')'),
+    ('exit',  'Exit ('  ~ exit_n  ~ ')'),
+]) }}
+
+{# ────────── BUY ────────── #}
+<div x-show="tab === 'buy'" x-cloak>
 
 <!-- Consider Buying -->
 <div style="margin-bottom: 24px;">
@@ -38,6 +54,12 @@
     {% endif %}
 </div>
 
+
+</div>{# / buy #}
+
+{# ────────── WATCH ────────── #}
+<div x-show="tab === 'watch'" x-cloak>
+
 <!-- Watch Closely -->
 <div style="margin-bottom: 24px;">
     <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
@@ -69,6 +91,12 @@
     {% endif %}
 </div>
 
+
+</div>{# / watch #}
+
+{# ────────── EXIT ────────── #}
+<div x-show="tab === 'exit'" x-cloak>
+
 <!-- Consider Exiting -->
 <div style="margin-bottom: 24px;">
     <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
@@ -96,5 +124,9 @@
     <div class="card" style="padding: 16px; color: var(--text-muted);">No exit signals. Top picks holding steady.</div>
     {% endif %}
 </div>
+
+</div>{# / exit #}
+
+</div>{# / tabs root #}
 
 {% endblock %}
