@@ -1,13 +1,31 @@
 {% extends "base.html" %}
+{% from "_components.html" import tab_bar %}
 
 {% block content %}
 
 <div class="section-title">Sector Intelligence</div>
 
+{% set tail_n = sectors | selectattr('macro_signal', 'in', ['TAILWIND', 'FAVORABLE']) | list | length %}
+{% set head_n = sectors | selectattr('macro_signal', 'in', ['HEADWIND', 'ADVERSE'])  | list | length %}
+
+<div x-data="{ tab: 'all', loaded: { all: true } }" x-cloak>
+
+{{ tab_bar([
+    ('all',     'All ('      ~ (sectors | length) ~ ')'),
+    ('tail',    'Tailwind (' ~ tail_n             ~ ')'),
+    ('head',    'Headwind (' ~ head_n             ~ ')'),
+]) }}
+
 <!-- Sector Grid -->
 <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; margin-bottom: 24px;">
     {% for sector in sectors %}
-    <div class="card" style="padding: 14px 16px;
+    {% set is_tail = sector.macro_signal in ['TAILWIND', 'FAVORABLE'] %}
+    {% set is_head = sector.macro_signal in ['HEADWIND', 'ADVERSE'] %}
+    <div class="card"
+         x-show="tab === 'all'
+                 || (tab === 'tail' && {{ 'true' if is_tail else 'false' }})
+                 || (tab === 'head' && {{ 'true' if is_head else 'false' }})"
+         style="padding: 14px 16px;
         {% if sector.macro_signal == 'TAILWIND' %}border-left: 4px solid var(--green);
         {% elif sector.macro_signal == 'HEADWIND' %}border-left: 4px solid var(--red);
         {% elif sector.macro_signal == 'FAVORABLE' %}border-left: 4px solid rgba(34, 197, 94, 0.5);
@@ -43,5 +61,7 @@
     </div>
     {% endfor %}
 </div>
+
+</div>{# / tabs root #}
 
 {% endblock %}
