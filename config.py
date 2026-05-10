@@ -180,7 +180,7 @@ API = {
 SCREEN = {
     "min_market_cap_cr": 200,
     "min_avg_volume_20d": 10_000,
-    "financial_sectors": ["Financial Services"],
+    "financial_sectors": ["Financials"],
     "cyclical_sectors": ["Metals & Mining", "Oil & Gas", "Chemicals", "Cement"],
 }
 
