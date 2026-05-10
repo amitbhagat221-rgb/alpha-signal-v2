@@ -635,3 +635,53 @@ CREATE TABLE IF NOT EXISTS fcf_yield_scores (
 );
 
 CREATE INDEX IF NOT EXISTS idx_fcfy_date ON fcf_yield_scores(snapshot_date);
+
+-- ─────────────────────────────────────────────────────────────
+-- Sector-narrative-derived factor cluster (plan 0007)
+-- ─────────────────────────────────────────────────────────────
+
+-- D: Revenue Volatility (5-year CV) — top-line stability proxy.
+CREATE TABLE IF NOT EXISTS revenue_cv_scores (
+    sid             TEXT NOT NULL REFERENCES stocks(sid),
+    snapshot_date   TEXT NOT NULL,
+    revenue_cv_5y   REAL,        -- stdev / |mean| of last 5 YoY growth rates
+    mean_growth     REAL,        -- mean of last 5 YoY growth rates
+    years_used      INTEGER,
+    PRIMARY KEY (sid, snapshot_date)
+);
+CREATE INDEX IF NOT EXISTS idx_rev_cv_date ON revenue_cv_scores(snapshot_date);
+
+-- C: Inventory Turnover (sector-relative) — Sales / Inventory.
+CREATE TABLE IF NOT EXISTS inventory_turnover_scores (
+    sid                 TEXT NOT NULL REFERENCES stocks(sid),
+    snapshot_date       TEXT NOT NULL,
+    period_end          TEXT,
+    inventory_turnover  REAL,    -- 3-yr median Sales / Inventory
+    sector_p50          REAL,    -- median across sector peers
+    relative_turnover   REAL,    -- inventory_turnover / sector_p50
+    PRIMARY KEY (sid, snapshot_date)
+);
+CREATE INDEX IF NOT EXISTS idx_inv_turn_date ON inventory_turnover_scores(snapshot_date);
+
+-- B: Sector-Relative Sales Growth.
+CREATE TABLE IF NOT EXISTS sales_growth_relative_scores (
+    sid             TEXT NOT NULL REFERENCES stocks(sid),
+    snapshot_date   TEXT NOT NULL,
+    period_end      TEXT,
+    sales_growth    REAL,         -- 3-yr median YoY sales growth
+    sector_median   REAL,         -- median across sector peers
+    relative_growth REAL,         -- sales_growth − sector_median
+    PRIMARY KEY (sid, snapshot_date)
+);
+CREATE INDEX IF NOT EXISTS idx_sgr_date ON sales_growth_relative_scores(snapshot_date);
+
+-- A: Market-Share Momentum — Δ market_cap_share within sector, 90-day window.
+CREATE TABLE IF NOT EXISTS share_momentum_scores (
+    sid             TEXT NOT NULL REFERENCES stocks(sid),
+    snapshot_date   TEXT NOT NULL,
+    market_cap_cr   REAL,         -- current market cap (₹ × share count, in line-item units)
+    sector_share    REAL,         -- share[t]
+    share_momentum  REAL,         -- share[t] / share[t-90d] − 1
+    PRIMARY KEY (sid, snapshot_date)
+);
+CREATE INDEX IF NOT EXISTS idx_sharemom_date ON share_momentum_scores(snapshot_date);

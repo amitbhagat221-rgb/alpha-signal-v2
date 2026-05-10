@@ -262,6 +262,26 @@ PIPELINE_STEPS = [
      "table": "fcf_yield_scores",  "source": "fundamentals_screener (Screener Premium) + stocks.market_cap_cr",
      "data_freq": "annual",        "frequency": "daily"},
 
+    # Sector-narrative-derived cluster (plan 0007) — 4 factors inspired by
+    # IIM Ahmedabad sector-narrative pages. None in scoring weights yet;
+    # promotion gated on backtest |t| ≥ 1.5 in any tier.
+
+    {"name": "signal_revenue_cv",  "module": "signals.revenue_cv",  "function": "compute",  "critical": False,
+     "table": "revenue_cv_scores", "source": "fundamentals_screener — Sales (annual, 6 yrs)",
+     "data_freq": "annual",        "frequency": "daily"},
+
+    {"name": "signal_inventory_turnover", "module": "signals.inventory_turnover", "function": "compute", "critical": False,
+     "table": "inventory_turnover_scores", "source": "fundamentals_screener — Sales + Inventory",
+     "data_freq": "annual",                "frequency": "daily"},
+
+    {"name": "signal_sales_growth_relative", "module": "signals.sales_growth_relative", "function": "compute", "critical": False,
+     "table": "sales_growth_relative_scores", "source": "fundamentals_screener — Sales + sector peers",
+     "data_freq": "annual",                   "frequency": "daily"},
+
+    {"name": "signal_share_momentum", "module": "signals.share_momentum", "function": "compute", "critical": False,
+     "table": "share_momentum_scores", "source": "stock_prices + fundamentals_screener — No. of Equity Shares",
+     "data_freq": "daily",             "frequency": "daily"},
+
     {"name": "signal_accruals",    "module": "signals.accruals",    "function": "compute",  "critical": False,
      "table": "accruals_scores",   "source": "quarterly_income + annual_balance_sheet + annual_cash_flow",
      "data_freq": "quarterly",     "frequency": "daily"},
