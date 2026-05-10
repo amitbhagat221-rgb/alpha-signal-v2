@@ -410,6 +410,30 @@
 
 {# ── By group view ── #}
 <div x-show="view === 'group'">
+
+{# Top-of-tab mind-map: parent "Data Model" + 13 group leaves as downward fork. #}
+<div class="mindmap mm-data-model" style="margin-bottom: 28px;">
+    <div class="mm-node">
+        <span class="mm-icon">D</span>
+        Data Model
+        <span class="mm-meta">{{ data_model | length }} groups · {{ data_model | sum(attribute='n_tables') }} tables</span>
+    </div>
+    <div class="mm-children">
+        {% for grp in data_model %}
+        <div class="mm-leaf">
+            <span class="mm-leaf-node">
+                <strong>{{ grp.name }}</strong>
+                <span class="mm-leaf-meta">— {{ grp.n_tables }} · {{ "{:,}".format(grp.n_rows) }}</span>
+            </span>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+
+<div style="font-size: 11px; color: var(--text-muted); margin-bottom: 14px; text-align: center;">
+    Click a group below for its tables and columns.
+</div>
+
 <div class="v-accordion">
 {% for grp in data_model %}
 <details>

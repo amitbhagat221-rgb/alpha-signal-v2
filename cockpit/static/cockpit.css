@@ -1132,35 +1132,38 @@ table tbody tr:hover {
 
 
 /* ─────────────────────────────────────────────────────────────
-   Mind-map ─ DOWNWARD-FACING tree.
-   Parent pill at top; children stacked vertically below with curved
-   branches descending from a left-anchored trunk and sweeping right
-   into each child node. Pure CSS; no JS, no SVG.
+   Mind-map ─ DOWNWARD-FORK tree (org-chart style).
+   Parent pill at the top, centered. A short trunk drops down from
+   parent's bottom-center into a horizontal cross-bar; each child sits
+   below the cross-bar with its own short vertical stub coming up.
+   Children flow horizontally with wrap so wide lists tile gracefully.
 
    Visual:
-        [ parent pill ]
-                │
-                ╰── child 1
-                ╰── child 2
-                ╰── child 3
+                [ parent pill ]
+                       │
+              ┌────────┼────────┐        ← cross-bar (rounded ends)
+              │        │        │
+           [child]  [child]  [child]
    ───────────────────────────────────────────────────────────── */
 
 .mindmap {
     --mm-color: var(--accent, #8b5cf6);
     --mm-color-soft: rgba(139,92,246,0.18);
     --mm-stroke: 1.5px;
-    --mm-curve: 14px;
-    --mm-stub: 22px;            /* horizontal length of branch into each child */
-    --mm-trunk-top: 14px;       /* vertical drop from parent down to first leaf */
+    --mm-curve: 12px;
+
+    --mm-trunk-h: 18px;      /* vertical line from parent down to cross-bar */
+    --mm-stub-h: 14px;       /* short vertical stub from cross-bar down to each child */
+    --mm-h-gap: 14px;        /* horizontal gap between sibling children */
 
     display: flex;
     flex-direction: column;
-    align-items: flex-start;
+    align-items: center;
     font-size: 13px;
     margin: 16px 0;
 }
 
-/* Parent pill, sits at the top of the mind-map */
+/* Parent pill at the top, self-centered */
 .mm-node {
     display: inline-flex;
     align-items: center;
@@ -1175,10 +1178,7 @@ table tbody tr:hover {
     color: var(--text-primary);
     white-space: nowrap;
     box-shadow: 0 0 0 4px var(--mm-color-soft) inset, 0 2px 12px rgba(0,0,0,0.18);
-    /* Anchor the mind-map's vertical trunk to start under the left edge of
-       the parent pill, indented by half the pill's left padding so the curve
-       descends from a visually pleasing point. */
-    margin-left: 0;
+    z-index: 1;
 }
 .mm-node .mm-icon {
     width: 22px; height: 22px;
@@ -1195,61 +1195,56 @@ table tbody tr:hover {
     text-transform: none;
 }
 
-/* Children container — sits below parent. Indented so the trunk passes
-   under-and-just-right of the parent pill's left curve. */
+/* Children container ─ flex row, wraps for many siblings.
+   `display: inline-flex` shrinks it to its actual content extent so the
+   border-top (cross-bar) lines up with first/last child centres.
+   Wrapped rows: only the first row gets the cross-bar; subsequent rows
+   are visually orphaned but still imply hierarchy via the stub. */
 .mm-children {
-    margin-left: 18px;
-    padding-top: var(--mm-trunk-top);
-    padding-left: 0;
+    display: inline-flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: var(--mm-h-gap);
+    margin-top: var(--mm-trunk-h);
+    padding-top: 0;
     position: relative;
+    /* The cross-bar */
+    border-top: var(--mm-stroke) solid var(--mm-color);
+    border-radius: var(--mm-curve) var(--mm-curve) 0 0;
 }
 
-/* Vertical drop from parent's bottom to first leaf's midpoint */
+/* Trunk descending from parent's bottom-center down to the cross-bar */
 .mm-children::before {
     content: '';
     position: absolute;
-    left: 0;
-    top: 0;
+    bottom: 100%;            /* sits above the children container, in the gap */
+    left: 50%;
     width: var(--mm-stroke);
-    height: var(--mm-trunk-top);
+    height: var(--mm-trunk-h);
     background: var(--mm-color);
+    transform: translateX(-50%);
 }
 
-/* Each leaf row */
+/* Each leaf — short vertical stub above, then the pill */
 .mm-leaf {
     position: relative;
-    padding: 8px 0 8px var(--mm-stub);
-    min-height: 32px;
+    padding-top: var(--mm-stub-h);
 }
-
-/* L-shaped curve into each leaf: vertical down from above, sweeping right
-   at the leaf's midpoint into the leaf-node pill */
 .mm-leaf::before {
     content: '';
     position: absolute;
-    left: 0;
     top: 0;
-    width: var(--mm-stub);
-    height: 50%;
-    border-left: var(--mm-stroke) solid var(--mm-color);
-    border-bottom: var(--mm-stroke) solid var(--mm-color);
-    border-bottom-left-radius: var(--mm-curve);
-}
-
-/* Bridge segment for leaves after the first — vertical line covering the
-   gap from the previous leaf's midpoint down to this leaf's top, so the
-   trunk reads as continuous between siblings. */
-.mm-leaf:not(:first-child)::after {
-    content: '';
-    position: absolute;
-    left: 0;
-    top: -50%;
+    left: 50%;
     width: var(--mm-stroke);
-    height: 50%;
+    height: var(--mm-stub-h);
     background: var(--mm-color);
+    transform: translateX(-50%);
 }
+/* Reset the legacy bridge rule from the previous left-right layout */
+.mm-leaf::after { content: none; }
 
-/* Leaf node ─ rounded pill, sits at the right end of each curved branch */
+/* Leaf pill */
 .mm-leaf-node {
     display: inline-flex; align-items: center; gap: 8px;
     padding: 6px 14px;
@@ -1260,7 +1255,7 @@ table tbody tr:hover {
     color: var(--text-primary);
     transition: border-color 0.15s, transform 0.15s;
 }
-.mm-leaf-node:hover { border-color: var(--mm-color); transform: translateX(2px); }
+.mm-leaf-node:hover { border-color: var(--mm-color); transform: translateY(-1px); }
 .mm-leaf-node code {
     font-size: 11px; padding: 1px 6px;
     background: rgba(255,255,255,0.04); border-radius: 3px;
@@ -1269,6 +1264,7 @@ table tbody tr:hover {
     color: var(--text-muted);
     font-size: 11px;
     margin-left: 4px;
+    white-space: nowrap;
 }
 
 /* Tone variants ─ per-stage colour on /command */
@@ -1276,11 +1272,20 @@ table tbody tr:hover {
 .mindmap.mm-signals { --mm-color: #f1c40f; --mm-color-soft: rgba(241,196,15,0.16); }
 .mindmap.mm-model   { --mm-color: #2ecc71; --mm-color-soft: rgba(46,204,113,0.16); }
 .mindmap.mm-picks   { --mm-color: #e74c3c; --mm-color-soft: rgba(231,76,60,0.16); }
+.mindmap.mm-data-model { --mm-color: #8b5cf6; --mm-color-soft: rgba(139,92,246,0.16); }
 
-/* Mobile — same downward layout, just tightens spacing */
+/* Mobile — preserve top-down hierarchy but tighten spacing and shrink stubs */
 @media (max-width: 720px) {
-    .mindmap { --mm-stub: 18px; }
-    .mm-children { margin-left: 14px; }
+    .mindmap {
+        --mm-trunk-h: 14px;
+        --mm-stub-h: 10px;
+        --mm-h-gap: 10px;
+    }
+    .mm-leaf-node {
+        max-width: 90vw;
+        white-space: normal;
+        text-align: center;
+    }
 }
 
 /* Factor card grid — replaces the v-accordion list on /command Factors,
