@@ -1765,6 +1765,171 @@ def get_command_centre():
     except Exception:
         commits = []
 
+    # ── Architecture flow (mother plan, layered) ─────────────
+    # 4 vertical stages, each expandable. Counts pulled from real data so
+    # the diagram updates as the system grows.
+    factors_by_group = {}
+    for f in factors:
+        factors_by_group.setdefault(f["group"], []).append(f)
+
+    arch_data_layer = [
+        {
+            "name": "Market data",
+            "summary": f"{data_layer.get('stock_prices',{}).get('rows', 0):,} daily price rows · {data_layer.get('stock_prices',{}).get('stocks', 0):,} stocks",
+            "items": [
+                ("stock_prices", "Daily OHLCV — NSE bhavcopy + nselib"),
+                ("daily_snapshots_pit", "PIT-reconstructed signal snapshots — 7 monthly dates"),
+                ("daily_snapshots_pit_v1", "Frozen v1 archive — 36 monthly periods, port-correctness reference"),
+            ],
+        },
+        {
+            "name": "Fundamentals",
+            "summary": f"{data_layer.get('fundamentals_screener',{}).get('rows', 0):,} long-format rows · {data_layer.get('quarterly_income',{}).get('rows', 0):,} quarterly · 2 sources",
+            "items": [
+                ("fundamentals_screener", "Screener Premium — 36 annual line items, 9 quarterly. Long-format (F-track)"),
+                ("quarterly_income", "Tickertape — quarterly income statement (legacy wide format)"),
+                ("annual_balance_sheet", "Tickertape — annual balance sheet"),
+                ("annual_cash_flow", "Tickertape — annual cash flow"),
+                ("shareholding", "Tickertape — quarterly promoter / FII / DII / public splits"),
+            ],
+        },
+        {
+            "name": "Ownership & flows",
+            "summary": f"insider trades, bulk deals, FII/DII positioning",
+            "items": [
+                ("insider_trades", f"NSE PIT API — {data_layer.get('insider_trades',{}).get('rows', 0):,} rows"),
+                ("bulk_deals", f"NSE bulk-deals daily snapshot — {data_layer.get('bulk_deals',{}).get('rows', 0):,} rows"),
+                ("fii_dii_cash", "FII/DII cash market positioning — daily"),
+                ("fii_fno_positioning", "FII F&O positioning — daily"),
+                ("short_selling_data", "NSE short-selling — daily, F&O-eligible names"),
+            ],
+        },
+        {
+            "name": "Events & news",
+            "summary": f"{data_layer.get('regulatory_events',{}).get('rows', 0):,} regulatory events · {data_layer.get('news_articles',{}).get('rows', 0):,} news articles",
+            "items": [
+                ("regulatory_events", "BSE/NSE filings — AI-classified into per-sector signals"),
+                ("regulatory_signals", "Sector-level regulatory tailwind/headwind (5,687 of 16,523 classified)"),
+                ("corporate_actions", "Splits, bonuses, dividends — composed at signal-compute time per ADR 0010"),
+                ("news_articles", "Google News RSS — 100/query, 2026-03+ dense"),
+                ("earnings_calendar", "Upcoming filings schedule"),
+            ],
+        },
+        {
+            "name": "Macro",
+            "summary": "Inflation, GDP, sector indicators — government & RBI",
+            "items": [
+                ("macro_indicators", "data.gov.in core sector index, RBI rates, monthly"),
+                ("vix_history", "India VIX — regime classifier input"),
+                ("benchmark_indices", "Nifty 50/100/500/Smallcap/Midcap + smart-beta indices"),
+            ],
+        },
+    ]
+
+    # Signals — group → factor list with counts
+    arch_signals = []
+    canonical_order = [
+        "Value", "Quality", "Growth", "Momentum", "Ownership",
+        "Smart Money", "Consensus", "Forensic", "Sentiment",
+        "Regulatory", "Macro", "Composite",
+        "F-track / Quality", "F-track / Cash",
+    ]
+    for grp in canonical_order:
+        if grp in factors_by_group:
+            in_group = factors_by_group[grp]
+            in_model = sum(1 for f in in_group if f["in_production"])
+            arch_signals.append({
+                "name": grp,
+                "n_total": len(in_group),
+                "n_model": in_model,
+                "items": [
+                    (f["name"], f"{f['t_stat']:.2f}" if f["t_stat"] is not None else "—",
+                     "model" if f["in_production"] else "library")
+                    for f in in_group
+                ],
+            })
+
+    arch_model = [
+        {
+            "name": "Quality gate",
+            "summary": "Excludes F-Score ≤ 1, distress flags, dilution",
+            "items": [
+                ("scoring/quality_gate.py", "Hard exclusions before scoring"),
+                ("Penalty: low Piotroski (F=2-3) → −0.15", "Soft penalty"),
+                ("Penalty: distress (Z<1.81) → fixed", "Forensic penalty"),
+            ],
+        },
+        {
+            "name": "Cap-tier composite",
+            "summary": "Within-tier weighted sum of validated signals (cf C13b rubric)",
+            "items": [
+                ("LARGE: 7 weighted signals", "consensus 1.0× / piotroski 0.1× / EY 0.5× ..."),
+                ("MID: 7 weighted signals", "consensus 0.5× / piotroski 0.2× / EY 0.5× ..."),
+                ("SMALL: 7 weighted signals", "EY 1.0× / piotroski 0.15× / promoter 1.0× ..."),
+                ("Weight tiers", "|t|≥2.5 → 1.0× / 1.5-2.5 → 0.5× / 0.5-1.5 → 0.2× / <0.5 → 0×"),
+            ],
+        },
+        {
+            "name": "Regime overlay",
+            "summary": "VIX-based + macro-sector overlays",
+            "items": [
+                ("scoring/regime.py", "Bullish / Neutral / Bearish from VIX + breadth"),
+                ("Macro tilts", "Sector tailwind/headwind from regulatory + macro signals"),
+            ],
+        },
+        {
+            "name": "Personal factor library",
+            "summary": f"{n_built - n_in_prod} factors built but not voting (yet)",
+            "items": [
+                ("Promotion criterion", "|t|≥1.5 in any tier (preferring v2_recompute)"),
+                ("ADR 0012", "v2 archive refreshes after every signal-side fix"),
+                ("Today: ROIC + FCF Yield", "F-track factors awaiting PIT helpers + backtest"),
+            ],
+        },
+    ]
+
+    arch_picks = [
+        {
+            "name": "Daily morning brief",
+            "summary": "Top picks per cap tier with regime context, dossiers",
+            "items": [
+                ("/", "Cockpit Morning Brief route"),
+                ("Top 5 LARGE / MID / SMALL", "Ranked by composite, gated by quality_gate"),
+                ("Regime banner", "Bullish/Neutral/Bearish header"),
+            ],
+        },
+        {
+            "name": "Email digest",
+            "summary": "Daily picks emailed via output/email_sender.py",
+            "items": [
+                ("output/email_sender.py", "Templated HTML email of top picks + commentary"),
+            ],
+        },
+        {
+            "name": "Cockpit explorer",
+            "summary": "Per-stock dossiers, signals, action queue",
+            "items": [
+                ("/explorer", "Universe scan + per-stock detail"),
+                ("/actions", "Buy / Watch / Exit candidates"),
+                ("/signals", "Per-signal cross-section"),
+                ("/portfolio", "Personal position tracking"),
+            ],
+        },
+    ]
+
+    architecture = {
+        "data": arch_data_layer,
+        "signals": arch_signals,
+        "model": arch_model,
+        "picks": arch_picks,
+        "summary": {
+            "tables": len(data_layer),
+            "factors_total": len(factors),
+            "factors_in_model": n_in_prod,
+            "factors_in_library": n_in_library,
+        },
+    }
+
     return {
         "plans": plans,
         "adrs": adrs,
@@ -1781,4 +1946,5 @@ def get_command_centre():
         "open_questions_md": open_questions_md,
         "where_md": where_md,
         "commits": commits,
+        "architecture": architecture,
     }

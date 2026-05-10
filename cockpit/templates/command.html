@@ -84,13 +84,245 @@
     <div>
         <div class="section-title">Command Centre</div>
         <div class="section-desc">
-            Plans, factor library, data layer, pending actions — everything in one place.
-            Updates whenever HANDOFF / plans / git change. Click sections to expand.
+            How a one-person hedge fund works. Start with the four-stage flow below;
+            click any stage to see what's inside. The further you drill, the more detail.
         </div>
     </div>
     <a href="/command" style="padding: 6px 12px; background: var(--card-bg);
         border: 1px solid var(--border); border-radius: 6px; text-decoration: none;
         color: var(--text-secondary); font-size: 11px;">↻ Refresh</a>
+</div>
+
+<!-- ═══════════════ ARCHITECTURE FLOW (mother plan, layered) ═══════════════ -->
+<style>
+    .arch-flow { max-width: 880px; margin: 0 auto 30px; }
+    .arch-stage {
+        position: relative; padding: 0; margin: 0; background: transparent; border: none;
+    }
+    .arch-stage > summary {
+        cursor: pointer; list-style: none; padding: 0; margin: 0;
+        display: block; user-select: none;
+    }
+    .arch-stage > summary::-webkit-details-marker { display: none; }
+    .arch-stage-card {
+        background: linear-gradient(180deg, var(--card-bg, #181a1f) 0%, rgba(24,26,31,0.85) 100%);
+        border: 1px solid var(--border, #2a2d33);
+        border-radius: 14px;
+        padding: 20px 24px;
+        position: relative;
+        transition: transform 0.15s, border-color 0.15s, box-shadow 0.15s;
+    }
+    .arch-stage > summary:hover .arch-stage-card {
+        border-color: var(--accent, #4d8eff);
+        transform: translateX(4px);
+        box-shadow: 0 4px 24px rgba(77,142,255,0.08);
+    }
+    .arch-stage[open] > summary .arch-stage-card {
+        border-color: var(--accent, #4d8eff);
+        box-shadow: 0 4px 24px rgba(77,142,255,0.12);
+    }
+    .arch-stage-num {
+        display: inline-flex; align-items: center; justify-content: center;
+        width: 30px; height: 30px; border-radius: 50%;
+        background: var(--accent, #4d8eff); color: white;
+        font-weight: 700; font-size: 13px;
+        margin-right: 14px;
+    }
+    .arch-stage-title {
+        font-size: 18px; font-weight: 700; letter-spacing: 0.6px;
+        text-transform: uppercase; color: var(--text-primary);
+        display: inline-block; vertical-align: middle;
+    }
+    .arch-stage-tagline {
+        font-size: 13px; color: var(--text-secondary); margin-top: 8px; line-height: 1.5;
+    }
+    .arch-stage-meta {
+        font-size: 11px; color: var(--text-muted); margin-top: 6px;
+        font-variant-numeric: tabular-nums;
+    }
+    .arch-stage-expand {
+        position: absolute; top: 22px; right: 24px; font-size: 14px;
+        color: var(--text-muted); transition: transform 0.2s;
+    }
+    .arch-stage[open] .arch-stage-expand { transform: rotate(90deg); color: var(--accent); }
+    .arch-arrow {
+        text-align: center; color: var(--text-muted, #555);
+        font-size: 22px; line-height: 1; margin: 6px 0; user-select: none;
+    }
+
+    /* Layer 2 — sub-items inside an opened stage */
+    .arch-substage {
+        margin: 18px 0 6px 50px;
+        padding-left: 18px;
+        border-left: 2px solid var(--border, #2a2d33);
+    }
+    .arch-substage > summary {
+        cursor: pointer; list-style: none; padding: 10px 14px; border-radius: 8px;
+        background: rgba(255,255,255,0.02);
+        font-size: 13px; font-weight: 600; color: var(--text-primary);
+        display: flex; align-items: center; gap: 10px;
+        transition: background 0.15s;
+    }
+    .arch-substage > summary:hover { background: rgba(77,142,255,0.06); }
+    .arch-substage > summary::-webkit-details-marker { display: none; }
+    .arch-substage > summary::before {
+        content: '▸'; color: var(--text-muted); transition: transform 0.2s; font-size: 11px;
+    }
+    .arch-substage[open] > summary::before { transform: rotate(90deg); color: var(--accent); }
+    .arch-substage-meta {
+        margin-left: auto; font-size: 11px; color: var(--text-muted); font-weight: 400;
+    }
+    .arch-substage-body {
+        margin: 6px 0 4px 18px; padding: 8px 14px;
+        font-size: 12px; line-height: 1.7; color: var(--text-secondary);
+    }
+    .arch-substage-body div { padding: 3px 0; }
+    .arch-substage-body code {
+        font-size: 11px; background: rgba(255,255,255,0.04);
+        padding: 1px 6px; border-radius: 3px;
+        color: var(--text-primary, #e6e8eb);
+    }
+
+    /* Stage colors — distinct accent per stage */
+    .arch-stage[data-color="data"]    .arch-stage-num { background: #4d8eff; }
+    .arch-stage[data-color="signals"] .arch-stage-num { background: #f1c40f; color: #181a1f; }
+    .arch-stage[data-color="model"]   .arch-stage-num { background: #2ecc71; color: #181a1f; }
+    .arch-stage[data-color="picks"]   .arch-stage-num { background: #e74c3c; }
+    .arch-pill {
+        display: inline-block; padding: 1px 8px; border-radius: 8px;
+        font-size: 10px; font-weight: 700; letter-spacing: 0.4px;
+        margin-left: 6px;
+    }
+    .arch-pill.model   { background: rgba(46,204,113,0.18); color: #2ecc71; }
+    .arch-pill.library { background: rgba(140,140,140,0.16); color: #aaa; }
+</style>
+
+<div class="arch-flow">
+
+    <!-- ──── STAGE 1 — DATA ──── -->
+    <details class="arch-stage" data-color="data">
+        <summary>
+            <div class="arch-stage-card">
+                <span class="arch-stage-num">1</span>
+                <span class="arch-stage-title">Data</span>
+                <span class="arch-stage-expand">▸</span>
+                <div class="arch-stage-tagline">
+                    Raw inputs from public, paid, and PIT-archived sources.
+                    Everything that any signal will need lives here, idempotent + timestamped.
+                </div>
+                <div class="arch-stage-meta">
+                    {{ architecture.summary.tables }} core tables · prices, fundamentals, ownership, events, news, macro
+                </div>
+            </div>
+        </summary>
+        {% for layer in architecture.data %}
+        <details class="arch-substage">
+            <summary>{{ layer.name }} <span class="arch-substage-meta">{{ layer.summary }}</span></summary>
+            <div class="arch-substage-body">
+                {% for tbl, desc in layer['items'] %}
+                <div><code>{{ tbl }}</code> — {{ desc }}</div>
+                {% endfor %}
+            </div>
+        </details>
+        {% endfor %}
+    </details>
+
+    <div class="arch-arrow">▼</div>
+
+    <!-- ──── STAGE 2 — SIGNALS ──── -->
+    <details class="arch-stage" data-color="signals">
+        <summary>
+            <div class="arch-stage-card">
+                <span class="arch-stage-num">2</span>
+                <span class="arch-stage-title">Signals</span>
+                <span class="arch-stage-expand">▸</span>
+                <div class="arch-stage-tagline">
+                    Each table-of-data becomes a number that ranks stocks. ~{{ architecture.summary.factors_total }} factors
+                    today, organized by what they're trying to capture (value, quality, momentum, ownership, …).
+                </div>
+                <div class="arch-stage-meta">
+                    {{ architecture.summary.factors_total }} factors · {{ architecture.summary.factors_in_model }} in model · {{ architecture.summary.factors_in_library }} in library · target {{ factor_summary.target }}
+                </div>
+            </div>
+        </summary>
+        {% for grp in architecture.signals %}
+        <details class="arch-substage">
+            <summary>{{ grp.name }}
+                <span class="arch-substage-meta">{{ grp.n_total }} factor{{ 's' if grp.n_total != 1 else '' }} · {{ grp.n_model }} in model</span>
+            </summary>
+            <div class="arch-substage-body">
+                {% for label, t, status in grp['items'] %}
+                <div>
+                    <code style="background: transparent; padding: 0;">{{ label }}</code>
+                    <span style="color: var(--text-muted); margin-left: 8px;">|t| = {{ t }}</span>
+                    <span class="arch-pill {{ status }}">{{ status }}</span>
+                </div>
+                {% endfor %}
+            </div>
+        </details>
+        {% endfor %}
+    </details>
+
+    <div class="arch-arrow">▼</div>
+
+    <!-- ──── STAGE 3 — MODEL ──── -->
+    <details class="arch-stage" data-color="model">
+        <summary>
+            <div class="arch-stage-card">
+                <span class="arch-stage-num">3</span>
+                <span class="arch-stage-title">Model</span>
+                <span class="arch-stage-expand">▸</span>
+                <div class="arch-stage-tagline">
+                    Validated signals (those with a real backtest t-stat) get weighted by cap tier and combined
+                    into a composite. A quality gate excludes obvious losers; regime overlay tilts by macro mood.
+                </div>
+                <div class="arch-stage-meta">
+                    {{ architecture.summary.factors_in_model }} factors voting · per-tier weights from C13b backtest
+                </div>
+            </div>
+        </summary>
+        {% for layer in architecture.model %}
+        <details class="arch-substage">
+            <summary>{{ layer.name }} <span class="arch-substage-meta">{{ layer.summary }}</span></summary>
+            <div class="arch-substage-body">
+                {% for label, desc in layer['items'] %}
+                <div><code>{{ label }}</code> — {{ desc }}</div>
+                {% endfor %}
+            </div>
+        </details>
+        {% endfor %}
+    </details>
+
+    <div class="arch-arrow">▼</div>
+
+    <!-- ──── STAGE 4 — PICKS ──── -->
+    <details class="arch-stage" data-color="picks">
+        <summary>
+            <div class="arch-stage-card">
+                <span class="arch-stage-num">4</span>
+                <span class="arch-stage-title">Picks</span>
+                <span class="arch-stage-expand">▸</span>
+                <div class="arch-stage-tagline">
+                    The model's daily output: top stocks per cap tier, with dossiers,
+                    delivered to a cockpit, an email, and a watchlist. The thing you actually trade off.
+                </div>
+                <div class="arch-stage-meta">
+                    daily morning brief · email digest · per-stock explorer · action queue
+                </div>
+            </div>
+        </summary>
+        {% for layer in architecture.picks %}
+        <details class="arch-substage">
+            <summary>{{ layer.name }} <span class="arch-substage-meta">{{ layer.summary }}</span></summary>
+            <div class="arch-substage-body">
+                {% for label, desc in layer['items'] %}
+                <div><code>{{ label }}</code> — {{ desc }}</div>
+                {% endfor %}
+            </div>
+        </details>
+        {% endfor %}
+    </details>
+
 </div>
 
 <!-- ── 1. Mission Control / Top-line numbers ─────────────────── -->
