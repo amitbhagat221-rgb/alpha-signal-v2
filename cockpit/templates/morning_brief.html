@@ -1,8 +1,9 @@
 {% extends "base.html" %}
+{% from "_components.html" import tab_bar %}
 
 {% block content %}
 
-<!-- Regime Banner -->
+<!-- Regime Banner (always visible above tabs) -->
 <div class="regime-banner {{ regime.color }}">
     <div style="display: flex; align-items: center; gap: 16px;">
         <span class="regime-badge {{ regime.color }}">{{ regime.regime }}</span>
@@ -28,6 +29,20 @@
     </div>
 </div>
 
+{% set changes_n = (changes or []) | length %}
+{% set earnings_n = (earnings or []) | length %}
+
+<div x-data="{ tab: 'today', loaded: { today: true } }" x-cloak>
+
+{{ tab_bar([
+    ('today',    'Today'),
+    ('changes',  'Changes ('  ~ changes_n  ~ ')'),
+    ('earnings', 'Earnings (' ~ earnings_n ~ ')'),
+]) }}
+
+{# ────────── CHANGES TAB ────────── #}
+<div x-show="tab === 'changes'" x-cloak>
+
 <!-- What Changed -->
 {% if changes %}
 <div style="margin-bottom: 20px;">
@@ -50,6 +65,12 @@
 </div>
 {% endif %}
 
+
+</div>{# / changes panel #}
+
+{# ────────── EARNINGS TAB ────────── #}
+<div x-show="tab === 'earnings'" x-cloak>
+
 <!-- Earnings This Week -->
 {% if earnings %}
 <div style="margin-bottom: 20px;">
@@ -65,6 +86,12 @@
     </div>
 </div>
 {% endif %}
+
+
+</div>{# / earnings panel #}
+
+{# ────────── TODAY TAB ────────── #}
+<div x-show="tab === 'today'" x-cloak>
 
 <!-- Top Picks by Tier -->
 <div class="section-title">Top Picks</div>
@@ -139,5 +166,9 @@
     </div>
     {% endfor %}
 </div>
+
+</div>{# / today panel #}
+
+</div>{# / tabs root #}
 
 {% endblock %}
