@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_components.html" import tab_bar %}
 
 {% block content %}
 
@@ -12,6 +13,17 @@
     </a>
 </div>
 <div class="section-desc">Pipeline run history, table inventory, and direct database access.</div>
+
+<div x-data="{ tab: 'health', loaded: { health: true } }" x-cloak>
+
+{{ tab_bar([
+    ('health',   'Health'),
+    ('pipeline', 'Pipeline Log'),
+    ('inventory','Inventory'),
+]) }}
+
+{# ────────── HEALTH TAB ────────── #}
+<div x-show="tab === 'health'" x-cloak>
 
 <!-- Database Health Summary -->
 {% if summary %}
@@ -188,6 +200,12 @@
 </div>
 {% endif %}
 
+
+</div>{# / health panel #}
+
+{# ────────── PIPELINE LOG TAB ────────── #}
+<div x-show="tab === 'pipeline'" x-cloak>
+
 <!-- Pipeline Log -->
 <div class="card" style="margin-bottom: 20px;">
     <div class="section-title">Pipeline Log (Last 7 Days)</div>
@@ -243,6 +261,12 @@
     <div style="color: var(--text-muted);">No pipeline runs in the last 7 days.</div>
     {% endif %}
 </div>
+
+
+</div>{# / pipeline panel #}
+
+{# ────────── INVENTORY TAB ────────── #}
+<div x-show="tab === 'inventory'" x-cloak>
 
 <!-- Data Inventory — grouped by domain, each domain is its own interactive Tabulator grid. -->
 <div class="card">
@@ -380,5 +404,9 @@
       }
     </style>
 </div>
+
+</div>{# / inventory panel #}
+
+</div>{# / tabs root #}
 
 {% endblock %}
