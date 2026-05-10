@@ -153,143 +153,232 @@
 
 
 {# ════════════════════════════════════════════ #}
-{# TAB 2 — PER-SECTOR DEEP DIVE (IIM casebook) #}
+{# TAB 2 — PER-SECTOR DEEP DIVE (visual + sub-tabs) #}
 {# ════════════════════════════════════════════ #}
+{% from "_components.html" import tab_bar, radio_group %}
 <div x-show="tab === 'per-sector'" x-cloak>
 
 <style>
-    /* IIM-casebook-style dense layout */
-    .iim-page { font-size: 12px; line-height: 1.5; }
-    .iim-page h3 {
-        font-size: 11px; font-weight: 700; letter-spacing: 0.7px;
-        text-transform: uppercase; color: var(--text-muted);
-        margin: 0 0 8px 0; padding-bottom: 4px;
-        border-bottom: 1px solid var(--border);
-    }
-    .iim-block {
-        background: var(--bg-card);
-        border: 1px solid var(--border);
-        border-radius: 8px;
-        padding: 12px 14px;
-    }
-    .iim-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
-    .iim-row-3 { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 10px; margin-bottom: 12px; }
-    @media (max-width: 900px) { .iim-row, .iim-row-3 { grid-template-columns: 1fr; } }
-
-    /* Compact metric bar */
-    .metric-bar {
-        display: flex; flex-wrap: wrap; gap: 24px;
-        padding: 12px 16px; margin-bottom: 14px;
-        background: var(--bg-card);
-        border: 1px solid var(--border);
-        border-radius: 8px;
-        font-size: 11px;
-    }
-    .metric-bar .m {
-        display: flex; flex-direction: column; gap: 2px;
-    }
-    .metric-bar .m label {
-        font-size: 9px; text-transform: uppercase; letter-spacing: 0.6px;
-        color: var(--text-muted);
-    }
-    .metric-bar .m value {
-        font-family: var(--mono, monospace);
-        font-size: 14px; font-weight: 700; color: var(--text-primary);
-    }
-
-    /* Compact tables */
-    table.iim-table { width: 100%; border-collapse: collapse; font-size: 11px; }
-    table.iim-table th {
-        text-align: left; padding: 4px 8px;
-        font-size: 9px; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase;
-        color: var(--text-muted);
-        border-bottom: 1px solid var(--border);
-    }
-    table.iim-table td {
-        padding: 4px 8px; border-bottom: 1px solid var(--border);
-        vertical-align: top;
-    }
-    table.iim-table tr:last-child td { border-bottom: none; }
-    table.iim-table td.num { text-align: right; font-family: var(--mono, monospace); }
-
-    /* Driver pills - inline, dense */
-    .iim-pill {
-        display: inline-block; padding: 1px 7px; border-radius: 8px;
-        font-size: 10px; margin: 1px;
-        background: rgba(140,140,140,0.10); color: var(--text-secondary);
-        border: 1px solid var(--border);
-    }
-    .iim-pill.structural { border-color: rgba(46,204,113,0.35); color: #2ecc71; }
-    .iim-pill.cyclical   { border-color: rgba(241,196,15,0.35); color: #f1c40f; }
-    .iim-pill.policy     { border-color: rgba(77,142,255,0.35); color: #4d8eff; }
-
-    /* Value chain — tight horizontal */
-    .iim-vc {
-        display: grid;
-        grid-template-columns: repeat(5, 1fr);
-        gap: 6px;
-    }
-    @media (max-width: 900px) { .iim-vc { grid-template-columns: 1fr 1fr; } }
-    .iim-vc-stage {
-        background: rgba(255,255,255,0.02);
-        border: 1px solid var(--border);
-        border-left: 2px solid var(--accent);
-        border-radius: 6px;
-        padding: 8px 10px;
-    }
-    .iim-vc-stage .stage-name {
-        font-size: 10px; font-weight: 700; letter-spacing: 0.5px;
-        text-transform: uppercase; color: var(--accent);
-        margin-bottom: 4px;
-    }
-    .iim-vc-stage ul {
-        list-style: none; padding: 0; margin: 0;
-        font-size: 10.5px; line-height: 1.5; color: var(--text-secondary);
-    }
-    .iim-vc-stage ul li { padding: 1px 0; }
-
-    /* Trends bullets */
-    .iim-trends ul { list-style: none; padding: 0; margin: 0; }
-    .iim-trends li {
-        padding: 3px 0 3px 12px; position: relative;
-        font-size: 11px; line-height: 1.5; color: var(--text-secondary);
-    }
-    .iim-trends li::before {
-        content: '·'; position: absolute; left: 0; top: 1px;
-        color: var(--accent); font-weight: 700;
-    }
-    .iim-trend-cat {
-        font-size: 9px; font-weight: 700; letter-spacing: 0.5px;
-        text-transform: uppercase; color: var(--text-muted);
-        margin: 8px 0 3px 0;
-    }
-    .iim-trend-cat:first-child { margin-top: 0; }
-
-    /* Selector header */
-    .iim-selector {
-        display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
-        margin-bottom: 14px;
-    }
-    .iim-selector select {
+    /* ── Per-sector page ── */
+    .ps-selector { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+    .ps-selector select {
         background: var(--bg-card); color: var(--text-primary);
         border: 1px solid var(--border); border-radius: 8px;
         padding: 8px 14px; font-size: 13px; font-weight: 600;
         font-family: inherit; cursor: pointer;
     }
-    .iim-selector .meta {
-        font-size: 11px; color: var(--text-muted);
+    .ps-selector .meta { font-size: 11px; color: var(--text-muted); }
+
+    /* KPI tile row */
+    .kpi-tiles {
+        display: grid; gap: 12px;
+        grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+        margin-bottom: 16px;
+    }
+    .kpi-tile {
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 14px 16px;
+        position: relative; overflow: hidden;
+    }
+    .kpi-tile.accent { border-left: 3px solid var(--accent); }
+    .kpi-tile.green  { border-left: 3px solid var(--green); }
+    .kpi-tile.red    { border-left: 3px solid var(--red); }
+    .kpi-tile.amber  { border-left: 3px solid var(--amber); }
+    .kpi-tile label {
+        display: block; font-size: 9px; text-transform: uppercase;
+        letter-spacing: 0.7px; color: var(--text-muted); margin-bottom: 4px;
+    }
+    .kpi-tile .v {
+        font-family: var(--mono, monospace);
+        font-size: 22px; font-weight: 700; color: var(--text-primary);
+        line-height: 1;
+    }
+    .kpi-tile .sub {
+        font-size: 10px; color: var(--text-secondary); margin-top: 4px;
     }
 
-    .iim-pulse-dot { display: inline-block; width: 6px; height: 6px;
-                     border-radius: 50%; margin-right: 5px; vertical-align: middle; }
-    .iim-pulse-dot.up   { background: #2ecc71; }
-    .iim-pulse-dot.down { background: #e74c3c; }
-    .iim-pulse-dot.flat { background: var(--text-muted); }
+    /* One-line summary */
+    .ps-summary {
+        font-size: 14px; line-height: 1.5; color: var(--text-primary);
+        padding: 10px 16px; margin-bottom: 16px;
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        border-left: 3px solid var(--accent);
+        border-radius: 8px;
+    }
+
+    /* Value chain — visual */
+    .vc-row { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
+    @media (max-width: 900px) { .vc-row { grid-template-columns: 1fr 1fr; } }
+    .vc-step {
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 10px 12px;
+        position: relative;
+    }
+    .vc-step .num {
+        position: absolute; top: -8px; left: 10px;
+        width: 18px; height: 18px; border-radius: 50%;
+        background: var(--accent); color: white;
+        font-size: 10px; font-weight: 700;
+        display: flex; align-items: center; justify-content: center;
+    }
+    .vc-step h4 {
+        font-size: 11px; font-weight: 700; letter-spacing: 0.4px;
+        text-transform: uppercase; color: var(--accent);
+        margin: 4px 0 6px 0;
+    }
+    .vc-step ul {
+        list-style: none; padding: 0; margin: 0;
+        font-size: 10.5px; line-height: 1.5; color: var(--text-secondary);
+    }
+    .vc-step ul li { padding: 1px 0; }
+
+    /* Driver columns with icons */
+    .driver-cols { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 8px; }
+    @media (max-width: 720px) { .driver-cols { grid-template-columns: 1fr; } }
+    .driver-col {
+        background: rgba(255,255,255,0.02);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 10px 12px;
+    }
+    .driver-col .icon-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+    .driver-col .icon {
+        width: 24px; height: 24px; border-radius: 6px;
+        display: flex; align-items: center; justify-content: center;
+        font-size: 13px;
+    }
+    .driver-col.revenue .icon { background: rgba(46,204,113,0.15); color: #2ecc71; }
+    .driver-col.cost    .icon { background: rgba(231,76,60,0.15);  color: #e74c3c; }
+    .driver-col.growth  .icon { background: rgba(77,142,255,0.15); color: #4d8eff; }
+    .driver-col h4 {
+        font-size: 11px; font-weight: 700; letter-spacing: 0.4px;
+        text-transform: uppercase; color: var(--text-primary);
+        margin: 0;
+    }
+    .driver-col .pills { display: flex; flex-wrap: wrap; gap: 3px; }
+    .driver-pill-v2 {
+        font-size: 10.5px; padding: 3px 8px; border-radius: 12px;
+        background: rgba(255,255,255,0.04);
+        border: 1px solid var(--border);
+        color: var(--text-secondary);
+    }
+    .driver-pill-v2.structural { border-color: rgba(46,204,113,0.30); }
+    .driver-pill-v2.cyclical   { border-color: rgba(241,196,15,0.30); }
+    .driver-pill-v2.policy     { border-color: rgba(77,142,255,0.30); }
+
+    /* Top-players bar chart */
+    .player-bar-row {
+        display: grid; grid-template-columns: 90px 1fr 60px 50px;
+        gap: 10px; align-items: center;
+        font-size: 11px; padding: 5px 0;
+        border-bottom: 1px solid var(--border);
+    }
+    .player-bar-row:last-child { border-bottom: none; }
+    .player-bar-track {
+        height: 14px; background: rgba(255,255,255,0.04); border-radius: 4px;
+        overflow: hidden; position: relative;
+    }
+    .player-bar-fill {
+        height: 100%; border-radius: 4px;
+        background: linear-gradient(90deg, var(--accent) 0%, rgba(139,92,246,0.4) 100%);
+    }
+    .player-bar-row .num { font-family: var(--mono, monospace); text-align: right; }
+
+    /* Segment cards */
+    .seg-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
+    .seg-card {
+        background: rgba(255,255,255,0.02);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 10px 12px;
+    }
+    .seg-card .seg-name {
+        font-size: 12px; font-weight: 700; color: var(--text-primary);
+        margin-bottom: 6px;
+    }
+    .seg-card .kpi {
+        font-size: 10.5px; padding: 2px 0;
+        color: var(--text-secondary);
+        display: flex; align-items: center; gap: 6px;
+    }
+    .seg-card .kpi .arrow {
+        font-size: 11px; font-weight: 700;
+        color: var(--text-muted); width: 12px; text-align: center;
+    }
+    .seg-card .kpi .arrow.up   { color: #2ecc71; }
+    .seg-card .kpi .arrow.down { color: #e74c3c; }
+
+    /* Trend categorised — radio + content */
+    .trend-cat-content {
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 14px 16px;
+        font-size: 13px; line-height: 1.6;
+        color: var(--text-secondary);
+    }
+    .trend-cat-content ul { padding-left: 18px; margin: 0; }
+    .trend-cat-content li { padding: 3px 0; }
+
+    /* Section headers */
+    .ps-section-title {
+        font-size: 11px; font-weight: 700; letter-spacing: 0.7px;
+        text-transform: uppercase; color: var(--text-muted);
+        margin: 14px 0 8px 0;
+    }
+
+    /* Mini cards in Our Model sub-tab */
+    .alpha-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; }
+    .alpha-card {
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 10px 12px;
+    }
+    .alpha-card h4 {
+        font-size: 10px; font-weight: 700; letter-spacing: 0.6px;
+        text-transform: uppercase; color: var(--text-muted);
+        margin: 0 0 6px 0; padding-bottom: 4px;
+        border-bottom: 1px solid var(--border);
+    }
+    .alpha-row {
+        display: grid; grid-template-columns: 60px 1fr 36px;
+        gap: 8px; padding: 3px 0;
+        font-size: 11px;
+    }
+    .alpha-row .ticker { color: var(--text-primary); font-weight: 600; }
+    .alpha-row .name   { color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .alpha-row .score  { font-family: var(--mono, monospace); text-align: right; }
+
+    /* Pulse dots */
+    .pdot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; vertical-align: middle; margin-right: 5px; }
+    .pdot.up { background: #2ecc71; } .pdot.down { background: #e74c3c; } .pdot.flat { background: var(--text-muted); }
+
+    /* Cyclicality + regulators collapsible */
+    details.ps-more {
+        margin-top: 16px;
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        overflow: hidden;
+    }
+    details.ps-more > summary {
+        cursor: pointer; list-style: none; padding: 10px 14px;
+        font-size: 11px; font-weight: 700; letter-spacing: 0.5px;
+        text-transform: uppercase; color: var(--text-muted);
+        user-select: none;
+    }
+    details.ps-more > summary::before { content: '▸ '; color: var(--accent); }
+    details.ps-more[open] > summary::before { content: '▾ '; }
+    details.ps-more > div { padding: 0 14px 14px 14px; font-size: 12px; line-height: 1.6; color: var(--text-secondary); }
 </style>
 
-<div class="iim-page">
-
-<div class="iim-selector">
+<div class="ps-selector">
     <select onchange="window.location.href = '/sectors?sector=' + encodeURIComponent(this.value) + '#per-sector'">
         {% for s in sector_list %}
         <option value="{{ s }}" {% if s == selected_sector %}selected{% endif %}>{{ s }}</option>
@@ -297,288 +386,281 @@
     </select>
     {% if detail %}
     <span class="meta">
-        {{ detail.narrative._industry if detail.narrative else '(no narrative yet — run sector_narrative_fetcher)' }}
+        {{ detail.narrative._industry if detail.narrative else '(no narrative — run sector_narrative_fetcher)' }}
         {% if detail.narrative and detail.narrative._generated_at %} · {{ detail.narrative._generated_at[:10] }}{% endif %}
     </span>
     {% endif %}
 </div>
 
 {% if not detail %}
-<div class="iim-block" style="text-align: center; color: var(--text-muted);">
-    Select a sector to drill in.
+<div class="kpi-tile" style="text-align: center; color: var(--text-muted);">
+    Pick a sector above.
 </div>
 {% else %}
 {% set narr = detail.narrative %}
+{% set sec_match = sectors | selectattr('sector', 'equalto', detail.name) | first %}
 
-{# ── Compact metric bar (mirrors stock-detail's price metric strip) ── #}
-<div class="metric-bar">
-    {% if narr and narr.industry_size_inr_cr %}
-    <div class="m"><label>Industry size</label><value>₹{{ "{:,.0f}".format(narr.industry_size_inr_cr) }} cr</value></div>
-    {% endif %}
-    {% if narr and narr.industry_cagr_pct %}
-    <div class="m"><label>Forward CAGR</label><value>{{ narr.industry_cagr_pct }}%</value></div>
-    {% endif %}
-    <div class="m"><label>Tracked players</label><value>{{ detail.top_players | length }}</value></div>
-    {% set sec_match = sectors | selectattr('sector', 'equalto', detail.name) | first %}
-    {% if sec_match %}
-    <div class="m"><label>Avg composite</label><value>{{ "%.0f"|format(sec_match.avg_score * 100) }}</value></div>
-    {% if sec_match.breadth_pct is not none %}
-    <div class="m"><label>Breadth ≥0.55</label><value>{{ "%.0f"|format(sec_match.breadth_pct) }}%</value></div>
-    {% endif %}
-    {% if sec_match.macro_signal %}
-    <div class="m"><label>Macro</label>
-        <value style="
-            {% if sec_match.macro_signal in ['TAILWIND', 'FAVORABLE'] %}color: var(--green);
-            {% elif sec_match.macro_signal in ['HEADWIND', 'ADVERSE'] %}color: var(--red);
-            {% else %}color: var(--text-muted);{% endif %}">
-            {{ sec_match.macro_signal }}
-        </value>
+{# ─── KPI tile row (4 big numbers) ─── #}
+<div class="kpi-tiles">
+    <div class="kpi-tile accent">
+        <label>Industry size</label>
+        <div class="v">
+            {% if narr and narr.industry_size_inr_cr %}₹{{ "{:,.0f}".format(narr.industry_size_inr_cr / 100000) }}<span style="font-size: 14px; color: var(--text-secondary); margin-left: 3px;">L cr</span>
+            {% else %}<span style="font-size: 14px; color: var(--text-muted);">—</span>{% endif %}
+        </div>
+        <div class="sub">
+            {% if narr and narr.industry_cagr_pct %}↑ {{ narr.industry_cagr_pct }}% CAGR forward{% else %}industry size unknown{% endif %}
+        </div>
     </div>
-    {% endif %}
-    {% endif %}
+    <div class="kpi-tile {% if sec_match and sec_match.avg_score >= 0.55 %}green{% elif sec_match and sec_match.avg_score < 0.45 %}red{% else %}amber{% endif %}">
+        <label>Avg composite</label>
+        <div class="v">{{ "%.0f"|format(sec_match.avg_score * 100) if sec_match else '—' }}<span style="font-size: 14px; color: var(--text-secondary); margin-left: 3px;">/100</span></div>
+        <div class="sub">{{ sec_match.stocks if sec_match else 0 }} stocks · breadth {{ sec_match.breadth_pct if sec_match else 0 }}%</div>
+    </div>
+    <div class="kpi-tile {% if sec_match and sec_match.macro_signal in ['TAILWIND','FAVORABLE'] %}green{% elif sec_match and sec_match.macro_signal in ['HEADWIND','ADVERSE'] %}red{% else %}accent{% endif %}">
+        <label>Macro signal</label>
+        <div class="v" style="font-size: 18px;">{{ sec_match.macro_signal if sec_match and sec_match.macro_signal else 'NEUTRAL' }}</div>
+        <div class="sub">
+            {% if sec_match and sec_match.macro_score is not none %}score {{ "%.1f"|format(sec_match.macro_score) }}{% else %}no macro signal{% endif %}
+        </div>
+    </div>
+    <div class="kpi-tile">
+        <label>Top players</label>
+        <div class="v">{{ detail.top_players | length }}</div>
+        <div class="sub">
+            {% set top3 = detail.top_players[:3] | map(attribute='ticker') | list | join(' · ') %}
+            {{ top3 if top3 else 'no players in universe' }}
+        </div>
+    </div>
 </div>
 
-{# ── One-line summary ── #}
+{# ─── One-line summary ─── #}
 {% if narr and narr.summary %}
-<div style="font-size: 13px; line-height: 1.5; color: var(--text-primary);
-            padding: 10px 14px; margin-bottom: 14px;
-            background: var(--bg-card); border: 1px solid var(--border);
-            border-left: 3px solid var(--accent); border-radius: 8px;">
-    {{ narr.summary }}
-</div>
-{% elif not narr %}
-<div style="font-size: 11px; color: var(--text-muted); margin-bottom: 14px; padding: 8px 12px; background: rgba(241,196,15,0.05); border: 1px solid rgba(241,196,15,0.2); border-radius: 6px;">
-    Narrative not generated. Run <code style="font-size: 10px;">python -m tools.sector_narrative_fetcher --sector "{{ detail.name }}"</code> for the full IIM-style page. Showing live-data only below.
-</div>
+<div class="ps-summary">{{ narr.summary }}</div>
 {% endif %}
 
-{# ── Value Chain ── #}
+{# ─── Sub-tabs: Overview / Players / Trends / Our Picks ─── #}
+<div x-data="{ subtab: 'overview', subloaded: { overview: true } }">
+<div class="tab-bar" style="margin-bottom: 16px;">
+    {% for k, l in [('overview','Overview'), ('players','Players'), ('trends','Trends'), ('alpha','Our Picks')] %}
+    <button class="tab-button" :class="{ active: subtab === '{{ k }}' }"
+            @click="subtab = '{{ k }}'; subloaded['{{ k }}'] = true">{{ l }}</button>
+    {% endfor %}
+</div>
+
+{# ────────── SUBTAB: OVERVIEW ────────── #}
+<div x-show="subtab === 'overview'" x-cloak>
+
 {% if narr and narr.value_chain %}
-<div class="iim-block" style="margin-bottom: 12px;">
-    <h3>Value Chain</h3>
-    <div class="iim-vc">
-        {% for stage in narr.value_chain[:5] %}
-        <div class="iim-vc-stage">
-            <div class="stage-name">{{ stage.name }}</div>
-            <ul>{% for item in stage['items'][:6] %}<li>· {{ item }}</li>{% endfor %}</ul>
-        </div>
-        {% endfor %}
+<div class="ps-section-title">How it works · 5-stage value chain</div>
+<div class="vc-row">
+    {% for stage in narr.value_chain[:5] %}
+    <div class="vc-step">
+        <div class="num">{{ loop.index }}</div>
+        <h4>{{ stage.name }}</h4>
+        <ul>{% for item in stage['items'][:5] %}<li>· {{ item }}</li>{% endfor %}</ul>
     </div>
+    {% endfor %}
 </div>
 {% endif %}
 
-{# ── Drivers + Segments + Cyclicality ── #}
-{% if narr %}
-<div class="iim-row">
-    {% if narr.drivers %}
-    <div class="iim-block">
-        <h3>Key Drivers</h3>
-        <table class="iim-table">
-            <thead>
-            <tr><th style="width:33%">Revenue</th><th style="width:33%">Cost</th><th>Growth</th></tr>
-            </thead>
-            <tbody>
-            <tr>
-                <td>{% for d in narr.drivers.get('revenue', []) %}<span class="iim-pill {{ d.type or '' }}">{{ d.item }}</span>{% endfor %}</td>
-                <td>{% for d in narr.drivers.get('cost',    []) %}<span class="iim-pill {{ d.type or '' }}">{{ d.item }}</span>{% endfor %}</td>
-                <td>{% for d in narr.drivers.get('growth',  []) %}<span class="iim-pill {{ d.type or '' }}">{{ d.item }}</span>{% endfor %}</td>
-            </tr>
-            </tbody>
-        </table>
-        <div style="font-size: 9px; color: var(--text-muted); margin-top: 6px;">
-            <span class="iim-pill structural">structural</span>
-            <span class="iim-pill cyclical">cyclical</span>
-            <span class="iim-pill policy">policy</span>
+{% if narr and narr.drivers %}
+<div class="ps-section-title">Key drivers</div>
+<div class="driver-cols">
+    {% for kind, label, icon in [('revenue','Revenue','💰'),('cost','Cost','💸'),('growth','Growth','📈')] %}
+    <div class="driver-col {{ kind }}">
+        <div class="icon-row">
+            <span class="icon">{{ icon }}</span>
+            <h4>{{ label }}</h4>
+        </div>
+        <div class="pills">
+            {% for d in narr.drivers.get(kind, [])[:6] %}
+            <span class="driver-pill-v2 {{ d.type or '' }}">{{ d.item }}</span>
+            {% endfor %}
         </div>
     </div>
-    {% endif %}
-
-    {% if narr.segments %}
-    <div class="iim-block">
-        <h3>Segments &amp; KPIs</h3>
-        <table class="iim-table">
-            <thead><tr><th style="width:40%">Segment</th><th>KPI</th></tr></thead>
-            <tbody>
-            {% for seg in narr.segments[:6] %}
-            <tr>
-                <td><strong>{{ seg.name }}</strong></td>
-                <td>
-                    {% for kpi in seg['kpis'][:3] %}
-                    <span style="display: inline-block; margin: 0 4px 2px 0;">
-                        {{ kpi.name }} <span style="color: var(--text-muted);">{{ '↑' if kpi.direction == 'higher_is_better' else '↓' }}</span>
-                    </span>
-                    {% endfor %}
-                </td>
-            </tr>
-            {% endfor %}
-            </tbody>
-        </table>
-    </div>
-    {% endif %}
+    {% endfor %}
 </div>
-
-{# ── Top Players + Market Trends ── #}
-<div class="iim-row">
-    <div class="iim-block">
-        <h3>Top Players</h3>
-        <table class="iim-table">
-            <thead>
-            <tr>
-                <th>Ticker</th><th>Name</th>
-                <th class="num">Mcap (₹cr)</th>
-                <th class="num">Share %</th>
-                <th class="num">Score</th>
-            </tr>
-            </thead>
-            <tbody>
-            {% for p in detail.top_players[:8] %}
-            <tr>
-                <td><a href="/explorer/{{ p.sid }}" style="color: var(--text-primary); font-weight: 600; text-decoration: none;">{{ p.ticker }}</a></td>
-                <td style="color: var(--text-secondary);">{{ p.name[:30] }}</td>
-                <td class="num">{{ "{:,.0f}".format(p.market_cap_cr) }}</td>
-                <td class="num">{{ "%.1f"|format(p.share_pct) }}</td>
-                <td class="num
-                    {% if p.final_score >= 0.7 %}score-green{% elif p.final_score >= 0.5 %}score-amber{% elif p.final_score > 0 %}score-red{% endif %}">
-                    {{ "%.0f"|format(p.final_score * 100) if p.final_score else '—' }}
-                </td>
-            </tr>
-            {% endfor %}
-            </tbody>
-        </table>
-    </div>
-
-    {% if narr and narr.trend_bullets %}
-    <div class="iim-block iim-trends">
-        <h3>Market Trends</h3>
-        {% for kind, label in [('industry_size', 'Size & growth'),
-                                ('structural_shifts', 'Structural shifts'),
-                                ('regulatory', 'Regulatory'),
-                                ('headwinds', 'Headwinds'),
-                                ('india_specific', 'India tailwinds')] %}
-            {% set bullets = narr.trend_bullets.get(kind) %}
-            {% if bullets %}
-            <div class="iim-trend-cat">{{ label }}</div>
-            <ul>{% for b in bullets[:2] %}<li>{{ b }}</li>{% endfor %}</ul>
-            {% endif %}
-        {% endfor %}
-    </div>
-    {% endif %}
+<div style="font-size: 9px; color: var(--text-muted); margin-top: 6px; padding-left: 4px;">
+    Border colour:
+    <span style="color: #2ecc71;">green = structural</span> ·
+    <span style="color: #f1c40f;">yellow = cyclical</span> ·
+    <span style="color: #4d8eff;">blue = policy-driven</span>
 </div>
+{% endif %}
 
-{# ── Regulators / Cyclicality / India-specific (inline strip) ── #}
-{% if narr.regulators or narr.cyclicality or narr.india_specific %}
-<div class="iim-row">
-    {% if narr.regulators %}
-    <div class="iim-block">
-        <h3>Regulators</h3>
-        <table class="iim-table">
-            <tbody>
-            {% for r in narr.regulators[:4] %}
-            <tr><td><strong>{{ r.body }}</strong></td><td style="color: var(--text-secondary);">{{ r.what }}</td></tr>
-            {% endfor %}
-            </tbody>
-        </table>
-    </div>
-    {% endif %}
-
-    <div class="iim-block">
+{# Cyclicality + Regulators + India-specific in one collapsible #}
+{% if narr and (narr.cyclicality or narr.regulators or narr.india_specific) %}
+<details class="ps-more">
+    <summary>More context — cyclicality · regulators · India-specific</summary>
+    <div>
         {% if narr.cyclicality %}
-        <h3>Cyclicality</h3>
-        <div style="font-size: 11px; line-height: 1.5; color: var(--text-secondary); margin-bottom: 10px;">
-            {{ narr.cyclicality }}
-        </div>
+        <div class="ps-section-title" style="margin-top: 0;">Cyclicality</div>
+        <div>{{ narr.cyclicality }}</div>
+        {% endif %}
+        {% if narr.regulators %}
+        <div class="ps-section-title">Regulators</div>
+        {% for r in narr.regulators %}
+        <div style="padding: 3px 0;"><strong style="color: var(--text-primary);">{{ r.body }}</strong> · <span style="color: var(--text-secondary);">{{ r.what }}</span></div>
+        {% endfor %}
         {% endif %}
         {% if narr.india_specific %}
-        <h3 style="margin-top: 10px;">India-specific factors</h3>
-        <ul style="padding-left: 14px; margin: 0; font-size: 11px; line-height: 1.5; color: var(--text-secondary);">
-            {% for b in narr.india_specific[:5] %}<li>{{ b }}</li>{% endfor %}
+        <div class="ps-section-title">India-specific factors</div>
+        <ul style="padding-left: 18px; margin: 0;">
+            {% for b in narr.india_specific %}<li>{{ b }}</li>{% endfor %}
         </ul>
         {% endif %}
     </div>
+</details>
+{% endif %}
+
+</div>{# / overview subtab #}
+
+
+{# ────────── SUBTAB: PLAYERS ────────── #}
+<div x-show="subtab === 'players'" x-cloak>
+
+<div class="ps-section-title">Top players · market-share visualisation</div>
+<div class="kpi-tile" style="border-left: 3px solid var(--accent);">
+    <div style="font-size: 9px; color: var(--text-muted); margin-bottom: 8px; display: grid; grid-template-columns: 90px 1fr 60px 50px; gap: 10px; padding: 0 0 4px 0; border-bottom: 1px solid var(--border); text-transform: uppercase; letter-spacing: 0.5px;">
+        <span>Ticker</span><span>Market-cap share</span><span style="text-align: right;">₹cr</span><span style="text-align: right;">Score</span>
+    </div>
+    {% for p in detail.top_players[:10] %}
+    <div class="player-bar-row">
+        <div><a href="/explorer/{{ p.sid }}" style="color: var(--text-primary); font-weight: 600; text-decoration: none;">{{ p.ticker }}</a></div>
+        <div class="player-bar-track">
+            <div class="player-bar-fill" style="width: {{ p.share_pct }}%;"></div>
+        </div>
+        <div class="num">{{ "{:,.0f}".format(p.market_cap_cr) }}</div>
+        <div class="num
+            {% if p.final_score >= 0.7 %}score-green{% elif p.final_score >= 0.5 %}score-amber{% elif p.final_score > 0 %}score-red{% endif %}">
+            {{ "%.0f"|format(p.final_score * 100) if p.final_score else '—' }}
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+{% if narr and narr.segments %}
+<div class="ps-section-title">Segments &amp; KPIs</div>
+<div class="seg-grid">
+    {% for seg in narr.segments[:8] %}
+    <div class="seg-card">
+        <div class="seg-name">{{ seg.name }}</div>
+        {% for kpi in seg['kpis'][:4] %}
+        <div class="kpi">
+            <span class="arrow {{ 'up' if kpi.direction == 'higher_is_better' else 'down' }}">
+                {{ '↑' if kpi.direction == 'higher_is_better' else '↓' }}
+            </span>
+            <span><strong style="color: var(--text-primary);">{{ kpi.name }}</strong> · {{ kpi.formula[:60] }}</span>
+        </div>
+        {% endfor %}
+    </div>
+    {% endfor %}
 </div>
 {% endif %}
-{% endif %}{# narr #}
 
-{# ── Alpha Signal Overlay (4 mini-cards) ── #}
-<div style="margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border);">
-    <h3 style="font-size: 11px; font-weight: 700; letter-spacing: 0.7px; text-transform: uppercase;
-               color: var(--accent); margin: 0 0 10px 0;">Alpha Signal Overlay</h3>
-    <div class="iim-row-3">
-        {# Picks #}
-        <div class="iim-block">
-            <h3>Top picks</h3>
-            <table class="iim-table">
-                <tbody>
-                {% for p in detail.picks.top[:6] %}
-                <tr>
-                    <td><a href="/explorer/{{ p.sid }}" style="color: var(--text-primary); text-decoration: none;">{{ p.ticker }}</a></td>
-                    <td style="color: var(--text-secondary);">{{ p.name[:18] }}</td>
-                    <td class="num score-green">{{ "%.0f"|format(p.final_score * 100) }}</td>
-                </tr>
-                {% endfor %}
-                </tbody>
-            </table>
-        </div>
+</div>{# / players subtab #}
 
-        {# Avoid #}
-        <div class="iim-block">
-            <h3>Avoid</h3>
-            <table class="iim-table">
-                <tbody>
-                {% for p in detail.picks.bottom[:5] %}
-                <tr>
-                    <td><a href="/explorer/{{ p.sid }}" style="color: var(--text-primary); text-decoration: none;">{{ p.ticker }}</a></td>
-                    <td style="color: var(--text-secondary);">{{ p.name[:18] }}</td>
-                    <td class="num score-red">{{ "%.0f"|format(p.final_score * 100) }}</td>
-                </tr>
-                {% endfor %}
-                </tbody>
-            </table>
-        </div>
 
-        {# Macro contributors #}
-        <div class="iim-block">
-            <h3>Macro contributors</h3>
-            {% if detail.macro_contributors %}
-            <table class="iim-table">
-                <tbody>
-                {% for m in detail.macro_contributors[:5] %}
-                <tr>
-                    <td>{{ m.indicator_id }}</td>
-                    <td style="color: var(--text-secondary);">{{ m.direction or '—' }}</td>
-                    <td class="num">{{ "%.2f"|format(m.weight) if m.weight is not none else '' }}</td>
-                </tr>
-                {% endfor %}
-                </tbody>
-            </table>
-            {% else %}
-            <div style="font-size: 11px; color: var(--text-muted);">No mappings.</div>
-            {% endif %}
-        </div>
+{# ────────── SUBTAB: TRENDS ────────── #}
+<div x-show="subtab === 'trends'" x-cloak>
 
-        {# Recent regulatory events #}
-        <div class="iim-block">
-            <h3>Recent regulatory</h3>
-            {% if detail.regulatory %}
-            <ul style="padding: 0; margin: 0; list-style: none;">
-                {% for r in detail.regulatory[:5] %}
-                <li style="font-size: 11px; line-height: 1.4; padding: 3px 0; border-bottom: 1px solid var(--border);">
-                    <span class="iim-pulse-dot {{ 'up' if r.direction == 'POSITIVE' else ('down' if r.direction == 'NEGATIVE' else 'flat') }}"></span>
-                    <span class="mono" style="font-size: 9px; color: var(--text-muted);">{{ r.published_at[:10] }}</span>
-                    {{ r.title[:70] }}
-                </li>
-                {% endfor %}
-            </ul>
-            {% else %}
-            <div style="font-size: 11px; color: var(--text-muted);">None.</div>
-            {% endif %}
+{% if narr and narr.trend_bullets %}
+<div x-data="{ tcat: 'industry_size' }">
+<div style="margin-bottom: 12px;">
+    {{ radio_group('tcat', [
+        ('industry_size',     'Size & growth'),
+        ('structural_shifts', 'Structural shifts'),
+        ('regulatory',        'Regulatory'),
+        ('headwinds',         'Headwinds'),
+        ('india_specific',    'India tailwinds'),
+    ]) }}
+</div>
+
+{% for kind in ['industry_size', 'structural_shifts', 'regulatory', 'headwinds', 'india_specific'] %}
+{% set bullets = narr.trend_bullets.get(kind) %}
+<div x-show="tcat === '{{ kind }}'" x-cloak class="trend-cat-content">
+    {% if bullets %}
+    <ul>
+        {% for b in bullets %}<li>{{ b }}</li>{% endfor %}
+    </ul>
+    {% else %}
+    <div style="color: var(--text-muted); font-style: italic;">No bullets in this category.</div>
+    {% endif %}
+</div>
+{% endfor %}
+</div>
+{% else %}
+<div class="kpi-tile" style="color: var(--text-muted);">
+    No trend bullets — narrative not generated yet for this sector.
+</div>
+{% endif %}
+
+</div>{# / trends subtab #}
+
+
+{# ────────── SUBTAB: OUR PICKS (Alpha overlay) ────────── #}
+<div x-show="subtab === 'alpha'" x-cloak>
+
+<div class="alpha-grid">
+    <div class="alpha-card">
+        <h4>Top picks</h4>
+        {% for p in detail.picks.top[:8] %}
+        <div class="alpha-row">
+            <span class="ticker"><a href="/explorer/{{ p.sid }}" style="color: inherit; text-decoration: none;">{{ p.ticker }}</a></span>
+            <span class="name">{{ p.name[:24] }}</span>
+            <span class="score score-green">{{ "%.0f"|format(p.final_score * 100) }}</span>
         </div>
+        {% endfor %}
+    </div>
+
+    <div class="alpha-card">
+        <h4>Avoid</h4>
+        {% for p in detail.picks.bottom[:5] %}
+        <div class="alpha-row">
+            <span class="ticker"><a href="/explorer/{{ p.sid }}" style="color: inherit; text-decoration: none;">{{ p.ticker }}</a></span>
+            <span class="name">{{ p.name[:24] }}</span>
+            <span class="score score-red">{{ "%.0f"|format(p.final_score * 100) }}</span>
+        </div>
+        {% endfor %}
+    </div>
+
+    <div class="alpha-card">
+        <h4>Macro contributors</h4>
+        {% if detail.macro_contributors %}
+        {% for m in detail.macro_contributors[:5] %}
+        <div class="alpha-row" style="grid-template-columns: 1fr 60px 36px;">
+            <span style="color: var(--text-secondary); font-size: 11px;">{{ m.indicator_id[:24] }}</span>
+            <span style="font-size: 10px; color: var(--text-muted);">{{ m.direction or '—' }}</span>
+            <span class="score">{{ "%.2f"|format(m.weight) if m.weight is not none else '' }}</span>
+        </div>
+        {% endfor %}
+        {% else %}
+        <div style="font-size: 11px; color: var(--text-muted);">No mappings.</div>
+        {% endif %}
+    </div>
+
+    <div class="alpha-card">
+        <h4>Recent regulatory</h4>
+        {% if detail.regulatory %}
+        {% for r in detail.regulatory[:5] %}
+        <div style="font-size: 11px; line-height: 1.4; padding: 4px 0; border-bottom: 1px solid var(--border);">
+            <span class="pdot {{ 'up' if r.direction == 'POSITIVE' else ('down' if r.direction == 'NEGATIVE' else 'flat') }}"></span>
+            <span class="mono" style="font-size: 9px; color: var(--text-muted);">{{ r.published_at[:10] }}</span>
+            {{ r.title[:65] }}
+        </div>
+        {% endfor %}
+        {% else %}
+        <div style="font-size: 11px; color: var(--text-muted);">None.</div>
+        {% endif %}
     </div>
 </div>
 
-{% endif %}{# detail #}
+</div>{# / alpha subtab #}
 
-</div>{# / iim-page #}
+</div>{# / subtab x-data #}
+
+{% endif %}{# detail #}
 
 </div>{# / per-sector tab #}
 
