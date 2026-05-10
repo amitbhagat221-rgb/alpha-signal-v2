@@ -1,20 +1,8 @@
 {% extends "base.html" %}
-{% from "_components.html" import tab_bar %}
 
 {% block content %}
 
 <div class="section-title">Model Portfolio</div>
-
-<div x-data="{ tab: 'holdings', loaded: { holdings: true } }" x-cloak>
-
-{{ tab_bar([
-    ('holdings',   'Holdings'),
-    ('allocation', 'Allocation'),
-    ('analytics',  'Analytics'),
-]) }}
-
-{# ────────── ANALYTICS PANEL ────────── #}
-<div x-show="tab === 'analytics'" x-cloak>
 
 <!-- Analytics Summary -->
 {% if analytics %}
@@ -61,12 +49,6 @@
 </div>
 {% endif %}
 
-
-</div>{# / analytics panel #}
-
-{# ────────── ALLOCATION PANEL ────────── #}
-<div x-show="tab === 'allocation'" x-cloak>
-
 <!-- Allocation Donut + Tier Weights -->
 <div style="display: grid; grid-template-columns: 250px 1fr; gap: 16px; margin-bottom: 20px;">
     <div class="card" style="display: flex; flex-direction: column; align-items: center; padding: 20px;">
@@ -96,12 +78,6 @@
         {% endfor %}
     </div>
 </div>
-
-
-</div>{# / allocation panel #}
-
-{# ────────── HOLDINGS PANEL ────────── #}
-<div x-show="tab === 'holdings'" x-cloak>
 
 <!-- Model Portfolio Tables -->
 {% for tier_name, stocks in [("LARGE", portfolio.large), ("MID", portfolio.mid), ("SMALL", portfolio.small)] %}
@@ -147,11 +123,6 @@
 </div>
 {% endif %}
 {% endfor %}
-
-
-</div>{# / holdings panel #}
-
-</div>{# / tabs root #}
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
 <script>
