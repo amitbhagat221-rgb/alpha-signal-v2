@@ -280,7 +280,11 @@ def _compute_scores(stocks, qi, bs, cf):
     # Compute composite
     df = _compute_composite(df)
 
-    # Select output columns (drop internal cols)
+    # Financials route through the financial sub-model (CLAUDE.md). The
+    # accrual ratios are already NaN for them; drop the partial composite
+    # too, otherwise EPS-CV + beat-rate alone would still produce a signal.
+    df.loc[df["sid"].isin(financial_sids), "accruals_signal"] = None
+
     out_cols = ["sid", "cf_accruals_ratio", "bs_accruals_ratio",
                 "earnings_persistence", "accruals_signal"]
     return df[out_cols]
