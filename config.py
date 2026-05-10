@@ -256,6 +256,12 @@ PIPELINE_STEPS = [
      "table": "roic_scores",       "source": "fundamentals_screener (Screener Premium)",
      "data_freq": "annual",        "frequency": "daily"},
 
+    # FCF Yield — second F-track factor. Same data source, same gating —
+    # not in scoring weights yet.
+    {"name": "signal_fcf_yield",   "module": "signals.fcf_yield",   "function": "compute",  "critical": False,
+     "table": "fcf_yield_scores",  "source": "fundamentals_screener (Screener Premium) + stocks.market_cap_cr",
+     "data_freq": "annual",        "frequency": "daily"},
+
     {"name": "signal_accruals",    "module": "signals.accruals",    "function": "compute",  "critical": False,
      "table": "accruals_scores",   "source": "quarterly_income + annual_balance_sheet + annual_cash_flow",
      "data_freq": "quarterly",     "frequency": "daily"},

@@ -620,3 +620,18 @@ CREATE TABLE IF NOT EXISTS roic_scores (
 );
 
 CREATE INDEX IF NOT EXISTS idx_roic_date ON roic_scores(snapshot_date);
+
+-- FCF Yield — second F-track factor.
+-- FCF = OCF − Capex; Capex ≈ Δ(Net Block + CWIP) + Depreciation (cf. roic.py
+-- comment for derivation). Yield = 3-yr median FCF / current market cap.
+CREATE TABLE IF NOT EXISTS fcf_yield_scores (
+    sid             TEXT NOT NULL REFERENCES stocks(sid),
+    snapshot_date   TEXT NOT NULL,
+    period_end      TEXT,
+    fcf             REAL,                         -- 3-yr median FCF
+    market_cap_cr   REAL,
+    fcf_yield       REAL,                         -- FCF / Market Cap
+    PRIMARY KEY (sid, snapshot_date)
+);
+
+CREATE INDEX IF NOT EXISTS idx_fcfy_date ON fcf_yield_scores(snapshot_date);
