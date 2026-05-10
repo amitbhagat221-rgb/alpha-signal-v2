@@ -173,6 +173,73 @@ def _recent_news_for_sector(sector: str, n: int = 10) -> str:
     )
 
 
+def _extract_json_object(text: str):
+    """Find the first balanced top-level JSON object in `text` and parse it.
+
+    Handles all the ways Claude can wrap JSON despite being told not to:
+      - "```json\\n{...}\\n```" fenced blocks
+      - "Here is the JSON:\\n\\n{...}" preamble + raw JSON
+      - "...preamble...\\n\\n```json\\n{...}\\n```\\n...trailing..." mixed
+      - Raw JSON-only output (the happy path)
+
+    Returns the parsed dict, or None if nothing parses.
+    """
+    # 1. Try parsing the whole text as JSON (happy path)
+    stripped = text.strip()
+    if stripped.startswith("{"):
+        try:
+            return json.loads(stripped)
+        except json.JSONDecodeError:
+            pass  # fall through to bracket-walk
+
+    # 2. Try extracting from a ```json ... ``` (or plain ```) fence anywhere
+    import re
+    fence_match = re.search(r"```(?:json)?\s*\n?(\{.*?\})\s*\n?```", text, re.DOTALL)
+    if fence_match:
+        try:
+            return json.loads(fence_match.group(1))
+        except json.JSONDecodeError:
+            pass
+
+    # 3. Bracket-walk: find first '{' and walk forward tracking string-escape
+    #    state and brace depth to identify the matching close. Tolerates
+    #    preamble text before and trailing text after.
+    in_string = False
+    escape = False
+    depth = 0
+    start = -1
+    for i, ch in enumerate(text):
+        if start < 0:
+            if ch == "{":
+                start = i
+                depth = 1
+            continue
+        if escape:
+            escape = False
+            continue
+        if ch == "\\" and in_string:
+            escape = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                candidate = text[start:i + 1]
+                try:
+                    return json.loads(candidate)
+                except json.JSONDecodeError:
+                    # keep walking — there might be a later, valid object
+                    start = -1
+                    continue
+    return None
+
+
 def _validate_payload(payload: dict, sector: str) -> list:
     """Return a list of validation errors. Empty list = valid."""
     errors = []
@@ -240,18 +307,11 @@ def fetch_one(client, sector: str, dry_run: bool = False) -> dict:
     text_parts = [b.text for b in resp.content if getattr(b, "type", None) == "text"]
     text = (text_parts[-1] if text_parts else "").strip()
 
-    # Strip markdown fences if model wrapped them despite the rule
-    if text.startswith("```"):
-        text = text.strip("`")
-        if text.lstrip().startswith("json"):
-            text = text.lstrip()[4:].lstrip()
-
-    try:
-        payload = json.loads(text)
-    except json.JSONDecodeError as e:
+    payload = _extract_json_object(text)
+    if payload is None:
         raise RuntimeError(
-            f"Claude returned invalid JSON for {sector}: {e}\n"
-            f"First 500 chars:\n{text[:500]}"
+            f"Claude returned no parseable JSON for {sector}.\n"
+            f"First 600 chars:\n{text[:600]}"
         )
 
     errors = _validate_payload(payload, sector)
