@@ -1,10 +1,23 @@
 ---
 Status: active
 Created: 2026-05-03
-Last updated: 2026-05-09
+Last updated: 2026-05-10
 Owner: Amit Bhagat
-Implementation: A1 (Screener Premium scraper) — thin slice landed 2026-05-09 in sources/screener_pull.py + tables fundamentals_screener, screener_pull_errors. Verified end-to-end on RELI (419 rows: 10 annual + 10 quarterly periods × 36 line items). Auth via password+cookie cache. Universe scale-up pending. A2/A3/A4: not started.
-Related ADRs: 0009-factor-track-parallel-to-d-track.md
+Implementation:
+  A1 (Screener Premium xlsx scraper): universe-complete on 2026-05-10.
+    2,119 / 2,448 stocks pulled, 681,256 rows in fundamentals_screener,
+    329 fetch failures (almost all SMALL — delisted/newly-listed/templates).
+    sources/screener_pull.py.
+  A2 (Screener schedules JSON scraper): module landed 2026-05-10
+    (sources/screener_schedules.py, commit 6bd5a38). Smoke-tested on RELI
+    (276 rows / 23 new line items incl. Trade Payables, ST/LT Borrowings,
+    Plant Machinery). Universe run kicked off 2026-05-10 12:17 UTC, ETA ~4 hrs.
+  A3 (NSE F&O OI), A4 (Kite + transcripts): not started.
+  Phase B factors shipped today: signals/roic.py (1,501 stocks scored),
+    signals/fcf_yield.py (1,195 stocks scored). Both wired into pipeline.py
+    via signal_roic / signal_fcf_yield steps. Neither in scoring weights yet
+    (no validated t-stat — needs N months of forward returns).
+Related ADRs: 0009-factor-track-parallel-to-d-track.md, 0011-long-format-for-new-fundamentals-tables.md
 ---
 
 # 0005 — Double Factor Count to 100 + Factor Model Upgrade
