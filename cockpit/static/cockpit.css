@@ -1129,3 +1129,214 @@ table tbody tr:hover {
     border-radius: 3px;
     color: var(--text-primary);
 }
+
+
+/* ─────────────────────────────────────────────────────────────
+   Mind-map ─ horizontal radiating tree with rounded pill nodes
+   and curved connectors. Used on /command for Architecture
+   and Factor groups. Pure CSS; SVG curves drawn via pseudo-elements.
+   Reads as: parent on the left, children stacked vertically to the
+   right, each connected by a smooth curved branch.
+   ───────────────────────────────────────────────────────────── */
+
+.mindmap {
+    --mm-color: var(--accent, #8b5cf6);
+    --mm-color-soft: rgba(139,92,246,0.18);
+    --mm-stroke: 1.5px;
+    --mm-radius: 14px;
+    --mm-h-gap: 36px;     /* horizontal space for the curve */
+    --mm-v-gap: 8px;      /* vertical space between sibling nodes */
+
+    display: flex;
+    flex-direction: row;
+    align-items: stretch;
+    font-size: 13px;
+    margin: 16px 0;
+}
+
+/* Parent node — rounded pill with optional icon, anchored left */
+.mm-node {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 18px;
+    background: var(--bg-card);
+    border: 1.5px solid var(--mm-color);
+    border-radius: 999px;
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.4px;
+    color: var(--text-primary);
+    white-space: nowrap;
+    align-self: center;
+    box-shadow: 0 0 0 4px var(--mm-color-soft) inset, 0 2px 12px rgba(0,0,0,0.18);
+}
+.mm-node .mm-icon {
+    width: 22px; height: 22px;
+    display: inline-flex; align-items: center; justify-content: center;
+    border-radius: 50%;
+    background: var(--mm-color); color: white;
+    font-weight: 800; font-size: 11px;
+}
+.mm-node .mm-meta {
+    margin-left: 10px;
+    font-size: 10px; font-weight: 500;
+    color: var(--text-muted);
+    letter-spacing: 0;
+    text-transform: none;
+}
+
+/* Children container — column layout, separated by curves from parent */
+.mm-children {
+    display: flex;
+    flex-direction: column;
+    gap: var(--mm-v-gap);
+    margin-left: var(--mm-h-gap);
+    position: relative;
+    flex: 1;
+}
+
+/* Each child = a row containing the curve stub + the leaf pill */
+.mm-leaf {
+    position: relative;
+    display: flex;
+    align-items: center;
+    padding: 8px 14px 8px 0;
+}
+/* Leaf node ─ smaller pill, less weight */
+.mm-leaf-node {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 6px 14px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    font-size: 12px;
+    color: var(--text-primary);
+    transition: border-color 0.15s, transform 0.15s;
+}
+.mm-leaf-node:hover { border-color: var(--mm-color); transform: translateX(2px); }
+.mm-leaf-node code {
+    font-size: 11px; padding: 1px 6px;
+    background: rgba(255,255,255,0.04); border-radius: 3px;
+}
+.mm-leaf-node .mm-leaf-meta {
+    color: var(--text-muted);
+    font-size: 11px;
+    margin-left: 4px;
+}
+
+/* Curved connector — drawn via ::before on each .mm-leaf.
+   The curve goes from mm-h-gap/2 above-or-below the leaf's center,
+   sweeps left into the parent's right edge.
+   Constructed as a quarter-circle border-radius corner of a 1.5px line. */
+.mm-leaf::before {
+    content: '';
+    position: absolute;
+    left: calc(-1 * var(--mm-h-gap));
+    top: 50%;
+    width: var(--mm-h-gap);
+    height: 50%;
+    border-bottom: var(--mm-stroke) solid var(--mm-color);
+    border-left: var(--mm-stroke) solid var(--mm-color);
+    border-bottom-left-radius: var(--mm-radius);
+    transform: translateY(-50%);
+}
+/* For leaves above the parent's center: flip the curve vertically */
+.mm-leaf.mm-above::before {
+    top: 0;
+    height: 50%;
+    border-bottom: none;
+    border-top: var(--mm-stroke) solid var(--mm-color);
+    border-top-left-radius: var(--mm-radius);
+    border-bottom-left-radius: 0;
+    transform: translateY(50%);
+}
+
+/* The vertical trunk between parent and the curve splay points */
+.mm-children::before {
+    content: '';
+    position: absolute;
+    left: calc(-1 * var(--mm-h-gap));
+    top: 50%;
+    bottom: auto;
+    width: var(--mm-stroke);
+    height: 0;            /* extended via inline style if needed; default covers 100% */
+    background: var(--mm-color);
+}
+/* Single-child case: no trunk needed, the leaf curve handles it */
+
+/* Tone variants ─ apply colour per stage on /command */
+.mindmap.mm-data    { --mm-color: #4d8eff; --mm-color-soft: rgba(77,142,255,0.16); }
+.mindmap.mm-signals { --mm-color: #f1c40f; --mm-color-soft: rgba(241,196,15,0.16); }
+.mindmap.mm-model   { --mm-color: #2ecc71; --mm-color-soft: rgba(46,204,113,0.16); }
+.mindmap.mm-picks   { --mm-color: #e74c3c; --mm-color-soft: rgba(231,76,60,0.16); }
+
+/* Mobile fallback — collapse mind-map to vertical stack with simple
+   left border instead of trying to do horizontal radiating layout */
+@media (max-width: 720px) {
+    .mindmap { flex-direction: column; gap: 8px; }
+    .mm-node { align-self: flex-start; }
+    .mm-children { margin-left: 16px; border-left: 2px solid var(--mm-color); padding-left: 12px; }
+    .mm-children::before { display: none; }
+    .mm-leaf::before { display: none; }
+    .mm-leaf { padding: 4px 0; }
+}
+
+/* Factor card grid — replaces the v-accordion list on /command Factors,
+   making each group a coloured card with factors as small chips inside.
+   Reads as a brain-map of categories rather than a dense bullet list. */
+.factor-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 14px;
+    margin-top: 14px;
+}
+.factor-grid-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 14px 16px;
+    transition: border-color 0.15s, transform 0.15s, box-shadow 0.15s;
+}
+.factor-grid-card:hover {
+    border-color: var(--accent);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 18px rgba(77,142,255,0.10);
+}
+.factor-grid-card .fg-head {
+    display: flex; justify-content: space-between; align-items: baseline;
+    margin-bottom: 10px;
+    padding-bottom: 8px; border-bottom: 1px solid var(--border);
+}
+.factor-grid-card .fg-name {
+    font-size: 13px; font-weight: 700; letter-spacing: 0.3px;
+    color: var(--text-primary);
+}
+.factor-grid-card .fg-meta {
+    font-size: 10px; color: var(--text-muted);
+    font-weight: 400;
+}
+.factor-grid-card .fg-chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 5px 10px; margin: 3px 4px 3px 0;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 11px;
+    color: var(--text-secondary);
+    transition: border-color 0.12s;
+}
+.factor-grid-card .fg-chip:hover { border-color: var(--accent); }
+.factor-grid-card .fg-chip.in-model {
+    border-color: rgba(46,204,113,0.40);
+    background: rgba(46,204,113,0.06);
+    color: var(--text-primary);
+}
+.factor-grid-card .fg-chip .fg-t {
+    font-size: 10px; font-weight: 700;
+    font-variant-numeric: tabular-nums;
+}
+.factor-grid-card .fg-chip.t-strong .fg-t  { color: #2ecc71; }
+.factor-grid-card .fg-chip.t-medium .fg-t  { color: #4d8eff; }
+.factor-grid-card .fg-chip.t-weak   .fg-t  { color: var(--text-muted); }
+

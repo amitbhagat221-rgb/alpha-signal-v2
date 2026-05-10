@@ -154,17 +154,22 @@
             </div>
         </summary>
         <div class="arch-body">
-            <div class="v-accordion">
-            {% for layer in architecture.data %}
-            <details>
-                <summary>{{ layer.name }} <span class="v-meta">{{ layer.summary }}</span></summary>
-                <div class="v-body">
-                    {% for tbl, desc in layer['items'] %}
-                    <div><code>{{ tbl }}</code> — {{ desc }}</div>
+            <div class="mindmap mm-data">
+                <div class="mm-node">
+                    <span class="mm-icon">D</span>
+                    Data Layer
+                    <span class="mm-meta">{{ architecture.data | length }} categories</span>
+                </div>
+                <div class="mm-children">
+                    {% for layer in architecture.data %}
+                    <div class="mm-leaf">
+                        <span class="mm-leaf-node">
+                            <strong>{{ layer.name }}</strong>
+                            <span class="mm-leaf-meta">— {{ layer.summary }}</span>
+                        </span>
+                    </div>
                     {% endfor %}
                 </div>
-            </details>
-            {% endfor %}
             </div>
         </div>
     </details>
@@ -187,23 +192,22 @@
             </div>
         </summary>
         <div class="arch-body">
-            <div class="v-accordion">
-            {% for grp in architecture.signals %}
-            <details>
-                <summary>{{ grp.name }}
-                    <span class="v-meta">{{ grp.n_total }} factor{{ 's' if grp.n_total != 1 else '' }} · {{ grp.n_model }} in model</span>
-                </summary>
-                <div class="v-body">
-                    {% for label, t, status in grp['items'] %}
-                    <div>
-                        <code>{{ label }}</code>
-                        <span style="color: var(--text-muted); margin-left: 8px;">|t| = {{ t }}</span>
-                        <span class="cc-pill {{ 'ok' if status == 'model' else 'muted' }}" style="margin-left: 8px;">{{ status }}</span>
+            <div class="mindmap mm-signals">
+                <div class="mm-node">
+                    <span class="mm-icon">S</span>
+                    Signals
+                    <span class="mm-meta">{{ architecture.signals | length }} categories</span>
+                </div>
+                <div class="mm-children">
+                    {% for grp in architecture.signals %}
+                    <div class="mm-leaf">
+                        <span class="mm-leaf-node">
+                            <strong>{{ grp.name }}</strong>
+                            <span class="mm-leaf-meta">— {{ grp.n_total }} factor{{ 's' if grp.n_total != 1 else '' }} · {{ grp.n_model }} in model</span>
+                        </span>
                     </div>
                     {% endfor %}
                 </div>
-            </details>
-            {% endfor %}
             </div>
         </div>
     </details>
@@ -226,17 +230,22 @@
             </div>
         </summary>
         <div class="arch-body">
-            <div class="v-accordion">
-            {% for layer in architecture.model %}
-            <details>
-                <summary>{{ layer.name }} <span class="v-meta">{{ layer.summary }}</span></summary>
-                <div class="v-body">
-                    {% for label, desc in layer['items'] %}
-                    <div><code>{{ label }}</code> — {{ desc }}</div>
+            <div class="mindmap mm-model">
+                <div class="mm-node">
+                    <span class="mm-icon">M</span>
+                    Model
+                    <span class="mm-meta">{{ architecture.model | length }} components</span>
+                </div>
+                <div class="mm-children">
+                    {% for layer in architecture.model %}
+                    <div class="mm-leaf">
+                        <span class="mm-leaf-node">
+                            <strong>{{ layer.name }}</strong>
+                            <span class="mm-leaf-meta">— {{ layer.summary }}</span>
+                        </span>
+                    </div>
                     {% endfor %}
                 </div>
-            </details>
-            {% endfor %}
             </div>
         </div>
     </details>
@@ -259,17 +268,22 @@
             </div>
         </summary>
         <div class="arch-body">
-            <div class="v-accordion">
-            {% for layer in architecture.picks %}
-            <details>
-                <summary>{{ layer.name }} <span class="v-meta">{{ layer.summary }}</span></summary>
-                <div class="v-body">
-                    {% for label, desc in layer['items'] %}
-                    <div><code>{{ label }}</code> — {{ desc }}</div>
+            <div class="mindmap mm-picks">
+                <div class="mm-node">
+                    <span class="mm-icon">P</span>
+                    Picks
+                    <span class="mm-meta">{{ architecture.picks | length }} channels</span>
+                </div>
+                <div class="mm-children">
+                    {% for layer in architecture.picks %}
+                    <div class="mm-leaf">
+                        <span class="mm-leaf-node">
+                            <strong>{{ layer.name }}</strong>
+                            <span class="mm-leaf-meta">— {{ layer.summary }}</span>
+                        </span>
+                    </div>
                     {% endfor %}
                 </div>
-            </details>
-            {% endfor %}
             </div>
         </div>
     </details>
@@ -331,61 +345,33 @@
 {% set factor_groups = {} %}
 {% for f in factors %}{% if factor_groups.update({f.group: factor_groups.get(f.group, []) + [f]}) %}{% endif %}{% endfor %}
 
-<div class="v-accordion">
+<div class="factor-grid">
 {% for group_name, group_factors in factor_groups.items() %}
-<details>
-    <summary>{{ group_name }}
-        <span class="v-meta">
+<div class="factor-grid-card">
+    <div class="fg-head">
+        <span class="fg-name">{{ group_name }}</span>
+        <span class="fg-meta">
             {{ group_factors | length }} factor{{ 's' if group_factors | length != 1 else '' }} ·
             {{ group_factors | selectattr('in_production') | list | length }} in model
         </span>
-    </summary>
-    <div class="v-body">
-        <table class="cc-table">
-            <thead>
-            <tr>
-                <th>Factor</th>
-                <th class="num">|t|</th>
-                <th class="num">n</th>
-                <th>Source</th>
-                <th>Bench</th>
-            </tr>
-            </thead>
-            <tbody>
-            {% for f in group_factors %}
-            <tr x-show="filter === 'all'
-                        || (filter === 'model'   && {{ 'true' if f.in_production else 'false' }})
-                        || (filter === 'library' && {{ 'false' if f.in_production else 'true' }})">
-                <td>
-                    <strong>{{ f.name }}</strong>
-                    {% if f.track == 'f-track' %}<span class="cc-tag" style="background: rgba(77,142,255,0.15); color: #4d8eff;">F</span>{% endif %}
-                    {% if f.status_reason %}
-                    <div style="font-size: 10px; color: var(--text-muted); margin-top: 2px;">{{ f.status_reason }}</div>
-                    {% endif %}
-                </td>
-                <td class="num">
-                    {%- if f.t_stat is not none %}
-                        {%- if f.t_stat | abs >= 2.5 %}<strong style="color: #2ecc71;">{{ '%.2f' | format(f.t_stat) }}</strong>
-                        {%- elif f.t_stat | abs >= 1.5 %}<strong style="color: #4d8eff;">{{ '%.2f' | format(f.t_stat) }}</strong>
-                        {%- else %}<span style="color: var(--text-muted);">{{ '%.2f' | format(f.t_stat) }}</span>
-                        {%- endif %}
-                    {%- else %}—{% endif %}
-                </td>
-                <td class="num">{{ f.n_periods or '—' }}</td>
-                <td><span style="font-size: 10px; color: var(--text-muted);">{{ f.ic_source }}</span></td>
-                <td>
-                    {% if f.in_production %}
-                        <span class="cc-pill ok">model</span>
-                    {% else %}
-                        <span class="cc-pill muted">library</span>
-                    {% endif %}
-                </td>
-            </tr>
-            {% endfor %}
-            </tbody>
-        </table>
     </div>
-</details>
+    <div>
+    {% for f in group_factors %}
+        {% set t_class = 't-strong' if (f.t_stat is not none and f.t_stat | abs >= 2.5)
+                         else ('t-medium' if (f.t_stat is not none and f.t_stat | abs >= 1.5)
+                         else 't-weak') %}
+        <span class="fg-chip {{ 'in-model' if f.in_production else '' }} {{ t_class }}"
+              x-show="filter === 'all'
+                      || (filter === 'model'   && {{ 'true' if f.in_production else 'false' }})
+                      || (filter === 'library' && {{ 'false' if f.in_production else 'true' }})"
+              title="{{ f.name }}{% if f.status_reason %} — {{ f.status_reason }}{% endif %}">
+            {{ f.name }}
+            {% if f.track == 'f-track' %}<span class="cc-tag" style="margin-left:0; background: rgba(77,142,255,0.20); color: #4d8eff; font-size: 9px;">F</span>{% endif %}
+            <span class="fg-t">{% if f.t_stat is not none %}{{ '%.2f' | format(f.t_stat) }}{% else %}—{% endif %}</span>
+        </span>
+    {% endfor %}
+    </div>
+</div>
 {% endfor %}
 </div>
 

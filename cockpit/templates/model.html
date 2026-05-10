@@ -15,10 +15,11 @@
 <div x-data="{ tab: 'regime', loaded: { regime: true } }" x-cloak>
 
 {{ tab_bar([
-    ('regime',    'Regime'),
-    ('weights',   'Weights'),
-    ('gate',      'Quality Gate'),
-    ('backtests', 'Backtests'),
+    ('regime',     'Regime'),
+    ('weights',    'Weights'),
+    ('gate',       'Quality Gate'),
+    ('backtests',  'Backtests'),
+    ('validation', 'Validation'),
 ]) }}
 
 {# ────────── REGIME TAB (active header) ────────── #}
@@ -272,6 +273,11 @@
 </div>
 {% endif %}
 
+</div>{# / backtests panel #}
+
+{# ────────── VALIDATION TAB ────────── #}
+<div x-show="tab === 'validation'" x-cloak>
+
 {# ── Backtest validation (detailed t-stat table) ── #}
 <div class="card" style="margin-bottom: 20px;">
     <div class="section-title">Backtest — Signal Validation</div>
@@ -354,7 +360,7 @@
 </div>
 
 
-</div>{# / backtests panel #}
+</div>{# / validation panel #}
 
 {# ────────── QUALITY GATE TAB ────────── #}
 <div x-show="tab === 'gate'" x-cloak>
