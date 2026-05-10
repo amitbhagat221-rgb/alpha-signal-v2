@@ -38,6 +38,16 @@ class SilentUndefined(Undefined):
 templates = Jinja2Templates(directory=COCKPIT_DIR / "templates")
 templates.env.undefined = SilentUndefined
 
+# Cache-busting for static assets — appends ?v=<mtime> so browser caches
+# invalidate automatically whenever a static file is edited.
+def _asset_version(filename: str) -> str:
+    p = COCKPIT_DIR / "static" / filename
+    try:
+        return str(int(p.stat().st_mtime))
+    except OSError:
+        return "0"
+templates.env.globals["asset_version"] = _asset_version
+
 
 # ── Page Routes ──
 
