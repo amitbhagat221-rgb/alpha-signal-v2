@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_components.html" import tab_bar %}
 
 {% block content %}
 
@@ -10,6 +11,18 @@
     The within-tier scoring model: signal weights per cap tier, the C13b validation that picked them, the
     VIX regime that scales the per-tier allocation, and the quality + portfolio guardrails on top.
 </div>
+
+<div x-data="{ tab: 'regime', loaded: { regime: true } }" x-cloak>
+
+{{ tab_bar([
+    ('regime',    'Regime'),
+    ('weights',   'Weights'),
+    ('gate',      'Quality Gate'),
+    ('backtests', 'Backtests'),
+]) }}
+
+{# ────────── REGIME TAB (active header) ────────── #}
+<div x-show="tab === 'regime'" x-cloak>
 
 {# ── Active regime header ── #}
 {% if current_regime %}
@@ -36,6 +49,11 @@
     </div>
 </div>
 {% endif %}
+
+</div>{# / regime panel — active header #}
+
+{# ────────── WEIGHTS TAB ────────── #}
+<div x-show="tab === 'weights'" x-cloak>
 
 {# ── Per-tier signal weights ── #}
 <div class="card" style="margin-bottom: 20px;">
@@ -65,6 +83,12 @@
     {% endfor %}
     </div>
 </div>
+
+
+</div>{# / weights panel #}
+
+{# ────────── REGIME TAB (allocation table — second regime panel) ────────── #}
+<div x-show="tab === 'regime'" x-cloak>
 
 {# ── VIX regime allocation ── #}
 <div class="card" style="margin-bottom: 20px;">
@@ -100,6 +124,12 @@
         </tbody>
     </table>
 </div>
+
+
+</div>{# / regime panel — allocation table #}
+
+{# ────────── BACKTESTS TAB ────────── #}
+<div x-show="tab === 'backtests'" x-cloak>
 
 {# ── Backtest Roster: what's IN the backtest, what's NOT, and why ── #}
 {% if backtest_roster %}
@@ -323,6 +353,12 @@
     {% endif %}
 </div>
 
+
+</div>{# / backtests panel #}
+
+{# ────────── QUALITY GATE TAB ────────── #}
+<div x-show="tab === 'gate'" x-cloak>
+
 {# ── Quality gate + portfolio rules side-by-side ── #}
 <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 16px;">
     <div class="card">
@@ -384,5 +420,9 @@
         </table>
     </div>
 </div>
+
+</div>{# / gate panel #}
+
+</div>{# / tabs root #}
 
 {% endblock %}

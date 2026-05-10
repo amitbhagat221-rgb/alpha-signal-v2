@@ -348,6 +348,12 @@ body {
     padding-bottom: 4px;
     border-bottom: 1px solid var(--border);
     scrollbar-width: thin;
+    /* Sticky so the tab bar stays visible on long-scroll pages */
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    background: var(--bg-primary);
+    backdrop-filter: blur(6px);
 }
 
 .tab-button {

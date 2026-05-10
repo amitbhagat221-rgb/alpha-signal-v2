@@ -12,10 +12,21 @@
    Each panel below the tab-bar should be `<div x-show="tab === '<key>'" x-cloak>...</div>`.
 #}
 {% macro tab_bar(tabs) -%}
-<div class="tab-bar">
+{# URL-hash sync: on init, read #hash and adopt as active tab if it matches a
+   known key. On click, push the hash so the browser's back/forward + sharing
+   work. Falls back gracefully if hash is empty or unknown. #}
+{% set valid_keys = tabs | map(attribute=0) | list %}
+<div class="tab-bar"
+     x-init="(() => {
+         const h = (location.hash || '').replace(/^#/, '');
+         if (h && {{ valid_keys | tojson }}.includes(h)) {
+             tab = h;
+             loaded[h] = true;
+         }
+     })()">
     {% for key, label in tabs %}
     <button class="tab-button" :class="{ active: tab === '{{ key }}' }"
-            @click="tab = '{{ key }}'; loaded['{{ key }}'] = true">{{ label }}</button>
+            @click="tab = '{{ key }}'; loaded['{{ key }}'] = true; history.replaceState(null, '', '#{{ key }}')">{{ label }}</button>
     {% endfor %}
 </div>
 {%- endmacro %}
