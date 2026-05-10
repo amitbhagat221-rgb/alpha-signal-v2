@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_components.html" import tab_bar %}
 
 {% block content %}
 
@@ -15,6 +16,8 @@
    inline truncates the attribute and breaks Alpine init. #}
 <script type="application/json" id="sql-initial-query">{{ (initial_query | tojson) if initial_query else 'null' }}</script>
 <div x-data="{
+    tab: 'console',
+    loaded: { console: true },
     query: 'SELECT cap_tier, COUNT(*) as n FROM stocks GROUP BY cap_tier',
     loading: false,
     error: null,
@@ -105,6 +108,14 @@
     loadSchema();
     if (_initial) { runQuery(); }
 ">
+
+    {{ tab_bar([
+        ('console', 'Console'),
+        ('schema',  'Schema'),
+    ]) }}
+
+    {# ────────── CONSOLE TAB ────────── #}
+    <div x-show="tab === 'console'" x-cloak>
 
     <!-- Query box -->
     <div class="card" style="margin-bottom: 20px;">
@@ -207,6 +218,11 @@
         </div>
     </div>
 
+    </div>{# / console panel #}
+
+    {# ────────── SCHEMA TAB ────────── #}
+    <div x-show="tab === 'schema'" x-cloak>
+
     <!-- Schema browser -->
     <div class="card">
         <div class="section-title">Schema</div>
@@ -231,6 +247,8 @@
             </template>
         </div>
     </div>
+
+    </div>{# / schema panel #}
 
 </div>
 
