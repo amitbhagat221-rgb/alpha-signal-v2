@@ -17,7 +17,8 @@
 <div x-data="{ tab: 'health', loaded: { health: true } }" x-cloak>
 
 {{ tab_bar([
-    ('health',   'Health'),
+    ('health',   'Data Health'),
+    ('factors',  'Factor Health'),
     ('pipeline', 'Pipeline Log'),
     ('inventory','Inventory'),
 ]) }}
@@ -202,6 +203,170 @@
 
 
 </div>{# / health panel #}
+
+{# ────────── FACTOR HEALTH TAB ────────── #}
+<div x-show="tab === 'factors'" x-cloak>
+
+{% if factor_health %}
+{% set fs = factor_health.summary %}
+
+<!-- Summary banner -->
+<div class="card" style="margin-bottom: 20px; border-left: 4px solid var(--accent);">
+    <div style="display: flex; flex-wrap: wrap; gap: 18px; align-items: flex-start;">
+        <div style="flex: 1 1 320px;">
+            <div style="font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px;">Factor Library Health</div>
+            <div style="font-size: 16px; font-weight: 700; color: var(--text-primary); margin-bottom: 4px;">
+                {{ fs.total }} factors registered · avg health <span class="mono" style="color: var(--accent);">{{ fs.avg_overall }}</span>/100
+            </div>
+            <div style="font-size: 12px; color: var(--text-secondary);">
+                <span style="color: #2ecc71;">{{ fs.in_model }} in model</span> ·
+                <span style="color: #4d8eff;">{{ fs.in_library }} in library</span> ·
+                <span style="color: var(--text-muted);">{{ fs.not_built }} not built</span>
+                · {{ fs.with_t_stat }} with t-stat · {{ fs.pit_ready }} PIT-ready
+            </div>
+        </div>
+        <div style="display: flex; gap: 12px; flex-wrap: wrap;">
+            {% for letter in ['A+', 'A', 'B', 'C', 'D', 'F'] %}
+                {% set n = fs.grade_dist.get(letter, 0) %}
+                <div style="text-align: center; min-width: 38px;">
+                    <div style="font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">{{ letter }}</div>
+                    <div class="mono" style="font-size: 18px; font-weight: 700;
+                        {% if letter in ['A+', 'A'] %}color: #2ecc71;
+                        {% elif letter == 'B' %}color: #4d8eff;
+                        {% elif letter == 'C' %}color: #f1c40f;
+                        {% elif letter == 'D' %}color: #e67e22;
+                        {% else %}color: #e74c3c;{% endif %}">{{ n }}</div>
+                </div>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+
+<!-- Per-factor table -->
+<div class="card">
+    <div class="section-title">Per-Factor Health</div>
+    <div class="section-desc">
+        Health = 35% coverage · 15% freshness · 30% backtest |t| · 10% PIT-ready · 10% in-model.
+        Click column headers to sort. Hover an issue chip to see details.
+    </div>
+    <table id="factor-health-table" style="width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 12px;">
+        <thead>
+        <tr style="color: var(--text-muted); text-align: left; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px;">
+            <th data-key="name"      data-sort="string" style="padding: 8px 10px; border-bottom: 2px solid var(--border-accent); cursor: pointer;">Factor</th>
+            <th data-key="group"     data-sort="string" style="padding: 8px 10px; border-bottom: 2px solid var(--border-accent); cursor: pointer;">Group</th>
+            <th data-key="track"     data-sort="string" style="padding: 8px 10px; border-bottom: 2px solid var(--border-accent); cursor: pointer;">Track</th>
+            <th data-key="coverage_pct" data-sort="number" style="padding: 8px 10px; text-align: right; border-bottom: 2px solid var(--border-accent); cursor: pointer;">Coverage</th>
+            <th data-key="freshness_days" data-sort="number" style="padding: 8px 10px; text-align: right; border-bottom: 2px solid var(--border-accent); cursor: pointer;">Stale (d)</th>
+            <th data-key="t_stat"    data-sort="number" style="padding: 8px 10px; text-align: right; border-bottom: 2px solid var(--border-accent); cursor: pointer;">|t|</th>
+            <th data-key="pit_ready" data-sort="number" style="padding: 8px 10px; text-align: center; border-bottom: 2px solid var(--border-accent); cursor: pointer;">PIT</th>
+            <th data-key="in_model"  data-sort="number" style="padding: 8px 10px; text-align: center; border-bottom: 2px solid var(--border-accent); cursor: pointer;">Bench</th>
+            <th data-key="overall"   data-sort="number" style="padding: 8px 10px; text-align: right; border-bottom: 2px solid var(--border-accent); cursor: pointer;">Health</th>
+            <th style="padding: 8px 10px; border-bottom: 2px solid var(--border-accent);">Issues</th>
+        </tr>
+        </thead>
+        <tbody>
+        {% for f in factor_health.factors %}
+        <tr style="border-bottom: 1px solid var(--border);">
+            <td data-key="name" style="padding: 8px 10px;">
+                <strong>{{ f.name }}</strong>
+                {% if f.status_reason %}
+                <div style="font-size: 10px; color: var(--text-muted); margin-top: 2px;">{{ f.status_reason }}</div>
+                {% endif %}
+            </td>
+            <td data-key="group" style="padding: 8px 10px; color: var(--text-secondary);">{{ f.group }}</td>
+            <td data-key="track" style="padding: 8px 10px;">
+                {% if f.track == 'f-track' %}<span style="font-size: 10px; padding: 1px 6px; border-radius: 4px; background: rgba(77,142,255,0.15); color: #4d8eff;">F</span>
+                {% else %}<span style="font-size: 10px; color: var(--text-muted);">legacy</span>{% endif %}
+            </td>
+            <td data-key="coverage_pct" class="mono" style="padding: 8px 10px; text-align: right;
+                {% if f.coverage_pct >= 80 %}color: #2ecc71;
+                {% elif f.coverage_pct >= 40 %}color: #f1c40f;
+                {% else %}color: #e74c3c;{% endif %}">
+                {{ f.coverage_pct }}%
+                <div style="font-size: 9px; color: var(--text-muted);">{{ f.coverage_n }}/{{ f.eligible_n }}</div>
+            </td>
+            <td data-key="freshness_days" class="mono" style="padding: 8px 10px; text-align: right;">
+                {% if f.freshness_days is none %}<span style="color: var(--text-muted);">—</span>
+                {% elif f.freshness_days <= 1 %}<span style="color: #2ecc71;">{{ f.freshness_days }}</span>
+                {% elif f.freshness_days <= 7 %}<span style="color: #f1c40f;">{{ f.freshness_days }}</span>
+                {% else %}<span style="color: #e74c3c;">{{ f.freshness_days }}</span>{% endif %}
+            </td>
+            <td data-key="t_stat" class="mono" style="padding: 8px 10px; text-align: right;">
+                {% if f.t_stat is none %}<span style="color: var(--text-muted);">—</span>
+                {% else %}
+                    {% set abs_t = f.t_stat | abs %}
+                    {% if abs_t >= 2.5 %}<strong style="color: #2ecc71;">{{ '%.2f' | format(f.t_stat) }}</strong>
+                    {% elif abs_t >= 1.5 %}<strong style="color: #4d8eff;">{{ '%.2f' | format(f.t_stat) }}</strong>
+                    {% else %}<span style="color: var(--text-muted);">{{ '%.2f' | format(f.t_stat) }}</span>
+                    {% endif %}
+                {% endif %}
+                {% if f.n_periods %}<div style="font-size: 9px; color: var(--text-muted);">n={{ f.n_periods }}</div>{% endif %}
+            </td>
+            <td data-key="pit_ready" style="padding: 8px 10px; text-align: center;">
+                {% if f.pit_ready %}<span style="color: #2ecc71;">✓</span>
+                {% else %}<span style="color: var(--text-muted);">—</span>{% endif %}
+            </td>
+            <td data-key="in_model" style="padding: 8px 10px; text-align: center;">
+                {% if f.in_model %}<span style="font-size: 10px; padding: 2px 8px; border-radius: 10px; background: rgba(46,204,113,0.18); color: #2ecc71; font-weight: 700;">model</span>
+                {% else %}<span style="font-size: 10px; padding: 2px 8px; border-radius: 10px; background: rgba(140,140,140,0.15); color: #aaa;">library</span>{% endif %}
+            </td>
+            <td data-key="overall" class="mono" style="padding: 8px 10px; text-align: right; font-weight: 700;
+                color: {{ f.grade_color }};">
+                {{ f.overall }}
+                <div style="font-size: 9px;">{{ f.grade }}</div>
+            </td>
+            <td style="padding: 8px 10px;">
+                {% for issue in f.issues %}
+                <span style="font-size: 10px; padding: 1px 6px; border-radius: 3px; background: rgba(231,76,60,0.12); color: #e74c3c; margin-right: 3px;">{{ issue }}</span>
+                {% endfor %}
+                {% if not f.issues %}
+                <span style="font-size: 10px; color: var(--text-muted);">healthy</span>
+                {% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<script>
+// Tiny sort helper, scoped to the factor-health table
+(function () {
+  const t = document.getElementById('factor-health-table');
+  if (!t) return;
+  t.querySelectorAll('thead th[data-key]').forEach((th) => {
+    th.addEventListener('click', () => {
+      const k = th.dataset.key, type = th.dataset.sort || 'string';
+      const dir = t.dataset.sortKey === k && t.dataset.sortDir === 'asc' ? 'desc' : 'asc';
+      const tbody = t.tBodies[0];
+      const rows = Array.from(tbody.rows);
+      const sign = dir === 'asc' ? 1 : -1;
+      rows.sort((a, b) => {
+        const av = (a.querySelector('td[data-key="' + k + '"]').textContent || '').trim();
+        const bv = (b.querySelector('td[data-key="' + k + '"]').textContent || '').trim();
+        if (type === 'number') {
+          const an = parseFloat(av.replace(/[%,]/g, '')) || 0;
+          const bn = parseFloat(bv.replace(/[%,]/g, '')) || 0;
+          return (an - bn) * sign;
+        }
+        return av.localeCompare(bv) * sign;
+      });
+      rows.forEach(r => tbody.appendChild(r));
+      t.dataset.sortKey = k; t.dataset.sortDir = dir;
+      t.querySelectorAll('thead th').forEach(h => { h.style.color = 'var(--text-muted)'; });
+      th.style.color = 'var(--accent)';
+    });
+  });
+})();
+</script>
+
+{% else %}
+<div class="card" style="padding: 20px; color: var(--text-muted);">
+    Factor health unavailable — no factors registered or pit_ic_by_tier_v2 empty.
+</div>
+{% endif %}
+
+</div>{# / factors panel #}
 
 {# ────────── PIPELINE LOG TAB ────────── #}
 <div x-show="tab === 'pipeline'" x-cloak>

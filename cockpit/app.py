@@ -265,10 +265,13 @@ async def system(request: Request, refresh: int = 0):
         for d in DOMAIN_ORDER if d in by_domain
     ]
 
+    factor_health = api.get_factor_health()
+
     return templates.TemplateResponse(request, "system.html", {
         "page": "system", "pipeline": pipeline, "health": health,
         "summary": summary, "health_scores": health_scores,
         "inventory_groups": inventory_groups,
+        "factor_health": factor_health,
     })
 
 

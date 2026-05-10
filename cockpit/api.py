@@ -1685,6 +1685,299 @@ def get_data_health_scores(force=False):
 
 
 # ═══════════════════════════════════════════════════
+# Factor Health — sister to data-health, but per-factor
+# ═══════════════════════════════════════════════════
+
+def get_factor_health():
+    """Return one row per registered factor with health metrics + grade.
+
+    Per-factor metrics:
+      - coverage_pct   : stocks with non-null score / eligible universe
+      - freshness_days : days since last snapshot
+      - best_abs_t     : best |t-stat| across cap-tiers from pit_ic_by_tier_v2
+      - pit_ready      : factor has PIT helper + appears in daily_snapshots_pit
+      - in_model       : marked production-ready
+    Aggregated 0-100 grade with letter (A+/A/B/C/D/F).
+    """
+    from db import BACKTEST_SIGNALS
+
+    # F-track extras not in BACKTEST_SIGNALS (mirrors get_command_centre)
+    F_TRACK_EXTRAS = [
+        {"signal": "roic",                 "label": "ROIC (F-track)",                "group": "F-track / Quality",
+         "score_table": "roic_scores",     "score_col": "roic"},
+        {"signal": "fcf_yield",            "label": "FCF Yield (F-track)",           "group": "F-track / Cash",
+         "score_table": "fcf_yield_scores","score_col": "fcf_yield"},
+        {"signal": "revenue_cv_5y",        "label": "Revenue Volatility 5y CV",      "group": "F-track / Quality",
+         "score_table": "revenue_cv_scores","score_col": "revenue_cv_5y"},
+        {"signal": "relative_turnover",    "label": "Inventory Turnover (sector-relative)","group": "F-track / Working Capital",
+         "score_table": "inventory_turnover_scores","score_col": "relative_turnover"},
+        {"signal": "relative_growth",      "label": "Sector-Relative Sales Growth",  "group": "F-track / Growth",
+         "score_table": "sales_growth_relative_scores","score_col": "relative_growth"},
+        {"signal": "share_momentum",       "label": "Market-Share Momentum",         "group": "F-track / Sector",
+         "score_table": "share_momentum_scores","score_col": "share_momentum"},
+    ]
+
+    PROMOTION_T = 1.5
+
+    # Universe baselines for coverage normalisation
+    with get_db() as conn:
+        uni_total = conn.execute(
+            "SELECT COUNT(*) FROM stocks WHERE ticker IS NOT NULL"
+        ).fetchone()[0]
+        uni_excl_fin = conn.execute(
+            "SELECT COUNT(*) FROM stocks WHERE ticker IS NOT NULL AND sector != 'Financials'"
+        ).fetchone()[0]
+
+        # Best |t| per signal (preferring v2_recompute over v1_archive when both exist)
+        ic = read_sql(
+            "SELECT signal, source, t_stat, n_periods FROM pit_ic_by_tier_v2"
+        )
+        if ic.empty:
+            best_by_signal = {}
+        else:
+            ic = ic.assign(
+                abst=lambda d: d["t_stat"].abs(),
+                _src=lambda d: d["source"].map({"v2_recompute": 0, "v1_archive": 1}).fillna(2),
+            )
+            best_by_signal = (ic.sort_values(["_src", "abst"], ascending=[True, False])
+                                .drop_duplicates("signal", keep="first")
+                                .set_index("signal")
+                                .to_dict("index"))
+
+        # PIT columns actually populated in daily_snapshots_pit (latest snapshot)
+        try:
+            latest_pit = conn.execute(
+                "SELECT MAX(snapshot_date) FROM daily_snapshots_pit"
+            ).fetchone()[0]
+        except Exception:
+            latest_pit = None
+
+        # Get per-column coverage from latest PIT snapshot
+        pit_coverage = {}
+        if latest_pit:
+            cols = [r[1] for r in conn.execute(
+                "PRAGMA table_info(daily_snapshots_pit)"
+            ).fetchall()]
+            skip = {"sid", "snapshot_date", "cap_tier", "close_price",
+                    "reconstructed_at", "fwd_return_20d"}
+            for c in cols:
+                if c in skip:
+                    continue
+                try:
+                    n = conn.execute(
+                        f"SELECT COUNT(*) FROM daily_snapshots_pit "
+                        f"WHERE snapshot_date = ? AND [{c}] IS NOT NULL",
+                        (latest_pit,)
+                    ).fetchone()[0]
+                    pit_coverage[c] = int(n)
+                except Exception:
+                    pit_coverage[c] = 0
+
+        # Per-table count + freshness for F-track score tables
+        def _table_stats(table, col):
+            try:
+                latest_snap = conn.execute(
+                    f"SELECT MAX(snapshot_date) FROM {table}"
+                ).fetchone()[0]
+                cnt = conn.execute(
+                    f"SELECT COUNT(*) FROM {table} WHERE snapshot_date = ? AND [{col}] IS NOT NULL",
+                    (latest_snap,)
+                ).fetchone()[0] if latest_snap else 0
+                return latest_snap, int(cnt)
+            except Exception:
+                return None, 0
+
+    today = pd.Timestamp.today().date()
+
+    def _grade(score):
+        for thr, letter, color in [
+            (90, "A+", "#2ecc71"),
+            (80, "A",  "#27ae60"),
+            (70, "B",  "#4d8eff"),
+            (60, "C",  "#f1c40f"),
+            (40, "D",  "#e67e22"),
+        ]:
+            if score >= thr:
+                return letter, color
+        return "F", "#e74c3c"
+
+    def _build_row(name, signal, group, status, status_reason, in_model_flag,
+                   coverage_n, eligible_n, latest_snap_str,
+                   t_stat, n_periods, ic_source, pit_ready, track):
+        # Coverage score: % of eligible universe scored
+        if eligible_n > 0:
+            coverage_pct = round(100 * coverage_n / eligible_n, 1)
+            coverage_score = min(100, coverage_pct * 1.05)  # cap at 100
+        else:
+            coverage_pct, coverage_score = 0.0, 0
+
+        # Freshness score
+        freshness_days = None
+        if latest_snap_str:
+            try:
+                latest_d = pd.to_datetime(latest_snap_str).date()
+                freshness_days = (today - latest_d).days
+            except Exception:
+                pass
+        if freshness_days is None:
+            freshness_score = 0
+        elif freshness_days <= 1:
+            freshness_score = 100
+        elif freshness_days <= 7:
+            freshness_score = 90 - (freshness_days - 1) * 5  # 90 → 60
+        elif freshness_days <= 30:
+            freshness_score = max(0, 60 - (freshness_days - 7) * 2)
+        else:
+            freshness_score = 0
+
+        # Backtest score — |t-stat| capped at 3.0, scaled to 0-100
+        if t_stat is None or pd.isna(t_stat):
+            backtest_score = 0
+        else:
+            abs_t = min(3.0, abs(float(t_stat)))
+            backtest_score = round(100 * abs_t / 3.0, 1)
+
+        # PIT-readiness — boolean, becomes 100 or 0
+        pit_score = 100 if pit_ready else 0
+
+        # In-model badge — adds a 100% to overall (already-validated factor)
+        # but doesn't count if factor isn't built yet
+        model_score = 100 if in_model_flag else (0 if status in ("PROPOSED", "BLOCKED") else 50)
+
+        # Weighted overall (these weights sum to 1.0)
+        overall = (
+            0.35 * coverage_score +
+            0.15 * freshness_score +
+            0.30 * backtest_score +
+            0.10 * pit_score +
+            0.10 * model_score
+        )
+        overall = round(overall, 1)
+        letter, color = _grade(overall)
+
+        issues = []
+        if coverage_pct < 40 and coverage_n > 0:
+            issues.append(f"coverage {coverage_pct}% — many stocks unscored")
+        elif coverage_n == 0:
+            issues.append("no scores in source table")
+        if freshness_days is not None and freshness_days > 7:
+            issues.append(f"stale ({freshness_days}d)")
+        if t_stat is None or pd.isna(t_stat):
+            issues.append("no backtest t-stat yet")
+        elif abs(float(t_stat)) < 0.5:
+            issues.append(f"t-stat near zero ({float(t_stat):+.2f})")
+        if not pit_ready:
+            issues.append("no PIT helper — can't be backtested")
+
+        return {
+            "name": name,
+            "signal": signal,
+            "group": group,
+            "track": track,
+            "status": status,
+            "status_reason": status_reason,
+            "in_model": in_model_flag,
+            "coverage_n": coverage_n,
+            "eligible_n": eligible_n,
+            "coverage_pct": coverage_pct,
+            "freshness_days": freshness_days,
+            "latest_snap": latest_snap_str,
+            "t_stat": float(t_stat) if t_stat is not None and not pd.isna(t_stat) else None,
+            "n_periods": int(n_periods) if n_periods is not None and not pd.isna(n_periods) else None,
+            "ic_source": ic_source,
+            "pit_ready": pit_ready,
+            "scores": {
+                "coverage": int(round(coverage_score)),
+                "freshness": int(round(freshness_score)),
+                "backtest": int(round(backtest_score)),
+                "pit": int(pit_score),
+                "model": int(model_score),
+            },
+            "overall": overall,
+            "grade": letter,
+            "grade_color": color,
+            "issues": issues,
+        }
+
+    out = []
+
+    # ── BACKTEST_SIGNALS (legacy + already-registered) ──
+    for spec in BACKTEST_SIGNALS:
+        signal = spec["signal"]
+        ic_row = best_by_signal.get(signal, {})
+        t_stat = ic_row.get("t_stat")
+        v2_col = spec.get("pit_column_v2")
+        coverage_n = pit_coverage.get(v2_col, 0) if v2_col else 0
+        eligible = uni_total  # legacy signals span the whole universe
+        in_model = (spec.get("status") == "READY"
+                    and t_stat is not None and abs(t_stat) >= PROMOTION_T)
+        out.append(_build_row(
+            name=spec["label"],
+            signal=signal,
+            group=spec.get("group", "—"),
+            status=spec.get("status"),
+            status_reason=(spec.get("status_reason") or "")[:200],
+            in_model_flag=in_model,
+            coverage_n=coverage_n,
+            eligible_n=eligible,
+            latest_snap_str=latest_pit,
+            t_stat=t_stat,
+            n_periods=ic_row.get("n_periods"),
+            ic_source=ic_row.get("source", "—"),
+            pit_ready=bool(v2_col),
+            track="legacy",
+        ))
+
+    # ── F-track extras ──
+    for spec in F_TRACK_EXTRAS:
+        signal = spec["signal"]
+        ic_row = best_by_signal.get(signal, {})
+        t_stat = ic_row.get("t_stat")
+        # Coverage: prefer per-snapshot table count over PIT column
+        latest_snap_str, coverage_n = _table_stats(
+            spec["score_table"], spec["score_col"]
+        )
+        # Eligible universe: most F-track factors exclude financials
+        eligible = uni_excl_fin
+        in_model = (t_stat is not None and abs(t_stat) >= PROMOTION_T)
+        out.append(_build_row(
+            name=spec["label"],
+            signal=signal,
+            group=spec.get("group", "F-track"),
+            status="READY",
+            status_reason="",
+            in_model_flag=in_model,
+            coverage_n=coverage_n,
+            eligible_n=eligible,
+            latest_snap_str=latest_snap_str,
+            t_stat=t_stat,
+            n_periods=ic_row.get("n_periods"),
+            ic_source=ic_row.get("source", "—"),
+            pit_ready=signal in pit_coverage,  # PIT helper added if column exists
+            track="f-track",
+        ))
+
+    # Aggregate summary
+    n = len(out)
+    by_grade = {}
+    for r in out:
+        by_grade[r["grade"]] = by_grade.get(r["grade"], 0) + 1
+    avg_overall = round(sum(r["overall"] for r in out) / n, 1) if n else 0
+    summary = {
+        "total": n,
+        "in_model": sum(1 for r in out if r["in_model"]),
+        "in_library": sum(1 for r in out if not r["in_model"] and r["coverage_n"] > 0),
+        "not_built": sum(1 for r in out if r["coverage_n"] == 0),
+        "with_t_stat": sum(1 for r in out if r["t_stat"] is not None),
+        "pit_ready": sum(1 for r in out if r["pit_ready"]),
+        "avg_overall": avg_overall,
+        "grade_dist": by_grade,
+    }
+
+    return {"summary": summary, "factors": out}
+
+
+# ═══════════════════════════════════════════════════
 # Command Centre — overview of plans, factors, data layer, pending actions
 # ═══════════════════════════════════════════════════
 
