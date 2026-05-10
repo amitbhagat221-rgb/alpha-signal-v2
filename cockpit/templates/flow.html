@@ -47,6 +47,19 @@
 </div>
 {% endif %}
 
+{# Tab bar — Failure banner stays above as always-relevant signal #}
+{% from "_components.html" import tab_bar %}
+
+<div x-data="{ tab: 'dag', loaded: { dag: true } }" x-cloak>
+
+{{ tab_bar([
+    ('dag',    'DAG'),
+    ('detail', 'Detail'),
+]) }}
+
+{# ────────── DAG TAB ────────── #}
+<div x-show="tab === 'dag'" x-cloak>
+
 {# ── Mini-DAG: 4 phase columns with arrows between them ── #}
 <div class="card" style="margin-bottom: 16px; padding: 18px; overflow-x: auto;">
     <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 14px;">
@@ -91,6 +104,12 @@
         {% endfor %}
     </div>
 </div>
+
+
+</div>{# / dag panel #}
+
+{# ────────── DETAIL TAB ────────── #}
+<div x-show="tab === 'detail'" x-cloak>
 
 {# ── Layered card detail ── #}
 {% for layer in layers %}
@@ -158,6 +177,10 @@
 <div style="text-align: center; color: var(--text-muted); font-size: 18px; margin: -8px 0;">▾</div>
 {% endif %}
 {% endfor %}
+
+</div>{# / detail panel #}
+
+</div>{# / tabs root #}
 
 <script>
 (function () {
