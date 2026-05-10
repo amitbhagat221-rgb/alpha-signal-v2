@@ -550,8 +550,9 @@ def pull_surveillance_today():
     try:
         r = s.get("https://www.nseindia.com/api/reportGSM", timeout=20)
         d = r.json()
+        items = d if isinstance(d, list) else d.get("data", [])
         rows = []
-        for item in d.get("data", []):
+        for item in items:
             sym = (item.get("symbol") or "").strip().upper()
             if not sym:
                 continue
@@ -560,8 +561,8 @@ def pull_surveillance_today():
                 "symbol": sym,
                 "flag_type": "GSM",
                 "flag_date": today_str,
-                "stage": item.get("stage") or item.get("Stage", ""),
-                "reason": "",
+                "stage": item.get("gsmStage") or item.get("stage") or item.get("Stage", ""),
+                "reason": (item.get("survDesc") or "")[:200],
             })
         if rows:
             n = _insert_or_ignore(pd.DataFrame(rows), "surveillance_flags")
@@ -573,7 +574,11 @@ def pull_surveillance_today():
     # F&O ban list
     try:
         from nselib import derivatives as dv
-        df = dv.fno_security_in_ban_period(trade_date=date.today().strftime("%d-%m-%Y"))
+        out = dv.fno_security_in_ban_period(trade_date=date.today().strftime("%d-%m-%Y"))
+        if isinstance(out, list):
+            df = pd.DataFrame(out) if out else pd.DataFrame()
+        else:
+            df = out
         if df is not None and not df.empty:
             df.columns = [c.strip() for c in df.columns]
             sym_col = next((c for c in df.columns if "symbol" in c.lower()), df.columns[0])
