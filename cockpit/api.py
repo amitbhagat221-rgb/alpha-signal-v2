@@ -1704,20 +1704,13 @@ def get_command_centre():
     n_in_prod = len([f for f in factors if f["in_production"]])
     n_in_library = n_built - n_in_prod
 
-    # ── Data layer ───────────────────────────────────────────
+    # ── Data layer (lightweight, for the architecture flow header stats) ──
     data_layer = {}
     with get_db() as conn:
-        for tbl, label in [
-            ("fundamentals_screener", "Fundamentals (Screener)"),
-            ("stock_prices",          "Daily prices"),
-            ("quarterly_income",      "Quarterly income (Tickertape)"),
-            ("annual_balance_sheet",  "Annual balance sheet"),
-            ("annual_cash_flow",      "Annual cash flow"),
-            ("shareholding",          "Shareholding"),
-            ("insider_trades",        "Insider trades"),
-            ("bulk_deals",            "Bulk deals"),
-            ("regulatory_events",     "Regulatory events"),
-            ("news_articles",         "News articles"),
+        for tbl in [
+            "fundamentals_screener", "stock_prices", "quarterly_income",
+            "annual_balance_sheet", "annual_cash_flow", "shareholding",
+            "insider_trades", "bulk_deals", "regulatory_events", "news_articles",
         ]:
             try:
                 cnt = conn.execute(f"SELECT COUNT(*) FROM {tbl}").fetchone()[0]
@@ -1729,21 +1722,256 @@ def get_command_centre():
                 except Exception:
                     pass
                 data_layer[tbl] = {
-                    "label": label, "rows": int(cnt),
+                    "rows": int(cnt),
                     "stocks": int(stocks_cnt) if stocks_cnt is not None else None,
                 }
             except Exception:
-                data_layer[tbl] = {"label": label, "rows": 0, "stocks": None}
-
-        # Special: how many stocks have Trade Payables (F1.2 progress proxy)
+                data_layer[tbl] = {"rows": 0, "stocks": None}
         try:
-            tp_stocks = conn.execute(
+            tp = conn.execute(
                 "SELECT COUNT(DISTINCT sid) FROM fundamentals_screener "
                 "WHERE line_item='Trade Payables'"
             ).fetchone()[0]
-            data_layer["fundamentals_screener"]["trade_payables_stocks"] = int(tp_stocks)
+            data_layer["fundamentals_screener"]["trade_payables_stocks"] = int(tp)
         except Exception:
             pass
+
+    # ── Full data model (every table — schema, columns, row counts, source) ──
+    # Logical grouping for the brain-map. Each table gets PRAGMA table_info.
+    DATA_MODEL_GROUPS = [
+        ("Universe & Reference", [
+            ("stocks",                 "NSE/BSE master + Tickertape SID, sector, cap_tier, market_cap_cr"),
+            ("nse_index_history",      "Nifty 50/100/500/Smallcap + smart-beta indices — daily OHLCV"),
+            ("vix_history",            "India VIX — daily, regime input"),
+        ]),
+        ("Prices & Adjustments", [
+            ("stock_prices",           "Daily OHLCV — NSE bhavcopy + nselib"),
+            ("corporate_adjustments",  "Pre-multiplied split+bonus+dividend factors per (sid, ex_date) — ADR 0010"),
+            ("corporate_actions",      "Raw corporate events (splits, bonuses, dividends, buybacks, M&A) from NSE"),
+        ]),
+        ("Fundamentals", [
+            ("fundamentals_screener",  "F-track long-format — Screener Premium xlsx + schedules JSON. PK (sid, period_end, period_type, line_item)"),
+            ("quarterly_income",       "Tickertape — quarterly income (legacy wide format)"),
+            ("annual_balance_sheet",   "Tickertape — annual balance sheet"),
+            ("annual_cash_flow",       "Tickertape — annual cash flow"),
+            ("shareholding",           "Tickertape — quarterly promoter / FII / DII / public splits"),
+        ]),
+        ("Ownership Flows", [
+            ("insider_trades",         "NSE PIT API — secAcq/secVal are the real values, not buy/sell qty"),
+            ("bulk_deals",             "NSE bulk-deals daily snapshot — append-only, today-only API"),
+            ("fii_dii_cash_flow",      "FII/DII cash market positioning — daily"),
+            ("fii_dii_positioning",    "FII/DII F&O + cash positioning — by participant type"),
+            ("short_selling_data",     "NSE short-selling — F&O-eligible names only"),
+        ]),
+        ("Analyst Forecasts", [
+            ("analyst_consensus",      "Snapshot of latest ratings, target price, upside per stock"),
+            ("forecast_history",       "Historical forecast revisions — feeds pt_revision_yoy and eps_revision_yoy"),
+        ]),
+        ("Events & News", [
+            ("regulatory_events",      "BSE/NSE filings — raw + classifier_status (6 terminal states)"),
+            ("regulatory_signals",     "Sector-level tailwind/headwind from AI-classified events (5,687 of 16,523 classified)"),
+            ("news_articles",          "Google News RSS — title+source+published_at"),
+            ("news_article_stocks",    "M2M join — article ↔ stock"),
+            ("earnings_calendar",      "Upcoming filings schedule — used for daily-incremental Screener pulls"),
+        ]),
+        ("Macro & Sectors", [
+            ("macro_indicators",       "Active per-indicator macro values"),
+            ("macro_history",          "Long-format historical series — per-indicator monthly observations"),
+            ("macro_indicator_meta",   "Indicator name → unit, transform, source registry"),
+            ("macro_sector_map",       "Indicator → sector weights (30 mappings)"),
+            ("macro_sector_signals",   "Per-sector macro signal output (today)"),
+            ("macro_sector_signals_pit", "PIT version — 11 sectors × 7 dates"),
+        ]),
+        ("Surveillance", [
+            ("surveillance_flags",     "ASM (LT/ST), GSM, F&O ban — append-only daily snapshot"),
+        ]),
+        ("Mutual Fund NAV", [
+            ("mf_schemes",             "AMFI scheme master — 4,048 schemes"),
+            ("mf_nav_history",         "Per-scheme NAV history from mfapi.in — ~13 yr daily"),
+        ]),
+        ("Computed Signals (per-stock)", [
+            ("piotroski_scores",       "F-Score 0-9 — quality"),
+            ("forensic_scores",        "M-Score (earnings manipulation) + Z-Score (distress)"),
+            ("accruals_scores",        "CF + BS accruals + EPS CV + composite"),
+            ("consensus_signals",      "PT upside, PT revision YoY, EPS revision YoY, combined"),
+            ("promoter_signals",       "Promoter QoQ + 4q trend"),
+            ("smart_money_scores",     "Bulk-deal + delivery anomaly composite"),
+            ("insider_signals",        "Insider trades signal — 29 monthly snapshots"),
+            ("sentiment_scores",       "News-based sentiment proxy — 7d volume + (FinBERT pending plan-0005)"),
+            ("roic_scores",            "F-track ROIC — 1,501 stocks (NOPAT/IC, 3yr median, IC≥₹50cr)"),
+            ("fcf_yield_scores",       "F-track FCF Yield — 1,195 stocks"),
+        ]),
+        ("Daily Output", [
+            ("daily_picks",            "Top picks per cap-tier per snapshot_date — what the screener emits"),
+            ("daily_changes",          "Day-over-day diff in picks (entered/exited)"),
+            ("daily_snapshots",        "Today-only snapshot of all factors per stock — current cross-section"),
+        ]),
+        ("PIT Snapshots & Backtest", [
+            ("daily_snapshots_pit",    "v2 PIT archive — 7 monthly dates × 26 signals × 2,448 stocks"),
+            ("daily_snapshots_pit_v1", "Frozen v1 archive — port-correctness reference per ADR 0012"),
+            ("pit_ic_by_tier_v1",      "v1 backtest IC table (older, for cross-checking)"),
+            ("pit_ic_by_tier_v2",      "Backtest output — IC, t-stat, n_periods per (signal, cap_tier, source)"),
+            ("pit_reconstruction_log", "Run-log of tools.reconstruct_pit invocations"),
+        ]),
+        ("Pipeline & Logging", [
+            ("pipeline_log",           "Per-step run log (started_at, status, rows, duration)"),
+            ("regime_state",           "Daily regime classifier output (Bullish/Neutral/Bearish)"),
+            ("screener_pull_errors",   "F-track scrape audit trail — error_type ∈ {auth, http, parse, thin, empty, fetch}"),
+        ]),
+    ]
+    data_model = []
+    with get_db() as conn:
+        # Get list of actually-existing tables once
+        existing = {r[0] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        ).fetchall()}
+
+        for group_name, table_specs in DATA_MODEL_GROUPS:
+            group_tables = []
+            for tbl, desc in table_specs:
+                if tbl not in existing:
+                    continue
+                # Columns
+                try:
+                    cols = [
+                        {
+                            "name": r[1], "type": r[2], "notnull": bool(r[3]),
+                            "pk": int(r[5]),
+                        }
+                        for r in conn.execute(f"PRAGMA table_info({tbl})").fetchall()
+                    ]
+                except Exception:
+                    cols = []
+                # Indexes (skip auto-pk indexes)
+                try:
+                    idxs = [
+                        r[1] for r in conn.execute(f"PRAGMA index_list({tbl})").fetchall()
+                        if not r[1].startswith("sqlite_autoindex")
+                    ]
+                except Exception:
+                    idxs = []
+                # Foreign keys
+                try:
+                    fks = [
+                        {"col": r[3], "ref_table": r[2], "ref_col": r[4]}
+                        for r in conn.execute(f"PRAGMA foreign_key_list({tbl})").fetchall()
+                    ]
+                except Exception:
+                    fks = []
+                # Row count
+                try:
+                    rows = int(conn.execute(f"SELECT COUNT(*) FROM {tbl}").fetchone()[0])
+                except Exception:
+                    rows = 0
+                # Distinct stocks if `sid` column present
+                stocks = None
+                if any(c["name"] == "sid" for c in cols) and rows > 0:
+                    try:
+                        stocks = int(conn.execute(
+                            f"SELECT COUNT(DISTINCT sid) FROM {tbl}"
+                        ).fetchone()[0])
+                    except Exception:
+                        pass
+                # Latest timestamp if a candidate column exists
+                latest = None
+                for ts_col in ("fetched_at", "snapshot_date", "attempted_at",
+                                "started_at", "created_at", "date", "ex_date"):
+                    if any(c["name"] == ts_col for c in cols):
+                        try:
+                            r = conn.execute(
+                                f"SELECT MAX({ts_col}) FROM {tbl}"
+                            ).fetchone()
+                            if r and r[0]:
+                                latest = str(r[0])[:19]
+                                break
+                        except Exception:
+                            pass
+
+                pk_cols = [c["name"] for c in cols if c["pk"]]
+                group_tables.append({
+                    "name": tbl,
+                    "desc": desc,
+                    "cols": cols,
+                    "n_cols": len(cols),
+                    "pk": pk_cols,
+                    "fks": fks,
+                    "indexes": idxs,
+                    "rows": rows,
+                    "stocks": stocks,
+                    "latest": latest,
+                })
+            if group_tables:
+                data_model.append({
+                    "name": group_name,
+                    "tables": group_tables,
+                    "n_tables": len(group_tables),
+                    "n_rows": sum(t["rows"] for t in group_tables),
+                })
+
+    # ── To Do (synthesized — top-level "what needs to happen") ──
+    todos = []
+
+    # Schedules scrape progress
+    try:
+        import subprocess
+        is_running = bool(subprocess.run(
+            ["pgrep", "-f", "screener_schedules"], capture_output=True
+        ).stdout.strip())
+    except Exception:
+        is_running = False
+    tp_n = data_layer.get("fundamentals_screener", {}).get("trade_payables_stocks", 0)
+    if is_running:
+        todos.append({
+            "title": "F1.2 universe scrape running",
+            "detail": f"Trade Payables landed for {tp_n} stocks so far (target ~2,000). Detached process — claude won't notify. Check `ps -ef | grep screener_schedules`.",
+            "status": "in-flight",
+        })
+    elif tp_n < 1500:
+        todos.append({
+            "title": "F1.2 universe scrape needs to finish or restart",
+            "detail": f"Only {tp_n} stocks have Trade Payables; expected ~1,800–2,000. May have stopped early — check screener_pull_errors.",
+            "status": "blocked",
+        })
+
+    # Factors built without PIT helpers (can't be backtested)
+    f_track_no_pit = [
+        f for f in factors
+        if f["track"] == "f-track" and f["t_stat"] is None and f["stocks"] > 0
+    ]
+    for f in f_track_no_pit:
+        todos.append({
+            "title": f"Add PIT helper for {f['name']}",
+            "detail": f"Has {f['stocks']} stocks scored today but no `pit_{f['signal']}(sid, eval_date)` in tools/reconstruct_pit.py — can't be backtested. Pair the module with its PIT version on next ship.",
+            "status": "todo",
+        })
+
+    # Factor count progress
+    todos.append({
+        "title": f"Build remaining {FACTOR_COUNT_TARGET - n_built} factors toward 100",
+        "detail": f"At {n_built}/{FACTOR_COUNT_TARGET} ({round(100*n_built/FACTOR_COUNT_TARGET)}%). Next batch (data already in fundamentals_screener): cash_conversion_cycle, gross_margin_trend, roiic, working_capital_intensity, debt_structure, asset_tangibility. ~30 min each from the ROIC/FCF Yield template.",
+        "status": "todo",
+    })
+
+    # Operational debt
+    todos.append({
+        "title": "Wire screener_pull + screener_schedules into weekly cron",
+        "detail": "Both currently manual-run only. Schedule for Sunday 02:00 IST (clear of daily 03:30 UTC pipeline). Cookie-health probe on cockpit /system. Use earnings_calendar for daily incremental.",
+        "status": "todo",
+    })
+
+    # Library surface
+    todos.append({
+        "title": "Build factor-library exploration surface",
+        "detail": "Once 30+ factors exist, add a per-factor drill-down (IC by tier, distribution, top/bottom names). Notebook first; cockpit page after.",
+        "status": "later",
+    })
+
+    # market_cap_cr rename
+    todos.append({
+        "title": "stocks.market_cap_cr is misnamed (actually rupees, not crores)",
+        "detail": "RELI shows 1.83e13 in the column (= ₹18.3L cr in rupees). Fixed locally in signals/fcf_yield.py with /1e7 divisor. Other consumers (cockpit/api.py, output/email_sender.py) treat the value as-is and could be displaying wrong units. Defer until a slow session.",
+        "status": "later",
+    })
 
     # ── Pending actions + open questions from HANDOFF ────────
     handoff = project_root / "HANDOFF.md"
@@ -1931,8 +2159,6 @@ def get_command_centre():
     }
 
     return {
-        "plans": plans,
-        "adrs": adrs,
         "factors": factors,
         "factor_summary": {
             "built": n_built,
@@ -1942,8 +2168,8 @@ def get_command_centre():
             "in_library": n_in_library,
         },
         "data_layer": data_layer,
-        "next_actions_md": next_actions_md,
-        "open_questions_md": open_questions_md,
+        "data_model": data_model,
+        "todos": todos,
         "where_md": where_md,
         "commits": commits,
         "architecture": architecture,
