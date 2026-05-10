@@ -685,3 +685,60 @@ CREATE TABLE IF NOT EXISTS share_momentum_scores (
     PRIMARY KEY (sid, snapshot_date)
 );
 CREATE INDEX IF NOT EXISTS idx_sharemom_date ON share_momentum_scores(snapshot_date);
+
+-- ─────────────────────────────────────────────────────────────
+-- Sector Intelligence (plan 0006) — per-sector structured narrative
+-- ─────────────────────────────────────────────────────────────
+
+-- Single row per sector. payload is a JSON blob with the IIM-style structure
+-- (value chain, drivers, segments, regulators, cyclicality, india_specific,
+-- trend_bullets) plus our top-players list (auto-derived from stocks).
+-- 'source' is 'auto' (LLM-generated) or 'manual' (user override that wins).
+CREATE TABLE IF NOT EXISTS sector_metadata (
+    sector          TEXT NOT NULL,        -- GICS sector name (matches stocks.sector)
+    industry        TEXT,                 -- IIM industry mapped to this sector
+    source          TEXT NOT NULL DEFAULT 'auto' CHECK(source IN ('auto', 'manual')),
+    generated_at    TEXT DEFAULT (datetime('now')),
+    payload         TEXT NOT NULL,        -- JSON blob, see structure below
+    notes           TEXT,                 -- optional free-text on generation run
+    PRIMARY KEY (sector, source)
+);
+
+-- payload JSON shape:
+-- {
+--   "summary": "one-sentence sector pitch",
+--   "industry_size_inr_cr": <number>,
+--   "industry_cagr_pct": <number>,
+--   "value_chain": [{"name": "...", "items": ["..."]}, ...],   -- 5 stages
+--   "drivers": {
+--     "revenue": [{"item": "...", "type": "structural|cyclical|policy"}, ...],
+--     "cost":    [{"item": "...", "type": "..."}, ...],
+--     "growth":  [{"item": "...", "type": "..."}, ...]
+--   },
+--   "segments": [{"name": "...", "kpis": [{"name": "...", "formula": "...", "direction": "higher_is_better"}]}, ...],
+--   "regulators": [{"body": "...", "what": "..."}, ...],
+--   "cyclicality": "...",
+--   "india_specific": ["...", "..."],
+--   "trend_bullets": {
+--     "industry_size":     ["..."],
+--     "structural_shifts": ["..."],
+--     "regulatory":        ["..."],
+--     "headwinds":         ["..."],
+--     "india_specific":    ["..."]
+--   },
+--   "top_players_override": null    -- optional; if set, used instead of derived
+-- }
+
+CREATE INDEX IF NOT EXISTS idx_sector_meta_gen ON sector_metadata(generated_at);
+
+-- Run log for the narrative-fetcher cron job
+CREATE TABLE IF NOT EXISTS sector_narrative_runs (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    started_at      TEXT DEFAULT (datetime('now')),
+    finished_at     TEXT,
+    status          TEXT,                 -- 'SUCCESS' | 'PARTIAL' | 'FAILED'
+    sectors_done    INTEGER DEFAULT 0,
+    sectors_failed  INTEGER DEFAULT 0,
+    api_cost_usd    REAL,
+    detail          TEXT
+);

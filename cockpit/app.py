@@ -182,10 +182,42 @@ async def portfolio(request: Request):
 
 
 @app.get("/sectors", response_class=HTMLResponse)
-async def sectors(request: Request):
+async def sectors(request: Request, sector: str = ""):
     sector_data = api.get_sector_overview()
+    sector_list = api.get_sector_list()
+    # If a sector is specified (deep-link), pre-load its detail payload
+    detail = None
+    if sector and sector in sector_list:
+        detail = {
+            "name": sector,
+            "narrative": api.get_sector_metadata(sector),
+            "top_players": api.get_sector_top_players(sector, n=10),
+            "picks": api.get_sector_picks(sector, top_n=10, bottom_n=5),
+            "factor_means": api.get_sector_factor_means(sector),
+            "macro_contributors": api.get_sector_macro_contributors(sector),
+            "regulatory": api.get_sector_recent_regulatory(sector, n=10),
+        }
+    trend = api.get_sector_trend(months=12)
     return templates.TemplateResponse(request, "sectors.html", {
-        "page": "sectors", "sectors": sector_data,
+        "page": "sectors",
+        "sectors": sector_data,
+        "sector_list": sector_list,
+        "selected_sector": sector or (sector_list[0] if sector_list else ""),
+        "detail": detail,
+        "trend": trend,
+    })
+
+
+@app.get("/api/sector-detail/{sector}")
+async def api_sector_detail(sector: str):
+    """JSON for live tab-2 sector switching without full page reload."""
+    return JSONResponse({
+        "narrative": api.get_sector_metadata(sector),
+        "top_players": api.get_sector_top_players(sector, n=10),
+        "picks": api.get_sector_picks(sector, top_n=10, bottom_n=5),
+        "factor_means": api.get_sector_factor_means(sector),
+        "macro_contributors": api.get_sector_macro_contributors(sector),
+        "regulatory": api.get_sector_recent_regulatory(sector, n=10),
     })
 
 

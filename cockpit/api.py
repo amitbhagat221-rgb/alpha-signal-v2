@@ -975,7 +975,207 @@ def get_sector_overview():
     if not macro.empty:
         df = df.merge(macro, on="sector", how="left")
 
+    # Tab 1 polish: breadth + top-3 tickers per sector
+    breadth = read_sql("""
+        SELECT sector,
+               ROUND(100.0 * SUM(CASE WHEN final_score >= 0.55 THEN 1 ELSE 0 END) / COUNT(*), 1)
+                   AS breadth_pct
+        FROM daily_picks
+        WHERE pick_date = (SELECT MAX(pick_date) FROM daily_picks)
+          AND sector IS NOT NULL
+        GROUP BY sector
+    """)
+    if not breadth.empty:
+        df = df.merge(breadth, on="sector", how="left")
+
+    top_n = read_sql("""
+        WITH ranked AS (
+            SELECT dp.sector, s.ticker, dp.final_score,
+                   ROW_NUMBER() OVER (PARTITION BY dp.sector ORDER BY dp.final_score DESC) AS r
+            FROM daily_picks dp
+            JOIN stocks s ON s.sid = dp.sid
+            WHERE dp.pick_date = (SELECT MAX(pick_date) FROM daily_picks)
+              AND dp.sector IS NOT NULL
+        )
+        SELECT sector, ticker, final_score
+        FROM ranked WHERE r <= 3
+    """)
+    top_by_sector = {}
+    if not top_n.empty:
+        for _, r in top_n.iterrows():
+            top_by_sector.setdefault(r["sector"], []).append(r["ticker"])
+    df["top_3"] = df["sector"].map(lambda s: ", ".join(top_by_sector.get(s, [])))
+
     return df.to_dict("records")
+
+
+def get_sector_list():
+    """Sorted list of sectors that have any stocks in the universe."""
+    df = read_sql(
+        "SELECT DISTINCT sector FROM stocks "
+        "WHERE sector IS NOT NULL AND ticker IS NOT NULL "
+        "ORDER BY sector"
+    )
+    return df["sector"].tolist()
+
+
+def get_sector_metadata(sector):
+    """Pull the latest sector_metadata payload for a sector. Manual override
+    wins over auto. Returns None if no narrative has been generated yet."""
+    df = read_sql(
+        "SELECT industry, source, generated_at, payload FROM sector_metadata "
+        "WHERE sector = ? "
+        "ORDER BY CASE source WHEN 'manual' THEN 0 ELSE 1 END, generated_at DESC "
+        "LIMIT 1",
+        params=[sector],
+    )
+    if df.empty:
+        return None
+    row = df.iloc[0]
+    try:
+        payload = json.loads(row["payload"])
+    except json.JSONDecodeError:
+        return None
+    payload["_industry"] = row["industry"]
+    payload["_source"] = row["source"]
+    payload["_generated_at"] = row["generated_at"]
+    return payload
+
+
+def get_sector_top_players(sector, n=10):
+    """Top n players in this sector by market cap, with our composite score
+    if available."""
+    df = read_sql(
+        """
+        SELECT s.sid, s.ticker, s.name, s.market_cap_cr,
+               COALESCE(dp.final_score, 0) AS final_score,
+               COALESCE(dp.rank, NULL)     AS rank
+        FROM stocks s
+        LEFT JOIN daily_picks dp
+          ON dp.sid = s.sid
+         AND dp.pick_date = (SELECT MAX(pick_date) FROM daily_picks)
+        WHERE s.sector = ? AND s.ticker IS NOT NULL
+        ORDER BY s.market_cap_cr DESC
+        LIMIT ?
+        """,
+        params=[sector, n],
+    )
+    if df.empty:
+        return []
+    # Convert market_cap from raw rupees → ₹cr (column is misnamed)
+    df["market_cap_cr"] = (df["market_cap_cr"] / 1e7).round(0)
+    sector_total = df["market_cap_cr"].sum()
+    df["share_pct"] = (100.0 * df["market_cap_cr"] / sector_total if sector_total else 0).round(1)
+    return df.to_dict("records")
+
+
+def get_sector_picks(sector, top_n=10, bottom_n=5):
+    """Top-N picks (highest composite) and bottom-N (lowest composite) within a sector."""
+    df = read_sql(
+        """
+        SELECT s.sid, s.ticker, s.name, dp.final_score, dp.cap_tier
+        FROM daily_picks dp
+        JOIN stocks s ON s.sid = dp.sid
+        WHERE dp.sector = ?
+          AND dp.pick_date = (SELECT MAX(pick_date) FROM daily_picks)
+        ORDER BY dp.final_score DESC
+        """,
+        params=[sector],
+    )
+    if df.empty:
+        return {"top": [], "bottom": []}
+    return {
+        "top":    df.head(top_n).to_dict("records"),
+        "bottom": df.tail(bottom_n).iloc[::-1].to_dict("records"),
+    }
+
+
+def get_sector_factor_means(sector):
+    """Mean of each factor (from latest daily_snapshots_pit) across stocks in
+    this sector. Used in Tab 2 v1 as a descriptive 'which factors are working
+    here' table — until per-sector IC backtest extension lands."""
+    df = read_sql(
+        """
+        SELECT pit.*
+        FROM daily_snapshots_pit pit
+        JOIN stocks s ON s.sid = pit.sid
+        WHERE s.sector = ?
+          AND pit.snapshot_date = (SELECT MAX(snapshot_date) FROM daily_snapshots_pit)
+        """,
+        params=[sector],
+    )
+    if df.empty:
+        return []
+    excluded = {"sid", "snapshot_date", "cap_tier", "close_price",
+                "reconstructed_at", "fwd_return_20d"}
+    factor_cols = [c for c in df.columns if c not in excluded]
+    rows = []
+    for c in factor_cols:
+        vals = df[c].dropna()
+        if vals.empty:
+            continue
+        rows.append({
+            "factor": c,
+            "n_stocks": int(vals.shape[0]),
+            "mean": float(round(vals.mean(), 4)),
+            "median": float(round(vals.median(), 4)),
+        })
+    rows.sort(key=lambda r: -abs(r["mean"]))
+    return rows
+
+
+def get_sector_macro_contributors(sector):
+    """The macro_indicator → sector_weight map for this sector, joined with
+    latest macro indicator values."""
+    df = read_sql(
+        """
+        SELECT msm.indicator_id, msm.weight, msm.direction,
+               mh.value AS latest_value, mh.date AS latest_date
+        FROM macro_sector_map msm
+        LEFT JOIN (
+            SELECT indicator_id, value, date,
+                   ROW_NUMBER() OVER (PARTITION BY indicator_id ORDER BY date DESC) AS r
+            FROM macro_history
+        ) mh ON mh.indicator_id = msm.indicator_id AND mh.r = 1
+        WHERE msm.sector = ?
+        ORDER BY ABS(msm.weight) DESC
+        """,
+        params=[sector],
+    )
+    return df.to_dict("records") if not df.empty else []
+
+
+def get_sector_recent_regulatory(sector, n=10):
+    """Recent regulatory events for stocks in this sector."""
+    df = read_sql(
+        """
+        SELECT re.event_id, re.published_at, re.title, rs.direction, rs.magnitude
+        FROM regulatory_events re
+        JOIN regulatory_signals rs ON rs.event_id = re.event_id
+        WHERE rs.sector = ? AND rs.direction IS NOT NULL
+        ORDER BY re.published_at DESC
+        LIMIT ?
+        """,
+        params=[sector, n],
+    )
+    return df.to_dict("records") if not df.empty else []
+
+
+def get_sector_trend(months=12):
+    """Sector-avg composite over time, monthly snapshots — Tab 3 source."""
+    df = read_sql(
+        """
+        SELECT pick_date, sector, ROUND(AVG(final_score), 3) AS avg_score,
+               COUNT(*) AS n_stocks
+        FROM daily_picks
+        WHERE pick_date >= date('now', :since)
+          AND sector IS NOT NULL
+        GROUP BY pick_date, sector
+        ORDER BY pick_date, sector
+        """,
+        params={"since": f"-{months * 31} days"},
+    )
+    return df.to_dict("records") if not df.empty else []
 
 
 def get_pipeline_status(days=7):

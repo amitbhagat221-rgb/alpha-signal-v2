@@ -3,36 +3,107 @@
 
 {% block content %}
 
+<style>
+    /* ─── Sector page styles ─── */
+    .sec-card {
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 16px 18px;
+        transition: transform 0.15s, border-color 0.15s, box-shadow 0.15s;
+    }
+    .sec-card:hover {
+        transform: translateY(-2px);
+        border-color: var(--accent);
+        box-shadow: 0 4px 18px rgba(77,142,255,0.10);
+        cursor: pointer;
+    }
+    .sec-meta { font-size: 11px; color: var(--text-muted); }
+
+    /* Value chain horizontal flow */
+    .vc-flow { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+    .vc-stage {
+        flex: 1 1 180px;
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        border-left: 3px solid var(--accent);
+        border-radius: 8px;
+        padding: 10px 12px;
+    }
+    .vc-stage-name {
+        font-size: 11px; font-weight: 700; letter-spacing: 0.5px;
+        text-transform: uppercase; color: var(--accent);
+        margin-bottom: 6px;
+    }
+    .vc-stage ul {
+        list-style: none; padding: 0; margin: 0;
+        font-size: 11px; line-height: 1.6; color: var(--text-secondary);
+    }
+    .vc-stage ul li { padding: 1px 0; }
+
+    /* Drivers / segments / regulators 3-col */
+    .grid-3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
+
+    /* KPI mini-table */
+    .kpi-table { width: 100%; font-size: 11px; }
+    .kpi-table td { padding: 3px 6px; border-bottom: 1px solid var(--border); }
+    .kpi-table td:first-child { color: var(--text-primary); font-weight: 600; }
+    .kpi-table td:nth-child(2) { color: var(--text-secondary); }
+    .kpi-table td:nth-child(3) { color: var(--text-muted); font-size: 10px; text-align: right; }
+
+    .driver-pill {
+        display: inline-block; margin: 2px;
+        padding: 3px 8px; border-radius: 12px;
+        font-size: 11px;
+        background: rgba(140,140,140,0.12);
+        color: var(--text-secondary);
+        border: 1px solid var(--border);
+    }
+    .driver-pill.structural { border-color: rgba(46,204,113,0.4); color: #2ecc71; }
+    .driver-pill.cyclical   { border-color: rgba(241,196,15,0.4); color: #f1c40f; }
+    .driver-pill.policy     { border-color: rgba(77,142,255,0.4); color: #4d8eff; }
+
+    .pulse-dot { display: inline-block; width: 8px; height: 8px;
+                 border-radius: 50%; margin-right: 6px; vertical-align: middle; }
+    .pulse-dot.up   { background: #2ecc71; }
+    .pulse-dot.down { background: #e74c3c; }
+    .pulse-dot.flat { background: var(--text-muted); }
+</style>
+
 <div class="section-title">Sector Intelligence</div>
+
+<div x-data="{ tab: 'heatmap', loaded: { heatmap: true } }" x-cloak>
+
+{{ tab_bar([
+    ('heatmap',     'Heatmap'),
+    ('per-sector',  'Per-Sector Deep Dive'),
+    ('trend',       'Trend'),
+]) }}
+
+{# ════════════════════════════════════════════ #}
+{# TAB 1 — HEATMAP (polished current view)     #}
+{# ════════════════════════════════════════════ #}
+<div x-show="tab === 'heatmap'" x-cloak>
 
 {% set tail_n = sectors | selectattr('macro_signal', 'in', ['TAILWIND', 'FAVORABLE']) | list | length %}
 {% set head_n = sectors | selectattr('macro_signal', 'in', ['HEADWIND', 'ADVERSE'])  | list | length %}
 
-<div x-data="{ tab: 'all', loaded: { all: true } }" x-cloak>
+<div style="font-size: 11px; color: var(--text-muted); margin-bottom: 14px;">
+    {{ sectors | length }} sectors · {{ tail_n }} with macro tailwind · {{ head_n }} with headwind. Click a card to drill in.
+</div>
 
-{{ tab_bar([
-    ('all',     'All ('      ~ (sectors | length) ~ ')'),
-    ('tail',    'Tailwind (' ~ tail_n             ~ ')'),
-    ('head',    'Headwind (' ~ head_n             ~ ')'),
-]) }}
-
-<!-- Sector Grid -->
-<div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; margin-bottom: 24px;">
+<div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px;">
     {% for sector in sectors %}
-    {% set is_tail = sector.macro_signal in ['TAILWIND', 'FAVORABLE'] %}
-    {% set is_head = sector.macro_signal in ['HEADWIND', 'ADVERSE'] %}
-    <div class="card"
-         x-show="tab === 'all'
-                 || (tab === 'tail' && {{ 'true' if is_tail else 'false' }})
-                 || (tab === 'head' && {{ 'true' if is_head else 'false' }})"
-         style="padding: 14px 16px;
-        {% if sector.macro_signal == 'TAILWIND' %}border-left: 4px solid var(--green);
-        {% elif sector.macro_signal == 'HEADWIND' %}border-left: 4px solid var(--red);
-        {% elif sector.macro_signal == 'FAVORABLE' %}border-left: 4px solid rgba(34, 197, 94, 0.5);
-        {% elif sector.macro_signal == 'ADVERSE' %}border-left: 4px solid rgba(239, 68, 68, 0.5);
-        {% else %}border-left: 4px solid var(--border);{% endif %}">
+    <a href="/sectors?sector={{ sector.sector | urlencode }}#per-sector"
+       class="sec-card"
+       style="text-decoration: none; color: inherit; display: block;
+            {% if sector.macro_signal == 'TAILWIND' %}border-left: 4px solid var(--green);
+            {% elif sector.macro_signal == 'HEADWIND' %}border-left: 4px solid var(--red);
+            {% elif sector.macro_signal == 'FAVORABLE' %}border-left: 4px solid rgba(34, 197, 94, 0.5);
+            {% elif sector.macro_signal == 'ADVERSE' %}border-left: 4px solid rgba(239, 68, 68, 0.5);
+            {% else %}border-left: 4px solid var(--border);{% endif %}">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-            <span style="font-weight: 600; font-size: 14px;">{{ sector.sector }}</span>
+            <span style="font-weight: 700; font-size: 14px;">{{ sector.sector }}</span>
             {% if sector.macro_signal %}
             <span style="font-size: 10px; padding: 2px 8px; border-radius: 4px;
                 {% if sector.macro_signal == 'TAILWIND' %}background: var(--green-bg); color: var(--green);
@@ -45,22 +116,413 @@
             {% endif %}
         </div>
 
-        <div style="display: flex; gap: 16px; font-size: 12px; margin-bottom: 6px;">
-            <span style="color: var(--text-muted);">Stocks: <span class="mono">{{ sector.stocks }}</span></span>
-            <span style="color: var(--text-muted);">Avg score: <span class="mono">{{ "%.0f"|format(sector.avg_score * 100) }}</span></span>
-            {% if sector.macro_score %}
-            <span style="color: var(--text-muted);">Macro: <span class="mono">{{ "%.0f"|format(sector.macro_score) }}</span></span>
+        <div style="display: flex; gap: 14px; font-size: 12px; margin-bottom: 8px;">
+            <span class="sec-meta">Stocks: <span class="mono">{{ sector.stocks }}</span></span>
+            <span class="sec-meta">Avg score: <span class="mono">{{ "%.0f"|format(sector.avg_score * 100) }}</span></span>
+            {% if sector.breadth_pct is not none %}
+            <span class="sec-meta">Breadth: <span class="mono">{{ "%.0f"|format(sector.breadth_pct) }}%</span></span>
             {% endif %}
         </div>
 
+        {# Breadth bar — % of stocks with composite ≥ 0.55 #}
+        {% if sector.breadth_pct is not none %}
+        <div style="height: 4px; border-radius: 2px; background: var(--border); margin-bottom: 8px;">
+            <div style="height: 100%; border-radius: 2px; width: {{ sector.breadth_pct }}%;
+                        background: var(--accent);"></div>
+        </div>
+        {% endif %}
+
+        {% if sector.top_3 %}
+        <div style="font-size: 11px; color: var(--text-secondary); line-height: 1.5;">
+            <span style="color: var(--text-muted);">Top:</span>
+            <span class="mono" style="color: var(--text-primary);">{{ sector.top_3 }}</span>
+        </div>
+        {% endif %}
+
         {% if sector.macro_detail %}
-        <div style="font-size: 11px; color: var(--text-muted); line-height: 1.4; overflow: hidden; max-height: 40px;">
-            {{ sector.macro_detail[:120] }}
+        <div style="font-size: 11px; color: var(--text-muted); line-height: 1.4; margin-top: 6px;
+                    overflow: hidden; max-height: 38px;">
+            {{ sector.macro_detail[:140] }}
+        </div>
+        {% endif %}
+    </a>
+    {% endfor %}
+</div>
+
+</div>{# / heatmap tab #}
+
+
+{# ════════════════════════════════════════════ #}
+{# TAB 2 — PER-SECTOR DEEP DIVE (IIM template) #}
+{# ════════════════════════════════════════════ #}
+<div x-show="tab === 'per-sector'" x-cloak>
+
+<div style="margin-bottom: 18px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+    <label style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.6px;">
+        Sector
+    </label>
+    <select onchange="window.location.href = '/sectors?sector=' + encodeURIComponent(this.value) + '#per-sector'"
+            style="background: var(--bg-card); color: var(--text-primary);
+                   border: 1px solid var(--border); border-radius: 8px;
+                   padding: 8px 14px; font-size: 13px; font-weight: 600;
+                   font-family: inherit; cursor: pointer;">
+        {% for s in sector_list %}
+        <option value="{{ s }}" {% if s == selected_sector %}selected{% endif %}>{{ s }}</option>
+        {% endfor %}
+    </select>
+    {% if detail %}
+    <span style="font-size: 11px; color: var(--text-muted);">
+        Industry: {{ detail.narrative._industry if detail.narrative else 'no narrative yet' }}
+        {% if detail.narrative and detail.narrative._generated_at %}
+            · generated {{ detail.narrative._generated_at[:10] }}
+        {% endif %}
+    </span>
+    {% endif %}
+</div>
+
+{% if not detail %}
+<div class="card" style="padding: 20px; text-align: center; color: var(--text-muted);">
+    Select a sector above to drill in. Click a card on the Heatmap tab to deep-link directly.
+</div>
+{% else %}
+{% set narr = detail.narrative %}
+
+{# ── (0) Summary banner ── #}
+{% if narr and narr.summary %}
+<div class="card" style="margin-bottom: 16px; padding: 14px 18px; border-left: 4px solid var(--accent);">
+    <div style="font-size: 14px; line-height: 1.5; color: var(--text-primary);">
+        <strong>{{ detail.name }}.</strong> {{ narr.summary }}
+    </div>
+    {% if narr.industry_size_inr_cr or narr.industry_cagr_pct %}
+    <div style="font-size: 11px; color: var(--text-muted); margin-top: 6px;">
+        {% if narr.industry_size_inr_cr %}Industry size: <span class="mono">₹{{ "{:,.0f}".format(narr.industry_size_inr_cr) }} cr</span>{% endif %}
+        {% if narr.industry_cagr_pct %}{% if narr.industry_size_inr_cr %} · {% endif %}Forward CAGR: <span class="mono">{{ narr.industry_cagr_pct }}%</span>{% endif %}
+    </div>
+    {% endif %}
+</div>
+{% elif not narr %}
+<div class="card" style="margin-bottom: 16px; padding: 14px 18px; border-left: 4px solid var(--amber);">
+    <div style="font-size: 13px; color: var(--text-secondary);">
+        ⚠ No structured narrative yet for <strong>{{ detail.name }}</strong>.
+        Run <code style="font-size: 11px;">python -m tools.sector_narrative_fetcher --sector "{{ detail.name }}"</code>
+        to generate (needs <code style="font-size: 11px;">ANTHROPIC_API_KEY</code>).
+        Showing live-data panels below.
+    </div>
+</div>
+{% endif %}
+
+{# ── (A) Value Chain ── #}
+{% if narr and narr.value_chain %}
+<div class="card" style="margin-bottom: 16px;">
+    <div class="section-title" style="font-size: 13px;">Value Chain</div>
+    <div class="vc-flow">
+        {% for stage in narr.value_chain %}
+        <div class="vc-stage">
+            <div class="vc-stage-name">{{ stage.name }}</div>
+            <ul>{% for item in stage['items'] %}<li>· {{ item }}</li>{% endfor %}</ul>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+
+{# ── (B, C, regulators) Drivers, Segments, Regulators ── #}
+{% if narr %}
+<div class="grid-3" style="margin-bottom: 16px;">
+    {# Drivers #}
+    {% if narr.drivers %}
+    <div class="card">
+        <div class="section-title" style="font-size: 13px;">Key Drivers</div>
+        {% for kind in ['revenue', 'cost', 'growth'] %}
+            {% if narr.drivers[kind] %}
+            <div style="margin-top: 10px;">
+                <div style="font-size: 11px; font-weight: 700; letter-spacing: 0.6px;
+                            text-transform: uppercase; color: var(--text-muted); margin-bottom: 6px;">
+                    {{ kind }}
+                </div>
+                {% for d in narr.drivers[kind] %}
+                <span class="driver-pill {{ d.type or '' }}">{{ d.item }}</span>
+                {% endfor %}
+            </div>
+            {% endif %}
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    {# Segments + KPIs #}
+    {% if narr.segments %}
+    <div class="card">
+        <div class="section-title" style="font-size: 13px;">Segments &amp; KPIs</div>
+        {% for seg in narr.segments %}
+        <div style="margin-top: 10px;">
+            <div style="font-size: 12px; font-weight: 700; color: var(--text-primary); margin-bottom: 4px;">
+                {{ seg.name }}
+            </div>
+            <table class="kpi-table">
+                {% for kpi in seg.kpis %}
+                <tr>
+                    <td>{{ kpi.name }}</td>
+                    <td>{{ kpi.formula }}</td>
+                    <td>{{ '↑' if kpi.direction == 'higher_is_better' else '↓' }}</td>
+                </tr>
+                {% endfor %}
+            </table>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    {# Regulators + cyclicality + india-specific #}
+    <div class="card">
+        {% if narr.regulators %}
+        <div class="section-title" style="font-size: 13px;">Regulators</div>
+        <table class="kpi-table" style="margin-top: 6px;">
+            {% for r in narr.regulators %}
+            <tr><td>{{ r.body }}</td><td>{{ r.what }}</td><td></td></tr>
+            {% endfor %}
+        </table>
+        {% endif %}
+
+        {% if narr.cyclicality %}
+        <div style="margin-top: 14px;">
+            <div style="font-size: 11px; font-weight: 700; letter-spacing: 0.6px;
+                        text-transform: uppercase; color: var(--text-muted); margin-bottom: 6px;">
+                Cyclicality
+            </div>
+            <div style="font-size: 12px; line-height: 1.5; color: var(--text-secondary);">
+                {{ narr.cyclicality }}
+            </div>
+        </div>
+        {% endif %}
+
+        {% if narr.india_specific %}
+        <div style="margin-top: 14px;">
+            <div style="font-size: 11px; font-weight: 700; letter-spacing: 0.6px;
+                        text-transform: uppercase; color: var(--text-muted); margin-bottom: 6px;">
+                India-specific factors
+            </div>
+            <ul style="padding-left: 18px; margin: 0; font-size: 12px; line-height: 1.6; color: var(--text-secondary);">
+                {% for b in narr.india_specific %}<li>{{ b }}</li>{% endfor %}
+            </ul>
         </div>
         {% endif %}
     </div>
+</div>
+{% endif %}
+
+{# ── (D) Top Players ── #}
+<div class="card" style="margin-bottom: 16px;">
+    <div class="section-title" style="font-size: 13px;">Top Players</div>
+    <table style="width: 100%; font-size: 12px; margin-top: 10px;">
+        <thead>
+        <tr style="font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">
+            <th style="text-align: left; padding: 6px 8px;">Ticker</th>
+            <th style="text-align: left; padding: 6px 8px;">Name</th>
+            <th style="text-align: right; padding: 6px 8px;">Market Cap (₹cr)</th>
+            <th style="text-align: right; padding: 6px 8px;">Sector Share %</th>
+            <th style="text-align: right; padding: 6px 8px;">Composite</th>
+        </tr>
+        </thead>
+        <tbody>
+        {% for p in detail.top_players %}
+        <tr style="border-top: 1px solid var(--border);">
+            <td style="padding: 6px 8px;">
+                <a href="/explorer/{{ p.sid }}" style="color: var(--text-primary); font-weight: 600; text-decoration: none;">{{ p.ticker }}</a>
+            </td>
+            <td style="padding: 6px 8px; color: var(--text-secondary);">{{ p.name[:40] }}</td>
+            <td style="padding: 6px 8px; text-align: right;" class="mono">{{ "{:,.0f}".format(p.market_cap_cr) }}</td>
+            <td style="padding: 6px 8px; text-align: right;" class="mono">{{ "%.1f"|format(p.share_pct) }}%</td>
+            <td style="padding: 6px 8px; text-align: right;" class="mono
+                {% if p.final_score >= 0.7 %}score-green{% elif p.final_score >= 0.5 %}score-amber{% elif p.final_score > 0 %}score-red{% endif %}">
+                {{ "%.0f"|format(p.final_score * 100) if p.final_score else '—' }}
+            </td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+{# ── (E) Market Trends ── #}
+{% if narr and narr.trend_bullets %}
+<div class="card" style="margin-bottom: 16px;">
+    <div class="section-title" style="font-size: 13px;">Market Trends</div>
+    {% for kind, label in [('industry_size', 'Industry size'),
+                            ('structural_shifts', 'Structural shifts'),
+                            ('regulatory', 'Regulatory'),
+                            ('headwinds', 'Headwinds'),
+                            ('india_specific', 'India tailwinds')] %}
+        {% set bullets = narr.trend_bullets.get(kind) %}
+        {% if bullets %}
+        <div style="margin-top: 10px;">
+            <div style="font-size: 11px; font-weight: 700; letter-spacing: 0.6px;
+                        text-transform: uppercase; color: var(--text-muted); margin-bottom: 4px;">
+                {{ label }}
+            </div>
+            <ul style="padding-left: 18px; margin: 0; font-size: 12px; line-height: 1.6; color: var(--text-secondary);">
+                {% for b in bullets %}<li>{{ b }}</li>{% endfor %}
+            </ul>
+        </div>
+        {% endif %}
     {% endfor %}
 </div>
+{% endif %}
+
+{# ── (F) Alpha Signal Overlay ── #}
+<div class="grid-3" style="margin-bottom: 16px;">
+    {# F1 — picks #}
+    <div class="card">
+        <div class="section-title" style="font-size: 13px;">Top Picks (this sector)</div>
+        <table class="kpi-table" style="margin-top: 6px;">
+            {% for p in detail.picks.top %}
+            <tr>
+                <td><a href="/explorer/{{ p.sid }}" style="color: var(--text-primary); text-decoration: none;">{{ p.ticker }}</a></td>
+                <td>{{ p.name[:24] }}</td>
+                <td>{{ "%.0f"|format(p.final_score * 100) }}</td>
+            </tr>
+            {% endfor %}
+        </table>
+        {% if detail.picks.bottom %}
+        <div style="margin-top: 12px; font-size: 11px; font-weight: 700; letter-spacing: 0.5px;
+                    color: var(--red); text-transform: uppercase;">
+            Avoid (lowest composite)
+        </div>
+        <table class="kpi-table">
+            {% for p in detail.picks.bottom %}
+            <tr>
+                <td><a href="/explorer/{{ p.sid }}" style="color: var(--text-primary); text-decoration: none;">{{ p.ticker }}</a></td>
+                <td>{{ p.name[:24] }}</td>
+                <td>{{ "%.0f"|format(p.final_score * 100) }}</td>
+            </tr>
+            {% endfor %}
+        </table>
+        {% endif %}
+    </div>
+
+    {# F2 — factor means #}
+    <div class="card">
+        <div class="section-title" style="font-size: 13px;">Factor Profile (sector means)</div>
+        <div style="font-size: 10px; color: var(--text-muted); margin-bottom: 6px;">
+            v1 descriptive — sector mean of factor scores. Per-sector IC arrives in v2.
+        </div>
+        <table class="kpi-table">
+            <tr><td><strong>Factor</strong></td><td><strong>n</strong></td><td><strong>mean</strong></td></tr>
+            {% for f in detail.factor_means[:15] %}
+            <tr>
+                <td><span class="mono" style="font-size: 11px;">{{ f.factor }}</span></td>
+                <td>{{ f.n_stocks }}</td>
+                <td class="mono">{{ "%.3f"|format(f.mean) }}</td>
+            </tr>
+            {% endfor %}
+        </table>
+    </div>
+
+    {# F3 + F4 — macro + regulatory #}
+    <div class="card">
+        <div class="section-title" style="font-size: 13px;">Macro Contributors</div>
+        {% if detail.macro_contributors %}
+        <table class="kpi-table" style="margin-top: 6px;">
+            <tr><td><strong>Indicator</strong></td><td><strong>Direction</strong></td><td><strong>Weight</strong></td></tr>
+            {% for m in detail.macro_contributors[:8] %}
+            <tr>
+                <td>{{ m.indicator_id }}</td>
+                <td>{{ m.direction or '—' }}</td>
+                <td>{{ "%.2f"|format(m.weight) if m.weight is not none else '' }}</td>
+            </tr>
+            {% endfor %}
+        </table>
+        {% else %}
+        <div style="font-size: 11px; color: var(--text-muted); margin-top: 6px;">
+            No macro indicators mapped to this sector yet.
+        </div>
+        {% endif %}
+
+        <div class="section-title" style="font-size: 13px; margin-top: 14px;">Recent Regulatory Events</div>
+        {% if detail.regulatory %}
+        <ul style="padding-left: 18px; margin: 6px 0 0 0; font-size: 11px; line-height: 1.5;">
+            {% for r in detail.regulatory %}
+            <li>
+                <span class="pulse-dot {{ 'up' if r.direction == 'POSITIVE' else ('down' if r.direction == 'NEGATIVE' else 'flat') }}"></span>
+                <span class="mono" style="font-size: 10px; color: var(--text-muted);">{{ r.published_at[:10] }}</span>
+                {{ r.title[:90] }}
+            </li>
+            {% endfor %}
+        </ul>
+        {% else %}
+        <div style="font-size: 11px; color: var(--text-muted); margin-top: 6px;">No classified regulatory events for this sector recently.</div>
+        {% endif %}
+    </div>
+</div>
+{% endif %}{# detail #}
+
+</div>{# / per-sector tab #}
+
+
+{# ════════════════════════════════════════════ #}
+{# TAB 3 — TREND (sector-avg score over time) #}
+{# ════════════════════════════════════════════ #}
+<div x-show="tab === 'trend'" x-cloak>
+
+<div style="margin-bottom: 14px; font-size: 11px; color: var(--text-muted);">
+    Sector-avg composite score over the last 12 months. Hover the chart for details.
+</div>
+
+{% if trend %}
+<div class="card" style="padding: 16px;">
+    <canvas id="sectorTrendChart" style="max-height: 380px;"></canvas>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+<script>
+  (function () {
+    const trend = {{ trend | tojson }};
+    if (!trend || trend.length === 0) return;
+
+    // Pivot rows → series per sector
+    const dates = Array.from(new Set(trend.map(r => r.pick_date))).sort();
+    const sectors = Array.from(new Set(trend.map(r => r.sector))).sort();
+    const palette = ['#4d8eff','#2ecc71','#f1c40f','#e74c3c','#9b59b6','#1abc9c',
+                     '#e67e22','#34495e','#95a5a6','#16a085','#8e44ad','#d35400'];
+
+    const datasets = sectors.map((s, i) => {
+      const lookup = {};
+      trend.filter(r => r.sector === s).forEach(r => { lookup[r.pick_date] = r.avg_score; });
+      return {
+        label: s,
+        data: dates.map(d => lookup[d] ?? null),
+        borderColor: palette[i % palette.length],
+        backgroundColor: palette[i % palette.length] + '20',
+        spanGaps: true, tension: 0.25, borderWidth: 1.5, pointRadius: 0,
+      };
+    });
+
+    const ctx = document.getElementById('sectorTrendChart').getContext('2d');
+    new Chart(ctx, {
+      type: 'line',
+      data: { labels: dates, datasets },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        scales: {
+          x: { ticks: { color: 'rgba(255,255,255,0.5)', font: { size: 10 } },
+               grid: { color: 'rgba(255,255,255,0.05)' } },
+          y: { ticks: { color: 'rgba(255,255,255,0.5)', font: { size: 10 } },
+               grid: { color: 'rgba(255,255,255,0.05)' },
+               title: { display: true, text: 'avg composite', color: 'rgba(255,255,255,0.5)' } }
+        },
+        plugins: {
+          legend: { labels: { color: 'rgba(255,255,255,0.7)', font: { size: 11 }, boxWidth: 12 } },
+          tooltip: { mode: 'index', intersect: false }
+        }
+      }
+    });
+  })();
+</script>
+{% else %}
+<div class="card" style="padding: 20px; color: var(--text-muted);">
+    No daily_picks history yet — chart populates once the daily pipeline has accumulated history.
+</div>
+{% endif %}
+
+</div>{# / trend tab #}
 
 </div>{# / tabs root #}
 
