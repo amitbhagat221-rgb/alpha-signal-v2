@@ -135,7 +135,7 @@
     }
 
     /* Top-players horizontal bars */
-    .pb-row { display: grid; grid-template-columns: 80px 1fr 70px 50px;
+    .pb-row { display: grid; grid-template-columns: 80px 1fr 60px 80px 50px;
               gap: 10px; align-items: center; padding: 5px 0;
               border-bottom: 1px solid var(--border); font-size: 11px; }
     .pb-row:last-child { border-bottom: none; }
@@ -499,12 +499,13 @@
     <div class="section-desc">Bar length = sector market-cap share. Score = our composite for that stock.</div>
     <div style="margin-top: 12px;">
         <div class="pb-row" style="font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid var(--border-accent);">
-            <span>Ticker</span><span>Sector share</span><span style="text-align: right;">₹cr</span><span style="text-align: right;">Score</span>
+            <span>Ticker</span><span>Share bar</span><span style="text-align: right;">Share %</span><span style="text-align: right;">Mcap ₹cr</span><span style="text-align: right;">Score</span>
         </div>
         {% for p in detail.top_players[:10] %}
         <div class="pb-row">
             <a href="/explorer/{{ p.sid }}" class="ticker" style="text-decoration: none;">{{ p.ticker }}</a>
             <div class="pb-track"><div class="pb-fill" style="width: {{ p.share_pct }}%;"></div></div>
+            <span class="num" style="font-weight: 700;">{{ "%.1f"|format(p.share_pct) }}%</span>
             <span class="num">{{ "{:,.0f}".format(p.market_cap_cr) }}</span>
             <span class="num
                 {% if p.final_score >= 0.7 %}score-green
