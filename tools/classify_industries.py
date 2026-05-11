@@ -141,6 +141,43 @@ Return ONLY a JSON array of {{"ticker": "...", "industry": "..."}} objects, in t
 - No commentary. No markdown fences. Just the JSON array."""
 
 
+def _build_prompt_from_scratch(stocks_batch):
+    """Pick from ALL 25 industries — used when we don't trust the input sector
+    tag (platform companies wrongly bucketed as Communication Services, etc).
+    The chosen industry's parent sector overwrites stocks.sector too."""
+    lines = []
+    for sec, inds in INDUSTRIES_BY_SECTOR.items():
+        lines.append(f"  [{sec}]")
+        for ind in inds:
+            lines.append(f"    - {ind}")
+    industries_str = "\n".join(lines)
+
+    rows = "\n".join(
+        f"{i+1}. {s['ticker']} — {s['name']}"
+        for i, s in enumerate(stocks_batch)
+    )
+
+    return f"""You are classifying Indian stocks into industries. The GICS sector tag in our database is sometimes wrong (especially for platform companies — Zomato, Swiggy, Paytm, Naukri are wrongly filed under Communication Services). Ignore any prior sector tag and pick the most accurate industry from the full list below.
+
+All allowed industries (grouped by sector for context — pick exactly one industry per stock):
+{industries_str}
+
+Stocks to classify:
+{rows}
+
+Return ONLY a JSON array of {{"ticker": "...", "industry": "..."}} objects, in the same order.
+- The "industry" field MUST exactly match one industry name from the list above (e.g. "E-Commerce", "Banks", "Automobiles").
+- For ambiguous companies, pick the industry that captures their primary revenue source.
+- Examples to guide:
+    - Zomato / Eternal → E-Commerce
+    - Swiggy → E-Commerce
+    - Paytm / PB Fintech / Bajaj Finance → NBFCs / Finance (if lending) or Capital Markets & Exchanges (if pure-broker)
+    - Naukri / IndiaMART / Just Dial → E-Commerce (online marketplaces / platforms)
+    - IRCTC → E-Commerce (online booking platform)
+    - Holding cos / conglomerates → classify by largest operating-revenue segment
+- No commentary. No markdown fences. Just the JSON array."""
+
+
 def _parse_response(text):
     """Extract JSON array from Claude's response (handles markdown / preamble)."""
     text = text.strip()
@@ -157,9 +194,20 @@ def _parse_response(text):
     return json.loads(text)
 
 
-def classify_batch(client, sector, stocks_batch):
-    """Classify one batch via Haiku. Returns dict {ticker: industry}."""
-    prompt = _build_prompt(stocks_batch, sector)
+def classify_batch(client, sector, stocks_batch, from_scratch=False):
+    """Classify one batch via Haiku. Returns dict {ticker: industry}.
+
+    In from_scratch mode, the prompt offers all 25 industries (not just the
+    sector's allowed list) and Haiku is told to ignore the existing sector
+    tag. Used to fix GICS mis-classifications (Zomato/Swiggy/Paytm wrongly
+    filed as Communication Services etc)."""
+    if from_scratch:
+        prompt = _build_prompt_from_scratch(stocks_batch)
+        allowed = set(ALL_INDUSTRIES.keys())
+    else:
+        prompt = _build_prompt(stocks_batch, sector)
+        allowed = set(INDUSTRIES_BY_SECTOR.get(sector, []))
+
     resp = client.messages.create(
         model=HAIKU_MODEL,
         max_tokens=2000,
@@ -171,8 +219,6 @@ def classify_batch(client, sector, stocks_batch):
     except json.JSONDecodeError as e:
         raise RuntimeError(f"Haiku returned invalid JSON: {e}\nFirst 400 chars:\n{text[:400]}")
 
-    # Validate: each industry must be in the allowed list for this sector
-    allowed = set(INDUSTRIES_BY_SECTOR.get(sector, []))
     out = {}
     for item in parsed:
         ticker = item.get("ticker")
@@ -182,20 +228,35 @@ def classify_batch(client, sector, stocks_batch):
     return out
 
 
-def _write_industries(updates):
-    """Bulk-update stocks.industry. updates = dict[ticker: industry]."""
+def _write_industries(updates, sync_sector=False):
+    """Bulk-update stocks.industry.
+
+    If sync_sector=True, also overwrite stocks.sector based on the industry's
+    parent sector in INDUSTRIES_BY_SECTOR — used in from-scratch mode where
+    we don't trust the existing GICS tag.
+    """
     if not updates:
-        return 0
+        return 0, 0
     with get_db() as conn:
-        n = 0
+        n_ind, n_sec = 0, 0
         for ticker, ind in updates.items():
+            if sync_sector:
+                sec = ALL_INDUSTRIES.get(ind)
+                if sec:
+                    r = conn.execute(
+                        "UPDATE stocks SET industry = ?, sector = ? WHERE ticker = ?",
+                        (ind, sec, ticker),
+                    )
+                    n_ind += r.rowcount
+                    n_sec += r.rowcount
+                    continue
             r = conn.execute(
                 "UPDATE stocks SET industry = ? WHERE ticker = ?",
                 (ind, ticker),
             )
-            n += r.rowcount
+            n_ind += r.rowcount
         conn.commit()
-    return n
+    return n_ind, n_sec
 
 
 def main():
@@ -205,6 +266,10 @@ def main():
     parser.add_argument("--dry-run", action="store_true", help="don't write to DB")
     parser.add_argument("--skip-existing", action="store_true",
                         help="skip stocks that already have industry set")
+    parser.add_argument("--from-scratch", action="store_true",
+                        help="ignore current sector tag — pick from all 25 industries "
+                             "and overwrite both stocks.industry and stocks.sector based "
+                             "on the chosen industry's parent sector")
     args = parser.parse_args()
 
     # Pull stocks needing classification
@@ -234,37 +299,54 @@ def main():
     total_failed = 0
     all_updates = {}
 
-    for sector, sec_df in df.groupby("sector"):
-        if sector not in INDUSTRIES_BY_SECTOR:
-            print(f"[skip] sector '{sector}' not in taxonomy")
-            total_failed += len(sec_df)
-            continue
-
-        stocks_list = sec_df[["ticker", "name"]].to_dict("records")
-        print(f"=== {sector} · {len(stocks_list)} stocks · "
-              f"{len(INDUSTRIES_BY_SECTOR[sector])} industries ===")
-
+    if args.from_scratch:
+        # One unified pool — sector is irrelevant
+        stocks_list = df[["ticker", "name"]].to_dict("records")
+        print(f"=== FROM-SCRATCH MODE · {len(stocks_list)} stocks · 25 industries ===")
         for i in range(0, len(stocks_list), BATCH_SIZE):
             batch = stocks_list[i:i + BATCH_SIZE]
             try:
-                updates = classify_batch(client, sector, batch)
+                updates = classify_batch(client, None, batch, from_scratch=True)
                 all_updates.update(updates)
                 total_done += len(updates)
-                # report a sample of what was assigned
                 sample = list(updates.items())[:3]
                 sample_str = ", ".join(f"{t}→{ind}" for t, ind in sample)
                 print(f"  [{i+1}-{i+len(batch)}/{len(stocks_list)}] {len(updates)}/{len(batch)} ok · {sample_str}…")
             except Exception as e:
                 print(f"  [{i+1}-{i+len(batch)}/{len(stocks_list)}] FAILED: {type(e).__name__}: {str(e)[:200]}")
                 total_failed += len(batch)
-            time.sleep(0.15)  # gentle on the API
+            time.sleep(0.15)
+    else:
+        for sector, sec_df in df.groupby("sector"):
+            if sector not in INDUSTRIES_BY_SECTOR:
+                print(f"[skip] sector '{sector}' not in taxonomy")
+                total_failed += len(sec_df)
+                continue
+
+            stocks_list = sec_df[["ticker", "name"]].to_dict("records")
+            print(f"=== {sector} · {len(stocks_list)} stocks · "
+                  f"{len(INDUSTRIES_BY_SECTOR[sector])} industries ===")
+
+            for i in range(0, len(stocks_list), BATCH_SIZE):
+                batch = stocks_list[i:i + BATCH_SIZE]
+                try:
+                    updates = classify_batch(client, sector, batch)
+                    all_updates.update(updates)
+                    total_done += len(updates)
+                    sample = list(updates.items())[:3]
+                    sample_str = ", ".join(f"{t}→{ind}" for t, ind in sample)
+                    print(f"  [{i+1}-{i+len(batch)}/{len(stocks_list)}] {len(updates)}/{len(batch)} ok · {sample_str}…")
+                except Exception as e:
+                    print(f"  [{i+1}-{i+len(batch)}/{len(stocks_list)}] FAILED: {type(e).__name__}: {str(e)[:200]}")
+                    total_failed += len(batch)
+                time.sleep(0.15)  # gentle on the API
 
     if args.dry_run:
         print(f"\n[dry-run] would update {len(all_updates)} stocks.")
         return
 
-    n_written = _write_industries(all_updates)
-    print(f"\nDone. {n_written} stocks updated, {total_failed} failed/skipped.")
+    n_ind, n_sec = _write_industries(all_updates, sync_sector=args.from_scratch)
+    print(f"\nDone. {n_ind} industry updates, {n_sec} sector updates, {total_failed} failed/skipped.")
 
     # Coverage summary
     print("\n=== Coverage summary (industry counts per sector) ===")
