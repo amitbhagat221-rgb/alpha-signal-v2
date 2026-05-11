@@ -1338,7 +1338,6 @@ def get_industry_competitive_landscape(industry):
         params=[industry],
     )
     by_ticker = {row["ticker"]: row for _, row in df.iterrows()}
-    by_name_token = {row["name"].split()[0].upper(): row for _, row in df.iterrows() if row["name"]}
 
     enriched = []
     for pl in cl.get("players", []):
@@ -1352,20 +1351,22 @@ def get_industry_competitive_landscape(industry):
             "final_score": None,
             "market_cap_cr": None,
         }
-        match = None
+        # Only enrich via EXPLICIT ticker match. Name-token fuzzy matching
+        # is too dangerous (e.g. "Reliance Jio" → ticker RCOM which is the
+        # defunct Reliance Communications). If Claude doesn't provide a
+        # ticker, treat the player as not-clickable rather than guess.
         if out["ticker"] and out["ticker"] in by_ticker:
             match = by_ticker[out["ticker"]]
-        elif out["name"]:
-            tok = out["name"].split()[0].upper()
-            if tok in by_name_token:
-                match = by_name_token[tok]
-        if match is not None:
             out["sid"] = match["sid"]
-            out["ticker"] = out["ticker"] or match["ticker"]
             out["final_score"] = float(match["final_score"]) if match["final_score"] is not None else None
             mcap = match["market_cap_cr"]
-            out["market_cap_cr"] = round(mcap / 1e7, 0) if mcap is not None and mcap == mcap else None  # NaN-safe
+            out["market_cap_cr"] = round(mcap / 1e7, 0) if mcap is not None and mcap == mcap else None
             out["listed"] = True  # if we found a row, it's listed in our DB
+        elif pl.get("ticker"):
+            # Claude claimed a ticker but it's not in our universe — could be
+            # a foreign listing or a misremembered symbol. Keep its `listed`
+            # value but don't make it clickable.
+            pass
         enriched.append(out)
 
     # Compute "other" residual so totals visibly add to ≤100
