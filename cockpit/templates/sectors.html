@@ -4,52 +4,70 @@
 {% block content %}
 
 <style>
-    /* Page-local additions only. Most styling reuses the global cockpit.css
-       vocabulary (.card / .section-title / .metric-grid / .signal-card / .conviction-bar). */
-
     .sec-meta { font-size: 11px; color: var(--text-muted); }
 
-    /* Heatmap mini-card — minimal, click to drill */
-    .heat-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-        gap: 10px;
+    /* Heatmap: industries grouped by sector */
+    .sec-group {
+        margin-bottom: 18px;
     }
-    .heat-card {
+    .sec-group-header {
+        display: flex; align-items: baseline; gap: 10px;
+        margin: 0 0 8px 2px;
+        padding-bottom: 4px;
+        border-bottom: 1px solid var(--border);
+    }
+    .sec-group-header .sec-name {
+        font-size: 10px; font-weight: 700; letter-spacing: 1px;
+        text-transform: uppercase; color: var(--accent);
+    }
+    .sec-group-header .sec-meta {
+        font-size: 10px; color: var(--text-muted);
+    }
+    .ind-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+        gap: 8px;
+    }
+    .ind-card {
         display: block; text-decoration: none; color: inherit;
         background: var(--bg-card);
         border: 1px solid var(--border);
         border-radius: 10px;
-        padding: 12px 14px;
+        padding: 10px 12px;
         transition: transform 0.12s, border-color 0.12s, box-shadow 0.12s;
     }
-    .heat-card:hover { transform: translateY(-2px); border-color: var(--accent);
+    .ind-card:hover { transform: translateY(-2px); border-color: var(--accent);
                        box-shadow: 0 4px 18px rgba(77,142,255,0.10); }
-    .heat-card .row {
+    .ind-card .row {
         display: flex; justify-content: space-between; align-items: center;
-        margin-bottom: 6px;
+        margin-bottom: 5px;
     }
-    .heat-card .name { font-weight: 700; font-size: 13px; color: var(--text-primary); }
-    .heat-card .score {
-        font-family: var(--mono, monospace); font-size: 18px; font-weight: 700;
+    .ind-card .name { font-weight: 700; font-size: 12.5px; color: var(--text-primary); }
+    .ind-card .score {
+        font-family: var(--mono, monospace); font-size: 16px; font-weight: 700;
     }
-    .heat-card .breadth-row { display: flex; gap: 10px; align-items: center; }
-    .heat-card .breadth-bar {
-        flex: 1; height: 4px; background: var(--border); border-radius: 2px; overflow: hidden;
+    .ind-card .breadth-row { display: flex; gap: 8px; align-items: center; }
+    .ind-card .breadth-bar {
+        flex: 1; height: 3px; background: var(--border); border-radius: 2px; overflow: hidden;
     }
-    .heat-card .breadth-fill {
+    .ind-card .breadth-fill {
         height: 100%; background: linear-gradient(90deg, var(--accent), rgba(139,92,246,0.4));
         border-radius: 2px;
     }
-    .heat-card .breadth-num { font-size: 10px; color: var(--text-muted); min-width: 38px; text-align: right; }
+    .ind-card .breadth-num { font-size: 9px; color: var(--text-muted); min-width: 32px; text-align: right; }
 
-    /* Per-sector header card */
+    /* Per-industry header */
     .ps-header {
         display: flex; flex-wrap: wrap; align-items: center; gap: 14px;
     }
     .ps-header h1 {
         margin: 0; font-size: 22px; font-weight: 800; letter-spacing: 0.4px;
         color: var(--text-primary);
+    }
+    .ps-header .parent-tag {
+        font-size: 10px; padding: 3px 8px; border-radius: 4px;
+        background: var(--bg-card-hover); color: var(--text-secondary);
+        letter-spacing: 0.4px;
     }
     .ps-header .industry-tag {
         font-size: 10px; padding: 3px 8px; border-radius: 4px;
@@ -110,7 +128,6 @@
         .vc-flow-lr .vc-arrow { transform: rotate(90deg); padding: 4px 0; }
     }
 
-    /* Driver column (3-up) — reuses metric-card aesthetics */
     .drv-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
     @media (max-width: 720px) { .drv-3 { grid-template-columns: 1fr; } }
     .drv-card {
@@ -134,7 +151,6 @@
         color: var(--text-secondary); margin: 2px 2px 2px 0; display: inline-block;
     }
 
-    /* Top-players horizontal bars */
     .pb-row { display: grid; grid-template-columns: 80px 1fr 60px 80px 50px;
               gap: 10px; align-items: center; padding: 5px 0;
               border-bottom: 1px solid var(--border); font-size: 11px; }
@@ -145,7 +161,6 @@
     .pb-fill { height: 100%; background: linear-gradient(90deg, var(--accent), rgba(139,92,246,0.4)); }
     .pb-row .num { font-family: var(--mono, monospace); text-align: right; }
 
-    /* Segment "chips" */
     .seg-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px; }
     .seg-chip {
         background: var(--bg-card-hover); border: 1px solid var(--border);
@@ -159,7 +174,6 @@
     .seg-chip .kpi-li .arrow.up { color: #2ecc71; }
     .seg-chip .kpi-li .arrow.down { color: #e74c3c; }
 
-    /* Trend bullets */
     .trend-box {
         background: var(--bg-card-hover); border: 1px solid var(--border);
         border-radius: 8px; padding: 12px 16px;
@@ -169,7 +183,6 @@
     .trend-box ul { margin: 0; padding-left: 18px; }
     .trend-box li { padding: 3px 0; }
 
-    /* Picks: signal-card style mini rows */
     .pick-row {
         display: grid; grid-template-columns: 60px 1fr 36px;
         gap: 8px; padding: 4px 0;
@@ -184,7 +197,7 @@
     .pdot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; vertical-align: middle; margin-right: 5px; }
     .pdot.up { background: #2ecc71; } .pdot.down { background: #e74c3c; } .pdot.flat { background: var(--text-muted); }
 
-    /* Sector rotation table */
+    /* Rotation table */
     .rot-table { width: 100%; border-collapse: collapse; font-size: 12px; }
     .rot-table th {
         text-align: left; padding: 8px 10px;
@@ -200,9 +213,6 @@
         font-weight: 700; font-size: 11px;
         text-align: center; line-height: 24px;
     }
-    .delta-up   { color: #2ecc71; }
-    .delta-down { color: #e74c3c; }
-    .delta-flat { color: var(--text-muted); }
 </style>
 
 
@@ -210,8 +220,9 @@
     <div>
         <div class="section-title">Sector Intelligence</div>
         <div class="section-desc">
-            {{ sectors | length }} sectors across the universe. Click a card to drill into the IIM-style sector page with
-            value chain, drivers, segments, top players, trends, and our model's picks for that sector.
+            {{ industries | length }} industries across {{ sector_list | length }} sectors.
+            Drill is at <strong>industry level</strong> (Automobiles, Cement, Banks, …) — sectors are visual groupings.
+            Click any card.
         </div>
     </div>
 </div>
@@ -220,120 +231,145 @@
 
 {{ tab_bar([
     ('heatmap',     'Heatmap'),
-    ('per-sector',  'Sector Detail'),
+    ('per-sector',  'Industry Detail'),
     ('rotation',    'Rotation'),
 ]) }}
 
 
 {# ════════════════════════════════════════════ #}
-{# TAB 1 — HEATMAP                              #}
+{# TAB 1 — HEATMAP (industries, grouped by sector) #}
 {# ════════════════════════════════════════════ #}
 <div x-show="tab === 'heatmap'" x-cloak>
 
-{# Methodology card — explains "composite score" #}
 <div class="card" style="margin-bottom: 14px; border-left: 4px solid var(--accent); padding: 12px 16px;">
     <div style="font-size: 11px; font-weight: 700; letter-spacing: 0.6px; text-transform: uppercase; color: var(--accent); margin-bottom: 4px;">
         How to read the score
     </div>
     <div style="font-size: 12.5px; line-height: 1.5; color: var(--text-secondary);">
-        <strong style="color: var(--text-primary);">Avg composite</strong> = mean of stock-level <code>final_score</code>
-        across stocks in the sector, where each stock's final_score is a cap-tier-weighted blend of validated factor signals
-        (consensus · piotroski · accruals · earnings yield · book-to-price · promoter · forensic + macro and regulatory tilts).
-        Higher is better. <strong style="color: var(--text-primary);">Breadth</strong> = % of stocks in the sector with composite ≥ 0.55.
-        <strong style="color: var(--text-primary);">Macro</strong> comes from <code>macro_sector_signals</code>
-        (RBI / sector index / regulatory tilts mapped per sector).
+        <strong style="color: var(--text-primary);">Avg composite</strong> = market-cap-weighted average of stock-level
+        <code>final_score</code> within the industry: <code>Σ(score × mcap) / Σ(mcap)</code>. Each stock's <code>final_score</code>
+        is itself a cap-tier-weighted blend of validated factor signals.
+        So a ₹10L cr leader dominates the industry score, and 50 micro-caps can't drag a sector down on their own.
+        <strong style="color: var(--text-primary);">Breadth</strong> = % of stocks with composite ≥ 0.55 (equal-weighted —
+        catches "is the bench deep?" alongside the cap-weighted leader signal).
+        Industry granularity uses our 25-bucket taxonomy (e.g. <em>Consumer Discretionary</em> splits into <em>Automobiles</em>,
+        <em>Auto Components</em>, <em>Hospitality</em>, <em>Retail</em>, <em>E-Commerce</em>, <em>Consumer Durables</em>).
     </div>
 </div>
 
-<div class="heat-grid">
-    {% for s in sectors %}
-    {% set is_tail = s.macro_signal in ['TAILWIND', 'FAVORABLE'] %}
-    {% set is_head = s.macro_signal in ['HEADWIND', 'ADVERSE'] %}
-    <a class="heat-card" href="/sectors?sector={{ s.sector | urlencode }}#per-sector"
-       style="border-left: 3px solid
-            {%- if is_tail %} var(--green)
-            {%- elif is_head %} var(--red)
-            {%- else %} var(--border){% endif %};">
-        <div class="row">
-            <span class="name">{{ s.sector }}</span>
-            <span class="score
-                {% if s.avg_score >= 0.6 %}score-green
-                {% elif s.avg_score >= 0.45 %}score-amber
-                {% else %}score-red{% endif %}">
-                {{ "%.0f"|format(s.avg_score * 100) }}
-            </span>
-        </div>
-        <div class="row" style="margin-bottom: 8px;">
-            <span class="sec-meta">{{ s.stocks }} stocks</span>
-            {% if s.macro_signal %}
-            <span class="sec-meta" style="
-                {% if is_tail %}color: var(--green);
-                {% elif is_head %}color: var(--red);{% endif %}">
-                {{ s.macro_signal }}
-            </span>
+{# Group industries by parent sector, ordered by sector then by avg_score desc #}
+{% set by_sector = {} %}
+{% for ind in industries %}
+    {% set s = ind.sector or '—' %}
+    {% if by_sector.update({s: by_sector.get(s, []) + [ind]}) %}{% endif %}
+{% endfor %}
+
+{% for sec in by_sector | sort %}
+    {% set inds = by_sector[sec] %}
+    {% set sec_meta = inds[0] %}
+<div class="sec-group">
+    <div class="sec-group-header">
+        <span class="sec-name">{{ sec }}</span>
+        <span class="sec-meta">
+            {{ inds | length }} industr{{ 'ies' if inds | length != 1 else 'y' }} ·
+            {{ inds | sum(attribute='stocks') }} stocks
+            {% if sec_meta.macro_signal %}
+            · <span style="
+                {% if sec_meta.macro_signal in ['TAILWIND', 'FAVORABLE'] %}color: var(--green);
+                {% elif sec_meta.macro_signal in ['HEADWIND', 'ADVERSE'] %}color: var(--red);{% endif %}
+                font-weight: 700;">macro: {{ sec_meta.macro_signal }}</span>
             {% endif %}
-        </div>
-        {% if s.breadth_pct is not none %}
-        <div class="breadth-row">
-            <div class="breadth-bar"><div class="breadth-fill" style="width: {{ s.breadth_pct }}%;"></div></div>
-            <span class="breadth-num">{{ "%.0f"|format(s.breadth_pct) }}% strong</span>
-        </div>
-        {% endif %}
-    </a>
-    {% endfor %}
+        </span>
+    </div>
+    <div class="ind-grid">
+        {% for ind in inds %}
+        {% set is_tail = ind.macro_signal in ['TAILWIND', 'FAVORABLE'] %}
+        {% set is_head = ind.macro_signal in ['HEADWIND', 'ADVERSE'] %}
+        <a class="ind-card" href="/sectors?industry={{ ind.industry | urlencode }}#per-sector"
+           style="border-left: 3px solid
+                {%- if is_tail %} var(--green)
+                {%- elif is_head %} var(--red)
+                {%- else %} var(--border){% endif %};">
+            <div class="row">
+                <span class="name">{{ ind.industry }}</span>
+                <span class="score
+                    {% if ind.avg_score >= 0.6 %}score-green
+                    {% elif ind.avg_score >= 0.45 %}score-amber
+                    {% else %}score-red{% endif %}">
+                    {{ "%.0f"|format(ind.avg_score * 100) if ind.avg_score else '—' }}
+                </span>
+            </div>
+            <div class="row" style="margin-bottom: 6px;">
+                <span class="sec-meta">{{ ind.stocks }} stocks</span>
+                {% if ind.top_3 %}
+                <span class="sec-meta" style="font-family: var(--mono, monospace); color: var(--text-secondary);">{{ ind.top_3[:36] }}{% if ind.top_3 | length > 36 %}…{% endif %}</span>
+                {% endif %}
+            </div>
+            {% if ind.breadth_pct is not none %}
+            <div class="breadth-row">
+                <div class="breadth-bar"><div class="breadth-fill" style="width: {{ ind.breadth_pct }}%;"></div></div>
+                <span class="breadth-num">{{ "%.0f"|format(ind.breadth_pct) }}%</span>
+            </div>
+            {% endif %}
+        </a>
+        {% endfor %}
+    </div>
 </div>
+{% endfor %}
 
 </div>{# / heatmap tab #}
 
 
 {# ════════════════════════════════════════════ #}
-{# TAB 2 — SECTOR DETAIL (stock_detail style)   #}
+{# TAB 2 — INDUSTRY DETAIL                      #}
 {# ════════════════════════════════════════════ #}
 <div x-show="tab === 'per-sector'" x-cloak>
 
 {% if not detail %}
 <div class="card" style="padding: 18px; color: var(--text-muted); text-align: center;">
-    Click a sector card on the Heatmap tab, or pick one below.
+    Click an industry card on the Heatmap tab, or pick one below.
 </div>
 
 <div class="ps-selector" style="margin-top: 12px;">
-    <select onchange="window.location.href = '/sectors?sector=' + encodeURIComponent(this.value) + '#per-sector'">
-        <option value="">— pick a sector —</option>
-        {% for s in sector_list %}
-        <option value="{{ s }}">{{ s }}</option>
+    <select onchange="window.location.href = '/sectors?industry=' + encodeURIComponent(this.value) + '#per-sector'">
+        <option value="">— pick an industry —</option>
+        {% for ind in industry_list %}
+        <option value="{{ ind }}">{{ ind }}</option>
         {% endfor %}
     </select>
 </div>
 
 {% else %}
 {% set narr = detail.narrative %}
-{% set sec_match = sectors | selectattr('sector', 'equalto', detail.name) | first %}
-{% set is_tail = sec_match and sec_match.macro_signal in ['TAILWIND', 'FAVORABLE'] %}
-{% set is_head = sec_match and sec_match.macro_signal in ['HEADWIND', 'ADVERSE'] %}
+{% set ind_match = industries | selectattr('industry', 'equalto', detail.name) | first %}
+{% set is_tail = ind_match and ind_match.macro_signal in ['TAILWIND', 'FAVORABLE'] %}
+{% set is_head = ind_match and ind_match.macro_signal in ['HEADWIND', 'ADVERSE'] %}
 
-{# ── Header card (like stock_detail's stock-header) ── #}
 <div class="card" style="margin-bottom: 14px; padding: 14px 18px;">
     <div class="ps-header">
         <h1>{{ detail.name }}</h1>
+        {% if detail.parent_sector %}
+        <span class="parent-tag">Sector · {{ detail.parent_sector }}</span>
+        {% endif %}
         {% if narr and narr._industry %}
         <span class="industry-tag">IIM industry · {{ narr._industry }}</span>
         {% endif %}
-        {% if sec_match and sec_match.macro_signal %}
+        {% if ind_match and ind_match.macro_signal %}
         <span class="macro-pill {{ 'tail' if is_tail else ('head' if is_head else 'neutral') }}">
-            {{ sec_match.macro_signal }}
+            {{ ind_match.macro_signal }}
         </span>
         {% endif %}
         <div style="margin-left: auto;" class="ps-selector">
-            <select onchange="window.location.href = '/sectors?sector=' + encodeURIComponent(this.value) + '#per-sector'">
-                {% for s in sector_list %}
-                <option value="{{ s }}" {% if s == detail.name %}selected{% endif %}>{{ s }}</option>
+            <select onchange="window.location.href = '/sectors?industry=' + encodeURIComponent(this.value) + '#per-sector'">
+                {% for ind in industry_list %}
+                <option value="{{ ind }}" {% if ind == detail.name %}selected{% endif %}>{{ ind }}</option>
                 {% endfor %}
             </select>
         </div>
     </div>
 </div>
 
-{# ── Metric strip (like stock_detail's price-metrics bar) ── #}
+{# ── Metric strip ── #}
 <div class="card" style="padding: 12px 18px; margin-bottom: 14px; display: flex; flex-wrap: wrap; gap: 28px; align-items: center;">
     {% if narr and narr.industry_size_inr_cr %}
     <div>
@@ -349,21 +385,21 @@
         <span class="mono score-green" style="font-size: 16px; font-weight: 700;">↑ {{ narr.industry_cagr_pct }}%</span>
     </div>
     {% endif %}
-    {% if sec_match %}
+    {% if ind_match %}
     <div>
         <span class="sec-meta">Avg composite</span><br>
         <span class="mono
-            {% if sec_match.avg_score >= 0.6 %}score-green
-            {% elif sec_match.avg_score >= 0.45 %}score-amber
+            {% if ind_match.avg_score >= 0.6 %}score-green
+            {% elif ind_match.avg_score >= 0.45 %}score-amber
             {% else %}score-red{% endif %}" style="font-size: 16px; font-weight: 700;">
-            {{ "%.0f"|format(sec_match.avg_score * 100) }}/100
+            {{ "%.0f"|format(ind_match.avg_score * 100) }}/100
         </span>
     </div>
     <div>
         <span class="sec-meta">Stocks · Breadth</span><br>
         <span class="mono" style="font-size: 16px; font-weight: 700;">
-            {{ sec_match.stocks }}<span style="font-size: 11px; color: var(--text-muted); margin-left: 4px;">stks ·</span>
-            {{ "%.0f"|format(sec_match.breadth_pct) if sec_match.breadth_pct is not none else 0 }}%
+            {{ ind_match.stocks }}<span style="font-size: 11px; color: var(--text-muted); margin-left: 4px;">stks ·</span>
+            {{ "%.0f"|format(ind_match.breadth_pct) if ind_match.breadth_pct is not none else 0 }}%
         </span>
     </div>
     {% endif %}
@@ -373,17 +409,15 @@
     </div>
 </div>
 
-{# ── Conviction bar — sector "where are we" ── #}
-{% if sec_match %}
+{# ── Conviction bar ── #}
+{% if ind_match %}
 <div class="card" style="margin-bottom: 14px; padding: 12px 18px;">
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-        <span class="section-title" style="margin-bottom: 0;">Where this sector stands</span>
-        <span class="mono" style="font-size: 11px; color: var(--text-muted);">
-            avg composite vs full universe
-        </span>
+        <span class="section-title" style="margin-bottom: 0;">Where this industry stands</span>
+        <span class="mono" style="font-size: 11px; color: var(--text-muted);">avg composite vs full universe</span>
     </div>
     <div class="conviction-bar" style="height: 10px; margin-bottom: 6px;">
-        <div class="conviction-marker" style="left: {{ sec_match.avg_score * 100 }}%;"></div>
+        <div class="conviction-marker" style="left: {{ ind_match.avg_score * 100 }}%;"></div>
     </div>
     <div style="display: flex; justify-content: space-between; font-size: 10px; color: var(--text-muted); letter-spacing: 0.4px; text-transform: uppercase;">
         <span>Avoid</span><span>Neutral</span><span>Buy</span>
@@ -391,9 +425,8 @@
 </div>
 {% endif %}
 
-{# ── Sub-tabs: Overview / Players / Trends / Picks ── #}
+{# ── Sub-tabs ── #}
 <div x-data="{ sub: 'overview', sloaded: { overview: true } }">
-
 <div class="tab-bar" style="margin-bottom: 14px;">
     {% for k, l in [('overview','Overview'), ('players','Players'), ('trends','Trends'), ('picks','Our Picks')] %}
     <button class="tab-button" :class="{ active: sub === '{{ k }}' }"
@@ -402,18 +435,16 @@
 </div>
 
 
-{# ──── OVERVIEW SUBTAB ──── #}
 <div x-show="sub === 'overview'" x-cloak>
-
 {% if narr and narr.summary %}
 <div class="card" style="margin-bottom: 14px; border-left: 4px solid var(--accent); padding: 14px 18px;">
-    <span style="font-size: 11px; font-weight: 700; letter-spacing: 1px; color: var(--accent);">SECTOR THESIS</span>
+    <span style="font-size: 11px; font-weight: 700; letter-spacing: 1px; color: var(--accent);">INDUSTRY THESIS</span>
     <div style="font-size: 14px; line-height: 1.6; color: var(--text-primary); margin-top: 6px;">{{ narr.summary }}</div>
 </div>
 {% elif not narr %}
 <div class="card" style="margin-bottom: 14px; border-left: 4px solid var(--amber); padding: 12px 16px;">
     <span style="font-size: 11px; color: var(--text-muted);">
-        ⚠ Structured narrative not generated for this sector. Run
+        ⚠ Structured narrative not generated for this industry. Run
         <code style="font-size: 11px;">python -m tools.sector_narrative_fetcher --sector "{{ detail.name }}"</code>.
     </span>
 </div>
@@ -422,7 +453,7 @@
 {% if narr and narr.value_chain %}
 <div class="card" style="margin-bottom: 14px;">
     <div class="section-title">How it works · 5-stage value chain</div>
-    <div class="section-desc">Left → right: how value moves through the sector. Click ahead through each step.</div>
+    <div class="section-desc">Left → right: how value moves through the industry.</div>
     <div class="vc-flow-lr" style="margin-top: 12px;">
         {% for stage in narr.value_chain[:5] %}
         <div class="vc-card">
@@ -447,15 +478,8 @@
             ('growth',  'Growth',   '📈', 'grow'),
         ] %}
         <div class="drv-card {{ cls }}">
-            <div class="head">
-                <span class="icon">{{ icon }}</span>
-                <h5>{{ label }}</h5>
-            </div>
-            <div>
-                {% for d in narr.drivers.get(kind, [])[:6] %}
-                <span class="drv-pill">{{ d.item }}</span>
-                {% endfor %}
-            </div>
+            <div class="head"><span class="icon">{{ icon }}</span><h5>{{ label }}</h5></div>
+            <div>{% for d in narr.drivers.get(kind, [])[:6] %}<span class="drv-pill">{{ d.item }}</span>{% endfor %}</div>
         </div>
         {% endfor %}
     </div>
@@ -468,35 +492,21 @@
         ▸ More context — cyclicality · regulators · India-specific
     </summary>
     <div style="padding: 0 18px 14px 18px; font-size: 12px; line-height: 1.6; color: var(--text-secondary);">
-        {% if narr.cyclicality %}
-        <div class="section-title" style="margin-top: 6px;">Cyclicality</div>
-        <div>{{ narr.cyclicality }}</div>
-        {% endif %}
-        {% if narr.regulators %}
-        <div class="section-title">Regulators</div>
-        {% for r in narr.regulators %}
-        <div style="padding: 3px 0;"><strong style="color: var(--text-primary);">{{ r.body }}</strong> · {{ r.what }}</div>
-        {% endfor %}
-        {% endif %}
-        {% if narr.india_specific %}
-        <div class="section-title">India-specific factors</div>
-        <ul style="padding-left: 18px; margin: 0;">
-            {% for b in narr.india_specific %}<li>{{ b }}</li>{% endfor %}
-        </ul>
-        {% endif %}
+        {% if narr.cyclicality %}<div class="section-title" style="margin-top: 6px;">Cyclicality</div><div>{{ narr.cyclicality }}</div>{% endif %}
+        {% if narr.regulators %}<div class="section-title">Regulators</div>
+        {% for r in narr.regulators %}<div style="padding: 3px 0;"><strong style="color: var(--text-primary);">{{ r.body }}</strong> · {{ r.what }}</div>{% endfor %}{% endif %}
+        {% if narr.india_specific %}<div class="section-title">India-specific factors</div>
+        <ul style="padding-left: 18px; margin: 0;">{% for b in narr.india_specific %}<li>{{ b }}</li>{% endfor %}</ul>{% endif %}
     </div>
 </details>
 {% endif %}
+</div>{# / overview sub #}
 
-</div>{# / overview subtab #}
 
-
-{# ──── PLAYERS SUBTAB ──── #}
 <div x-show="sub === 'players'" x-cloak>
-
 <div class="card" style="margin-bottom: 14px;">
     <div class="section-title">Top players — market-cap share</div>
-    <div class="section-desc">Bar length = sector market-cap share. Score = our composite for that stock.</div>
+    <div class="section-desc">Within this industry. Bar length = industry market-cap share. Score = our composite.</div>
     <div style="margin-top: 12px;">
         <div class="pb-row" style="font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid var(--border-accent);">
             <span>Ticker</span><span>Share bar</span><span style="text-align: right;">Share %</span><span style="text-align: right;">Mcap ₹cr</span><span style="text-align: right;">Score</span>
@@ -521,16 +531,14 @@
 {% if narr and narr.segments %}
 <div class="card">
     <div class="section-title">Segments &amp; KPIs</div>
-    <div class="section-desc">How investors split the sector + which metrics matter per slice.</div>
+    <div class="section-desc">How investors split the industry + which metrics matter per slice.</div>
     <div class="seg-list" style="margin-top: 12px;">
         {% for seg in narr.segments[:8] %}
         <div class="seg-chip">
             <div class="seg-name">{{ seg.name }}</div>
             {% for kpi in seg['kpis'][:4] %}
             <div class="kpi-li">
-                <span class="arrow {{ 'up' if kpi.direction == 'higher_is_better' else 'down' }}">
-                    {{ '↑' if kpi.direction == 'higher_is_better' else '↓' }}
-                </span>
+                <span class="arrow {{ 'up' if kpi.direction == 'higher_is_better' else 'down' }}">{{ '↑' if kpi.direction == 'higher_is_better' else '↓' }}</span>
                 <strong style="color: var(--text-primary);">{{ kpi.name }}</strong>
                 <span style="color: var(--text-muted);">· {{ kpi.formula[:50] }}</span>
             </div>
@@ -540,17 +548,14 @@
     </div>
 </div>
 {% endif %}
+</div>{# / players sub #}
 
-</div>{# / players subtab #}
 
-
-{# ──── TRENDS SUBTAB ──── #}
 <div x-show="sub === 'trends'" x-cloak>
-
 {% if narr and narr.trend_bullets %}
 <div class="card">
     <div class="section-title">Market trends</div>
-    <div class="section-desc">Switch category — only one set of bullets visible at a time. Sourced fresh from web search at narrative-generation time.</div>
+    <div class="section-desc">Switch category — only one set of bullets visible at a time. Sourced fresh from web search.</div>
     <div x-data="{ tcat: 'industry_size' }" style="margin-top: 12px;">
         {{ radio_group('tcat', [
             ('industry_size',     'Size & growth'),
@@ -559,37 +564,26 @@
             ('headwinds',         'Headwinds'),
             ('india_specific',    'India tailwinds'),
         ]) }}
-
         {% for kind in ['industry_size', 'structural_shifts', 'regulatory', 'headwinds', 'india_specific'] %}
         {% set bullets = narr.trend_bullets.get(kind) %}
         <div x-show="tcat === '{{ kind }}'" x-cloak class="trend-box">
-            {% if bullets %}
-            <ul>{% for b in bullets %}<li>{{ b }}</li>{% endfor %}</ul>
-            {% else %}
-            <div style="color: var(--text-muted); font-style: italic;">No bullets in this category.</div>
-            {% endif %}
+            {% if bullets %}<ul>{% for b in bullets %}<li>{{ b }}</li>{% endfor %}</ul>
+            {% else %}<div style="color: var(--text-muted); font-style: italic;">No bullets in this category.</div>{% endif %}
         </div>
         {% endfor %}
     </div>
 </div>
 {% else %}
-<div class="card" style="padding: 18px; color: var(--text-muted);">
-    No trend bullets — narrative not generated yet for this sector.
-</div>
+<div class="card" style="padding: 18px; color: var(--text-muted);">No trend bullets — narrative not generated yet.</div>
 {% endif %}
+</div>{# / trends sub #}
 
-</div>{# / trends subtab #}
 
-
-{# ──── PICKS SUBTAB ──── #}
 <div x-show="sub === 'picks'" x-cloak>
-
 <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px;">
-
-    {# Top picks #}
     <div class="card">
-        <div class="section-title" style="margin-bottom: 4px;">Top picks · in this sector</div>
-        <div class="section-desc">Sorted by our composite score. Click ticker to drill.</div>
+        <div class="section-title" style="margin-bottom: 4px;">Top picks · in this industry</div>
+        <div class="section-desc">Sorted by composite. Click to drill.</div>
         <div style="margin-top: 10px;">
         {% for p in detail.picks.top[:8] %}
         <div class="pick-row">
@@ -600,11 +594,9 @@
         {% endfor %}
         </div>
     </div>
-
-    {# Avoid #}
     <div class="card">
-        <div class="section-title" style="margin-bottom: 4px;">Avoid · in this sector</div>
-        <div class="section-desc">Lowest composite scores. Probable structural risks.</div>
+        <div class="section-title" style="margin-bottom: 4px;">Avoid</div>
+        <div class="section-desc">Lowest composite scores within this industry.</div>
         <div style="margin-top: 10px;">
         {% for p in detail.picks.bottom[:5] %}
         <div class="pick-row">
@@ -615,11 +607,9 @@
         {% endfor %}
         </div>
     </div>
-
-    {# Macro contributors #}
     <div class="card">
         <div class="section-title" style="margin-bottom: 4px;">Macro contributors</div>
-        <div class="section-desc">Indicators driving the macro signal.</div>
+        <div class="section-desc">Indicators driving the parent sector's macro signal.</div>
         <div style="margin-top: 10px;">
         {% if detail.macro_contributors %}
             {% for m in detail.macro_contributors[:5] %}
@@ -629,16 +619,12 @@
                 <span class="score">{{ "%.2f"|format(m.weight) if m.weight is not none else '' }}</span>
             </div>
             {% endfor %}
-        {% else %}
-            <div style="font-size: 11px; color: var(--text-muted);">No mappings.</div>
-        {% endif %}
+        {% else %}<div style="font-size: 11px; color: var(--text-muted);">No mappings.</div>{% endif %}
         </div>
     </div>
-
-    {# Regulatory #}
     <div class="card">
         <div class="section-title" style="margin-bottom: 4px;">Recent regulatory</div>
-        <div class="section-desc">Classified events affecting the sector.</div>
+        <div class="section-desc">Classified events affecting the parent sector.</div>
         <div style="margin-top: 10px;">
         {% if detail.regulatory %}
             {% for r in detail.regulatory[:5] %}
@@ -648,67 +634,68 @@
                 <span style="margin-left: 4px;">{{ r.title[:65] }}</span>
             </div>
             {% endfor %}
-        {% else %}
-            <div style="font-size: 11px; color: var(--text-muted);">None.</div>
-        {% endif %}
+        {% else %}<div style="font-size: 11px; color: var(--text-muted);">None.</div>{% endif %}
         </div>
     </div>
-
 </div>
+</div>{# / picks sub #}
 
-</div>{# / picks subtab #}
-
-</div>{# / sub-tab x-data #}
+</div>{# / sub x-data #}
 {% endif %}{# detail #}
 
 </div>{# / per-sector tab #}
 
 
 {# ════════════════════════════════════════════ #}
-{# TAB 3 — ROTATION (sector ranking table)     #}
+{# TAB 3 — ROTATION (industries ranked)         #}
 {# ════════════════════════════════════════════ #}
 <div x-show="tab === 'rotation'" x-cloak>
 
 <div class="card">
-    <div class="section-title">Sector rotation · today's ranking</div>
+    <div class="section-title">Industry rotation · today's ranking</div>
     <div class="section-desc">
-        Sectors ranked by today's avg composite. Macro signal and breadth (% of stocks with composite ≥ 0.55) shown side-by-side.
-        Click a row to drill into the sector.
+        25 industries ranked by today's avg composite. Macro signal inherited from parent sector. Click a row to drill.
     </div>
     <table class="rot-table" style="margin-top: 14px;">
         <thead>
         <tr>
             <th style="width: 50px;">Rank</th>
+            <th>Industry</th>
             <th>Sector</th>
-            <th class="num" style="width: 90px;">Avg comp.</th>
-            <th class="num" style="width: 80px;">Breadth</th>
+            <th class="num" style="width: 80px;">Avg</th>
+            <th class="num" style="width: 70px;">Breadth</th>
             <th style="width: 110px;">Macro</th>
-            <th class="num" style="width: 70px;">Stocks</th>
+            <th class="num" style="width: 60px;">Stocks</th>
         </tr>
         </thead>
         <tbody>
-        {% for s in sectors %}
-        {% set is_tail = s.macro_signal in ['TAILWIND', 'FAVORABLE'] %}
-        {% set is_head = s.macro_signal in ['HEADWIND', 'ADVERSE'] %}
-        <tr onclick="window.location.href = '/sectors?sector={{ s.sector | urlencode }}#per-sector'"
+        {% for ind in industries %}
+        {% set is_tail = ind.macro_signal in ['TAILWIND', 'FAVORABLE'] %}
+        {% set is_head = ind.macro_signal in ['HEADWIND', 'ADVERSE'] %}
+        <tr onclick="window.location.href = '/sectors?industry={{ ind.industry | urlencode }}#per-sector'"
             style="cursor: pointer;">
             <td><span class="rot-rank-pill">{{ loop.index }}</span></td>
-            <td style="font-weight: 600; color: var(--text-primary);">{{ s.sector }}</td>
+            <td style="font-weight: 600; color: var(--text-primary);">{{ ind.industry }}</td>
+            <td style="color: var(--text-muted); font-size: 11px;">{{ ind.sector }}</td>
             <td class="num
-                {% if s.avg_score >= 0.6 %}score-green
-                {% elif s.avg_score >= 0.45 %}score-amber
+                {% if ind.avg_score >= 0.6 %}score-green
+                {% elif ind.avg_score >= 0.45 %}score-amber
                 {% else %}score-red{% endif %}">
-                {{ "%.0f"|format(s.avg_score * 100) }}
+                {{ "%.0f"|format(ind.avg_score * 100) if ind.avg_score else '—' }}
             </td>
-            <td class="num">{{ "%.0f"|format(s.breadth_pct) if s.breadth_pct is not none else 0 }}%</td>
+            <td class="num">{{ "%.0f"|format(ind.breadth_pct) if ind.breadth_pct is not none else 0 }}%</td>
             <td>
-                {% if s.macro_signal %}
-                <span class="macro-pill {{ 'tail' if is_tail else ('head' if is_head else 'neutral') }}">
-                    {{ s.macro_signal }}
+                {% if ind.macro_signal %}
+                <span class="macro-pill {{ 'tail' if is_tail else ('head' if is_head else 'neutral') }}"
+                      style="font-size: 9px; padding: 2px 7px; border-radius: 10px; font-weight: 700; letter-spacing: 0.5px;
+                      {% if is_tail %}background: var(--green-bg); color: var(--green);
+                      {% elif is_head %}background: var(--red-bg); color: var(--red);
+                      {% else %}background: var(--bg-card-hover); color: var(--text-muted);{% endif %}">
+                    {{ ind.macro_signal }}
                 </span>
                 {% endif %}
             </td>
-            <td class="num">{{ s.stocks }}</td>
+            <td class="num">{{ ind.stocks }}</td>
         </tr>
         {% endfor %}
         </tbody>
@@ -717,6 +704,6 @@
 
 </div>{# / rotation tab #}
 
-</div>{# / main tab x-data #}
+</div>{# / main x-data #}
 
 {% endblock %}

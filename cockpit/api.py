@@ -954,16 +954,22 @@ def get_model_portfolio():
 
 
 def get_sector_overview():
-    """Sector scores + stock counts."""
+    """Sector scores + stock counts. avg_score is MARKET-CAP WEIGHTED."""
     df = read_sql("""
-        SELECT dp.sector, COUNT(*) as stocks,
-               ROUND(AVG(dp.final_score), 3) as avg_score,
+        SELECT dp.sector,
+               COUNT(*) AS stocks,
+               ROUND(
+                 SUM(dp.final_score * s.market_cap_cr) /
+                 NULLIF(SUM(s.market_cap_cr), 0),
+                 3
+               ) AS avg_score,
                MIN(dp.rank) as best_rank
         FROM daily_picks dp
+        JOIN stocks s ON s.sid = dp.sid
         WHERE dp.pick_date = (SELECT MAX(pick_date) FROM daily_picks)
         AND dp.sector IS NOT NULL
         GROUP BY dp.sector
-        ORDER BY avg_score DESC
+        ORDER BY avg_score DESC NULLS LAST
     """)
 
     # Merge with macro sector signals (latest snapshot only — table keeps history)
@@ -1159,6 +1165,177 @@ def get_sector_recent_regulatory(sector, n=10):
         params=[sector, n],
     )
     return df.to_dict("records") if not df.empty else []
+
+
+def get_industry_overview():
+    """Per-industry rollup. avg_score is MARKET-CAP WEIGHTED across stocks
+    with a daily_picks score, so a ₹10L cr leader doesn't get diluted by 50
+    micro-caps. Stocks without a final_score (NULL daily_picks join) are
+    excluded from the weighted average.
+    """
+    df = read_sql("""
+        SELECT s.industry AS industry, s.sector AS sector,
+               COUNT(*) AS stocks,
+               ROUND(
+                 SUM(dp.final_score * s.market_cap_cr) /
+                 NULLIF(SUM(CASE WHEN dp.final_score IS NOT NULL THEN s.market_cap_cr ELSE 0 END), 0),
+                 3
+               ) AS avg_score
+        FROM stocks s
+        LEFT JOIN daily_picks dp
+          ON dp.sid = s.sid
+         AND dp.pick_date = (SELECT MAX(pick_date) FROM daily_picks)
+        WHERE s.industry IS NOT NULL AND s.ticker IS NOT NULL
+        GROUP BY s.industry, s.sector
+        ORDER BY avg_score DESC NULLS LAST
+    """)
+    if df.empty:
+        return []
+
+    # Macro signal inherited from parent sector
+    macro = read_sql("""
+        SELECT sector, macro_score, macro_signal, macro_detail
+        FROM macro_sector_signals
+        WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM macro_sector_signals)
+    """)
+    if not macro.empty:
+        df = df.merge(macro, on="sector", how="left")
+
+    # Breadth per industry
+    breadth = read_sql("""
+        SELECT s.industry,
+               ROUND(100.0 * SUM(CASE WHEN dp.final_score >= 0.55 THEN 1 ELSE 0 END) / COUNT(*), 1)
+                   AS breadth_pct
+        FROM daily_picks dp
+        JOIN stocks s ON s.sid = dp.sid
+        WHERE dp.pick_date = (SELECT MAX(pick_date) FROM daily_picks)
+          AND s.industry IS NOT NULL
+        GROUP BY s.industry
+    """)
+    if not breadth.empty:
+        df = df.merge(breadth, on="industry", how="left")
+
+    # Top-3 tickers per industry
+    top_n = read_sql("""
+        WITH ranked AS (
+            SELECT s.industry, s.ticker, dp.final_score,
+                   ROW_NUMBER() OVER (PARTITION BY s.industry ORDER BY dp.final_score DESC) AS r
+            FROM daily_picks dp
+            JOIN stocks s ON s.sid = dp.sid
+            WHERE dp.pick_date = (SELECT MAX(pick_date) FROM daily_picks)
+              AND s.industry IS NOT NULL
+        )
+        SELECT industry, ticker FROM ranked WHERE r <= 3
+    """)
+    top_by_ind = {}
+    if not top_n.empty:
+        for _, r in top_n.iterrows():
+            top_by_ind.setdefault(r["industry"], []).append(r["ticker"])
+    df["top_3"] = df["industry"].map(lambda i: ", ".join(top_by_ind.get(i, [])))
+
+    return df.to_dict("records")
+
+
+def get_industry_list():
+    """Sorted list of industries that have any stocks."""
+    df = read_sql(
+        "SELECT DISTINCT industry FROM stocks "
+        "WHERE industry IS NOT NULL AND ticker IS NOT NULL "
+        "ORDER BY industry"
+    )
+    return df["industry"].tolist()
+
+
+def get_industry_metadata(industry):
+    """Same as get_sector_metadata but keyed by industry name (which is
+    stored in sector_metadata.sector — the column is named for legacy
+    reasons; we treat its value as 'taxonomy key', be it sector or industry)."""
+    return get_sector_metadata(industry)
+
+
+def get_industry_parent_sector(industry):
+    """Return the GICS sector this industry rolls up to."""
+    df = read_sql(
+        "SELECT DISTINCT sector FROM stocks "
+        "WHERE industry = ? AND sector IS NOT NULL LIMIT 1",
+        params=[industry],
+    )
+    return df["sector"].iloc[0] if not df.empty else None
+
+
+def get_industry_top_players(industry, n=10):
+    df = read_sql(
+        """
+        SELECT s.sid, s.ticker, s.name, s.market_cap_cr,
+               COALESCE(dp.final_score, 0) AS final_score,
+               COALESCE(dp.rank, NULL)     AS rank
+        FROM stocks s
+        LEFT JOIN daily_picks dp
+          ON dp.sid = s.sid
+         AND dp.pick_date = (SELECT MAX(pick_date) FROM daily_picks)
+        WHERE s.industry = ? AND s.ticker IS NOT NULL
+        ORDER BY s.market_cap_cr DESC
+        LIMIT ?
+        """,
+        params=[industry, n],
+    )
+    if df.empty:
+        return []
+    df["market_cap_cr"] = (df["market_cap_cr"] / 1e7).round(0)
+    sector_total = df["market_cap_cr"].sum()
+    df["share_pct"] = (100.0 * df["market_cap_cr"] / sector_total if sector_total else 0).round(1)
+    return df.to_dict("records")
+
+
+def get_industry_picks(industry, top_n=10, bottom_n=5):
+    df = read_sql(
+        """
+        SELECT s.sid, s.ticker, s.name, dp.final_score, dp.cap_tier
+        FROM daily_picks dp
+        JOIN stocks s ON s.sid = dp.sid
+        WHERE s.industry = ?
+          AND dp.pick_date = (SELECT MAX(pick_date) FROM daily_picks)
+        ORDER BY dp.final_score DESC
+        """,
+        params=[industry],
+    )
+    if df.empty:
+        return {"top": [], "bottom": []}
+    return {
+        "top":    df.head(top_n).to_dict("records"),
+        "bottom": df.tail(bottom_n).iloc[::-1].to_dict("records"),
+    }
+
+
+def get_industry_factor_means(industry):
+    df = read_sql(
+        """
+        SELECT pit.*
+        FROM daily_snapshots_pit pit
+        JOIN stocks s ON s.sid = pit.sid
+        WHERE s.industry = ?
+          AND pit.snapshot_date = (SELECT MAX(snapshot_date) FROM daily_snapshots_pit)
+        """,
+        params=[industry],
+    )
+    if df.empty:
+        return []
+    excluded = {"sid", "snapshot_date", "cap_tier", "close_price",
+                "reconstructed_at", "fwd_return_20d"}
+    factor_cols = [c for c in df.columns if c not in excluded]
+    rows = []
+    for c in factor_cols:
+        vals = df[c].dropna()
+        if vals.empty:
+            continue
+        rows.append({
+            "factor": c,
+            "n_stocks": int(vals.shape[0]),
+            "mean": float(round(vals.mean(), 4)),
+            "median": float(round(vals.median(), 4)),
+        })
+    rows.sort(key=lambda r: -abs(r["mean"]))
+    return rows
 
 
 def get_sector_trend(months=12):

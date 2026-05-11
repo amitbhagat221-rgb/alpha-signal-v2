@@ -182,14 +182,30 @@ async def portfolio(request: Request):
 
 
 @app.get("/sectors", response_class=HTMLResponse)
-async def sectors(request: Request, sector: str = ""):
-    sector_data = api.get_sector_overview()
+async def sectors(request: Request, sector: str = "", industry: str = ""):
+    # Industry-first overview (drill-down primary); sectors as grouping
+    industries_data = api.get_industry_overview()
+    industry_list = api.get_industry_list()
     sector_list = api.get_sector_list()
-    # If a sector is specified (deep-link), pre-load its detail payload
+
     detail = None
-    if sector and sector in sector_list:
+    if industry and industry in industry_list:
+        parent_sector = api.get_industry_parent_sector(industry)
+        detail = {
+            "name": industry,
+            "parent_sector": parent_sector,
+            "narrative": api.get_industry_metadata(industry),
+            "top_players": api.get_industry_top_players(industry, n=10),
+            "picks": api.get_industry_picks(industry, top_n=10, bottom_n=5),
+            "factor_means": api.get_industry_factor_means(industry),
+            "macro_contributors": api.get_sector_macro_contributors(parent_sector) if parent_sector else [],
+            "regulatory": api.get_sector_recent_regulatory(parent_sector, n=10) if parent_sector else [],
+        }
+    elif sector and sector in sector_list:
+        # Back-compat: ?sector=X falls back to sector-level detail
         detail = {
             "name": sector,
+            "parent_sector": None,
             "narrative": api.get_sector_metadata(sector),
             "top_players": api.get_sector_top_players(sector, n=10),
             "picks": api.get_sector_picks(sector, top_n=10, bottom_n=5),
@@ -197,14 +213,15 @@ async def sectors(request: Request, sector: str = ""):
             "macro_contributors": api.get_sector_macro_contributors(sector),
             "regulatory": api.get_sector_recent_regulatory(sector, n=10),
         }
-    trend = api.get_sector_trend(months=12)
+
     return templates.TemplateResponse(request, "sectors.html", {
         "page": "sectors",
-        "sectors": sector_data,
+        "industries": industries_data,
+        "industry_list": industry_list,
         "sector_list": sector_list,
-        "selected_sector": sector or (sector_list[0] if sector_list else ""),
+        "selected_industry": industry,
+        "selected_sector": sector,
         "detail": detail,
-        "trend": trend,
     })
 
 
