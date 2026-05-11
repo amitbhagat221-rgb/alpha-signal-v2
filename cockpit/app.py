@@ -196,6 +196,7 @@ async def sectors(request: Request, sector: str = "", industry: str = ""):
             "parent_sector": parent_sector,
             "narrative": api.get_industry_metadata(industry),
             "top_players": api.get_industry_top_players(industry, n=10),
+            "competitive_landscape": api.get_industry_competitive_landscape(industry),
             "picks": api.get_industry_picks(industry, top_n=10, bottom_n=5),
             "factor_means": api.get_industry_factor_means(industry),
             "macro_contributors": api.get_sector_macro_contributors(parent_sector) if parent_sector else [],

@@ -37,7 +37,8 @@ from db import get_db, read_sql
 # generation, not novel reasoning, so Sonnet over Opus for cost-efficiency.
 SONNET_MODEL = "claude-sonnet-4-6"
 
-# GICS sector → dominant IIM industry (per plan-0006 mapping)
+# GICS sector → dominant IIM industry (legacy — kept for back-compat
+# with sector-keyed runs; new runs default to the industry-level list below).
 SECTOR_INDUSTRY_MAP = {
     "Energy":                  "Oil & Gas",
     "Materials":               "Cement",
@@ -48,9 +49,40 @@ SECTOR_INDUSTRY_MAP = {
     "Financials":              "Banking",
     "Information Technology":  "IT & ITeS",
     "Communication Services":  "Telecom",
-    "Utilities":               "Utilities (no IIM source — generate from scratch)",
-    "Real Estate":             "Real Estate (no IIM source — generate from scratch)",
+    "Utilities":               "Utilities",
+    "Real Estate":             "Real Estate",
 }
+
+# Full 25-industry list (matches tools/classify_industries.INDUSTRIES_BY_SECTOR).
+# Default unit of work going forward.
+INDUSTRY_LIST = [
+    # Energy
+    "Oil & Gas",
+    # Materials
+    "Cement", "Iron & Steel", "Chemicals & Specialty", "Mining & Minerals",
+    "Paper, Wood & Forest Products",
+    # Industrials
+    "Capital Goods & Industrial Machinery", "Logistics & Transport", "Aviation",
+    "Defence & Aerospace", "Construction & Engineering", "Industrial Services & Misc",
+    # Consumer Discretionary
+    "Automobiles", "Auto Components", "Hospitality & Hotels", "Retail",
+    "E-Commerce", "Consumer Durables",
+    # Consumer Staples
+    "FMCG", "Food & Beverages", "Personal Care & Household Products",
+    # Health Care
+    "Pharmaceuticals", "Hospitals & Diagnostics", "Medical Devices",
+    # Financials
+    "Banks", "NBFCs / Finance", "Asset Management", "Insurance",
+    "Capital Markets & Exchanges",
+    # IT
+    "IT Services & ITeS", "Software Products & SaaS",
+    # Communication Services
+    "Telecom", "Media & Entertainment",
+    # Utilities
+    "Power Generation", "Power T&D", "Gas Utilities",
+    # Real Estate
+    "Real Estate Developers", "REITs",
+]
 
 
 PROMPT_TEMPLATE = """You are a sector analyst building a structured Indian-equity sector narrative for a one-person hedge fund's research cockpit. The output drives a UI page that anyone should grok in 90 seconds.
@@ -94,6 +126,14 @@ Required JSON schema (return EXACTLY this shape, no markdown, no commentary):
     {{"body": "<e.g. RBI>", "what": "<one line — what they regulate in this sector>"}},
     ... typically 2-4 regulators
   ],
+  "competitive_landscape": {{
+    "share_basis": "<what the share % represents — e.g. 'domestic passenger market share (DGCA)', 'revenue', 'AUM', 'subscriber base'>",
+    "as_of": "<period — e.g. 'FY25', 'CY2024', 'Mar-2025'>",
+    "players": [
+      {{"name": "<company name as commonly known>", "ticker": "<NSE ticker if listed, else null>", "share_pct": <number 0-100>, "listed": <true|false>, "note": "<≤6 words — e.g. 'Tata Group', 'state-owned', 'subsidiary of X'>"}},
+      ... 6-10 players covering AT LEAST 90% of industry by share, including BOTH listed and non-listed (private, PSU-unlisted, foreign subsidiaries) players. Order by share desc.
+    ]
+  }},
   "cyclicality": "<one paragraph — how cyclical is the sector, what's the cycle length, what drives it>",
   "india_specific": [
     "<bullet 1 — something that is uniquely true for THIS sector in INDIA>",
@@ -119,6 +159,7 @@ Rules:
 - "cyclicality" = one paragraph, plain English.
 - "india_specific" should NOT repeat what's said in trend_bullets — make these structural / persistent factors, not news.
 - "trend_bullets" should be FRESH (2024-2025 oriented), citing specific numbers and policies where possible.
+- "competitive_landscape.players" MUST include private / unlisted majors — e.g. Air India in Aviation, BSNL in Telecom, NPCI in Payments, LIC's unlisted subsidiaries, IKEA, foreign banks, MNC unlisted arms. Set `listed: false` and `ticker: null` for these. The share_pct of all listed + unlisted players should reflect real industry concentration; do not normalise to 100% over listed-only.
 
 Return ONLY the JSON object."""
 
@@ -133,40 +174,42 @@ def _get_client():
     return anthropic.Anthropic(api_key=api_key)
 
 
-def _top_stocks_for_sector(sector: str, n: int = 8) -> str:
+def _top_stocks_for_key(key: str, by: str = "industry", n: int = 8) -> str:
+    """Top stocks by market cap within `key`. by='industry' or 'sector'."""
+    col = "industry" if by == "industry" else "sector"
     df = read_sql(
-        "SELECT ticker, name, market_cap_cr "
-        "FROM stocks "
-        "WHERE sector = ? AND ticker IS NOT NULL "
-        "ORDER BY market_cap_cr DESC LIMIT ?",
-        params=[sector, n],
+        f"SELECT ticker, name, market_cap_cr "
+        f"FROM stocks "
+        f"WHERE {col} = ? AND ticker IS NOT NULL "
+        f"ORDER BY market_cap_cr DESC LIMIT ?",
+        params=[key, n],
     )
     if df.empty:
-        return "(no stocks in our universe for this sector)"
+        return f"(no stocks in our universe for this {by})"
     lines = []
     for _, r in df.iterrows():
-        # market_cap_cr is misnamed — actually rupees. Convert to ₹cr for display.
         mcap_cr = r["market_cap_cr"] / 1e7
         lines.append(f"- {r['ticker']} ({r['name']}) — ₹{mcap_cr:,.0f} cr")
     return "\n".join(lines)
 
 
-def _recent_news_for_sector(sector: str, n: int = 10) -> str:
+def _recent_news_for_key(key: str, by: str = "industry", n: int = 10) -> str:
+    col = "industry" if by == "industry" else "sector"
     df = read_sql(
-        """
+        f"""
         SELECT DISTINCT a.title, a.published_at
         FROM news_articles a
         JOIN news_article_stocks nas ON a.article_id = nas.article_id
         JOIN stocks s ON nas.sid = s.sid
-        WHERE s.sector = ?
+        WHERE s.{col} = ?
           AND a.published_at >= date('now', '-90 days')
         ORDER BY a.published_at DESC
         LIMIT ?
         """,
-        params=[sector, n],
+        params=[key, n],
     )
     if df.empty:
-        return "(no recent news in our DB for this sector)"
+        return f"(no recent news in our DB for this {by})"
     return "\n".join(
         f"- [{r['published_at'][:10]}] {r['title'][:140]}"
         for _, r in df.iterrows()
@@ -245,10 +288,24 @@ def _validate_payload(payload: dict, sector: str) -> list:
     errors = []
     required_top = ["summary", "industry_size_inr_cr", "industry_cagr_pct",
                     "value_chain", "drivers", "segments", "regulators",
-                    "cyclicality", "india_specific", "trend_bullets"]
+                    "cyclicality", "india_specific", "trend_bullets",
+                    "competitive_landscape"]
     for k in required_top:
         if k not in payload:
             errors.append(f"missing top-level key: {k}")
+
+    if "competitive_landscape" in payload:
+        cl = payload["competitive_landscape"]
+        if not isinstance(cl, dict):
+            errors.append("competitive_landscape must be an object")
+        else:
+            if "players" not in cl or not isinstance(cl["players"], list) or len(cl["players"]) < 3:
+                errors.append("competitive_landscape.players should be a list of ≥3 players")
+            else:
+                for i, pl in enumerate(cl["players"]):
+                    for f in ("name", "share_pct", "listed"):
+                        if f not in pl:
+                            errors.append(f"competitive_landscape.players[{i}] missing '{f}'")
 
     if "value_chain" in payload:
         if not isinstance(payload["value_chain"], list) or len(payload["value_chain"]) < 4:
@@ -276,21 +333,33 @@ def _validate_payload(payload: dict, sector: str) -> list:
     return errors
 
 
-def fetch_one(client, sector: str, dry_run: bool = False) -> dict:
-    """Fetch one sector's narrative. Returns the parsed payload dict on
-    success, or raises."""
-    industry = SECTOR_INDUSTRY_MAP.get(sector, sector)
-    top_stocks = _top_stocks_for_sector(sector)
-    news_sample = _recent_news_for_sector(sector)
+def fetch_one(client, key: str, by: str = "industry", dry_run: bool = False) -> dict:
+    """Fetch one industry's (or sector's) narrative. Returns parsed payload.
+
+    `by='industry'`: looks up stocks/news by industry, prompt is industry-keyed.
+    `by='sector'`: legacy sector-keyed flow.
+    """
+    if by == "industry":
+        # When by-industry, the prompt's 'sector' slot becomes the industry name
+        # and the 'industry' slot is the same (single label). The schema fields
+        # in the output JSON are unaffected.
+        sector_label = key
+        industry_label = key
+    else:
+        sector_label = key
+        industry_label = SECTOR_INDUSTRY_MAP.get(key, key)
+
+    top_stocks = _top_stocks_for_key(key, by=by)
+    news_sample = _recent_news_for_key(key, by=by)
 
     prompt = PROMPT_TEMPLATE.format(
-        sector=sector,
-        industry=industry,
+        sector=sector_label,
+        industry=industry_label,
         top_stocks=top_stocks,
         news_sample=news_sample,
     )
 
-    print(f"  → Calling Claude for {sector!r} (industry: {industry})…")
+    print(f"  → Calling Claude for {key!r} ({by})…")
     resp = client.messages.create(
         model=SONNET_MODEL,
         max_tokens=8000,
@@ -310,14 +379,14 @@ def fetch_one(client, sector: str, dry_run: bool = False) -> dict:
     payload = _extract_json_object(text)
     if payload is None:
         raise RuntimeError(
-            f"Claude returned no parseable JSON for {sector}.\n"
+            f"Claude returned no parseable JSON for {key}.\n"
             f"First 600 chars:\n{text[:600]}"
         )
 
-    errors = _validate_payload(payload, sector)
+    errors = _validate_payload(payload, key)
     if errors:
         raise RuntimeError(
-            f"Validation failed for {sector}:\n  " + "\n  ".join(errors)
+            f"Validation failed for {key}:\n  " + "\n  ".join(errors)
         )
 
     return payload
@@ -351,27 +420,33 @@ def _log_run(started_at: str, status: str, done: int, failed: int, detail: str =
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[1])
-    parser.add_argument("--sector", help="single sector name (e.g. 'Banking')")
+    parser.add_argument("--industry", help="single industry name (e.g. 'Automobiles')")
+    parser.add_argument("--sector", help="legacy: single sector name (e.g. 'Financials')")
     parser.add_argument("--dry-run", action="store_true", help="don't write to DB")
     parser.add_argument("--skip-existing", action="store_true",
-                        help="skip sectors with a recent (≤30 days) auto row")
+                        help="skip keys with a recent (≤30 days) auto row")
     args = parser.parse_args()
 
-    if args.sector:
-        sectors_to_fetch = [args.sector]
+    if args.industry:
+        keys_to_fetch = [args.industry]
+        by = "industry"
+    elif args.sector:
+        keys_to_fetch = [args.sector]
+        by = "sector"
     else:
-        sectors_to_fetch = list(SECTOR_INDUSTRY_MAP.keys())
+        keys_to_fetch = list(INDUSTRY_LIST)
+        by = "industry"
 
     if args.skip_existing:
         existing = read_sql(
             "SELECT sector FROM sector_metadata "
             "WHERE source='auto' AND generated_at >= datetime('now', '-30 days')"
         )["sector"].tolist()
-        before = len(sectors_to_fetch)
-        sectors_to_fetch = [s for s in sectors_to_fetch if s not in existing]
-        print(f"  --skip-existing: {before} → {len(sectors_to_fetch)} sectors to fetch")
+        before = len(keys_to_fetch)
+        keys_to_fetch = [k for k in keys_to_fetch if k not in existing]
+        print(f"  --skip-existing: {before} → {len(keys_to_fetch)} keys to fetch")
 
-    print(f"Fetching narratives for {len(sectors_to_fetch)} sector(s)…\n")
+    print(f"Fetching narratives for {len(keys_to_fetch)} {by}(s)…\n")
 
     client = _get_client()
     started_at = datetime.now().isoformat(timespec="seconds")
@@ -379,28 +454,30 @@ def main():
     failed = 0
     failures = []
 
-    for i, sector in enumerate(sectors_to_fetch, 1):
-        industry = SECTOR_INDUSTRY_MAP.get(sector, sector)
-        print(f"[{i}/{len(sectors_to_fetch)}] {sector}")
+    for i, key in enumerate(keys_to_fetch, 1):
+        # `industry_label` is the IIM industry hint stored on the row;
+        # for industry-keyed runs, it's just the same string.
+        industry_label = key if by == "industry" else SECTOR_INDUSTRY_MAP.get(key, key)
+        print(f"[{i}/{len(keys_to_fetch)}] {key}")
         try:
-            payload = fetch_one(client, sector, dry_run=args.dry_run)
+            payload = fetch_one(client, key, by=by, dry_run=args.dry_run)
             if not args.dry_run:
-                save_payload(sector, industry, payload)
+                save_payload(key, industry_label, payload)
             print(f"  ✓ saved · summary: {payload['summary'][:80]}")
             done += 1
         except Exception as e:
             print(f"  ✗ FAILED: {type(e).__name__}: {str(e)[:200]}")
             failed += 1
-            failures.append(f"{sector}: {e}")
-        if i < len(sectors_to_fetch):
-            time.sleep(1.0)  # gentle on the API
+            failures.append(f"{key}: {e}")
+        if i < len(keys_to_fetch):
+            time.sleep(1.0)
 
     status = "SUCCESS" if failed == 0 else ("PARTIAL" if done > 0 else "FAILED")
     detail = "\n".join(failures) if failures else ""
     if not args.dry_run:
         _log_run(started_at, status, done, failed, detail)
 
-    print(f"\nDone. {done} sector(s) saved, {failed} failed. Status: {status}")
+    print(f"\nDone. {done} saved, {failed} failed. Status: {status}")
 
 
 if __name__ == "__main__":

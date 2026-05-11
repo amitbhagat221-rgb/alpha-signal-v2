@@ -1264,6 +1264,15 @@ def get_industry_parent_sector(industry):
 
 
 def get_industry_top_players(industry, n=10):
+    """Listed-only top players within an industry.
+
+    Notes on shares:
+      - Drops rows with NaN market cap (those tickers have no fundamentals data).
+      - Denominator is the full LISTED industry market cap (not the top-N sum),
+        so a single dominant ticker won't show 100% if other listed peers exist.
+      - This is "share of LISTED universe" — for true industry share that
+        includes private/unlisted players, see get_industry_competitive_landscape.
+    """
     df = read_sql(
         """
         SELECT s.sid, s.ticker, s.name, s.market_cap_cr,
@@ -1273,7 +1282,9 @@ def get_industry_top_players(industry, n=10):
         LEFT JOIN daily_picks dp
           ON dp.sid = s.sid
          AND dp.pick_date = (SELECT MAX(pick_date) FROM daily_picks)
-        WHERE s.industry = ? AND s.ticker IS NOT NULL
+        WHERE s.industry = ?
+          AND s.ticker IS NOT NULL
+          AND s.market_cap_cr IS NOT NULL
         ORDER BY s.market_cap_cr DESC
         LIMIT ?
         """,
@@ -1282,9 +1293,91 @@ def get_industry_top_players(industry, n=10):
     if df.empty:
         return []
     df["market_cap_cr"] = (df["market_cap_cr"] / 1e7).round(0)
-    sector_total = df["market_cap_cr"].sum()
-    df["share_pct"] = (100.0 * df["market_cap_cr"] / sector_total if sector_total else 0).round(1)
+    # Denominator = full listed industry mcap, not just top-N's sum.
+    total_listed = read_sql(
+        "SELECT COALESCE(SUM(market_cap_cr), 0) / 1e7 AS total "
+        "FROM stocks WHERE industry = ? AND market_cap_cr IS NOT NULL",
+        params=[industry],
+    )["total"].iloc[0]
+    if total_listed and total_listed > 0:
+        df["share_pct"] = (100.0 * df["market_cap_cr"] / total_listed).round(1)
+    else:
+        df["share_pct"] = 0.0
     return df.to_dict("records")
+
+
+def get_industry_competitive_landscape(industry):
+    """Real industry concentration including private / unlisted players.
+
+    Sourced from the narrative payload (`competitive_landscape.players`),
+    then enriched: any listed player whose ticker matches a row in `stocks`
+    is given a SID + our composite score for navigation. Private players
+    are marked listed=False and have no SID.
+
+    Returns {share_basis, as_of, players: [...]} or None if no narrative
+    or the narrative doesn't carry this field yet.
+    """
+    narr = get_industry_metadata(industry)
+    if not narr:
+        return None
+    cl = narr.get("competitive_landscape")
+    if not cl or not isinstance(cl, dict) or not cl.get("players"):
+        return None
+
+    # Build a ticker -> stock-row map for quick enrichment
+    df = read_sql(
+        """
+        SELECT s.sid, s.ticker, s.name, s.market_cap_cr,
+               COALESCE(dp.final_score, 0) AS final_score
+        FROM stocks s
+        LEFT JOIN daily_picks dp
+          ON dp.sid = s.sid
+         AND dp.pick_date = (SELECT MAX(pick_date) FROM daily_picks)
+        WHERE s.industry = ? AND s.ticker IS NOT NULL
+        """,
+        params=[industry],
+    )
+    by_ticker = {row["ticker"]: row for _, row in df.iterrows()}
+    by_name_token = {row["name"].split()[0].upper(): row for _, row in df.iterrows() if row["name"]}
+
+    enriched = []
+    for pl in cl.get("players", []):
+        out = {
+            "name": pl.get("name"),
+            "share_pct": pl.get("share_pct"),
+            "listed": bool(pl.get("listed")),
+            "note": pl.get("note") or "",
+            "ticker": pl.get("ticker"),
+            "sid": None,
+            "final_score": None,
+            "market_cap_cr": None,
+        }
+        match = None
+        if out["ticker"] and out["ticker"] in by_ticker:
+            match = by_ticker[out["ticker"]]
+        elif out["name"]:
+            tok = out["name"].split()[0].upper()
+            if tok in by_name_token:
+                match = by_name_token[tok]
+        if match is not None:
+            out["sid"] = match["sid"]
+            out["ticker"] = out["ticker"] or match["ticker"]
+            out["final_score"] = float(match["final_score"]) if match["final_score"] is not None else None
+            mcap = match["market_cap_cr"]
+            out["market_cap_cr"] = round(mcap / 1e7, 0) if mcap is not None and mcap == mcap else None  # NaN-safe
+            out["listed"] = True  # if we found a row, it's listed in our DB
+        enriched.append(out)
+
+    # Compute "other" residual so totals visibly add to ≤100
+    covered = sum((p["share_pct"] or 0) for p in enriched)
+    other = round(max(0.0, 100.0 - covered), 1)
+
+    return {
+        "share_basis": cl.get("share_basis") or "industry share",
+        "as_of": cl.get("as_of") or "",
+        "players": enriched,
+        "other_pct": other,
+    }
 
 
 def get_industry_picks(industry, top_n=10, bottom_n=5):

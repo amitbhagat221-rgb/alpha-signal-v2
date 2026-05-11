@@ -504,12 +504,56 @@
 
 
 <div x-show="sub === 'players'" x-cloak>
+{% if detail.competitive_landscape and detail.competitive_landscape.players %}
+{% set cl = detail.competitive_landscape %}
 <div class="card" style="margin-bottom: 14px;">
-    <div class="section-title">Top players — market-cap share</div>
-    <div class="section-desc">Within this industry. Bar length = industry market-cap share. Score = our composite.</div>
+    <div class="section-title">True industry share — listed + private players</div>
+    <div class="section-desc">
+        Share basis: <strong>{{ cl.share_basis }}</strong>{% if cl.as_of %} · as of {{ cl.as_of }}{% endif %}.
+        Includes non-listed players (state-owned, foreign subsidiaries, Tata-group unlisted, etc.).
+        Click ▸ to open the listed ones. Source: AI-curated narrative.
+    </div>
     <div style="margin-top: 12px;">
         <div class="pb-row" style="font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid var(--border-accent);">
-            <span>Ticker</span><span>Share bar</span><span style="text-align: right;">Share %</span><span style="text-align: right;">Mcap ₹cr</span><span style="text-align: right;">Score</span>
+            <span>Player</span><span>Share bar</span><span style="text-align: right;">Share %</span><span style="text-align: right;">Listed?</span><span style="text-align: right;">Our score</span>
+        </div>
+        {% for p in cl.players %}
+        <div class="pb-row">
+            {% if p.sid %}
+              <a href="/explorer/{{ p.sid }}" class="ticker" style="text-decoration: none;">▸ {{ p.ticker or p.name }}</a>
+            {% else %}
+              <span style="color: var(--text-secondary);">{{ p.name }}<span style="color: var(--text-muted); font-size: 10px;"> {% if p.note %}· {{ p.note }}{% endif %}</span></span>
+            {% endif %}
+            <div class="pb-track"><div class="pb-fill" style="width: {{ p.share_pct or 0 }}%;{% if not p.listed %} background: var(--text-muted);{% endif %}"></div></div>
+            <span class="num" style="font-weight: 700;">{{ "%.1f"|format(p.share_pct or 0) }}%</span>
+            <span class="num" style="color: {{ 'var(--accent)' if p.listed else 'var(--text-muted)' }};">{{ 'Listed' if p.listed else 'Private' }}</span>
+            <span class="num
+                {% if p.final_score and p.final_score >= 0.7 %}score-green
+                {% elif p.final_score and p.final_score >= 0.5 %}score-amber
+                {% elif p.final_score and p.final_score > 0 %}score-red{% endif %}">
+                {{ "%.0f"|format(p.final_score * 100) if p.final_score else '—' }}
+            </span>
+        </div>
+        {% endfor %}
+        {% if cl.other_pct and cl.other_pct > 0.5 %}
+        <div class="pb-row" style="opacity: 0.6;">
+            <span style="color: var(--text-muted); font-style: italic;">Others / long tail</span>
+            <div class="pb-track"><div class="pb-fill" style="width: {{ cl.other_pct }}%; background: var(--text-muted);"></div></div>
+            <span class="num">{{ "%.1f"|format(cl.other_pct) }}%</span>
+            <span class="num" style="color: var(--text-muted);">—</span>
+            <span class="num">—</span>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endif %}
+
+<div class="card" style="margin-bottom: 14px;">
+    <div class="section-title">Listed players — market-cap share</div>
+    <div class="section-desc">Share of LISTED universe only (denominator = full listed industry mcap). For true share that includes private players, see the card above.</div>
+    <div style="margin-top: 12px;">
+        <div class="pb-row" style="font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid var(--border-accent);">
+            <span>Ticker</span><span>Share bar</span><span style="text-align: right;">Listed share %</span><span style="text-align: right;">Mcap ₹cr</span><span style="text-align: right;">Score</span>
         </div>
         {% for p in detail.top_players[:10] %}
         <div class="pb-row">
