@@ -233,6 +233,20 @@ PIPELINE_STEPS = [
     #  "table": "quarterly_income",  "source": "Tickertape API",     "data_freq": "quarterly", "frequency": "monthly"},
     # NOTE: Tickertape fetcher takes ~4 hours for full universe (2,448 × 3 calls × 2s).
     # Run manually: python -m sources.tickertape --limit 10 (test) then full run overnight.
+    # Monthly cron entry handles full refresh (run_tickertape_monthly.sh).
+
+    # Tickertape HTML scrape — one page hit per stock, writes both analyst_consensus
+    # and forecast_history. Two pipeline entries because each row in PIPELINE_STEPS
+    # maps to one table; watchdog dedupes by (module, function) so it only runs once.
+    {"name": "fetch_analyst",      "module": "sources.tickertape_analyst", "function": "compute", "critical": False,
+     "table": "analyst_consensus", "source": "Tickertape __NEXT_DATA__", "data_freq": "monthly", "frequency": "monthly"},
+
+    {"name": "fetch_forecast",     "module": "sources.tickertape_analyst", "function": "compute", "critical": False,
+     "table": "forecast_history",  "source": "Tickertape __NEXT_DATA__", "data_freq": "monthly", "frequency": "monthly"},
+
+    # Tickertape shareholding pattern — Bharat_sm_data API (different path from analyst scrape).
+    {"name": "fetch_shareholding", "module": "sources.tickertape_shareholding", "function": "compute", "critical": False,
+     "table": "shareholding",      "source": "Tickertape API",        "data_freq": "quarterly", "frequency": "monthly"},
 
     # ── Signals ──
     {"name": "signal_sentiment",   "module": "signals.sentiment",   "function": "compute",  "critical": False,

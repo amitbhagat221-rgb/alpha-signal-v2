@@ -1,0 +1,214 @@
+"""
+Alpha Signal v2 — Tickertape Analyst + Forecast (HTML scrape)
+
+Ports v1 scripts 25_analyst_harvester.py + 31_forecast_history_harvester.py
+into a single v2 producer. Both v1 fetchers hit the same Tickertape company
+page and parse the embedded __NEXT_DATA__ JSON; we do it once per stock and
+write to *both* tables. Saves ~80 min vs running them separately.
+
+Writes:
+    analyst_consensus  — PK (sid). One row per stock with latest snapshot.
+    forecast_history   — PK (sid, metric, date). Long format. Price/EPS/Revenue
+                         estimates over time, drives the pt_revision/eps_revision
+                         signals.
+
+Reads:
+    stocks.slug — the Tickertape slug, e.g. "stocks/reliance-industries-RELI".
+
+Usage:
+    python -m sources.tickertape_analyst              # full refresh, all sids
+    python -m sources.tickertape_analyst --limit 3    # smoke test
+    python -m sources.tickertape_analyst --dry-run
+"""
+
+import argparse
+import json
+import sys
+import time
+from datetime import datetime
+from pathlib import Path
+
+import pandas as pd
+import requests
+from bs4 import BeautifulSoup
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
+
+from config import API
+from db import read_sql, upsert_df
+
+DELAY = API["tickertape_delay"]  # 2 seconds
+TIMEOUT = 15
+MAX_RETRIES = 2
+
+HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/120.0.0.0 Safari/537.36"
+    ),
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.5",
+}
+
+
+def _fetch_next_data(slug):
+    """GET tickertape.in/{slug} and return parsed __NEXT_DATA__ JSON, or None."""
+    url = f"https://tickertape.in/{slug}"
+    for attempt in range(MAX_RETRIES + 1):
+        try:
+            r = requests.get(url, headers=HEADERS, timeout=TIMEOUT)
+            if r.status_code == 404:
+                return None
+            if r.status_code != 200:
+                if attempt < MAX_RETRIES:
+                    time.sleep(2)
+                    continue
+                return None
+            soup = BeautifulSoup(r.text, "html5lib")
+            script = soup.find("script", attrs={"id": "__NEXT_DATA__"})
+            if not script:
+                return None
+            return json.loads(script.contents[0].text)
+        except (requests.exceptions.Timeout, requests.exceptions.RequestException):
+            if attempt < MAX_RETRIES:
+                time.sleep(2)
+                continue
+            return None
+    return None
+
+
+def _extract_analyst_row(sid, data, fetched_at):
+    """Flatten __NEXT_DATA__ into a single analyst_consensus row."""
+    rec = {
+        "sid": sid,
+        "total_analysts": None,
+        "buy_pct": None,
+        "price_target": None,
+        "forward_eps": None,
+        "eps_growth_pct": None,
+        "forward_revenue": None,
+        "revenue_growth_pct": None,
+        "has_analyst_data": 0,
+        "fetched_at": fetched_at,
+    }
+    try:
+        pp = data.get("props", {}).get("pageProps", {})
+        forecast = pp.get("securitySummary", {}).get("forecast", {}) or {}
+        rec["total_analysts"] = forecast.get("totalReco")
+        rec["buy_pct"] = forecast.get("percBuyReco")
+
+        fh = pp.get("forecastsHistory", {}) or {}
+
+        price_hist = fh.get("price", [])
+        if price_hist:
+            rec["price_target"] = price_hist[-1].get("value")
+
+        eps_hist = fh.get("eps", [])
+        if eps_hist:
+            rec["forward_eps"] = eps_hist[-1].get("value")
+            rec["eps_growth_pct"] = eps_hist[-1].get("change")
+
+        rev_hist = fh.get("revenue", [])
+        if rev_hist:
+            rec["forward_revenue"] = rev_hist[-1].get("value")
+            rec["revenue_growth_pct"] = rev_hist[-1].get("change")
+
+        if rec["total_analysts"] or rec["price_target"]:
+            rec["has_analyst_data"] = 1
+    except Exception:
+        pass
+    return rec
+
+
+def _extract_forecast_rows(sid, data, fetched_at):
+    """Flatten __NEXT_DATA__ into long-format forecast_history rows."""
+    rows = []
+    try:
+        fh = data.get("props", {}).get("pageProps", {}).get("forecastsHistory", {}) or {}
+        for metric in ("price", "eps", "revenue"):
+            for entry in fh.get(metric, []):
+                raw_date = entry.get("date", "")
+                rows.append({
+                    "sid": sid,
+                    "metric": metric,
+                    "date": raw_date[:10] if raw_date else None,
+                    "value": entry.get("value"),
+                    "change": entry.get("change"),
+                    "fetched_at": fetched_at,
+                })
+    except Exception:
+        pass
+    # Drop rows with bad date (PK required)
+    return [r for r in rows if r["date"]]
+
+
+def compute(limit=None, dry_run=False):
+    """Pipeline entry point — fetch analyst + forecast for all sids with a slug."""
+    stocks = read_sql(
+        "SELECT sid, slug FROM stocks WHERE slug IS NOT NULL AND slug LIKE 'stocks/%' ORDER BY sid"
+    )
+    if limit:
+        stocks = stocks.head(limit)
+
+    total = len(stocks)
+    print(f"Tickertape Analyst+Forecast (HTML scrape): {total} stocks")
+
+    if dry_run:
+        print(f"  Estimated time: ~{total * DELAY / 60:.0f} min ({DELAY}s × {total} pages)")
+        return 0
+
+    fetched_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    analyst_rows = []
+    forecast_rows = []
+    no_data = 0
+    errors = 0
+    saved_analyst = 0
+    saved_forecast = 0
+
+    for i, (sid, slug) in enumerate(stocks.itertuples(index=False), 1):
+        data = _fetch_next_data(slug)
+        if data is None:
+            errors += 1
+        else:
+            arow = _extract_analyst_row(sid, data, fetched_at)
+            analyst_rows.append(arow)
+            if not arow["has_analyst_data"]:
+                no_data += 1
+            forecast_rows.extend(_extract_forecast_rows(sid, data, fetched_at))
+
+        if i % 200 == 0:
+            # Mid-run checkpoint — flush what we have so a crash doesn't lose progress.
+            if analyst_rows:
+                upsert_df(pd.DataFrame(analyst_rows), "analyst_consensus")
+                saved_analyst += len(analyst_rows)
+                analyst_rows = []
+            if forecast_rows:
+                upsert_df(pd.DataFrame(forecast_rows), "forecast_history")
+                saved_forecast += len(forecast_rows)
+                forecast_rows = []
+            print(f"  [{i}/{total}] {saved_analyst} analyst rows, {saved_forecast} forecast rows saved")
+
+        time.sleep(DELAY)
+
+    # Final flush.
+    if analyst_rows:
+        upsert_df(pd.DataFrame(analyst_rows), "analyst_consensus")
+        saved_analyst += len(analyst_rows)
+    if forecast_rows:
+        upsert_df(pd.DataFrame(forecast_rows), "forecast_history")
+        saved_forecast += len(forecast_rows)
+
+    print(f"Done: {saved_analyst} analyst rows, {saved_forecast} forecast rows. "
+          f"No coverage: {no_data}. Errors: {errors}.")
+    # Return analyst-row count for pipeline_log (tracks the primary table).
+    return saved_analyst
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--limit", type=int, help="Limit to first N stocks (smoke test)")
+    parser.add_argument("--dry-run", action="store_true")
+    args = parser.parse_args()
+    compute(limit=args.limit, dry_run=args.dry_run)
