@@ -43,8 +43,11 @@ from db import get_db, read_sql, _table_date_range, TABLE_META
 
 # Refresh intervals in days. Used by the freshness factor.
 # Slow-cadence data (annual filings) is fresh for up to 1 year.
+# "daily" = 3 because Indian markets have 2-day weekends and most daily
+# producers publish EOD with a 1-day lag — pure 1-day cycle would flag
+# every Monday morning as stale.
 REFRESH_INTERVALS = {
-    "daily":     1,
+    "daily":     3,
     "weekly":    7,
     "monthly":   30,
     "quarterly": 91,
@@ -124,7 +127,10 @@ def factor_freshness(tbl, count, dates, meta, profile, conn):
                        "No refresh schedule (config / state table)",
                        weight=weight)
 
-    interval = REFRESH_INTERVALS[freq]
+    # Absolute-day override wins over the frequency-mapped interval. Use for
+    # tables whose upstream has a structural lag (NSE PIT filings come with a
+    # 7-14 day delay regardless of how often we fetch).
+    interval = profile.get("refresh_interval_days") or REFRESH_INTERVALS[freq]
     try:
         latest_d = datetime.strptime(latest, "%Y-%m-%d").date()
     except Exception:
@@ -134,21 +140,23 @@ def factor_freshness(tbl, count, dates, meta, profile, conn):
     age = (datetime.now().date() - latest_d).days
     overdue = age / interval if interval else 0
 
+    # Brackets: 1× = fresh, 1-2× = slightly stale, 2-3× = stale, >3× = severely outdated.
+    # Severity tracks "real" producer drift, not single-cycle slippage.
     if overdue <= 1.0:
         days_until_due = max(0, interval - age)
         return _factor("freshness", 100, "ok",
                        f"Fresh — {age}d old, next {freq} refresh due in {days_until_due}d",
                        weight=weight)
 
-    if overdue <= 1.5:
-        score = 100 - 80 * (overdue - 1.0)  # 100 → 60
+    if overdue <= 2.0:
+        score = 100 - 40 * (overdue - 1.0)  # 100 → 60
         return _factor("freshness", score, "warn",
                        f"Slightly stale — {age}d old, {age - interval}d past {freq} cycle",
                        fix=f"Run the producer that writes {tbl}",
                        weight=weight)
 
-    if overdue <= 2.0:
-        score = 60 - 80 * (overdue - 1.5)  # 60 → 20
+    if overdue <= 3.0:
+        score = 60 - 40 * (overdue - 2.0)  # 60 → 20
         return _factor("freshness", score, "error",
                        f"Stale — {age}d old, {overdue:.1f}× past {freq} cycle",
                        fix=f"Producer may be broken — check {meta.get('function') or tbl}",
@@ -760,6 +768,10 @@ TABLE_PROFILES = {
         # Freshness tracks producer cadence, not the most recent filing date —
         # insider filings are sparse (some days have none).
         "freshness_column": "fetched_at",
+        # NSE PIT API publishes filings with a 7-14 day delay — even a same-day
+        # fetch shows ~10 day staleness on `trade_date`. 14-day interval avoids
+        # flagging an otherwise-working fetcher as outdated.
+        "refresh_interval_days": 14,
     },
     "bulk_deals": {
         "critical_columns": ["sid", "deal_date", "client_name", "buy_sell"],

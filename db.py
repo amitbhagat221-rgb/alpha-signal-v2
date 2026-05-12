@@ -702,13 +702,20 @@ def get_db_references():
 STALENESS_THRESHOLDS = {
     "daily": 3,        # allow long weekends
     "weekly": 10,
-    "monthly": 40,
+    "monthly": 50,     # Tickertape monthly pulls land day-1 of month → 31d when cron runs day-2; 50d tolerates a skipped month
     "quarterly": 100,
     "annual": 400,
 }
 
+# Per-table overrides for tables whose upstream has known publishing lag.
+# Listed by table name; takes precedence over the frequency-based default.
+STALENESS_OVERRIDES = {
+    # NSE PIT filings post with a 7-14 day delay — a fresh fetch still shows ~10 day staleness.
+    "insider_trades": 14,
+}
 
-def _compute_freshness(latest_date_iso, refresh_freq):
+
+def _compute_freshness(latest_date_iso, refresh_freq, table_name=None):
     """Return (status, age_days, threshold_days). status ∈ FRESH/STALE/OUTDATED/N/A."""
     if not latest_date_iso or refresh_freq not in STALENESS_THRESHOLDS:
         return "N/A", None, None
@@ -717,7 +724,7 @@ def _compute_freshness(latest_date_iso, refresh_freq):
         latest = datetime.strptime(latest_date_iso, "%Y-%m-%d").date()
         today = datetime.now().date()
         age = (today - latest).days
-        threshold = STALENESS_THRESHOLDS[refresh_freq]
+        threshold = STALENESS_OVERRIDES.get(table_name) or STALENESS_THRESHOLDS[refresh_freq]
         if age <= threshold:
             return "FRESH", age, threshold
         if age <= threshold * 2:
@@ -1556,7 +1563,7 @@ def data_health():
             consumed_by = "(no consumers found)"
 
         # Freshness benchmark
-        freshness, age_days, threshold_days = _compute_freshness(latest, m.get("frequency"))
+        freshness, age_days, threshold_days = _compute_freshness(latest, m.get("frequency"), tbl)
 
         status = "OK" if count > 0 else "EMPTY"
 
