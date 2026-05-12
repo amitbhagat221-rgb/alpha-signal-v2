@@ -225,9 +225,15 @@ def backfill(days=30, dry_run=False):
 
 
 def compute(dry_run=False):
-    """Pipeline entry point — fetch today's bhavcopy."""
-    print("NSE Bhavcopy:")
-    return fetch_bhavcopy(dry_run=dry_run)
+    """Pipeline entry point — backfill last 7 trading days.
+
+    Cron runs in the early morning before NSE publishes the day's bhavcopy,
+    so fetching only `date.today()` returns 0 rows on every run. Backfilling
+    a 7-day window (with INSERT OR IGNORE) picks up today's file once it
+    goes live AND self-heals from cron downtime or skipped weekends without
+    re-inserting what we already have.
+    """
+    return backfill(days=7, dry_run=dry_run)
 
 
 if __name__ == "__main__":
