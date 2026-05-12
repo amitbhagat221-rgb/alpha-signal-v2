@@ -60,3 +60,6 @@ Related ADRs: [comma-separated ADR filenames, or leave blank]
 | [0003-mother-plan.md](0003-mother-plan.md) | active | 2026-05-03 | Amit Bhagat |
 | [0004-pit-reconstruction.md](0004-pit-reconstruction.md) | active | 2026-05-03 | Amit Bhagat |
 | [0005-100-factors-and-model.md](0005-100-factors-and-model.md) | active | 2026-05-03 | Amit Bhagat |
+| [0006-sector-intelligence-page.md](0006-sector-intelligence-page.md) | implemented | 2026-05-10 | Amit Bhagat |
+| [0007-market-share-momentum-factor.md](0007-market-share-momentum-factor.md) | proposed | 2026-05-10 | Amit Bhagat |
+| [0008-consumer-demand-pulse.md](0008-consumer-demand-pulse.md) | proposed | 2026-05-12 | Amit Bhagat |
