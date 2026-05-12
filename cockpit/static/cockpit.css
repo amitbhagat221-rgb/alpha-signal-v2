@@ -317,24 +317,31 @@ body {
     font-size: 0.8em;
 }
 
-/* Section title — prominent, with accent underline */
+/* Section title — prominent, with accent underline.
+   Margin-bottom is intentionally small so any sibling `.section-desc` sits
+   *below* the border. Do NOT add a negative margin-top to section-desc — it
+   used to live there as a tightening hack and caused the underline to cut
+   through the desc text whenever a caller overrode title margin-bottom. */
 .section-title {
     font-size: 14px;
     font-weight: 700;
     letter-spacing: 1.5px;
     text-transform: uppercase;
     color: var(--text-secondary);
-    margin-bottom: 16px;
-    padding-bottom: 8px;
+    margin-bottom: 6px;
+    padding-bottom: 6px;
     border-bottom: 2px solid var(--accent);
     display: inline-block;
 }
 
-/* Section description — muted text below section title */
+/* Section description — muted text below section title.
+   No negative margin-top: positioning is owned by .section-title's
+   margin-bottom so callers can override the title's margin without
+   risking overlap with the underline. */
 .section-desc {
     font-size: 12px;
     color: var(--text-muted);
-    margin-top: -8px;
+    margin-top: 0;
     margin-bottom: 16px;
     line-height: 1.5;
 }

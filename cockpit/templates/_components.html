@@ -56,3 +56,21 @@
     {% endfor %}
 </div>
 {%- endmacro %}
+
+
+{# ─────────────── slide_row ───────────────
+   Progressive-elaboration row: bold headline + muted body, separated by a thin rule.
+   Pass either a pre-slidified dict `{head, body}` or a raw string (then `slidify=True`
+   to run the filter inline).
+
+   Example:
+       {{ slide_row(bullet | slidify) }}
+       {{ slide_row(text, slidify=True) }}
+#}
+{% macro slide_row(item, slidify=False) -%}
+{% set s = item | slidify if slidify else item %}
+<div class="slide-row">
+    <div class="slide-head">{{ s.head }}</div>
+    {% if s.body %}<div class="slide-body">{{ s.body }}</div>{% endif %}
+</div>
+{%- endmacro %}

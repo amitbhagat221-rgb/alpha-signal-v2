@@ -5,9 +5,11 @@ All data queries live here. Called by app.py routes.
 Imports db.read_sql directly — no ORM, no new abstractions.
 """
 
+import functools
 import glob
 import json
 import sys
+import time as _time
 from pathlib import Path
 
 import numpy as np
@@ -20,10 +22,43 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from db import read_sql, get_db
 
 
+# In-process TTL cache for read-only functions.
+# Pages call these on every render, but the underlying SQLite tables only
+# change when the daily cron pipeline runs — so a 60s TTL is invisible to
+# users and shaves 1-2 seconds off /system, /command, /model, /actions, /portfolio.
+# Args are tuple-keyed; pass `_force=True` to bypass.
+def _ttl_cache(ttl_seconds, max_entries=512):
+    def decorator(fn):
+        cache: dict = {}
+
+        @functools.wraps(fn)
+        def wrapper(*args, **kwargs):
+            force = kwargs.pop("_force", False)
+            key = (args, tuple(sorted(kwargs.items())))
+            now = _time.time()
+            entry = cache.get(key)
+            if not force and entry is not None and (now - entry[1]) < ttl_seconds:
+                return entry[0]
+            value = fn(*args, **kwargs)
+            cache[key] = (value, now)
+            # Bound memory: evict oldest entries if over max_entries.
+            if len(cache) > max_entries:
+                oldest = sorted(cache.items(), key=lambda kv: kv[1][1])[: len(cache) - max_entries]
+                for k, _ in oldest:
+                    cache.pop(k, None)
+            return value
+
+        wrapper.cache_clear = lambda: cache.clear()
+        return wrapper
+
+    return decorator
+
+
 # ═══════════════════════════════════════════════════
 # A1-A12: NEW DATA FUNCTIONS
 # ═══════════════════════════════════════════════════
 
+@_ttl_cache(60)
 def get_stock_price_metrics(sid):
     """A1: Returns, RSI-14, 52W high/low from stock_prices."""
     df = read_sql(
@@ -64,6 +99,7 @@ def get_stock_price_metrics(sid):
     return result
 
 
+@_ttl_cache(60)
 def get_analyst_consensus(sid):
     """A2: Price target, analyst count, buy%, growth from analyst_consensus."""
     row = read_sql(
@@ -111,6 +147,7 @@ def get_shareholding_history(sid):
     return quarters
 
 
+@_ttl_cache(60)
 def get_insider_activity(sid):
     """A4: Recent trades + signal summary."""
     trades = read_sql(
@@ -186,6 +223,7 @@ def get_earnings_upcoming(sid=None):
     return df.to_dict("records") if not df.empty else []
 
 
+@_ttl_cache(60)
 def get_dossier(sid):
     """A9: AI investment dossier from latest JSON file."""
     dossier_dir = PROJECT_ROOT / "output"
@@ -202,6 +240,7 @@ def get_dossier(sid):
     return {}
 
 
+@_ttl_cache(60)
 def get_sector_averages():
     """A10: Per-sector average metrics for comparison."""
     df = read_sql("""
@@ -869,6 +908,7 @@ def get_active_signals():
     return signals
 
 
+@_ttl_cache(60)
 def get_action_candidates():
     """Stocks categorized into Buy/Watch/Exit based on signals + changes."""
     changes = get_changes(days=7)
@@ -934,6 +974,7 @@ def get_action_candidates():
     return {"buy": buy, "watch": watch, "exit": exit_list}
 
 
+@_ttl_cache(60)
 def get_model_portfolio():
     """Model portfolio: top stocks per tier with position weights."""
     regime = get_regime()
@@ -1534,6 +1575,7 @@ def run_sql_query(query, max_rows=500):
     }
 
 
+@_ttl_cache(60)
 def get_data_freshness():
     """Data health from db.data_health(). NaN floats are coerced to None so the
     payload is JSON-safe (Jinja's tojson preserves NaN literals which break
@@ -1549,6 +1591,7 @@ def get_data_freshness():
     return records
 
 
+@_ttl_cache(60)
 def get_db_summary():
     """High-level health verdict for the system page header."""
     from db import db_summary
@@ -1564,6 +1607,7 @@ def get_db_summary():
 V1_BACKTEST_DIR = Path("/home/ubuntu/alpha-signal/data/backtest")
 
 
+@_ttl_cache(60)
 def get_model_overview():
     """Tier weight tables, signal validation, regime rules. Used by /model."""
     from config import SIGNAL_WEIGHTS, VIX_REGIMES, QUALITY_GATE, PORTFOLIO, TRANSACTION_COSTS_BPS
@@ -2015,13 +2059,26 @@ def get_factor_health():
                                 .set_index("signal")
                                 .to_dict("index"))
 
-        # PIT columns actually populated in daily_snapshots_pit (latest snapshot)
+        # PIT columns actually populated in daily_snapshots_pit (latest snapshot).
+        # NOTE: daily_snapshots_pit is the *backtest* reconstruction, only refreshed
+        # when tools/reconstruct_pit.py runs (manually, periodically). Use this
+        # only for PIT-readiness flag (does the column exist) — NOT for factor
+        # freshness shown in the UI. For production freshness see latest_live below.
         try:
             latest_pit = conn.execute(
                 "SELECT MAX(snapshot_date) FROM daily_snapshots_pit"
             ).fetchone()[0]
         except Exception:
             latest_pit = None
+
+        # Live production snapshot — written by scoring/screener.py + output/snapshot.py
+        # on every daily pipeline run. This is what "factor freshness" should reflect.
+        try:
+            latest_live = conn.execute(
+                "SELECT MAX(snapshot_date) FROM daily_snapshots"
+            ).fetchone()[0]
+        except Exception:
+            latest_live = None
 
         # Get per-column coverage from latest PIT snapshot
         pit_coverage = {}
@@ -2191,7 +2248,7 @@ def get_factor_health():
             in_model_flag=in_model,
             coverage_n=coverage_n,
             eligible_n=eligible,
-            latest_snap_str=latest_pit,
+            latest_snap_str=latest_live,  # production freshness, not backtest
             t_stat=t_stat,
             n_periods=ic_row.get("n_periods"),
             ic_source=ic_row.get("source", "—"),
@@ -2285,6 +2342,7 @@ def _parse_plan_frontmatter(md_path: Path) -> dict:
     return fm
 
 
+@_ttl_cache(60)
 def get_command_centre():
     """Assemble the command-centre payload — plans, factor library, data layer,
     pending actions. Server-rendered; no live polling."""

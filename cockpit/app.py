@@ -38,6 +38,50 @@ class SilentUndefined(Undefined):
 templates = Jinja2Templates(directory=COCKPIT_DIR / "templates")
 templates.env.undefined = SilentUndefined
 
+
+# Slide-style "headline + body" split for sector narrative bullets.
+# Narratives concatenate headline + elaboration with em-dashes / colons / first-sentence breaks.
+# slidify lifts the headline so templates can render bold-then-muted (progressive elaboration).
+def _slidify(text):
+    if not isinstance(text, str):
+        return {"head": "", "body": ""}
+    t = text.strip()
+    if not t:
+        return {"head": "", "body": ""}
+    for sep in (" — ", " – ", " - "):
+        if sep in t:
+            h, _, b = t.partition(sep)
+            h, b = h.strip().rstrip(".,;"), b.strip()
+            # Lopsided split: short trailing qualifier after a long head.
+            # If the trailer has a number ("3× the global average"), it's a punchy stat → swap so it leads.
+            # If it has none ("a new post-COVID high"), it's a weak qualifier → keep whole sentence.
+            if len(b) < 35 and len(h) > 100:
+                if any(c.isdigit() for c in b):
+                    return {"head": b.rstrip("."), "body": h}
+                return {"head": t, "body": ""}
+            return {"head": h, "body": b}
+    if ": " in t:
+        h, _, b = t.partition(": ")
+        if 4 <= len(h) <= 80 and b:
+            return {"head": h.strip(), "body": b.strip()}
+    import re as _re
+    m = _re.search(r"\.\s+(?=[A-Z(])", t)
+    if m and 30 <= m.start() <= 140 and len(t) - m.end() >= 20:
+        return {"head": t[: m.start()].strip() + ".", "body": t[m.end():].strip()}
+    return {"head": t, "body": ""}
+
+
+def _sentences(text, max_slides=5):
+    if not isinstance(text, str) or not text.strip():
+        return []
+    import re as _re
+    parts = _re.split(r"(?<=[.!?])\s+(?=[A-Z(₹])", text.strip())
+    return [_slidify(s) for s in parts[:max_slides] if s.strip()]
+
+
+templates.env.filters["slidify"] = _slidify
+templates.env.filters["sentences"] = _sentences
+
 # Cache-busting for static assets — appends ?v=<mtime> so browser caches
 # invalidate automatically whenever a static file is edited.
 def _asset_version(filename: str) -> str:
