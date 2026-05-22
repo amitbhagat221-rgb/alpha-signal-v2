@@ -1,65 +1,45 @@
-# Plans — Active Proposals
+# Plans
 
-Active proposals for things **not yet built**. A plan is a thinking document — it captures what we'd do, why, and what we considered before committing to code.
+> Quick "what's done / what's pending" view: [0000-checklist.md](0000-checklist.md). Start there.
 
----
+Proposals for things being built or about to be built. Temporary scaffolding — when work is done, the plan's permanent content distills into `architecture.md` / `reference/` / `decisions/`, and the plan moves to `_archive/`.
 
-## The Plan Lifecycle
+## Plan format
 
-```
-[draft a plan] → [discuss] → [implement] → [archive]
-                              │
-                              ↓
-                              ↓ extract permanent learnings into:
-                              ↓   - architecture.md  (how it works now)
-                              ↓   - reference/       (its details)
-                              ↓   - decisions/       (an ADR if a key choice)
-                              ↓
-                              [move plan to _archive/ with date prefix]
-```
-
-A plan should never become a permanent doc. **Plans are temporary scaffolding.** When the work is done, the plan's job is done — its useful content has been distilled into reference/ and decisions/, and the plan itself becomes history in `_archive/`.
-
----
-
-## Plan Format
-
-A plan can be loose, but should answer:
-
-1. **What problem are we solving?**
-2. **What does the solution look like?** (sketch, schema, sequence)
-3. **What are the open questions?**
-4. **What does success look like?**
-5. **What did we consider and reject?**
-
----
-
-## Status Header Fields
-
-Each plan file starts with a YAML frontmatter block:
+Each plan starts with frontmatter:
 
 ```yaml
 ---
-Status: [leave blank or use: draft, active, blocked, ready-to-implement, paused]
+Status: proposed | active | implemented | paused | blocked
 Created: YYYY-MM-DD
 Last updated: YYYY-MM-DD
-Owner: [name]
-Implementation: [link to related code/PR, or leave blank]
-Related ADRs: [comma-separated ADR filenames, or leave blank]
+Owner: <name>
+Implementation: <link to code or short status>
+Related ADRs: <list>
 ---
 ```
 
----
+A plan answers: **What problem? · What does the solution look like? · Done when? · Open questions? · Considered & rejected?**
 
-## Index
+Naming + numbering convention: see [ADR 0015](../decisions/0015-track-numbering-and-rename.md). Three tracks (Foundation / Portfolio / Factor model); decimal phases (2.1, 2.2); forks (3.1a, 3.1b); cross-track parallels (↔).
 
-| Plan | Status | Created | Owner |
-|------|--------|---------|-------|
-| [0001-regulatory-signal.md](0001-regulatory-signal.md) | Implemented — distillation pending | 2026-04-10 | Amit Bhagat |
-| [0002-macro-data.md](0002-macro-data.md) | Implemented — distillation pending | 2026-04-10 | Amit Bhagat |
-| [0003-mother-plan.md](0003-mother-plan.md) | active | 2026-05-03 | Amit Bhagat |
-| [0004-pit-reconstruction.md](0004-pit-reconstruction.md) | active | 2026-05-03 | Amit Bhagat |
-| [0005-100-factors-and-model.md](0005-100-factors-and-model.md) | active | 2026-05-03 | Amit Bhagat |
-| [0006-sector-intelligence-page.md](0006-sector-intelligence-page.md) | implemented | 2026-05-10 | Amit Bhagat |
-| [0007-market-share-momentum-factor.md](0007-market-share-momentum-factor.md) | proposed | 2026-05-10 | Amit Bhagat |
-| [0008-consumer-demand-pulse.md](0008-consumer-demand-pulse.md) | proposed | 2026-05-12 | Amit Bhagat |
+## Active
+
+| Plan | Status |
+|---|---|
+| [0001-mother-plan.md](0001-mother-plan.md) | active — Track 2 (Portfolio) ladder, 2.2 next |
+| [0002-100-factors-and-model.md](0002-100-factors-and-model.md) | active — Track 3 (Factor model), Phase 3.1a done, 3.2 underway |
+
+## Proposed
+
+| Plan | Status |
+|---|---|
+| [0003-market-share-momentum-factor.md](0003-market-share-momentum-factor.md) | proposed — 4-factor cluster, ~7 hr |
+| [0004-consumer-demand-pulse.md](0004-consumer-demand-pulse.md) | proposed — research-first, validation-gated |
+
+## Archived (in `_archive/` as `YYYY-MM-DD-plan-NNNN-*.md`)
+
+- 0001 regulatory-signal — implemented
+- 0002 macro-data — implemented
+- 0004 pit-reconstruction — shipped (ADRs [0010](../decisions/0010-pit-strict-corporate-action-adjustment.md), [0012](../decisions/0012-pit-archive-refresh-on-signal-fix.md))
+- 0006 sector-intelligence-page — implemented (ADRs [0013](../decisions/0013-industry-not-sector-as-drill-unit.md), [0014](../decisions/0014-llm-sourced-competitive-landscape.md))

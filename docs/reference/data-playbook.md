@@ -161,7 +161,7 @@ For each source: **what it gives**, **endpoint**, **PIT/live access**, **histori
 | **Historical access** | Circulars go back 10+ years; bank quarterly data goes back ~5 years. |
 | **v2 depth** | 5,687 regulatory_signals classified from regulatory_events; bank metrics not yet ingested |
 | **Gotchas** | (1) **2-second delay between requests or RBI blocks**. (2) PDF parsing is brittle; some quarters have format changes. |
-| **Used by** | `sources/regulatory_*` (planned), `sources/banking_metrics.py` (planned for D15) |
+| **Used by** | `sources/regulatory_*` (planned), `sources/banking_metrics.py` (planned for Track 2.2) |
 
 ### SEBI — Circulars
 
@@ -206,7 +206,7 @@ For each source: **what it gives**, **endpoint**, **PIT/live access**, **histori
 | **Endpoint** | `nselib.capital_market.short_selling_data(from_date, to_date)` |
 | **Historical access** | Back to Jan 2024 confirmed; sparse for older dates. |
 | **Alpha use** | Short-interest spike = bearish positioning; short squeeze candidate when shorts cover. New signal class not in v1's roster. |
-| **Status in v2** | Not yet ingested. PROPOSED for D17 work. |
+| **Status in v2** | Not yet ingested. PROPOSED for Track 2.4 work. |
 
 ### Corporate Actions — fixes the Adj-Close issue
 
@@ -645,8 +645,8 @@ CREATE TABLE macro_sector_signals_pit (
 - **Per-endpoint catalog:** [api-endpoints.md](api-endpoints.md) — function signatures, install commands, probe dates, NSE quirks, things-tried-and-rejected
 - **Paid data playbook:** [paid-data-sources.md](paid-data-sources.md) — ₹5K/mo budget, Screener scrape pattern, Sensibull skip rationale
 - **Engineering:** [tools/reconstruct_pit.py](../../tools/reconstruct_pit.py) (the reconstruction driver), [tools/import_v1_pit.py](../../tools/import_v1_pit.py) (v1 archive importer)
-- **Plans:** [0004-pit-reconstruction.md](../plans/0004-pit-reconstruction.md), [0005-100-factors-and-model.md](../plans/0005-100-factors-and-model.md)
-- **Mother plan:** [docs/plans/0003-mother-plan.md](../plans/0003-mother-plan.md)
+- **Plans:** [pit-reconstruction (archived)](../_archive/2026-05-22-plan-0004-pit-reconstruction.md), [0002-100-factors-and-model.md](../plans/0002-100-factors-and-model.md)
+- **Mother plan:** [docs/plans/0001-mother-plan.md](../plans/0001-mother-plan.md)
 - **Registry of signals:** `db.py` → `BACKTEST_SIGNALS` (42 entries, all statuses)
 - **Critical rules:** [CLAUDE.md](../../CLAUDE.md) (filing-lag rule, harvester-rate rule, dedup rule)
 - **v1 backtest source-of-truth:** `daily_snapshots_pit_v1`, `pit_ic_by_tier_v1` (imported from v1 CSV, frozen)

@@ -1,48 +1,15 @@
 # 0001 — SQLite over CSV files
+**2026-04-09 · Accepted**
 
-**Status:** Accepted
-**Date:** 2026-04-09
-**Decided by:** Amit (with Claude Code)
+**Decision.** One SQLite database at `data/alpha_signal.db`. 51 tables, WAL journaling, schema in `schema.sql`. All scripts go through `db.py` helpers — no direct `sqlite3.connect`.
 
-## Context
+**Why.** v1 had 80+ scattered CSVs, 3 conflicting "universe" files (501 vs 501 vs 2,500), and 96.5% duplicate rows in `insider_archive.csv` because dedup lived in pandas and the script forgot to call it. We needed constraints enforced by storage, not hoped for in code.
 
-v1 stored everything as CSV files: `~/alpha-signal/data/` had 80+ CSVs across multiple subdirectories. The "universe" was defined in three different files (`nifty500_list.csv` 501 stocks, `stock_metadata.csv` 501 stocks, `universe.csv` 2,500 stocks). Different scripts read different ones. Insider archive had 96.5% duplicate rows because there was no UNIQUE constraint, just `concat + drop_duplicates` in pandas (which the script forgot to do).
+**Trade-offs.**
+- Backup = `cp`; UNIQUE/FK catch dedup + wrong-sid bugs at insert time
+- Notebooks must use `db.read_table()` instead of `pd.read_csv()` (small workflow cost)
+- Schema changes go in `schema.sql` + ad-hoc migration in `notebooks/`
 
-We needed a single source of truth, with constraints enforced by the storage layer rather than hoped for in code.
+**Not chosen.** Postgres (server overhead). DuckDB (weaker concurrency). Parquet (rewrites whole file on append).
 
-## Decision
-
-One SQLite database file at `data/alpha_signal.db`. 33 tables across 6 logical groups. WAL journaling for concurrent reads. Schema versioned via `schema.sql` (CREATE TABLE IF NOT EXISTS).
-
-All scripts use the helpers in `db.py` (`get_db()`, `read_table()`, `upsert_df()`, etc.) — no script opens `sqlite3.connect()` directly.
-
-## Alternatives considered
-
-- **Continue with CSVs.** Status quo. Rejected: every problem we hit in v1 was a "CSV said one thing, script assumed another" problem.
-- **Postgres.** More features, but requires running a server, has auth, is overkill for a single-user single-VM project. SQLite is a file. Backup = `cp`.
-- **DuckDB.** Faster for analytics, OLAP-shaped. But weaker concurrency story and less mature for the write-heavy ingest patterns we need. SQLite is boring and that's good.
-- **Parquet + pandas.** Great for read-heavy analytics, awful for incremental writes. We do a lot of "append today's data" — Parquet rewrites the whole file.
-
-## Consequences
-
-**Easier:**
-- One backup target (`alpha_signal.db`)
-- UNIQUE/PRIMARY KEY constraints enforce dedup at insert time
-- Foreign keys catch "wrong sid" bugs at insert time
-- SQL is the right query language for this data shape
-- WAL allows pipeline tasks to read while one writes
-
-**Harder:**
-- Migrations need to be intentional (we use `schema.sql` with IF NOT EXISTS, plus ad-hoc ALTER scripts)
-- Notebooks need to use `db.read_table()` instead of `pd.read_csv()` — small workflow cost
-
-**Will bite us if:**
-- DB file gets corrupted (mitigation: daily backup; SQLite is very crash-resistant in WAL mode)
-- We ever need multi-machine writes (we don't)
-- Schema changes get sloppy (mitigation: every schema change goes in `schema.sql` AND has a migration script in `notebooks/` that's runnable on existing DBs)
-
-## References
-
-- Schema: [../reference/schema.md](../reference/schema.md)
-- DB helpers: `db.py`
-- Original data source audit: [../_archive/2026-04-09-data-source-strategy.md](../_archive/2026-04-09-data-source-strategy.md)
+**References.** `db.py` · `schema.sql` · [reference/schema.md](../reference/schema.md)

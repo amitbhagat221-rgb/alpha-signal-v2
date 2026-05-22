@@ -4,7 +4,7 @@ Created: 2026-05-12
 Last updated: 2026-05-12
 Owner: Amit Bhagat
 Implementation: not started — research-first signal, validation gates production port
-Related: 0005-100-factors-and-model.md (factor library), 0007-market-share-momentum-factor.md (sector-relative pattern)
+Related: 0002-100-factors-and-model.md (factor library), 0003-market-share-momentum-factor.md (sector-relative pattern)
 Supersedes: v1's `scripts/12_google_trends.py` (38 hand-picked keywords, no consumer, last output was 1-byte empty CSV)
 ---
 
@@ -21,7 +21,7 @@ If yes → port as a real v2 signal. If no → close this plan and don't touch s
 ## Why now
 
 - v1 cron just got disabled (2026-05-12); zero search-pulse data flowing today
-- F-track (plan 0005) needs more cross-sectional signals that aren't already in BACKTEST_SIGNALS
+- Track 3 (plan 0002) needs more cross-sectional signals that aren't already in BACKTEST_SIGNALS
 - Consumer-discretionary, FMCG, auto, and quick-commerce names are 26% of the universe — if search-interest leads revenue for these, it's a real edge
 - We just shipped LLM-curated `competitive_landscape` per industry (ADR 0014) — gives us a mapping from "brand the consumer types into Google" → listed sid, with `share_pct` weights. That eliminates v1's hand-curated `BRAND_MAP` of 38 entries
 
@@ -44,13 +44,13 @@ A backtest answers a single question:
 
 ## If validation passes — design
 
-`signals/consumer_demand.py` following the established F-track template:
+`signals/consumer_demand.py` following the established Track 3 template:
 
 - **Source data**: a new `consumer_search_interest` table — `(brand_keyword, sid, week_end_date, interest_0_100, interest_4w_avg, interest_12w_avg)`. Populated by a fetcher `sources/search_interest.py`.
 - **Score formula**: `(interest_4w_avg - interest_12w_avg) / interest_12w_avg` → percentile rank within cap-tier × sector
 - **PIT helper**: `pit_consumer_demand(sid, eval_date)` reads only `week_end_date <= eval_date - 7d` rows (1-week filing lag to model real-world data availability)
 - **Score table**: `consumer_demand_scores (sid, snapshot_date, score, raw_change_pct)` — INSERT OR REPLACE on (sid, snapshot_date)
-- **Weighting**: starts at the F-track default tier weight (`t≥2.5 → 1.0x`, etc per CLAUDE.md)
+- **Weighting**: starts at the Track 3 default tier weight (`t≥2.5 → 1.0x`, etc per CLAUDE.md)
 - **Cockpit surfacing**: factor card on stock_detail (same template as ROIC/FCF Yield); rolls into Quality composite OR a new "Demand" composite if it doesn't fit
 
 ## Phases

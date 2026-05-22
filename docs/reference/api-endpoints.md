@@ -1,31 +1,10 @@
 # API Endpoints — Working Catalog
 
-> **Purpose.** Per-endpoint reference for every external data source v2 calls.
-> Function signatures, history depth, quirks, install commands, probe dates.
-> Companion to [data-playbook.md](data-playbook.md) (which is the *strategy*
-> doc — sources by use case, PIT/reconstruction patterns). This file is the
-> *reference* — what to call, with what args.
->
-> **Invariant:** nothing here is theoretical. Every entry was probed at the
-> listed date from this VM. Re-verify after long gaps.
->
-> Last full audit: **2026-05-03** (Bengaluru / Oracle Cloud VM).
+Per-endpoint reference for every external data source v2 calls. Every entry was probed from this VM. Re-verify after long gaps. Strategy doc: [data-playbook.md](data-playbook.md). Last audit: **2026-05-03**.
 
----
+Tiers: A = free + deep history · B = free + forward-only (must cron) · C = free with caveats · D = paid (see [paid-data-sources.md](paid-data-sources.md)).
 
-## How this doc is organized
-
-- **Tier A** — free, deep history (the alpha gold)
-- **Tier B** — free, forward-only (must accumulate; cron now)
-- **Tier C** — free with caveats
-- **Tier D** — paid (deferred per cost discipline)
-- **Quirks & gotchas** — common-mode failures
-- **Things tried and rejected** — saves you the discovery time
-- **Install + cookie-warm pattern** — boilerplate that always works
-
----
-
-## Library install (confirmed-working versions)
+## Library install
 
 ```bash
 pip install --break-system-packages nselib jugaad-data mftool
@@ -231,8 +210,8 @@ See [paid-data-sources.md](paid-data-sources.md) for full ranked playbook.
 
 | Source | Cost | Status |
 |---|---|---|
-| Zerodha Kite Connect | ₹500/mo | Recommended (Phase A3 of plan 0005) |
-| Screener.in Premium | ₹420/mo | Recommended (Phase A1 of plan 0005). NO official API — login + Excel export pattern. |
+| Zerodha Kite Connect | ₹500/mo | Recommended (Phase 3.1c of plan 0002) |
+| Screener.in Premium | ₹420/mo | Recommended (Phase 3.1a of plan 0002). NO official API — login + Excel export pattern. |
 | EODHD India Fundamentals | $20-60/mo | One-month bursts when extending PIT past 2023 |
 | Trendlyne | ~₹500/mo | Backup for nselib data |
 | TrueData | ₹500-2000/mo | Tick data + IV surface — only if HFT/options |
@@ -306,37 +285,15 @@ This is what v1's CLAUDE.md called "blocked" — it isn't. nselib does this inte
 
 ---
 
-## Probe verification checklist
+## After a long gap, before trusting an endpoint
 
-Before trusting any endpoint after a long gap:
-
-- [ ] Hit it with a known-recent date first (cookie session can intermittently fail)
-- [ ] Check response shape vs documented schema (NSE silently changes column names)
-- [ ] Verify date format the function expects (`DD-MM-YYYY` for nselib, ISO elsewhere)
-- [ ] Strip column whitespace if you see weird `KeyError: ' SYMBOL'` failures
-- [ ] If 403/blocked: check the cookie warm-up step, not the endpoint
-- [ ] If empty result: try chunking the date range smaller
-
----
+- Hit a known-recent date first (cookie can intermittently fail)
+- Check response shape vs schema — NSE silently changes column names
+- Verify date format: `DD-MM-YYYY` for nselib, ISO elsewhere
+- Strip column whitespace if `KeyError: ' SYMBOL'`
+- 403/blocked → cookie warm-up issue, not the endpoint
+- Empty result → chunk the date range smaller
 
 ## Update protocol
 
-When you confirm a new endpoint or break an old one:
-
-1. Add or update the entry above with **probe date**.
-2. If the endpoint unblocks a registered signal, flip its status in
-   `db.BACKTEST_SIGNALS` and note the change.
-3. If the endpoint feeds a new factor, log it in [factor-catalog.md] (when
-   that exists) and reference here.
-4. Keep tier classification (A/B/C/D) honest — promote/demote based on
-   actual reliability, not initial impression.
-
----
-
-## Cross-references
-
-- [data-playbook.md](data-playbook.md) — strategy: PIT discipline, reconstruction patterns, per-signal recipes
-- [paid-data-sources.md](paid-data-sources.md) — ₹5K/mo budget allocation
-- [docs/plans/0005-100-factors-and-model.md](../plans/0005-100-factors-and-model.md) — uses these endpoints to build 50 new factors
-- [run_daily_forward.sh](../../run_daily_forward.sh) — cron wrapper for Tier B forward accumulation
-- [sources/nselib_pull.py](../../sources/nselib_pull.py) — the unified ingest module that wraps most of these calls
+Add/update entries with **probe date**. If an endpoint unblocks a registered signal, flip its status in `db.BACKTEST_SIGNALS`. Promote/demote tier based on actual reliability, not first impression.

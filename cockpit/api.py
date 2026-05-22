@@ -2016,19 +2016,19 @@ def get_factor_health():
     """
     from db import BACKTEST_SIGNALS
 
-    # F-track extras not in BACKTEST_SIGNALS (mirrors get_command_centre)
-    F_TRACK_EXTRAS = [
-        {"signal": "roic",                 "label": "ROIC (F-track)",                "group": "F-track / Quality",
+    # Track 3 extras not in BACKTEST_SIGNALS (mirrors get_command_centre)
+    TRACK3_EXTRAS = [
+        {"signal": "roic",                 "label": "ROIC (Track 3)",                "group": "Track 3 / Quality",
          "score_table": "roic_scores",     "score_col": "roic"},
-        {"signal": "fcf_yield",            "label": "FCF Yield (F-track)",           "group": "F-track / Cash",
+        {"signal": "fcf_yield",            "label": "FCF Yield (Track 3)",           "group": "Track 3 / Cash",
          "score_table": "fcf_yield_scores","score_col": "fcf_yield"},
-        {"signal": "revenue_cv_5y",        "label": "Revenue Volatility 5y CV",      "group": "F-track / Quality",
+        {"signal": "revenue_cv_5y",        "label": "Revenue Volatility 5y CV",      "group": "Track 3 / Quality",
          "score_table": "revenue_cv_scores","score_col": "revenue_cv_5y"},
-        {"signal": "relative_turnover",    "label": "Inventory Turnover (sector-relative)","group": "F-track / Working Capital",
+        {"signal": "relative_turnover",    "label": "Inventory Turnover (sector-relative)","group": "Track 3 / Working Capital",
          "score_table": "inventory_turnover_scores","score_col": "relative_turnover"},
-        {"signal": "relative_growth",      "label": "Sector-Relative Sales Growth",  "group": "F-track / Growth",
+        {"signal": "relative_growth",      "label": "Sector-Relative Sales Growth",  "group": "Track 3 / Growth",
          "score_table": "sales_growth_relative_scores","score_col": "relative_growth"},
-        {"signal": "share_momentum",       "label": "Market-Share Momentum",         "group": "F-track / Sector",
+        {"signal": "share_momentum",       "label": "Market-Share Momentum",         "group": "Track 3 / Sector",
          "score_table": "share_momentum_scores","score_col": "share_momentum"},
     ]
 
@@ -2101,7 +2101,7 @@ def get_factor_health():
                 except Exception:
                     pit_coverage[c] = 0
 
-        # Per-table count + freshness for F-track score tables
+        # Per-table count + freshness for Track 3 score tables
         def _table_stats(table, col):
             try:
                 latest_snap = conn.execute(
@@ -2256,8 +2256,8 @@ def get_factor_health():
             track="legacy",
         ))
 
-    # ── F-track extras ──
-    for spec in F_TRACK_EXTRAS:
+    # ── Track 3 extras ──
+    for spec in TRACK3_EXTRAS:
         signal = spec["signal"]
         ic_row = best_by_signal.get(signal, {})
         t_stat = ic_row.get("t_stat")
@@ -2265,13 +2265,13 @@ def get_factor_health():
         latest_snap_str, coverage_n = _table_stats(
             spec["score_table"], spec["score_col"]
         )
-        # Eligible universe: most F-track factors exclude financials
+        # Eligible universe: most Track 3 factors exclude financials
         eligible = uni_excl_fin
         in_model = (t_stat is not None and abs(t_stat) >= PROMOTION_T)
         out.append(_build_row(
             name=spec["label"],
             signal=signal,
-            group=spec.get("group", "F-track"),
+            group=spec.get("group", "Track 3"),
             status="READY",
             status_reason="",
             in_model_flag=in_model,
@@ -2381,18 +2381,18 @@ def get_command_centre():
 
     # ── Factor library ───────────────────────────────────────
     # Source of truth: BACKTEST_SIGNALS in db.py (42 v1-derived signals) plus
-    # F-track additions (ROIC, FCF Yield, …). Each factor's t-stat is looked
+    # Track 3 additions (ROIC, FCF Yield, …). Each factor's t-stat is looked
     # up from pit_ic_by_tier_v2 by `signal` column.
     from db import BACKTEST_SIGNALS
 
-    # F-track factors not yet in BACKTEST_SIGNALS (no PIT helper yet, so no
+    # Track 3 factors not yet in BACKTEST_SIGNALS (no PIT helper yet, so no
     # entry in the v1-shaped registry). Same fields shape, so they render
     # uniformly.
-    F_TRACK_EXTRAS = [
+    TRACK3_EXTRAS = [
         {
             "signal": "roic",
-            "label": "ROIC (F-track)",
-            "group": "F-track / Quality",
+            "label": "ROIC (Track 3)",
+            "group": "Track 3 / Quality",
             "status": "READY",
             "status_reason": "",
             "track": "f-track",
@@ -2400,8 +2400,8 @@ def get_command_centre():
         },
         {
             "signal": "fcf_yield",
-            "label": "FCF Yield (F-track)",
-            "group": "F-track / Cash",
+            "label": "FCF Yield (Track 3)",
+            "group": "Track 3 / Cash",
             "status": "READY",
             "status_reason": "",
             "track": "f-track",
@@ -2497,8 +2497,8 @@ def get_command_centre():
                 "table": v2_col or "—",
             })
 
-        # ── F-track extras (ROIC, FCF Yield, …) ──
-        for spec in F_TRACK_EXTRAS:
+        # ── Track 3 extras (ROIC, FCF Yield, …) ──
+        for spec in TRACK3_EXTRAS:
             signal = spec["signal"]
             ic_row = best.get(signal, {})
             t_stat = ic_row.get("t_stat")
@@ -2509,7 +2509,7 @@ def get_command_centre():
             factors.append({
                 "name": spec["label"],
                 "signal": signal,
-                "group": spec.get("group", "F-track"),
+                "group": spec.get("group", "Track 3"),
                 "status": spec.get("status"),
                 "status_reason": spec.get("status_reason", ""),
                 "stocks": stocks,
@@ -2572,7 +2572,7 @@ def get_command_centre():
             ("corporate_actions",      "Raw corporate events (splits, bonuses, dividends, buybacks, M&A) from NSE"),
         ]),
         ("Fundamentals", [
-            ("fundamentals_screener",  "F-track long-format — Screener Premium xlsx + schedules JSON. PK (sid, period_end, period_type, line_item)"),
+            ("fundamentals_screener",  "Track 3 long-format — Screener Premium xlsx + schedules JSON. PK (sid, period_end, period_type, line_item)"),
             ("quarterly_income",       "Tickertape — quarterly income (legacy wide format)"),
             ("annual_balance_sheet",   "Tickertape — annual balance sheet"),
             ("annual_cash_flow",       "Tickertape — annual cash flow"),
@@ -2619,9 +2619,9 @@ def get_command_centre():
             ("promoter_signals",       "Promoter QoQ + 4q trend"),
             ("smart_money_scores",     "Bulk-deal + delivery anomaly composite"),
             ("insider_signals",        "Insider trades signal — 29 monthly snapshots"),
-            ("sentiment_scores",       "News-based sentiment proxy — 7d volume + (FinBERT pending plan-0005)"),
-            ("roic_scores",            "F-track ROIC — 1,501 stocks (NOPAT/IC, 3yr median, IC≥₹50cr)"),
-            ("fcf_yield_scores",       "F-track FCF Yield — 1,195 stocks"),
+            ("sentiment_scores",       "News-based sentiment proxy — 7d volume + (FinBERT pending plan-0002)"),
+            ("roic_scores",            "Track 3 ROIC — 1,501 stocks (NOPAT/IC, 3yr median, IC≥₹50cr)"),
+            ("fcf_yield_scores",       "Track 3 FCF Yield — 1,195 stocks"),
         ]),
         ("Daily Output", [
             ("daily_picks",            "Top picks per cap-tier per snapshot_date — what the screener emits"),
@@ -2638,7 +2638,7 @@ def get_command_centre():
         ("Pipeline & Logging", [
             ("pipeline_log",           "Per-step run log (started_at, status, rows, duration)"),
             ("regime_state",           "Daily regime classifier output (Bullish/Neutral/Bearish)"),
-            ("screener_pull_errors",   "F-track scrape audit trail — error_type ∈ {auth, http, parse, thin, empty, fetch}"),
+            ("screener_pull_errors",   "Track 3 scrape audit trail — error_type ∈ {auth, http, parse, thin, empty, fetch}"),
         ]),
     ]
     data_model = []
@@ -2837,7 +2837,7 @@ def get_command_centre():
             "name": "Fundamentals",
             "summary": f"{data_layer.get('fundamentals_screener',{}).get('rows', 0):,} long-format rows · {data_layer.get('quarterly_income',{}).get('rows', 0):,} quarterly · 2 sources",
             "items": [
-                ("fundamentals_screener", "Screener Premium — 36 annual line items, 9 quarterly. Long-format (F-track)"),
+                ("fundamentals_screener", "Screener Premium — 36 annual line items, 9 quarterly. Long-format (Track 3)"),
                 ("quarterly_income", "Tickertape — quarterly income statement (legacy wide format)"),
                 ("annual_balance_sheet", "Tickertape — annual balance sheet"),
                 ("annual_cash_flow", "Tickertape — annual cash flow"),
@@ -2883,7 +2883,7 @@ def get_command_centre():
         "Value", "Quality", "Growth", "Momentum", "Ownership",
         "Smart Money", "Consensus", "Forensic", "Sentiment",
         "Regulatory", "Macro", "Composite",
-        "F-track / Quality", "F-track / Cash",
+        "Track 3 / Quality", "Track 3 / Cash",
     ]
     for grp in canonical_order:
         if grp in factors_by_group:
@@ -2934,7 +2934,7 @@ def get_command_centre():
             "items": [
                 ("Promotion criterion", "|t|≥1.5 in any tier (preferring v2_recompute)"),
                 ("ADR 0012", "v2 archive refreshes after every signal-side fix"),
-                ("Today: ROIC + FCF Yield", "F-track factors awaiting PIT helpers + backtest"),
+                ("Today: ROIC + FCF Yield", "Track 3 factors awaiting PIT helpers + backtest"),
             ],
         },
     ]

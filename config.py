@@ -263,20 +263,20 @@ PIPELINE_STEPS = [
      "table": "piotroski_scores",  "source": "quarterly_income + annual_balance_sheet + annual_cash_flow",
      "data_freq": "quarterly",     "frequency": "daily"},
 
-    # ROIC — first F-track factor. Reads fundamentals_screener (sourced
+    # ROIC — first Track 3 factor. Reads fundamentals_screener (sourced
     # weekly via sources.screener_pull — separate cadence, not in daily
     # pipeline). Not yet in scoring weights — needs t-stat validation.
     {"name": "signal_roic",        "module": "signals.roic",        "function": "compute",  "critical": False,
      "table": "roic_scores",       "source": "fundamentals_screener (Screener Premium)",
      "data_freq": "annual",        "frequency": "daily"},
 
-    # FCF Yield — second F-track factor. Same data source, same gating —
+    # FCF Yield — second Track 3 factor. Same data source, same gating —
     # not in scoring weights yet.
     {"name": "signal_fcf_yield",   "module": "signals.fcf_yield",   "function": "compute",  "critical": False,
      "table": "fcf_yield_scores",  "source": "fundamentals_screener (Screener Premium) + stocks.market_cap_cr",
      "data_freq": "annual",        "frequency": "daily"},
 
-    # Sector-narrative-derived cluster (plan 0007) — 4 factors inspired by
+    # Sector-narrative-derived cluster (plan 0003) — 4 factors inspired by
     # IIM Ahmedabad sector-narrative pages. None in scoring weights yet;
     # promotion gated on backtest |t| ≥ 1.5 in any tier.
 

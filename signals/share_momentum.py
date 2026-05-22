@@ -11,7 +11,7 @@ Writes: share_momentum_scores
 
   share_momentum     = share[t] / share[t-90 trading days] − 1
 
-The headline factor in plan-0007. Stocks gaining share within their sector
+The headline factor in plan-0003. Stocks gaining share within their sector
 tend to outperform; stocks losing share tend to lag. Independent of price
 momentum (different denominator) and sector-relative by construction.
 

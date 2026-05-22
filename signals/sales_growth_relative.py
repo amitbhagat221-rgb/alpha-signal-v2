@@ -16,7 +16,7 @@ Existing `revenue_growth_yoy` factor is absolute. A 15% Pharma stock looks
 fast in isolation but is *underperforming* the 22% sector. This factor fixes
 the comparison.
 
-Smoothing: 3-yr median per the F-track convention.
+Smoothing: 3-yr median per the Track 3 convention.
 
 Usage:
     python -m signals.sales_growth_relative

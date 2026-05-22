@@ -957,7 +957,7 @@ BACKTEST_SIGNALS = [
         "filing_lag": "75d annual + 60d quarterly",
         "pit_column_v1": None,
         "pit_column_v2": "roa",
-        "v1_verdict_summary": "(component of D15 financial sub-model; not in main C13b)",
+        "v1_verdict_summary": "(component of Track 2.2 financial sub-model; not in main C13b)",
         "status": "READY",
         "status_reason": "",
     },
@@ -1312,7 +1312,7 @@ BACKTEST_SIGNALS = [
         "pit_column_v2": "consensus_signal_combined",
         "v1_verdict_summary": "KEEP / WEAK / WEAK (t=3.52 LARGE — proxy validation in v1)",
         "status": "READY",
-        "status_reason": "v2 reconstruction uses Pattern 6 — annual forecast snapshots from forecast_history. v1's t=3.52 was proxy-mode, not pure PIT, so v2 t-stat may differ. Still the headline LARGE-tier signal candidate for D17.",
+        "status_reason": "v2 reconstruction uses Pattern 6 — annual forecast snapshots from forecast_history. v1's t=3.52 was proxy-mode, not pure PIT, so v2 t-stat may differ. Still the headline LARGE-tier signal candidate for Track 2.4.",
     },
 
     # ═══════════════════════════════════════════════════════════════════
@@ -1331,7 +1331,7 @@ BACKTEST_SIGNALS = [
         "pit_column_v2": None,
         "v1_verdict_summary": "(used as adjustment in v1 screener, not in C13b)",
         "status": "PARTIAL",
-        "status_reason": "Blocked on NLP setup. news_articles has no sentiment column — needs FinBERT classifier (see plan 0005 Phase A4). Once added, signal is computable on 2026-03+ data. Other partial fix: news_volume_7d (raw count) is now READY as a working proxy for attention.",
+        "status_reason": "Blocked on NLP setup. news_articles has no sentiment column — needs FinBERT classifier (see plan 0002 Phase A4). Once added, signal is computable on 2026-03+ data. Other partial fix: news_volume_7d (raw count) is now READY as a working proxy for attention.",
     },
     {
         "signal": "news_volume",
@@ -1345,7 +1345,7 @@ BACKTEST_SIGNALS = [
         "pit_column_v2": "news_volume_7d",
         "v1_verdict_summary": "(diagnostic)",
         "status": "READY",
-        "status_reason": "v2 column populated from news_articles ⟕ news_article_stocks. 0 rows for snapshots before news data starts (2024-04 single-day, then continuous from 2026-03). 10-118 stocks/date for 2026-03+. Forward-only — sentiment analysis (sentiment_7d) blocked on FinBERT setup, see plan 0005 Phase A4.",
+        "status_reason": "v2 column populated from news_articles ⟕ news_article_stocks. 0 rows for snapshots before news data starts (2024-04 single-day, then continuous from 2026-03). 10-118 stocks/date for 2026-03+. Forward-only — sentiment analysis (sentiment_7d) blocked on FinBERT setup, see plan 0002 Phase A4.",
     },
 
     # ═══════════════════════════════════════════════════════════════════
@@ -1453,7 +1453,7 @@ BACKTEST_SIGNALS = [
         "pit_column_v2": None,
         "v1_verdict_summary": "(insufficient PIT data — n=0 in v1)",
         "status": "PROPOSED",
-        "status_reason": "End-state composite — built only after all sub-signals are PIT-ready. Tracks D17 portfolio construction work.",
+        "status_reason": "End-state composite — built only after all sub-signals are PIT-ready. Tracks Track 2.4 portfolio construction work.",
     },
 ]
 

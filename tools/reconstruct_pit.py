@@ -136,7 +136,7 @@ PIT_COLUMNS = [
     "short_selling_signal",
     # Tier 4 — quality + sentiment
     "earnings_beat_rate", "news_volume_7d",
-    # F-track cluster (plan 0007) — sector-narrative-derived factors
+    # Track 3 cluster (plan 0003) — sector-narrative-derived factors
     "revenue_cv_5y", "relative_turnover", "relative_growth", "share_momentum",
 ]
 
@@ -186,7 +186,7 @@ VALIDATION_RANGES = {
     # Tier 4 — quality + sentiment
     "earnings_beat_rate":    (0, 1, True),      # fraction of last-N quarters beating
     "news_volume_7d":        (0, 100, True),    # article count in last 7d
-    # F-track cluster (plan 0007)
+    # Track 3 cluster (plan 0003)
     "revenue_cv_5y":         (0, 50, True),     # CV; >50 means mean ~ 0
     "relative_turnover":     (0, 20, True),     # ratio vs sector p50
     "relative_growth":       (-2, 5, True),     # growth − sector_median
@@ -1379,7 +1379,7 @@ def reconstruct_one_date(eval_date, raw, signals_to_run):
         news_pit = raw["news"][raw["news"]["published_date"] <= eval_date.isoformat()]
         base = base.merge(pit_news_volume(raw["stocks"], news_pit, eval_date), on="sid", how="left")
 
-    # ── F-track cluster (plan 0007) — sector-narrative-derived factors ──
+    # ── Track 3 cluster (plan 0003) — sector-narrative-derived factors ──
     fund_pit = (knowable_screener(raw["fund_screener"], eval_date)
                 if "fund_screener" in raw else pd.DataFrame())
 
@@ -1489,7 +1489,7 @@ def load_raw():
     macro_map = read_sql(
         "SELECT indicator_id, sector, direction, weight FROM macro_sector_map"
     )
-    # F-track fundamentals (long-format) — annual rows only for the cluster
+    # Track 3 fundamentals (long-format) — annual rows only for the cluster
     fund_screener = read_sql(
         "SELECT sid, period_end, line_item, value FROM fundamentals_screener "
         "WHERE period_type = 'annual'"
@@ -1548,7 +1548,7 @@ def main():
         "short_selling",
         # Tier 4 quality + sentiment
         "earnings_beat_rate", "news_volume",
-        # F-track cluster (plan 0007)
+        # Track 3 cluster (plan 0003)
         "revenue_cv", "inventory_turnover",
         "sales_growth_relative", "share_momentum",
     }

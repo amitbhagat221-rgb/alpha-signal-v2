@@ -54,9 +54,10 @@ Links to discussions, specs, related ADRs.
 | 0006 | [Classifier status tracking](0006-classifier-status-tracking.md) | Accepted | Regulatory classifier state lives in `regulatory_events.classifier_status` |
 | 0007 | [Fresh rebuild for v2](0007-fresh-rebuild-v2.md) | Accepted | v2 is greenfield, not a v1 refactor |
 | 0008 | [Cockpit as a write-side surface](0008-cockpit-write-surface.md) | Accepted | Cockpit can mutate state (rerun steps), with strict guardrails |
-| 0009 | [F-track parallel to D-track](0009-factor-track-parallel-to-d-track.md) | Accepted | Factor-depth track runs concurrent with intelligence track |
+| 0009 | [Track 3 parallel to Track 2](0009-factor-track-parallel-to-d-track.md) | Accepted | Factor model (Track 3) runs concurrent with Portfolio (Track 2). Terminology per ADR 0015. |
 | 0010 | [PIT-strict corporate-action adjustment](0010-pit-strict-corporate-action-adjustment.md) | Accepted | Splits/bonuses/dividends compose at signal-compute time, not at ingest |
-| 0011 | [Long format for new fundamentals tables](0011-long-format-for-new-fundamentals-tables.md) | Accepted | F-track and onward use long-format; legacy wide tables stay wide |
+| 0011 | [Long format for new fundamentals tables](0011-long-format-for-new-fundamentals-tables.md) | Accepted | Track 3 and onward use long-format; legacy wide tables stay wide |
 | 0012 | [PIT archive refresh on signal fix](0012-pit-archive-refresh-on-signal-fix.md) | Accepted | Refresh v2 PIT archive when signal logic changes; v1 archive is frozen |
 | 0013 | [Industry, not GICS sector, as drill unit](0013-industry-not-sector-as-drill-unit.md) | Accepted | 25-industry IIM-style taxonomy + market-cap-weighted composite |
 | 0014 | [LLM-sourced competitive landscape](0014-llm-sourced-competitive-landscape.md) | Accepted | Sonnet+web-search generates industry share including private players |
+| 0015 | [Track numbering and rename](0015-track-numbering-and-rename.md) | Accepted | Three tracks (Foundation/Portfolio/Factor model) + decimal phases + fork suffixes + ↔ parallels |
