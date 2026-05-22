@@ -1382,7 +1382,157 @@ BACKTEST_SIGNALS = [
     },
 
     # ═══════════════════════════════════════════════════════════════════
-    # GROUP 11 — FACTOR COMPOSITES (v1 screener inputs)
+    # GROUP 11 — TRACK 3 FACTOR LIBRARY
+    # ═══════════════════════════════════════════════════════════════════
+    # All sourced from fundamentals_screener (Screener Premium scrape).
+    # Filing lag 75d annual. Validated tier = |t|≥1.5 on some cap-tier in
+    # the most recent backtest; library tier = below that bar but kept
+    # computed for re-test as PIT history extends. The FACTOR_LIBRARY list
+    # below carries the library-tier signal ids.
+
+    {
+        "signal": "roic",
+        "label": "Return on Invested Capital",
+        "group": "Track 3 — Library",
+        "description": "NOPAT / Invested Capital, 3-yr median. NOPAT = (PBT + Interest) × (1 − Tax/PBT)",
+        "source_tables": ["fundamentals_screener"],
+        "source_columns": ["{PBT, Interest, Tax, Equity Share Capital, Reserves, Borrowings}"],
+        "filing_lag": "75d annual",
+        "pit_column_v1": None,
+        "pit_column_v2": None,
+        "v1_verdict_summary": "(awaiting PIT helper retrofit)",
+        "status": "MISSING",
+        "status_reason": "Signal module shipped + scoring; PIT helper not yet built (unit-of-work rule violation — to retrofit).",
+    },
+    {
+        "signal": "fcf_yield",
+        "label": "Free Cash Flow Yield",
+        "group": "Track 3 — Library",
+        "description": "3-yr median FCF / market cap. FCF = OCF − (Δ(Net Block + CWIP) + Depreciation)",
+        "source_tables": ["fundamentals_screener", "stocks"],
+        "source_columns": ["{OCF, Net Block, CWIP, Depreciation}", "stocks.market_cap_cr"],
+        "filing_lag": "75d annual + 0d market cap",
+        "pit_column_v1": None,
+        "pit_column_v2": None,
+        "v1_verdict_summary": "(awaiting PIT helper retrofit)",
+        "status": "MISSING",
+        "status_reason": "Signal module shipped + scoring; PIT helper not yet built.",
+    },
+    {
+        "signal": "ccc",
+        "label": "Cash Conversion Cycle",
+        "group": "Track 3 — Library",
+        "description": "DSO + DIO − DPO, 3-yr median. Sales used as denominator (no clean COGS line in Screener).",
+        "source_tables": ["fundamentals_screener"],
+        "source_columns": ["{Sales, Receivables, Inventory, Trade Payables}"],
+        "filing_lag": "75d annual",
+        "pit_column_v1": None,
+        "pit_column_v2": "ccc",
+        "v1_verdict_summary": "v2-only — LARGE WEAK (t=+1.87, n=5, contrarian sign), MID/SMALL DROP",
+        "status": "READY",
+        "status_reason": "PARKED — passes |t|≥1.5 bar on LARGE but with contrarian sign (higher CCC predicts higher return). Likely 5-month regime artifact (small-cap rotation period); awaiting more periods before promoting to scoring weights.",
+    },
+    {
+        "signal": "margin_slope",
+        "label": "Operating Margin Trend (5y slope)",
+        "group": "Track 3 — Library",
+        "description": "OLS slope of last 5y EBIT/Sales in percentage-points/year. EBIT = PBT + Interest.",
+        "source_tables": ["fundamentals_screener"],
+        "source_columns": ["{Sales, PBT, Interest}"],
+        "filing_lag": "75d annual",
+        "pit_column_v1": None,
+        "pit_column_v2": "margin_slope",
+        "v1_verdict_summary": "v2-only — DROP all tiers (best |t|=1.30 MID)",
+        "status": "READY",
+        "status_reason": "Library tier — signs negative across LARGE/MID, suggesting declining-margin stocks outperformed in the 5-period window. Kept computed for re-test as PIT extends.",
+    },
+    {
+        "signal": "wc_intensity",
+        "label": "Working Capital Intensity",
+        "group": "Track 3 — Library",
+        "description": "(Receivables + Inventory − Trade Payables) / Sales, 3-yr median. Sibling of CCC in ratio form.",
+        "source_tables": ["fundamentals_screener"],
+        "source_columns": ["{Sales, Receivables, Inventory, Trade Payables}"],
+        "filing_lag": "75d annual",
+        "pit_column_v1": None,
+        "pit_column_v2": "wc_intensity",
+        "v1_verdict_summary": "v2-only — DROP all tiers (best |t|=1.48 LARGE)",
+        "status": "READY",
+        "status_reason": "Library tier — borderline (t=1.48 just under bar); same regime pattern as CCC. Kept computed.",
+    },
+    {
+        "signal": "interest_coverage",
+        "label": "Interest Coverage Ratio",
+        "group": "Track 3 — Library",
+        "description": "(PBT + Interest) / Interest, 3-yr median, capped ±200. Stocks with Interest<₹1cr excluded.",
+        "source_tables": ["fundamentals_screener"],
+        "source_columns": ["{PBT, Interest}"],
+        "filing_lag": "75d annual",
+        "pit_column_v1": None,
+        "pit_column_v2": "interest_coverage",
+        "v1_verdict_summary": "v2-only — SMALL WEAK (t=+2.41, n=5, intuitive sign), LARGE/MID DROP",
+        "status": "READY",
+        "status_reason": "PARKED — strongest result of the 2026-05-22 batch; intuitively-signed (higher coverage → higher return) on SMALL. Promote candidate after one more month of fwd_return matures.",
+    },
+    {
+        "signal": "revenue_cv_5y",
+        "label": "Revenue CV (5y stability)",
+        "group": "Track 3 — Library",
+        "description": "Stdev/|mean| of last 5 YoY Sales growth rates. Lower = more stable top line.",
+        "source_tables": ["fundamentals_screener"],
+        "source_columns": ["Sales (annual, 6 yrs)"],
+        "filing_lag": "75d annual",
+        "pit_column_v1": None,
+        "pit_column_v2": "revenue_cv_5y",
+        "v1_verdict_summary": "v2-only — DROP all tiers (best |t|=1.28)",
+        "status": "READY",
+        "status_reason": "Library tier (plan 0007 cluster).",
+    },
+    {
+        "signal": "relative_turnover",
+        "label": "Inventory Turnover vs Sector",
+        "group": "Track 3 — Library",
+        "description": "Sales/Inventory 3-yr median, divided by sector p50. IT/Comm/Utilities + financials excluded.",
+        "source_tables": ["fundamentals_screener"],
+        "source_columns": ["{Sales, Inventory}"],
+        "filing_lag": "75d annual",
+        "pit_column_v1": None,
+        "pit_column_v2": "relative_turnover",
+        "v1_verdict_summary": "v2-only — DROP all tiers (best |t|=1.07)",
+        "status": "READY",
+        "status_reason": "Library tier (plan 0007 cluster).",
+    },
+    {
+        "signal": "relative_growth",
+        "label": "Sales Growth vs Sector Median",
+        "group": "Track 3 — Library",
+        "description": "3-yr median YoY Sales growth minus sector median. Financials excluded.",
+        "source_tables": ["fundamentals_screener"],
+        "source_columns": ["Sales (annual)"],
+        "filing_lag": "75d annual",
+        "pit_column_v1": None,
+        "pit_column_v2": "relative_growth",
+        "v1_verdict_summary": "v2-only — DROP all tiers (best |t|=1.19)",
+        "status": "READY",
+        "status_reason": "Library tier (plan 0007 cluster).",
+    },
+    {
+        "signal": "share_momentum",
+        "label": "Market-Cap Share Momentum",
+        "group": "Track 3 — Library",
+        "description": "Δ market_cap_share within sector over trailing 90 calendar days. Financials excluded.",
+        "source_tables": ["stock_prices", "fundamentals_screener"],
+        "source_columns": ["close (PIT-adjusted)", "No. of Equity Shares"],
+        "filing_lag": "0d price + 75d shares",
+        "pit_column_v1": None,
+        "pit_column_v2": "share_momentum",
+        "v1_verdict_summary": "v2-only — KEEP on at least one tier (best |t|=3.21)",
+        "status": "READY",
+        "status_reason": "VALIDATED — strongest Track-3 signal to date. Eligible for scoring weights pending Track 3.3a weighting work (per CLAUDE.md, don't edit SCREEN.weight_tiers mechanically).",
+    },
+
+    # ═══════════════════════════════════════════════════════════════════
+    # GROUP 12 — FACTOR COMPOSITES (v1 screener inputs)
     # ═══════════════════════════════════════════════════════════════════
 
     {
@@ -1455,6 +1605,37 @@ BACKTEST_SIGNALS = [
         "status": "PROPOSED",
         "status_reason": "End-state composite — built only after all sub-signals are PIT-ready. Tracks Track 2.4 portfolio construction work.",
     },
+]
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# FACTOR_LIBRARY — signal ids that are computed and PIT-reconstructable but
+# do NOT (yet) clear the |t|≥1.5 promotion bar. Kept in BACKTEST_SIGNALS so
+# the cockpit can render their cards, but listed here so downstream tools
+# can filter "validated tier" from "library tier" cleanly.
+#
+# A signal moves from FACTOR_LIBRARY → validated tier by:
+#   1. Hitting |t|≥1.5 on some cap-tier in pit_ic_by_tier_v2, AND
+#   2. Being added to SCREEN.weight_tiers via the deliberate process
+#      documented in docs/reference/signal-weights.md (NOT mechanically).
+#
+# Membership changes when t-stats change — keep in sync with the most recent
+# `python -m tools.backtest_pit` output. The two PARKED entries (ccc,
+# interest_coverage) are listed here because they pass the |t| bar but await
+# sign/regime verification before promotion.
+FACTOR_LIBRARY = [
+    # PARKED — passes |t|≥1.5, sign/regime verification pending
+    "ccc",                  # contrarian sign on LARGE (t=+1.87)
+    "interest_coverage",    # intuitive sign on SMALL (t=+2.41) — strongest candidate
+    # Sub-threshold — kept computed, awaiting more periods
+    "margin_slope",
+    "wc_intensity",
+    "revenue_cv_5y",
+    "relative_turnover",
+    "relative_growth",
+    # PIT helper not yet retrofitted (status MISSING in BACKTEST_SIGNALS)
+    "roic",
+    "fcf_yield",
 ]
 
 

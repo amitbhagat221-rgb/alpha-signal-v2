@@ -636,6 +636,63 @@ CREATE TABLE IF NOT EXISTS fcf_yield_scores (
 
 CREATE INDEX IF NOT EXISTS idx_fcfy_date ON fcf_yield_scores(snapshot_date);
 
+-- Cash Conversion Cycle — third Track 3 factor.
+-- DSO = Receivables / (Sales/365); DIO = Inventory / (Sales/365);
+-- DPO = Trade Payables / (Sales/365); CCC = DSO + DIO − DPO.
+-- Sales used as the denominator for all three legs (no clean COGS line in
+-- Screener); the bias is consistent across stocks, so ranking is preserved.
+-- 3-yr median per stock to suppress one-off year-end working-capital tactics.
+CREATE TABLE IF NOT EXISTS cash_conversion_cycle_scores (
+    sid             TEXT NOT NULL REFERENCES stocks(sid),
+    snapshot_date   TEXT NOT NULL,
+    period_end      TEXT,
+    dso             REAL,        -- days sales outstanding
+    dio             REAL,        -- days inventory outstanding
+    dpo             REAL,        -- days payables outstanding
+    ccc             REAL,        -- DSO + DIO − DPO
+    PRIMARY KEY (sid, snapshot_date)
+);
+
+CREATE INDEX IF NOT EXISTS idx_ccc_date ON cash_conversion_cycle_scores(snapshot_date);
+
+-- Operating Margin Trend — slope of last 5 years' (PBT+Interest)/Sales.
+-- Positive slope = expanding profitability. Financials excluded.
+CREATE TABLE IF NOT EXISTS operating_margin_trend_scores (
+    sid              TEXT NOT NULL REFERENCES stocks(sid),
+    snapshot_date    TEXT NOT NULL,
+    period_end       TEXT,
+    margin_latest    REAL,       -- most recent year's EBIT/Sales
+    margin_5y_avg    REAL,       -- mean across the 5y window
+    margin_slope     REAL,       -- pp/year slope from linear regression
+    PRIMARY KEY (sid, snapshot_date)
+);
+CREATE INDEX IF NOT EXISTS idx_omtrend_date ON operating_margin_trend_scores(snapshot_date);
+
+-- Working Capital Intensity — 3y median (Receivables + Inventory − Trade Payables) / Sales.
+-- Lower = less capital tied per ₹ of revenue. Same data lineage as CCC,
+-- but expressed as a ratio rather than days — captures the magnitude of
+-- working-capital drag in a scale-free way.
+CREATE TABLE IF NOT EXISTS working_capital_intensity_scores (
+    sid              TEXT NOT NULL REFERENCES stocks(sid),
+    snapshot_date    TEXT NOT NULL,
+    period_end       TEXT,
+    wc_intensity     REAL,       -- (Recv+Inv-Pay)/Sales, 3y median
+    PRIMARY KEY (sid, snapshot_date)
+);
+CREATE INDEX IF NOT EXISTS idx_wci_date ON working_capital_intensity_scores(snapshot_date);
+
+-- Interest Coverage — 3y median (PBT + Interest) / Interest.
+-- Higher = safer balance sheet. Stocks with Interest ≈ 0 (no debt) are
+-- excluded — coverage isn't meaningful, and they'd dominate the rank.
+CREATE TABLE IF NOT EXISTS interest_coverage_scores (
+    sid              TEXT NOT NULL REFERENCES stocks(sid),
+    snapshot_date    TEXT NOT NULL,
+    period_end       TEXT,
+    interest_coverage REAL,      -- (PBT + Interest) / Interest, 3y median
+    PRIMARY KEY (sid, snapshot_date)
+);
+CREATE INDEX IF NOT EXISTS idx_icov_date ON interest_coverage_scores(snapshot_date);
+
 -- ─────────────────────────────────────────────────────────────
 -- Sector-narrative-derived factor cluster (plan 0007)
 -- ─────────────────────────────────────────────────────────────

@@ -138,6 +138,11 @@ PIT_COLUMNS = [
     "earnings_beat_rate", "news_volume_7d",
     # Track 3 cluster (plan 0003) — sector-narrative-derived factors
     "revenue_cv_5y", "relative_turnover", "relative_growth", "share_momentum",
+    # Track 3 standalone factors
+    "ccc",
+    "margin_slope",
+    "wc_intensity",
+    "interest_coverage",
 ]
 
 
@@ -191,6 +196,18 @@ VALIDATION_RANGES = {
     "relative_turnover":     (0, 20, True),     # ratio vs sector p50
     "relative_growth":       (-2, 5, True),     # growth − sector_median
     "share_momentum":        (-1, 5, True),     # share[t]/share[t-90d] − 1
+    # Cash conversion cycle — in days. Real-world spans -100 to +400d.
+    # Pad bounds to (-365, 730) to keep distressed outliers (huge unpaid
+    # payables, near-zero turnover) without letting them dominate the rank.
+    "ccc":                   (-365, 730, True),
+    # Operating margin slope — percentage-points/year. ±50pp/yr is a
+    # massive shift; anything beyond is data error.
+    "margin_slope":          (-50, 50, True),
+    # Working capital intensity — (Recv + Inv − Pay) / Sales. Real-world
+    # band roughly -0.5 to +2; pad to (-2, 5) for distressed names.
+    "wc_intensity":          (-2, 5, True),
+    # Interest coverage — capped to ±200 in the signal itself.
+    "interest_coverage":     (-200, 200, True),
     # Sector signals (separate table)
     "regulatory_score":      (-10, 10, True),
     "macro_score":           (-10, 10, True),
@@ -1282,6 +1299,170 @@ def pit_share_momentum(stocks, fund_pit, prices_pit, eval_date,
     return df[["sid", "share_momentum"]].copy()
 
 
+# ───── Cash Conversion Cycle (paired with signals/cash_conversion_cycle.py) ─────
+
+_CCC_SMOOTH_YEARS = 3
+_CCC_MIN_SALES_CR = 50.0
+_CCC_ITEMS = ("Sales", "Receivables", "Inventory", "Trade Payables")
+
+
+def pit_cash_conversion_cycle(stocks, fund_pit):
+    """3-yr median CCC = DSO + DIO − DPO, all using Sales/365 as denominator.
+
+    Mirrors signals/cash_conversion_cycle.py — see that module for the rationale
+    on using Sales (not COGS) and the financial-sector exclusion.
+    """
+    universe = stocks[~stocks["sector"].isin(FINANCIAL_SECTORS)][["sid"]]
+    fp = fund_pit[fund_pit["line_item"].isin(_CCC_ITEMS)]
+    if fp.empty:
+        return pd.DataFrame(columns=["sid", "ccc"])
+
+    wide = fp.pivot_table(
+        index=["sid", "period_end"], columns="line_item", values="value", aggfunc="first"
+    ).reset_index()
+    for item in _CCC_ITEMS:
+        if item not in wide.columns:
+            wide[item] = np.nan
+    wide = wide.dropna(subset=list(_CCC_ITEMS))
+    wide = wide[wide["Sales"] >= _CCC_MIN_SALES_CR]
+    if wide.empty:
+        return pd.DataFrame(columns=["sid", "ccc"])
+
+    daily_sales = wide["Sales"] / 365.0
+    wide["ccc_yr"] = (
+        wide["Receivables"] / daily_sales
+        + wide["Inventory"] / daily_sales
+        - wide["Trade Payables"] / daily_sales
+    )
+
+    wide = wide.sort_values(["sid", "period_end"])
+    last_n = wide.groupby("sid", as_index=False).tail(_CCC_SMOOTH_YEARS)
+    agg = last_n.groupby("sid", as_index=False).agg(
+        ccc=("ccc_yr", "median"),
+        years_used=("ccc_yr", "count"),
+    )
+    agg = agg[agg["years_used"] >= _CCC_SMOOTH_YEARS]
+    agg = agg.merge(universe, on="sid", how="inner")
+    return agg[["sid", "ccc"]].reset_index(drop=True)
+
+
+# ───── Operating Margin Trend (paired with signals/operating_margin_trend.py) ─────
+
+_OMTREND_WINDOW = 5
+_OMTREND_MIN_SALES_CR = 50.0
+_OMTREND_ITEMS = ("Sales", "Profit before tax", "Interest")
+
+
+def pit_operating_margin_trend(stocks, fund_pit):
+    """OLS slope (pp/yr) of last 5y EBIT/Sales per sid."""
+    universe = stocks[~stocks["sector"].isin(FINANCIAL_SECTORS)][["sid"]]
+    fp = fund_pit[fund_pit["line_item"].isin(_OMTREND_ITEMS)]
+    if fp.empty:
+        return pd.DataFrame(columns=["sid", "margin_slope"])
+
+    wide = fp.pivot_table(
+        index=["sid", "period_end"], columns="line_item", values="value", aggfunc="first"
+    ).reset_index()
+    for item in _OMTREND_ITEMS:
+        if item not in wide.columns:
+            wide[item] = np.nan
+    wide = wide.dropna(subset=list(_OMTREND_ITEMS))
+    wide = wide[wide["Sales"] >= _OMTREND_MIN_SALES_CR].copy()
+    wide["margin"] = (wide["Profit before tax"] + wide["Interest"]) / wide["Sales"]
+    wide = wide[wide["margin"].between(-2.0, 2.0)]
+
+    wide = wide.sort_values(["sid", "period_end"])
+    last_n = wide.groupby("sid", as_index=False).tail(_OMTREND_WINDOW)
+
+    rows = []
+    for sid, g in last_n.groupby("sid"):
+        if len(g) < _OMTREND_WINDOW:
+            continue
+        x = np.arange(len(g), dtype=float)
+        y = g["margin"].values
+        slope_frac = np.polyfit(x, y, 1)[0]
+        rows.append({"sid": sid, "margin_slope": float(slope_frac) * 100.0})
+    if not rows:
+        return pd.DataFrame(columns=["sid", "margin_slope"])
+    out = pd.DataFrame(rows).merge(universe, on="sid", how="inner")
+    return out[["sid", "margin_slope"]]
+
+
+# ───── Working Capital Intensity (paired with signals/working_capital_intensity.py) ─────
+
+_WCI_SMOOTH = 3
+_WCI_MIN_SALES_CR = 50.0
+_WCI_ITEMS = ("Sales", "Receivables", "Inventory", "Trade Payables")
+
+
+def pit_working_capital_intensity(stocks, fund_pit):
+    """3y median (Recv + Inv − Pay) / Sales per sid."""
+    universe = stocks[~stocks["sector"].isin(FINANCIAL_SECTORS)][["sid"]]
+    fp = fund_pit[fund_pit["line_item"].isin(_WCI_ITEMS)]
+    if fp.empty:
+        return pd.DataFrame(columns=["sid", "wc_intensity"])
+
+    wide = fp.pivot_table(
+        index=["sid", "period_end"], columns="line_item", values="value", aggfunc="first"
+    ).reset_index()
+    for item in _WCI_ITEMS:
+        if item not in wide.columns:
+            wide[item] = np.nan
+    wide = wide.dropna(subset=list(_WCI_ITEMS))
+    wide = wide[wide["Sales"] >= _WCI_MIN_SALES_CR].copy()
+    wide["wci_yr"] = (
+        wide["Receivables"] + wide["Inventory"] - wide["Trade Payables"]
+    ) / wide["Sales"]
+
+    wide = wide.sort_values(["sid", "period_end"])
+    last_n = wide.groupby("sid", as_index=False).tail(_WCI_SMOOTH)
+    agg = last_n.groupby("sid", as_index=False).agg(
+        wc_intensity=("wci_yr", "median"),
+        years_used=("wci_yr", "count"),
+    )
+    agg = agg[agg["years_used"] >= _WCI_SMOOTH]
+    agg = agg.merge(universe, on="sid", how="inner")
+    return agg[["sid", "wc_intensity"]].reset_index(drop=True)
+
+
+# ───── Interest Coverage (paired with signals/interest_coverage.py) ─────
+
+_ICOV_SMOOTH = 3
+_ICOV_MIN_INTEREST_CR = 1.0
+_ICOV_CAP = 200.0
+_ICOV_ITEMS = ("Profit before tax", "Interest")
+
+
+def pit_interest_coverage(stocks, fund_pit):
+    """3y median (PBT + Interest) / Interest per sid, capped at ±200."""
+    universe = stocks[~stocks["sector"].isin(FINANCIAL_SECTORS)][["sid"]]
+    fp = fund_pit[fund_pit["line_item"].isin(_ICOV_ITEMS)]
+    if fp.empty:
+        return pd.DataFrame(columns=["sid", "interest_coverage"])
+
+    wide = fp.pivot_table(
+        index=["sid", "period_end"], columns="line_item", values="value", aggfunc="first"
+    ).reset_index()
+    for item in _ICOV_ITEMS:
+        if item not in wide.columns:
+            wide[item] = np.nan
+    wide = wide.dropna(subset=list(_ICOV_ITEMS))
+    wide = wide[wide["Interest"] >= _ICOV_MIN_INTEREST_CR].copy()
+    wide["cov_yr"] = (
+        (wide["Profit before tax"] + wide["Interest"]) / wide["Interest"]
+    ).clip(-_ICOV_CAP, _ICOV_CAP)
+
+    wide = wide.sort_values(["sid", "period_end"])
+    last_n = wide.groupby("sid", as_index=False).tail(_ICOV_SMOOTH)
+    agg = last_n.groupby("sid", as_index=False).agg(
+        interest_coverage=("cov_yr", "median"),
+        years_used=("cov_yr", "count"),
+    )
+    agg = agg[agg["years_used"] >= _ICOV_SMOOTH]
+    agg = agg.merge(universe, on="sid", how="inner")
+    return agg[["sid", "interest_coverage"]].reset_index(drop=True)
+
+
 # ─────────────────────── Driver ───────────────────────
 
 def reconstruct_one_date(eval_date, raw, signals_to_run):
@@ -1395,6 +1576,30 @@ def reconstruct_one_date(eval_date, raw, signals_to_run):
     if "share_momentum" in signals_to_run and not fund_pit.empty:
         base = base.merge(
             pit_share_momentum(raw["stocks"], fund_pit, px_pit, eval_date),
+            on="sid", how="left",
+        )
+
+    if "cash_conversion_cycle" in signals_to_run and not fund_pit.empty:
+        base = base.merge(
+            pit_cash_conversion_cycle(raw["stocks"], fund_pit),
+            on="sid", how="left",
+        )
+
+    if "operating_margin_trend" in signals_to_run and not fund_pit.empty:
+        base = base.merge(
+            pit_operating_margin_trend(raw["stocks"], fund_pit),
+            on="sid", how="left",
+        )
+
+    if "working_capital_intensity" in signals_to_run and not fund_pit.empty:
+        base = base.merge(
+            pit_working_capital_intensity(raw["stocks"], fund_pit),
+            on="sid", how="left",
+        )
+
+    if "interest_coverage" in signals_to_run and not fund_pit.empty:
+        base = base.merge(
+            pit_interest_coverage(raw["stocks"], fund_pit),
             on="sid", how="left",
         )
 
@@ -1528,7 +1733,11 @@ def main():
                                  "short_selling",
                                  "earnings_beat_rate", "news_volume",
                                  "revenue_cv", "inventory_turnover",
-                                 "sales_growth_relative", "share_momentum"],
+                                 "sales_growth_relative", "share_momentum",
+                                 "cash_conversion_cycle",
+                                 "operating_margin_trend",
+                                 "working_capital_intensity",
+                                 "interest_coverage"],
                         help="Compute only this signal (repeatable)")
     parser.add_argument("--skip-existing", action="store_true",
                         help="Skip eval dates that already have a SUCCESS row in pit_reconstruction_log")
@@ -1551,6 +1760,11 @@ def main():
         # Track 3 cluster (plan 0003)
         "revenue_cv", "inventory_turnover",
         "sales_growth_relative", "share_momentum",
+        # Track 3 standalone factors
+        "cash_conversion_cycle",
+        "operating_margin_trend",
+        "working_capital_intensity",
+        "interest_coverage",
     }
     signals_to_run = set(args.signal) if args.signal else DEFAULT_SIGNALS
     signals_label = ",".join(sorted(signals_to_run))

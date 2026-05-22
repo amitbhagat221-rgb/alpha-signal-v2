@@ -276,6 +276,27 @@ PIPELINE_STEPS = [
      "table": "fcf_yield_scores",  "source": "fundamentals_screener (Screener Premium) + stocks.market_cap_cr",
      "data_freq": "annual",        "frequency": "daily"},
 
+    # Cash Conversion Cycle — third Track 3 factor. DSO + DIO − DPO, 3-yr median.
+    # Same gating — not in scoring weights yet.
+    {"name": "signal_cash_conversion_cycle", "module": "signals.cash_conversion_cycle", "function": "compute", "critical": False,
+     "table": "cash_conversion_cycle_scores", "source": "fundamentals_screener — Sales + Receivables + Inventory + Trade Payables",
+     "data_freq": "annual",        "frequency": "daily"},
+
+    # Operating Margin Trend — 5y OLS slope of EBIT/Sales (pp/year). Same gating.
+    {"name": "signal_operating_margin_trend", "module": "signals.operating_margin_trend", "function": "compute", "critical": False,
+     "table": "operating_margin_trend_scores", "source": "fundamentals_screener — Sales + PBT + Interest",
+     "data_freq": "annual",        "frequency": "daily"},
+
+    # Working Capital Intensity — (Recv + Inv − Pay) / Sales, 3y median. Same gating.
+    {"name": "signal_working_capital_intensity", "module": "signals.working_capital_intensity", "function": "compute", "critical": False,
+     "table": "working_capital_intensity_scores", "source": "fundamentals_screener — Sales + Receivables + Inventory + Trade Payables",
+     "data_freq": "annual",        "frequency": "daily"},
+
+    # Interest Coverage — (PBT + Interest) / Interest, 3y median. Same gating.
+    {"name": "signal_interest_coverage", "module": "signals.interest_coverage", "function": "compute", "critical": False,
+     "table": "interest_coverage_scores", "source": "fundamentals_screener — PBT + Interest",
+     "data_freq": "annual",        "frequency": "daily"},
+
     # Sector-narrative-derived cluster (plan 0003) — 4 factors inspired by
     # IIM Ahmedabad sector-narrative pages. None in scoring weights yet;
     # promotion gated on backtest |t| ≥ 1.5 in any tier.

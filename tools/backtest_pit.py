@@ -87,6 +87,11 @@ SIGNAL_COLUMN_MAP = {
     "relative_turnover":   (None, "relative_turnover"),
     "relative_growth":     (None, "relative_growth"),
     "share_momentum":      (None, "share_momentum"),
+    # Track 3 standalone factors
+    "ccc":                 (None, "ccc"),
+    "margin_slope":        (None, "margin_slope"),
+    "wc_intensity":        (None, "wc_intensity"),
+    "interest_coverage":   (None, "interest_coverage"),
     # forward return — same column in both
     "_response": ("fwd_return_20d", "fwd_return_20d"),
 }
