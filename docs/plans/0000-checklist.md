@@ -1,5 +1,5 @@
 # Alpha Signal v2 — Progress Checklist
-_Last updated: 2026-05-22 (CCC unblocked) · Plans are truth, this is the view. Update via `/handoff`._
+_Last updated: 2026-05-22 (handoff — workflow tightened, CCC ready to ship next session) · Plans are truth, this is the view. Update via `/handoff`._
 _Glyphs: ✅ done · ⏳ next/in-progress · 🚫 blocked · 💤 parked · ↔ cross-track integration point_
 _Convention: see [ADR 0015](../decisions/0015-track-numbering-and-rename.md) (tracks) + [ADR 0016](../decisions/0016-plan-numbering-fresh-start.md) (plan numbers)._
 
