@@ -1,10 +1,10 @@
 # Alpha Signal v2 — Progress Checklist
-_Last updated: 2026-05-22 · Plans are truth, this is the view. Update via `/handoff`._
+_Last updated: 2026-05-22 (post-doc-overhaul) · Plans are truth, this is the view. Update via `/handoff`._
 _Glyphs: ✅ done · ⏳ next/in-progress · 🚫 blocked · 💤 parked · ↔ cross-track integration point_
-_Convention: see [ADR 0015](../decisions/0015-track-numbering-and-rename.md)._
+_Convention: see [ADR 0015](../decisions/0015-track-numbering-and-rename.md) (tracks) + [ADR 0016](../decisions/0016-plan-numbering-fresh-start.md) (plan numbers)._
 
 ## Next 3
-1. ⏳ `git push origin master` — 6 commits sitting locally for 10 days
+1. ⏳ `git push origin master` — 7 commits sitting locally (oldest 11 days, doc-overhaul `4ddcc20` on top)
 2. ⏳ Verify Track 3.1a schedules scrape finished (see HANDOFF.md for the 3-command check)
 3. ⏳ Resume Track 3 Phase 3.2 — ship the 6-factor batch + PIT helpers in [tools/reconstruct_pit.py](../../tools/reconstruct_pit.py)
 
@@ -52,6 +52,7 @@ _Convention: see [ADR 0015](../decisions/0015-track-numbering-and-rename.md)._
 - [ADR 0009](../decisions/0009-factor-track-parallel-to-d-track.md) — Tracks 2 & 3 run parallel; integration points 2.4↔3.3c and 2.5↔3.3b
 - [ADR 0013](../decisions/0013-industry-not-sector-as-drill-unit.md) — industry replaces GICS sector as drill unit
 - [ADR 0015](../decisions/0015-track-numbering-and-rename.md) — Track 1/2/3 naming + numbering convention (this doc's vocabulary)
+- [ADR 0016](../decisions/0016-plan-numbering-fresh-start.md) — active plans renumbered 0001–0004 chronologically; archived keep historical numbers
 
 ## Recently archived
 - 0001 regulatory signal — implemented
