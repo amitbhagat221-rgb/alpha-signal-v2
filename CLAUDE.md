@@ -43,8 +43,8 @@ Everything else (memory, `_archive/`, slash commands, settings) — Claude handl
 
 **Backtest hygiene**
 - Ship a factor module and its PIT helper as one unit — never separately
-- Don't add to `BACKTEST_SIGNALS` until t-stat ≥ 1.5 on at least one cap tier
-- Don't edit `SCREEN.weight_tiers` mechanically — see `docs/reference/signal-weights.md`
+- Register every shipped factor in `BACKTEST_SIGNALS`; sub-|t|=1.5 ids also go in `FACTOR_LIBRARY`. See [ADR 0017](docs/decisions/0017-factor-library-two-tier-registry.md)
+- Don't add to `SCREEN.weight_tiers` until t-stat ≥ 1.5 on at least one cap tier, and never mechanically — see `docs/reference/signal-weights.md`
 
 **Git**
 - Never `git commit --amend`, `git add .`, `git add -A`

@@ -35,6 +35,9 @@ We're wrapping up.
 2. Check: any decisions made today that need an ADR in `docs/decisions/`? Propose them.
 3. Check: any plans whose status changed (proposed → active → implemented)? Propose updates.
 4. Show me the diff. Don't commit until I approve.
+5. On approval: stage and commit in one shot (subject line scoped per recent `git log` style, e.g. `feat(signals):` / `docs:` / `refactor:`). Body summarizes what shipped + what moved on the checklist. Co-Authored-By trailer per the global template. Then `git push origin <current-branch>`.
+   - Never `--force` to master. Never `--no-verify`. Investigate pre-commit hook failures rather than bypassing.
+   - If the session touched code + docs + ADRs and they're logically separate, split into two commits (code first, then docs) — but a single commit is fine for cohesive sessions.
 
 Be specific. Reference real files, commits, tables. No platitudes.
 Don't reintroduce "What works" / "Don't do" / "Open questions" — those sections are gone.
