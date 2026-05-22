@@ -23,12 +23,14 @@ We're wrapping up.
    ```
 
 1.5. Update `docs/plans/0000-checklist.md` to reflect anything that moved this session.
-     Four mechanical rules:
+     Five mechanical rules:
        a. Phase shipped → flip glyph (⏳→✅) + update "Next 3"
        b. New roadmap-affecting ADR → add line under "Decisions changing roadmap"
        c. Phase deprioritized → glyph to 💤 under its track
        d. Plan archived → strip its items, add 1-line entry under "Recently archived"
+       e. Phase started (work begun on a previously-coarse line) → expand it into named sub-items showing the active task with its sub-checklist, plus the queue behind it. Collapse back to a summary line once the phase completes.
      Update "Last updated" date in header. Cross-track parallels (↔) — both sides must agree.
+     "Next 3" must name concrete actions with file refs, not generic phase labels.
 
 2. Check: any decisions made today that need an ADR in `docs/decisions/`? Propose them.
 3. Check: any plans whose status changed (proposed → active → implemented)? Propose updates.

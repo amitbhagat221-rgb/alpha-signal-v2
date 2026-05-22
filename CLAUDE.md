@@ -54,10 +54,10 @@ Everything else (memory, `_archive/`, slash commands, settings) — Claude handl
 
 ## Session Protocol
 
-**Start:** `/catchup` reads HANDOFF.md + the active plan it references.
-**End:** `/handoff` overwrites HANDOFF.md, files any ADRs, updates plan status, commits.
+**Start:** `/catchup` reads HANDOFF.md + `docs/plans/0000-checklist.md` + the active plan. Names the specific checklist item(s) this session will work on — if the goal isn't already a bullet, add it before starting.
+**End:** `/handoff` overwrites HANDOFF.md, updates the checklist (step 1.5), files any ADRs, updates plan status, commits.
 
-Skipping `/handoff` is the single biggest source of context loss.
+Skipping `/handoff` is the single biggest source of context loss. Working on something that isn't on the checklist is the second.
 
 ---
 

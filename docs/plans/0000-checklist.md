@@ -1,12 +1,12 @@
 # Alpha Signal v2 — Progress Checklist
-_Last updated: 2026-05-22 (post-doc-overhaul) · Plans are truth, this is the view. Update via `/handoff`._
+_Last updated: 2026-05-22 (CCC unblocked) · Plans are truth, this is the view. Update via `/handoff`._
 _Glyphs: ✅ done · ⏳ next/in-progress · 🚫 blocked · 💤 parked · ↔ cross-track integration point_
 _Convention: see [ADR 0015](../decisions/0015-track-numbering-and-rename.md) (tracks) + [ADR 0016](../decisions/0016-plan-numbering-fresh-start.md) (plan numbers)._
 
 ## Next 3
-1. ⏳ `git push origin master` — 7 commits sitting locally (oldest 11 days, doc-overhaul `4ddcc20` on top)
-2. ⏳ Verify Track 3.1a schedules scrape finished (see HANDOFF.md for the 3-command check)
-3. ⏳ Resume Track 3 Phase 3.2 — ship the 6-factor batch + PIT helpers in [tools/reconstruct_pit.py](../../tools/reconstruct_pit.py)
+1. ⏳ Ship `signals/cash_conversion_cycle.py` + `pit_cash_conversion_cycle` in [tools/reconstruct_pit.py](../../tools/reconstruct_pit.py) (module + PIT helper, one unit)
+2. ⏳ Wire into `config.PIPELINE_STEPS` + smoke-test on 3 stocks
+3. ⏳ Reconstruct + `tools/backtest_pit.py` → t-stat per cap tier; promote to scoring weights only if `|t| ≥ 1.5`
 
 ## Track 1 — Foundation  ✅ done 2026-05-01
 - 1.1 ✅ v1 audit + rebuild plan
@@ -31,7 +31,16 @@ _Convention: see [ADR 0015](../decisions/0015-track-numbering-and-rename.md) (tr
    - ⏳ 3.1b NSE F&O OI  (next)
    - ⏳ 3.1c Kite Connect
    - ⏳ 3.1d PIB + earnings call NLP
-- ⏳ 3.2 Factor build, 50 factors  (2/50 shipped: `roic`, `fcf_yield`)
+- ⏳ 3.2 Factor build, 50 factors  (2/50 shipped)
+   - ✅ roic · ✅ fcf_yield
+   - ⏳ cash_conversion_cycle  ← **active** (Track 3.1a verified 2026-05-22: 1,775 sids with Trade Payables)
+      - ⏳ `signals/cash_conversion_cycle.py` (template: [signals/roic.py](../../signals/roic.py))
+      - ⏳ `pit_cash_conversion_cycle(sid, eval_date)` in [tools/reconstruct_pit.py](../../tools/reconstruct_pit.py)
+      - ⏳ `config.PIPELINE_STEPS` wire-up
+      - ⏳ reconstruct + backtest → t-stat verdict
+   - ⏳ Batch queue (same template, ship in this order): `gross_margin_trend`, `roiic`, `working_capital_intensity`, `debt_structure`, `asset_tangibility`
+   - ⏳ Retrofit PIT helpers for live `roic` + `fcf_yield` (unit-of-work rule)
+   - 💤 +42 remaining factors (see plan 0002 §3.2.1–3.2.7)
 - 💤 3.3 Factor model upgrade (gated on 3.2 ≥ 25 factors):
    - 💤 3.3a IC stability weighting
    - 💤 3.3b Orthogonalization  **↔ 2.5**
