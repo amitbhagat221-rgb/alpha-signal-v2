@@ -92,6 +92,20 @@ SIGNAL_COLUMN_MAP = {
     "margin_slope":        (None, "margin_slope"),
     "wc_intensity":        (None, "wc_intensity"),
     "interest_coverage":   (None, "interest_coverage"),
+    "roic":                (None, "roic"),
+    "fcf_yield":           (None, "fcf_yield"),
+    "roiic":               (None, "roiic"),
+    # Forensic / capital-allocation batch (plan 0002 §3.2.1)
+    "dso_change_yoy":        (None, "dso_change_yoy"),
+    "dio_change_yoy":        (None, "dio_change_yoy"),
+    "nwc_to_revenue":        (None, "nwc_to_revenue"),
+    "sloan_accruals_full":   (None, "sloan_accruals_full"),
+    "sga_to_revenue_change": (None, "sga_to_revenue_change"),
+    "fcf_margin":            (None, "fcf_margin"),
+    "capex_to_dep":          (None, "capex_to_dep"),
+    "goodwill_to_assets":    (None, "goodwill_to_assets"),
+    "debt_structure":        (None, "debt_structure"),
+    "asset_tangibility":     (None, "asset_tangibility"),
     # forward return — same column in both
     "_response": ("fwd_return_20d", "fwd_return_20d"),
 }

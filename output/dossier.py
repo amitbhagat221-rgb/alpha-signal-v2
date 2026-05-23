@@ -18,7 +18,8 @@ Usage:
 import argparse
 import json
 import os
-from datetime import date
+import re
+from datetime import date, datetime
 from pathlib import Path
 
 import pandas as pd
@@ -27,6 +28,86 @@ from config import PROJECT_ROOT
 from db import read_sql
 
 OUTPUT_DIR = PROJECT_ROOT / "output"
+
+
+# ─────────────────────── Hallucination validator ───────────────────────
+# Narrative fields must contain no raw numbers — see _build_prompt rule 1.
+# Any numeric content in these fields is either (a) hallucinated math
+# (the HALC "16.5% downside" bug) or (b) a value snuck through that will
+# rot the moment the underlying signal changes. Both cases → invalid.
+
+_NARRATIVE_FIELDS = ("thesis", "bull_case", "bear_case", "catalysts", "risks")
+
+# Permissive number detector. We intentionally do NOT allow "12-month"
+# or "Q2" (calendar references are fine); the regex catches:
+#   ₹1038, Rs 1,038, 16.5%, 12.5x, 0.43 (decimal), 7/9 (score-style),
+#   $50, integers >= 4 digits.
+_NUMBER_PATTERNS = [
+    (re.compile(r"₹\s?[\d,]+(?:\.\d+)?"),         "rupee_amount"),
+    (re.compile(r"\bRs\.?\s?[\d,]+(?:\.\d+)?"),   "rupee_amount"),
+    (re.compile(r"\$\s?[\d,]+(?:\.\d+)?"),        "dollar_amount"),
+    (re.compile(r"\d+(?:\.\d+)?%"),                "percentage"),
+    (re.compile(r"\b\d+(?:\.\d+)?\s?x\b", re.I),  "multiple"),  # 12.5x, 3x
+    (re.compile(r"\b\d+\.\d+\b"),                  "decimal"),   # 0.43, 7.5
+    (re.compile(r"\b\d+/\d+\b"),                   "score_ratio"),  # 7/9
+    (re.compile(r"\b\d{4,}\b"),                    "large_integer"),  # 1038, 950
+]
+
+# Allowed exceptions — calendar tokens that look numeric but aren't claims.
+_ALLOW_PATTERNS = [
+    re.compile(r"\bQ[1-4]\b", re.I),               # Q1..Q4
+    re.compile(r"\b(?:FY|fy)\d{2,4}\b"),            # FY24, FY2025
+    re.compile(r"\b(?:H1|H2)\b"),                   # H1, H2
+    re.compile(r"\b\d{4}\b(?=\s+(?:capex|infrastructure|budget))", re.I),  # "2025 capex"
+]
+
+
+def _scan_for_numbers(text):
+    """Return list of (snippet, kind) hallucinated-number hits in `text`."""
+    if not text:
+        return []
+    # Strip allowed calendar tokens first so they don't double-match
+    cleaned = text
+    for ap in _ALLOW_PATTERNS:
+        cleaned = ap.sub("", cleaned)
+
+    hits = []
+    for pat, kind in _NUMBER_PATTERNS:
+        for m in pat.finditer(cleaned):
+            snippet = m.group(0)
+            hits.append((snippet, kind))
+    return hits
+
+
+def _validate_dossier(dossier):
+    """Scan narrative fields for forbidden numbers.
+
+    Returns dict { ok: bool, violations: [{field, snippet, kind}], structured_ok: bool }.
+    structured_ok = target_price and stop_loss are integers (not stringly numbers).
+    """
+    violations = []
+    for field in _NARRATIVE_FIELDS:
+        val = dossier.get(field)
+        if val is None:
+            continue
+        if isinstance(val, list):
+            texts = [str(x) for x in val]
+        else:
+            texts = [str(val)]
+        for text in texts:
+            for snippet, kind in _scan_for_numbers(text):
+                violations.append({"field": field, "snippet": snippet, "kind": kind})
+
+    structured_ok = (
+        isinstance(dossier.get("target_price"), (int, float)) and
+        isinstance(dossier.get("stop_loss"), (int, float))
+    )
+    return {
+        "ok": len(violations) == 0 and structured_ok,
+        "violations": violations,
+        "structured_ok": structured_ok,
+        "validated_at": datetime.now().isoformat(timespec="seconds"),
+    }
 
 
 def _build_stock_context(sid):
@@ -80,7 +161,19 @@ def _build_stock_context(sid):
 
 
 def _build_prompt(context):
-    """Build the Claude prompt for investment thesis."""
+    """Build the Claude prompt for investment thesis.
+
+    Hard constraints encoded:
+      - Narrative fields (thesis / bull_case / bear_case / catalysts / risks)
+        must contain NO raw numbers. Numbers are a known hallucination class —
+        the LLM invents plausible-sounding percentages that don't match the
+        actual math (2026-05-22 HALC bug: "16.5% downside at ₹1038" when
+        950/1038 = -8.5%).
+      - Structured fields (target_price, stop_loss, conviction, action) are
+        the only place numbers live. The cockpit renders them from there.
+      - Bull/bear cases must REFERENCE the signal by name, not its value
+        — "strong Piotroski" not "Piotroski 7/9", "high accruals" not "0.43".
+    """
     return f"""You are an expert Indian equity analyst. Generate a concise investment dossier for this stock.
 
 STOCK: {context.get('name', 'Unknown')} ({context.get('ticker', '?')})
@@ -102,22 +195,57 @@ FUNDAMENTALS:
 - P/E: {context.get('pe_ratio', 'N/A')} | P/B: {context.get('pb_ratio', 'N/A')} | ROE: {context.get('roe', 'N/A')}%
 - D/E: {context.get('debt_to_equity', 'N/A')} | Div Yield: {context.get('dividend_yield', 'N/A')}%
 
+═══════════════════════════════════════════════════════════════════
+HARD RULES — violations will be rejected by the validator:
+
+1. NO raw numbers anywhere in narrative fields (thesis, bull_case, bear_case,
+   catalysts, risks). That means NO percentages ("16.5%"), NO rupee amounts
+   ("₹1038"), NO multiples ("12.5x"), NO ratios ("0.43"), NO score values
+   ("7/9", "M-Score of -2.1").
+
+2. Reference signals BY NAME, not by value. Write "strong Piotroski score"
+   not "Piotroski of 7/9". Write "high accruals signal" not "0.43 accruals".
+
+3. Use QUALITATIVE language for magnitude: substantial, modest, marginal,
+   pronounced. Never invent a percentage to make a point sound concrete.
+
+4. Numbers belong ONLY in the structured fields: target_price, stop_loss.
+   The cockpit renders those from the JSON; do not duplicate them in text.
+
+5. Do not anchor narrative to the current price or "downside from here".
+   Price moves; the dossier is rendered later when math will be wrong.
+═══════════════════════════════════════════════════════════════════
+
 Respond in JSON with these exact keys:
-- thesis: 2-3 sentence investment thesis
-- bull_case: 2 bullet points
-- bear_case: 2 bullet points
-- catalysts: 2 near-term catalysts
-- risks: 2 key risks
+- thesis: 2-3 sentence investment thesis (NO NUMBERS)
+- bull_case: 2 bullet points (NO NUMBERS — qualitative only)
+- bear_case: 2 bullet points (NO NUMBERS — qualitative only)
+- catalysts: 2 near-term catalysts (NO NUMBERS)
+- risks: 2 key risks (NO NUMBERS)
 - conviction: HIGH / MEDIUM / LOW
 - action: BUY / WATCH / AVOID
-- target_price: estimated 12-month target (₹)
-- stop_loss: suggested stop loss (₹)
+- target_price: integer ₹ (number-only field — no string, no percentage)
+- stop_loss: integer ₹ (number-only field — no string, no percentage)
+- target_horizon_months: integer (typically 12)
 
 Be specific to THIS stock. No generic statements."""
 
 
 def generate(top=5, dry_run=False):
-    """Generate dossiers for top picks."""
+    """Generate dossiers for top picks.
+
+    Raises RuntimeError if ANTHROPIC_API_KEY is missing (in non-dry-run) or
+    if every per-stock API call failed — so pipeline.run_step() logs FAILED
+    in pipeline_log and the freshness watchdog can see the silent breakage.
+    """
+    # Fail fast on missing creds — silent placeholder writes hid this bug
+    # for 20 days previously. See ADR/HANDOFF 2026-05-22.
+    if not dry_run and not os.environ.get("ANTHROPIC_API_KEY"):
+        raise RuntimeError(
+            "ANTHROPIC_API_KEY not set — dossier generator cannot run. "
+            "Check run_pipeline.sh exports or systemd env."
+        )
+
     # Get top picks per tier
     picks = read_sql(
         "SELECT dp.sid, dp.final_score, dp.rank, dp.cap_tier, s.ticker, s.name "
@@ -132,6 +260,7 @@ def generate(top=5, dry_run=False):
     print(f"Generating dossiers for {len(picks)} stocks...\n")
 
     dossiers = []
+    n_thesis = 0
     for _, pick in picks.iterrows():
         sid = pick["sid"]
         context = _build_stock_context(sid)
@@ -146,12 +275,7 @@ def generate(top=5, dry_run=False):
             dossiers.append({"sid": sid, "ticker": pick["ticker"], "status": "dry_run"})
             continue
 
-        # Call Claude API
         api_key = os.environ.get("ANTHROPIC_API_KEY")
-        if not api_key:
-            print("  ANTHROPIC_API_KEY not set — skipping API call")
-            dossiers.append({"sid": sid, "ticker": pick["ticker"], "status": "no_api_key"})
-            continue
 
         try:
             import anthropic
@@ -177,10 +301,22 @@ def generate(top=5, dry_run=False):
 
             dossier["sid"] = sid
             dossier["ticker"] = pick["ticker"]
+            dossier["generated_at"] = datetime.now().isoformat(timespec="seconds")
+            dossier["validation"] = _validate_dossier(dossier)
             dossiers.append(dossier)
+            if dossier.get("thesis") and dossier["validation"]["ok"]:
+                n_thesis += 1
             print(f"  Conviction: {dossier.get('conviction', '?')}")
             print(f"  Action: {dossier.get('action', '?')}")
             print(f"  Thesis: {dossier.get('thesis', '?')[:100]}...")
+            v = dossier["validation"]
+            if not v["ok"]:
+                print(f"  ⚠ VALIDATION FAILED — {len(v['violations'])} number-in-narrative hits, "
+                      f"structured_ok={v['structured_ok']}")
+                for vi in v["violations"][:5]:
+                    print(f"     {vi['field']}: '{vi['snippet']}' ({vi['kind']})")
+            else:
+                print(f"  ✓ validation clean")
             print()
 
         except Exception as e:
@@ -192,7 +328,21 @@ def generate(top=5, dry_run=False):
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with open(out_path, "w") as f:
         json.dump(dossiers, f, indent=2, default=str)
-    print(f"Saved {len(dossiers)} dossiers to {out_path}")
+    n_invalid = sum(
+        1 for d in dossiers
+        if d.get("thesis") and not d.get("validation", {}).get("ok", False)
+    )
+    print(f"Saved {len(dossiers)} dossiers to {out_path} "
+          f"({n_thesis} clean / {n_invalid} validation-failed)")
+
+    # Fail loudly if every per-stock call returned errors and we wrote a file
+    # of placeholders. Previously this silently logged SUCCESS for 20 days.
+    if not dry_run and len(picks) > 0 and n_thesis == 0:
+        raise RuntimeError(
+            f"Dossier generator wrote {len(dossiers)} placeholders but 0 clean theses — "
+            f"every Claude API call failed OR every output failed validation. "
+            f"Check API key, model availability, prompt compliance."
+        )
 
     return len(dossiers)
 

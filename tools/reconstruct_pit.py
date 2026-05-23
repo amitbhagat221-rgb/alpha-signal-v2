@@ -143,6 +143,14 @@ PIT_COLUMNS = [
     "margin_slope",
     "wc_intensity",
     "interest_coverage",
+    "roic",
+    "fcf_yield",
+    "roiic",
+    # Forensic / capital-allocation batch (plan 0002 §3.2.1)
+    "dso_change_yoy", "dio_change_yoy", "nwc_to_revenue",
+    "sloan_accruals_full", "sga_to_revenue_change",
+    "fcf_margin", "capex_to_dep", "goodwill_to_assets",
+    "debt_structure", "asset_tangibility",
 ]
 
 
@@ -208,6 +216,27 @@ VALIDATION_RANGES = {
     "wc_intensity":          (-2, 5, True),
     # Interest coverage — capped to ±200 in the signal itself.
     "interest_coverage":     (-200, 200, True),
+    # ROIC — 3y median NOPAT/IC. Signal-side filter keeps roic > 0; pad bounds
+    # to (-2, 5) so anything outside (200% return on capital) is data error.
+    "roic":                  (-2, 5, True),
+    # FCF Yield — 3y median FCF / market_cap. Real-world band ±0.5; pad to
+    # (-2, 2) for negative-FCF growth names + tiny-cap blowups.
+    "fcf_yield":             (-2, 2, True),
+    # ROIIC — 5y marginal NOPAT/IC. Capped to ±5 in the scorer; range is
+    # mirrored here so the validator is a no-op except for inf scrubbing.
+    "roiic":                 (-5, 5, True),
+    # Forensic / capital-allocation batch (§3.2.1) — bounds are intentionally
+    # wide to keep distressed outliers without letting them dominate ranks.
+    "dso_change_yoy":        (-365, 365, True),    # days
+    "dio_change_yoy":        (-365, 365, True),    # days
+    "nwc_to_revenue":        (-2, 5, True),        # ratio
+    "sloan_accruals_full":   (-1, 1, True),        # ratio of avg total assets
+    "sga_to_revenue_change": (-1, 1, True),        # YoY pp change in SGA intensity
+    "fcf_margin":            (-2, 2, True),        # 3y median FCF/Sales
+    "capex_to_dep":          (-20, 20, True),      # capped in scorer to ±20
+    "goodwill_to_assets":    (0, 1, True),         # bounded ratio
+    "debt_structure":        (0, 1, True),         # LT/total share
+    "asset_tangibility":     (0, 1, True),         # Net Block/total
     # Sector signals (separate table)
     "regulatory_score":      (-10, 10, True),
     "macro_score":           (-10, 10, True),
@@ -874,22 +903,48 @@ def pit_growth_composite(df_in_progress):
     ], "growth_composite")
 
 
-def pit_pt_upside(stocks, fh_pit, close_df):
+def pit_pt_upside(stocks, fh_pit, close_df, acs_pit=None):
     """Implied upside from analyst price target.
 
-    Uses forecast_history.value where metric='price' (NOT analyst_consensus, which
-    is snapshot-only). For each sid: latest knowable PT / current close − 1.
+    Source priority (most recent wins):
+      1. analyst_consensus_snapshots — monthly snapshots of Yahoo's aggregate.
+         Available from 2026-05 onwards. Most recent and most accurate.
+      2. forecast_history (metric='price') — Tickertape year-end snapshots,
+         ~1 per stock per year from 2022 onwards. Real PTs, but stale by up
+         to 12 months. Used when no consensus_snapshots row precedes eval_date.
+
+    PTs are episodic — sell-side analysts revise quarterly at best. The two
+    sources combined cover (a) recent revisions (yfinance monthly) and
+    (b) long-horizon history for backtest (Tickertape year-end). Daily price
+    data masquerading as PT is filtered out at ingestion (see HANDOFF
+    2026-05-22 for the rationale).
     """
-    if fh_pit.empty:
+    rows = []
+    if acs_pit is not None and not acs_pit.empty:
+        latest_acs = (acs_pit.sort_values(["sid", "snapshot_date"])
+                      .groupby("sid")
+                      .tail(1)[["sid", "target_mean"]]
+                      .rename(columns={"target_mean": "latest_pt"}))
+        rows.append(latest_acs.assign(_priority=1))
+
+    if fh_pit is not None and not fh_pit.empty:
+        pt_only = fh_pit[fh_pit["metric"] == "price"]
+        if not pt_only.empty:
+            latest_fh = (pt_only.sort_values(["sid", "date"])
+                         .groupby("sid")
+                         .tail(1)[["sid", "value"]]
+                         .rename(columns={"value": "latest_pt"}))
+            rows.append(latest_fh.assign(_priority=2))
+
+    if not rows:
         return pd.DataFrame(columns=["sid", "pt_upside"])
 
-    pt_only = fh_pit[fh_pit["metric"] == "price"]
-    latest_pt = (pt_only.sort_values(["sid", "date"])
-                 .groupby("sid")
-                 .tail(1)[["sid", "value"]]
-                 .rename(columns={"value": "latest_pt"}))
+    # Stack both sources, keep highest-priority (lowest _priority value) per sid
+    combined = pd.concat(rows, ignore_index=True)
+    combined = (combined.sort_values(["sid", "_priority"])
+                .drop_duplicates(subset=["sid"], keep="first"))
 
-    merged = latest_pt.merge(close_df, on="sid", how="left")
+    merged = combined.merge(close_df, on="sid", how="left")
     merged["pt_upside"] = np.where(
         (merged["close_price"].notna()) & (merged["close_price"] > 0)
         & (merged["latest_pt"].notna()) & (merged["latest_pt"] > 0),
@@ -1463,6 +1518,457 @@ def pit_interest_coverage(stocks, fund_pit):
     return agg[["sid", "interest_coverage"]].reset_index(drop=True)
 
 
+# ───── ROIC (paired with signals/roic.py) ─────
+
+_ROIC_SMOOTH = 3
+_ROIC_MIN_IC_CR = 50.0
+_ROIC_ITEMS = (
+    "Profit before tax", "Tax", "Interest",
+    "Equity Share Capital", "Reserves", "Borrowings",
+)
+
+
+def pit_roic(stocks, fund_pit):
+    """3y median ROIC = NOPAT / Invested Capital per sid.
+
+    Mirrors signals/roic.py: NOPAT = (PBT + Interest) × (1 − Tax/PBT), tax
+    rate clipped to [0, 1] when PBT > 0 and treated as 0 in loss years.
+    Invested Capital = Equity Share Capital + Reserves + Borrowings.
+    Financial sector excluded (semantics differ for banks).
+    """
+    universe = stocks[~stocks["sector"].isin(FINANCIAL_SECTORS)][["sid"]]
+    fp = fund_pit[fund_pit["line_item"].isin(_ROIC_ITEMS)]
+    if fp.empty:
+        return pd.DataFrame(columns=["sid", "roic"])
+
+    wide = fp.pivot_table(
+        index=["sid", "period_end"], columns="line_item", values="value", aggfunc="first"
+    ).reset_index()
+    for item in _ROIC_ITEMS:
+        if item not in wide.columns:
+            wide[item] = np.nan
+    wide = wide.dropna(subset=list(_ROIC_ITEMS))
+
+    pbt = wide["Profit before tax"]
+    tax = wide["Tax"]
+    interest = wide["Interest"]
+    tax_rate = np.where(pbt > 0, (tax / pbt.replace(0, np.nan)).clip(0.0, 1.0), 0.0)
+    wide["nopat"] = (pbt + interest) * (1 - tax_rate)
+    wide["invested_capital"] = (
+        wide["Equity Share Capital"] + wide["Reserves"] + wide["Borrowings"]
+    )
+    wide = wide[wide["invested_capital"] >= _ROIC_MIN_IC_CR].copy()
+    wide["roic_yr"] = wide["nopat"] / wide["invested_capital"]
+
+    wide = wide.sort_values(["sid", "period_end"])
+    last_n = wide.groupby("sid", as_index=False).tail(_ROIC_SMOOTH)
+    agg = last_n.groupby("sid", as_index=False).agg(
+        roic=("roic_yr", "median"),
+        years_used=("roic_yr", "count"),
+    )
+    agg = agg[(agg["years_used"] >= _ROIC_SMOOTH) & (agg["roic"] > 0)]
+    agg = agg.merge(universe, on="sid", how="inner")
+    return agg[["sid", "roic"]].reset_index(drop=True)
+
+
+# ───── FCF Yield (paired with signals/fcf_yield.py) ─────
+
+_FCFY_SMOOTH = 3
+_FCFY_RUPEES_PER_CRORE = 1e7
+_FCFY_MIN_MARKET_CAP_CR = SCREEN["min_market_cap_cr"]
+_FCFY_ITEMS = (
+    "Cash from Operating Activity",
+    "Net Block",
+    "Capital Work in Progress",
+    "Depreciation",
+)
+
+
+_ROIIC_WINDOW = 5
+_ROIIC_MIN_DELTA_IC_CR = 50.0
+_ROIIC_CAP = 5.0
+_ROIIC_ITEMS = (
+    "Profit before tax", "Tax", "Interest",
+    "Equity Share Capital", "Reserves", "Borrowings",
+)
+
+
+def pit_roiic(stocks, fund_pit):
+    """5y endpoint ROIIC = (NOPAT_t − NOPAT_{t-5}) / (IC_t − IC_{t-5}) per sid.
+
+    Mirrors signals/roiic.py: same NOPAT and IC formulas as pit_roic, but
+    measured as a *change* over the trailing 5 annual periods. Drops sids
+    where ΔIC < ₹50 cr (denominator blow-up + sign-inverted capital returners).
+    Capped to ±5 to match the scorer.
+    """
+    universe = stocks[~stocks["sector"].isin(FINANCIAL_SECTORS)][["sid"]]
+    fp = fund_pit[fund_pit["line_item"].isin(_ROIIC_ITEMS)]
+    if fp.empty:
+        return pd.DataFrame(columns=["sid", "roiic"])
+
+    wide = fp.pivot_table(
+        index=["sid", "period_end"], columns="line_item", values="value", aggfunc="first"
+    ).reset_index()
+    for item in _ROIIC_ITEMS:
+        if item not in wide.columns:
+            wide[item] = np.nan
+    wide = wide.dropna(subset=list(_ROIIC_ITEMS))
+    if wide.empty:
+        return pd.DataFrame(columns=["sid", "roiic"])
+
+    pbt = wide["Profit before tax"]
+    tax = wide["Tax"]
+    interest = wide["Interest"]
+    tax_rate = np.where(pbt > 0, (tax / pbt.replace(0, np.nan)).clip(0.0, 1.0), 0.0)
+    wide["nopat"] = (pbt + interest) * (1 - tax_rate)
+    wide["ic"] = (
+        wide["Equity Share Capital"] + wide["Reserves"] + wide["Borrowings"]
+    )
+
+    wide = wide.sort_values(["sid", "period_end"])
+    rows = []
+    for sid, g in wide.groupby("sid"):
+        if len(g) < _ROIIC_WINDOW + 1:
+            continue
+        nopat_old = g["nopat"].iloc[-(_ROIIC_WINDOW + 1)]
+        nopat_new = g["nopat"].iloc[-1]
+        ic_old = g["ic"].iloc[-(_ROIIC_WINDOW + 1)]
+        ic_new = g["ic"].iloc[-1]
+        delta_ic = ic_new - ic_old
+        if delta_ic < _ROIIC_MIN_DELTA_IC_CR:
+            continue
+        roiic = float(np.clip((nopat_new - nopat_old) / delta_ic, -_ROIIC_CAP, _ROIIC_CAP))
+        rows.append({"sid": sid, "roiic": roiic})
+
+    if not rows:
+        return pd.DataFrame(columns=["sid", "roiic"])
+    out = pd.DataFrame(rows).merge(universe, on="sid", how="inner")
+    return out[["sid", "roiic"]].reset_index(drop=True)
+
+
+# ───── Forensic / capital-allocation batch (plan 0002 §3.2.1) ─────
+# All paired with signals/{name}.py — same formulas, just sourced from
+# the PIT-filtered fund_pit slice instead of the live fundamentals_screener.
+
+_FBATCH_MIN_SALES_CR = 50.0
+_FBATCH_MIN_ASSETS_CR = 50.0
+_FBATCH_MIN_BORROW_CR = 50.0
+_FBATCH_MIN_DEP_CR = 1.0
+_FBATCH_SMOOTH = 3
+_CAPEX2DEP_CAP = 20.0
+
+
+def _yoy_change_per_day(fund_pit, stocks, item_num, denom_item="Sales", out_col=None):
+    """Generic YoY change in days: (item_t/(denom_t/365)) − (item_{t-1}/(denom_{t-1}/365))."""
+    universe = stocks[~stocks["sector"].isin(FINANCIAL_SECTORS)][["sid"]]
+    fp = fund_pit[fund_pit["line_item"].isin([item_num, denom_item])]
+    if fp.empty:
+        return pd.DataFrame(columns=["sid", out_col])
+    wide = fp.pivot_table(
+        index=["sid", "period_end"], columns="line_item", values="value", aggfunc="first"
+    ).reset_index()
+    for item in (item_num, denom_item):
+        if item not in wide.columns:
+            wide[item] = np.nan
+    wide = wide.dropna(subset=[item_num, denom_item])
+    wide = wide[wide[denom_item] >= _FBATCH_MIN_SALES_CR].copy()
+    wide["days"] = wide[item_num] / (wide[denom_item] / 365.0)
+    wide = wide.sort_values(["sid", "period_end"])
+    rows = []
+    for sid, g in wide.groupby("sid"):
+        if len(g) < 2:
+            continue
+        rows.append({"sid": sid, out_col: float(g["days"].iloc[-1] - g["days"].iloc[-2])})
+    if not rows:
+        return pd.DataFrame(columns=["sid", out_col])
+    return pd.DataFrame(rows).merge(universe, on="sid", how="inner")[["sid", out_col]]
+
+
+def pit_dso_change_yoy(stocks, fund_pit):
+    return _yoy_change_per_day(fund_pit, stocks, "Receivables", "Sales", "dso_change_yoy")
+
+
+def pit_dio_change_yoy(stocks, fund_pit):
+    return _yoy_change_per_day(fund_pit, stocks, "Inventory", "Sales", "dio_change_yoy")
+
+
+_NWC2REV_ITEMS = ("Sales", "Receivables", "Inventory", "Trade Payables")
+
+
+def pit_nwc_to_revenue(stocks, fund_pit):
+    universe = stocks[~stocks["sector"].isin(FINANCIAL_SECTORS)][["sid"]]
+    fp = fund_pit[fund_pit["line_item"].isin(_NWC2REV_ITEMS)]
+    if fp.empty:
+        return pd.DataFrame(columns=["sid", "nwc_to_revenue"])
+    wide = fp.pivot_table(
+        index=["sid", "period_end"], columns="line_item", values="value", aggfunc="first"
+    ).reset_index()
+    for item in _NWC2REV_ITEMS:
+        if item not in wide.columns:
+            wide[item] = np.nan
+    wide = wide.dropna(subset=list(_NWC2REV_ITEMS))
+    wide = wide[wide["Sales"] >= _FBATCH_MIN_SALES_CR].copy()
+    wide["nwc_to_revenue"] = (
+        wide["Receivables"] + wide["Inventory"] - wide["Trade Payables"]
+    ) / wide["Sales"]
+    wide = wide.sort_values(["sid", "period_end"])
+    latest = wide.groupby("sid", as_index=False).tail(1)
+    return latest.merge(universe, on="sid", how="inner")[["sid", "nwc_to_revenue"]].reset_index(drop=True)
+
+
+_SLOAN_ITEMS = ("Receivables", "Inventory", "Trade Payables", "Depreciation", "Total")
+
+
+def pit_sloan_accruals_full(stocks, fund_pit):
+    universe = stocks[~stocks["sector"].isin(FINANCIAL_SECTORS)][["sid"]]
+    fp = fund_pit[fund_pit["line_item"].isin(_SLOAN_ITEMS)]
+    if fp.empty:
+        return pd.DataFrame(columns=["sid", "sloan_accruals_full"])
+    wide = fp.pivot_table(
+        index=["sid", "period_end"], columns="line_item", values="value", aggfunc="first"
+    ).reset_index()
+    for item in _SLOAN_ITEMS:
+        if item not in wide.columns:
+            wide[item] = np.nan
+    wide = wide.dropna(subset=list(_SLOAN_ITEMS))
+    wide = wide[wide["Total"] >= _FBATCH_MIN_ASSETS_CR].copy()
+    wide["nwc"] = wide["Receivables"] + wide["Inventory"] - wide["Trade Payables"]
+    wide = wide.sort_values(["sid", "period_end"])
+    rows = []
+    for sid, g in wide.groupby("sid"):
+        if len(g) < 2:
+            continue
+        latest, prior = g.iloc[-1], g.iloc[-2]
+        ta_avg = (latest["Total"] + prior["Total"]) / 2.0
+        if ta_avg <= 0:
+            continue
+        sloan = (latest["nwc"] - prior["nwc"] - latest["Depreciation"]) / ta_avg
+        rows.append({"sid": sid, "sloan_accruals_full": float(sloan)})
+    if not rows:
+        return pd.DataFrame(columns=["sid", "sloan_accruals_full"])
+    return pd.DataFrame(rows).merge(universe, on="sid", how="inner")[["sid", "sloan_accruals_full"]]
+
+
+_SGA_ITEMS = ("Sales", "Selling and admin")
+
+
+def pit_sga_to_revenue_change(stocks, fund_pit):
+    universe = stocks[~stocks["sector"].isin(FINANCIAL_SECTORS)][["sid"]]
+    fp = fund_pit[fund_pit["line_item"].isin(_SGA_ITEMS)]
+    if fp.empty:
+        return pd.DataFrame(columns=["sid", "sga_to_revenue_change"])
+    wide = fp.pivot_table(
+        index=["sid", "period_end"], columns="line_item", values="value", aggfunc="first"
+    ).reset_index()
+    for item in _SGA_ITEMS:
+        if item not in wide.columns:
+            wide[item] = np.nan
+    wide = wide.dropna(subset=list(_SGA_ITEMS))
+    wide = wide[wide["Sales"] >= _FBATCH_MIN_SALES_CR].copy()
+    wide["sga_int"] = wide["Selling and admin"] / wide["Sales"]
+    wide = wide.sort_values(["sid", "period_end"])
+    rows = []
+    for sid, g in wide.groupby("sid"):
+        if len(g) < 2:
+            continue
+        rows.append({
+            "sid": sid,
+            "sga_to_revenue_change": float(g["sga_int"].iloc[-1] - g["sga_int"].iloc[-2]),
+        })
+    if not rows:
+        return pd.DataFrame(columns=["sid", "sga_to_revenue_change"])
+    return pd.DataFrame(rows).merge(universe, on="sid", how="inner")[["sid", "sga_to_revenue_change"]]
+
+
+_FCFM_ITEMS = (
+    "Sales", "Cash from Operating Activity", "Net Block",
+    "Capital Work in Progress", "Depreciation",
+)
+
+
+def pit_fcf_margin(stocks, fund_pit):
+    universe = stocks[~stocks["sector"].isin(FINANCIAL_SECTORS)][["sid"]]
+    fp = fund_pit[fund_pit["line_item"].isin(_FCFM_ITEMS)]
+    if fp.empty:
+        return pd.DataFrame(columns=["sid", "fcf_margin"])
+    wide = fp.pivot_table(
+        index=["sid", "period_end"], columns="line_item", values="value", aggfunc="first"
+    ).reset_index().sort_values(["sid", "period_end"])
+    for item in _FCFM_ITEMS:
+        if item not in wide.columns:
+            wide[item] = np.nan
+    wide = wide.dropna(subset=list(_FCFM_ITEMS))
+    wide = wide[wide["Sales"] >= _FBATCH_MIN_SALES_CR].copy()
+    wide["ppe"] = wide["Net Block"] + wide["Capital Work in Progress"]
+    wide["ppe_prev"] = wide.groupby("sid")["ppe"].shift(1)
+    wide = wide.dropna(subset=["ppe_prev"])
+    delta_ppe = (wide["ppe"] - wide["ppe_prev"]).clip(lower=0.0)
+    wide["capex"] = delta_ppe + wide["Depreciation"]
+    wide["fcf_margin_yr"] = (wide["Cash from Operating Activity"] - wide["capex"]) / wide["Sales"]
+    last_n = wide.groupby("sid", as_index=False).tail(_FBATCH_SMOOTH)
+    agg = last_n.groupby("sid", as_index=False).agg(
+        fcf_margin=("fcf_margin_yr", "median"),
+        years_used=("fcf_margin_yr", "count"),
+    )
+    agg = agg[agg["years_used"] >= _FBATCH_SMOOTH]
+    return agg.merge(universe, on="sid", how="inner")[["sid", "fcf_margin"]].reset_index(drop=True)
+
+
+_CAPEX_ITEMS = ("Net Block", "Capital Work in Progress", "Depreciation")
+
+
+def pit_capex_to_dep(stocks, fund_pit):
+    universe = stocks[~stocks["sector"].isin(FINANCIAL_SECTORS)][["sid"]]
+    fp = fund_pit[fund_pit["line_item"].isin(_CAPEX_ITEMS)]
+    if fp.empty:
+        return pd.DataFrame(columns=["sid", "capex_to_dep"])
+    wide = fp.pivot_table(
+        index=["sid", "period_end"], columns="line_item", values="value", aggfunc="first"
+    ).reset_index().sort_values(["sid", "period_end"])
+    for item in _CAPEX_ITEMS:
+        if item not in wide.columns:
+            wide[item] = np.nan
+    wide = wide.dropna(subset=list(_CAPEX_ITEMS))
+    wide = wide[wide["Depreciation"] >= _FBATCH_MIN_DEP_CR].copy()
+    wide["ppe"] = wide["Net Block"] + wide["Capital Work in Progress"]
+    wide["ppe_prev"] = wide.groupby("sid")["ppe"].shift(1)
+    wide = wide.dropna(subset=["ppe_prev"])
+    delta_ppe = (wide["ppe"] - wide["ppe_prev"]).clip(lower=0.0)
+    wide["capex"] = delta_ppe + wide["Depreciation"]
+    wide["ratio_yr"] = (wide["capex"] / wide["Depreciation"]).clip(-_CAPEX2DEP_CAP, _CAPEX2DEP_CAP)
+    last_n = wide.groupby("sid", as_index=False).tail(_FBATCH_SMOOTH)
+    agg = last_n.groupby("sid", as_index=False).agg(
+        capex_to_dep=("ratio_yr", "median"),
+        years_used=("ratio_yr", "count"),
+    )
+    agg = agg[agg["years_used"] >= _FBATCH_SMOOTH]
+    return agg.merge(universe, on="sid", how="inner")[["sid", "capex_to_dep"]].reset_index(drop=True)
+
+
+_GW_ITEMS = ("Intangible Assets", "Total")
+
+
+def pit_goodwill_to_assets(stocks, fund_pit):
+    universe = stocks[~stocks["sector"].isin(FINANCIAL_SECTORS)][["sid"]]
+    fp = fund_pit[fund_pit["line_item"].isin(_GW_ITEMS)]
+    if fp.empty:
+        return pd.DataFrame(columns=["sid", "goodwill_to_assets"])
+    wide = fp.pivot_table(
+        index=["sid", "period_end"], columns="line_item", values="value", aggfunc="first"
+    ).reset_index()
+    for item in _GW_ITEMS:
+        if item not in wide.columns:
+            wide[item] = np.nan
+    wide = wide.dropna(subset=list(_GW_ITEMS))
+    wide = wide[wide["Total"] >= _FBATCH_MIN_ASSETS_CR].copy()
+    wide["goodwill_to_assets"] = wide["Intangible Assets"] / wide["Total"]
+    wide = wide.sort_values(["sid", "period_end"])
+    latest = wide.groupby("sid", as_index=False).tail(1)
+    return latest.merge(universe, on="sid", how="inner")[["sid", "goodwill_to_assets"]].reset_index(drop=True)
+
+
+_DBT_ITEMS = ("Long term Borrowings", "Borrowings")
+
+
+def pit_debt_structure(stocks, fund_pit):
+    universe = stocks[~stocks["sector"].isin(FINANCIAL_SECTORS)][["sid"]]
+    fp = fund_pit[fund_pit["line_item"].isin(_DBT_ITEMS)]
+    if fp.empty:
+        return pd.DataFrame(columns=["sid", "debt_structure"])
+    wide = fp.pivot_table(
+        index=["sid", "period_end"], columns="line_item", values="value", aggfunc="first"
+    ).reset_index()
+    for item in _DBT_ITEMS:
+        if item not in wide.columns:
+            wide[item] = np.nan
+    wide = wide.dropna(subset=list(_DBT_ITEMS))
+    wide = wide[wide["Borrowings"] >= _FBATCH_MIN_BORROW_CR].copy()
+    wide["debt_structure"] = (
+        wide["Long term Borrowings"] / wide["Borrowings"]
+    ).clip(0.0, 1.0)
+    wide = wide.sort_values(["sid", "period_end"])
+    latest = wide.groupby("sid", as_index=False).tail(1)
+    return latest.merge(universe, on="sid", how="inner")[["sid", "debt_structure"]].reset_index(drop=True)
+
+
+_ASSTAN_ITEMS = ("Net Block", "Total")
+
+
+def pit_asset_tangibility(stocks, fund_pit):
+    universe = stocks[~stocks["sector"].isin(FINANCIAL_SECTORS)][["sid"]]
+    fp = fund_pit[fund_pit["line_item"].isin(_ASSTAN_ITEMS)]
+    if fp.empty:
+        return pd.DataFrame(columns=["sid", "asset_tangibility"])
+    wide = fp.pivot_table(
+        index=["sid", "period_end"], columns="line_item", values="value", aggfunc="first"
+    ).reset_index()
+    for item in _ASSTAN_ITEMS:
+        if item not in wide.columns:
+            wide[item] = np.nan
+    wide = wide.dropna(subset=list(_ASSTAN_ITEMS))
+    wide = wide[wide["Total"] >= _FBATCH_MIN_ASSETS_CR].copy()
+    wide["asset_tangibility"] = (wide["Net Block"] / wide["Total"]).clip(0.0, 1.0)
+    wide = wide.sort_values(["sid", "period_end"])
+    latest = wide.groupby("sid", as_index=False).tail(1)
+    return latest.merge(universe, on="sid", how="inner")[["sid", "asset_tangibility"]].reset_index(drop=True)
+
+
+def pit_fcf_yield(stocks, fund_pit, close_df):
+    """3y median FCF / PIT market_cap_cr per sid.
+
+    Mirrors signals/fcf_yield.py: FCF = OCF − (max(Δ(NetBlock+CWIP),0) +
+    Depreciation). Market cap is reconstructed PIT as
+    (close × No. of Equity Shares) / 1e7 (rupees → ₹cr) so the yield is
+    dimensionless, matching the live signal's output.
+    """
+    universe = stocks[~stocks["sector"].isin(FINANCIAL_SECTORS)][["sid"]]
+    fp = fund_pit[fund_pit["line_item"].isin(_FCFY_ITEMS)]
+    if fp.empty:
+        return pd.DataFrame(columns=["sid", "fcf_yield"])
+
+    wide = fp.pivot_table(
+        index=["sid", "period_end"], columns="line_item", values="value", aggfunc="first"
+    ).reset_index().sort_values(["sid", "period_end"])
+    for item in _FCFY_ITEMS:
+        if item not in wide.columns:
+            wide[item] = np.nan
+    wide = wide.dropna(subset=list(_FCFY_ITEMS))
+
+    wide["ppe"] = wide["Net Block"] + wide["Capital Work in Progress"]
+    wide["ppe_prev"] = wide.groupby("sid")["ppe"].shift(1)
+    wide = wide.dropna(subset=["ppe_prev"])
+    delta_ppe = (wide["ppe"] - wide["ppe_prev"]).clip(lower=0.0)
+    wide["capex"] = delta_ppe + wide["Depreciation"]
+    wide["fcf_yr"] = wide["Cash from Operating Activity"] - wide["capex"]
+
+    last_n = wide.groupby("sid", as_index=False).tail(_FCFY_SMOOTH)
+    agg = last_n.groupby("sid", as_index=False).agg(
+        fcf=("fcf_yr", "median"),
+        years_used=("fcf_yr", "count"),
+    )
+    agg = agg[agg["years_used"] >= _FCFY_SMOOTH]
+    agg = agg.merge(universe, on="sid", how="inner")
+    if agg.empty:
+        return pd.DataFrame(columns=["sid", "fcf_yield"])
+
+    # PIT market cap from close × latest-known shares (annual filing)
+    shares = fund_pit[fund_pit["line_item"] == "No. of Equity Shares"]
+    if shares.empty:
+        return pd.DataFrame(columns=["sid", "fcf_yield"])
+    shares = (shares.sort_values(["sid", "period_end"])
+                    .groupby("sid", as_index=False).tail(1)
+                    [["sid", "value"]].rename(columns={"value": "shares"}))
+    shares = shares[shares["shares"] > 0]
+
+    mc = (close_df.merge(shares, on="sid", how="inner"))
+    mc["market_cap_cr"] = (mc["close_price"] * mc["shares"]) / _FCFY_RUPEES_PER_CRORE
+    mc = mc[mc["market_cap_cr"] >= _FCFY_MIN_MARKET_CAP_CR]
+
+    out = agg.merge(mc[["sid", "market_cap_cr"]], on="sid", how="inner")
+    out["fcf_yield"] = out["fcf"] / out["market_cap_cr"]
+    return out[["sid", "fcf_yield"]].reset_index(drop=True)
+
+
 # ─────────────────────── Driver ───────────────────────
 
 def reconstruct_one_date(eval_date, raw, signals_to_run):
@@ -1537,9 +2043,14 @@ def reconstruct_one_date(eval_date, raw, signals_to_run):
     if "consensus" in signals_to_run:
         base = base.merge(pit_consensus(raw["stocks"], fh_pit), on="sid", how="left")
 
-    # ── Tier 3: pt_upside (uses forecast_history.price, not analyst_consensus) ──
+    # ── Tier 3: pt_upside (analyst_consensus_snapshots preferred; year-end fallback) ──
     if "pt_upside" in signals_to_run:
-        base = base.merge(pit_pt_upside(raw["stocks"], fh_pit, close_df), on="sid", how="left")
+        acs_pit = (raw["acs"][raw["acs"]["snapshot_date"] <= eval_date.isoformat()]
+                   if "acs" in raw and not raw["acs"].empty else pd.DataFrame())
+        base = base.merge(
+            pit_pt_upside(raw["stocks"], fh_pit, close_df, acs_pit=acs_pit),
+            on="sid", how="left",
+        )
 
     # ── Tier 3: bulk_deal_signal (sparse — NULL for dates without bulk_deals data) ──
     if "bulk_deal" in signals_to_run and "bulk" in raw:
@@ -1603,6 +2114,46 @@ def reconstruct_one_date(eval_date, raw, signals_to_run):
             on="sid", how="left",
         )
 
+    if "roic" in signals_to_run and not fund_pit.empty:
+        base = base.merge(
+            pit_roic(raw["stocks"], fund_pit),
+            on="sid", how="left",
+        )
+
+    if "fcf_yield" in signals_to_run and not fund_pit.empty:
+        base = base.merge(
+            pit_fcf_yield(raw["stocks"], fund_pit, close_df),
+            on="sid", how="left",
+        )
+
+    if "roiic" in signals_to_run and not fund_pit.empty:
+        base = base.merge(
+            pit_roiic(raw["stocks"], fund_pit),
+            on="sid", how="left",
+        )
+
+    # Forensic / capital-allocation batch (plan 0002 §3.2.1)
+    if "dso_change_yoy" in signals_to_run and not fund_pit.empty:
+        base = base.merge(pit_dso_change_yoy(raw["stocks"], fund_pit), on="sid", how="left")
+    if "dio_change_yoy" in signals_to_run and not fund_pit.empty:
+        base = base.merge(pit_dio_change_yoy(raw["stocks"], fund_pit), on="sid", how="left")
+    if "nwc_to_revenue" in signals_to_run and not fund_pit.empty:
+        base = base.merge(pit_nwc_to_revenue(raw["stocks"], fund_pit), on="sid", how="left")
+    if "sloan_accruals_full" in signals_to_run and not fund_pit.empty:
+        base = base.merge(pit_sloan_accruals_full(raw["stocks"], fund_pit), on="sid", how="left")
+    if "sga_to_revenue_change" in signals_to_run and not fund_pit.empty:
+        base = base.merge(pit_sga_to_revenue_change(raw["stocks"], fund_pit), on="sid", how="left")
+    if "fcf_margin" in signals_to_run and not fund_pit.empty:
+        base = base.merge(pit_fcf_margin(raw["stocks"], fund_pit), on="sid", how="left")
+    if "capex_to_dep" in signals_to_run and not fund_pit.empty:
+        base = base.merge(pit_capex_to_dep(raw["stocks"], fund_pit), on="sid", how="left")
+    if "goodwill_to_assets" in signals_to_run and not fund_pit.empty:
+        base = base.merge(pit_goodwill_to_assets(raw["stocks"], fund_pit), on="sid", how="left")
+    if "debt_structure" in signals_to_run and not fund_pit.empty:
+        base = base.merge(pit_debt_structure(raw["stocks"], fund_pit), on="sid", how="left")
+    if "asset_tangibility" in signals_to_run and not fund_pit.empty:
+        base = base.merge(pit_asset_tangibility(raw["stocks"], fund_pit), on="sid", how="left")
+
     # Composite: needs mom_6m + mom_12m already computed in `base`
     if "mom_composite" in signals_to_run and "mom_6m" in base.columns and "mom_12m" in base.columns:
         base = base.merge(pit_mom_composite(base), on="sid", how="left")
@@ -1617,15 +2168,22 @@ def reconstruct_one_date(eval_date, raw, signals_to_run):
     if "growth_composite" in signals_to_run and {"revenue_growth_yoy", "eps_growth_yoy"}.issubset(base.columns):
         base = base.merge(pit_growth_composite(base), on="sid", how="left")
 
-    # Ensure every PIT_COLUMN exists (NaN for skipped signals)
-    for col in PIT_COLUMNS:
-        if col not in base.columns:
-            base[col] = np.nan
-
-    df = base[PIT_COLUMNS].copy()
+    # Emit ONLY the columns the requested signals actually produced.
+    #
+    # Why: `upsert_df` uses INSERT … ON CONFLICT(pk) DO UPDATE SET col=excluded.col
+    # — per-column. If we padded missing columns with NaN here, a `--signal X`
+    # rerun on an existing date would write NULL into every OTHER column, wiping
+    # the earlier full run. Keeping the dataframe narrow makes `--signal` safe
+    # by construction: untouched columns stay untouched on UPDATE, and default
+    # to NULL on fresh INSERT (which is the same as "not computed yet").
+    #
+    # On a full default run every signal runs, so all PIT_COLUMNS naturally
+    # appear in `base` and the behavior is identical to before.
+    cols_to_emit = [c for c in PIT_COLUMNS if c in base.columns]
+    df = base[cols_to_emit].copy()
 
     # ── Validation gate: clean ranges, drop infinities ──
-    df, validation_summary = _validate_and_clean(df, PIT_COLUMNS)
+    df, validation_summary = _validate_and_clean(df, cols_to_emit)
 
     return df, validation_summary
 
@@ -1667,6 +2225,17 @@ def load_raw():
         "SELECT sid, metric, date, value, change FROM forecast_history "
         "WHERE metric IN ('price', 'eps') AND value IS NOT NULL ORDER BY sid, metric, date"
     )
+    # Monthly analyst consensus snapshots — preferred source for pt_upside
+    # (more recent than Tickertape's year-end series). See HANDOFF 2026-05-22.
+    try:
+        acs = read_sql(
+            "SELECT sid, snapshot_date, source, target_mean, target_median, "
+            "n_analysts, recommendation_mean "
+            "FROM analyst_consensus_snapshots "
+            "WHERE target_mean IS NOT NULL ORDER BY sid, snapshot_date"
+        )
+    except Exception:
+        acs = pd.DataFrame()
     bulk = read_sql(
         "SELECT sid, deal_date, quantity, price, buy_sell FROM bulk_deals ORDER BY sid, deal_date"
     )
@@ -1700,14 +2269,15 @@ def load_raw():
         "WHERE period_type = 'annual'"
     )
     print(f"  stocks={len(stocks)} qi={len(qi)} bs={len(bs)} cf={len(cf)} sh={len(sh)} "
-          f"prices={len(prices)} adj={len(adjustments)} fh={len(fh)} bulk={len(bulk)} "
+          f"prices={len(prices)} adj={len(adjustments)} fh={len(fh)} acs={len(acs)} "
+          f"bulk={len(bulk)} "
           f"reg_events={len(reg_events)} reg_signals={len(reg_signals)} "
           f"macro_hist={len(macro_hist)} macro_map={len(macro_map)} "
           f"fund_screener={len(fund_screener)}")
     return {
         "stocks": stocks, "qi": qi, "bs": bs, "cf": cf, "sh": sh, "prices": prices,
         "adjustments": adjustments,
-        "fh": fh, "bulk": bulk, "short": short, "news": news,
+        "fh": fh, "acs": acs, "bulk": bulk, "short": short, "news": news,
         "fund_screener": fund_screener,
         "reg_events": reg_events, "reg_signals": reg_signals,
         "macro_hist": macro_hist, "macro_map": macro_map,
@@ -1737,7 +2307,14 @@ def main():
                                  "cash_conversion_cycle",
                                  "operating_margin_trend",
                                  "working_capital_intensity",
-                                 "interest_coverage"],
+                                 "interest_coverage",
+                                 "roic", "fcf_yield", "roiic",
+                                 "dso_change_yoy", "dio_change_yoy",
+                                 "nwc_to_revenue", "sloan_accruals_full",
+                                 "sga_to_revenue_change",
+                                 "fcf_margin", "capex_to_dep",
+                                 "goodwill_to_assets", "debt_structure",
+                                 "asset_tangibility"],
                         help="Compute only this signal (repeatable)")
     parser.add_argument("--skip-existing", action="store_true",
                         help="Skip eval dates that already have a SUCCESS row in pit_reconstruction_log")
@@ -1765,6 +2342,12 @@ def main():
         "operating_margin_trend",
         "working_capital_intensity",
         "interest_coverage",
+        "roic", "fcf_yield", "roiic",
+        # Forensic / capital-allocation batch (plan 0002 §3.2.1)
+        "dso_change_yoy", "dio_change_yoy",
+        "nwc_to_revenue", "sloan_accruals_full", "sga_to_revenue_change",
+        "fcf_margin", "capex_to_dep", "goodwill_to_assets",
+        "debt_structure", "asset_tangibility",
     }
     signals_to_run = set(args.signal) if args.signal else DEFAULT_SIGNALS
     signals_label = ",".join(sorted(signals_to_run))

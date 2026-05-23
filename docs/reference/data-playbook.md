@@ -459,7 +459,7 @@ The bugs and gotchas we've already paid for. Add to this list every time somethi
 | data.gov.in API timeouts common | data.gov.in | 60s timeout + 3 retries with exponential backoff | v1 |
 | data.gov.in Core Sector wide format | data.gov.in | Pivot to long; use `ITEM_CODE` (`INDEX_COAL`) not `ITEM_NAME` (text shifts) | v1 |
 | **bulk_deals — no historical archive** | NSE bulk deals | Today's file only. Forward-only. Backtest BLOCKED. | v1 |
-| **analyst_consensus — no history** | Tickertape consensus | Snapshot table; no historical buy_pct / PT. Use `forecast_history` for revision-based reconstruction. | v1 |
+| **analyst_consensus — current only** | yfinance daily refresh | PK=sid, daily-refreshed for cockpit "current PT" card. Historical aggregates live in `analyst_consensus_snapshots` (monthly cadence, since 2026-05-22). | v2 |
 | **news_articles 2024-05 → 2026-01 blackout** | Google News RSS | We fetched once in 2024-04, then nothing until 2026-02. Sentiment reconstruction starts at 2026-03. | 2026-05-03 |
 | **v1 sentiment reconstruction lost** | Sentiment / migration | v1 had VADER scores back to ~2023; CSVs were dropped during v2 migration; news depth wasn't preserved either, so re-derivation impossible. **Lesson: archive the computed signal, not just the raw source.** | 2026-05-03 |
 | Live snapshots ≠ PIT (37% Piotroski divergence) | daily_snapshots vs daily_snapshots_pit | Use `daily_snapshots_pit_v1` for backtests. Live is for daily ranking only. | 2026-05-03 |
@@ -583,19 +583,27 @@ For every signal in [`db.py BACKTEST_SIGNALS`](../../db.py), the exact computati
 
 ### Consensus group
 
-**pt_revision_yoy / eps_revision_yoy / consensus_signal_combined** (all READY as of 2026-05-03)
+**pt_revision_yoy / eps_revision_yoy / consensus_signal_combined** (READY; cadence corrected 2026-05-22)
 - Inputs: `forecast_history.value` for `metric IN ('eps', 'price')`. Filter `date ≤ eval_date`.
 - For each (sid, metric): latest snapshot with date ≤ D; pick prior-year snapshot (closest to D − 1 year, within 9–18 month window).
 - yoy = `(latest_value / |prior_value|) − 1` (× 100 for percentage units).
 - consensus_signal_combined = mean of pt_revision_yoy + eps_revision_yoy when both available; single value if only one.
 - Pattern: 6 (annual-snapshot PIT). Implementation: `pit_consensus()` in `tools/reconstruct_pit.py`.
-- **Caveat:** annual cadence (FY-end snapshots), not monthly revisions. v1's "consensus" t=3.52 LARGE was *proxy mode* (snapshot-anchored), not strict PIT. Re-deriving in v2 with strict PIT may produce a different t-stat — that's intentional, not a bug.
+- **Caveat:** annual cadence (FY-end snapshots), not monthly revisions. PTs are episodic — that's the right cadence for this signal.
 
-**pt_upside** (READY as of 2026-05-03)
-- Inputs: forecast_history (metric='price', dated PT snapshots back to 2015) + close at eval_date.
-- Recipe: latest knowable PT for sid (where forecast date ≤ eval_date) / close at eval_date − 1.
-- Pattern: 6 (uses forecast_history annual snapshots, not analyst_consensus snapshot-only).
-- Implementation: `pit_pt_upside()` in `tools/reconstruct_pit.py`. **Was BLOCKED** when we mistakenly anchored on `analyst_consensus.price_target` — switching to forecast_history unblocks it.
+**pt_upside** (re-validated 2026-05-22 — earlier |t|=16 was inflated by data corruption)
+- Sources (priority order):
+  1. `analyst_consensus_snapshots` — monthly yfinance aggregate (2026-05-onwards). Most recent.
+  2. `forecast_history` (metric='price') — Tickertape year-end snapshots, ~1/yr per stock 2022-2025. Real PTs; sparse fallback.
+- Recipe: latest knowable PT for sid (filter source ≤ eval_date) / close at eval_date − 1.
+- Pattern: 6+. Implementation: `pit_pt_upside()` in `tools/reconstruct_pit.py`.
+- **Earlier finding invalidated.** The 2026-05-03 backtest produced |t|=16 from `forecast_history` data that had been silently contaminated by Tickertape's lastPrice "today" entries (see HANDOFF 2026-05-22). Cleaned data + correct sources may yield a real |t| in the 2-5 range, or DROP entirely.
+
+**Cadence reference for PT-class signals (per CLAUDE.md):**
+- Live current view: `analyst_consensus.price_target` (PK=sid, yfinance-sourced, daily refresh)
+- Backtest / revision signals: `analyst_consensus_snapshots` (PK=sid+date+source, MONTHLY snapshots, 1st-of-month cron)
+- Long-horizon historical: `forecast_history` (Tickertape year-end snapshots, ~annual)
+- **Never** write a daily PT row. PTs change episodically; daily storage is phantom precision.
 
 ### Sentiment group
 

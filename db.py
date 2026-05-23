@@ -8,6 +8,9 @@ Usage:
     from db import get_db, read_table, get_universe, init_db
 """
 
+import glob
+import json
+import re
 import sqlite3
 import pandas as pd
 from pathlib import Path
@@ -1399,24 +1402,38 @@ BACKTEST_SIGNALS = [
         "source_columns": ["{PBT, Interest, Tax, Equity Share Capital, Reserves, Borrowings}"],
         "filing_lag": "75d annual",
         "pit_column_v1": None,
-        "pit_column_v2": None,
-        "v1_verdict_summary": "(awaiting PIT helper retrofit)",
-        "status": "MISSING",
-        "status_reason": "Signal module shipped + scoring; PIT helper not yet built (unit-of-work rule violation — to retrofit).",
+        "pit_column_v2": "roic",
+        "v1_verdict_summary": "v2-only — DROP all tiers (best |t|=0.75 LARGE)",
+        "status": "READY",
+        "status_reason": "Library tier — sub-|t|=1.5 on every tier in the 6-period backtest. Kept computed for re-test as PIT history extends.",
+    },
+    {
+        "signal": "roiic",
+        "label": "Return on Incremental Invested Capital",
+        "group": "Track 3 — Library",
+        "description": "(NOPAT_t − NOPAT_{t-5}) / (IC_t − IC_{t-5}). Marginal-ROIC over trailing 5y; sister of ROIC. ΔIC ≥ ₹50 cr filter, capped ±5.",
+        "source_tables": ["fundamentals_screener"],
+        "source_columns": ["{PBT, Tax, Interest, Equity Share Capital, Reserves, Borrowings} (annual, 6 yrs)"],
+        "filing_lag": "75d annual",
+        "pit_column_v1": None,
+        "pit_column_v2": "roiic",
+        "v1_verdict_summary": "v2-only — DROP all tiers (best |t|=0.91 MID, intuitive sign)",
+        "status": "READY",
+        "status_reason": "Library tier — sub-|t|=1.5 in the 6-period backtest but signs are intuitive (positive marginal ROIC → positive return). Retest as PIT extends.",
     },
     {
         "signal": "fcf_yield",
         "label": "Free Cash Flow Yield",
         "group": "Track 3 — Library",
-        "description": "3-yr median FCF / market cap. FCF = OCF − (Δ(Net Block + CWIP) + Depreciation)",
-        "source_tables": ["fundamentals_screener", "stocks"],
-        "source_columns": ["{OCF, Net Block, CWIP, Depreciation}", "stocks.market_cap_cr"],
-        "filing_lag": "75d annual + 0d market cap",
+        "description": "3-yr median FCF / PIT market_cap. FCF = OCF − (max(Δ(Net Block + CWIP), 0) + Depreciation). PIT market cap uses close × No. of Equity Shares.",
+        "source_tables": ["fundamentals_screener", "stock_prices"],
+        "source_columns": ["{OCF, Net Block, CWIP, Depreciation, No. of Equity Shares}", "stock_prices.close (PIT)"],
+        "filing_lag": "75d annual",
         "pit_column_v1": None,
-        "pit_column_v2": None,
-        "v1_verdict_summary": "(awaiting PIT helper retrofit)",
-        "status": "MISSING",
-        "status_reason": "Signal module shipped + scoring; PIT helper not yet built.",
+        "pit_column_v2": "fcf_yield",
+        "v1_verdict_summary": "v2-only — DROP all tiers (best |t|=1.08 SMALL)",
+        "status": "READY",
+        "status_reason": "Library tier — sub-|t|=1.5 on every tier in the 6-period backtest. Kept computed for re-test as PIT history extends.",
     },
     {
         "signal": "ccc",
@@ -1459,6 +1476,146 @@ BACKTEST_SIGNALS = [
         "v1_verdict_summary": "v2-only — DROP all tiers (best |t|=1.48 LARGE)",
         "status": "READY",
         "status_reason": "Library tier — borderline (t=1.48 just under bar); same regime pattern as CCC. Kept computed.",
+    },
+    {
+        "signal": "dso_change_yoy",
+        "label": "DSO YoY Change",
+        "group": "Track 3 — Library",
+        "description": "Receivables/(Sales/365) − prior year. Rising DSO = receivables outpacing sales (forensic yellow flag). Days.",
+        "source_tables": ["fundamentals_screener"],
+        "source_columns": ["{Sales, Receivables}"],
+        "filing_lag": "75d annual",
+        "pit_column_v1": None,
+        "pit_column_v2": "dso_change_yoy",
+        "v1_verdict_summary": "v2-only — LARGE KEEP (t=-2.81), MID WEAK (t=-1.71), SMALL DROP (t=+1.49)",
+        "status": "READY",
+        "status_reason": "PARKED — strongest factor in 2026-05 forensic batch. Intuitive sign on LARGE+MID (higher Δ DSO → lower return). Promote candidate after one more month of fwd_return matures.",
+    },
+    {
+        "signal": "dio_change_yoy",
+        "label": "DIO YoY Change",
+        "group": "Track 3 — Library",
+        "description": "Inventory/(Sales/365) − prior year. Rising DIO = inventory accumulating faster than sales. Days.",
+        "source_tables": ["fundamentals_screener"],
+        "source_columns": ["{Sales, Inventory}"],
+        "filing_lag": "75d annual",
+        "pit_column_v1": None,
+        "pit_column_v2": "dio_change_yoy",
+        "v1_verdict_summary": "v2-only — DROP all tiers (best |t|=0.97 MID)",
+        "status": "READY",
+        "status_reason": "Library tier — no edge in the 6-period backtest. Cousin of dso_change_yoy but inventory dynamics are noisier (production decisions).",
+    },
+    {
+        "signal": "nwc_to_revenue",
+        "label": "NWC / Revenue (latest)",
+        "group": "Track 3 — Library",
+        "description": "(Receivables + Inventory − Trade Payables) / Sales, latest annual. Spot sibling of wc_intensity (which is 3y median).",
+        "source_tables": ["fundamentals_screener"],
+        "source_columns": ["{Sales, Receivables, Inventory, Trade Payables}"],
+        "filing_lag": "75d annual",
+        "pit_column_v1": None,
+        "pit_column_v2": "nwc_to_revenue",
+        "v1_verdict_summary": "v2-only — LARGE WEAK (t=+1.68), SMALL WEAK (t=+1.92), MID DROP (t=+1.29)",
+        "status": "READY",
+        "status_reason": "PARKED — passes |t|≥1.5 bar on LARGE+SMALL but with contrarian sign (higher NWC predicts higher return). Likely 6-period regime artifact (same pattern as wc_intensity / ccc); awaiting more periods.",
+    },
+    {
+        "signal": "sloan_accruals_full",
+        "label": "Sloan Accruals (full BS formula)",
+        "group": "Track 3 — Library",
+        "description": "(ΔNWC − Depreciation) / avg(Total assets). The original Sloan (1996) measure. Lower = cash-rich earnings.",
+        "source_tables": ["fundamentals_screener"],
+        "source_columns": ["{Receivables, Inventory, Trade Payables, Depreciation, Total}"],
+        "filing_lag": "75d annual",
+        "pit_column_v1": None,
+        "pit_column_v2": "sloan_accruals_full",
+        "v1_verdict_summary": "v2-only — DROP all tiers (best |t|=1.43 SMALL)",
+        "status": "READY",
+        "status_reason": "Library tier — sub-|t|=1.5 across tiers. Sibling of cf_accruals/bs_accruals from v1 forensic suite; redundancy possible.",
+    },
+    {
+        "signal": "sga_to_revenue_change",
+        "label": "Δ SG&A Intensity",
+        "group": "Track 3 — Library",
+        "description": "Selling and admin / Sales − prior year. Rising intensity = operating discipline slipping.",
+        "source_tables": ["fundamentals_screener"],
+        "source_columns": ["{Sales, Selling and admin}"],
+        "filing_lag": "75d annual",
+        "pit_column_v1": None,
+        "pit_column_v2": "sga_to_revenue_change",
+        "v1_verdict_summary": "v2-only — DROP all tiers (best |t|=0.69 MID)",
+        "status": "READY",
+        "status_reason": "Library tier — no edge in the 6-period backtest. Screener's 'Selling and admin' may miss R&D and other overheads broken out separately.",
+    },
+    {
+        "signal": "fcf_margin",
+        "label": "FCF Margin",
+        "group": "Track 3 — Library",
+        "description": "3y median (OCF − Capex) / Sales. Fundamental sibling of fcf_yield (no valuation input).",
+        "source_tables": ["fundamentals_screener"],
+        "source_columns": ["{Sales, OCF, Net Block, CWIP, Depreciation}"],
+        "filing_lag": "75d annual",
+        "pit_column_v1": None,
+        "pit_column_v2": "fcf_margin",
+        "v1_verdict_summary": "v2-only — DROP all tiers (best |t|=1.28 LARGE)",
+        "status": "READY",
+        "status_reason": "Library tier — sub-|t|=1.5. Likely correlated with fcf_yield and quality_composite.",
+    },
+    {
+        "signal": "capex_to_dep",
+        "label": "CapEx / Depreciation",
+        "group": "Track 3 — Library",
+        "description": "3y median (max(Δ(Net Block + CWIP), 0) + Depreciation) / Depreciation. >1 = growing, <1 = harvesting.",
+        "source_tables": ["fundamentals_screener"],
+        "source_columns": ["{Net Block, CWIP, Depreciation}"],
+        "filing_lag": "75d annual",
+        "pit_column_v1": None,
+        "pit_column_v2": "capex_to_dep",
+        "v1_verdict_summary": "v2-only — DROP all tiers (best |t|=0.94 SMALL)",
+        "status": "READY",
+        "status_reason": "Library tier — capital-cycle descriptor more than a return predictor in this regime.",
+    },
+    {
+        "signal": "goodwill_to_assets",
+        "label": "Intangibles / Total Assets",
+        "group": "Track 3 — Library",
+        "description": "Intangible Assets / Total. Goodwill proxy — Screener doesn't separate goodwill from other intangibles.",
+        "source_tables": ["fundamentals_screener"],
+        "source_columns": ["{Intangible Assets, Total}"],
+        "filing_lag": "75d annual",
+        "pit_column_v1": None,
+        "pit_column_v2": "goodwill_to_assets",
+        "v1_verdict_summary": "v2-only — DROP all tiers (best |t|=0.89 MID)",
+        "status": "READY",
+        "status_reason": "Library tier — no edge in 6 periods. Median ratio is 0.6% so the cross-section is thin; mostly a tag for acquisition-driven names.",
+    },
+    {
+        "signal": "debt_structure",
+        "label": "LT Borrowings Share",
+        "group": "Track 3 — Library",
+        "description": "Long term Borrowings / Borrowings, latest annual. Higher = safer debt maturity profile.",
+        "source_tables": ["fundamentals_screener"],
+        "source_columns": ["{Long term Borrowings, Borrowings}"],
+        "filing_lag": "75d annual",
+        "pit_column_v1": None,
+        "pit_column_v2": "debt_structure",
+        "v1_verdict_summary": "v2-only — DROP all tiers (best |t|=1.15 LARGE)",
+        "status": "READY",
+        "status_reason": "Library tier — debt maturity profile descriptor. Median 27% LT (Indian companies skew short-term); cross-section may need finer maturity buckets to find signal.",
+    },
+    {
+        "signal": "asset_tangibility",
+        "label": "Asset Tangibility (Net Block / Total)",
+        "group": "Track 3 — Library",
+        "description": "Net Block / Total assets, latest annual. Higher = capex-heavy / asset-rich business model.",
+        "source_tables": ["fundamentals_screener"],
+        "source_columns": ["{Net Block, Total}"],
+        "filing_lag": "75d annual",
+        "pit_column_v1": None,
+        "pit_column_v2": "asset_tangibility",
+        "v1_verdict_summary": "v2-only — MID WEAK (t=+2.06), LARGE/SMALL DROP",
+        "status": "READY",
+        "status_reason": "PARKED — WEAK MID with positive sign (capex-heavy mid-caps outperformed in the 6-period window). Likely regime-dependent (industrials/cement rotation); awaiting more periods.",
     },
     {
         "signal": "interest_coverage",
@@ -1625,17 +1782,27 @@ BACKTEST_SIGNALS = [
 # sign/regime verification before promotion.
 FACTOR_LIBRARY = [
     # PARKED — passes |t|≥1.5, sign/regime verification pending
+    "dso_change_yoy",       # KEEP LARGE (t=-2.81) — strongest candidate, intuitive sign
+    "interest_coverage",    # intuitive sign on SMALL (t=+2.41)
+    "asset_tangibility",    # WEAK MID (t=+2.06), regime-dependent positive sign
     "ccc",                  # contrarian sign on LARGE (t=+1.87)
-    "interest_coverage",    # intuitive sign on SMALL (t=+2.41) — strongest candidate
+    "nwc_to_revenue",       # contrarian sign on LARGE+SMALL (t=+1.68/+1.92)
     # Sub-threshold — kept computed, awaiting more periods
     "margin_slope",
     "wc_intensity",
     "revenue_cv_5y",
     "relative_turnover",
     "relative_growth",
-    # PIT helper not yet retrofitted (status MISSING in BACKTEST_SIGNALS)
-    "roic",
-    "fcf_yield",
+    "roic",                 # best |t|=0.75 LARGE
+    "fcf_yield",            # best |t|=1.08 SMALL
+    "roiic",                # best |t|=0.91 MID, intuitive sign
+    "dio_change_yoy",       # best |t|=0.97 MID
+    "sloan_accruals_full",  # best |t|=1.43 SMALL
+    "sga_to_revenue_change",  # best |t|=0.69 MID
+    "fcf_margin",           # best |t|=1.28 LARGE
+    "capex_to_dep",         # best |t|=0.94 SMALL
+    "goodwill_to_assets",   # best |t|=0.89 MID
+    "debt_structure",       # best |t|=1.15 LARGE
 ]
 
 
@@ -1779,7 +1946,82 @@ def data_health():
             "status": status,
         })
 
+    # ── File-based outputs (virtual tables) ────────────────────────────────
+    # Brings dossier JSONs and similar disk artifacts under the same
+    # freshness lens as DB tables. The freshness watchdog reads this row
+    # set directly, so file outputs get monitored "for free".
+    try:
+        from config import FILE_OUTPUTS
+    except ImportError:
+        FILE_OUTPUTS = []
+    for fo in FILE_OUTPUTS:
+        latest_iso, rows_count = _file_output_state(fo)
+        freshness, age_days, threshold_days = _compute_freshness(
+            latest_iso, fo.get("frequency"), fo["virtual_table"]
+        )
+        status = "OK" if rows_count > 0 else "EMPTY"
+        rows.append({
+            "table":             fo["virtual_table"],
+            "domain":            "Output",
+            "rows":              rows_count,
+            "kind":              "file",
+            "depth":             "—",
+            "description":       fo.get("source", "—"),
+            "produced_by":       fo.get("producer", "—"),
+            "consumed_by":       "(cockpit UI)",
+            "consumed_count":    1,
+            "source":            fo.get("source", "—"),
+            "data_freq":         fo.get("data_freq", "—"),
+            "frequency":         fo.get("frequency", "—"),
+            "earliest_date":     None,
+            "latest_date":       latest_iso,
+            "date_span":         None,
+            "freshness":         freshness,
+            "age_days":          age_days,
+            "threshold_days":    threshold_days,
+            "stock_count":       None,
+            "stock_coverage_pct": None,
+            "stock_coverage":    "—",
+            "status":            status,
+        })
+
     return pd.DataFrame(rows)
+
+
+def _file_output_state(fo):
+    """Return (latest_iso, n_records_with_freshness_field) for a file output.
+
+    The freshness anchor is the newest file matching the glob *that contains*
+    at least one record whose freshness_field is present. A file full of
+    placeholders (status: no_api_key) doesn't count — that's the whole point.
+    """
+    pattern = str(PROJECT_ROOT / fo["glob"])
+    files = sorted(glob.glob(pattern), reverse=True)
+    freshness_field = fo.get("freshness_field")
+    for f in files:
+        try:
+            with open(f) as fh:
+                data = json.load(fh)
+        except (json.JSONDecodeError, IOError):
+            continue
+        if not isinstance(data, list):
+            data = [data]
+        if freshness_field:
+            real = [d for d in data if isinstance(d, dict) and d.get(freshness_field)]
+            if not real:
+                continue
+            n = len(real)
+        else:
+            n = len(data)
+        # Date from filename if it follows the dossiers_YYYY-MM-DD.json pattern,
+        # else fall back to mtime.
+        from datetime import datetime as _dt
+        m = re.search(r"(\d{4}-\d{2}-\d{2})", Path(f).name)
+        if m:
+            return m.group(1), n
+        ts = _dt.fromtimestamp(Path(f).stat().st_mtime).date()
+        return ts.isoformat(), n
+    return None, 0
 
 
 def db_summary():

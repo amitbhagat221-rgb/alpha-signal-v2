@@ -174,13 +174,35 @@ CREATE TABLE IF NOT EXISTS analyst_consensus (
 
 CREATE TABLE IF NOT EXISTS forecast_history (
     sid             TEXT NOT NULL REFERENCES stocks(sid),
-    metric          TEXT NOT NULL,
-    date            TEXT NOT NULL,
+    metric          TEXT NOT NULL,                     -- 'price'/'eps'/'revenue'
+    date            TEXT NOT NULL,                     -- publication / year-end date
     value           REAL,
     change          REAL,
     fetched_at      TEXT DEFAULT (datetime('now')),
     PRIMARY KEY (sid, metric, date)
 );
+
+-- Monthly snapshots of analyst consensus aggregate. Drives pt_revision_*
+-- signals over proper windows. PTs are episodic — daily snapshots would be
+-- phantom precision (same value most days). Snapshot once per month at the
+-- 1st business day. Distinct from analyst_consensus (current-only, PK=sid)
+-- and from forecast_history (year-end snapshots from Tickertape, even sparser).
+CREATE TABLE IF NOT EXISTS analyst_consensus_snapshots (
+    sid                 TEXT NOT NULL REFERENCES stocks(sid),
+    snapshot_date       TEXT NOT NULL,                 -- 1st business day of month
+    source              TEXT NOT NULL,                 -- 'yfinance' / 'tickertape' / 'moneycontrol'
+    target_mean         REAL,
+    target_median       REAL,
+    target_high         REAL,                          -- highest analyst PT (dispersion proxy)
+    target_low          REAL,
+    n_analysts          INTEGER,
+    recommendation_key  TEXT,                          -- strong_buy / buy / hold / sell / strong_sell / none
+    recommendation_mean REAL,                          -- 1=strong buy, 5=strong sell
+    fetched_at          TEXT DEFAULT (datetime('now')),
+    PRIMARY KEY (sid, snapshot_date, source)
+);
+CREATE INDEX IF NOT EXISTS idx_acs_sid ON analyst_consensus_snapshots(sid);
+CREATE INDEX IF NOT EXISTS idx_acs_date ON analyst_consensus_snapshots(snapshot_date);
 
 CREATE TABLE IF NOT EXISTS news_articles (
     article_id      TEXT PRIMARY KEY,
@@ -692,6 +714,106 @@ CREATE TABLE IF NOT EXISTS interest_coverage_scores (
     PRIMARY KEY (sid, snapshot_date)
 );
 CREATE INDEX IF NOT EXISTS idx_icov_date ON interest_coverage_scores(snapshot_date);
+
+-- ROIIC — Return on Incremental Invested Capital, 5-year endpoint.
+-- (NOPAT_t − NOPAT_{t-5}) / (IC_t − IC_{t-5}). Drop ΔIC < ₹50 cr to avoid
+-- denominator blow-ups and sign-inverted capital returners. Capped to ±5.
+CREATE TABLE IF NOT EXISTS roiic_scores (
+    sid              TEXT NOT NULL REFERENCES stocks(sid),
+    snapshot_date    TEXT NOT NULL,
+    period_end       TEXT,
+    delta_nopat      REAL,        -- NOPAT_t − NOPAT_{t-5}, ₹cr
+    delta_ic         REAL,        -- IC_t − IC_{t-5}, ₹cr (≥ 50 by filter)
+    roiic            REAL,        -- ΔNOPAT / ΔIC, capped ±5
+    PRIMARY KEY (sid, snapshot_date)
+);
+CREATE INDEX IF NOT EXISTS idx_roiic_date ON roiic_scores(snapshot_date);
+
+-- ─────────────────────────────────────────────────────────────
+-- Forensic / capital-allocation batch (plan 0002 §3.2.1)
+-- All single-column score tables, latest annual or 3y-median.
+-- ─────────────────────────────────────────────────────────────
+
+-- DSO YoY change (Receivables/(Sales/365) − prior year). Days.
+CREATE TABLE IF NOT EXISTS dso_change_yoy_scores (
+    sid TEXT NOT NULL REFERENCES stocks(sid), snapshot_date TEXT NOT NULL, period_end TEXT,
+    dso_change_yoy REAL,
+    PRIMARY KEY (sid, snapshot_date)
+);
+CREATE INDEX IF NOT EXISTS idx_dsoyoy_date ON dso_change_yoy_scores(snapshot_date);
+
+-- DIO YoY change (Inventory/(Sales/365) − prior year). Days.
+CREATE TABLE IF NOT EXISTS dio_change_yoy_scores (
+    sid TEXT NOT NULL REFERENCES stocks(sid), snapshot_date TEXT NOT NULL, period_end TEXT,
+    dio_change_yoy REAL,
+    PRIMARY KEY (sid, snapshot_date)
+);
+CREATE INDEX IF NOT EXISTS idx_dioyoy_date ON dio_change_yoy_scores(snapshot_date);
+
+-- NWC / Revenue, latest annual. Spot sibling of wc_intensity (3y median).
+CREATE TABLE IF NOT EXISTS nwc_to_revenue_scores (
+    sid TEXT NOT NULL REFERENCES stocks(sid), snapshot_date TEXT NOT NULL, period_end TEXT,
+    nwc_to_revenue REAL,
+    PRIMARY KEY (sid, snapshot_date)
+);
+CREATE INDEX IF NOT EXISTS idx_nwc2rev_date ON nwc_to_revenue_scores(snapshot_date);
+
+-- Sloan accruals (BS construction): (ΔNWC − Depreciation) / avg Total Assets.
+CREATE TABLE IF NOT EXISTS sloan_accruals_full_scores (
+    sid TEXT NOT NULL REFERENCES stocks(sid), snapshot_date TEXT NOT NULL, period_end TEXT,
+    sloan_accruals_full REAL,
+    PRIMARY KEY (sid, snapshot_date)
+);
+CREATE INDEX IF NOT EXISTS idx_sloanfull_date ON sloan_accruals_full_scores(snapshot_date);
+
+-- SGA / Revenue YoY change.
+CREATE TABLE IF NOT EXISTS sga_to_revenue_change_scores (
+    sid TEXT NOT NULL REFERENCES stocks(sid), snapshot_date TEXT NOT NULL, period_end TEXT,
+    sga_to_revenue_change REAL,
+    PRIMARY KEY (sid, snapshot_date)
+);
+CREATE INDEX IF NOT EXISTS idx_sgachg_date ON sga_to_revenue_change_scores(snapshot_date);
+
+-- FCF margin: 3y median FCF / Sales. (FCF formula = fcf_yield's.)
+CREATE TABLE IF NOT EXISTS fcf_margin_scores (
+    sid TEXT NOT NULL REFERENCES stocks(sid), snapshot_date TEXT NOT NULL, period_end TEXT,
+    fcf_margin REAL,
+    PRIMARY KEY (sid, snapshot_date)
+);
+CREATE INDEX IF NOT EXISTS idx_fcfmargin_date ON fcf_margin_scores(snapshot_date);
+
+-- CapEx / Depreciation ratio, 3y median. >1 = growing, <1 = harvesting.
+CREATE TABLE IF NOT EXISTS capex_to_dep_scores (
+    sid TEXT NOT NULL REFERENCES stocks(sid), snapshot_date TEXT NOT NULL, period_end TEXT,
+    capex_to_dep REAL,
+    PRIMARY KEY (sid, snapshot_date)
+);
+CREATE INDEX IF NOT EXISTS idx_capdep_date ON capex_to_dep_scores(snapshot_date);
+
+-- Intangibles / Total assets (proxy for goodwill_to_assets — Screener doesn't
+-- separate goodwill from other intangibles).
+CREATE TABLE IF NOT EXISTS goodwill_to_assets_scores (
+    sid TEXT NOT NULL REFERENCES stocks(sid), snapshot_date TEXT NOT NULL, period_end TEXT,
+    goodwill_to_assets REAL,
+    PRIMARY KEY (sid, snapshot_date)
+);
+CREATE INDEX IF NOT EXISTS idx_gw2assets_date ON goodwill_to_assets_scores(snapshot_date);
+
+-- LT Borrowings / Total Borrowings. Higher = safer debt maturity profile.
+CREATE TABLE IF NOT EXISTS debt_structure_scores (
+    sid TEXT NOT NULL REFERENCES stocks(sid), snapshot_date TEXT NOT NULL, period_end TEXT,
+    debt_structure REAL,
+    PRIMARY KEY (sid, snapshot_date)
+);
+CREATE INDEX IF NOT EXISTS idx_dbtstruct_date ON debt_structure_scores(snapshot_date);
+
+-- Net Block / Total assets. Capital-intensity tag.
+CREATE TABLE IF NOT EXISTS asset_tangibility_scores (
+    sid TEXT NOT NULL REFERENCES stocks(sid), snapshot_date TEXT NOT NULL, period_end TEXT,
+    asset_tangibility REAL,
+    PRIMARY KEY (sid, snapshot_date)
+);
+CREATE INDEX IF NOT EXISTS idx_asstan_date ON asset_tangibility_scores(snapshot_date);
 
 -- ─────────────────────────────────────────────────────────────
 -- Sector-narrative-derived factor cluster (plan 0007)

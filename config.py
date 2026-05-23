@@ -244,6 +244,15 @@ PIPELINE_STEPS = [
     {"name": "fetch_forecast",     "module": "sources.tickertape_analyst", "function": "compute", "critical": False,
      "table": "forecast_history",  "source": "Tickertape __NEXT_DATA__", "data_freq": "monthly", "frequency": "monthly"},
 
+    # Yahoo Finance analyst consensus aggregate. Replaces the Tickertape PT field
+    # (which was contaminated with lastPrice — see HANDOFF 2026-05-22). Refreshes
+    # the live `analyst_consensus` row per stock. The monthly snapshot to
+    # `analyst_consensus_snapshots` runs from its own cron entry (1st business
+    # day of month) — keeping daily history would be phantom precision since
+    # PTs are episodic.
+    {"name": "fetch_yf_analyst",   "module": "sources.yfinance_analyst",   "function": "compute", "critical": False,
+     "table": "analyst_consensus", "source": "Yahoo Finance (yfinance)",  "data_freq": "monthly", "frequency": "daily"},
+
     # Tickertape shareholding pattern — Bharat_sm_data API (different path from analyst scrape).
     {"name": "fetch_shareholding", "module": "sources.tickertape_shareholding", "function": "compute", "critical": False,
      "table": "shareholding",      "source": "Tickertape API",        "data_freq": "quarterly", "frequency": "monthly"},
@@ -296,6 +305,44 @@ PIPELINE_STEPS = [
     {"name": "signal_interest_coverage", "module": "signals.interest_coverage", "function": "compute", "critical": False,
      "table": "interest_coverage_scores", "source": "fundamentals_screener — PBT + Interest",
      "data_freq": "annual",        "frequency": "daily"},
+
+    # ROIIC — marginal NOPAT/IC over trailing 5y. Sister of ROIC; measures
+    # how productive newly-deployed capital has been.
+    {"name": "signal_roiic", "module": "signals.roiic", "function": "compute", "critical": False,
+     "table": "roiic_scores", "source": "fundamentals_screener — PBT + Tax + Interest + Equity Share Capital + Reserves + Borrowings",
+     "data_freq": "annual",        "frequency": "daily"},
+
+    # ── Forensic / capital-allocation batch (plan 0002 §3.2.1) ──
+    {"name": "signal_dso_change_yoy", "module": "signals.dso_change_yoy", "function": "compute", "critical": False,
+     "table": "dso_change_yoy_scores", "source": "fundamentals_screener — Sales + Receivables",
+     "data_freq": "annual", "frequency": "daily"},
+    {"name": "signal_dio_change_yoy", "module": "signals.dio_change_yoy", "function": "compute", "critical": False,
+     "table": "dio_change_yoy_scores", "source": "fundamentals_screener — Sales + Inventory",
+     "data_freq": "annual", "frequency": "daily"},
+    {"name": "signal_nwc_to_revenue", "module": "signals.nwc_to_revenue", "function": "compute", "critical": False,
+     "table": "nwc_to_revenue_scores", "source": "fundamentals_screener — Sales + Receivables + Inventory + Trade Payables",
+     "data_freq": "annual", "frequency": "daily"},
+    {"name": "signal_sloan_accruals_full", "module": "signals.sloan_accruals_full", "function": "compute", "critical": False,
+     "table": "sloan_accruals_full_scores", "source": "fundamentals_screener — Receivables + Inventory + Trade Payables + Depreciation + Total",
+     "data_freq": "annual", "frequency": "daily"},
+    {"name": "signal_sga_to_revenue_change", "module": "signals.sga_to_revenue_change", "function": "compute", "critical": False,
+     "table": "sga_to_revenue_change_scores", "source": "fundamentals_screener — Sales + Selling and admin",
+     "data_freq": "annual", "frequency": "daily"},
+    {"name": "signal_fcf_margin", "module": "signals.fcf_margin", "function": "compute", "critical": False,
+     "table": "fcf_margin_scores", "source": "fundamentals_screener — Sales + OCF + Net Block + CWIP + Depreciation",
+     "data_freq": "annual", "frequency": "daily"},
+    {"name": "signal_capex_to_dep", "module": "signals.capex_to_dep", "function": "compute", "critical": False,
+     "table": "capex_to_dep_scores", "source": "fundamentals_screener — Net Block + CWIP + Depreciation",
+     "data_freq": "annual", "frequency": "daily"},
+    {"name": "signal_goodwill_to_assets", "module": "signals.goodwill_to_assets", "function": "compute", "critical": False,
+     "table": "goodwill_to_assets_scores", "source": "fundamentals_screener — Intangible Assets + Total",
+     "data_freq": "annual", "frequency": "daily"},
+    {"name": "signal_debt_structure", "module": "signals.debt_structure", "function": "compute", "critical": False,
+     "table": "debt_structure_scores", "source": "fundamentals_screener — Long term Borrowings + Borrowings",
+     "data_freq": "annual", "frequency": "daily"},
+    {"name": "signal_asset_tangibility", "module": "signals.asset_tangibility", "function": "compute", "critical": False,
+     "table": "asset_tangibility_scores", "source": "fundamentals_screener — Net Block + Total",
+     "data_freq": "annual", "frequency": "daily"},
 
     # Sector-narrative-derived cluster (plan 0003) — 4 factors inspired by
     # IIM Ahmedabad sector-narrative pages. None in scoring weights yet;
@@ -394,3 +441,24 @@ RAW_TABLES = [
     # vix_history is mirrored from macro_history.india_vix by sources.macro_yfinance._sync_vix_history.
     {"table": "vix_history",            "source": "yfinance ^INDIAVIX (mirrored from macro_history)", "data_freq": "daily", "frequency": "daily"},
 ]
+
+
+# File-based outputs that aren't DB tables. Tracked by data_health() so the
+# freshness watchdog can see them — without this, file-only producers (the
+# 2026-05 HALC dossier bug) fail silently for weeks.
+#
+# Each entry maps a virtual_table name → glob pattern (newest file by mtime
+# is the freshness anchor), a recency threshold in days, and the producer
+# step the watchdog should retrigger.
+FILE_OUTPUTS = [
+    {
+        "virtual_table": "_file_dossiers",
+        "glob":          "output/dossiers_*.json",
+        "freshness_field": "thesis",   # JSON must contain at least one record with this key
+        "source":        "output/dossier.py (Claude API)",
+        "data_freq":     "daily",
+        "frequency":     "daily",
+        "producer":      "dossier",    # PIPELINE_STEPS name to retrigger
+    },
+]
+

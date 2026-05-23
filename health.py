@@ -732,10 +732,11 @@ TABLE_PROFILES = {
     },
     "analyst_consensus": {
         "per_stock": True,
-        # total_analysts is intentionally absent: Tickertape omits it for ~60% of
-        # covered stocks even when has_analyst_data=1; signals.consensus degrades
-        # gracefully (confidence = 0.3 when missing). price_target is the actual
-        # signal driver — that's what we care about being non-NULL.
+        # Current snapshot per sid. As of 2026-05-22:
+        #   - price_target sourced from yfinance (98% LARGE, 92% MID coverage; ~4% SMALL)
+        #   - forward_eps / eps_growth_pct / forward_revenue / revenue_growth_pct sourced from Tickertape
+        #   - total_analysts written by both, last-writer-wins (yfinance daily overrides Tickertape monthly)
+        # See HANDOFF 2026-05-22 for the migration off Tickertape's contaminated price feed.
         "critical_columns": ["sid", "price_target"],
         "validity_checks": [
             {"column": "price_target", "not_negative": True, "label": "price target"},
@@ -743,7 +744,16 @@ TABLE_PROFILES = {
         ],
         "outlier_columns": ["price_target", "forward_eps"],
     },
+    "analyst_consensus_snapshots": {
+        # Monthly history of yfinance aggregate. Drives pt_revision signals.
+        "per_stock": True,
+        "critical_columns": ["sid", "snapshot_date", "source", "target_mean"],
+        "natural_key": ["sid", "snapshot_date", "source"],
+        "outlier_columns": ["target_mean", "target_high", "target_low"],
+    },
     "forecast_history": {
+        # Sparse Tickertape year-end snapshots (~1/yr per stock 2022-2025).
+        # Daily "today" entries filtered at ingestion (see sources/tickertape_analyst.py).
         "per_stock": True,
         "critical_columns": ["sid", "date", "metric", "value"],
         "natural_key": ["sid", "metric", "date"],

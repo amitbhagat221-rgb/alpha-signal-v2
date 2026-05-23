@@ -49,7 +49,7 @@ Header (always visible): ticker, price, date, cap tier + action + conviction bad
 | **Overview** | AI dossier (thesis/bull/bear/target/stop), conviction 0-100, signal cards with progress bars + tooltips, analyst summary, news + sentiment, sector regulatory events | daily_picks, daily_snapshots, all signal tables, news_articles, regulatory_signals |
 | **Financials** | 12-metric grid (Mcap, P/E, EY, D/E, ROE, EBITDA margin, PAT margin, BV, FCF Yield, Rev growth, CR, Piotroski F) with sector-avg comparison; quarterly results (10q); Revenue+PAT bar chart; 5-year balance sheet | quarterly_income, annual_balance_sheet, annual_cash_flow |
 | **Ownership** | Shareholding stacked area (6q: Promoter/FII/MF/DII) + QoQ arrows; pledge warning; insider trades + monthly timeline; bulk deals | shareholding, insider_trades, insider_signals, bulk_deals |
-| **Consensus** | PT range bar (low→current→target→high); forecast revision chart; analyst breakdown (count, buy%, EPS+rev growth); forward P/E | analyst_consensus, forecast_history |
+| **Consensus** | PT range bar (low→current→target→high); forecast revision chart; analyst breakdown (count, buy%, EPS+rev growth); forward P/E | analyst_consensus (yfinance daily), analyst_consensus_snapshots (monthly history), forecast_history (Tickertape year-end) |
 | **Forensic** | Piotroski 9-factor grid (pass/fail per factor); Beneish M-Score zone card; Altman Z zone card; accruals quality (CF, BS, persistence) | piotroski_scores, forensic_scores, accruals_scores |
 | **Price & Tech** | Multi-timeframe price chart (1M/3M/6M/1Y/3Y) + volume + 90d delivery%; 52W annotations; momentum 6M/12M + RSI | stock_prices |
 

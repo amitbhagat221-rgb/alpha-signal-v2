@@ -29,12 +29,22 @@ from config import PIPELINE_STEPS
 from pipeline import run_step
 
 
-def _producer_for(table_name):
-    """Return the (name, module, function, critical) tuple for a table's producer,
-    or None if no producer is registered in PIPELINE_STEPS."""
+def _producer_for(table_name, row_produced_by=None):
+    """Return the (name, module, function, critical) tuple for a table's producer.
+
+    Match priority:
+      1. PIPELINE_STEPS row with matching `table`
+      2. PIPELINE_STEPS row whose `name` matches `row_produced_by` (file outputs
+         have `table: None`, so data_health() carries the step name in
+         `produced_by` instead).
+    """
     for s in PIPELINE_STEPS:
-        if s.get("table") == table_name:
+        if s.get("table") and s["table"] == table_name:
             return (s["name"], s["module"], s["function"], s["critical"])
+    if row_produced_by:
+        for s in PIPELINE_STEPS:
+            if s["name"] == row_produced_by:
+                return (s["name"], s["module"], s["function"], s["critical"])
     return None
 
 
@@ -71,7 +81,7 @@ def scan(dry_run=False, only_tables=None):
         tbl = row["table"]
         age = int(row["age_days"]) if row["age_days"] else "?"
         freshness = row["freshness"]
-        producer = _producer_for(tbl)
+        producer = _producer_for(tbl, row.get("produced_by"))
 
         if producer is None:
             print(f"  ✗ {tbl:30s} {freshness:8s} {age}d old — NO PRODUCER REGISTERED")

@@ -223,18 +223,53 @@ def get_earnings_upcoming(sid=None):
     return df.to_dict("records") if not df.empty else []
 
 
+DOSSIER_MAX_AGE_DAYS = 3  # honest staleness cap; matches data_health "daily" threshold
+
+
 @_ttl_cache(60)
 def get_dossier(sid):
-    """A9: AI investment dossier from latest JSON file."""
+    """A9: AI investment dossier from latest JSON file.
+
+    Refuses to serve theses older than DOSSIER_MAX_AGE_DAYS — previously this
+    function walked back through history until it found ANY thesis, which
+    silently surfaced 20-day-old text as if it were current (see HALC bug
+    2026-05-22).
+    """
+    import re
+    from datetime import datetime as _dt
     dossier_dir = PROJECT_ROOT / "output"
     files = sorted(glob.glob(str(dossier_dir / "dossiers_*.json")), reverse=True)
+    today = _dt.now().date()
     for f in files:
+        # File-date from filename for honest "as_of" labeling. If the filename
+        # doesn't carry a date, skip — the dossier card can't be honest.
+        m = re.search(r"(\d{4}-\d{2}-\d{2})", Path(f).name)
+        if not m:
+            continue
+        file_date = _dt.strptime(m.group(1), "%Y-%m-%d").date()
+        age_days = (today - file_date).days
+        if age_days > DOSSIER_MAX_AGE_DAYS:
+            # Anything older isn't current truth — bail. The template's
+            # `{% if dos.get("thesis") %}` will hide the card.
+            return {}
         try:
             with open(f) as fh:
                 dossiers = json.load(fh)
             for d in dossiers:
                 if d.get("sid") == sid and d.get("thesis"):
-                    return d
+                    # Reject hallucinated/invalid dossiers — see output/dossier.py
+                    # _validate_dossier. Dossiers without a `validation` block
+                    # are legacy (pre-validator) and we tolerate them but mark
+                    # them as such so the template can show a notice.
+                    v = d.get("validation")
+                    if v and not v.get("ok", False):
+                        return {}
+                    return {
+                        **d,
+                        "as_of": file_date.isoformat(),
+                        "age_days": age_days,
+                        "validated": bool(v and v.get("ok")),
+                    }
         except (json.JSONDecodeError, IOError):
             continue
     return {}
@@ -2586,8 +2621,9 @@ def get_command_centre():
             ("short_selling_data",     "NSE short-selling — F&O-eligible names only"),
         ]),
         ("Analyst Forecasts", [
-            ("analyst_consensus",      "Snapshot of latest ratings, target price, upside per stock"),
-            ("forecast_history",       "Historical forecast revisions — feeds pt_revision_yoy and eps_revision_yoy"),
+            ("analyst_consensus",          "Current snapshot — yfinance-sourced price_target + Tickertape-sourced eps/revenue. PK=sid, daily refresh."),
+            ("analyst_consensus_snapshots", "Monthly history of yfinance aggregate — drives pt_revision signals. PK=(sid, snapshot_date, source). New 2026-05-22."),
+            ("forecast_history",           "Tickertape year-end PT/EPS/Revenue snapshots (~1/yr per stock 2022-2025). Daily 'today' entries filtered at ingest."),
         ]),
         ("Events & News", [
             ("regulatory_events",      "BSE/NSE filings — raw + classifier_status (6 terminal states)"),

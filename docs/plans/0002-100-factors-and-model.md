@@ -1,14 +1,16 @@
 ---
 Status: active
 Created: 2026-05-03
-Last updated: 2026-05-22
+Last updated: 2026-05-23
 Owner: Amit Bhagat
 Implementation:
-  3.1a (Screener Premium xlsx): universe-complete 2026-05-10. 2,119/2,448 stocks, 681K rows in `fundamentals_screener`, 329 failures (mostly SMALL delisted/new). `sources/screener_pull.py`.
-  3.1b/c/d (NSE F&O OI, Kite, NLP): not started.
-  Schedules JSON scraper: module landed 2026-05-10 (`sources/screener_schedules.py`). RELI smoke test passed (276 rows / 23 new line items). Universe run kicked off.
-  Phase 3.2 factors shipped: `signals/roic.py` (1,501 stocks), `signals/fcf_yield.py` (1,195 stocks). Both wired into pipeline. Not in scoring weights yet — need t-stat validation.
-Related ADRs: 0009-factor-track-parallel-to-d-track.md, 0011-long-format-for-new-fundamentals-tables.md, 0015-track-numbering-and-rename.md
+  3.1a (Screener Premium xlsx): universe-complete 2026-05-10. 2,119/2,448 stocks, 681K rows in `fundamentals_screener`.
+  3.1b/c/d (NSE F&O OI, Kite, NLP): not started. 3.1b is next (unblocks §3.2.2).
+  Phase 3.2 factors shipped (19/50 PIT-ready as of 2026-05-23):
+    §3.2.1 forensic/capital-allocation (11/15): roic, fcf_yield, ccc, operating_margin_trend, working_capital_intensity, interest_coverage, roiic, dso_change_yoy, dio_change_yoy, nwc_to_revenue, sloan_accruals_full, sga_to_revenue_change, fcf_margin, capex_to_dep, goodwill_to_assets, debt_structure, asset_tangibility. 4 skipped (gross_margin family — no clean COGS; consol_standalone_gap — schema gap).
+    Best new result: dso_change_yoy KEEP LARGE |t|=-2.81 (intuitive sign).
+  Analyst PT data overhaul (2026-05-23): yfinance replaces Tickertape for `analyst_consensus.price_target` (902 stocks covered). New `analyst_consensus_snapshots` monthly table. `pt_upside` |t| dropped 16.29→7.20 LARGE after cleanup — still elevated, awaiting more monthly snapshots.
+Related ADRs: 0009-factor-track-parallel-to-d-track.md, 0011-long-format-for-new-fundamentals-tables.md, 0015-track-numbering-and-rename.md, 0017-factor-library-two-tier-registry.md, 0018-pt-data-model-episodic-cadence.md
 ---
 
 # 0005 — Double Factor Count to 100 + Factor Model Upgrade

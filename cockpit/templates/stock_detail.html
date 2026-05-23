@@ -113,11 +113,22 @@
 {% if dos.get("thesis") %}
 <div class="card" style="margin-bottom: 16px; border-left: 4px solid var(--accent);">
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-        <span style="font-size: 12px; font-weight: 700; letter-spacing: 1.5px; color: var(--accent);">AI INVESTMENT THESIS</span>
-        <div style="display: flex; gap: 10px;">
+        <span style="font-size: 12px; font-weight: 700; letter-spacing: 1.5px; color: var(--accent);">
+            AI INVESTMENT THESIS
+            {% if dos.get("as_of") %}
+            <span style="color: var(--text-muted); font-weight: 400; letter-spacing: 0.5px; margin-left: 8px;">
+                AS OF {{ dos.as_of }}{% if dos.get("age_days") and dos.age_days > 0 %} ({{ dos.age_days }}d){% endif %}
+            </span>
+            {% endif %}
+        </span>
+        <div style="display: flex; gap: 10px; align-items: center;">
             {% if dos.get("target_price") %}
-            <span style="font-size: 13px; color: var(--green);">Target: <span class="mono">&#8377;{{ dos.target_price }}</span>
-                {% if dos.get("target_upside_pct") %} (+{{ dos.target_upside_pct }}%){% endif %}
+            <span style="font-size: 13px; color: var(--green);">
+                {{ dos.get("target_horizon_months", 12) }}-mo Target: <span class="mono">&#8377;{{ dos.target_price }}</span>
+                {% if pm.get("close_price") and pm.close_price > 0 %}
+                  {% set upside = ((dos.target_price / pm.close_price) - 1) * 100 %}
+                  <span style="color: var(--text-muted); font-size: 11px;">({{ "%+.1f"|format(upside) }}%)</span>
+                {% endif %}
             </span>
             {% endif %}
             {% if dos.get("stop_loss_price") or dos.get("stop_loss") %}
@@ -269,14 +280,20 @@
 
 {# RIGHT: Analyst summary + Regulatory + Forensic snapshot #}
 <div>
-    {# Analyst Consensus snapshot #}
+    {# Analyst Consensus snapshot — hides the misleading price_target field when
+       it degenerates to current price (≥95% of universe today; root cause is
+       that we scrape Tickertape's forecastsHistory.price endpoint which returns
+       historical close prices, not forward PTs. See HANDOFF 2026-05-22). #}
     {% if ac %}
+    {% set pt_suspect = ac.get("price_target") and pm.get("close_price") and (ac.price_target - pm.close_price)|abs < 1.0 %}
     <div class="card" style="margin-bottom: 16px;">
         <div class="section-title">Analyst Snapshot</div>
-        <div class="section-desc">Aggregated forecasts from sell-side analysts covering this stock.</div>
-        {% if ac.get("price_target") %}
+        <div class="section-desc">
+            Sell-side analyst aggregate. <em>Distinct from the AI thesis target above.</em>
+        </div>
+        {% if ac.get("price_target") and not pt_suspect %}
         <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 12px;">
-            <span style="font-size: 12px; color: var(--text-secondary);">Price Target</span>
+            <span style="font-size: 12px; color: var(--text-secondary);">Consensus Price Target</span>
             <div>
                 <span class="mono" style="font-size: 22px; font-weight: 700;">&#8377;{{ "%.0f"|format(ac.price_target) }}</span>
                 {% if ac.get("pt_upside_pct") is not none %}
@@ -285,6 +302,10 @@
                 </span>
                 {% endif %}
             </div>
+        </div>
+        {% elif pt_suspect %}
+        <div style="padding: 10px 12px; border-radius: 8px; background: rgba(245, 158, 11, 0.1); border-left: 3px solid var(--amber); margin-bottom: 12px; font-size: 12px; color: var(--text-secondary);">
+            Consensus PT data unavailable (source feed returns price history rather than forward targets — under investigation).
         </div>
         {% endif %}
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">

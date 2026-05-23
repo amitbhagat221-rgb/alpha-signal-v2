@@ -1,18 +1,19 @@
 # HANDOFF
-Updated: 2026-05-22 | Branch: master (1 unpushed + new work) | HEAD: `d1d4d33` docs: handoff — Track 3.1a verified, CCC ready as next factor
+Updated: 2026-05-23 | Branch: master (0 unpushed, all session work uncommitted) | HEAD: `f8d1358` docs: handoff 2026-05-22 + ADR 0017 + /handoff includes commit+push
 
 ## Left off
-Shipped 4 Track-3 factors end-to-end as signal+PIT-helper pairs (`ccc`, `operating_margin_trend`, `working_capital_intensity`, `interest_coverage`) and introduced `FACTOR_LIBRARY` in [db.py](db.py) so library-tier (sub-|t|=1.5) factors are explicitly registered. `BACKTEST_SIGNALS` grew 41→52; share_momentum hit KEEP (|t|=3.21, strongest Track-3 result), ccc + interest_coverage parked at WEAK pending sign verification, the rest dropped into library tier.
+Pulled the HALC cockpit thread, found Tickertape's `forecastsHistory.price[-1]` was `lastPrice` masquerading as analyst PT (95.6% of universe degenerate). Replaced with yfinance for `analyst_consensus.price_target` (902 stocks covered), rebuilt the PT data model into 3 tables × 3 cadences, and shipped the observability stack (`tools/health_report.py` + `tools/data_sanity.py` + watchdog file-output coverage) so the next class of silent failure surfaces automatically.
 
 ## Pick up here
-1. Retrofit `pit_roic` + `pit_fcf_yield` in [tools/reconstruct_pit.py](tools/reconstruct_pit.py) — closes the unit-of-work rule violation; flips both from status MISSING → READY in `db.BACKTEST_SIGNALS`. Template: today's `pit_cash_conversion_cycle`.
-2. Continue batch queue with `roiic` (ΔNOPAT / ΔInvested Capital, 5y). Same signal+PIT unit-of-work as ccc.
-3. Decide share_momentum's scoring weight: hit KEEP at |t|=3.21 but stays out of `SCREEN.weight_tiers` per CLAUDE.md. Either weight-now (manual ~0.5×) or wait for Track 3.3a IC-stability framework.
+1. Fix the `daily_picks` rank tie-break in [scoring/screener.py](scoring/screener.py) — `SANITY:DAILY_PICKS_RANK_DUPLICATE` fires CRITICAL (16 stocks share SMALL rank 2183). Add a secondary sort key (e.g., `sid`) to break ties.
+2. Resume Track 3.2 batch — 13 new factors shipped today raised count from 6/50 to 19/50. Next in queue: `nse_fo_oi` ingest (Phase 3.1b) to unblock §3.2.2 options-implied factors. Alt path: §3.2.5 event-time/PEAD signals from existing data.
+3. Decide `share_momentum` and `dso_change_yoy` scoring weights — both hit KEEP (|t|=3.21 and -2.81 LARGE respectively) but stay out of `SCREEN.weight_tiers` per CLAUDE.md "never mechanically." Manual ~0.5× or wait for Track 3.3a IC-stability framework.
 
 ## Watch out
-- 4 new columns ALTER'd onto `daily_snapshots_pit` (ccc, margin_slope, wc_intensity, interest_coverage). `CREATE_TABLE_SQL` in [tools/reconstruct_pit.py](tools/reconstruct_pit.py) stops at `growth_composite` — pre-existing drift, but a fresh DB rebuild would miss 14+ columns.
-- `FACTOR_LIBRARY` in [db.py](db.py) is hand-maintained. When a factor's t-stat crosses |t|≥1.5 it needs explicit removal. Not enforced by code — drift risk against `pit_ic_by_tier_v2`.
-- Cockpit `import` test passed but the new "Track 3 — Library" group of 10 BACKTEST_SIGNALS entries hasn't been visually verified on a real page load.
+- `pt_upside` |t| dropped 16.29 → 7.20 LARGE after the cleanup but is still suspiciously high; likely still a price-anchor artifact. Don't bump its weight in `SCREEN.weight_tiers` until ≥3 monthly `analyst_consensus_snapshots` accumulate (calendar: 2026-08).
+- `analyst_consensus.price_target` is now NULL for ~1,538 stocks without yfinance coverage (mostly SMALL caps). Any signal that consumes it (`consensus_signals.pt_upside`, `signals/consensus.py`) silently produces NaN for those — by design, but `daily_picks` for SMALL is now ranking with a missing feature.
+- New cron entries: watchdog @ 15:00 UTC, health_report @ 04:00 UTC, monthly snapshot @ 30 4 1 * *. First snapshot landed today (902 rows @ 2026-05-01); next at 2026-06-01.
+- v2 cron now imports v1's exports via `eval "$(grep '^export ' /home/ubuntu/alpha-signal/run_pipeline.sh)"` — if v1's run_pipeline.sh is ever rewritten, v2 loses credentials silently. Treat the v1 file as load-bearing.
 
 ## Active plan
-[docs/plans/0002-100-factors-and-model.md](docs/plans/0002-100-factors-and-model.md) — Track 3 Phase 3.2 (6/50 factors PIT-shipped; next: roic/fcf_yield PIT retrofit → roiic)
+[docs/plans/0002-100-factors-and-model.md](docs/plans/0002-100-factors-and-model.md) — Track 3 Phase 3.2 (19/50 factors PIT-shipped). Phase 3.2.1 forensic/capital-allocation: 11/15 done. Next: §3.2.5 event-time OR §3.2.2 options-implied (needs Phase 3.1b ingest first).

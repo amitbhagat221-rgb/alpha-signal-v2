@@ -80,12 +80,19 @@ def _fetch_next_data(slug):
 
 
 def _extract_analyst_row(sid, data, fetched_at):
-    """Flatten __NEXT_DATA__ into a single analyst_consensus row."""
+    """Flatten __NEXT_DATA__ into a single analyst_consensus row.
+
+    Owns these fields in analyst_consensus:
+      buy_pct, forward_eps, eps_growth_pct, forward_revenue, revenue_growth_pct
+    Co-writes total_analysts (yfinance overwrites daily).
+    Does NOT touch price_target — yfinance is the sole writer (see HANDOFF
+    2026-05-22 — Tickertape's forecastsHistory.price[-1] was lastPrice, not
+    a real PT, and contaminated the field for 20 days).
+    """
     rec = {
         "sid": sid,
         "total_analysts": None,
         "buy_pct": None,
-        "price_target": None,
         "forward_eps": None,
         "eps_growth_pct": None,
         "forward_revenue": None,
@@ -101,9 +108,12 @@ def _extract_analyst_row(sid, data, fetched_at):
 
         fh = pp.get("forecastsHistory", {}) or {}
 
-        price_hist = fh.get("price", [])
-        if price_hist:
-            rec["price_target"] = price_hist[-1].get("value")
+        # NOTE: do NOT pull price_target from forecastsHistory.price[-1].
+        # That entry is the "today" value (lastPrice masquerading as PT —
+        # see HANDOFF 2026-05-22). yfinance is the sole writer of
+        # analyst_consensus.price_target; Tickertape leaves it alone.
+        # Year-end snapshots still flow to forecast_history (long format) via
+        # _extract_forecast_rows below; backtest pulls from there.
 
         eps_hist = fh.get("eps", [])
         if eps_hist:
@@ -115,7 +125,7 @@ def _extract_analyst_row(sid, data, fetched_at):
             rec["forward_revenue"] = rev_hist[-1].get("value")
             rec["revenue_growth_pct"] = rev_hist[-1].get("change")
 
-        if rec["total_analysts"] or rec["price_target"]:
+        if rec["total_analysts"] or rec["forward_eps"]:
             rec["has_analyst_data"] = 1
     except Exception:
         pass
@@ -123,25 +133,47 @@ def _extract_analyst_row(sid, data, fetched_at):
 
 
 def _extract_forecast_rows(sid, data, fetched_at):
-    """Flatten __NEXT_DATA__ into long-format forecast_history rows."""
+    """Flatten __NEXT_DATA__ into long-format forecast_history rows.
+
+    Tickertape's forecastsHistory.price array contains TWO kinds of entries:
+      1. Historical year-end snapshots (Dec 27-28 of each year) — real
+         analyst PT consensus at that point. Sparse: ~1 per stock per year.
+      2. A "today" entry — date = page-load date, value = current lastPrice
+         (NOT a real PT; it's just the intraday price). Fetched daily, this
+         creates phantom daily PT rows that match close prices and break
+         every downstream signal. See HANDOFF 2026-05-22.
+
+    We keep (1) and drop (2). A "today" entry is anything dated within the
+    last 90 days — real broker PT revisions get published quarterly at best,
+    so a fresh entry from this week is the lastPrice contaminant, not new
+    consensus.
+    """
+    from datetime import date as _date, timedelta as _timedelta
+    cutoff = (_date.today() - _timedelta(days=90)).isoformat()
     rows = []
     try:
         fh = data.get("props", {}).get("pageProps", {}).get("forecastsHistory", {}) or {}
         for metric in ("price", "eps", "revenue"):
             for entry in fh.get(metric, []):
                 raw_date = entry.get("date", "")
+                d = raw_date[:10] if raw_date else None
+                if not d:
+                    continue
+                # Drop the contaminating "today" entry for the price metric only.
+                # eps/revenue are quarterly fundamentals — those can be recent.
+                if metric == "price" and d >= cutoff:
+                    continue
                 rows.append({
                     "sid": sid,
                     "metric": metric,
-                    "date": raw_date[:10] if raw_date else None,
+                    "date": d,
                     "value": entry.get("value"),
                     "change": entry.get("change"),
                     "fetched_at": fetched_at,
                 })
     except Exception:
         pass
-    # Drop rows with bad date (PK required)
-    return [r for r in rows if r["date"]]
+    return rows
 
 
 def compute(limit=None, dry_run=False):
