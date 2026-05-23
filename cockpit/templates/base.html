@@ -30,18 +30,69 @@
 
     <!-- Left Rail Navigation (desktop) -->
     <nav class="left-rail">
-        <div class="brand-mark" aria-label="Alpha Signal">{{ icon("diamond", 22) }}</div>
-        <a href="/" class="nav-item {% if page == 'brief' %}active{% endif %}" title="Morning Brief">{{ icon("sun") }}</a>
-        <a href="/signals" class="nav-item {% if page == 'signals' %}active{% endif %}" title="Signals">{{ icon("activity") }}</a>
-        <a href="/actions" class="nav-item {% if page == 'actions' %}active{% endif %}" title="Action Queue">{{ icon("target") }}</a>
-        <a href="/explorer" class="nav-item {% if page == 'explorer' %}active{% endif %}" title="Explorer">{{ icon("search") }}</a>
-        <a href="/portfolio" class="nav-item {% if page == 'portfolio' %}active{% endif %}" title="Portfolio">{{ icon("briefcase") }}</a>
-        <a href="/sectors" class="nav-item {% if page == 'sectors' %}active{% endif %}" title="Sectors">{{ icon("layers") }}</a>
-        <a href="/model" class="nav-item {% if page == 'model' %}active{% endif %}" title="Model &amp; Backtest">{{ icon("sliders") }}</a>
-        <a href="/flow" class="nav-item {% if page == 'flow' %}active{% endif %}" title="Pipeline Flow">{{ icon("git-branch") }}</a>
-        <a href="/command" class="nav-item {% if page == 'command' %}active{% endif %}" title="Command Centre">{{ icon("compass") }}</a>
-        <a href="/system" class="nav-item {% if page == 'system' %}active{% endif %}" title="System">{{ icon("zap") }}</a>
-        <a href="/sql" class="nav-item {% if page == 'sql' %}active{% endif %}" title="SQL Console">{{ icon("terminal") }}</a>
+        <a href="/" class="brand-row" aria-label="Alpha Signal">
+            <span class="brand-mark">{{ icon("diamond", 20) }}</span>
+            <span class="brand-text">
+                <span class="brand-title">Alpha Signal</span>
+                <span class="brand-subtitle">v2 cockpit</span>
+            </span>
+        </a>
+
+        <div class="nav-section">
+            <div class="nav-section-label">Daily</div>
+            <a href="/" class="nav-item {% if page == 'brief' %}active{% endif %}">
+                <span class="nav-icon">{{ icon("sun") }}</span>
+                <span class="nav-text"><span class="nav-title">Morning Brief</span><span class="nav-subtitle">Today's read &amp; top picks</span></span>
+            </a>
+            <a href="/signals" class="nav-item {% if page == 'signals' %}active{% endif %}">
+                <span class="nav-icon">{{ icon("activity") }}</span>
+                <span class="nav-text"><span class="nav-title">Signals</span><span class="nav-subtitle">Factor scores &amp; ICs</span></span>
+            </a>
+            <a href="/actions" class="nav-item {% if page == 'actions' %}active{% endif %}">
+                <span class="nav-icon">{{ icon("target") }}</span>
+                <span class="nav-text"><span class="nav-title">Action Queue</span><span class="nav-subtitle">Buys &amp; sells to act on</span></span>
+            </a>
+            <a href="/explorer" class="nav-item {% if page == 'explorer' %}active{% endif %}">
+                <span class="nav-icon">{{ icon("search") }}</span>
+                <span class="nav-text"><span class="nav-title">Explorer</span><span class="nav-subtitle">Browse 2,448 stocks</span></span>
+            </a>
+        </div>
+
+        <div class="nav-section">
+            <div class="nav-section-label">Analysis</div>
+            <a href="/portfolio" class="nav-item {% if page == 'portfolio' %}active{% endif %}">
+                <span class="nav-icon">{{ icon("briefcase") }}</span>
+                <span class="nav-text"><span class="nav-title">Portfolio</span><span class="nav-subtitle">Holdings &amp; tier mix</span></span>
+            </a>
+            <a href="/sectors" class="nav-item {% if page == 'sectors' %}active{% endif %}">
+                <span class="nav-icon">{{ icon("layers") }}</span>
+                <span class="nav-text"><span class="nav-title">Sectors</span><span class="nav-subtitle">Industry rotation</span></span>
+            </a>
+            <a href="/model" class="nav-item {% if page == 'model' %}active{% endif %}">
+                <span class="nav-icon">{{ icon("sliders") }}</span>
+                <span class="nav-text"><span class="nav-title">Model &amp; Backtest</span><span class="nav-subtitle">Weights, t-stats, validation</span></span>
+            </a>
+        </div>
+
+        <div class="nav-section">
+            <div class="nav-section-label">Ops</div>
+            <a href="/flow" class="nav-item {% if page == 'flow' %}active{% endif %}">
+                <span class="nav-icon">{{ icon("git-branch") }}</span>
+                <span class="nav-text"><span class="nav-title">Pipeline Flow</span><span class="nav-subtitle">Producer/consumer DAG</span></span>
+            </a>
+            <a href="/command" class="nav-item {% if page == 'command' %}active{% endif %}">
+                <span class="nav-icon">{{ icon("compass") }}</span>
+                <span class="nav-text"><span class="nav-title">Command Centre</span><span class="nav-subtitle">One-off scripts &amp; rebuilds</span></span>
+            </a>
+            <a href="/system" class="nav-item {% if page == 'system' %}active{% endif %}">
+                <span class="nav-icon">{{ icon("zap") }}</span>
+                <span class="nav-text"><span class="nav-title">System</span><span class="nav-subtitle">Health, freshness, alerts</span></span>
+            </a>
+            <a href="/sql" class="nav-item {% if page == 'sql' %}active{% endif %}">
+                <span class="nav-icon">{{ icon("terminal") }}</span>
+                <span class="nav-text"><span class="nav-title">SQL Console</span><span class="nav-subtitle">Ad-hoc queries</span></span>
+            </a>
+        </div>
     </nav>
 
     <!-- Mobile Bottom Tab Bar -->

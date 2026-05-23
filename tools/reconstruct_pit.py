@@ -786,11 +786,13 @@ def pit_growth_fundamentals(stocks, qi_pit):
 
 
 def pit_consensus(stocks, fh_pit):
-    """PT revision YoY, EPS revision YoY, combined consensus signal.
+    """EPS revision YoY + combined consensus signal.
 
-    Uses forecast_history.{value, change} where metric IN ('price', 'eps').
-    For each (sid, metric): find latest snapshot with date <= eval_date, then
-    find the snapshot ~12 months prior; YoY = (latest/prior − 1).
+    `pt_revision_yoy` was DROPPED 2026-05-23 — `forecast_history.metric='price'`
+    is current-close masquerading as PT, so its YoY = 1-year price return, not
+    PT revision. The combined signal is now eps-revision only until the
+    `analyst_consensus_snapshots` monthly history accumulates ≥12 months
+    (calendar: 2027-05). See memory `forecast_history_price_contaminated`.
     """
     if fh_pit.empty:
         return pd.DataFrame(columns=["sid", "pt_revision_yoy", "eps_revision_yoy", "consensus_signal_combined"])
@@ -826,19 +828,10 @@ def pit_consensus(stocks, fh_pit):
 
     rows = []
     for sid in stocks["sid"]:
-        row = {"sid": sid}
-        pt_yoy = _yoy(fh_by_sid_metric.get((sid, "price")))
+        row = {"sid": sid, "pt_revision_yoy": None}  # always NULL; data source contaminated
         eps_yoy = _yoy(fh_by_sid_metric.get((sid, "eps")))
-        if pt_yoy is not None:
-            row["pt_revision_yoy"] = pt_yoy
         if eps_yoy is not None:
             row["eps_revision_yoy"] = eps_yoy
-        # Combined: mean when both available, else single
-        if pt_yoy is not None and eps_yoy is not None:
-            row["consensus_signal_combined"] = round((pt_yoy + eps_yoy) / 2, 2)
-        elif pt_yoy is not None:
-            row["consensus_signal_combined"] = pt_yoy
-        elif eps_yoy is not None:
             row["consensus_signal_combined"] = eps_yoy
         rows.append(row)
     return pd.DataFrame(rows)

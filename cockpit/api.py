@@ -101,26 +101,86 @@ def get_stock_price_metrics(sid):
 
 @_ttl_cache(60)
 def get_analyst_consensus(sid):
-    """A2: Price target, analyst count, buy%, growth from analyst_consensus."""
+    """A2: Price target, analyst count, buy%, growth from analyst_consensus.
+
+    Includes Tier-1 extended yfinance fields (added 2026-05-23): median PT,
+    high/low range, rating mix counts, qualitative recommendation key.
+    """
     row = read_sql(
-        "SELECT price_target, total_analysts, buy_pct, eps_growth_pct, "
-        "revenue_growth_pct, forward_eps, fetched_at "
+        "SELECT price_target, price_target_median, price_target_high, price_target_low, "
+        "total_analysts, buy_pct, eps_growth_pct, revenue_growth_pct, forward_eps, "
+        "recommendation_key, recommendation_mean, "
+        "n_strong_buy, n_buy, n_hold, n_sell, n_strong_sell, "
+        "pt_source, next_earnings_date, rating_mix_history, "
+        "price_target_prev, price_target_changed_at, fetched_at "
         "FROM analyst_consensus WHERE sid = ?",
         params=[sid],
     )
     if row.empty:
         return {}
     r = row.iloc[0].to_dict()
-    # Compute upside vs current price
+
+    # PT-freshness derived fields (added 2026-05-23)
+    import json as _json
+    from datetime import date as _date_, datetime as _dt_
+    today = _date_.today()
+
+    # 1. Next earnings days delta
+    if r.get("next_earnings_date"):
+        try:
+            ne = _dt_.fromisoformat(r["next_earnings_date"]).date()
+            r["days_to_earnings"] = (ne - today).days   # positive=future, negative=past
+        except Exception:
+            pass
+
+    # 2. PT change recency
+    if r.get("price_target_changed_at") and r.get("price_target_prev"):
+        try:
+            chg_dt = _dt_.fromisoformat(r["price_target_changed_at"][:10]).date()
+            r["days_since_pt_change"] = (today - chg_dt).days
+            prev_pt = float(r["price_target_prev"])
+            if prev_pt > 0 and r.get("price_target"):
+                r["pt_change_pct"] = round((r["price_target"] / prev_pt - 1) * 100, 1)
+        except Exception:
+            pass
+
+    # 3. Rating-mix trend (now vs ~3mo ago)
+    if r.get("rating_mix_history"):
+        try:
+            hist = _json.loads(r["rating_mix_history"])
+            if len(hist) >= 2:
+                # First entry is oldest, last is newest
+                def _bullish_pct(row):
+                    _, sb, b, h, s, ss = row
+                    tot = sb + b + h + s + ss
+                    return ((sb + b) / tot * 100) if tot else None
+                pct_old = _bullish_pct(hist[0])
+                pct_new = _bullish_pct(hist[-1])
+                if pct_old is not None and pct_new is not None:
+                    r["bullish_pct_now"]    = round(pct_new, 0)
+                    r["bullish_pct_old"]    = round(pct_old, 0)
+                    r["bullish_pct_delta"]  = round(pct_new - pct_old, 0)
+                    r["bullish_old_period"] = hist[0][0]   # e.g. '-3m'
+            r["rating_mix_periods"] = hist     # parsed for template
+        except Exception:
+            pass
+    # Compute upside vs current price (use median when available — robust to outliers)
     price = read_sql(
         "SELECT close FROM stock_prices WHERE sid = ? ORDER BY date DESC LIMIT 1",
         params=[sid],
     )
-    if not price.empty and price.iloc[0]["close"] and r.get("price_target"):
+    if not price.empty and price.iloc[0]["close"]:
         cmp = price.iloc[0]["close"]
         if cmp > 0:
-            r["pt_upside_pct"] = round((r["price_target"] / cmp - 1) * 100, 1)
             r["current_price"] = round(cmp, 2)
+            if r.get("price_target"):
+                r["pt_upside_pct"] = round((r["price_target"] / cmp - 1) * 100, 1)
+            if r.get("price_target_median"):
+                r["pt_upside_median_pct"] = round((r["price_target_median"] / cmp - 1) * 100, 1)
+            if r.get("price_target_high"):
+                r["pt_upside_high_pct"] = round((r["price_target_high"] / cmp - 1) * 100, 1)
+            if r.get("price_target_low"):
+                r["pt_upside_low_pct"] = round((r["price_target_low"] / cmp - 1) * 100, 1)
     return r
 
 

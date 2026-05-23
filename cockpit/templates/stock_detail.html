@@ -121,20 +121,11 @@
             </span>
             {% endif %}
         </span>
-        <div style="display: flex; gap: 10px; align-items: center;">
-            {% if dos.get("target_price") %}
-            <span style="font-size: 13px; color: var(--green);">
-                {{ dos.get("target_horizon_months", 12) }}-mo Target: <span class="mono">&#8377;{{ dos.target_price }}</span>
-                {% if pm.get("close_price") and pm.close_price > 0 %}
-                  {% set upside = ((dos.target_price / pm.close_price) - 1) * 100 %}
-                  <span style="color: var(--text-muted); font-size: 11px;">({{ "%+.1f"|format(upside) }}%)</span>
-                {% endif %}
-            </span>
-            {% endif %}
-            {% if dos.get("stop_loss_price") or dos.get("stop_loss") %}
-            <span style="font-size: 13px; color: var(--red);">Stop: <span class="mono">&#8377;{{ dos.get("stop_loss_price") or dos.get("stop_loss") }}</span></span>
-            {% endif %}
-        </div>
+        {# 2026-05-23: AI-generated target_price / stop_loss removed from header.
+           The LLM was hallucinating PTs that contradicted the sell-side consensus
+           (HALC: AI said ₹1320 / +19% when actual aggregate was ₹1015 / -8.5%).
+           PT data now lives ONLY in the Analyst Snapshot card on the right —
+           sourced deterministically from yfinance. See ADR 0020. #}
     </div>
     <div style="font-size: 14px; color: var(--text-primary); line-height: 1.6; margin-bottom: 12px;">{{ dos.thesis }}</div>
     {% if dos.get("entry_strategy") %}
@@ -228,9 +219,9 @@
             {# Sub-components per signal #}
             {% if key == 'consensus_signal' %}
             <div class="signal-subcomp">
+                {# pt_revision_1yr removed 2026-05-23 — was contaminated 1yr return, not PT revision. See ADR 0020. #}
                 {% if s.get('pt_upside') is not none %}<div><span class="label">PT Upside:</span> <span class="val">{{ "%+.1f"|format(s.pt_upside) }}%</span></div>{% endif %}
                 {% if s.get('eps_growth') is not none %}<div><span class="label">EPS Growth:</span> <span class="val">{{ "%+.1f"|format(s.eps_growth) }}%</span></div>{% endif %}
-                {% if s.get('pt_revision_1yr') is not none %}<div><span class="label">PT Revision:</span> <span class="val">{{ "%+.1f"|format(s.pt_revision_1yr) }}%</span></div>{% endif %}
                 {% if s.get('revenue_growth') is not none %}<div><span class="label">Rev Growth:</span> <span class="val">{{ "%+.1f"|format(s.revenue_growth) }}%</span></div>{% endif %}
             </div>
             {% elif key == 'promoter_signal' %}
@@ -280,49 +271,198 @@
 
 {# RIGHT: Analyst summary + Regulatory + Forensic snapshot #}
 <div>
-    {# Analyst Consensus snapshot — hides the misleading price_target field when
-       it degenerates to current price (≥95% of universe today; root cause is
-       that we scrape Tickertape's forecastsHistory.price endpoint which returns
-       historical close prices, not forward PTs. See HANDOFF 2026-05-22). #}
-    {% if ac %}
-    {% set pt_suspect = ac.get("price_target") and pm.get("close_price") and (ac.price_target - pm.close_price)|abs < 1.0 %}
+    {# Sell-side analyst consensus. As of 2026-05-23 sourced ONLY from yfinance
+       — Tickertape forecast_history.price was contaminated (last-close masquerading
+       as PT). The AI thesis target was removed for the same reason (hallucinated
+       numbers contradicting deterministic data). See ADR 0020. #}
+    {% if ac and ac.get("price_target") %}
+    {% set fetched_short = (ac.get("fetched_at") or "")[:10] %}
+    {% set fetched_today = fetched_short == today_iso %}
     <div class="card" style="margin-bottom: 16px;">
-        <div class="section-title">Analyst Snapshot</div>
-        <div class="section-desc">
-            Sell-side analyst aggregate. <em>Distinct from the AI thesis target above.</em>
+        <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 4px;">
+            <span class="section-title" style="margin-bottom: 0;">Sell-side Price Target</span>
+            <span style="font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;"
+                  title="Date is when WE last refreshed the aggregate from yfinance — NOT when analysts last revised. yfinance doesn't expose per-analyst revision dates for Indian equities. Individual broker PTs may be days to months old.">
+                {{ ac.get("pt_source") or "yfinance" }} · refreshed {{ "today" if fetched_today else fetched_short }} ⓘ
+            </span>
         </div>
-        {% if ac.get("price_target") and not pt_suspect %}
-        <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 12px;">
-            <span style="font-size: 12px; color: var(--text-secondary);">Consensus Price Target</span>
+        <div class="section-desc">Aggregate of analyst 12-mo targets covering this stock. Individual analyst revision dates not exposed by source.</div>
+
+        {# Headline PT (median preferred, mean fallback) + upside #}
+        {% set headline_pt = ac.get("price_target_median") or ac.get("price_target") %}
+        {% set headline_upside = ac.get("pt_upside_median_pct") if ac.get("price_target_median") else ac.get("pt_upside_pct") %}
+        {% set headline_label = "Median" if ac.get("price_target_median") else "Mean" %}
+        <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px;">
             <div>
-                <span class="mono" style="font-size: 22px; font-weight: 700;">&#8377;{{ "%.0f"|format(ac.price_target) }}</span>
-                {% if ac.get("pt_upside_pct") is not none %}
-                <span class="mono {% if ac.pt_upside_pct > 0 %}score-green{% else %}score-red{% endif %}" style="font-size: 14px; margin-left: 6px;">
-                    ({{ "%+.1f"|format(ac.pt_upside_pct) }}%)
+                <span class="mono" style="font-size: 24px; font-weight: 700;">&#8377;{{ "%.0f"|format(headline_pt) }}</span>
+                {% if headline_upside is not none %}
+                <span class="mono {% if headline_upside > 0 %}score-green{% else %}score-red{% endif %}" style="font-size: 15px; margin-left: 6px; font-weight: 600;">
+                    ({{ "%+.1f"|format(headline_upside) }}%)
+                </span>
+                {% endif %}
+                <span style="font-size: 10px; color: var(--text-muted); margin-left: 6px;">{{ headline_label }} of {{ ac.get("total_analysts")|int if ac.get("total_analysts") else "?" }}</span>
+            </div>
+        </div>
+
+        {# Freshness strip — next earnings + PT change recency. Both are proxies
+           because yfinance doesn't expose per-analyst revision timestamps. #}
+        {% set d2e = ac.get("days_to_earnings") %}
+        {% set dpt = ac.get("days_since_pt_change") %}
+        {% if d2e is not none or dpt is not none %}
+        <div style="display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; font-size: 11px;">
+            {% if d2e is not none %}
+            <span style="color: var(--text-muted);" title="Analysts typically revise PTs within 10 days of earnings. Proximity = freshness hint.">
+                Next earnings:
+                {% if d2e > 0 %}
+                    <span style="color: var(--text-secondary); font-weight: 600;">in {{ d2e }}d</span> ({{ ac.next_earnings_date }})
+                {% elif d2e == 0 %}
+                    <span style="color: var(--green); font-weight: 600;">today</span>
+                {% else %}
+                    <span style="color: var(--text-secondary); font-weight: 600;">{{ -d2e }}d ago</span> ({{ ac.next_earnings_date }})
+                {% endif %}
+            </span>
+            {% endif %}
+            {% if dpt is not none and dpt <= 30 and ac.get("pt_change_pct") is not none %}
+            <span style="color: var(--text-muted);" title="Our own change-detection: when the yfinance aggregate moves >0.5% between fetches, we record the prior value and timestamp.">
+                PT moved
+                <span class="mono {% if ac.pt_change_pct > 0 %}score-green{% else %}score-red{% endif %}" style="font-weight: 600;">{{ "%+.1f"|format(ac.pt_change_pct) }}%</span>
+                {% if dpt == 0 %}today{% elif dpt == 1 %}yesterday{% else %}{{ dpt }}d ago{% endif %}
+            </span>
+            {% endif %}
+        </div>
+        {% else %}
+        <div style="margin-bottom: 14px;"></div>
+        {% endif %}
+
+        {# Range bar — low / median / high (only when high & low present) #}
+        {% if ac.get("price_target_high") and ac.get("price_target_low") and ac.get("current_price") %}
+        {% set lo = ac.price_target_low %}
+        {% set hi = ac.price_target_high %}
+        {% set cp = ac.current_price %}
+        {% set md = ac.get("price_target_median") or ac.get("price_target") %}
+        {% set range_min = [lo, cp]|min %}
+        {% set range_max = [hi, cp]|max %}
+        {% set span = (range_max - range_min) if (range_max - range_min) > 0 else 1 %}
+        {% set md_pos = ((md - range_min) / span * 100) %}
+        {% set cp_pos = ((cp - range_min) / span * 100) %}
+        <div style="margin-bottom: 14px;">
+            <div style="display: flex; justify-content: space-between; font-size: 10px; color: var(--text-muted); margin-bottom: 4px;">
+                <span>Low &#8377;{{ "%.0f"|format(lo) }}</span>
+                <span>High &#8377;{{ "%.0f"|format(hi) }}</span>
+            </div>
+            <div style="position: relative; height: 8px; border-radius: 4px; background: linear-gradient(to right, var(--red), var(--amber), var(--green)); overflow: visible;">
+                {# Current price marker (white) #}
+                <div style="position: absolute; left: {{ cp_pos }}%; top: -4px; transform: translateX(-50%); width: 3px; height: 16px; background: var(--text-primary); border-radius: 1px;" title="Current ₹{{ '%.0f'|format(cp) }}"></div>
+                {# Median target marker (dark dot) #}
+                <div style="position: absolute; left: {{ md_pos }}%; top: -3px; transform: translateX(-50%); width: 14px; height: 14px; border-radius: 50%; background: white; border: 2px solid var(--accent);" title="Median target ₹{{ '%.0f'|format(md) }}"></div>
+            </div>
+            <div style="display: flex; justify-content: space-between; font-size: 10px; color: var(--text-muted); margin-top: 5px;">
+                <span>Now &#8377;{{ "%.0f"|format(cp) }}</span>
+                <span>Target &#8377;{{ "%.0f"|format(md) }}</span>
+            </div>
+        </div>
+        {% endif %}
+
+        {# Rating mix bar (yfinance .recommendations latest period) #}
+        {% set sb = ac.get("n_strong_buy") or 0 %}
+        {% set bb = ac.get("n_buy") or 0 %}
+        {% set hh = ac.get("n_hold") or 0 %}
+        {% set ss = ac.get("n_sell") or 0 %}
+        {% set sss = ac.get("n_strong_sell") or 0 %}
+        {% set tot = sb + bb + hh + ss + sss %}
+        {% if tot > 0 %}
+        <div style="margin-bottom: 12px;">
+            <div style="display: flex; justify-content: space-between; align-items: baseline; font-size: 11px; color: var(--text-secondary); margin-bottom: 5px;">
+                <span>Rating mix</span>
+                {% if ac.get("recommendation_key") %}
+                <span style="text-transform: capitalize; font-weight: 600;
+                    {% if 'buy' in ac.recommendation_key %}color: var(--green);
+                    {% elif 'sell' in ac.recommendation_key %}color: var(--red);
+                    {% else %}color: var(--amber);{% endif %}">
+                    {{ ac.recommendation_key|replace('_', ' ') }}
                 </span>
                 {% endif %}
             </div>
-        </div>
-        {% elif pt_suspect %}
-        <div style="padding: 10px 12px; border-radius: 8px; background: rgba(245, 158, 11, 0.1); border-left: 3px solid var(--amber); margin-bottom: 12px; font-size: 12px; color: var(--text-secondary);">
-            Consensus PT data unavailable (source feed returns price history rather than forward targets — under investigation).
+            <div style="display: flex; height: 8px; border-radius: 4px; overflow: hidden;">
+                {% if sb %}<div style="width: {{ sb / tot * 100 }}%; background: var(--green); box-shadow: inset 0 0 0 1px rgba(0,0,0,0.2);" title="Strong Buy: {{ sb }}"></div>{% endif %}
+                {% if bb %}<div style="width: {{ bb / tot * 100 }}%; background: rgba(34, 197, 94, 0.65);" title="Buy: {{ bb }}"></div>{% endif %}
+                {% if hh %}<div style="width: {{ hh / tot * 100 }}%; background: var(--amber);" title="Hold: {{ hh }}"></div>{% endif %}
+                {% if ss %}<div style="width: {{ ss / tot * 100 }}%; background: rgba(239, 68, 68, 0.65);" title="Sell: {{ ss }}"></div>{% endif %}
+                {% if sss %}<div style="width: {{ sss / tot * 100 }}%; background: var(--red); box-shadow: inset 0 0 0 1px rgba(0,0,0,0.2);" title="Strong Sell: {{ sss }}"></div>{% endif %}
+            </div>
+            <div style="display: flex; justify-content: space-between; font-size: 10px; color: var(--text-muted); margin-top: 4px;">
+                <span>{{ sb }} SB · {{ bb }} B · {{ hh }} H · {{ ss }} S · {{ sss }} SS</span>
+                <span>{{ tot }} total</span>
+            </div>
+
+            {# 4-period rating-mix trend — shows how mix has shifted vs ~3mo ago #}
+            {% if ac.get("rating_mix_periods") and ac.rating_mix_periods|length >= 2 %}
+            <div style="margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--border);">
+                <div style="display: flex; justify-content: space-between; align-items: center; font-size: 10px; color: var(--text-muted); margin-bottom: 6px;">
+                    <span>4-month trend</span>
+                    {% if ac.get("bullish_pct_now") is not none and ac.get("bullish_pct_old") is not none %}
+                    <span>
+                        Bullish:
+                        <span style="color: var(--text-secondary); font-weight: 600;">{{ ac.bullish_pct_now|int }}%</span>
+                        vs <span>{{ ac.bullish_pct_old|int }}%</span> ({{ ac.bullish_old_period }})
+                        {% if ac.bullish_pct_delta and ac.bullish_pct_delta > 0 %}
+                            <span style="color: var(--green); font-weight: 600;">↑{{ ac.bullish_pct_delta|int }}</span>
+                        {% elif ac.bullish_pct_delta and ac.bullish_pct_delta < 0 %}
+                            <span style="color: var(--red); font-weight: 600;">↓{{ (-ac.bullish_pct_delta)|int }}</span>
+                        {% else %}
+                            <span style="color: var(--text-muted);">→</span>
+                        {% endif %}
+                    </span>
+                    {% endif %}
+                </div>
+                <div style="display: flex; gap: 4px; align-items: end; height: 32px;">
+                    {% for period_row in ac.rating_mix_periods %}
+                    {% set p_label = period_row[0] %}
+                    {% set p_sb = period_row[1] %}
+                    {% set p_b  = period_row[2] %}
+                    {% set p_h  = period_row[3] %}
+                    {% set p_s  = period_row[4] %}
+                    {% set p_ss = period_row[5] %}
+                    {% set p_tot = p_sb + p_b + p_h + p_s + p_ss %}
+                    {% set label_friendly = "now" if p_label == "0m" else (p_label|replace("-", "") ~ " ago") %}
+                    <div style="flex: 1; display: flex; flex-direction: column; align-items: stretch; gap: 2px;" title="{{ label_friendly }}: {{ p_sb }} SB · {{ p_b }} B · {{ p_h }} H · {{ p_s }} S · {{ p_ss }} SS ({{ p_tot }} total)">
+                        {% if p_tot > 0 %}
+                        <div style="display: flex; height: 24px; border-radius: 3px; overflow: hidden;">
+                            {% if p_sb %}<div style="width: {{ p_sb / p_tot * 100 }}%; background: var(--green); box-shadow: inset 0 0 0 1px rgba(0,0,0,0.2);"></div>{% endif %}
+                            {% if p_b %}<div style="width: {{ p_b / p_tot * 100 }}%; background: rgba(34, 197, 94, 0.65);"></div>{% endif %}
+                            {% if p_h %}<div style="width: {{ p_h / p_tot * 100 }}%; background: var(--amber);"></div>{% endif %}
+                            {% if p_s %}<div style="width: {{ p_s / p_tot * 100 }}%; background: rgba(239, 68, 68, 0.65);"></div>{% endif %}
+                            {% if p_ss %}<div style="width: {{ p_ss / p_tot * 100 }}%; background: var(--red); box-shadow: inset 0 0 0 1px rgba(0,0,0,0.2);"></div>{% endif %}
+                        </div>
+                        {% else %}
+                        <div style="height: 24px; border-radius: 3px; background: var(--border);"></div>
+                        {% endif %}
+                        <div style="font-size: 9px; color: var(--text-muted); text-align: center;">{{ label_friendly }}</div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endif %}
         </div>
         {% endif %}
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
-            {% if ac.get("total_analysts") is not none %}
-            <div style="padding: 10px; border-radius: 8px; background: var(--bg-primary);">
-                <div style="font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Analysts</div>
-                <div class="mono" style="font-size: 18px; font-weight: 700;">{{ ac.total_analysts|int }}</div>
-            </div>
-            {% endif %}
-            {% if ac.get("buy_pct") is not none %}
-            <div style="padding: 10px; border-radius: 8px; background: var(--bg-primary);">
-                <div style="font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Buy %</div>
-                <div class="mono score-green" style="font-size: 18px; font-weight: 700;">{{ "%.0f"|format(ac.buy_pct) }}%</div>
-            </div>
-            {% endif %}
-        </div>
+
         <div style="margin-top: 10px; font-size: 11px; color: var(--text-muted); text-align: center;">See <span style="color: var(--accent); cursor: pointer;" @click="tab = 'consensus'; loaded.consensus = true; $nextTick(() => initConsensusCharts())">Consensus tab</span> for full breakdown</div>
+    </div>
+    {% elif ac %}
+    {# Stock has an analyst_consensus row but no price_target — partial coverage #}
+    <div class="card" style="margin-bottom: 16px;">
+        <div class="section-title">Sell-side Price Target</div>
+        <div style="padding: 10px 12px; border-radius: 8px; background: rgba(245, 158, 11, 0.08); border-left: 3px solid var(--amber); font-size: 12px; color: var(--text-secondary);">
+            No analyst price target available from yfinance for this stock. This is common for SMALL caps where no sell-side broker publishes targets.
+        </div>
+    </div>
+    {% else %}
+    {# Stock has no analyst_consensus row at all #}
+    <div class="card" style="margin-bottom: 16px;">
+        <div class="section-title">Sell-side Price Target</div>
+        <div style="padding: 10px 12px; border-radius: 8px; background: rgba(107, 114, 128, 0.1); border-left: 3px solid var(--text-muted); font-size: 12px; color: var(--text-secondary);">
+            No analyst coverage for this stock.
+        </div>
     </div>
     {% endif %}
 

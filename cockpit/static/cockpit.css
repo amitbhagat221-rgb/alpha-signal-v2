@@ -74,7 +74,7 @@ body {
 
 /* Left Rail Navigation */
 .left-rail {
-    width: 64px;
+    width: 232px;
     min-height: 100vh;
     background: rgba(18, 18, 26, 0.85);
     backdrop-filter: blur(12px);
@@ -86,15 +86,27 @@ body {
     z-index: 50;
     display: flex;
     flex-direction: column;
+    align-items: stretch;
+    padding: 18px 12px 24px;
+    gap: 4px;
+    overflow-y: auto;
+}
+
+.brand-row {
+    display: flex;
     align-items: center;
-    padding-top: 16px;
-    gap: 6px;
+    gap: 10px;
+    padding: 4px 6px 14px;
+    margin-bottom: 4px;
+    border-bottom: 1px solid var(--border);
+    text-decoration: none;
+    color: inherit;
 }
 
 .brand-mark {
-    width: 40px;
-    height: 40px;
-    margin-bottom: 12px;
+    width: 36px;
+    height: 36px;
+    flex-shrink: 0;
     border-radius: 10px;
     display: flex;
     align-items: center;
@@ -104,50 +116,99 @@ body {
     box-shadow: inset 0 0 0 1px rgba(139, 92, 246, 0.25);
 }
 
+.brand-text {
+    display: flex;
+    flex-direction: column;
+    line-height: 1.15;
+    min-width: 0;
+}
+
+.brand-title {
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    font-weight: 700;
+    font-size: 14px;
+    color: var(--text-primary);
+    letter-spacing: -0.01em;
+}
+
+.brand-subtitle {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-top: 2px;
+}
+
+.nav-section {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin-top: 12px;
+}
+
+.nav-section-label {
+    font-size: 10.5px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-muted);
+    opacity: 0.7;
+    padding: 0 10px;
+    margin-bottom: 6px;
+}
+
 .nav-item {
     position: relative;
-    width: 44px;
-    height: 44px;
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    padding: 8px 10px;
+    border-radius: 10px;
+    color: var(--text-muted);
+    transition: color var(--t-fast) var(--ease-out),
+                background var(--t-fast) var(--ease-out);
+    text-decoration: none;
+    min-height: 44px;
+}
+
+.nav-icon {
+    flex-shrink: 0;
     display: flex;
     align-items: center;
     justify-content: center;
-    border-radius: 12px;
+    width: 22px;
+    height: 22px;
+    color: inherit;
+}
+
+.nav-text {
+    display: flex;
+    flex-direction: column;
+    line-height: 1.2;
+    min-width: 0;
+}
+
+.nav-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary);
+    letter-spacing: -0.005em;
+}
+
+.nav-subtitle {
+    font-size: 11px;
     color: var(--text-muted);
-    transition: color var(--t-fast) var(--ease-out),
-                background var(--t-fast) var(--ease-out),
-                transform var(--t-fast) var(--ease-out);
-    text-decoration: none;
+    margin-top: 2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .nav-item:hover {
     background: var(--bg-card-hover);
     color: var(--text-primary);
-    transform: translateY(-1px);
 }
 
-.nav-item:hover::after {
-    content: attr(title);
-    position: absolute;
-    left: calc(100% + 10px);
-    top: 50%;
-    transform: translateY(-50%);
-    background: var(--bg-card);
-    border: 1px solid var(--border-accent);
-    color: var(--text-primary);
-    padding: 5px 11px;
-    border-radius: 6px;
-    font-size: 12px;
-    font-weight: 500;
-    white-space: nowrap;
-    pointer-events: none;
-    z-index: 60;
-    box-shadow: var(--shadow-md);
-    animation: tipIn 140ms var(--ease-out) both;
-}
-
-@keyframes tipIn {
-    from { opacity: 0; transform: translate(-4px, -50%); }
-    to   { opacity: 1; transform: translate(0, -50%); }
+.nav-item:hover .nav-subtitle {
+    color: var(--text-secondary);
 }
 
 .nav-item.active {
@@ -156,21 +217,29 @@ body {
     box-shadow: inset 0 0 0 1px rgba(139, 92, 246, 0.35);
 }
 
+.nav-item.active .nav-title {
+    color: var(--accent);
+}
+
+.nav-item.active .nav-subtitle {
+    color: var(--text-secondary);
+}
+
 .nav-item.active::before {
     content: "";
     position: absolute;
-    left: -10px;
+    left: -12px;
     top: 50%;
     transform: translateY(-50%);
     width: 3px;
-    height: 22px;
+    height: 24px;
     border-radius: 0 3px 3px 0;
     background: var(--accent);
     box-shadow: 0 0 12px var(--accent-glow);
 }
 
 .main-content {
-    margin-left: 64px;
+    margin-left: 232px;
     padding: 24px 32px;
     max-width: 1400px;
 }

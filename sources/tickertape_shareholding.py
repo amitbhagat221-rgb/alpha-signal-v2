@@ -57,7 +57,13 @@ def _get_client():
 
 
 def _normalise(value):
-    """Coerce pandas/numpy types to plain Python so sqlite3 doesn't trip on numpy scalars."""
+    """Coerce pandas/numpy types to plain Python so sqlite3 doesn't trip on numpy scalars.
+
+    Tickertape derives `data_othPctT` as `100 - sum(other categories)`, which
+    rounds to tiny negative floats like `-3.5e-15`. Snap values within float
+    epsilon of [0, 100] to the boundary so the column CHECK constraint passes
+    while still surfacing genuinely out-of-range values as failures.
+    """
     if value is None:
         return None
     try:
@@ -66,9 +72,14 @@ def _normalise(value):
     except (TypeError, ValueError):
         pass
     try:
-        return float(value)
+        v = float(value)
     except (TypeError, ValueError):
         return None
+    if -1e-6 <= v < 0:
+        return 0.0
+    if 100 < v <= 100 + 1e-6:
+        return 100.0
+    return v
 
 
 def compute(limit=None, dry_run=False):

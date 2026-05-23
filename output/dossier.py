@@ -82,8 +82,9 @@ def _scan_for_numbers(text):
 def _validate_dossier(dossier):
     """Scan narrative fields for forbidden numbers.
 
-    Returns dict { ok: bool, violations: [{field, snippet, kind}], structured_ok: bool }.
-    structured_ok = target_price and stop_loss are integers (not stringly numbers).
+    Returns dict { ok: bool, violations: [{field, snippet, kind}], leaked_pt: bool }.
+    leaked_pt = LLM sneaked a target_price or stop_loss into the response despite
+    the prompt rule (2026-05-23: now a violation, not a requirement).
     """
     violations = []
     for field in _NARRATIVE_FIELDS:
@@ -98,14 +99,19 @@ def _validate_dossier(dossier):
             for snippet, kind in _scan_for_numbers(text):
                 violations.append({"field": field, "snippet": snippet, "kind": kind})
 
-    structured_ok = (
-        isinstance(dossier.get("target_price"), (int, float)) and
-        isinstance(dossier.get("stop_loss"), (int, float))
+    # Flag (don't fail-hard) if LLM leaked a target/stop despite the new rule.
+    leaked_pt = (
+        dossier.get("target_price") is not None or
+        dossier.get("stop_loss") is not None or
+        dossier.get("stop_loss_price") is not None
     )
+    if leaked_pt:
+        violations.append({"field": "structured", "snippet": "target_price or stop_loss present", "kind": "leaked_pt"})
+
     return {
-        "ok": len(violations) == 0 and structured_ok,
+        "ok": len(violations) == 0,
         "violations": violations,
-        "structured_ok": structured_ok,
+        "leaked_pt": leaked_pt,
         "validated_at": datetime.now().isoformat(timespec="seconds"),
     }
 
@@ -214,6 +220,12 @@ HARD RULES — violations will be rejected by the validator:
 
 5. Do not anchor narrative to the current price or "downside from here".
    Price moves; the dossier is rendered later when math will be wrong.
+
+6. DO NOT provide target_price, stop_loss, or any rupee-amount field. The
+   LLM-generated numbers hallucinated 2x against actual sell-side consensus
+   (2026-05-22: HALC AI target ₹1320 vs analyst ₹1015). PT data is now
+   rendered ONLY from the deterministic analyst_consensus table in the
+   cockpit. Your job is narrative, not numbers. See ADR 0020.
 ═══════════════════════════════════════════════════════════════════
 
 Respond in JSON with these exact keys:
@@ -224,9 +236,6 @@ Respond in JSON with these exact keys:
 - risks: 2 key risks (NO NUMBERS)
 - conviction: HIGH / MEDIUM / LOW
 - action: BUY / WATCH / AVOID
-- target_price: integer ₹ (number-only field — no string, no percentage)
-- stop_loss: integer ₹ (number-only field — no string, no percentage)
-- target_horizon_months: integer (typically 12)
 
 Be specific to THIS stock. No generic statements."""
 
@@ -311,8 +320,8 @@ def generate(top=5, dry_run=False):
             print(f"  Thesis: {dossier.get('thesis', '?')[:100]}...")
             v = dossier["validation"]
             if not v["ok"]:
-                print(f"  ⚠ VALIDATION FAILED — {len(v['violations'])} number-in-narrative hits, "
-                      f"structured_ok={v['structured_ok']}")
+                print(f"  ⚠ VALIDATION FAILED — {len(v['violations'])} issues, "
+                      f"leaked_pt={v.get('leaked_pt', False)}")
                 for vi in v["violations"][:5]:
                     print(f"     {vi['field']}: '{vi['snippet']}' ({vi['kind']})")
             else:

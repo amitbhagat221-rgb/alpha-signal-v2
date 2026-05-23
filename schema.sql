@@ -163,7 +163,24 @@ CREATE TABLE IF NOT EXISTS analyst_consensus (
     sid             TEXT PRIMARY KEY REFERENCES stocks(sid),
     total_analysts  INTEGER,
     buy_pct         REAL CHECK(buy_pct BETWEEN 0 AND 100),
-    price_target    REAL,
+    price_target    REAL,                              -- mean PT (kept for backward compat)
+    -- Extended yfinance fields (added 2026-05-23 — Tier 1 PT plan):
+    price_target_median REAL,                          -- more robust to outliers
+    price_target_high   REAL,                          -- range top
+    price_target_low    REAL,                          -- range bottom
+    recommendation_key  TEXT,                          -- strong_buy/buy/hold/sell/strong_sell/none
+    recommendation_mean REAL,                          -- 1=strong buy, 5=strong sell
+    n_strong_buy   INTEGER,                            -- latest-period rating mix
+    n_buy          INTEGER,
+    n_hold         INTEGER,
+    n_sell         INTEGER,
+    n_strong_sell  INTEGER,
+    pt_source      TEXT,                               -- 'yfinance' (only viable source as of 2026-05-23)
+    -- PT freshness v2 (added 2026-05-23):
+    next_earnings_date       TEXT,                     -- yyyy-mm-dd; freshness proxy (analysts revise post-earnings)
+    rating_mix_history       TEXT,                     -- JSON: 4-period rating mix [[sb,b,h,s,ss], ...]
+    price_target_prev        REAL,                     -- previous fetch's price_target (for change detection)
+    price_target_changed_at  TEXT,                     -- datetime when we detected PT moved >0.5%
     forward_eps     REAL,
     eps_growth_pct  REAL,
     forward_revenue REAL,

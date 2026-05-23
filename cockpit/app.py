@@ -200,8 +200,10 @@ async def stock_detail(request: Request, sid: str):
     if ey and ey > 0:
         detail["approx_pe"] = round(1 / ey, 1)
 
+    from datetime import date as _date
     return templates.TemplateResponse(request, "stock_detail.html", {
         "stock": detail, "page": "explorer",
+        "today_iso": _date.today().isoformat(),
     })
 
 

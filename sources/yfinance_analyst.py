@@ -36,9 +36,10 @@ Usage:
 """
 
 import argparse
+import json
 import sys
 import time
-from datetime import date as _date, datetime, timedelta
+from datetime import date as _date, datetime, timedelta, timezone
 from pathlib import Path
 
 import pandas as pd
@@ -62,10 +63,16 @@ def _first_business_day(d=None):
 
 
 def _fetch_one(ticker):
-    """Return dict of analyst fields, or None if no coverage."""
+    """Return dict of analyst fields, or None if no coverage.
+
+    Adds rating-mix counts (`n_strong_buy` ... `n_strong_sell`) from
+    `.recommendations` DataFrame's most recent period — used for the
+    cockpit's rating-distribution bar.
+    """
     import yfinance as yf
     try:
-        info = yf.Ticker(f"{ticker}.NS").info
+        tk = yf.Ticker(f"{ticker}.NS")
+        info = tk.info
     except Exception:
         return None
     if not info:
@@ -73,6 +80,54 @@ def _fetch_one(ticker):
     tgt_mean = info.get("targetMeanPrice")
     if tgt_mean is None:
         return None
+    rec_mix = {}
+    rating_mix_history = None
+    try:
+        recs = tk.recommendations
+        if recs is not None and len(recs) > 0:
+            # Most-recent row (period '0m')
+            row = recs.iloc[0]
+            for col in ("strongBuy", "buy", "hold", "sell", "strongSell"):
+                v = row.get(col)
+                if v is not None and not pd.isna(v):
+                    rec_mix[col] = int(v)
+            # Serialize full 4-period history for trend rendering. Compact JSON
+            # array: [[period, sb, b, h, s, ss], ...] in chronological order
+            # (oldest first) so client can render left-to-right.
+            # Period is '0m', '-1m', '-2m', '-3m' — parse the integer for sort.
+            def _period_int(p):
+                try:
+                    return int(str(p).rstrip("m"))
+                except (ValueError, TypeError):
+                    return 0
+            recs_sorted = recs.assign(_p=recs["period"].map(_period_int)).sort_values("_p")
+            history = []
+            for _, r in recs_sorted.iterrows():
+                period = r.get("period")
+                if period is None:
+                    continue
+                history.append([
+                    str(period),
+                    int(r["strongBuy"]) if not pd.isna(r.get("strongBuy")) else 0,
+                    int(r["buy"])       if not pd.isna(r.get("buy"))       else 0,
+                    int(r["hold"])      if not pd.isna(r.get("hold"))      else 0,
+                    int(r["sell"])      if not pd.isna(r.get("sell"))      else 0,
+                    int(r["strongSell"]) if not pd.isna(r.get("strongSell")) else 0,
+                ])
+            if history:
+                rating_mix_history = json.dumps(history, separators=(",", ":"))
+    except Exception:
+        pass
+
+    # Next earnings date (analysts revise PTs within ~10d of earnings → freshness proxy)
+    next_earnings_date = None
+    try:
+        ets = info.get("earningsTimestamp")
+        if ets:
+            next_earnings_date = datetime.fromtimestamp(int(ets), tz=timezone.utc).date().isoformat()
+    except Exception:
+        pass
+
     return {
         "target_mean":         float(tgt_mean) if tgt_mean is not None else None,
         "target_median":       float(info["targetMedianPrice"]) if info.get("targetMedianPrice") is not None else None,
@@ -81,6 +136,13 @@ def _fetch_one(ticker):
         "n_analysts":          int(info["numberOfAnalystOpinions"]) if info.get("numberOfAnalystOpinions") else None,
         "recommendation_key":  info.get("recommendationKey"),
         "recommendation_mean": float(info["recommendationMean"]) if info.get("recommendationMean") is not None else None,
+        "n_strong_buy":        rec_mix.get("strongBuy"),
+        "n_buy":               rec_mix.get("buy"),
+        "n_hold":              rec_mix.get("hold"),
+        "n_sell":              rec_mix.get("sell"),
+        "n_strong_sell":       rec_mix.get("strongSell"),
+        "next_earnings_date":  next_earnings_date,
+        "rating_mix_history":  rating_mix_history,
     }
 
 
@@ -119,6 +181,15 @@ def compute(limit=None, ticker=None, tier=None, snapshot=False, dry_run=False):
     )
     close_map = dict(zip(closes["sid"], closes["close"]))
 
+    # Existing PT map for change detection — if new value differs from old
+    # by >0.5%, we record the prior value and the change timestamp. This is
+    # our own "PT revised <date>" badge since yfinance doesn't expose it.
+    prior = read_sql(
+        "SELECT sid, price_target, price_target_changed_at FROM analyst_consensus"
+    )
+    prior_pt_map     = dict(zip(prior["sid"], prior["price_target"]))
+    prior_changed_at = dict(zip(prior["sid"], prior["price_target_changed_at"]))
+
     t_start = time.time()
     for i, (sid, t, cap_tier) in enumerate(stocks.itertuples(index=False), 1):
         data = _fetch_one(t)
@@ -133,12 +204,38 @@ def compute(limit=None, ticker=None, tier=None, snapshot=False, dry_run=False):
             # Narrow column set so upsert_df only updates these fields,
             # leaving Tickertape-sourced forward_eps / eps_growth_pct /
             # forward_revenue / revenue_growth_pct intact (those are real).
+            # PT change detection — compare new mean PT to prior fetch
+            prior_pt   = prior_pt_map.get(sid)
+            changed_at = prior_changed_at.get(sid)
+            new_pt     = data["target_mean"]
+            pt_prev_to_save = None
+            if (prior_pt is not None and not pd.isna(prior_pt) and prior_pt > 0
+                    and new_pt is not None
+                    and abs(new_pt - prior_pt) / prior_pt > 0.005):
+                # PT moved >0.5% — record prior value + update timestamp
+                pt_prev_to_save = float(prior_pt)
+                changed_at = fetched_at
             consensus_rows.append({
-                "sid":              sid,
-                "total_analysts":   data["n_analysts"],
-                "price_target":     data["target_mean"],
-                "has_analyst_data": 1,
-                "fetched_at":       fetched_at,
+                "sid":                       sid,
+                "total_analysts":            data["n_analysts"],
+                "price_target":              new_pt,
+                "price_target_median":       data["target_median"],
+                "price_target_high":         data["target_high"],
+                "price_target_low":          data["target_low"],
+                "recommendation_key":        data["recommendation_key"],
+                "recommendation_mean":       data["recommendation_mean"],
+                "n_strong_buy":              data["n_strong_buy"],
+                "n_buy":                     data["n_buy"],
+                "n_hold":                    data["n_hold"],
+                "n_sell":                    data["n_sell"],
+                "n_strong_sell":             data["n_strong_sell"],
+                "pt_source":                 SOURCE,
+                "next_earnings_date":        data["next_earnings_date"],
+                "rating_mix_history":        data["rating_mix_history"],
+                "price_target_prev":         pt_prev_to_save if pt_prev_to_save else prior_pt_map.get(sid),
+                "price_target_changed_at":   changed_at,
+                "has_analyst_data":          1,
+                "fetched_at":                fetched_at,
             })
             if snapshot:
                 snapshot_rows.append({

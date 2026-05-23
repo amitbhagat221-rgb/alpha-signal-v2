@@ -138,16 +138,29 @@ CHECKS = [
         "message": "forecast_history.value (metric=price) matches stock_prices.close — not a real PT history",
         "critical_pct": 50,
         "warn_pct": 10,
+        # Strengthened 2026-05-23: original check JOINed on (sid, date) — same date
+        # — and the contamination pattern bypasses it (fh.date=2025-12-27,
+        # sp.date=2026-05-23, but values match because the latest fh.value is
+        # being overwritten with today's lastPrice). Now compares each stock's
+        # LATEST fh.value vs LATEST sp.close regardless of date. If real PTs,
+        # latest fh.value should be +12-25% above latest sp.close (sell-side
+        # optimism). If matches within ₹1, the value is contaminated.
         "sql": """
+            WITH latest_fh AS (
+                SELECT sid, value, MAX(date) AS fh_date
+                FROM forecast_history WHERE metric='price' GROUP BY sid
+            ),
+            latest_sp AS (
+                SELECT sid, close, MAX(date) AS sp_date
+                FROM stock_prices GROUP BY sid
+            )
             SELECT
-                SUM(CASE WHEN ABS(fh.value - sp.close) < 0.5 THEN 1 ELSE 0 END) AS n_bad,
+                SUM(CASE WHEN ABS(lf.value - ls.close) < 1.0 THEN 1 ELSE 0 END) AS n_bad,
                 COUNT(*) AS n_total,
-                (SELECT fh2.sid || '@' || fh2.date || ': fh.value=' || fh2.value || ' / sp.close=' || sp2.close
-                 FROM forecast_history fh2 JOIN stock_prices sp2 ON fh2.sid=sp2.sid AND fh2.date=sp2.date
-                 WHERE fh2.metric='price' AND ABS(fh2.value - sp2.close) < 0.5 LIMIT 1) AS sample
-            FROM forecast_history fh
-            JOIN stock_prices sp ON fh.sid = sp.sid AND fh.date = sp.date
-            WHERE fh.metric = 'price'
+                (SELECT lf2.sid || ': fh.value=' || lf2.value || ' (' || lf2.fh_date || ') / sp.close=' || ls2.close || ' (' || ls2.sp_date || ')'
+                 FROM latest_fh lf2 JOIN latest_sp ls2 ON lf2.sid=ls2.sid
+                 WHERE ABS(lf2.value - ls2.close) < 1.0 LIMIT 1) AS sample
+            FROM latest_fh lf JOIN latest_sp ls ON lf.sid = ls.sid
         """,
     },
 

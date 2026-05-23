@@ -165,8 +165,13 @@ def score_universe(df):
     df["final_score"] = df["base_score"] + df["penalty"]
     df["final_score"] = df["final_score"].clip(lower=0)
 
-    # Rank within tier (1 = best)
-    df["rank"] = df.groupby("cap_tier")["final_score"].rank(ascending=False, method="min").astype("Int64")
+    # Rank within tier (1 = best). Tie-break by sid for a deterministic 1..N
+    # ordering — `method="min"` collapses ties to a shared rank and breaks
+    # `SANITY:DAILY_PICKS_RANK_DUPLICATE` (PK (pick_date, cap_tier, rank)).
+    df = df.sort_values(["cap_tier", "sid"], kind="mergesort").reset_index(drop=True)
+    df["rank"] = df.groupby("cap_tier")["final_score"].rank(
+        ascending=False, method="first", na_option="keep"
+    ).astype("Int64")
 
     return df
 

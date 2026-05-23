@@ -28,12 +28,16 @@ import pandas as pd
 
 from db import read_sql, upsert_df
 
-# Sub-signal weights
-WEIGHTS = {"pt_rev": 0.35, "pt_up": 0.15, "eps": 0.35, "rev": 0.15}
+# Sub-signal weights. `pt_rev` dropped 2026-05-23 — its source
+# (forecast_history.metric='price') was current close masquerading as PT,
+# meaning the YoY computation = 1-year price return, not PT revision. Made
+# up 35% of consensus_signal which is 40% of LARGE final_score → 14% of
+# every LARGE rank was contaminated. Redistributed proportionally; will
+# rebuild from analyst_consensus_snapshots once 12mo accumulates (2027-05).
+WEIGHTS = {"pt_up": 0.23, "eps": 0.54, "rev": 0.23}
 
 # Clipping ranges (before ranking)
 CLIP = {
-    "pt_revision_1yr": (-60, 100),
     "pt_upside": (-50, 150),
     "eps_growth": (-50, 100),
     "revenue_growth": (-30, 80),
@@ -57,11 +61,9 @@ def _load_data():
         "FROM analyst_consensus WHERE has_analyst_data = 1"
     )
 
-    # Forecast history — price targets only
-    fh = read_sql(
-        "SELECT sid, date, value FROM forecast_history "
-        "WHERE metric = 'price' ORDER BY sid, date"
-    )
+    # NOTE: forecast_history removed 2026-05-23. metric='price' was contaminated
+    # (current close labeled as historical PT); eps/revenue forecasts are real
+    # but already covered by analyst_consensus.{eps,revenue}_growth_pct.
 
     # Latest close price per stock
     prices = read_sql(
@@ -71,57 +73,11 @@ def _load_data():
         ")"
     )
 
-    return stocks, consensus, fh, prices
+    return stocks, consensus, prices
 
 
-def _compute_pt_revision(fh):
-    """Compute 1-year PT revision from forecast history."""
-    revisions = {}
-
-    for sid, group in fh.groupby("sid"):
-        g = group.sort_values("date")
-        if len(g) < 2:
-            continue
-
-        latest_date = g.iloc[-1]["date"]
-        latest_val = g.iloc[-1]["value"]
-
-        if pd.isna(latest_val) or latest_val == 0:
-            continue
-
-        # Find entry closest to 1 year prior (±6 month window)
-        target = pd.Timestamp(latest_date) - pd.DateOffset(years=1)
-        window_start = target - pd.DateOffset(months=6)
-        window_end = target + pd.DateOffset(months=6)
-
-        candidates = g[
-            (pd.to_datetime(g["date"]) >= window_start)
-            & (pd.to_datetime(g["date"]) <= window_end)
-            & (g["date"] < latest_date)
-        ]
-
-        if candidates.empty:
-            continue
-
-        # Pick closest to 1-year-ago target
-        candidates = candidates.copy()
-        candidates["dist"] = (pd.to_datetime(candidates["date"]) - target).abs()
-        prev = candidates.sort_values("dist").iloc[0]
-        prev_val = prev["value"]
-
-        if pd.isna(prev_val) or prev_val == 0:
-            continue
-
-        revisions[sid] = ((latest_val - prev_val) / abs(prev_val)) * 100
-
-    return revisions
-
-
-def _compute_scores(stocks, consensus, fh, prices):
+def _compute_scores(stocks, consensus, prices):
     """Compute consensus signal for all stocks."""
-    # PT revision
-    pt_revisions = _compute_pt_revision(fh)
-
     # PT upside — merge consensus PT with latest price
     pt_upside_map = {}
     price_map = prices.set_index("sid")["close"].to_dict()
@@ -139,10 +95,6 @@ def _compute_scores(stocks, consensus, fh, prices):
     rows = []
     for sid in stocks["sid"]:
         row = {"sid": sid, "cap_tier": tier_map.get(sid)}
-
-        # PT revision
-        if sid in pt_revisions:
-            row["pt_revision_1yr"] = pt_revisions[sid]
 
         # PT upside
         if sid in pt_upside_map:
@@ -167,9 +119,9 @@ def _compute_scores(stocks, consensus, fh, prices):
         if col in df.columns:
             df[col + "_clipped"] = df[col].clip(lower=lo, upper=hi)
 
-    # Within-segment percentile ranking (higher = better for all sub-signals)
+    # Within-segment percentile ranking (higher = better for all sub-signals).
+    # pt_rev removed 2026-05-23 (data contamination — see WEIGHTS comment).
     rank_cols = {
-        "pt_rev": "pt_revision_1yr_clipped",
         "pt_up": "pt_upside_clipped",
         "eps": "eps_growth_clipped",
         "rev": "revenue_growth_clipped",
@@ -202,7 +154,9 @@ def _compute_scores(stocks, consensus, fh, prices):
 
     df["consensus_signal"] = signals
 
-    # Output columns matching schema
+    # Output columns matching schema. pt_revision_1yr is now always NULL
+    # (column kept for schema compat; legacy historical rows still hold values).
+    df["pt_revision_1yr"] = None
     out = df[["sid", "pt_upside", "pt_revision_1yr", "eps_growth",
               "revenue_growth", "consensus_signal"]].copy()
     return out
@@ -210,15 +164,15 @@ def _compute_scores(stocks, consensus, fh, prices):
 
 def compute(dry_run=False):
     """Main entry point. Returns row count."""
-    stocks, consensus, fh, prices = _load_data()
-    df = _compute_scores(stocks, consensus, fh, prices)
+    stocks, consensus, prices = _load_data()
+    df = _compute_scores(stocks, consensus, prices)
 
     snapshot = date.today().isoformat()
     df["snapshot_date"] = snapshot
 
     has_signal = df["consensus_signal"].notna().sum()
     print(f"Consensus: {len(df)} stocks, {has_signal} with signal")
-    for col in ["pt_upside", "pt_revision_1yr", "eps_growth", "revenue_growth"]:
+    for col in ["pt_upside", "eps_growth", "revenue_growth"]:
         n = df[col].notna().sum()
         print(f"  {col}: {n} non-null")
     if has_signal > 0:
