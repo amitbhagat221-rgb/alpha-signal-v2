@@ -4,9 +4,9 @@ _Glyphs: ✅ done · ⏳ next/in-progress · 🚫 blocked · 💤 parked · ↔ 
 _Convention: see [ADR 0015](../decisions/0015-track-numbering-and-rename.md) (tracks) + [ADR 0016](../decisions/0016-plan-numbering-fresh-start.md) (plan numbers)._
 
 ## Next 3
-1. ⏳ **Fix `insider_timeline` cockpit endpoint** — only remaining CRITICAL after today's audit. Endpoint audit shows 48/90 (53.3%) sids return empty (sample: ADEL). Likely sid/ticker mismatch in [cockpit/api.py](../../cockpit/api.py) get_insider_timeline. ~30-60min.
-2. ⏳ **Extend historical_backfill to FII/DII Cash Segment** — different SEBI source than the F&O positioning shipped 2026-05-24. Add `backfill_fii_cash()` paralleling `backfill_fii_fno()` in [sources/historical_backfill.py](../../sources/historical_backfill.py); endpoint `https://www.nseindia.com/api/historical/foreignActivity`. ~1hr code + ~30min pull.
-3. ⏳ **Price source fallback layer** — `sources/bse.py` (BSE bhavcopy) + `sources/yfinance_prices.py` registered in [config.py:PIPELINE_STEPS](../../config.py#L218) after `fetch_bhavcopy`, each filling only sids the prior source missed. Covers the 339 still-missing stocks (mostly InvITs, BSE-only, recent IPOs).
+1. ⏳ **Start [plan 0005 Phase A](0005-data-confidence-to-95.md#phase-a--source-eligibility-transparency-75--80)** — source-eligibility transparency. Builds `universe_eligibility` table + per-signal `eligible_universe_sql` + extends pick gate to refuse SIDs the system can't fully evaluate. Highest-leverage step in the 75→95 confidence climb. ~1-2 sessions.
+2. ⏳ **Plan 0005 Phase B — Per-stock integrity validator** — closes the HALC class of bug (LLM narrative contradicts structured field). Block pick promotion on FAIL. ~2 sessions.
+3. ⏳ **Extend historical_backfill to FII/DII Cash Segment** — parallel-able with Phase A/B. Add `backfill_fii_cash()` paralleling `backfill_fii_fno()` in [sources/historical_backfill.py](../../sources/historical_backfill.py); endpoint `https://www.nseindia.com/api/historical/foreignActivity`. ~1hr code + ~30min pull. Feeds Phase D backtest depth.
 
 ## Track 1 — Foundation  ✅ done 2026-05-01
 - 1.1 ✅ v1 audit + rebuild plan
@@ -51,6 +51,7 @@ _Convention: see [ADR 0015](../decisions/0015-track-numbering-and-rename.md) (tr
    - 💤 3.3d Risk decomposition (Barra-style)
 
 ## Side plans
+- ⏳ [0005 Data confidence 75 → 95](0005-data-confidence-to-95.md) — 6-phase plan (A-F), ~10-14 sessions, takes the system from "trust for my picks if I verify outliers" → "trust blind for institutional capital". Phase A is in Next-3.
 - ✅ **Health Center cockpit redesign + 2 CRITICAL fixes** (this session, 2026-05-24 #3) — institutional-grade observability folded into cockpit's `/system` (nav renamed: System → Health Center):
    1. **Fixed CRITICAL: `fetch_shareholding` CHECK constraint regression** — [sources/tickertape_shareholding.py](../../sources/tickertape_shareholding.py) `_normalise()` clamp widened from 1e-6 to 0.05pp (covers all empirical rounding drift) and now drops the column (not the row) for genuinely out-of-range values, logging to `_OUT_OF_RANGE_LOG` with sid+col+date so contamination is surfaced not silent. Also fixed [tools/health_report.py](../../tools/health_report.py) streak query — it was flagging steps as "currently failing N consecutive days" even when the most-recent run had succeeded. Now uses a CTE that requires the latest run for that step to also be FAILED before counting it as broken.
    2. **Fixed CRITICAL: `ANALYST_CONSENSUS_GROWTH_WITHOUT_ANALYSTS`** — gated [signals/consensus.py](../../signals/consensus.py) SELECT on `(total_analysts IS NOT NULL OR price_target IS NOT NULL)` — Tickertape forecast-only rows (model projection, no analyst attribution) never fire `consensus_signal`. Reframed sanity check in [tools/data_sanity.py](../../tools/data_sanity.py) into a forward-looking gate validator `CONSENSUS_SIGNAL_WITHOUT_ANALYST_ATTRIBUTION` (joins `consensus_signals` × `analyst_consensus` for the latest snapshot; provably 0 when the gate holds). Added companion INFO check `ANALYST_ATTRIBUTION_COVERAGE` that tracks yfinance coverage gap (not a leak).
