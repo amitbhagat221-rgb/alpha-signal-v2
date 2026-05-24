@@ -4,8 +4,8 @@ _Glyphs: ✅ done · ⏳ next/in-progress · 🚫 blocked · 💤 parked · ↔ 
 _Convention: see [ADR 0015](../decisions/0015-track-numbering-and-rename.md) (tracks) + [ADR 0016](../decisions/0016-plan-numbering-fresh-start.md) (plan numbers)._
 
 ## Next 3
-1. ⏳ **Plan 0005 Phase C — coverage gap closure (85 → 88)** — BSE bhavcopy fallback (339 missing-price SIDs), yfinance ticker audit (lift 41% → 60% analyst coverage), regulatory feed recovery. 2-3 sessions. With A+B done, this is the leverage step now.
-2. ⏳ **Plan 0005 Phase A.5 (follow-up) — switch pick gate to use `eligible_coverage`** — after a few days of confirming the data is stable. Currently both `weight_coverage` AND `eligible_coverage` populate in `daily_picks`; only `weight_coverage` is used in the gate. ~1hr.
+1. ⏳ **Plan 0005 Phase C remainder** — partial done this session (regulatory feed alive + coverage-regression sanity). Still TODO: BSE bhavcopy fallback for 339 missing-price SIDs (~1 session, greenfield), yfinance ticker audit (most gap is real SMALL-cap coverage gap, low yield), news_articles feed continuity. ~1-2 more sessions.
+2. ⏳ **Re-classify the 1904 new regulatory_events** — Anthropic budget cap suspended classifier; either restart classify_regulatory in a budgeted batch, or accept gap and remove regulatory factor from active production until backfilled. The raw feed is now flowing; only the classified signals are stuck.
 3. ⏳ **Extend historical_backfill to FII/DII Cash Segment** — feeds plan 0005 Phase D. ~1.5hr.
 
 ## Track 1 — Foundation  ✅ done 2026-05-01
@@ -51,7 +51,9 @@ _Convention: see [ADR 0015](../decisions/0015-track-numbering-and-rename.md) (tr
    - 💤 3.3d Risk decomposition (Barra-style)
 
 ## Side plans
-- ⏳ [0005 Data confidence 75 → 95](0005-data-confidence-to-95.md) — **Phase A + B shipped 2026-05-24 session #4** (estimated +10 points to ~85/100). Phase C is in Next-3. See [ADR 0024](../decisions/0024-per-signal-eligibility-and-per-stock-integrity.md).
+- ⏳ [0005 Data confidence 75 → 95](0005-data-confidence-to-95.md) — **A + B + ~30% of C shipped 2026-05-24** (est ~86/100). Remaining C in Next-3.
+   - ✅ C (partial 2026-05-24): regulatory feed recovery (was 44d dark) — root cause: `fetch_regulatory` step was calling `harvest_all` which is a 3-year backfill (180 Google + 870 RBI + 110K PIB IDs), timing out daily. Shipped `sources.regulatory_harvester.harvest_incremental(days=30)` — last 30d Google News only, ~5 min runtime. Wired into PIPELINE_STEPS. Backfilled 1904 new events (table went from 22,121 → 24,025 rows; latest published_at jumped from May 2023 to May 2026). Classifier still budget-capped — see Next-3 #2.
+   - ✅ C (partial 2026-05-24): `ELIGIBILITY_REGRESSION` sanity check in [tools/data_sanity.py](../../tools/data_sanity.py) — compares each signal's eligible count today vs prior snapshot in `universe_eligibility`; fires WARN at 5% drop, CRITICAL at 10%. Catches "harvester silently shrinking universe overnight". Returns 0 today (only 1 snapshot exists); gets teeth tomorrow.
    - ✅ A: per-signal eligibility registry ([eligibility/registry.py](../../eligibility/registry.py)) + `universe_eligibility` table + `tools/refresh_eligibility.py` (cron-wired before screener) + `daily_picks.eligible_coverage` column + cockpit "Universe coverage per signal" section
    - ✅ B: [validators/per_stock_integrity.py](../../validators/per_stock_integrity.py) with 8 cross-source assertions + `daily_picks.integrity_status/reasons` + FAIL gate on `cockpit.api.get_top_picks` (drives morning_brief + action_queue) + cockpit "Per-stock integrity violations" section + new "Picks integrity" pillar tile. **Already paid off**: caught 14 stocks with `consensus_signal != NULL` but `total_analysts = 0` — `signals/consensus.py` gate tightened from `IS NOT NULL` to `> 0`.
 - ✅ **Health Center cockpit redesign + 2 CRITICAL fixes** (this session, 2026-05-24 #3) — institutional-grade observability folded into cockpit's `/system` (nav renamed: System → Health Center):

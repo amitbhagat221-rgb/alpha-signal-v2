@@ -781,6 +781,45 @@ CHECKS = [
             FROM analyst_consensus
         """,
     },
+    # Plan 0005 Phase C item 5: catch a harvester silently shrinking the
+    # universe overnight. Compares each signal's eligible_n today vs prior
+    # snapshot in universe_eligibility; fires if any signal dropped ≥5%
+    # (WARN) or ≥10% (CRITICAL). Returns 0 when there's no prior snapshot
+    # (the cron hasn't run twice yet — false-positive-free by design).
+    {
+        "code": "ELIGIBILITY_REGRESSION",
+        "table": "universe_eligibility",
+        "column": "eligible",
+        "message": "Signal eligible count dropped overnight — source may have regressed",
+        "critical_pct": 10,
+        "warn_pct": 5,
+        "sql": """
+            WITH per_date AS (
+                SELECT signal, snapshot_date, SUM(eligible) AS n_elig
+                FROM universe_eligibility GROUP BY signal, snapshot_date
+            ),
+            ranked AS (
+                SELECT signal, snapshot_date, n_elig,
+                       ROW_NUMBER() OVER (PARTITION BY signal ORDER BY snapshot_date DESC) AS rn
+                FROM per_date
+            ),
+            paired AS (
+                SELECT t.signal,
+                       t.n_elig AS today_n,
+                       y.n_elig AS prior_n,
+                       100.0 * (y.n_elig - t.n_elig) / y.n_elig AS pct_drop
+                FROM ranked t
+                JOIN ranked y ON y.signal = t.signal AND y.rn = 2
+                WHERE t.rn = 1 AND y.n_elig > 0
+            )
+            SELECT
+                COALESCE(MAX(pct_drop), 0) AS n_bad,
+                100 AS n_total,
+                (SELECT signal || ': ' || prior_n || ' → ' || today_n || ' (' || ROUND(pct_drop,1) || '% drop)'
+                 FROM paired ORDER BY pct_drop DESC LIMIT 1) AS sample
+            FROM paired WHERE pct_drop >= 5
+        """,
+    },
 ]
 
 

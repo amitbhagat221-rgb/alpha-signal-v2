@@ -11,6 +11,11 @@ Shipped **plan 0005 Phase A + Phase B fully** including all 5 gaps from my own h
 
 End state: 0 CRITICAL, 12 WARN unchanged. Pipeline runs clean. Self-test 10/10. Confidence estimate now ~85/100 — A and B are FULLY done per the plan's "done when" criteria.
 
+**Then continued into Phase C** — 30% done this session:
+  • **Regulatory feed recovery** — root cause: `fetch_regulatory` pipeline step called `harvest_all` which is a 3-year historical backfill (180 Google + 870 RBI iterations + 110K PIB IDs). Timed out daily, left stale RUNNING rows, never landed new events → table went 44d dark. Shipped `harvest_incremental(days=30)` in [sources/regulatory_harvester.py](sources/regulatory_harvester.py) — last-30d Google News only, ~5min runtime. Wired into config.PIPELINE_STEPS. Manual backfill landed 1904 new events; raw feed went from latest 2023-05 → 2026-05. WARN count 12 → 11.
+  • **`ELIGIBILITY_REGRESSION` sanity check** in [tools/data_sanity.py](tools/data_sanity.py) — compares each signal's eligible count today vs prior snapshot in `universe_eligibility`. Fires WARN at 5% drop, CRITICAL at 10%. Catches "harvester silently shrinking universe overnight" — exactly the bug class Phase C item 5 was designed to prevent. Returns 0 today (need 2 snapshots for the JOIN); gets teeth tomorrow.
+  • **Deferred**: BSE bhavcopy fallback (greenfield), yfinance ticker audit (most gap is real SMALL-cap coverage gap, low yield ~5%), regulatory_signals classifier restart (Anthropic budget cap — strategy TBD).
+
 ## Pick up here
 1. **Start [plan 0005 Phase C — coverage gap closure](docs/plans/0005-data-confidence-to-95.md#phase-c--coverage-gap-closure-85--88)** — with A+B in place, the eligibility data is screaming where the real gaps are: `consensus` only 976/2448 (40%) eligible (yfinance ceiling), `momentum` 1970/2448 (80%) missing prices for the SME tail, `book_to_price` 2106/2448 (86%) missing shares-outstanding. Phase C targets each: BSE bhavcopy fallback for 339 priceless SIDs + yfinance ticker audit + regulatory feed recovery. 2-3 sessions.
 2. **Watch the daily for a few runs**, then **switch the pick gate to use `eligible_coverage`** (currently both populate but only `weight_coverage` is the gate). The behavioural change is small (a few hundred more LARGE/MID caps qualify) but the principle is right. ~1hr once we're confident.

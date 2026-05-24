@@ -247,8 +247,12 @@ PIPELINE_STEPS = [
     # 2026-05-24 → REGULATORY_FEED_DARK fired (43 days silent before the
     # staleness override caught it). Weekly harvest, daily classify (only
     # new unclassified rows).
-    {"name": "fetch_regulatory",   "module": "sources.regulatory_harvester", "function": "harvest_all", "critical": False,
-     "table": "regulatory_events", "source": "RBI + PIB + Google News + Wayback", "data_freq": "weekly", "frequency": "weekly"},
+    # Plan 0005 Phase C (2026-05-24): switched from harvest_all (3-year backfill
+    # — 180 Google + 870 RBI + 110K PIB IDs) to harvest_incremental (last 30d
+    # Google News only). harvest_all was timing out daily, leaving stale RUNNING
+    # rows and the table 44d stale. Incremental completes in ~5 min.
+    {"name": "fetch_regulatory",   "module": "sources.regulatory_harvester", "function": "harvest_incremental", "critical": False,
+     "table": "regulatory_events", "source": "Google News last 30d", "data_freq": "daily", "frequency": "daily"},
 
     {"name": "classify_regulatory","module": "sources.regulatory_classifier", "function": "compute", "critical": False,
      "table": "regulatory_signals","source": "regulatory_events (AI-classified)", "data_freq": "daily", "frequency": "daily"},

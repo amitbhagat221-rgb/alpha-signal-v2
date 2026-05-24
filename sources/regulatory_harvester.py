@@ -548,6 +548,60 @@ def harvest_pib(start_prid=2150000, end_prid=2260000, dry_run=False):
 # MAIN
 # ═══════════════════════════════════════════════════
 
+def harvest_incremental(days=30, dry_run=False):
+    """Daily-cron-safe regulatory event fetch — last N days only.
+
+    `harvest_all` is a 3-year backfill (180 Google queries + 870 RBI iterations
+    + 110K PIB IDs) — wrong fit for daily cron, would always time out leaving
+    stale RUNNING rows. This is the daily incremental: a single recent window
+    on Google News for each topic. Completes in ~5 minutes.
+
+    Plan 0005 Phase C — see docs/plans/0005-data-confidence-to-95.md.
+    """
+    from datetime import date as _date, timedelta as _td
+    end = _date.today()
+    start = end - _td(days=days)
+    window_str_start = start.isoformat()
+    window_str_end = end.isoformat()
+
+    if dry_run:
+        print(f"[dry-run] would query {len(GOOGLE_TOPICS)} topics × 1 window "
+              f"({window_str_start} → {window_str_end})")
+        return 0
+
+    print(f"Regulatory incremental: last {days}d ({window_str_start} → {window_str_end})")
+    print(f"  {len(GOOGLE_TOPICS)} topics × 1 window = {len(GOOGLE_TOPICS)} queries")
+
+    all_items = []
+    seen_ids = set()
+    for i, topic in enumerate(GOOGLE_TOPICS, 1):
+        q = f"{topic}+after:{window_str_start}+before:{window_str_end}"
+        url = f"https://news.google.com/rss/search?q={q}&hl=en-IN&gl=IN&ceid=IN:en"
+        try:
+            resp = requests.get(url, headers=HEADERS, timeout=15)
+            if resp.status_code == 200:
+                items = _parse_google_rss(resp.text)
+                new_items = [it for it in items if it["event_id"] not in seen_ids]
+                for it in new_items:
+                    seen_ids.add(it["event_id"])
+                all_items.extend(new_items)
+                if i % 10 == 0 or len(new_items) > 0:
+                    print(f"  [{i:3d}/{len(GOOGLE_TOPICS)}] {topic[:40]:40s} +{len(new_items)} (total: {len(all_items)})")
+            elif resp.status_code == 429:
+                print(f"  Rate limited at query {i}. Sleeping 30s...")
+                time.sleep(30)
+        except Exception as e:
+            print(f"  Error on {topic}: {e}")
+        time.sleep(1.0)
+
+    print(f"\nRegulatory incremental: {len(all_items)} articles fetched")
+    if all_items:
+        df = pd.DataFrame(all_items)
+        n = insert_df(df, "regulatory_events")
+        print(f"Saved {n} new rows to regulatory_events")
+    return len(all_items)
+
+
 def harvest_all(dry_run=False):
     """Run all harvesters."""
     total = 0
