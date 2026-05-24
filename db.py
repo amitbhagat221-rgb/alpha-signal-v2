@@ -61,8 +61,33 @@ def init_db():
     schema_sql = SCHEMA_PATH.read_text()
     with get_db() as conn:
         conn.executescript(schema_sql)
+    _ensure_columns()
     print(f"Database initialized: {DB_PATH}")
     print(f"Size: {DB_PATH.stat().st_size / 1024:.1f} KB")
+
+
+# Columns added after a table was first created. SQLite has no "ADD COLUMN
+# IF NOT EXISTS" so we catch the duplicate-column error. Append to this list
+# whenever a new column is added to an existing table; never edit existing
+# entries (they're idempotent by design).
+_COLUMN_MIGRATIONS = [
+    ("daily_picks", "weight_coverage", "REAL"),
+    ("daily_picks", "price_rows", "INTEGER"),
+    ("daily_picks", "fundamental_coverage", "REAL"),
+    # 2026-05-24: insider_signal and sentiment_7d now PIT-reconstructible.
+    ("daily_snapshots_pit", "insider_score", "REAL"),
+    ("daily_snapshots_pit", "sentiment_7d", "REAL"),
+]
+
+
+def _ensure_columns():
+    with get_db() as conn:
+        for tbl, col, typ in _COLUMN_MIGRATIONS:
+            try:
+                conn.execute(f"ALTER TABLE {tbl} ADD COLUMN {col} {typ}")
+            except sqlite3.OperationalError as e:
+                if "duplicate column" not in str(e).lower():
+                    raise
 
 
 def table_counts():
@@ -855,6 +880,55 @@ TABLE_DOMAIN = {
 #              historical archive). Forward-only or wontfix without new source.
 #
 # IC / t-stat / verdict come from pit_ic_by_tier_v1 at runtime — no hardcoding.
+
+# ─────────────────────────────────────────────────────────────────────────
+# Backtest cadence per signal — 2026-05-24.
+#
+# Pre-2026-05-24: ALL signals were backtested at v1's monthly cadence (35 dates).
+# That handicapped fast-decay signals (sentiment_7d, insider_signal, etc.) which
+# would have hundreds of weekly observations but only ~24 monthly ones, giving
+# misleadingly weak t-stats.
+#
+# Cadence taxonomy:
+#   "monthly"          — slow-moving fundamentals/momentum/shareholding/analyst.
+#                        Matches v1 C13b framework. ~42 v1+v2 monthly dates.
+#                        Forward return: fwd_return_20d. No Newey-West.
+#   "weekly"           — behavioral, event-driven, news, daily-published.
+#                        Eval each Friday. Forward return: fwd_return_5d (or 20d).
+#                        Newey-West required if signal-window > eval-gap.
+#   "sector_portfolio" — sector-level signals (regulatory_sector, macro_sector).
+#                        Not per-stock; need sector-tilt portfolio test, not IC.
+#   "portfolio"        — end-state composite (screener_final). Track 2.4
+#                        portfolio backtest, not factor IC.
+#
+# Use get_backtest_cadence(signal_id) — falls back to "monthly" for unknown ids.
+BACKTEST_CADENCE = {
+    # ── Weekly: behavioral / event-driven / news ──
+    "insider_signal":           "weekly",
+    "avg_delivery_pct_30d":     "weekly",
+    "delivery_anomaly_z":       "weekly",
+    "bulk_deal_signal":         "weekly",
+    "short_selling_signal":     "weekly",
+    "sentiment_7d":             "weekly",
+    "news_volume":              "weekly",
+    "fii_dii_cash_net":         "weekly",
+    "fii_dii_fno_positioning":  "weekly",
+    # ── Sector-portfolio: sector-level signals (not per-stock IC) ──
+    "regulatory_sector_signal": "sector_portfolio",
+    "macro_sector_signal":      "sector_portfolio",
+    # ── Portfolio: end-state composite (backtest via Track 2.4) ──
+    "screener_final_composite": "portfolio",
+    # All other signals default to "monthly" — see get_backtest_cadence().
+}
+
+
+def get_backtest_cadence(signal_id):
+    """Return cadence label for a signal. Defaults to 'monthly' for unknown ids
+    (the safe default — monthly cadence works for all current signals even if
+    sub-optimal for fast-decay ones)."""
+    return BACKTEST_CADENCE.get(signal_id, "monthly")
+
+
 BACKTEST_SIGNALS = [
 
     # ═══════════════════════════════════════════════════════════════════
@@ -1170,7 +1244,7 @@ BACKTEST_SIGNALS = [
         "source_columns": ["insider_trades.{person_category, transaction_type, value_lakhs, trade_date}"],
         "filing_lag": "0d (NSE PIT discloses on transaction)",
         "pit_column_v1": None,
-        "pit_column_v2": None,
+        "pit_column_v2": "insider_score",  # PIT helper added 2026-05-24
         "external_table": "insider_signals",
         "v1_verdict_summary": "(not in C13b; new in v2)",
         "status": "READY",
@@ -1373,10 +1447,10 @@ BACKTEST_SIGNALS = [
         "source_columns": ["news_articles.{title, summary, published_at}", "news_article_stocks.sid"],
         "filing_lag": "0d",
         "pit_column_v1": None,
-        "pit_column_v2": None,
+        "pit_column_v2": "sentiment_7d",  # PIT helper added 2026-05-24 (NaN pre-2024-04 — news data starts 2024-04-23)
         "v1_verdict_summary": "(used as adjustment in v1 screener, not in C13b)",
-        "status": "PARTIAL",
-        "status_reason": "Blocked on NLP setup. news_articles has no sentiment column — needs FinBERT classifier (see plan 0002 Phase A4). Once added, signal is computable on 2026-03+ data. Other partial fix: news_volume_7d (raw count) is now READY as a working proxy for attention.",
+        "status": "READY",
+        "status_reason": "PIT helper added 2026-05-24 — VADER on PIT-filtered article text. Output empty for eval dates before news_articles begins (2024-04-23).",
     },
     {
         "signal": "news_volume",

@@ -33,12 +33,19 @@ import pandas as pd
 
 from db import read_sql, upsert_df
 
-# Weights by person category
+# Weights by person category. Keys are matched via case-insensitive substring
+# against the `person_category` column. 2026-05-24 audit: "KMP" never matched
+# anything because actual data uses the full "Key Managerial Personnel" — 92
+# KMP trades / 90d were silently skipped. "Employees/Designated Employees"
+# (258 trades / 34 stocks / 90d) is deliberately excluded — non-promoter
+# employee trading is a weaker signal per Brochet et al. 2017 and adding it
+# would drown out the priority categories. Revisit if the empirical IC says
+# otherwise.
 CATEGORY_WEIGHTS = {
     "Promoters": 1.0,
     "Promoter Group": 0.8,
     "Director": 0.5,
-    "KMP": 0.4,
+    "Key Managerial Personnel": 0.4,
     "Immediate Relative": 0.3,
 }
 
@@ -73,11 +80,14 @@ def _compute_scores(trades, stocks, eval_date=None):
         total_signal = 0.0
         total_weight = 0.0
         descriptions = []
+        n_total_trades = len(stock_trades)
+        n_tracked_trades = 0
 
         for cat, weight in CATEGORY_WEIGHTS.items():
             cat_trades = stock_trades[stock_trades["person_category"].str.contains(cat, case=False, na=False)]
             if cat_trades.empty:
                 continue
+            n_tracked_trades += len(cat_trades)
 
             buys = cat_trades[cat_trades["transaction_type"].str.contains("Buy", case=False, na=False)]
             sells = cat_trades[cat_trades["transaction_type"].str.contains("Sell", case=False, na=False)]
@@ -137,6 +147,14 @@ def _compute_scores(trades, stocks, eval_date=None):
             row["strength"] = strength
             row["score_impact"] = round(score, 4)
             row["description"] = "; ".join(descriptions)[:500]
+        elif n_total_trades > 0:
+            # Trades exist but all from non-tracked categories (Employees, Other, "-").
+            # Don't claim "no activity" — that's misleading. WIPR 2026-05-24 had 6
+            # Employee trades and the message read "No insider activity in last 90d".
+            row["signal_type"] = "NEUTRAL"
+            row["strength"] = "weak"
+            row["score_impact"] = 0.0
+            row["description"] = f"{n_total_trades} trade(s) from non-tracked categories (no Promoter/Director/KMP activity)"
 
         rows.append(row)
 

@@ -702,6 +702,64 @@ CHECKS = [
                 (SELECT MAX(published_at) FROM regulatory_events WHERE classifier_status='classified') AS sample
         """,
     },
+    # 2026-05-24 audit: 273 stocks have |eps_growth_pct| > 200% — arithmetic
+    # artifacts from near-zero base EPS (turnarounds). consensus.py clips
+    # internally before computing the signal, so screener rank is safe, but
+    # the raw value is fed verbatim to the dossier LLM prompt. VSKI ranked
+    # #1 SMALL today with eps_growth=2941%. Clip happens in output/dossier.py;
+    # this check fires when extreme values reach the top-100 of any tier
+    # (where they would be eligible for dossier generation if we extended it).
+    {
+        "code": "EXTREME_GROWTH_PCT_IN_TOP_PICKS",
+        "table": "analyst_consensus",
+        "column": "eps_growth_pct",
+        "message": "Top-100 picks have |eps_growth_pct| or |revenue_growth_pct| > 300% (likely div-by-near-zero artifacts)",
+        "critical_pct": 20,
+        "warn_pct": 5,
+        "sql": """
+            WITH top_picks AS (
+                SELECT sid FROM daily_picks
+                WHERE pick_date = (SELECT MAX(pick_date) FROM daily_picks)
+                  AND rank <= 100
+            )
+            SELECT
+                SUM(CASE WHEN ABS(ac.eps_growth_pct) > 300 OR ABS(ac.revenue_growth_pct) > 300
+                         THEN 1 ELSE 0 END) AS n_bad,
+                COUNT(*) AS n_total,
+                (SELECT sid || ' (eps=' || ROUND(eps_growth_pct, 0) || '%)' FROM analyst_consensus
+                 WHERE sid IN (SELECT sid FROM top_picks)
+                   AND (ABS(eps_growth_pct) > 300 OR ABS(revenue_growth_pct) > 300)
+                 ORDER BY ABS(eps_growth_pct) DESC LIMIT 1) AS sample
+            FROM analyst_consensus ac
+            WHERE ac.sid IN (SELECT sid FROM top_picks)
+        """,
+    },
+    # 2026-05-24 audit: ABSM (and 3 of 5 sampled SMALL stocks) had growth
+    # percentages populated while total_analysts and price_target were NULL.
+    # Different upstream sources write the same row independently — growth
+    # comes from Tickertape forecast feed, PT/analyst-count from yfinance.
+    # When yfinance has no data, consensus_signal still fires on growth-only,
+    # which is exactly the partial-input → real-output leak the audit targets.
+    {
+        "code": "ANALYST_CONSENSUS_GROWTH_WITHOUT_ANALYSTS",
+        "table": "analyst_consensus",
+        "column": "eps_growth_pct",
+        "message": "analyst_consensus rows with growth pcts but NULL total_analysts AND NULL price_target (mixed-provenance row)",
+        "critical_pct": 30,
+        "warn_pct": 10,
+        "sql": """
+            SELECT
+                SUM(CASE WHEN total_analysts IS NULL AND price_target IS NULL
+                              AND (eps_growth_pct IS NOT NULL OR revenue_growth_pct IS NOT NULL)
+                         THEN 1 ELSE 0 END) AS n_bad,
+                COUNT(*) AS n_total,
+                (SELECT sid FROM analyst_consensus
+                 WHERE total_analysts IS NULL AND price_target IS NULL
+                   AND (eps_growth_pct IS NOT NULL OR revenue_growth_pct IS NOT NULL)
+                 LIMIT 1) AS sample
+            FROM analyst_consensus
+        """,
+    },
 ]
 
 

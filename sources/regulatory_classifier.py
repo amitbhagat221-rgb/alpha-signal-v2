@@ -63,14 +63,17 @@ Respond in JSON (no markdown, just raw JSON):
   ]
 }}
 
-BSE sectors: Financial Services, IT, Materials, Energy, Consumer Discretionary,
-Consumer Staples, Health Care, Industrials, Utilities, Real Estate,
-Communication Services, Financials
+Valid sectors (use these EXACT strings — taxonomy aligned to stocks.sector):
+Communication Services, Consumer Discretionary, Consumer Staples, Energy,
+Financials, Health Care, Industrials, Information Technology, Materials,
+Real Estate, Utilities
 
 Rules:
 - Only sectors genuinely affected. Don't force-fit sectors.
 - "major" = >10% sector impact potential. "moderate" = 5-10%. "minor" = <5%.
-- Be specific about WHY. Generic "positive for economy" is useless."""
+- Be specific about WHY. Generic "positive for economy" is useless.
+- Use EXACTLY the sector strings above. Do NOT use "Financial Services" (use "Financials"),
+  do NOT use "IT" (use "Information Technology"). Mismatches orphan the row from stocks join."""
 
 
 def _get_client():

@@ -42,9 +42,15 @@ def _asymmetric_adjust(val):
 
 
 def _holding_modifier(promoter_latest):
-    """Nonlinear modifier based on absolute stake level."""
+    """Nonlinear modifier based on absolute stake level.
+
+    Returns None when promoter_latest is unknown — caller must treat that as
+    "no modifier" (signal = raw, not raw * 0.9). Pre-2026-05-24 returned 0.9
+    on NaN which let stocks without a known stake migrate to a fixed signal
+    cluster (see 2026-05-24 audit: 398/2448 promoter_signal values at 0.60).
+    """
     if pd.isna(promoter_latest):
-        return 0.9
+        return None
     if promoter_latest > 75:
         return 0.7  # concentrated, governance risk
     if 40 <= promoter_latest <= 65:
@@ -125,7 +131,10 @@ def _compute_scores(stocks, sh):
         if den > 0.01:
             raw = num / den
             modifier = _holding_modifier(row.get("promoter_latest"))
-            signals.append(round(raw * modifier, 4))
+            if modifier is None:
+                signals.append(round(raw, 4))  # no stake info → don't dampen
+            else:
+                signals.append(round(raw * modifier, 4))
         else:
             signals.append(None)
 

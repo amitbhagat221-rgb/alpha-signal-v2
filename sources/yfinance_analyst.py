@@ -133,7 +133,15 @@ def _fetch_one(ticker):
         "target_median":       float(info["targetMedianPrice"]) if info.get("targetMedianPrice") is not None else None,
         "target_high":         float(info["targetHighPrice"])   if info.get("targetHighPrice") is not None else None,
         "target_low":          float(info["targetLowPrice"])    if info.get("targetLowPrice") is not None else None,
-        "n_analysts":          int(info["numberOfAnalystOpinions"]) if info.get("numberOfAnalystOpinions") else None,
+        # n_analysts: yfinance can return None for numberOfAnalystOpinions even
+        # when per-rating counts are populated (e.g. KALYA 2026-05-24: NULL count
+        # but 9 in n_buy). Fall back to sum of rating-mix counts so downstream
+        # _confidence() doesn't apply low-conf shrinkage to real consensus.
+        "n_analysts":          (
+            int(info["numberOfAnalystOpinions"]) if info.get("numberOfAnalystOpinions")
+            else (sum(v for v in (rec_mix.get("strongBuy"), rec_mix.get("buy"), rec_mix.get("hold"),
+                                  rec_mix.get("sell"), rec_mix.get("strongSell")) if v) or None)
+        ),
         "recommendation_key":  info.get("recommendationKey"),
         "recommendation_mean": float(info["recommendationMean"]) if info.get("recommendationMean") is not None else None,
         "n_strong_buy":        rec_mix.get("strongBuy"),

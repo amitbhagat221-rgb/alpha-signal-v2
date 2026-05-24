@@ -38,6 +38,24 @@ OUTPUT_DIR = PROJECT_ROOT / "output"
 
 _NARRATIVE_FIELDS = ("thesis", "bull_case", "bear_case", "catalysts", "risks")
 
+# Map narrative keywords to the context field that must be non-None to
+# legitimately reference them. 2026-05-24: MUTT + BJAT (both Financials)
+# referenced "solid Piotroski" but Piotroski isn't computed for Financial
+# sector stocks — they route through the financial sub-model. Validator only
+# caught raw numbers, not soft signal-name hallucination.
+#
+# Pattern → (context key that must exist, human-readable signal name).
+_SIGNAL_KEYWORD_MAP = [
+    (re.compile(r"\bpiotroski\b", re.I),                            "f_score",            "Piotroski"),
+    (re.compile(r"\baccruals?\b", re.I),                            "accruals_signal",    "Accruals"),
+    (re.compile(r"\bconsensus\b|\banalyst\s+(?:target|view|coverage)\b", re.I), "consensus_signal", "Consensus"),
+    (re.compile(r"\bsmart[\s-]?money\b", re.I),                     "smart_money_score",  "Smart Money"),
+    (re.compile(r"\bpromoter\s+(?:holding|trend|qoq|signal|accumulation|stake)\b", re.I), "promoter_qoq", "Promoter"),
+    (re.compile(r"\bm[\s-]?score\b|\bbeneish\b|\bmanipulation\b", re.I), "m_score",         "M-Score / Beneish"),
+    (re.compile(r"\bz[\s-]?score\b|\baltman\b|\bdistress\b", re.I), "z_score",            "Z-Score / Altman"),
+    (re.compile(r"\bsentiment\b", re.I),                            "sentiment_7d",       "Sentiment"),
+]
+
 # Permissive number detector. We intentionally do NOT allow "12-month"
 # or "Q2" (calendar references are fine); the regex catches:
 #   ₹1038, Rs 1,038, 16.5%, 12.5x, 0.43 (decimal), 7/9 (score-style),
@@ -79,12 +97,17 @@ def _scan_for_numbers(text):
     return hits
 
 
-def _validate_dossier(dossier):
-    """Scan narrative fields for forbidden numbers.
+def _validate_dossier(dossier, context=None):
+    """Scan narrative fields for forbidden numbers AND missing-signal hallucination.
 
     Returns dict { ok: bool, violations: [{field, snippet, kind}], leaked_pt: bool }.
     leaked_pt = LLM sneaked a target_price or stop_loss into the response despite
     the prompt rule (2026-05-23: now a violation, not a requirement).
+
+    `context` (if provided) is the stock context dict from _build_stock_context.
+    Used to flag soft hallucination — narrative mentions a signal by name but
+    that signal value was None in the context (e.g. MUTT referencing Piotroski
+    when f_score is None because Financials route through the sub-model).
     """
     violations = []
     for field in _NARRATIVE_FIELDS:
@@ -98,6 +121,16 @@ def _validate_dossier(dossier):
         for text in texts:
             for snippet, kind in _scan_for_numbers(text):
                 violations.append({"field": field, "snippet": snippet, "kind": kind})
+
+            # Soft hallucination: signal-name mentioned but signal not in context
+            if context is not None:
+                for pat, ctx_key, signal_name in _SIGNAL_KEYWORD_MAP:
+                    if pat.search(text) and context.get(ctx_key) is None:
+                        violations.append({
+                            "field": field,
+                            "snippet": signal_name,
+                            "kind": "missing_signal_referenced",
+                        })
 
     # Flag (don't fail-hard) if LLM leaked a target/stop despite the new rule.
     leaked_pt = (
@@ -166,6 +199,79 @@ def _build_stock_context(sid):
     return s
 
 
+FINANCIAL_SECTORS = {"Financials"}
+
+# Cap raw growth pcts before showing to the LLM. yfinance/Tickertape report
+# arithmetic-true but useless numbers (eps_growth = 2941% for VSKI 2026-05-24
+# because prior year EPS was near zero). consensus.py clips internally; we
+# clip here defensively so the LLM doesn't see "+2941%" and hallucinate.
+_GROWTH_DISPLAY_CAP = 300.0
+
+
+def _clip_growth(val):
+    if val is None or pd.isna(val):
+        return None
+    if val > _GROWTH_DISPLAY_CAP:
+        return f"{_GROWTH_DISPLAY_CAP:.0f}+"
+    if val < -_GROWTH_DISPLAY_CAP:
+        return f"-{_GROWTH_DISPLAY_CAP:.0f}+"
+    return round(val, 1)
+
+
+def _build_signals_section(context):
+    """Build the SIGNALS bullet list, suppressing missing values and
+    sector-inapplicable signals. Pre-2026-05-24 the prompt always listed
+    every signal with `N/A` for missing — the LLM then confabulated 'solid
+    Piotroski score' from the field name alone. Now: only show signals that
+    actually have a value, and skip Piotroski entirely for Financials (it's
+    not computed there — sub-model territory)."""
+    sector = context.get("sector")
+    in_financial = sector in FINANCIAL_SECTORS
+
+    lines = []
+    def add(line, key):
+        if context.get(key) is not None:
+            lines.append(line)
+
+    if not in_financial:
+        add(f"- Piotroski F-Score: {context.get('f_score')}/9", "f_score")
+    add(f"- Accruals Signal: {context.get('accruals_signal')}", "accruals_signal")
+    if context.get("consensus_signal") is not None:
+        pt_part = f" (PT upside: {context.get('pt_upside')}%)" if context.get("pt_upside") is not None else ""
+        lines.append(f"- Consensus Signal: {context.get('consensus_signal')}{pt_part}")
+    eps_g_clip = _clip_growth(context.get("eps_growth"))
+    rev_g_clip = _clip_growth(context.get("revenue_growth"))
+    if eps_g_clip is not None or rev_g_clip is not None:
+        parts = []
+        if eps_g_clip is not None:
+            parts.append(f"EPS Growth: {eps_g_clip}%")
+        if rev_g_clip is not None:
+            parts.append(f"Revenue Growth: {rev_g_clip}%")
+        lines.append("- " + " | ".join(parts))
+    if context.get("promoter_qoq") is not None or context.get("promoter_trend"):
+        parts = []
+        if context.get("promoter_qoq") is not None:
+            parts.append(f"QoQ={context['promoter_qoq']}%")
+        if context.get("promoter_trend"):
+            parts.append(f"trend={context['promoter_trend']}")
+        if context.get("pledge_quality") is not None:
+            parts.append(f"pledge={context['pledge_quality']}")
+        lines.append("- Promoter: " + ", ".join(parts))
+    if not in_financial:  # Beneish/Altman are not designed for banks
+        forensic_parts = []
+        if context.get("m_score") is not None:
+            forensic_parts.append(f"M-Score={context['m_score']} ({context.get('m_score_flag', '?')})")
+        if context.get("z_score") is not None:
+            forensic_parts.append(f"Z-Score={context['z_score']} ({context.get('z_score_flag', '?')})")
+        if forensic_parts:
+            lines.append("- Forensic: " + ", ".join(forensic_parts))
+    add(f"- Smart Money: {context.get('smart_money_score')}/100", "smart_money_score")
+    if context.get("sentiment_7d") is not None:
+        lines.append(f"- Sentiment 7d: {context.get('sentiment_7d')} ({context.get('articles_7d', 0)} articles)")
+    lines.append(f"- Final Score: {context.get('final_score', 'N/A')} (Rank #{context.get('rank', '?')} in {context.get('cap_tier', '?')})")
+    return "\n".join(lines)
+
+
 def _build_prompt(context):
     """Build the Claude prompt for investment thesis.
 
@@ -179,23 +285,19 @@ def _build_prompt(context):
         the only place numbers live. The cockpit renders them from there.
       - Bull/bear cases must REFERENCE the signal by name, not its value
         — "strong Piotroski" not "Piotroski 7/9", "high accruals" not "0.43".
+      - Signals section is filtered to non-NULL values + sector-applicable
+        (2026-05-24): omitting a signal from context means it shouldn't appear
+        in narrative either — the validator now enforces that.
     """
+    signals_block = _build_signals_section(context)
     return f"""You are an expert Indian equity analyst. Generate a concise investment dossier for this stock.
 
 STOCK: {context.get('name', 'Unknown')} ({context.get('ticker', '?')})
 SECTOR: {context.get('sector', '?')} | TIER: {context.get('cap_tier', '?')}
 PRICE: ₹{context.get('current_price', '?')} ({context.get('price_date', '?')})
 
-SIGNALS:
-- Piotroski F-Score: {context.get('f_score', 'N/A')}/9
-- Accruals Signal: {context.get('accruals_signal', 'N/A')}
-- Consensus Signal: {context.get('consensus_signal', 'N/A')} (PT upside: {context.get('pt_upside', 'N/A')}%)
-- EPS Growth: {context.get('eps_growth', 'N/A')}% | Revenue Growth: {context.get('revenue_growth', 'N/A')}%
-- Promoter: QoQ={context.get('promoter_qoq', 'N/A')}%, trend={context.get('promoter_trend', 'N/A')}, pledge={context.get('pledge_quality', 'N/A')}
-- Forensic: M-Score={context.get('m_score', 'N/A')} ({context.get('m_score_flag', '?')}), Z-Score={context.get('z_score', 'N/A')} ({context.get('z_score_flag', '?')})
-- Smart Money: {context.get('smart_money_score', 'N/A')}/100
-- Sentiment 7d: {context.get('sentiment_7d', 'N/A')} ({context.get('articles_7d', 0)} articles)
-- Final Score: {context.get('final_score', 'N/A')} (Rank #{context.get('rank', '?')} in {context.get('cap_tier', '?')})
+SIGNALS (only signals listed here are valid to reference — do not invent absent ones):
+{signals_block}
 
 FUNDAMENTALS:
 - P/E: {context.get('pe_ratio', 'N/A')} | P/B: {context.get('pb_ratio', 'N/A')} | ROE: {context.get('roe', 'N/A')}%
@@ -311,7 +413,7 @@ def generate(top=5, dry_run=False):
             dossier["sid"] = sid
             dossier["ticker"] = pick["ticker"]
             dossier["generated_at"] = datetime.now().isoformat(timespec="seconds")
-            dossier["validation"] = _validate_dossier(dossier)
+            dossier["validation"] = _validate_dossier(dossier, context=context)
             dossiers.append(dossier)
             if dossier.get("thesis") and dossier["validation"]["ok"]:
                 n_thesis += 1

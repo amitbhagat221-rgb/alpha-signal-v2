@@ -1,0 +1,23 @@
+# Images
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.webp
+*.svg
+
+# Screenshots / audits
+playwright-screens/
+screenshots/
+audit/
+
+# Build junk
+node_modules/
+dist/
+build/
+coverage/
+
+# Binary data
+*.pdf
+*.parquet
+*.db

@@ -214,9 +214,9 @@
 <div class="card" style="margin-bottom: 20px; border-left: 4px solid var(--accent);">
     <div style="display: flex; flex-wrap: wrap; gap: 18px; align-items: flex-start;">
         <div style="flex: 1 1 320px;">
-            <div style="font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px;">Factor Library Health</div>
+            <div style="font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px;">Factor Library</div>
             <div style="font-size: 16px; font-weight: 700; color: var(--text-primary); margin-bottom: 4px;">
-                {{ fs.total }} factors registered · avg health <span class="mono" style="color: var(--accent);">{{ fs.avg_overall }}</span>/100
+                {{ fs.total }} factors registered · avg <em>data health</em> <span class="mono" style="color: var(--accent);">{{ fs.avg_data_health }}</span>/100
             </div>
             <div style="font-size: 12px; color: var(--text-secondary);">
                 <span style="color: #2ecc71;">{{ fs.in_model }} in model</span> ·
@@ -224,30 +224,53 @@
                 <span style="color: var(--text-muted);">{{ fs.not_built }} not built</span>
                 · {{ fs.with_t_stat }} with t-stat · {{ fs.pit_ready }} PIT-ready
             </div>
+            <div style="font-size: 10px; color: var(--text-muted); margin-top: 8px; font-style: italic; max-width: 540px;">
+                Two distinct grades below — <strong style="color: var(--text-secondary);">Data Health</strong> = is the signal computing?
+                <strong style="color: var(--text-secondary);">Validation</strong> = is it predictive in backtest? A factor can be perfectly healthy (A) but DROP-verdict in backtest.
+            </div>
         </div>
-        <div style="display: flex; gap: 12px; flex-wrap: wrap;">
-            {% for letter in ['A+', 'A', 'B', 'C', 'D', 'F'] %}
-                {% set n = fs.grade_dist.get(letter, 0) %}
-                <div style="text-align: center; min-width: 38px;">
-                    <div style="font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">{{ letter }}</div>
-                    <div class="mono" style="font-size: 18px; font-weight: 700;
-                        {% if letter in ['A+', 'A'] %}color: #2ecc71;
-                        {% elif letter == 'B' %}color: #4d8eff;
-                        {% elif letter == 'C' %}color: #f1c40f;
-                        {% elif letter == 'D' %}color: #e67e22;
-                        {% else %}color: #e74c3c;{% endif %}">{{ n }}</div>
+        <div style="display: flex; gap: 20px; flex-wrap: wrap;">
+            <div>
+                <div style="font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Data Health</div>
+                <div style="display: flex; gap: 8px;">
+                    {% for letter in ['A+', 'A', 'B', 'C', 'D', 'F'] %}
+                        {% set n = fs.data_grade_dist.get(letter, 0) %}
+                        <div style="text-align: center; min-width: 32px;">
+                            <div style="font-size: 9px; color: var(--text-muted);">{{ letter }}</div>
+                            <div class="mono" style="font-size: 16px; font-weight: 700;
+                                {% if letter in ['A+', 'A'] %}color: #2ecc71;
+                                {% elif letter == 'B' %}color: #4d8eff;
+                                {% elif letter == 'C' %}color: #f1c40f;
+                                {% elif letter == 'D' %}color: #e67e22;
+                                {% else %}color: #e74c3c;{% endif %}">{{ n }}</div>
+                        </div>
+                    {% endfor %}
                 </div>
-            {% endfor %}
+            </div>
+            <div>
+                <div style="font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Validation</div>
+                <div style="display: flex; gap: 8px;">
+                    {% for v, vcolor in [('KEEP', '#2ecc71'), ('WEAK', '#4d8eff'), ('DROP', '#e74c3c'), ('NONE', 'var(--text-muted)')] %}
+                        {% set n = fs.validation_dist.get(v, 0) %}
+                        <div style="text-align: center; min-width: 42px;">
+                            <div style="font-size: 9px; color: var(--text-muted);">{{ v }}</div>
+                            <div class="mono" style="font-size: 16px; font-weight: 700; color: {{ vcolor }};">{{ n }}</div>
+                        </div>
+                    {% endfor %}
+                </div>
+            </div>
         </div>
     </div>
 </div>
 
 <!-- Per-factor table -->
 <div class="card">
-    <div class="section-title">Per-Factor Health</div>
+    <div class="section-title">Per-Factor — Data Health & Validation</div>
     <div class="section-desc">
-        Health = 35% coverage · 15% freshness · 30% backtest |t| · 10% PIT-ready · 10% in-model.
-        Click column headers to sort. Hover an issue chip to see details.
+        <strong>Data Health</strong> = 65% coverage · 25% freshness · 10% PIT-ready. Data-side only.<br>
+        <strong>Validation</strong> = KEEP (|t|≥2.5) · WEAK (|t|≥1.5) · DROP (|t|&lt;1.5) · NONE (no backtest yet).
+        These are independent — a healthy factor can still have DROP validation, and a high-validation factor can have low coverage.<br>
+        <strong>Cadence</strong> shown below the Validation badge for non-default (monthly is the default; weekly/sector/portfolio are flagged). t-stats from different cadences are not directly comparable.
     </div>
     <table id="factor-health-table" style="width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 12px;">
         <thead>
@@ -260,7 +283,8 @@
             <th data-key="t_stat"    data-sort="number" style="padding: 8px 10px; text-align: right; border-bottom: 2px solid var(--border-accent); cursor: pointer;">|t|</th>
             <th data-key="pit_ready" data-sort="number" style="padding: 8px 10px; text-align: center; border-bottom: 2px solid var(--border-accent); cursor: pointer;">PIT</th>
             <th data-key="in_model"  data-sort="number" style="padding: 8px 10px; text-align: center; border-bottom: 2px solid var(--border-accent); cursor: pointer;">Bench</th>
-            <th data-key="overall"   data-sort="number" style="padding: 8px 10px; text-align: right; border-bottom: 2px solid var(--border-accent); cursor: pointer;">Health</th>
+            <th data-key="data_health"  data-sort="number" style="padding: 8px 10px; text-align: right; border-bottom: 2px solid var(--border-accent); cursor: pointer;">Data Health</th>
+            <th data-key="validation_verdict" data-sort="string" style="padding: 8px 10px; text-align: center; border-bottom: 2px solid var(--border-accent); cursor: pointer;">Validation</th>
             <th style="padding: 8px 10px; border-bottom: 2px solid var(--border-accent);">Issues</th>
         </tr>
         </thead>
@@ -310,10 +334,16 @@
                 {% if f.in_model %}<span style="font-size: 10px; padding: 2px 8px; border-radius: 10px; background: rgba(46,204,113,0.18); color: #2ecc71; font-weight: 700;">model</span>
                 {% else %}<span style="font-size: 10px; padding: 2px 8px; border-radius: 10px; background: rgba(140,140,140,0.15); color: #aaa;">library</span>{% endif %}
             </td>
-            <td data-key="overall" class="mono" style="padding: 8px 10px; text-align: right; font-weight: 700;
-                color: {{ f.grade_color }};">
-                {{ f.overall }}
-                <div style="font-size: 9px;">{{ f.grade }}</div>
+            <td data-key="data_health" class="mono" style="padding: 8px 10px; text-align: right; font-weight: 700;
+                color: {{ f.data_grade_color }};">
+                {{ f.data_health }}
+                <div style="font-size: 9px;">{{ f.data_grade }}</div>
+            </td>
+            <td data-key="validation_verdict" style="padding: 8px 10px; text-align: center;">
+                <span style="font-size: 10px; padding: 2px 8px; border-radius: 4px; color: {{ f.validation_color }}; border: 1px solid {{ f.validation_color }}; font-weight: 700; letter-spacing: 0.5px;">{{ f.validation_verdict }}</span>
+                {% if f.backtest_cadence and f.backtest_cadence != 'monthly' %}
+                <div style="font-size: 9px; color: var(--text-muted); margin-top: 2px; font-style: italic;">{{ f.backtest_cadence }}</div>
+                {% endif %}
             </td>
             <td style="padding: 8px 10px;">
                 {% for issue in f.issues %}

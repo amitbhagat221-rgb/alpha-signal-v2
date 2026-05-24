@@ -2139,23 +2139,15 @@ def get_factor_health():
       - in_model       : marked production-ready
     Aggregated 0-100 grade with letter (A+/A/B/C/D/F).
     """
-    from db import BACKTEST_SIGNALS
+    from db import BACKTEST_SIGNALS, get_backtest_cadence as _bt_cadence
 
-    # Track 3 extras not in BACKTEST_SIGNALS (mirrors get_command_centre)
-    TRACK3_EXTRAS = [
-        {"signal": "roic",                 "label": "ROIC (Track 3)",                "group": "Track 3 / Quality",
-         "score_table": "roic_scores",     "score_col": "roic"},
-        {"signal": "fcf_yield",            "label": "FCF Yield (Track 3)",           "group": "Track 3 / Cash",
-         "score_table": "fcf_yield_scores","score_col": "fcf_yield"},
-        {"signal": "revenue_cv_5y",        "label": "Revenue Volatility 5y CV",      "group": "Track 3 / Quality",
-         "score_table": "revenue_cv_scores","score_col": "revenue_cv_5y"},
-        {"signal": "relative_turnover",    "label": "Inventory Turnover (sector-relative)","group": "Track 3 / Working Capital",
-         "score_table": "inventory_turnover_scores","score_col": "relative_turnover"},
-        {"signal": "relative_growth",      "label": "Sector-Relative Sales Growth",  "group": "Track 3 / Growth",
-         "score_table": "sales_growth_relative_scores","score_col": "relative_growth"},
-        {"signal": "share_momentum",       "label": "Market-Share Momentum",         "group": "Track 3 / Sector",
-         "score_table": "share_momentum_scores","score_col": "share_momentum"},
-    ]
+    # Track 3 extras list — all entries were duplicates of BACKTEST_SIGNALS
+    # rows as of 2026-05-24 (Track 3 factors got promoted to BACKTEST_SIGNALS
+    # when they shipped). Keeping them here double-counted each one and the
+    # duplicate showed as F (cockpit looked up by score_table which sometimes
+    # failed silently). Cleaned out; new Track 3 factors should be registered
+    # directly in BACKTEST_SIGNALS with pit_column_v2.
+    TRACK3_EXTRAS = []
 
     PROMOTION_T = 1.5
 
@@ -2297,29 +2289,73 @@ def get_factor_health():
         # but doesn't count if factor isn't built yet
         model_score = 100 if in_model_flag else (0 if status in ("PROPOSED", "BLOCKED") else 50)
 
-        # Weighted overall (these weights sum to 1.0)
-        overall = (
-            0.35 * coverage_score +
-            0.15 * freshness_score +
-            0.30 * backtest_score +
-            0.10 * pit_score +
-            0.10 * model_score
+        # Two separate grades — pre-2026-05-24 these were conflated into one
+        # composite. Caused user confusion: a factor with perfect data but a
+        # DROP-verdict backtest would show 'F' as if the data were broken.
+        #
+        # data_health: is the signal COMPUTING properly? (data side)
+        # validation:  is the signal PREDICTIVE in backtest? (alpha side)
+        data_health = (
+            0.65 * coverage_score +   # was 0.35; renormalized after removing backtest
+            0.25 * freshness_score +  # was 0.15
+            0.10 * pit_score          # was 0.10 + 0.10 model_score (model = rotation, not health)
         )
-        overall = round(overall, 1)
-        letter, color = _grade(overall)
+        data_health = round(data_health, 1)
+        data_grade, data_color = _grade(data_health)
+
+        # Validation verdict — purely t-stat based, independent of data quality
+        if t_stat is None or pd.isna(t_stat):
+            validation_verdict, validation_color = "NONE", "var(--text-muted)"
+        else:
+            abs_t = abs(float(t_stat))
+            if abs_t >= 2.5:
+                validation_verdict, validation_color = "KEEP", "#2ecc71"
+            elif abs_t >= 1.5:
+                validation_verdict, validation_color = "WEAK", "#4d8eff"
+            else:
+                validation_verdict, validation_color = "DROP", "#e74c3c"
+
+        # Back-compat: keep `overall` field but redirect callers to data_health
+        overall = data_health
+        letter, color = data_grade, data_color
+
+        # Per-signal sparseness expectations (some signals are LOW-coverage by
+        # nature — sparse data ≠ broken). Tagged here so the issue chip uses
+        # an honest reason instead of "many stocks unscored" implying bug.
+        SPARSE_BY_NATURE = {
+            "bulk_deal_signal",
+            "sentiment_7d", "news_volume",
+            "insider_signal",      # only stocks with recent insider trades
+        }
+        # Sector-level signals: don't measure per-stock coverage
+        SECTOR_LEVEL = {"regulatory_sector_signal", "macro_sector_signal"}
+        # End-state composite — backtest-via-portfolio (Track 2.4), not as a factor
+        COMPOSITE_NOT_FACTOR = {"screener_final_composite"}
+        # Data-depth gapped signals — known short history (needs NSE archive backfill)
+        DATA_DEPTH_LIMITED = {"fii_dii_cash_net", "fii_dii_fno_positioning"}
 
         issues = []
-        if coverage_pct < 40 and coverage_n > 0:
-            issues.append(f"coverage {coverage_pct}% — many stocks unscored")
+        if signal in SECTOR_LEVEL:
+            issues.append("sector-level signal — per-stock coverage not applicable")
+        elif signal in COMPOSITE_NOT_FACTOR:
+            issues.append("composite output — backtest via portfolio (Track 2.4), not as factor")
+        elif signal in DATA_DEPTH_LIMITED:
+            issues.append("data depth limited — needs NSE archive backfill for backtest window")
         elif coverage_n == 0:
             issues.append("no scores in source table")
+        elif coverage_pct < 40 and signal in SPARSE_BY_NATURE:
+            issues.append(f"sparse by nature — {coverage_pct}% of universe has the underlying event")
+        elif coverage_pct < 40:
+            issues.append(f"coverage {coverage_pct}% — many stocks unscored")
+
         if freshness_days is not None and freshness_days > 7:
             issues.append(f"stale ({freshness_days}d)")
         if t_stat is None or pd.isna(t_stat):
-            issues.append("no backtest t-stat yet")
+            if signal not in COMPOSITE_NOT_FACTOR | DATA_DEPTH_LIMITED:
+                issues.append("no backtest t-stat yet")
         elif abs(float(t_stat)) < 0.5:
             issues.append(f"t-stat near zero ({float(t_stat):+.2f})")
-        if not pit_ready:
+        if not pit_ready and signal not in COMPOSITE_NOT_FACTOR:
             issues.append("no PIT helper — can't be backtested")
 
         return {
@@ -2346,9 +2382,15 @@ def get_factor_health():
                 "pit": int(pit_score),
                 "model": int(model_score),
             },
-            "overall": overall,
-            "grade": letter,
+            "overall": overall,         # = data_health (back-compat alias)
+            "grade": letter,            # = data_grade (back-compat alias)
             "grade_color": color,
+            "data_health": data_health,
+            "data_grade": data_grade,
+            "data_grade_color": data_color,
+            "validation_verdict": validation_verdict,
+            "validation_color": validation_color,
+            "backtest_cadence": _bt_cadence(signal),
             "issues": issues,
         }
 
@@ -2410,12 +2452,14 @@ def get_factor_health():
             track="f-track",
         ))
 
-    # Aggregate summary
+    # Aggregate summary — two distinct distributions
     n = len(out)
-    by_grade = {}
+    by_data_grade = {}
+    by_validation = {}
     for r in out:
-        by_grade[r["grade"]] = by_grade.get(r["grade"], 0) + 1
-    avg_overall = round(sum(r["overall"] for r in out) / n, 1) if n else 0
+        by_data_grade[r["data_grade"]] = by_data_grade.get(r["data_grade"], 0) + 1
+        by_validation[r["validation_verdict"]] = by_validation.get(r["validation_verdict"], 0) + 1
+    avg_data_health = round(sum(r["data_health"] for r in out) / n, 1) if n else 0
     summary = {
         "total": n,
         "in_model": sum(1 for r in out if r["in_model"]),
@@ -2423,8 +2467,13 @@ def get_factor_health():
         "not_built": sum(1 for r in out if r["coverage_n"] == 0),
         "with_t_stat": sum(1 for r in out if r["t_stat"] is not None),
         "pit_ready": sum(1 for r in out if r["pit_ready"]),
-        "avg_overall": avg_overall,
-        "grade_dist": by_grade,
+        # Back-compat aliases (template still reads these)
+        "avg_overall": avg_data_health,
+        "grade_dist": by_data_grade,
+        # New, clearer fields
+        "avg_data_health": avg_data_health,
+        "data_grade_dist": by_data_grade,
+        "validation_dist": by_validation,
     }
 
     return {"summary": summary, "factors": out}

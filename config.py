@@ -182,6 +182,19 @@ SCREEN = {
     "min_avg_volume_20d": 10_000,
     "financial_sectors": ["Financials"],
     "cyclical_sectors": ["Metals & Mining", "Oil & Gas", "Chemicals", "Cement"],
+    # InvIT / REIT / business-trust name patterns. These instruments don't
+    # share equity ranking semantics (distribution-yield vehicles with
+    # quarterly NAV mechanics, low float). Excluded from main screener since
+    # 2026-05-24. Match is on stocks.name containing any of these substrings
+    # (case-insensitive); audit pass with `python -m scoring.screener
+    # --dry-run` after editing to confirm intent.
+    "trust_exclusion_patterns": [
+        "InvIT", "REIT",
+        "Infrastructure Trust", "Infra Trust",
+        "Highways Trust", "Realty Trust",
+        "Business Parks", "Office Parks",
+        "Yield Plus Trust", "Select Trust",
+    ],
 }
 
 # ── Pipeline ──
@@ -228,6 +241,26 @@ PIPELINE_STEPS = [
 
     {"name": "fetch_news",         "module": "sources.rss",          "function": "compute", "critical": False,
      "table": "news_articles",     "source": "RSS feeds (8 sources)", "data_freq": "daily", "frequency": "daily"},
+
+    # Regulatory pipeline — harvester writes to regulatory_events, classifier
+    # writes to regulatory_signals. Were missing from PIPELINE_STEPS pre-
+    # 2026-05-24 → REGULATORY_FEED_DARK fired (43 days silent before the
+    # staleness override caught it). Weekly harvest, daily classify (only
+    # new unclassified rows).
+    {"name": "fetch_regulatory",   "module": "sources.regulatory_harvester", "function": "harvest_all", "critical": False,
+     "table": "regulatory_events", "source": "RBI + PIB + Google News + Wayback", "data_freq": "weekly", "frequency": "weekly"},
+
+    {"name": "classify_regulatory","module": "sources.regulatory_classifier", "function": "compute", "critical": False,
+     "table": "regulatory_signals","source": "regulatory_events (AI-classified)", "data_freq": "daily", "frequency": "daily"},
+
+    # Moneycontrol broker recos — named-broker BUY/HOLD/SELL with target prices.
+    # 2026-05-24: source confirmed alive (HINDALCO returned 6 real reports from
+    # Motilal Oswal / Prabhudas Lilladher / Emkay Global). One-time backfill
+    # needed first: `python -m sources.moneycontrol_recos --discover-only`
+    # (writes stocks.mc_slug for ~2,448 stocks; otherwise harvester silently
+    # skips no_slug stocks). Then this daily step keeps it fresh.
+    {"name": "fetch_broker_recos", "module": "sources.moneycontrol_recos", "function": "compute", "critical": False,
+     "table": "broker_recommendations", "source": "Moneycontrol HTML",   "data_freq": "weekly", "frequency": "weekly"},
 
     # {"name": "fetch_fundamentals", "module": "sources.tickertape", "function": "compute", "critical": False,
     #  "table": "quarterly_income",  "source": "Tickertape API",     "data_freq": "quarterly", "frequency": "monthly"},

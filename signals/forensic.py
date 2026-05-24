@@ -178,12 +178,16 @@ def _compute_beneish(qi_group, bs_y0, bs_y1, cf_y0):
             lo, hi = RATIO_CLIP.get(k, (-10, 10))
             components[k] = max(lo, min(hi, v))
 
-    # Need at least 4 of 6 components to compute a score
+    # Need at least 5 of 6 components to compute a score (pre-2026-05-24 it
+    # was 4-of-6 with missing components substituted as 1.0=neutral — that
+    # silently understated manipulation flags for partial-data stocks).
     valid = {k: v for k, v in components.items() if v is not None and not pd.isna(v)}
-    if len(valid) < 4:
+    if len(valid) < 5:
         return None
 
-    # Compute M-Score (fill missing components with 1.0 = neutral)
+    # Compute M-Score. For the at-most-1 missing component, substitute 1.0
+    # (Beneish's neutral ratio for multiplicative inputs). With a 5-of-6
+    # floor, the rescaling impact of a single missing ratio is bounded.
     m = BENEISH_COEFFICIENTS["intercept"]
     for comp, coeff in BENEISH_COEFFICIENTS.items():
         if comp == "intercept":

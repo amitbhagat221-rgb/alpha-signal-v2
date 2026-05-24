@@ -325,8 +325,18 @@ def compute(limit=None, ticker=None, discover_only=False, aggregate_only=False, 
             time.sleep(DELAY)
             if not slug:
                 no_slug += 1
-                continue
+
+        # Heartbeat — fires in both --discover-only and full-fetch modes.
+        # Pre-2026-05-24 this print was AFTER `if discover_only: continue` →
+        # discovery ran 30+ min with zero log output. CLAUDE.md rule: silent
+        # failures are the enemy.
+        if i % 50 == 0:
+            mode = "discovery" if discover_only else "fetch"
+            print(f"  [{i}/{len(stocks)}] {mode} · slugs_found={i - no_slug} · no_slug={no_slug}"
+                  + (f" · recos={n_recos_total}" if not discover_only else ""), flush=True)
+
         if discover_only:
+            time.sleep(DELAY)
             continue
 
         recos = fetch_for_sid(sid, slug, fetched_at)
@@ -341,7 +351,6 @@ def compute(limit=None, ticker=None, discover_only=False, aggregate_only=False, 
                 upsert_df(pd.DataFrame(buf), "broker_recommendations")
                 saved += len(buf)
                 buf = []
-            print(f"  [{i}/{len(stocks)}] {saved} recos saved · no_slug={no_slug} · no_recos={no_recos}")
 
         time.sleep(DELAY)
 

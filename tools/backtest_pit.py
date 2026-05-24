@@ -72,6 +72,9 @@ SIGNAL_COLUMN_MAP = {
     "delivery_anomaly_z":  (None, "delivery_anomaly_z"),
     "bulk_deal_signal":    (None, "bulk_deal_signal"),
     "short_selling_signal": (None, "short_selling_signal"),
+    # Behavior tier — PIT helpers shipped 2026-05-24
+    "insider_signal":      (None, "insider_score"),
+    "sentiment_7d":        (None, "sentiment_7d"),
     # Consensus
     "pt_upside":           (None, "pt_upside"),
     "pt_revision_yoy":     (None, "pt_revision_yoy"),
@@ -143,8 +146,37 @@ def _compute_ic(df, signal_col, fwd_col):
     return out
 
 
-def _aggregate(ic_rows, signal, cap_tier, source):
-    """Aggregate per-period IC list into a single (signal, tier) result."""
+def _newey_west_se(ics, lag):
+    """Newey-West standard error for serially-correlated IC series.
+
+    Standard SE = std(ics) / sqrt(n). Newey-West corrects for autocorrelation
+    when consecutive IC observations overlap (e.g. signal lookback > eval gap,
+    or fwd_return window > eval gap). Bartlett kernel with `lag` truncation.
+    """
+    n = len(ics)
+    if n < 2 or lag <= 0:
+        return float(np.std(ics, ddof=1) / np.sqrt(n)) if n > 1 else None
+    mean = float(np.mean(ics))
+    centered = ics - mean
+    # γ_0 = variance
+    var = float(np.dot(centered, centered) / n)
+    # Add 2 * Σ_l (1 - l/(L+1)) * γ_l
+    for l in range(1, min(lag, n - 1) + 1):
+        weight = 1.0 - l / (lag + 1.0)
+        cov = float(np.dot(centered[l:], centered[:-l]) / n)
+        var += 2.0 * weight * cov
+    if var <= 0:
+        # Negative-variance edge: fall back to classical std
+        return float(np.std(ics, ddof=1) / np.sqrt(n))
+    return float(np.sqrt(var) / np.sqrt(n))
+
+
+def _aggregate(ic_rows, signal, cap_tier, source, cadence="monthly", nw_lag=0):
+    """Aggregate per-period IC list into a single (signal, tier) result.
+
+    For overlapping-window signals (e.g. insider 90d at weekly cadence),
+    pass nw_lag > 0 to apply Newey-West variance correction.
+    """
     if not ic_rows:
         return None
     ics = np.array([r[1] for r in ic_rows])
@@ -152,9 +184,14 @@ def _aggregate(ic_rows, signal, cap_tier, source):
     n_periods = len(ic_rows)
     mean_ic = float(ics.mean())
     std_ic = float(ics.std(ddof=1)) if n_periods > 1 else None
-    icir = mean_ic / std_ic if std_ic and std_ic > 0 else None
-    # t-stat = ICIR * sqrt(n_periods); approximation
-    t_stat = icir * np.sqrt(n_periods) if icir is not None else None
+    if nw_lag > 0 and n_periods > 1:
+        se = _newey_west_se(ics, nw_lag)
+        t_stat = mean_ic / se if se and se > 0 else None
+        icir = mean_ic / std_ic if std_ic and std_ic > 0 else None  # report classical ICIR
+    else:
+        icir = mean_ic / std_ic if std_ic and std_ic > 0 else None
+        # t-stat = ICIR * sqrt(n_periods); equivalent to mean/SE_classical
+        t_stat = icir * np.sqrt(n_periods) if icir is not None else None
 
     return {
         "signal": signal,
@@ -166,8 +203,32 @@ def _aggregate(ic_rows, signal, cap_tier, source):
         "icir": round(icir, 3) if icir is not None else None,
         "t_stat": round(float(t_stat), 2) if t_stat is not None else None,
         "verdict": _verdict(t_stat),
-        "source": source,
+        "source": source + (f":{cadence}+NW{nw_lag}" if nw_lag > 0 else (f":{cadence}" if cadence != "monthly" else "")),
     }
+
+
+# Per-signal Newey-West lag for weekly cadence.
+# Lag = max(signal_window_in_weeks, fwd_horizon_in_weeks - 1).
+# fwd_return_20d ≈ 4 weeks → adds lag 3 from return overlap.
+# Signal window adds more if > 1 week.
+_NW_LAG_WEEKLY = {
+    "insider_signal":       13,   # 90d insider window / 7d ≈ 13
+    "avg_delivery_pct_30d":  4,   # 30d / 7d ≈ 4
+    "delivery_anomaly_z":   13,   # 90d / 7d ≈ 13
+    "bulk_deal_signal":      4,   # 30d aggregation window
+    "short_selling_signal":  4,   # 30d aggregation window
+    "sentiment_7d":          3,   # 7d window, only fwd-return overlap matters
+    "news_volume":           3,   # same
+    "fii_dii_cash_net":      3,
+    "fii_dii_fno_positioning": 3,
+}
+
+
+def _nw_lag_for(signal_id, cadence):
+    """Pick Newey-West lag for (signal, cadence). 0 = classical SE."""
+    if cadence == "weekly":
+        return _NW_LAG_WEEKLY.get(signal_id, 3)  # default lag 3 for fwd_return_20d overlap
+    return 0  # monthly cadence with fwd_return_20d has ~no overlap
 
 
 def _load_pit(table, columns, fwd_col):
@@ -205,28 +266,47 @@ def main():
             print(f"No signal '{args.signal}' in registry")
             return
 
+    # Cadence dispatch — each signal uses the cadence registered in db.py.
+    # For weekly signals we filter v2_df to weekly Friday dates and apply
+    # Newey-West variance correction for overlapping signal/return windows.
+    from db import get_backtest_cadence
+    v2_dates_all = pd.to_datetime(v2_df["snapshot_date"]).dt.date.unique() if not v2_df.empty else []
+    weekly_dates = {d.isoformat() for d in v2_dates_all if pd.Timestamp(d).weekday() == 4}
+
     out_rows = []
     for signal, (v1_col, v2_col) in targets:
         if signal == "_response":
             continue
+        cadence = get_backtest_cadence(signal)
 
-        # Pick source
-        for src_name, src_df, signal_col, fwd_col in [
-            ("v1_archive", v1_df, v1_col, "fwd_return_20d"),
-            ("v2_recompute", v2_df, v2_col, "fwd_return_20d"),
-        ]:
+        # Pick source — for weekly cadence skip v1 archive (monthly only)
+        sources = [("v2_recompute", v2_df, v2_col, "fwd_return_20d")]
+        if cadence == "monthly":
+            sources.insert(0, ("v1_archive", v1_df, v1_col, "fwd_return_20d"))
+
+        for src_name, src_df, signal_col, fwd_col in sources:
             if signal_col is None or signal_col not in src_df.columns or fwd_col not in src_df.columns:
                 continue
-            # Skip if all values null
             if src_df[signal_col].notna().sum() == 0:
                 continue
+            # Filter to cadence-appropriate dates
+            if cadence == "weekly" and src_name == "v2_recompute":
+                df_use = src_df[src_df["snapshot_date"].isin(weekly_dates)]
+            elif cadence == "monthly":
+                # Monthly: keep only first-of-month-style dates (anything not Friday OR is the first day of month)
+                df_use = src_df[~src_df["snapshot_date"].isin(weekly_dates)] if src_name == "v2_recompute" and weekly_dates else src_df
+            else:
+                df_use = src_df
+            if df_use.empty:
+                continue
 
+            nw_lag = _nw_lag_for(signal, cadence)
             for tier in ["LARGE", "MID", "SMALL"]:
-                tier_df = src_df[src_df["cap_tier"] == tier]
+                tier_df = df_use[df_use["cap_tier"] == tier]
                 if tier_df.empty:
                     continue
                 ic_rows = _compute_ic(tier_df, signal_col, fwd_col)
-                result = _aggregate(ic_rows, signal, tier, src_name)
+                result = _aggregate(ic_rows, signal, tier, src_name, cadence=cadence, nw_lag=nw_lag)
                 if result:
                     out_rows.append(result)
 

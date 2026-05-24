@@ -20,7 +20,7 @@ from datetime import date
 import numpy as np
 import pandas as pd
 
-from config import SIGNAL_WEIGHTS, PORTFOLIO
+from config import SIGNAL_WEIGHTS, PORTFOLIO, SCREEN
 from db import read_sql, get_db, upsert_df
 
 
@@ -28,12 +28,34 @@ def _load_signals():
     """Load all signal values for the latest snapshot date."""
     stocks = read_sql("SELECT sid, ticker, name, sector, cap_tier FROM stocks")
 
+    # Drop InvIT / REIT / business-trust instruments — different ranking
+    # semantics from equities (distribution-yield vehicles, low float).
+    # See SCREEN["trust_exclusion_patterns"]. 2026-05-24 audit found SHREI
+    # (Shrem InvIT) with 40 of 65 trading days in last 90d ranked into SMALL.
+    patterns = SCREEN.get("trust_exclusion_patterns", [])
+    if patterns:
+        pat_re = "|".join(patterns)
+        trust_mask = stocks["name"].str.contains(pat_re, case=False, regex=True, na=False)
+        dropped = trust_mask.sum()
+        if dropped:
+            print(f"  Excluded {dropped} InvIT/REIT/trust instruments from screener universe")
+        stocks = stocks[~trust_mask].reset_index(drop=True)
+
     # Per-sid price-row count, used by the has-prices pick-eligibility gate.
     # A stock with zero (or near-zero) price history can't be charted, can't
     # have momentum/EY/B-P computed, and isn't really actionable even if it
     # scores well on fundamentals alone.
     price_counts = read_sql(
         "SELECT sid, COUNT(*) AS price_rows FROM stock_prices WHERE close > 0 GROUP BY sid"
+    )
+
+    # Per-sid quarterly_income row count → fundamental_coverage. INPUT-side
+    # coverage (vs weight_coverage which is OUTPUT-side). 2026-05-24 audit:
+    # ABSM ranked #164 SMALL with weight_coverage~0.6 because signal modules
+    # emit non-NULL outputs from partial inputs (accruals_signal from BS
+    # alone, consensus_signal from growth-only). Input coverage catches that.
+    fundamental_counts = read_sql(
+        "SELECT sid, COUNT(*) AS quarters_present FROM quarterly_income GROUP BY sid"
     )
 
     # Signal tables — get latest snapshot per stock
@@ -85,6 +107,10 @@ def _load_signals():
     df = df.merge(book_to_price, on="sid", how="left")
     df = df.merge(price_counts, on="sid", how="left")
     df["price_rows"] = df["price_rows"].fillna(0).astype(int)
+
+    df = df.merge(fundamental_counts, on="sid", how="left")
+    df["quarters_present"] = df["quarters_present"].fillna(0).astype(int)
+    df["fundamental_coverage"] = (df["quarters_present"] / 8.0).clip(upper=1.0)
 
     # Normalize smart_money from 0-100 to 0-1 for consistent percentile ranking
     df["smart_money"] = df["smart_money"] / 100.0
@@ -201,16 +227,18 @@ def score_universe(df):
     return df
 
 
-MIN_WEIGHT_COVERAGE = 0.50  # Stock must have ≥50% of tier signal weight backed by real data
-MIN_PRICE_ROWS = 60         # ≈3 months of trading days — required for actionable pick
-# Both thresholds + rationale: docs/decisions/0021-pick-eligibility-gate.md
+MIN_WEIGHT_COVERAGE = 0.50  # ≥50% of tier signal weight backed by non-NULL signal OUTPUT
+MIN_PRICE_ROWS = 60         # ≈3 months of trading days
+MIN_FUNDAMENTAL_COVERAGE = 0.50  # ≥4 of 8 quarterly_income rows (INPUT-side, added 2026-05-24)
+# Thresholds + rationale: docs/decisions/0021-pick-eligibility-gate.md
 
 
 def _pick_eligible(df):
     """Boolean Series: True where stock qualifies for daily_picks."""
     has_coverage = df["weight_coverage"].fillna(0) >= MIN_WEIGHT_COVERAGE
     has_prices = df["price_rows"].fillna(0) >= MIN_PRICE_ROWS
-    return has_coverage & has_prices
+    has_fundamentals = df["fundamental_coverage"].fillna(0) >= MIN_FUNDAMENTAL_COVERAGE
+    return has_coverage & has_prices & has_fundamentals
 
 
 def select_picks(df, picks_per_tier=None):
@@ -230,9 +258,11 @@ def select_picks(df, picks_per_tier=None):
     eligible = _pick_eligible(df)
     dropped_coverage = ((df["weight_coverage"].fillna(0) < MIN_WEIGHT_COVERAGE)).sum()
     dropped_prices = ((df["price_rows"].fillna(0) < MIN_PRICE_ROWS)).sum()
+    dropped_fundamentals = ((df["fundamental_coverage"].fillna(0) < MIN_FUNDAMENTAL_COVERAGE)).sum()
     print(f"  Pick gate: {(~eligible).sum()} excluded "
-          f"({dropped_coverage} below {MIN_WEIGHT_COVERAGE:.0%} coverage, "
-          f"{dropped_prices} below {MIN_PRICE_ROWS}d prices)")
+          f"({dropped_coverage} below {MIN_WEIGHT_COVERAGE:.0%} weight, "
+          f"{dropped_prices} below {MIN_PRICE_ROWS}d prices, "
+          f"{dropped_fundamentals} below {MIN_FUNDAMENTAL_COVERAGE:.0%} fundamentals)")
 
     picks = []
     for tier, n in picks_per_tier.items():
@@ -286,7 +316,8 @@ def compute(dry_run=False, top=None):
     ).astype("Int64")
 
     out = eligible[["sid", "final_score", "rank", "base_score", "cap_tier", "sector",
-                    "consensus", "accruals", "promoter"]].copy()
+                    "consensus", "accruals", "promoter",
+                    "weight_coverage", "price_rows", "fundamental_coverage"]].copy()
     out["pick_date"] = pick_date
     out["sentiment_adj"] = 0  # placeholder
     out["insider_adj"] = 0
@@ -302,7 +333,8 @@ def compute(dry_run=False, top=None):
     picks_out = out[["sid", "pick_date", "final_score", "rank", "base_score",
                      "sentiment_adj", "insider_adj", "forensic_adj", "macro_adj",
                      "piotroski_adj", "accruals_adj", "consensus_adj", "promoter_adj",
-                     "smart_money_adj", "cap_tier", "sector"]]
+                     "smart_money_adj", "cap_tier", "sector",
+                     "weight_coverage", "price_rows", "fundamental_coverage"]]
 
     # Delete today's prior rows before insert. Upsert is REPLACE on (sid, pick_date)
     # which leaves rows untouched if today's run drops a sid (gated out by

@@ -446,6 +446,11 @@ CREATE TABLE IF NOT EXISTS daily_picks (
     smart_money_adj REAL,
     cap_tier        TEXT,
     sector          TEXT,
+    -- Pick-eligibility gate columns (persisted from 2026-05-24 so /audit
+    -- can answer "why is this stock in/out of picks" without re-running scorer):
+    weight_coverage      REAL,    -- fraction of tier signal weight backed by non-NULL signal OUTPUT
+    price_rows           INTEGER, -- total non-zero close rows in stock_prices
+    fundamental_coverage REAL,    -- min(quarterly_income rows / 8, 1.0) — INPUT-side coverage
     PRIMARY KEY (sid, pick_date)
 );
 

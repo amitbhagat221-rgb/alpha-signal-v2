@@ -92,6 +92,9 @@ CREATE TABLE IF NOT EXISTS daily_snapshots_pit (
     value_composite  REAL,
     quality_composite REAL,
     growth_composite REAL,
+    -- Behavior tier — added 2026-05-24 (audit: were missing PIT helpers)
+    insider_score    REAL,
+    sentiment_7d     REAL,
     reconstructed_at TEXT DEFAULT (datetime('now')),
     PRIMARY KEY (sid, snapshot_date)
 );
@@ -138,6 +141,9 @@ PIT_COLUMNS = [
     "earnings_beat_rate", "news_volume_7d",
     # Track 3 cluster (plan 0003) — sector-narrative-derived factors
     "revenue_cv_5y", "relative_turnover", "relative_growth", "share_momentum",
+    # Behavior tier — added 2026-05-24 (audit: were missing PIT helpers)
+    "insider_score",    # net-weighted insider buys/sells, last 90d
+    "sentiment_7d",     # VADER compound score, mean over last 7d articles
     # Track 3 standalone factors
     "ccc",
     "margin_slope",
@@ -199,6 +205,8 @@ VALIDATION_RANGES = {
     # Tier 4 — quality + sentiment
     "earnings_beat_rate":    (0, 1, True),      # fraction of last-N quarters beating
     "news_volume_7d":        (0, 100, True),    # article count in last 7d
+    "insider_score":         (-1, 1, True),     # weighted net buys/sells, clipped
+    "sentiment_7d":          (-1, 1, True),     # VADER compound score, mean over 7d
     # Track 3 cluster (plan 0003)
     "revenue_cv_5y":         (0, 50, True),     # CV; >50 means mean ~ 0
     "relative_turnover":     (0, 20, True),     # ratio vs sector p50
@@ -307,6 +315,24 @@ def generate_eval_dates(months_back=7, today=None):
         while d.weekday() >= 5:
             d += timedelta(days=1)
         dates.append(d)
+    return dates
+
+
+def generate_weekly_eval_dates(weeks_back=104, today=None):
+    """Generate weekly eval dates: every Friday close, last N weeks.
+
+    Default 104 weeks (~2 years). For behavioral/news signals that warrant
+    weekly cadence per BACKTEST_CADENCE in db.py. Friday choice = end-of-week
+    market state, consistent across signals.
+    """
+    if today is None:
+        today = date.today()
+    # Walk back to find the most-recent past Friday (weekday 4)
+    days_since_fri = (today.weekday() - 4) % 7
+    last_friday = today - timedelta(days=days_since_fri)
+    dates = []
+    for offset in range(weeks_back - 1, -1, -1):
+        dates.append(last_friday - timedelta(weeks=offset))
     return dates
 
 
@@ -1175,6 +1201,57 @@ def pit_news_volume(stocks, news_pit_with_sids, eval_date, window_days=7):
     # Cap at validation max
     counts["news_volume_7d"] = counts["news_volume_7d"].clip(upper=100)
     return counts
+
+
+def pit_sentiment_7d(news_text_pit, eval_date, window_days=7):
+    """Mean VADER compound score of articles in last `window_days` per stock.
+
+    `news_text_pit` has (sid, published_date, title, summary), already
+    filtered to published_date <= eval_date. NULL for stocks with no
+    articles in the window. Available from 2024-04-23 onwards (news_articles
+    start date); pre-2024 eval dates produce empty output.
+    """
+    if news_text_pit is None or news_text_pit.empty:
+        return pd.DataFrame(columns=["sid", "sentiment_7d"])
+    cutoff = (eval_date - timedelta(days=window_days)).isoformat()
+    win = news_text_pit[news_text_pit["published_date"] >= cutoff]
+    if win.empty:
+        return pd.DataFrame(columns=["sid", "sentiment_7d"])
+    try:
+        from nltk.sentiment.vader import SentimentIntensityAnalyzer
+        sia = SentimentIntensityAnalyzer()
+    except Exception:
+        # nltk vader_lexicon missing — skip gracefully
+        return pd.DataFrame(columns=["sid", "sentiment_7d"])
+    # Score per article (cache by article_id since same article can tag multiple sids)
+    article_scores = {}
+    for _, r in win.drop_duplicates(subset=["article_id"]).iterrows():
+        text = f"{r.get('title','') or ''} {r.get('summary','') or ''}"
+        article_scores[r["article_id"]] = sia.polarity_scores(text)["compound"]
+    win = win.copy()
+    win["score"] = win["article_id"].map(article_scores)
+    out = win.groupby("sid")["score"].mean().reset_index(name="sentiment_7d")
+    out["sentiment_7d"] = out["sentiment_7d"].round(4)
+    return out
+
+
+def pit_insider_signal(stocks, insider_trades_pit, eval_date):
+    """Net-weighted insider signal as of eval_date — reuses signals.insider_signal._compute_scores.
+
+    insider_signal._compute_scores already accepts eval_date and a 90d
+    lookback. We just route PIT-filtered trades through it and extract the
+    score_impact column as the PIT value. Insider_trades depth from 2021-01
+    covers all v1 PIT eval dates (2023-04+).
+    """
+    if insider_trades_pit is None or insider_trades_pit.empty:
+        return pd.DataFrame(columns=["sid", "insider_score"])
+    from signals.insider_signal import _compute_scores
+    df = _compute_scores(insider_trades_pit, stocks, eval_date)
+    if "score_impact" not in df.columns:
+        return pd.DataFrame(columns=["sid", "insider_score"])
+    out = df[["sid", "score_impact"]].rename(columns={"score_impact": "insider_score"})
+    # Drop rows where signal didn't compute (no tracked-category activity)
+    return out.dropna(subset=["insider_score"])
 
 
 def pit_momentum(prices_pit):
@@ -2064,6 +2141,17 @@ def reconstruct_one_date(eval_date, raw, signals_to_run):
         news_pit = raw["news"][raw["news"]["published_date"] <= eval_date.isoformat()]
         base = base.merge(pit_news_volume(raw["stocks"], news_pit, eval_date), on="sid", how="left")
 
+    # ── Behavior tier: sentiment_7d (VADER on PIT-filtered articles, last 7d) ──
+    # Pre-2024-04 eval dates: news_articles started 2024-04-23, output will be empty.
+    if "sentiment_7d" in signals_to_run and "news_text" in raw:
+        news_text_pit = raw["news_text"][raw["news_text"]["published_date"] <= eval_date.isoformat()]
+        base = base.merge(pit_sentiment_7d(news_text_pit, eval_date), on="sid", how="left")
+
+    # ── Behavior tier: insider_score (net-weighted Promoter/Director/KMP, 90d) ──
+    if "insider_signal" in signals_to_run and "insider_trades" in raw:
+        ins_pit = raw["insider_trades"][raw["insider_trades"]["trade_date"] <= eval_date.isoformat()]
+        base = base.merge(pit_insider_signal(raw["stocks"], ins_pit, eval_date), on="sid", how="left")
+
     # ── Track 3 cluster (plan 0003) — sector-narrative-derived factors ──
     fund_pit = (knowable_screener(raw["fund_screener"], eval_date)
                 if "fund_screener" in raw else pd.DataFrame())
@@ -2243,6 +2331,20 @@ def load_raw():
         "JOIN news_article_stocks nas ON na.article_id = nas.article_id "
         "WHERE na.published_at IS NOT NULL"
     )
+    # News article text — needed for sentiment_7d PIT (VADER on title+summary)
+    news_text = read_sql(
+        "SELECT na.article_id, nas.sid, "
+        "       SUBSTR(na.published_at, 1, 10) AS published_date, "
+        "       na.title, na.summary "
+        "FROM news_articles na "
+        "JOIN news_article_stocks nas ON na.article_id = nas.article_id "
+        "WHERE na.published_at IS NOT NULL"
+    )
+    # Insider trades — depth from 2021-01 supports v1 PIT eval dates (2023-04+)
+    insider_trades = read_sql(
+        "SELECT sid, person_category, transaction_type, shares, value_lakhs, trade_date "
+        "FROM insider_trades WHERE trade_date IS NOT NULL"
+    )
     reg_events = read_sql(
         "SELECT event_id, published_at FROM regulatory_events WHERE published_at IS NOT NULL"
     )
@@ -2271,6 +2373,7 @@ def load_raw():
         "stocks": stocks, "qi": qi, "bs": bs, "cf": cf, "sh": sh, "prices": prices,
         "adjustments": adjustments,
         "fh": fh, "acs": acs, "bulk": bulk, "short": short, "news": news,
+        "news_text": news_text, "insider_trades": insider_trades,
         "fund_screener": fund_screener,
         "reg_events": reg_events, "reg_signals": reg_signals,
         "macro_hist": macro_hist, "macro_map": macro_map,
@@ -2280,7 +2383,11 @@ def load_raw():
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--months", type=int, default=7,
-                        help="Number of monthly eval dates back from today (default 7)")
+                        help="Number of monthly eval dates back from today (default 7). Ignored when --cadence weekly.")
+    parser.add_argument("--cadence", choices=["monthly", "weekly"], default="monthly",
+                        help="Eval-date frequency. weekly = every Friday close (use for behavioral/news signals; see db.BACKTEST_CADENCE).")
+    parser.add_argument("--weeks", type=int, default=104,
+                        help="Number of weekly eval dates back from today (default 104 = 2yr). Only used when --cadence weekly.")
     parser.add_argument("--dry-run", action="store_true",
                         help="Compute but don't write to daily_snapshots_pit")
     parser.add_argument("--signal", action="append", default=None,
@@ -2295,6 +2402,7 @@ def main():
                                  "pt_upside", "bulk_deal", "sector_overlays",
                                  "short_selling",
                                  "earnings_beat_rate", "news_volume",
+                                 "sentiment_7d", "insider_signal",
                                  "revenue_cv", "inventory_turnover",
                                  "sales_growth_relative", "share_momentum",
                                  "cash_conversion_cycle",
@@ -2313,7 +2421,12 @@ def main():
                         help="Skip eval dates that already have a SUCCESS row in pit_reconstruction_log")
     args = parser.parse_args()
 
-    eval_dates = generate_eval_dates(months_back=args.months)
+    if args.cadence == "weekly":
+        eval_dates = generate_weekly_eval_dates(weeks_back=args.weeks)
+        print(f"  Cadence: weekly · {len(eval_dates)} Friday eval dates · {eval_dates[0]} → {eval_dates[-1]}")
+    else:
+        eval_dates = generate_eval_dates(months_back=args.months)
+        print(f"  Cadence: monthly · {len(eval_dates)} dates · {eval_dates[0]} → {eval_dates[-1]}")
     DEFAULT_SIGNALS = {
         "piotroski", "accruals", "promoter", "forensic",
         "earnings_yield", "book_to_price", "momentum",
@@ -2327,6 +2440,8 @@ def main():
         "short_selling",
         # Tier 4 quality + sentiment
         "earnings_beat_rate", "news_volume",
+        # Behavior tier — added 2026-05-24
+        "sentiment_7d", "insider_signal",
         # Track 3 cluster (plan 0003)
         "revenue_cv", "inventory_turnover",
         "sales_growth_relative", "share_momentum",

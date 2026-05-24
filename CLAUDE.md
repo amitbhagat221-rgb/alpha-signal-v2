@@ -68,6 +68,11 @@ Everything else (memory, `_archive/`, slash commands, settings) — Claude handl
 - Never `git commit --amend`, `git add .`, `git add -A`
 - Never `pkill -f "uvicorn cockpit.app"` — pattern matches prod systemd service
 
+**Graph-first lookup**
+- Before any cross-file grep/read sweep, query the graphify MCP first (`mcp__graphify__*`). The graph indexes 1,792 nodes / 2,801 edges at 90% extraction confidence — use it for navigation and recall, then read only the specific files it points to.
+- Do NOT query the graph for files you're about to edit — read them directly. Graph is for finding things, not for the working file.
+- Do NOT run `graphify --update` yet. Graph is frozen on the 2026-05-23 snapshot until Amit rebuilds without image extraction. Trial period: ~1 week from 2026-05-24, then revisit cadence.
+
 ---
 
 ## Session Protocol
