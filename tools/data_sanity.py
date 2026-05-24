@@ -88,6 +88,36 @@ def _run_sql_check(check, conn):
     }
 
 
+def _generic_coverage_checks():
+    """Auto-generated coverage checks for every per-sid table in COVERAGE_THRESHOLDS.
+
+    Avoids the maintenance burden of hand-writing a sanity-check row each time
+    a new per-stock signal table ships. If db.COVERAGE_THRESHOLDS lists the
+    table, this generator emits a CRITICAL/WARN at the same thresholds.
+    """
+    from db import COVERAGE_THRESHOLDS
+    out = []
+    for tbl, (gap_pct, severe_pct) in COVERAGE_THRESHOLDS.items():
+        # critical_pct/warn_pct are PERCENT OF UNIVERSE MISSING — invert from
+        # the COVERAGE_THRESHOLDS form which is "percent of universe present".
+        out.append({
+            "code": f"COVERAGE_GAP_AUTO_{tbl.upper()}",
+            "table": tbl,
+            "column": "sid",
+            "message": f"{tbl} per-stock coverage below {gap_pct:.0f}% (severe < {severe_pct:.0f}%)",
+            "critical_pct": 100 - severe_pct,
+            "warn_pct": 100 - gap_pct,
+            "sql": f"""
+                SELECT
+                    (SELECT COUNT(*) FROM stocks WHERE sid NOT IN (SELECT DISTINCT sid FROM {tbl})) AS n_bad,
+                    (SELECT COUNT(*) FROM stocks) AS n_total,
+                    (SELECT sid || ' (' || ticker || ', ' || cap_tier || ')' FROM stocks
+                     WHERE sid NOT IN (SELECT DISTINCT sid FROM {tbl}) LIMIT 1) AS sample
+            """,
+        })
+    return out
+
+
 def _run_fn_check(check):
     """Function-form check. fn must return None or a result dict."""
     result = check["fn"]()
@@ -513,6 +543,165 @@ CHECKS = [
     # ═══════════════════════════════════════════════════════════════════
     # (Existing dossier validation already runs at write-time and the health
     # report already reports DOSSIER_HALLUCINATION. We don't double-count it.)
+
+    # ═══════════════════════════════════════════════════════════════════
+    # Output-quality — pick is only as good as the data behind it
+    # ═══════════════════════════════════════════════════════════════════
+    # 2026-05-23: ANO ranked #1 SMALL with zero price rows and only 2 of 7
+    # signals (one a default 50.0). Freshness watchdog said FRESH because
+    # stock_prices.MAX(date) was current — the per-stock coverage hole was
+    # invisible. The checks below catch that class of bug at the output layer.
+    {
+        "code": "DAILY_PICK_NO_PRICES",
+        "table": "daily_picks",
+        "column": "sid",
+        "message": "Top-ranked stock has zero rows in stock_prices",
+        "severity": CRITICAL,
+        "sql": """
+            WITH latest AS (
+                SELECT sid, cap_tier, rank FROM daily_picks
+                WHERE pick_date = (SELECT MAX(pick_date) FROM daily_picks)
+                  AND rank <= 20
+            )
+            SELECT
+                SUM(CASE WHEN sp.cnt IS NULL OR sp.cnt = 0 THEN 1 ELSE 0 END) AS n_bad,
+                COUNT(*) AS n_total,
+                (SELECT l.cap_tier || ' rank ' || l.rank || ': ' || l.sid
+                 FROM latest l LEFT JOIN (
+                    SELECT sid, COUNT(*) AS cnt FROM stock_prices WHERE close > 0 GROUP BY sid
+                 ) sp2 ON l.sid = sp2.sid
+                 WHERE sp2.cnt IS NULL OR sp2.cnt = 0 LIMIT 1) AS sample
+            FROM latest l
+            LEFT JOIN (
+                SELECT sid, COUNT(*) AS cnt FROM stock_prices WHERE close > 0 GROUP BY sid
+            ) sp ON l.sid = sp.sid
+        """,
+    },
+    {
+        "code": "DAILY_PICK_THIN_SIGNAL_COVERAGE",
+        "table": "daily_picks",
+        "column": "—",
+        "message": "Top picks scored on <4 of 8 signals (rank inflated by missing-data normalization)",
+        "critical_pct": 25,
+        "warn_pct": 10,
+        "sql": """
+            WITH latest_picks AS (
+                SELECT sid, cap_tier, rank FROM daily_picks
+                WHERE pick_date = (SELECT MAX(pick_date) FROM daily_picks)
+                  AND rank <= 50
+            ),
+            signal_counts AS (
+                SELECT
+                    lp.sid, lp.cap_tier, lp.rank,
+                    (CASE WHEN ps.f_score IS NOT NULL THEN 1 ELSE 0 END +
+                     CASE WHEN ac.accruals_signal IS NOT NULL THEN 1 ELSE 0 END +
+                     CASE WHEN cs.consensus_signal IS NOT NULL THEN 1 ELSE 0 END +
+                     CASE WHEN pr.promoter_signal IS NOT NULL THEN 1 ELSE 0 END +
+                     CASE WHEN sm.smart_money_score IS NOT NULL THEN 1 ELSE 0 END +
+                     CASE WHEN sp.cnt > 100 THEN 1 ELSE 0 END +    /* momentum + earnings_yield + b/p */
+                     CASE WHEN sp.cnt > 100 THEN 1 ELSE 0 END +
+                     CASE WHEN sp.cnt > 100 AND abs.total_equity IS NOT NULL THEN 1 ELSE 0 END) AS n_signals
+                FROM latest_picks lp
+                LEFT JOIN (SELECT sid, f_score FROM piotroski_scores WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM piotroski_scores)) ps ON lp.sid = ps.sid
+                LEFT JOIN (SELECT sid, accruals_signal FROM accruals_scores WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM accruals_scores)) ac ON lp.sid = ac.sid
+                LEFT JOIN (SELECT sid, consensus_signal FROM consensus_signals WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM consensus_signals)) cs ON lp.sid = cs.sid
+                LEFT JOIN (SELECT sid, promoter_signal FROM promoter_signals WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM promoter_signals)) pr ON lp.sid = pr.sid
+                LEFT JOIN (SELECT sid, smart_money_score FROM smart_money_scores WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM smart_money_scores)) sm ON lp.sid = sm.sid
+                LEFT JOIN (SELECT sid, COUNT(*) AS cnt FROM stock_prices WHERE close > 0 GROUP BY sid) sp ON lp.sid = sp.sid
+                LEFT JOIN (SELECT sid, MAX(total_equity) AS total_equity FROM annual_balance_sheet GROUP BY sid) abs ON lp.sid = abs.sid
+            )
+            SELECT
+                SUM(CASE WHEN n_signals < 4 THEN 1 ELSE 0 END) AS n_bad,
+                COUNT(*) AS n_total,
+                (SELECT cap_tier || ' rank ' || rank || ': ' || sid || ' (' || n_signals || '/8 signals)'
+                 FROM signal_counts WHERE n_signals < 4 ORDER BY rank LIMIT 1) AS sample
+            FROM signal_counts
+        """,
+    },
+    {
+        "code": "SCORE_TABLE_DEFAULT_PROLIFERATION",
+        "table": "smart_money_scores",
+        "column": "smart_money_score",
+        "message": "smart_money_score = 50.0 for >30% of universe (default-value leak from missing inputs)",
+        "critical_pct": 30,
+        "warn_pct": 15,
+        # The 2026-05-23 bug: _minmax_by_tier seeded all stocks at 50.0, so
+        # stocks with no bulk-deals AND no delivery data came out at exactly
+        # 50.0 instead of NaN. Hardcoded threshold of exactly 50.0 catches the
+        # default-substitution pattern; legitimate near-50 scores from real
+        # min-max output won't land on the exact value.
+        "sql": """
+            WITH latest AS (
+                SELECT smart_money_score FROM smart_money_scores
+                WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM smart_money_scores)
+            )
+            SELECT
+                SUM(CASE WHEN smart_money_score = 50.0 THEN 1 ELSE 0 END) AS n_bad,
+                COUNT(*) AS n_total
+            FROM latest
+        """,
+    },
+    {
+        "code": "UNIVERSE_PRICE_COVERAGE_LOW",
+        "table": "stock_prices",
+        "column": "sid",
+        "message": "Universe stocks missing from stock_prices entirely (harvester not covering all series)",
+        "critical_pct": 20,
+        "warn_pct": 5,
+        # Mirrors db.COVERAGE_THRESHOLDS but lives in data_sanity so it shows
+        # up in the daily health email alongside other invariant violations.
+        "sql": """
+            SELECT
+                (SELECT COUNT(*) FROM stocks WHERE sid NOT IN (SELECT DISTINCT sid FROM stock_prices)) AS n_bad,
+                (SELECT COUNT(*) FROM stocks) AS n_total,
+                (SELECT sid || ' (' || ticker || ', ' || cap_tier || ')' FROM stocks
+                 WHERE sid NOT IN (SELECT DISTINCT sid FROM stock_prices) LIMIT 1) AS sample
+        """,
+    },
+
+    # ═══════════════════════════════════════════════════════════════════
+    # Sector taxonomy — regulatory_signals.sector must align with stocks.sector
+    # ═══════════════════════════════════════════════════════════════════
+    # 2026-05-23: Gillette dossier showed Consumer Staples regulatory items
+    # because that part matched. But 1,638 regulatory_signals rows ("Financial
+    # Services" + "IT") never joined any stock — the AI classifier and the
+    # stocks universe were using different sector taxonomies and no one knew.
+    {
+        "code": "REGULATORY_SECTOR_TAXONOMY_MISMATCH",
+        "table": "regulatory_signals",
+        "column": "sector",
+        "message": "regulatory_signals.sector values don't exist in stocks.sector (taxonomy drift)",
+        "critical_pct": 20,
+        "warn_pct": 5,
+        "sql": """
+            SELECT
+                (SELECT COUNT(*) FROM regulatory_signals
+                 WHERE sector NOT IN (SELECT DISTINCT sector FROM stocks)) AS n_bad,
+                (SELECT COUNT(*) FROM regulatory_signals) AS n_total,
+                (SELECT sector || ' (' || COUNT(*) || ' rows orphaned)' FROM regulatory_signals
+                 WHERE sector NOT IN (SELECT DISTINCT sector FROM stocks)
+                 GROUP BY sector ORDER BY COUNT(*) DESC LIMIT 1) AS sample
+        """,
+    },
+    # 2026-05-23: regulatory_events stopped flowing 2026-04-10 but stayed
+    # "FRESH" because its threshold was monthly (50d). Gillette dossier showed
+    # 43-day-old items as "most recent." Watchdog override now 14d.
+    {
+        "code": "REGULATORY_FEED_DARK",
+        "table": "regulatory_events",
+        "column": "published_at",
+        "message": "No classified regulatory events in last 7 days — harvester or classifier silent",
+        "severity": WARN,
+        "sql": """
+            SELECT
+                CASE WHEN (SELECT COUNT(*) FROM regulatory_events
+                           WHERE classifier_status = 'classified'
+                             AND julianday('now') - julianday(published_at) <= 7) = 0
+                     THEN 1 ELSE 0 END AS n_bad,
+                1 AS n_total,
+                (SELECT MAX(published_at) FROM regulatory_events WHERE classifier_status='classified') AS sample
+        """,
+    },
 ]
 
 
@@ -521,9 +710,13 @@ CHECKS = [
 
 def run(only_code=None):
     """Run all checks, return list of violations (each a result dict)."""
+    # Auto-generated coverage checks (one per table in COVERAGE_THRESHOLDS).
+    # Lives outside CHECKS so future per-sid tables can be covered just by
+    # adding to db.COVERAGE_THRESHOLDS.
+    all_checks = CHECKS + _generic_coverage_checks()
     violations = []
     with get_db() as conn:
-        for check in CHECKS:
+        for check in all_checks:
             if only_code and check["code"] != only_code:
                 continue
             try:

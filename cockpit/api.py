@@ -250,17 +250,37 @@ def get_bulk_deals(sid):
 
 
 def get_regulatory_for_sector(sector):
-    """A7: Recent regulatory events affecting a sector."""
+    """A7: Recent regulatory events affecting a sector.
+
+    Two bugs fixed 2026-05-23 after Gillette dossier showed 2023 articles:
+      1. `published_at` is stored RFC 2822 ("Wed, 27 Sep 2023..."). Naive
+         ORDER BY does lexicographic sort, which puts "W"-day articles from
+         2023 above "S"-day articles from 2025. Use julianday() to parse.
+      2. No recency cutoff. Sector regulatory has 32 years of history; the
+         dossier shows operational signal, not archive. 90-day window matches
+         the regulatory.py DECAY_RATE half-life.
+      3. Sector taxonomy: regulatory_signals carries "Financial Services" /
+         "IT" while stocks uses "Financials" / "Information Technology". Map
+         both ways so a query never silently misses 1.6k rows.
+    """
     if not sector:
         return []
+    sector_aliases = {
+        "Financials": ["Financials", "Financial Services"],
+        "Information Technology": ["Information Technology", "IT"],
+    }.get(sector, [sector])
+    placeholders = ",".join(["?"] * len(sector_aliases))
     df = read_sql(
-        "SELECT rs.direction, rs.magnitude, rs.time_horizon, rs.confidence, "
-        "rs.ai_reasoning, re.title, re.published_at "
-        "FROM regulatory_signals rs "
-        "JOIN regulatory_events re ON rs.event_id = re.event_id "
-        "WHERE rs.sector = ? AND rs.magnitude IN ('major', 'moderate') "
-        "ORDER BY re.published_at DESC LIMIT 8",
-        params=[sector],
+        f"SELECT rs.direction, rs.magnitude, rs.time_horizon, rs.confidence, "
+        f"rs.ai_reasoning, re.title, re.published_at "
+        f"FROM regulatory_signals rs "
+        f"JOIN regulatory_events re ON rs.event_id = re.event_id "
+        f"WHERE rs.sector IN ({placeholders}) "
+        f"  AND rs.magnitude IN ('major', 'moderate') "
+        f"  AND rs.confidence IN ('high', 'medium') "
+        f"  AND julianday('now') - julianday(re.published_at) <= 90 "
+        f"ORDER BY julianday(re.published_at) DESC LIMIT 8",
+        params=list(sector_aliases),
     )
     return df.to_dict("records") if not df.empty else []
 
@@ -1288,17 +1308,27 @@ def get_sector_macro_contributors(sector):
 
 
 def get_sector_recent_regulatory(sector, n=10):
-    """Recent regulatory events for stocks in this sector."""
+    """Recent regulatory events for stocks in this sector.
+
+    Same RFC-2822-sort + taxonomy fixes as get_regulatory_for_sector
+    (2026-05-23 Gillette bug).
+    """
+    sector_aliases = {
+        "Financials": ["Financials", "Financial Services"],
+        "Information Technology": ["Information Technology", "IT"],
+    }.get(sector, [sector])
+    placeholders = ",".join(["?"] * len(sector_aliases))
     df = read_sql(
-        """
+        f"""
         SELECT re.event_id, re.published_at, re.title, rs.direction, rs.magnitude
         FROM regulatory_events re
         JOIN regulatory_signals rs ON rs.event_id = re.event_id
-        WHERE rs.sector = ? AND rs.direction IS NOT NULL
-        ORDER BY re.published_at DESC
+        WHERE rs.sector IN ({placeholders}) AND rs.direction IS NOT NULL
+          AND julianday('now') - julianday(re.published_at) <= 90
+        ORDER BY julianday(re.published_at) DESC
         LIMIT ?
         """,
-        params=[sector, n],
+        params=list(sector_aliases) + [n],
     )
     return df.to_dict("records") if not df.empty else []
 

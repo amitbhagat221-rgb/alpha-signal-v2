@@ -60,12 +60,44 @@ def _log_watchdog(table, action, status, error=None):
         )
 
 
+def _report_coverage(coverage_gap, dry_run=False):
+    """Print and log per-sid coverage shortfalls. Does not auto-heal."""
+    if coverage_gap.empty:
+        return
+    print(f"⚠ {len(coverage_gap)} tables with per-stock coverage gap:")
+    for _, row in coverage_gap.iterrows():
+        tbl = row["table"]
+        pct = row.get("stock_coverage_pct")
+        cov = row.get("stock_coverage", "—")
+        status = row.get("coverage_status", "?")
+        marker = "✗✗" if status == "COVERAGE_SEVERE" else "✗ "
+        print(f"  {marker} {tbl:30s} {status:16s} {cov}")
+        if not dry_run:
+            _log_watchdog(
+                tbl,
+                "coverage",
+                status,
+                error=f"per-sid coverage {pct}% — structural gap, won't self-heal",
+            )
+    print()
+
+
 def scan(dry_run=False, only_tables=None):
     df = data_health()
 
     stale = df[df["freshness"].isin(["STALE", "OUTDATED"])].copy()
     if only_tables:
         stale = stale[stale["table"].isin(only_tables)]
+
+    # Coverage scan — separate concern from time-based staleness. A table can
+    # be FRESH (MAX(date) is today) but have a structural per-sid gap. We log
+    # these but don't auto-heal — re-running the producer won't fix a harvester
+    # that systematically drops a series or a source that doesn't carry every
+    # stock. Surfaces them so the human knows where the holes are.
+    coverage_gap = df[df.get("coverage_status", "").isin(["COVERAGE_GAP", "COVERAGE_SEVERE"])].copy()
+    if only_tables:
+        coverage_gap = coverage_gap[coverage_gap["table"].isin(only_tables)]
+    _report_coverage(coverage_gap, dry_run=dry_run)
 
     if stale.empty:
         print("✓ All registered tables are FRESH. Nothing to heal.")
@@ -126,6 +158,18 @@ def scan(dry_run=False, only_tables=None):
 
     print()
     print(f"Summary: {healed} healed · {skipped} skipped (no producer) · {failed} failed")
+
+    # Proactive endpoint coverage audit. Catches "table is fresh but the cockpit
+    # endpoint that consumes it returns empty for X% of stocks" — a class the
+    # freshness check can't see by design. Added 2026-05-23.
+    print()
+    print("─── Cockpit endpoint coverage audit ───")
+    try:
+        from tools.cockpit_endpoint_audit import audit as endpoint_audit
+        endpoint_audit(sample_size=30)
+    except Exception as e:
+        print(f"  ⚠ endpoint audit failed: {type(e).__name__}: {e}")
+
     return failed
 
 

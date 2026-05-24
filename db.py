@@ -715,7 +715,49 @@ STALENESS_THRESHOLDS = {
 STALENESS_OVERRIDES = {
     # NSE PIT filings post with a 7-14 day delay — a fresh fetch still shows ~10 day staleness.
     "insider_trades": 14,
+    # 2026-05-23: regulatory_events was registered as "monthly" (50d) and
+    # silently went stale for 43d before being noticed (Gillette dossier
+    # showing 2023 articles). News/PIB are weekly cadence at worst; if the
+    # harvester stops, we want a yellow flag in <2 weeks, not 50 days.
+    "regulatory_events": 14,
+    "regulatory_signals": 14,
 }
+
+# Per-stock coverage gates. A table that should have a row per universe stock
+# (or close to it) flips to COVERAGE_GAP / COVERAGE_SEVERE when too many sids
+# are missing. The freshness watchdog logs these — they're typically structural
+# (harvester filter dropping a series, source doesn't cover SME, etc), not
+# something the next cron tick will fix. Pre-2026-05-23 the entire 22% gap on
+# stock_prices was invisible because `MAX(date)` stayed FRESH for the 78% that
+# did exist; that's the gap this is closing.
+COVERAGE_THRESHOLDS = {
+    # table:          (gap_below_pct, severe_below_pct)
+    "stock_prices":   (95.0, 80.0),
+    "analyst_consensus": (60.0, 30.0),  # sell-side doesn't cover every SMALL
+    "fundamentals_screener": (90.0, 70.0),
+    "annual_balance_sheet":  (85.0, 70.0),
+    "quarterly_income":      (85.0, 70.0),
+    "promoter_signals":      (90.0, 70.0),
+    "piotroski_scores":      (85.0, 70.0),
+    "smart_money_scores":    (95.0, 80.0),
+}
+
+
+def _compute_coverage_status(table_name, stock_coverage_pct):
+    """Return COVERAGE_OK / COVERAGE_GAP / COVERAGE_SEVERE / None.
+
+    None means the table is not coverage-gated (no per-sid expectation, or no
+    entry in COVERAGE_THRESHOLDS). Watchdog ignores None.
+    """
+    gate = COVERAGE_THRESHOLDS.get(table_name)
+    if gate is None or stock_coverage_pct is None:
+        return None
+    gap_below, severe_below = gate
+    if stock_coverage_pct < severe_below:
+        return "COVERAGE_SEVERE"
+    if stock_coverage_pct < gap_below:
+        return "COVERAGE_GAP"
+    return "COVERAGE_OK"
 
 
 def _compute_freshness(latest_date_iso, refresh_freq, table_name=None):
@@ -1913,6 +1955,11 @@ def data_health():
         # Freshness benchmark
         freshness, age_days, threshold_days = _compute_freshness(latest, m.get("frequency"), tbl)
 
+        # Per-sid coverage gate (independent of freshness). MAX(date) stays
+        # fresh as long as any one stock pushed a row today — coverage_status
+        # catches the case where 20% of the universe is silently missing.
+        coverage_status = _compute_coverage_status(tbl, stock_coverage_pct)
+
         status = "OK" if count > 0 else "EMPTY"
 
         # Consumer count for the inventory's "Used by" column.
@@ -1943,6 +1990,7 @@ def data_health():
             "stock_count": stock_count,
             "stock_coverage_pct": stock_coverage_pct,
             "stock_coverage": stock_coverage,
+            "coverage_status": coverage_status,
             "status": status,
         })
 
@@ -1982,6 +2030,7 @@ def data_health():
             "stock_count":       None,
             "stock_coverage_pct": None,
             "stock_coverage":    "—",
+            "coverage_status":   None,
             "status":            status,
         })
 

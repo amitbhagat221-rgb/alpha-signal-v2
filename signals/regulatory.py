@@ -79,9 +79,18 @@ def compute_regulatory_scores(eval_date=None, window_days=DEFAULT_WINDOW):
     signals = signals.dropna(subset=["pub_date"])
     signals["days_ago"] = (pd.Timestamp(eval_date) - signals["pub_date"]).dt.days.clip(lower=0)
 
-    # Compute weighted contribution per signal
-    signals["mag_w"] = signals["magnitude"].map(MAG_WEIGHT).fillna(0.3)
-    signals["conf_w"] = signals["confidence"].map(CONF_WEIGHT).fillna(0.5)
+    # Compute weighted contribution per signal. Unmapped magnitude/confidence
+    # labels are dropped, not silently filled with a midpoint — a classifier
+    # typo or new label should fail loud rather than skew sector scores.
+    signals["mag_w"] = signals["magnitude"].map(MAG_WEIGHT)
+    signals["conf_w"] = signals["confidence"].map(CONF_WEIGHT)
+    unmapped = signals[signals["mag_w"].isna() | signals["conf_w"].isna()]
+    if not unmapped.empty:
+        bad_mag = unmapped["magnitude"].dropna().unique().tolist()
+        bad_conf = unmapped["confidence"].dropna().unique().tolist()
+        print(f"  ⚠ {len(unmapped)} regulatory_signals with unmapped labels — "
+              f"dropping. magnitudes={bad_mag} confidences={bad_conf}")
+        signals = signals.dropna(subset=["mag_w", "conf_w"])
     signals["decay"] = np.exp(-DECAY_RATE * signals["days_ago"])
     signals["contribution"] = (
         signals["direction"] * signals["mag_w"] * signals["conf_w"] * signals["decay"]
@@ -183,8 +192,12 @@ def compute(dry_run=False, window_days=DEFAULT_WINDOW):
     for _, r in scores.iterrows():
         # Find existing macro score for this sector
         existing_row = existing[existing["sector"] == r["sector"]]
-        macro_score = existing_row.iloc[0]["macro_score"] if not existing_row.empty else 50.0
-        macro_signal = existing_row.iloc[0]["macro_signal"] if not existing_row.empty else "NEUTRAL"
+        # When no prior macro_score for this sector, leave NULL rather than
+        # fabricate a midpoint 50.0 — downstream readers (cockpit, scoring)
+        # can then tell "missing" from "median." 2026-05-23: matches the
+        # smart_money NaN-not-50 fix in the same audit.
+        macro_score = existing_row.iloc[0]["macro_score"] if not existing_row.empty else None
+        macro_signal = existing_row.iloc[0]["macro_signal"] if not existing_row.empty else "UNKNOWN"
 
         # Combine: macro_detail now includes regulatory info
         reg_detail = f"Regulatory: {r['reg_signal']} ({r['reg_events']} events, {r['reg_major_events']} major)"

@@ -28,6 +28,14 @@ def _load_signals():
     """Load all signal values for the latest snapshot date."""
     stocks = read_sql("SELECT sid, ticker, name, sector, cap_tier FROM stocks")
 
+    # Per-sid price-row count, used by the has-prices pick-eligibility gate.
+    # A stock with zero (or near-zero) price history can't be charted, can't
+    # have momentum/EY/B-P computed, and isn't really actionable even if it
+    # scores well on fundamentals alone.
+    price_counts = read_sql(
+        "SELECT sid, COUNT(*) AS price_rows FROM stock_prices WHERE close > 0 GROUP BY sid"
+    )
+
     # Signal tables — get latest snapshot per stock
     piotroski = read_sql(
         "SELECT sid, f_score FROM piotroski_scores "
@@ -75,6 +83,8 @@ def _load_signals():
     df = df.merge(momentum, on="sid", how="left")
     df = df.merge(earnings_yield, on="sid", how="left")
     df = df.merge(book_to_price, on="sid", how="left")
+    df = df.merge(price_counts, on="sid", how="left")
+    df["price_rows"] = df["price_rows"].fillna(0).astype(int)
 
     # Normalize smart_money from 0-100 to 0-1 for consistent percentile ranking
     df["smart_money"] = df["smart_money"] / 100.0
@@ -141,13 +151,19 @@ def score_universe(df):
         small_mask = df["cap_tier"] == "SMALL"
         df.loc[small_mask, "momentum_pctile"] = mom_12m_pctile[small_mask]
 
-    # Compute weighted score per tier
+    # Compute weighted score per tier. We track both the score numerator (sum
+    # of weight × pctile for non-null signals) and the weight coverage (sum of
+    # weights actually contributing). Coverage is used both for the score
+    # denominator AND as a pick-eligibility gate further down.
     scores = pd.Series(0.0, index=df.index)
     weight_sums = pd.Series(0.0, index=df.index)
+    tier_total_weight = pd.Series(0.0, index=df.index)
 
     for tier in ["LARGE", "MID", "SMALL"]:
         tier_mask = df["cap_tier"] == tier
         weights = SIGNAL_WEIGHTS.get(tier, {})
+        total_weight = sum(weights.values())
+        tier_total_weight.loc[tier_mask] = total_weight
 
         for signal_key, weight in weights.items():
             pctile_col = f"{signal_key}_pctile"
@@ -159,6 +175,15 @@ def score_universe(df):
 
     # Normalize by actual weights used (handles NaN signals gracefully)
     df["base_score"] = np.where(weight_sums > 0, scores / weight_sums, np.nan)
+
+    # Weight coverage = fraction of the tier's total weight backed by real data.
+    # A stock with promoter+smart_money only on SMALL has coverage = 0.35/1.0.
+    # Used by select_picks() as an eligibility gate — 2026-05-23 ANO ranked
+    # #1 SMALL with coverage=0.25 (1 of 7 signals real after smart_money fix),
+    # which is exactly what the gate is meant to catch.
+    df["weight_coverage"] = np.where(
+        tier_total_weight > 0, weight_sums / tier_total_weight, np.nan
+    )
 
     # Apply forensic penalty
     df["penalty"] = df["penalty"].fillna(0)
@@ -176,14 +201,42 @@ def score_universe(df):
     return df
 
 
+MIN_WEIGHT_COVERAGE = 0.50  # Stock must have ≥50% of tier signal weight backed by real data
+MIN_PRICE_ROWS = 60         # ≈3 months of trading days — required for actionable pick
+# Both thresholds + rationale: docs/decisions/0021-pick-eligibility-gate.md
+
+
+def _pick_eligible(df):
+    """Boolean Series: True where stock qualifies for daily_picks."""
+    has_coverage = df["weight_coverage"].fillna(0) >= MIN_WEIGHT_COVERAGE
+    has_prices = df["price_rows"].fillna(0) >= MIN_PRICE_ROWS
+    return has_coverage & has_prices
+
+
 def select_picks(df, picks_per_tier=None):
-    """Select top stocks per tier for daily output."""
+    """Select top stocks per tier for daily output.
+
+    Two-part gate:
+      • `weight_coverage` ≥ 50% — at least half the tier signal weight backed
+        by real data (rather than missing-signal renormalization inflating the
+        score of a stock with only 1-2 signals).
+      • `price_rows` ≥ 60 — at least ~3 months of price history. Without
+        prices the stock has no chart, no momentum/EY/B-P, and isn't really
+        actionable even if fundamentals look strong.
+    """
     if picks_per_tier is None:
         picks_per_tier = PORTFOLIO["picks_per_tier"]
 
+    eligible = _pick_eligible(df)
+    dropped_coverage = ((df["weight_coverage"].fillna(0) < MIN_WEIGHT_COVERAGE)).sum()
+    dropped_prices = ((df["price_rows"].fillna(0) < MIN_PRICE_ROWS)).sum()
+    print(f"  Pick gate: {(~eligible).sum()} excluded "
+          f"({dropped_coverage} below {MIN_WEIGHT_COVERAGE:.0%} coverage, "
+          f"{dropped_prices} below {MIN_PRICE_ROWS}d prices)")
+
     picks = []
     for tier, n in picks_per_tier.items():
-        tier_df = df[df["cap_tier"] == tier].nsmallest(n, "rank")
+        tier_df = df[(df["cap_tier"] == tier) & eligible].nsmallest(n, "rank")
         picks.append(tier_df)
 
     return pd.concat(picks).sort_values(["cap_tier", "rank"])
@@ -216,14 +269,28 @@ def compute(dry_run=False, top=None):
         print("\nDry run — not saving.")
         return len(df)
 
-    # Save to daily_picks
+    # Save to daily_picks. Apply pick gate before saving — data-sparse and
+    # priceless stocks stay out of daily_picks entirely so dossier/email
+    # pipelines can't surface them as recommendations. Rank is re-densified
+    # within the eligible set so the saved column reads as 1..N_eligible
+    # without gaps.
     pick_date = today
-    out = df[["sid", "final_score", "rank", "base_score", "cap_tier", "sector",
-              "consensus", "accruals", "promoter"]].copy()
+    eligible_mask = _pick_eligible(df)
+    eligible = df[eligible_mask].copy()
+    gated_out = (~eligible_mask).sum()
+    if gated_out:
+        print(f"  Pick gate excluded {gated_out} stocks from daily_picks")
+
+    eligible["rank"] = eligible.groupby("cap_tier")["final_score"].rank(
+        ascending=False, method="first", na_option="keep"
+    ).astype("Int64")
+
+    out = eligible[["sid", "final_score", "rank", "base_score", "cap_tier", "sector",
+                    "consensus", "accruals", "promoter"]].copy()
     out["pick_date"] = pick_date
     out["sentiment_adj"] = 0  # placeholder
     out["insider_adj"] = 0
-    out["forensic_adj"] = df["penalty"]
+    out["forensic_adj"] = eligible["penalty"]
     out["macro_adj"] = 0
     out["piotroski_adj"] = 0
     out["accruals_adj"] = 0
@@ -236,6 +303,14 @@ def compute(dry_run=False, top=None):
                      "sentiment_adj", "insider_adj", "forensic_adj", "macro_adj",
                      "piotroski_adj", "accruals_adj", "consensus_adj", "promoter_adj",
                      "smart_money_adj", "cap_tier", "sector"]]
+
+    # Delete today's prior rows before insert. Upsert is REPLACE on (sid, pick_date)
+    # which leaves rows untouched if today's run drops a sid (gated out by
+    # coverage). Without this, rank gaps + duplicate rank values from prior
+    # runs accumulate in the table.
+    from db import get_db
+    with get_db() as conn:
+        conn.execute("DELETE FROM daily_picks WHERE pick_date = ?", (pick_date,))
 
     rows = upsert_df(picks_out, "daily_picks")
     print(f"\nSaved {rows} rows to daily_picks (date={pick_date})")

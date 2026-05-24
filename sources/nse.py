@@ -41,6 +41,12 @@ MIN_ROWS = 1000           # typical trading day has 1500+ EQ rows
 MAX_CLOSE = 500_000       # no stock > ₹5L (Berkshire-like check)
 MIN_CLOSE = 0.01          # penny stock floor
 
+# Equity-adjacent series we accept. NSE bhavcopy mixes equity with bonds,
+# ETFs, and government securities; we want main-board + SME + trade-for-trade
+# + REIT/InvIT, but not GS/GB/MF/E1. Without SM/BE/ST we lose ~175 stocks
+# from our 2,448-stock universe (SME-listed pharma, etc — e.g. ANO/ANONDITA).
+TRADEABLE_SERIES = {"EQ", "SM", "BE", "ST", "IV", "RR", "BZ"}
+
 _SID_MAP = None
 
 
@@ -84,10 +90,10 @@ def _fetch_date(target_date):
     if missing:
         return None, [f"Missing columns: {missing}"]
 
-    # Filter to EQ series only
+    # Filter to tradeable equity-adjacent series (EQ + SM + BE + ST + IV + RR + BZ).
     if "SERIES" in df.columns:
         df["SERIES"] = df["SERIES"].str.strip()
-        df = df[df["SERIES"] == "EQ"].copy()
+        df = df[df["SERIES"].isin(TRADEABLE_SERIES)].copy()
 
     # ── GUARDRAIL 2: Minimum rows ──
     if len(df) < MIN_ROWS:
