@@ -2197,8 +2197,14 @@ def get_factor_health():
         except Exception:
             latest_live = None
 
-        # Get per-column coverage from latest PIT snapshot
+        # Per-column coverage at THAT COLUMN's latest non-null date.
+        # ADR 0022 split cadence (weekly behavioural vs monthly fundamentals).
+        # The latest table-wide snapshot_date is a Friday with ONLY the 6 behavioural
+        # columns populated — using it for coverage gave 0/2448 for every monthly
+        # fundamental, falsely grading 56 factors as F (2026-05-24).
+        # Now each column reports coverage at its own most-recent populated date.
         pit_coverage = {}
+        pit_latest_for_col = {}
         if latest_pit:
             cols = [r[1] for r in conn.execute(
                 "PRAGMA table_info(daily_snapshots_pit)"
@@ -2209,14 +2215,19 @@ def get_factor_health():
                 if c in skip:
                     continue
                 try:
-                    n = conn.execute(
-                        f"SELECT COUNT(*) FROM daily_snapshots_pit "
-                        f"WHERE snapshot_date = ? AND [{c}] IS NOT NULL",
-                        (latest_pit,)
-                    ).fetchone()[0]
-                    pit_coverage[c] = int(n)
+                    row = conn.execute(
+                        f"SELECT MAX(snapshot_date) AS d, COUNT(*) AS n "
+                        f"FROM daily_snapshots_pit "
+                        f"WHERE [{c}] IS NOT NULL "
+                        f"  AND snapshot_date = ("
+                        f"      SELECT MAX(snapshot_date) FROM daily_snapshots_pit WHERE [{c}] IS NOT NULL"
+                        f"  )"
+                    ).fetchone()
+                    pit_coverage[c] = int(row[1] or 0)
+                    pit_latest_for_col[c] = row[0]
                 except Exception:
                     pit_coverage[c] = 0
+                    pit_latest_for_col[c] = None
 
         # Per-table count + freshness for Track 3 score tables
         def _table_stats(table, col):
@@ -2403,6 +2414,10 @@ def get_factor_health():
         t_stat = ic_row.get("t_stat")
         v2_col = spec.get("pit_column_v2")
         coverage_n = pit_coverage.get(v2_col, 0) if v2_col else 0
+        # Freshness: prefer the column's own latest non-null date (handles
+        # weekly+monthly cadence correctly). Fall back to global latest_live
+        # only when the column has never been populated.
+        col_latest = pit_latest_for_col.get(v2_col) if v2_col else None
         eligible = uni_total  # legacy signals span the whole universe
         in_model = (spec.get("status") == "READY"
                     and t_stat is not None and abs(t_stat) >= PROMOTION_T)
@@ -2415,7 +2430,7 @@ def get_factor_health():
             in_model_flag=in_model,
             coverage_n=coverage_n,
             eligible_n=eligible,
-            latest_snap_str=latest_live,  # production freshness, not backtest
+            latest_snap_str=col_latest or latest_live,
             t_stat=t_stat,
             n_periods=ic_row.get("n_periods"),
             ic_source=ic_row.get("source", "—"),
