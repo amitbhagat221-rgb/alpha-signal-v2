@@ -414,6 +414,114 @@ def get_portfolio_analytics(portfolio_data, regime):
         "score_premium": avg_score - univ_avg,
         "total_stocks": len(all_stocks),
         "top3_weight": sum(s.get("weight", 0) for s in sorted(all_stocks, key=lambda x: -x.get("weight", 0))[:3]),
+        # Plan 0005 Phase F: Barra-style risk decomp
+        "risk_decomp": get_risk_decomposition([s["sid"] for s in all_stocks]),
+    }
+
+
+def get_risk_decomposition(sids):
+    """Barra-style portfolio risk decomposition for a given pick set.
+
+    Plan 0005 Phase F (93 → 95). Surfaces three views:
+      1. Style tilts — portfolio's average factor z-score vs universe mean.
+         A +1.4σ Value tilt means the portfolio is, on average, 1.4 standard
+         deviations above the universe on Earnings Yield + Book-to-Price.
+         Catches "your model is just a value bet" without you noticing.
+      2. Sector concentration — Herfindahl-Hirschman Index (HHI) of sector
+         weights. HHI > 1500 = concentrated; > 2500 = highly concentrated.
+      3. Cap-tier mix — % of picks in LARGE/MID/SMALL.
+
+    Returns: {"tilts": [{group, z, label}], "sector_hhi": int, "sector_top3_pct": float,
+              "cap_mix": {LARGE, MID, SMALL}, "n_picks": int} or {} if no picks.
+    """
+    if not sids:
+        return {}
+
+    # Latest daily_snapshots for portfolio + universe
+    snap = read_sql(
+        "SELECT sid, cap_tier, piotroski_f, cf_accruals, bs_accruals, "
+        "       earnings_yield, book_to_price, consensus_signal, "
+        "       promoter_qoq, mom_6m, mom_12m, smart_money "
+        "FROM daily_snapshots "
+        "WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM daily_snapshots)"
+    )
+    if snap.empty:
+        return {}
+
+    # Style groups — Barra-style. Each group aggregates 1-N signals.
+    STYLE_GROUPS = [
+        ("Value",     ["earnings_yield", "book_to_price"]),
+        ("Quality",   ["piotroski_f"]),
+        ("Growth",    ["consensus_signal"]),
+        ("Momentum",  ["mom_6m", "mom_12m"]),
+        ("Accruals",  ["cf_accruals", "bs_accruals"]),   # sign-flipped (lower = better)
+        ("Ownership", ["promoter_qoq"]),
+        ("Flow",      ["smart_money"]),
+    ]
+
+    portfolio = snap[snap["sid"].isin(sids)]
+    if portfolio.empty:
+        return {}
+
+    tilts = []
+    for label, cols in STYLE_GROUPS:
+        # Combine the constituent signals: z-score each, average. Universe z=0 by definition.
+        zs_port = []
+        for c in cols:
+            if c not in snap.columns:
+                continue
+            mu = float(snap[c].mean(skipna=True))
+            sd = float(snap[c].std(skipna=True, ddof=1))
+            if sd <= 0 or pd.isna(sd):
+                continue
+            port_mean = float(portfolio[c].mean(skipna=True))
+            if pd.isna(port_mean):
+                continue
+            # Accruals: invert sign so lower-is-better gives a POSITIVE quality-tilt z
+            sign = -1 if c in ("cf_accruals", "bs_accruals") else 1
+            zs_port.append(sign * (port_mean - mu) / sd)
+        if zs_port:
+            z = round(sum(zs_port) / len(zs_port), 2)
+            tilts.append({
+                "group": label,
+                "z": z,
+                # Direction label — what "+z" means for this style
+                "direction": "tilted toward" if z >= 0 else "tilted away from",
+                "magnitude": (
+                    "strong" if abs(z) >= 0.5 else
+                    "moderate" if abs(z) >= 0.25 else
+                    "neutral"
+                ),
+            })
+
+    # Sector concentration — HHI on the pick set
+    sectors_q = read_sql(
+        f"SELECT sector FROM stocks WHERE sid IN ({','.join('?'*len(sids))})",
+        params=list(sids),
+    )
+    sector_counts = sectors_q["sector"].value_counts(normalize=True)  # weight by equal-weight
+    hhi = int((sector_counts ** 2).sum() * 10000) if not sector_counts.empty else 0
+    top3_pct = float(sector_counts.head(3).sum() * 100) if not sector_counts.empty else 0
+    top_sector = sector_counts.idxmax() if not sector_counts.empty else None
+    top_sector_pct = float(sector_counts.max() * 100) if not sector_counts.empty else 0
+
+    # Cap-tier mix
+    cap_counts = portfolio["cap_tier"].value_counts().to_dict()
+    cap_mix = {t: int(cap_counts.get(t, 0)) for t in ("LARGE", "MID", "SMALL")}
+
+    return {
+        "n_picks": len(portfolio),
+        "tilts": tilts,
+        "sector_hhi": hhi,
+        "sector_hhi_label": (
+            "concentrated" if hhi > 2500 else
+            "moderate" if hhi > 1500 else
+            "diversified"
+        ),
+        "sector_top3_pct": round(top3_pct, 1),
+        "top_sector": top_sector,
+        "top_sector_pct": round(top_sector_pct, 1),
+        "cap_mix": cap_mix,
     }
 
 

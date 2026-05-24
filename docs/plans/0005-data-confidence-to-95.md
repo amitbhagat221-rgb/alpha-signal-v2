@@ -139,21 +139,23 @@ Today we can't *prove* that on (say) 2025-09-01 the system would have produced e
 ---
 
 ## Phase F — Risk decomposition + sub-models (93 → 95)
-**Effort**: 3-4 sessions. **Already partly on the roadmap.**
+**Effort**: 3-4 sessions (**~50% done 2026-05-24**). **Already partly on the roadmap.**
 
 The last 2 points require treating the model as a real portfolio not just a ranker.
 
-### Deliverables
-1. **Ship financial sub-model** — Track 2.2 (`sources/banking_metrics.py` + `signals/financial_signal.py`). Until shipped, financial-sector picks have weaker grounding.
-2. **Barra-style risk decomp** — Track 3.3d. Surface in cockpit Portfolio tab: "your top-30 has +1.4σ Value tilt, -0.8σ Growth, sector concentration HHI = X".
-3. **Per-stock data lineage** — for each scored stock, record which source-table-row produced each factor input. Enables "explain why this rank changed today" forensics.
-4. **Cross-source PT reconciliation** — daily sanity: where the same SID has PT from multiple sources (yfinance + Tickertape + future Moneycontrol), assert they're within 10% of each other or flag.
+### Shipped (this session)
+2. ✅ **Barra-style risk decomp** — `cockpit.api.get_risk_decomposition(sids)` computes 7 style-group z-tilts (Value, Quality, Growth, Momentum, Accruals, Ownership, Flow) vs universe + sector HHI + cap-tier mix. Surfaces in Portfolio tab as a new card with bidirectional bars, sector concentration label (diversified/moderate/concentrated), and top-sector pct. Today's picks read: STRONG Quality (+0.90), STRONG Growth (+0.83), STRONG Flow (+1.37), NEUTRAL Value (+0.01) — instantly clear the model is *not* a Value play, despite Earnings Yield being a primary signal.
+4. ✅ **Cross-source PT reconciliation sanity check** — `CROSS_SOURCE_PT_MISMATCH` in `tools/data_sanity.py`. Compares `analyst_consensus.price_target` (yfinance) vs most-recent `broker_recommendations.target_price` (moneycontrol). Fires WARN at 5% mismatch rate, CRITICAL at 30%. Future-ready: today only 1 SID has broker data (returns 0); becomes meaningful when moneycontrol_recos backfills the universe.
+
+### Deferred (multi-session work)
+1. ⏳ **Ship financial sub-model** — Track 2.2 (`sources/banking_metrics.py` + `signals/financial_signal.py`). Needs new RBI/banking data source. Worth 1 point on its own.
+3. ⏳ **Per-stock data lineage** — instrument every signal module to record source-row → factor-input mapping. Big infra change.
 
 ### Done when
-- Financial sub-model live for ≥ 30 days with non-degenerate Bank Nifty backtest performance.
-- Risk decomp visible in cockpit and matches a manual reconciliation.
-- Lineage table queryable: `SELECT lineage WHERE sid='X' AND date='Y'` returns every row that contributed.
-- Cross-source PT mismatches surfaced in Live Issues Inbox.
+- ⏳ Financial sub-model live for ≥ 30 days with non-degenerate Bank Nifty backtest performance.
+- ✅ Risk decomp visible in cockpit and matches a manual reconciliation.
+- ⏳ Lineage table queryable: `SELECT lineage WHERE sid='X' AND date='Y'` returns every row that contributed.
+- ✅ Cross-source PT mismatches surfaced in Live Issues Inbox (armed, awaiting broker coverage to fire meaningfully).
 
 ---
 

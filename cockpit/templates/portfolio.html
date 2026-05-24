@@ -49,6 +49,64 @@
 </div>
 {% endif %}
 
+{# ────────── Plan 0005 Phase F: Barra-style Risk Decomp ────────── #}
+{% if analytics and analytics.get("risk_decomp") and analytics.risk_decomp.get("tilts") %}
+{% set rd = analytics.risk_decomp %}
+<div class="card" style="margin-bottom: 16px; padding: 16px 20px; border-left: 4px solid #9b59b6;">
+    <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 12px; flex-wrap: wrap; gap: 12px;">
+        <div>
+            <div style="font-size: 13px; font-weight: 700; color: var(--text-primary);">Style & Concentration — risk decomposition</div>
+            <div style="font-size: 11px; color: var(--text-muted); margin-top: 2px;">Across {{ rd.n_picks }} picks · Barra-style z-tilts vs universe + sector HHI + cap-tier mix</div>
+        </div>
+        <div style="display: flex; gap: 18px; align-items: center;">
+            <div style="text-align: right;">
+                <div style="font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Sector HHI</div>
+                <div class="mono" style="font-size: 18px; font-weight: 700;
+                    {% if rd.sector_hhi > 2500 %}color: var(--red);
+                    {% elif rd.sector_hhi > 1500 %}color: var(--amber);
+                    {% else %}color: var(--green);{% endif %}">{{ rd.sector_hhi }}</div>
+                <div style="font-size: 10px; color: var(--text-muted);">{{ rd.sector_hhi_label }}</div>
+            </div>
+            <div style="text-align: right;">
+                <div style="font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Top sector</div>
+                <div class="mono" style="font-size: 12px; font-weight: 700;">{{ rd.top_sector }}</div>
+                <div style="font-size: 10px; color: var(--text-muted);">{{ "%.0f"|format(rd.top_sector_pct) }}% · top-3 {{ "%.0f"|format(rd.sector_top3_pct) }}%</div>
+            </div>
+            <div style="text-align: right;">
+                <div style="font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Cap mix</div>
+                <div class="mono" style="font-size: 11px;">
+                    <span style="color: #3b82f6;">{{ rd.cap_mix.LARGE }}L</span>
+                    · <span style="color: #8b5cf6;">{{ rd.cap_mix.MID }}M</span>
+                    · <span style="color: #22c55e;">{{ rd.cap_mix.SMALL }}S</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div style="font-size: 11px; color: var(--text-muted); font-weight: 600; margin-bottom: 8px; letter-spacing: 0.5px;">STYLE TILTS (z vs universe)</div>
+    {% for t in rd.tilts %}
+    {% set z = t.z %}
+    {% set bar_color = '#2ecc71' if t.magnitude == 'strong' else ('#4d8eff' if t.magnitude == 'moderate' else 'var(--text-muted)') %}
+    {% set bar_pct = ((z if z >= 0 else -z) * 33)|round(0, 'floor') %}
+    {% if bar_pct > 100 %}{% set bar_pct = 100 %}{% endif %}
+    <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 5px; font-size: 11px;">
+        <span style="width: 95px; color: var(--text-secondary);">{{ t.group }}</span>
+        <span style="width: 38px; text-align: right; font-weight: 700; color: {{ bar_color }};" class="mono" title="{{ t.magnitude }} {{ t.direction }} {{ t.group }}">{{ "%+.2f"|format(z) }}</span>
+        <div style="flex: 1; height: 5px; border-radius: 3px; background: var(--border); display: flex; justify-content: center; position: relative;">
+            <div style="position: absolute; left: 50%; top: -1px; bottom: -1px; width: 1px; background: var(--text-muted); opacity: 0.4;"></div>
+            <div style="position: absolute; top: 0; bottom: 0;
+                {% if z >= 0 %}left: 50%; width: {{ bar_pct / 2 }}%;{% else %}right: 50%; width: {{ bar_pct / 2 }}%;{% endif %}
+                background: {{ bar_color }}; border-radius: 3px;"></div>
+        </div>
+        <span style="width: 75px; font-size: 10px; color: var(--text-muted);">{{ t.magnitude }}</span>
+    </div>
+    {% endfor %}
+    <div style="font-size: 10px; color: var(--text-muted); margin-top: 10px; font-style: italic;">
+        Reading: |z| ≥ 0.5 strong · 0.25-0.5 moderate · &lt; 0.25 neutral. Catches "your model is just a Value/Quality/Momentum bet" before you notice.
+    </div>
+</div>
+{% endif %}
+
 <!-- Allocation Donut + Tier Weights -->
 <div style="display: grid; grid-template-columns: 250px 1fr; gap: 16px; margin-bottom: 20px;">
     <div class="card" style="display: flex; flex-direction: column; align-items: center; padding: 20px;">

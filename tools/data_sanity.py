@@ -781,6 +781,42 @@ CHECKS = [
             FROM analyst_consensus
         """,
     },
+    # Plan 0005 Phase F: cross-source price-target reconciliation.
+    # Currently we have ONE PT source (yfinance via analyst_consensus). Once
+    # moneycontrol broker recos populate at scale, this check fires when
+    # yfinance PT and the most-recent broker PT for the same SID differ by
+    # >15% — indicates source disagreement worth investigating. Today only
+    # 1 SID has broker data so this check returns 0 by construction; it's
+    # armed for when broker coverage expands.
+    {
+        "code": "CROSS_SOURCE_PT_MISMATCH",
+        "table": "analyst_consensus",
+        "column": "price_target",
+        "message": "yfinance price_target and most-recent broker target_price differ by >15% for the same SID",
+        "critical_pct": 30,    # high pct = systemic source disagreement
+        "warn_pct": 5,
+        "sql": """
+            WITH latest_broker AS (
+                SELECT sid, target_price AS broker_pt,
+                       ROW_NUMBER() OVER (PARTITION BY sid ORDER BY reco_date DESC) AS rn
+                FROM broker_recommendations
+                WHERE target_price IS NOT NULL AND target_price > 0
+            )
+            SELECT
+                SUM(CASE WHEN ABS(ac.price_target - lb.broker_pt) / ac.price_target > 0.15
+                         THEN 1 ELSE 0 END) AS n_bad,
+                COUNT(*) AS n_total,
+                (SELECT ac2.sid || ': yf=' || ROUND(ac2.price_target,1) || ' vs broker=' || ROUND(lb2.broker_pt,1)
+                 FROM analyst_consensus ac2
+                 JOIN latest_broker lb2 ON lb2.sid = ac2.sid AND lb2.rn = 1
+                 WHERE ac2.price_target IS NOT NULL AND ac2.price_target > 0
+                   AND ABS(ac2.price_target - lb2.broker_pt) / ac2.price_target > 0.15
+                 ORDER BY ABS(ac2.price_target - lb2.broker_pt) / ac2.price_target DESC LIMIT 1) AS sample
+            FROM analyst_consensus ac
+            JOIN latest_broker lb ON lb.sid = ac.sid AND lb.rn = 1
+            WHERE ac.price_target IS NOT NULL AND ac.price_target > 0
+        """,
+    },
     # Plan 0005 Phase C item 5: catch a harvester silently shrinking the
     # universe overnight. Compares each signal's eligible_n today vs prior
     # snapshot in universe_eligibility; fires if any signal dropped ≥5%
