@@ -236,6 +236,12 @@ PIPELINE_STEPS = [
     {"name": "fetch_bhavcopy",     "module": "sources.nse",          "function": "compute", "critical": True,
      "table": "stock_prices",      "source": "NSE Archives bhavcopy", "data_freq": "daily", "frequency": "daily"},
 
+    # Plan 0005 Phase C: yfinance fallback for SIDs not in NSE bhavcopy
+    # (InvITs, REITs, BSE-only listings, recent IPOs). Tries .NS first then
+    # .BO. Empirically 90% hit rate on the 339 missing SIDs as of 2026-05-24.
+    {"name": "fetch_prices_fallback", "module": "sources.yfinance_prices", "function": "compute", "critical": False,
+     "table": "stock_prices",      "source": "yfinance .BO / .NS (gap-fill)", "data_freq": "daily", "frequency": "daily"},
+
     {"name": "universe_liveness",  "module": "sources.universe",     "function": "compute", "critical": False,
      "table": "stocks",            "source": "stock_prices (recent activity)", "data_freq": "daily", "frequency": "daily"},
 
