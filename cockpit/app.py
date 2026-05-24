@@ -39,6 +39,41 @@ templates = Jinja2Templates(directory=COCKPIT_DIR / "templates")
 templates.env.undefined = SilentUndefined
 
 
+# ────────────── Startup cache warmer ──────────────
+# When uvicorn boots (or restarts via systemd), the in-process TTL caches
+# in api.py are empty. The first user to visit any page would otherwise
+# trigger a 5-37s cold-cache compute. Background-warm the expensive ones
+# at startup so the first visit is always fast.
+@app.on_event("startup")
+def _prewarm_cache():
+    import threading
+    def _warm():
+        import time as _t
+        t0 = _t.time()
+        warmers = [
+            ("data_freshness",   lambda: api.get_data_freshness()),
+            ("db_summary",       lambda: api.get_db_summary()),
+            ("data_health_scores", lambda: api.get_data_health_scores(force=False)),
+            ("factor_health",    lambda: api.get_factor_health()),
+            ("model_overview",   lambda: api.get_model_overview()),
+            ("flow_overview",    lambda: api.get_flow_overview()),
+            ("command_centre",   lambda: api.get_command_centre()),
+            ("health_overview",  lambda: api.get_health_overview()),
+            ("top_picks",        lambda: api.get_top_picks()),
+        ]
+        for name, fn in warmers:
+            t = _t.time()
+            try:
+                fn()
+                dt = _t.time() - t
+                print(f"  [cache-warm] {name}: {dt:.1f}s")
+            except Exception as e:
+                print(f"  [cache-warm] {name}: FAILED — {e}")
+        print(f"  [cache-warm] total: {_t.time()-t0:.1f}s")
+
+    threading.Thread(target=_warm, daemon=True).start()
+
+
 # Slide-style "headline + body" split for sector narrative bullets.
 # Narratives concatenate headline + elaboration with em-dashes / colons / first-sentence breaks.
 # slidify lifts the headline so templates can render bold-then-muted (progressive elaboration).

@@ -1815,7 +1815,7 @@ def run_sql_query(query, max_rows=500):
     }
 
 
-@_ttl_cache(60)
+@_ttl_cache(300)
 def get_data_freshness():
     """Data health from db.data_health(). NaN floats are coerced to None so the
     payload is JSON-safe (Jinja's tojson preserves NaN literals which break
@@ -1831,7 +1831,7 @@ def get_data_freshness():
     return records
 
 
-@_ttl_cache(60)
+@_ttl_cache(300)
 def get_db_summary():
     """High-level health verdict for the system page header."""
     from db import db_summary
@@ -1847,7 +1847,7 @@ def get_db_summary():
 V1_BACKTEST_DIR = Path("/home/ubuntu/alpha-signal/data/backtest")
 
 
-@_ttl_cache(60)
+@_ttl_cache(300)
 def get_model_overview():
     """Tier weight tables, signal validation, regime rules. Used by /model."""
     from config import SIGNAL_WEIGHTS, VIX_REGIMES, QUALITY_GATE, PORTFOLIO, TRANSACTION_COSTS_BPS
@@ -2099,6 +2099,7 @@ def _safe_float(v, places=2):
         return None
 
 
+@_ttl_cache(300)
 def get_flow_overview():
     """Pipeline DAG: source → raw → signals → scoring → output. Used by /flow.
 
@@ -2243,6 +2244,7 @@ def get_data_health_scores(force=False):
 # Factor Health — sister to data-health, but per-factor
 # ═══════════════════════════════════════════════════
 
+@_ttl_cache(300)
 def get_factor_health():
     """Return one row per registered factor with health metrics + grade.
 
@@ -2727,7 +2729,7 @@ def _parse_plan_frontmatter(md_path: Path) -> dict:
     return fm
 
 
-@_ttl_cache(60)
+@_ttl_cache(300)
 def get_command_centre():
     """Assemble the command-centre payload — plans, factor library, data layer,
     pending actions. Server-rendered; no live polling."""
@@ -3432,6 +3434,7 @@ def _severity_rank(sev):
     return {"CRITICAL": 0, "WARN": 1, "INFO": 2}.get(sev, 3)
 
 
+@_ttl_cache(300)
 def get_health_overview(force=False):
     """One-stop Health Center overview.
 
@@ -3524,7 +3527,12 @@ def get_health_overview(force=False):
         })
 
     # ── data_sanity violations ──
-    if _sanity is not None:
+    # Performance: health_report.gather() already runs data_sanity.run()
+    # internally (stored as report["sanity"]). Re-running it here was wasted
+    # ~14s every page load. Reuse the existing output.
+    sanity_violations = report.get("sanity") or []
+    if not sanity_violations and _sanity is not None:
+        # Fallback if health_report didn't include sanity for some reason
         try:
             sanity_violations = _sanity.run()
         except Exception as e:
@@ -3539,35 +3547,35 @@ def get_health_overview(force=False):
                 "detail": str(e)[:240],
                 "sample": None, "pct": None, "n_bad": None, "n_total": None,
             })
-        for v in sanity_violations:
-            # categorize by code prefix for filter
-            code = v.get("code", "")
-            if any(p in code for p in ("CONSENSUS", "ANALYST", "PT_", "FORECAST")):
-                cat = "Analyst / PT"
-            elif any(p in code for p in ("REGULATORY", "NEWS", "SENTIMENT")):
-                cat = "News / regulatory"
-            elif any(p in code for p in ("FACTOR", "PIT", "BACKTEST", "PIOTROSKI", "M_SCORE")):
-                cat = "Factors / backtest"
-            elif any(p in code for p in ("DAILY_PICK", "SCORE_TABLE", "UNIVERSE", "PROMOTER", "INSIDER", "BULK")):
-                cat = "Signals / picks"
-            elif "COVERAGE" in code:
-                cat = "Coverage"
-            else:
-                cat = "Data sanity"
-            issues.append({
-                "severity": v.get("severity", "WARN"),
-                "source": "sanity",
-                "category": cat,
-                "code": code,
-                "table": v.get("table"),
-                "column": v.get("column"),
-                "message": v.get("message", ""),
-                "detail": "",
-                "sample": v.get("sample"),
-                "pct": v.get("pct_violations"),
-                "n_bad": v.get("n_violations"),
-                "n_total": v.get("n_total"),
-            })
+    for v in sanity_violations:
+        # categorize by code prefix for filter
+        code = v.get("code", "")
+        if any(p in code for p in ("CONSENSUS", "ANALYST", "PT_", "FORECAST")):
+            cat = "Analyst / PT"
+        elif any(p in code for p in ("REGULATORY", "NEWS", "SENTIMENT")):
+            cat = "News / regulatory"
+        elif any(p in code for p in ("FACTOR", "PIT", "BACKTEST", "PIOTROSKI", "M_SCORE")):
+            cat = "Factors / backtest"
+        elif any(p in code for p in ("DAILY_PICK", "SCORE_TABLE", "UNIVERSE", "PROMOTER", "INSIDER", "BULK")):
+            cat = "Signals / picks"
+        elif "COVERAGE" in code:
+            cat = "Coverage"
+        else:
+            cat = "Data sanity"
+        issues.append({
+            "severity": v.get("severity", "WARN"),
+            "source": "sanity",
+            "category": cat,
+            "code": code,
+            "table": v.get("table"),
+            "column": v.get("column"),
+            "message": v.get("message", ""),
+            "detail": "",
+            "sample": v.get("sample"),
+            "pct": v.get("pct_violations"),
+            "n_bad": v.get("n_violations"),
+            "n_total": v.get("n_total"),
+        })
 
     # ── cockpit endpoint audit (most-recent per endpoint) ──
     try:
