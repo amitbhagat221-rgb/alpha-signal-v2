@@ -2262,7 +2262,9 @@ def get_factor_health():
     SPARSE_BY_NATURE = {
         "bulk_deal_signal",
         "sentiment_7d", "news_volume",
-        "insider_signal",      # only stocks with recent insider trades
+        "insider_signal",          # only stocks with recent insider trades
+        "short_selling_signal",    # only 981/2448 stocks have any short reporting (NSE)
+        "roiic",                   # needs multi-year NOPAT + IC history; ~46% of universe qualifies
     }
     SECTOR_LEVEL = {"regulatory_sector_signal", "macro_sector_signal"}
     COMPOSITE_NOT_FACTOR = {"screener_final_composite"}
@@ -3440,12 +3442,17 @@ def get_health_overview(force=False):
     except Exception:
         ep = pd.DataFrame()
     for _, r in ep.iterrows():
-        if r["status"] in ("SUCCESS",) and not (r.get("error_message") or ""):
-            continue  # endpoint is fine
+        if r["status"] == "SUCCESS":
+            continue  # endpoint is fine — message carries an [OK] summary we don't surface
         endpoint = r["step_name"].replace("endpoint_audit_", "")
         err = (r.get("error_message") or "").strip()
-        # Heuristic: if status SUCCESS but error_message non-empty, audit found a gap
-        sev = "CRITICAL" if r["status"] == "FAILED" else "WARN"
+        # Derive severity from the message tag if present, else from status
+        if "[CRITICAL]" in err:
+            sev = "CRITICAL"
+        elif "[WARN]" in err:
+            sev = "WARN"
+        else:
+            sev = "CRITICAL" if r["status"] == "FAILED" else "WARN"
         issues.append({
             "severity": sev,
             "source": "endpoint",
