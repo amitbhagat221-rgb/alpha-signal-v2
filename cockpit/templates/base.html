@@ -56,6 +56,10 @@
                 <span class="nav-icon">{{ icon("search") }}</span>
                 <span class="nav-text"><span class="nav-title">Explorer</span><span class="nav-subtitle">Browse 2,448 stocks</span></span>
             </a>
+            <a href="/news" class="nav-item {% if page == 'news' %}active{% endif %}">
+                <span class="nav-icon">{{ icon("activity") }}</span>
+                <span class="nav-text"><span class="nav-title">News</span><span class="nav-subtitle">Inshorts-style daily feed</span></span>
+            </a>
         </div>
 
         <div class="nav-section">
@@ -123,6 +127,7 @@
             <a href="/flow" class="more-item {% if page == 'flow' %}active{% endif %}">{{ icon("git-branch", 16) }}<span>Pipeline</span></a>
             <a href="/command" class="more-item {% if page == 'command' %}active{% endif %}">{{ icon("compass", 16) }}<span>Command</span></a>
             <a href="/system" class="more-item {% if page == 'system' %}active{% endif %}">{{ icon("zap", 16) }}<span>Health</span></a>
+            <a href="/news" class="more-item {% if page == 'news' %}active{% endif %}">{{ icon("activity", 16) }}<span>News</span></a>
             <a href="/sql" class="more-item {% if page == 'sql' %}active{% endif %}">{{ icon("terminal", 16) }}<span>SQL Console</span></a>
         </div>
     </nav>

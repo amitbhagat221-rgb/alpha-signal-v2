@@ -8,6 +8,7 @@ Imports db.read_sql directly — no ORM, no new abstractions.
 import functools
 import glob
 import json
+import re
 import sys
 import time as _time
 from pathlib import Path
@@ -3432,6 +3433,166 @@ def _drilldown_for_issue(issue):
 
 def _severity_rank(sev):
     return {"CRITICAL": 0, "WARN": 1, "INFO": 2}.get(sev, 3)
+
+
+# ═══════════════════════════════════════════════════
+# News feed — Inshorts/Finshots style
+#
+# Lightweight: pull from news_articles, rank by recency × source tier, dedupe
+# by title-similarity. No per-article LLM call (would add cost + complexity).
+# The spec calls for an LLM brief; we do that as a separate optional pass.
+# ═══════════════════════════════════════════════════
+
+# Source tier map — per news_app_build_spec.md.
+# Tier 1 = highest trust, Tier 4 = lowest. Score is the source_trust component.
+_NEWS_SOURCE_TIERS = {
+    "livemint_markets":     ("Mint Markets",        1, 1.0),
+    "livemint_companies":   ("Mint Companies",      1, 1.0),
+    "et_markets":           ("Economic Times Markets",   2, 0.75),
+    "et_companies":         ("Economic Times Companies", 2, 0.75),
+    "et_economy":           ("Economic Times Economy",   2, 0.75),
+    "moneycontrol_latest":  ("Moneycontrol",        3, 0.55),
+    "moneycontrol_business":("Moneycontrol Business",3, 0.55),
+    "moneycontrol_markets": ("Moneycontrol Markets",3, 0.55),
+}
+
+
+def _news_tier(source):
+    return _NEWS_SOURCE_TIERS.get(source, (source, 4, 0.30))
+
+
+def _humanize_age(published_at):
+    """Return '3h ago' / '2d ago' / '5m ago' style relative time."""
+    if not published_at:
+        return ""
+    try:
+        ts = pd.to_datetime(published_at, errors="coerce", utc=True)
+        if pd.isna(ts):
+            return ""
+        delta = (pd.Timestamp.now(tz="UTC") - ts).total_seconds()
+    except Exception:
+        return ""
+    if delta < 60:    return "just now"
+    if delta < 3600:  return f"{int(delta/60)}m ago"
+    if delta < 86400: return f"{int(delta/3600)}h ago"
+    if delta < 604800:return f"{int(delta/86400)}d ago"
+    return ts.strftime("%d %b")
+
+
+@_ttl_cache(300)
+def get_news_feed(topic=None, tier=None, limit=80):
+    """Inshorts-style news cards: rank by recency × source-trust, dedupe by title.
+
+    Plan: pull last 7d, score each with `tier_score × recency_decay(half_life=12h)`,
+    return top `limit`. Dedupe: drop articles whose title is >85% similar to a
+    higher-ranked one already in the result (cheap n-gram overlap, no embedding).
+
+    Each card returned has:
+        id, headline, summary, source_label, source_tier, source_url,
+        published_at, age_label, score
+    Designed for a single page in cockpit (`/news`) — no per-card LLM call.
+    """
+    df = read_sql(
+        """
+        SELECT article_id AS id, title AS headline, summary,
+               url AS source_url, source, published_at
+        FROM news_articles
+        WHERE published_at >= date('now', '-7 days')
+        ORDER BY published_at DESC
+        LIMIT 500
+        """
+    )
+    if df.empty:
+        return {"cards": [], "total": 0, "sources_present": []}
+
+    # Score: tier_score (0..1) × recency_decay (12h half-life)
+    now = pd.Timestamp.now(tz="UTC")
+    cards = []
+    for _, r in df.iterrows():
+        label, tier_num, tier_score = _news_tier(r["source"])
+        if tier is not None and tier_num != int(tier):
+            continue
+        try:
+            ts = pd.to_datetime(r["published_at"], errors="coerce", utc=True)
+            if pd.isna(ts):
+                hours_old = 999
+            else:
+                hours_old = (now - ts).total_seconds() / 3600
+        except Exception:
+            hours_old = 999
+        recency = 0.5 ** (hours_old / 12.0)
+        score = tier_score * recency
+
+        # Topic filter — simple keyword overlap
+        if topic:
+            t_lower = (r["headline"] or "").lower() + " " + (r["summary"] or "").lower()
+            if topic.lower() not in t_lower:
+                continue
+
+        summary = (r["summary"] or "").strip()
+        # Cap summary at ~80 words for the Inshorts feel (~3-5 min full-feed read)
+        words = summary.split()
+        if len(words) > 80:
+            summary = " ".join(words[:80]) + "…"
+
+        cards.append({
+            "id": r["id"],
+            "headline": (r["headline"] or "").strip(),
+            "summary": summary,
+            "source": r["source"],
+            "source_label": label,
+            "source_tier": tier_num,
+            "source_tier_score": tier_score,
+            "source_url": r["source_url"],
+            "published_at": r["published_at"],
+            "age_label": _humanize_age(r["published_at"]),
+            "score": round(score, 4),
+        })
+
+    # Sort by score
+    cards.sort(key=lambda c: c["score"], reverse=True)
+
+    # Dedupe: drop articles whose first-7-word fingerprint overlaps >80% with
+    # one already in the kept list. Catches "same story 12 different headlines"
+    # without needing embeddings. (Spec calls for embedding-cluster; this is
+    # the v1 cheap version.)
+    def _fingerprint(text):
+        # Lowercase, alnum-only tokens, first 7 substantive words (>3 chars)
+        toks = [t for t in re.findall(r"[a-z0-9]+", (text or "").lower()) if len(t) > 3]
+        return set(toks[:7])
+
+    kept = []
+    seen_prints = []
+    for c in cards:
+        fp = _fingerprint(c["headline"])
+        if not fp:
+            continue
+        dup = False
+        for sp in seen_prints:
+            inter = len(fp & sp)
+            if inter >= 5 and inter / max(1, min(len(fp), len(sp))) > 0.8:
+                dup = True
+                break
+        if dup:
+            continue
+        kept.append(c)
+        seen_prints.append(fp)
+        if len(kept) >= limit:
+            break
+
+    # Sources present (for filter chips)
+    sources_present = sorted({c["source_label"] for c in kept})
+
+    return {
+        "cards": kept,
+        "total": len(kept),
+        "sources_present": sources_present,
+        "tier_counts": {
+            1: sum(1 for c in kept if c["source_tier"] == 1),
+            2: sum(1 for c in kept if c["source_tier"] == 2),
+            3: sum(1 for c in kept if c["source_tier"] == 3),
+        },
+    }
 
 
 @_ttl_cache(300)

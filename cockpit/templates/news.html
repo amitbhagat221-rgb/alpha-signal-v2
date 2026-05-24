@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<div style="max-width: 720px; margin: 0 auto;">
+
+<div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px; gap: 12px; flex-wrap: wrap;">
+    <div>
+        <div class="section-title">News</div>
+        <div class="section-desc" style="margin-bottom: 0;">
+            Inshorts-style daily feed. {{ feed.total }} stories from last 7 days, ranked by recency × source-trust.
+            Tap a card to read the full summary.
+        </div>
+    </div>
+    <div style="display: flex; gap: 14px; align-items: baseline; padding-top: 4px;">
+        <span style="font-size: 11px; color: var(--text-muted);">Tier 1 <strong style="color: var(--green);">{{ feed.tier_counts[1] }}</strong></span>
+        <span style="font-size: 11px; color: var(--text-muted);">T2 <strong style="color: #4d8eff;">{{ feed.tier_counts[2] }}</strong></span>
+        <span style="font-size: 11px; color: var(--text-muted);">T3 <strong style="color: var(--text-muted);">{{ feed.tier_counts[3] }}</strong></span>
+    </div>
+</div>
+
+<!-- Filter chips -->
+<div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center; padding: 10px 0 16px; border-bottom: 1px solid var(--border);">
+    <span style="font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Tier</span>
+    <a href="/news{% if topic %}?topic={{ topic }}{% endif %}" class="news-chip {% if not active_tier %}active{% endif %}">All</a>
+    <a href="/news?tier=1{% if topic %}&topic={{ topic }}{% endif %}" class="news-chip {% if active_tier == 1 %}active{% endif %}">Tier 1</a>
+    <a href="/news?tier=2{% if topic %}&topic={{ topic }}{% endif %}" class="news-chip {% if active_tier == 2 %}active{% endif %}">Tier 2</a>
+    <a href="/news?tier=3{% if topic %}&topic={{ topic }}{% endif %}" class="news-chip {% if active_tier == 3 %}active{% endif %}">Tier 3</a>
+    <span style="flex: 1;"></span>
+    <form action="/news" method="get" style="display: flex; gap: 6px;">
+        {% if active_tier %}<input type="hidden" name="tier" value="{{ active_tier }}">{% endif %}
+        <input type="text" name="topic" value="{{ topic }}" placeholder="filter by keyword…"
+            style="background: var(--bg-card); color: var(--text-primary); border: 1px solid var(--border); border-radius: 6px; padding: 5px 10px; font-size: 12px; min-width: 180px;">
+        {% if topic %}
+        <a href="/news{% if active_tier %}?tier={{ active_tier }}{% endif %}" style="padding: 5px 10px; font-size: 11px; color: var(--text-muted); text-decoration: none;">clear</a>
+        {% endif %}
+    </form>
+</div>
+
+<!-- Cards -->
+{% if feed.cards %}
+{% for card in feed.cards %}
+{% set tier_color = '#2ecc71' if card.source_tier == 1 else ('#4d8eff' if card.source_tier == 2 else 'var(--text-muted)') %}
+<article x-data="{ open: false }" class="news-card" style="border-bottom: 1px solid var(--border); padding: 18px 0; cursor: pointer;" @click="open = !open">
+    <div style="display: flex; align-items: baseline; gap: 8px; margin-bottom: 6px;">
+        <span style="display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: {{ tier_color }}; flex-shrink: 0;" title="Tier {{ card.source_tier }}"></span>
+        <span style="font-size: 11px; color: {{ tier_color }}; font-weight: 600; letter-spacing: 0.3px;">{{ card.source_label }}</span>
+        <span style="font-size: 11px; color: var(--text-muted);">·</span>
+        <span style="font-size: 11px; color: var(--text-muted);">{{ card.age_label }}</span>
+    </div>
+    <h3 style="font-size: 16px; font-weight: 700; color: var(--text-primary); line-height: 1.35; margin: 0 0 8px;">{{ card.headline }}</h3>
+    <p style="font-size: 13px; color: var(--text-secondary); line-height: 1.55; margin: 0;"
+       x-show="!open">
+        {{ card.summary[:180] }}{% if card.summary|length > 180 %}…{% endif %}
+    </p>
+    <div x-show="open" x-cloak>
+        <p style="font-size: 13px; color: var(--text-secondary); line-height: 1.6; margin: 0 0 10px;">{{ card.summary }}</p>
+        {% if card.source_url %}
+        <a href="{{ card.source_url }}" target="_blank" rel="noopener" @click.stop=""
+           style="display: inline-block; font-size: 11px; color: var(--accent); text-decoration: none; padding: 4px 10px; border: 1px solid var(--accent); border-radius: 5px; font-weight: 600;">
+            Read source ↗
+        </a>
+        {% endif %}
+    </div>
+</article>
+{% endfor %}
+
+{% else %}
+<div style="padding: 60px 20px; text-align: center; color: var(--text-muted);">
+    <div style="font-size: 36px; margin-bottom: 8px;">∅</div>
+    <div>No stories matching your filters in the last 7 days.</div>
+</div>
+{% endif %}
+
+</div>
+
+<style>
+.news-chip {
+    display: inline-block;
+    padding: 4px 10px;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-decoration: none;
+    transition: all 0.1s;
+}
+.news-chip:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+.news-chip.active {
+    background: var(--accent);
+    color: white;
+    border-color: var(--accent);
+}
+.news-card:hover h3 { color: var(--accent); }
+</style>
+
+{% endblock %}

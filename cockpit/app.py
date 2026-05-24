@@ -346,6 +346,22 @@ async def command_centre(request: Request):
     })
 
 
+@app.get("/news", response_class=HTMLResponse)
+async def news_page(request: Request, topic: str = "", tier: int = 0):
+    """Inshorts-style news feed page. Single-page render, no SPA."""
+    feed = api.get_news_feed(
+        topic=(topic or None),
+        tier=(tier if tier else None),
+        limit=80,
+    )
+    return templates.TemplateResponse(request, "news.html", {
+        "page": "news",
+        "feed": feed,
+        "topic": topic,
+        "active_tier": tier,
+    })
+
+
 @app.get("/system", response_class=HTMLResponse)
 async def system(request: Request, refresh: int = 0):
     """Health Center page. Pass ?refresh=1 to force a recompute of the health model."""
