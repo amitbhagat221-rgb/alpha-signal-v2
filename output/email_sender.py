@@ -341,6 +341,7 @@ def _build_html():
         LEFT JOIN daily_snapshots ds ON dp.sid = ds.sid
               AND ds.snapshot_date = dp.pick_date
         WHERE dp.pick_date = (SELECT MAX(pick_date) FROM daily_picks)
+          AND (dp.integrity_status IS NULL OR dp.integrity_status != 'FAIL')
         ORDER BY dp.cap_tier, dp.rank
     """)
 

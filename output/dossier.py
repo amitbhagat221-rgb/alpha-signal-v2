@@ -97,17 +97,80 @@ def _scan_for_numbers(text):
     return hits
 
 
+def _reconcile_narrative_number(snippet, kind, text_around, context):
+    """Try to match a narrative number against a known structured field. If
+    we find a structured field that the number CLAIMS to be quoting AND the
+    structured value differs, return a 'narrative_contradicts_structured'
+    violation. Otherwise return None (snippet is still a violation as a raw
+    number, just not a specifically contradicting one).
+
+    The 2026-05-22 HALC bug: narrative said "16.5% downside at ₹1038", actual
+    PT was 1038 but actual close was 1135 → real downside -8.5%. This function
+    flags the +16.5% as actively contradicting the structured fields.
+    """
+    if context is None:
+        return None
+    txt = text_around.lower()
+    try:
+        # Parse the snippet to a float (strip ₹, %, x, commas, etc.)
+        num_str = snippet.replace("₹", "").replace("Rs", "").replace("$", "")
+        num_str = num_str.replace("%", "").replace("x", "").replace("X", "").replace(",", "").strip()
+        val = float(num_str)
+    except ValueError:
+        return None
+
+    pairs = []  # list of (cue_keywords, structured_value, structured_name, tolerance)
+    pt_upside = context.get("pt_upside")
+    current_price = context.get("current_price")
+    target_price = context.get("target_price") or context.get("price_target")
+    pe = context.get("pe_ratio") or context.get("forward_pe")
+    roe = context.get("roe")
+
+    if kind in ("percentage",):
+        if pt_upside is not None and any(k in txt for k in ("upside", "downside", "target")):
+            pairs.append((pt_upside, "pt_upside_pct", 1.0))
+        if roe is not None and "roe" in txt:
+            pairs.append((roe, "ROE", 1.0))
+    elif kind in ("rupee_amount", "large_integer", "decimal"):
+        if current_price is not None and any(k in txt for k in ("current", "cmp", "price", "trading at", "at ₹")):
+            pairs.append((current_price, "close", current_price * 0.02))  # 2%
+        if target_price is not None and any(k in txt for k in ("target", "pt ", "price target", "upside to")):
+            pairs.append((target_price, "price_target", target_price * 0.02))
+    elif kind == "multiple":
+        if pe is not None and any(k in txt for k in ("p/e", "pe ratio", "trading at", "valuation")):
+            pairs.append((pe, "forward_pe", max(0.5, pe * 0.1)))
+
+    for structured_val, structured_name, tolerance in pairs:
+        try:
+            if abs(val - float(structured_val)) > tolerance:
+                return {
+                    "structured_field": structured_name,
+                    "narrative_claimed": val,
+                    "actual": float(structured_val),
+                    "tolerance": tolerance,
+                }
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
 def _validate_dossier(dossier, context=None):
     """Scan narrative fields for forbidden numbers AND missing-signal hallucination.
 
-    Returns dict { ok: bool, violations: [{field, snippet, kind}], leaked_pt: bool }.
+    Returns dict { ok: bool, violations: [{field, snippet, kind, contradicts?}], leaked_pt: bool }.
     leaked_pt = LLM sneaked a target_price or stop_loss into the response despite
     the prompt rule (2026-05-23: now a violation, not a requirement).
 
     `context` (if provided) is the stock context dict from _build_stock_context.
-    Used to flag soft hallucination — narrative mentions a signal by name but
-    that signal value was None in the context (e.g. MUTT referencing Piotroski
-    when f_score is None because Financials route through the sub-model).
+    Used for:
+      • Soft hallucination — narrative mentions a signal by name but that signal
+        value was None in the context (e.g. MUTT referencing Piotroski when
+        f_score is None because Financials route through the sub-model).
+      • Narrative-vs-structured cross-check (plan 0005 Phase B Gap 4) — if a
+        number in narrative tries to quote a structured field but differs from
+        it, escalate the violation to 'narrative_contradicts_structured'. The
+        2026-05-22 HALC bug ("16.5% downside" while PT/close = -8.5%) is the
+        canonical case.
     """
     violations = []
     for field in _NARRATIVE_FIELDS:
@@ -120,7 +183,12 @@ def _validate_dossier(dossier, context=None):
             texts = [str(val)]
         for text in texts:
             for snippet, kind in _scan_for_numbers(text):
-                violations.append({"field": field, "snippet": snippet, "kind": kind})
+                v = {"field": field, "snippet": snippet, "kind": kind}
+                contradicts = _reconcile_narrative_number(snippet, kind, text, context)
+                if contradicts:
+                    v["kind"] = "narrative_contradicts_structured"
+                    v["contradicts"] = contradicts
+                violations.append(v)
 
             # Soft hallucination: signal-name mentioned but signal not in context
             if context is not None:
@@ -357,11 +425,17 @@ def generate(top=5, dry_run=False):
             "Check run_pipeline.sh exports or systemd env."
         )
 
-    # Get top picks per tier
+    # Get top picks per tier.
+    # Plan 0005 Phase B: integrity FAIL SIDs (contradictions across sources)
+    # are excluded — a stock whose structured fields don't reconcile shouldn't
+    # have a dossier written. The SID remains in daily_picks for review in
+    # cockpit but doesn't get LLM-narrated. WARN-status picks still get
+    # dossiers (the WARN is surfaced in cockpit, not blocking).
     picks = read_sql(
         "SELECT dp.sid, dp.final_score, dp.rank, dp.cap_tier, s.ticker, s.name "
         "FROM daily_picks dp JOIN stocks s ON dp.sid = s.sid "
         "WHERE dp.pick_date = (SELECT MAX(pick_date) FROM daily_picks) "
+        "  AND (dp.integrity_status IS NULL OR dp.integrity_status != 'FAIL') "
         "ORDER BY dp.cap_tier, dp.rank LIMIT ?",
         params=[top * 3],
     )

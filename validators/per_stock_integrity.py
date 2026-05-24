@@ -163,6 +163,37 @@ def base_score_realistic(row):
     return "PASS", None
 
 
+def market_cap_consistency(row):
+    """market_cap_cr ≈ shares_outstanding × close × 1e-7 (₹ → crores).
+
+    1 crore = 10^7. So `mcap_cr = shares × close / 10^7`. 10% tolerance
+    accounts for stale market_cap_cr (it's a slow-moving stocks.* field
+    refreshed less often than close) — anything beyond is corrupt input or
+    a shares_outstanding stale by a buyback/split.
+    """
+    mcap = row.get("market_cap_cr")
+    shares = row.get("shares_outstanding")
+    close = row.get("close")
+    for v in (mcap, shares, close):
+        if v is None or (isinstance(v, float) and pd.isna(v)):
+            return "PASS", None
+    try:
+        mcap = float(mcap); shares = float(shares); close = float(close)
+    except (TypeError, ValueError):
+        return "PASS", None
+    if mcap <= 0 or shares <= 0 or close <= 0:
+        return "PASS", None
+    expected = shares * close / 1e7
+    if expected == 0:
+        return "PASS", None
+    diff_pct = 100 * abs(mcap - expected) / max(expected, mcap)
+    if diff_pct > 25:
+        return "FAIL", f"market_cap_cr={mcap:.1f} vs shares×close/1e7={expected:.1f} ({diff_pct:.0f}% off)"
+    if diff_pct > 10:
+        return "WARN", f"market_cap_cr={mcap:.1f} vs shares×close/1e7={expected:.1f} ({diff_pct:.0f}% off — stale shares?)"
+    return "PASS", None
+
+
 CHECKS = [
     ("pt_upside_consistency",          pt_upside_consistency),
     ("consensus_requires_attribution", consensus_requires_attribution),
@@ -172,6 +203,19 @@ CHECKS = [
     ("eps_growth_requires_eps",        eps_growth_requires_eps),
     ("extreme_growth_clipped",         extreme_growth_clipped),
     ("base_score_realistic",           base_score_realistic),
+    # market_cap_consistency intentionally NOT in production CHECKS yet —
+    # stocks.market_cap_cr and annual_balance_sheet.shares_outstanding use
+    # inconsistent units across upstream sources (Tickertape vs Screener.in),
+    # making a strict cross-check noisy. The assertion is correct in spirit;
+    # add to CHECKS after Phase C unit-normalization. Self-test keeps the
+    # logic verified so it's instantly re-enableable.
+    # ("market_cap_consistency",      market_cap_consistency),
+]
+
+
+# Optional CHECKS — exposed for self-test but not run in production CHECKS.
+OPTIONAL_CHECKS = [
+    ("market_cap_consistency", market_cap_consistency),
 ]
 
 
@@ -249,6 +293,22 @@ def _augment_with_cross_source_fields(picks_df):
         params=list(sids),
     )
 
+    # market_cap_cr from stocks (slow-moving snapshot)
+    mc = read_sql(
+        f"SELECT sid, market_cap_cr FROM stocks WHERE sid IN ({placeholders})",
+        params=list(sids),
+    )
+
+    # shares_outstanding from latest annual_balance_sheet
+    sh = read_sql(
+        f"SELECT sid, shares_outstanding FROM annual_balance_sheet "
+        f"WHERE sid IN ({placeholders}) "
+        f"AND (sid, period) IN ("
+        f"  SELECT sid, MAX(period) FROM annual_balance_sheet WHERE sid IN ({placeholders}) GROUP BY sid"
+        f")",
+        params=list(sids) + list(sids),
+    )
+
     # Compute pt_upside_pct from PT and close
     merged = picks_df.copy()
     merged = merged.merge(ac, on="sid", how="left")
@@ -256,6 +316,8 @@ def _augment_with_cross_source_fields(picks_df):
     merged = merged.merge(px, on="sid", how="left", suffixes=("", "_px"))
     merged = merged.merge(pio, on="sid", how="left")
     merged = merged.merge(fos, on="sid", how="left")
+    merged = merged.merge(mc, on="sid", how="left")
+    merged = merged.merge(sh, on="sid", how="left")
 
     # Derived: pt_upside_pct from PT/close. NB: the screener's consensus output
     # column is `consensus` (not consensus_signal), so the new merged
@@ -291,8 +353,133 @@ def validate_picks(picks_df):
     })
 
 
+# ─────────────────────── injection tests ───────────────────────
+#
+# `python -m validators.per_stock_integrity --self-test` runs deliberate
+# HALC-class injections and asserts the right assertion fires. These are
+# the "would I have caught the 2026-05-22 HALC bug?" smoke tests. Run on
+# every meaningful change to this file (manual today; CI step in Phase E).
+
+
+def _self_test():
+    """Inject known-bad rows, assert the right assertion catches each."""
+    cases = [
+        {
+            "name": "HALC 2026-05-22 (16.5% downside, actually -8.5%)",
+            "row": {"price_target": 1038.0, "close": 1135.0, "pt_upside_pct": -16.5},
+            "expected_status": "FAIL",
+            "expected_check": "pt_upside_consistency",
+        },
+        {
+            "name": "PT/close consistent, no false positive",
+            "row": {"price_target": 1150.0, "close": 1000.0, "pt_upside_pct": 15.0},
+            "expected_status": "PASS",
+            "expected_check": None,
+        },
+        {
+            "name": "consensus without attribution (the 14-stock bug)",
+            "row": {"consensus_signal": 0.55, "total_analysts": 0, "price_target": None},
+            "expected_status": "FAIL",
+            "expected_check": "consensus_requires_attribution",
+        },
+        {
+            "name": "consensus WITH attribution (yfinance has data)",
+            "row": {"consensus_signal": 0.55, "total_analysts": 12, "price_target": 950.0,
+                    "close": 900.0, "pt_upside_pct": 5.56},  # 50/900 = 5.56%
+            "expected_status": "PASS",
+            "expected_check": None,
+        },
+        {
+            "name": "f_score out of range",
+            "row": {"f_score": 12},
+            "expected_status": "FAIL",
+            "expected_check": "f_score_range",
+        },
+        {
+            "name": "m_score impossibly extreme (data corruption)",
+            "row": {"m_score": -99.5},
+            "expected_status": "FAIL",
+            "expected_check": "m_score_realistic",
+        },
+        {
+            "name": "forward_pe inconsistent with close/forward_eps",
+            "row": {"forward_pe": 25.0, "forward_eps": 50.0, "close": 800.0},  # close/eps=16, not 25
+            "expected_status": "WARN",
+            "expected_check": "forward_pe_consistency",
+        },
+        {
+            "name": "base_score outside [0,1] (screener arithmetic broken)",
+            "row": {"base_score": 1.45},
+            "expected_status": "FAIL",
+            "expected_check": "base_score_realistic",
+        },
+        {
+            "name": "market_cap matches shares × close (consistent: 10M × ₹1000 = ₹1000cr)",
+            "row": {"market_cap_cr": 1000.0, "shares_outstanding": 10_000_000, "close": 1000.0},
+            "expected_status": "PASS",
+            "expected_check": None,
+        },
+        {
+            "name": "market_cap contradicts shares × close (3× off — likely stale shares)",
+            "row": {"market_cap_cr": 3000.0, "shares_outstanding": 10_000_000, "close": 1000.0},
+            "expected_status": "FAIL",
+            "expected_check": "market_cap_consistency",
+        },
+    ]
+
+    print(f"Self-test: {len(cases)} injection cases")
+    print("=" * 80)
+    passed = failed = 0
+    # Combine production + optional checks for self-test only — we want to
+    # verify the dormant assertions work even though they're not in production.
+    all_checks = CHECKS + OPTIONAL_CHECKS
+
+    def _run_all(row):
+        fails, warns = [], []
+        for name, fn in all_checks:
+            try:
+                s, reason = fn(row)
+            except Exception as e:
+                warns.append(f"{name}: raised {type(e).__name__}")
+                continue
+            if s == "FAIL": fails.append(f"{name}: {reason}")
+            elif s == "WARN": warns.append(f"{name}: {reason}")
+        if fails: return "FAIL", " | ".join(fails + warns)
+        if warns: return "WARN", " | ".join(warns)
+        return "PASS", ""
+
+    for c in cases:
+        status, reasons = _run_all(c["row"])
+        ok = status == c["expected_status"]
+        if c["expected_check"]:
+            ok = ok and c["expected_check"] in reasons
+        marker = "✓" if ok else "✗"
+        print(f"  {marker} {c['name']}")
+        print(f"      expected: {c['expected_status']}" +
+              (f" via {c['expected_check']}" if c["expected_check"] else ""))
+        print(f"      got:      {status}" + (f" — {reasons[:120]}" if reasons else ""))
+        if ok:
+            passed += 1
+        else:
+            failed += 1
+    print()
+    print(f"Result: {passed}/{len(cases)} passed, {failed} failed")
+    return failed == 0
+
+
 if __name__ == "__main__":
-    # Smoke test: validate today's daily_picks
+    import argparse
+    p = argparse.ArgumentParser()
+    p.add_argument("--self-test", action="store_true",
+                   help="Run injection tests against the validator")
+    args = p.parse_args()
+
+    if args.self_test:
+        ok = _self_test()
+        import sys
+        sys.exit(0 if ok else 1)
+
+    # Default: validate today's daily_picks
     picks = read_sql(
         "SELECT * FROM daily_picks WHERE pick_date = (SELECT MAX(pick_date) FROM daily_picks)"
     )

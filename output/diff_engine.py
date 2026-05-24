@@ -68,15 +68,21 @@ def _detect_rank_changes(today_date, yesterday_date):
     """Detect entries, exits, upgrades, and downgrades in top picks."""
     changes = []
 
+    # Plan 0005 Phase B: exclude integrity-FAIL picks from rank-change diffs
+    # so a FAIL never surfaces as a "new entry" or "upgrade" headline.
     today = read_sql(
         "SELECT dp.sid, dp.rank, dp.cap_tier, dp.final_score, s.ticker, s.name "
         "FROM daily_picks dp JOIN stocks s ON dp.sid = s.sid "
-        "WHERE dp.pick_date = ?", params=[today_date]
+        "WHERE dp.pick_date = ? "
+        "  AND (dp.integrity_status IS NULL OR dp.integrity_status != 'FAIL')",
+        params=[today_date],
     )
     yesterday = read_sql(
         "SELECT dp.sid, dp.rank, dp.cap_tier, dp.final_score, s.ticker "
         "FROM daily_picks dp JOIN stocks s ON dp.sid = s.sid "
-        "WHERE dp.pick_date = ?", params=[yesterday_date]
+        "WHERE dp.pick_date = ? "
+        "  AND (dp.integrity_status IS NULL OR dp.integrity_status != 'FAIL')",
+        params=[yesterday_date],
     )
 
     if today.empty or yesterday.empty:

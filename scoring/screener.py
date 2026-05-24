@@ -268,18 +268,32 @@ def score_universe(df):
     return df
 
 
-MIN_WEIGHT_COVERAGE = 0.50  # ≥50% of tier signal weight backed by non-NULL signal OUTPUT
-MIN_PRICE_ROWS = 60         # ≈3 months of trading days
+MIN_ELIGIBLE_COVERAGE = 0.60  # ≥60% of the SID's ELIGIBLE signal weight produced output
+MIN_WEIGHT_COVERAGE = 0.50    # ≥50% of TIER TOTAL weight (legacy floor — defence in depth)
+MIN_PRICE_ROWS = 60           # ≈3 months of trading days
 MIN_FUNDAMENTAL_COVERAGE = 0.50  # ≥4 of 8 quarterly_income rows (INPUT-side, added 2026-05-24)
 # Thresholds + rationale: docs/decisions/0021-pick-eligibility-gate.md
+# Plan 0005 Phase A.5 (2026-05-24): primary gate switched to eligible_coverage.
+# A SMALL cap with no analyst attribution that scores well on its 6 ELIGIBLE
+# signals is no longer punished for missing consensus (which was never going
+# to apply). weight_coverage retained at 50% as a backstop — catches the
+# pathological case where eligibility data itself is wrong.
 
 
 def _pick_eligible(df):
-    """Boolean Series: True where stock qualifies for daily_picks."""
-    has_coverage = df["weight_coverage"].fillna(0) >= MIN_WEIGHT_COVERAGE
+    """Boolean Series: True where stock qualifies for daily_picks.
+
+    Gate has 4 conditions, ALL must hold:
+      • eligible_coverage ≥ 0.60 — SID's ELIGIBLE signals produced ≥60% output
+      • weight_coverage   ≥ 0.50 — legacy backstop (in case eligibility data is wrong)
+      • price_rows        ≥ 60  — ≥3 months of trading prices
+      • fundamental_coverage ≥ 0.50 — ≥4 of 8 quarterly_income rows
+    """
+    has_elig = df.get("eligible_coverage", df.get("weight_coverage")).fillna(0) >= MIN_ELIGIBLE_COVERAGE
+    has_weight = df["weight_coverage"].fillna(0) >= MIN_WEIGHT_COVERAGE
     has_prices = df["price_rows"].fillna(0) >= MIN_PRICE_ROWS
     has_fundamentals = df["fundamental_coverage"].fillna(0) >= MIN_FUNDAMENTAL_COVERAGE
-    return has_coverage & has_prices & has_fundamentals
+    return has_elig & has_weight & has_prices & has_fundamentals
 
 
 def select_picks(df, picks_per_tier=None):
@@ -297,11 +311,13 @@ def select_picks(df, picks_per_tier=None):
         picks_per_tier = PORTFOLIO["picks_per_tier"]
 
     eligible = _pick_eligible(df)
+    dropped_elig = (df.get("eligible_coverage", df.get("weight_coverage")).fillna(0) < MIN_ELIGIBLE_COVERAGE).sum()
     dropped_coverage = ((df["weight_coverage"].fillna(0) < MIN_WEIGHT_COVERAGE)).sum()
     dropped_prices = ((df["price_rows"].fillna(0) < MIN_PRICE_ROWS)).sum()
     dropped_fundamentals = ((df["fundamental_coverage"].fillna(0) < MIN_FUNDAMENTAL_COVERAGE)).sum()
     print(f"  Pick gate: {(~eligible).sum()} excluded "
-          f"({dropped_coverage} below {MIN_WEIGHT_COVERAGE:.0%} weight, "
+          f"({dropped_elig} below {MIN_ELIGIBLE_COVERAGE:.0%} eligible, "
+          f"{dropped_coverage} below {MIN_WEIGHT_COVERAGE:.0%} weight, "
           f"{dropped_prices} below {MIN_PRICE_ROWS}d prices, "
           f"{dropped_fundamentals} below {MIN_FUNDAMENTAL_COVERAGE:.0%} fundamentals)")
 
