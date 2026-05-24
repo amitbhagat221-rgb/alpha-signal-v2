@@ -354,9 +354,11 @@ async def news_page(request: Request, topic: str = "", tier: int = 0):
         tier=(tier if tier else None),
         limit=80,
     )
+    brief = api.get_news_brief()
     return templates.TemplateResponse(request, "news.html", {
         "page": "news",
         "feed": feed,
+        "brief": brief,
         "topic": topic,
         "active_tier": tier,
     })

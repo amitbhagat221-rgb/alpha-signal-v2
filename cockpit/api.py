@@ -3480,26 +3480,79 @@ def _humanize_age(published_at):
 
 
 @_ttl_cache(300)
+def get_news_brief(target_date=None):
+    """Latest daily brief (THE BIG ONE / FIVE FAST / ONE TO WATCH / ZOOM OUT).
+
+    Returns {} if no brief generated yet. Otherwise the parsed structure for
+    display at the top of /news. Synthesized by sources/news_brief.py via
+    Claude Sonnet.
+    """
+    if target_date:
+        df = read_sql(
+            "SELECT * FROM news_briefs WHERE brief_date = ? LIMIT 1",
+            params=[target_date],
+        )
+    else:
+        df = read_sql("SELECT * FROM news_briefs ORDER BY brief_date DESC LIMIT 1")
+    if df.empty:
+        return {}
+    r = df.iloc[0].to_dict()
+    import json as _json
+    try:
+        r["five_fast"] = _json.loads(r.get("five_fast") or "[]")
+    except Exception:
+        r["five_fast"] = []
+    return r
+
+
+# Topic taxonomy — kept in sync with sources/news_classifier.py TOPIC_TAXONOMY.
+# Cockpit reads its own copy so it can render without importing the classifier
+# module (avoids pulling in anthropic SDK dependency on every page load).
+_NEWS_TOPICS = [
+    ("macro",          "Macro",                "#9b59b6"),
+    ("global_economy", "Global Economy",       "#5dade2"),
+    ("india_markets",  "India Markets",        "#2ecc71"),
+    ("finance",        "Finance & Banking",    "#f1c40f"),
+    ("earnings",       "Earnings & Companies", "#e67e22"),
+    ("deals",          "Deals, IPOs & M&A",    "#e91e63"),
+    ("ai_tech",        "AI & Tech",            "#3498db"),
+    ("politics",       "Politics & Policy",    "#c0392b"),
+    ("energy",         "Energy & Commodities", "#ff8c00"),
+    ("consumer",       "Consumer & Retail",    "#16a085"),
+    ("industrial",     "Industrial & Infra",   "#7f8c8d"),
+    ("pharma_health",  "Pharma & Health",      "#1abc9c"),
+    ("other",          "Other",                "#95a5a6"),
+]
+_NEWS_TOPIC_MAP = {tid: (label, color) for tid, label, color in _NEWS_TOPICS}
+
+
+@_ttl_cache(300)
 def get_news_feed(topic=None, tier=None, limit=80):
     """Inshorts-style news cards: rank by recency × source-trust, dedupe by title.
 
-    Plan: pull last 7d, score each with `tier_score × recency_decay(half_life=12h)`,
-    return top `limit`. Dedupe: drop articles whose title is >85% similar to a
-    higher-ranked one already in the result (cheap n-gram overlap, no embedding).
+    Joins news_enriched (Phase 2) when present so each card carries the LLM
+    structured fields (one_liner, why_it_matters, key_numbers, what_to_watch,
+    confidence, sentiment) plus topic tags. Unclassified articles still render
+    with raw title+summary — graceful degradation.
 
-    Each card returned has:
+    Each card has:
         id, headline, summary, source_label, source_tier, source_url,
-        published_at, age_label, score
-    Designed for a single page in cockpit (`/news`) — no per-card LLM call.
+        published_at, age_label, score, primary_topic, topic_label, topic_color,
+        one_liner, why_it_matters, key_numbers (parsed list), what_to_watch,
+        confidence, sentiment, enriched (bool)
     """
     df = read_sql(
         """
-        SELECT article_id AS id, title AS headline, summary,
-               url AS source_url, source, published_at
-        FROM news_articles
-        WHERE published_at >= date('now', '-7 days')
-        ORDER BY published_at DESC
-        LIMIT 500
+        SELECT na.article_id AS id, na.title AS headline, na.summary,
+               na.url AS source_url, na.source, na.published_at,
+               ne.primary_topic, ne.topics, ne.one_liner, ne.why_it_matters,
+               ne.key_numbers, ne.what_to_watch, ne.confidence, ne.sentiment,
+               ne.classifier_status
+        FROM news_articles na
+        LEFT JOIN news_enriched ne ON ne.article_id = na.article_id
+        WHERE na.published_at >= date('now', '-7 days')
+        ORDER BY na.published_at DESC
+        LIMIT 800
         """
     )
     if df.empty:
@@ -3523,17 +3576,35 @@ def get_news_feed(topic=None, tier=None, limit=80):
         recency = 0.5 ** (hours_old / 12.0)
         score = tier_score * recency
 
-        # Topic filter — simple keyword overlap
+        # Topic filter — match against enriched primary_topic when classified,
+        # else fall back to keyword overlap (handles unclassified backlog).
+        primary_topic = r.get("primary_topic") if pd.notna(r.get("primary_topic")) else None
         if topic:
-            t_lower = (r["headline"] or "").lower() + " " + (r["summary"] or "").lower()
-            if topic.lower() not in t_lower:
-                continue
+            if primary_topic:
+                # Strict topic-id match
+                if primary_topic != topic:
+                    continue
+            else:
+                # Fallback for unclassified: keyword overlap
+                t_lower = (r["headline"] or "").lower() + " " + (r["summary"] or "").lower()
+                if topic.lower().replace("_", " ") not in t_lower:
+                    continue
 
         summary = (r["summary"] or "").strip()
-        # Cap summary at ~80 words for the Inshorts feel (~3-5 min full-feed read)
         words = summary.split()
         if len(words) > 80:
             summary = " ".join(words[:80]) + "…"
+
+        # Parse enriched fields
+        import json as _json
+        key_numbers = []
+        if r.get("key_numbers") and pd.notna(r.get("key_numbers")):
+            try:
+                key_numbers = _json.loads(r["key_numbers"]) or []
+            except Exception:
+                key_numbers = []
+
+        topic_label, topic_color = _NEWS_TOPIC_MAP.get(primary_topic or "", (None, None))
 
         cards.append({
             "id": r["id"],
@@ -3547,6 +3618,17 @@ def get_news_feed(topic=None, tier=None, limit=80):
             "published_at": r["published_at"],
             "age_label": _humanize_age(r["published_at"]),
             "score": round(score, 4),
+            # Phase 2 enrichment
+            "enriched": pd.notna(r.get("classifier_status")) and r.get("classifier_status") == "done",
+            "primary_topic": primary_topic,
+            "topic_label": topic_label,
+            "topic_color": topic_color,
+            "one_liner": r.get("one_liner") if pd.notna(r.get("one_liner")) else None,
+            "why_it_matters": r.get("why_it_matters") if pd.notna(r.get("why_it_matters")) else None,
+            "key_numbers": key_numbers,
+            "what_to_watch": r.get("what_to_watch") if pd.notna(r.get("what_to_watch")) else None,
+            "confidence": r.get("confidence") if pd.notna(r.get("confidence")) else None,
+            "sentiment": r.get("sentiment") if pd.notna(r.get("sentiment")) else None,
         })
 
     # Sort by score
@@ -3583,6 +3665,29 @@ def get_news_feed(topic=None, tier=None, limit=80):
     # Sources present (for filter chips)
     sources_present = sorted({c["source_label"] for c in kept})
 
+    # Per-topic counts — for top-tab badges. When the user is filtering by a
+    # topic, the counts reflect the unfiltered population so tabs work as
+    # navigation (clicking a tab shows N matching items).
+    if topic:
+        unfiltered = read_sql(
+            """
+            SELECT ne.primary_topic, COUNT(*) AS n
+            FROM news_articles na
+            LEFT JOIN news_enriched ne ON ne.article_id = na.article_id
+            WHERE na.published_at >= date('now', '-7 days')
+            GROUP BY ne.primary_topic
+            """
+        )
+        topic_counts = {tid: 0 for tid, _, _ in _NEWS_TOPICS}
+        for _, row in unfiltered.iterrows():
+            t = row["primary_topic"] if pd.notna(row.get("primary_topic")) else "other"
+            topic_counts[t] = topic_counts.get(t, 0) + int(row["n"])
+    else:
+        topic_counts = {tid: 0 for tid, _, _ in _NEWS_TOPICS}
+        for c in kept:
+            t = c.get("primary_topic") or "other"
+            topic_counts[t] = topic_counts.get(t, 0) + 1
+
     return {
         "cards": kept,
         "total": len(kept),
@@ -3592,6 +3697,9 @@ def get_news_feed(topic=None, tier=None, limit=80):
             2: sum(1 for c in kept if c["source_tier"] == 2),
             3: sum(1 for c in kept if c["source_tier"] == 3),
         },
+        "topic_counts": topic_counts,
+        "topics": _NEWS_TOPICS,  # for tab rendering: list of (id, label, color)
+        "n_enriched": sum(1 for c in kept if c["enriched"]),
     }
 
 

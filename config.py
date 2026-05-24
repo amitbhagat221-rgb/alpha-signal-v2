@@ -248,6 +248,17 @@ PIPELINE_STEPS = [
     {"name": "fetch_news",         "module": "sources.rss",          "function": "compute", "critical": False,
      "table": "news_articles",     "source": "RSS feeds (8 sources)", "data_freq": "daily", "frequency": "daily"},
 
+    # News Phase 2 enrichment — Claude Haiku per-article structured fields
+    # (~$0.001/article, ~$1/day). Runs after fetch_news so today's stories
+    # are classified by the time the brief generator fires.
+    {"name": "classify_news",       "module": "sources.news_classifier", "function": "compute", "critical": False,
+     "table": "news_enriched",     "source": "news_articles (Claude Haiku enrich)", "data_freq": "daily", "frequency": "daily"},
+
+    # Daily news brief — Claude Sonnet synthesis of top 25 enriched stories.
+    # ~$0.05/day. Cron after classify_news so the brief reflects today.
+    {"name": "news_brief",          "module": "sources.news_brief",   "function": "compute", "critical": False,
+     "table": "news_briefs",       "source": "news_enriched (Claude Sonnet synthesis)", "data_freq": "daily", "frequency": "daily"},
+
     # Regulatory pipeline — harvester writes to regulatory_events, classifier
     # writes to regulatory_signals. Were missing from PIPELINE_STEPS pre-
     # 2026-05-24 → REGULATORY_FEED_DARK fired (43 days silent before the

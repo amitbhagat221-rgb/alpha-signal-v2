@@ -2,38 +2,91 @@
 
 {% block content %}
 
-<div style="max-width: 720px; margin: 0 auto;">
+<div style="max-width: 780px; margin: 0 auto;">
 
 <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px; gap: 12px; flex-wrap: wrap;">
     <div>
         <div class="section-title">News</div>
         <div class="section-desc" style="margin-bottom: 0;">
-            Inshorts-style daily feed. {{ feed.total }} stories from last 7 days, ranked by recency × source-trust.
-            Tap a card to read the full summary.
+            Daily feed — {{ feed.total }} stories from last 7 days · {{ feed.n_enriched }} LLM-enriched.
+            Each card: what happened · why it matters · key numbers. Tap to expand.
         </div>
     </div>
     <div style="display: flex; gap: 14px; align-items: baseline; padding-top: 4px;">
-        <span style="font-size: 11px; color: var(--text-muted);">Tier 1 <strong style="color: var(--green);">{{ feed.tier_counts[1] }}</strong></span>
+        <span style="font-size: 11px; color: var(--text-muted);">T1 <strong style="color: var(--green);">{{ feed.tier_counts[1] }}</strong></span>
         <span style="font-size: 11px; color: var(--text-muted);">T2 <strong style="color: #4d8eff;">{{ feed.tier_counts[2] }}</strong></span>
         <span style="font-size: 11px; color: var(--text-muted);">T3 <strong style="color: var(--text-muted);">{{ feed.tier_counts[3] }}</strong></span>
     </div>
 </div>
 
-<!-- Filter chips -->
-<div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center; padding: 10px 0 16px; border-bottom: 1px solid var(--border);">
-    <span style="font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Tier</span>
+{# ────────── Daily brief — shown only on the "All" tab (no topic filter) ────────── #}
+{% if brief and brief.big_one and not topic %}
+<div class="card" style="margin-bottom: 18px; padding: 18px 22px; background: var(--bg-card); border-left: 4px solid var(--accent);">
+    <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 10px;">
+        <div style="font-size: 11px; color: var(--accent); font-weight: 700; letter-spacing: 1px; text-transform: uppercase;">Today's brief · {{ brief.brief_date }}</div>
+        <div style="font-size: 10px; color: var(--text-muted);">{{ brief.n_articles_used }} stories synthesized</div>
+    </div>
+
+    <div style="margin-bottom: 14px;">
+        <div style="font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 5px;">The Big One</div>
+        <div style="font-size: 14px; color: var(--text-primary); line-height: 1.55;">{{ brief.big_one }}</div>
+    </div>
+
+    {% if brief.five_fast %}
+    <div style="margin-bottom: 14px;">
+        <div style="font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 5px;">Five Fast</div>
+        <ol style="margin: 0; padding-left: 22px; color: var(--text-secondary); font-size: 12px; line-height: 1.55;">
+            {% for item in brief.five_fast %}
+            <li style="margin-bottom: 4px;">{{ item }}</li>
+            {% endfor %}
+        </ol>
+    </div>
+    {% endif %}
+
+    {% if brief.one_to_watch %}
+    <div style="margin-bottom: 14px;">
+        <div style="font-size: 10px; color: #9b59b6; text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 5px;">One to Watch</div>
+        <div style="font-size: 12px; color: var(--text-primary); line-height: 1.55;">{{ brief.one_to_watch }}</div>
+    </div>
+    {% endif %}
+
+    {% if brief.zoom_out %}
+    <div>
+        <div style="font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 5px;">Zoom Out</div>
+        <div style="font-size: 12px; color: var(--text-secondary); line-height: 1.55; font-style: italic;">{{ brief.zoom_out }}</div>
+    </div>
+    {% endif %}
+</div>
+{% endif %}
+
+<!-- Top-tab navigation by topic (Inshorts-style) -->
+<div class="news-tabs">
+    <a href="/news{% if active_tier %}?tier={{ active_tier }}{% endif %}" class="news-tab {% if not topic %}active{% endif %}">All <span class="ct">{{ feed.total }}</span></a>
+    {% for tid, label, color in feed.topics %}
+    {% set n = feed.topic_counts.get(tid, 0) %}
+    {% if n > 0 or topic == tid %}
+    <a href="/news?topic={{ tid }}{% if active_tier %}&tier={{ active_tier }}{% endif %}"
+       class="news-tab {% if topic == tid %}active{% endif %}"
+       style="{% if topic == tid %}background: {{ color }}; border-color: {{ color }}; color: white;{% else %}border-left: 3px solid {{ color }};{% endif %}">
+        {{ label }} <span class="ct">{{ n }}</span>
+    </a>
+    {% endif %}
+    {% endfor %}
+</div>
+
+<!-- Secondary filters -->
+<div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center; padding: 12px 0 16px; border-bottom: 1px solid var(--border);">
+    <span style="font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Source tier</span>
     <a href="/news{% if topic %}?topic={{ topic }}{% endif %}" class="news-chip {% if not active_tier %}active{% endif %}">All</a>
-    <a href="/news?tier=1{% if topic %}&topic={{ topic }}{% endif %}" class="news-chip {% if active_tier == 1 %}active{% endif %}">Tier 1</a>
-    <a href="/news?tier=2{% if topic %}&topic={{ topic }}{% endif %}" class="news-chip {% if active_tier == 2 %}active{% endif %}">Tier 2</a>
-    <a href="/news?tier=3{% if topic %}&topic={{ topic }}{% endif %}" class="news-chip {% if active_tier == 3 %}active{% endif %}">Tier 3</a>
+    <a href="/news?tier=1{% if topic %}&topic={{ topic }}{% endif %}" class="news-chip {% if active_tier == 1 %}active{% endif %}">T1</a>
+    <a href="/news?tier=2{% if topic %}&topic={{ topic }}{% endif %}" class="news-chip {% if active_tier == 2 %}active{% endif %}">T2</a>
+    <a href="/news?tier=3{% if topic %}&topic={{ topic }}{% endif %}" class="news-chip {% if active_tier == 3 %}active{% endif %}">T3</a>
     <span style="flex: 1;"></span>
     <form action="/news" method="get" style="display: flex; gap: 6px;">
+        {% if topic %}<input type="hidden" name="topic" value="{{ topic }}">{% endif %}
         {% if active_tier %}<input type="hidden" name="tier" value="{{ active_tier }}">{% endif %}
-        <input type="text" name="topic" value="{{ topic }}" placeholder="filter by keyword…"
+        <input type="text" name="q" placeholder="keyword search…"
             style="background: var(--bg-card); color: var(--text-primary); border: 1px solid var(--border); border-radius: 6px; padding: 5px 10px; font-size: 12px; min-width: 180px;">
-        {% if topic %}
-        <a href="/news{% if active_tier %}?tier={{ active_tier }}{% endif %}" style="padding: 5px 10px; font-size: 11px; color: var(--text-muted); text-decoration: none;">clear</a>
-        {% endif %}
     </form>
 </div>
 
@@ -41,23 +94,77 @@
 {% if feed.cards %}
 {% for card in feed.cards %}
 {% set tier_color = '#2ecc71' if card.source_tier == 1 else ('#4d8eff' if card.source_tier == 2 else 'var(--text-muted)') %}
-<article x-data="{ open: false }" class="news-card" style="border-bottom: 1px solid var(--border); padding: 18px 0; cursor: pointer;" @click="open = !open">
-    <div style="display: flex; align-items: baseline; gap: 8px; margin-bottom: 6px;">
-        <span style="display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: {{ tier_color }}; flex-shrink: 0;" title="Tier {{ card.source_tier }}"></span>
-        <span style="font-size: 11px; color: {{ tier_color }}; font-weight: 600; letter-spacing: 0.3px;">{{ card.source_label }}</span>
+{% set sent_color = '#2ecc71' if card.sentiment == 'bullish' else ('#e74c3c' if card.sentiment == 'bearish' else 'var(--text-muted)') %}
+<article x-data="{ open: false }" class="news-card" style="border-bottom: 1px solid var(--border); padding: 20px 0; cursor: pointer;" @click="open = !open">
+    <!-- Meta row: topic badge + source + age + confidence + sentiment -->
+    <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px;">
+        {% if card.topic_label %}
+        <span style="display: inline-block; padding: 2px 8px; border-radius: 10px; background: {{ card.topic_color }}; color: white; font-size: 10px; font-weight: 700; letter-spacing: 0.3px; text-transform: uppercase;">{{ card.topic_label }}</span>
+        {% endif %}
+        <span style="display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: {{ tier_color }};" title="Tier {{ card.source_tier }}"></span>
+        <span style="font-size: 11px; color: {{ tier_color }}; font-weight: 600;">{{ card.source_label }}</span>
         <span style="font-size: 11px; color: var(--text-muted);">·</span>
         <span style="font-size: 11px; color: var(--text-muted);">{{ card.age_label }}</span>
+        {% if card.sentiment and card.sentiment != 'neutral' %}
+        <span style="font-size: 10px; color: {{ sent_color }}; font-weight: 700;">·</span>
+        <span style="font-size: 10px; color: {{ sent_color }}; font-weight: 700; text-transform: uppercase;">{{ card.sentiment }}</span>
+        {% endif %}
+        {% if card.confidence == 'low' %}
+        <span style="font-size: 10px; color: var(--amber); margin-left: auto;" title="Low confidence per source">⚠ low confidence</span>
+        {% endif %}
     </div>
+
+    <!-- Headline -->
     <h3 style="font-size: 16px; font-weight: 700; color: var(--text-primary); line-height: 1.35; margin: 0 0 8px;">{{ card.headline }}</h3>
-    <p style="font-size: 13px; color: var(--text-secondary); line-height: 1.55; margin: 0;"
-       x-show="!open">
-        {{ card.summary[:180] }}{% if card.summary|length > 180 %}…{% endif %}
+
+    <!-- Compact view: one-liner or raw summary -->
+    {% set preview = card.one_liner if card.one_liner else card.summary[:180] %}
+    <p style="font-size: 13px; color: var(--text-secondary); line-height: 1.55; margin: 0;" x-show="!open">
+        {{ preview }}{% if preview|length >= 178 and not card.one_liner %}…{% endif %}
     </p>
-    <div x-show="open" x-cloak>
-        <p style="font-size: 13px; color: var(--text-secondary); line-height: 1.6; margin: 0 0 10px;">{{ card.summary }}</p>
+
+    <!-- Expanded: structured fields -->
+    <div x-show="open" x-cloak style="margin-top: 4px;">
+        {% if card.one_liner %}
+        <p style="font-size: 13px; color: var(--text-primary); line-height: 1.6; margin: 0 0 10px; font-weight: 500;">{{ card.one_liner }}</p>
+        {% endif %}
+
+        {% if card.why_it_matters and card.why_it_matters != 'Not market-relevant' %}
+        <div style="margin: 12px 0; padding: 10px 14px; background: var(--bg-card); border-left: 3px solid var(--accent); border-radius: 4px;">
+            <div style="font-size: 9px; color: var(--accent); text-transform: uppercase; letter-spacing: 0.8px; font-weight: 700; margin-bottom: 4px;">Why it matters</div>
+            <div style="font-size: 12px; color: var(--text-primary); line-height: 1.55;">{{ card.why_it_matters }}</div>
+        </div>
+        {% endif %}
+
+        {% if card.key_numbers and card.key_numbers|length > 0 %}
+        <div style="margin: 10px 0; display: flex; gap: 10px; flex-wrap: wrap;">
+            {% for kn in card.key_numbers %}
+            <div style="padding: 6px 10px; background: var(--bg-card); border: 1px solid var(--border); border-radius: 6px;">
+                <div style="font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">{{ kn.label }}</div>
+                <div class="mono" style="font-size: 13px; color: var(--text-primary); font-weight: 700;">{{ kn.value }}</div>
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        {% if card.what_to_watch %}
+        <div style="margin: 12px 0; padding: 8px 12px; background: rgba(155,89,182,0.06); border-left: 3px solid #9b59b6; border-radius: 4px;">
+            <div style="font-size: 9px; color: #9b59b6; text-transform: uppercase; letter-spacing: 0.8px; font-weight: 700; margin-bottom: 3px;">What to watch</div>
+            <div style="font-size: 12px; color: var(--text-primary); line-height: 1.55;">{{ card.what_to_watch }}</div>
+        </div>
+        {% endif %}
+
+        <!-- Raw summary as a small footnote (always show — trust builder) -->
+        {% if card.summary and card.summary != card.one_liner %}
+        <details style="margin: 10px 0;">
+            <summary style="font-size: 10px; color: var(--text-muted); cursor: pointer; outline: none;">Source summary</summary>
+            <p style="font-size: 11px; color: var(--text-muted); line-height: 1.55; margin: 6px 0;">{{ card.summary }}</p>
+        </details>
+        {% endif %}
+
         {% if card.source_url %}
         <a href="{{ card.source_url }}" target="_blank" rel="noopener" @click.stop=""
-           style="display: inline-block; font-size: 11px; color: var(--accent); text-decoration: none; padding: 4px 10px; border: 1px solid var(--accent); border-radius: 5px; font-weight: 600;">
+           style="display: inline-block; font-size: 11px; color: var(--accent); text-decoration: none; padding: 5px 12px; border: 1px solid var(--accent); border-radius: 5px; font-weight: 600; margin-top: 4px;">
             Read source ↗
         </a>
         {% endif %}
@@ -75,6 +182,25 @@
 </div>
 
 <style>
+.news-tabs {
+    display: flex; gap: 6px; flex-wrap: wrap; align-items: center;
+    padding: 12px 0 0; border-bottom: 1px solid var(--border);
+    margin-bottom: 4px;
+}
+.news-tab {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 6px 12px; border: 1px solid var(--border); border-radius: 16px;
+    font-size: 12px; font-weight: 600; color: var(--text-secondary);
+    text-decoration: none; transition: all 0.1s; white-space: nowrap;
+}
+.news-tab:hover { color: var(--text-primary); border-color: var(--text-primary); }
+.news-tab.active { background: var(--accent); color: white; border-color: var(--accent); }
+.news-tab .ct {
+    font-size: 10px; padding: 1px 6px; border-radius: 8px;
+    background: rgba(255,255,255,0.1); font-weight: 700;
+}
+.news-tab.active .ct { background: rgba(0,0,0,0.2); }
+
 .news-chip {
     display: inline-block;
     padding: 4px 10px;
@@ -86,15 +212,8 @@
     text-decoration: none;
     transition: all 0.1s;
 }
-.news-chip:hover {
-    border-color: var(--accent);
-    color: var(--accent);
-}
-.news-chip.active {
-    background: var(--accent);
-    color: white;
-    border-color: var(--accent);
-}
+.news-chip:hover { border-color: var(--accent); color: var(--accent); }
+.news-chip.active { background: var(--accent); color: white; border-color: var(--accent); }
 .news-card:hover h3 { color: var(--accent); }
 </style>
 

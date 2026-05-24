@@ -965,3 +965,39 @@ CREATE TABLE IF NOT EXISTS universe_eligibility (
 );
 CREATE INDEX IF NOT EXISTS idx_eligibility_signal_date ON universe_eligibility(signal, snapshot_date);
 CREATE INDEX IF NOT EXISTS idx_eligibility_date ON universe_eligibility(snapshot_date);
+
+
+-- ──────────────────────────────────────────────────────────────────
+-- Plan 0005 news Phase 2: per-article LLM enrichment
+-- One row per news_articles.article_id. Populated by sources/news_classifier.py
+-- (Claude Haiku — ~$0.001 per article). Fields lifted from the spec at
+-- sources/news_app_build_spec.md. NULL = not yet classified.
+-- ──────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS news_enriched (
+    article_id       TEXT PRIMARY KEY REFERENCES news_articles(article_id),
+    topics           TEXT,            -- JSON array of topic_ids (e.g. ["ai", "indian_markets"])
+    primary_topic    TEXT,            -- single best-match topic, used for filter chips
+    one_liner        TEXT,            -- max 20 words, what happened
+    why_it_matters   TEXT,            -- max 40 words, the actual implication
+    key_numbers      TEXT,            -- JSON array of {label, value} pairs, max 3
+    what_to_watch    TEXT,            -- max 30 words, next thing to look for
+    confidence       TEXT,            -- "high" | "medium" | "low"
+    sentiment        TEXT,            -- "bullish" | "bearish" | "neutral" — market-relevance only
+    classifier_status TEXT DEFAULT 'pending',  -- pending | done | failed | skipped
+    classified_at    TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_news_enriched_topic ON news_enriched(primary_topic);
+CREATE INDEX IF NOT EXISTS idx_news_enriched_status ON news_enriched(classifier_status);
+
+-- Daily news brief — one row per date. Synthesized by sources/news_brief.py
+-- via Claude Sonnet from top-N enriched articles. Cron: 04:00 UTC after the
+-- per-article classifier completes.
+CREATE TABLE IF NOT EXISTS news_briefs (
+    brief_date       TEXT PRIMARY KEY,
+    big_one          TEXT NOT NULL,    -- THE BIG ONE — single most important story (60w)
+    five_fast        TEXT NOT NULL,    -- FIVE FAST — JSON array of 5 items (20w each)
+    one_to_watch     TEXT,             -- ONE TO WATCH — forming story (40w)
+    zoom_out         TEXT,             -- ZOOM OUT — connect today to larger pattern (50w)
+    n_articles_used  INTEGER,
+    generated_at     TEXT NOT NULL DEFAULT (datetime('now'))
+);
