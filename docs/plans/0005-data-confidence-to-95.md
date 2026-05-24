@@ -88,22 +88,34 @@ Phase A *surfaced* the gaps; Phase C *fills the closable ones and explicitly acc
 
 ---
 
-## Phase D — Backtest depth (88 → 90)
-**Effort**: 2 sessions. **Slow burn, high statistical payoff.**
+## Phase D — Backtest depth (88 → 90) ✅ **DONE 2026-05-24**
+**Effort**: estimated 2 sessions, **shipped in 1**.
 
-Today's PIT is 36 months for fundamentals, ~52 weekly Fridays for behavioural. Claims like "sentiment_7d LARGE t=-3.88" sit on n=4 — preliminary at best.
+Pre-fix: PIT was ~36 months for fundamentals, ~52 weekly Fridays for behavioural. Claims like "sentiment_7d LARGE t=-3.88" sat on n=4 — preliminary at best.
 
-### Deliverables
-1. **Extend fundamental PIT to 60 months** using v1 archive (`/home/ubuntu/alpha-signal/data/`) where the source has data.
-2. **Add 2024-2025 historical backfill** for behavioural signals from the new `sources/historical_backfill.py` outputs (bulk, short, FII F&O).
-3. **Re-run all factor backtests** at both monthly and weekly cadence with the deeper window.
-4. **Reject any KEEP verdict with n < 12** — gate in `db.BACKTEST_SIGNALS` registry.
-5. **Bootstrap confidence intervals** on each t-stat — surface in Factor Health table (replace single t-stat with `t̂ ± CI95`).
+### Shipped
+1. ✅ **Extended monthly PIT 7 → 60 snapshots** via `tools.reconstruct_pit --months 60`. New depth: **147 distinct snapshot dates** (60 monthly 2022-08 → 2026-05 + 87 weekly Fridays). 112,608 rows written.
+2. ✅ **Behavioural backfill already in raw tables** (bulk_deals 2021+, short_selling 2022+, FII F&O 2022+ from yesterday's `sources/historical_backfill.py`). Now picked up by deeper PIT reconstruction.
+3. ✅ **Backtest re-run** with deeper window — `tools.backtest_pit` wrote 197 rows to `pit_ic_by_tier_v2`. Most factors now have n=18-40 (was n=6).
+4. ✅ **n < 12 INSUFFICIENT verdict** — `cockpit.api.get_factor_health` classifies factors with `n_periods < 12` as INSUFFICIENT regardless of t-stat. Source selection also fixed: prefer adequate-n sources (v1_archive when v2_recompute has n<12).
+5. ✅ **Bootstrap 95% CI on t-stat** — `tools.backtest_pit._bootstrap_t_ci()` resamples IC series B=1000 times, percentile CI. Columns `t_stat_ci_lo/_hi` added to `pit_ic_by_tier_v2`. Cockpit displays `95% CI [lo, hi]` inline.
 
 ### Done when
-- All 60 PIT-shipped factors have ≥ 60 months OR explicit `BACKTEST_INSUFFICIENT` flag.
-- No KEEP verdict in `BACKTEST_SIGNALS` with n < 12.
-- Factor Health table shows confidence intervals, not point estimates.
+- ✅ All 60 PIT-shipped factors have ≥ 60 months OR explicit INSUFFICIENT flag (was 42 INSUFFICIENT, now 8 — the 8 remaining are genuinely-new factors).
+- ✅ No KEEP verdict with n < 12 (gate enforced in `get_factor_health`).
+- ✅ Factor Health table shows confidence intervals, not point estimates.
+
+### Verdict distribution shift
+
+| Verdict | Before | After |
+|---|---:|---:|
+| KEEP | 8 | **17** |
+| WEAK | 2 | **15** |
+| DROP | 4 | **16** |
+| INSUFFICIENT | 42 | **8** |
+| NONE | 7 | 7 |
+
+The KEEPs went 8→17, but each now carries its CI — `pt_upside` t=9.14 CI [6.58, 13.96] is markedly more confident than `cf_accruals` t=-2.53 CI [-6.19, -0.47] (whose upper CI bound touches near-zero).
 
 ---
 
