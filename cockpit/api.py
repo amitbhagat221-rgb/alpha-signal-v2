@@ -2257,17 +2257,60 @@ def get_factor_health():
                 return letter, color
         return "F", "#e74c3c"
 
+    # Per-signal nature classifications — drive both grading and the visible
+    # "nature badge" so the grade is self-explanatory at a glance.
+    SPARSE_BY_NATURE = {
+        "bulk_deal_signal",
+        "sentiment_7d", "news_volume",
+        "insider_signal",      # only stocks with recent insider trades
+    }
+    SECTOR_LEVEL = {"regulatory_sector_signal", "macro_sector_signal"}
+    COMPOSITE_NOT_FACTOR = {"screener_final_composite"}
+    DATA_DEPTH_LIMITED = {"fii_dii_cash_net", "fii_dii_fno_positioning"}
+
+    def _nature_of(signal):
+        if signal in SECTOR_LEVEL:        return "sector"
+        if signal in COMPOSITE_NOT_FACTOR: return "composite"
+        if signal in DATA_DEPTH_LIMITED:   return "data-depth"
+        if signal in SPARSE_BY_NATURE:     return "sparse"
+        return "broad"
+
     def _build_row(name, signal, group, status, status_reason, in_model_flag,
                    coverage_n, eligible_n, latest_snap_str,
                    t_stat, n_periods, ic_source, pit_ready, track):
-        # Coverage score: % of eligible universe scored
+        nature = _nature_of(signal)
+
+        # Coverage score — context-aware so the grade reflects "should I worry?"
+        # rather than mechanical % of universe.
+        #
+        # - broad factors: % of universe (the standard case)
+        # - sparse-by-nature (insider/bulk/sentiment/news_volume): full credit
+        #     IF data is flowing on cadence. These factors are SUPPOSED to
+        #     cover only stocks with the underlying event (~10-15% of universe).
+        #     Punishing them for that gave false D-grades and made the user
+        #     second-guess healthy signals.
+        # - sector / composite / data-depth: coverage % is meaningless for
+        #     these; score 100 so they don't drag the average down with a
+        #     metric that doesn't apply.
         if eligible_n > 0:
             coverage_pct = round(100 * coverage_n / eligible_n, 1)
-            coverage_score = min(100, coverage_pct * 1.05)  # cap at 100
         else:
-            coverage_pct, coverage_score = 0.0, 0
+            coverage_pct = 0.0
 
-        # Freshness score
+        if nature in ("sector", "composite", "data-depth"):
+            # Per-stock coverage not applicable — full credit, surfaced via badge.
+            coverage_score = 100
+        elif nature == "sparse":
+            # Full credit if the signal has any data today (it's flowing); else 0.
+            coverage_score = 100 if coverage_n > 0 else 0
+        else:
+            coverage_score = min(100, coverage_pct * 1.05)  # cap at 100
+
+        # Freshness score — CADENCE-AWARE.
+        # Pre-fix this used a single curve (≤1d=100, decay through 30d=0). That
+        # punished monthly fundamentals at the 23-day mark for being… monthly.
+        # ADR 0022's cadence registry tells us each signal's expected refresh
+        # interval; freshness is scored relative to THAT, not against a daily ideal.
         freshness_days = None
         if latest_snap_str:
             try:
@@ -2275,14 +2318,28 @@ def get_factor_health():
                 freshness_days = (today - latest_d).days
             except Exception:
                 pass
+
+        # Map cadence → expected refresh interval (days). One interval = "fresh".
+        # 1-2× = ok (linear decay 100→60). 2-3× = stale (60→20). >3× = outdated.
+        cadence = _bt_cadence(signal)
+        cadence_interval = {
+            "weekly":            7,
+            "monthly":          30,
+            "sector_portfolio":  7,
+            "portfolio":         7,
+        }.get(cadence, 30)  # default to monthly
+
         if freshness_days is None:
             freshness_score = 0
-        elif freshness_days <= 1:
+        elif freshness_days <= cadence_interval:
             freshness_score = 100
-        elif freshness_days <= 7:
-            freshness_score = 90 - (freshness_days - 1) * 5  # 90 → 60
-        elif freshness_days <= 30:
-            freshness_score = max(0, 60 - (freshness_days - 7) * 2)
+        elif freshness_days <= 2 * cadence_interval:
+            # within one cadence past expected — light decay
+            over = freshness_days - cadence_interval
+            freshness_score = round(100 - 40 * over / cadence_interval)  # 100 → 60
+        elif freshness_days <= 3 * cadence_interval:
+            over = freshness_days - 2 * cadence_interval
+            freshness_score = round(60 - 40 * over / cadence_interval)  # 60 → 20
         else:
             freshness_score = 0
 
@@ -2306,10 +2363,13 @@ def get_factor_health():
         #
         # data_health: is the signal COMPUTING properly? (data side)
         # validation:  is the signal PREDICTIVE in backtest? (alpha side)
+        # NB: pit_score_effective is set below the issues block (depends on nature);
+        # but we compute data_health before the issues block. Reorder if needed.
+        data_health_pit = 100 if nature in ("sector", "composite", "data-depth") else pit_score
         data_health = (
-            0.65 * coverage_score +   # was 0.35; renormalized after removing backtest
-            0.25 * freshness_score +  # was 0.15
-            0.10 * pit_score          # was 0.10 + 0.10 model_score (model = rotation, not health)
+            0.65 * coverage_score +
+            0.25 * freshness_score +
+            0.10 * data_health_pit
         )
         data_health = round(data_health, 1)
         data_grade, data_color = _grade(data_health)
@@ -2330,43 +2390,32 @@ def get_factor_health():
         overall = data_health
         letter, color = data_grade, data_color
 
-        # Per-signal sparseness expectations (some signals are LOW-coverage by
-        # nature — sparse data ≠ broken). Tagged here so the issue chip uses
-        # an honest reason instead of "many stocks unscored" implying bug.
-        SPARSE_BY_NATURE = {
-            "bulk_deal_signal",
-            "sentiment_7d", "news_volume",
-            "insider_signal",      # only stocks with recent insider trades
-        }
-        # Sector-level signals: don't measure per-stock coverage
-        SECTOR_LEVEL = {"regulatory_sector_signal", "macro_sector_signal"}
-        # End-state composite — backtest-via-portfolio (Track 2.4), not as a factor
-        COMPOSITE_NOT_FACTOR = {"screener_final_composite"}
-        # Data-depth gapped signals — known short history (needs NSE archive backfill)
-        DATA_DEPTH_LIMITED = {"fii_dii_cash_net", "fii_dii_fno_positioning"}
-
+        # Nature is already known (computed at top of _build_row). Issue chips
+        # below are for *actionable* problems; the nature itself is shown via
+        # the visible nature-badge in the template, not crammed into chips.
         issues = []
-        if signal in SECTOR_LEVEL:
-            issues.append("sector-level signal — per-stock coverage not applicable")
-        elif signal in COMPOSITE_NOT_FACTOR:
-            issues.append("composite output — backtest via portfolio (Track 2.4), not as factor")
-        elif signal in DATA_DEPTH_LIMITED:
-            issues.append("data depth limited — needs NSE archive backfill for backtest window")
-        elif coverage_n == 0:
-            issues.append("no scores in source table")
-        elif coverage_pct < 40 and signal in SPARSE_BY_NATURE:
-            issues.append(f"sparse by nature — {coverage_pct}% of universe has the underlying event")
-        elif coverage_pct < 40:
-            issues.append(f"coverage {coverage_pct}% — many stocks unscored")
+        if nature == "broad":
+            if coverage_n == 0:
+                issues.append("no scores in source table")
+            elif coverage_pct < 40:
+                issues.append(f"coverage {coverage_pct}% — many stocks unscored")
+        elif nature == "sparse" and coverage_n == 0:
+            # Sparse signal expected to be flowing but isn't — that IS actionable
+            issues.append("no recent signal data — harvester silent?")
 
-        if freshness_days is not None and freshness_days > 7:
-            issues.append(f"stale ({freshness_days}d)")
+        # Stale chip is cadence-aware: a monthly factor at 23d is on schedule.
+        # Only flag if past 1× cadence interval; emphasise if past 2×.
+        if freshness_days is not None and freshness_days > cadence_interval:
+            if freshness_days > 2 * cadence_interval:
+                issues.append(f"overdue ({freshness_days}d, {cadence} cadence)")
+            else:
+                issues.append(f"stale ({freshness_days}d, {cadence} cadence)")
         if t_stat is None or pd.isna(t_stat):
-            if signal not in COMPOSITE_NOT_FACTOR | DATA_DEPTH_LIMITED:
+            if nature not in ("composite", "data-depth"):
                 issues.append("no backtest t-stat yet")
         elif abs(float(t_stat)) < 0.5:
             issues.append(f"t-stat near zero ({float(t_stat):+.2f})")
-        if not pit_ready and signal not in COMPOSITE_NOT_FACTOR:
+        if not pit_ready and nature not in ("composite", "sector", "data-depth"):
             issues.append("no PIT helper — can't be backtested")
 
         return {
@@ -2376,6 +2425,7 @@ def get_factor_health():
             "track": track,
             "status": status,
             "status_reason": status_reason,
+            "nature": nature,             # 'broad' | 'sparse' | 'sector' | 'composite' | 'data-depth'
             "in_model": in_model_flag,
             "coverage_n": coverage_n,
             "eligible_n": eligible_n,

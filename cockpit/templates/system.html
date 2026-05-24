@@ -481,10 +481,13 @@
 <div class="card" x-data="{ status: 'all', validation: 'all', track: 'all', search: '' }">
     <div class="section-title">Per-Factor — Data Health & Validation</div>
     <div class="section-desc">
-        <strong>Data Health</strong> = 65% coverage · 25% freshness · 10% PIT-ready. Data-side only.<br>
-        <strong>Validation</strong> = KEEP (|t|≥2.5) · WEAK (|t|≥1.5) · DROP (|t|&lt;1.5) · NONE (no backtest yet).
-        These are independent — a healthy factor can still have DROP validation, and a high-validation factor can have low coverage.<br>
-        <strong>Cadence</strong> shown below the Validation badge for non-default (monthly is the default; weekly/sector/portfolio are flagged).
+        <strong>Data Health</strong> = 65% coverage · 25% freshness · 10% PIT-ready, all <em>cadence-aware</em>.
+        Coverage is graded against the right denominator for the factor's <em>nature</em>:<br>
+        &nbsp;&nbsp;<strong>broad</strong> = % of universe ·
+        <strong>sparse</strong> = "is data flowing?" (insider/bulk/sentiment only cover stocks with the event) ·
+        <strong>sector</strong> / <strong>composite</strong> / <strong>data-depth</strong> = per-stock coverage doesn't apply.<br>
+        <strong>Rule of thumb:</strong> A/B/C = trust it · D = look here · F = broken or unbuilt.<br>
+        <strong>Validation</strong> = KEEP (|t|≥2.5) · WEAK (|t|≥1.5) · DROP (|t|&lt;1.5) · NONE (no backtest yet) — independent of data health.
     </div>
 
     <!-- Filter toolbar -->
@@ -551,6 +554,11 @@
                  && (search === '' || $el.dataset.name.includes(search.toLowerCase()))">
             <td data-key="name" style="padding: 8px 10px;">
                 <strong>{{ f.name }}</strong>
+                {% if f.nature and f.nature != 'broad' %}
+                {% set nat_color = {'sparse': '#9b59b6', 'sector': '#5dade2', 'composite': '#aab7b8', 'data-depth': '#e67e22'}.get(f.nature, '#888') %}
+                {% set nat_tooltip = {'sparse': 'Sparse by nature: only stocks with the underlying event have a score (insider trades, bulk deals, news). Grade reflects whether the signal is flowing, not % of universe.', 'sector': 'Sector-level signal: scored per-sector, not per-stock. Per-stock coverage is not applicable.', 'composite': 'End-state composite: backtest via portfolio (Track 2.4), not as a stand-alone factor.', 'data-depth': 'Data depth limited: needs NSE archive backfill before backtest window is meaningful.'}.get(f.nature, '') %}
+                <span title="{{ nat_tooltip }}" style="display: inline-block; font-size: 9px; padding: 1px 6px; margin-left: 4px; background: rgba(155,89,182,0.1); border: 1px solid {{ nat_color }}; color: {{ nat_color }}; border-radius: 3px; font-weight: 700; letter-spacing: 0.3px; vertical-align: middle;">{{ f.nature }}</span>
+                {% endif %}
                 {% if f.status_reason %}
                 <div style="font-size: 10px; color: var(--text-muted); margin-top: 2px;">{{ f.status_reason }}</div>
                 {% endif %}
