@@ -3172,3 +3172,366 @@ def get_command_centre():
         "commits": commits,
         "architecture": architecture,
     }
+
+
+# ═══════════════════════════════════════════════════
+# Health Center — unified one-screen pulse
+#
+# Surfaces ALL findings inside cockpit so the user never has to read terminal
+# health_report output or email digests to know if the system is healthy:
+#   1. tools.health_report.gather()  — pipeline + tables + watchdog + dossiers
+#   2. tools.data_sanity.run()       — semantic invariants (CRITICAL/WARN/INFO)
+#   3. pipeline_log endpoint_audit_* — per-endpoint cockpit coverage gaps
+#   4. failed_streaks                — steps currently broken (not historical)
+# Each issue is one row with severity / code / source / message / sample /
+# drilldown URL, ready for filter+render in the template.
+# ═══════════════════════════════════════════════════
+
+def _drilldown_for_issue(issue):
+    """Return ('/sql?q=...', label) for an issue, or (None, None) if no drilldown.
+
+    Looks at the issue's source ('sanity'/'freshness'/'pipeline'/'endpoint'/'dossier')
+    and table/code to pick the most useful SQL probe.
+    """
+    src = issue.get("source")
+    table = issue.get("table")
+    col = issue.get("column")
+    if src == "pipeline" and issue.get("step"):
+        sql = f"SELECT run_date, status, started_at, error_message FROM pipeline_log WHERE step_name='{issue['step']}' ORDER BY id DESC LIMIT 20"
+        return (f"/sql?q={sql}", "Last 20 runs →")
+    if src == "endpoint" and issue.get("endpoint"):
+        sql = f"SELECT * FROM pipeline_log WHERE step_name='endpoint_audit_{issue['endpoint']}' ORDER BY id DESC LIMIT 10"
+        return (f"/sql?q={sql}", "Endpoint audit log →")
+    if src == "freshness" and table:
+        sql = f"SELECT MAX(date) AS latest FROM {table}" if table else None
+        return (f"/sql?table={table}", "Inspect table →") if table else (None, None)
+    if src == "sanity":
+        # If we have a sample sid, link to its stock detail (always useful)
+        sample = issue.get("sample")
+        sample = str(sample) if sample is not None else ""
+        if sample and len(sample.split()) == 1 and len(sample) <= 12 and "@" not in sample:
+            # Looks like a sid
+            return (f"/explorer/{sample}", f"Inspect {sample} →")
+        if table:
+            return (f"/sql?table={table}", f"Inspect {table} →")
+    return (None, None)
+
+
+def _severity_rank(sev):
+    return {"CRITICAL": 0, "WARN": 1, "INFO": 2}.get(sev, 3)
+
+
+def get_health_overview(force=False):
+    """One-stop Health Center overview.
+
+    Returns:
+        {
+            "as_of":            ISO datetime,
+            "verdict":          human string (e.g. "1 CRITICAL · 12 WARN"),
+            "verdict_severity": "CRITICAL" | "WARN" | "INFO" | "OK",
+            "counts":           {critical, warn, info, total},
+            "tiles":            {data, factors, pipeline, dossiers}  each {grade, color, headline, detail, link},
+            "issues":           [issue dicts] sorted CRITICAL → WARN → INFO,
+            "categories":       list of category labels present (for filter dropdown),
+            "sources":          list of source labels present,
+        }
+    """
+    from tools import health_report as _hr
+    try:
+        from tools import data_sanity as _sanity
+    except Exception:
+        _sanity = None
+
+    report = _hr.gather()
+    issues = []
+
+    # ── pipeline failures (today) + streaks (currently broken only) ──
+    for f in report["pipeline"]["failed_steps_today"]:
+        issues.append({
+            "severity": "CRITICAL",
+            "source": "pipeline",
+            "category": "Pipeline",
+            "code": f"PIPELINE_FAILED:{f['step']}",
+            "table": None, "column": None,
+            "step": f["step"],
+            "message": f"Pipeline step '{f['step']}' failed today",
+            "detail": (f.get("error") or "")[:240],
+            "sample": None, "pct": None, "n_bad": None, "n_total": None,
+        })
+    for s in report["pipeline"]["failed_streaks"]:
+        # Skip if it's already in today's failures (avoid duplicate)
+        if any(i["code"] == f"PIPELINE_FAILED:{s['step']}" for i in issues):
+            continue
+        issues.append({
+            "severity": "CRITICAL",
+            "source": "pipeline",
+            "category": "Pipeline",
+            "code": f"PIPELINE_STREAK:{s['step']}",
+            "table": None, "column": None,
+            "step": s["step"],
+            "message": f"Pipeline step '{s['step']}' has failed {s['days']} consecutive days (currently broken)",
+            "detail": (s.get("sample_error") or "")[:240],
+            "sample": None, "pct": None, "n_bad": s["days"], "n_total": None,
+        })
+
+    # ── freshness (stale / outdated / empty tables) ──
+    for tbl, age, threshold, producer in report["tables"].get("outdated", []):
+        sev = "CRITICAL" if tbl in _hr.CRITICAL_TABLE_OUTDATED else "WARN"
+        issues.append({
+            "severity": sev,
+            "source": "freshness",
+            "category": "Data freshness",
+            "code": f"OUTDATED:{tbl}",
+            "table": tbl, "column": "—",
+            "message": f"{tbl} is OUTDATED ({age:.0f}d old, threshold {threshold:.0f}d)",
+            "detail": f"producer: {producer}" if producer else "",
+            "sample": None, "pct": None,
+            "n_bad": round(age), "n_total": round(threshold),
+        })
+    for tbl, age, threshold, producer in report["tables"].get("stale", []):
+        issues.append({
+            "severity": "WARN",
+            "source": "freshness",
+            "category": "Data freshness",
+            "code": f"STALE:{tbl}",
+            "table": tbl, "column": "—",
+            "message": f"{tbl} is STALE ({age:.0f}d / threshold {threshold:.0f}d)",
+            "detail": f"producer: {producer}" if producer else "",
+            "sample": None, "pct": None,
+            "n_bad": round(age), "n_total": round(threshold),
+        })
+    for tbl in report["tables"].get("empty", []):
+        issues.append({
+            "severity": "CRITICAL",
+            "source": "freshness",
+            "category": "Data freshness",
+            "code": f"EMPTY:{tbl}",
+            "table": tbl, "column": "—",
+            "message": f"{tbl} is EMPTY (table exists but no rows)",
+            "detail": "",
+            "sample": None, "pct": None, "n_bad": 0, "n_total": None,
+        })
+
+    # ── data_sanity violations ──
+    if _sanity is not None:
+        try:
+            sanity_violations = _sanity.run()
+        except Exception as e:
+            sanity_violations = []
+            issues.append({
+                "severity": "WARN",
+                "source": "sanity",
+                "category": "Data sanity",
+                "code": "SANITY_RUN_FAILED",
+                "table": None, "column": None,
+                "message": f"data_sanity.run() itself raised: {type(e).__name__}",
+                "detail": str(e)[:240],
+                "sample": None, "pct": None, "n_bad": None, "n_total": None,
+            })
+        for v in sanity_violations:
+            # categorize by code prefix for filter
+            code = v.get("code", "")
+            if any(p in code for p in ("CONSENSUS", "ANALYST", "PT_", "FORECAST")):
+                cat = "Analyst / PT"
+            elif any(p in code for p in ("REGULATORY", "NEWS", "SENTIMENT")):
+                cat = "News / regulatory"
+            elif any(p in code for p in ("FACTOR", "PIT", "BACKTEST", "PIOTROSKI", "M_SCORE")):
+                cat = "Factors / backtest"
+            elif any(p in code for p in ("DAILY_PICK", "SCORE_TABLE", "UNIVERSE", "PROMOTER", "INSIDER", "BULK")):
+                cat = "Signals / picks"
+            elif "COVERAGE" in code:
+                cat = "Coverage"
+            else:
+                cat = "Data sanity"
+            issues.append({
+                "severity": v.get("severity", "WARN"),
+                "source": "sanity",
+                "category": cat,
+                "code": code,
+                "table": v.get("table"),
+                "column": v.get("column"),
+                "message": v.get("message", ""),
+                "detail": "",
+                "sample": v.get("sample"),
+                "pct": v.get("pct_violations"),
+                "n_bad": v.get("n_violations"),
+                "n_total": v.get("n_total"),
+            })
+
+    # ── cockpit endpoint audit (most-recent per endpoint) ──
+    try:
+        ep = read_sql(
+            """
+            WITH ranked AS (
+                SELECT step_name, status, error_message, started_at,
+                       ROW_NUMBER() OVER (PARTITION BY step_name ORDER BY id DESC) AS rn
+                FROM pipeline_log
+                WHERE step_name LIKE 'endpoint_audit_%'
+            )
+            SELECT step_name, status, error_message, started_at
+            FROM ranked WHERE rn = 1
+            """
+        )
+    except Exception:
+        ep = pd.DataFrame()
+    for _, r in ep.iterrows():
+        if r["status"] in ("SUCCESS",) and not (r.get("error_message") or ""):
+            continue  # endpoint is fine
+        endpoint = r["step_name"].replace("endpoint_audit_", "")
+        err = (r.get("error_message") or "").strip()
+        # Heuristic: if status SUCCESS but error_message non-empty, audit found a gap
+        sev = "CRITICAL" if r["status"] == "FAILED" else "WARN"
+        issues.append({
+            "severity": sev,
+            "source": "endpoint",
+            "category": "Cockpit endpoints",
+            "code": f"ENDPOINT_AUDIT:{endpoint}",
+            "table": None, "column": None,
+            "endpoint": endpoint,
+            "message": f"Cockpit endpoint `{endpoint}` has audit issues",
+            "detail": err[:240] or f"status={r['status']}",
+            "sample": None, "pct": None, "n_bad": None, "n_total": None,
+        })
+
+    # ── dossier validator failures ──
+    dossiers_block = report.get("dossiers", {}) or {}
+    invalid = dossiers_block.get("invalid_count", 0) or 0
+    if invalid:
+        issues.append({
+            "severity": "WARN",
+            "source": "dossier",
+            "category": "Dossiers (LLM)",
+            "code": "DOSSIER_VALIDATOR_FAILED",
+            "table": None, "column": None,
+            "message": f"{invalid} dossier(s) failed the narrative validator (raw numbers in prose, or signal mention without context)",
+            "detail": ", ".join((dossiers_block.get("invalid_sample") or [])[:5]),
+            "sample": None, "pct": None,
+            "n_bad": invalid, "n_total": dossiers_block.get("total"),
+        })
+
+    # ── attach drilldowns ──
+    for i in issues:
+        url, label = _drilldown_for_issue(i)
+        i["drilldown_url"] = url
+        i["drilldown_label"] = label
+
+    # ── sort: severity then code ──
+    issues.sort(key=lambda i: (_severity_rank(i["severity"]), i.get("code", "")))
+
+    # ── counts + verdict ──
+    counts = {"critical": 0, "warn": 0, "info": 0, "total": len(issues)}
+    for i in issues:
+        if i["severity"] == "CRITICAL": counts["critical"] += 1
+        elif i["severity"] == "WARN":   counts["warn"]     += 1
+        elif i["severity"] == "INFO":   counts["info"]     += 1
+    if counts["critical"]:
+        verdict_sev = "CRITICAL"
+        verdict = f"⚠ {counts['critical']} CRITICAL · {counts['warn']} warn · {counts['info']} info"
+    elif counts["warn"]:
+        verdict_sev = "WARN"
+        verdict = f"⚠ {counts['warn']} warn · {counts['info']} info"
+    elif counts["info"]:
+        verdict_sev = "INFO"
+        verdict = f"{counts['info']} info"
+    else:
+        verdict_sev = "OK"
+        verdict = "✓ all healthy"
+
+    # ── tiles: one grade per pillar ──
+    def _pillar_grade(critical_n, warn_n):
+        if critical_n: return ("F", "#e74c3c")
+        if warn_n >= 5: return ("C", "#f1c40f")
+        if warn_n: return ("B", "#4d8eff")
+        return ("A", "#2ecc71")
+
+    def _count_by(src):
+        c = sum(1 for i in issues if i["source"] == src and i["severity"] == "CRITICAL")
+        w = sum(1 for i in issues if i["source"] == src and i["severity"] == "WARN")
+        info = sum(1 for i in issues if i["source"] == src and i["severity"] == "INFO")
+        return c, w, info
+
+    data_c, data_w, data_i = (lambda: (
+        sum(1 for i in issues if i["source"] in ("freshness", "sanity") and i["severity"] == "CRITICAL"),
+        sum(1 for i in issues if i["source"] in ("freshness", "sanity") and i["severity"] == "WARN"),
+        sum(1 for i in issues if i["source"] in ("freshness", "sanity") and i["severity"] == "INFO"),
+    ))()
+
+    pipe_c, pipe_w, pipe_i = _count_by("pipeline")
+    ep_c, ep_w, ep_i = _count_by("endpoint")
+    dos_c, dos_w, dos_i = _count_by("dossier")
+
+    # Factor tile derives from get_factor_health()
+    try:
+        fh = get_factor_health() or {}
+        fh_summary = fh.get("summary", {}) or {}
+        # Crude factor pillar grade: F if any in_model factor has data F-grade
+        f_grade_dist = fh_summary.get("data_grade_dist", {}) or {}
+        f_validation = fh_summary.get("validation_dist", {}) or {}
+        if f_grade_dist.get("F", 0):
+            f_grade, f_color = ("D", "#e67e22")
+        elif f_grade_dist.get("D", 0):
+            f_grade, f_color = ("C", "#f1c40f")
+        elif f_grade_dist.get("C", 0):
+            f_grade, f_color = ("B", "#4d8eff")
+        else:
+            f_grade, f_color = ("A", "#2ecc71")
+        f_headline = f"{fh_summary.get('in_model', 0)} in model · {fh_summary.get('in_library', 0)} library"
+        f_detail = (
+            f"{f_validation.get('KEEP', 0)} KEEP · "
+            f"{f_validation.get('WEAK', 0)} WEAK · "
+            f"{f_validation.get('DROP', 0)} DROP · "
+            f"{f_validation.get('NONE', 0)} NONE"
+        )
+    except Exception:
+        f_grade, f_color, f_headline, f_detail = ("?", "#888", "—", "factor health unavailable")
+
+    data_grade, data_color = _pillar_grade(data_c, data_w)
+    pipe_grade, pipe_color = _pillar_grade(pipe_c, pipe_w)
+    dos_grade, dos_color = _pillar_grade(dos_c, dos_w)
+
+    tiles = {
+        "data": {
+            "label": "Data",
+            "grade": data_grade, "color": data_color,
+            "headline": f"{data_c} critical · {data_w} warn",
+            "detail": f"freshness + sanity invariants across {len(report['tables'])} table-state slots",
+            "link": "#data",
+        },
+        "factors": {
+            "label": "Factors",
+            "grade": f_grade, "color": f_color,
+            "headline": f_headline,
+            "detail": f_detail,
+            "link": "#factors",
+        },
+        "pipeline": {
+            "label": "Pipeline",
+            "grade": pipe_grade, "color": pipe_color,
+            "headline": f"last run: {report['pipeline'].get('last_run_status') or '—'}",
+            "detail": f"{pipe_c} broken streak(s) · {len(report['pipeline'].get('failed_steps_today', []))} failure(s) today",
+            "link": "#pipeline",
+        },
+        "dossiers": {
+            "label": "Dossiers",
+            "grade": dos_grade, "color": dos_color,
+            "headline": f"{dossiers_block.get('total', 0)} total · {dossiers_block.get('invalid_count', 0)} invalid",
+            "detail": "narrative validator (raw numbers / signal-without-context)",
+            "link": "#overview",
+        },
+    }
+
+    categories = sorted({i["category"] for i in issues})
+    sources = sorted({i["source"] for i in issues})
+
+    return {
+        "as_of": report["as_of"],
+        "verdict": verdict,
+        "verdict_severity": verdict_sev,
+        "counts": counts,
+        "tiles": tiles,
+        "issues": issues,
+        "categories": categories,
+        "sources": sources,
+        "watchdog": report.get("watchdog", {}),
+        "pipeline_summary": report.get("pipeline", {}),
+    }

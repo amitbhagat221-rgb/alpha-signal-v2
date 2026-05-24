@@ -734,29 +734,50 @@ CHECKS = [
             WHERE ac.sid IN (SELECT sid FROM top_picks)
         """,
     },
-    # 2026-05-24 audit: ABSM (and 3 of 5 sampled SMALL stocks) had growth
-    # percentages populated while total_analysts and price_target were NULL.
-    # Different upstream sources write the same row independently — growth
-    # comes from Tickertape forecast feed, PT/analyst-count from yfinance.
-    # When yfinance has no data, consensus_signal still fires on growth-only,
-    # which is exactly the partial-input → real-output leak the audit targets.
+    # 2026-05-24 fixed at consumer: signals/consensus.py now requires
+    # (total_analysts IS NOT NULL OR price_target IS NOT NULL) in its SELECT —
+    # Tickertape-only forecast rows (forward_eps without analyst attribution)
+    # are model projections, not analyst consensus, and never fire consensus_signal.
+    # This check now verifies the gate is holding: zero consensus_signals rows
+    # should have a source analyst_consensus row missing both attribution fields.
     {
-        "code": "ANALYST_CONSENSUS_GROWTH_WITHOUT_ANALYSTS",
-        "table": "analyst_consensus",
-        "column": "eps_growth_pct",
-        "message": "analyst_consensus rows with growth pcts but NULL total_analysts AND NULL price_target (mixed-provenance row)",
-        "critical_pct": 30,
-        "warn_pct": 10,
+        "code": "CONSENSUS_SIGNAL_WITHOUT_ANALYST_ATTRIBUTION",
+        "table": "consensus_signals",
+        "column": "consensus_signal",
+        "message": "consensus_signal fired for a stock whose analyst_consensus row has NULL total_analysts AND NULL price_target",
+        "critical_pct": 1,   # ANY leak is a bug — gate failure
+        "warn_pct": 0,
         "sql": """
             SELECT
-                SUM(CASE WHEN total_analysts IS NULL AND price_target IS NULL
-                              AND (eps_growth_pct IS NOT NULL OR revenue_growth_pct IS NOT NULL)
+                SUM(CASE WHEN ac.total_analysts IS NULL AND ac.price_target IS NULL
                          THEN 1 ELSE 0 END) AS n_bad,
                 COUNT(*) AS n_total,
+                (SELECT cs2.sid FROM consensus_signals cs2
+                 JOIN analyst_consensus ac2 ON ac2.sid = cs2.sid
+                 WHERE cs2.consensus_signal IS NOT NULL
+                   AND ac2.total_analysts IS NULL
+                   AND ac2.price_target IS NULL LIMIT 1) AS sample
+            FROM consensus_signals cs
+            JOIN analyst_consensus ac ON ac.sid = cs.sid
+            WHERE cs.consensus_signal IS NOT NULL
+              AND cs.snapshot_date = (SELECT MAX(snapshot_date) FROM consensus_signals)
+        """,
+    },
+    # Companion observation check: how much of the universe lacks analyst
+    # attribution entirely. INFO severity — this is yfinance coverage gap,
+    # not a leak. Watch for sudden jumps which indicate yfinance breakage.
+    {
+        "code": "ANALYST_ATTRIBUTION_COVERAGE",
+        "table": "analyst_consensus",
+        "column": "total_analysts",
+        "message": "Stocks with NO analyst attribution (total_analysts AND price_target both NULL) — yfinance coverage gap, not a leak",
+        "severity": INFO,
+        "sql": """
+            SELECT
+                SUM(CASE WHEN total_analysts IS NULL AND price_target IS NULL THEN 1 ELSE 0 END) AS n_bad,
+                COUNT(*) AS n_total,
                 (SELECT sid FROM analyst_consensus
-                 WHERE total_analysts IS NULL AND price_target IS NULL
-                   AND (eps_growth_pct IS NOT NULL OR revenue_growth_pct IS NOT NULL)
-                 LIMIT 1) AS sample
+                 WHERE total_analysts IS NULL AND price_target IS NULL LIMIT 1) AS sample
             FROM analyst_consensus
         """,
     },

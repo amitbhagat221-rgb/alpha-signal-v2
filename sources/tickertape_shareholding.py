@@ -56,13 +56,17 @@ def _get_client():
     return Tickertape()
 
 
-def _normalise(value):
+_OUT_OF_RANGE_LOG: list = []  # populated per-run; surfaced in summary
+_CLAMP_TOLERANCE = 0.05  # percentage points — wider than empirical max drift seen
+
+
+def _normalise(value, *, sid=None, col=None, end_date=None):
     """Coerce pandas/numpy types to plain Python so sqlite3 doesn't trip on numpy scalars.
 
-    Tickertape derives `data_othPctT` as `100 - sum(other categories)`, which
-    rounds to tiny negative floats like `-3.5e-15`. Snap values within float
-    epsilon of [0, 100] to the boundary so the column CHECK constraint passes
-    while still surfacing genuinely out-of-range values as failures.
+    Tickertape derives `data_othPctT` as `100 - sum(other categories)`. Empirically:
+    - Most rounding drift is ±1e-15 (snap silently).
+    - Occasional drift up to ±0.01 pp (snap silently — still data-faithful).
+    - Genuine outliers > ±0.05 pp (drop the column, log it — better than failing the whole row).
     """
     if value is None:
         return None
@@ -75,10 +79,13 @@ def _normalise(value):
         v = float(value)
     except (TypeError, ValueError):
         return None
-    if -1e-6 <= v < 0:
+    if -_CLAMP_TOLERANCE <= v < 0:
         return 0.0
-    if 100 < v <= 100 + 1e-6:
+    if 100 < v <= 100 + _CLAMP_TOLERANCE:
         return 100.0
+    if v < 0 or v > 100:
+        _OUT_OF_RANGE_LOG.append({"sid": sid, "col": col, "end_date": end_date, "value": v})
+        return None
     return v
 
 
@@ -126,15 +133,15 @@ def compute(limit=None, dry_run=False):
             rows.append({
                 "sid": sid,
                 "end_date": end_date,
-                "promoter_pct": _normalise(r.get("data_pmPctT")),
-                "fii_pct": _normalise(r.get("data_fiPctT")),
-                "mf_pct": _normalise(r.get("data_mfPctT")),
-                "dii_pct": _normalise(r.get("data_diPctT")),
-                "public_pct": _normalise(r.get("data_plPctT")),
-                "pledge_pct": _normalise(r.get("data_pmPctP")),
-                "insurance_pct": _normalise(r.get("data_isPctT")),
-                "retail_hni_pct": _normalise(r.get("data_rhPctT")),
-                "other_pct": _normalise(r.get("data_othPctT")),
+                "promoter_pct": _normalise(r.get("data_pmPctT"), sid=sid, col="promoter_pct", end_date=end_date),
+                "fii_pct": _normalise(r.get("data_fiPctT"), sid=sid, col="fii_pct", end_date=end_date),
+                "mf_pct": _normalise(r.get("data_mfPctT"), sid=sid, col="mf_pct", end_date=end_date),
+                "dii_pct": _normalise(r.get("data_diPctT"), sid=sid, col="dii_pct", end_date=end_date),
+                "public_pct": _normalise(r.get("data_plPctT"), sid=sid, col="public_pct", end_date=end_date),
+                "pledge_pct": _normalise(r.get("data_pmPctP"), sid=sid, col="pledge_pct", end_date=end_date),
+                "insurance_pct": _normalise(r.get("data_isPctT"), sid=sid, col="insurance_pct", end_date=end_date),
+                "retail_hni_pct": _normalise(r.get("data_rhPctT"), sid=sid, col="retail_hni_pct", end_date=end_date),
+                "other_pct": _normalise(r.get("data_othPctT"), sid=sid, col="other_pct", end_date=end_date),
                 "fetched_at": fetched_at,
             })
 
@@ -151,7 +158,11 @@ def compute(limit=None, dry_run=False):
         upsert_df(pd.DataFrame(rows), "shareholding")
         saved += len(rows)
 
-    print(f"Done: {saved} rows. No data: {no_data}. Errors: {errors}.")
+    oor = len(_OUT_OF_RANGE_LOG)
+    print(f"Done: {saved} rows. No data: {no_data}. Errors: {errors}. Out-of-range values dropped: {oor}.")
+    if oor:
+        sample = _OUT_OF_RANGE_LOG[:5]
+        print(f"  Sample: {sample}")
     return saved
 
 

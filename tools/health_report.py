@@ -147,15 +147,28 @@ def _gather_pipeline(since_days):
         for _, r in failed_today.iterrows()
     ]
 
-    # Failure streaks (same step_name failing N+ days in a row)
+    # Failure streaks: same step failing N+ days in a row AND not yet recovered.
+    # A step that failed Mon+Tue but succeeded Wed is historical noise, not actionable.
     streaks = read_sql(
         """
-        SELECT step_name, COUNT(DISTINCT run_date) AS n_days,
-               MAX(error_message) AS sample_error
-        FROM pipeline_log
-        WHERE status = 'FAILED'
-          AND run_date >= date('now', ?)
-        GROUP BY step_name
+        WITH latest_status AS (
+            SELECT step_name,
+                   status,
+                   ROW_NUMBER() OVER (PARTITION BY step_name ORDER BY id DESC) AS rn
+            FROM pipeline_log
+            WHERE status IN ('SUCCESS', 'FAILED')
+        ),
+        currently_broken AS (
+            SELECT step_name FROM latest_status WHERE rn = 1 AND status = 'FAILED'
+        )
+        SELECT pl.step_name,
+               COUNT(DISTINCT pl.run_date) AS n_days,
+               MAX(pl.error_message) AS sample_error
+        FROM pipeline_log pl
+        JOIN currently_broken cb ON cb.step_name = pl.step_name
+        WHERE pl.status = 'FAILED'
+          AND pl.run_date >= date('now', ?)
+        GROUP BY pl.step_name
         HAVING n_days >= ?
         ORDER BY n_days DESC
         """,

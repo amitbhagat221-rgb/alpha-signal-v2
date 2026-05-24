@@ -313,7 +313,7 @@ async def command_centre(request: Request):
 
 @app.get("/system", response_class=HTMLResponse)
 async def system(request: Request, refresh: int = 0):
-    """System page. Pass ?refresh=1 to force a recompute of the health model."""
+    """Health Center page. Pass ?refresh=1 to force a recompute of the health model."""
     pipeline = api.get_pipeline_status()
     health = api.get_data_freshness()
     summary = api.get_db_summary()
@@ -330,13 +330,24 @@ async def system(request: Request, refresh: int = 0):
     ]
 
     factor_health = api.get_factor_health()
+    try:
+        overview = api.get_health_overview()
+    except Exception as e:
+        overview = None
+        import traceback; traceback.print_exc()
 
     return templates.TemplateResponse(request, "system.html", {
         "page": "system", "pipeline": pipeline, "health": health,
         "summary": summary, "health_scores": health_scores,
         "inventory_groups": inventory_groups,
         "factor_health": factor_health,
+        "overview": overview,
     })
+
+
+@app.get("/api/health/overview")
+async def api_health_overview():
+    return api.get_health_overview()
 
 
 # ── JSON API Routes ──

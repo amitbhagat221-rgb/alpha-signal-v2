@@ -1,27 +1,213 @@
 {% extends "base.html" %}
-{% from "_components.html" import tab_bar %}
+{% from "_components.html" import tab_bar, radio_group %}
 
 {% block content %}
 
 <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">
-    <div class="section-title">System Health</div>
-    <a href="/sql"
-       style="padding: 8px 16px; background: var(--accent); color: white;
-              border-radius: 8px; text-decoration: none; font-size: 12px;
-              font-weight: 600; letter-spacing: 0.3px;">
-        SQL Console &rarr;
-    </a>
+    <div>
+        <div class="section-title">Health Center</div>
+        <div class="section-desc" style="margin-bottom: 0;">
+            One window into the system — pipeline · data · factors · cockpit endpoints · dossiers.
+            Findings from <span class="mono">tools.health_report</span> + <span class="mono">tools.data_sanity</span>
+            + <span class="mono">cockpit_endpoint_audit</span> unified into a single inbox.
+        </div>
+    </div>
+    <div style="display: flex; gap: 8px;">
+        <a href="?refresh=1"
+           style="padding: 8px 14px; background: var(--bg-card); color: var(--text-secondary);
+                  border: 1px solid var(--border); border-radius: 8px; text-decoration: none;
+                  font-size: 12px; font-weight: 600; letter-spacing: 0.3px;">
+            ⟳ Refresh
+        </a>
+        <a href="/sql"
+           style="padding: 8px 16px; background: var(--accent); color: white;
+                  border-radius: 8px; text-decoration: none; font-size: 12px;
+                  font-weight: 600; letter-spacing: 0.3px;">
+            SQL Console &rarr;
+        </a>
+    </div>
 </div>
-<div class="section-desc">Pipeline run history, table inventory, and direct database access.</div>
 
-<div x-data="{ tab: 'health', loaded: { health: true } }" x-cloak>
+<div x-data="{ tab: 'overview', loaded: { overview: true } }" x-cloak>
 
 {{ tab_bar([
-    ('health',   'Data Health'),
-    ('factors',  'Factor Health'),
-    ('pipeline', 'Pipeline Log'),
+    ('overview', 'Overview'),
+    ('health',   'Data'),
+    ('factors',  'Factors'),
+    ('pipeline', 'Pipeline'),
     ('inventory','Inventory'),
 ]) }}
+
+{# ────────── OVERVIEW TAB ────────── #}
+<div x-show="tab === 'overview'" x-cloak>
+
+{% if overview %}
+{% set verdict_color = {'CRITICAL': 'var(--red)', 'WARN': 'var(--amber)', 'INFO': 'var(--text-secondary)', 'OK': 'var(--green)'}.get(overview.verdict_severity, 'var(--text-muted)') %}
+
+<!-- Verdict banner -->
+<div class="card" style="margin-bottom: 18px; border-left: 4px solid {{ verdict_color }};">
+    <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap;">
+        <div>
+            <div style="font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px;">System pulse</div>
+            <div style="font-size: 22px; font-weight: 800; color: {{ verdict_color }};">{{ overview.verdict }}</div>
+            <div style="font-size: 11px; color: var(--text-muted); margin-top: 6px;">
+                As of <span class="mono">{{ overview.as_of[:19].replace('T', ' ') }}</span>
+                {% if overview.watchdog and overview.watchdog.last_run %}
+                · Watchdog last ran <span class="mono">{{ overview.watchdog.last_run[:19].replace('T', ' ') }}</span>
+                {% endif %}
+            </div>
+        </div>
+        <div style="display: flex; gap: 12px; align-items: center;">
+            {% for sev, label, color in [('critical', 'CRITICAL', 'var(--red)'), ('warn', 'WARN', 'var(--amber)'), ('info', 'INFO', 'var(--text-secondary)')] %}
+            <div style="text-align: center; padding: 6px 14px; border: 1px solid {{ color }}; border-radius: 8px; min-width: 70px;">
+                <div class="mono" style="font-size: 22px; font-weight: 800; color: {{ color }}; line-height: 1;">{{ overview.counts[sev] }}</div>
+                <div style="font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-top: 2px;">{{ label }}</div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+
+<!-- Pillar tiles -->
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin-bottom: 18px;">
+    {% for key in ['data', 'factors', 'pipeline', 'dossiers'] %}
+    {% set tile = overview.tiles[key] %}
+    <a href="#{{ 'health' if key == 'data' else key }}"
+       @click="tab = '{{ 'health' if key == 'data' else (key if key in ['factors','pipeline'] else 'overview') }}'; loaded['{{ 'health' if key == 'data' else (key if key in ['factors','pipeline'] else 'overview') }}'] = true"
+       class="card" style="text-decoration: none; color: inherit; display: block; transition: transform 0.1s; cursor: pointer; border-top: 3px solid {{ tile.color }};">
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">
+            <div style="font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px;">{{ tile.label }}</div>
+            <div style="font-size: 24px; font-weight: 800; color: {{ tile.color }}; line-height: 1;">{{ tile.grade }}</div>
+        </div>
+        <div style="font-size: 13px; font-weight: 600; color: var(--text-primary); margin-bottom: 4px;">{{ tile.headline }}</div>
+        <div style="font-size: 11px; color: var(--text-muted); line-height: 1.4;">{{ tile.detail }}</div>
+    </a>
+    {% endfor %}
+</div>
+
+<!-- Live Issues Inbox -->
+<div class="card" x-data="{
+    sev: 'actionable',
+    src: 'all',
+    cat: 'all',
+    search: ''
+}">
+    <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; margin-bottom: 14px;">
+        <div>
+            <div class="section-title" style="margin-bottom: 4px;">Live Issues</div>
+            <div class="section-desc" style="margin-bottom: 0;">
+                Every CRITICAL · WARN · INFO finding from sanity invariants, freshness, pipeline streaks,
+                cockpit endpoint audit, and dossier validator — in one inbox. Click a row's drill link to inspect.
+            </div>
+        </div>
+        <span style="font-size: 11px; color: var(--text-muted);" x-text="$el.parentElement.parentElement.querySelectorAll('tbody tr:not([style*=\'display: none\'])').length + ' shown'"></span>
+    </div>
+
+    <!-- Filter toolbar -->
+    <div style="display: flex; gap: 16px; flex-wrap: wrap; align-items: center; padding: 10px 14px; background: var(--bg-primary); border-radius: 8px; margin-bottom: 14px;">
+        <div>
+            <div style="font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Severity</div>
+            <div class="radio-group" role="radiogroup">
+                <button type="button" class="radio-btn" :class="{ active: sev === 'all' }" @click="sev='all'">All</button>
+                <button type="button" class="radio-btn" :class="{ active: sev === 'actionable' }" @click="sev='actionable'">Actionable</button>
+                <button type="button" class="radio-btn" :class="{ active: sev === 'critical' }" @click="sev='critical'">CRITICAL only</button>
+            </div>
+        </div>
+        <div>
+            <div style="font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Source</div>
+            <select x-model="src" style="background: var(--bg-card); color: var(--text-primary); border: 1px solid var(--border); border-radius: 6px; padding: 5px 8px; font-size: 12px;">
+                <option value="all">All sources</option>
+                {% for s in overview.sources %}<option value="{{ s }}">{{ s }}</option>{% endfor %}
+            </select>
+        </div>
+        <div>
+            <div style="font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Category</div>
+            <select x-model="cat" style="background: var(--bg-card); color: var(--text-primary); border: 1px solid var(--border); border-radius: 6px; padding: 5px 8px; font-size: 12px;">
+                <option value="all">All categories</option>
+                {% for c in overview.categories %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
+            </select>
+        </div>
+        <div style="flex: 1; min-width: 200px;">
+            <div style="font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Search</div>
+            <input type="text" x-model="search" placeholder="code, table, message…"
+                style="width: 100%; background: var(--bg-card); color: var(--text-primary); border: 1px solid var(--border); border-radius: 6px; padding: 5px 10px; font-size: 12px;">
+        </div>
+    </div>
+
+    {% if overview.issues %}
+    <div style="overflow-x: auto;">
+    <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
+        <thead>
+            <tr style="color: var(--text-muted); text-align: left; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px;">
+                <th style="padding: 8px 10px; border-bottom: 2px solid var(--border-accent); width: 90px;">Severity</th>
+                <th style="padding: 8px 10px; border-bottom: 2px solid var(--border-accent); width: 100px;">Source</th>
+                <th style="padding: 8px 10px; border-bottom: 2px solid var(--border-accent); width: 140px;">Category</th>
+                <th style="padding: 8px 10px; border-bottom: 2px solid var(--border-accent);">Finding</th>
+                <th style="padding: 8px 10px; border-bottom: 2px solid var(--border-accent); width: 100px; text-align: right;">Volume</th>
+                <th style="padding: 8px 10px; border-bottom: 2px solid var(--border-accent); width: 180px;">Drill</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for issue in overview.issues %}
+            {% set sev_color = {'CRITICAL': 'var(--red)', 'WARN': 'var(--amber)', 'INFO': 'var(--text-muted)'}.get(issue.severity, 'var(--text-muted)') %}
+            {% set sev_bg = {'CRITICAL': 'rgba(239,68,68,0.06)', 'WARN': 'rgba(251,191,36,0.04)', 'INFO': 'transparent'}.get(issue.severity, 'transparent') %}
+            <tr style="border-bottom: 1px solid var(--border); background: {{ sev_bg }};"
+                data-sev="{{ issue.severity|lower }}"
+                data-src="{{ issue.source }}"
+                data-cat="{{ issue.category }}"
+                data-text="{{ (issue.code ~ ' ' ~ (issue.table or '') ~ ' ' ~ (issue.column or '') ~ ' ' ~ issue.message)|lower }}"
+                x-show="(sev === 'all' || (sev === 'actionable' && ($el.dataset.sev === 'critical' || $el.dataset.sev === 'warn')) || (sev === 'critical' && $el.dataset.sev === 'critical')) && (src === 'all' || src === $el.dataset.src) && (cat === 'all' || cat === $el.dataset.cat) && (search === '' || $el.dataset.text.includes(search.toLowerCase()))">
+                <td style="padding: 10px; vertical-align: top;">
+                    <span style="font-size: 10px; padding: 2px 8px; border: 1px solid {{ sev_color }}; color: {{ sev_color }}; border-radius: 4px; font-weight: 700; letter-spacing: 0.5px;">{{ issue.severity }}</span>
+                </td>
+                <td style="padding: 10px; vertical-align: top; font-size: 11px; color: var(--text-secondary);">{{ issue.source }}</td>
+                <td style="padding: 10px; vertical-align: top; font-size: 11px; color: var(--text-secondary);">{{ issue.category }}</td>
+                <td style="padding: 10px; vertical-align: top;">
+                    <div class="mono" style="font-size: 10px; color: var(--accent); margin-bottom: 3px;">{{ issue.code }}</div>
+                    <div style="font-size: 12px; color: var(--text-primary); line-height: 1.4;">{{ issue.message }}</div>
+                    {% if issue.detail %}
+                    <div style="font-size: 11px; color: var(--text-muted); line-height: 1.4; margin-top: 3px;">{{ issue.detail }}</div>
+                    {% endif %}
+                    {% if issue.table %}
+                    <div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">
+                        <span class="mono">{{ issue.table }}{% if issue.column and issue.column != '—' %}.{{ issue.column }}{% endif %}</span>
+                        {% if issue.sample %}· sample: <span class="mono">{{ issue.sample }}</span>{% endif %}
+                    </div>
+                    {% endif %}
+                </td>
+                <td class="mono" style="padding: 10px; vertical-align: top; text-align: right; font-size: 11px;">
+                    {% if issue.n_total %}
+                    <span style="color: {{ sev_color }}; font-weight: 700;">{{ issue.n_bad }}</span>
+                    <span style="color: var(--text-muted);">/{{ issue.n_total }}</span>
+                    {% if issue.pct %}<div style="color: var(--text-muted); font-size: 10px;">{{ "%.1f"|format(issue.pct) }}%</div>{% endif %}
+                    {% elif issue.n_bad %}
+                    <span style="color: {{ sev_color }}; font-weight: 700;">{{ issue.n_bad }}</span>
+                    {% else %}
+                    <span style="color: var(--text-muted);">—</span>
+                    {% endif %}
+                </td>
+                <td style="padding: 10px; vertical-align: top;">
+                    {% if issue.drilldown_url %}
+                    <a href="{{ issue.drilldown_url }}" style="display: inline-block; padding: 4px 10px; background: var(--accent); color: white; border-radius: 4px; text-decoration: none; font-size: 10px; font-weight: 600; letter-spacing: 0.3px;">{{ issue.drilldown_label }}</a>
+                    {% else %}
+                    <span style="color: var(--text-muted); font-size: 10px;">—</span>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% else %}
+    <div style="padding: 30px; text-align: center; color: var(--green); font-size: 14px;">✓ No active issues — all checks pass.</div>
+    {% endif %}
+</div>
+
+{% else %}
+<div class="card" style="padding: 30px; color: var(--text-muted);">Health overview unavailable.</div>
+{% endif %}
+
+</div>{# / overview panel #}
 
 {# ────────── HEALTH TAB ────────── #}
 <div x-show="tab === 'health'" x-cloak>
@@ -68,7 +254,7 @@
 
 <!-- Data Health Scores -->
 {% if health_scores %}
-<div class="card" style="margin-bottom: 20px;">
+<div class="card" style="margin-bottom: 20px;" x-data="{ filter: 'all', search: '' }">
     <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; margin-bottom: 16px;">
         <div>
             <div class="section-title" style="margin-bottom: 4px;">Data Health Scores</div>
@@ -100,6 +286,25 @@
         <span style="margin-left: auto;">{{ health_scores.total_issues }} issues across {{ health_scores.tables|length }} tables · computed {{ health_scores.computed_at[11:19] }}</span>
     </div>
 
+    <!-- Filter toolbar -->
+    <div style="display: flex; gap: 16px; flex-wrap: wrap; align-items: center; padding: 10px 14px; background: var(--bg-primary); border-radius: 8px; margin-bottom: 12px;">
+        <div>
+            <div style="font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Filter</div>
+            <div class="radio-group" role="radiogroup">
+                <button type="button" class="radio-btn" :class="{ active: filter === 'all' }" @click="filter='all'">All ({{ health_scores.tables|length }})</button>
+                <button type="button" class="radio-btn" :class="{ active: filter === 'failing' }" @click="filter='failing'">Failing (&lt;60)</button>
+                <button type="button" class="radio-btn" :class="{ active: filter === 'warning' }" @click="filter='warning'">Warning (60-79)</button>
+                <button type="button" class="radio-btn" :class="{ active: filter === 'passing' }" @click="filter='passing'">Passing (≥80)</button>
+                <button type="button" class="radio-btn" :class="{ active: filter === 'issues' }" @click="filter='issues'">Has issues</button>
+            </div>
+        </div>
+        <div style="flex: 1; min-width: 200px;">
+            <div style="font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Search table</div>
+            <input type="text" x-model="search" placeholder="e.g. analyst_consensus"
+                style="width: 100%; background: var(--bg-card); color: var(--text-primary); border: 1px solid var(--border); border-radius: 6px; padding: 5px 10px; font-size: 12px;">
+        </div>
+    </div>
+
     {# Per-table table #}
     <div style="overflow-x: auto;">
     <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
@@ -117,7 +322,16 @@
         {# (Two sibling <tr> elements would each get their own scope, so the expanded row's `open` would never resolve.) #}
         {% for t in health_scores.tables %}
         {% set sev_bg = 'rgba(239,68,68,0.04)' if t.score < 60 else ('rgba(251,191,36,0.03)' if t.score < 80 else 'transparent') %}
-        <tbody x-data="{open: false}">
+        <tbody x-data="{open: false}"
+               data-score="{{ t.score }}"
+               data-issues="{{ t.issue_count }}"
+               data-name="{{ t.table|lower }}"
+               x-show="(filter === 'all'
+                    || (filter === 'failing' && {{ t.score }} < 60)
+                    || (filter === 'warning' && {{ t.score }} >= 60 && {{ t.score }} < 80)
+                    || (filter === 'passing' && {{ t.score }} >= 80)
+                    || (filter === 'issues'  && {{ t.issue_count }} > 0))
+                    && (search === '' || $el.dataset.name.includes(search.toLowerCase()))">
             <tr style="border-bottom: 1px solid var(--border); background: {{ sev_bg }}; cursor: pointer;" @click="open = !open">
                 {# expand chevron #}
                 <td style="padding: 10px 12px; vertical-align: top; text-align: center; color: var(--text-muted);">
@@ -264,14 +478,50 @@
 </div>
 
 <!-- Per-factor table -->
-<div class="card">
+<div class="card" x-data="{ status: 'all', validation: 'all', track: 'all', search: '' }">
     <div class="section-title">Per-Factor — Data Health & Validation</div>
     <div class="section-desc">
         <strong>Data Health</strong> = 65% coverage · 25% freshness · 10% PIT-ready. Data-side only.<br>
         <strong>Validation</strong> = KEEP (|t|≥2.5) · WEAK (|t|≥1.5) · DROP (|t|&lt;1.5) · NONE (no backtest yet).
         These are independent — a healthy factor can still have DROP validation, and a high-validation factor can have low coverage.<br>
-        <strong>Cadence</strong> shown below the Validation badge for non-default (monthly is the default; weekly/sector/portfolio are flagged). t-stats from different cadences are not directly comparable.
+        <strong>Cadence</strong> shown below the Validation badge for non-default (monthly is the default; weekly/sector/portfolio are flagged).
     </div>
+
+    <!-- Filter toolbar -->
+    <div style="display: flex; gap: 16px; flex-wrap: wrap; align-items: center; padding: 10px 14px; background: var(--bg-primary); border-radius: 8px; margin-top: 12px;">
+        <div>
+            <div style="font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Status</div>
+            <div class="radio-group" role="radiogroup">
+                <button type="button" class="radio-btn" :class="{ active: status === 'all' }" @click="status='all'">All</button>
+                <button type="button" class="radio-btn" :class="{ active: status === 'model' }" @click="status='model'">In model</button>
+                <button type="button" class="radio-btn" :class="{ active: status === 'library' }" @click="status='library'">Library</button>
+            </div>
+        </div>
+        <div>
+            <div style="font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Validation</div>
+            <div class="radio-group" role="radiogroup">
+                <button type="button" class="radio-btn" :class="{ active: validation === 'all' }" @click="validation='all'">All</button>
+                <button type="button" class="radio-btn" :class="{ active: validation === 'KEEP' }" @click="validation='KEEP'">KEEP</button>
+                <button type="button" class="radio-btn" :class="{ active: validation === 'WEAK' }" @click="validation='WEAK'">WEAK</button>
+                <button type="button" class="radio-btn" :class="{ active: validation === 'DROP' }" @click="validation='DROP'">DROP</button>
+                <button type="button" class="radio-btn" :class="{ active: validation === 'NONE' }" @click="validation='NONE'">NONE</button>
+            </div>
+        </div>
+        <div>
+            <div style="font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Track</div>
+            <div class="radio-group" role="radiogroup">
+                <button type="button" class="radio-btn" :class="{ active: track === 'all' }" @click="track='all'">All</button>
+                <button type="button" class="radio-btn" :class="{ active: track === 'f-track' }" @click="track='f-track'">F</button>
+                <button type="button" class="radio-btn" :class="{ active: track === 'legacy' }" @click="track='legacy'">Legacy</button>
+            </div>
+        </div>
+        <div style="flex: 1; min-width: 200px;">
+            <div style="font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Search factor name</div>
+            <input type="text" x-model="search" placeholder="e.g. roic, accruals…"
+                style="width: 100%; background: var(--bg-card); color: var(--text-primary); border: 1px solid var(--border); border-radius: 6px; padding: 5px 10px; font-size: 12px;">
+        </div>
+    </div>
+
     <table id="factor-health-table" style="width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 12px;">
         <thead>
         <tr style="color: var(--text-muted); text-align: left; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px;">
@@ -290,7 +540,15 @@
         </thead>
         <tbody>
         {% for f in factor_health.factors %}
-        <tr style="border-bottom: 1px solid var(--border);">
+        <tr style="border-bottom: 1px solid var(--border);"
+            data-status="{{ 'model' if f.in_model else 'library' }}"
+            data-validation="{{ f.validation_verdict }}"
+            data-track="{{ f.track }}"
+            data-name="{{ f.name|lower }}"
+            x-show="(status === 'all' || status === $el.dataset.status)
+                 && (validation === 'all' || validation === $el.dataset.validation)
+                 && (track === 'all' || track === $el.dataset.track)
+                 && (search === '' || $el.dataset.name.includes(search.toLowerCase()))">
             <td data-key="name" style="padding: 8px 10px;">
                 <strong>{{ f.name }}</strong>
                 {% if f.status_reason %}
@@ -401,14 +659,64 @@
 {# ────────── PIPELINE LOG TAB ────────── #}
 <div x-show="tab === 'pipeline'" x-cloak>
 
+{% if overview and overview.pipeline_summary %}
+{% set ps = overview.pipeline_summary %}
+{% if ps.failed_streaks %}
+<!-- Currently-broken streaks panel — separated from historical noise -->
+<div class="card" style="margin-bottom: 18px; border-left: 4px solid var(--red);">
+    <div class="section-title" style="color: var(--red); margin-bottom: 4px;">Currently broken steps</div>
+    <div class="section-desc">
+        Steps whose most-recent run failed AND have been failing for ≥2 days in a row.
+        Historical streaks that have since recovered are filtered out (see health_report streak query).
+    </div>
+    <table style="width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 10px;">
+        <thead><tr style="color: var(--text-muted); text-align: left; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px;">
+            <th style="padding: 8px 10px; border-bottom: 1px solid var(--border-accent);">Step</th>
+            <th style="padding: 8px 10px; border-bottom: 1px solid var(--border-accent); width: 80px; text-align: right;">Days</th>
+            <th style="padding: 8px 10px; border-bottom: 1px solid var(--border-accent);">Sample error</th>
+        </tr></thead>
+        <tbody>
+        {% for s in ps.failed_streaks %}
+        <tr style="border-bottom: 1px solid var(--border);">
+            <td class="mono" style="padding: 8px 10px; color: var(--accent); font-weight: 700;">{{ s.step }}</td>
+            <td class="mono" style="padding: 8px 10px; text-align: right; color: var(--red); font-weight: 700;">{{ s.days }}</td>
+            <td style="padding: 8px 10px; color: var(--text-secondary); font-size: 11px;">{{ s.sample_error }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+{% endif %}
+
 <!-- Pipeline Log -->
-<div class="card" style="margin-bottom: 20px;">
+<div class="card" style="margin-bottom: 20px;" x-data="{ statusFilter: 'all', stepFilter: '' }">
     <div class="section-title">Pipeline Log (Last 7 Days)</div>
     <div class="section-desc">
         One row per (date, step) showing the final state. Stale RUNNING rows from crashed
         runs are shown as ABORTED. Each pipeline step writes a RUNNING row on start and a
         SUCCESS/FAILED row on completion — only the final state is displayed here.
     </div>
+
+    <!-- Filter toolbar -->
+    <div style="display: flex; gap: 16px; flex-wrap: wrap; align-items: center; padding: 10px 14px; background: var(--bg-primary); border-radius: 8px; margin-top: 12px; margin-bottom: 12px;">
+        <div>
+            <div style="font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Status</div>
+            <div class="radio-group" role="radiogroup">
+                <button type="button" class="radio-btn" :class="{ active: statusFilter === 'all' }" @click="statusFilter='all'">All</button>
+                <button type="button" class="radio-btn" :class="{ active: statusFilter === 'FAILED' }" @click="statusFilter='FAILED'">Failed</button>
+                <button type="button" class="radio-btn" :class="{ active: statusFilter === 'SUCCESS' }" @click="statusFilter='SUCCESS'">Success</button>
+                <button type="button" class="radio-btn" :class="{ active: statusFilter === 'RUNNING' }" @click="statusFilter='RUNNING'">Running</button>
+                <button type="button" class="radio-btn" :class="{ active: statusFilter === 'ABORTED' }" @click="statusFilter='ABORTED'">Aborted</button>
+            </div>
+        </div>
+        <div style="flex: 1; min-width: 200px;">
+            <div style="font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Search step</div>
+            <input type="text" x-model="stepFilter" placeholder="e.g. fetch_shareholding, classify_…"
+                style="width: 100%; background: var(--bg-card); color: var(--text-primary); border: 1px solid var(--border); border-radius: 6px; padding: 5px 10px; font-size: 12px;">
+        </div>
+    </div>
+
     {% if pipeline %}
     <div style="overflow-x: auto;">
     <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
@@ -425,7 +733,10 @@
         </thead>
         <tbody>
             {% for row in pipeline[:30] %}
-            <tr style="border-top: 1px solid var(--border);">
+            <tr style="border-top: 1px solid var(--border);"
+                data-status="{{ row.status }}"
+                data-step="{{ row.step_name|lower }}"
+                x-show="(statusFilter === 'all' || statusFilter === $el.dataset.status) && (stepFilter === '' || $el.dataset.step.includes(stepFilter.toLowerCase()))">
                 <td class="mono" style="padding: 8px 10px; font-size: 11px;">{{ row.run_date }}</td>
                 <td style="padding: 8px 10px; font-weight: 600;">{{ row.step_name }}</td>
                 <td style="padding: 8px 10px;">
