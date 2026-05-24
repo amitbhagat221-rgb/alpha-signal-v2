@@ -77,6 +77,11 @@ _COLUMN_MIGRATIONS = [
     # 2026-05-24: insider_signal and sentiment_7d now PIT-reconstructible.
     ("daily_snapshots_pit", "insider_score", "REAL"),
     ("daily_snapshots_pit", "sentiment_7d", "REAL"),
+    # 2026-05-24 (session #3): plan 0005 Phase A — per-signal eligibility,
+    # plus Phase B — per-stock integrity validator
+    ("daily_picks", "eligible_coverage", "REAL"),
+    ("daily_picks", "integrity_status", "TEXT"),
+    ("daily_picks", "integrity_reasons", "TEXT"),
 ]
 
 

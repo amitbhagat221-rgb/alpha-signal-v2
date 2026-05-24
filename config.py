@@ -419,6 +419,13 @@ PIPELINE_STEPS = [
      "data_freq": "daily",           "frequency": "daily"},
 
     # ── Scoring ──
+    # Plan 0005 Phase A: refresh eligibility BEFORE screener so eligible_coverage
+    # uses today's snapshot, not yesterday's.
+    {"name": "refresh_eligibility", "module": "tools.refresh_eligibility", "function": "refresh",
+     "critical": False,
+     "table": "universe_eligibility", "source": "eligibility/registry.py — 8 signals × universe",
+     "data_freq": "daily",         "frequency": "daily"},
+
     {"name": "quality_gate",       "module": "scoring.quality_gate","function": "compute",  "critical": True,
      "table": None,                "source": "piotroski + forensic + shareholding",
      "data_freq": "quarterly",     "frequency": "daily"},

@@ -943,3 +943,25 @@ CREATE TABLE IF NOT EXISTS sector_narrative_runs (
     api_cost_usd    REAL,
     detail          TEXT
 );
+
+
+-- ──────────────────────────────────────────────────────────────────
+-- Plan 0005 Phase A: per-signal eligibility
+-- One row per (sid, signal, snapshot_date). `eligible=1` means the SID
+-- meets the signal's eligibility SQL (eligibility/registry.py) — it
+-- SHOULD have a score. `eligible=0` means the SID is correctly missing
+-- (e.g. SMALL cap with no analyst coverage for `consensus`). This lets
+-- scoring/screener.py compute `eligible_coverage` distinct from raw
+-- `weight_coverage`, and lets cockpit Health Center distinguish
+-- "broken" from "expected miss" per signal.
+-- ──────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS universe_eligibility (
+    sid             TEXT NOT NULL,
+    signal          TEXT NOT NULL,
+    snapshot_date   TEXT NOT NULL DEFAULT (date('now')),
+    eligible        INTEGER NOT NULL CHECK(eligible IN (0,1)),
+    refreshed_at    TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (sid, signal, snapshot_date)
+);
+CREATE INDEX IF NOT EXISTS idx_eligibility_signal_date ON universe_eligibility(signal, snapshot_date);
+CREATE INDEX IF NOT EXISTS idx_eligibility_date ON universe_eligibility(snapshot_date);

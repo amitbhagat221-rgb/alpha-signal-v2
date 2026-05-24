@@ -505,7 +505,13 @@ def get_regime():
 
 
 def get_top_picks(tier=None, top=5):
-    """Top picks by tier with stock metadata."""
+    """Top picks by tier with stock metadata.
+
+    integrity FAIL SIDs (plan 0005 Phase B) are excluded — a stock whose
+    structured fields contradict each other shouldn't appear in morning_brief
+    or action_queue. The picks still exist in daily_picks for review in cockpit,
+    just not as a recommendation.
+    """
     where = f"AND dp.cap_tier = '{tier}'" if tier else ""
     df = read_sql(f"""
         SELECT dp.sid, dp.final_score, dp.rank, dp.cap_tier, dp.sector,
@@ -514,6 +520,7 @@ def get_top_picks(tier=None, top=5):
         FROM daily_picks dp
         JOIN stocks s ON dp.sid = s.sid
         WHERE dp.pick_date = (SELECT MAX(pick_date) FROM daily_picks)
+          AND (dp.integrity_status IS NULL OR dp.integrity_status != 'FAIL')
         {where}
         ORDER BY dp.cap_tier, dp.rank
     """)
@@ -3481,6 +3488,62 @@ def get_health_overview(force=False):
             "n_bad": invalid, "n_total": dossiers_block.get("total"),
         })
 
+    # ── per-stock integrity violations (plan 0005 Phase B) ──
+    try:
+        integrity_rows = read_sql(
+            "SELECT sid, integrity_status, integrity_reasons FROM daily_picks "
+            "WHERE pick_date = (SELECT MAX(pick_date) FROM daily_picks) "
+            "  AND integrity_status IN ('FAIL', 'WARN')"
+        )
+    except Exception:
+        integrity_rows = pd.DataFrame()
+    n_fail = int((integrity_rows["integrity_status"] == "FAIL").sum()) if not integrity_rows.empty else 0
+    n_warn = int((integrity_rows["integrity_status"] == "WARN").sum()) if not integrity_rows.empty else 0
+    if n_fail:
+        sample = integrity_rows[integrity_rows["integrity_status"] == "FAIL"].iloc[0]
+        issues.append({
+            "severity": "CRITICAL",
+            "source": "integrity",
+            "category": "Per-stock integrity",
+            "code": "INTEGRITY_FAIL",
+            "table": "daily_picks", "column": "integrity_status",
+            "message": f"{n_fail} pick(s) failed per-stock integrity validator — bumped from action_queue",
+            "detail": f"{sample['sid']}: {sample['integrity_reasons'][:160]}",
+            "sample": sample["sid"], "pct": None,
+            "n_bad": n_fail, "n_total": None,
+        })
+    if n_warn:
+        sample = integrity_rows[integrity_rows["integrity_status"] == "WARN"].iloc[0]
+        issues.append({
+            "severity": "WARN",
+            "source": "integrity",
+            "category": "Per-stock integrity",
+            "code": "INTEGRITY_WARN",
+            "table": "daily_picks", "column": "integrity_status",
+            "message": f"{n_warn} pick(s) flagged with WARN by integrity validator — surfaced but not gated",
+            "detail": f"{sample['sid']}: {sample['integrity_reasons'][:160]}",
+            "sample": sample["sid"], "pct": None,
+            "n_bad": n_warn, "n_total": None,
+        })
+
+    # ── universe eligibility coverage gaps (plan 0005 Phase A) ──
+    # Surface per-signal eligibility deltas vs prior snapshot — a sudden jump
+    # in INELIGIBLE count means a source went dark (yfinance broke, screener
+    # source stopped delivering). Showing as INFO at baseline so the user has
+    # the per-signal eligible/ineligible breakdown without alarm.
+    try:
+        elig_today = read_sql(
+            "SELECT signal, "
+            "       SUM(CASE WHEN eligible=1 THEN 1 ELSE 0 END) AS n_eligible, "
+            "       SUM(CASE WHEN eligible=0 THEN 1 ELSE 0 END) AS n_ineligible "
+            "FROM universe_eligibility "
+            "WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM universe_eligibility) "
+            "GROUP BY signal ORDER BY signal"
+        )
+    except Exception:
+        elig_today = pd.DataFrame()
+    eligibility_block = elig_today.to_dict("records") if not elig_today.empty else []
+
     # ── attach drilldowns ──
     for i in issues:
         url, label = _drilldown_for_issue(i)
@@ -3557,9 +3620,22 @@ def get_health_overview(force=False):
     except Exception:
         f_grade, f_color, f_headline, f_detail = ("?", "#888", "—", "factor health unavailable")
 
+    int_c, int_w, int_i = _count_by("integrity")
+
     data_grade, data_color = _pillar_grade(data_c, data_w)
     pipe_grade, pipe_color = _pillar_grade(pipe_c, pipe_w)
     dos_grade, dos_color = _pillar_grade(dos_c, dos_w)
+    int_grade, int_color = _pillar_grade(int_c, int_w)
+
+    # Picks tile: total picks today + integrity status
+    try:
+        picks_row = read_sql(
+            "SELECT COUNT(*) AS n FROM daily_picks "
+            "WHERE pick_date = (SELECT MAX(pick_date) FROM daily_picks)"
+        )
+        n_picks = int(picks_row.iloc[0]["n"]) if not picks_row.empty else 0
+    except Exception:
+        n_picks = 0
 
     tiles = {
         "data": {
@@ -3575,6 +3651,13 @@ def get_health_overview(force=False):
             "headline": f_headline,
             "detail": f_detail,
             "link": "#factors",
+        },
+        "picks": {
+            "label": "Picks integrity",
+            "grade": int_grade, "color": int_color,
+            "headline": f"{n_picks} ranked · {n_fail} FAIL · {n_warn} WARN",
+            "detail": "per-stock cross-source assertions (plan 0005 Phase B)",
+            "link": "#overview",
         },
         "pipeline": {
             "label": "Pipeline",
@@ -3606,4 +3689,11 @@ def get_health_overview(force=False):
         "sources": sources,
         "watchdog": report.get("watchdog", {}),
         "pipeline_summary": report.get("pipeline", {}),
+        "eligibility": eligibility_block,
+        "integrity": {
+            "n_fail": n_fail,
+            "n_warn": n_warn,
+            "fails": (integrity_rows[integrity_rows["integrity_status"] == "FAIL"].to_dict("records") if not integrity_rows.empty else []),
+            "warns": (integrity_rows[integrity_rows["integrity_status"] == "WARN"].to_dict("records") if not integrity_rows.empty else []),
+        },
     }

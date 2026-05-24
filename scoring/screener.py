@@ -24,6 +24,22 @@ from config import SIGNAL_WEIGHTS, PORTFOLIO, SCREEN
 from db import read_sql, get_db, upsert_df
 
 
+def _load_eligibility_wide():
+    """Load latest universe_eligibility, pivot to wide (sid index × signal cols).
+    Values are 0/1. Empty DataFrame if the table is empty (e.g. before first refresh).
+    """
+    try:
+        long = read_sql(
+            "SELECT sid, signal, eligible FROM universe_eligibility "
+            "WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM universe_eligibility)"
+        )
+    except Exception:
+        long = pd.DataFrame(columns=["sid", "signal", "eligible"])
+    if long.empty:
+        return pd.DataFrame(index=pd.Index([], name="sid"))
+    return long.pivot(index="sid", columns="signal", values="eligible").fillna(1).astype(int)
+
+
 def _load_signals():
     """Load all signal values for the latest snapshot date."""
     stocks = read_sql("SELECT sid, ticker, name, sector, cap_tier FROM stocks")
@@ -177,13 +193,21 @@ def score_universe(df):
         small_mask = df["cap_tier"] == "SMALL"
         df.loc[small_mask, "momentum_pctile"] = mom_12m_pctile[small_mask]
 
-    # Compute weighted score per tier. We track both the score numerator (sum
-    # of weight × pctile for non-null signals) and the weight coverage (sum of
-    # weights actually contributing). Coverage is used both for the score
-    # denominator AND as a pick-eligibility gate further down.
+    # Compute weighted score per tier. We track:
+    #   • scores             : weight × pctile, summed over non-NULL signals (the numerator)
+    #   • weight_sums        : weights actually contributing (signal produced output)
+    #   • tier_total_weight  : sum of all tier weights (raw denominator)
+    #   • eligible_weight    : sum of weights where the signal was ELIGIBLE for this SID
+    #                          (plan 0005 Phase A — see eligibility/registry.py)
     scores = pd.Series(0.0, index=df.index)
     weight_sums = pd.Series(0.0, index=df.index)
     tier_total_weight = pd.Series(0.0, index=df.index)
+    eligible_weight = pd.Series(0.0, index=df.index)
+
+    # Load today's eligibility snapshot, pivot to wide (sid × signal). Missing
+    # (sid, signal) defaults to ELIGIBLE=1 (back-compat for signals not yet
+    # in registry) — registered signals will have explicit rows.
+    elig_wide = _load_eligibility_wide()
 
     for tier in ["LARGE", "MID", "SMALL"]:
         tier_mask = df["cap_tier"] == tier
@@ -193,22 +217,39 @@ def score_universe(df):
 
         for signal_key, weight in weights.items():
             pctile_col = f"{signal_key}_pctile"
-            if pctile_col in df.columns:
-                vals = df.loc[tier_mask, pctile_col]
-                valid = vals.notna()
-                scores.loc[tier_mask & valid.reindex(df.index, fill_value=False)] += weight * vals[valid]
-                weight_sums.loc[tier_mask & valid.reindex(df.index, fill_value=False)] += weight
+            if pctile_col not in df.columns:
+                continue
+            vals = df.loc[tier_mask, pctile_col]
+            valid = vals.notna()
+            scores.loc[tier_mask & valid.reindex(df.index, fill_value=False)] += weight * vals[valid]
+            weight_sums.loc[tier_mask & valid.reindex(df.index, fill_value=False)] += weight
+
+            # Eligibility — if registry has this signal, only count toward
+            # eligible_weight for SIDs marked eligible. If not registered,
+            # treat all SIDs as eligible (preserves prior behaviour).
+            if signal_key in elig_wide.columns:
+                eligible_for_signal = elig_wide.reindex(df["sid"]).loc[
+                    df.loc[tier_mask, "sid"], signal_key
+                ].fillna(1).astype(int).values  # default ELIGIBLE if no row
+                eligible_weight.loc[tier_mask] += weight * eligible_for_signal
+            else:
+                eligible_weight.loc[tier_mask] += weight
 
     # Normalize by actual weights used (handles NaN signals gracefully)
     df["base_score"] = np.where(weight_sums > 0, scores / weight_sums, np.nan)
 
-    # Weight coverage = fraction of the tier's total weight backed by real data.
-    # A stock with promoter+smart_money only on SMALL has coverage = 0.35/1.0.
-    # Used by select_picks() as an eligibility gate — 2026-05-23 ANO ranked
-    # #1 SMALL with coverage=0.25 (1 of 7 signals real after smart_money fix),
-    # which is exactly what the gate is meant to catch.
+    # weight_coverage = covered / TIER TOTAL (legacy semantics, unchanged).
+    # A LARGE cap missing consensus drops to 0.6 regardless of why.
     df["weight_coverage"] = np.where(
         tier_total_weight > 0, weight_sums / tier_total_weight, np.nan
+    )
+
+    # eligible_coverage = covered / ELIGIBLE (new — plan 0005 Phase A).
+    # Same LARGE cap missing consensus, but the SID was ineligible for
+    # consensus (no analyst attribution) → eligible_coverage = 1.0 (perfect).
+    # Surfaced for now; gate change is a follow-up commit once we've validated.
+    df["eligible_coverage"] = np.where(
+        eligible_weight > 0, weight_sums / eligible_weight, np.nan
     )
 
     # Apply forensic penalty
@@ -317,7 +358,8 @@ def compute(dry_run=False, top=None):
 
     out = eligible[["sid", "final_score", "rank", "base_score", "cap_tier", "sector",
                     "consensus", "accruals", "promoter",
-                    "weight_coverage", "price_rows", "fundamental_coverage"]].copy()
+                    "weight_coverage", "price_rows", "fundamental_coverage",
+                    "eligible_coverage"]].copy()
     out["pick_date"] = pick_date
     out["sentiment_adj"] = 0  # placeholder
     out["insider_adj"] = 0
@@ -329,12 +371,26 @@ def compute(dry_run=False, top=None):
     out["promoter_adj"] = 0
     out["smart_money_adj"] = 0
 
+    # Per-stock integrity validation (plan 0005 Phase B) — runs on the gated
+    # eligible set so a FAIL bumps the SID out of action_queue / morning_brief
+    # downstream. Status + reasons stored alongside other adjustments.
+    from validators.per_stock_integrity import validate_picks
+    integrity = validate_picks(eligible)
+    out = out.merge(integrity, on="sid", how="left")
+    out["integrity_status"] = out["integrity_status"].fillna("PASS")
+    out["integrity_reasons"] = out["integrity_reasons"].fillna("")
+    fail_n = (out["integrity_status"] == "FAIL").sum()
+    warn_n = (out["integrity_status"] == "WARN").sum()
+    if fail_n or warn_n:
+        print(f"  Integrity validator: {fail_n} FAIL, {warn_n} WARN")
+
     # Match daily_picks schema
     picks_out = out[["sid", "pick_date", "final_score", "rank", "base_score",
                      "sentiment_adj", "insider_adj", "forensic_adj", "macro_adj",
                      "piotroski_adj", "accruals_adj", "consensus_adj", "promoter_adj",
                      "smart_money_adj", "cap_tier", "sector",
-                     "weight_coverage", "price_rows", "fundamental_coverage"]]
+                     "weight_coverage", "price_rows", "fundamental_coverage",
+                     "eligible_coverage", "integrity_status", "integrity_reasons"]]
 
     # Delete today's prior rows before insert. Upsert is REPLACE on (sid, pick_date)
     # which leaves rows untouched if today's run drops a sid (gated out by

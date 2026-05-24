@@ -70,7 +70,7 @@
 
 <!-- Pillar tiles -->
 <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin-bottom: 18px;">
-    {% for key in ['data', 'factors', 'pipeline', 'dossiers'] %}
+    {% for key in ['data', 'factors', 'picks', 'pipeline', 'dossiers'] %}
     {% set tile = overview.tiles[key] %}
     <a href="#{{ 'health' if key == 'data' else key }}"
        @click="tab = '{{ 'health' if key == 'data' else (key if key in ['factors','pipeline'] else 'overview') }}'; loaded['{{ 'health' if key == 'data' else (key if key in ['factors','pipeline'] else 'overview') }}'] = true"
@@ -84,6 +84,91 @@
     </a>
     {% endfor %}
 </div>
+
+{% if overview.eligibility %}
+<!-- Universe coverage per signal (plan 0005 Phase A) -->
+<div class="card" style="margin-bottom: 18px;">
+    <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; margin-bottom: 10px;">
+        <div>
+            <div class="section-title" style="margin-bottom: 4px;">Universe coverage per signal</div>
+            <div class="section-desc" style="margin-bottom: 0;">
+                Per-signal "who SHOULD have a score" (eligible) vs "who currently lacks it" (ineligible).
+                INELIGIBLE is NOT a defect — it means the source data the signal needs isn't present for that SID
+                (e.g. SMALL caps with no analyst attribution can never have <span class="mono">consensus_signal</span>).
+                Watch for sudden jumps in ineligible count — those signal a source-side regression.
+            </div>
+        </div>
+    </div>
+    <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px;">
+        {% for e in overview.eligibility %}
+        {% set total = e.n_eligible + e.n_ineligible %}
+        {% set elig_pct = (100 * e.n_eligible / total) if total else 0 %}
+        {% set bar_color = '#2ecc71' if elig_pct >= 90 else ('#4d8eff' if elig_pct >= 70 else ('#f1c40f' if elig_pct >= 40 else '#e67e22')) %}
+        <div style="padding: 10px 14px; background: var(--bg-primary); border-radius: 8px; border-left: 3px solid {{ bar_color }};">
+            <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 4px;">
+                <span class="mono" style="font-size: 12px; font-weight: 700; color: var(--text-primary);">{{ e.signal }}</span>
+                <span class="mono" style="font-size: 12px; font-weight: 700; color: {{ bar_color }};">{{ "%.0f"|format(elig_pct) }}%</span>
+            </div>
+            <div style="height: 6px; background: var(--bg-card); border-radius: 3px; overflow: hidden; margin-bottom: 6px;">
+                <div style="width: {{ elig_pct }}%; height: 100%; background: {{ bar_color }};"></div>
+            </div>
+            <div style="font-size: 10px; color: var(--text-muted);">
+                <span style="color: var(--text-primary); font-weight: 600;">{{ e.n_eligible }}</span> eligible ·
+                {{ e.n_ineligible }} ineligible
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+
+{% if overview.integrity and (overview.integrity.n_fail or overview.integrity.n_warn) %}
+<!-- Per-stock integrity violations (plan 0005 Phase B) -->
+<div class="card" style="margin-bottom: 18px; border-left: 4px solid {{ 'var(--red)' if overview.integrity.n_fail else 'var(--amber)' }};">
+    <div class="section-title" style="margin-bottom: 4px; color: {{ 'var(--red)' if overview.integrity.n_fail else 'var(--amber)' }};">
+        Per-stock integrity violations
+    </div>
+    <div class="section-desc">
+        FAIL = pick contradicts itself across sources (e.g. dossier "16.5% downside" but PT/price → -8.5%).
+        FAILs are bumped from action_queue + morning_brief but retained here for review.
+        WARNs are surfaced but not gated.
+    </div>
+    {% if overview.integrity.fails %}
+    <div style="margin-top: 12px;">
+        <div style="font-size: 11px; color: var(--red); font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px;">
+            FAIL ({{ overview.integrity.n_fail }})
+        </div>
+        <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
+        {% for f in overview.integrity.fails[:10] %}
+        <tr style="border-bottom: 1px solid var(--border);">
+            <td style="padding: 6px 10px; vertical-align: top; width: 80px;">
+                <a href="/explorer/{{ f.sid }}" class="mono" style="color: var(--accent); font-weight: 700; text-decoration: none;">{{ f.sid }}</a>
+            </td>
+            <td style="padding: 6px 10px; font-size: 11px; color: var(--text-secondary); line-height: 1.4;">{{ f.integrity_reasons }}</td>
+        </tr>
+        {% endfor %}
+        </table>
+    </div>
+    {% endif %}
+    {% if overview.integrity.warns %}
+    <div style="margin-top: 12px;">
+        <div style="font-size: 11px; color: var(--amber); font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px;">
+            WARN ({{ overview.integrity.n_warn }})
+        </div>
+        <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
+        {% for w in overview.integrity.warns[:10] %}
+        <tr style="border-bottom: 1px solid var(--border);">
+            <td style="padding: 6px 10px; vertical-align: top; width: 80px;">
+                <a href="/explorer/{{ w.sid }}" class="mono" style="color: var(--accent); font-weight: 700; text-decoration: none;">{{ w.sid }}</a>
+            </td>
+            <td style="padding: 6px 10px; font-size: 11px; color: var(--text-secondary); line-height: 1.4;">{{ w.integrity_reasons }}</td>
+        </tr>
+        {% endfor %}
+        </table>
+    </div>
+    {% endif %}
+</div>
+{% endif %}
 
 <!-- Live Issues Inbox -->
 <div class="card" x-data="{

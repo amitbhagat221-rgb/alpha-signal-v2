@@ -56,15 +56,16 @@ def _load_data():
     """Load all inputs."""
     stocks = read_sql("SELECT sid, cap_tier FROM stocks")
 
-    # Analyst attribution gate: require total_analysts OR price_target from a real
-    # analyst source (yfinance). Without it, Tickertape's forecastsHistory growth
-    # pcts are model projections — useful as fundamentals but NOT analyst consensus.
-    # See data_sanity.CONSENSUS_SIGNAL_WITHOUT_ANALYST_ATTRIBUTION.
+    # Analyst attribution gate: require total_analysts>0 OR price_target NOT NULL.
+    # Was originally `total_analysts IS NOT NULL` — but yfinance returns 0
+    # (explicit zero) for some stocks, which passed the IS NOT NULL check. Phase B
+    # integrity validator (validators/per_stock_integrity.py) caught 14 stocks
+    # ranked with consensus_signal but n=0 and PT=NULL. Tightened to > 0.
     consensus = read_sql(
         "SELECT sid, total_analysts, price_target, eps_growth_pct, revenue_growth_pct "
         "FROM analyst_consensus "
         "WHERE has_analyst_data = 1 "
-        "  AND (total_analysts IS NOT NULL OR price_target IS NOT NULL)"
+        "  AND ((total_analysts IS NOT NULL AND total_analysts > 0) OR price_target IS NOT NULL)"
     )
 
     # NOTE: forecast_history removed 2026-05-23. metric='price' was contaminated
