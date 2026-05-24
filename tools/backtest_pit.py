@@ -171,6 +171,36 @@ def _newey_west_se(ics, lag):
     return float(np.sqrt(var) / np.sqrt(n))
 
 
+def _bootstrap_t_ci(ics, n_bootstrap=1000, nw_lag=0, seed=42):
+    """95% bootstrap CI on the t-stat (resample IC series with replacement).
+
+    Plan 0005 Phase D.5: point-estimate t-stats hide their own uncertainty.
+    A t=3.0 with [CI 1.2, 4.8] is much weaker evidence than t=3.0 with
+    [CI 2.8, 3.2]. Bootstrap is non-parametric — works whether IC is normal
+    or fat-tailed.
+    """
+    n = len(ics)
+    if n < 4:  # below 4, bootstrap is meaningless
+        return None, None
+    rng = np.random.default_rng(seed)
+    ts = np.empty(n_bootstrap)
+    for i in range(n_bootstrap):
+        sample = rng.choice(ics, size=n, replace=True)
+        mu = sample.mean()
+        sd = sample.std(ddof=1)
+        if sd <= 0:
+            ts[i] = 0.0
+            continue
+        if nw_lag > 0:
+            se = _newey_west_se(sample, nw_lag) or (sd / np.sqrt(n))
+        else:
+            se = sd / np.sqrt(n)
+        ts[i] = mu / se if se > 0 else 0.0
+    lo = float(np.percentile(ts, 2.5))
+    hi = float(np.percentile(ts, 97.5))
+    return round(lo, 2), round(hi, 2)
+
+
 def _aggregate(ic_rows, signal, cap_tier, source, cadence="monthly", nw_lag=0):
     """Aggregate per-period IC list into a single (signal, tier) result.
 
@@ -193,6 +223,9 @@ def _aggregate(ic_rows, signal, cap_tier, source, cadence="monthly", nw_lag=0):
         # t-stat = ICIR * sqrt(n_periods); equivalent to mean/SE_classical
         t_stat = icir * np.sqrt(n_periods) if icir is not None else None
 
+    # Bootstrap 95% CI on the t-stat (plan 0005 Phase D.5)
+    t_ci_lo, t_ci_hi = _bootstrap_t_ci(ics, nw_lag=nw_lag)
+
     return {
         "signal": signal,
         "cap_tier": cap_tier,
@@ -202,6 +235,8 @@ def _aggregate(ic_rows, signal, cap_tier, source, cadence="monthly", nw_lag=0):
         "std_ic": round(std_ic, 4) if std_ic is not None else None,
         "icir": round(icir, 3) if icir is not None else None,
         "t_stat": round(float(t_stat), 2) if t_stat is not None else None,
+        "t_stat_ci_lo": t_ci_lo,
+        "t_stat_ci_hi": t_ci_hi,
         "verdict": _verdict(t_stat),
         "source": source + (f":{cadence}+NW{nw_lag}" if nw_lag > 0 else (f":{cadence}" if cadence != "monthly" else "")),
     }

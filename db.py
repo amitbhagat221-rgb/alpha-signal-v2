@@ -82,6 +82,9 @@ _COLUMN_MIGRATIONS = [
     ("daily_picks", "eligible_coverage", "REAL"),
     ("daily_picks", "integrity_status", "TEXT"),
     ("daily_picks", "integrity_reasons", "TEXT"),
+    # 2026-05-24 (session #4): plan 0005 Phase D.5 — bootstrap CIs on t-stat
+    ("pit_ic_by_tier_v2", "t_stat_ci_lo", "REAL"),
+    ("pit_ic_by_tier_v2", "t_stat_ci_hi", "REAL"),
 ]
 
 

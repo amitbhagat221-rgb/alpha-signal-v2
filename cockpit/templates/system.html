@@ -549,7 +549,7 @@
             <div>
                 <div style="font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Validation</div>
                 <div style="display: flex; gap: 8px;">
-                    {% for v, vcolor in [('KEEP', '#2ecc71'), ('WEAK', '#4d8eff'), ('DROP', '#e74c3c'), ('NONE', 'var(--text-muted)')] %}
+                    {% for v, vcolor in [('KEEP', '#2ecc71'), ('WEAK', '#4d8eff'), ('DROP', '#e74c3c'), ('INSUFFICIENT', '#9b59b6'), ('NONE', 'var(--text-muted)')] %}
                         {% set n = fs.validation_dist.get(v, 0) %}
                         <div style="text-align: center; min-width: 42px;">
                             <div style="font-size: 9px; color: var(--text-muted);">{{ v }}</div>
@@ -572,7 +572,7 @@
         <strong>sparse</strong> = "is data flowing?" (insider/bulk/sentiment only cover stocks with the event) ·
         <strong>sector</strong> / <strong>composite</strong> / <strong>data-depth</strong> = per-stock coverage doesn't apply.<br>
         <strong>Rule of thumb:</strong> A/B/C = trust it · D = look here · F = broken or unbuilt.<br>
-        <strong>Validation</strong> = KEEP (|t|≥2.5) · WEAK (|t|≥1.5) · DROP (|t|&lt;1.5) · NONE (no backtest yet) — independent of data health.
+        <strong>Validation</strong> = KEEP (|t|≥2.5) · WEAK (|t|≥1.5) · DROP (|t|&lt;1.5) · INSUFFICIENT (n&lt;12 periods — preliminary, await deeper backtest) · NONE (no backtest yet) — independent of data health.
     </div>
 
     <!-- Filter toolbar -->
@@ -592,6 +592,7 @@
                 <button type="button" class="radio-btn" :class="{ active: validation === 'KEEP' }" @click="validation='KEEP'">KEEP</button>
                 <button type="button" class="radio-btn" :class="{ active: validation === 'WEAK' }" @click="validation='WEAK'">WEAK</button>
                 <button type="button" class="radio-btn" :class="{ active: validation === 'DROP' }" @click="validation='DROP'">DROP</button>
+                <button type="button" class="radio-btn" :class="{ active: validation === 'INSUFFICIENT' }" @click="validation='INSUFFICIENT'">INSUFF</button>
                 <button type="button" class="radio-btn" :class="{ active: validation === 'NONE' }" @click="validation='NONE'">NONE</button>
             </div>
         </div>
@@ -674,6 +675,9 @@
                     {% elif abs_t >= 1.5 %}<strong style="color: #4d8eff;">{{ '%.2f' | format(f.t_stat) }}</strong>
                     {% else %}<span style="color: var(--text-muted);">{{ '%.2f' | format(f.t_stat) }}</span>
                     {% endif %}
+                {% endif %}
+                {% if f.t_ci_lo is not none and f.t_ci_hi is not none %}
+                <div style="font-size: 9px; color: var(--text-muted);" title="Bootstrap 95% CI on t-stat (B=1000)">95% CI [{{ '%.2f' | format(f.t_ci_lo) }}, {{ '%.2f' | format(f.t_ci_hi) }}]</div>
                 {% endif %}
                 {% if f.n_periods %}<div style="font-size: 9px; color: var(--text-muted);">n={{ f.n_periods }}</div>{% endif %}
             </td>

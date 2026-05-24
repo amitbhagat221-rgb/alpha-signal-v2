@@ -2167,18 +2167,31 @@ def get_factor_health():
             "SELECT COUNT(*) FROM stocks WHERE ticker IS NOT NULL AND sector != 'Financials'"
         ).fetchone()[0]
 
-        # Best |t| per signal (preferring v2_recompute over v1_archive when both exist)
+        # Best t-stat per signal — plan 0005 Phase D rule:
+        # 1. Prefer sources with n_periods >= 12 (statistically meaningful)
+        # 2. Within those, prefer v2_recompute over v1_archive (cleaner pipeline)
+        # 3. Fall back to whatever has the highest n if nothing meets the bar
+        # Pre-fix: always preferred v2_recompute even at n=6, masking the n=35
+        # v1_archive result for the same signal. The n<12 gate then nuked the
+        # whole factor library to INSUFFICIENT.
         ic = read_sql(
-            "SELECT signal, source, t_stat, n_periods FROM pit_ic_by_tier_v2"
+            "SELECT signal, source, t_stat, n_periods, t_stat_ci_lo, t_stat_ci_hi "
+            "FROM pit_ic_by_tier_v2"
         )
         if ic.empty:
             best_by_signal = {}
         else:
+            MIN_N = 12
             ic = ic.assign(
                 abst=lambda d: d["t_stat"].abs(),
-                _src=lambda d: d["source"].map({"v2_recompute": 0, "v1_archive": 1}).fillna(2),
+                _adequate_n=lambda d: (d["n_periods"] >= MIN_N).astype(int),
+                _src=lambda d: d["source"].map({"v2_recompute": 0}).fillna(
+                    d["source"].str.startswith("v2_recompute:").map({True: 0}).fillna(1)
+                ),
             )
-            best_by_signal = (ic.sort_values(["_src", "abst"], ascending=[True, False])
+            # Sort: adequate_n DESC (1 first), _src ASC (v2 first), abst DESC
+            best_by_signal = (ic.sort_values(["_adequate_n", "_src", "abst"],
+                                              ascending=[False, True, False])
                                 .drop_duplicates("signal", keep="first")
                                 .set_index("signal")
                                 .to_dict("index"))
@@ -2286,7 +2299,8 @@ def get_factor_health():
 
     def _build_row(name, signal, group, status, status_reason, in_model_flag,
                    coverage_n, eligible_n, latest_snap_str,
-                   t_stat, n_periods, ic_source, pit_ready, track):
+                   t_stat, n_periods, ic_source, pit_ready, track,
+                   t_ci_lo=None, t_ci_hi=None):
         nature = _nature_of(signal)
 
         # Coverage score — context-aware so the grade reflects "should I worry?"
@@ -2383,9 +2397,18 @@ def get_factor_health():
         data_health = round(data_health, 1)
         data_grade, data_color = _grade(data_health)
 
-        # Validation verdict — purely t-stat based, independent of data quality
+        # Validation verdict — t-stat based with sample-size gate.
+        # Plan 0005 Phase D.4: any KEEP/WEAK claim with n < 12 periods is
+        # downgraded to INSUFFICIENT. The 2026-05-24 weekly+NW backtest found
+        # `sentiment_7d LARGE` at t=-3.88 but n=4 — statistically meaningless;
+        # this gate prevents preliminary findings from misleading prod decisions.
+        MIN_N_FOR_VERDICT = 12
+        n_int = int(n_periods) if (n_periods is not None and not pd.isna(n_periods)) else 0
         if t_stat is None or pd.isna(t_stat):
             validation_verdict, validation_color = "NONE", "var(--text-muted)"
+        elif n_int < MIN_N_FOR_VERDICT:
+            # Real t-stat but too few periods — show value but flag insufficiency
+            validation_verdict, validation_color = "INSUFFICIENT", "#9b59b6"
         else:
             abs_t = abs(float(t_stat))
             if abs_t >= 2.5:
@@ -2442,6 +2465,8 @@ def get_factor_health():
             "freshness_days": freshness_days,
             "latest_snap": latest_snap_str,
             "t_stat": float(t_stat) if t_stat is not None and not pd.isna(t_stat) else None,
+            "t_ci_lo": float(t_ci_lo) if t_ci_lo is not None and not pd.isna(t_ci_lo) else None,
+            "t_ci_hi": float(t_ci_hi) if t_ci_hi is not None and not pd.isna(t_ci_hi) else None,
             "n_periods": int(n_periods) if n_periods is not None and not pd.isna(n_periods) else None,
             "ic_source": ic_source,
             "pit_ready": pit_ready,
@@ -2493,6 +2518,8 @@ def get_factor_health():
             t_stat=t_stat,
             n_periods=ic_row.get("n_periods"),
             ic_source=ic_row.get("source", "—"),
+            t_ci_lo=ic_row.get("t_stat_ci_lo"),
+            t_ci_hi=ic_row.get("t_stat_ci_hi"),
             pit_ready=bool(v2_col),
             track="legacy",
         ))
@@ -2522,6 +2549,8 @@ def get_factor_health():
             t_stat=t_stat,
             n_periods=ic_row.get("n_periods"),
             ic_source=ic_row.get("source", "—"),
+            t_ci_lo=ic_row.get("t_stat_ci_lo"),
+            t_ci_hi=ic_row.get("t_stat_ci_hi"),
             pit_ready=signal in pit_coverage,  # PIT helper added if column exists
             track="f-track",
         ))
