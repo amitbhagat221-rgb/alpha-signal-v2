@@ -248,40 +248,13 @@ PIPELINE_STEPS = [
     {"name": "fetch_news",         "module": "sources.rss",          "function": "compute", "critical": False,
      "table": "news_articles",     "source": "RSS feeds (8 sources)", "data_freq": "daily", "frequency": "daily"},
 
-    # News Phase 2 enrichment — Claude Haiku per-article structured fields
-    # (~$0.001/article, ~$1/day). Runs after fetch_news so today's stories
-    # are classified by the time the brief generator fires.
-    {"name": "classify_news",       "module": "sources.news_classifier", "function": "compute", "critical": False,
-     "table": "news_enriched",     "source": "news_articles (Claude Haiku enrich)", "data_freq": "daily", "frequency": "daily"},
-
-    # Daily news brief — Claude Sonnet synthesis of top 25 enriched stories.
-    # ~$0.05/day. Cron after classify_news so the brief reflects today.
-    {"name": "news_brief",          "module": "sources.news_brief",   "function": "compute", "critical": False,
-     "table": "news_briefs",       "source": "news_enriched (Claude Sonnet synthesis)", "data_freq": "daily", "frequency": "daily"},
-
-    # Regulatory pipeline — harvester writes to regulatory_events, classifier
-    # writes to regulatory_signals. Were missing from PIPELINE_STEPS pre-
-    # 2026-05-24 → REGULATORY_FEED_DARK fired (43 days silent before the
-    # staleness override caught it). Weekly harvest, daily classify (only
-    # new unclassified rows).
-    # Plan 0005 Phase C (2026-05-24): switched from harvest_all (3-year backfill
-    # — 180 Google + 870 RBI + 110K PIB IDs) to harvest_incremental (last 30d
-    # Google News only). harvest_all was timing out daily, leaving stale RUNNING
-    # rows and the table 44d stale. Incremental completes in ~5 min.
+    # Regulatory harvester is daily (cheap incremental, ~5 min).
     {"name": "fetch_regulatory",   "module": "sources.regulatory_harvester", "function": "harvest_incremental", "critical": False,
      "table": "regulatory_events", "source": "Google News last 30d", "data_freq": "daily", "frequency": "daily"},
 
-    {"name": "classify_regulatory","module": "sources.regulatory_classifier", "function": "compute", "critical": False,
-     "table": "regulatory_signals","source": "regulatory_events (AI-classified)", "data_freq": "daily", "frequency": "daily"},
-
-    # Moneycontrol broker recos — named-broker BUY/HOLD/SELL with target prices.
-    # 2026-05-24: source confirmed alive (HINDALCO returned 6 real reports from
-    # Motilal Oswal / Prabhudas Lilladher / Emkay Global). One-time backfill
-    # needed first: `python -m sources.moneycontrol_recos --discover-only`
-    # (writes stocks.mc_slug for ~2,448 stocks; otherwise harvester silently
-    # skips no_slug stocks). Then this daily step keeps it fresh.
-    {"name": "fetch_broker_recos", "module": "sources.moneycontrol_recos", "function": "compute", "critical": False,
-     "table": "broker_recommendations", "source": "Moneycontrol HTML",   "data_freq": "weekly", "frequency": "weekly"},
+    # NOTE: classify_regulatory, classify_news, news_brief, and fetch_broker_recos
+    # all moved to END of pipeline — they were blocking production. See block
+    # at the bottom: "Background / non-blocking section".
 
     # {"name": "fetch_fundamentals", "module": "sources.tickertape", "function": "compute", "critical": False,
     #  "table": "quarterly_income",  "source": "Tickertape API",     "data_freq": "quarterly", "frequency": "monthly"},
@@ -473,6 +446,34 @@ PIPELINE_STEPS = [
     {"name": "email",              "module": "output.email_sender", "function": "compute",  "critical": False,
      "table": None,                "source": "daily_picks + dossiers (Gmail SMTP)",
      "data_freq": "daily",         "frequency": "daily"},
+
+    # ── Background / non-blocking section ──
+    # Heavy enrichment + scrapes that don't gate today's picks. Moved AFTER
+    # email so a slow run never blocks production. 2026-05-25 incident:
+    # classify_regulatory was second-from-top and ran 1.5+hr daily, blocking
+    # fetch_broker_recos + signals + screener + dossier + email entirely.
+    # Each runs with its own internal cap so the daily cron has bounded
+    # runtime even when there's a large backlog.
+
+    # News Phase 2 enrichment — Claude Haiku (~$0.001/article, ~$1/day).
+    {"name": "classify_news",       "module": "sources.news_classifier", "function": "compute", "critical": False,
+     "table": "news_enriched",     "source": "news_articles (Claude Haiku enrich)", "data_freq": "daily", "frequency": "daily"},
+
+    # Daily news brief — Claude Sonnet (~$0.05/day). After classify_news.
+    {"name": "news_brief",          "module": "sources.news_brief",   "function": "compute", "critical": False,
+     "table": "news_briefs",       "source": "news_enriched (Claude Sonnet synthesis)", "data_freq": "daily", "frequency": "daily"},
+
+    # Regulatory classifier — hard-capped at DAILY_CLASSIFIER_CAP (500/run) so
+    # the 7.5K-event backlog drains over 15 days without ever blocking cron.
+    {"name": "classify_regulatory","module": "sources.regulatory_classifier", "function": "compute", "critical": False,
+     "table": "regulatory_signals","source": "regulatory_events (AI-classified, capped 500/run)", "data_freq": "daily", "frequency": "daily"},
+
+    # Moneycontrol broker recos — WEEKLY (Sunday only per `frequency: weekly`).
+    # DELAY=12s × 2336 sids ≈ 8 hours. Pipeline runner honors frequency since
+    # 2026-05-25. Discovery one-time: --discover-only (mc_slug already
+    # populated for 2336 stocks).
+    {"name": "fetch_broker_recos", "module": "sources.moneycontrol_recos", "function": "compute", "critical": False,
+     "table": "broker_recommendations", "source": "Moneycontrol HTML (12s/req)",   "data_freq": "weekly", "frequency": "weekly"},
 ]
 
 # Also track raw data tables (not pipeline steps — populated by migration / fetchers)

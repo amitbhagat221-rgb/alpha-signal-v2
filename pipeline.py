@@ -45,10 +45,31 @@ log = logging.getLogger("pipeline")
 
 from config import PIPELINE_STEPS
 
+# Honor the `frequency` field so weekly/monthly steps don't run every day.
+# 2026-05-25: fetch_broker_recos is weekly (8hr at 12s rate-limit) — running
+# daily would hammer Moneycontrol's WAF. weekly = Sunday only (weekday 6).
+# `--step <name>` always overrides this gate (manual runs ignore frequency).
+def _step_should_run_today(spec):
+    freq = (spec.get("frequency") or "daily").lower()
+    if freq == "daily":
+        return True
+    today = date.today()
+    if freq == "weekly":
+        return today.weekday() == 6  # Sunday
+    if freq == "monthly":
+        return today.day == 1
+    if freq == "quarterly":
+        return today.day == 1 and today.month in (1, 4, 7, 10)
+    return True  # unknown freq → run (fail-open)
+
+
+# Full step list (unfiltered) — used for --step lookups so manual runs work
+# any day of the week. Cron path filters via _step_should_run_today inside main().
 STEPS = [
     (s["name"], s["module"], s["function"], s["critical"])
     for s in PIPELINE_STEPS
 ]
+STEP_SPECS = {s["name"]: s for s in PIPELINE_STEPS}
 
 
 # ── Pipeline engine ──
@@ -187,6 +208,13 @@ def main():
             print(f"Unknown step '{args.step}'. Available: {available}")
             sys.exit(1)
         active_steps = matches
+    else:
+        # Cron path: filter weekly/monthly/quarterly steps to their firing day
+        before = len(active_steps)
+        active_steps = [s for s in active_steps if _step_should_run_today(STEP_SPECS[s[0]])]
+        skipped = before - len(active_steps)
+        if skipped:
+            log.info(f"Frequency gate: {skipped} step(s) skipped today (weekly/monthly/quarterly)")
 
     if not active_steps:
         print("No active steps defined yet. Uncomment steps in STEPS list as modules are built.")

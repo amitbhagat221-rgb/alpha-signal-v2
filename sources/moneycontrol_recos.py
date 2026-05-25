@@ -55,7 +55,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from db import get_db, read_sql, upsert_df
 
-DELAY = 2.0
+DELAY = 12.0   # Per docstring: 2s tripped the Moneycontrol WAF. 12s is safe.
 TIMEOUT = 15
 MAX_RETRIES = 2
 # Browser-like headers. The autosuggest endpoint 403s if Accept doesn't

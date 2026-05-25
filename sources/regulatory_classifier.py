@@ -429,10 +429,26 @@ def classify_events(limit=None, dry_run=False):
     return total_regulatory
 
 
+# Daily cap on cron runs — at ~5-10s per event (Haiku + maybe Sonnet), 500
+# events ≈ 45-90 min upper bound. Without this, the 7,500-event backlog from
+# a missed week of cron blocks the production pipeline for hours every day
+# (witnessed 2026-05-25: classify_regulatory ran 1.5+hr, never reached
+# fetch_broker_recos / screener / dossier / email downstream). Manual
+# backfills bypass via `python -m sources.regulatory_classifier --events
+# --limit N`.
+DAILY_CLASSIFIER_CAP = 500
+
+
 def compute(dry_run=False):
-    """Pipeline entry point — classifies both news_articles and regulatory_events."""
-    n1 = classify(dry_run=dry_run)
-    n2 = classify_events(dry_run=dry_run)
+    """Pipeline entry point — classifies both news_articles and regulatory_events.
+
+    Hard-caps each side at DAILY_CLASSIFIER_CAP to keep the cron run bounded
+    so downstream production steps (signals → screener → dossier → email) run
+    every day. The backlog catches up over multiple days; new daily incoming
+    (~50 events) fits comfortably under the cap.
+    """
+    n1 = classify(limit=DAILY_CLASSIFIER_CAP, dry_run=dry_run)
+    n2 = classify_events(limit=DAILY_CLASSIFIER_CAP, dry_run=dry_run)
     return n1 + n2
 
 
