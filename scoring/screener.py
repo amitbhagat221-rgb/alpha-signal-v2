@@ -41,8 +41,19 @@ def _load_eligibility_wide():
 
 
 def _load_signals():
-    """Load all signal values for the latest snapshot date."""
-    stocks = read_sql("SELECT sid, ticker, name, sector, cap_tier FROM stocks")
+    """Load all signal values for the latest snapshot date.
+    Excludes MICRO tier (config.EXCLUDED_FROM_PICKS) — they're too illiquid + data-thin
+    to recommend; see tools/classify_micro_tier.py for the spec."""
+    from config import EXCLUDED_FROM_PICKS
+    if EXCLUDED_FROM_PICKS:
+        placeholders = ",".join("?" * len(EXCLUDED_FROM_PICKS))
+        stocks = read_sql(
+            f"SELECT sid, ticker, name, sector, cap_tier FROM stocks "
+            f"WHERE cap_tier NOT IN ({placeholders})",
+            params=list(EXCLUDED_FROM_PICKS),
+        )
+    else:
+        stocks = read_sql("SELECT sid, ticker, name, sector, cap_tier FROM stocks")
 
     # Drop InvIT / REIT / business-trust instruments — different ranking
     # semantics from equities (distribution-yield vehicles, low float).

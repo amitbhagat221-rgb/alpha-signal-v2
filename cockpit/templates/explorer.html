@@ -59,6 +59,7 @@
     ('LARGE', 'Large Cap'),
     ('MID',   'Mid Cap'),
     ('SMALL', 'Small Cap'),
+    ('MICRO', 'Micro · excluded from picks'),
 ]) }}
 
 <!-- Tier Heat Maps -->
@@ -68,10 +69,12 @@
         <div class="tier-header" style="margin-bottom: 12px;
             {% if tier_name == 'LARGE' %}border-left: 3px solid var(--blue); padding-left: 12px;
             {% elif tier_name == 'MID' %}border-left: 3px solid var(--accent); padding-left: 12px;
+            {% elif tier_name == 'MICRO' %}border-left: 3px solid #e74c3c; padding-left: 12px;
             {% else %}border-left: 3px solid var(--green); padding-left: 12px;{% endif %}">
             {{ tier_name }} CAP
             <span style="color: var(--text-muted); font-weight: 400; letter-spacing: 0;">
                 ({{ tier_stocks|length }} stocks)
+                {% if tier_name == 'MICRO' %} · ADTV&lt;₹1Cr + (mcap&lt;₹500Cr OR Piot≤3 OR &lt;4q) · excluded from daily_picks{% endif %}
             </span>
         </div>
         <div style="display: flex; flex-wrap: wrap; gap: 4px;">

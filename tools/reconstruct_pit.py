@@ -157,6 +157,10 @@ PIT_COLUMNS = [
     "sloan_accruals_full", "sga_to_revenue_change",
     "fcf_margin", "capex_to_dep", "goodwill_to_assets",
     "debt_structure", "asset_tangibility",
+    # Plan 0005 Phase E "full fix" — composite signals so historical PIT
+    # replay can validate all 8 screener inputs end-to-end (not just the 4
+    # that were derivable from raw cols).
+    "accruals_signal", "promoter_signal", "forensic_penalty", "smart_money_score",
 ]
 
 
@@ -245,6 +249,11 @@ VALIDATION_RANGES = {
     "goodwill_to_assets":    (0, 1, True),         # bounded ratio
     "debt_structure":        (0, 1, True),         # LT/total share
     "asset_tangibility":     (0, 1, True),         # Net Block/total
+    # Plan 0005 Phase E composites (used by screener directly)
+    "accruals_signal":       (0, 1, True),         # within-tier percentile blend
+    "promoter_signal":       (0, 1, True),         # within-tier percentile blend
+    "forensic_penalty":      (-1, 0, True),        # 0 / -0.10 / -0.20 / -0.30
+    "smart_money_score":     (0, 100, True),       # min-max-normalised 0-100
     # Sector signals (separate table)
     "regulatory_score":      (-10, 10, True),
     "macro_score":           (-10, 10, True),
@@ -429,10 +438,11 @@ def pit_piotroski(stocks, qi_pit, bs_pit, cf_pit):
 
 
 def pit_accruals(stocks, qi_pit, bs_pit, cf_pit):
-    """Reuse signals.accruals._compute_scores."""
+    """Reuse signals.accruals._compute_scores. Keeps the composite `accruals_signal`
+    alongside raw cf_/bs_ ratios so PIT replay can validate the full screener input."""
     from signals.accruals import _compute_scores
     df = _compute_scores(stocks, qi_pit, bs_pit, cf_pit)
-    out = df[["sid", "cf_accruals_ratio", "bs_accruals_ratio", "earnings_persistence"]].copy()
+    out = df[["sid", "cf_accruals_ratio", "bs_accruals_ratio", "earnings_persistence", "accruals_signal"]].copy()
     out = out.rename(columns={
         "cf_accruals_ratio": "cf_accruals",
         "bs_accruals_ratio": "bs_accruals",
@@ -441,23 +451,54 @@ def pit_accruals(stocks, qi_pit, bs_pit, cf_pit):
 
 
 def pit_promoter(stocks, sh_pit):
-    """Reuse signals.promoter._compute_scores."""
+    """Reuse signals.promoter._compute_scores. Keeps the composite `promoter_signal`."""
     from signals.promoter import _compute_scores
     df = _compute_scores(stocks, sh_pit)
-    return df[["sid", "promoter_qoq"]].copy()
+    cols = ["sid", "promoter_qoq"]
+    if "promoter_signal" in df.columns:
+        cols.append("promoter_signal")
+    return df[cols].copy()
 
 
 def pit_forensic(stocks, qi_pit, bs_pit, cf_pit):
-    """Reuse signals.forensic._compute_scores."""
+    """Reuse signals.forensic._compute_scores. Keeps the composite `forensic_penalty`."""
     from signals.forensic import _compute_scores
     financial_sids = set(stocks[stocks["sector"].isin(FINANCIAL_SECTORS)]["sid"])
     df = _compute_scores(stocks, financial_sids, qi_pit, bs_pit, cf_pit)
     keep_cols = ["sid"]
-    if "m_score" in df.columns:
-        keep_cols.append("m_score")
-    if "z_score" in df.columns:
-        keep_cols.append("z_score")
+    for c in ("m_score", "z_score"):
+        if c in df.columns:
+            keep_cols.append(c)
+    if "penalty" in df.columns:
+        out = df[keep_cols + ["penalty"]].copy()
+        out = out.rename(columns={"penalty": "forensic_penalty"})
+        return out
     return df[keep_cols].copy()
+
+
+def pit_smart_money(stocks, bulk_pit, prices_pit, eval_date, window_days=90):
+    """Reuse signals.smart_money._compute_scores against date-filtered inputs.
+    Produces smart_money_score for PIT. Bulk + delivery come from raw stores
+    already loaded by the orchestrator. Returns DataFrame[sid, smart_money_score]."""
+    from signals.smart_money import _compute_scores
+    eval_str = eval_date.isoformat() if hasattr(eval_date, "isoformat") else str(eval_date)
+    cutoff = (pd.Timestamp(eval_str) - pd.Timedelta(days=window_days)).strftime("%Y-%m-%d")
+
+    bulk = bulk_pit[(bulk_pit["deal_date"] >= cutoff) & (bulk_pit["deal_date"] <= eval_str)] \
+        if bulk_pit is not None and not bulk_pit.empty else pd.DataFrame(
+            columns=["sid", "symbol", "client_name", "buy_sell", "quantity", "price", "deal_date"]
+        )
+    if "delivery_pct" in prices_pit.columns:
+        delivery = prices_pit[(prices_pit["date"] >= cutoff) & (prices_pit["date"] <= eval_str)][
+            ["sid", "date", "delivery_pct", "close"]
+        ].dropna(subset=["delivery_pct"])
+    else:
+        delivery = pd.DataFrame(columns=["sid", "date", "delivery_pct", "close"])
+
+    df = _compute_scores(stocks[["sid", "cap_tier"]], bulk, delivery)
+    if "smart_money_score" not in df.columns:
+        return pd.DataFrame(columns=["sid", "smart_money_score"])
+    return df[["sid", "smart_money_score"]].copy()
 
 
 def pit_earnings_yield(qi_pit, close_df):
@@ -2127,6 +2168,11 @@ def reconstruct_one_date(eval_date, raw, signals_to_run):
         bulk_pit = raw["bulk"][raw["bulk"]["deal_date"] <= eval_date.isoformat()]
         base = base.merge(pit_bulk_deal_signal(raw["stocks"], bulk_pit, px_pit, eval_date), on="sid", how="left")
 
+    # ── Plan 0005 Phase E: composite smart_money for full screener-input replay ──
+    if "smart_money" in signals_to_run and "bulk" in raw:
+        bulk_pit = raw["bulk"][raw["bulk"]["deal_date"] <= eval_date.isoformat()]
+        base = base.merge(pit_smart_money(raw["stocks"], bulk_pit, px_pit, eval_date), on="sid", how="left")
+
     # ── Tier 4: short_selling_signal (Jan 2024+ data) ──
     if "short_selling" in signals_to_run and "short" in raw:
         short_pit = raw["short"][raw["short"]["short_date"] <= eval_date.isoformat()]
@@ -2318,7 +2364,8 @@ def load_raw():
     except Exception:
         acs = pd.DataFrame()
     bulk = read_sql(
-        "SELECT sid, deal_date, quantity, price, buy_sell FROM bulk_deals ORDER BY sid, deal_date"
+        "SELECT sid, deal_date, quantity, price, buy_sell, client_name, symbol "
+        "FROM bulk_deals ORDER BY sid, deal_date"
     )
     short = read_sql(
         "SELECT sid, short_date, quantity FROM short_selling_data WHERE sid IS NOT NULL ORDER BY sid, short_date"
@@ -2415,13 +2462,21 @@ def main():
                                  "sga_to_revenue_change",
                                  "fcf_margin", "capex_to_dep",
                                  "goodwill_to_assets", "debt_structure",
-                                 "asset_tangibility"],
+                                 "asset_tangibility",
+                                 "smart_money"],
                         help="Compute only this signal (repeatable)")
+    parser.add_argument("--date", action="append", default=None,
+                        help="Explicit eval date (YYYY-MM-DD, repeatable). "
+                             "Overrides --months/--weeks/--cadence date generation.")
     parser.add_argument("--skip-existing", action="store_true",
                         help="Skip eval dates that already have a SUCCESS row in pit_reconstruction_log")
     args = parser.parse_args()
 
-    if args.cadence == "weekly":
+    if args.date:
+        from datetime import date as _date
+        eval_dates = [_date.fromisoformat(d) for d in args.date]
+        print(f"  Explicit dates · {len(eval_dates)}: {eval_dates}")
+    elif args.cadence == "weekly":
         eval_dates = generate_weekly_eval_dates(weeks_back=args.weeks)
         print(f"  Cadence: weekly · {len(eval_dates)} Friday eval dates · {eval_dates[0]} → {eval_dates[-1]}")
     else:
@@ -2456,6 +2511,9 @@ def main():
         "nwc_to_revenue", "sloan_accruals_full", "sga_to_revenue_change",
         "fcf_margin", "capex_to_dep", "goodwill_to_assets",
         "debt_structure", "asset_tangibility",
+        # Plan 0005 Phase E composite (smart_money — accruals/promoter/forensic
+        # composites flow through their existing _compute_scores)
+        "smart_money",
     }
     signals_to_run = set(args.signal) if args.signal else DEFAULT_SIGNALS
     signals_label = ",".join(sorted(signals_to_run))

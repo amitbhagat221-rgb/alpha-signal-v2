@@ -782,38 +782,45 @@ CHECKS = [
         """,
     },
     # Plan 0005 Phase F: cross-source price-target reconciliation.
-    # Currently we have ONE PT source (yfinance via analyst_consensus). Once
-    # moneycontrol broker recos populate at scale, this check fires when
-    # yfinance PT and the most-recent broker PT for the same SID differ by
-    # >15% — indicates source disagreement worth investigating. Today only
-    # 1 SID has broker data so this check returns 0 by construction; it's
-    # armed for when broker coverage expands.
+    # Compare yfinance consensus PT vs the *consensus of broker PTs* (mean of
+    # last-90d broker calls per stock). Single-broker PT vs yfinance consensus
+    # is apples-to-oranges and trips false positives — broker calls are by
+    # construction higher-variance than consensus. We only fire CRITICAL when
+    # the two CONSENSUSES diverge meaningfully (>30%), and only after we have
+    # ≥10 broker recos for the stock (so the broker mean is meaningful).
+    # 2026-05-25: scope tightened after first run flagged 57/213 stocks @ 15%
+    # threshold — most disagreements were stale single-broker calls, not real
+    # source divergence.
     {
         "code": "CROSS_SOURCE_PT_MISMATCH",
         "table": "analyst_consensus",
         "column": "price_target",
-        "message": "yfinance price_target and most-recent broker target_price differ by >15% for the same SID",
-        "critical_pct": 30,    # high pct = systemic source disagreement
-        "warn_pct": 5,
+        "message": "yfinance consensus PT and broker-mean PT differ by >30% (consensus-of-consensuses divergence, ≥10 broker recos)",
+        "critical_pct": 25,
+        "warn_pct": 10,
         "sql": """
-            WITH latest_broker AS (
-                SELECT sid, target_price AS broker_pt,
-                       ROW_NUMBER() OVER (PARTITION BY sid ORDER BY reco_date DESC) AS rn
+            WITH broker_mean AS (
+                SELECT sid,
+                       AVG(target_price) AS broker_pt,
+                       COUNT(*) AS n_recos
                 FROM broker_recommendations
                 WHERE target_price IS NOT NULL AND target_price > 0
+                  AND reco_date >= date('now', '-90 days')
+                GROUP BY sid
+                HAVING COUNT(*) >= 10
             )
             SELECT
-                SUM(CASE WHEN ABS(ac.price_target - lb.broker_pt) / ac.price_target > 0.15
+                SUM(CASE WHEN ABS(ac.price_target - bm.broker_pt) / ac.price_target > 0.30
                          THEN 1 ELSE 0 END) AS n_bad,
                 COUNT(*) AS n_total,
-                (SELECT ac2.sid || ': yf=' || ROUND(ac2.price_target,1) || ' vs broker=' || ROUND(lb2.broker_pt,1)
+                (SELECT ac2.sid || ': yf=' || ROUND(ac2.price_target,1) || ' vs broker_mean=' || ROUND(bm2.broker_pt,1) || ' (n=' || bm2.n_recos || ')'
                  FROM analyst_consensus ac2
-                 JOIN latest_broker lb2 ON lb2.sid = ac2.sid AND lb2.rn = 1
+                 JOIN broker_mean bm2 ON bm2.sid = ac2.sid
                  WHERE ac2.price_target IS NOT NULL AND ac2.price_target > 0
-                   AND ABS(ac2.price_target - lb2.broker_pt) / ac2.price_target > 0.15
-                 ORDER BY ABS(ac2.price_target - lb2.broker_pt) / ac2.price_target DESC LIMIT 1) AS sample
+                   AND ABS(ac2.price_target - bm2.broker_pt) / ac2.price_target > 0.30
+                 ORDER BY ABS(ac2.price_target - bm2.broker_pt) / ac2.price_target DESC LIMIT 1) AS sample
             FROM analyst_consensus ac
-            JOIN latest_broker lb ON lb.sid = ac.sid AND lb.rn = 1
+            JOIN broker_mean bm ON bm.sid = ac.sid
             WHERE ac.price_target IS NOT NULL AND ac.price_target > 0
         """,
     },

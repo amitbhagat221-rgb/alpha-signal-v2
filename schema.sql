@@ -14,7 +14,7 @@ CREATE TABLE IF NOT EXISTS stocks (
     name            TEXT NOT NULL,
     sector          TEXT,
     industry        TEXT,
-    cap_tier        TEXT CHECK(cap_tier IN ('LARGE', 'MID', 'SMALL')),
+    cap_tier        TEXT CHECK(cap_tier IN ('LARGE', 'MID', 'SMALL', 'MICRO')),
     market_cap_cr   REAL,
     adtv_6m_cr      REAL,
     in_nifty500     INTEGER DEFAULT 0,

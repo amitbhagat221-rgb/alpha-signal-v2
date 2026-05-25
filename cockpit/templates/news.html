@@ -2,219 +2,576 @@
 
 {% block content %}
 
-<div style="max-width: 780px; margin: 0 auto;">
+{# ─────────────────────────────────────────────────────────────
+   /news — flagship feed
+   - Sticky toolbar (search · sort · time · sentiment · confidence · tier)
+   - Topic top-tabs (Inshorts-style)
+   - Hero card (top story) + magazine grid (24/page)
+   - Keyboard: j/k = step, →/Enter = open, ← = close, / = focus search
+   - Saved articles in localStorage (★ on each card)
+   ───────────────────────────────────────────────────────────── #}
 
-<div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px; gap: 12px; flex-wrap: wrap;">
+<div class="news-shell"
+     x-data="newsFeed()"
+     x-init="init()"
+     @keydown.window="onKey($event)">
+
+<!-- ────────── Header ────────── -->
+<header class="news-header">
     <div>
-        <div class="section-title">News</div>
-        <div class="section-desc" style="margin-bottom: 0;">
-            Daily feed — {{ feed.total }} stories from last 7 days · {{ feed.n_enriched }} LLM-enriched.
-            Each card: what happened · why it matters · key numbers. Tap to expand.
+        <div class="news-h1">News</div>
+        <div class="news-sub">
+            <span class="mono">{{ feed.total_pool }}</span> stories in window ·
+            <span class="mono">{{ feed.n_enriched }}</span> LLM-enriched ·
+            showing <span class="mono">{{ feed.total }}</span> match{% if feed.total != 1 %}es{% endif %} on page <span class="mono">{{ feed.page }}/{{ feed.total_pages }}</span>
         </div>
     </div>
-    <div style="display: flex; gap: 14px; align-items: baseline; padding-top: 4px;">
-        <span style="font-size: 11px; color: var(--text-muted);">T1 <strong style="color: var(--green);">{{ feed.tier_counts[1] }}</strong></span>
-        <span style="font-size: 11px; color: var(--text-muted);">T2 <strong style="color: #4d8eff;">{{ feed.tier_counts[2] }}</strong></span>
-        <span style="font-size: 11px; color: var(--text-muted);">T3 <strong style="color: var(--text-muted);">{{ feed.tier_counts[3] }}</strong></span>
+    <div class="news-tier-legend">
+        <span>T1 <strong style="color:var(--green)">{{ feed.tier_counts[1] }}</strong></span>
+        <span>T2 <strong style="color:#4d8eff">{{ feed.tier_counts[2] }}</strong></span>
+        <span>T3 <strong style="color:var(--text-muted)">{{ feed.tier_counts[3] }}</strong></span>
+        <span class="news-saved-pill" @click="showSaved = !showSaved" title="Saved articles">
+            ★ <span x-text="savedCount"></span>
+        </span>
     </div>
-</div>
+</header>
 
-{# ────────── Daily brief — shown only on the "All" tab (no topic filter) ────────── #}
-{% if brief and brief.big_one and not topic %}
-<div class="card" style="margin-bottom: 18px; padding: 18px 22px; background: var(--bg-card); border-left: 4px solid var(--accent);">
-    <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 10px;">
-        <div style="font-size: 11px; color: var(--accent); font-weight: 700; letter-spacing: 1px; text-transform: uppercase;">Today's brief · {{ brief.brief_date }}</div>
-        <div style="font-size: 10px; color: var(--text-muted);">{{ brief.n_articles_used }} stories synthesized</div>
+{# ────────── Daily brief (only on the unfiltered All view) ────────── #}
+{% set is_unfiltered = not (topic or q or active_sentiment or active_confidence or active_tier) %}
+{% if brief and brief.big_one and is_unfiltered and active_page == 1 %}
+<div class="brief-card">
+    <div class="brief-meta">
+        <div class="brief-stamp">Today's brief · {{ brief.brief_date }}</div>
+        <div class="brief-count">{{ brief.n_articles_used }} stories synthesized</div>
     </div>
-
-    <div style="margin-bottom: 14px;">
-        <div style="font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 5px;">The Big One</div>
-        <div style="font-size: 14px; color: var(--text-primary); line-height: 1.55;">{{ brief.big_one }}</div>
+    <div class="brief-row">
+        <div class="brief-label">The Big One</div>
+        <div class="brief-big">{{ brief.big_one }}</div>
     </div>
-
     {% if brief.five_fast %}
-    <div style="margin-bottom: 14px;">
-        <div style="font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 5px;">Five Fast</div>
-        <ol style="margin: 0; padding-left: 22px; color: var(--text-secondary); font-size: 12px; line-height: 1.55;">
-            {% for item in brief.five_fast %}
-            <li style="margin-bottom: 4px;">{{ item }}</li>
-            {% endfor %}
+    <div class="brief-row">
+        <div class="brief-label">Five Fast</div>
+        <ol class="brief-list">
+            {% for item in brief.five_fast %}<li>{{ item }}</li>{% endfor %}
         </ol>
     </div>
     {% endif %}
-
     {% if brief.one_to_watch %}
-    <div style="margin-bottom: 14px;">
-        <div style="font-size: 10px; color: #9b59b6; text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 5px;">One to Watch</div>
-        <div style="font-size: 12px; color: var(--text-primary); line-height: 1.55;">{{ brief.one_to_watch }}</div>
+    <div class="brief-row">
+        <div class="brief-label" style="color:#9b59b6;">One to Watch</div>
+        <div class="brief-body">{{ brief.one_to_watch }}</div>
     </div>
     {% endif %}
-
     {% if brief.zoom_out %}
-    <div>
-        <div style="font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 5px;">Zoom Out</div>
-        <div style="font-size: 12px; color: var(--text-secondary); line-height: 1.55; font-style: italic;">{{ brief.zoom_out }}</div>
+    <div class="brief-row">
+        <div class="brief-label">Zoom Out</div>
+        <div class="brief-body" style="font-style:italic;">{{ brief.zoom_out }}</div>
     </div>
     {% endif %}
 </div>
 {% endif %}
 
-<!-- Top-tab navigation by topic (Inshorts-style) -->
-<div class="news-tabs">
-    <a href="/news{% if active_tier %}?tier={{ active_tier }}{% endif %}" class="news-tab {% if not topic %}active{% endif %}">All <span class="ct">{{ feed.total }}</span></a>
-    {% for tid, label, color in feed.topics %}
-    {% set n = feed.topic_counts.get(tid, 0) %}
-    {% if n > 0 or topic == tid %}
-    <a href="/news?topic={{ tid }}{% if active_tier %}&tier={{ active_tier }}{% endif %}"
-       class="news-tab {% if topic == tid %}active{% endif %}"
-       style="{% if topic == tid %}background: {{ color }}; border-color: {{ color }}; color: white;{% else %}border-left: 3px solid {{ color }};{% endif %}">
-        {{ label }} <span class="ct">{{ n }}</span>
+<!-- ────────── Topic tabs ────────── -->
+<nav class="news-tabs">
+    <a href="{{ url_keep('topic', '') }}" class="news-tab {% if not topic %}active{% endif %}">
+        All <span class="ct">{{ feed.total_pool }}</span>
     </a>
-    {% endif %}
+    {% for tid, label, color in feed.topics %}
+        {% set n = feed.topic_counts.get(tid, 0) %}
+        {% if n > 0 or topic == tid %}
+        <a href="{{ url_keep('topic', tid) }}"
+           class="news-tab {% if topic == tid %}active{% endif %}"
+           style="{% if topic == tid %}background:{{ color }};border-color:{{ color }};color:#fff;{% else %}border-left:3px solid {{ color }};{% endif %}">
+            {{ label }} <span class="ct">{{ n }}</span>
+        </a>
+        {% endif %}
     {% endfor %}
-</div>
+</nav>
 
-<!-- Secondary filters -->
-<div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center; padding: 12px 0 16px; border-bottom: 1px solid var(--border);">
-    <span style="font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Source tier</span>
-    <a href="/news{% if topic %}?topic={{ topic }}{% endif %}" class="news-chip {% if not active_tier %}active{% endif %}">All</a>
-    <a href="/news?tier=1{% if topic %}&topic={{ topic }}{% endif %}" class="news-chip {% if active_tier == 1 %}active{% endif %}">T1</a>
-    <a href="/news?tier=2{% if topic %}&topic={{ topic }}{% endif %}" class="news-chip {% if active_tier == 2 %}active{% endif %}">T2</a>
-    <a href="/news?tier=3{% if topic %}&topic={{ topic }}{% endif %}" class="news-chip {% if active_tier == 3 %}active{% endif %}">T3</a>
-    <span style="flex: 1;"></span>
-    <form action="/news" method="get" style="display: flex; gap: 6px;">
-        {% if topic %}<input type="hidden" name="topic" value="{{ topic }}">{% endif %}
-        {% if active_tier %}<input type="hidden" name="tier" value="{{ active_tier }}">{% endif %}
-        <input type="text" name="q" placeholder="keyword search…"
-            style="background: var(--bg-card); color: var(--text-primary); border: 1px solid var(--border); border-radius: 6px; padding: 5px 10px; font-size: 12px; min-width: 180px;">
-    </form>
-</div>
+<!-- ────────── Sticky toolbar ────────── -->
+<form method="get" action="/news" class="news-toolbar" id="newsToolbar">
+    {# Persist topic + tier in hidden inputs so submitting search keeps filters #}
+    {% if topic %}<input type="hidden" name="topic" value="{{ topic }}">{% endif %}
+    {% if active_tier %}<input type="hidden" name="tier" value="{{ active_tier }}">{% endif %}
+    {% if active_sentiment %}<input type="hidden" name="sentiment" value="{{ active_sentiment }}">{% endif %}
+    {% if active_confidence %}<input type="hidden" name="confidence" value="{{ active_confidence }}">{% endif %}
 
-<!-- Cards -->
-{% if feed.cards %}
-{% for card in feed.cards %}
-{% set tier_color = '#2ecc71' if card.source_tier == 1 else ('#4d8eff' if card.source_tier == 2 else 'var(--text-muted)') %}
-{% set sent_color = '#2ecc71' if card.sentiment == 'bullish' else ('#e74c3c' if card.sentiment == 'bearish' else 'var(--text-muted)') %}
-<article x-data="{ open: false }" class="news-card" style="border-bottom: 1px solid var(--border); padding: 20px 0; cursor: pointer;" @click="open = !open">
-    <!-- Meta row: topic badge + source + age + confidence + sentiment -->
-    <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px;">
-        {% if card.topic_label %}
-        <span style="display: inline-block; padding: 2px 8px; border-radius: 10px; background: {{ card.topic_color }}; color: white; font-size: 10px; font-weight: 700; letter-spacing: 0.3px; text-transform: uppercase;">{{ card.topic_label }}</span>
-        {% endif %}
-        <span style="display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: {{ tier_color }};" title="Tier {{ card.source_tier }}"></span>
-        <span style="font-size: 11px; color: {{ tier_color }}; font-weight: 600;">{{ card.source_label }}</span>
-        <span style="font-size: 11px; color: var(--text-muted);">·</span>
-        <span style="font-size: 11px; color: var(--text-muted);">{{ card.age_label }}</span>
-        {% if card.sentiment and card.sentiment != 'neutral' %}
-        <span style="font-size: 10px; color: {{ sent_color }}; font-weight: 700;">·</span>
-        <span style="font-size: 10px; color: {{ sent_color }}; font-weight: 700; text-transform: uppercase;">{{ card.sentiment }}</span>
-        {% endif %}
-        {% if card.confidence == 'low' %}
-        <span style="font-size: 10px; color: var(--amber); margin-left: auto;" title="Low confidence per source">⚠ low confidence</span>
-        {% endif %}
+    <div class="tb-left">
+        <div class="tb-search">
+            <input type="text" name="q" id="newsSearch" value="{{ q }}"
+                   placeholder="Search headlines, summaries, insights…  (press /)"
+                   autocomplete="off"
+                   @keydown.enter="$el.form.submit()">
+            {% if q %}
+            <a href="{{ url_keep('q', '') }}" class="tb-search-clear" title="Clear">✕</a>
+            {% endif %}
+        </div>
     </div>
 
-    <!-- Headline -->
-    <h3 style="font-size: 16px; font-weight: 700; color: var(--text-primary); line-height: 1.35; margin: 0 0 8px;">{{ card.headline }}</h3>
+    <div class="tb-right">
+        <label class="tb-select" title="Sort">
+            <span class="tb-sel-label">Sort</span>
+            <select name="sort" onchange="this.form.submit()">
+                <option value="smart"   {% if active_sort=='smart' %}selected{% endif %}>Smart (tier × recency)</option>
+                <option value="recent"  {% if active_sort=='recent' %}selected{% endif %}>Most recent</option>
+                <option value="trust"   {% if active_sort=='trust' %}selected{% endif %}>Most trusted source</option>
+                <option value="numbers" {% if active_sort=='numbers' %}selected{% endif %}>Most key numbers</option>
+            </select>
+        </label>
 
-    <!-- Compact view: one-liner or raw summary -->
-    {% set preview = card.one_liner if card.one_liner else card.summary[:180] %}
-    <p style="font-size: 13px; color: var(--text-secondary); line-height: 1.55; margin: 0;" x-show="!open">
-        {{ preview }}{% if preview|length >= 178 and not card.one_liner %}…{% endif %}
-    </p>
+        <div class="tb-group" title="Time window">
+            {% for h, lbl in [(24,'24h'),(72,'3d'),(168,'7d'),(720,'30d')] %}
+            <a href="{{ url_keep('hours', h) }}" class="tb-chip {% if active_hours == h %}active{% endif %}">{{ lbl }}</a>
+            {% endfor %}
+        </div>
+    </div>
+</form>
 
-    <!-- Expanded: structured fields -->
-    <div x-show="open" x-cloak style="margin-top: 4px;">
-        {% if card.one_liner %}
-        <p style="font-size: 13px; color: var(--text-primary); line-height: 1.6; margin: 0 0 10px; font-weight: 500;">{{ card.one_liner }}</p>
+<!-- ────────── Secondary filter row ────────── -->
+<div class="news-filters">
+    <div class="filt-group">
+        <span class="filt-label">Sentiment</span>
+        {% set sentcounts = feed.sentiment_counts %}
+        <a href="{{ url_keep('sentiment','') }}" class="news-chip {% if not active_sentiment %}active{% endif %}">All</a>
+        <a href="{{ url_keep('sentiment','bullish') }}" class="news-chip sent-bullish {% if active_sentiment=='bullish' %}active{% endif %}">▲ Bullish <span class="ct">{{ sentcounts.bullish }}</span></a>
+        <a href="{{ url_keep('sentiment','bearish') }}" class="news-chip sent-bearish {% if active_sentiment=='bearish' %}active{% endif %}">▼ Bearish <span class="ct">{{ sentcounts.bearish }}</span></a>
+        <a href="{{ url_keep('sentiment','neutral') }}" class="news-chip {% if active_sentiment=='neutral' %}active{% endif %}">◆ Neutral <span class="ct">{{ sentcounts.neutral }}</span></a>
+    </div>
+
+    <div class="filt-group">
+        <span class="filt-label">Source tier</span>
+        <a href="{{ url_keep('tier','') }}" class="news-chip {% if not active_tier %}active{% endif %}">All</a>
+        <a href="{{ url_keep('tier',1) }}" class="news-chip tier-1 {% if active_tier==1 %}active{% endif %}">T1</a>
+        <a href="{{ url_keep('tier',2) }}" class="news-chip tier-2 {% if active_tier==2 %}active{% endif %}">T2</a>
+        <a href="{{ url_keep('tier',3) }}" class="news-chip tier-3 {% if active_tier==3 %}active{% endif %}">T3</a>
+    </div>
+
+    <div class="filt-group">
+        <span class="filt-label">Confidence</span>
+        <a href="{{ url_keep('confidence','') }}" class="news-chip {% if not active_confidence %}active{% endif %}">All</a>
+        <a href="{{ url_keep('confidence','medium') }}" class="news-chip {% if active_confidence=='medium' %}active{% endif %}">Med+</a>
+        <a href="{{ url_keep('confidence','high') }}" class="news-chip {% if active_confidence=='high' %}active{% endif %}">High only</a>
+    </div>
+
+    {% if topic or q or active_sentiment or active_confidence or active_tier or active_hours != 168 or active_sort != 'smart' %}
+    <a href="/news" class="filt-reset">Reset filters</a>
+    {% endif %}
+</div>
+
+<!-- ────────── Cards ────────── -->
+{% if feed.cards %}
+
+{% set hero = feed.cards[0] %}
+{% set rest = feed.cards[1:] %}
+
+{# ────── Hero card ────── #}
+{% set hero_color = hero.topic_color or '#666' %}
+<article class="hero-card"
+         id="card-{{ hero.id }}"
+         :class="{ 'is-saved': saved.has('{{ hero.id }}') }"
+         x-data="{ open: false }"
+         data-idx="0"
+         data-card-id="{{ hero.id }}"
+         data-card-title="{{ hero.headline|e }}"
+         @click="open = !open">
+    <div class="hero-imgwrap" style="background: linear-gradient(135deg, {{ hero_color }} 0%, rgba(0,0,0,0.6) 90%);">
+        {% if hero.image_url %}<img src="{{ hero.image_url }}" loading="lazy" alt="">{% endif %}
+        <div class="hero-imgmask"></div>
+        {% if hero.topic_label %}
+        <span class="hero-topic" style="background:{{ hero_color }};">{{ hero.topic_label }}</span>
         {% endif %}
-
-        {% if card.why_it_matters and card.why_it_matters != 'Not market-relevant' %}
-        <div style="margin: 12px 0; padding: 10px 14px; background: var(--bg-card); border-left: 3px solid var(--accent); border-radius: 4px;">
-            <div style="font-size: 9px; color: var(--accent); text-transform: uppercase; letter-spacing: 0.8px; font-weight: 700; margin-bottom: 4px;">Why it matters</div>
-            <div style="font-size: 12px; color: var(--text-primary); line-height: 1.55;">{{ card.why_it_matters }}</div>
+        {% if hero.sentiment and hero.sentiment != 'neutral' %}
+        <span class="hero-sent sent-{{ hero.sentiment }}">{{ '▲ Bullish' if hero.sentiment=='bullish' else '▼ Bearish' }}</span>
+        {% endif %}
+    </div>
+    <div class="hero-body">
+        <div class="hero-meta">
+            <span class="src-dot" style="background:{{ '#2ecc71' if hero.source_tier==1 else ('#4d8eff' if hero.source_tier==2 else '#666') }};"></span>
+            <span class="src-label">{{ hero.source_label }}</span>
+            <span class="sep">·</span>
+            <span class="age">{{ hero.age_label }}</span>
+            {% if hero.confidence == 'low' %}<span class="conf-warn">⚠ low confidence</span>{% endif %}
+            <span class="hero-save" @click.stop="toggleSave('{{ hero.id }}')" :class="{ 'is-on': saved.has('{{ hero.id }}') }" title="Save">★</span>
+        </div>
+        <h1 class="hero-headline">{{ hero.headline }}</h1>
+        {% if hero.one_liner %}
+        <p class="hero-oneliner">{{ hero.one_liner }}</p>
+        {% endif %}
+        {% if hero.key_numbers %}
+        <div class="kn-row">
+            {% for kn in hero.key_numbers %}
+            <div class="kn-chip"><div class="kn-label">{{ kn.label }}</div><div class="kn-value mono">{{ kn.value }}</div></div>
+            {% endfor %}
         </div>
         {% endif %}
-
-        {% if card.key_numbers and card.key_numbers|length > 0 %}
-        <div style="margin: 10px 0; display: flex; gap: 10px; flex-wrap: wrap;">
-            {% for kn in card.key_numbers %}
-            <div style="padding: 6px 10px; background: var(--bg-card); border: 1px solid var(--border); border-radius: 6px;">
-                <div style="font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">{{ kn.label }}</div>
-                <div class="mono" style="font-size: 13px; color: var(--text-primary); font-weight: 700;">{{ kn.value }}</div>
+        <div x-show="open" x-cloak class="hero-expanded">
+            {% if hero.why_it_matters and hero.why_it_matters != 'Not market-relevant' %}
+            <div class="why-block">
+                <div class="why-label">Why it matters</div>
+                <div>{{ hero.why_it_matters }}</div>
             </div>
+            {% endif %}
+            {% if hero.what_to_watch %}
+            <div class="wtw-block">
+                <div class="wtw-label">What to watch</div>
+                <div>{{ hero.what_to_watch }}</div>
+            </div>
+            {% endif %}
+            {% if hero.summary and hero.summary != hero.one_liner %}
+            <details class="src-summary"><summary>Source summary</summary><p>{{ hero.summary }}</p></details>
+            {% endif %}
+        </div>
+        {% if hero.source_url %}
+        <a href="{{ hero.source_url }}" target="_blank" rel="noopener" @click.stop class="src-link">Read source ↗</a>
+        {% endif %}
+    </div>
+</article>
+
+{# ────── Magazine grid ────── #}
+<div class="news-grid">
+{% for card in rest %}
+{% set idx = loop.index %}
+{% set tcolor = card.topic_color or '#555570' %}
+{% set tier_color = '#2ecc71' if card.source_tier==1 else ('#4d8eff' if card.source_tier==2 else '#888') %}
+<article class="news-card"
+         id="card-{{ card.id }}"
+         :class="{ 'is-saved': saved.has('{{ card.id }}'), 'is-active': activeIdx === {{ idx }} }"
+         x-data="{ open: false }"
+         data-idx="{{ idx }}"
+         data-card-id="{{ card.id }}"
+         data-card-title="{{ card.headline|e }}"
+         @click="open = !open; activeIdx = {{ idx }}"
+         style="--accent-color:{{ tcolor }};">
+    {# Topic accent stripe #}
+    <div class="card-stripe" style="background:{{ tcolor }};"></div>
+
+    <div class="card-body">
+        <div class="card-meta">
+            {% if card.topic_label %}
+            <span class="topic-pill" style="background:{{ tcolor }};">{{ card.topic_label }}</span>
+            {% endif %}
+            <span class="src-dot" style="background:{{ tier_color }};"></span>
+            <span class="src-label" style="color:{{ tier_color }};">{{ card.source_label }}</span>
+            <span class="sep">·</span>
+            <span class="age">{{ card.age_label }}</span>
+            {% if card.sentiment and card.sentiment != 'neutral' %}
+            <span class="sent-tag sent-{{ card.sentiment }}">{{ '▲' if card.sentiment=='bullish' else '▼' }}</span>
+            {% endif %}
+            <span class="card-save"
+                  @click.stop="toggleSave('{{ card.id }}')"
+                  :class="{ 'is-on': saved.has('{{ card.id }}') }"
+                  title="Save">★</span>
+        </div>
+
+        <h3 class="card-headline">{{ card.headline }}</h3>
+
+        <p class="card-preview" x-show="!open">
+            {{ card.one_liner if card.one_liner else (card.summary[:180] + ('…' if card.summary|length > 178 else '')) }}
+        </p>
+
+        {% if card.key_numbers %}
+        <div class="kn-row kn-row-compact" x-show="!open">
+            {% for kn in card.key_numbers[:3] %}
+            <span class="kn-mini mono">{{ kn.value }}</span>
             {% endfor %}
         </div>
         {% endif %}
 
-        {% if card.what_to_watch %}
-        <div style="margin: 12px 0; padding: 8px 12px; background: rgba(155,89,182,0.06); border-left: 3px solid #9b59b6; border-radius: 4px;">
-            <div style="font-size: 9px; color: #9b59b6; text-transform: uppercase; letter-spacing: 0.8px; font-weight: 700; margin-bottom: 3px;">What to watch</div>
-            <div style="font-size: 12px; color: var(--text-primary); line-height: 1.55;">{{ card.what_to_watch }}</div>
+        <div x-show="open" x-cloak class="card-expanded">
+            {% if card.one_liner %}
+            <p class="exp-oneliner">{{ card.one_liner }}</p>
+            {% endif %}
+            {% if card.key_numbers %}
+            <div class="kn-row">
+                {% for kn in card.key_numbers %}
+                <div class="kn-chip"><div class="kn-label">{{ kn.label }}</div><div class="kn-value mono">{{ kn.value }}</div></div>
+                {% endfor %}
+            </div>
+            {% endif %}
+            {% if card.why_it_matters and card.why_it_matters != 'Not market-relevant' %}
+            <div class="why-block"><div class="why-label">Why it matters</div><div>{{ card.why_it_matters }}</div></div>
+            {% endif %}
+            {% if card.what_to_watch %}
+            <div class="wtw-block"><div class="wtw-label">What to watch</div><div>{{ card.what_to_watch }}</div></div>
+            {% endif %}
+            {% if card.summary and card.summary != card.one_liner %}
+            <details class="src-summary"><summary>Source summary</summary><p>{{ card.summary }}</p></details>
+            {% endif %}
+            {% if card.source_url %}
+            <a href="{{ card.source_url }}" target="_blank" rel="noopener" @click.stop class="src-link">Read source ↗</a>
+            {% endif %}
+            {% if card.confidence == 'low' %}<div class="conf-warn-inline">⚠ Source flagged low confidence — verify before acting</div>{% endif %}
         </div>
-        {% endif %}
-
-        <!-- Raw summary as a small footnote (always show — trust builder) -->
-        {% if card.summary and card.summary != card.one_liner %}
-        <details style="margin: 10px 0;">
-            <summary style="font-size: 10px; color: var(--text-muted); cursor: pointer; outline: none;">Source summary</summary>
-            <p style="font-size: 11px; color: var(--text-muted); line-height: 1.55; margin: 6px 0;">{{ card.summary }}</p>
-        </details>
-        {% endif %}
-
-        {% if card.source_url %}
-        <a href="{{ card.source_url }}" target="_blank" rel="noopener" @click.stop=""
-           style="display: inline-block; font-size: 11px; color: var(--accent); text-decoration: none; padding: 5px 12px; border: 1px solid var(--accent); border-radius: 5px; font-weight: 600; margin-top: 4px;">
-            Read source ↗
-        </a>
-        {% endif %}
     </div>
 </article>
 {% endfor %}
+</div>
+
+{# ────── Pagination ────── #}
+{% if feed.total_pages > 1 %}
+<nav class="pager">
+    {% if feed.page > 1 %}
+    <a href="{{ url_keep('page', feed.page - 1) }}" class="pager-arrow">← Prev</a>
+    {% else %}
+    <span class="pager-arrow disabled">← Prev</span>
+    {% endif %}
+    <span class="pager-info">Page <strong>{{ feed.page }}</strong> of <strong>{{ feed.total_pages }}</strong> · <span class="mono">{{ feed.total_filtered }}</span> stories</span>
+    {% if feed.page < feed.total_pages %}
+    <a href="{{ url_keep('page', feed.page + 1) }}" class="pager-arrow">Next →</a>
+    {% else %}
+    <span class="pager-arrow disabled">Next →</span>
+    {% endif %}
+</nav>
+{% endif %}
 
 {% else %}
-<div style="padding: 60px 20px; text-align: center; color: var(--text-muted);">
-    <div style="font-size: 36px; margin-bottom: 8px;">∅</div>
-    <div>No stories matching your filters in the last 7 days.</div>
+<div class="news-empty">
+    <div class="empty-glyph">∅</div>
+    <div class="empty-title">No stories match these filters in the last {{ active_hours }}h.</div>
+    <div class="empty-hint">Try widening the time window, clearing a filter, or <a href="/news">reset everything</a>.</div>
 </div>
 {% endif %}
 
+<!-- ────────── Saved-articles drawer ────────── -->
+<div class="saved-drawer" x-show="showSaved" x-cloak @click.outside="showSaved = false">
+    <div class="saved-head">
+        <strong>Saved articles</strong>
+        <span style="margin-left:auto;font-size:11px;color:var(--text-muted);" @click="clearSaved()">Clear all</span>
+        <span class="saved-close" @click="showSaved = false">✕</span>
+    </div>
+    <div class="saved-list" x-show="savedCount > 0">
+        <template x-for="id in [...saved]" :key="id">
+            <div class="saved-row">
+                <a :href="'#card-' + id" @click="showSaved=false" x-text="savedTitles.get(id) || id"></a>
+            </div>
+        </template>
+    </div>
+    <div class="saved-empty" x-show="savedCount === 0">No saved articles yet. Tap ★ on any card.</div>
 </div>
 
-<style>
-.news-tabs {
-    display: flex; gap: 6px; flex-wrap: wrap; align-items: center;
-    padding: 12px 0 0; border-bottom: 1px solid var(--border);
-    margin-bottom: 4px;
-}
-.news-tab {
-    display: inline-flex; align-items: center; gap: 6px;
-    padding: 6px 12px; border: 1px solid var(--border); border-radius: 16px;
-    font-size: 12px; font-weight: 600; color: var(--text-secondary);
-    text-decoration: none; transition: all 0.1s; white-space: nowrap;
-}
-.news-tab:hover { color: var(--text-primary); border-color: var(--text-primary); }
-.news-tab.active { background: var(--accent); color: white; border-color: var(--accent); }
-.news-tab .ct {
-    font-size: 10px; padding: 1px 6px; border-radius: 8px;
-    background: rgba(255,255,255,0.1); font-weight: 700;
-}
-.news-tab.active .ct { background: rgba(0,0,0,0.2); }
+</div>
 
-.news-chip {
-    display: inline-block;
-    padding: 4px 10px;
-    border: 1px solid var(--border);
-    border-radius: 14px;
-    font-size: 11px;
-    font-weight: 600;
-    color: var(--text-secondary);
-    text-decoration: none;
-    transition: all 0.1s;
-}
+<!-- ────────── Styles ────────── -->
+<style>
+.news-shell { max-width: 1180px; margin: 0 auto; }
+.news-header { display:flex; justify-content:space-between; align-items:flex-start; gap:16px; margin-bottom:14px; flex-wrap:wrap; }
+.news-h1 { font-size: 22px; font-weight: 800; color: var(--text-primary); letter-spacing:-0.3px; }
+.news-sub { font-size: 12px; color: var(--text-muted); margin-top: 4px; }
+.news-tier-legend { display:flex; gap:14px; align-items:center; font-size:11px; color: var(--text-muted); padding-top:4px; }
+.news-saved-pill { padding:4px 10px; border:1px solid var(--border); border-radius:14px; cursor:pointer; font-weight:700; color: #f1c40f; user-select:none; }
+.news-saved-pill:hover { border-color: #f1c40f; }
+
+/* Brief */
+.brief-card { padding: 18px 22px; background: var(--bg-card); border-left: 4px solid var(--accent); border-radius: 6px; margin-bottom: 18px; }
+.brief-meta { display:flex; justify-content:space-between; align-items:baseline; margin-bottom:10px; }
+.brief-stamp { font-size:11px; color: var(--accent); font-weight:700; letter-spacing:1px; text-transform:uppercase; }
+.brief-count { font-size:10px; color: var(--text-muted); }
+.brief-row { margin-bottom: 12px; }
+.brief-label { font-size:10px; color: var(--text-muted); text-transform:uppercase; letter-spacing:0.8px; margin-bottom:5px; font-weight:700; }
+.brief-big { font-size:14px; color: var(--text-primary); line-height:1.55; }
+.brief-list { margin:0; padding-left:22px; color: var(--text-secondary); font-size:12px; line-height:1.6; }
+.brief-list li { margin-bottom:4px; }
+.brief-body { font-size:12px; color: var(--text-primary); line-height:1.55; }
+
+/* Topic tabs */
+.news-tabs { display:flex; gap:6px; flex-wrap:wrap; padding: 10px 0 0; border-bottom:1px solid var(--border); margin-bottom:0; }
+.news-tab { display:inline-flex; align-items:center; gap:6px; padding:6px 12px; border:1px solid var(--border); border-radius:16px; font-size:12px; font-weight:600; color:var(--text-secondary); text-decoration:none; transition:all 0.12s; white-space:nowrap; }
+.news-tab:hover { color:var(--text-primary); border-color:var(--text-primary); }
+.news-tab.active { color:#fff; border-color: var(--accent); }
+.news-tab .ct { font-size:10px; padding:1px 6px; border-radius:8px; background:rgba(255,255,255,0.1); font-weight:700; }
+.news-tab.active .ct { background:rgba(0,0,0,0.25); }
+
+/* Sticky toolbar */
+.news-toolbar { position:sticky; top:0; z-index:30; background: var(--bg-body); padding: 12px 0 10px; border-bottom: 1px solid var(--border); display:flex; gap:14px; align-items:center; flex-wrap:wrap; }
+.tb-left { flex: 1 1 320px; }
+.tb-search { position:relative; }
+.tb-search input { width:100%; background: var(--bg-card); color: var(--text-primary); border: 1px solid var(--border); border-radius:8px; padding: 8px 36px 8px 12px; font-size:13px; }
+.tb-search input:focus { outline:none; border-color: var(--accent); box-shadow: 0 0 0 2px rgba(139,92,246,0.2); }
+.tb-search-clear { position:absolute; right:8px; top:6px; padding: 2px 8px; color: var(--text-muted); font-size:14px; cursor:pointer; text-decoration:none; }
+.tb-right { display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+.tb-select { display:inline-flex; align-items:center; gap:6px; font-size:11px; color: var(--text-muted); text-transform:uppercase; letter-spacing:0.5px; }
+.tb-select select { background: var(--bg-card); color: var(--text-primary); border:1px solid var(--border); border-radius:6px; padding: 5px 10px; font-size:12px; cursor:pointer; }
+.tb-select select:focus { outline:none; border-color: var(--accent); }
+.tb-group { display:inline-flex; gap:4px; }
+.tb-chip { padding: 4px 10px; border:1px solid var(--border); border-radius:6px; font-size:11px; font-weight:600; color:var(--text-secondary); text-decoration:none; }
+.tb-chip:hover { color: var(--text-primary); border-color: var(--text-primary); }
+.tb-chip.active { background: var(--accent); border-color: var(--accent); color:#fff; }
+
+/* Secondary filters */
+.news-filters { display:flex; gap:18px; align-items:center; flex-wrap:wrap; padding: 12px 0 14px; border-bottom: 1px solid var(--border); margin-bottom: 18px; }
+.filt-group { display:inline-flex; align-items:center; gap:6px; flex-wrap:wrap; }
+.filt-label { font-size:10px; color: var(--text-muted); text-transform:uppercase; letter-spacing:0.5px; margin-right:4px; }
+.filt-reset { margin-left:auto; font-size:11px; color: var(--accent); text-decoration:none; padding: 4px 10px; border:1px solid var(--accent); border-radius:6px; }
+.filt-reset:hover { background: var(--accent); color:#fff; }
+.news-chip { display:inline-flex; align-items:center; gap:5px; padding: 4px 10px; border:1px solid var(--border); border-radius:14px; font-size:11px; font-weight:600; color: var(--text-secondary); text-decoration:none; }
 .news-chip:hover { border-color: var(--accent); color: var(--accent); }
-.news-chip.active { background: var(--accent); color: white; border-color: var(--accent); }
-.news-card:hover h3 { color: var(--accent); }
+.news-chip.active { background: var(--accent); border-color: var(--accent); color:#fff; }
+.news-chip .ct { font-size:9px; padding:1px 5px; border-radius:6px; background: rgba(255,255,255,0.08); font-weight:700; }
+.news-chip.sent-bullish.active { background:#27ae60; border-color:#27ae60; }
+.news-chip.sent-bearish.active { background:#c0392b; border-color:#c0392b; }
+.news-chip.tier-1.active { background:#2ecc71; border-color:#2ecc71; }
+.news-chip.tier-2.active { background:#4d8eff; border-color:#4d8eff; }
+
+/* Hero card */
+.hero-card { display:grid; grid-template-columns: 1.1fr 1fr; gap:0; background: var(--bg-card); border:1px solid var(--border); border-radius:10px; overflow:hidden; cursor:pointer; margin-bottom: 22px; transition: border-color 0.15s; }
+.hero-card:hover { border-color: var(--accent); }
+.hero-card.is-saved { box-shadow: inset 3px 0 0 #f1c40f; }
+.hero-imgwrap { position:relative; min-height: 220px; }
+.hero-imgwrap img { width:100%; height:100%; object-fit:cover; }
+.hero-imgmask { position:absolute; inset:0; background: linear-gradient(180deg, transparent 50%, rgba(0,0,0,0.55) 100%); }
+.hero-topic { position:absolute; top:14px; left:14px; padding: 4px 12px; border-radius: 12px; color:#fff; font-size: 11px; font-weight: 800; letter-spacing: 0.5px; text-transform: uppercase; }
+.hero-sent { position:absolute; top:14px; right:14px; padding: 4px 10px; border-radius:12px; font-size:11px; font-weight:800; }
+.hero-sent.sent-bullish { background: rgba(46,204,113,0.95); color:#fff; }
+.hero-sent.sent-bearish { background: rgba(231,76,60,0.95); color:#fff; }
+.hero-body { padding: 20px 24px; display:flex; flex-direction:column; gap:10px; }
+.hero-meta { display:flex; align-items:center; gap:8px; font-size:11px; color: var(--text-muted); }
+.hero-headline { font-size: 22px; font-weight: 800; color: var(--text-primary); line-height: 1.25; margin: 0; letter-spacing:-0.3px; }
+.hero-oneliner { font-size: 14px; color: var(--text-secondary); line-height: 1.55; margin: 0; }
+.hero-save { margin-left:auto; cursor:pointer; padding: 2px 8px; color: var(--text-muted); font-size:14px; user-select:none; }
+.hero-save:hover, .hero-save.is-on { color: #f1c40f; }
+.hero-expanded { padding-top:8px; }
+
+/* Magazine grid */
+.news-grid { display:grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+@media (max-width: 820px) { .news-grid { grid-template-columns: 1fr; } .hero-card { grid-template-columns: 1fr; } .hero-imgwrap { min-height: 160px; } }
+
+.news-card { position:relative; display:flex; background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; overflow:hidden; cursor:pointer; transition: all 0.12s; }
+.news-card:hover { border-color: var(--accent-color); transform: translateY(-1px); }
+.news-card.is-saved { box-shadow: inset 3px 0 0 #f1c40f; }
+.news-card.is-active { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(139,92,246,0.25); }
+.card-stripe { width: 4px; flex-shrink:0; }
+.card-body { flex:1; padding: 14px 16px; min-width:0; }
+.card-meta { display:flex; align-items:center; gap:7px; flex-wrap:wrap; margin-bottom:6px; font-size:11px; color: var(--text-muted); }
+.topic-pill { padding: 2px 8px; border-radius: 10px; color:#fff; font-size: 9px; font-weight: 800; letter-spacing: 0.3px; text-transform: uppercase; }
+.src-dot { display:inline-block; width:6px; height:6px; border-radius:50%; }
+.src-label { font-weight:600; }
+.sep { color: var(--text-muted); }
+.sent-tag { padding:1px 6px; border-radius:4px; font-size:10px; font-weight:800; }
+.sent-tag.sent-bullish { background: rgba(46,204,113,0.15); color: #2ecc71; }
+.sent-tag.sent-bearish { background: rgba(231,76,60,0.15); color: #e74c3c; }
+.conf-warn { color: var(--amber); font-size:10px; margin-left:auto; }
+.conf-warn-inline { color: var(--amber); font-size:11px; margin-top: 10px; padding: 6px 10px; background: rgba(245,158,11,0.07); border-radius:4px; }
+.card-save { margin-left:auto; cursor:pointer; padding: 0 6px; color: var(--text-muted); font-size:13px; user-select:none; }
+.card-save:hover, .card-save.is-on { color: #f1c40f; }
+.card-headline { font-size: 15px; font-weight: 700; color: var(--text-primary); line-height: 1.35; margin: 0 0 8px; }
+.card-preview { font-size: 12.5px; color: var(--text-secondary); line-height: 1.55; margin: 0; }
+
+.kn-row { display:flex; gap: 8px; flex-wrap:wrap; margin: 10px 0 4px; }
+.kn-row-compact { margin: 8px 0 0; gap:6px; }
+.kn-chip { padding: 5px 9px; background: var(--bg-body); border:1px solid var(--border); border-radius: 6px; }
+.kn-label { font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing:0.4px; }
+.kn-value { font-size: 12px; color: var(--text-primary); font-weight: 700; }
+.kn-mini { padding: 2px 7px; background: var(--bg-body); border:1px solid var(--border); border-radius:4px; font-size:11px; font-weight:700; color: var(--text-primary); }
+
+.card-expanded, .hero-expanded { animation: slideDown 0.18s ease-out; }
+@keyframes slideDown { from { opacity:0; transform: translateY(-4px); } to { opacity:1; transform:translateY(0); } }
+
+.exp-oneliner { font-size: 13px; color: var(--text-primary); line-height: 1.55; margin: 0 0 10px; font-weight: 500; }
+.why-block { margin: 10px 0; padding: 10px 12px; background: var(--bg-body); border-left: 3px solid var(--accent); border-radius: 4px; }
+.why-label { font-size:9px; color: var(--accent); text-transform: uppercase; letter-spacing:0.8px; font-weight:700; margin-bottom:4px; }
+.why-block > div:last-child { font-size:12px; color: var(--text-primary); line-height: 1.55; }
+.wtw-block { margin: 10px 0; padding: 8px 12px; background: rgba(155,89,182,0.06); border-left: 3px solid #9b59b6; border-radius: 4px; }
+.wtw-label { font-size:9px; color: #9b59b6; text-transform: uppercase; letter-spacing:0.8px; font-weight:700; margin-bottom:3px; }
+.wtw-block > div:last-child { font-size:12px; color: var(--text-primary); line-height: 1.55; }
+.src-summary { margin: 10px 0; }
+.src-summary summary { font-size:10px; color: var(--text-muted); cursor:pointer; outline:none; }
+.src-summary p { font-size:11px; color: var(--text-muted); line-height:1.55; margin: 6px 0; }
+.src-link { display:inline-block; font-size:11px; color: var(--accent); text-decoration:none; padding: 5px 12px; border: 1px solid var(--accent); border-radius:5px; font-weight:600; margin-top: 8px; }
+.src-link:hover { background: var(--accent); color:#fff; }
+
+/* Pagination */
+.pager { display:flex; align-items:center; justify-content:space-between; padding: 24px 0 12px; margin-top: 12px; }
+.pager-arrow { padding: 8px 16px; border:1px solid var(--border); border-radius: 6px; color: var(--text-primary); text-decoration:none; font-weight:600; font-size: 13px; transition: all 0.12s; }
+.pager-arrow:not(.disabled):hover { border-color: var(--accent); background: var(--accent); color:#fff; }
+.pager-arrow.disabled { color: var(--text-muted); opacity:0.4; cursor: not-allowed; }
+.pager-info { font-size:12px; color: var(--text-muted); }
+
+/* Empty + Saved drawer */
+.news-empty { padding: 60px 20px; text-align:center; color: var(--text-muted); }
+.empty-glyph { font-size:42px; margin-bottom: 8px; }
+.empty-title { font-size: 14px; color: var(--text-primary); margin-bottom: 6px; }
+.empty-hint { font-size: 12px; }
+.empty-hint a { color: var(--accent); }
+
+.saved-drawer { position: fixed; right: 24px; bottom: 24px; width: 320px; max-height: 60vh; background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 8px 32px rgba(0,0,0,0.4); z-index: 50; overflow:hidden; display:flex; flex-direction:column; }
+.saved-head { display:flex; align-items:center; gap:8px; padding: 12px 14px; border-bottom:1px solid var(--border); font-size:13px; }
+.saved-close { cursor:pointer; padding: 2px 8px; color: var(--text-muted); }
+.saved-list { padding: 4px 0; overflow-y:auto; }
+.saved-row { padding: 8px 14px; border-bottom: 1px solid var(--border); font-size:12px; }
+.saved-row a { color: var(--text-primary); text-decoration:none; }
+.saved-row a:hover { color: var(--accent); }
+.saved-empty { padding: 24px 14px; font-size: 12px; color: var(--text-muted); text-align:center; }
 </style>
+
+<script>
+function newsFeed() {
+    return {
+        saved: new Set(JSON.parse(localStorage.getItem('news_saved') || '[]')),
+        savedTitles: new Map(),
+        savedCount: 0,
+        showSaved: false,
+        activeIdx: -1,
+        init() {
+            this.savedCount = this.saved.size;
+            // Capture titles for the saved-articles drawer.
+            document.querySelectorAll('article[data-card-id]').forEach(el => {
+                const id = el.dataset.cardId;
+                const title = el.dataset.cardTitle;
+                if (id && title) this.savedTitles.set(id, title);
+            });
+        },
+        toggleSave(id) {
+            if (this.saved.has(id)) this.saved.delete(id);
+            else this.saved.add(id);
+            this.savedCount = this.saved.size;
+            localStorage.setItem('news_saved', JSON.stringify([...this.saved]));
+        },
+        clearSaved() {
+            this.saved.clear();
+            this.savedCount = 0;
+            localStorage.setItem('news_saved', '[]');
+        },
+        onKey(e) {
+            // Ignore when typing in inputs
+            if (['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName)) {
+                if (e.key === 'Escape') e.target.blur();
+                return;
+            }
+            const cards = [...document.querySelectorAll('article[data-idx]')];
+            if (!cards.length) return;
+            if (e.key === '/') {
+                e.preventDefault();
+                document.getElementById('newsSearch')?.focus();
+            } else if (e.key === 'j' || e.key === 'ArrowDown') {
+                this.activeIdx = Math.min(cards.length - 1, this.activeIdx + 1);
+                this.scrollTo(cards[this.activeIdx]);
+            } else if (e.key === 'k' || e.key === 'ArrowUp') {
+                this.activeIdx = Math.max(0, this.activeIdx - 1);
+                this.scrollTo(cards[this.activeIdx]);
+            } else if (e.key === 'ArrowRight' || e.key === 'Enter') {
+                if (this.activeIdx >= 0) cards[this.activeIdx]?.click();
+            } else if (e.key === 'ArrowLeft' || e.key === 'Escape') {
+                // Collapse expanded cards by dispatching click on each expanded body.
+                // Cards toggle open on @click — clicking again on an open one collapses it.
+                document.querySelectorAll('article[data-idx] .card-expanded, article[data-idx] .hero-expanded')
+                    .forEach(exp => {
+                        if (exp.offsetParent !== null) exp.closest('article').click();
+                    });
+            } else if (e.key === 'n') {
+                // Next page
+                document.querySelector('.pager-arrow[href*="page="]:last-of-type')?.click();
+            } else if (e.key === 'p') {
+                document.querySelector('.pager-arrow[href*="page="]:first-of-type')?.click();
+            }
+        },
+        scrollTo(el) {
+            if (!el) return;
+            const r = el.getBoundingClientRect();
+            const ok = r.top > 80 && r.bottom < window.innerHeight - 20;
+            if (!ok) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        },
+    };
+}
+</script>
 
 {% endblock %}

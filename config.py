@@ -18,20 +18,29 @@ V1_ROOT = Path.home() / "alpha-signal"
 
 # ── Universe ──
 
-TIERS = ("LARGE", "MID", "SMALL")
+TIERS = ("LARGE", "MID", "SMALL", "MICRO")
 
 TIER_SIZES = {
     "LARGE": 100,    # top 100 by market cap
     "MID": 150,      # 101-250
-    "SMALL": 2200,   # 251+
+    "SMALL": 2200,   # 251+, minus MICRO carveout
+    # MICRO: composite spec, see tools/classify_micro_tier.py — not size-ranked
 }
 
-# Minimum ADTV (₹ Cr) to be investable per tier
+# Minimum ADTV (₹ Cr) to be investable per tier. MICRO are below this
+# threshold by definition (the manipulation pre-requisite) and excluded from picks.
 ADTV_MIN = {
     "LARGE": 10.0,
     "MID": 5.0,
     "SMALL": 1.0,
+    "MICRO": 0.0,   # advisory only — MICRO are excluded by tier, not by ADTV
 }
+
+# Tiers excluded from daily_picks / dossier / morning_brief / action_queue.
+# MICRO stocks are CLASSIFIED but never recommended — they're too illiquid +
+# data-thin to trust, and trivially manipulatable by any operator with size.
+# See tools/classify_micro_tier.py for the composite criteria.
+EXCLUDED_FROM_PICKS = ("MICRO",)
 
 # ── Signal Weights per Tier (from C13b validation) ──
 # t >= 2.5 → 1.0x (primary)
@@ -445,6 +454,21 @@ PIPELINE_STEPS = [
 
     {"name": "email",              "module": "output.email_sender", "function": "compute",  "critical": False,
      "table": None,                "source": "daily_picks + dossiers (Gmail SMTP)",
+     "data_freq": "daily",         "frequency": "daily"},
+
+    # PIT replay freeze — captures today's pipeline inputs+outputs as a
+    # frozen anchor. Daily cadence means every day becomes a regression-test
+    # case going forward. Non-critical: a freeze failure shouldn't gate email.
+    # See [tools/pit_replay.py] and Plan 0005 Phase E.
+    {"name": "pit_replay_freeze",  "module": "tools.pit_replay",    "function": "freeze",   "critical": False,
+     "table": "pit_replay_snapshots", "source": "scoring.screener._load_signals + score_universe (frozen)",
+     "data_freq": "daily",         "frequency": "daily"},
+
+    # MICRO tier reclassifier — keeps the SMALL/MICRO boundary fresh as ADTV,
+    # quality scores, and fundamental depth change. Idempotent. Demotes any
+    # MICRO that re-qualifies for SMALL. See tools/classify_micro_tier.py.
+    {"name": "classify_micro_tier","module": "tools.classify_micro_tier", "function": "reclassify", "critical": False,
+     "table": "stocks",            "source": "stocks + stock_prices + piotroski_scores + quarterly_income",
      "data_freq": "daily",         "frequency": "daily"},
 
     # ── Background / non-blocking section ──

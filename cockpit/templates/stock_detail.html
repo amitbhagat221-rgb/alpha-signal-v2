@@ -32,7 +32,7 @@
     <div style="flex: 1; min-width: 280px;">
         <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
             <h1 class="stock-ticker">{{ s.ticker }}</h1>
-            <span class="stock-badge">{{ s.cap_tier }}</span>
+            <span class="stock-badge tier-{{ s.cap_tier|lower }}" {% if s.cap_tier == 'MICRO' %}title="MICRO — illiquid + data-sparse + manipulation-prone. Excluded from daily_picks."{% endif %}>{{ s.cap_tier }}{% if s.cap_tier == 'MICRO' %} <span style="font-size:9px;opacity:0.8;">· no picks</span>{% endif %}</span>
             {% if dos.get("action") %}
             <span class="stock-badge {% if dos.action == 'BUY' %}buy{% elif dos.action == 'AVOID' %}avoid{% else %}hold{% endif %}">
                 {{ dos.action }}

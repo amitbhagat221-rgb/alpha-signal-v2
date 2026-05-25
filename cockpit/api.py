@@ -55,6 +55,80 @@ def _ttl_cache(ttl_seconds, max_entries=512):
     return decorator
 
 
+# Persistent TTL cache — same as _ttl_cache but also pickles to disk so a
+# systemd restart doesn't reset the cache. First call after restart loads
+# from disk (~ms) instead of recomputing (~5-17s). Background refresh kicks
+# off the next time TTL expires. Use for the heaviest cockpit endpoints.
+# 2026-05-25: added after /system cold-restart was 28-39s.
+_PERSISTED_CACHE_DIR = Path(__file__).resolve().parent.parent / "data" / ".cockpit_cache"
+
+
+def _persisted_cache(ttl_seconds, name=None):
+    """Disk-backed sibling of _ttl_cache. Keyed by (args, kwargs) — each unique
+    arg combo gets its own pickle file. Use sparingly for heavy functions where
+    the arg space is small (e.g. news pool keyed by hours ∈ {24,72,168,720})."""
+    import pickle as _pickle
+
+    def _key_to_slot(slot_base, args, kwargs):
+        if not args and not kwargs:
+            return slot_base
+        parts = [slot_base]
+        if args:
+            parts.append("_".join(str(a) for a in args))
+        if kwargs:
+            parts.append("_".join(f"{k}={v}" for k, v in sorted(kwargs.items())))
+        return "__".join(parts)
+
+    def decorator(fn):
+        slot_base = name or f"{fn.__module__}.{fn.__name__}"
+        memo: dict = {}  # key -> (value, mtime)
+
+        def _path_for(slot):
+            return _PERSISTED_CACHE_DIR / f"{slot}.pkl"
+
+        def _load(slot):
+            p = _path_for(slot)
+            if not p.exists():
+                return None, 0
+            try:
+                with p.open("rb") as f:
+                    payload, mtime = _pickle.load(f)
+                return payload, mtime
+            except Exception:
+                return None, 0
+
+        def _save(slot, payload, mtime):
+            try:
+                _PERSISTED_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+                with _path_for(slot).open("wb") as f:
+                    _pickle.dump((payload, mtime), f)
+            except Exception:
+                pass
+
+        @functools.wraps(fn)
+        def wrapper(*args, **kwargs):
+            force = kwargs.pop("_force", False)
+            now = _time.time()
+            slot = _key_to_slot(slot_base, args, kwargs)
+            entry = memo.get(slot)
+            if entry is None and not force:
+                payload, mtime = _load(slot)
+                if payload is not None:
+                    entry = (payload, mtime)
+                    memo[slot] = entry
+            if not force and entry is not None and (now - entry[1]) < ttl_seconds:
+                return entry[0]
+            value = fn(*args, **kwargs)
+            memo[slot] = (value, now)
+            _save(slot, value, now)
+            return value
+
+        wrapper.cache_clear = lambda: memo.clear()
+        return wrapper
+
+    return decorator
+
+
 # ═══════════════════════════════════════════════════
 # A1-A12: NEW DATA FUNCTIONS
 # ═══════════════════════════════════════════════════
@@ -198,6 +272,7 @@ def get_shareholding_history(sid):
         return []
 
     # Compute QoQ changes (older quarter is in the next row since we're DESC)
+    df = df.astype(object).where(df.notna(), None)
     quarters = df.to_dict("records")
     for i, q in enumerate(quarters):
         if i + 1 < len(quarters):
@@ -700,35 +775,62 @@ def get_dominant_signal(sid):
 
 
 def get_heatmap_data():
-    """All stocks grouped by tier with scores for heat map."""
+    """All stocks grouped by tier with scores for heat map.
+    MICRO tier is included via a separate path: they're excluded from daily_picks
+    by design (config.EXCLUDED_FROM_PICKS) but signal data IS still computed for
+    them. Render at score=0 placeholder so the heatmap shows the universe."""
     df = read_sql("""
         SELECT dp.sid, s.ticker, s.name, dp.final_score as score, dp.cap_tier
         FROM daily_picks dp JOIN stocks s ON dp.sid = s.sid
         WHERE dp.pick_date = (SELECT MAX(pick_date) FROM daily_picks)
+          AND s.cap_tier != 'MICRO'
         ORDER BY dp.cap_tier, dp.final_score DESC
+    """)
+    micro_df = read_sql("""
+        SELECT sid, ticker, name, 0.0 AS score, cap_tier
+        FROM stocks WHERE cap_tier = 'MICRO'
+        ORDER BY ticker
     """)
     result = {}
     for tier in ["LARGE", "MID", "SMALL"]:
         tier_df = df[df["cap_tier"] == tier]
         result[tier] = tier_df[["sid", "ticker", "name", "score"]].to_dict("records")
+    if not micro_df.empty:
+        result["MICRO"] = micro_df[["sid", "ticker", "name", "score"]].to_dict("records")
     return result
 
 
 def get_explorer_table():
-    """Ranked table view for explorer with enriched data."""
+    """Ranked table view for explorer with enriched data.
+    Includes MICRO tier (no rank/score since they're excluded from daily_picks)
+    via a UNION — explorer tab needs to render the MICRO grid even though MICRO
+    stocks aren't scored. Signal data IS computed for them; we just don't pick."""
     df = read_sql("""
-        SELECT dp.sid, s.ticker, s.name, dp.sector, dp.cap_tier, dp.rank,
-               dp.final_score, ds.consensus_signal, ds.piotroski_f,
-               ds.earnings_yield
-        FROM daily_picks dp
-        JOIN stocks s ON dp.sid = s.sid
-        LEFT JOIN daily_snapshots ds ON dp.sid = ds.sid
-            AND ds.snapshot_date = (SELECT MAX(snapshot_date) FROM daily_snapshots)
-        WHERE dp.pick_date = (SELECT MAX(pick_date) FROM daily_picks)
-        ORDER BY dp.cap_tier, dp.rank
-        LIMIT 100
+        SELECT * FROM (
+          SELECT dp.sid, s.ticker, s.name, dp.sector, dp.cap_tier,
+                 dp.rank AS rank, dp.final_score AS score,
+                 ds.consensus_signal, ds.piotroski_f, ds.earnings_yield
+          FROM daily_picks dp
+          JOIN stocks s ON dp.sid = s.sid
+          LEFT JOIN daily_snapshots ds ON dp.sid = ds.sid
+              AND ds.snapshot_date = (SELECT MAX(snapshot_date) FROM daily_snapshots)
+          WHERE dp.pick_date = (SELECT MAX(pick_date) FROM daily_picks)
+            AND s.cap_tier != 'MICRO'
+          UNION ALL
+          SELECT s.sid, s.ticker, s.name, s.sector, s.cap_tier,
+                 NULL AS rank, NULL AS score,
+                 ds.consensus_signal, ds.piotroski_f, ds.earnings_yield
+          FROM stocks s
+          LEFT JOIN daily_snapshots ds ON s.sid = ds.sid
+              AND ds.snapshot_date = (SELECT MAX(snapshot_date) FROM daily_snapshots)
+          WHERE s.cap_tier = 'MICRO'
+        )
+        ORDER BY cap_tier, rank
     """)
-    return df.to_dict("records") if not df.empty else []
+    if df.empty:
+        return []
+    df = df.astype(object).where(df.notna(), None)
+    return df.to_dict("records")
 
 
 def search_stocks(query):
@@ -750,9 +852,11 @@ def get_stock_detail(sid):
 
     detail = stock.iloc[0].to_dict()
 
-    # Latest pick
+    # Latest pick. Skip cap_tier from daily_picks — `stocks.cap_tier` is the
+    # source of truth (MICRO reclassification, etc); merging a stale pick row
+    # would resurrect yesterday's tier assignment.
     pick = read_sql(
-        "SELECT final_score, rank, cap_tier FROM daily_picks "
+        "SELECT final_score, rank FROM daily_picks "
         "WHERE sid = ? ORDER BY pick_date DESC LIMIT 1", params=[sid]
     )
     if not pick.empty:
@@ -803,18 +907,25 @@ def get_price_series(sid, days=365):
         "WHERE sid = ? ORDER BY date DESC LIMIT ?",
         params=[sid, days],
     )
-    return df.sort_values("date").to_dict("records") if not df.empty else []
+    if df.empty:
+        return []
+    df = df.sort_values("date").astype(object).where(df.notna(), None)
+    return df.to_dict("records")
 
 
 def get_price_series_extended(sid, days=365):
-    """Extended price series with OHLCV + delivery % for technicals tab."""
+    """Extended price series with OHLCV + delivery % for technicals tab.
+    NaN → None so FastAPI's JSON encoder doesn't 500 on sparse delivery_pct rows."""
     df = read_sql(
         "SELECT date, open, high, low, close, volume, delivery_pct "
         "FROM stock_prices WHERE sid = ? AND close > 0 "
         "ORDER BY date DESC LIMIT ?",
         params=[sid, days],
     )
-    return df.sort_values("date").to_dict("records") if not df.empty else []
+    if df.empty:
+        return []
+    df = df.sort_values("date").astype(object).where(df.notna(), None)
+    return df.to_dict("records")
 
 
 def get_quarterly_financials(sid):
@@ -844,8 +955,12 @@ def get_quarterly_financials(sid):
     df["ebitda_margin"] = (df["ebitda"] / df["revenue"] * 100).round(1)
     df["pat_margin"] = (df["net_income"] / df["revenue"] * 100).round(1)
 
-    # YoY growth: compare each quarter to the same quarter 4 quarters ago
-    quarters = df.sort_values("end_date").to_dict("records")
+    # YoY growth: compare each quarter to the same quarter 4 quarters ago.
+    # replace([inf,-inf,nan], None) so divide-by-zero margins (revenue=0) don't 500 the API.
+    df_records = (df.sort_values("end_date")
+                    .replace([np.inf, -np.inf], np.nan)
+                    .astype(object).where(lambda x: x.notna(), None))
+    quarters = df_records.to_dict("records")
     for i, q in enumerate(quarters):
         if i >= 4:
             prior = quarters[i - 4]
@@ -1139,7 +1254,7 @@ def get_active_signals():
     return signals
 
 
-@_ttl_cache(60)
+@_persisted_cache(60, name="get_action_candidates")
 def get_action_candidates():
     """Stocks categorized into Buy/Watch/Exit based on signals + changes."""
     changes = get_changes(days=7)
@@ -1205,7 +1320,26 @@ def get_action_candidates():
     return {"buy": buy, "watch": watch, "exit": exit_list}
 
 
-@_ttl_cache(60)
+@_persisted_cache(60, name="get_portfolio_bundle")
+def get_portfolio_bundle():
+    """Single cacheable bundle for /portfolio render — picks + per-stock enrichment
+    + analytics in one disk slot, so first-click after restart is fast even though
+    we'd otherwise loop ~30 stocks × 2 API calls. 2026-05-25 perf pass."""
+    regime = get_regime()
+    portfolio_data = get_model_portfolio()
+    for key in ["large", "mid", "small"]:
+        for s in portfolio_data.get(key, []):
+            ac = get_analyst_consensus(s["sid"])
+            pm = get_stock_price_metrics(s["sid"])
+            s["pt_upside"] = ac.get("pt_upside_pct")
+            s["price"] = pm.get("close_price")
+            s["return_1m"] = pm.get("return_1m")
+            s["price_target"] = ac.get("price_target")
+    analytics = get_portfolio_analytics(portfolio_data, regime)
+    return {"regime": regime, "portfolio": portfolio_data, "analytics": analytics}
+
+
+@_persisted_cache(60, name="get_model_portfolio")
 def get_model_portfolio():
     """Model portfolio: top stocks per tier with position weights."""
     regime = get_regime()
@@ -1773,6 +1907,7 @@ def get_pipeline_status(days=7):
         cutoff = (datetime.now() - timedelta(minutes=5)).isoformat()
         df.loc[(df["status"] == "RUNNING") & (df["started_at"] < cutoff), "status"] = "ABORTED"
 
+    df = df.astype(object).where(df.notna(), None)
     return df.to_dict("records")
 
 
@@ -1816,7 +1951,7 @@ def run_sql_query(query, max_rows=500):
     }
 
 
-@_ttl_cache(300)
+@_persisted_cache(300, name="get_data_freshness")
 def get_data_freshness():
     """Data health from db.data_health(). NaN floats are coerced to None so the
     payload is JSON-safe (Jinja's tojson preserves NaN literals which break
@@ -1832,7 +1967,7 @@ def get_data_freshness():
     return records
 
 
-@_ttl_cache(300)
+@_persisted_cache(300, name="get_db_summary")
 def get_db_summary():
     """High-level health verdict for the system page header."""
     from db import db_summary
@@ -1848,7 +1983,7 @@ def get_db_summary():
 V1_BACKTEST_DIR = Path("/home/ubuntu/alpha-signal/data/backtest")
 
 
-@_ttl_cache(300)
+@_persisted_cache(300, name="get_model_overview")
 def get_model_overview():
     """Tier weight tables, signal validation, regime rules. Used by /model."""
     from config import SIGNAL_WEIGHTS, VIX_REGIMES, QUALITY_GATE, PORTFOLIO, TRANSACTION_COSTS_BPS
@@ -2245,7 +2380,7 @@ def get_data_health_scores(force=False):
 # Factor Health — sister to data-health, but per-factor
 # ═══════════════════════════════════════════════════
 
-@_ttl_cache(300)
+@_persisted_cache(300, name="get_factor_health")
 def get_factor_health():
     """Return one row per registered factor with health metrics + grade.
 
@@ -2730,7 +2865,7 @@ def _parse_plan_frontmatter(md_path: Path) -> dict:
     return fm
 
 
-@_ttl_cache(300)
+@_persisted_cache(300, name="get_command_centre")
 def get_command_centre():
     """Assemble the command-centre payload — plans, factor library, data layer,
     pending actions. Server-rendered; no live polling."""
@@ -3526,20 +3661,13 @@ _NEWS_TOPICS = [
 _NEWS_TOPIC_MAP = {tid: (label, color) for tid, label, color in _NEWS_TOPICS}
 
 
-@_ttl_cache(300)
-def get_news_feed(topic=None, tier=None, limit=80):
-    """Inshorts-style news cards: rank by recency × source-trust, dedupe by title.
+@_persisted_cache(300, name="_get_news_pool")
+def _get_news_pool(hours=720):
+    """Cached pool: full ranked+deduped feed for the requested window.
 
-    Joins news_enriched (Phase 2) when present so each card carries the LLM
-    structured fields (one_liner, why_it_matters, key_numbers, what_to_watch,
-    confidence, sentiment) plus topic tags. Unclassified articles still render
-    with raw title+summary — graceful degradation.
-
-    Each card has:
-        id, headline, summary, source_label, source_tier, source_url,
-        published_at, age_label, score, primary_topic, topic_label, topic_color,
-        one_liner, why_it_matters, key_numbers (parsed list), what_to_watch,
-        confidence, sentiment, enriched (bool)
+    All in-memory filtering/sort/paginate happens in get_news_feed() against
+    this pool — one cache slot serves every filter combo, so flipping
+    chips/search doesn't re-run the 800-row DB pass + scoring.
     """
     df = read_sql(
         """
@@ -3547,55 +3675,35 @@ def get_news_feed(topic=None, tier=None, limit=80):
                na.url AS source_url, na.source, na.published_at,
                ne.primary_topic, ne.topics, ne.one_liner, ne.why_it_matters,
                ne.key_numbers, ne.what_to_watch, ne.confidence, ne.sentiment,
-               ne.classifier_status
+               ne.classifier_status, ne.image_url
         FROM news_articles na
         LEFT JOIN news_enriched ne ON ne.article_id = na.article_id
-        WHERE na.published_at >= date('now', '-7 days')
+        WHERE na.published_at >= datetime('now', ? )
         ORDER BY na.published_at DESC
-        LIMIT 800
-        """
+        LIMIT 2000
+        """,
+        params=[f"-{int(hours)} hours"],
     )
     if df.empty:
-        return {"cards": [], "total": 0, "sources_present": []}
+        return []
 
-    # Score: tier_score (0..1) × recency_decay (12h half-life)
     now = pd.Timestamp.now(tz="UTC")
     cards = []
     for _, r in df.iterrows():
         label, tier_num, tier_score = _news_tier(r["source"])
-        if tier is not None and tier_num != int(tier):
-            continue
         try:
             ts = pd.to_datetime(r["published_at"], errors="coerce", utc=True)
-            if pd.isna(ts):
-                hours_old = 999
-            else:
-                hours_old = (now - ts).total_seconds() / 3600
+            hours_old = (now - ts).total_seconds() / 3600 if not pd.isna(ts) else 999
         except Exception:
             hours_old = 999
         recency = 0.5 ** (hours_old / 12.0)
         score = tier_score * recency
-
-        # Topic filter — match against enriched primary_topic when classified,
-        # else fall back to keyword overlap (handles unclassified backlog).
-        primary_topic = r.get("primary_topic") if pd.notna(r.get("primary_topic")) else None
-        if topic:
-            if primary_topic:
-                # Strict topic-id match
-                if primary_topic != topic:
-                    continue
-            else:
-                # Fallback for unclassified: keyword overlap
-                t_lower = (r["headline"] or "").lower() + " " + (r["summary"] or "").lower()
-                if topic.lower().replace("_", " ") not in t_lower:
-                    continue
 
         summary = (r["summary"] or "").strip()
         words = summary.split()
         if len(words) > 80:
             summary = " ".join(words[:80]) + "…"
 
-        # Parse enriched fields
         import json as _json
         key_numbers = []
         if r.get("key_numbers") and pd.notna(r.get("key_numbers")):
@@ -3604,6 +3712,7 @@ def get_news_feed(topic=None, tier=None, limit=80):
             except Exception:
                 key_numbers = []
 
+        primary_topic = r.get("primary_topic") if pd.notna(r.get("primary_topic")) else None
         topic_label, topic_color = _NEWS_TOPIC_MAP.get(primary_topic or "", (None, None))
 
         cards.append({
@@ -3617,8 +3726,8 @@ def get_news_feed(topic=None, tier=None, limit=80):
             "source_url": r["source_url"],
             "published_at": r["published_at"],
             "age_label": _humanize_age(r["published_at"]),
+            "hours_old": round(hours_old, 1),
             "score": round(score, 4),
-            # Phase 2 enrichment
             "enriched": pd.notna(r.get("classifier_status")) and r.get("classifier_status") == "done",
             "primary_topic": primary_topic,
             "topic_label": topic_label,
@@ -3626,84 +3735,141 @@ def get_news_feed(topic=None, tier=None, limit=80):
             "one_liner": r.get("one_liner") if pd.notna(r.get("one_liner")) else None,
             "why_it_matters": r.get("why_it_matters") if pd.notna(r.get("why_it_matters")) else None,
             "key_numbers": key_numbers,
+            "n_key_numbers": len(key_numbers),
             "what_to_watch": r.get("what_to_watch") if pd.notna(r.get("what_to_watch")) else None,
             "confidence": r.get("confidence") if pd.notna(r.get("confidence")) else None,
             "sentiment": r.get("sentiment") if pd.notna(r.get("sentiment")) else None,
+            "image_url": r.get("image_url") if "image_url" in r and pd.notna(r.get("image_url")) else None,
         })
 
-    # Sort by score
     cards.sort(key=lambda c: c["score"], reverse=True)
 
-    # Dedupe: drop articles whose first-7-word fingerprint overlaps >80% with
-    # one already in the kept list. Catches "same story 12 different headlines"
-    # without needing embeddings. (Spec calls for embedding-cluster; this is
-    # the v1 cheap version.)
+    # Dedupe: first-7-word fingerprint overlap >80% (catches "same story, 12 outlets").
     def _fingerprint(text):
-        # Lowercase, alnum-only tokens, first 7 substantive words (>3 chars)
         toks = [t for t in re.findall(r"[a-z0-9]+", (text or "").lower()) if len(t) > 3]
         return set(toks[:7])
 
-    kept = []
-    seen_prints = []
+    kept, seen_prints = [], []
     for c in cards:
         fp = _fingerprint(c["headline"])
         if not fp:
             continue
-        dup = False
-        for sp in seen_prints:
-            inter = len(fp & sp)
-            if inter >= 5 and inter / max(1, min(len(fp), len(sp))) > 0.8:
-                dup = True
-                break
+        dup = any(
+            len(fp & sp) >= 5 and len(fp & sp) / max(1, min(len(fp), len(sp))) > 0.8
+            for sp in seen_prints
+        )
         if dup:
             continue
         kept.append(c)
         seen_prints.append(fp)
-        if len(kept) >= limit:
-            break
+    return kept
 
-    # Sources present (for filter chips)
-    sources_present = sorted({c["source_label"] for c in kept})
 
-    # Per-topic counts — for top-tab badges. When the user is filtering by a
-    # topic, the counts reflect the unfiltered population so tabs work as
-    # navigation (clicking a tab shows N matching items).
-    if topic:
-        unfiltered = read_sql(
-            """
-            SELECT ne.primary_topic, COUNT(*) AS n
-            FROM news_articles na
-            LEFT JOIN news_enriched ne ON ne.article_id = na.article_id
-            WHERE na.published_at >= date('now', '-7 days')
-            GROUP BY ne.primary_topic
-            """
+_CONFIDENCE_RANK = {"high": 3, "medium": 2, "low": 1, None: 0}
+
+
+def get_news_feed(
+    topic=None, tier=None, limit=80,
+    q=None, sentiment=None, confidence=None,
+    hours=168, sort="smart", page=1, page_size=24,
+):
+    """Filter + sort + paginate over the cached news pool.
+
+    All inputs are user-facing query params from /news. The heavy work
+    (DB + scoring + dedupe) is cached upstream in _get_news_pool — this
+    function is pure in-memory transformation.
+    """
+    pool_hours = max(int(hours), 720)  # always cache 30d; filter window in-memory
+    pool = _get_news_pool(hours=pool_hours)
+
+    # Window filter
+    pool_in_window = [c for c in pool if c["hours_old"] <= int(hours)]
+
+    # Topic counts for tabs — computed over window, BEFORE other filters,
+    # so chip badges show "what's available if I switched to this topic".
+    topic_counts = {tid: 0 for tid, _, _ in _NEWS_TOPICS}
+    for c in pool_in_window:
+        topic_counts[c.get("primary_topic") or "other"] = (
+            topic_counts.get(c.get("primary_topic") or "other", 0) + 1
         )
-        topic_counts = {tid: 0 for tid, _, _ in _NEWS_TOPICS}
-        for _, row in unfiltered.iterrows():
-            t = row["primary_topic"] if pd.notna(row.get("primary_topic")) else "other"
-            topic_counts[t] = topic_counts.get(t, 0) + int(row["n"])
-    else:
-        topic_counts = {tid: 0 for tid, _, _ in _NEWS_TOPICS}
-        for c in kept:
-            t = c.get("primary_topic") or "other"
-            topic_counts[t] = topic_counts.get(t, 0) + 1
+
+    filtered = pool_in_window
+
+    if topic:
+        def _topic_match(c):
+            if c.get("primary_topic"):
+                return c["primary_topic"] == topic
+            t_lower = (c["headline"] or "").lower() + " " + (c["summary"] or "").lower()
+            return topic.lower().replace("_", " ") in t_lower
+        filtered = [c for c in filtered if _topic_match(c)]
+
+    if tier:
+        tier_int = int(tier)
+        filtered = [c for c in filtered if c["source_tier"] == tier_int]
+
+    if sentiment and sentiment != "all":
+        filtered = [c for c in filtered if c.get("sentiment") == sentiment]
+
+    if confidence and confidence != "all":
+        min_rank = _CONFIDENCE_RANK.get(confidence, 0)
+        filtered = [c for c in filtered if _CONFIDENCE_RANK.get(c.get("confidence")) >= min_rank]
+
+    if q:
+        q_lower = q.strip().lower()
+        if q_lower:
+            def _hit(c):
+                blob = " ".join([
+                    c.get("headline") or "", c.get("summary") or "",
+                    c.get("one_liner") or "", c.get("why_it_matters") or "",
+                ]).lower()
+                return q_lower in blob
+            filtered = [c for c in filtered if _hit(c)]
+
+    # Sort
+    if sort == "recent":
+        filtered.sort(key=lambda c: c["hours_old"])
+    elif sort == "trust":
+        filtered.sort(key=lambda c: (-c["source_tier_score"], c["hours_old"]))
+    elif sort == "numbers":
+        filtered.sort(key=lambda c: (-c["n_key_numbers"], -c["score"]))
+    else:  # "smart" (default) — already sorted by score in pool
+        filtered.sort(key=lambda c: -c["score"])
+
+    total_filtered = len(filtered)
+    page = max(1, int(page))
+    page_size = max(1, int(page_size))
+    total_pages = max(1, (total_filtered + page_size - 1) // page_size)
+    if page > total_pages:
+        page = total_pages
+    start = (page - 1) * page_size
+    page_cards = filtered[start:start + page_size]
 
     return {
-        "cards": kept,
-        "total": len(kept),
-        "sources_present": sources_present,
+        "cards": page_cards,
+        "total": total_filtered,
+        "total_filtered": total_filtered,
+        "total_pool": len(pool_in_window),
+        "page": page,
+        "total_pages": total_pages,
+        "page_size": page_size,
         "tier_counts": {
-            1: sum(1 for c in kept if c["source_tier"] == 1),
-            2: sum(1 for c in kept if c["source_tier"] == 2),
-            3: sum(1 for c in kept if c["source_tier"] == 3),
+            1: sum(1 for c in pool_in_window if c["source_tier"] == 1),
+            2: sum(1 for c in pool_in_window if c["source_tier"] == 2),
+            3: sum(1 for c in pool_in_window if c["source_tier"] == 3),
+        },
+        "sentiment_counts": {
+            "bullish": sum(1 for c in pool_in_window if c.get("sentiment") == "bullish"),
+            "bearish": sum(1 for c in pool_in_window if c.get("sentiment") == "bearish"),
+            "neutral": sum(1 for c in pool_in_window if c.get("sentiment") == "neutral"),
         },
         "topic_counts": topic_counts,
-        "topics": _NEWS_TOPICS,  # for tab rendering: list of (id, label, color)
-        "n_enriched": sum(1 for c in kept if c["enriched"]),
+        "topics": _NEWS_TOPICS,
+        "n_enriched": sum(1 for c in pool_in_window if c["enriched"]),
+        "n_with_image": sum(1 for c in pool_in_window if c.get("image_url")),
     }
 
 
-@_ttl_cache(300)
+@_persisted_cache(300, name="get_health_overview")
 def get_health_overview(force=False):
     """One-stop Health Center overview.
 
@@ -4088,6 +4254,52 @@ def get_health_overview(force=False):
             "link": "#overview",
         },
     }
+
+    # PIT replay tile (plan 0005 Phase E) — "can current code reproduce frozen picks?"
+    try:
+        pit_status_row = read_sql(
+            "SELECT MAX(snapshot_date) AS d, COUNT(DISTINCT snapshot_date) AS n, "
+            "MAX(frozen_at) AS last_freeze, MAX(frozen_by_commit) AS sha "
+            "FROM pit_replay_snapshots"
+        )
+        if not pit_status_row.empty and pit_status_row.iloc[0]["d"]:
+            r = pit_status_row.iloc[0]
+            n_frozen = int(r["n"])
+            last_d = r["d"]
+            last_freeze = r["last_freeze"] or ""
+            # We don't run replay here (would block page load 5-10s). Instead show
+            # freeze recency + count of historical anchors. Replay verdict is
+            # surfaced via dedicated /pit-replay endpoint if/when added.
+            age_days = None
+            try:
+                from datetime import datetime as _dt
+                last_dt = _dt.fromisoformat(last_freeze.split(".")[0]) if last_freeze else None
+                age_days = (_dt.now() - last_dt).days if last_dt else None
+            except Exception:
+                pass
+            if age_days is not None and age_days <= 2:
+                pit_grade, pit_color = "OK", "var(--green)"
+                pit_headline = f"{n_frozen} dates frozen · last {age_days}d ago"
+            elif age_days is not None and age_days <= 7:
+                pit_grade, pit_color = "STALE", "var(--amber)"
+                pit_headline = f"{n_frozen} dates frozen · stale ({age_days}d)"
+            else:
+                pit_grade, pit_color = "OK", "var(--green)"
+                pit_headline = f"{n_frozen} dates frozen"
+            pit_detail = f"latest anchor: {last_d} · run `python -m tools.pit_replay replay-all` to verify"
+        else:
+            pit_grade, pit_color = "INFO", "var(--text-muted)"
+            pit_headline = "no anchors yet"
+            pit_detail = "run `python -m tools.pit_replay freeze` to create first anchor"
+        tiles["pit_replay"] = {
+            "label": "PIT replay",
+            "grade": pit_grade, "color": pit_color,
+            "headline": pit_headline,
+            "detail": pit_detail,
+            "link": "#pit-replay",
+        }
+    except Exception:
+        pass
 
     categories = sorted({i["category"] for i in issues})
     sources = sorted({i["source"] for i in issues})

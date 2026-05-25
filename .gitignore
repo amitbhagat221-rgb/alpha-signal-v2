@@ -58,6 +58,14 @@ output/*.log
 .ipynb_checkpoints/
 *.ipynb_checkpoints
 
+# QA artifacts (Playwright screenshots at repo root)
+news-*.png
+news_*.png
+
+# Local-only git hooks copy (live in .git/hooks/, not versioned by git anyway,
+# but listed here as a reminder that pre-push lives outside source control)
+# scripts/hooks/pre-push  ← uncomment if moved into tracked dir later
+
 # Credentials
 .env
 *.env

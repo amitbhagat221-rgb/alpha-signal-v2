@@ -563,6 +563,11 @@ body {
 .stock-badge.buy { background: var(--green-bg); color: var(--green); border: 1px solid var(--green); }
 .stock-badge.avoid { background: var(--red-bg); color: var(--red); border: 1px solid var(--red); }
 .stock-badge.hold { background: var(--amber-bg); color: var(--amber); border: 1px solid var(--amber); }
+/* MICRO tier — excluded-from-picks marker so it's instantly visible as speculative */
+.stock-badge.tier-micro { background: rgba(192,57,43,0.12); color: #e74c3c; border: 1px solid #c0392b; }
+.stock-badge.tier-small { background: rgba(46,204,113,0.10); color: #2ecc71; }
+.stock-badge.tier-mid   { background: rgba(245,158,11,0.10); color: #f59e0b; }
+.stock-badge.tier-large { background: rgba(139,92,246,0.10); color: #8b5cf6; }
 
 .stock-price {
     font-size: 36px;

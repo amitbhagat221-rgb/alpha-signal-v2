@@ -746,14 +746,27 @@ STALENESS_THRESHOLDS = {
 # Per-table overrides for tables whose upstream has known publishing lag.
 # Listed by table name; takes precedence over the frequency-based default.
 STALENESS_OVERRIDES = {
-    # NSE PIT filings post with a 7-14 day delay — a fresh fetch still shows ~10 day staleness.
-    "insider_trades": 14,
+    # NSE PIT filings post with delay AND many stocks have weeks-long quiet
+    # stretches. Bumped 14→30 (2026-05-25) after producer ran daily but
+    # MAX(trade_date) stayed flat because no fresh insider trades were filed.
+    "insider_trades": 30,
     # 2026-05-23: regulatory_events was registered as "monthly" (50d) and
     # silently went stale for 43d before being noticed (Gillette dossier
     # showing 2023 articles). News/PIB are weekly cadence at worst; if the
     # harvester stops, we want a yellow flag in <2 weeks, not 50 days.
     "regulatory_events": 14,
     "regulatory_signals": 14,
+    # ── Filing-cycle-bound tables (data only moves when companies file) ──
+    # Producer runs daily, but `latest_date` is the most recent end_date,
+    # which only advances after a fresh filing wave. Threshold is set so
+    # the alarm fires only when the EXPECTED next wave has been missed
+    # (= a real harvester problem), not on the natural lag inside a wave.
+    # 2026-05-25: bumped these from monthly(50)/quarterly(100) defaults
+    # after they flagged STALE 55d when the data is healthy.
+    "quarterly_income":      120,  # quarterly filings; ~90d max gap, 120 tolerates a delayed wave
+    "annual_balance_sheet":  220,  # annual filings; ~12mo max gap, 220 catches a missed cycle in ~7mo
+    "annual_cash_flow":      220,
+    "forecast_history":      220,  # Tickertape stores PT only at FY year-end → annual cadence
 }
 
 # Per-stock coverage gates. A table that should have a row per universe stock
@@ -767,7 +780,11 @@ COVERAGE_THRESHOLDS = {
     # table:          (gap_below_pct, severe_below_pct)
     "stock_prices":   (95.0, 80.0),
     "analyst_consensus": (60.0, 30.0),  # sell-side doesn't cover every SMALL
-    "fundamentals_screener": (90.0, 70.0),
+    # Source (Screener.in) doesn't cover all SME-board smallcaps. Verified
+    # 2026-05-25: 100% LARGE + 100% MID; 14.8% of SMALL universe (mostly
+    # SME-board) is structurally absent — not a harvester defect. Lowered
+    # 90→85 to match reality; severe at 70 still catches a real regression.
+    "fundamentals_screener": (85.0, 70.0),
     "annual_balance_sheet":  (85.0, 70.0),
     "quarterly_income":      (85.0, 70.0),
     "promoter_signals":      (90.0, 70.0),

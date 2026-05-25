@@ -46,30 +46,55 @@ templates.env.undefined = SilentUndefined
 # at startup so the first visit is always fast.
 @app.on_event("startup")
 def _prewarm_cache():
+    """Background-warm expensive TTL caches in PARALLEL so wall-clock matches the
+    slowest single warmer (data_health_scores ~19s) rather than the sum (~38s).
+    2026-05-25: bumped from sequential after /system cold path was 39s; parallel
+    drops it to ~19s, and the cache survives until TTL expiry."""
     import threading
+    import concurrent.futures as cf
+
+    warmers = [
+        ("data_freshness",     lambda: api.get_data_freshness()),
+        ("db_summary",         lambda: api.get_db_summary()),
+        ("data_health_scores", lambda: api.get_data_health_scores(force=False)),
+        ("factor_health",      lambda: api.get_factor_health()),
+        ("model_overview",     lambda: api.get_model_overview()),
+        ("flow_overview",      lambda: api.get_flow_overview()),
+        ("command_centre",     lambda: api.get_command_centre()),
+        ("health_overview",    lambda: api.get_health_overview()),
+        ("top_picks",          lambda: api.get_top_picks()),
+        ("pipeline_status",    lambda: api.get_pipeline_status()),
+        # 2026-05-25: added these as part of /actions and /news perf pass.
+        ("action_candidates",  lambda: api.get_action_candidates()),
+        ("model_portfolio",    lambda: api.get_model_portfolio()),
+        ("news_pool_168",      lambda: api._get_news_pool(hours=168)),
+        ("news_pool_720",      lambda: api._get_news_pool(hours=720)),
+        ("portfolio_bundle",   lambda: api.get_portfolio_bundle()),
+    ]
+
+    def _warm_one(name, fn):
+        import time as _t
+        t = _t.time()
+        try:
+            fn()
+            return name, _t.time() - t, None
+        except Exception as e:
+            return name, _t.time() - t, str(e)
+
     def _warm():
         import time as _t
         t0 = _t.time()
-        warmers = [
-            ("data_freshness",   lambda: api.get_data_freshness()),
-            ("db_summary",       lambda: api.get_db_summary()),
-            ("data_health_scores", lambda: api.get_data_health_scores(force=False)),
-            ("factor_health",    lambda: api.get_factor_health()),
-            ("model_overview",   lambda: api.get_model_overview()),
-            ("flow_overview",    lambda: api.get_flow_overview()),
-            ("command_centre",   lambda: api.get_command_centre()),
-            ("health_overview",  lambda: api.get_health_overview()),
-            ("top_picks",        lambda: api.get_top_picks()),
-        ]
-        for name, fn in warmers:
-            t = _t.time()
-            try:
-                fn()
-                dt = _t.time() - t
-                print(f"  [cache-warm] {name}: {dt:.1f}s")
-            except Exception as e:
-                print(f"  [cache-warm] {name}: FAILED — {e}")
-        print(f"  [cache-warm] total: {_t.time()-t0:.1f}s")
+        # SQLite is single-writer so unbounded parallelism doesn't help and
+        # can starve user requests; 4 workers is the sweet spot for our mix.
+        with cf.ThreadPoolExecutor(max_workers=4) as ex:
+            futures = [ex.submit(_warm_one, n, f) for n, f in warmers]
+            for fut in cf.as_completed(futures):
+                name, dt, err = fut.result()
+                if err:
+                    print(f"  [cache-warm] {name}: FAILED — {err}")
+                else:
+                    print(f"  [cache-warm] {name}: {dt:.1f}s")
+        print(f"  [cache-warm] total wall-clock: {_t.time()-t0:.1f}s")
 
     threading.Thread(target=_warm, daemon=True).start()
 
@@ -126,6 +151,42 @@ def _asset_version(filename: str) -> str:
     except OSError:
         return "0"
 templates.env.globals["asset_version"] = _asset_version
+
+
+# Build a URL on the current request preserving all query params except one,
+# which gets set/unset. Used by /news for chip/tab/pagination links so each
+# action keeps the rest of the user's filter state. Pass value="" to drop a key.
+from urllib.parse import urlencode
+def _url_keep(key, value):
+    import contextvars
+    req = _current_request.get()
+    if req is None:
+        return f"?{key}={value}" if value not in ("", None) else "?"
+    params = dict(req.query_params)
+    # Reset pagination whenever any non-"page" filter changes
+    if key != "page":
+        params.pop("page", None)
+    if value in ("", None, 0):
+        params.pop(key, None)
+    else:
+        params[key] = str(value)
+    base = req.url.path
+    return f"{base}?{urlencode(params)}" if params else base
+templates.env.globals["url_keep"] = _url_keep
+
+# Track current request for url_keep — set by a tiny middleware.
+import contextvars
+_current_request: "contextvars.ContextVar[Request | None]" = contextvars.ContextVar(
+    "current_request", default=None
+)
+
+@app.middleware("http")
+async def _bind_request(request: Request, call_next):
+    token = _current_request.set(request)
+    try:
+        return await call_next(request)
+    finally:
+        _current_request.reset(token)
 
 
 # ── Page Routes ──
@@ -244,21 +305,12 @@ async def stock_detail(request: Request, sid: str):
 
 @app.get("/portfolio", response_class=HTMLResponse)
 async def portfolio(request: Request):
-    regime = api.get_regime()
-    portfolio_data = api.get_model_portfolio()
-    # Enrich portfolio stocks
-    for key in ["large", "mid", "small"]:
-        for s in portfolio_data.get(key, []):
-            ac = api.get_analyst_consensus(s["sid"])
-            pm = api.get_stock_price_metrics(s["sid"])
-            s["pt_upside"] = ac.get("pt_upside_pct")
-            s["price"] = pm.get("close_price")
-            s["return_1m"] = pm.get("return_1m")
-            s["price_target"] = ac.get("price_target")
-    analytics = api.get_portfolio_analytics(portfolio_data, regime)
+    bundle = api.get_portfolio_bundle()
     return templates.TemplateResponse(request, "portfolio.html", {
-        "page": "portfolio", "regime": regime, "portfolio": portfolio_data,
-        "analytics": analytics,
+        "page": "portfolio",
+        "regime": bundle["regime"],
+        "portfolio": bundle["portfolio"],
+        "analytics": bundle["analytics"],
     })
 
 
@@ -347,12 +399,29 @@ async def command_centre(request: Request):
 
 
 @app.get("/news", response_class=HTMLResponse)
-async def news_page(request: Request, topic: str = "", tier: int = 0):
-    """Inshorts-style news feed page. Single-page render, no SPA."""
+async def news_page(
+    request: Request,
+    topic: str = "",
+    tier: int = 0,
+    q: str = "",
+    sentiment: str = "",
+    confidence: str = "",
+    hours: int = 168,
+    sort: str = "smart",
+    page: int = 1,
+):
+    """Flagship news feed: topic tabs, search, sentiment/confidence/tier filters,
+    sort modes, server-side pagination. Single-page render, no SPA."""
     feed = api.get_news_feed(
         topic=(topic or None),
         tier=(tier if tier else None),
-        limit=80,
+        q=(q or None),
+        sentiment=(sentiment or None),
+        confidence=(confidence or None),
+        hours=hours,
+        sort=sort,
+        page=page,
+        page_size=24,
     )
     brief = api.get_news_brief()
     return templates.TemplateResponse(request, "news.html", {
@@ -361,6 +430,12 @@ async def news_page(request: Request, topic: str = "", tier: int = 0):
         "brief": brief,
         "topic": topic,
         "active_tier": tier,
+        "q": q,
+        "active_sentiment": sentiment,
+        "active_confidence": confidence,
+        "active_hours": hours,
+        "active_sort": sort,
+        "active_page": page,
     })
 
 
