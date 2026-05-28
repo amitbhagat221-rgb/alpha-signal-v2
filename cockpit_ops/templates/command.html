@@ -1,0 +1,570 @@
+{% extends "base.html" %}
+{% from "_components.html" import tab_bar, radio_group %}
+
+{% block content %}
+
+<style>
+    /* ─── Architecture flow cards (kept from previous /command) ─── */
+    .arch-flow { max-width: 880px; margin: 0 auto 30px; }
+    .arch-stage { padding: 0; margin: 0; background: transparent; border: none; }
+    .arch-stage > summary {
+        cursor: pointer; list-style: none; padding: 0; margin: 0;
+        display: block; user-select: none;
+    }
+    .arch-stage > summary::-webkit-details-marker { display: none; }
+    .arch-stage-card {
+        background: linear-gradient(180deg, var(--bg-card) 0%, rgba(24,26,31,0.85) 100%);
+        border: 1px solid var(--border); border-radius: 14px;
+        padding: 20px 24px; position: relative;
+        transition: transform 0.15s, border-color 0.15s, box-shadow 0.15s;
+    }
+    .arch-stage > summary:hover .arch-stage-card {
+        border-color: var(--accent); transform: translateX(4px);
+        box-shadow: 0 4px 24px rgba(77,142,255,0.08);
+    }
+    .arch-stage[open] > summary .arch-stage-card {
+        border-color: var(--accent);
+        box-shadow: 0 4px 24px rgba(77,142,255,0.12);
+    }
+    .arch-stage-num {
+        display: inline-flex; align-items: center; justify-content: center;
+        width: 30px; height: 30px; border-radius: 50%;
+        background: var(--accent); color: white;
+        font-weight: 700; font-size: 13px; margin-right: 14px;
+    }
+    .arch-stage-title { font-size: 18px; font-weight: 700; letter-spacing: 0.6px;
+                        text-transform: uppercase; color: var(--text-primary);
+                        display: inline-block; vertical-align: middle; }
+    .arch-stage-tagline { font-size: 13px; color: var(--text-secondary);
+                          margin-top: 8px; line-height: 1.5; }
+    .arch-stage-meta { font-size: 11px; color: var(--text-muted);
+                       margin-top: 6px; font-variant-numeric: tabular-nums; }
+    .arch-stage-expand { position: absolute; top: 22px; right: 24px;
+                         font-size: 14px; color: var(--text-muted);
+                         transition: transform 0.2s; }
+    .arch-stage[open] .arch-stage-expand { transform: rotate(90deg); color: var(--accent); }
+    .arch-arrow { text-align: center; color: var(--text-muted);
+                  font-size: 22px; line-height: 1; margin: 6px 0; user-select: none; }
+    .arch-stage[data-color="data"]    .arch-stage-num { background: #4d8eff; }
+    .arch-stage[data-color="signals"] .arch-stage-num { background: #f1c40f; color: #181a1f; }
+    .arch-stage[data-color="model"]   .arch-stage-num { background: #2ecc71; color: #181a1f; }
+    .arch-stage[data-color="picks"]   .arch-stage-num { background: #e74c3c; }
+    .arch-body { padding: 16px 0 0 0; }
+
+    /* ─── Stat cards ─── */
+    .cc-grid { display: grid; gap: 10px; }
+    .cc-grid-3 { grid-template-columns: repeat(3, 1fr); }
+    @media (max-width: 720px) { .cc-grid-3 { grid-template-columns: 1fr; } }
+    .cc-stat-card { padding: 12px 14px; background: var(--bg-card);
+                    border: 1px solid var(--border); border-radius: 8px; }
+    .cc-stat-label { font-size: 10px; color: var(--text-muted);
+                     text-transform: uppercase; letter-spacing: 0.7px; margin-bottom: 6px; }
+    .cc-stat-value { font-size: 22px; font-weight: 700; color: var(--text-primary); }
+    .cc-stat-sub { font-size: 11px; color: var(--text-secondary); margin-top: 4px; }
+    .cc-progress { height: 8px; background: var(--border); border-radius: 4px;
+                   overflow: hidden; margin-top: 8px; }
+    .cc-progress-bar { height: 100%; background: var(--accent); transition: width 0.3s; }
+
+    /* ─── Pills (status / track labels) ─── */
+    .cc-pill { display: inline-block; padding: 2px 8px; border-radius: 10px;
+               font-size: 10px; font-weight: 700; letter-spacing: 0.4px;
+               text-transform: uppercase; }
+    .cc-pill.ok        { background: rgba(46,204,113,0.15); color: #2ecc71; }
+    .cc-pill.warn      { background: rgba(241,196,15,0.15); color: #f1c40f; }
+    .cc-pill.muted     { background: rgba(140,140,140,0.15); color: #aaa; }
+    .cc-pill.todo      { background: rgba(77,142,255,0.10); color: #4d8eff; }
+    .cc-pill.in-flight { background: rgba(241,196,15,0.18); color: #f1c40f; }
+    .cc-pill.blocked   { background: rgba(231,76,60,0.18); color: #e74c3c; }
+    .cc-pill.later     { background: rgba(140,140,140,0.12); color: #888; }
+    .cc-tag { display: inline-block; padding: 2px 6px; border-radius: 4px;
+              font-size: 10px; font-weight: 600; letter-spacing: 0.3px;
+              background: rgba(140,140,140,0.12); color: var(--text-secondary);
+              margin-left: 6px; }
+
+    /* ─── Factor / data tables ─── */
+    table.cc-table { width: 100%; border-collapse: collapse; }
+    table.cc-table th, table.cc-table td {
+        text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border);
+        font-size: 12px;
+    }
+    table.cc-table th { font-size: 10px; text-transform: uppercase; letter-spacing: 0.6px;
+                        color: var(--text-muted); font-weight: 600; }
+    table.cc-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+
+    /* ─── Data-model column listing ─── */
+    .col-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+                gap: 4px 14px; margin-top: 6px; }
+    .col-list .col {
+        font-size: 11px; font-family: var(--mono, monospace);
+        color: var(--text-secondary);
+    }
+    .col-list .col .name { color: var(--text-primary); font-weight: 600; }
+    .col-list .col .type { color: var(--text-muted); margin-left: 6px; font-size: 10px; }
+    .col-list .col.pk { border-left: 2px solid #f1c40f; padding-left: 6px; }
+    .col-list .col.fk { border-left: 2px solid #4d8eff; padding-left: 6px; }
+
+    /* ─── Markdown (handoff text) ─── */
+    .cc-md { white-space: pre-wrap; font-family: var(--mono, monospace);
+             font-size: 12px; line-height: 1.6; color: var(--text-secondary); }
+</style>
+
+<div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 18px;">
+    <div>
+        <div class="section-title">Command Centre</div>
+        <div class="section-desc">
+            How a one-person hedge fund works. Pick a tab; drill in further with the
+            collapsibles inside each tab.
+        </div>
+    </div>
+    <a href="/command" style="padding: 6px 12px; background: var(--bg-card);
+        border: 1px solid var(--border); border-radius: 6px; text-decoration: none;
+        color: var(--text-secondary); font-size: 11px;">↻ Refresh</a>
+</div>
+
+<div x-data="{ tab: 'architecture', loaded: { architecture: true } }" x-cloak>
+
+{{ tab_bar([
+    ('architecture', 'Architecture'),
+    ('todo',         'To Do'),
+    ('factors',      'Factors'),
+    ('data',         'Data Model'),
+    ('activity',     'Activity'),
+]) }}
+
+{# ════════════════════════════════════════════ #}
+{# ───────── TAB 1 — ARCHITECTURE ───────────── #}
+{# ════════════════════════════════════════════ #}
+<div x-show="tab === 'architecture'" x-cloak>
+
+<div class="arch-flow">
+
+    <details class="arch-stage" data-color="data" open>
+        <summary>
+            <div class="arch-stage-card">
+                <span class="arch-stage-num">1</span>
+                <span class="arch-stage-title">Data</span>
+                <span class="arch-stage-expand">▸</span>
+                <div class="arch-stage-tagline">
+                    Raw inputs from public, paid, and PIT-archived sources.
+                    Everything any signal will need lives here, idempotent + timestamped.
+                </div>
+                <div class="arch-stage-meta">
+                    {{ architecture.summary.tables }} core tables · prices, fundamentals, ownership, events, news, macro
+                </div>
+            </div>
+        </summary>
+        <div class="arch-body">
+            <div class="mindmap mm-data">
+                <div class="mm-node">
+                    <span class="mm-icon">D</span>
+                    Data Layer
+                    <span class="mm-meta">{{ architecture.data | length }} categories</span>
+                </div>
+                <div class="mm-children">
+                    {% for layer in architecture.data %}
+                    <div class="mm-leaf">
+                        <span class="mm-leaf-node">
+                            <strong>{{ layer.name }}</strong>
+                            <span class="mm-leaf-meta">— {{ layer.summary }}</span>
+                        </span>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </details>
+
+    <div class="arch-arrow">▼</div>
+
+    <details class="arch-stage" data-color="signals">
+        <summary>
+            <div class="arch-stage-card">
+                <span class="arch-stage-num">2</span>
+                <span class="arch-stage-title">Signals</span>
+                <span class="arch-stage-expand">▸</span>
+                <div class="arch-stage-tagline">
+                    Each table-of-data becomes a number that ranks stocks.
+                    {{ architecture.summary.factors_total }} factors today, organized by what they're trying to capture.
+                </div>
+                <div class="arch-stage-meta">
+                    {{ architecture.summary.factors_total }} factors · {{ architecture.summary.factors_in_model }} in model · {{ architecture.summary.factors_in_library }} in library · target {{ factor_summary.target }}
+                </div>
+            </div>
+        </summary>
+        <div class="arch-body">
+            <div class="mindmap mm-signals">
+                <div class="mm-node">
+                    <span class="mm-icon">S</span>
+                    Signals
+                    <span class="mm-meta">{{ architecture.signals | length }} categories</span>
+                </div>
+                <div class="mm-children">
+                    {% for grp in architecture.signals %}
+                    <div class="mm-leaf">
+                        <span class="mm-leaf-node">
+                            <strong>{{ grp.name }}</strong>
+                            <span class="mm-leaf-meta">— {{ grp.n_total }} factor{{ 's' if grp.n_total != 1 else '' }} · {{ grp.n_model }} in model</span>
+                        </span>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </details>
+
+    <div class="arch-arrow">▼</div>
+
+    <details class="arch-stage" data-color="model">
+        <summary>
+            <div class="arch-stage-card">
+                <span class="arch-stage-num">3</span>
+                <span class="arch-stage-title">Model</span>
+                <span class="arch-stage-expand">▸</span>
+                <div class="arch-stage-tagline">
+                    Validated signals get cap-tier-weighted into a composite. A quality gate excludes obvious losers;
+                    regime overlay tilts by macro mood. Non-validated factors wait in the personal library.
+                </div>
+                <div class="arch-stage-meta">
+                    {{ architecture.summary.factors_in_model }} factors voting · per-tier weights from C13b backtest
+                </div>
+            </div>
+        </summary>
+        <div class="arch-body">
+            <div class="mindmap mm-model">
+                <div class="mm-node">
+                    <span class="mm-icon">M</span>
+                    Model
+                    <span class="mm-meta">{{ architecture.model | length }} components</span>
+                </div>
+                <div class="mm-children">
+                    {% for layer in architecture.model %}
+                    <div class="mm-leaf">
+                        <span class="mm-leaf-node">
+                            <strong>{{ layer.name }}</strong>
+                            <span class="mm-leaf-meta">— {{ layer.summary }}</span>
+                        </span>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </details>
+
+    <div class="arch-arrow">▼</div>
+
+    <details class="arch-stage" data-color="picks">
+        <summary>
+            <div class="arch-stage-card">
+                <span class="arch-stage-num">4</span>
+                <span class="arch-stage-title">Picks</span>
+                <span class="arch-stage-expand">▸</span>
+                <div class="arch-stage-tagline">
+                    The model's daily output: top stocks per cap tier, with dossiers,
+                    delivered to a cockpit, an email, and a watchlist. The thing you actually trade off.
+                </div>
+                <div class="arch-stage-meta">
+                    daily morning brief · email digest · per-stock explorer · action queue
+                </div>
+            </div>
+        </summary>
+        <div class="arch-body">
+            <div class="mindmap mm-picks">
+                <div class="mm-node">
+                    <span class="mm-icon">P</span>
+                    Picks
+                    <span class="mm-meta">{{ architecture.picks | length }} channels</span>
+                </div>
+                <div class="mm-children">
+                    {% for layer in architecture.picks %}
+                    <div class="mm-leaf">
+                        <span class="mm-leaf-node">
+                            <strong>{{ layer.name }}</strong>
+                            <span class="mm-leaf-meta">— {{ layer.summary }}</span>
+                        </span>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </details>
+
+</div>
+
+</div>{# / architecture tab #}
+
+
+{# ════════════════════════════════════════════ #}
+{# ───────── TAB 2 — TO DO ──────────────────── #}
+{# ════════════════════════════════════════════ #}
+<div x-show="tab === 'todo'" x-cloak>
+
+<div style="margin-bottom: 14px; font-size: 12px; color: var(--text-muted);">
+    Auto-derived from system state: in-flight processes, missing PIT helpers, factor-count gap,
+    operational debt. Updates whenever a check-in routine re-runs.
+</div>
+
+{% for t in todos %}
+<div class="cc-stat-card" style="margin-bottom: 10px; border-left: 3px solid
+    {%- if t.status == 'in-flight' %} #f1c40f
+    {%- elif t.status == 'blocked' %} #e74c3c
+    {%- elif t.status == 'later' %} #888
+    {%- else %} #4d8eff
+    {%- endif %};">
+    <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 12px;">
+        <div style="flex: 1;">
+            <div style="font-size: 13px; font-weight: 600; margin-bottom: 4px;">{{ t.title }}</div>
+            <div class="cc-stat-sub" style="line-height: 1.6; color: var(--text-secondary);">{{ t.detail }}</div>
+        </div>
+        <span class="cc-pill {{ t.status }}">{{ t.status }}</span>
+    </div>
+</div>
+{% endfor %}
+
+</div>{# / todo tab #}
+
+
+{# ════════════════════════════════════════════ #}
+{# ───────── TAB 3 — FACTORS ────────────────── #}
+{# ════════════════════════════════════════════ #}
+<div x-show="tab === 'factors'" x-cloak>
+
+<div x-data="{ filter: 'all' }">
+
+<div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 14px;">
+    <div style="font-size: 12px; color: var(--text-muted);">
+        {{ factors | length }} factors · {{ factor_summary.in_production }} in model · {{ factor_summary.in_library }} in library · target {{ factor_summary.target }}.
+        Promotion rule: |t| ≥ 1.5 in any tier.
+    </div>
+    {{ radio_group('filter', [
+        ('all',     'All'),
+        ('model',   'In Model'),
+        ('library', 'In Library'),
+    ]) }}
+</div>
+
+{% set factor_groups = {} %}
+{% for f in factors %}{% if factor_groups.update({f.group: factor_groups.get(f.group, []) + [f]}) %}{% endif %}{% endfor %}
+
+<div class="factor-grid">
+{% for group_name, group_factors in factor_groups.items() %}
+<div class="factor-grid-card">
+    <div class="fg-head">
+        <span class="fg-name">{{ group_name }}</span>
+        <span class="fg-meta">
+            {{ group_factors | length }} factor{{ 's' if group_factors | length != 1 else '' }} ·
+            {{ group_factors | selectattr('in_production') | list | length }} in model
+        </span>
+    </div>
+    <div>
+    {% for f in group_factors %}
+        {% set t_class = 't-strong' if (f.t_stat is not none and f.t_stat | abs >= 2.5)
+                         else ('t-medium' if (f.t_stat is not none and f.t_stat | abs >= 1.5)
+                         else 't-weak') %}
+        <span class="fg-chip {{ 'in-model' if f.in_production else '' }} {{ t_class }}"
+              x-show="filter === 'all'
+                      || (filter === 'model'   && {{ 'true' if f.in_production else 'false' }})
+                      || (filter === 'library' && {{ 'false' if f.in_production else 'true' }})"
+              title="{{ f.name }}{% if f.status_reason %} — {{ f.status_reason }}{% endif %}">
+            {{ f.name }}
+            {% if f.track == 'f-track' %}<span class="cc-tag" style="margin-left:0; background: rgba(77,142,255,0.20); color: #4d8eff; font-size: 9px;">F</span>{% endif %}
+            <span class="fg-t">{% if f.t_stat is not none %}{{ '%.2f' | format(f.t_stat) }}{% else %}—{% endif %}</span>
+        </span>
+    {% endfor %}
+    </div>
+</div>
+{% endfor %}
+</div>
+
+<div style="margin-top: 14px; font-size: 11px; color: var(--text-muted);">
+    <strong>t-stat colour key:</strong>
+    <span style="color: #2ecc71;">|t| ≥ 2.5 (KEEP)</span> ·
+    <span style="color: #4d8eff;">1.5–2.5 (WEAK keep)</span> ·
+    <span style="color: var(--text-muted);">&lt; 1.5 (library)</span>.
+    Reference: pit_ic_by_tier_v2 (preferring v2_recompute over v1_archive).
+</div>
+
+</div>{# / x-data filter #}
+
+</div>{# / factors tab #}
+
+
+{# ════════════════════════════════════════════ #}
+{# ───────── TAB 4 — DATA MODEL ─────────────── #}
+{# ════════════════════════════════════════════ #}
+<div x-show="tab === 'data'" x-cloak>
+
+<div x-data="{ view: 'group' }">
+
+<div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 14px;">
+    <div style="font-size: 12px; color: var(--text-muted);">
+        {{ data_model | length }} groups ·
+        {{ data_model | sum(attribute='n_tables') }} tables ·
+        {{ "{:,}".format(data_model | sum(attribute='n_rows')) }} rows.
+        Yellow border = primary key column · blue border = foreign key column.
+    </div>
+    {{ radio_group('view', [
+        ('group', 'By group'),
+        ('size',  'By size'),
+    ]) }}
+</div>
+
+{# ── By group view ── #}
+<div x-show="view === 'group'">
+<div class="v-accordion">
+{% for grp in data_model %}
+<details>
+    <summary>{{ grp.name }}
+        <span class="v-meta">{{ grp.n_tables }} table{{ 's' if grp.n_tables != 1 else '' }} · {{ "{:,}".format(grp.n_rows) }} rows</span>
+    </summary>
+    <div class="v-body">
+        <div class="v-accordion" style="margin-top: 4px;">
+        {% for t in grp.tables %}
+        <details>
+            <summary>
+                <code>{{ t.name }}</code>
+                <span class="v-meta">
+                    {{ t.n_cols }} cols · {{ "{:,}".format(t.rows) }} rows
+                    {%- if t.stocks is not none %} · {{ "{:,}".format(t.stocks) }} stocks{% endif -%}
+                    {%- if t.latest %} · latest {{ t.latest }}{% endif -%}
+                </span>
+            </summary>
+            <div class="v-body">
+                <div style="color: var(--text-secondary); margin-bottom: 6px;">{{ t.desc }}</div>
+                {% if t.pk %}
+                <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 4px;">
+                    <strong style="color: #f1c40f;">PK:</strong>
+                    {% for c in t.pk %}<code>{{ c }}</code>{% if not loop.last %}, {% endif %}{% endfor %}
+                </div>
+                {% endif %}
+                {% if t.fks %}
+                <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 4px;">
+                    <strong style="color: #4d8eff;">FK:</strong>
+                    {% for fk in t.fks %}<code>{{ fk.col }} → {{ fk.ref_table }}.{{ fk.ref_col }}</code>{% if not loop.last %}, {% endif %}{% endfor %}
+                </div>
+                {% endif %}
+                {% if t.indexes %}
+                <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 4px;">
+                    <strong>Indexes:</strong>
+                    {% for ix in t.indexes %}<code>{{ ix }}</code>{% if not loop.last %}, {% endif %}{% endfor %}
+                </div>
+                {% endif %}
+                {% set fk_cols = t.fks | map(attribute='col') | list %}
+                <div class="col-list">
+                    {% for c in t.cols %}
+                    <div class="col {{ 'pk' if c.pk else ('fk' if c.name in fk_cols else '') }}">
+                        <span class="name">{{ c.name }}</span><span class="type">{{ c.type }}</span>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </details>
+        {% endfor %}
+        </div>
+    </div>
+</details>
+{% endfor %}
+</div>
+</div>
+
+{# ── By size view (flat list, sorted by row count desc) ── #}
+{% set flat_tables = [] %}
+{% for grp in data_model %}{% for t in grp.tables %}{% if flat_tables.append(t) %}{% endif %}{% endfor %}{% endfor %}
+<div x-show="view === 'size'">
+<div class="v-accordion">
+{% for t in flat_tables | sort(attribute='rows', reverse=true) %}
+<details>
+    <summary>
+        <code>{{ t.name }}</code>
+        <span class="v-meta">
+            {{ "{:,}".format(t.rows) }} rows ·
+            {%- if t.stocks is not none %} {{ "{:,}".format(t.stocks) }} stocks · {% endif -%}
+            {{ t.group }}
+        </span>
+    </summary>
+    <div class="v-body">
+        <div style="color: var(--text-secondary); margin-bottom: 6px;">{{ t.desc }}</div>
+        {% if t.pk %}<div style="font-size: 11px; color: var(--text-muted);"><strong style="color: #f1c40f;">PK:</strong>
+            {% for c in t.pk %}<code>{{ c }}</code>{% if not loop.last %}, {% endif %}{% endfor %}</div>{% endif %}
+        {% set fk_cols = t.fks | map(attribute='col') | list %}
+        <div class="col-list">
+            {% for c in t.cols %}
+            <div class="col {{ 'pk' if c.pk else ('fk' if c.name in fk_cols else '') }}">
+                <span class="name">{{ c.name }}</span><span class="type">{{ c.type }}</span>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+</details>
+{% endfor %}
+</div>
+</div>
+
+</div>{# / x-data view #}
+
+</div>{# / data tab #}
+
+
+{# ════════════════════════════════════════════ #}
+{# ───────── TAB 5 — ACTIVITY ───────────────── #}
+{# ════════════════════════════════════════════ #}
+<div x-show="tab === 'activity'" x-cloak>
+
+<div class="cc-grid cc-grid-3" style="margin-bottom: 18px;">
+    <div class="cc-stat-card">
+        <div class="cc-stat-label">Factor Library</div>
+        <div class="cc-stat-value">{{ factor_summary.built }} / {{ factor_summary.target }}</div>
+        <div class="cc-stat-sub">{{ factor_summary.in_production }} in model · {{ factor_summary.in_library }} in library</div>
+        <div class="cc-progress"><div class="cc-progress-bar" style="width: {{ factor_summary.pct }}%;"></div></div>
+    </div>
+    <div class="cc-stat-card">
+        <div class="cc-stat-label">Fundamentals (F-track)</div>
+        {% set fs = data_layer.get('fundamentals_screener', {}) %}
+        <div class="cc-stat-value">{{ "{:,}".format(fs.get('rows', 0)) }}</div>
+        <div class="cc-stat-sub">
+            {{ fs.get('stocks', 0) }} stocks ·
+            {% if fs.get('trade_payables_stocks', 0) %}{{ fs.get('trade_payables_stocks') }} with Trade Payables{% else %}schedules pending{% endif %}
+        </div>
+    </div>
+    <div class="cc-stat-card">
+        <div class="cc-stat-label">Tables &amp; Rows</div>
+        <div class="cc-stat-value">{{ data_model | sum(attribute='n_tables') }}</div>
+        <div class="cc-stat-sub">{{ "{:,}".format(data_model | sum(attribute='n_rows')) }} rows across {{ data_model | length }} groups</div>
+    </div>
+</div>
+
+<div class="v-accordion">
+    <details open>
+        <summary>Recent commits <span class="v-meta">last {{ commits | length }} on master</span></summary>
+        <div class="v-body">
+            <table class="cc-table">
+                <thead>
+                <tr><th>SHA</th><th>Subject</th><th>When</th></tr>
+                </thead>
+                <tbody>
+                {% for c in commits %}
+                <tr>
+                    <td><code>{{ c.sha }}</code></td>
+                    <td>{{ c.subject }}</td>
+                    <td class="cc-stat-sub">{{ c.when }}</td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </details>
+
+    {% if where_md %}
+    <details>
+        <summary>Where I am <span class="v-meta">from HANDOFF.md</span></summary>
+        <div class="v-body">
+            <div class="cc-md">{{ where_md }}</div>
+        </div>
+    </details>
+    {% endif %}
+</div>
+
+</div>{# / activity tab #}
+
+</div>{# / tabs root #}
+
+{% endblock %}

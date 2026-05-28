@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<style>
+.mv-grid { display:grid; grid-template-columns: repeat(3, 1fr); gap:16px; margin-bottom:24px; }
+.mv-card { background:var(--bg-card); border:1px solid var(--border); border-radius:12px; padding:18px; }
+.mv-card.is-production { border-left:4px solid var(--accent); }
+.mv-card.is-return     { border-left:4px solid var(--green); }
+.mv-card.is-sharpe     { border-left:4px solid var(--blue); }
+.mv-head { display:flex; justify-content:space-between; align-items:baseline; margin-bottom:6px; }
+.mv-title { font-weight:800; font-size:15px; letter-spacing:-0.01em; color:var(--text-primary); }
+.mv-pill { font-size:10px; padding:2px 8px; border-radius:10px; background:var(--bg-card-hover); color:var(--text-muted); letter-spacing:0.5px; text-transform:uppercase; }
+.mv-desc { font-size:11.5px; color:var(--text-muted); line-height:1.45; margin-bottom:14px; min-height:34px; }
+.mv-weights { font-size:10.5px; color:var(--text-secondary); line-height:1.7; margin-bottom:14px; padding:10px 12px; background:rgba(255,255,255,0.02); border-radius:8px; }
+.mv-weights b { color:var(--text-primary); font-weight:600; }
+.mv-tier-block { margin-top:12px; }
+.mv-tier-label { font-size:10.5px; font-weight:700; letter-spacing:0.06em; text-transform:uppercase; color:var(--text-muted); margin-bottom:6px; display:flex; align-items:center; gap:8px; }
+.mv-tier-label .pip { width:8px; height:8px; border-radius:50%; }
+.mv-tier-label.tier-large .pip { background:var(--accent); }
+.mv-tier-label.tier-mid   .pip { background:var(--amber); }
+.mv-tier-label.tier-small .pip { background:var(--green); }
+.mv-pick { display:grid; grid-template-columns: 22px 1fr 60px; gap:8px; padding:5px 0; align-items:baseline; border-bottom:1px solid rgba(255,255,255,0.03); font-size:12px; }
+.mv-pick:last-child { border-bottom:none; }
+.mv-pick .rank { color:var(--text-muted); font-variant-numeric: tabular-nums; font-size:11px; }
+.mv-pick .ticker a { color:var(--text-primary); text-decoration:none; font-weight:600; }
+.mv-pick .ticker a:hover { color:var(--accent); }
+.mv-pick .name { color:var(--text-muted); font-size:10.5px; display:block; margin-top:1px; }
+.mv-pick .score { color:var(--text-secondary); text-align:right; font-variant-numeric: tabular-nums; font-size:11.5px; }
+.mv-pick.is-divergent { background:linear-gradient(90deg, rgba(245,158,11,0.06) 0%, transparent 100%); }
+.mv-pick.is-divergent .ticker a::after { content:"★"; color:var(--amber); margin-left:4px; font-size:9px; vertical-align:super; }
+.mv-divergent-legend { font-size:10.5px; color:var(--text-muted); padding-top:4px; margin-top:4px; border-top:1px dashed var(--border); }
+.mv-legend-star { color:var(--amber); }
+.mv-footnote { margin-top:24px; padding:14px 18px; background:var(--bg-card); border:1px solid var(--border); border-radius:10px; font-size:11.5px; color:var(--text-secondary); line-height:1.6; }
+.mv-footnote b { color:var(--text-primary); }
+@media (max-width: 980px) { .mv-grid { grid-template-columns: 1fr; } }
+</style>
+
+<div class="section-title">Factor Model — Variants</div>
+<div class="section-desc">
+    Three weight schemes, same universe, same date ({{ bundle.as_of }}). <b>Production</b> is the live model writing to <code>daily_picks</code>. <b>Max Return</b> &amp; <b>Max Sharpe</b> are derived live from the PIT IC backtest (<code>pit_ic_by_tier_v2</code>) by <a href="https://github.com/anthropics" style="color:var(--accent);">tools/optimize_weights.py</a> — they're <i>not</i> persisted to <code>daily_picks</code> yet, this page runs them on demand (30-min cache).
+</div>
+
+{% set variant_keys = ['production', 'return', 'sharpe'] %}
+
+{# Pre-compute divergence: a pick is "divergent" if it appears in only this variant's tier top-N #}
+{% set tickers_by_variant_tier = {} %}
+{% for vk in variant_keys %}
+  {% for tier in ['LARGE','MID','SMALL'] %}
+    {% set key = vk ~ '_' ~ tier %}
+    {% set _ = tickers_by_variant_tier.update({key: bundle.variants[vk].picks[tier] | map(attribute='ticker') | list}) %}
+  {% endfor %}
+{% endfor %}
+
+<div class="mv-grid">
+  {% for vk in variant_keys %}
+  {% set v = bundle.variants[vk] %}
+  <div class="mv-card is-{{ vk }}">
+    <div class="mv-head">
+      <div class="mv-title">{{ v.label }}</div>
+      <div class="mv-pill">{{ vk }}</div>
+    </div>
+    <div class="mv-desc">{{ v.description }}</div>
+
+    <div class="mv-weights">
+      <b>LARGE:</b>
+      {% for k, w in v.weights['LARGE'].items() %}<span>{{ k }} {{ "%+.0f"|format(w*100) }}%</span>{% if not loop.last %} · {% endif %}{% endfor %}<br>
+      <b>MID:</b>
+      {% for k, w in v.weights['MID'].items() %}<span>{{ k }} {{ "%+.0f"|format(w*100) }}%</span>{% if not loop.last %} · {% endif %}{% endfor %}<br>
+      <b>SMALL:</b>
+      {% for k, w in v.weights['SMALL'].items() %}<span>{{ k }} {{ "%+.0f"|format(w*100) }}%</span>{% if not loop.last %} · {% endif %}{% endfor %}
+    </div>
+
+    {% for tier in ['LARGE','MID','SMALL'] %}
+    <div class="mv-tier-block">
+      <div class="mv-tier-label tier-{{ tier|lower }}"><span class="pip"></span>{{ tier }} ({{ v.picks[tier]|length }})</div>
+      {% for p in v.picks[tier] %}
+        {# Divergent = this ticker not in either of the OTHER two variants' same-tier top-N #}
+        {% set other_keys = variant_keys | reject('equalto', vk) | list %}
+        {% set in_other = false %}
+        {% for ok in other_keys %}
+          {% if p.ticker in tickers_by_variant_tier[ok ~ '_' ~ tier] %}{% set in_other = true %}{% endif %}
+        {% endfor %}
+        <div class="mv-pick {% if not in_other %}is-divergent{% endif %}">
+          <span class="rank">#{{ p.rank }}</span>
+          <span class="ticker">
+            <a href="/explorer/{{ p.sid }}">{{ p.ticker }}</a>
+            <span class="name">{{ p.name | truncate(28, true) }}</span>
+          </span>
+          <span class="score">{{ "%.3f"|format(p.final_score) }}</span>
+        </div>
+      {% endfor %}
+    </div>
+    {% endfor %}
+  </div>
+  {% endfor %}
+</div>
+
+<div class="mv-divergent-legend"><span class="mv-legend-star">★</span> Divergent — pick appears in this variant's top {{ n_per_tier }} but in <i>neither</i> of the other two variants. The most informative cell — these are picks whose ranking is driven by the weight-scheme choice rather than the underlying signals.</div>
+
+<div class="mv-footnote">
+  <b>How to read this:</b><br>
+  Production was tuned by hand from a single t-stat per signal. Max Return + Max Sharpe were derived from the PIT IC backtest and surface two factors that production missed: <code>pt_upside</code> (t = 7-9 across tiers) and <code>eps_growth</code> (t = 3-5).<br><br>
+  <b>Max Return</b> weights factors by |t-stat| — favors factors with biggest absolute IC, even if volatile.<br>
+  <b>Max Sharpe</b> weights factors by ICIR (mean IC ÷ vol of IC) — favors consistency. Lower expected return per trade, lower variance.<br><br>
+  Both variants gate at 40% eligible coverage (vs production's 60%) because they concentrate ~40% of SMALL weight on analyst-dependent signals; the looser gate keeps stocks without analyst coverage in the SMALL universe.<br><br>
+  <b>Not yet persisted</b> — these variants are CLI / cockpit only. To persist them to <code>daily_picks</code>, the schema needs a <code>variant</code> column and the screener cron needs to run all three. Defer until you decide whether to actually switch live picks to one of the new schemes.
+</div>
+
+{% endblock %}

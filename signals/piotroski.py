@@ -21,7 +21,7 @@ import numpy as np
 import pandas as pd
 
 from config import SCREEN
-from db import get_db, read_sql, upsert_df
+from db import get_db, read_sql, upsert_df, emit_lineage
 
 FINANCIAL_SECTORS = set(SCREEN["financial_sectors"])
 DILUTION_TOLERANCE = 0.02  # 2% max share increase allowed
@@ -239,6 +239,68 @@ def _nonzero(val):
     return val != 0
 
 
+def _build_lineage(stocks, qi, bs, cf, df):
+    """Emit lineage records for piotroski_f_score per top-300 sid.
+
+    Each scored sid produces lineage rows pointing at the contributing
+    source rows: the last 8 quarters of quarterly_income (for LTM y0+y1),
+    last 2 annual_balance_sheet rows, last annual_cash_flow row.
+    """
+    out = []
+    qi_by_sid = dict(list(qi.groupby("sid")))
+    bs_by_sid = dict(list(bs.groupby("sid")))
+    cf_by_sid = dict(list(cf.groupby("sid")))
+
+    scored_sids = set(df[df["f_score"].notna()]["sid"])
+
+    for sid in scored_sids:
+        # quarterly_income: last 8 quarters (LTM y0 + y1)
+        qi_g = qi_by_sid.get(sid)
+        if qi_g is not None and len(qi_g) >= MIN_QUARTERS:
+            g = qi_g.sort_values("end_date").tail(MIN_QUARTERS_YOY)
+            for i, qrow in enumerate(g.itertuples(index=False)):
+                # y0 = most recent 4, y1 = previous 4
+                role = "ltm_y0" if i >= len(g) - 4 else "ltm_y1"
+                out.append({
+                    "sid": sid, "factor": "piotroski_f_score",
+                    "source_table": "quarterly_income",
+                    "source_key": {"sid": sid,
+                                   "end_date": str(qrow.end_date),
+                                   "reporting": qrow.reporting},
+                    "source_cols": ["revenue", "net_income", "pbt", "interest"],
+                    "contribution": role,
+                })
+
+        # annual_balance_sheet: last 2 years
+        bs_g = bs_by_sid.get(sid)
+        if bs_g is not None:
+            bs_sorted = bs_g.sort_values("period").tail(2)
+            for i, brow in enumerate(bs_sorted.itertuples(index=False)):
+                role = "bs_y0" if i == len(bs_sorted) - 1 else "bs_y1"
+                out.append({
+                    "sid": sid, "factor": "piotroski_f_score",
+                    "source_table": "annual_balance_sheet",
+                    "source_key": {"sid": sid, "period": str(brow.period)},
+                    "source_cols": ["total_assets", "current_assets", "current_liabilities",
+                                    "long_term_debt", "shares_outstanding"],
+                    "contribution": role,
+                })
+
+        # annual_cash_flow: last 1 year
+        cf_g = cf_by_sid.get(sid)
+        if cf_g is not None and len(cf_g) >= 1:
+            crow = cf_g.sort_values("period").iloc[-1]
+            out.append({
+                "sid": sid, "factor": "piotroski_f_score",
+                "source_table": "annual_cash_flow",
+                "source_key": {"sid": sid, "period": str(crow["period"])},
+                "source_cols": ["operating_cash_flow"],
+                "contribution": "cf_y0",
+            })
+
+    return out
+
+
 def compute(dry_run=False):
     """Main entry point. Returns row count."""
     stocks, qi, bs, cf = _load_data()
@@ -269,6 +331,13 @@ def compute(dry_run=False):
 
     rows = upsert_df(df, "piotroski_scores")
     print(f"Saved {rows} rows to piotroski_scores (snapshot={snapshot})")
+
+    # Emit per-sid lineage for top-300 SIDs (gated by lineage_active_sids)
+    lineage_records = _build_lineage(stocks, qi, bs, cf, df)
+    if lineage_records:
+        n_lineage = emit_lineage(lineage_records, snapshot_date=snapshot)
+        print(f"Saved {n_lineage} lineage records for piotroski_f_score")
+
     return rows
 
 

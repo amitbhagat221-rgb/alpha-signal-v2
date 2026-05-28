@@ -1,0 +1,1015 @@
+{% extends "base.html" %}
+{% from "_components.html" import tab_bar, radio_group %}
+
+{% block content %}
+
+<div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">
+    <div>
+        <div class="section-title">Health Center</div>
+        <div class="section-desc" style="margin-bottom: 0;">
+            One window into the system — pipeline · data · factors · cockpit endpoints · dossiers.
+            Findings from <span class="mono">tools.health_report</span> + <span class="mono">tools.data_sanity</span>
+            + <span class="mono">cockpit_endpoint_audit</span> unified into a single inbox.
+        </div>
+    </div>
+    <div style="display: flex; gap: 8px;">
+        <a href="?refresh=1"
+           style="padding: 8px 14px; background: var(--bg-card); color: var(--text-secondary);
+                  border: 1px solid var(--border); border-radius: 8px; text-decoration: none;
+                  font-size: 12px; font-weight: 600; letter-spacing: 0.3px;">
+            ⟳ Refresh
+        </a>
+        <a href="/sql"
+           style="padding: 8px 16px; background: var(--accent); color: white;
+                  border-radius: 8px; text-decoration: none; font-size: 12px;
+                  font-weight: 600; letter-spacing: 0.3px;">
+            SQL Console &rarr;
+        </a>
+    </div>
+</div>
+
+<div x-data="{ tab: 'overview', loaded: { overview: true } }" x-cloak>
+
+{{ tab_bar([
+    ('overview', 'Overview'),
+    ('health',   'Data'),
+    ('factors',  'Factors'),
+    ('pipeline', 'Pipeline'),
+    ('inventory','Inventory'),
+]) }}
+
+{# ────────── OVERVIEW TAB ────────── #}
+<div x-show="tab === 'overview'" x-cloak>
+
+{% if overview %}
+{% set verdict_color = {'CRITICAL': 'var(--red)', 'WARN': 'var(--amber)', 'INFO': 'var(--text-secondary)', 'OK': 'var(--green)'}.get(overview.verdict_severity, 'var(--text-muted)') %}
+
+<!-- Verdict banner -->
+<div class="card" style="margin-bottom: 18px; border-left: 4px solid {{ verdict_color }};">
+    <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap;">
+        <div>
+            <div style="font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px;">System pulse</div>
+            <div style="font-size: 22px; font-weight: 800; color: {{ verdict_color }};">{{ overview.verdict }}</div>
+            <div style="font-size: 11px; color: var(--text-muted); margin-top: 6px;">
+                As of <span class="mono">{{ overview.as_of[:19].replace('T', ' ') }}</span>
+                {% if overview.watchdog and overview.watchdog.last_run %}
+                · Watchdog last ran <span class="mono">{{ overview.watchdog.last_run[:19].replace('T', ' ') }}</span>
+                {% endif %}
+            </div>
+        </div>
+        <div style="display: flex; gap: 12px; align-items: center;">
+            {% for sev, label, color in [('critical', 'CRITICAL', 'var(--red)'), ('warn', 'WARN', 'var(--amber)'), ('info', 'INFO', 'var(--text-secondary)')] %}
+            <div style="text-align: center; padding: 6px 14px; border: 1px solid {{ color }}; border-radius: 8px; min-width: 70px;">
+                <div class="mono" style="font-size: 22px; font-weight: 800; color: {{ color }}; line-height: 1;">{{ overview.counts[sev] }}</div>
+                <div style="font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-top: 2px;">{{ label }}</div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+
+<!-- Pillar tiles -->
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin-bottom: 18px;">
+    {% for key in ['data', 'factors', 'picks', 'pipeline', 'dossiers'] %}
+    {% set tile = overview.tiles[key] %}
+    <a href="#{{ 'health' if key == 'data' else key }}"
+       @click="tab = '{{ 'health' if key == 'data' else (key if key in ['factors','pipeline'] else 'overview') }}'; loaded['{{ 'health' if key == 'data' else (key if key in ['factors','pipeline'] else 'overview') }}'] = true"
+       class="card" style="text-decoration: none; color: inherit; display: block; transition: transform 0.1s; cursor: pointer; border-top: 3px solid {{ tile.color }};">
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">
+            <div style="font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px;">{{ tile.label }}</div>
+            <div style="font-size: 24px; font-weight: 800; color: {{ tile.color }}; line-height: 1;">{{ tile.grade }}</div>
+        </div>
+        <div style="font-size: 13px; font-weight: 600; color: var(--text-primary); margin-bottom: 4px;">{{ tile.headline }}</div>
+        <div style="font-size: 11px; color: var(--text-muted); line-height: 1.4;">{{ tile.detail }}</div>
+    </a>
+    {% endfor %}
+</div>
+
+{% if overview.eligibility %}
+<!-- Universe coverage per signal (plan 0005 Phase A) -->
+<div class="card" style="margin-bottom: 18px;">
+    <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; margin-bottom: 10px;">
+        <div>
+            <div class="section-title" style="margin-bottom: 4px;">Universe coverage per signal</div>
+            <div class="section-desc" style="margin-bottom: 0;">
+                Per-signal "who SHOULD have a score" (eligible) vs "who currently lacks it" (ineligible).
+                INELIGIBLE is NOT a defect — it means the source data the signal needs isn't present for that SID
+                (e.g. SMALL caps with no analyst attribution can never have <span class="mono">consensus_signal</span>).
+                Watch for sudden jumps in ineligible count — those signal a source-side regression.
+            </div>
+        </div>
+    </div>
+    <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px;">
+        {% for e in overview.eligibility %}
+        {% set total = e.n_eligible + e.n_ineligible %}
+        {% set elig_pct = (100 * e.n_eligible / total) if total else 0 %}
+        {% set bar_color = '#2ecc71' if elig_pct >= 90 else ('#4d8eff' if elig_pct >= 70 else ('#f1c40f' if elig_pct >= 40 else '#e67e22')) %}
+        <div style="padding: 10px 14px; background: var(--bg-primary); border-radius: 8px; border-left: 3px solid {{ bar_color }};">
+            <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 4px;">
+                <span class="mono" style="font-size: 12px; font-weight: 700; color: var(--text-primary);">{{ e.signal }}</span>
+                <span class="mono" style="font-size: 12px; font-weight: 700; color: {{ bar_color }};">{{ "%.0f"|format(elig_pct) }}%</span>
+            </div>
+            <div style="height: 6px; background: var(--bg-card); border-radius: 3px; overflow: hidden; margin-bottom: 6px;">
+                <div style="width: {{ elig_pct }}%; height: 100%; background: {{ bar_color }};"></div>
+            </div>
+            <div style="font-size: 10px; color: var(--text-muted);">
+                <span style="color: var(--text-primary); font-weight: 600;">{{ e.n_eligible }}</span> eligible ·
+                {{ e.n_ineligible }} ineligible
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+
+{% if overview.integrity and (overview.integrity.n_fail or overview.integrity.n_warn) %}
+<!-- Per-stock integrity violations (plan 0005 Phase B) -->
+<div class="card" style="margin-bottom: 18px; border-left: 4px solid {{ 'var(--red)' if overview.integrity.n_fail else 'var(--amber)' }};">
+    <div class="section-title" style="margin-bottom: 4px; color: {{ 'var(--red)' if overview.integrity.n_fail else 'var(--amber)' }};">
+        Per-stock integrity violations
+    </div>
+    <div class="section-desc">
+        FAIL = pick contradicts itself across sources (e.g. dossier "16.5% downside" but PT/price → -8.5%).
+        FAILs are bumped from action_queue + morning_brief but retained here for review.
+        WARNs are surfaced but not gated.
+    </div>
+    {% if overview.integrity.fails %}
+    <div style="margin-top: 12px;">
+        <div style="font-size: 11px; color: var(--red); font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px;">
+            FAIL ({{ overview.integrity.n_fail }})
+        </div>
+        <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
+        {% for f in overview.integrity.fails[:10] %}
+        <tr style="border-bottom: 1px solid var(--border);">
+            <td style="padding: 6px 10px; vertical-align: top; width: 80px;">
+                <a href="/explorer/{{ f.sid }}" class="mono" style="color: var(--accent); font-weight: 700; text-decoration: none;">{{ f.sid }}</a>
+            </td>
+            <td style="padding: 6px 10px; font-size: 11px; color: var(--text-secondary); line-height: 1.4;">{{ f.integrity_reasons }}</td>
+        </tr>
+        {% endfor %}
+        </table>
+    </div>
+    {% endif %}
+    {% if overview.integrity.warns %}
+    <div style="margin-top: 12px;">
+        <div style="font-size: 11px; color: var(--amber); font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px;">
+            WARN ({{ overview.integrity.n_warn }})
+        </div>
+        <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
+        {% for w in overview.integrity.warns[:10] %}
+        <tr style="border-bottom: 1px solid var(--border);">
+            <td style="padding: 6px 10px; vertical-align: top; width: 80px;">
+                <a href="/explorer/{{ w.sid }}" class="mono" style="color: var(--accent); font-weight: 700; text-decoration: none;">{{ w.sid }}</a>
+            </td>
+            <td style="padding: 6px 10px; font-size: 11px; color: var(--text-secondary); line-height: 1.4;">{{ w.integrity_reasons }}</td>
+        </tr>
+        {% endfor %}
+        </table>
+    </div>
+    {% endif %}
+</div>
+{% endif %}
+
+<!-- Live Issues Inbox -->
+<div class="card" x-data="{
+    sev: 'actionable',
+    src: 'all',
+    cat: 'all',
+    search: ''
+}">
+    <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; margin-bottom: 14px;">
+        <div>
+            <div class="section-title" style="margin-bottom: 4px;">Live Issues</div>
+            <div class="section-desc" style="margin-bottom: 0;">
+                Every CRITICAL · WARN · INFO finding from sanity invariants, freshness, pipeline streaks,
+                cockpit endpoint audit, and dossier validator — in one inbox. Click a row's drill link to inspect.
+            </div>
+        </div>
+        <span style="font-size: 11px; color: var(--text-muted);" x-text="$el.parentElement.parentElement.querySelectorAll('tbody tr:not([style*=\'display: none\'])').length + ' shown'"></span>
+    </div>
+
+    <!-- Filter toolbar -->
+    <div style="display: flex; gap: 16px; flex-wrap: wrap; align-items: center; padding: 10px 14px; background: var(--bg-primary); border-radius: 8px; margin-bottom: 14px;">
+        <div>
+            <div style="font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Severity</div>
+            <div class="radio-group" role="radiogroup">
+                <button type="button" class="radio-btn" :class="{ active: sev === 'all' }" @click="sev='all'">All</button>
+                <button type="button" class="radio-btn" :class="{ active: sev === 'actionable' }" @click="sev='actionable'">Actionable</button>
+                <button type="button" class="radio-btn" :class="{ active: sev === 'critical' }" @click="sev='critical'">CRITICAL only</button>
+            </div>
+        </div>
+        <div>
+            <div style="font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Source</div>
+            <select x-model="src" style="background: var(--bg-card); color: var(--text-primary); border: 1px solid var(--border); border-radius: 6px; padding: 5px 8px; font-size: 12px;">
+                <option value="all">All sources</option>
+                {% for s in overview.sources %}<option value="{{ s }}">{{ s }}</option>{% endfor %}
+            </select>
+        </div>
+        <div>
+            <div style="font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Category</div>
+            <select x-model="cat" style="background: var(--bg-card); color: var(--text-primary); border: 1px solid var(--border); border-radius: 6px; padding: 5px 8px; font-size: 12px;">
+                <option value="all">All categories</option>
+                {% for c in overview.categories %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
+            </select>
+        </div>
+        <div style="flex: 1; min-width: 200px;">
+            <div style="font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Search</div>
+            <input type="text" x-model="search" placeholder="code, table, message…"
+                style="width: 100%; background: var(--bg-card); color: var(--text-primary); border: 1px solid var(--border); border-radius: 6px; padding: 5px 10px; font-size: 12px;">
+        </div>
+    </div>
+
+    {% if overview.issues %}
+    <div style="overflow-x: auto;">
+    <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
+        <thead>
+            <tr style="color: var(--text-muted); text-align: left; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px;">
+                <th style="padding: 8px 10px; border-bottom: 2px solid var(--border-accent); width: 90px;">Severity</th>
+                <th style="padding: 8px 10px; border-bottom: 2px solid var(--border-accent); width: 100px;">Source</th>
+                <th style="padding: 8px 10px; border-bottom: 2px solid var(--border-accent); width: 140px;">Category</th>
+                <th style="padding: 8px 10px; border-bottom: 2px solid var(--border-accent);">Finding</th>
+                <th style="padding: 8px 10px; border-bottom: 2px solid var(--border-accent); width: 100px; text-align: right;">Volume</th>
+                <th style="padding: 8px 10px; border-bottom: 2px solid var(--border-accent); width: 180px;">Drill</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for issue in overview.issues %}
+            {% set sev_color = {'CRITICAL': 'var(--red)', 'WARN': 'var(--amber)', 'INFO': 'var(--text-muted)'}.get(issue.severity, 'var(--text-muted)') %}
+            {% set sev_bg = {'CRITICAL': 'rgba(239,68,68,0.06)', 'WARN': 'rgba(251,191,36,0.04)', 'INFO': 'transparent'}.get(issue.severity, 'transparent') %}
+            <tr style="border-bottom: 1px solid var(--border); background: {{ sev_bg }};"
+                data-sev="{{ issue.severity|lower }}"
+                data-src="{{ issue.source }}"
+                data-cat="{{ issue.category }}"
+                data-text="{{ (issue.code ~ ' ' ~ (issue.table or '') ~ ' ' ~ (issue.column or '') ~ ' ' ~ issue.message)|lower }}"
+                x-show="(sev === 'all' || (sev === 'actionable' && ($el.dataset.sev === 'critical' || $el.dataset.sev === 'warn')) || (sev === 'critical' && $el.dataset.sev === 'critical')) && (src === 'all' || src === $el.dataset.src) && (cat === 'all' || cat === $el.dataset.cat) && (search === '' || $el.dataset.text.includes(search.toLowerCase()))">
+                <td style="padding: 10px; vertical-align: top;">
+                    <span style="font-size: 10px; padding: 2px 8px; border: 1px solid {{ sev_color }}; color: {{ sev_color }}; border-radius: 4px; font-weight: 700; letter-spacing: 0.5px;">{{ issue.severity }}</span>
+                </td>
+                <td style="padding: 10px; vertical-align: top; font-size: 11px; color: var(--text-secondary);">{{ issue.source }}</td>
+                <td style="padding: 10px; vertical-align: top; font-size: 11px; color: var(--text-secondary);">{{ issue.category }}</td>
+                <td style="padding: 10px; vertical-align: top;">
+                    <div class="mono" style="font-size: 10px; color: var(--accent); margin-bottom: 3px;">{{ issue.code }}</div>
+                    <div style="font-size: 12px; color: var(--text-primary); line-height: 1.4;">{{ issue.message }}</div>
+                    {% if issue.detail %}
+                    <div style="font-size: 11px; color: var(--text-muted); line-height: 1.4; margin-top: 3px;">{{ issue.detail }}</div>
+                    {% endif %}
+                    {% if issue.table %}
+                    <div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">
+                        <span class="mono">{{ issue.table }}{% if issue.column and issue.column != '—' %}.{{ issue.column }}{% endif %}</span>
+                        {% if issue.sample %}· sample: <span class="mono">{{ issue.sample }}</span>{% endif %}
+                    </div>
+                    {% endif %}
+                </td>
+                <td class="mono" style="padding: 10px; vertical-align: top; text-align: right; font-size: 11px;">
+                    {% if issue.n_total %}
+                    <span style="color: {{ sev_color }}; font-weight: 700;">{{ issue.n_bad }}</span>
+                    <span style="color: var(--text-muted);">/{{ issue.n_total }}</span>
+                    {% if issue.pct %}<div style="color: var(--text-muted); font-size: 10px;">{{ "%.1f"|format(issue.pct) }}%</div>{% endif %}
+                    {% elif issue.n_bad %}
+                    <span style="color: {{ sev_color }}; font-weight: 700;">{{ issue.n_bad }}</span>
+                    {% else %}
+                    <span style="color: var(--text-muted);">—</span>
+                    {% endif %}
+                </td>
+                <td style="padding: 10px; vertical-align: top;">
+                    {% if issue.drilldown_url %}
+                    <a href="{{ issue.drilldown_url }}" style="display: inline-block; padding: 4px 10px; background: var(--accent); color: white; border-radius: 4px; text-decoration: none; font-size: 10px; font-weight: 600; letter-spacing: 0.3px;">{{ issue.drilldown_label }}</a>
+                    {% else %}
+                    <span style="color: var(--text-muted); font-size: 10px;">—</span>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% else %}
+    <div style="padding: 30px; text-align: center; color: var(--green); font-size: 14px;">✓ No active issues — all checks pass.</div>
+    {% endif %}
+</div>
+
+{% else %}
+<div class="card" style="padding: 30px; color: var(--text-muted);">Health overview unavailable.</div>
+{% endif %}
+
+</div>{# / overview panel #}
+
+{# ────────── HEALTH TAB ────────── #}
+<div x-show="tab === 'health'" x-cloak>
+
+<!-- Database Health Summary -->
+{% if summary %}
+{% set verdict_color = 'var(--red)' if 'NEEDS ATTENTION' in summary.verdict else ('var(--amber)' if 'WATCH' in summary.verdict else 'var(--green)') %}
+<div class="card" style="margin-bottom: 20px; border-left: 4px solid {{ verdict_color }};">
+    <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap;">
+        <div style="flex: 1 1 320px;">
+            <div style="font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px;">Database Health</div>
+            <div style="font-size: 16px; font-weight: 700; color: {{ verdict_color }}; margin-bottom: 8px;">{{ summary.verdict }}</div>
+            <div style="font-size: 12px; color: var(--text-secondary); line-height: 1.6;">
+                {{ "{:,}".format(summary.total_rows) }} rows across {{ summary.total_tables }} tables · {{ summary.db_size_mb }} MB on disk
+                {% if summary.last_run.started_at %}
+                · last pipeline activity: <span class="mono">{{ summary.last_run.started_at[:16].replace('T', ' ') }}</span>
+                ({{ summary.last_run.step_name }}, {{ summary.last_run.status }})
+                {% endif %}
+            </div>
+        </div>
+        <div style="display: flex; gap: 18px; flex-wrap: wrap;">
+            <div style="text-align: center;">
+                <div style="font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Kinds</div>
+                <div style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">
+                    <span style="color: var(--accent); font-weight: 700;">{{ summary.kind_counts.get('RAW', 0) }}</span> raw &nbsp;
+                    <span style="color: var(--green); font-weight: 700;">{{ summary.kind_counts.get('COMPUTED', 0) }}</span> computed &nbsp;
+                    <span style="color: var(--amber); font-weight: 700;">{{ summary.kind_counts.get('LOG', 0) }}</span> log &nbsp;
+                    <span style="color: var(--text-muted); font-weight: 700;">{{ summary.kind_counts.get('STATE', 0) }}</span> state
+                </div>
+            </div>
+            <div style="text-align: center;">
+                <div style="font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Freshness</div>
+                <div style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">
+                    <span style="color: var(--green); font-weight: 700;">{{ summary.fresh_counts.FRESH }}</span> fresh &nbsp;
+                    <span style="color: var(--amber); font-weight: 700;">{{ summary.fresh_counts.STALE }}</span> stale &nbsp;
+                    <span style="color: var(--red); font-weight: 700;">{{ summary.fresh_counts.OUTDATED }}</span> outdated &nbsp;
+                    <span style="color: var(--text-muted); font-weight: 700;">{{ summary.fresh_counts['N/A'] }}</span> n/a
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<!-- Data Health Scores -->
+{% if health_scores %}
+<div class="card" style="margin-bottom: 20px;" x-data="{ filter: 'all', search: '' }">
+    <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; margin-bottom: 16px;">
+        <div>
+            <div class="section-title" style="margin-bottom: 4px;">Data Health Scores</div>
+            <div class="section-desc" style="margin-bottom: 0;">
+                Each table is scored 0-100 across 8 factors:
+                freshness (smart — annual data is fresh for ~1 year),
+                completeness, coverage, NULL rate, validity, outliers, backtest sufficiency, duplicates.
+                Sorted worst-first. Click any row to see the per-factor diagnostic and a drill-down query.
+            </div>
+        </div>
+        <div style="display: flex; align-items: center; gap: 16px;">
+            <div style="text-align: right;">
+                <div style="font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px;">Overall</div>
+                <div style="font-size: 36px; font-weight: 900; color: {{ health_scores.overall_color }}; line-height: 1;">{{ health_scores.overall_score }}</div>
+                <div style="font-size: 12px; color: var(--text-muted);">/ 100</div>
+            </div>
+            <div style="font-size: 32px; font-weight: 800; color: {{ health_scores.overall_color }}; padding: 8px 18px; border: 3px solid {{ health_scores.overall_color }}; border-radius: 12px; line-height: 1;">{{ health_scores.overall_grade }}</div>
+        </div>
+    </div>
+
+    {# Per-kind breakdown bar #}
+    <div style="display: flex; gap: 8px; flex-wrap: wrap; padding: 10px 14px; background: var(--bg-primary); border-radius: 8px; margin-bottom: 16px; font-size: 11px; color: var(--text-muted);">
+        <span style="text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600;">By kind:</span>
+        {% for kind, avg in health_scores.kind_summary.items() %}
+            {% set kc = 'var(--green)' if avg >= 80 else ('var(--amber)' if avg >= 60 else 'var(--red)') %}
+            <span><span style="color: {{ kc }}; font-weight: 700;">{{ kind }}</span> {{ avg }}</span>
+            {% if not loop.last %}<span style="color: var(--border);">|</span>{% endif %}
+        {% endfor %}
+        <span style="margin-left: auto;">{{ health_scores.total_issues }} issues across {{ health_scores.tables|length }} tables · computed {{ health_scores.computed_at[11:19] }}</span>
+    </div>
+
+    <!-- Filter toolbar -->
+    <div style="display: flex; gap: 16px; flex-wrap: wrap; align-items: center; padding: 10px 14px; background: var(--bg-primary); border-radius: 8px; margin-bottom: 12px;">
+        <div>
+            <div style="font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Filter</div>
+            <div class="radio-group" role="radiogroup">
+                <button type="button" class="radio-btn" :class="{ active: filter === 'all' }" @click="filter='all'">All ({{ health_scores.tables|length }})</button>
+                <button type="button" class="radio-btn" :class="{ active: filter === 'failing' }" @click="filter='failing'">Failing (&lt;60)</button>
+                <button type="button" class="radio-btn" :class="{ active: filter === 'warning' }" @click="filter='warning'">Warning (60-79)</button>
+                <button type="button" class="radio-btn" :class="{ active: filter === 'passing' }" @click="filter='passing'">Passing (≥80)</button>
+                <button type="button" class="radio-btn" :class="{ active: filter === 'issues' }" @click="filter='issues'">Has issues</button>
+            </div>
+        </div>
+        <div style="flex: 1; min-width: 200px;">
+            <div style="font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Search table</div>
+            <input type="text" x-model="search" placeholder="e.g. analyst_consensus"
+                style="width: 100%; background: var(--bg-card); color: var(--text-primary); border: 1px solid var(--border); border-radius: 6px; padding: 5px 10px; font-size: 12px;">
+        </div>
+    </div>
+
+    {# Per-table table #}
+    <div style="overflow-x: auto;">
+    <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
+        <thead>
+            <tr style="color: var(--text-muted); text-align: left; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px;">
+                <th style="padding: 8px 12px; border-bottom: 2px solid var(--border-accent); width: 32px;"></th>
+                <th style="padding: 8px 12px; border-bottom: 2px solid var(--border-accent);">Table</th>
+                <th style="padding: 8px 12px; border-bottom: 2px solid var(--border-accent); width: 220px;">Score</th>
+                <th style="padding: 8px 12px; border-bottom: 2px solid var(--border-accent); width: 60px; text-align: center;">Grade</th>
+                <th style="padding: 8px 12px; border-bottom: 2px solid var(--border-accent); width: 80px; text-align: center;">Issues</th>
+                <th style="padding: 8px 12px; border-bottom: 2px solid var(--border-accent);">Top issue / Status</th>
+            </tr>
+        </thead>
+        {# One <tbody> per table — required so the expand row shares the same Alpine scope as its trigger row. #}
+        {# (Two sibling <tr> elements would each get their own scope, so the expanded row's `open` would never resolve.) #}
+        {% for t in health_scores.tables %}
+        {% set sev_bg = 'rgba(239,68,68,0.04)' if t.score < 60 else ('rgba(251,191,36,0.03)' if t.score < 80 else 'transparent') %}
+        <tbody x-data="{open: false}"
+               data-score="{{ t.score }}"
+               data-issues="{{ t.issue_count }}"
+               data-name="{{ t.table|lower }}"
+               x-show="(filter === 'all'
+                    || (filter === 'failing' && {{ t.score }} < 60)
+                    || (filter === 'warning' && {{ t.score }} >= 60 && {{ t.score }} < 80)
+                    || (filter === 'passing' && {{ t.score }} >= 80)
+                    || (filter === 'issues'  && {{ t.issue_count }} > 0))
+                    && (search === '' || $el.dataset.name.includes(search.toLowerCase()))">
+            <tr style="border-bottom: 1px solid var(--border); background: {{ sev_bg }}; cursor: pointer;" @click="open = !open">
+                {# expand chevron #}
+                <td style="padding: 10px 12px; vertical-align: top; text-align: center; color: var(--text-muted);">
+                    <span x-text="open ? '▼' : '▶'" style="font-size: 10px;"></span>
+                </td>
+                {# table name #}
+                <td style="padding: 10px 12px; vertical-align: top;">
+                    <span class="mono" style="font-size: 12px; font-weight: 700; color: var(--accent);">{{ t.table }}</span>
+                    {% if t.kind and t.kind != '—' %}
+                    <span class="mono" style="font-size: 9px; color: var(--text-muted); margin-left: 6px;">{{ t.kind }}</span>
+                    {% endif %}
+                </td>
+                {# score bar #}
+                <td style="padding: 10px 12px; vertical-align: top;">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <div style="flex: 1; height: 10px; background: var(--bg-primary); border-radius: 5px; overflow: hidden;">
+                            <div style="width: {{ t.score }}%; height: 100%; background: {{ t.grade_color }}; border-radius: 5px;"></div>
+                        </div>
+                        <span class="mono" style="font-size: 12px; font-weight: 700; color: {{ t.grade_color }}; min-width: 28px; text-align: right;">{{ t.score }}</span>
+                    </div>
+                </td>
+                {# grade #}
+                <td style="padding: 10px 12px; vertical-align: top; text-align: center;">
+                    <span style="font-size: 13px; font-weight: 800; color: {{ t.grade_color }};">{{ t.grade }}</span>
+                </td>
+                {# issue count #}
+                <td style="padding: 10px 12px; vertical-align: top; text-align: center;">
+                    {% if t.issue_count > 0 %}
+                    <span class="mono" style="font-size: 12px; font-weight: 700; color: {% if t.score < 60 %}var(--red){% else %}var(--amber){% endif %};">{{ t.issue_count }}</span>
+                    {% else %}
+                    <span style="color: var(--green); font-size: 14px;">&#10003;</span>
+                    {% endif %}
+                </td>
+                {# top issue #}
+                <td style="padding: 10px 12px; vertical-align: top; font-size: 11px; color: var(--text-secondary);">
+                    {% if t.issues %}
+                    {{ t.issues[0].msg }}
+                    {% else %}
+                    <span style="color: var(--green);">All checks pass ({{ t.factors|length }} factors)</span>
+                    {% endif %}
+                </td>
+            </tr>
+            {# expanded row — factor breakdown #}
+            <tr x-show="open" x-cloak style="background: var(--bg-primary);">
+                <td colspan="6" style="padding: 14px 18px;">
+                    <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(420px, 1fr)); gap: 10px;">
+                        {% for f in t.factors %}
+                        {% set fc = 'var(--green)' if f.severity == 'ok' else ('var(--amber)' if f.severity == 'warn' else 'var(--red)') %}
+                        {% set ficon = '&#10003;' if f.severity == 'ok' else ('&#9888;' if f.severity == 'warn' else '&#10007;') %}
+                        <div style="padding: 10px 14px; background: var(--bg-card); border: 1px solid var(--border); border-left: 3px solid {{ fc }}; border-radius: 6px;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                                <div style="font-size: 11px; font-weight: 700; color: var(--text-primary); text-transform: uppercase; letter-spacing: 0.5px;">
+                                    <span style="color: {{ fc }};">{{ ficon|safe }}</span> {{ f.name|replace('_', ' ') }}
+                                </div>
+                                <div class="mono" style="font-size: 11px; font-weight: 700; color: {{ fc }};">{{ f.score }}/100</div>
+                            </div>
+                            <div style="font-size: 11px; color: var(--text-secondary); line-height: 1.5;">{{ f.message }}</div>
+                            {% if f.fix %}
+                            <div style="font-size: 10px; color: var(--text-muted); margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--border);">
+                                <span style="text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600; color: var(--text-secondary);">Fix:</span> {{ f.fix }}
+                            </div>
+                            {% endif %}
+                            {% if f.drill_sql %}
+                            <div style="margin-top: 6px;">
+                                <a href="/sql?q={{ f.drill_sql|urlencode }}"
+                                   @click.stop=""
+                                   style="display: inline-block; padding: 3px 10px; font-size: 10px; background: var(--accent); color: white; border-radius: 4px; text-decoration: none; font-weight: 600; letter-spacing: 0.3px;">
+                                    Drill &rarr; SQL Console
+                                </a>
+                            </div>
+                            {% endif %}
+                        </div>
+                        {% endfor %}
+                    </div>
+                </td>
+            </tr>
+        </tbody>
+        {% endfor %}
+    </table>
+    </div>
+</div>
+{% endif %}
+
+
+</div>{# / health panel #}
+
+{# ────────── FACTOR HEALTH TAB ────────── #}
+<div x-show="tab === 'factors'" x-cloak>
+
+{% if factor_health %}
+{% set fs = factor_health.summary %}
+
+<!-- Summary banner -->
+<div class="card" style="margin-bottom: 20px; border-left: 4px solid var(--accent);">
+    <div style="display: flex; flex-wrap: wrap; gap: 18px; align-items: flex-start;">
+        <div style="flex: 1 1 320px;">
+            <div style="font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px;">Factor Library</div>
+            <div style="font-size: 16px; font-weight: 700; color: var(--text-primary); margin-bottom: 4px;">
+                {{ fs.total }} factors registered · avg <em>data health</em> <span class="mono" style="color: var(--accent);">{{ fs.avg_data_health }}</span>/100
+            </div>
+            <div style="font-size: 12px; color: var(--text-secondary);">
+                <span style="color: #2ecc71;">{{ fs.in_model }} in model</span> ·
+                <span style="color: #4d8eff;">{{ fs.in_library }} in library</span> ·
+                <span style="color: var(--text-muted);">{{ fs.not_built }} not built</span>
+                · {{ fs.with_t_stat }} with t-stat · {{ fs.pit_ready }} PIT-ready
+            </div>
+            <div style="font-size: 10px; color: var(--text-muted); margin-top: 8px; font-style: italic; max-width: 540px;">
+                Two distinct grades below — <strong style="color: var(--text-secondary);">Data Health</strong> = is the signal computing?
+                <strong style="color: var(--text-secondary);">Validation</strong> = is it predictive in backtest? A factor can be perfectly healthy (A) but DROP-verdict in backtest.
+            </div>
+        </div>
+        <div style="display: flex; gap: 20px; flex-wrap: wrap;">
+            <div>
+                <div style="font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Data Health</div>
+                <div style="display: flex; gap: 8px;">
+                    {% for letter in ['A+', 'A', 'B', 'C', 'D', 'F'] %}
+                        {% set n = fs.data_grade_dist.get(letter, 0) %}
+                        <div style="text-align: center; min-width: 32px;">
+                            <div style="font-size: 9px; color: var(--text-muted);">{{ letter }}</div>
+                            <div class="mono" style="font-size: 16px; font-weight: 700;
+                                {% if letter in ['A+', 'A'] %}color: #2ecc71;
+                                {% elif letter == 'B' %}color: #4d8eff;
+                                {% elif letter == 'C' %}color: #f1c40f;
+                                {% elif letter == 'D' %}color: #e67e22;
+                                {% else %}color: #e74c3c;{% endif %}">{{ n }}</div>
+                        </div>
+                    {% endfor %}
+                </div>
+            </div>
+            <div>
+                <div style="font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Validation</div>
+                <div style="display: flex; gap: 8px;">
+                    {% for v, vcolor in [('KEEP', '#2ecc71'), ('WEAK', '#4d8eff'), ('DROP', '#e74c3c'), ('INSUFFICIENT', '#9b59b6'), ('NONE', 'var(--text-muted)')] %}
+                        {% set n = fs.validation_dist.get(v, 0) %}
+                        <div style="text-align: center; min-width: 42px;">
+                            <div style="font-size: 9px; color: var(--text-muted);">{{ v }}</div>
+                            <div class="mono" style="font-size: 16px; font-weight: 700; color: {{ vcolor }};">{{ n }}</div>
+                        </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Per-factor table -->
+<div class="card" x-data="{ status: 'all', validation: 'all', track: 'all', search: '' }">
+    <div class="section-title">Per-Factor — Data Health & Validation</div>
+    <div class="section-desc">
+        <strong>Data Health</strong> = 65% coverage · 25% freshness · 10% PIT-ready, all <em>cadence-aware</em>.
+        Coverage is graded against the right denominator for the factor's <em>nature</em>:<br>
+        &nbsp;&nbsp;<strong>broad</strong> = % of universe ·
+        <strong>sparse</strong> = "is data flowing?" (insider/bulk/sentiment only cover stocks with the event) ·
+        <strong>sector</strong> / <strong>composite</strong> / <strong>data-depth</strong> = per-stock coverage doesn't apply.<br>
+        <strong>Rule of thumb:</strong> A/B/C = trust it · D = look here · F = broken or unbuilt.<br>
+        <strong>Validation</strong> = KEEP (|t|≥2.5) · WEAK (|t|≥1.5) · DROP (|t|&lt;1.5) · INSUFFICIENT (n&lt;12 periods — preliminary, await deeper backtest) · NONE (no backtest yet) — independent of data health.
+    </div>
+
+    <!-- Filter toolbar -->
+    <div style="display: flex; gap: 16px; flex-wrap: wrap; align-items: center; padding: 10px 14px; background: var(--bg-primary); border-radius: 8px; margin-top: 12px;">
+        <div>
+            <div style="font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Status</div>
+            <div class="radio-group" role="radiogroup">
+                <button type="button" class="radio-btn" :class="{ active: status === 'all' }" @click="status='all'">All</button>
+                <button type="button" class="radio-btn" :class="{ active: status === 'model' }" @click="status='model'">In model</button>
+                <button type="button" class="radio-btn" :class="{ active: status === 'library' }" @click="status='library'">Library</button>
+            </div>
+        </div>
+        <div>
+            <div style="font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Validation</div>
+            <div class="radio-group" role="radiogroup">
+                <button type="button" class="radio-btn" :class="{ active: validation === 'all' }" @click="validation='all'">All</button>
+                <button type="button" class="radio-btn" :class="{ active: validation === 'KEEP' }" @click="validation='KEEP'">KEEP</button>
+                <button type="button" class="radio-btn" :class="{ active: validation === 'WEAK' }" @click="validation='WEAK'">WEAK</button>
+                <button type="button" class="radio-btn" :class="{ active: validation === 'DROP' }" @click="validation='DROP'">DROP</button>
+                <button type="button" class="radio-btn" :class="{ active: validation === 'INSUFFICIENT' }" @click="validation='INSUFFICIENT'">INSUFF</button>
+                <button type="button" class="radio-btn" :class="{ active: validation === 'NONE' }" @click="validation='NONE'">NONE</button>
+            </div>
+        </div>
+        <div>
+            <div style="font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Track</div>
+            <div class="radio-group" role="radiogroup">
+                <button type="button" class="radio-btn" :class="{ active: track === 'all' }" @click="track='all'">All</button>
+                <button type="button" class="radio-btn" :class="{ active: track === 'f-track' }" @click="track='f-track'">F</button>
+                <button type="button" class="radio-btn" :class="{ active: track === 'legacy' }" @click="track='legacy'">Legacy</button>
+            </div>
+        </div>
+        <div style="flex: 1; min-width: 200px;">
+            <div style="font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Search factor name</div>
+            <input type="text" x-model="search" placeholder="e.g. roic, accruals…"
+                style="width: 100%; background: var(--bg-card); color: var(--text-primary); border: 1px solid var(--border); border-radius: 6px; padding: 5px 10px; font-size: 12px;">
+        </div>
+    </div>
+
+    <table id="factor-health-table" style="width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 12px;">
+        <thead>
+        <tr style="color: var(--text-muted); text-align: left; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px;">
+            <th data-key="name"      data-sort="string" style="padding: 8px 10px; border-bottom: 2px solid var(--border-accent); cursor: pointer;">Factor</th>
+            <th data-key="group"     data-sort="string" style="padding: 8px 10px; border-bottom: 2px solid var(--border-accent); cursor: pointer;">Group</th>
+            <th data-key="track"     data-sort="string" style="padding: 8px 10px; border-bottom: 2px solid var(--border-accent); cursor: pointer;">Track</th>
+            <th data-key="coverage_pct" data-sort="number" style="padding: 8px 10px; text-align: right; border-bottom: 2px solid var(--border-accent); cursor: pointer;">Coverage</th>
+            <th data-key="freshness_days" data-sort="number" style="padding: 8px 10px; text-align: right; border-bottom: 2px solid var(--border-accent); cursor: pointer;">Stale (d)</th>
+            <th data-key="t_stat"    data-sort="number" style="padding: 8px 10px; text-align: right; border-bottom: 2px solid var(--border-accent); cursor: pointer;">|t|</th>
+            <th data-key="pit_ready" data-sort="number" style="padding: 8px 10px; text-align: center; border-bottom: 2px solid var(--border-accent); cursor: pointer;">PIT</th>
+            <th data-key="in_model"  data-sort="number" style="padding: 8px 10px; text-align: center; border-bottom: 2px solid var(--border-accent); cursor: pointer;">Bench</th>
+            <th data-key="data_health"  data-sort="number" style="padding: 8px 10px; text-align: right; border-bottom: 2px solid var(--border-accent); cursor: pointer;">Data Health</th>
+            <th data-key="validation_verdict" data-sort="string" style="padding: 8px 10px; text-align: center; border-bottom: 2px solid var(--border-accent); cursor: pointer;">Validation</th>
+            <th style="padding: 8px 10px; border-bottom: 2px solid var(--border-accent);">Issues</th>
+        </tr>
+        </thead>
+        <tbody>
+        {% for f in factor_health.factors %}
+        <tr style="border-bottom: 1px solid var(--border);"
+            data-status="{{ 'model' if f.in_model else 'library' }}"
+            data-validation="{{ f.validation_verdict }}"
+            data-track="{{ f.track }}"
+            data-name="{{ f.name|lower }}"
+            x-show="(status === 'all' || status === $el.dataset.status)
+                 && (validation === 'all' || validation === $el.dataset.validation)
+                 && (track === 'all' || track === $el.dataset.track)
+                 && (search === '' || $el.dataset.name.includes(search.toLowerCase()))">
+            <td data-key="name" style="padding: 8px 10px;">
+                <strong>{{ f.name }}</strong>
+                {% if f.nature and f.nature != 'broad' %}
+                {% set nat_color = {'sparse': '#9b59b6', 'sector': '#5dade2', 'composite': '#aab7b8', 'data-depth': '#e67e22'}.get(f.nature, '#888') %}
+                {% set nat_tooltip = {'sparse': 'Sparse by nature: only stocks with the underlying event have a score (insider trades, bulk deals, news). Grade reflects whether the signal is flowing, not % of universe.', 'sector': 'Sector-level signal: scored per-sector, not per-stock. Per-stock coverage is not applicable.', 'composite': 'End-state composite: backtest via portfolio (Track 2.4), not as a stand-alone factor.', 'data-depth': 'Data depth limited: needs NSE archive backfill before backtest window is meaningful.'}.get(f.nature, '') %}
+                <span title="{{ nat_tooltip }}" style="display: inline-block; font-size: 9px; padding: 1px 6px; margin-left: 4px; background: rgba(155,89,182,0.1); border: 1px solid {{ nat_color }}; color: {{ nat_color }}; border-radius: 3px; font-weight: 700; letter-spacing: 0.3px; vertical-align: middle;">{{ f.nature }}</span>
+                {% endif %}
+                {% if f.status_reason %}
+                <div style="font-size: 10px; color: var(--text-muted); margin-top: 2px;">{{ f.status_reason }}</div>
+                {% endif %}
+            </td>
+            <td data-key="group" style="padding: 8px 10px; color: var(--text-secondary);">{{ f.group }}</td>
+            <td data-key="track" style="padding: 8px 10px;">
+                {% if f.track == 'f-track' %}<span style="font-size: 10px; padding: 1px 6px; border-radius: 4px; background: rgba(77,142,255,0.15); color: #4d8eff;">F</span>
+                {% else %}<span style="font-size: 10px; color: var(--text-muted);">legacy</span>{% endif %}
+            </td>
+            <td data-key="coverage_pct" class="mono" style="padding: 8px 10px; text-align: right;
+                {% if f.coverage_pct >= 80 %}color: #2ecc71;
+                {% elif f.coverage_pct >= 40 %}color: #f1c40f;
+                {% else %}color: #e74c3c;{% endif %}">
+                {{ f.coverage_pct }}%
+                <div style="font-size: 9px; color: var(--text-muted);">{{ f.coverage_n }}/{{ f.eligible_n }}</div>
+            </td>
+            <td data-key="freshness_days" class="mono" style="padding: 8px 10px; text-align: right;">
+                {% if f.freshness_days is none %}<span style="color: var(--text-muted);">—</span>
+                {% elif f.freshness_days <= 1 %}<span style="color: #2ecc71;">{{ f.freshness_days }}</span>
+                {% elif f.freshness_days <= 7 %}<span style="color: #f1c40f;">{{ f.freshness_days }}</span>
+                {% else %}<span style="color: #e74c3c;">{{ f.freshness_days }}</span>{% endif %}
+            </td>
+            <td data-key="t_stat" class="mono" style="padding: 8px 10px; text-align: right;">
+                {% if f.t_stat is none %}<span style="color: var(--text-muted);">—</span>
+                {% else %}
+                    {% set abs_t = f.t_stat | abs %}
+                    {% if abs_t >= 2.5 %}<strong style="color: #2ecc71;">{{ '%.2f' | format(f.t_stat) }}</strong>
+                    {% elif abs_t >= 1.5 %}<strong style="color: #4d8eff;">{{ '%.2f' | format(f.t_stat) }}</strong>
+                    {% else %}<span style="color: var(--text-muted);">{{ '%.2f' | format(f.t_stat) }}</span>
+                    {% endif %}
+                {% endif %}
+                {% if f.t_ci_lo is not none and f.t_ci_hi is not none %}
+                <div style="font-size: 9px; color: var(--text-muted);" title="Bootstrap 95% CI on t-stat (B=1000)">95% CI [{{ '%.2f' | format(f.t_ci_lo) }}, {{ '%.2f' | format(f.t_ci_hi) }}]</div>
+                {% endif %}
+                {% if f.n_periods %}<div style="font-size: 9px; color: var(--text-muted);">n={{ f.n_periods }}</div>{% endif %}
+            </td>
+            <td data-key="pit_ready" style="padding: 8px 10px; text-align: center;">
+                {% if f.pit_ready %}<span style="color: #2ecc71;">✓</span>
+                {% else %}<span style="color: var(--text-muted);">—</span>{% endif %}
+            </td>
+            <td data-key="in_model" style="padding: 8px 10px; text-align: center;">
+                {% if f.in_model %}<span style="font-size: 10px; padding: 2px 8px; border-radius: 10px; background: rgba(46,204,113,0.18); color: #2ecc71; font-weight: 700;">model</span>
+                {% else %}<span style="font-size: 10px; padding: 2px 8px; border-radius: 10px; background: rgba(140,140,140,0.15); color: #aaa;">library</span>{% endif %}
+            </td>
+            <td data-key="data_health" class="mono" style="padding: 8px 10px; text-align: right; font-weight: 700;
+                color: {{ f.data_grade_color }};">
+                {{ f.data_health }}
+                <div style="font-size: 9px;">{{ f.data_grade }}</div>
+            </td>
+            <td data-key="validation_verdict" style="padding: 8px 10px; text-align: center;">
+                <span style="font-size: 10px; padding: 2px 8px; border-radius: 4px; color: {{ f.validation_color }}; border: 1px solid {{ f.validation_color }}; font-weight: 700; letter-spacing: 0.5px;">{{ f.validation_verdict }}</span>
+                {% if f.backtest_cadence and f.backtest_cadence != 'monthly' %}
+                <div style="font-size: 9px; color: var(--text-muted); margin-top: 2px; font-style: italic;">{{ f.backtest_cadence }}</div>
+                {% endif %}
+            </td>
+            <td style="padding: 8px 10px;">
+                {% for issue in f.issues %}
+                <span style="font-size: 10px; padding: 1px 6px; border-radius: 3px; background: rgba(231,76,60,0.12); color: #e74c3c; margin-right: 3px;">{{ issue }}</span>
+                {% endfor %}
+                {% if not f.issues %}
+                <span style="font-size: 10px; color: var(--text-muted);">healthy</span>
+                {% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<script>
+// Tiny sort helper, scoped to the factor-health table
+(function () {
+  const t = document.getElementById('factor-health-table');
+  if (!t) return;
+  t.querySelectorAll('thead th[data-key]').forEach((th) => {
+    th.addEventListener('click', () => {
+      const k = th.dataset.key, type = th.dataset.sort || 'string';
+      const dir = t.dataset.sortKey === k && t.dataset.sortDir === 'asc' ? 'desc' : 'asc';
+      const tbody = t.tBodies[0];
+      const rows = Array.from(tbody.rows);
+      const sign = dir === 'asc' ? 1 : -1;
+      rows.sort((a, b) => {
+        const av = (a.querySelector('td[data-key="' + k + '"]').textContent || '').trim();
+        const bv = (b.querySelector('td[data-key="' + k + '"]').textContent || '').trim();
+        if (type === 'number') {
+          const an = parseFloat(av.replace(/[%,]/g, '')) || 0;
+          const bn = parseFloat(bv.replace(/[%,]/g, '')) || 0;
+          return (an - bn) * sign;
+        }
+        return av.localeCompare(bv) * sign;
+      });
+      rows.forEach(r => tbody.appendChild(r));
+      t.dataset.sortKey = k; t.dataset.sortDir = dir;
+      t.querySelectorAll('thead th').forEach(h => { h.style.color = 'var(--text-muted)'; });
+      th.style.color = 'var(--accent)';
+    });
+  });
+})();
+</script>
+
+{% else %}
+<div class="card" style="padding: 20px; color: var(--text-muted);">
+    Factor health unavailable — no factors registered or pit_ic_by_tier_v2 empty.
+</div>
+{% endif %}
+
+</div>{# / factors panel #}
+
+{# ────────── PIPELINE LOG TAB ────────── #}
+<div x-show="tab === 'pipeline'" x-cloak>
+
+{% if overview and overview.pipeline_summary %}
+{% set ps = overview.pipeline_summary %}
+{% if ps.failed_streaks %}
+<!-- Currently-broken streaks panel — separated from historical noise -->
+<div class="card" style="margin-bottom: 18px; border-left: 4px solid var(--red);">
+    <div class="section-title" style="color: var(--red); margin-bottom: 4px;">Currently broken steps</div>
+    <div class="section-desc">
+        Steps whose most-recent run failed AND have been failing for ≥2 days in a row.
+        Historical streaks that have since recovered are filtered out (see health_report streak query).
+    </div>
+    <table style="width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 10px;">
+        <thead><tr style="color: var(--text-muted); text-align: left; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px;">
+            <th style="padding: 8px 10px; border-bottom: 1px solid var(--border-accent);">Step</th>
+            <th style="padding: 8px 10px; border-bottom: 1px solid var(--border-accent); width: 80px; text-align: right;">Days</th>
+            <th style="padding: 8px 10px; border-bottom: 1px solid var(--border-accent);">Sample error</th>
+        </tr></thead>
+        <tbody>
+        {% for s in ps.failed_streaks %}
+        <tr style="border-bottom: 1px solid var(--border);">
+            <td class="mono" style="padding: 8px 10px; color: var(--accent); font-weight: 700;">{{ s.step }}</td>
+            <td class="mono" style="padding: 8px 10px; text-align: right; color: var(--red); font-weight: 700;">{{ s.days }}</td>
+            <td style="padding: 8px 10px; color: var(--text-secondary); font-size: 11px;">{{ s.sample_error }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+{% endif %}
+
+<!-- Pipeline Log -->
+<div class="card" style="margin-bottom: 20px;" x-data="{ statusFilter: 'all', stepFilter: '' }">
+    <div class="section-title">Pipeline Log (Last 7 Days)</div>
+    <div class="section-desc">
+        One row per (date, step) showing the final state. Stale RUNNING rows from crashed
+        runs are shown as ABORTED. Each pipeline step writes a RUNNING row on start and a
+        SUCCESS/FAILED row on completion — only the final state is displayed here.
+    </div>
+
+    <!-- Filter toolbar -->
+    <div style="display: flex; gap: 16px; flex-wrap: wrap; align-items: center; padding: 10px 14px; background: var(--bg-primary); border-radius: 8px; margin-top: 12px; margin-bottom: 12px;">
+        <div>
+            <div style="font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Status</div>
+            <div class="radio-group" role="radiogroup">
+                <button type="button" class="radio-btn" :class="{ active: statusFilter === 'all' }" @click="statusFilter='all'">All</button>
+                <button type="button" class="radio-btn" :class="{ active: statusFilter === 'FAILED' }" @click="statusFilter='FAILED'">Failed</button>
+                <button type="button" class="radio-btn" :class="{ active: statusFilter === 'SUCCESS' }" @click="statusFilter='SUCCESS'">Success</button>
+                <button type="button" class="radio-btn" :class="{ active: statusFilter === 'RUNNING' }" @click="statusFilter='RUNNING'">Running</button>
+                <button type="button" class="radio-btn" :class="{ active: statusFilter === 'ABORTED' }" @click="statusFilter='ABORTED'">Aborted</button>
+            </div>
+        </div>
+        <div style="flex: 1; min-width: 200px;">
+            <div style="font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Search step</div>
+            <input type="text" x-model="stepFilter" placeholder="e.g. fetch_shareholding, classify_…"
+                style="width: 100%; background: var(--bg-card); color: var(--text-primary); border: 1px solid var(--border); border-radius: 6px; padding: 5px 10px; font-size: 12px;">
+        </div>
+    </div>
+
+    {% if pipeline %}
+    <div style="overflow-x: auto;">
+    <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+        <thead>
+            <tr style="color: var(--text-muted); text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;">
+                <th style="padding: 8px 10px;">Date</th>
+                <th style="padding: 8px 10px;">Step</th>
+                <th style="padding: 8px 10px;">Status</th>
+                <th style="padding: 8px 10px; text-align: right;">Rows</th>
+                <th style="padding: 8px 10px; text-align: right;">Time</th>
+                <th style="padding: 8px 10px;">Started</th>
+                <th style="padding: 8px 10px;">Error</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in pipeline[:30] %}
+            <tr style="border-top: 1px solid var(--border);"
+                data-status="{{ row.status }}"
+                data-step="{{ row.step_name|lower }}"
+                x-show="(statusFilter === 'all' || statusFilter === $el.dataset.status) && (stepFilter === '' || $el.dataset.step.includes(stepFilter.toLowerCase()))">
+                <td class="mono" style="padding: 8px 10px; font-size: 11px;">{{ row.run_date }}</td>
+                <td style="padding: 8px 10px; font-weight: 600;">{{ row.step_name }}</td>
+                <td style="padding: 8px 10px;">
+                    {% if row.status == 'SUCCESS' %}
+                    <span style="color: var(--green); font-weight: 600;">&#10003; {{ row.status }}</span>
+                    {% elif row.status == 'FAILED' %}
+                    <span style="color: var(--red); font-weight: 600;">&#10007; {{ row.status }}</span>
+                    {% elif row.status == 'RUNNING' %}
+                    <span style="color: var(--amber); font-weight: 600;">&#9679; {{ row.status }}</span>
+                    {% elif row.status == 'ABORTED' %}
+                    <span style="color: var(--text-muted); font-weight: 600;">&#9888; ABORTED</span>
+                    {% else %}
+                    <span style="color: var(--text-muted);">{{ row.status }}</span>
+                    {% endif %}
+                </td>
+                <td class="mono" style="padding: 8px 10px; text-align: right;">
+                    {% if row.rows_affected is not none and row.rows_affected == row.rows_affected %}{{ "{:,.0f}".format(row.rows_affected) }}{% else %}<span style="color: var(--text-muted);">—</span>{% endif %}
+                </td>
+                <td class="mono" style="padding: 8px 10px; text-align: right;">{% if row.duration_sec %}{{ "%.1f"|format(row.duration_sec) }}s{% else %}<span style="color: var(--text-muted);">—</span>{% endif %}</td>
+                <td class="mono" style="padding: 8px 10px; font-size: 11px; color: var(--text-muted);">{% if row.started_at %}{{ row.started_at[11:19] }}{% endif %}</td>
+                <td style="padding: 8px 10px; font-size: 11px; color: var(--red); max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="{{ row.error_message or '' }}">{{ (row.error_message or '')[:60] }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% else %}
+    <div style="color: var(--text-muted);">No pipeline runs in the last 7 days.</div>
+    {% endif %}
+</div>
+
+
+</div>{# / pipeline panel #}
+
+{# ────────── INVENTORY TAB ────────── #}
+<div x-show="tab === 'inventory'" x-cloak>
+
+<!-- Data Inventory — grouped by domain, each domain is its own interactive Tabulator grid. -->
+<div class="card">
+    <div class="section-title">Data Inventory</div>
+    <div class="section-desc">
+        {{ health|length }} tables across {{ inventory_groups|length }} domains. Each grid below is sortable
+        (click a column header), columns are draggable to reorder, and your layout per domain
+        is saved in this browser. <b>Kind</b>: RAW = fetched · COMPUTED = derived · LOG = audit · STATE = config.
+    </div>
+
+    {% for group in inventory_groups %}
+    <details open class="inv-domain" data-domain="{{ group.domain }}">
+        <summary>
+            <span class="inv-arrow"></span>
+            <span class="inv-domain-title">{{ group.domain }}</span>
+            <span class="inv-domain-count mono">{{ group.rows|length }} table{{ '' if group.rows|length == 1 else 's' }}</span>
+        </summary>
+        <div class="inv-table-wrap">
+        <table class="inv-table" data-domain-key="{{ group.domain | replace(' & ', '-') | replace(' ', '-') | lower }}">
+            <thead>
+                <tr>
+                    <th data-key="table"              data-sort="string">Table</th>
+                    <th data-key="kind"               data-sort="string">Kind</th>
+                    <th data-key="rows"               data-sort="number" class="num">Rows</th>
+                    <th data-key="stock_coverage_pct" data-sort="number" class="num">Stock Coverage</th>
+                    <th data-key="date_span"          data-sort="string">Span</th>
+                    <th data-key="latest_date"        data-sort="string">Latest</th>
+                    <th data-key="freshness"          data-sort="string">Freshness</th>
+                    <th data-key="age_days"           data-sort="number" class="num">Age</th>
+                    <th data-key="frequency"          data-sort="string">Refresh</th>
+                    <th data-key="source"             data-sort="string">Source</th>
+                    <th data-key="produced_by"        data-sort="string">Producer</th>
+                    <th data-key="consumed_count"    data-sort="number" class="num">Used by</th>
+                    <th data-key="description"        data-sort="string">Description</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in group.rows %}
+                {% set kind_color = 'var(--accent)' if row.kind == 'RAW' else ('var(--green)' if row.kind == 'COMPUTED' else ('var(--amber)' if row.kind == 'LOG' else 'var(--text-muted)')) %}
+                {% set fresh_color = 'var(--green)' if row.freshness == 'FRESH' else ('var(--amber)' if row.freshness == 'STALE' else ('var(--red)' if row.freshness == 'OUTDATED' else 'var(--text-muted)')) %}
+                {% set cov_pct = row.stock_coverage_pct %}
+                {% set cov_color = 'var(--green)' if (cov_pct is not none and cov_pct >= 80) else ('var(--amber)' if (cov_pct is not none and cov_pct >= 30) else ('var(--red)' if cov_pct is not none else 'var(--text-muted)')) %}
+                {% set age_color = 'var(--red)' if (row.age_days is not none and row.threshold_days and row.age_days > row.threshold_days) else ('var(--amber)' if (row.age_days is not none and row.threshold_days and row.age_days > row.threshold_days * 0.7) else 'inherit') %}
+                <tr>
+                    <td data-key="table">
+                        <a href="/sql?table={{ row.table }}" class="mono inv-table-name">{{ row.table }}</a>
+                        {% if row.status == 'EMPTY' %}<span class="inv-badge-empty">EMPTY</span>{% endif %}
+                    </td>
+                    <td data-key="kind"><span class="inv-pill" style="color:{{ kind_color }};border-color:{{ kind_color }}">{{ row.kind }}</span></td>
+                    <td data-key="rows" class="num mono inv-strong">{{ "{:,}".format(row.rows) }}</td>
+                    <td data-key="stock_coverage_pct" class="num mono">
+                        {% if cov_pct is not none %}<span style="color:{{ cov_color }};font-weight:600">{{ "{:,}".format(row.stock_count) }}</span> <span class="inv-faint">{{ cov_pct }}%</span>{% else %}<span class="inv-faint">—</span>{% endif %}
+                    </td>
+                    <td data-key="date_span" class="mono">{{ row.date_span if row.date_span and row.date_span != '—' else (row.depth or '—') }}</td>
+                    <td data-key="latest_date" class="mono">{{ row.latest_date or '—' }}</td>
+                    <td data-key="freshness">
+                        {% if row.freshness != 'N/A' %}<span class="inv-pill" style="color:{{ fresh_color }};border-color:{{ fresh_color }}">{{ row.freshness }}</span>{% else %}<span class="inv-faint">—</span>{% endif %}
+                    </td>
+                    <td data-key="age_days" class="num mono">
+                        {% if row.age_days is not none %}<span style="color:{{ age_color }};font-weight:{{ 600 if age_color != 'inherit' else 400 }}">{{ row.age_days }}d</span><span class="inv-faint">&nbsp;/&nbsp;{{ row.threshold_days }}d</span>{% else %}<span class="inv-faint">—</span>{% endif %}
+                    </td>
+                    <td data-key="frequency">{{ row.frequency or '—' }}</td>
+                    <td data-key="source" class="inv-truncate">{{ row.source or '—' }}</td>
+                    <td data-key="produced_by" class="mono inv-faint inv-truncate">{{ row.produced_by or '—' }}</td>
+                    <td data-key="consumed_count" class="num mono" title="{{ row.consumed_by }}">{{ row.consumed_count if row.consumed_count is defined else '—' }}</td>
+                    <td data-key="description" class="inv-truncate" title="{{ row.description }}">{{ row.description }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        </div>
+    </details>
+    {% endfor %}
+
+    <script src="/static/inventory.js" defer></script>
+
+    <style>
+      /* ── Domain accordion ── */
+      details.inv-domain { margin-top: 18px; }
+      details.inv-domain summary::-webkit-details-marker { display: none; }
+      details.inv-domain summary {
+        display: flex; align-items: center; gap: 10px; padding: 8px 4px;
+        cursor: pointer; border-bottom: 1px solid var(--border); user-select: none; list-style: none;
+      }
+      details.inv-domain[open]  .inv-arrow::before { content: "▾"; }
+      details.inv-domain:not([open]) .inv-arrow::before { content: "▸"; }
+      details.inv-domain .inv-arrow { width: 14px; font-size: 12px; }
+      details.inv-domain .inv-arrow::before { color: var(--text-muted); }
+      details.inv-domain .inv-domain-title {
+        font-size: 13px; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase;
+        color: var(--text-primary);
+      }
+      details.inv-domain .inv-domain-count { font-size: 11px; color: var(--text-muted); }
+
+      /* ── The table itself — flat, muted, no zebra, no vertical lines ── */
+      .inv-table-wrap { overflow-x: auto; margin-top: 8px; }
+      table.inv-table { width: 100%; border-collapse: collapse; font-size: 12px; color: var(--text-secondary); }
+      table.inv-table thead th {
+        text-align: left; font-size: 10px; font-weight: 600; letter-spacing: 0.5px; text-transform: uppercase;
+        color: var(--text-muted); padding: 10px 12px; white-space: nowrap;
+        border-bottom: 2px solid var(--border-accent); cursor: pointer; user-select: none;
+        background: transparent;
+      }
+      table.inv-table thead th:hover { color: var(--text-primary); }
+      table.inv-table thead th.num { text-align: right; }
+      table.inv-table thead th.sort-asc, table.inv-table thead th.sort-desc { color: var(--accent); }
+      table.inv-table thead th.sort-asc::after { content: " ▲"; font-size: 9px; }
+      table.inv-table thead th.sort-desc::after { content: " ▼"; font-size: 9px; }
+      table.inv-table thead th.dragging { opacity: 0.4; }
+      table.inv-table thead th.drag-over { box-shadow: inset 2px 0 0 var(--accent); }
+
+      table.inv-table tbody tr { border-bottom: 1px solid var(--border); }
+      table.inv-table tbody tr:hover { background: var(--bg-card-hover); }
+      table.inv-table tbody td {
+        padding: 10px 12px; vertical-align: middle; color: inherit;
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      }
+      table.inv-table tbody td.num { text-align: right; }
+      table.inv-table tbody td.mono, table.inv-table .mono { font-family: 'JetBrains Mono', monospace; }
+      table.inv-table tbody td.inv-truncate { max-width: 320px; }
+      table.inv-table tbody td.inv-faint { color: var(--text-muted); }
+      table.inv-table .inv-faint { color: var(--text-muted); }
+      table.inv-table .inv-strong { color: var(--text-primary); font-weight: 600; }
+      table.inv-table .inv-table-name {
+        font-family: 'JetBrains Mono', monospace; font-weight: 700; font-size: 12px;
+        color: var(--accent); text-decoration: none;
+      }
+      table.inv-table .inv-pill {
+        display: inline-block; font-size: 9px; padding: 2px 6px; border: 1px solid;
+        border-radius: 4px; font-weight: 700; letter-spacing: 0.5px;
+      }
+      table.inv-table .inv-badge-empty {
+        display: inline-block; font-size: 9px; padding: 1px 6px; margin-left: 4px;
+        background: rgba(239,68,68,0.18); color: var(--red); border-radius: 4px; font-weight: 700;
+      }
+    </style>
+</div>
+
+</div>{# / inventory panel #}
+
+</div>{# / tabs root #}
+
+{% endblock %}

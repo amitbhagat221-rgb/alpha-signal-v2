@@ -1001,3 +1001,216 @@ CREATE TABLE IF NOT EXISTS news_briefs (
     n_articles_used  INTEGER,
     generated_at     TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+-- ── Mutual Fund research universe (plan: prfect-lets-add-a-zazzy-eich, 2026-05-26) ──
+-- Standalone research interface covering all ~4,048 active Indian MF schemes.
+-- Universe + daily NAV from AMFI NAVAll.txt; full historical NAV from mfapi.in.
+-- Metrics + scorer computed monthly. See cockpit page /mutual-funds.
+
+-- AMFI scheme master — authoritative ~4,048 schemes (weekly refresh)
+CREATE TABLE IF NOT EXISTS mf_scheme_master (
+    scheme_code      TEXT PRIMARY KEY,
+    isin_growth      TEXT,
+    isin_div         TEXT,
+    scheme_name      TEXT NOT NULL,
+    amc              TEXT,                        -- fund house (e.g. "HDFC Mutual Fund")
+    category_raw     TEXT,                        -- AMFI/SEBI category string as-fetched
+    category_norm    TEXT,                        -- our normalised label (e.g. "Equity / Multi Cap")
+    sub_category     TEXT,
+    plan_type        TEXT CHECK (plan_type IN ('DIRECT','REGULAR','UNKNOWN')),
+    option_type      TEXT CHECK (option_type IN ('GROWTH','IDCW','UNKNOWN')),
+    inception_date   TEXT,                        -- when fetchable from mfapi.in
+    aum_cr           REAL,                        -- ₹ crore (NULL in v1 — needs VRO/Groww in v2)
+    expense_ratio    REAL,                        -- pct (NULL in v1)
+    benchmark        TEXT,                        -- e.g. "Nifty 50 TRI"
+    last_seen        TEXT,                        -- date this scheme last appeared in NAVAll.txt
+    active           INTEGER DEFAULT 1,
+    fetched_at       TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_mf_master_amc      ON mf_scheme_master(amc);
+CREATE INDEX IF NOT EXISTS idx_mf_master_cat      ON mf_scheme_master(category_norm);
+CREATE INDEX IF NOT EXISTS idx_mf_master_plan     ON mf_scheme_master(plan_type, option_type);
+CREATE INDEX IF NOT EXISTS idx_mf_master_active   ON mf_scheme_master(active);
+
+-- Point-in-time returns + risk snapshot per scheme — recomputed monthly
+CREATE TABLE IF NOT EXISTS mf_metrics (
+    scheme_code             TEXT NOT NULL,
+    as_of_date              TEXT NOT NULL,
+    nav                     REAL,
+    nav_date                TEXT,
+    ret_1m                  REAL,
+    ret_3m                  REAL,
+    ret_6m                  REAL,
+    ret_1y                  REAL,
+    ret_3y_cagr             REAL,
+    ret_5y_cagr             REAL,
+    ret_10y_cagr            REAL,
+    ret_since_inception_cagr REAL,
+    std_1y                  REAL,
+    std_3y                  REAL,
+    sharpe_1y               REAL,
+    sharpe_3y               REAL,
+    sortino_1y              REAL,
+    max_drawdown            REAL,                 -- negative %
+    max_dd_start            TEXT,
+    max_dd_end              TEXT,
+    recovery_days           INTEGER,
+    bench_spread_1y         REAL,                 -- ret_1y - benchmark_1y
+    bench_spread_3y         REAL,
+    peer_rank_1y            INTEGER,
+    peer_rank_3y            INTEGER,
+    peer_count              INTEGER,
+    composite_score         REAL,                 -- 0-100 within category
+    score_percentile        REAL,                 -- 0-100 percentile within category
+    score_3y_cagr_pct       REAL,                 -- breakdown: each component's percentile
+    score_sharpe_3y_pct     REAL,
+    score_max_dd_pct        REAL,
+    score_consistency_pct   REAL,
+    PRIMARY KEY (scheme_code, as_of_date)
+);
+CREATE INDEX IF NOT EXISTS idx_mf_metrics_score ON mf_metrics(composite_score DESC);
+CREATE INDEX IF NOT EXISTS idx_mf_metrics_asof ON mf_metrics(as_of_date);
+
+-- Per-scheme calendar-year returns (for the bar chart on detail page)
+CREATE TABLE IF NOT EXISTS mf_calendar_returns (
+    scheme_code   TEXT NOT NULL,
+    year          INTEGER NOT NULL,
+    ret_pct       REAL,
+    bench_ret_pct REAL,
+    PRIMARY KEY (scheme_code, year)
+);
+
+-- Per-scheme rolling 3Y/5Y CAGR sampled monthly (rolling-return chart + consistency scorer)
+CREATE TABLE IF NOT EXISTS mf_rolling_returns (
+    scheme_code                 TEXT NOT NULL,
+    anchor_date                 TEXT NOT NULL,    -- first business day of each month
+    rolling_3y_cagr             REAL,
+    rolling_5y_cagr             REAL,
+    rolling_3y_beats_category   INTEGER,          -- 1 if rolling > category median for that anchor; 0 if <=; NULL if N/A
+    rolling_5y_beats_category   INTEGER,
+    PRIMARY KEY (scheme_code, anchor_date)
+);
+CREATE INDEX IF NOT EXISTS idx_mf_rolling_sid ON mf_rolling_returns(scheme_code);
+
+-- Category aggregates for ranking + heatmap
+CREATE TABLE IF NOT EXISTS mf_category_stats (
+    category_norm     TEXT NOT NULL,
+    as_of_date        TEXT NOT NULL,
+    scheme_count      INTEGER,
+    median_ret_1y     REAL,
+    median_ret_3y     REAL,
+    median_ret_5y     REAL,
+    median_sharpe_1y  REAL,
+    median_std_1y     REAL,
+    top_decile_ret_1y REAL,
+    bot_decile_ret_1y REAL,
+    PRIMARY KEY (category_norm, as_of_date)
+);
+
+-- Per-scheme portfolio holdings (Phase 4c — schema ready, ingest deferred).
+-- Top stocks + sector allocation per scheme from AMFI monthly disclosures.
+-- AMFI publishes monthly portfolio disclosures (~45-day lag) at
+-- amfiindia.com/research-information/other-data — page is JS-rendered, per-AMC
+-- XLSX downloads. Full automated ingest needs per-AMC parsers (~50 AMCs).
+-- Schema lands now so the UI tab can render "—" placeholders cleanly.
+CREATE TABLE IF NOT EXISTS mf_holdings (
+    scheme_code     TEXT NOT NULL,
+    as_of_date      TEXT NOT NULL,   -- disclosure month-end
+    holding_rank    INTEGER NOT NULL,
+    instrument_type TEXT,             -- 'EQUITY' / 'DEBT' / 'CASH' / 'OTHER'
+    sid             TEXT,             -- our stocks.sid if equity holding (NULLABLE — best-effort match)
+    isin            TEXT,
+    instrument_name TEXT NOT NULL,
+    sector          TEXT,
+    pct_of_aum      REAL,
+    market_value_cr REAL,
+    PRIMARY KEY (scheme_code, as_of_date, holding_rank)
+);
+CREATE INDEX IF NOT EXISTS idx_mf_holdings_scheme ON mf_holdings(scheme_code);
+CREATE INDEX IF NOT EXISTS idx_mf_holdings_sid    ON mf_holdings(sid);
+
+-- Per-scheme sector allocation rollup (derived from mf_holdings or AMC disclosure)
+CREATE TABLE IF NOT EXISTS mf_sector_allocation (
+    scheme_code  TEXT NOT NULL,
+    as_of_date   TEXT NOT NULL,
+    sector       TEXT NOT NULL,
+    pct_of_aum   REAL NOT NULL,
+    PRIMARY KEY (scheme_code, as_of_date, sector)
+);
+
+-- ── Paper portfolio — realized-return loop (plan 0005 Phase F+, 2026-05-25) ──
+-- The bridge between "we publish daily picks" and "did this make money?".
+-- Forward-tracking + historical backfill from existing daily_picks. Once these
+-- prove out, the same plumbing wires into Kite Connect for live trading.
+-- See docs/decisions/0028-paper-portfolio-realized-return-loop.md.
+
+CREATE TABLE IF NOT EXISTS paper_positions (
+    position_id      INTEGER PRIMARY KEY AUTOINCREMENT,
+    sid              TEXT NOT NULL,
+    cap_tier         TEXT NOT NULL,
+    sector           TEXT,
+    entry_date       TEXT NOT NULL,      -- when the position was opened
+    entry_price      REAL NOT NULL,
+    entry_weight_pct REAL NOT NULL,      -- target weight at entry (% of NAV)
+    qty              REAL NOT NULL,      -- shares (fractional allowed for paper)
+    exit_date        TEXT,               -- NULL while open
+    exit_price       REAL,
+    rank_at_entry    INTEGER,
+    score_at_entry   REAL,
+    status           TEXT NOT NULL CHECK (status IN ('OPEN','CLOSED'))
+);
+CREATE INDEX IF NOT EXISTS idx_paper_positions_status ON paper_positions(status);
+CREATE INDEX IF NOT EXISTS idx_paper_positions_sid ON paper_positions(sid);
+
+CREATE TABLE IF NOT EXISTS paper_trades (
+    trade_id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    trade_date       TEXT NOT NULL,
+    sid              TEXT NOT NULL,
+    side             TEXT NOT NULL CHECK (side IN ('BUY','SELL')),
+    qty              REAL NOT NULL,
+    price            REAL NOT NULL,      -- executed at this price (next-day open in paper)
+    gross_value      REAL NOT NULL,      -- qty * price
+    cost_bps         REAL NOT NULL,      -- from config.TRANSACTION_COSTS_BPS by tier
+    cost_amount      REAL NOT NULL,
+    net_value        REAL NOT NULL,      -- gross +/- cost
+    reason           TEXT NOT NULL,      -- INITIAL / NEW_PICK / EXIT_DROPPED / EXIT_SECTOR_CAP / EXIT_FORCED
+    position_id      INTEGER REFERENCES paper_positions(position_id),
+    rebalance_date   TEXT                -- the Friday whose picks drove this trade
+);
+CREATE INDEX IF NOT EXISTS idx_paper_trades_date ON paper_trades(trade_date);
+CREATE INDEX IF NOT EXISTS idx_paper_trades_sid ON paper_trades(sid);
+
+CREATE TABLE IF NOT EXISTS paper_nav_history (
+    nav_date              TEXT PRIMARY KEY,
+    nav                   REAL NOT NULL,          -- mark-to-market portfolio value INR
+    cash                  REAL NOT NULL,          -- uninvested cash
+    n_positions           INTEGER NOT NULL,
+    daily_return_pct      REAL,                   -- vs prior nav
+    cumulative_return_pct REAL,                   -- vs initial 10L
+    drawdown_pct          REAL,                   -- from running peak
+    benchmark_nav         REAL,                   -- Nifty50 baseline starting at same capital
+    benchmark_cumret      REAL,
+    spread_vs_benchmark   REAL                    -- alpha proxy
+);
+CREATE INDEX IF NOT EXISTS idx_paper_nav_date ON paper_nav_history(nav_date);
+
+-- ── Per-stock data lineage (plan 0005 Phase F, 2026-05-25) ──
+-- For any (sid, factor, date), points at the exact source rows that contributed.
+-- Emitted by each signal module's _compute_scores via db._emit_lineage().
+-- Gated by lineage.lineage_active_sids() (default top-300 from daily_picks).
+-- Static lineage (declarative) lives in lineage.FACTOR_LINEAGE.
+-- See docs/decisions/0027-per-stock-data-lineage.md.
+CREATE TABLE IF NOT EXISTS signal_lineage (
+    sid              TEXT NOT NULL,
+    snapshot_date    TEXT NOT NULL,
+    factor           TEXT NOT NULL,         -- canonical factor name (matches db.BACKTEST_SIGNALS.signal)
+    source_table     TEXT NOT NULL,
+    source_key       TEXT NOT NULL,         -- JSON dict {col: value} identifying source row(s)
+    source_cols      TEXT,                  -- JSON list of cols read from this source row
+    column_sources   TEXT,                  -- JSON {col: feed} for mixed-source tables; NULL otherwise
+    contribution     TEXT,                  -- role label (ltm_y0 / latest / pt_upside_anchor / ...)
+    PRIMARY KEY (sid, snapshot_date, factor, source_table, source_key, contribution)
+);
+CREATE INDEX IF NOT EXISTS idx_lineage_sid_factor ON signal_lineage(sid, factor);
+CREATE INDEX IF NOT EXISTS idx_lineage_snapshot ON signal_lineage(snapshot_date);
+CREATE INDEX IF NOT EXISTS idx_lineage_source_table ON signal_lineage(source_table);

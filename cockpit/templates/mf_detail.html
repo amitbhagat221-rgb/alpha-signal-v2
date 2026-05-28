@@ -1,0 +1,458 @@
+{% extends "base.html" %}
+{% block content %}
+{% from "_icons.html" import icon %}
+
+{% set i = detail.info %}
+{% set m = detail.metrics %}
+{% set cal = detail.calendar %}
+
+<style>
+.mf-detail-hero { display:flex; justify-content:space-between; align-items:flex-start; gap:24px; padding:20px; background:var(--card-bg); border-radius:8px; border:1px solid var(--border); margin-bottom:16px; }
+.mf-detail-left { flex:1; }
+.mf-detail-title { font-size:22px; font-weight:700; margin-bottom:4px; }
+.mf-detail-amc { color:var(--text-muted); font-size:13px; margin-bottom:12px; }
+.mf-tags { display:flex; gap:6px; flex-wrap:wrap; margin-top:8px; }
+.mf-tag { padding:3px 8px; background:rgba(124,58,237,0.12); border-radius:4px; font-size:11px; color:var(--accent); font-weight:600; }
+.mf-tag.muted { background:rgba(255,255,255,0.05); color:var(--text-muted); }
+
+.mf-score-box { text-align:center; padding:16px 20px; background:var(--bg); border-radius:8px; border:1px solid var(--border); min-width:140px; }
+.mf-score-value { font-size:36px; font-weight:800; line-height:1; }
+.mf-score-elite  { color:#22c55e; }
+.mf-score-strong { color:#84cc16; }
+.mf-score-mid    { color:#f59e0b; }
+.mf-score-weak   { color:#ef4444; }
+.mf-score-label { font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px; margin-top:6px; }
+.mf-score-meta  { font-size:11px; color:var(--text-muted); margin-top:4px; }
+
+.mf-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:12px; margin-bottom:16px; }
+.mf-stat { padding:12px 14px; background:var(--card-bg); border-radius:6px; border:1px solid var(--border); }
+.mf-stat-label { font-size:10px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px; }
+.mf-stat-value { font-size:18px; font-weight:600; margin-top:4px; }
+.ret-pos { color:#22c55e; } .ret-neg { color:#ef4444; }
+
+.section-title { font-size:14px; font-weight:700; margin:24px 0 12px; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-muted); }
+.card { background:var(--card-bg); border:1px solid var(--border); border-radius:6px; padding:16px; margin-bottom:16px; }
+
+table.mini { width:100%; font-size:12px; border-collapse:collapse; }
+table.mini th { padding:6px 8px; text-align:left; color:var(--text-muted); font-size:10px; text-transform:uppercase; }
+table.mini td { padding:6px 8px; border-top:1px solid var(--border); }
+table.mini .num { text-align:right; font-variant-numeric:tabular-nums; }
+
+.tabs { display:flex; gap:0; border-bottom:1px solid var(--border); margin-bottom:16px; }
+.tab { padding:10px 18px; cursor:pointer; color:var(--text-muted); font-weight:600; font-size:13px; border-bottom:2px solid transparent; }
+.tab.active { color:var(--text); border-bottom-color:var(--accent); }
+
+.chart-wrap { background:var(--card-bg); border:1px solid var(--border); border-radius:6px; padding:16px; margin-bottom:16px; }
+.chart-title { font-size:13px; font-weight:600; margin-bottom:8px; color:var(--text-muted); }
+.chart-canvas { position:relative; height:280px; }
+
+.score-breakdown { display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:12px; }
+.score-comp { background:var(--bg); padding:12px; border-radius:6px; }
+.score-comp-label { font-size:11px; color:var(--text-muted); text-transform:uppercase; }
+.score-comp-pct { font-size:24px; font-weight:700; margin:4px 0; }
+.score-comp-meta { font-size:11px; color:var(--text-muted); }
+.bar { height:6px; background:rgba(255,255,255,0.05); border-radius:3px; margin-top:6px; overflow:hidden; }
+.bar > div { height:100%; background:var(--accent); }
+</style>
+
+{# ─── Data-quality warning banner (wound-up / segregated / interval / bonus / anomalous) ─── #}
+{% if i.data_quality and i.data_quality != 'TRUSTED' %}
+<div style="background:rgba(239,68,68,0.10); border:1px solid rgba(239,68,68,0.4); color:#ef4444; padding:14px 18px; border-radius:6px; margin-bottom:16px; display:flex; gap:12px; align-items:flex-start;">
+    <div style="font-size:20px;">⚠</div>
+    <div style="flex:1;">
+        <div style="font-weight:700; margin-bottom:4px;">
+            {% if i.data_quality == 'WOUND_UP' %}WOUND-UP SCHEME — historical returns shown are NOT genuine fund performance
+            {% elif i.data_quality == 'SEGREGATED' %}SEGREGATED PORTFOLIO — accounting carve-out from a wind-up, not an investable fund
+            {% elif i.data_quality == 'INTERVAL' %}INTERVAL FUND — closed-ended, NAVs spike at maturity windows
+            {% elif i.data_quality == 'BONUS' %}BONUS OPTION — rarely traded, NAV often stale
+            {% elif i.data_quality == 'ANOMALOUS' %}ANOMALOUS NAV — recent values pollute return calculations
+            {% else %}DATA-QUALITY FLAG: {{ i.data_quality }}{% endif %}
+        </div>
+        <div style="font-size:12px; color:rgba(239,68,68,0.85);">
+            {{ i.quality_reason or '' }}
+        </div>
+        <div style="font-size:11px; color:var(--text-muted); margin-top:6px;">
+            This scheme is excluded from the default <a href="/mutual-funds" style="color:var(--accent);">universe browser</a> and from
+            composite-score ranking. The metrics below are computed but flagged unreliable —
+            don't use them for investment decisions.
+        </div>
+    </div>
+</div>
+{% endif %}
+
+{# ─── Hero header ─── #}
+<div class="mf-detail-hero" x-data="{tab:'performance'}">
+    <div class="mf-detail-left">
+        <div class="mf-detail-title">{{ i.scheme_name }}</div>
+        <div class="mf-detail-amc">{{ i.amc }} · {{ i.category_norm or i.category_raw or 'Uncategorised' }}</div>
+        <div class="mf-tags">
+            <span class="mf-tag">{{ i.plan_type or 'N/A' }}</span>
+            <span class="mf-tag">{{ i.option_type or 'N/A' }}</span>
+            {% if i.inception_date %}<span class="mf-tag muted">Inception {{ i.inception_date }}</span>{% endif %}
+            {% if i.aum_cr %}<span class="mf-tag muted">AUM ₹{{ '%.0f' % i.aum_cr }} Cr</span>{% endif %}
+            {% if i.expense_ratio is not none and i.expense_ratio %}<span class="mf-tag muted">Expense {{ '%.2f%%' % i.expense_ratio }}</span>{% endif %}
+            {% if i.benchmark %}<span class="mf-tag muted">vs {{ i.benchmark }}</span>{% endif %}
+            <span class="mf-tag muted">Scheme #{{ i.scheme_code }}</span>
+            {% if i.isin_growth %}<span class="mf-tag muted">ISIN-G {{ i.isin_growth }}</span>{% endif %}
+        </div>
+    </div>
+    <div class="mf-score-box">
+        {% set s = m.composite_score %}
+        <div class="mf-score-value {% if s and s>=70 %}mf-score-elite{% elif s and s>=55 %}mf-score-strong{% elif s and s>=35 %}mf-score-mid{% elif s %}mf-score-weak{% endif %}">
+            {% if s is not none %}{{ '%.0f' % s }}{% else %}—{% endif %}
+        </div>
+        <div class="mf-score-label">Composite Score</div>
+        {% if m and m.score_percentile is not none and m.score_percentile is number %}
+        <div class="mf-score-meta">Top {{ (100 - m.score_percentile)|round|int }}% in category</div>
+        {% endif %}
+    </div>
+</div>
+
+{# ─── Snapshot stats ─── #}
+<div class="mf-grid">
+    <div class="mf-stat">
+        <div class="mf-stat-label">NAV</div>
+        <div class="mf-stat-value">{% if m.nav %}₹{{ '%.2f' % m.nav }}{% else %}—{% endif %}</div>
+        <div style="font-size:11px; color:var(--text-muted);">as of {{ m.nav_date or '—' }}</div>
+    </div>
+    <div class="mf-stat">
+        <div class="mf-stat-label">1Y return</div>
+        <div class="mf-stat-value {% if m.ret_1y and m.ret_1y >= 0 %}ret-pos{% elif m.ret_1y %}ret-neg{% endif %}">{% if m.ret_1y is not none %}{{ '%+.1f%%' % m.ret_1y }}{% else %}—{% endif %}</div>
+        {% if m.bench_spread_1y is not none %}<div style="font-size:11px; color:var(--text-muted);">{{ '%+.1f%%' % m.bench_spread_1y }} vs Nifty</div>{% endif %}
+    </div>
+    <div class="mf-stat">
+        <div class="mf-stat-label">3Y CAGR</div>
+        <div class="mf-stat-value {% if m.ret_3y_cagr and m.ret_3y_cagr >= 0 %}ret-pos{% elif m.ret_3y_cagr %}ret-neg{% endif %}">{% if m.ret_3y_cagr is not none %}{{ '%+.1f%%' % m.ret_3y_cagr }}{% else %}—{% endif %}</div>
+        {% if m.bench_spread_3y is not none %}<div style="font-size:11px; color:var(--text-muted);">{{ '%+.1f%%' % m.bench_spread_3y }} vs Nifty</div>{% endif %}
+    </div>
+    <div class="mf-stat">
+        <div class="mf-stat-label">5Y CAGR</div>
+        <div class="mf-stat-value {% if m.ret_5y_cagr and m.ret_5y_cagr >= 0 %}ret-pos{% elif m.ret_5y_cagr %}ret-neg{% endif %}">{% if m.ret_5y_cagr is not none %}{{ '%+.1f%%' % m.ret_5y_cagr }}{% else %}—{% endif %}</div>
+    </div>
+    <div class="mf-stat">
+        <div class="mf-stat-label">Since inception</div>
+        <div class="mf-stat-value {% if m.ret_since_inception_cagr and m.ret_since_inception_cagr >= 0 %}ret-pos{% elif m.ret_since_inception_cagr %}ret-neg{% endif %}">{% if m.ret_since_inception_cagr is not none %}{{ '%+.1f%%' % m.ret_since_inception_cagr }}{% else %}—{% endif %}</div>
+        <div style="font-size:11px; color:var(--text-muted);">annualised</div>
+    </div>
+    <div class="mf-stat">
+        <div class="mf-stat-label">Sharpe 3Y</div>
+        <div class="mf-stat-value">{% if m.sharpe_3y is not none %}{{ '%.2f' % m.sharpe_3y }}{% else %}—{% endif %}</div>
+    </div>
+    <div class="mf-stat">
+        <div class="mf-stat-label">Max drawdown</div>
+        <div class="mf-stat-value ret-neg">{% if m.max_drawdown is not none %}{{ '%.1f%%' % m.max_drawdown }}{% else %}—{% endif %}</div>
+        {% if m.max_dd_start and m.max_dd_end %}<div style="font-size:11px; color:var(--text-muted);">{{ m.max_dd_start }} → {{ m.max_dd_end }}</div>{% endif %}
+    </div>
+    <div class="mf-stat">
+        <div class="mf-stat-label">Volatility 1Y</div>
+        <div class="mf-stat-value">{% if m.std_1y is not none %}{{ '%.1f%%' % m.std_1y }}{% else %}—{% endif %}</div>
+    </div>
+</div>
+
+{# ─── Tabs ─── #}
+<div x-data="mfDetail('{{ i.scheme_code }}')" x-init="init()">
+    <div class="tabs">
+        <div class="tab" :class="tab=='performance' && 'active'" @click="tab='performance'; if (!chartsReady.perf) drawPerformance()">Performance &amp; Rolling</div>
+        <div class="tab" :class="tab=='risk' && 'active'" @click="tab='risk'">Risk &amp; Scorer</div>
+        <div class="tab" :class="tab=='peers' && 'active'" @click="tab='peers'">Peer rank</div>
+        <div class="tab" :class="tab=='holdings' && 'active'" @click="tab='holdings'">Holdings</div>
+        <div class="tab" :class="tab=='meta' && 'active'" @click="tab='meta'">Metadata</div>
+    </div>
+
+    {# ── Performance + rolling charts ── #}
+    <div x-show="tab=='performance'">
+        <div class="chart-wrap">
+            <div class="chart-title">NAV vs Nifty 50 proxy (rebased to 100)</div>
+            <div class="chart-canvas"><canvas id="navChart"></canvas></div>
+        </div>
+
+        <div class="chart-wrap">
+            <div class="chart-title">Rolling 3-year CAGR (% per monthly anchor)</div>
+            <div class="chart-canvas"><canvas id="rolling3yChart"></canvas></div>
+        </div>
+
+        <div class="chart-wrap">
+            <div class="chart-title">Rolling 5-year CAGR (% per monthly anchor)</div>
+            <div class="chart-canvas"><canvas id="rolling5yChart"></canvas></div>
+        </div>
+
+        {% if cal %}
+        <div class="card">
+            <div class="section-title" style="margin-top:0;">Calendar-year returns</div>
+            <table class="mini">
+                <thead><tr><th>Year</th><th class="num">Fund</th><th class="num">Nifty proxy</th><th class="num">Spread</th></tr></thead>
+                <tbody>
+                {% for c in cal %}
+                <tr>
+                    <td>{{ c.year }}</td>
+                    <td class="num {% if c.ret_pct and c.ret_pct>=0 %}ret-pos{% elif c.ret_pct %}ret-neg{% endif %}">{% if c.ret_pct is not none %}{{ '%+.1f%%' % c.ret_pct }}{% else %}—{% endif %}</td>
+                    <td class="num">{% if c.bench_ret_pct is not none %}{{ '%+.1f%%' % c.bench_ret_pct }}{% else %}—{% endif %}</td>
+                    <td class="num">{% if c.ret_pct is not none and c.bench_ret_pct is not none %}{{ '%+.1f' % (c.ret_pct - c.bench_ret_pct) }}{% else %}—{% endif %}</td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+    </div>
+
+    {# ── Risk + scorer ── #}
+    <div x-show="tab=='risk'">
+        <div class="card">
+            <div class="section-title" style="margin-top:0;">Composite score breakdown</div>
+            <p style="color:var(--text-muted); font-size:12px; margin:0 0 12px;">
+                <strong>Absolute</strong> (not category-relative) score 0–100. Formula:
+                <code style="background:rgba(255,255,255,0.05); padding:1px 5px; border-radius:3px;">(return base × Sharpe multiplier) + drawdown adj + consistency adj</code>.
+                Score 80+ ≈ funds historically delivering 15-20%+ CAGR; 60-80 ≈ 8-12%; below 40 = poor.
+            </p>
+            <div class="score-breakdown">
+                <div class="score-comp">
+                    <div class="score-comp-label">Return base · 0-50</div>
+                    <div class="score-comp-pct">{% if m.score_3y_cagr_pct is not none %}{{ '%.1f' % m.score_3y_cagr_pct }}{% else %}—{% endif %}</div>
+                    <div class="score-comp-meta">3Y CAGR {% if m.ret_3y_cagr is not none %}{{ '%.1f%%' % m.ret_3y_cagr }}{% else %}—{% endif %}  ·  scale: 6% → 5pts, 15% → 30pts, 20%+ → 42-50pts</div>
+                    <div class="bar"><div style="width: {{ ((m.score_3y_cagr_pct|default(0))/50*100)|round }}%"></div></div>
+                </div>
+                <div class="score-comp">
+                    <div class="score-comp-label">Sharpe multiplier · 0.5×-1.4×</div>
+                    <div class="score-comp-pct">{% if m.score_sharpe_3y_pct is not none %}{{ '%.2f' % m.score_sharpe_3y_pct }}×{% else %}—{% endif %}</div>
+                    <div class="score-comp-meta">Sharpe 3Y {% if m.sharpe_3y is not none %}{{ '%.2f' % m.sharpe_3y }}{% else %}—{% endif %}  ·  multiplies return base; rewards risk-adjusted skill</div>
+                    <div class="bar"><div style="width: {{ ((m.score_sharpe_3y_pct|default(0.5)-0.5)/0.9*100)|round }}%"></div></div>
+                </div>
+                <div class="score-comp">
+                    <div class="score-comp-label">Drawdown adj · -15 to +15</div>
+                    <div class="score-comp-pct">{% if m.score_max_dd_pct is not none %}{{ '%+.1f' % m.score_max_dd_pct }}{% else %}—{% endif %}</div>
+                    <div class="score-comp-meta">Max DD {% if m.max_drawdown is not none %}{{ '%.1f%%' % m.max_drawdown }}{% else %}—{% endif %}  ·  -50% DD → -15pts; -5% DD → +10pts</div>
+                    <div class="bar"><div style="width: {{ (((m.score_max_dd_pct|default(0))+15)/30*100)|round }}%"></div></div>
+                </div>
+                <div class="score-comp">
+                    <div class="score-comp-label">Consistency adj · 0-15</div>
+                    <div class="score-comp-pct">{% if m.score_consistency_pct is not none %}{{ '%+.1f' % m.score_consistency_pct }}{% else %}—{% endif %}</div>
+                    <div class="score-comp-meta">% of rolling 3Y windows beating peer median  ·  50% → 5pts, 90% → 15pts</div>
+                    <div class="bar"><div style="width: {{ ((m.score_consistency_pct|default(0))/15*100)|round }}%"></div></div>
+                </div>
+            </div>
+            {% if m.score_percentile is not none %}
+            <p style="color:var(--text-muted); font-size:11px; margin:12px 0 0;">
+                Within-category rank: <strong style="color:var(--text);">top {{ (100 - m.score_percentile)|round|int }}%</strong> in {{ i.category_norm or 'this category' }} —
+                shown as a secondary view; the absolute score above is the one to act on.
+            </p>
+            {% endif %}
+        </div>
+
+        <div class="card">
+            <div class="section-title" style="margin-top:0;">Risk detail</div>
+            <table class="mini">
+                <tr><td>Annualised volatility (1Y)</td><td class="num">{% if m.std_1y is not none %}{{ '%.2f%%' % m.std_1y }}{% else %}—{% endif %}</td></tr>
+                <tr><td>Annualised volatility (3Y)</td><td class="num">{% if m.std_3y is not none %}{{ '%.2f%%' % m.std_3y }}{% else %}—{% endif %}</td></tr>
+                <tr><td>Sharpe 1Y</td><td class="num">{% if m.sharpe_1y is not none %}{{ '%.2f' % m.sharpe_1y }}{% else %}—{% endif %}</td></tr>
+                <tr><td>Sortino 1Y</td><td class="num">{% if m.sortino_1y is not none %}{{ '%.2f' % m.sortino_1y }}{% else %}—{% endif %}</td></tr>
+                <tr><td>Max drawdown</td><td class="num">{% if m.max_drawdown is not none %}{{ '%.1f%%' % m.max_drawdown }}{% else %}—{% endif %}</td></tr>
+                <tr><td>Drawdown window</td><td class="num">{{ m.max_dd_start or '—' }} → {{ m.max_dd_end or '—' }}</td></tr>
+                <tr><td>Recovery days</td><td class="num">{% if m.recovery_days %}{{ m.recovery_days }}{% else %}not yet recovered{% endif %}</td></tr>
+            </table>
+        </div>
+    </div>
+
+    {# ── Peer rank ── #}
+    <div x-show="tab=='peers'">
+        <div class="card">
+            <div class="section-title" style="margin-top:0;">Top 10 in {{ peers.category or 'category' }}</div>
+            <table class="mini">
+                <thead><tr><th>#</th><th>Scheme</th><th class="num">3Y CAGR</th><th class="num">Sharpe</th><th class="num">Score</th></tr></thead>
+                <tbody>
+                {% for p in peers.peers %}
+                <tr {% if p.scheme_code == i.scheme_code %}style="background:rgba(124,58,237,0.10);"{% endif %}>
+                    <td>{{ loop.index }}</td>
+                    <td><a href="/mutual-funds/{{ p.scheme_code }}" style="color:var(--text); text-decoration:none;">{{ p.scheme_name[:65] }}</a><div style="font-size:11px; color:var(--text-muted);">{{ p.amc }}</div></td>
+                    <td class="num">{% if p.ret_3y_cagr is not none %}{{ '%+.1f%%' % p.ret_3y_cagr }}{% else %}—{% endif %}</td>
+                    <td class="num">{% if p.sharpe_3y is not none %}{{ '%.2f' % p.sharpe_3y }}{% else %}—{% endif %}</td>
+                    <td class="num"><strong>{% if p.composite_score is not none %}{{ '%.0f' % p.composite_score }}{% else %}—{% endif %}</strong></td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    {# ── Metadata ── #}
+    <div x-show="tab=='meta'">
+        <div class="card">
+            <div class="section-title" style="margin-top:0;">Identifiers &amp; source data</div>
+            <table class="mini">
+                <tr><td>Scheme code</td><td class="num">{{ i.scheme_code }}</td></tr>
+                <tr><td>ISIN (Growth)</td><td class="num">{{ i.isin_growth or '—' }}</td></tr>
+                <tr><td>ISIN (Dividend)</td><td class="num">{{ i.isin_div or '—' }}</td></tr>
+                <tr><td>AMC</td><td>{{ i.amc }}</td></tr>
+                <tr><td>Raw SEBI category</td><td>{{ i.category_raw }}</td></tr>
+                <tr><td>Normalised category</td><td>{{ i.category_norm or '(unmapped)' }}</td></tr>
+                <tr><td>Plan type</td><td>{{ i.plan_type or '—' }}</td></tr>
+                <tr><td>Option type</td><td>{{ i.option_type or '—' }}</td></tr>
+                <tr><td>Inception date</td><td>{{ i.inception_date or '—' }}</td></tr>
+                <tr><td>Full NAV history backfilled?</td><td>{% if i.has_full_history %}yes{% else %}no — only today's AMFI snapshot{% endif %}</td></tr>
+                <tr><td>Last seen in AMFI</td><td>{{ i.last_seen or '—' }}</td></tr>
+                <tr><td>AUM (₹ Cr)</td><td class="num">{% if i.aum_cr %}{{ '%.0f' % i.aum_cr }}{% else %}— (not yet ingested — see sources/mf_metadata_enrichment.py){% endif %}</td></tr>
+                <tr><td>Expense ratio</td><td class="num">{% if i.expense_ratio is not none and i.expense_ratio %}{{ '%.3f%%' % i.expense_ratio }}{% else %}— (not yet ingested){% endif %}</td></tr>
+                <tr><td>Benchmark</td><td>{{ i.benchmark or '— (synthetic Nifty 50 used)' }}</td></tr>
+            </table>
+            <p style="font-size:11px; color:var(--text-muted); margin-top:16px;">
+                Sources: scheme master + daily NAV via AMFI <code>NAVAll.txt</code> (public);
+                historical NAV via mfapi.in (community wrapper). Benchmark = synthetic Nifty 50 proxy from top-50 LARGE caps in <code>stock_prices</code>.
+            </p>
+        </div>
+
+    </div>
+
+    {# ── Holdings tab (Phase 4c) ── #}
+    <div x-show="tab=='holdings'">
+        {% if holdings and holdings.top %}
+        <div class="card">
+            <div class="section-title" style="margin-top:0;">Top holdings — as of {{ holdings.as_of_date }}</div>
+            <table class="mini">
+                <thead><tr><th>#</th><th>Holding</th><th>Sector</th><th class="num">% of AUM</th><th class="num">₹ Cr</th></tr></thead>
+                <tbody>
+                {% for h in holdings.top[:30] %}
+                <tr>
+                    <td>{{ h.holding_rank }}</td>
+                    <td>
+                        {% if h.sid %}<a href="/explorer/{{ h.sid }}" style="color:var(--accent); text-decoration:none;">{{ h.instrument_name[:60] }}</a>
+                        {% else %}{{ h.instrument_name[:60] }}{% endif %}
+                        {% if h.isin %}<div style="font-size:10px; color:var(--text-muted);">{{ h.isin }}</div>{% endif %}
+                    </td>
+                    <td>{{ h.sector or '—' }}</td>
+                    <td class="num">{% if h.pct_of_aum %}{{ '%.2f%%' % h.pct_of_aum }}{% else %}—{% endif %}</td>
+                    <td class="num">{% if h.market_value_cr %}{{ '%.0f' % h.market_value_cr }}{% else %}—{% endif %}</td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% if holdings.sectors %}
+        <div class="card">
+            <div class="section-title" style="margin-top:0;">Sector allocation</div>
+            <table class="mini">
+                <thead><tr><th>Sector</th><th class="num">% of AUM</th></tr></thead>
+                <tbody>
+                {% for s in holdings.sectors %}
+                <tr><td>{{ s.sector }}</td><td class="num">{{ '%.2f%%' % s.pct_of_aum }}</td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+        {% else %}
+        <div class="card">
+            <div class="section-title" style="margin-top:0;">Holdings — not yet ingested</div>
+            <p style="color:var(--text-muted); font-size:12px; line-height:1.5;">
+                The schema is in place (<code>mf_holdings</code>, <code>mf_sector_allocation</code>), but no holdings data has been ingested for this scheme yet.
+            </p>
+            <p style="color:var(--text-muted); font-size:12px; line-height:1.5;">
+                Ingest path: drop a CSV with columns
+                <code>scheme_code, as_of_date, holding_rank, instrument_name, pct_of_aum, sector, sid, isin, market_value_cr</code>
+                and run <code>python -m sources.mf_holdings --csv path/to/holdings.csv</code>.
+                See <code>sources/mf_holdings.py</code> docstring for the rationale and the deferred-to-v2 automated AMFI scrape.
+            </p>
+            <p style="color:var(--text-muted); font-size:11px; margin-top:12px;">
+                <strong>Why manual</strong>: AMFI's portfolio disclosure portal is JS-rendered with per-AMC formats; an automated scrape needs ~50 per-AMC parsers (~1-2 sessions each).
+                For high-conviction funds you research, manual CSV from the AMC's monthly factsheet is faster than building scrapers.
+            </p>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+<script>
+function mfDetail(schemeCode) {
+    return {
+        tab: 'performance',
+        chartsReady: {perf: false},
+        navChart: null, r3y: null, r5y: null,
+
+        init() {
+            // Draw charts when tab is opened (lazy)
+            this.$watch('tab', (v) => { if (v === 'performance' && !this.chartsReady.perf) this.drawPerformance(); });
+            // Draw immediately for default-active tab
+            this.drawPerformance();
+        },
+
+        async drawPerformance() {
+            this.chartsReady.perf = true;
+            const [nav, rolling] = await Promise.all([
+                fetch(`/api/mf-nav-series/${schemeCode}`).then(r => r.json()),
+                fetch(`/api/mf-rolling/${schemeCode}`).then(r => r.json()),
+            ]);
+            this.drawNav(nav);
+            this.drawRolling(rolling);
+        },
+
+        drawNav(data) {
+            if (!data || !data.length) return;
+            // Rebase NAV to 100
+            const startNav = data[0].nav;
+            const dates = data.map(d => d.date);
+            const navs = data.map(d => 100 * d.nav / startNav);
+
+            const ctx = document.getElementById('navChart');
+            if (!ctx) return;
+            this.navChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: dates,
+                    datasets: [{
+                        label: 'Fund NAV (rebased)',
+                        data: navs,
+                        borderColor: '#7c3aed',
+                        backgroundColor: 'rgba(124,58,237,0.08)',
+                        borderWidth: 1.5,
+                        pointRadius: 0,
+                        tension: 0.1,
+                        fill: true,
+                    }],
+                },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    interaction: { mode: 'index', intersect: false },
+                    scales: {
+                        x: { ticks: { maxTicksLimit: 10, color: '#888' }, grid: { display: false } },
+                        y: { ticks: { color: '#888' }, grid: { color: 'rgba(255,255,255,0.05)' } },
+                    },
+                    plugins: { legend: { display: false } },
+                },
+            });
+        },
+
+        drawRolling(data) {
+            if (!data || !data.length) return;
+            const labels = data.map(d => d.anchor_date);
+            const r3y = data.map(d => d.rolling_3y_cagr);
+            const r5y = data.map(d => d.rolling_5y_cagr);
+
+            const mk = (id, label, points, color) => {
+                const ctx = document.getElementById(id);
+                if (!ctx) return null;
+                return new Chart(ctx, {
+                    type: 'line',
+                    data: { labels, datasets: [{
+                        label, data: points, borderColor: color, backgroundColor: color + '22',
+                        borderWidth: 1.5, pointRadius: 0, tension: 0.2, fill: true,
+                        spanGaps: true,
+                    }]},
+                    options: {
+                        responsive: true, maintainAspectRatio: false,
+                        interaction: { mode: 'index', intersect: false },
+                        scales: {
+                            x: { ticks: { maxTicksLimit: 10, color: '#888' }, grid: { display: false } },
+                            y: { ticks: { color: '#888', callback: (v)=>v+'%' }, grid: { color: 'rgba(255,255,255,0.05)' } },
+                        },
+                        plugins: { legend: { display: false } },
+                    },
+                });
+            };
+            this.r3y = mk('rolling3yChart', 'Rolling 3Y CAGR', r3y, '#22c55e');
+            this.r5y = mk('rolling5yChart', 'Rolling 5Y CAGR', r5y, '#3b82f6');
+        },
+    };
+}
+</script>
+
+{% endblock %}

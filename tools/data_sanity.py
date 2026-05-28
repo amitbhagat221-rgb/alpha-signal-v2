@@ -119,16 +119,39 @@ def _generic_coverage_checks():
 
 
 def _run_fn_check(check):
-    """Function-form check. fn must return None or a result dict."""
+    """Function-form check. fn must return None or a result dict.
+
+    Mirrors `_run_sql_check`: a result with n_bad=0 is treated as PASS
+    (returns None — no violation). Severity is auto-computed from
+    pct = n_bad / n_total when not explicitly set, using the same
+    critical_pct/warn_pct thresholds as SQL checks.
+    """
     result = check["fn"]()
     if result is None:
         return None
-    # Stamp the standard fields
-    result.setdefault("code", check["code"])
-    result.setdefault("severity", check.get("severity", WARN))
-    result.setdefault("table", check.get("table"))
-    result.setdefault("column", check.get("column"))
-    result.setdefault("message", check["message"])
+    n_bad = int(result.get("n_bad", 0) or 0)
+    if n_bad == 0:
+        return None
+    n_total = int(result.get("n_total") or 0)
+    pct = (100.0 * n_bad / n_total) if n_total > 0 else None
+    severity = check.get("severity")
+    if severity is None:
+        if pct is not None:
+            severity = _severity_for(pct,
+                                     critical_pct=check.get("critical_pct", 10),
+                                     warn_pct=check.get("warn_pct", 1))
+        else:
+            severity = WARN
+    result.update({
+        "code": check["code"],
+        "severity": severity,
+        "table": check.get("table"),
+        "column": check.get("column"),
+        "message": check["message"],
+        "n_violations": n_bad,
+        "n_total": n_total,
+        "pct_violations": round(pct, 1) if pct is not None else None,
+    })
     return result
 
 
@@ -863,7 +886,98 @@ CHECKS = [
             FROM paired WHERE pct_drop >= 5
         """,
     },
+
+    # ═══════════════════════════════════════════════════════════════════
+    # MoneyControl slug integrity — discovery mis-mapped 21% of stocks
+    # (2026-05-25). The autosuggest endpoint returned the wrong company
+    # for non-exact ticker matches (IOC → ITC, ABB → Hitachi Energy,
+    # BAJAJ-AUTO → Bajaj Finance, etc.). Slug fix landed; this check
+    # gates future regressions.
+    # ═══════════════════════════════════════════════════════════════════
+    {
+        "code": "LINEAGE_REGISTRY_DRIFT",
+        "table": "lineage.FACTOR_LINEAGE",
+        "column": "(registry coverage)",
+        "message": "BACKTEST_SIGNALS contains factor(s) with no FACTOR_LINEAGE entry — "
+                   "any new factor MUST be added to lineage.py before ranking",
+        "critical_pct": 0.01,   # any missing factor is CRITICAL
+        "warn_pct": 0,
+        "fn": lambda: _lineage_registry_drift_check(),
+    },
+    {
+        "code": "MC_SLUG_NAME_MISMATCH",
+        "table": "stocks",
+        "column": "mc_slug",
+        "message": "stocks.mc_slug points to a Moneycontrol URL whose company segment "
+                   "does not match stocks.name (was autosuggest's wrong-result bug)",
+        "critical_pct": 2,
+        "warn_pct": 0.5,
+        "fn": lambda: _mc_slug_name_mismatch_check(),
+    },
 ]
+
+
+def _lineage_registry_drift_check():
+    """Flag canonical factors missing from lineage.FACTOR_LINEAGE.
+
+    Enforces: every BACKTEST_SIGNALS entry MUST have a corresponding
+    FACTOR_LINEAGE entry. Adding a new factor without lineage = CRITICAL.
+    See ADR 0027 + plan 0005 Phase F.
+    """
+    try:
+        from lineage import FACTOR_LINEAGE, missing_factors, orphan_factors
+        from db import BACKTEST_SIGNALS
+    except Exception as exc:
+        return {"n_bad": 1, "n_total": 1, "sample": f"import failed: {exc}"}
+
+    missing = missing_factors()
+    orphan = orphan_factors()
+    total = len(BACKTEST_SIGNALS)
+    n_bad = len(missing)
+    sample = None
+    if missing:
+        sample = f"missing lineage entry: {missing[0]}" + (
+            f" (+{len(missing)-1} more)" if len(missing) > 1 else "")
+    elif orphan:
+        sample = f"orphan registry entry (in lineage but not in BACKTEST_SIGNALS): {orphan[0]}"
+    return {"n_bad": n_bad, "n_total": total, "sample": sample}
+
+
+def _mc_slug_name_mismatch_check():
+    """Flag stocks.mc_slug values whose company segment doesn't match stocks.name.
+
+    Match logic mirrors the audit that purged 497 contaminated slugs on
+    2026-05-25: accept if normalised slug-company is a substring of the
+    normalised stock name (or vice versa), OR if SequenceMatcher ratio
+    >= 0.55, OR if the ticker is a substring of the slug. Mismatch otherwise.
+    """
+    import re as _re
+    from difflib import SequenceMatcher as _SM
+
+    rows = read_sql("SELECT sid, name, ticker, mc_slug FROM stocks WHERE mc_slug IS NOT NULL")
+    if rows.empty:
+        return {"n_bad": 0, "n_total": 0, "sample": None}
+
+    def _norm(s):
+        return _re.sub(r"[^a-z0-9]", "", (s or "").lower())
+
+    def _slug_co(slug):
+        parts = (slug or "").strip("/").split("/")
+        return parts[-2] if len(parts) >= 2 else ""
+
+    bad_sample = None
+    n_bad = 0
+    for sid, name, ticker, slug in rows.itertuples(index=False):
+        sc_n = _norm(_slug_co(slug)); name_n = _norm(name); ticker_n = _norm(ticker)
+        ratio = _SM(None, sc_n, name_n).ratio()
+        ticker_in = (ticker_n in sc_n or sc_n in ticker_n) if ticker_n else False
+        name_in = sc_n in name_n or name_n in sc_n
+        if not (name_in or ratio >= 0.55 or ticker_in):
+            n_bad += 1
+            if bad_sample is None:
+                bad_sample = f"{sid}: name='{name[:30]}' → slug='{_slug_co(slug)}'"
+
+    return {"n_bad": n_bad, "n_total": len(rows), "sample": bad_sample}
 
 
 # ─────────────────────── Driver ───────────────────────

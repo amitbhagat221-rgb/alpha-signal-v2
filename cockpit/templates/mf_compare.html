@@ -1,0 +1,167 @@
+{% extends "base.html" %}
+{% block content %}
+{% from "_icons.html" import icon %}
+
+<style>
+.compare-form { display:flex; gap:8px; align-items:center; margin-bottom:20px; padding:16px; background:var(--card-bg); border:1px solid var(--border); border-radius:6px; }
+.compare-form input { flex:1; padding:8px 12px; background:var(--bg); border:1px solid var(--border); color:var(--text); border-radius:4px; font-size:13px; font-family:monospace; }
+.compare-form button { padding:8px 16px; background:var(--accent); color:white; border:none; border-radius:4px; cursor:pointer; font-weight:600; }
+.compare-form a { padding:8px 12px; color:var(--text-muted); font-size:12px; text-decoration:none; }
+
+.cmp-table { width:100%; border-collapse:collapse; font-size:12px; }
+.cmp-table th, .cmp-table td { padding:10px 12px; border-bottom:1px solid var(--border); vertical-align:top; }
+.cmp-table thead th { background:var(--card-bg); font-weight:700; text-align:left; }
+.cmp-table .row-label { color:var(--text-muted); font-size:11px; text-transform:uppercase; letter-spacing:0.5px; min-width:160px; }
+.cmp-table .num { text-align:right; font-variant-numeric:tabular-nums; }
+.cmp-table tr.hero td { padding:14px 12px; background:var(--card-bg); }
+.scheme-name { font-weight:700; font-size:14px; margin-bottom:2px; }
+.scheme-amc { color:var(--text-muted); font-size:11px; margin-bottom:8px; }
+.scheme-tag { display:inline-block; padding:2px 6px; background:rgba(124,58,237,0.12); border-radius:3px; font-size:10px; color:var(--accent); margin-right:4px; }
+.ret-pos { color:#22c55e; } .ret-neg { color:#ef4444; }
+.score-cmp { font-size:22px; font-weight:800; }
+.score-elite { color:#22c55e; } .score-strong { color:#84cc16; } .score-mid { color:#f59e0b; } .score-weak { color:#ef4444; }
+
+.cat-warn { padding:10px 14px; background:rgba(245,158,11,0.10); border:1px solid rgba(245,158,11,0.3); color:#f59e0b; border-radius:6px; margin-bottom:16px; font-size:12px; }
+.no-data { color:var(--text-muted); font-style:italic; }
+
+.best { background:rgba(34,197,94,0.10); position:relative; }
+.best::after { content:"★"; position:absolute; top:4px; right:4px; color:#22c55e; font-size:11px; }
+</style>
+
+<h1 style="font-size:22px; font-weight:700; margin:0 0 12px;">Compare Mutual Funds</h1>
+
+<form class="compare-form" method="get" action="/mutual-funds/compare">
+    <input name="codes" type="text" placeholder="Scheme codes, comma-separated (e.g. 122639,118989,118955)" value="{{ input_codes or '' }}" required>
+    <button type="submit">Compare</button>
+    <a href="/mutual-funds">← Back to universe</a>
+</form>
+
+{% if not bundle.schemes %}
+<p style="color:var(--text-muted); margin-top:24px;">
+    Enter 2-5 scheme codes separated by commas. You can find scheme codes on each fund's detail page,
+    or via the <a href="/mutual-funds" style="color:var(--accent);">universe browser</a>.
+    Example: <code style="background:var(--card-bg); padding:2px 6px; border-radius:3px;">122639,118989,118955</code>
+    (Parag Parikh Flexi Cap · HDFC Mid Cap · HDFC Flexi Cap).
+</p>
+{% else %}
+
+{% if bundle.categories_seen|length > 1 %}
+<div class="cat-warn">
+    ⚠ Comparing across different categories ({{ bundle.categories_seen|join(', ') }}).
+    Composite scores are within-category percentile ranks, so direct score comparison can mislead — read raw 3Y CAGR, Sharpe and Max DD as the canonical numbers.
+</div>
+{% endif %}
+
+{# Build "best in each row" helpers — render with simple max/min checks #}
+
+<table class="cmp-table">
+    <thead>
+        <tr>
+            <th></th>
+            {% for s in bundle.schemes %}
+            <th style="min-width:240px;">
+                <div class="scheme-name"><a href="/mutual-funds/{{ s.info.scheme_code }}" style="color:inherit; text-decoration:none;">{{ s.info.scheme_name[:60] }}</a></div>
+                <div class="scheme-amc">{{ s.info.amc }} · {{ s.info.category_norm or s.info.category_raw or '—' }}</div>
+                <div>
+                    <span class="scheme-tag">{{ s.info.plan_type or '—' }}</span>
+                    <span class="scheme-tag">{{ s.info.option_type or '—' }}</span>
+                    <span class="scheme-tag" style="background:rgba(255,255,255,0.05); color:var(--text-muted);">#{{ s.info.scheme_code }}</span>
+                </div>
+            </th>
+            {% endfor %}
+        </tr>
+    </thead>
+    <tbody>
+        {# Composite score row #}
+        <tr>
+            <td class="row-label">Composite Score</td>
+            {% set scores = bundle.schemes|map(attribute='metrics.composite_score')|select|list %}
+            {% set max_score = scores|max if scores else None %}
+            {% for s in bundle.schemes %}
+                {% set v = s.metrics.composite_score %}
+                <td class="num {% if v is not none and v == max_score %}best{% endif %}">
+                    {% if v is not none %}
+                        <span class="score-cmp {% if v>=80 %}score-elite{% elif v>=60 %}score-strong{% elif v>=40 %}score-mid{% else %}score-weak{% endif %}">{{ '%.0f' % v }}</span>
+                        {% if s.metrics.score_percentile is not none %}<div style="font-size:11px; color:var(--text-muted);">Top {{ (100 - s.metrics.score_percentile)|round|int }}%</div>{% endif %}
+                    {% else %}<span class="no-data">—</span>{% endif %}
+                </td>
+            {% endfor %}
+        </tr>
+
+        {# Generic numeric rows: (label, attribute path, format string, higher_is_better, optional_suffix) #}
+        {% set rows = [
+            ('Current NAV', 'nav', '₹%.2f', None, ''),
+            ('NAV date', 'nav_date', '%s', None, ''),
+            ('1Y return', 'ret_1y', '%+.1f%%', True, ''),
+            ('3Y CAGR', 'ret_3y_cagr', '%+.1f%%', True, ''),
+            ('5Y CAGR', 'ret_5y_cagr', '%+.1f%%', True, ''),
+            ('10Y CAGR', 'ret_10y_cagr', '%+.1f%%', True, ''),
+            ('Since inception', 'ret_since_inception_cagr', '%+.1f%%', True, ''),
+            ('Sharpe 1Y', 'sharpe_1y', '%.2f', True, ''),
+            ('Sharpe 3Y', 'sharpe_3y', '%.2f', True, ''),
+            ('Sortino 1Y', 'sortino_1y', '%.2f', True, ''),
+            ('Std dev 1Y (annualised)', 'std_1y', '%.1f%%', False, ''),
+            ('Std dev 3Y (annualised)', 'std_3y', '%.1f%%', False, ''),
+            ('Max drawdown', 'max_drawdown', '%.1f%%', True, ''),
+            ('Recovery days', 'recovery_days', '%d days', False, ''),
+            ('vs Nifty (1Y)', 'bench_spread_1y', '%+.1f%%', True, ''),
+            ('vs Nifty (3Y)', 'bench_spread_3y', '%+.1f%%', True, ''),
+        ] %}
+        {% for label, key, fmt, higher_better, _ in rows %}
+        {% set values = bundle.schemes|map(attribute='metrics.' ~ key)|list %}
+        {% set numeric_vals = [] %}
+        {% for v in values %}{% if v is not none and v is number %}{% set _ = numeric_vals.append(v) %}{% endif %}{% endfor %}
+        {% set best_val = (numeric_vals|max if higher_better else numeric_vals|min) if numeric_vals and higher_better is not none else None %}
+        <tr>
+            <td class="row-label">{{ label }}</td>
+            {% for v in values %}
+            <td class="num {% if v is not none and best_val is not none and v == best_val %}best{% endif %}">
+                {% if v is none or (v is string and v == '') %}<span class="no-data">—</span>
+                {% elif v is string %}{{ v }}
+                {% else %}{{ fmt % v }}{% endif %}
+            </td>
+            {% endfor %}
+        </tr>
+        {% endfor %}
+
+        {# Scorer breakdown #}
+        <tr><td colspan="{{ bundle.schemes|length + 1 }}" style="padding-top:16px; padding-bottom:6px; font-weight:700; color:var(--text-muted); font-size:11px; text-transform:uppercase; letter-spacing:0.5px;">Scorer breakdown (percentile within category)</td></tr>
+        {% set score_rows = [
+            ('3Y CAGR percentile (40%)',     'score_3y_cagr_pct'),
+            ('Sharpe 3Y percentile (30%)',   'score_sharpe_3y_pct'),
+            ('Max DD percentile (15%)',      'score_max_dd_pct'),
+            ('Rolling 3Y consistency (15%)', 'score_consistency_pct'),
+        ] %}
+        {% for label, key in score_rows %}
+        {% set values = bundle.schemes|map(attribute='metrics.' ~ key)|list %}
+        {% set numeric_vals = [] %}
+        {% for v in values %}{% if v is not none and v is number %}{% set _ = numeric_vals.append(v) %}{% endif %}{% endfor %}
+        {% set best_val = numeric_vals|max if numeric_vals else None %}
+        <tr>
+            <td class="row-label">{{ label }}</td>
+            {% for v in values %}
+            <td class="num {% if v is not none and best_val is not none and v == best_val %}best{% endif %}">
+                {% if v is not none %}{{ '%.0f' % v }}{% else %}<span class="no-data">—</span>{% endif %}
+            </td>
+            {% endfor %}
+        </tr>
+        {% endfor %}
+
+        {# Peer rank #}
+        <tr>
+            <td class="row-label">Peer rank (3Y)</td>
+            {% for s in bundle.schemes %}
+            <td class="num">{% if s.metrics.peer_rank_3y %}#{{ s.metrics.peer_rank_3y }} of {{ s.metrics.peer_count or '?' }}{% else %}<span class="no-data">—</span>{% endif %}</td>
+            {% endfor %}
+        </tr>
+    </tbody>
+</table>
+
+<p style="font-size:11px; color:var(--text-muted); margin-top:16px;">
+    ★ = best value in that row. Composite scores blend within-category percentiles —
+    direct score comparison across categories can mislead. Add or swap schemes by editing the URL's <code>codes</code> param.
+</p>
+
+{% endif %}
+
+{% endblock %}

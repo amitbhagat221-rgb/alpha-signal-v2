@@ -113,23 +113,42 @@ def _ensure_schema():
 def _autosuggest(ticker):
     """Use Moneycontrol's autosuggest to find the canonical slug for an NSE ticker.
 
-    Endpoint returns a string with `|` separators; the format includes
-    stock_name|sc_id|slug|sc_didcode|symbol|... — we want the slug.
+    Endpoint returns a JSON array of result records. Each record carries
+    company_name, sc_id, slug, sc_didcode, symbol (the NSE ticker), and more.
+    We require an EXACT symbol match before accepting a slug — the previous
+    "first /india/stockpricequote URL in response" heuristic mis-mapped 21%
+    of stocks (e.g. "IOC" → ITC, "ABB" → ABBW/Hitachi Energy, "BAJAJ-AUTO"
+    → Bajaj Finance) because the regex grabbed whatever URL appeared first.
     """
     params = {"query": ticker, "type": 1, "format": "json"}
     try:
         r = requests.get(SEARCH_URL, headers=HEADERS, params=params, timeout=TIMEOUT)
         if r.status_code != 200 or not r.text.strip():
             return None
-        # Response is plain text, sometimes JSONP. Find the first matching block.
-        text = r.text
-        # Pattern: "company name|sc_id|slug|... " — we look for /india/stockpricequote
-        m = re.search(r"(/india/stockpricequote/[a-z0-9-]+/[a-z0-9-]+/[A-Z0-9]+)", text)
-        if m:
-            return m.group(1)
+        # Strip JSONP wrapper if present.
+        text = r.text.strip()
+        m = re.search(r"\[\s*\{.*\}\s*\]", text, re.DOTALL)
+        if not m:
+            return None
+        try:
+            import json as _json
+            results = _json.loads(m.group(0))
+        except ValueError:
+            return None
+        want = (ticker or "").strip().upper()
+        for rec in results:
+            sym = (rec.get("symbol") or rec.get("nse_symbol") or "").strip().upper()
+            slug = rec.get("link_src") or rec.get("seo_name") or rec.get("link") or ""
+            if not slug or not sym:
+                continue
+            slug_m = re.search(r"(/india/stockpricequote/[a-z0-9-]+/[a-z0-9-]+/[A-Z0-9]+)", slug)
+            if not slug_m:
+                continue
+            if sym == want:
+                return slug_m.group(1)
+        return None
     except Exception:
         return None
-    return None
 
 
 def discover_slug_for(sid, ticker):

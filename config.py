@@ -76,6 +76,64 @@ SIGNAL_WEIGHTS = {
     },
 }
 
+
+# ── Two optimized weight schemes from PIT IC backtest (2026-05-28) ──
+# Source: tools/optimize_weights.py reads pit_ic_by_tier_v2 and normalises by tier.
+# Each scheme is "aggressive" — no caps, no diversification floor. pt_upside +
+# eps_growth dominate because their t-stats earn it (t=7-9 and t=5 respectively).
+# Choose by passing --variant {return,sharpe} to scoring/screener.
+
+# MaxReturn: w_i ∝ |t_stat_i| × sign(IC_i). Favours absolute IC magnitude.
+SIGNAL_WEIGHTS_RETURN = {
+    "LARGE": {
+        "pt_upside":      0.4679,  # t=7.15
+        "eps_growth":     0.3475,  # t=5.31
+        "consensus":      0.1846,  # t=2.82
+    },
+    "MID": {
+        "pt_upside":      0.6500,  # t=8.40  (only WIRED KEEP at MID; un-wired interest_coverage/ccc/etc deferred)
+        "accruals":      -0.2000,  # t=-2.53 (inverse — high accruals predicts under-performance)
+        "consensus":      0.1500,  # NOTE: MID consensus is t=-1.16 in v2 backtest, but kept as a stabiliser
+    },
+    "SMALL": {
+        "pt_upside":      0.2880,  # t=9.14
+        "smart_money":    0.1378,  # t=4.37 (avg_delivery_pct_30d)
+        "eps_growth":     0.1018,  # t=3.23
+        "earnings_yield": 0.0987,  # t=3.13
+        "consensus":      0.0946,  # t=3.00
+        "promoter":       0.0826,  # t=2.62
+        "piotroski":      0.0791,  # t=2.51
+        "book_to_price":  0.0800,  # t=2.54
+        "accruals":      -0.0374,  # t=-2.10 (inverse)
+    },
+}
+
+# MaxSharpe: w_i ∝ |ICIR_i| × sign(IC_i). Favours information ratio (mean/vol of IC).
+# Stocks selected here will have lower expected return per trade but lower variance.
+SIGNAL_WEIGHTS_SHARPE = {
+    "LARGE": {
+        "eps_growth":     0.5239,  # ICIR=1.88
+        "pt_upside":      0.3371,  # ICIR=1.21
+        "consensus":      0.1390,  # ICIR=0.50
+    },
+    "MID": {
+        "pt_upside":      0.6700,  # ICIR=1.42
+        "accruals":      -0.2300,  # ICIR=-0.60
+        "consensus":      0.1000,  # stabiliser
+    },
+    "SMALL": {
+        "pt_upside":      0.2693,  # ICIR=1.54
+        "eps_growth":     0.1782,  # ICIR=1.02
+        "earnings_yield": 0.1222,  # ICIR=0.70
+        "smart_money":    0.1135,  # ICIR=0.65
+        "piotroski":      0.0955,  # ICIR=0.55
+        "consensus":      0.0925,  # ICIR=0.53
+        "promoter":       0.0897,  # ICIR=0.51
+        "book_to_price":  0.0631,  # ICIR=0.43
+        "accruals":      -0.0760,  # ICIR=-0.50 (inverse)
+    },
+}
+
 # ── VIX Regime ──
 
 VIX_REGIMES = {
@@ -260,6 +318,27 @@ PIPELINE_STEPS = [
     # Regulatory harvester is daily (cheap incremental, ~5 min).
     {"name": "fetch_regulatory",   "module": "sources.regulatory_harvester", "function": "harvest_incremental", "critical": False,
      "table": "regulatory_events", "source": "Google News last 30d", "data_freq": "daily", "frequency": "daily"},
+
+    # ── Mutual Fund universe (research-only, plan prfect-lets-add-a-zazzy-eich, 2026-05-26) ──
+    # Weekly: refresh scheme master from AMFI NAVAll.txt (~14k schemes, single HTTP).
+    {"name": "fetch_mf_master",    "module": "sources.mf_amfi_master",       "function": "compute", "critical": False,
+     "table": "mf_scheme_master",  "source": "AMFI NAVAll.txt",       "data_freq": "weekly", "frequency": "weekly"},
+    # Weekly: classify data quality — flag wound-up / segregated / interval / bonus / anomalous schemes
+    # so they don't pollute the universe browser, scorer, or category stats. Runs AFTER master refresh
+    # so new schemes get classified; metric-based ANOMALOUS flags get picked up on the next monthly
+    # metrics recompute (the classifier reads from mf_metrics if present).
+    {"name": "classify_mf_quality","module": "sources.mf_data_quality",      "function": "compute", "critical": False,
+     "table": "mf_scheme_master",  "source": "name patterns + NAV jumps", "data_freq": "weekly", "frequency": "weekly"},
+    # Daily: refresh today's NAVs for all schemes from same source (single HTTP, idempotent).
+    {"name": "fetch_mf_nav_daily", "module": "sources.mf_nav_daily",         "function": "compute", "critical": False,
+     "table": "mf_nav_history",    "source": "AMFI NAVAll.txt",       "data_freq": "daily",  "frequency": "daily"},
+    # Monthly: recompute returns + risk + scorer + rolling-returns + category aggregates.
+    {"name": "compute_mf_metrics", "module": "signals.mf_metrics",           "function": "compute", "critical": False,
+     "table": "mf_metrics",        "source": "mf_nav_history + Nifty50 benchmark", "data_freq": "monthly", "frequency": "monthly"},
+    # Monthly: refresh top-N MF holdings via ETMoney scrape (AMFI's holdings data has 45d lag,
+    # monthly refresh is sufficient). Rate-limited at 2.5s/req with 30s pause every 100 reqs.
+    {"name": "scrape_mf_holdings", "module": "sources.mf_holdings_scrape",   "function": "compute", "critical": False,
+     "table": "mf_holdings",       "source": "ETMoney portfolio-details (public)", "data_freq": "monthly", "frequency": "monthly"},
 
     # NOTE: classify_regulatory, classify_news, news_brief, and fetch_broker_recos
     # all moved to END of pipeline — they were blocking production. See block

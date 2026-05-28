@@ -53,18 +53,12 @@ def _prewarm_cache():
     import threading
     import concurrent.futures as cf
 
+    # Ops-domain warmers (data_freshness, db_summary, data_health_scores,
+    # factor_health, model_overview, flow_overview, command_centre,
+    # health_overview, pipeline_status) moved to cockpit_ops/app.py during
+    # Stage 2 split (2026-05-26).
     warmers = [
-        ("data_freshness",     lambda: api.get_data_freshness()),
-        ("db_summary",         lambda: api.get_db_summary()),
-        ("data_health_scores", lambda: api.get_data_health_scores(force=False)),
-        ("factor_health",      lambda: api.get_factor_health()),
-        ("model_overview",     lambda: api.get_model_overview()),
-        ("flow_overview",      lambda: api.get_flow_overview()),
-        ("command_centre",     lambda: api.get_command_centre()),
-        ("health_overview",    lambda: api.get_health_overview()),
         ("top_picks",          lambda: api.get_top_picks()),
-        ("pipeline_status",    lambda: api.get_pipeline_status()),
-        # 2026-05-25: added these as part of /actions and /news perf pass.
         ("action_candidates",  lambda: api.get_action_candidates()),
         ("model_portfolio",    lambda: api.get_model_portfolio()),
         ("news_pool_168",      lambda: api._get_news_pool(hours=168)),
@@ -380,22 +374,91 @@ async def model_page(request: Request):
     })
 
 
-@app.get("/flow", response_class=HTMLResponse)
-async def flow_page(request: Request):
-    overview = api.get_flow_overview()
-    return templates.TemplateResponse(request, "flow.html", {
-        "page": "flow", **overview,
+@app.get("/model/variants", response_class=HTMLResponse)
+async def model_variants_page(request: Request, n: int = 10):
+    """Side-by-side comparison of production / max-return / max-sharpe weight schemes.
+
+    n: picks per tier per variant (default 10). All three variants run on the
+    same universe; production is the live model writing to daily_picks, return
+    and sharpe are computed live (cached 30 min).
+    """
+    bundle = api.get_model_variants(top_per_tier=n)
+    return templates.TemplateResponse(request, "model_variants.html", {
+        "page": "model-variants",
+        "bundle": bundle,
+        "n_per_tier": n,
     })
 
 
-@app.get("/command", response_class=HTMLResponse)
-async def command_centre(request: Request):
-    """Command centre — collapsible flow of plans, factor library, data layer,
-    pending actions. Updates whenever HANDOFF / plans / git change."""
-    payload = api.get_command_centre()
-    return templates.TemplateResponse(request, "command.html", {
-        "page": "command", **payload,
+# NOTE: /flow, /command, /system, /sql moved to cockpit_ops (port 3001)
+# during Stage 2 split (2026-05-26). Their routes here are removed.
+
+
+# ── Mutual Fund research section (plan prfect-lets-add-a-zazzy-eich) ──
+
+@app.get("/mutual-funds", response_class=HTMLResponse)
+async def mutual_funds_page(
+    request: Request,
+    category: str = None, amc: str = None,
+    plan: str = None, option: str = None,
+    q: str = None, sort: str = "score", page: int = 1,
+    show_all: int = 0,
+):
+    bundle = api.get_mf_universe_overview(
+        category=category, amc=amc, plan=plan, option=option,
+        q=q, sort=sort, page=page,
+        include_non_investable=bool(show_all),
+    )
+    heatmap = api.get_mf_category_heatmap(include_non_investable=bool(show_all))
+    return templates.TemplateResponse(request, "mutual_funds.html", {
+        "page": "mutual-funds",
+        "bundle": bundle, "heatmap": heatmap,
+        "active_category": category, "active_amc": amc,
+        "active_plan": plan, "active_option": option, "active_q": q,
+        "active_sort": sort, "active_page": page,
+        "show_all": show_all,
     })
+
+
+@app.get("/mutual-funds/compare", response_class=HTMLResponse)
+async def mutual_fund_compare(request: Request, codes: str = ""):
+    """Side-by-side compare. ?codes=A,B,C (2-5 scheme codes)."""
+    scheme_codes = [c.strip() for c in (codes or "").split(",") if c.strip()]
+    bundle = api.get_mf_compare(scheme_codes) if scheme_codes else {"schemes": [], "categories_seen": []}
+    return templates.TemplateResponse(request, "mf_compare.html", {
+        "page": "mutual-funds",
+        "bundle": bundle,
+        "input_codes": ",".join(scheme_codes),
+    })
+
+
+@app.get("/mutual-funds/{scheme_code}", response_class=HTMLResponse)
+async def mutual_fund_detail(request: Request, scheme_code: str):
+    detail = api.get_mf_detail(scheme_code)
+    if not detail:
+        return HTMLResponse(f"Scheme {scheme_code} not found", status_code=404)
+    peers = api.get_mf_peer_rank(scheme_code)
+    holdings = api.get_mf_holdings(scheme_code)
+    return templates.TemplateResponse(request, "mf_detail.html", {
+        "page": "mutual-funds",
+        "detail": detail, "peers": peers, "holdings": holdings,
+        "scheme_code": scheme_code,
+    })
+
+
+@app.get("/api/mf-nav-series/{scheme_code}")
+async def api_mf_nav_series(scheme_code: str, days: int = None):
+    return api.get_mf_nav_series(scheme_code, days=days)
+
+
+@app.get("/api/mf-rolling/{scheme_code}")
+async def api_mf_rolling(scheme_code: str):
+    return api.get_mf_rolling_returns(scheme_code)
+
+
+@app.get("/api/mf-search")
+async def api_mf_search(q: str = "", limit: int = 10):
+    return api.get_mf_search(q, limit=limit)
 
 
 @app.get("/news", response_class=HTMLResponse)
@@ -439,44 +502,8 @@ async def news_page(
     })
 
 
-@app.get("/system", response_class=HTMLResponse)
-async def system(request: Request, refresh: int = 0):
-    """Health Center page. Pass ?refresh=1 to force a recompute of the health model."""
-    pipeline = api.get_pipeline_status()
-    health = api.get_data_freshness()
-    summary = api.get_db_summary()
-    health_scores = api.get_data_health_scores(force=bool(refresh))
-
-    # Group health rows by domain for the inventory section.
-    from db import DOMAIN_ORDER
-    by_domain: dict[str, list[dict]] = {}
-    for row in health:
-        by_domain.setdefault(row.get("domain") or "Other", []).append(row)
-    inventory_groups = [
-        {"domain": d, "rows": by_domain[d]}
-        for d in DOMAIN_ORDER if d in by_domain
-    ]
-
-    factor_health = api.get_factor_health()
-    try:
-        overview = api.get_health_overview()
-    except Exception as e:
-        overview = None
-        import traceback; traceback.print_exc()
-
-    return templates.TemplateResponse(request, "system.html", {
-        "page": "system", "pipeline": pipeline, "health": health,
-        "summary": summary, "health_scores": health_scores,
-        "inventory_groups": inventory_groups,
-        "factor_health": factor_health,
-        "overview": overview,
-    })
-
-
-@app.get("/api/health/overview")
-async def api_health_overview():
-    return api.get_health_overview()
-
+# NOTE: /system moved to cockpit_ops (port 3001) during Stage 2 split.
+# /api/health/overview also moved.
 
 # ── JSON API Routes ──
 
@@ -531,51 +558,14 @@ async def api_forecasts(sid: str):
 async def api_insider_timeline(sid: str):
     return api.get_insider_timeline(sid)
 
+@app.get("/api/lineage/{sid}")
+async def api_stock_lineage(sid: str):
+    """Per-stock data lineage. See cockpit.api.get_stock_lineage + ADR 0027."""
+    return api.get_stock_lineage(sid)
+
 @app.get("/api/sectors")
 async def api_sectors():
     return api.get_sector_overview()
 
-@app.get("/api/pipeline")
-async def api_pipeline(days: int = 7):
-    return api.get_pipeline_status(days=days)
-
-@app.post("/api/pipeline/rerun/{step_name}")
-async def api_pipeline_rerun(step_name: str):
-    """Trigger a single pipeline step in the background. Returns immediately."""
-    result = api.rerun_step(step_name)
-    return JSONResponse(result, status_code=200 if result.get("ok") else 409)
-
-@app.get("/api/health")
-async def api_health():
-    return api.get_data_freshness()
-
-
-# ── SQL Console ──
-
-@app.get("/sql", response_class=HTMLResponse)
-async def sql_console(request: Request, table: str = None, q: str = None):
-    """Read-only SQL query interface.
-
-    Two ways to pre-fill the query box:
-      ?table=foo  → prefills `SELECT * FROM foo LIMIT 20` and auto-runs
-      ?q=<query>  → prefills the verbatim query and auto-runs (used by health
-                    drill-down links)
-    """
-    if q:
-        initial_query = q
-    elif table:
-        initial_query = f"SELECT * FROM {table} LIMIT 20"
-    else:
-        initial_query = None
-    return templates.TemplateResponse(request, "sql_console.html", {
-        "page": "system",
-        "initial_query": initial_query,
-    })
-
-
-@app.post("/api/sql")
-async def api_sql(request: Request):
-    """Execute a read-only SQL query and return JSON results."""
-    body = await request.json()
-    query = body.get("query", "").strip()
-    return api.run_sql_query(query, max_rows=500)
+# NOTE: /api/pipeline, /api/pipeline/rerun, /api/health, /sql, /api/sql
+# all moved to cockpit_ops (port 3001) during Stage 2 split (2026-05-26).

@@ -26,7 +26,7 @@ from datetime import date
 import numpy as np
 import pandas as pd
 
-from db import read_sql, upsert_df
+from db import read_sql, upsert_df, emit_lineage
 
 # Sub-signal weights. `pt_rev` dropped 2026-05-23 — its source
 # (forecast_history.metric='price') was current close masquerading as PT,
@@ -164,8 +164,87 @@ def _compute_scores(stocks, consensus, prices):
     # Output columns matching schema. pt_revision_1yr is now always NULL
     # (column kept for schema compat; legacy historical rows still hold values).
     df["pt_revision_1yr"] = None
+
+    # Clip pt_upside on the way out — yfinance occasionally returns broken
+    # PTs for thin-coverage SMALL caps (CCAVENUE saw 33,522% upside on a
+    # stale PT vs current price; ABCOTS saw 15,894%). Percentile ranking in
+    # downstream consumers (screener, scorer) treats these as "max upside"
+    # regardless of magnitude, so the clip costs us nothing on the high end
+    # while preventing the broken values from polluting per-stock dashboards.
+    # Range matches CLIP["pt_upside"] = (-50, 150) used by the composite.
+    lo, hi = CLIP["pt_upside"]
+    df["pt_upside"] = df["pt_upside"].clip(lower=lo, upper=hi)
+
     out = df[["sid", "pt_upside", "pt_revision_1yr", "eps_growth",
               "revenue_growth", "consensus_signal"]].copy()
+    return out
+
+
+def _build_lineage(stocks, consensus, prices, df):
+    """Emit per-sid lineage records for the consensus factors.
+
+    Three canonical factors share this module's reads (per FACTOR_LINEAGE):
+      - pt_upside           : reads analyst_consensus.price_target + stock_prices.close
+      - eps_growth_yoy      : reads analyst_consensus.eps_growth_pct
+      - revenue_growth_yoy  : reads analyst_consensus.revenue_growth_pct
+
+    Each non-NULL sub-signal produces one lineage record per contributing
+    source row. Column-level provenance (which feed wrote the value —
+    yfinance vs MoneyControl vs Tickertape) comes from lineage.TABLE_COLUMN_SOURCES.
+    """
+    from lineage import TABLE_COLUMN_SOURCES
+    ac_provenance = TABLE_COLUMN_SOURCES.get("analyst_consensus", {})
+
+    consensus_map = consensus.set_index("sid")
+    price_map = prices.set_index("sid")["close"].to_dict()
+
+    out = []
+    for sid in df["sid"]:
+        # pt_upside: emit when both PT and close are available
+        if sid in consensus_map.index and sid in price_map:
+            row = consensus_map.loc[sid]
+            if pd.notna(row.get("price_target")):
+                out.append({
+                    "sid": sid, "factor": "pt_upside",
+                    "source_table": "analyst_consensus",
+                    "source_key": {"sid": sid},
+                    "source_cols": ["price_target", "total_analysts"],
+                    "column_sources": {
+                        "price_target": ac_provenance.get("price_target"),
+                        "total_analysts": ac_provenance.get("total_analysts"),
+                    },
+                    "contribution": "pt_numerator",
+                })
+                out.append({
+                    "sid": sid, "factor": "pt_upside",
+                    "source_table": "stock_prices",
+                    "source_key": {"sid": sid, "date": "latest"},
+                    "source_cols": ["close"],
+                    "contribution": "pt_upside_denominator",
+                })
+
+        # eps_growth_yoy
+        if sid in consensus_map.index:
+            row = consensus_map.loc[sid]
+            if pd.notna(row.get("eps_growth_pct")):
+                out.append({
+                    "sid": sid, "factor": "eps_growth_yoy",
+                    "source_table": "analyst_consensus",
+                    "source_key": {"sid": sid},
+                    "source_cols": ["eps_growth_pct"],
+                    "column_sources": {"eps_growth_pct": ac_provenance.get("eps_growth_pct")},
+                    "contribution": "tickertape_forward_eps_growth",
+                })
+            if pd.notna(row.get("revenue_growth_pct")):
+                out.append({
+                    "sid": sid, "factor": "revenue_growth_yoy",
+                    "source_table": "analyst_consensus",
+                    "source_key": {"sid": sid},
+                    "source_cols": ["revenue_growth_pct"],
+                    "column_sources": {"revenue_growth_pct": ac_provenance.get("revenue_growth_pct")},
+                    "contribution": "tickertape_forward_revenue_growth",
+                })
+
     return out
 
 
@@ -191,6 +270,13 @@ def compute(dry_run=False):
 
     rows = upsert_df(df, "consensus_signals")
     print(f"Saved {rows} rows to consensus_signals (snapshot={snapshot})")
+
+    # Emit per-sid lineage (gated to top-300 actionable SIDs by default)
+    lineage_records = _build_lineage(stocks, consensus, prices, df)
+    if lineage_records:
+        n_lineage = emit_lineage(lineage_records, snapshot_date=snapshot)
+        print(f"Saved {n_lineage} lineage records for consensus factors")
+
     return rows
 
 

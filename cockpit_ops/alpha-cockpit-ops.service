@@ -1,0 +1,19 @@
+[Unit]
+Description=Alpha Signal Ops Cockpit (FastAPI on port 3001)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/alpha-signal-v2
+Environment=PATH=/home/ubuntu/alpha-signal/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/home/ubuntu/alpha-signal/venv/bin/uvicorn cockpit_ops.app:app --host 0.0.0.0 --port 3001
+Restart=on-failure
+RestartSec=5
+StandardOutput=append:/home/ubuntu/alpha-signal-v2/output/cockpit-ops.log
+StandardError=append:/home/ubuntu/alpha-signal-v2/output/cockpit-ops.log
+
+[Install]
+WantedBy=multi-user.target

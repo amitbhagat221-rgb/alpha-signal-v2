@@ -6,9 +6,9 @@
     --bg-card-hover: #1a1a28;
     --border: #1e1e2e;
     --border-accent: #2a2a3e;
-    --text-primary: #e8e8ed;
-    --text-secondary: #8888a0;
-    --text-muted: #555570;
+    --text-primary: #ececf2;
+    --text-secondary: #b0b2c4;
+    --text-muted: #8e90ac;
     --green: #22c55e;
     --green-bg: rgba(34, 197, 94, 0.08);
     --amber: #f59e0b;
@@ -44,9 +44,15 @@ body {
         radial-gradient(900px 500px at -10% 100%, rgba(59, 130, 246, 0.04), transparent 60%),
         var(--bg-primary);
     color: var(--text-primary);
-    font-family: 'Plus Jakarta Sans', sans-serif;
+    font-family: 'Inter', sans-serif;
+    line-height: 1.55;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    /* Inter v3 has wider apertures; tighten slightly to keep dense data tables compact */
+    letter-spacing: -0.005em;
+    /* Tabular numerals — every digit takes equal width, so price columns align */
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: 'cv11', 'ss01', 'ss03';  /* Inter's "single-storey a", "open digits" stylistic sets */
 }
 
 /* Global focus ring — accessible without breaking aesthetics */
@@ -124,7 +130,7 @@ body {
 }
 
 .brand-title {
-    font-family: 'Plus Jakarta Sans', sans-serif;
+    font-family: 'Inter', sans-serif;
     font-weight: 700;
     font-size: 14px;
     color: var(--text-primary);
@@ -763,7 +769,7 @@ body {
 .quarterly-table th:first-child, .quarterly-table td:first-child {
     text-align: left;
     color: var(--text-secondary);
-    font-family: 'Plus Jakarta Sans', sans-serif;
+    font-family: 'Inter', sans-serif;
     font-weight: 600;
 }
 

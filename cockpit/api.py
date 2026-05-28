@@ -900,6 +900,83 @@ def get_stock_detail(sid):
     return detail
 
 
+def get_stock_lineage(sid):
+    """Per-stock data lineage — which source rows fed each factor.
+
+    Returns dict keyed by factor name, each value a list of source records
+    with {table, key, cols, column_sources, contribution}.
+
+    Pairs with the static `lineage.FACTOR_LINEAGE` registry: the cockpit
+    panel shows both layers — declarative reads from the registry, plus
+    actual emitted rows from `signal_lineage` for this sid (top-300 only).
+
+    See plan 0005 Phase F + ADR 0027.
+    """
+    import json as _json
+    from lineage import FACTOR_LINEAGE, TABLE_COLUMN_SOURCES
+
+    df = read_sql(
+        "SELECT factor, source_table, source_key, source_cols, column_sources, contribution, "
+        "       snapshot_date "
+        "FROM signal_lineage WHERE sid = ? "
+        "ORDER BY factor, source_table, contribution, source_key",
+        params=[sid],
+    )
+
+    grouped = {}
+    if not df.empty:
+        for _, row in df.iterrows():
+            f = row["factor"]
+            try:
+                src_key = _json.loads(row["source_key"]) if row["source_key"] else {}
+            except Exception:
+                src_key = row["source_key"]
+            try:
+                src_cols = _json.loads(row["source_cols"]) if row["source_cols"] else None
+            except Exception:
+                src_cols = row["source_cols"]
+            try:
+                col_src = _json.loads(row["column_sources"]) if row["column_sources"] else None
+            except Exception:
+                col_src = None
+            grouped.setdefault(f, []).append({
+                "table":          row["source_table"],
+                "key":            src_key,
+                "cols":           src_cols,
+                "column_sources": col_src,
+                "contribution":   row["contribution"] or None,
+                "snapshot_date":  row["snapshot_date"],
+            })
+
+    # Also surface the static registry entries so factors WITHOUT dynamic
+    # emission still show their declared reads (model_active subset for now).
+    static = {}
+    for factor, entry in FACTOR_LINEAGE.items():
+        if "inherits_from" in entry:
+            entry = FACTOR_LINEAGE.get(entry["inherits_from"], {})
+        reads = entry.get("reads") or []
+        if not reads and "composite_of" in entry:
+            static[factor] = {
+                "status":       entry.get("status"),
+                "composite_of": entry.get("composite_of"),
+            }
+            continue
+        static[factor] = {
+            "status": entry.get("status"),
+            "module": entry.get("module"),
+            "reads":  reads,
+            "sector_exclusions": entry.get("sector_exclusions", []),
+        }
+
+    return {
+        "sid":              sid,
+        "dynamic_lineage":  grouped,
+        "static_registry":  static,
+        "mixed_source_tables": list(TABLE_COLUMN_SOURCES.keys()),
+        "in_active_universe": bool(grouped),   # top-300 SIDs have dynamic rows
+    }
+
+
 def get_price_series(sid, days=365):
     """Price time series for charts."""
     df = read_sql(
@@ -1357,6 +1434,426 @@ def get_model_portfolio():
         result[key] = stocks
 
     return result
+
+
+# ── Factor-model variants (production / max-return / max-sharpe) ──
+# Runs scoring.screener three ways and returns picks side-by-side. Production
+# is the same data already in daily_picks; variants are computed live.
+# Cached 30 min — once per ~half-hour the screener runs end-to-end (~5-8s).
+
+@_persisted_cache(1800, name="model_variants")
+def get_model_variants(top_per_tier: int = 10) -> dict:
+    """Run all 3 weight schemes and return their top picks for comparison.
+
+    Returns a dict with structure:
+        {
+          'variants': {
+            'production': {
+              'label': 'Production', 'description': '...',
+              'weights': {LARGE: {...}, MID: {...}, SMALL: {...}},
+              'picks':   {LARGE: [...], MID: [...], SMALL: [...]},
+              'gate_excluded': int,
+            },
+            'return':  {...},
+            'sharpe':  {...},
+          },
+          'as_of': '2026-05-28',
+        }
+    Pick records carry: rank, sid, ticker, name, sector, final_score,
+    base_score, eligible_coverage.
+    """
+    from datetime import date
+    from config import SIGNAL_WEIGHTS, SIGNAL_WEIGHTS_RETURN, SIGNAL_WEIGHTS_SHARPE
+    from scoring.screener import _load_signals, score_universe, select_picks
+
+    variant_specs = [
+        ("production", SIGNAL_WEIGHTS,        None, "Production",
+         "Hand-tuned weights from the C13b validation. Currently writes to daily_picks."),
+        ("return",     SIGNAL_WEIGHTS_RETURN, 0.40, "Max Return",
+         "Weights ∝ |t-stat| from PIT IC backtest. Concentrates on factors with biggest absolute IC."),
+        ("sharpe",     SIGNAL_WEIGHTS_SHARPE, 0.40, "Max Sharpe",
+         "Weights ∝ ICIR (IC info-ratio). Favors consistency over magnitude — lower variance per trade."),
+    ]
+
+    df = _load_signals()
+
+    out = {}
+    for key, weights, gate, label, descr in variant_specs:
+        scored = score_universe(df.copy(), weights=weights)
+        # Note: select_picks already prints to stdout; ok in this cached path.
+        picks_df = select_picks(scored,
+                                 {"LARGE": top_per_tier, "MID": top_per_tier, "SMALL": top_per_tier},
+                                 min_eligible=gate)
+        picks_by_tier = {}
+        for tier in ["LARGE", "MID", "SMALL"]:
+            tier_df = picks_df[picks_df["cap_tier"] == tier]
+            picks_by_tier[tier] = [
+                {
+                    "rank":              int(r["rank"]) if pd.notna(r["rank"]) else None,
+                    "sid":               r["sid"],
+                    "ticker":            r["ticker"],
+                    "name":              r["name"],
+                    "sector":            r["sector"],
+                    "final_score":       round(float(r["final_score"]), 4) if pd.notna(r["final_score"]) else None,
+                    "base_score":        round(float(r["base_score"]), 4) if pd.notna(r["base_score"]) else None,
+                    "eligible_coverage": round(float(r.get("eligible_coverage", 0)), 3) if pd.notna(r.get("eligible_coverage", 0)) else None,
+                }
+                for _, r in tier_df.iterrows()
+            ]
+        out[key] = {
+            "label":       label,
+            "description": descr,
+            "weights":     weights,
+            "picks":       picks_by_tier,
+        }
+
+    return {
+        "variants": out,
+        "as_of":    date.today().isoformat(),
+    }
+
+
+# ── Mutual Fund research section (plan prfect-lets-add-a-zazzy-eich) ──
+# Standalone research section. See cockpit/templates/mutual_funds.html (universe
+# browser) and mf_detail.html (per-scheme deep-dive). Data layer:
+#   - mf_scheme_master   AMFI universe (~14k schemes, refreshed weekly)
+#   - mf_nav_history     daily NAV per scheme (AMFI daily + mfapi.in backfill)
+#   - mf_metrics         per-scheme returns/risk/composite_score (monthly recompute)
+#   - mf_rolling_returns 3Y/5Y rolling CAGR sampled monthly per scheme
+#   - mf_calendar_returns per-year returns table
+#   - mf_category_stats  category medians/deciles
+
+
+@_persisted_cache(600, name="mf_universe_overview")
+def get_mf_universe_overview(category: str = None, amc: str = None,
+                              plan: str = None, option: str = None,
+                              q: str = None, sort: str = "score",
+                              page: int = 1, page_size: int = 50,
+                              include_non_investable: bool = False) -> dict:
+    """Filterable + paginated universe browser. Returns dict with rows + facets + counts.
+
+    Filters:
+      category   one of mf_scheme_master.category_norm (or family prefix like 'Equity')
+      amc        substring match on AMC name
+      plan       'DIRECT' / 'REGULAR'
+      option     'GROWTH' / 'IDCW'
+      q          free-text on scheme_name
+      include_non_investable  if True, include schemes that are NOT realistically
+                       investable: data_quality != 'TRUSTED' (wound-up, segregated,
+                       interval, bonus, anomalous NAV) OR latest NAV is stale
+                       (>30 days old — matured FMPs, delisted plans). Default False.
+    Sort: 'score' (default) / 'ret_1y' / 'ret_3y' / 'sharpe_1y' / 'name'.
+    """
+    where = ["sm.active = 1"]
+    if not include_non_investable:
+        where.append("(sm.data_quality IS NULL OR sm.data_quality = 'TRUSTED')")
+        where.append(
+            "EXISTS (SELECT 1 FROM mf_nav_history n "
+            "WHERE n.scheme_code = sm.scheme_code "
+            "AND n.nav_date >= date('now','-30 days'))"
+        )
+    params: list = []
+    if category:
+        if "/" in category:
+            where.append("sm.category_norm = ?")
+            params.append(category)
+        else:
+            where.append("sm.category_norm LIKE ?")
+            params.append(f"{category}%")
+    if amc:
+        where.append("sm.amc LIKE ?")
+        params.append(f"%{amc}%")
+    if plan:
+        where.append("sm.plan_type = ?")
+        params.append(plan.upper())
+    if option:
+        where.append("sm.option_type = ?")
+        params.append(option.upper())
+    if q:
+        where.append("sm.scheme_name LIKE ?")
+        params.append(f"%{q}%")
+
+    where_sql = " AND ".join(where)
+    sort_map = {
+        "score":     "m.composite_score DESC NULLS LAST",
+        "ret_1y":    "m.ret_1y DESC NULLS LAST",
+        "ret_3y":    "m.ret_3y_cagr DESC NULLS LAST",
+        "ret_5y":    "m.ret_5y_cagr DESC NULLS LAST",
+        "sharpe_1y": "m.sharpe_1y DESC NULLS LAST",
+        "max_dd":    "m.max_drawdown DESC NULLS LAST",
+        "name":      "sm.scheme_name ASC",
+    }
+    order_by = sort_map.get(sort, sort_map["score"])
+
+    # Join to LATEST mf_metrics row per scheme (defensive — table should be clean
+    # after the monthly compute, but stale rows from earlier runs can stick around).
+    metrics_join = """LEFT JOIN mf_metrics m
+        ON sm.scheme_code = m.scheme_code
+       AND m.as_of_date = (SELECT MAX(as_of_date) FROM mf_metrics)"""
+
+    # Count for pagination
+    total = read_sql(
+        f"""SELECT COUNT(*) AS n FROM mf_scheme_master sm
+            {metrics_join}
+            WHERE {where_sql}""",
+        params=params,
+    ).iloc[0]["n"]
+
+    # Page rows
+    offset = max(0, (page - 1) * page_size)
+    rows = read_sql(
+        f"""SELECT sm.scheme_code, sm.scheme_name, sm.amc, sm.category_norm,
+                   sm.plan_type, sm.option_type,
+                   m.nav, m.nav_date,
+                   m.ret_1y, m.ret_3y_cagr, m.ret_5y_cagr,
+                   m.sharpe_1y, m.max_drawdown,
+                   m.composite_score, m.score_percentile, m.peer_rank_3y
+            FROM mf_scheme_master sm
+            {metrics_join}
+            WHERE {where_sql}
+            ORDER BY {order_by}
+            LIMIT ? OFFSET ?""",
+        params=params + [page_size, offset],
+    )
+
+    return {
+        "rows":      rows.replace({float("nan"): None}).to_dict("records"),
+        "total":     int(total),
+        "page":      page,
+        "page_size": page_size,
+        "n_pages":   (int(total) + page_size - 1) // page_size,
+        "sort":      sort,
+        "filters":   {"category": category, "amc": amc, "plan": plan, "option": option, "q": q},
+    }
+
+
+@_persisted_cache(3600, name="mf_category_heatmap")
+def get_mf_category_heatmap(include_non_investable: bool = False) -> list[dict]:
+    """Category-level medians for the heatmap on /mutual-funds.
+
+    One row per category_norm with median 3Y CAGR, scheme count.
+    Used to render colored squares at the top of the page (click to filter).
+
+    When include_non_investable=False (default), categories with zero investable
+    schemes (e.g. Debt / Income legacy FMPs, ETFs that aren't real funds) are
+    hidden, and scheme_count reflects the investable-only count to match the
+    table below.
+    """
+    df = read_sql("""
+        SELECT cs.category_norm,
+               cs.scheme_count,
+               ROUND(cs.median_ret_1y, 2)  AS median_ret_1y,
+               ROUND(cs.median_ret_3y, 2)  AS median_ret_3y,
+               ROUND(cs.median_ret_5y, 2)  AS median_ret_5y,
+               ROUND(cs.median_sharpe_1y, 2) AS median_sharpe_1y,
+               ROUND(cs.median_std_1y, 2)    AS median_std_1y,
+               ROUND(cs.top_decile_ret_1y, 2) AS top_decile_ret_1y
+        FROM mf_category_stats cs
+        WHERE cs.as_of_date = (SELECT MAX(as_of_date) FROM mf_category_stats)
+        ORDER BY cs.scheme_count DESC
+    """)
+    if include_non_investable:
+        return df.replace({float("nan"): None}).to_dict("records")
+
+    inv = read_sql("""
+        SELECT sm.category_norm, COUNT(*) AS investable_count
+        FROM mf_scheme_master sm
+        WHERE sm.active = 1
+          AND (sm.data_quality IS NULL OR sm.data_quality = 'TRUSTED')
+          AND EXISTS (SELECT 1 FROM mf_nav_history n
+                      WHERE n.scheme_code = sm.scheme_code
+                        AND n.nav_date >= date('now','-30 days'))
+        GROUP BY sm.category_norm
+    """)
+    inv_map = dict(zip(inv["category_norm"], inv["investable_count"]))
+    df["scheme_count"] = df["category_norm"].map(inv_map).fillna(0).astype(int)
+    df = df[df["scheme_count"] > 0].sort_values("scheme_count", ascending=False).copy()
+    return df.replace({float("nan"): None}).to_dict("records")
+
+
+def get_mf_detail(scheme_code: str) -> dict | None:
+    """Per-scheme deep-dive payload — identity, snapshot, returns, risk, scorer breakdown."""
+    info = read_sql(
+        """SELECT sm.scheme_code, sm.scheme_name, sm.amc, sm.category_norm, sm.category_raw,
+                  sm.plan_type, sm.option_type, sm.isin_growth, sm.isin_div,
+                  sm.aum_cr, sm.expense_ratio, sm.benchmark,
+                  sm.data_quality, sm.quality_reason,
+                  ms.inception_date, ms.has_full_history, sm.last_seen
+           FROM mf_scheme_master sm
+           LEFT JOIN mf_schemes ms ON sm.scheme_code = ms.scheme_code
+           WHERE sm.scheme_code = ?""",
+        params=[scheme_code],
+    )
+    if info.empty:
+        return None
+    info_dict = info.iloc[0].replace({float("nan"): None}).to_dict()
+
+    metrics = read_sql(
+        "SELECT * FROM mf_metrics WHERE scheme_code = ? ORDER BY as_of_date DESC LIMIT 1",
+        params=[scheme_code],
+    )
+    metrics_dict = metrics.iloc[0].replace({float("nan"): None}).to_dict() if not metrics.empty else {}
+
+    calendar = read_sql(
+        "SELECT year, ret_pct, bench_ret_pct FROM mf_calendar_returns "
+        "WHERE scheme_code = ? ORDER BY year DESC",
+        params=[scheme_code],
+    )
+    calendar_list = calendar.replace({float("nan"): None}).to_dict("records")
+
+    return {
+        "info":     info_dict,
+        "metrics":  metrics_dict,
+        "calendar": calendar_list,
+    }
+
+
+def get_mf_nav_series(scheme_code: str, days: int = None) -> list[dict]:
+    """NAV time series for the chart. `days` filters to last N days; None = full history."""
+    if days:
+        df = read_sql(
+            "SELECT nav_date AS date, nav FROM mf_nav_history "
+            "WHERE scheme_code = ? AND nav_date >= date('now', ?) "
+            "ORDER BY nav_date",
+            params=[scheme_code, f"-{int(days)} day"],
+        )
+    else:
+        df = read_sql(
+            "SELECT nav_date AS date, nav FROM mf_nav_history "
+            "WHERE scheme_code = ? ORDER BY nav_date",
+            params=[scheme_code],
+        )
+    return df.to_dict("records")
+
+
+def get_mf_rolling_returns(scheme_code: str) -> list[dict]:
+    """Rolling 3Y / 5Y CAGR series (monthly anchors)."""
+    df = read_sql(
+        """SELECT anchor_date,
+                  rolling_3y_cagr, rolling_5y_cagr,
+                  rolling_3y_beats_category, rolling_5y_beats_category
+           FROM mf_rolling_returns
+           WHERE scheme_code = ? ORDER BY anchor_date""",
+        params=[scheme_code],
+    )
+    return df.replace({float("nan"): None}).to_dict("records")
+
+
+def get_mf_peer_rank(scheme_code: str, top_n: int = 10) -> dict:
+    """Peer comparison — top N schemes in same category_norm by composite_score."""
+    cat = read_sql(
+        "SELECT category_norm FROM mf_scheme_master WHERE scheme_code = ?",
+        params=[scheme_code],
+    )
+    if cat.empty or not cat.iloc[0]["category_norm"]:
+        return {"category": None, "peers": []}
+    category = cat.iloc[0]["category_norm"]
+
+    peers = read_sql(
+        """SELECT sm.scheme_code, sm.scheme_name, sm.amc,
+                  m.composite_score, m.ret_3y_cagr, m.sharpe_3y
+           FROM mf_metrics m
+           JOIN mf_scheme_master sm ON sm.scheme_code = m.scheme_code
+           WHERE sm.category_norm = ? AND m.composite_score IS NOT NULL
+           ORDER BY m.composite_score DESC LIMIT ?""",
+        params=[category, top_n],
+    )
+    return {
+        "category": category,
+        "peers":    peers.replace({float("nan"): None}).to_dict("records"),
+    }
+
+
+def get_mf_holdings(scheme_code: str) -> dict:
+    """Top holdings + sector allocation for a scheme (mf_holdings + mf_sector_allocation).
+
+    Returns dict with `top` (list of holding dicts), `sectors` (list of sector dicts),
+    and `as_of_date`. Empty if no holdings data has been ingested for this scheme.
+    """
+    top = read_sql(
+        """SELECT holding_rank, instrument_name, sid, isin, sector, pct_of_aum,
+                  market_value_cr, instrument_type
+           FROM mf_holdings
+           WHERE scheme_code = ?
+             AND as_of_date = (SELECT MAX(as_of_date) FROM mf_holdings WHERE scheme_code = ?)
+           ORDER BY holding_rank ASC""",
+        params=[scheme_code, scheme_code],
+    )
+    sectors = read_sql(
+        """SELECT sector, pct_of_aum FROM mf_sector_allocation
+           WHERE scheme_code = ?
+             AND as_of_date = (SELECT MAX(as_of_date) FROM mf_sector_allocation WHERE scheme_code = ?)
+           ORDER BY pct_of_aum DESC""",
+        params=[scheme_code, scheme_code],
+    )
+    as_of = top["holding_rank"].iloc[0] if False else None
+    if not top.empty:
+        as_of_row = read_sql(
+            "SELECT MAX(as_of_date) AS d FROM mf_holdings WHERE scheme_code = ?",
+            params=[scheme_code],
+        )
+        as_of = as_of_row.iloc[0]["d"] if not as_of_row.empty else None
+    return {
+        "top":         top.replace({float("nan"): None}).to_dict("records"),
+        "sectors":     sectors.replace({float("nan"): None}).to_dict("records"),
+        "as_of_date":  as_of,
+    }
+
+
+def get_mf_compare(scheme_codes: list[str]) -> dict:
+    """Side-by-side comparison for 2-5 schemes — same metrics shape as detail page.
+
+    Returns dict with `schemes` (one entry per code) + `categories_seen` (so the
+    UI can warn when comparing across categories).
+    """
+    if not scheme_codes:
+        return {"schemes": [], "categories_seen": []}
+    scheme_codes = scheme_codes[:5]
+    ph = ",".join("?" * len(scheme_codes))
+
+    info = read_sql(
+        f"""SELECT sm.scheme_code, sm.scheme_name, sm.amc, sm.category_norm,
+                   sm.plan_type, sm.option_type,
+                   ms.inception_date, ms.has_full_history
+            FROM mf_scheme_master sm
+            LEFT JOIN mf_schemes ms ON sm.scheme_code = ms.scheme_code
+            WHERE sm.scheme_code IN ({ph})""",
+        params=scheme_codes,
+    )
+    metrics = read_sql(
+        f"""SELECT * FROM mf_metrics WHERE scheme_code IN ({ph})
+            AND as_of_date = (SELECT MAX(as_of_date) FROM mf_metrics)""",
+        params=scheme_codes,
+    )
+
+    info_by_code = {r["scheme_code"]: r for _, r in info.iterrows()}
+    metrics_by_code = {r["scheme_code"]: r for _, r in metrics.iterrows()}
+
+    schemes = []
+    for code in scheme_codes:
+        if code not in info_by_code:
+            continue
+        i = info_by_code[code].replace({float("nan"): None}).to_dict()
+        m = metrics_by_code.get(code)
+        m = m.replace({float("nan"): None}).to_dict() if m is not None else {}
+        schemes.append({"info": i, "metrics": m})
+
+    cats = sorted({s["info"].get("category_norm") for s in schemes if s["info"].get("category_norm")})
+    return {"schemes": schemes, "categories_seen": cats}
+
+
+def get_mf_search(q: str, limit: int = 10) -> list[dict]:
+    """Typeahead suggestions for scheme search."""
+    if not q or len(q) < 2:
+        return []
+    df = read_sql(
+        """SELECT scheme_code, scheme_name, amc, category_norm
+           FROM mf_scheme_master
+           WHERE active = 1 AND scheme_name LIKE ?
+           ORDER BY LENGTH(scheme_name) ASC LIMIT ?""",
+        params=[f"%{q}%", limit],
+    )
+    return df.to_dict("records")
 
 
 def get_sector_overview():
@@ -1865,1721 +2362,12 @@ def get_sector_trend(months=12):
     return df.to_dict("records") if not df.empty else []
 
 
-def get_pipeline_status(days=7):
-    """Pipeline log for last N days — deduped to one row per (date, step) showing the FINAL state.
-
-    The pipeline writes 2 rows per step: a 'RUNNING' row when the step starts, then a
-    'SUCCESS' or 'FAILED' row when it finishes. We only want to show the latest state.
-    Also: a step is only treated as RUNNING if its started_at is recent (last 5 minutes)
-    AND there's no completion row for it — otherwise it's a stale RUNNING row from a
-    previous run that crashed before writing its completion."""
-    df = read_sql(
-        """
-        WITH ranked AS (
-            SELECT id, run_date, step_name, status, rows_affected, duration_sec,
-                   error_message, started_at, finished_at,
-                   ROW_NUMBER() OVER (
-                       PARTITION BY run_date, step_name
-                       ORDER BY
-                           CASE status
-                               WHEN 'SUCCESS' THEN 1
-                               WHEN 'FAILED'  THEN 2
-                               WHEN 'RUNNING' THEN 3
-                               ELSE 4
-                           END,
-                           id DESC
-                   ) AS rn
-            FROM pipeline_log
-            WHERE run_date >= date('now', ?)
-        )
-        SELECT run_date, step_name, status, rows_affected, duration_sec,
-               error_message, started_at, finished_at
-        FROM ranked
-        WHERE rn = 1
-        ORDER BY started_at DESC
-        """,
-        params=[f"-{days} days"],
-    )
-
-    # Mark stale RUNNING rows as ABORTED — they're from runs that crashed mid-step
-    if not df.empty:
-        from datetime import datetime, timedelta
-        cutoff = (datetime.now() - timedelta(minutes=5)).isoformat()
-        df.loc[(df["status"] == "RUNNING") & (df["started_at"] < cutoff), "status"] = "ABORTED"
-
-    df = df.astype(object).where(df.notna(), None)
-    return df.to_dict("records")
-
-
-def run_sql_query(query, max_rows=500):
-    """Execute a read-only SQL query via the SQL console.
-    Returns: {"columns": [...], "rows": [...], "error": str|None, "row_count": int}"""
-    from db import safe_read_sql
-    df, error = safe_read_sql(query, max_rows=max_rows)
-    if error:
-        return {"columns": [], "rows": [], "error": error, "row_count": 0}
-    if df is None or df.empty:
-        return {"columns": list(df.columns) if df is not None else [],
-                "rows": [], "error": None, "row_count": 0}
-    # Convert to JSON-safe values. Order matters: check NaN/None first because
-    # numpy NaN is a float and would bypass the float branch otherwise.
-    import math
-    rows = []
-    for record in df.to_dict("records"):
-        clean = {}
-        for k, v in record.items():
-            if v is None:
-                clean[k] = None
-            elif isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
-                clean[k] = None
-            elif isinstance(v, (int, float, str, bool)):
-                clean[k] = v
-            else:
-                try:
-                    if pd.isna(v):
-                        clean[k] = None
-                        continue
-                except (TypeError, ValueError):
-                    pass
-                clean[k] = str(v)
-        rows.append(clean)
-    return {
-        "columns": list(df.columns),
-        "rows": rows,
-        "error": None,
-        "row_count": len(rows),
-    }
-
-
-@_persisted_cache(300, name="get_data_freshness")
-def get_data_freshness():
-    """Data health from db.data_health(). NaN floats are coerced to None so the
-    payload is JSON-safe (Jinja's tojson preserves NaN literals which break
-    JSON.parse in the browser)."""
-    import math
-    from db import data_health
-    df = data_health()
-    records = df.to_dict("records")
-    for r in records:
-        for k, v in r.items():
-            if isinstance(v, float) and math.isnan(v):
-                r[k] = None
-    return records
-
-
-@_persisted_cache(300, name="get_db_summary")
-def get_db_summary():
-    """High-level health verdict for the system page header."""
-    from db import db_summary
-    return db_summary()
-
-
-# ═══════════════════════════════════════════════════
-# Model + Flow pages
-# ═══════════════════════════════════════════════════
-
-# v1 holds the C13b 18-period reconstructed validation. v2 doesn't have its
-# own backtest yet — we surface the v1 file as the canonical signal map.
-V1_BACKTEST_DIR = Path("/home/ubuntu/alpha-signal/data/backtest")
-
-
-@_persisted_cache(300, name="get_model_overview")
-def get_model_overview():
-    """Tier weight tables, signal validation, regime rules. Used by /model."""
-    from config import SIGNAL_WEIGHTS, VIX_REGIMES, QUALITY_GATE, PORTFOLIO, TRANSACTION_COSTS_BPS
-
-    # Per-tier signal weights — convert dict to ordered list of (signal, weight, pct).
-    tiers = {}
-    for tier, weights in SIGNAL_WEIGHTS.items():
-        total = sum(weights.values()) or 1
-        rows = sorted(weights.items(), key=lambda kv: -kv[1])
-        tiers[tier] = [
-            {"signal": s, "weight": w, "pct": round(100 * w / total, 1)}
-            for s, w in rows
-        ]
-
-    # VIX regime → allocation table.
-    regimes = []
-    for name, (vlo, vhi, large, mid, small) in VIX_REGIMES.items():
-        regimes.append({
-            "regime": name,
-            "vix_lo": vlo, "vix_hi": vhi,
-            "alloc_large": large, "alloc_mid": mid, "alloc_small": small,
-        })
-
-    # Current regime so the page can highlight the active row.
-    cur = read_sql("SELECT regime, vix_latest FROM regime_state WHERE id = 1")
-    current_regime = cur.iloc[0].to_dict() if not cur.empty else {}
-
-    # Validation t-stats from v1 backtest (PIT reconstruction, 18 periods).
-    validation_csv = V1_BACKTEST_DIR / "reconstructed_ic_by_tier.csv"
-    validation_rows = []
-    validation_meta = {}
-    if validation_csv.exists():
-        try:
-            v = pd.read_csv(validation_csv)
-            validation_meta = {
-                "periods": int(v["n_periods"].max()) if "n_periods" in v.columns else None,
-                "source": "v1 reconstructed_ic_by_tier.csv",
-            }
-            for _, row in v.iterrows():
-                validation_rows.append({
-                    "signal": row.get("signal"),
-                    "description": row.get("description"),
-                    "cap_tier": row.get("cap_tier"),
-                    "n_stocks_avg": _safe_int(row.get("n_stocks_avg")),
-                    "mean_ic": _safe_float(row.get("mean_ic"), 4),
-                    "icir": _safe_float(row.get("icir"), 3),
-                    "t_stat": _safe_float(row.get("t_stat"), 2),
-                    "verdict": row.get("verdict"),
-                })
-        except Exception:
-            pass
-
-    return {
-        "tiers": tiers,
-        "regimes": regimes,
-        "current_regime": current_regime,
-        "validation": {"rows": validation_rows, "meta": validation_meta},
-        "quality_gate": QUALITY_GATE,
-        "portfolio": PORTFOLIO,
-        "transaction_costs_bps": TRANSACTION_COSTS_BPS,
-        "backtest_roster": get_backtest_roster(),
-    }
-
-
-def get_backtest_roster():
-    """Signal-level backtest readiness for /model.
-
-    For each entry in db.BACKTEST_SIGNALS, enriches with live data:
-      - C13b verdict + t-stat per cap_tier (from pit_ic_by_tier_v1)
-      - Coverage snapshot (max history available, n_periods)
-
-    Returns a dict with:
-      signals: list of enriched signal rows
-      response: info on the response variable (fwd_return_20d)
-      pit_tables: summary of the PIT tables themselves
-      summary: count by status (READY / PARTIAL / MISSING)
-    """
-    from db import BACKTEST_SIGNALS, get_db, read_sql
-
-    # ── Existing PIT tables ──
-    with get_db() as conn:
-        names = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-
-    has_pit_v1 = "daily_snapshots_pit_v1" in names
-    has_pit_v2 = "daily_snapshots_pit" in names
-    has_ic = "pit_ic_by_tier_v1" in names
-
-    # ── IC table — group by signal for fast lookup ──
-    ic_by_signal = {}
-    if has_ic:
-        ic_rows = read_sql("SELECT signal, cap_tier, t_stat, verdict, n_periods FROM pit_ic_by_tier_v1")
-        for _, r in ic_rows.iterrows():
-            sig = r["signal"]
-            ic_by_signal.setdefault(sig, {})[r["cap_tier"]] = {
-                "t_stat": _safe_float(r["t_stat"], 2),
-                "verdict": r["verdict"],
-                "n_periods": _safe_int(r["n_periods"]),
-            }
-
-    # ── Coverage per PIT column ──
-    def _coverage(table, column):
-        if not column or table not in names:
-            return None
-        try:
-            df = read_sql(f"""
-                SELECT COUNT(DISTINCT snapshot_date) AS n_dates,
-                       MIN(snapshot_date) AS first_date,
-                       MAX(snapshot_date) AS last_date,
-                       AVG(CASE WHEN [{column}] IS NOT NULL THEN 1.0 ELSE 0 END) AS pct_filled
-                FROM [{table}]
-                WHERE [{column}] IS NOT NULL
-            """)
-            if df.empty or df.iloc[0]["n_dates"] == 0:
-                return None
-            r = df.iloc[0]
-            return {
-                "n_dates": _safe_int(r["n_dates"]),
-                "first_date": r["first_date"],
-                "last_date": r["last_date"],
-                "pct_filled": round(float(r["pct_filled"]) * 100, 1) if pd.notna(r["pct_filled"]) else None,
-            }
-        except Exception:
-            return None
-
-    # ── Enrich each signal ──
-    signals = []
-    for s in BACKTEST_SIGNALS:
-        cov_v1 = _coverage("daily_snapshots_pit_v1", s.get("pit_column_v1"))
-        cov_v2 = _coverage("daily_snapshots_pit", s.get("pit_column_v2"))
-        cov_ext = None
-        if s.get("external_table"):
-            ext_tbl = s["external_table"]
-            if ext_tbl in names:
-                try:
-                    df = read_sql(f"SELECT COUNT(DISTINCT snapshot_date) AS n, MIN(snapshot_date) AS f, MAX(snapshot_date) AS l FROM [{ext_tbl}]")
-                    if not df.empty and df.iloc[0]["n"] > 0:
-                        cov_ext = {
-                            "n_dates": _safe_int(df.iloc[0]["n"]),
-                            "first_date": df.iloc[0]["f"],
-                            "last_date": df.iloc[0]["l"],
-                            "table": ext_tbl,
-                        }
-                except Exception:
-                    pass
-
-        # Pick the deeper coverage as the headline
-        depths = []
-        if cov_v1 and cov_v1["n_dates"]: depths.append(("v1 archive", cov_v1["n_dates"], cov_v1["first_date"], cov_v1["last_date"]))
-        if cov_v2 and cov_v2["n_dates"]: depths.append(("v2 recompute", cov_v2["n_dates"], cov_v2["first_date"], cov_v2["last_date"]))
-        if cov_ext:                       depths.append((cov_ext["table"], cov_ext["n_dates"], cov_ext["first_date"], cov_ext["last_date"]))
-
-        max_dates = max((d[1] for d in depths), default=0)
-        first_date = min((d[2] for d in depths), default=None)
-        last_date = max((d[3] for d in depths), default=None)
-        sources = ", ".join(d[0] for d in depths) or "—"
-
-        signals.append({
-            **s,
-            "ic_by_tier": ic_by_signal.get(s["signal"], {}),
-            "coverage_v1": cov_v1,
-            "coverage_v2": cov_v2,
-            "coverage_external": cov_ext,
-            "max_dates": max_dates,
-            "first_date": first_date,
-            "last_date": last_date,
-            "live_source": sources,
-        })
-
-    # ── Response variable ──
-    response = {"variable": "fwd_return_20d", "computed_from": "stock_prices.close",
-                "horizon_days": 20, "available_in": []}
-    if has_pit_v1:
-        try:
-            df = read_sql("SELECT COUNT(*) AS n, MIN(snapshot_date) AS f, MAX(snapshot_date) AS l FROM daily_snapshots_pit_v1 WHERE fwd_return_20d IS NOT NULL")
-            if not df.empty and df.iloc[0]["n"] > 0:
-                response["available_in"].append({
-                    "table": "daily_snapshots_pit_v1",
-                    "rows": _safe_int(df.iloc[0]["n"]),
-                    "first_date": df.iloc[0]["f"],
-                    "last_date": df.iloc[0]["l"],
-                    "note": "precomputed",
-                })
-        except Exception:
-            pass
-    response["available_in"].append({
-        "table": "stock_prices",
-        "rows": None,
-        "note": "Compute on the fly: close on (eval_date + 20 trading days) / close on eval_date − 1",
-    })
-
-    # ── PIT table summary ──
-    pit_tables = []
-    for tbl in ["daily_snapshots_pit_v1", "daily_snapshots_pit", "pit_ic_by_tier_v1"]:
-        if tbl not in names:
-            continue
-        try:
-            r = read_sql(f"SELECT COUNT(*) AS rows FROM [{tbl}]").iloc[0]
-            entry = {"table": tbl, "rows": _safe_int(r["rows"])}
-            if tbl != "pit_ic_by_tier_v1":
-                d = read_sql(f"SELECT COUNT(DISTINCT snapshot_date) AS n_dates, MIN(snapshot_date) AS f, MAX(snapshot_date) AS l, COUNT(DISTINCT sid) AS sids FROM [{tbl}]").iloc[0]
-                entry.update({
-                    "n_dates": _safe_int(d["n_dates"]),
-                    "first_date": d["f"],
-                    "last_date": d["l"],
-                    "n_stocks": _safe_int(d["sids"]),
-                })
-            pit_tables.append(entry)
-        except Exception:
-            pass
-
-    # ── Summary counts by status ──
-    summary = {"READY": 0, "PARTIAL": 0, "MISSING": 0, "PROPOSED": 0, "BLOCKED": 0}
-    for s in signals:
-        summary[s["status"]] = summary.get(s["status"], 0) + 1
-
-    # ── Grouped (by signal.group) for the page layout ──
-    from collections import OrderedDict
-    GROUP_ORDER = ["Value", "Quality", "Growth", "Momentum", "Ownership",
-                   "Forensic", "Smart Money", "Consensus", "Sentiment",
-                   "Regulatory", "Macro", "Composite"]
-    grouped = OrderedDict((g, []) for g in GROUP_ORDER)
-    for s in signals:
-        g = s.get("group") or "Other"
-        grouped.setdefault(g, []).append(s)
-
-    return {
-        "signals": signals,
-        "groups": [{"name": g, "signals": gs} for g, gs in grouped.items() if gs],
-        "response": response,
-        "pit_tables": pit_tables,
-        "summary": summary,
-    }
-
-
-
-def _safe_int(v):
-    try:
-        if pd.isna(v): return None
-        return int(v)
-    except Exception:
-        return None
-
-
-def _safe_float(v, places=2):
-    try:
-        if pd.isna(v): return None
-        return round(float(v), places)
-    except Exception:
-        return None
-
-
-@_ttl_cache(300)
-def get_flow_overview():
-    """Pipeline DAG: source → raw → signals → scoring → output. Used by /flow.
-
-    Builds the layered flow from PIPELINE_STEPS with the latest pipeline_log
-    status overlaid so the page shows what last ran and how it went.
-    """
-    from config import PIPELINE_STEPS
-
-    # Latest status per step from pipeline_log.
-    latest = read_sql("""
-        SELECT step_name, status, rows_affected, finished_at, duration_sec, error_message
-        FROM pipeline_log p
-        WHERE p.id = (SELECT MAX(id) FROM pipeline_log
-                      WHERE step_name = p.step_name)
-    """)
-    status_by_step = {r["step_name"]: r.to_dict() for _, r in latest.iterrows()}
-
-    # Layer assignment based on the step's role.
-    LAYERS = {
-        "fetch_macro_market": "Sources",
-        "fetch_macro_gov":    "Sources",
-        "fetch_insider":      "Sources",
-        "fetch_bulk_deals":   "Sources",
-        "fetch_bhavcopy":     "Sources",
-        "fetch_news":         "Sources",
-        "universe_liveness":  "Sources",
-        "signal_sentiment":   "Signals",
-        "signal_insider":     "Signals",
-        "signal_forensic":    "Signals",
-        "signal_piotroski":   "Signals",
-        "signal_accruals":    "Signals",
-        "signal_consensus":   "Signals",
-        "signal_promoter":    "Signals",
-        "signal_smart_money": "Signals",
-        "signal_macro":       "Signals",
-        "signal_regulatory":  "Signals",
-        "quality_gate":       "Scoring",
-        "regime_update":      "Scoring",
-        "screener":           "Scoring",
-        "snapshot":           "Output",
-        "diff_engine":        "Output",
-        "dossier":            "Output",
-        "email":              "Output",
-    }
-    LAYER_ORDER = ["Sources", "Signals", "Scoring", "Output"]
-
-    layers = {ln: [] for ln in LAYER_ORDER}
-    for step in PIPELINE_STEPS:
-        name = step["name"]
-        layer = LAYERS.get(name, "Other")
-        if layer not in layers:
-            layers[layer] = []
-        last = status_by_step.get(name, {})
-        layers[layer].append({
-            "name": name,
-            "module": step["module"],
-            "function": step["function"],
-            "table": step.get("table"),
-            "source": step.get("source"),
-            "frequency": step.get("frequency"),
-            "critical": step.get("critical", False),
-            "last_status": last.get("status"),
-            "last_finished_at": last.get("finished_at"),
-            "last_duration_sec": last.get("duration_sec"),
-            "last_rows": last.get("rows_affected"),
-            "last_error": last.get("error_message"),
-        })
-
-    layered = [{"name": ln, "steps": layers[ln]} for ln in LAYER_ORDER if layers[ln]]
-
-    return {
-        "layers": layered,
-        "step_count": sum(len(v) for v in layers.values()),
-        "failures": [
-            s for layer in layered for s in layer["steps"]
-            if s.get("last_status") in ("FAILED", "ABORTED")
-        ],
-    }
-
-
-# ── Step rerun (UI button on /flow) ──────────────────────────────────────
-
-def rerun_step(step_name: str) -> dict:
-    """Spawn `python pipeline.py --step <name>` as a detached subprocess.
-
-    Returns immediately so the HTTP request doesn't block. The pipeline writes
-    its RUNNING/SUCCESS/FAILED rows to pipeline_log; the /flow page picks them
-    up on its next auto-refresh.
-
-    Refuses if (a) the step name isn't in PIPELINE_STEPS, or (b) a RUNNING row
-    for that step is younger than 5 minutes (treat older as crashed / stale).
-    """
-    import subprocess
-    import sys
-    from datetime import datetime, timedelta
-    from pathlib import Path
-    from config import PIPELINE_STEPS, LOG_PATH
-
-    valid = {s["name"] for s in PIPELINE_STEPS}
-    if step_name not in valid:
-        return {"ok": False, "error": f"unknown step: {step_name}"}
-
-    recent = read_sql(
-        """SELECT started_at FROM pipeline_log
-           WHERE step_name = ? AND status = 'RUNNING'
-           ORDER BY id DESC LIMIT 1""",
-        params=[step_name],
-    )
-    if not recent.empty:
-        try:
-            started = datetime.fromisoformat(recent.iloc[0]["started_at"])
-            if datetime.now() - started < timedelta(minutes=5):
-                return {"ok": False, "error": f"{step_name} is already RUNNING"}
-        except (ValueError, TypeError):
-            pass
-
-    project_root = Path(__file__).resolve().parent.parent
-    rerun_log = project_root / "output" / "rerun.log"
-    rerun_log.parent.mkdir(parents=True, exist_ok=True)
-    log_fp = open(rerun_log, "ab")
-
-    subprocess.Popen(
-        [sys.executable, "pipeline.py", "--step", step_name],
-        cwd=project_root,
-        stdout=log_fp,
-        stderr=subprocess.STDOUT,
-        start_new_session=True,
-    )
-    return {"ok": True, "step": step_name, "log": str(rerun_log)}
-
-
-def get_data_health_scores(force=False):
-    """Comprehensive per-table data health from health.compute_db_health().
-
-    Pass force=True to bypass the 5-minute TTL cache.
-    """
-    from health import compute_db_health
-    return compute_db_health(force=force)
-
-
-# ═══════════════════════════════════════════════════
-# Factor Health — sister to data-health, but per-factor
-# ═══════════════════════════════════════════════════
-
-@_persisted_cache(300, name="get_factor_health")
-def get_factor_health():
-    """Return one row per registered factor with health metrics + grade.
-
-    Per-factor metrics:
-      - coverage_pct   : stocks with non-null score / eligible universe
-      - freshness_days : days since last snapshot
-      - best_abs_t     : best |t-stat| across cap-tiers from pit_ic_by_tier_v2
-      - pit_ready      : factor has PIT helper + appears in daily_snapshots_pit
-      - in_model       : marked production-ready
-    Aggregated 0-100 grade with letter (A+/A/B/C/D/F).
-    """
-    from db import BACKTEST_SIGNALS, get_backtest_cadence as _bt_cadence
-
-    # Track 3 extras list — all entries were duplicates of BACKTEST_SIGNALS
-    # rows as of 2026-05-24 (Track 3 factors got promoted to BACKTEST_SIGNALS
-    # when they shipped). Keeping them here double-counted each one and the
-    # duplicate showed as F (cockpit looked up by score_table which sometimes
-    # failed silently). Cleaned out; new Track 3 factors should be registered
-    # directly in BACKTEST_SIGNALS with pit_column_v2.
-    TRACK3_EXTRAS = []
-
-    PROMOTION_T = 1.5
-
-    # Universe baselines for coverage normalisation
-    with get_db() as conn:
-        uni_total = conn.execute(
-            "SELECT COUNT(*) FROM stocks WHERE ticker IS NOT NULL"
-        ).fetchone()[0]
-        uni_excl_fin = conn.execute(
-            "SELECT COUNT(*) FROM stocks WHERE ticker IS NOT NULL AND sector != 'Financials'"
-        ).fetchone()[0]
-
-        # Best t-stat per signal — plan 0005 Phase D rule:
-        # 1. Prefer sources with n_periods >= 12 (statistically meaningful)
-        # 2. Within those, prefer v2_recompute over v1_archive (cleaner pipeline)
-        # 3. Fall back to whatever has the highest n if nothing meets the bar
-        # Pre-fix: always preferred v2_recompute even at n=6, masking the n=35
-        # v1_archive result for the same signal. The n<12 gate then nuked the
-        # whole factor library to INSUFFICIENT.
-        ic = read_sql(
-            "SELECT signal, source, t_stat, n_periods, t_stat_ci_lo, t_stat_ci_hi "
-            "FROM pit_ic_by_tier_v2"
-        )
-        if ic.empty:
-            best_by_signal = {}
-        else:
-            MIN_N = 12
-            ic = ic.assign(
-                abst=lambda d: d["t_stat"].abs(),
-                _adequate_n=lambda d: (d["n_periods"] >= MIN_N).astype(int),
-                _src=lambda d: d["source"].map({"v2_recompute": 0}).fillna(
-                    d["source"].str.startswith("v2_recompute:").map({True: 0}).fillna(1)
-                ),
-            )
-            # Sort: adequate_n DESC (1 first), _src ASC (v2 first), abst DESC
-            best_by_signal = (ic.sort_values(["_adequate_n", "_src", "abst"],
-                                              ascending=[False, True, False])
-                                .drop_duplicates("signal", keep="first")
-                                .set_index("signal")
-                                .to_dict("index"))
-
-        # PIT columns actually populated in daily_snapshots_pit (latest snapshot).
-        # NOTE: daily_snapshots_pit is the *backtest* reconstruction, only refreshed
-        # when tools/reconstruct_pit.py runs (manually, periodically). Use this
-        # only for PIT-readiness flag (does the column exist) — NOT for factor
-        # freshness shown in the UI. For production freshness see latest_live below.
-        try:
-            latest_pit = conn.execute(
-                "SELECT MAX(snapshot_date) FROM daily_snapshots_pit"
-            ).fetchone()[0]
-        except Exception:
-            latest_pit = None
-
-        # Live production snapshot — written by scoring/screener.py + output/snapshot.py
-        # on every daily pipeline run. This is what "factor freshness" should reflect.
-        try:
-            latest_live = conn.execute(
-                "SELECT MAX(snapshot_date) FROM daily_snapshots"
-            ).fetchone()[0]
-        except Exception:
-            latest_live = None
-
-        # Per-column coverage at THAT COLUMN's latest non-null date.
-        # ADR 0022 split cadence (weekly behavioural vs monthly fundamentals).
-        # The latest table-wide snapshot_date is a Friday with ONLY the 6 behavioural
-        # columns populated — using it for coverage gave 0/2448 for every monthly
-        # fundamental, falsely grading 56 factors as F (2026-05-24).
-        # Now each column reports coverage at its own most-recent populated date.
-        pit_coverage = {}
-        pit_latest_for_col = {}
-        if latest_pit:
-            cols = [r[1] for r in conn.execute(
-                "PRAGMA table_info(daily_snapshots_pit)"
-            ).fetchall()]
-            skip = {"sid", "snapshot_date", "cap_tier", "close_price",
-                    "reconstructed_at", "fwd_return_20d"}
-            for c in cols:
-                if c in skip:
-                    continue
-                try:
-                    row = conn.execute(
-                        f"SELECT MAX(snapshot_date) AS d, COUNT(*) AS n "
-                        f"FROM daily_snapshots_pit "
-                        f"WHERE [{c}] IS NOT NULL "
-                        f"  AND snapshot_date = ("
-                        f"      SELECT MAX(snapshot_date) FROM daily_snapshots_pit WHERE [{c}] IS NOT NULL"
-                        f"  )"
-                    ).fetchone()
-                    pit_coverage[c] = int(row[1] or 0)
-                    pit_latest_for_col[c] = row[0]
-                except Exception:
-                    pit_coverage[c] = 0
-                    pit_latest_for_col[c] = None
-
-        # Per-table count + freshness for Track 3 score tables
-        def _table_stats(table, col):
-            try:
-                latest_snap = conn.execute(
-                    f"SELECT MAX(snapshot_date) FROM {table}"
-                ).fetchone()[0]
-                cnt = conn.execute(
-                    f"SELECT COUNT(*) FROM {table} WHERE snapshot_date = ? AND [{col}] IS NOT NULL",
-                    (latest_snap,)
-                ).fetchone()[0] if latest_snap else 0
-                return latest_snap, int(cnt)
-            except Exception:
-                return None, 0
-
-    today = pd.Timestamp.today().date()
-
-    def _grade(score):
-        for thr, letter, color in [
-            (90, "A+", "#2ecc71"),
-            (80, "A",  "#27ae60"),
-            (70, "B",  "#4d8eff"),
-            (60, "C",  "#f1c40f"),
-            (40, "D",  "#e67e22"),
-        ]:
-            if score >= thr:
-                return letter, color
-        return "F", "#e74c3c"
-
-    # Per-signal nature classifications — drive both grading and the visible
-    # "nature badge" so the grade is self-explanatory at a glance.
-    SPARSE_BY_NATURE = {
-        "bulk_deal_signal",
-        "sentiment_7d", "news_volume",
-        "insider_signal",          # only stocks with recent insider trades
-        "short_selling_signal",    # only 981/2448 stocks have any short reporting (NSE)
-        "roiic",                   # needs multi-year NOPAT + IC history; ~46% of universe qualifies
-    }
-    SECTOR_LEVEL = {"regulatory_sector_signal", "macro_sector_signal"}
-    COMPOSITE_NOT_FACTOR = {"screener_final_composite"}
-    DATA_DEPTH_LIMITED = {"fii_dii_cash_net", "fii_dii_fno_positioning"}
-
-    def _nature_of(signal):
-        if signal in SECTOR_LEVEL:        return "sector"
-        if signal in COMPOSITE_NOT_FACTOR: return "composite"
-        if signal in DATA_DEPTH_LIMITED:   return "data-depth"
-        if signal in SPARSE_BY_NATURE:     return "sparse"
-        return "broad"
-
-    def _build_row(name, signal, group, status, status_reason, in_model_flag,
-                   coverage_n, eligible_n, latest_snap_str,
-                   t_stat, n_periods, ic_source, pit_ready, track,
-                   t_ci_lo=None, t_ci_hi=None):
-        nature = _nature_of(signal)
-
-        # Coverage score — context-aware so the grade reflects "should I worry?"
-        # rather than mechanical % of universe.
-        #
-        # - broad factors: % of universe (the standard case)
-        # - sparse-by-nature (insider/bulk/sentiment/news_volume): full credit
-        #     IF data is flowing on cadence. These factors are SUPPOSED to
-        #     cover only stocks with the underlying event (~10-15% of universe).
-        #     Punishing them for that gave false D-grades and made the user
-        #     second-guess healthy signals.
-        # - sector / composite / data-depth: coverage % is meaningless for
-        #     these; score 100 so they don't drag the average down with a
-        #     metric that doesn't apply.
-        if eligible_n > 0:
-            coverage_pct = round(100 * coverage_n / eligible_n, 1)
-        else:
-            coverage_pct = 0.0
-
-        if nature in ("sector", "composite", "data-depth"):
-            # Per-stock coverage not applicable — full credit, surfaced via badge.
-            coverage_score = 100
-        elif nature == "sparse":
-            # Full credit if the signal has any data today (it's flowing); else 0.
-            coverage_score = 100 if coverage_n > 0 else 0
-        else:
-            coverage_score = min(100, coverage_pct * 1.05)  # cap at 100
-
-        # Freshness score — CADENCE-AWARE.
-        # Pre-fix this used a single curve (≤1d=100, decay through 30d=0). That
-        # punished monthly fundamentals at the 23-day mark for being… monthly.
-        # ADR 0022's cadence registry tells us each signal's expected refresh
-        # interval; freshness is scored relative to THAT, not against a daily ideal.
-        freshness_days = None
-        if latest_snap_str:
-            try:
-                latest_d = pd.to_datetime(latest_snap_str).date()
-                freshness_days = (today - latest_d).days
-            except Exception:
-                pass
-
-        # Map cadence → expected refresh interval (days). One interval = "fresh".
-        # 1-2× = ok (linear decay 100→60). 2-3× = stale (60→20). >3× = outdated.
-        cadence = _bt_cadence(signal)
-        cadence_interval = {
-            "weekly":            7,
-            "monthly":          30,
-            "sector_portfolio":  7,
-            "portfolio":         7,
-        }.get(cadence, 30)  # default to monthly
-
-        if freshness_days is None:
-            freshness_score = 0
-        elif freshness_days <= cadence_interval:
-            freshness_score = 100
-        elif freshness_days <= 2 * cadence_interval:
-            # within one cadence past expected — light decay
-            over = freshness_days - cadence_interval
-            freshness_score = round(100 - 40 * over / cadence_interval)  # 100 → 60
-        elif freshness_days <= 3 * cadence_interval:
-            over = freshness_days - 2 * cadence_interval
-            freshness_score = round(60 - 40 * over / cadence_interval)  # 60 → 20
-        else:
-            freshness_score = 0
-
-        # Backtest score — |t-stat| capped at 3.0, scaled to 0-100
-        if t_stat is None or pd.isna(t_stat):
-            backtest_score = 0
-        else:
-            abs_t = min(3.0, abs(float(t_stat)))
-            backtest_score = round(100 * abs_t / 3.0, 1)
-
-        # PIT-readiness — boolean, becomes 100 or 0
-        pit_score = 100 if pit_ready else 0
-
-        # In-model badge — adds a 100% to overall (already-validated factor)
-        # but doesn't count if factor isn't built yet
-        model_score = 100 if in_model_flag else (0 if status in ("PROPOSED", "BLOCKED") else 50)
-
-        # Two separate grades — pre-2026-05-24 these were conflated into one
-        # composite. Caused user confusion: a factor with perfect data but a
-        # DROP-verdict backtest would show 'F' as if the data were broken.
-        #
-        # data_health: is the signal COMPUTING properly? (data side)
-        # validation:  is the signal PREDICTIVE in backtest? (alpha side)
-        # NB: pit_score_effective is set below the issues block (depends on nature);
-        # but we compute data_health before the issues block. Reorder if needed.
-        data_health_pit = 100 if nature in ("sector", "composite", "data-depth") else pit_score
-        data_health = (
-            0.65 * coverage_score +
-            0.25 * freshness_score +
-            0.10 * data_health_pit
-        )
-        data_health = round(data_health, 1)
-        data_grade, data_color = _grade(data_health)
-
-        # Validation verdict — t-stat based with sample-size gate.
-        # Plan 0005 Phase D.4: any KEEP/WEAK claim with n < 12 periods is
-        # downgraded to INSUFFICIENT. The 2026-05-24 weekly+NW backtest found
-        # `sentiment_7d LARGE` at t=-3.88 but n=4 — statistically meaningless;
-        # this gate prevents preliminary findings from misleading prod decisions.
-        MIN_N_FOR_VERDICT = 12
-        n_int = int(n_periods) if (n_periods is not None and not pd.isna(n_periods)) else 0
-        if t_stat is None or pd.isna(t_stat):
-            validation_verdict, validation_color = "NONE", "var(--text-muted)"
-        elif n_int < MIN_N_FOR_VERDICT:
-            # Real t-stat but too few periods — show value but flag insufficiency
-            validation_verdict, validation_color = "INSUFFICIENT", "#9b59b6"
-        else:
-            abs_t = abs(float(t_stat))
-            if abs_t >= 2.5:
-                validation_verdict, validation_color = "KEEP", "#2ecc71"
-            elif abs_t >= 1.5:
-                validation_verdict, validation_color = "WEAK", "#4d8eff"
-            else:
-                validation_verdict, validation_color = "DROP", "#e74c3c"
-
-        # Back-compat: keep `overall` field but redirect callers to data_health
-        overall = data_health
-        letter, color = data_grade, data_color
-
-        # Nature is already known (computed at top of _build_row). Issue chips
-        # below are for *actionable* problems; the nature itself is shown via
-        # the visible nature-badge in the template, not crammed into chips.
-        issues = []
-        if nature == "broad":
-            if coverage_n == 0:
-                issues.append("no scores in source table")
-            elif coverage_pct < 40:
-                issues.append(f"coverage {coverage_pct}% — many stocks unscored")
-        elif nature == "sparse" and coverage_n == 0:
-            # Sparse signal expected to be flowing but isn't — that IS actionable
-            issues.append("no recent signal data — harvester silent?")
-
-        # Stale chip is cadence-aware: a monthly factor at 23d is on schedule.
-        # Only flag if past 1× cadence interval; emphasise if past 2×.
-        if freshness_days is not None and freshness_days > cadence_interval:
-            if freshness_days > 2 * cadence_interval:
-                issues.append(f"overdue ({freshness_days}d, {cadence} cadence)")
-            else:
-                issues.append(f"stale ({freshness_days}d, {cadence} cadence)")
-        if t_stat is None or pd.isna(t_stat):
-            if nature not in ("composite", "data-depth"):
-                issues.append("no backtest t-stat yet")
-        elif abs(float(t_stat)) < 0.5:
-            issues.append(f"t-stat near zero ({float(t_stat):+.2f})")
-        if not pit_ready and nature not in ("composite", "sector", "data-depth"):
-            issues.append("no PIT helper — can't be backtested")
-
-        return {
-            "name": name,
-            "signal": signal,
-            "group": group,
-            "track": track,
-            "status": status,
-            "status_reason": status_reason,
-            "nature": nature,             # 'broad' | 'sparse' | 'sector' | 'composite' | 'data-depth'
-            "in_model": in_model_flag,
-            "coverage_n": coverage_n,
-            "eligible_n": eligible_n,
-            "coverage_pct": coverage_pct,
-            "freshness_days": freshness_days,
-            "latest_snap": latest_snap_str,
-            "t_stat": float(t_stat) if t_stat is not None and not pd.isna(t_stat) else None,
-            "t_ci_lo": float(t_ci_lo) if t_ci_lo is not None and not pd.isna(t_ci_lo) else None,
-            "t_ci_hi": float(t_ci_hi) if t_ci_hi is not None and not pd.isna(t_ci_hi) else None,
-            "n_periods": int(n_periods) if n_periods is not None and not pd.isna(n_periods) else None,
-            "ic_source": ic_source,
-            "pit_ready": pit_ready,
-            "scores": {
-                "coverage": int(round(coverage_score)),
-                "freshness": int(round(freshness_score)),
-                "backtest": int(round(backtest_score)),
-                "pit": int(pit_score),
-                "model": int(model_score),
-            },
-            "overall": overall,         # = data_health (back-compat alias)
-            "grade": letter,            # = data_grade (back-compat alias)
-            "grade_color": color,
-            "data_health": data_health,
-            "data_grade": data_grade,
-            "data_grade_color": data_color,
-            "validation_verdict": validation_verdict,
-            "validation_color": validation_color,
-            "backtest_cadence": _bt_cadence(signal),
-            "issues": issues,
-        }
-
-    out = []
-
-    # ── BACKTEST_SIGNALS (legacy + already-registered) ──
-    for spec in BACKTEST_SIGNALS:
-        signal = spec["signal"]
-        ic_row = best_by_signal.get(signal, {})
-        t_stat = ic_row.get("t_stat")
-        v2_col = spec.get("pit_column_v2")
-        coverage_n = pit_coverage.get(v2_col, 0) if v2_col else 0
-        # Freshness: prefer the column's own latest non-null date (handles
-        # weekly+monthly cadence correctly). Fall back to global latest_live
-        # only when the column has never been populated.
-        col_latest = pit_latest_for_col.get(v2_col) if v2_col else None
-        eligible = uni_total  # legacy signals span the whole universe
-        in_model = (spec.get("status") == "READY"
-                    and t_stat is not None and abs(t_stat) >= PROMOTION_T)
-        out.append(_build_row(
-            name=spec["label"],
-            signal=signal,
-            group=spec.get("group", "—"),
-            status=spec.get("status"),
-            status_reason=(spec.get("status_reason") or "")[:200],
-            in_model_flag=in_model,
-            coverage_n=coverage_n,
-            eligible_n=eligible,
-            latest_snap_str=col_latest or latest_live,
-            t_stat=t_stat,
-            n_periods=ic_row.get("n_periods"),
-            ic_source=ic_row.get("source", "—"),
-            t_ci_lo=ic_row.get("t_stat_ci_lo"),
-            t_ci_hi=ic_row.get("t_stat_ci_hi"),
-            pit_ready=bool(v2_col),
-            track="legacy",
-        ))
-
-    # ── Track 3 extras ──
-    for spec in TRACK3_EXTRAS:
-        signal = spec["signal"]
-        ic_row = best_by_signal.get(signal, {})
-        t_stat = ic_row.get("t_stat")
-        # Coverage: prefer per-snapshot table count over PIT column
-        latest_snap_str, coverage_n = _table_stats(
-            spec["score_table"], spec["score_col"]
-        )
-        # Eligible universe: most Track 3 factors exclude financials
-        eligible = uni_excl_fin
-        in_model = (t_stat is not None and abs(t_stat) >= PROMOTION_T)
-        out.append(_build_row(
-            name=spec["label"],
-            signal=signal,
-            group=spec.get("group", "Track 3"),
-            status="READY",
-            status_reason="",
-            in_model_flag=in_model,
-            coverage_n=coverage_n,
-            eligible_n=eligible,
-            latest_snap_str=latest_snap_str,
-            t_stat=t_stat,
-            n_periods=ic_row.get("n_periods"),
-            ic_source=ic_row.get("source", "—"),
-            t_ci_lo=ic_row.get("t_stat_ci_lo"),
-            t_ci_hi=ic_row.get("t_stat_ci_hi"),
-            pit_ready=signal in pit_coverage,  # PIT helper added if column exists
-            track="f-track",
-        ))
-
-    # Aggregate summary — two distinct distributions
-    n = len(out)
-    by_data_grade = {}
-    by_validation = {}
-    for r in out:
-        by_data_grade[r["data_grade"]] = by_data_grade.get(r["data_grade"], 0) + 1
-        by_validation[r["validation_verdict"]] = by_validation.get(r["validation_verdict"], 0) + 1
-    avg_data_health = round(sum(r["data_health"] for r in out) / n, 1) if n else 0
-    summary = {
-        "total": n,
-        "in_model": sum(1 for r in out if r["in_model"]),
-        "in_library": sum(1 for r in out if not r["in_model"] and r["coverage_n"] > 0),
-        "not_built": sum(1 for r in out if r["coverage_n"] == 0),
-        "with_t_stat": sum(1 for r in out if r["t_stat"] is not None),
-        "pit_ready": sum(1 for r in out if r["pit_ready"]),
-        # Back-compat aliases (template still reads these)
-        "avg_overall": avg_data_health,
-        "grade_dist": by_data_grade,
-        # New, clearer fields
-        "avg_data_health": avg_data_health,
-        "data_grade_dist": by_data_grade,
-        "validation_dist": by_validation,
-    }
-
-    return {"summary": summary, "factors": out}
-
-
-# ═══════════════════════════════════════════════════
-# Command Centre — overview of plans, factors, data layer, pending actions
-# ═══════════════════════════════════════════════════
-
-FACTOR_COUNT_TARGET = 100
-
-
-def _read_md_section(md_path: Path, header: str) -> str | None:
-    """Return the body of an H2 section by header text, or None."""
-    if not md_path.exists():
-        return None
-    text = md_path.read_text()
-    needle = f"\n## {header}"
-    start = text.find(needle)
-    if start < 0:
-        return None
-    body_start = start + len(needle)
-    end = text.find("\n## ", body_start)
-    return text[body_start:end if end > 0 else len(text)].strip()
-
-
-def _parse_plan_frontmatter(md_path: Path) -> dict:
-    """Parse YAML-ish frontmatter at top of a plan or ADR markdown file."""
-    text = md_path.read_text()
-    if not text.startswith("---"):
-        return {}
-    end = text.find("\n---", 3)
-    if end < 0:
-        return {}
-    fm = {}
-    for line in text[3:end].splitlines():
-        if ":" in line and not line.startswith(" "):
-            key, _, val = line.partition(":")
-            fm[key.strip().lower()] = val.strip()
-    return fm
-
-
-@_persisted_cache(300, name="get_command_centre")
-def get_command_centre():
-    """Assemble the command-centre payload — plans, factor library, data layer,
-    pending actions. Server-rendered; no live polling."""
-    project_root = Path(__file__).resolve().parent.parent
-
-    # ── Plans ────────────────────────────────────────────────
-    plans = []
-    for p in sorted((project_root / "docs" / "plans").glob("000*.md")):
-        fm = _parse_plan_frontmatter(p)
-        title_match = None
-        for line in p.read_text().splitlines():
-            if line.startswith("# "):
-                title_match = line[2:].strip()
-                break
-        plans.append({
-            "file": p.name,
-            "title": title_match or p.stem,
-            "status": fm.get("status") or "—",
-            "last_updated": fm.get("last updated") or "—",
-            "implementation": fm.get("implementation") or "",
-        })
-
-    # ── ADRs ─────────────────────────────────────────────────
-    adrs = []
-    for a in sorted((project_root / "docs" / "decisions").glob("0*.md")):
-        first_lines = a.read_text().splitlines()[:10]
-        title = next((l[2:].strip() for l in first_lines if l.startswith("# ")), a.stem)
-        status_line = next((l for l in first_lines if l.startswith("**Status:")), "")
-        date_line = next((l for l in first_lines if l.startswith("**Date:")), "")
-        adrs.append({
-            "file": a.name,
-            "title": title,
-            "status": status_line.replace("**Status:**", "").strip().rstrip("*").strip() or "—",
-            "date": date_line.replace("**Date:**", "").strip().rstrip("*").strip() or "—",
-        })
-
-    # ── Factor library ───────────────────────────────────────
-    # Source of truth: BACKTEST_SIGNALS in db.py (42 v1-derived signals) plus
-    # Track 3 additions (ROIC, FCF Yield, …). Each factor's t-stat is looked
-    # up from pit_ic_by_tier_v2 by `signal` column.
-    from db import BACKTEST_SIGNALS
-
-    # Track 3 factors not yet in BACKTEST_SIGNALS (no PIT helper yet, so no
-    # entry in the v1-shaped registry). Same fields shape, so they render
-    # uniformly.
-    TRACK3_EXTRAS = [
-        {
-            "signal": "roic",
-            "label": "ROIC (Track 3)",
-            "group": "Track 3 / Quality",
-            "status": "READY",
-            "status_reason": "",
-            "track": "f-track",
-            "score_table": "roic_scores",
-        },
-        {
-            "signal": "fcf_yield",
-            "label": "FCF Yield (Track 3)",
-            "group": "Track 3 / Cash",
-            "status": "READY",
-            "status_reason": "",
-            "track": "f-track",
-            "score_table": "fcf_yield_scores",
-        },
-    ]
-
-    # Promotion criterion: if pit_ic_by_tier_v2 has a row with |t| >= 1.5 in
-    # any cap-tier (preferring v2_recompute over v1_archive when both exist),
-    # the factor is "in model"; otherwise "library".
-    PROMOTION_T_THRESHOLD = 1.5
-
-    factors = []
-    with get_db() as conn:
-        try:
-            ic = read_sql(
-                "SELECT signal, cap_tier, t_stat, mean_ic, source, n_periods "
-                "FROM pit_ic_by_tier_v2"
-            )
-            # Best |t| across cap_tier per signal — prefer v2_recompute over v1_archive.
-            ic = ic.assign(
-                abst=lambda d: d["t_stat"].abs(),
-                src_priority=lambda d: d["source"].map(
-                    {"v2_recompute": 0, "v1_archive": 1}
-                ).fillna(2),
-            )
-            best = (
-                ic.sort_values(["src_priority", "abst"], ascending=[True, False])
-                  .drop_duplicates("signal", keep="first")
-                  .set_index("signal")
-                  .to_dict("index")
-            )
-        except Exception:
-            best = {}
-
-        # Score-table count helper (cached per table in this call)
-        score_table_counts: dict[str, int] = {}
-
-        def _stocks_in(table_name: str | None) -> int:
-            if not table_name:
-                return 0
-            if table_name in score_table_counts:
-                return score_table_counts[table_name]
-            try:
-                row = conn.execute(
-                    f"SELECT COUNT(DISTINCT sid) FROM {table_name}"
-                ).fetchone()
-                n = int(row[0]) if row and row[0] is not None else 0
-            except Exception:
-                n = 0
-            score_table_counts[table_name] = n
-            return n
-
-        # ── BACKTEST_SIGNALS (42 v1-derived) ──
-        for spec in BACKTEST_SIGNALS:
-            signal = spec["signal"]
-            ic_row = best.get(signal, {})
-            t_stat = ic_row.get("t_stat")
-            n_periods = ic_row.get("n_periods")
-            ic_source = ic_row.get("source")
-
-            # Coverage: prefer the v2 PIT column count over generic table counts
-            v2_col = spec.get("pit_column_v2")
-            stocks = 0
-            if v2_col:
-                try:
-                    row = conn.execute(
-                        f"SELECT COUNT(DISTINCT sid) FROM daily_snapshots_pit "
-                        f"WHERE {v2_col} IS NOT NULL"
-                    ).fetchone()
-                    stocks = int(row[0]) if row and row[0] is not None else 0
-                except Exception:
-                    stocks = 0
-
-            in_production = (
-                spec["status"] == "READY"
-                and t_stat is not None
-                and abs(t_stat) >= PROMOTION_T_THRESHOLD
-            )
-
-            factors.append({
-                "name": spec["label"],
-                "signal": signal,
-                "group": spec.get("group", "—"),
-                "status": spec.get("status"),
-                "status_reason": spec.get("status_reason", "")[:240],
-                "stocks": stocks,
-                "t_stat": float(t_stat) if t_stat is not None else None,
-                "n_periods": int(n_periods) if n_periods is not None else None,
-                "ic_source": ic_source or "—",
-                "in_production": in_production,
-                "track": "legacy",
-                "table": v2_col or "—",
-            })
-
-        # ── Track 3 extras (ROIC, FCF Yield, …) ──
-        for spec in TRACK3_EXTRAS:
-            signal = spec["signal"]
-            ic_row = best.get(signal, {})
-            t_stat = ic_row.get("t_stat")
-            stocks = _stocks_in(spec.get("score_table"))
-            in_production = (
-                t_stat is not None and abs(t_stat) >= PROMOTION_T_THRESHOLD
-            )
-            factors.append({
-                "name": spec["label"],
-                "signal": signal,
-                "group": spec.get("group", "Track 3"),
-                "status": spec.get("status"),
-                "status_reason": spec.get("status_reason", ""),
-                "stocks": stocks,
-                "t_stat": float(t_stat) if t_stat is not None else None,
-                "n_periods": int(ic_row["n_periods"]) if ic_row.get("n_periods") is not None else None,
-                "ic_source": ic_row.get("source") or "—",
-                "in_production": in_production,
-                "track": "f-track",
-                "table": spec.get("score_table"),
-            })
-
-    # "Built" = has scores OR has a t-stat. "In model" = passes promotion.
-    n_built = len([f for f in factors if f["stocks"] > 0 or f["t_stat"] is not None])
-    n_in_prod = len([f for f in factors if f["in_production"]])
-    n_in_library = n_built - n_in_prod
-
-    # ── Data layer (lightweight, for the architecture flow header stats) ──
-    data_layer = {}
-    with get_db() as conn:
-        for tbl in [
-            "fundamentals_screener", "stock_prices", "quarterly_income",
-            "annual_balance_sheet", "annual_cash_flow", "shareholding",
-            "insider_trades", "bulk_deals", "regulatory_events", "news_articles",
-        ]:
-            try:
-                cnt = conn.execute(f"SELECT COUNT(*) FROM {tbl}").fetchone()[0]
-                stocks_cnt = None
-                try:
-                    stocks_cnt = conn.execute(
-                        f"SELECT COUNT(DISTINCT sid) FROM {tbl}"
-                    ).fetchone()[0]
-                except Exception:
-                    pass
-                data_layer[tbl] = {
-                    "rows": int(cnt),
-                    "stocks": int(stocks_cnt) if stocks_cnt is not None else None,
-                }
-            except Exception:
-                data_layer[tbl] = {"rows": 0, "stocks": None}
-        try:
-            tp = conn.execute(
-                "SELECT COUNT(DISTINCT sid) FROM fundamentals_screener "
-                "WHERE line_item='Trade Payables'"
-            ).fetchone()[0]
-            data_layer["fundamentals_screener"]["trade_payables_stocks"] = int(tp)
-        except Exception:
-            pass
-
-    # ── Full data model (every table — schema, columns, row counts, source) ──
-    # Logical grouping for the brain-map. Each table gets PRAGMA table_info.
-    DATA_MODEL_GROUPS = [
-        ("Universe & Reference", [
-            ("stocks",                 "NSE/BSE master + Tickertape SID, sector, cap_tier, market_cap_cr"),
-            ("nse_index_history",      "Nifty 50/100/500/Smallcap + smart-beta indices — daily OHLCV"),
-            ("vix_history",            "India VIX — daily, regime input"),
-        ]),
-        ("Prices & Adjustments", [
-            ("stock_prices",           "Daily OHLCV — NSE bhavcopy + nselib"),
-            ("corporate_adjustments",  "Pre-multiplied split+bonus+dividend factors per (sid, ex_date) — ADR 0010"),
-            ("corporate_actions",      "Raw corporate events (splits, bonuses, dividends, buybacks, M&A) from NSE"),
-        ]),
-        ("Fundamentals", [
-            ("fundamentals_screener",  "Track 3 long-format — Screener Premium xlsx + schedules JSON. PK (sid, period_end, period_type, line_item)"),
-            ("quarterly_income",       "Tickertape — quarterly income (legacy wide format)"),
-            ("annual_balance_sheet",   "Tickertape — annual balance sheet"),
-            ("annual_cash_flow",       "Tickertape — annual cash flow"),
-            ("shareholding",           "Tickertape — quarterly promoter / FII / DII / public splits"),
-        ]),
-        ("Ownership Flows", [
-            ("insider_trades",         "NSE PIT API — secAcq/secVal are the real values, not buy/sell qty"),
-            ("bulk_deals",             "NSE bulk-deals daily snapshot — append-only, today-only API"),
-            ("fii_dii_cash_flow",      "FII/DII cash market positioning — daily"),
-            ("fii_dii_positioning",    "FII/DII F&O + cash positioning — by participant type"),
-            ("short_selling_data",     "NSE short-selling — F&O-eligible names only"),
-        ]),
-        ("Analyst Forecasts", [
-            ("analyst_consensus",          "Current snapshot — yfinance-sourced price_target + Tickertape-sourced eps/revenue. PK=sid, daily refresh."),
-            ("analyst_consensus_snapshots", "Monthly history of yfinance aggregate — drives pt_revision signals. PK=(sid, snapshot_date, source). New 2026-05-22."),
-            ("forecast_history",           "Tickertape year-end PT/EPS/Revenue snapshots (~1/yr per stock 2022-2025). Daily 'today' entries filtered at ingest."),
-        ]),
-        ("Events & News", [
-            ("regulatory_events",      "BSE/NSE filings — raw + classifier_status (6 terminal states)"),
-            ("regulatory_signals",     "Sector-level tailwind/headwind from AI-classified events (5,687 of 16,523 classified)"),
-            ("news_articles",          "Google News RSS — title+source+published_at"),
-            ("news_article_stocks",    "M2M join — article ↔ stock"),
-            ("earnings_calendar",      "Upcoming filings schedule — used for daily-incremental Screener pulls"),
-        ]),
-        ("Macro & Sectors", [
-            ("macro_indicators",       "Active per-indicator macro values"),
-            ("macro_history",          "Long-format historical series — per-indicator monthly observations"),
-            ("macro_indicator_meta",   "Indicator name → unit, transform, source registry"),
-            ("macro_sector_map",       "Indicator → sector weights (30 mappings)"),
-            ("macro_sector_signals",   "Per-sector macro signal output (today)"),
-            ("macro_sector_signals_pit", "PIT version — 11 sectors × 7 dates"),
-        ]),
-        ("Surveillance", [
-            ("surveillance_flags",     "ASM (LT/ST), GSM, F&O ban — append-only daily snapshot"),
-        ]),
-        ("Mutual Fund NAV", [
-            ("mf_schemes",             "AMFI scheme master — 4,048 schemes"),
-            ("mf_nav_history",         "Per-scheme NAV history from mfapi.in — ~13 yr daily"),
-        ]),
-        ("Computed Signals (per-stock)", [
-            ("piotroski_scores",       "F-Score 0-9 — quality"),
-            ("forensic_scores",        "M-Score (earnings manipulation) + Z-Score (distress)"),
-            ("accruals_scores",        "CF + BS accruals + EPS CV + composite"),
-            ("consensus_signals",      "PT upside, PT revision YoY, EPS revision YoY, combined"),
-            ("promoter_signals",       "Promoter QoQ + 4q trend"),
-            ("smart_money_scores",     "Bulk-deal + delivery anomaly composite"),
-            ("insider_signals",        "Insider trades signal — 29 monthly snapshots"),
-            ("sentiment_scores",       "News-based sentiment proxy — 7d volume + (FinBERT pending plan-0002)"),
-            ("roic_scores",            "Track 3 ROIC — 1,501 stocks (NOPAT/IC, 3yr median, IC≥₹50cr)"),
-            ("fcf_yield_scores",       "Track 3 FCF Yield — 1,195 stocks"),
-        ]),
-        ("Daily Output", [
-            ("daily_picks",            "Top picks per cap-tier per snapshot_date — what the screener emits"),
-            ("daily_changes",          "Day-over-day diff in picks (entered/exited)"),
-            ("daily_snapshots",        "Today-only snapshot of all factors per stock — current cross-section"),
-        ]),
-        ("PIT Snapshots & Backtest", [
-            ("daily_snapshots_pit",    "v2 PIT archive — 7 monthly dates × 26 signals × 2,448 stocks"),
-            ("daily_snapshots_pit_v1", "Frozen v1 archive — port-correctness reference per ADR 0012"),
-            ("pit_ic_by_tier_v1",      "v1 backtest IC table (older, for cross-checking)"),
-            ("pit_ic_by_tier_v2",      "Backtest output — IC, t-stat, n_periods per (signal, cap_tier, source)"),
-            ("pit_reconstruction_log", "Run-log of tools.reconstruct_pit invocations"),
-        ]),
-        ("Pipeline & Logging", [
-            ("pipeline_log",           "Per-step run log (started_at, status, rows, duration)"),
-            ("regime_state",           "Daily regime classifier output (Bullish/Neutral/Bearish)"),
-            ("screener_pull_errors",   "Track 3 scrape audit trail — error_type ∈ {auth, http, parse, thin, empty, fetch}"),
-        ]),
-    ]
-    data_model = []
-    with get_db() as conn:
-        # Get list of actually-existing tables once
-        existing = {r[0] for r in conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table'"
-        ).fetchall()}
-
-        for group_name, table_specs in DATA_MODEL_GROUPS:
-            group_tables = []
-            for tbl, desc in table_specs:
-                if tbl not in existing:
-                    continue
-                # Columns
-                try:
-                    cols = [
-                        {
-                            "name": r[1], "type": r[2], "notnull": bool(r[3]),
-                            "pk": int(r[5]),
-                        }
-                        for r in conn.execute(f"PRAGMA table_info({tbl})").fetchall()
-                    ]
-                except Exception:
-                    cols = []
-                # Indexes (skip auto-pk indexes)
-                try:
-                    idxs = [
-                        r[1] for r in conn.execute(f"PRAGMA index_list({tbl})").fetchall()
-                        if not r[1].startswith("sqlite_autoindex")
-                    ]
-                except Exception:
-                    idxs = []
-                # Foreign keys
-                try:
-                    fks = [
-                        {"col": r[3], "ref_table": r[2], "ref_col": r[4]}
-                        for r in conn.execute(f"PRAGMA foreign_key_list({tbl})").fetchall()
-                    ]
-                except Exception:
-                    fks = []
-                # Row count
-                try:
-                    rows = int(conn.execute(f"SELECT COUNT(*) FROM {tbl}").fetchone()[0])
-                except Exception:
-                    rows = 0
-                # Distinct stocks if `sid` column present
-                stocks = None
-                if any(c["name"] == "sid" for c in cols) and rows > 0:
-                    try:
-                        stocks = int(conn.execute(
-                            f"SELECT COUNT(DISTINCT sid) FROM {tbl}"
-                        ).fetchone()[0])
-                    except Exception:
-                        pass
-                # Latest timestamp if a candidate column exists
-                latest = None
-                for ts_col in ("fetched_at", "snapshot_date", "attempted_at",
-                                "started_at", "created_at", "date", "ex_date"):
-                    if any(c["name"] == ts_col for c in cols):
-                        try:
-                            r = conn.execute(
-                                f"SELECT MAX({ts_col}) FROM {tbl}"
-                            ).fetchone()
-                            if r and r[0]:
-                                latest = str(r[0])[:19]
-                                break
-                        except Exception:
-                            pass
-
-                pk_cols = [c["name"] for c in cols if c["pk"]]
-                group_tables.append({
-                    "name": tbl,
-                    "desc": desc,
-                    "cols": cols,
-                    "n_cols": len(cols),
-                    "pk": pk_cols,
-                    "fks": fks,
-                    "indexes": idxs,
-                    "rows": rows,
-                    "stocks": stocks,
-                    "latest": latest,
-                    "group": group_name,
-                })
-            if group_tables:
-                data_model.append({
-                    "name": group_name,
-                    "tables": group_tables,
-                    "n_tables": len(group_tables),
-                    "n_rows": sum(t["rows"] for t in group_tables),
-                })
-
-    # ── To Do (synthesized — top-level "what needs to happen") ──
-    todos = []
-
-    # Schedules scrape progress
-    try:
-        import subprocess
-        is_running = bool(subprocess.run(
-            ["pgrep", "-f", "screener_schedules"], capture_output=True
-        ).stdout.strip())
-    except Exception:
-        is_running = False
-    tp_n = data_layer.get("fundamentals_screener", {}).get("trade_payables_stocks", 0)
-    if is_running:
-        todos.append({
-            "title": "F1.2 universe scrape running",
-            "detail": f"Trade Payables landed for {tp_n} stocks so far (target ~2,000). Detached process — claude won't notify. Check `ps -ef | grep screener_schedules`.",
-            "status": "in-flight",
-        })
-    elif tp_n < 1500:
-        todos.append({
-            "title": "F1.2 universe scrape needs to finish or restart",
-            "detail": f"Only {tp_n} stocks have Trade Payables; expected ~1,800–2,000. May have stopped early — check screener_pull_errors.",
-            "status": "blocked",
-        })
-
-    # Factors built without PIT helpers (can't be backtested)
-    f_track_no_pit = [
-        f for f in factors
-        if f["track"] == "f-track" and f["t_stat"] is None and f["stocks"] > 0
-    ]
-    for f in f_track_no_pit:
-        todos.append({
-            "title": f"Add PIT helper for {f['name']}",
-            "detail": f"Has {f['stocks']} stocks scored today but no `pit_{f['signal']}(sid, eval_date)` in tools/reconstruct_pit.py — can't be backtested. Pair the module with its PIT version on next ship.",
-            "status": "todo",
-        })
-
-    # Factor count progress
-    todos.append({
-        "title": f"Build remaining {FACTOR_COUNT_TARGET - n_built} factors toward 100",
-        "detail": f"At {n_built}/{FACTOR_COUNT_TARGET} ({round(100*n_built/FACTOR_COUNT_TARGET)}%). Next batch (data already in fundamentals_screener): cash_conversion_cycle, gross_margin_trend, roiic, working_capital_intensity, debt_structure, asset_tangibility. ~30 min each from the ROIC/FCF Yield template.",
-        "status": "todo",
-    })
-
-    # Operational debt
-    todos.append({
-        "title": "Wire screener_pull + screener_schedules into weekly cron",
-        "detail": "Both currently manual-run only. Schedule for Sunday 02:00 IST (clear of daily 03:30 UTC pipeline). Cookie-health probe on cockpit /system. Use earnings_calendar for daily incremental.",
-        "status": "todo",
-    })
-
-    # Library surface
-    todos.append({
-        "title": "Build factor-library exploration surface",
-        "detail": "Once 30+ factors exist, add a per-factor drill-down (IC by tier, distribution, top/bottom names). Notebook first; cockpit page after.",
-        "status": "later",
-    })
-
-    # market_cap_cr rename
-    todos.append({
-        "title": "stocks.market_cap_cr is misnamed (actually rupees, not crores)",
-        "detail": "RELI shows 1.83e13 in the column (= ₹18.3L cr in rupees). Fixed locally in signals/fcf_yield.py with /1e7 divisor. Other consumers (cockpit/api.py, output/email_sender.py) treat the value as-is and could be displaying wrong units. Defer until a slow session.",
-        "status": "later",
-    })
-
-    # ── Pending actions + open questions from HANDOFF ────────
-    handoff = project_root / "HANDOFF.md"
-    next_actions_md = _read_md_section(handoff, "Next 3 actions (in order, concrete)") or ""
-    open_questions_md = _read_md_section(handoff, "Open questions for me (decisions you need to make)") or ""
-    where_md = _read_md_section(handoff, "Where I am") or ""
-
-    # ── Recent commits ───────────────────────────────────────
-    import subprocess
-    try:
-        log_out = subprocess.check_output(
-            ["git", "log", "--pretty=format:%h|%s|%cr", "-15"],
-            cwd=str(project_root), text=True, timeout=5,
-        )
-        commits = [
-            dict(zip(["sha", "subject", "when"], line.split("|", 2)))
-            for line in log_out.splitlines() if line
-        ]
-    except Exception:
-        commits = []
-
-    # ── Architecture flow (mother plan, layered) ─────────────
-    # 4 vertical stages, each expandable. Counts pulled from real data so
-    # the diagram updates as the system grows.
-    factors_by_group = {}
-    for f in factors:
-        factors_by_group.setdefault(f["group"], []).append(f)
-
-    arch_data_layer = [
-        {
-            "name": "Market data",
-            "summary": f"{data_layer.get('stock_prices',{}).get('rows', 0):,} daily price rows · {data_layer.get('stock_prices',{}).get('stocks', 0):,} stocks",
-            "items": [
-                ("stock_prices", "Daily OHLCV — NSE bhavcopy + nselib"),
-                ("daily_snapshots_pit", "PIT-reconstructed signal snapshots — 7 monthly dates"),
-                ("daily_snapshots_pit_v1", "Frozen v1 archive — 36 monthly periods, port-correctness reference"),
-            ],
-        },
-        {
-            "name": "Fundamentals",
-            "summary": f"{data_layer.get('fundamentals_screener',{}).get('rows', 0):,} long-format rows · {data_layer.get('quarterly_income',{}).get('rows', 0):,} quarterly · 2 sources",
-            "items": [
-                ("fundamentals_screener", "Screener Premium — 36 annual line items, 9 quarterly. Long-format (Track 3)"),
-                ("quarterly_income", "Tickertape — quarterly income statement (legacy wide format)"),
-                ("annual_balance_sheet", "Tickertape — annual balance sheet"),
-                ("annual_cash_flow", "Tickertape — annual cash flow"),
-                ("shareholding", "Tickertape — quarterly promoter / FII / DII / public splits"),
-            ],
-        },
-        {
-            "name": "Ownership & flows",
-            "summary": f"insider trades, bulk deals, FII/DII positioning",
-            "items": [
-                ("insider_trades", f"NSE PIT API — {data_layer.get('insider_trades',{}).get('rows', 0):,} rows"),
-                ("bulk_deals", f"NSE bulk-deals daily snapshot — {data_layer.get('bulk_deals',{}).get('rows', 0):,} rows"),
-                ("fii_dii_cash", "FII/DII cash market positioning — daily"),
-                ("fii_fno_positioning", "FII F&O positioning — daily"),
-                ("short_selling_data", "NSE short-selling — daily, F&O-eligible names"),
-            ],
-        },
-        {
-            "name": "Events & news",
-            "summary": f"{data_layer.get('regulatory_events',{}).get('rows', 0):,} regulatory events · {data_layer.get('news_articles',{}).get('rows', 0):,} news articles",
-            "items": [
-                ("regulatory_events", "BSE/NSE filings — AI-classified into per-sector signals"),
-                ("regulatory_signals", "Sector-level regulatory tailwind/headwind (5,687 of 16,523 classified)"),
-                ("corporate_actions", "Splits, bonuses, dividends — composed at signal-compute time per ADR 0010"),
-                ("news_articles", "Google News RSS — 100/query, 2026-03+ dense"),
-                ("earnings_calendar", "Upcoming filings schedule"),
-            ],
-        },
-        {
-            "name": "Macro",
-            "summary": "Inflation, GDP, sector indicators — government & RBI",
-            "items": [
-                ("macro_indicators", "data.gov.in core sector index, RBI rates, monthly"),
-                ("vix_history", "India VIX — regime classifier input"),
-                ("benchmark_indices", "Nifty 50/100/500/Smallcap/Midcap + smart-beta indices"),
-            ],
-        },
-    ]
-
-    # Signals — group → factor list with counts
-    arch_signals = []
-    canonical_order = [
-        "Value", "Quality", "Growth", "Momentum", "Ownership",
-        "Smart Money", "Consensus", "Forensic", "Sentiment",
-        "Regulatory", "Macro", "Composite",
-        "Track 3 / Quality", "Track 3 / Cash",
-    ]
-    for grp in canonical_order:
-        if grp in factors_by_group:
-            in_group = factors_by_group[grp]
-            in_model = sum(1 for f in in_group if f["in_production"])
-            arch_signals.append({
-                "name": grp,
-                "n_total": len(in_group),
-                "n_model": in_model,
-                "items": [
-                    (f["name"], f"{f['t_stat']:.2f}" if f["t_stat"] is not None else "—",
-                     "model" if f["in_production"] else "library")
-                    for f in in_group
-                ],
-            })
-
-    arch_model = [
-        {
-            "name": "Quality gate",
-            "summary": "Excludes F-Score ≤ 1, distress flags, dilution",
-            "items": [
-                ("scoring/quality_gate.py", "Hard exclusions before scoring"),
-                ("Penalty: low Piotroski (F=2-3) → −0.15", "Soft penalty"),
-                ("Penalty: distress (Z<1.81) → fixed", "Forensic penalty"),
-            ],
-        },
-        {
-            "name": "Cap-tier composite",
-            "summary": "Within-tier weighted sum of validated signals (cf C13b rubric)",
-            "items": [
-                ("LARGE: 7 weighted signals", "consensus 1.0× / piotroski 0.1× / EY 0.5× ..."),
-                ("MID: 7 weighted signals", "consensus 0.5× / piotroski 0.2× / EY 0.5× ..."),
-                ("SMALL: 7 weighted signals", "EY 1.0× / piotroski 0.15× / promoter 1.0× ..."),
-                ("Weight tiers", "|t|≥2.5 → 1.0× / 1.5-2.5 → 0.5× / 0.5-1.5 → 0.2× / <0.5 → 0×"),
-            ],
-        },
-        {
-            "name": "Regime overlay",
-            "summary": "VIX-based + macro-sector overlays",
-            "items": [
-                ("scoring/regime.py", "Bullish / Neutral / Bearish from VIX + breadth"),
-                ("Macro tilts", "Sector tailwind/headwind from regulatory + macro signals"),
-            ],
-        },
-        {
-            "name": "Personal factor library",
-            "summary": f"{n_built - n_in_prod} factors built but not voting (yet)",
-            "items": [
-                ("Promotion criterion", "|t|≥1.5 in any tier (preferring v2_recompute)"),
-                ("ADR 0012", "v2 archive refreshes after every signal-side fix"),
-                ("Today: ROIC + FCF Yield", "Track 3 factors awaiting PIT helpers + backtest"),
-            ],
-        },
-    ]
-
-    arch_picks = [
-        {
-            "name": "Daily morning brief",
-            "summary": "Top picks per cap tier with regime context, dossiers",
-            "items": [
-                ("/", "Cockpit Morning Brief route"),
-                ("Top 5 LARGE / MID / SMALL", "Ranked by composite, gated by quality_gate"),
-                ("Regime banner", "Bullish/Neutral/Bearish header"),
-            ],
-        },
-        {
-            "name": "Email digest",
-            "summary": "Daily picks emailed via output/email_sender.py",
-            "items": [
-                ("output/email_sender.py", "Templated HTML email of top picks + commentary"),
-            ],
-        },
-        {
-            "name": "Cockpit explorer",
-            "summary": "Per-stock dossiers, signals, action queue",
-            "items": [
-                ("/explorer", "Universe scan + per-stock detail"),
-                ("/actions", "Buy / Watch / Exit candidates"),
-                ("/signals", "Per-signal cross-section"),
-                ("/portfolio", "Personal position tracking"),
-            ],
-        },
-    ]
-
-    architecture = {
-        "data": arch_data_layer,
-        "signals": arch_signals,
-        "model": arch_model,
-        "picks": arch_picks,
-        "summary": {
-            "tables": len(data_layer),
-            "factors_total": len(factors),
-            "factors_in_model": n_in_prod,
-            "factors_in_library": n_in_library,
-        },
-    }
-
-    return {
-        "factors": factors,
-        "factor_summary": {
-            "built": n_built,
-            "target": FACTOR_COUNT_TARGET,
-            "pct": round(100 * n_built / FACTOR_COUNT_TARGET, 1),
-            "in_production": n_in_prod,
-            "in_library": n_in_library,
-        },
-        "data_layer": data_layer,
-        "data_model": data_model,
-        "todos": todos,
-        "where_md": where_md,
-        "commits": commits,
-        "architecture": architecture,
-    }
-
-
-# ═══════════════════════════════════════════════════
-# Health Center — unified one-screen pulse
-#
-# Surfaces ALL findings inside cockpit so the user never has to read terminal
-# health_report output or email digests to know if the system is healthy:
-#   1. tools.health_report.gather()  — pipeline + tables + watchdog + dossiers
-#   2. tools.data_sanity.run()       — semantic invariants (CRITICAL/WARN/INFO)
-#   3. pipeline_log endpoint_audit_* — per-endpoint cockpit coverage gaps
-#   4. failed_streaks                — steps currently broken (not historical)
-# Each issue is one row with severity / code / source / message / sample /
-# drilldown URL, ready for filter+render in the template.
-# ═══════════════════════════════════════════════════
-
-def _drilldown_for_issue(issue):
-    """Return ('/sql?q=...', label) for an issue, or (None, None) if no drilldown.
-
-    Looks at the issue's source ('sanity'/'freshness'/'pipeline'/'endpoint'/'dossier')
-    and table/code to pick the most useful SQL probe.
-    """
-    src = issue.get("source")
-    table = issue.get("table")
-    col = issue.get("column")
-    if src == "pipeline" and issue.get("step"):
-        sql = f"SELECT run_date, status, started_at, error_message FROM pipeline_log WHERE step_name='{issue['step']}' ORDER BY id DESC LIMIT 20"
-        return (f"/sql?q={sql}", "Last 20 runs →")
-    if src == "endpoint" and issue.get("endpoint"):
-        sql = f"SELECT * FROM pipeline_log WHERE step_name='endpoint_audit_{issue['endpoint']}' ORDER BY id DESC LIMIT 10"
-        return (f"/sql?q={sql}", "Endpoint audit log →")
-    if src == "freshness" and table:
-        sql = f"SELECT MAX(date) AS latest FROM {table}" if table else None
-        return (f"/sql?table={table}", "Inspect table →") if table else (None, None)
-    if src == "sanity":
-        # If we have a sample sid, link to its stock detail (always useful)
-        sample = issue.get("sample")
-        sample = str(sample) if sample is not None else ""
-        if sample and len(sample.split()) == 1 and len(sample) <= 12 and "@" not in sample:
-            # Looks like a sid
-            return (f"/explorer/{sample}", f"Inspect {sample} →")
-        if table:
-            return (f"/sql?table={table}", f"Inspect {table} →")
-    return (None, None)
-
-
-def _severity_rank(sev):
-    return {"CRITICAL": 0, "WARN": 1, "INFO": 2}.get(sev, 3)
-
-
-# ═══════════════════════════════════════════════════
-# News feed — Inshorts/Finshots style
-#
-# Lightweight: pull from news_articles, rank by recency × source tier, dedupe
-# by title-similarity. No per-article LLM call (would add cost + complexity).
-# The spec calls for an LLM brief; we do that as a separate optional pass.
-# ═══════════════════════════════════════════════════
-
 # Source tier map — per news_app_build_spec.md.
 # Tier 1 = highest trust, Tier 4 = lowest. Score is the source_trust component.
+# Moved back here from cockpit_ops/api.py during a hotfix on 2026-05-26: the
+# Stage 2 Ops extraction had grabbed it along with `get_health_overview` (it
+# lived adjacent in the original file), but `_news_tier()` is the only
+# consumer and lives here.
 _NEWS_SOURCE_TIERS = {
     "livemint_markets":     ("Mint Markets",        1, 1.0),
     "livemint_companies":   ("Mint Companies",      1, 1.0),
@@ -3869,457 +2657,16 @@ def get_news_feed(
     }
 
 
-@_persisted_cache(300, name="get_health_overview")
-def get_health_overview(force=False):
-    """One-stop Health Center overview.
+# ── Re-exports from cockpit_ops ──
+# Stage 2 split (2026-05-26) moved Ops functions to cockpit_ops/api.py, but the
+# main cockpit's /model page (and a few other surfaces) still calls them through
+# `api.get_model_overview()`. Re-export at the very end of this module — after
+# every cockpit.api function is fully defined — so the back-import from
+# cockpit_ops (which `from cockpit.api import _ttl_cache, _persisted_cache`) sees
+# a fully-populated module. Anything imported here also stays available as
+# `cockpit.api.<name>` for callers that haven't been migrated.
+from cockpit_ops.api import (  # noqa: E402
+    get_model_overview,
+    get_backtest_roster,
+)
 
-    Returns:
-        {
-            "as_of":            ISO datetime,
-            "verdict":          human string (e.g. "1 CRITICAL · 12 WARN"),
-            "verdict_severity": "CRITICAL" | "WARN" | "INFO" | "OK",
-            "counts":           {critical, warn, info, total},
-            "tiles":            {data, factors, pipeline, dossiers}  each {grade, color, headline, detail, link},
-            "issues":           [issue dicts] sorted CRITICAL → WARN → INFO,
-            "categories":       list of category labels present (for filter dropdown),
-            "sources":          list of source labels present,
-        }
-    """
-    from tools import health_report as _hr
-    try:
-        from tools import data_sanity as _sanity
-    except Exception:
-        _sanity = None
-
-    report = _hr.gather()
-    issues = []
-
-    # ── pipeline failures (today) + streaks (currently broken only) ──
-    for f in report["pipeline"]["failed_steps_today"]:
-        issues.append({
-            "severity": "CRITICAL",
-            "source": "pipeline",
-            "category": "Pipeline",
-            "code": f"PIPELINE_FAILED:{f['step']}",
-            "table": None, "column": None,
-            "step": f["step"],
-            "message": f"Pipeline step '{f['step']}' failed today",
-            "detail": (f.get("error") or "")[:240],
-            "sample": None, "pct": None, "n_bad": None, "n_total": None,
-        })
-    for s in report["pipeline"]["failed_streaks"]:
-        # Skip if it's already in today's failures (avoid duplicate)
-        if any(i["code"] == f"PIPELINE_FAILED:{s['step']}" for i in issues):
-            continue
-        issues.append({
-            "severity": "CRITICAL",
-            "source": "pipeline",
-            "category": "Pipeline",
-            "code": f"PIPELINE_STREAK:{s['step']}",
-            "table": None, "column": None,
-            "step": s["step"],
-            "message": f"Pipeline step '{s['step']}' has failed {s['days']} consecutive days (currently broken)",
-            "detail": (s.get("sample_error") or "")[:240],
-            "sample": None, "pct": None, "n_bad": s["days"], "n_total": None,
-        })
-
-    # ── freshness (stale / outdated / empty tables) ──
-    for tbl, age, threshold, producer in report["tables"].get("outdated", []):
-        sev = "CRITICAL" if tbl in _hr.CRITICAL_TABLE_OUTDATED else "WARN"
-        issues.append({
-            "severity": sev,
-            "source": "freshness",
-            "category": "Data freshness",
-            "code": f"OUTDATED:{tbl}",
-            "table": tbl, "column": "—",
-            "message": f"{tbl} is OUTDATED ({age:.0f}d old, threshold {threshold:.0f}d)",
-            "detail": f"producer: {producer}" if producer else "",
-            "sample": None, "pct": None,
-            "n_bad": round(age), "n_total": round(threshold),
-        })
-    for tbl, age, threshold, producer in report["tables"].get("stale", []):
-        issues.append({
-            "severity": "WARN",
-            "source": "freshness",
-            "category": "Data freshness",
-            "code": f"STALE:{tbl}",
-            "table": tbl, "column": "—",
-            "message": f"{tbl} is STALE ({age:.0f}d / threshold {threshold:.0f}d)",
-            "detail": f"producer: {producer}" if producer else "",
-            "sample": None, "pct": None,
-            "n_bad": round(age), "n_total": round(threshold),
-        })
-    for tbl in report["tables"].get("empty", []):
-        issues.append({
-            "severity": "CRITICAL",
-            "source": "freshness",
-            "category": "Data freshness",
-            "code": f"EMPTY:{tbl}",
-            "table": tbl, "column": "—",
-            "message": f"{tbl} is EMPTY (table exists but no rows)",
-            "detail": "",
-            "sample": None, "pct": None, "n_bad": 0, "n_total": None,
-        })
-
-    # ── data_sanity violations ──
-    # Performance: health_report.gather() already runs data_sanity.run()
-    # internally (stored as report["sanity"]). Re-running it here was wasted
-    # ~14s every page load. Reuse the existing output.
-    sanity_violations = report.get("sanity") or []
-    if not sanity_violations and _sanity is not None:
-        # Fallback if health_report didn't include sanity for some reason
-        try:
-            sanity_violations = _sanity.run()
-        except Exception as e:
-            sanity_violations = []
-            issues.append({
-                "severity": "WARN",
-                "source": "sanity",
-                "category": "Data sanity",
-                "code": "SANITY_RUN_FAILED",
-                "table": None, "column": None,
-                "message": f"data_sanity.run() itself raised: {type(e).__name__}",
-                "detail": str(e)[:240],
-                "sample": None, "pct": None, "n_bad": None, "n_total": None,
-            })
-    for v in sanity_violations:
-        # categorize by code prefix for filter
-        code = v.get("code", "")
-        if any(p in code for p in ("CONSENSUS", "ANALYST", "PT_", "FORECAST")):
-            cat = "Analyst / PT"
-        elif any(p in code for p in ("REGULATORY", "NEWS", "SENTIMENT")):
-            cat = "News / regulatory"
-        elif any(p in code for p in ("FACTOR", "PIT", "BACKTEST", "PIOTROSKI", "M_SCORE")):
-            cat = "Factors / backtest"
-        elif any(p in code for p in ("DAILY_PICK", "SCORE_TABLE", "UNIVERSE", "PROMOTER", "INSIDER", "BULK")):
-            cat = "Signals / picks"
-        elif "COVERAGE" in code:
-            cat = "Coverage"
-        else:
-            cat = "Data sanity"
-        issues.append({
-            "severity": v.get("severity", "WARN"),
-            "source": "sanity",
-            "category": cat,
-            "code": code,
-            "table": v.get("table"),
-            "column": v.get("column"),
-            "message": v.get("message", ""),
-            "detail": "",
-            "sample": v.get("sample"),
-            "pct": v.get("pct_violations"),
-            "n_bad": v.get("n_violations"),
-            "n_total": v.get("n_total"),
-        })
-
-    # ── cockpit endpoint audit (most-recent per endpoint) ──
-    try:
-        ep = read_sql(
-            """
-            WITH ranked AS (
-                SELECT step_name, status, error_message, started_at,
-                       ROW_NUMBER() OVER (PARTITION BY step_name ORDER BY id DESC) AS rn
-                FROM pipeline_log
-                WHERE step_name LIKE 'endpoint_audit_%'
-            )
-            SELECT step_name, status, error_message, started_at
-            FROM ranked WHERE rn = 1
-            """
-        )
-    except Exception:
-        ep = pd.DataFrame()
-    for _, r in ep.iterrows():
-        if r["status"] == "SUCCESS":
-            continue  # endpoint is fine — message carries an [OK] summary we don't surface
-        endpoint = r["step_name"].replace("endpoint_audit_", "")
-        err = (r.get("error_message") or "").strip()
-        # Derive severity from the message tag if present, else from status
-        if "[CRITICAL]" in err:
-            sev = "CRITICAL"
-        elif "[WARN]" in err:
-            sev = "WARN"
-        else:
-            sev = "CRITICAL" if r["status"] == "FAILED" else "WARN"
-        issues.append({
-            "severity": sev,
-            "source": "endpoint",
-            "category": "Cockpit endpoints",
-            "code": f"ENDPOINT_AUDIT:{endpoint}",
-            "table": None, "column": None,
-            "endpoint": endpoint,
-            "message": f"Cockpit endpoint `{endpoint}` has audit issues",
-            "detail": err[:240] or f"status={r['status']}",
-            "sample": None, "pct": None, "n_bad": None, "n_total": None,
-        })
-
-    # ── dossier validator failures ──
-    dossiers_block = report.get("dossiers", {}) or {}
-    invalid = dossiers_block.get("invalid_count", 0) or 0
-    if invalid:
-        issues.append({
-            "severity": "WARN",
-            "source": "dossier",
-            "category": "Dossiers (LLM)",
-            "code": "DOSSIER_VALIDATOR_FAILED",
-            "table": None, "column": None,
-            "message": f"{invalid} dossier(s) failed the narrative validator (raw numbers in prose, or signal mention without context)",
-            "detail": ", ".join((dossiers_block.get("invalid_sample") or [])[:5]),
-            "sample": None, "pct": None,
-            "n_bad": invalid, "n_total": dossiers_block.get("total"),
-        })
-
-    # ── per-stock integrity violations (plan 0005 Phase B) ──
-    try:
-        integrity_rows = read_sql(
-            "SELECT sid, integrity_status, integrity_reasons FROM daily_picks "
-            "WHERE pick_date = (SELECT MAX(pick_date) FROM daily_picks) "
-            "  AND integrity_status IN ('FAIL', 'WARN')"
-        )
-    except Exception:
-        integrity_rows = pd.DataFrame()
-    n_fail = int((integrity_rows["integrity_status"] == "FAIL").sum()) if not integrity_rows.empty else 0
-    n_warn = int((integrity_rows["integrity_status"] == "WARN").sum()) if not integrity_rows.empty else 0
-    if n_fail:
-        sample = integrity_rows[integrity_rows["integrity_status"] == "FAIL"].iloc[0]
-        issues.append({
-            "severity": "CRITICAL",
-            "source": "integrity",
-            "category": "Per-stock integrity",
-            "code": "INTEGRITY_FAIL",
-            "table": "daily_picks", "column": "integrity_status",
-            "message": f"{n_fail} pick(s) failed per-stock integrity validator — bumped from action_queue",
-            "detail": f"{sample['sid']}: {sample['integrity_reasons'][:160]}",
-            "sample": sample["sid"], "pct": None,
-            "n_bad": n_fail, "n_total": None,
-        })
-    if n_warn:
-        sample = integrity_rows[integrity_rows["integrity_status"] == "WARN"].iloc[0]
-        issues.append({
-            "severity": "WARN",
-            "source": "integrity",
-            "category": "Per-stock integrity",
-            "code": "INTEGRITY_WARN",
-            "table": "daily_picks", "column": "integrity_status",
-            "message": f"{n_warn} pick(s) flagged with WARN by integrity validator — surfaced but not gated",
-            "detail": f"{sample['sid']}: {sample['integrity_reasons'][:160]}",
-            "sample": sample["sid"], "pct": None,
-            "n_bad": n_warn, "n_total": None,
-        })
-
-    # ── universe eligibility coverage gaps (plan 0005 Phase A) ──
-    # Surface per-signal eligibility deltas vs prior snapshot — a sudden jump
-    # in INELIGIBLE count means a source went dark (yfinance broke, screener
-    # source stopped delivering). Showing as INFO at baseline so the user has
-    # the per-signal eligible/ineligible breakdown without alarm.
-    try:
-        elig_today = read_sql(
-            "SELECT signal, "
-            "       SUM(CASE WHEN eligible=1 THEN 1 ELSE 0 END) AS n_eligible, "
-            "       SUM(CASE WHEN eligible=0 THEN 1 ELSE 0 END) AS n_ineligible "
-            "FROM universe_eligibility "
-            "WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM universe_eligibility) "
-            "GROUP BY signal ORDER BY signal"
-        )
-    except Exception:
-        elig_today = pd.DataFrame()
-    eligibility_block = elig_today.to_dict("records") if not elig_today.empty else []
-
-    # ── attach drilldowns ──
-    for i in issues:
-        url, label = _drilldown_for_issue(i)
-        i["drilldown_url"] = url
-        i["drilldown_label"] = label
-
-    # ── sort: severity then code ──
-    issues.sort(key=lambda i: (_severity_rank(i["severity"]), i.get("code", "")))
-
-    # ── counts + verdict ──
-    counts = {"critical": 0, "warn": 0, "info": 0, "total": len(issues)}
-    for i in issues:
-        if i["severity"] == "CRITICAL": counts["critical"] += 1
-        elif i["severity"] == "WARN":   counts["warn"]     += 1
-        elif i["severity"] == "INFO":   counts["info"]     += 1
-    if counts["critical"]:
-        verdict_sev = "CRITICAL"
-        verdict = f"⚠ {counts['critical']} CRITICAL · {counts['warn']} warn · {counts['info']} info"
-    elif counts["warn"]:
-        verdict_sev = "WARN"
-        verdict = f"⚠ {counts['warn']} warn · {counts['info']} info"
-    elif counts["info"]:
-        verdict_sev = "INFO"
-        verdict = f"{counts['info']} info"
-    else:
-        verdict_sev = "OK"
-        verdict = "✓ all healthy"
-
-    # ── tiles: one grade per pillar ──
-    def _pillar_grade(critical_n, warn_n):
-        if critical_n: return ("F", "#e74c3c")
-        if warn_n >= 5: return ("C", "#f1c40f")
-        if warn_n: return ("B", "#4d8eff")
-        return ("A", "#2ecc71")
-
-    def _count_by(src):
-        c = sum(1 for i in issues if i["source"] == src and i["severity"] == "CRITICAL")
-        w = sum(1 for i in issues if i["source"] == src and i["severity"] == "WARN")
-        info = sum(1 for i in issues if i["source"] == src and i["severity"] == "INFO")
-        return c, w, info
-
-    data_c, data_w, data_i = (lambda: (
-        sum(1 for i in issues if i["source"] in ("freshness", "sanity") and i["severity"] == "CRITICAL"),
-        sum(1 for i in issues if i["source"] in ("freshness", "sanity") and i["severity"] == "WARN"),
-        sum(1 for i in issues if i["source"] in ("freshness", "sanity") and i["severity"] == "INFO"),
-    ))()
-
-    pipe_c, pipe_w, pipe_i = _count_by("pipeline")
-    ep_c, ep_w, ep_i = _count_by("endpoint")
-    dos_c, dos_w, dos_i = _count_by("dossier")
-
-    # Factor tile derives from get_factor_health()
-    try:
-        fh = get_factor_health() or {}
-        fh_summary = fh.get("summary", {}) or {}
-        # Crude factor pillar grade: F if any in_model factor has data F-grade
-        f_grade_dist = fh_summary.get("data_grade_dist", {}) or {}
-        f_validation = fh_summary.get("validation_dist", {}) or {}
-        if f_grade_dist.get("F", 0):
-            f_grade, f_color = ("D", "#e67e22")
-        elif f_grade_dist.get("D", 0):
-            f_grade, f_color = ("C", "#f1c40f")
-        elif f_grade_dist.get("C", 0):
-            f_grade, f_color = ("B", "#4d8eff")
-        else:
-            f_grade, f_color = ("A", "#2ecc71")
-        f_headline = f"{fh_summary.get('in_model', 0)} in model · {fh_summary.get('in_library', 0)} library"
-        f_detail = (
-            f"{f_validation.get('KEEP', 0)} KEEP · "
-            f"{f_validation.get('WEAK', 0)} WEAK · "
-            f"{f_validation.get('DROP', 0)} DROP · "
-            f"{f_validation.get('NONE', 0)} NONE"
-        )
-    except Exception:
-        f_grade, f_color, f_headline, f_detail = ("?", "#888", "—", "factor health unavailable")
-
-    int_c, int_w, int_i = _count_by("integrity")
-
-    data_grade, data_color = _pillar_grade(data_c, data_w)
-    pipe_grade, pipe_color = _pillar_grade(pipe_c, pipe_w)
-    dos_grade, dos_color = _pillar_grade(dos_c, dos_w)
-    int_grade, int_color = _pillar_grade(int_c, int_w)
-
-    # Picks tile: total picks today + integrity status
-    try:
-        picks_row = read_sql(
-            "SELECT COUNT(*) AS n FROM daily_picks "
-            "WHERE pick_date = (SELECT MAX(pick_date) FROM daily_picks)"
-        )
-        n_picks = int(picks_row.iloc[0]["n"]) if not picks_row.empty else 0
-    except Exception:
-        n_picks = 0
-
-    tiles = {
-        "data": {
-            "label": "Data",
-            "grade": data_grade, "color": data_color,
-            "headline": f"{data_c} critical · {data_w} warn",
-            "detail": f"freshness + sanity invariants across {len(report['tables'])} table-state slots",
-            "link": "#data",
-        },
-        "factors": {
-            "label": "Factors",
-            "grade": f_grade, "color": f_color,
-            "headline": f_headline,
-            "detail": f_detail,
-            "link": "#factors",
-        },
-        "picks": {
-            "label": "Picks integrity",
-            "grade": int_grade, "color": int_color,
-            "headline": f"{n_picks} ranked · {n_fail} FAIL · {n_warn} WARN",
-            "detail": "per-stock cross-source assertions (plan 0005 Phase B)",
-            "link": "#overview",
-        },
-        "pipeline": {
-            "label": "Pipeline",
-            "grade": pipe_grade, "color": pipe_color,
-            "headline": f"last run: {report['pipeline'].get('last_run_status') or '—'}",
-            "detail": f"{pipe_c} broken streak(s) · {len(report['pipeline'].get('failed_steps_today', []))} failure(s) today",
-            "link": "#pipeline",
-        },
-        "dossiers": {
-            "label": "Dossiers",
-            "grade": dos_grade, "color": dos_color,
-            "headline": f"{dossiers_block.get('total', 0)} total · {dossiers_block.get('invalid_count', 0)} invalid",
-            "detail": "narrative validator (raw numbers / signal-without-context)",
-            "link": "#overview",
-        },
-    }
-
-    # PIT replay tile (plan 0005 Phase E) — "can current code reproduce frozen picks?"
-    try:
-        pit_status_row = read_sql(
-            "SELECT MAX(snapshot_date) AS d, COUNT(DISTINCT snapshot_date) AS n, "
-            "MAX(frozen_at) AS last_freeze, MAX(frozen_by_commit) AS sha "
-            "FROM pit_replay_snapshots"
-        )
-        if not pit_status_row.empty and pit_status_row.iloc[0]["d"]:
-            r = pit_status_row.iloc[0]
-            n_frozen = int(r["n"])
-            last_d = r["d"]
-            last_freeze = r["last_freeze"] or ""
-            # We don't run replay here (would block page load 5-10s). Instead show
-            # freeze recency + count of historical anchors. Replay verdict is
-            # surfaced via dedicated /pit-replay endpoint if/when added.
-            age_days = None
-            try:
-                from datetime import datetime as _dt
-                last_dt = _dt.fromisoformat(last_freeze.split(".")[0]) if last_freeze else None
-                age_days = (_dt.now() - last_dt).days if last_dt else None
-            except Exception:
-                pass
-            if age_days is not None and age_days <= 2:
-                pit_grade, pit_color = "OK", "var(--green)"
-                pit_headline = f"{n_frozen} dates frozen · last {age_days}d ago"
-            elif age_days is not None and age_days <= 7:
-                pit_grade, pit_color = "STALE", "var(--amber)"
-                pit_headline = f"{n_frozen} dates frozen · stale ({age_days}d)"
-            else:
-                pit_grade, pit_color = "OK", "var(--green)"
-                pit_headline = f"{n_frozen} dates frozen"
-            pit_detail = f"latest anchor: {last_d} · run `python -m tools.pit_replay replay-all` to verify"
-        else:
-            pit_grade, pit_color = "INFO", "var(--text-muted)"
-            pit_headline = "no anchors yet"
-            pit_detail = "run `python -m tools.pit_replay freeze` to create first anchor"
-        tiles["pit_replay"] = {
-            "label": "PIT replay",
-            "grade": pit_grade, "color": pit_color,
-            "headline": pit_headline,
-            "detail": pit_detail,
-            "link": "#pit-replay",
-        }
-    except Exception:
-        pass
-
-    categories = sorted({i["category"] for i in issues})
-    sources = sorted({i["source"] for i in issues})
-
-    return {
-        "as_of": report["as_of"],
-        "verdict": verdict,
-        "verdict_severity": verdict_sev,
-        "counts": counts,
-        "tiles": tiles,
-        "issues": issues,
-        "categories": categories,
-        "sources": sources,
-        "watchdog": report.get("watchdog", {}),
-        "pipeline_summary": report.get("pipeline", {}),
-        "eligibility": eligibility_block,
-        "integrity": {
-            "n_fail": n_fail,
-            "n_warn": n_warn,
-            "fails": (integrity_rows[integrity_rows["integrity_status"] == "FAIL"].to_dict("records") if not integrity_rows.empty else []),
-            "warns": (integrity_rows[integrity_rows["integrity_status"] == "WARN"].to_dict("records") if not integrity_rows.empty else []),
-        },
-    }

@@ -1,0 +1,76 @@
+{# Reusable cockpit components — Jinja macros.
+   Import in any template with:
+       {% from "_components.html" import tab_bar, radio_group %}
+   The tab_bar relies on the page setting Alpine state at the parent:
+       <div x-data="{ tab: 'first', loaded: { first: true } }">
+   The radio_group sets its own scoped Alpine state, name-keyed.
+#}
+
+{# ─────────────── tab_bar ───────────────
+   tabs: list of (key, label) tuples — first tuple is the default active tab.
+   Use inside a parent `x-data="{ tab: '<first key>', loaded: { '<first key>': true } }"`.
+   Each panel below the tab-bar should be `<div x-show="tab === '<key>'" x-cloak>...</div>`.
+#}
+{% macro tab_bar(tabs) -%}
+{# URL-hash sync: on init, read #hash and adopt as active tab if it matches a
+   known key. On click, push the hash so the browser's back/forward + sharing
+   work. Falls back gracefully if hash is empty or unknown. #}
+{% set valid_keys = tabs | map(attribute=0) | list %}
+{# Stash the valid keys as a CSV in a data-* attribute so the x-init
+   expression doesn't need to embed JSON (whose " would terminate the
+   x-init="..." attribute and silently break Alpine). #}
+<div class="tab-bar"
+     data-tab-keys="{{ valid_keys | join(',') }}"
+     x-init="(() => {
+         const h = (location.hash || '').replace(/^#/, '');
+         const keys = ($el.dataset.tabKeys || '').split(',');
+         if (h && keys.includes(h)) {
+             tab = h;
+             loaded[h] = true;
+         }
+     })()">
+    {% for key, label in tabs %}
+    <button class="tab-button" :class="{ active: tab === '{{ key }}' }"
+            @click="tab = '{{ key }}'; loaded['{{ key }}'] = true; history.replaceState(null, '', '#{{ key }}')">{{ label }}</button>
+    {% endfor %}
+</div>
+{%- endmacro %}
+
+
+{# ─────────────── radio_group ───────────────
+   name: local Alpine state key for the toggle (e.g. "viewMode").
+   options: list of (key, label) tuples — first tuple is the default.
+   Use the chosen value via `x-bind` / `x-show` / `:class` on sibling elements
+   inside the same Alpine scope.
+
+   Wrap the radio_group **and** the elements it controls in a single
+   `<div x-data="{ <name>: '<first key>' }">...</div>`.
+#}
+{% macro radio_group(name, options) -%}
+<div class="radio-group" role="radiogroup">
+    {% for key, label in options %}
+    <button type="button" class="radio-btn"
+            :class="{ active: {{ name }} === '{{ key }}' }"
+            @click="{{ name }} = '{{ key }}'"
+            role="radio" :aria-checked="{{ name }} === '{{ key }}'">{{ label }}</button>
+    {% endfor %}
+</div>
+{%- endmacro %}
+
+
+{# ─────────────── slide_row ───────────────
+   Progressive-elaboration row: bold headline + muted body, separated by a thin rule.
+   Pass either a pre-slidified dict `{head, body}` or a raw string (then `slidify=True`
+   to run the filter inline).
+
+   Example:
+       {{ slide_row(bullet | slidify) }}
+       {{ slide_row(text, slidify=True) }}
+#}
+{% macro slide_row(item, slidify=False) -%}
+{% set s = item | slidify if slidify else item %}
+<div class="slide-row">
+    <div class="slide-head">{{ s.head }}</div>
+    {% if s.body %}<div class="slide-body">{{ s.body }}</div>{% endif %}
+</div>
+{%- endmacro %}

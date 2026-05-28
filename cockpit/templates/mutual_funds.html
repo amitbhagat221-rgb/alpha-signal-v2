@@ -1,0 +1,243 @@
+{% extends "base.html" %}
+{% block content %}
+{% from "_icons.html" import icon %}
+
+<style>
+/* ─── Container + spacing ─── */
+.mf-page { max-width: 1320px; }
+
+/* ─── Header strip ─── */
+.mf-header { display:flex; justify-content:space-between; align-items:baseline; margin-bottom:6px; }
+.mf-header h1 { font-size:22px; font-weight:700; margin:0; }
+.mf-header .meta { font-size:12px; color:var(--text-muted); }
+.mf-sub { font-size:12px; color:var(--text-muted); margin:0 0 14px; }
+
+/* ─── Inline toolbar (single compact row) ─── */
+.mf-toolbar { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:14px; padding:8px 10px; background:rgba(255,255,255,0.02); border:1px solid var(--border); border-radius:6px; }
+.mf-toolbar input,
+.mf-toolbar select {
+    height:30px;
+    padding:0 10px;
+    background:#181a20;                 /* explicit dark — never browser-default white */
+    color:var(--text);
+    border:1px solid var(--border);
+    border-radius:4px;
+    font-size:12px;
+    font-family:inherit;
+    -webkit-appearance:none;
+    -moz-appearance:none;
+    appearance:none;
+    background-image:url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath fill='%23888' d='M0 0l5 6 5-6z'/%3E%3C/svg%3E");
+    background-repeat:no-repeat;
+    background-position:right 8px center;
+    padding-right:24px;
+}
+.mf-toolbar input { background-image:none; padding-right:10px; }
+.mf-toolbar input:focus, .mf-toolbar select:focus { outline:none; border-color:var(--accent); }
+.mf-toolbar option { background:#181a20; color:var(--text); }       /* dark dropdown options */
+.mf-toolbar button { height:30px; padding:0 14px; background:var(--accent); color:white; border:none; border-radius:4px; cursor:pointer; font-weight:600; font-size:12px; }
+.mf-toolbar .clear { padding:0 8px; color:var(--text-muted); font-size:12px; text-decoration:none; height:30px; line-height:30px; }
+.mf-toolbar .grow { flex:1; min-width:180px; }
+.mf-toolbar .pill-toggle { padding:0 10px; height:30px; line-height:28px; border:1px solid var(--border); border-radius:4px; font-size:12px; color:var(--text-muted); cursor:pointer; user-select:none; background:transparent; }
+.mf-toolbar .pill-toggle.active { color:var(--accent); border-color:var(--accent); background:rgba(124,58,237,0.10); }
+
+/* ─── Presets (one row, smaller chips) ─── */
+.mf-presets { display:flex; gap:6px; flex-wrap:wrap; align-items:center; margin-bottom:14px; font-size:11px; }
+.mf-presets .label { color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px; margin-right:2px; }
+.mf-preset { display:inline-block; padding:3px 9px; background:rgba(255,255,255,0.04); border:1px solid transparent; border-radius:12px; font-size:11px; color:var(--text); text-decoration:none; }
+.mf-preset:hover { background:rgba(124,58,237,0.12); border-color:rgba(124,58,237,0.35); }
+
+/* ─── Heatmap (now collapsible) ─── */
+.mf-heatmap { display:grid; grid-template-columns:repeat(auto-fill, minmax(150px,1fr)); gap:6px; margin-bottom:14px; }
+.mf-heatmap-tile { padding:8px 10px; border-radius:4px; background:rgba(255,255,255,0.025); border:1px solid var(--border); text-decoration:none; transition:border-color .12s; }
+.mf-heatmap-tile:hover { border-color:var(--accent); }
+.mf-heatmap-tile.active { border-color:var(--accent); background:rgba(124,58,237,0.10); }
+.mf-cat-label { font-size:10px; color:var(--text-muted); margin-bottom:2px; }
+.mf-cat-ret { font-size:15px; font-weight:600; }
+.mf-cat-meta { font-size:10px; color:var(--text-muted); margin-top:1px; }
+
+/* ─── Table — cleaner, less aggressive coloring ─── */
+.mf-table { width:100%; border-collapse:collapse; font-size:12px; }
+.mf-table thead th { background:transparent; padding:8px 10px; text-align:left; font-weight:600; font-size:10px; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-muted); border-bottom:1px solid var(--border); white-space:nowrap; user-select:none; }
+.mf-table thead th.num { text-align:right; }
+.mf-table thead a { color:inherit; text-decoration:none; display:inline-block; padding:0 2px; }
+.mf-table thead a.sortable:hover { color:var(--text); }
+.mf-table thead a.active { color:var(--accent); }
+.mf-table thead .arrow { display:inline-block; width:8px; opacity:0.6; }
+.mf-table tbody td { padding:10px 10px; border-bottom:1px solid rgba(255,255,255,0.04); vertical-align:middle; }
+.mf-table tbody td.num { text-align:right; font-variant-numeric:tabular-nums; }
+.mf-table tbody tr:hover { background:rgba(124,58,237,0.04); }
+.mf-scheme-name { font-weight:500; color:var(--text); text-decoration:none; }
+.mf-scheme-name:hover { color:var(--accent); }
+.mf-amc { color:var(--text-muted); font-size:11px; margin-top:1px; }
+.mf-cat-cell { font-size:11px; color:var(--text-muted); }
+
+/* Subtler number coloring — only loss highlighted in red, gains stay neutral */
+.ret { color:var(--text); }
+.ret-strong-pos { color:#22c55e; }      /* applied only when meaningfully positive */
+.ret-neg { color:#ef4444; }
+
+/* Score column — keep the badge, smaller + softer */
+.score-badge { display:inline-block; padding:2px 8px; border-radius:10px; font-weight:600; font-size:11px; min-width:34px; text-align:center; font-variant-numeric:tabular-nums; }
+.score-elite  { background:rgba(34,197,94,0.14);  color:#22c55e; }
+.score-strong { background:rgba(132,204,22,0.14); color:#84cc16; }
+.score-mid    { background:rgba(245,158,11,0.14); color:#f59e0b; }
+.score-weak   { background:rgba(239,68,68,0.14);  color:#ef4444; }
+.score-na     { color:var(--text-muted); font-size:11px; }
+
+/* ─── Pager ─── */
+.pager { display:flex; gap:8px; align-items:center; margin-top:14px; justify-content:center; font-size:12px; }
+.pager a, .pager span { padding:5px 10px; border:1px solid var(--border); border-radius:4px; text-decoration:none; color:var(--text); }
+.pager a:hover { border-color:var(--accent); }
+.pager .info { border:none; color:var(--text-muted); }
+.pager .disabled { opacity:0.35; pointer-events:none; }
+</style>
+
+<div class="mf-page" x-data="{ heatmapOpen: false }">
+
+<div class="mf-header">
+    <h1>Mutual Funds</h1>
+    <div class="meta">
+        <strong style="color:var(--text);">{{ bundle.total|default(0) }}</strong> match
+    </div>
+</div>
+<p class="mf-sub">
+    <strong style="color:var(--text);">Absolute</strong> composite score 0–100. Formula:
+    <code style="font-size:11px;">(return base 0–50 × Sharpe multiplier 0.5–1.4×) + drawdown adj ±15 + consistency adj 0–15</code>.
+    Score 70+ ≈ funds delivering 25%+ CAGR; 55-70 ≈ 15-20%; below 35 = avoid.
+</p>
+
+{# ─── Compact toolbar ─── #}
+{% set qs_keep %}{% if active_q %}&q={{ active_q|urlencode }}{% endif %}{% if active_category %}&category={{ active_category|urlencode }}{% endif %}{% if active_amc %}&amc={{ active_amc|urlencode }}{% endif %}{% if active_plan %}&plan={{ active_plan }}{% endif %}{% if active_option %}&option={{ active_option }}{% endif %}{% if show_all %}&show_all=1{% endif %}{% endset %}
+{% set qs_keep_no_sort = qs_keep %}
+
+<form class="mf-toolbar" method="get" action="/mutual-funds">
+    <input class="grow" name="q" type="text" placeholder="Search scheme name…" value="{{ active_q or '' }}">
+    <select name="category">
+        <option value="">All categories</option>
+        {% for h in heatmap %}
+        <option value="{{ h.category_norm }}" {% if active_category == h.category_norm %}selected{% endif %}>{{ h.category_norm }} ({{ h.scheme_count }})</option>
+        {% endfor %}
+    </select>
+    <input name="amc" type="text" placeholder="AMC" value="{{ active_amc or '' }}" style="width:120px;">
+    <select name="plan">
+        <option value="">Plan</option>
+        <option value="DIRECT" {% if active_plan == 'DIRECT' %}selected{% endif %}>Direct</option>
+        <option value="REGULAR" {% if active_plan == 'REGULAR' %}selected{% endif %}>Regular</option>
+    </select>
+    <select name="option">
+        <option value="">Option</option>
+        <option value="GROWTH" {% if active_option == 'GROWTH' %}selected{% endif %}>Growth</option>
+        <option value="IDCW"   {% if active_option == 'IDCW' %}selected{% endif %}>IDCW</option>
+    </select>
+    <input type="hidden" name="sort" value="{{ active_sort or 'score' }}">
+    {% if show_all %}<input type="hidden" name="show_all" value="1">{% endif %}
+    <button type="submit">Filter</button>
+    {% if active_category or active_amc or active_plan or active_option or active_q %}
+    <a class="clear" href="/mutual-funds{% if show_all %}?show_all=1{% endif %}">Clear</a>
+    {% endif %}
+    <span class="pill-toggle" :class="heatmapOpen && 'active'" @click="heatmapOpen = !heatmapOpen">
+        <span x-show="!heatmapOpen">Show heatmap</span>
+        <span x-show="heatmapOpen" x-cloak>Hide heatmap</span>
+    </span>
+    {% if show_all %}
+    <a class="pill-toggle active" href="/mutual-funds?sort={{ active_sort or 'score' }}{{ qs_keep|replace('&show_all=1','') }}" title="Currently showing every scheme including matured FMPs, wound-up funds, ETFs. Click to show only investable.">Investable only</a>
+    {% else %}
+    <a class="pill-toggle" href="/mutual-funds?sort={{ active_sort or 'score' }}{{ qs_keep }}&show_all=1" title="Currently showing only investable schemes (active, TRUSTED, NAV within 30 days). Click to include matured FMPs, wound-up funds, ETFs.">Show all</a>
+    {% endif %}
+</form>
+
+{# ─── Heatmap (collapsed by default) ─── #}
+<div x-show="heatmapOpen" x-cloak class="mf-heatmap">
+    {% for h in heatmap[:36] %}
+    {% set ret = h.median_ret_3y %}
+    <a class="mf-heatmap-tile {% if active_category == h.category_norm %}active{% endif %}"
+       href="/mutual-funds?category={{ h.category_norm|urlencode }}&sort={{ active_sort or 'score' }}{% if show_all %}&show_all=1{% endif %}">
+        <div class="mf-cat-label">{{ h.category_norm }}</div>
+        <div class="mf-cat-ret {% if ret and ret >= 8 %}ret-strong-pos{% elif ret and ret < 0 %}ret-neg{% endif %}">{% if ret is not none %}{{ '%.1f' % ret }}%{% else %}—{% endif %}</div>
+        <div class="mf-cat-meta">{{ h.scheme_count }} schemes</div>
+    </a>
+    {% endfor %}
+</div>
+
+{# ─── Presets (one row, no emoji clutter) ─── #}
+<div class="mf-presets">
+    <span class="label">Quick:</span>
+    <a class="mf-preset" href="/mutual-funds?category=Equity&plan=DIRECT&option=GROWTH&sort=score">Best equity</a>
+    <a class="mf-preset" href="/mutual-funds?category=Equity+%2F+Large+Cap&plan=DIRECT&option=GROWTH&sort=score">Large cap</a>
+    <a class="mf-preset" href="/mutual-funds?category=Equity+%2F+Mid+Cap&plan=DIRECT&option=GROWTH&sort=score">Mid cap</a>
+    <a class="mf-preset" href="/mutual-funds?category=Equity+%2F+Small+Cap&plan=DIRECT&option=GROWTH&sort=score">Small cap</a>
+    <a class="mf-preset" href="/mutual-funds?category=Equity+%2F+Flexi+Cap&plan=DIRECT&option=GROWTH&sort=score">Flexi cap</a>
+    <a class="mf-preset" href="/mutual-funds?category=Equity+%2F+ELSS&plan=DIRECT&option=GROWTH&sort=score">ELSS</a>
+    <a class="mf-preset" href="/mutual-funds?category=Hybrid&plan=DIRECT&option=GROWTH&sort=score">Hybrid</a>
+    <a class="mf-preset" href="/mutual-funds?category=Debt&plan=DIRECT&option=GROWTH&sort=score">Debt</a>
+    <a class="mf-preset" href="/mutual-funds?category=Index&sort=score">Index</a>
+    <a class="mf-preset" href="/mutual-funds?sort=ret_5y">Top 5Y</a>
+</div>
+
+{# ─── Table with sortable headers (server-side via URL navigation) ─── #}
+{% macro sort_header(label, key, num=False) %}
+    {% set arrow = '↓' if active_sort == key else '' %}
+    <th class="{% if num %}num{% endif %}">
+        <a class="sortable {% if active_sort == key %}active{% endif %}"
+           href="/mutual-funds?sort={{ key }}{{ qs_keep_no_sort }}">{{ label }} <span class="arrow">{{ arrow }}</span></a>
+    </th>
+{% endmacro %}
+
+<div style="overflow-x:auto;">
+<table class="mf-table">
+    <thead>
+        <tr>
+            {{ sort_header('Scheme', 'name') }}
+            <th>Category</th>
+            {{ sort_header('NAV', 'name', num=True) }}
+            {{ sort_header('1Y', 'ret_1y', num=True) }}
+            {{ sort_header('3Y CAGR', 'ret_3y', num=True) }}
+            {{ sort_header('5Y CAGR', 'ret_5y', num=True) }}
+            {{ sort_header('Sharpe 1Y', 'sharpe_1y', num=True) }}
+            {{ sort_header('Max DD', 'max_dd', num=True) }}
+            {{ sort_header('Score', 'score', num=True) }}
+        </tr>
+    </thead>
+    <tbody>
+    {% for row in bundle.rows %}
+    <tr>
+        <td>
+            <a class="mf-scheme-name" href="/mutual-funds/{{ row.scheme_code }}">{{ row.scheme_name[:75] }}</a>
+            <div class="mf-amc">{{ row.amc or '' }}{% if row.plan_type or row.option_type %} · {% endif %}{{ row.plan_type or '' }}{% if row.plan_type and row.option_type %}/{% endif %}{{ row.option_type or '' }}</div>
+        </td>
+        <td class="mf-cat-cell">{{ row.category_norm or row.category_raw or '—' }}</td>
+        <td class="num">{% if row.nav %}{{ '%.2f' % row.nav }}{% else %}<span class="score-na">—</span>{% endif %}</td>
+        <td class="num {% if row.ret_1y and row.ret_1y >= 8 %}ret-strong-pos{% elif row.ret_1y and row.ret_1y < 0 %}ret-neg{% endif %}">{% if row.ret_1y is not none %}{{ '%.1f' % row.ret_1y }}%{% else %}<span class="score-na">—</span>{% endif %}</td>
+        <td class="num {% if row.ret_3y_cagr and row.ret_3y_cagr >= 12 %}ret-strong-pos{% elif row.ret_3y_cagr and row.ret_3y_cagr < 0 %}ret-neg{% endif %}">{% if row.ret_3y_cagr is not none %}{{ '%.1f' % row.ret_3y_cagr }}%{% else %}<span class="score-na">—</span>{% endif %}</td>
+        <td class="num {% if row.ret_5y_cagr and row.ret_5y_cagr >= 12 %}ret-strong-pos{% elif row.ret_5y_cagr and row.ret_5y_cagr < 0 %}ret-neg{% endif %}">{% if row.ret_5y_cagr is not none %}{{ '%.1f' % row.ret_5y_cagr }}%{% else %}<span class="score-na">—</span>{% endif %}</td>
+        <td class="num">{% if row.sharpe_1y is not none %}{{ '%.2f' % row.sharpe_1y }}{% else %}<span class="score-na">—</span>{% endif %}</td>
+        <td class="num {% if row.max_drawdown %}ret-neg{% endif %}">{% if row.max_drawdown is not none %}{{ '%.1f' % row.max_drawdown }}%{% else %}<span class="score-na">—</span>{% endif %}</td>
+        <td class="num">
+            {% if row.composite_score is not none %}
+                {% set s = row.composite_score %}
+                <span class="score-badge {% if s>=70 %}score-elite{% elif s>=55 %}score-strong{% elif s>=35 %}score-mid{% else %}score-weak{% endif %}">{{ '%.0f' % s }}</span>
+            {% else %}<span class="score-na">—</span>{% endif %}
+        </td>
+    </tr>
+    {% endfor %}
+    {% if not bundle.rows %}
+    <tr><td colspan="9" style="text-align:center; padding:32px; color:var(--text-muted);">No schemes match your filters.</td></tr>
+    {% endif %}
+    </tbody>
+</table>
+</div>
+
+{# ─── Pagination ─── #}
+{% if bundle.n_pages and bundle.n_pages > 1 %}
+{% set qs %}{{ qs_keep }}&sort={{ active_sort }}{% endset %}
+<div class="pager">
+    <a href="/mutual-funds?page={{ bundle.page - 1 }}{{ qs }}" class="{% if bundle.page <= 1 %}disabled{% endif %}">← Prev</a>
+    <span class="info">Page {{ bundle.page }} / {{ bundle.n_pages }}</span>
+    <a href="/mutual-funds?page={{ bundle.page + 1 }}{{ qs }}" class="{% if bundle.page >= bundle.n_pages %}disabled{% endif %}">Next →</a>
+</div>
+{% endif %}
+
+</div>
+
+{% endblock %}

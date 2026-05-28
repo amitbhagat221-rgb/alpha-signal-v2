@@ -85,6 +85,16 @@ _COLUMN_MIGRATIONS = [
     # 2026-05-24 (session #4): plan 0005 Phase D.5 — bootstrap CIs on t-stat
     ("pit_ic_by_tier_v2", "t_stat_ci_lo", "REAL"),
     ("pit_ic_by_tier_v2", "t_stat_ci_hi", "REAL"),
+    # 2026-05-26: MF research section (plan prfect-lets-add-a-zazzy-eich)
+    ("mf_schemes", "category_norm",     "TEXT"),
+    ("mf_schemes", "benchmark",         "TEXT"),
+    ("mf_schemes", "inception_date",    "TEXT"),
+    ("mf_schemes", "has_full_history",  "INTEGER DEFAULT 0"),
+    # 2026-05-26: data-quality flag on master — keeps wound-up / segregated /
+    # interval-fund / NAV-anomalous schemes out of the universe browser + scorer.
+    # Values: TRUSTED (default) / WOUND_UP / SEGREGATED / INTERVAL / ANOMALOUS / BONUS
+    ("mf_scheme_master", "data_quality",       "TEXT DEFAULT 'TRUSTED'"),
+    ("mf_scheme_master", "quality_reason",     "TEXT"),
 ]
 
 
@@ -209,6 +219,90 @@ def _table_pk(table_name, connection):
     pks = [r[1] for r in rows if r[5] > 0]  # PRAGMA returns (cid, name, type, notnull, dflt, pk)
     _PK_CACHE[table_name] = pks
     return pks
+
+
+def emit_lineage(records, snapshot_date=None, replace_factor=True):
+    """Write per-stock lineage rows to `signal_lineage`.
+
+    Args:
+      records:        list of dicts, each with keys:
+                        sid (str), factor (str), source_table (str),
+                        source_key (dict — serialized to JSON),
+                        source_cols (list — optional, serialized to JSON),
+                        column_sources (dict — optional, for mixed-source tables),
+                        contribution (str — optional)
+      snapshot_date:  ISO date; defaults to today
+      replace_factor: if True, deletes existing rows for the (factor, snapshot_date)
+                      tuple before inserting. Idempotent re-runs.
+
+    Each signal module that participates in lineage calls this once per compute()
+    with the records it emitted alongside its own *_signals upsert.
+
+    Records are SKIPPED (not raised on) if `lineage.lineage_active_sids()` is set
+    and the record's sid is not in the active universe. That keeps the
+    `signal_lineage` table at a manageable size (top-300 SIDs by default).
+    """
+    if not records:
+        return 0
+
+    from datetime import date as _date
+    import json as _json
+    snapshot = snapshot_date or _date.today().isoformat()
+
+    # Gate by active SID set (default: top-300 from daily_picks)
+    try:
+        from lineage import lineage_active_sids
+        active = lineage_active_sids()
+    except Exception:
+        active = None
+    if active is not None:
+        records = [r for r in records if r.get("sid") in active]
+        if not records:
+            return 0
+
+    rows = []
+    factors_seen = set()
+    for r in records:
+        sid = r.get("sid")
+        factor = r.get("factor")
+        if not sid or not factor:
+            continue
+        factors_seen.add(factor)
+        key_obj = r.get("source_key") or {}
+        cols_obj = r.get("source_cols")
+        colsrc_obj = r.get("column_sources")
+        rows.append((
+            sid, snapshot, factor,
+            r.get("source_table"),
+            _json.dumps(key_obj, sort_keys=True, separators=(",", ":")),
+            _json.dumps(cols_obj, separators=(",", ":")) if cols_obj else None,
+            _json.dumps(colsrc_obj, separators=(",", ":")) if colsrc_obj else None,
+            r.get("contribution") or "",
+        ))
+
+    if not rows:
+        return 0
+
+    with get_db() as conn:
+        if replace_factor:
+            # Wipe prior (factor, snapshot_date) rows for the active SIDs only.
+            # Re-running the same signal on the same day rewrites cleanly.
+            sids_in_batch = list({row[0] for row in rows})
+            placeholders = ",".join("?" * len(sids_in_batch))
+            for f in factors_seen:
+                conn.execute(
+                    f"DELETE FROM signal_lineage WHERE factor=? AND snapshot_date=? "
+                    f"AND sid IN ({placeholders})",
+                    [f, snapshot] + sids_in_batch,
+                )
+        cursor = conn.executemany(
+            "INSERT OR IGNORE INTO signal_lineage "
+            "(sid, snapshot_date, factor, source_table, source_key, "
+            "source_cols, column_sources, contribution) "
+            "VALUES (?,?,?,?,?,?,?,?)",
+            rows,
+        )
+        return cursor.rowcount
 
 
 def upsert_df(df, table_name, conn=None):
@@ -459,6 +553,50 @@ TABLE_META = {
         "depth": "7-day rolling per stock",
         "description": "VADER sentiment scores from news articles, aggregated to per-stock 7-day windows.",
         "consumed_by": "screener (sentiment signal), stock_detail",
+    },
+
+    # ── Mutual Fund universe (research-only; standalone from stock model) ──
+    "mf_scheme_master": {
+        "kind": "RAW",
+        "depth": "~14,364 active Indian MF schemes (refreshed weekly from AMFI NAVAll.txt)",
+        "description": "Authoritative MF universe from AMFI. One row per scheme: code, ISINs, name, AMC, raw + normalised category, plan_type (Direct/Regular), option_type (Growth/IDCW), last_seen, active flag.",
+        "consumed_by": "/mutual-funds cockpit page, mf_nav_backfill (selects active+Growth subset)",
+    },
+    "mf_nav_history": {
+        "kind": "RAW",
+        "depth": "~13y daily NAV per scheme (mfapi.in backfill) + ongoing daily (AMFI)",
+        "description": "Per-scheme NAV time series. PK (scheme_code, nav_date). Bootstrap fills via mfapi.in; daily incremental via AMFI NAVAll.txt.",
+        "consumed_by": "mf_metrics, mf_rolling_returns compute; cockpit /mutual-funds/{code} NAV chart",
+    },
+    "mf_schemes": {
+        "kind": "RAW",
+        "depth": "Subset of mf_scheme_master with full backfilled history",
+        "description": "Compat table from v0 — tracks scheme metadata (inception_date, has_full_history) for schemes we've backfilled via mfapi.in. Functionally a join key with mf_scheme_master.",
+        "consumed_by": "mf_nav_backfill (skip already-done), /mutual-funds/{code} detail",
+    },
+    "mf_metrics": {
+        "kind": "COMPUTED",
+        "depth": "One row per (scheme_code, as_of_date); recomputed monthly",
+        "description": "Per-scheme returns + risk snapshot. 1Y/3Y/5Y/10Y CAGR, Sharpe, Sortino, max drawdown, peer rank, plus composite_score (0-100 within category) with 4-way breakdown (3Y CAGR / Sharpe 3Y / max DD / rolling consistency).",
+        "consumed_by": "/mutual-funds universe browser (Score column, sort key), /mutual-funds/{code} detail page",
+    },
+    "mf_calendar_returns": {
+        "kind": "COMPUTED",
+        "depth": "Per-scheme per-calendar-year",
+        "description": "Yearly returns table for the bar chart on the detail page. PK (scheme_code, year).",
+        "consumed_by": "/mutual-funds/{code} Performance tab calendar chart",
+    },
+    "mf_rolling_returns": {
+        "kind": "COMPUTED",
+        "depth": "Monthly anchors (~60 per scheme), 3Y + 5Y rolling CAGR each",
+        "description": "Rolling 3Y and 5Y CAGR sampled on the first business day of each month, plus a flag for whether the rolling window beat category median. Drives the rolling-returns charts + the consistency component of composite_score.",
+        "consumed_by": "/mutual-funds/{code} Performance tab rolling charts; mf_metrics scorer",
+    },
+    "mf_category_stats": {
+        "kind": "COMPUTED",
+        "depth": "One row per (category_norm, as_of_date)",
+        "description": "Category aggregates — median 1Y/3Y/5Y returns, median Sharpe, top/bottom decile cuts. Powers the heatmap on /mutual-funds and peer-rank comparisons.",
+        "consumed_by": "/mutual-funds heatmap, mf_metrics peer ranking",
     },
 
     # ── Output ──

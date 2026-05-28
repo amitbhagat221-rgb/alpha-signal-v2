@@ -94,8 +94,11 @@ def _load_signals():
         "SELECT sid, accruals_signal FROM accruals_scores "
         "WHERE (sid, snapshot_date) IN (SELECT sid, MAX(snapshot_date) FROM accruals_scores GROUP BY sid)"
     )
+    # consensus_signal (composite) + pt_upside (top backtest factor t=7-9) + eps_growth (t=3-5).
+    # Backtest evidence: tools/optimize_weights.py shows pt_upside and eps_growth dominate the
+    # MaxReturn/MaxSharpe weight schemes (~80% of LARGE/MID weight together).
     consensus = read_sql(
-        "SELECT sid, consensus_signal FROM consensus_signals "
+        "SELECT sid, consensus_signal, pt_upside, eps_growth FROM consensus_signals "
         "WHERE (sid, snapshot_date) IN (SELECT sid, MAX(snapshot_date) FROM consensus_signals GROUP BY sid)"
     )
     promoter = read_sql(
@@ -176,11 +179,18 @@ def _percentile_rank_within_tier(df, col):
     return df.groupby("cap_tier")[col].rank(pct=True)
 
 
-def score_universe(df):
+def score_universe(df, weights: dict = None):
     """
     Apply tier-specific weights, rank within segment, apply forensic penalty.
     Returns scored DataFrame with final_score and rank columns.
+
+    `weights` — optional override. Defaults to config.SIGNAL_WEIGHTS. Pass
+    SIGNAL_WEIGHTS_RETURN or SIGNAL_WEIGHTS_SHARPE to score with an alternate
+    scheme. Negative weights are honoured — inverse signals get a sign-flip
+    on the percentile (1 - pctile) so the weighted sum stays directional.
     """
+    if weights is None:
+        weights = SIGNAL_WEIGHTS
     # Signal column mapping: config key → DataFrame column
     SIGNAL_COLS = {
         "consensus": "consensus",
@@ -191,6 +201,9 @@ def score_universe(df):
         "book_to_price": "book_to_price",
         "promoter": "promoter",
         "smart_money": "smart_money",
+        # Wired 2026-05-28 — dominant in PIT IC backtest, were missing from screener:
+        "pt_upside": "pt_upside",    # t=7.15 LARGE / 8.40 MID / 9.14 SMALL
+        "eps_growth": "eps_growth",  # t=5.31 LARGE / 3.23 SMALL
     }
 
     # Percentile-rank all signals within tier (higher = better for all)
@@ -222,18 +235,27 @@ def score_universe(df):
 
     for tier in ["LARGE", "MID", "SMALL"]:
         tier_mask = df["cap_tier"] == tier
-        weights = SIGNAL_WEIGHTS.get(tier, {})
-        total_weight = sum(weights.values())
+        tier_weights = weights.get(tier, {})
+        # Use abs(weight) for the denominator so negative-weight signals
+        # contribute to coverage but don't shrink the sum.
+        total_weight = sum(abs(w) for w in tier_weights.values())
         tier_total_weight.loc[tier_mask] = total_weight
 
-        for signal_key, weight in weights.items():
+        for signal_key, weight in tier_weights.items():
             pctile_col = f"{signal_key}_pctile"
             if pctile_col not in df.columns:
                 continue
             vals = df.loc[tier_mask, pctile_col]
             valid = vals.notna()
-            scores.loc[tier_mask & valid.reindex(df.index, fill_value=False)] += weight * vals[valid]
-            weight_sums.loc[tier_mask & valid.reindex(df.index, fill_value=False)] += weight
+            # Negative weight ⇒ inverse signal: invert the percentile (1 - p)
+            # then multiply by |weight|. Result: high-quality stocks (e.g. low
+            # accruals) get the positive contribution.
+            if weight < 0:
+                contribution = abs(weight) * (1.0 - vals[valid])
+            else:
+                contribution = weight * vals[valid]
+            scores.loc[tier_mask & valid.reindex(df.index, fill_value=False)] += contribution
+            weight_sums.loc[tier_mask & valid.reindex(df.index, fill_value=False)] += abs(weight)
 
             # Eligibility — if registry has this signal, only count toward
             # eligible_weight for SIDs marked eligible. If not registered,
@@ -242,9 +264,9 @@ def score_universe(df):
                 eligible_for_signal = elig_wide.reindex(df["sid"]).loc[
                     df.loc[tier_mask, "sid"], signal_key
                 ].fillna(1).astype(int).values  # default ELIGIBLE if no row
-                eligible_weight.loc[tier_mask] += weight * eligible_for_signal
+                eligible_weight.loc[tier_mask] += abs(weight) * eligible_for_signal
             else:
-                eligible_weight.loc[tier_mask] += weight
+                eligible_weight.loc[tier_mask] += abs(weight)
 
     # Normalize by actual weights used (handles NaN signals gracefully)
     df["base_score"] = np.where(weight_sums > 0, scores / weight_sums, np.nan)
@@ -291,23 +313,30 @@ MIN_FUNDAMENTAL_COVERAGE = 0.50  # ≥4 of 8 quarterly_income rows (INPUT-side, 
 # pathological case where eligibility data itself is wrong.
 
 
-def _pick_eligible(df):
+def _pick_eligible(df, min_eligible: float = None):
     """Boolean Series: True where stock qualifies for daily_picks.
 
     Gate has 4 conditions, ALL must hold:
-      • eligible_coverage ≥ 0.60 — SID's ELIGIBLE signals produced ≥60% output
+      • eligible_coverage ≥ min_eligible (default 0.60) — SID's ELIGIBLE signals produced enough output
       • weight_coverage   ≥ 0.50 — legacy backstop (in case eligibility data is wrong)
       • price_rows        ≥ 60  — ≥3 months of trading prices
       • fundamental_coverage ≥ 0.50 — ≥4 of 8 quarterly_income rows
+
+    `min_eligible` override: variant runs ('return', 'sharpe') concentrate weight on
+    analyst-dependent signals (pt_upside, eps_growth). Many SMALL caps have no
+    analyst coverage so the 60% bar excludes them even though their non-analyst
+    signals are sound. Variants pass 0.40 so those stocks remain rankable.
     """
-    has_elig = df.get("eligible_coverage", df.get("weight_coverage")).fillna(0) >= MIN_ELIGIBLE_COVERAGE
+    if min_eligible is None:
+        min_eligible = MIN_ELIGIBLE_COVERAGE
+    has_elig = df.get("eligible_coverage", df.get("weight_coverage")).fillna(0) >= min_eligible
     has_weight = df["weight_coverage"].fillna(0) >= MIN_WEIGHT_COVERAGE
     has_prices = df["price_rows"].fillna(0) >= MIN_PRICE_ROWS
     has_fundamentals = df["fundamental_coverage"].fillna(0) >= MIN_FUNDAMENTAL_COVERAGE
     return has_elig & has_weight & has_prices & has_fundamentals
 
 
-def select_picks(df, picks_per_tier=None):
+def select_picks(df, picks_per_tier=None, min_eligible: float = None):
     """Select top stocks per tier for daily output.
 
     Two-part gate:
@@ -321,13 +350,14 @@ def select_picks(df, picks_per_tier=None):
     if picks_per_tier is None:
         picks_per_tier = PORTFOLIO["picks_per_tier"]
 
-    eligible = _pick_eligible(df)
-    dropped_elig = (df.get("eligible_coverage", df.get("weight_coverage")).fillna(0) < MIN_ELIGIBLE_COVERAGE).sum()
+    eligible = _pick_eligible(df, min_eligible=min_eligible)
+    elig_floor = min_eligible if min_eligible is not None else MIN_ELIGIBLE_COVERAGE
+    dropped_elig = (df.get("eligible_coverage", df.get("weight_coverage")).fillna(0) < elig_floor).sum()
     dropped_coverage = ((df["weight_coverage"].fillna(0) < MIN_WEIGHT_COVERAGE)).sum()
     dropped_prices = ((df["price_rows"].fillna(0) < MIN_PRICE_ROWS)).sum()
     dropped_fundamentals = ((df["fundamental_coverage"].fillna(0) < MIN_FUNDAMENTAL_COVERAGE)).sum()
     print(f"  Pick gate: {(~eligible).sum()} excluded "
-          f"({dropped_elig} below {MIN_ELIGIBLE_COVERAGE:.0%} eligible, "
+          f"({dropped_elig} below {elig_floor:.0%} eligible, "
           f"{dropped_coverage} below {MIN_WEIGHT_COVERAGE:.0%} weight, "
           f"{dropped_prices} below {MIN_PRICE_ROWS}d prices, "
           f"{dropped_fundamentals} below {MIN_FUNDAMENTAL_COVERAGE:.0%} fundamentals)")
@@ -340,13 +370,36 @@ def select_picks(df, picks_per_tier=None):
     return pd.concat(picks).sort_values(["cap_tier", "rank"])
 
 
-def compute(dry_run=False, top=None):
-    """Main entry point. Returns row count."""
+def compute(dry_run=False, top=None, variant: str = "production"):
+    """Main entry point. Returns row count.
+
+    variant:
+      'production'  → use config.SIGNAL_WEIGHTS (the current live weights)
+      'return'      → use config.SIGNAL_WEIGHTS_RETURN (MaxReturn, t-weighted)
+      'sharpe'      → use config.SIGNAL_WEIGHTS_SHARPE (MaxSharpe, ICIR-weighted)
+
+    Non-production variants are dry-run only — they print top picks but
+    don't write to daily_picks (no schema change needed yet). Compare with
+    production by running:
+        python -m scoring.screener --variant production --top 10
+        python -m scoring.screener --variant return --top 10
+        python -m scoring.screener --variant sharpe --top 10
+    """
+    from config import SIGNAL_WEIGHTS, SIGNAL_WEIGHTS_RETURN, SIGNAL_WEIGHTS_SHARPE
+    weights = {
+        "production": SIGNAL_WEIGHTS,
+        "return":     SIGNAL_WEIGHTS_RETURN,
+        "sharpe":     SIGNAL_WEIGHTS_SHARPE,
+    }[variant]
+    print(f"Variant: {variant}")
     print("Loading signals...")
     df = _load_signals()
 
     print("Scoring universe...")
-    df = score_universe(df)
+    df = score_universe(df, weights=weights)
+    # Variants concentrate weight on pt_upside/eps_growth which have ~43%
+    # coverage in SMALL — relax the eligibility floor for variants only.
+    variant_gate = 0.40 if variant in ("return", "sharpe") else None
 
     today = date.today().isoformat()
 
@@ -358,13 +411,19 @@ def compute(dry_run=False, top=None):
 
     # Show top picks
     show_n = top or 5
-    picks = select_picks(df, {t: show_n for t in ["LARGE", "MID", "SMALL"]})
+    picks = select_picks(df, {t: show_n for t in ["LARGE", "MID", "SMALL"]},
+                          min_eligible=variant_gate)
     print(f"\nTop {show_n} per tier:")
     display_cols = ["rank", "cap_tier", "sid", "ticker", "sector", "final_score", "base_score", "penalty"]
     print(picks[display_cols].to_string(index=False))
 
-    if dry_run:
-        print("\nDry run — not saving.")
+    if dry_run or variant != "production":
+        # Non-production variants always dry-run — daily_picks schema only
+        # supports one row per (sid, pick_date), so variant runs only print.
+        if variant != "production" and not dry_run:
+            print(f"\nVariant '{variant}' is print-only (no daily_picks write).")
+        else:
+            print("\nDry run — not saving.")
         return len(df)
 
     # Save to daily_picks. Apply pick gate before saving — data-sparse and
@@ -436,5 +495,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--top", type=int, default=5, help="Show top N per tier")
+    parser.add_argument("--variant", choices=["production", "return", "sharpe"],
+                        default="production",
+                        help="Weight scheme to use (default: production). "
+                             "Non-production is dry-run only.")
     args = parser.parse_args()
-    compute(dry_run=args.dry_run, top=args.top)
+    compute(dry_run=args.dry_run, top=args.top, variant=args.variant)

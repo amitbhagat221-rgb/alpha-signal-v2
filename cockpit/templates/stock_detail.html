@@ -1214,6 +1214,67 @@
 
 </div> {# end alpine wrapper #}
 
+{# ── Data lineage panel — Phase F, ADR 0027 ── #}
+<div class="card" style="margin-bottom: 16px;" x-data="{open: false, payload: null}"
+     x-init="$watch('open', val => { if (val && !payload) { fetch('/api/lineage/{{ s.sid }}').then(r=>r.json()).then(d=>payload=d) }})">
+    <div style="display: flex; justify-content: space-between; align-items: center; cursor: pointer;" @click="open = !open">
+        <div>
+            <div class="section-title" style="margin-bottom: 4px;">Data Lineage</div>
+            <div class="section-desc" style="margin: 0;">For each factor, the exact source rows that contributed. Top-300 picks have row-level emission; others show the static read spec.</div>
+        </div>
+        <div style="font-size: 18px; color: var(--text-muted);" x-text="open ? '−' : '+'"></div>
+    </div>
+
+    <div x-show="open" x-cloak style="margin-top: 16px;">
+        <template x-if="!payload"><div style="color: var(--text-muted); font-size: 12px;">Loading…</div></template>
+        <template x-if="payload && payload.in_active_universe">
+            <div>
+                <div style="font-size: 11px; color: var(--green); letter-spacing: 0.5px; text-transform: uppercase; margin-bottom: 8px;">
+                    In active universe (top-300) — row-level lineage emitted
+                </div>
+                <template x-for="(rows, factor) in payload.dynamic_lineage" :key="factor">
+                    <div style="margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid var(--border);">
+                        <div style="font-weight: 600; font-size: 13px; margin-bottom: 6px;" x-text="factor"></div>
+                        <table style="width: 100%; font-size: 11px;">
+                            <thead><tr style="color: var(--text-muted);">
+                                <th style="text-align: left; padding: 4px 0;">Source table</th>
+                                <th style="text-align: left;">Role</th>
+                                <th style="text-align: left;">Source key</th>
+                                <th style="text-align: left;">Columns</th>
+                                <th style="text-align: left;">Provenance</th>
+                            </tr></thead>
+                            <tbody>
+                                <template x-for="(r, i) in rows" :key="i">
+                                    <tr style="border-top: 1px solid var(--border);">
+                                        <td class="mono" style="padding: 4px 4px 4px 0;" x-text="r.table"></td>
+                                        <td style="color: var(--text-muted);" x-text="r.contribution || '-'"></td>
+                                        <td class="mono" style="font-size: 10px;" x-text="JSON.stringify(r.key)"></td>
+                                        <td class="mono" style="font-size: 10px;" x-text="(r.cols || []).join(', ')"></td>
+                                        <td class="mono" style="font-size: 10px; color: var(--text-muted);" x-text="r.column_sources ? Object.entries(r.column_sources).map(([c,v])=>c+': '+ (v||['?']).join('|')).join('; ') : '—'"></td>
+                                    </tr>
+                                </template>
+                            </tbody>
+                        </table>
+                    </div>
+                </template>
+            </div>
+        </template>
+        <template x-if="payload && !payload.in_active_universe">
+            <div>
+                <div style="font-size: 11px; color: var(--text-muted); letter-spacing: 0.5px; text-transform: uppercase; margin-bottom: 8px;">
+                    Outside top-300 — showing static registry only
+                </div>
+                <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 12px;">
+                    Set <code class="mono">LINEAGE_SIDS={{ s.sid }}</code> and re-run signal modules to capture row-level lineage for this stock.
+                </div>
+                <div style="font-size: 12px;">
+                    Static lineage spec is available via <code class="mono">/api/lineage/{{ s.sid }}</code> (returns 63 factors with their declared source tables and read filters).
+                </div>
+            </div>
+        </template>
+    </div>
+</div>
+
 <div style="margin-top: 24px;">
     <a href="/explorer" style="font-size: 13px; color: var(--blue); text-decoration: none;">&larr; Back to Explorer</a>
 </div>
