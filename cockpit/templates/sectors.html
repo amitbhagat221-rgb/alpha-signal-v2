@@ -231,6 +231,126 @@
     .pdot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; vertical-align: middle; margin-right: 5px; }
     .pdot.up { background: #2ecc71; } .pdot.down { background: #e74c3c; } .pdot.flat { background: var(--text-muted); }
 
+    /* ── Sector Digest (Plan 0006 Phase C — replaces 47-card industry heatmap) ── */
+    .sd-bucket { margin-bottom: 18px; }
+    .sd-bucket-head {
+        display: flex; align-items: baseline; gap: 10px;
+        margin: 0 0 8px 0;
+        padding-bottom: 4px;
+        border-bottom: 1px solid var(--border);
+    }
+    .sd-bucket-icon { font-size: 18px; }
+    .sd-bucket-title {
+        font-size: 13px; font-weight: 700;
+        letter-spacing: 0.6px; text-transform: uppercase;
+        color: var(--text-primary);
+    }
+    .sd-bucket-sub { font-size: 11px; color: var(--text-muted); }
+
+    .sd-row {
+        display: block; text-decoration: none; color: inherit;
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 11px 14px;
+        margin-bottom: 6px;
+        transition: transform 0.12s, border-color 0.12s, box-shadow 0.12s;
+    }
+    .sd-row:hover { transform: translateX(2px); border-color: var(--accent);
+                    box-shadow: 0 2px 12px rgba(77,142,255,0.10); }
+    .sd-row-head {
+        display: flex; justify-content: space-between; align-items: baseline;
+        margin-bottom: 4px;
+    }
+    .sd-sector { font-size: 14px; font-weight: 700; color: var(--text-primary); letter-spacing: 0.2px; }
+    .sd-picks { display: flex; align-items: baseline; gap: 4px; }
+    .sd-picks-n {
+        font-family: var(--mono, monospace); font-size: 16px; font-weight: 700;
+        color: var(--text-primary);
+    }
+    .sd-picks-label { font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
+    .sd-driver {
+        font-size: 11.5px; line-height: 1.45;
+        display: flex; gap: 6px; margin-bottom: 3px;
+    }
+    .sd-arrow { font-weight: 700; min-width: 12px; }
+    .sd-driver-text { font-family: var(--mono, monospace); color: var(--text-secondary); }
+    .sd-hint {
+        font-size: 11px; color: #f5a623; font-weight: 600;
+        margin: 4px 0 2px 0;
+    }
+    .sd-tickers {
+        font-family: var(--mono, monospace); font-size: 11px;
+        color: var(--text-muted);
+        margin-top: 4px;
+    }
+    .sd-tk-sep { margin: 0 5px; opacity: 0.5; }
+    .sd-empty {
+        font-size: 12px; color: var(--text-muted);
+        background: var(--bg-card); border: 1px dashed var(--border);
+        border-radius: 8px; padding: 14px;
+        line-height: 1.5;
+    }
+
+    .sd-quiet { margin-bottom: 18px; }
+    .sd-quiet summary {
+        list-style: none; cursor: pointer;
+        display: flex; align-items: baseline; gap: 10px;
+        padding-bottom: 4px; border-bottom: 1px solid var(--border);
+        margin-bottom: 8px;
+    }
+    .sd-quiet summary::-webkit-details-marker { display: none; }
+    .sd-quiet summary::before { content: "▸"; color: var(--text-muted); margin-right: 4px; transition: transform 0.15s; display: inline-block; }
+    .sd-quiet[open] summary::before { transform: rotate(90deg); }
+
+    .sd-section-head {
+        font-size: 11px; font-weight: 700; letter-spacing: 0.7px;
+        text-transform: uppercase; color: var(--text-muted);
+        margin: 24px 0 10px 0;
+        padding-bottom: 4px; border-bottom: 1px solid var(--border);
+    }
+
+    .sd-force-grid {
+        display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px;
+        margin-bottom: 16px;
+    }
+    @media (max-width: 720px) { .sd-force-grid { grid-template-columns: 1fr; } }
+    .sd-force {
+        background: var(--bg-card); border: 1px solid var(--border);
+        border-radius: 10px; padding: 14px 16px;
+    }
+    .sd-force-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 10px; }
+    .sd-force-icon { font-size: 15px; }
+    .sd-force-title {
+        font-size: 12px; font-weight: 700; letter-spacing: 0.5px;
+        text-transform: uppercase; color: var(--text-primary);
+    }
+    .sd-force-side { margin-bottom: 10px; }
+    .sd-force-side:last-child { margin-bottom: 0; }
+    .sd-force-arrow { font-size: 11px; font-weight: 700; margin-bottom: 3px; }
+    .sd-force-sectors { font-size: 11.5px; line-height: 1.5; color: var(--text-secondary); }
+    .sd-fs { color: inherit; text-decoration: none; border-bottom: 1px dotted currentColor; }
+    .sd-fs:hover { color: var(--accent); }
+    .sd-force-quote {
+        font-size: 11px; color: var(--text-muted);
+        margin-top: 4px; font-style: italic; line-height: 1.45;
+        padding-left: 8px; border-left: 2px solid var(--border);
+    }
+    .sd-force-empty {
+        font-size: 11px; color: var(--text-muted);
+        font-style: italic; line-height: 1.5;
+    }
+
+    .sd-horizon {
+        display: flex; gap: 8px; align-items: baseline;
+        font-size: 11.5px; color: var(--text-muted); line-height: 1.5;
+        padding: 12px 14px;
+        background: var(--bg-card-hover); border-radius: 8px;
+        margin-top: 16px;
+    }
+    .sd-horizon-icon { font-size: 14px; }
+    .sd-horizon strong { color: var(--text-secondary); }
+
     /* Rotation table */
     .rot-table { width: 100%; border-collapse: collapse; font-size: 12px; }
     .rot-table th {
@@ -254,9 +374,8 @@
     <div>
         <div class="section-title">Sector Intelligence</div>
         <div class="section-desc">
-            {{ industries | length }} industries across {{ sector_list | length }} sectors.
-            Drill is at <strong>industry level</strong> (Automobiles, Cement, Banks, …) — sectors are visual groupings.
-            Click any card.
+            {{ sector_list | length }} sectors · what's booming today, what's about to.
+            Click any sector to drill into <strong>industry detail</strong>.
         </div>
     </div>
 </div>
@@ -264,92 +383,177 @@
 <div x-data="{ tab: 'heatmap', loaded: { heatmap: true } }" x-cloak>
 
 {{ tab_bar([
-    ('heatmap',     'Heatmap'),
+    ('heatmap',     'Today'),
     ('per-sector',  'Industry Detail'),
     ('rotation',    'Rotation'),
 ]) }}
 
 
 {# ════════════════════════════════════════════ #}
-{# TAB 1 — HEATMAP (industries, grouped by sector) #}
+{# TAB 1 — TODAY (sector dossier digest)        #}
+{# Plan 0006 Phase C — replaces the 47-card     #}
+{# industry heatmap. Reads from `digest` payload #}
+{# (sector_briefs + sector_force_breakdown).    #}
 {# ════════════════════════════════════════════ #}
 <div x-show="tab === 'heatmap'" x-cloak>
 
-<div class="card" style="margin-bottom: 14px; border-left: 4px solid var(--accent); padding: 12px 16px;">
-    <div style="font-size: 11px; font-weight: 700; letter-spacing: 0.6px; text-transform: uppercase; color: var(--accent); margin-bottom: 4px;">
-        How to read the score
-    </div>
-    <div style="font-size: 12.5px; line-height: 1.5; color: var(--text-secondary);">
-        <strong style="color: var(--text-primary);">Avg composite</strong> = market-cap-weighted average of stock-level
-        <code>final_score</code> within the industry: <code>Σ(score × mcap) / Σ(mcap)</code>. Each stock's <code>final_score</code>
-        is itself a cap-tier-weighted blend of validated factor signals.
-        So a ₹10L cr leader dominates the industry score, and 50 micro-caps can't drag a sector down on their own.
-        <strong style="color: var(--text-primary);">Breadth</strong> = % of stocks with composite ≥ 0.55 (equal-weighted —
-        catches "is the bench deep?" alongside the cap-weighted leader signal).
-        Industry granularity uses our 25-bucket taxonomy (e.g. <em>Consumer Discretionary</em> splits into <em>Automobiles</em>,
-        <em>Auto Components</em>, <em>Hospitality</em>, <em>Retail</em>, <em>E-Commerce</em>, <em>Consumer Durables</em>).
-    </div>
+{% if not digest or not digest.snapshot_date %}
+<div class="card" style="padding: 18px; color: var(--text-muted);">
+    No sector briefs yet. The nightly pipeline writes <code>sector_briefs</code> + <code>sector_force_breakdown</code> tables;
+    once the next 03:30 UTC run completes this view will populate. To run manually:
+    <code>python -m signals.sector_briefs && python -m signals.sector_forces</code>.
 </div>
+{% else %}
 
-{# Group industries by parent sector, ordered by sector then by avg_score desc #}
-{% set by_sector = {} %}
-{% for ind in industries %}
-    {% set s = ind.sector or '—' %}
-    {% if by_sector.update({s: by_sector.get(s, []) + [ind]}) %}{% endif %}
-{% endfor %}
+{# ───────────── BUCKETS ───────────── #}
 
-{% for sec in by_sector | sort %}
-    {% set inds = by_sector[sec] %}
-    {% set sec_meta = inds[0] %}
-<div class="sec-group">
-    <div class="sec-group-header">
-        <span class="sec-name">{{ sec }}</span>
-        <span class="sec-meta">
-            {{ inds | length }} industr{{ 'ies' if inds | length != 1 else 'y' }} ·
-            {{ inds | sum(attribute='stocks') }} stocks
-            {% if sec_meta.macro_signal %}
-            · <span style="
-                {% if sec_meta.macro_signal in ['TAILWIND', 'FAVORABLE'] %}color: var(--green);
-                {% elif sec_meta.macro_signal in ['HEADWIND', 'ADVERSE'] %}color: var(--red);{% endif %}
-                font-weight: 700;">macro: {{ sec_meta.macro_signal }}</span>
-            {% endif %}
+{% macro sector_row(s, accent, hint_label) %}
+<a class="sd-row" href="/sectors?sector={{ s.sector | urlencode }}#per-sector"
+   style="border-left: 3px solid {{ accent }};">
+    <div class="sd-row-head">
+        <span class="sd-sector">{{ s.sector }}</span>
+        <span class="sd-picks">
+            <span class="sd-picks-n">{{ s.n_picks_top30 }}</span>
+            <span class="sd-picks-label">{{ 'pick' if s.n_picks_top30 == 1 else 'picks' }}</span>
         </span>
     </div>
-    <div class="ind-grid">
-        {% for ind in inds %}
-        {% set is_tail = ind.macro_signal in ['TAILWIND', 'FAVORABLE'] %}
-        {% set is_head = ind.macro_signal in ['HEADWIND', 'ADVERSE'] %}
-        <a class="ind-card" href="/sectors?industry={{ ind.industry | urlencode }}#per-sector"
-           style="border-left: 3px solid
-                {%- if is_tail %} var(--green)
-                {%- elif is_head %} var(--red)
-                {%- else %} var(--border){% endif %};">
-            <div class="row">
-                <span class="name">{{ ind.industry }}</span>
-                <span class="score
-                    {% if ind.avg_score >= 0.6 %}score-green
-                    {% elif ind.avg_score >= 0.45 %}score-amber
-                    {% else %}score-red{% endif %}">
-                    {{ "%.0f"|format(ind.avg_score * 100) if ind.avg_score else '—' }}
-                </span>
-            </div>
-            <div class="row" style="margin-bottom: 6px;">
-                <span class="sec-meta">{{ ind.stocks }} stocks</span>
-                {% if ind.top_3 %}
-                <span class="sec-meta" style="font-family: var(--mono, monospace); color: var(--text-secondary);">{{ ind.top_3[:36] }}{% if ind.top_3 | length > 36 %}…{% endif %}</span>
-                {% endif %}
-            </div>
-            {% if ind.breadth_pct is not none %}
-            <div class="breadth-row">
-                <div class="breadth-bar"><div class="breadth-fill" style="width: {{ ind.breadth_pct }}%;"></div></div>
-                <span class="breadth-num">{{ "%.0f"|format(ind.breadth_pct) }}%</span>
-            </div>
-            {% endif %}
-        </a>
-        {% endfor %}
+    {% if s.driver_preview %}
+    <div class="sd-driver" style="color: {{ accent }};">
+        <span class="sd-arrow">{{ hint_label }}</span>
+        <span class="sd-driver-text">{{ s.driver_preview }}</span>
     </div>
+    {% endif %}
+    {% if s.alignment_hint %}
+    <div class="sd-hint">⚠ {{ s.alignment_hint }}</div>
+    {% endif %}
+    {% if s.top_picks %}
+    <div class="sd-tickers">
+        {% for p in s.top_picks %}{{ p.ticker }}{% if not loop.last %}<span class="sd-tk-sep">·</span>{% endif %}{% endfor %}
+    </div>
+    {% endif %}
+</a>
+{% endmacro %}
+
+{# 🔥 BOOMING NOW #}
+{% set booming = digest.buckets.BOOMING or [] %}
+{% set likely  = digest.buckets.LIKELY or [] %}
+{% set headwind = digest.buckets.HEADWIND or [] %}
+{% set quiet   = digest.buckets.QUIET or [] %}
+
+<div class="sd-bucket">
+    <div class="sd-bucket-head">
+        <span class="sd-bucket-icon">🔥</span>
+        <span class="sd-bucket-title">Booming now</span>
+        <span class="sd-bucket-sub">{{ booming | length }} {{ 'sector' if booming | length == 1 else 'sectors' }} — tailwind + broad model strength</span>
+    </div>
+    {% if booming %}
+        {% for s in booming %}{{ sector_row(s, 'var(--green)', '↑') }}{% endfor %}
+    {% else %}
+    <div class="sd-empty">
+        Nothing today — no sector with macro tailwind AND model breadth ≥ 50%. Look at <strong>Likely to boom</strong> for catalysts the model hasn't priced in yet.
+    </div>
+    {% endif %}
 </div>
-{% endfor %}
+
+{# 🌱 LIKELY TO BOOM #}
+{% if likely %}
+<div class="sd-bucket">
+    <div class="sd-bucket-head">
+        <span class="sd-bucket-icon">🌱</span>
+        <span class="sd-bucket-title">Likely to boom</span>
+        <span class="sd-bucket-sub">{{ likely | length }} {{ 'sector' if likely | length == 1 else 'sectors' }} — tailwind, model not fully in yet</span>
+    </div>
+    {% for s in likely %}{{ sector_row(s, '#7cb305', '↑') }}{% endfor %}
+</div>
+{% endif %}
+
+{# ⚠ HEADWINDS #}
+{% if headwind %}
+<div class="sd-bucket">
+    <div class="sd-bucket-head">
+        <span class="sd-bucket-icon">⚠️</span>
+        <span class="sd-bucket-title">Headwinds</span>
+        <span class="sd-bucket-sub">{{ headwind | length }} {{ 'sector' if headwind | length == 1 else 'sectors' }} — macro adverse</span>
+    </div>
+    {% for s in headwind %}{{ sector_row(s, 'var(--red)', '↓') }}{% endfor %}
+</div>
+{% endif %}
+
+{# 💤 QUIET — collapsed by default #}
+{% if quiet %}
+<details class="sd-quiet">
+    <summary>
+        <span class="sd-bucket-icon">💤</span>
+        <span class="sd-bucket-title">Quiet</span>
+        <span class="sd-bucket-sub">{{ quiet | length }} {{ 'sector' if quiet | length == 1 else 'sectors' }} — neither side excited · click to expand</span>
+    </summary>
+    {% for s in quiet %}{{ sector_row(s, 'var(--text-muted)', '·') }}{% endfor %}
+</details>
+{% endif %}
+
+
+{# ───────────── BY FORCE 2×2 ───────────── #}
+
+<div class="sd-section-head">By force — what's pushing which sector</div>
+
+{% macro force_card(fkey, flabel, ficon, fdir, accent_pos, accent_neg) %}
+<div class="sd-force">
+    <div class="sd-force-head">
+        <span class="sd-force-icon">{{ ficon }}</span>
+        <span class="sd-force-title">{{ flabel }}</span>
+    </div>
+    {% if fkey == 'market' %}
+    <div class="sd-force-empty">
+        Sector-level FII/DII attribution pending.<br>
+        v2 carries index-level flow only ({{ digest.snapshot_date }}).
+    </div>
+    {% else %}
+        {% set pos = fdir.positive or [] %}
+        {% set neg = fdir.negative or [] %}
+        {% if pos %}
+        <div class="sd-force-side sd-force-pos" style="color: {{ accent_pos }};">
+            <div class="sd-force-arrow">↑ {{ pos | length }} {{ 'sector' if pos | length == 1 else 'sectors' }} favoured</div>
+            <div class="sd-force-sectors">
+                {% for s in pos[:5] %}<a class="sd-fs" href="/sectors?sector={{ s.sector | urlencode }}#per-sector">{{ s.sector }}</a>{% if not loop.last %}, {% endif %}{% endfor %}{% if pos | length > 5 %} +{{ pos | length - 5 }}{% endif %}
+            </div>
+            {% if pos[0].summary %}
+            <div class="sd-force-quote">"{{ pos[0].summary }}"</div>
+            {% endif %}
+        </div>
+        {% endif %}
+        {% if neg %}
+        <div class="sd-force-side sd-force-neg" style="color: {{ accent_neg }};">
+            <div class="sd-force-arrow">↓ {{ neg | length }} {{ 'sector' if neg | length == 1 else 'sectors' }} hurt</div>
+            <div class="sd-force-sectors">
+                {% for s in neg[:5] %}<a class="sd-fs" href="/sectors?sector={{ s.sector | urlencode }}#per-sector">{{ s.sector }}</a>{% if not loop.last %}, {% endif %}{% endfor %}{% if neg | length > 5 %} +{{ neg | length - 5 }}{% endif %}
+            </div>
+            {% if neg[0].summary %}
+            <div class="sd-force-quote">"{{ neg[0].summary }}"</div>
+            {% endif %}
+        </div>
+        {% endif %}
+        {% if not pos and not neg %}
+        <div class="sd-force-empty">No directional signal in the last 30 days.</div>
+        {% endif %}
+    {% endif %}
+</div>
+{% endmacro %}
+
+<div class="sd-force-grid">
+    {{ force_card('regulation', 'Regulation', '📜', digest.forces.regulation, 'var(--green)', 'var(--red)') }}
+    {{ force_card('tech',       'Tech / Innovation', '⚡', digest.forces.tech, 'var(--accent)', 'var(--red)') }}
+    {{ force_card('market',     'Markets', '📈', digest.forces.market, 'var(--green)', 'var(--red)') }}
+    {{ force_card('macro',      'Macro', '🏛', digest.forces.macro, 'var(--green)', 'var(--red)') }}
+</div>
+
+
+{# ───────────── HORIZON FOOTNOTE ───────────── #}
+<div class="sd-horizon">
+    <span class="sd-horizon-icon">⏱</span>
+    <span><strong>Medium-term lens.</strong> Sectors lead the broader cycle by 1–2 quarters. Review weekly; don't react daily.</span>
+</div>
+
+{% endif %}
 
 </div>{# / heatmap tab #}
 

@@ -342,6 +342,8 @@ async def sectors(request: Request, sector: str = "", industry: str = ""):
             "regulatory": api.get_sector_recent_regulatory(sector, n=10),
         }
 
+    digest = api.get_sector_digest()
+
     return templates.TemplateResponse(request, "sectors.html", {
         "page": "sectors",
         "industries": industries_data,
@@ -350,6 +352,7 @@ async def sectors(request: Request, sector: str = "", industry: str = ""):
         "selected_industry": industry,
         "selected_sector": sector,
         "detail": detail,
+        "digest": digest,
     })
 
 

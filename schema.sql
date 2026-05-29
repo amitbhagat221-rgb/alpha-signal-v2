@@ -425,6 +425,79 @@ CREATE TABLE IF NOT EXISTS macro_sector_signals (
 CREATE INDEX IF NOT EXISTS idx_macro_sector_date ON macro_sector_signals(snapshot_date);
 
 
+-- Per-sector daily brief — plan 0006 Phase A.
+-- One row per sector per snapshot_date with macro + model + regulatory rollup
+-- and a bucket classification (BOOMING / LIKELY / HEADWIND / QUIET) that drives
+-- the /sectors front-door digest. JSON columns hold structured per-row detail.
+--
+-- Field cadence:
+--   macro_score / macro_signal — daily from macro_sector_signals (latest snapshot)
+--   macro_drivers (JSON)        — parsed from macro_detail string
+--   breadth_pct / avg_score     — from daily_picks at snapshot_date
+--   n_picks_top30 / top_picks   — top-30 rank cut from daily_picks
+--   n_regulatory_30d            — count from regulatory_signals + regulatory_events (30d window)
+--   regulatory_summary (JSON)   — {"1": count, "-1": count, ...} by direction
+--   fii_net_30d / dii_net_30d   — RESERVED FOR FUTURE; v2 FII/DII tables are
+--                                 index-level only (no sector breakdown).
+CREATE TABLE IF NOT EXISTS sector_briefs (
+    sector              TEXT NOT NULL,
+    snapshot_date       TEXT NOT NULL,
+    n_stocks            INTEGER NOT NULL,
+    mcap_total_cr       REAL,
+    macro_score         REAL,
+    macro_signal        TEXT,
+    macro_drivers       TEXT,
+    breadth_pct         REAL,
+    avg_score           REAL,
+    n_picks_top30       INTEGER NOT NULL DEFAULT 0,
+    top_picks           TEXT,
+    n_regulatory_30d    INTEGER NOT NULL DEFAULT 0,
+    regulatory_summary  TEXT,
+    fii_net_30d         REAL,
+    dii_net_30d         REAL,
+    bucket              TEXT NOT NULL CHECK (bucket IN ('BOOMING','LIKELY','HEADWIND','QUIET')),
+    computed_at         TEXT NOT NULL,
+    PRIMARY KEY (sector, snapshot_date)
+);
+
+CREATE INDEX IF NOT EXISTS idx_sector_briefs_date ON sector_briefs(snapshot_date);
+CREATE INDEX IF NOT EXISTS idx_sector_briefs_bucket ON sector_briefs(snapshot_date, bucket);
+
+
+-- Per-sector force decomposition — plan 0006 Phase B.
+-- Sits on top of sector_briefs. Each (sector, date) emits up to 4 rows, one
+-- per force: 'macro', 'regulation', 'market', 'tech'. Cockpit's "BY FORCE"
+-- 2×2 grid (Phase C) groups rows by force, so each force shows which sectors
+-- it favours / hurts today.
+--
+-- Force sources:
+--   macro      — sector_briefs.macro_drivers (already parsed in Phase A);
+--                summary picks top 2 drivers by absolute magnitude.
+--   regulation — regulatory_signals + regulatory_events (last 30d), grouped
+--                by sector. Direction = sign(pos - neg); magnitude = mode of
+--                signal magnitudes; summary = ai_reasoning from the highest-
+--                magnitude event.
+--   tech       — sector_metadata.drivers.growth (auto-generated dossier);
+--                takes the top 2 items where type IN ('structural','policy').
+--                Falls back to a constituent industry's metadata where the
+--                sector-level row is absent (e.g. Financials → Banks).
+--   market     — RESERVED for v2. FII/DII tables are index-level only; sector
+--                attribution is a future fetcher build. No rows emitted in v1.
+CREATE TABLE IF NOT EXISTS sector_force_breakdown (
+    sector              TEXT NOT NULL,
+    snapshot_date       TEXT NOT NULL,
+    force               TEXT NOT NULL CHECK (force IN ('macro','regulation','market','tech')),
+    direction           TEXT,
+    magnitude           TEXT,
+    summary             TEXT,
+    detail              TEXT,
+    computed_at         TEXT NOT NULL,
+    PRIMARY KEY (sector, snapshot_date, force)
+);
+
+CREATE INDEX IF NOT EXISTS idx_sector_force_date_force ON sector_force_breakdown(snapshot_date, force);
+
+
 -- ═══════════════════════════════════════════════════
 -- GROUP 4: OUTPUT
 -- ═══════════════════════════════════════════════════

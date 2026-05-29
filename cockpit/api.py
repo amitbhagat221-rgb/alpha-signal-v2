@@ -1918,6 +1918,117 @@ def get_sector_overview():
     return df.to_dict("records")
 
 
+def get_sector_digest():
+    """Front-door payload for /sectors — Plan 0006 Phase C.
+
+    Reads sector_briefs + sector_force_breakdown for the latest snapshot.
+    Returns:
+      {
+        "snapshot_date": "...",
+        "buckets": {BOOMING: [...], LIKELY: [...], HEADWIND: [...], QUIET: [...]},
+        "forces":  {macro: {positive, negative, neutral}, regulation: {...}, ...},
+      }
+    Each bucket entry has: sector, macro_score, macro_signal, driver_preview,
+    breadth_pct, n_picks_top30, top_picks (≤5), alignment_hint, n_regulatory_30d.
+    """
+    briefs = read_sql("""
+        SELECT sector, n_stocks, mcap_total_cr, macro_score, macro_signal,
+               macro_drivers, breadth_pct, avg_score, n_picks_top30, top_picks,
+               n_regulatory_30d, bucket, snapshot_date
+        FROM sector_briefs
+        WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM sector_briefs)
+    """)
+    if briefs.empty:
+        return {"snapshot_date": None, "buckets": {}, "forces": {}}
+
+    snapshot_date = briefs.iloc[0]["snapshot_date"]
+
+    def _f(v, places=None):
+        if v is None or (isinstance(v, float) and pd.isna(v)):
+            return None
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            return None
+        return round(f, places) if places is not None else f
+
+    def _row_to_dict(r):
+        try:
+            drivers = json.loads(r["macro_drivers"] or "[]")
+        except (json.JSONDecodeError, TypeError):
+            drivers = []
+        try:
+            picks = json.loads(r["top_picks"] or "[]")
+        except (json.JSONDecodeError, TypeError):
+            picks = []
+        scored = [d for d in drivers if isinstance(d.get("value"), (int, float))][:3]
+        if scored:
+            driver_preview = " · ".join(
+                f"{d.get('driver','')} {d.get('raw') or (str(d.get('value','')) + (d.get('unit') or ''))}"
+                for d in scored
+            )
+        else:
+            driver_preview = " · ".join(d.get("raw", "") or d.get("driver", "") for d in drivers[:3])
+        hint = None
+        if r["bucket"] == "HEADWIND" and (r["n_picks_top30"] or 0) > 0 and picks:
+            hint = "Model still picking here — " + ", ".join(p["ticker"] for p in picks[:3])
+        return {
+            "sector": r["sector"],
+            "macro_score": _f(r.get("macro_score"), 0),
+            "macro_signal": r.get("macro_signal"),
+            "driver_preview": driver_preview,
+            "breadth_pct": _f(r.get("breadth_pct"), 0),
+            "avg_score": _f(r.get("avg_score"), 2),
+            "n_picks_top30": int(r["n_picks_top30"] or 0),
+            "top_picks": picks,
+            "alignment_hint": hint,
+            "n_regulatory_30d": int(r["n_regulatory_30d"] or 0),
+            "n_stocks": int(r["n_stocks"] or 0),
+        }
+
+    buckets = {"BOOMING": [], "LIKELY": [], "HEADWIND": [], "QUIET": []}
+    for _, r in briefs.iterrows():
+        buckets[r["bucket"]].append(_row_to_dict(r))
+    for b in ("BOOMING", "LIKELY"):
+        buckets[b].sort(key=lambda s: (-s["n_picks_top30"], -(s["macro_score"] or 0)))
+    buckets["HEADWIND"].sort(key=lambda s: (s["macro_score"] or 100))
+    buckets["QUIET"].sort(key=lambda s: -(s["macro_score"] or 0))
+
+    forces_df = read_sql(
+        "SELECT sector, force, direction, magnitude, summary, detail "
+        "FROM sector_force_breakdown WHERE snapshot_date = ?",
+        params=[snapshot_date],
+    )
+    forces = {f: {"positive": [], "negative": [], "neutral": []}
+              for f in ("macro", "regulation", "tech", "market")}
+    if not forces_df.empty:
+        # Order sectors within each direction by magnitude desc, then alpha
+        mag_rank = {"strong": 3, "moderate": 2, "weak": 1, None: 0}
+        for _, r in forces_df.iterrows():
+            entry = {
+                "sector": r["sector"],
+                "magnitude": r["magnitude"],
+                "summary": r["summary"] or "",
+            }
+            f = r["force"]
+            d = r["direction"]
+            if d == "+":
+                forces[f]["positive"].append(entry)
+            elif d == "-":
+                forces[f]["negative"].append(entry)
+            else:
+                forces[f]["neutral"].append(entry)
+        for f_key, dirs in forces.items():
+            for d_key in dirs:
+                dirs[d_key].sort(key=lambda e: (-mag_rank.get(e["magnitude"], 0), e["sector"]))
+
+    return {
+        "snapshot_date": snapshot_date,
+        "buckets": buckets,
+        "forces": forces,
+    }
+
+
 def get_sector_list():
     """Sorted list of sectors that have any stocks in the universe."""
     df = read_sql(

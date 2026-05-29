@@ -1,5 +1,5 @@
 # Alpha Signal v2 — Progress Checklist
-_Last updated: 2026-05-29 (CRITICAL fixes: dossier sentiment regex + watchdog CHECK widening + heartbeat) · Plans are truth, this is the view. Update via `/handoff`._
+_Last updated: 2026-05-29 (DuckDB read-replica + Plan 0006 A+B+C shipped) · Plans are truth, this is the view. Update via `/handoff`._
 _Glyphs: ✅ done · ⏳ next/in-progress · 🚫 blocked · 💤 parked · ↔ cross-track integration point_
 _Convention: [ADR 0015](../decisions/0015-track-numbering-and-rename.md) (tracks) + [ADR 0016](../decisions/0016-plan-numbering-fresh-start.md) (plans)._
 
@@ -8,6 +8,16 @@ _Convention: [ADR 0015](../decisions/0015-track-numbering-and-rename.md) (tracks
 2. ⏳ **Phase 2.2c — NBFC GNPA fallback** — 80/100 NBFCs missing quarterly NPA. RBI XBRL / SEBI Form A / AR scrape. Required for NBFC scoring to mature beyond 2-component basis.
 3. ⏳ **Wire 2 non-colinear bench factors** — `pledge_quality` (SMALL t=5.9) + `delivery_anomaly_z` (SMALL t=4.76) into `scoring/screener.py`.
 4. ⏳ **Variant promotion** + **Refresh `nse_index_history`** — both queued; promotion gated on orthogonalization.
+
+## Queued
+- ⏳ **[Plan 0006 — Sector dossiers](0006-sector-dossiers.md)** — `/sectors` front door rebuild. MVP **A + B + C shipped 2026-05-29** (see Shipped today). Remaining:
+   - ⏳ Phase D — LLM-narrated per-sector thesis. New `sector_dossiers` table; 11 LLM calls/night (~₹3-5). Mirror `output/dossier.py` hygiene contract.
+   - ⏳ Phase E — per-sector horizon scores (short / medium / long badges). Needs new `signals/sector_momentum.py` factor.
+
+## Shipped today (2026-05-29, cont.)
+- ✅ **DuckDB read-replica + perf wins** ([ADR 0031](../decisions/0031-duckdb-read-replica.md)). New `tools/duckdb_refresh.py` rebuilds `data/alpha_signal.duckdb` (87 MB columnar) nightly after pipeline; `tools/bench_duckdb_vs_sqlite.py` records the win (11-57× on column-scan-heavy SELECTs). New `db.read_sql_fast()` helper routes mirrored-table reads to DuckDB, falls back to SQLite if file missing. SQLite stays the write-side source of truth. **Measured cockpit gains**: `/model` cold-render 5.6s → 1.6s (3.5×) via [cockpit_ops/api.py:get_backtest_roster](../../cockpit_ops/api.py); `/system` cold-render 33.9s → 13.1s (2.6×) via a SEPARATE [health.py:534](../../health.py) `factor_type_conformance` rewrite — consolidated N per-column scans into 1, sample tables >500K rows at 200K LIMIT (CPU-bound `typeof()` was the bottleneck; not a DuckDB candidate because the check is fundamentally about SQLite's dynamic-typing surprises). Also fixed pre-existing latent circular-import bug in [cockpit_ops/app.py](../../cockpit_ops/app.py) surfaced by the cockpit restart.
+- ✅ **Plan 0006 Sector dossiers — Phases A + B + C** ([plan](0006-sector-dossiers.md)). Phase A: [signals/sector_briefs.py](../../signals/sector_briefs.py) + new `sector_briefs` table — rolls macro_sector_signals + daily_picks + regulatory_signals into one row per sector per date with a 4-bucket classifier {BOOMING/LIKELY/HEADWIND/QUIET}. Today: 0/4/1/6. Phase B: [signals/sector_forces.py](../../signals/sector_forces.py) + new `sector_force_breakdown` table — 33 rows/day across 3 forces (macro 10+/1−, regulation 7+/2−, tech 11+/0−; market reserved for v2 — v2 `fii_dii_cash_flow` is index-level only). Phase C: [cockpit/api.py:get_sector_digest()](../../cockpit/api.py) + Tab "Today" rewrite in [cockpit/templates/sectors.html](../../cockpit/templates/sectors.html). 47-card heatmap deleted (`grep -c "ind-card"` now 0). Conflicts-first ordering surfaces Energy ("model still picking here — RELIANCE, BPCL, IOC") at top. Drill-down `/sectors?sector=X#per-sector` unchanged.
+- ✅ **Rank-skill gate** — [tools/validate_rank_skill.py](../../tools/validate_rank_skill.py). The go/no-go test before deploying own capital: per-tier top-vs-bottom decile spread on **non-overlapping** windows with a 95% band; never prints "PROVEN" under 6 independent periods. Current read: only **2 independent 20d windows** exist (2026-04-09, 2026-05-07) — LARGE −1.03pp, MID +0.12pp, SMALL +0.39pp, all UNPROVEN. **Do not deploy capital yet.** Re-run weekly as `pick_outcomes` accumulates; invest a tier only when its independent spread's 95% range clears 0 on ≥6 periods.
 
 ## Shipped today (2026-05-29)
 - ✅ **Factor correlation diagnostic** — [tools/factor_correlation.py](../../tools/factor_correlation.py). Findings: 5 clusters per tier at |ρ|≥0.6, including a "is this a strong business" mega-cluster of 8-12 factors (roe / roa / roic / interest_coverage / debt_to_equity / fcf_margin / fcf_yield / profit_margin / z_score / quality_composite). Killed 5 of 7 proposed wirings as colinear. Output: `data/factor_correlation_{LARGE,MID,SMALL}.json` + `output/factor_correlation_report.txt`.
