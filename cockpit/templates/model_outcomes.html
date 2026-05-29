@@ -1,0 +1,192 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<style>
+.mo-hero { display:grid; grid-template-columns: 1.6fr 1fr; gap:20px; margin-bottom:24px; }
+.mo-card { background:var(--bg-card); border:1px solid var(--border); border-radius:12px; padding:18px; }
+.mo-hero-title { font-size:18px; font-weight:800; letter-spacing:-0.01em; color:var(--text-primary); margin-bottom:6px; }
+.mo-hero-sub   { font-size:12px; color:var(--text-muted); line-height:1.55; }
+.mo-caveat     { background:rgba(245,158,11,0.08); border:1px solid rgba(245,158,11,0.25); border-radius:10px; padding:10px 14px; font-size:11.5px; color:var(--amber); }
+.mo-caveat b   { color:var(--amber); }
+
+.mo-sec        { background:var(--bg-card); border:1px solid var(--border); border-radius:12px; padding:18px; margin-bottom:20px; }
+.mo-sec-head   { display:flex; justify-content:space-between; align-items:baseline; margin-bottom:14px; }
+.mo-sec-title  { font-size:14px; font-weight:700; letter-spacing:-0.005em; color:var(--text-primary); }
+.mo-sec-sub    { font-size:11px; color:var(--text-muted); }
+
+table.mo-tbl    { width:100%; border-collapse: collapse; font-size:12px; font-variant-numeric: tabular-nums; }
+table.mo-tbl th { text-align:left; padding:6px 10px; font-size:10.5px; letter-spacing:0.05em; color:var(--text-muted); text-transform:uppercase; border-bottom:1px solid var(--border); }
+table.mo-tbl td { padding:7px 10px; border-bottom:1px solid rgba(255,255,255,0.04); color:var(--text-secondary); }
+table.mo-tbl td.num { text-align:right; }
+table.mo-tbl td.pos { color:var(--green); font-weight:600; }
+table.mo-tbl td.neg { color:var(--red); font-weight:600; }
+table.mo-tbl tr:hover td { background:rgba(255,255,255,0.015); }
+.tier-tag { display:inline-block; padding:1px 8px; border-radius:8px; font-size:10px; font-weight:700; letter-spacing:0.05em; }
+.tier-tag.LARGE { background:rgba(99,102,241,0.15); color:#a3a5ff; }
+.tier-tag.MID   { background:rgba(245,158,11,0.15); color:#fbbf24; }
+.tier-tag.SMALL { background:rgba(34,197,94,0.15);  color:#4ade80; }
+.scope-tag      { display:inline-block; padding:1px 7px; border-radius:8px; font-size:9.5px; font-weight:600; background:rgba(255,255,255,0.04); color:var(--text-muted); }
+.scope-tag.top  { background:rgba(99,102,241,0.12); color:#a3a5ff; }
+
+/* Decile bars */
+.mo-decile-grid { display:grid; grid-template-columns: repeat(10, 1fr); gap:4px; margin-top:8px; }
+.mo-decile-cell { padding:7px 4px; border-radius:6px; text-align:center; font-size:10.5px; color:var(--text-muted); background:rgba(255,255,255,0.02); }
+.mo-decile-cell .v { font-size:11.5px; font-weight:700; font-variant-numeric: tabular-nums; }
+.mo-decile-cell.best  { background:rgba(34,197,94,0.12); color:#4ade80; }
+.mo-decile-cell.worst { background:rgba(239,68,68,0.12); color:#f87171; }
+
+/* Sparkline time series */
+.mo-ts-grid { display:grid; grid-template-columns: repeat(3, 1fr); gap:14px; margin-top:8px; }
+.mo-ts-card { background:rgba(255,255,255,0.02); border-radius:10px; padding:12px; }
+.mo-ts-head { display:flex; justify-content:space-between; align-items:baseline; margin-bottom:6px; }
+.mo-ts-head .tier { font-size:11px; font-weight:700; }
+.mo-ts-head .n    { font-size:10px; color:var(--text-muted); }
+.mo-ts-svg svg    { width:100%; height:80px; }
+.mo-ts-foot       { display:flex; justify-content:space-between; margin-top:6px; font-size:10.5px; color:var(--text-muted); }
+.mo-ts-foot b     { color:var(--text-primary); font-variant-numeric: tabular-nums; }
+</style>
+
+{% set s = summary %}
+
+<div class="mo-hero">
+  <div class="mo-card">
+    <div class="mo-hero-title">Pick outcomes — the live equity curve</div>
+    <div class="mo-hero-sub">
+      For every pick the screener wrote to <code>daily_picks</code>, the realized
+      forward return over 5/20/60 trading days using <code>stock_prices.close</code>,
+      compared to the matching NIFTY tier benchmark (50 / Midcap 150 / Smallcap 250).
+      <br><br>
+      <b>The factor model is the hypothesis.</b> The numbers below are the answer.
+      Started accumulating 2026-04-09 (v2 cutover was 2026-05-01) — sample size
+      caveats apply.
+    </div>
+  </div>
+  <div class="mo-card">
+    <div class="mo-caveat">
+      <b>Read carefully:</b>
+      {% if s.bench_staleness_days and s.bench_staleness_days > 7 %}
+        NIFTY benchmark latest = <b>{{ s.bench_max_date }}</b> ({{ s.bench_staleness_days }}d stale) —
+        picks newer than that have <b>NULL</b> bench/excess columns until
+        <code>sources.nse_indices</code> refreshes.<br><br>
+      {% endif %}
+      Rank-decile signal will only become visible after ≥60 distinct pick dates per tier
+      accumulate. Today is ~{{ s.time_series | length // 3 }} dates per tier.
+    </div>
+  </div>
+</div>
+
+<div class="mo-sec">
+  <div class="mo-sec-head">
+    <div>
+      <div class="mo-sec-title">Per-tier × window summary</div>
+      <div class="mo-sec-sub">All-picks aggregate vs top-{{ top_n }} portfolio. Bench = matching NIFTY tier index. Excess = pick - bench.</div>
+    </div>
+  </div>
+  <table class="mo-tbl">
+    <thead><tr>
+      <th>Tier</th><th>Window</th><th>Scope</th>
+      <th class="num">n picks</th>
+      <th class="num">n dates</th>
+      <th class="num">Avg fwd %</th>
+      <th class="num">Median %</th>
+      <th class="num">Hit rate</th>
+      <th class="num">Avg excess %</th>
+      <th class="num">n excess obs</th>
+    </tr></thead>
+    <tbody>
+    {% for row in s.by_window_tier %}
+      <tr>
+        <td><span class="tier-tag {{ row.cap_tier }}">{{ row.cap_tier }}</span></td>
+        <td>{{ row.window_days }}d</td>
+        <td><span class="scope-tag {% if row.scope.startswith('top') %}top{% endif %}">{{ row.scope }}</span></td>
+        <td class="num">{{ "{:,}".format(row.n) }}</td>
+        <td class="num">{{ row.n_dates }}</td>
+        <td class="num {% if row.avg_fwd and row.avg_fwd > 0 %}pos{% elif row.avg_fwd and row.avg_fwd < 0 %}neg{% endif %}">{{ "%+.2f"|format(row.avg_fwd) if row.avg_fwd is not none else "—" }}</td>
+        <td class="num">{{ "%+.2f"|format(row.median_fwd) if row.median_fwd is not none else "—" }}</td>
+        <td class="num">{{ row.hit_rate }}%</td>
+        <td class="num {% if row.avg_excess and row.avg_excess > 0 %}pos{% elif row.avg_excess and row.avg_excess < 0 %}neg{% endif %}">{{ "%+.2f"|format(row.avg_excess) if row.avg_excess is not none else "—" }}</td>
+        <td class="num">{{ row.n_excess_obs }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div class="mo-sec">
+  <div class="mo-sec-head">
+    <div>
+      <div class="mo-sec-title">Rank-decile analysis (20d window)</div>
+      <div class="mo-sec-sub">Does rank predict return? Decile 1 = best-ranked, 10 = worst. Spread 1-vs-10 is the model's actual edge.</div>
+    </div>
+  </div>
+  {% for tier in ['LARGE', 'MID', 'SMALL'] %}
+    {% set deciles = s.rank_deciles | selectattr('cap_tier', 'equalto', tier) | list %}
+    {% if deciles %}
+      {% set d1 = deciles[0].avg_fwd %}
+      {% set d10 = deciles[-1].avg_fwd %}
+      <div style="margin-bottom:12px;">
+        <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
+          <span style="font-size:11px; color:var(--text-muted);"><span class="tier-tag {{ tier }}">{{ tier }}</span> Decile 1 → 10 spread:
+            <b style="color:var(--text-primary); font-variant-numeric: tabular-nums;">{{ "%+.2f"|format(d1 - d10) if d1 is not none and d10 is not none else "—" }} pp</b></span>
+        </div>
+        <div class="mo-decile-grid">
+          {% for d in deciles %}
+            <div class="mo-decile-cell {% if loop.first %}best{% elif loop.last %}worst{% endif %}">
+              D{{ d.decile }}<br>
+              <span class="v">{{ "%+.2f"|format(d.avg_fwd) if d.avg_fwd is not none else "—" }}</span>
+            </div>
+          {% endfor %}
+        </div>
+      </div>
+    {% endif %}
+  {% endfor %}
+</div>
+
+<div class="mo-sec">
+  <div class="mo-sec-head">
+    <div>
+      <div class="mo-sec-title">Time series — top-{{ top_n }} basket fwd return by pick date (20d)</div>
+      <div class="mo-sec-sub">Each bar = one pick date's avg fwd-20d return of the top-{{ top_n }} basket. Positive = green, negative = red.</div>
+    </div>
+  </div>
+  <div class="mo-ts-grid">
+    {% for tier in ['LARGE', 'MID', 'SMALL'] %}
+      {% set ts = s.time_series | selectattr('cap_tier', 'equalto', tier) | list %}
+      {% set values = ts | map(attribute='avg_fwd_top_n') | reject('none') | list %}
+      <div class="mo-ts-card">
+        <div class="mo-ts-head">
+          <span class="tier"><span class="tier-tag {{ tier }}">{{ tier }}</span> n={{ ts|length }}</span>
+          <span class="n">avg {{ "%+.2f"|format((values|sum)/(values|length)) if values else "—" }}%</span>
+        </div>
+        <div class="mo-ts-svg">
+          <svg viewBox="0 0 200 80" preserveAspectRatio="none">
+            {% if values %}
+              {% set vmax = (values | map('abs') | max) or 1 %}
+              {% set w = 200.0 / (ts|length or 1) %}
+              {% for r in ts %}
+                {% if r.avg_fwd_top_n is not none %}
+                  {% set h = ((r.avg_fwd_top_n | abs) / vmax) * 38 %}
+                  {% set x = loop.index0 * w + 0.4 %}
+                  {% if r.avg_fwd_top_n >= 0 %}
+                    <rect x="{{ "%.2f"|format(x) }}" y="{{ 40 - h }}" width="{{ "%.2f"|format(w - 0.8) }}" height="{{ h }}" fill="#22c55e" opacity="0.75"/>
+                  {% else %}
+                    <rect x="{{ "%.2f"|format(x) }}" y="40" width="{{ "%.2f"|format(w - 0.8) }}" height="{{ h }}" fill="#ef4444" opacity="0.75"/>
+                  {% endif %}
+                {% endif %}
+              {% endfor %}
+              <line x1="0" y1="40" x2="200" y2="40" stroke="rgba(255,255,255,0.15)" stroke-width="0.5"/>
+            {% endif %}
+          </svg>
+        </div>
+        <div class="mo-ts-foot">
+          <span>{{ ts[0].pick_date if ts else "" }}</span>
+          <span>n_dates: <b>{{ ts|length }}</b></span>
+          <span>{{ ts[-1].pick_date if ts else "" }}</span>
+        </div>
+      </div>
+    {% endfor %}
+  </div>
+</div>
+
+{% endblock %}

@@ -501,6 +501,33 @@ CREATE TABLE IF NOT EXISTS pipeline_log (
 CREATE INDEX IF NOT EXISTS idx_pipeline_log_date ON pipeline_log(run_date);
 
 
+-- ── Pick outcomes: realized forward returns per pick ────────────────
+-- Closes the loop on `daily_picks`. For each (sid, pick_date) the screener
+-- writes, compute the realized close-to-close return over a fixed forward
+-- window. The "equity curve" view aggregates top-N per tier into a daily
+-- rolling-overlapping basket vs the matching NIFTY benchmark.
+-- The factor model is the hypothesis; this table is the answer.
+CREATE TABLE IF NOT EXISTS pick_outcomes (
+    sid             TEXT NOT NULL,
+    pick_date       TEXT NOT NULL,
+    window_days     INTEGER NOT NULL,
+    cap_tier        TEXT,
+    rank_at_pick    INTEGER,
+    final_score     REAL,
+    entry_price     REAL,
+    exit_date       TEXT,
+    exit_price      REAL,
+    fwd_return_pct  REAL,
+    bench_index     TEXT,
+    bench_return_pct REAL,
+    excess_return_pct REAL,
+    computed_at     TEXT DEFAULT (datetime('now')),
+    PRIMARY KEY (sid, pick_date, window_days)
+);
+CREATE INDEX IF NOT EXISTS idx_pick_outcomes_date ON pick_outcomes(pick_date);
+CREATE INDEX IF NOT EXISTS idx_pick_outcomes_tier ON pick_outcomes(cap_tier, pick_date);
+
+
 -- ═══════════════════════════════════════════════════
 -- GROUP 6: MACRO & REGULATORY INTELLIGENCE
 -- ═══════════════════════════════════════════════════

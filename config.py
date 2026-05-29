@@ -518,6 +518,14 @@ PIPELINE_STEPS = [
     {"name": "screener",           "module": "scoring.screener",    "function": "compute",  "critical": True,
      "table": "daily_picks",       "source": "all signals",         "data_freq": "daily",   "frequency": "daily"},
 
+    # Live equity curve — realized forward returns on every daily_picks row.
+    # Runs after screener (today's picks land first) but needs ≥5 trading days
+    # of forward data to write a row, so it's writing yesterday's-and-prior
+    # mature rows daily. Idempotent upsert by (sid, pick_date, window_days).
+    {"name": "compute_pick_outcomes", "module": "tools.compute_pick_outcomes", "function": "compute", "critical": False,
+     "table": "pick_outcomes",     "source": "daily_picks + stock_prices + nse_index_history",
+     "data_freq": "daily",         "frequency": "daily"},
+
     # ── Output ──
     {"name": "snapshot",           "module": "output.snapshot",     "function": "compute",  "critical": False,
      "table": "daily_snapshots",   "source": "all signals + stock_prices",

@@ -374,6 +374,26 @@ async def model_page(request: Request):
     })
 
 
+@app.get("/model/outcomes", response_class=HTMLResponse)
+async def model_outcomes_page(request: Request, n: int = 10):
+    """Live equity curve — realized forward returns on actual picks.
+
+    The factor model is hypothesis; this page is the answer. Per-tier × window
+    summaries, rank-decile analysis, time-series of top-N basket returns.
+    """
+    summary = api.get_pick_outcomes_summary(top_n=n)
+    return templates.TemplateResponse(request, "model_outcomes.html", {
+        "page": "model-outcomes",
+        "summary": summary,
+        "top_n": n,
+    })
+
+
+@app.get("/api/model/outcomes")
+async def api_model_outcomes(n: int = 10):
+    return api.get_pick_outcomes_summary(top_n=n)
+
+
 @app.get("/model/variants", response_class=HTMLResponse)
 async def model_variants_page(request: Request, n: int = 10):
     """Side-by-side comparison of production / max-return / max-sharpe weight schemes.

@@ -2657,6 +2657,150 @@ def get_news_feed(
     }
 
 
+# ── Pick outcomes (live equity curve) ──
+# Built 2026-05-29. The factor model is hypothesis; pick_outcomes is the
+# realization. ADR 0028 ships SIGNAL_WEIGHTS_RETURN/SHARPE on backtest t-stats;
+# this surface shows what live picks actually did, per tier × window.
+
+@_persisted_cache(300, name="get_pick_outcomes_summary")
+def get_pick_outcomes_summary(top_n=10):
+    """Returns aggregate stats per (tier, window) for all picks AND for the top-N
+    portfolio (the actual tradable subset).
+
+    Shape:
+    {
+      "as_of": "2026-05-29T...",
+      "bench_max_date": "2026-04-30",
+      "bench_staleness_days": 29,
+      "by_window_tier": [
+        {"window_days": 20, "cap_tier": "LARGE", "scope": "all",      "n": ..., "avg_fwd": ..., "avg_excess": ..., "hit_rate": ...},
+        {"window_days": 20, "cap_tier": "LARGE", "scope": "top_10",   ...},
+        ...
+      ],
+      "rank_deciles": [
+        {"cap_tier": "LARGE", "window_days": 20, "decile": 1, "n": ..., "avg_fwd": ..., "avg_excess": ...},
+        ...
+      ],
+      "time_series": [
+        {"pick_date": "2026-05-01", "cap_tier": "LARGE", "window_days": 20, "avg_fwd_top_n": ..., "avg_excess_top_n": ...},
+        ...
+      ]
+    }
+    """
+    base = read_sql(
+        "SELECT sid, pick_date, window_days, cap_tier, rank_at_pick, "
+        "       fwd_return_pct, bench_return_pct, excess_return_pct, bench_index "
+        "FROM pick_outcomes"
+    )
+    bench_max = read_sql(
+        "SELECT MAX(trade_date) AS d FROM nse_index_history WHERE index_symbol='NIFTY 50'"
+    ).iloc[0]["d"]
+
+    from datetime import datetime as _dt
+    bench_staleness = None
+    if bench_max:
+        try:
+            bench_staleness = (_dt.now().date() - _dt.fromisoformat(bench_max).date()).days
+        except Exception:
+            pass
+
+    by_window_tier = []
+    if not base.empty:
+        # all-picks aggregate
+        for (w, t), g in base.groupby(["window_days", "cap_tier"]):
+            by_window_tier.append({
+                "window_days": int(w),
+                "cap_tier": t,
+                "scope": "all",
+                "n": int(len(g)),
+                "n_dates": int(g["pick_date"].nunique()),
+                "avg_fwd": round(float(g["fwd_return_pct"].mean()), 3),
+                "median_fwd": round(float(g["fwd_return_pct"].median()), 3),
+                "avg_excess": (round(float(g["excess_return_pct"].mean()), 3)
+                               if g["excess_return_pct"].notna().any() else None),
+                "hit_rate": round(100.0 * (g["fwd_return_pct"] > 0).mean(), 1),
+                "n_excess_obs": int(g["excess_return_pct"].notna().sum()),
+            })
+
+        # top-N portfolio aggregate (the actually-tradable basket)
+        top = base[base["rank_at_pick"] <= top_n]
+        for (w, t), g in top.groupby(["window_days", "cap_tier"]):
+            by_window_tier.append({
+                "window_days": int(w),
+                "cap_tier": t,
+                "scope": f"top_{top_n}",
+                "n": int(len(g)),
+                "n_dates": int(g["pick_date"].nunique()),
+                "avg_fwd": round(float(g["fwd_return_pct"].mean()), 3),
+                "median_fwd": round(float(g["fwd_return_pct"].median()), 3),
+                "avg_excess": (round(float(g["excess_return_pct"].mean()), 3)
+                               if g["excess_return_pct"].notna().any() else None),
+                "hit_rate": round(100.0 * (g["fwd_return_pct"] > 0).mean(), 1),
+                "n_excess_obs": int(g["excess_return_pct"].notna().sum()),
+            })
+
+    # Rank-decile analysis (20d only — the canonical window)
+    rank_deciles = []
+    deciles_df = read_sql(
+        """
+        WITH ranked AS (
+            SELECT cap_tier, fwd_return_pct, excess_return_pct,
+                   NTILE(10) OVER (PARTITION BY pick_date, cap_tier ORDER BY rank_at_pick) AS d
+            FROM pick_outcomes WHERE window_days = 20
+        )
+        SELECT cap_tier, d AS decile, COUNT(*) n,
+               AVG(fwd_return_pct) avg_fwd,
+               AVG(excess_return_pct) avg_excess
+        FROM ranked GROUP BY cap_tier, d ORDER BY cap_tier, d
+        """
+    )
+    for _, row in deciles_df.iterrows():
+        rank_deciles.append({
+            "cap_tier": row["cap_tier"],
+            "window_days": 20,
+            "decile": int(row["decile"]),
+            "n": int(row["n"]),
+            "avg_fwd": round(float(row["avg_fwd"]), 3) if pd.notna(row["avg_fwd"]) else None,
+            "avg_excess": round(float(row["avg_excess"]), 3) if pd.notna(row["avg_excess"]) else None,
+        })
+
+    # Time series of avg top-N fwd return per pick_date (20d window)
+    time_series = []
+    ts_df = read_sql(
+        """
+        SELECT pick_date, cap_tier,
+               AVG(fwd_return_pct) avg_fwd,
+               AVG(excess_return_pct) avg_excess,
+               COUNT(*) n
+        FROM pick_outcomes
+        WHERE window_days = 20 AND rank_at_pick <= ?
+        GROUP BY pick_date, cap_tier
+        ORDER BY pick_date, cap_tier
+        """,
+        params=[top_n],
+    )
+    for _, row in ts_df.iterrows():
+        time_series.append({
+            "pick_date": row["pick_date"],
+            "cap_tier": row["cap_tier"],
+            "window_days": 20,
+            "avg_fwd_top_n": round(float(row["avg_fwd"]), 3) if pd.notna(row["avg_fwd"]) else None,
+            "avg_excess_top_n": (round(float(row["avg_excess"]), 3)
+                                  if pd.notna(row["avg_excess"]) else None),
+            "n": int(row["n"]),
+        })
+
+    return {
+        "as_of": pd.Timestamp.now().isoformat(timespec="seconds"),
+        "bench_max_date": bench_max,
+        "bench_staleness_days": bench_staleness,
+        "top_n": top_n,
+        "by_window_tier": by_window_tier,
+        "rank_deciles": rank_deciles,
+        "time_series": time_series,
+    }
+
+
 # ── Re-exports from cockpit_ops ──
 # Stage 2 split (2026-05-26) moved Ops functions to cockpit_ops/api.py, but the
 # main cockpit's /model page (and a few other surfaces) still calls them through
