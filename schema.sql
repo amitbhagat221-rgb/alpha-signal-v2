@@ -490,7 +490,7 @@ CREATE TABLE IF NOT EXISTS pipeline_log (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     run_date        TEXT NOT NULL DEFAULT (date('now')),
     step_name       TEXT NOT NULL,
-    status          TEXT CHECK(status IN ('RUNNING', 'SUCCESS', 'FAILED', 'SKIPPED')),
+    status          TEXT CHECK(status IN ('RUNNING', 'SUCCESS', 'FAILED', 'SKIPPED', 'COVERAGE_GAP', 'COVERAGE_SEVERE')),
     rows_affected   INTEGER,
     started_at      TEXT DEFAULT (datetime('now')),
     finished_at     TEXT,

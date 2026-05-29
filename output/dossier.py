@@ -53,7 +53,10 @@ _SIGNAL_KEYWORD_MAP = [
     (re.compile(r"\bpromoter\s+(?:holding|trend|qoq|signal|accumulation|stake)\b", re.I), "promoter_qoq", "Promoter"),
     (re.compile(r"\bm[\s-]?score\b|\bbeneish\b|\bmanipulation\b", re.I), "m_score",         "M-Score / Beneish"),
     (re.compile(r"\bz[\s-]?score\b|\baltman\b|\bdistress\b", re.I), "z_score",            "Z-Score / Altman"),
-    (re.compile(r"\bsentiment\b", re.I),                            "sentiment_7d",       "Sentiment"),
+    # "sentiment" alone is generic English ("positive institutional sentiment" —
+    # M&M bull_case 2026-05-29 false-positive). Anchor to a scoring noun so we
+    # only fire on actual signal references, not narrative mood words.
+    (re.compile(r"\bsentiment\s+(?:score|signal|reading|index|gauge|7d|7-day)\b", re.I), "sentiment_7d", "Sentiment"),
 ]
 
 # Permissive number detector. We intentionally do NOT allow "12-month"

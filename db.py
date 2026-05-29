@@ -106,6 +106,50 @@ def _ensure_columns():
             except sqlite3.OperationalError as e:
                 if "duplicate column" not in str(e).lower():
                     raise
+    _ensure_pipeline_log_status_check()
+
+
+def _ensure_pipeline_log_status_check():
+    """Widen pipeline_log.status CHECK to include COVERAGE_GAP/COVERAGE_SEVERE.
+
+    Added 2026-05-29: HANDOFF 2026-05-24 #4 introduced these statuses in
+    tools/freshness_watchdog._report_coverage() without widening the schema
+    constraint, so every daily watchdog run since has crashed with
+    `CHECK constraint failed: status IN (...)`. Idempotent — checks the
+    live table's CHECK string and only recreates if missing.
+    """
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='pipeline_log'"
+        ).fetchone()
+        if not row:
+            return
+        if "COVERAGE_GAP" in row[0]:
+            return
+        conn.executescript(
+            """
+            BEGIN;
+            CREATE TABLE pipeline_log__new (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                run_date        TEXT NOT NULL DEFAULT (date('now')),
+                step_name       TEXT NOT NULL,
+                status          TEXT CHECK(status IN ('RUNNING', 'SUCCESS', 'FAILED', 'SKIPPED', 'COVERAGE_GAP', 'COVERAGE_SEVERE')),
+                rows_affected   INTEGER,
+                started_at      TEXT DEFAULT (datetime('now')),
+                finished_at     TEXT,
+                duration_sec    REAL,
+                error_message   TEXT
+            );
+            INSERT INTO pipeline_log__new
+                SELECT id, run_date, step_name, status, rows_affected,
+                       started_at, finished_at, duration_sec, error_message
+                FROM pipeline_log;
+            DROP TABLE pipeline_log;
+            ALTER TABLE pipeline_log__new RENAME TO pipeline_log;
+            CREATE INDEX IF NOT EXISTS idx_pipeline_log_date ON pipeline_log(run_date);
+            COMMIT;
+            """
+        )
 
 
 def table_counts():

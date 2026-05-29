@@ -101,6 +101,10 @@ def scan(dry_run=False, only_tables=None):
 
     if stale.empty:
         print("✓ All registered tables are FRESH. Nothing to heal.")
+        # Heartbeat so `health_report` sees a recent run even on a clean scan
+        # (otherwise "last ran Nh ago" only updates when something fires).
+        if not dry_run:
+            _log_watchdog("heartbeat", "scan", "SUCCESS", error=None)
         return 0
 
     print(f"⚠ {len(stale)} stale/outdated tables:")
