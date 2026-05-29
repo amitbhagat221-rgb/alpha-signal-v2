@@ -95,6 +95,8 @@ CREATE TABLE IF NOT EXISTS daily_snapshots_pit (
     -- Behavior tier — added 2026-05-24 (audit: were missing PIT helpers)
     insider_score    REAL,
     sentiment_7d     REAL,
+    -- Track 2.2b — Financial sub-model (Banks + NBFCs only)
+    financial_signal REAL,
     reconstructed_at TEXT DEFAULT (datetime('now')),
     PRIMARY KEY (sid, snapshot_date)
 );
@@ -161,6 +163,9 @@ PIT_COLUMNS = [
     # replay can validate all 8 screener inputs end-to-end (not just the 4
     # that were derivable from raw cols).
     "accruals_signal", "promoter_signal", "forensic_penalty", "smart_money_score",
+    # Track 2.2b (2026-05-29) — Financial sub-model. NULL for non-financials;
+    # only Banks + NBFCs get a score. Scope clarification in ADR 0030.
+    "financial_signal",
 ]
 
 
@@ -211,6 +216,7 @@ VALIDATION_RANGES = {
     "news_volume_7d":        (0, 100, True),    # article count in last 7d
     "insider_score":         (-1, 1, True),     # weighted net buys/sells, clipped
     "sentiment_7d":          (-1, 1, True),     # VADER compound score, mean over 7d
+    "financial_signal":      (-3, 3, True),     # z-composite, clipped to ±3 (signals.financial_signal)
     # Track 3 cluster (plan 0003)
     "revenue_cv_5y":         (0, 50, True),     # CV; >50 means mean ~ 0
     "relative_turnover":     (0, 20, True),     # ratio vs sector p50
@@ -2198,6 +2204,11 @@ def reconstruct_one_date(eval_date, raw, signals_to_run):
         ins_pit = raw["insider_trades"][raw["insider_trades"]["trade_date"] <= eval_date.isoformat()]
         base = base.merge(pit_insider_signal(raw["stocks"], ins_pit, eval_date), on="sid", how="left")
 
+    # ── Track 2.2b — Financial sub-model (Banks + NBFCs only) ──
+    if "financial_signal" in signals_to_run and "banking_metrics" in raw:
+        base = base.merge(pit_financial_signal(raw["banking_metrics"], eval_date),
+                          on="sid", how="left")
+
     # ── Track 3 cluster (plan 0003) — sector-narrative-derived factors ──
     fund_pit = (knowable_screener(raw["fund_screener"], eval_date)
                 if "fund_screener" in raw else pd.DataFrame())
@@ -2315,6 +2326,26 @@ def reconstruct_one_date(eval_date, raw, signals_to_run):
     return df, validation_summary
 
 
+def pit_financial_signal(banking_metrics_full, eval_date):
+    """Reconstruct financial_signal at eval_date using PIT-filtered banking_metrics.
+
+    Delegates to signals.financial_signal.compute_pit which applies the
+    quarterly_lag (60d) + annual_lag (75d) filters internally and runs the
+    same algorithm as the live signal (40% asset quality + 30% profitability
+    + 15% capital [NULL pre-2.2c] + 15% funding, renormalized).
+
+    Returns DataFrame[sid, financial_signal] — NULL for non-financials and
+    for insufficient-data stocks. Caller merges onto base; the upsert into
+    daily_snapshots_pit naturally leaves financial_signal NULL for stocks
+    not in the (Banks ∪ NBFCs) universe.
+    """
+    if banking_metrics_full is None or banking_metrics_full.empty:
+        return pd.DataFrame(columns=["sid", "financial_signal"])
+    from signals.financial_signal import compute_pit
+    eval_str = eval_date.isoformat() if hasattr(eval_date, "isoformat") else str(eval_date)
+    return compute_pit(eval_str, banking_metrics_full)
+
+
 def load_raw():
     """Load all raw history once. Avoids re-querying per eval_date."""
     print("Loading raw data...")
@@ -2410,6 +2441,17 @@ def load_raw():
         "SELECT sid, period_end, line_item, value FROM fundamentals_screener "
         "WHERE period_type = 'annual'"
     )
+    # Track 2.2b — Banking metrics for financial_signal PIT reconstruction.
+    # Only ~3,400 rows (158 stocks × ~25 periods), so load all and filter
+    # per eval_date inside the helper.
+    try:
+        banking_metrics = read_sql(
+            "SELECT sid, period_end, period_type, gross_npa_pct, net_npa_pct, "
+            "       interest_earned, net_interest_income, net_profit, cost_of_funds_pct "
+            "FROM banking_metrics"
+        )
+    except Exception:
+        banking_metrics = pd.DataFrame()
     print(f"  stocks={len(stocks)} qi={len(qi)} bs={len(bs)} cf={len(cf)} sh={len(sh)} "
           f"prices={len(prices)} adj={len(adjustments)} fh={len(fh)} acs={len(acs)} "
           f"bulk={len(bulk)} "
@@ -2422,6 +2464,7 @@ def load_raw():
         "fh": fh, "acs": acs, "bulk": bulk, "short": short, "news": news,
         "news_text": news_text, "insider_trades": insider_trades,
         "fund_screener": fund_screener,
+        "banking_metrics": banking_metrics,
         "reg_events": reg_events, "reg_signals": reg_signals,
         "macro_hist": macro_hist, "macro_map": macro_map,
     }
@@ -2463,7 +2506,8 @@ def main():
                                  "fcf_margin", "capex_to_dep",
                                  "goodwill_to_assets", "debt_structure",
                                  "asset_tangibility",
-                                 "smart_money"],
+                                 "smart_money",
+                                 "financial_signal"],
                         help="Compute only this signal (repeatable)")
     parser.add_argument("--date", action="append", default=None,
                         help="Explicit eval date (YYYY-MM-DD, repeatable). "
@@ -2514,6 +2558,8 @@ def main():
         # Plan 0005 Phase E composite (smart_money — accruals/promoter/forensic
         # composites flow through their existing _compute_scores)
         "smart_money",
+        # Track 2.2b (2026-05-29) — Financial sub-model for Banks + NBFCs
+        "financial_signal",
     }
     signals_to_run = set(args.signal) if args.signal else DEFAULT_SIGNALS
     signals_label = ",".join(sorted(signals_to_run))

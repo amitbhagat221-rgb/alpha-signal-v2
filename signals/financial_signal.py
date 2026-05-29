@@ -92,10 +92,24 @@ NBFC_BENCHMARKS = {
 }
 
 
-def _load_inputs():
+# Filing lags (mirror tools/reconstruct_pit.py constants — period_end + lag is
+# when the row becomes "knowable" to a real-time observer).
+QUARTERLY_LAG = 60
+ANNUAL_LAG = 75
+
+
+def _load_inputs(pit_date: str | None = None, banking_metrics: pd.DataFrame | None = None):
     """Load latest quarterly + latest annual per sid, joined with stocks meta.
 
-    Returns DataFrame indexed by sid with columns:
+    Live mode (pit_date=None): latest row per sid from the live banking_metrics
+    table. Used by `compute()` for today's snapshot.
+
+    PIT mode (pit_date='YYYY-MM-DD'): latest row per sid where period_end is
+    "knowable" at pit_date, i.e. period_end ≤ pit_date − filing_lag.
+    Caller can pass a pre-loaded banking_metrics DataFrame to avoid re-querying
+    the DB inside a reconstruct_pit loop.
+
+    Returns DataFrame with one row per sid and columns:
       industry, cap_tier,
       gross_npa_pct, net_npa_pct, nii_q, ie_q, np_q,   (from latest quarterly)
       cof_pct                                            (from latest annual)
@@ -106,46 +120,77 @@ def _load_inputs():
         params=list(BANKING_INDUSTRIES),
     )
 
-    # Latest quarterly per sid
-    quarterly = read_sql(
-        """
-        WITH latest AS (
-            SELECT sid, MAX(period_end) AS p
-            FROM banking_metrics
-            WHERE period_type='quarterly'
-            GROUP BY sid
+    if banking_metrics is None:
+        banking_metrics = read_sql(
+            "SELECT sid, period_end, period_type, gross_npa_pct, net_npa_pct, "
+            "       interest_earned, net_interest_income, net_profit, cost_of_funds_pct "
+            "FROM banking_metrics"
         )
-        SELECT b.sid, b.period_end AS q_period,
-               b.gross_npa_pct, b.net_npa_pct,
-               b.interest_earned AS ie_q,
-               b.net_interest_income AS nii_q,
-               b.net_profit AS np_q
-        FROM banking_metrics b
-        JOIN latest l ON b.sid=l.sid AND b.period_end=l.p
-        WHERE b.period_type='quarterly'
-        """
-    )
 
-    # Latest annual per sid (for COF)
-    annual = read_sql(
-        """
-        WITH latest AS (
-            SELECT sid, MAX(period_end) AS p
-            FROM banking_metrics
-            WHERE period_type='annual'
-            GROUP BY sid
+    if pit_date is not None:
+        bm = banking_metrics.copy()
+        bm["period_end_dt"] = pd.to_datetime(bm["period_end"])
+        eval_dt = pd.Timestamp(pit_date)
+        q_cutoff = eval_dt - pd.Timedelta(days=QUARTERLY_LAG)
+        a_cutoff = eval_dt - pd.Timedelta(days=ANNUAL_LAG)
+        q = bm[(bm["period_type"] == "quarterly") & (bm["period_end_dt"] <= q_cutoff)]
+        a = bm[(bm["period_type"] == "annual")    & (bm["period_end_dt"] <= a_cutoff)]
+    else:
+        q = banking_metrics[banking_metrics["period_type"] == "quarterly"]
+        a = banking_metrics[banking_metrics["period_type"] == "annual"]
+
+    # Latest quarterly row per sid
+    if not q.empty:
+        idx_q = q.groupby("sid")["period_end"].idxmax()
+        q_latest = q.loc[idx_q, [
+            "sid", "period_end", "gross_npa_pct", "net_npa_pct",
+            "interest_earned", "net_interest_income", "net_profit",
+        ]].rename(columns={
+            "period_end": "q_period",
+            "interest_earned": "ie_q",
+            "net_interest_income": "nii_q",
+            "net_profit": "np_q",
+        })
+    else:
+        q_latest = pd.DataFrame(columns=["sid","q_period","gross_npa_pct","net_npa_pct","ie_q","nii_q","np_q"])
+
+    # Latest annual row per sid (for COF)
+    if not a.empty:
+        idx_a = a.groupby("sid")["period_end"].idxmax()
+        a_latest = a.loc[idx_a, ["sid", "period_end", "cost_of_funds_pct"]].rename(
+            columns={"period_end": "a_period", "cost_of_funds_pct": "cof_pct"}
         )
-        SELECT b.sid, b.period_end AS a_period, b.cost_of_funds_pct AS cof_pct
-        FROM banking_metrics b
-        JOIN latest l ON b.sid=l.sid AND b.period_end=l.p
-        WHERE b.period_type='annual'
-        """
-    )
+    else:
+        a_latest = pd.DataFrame(columns=["sid", "a_period", "cof_pct"])
 
-    df = stocks.merge(quarterly, on="sid", how="left").merge(annual, on="sid", how="left")
-    # Drop stocks with no banking_metrics rows at all (the 17 404s)
+    df = stocks.merge(q_latest, on="sid", how="left").merge(a_latest, on="sid", how="left")
     df = df.dropna(subset=["q_period", "a_period"], how="all").copy()
     return df
+
+
+def compute_pit(pit_date: str, banking_metrics: pd.DataFrame) -> pd.DataFrame:
+    """Compute financial_signal at a historical eval date.
+
+    Mirror of `compute()` but with PIT-filtered inputs. Returns
+    DataFrame[sid, financial_signal] suitable for merging into
+    daily_snapshots_pit. Does NOT write — caller manages persistence.
+
+    Caveat: banking_metrics reflects TODAY's reported values (Screener.in
+    rendered today). For backtest dates ≥ 60d ago this is typically stable
+    (Indian filing deadlines are 60d quarterly / 75d annual + revisions are
+    rare for asset-quality numbers), but restatements introduce some look-
+    ahead bias on edges. Document but don't gate.
+    """
+    df = _load_inputs(pit_date=pit_date, banking_metrics=banking_metrics)
+    if df.empty:
+        return pd.DataFrame(columns=["sid", "financial_signal"])
+    df = _compute_raw_components(df)
+    df["asset_quality_z"] = _zscore_within(df, "aq_raw", direction="lower")
+    df["profitability_z"] = _zscore_within(df, "p_raw",  direction="higher")
+    df["capital_z"]       = _zscore_within(df, "c_raw",  direction="higher")
+    df["funding_z"]       = _zscore_within(df, "f_raw",  direction="lower")
+    df = _compute_composite(df)
+    return df[["sid", "financial_signal"]].copy()
 
 
 def _compute_raw_components(df: pd.DataFrame) -> pd.DataFrame:

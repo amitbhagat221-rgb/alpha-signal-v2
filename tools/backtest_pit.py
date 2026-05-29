@@ -109,6 +109,8 @@ SIGNAL_COLUMN_MAP = {
     "goodwill_to_assets":    (None, "goodwill_to_assets"),
     "debt_structure":        (None, "debt_structure"),
     "asset_tangibility":     (None, "asset_tangibility"),
+    # Track 2.2b — Financial sub-model (Banks + NBFCs only)
+    "financial_signal":      (None, "financial_signal"),
     # forward return — same column in both
     "_response": ("fwd_return_20d", "fwd_return_20d"),
 }

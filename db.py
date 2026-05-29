@@ -95,6 +95,9 @@ _COLUMN_MIGRATIONS = [
     # Values: TRUSTED (default) / WOUND_UP / SEGREGATED / INTERVAL / ANOMALOUS / BONUS
     ("mf_scheme_master", "data_quality",       "TEXT DEFAULT 'TRUSTED'"),
     ("mf_scheme_master", "quality_reason",     "TEXT"),
+    # 2026-05-29: Track 2.2b — Financial sub-model PIT column. NULL for non-
+    # financials (Banks + NBFCs scope per ADR 0030).
+    ("daily_snapshots_pit", "financial_signal", "REAL"),
 ]
 
 
@@ -193,6 +196,44 @@ def read_sql(query, params=None):
     """Run arbitrary SQL and return a DataFrame."""
     with get_db() as conn:
         return pd.read_sql_query(query, conn, params=params)
+
+
+# ── DuckDB read-replica ──
+# Columnar replica at data/alpha_signal.duckdb, rebuilt by tools.duckdb_refresh.
+# Use for analytical reads on the tables in DUCKDB_MIRRORED_TABLES. SQLite stays
+# the source of truth for writes and for tables not in the mirror list.
+DUCK_PATH = PROJECT_ROOT / "data" / "alpha_signal.duckdb"
+DUCKDB_MIRRORED_TABLES = frozenset({
+    "daily_snapshots_pit",
+    "daily_snapshots_pit_v1",
+    "pit_ic_by_tier_v1",
+    "stock_prices",
+    "daily_picks",
+    "pick_outcomes",
+    "consensus_signals",
+})
+
+
+def read_sql_fast(query, params=None):
+    """Drop-in for read_sql() that uses DuckDB when the replica is present.
+
+    Falls back to SQLite if the replica file is missing — keeps callers safe
+    during the first run after install / after manual deletion of the file.
+
+    Caller must use DuckDB-compatible SQL: double-quoted identifiers ("col"),
+    not SQLite's bracket-quoting ([col]). Caller is responsible for only
+    referencing tables in DUCKDB_MIRRORED_TABLES.
+    """
+    if DUCK_PATH.exists():
+        import duckdb
+        con = duckdb.connect(str(DUCK_PATH), read_only=True)
+        try:
+            if params:
+                return con.execute(query, params).fetchdf()
+            return con.execute(query).fetchdf()
+        finally:
+            con.close()
+    return read_sql(query, params)
 
 
 def get_universe(tier=None, sector=None):
@@ -2084,6 +2125,20 @@ BACKTEST_SIGNALS = [
         "v1_verdict_summary": "(insufficient PIT data — n=0 in v1)",
         "status": "PROPOSED",
         "status_reason": "End-state composite — built only after all sub-signals are PIT-ready. Tracks Track 2.4 portfolio construction work.",
+    },
+    {
+        "signal": "financial_signal",
+        "label": "Financial Sub-Model (Banks + NBFCs)",
+        "group": "Track 2 — Portfolio",
+        "description": "Per-stock composite for Banks + NBFCs only: 40% asset_quality (GNPA/NNPA) + 30% profitability (NII/NP margin) + 15% capital (NULL pre-2.2c) + 15% funding (cost_of_funds). Z-scored within (industry, cap_tier).",
+        "source_tables": ["banking_metrics"],
+        "source_columns": ["gross_npa_pct, net_npa_pct, interest_earned, net_interest_income, net_profit, cost_of_funds_pct"],
+        "filing_lag": "60d quarterly + 75d annual",
+        "pit_column_v1": None,
+        "pit_column_v2": "financial_signal",
+        "v1_verdict_summary": "(v2-only; Plan 0001 §2.2 done gate is t-stat ≥ 2.0 within Financial Services subset)",
+        "status": "READY",
+        "status_reason": "Phase 2.2b shipped 2026-05-29 (ADR 0030, Screener.in source). PIT helper reconstructs across existing eval dates. Routing in scoring/screener.py gated on backtest validation.",
     },
 ]
 
