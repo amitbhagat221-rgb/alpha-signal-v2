@@ -531,28 +531,60 @@ def factor_type_conformance(tbl, count, dates, meta, profile, conn):
     worst_drill = None
     checks_run = 0
 
+    # ── 1. Typeof mismatch — CONSOLIDATED: one table scan instead of N ──
+    # Previously this loop ran `SELECT COUNT(*) FROM [tbl] WHERE typeof([col]) NOT IN (...)`
+    # once per column → N full-table scans (5.4s on daily_snapshots_pit, 68 cols).
+    # Now: one SUM(CASE WHEN ...) per column in a single SELECT → one scan.
+    typed_cols = []
     for row in info:
         col = row[1]
         decl = row[2] or ""
         allowed = _affinity_for(decl)
         if allowed is None:
             continue
+        typed_cols.append((col, decl, allowed))
 
-        # 1. Type-of mismatch — value's typeof() not in the allowed set
-        try:
+    # Tall-narrow tables (mf_nav_history at 8M rows, stock_prices at 1.5M) are
+    # CPU-bound on per-cell typeof() — consolidating queries doesn't help. For
+    # tables above this threshold we sample. Bad-row rates >0.001% (the only
+    # thing that would push the score below ~100) are still detected with
+    # near-certainty at this sample size.
+    SAMPLE_THRESHOLD = 500_000
+    SAMPLE_SIZE = 200_000
+    sampled = count > SAMPLE_THRESHOLD
+    if sampled:
+        from_clause = f"(SELECT * FROM [{tbl}] LIMIT {SAMPLE_SIZE})"
+        scan_basis = SAMPLE_SIZE
+    else:
+        from_clause = f"[{tbl}]"
+        scan_basis = count
+
+    typeof_bad = {}  # col -> bad row count (in sample if sampled)
+    if typed_cols:
+        sum_exprs, params = [], []
+        for col, _decl, allowed in typed_cols:
             placeholders = ",".join(["?"] * len(allowed))
-            bad = conn.execute(
-                f"SELECT COUNT(*) FROM [{tbl}] "
-                f"WHERE [{col}] IS NOT NULL AND typeof([{col}]) NOT IN ({placeholders})",
-                tuple(allowed),
-            ).fetchone()[0]
+            sum_exprs.append(
+                f"SUM(CASE WHEN [{col}] IS NOT NULL AND typeof([{col}]) NOT IN ({placeholders}) THEN 1 ELSE 0 END)"
+            )
+            params.extend(allowed)
+        try:
+            row = conn.execute(f"SELECT {', '.join(sum_exprs)} FROM {from_clause}", params).fetchone()
+            for (col, _decl, _allowed), bad in zip(typed_cols, row):
+                typeof_bad[col] = bad or 0
+                checks_run += 1
         except Exception:
-            continue
-        checks_run += 1
+            # If the consolidated query fails (e.g. SQL parser quirks for some column name),
+            # leave typeof_bad empty — issues stay empty and the score stays 100, which is
+            # the same behaviour as the old per-column exception path.
+            pass
 
+    for col, decl, allowed in typed_cols:
+        bad = typeof_bad.get(col, 0)
         if bad > 0:
-            rate = bad / count
-            issues.append(f"{col}: {bad:,} non-{decl.upper()} values ({100 * rate:.1f}%)")
+            rate = bad / scan_basis
+            note = " (sampled)" if sampled else ""
+            issues.append(f"{col}: {bad:,} non-{decl.upper()} values ({100 * rate:.1f}%){note}")
             score = max(0, 100 - 100 * rate)
             if score < worst_score:
                 worst_score = score

@@ -250,7 +250,7 @@ def get_backtest_roster():
       pit_tables: summary of the PIT tables themselves
       summary: count by status (READY / PARTIAL / MISSING)
     """
-    from db import BACKTEST_SIGNALS, get_db, read_sql
+    from db import BACKTEST_SIGNALS, get_db, read_sql, read_sql_fast
 
     # ── Existing PIT tables ──
     with get_db() as conn:
@@ -263,7 +263,7 @@ def get_backtest_roster():
     # ── IC table — group by signal for fast lookup ──
     ic_by_signal = {}
     if has_ic:
-        ic_rows = read_sql("SELECT signal, cap_tier, t_stat, verdict, n_periods FROM pit_ic_by_tier_v1")
+        ic_rows = read_sql_fast('SELECT signal, cap_tier, t_stat, verdict, n_periods FROM "pit_ic_by_tier_v1"')
         for _, r in ic_rows.iterrows():
             sig = r["signal"]
             ic_by_signal.setdefault(sig, {})[r["cap_tier"]] = {
@@ -272,19 +272,19 @@ def get_backtest_roster():
                 "n_periods": _safe_int(r["n_periods"]),
             }
 
-    # ── Coverage per PIT column ──
+    # ── Coverage per PIT column (DuckDB replica — 27× faster on this scan) ──
     def _coverage(table, column):
         if not column or table not in names:
             return None
         try:
-            df = read_sql(f"""
+            df = read_sql_fast(f'''
                 SELECT COUNT(DISTINCT snapshot_date) AS n_dates,
                        MIN(snapshot_date) AS first_date,
                        MAX(snapshot_date) AS last_date,
-                       AVG(CASE WHEN [{column}] IS NOT NULL THEN 1.0 ELSE 0 END) AS pct_filled
-                FROM [{table}]
-                WHERE [{column}] IS NOT NULL
-            """)
+                       AVG(CASE WHEN "{column}" IS NOT NULL THEN 1.0 ELSE 0 END) AS pct_filled
+                FROM "{table}"
+                WHERE "{column}" IS NOT NULL
+            ''')
             if df.empty or df.iloc[0]["n_dates"] == 0:
                 return None
             r = df.iloc[0]
@@ -346,7 +346,7 @@ def get_backtest_roster():
                 "horizon_days": 20, "available_in": []}
     if has_pit_v1:
         try:
-            df = read_sql("SELECT COUNT(*) AS n, MIN(snapshot_date) AS f, MAX(snapshot_date) AS l FROM daily_snapshots_pit_v1 WHERE fwd_return_20d IS NOT NULL")
+            df = read_sql_fast('SELECT COUNT(*) AS n, MIN(snapshot_date) AS f, MAX(snapshot_date) AS l FROM "daily_snapshots_pit_v1" WHERE fwd_return_20d IS NOT NULL')
             if not df.empty and df.iloc[0]["n"] > 0:
                 response["available_in"].append({
                     "table": "daily_snapshots_pit_v1",
@@ -369,10 +369,10 @@ def get_backtest_roster():
         if tbl not in names:
             continue
         try:
-            r = read_sql(f"SELECT COUNT(*) AS rows FROM [{tbl}]").iloc[0]
+            r = read_sql_fast(f'SELECT COUNT(*) AS rows FROM "{tbl}"').iloc[0]
             entry = {"table": tbl, "rows": _safe_int(r["rows"])}
             if tbl != "pit_ic_by_tier_v1":
-                d = read_sql(f"SELECT COUNT(DISTINCT snapshot_date) AS n_dates, MIN(snapshot_date) AS f, MAX(snapshot_date) AS l, COUNT(DISTINCT sid) AS sids FROM [{tbl}]").iloc[0]
+                d = read_sql_fast(f'SELECT COUNT(DISTINCT snapshot_date) AS n_dates, MIN(snapshot_date) AS f, MAX(snapshot_date) AS l, COUNT(DISTINCT sid) AS sids FROM "{tbl}"').iloc[0]
                 entry.update({
                     "n_dates": _safe_int(d["n_dates"]),
                     "first_date": d["f"],

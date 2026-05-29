@@ -31,6 +31,13 @@ echo "=============================="
 python pipeline.py
 PIPELINE_RC=$?
 
+# Rebuild the DuckDB read-replica so the cockpit serves fresh columnar reads.
+# Non-fatal: a failed rebuild leaves the previous .duckdb file in place; the
+# cockpit will keep serving slightly-stale columnar data, or fall back to
+# SQLite if the file is missing entirely. Does NOT block the pipeline rc.
+echo "--- DuckDB read-replica refresh ---"
+python -m tools.duckdb_refresh || echo "[warn] duckdb_refresh failed; cockpit will fall back to SQLite reads"
+
 # TODO: v2 has no git repo yet. Wire up GitHub backup once remote exists.
 # (v1 used the same daily commit-and-push pattern — see /home/ubuntu/alpha-signal/run_pipeline.sh.)
 

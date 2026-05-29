@@ -21,6 +21,13 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.gzip import GZipMiddleware
 
+# Load cockpit.api FIRST. It ends with a back-import of get_model_overview /
+# get_backtest_roster from cockpit_ops.api (see cockpit/api.py:2812). If
+# cockpit_ops.api is the first module to start loading, that back-import fires
+# while cockpit_ops.api is still partially initialised → ImportError. Loading
+# cockpit.api here breaks the cycle: it runs end-to-end, triggers cockpit_ops.api
+# itself, and both modules end up fully initialised.
+import cockpit.api  # noqa: F401
 from cockpit_ops import api
 
 # Shared static assets from the main cockpit. No need to duplicate CSS/JS.
