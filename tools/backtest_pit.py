@@ -111,6 +111,9 @@ SIGNAL_COLUMN_MAP = {
     "asset_tangibility":     (None, "asset_tangibility"),
     # Track 2.2b — Financial sub-model (Banks + NBFCs only)
     "financial_signal":      (None, "financial_signal"),
+    # Phase 2.2b-v2 (2026-05-29 #2) — direction-split:
+    "financial_quality":     (None, "financial_quality"),
+    "financial_recovery":    (None, "financial_recovery"),
     # forward return — same column in both
     "_response": ("fwd_return_20d", "fwd_return_20d"),
 }

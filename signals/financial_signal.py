@@ -169,28 +169,41 @@ def _load_inputs(pit_date: str | None = None, banking_metrics: pd.DataFrame | No
 
 
 def compute_pit(pit_date: str, banking_metrics: pd.DataFrame) -> pd.DataFrame:
-    """Compute financial_signal at a historical eval date.
+    """Compute financial_quality + financial_recovery at a historical eval date.
 
-    Mirror of `compute()` but with PIT-filtered inputs. Returns
-    DataFrame[sid, financial_signal] suitable for merging into
-    daily_snapshots_pit. Does NOT write — caller manages persistence.
+    Mirror of `compute()` but with PIT-filtered inputs. Returns DataFrame with
+    [sid, financial_quality, financial_recovery] — both columns suitable for
+    merging into daily_snapshots_pit. Does NOT write — caller manages persistence.
 
-    Caveat: banking_metrics reflects TODAY's reported values (Screener.in
-    rendered today). For backtest dates ≥ 60d ago this is typically stable
-    (Indian filing deadlines are 60d quarterly / 75d annual + revisions are
-    rare for asset-quality numbers), but restatements introduce some look-
-    ahead bias on edges. Document but don't gate.
+    Why two signals: the 2026-05-29 backtest of the OLD single-direction composite
+    found the NPA leg responds oppositely by cap_tier (SMALL gross_npa t=-3.09,
+    LARGE/MID net_npa t=+2.39/+4.16). The split names the underlying mechanism:
+    `financial_quality` for "low NPA = strong franchise" (SMALL), `financial_recovery`
+    for "high NPA = distressed mean-reversion opportunity" (LARGE/MID). The other
+    three components (profitability, capital, funding) are direction-stable across
+    tiers — only asset quality flips.
+
+    Caveat: banking_metrics reflects TODAY's reported values (Screener.in rendered
+    today). For backtest dates ≥ 60d ago this is typically stable (Indian filing
+    deadlines are 60d quarterly / 75d annual + revisions are rare for asset-quality
+    numbers), but restatements introduce some look-ahead bias on edges.
     """
     df = _load_inputs(pit_date=pit_date, banking_metrics=banking_metrics)
     if df.empty:
-        return pd.DataFrame(columns=["sid", "financial_signal"])
+        return pd.DataFrame(columns=["sid", "financial_quality", "financial_recovery"])
     df = _compute_raw_components(df)
-    df["asset_quality_z"] = _zscore_within(df, "aq_raw", direction="lower")
-    df["profitability_z"] = _zscore_within(df, "p_raw",  direction="higher")
-    df["capital_z"]       = _zscore_within(df, "c_raw",  direction="higher")
-    df["funding_z"]       = _zscore_within(df, "f_raw",  direction="lower")
-    df = _compute_composite(df)
-    return df[["sid", "financial_signal"]].copy()
+    df["asset_quality_quality_z"]  = _zscore_within(df, "aq_raw", direction="lower")
+    df["asset_quality_recovery_z"] = _zscore_within(df, "aq_raw", direction="higher")
+    df["profitability_z"]          = _zscore_within(df, "p_raw",  direction="higher")
+    df["capital_z"]                = _zscore_within(df, "c_raw",  direction="higher")
+    df["funding_z"]                = _zscore_within(df, "f_raw",  direction="lower")
+    df = _compute_composite(df, aq_col="asset_quality_quality_z",
+                                  out_col="financial_quality",
+                                  basis_col="quality_basis")
+    df = _compute_composite(df, aq_col="asset_quality_recovery_z",
+                                  out_col="financial_recovery",
+                                  basis_col="recovery_basis")
+    return df[["sid", "financial_quality", "financial_recovery"]].copy()
 
 
 def _compute_raw_components(df: pd.DataFrame) -> pd.DataFrame:
@@ -279,14 +292,19 @@ def _zscore_within(df: pd.DataFrame, col: str, group_cols=("industry", "cap_tier
     return out
 
 
-def _compute_composite(df: pd.DataFrame) -> pd.DataFrame:
+def _compute_composite(df: pd.DataFrame, aq_col: str = "asset_quality_z",
+                       out_col: str = "financial_signal",
+                       basis_col: str = "score_basis") -> pd.DataFrame:
     """Renormalize weights over present components → composite score.
 
-    < MIN_COMPONENTS present → financial_signal = NULL, score_basis = INSUFFICIENT.
+    < MIN_COMPONENTS present → out_col = NULL, basis_col = INSUFFICIENT.
+
+    aq_col chooses which asset-quality direction (low-NPA=good vs high-NPA=good)
+    drives this composite. profitability_z / capital_z / funding_z are reused.
     """
     df = df.copy()
     label_map = {
-        "asset_quality_z": ("asset_quality", "AQ"),
+        aq_col:            ("asset_quality", "AQ"),
         "profitability_z": ("profitability", "P"),
         "capital_z":       ("capital",       "C"),
         "funding_z":       ("funding",       "F"),
@@ -314,8 +332,8 @@ def _compute_composite(df: pd.DataFrame) -> pd.DataFrame:
             score = num / denom
             composites.append(round(float(np.clip(score, -Z_CLIP, Z_CLIP)), 4))
             bases.append("+".join(present))
-    df["financial_signal"] = composites
-    df["score_basis"] = bases
+    df[out_col] = composites
+    df[basis_col] = bases
     df["components_present"] = n_presents
     return df
 
@@ -330,13 +348,33 @@ def compute(snapshot_date: str | None = None, dry_run: bool = False) -> int:
 
     df = _compute_raw_components(df)
 
-    # Z-score each component within (industry, cap_tier)
-    df["asset_quality_z"] = _zscore_within(df, "aq_raw", direction="lower")
-    df["profitability_z"] = _zscore_within(df, "p_raw",  direction="higher")
-    df["capital_z"]       = _zscore_within(df, "c_raw",  direction="higher")
-    df["funding_z"]       = _zscore_within(df, "f_raw",  direction="lower")
+    # Z-score each component within (industry, cap_tier).
+    # Asset quality computed BOTH WAYS — direction='lower' (low NPA = strong
+    # franchise → financial_quality, used for SMALL) and direction='higher' (high
+    # NPA = distressed recovery → financial_recovery, used for LARGE/MID). The
+    # 2026-05-29 backtest showed the AQ leg flips sign by tier (SMALL gross_npa
+    # t=-3.09 vs LARGE/MID net_npa t=+2.39/+4.16); the other three legs are
+    # direction-stable.
+    df["asset_quality_quality_z"]  = _zscore_within(df, "aq_raw", direction="lower")
+    df["asset_quality_recovery_z"] = _zscore_within(df, "aq_raw", direction="higher")
+    df["profitability_z"]          = _zscore_within(df, "p_raw",  direction="higher")
+    df["capital_z"]                = _zscore_within(df, "c_raw",  direction="higher")
+    df["funding_z"]                = _zscore_within(df, "f_raw",  direction="lower")
 
-    df = _compute_composite(df)
+    df = _compute_composite(df, aq_col="asset_quality_quality_z",
+                                  out_col="financial_quality",
+                                  basis_col="quality_basis")
+    df = _compute_composite(df, aq_col="asset_quality_recovery_z",
+                                  out_col="financial_recovery",
+                                  basis_col="recovery_basis")
+    # Back-compat alias — older consumers / dashboards looking for
+    # financial_signal get the quality variant by default. Will be removed once
+    # the screener is fully switched to tier-aware reads (Phase 2.2b-v2).
+    df["financial_signal"] = df["financial_quality"]
+    df["score_basis"]      = df["quality_basis"]
+    # Old asset_quality_z column kept too — equals the quality direction.
+    df["asset_quality_z"]  = df["asset_quality_quality_z"]
+
     df["snapshot_date"] = snapshot_date
     df["computed_at"]   = datetime.now().isoformat(timespec="seconds")
 
@@ -344,6 +382,9 @@ def compute(snapshot_date: str | None = None, dry_run: bool = False) -> int:
         "sid", "snapshot_date", "industry", "cap_tier",
         "asset_quality_z", "profitability_z", "capital_z", "funding_z",
         "components_present", "score_basis", "financial_signal",
+        # New split columns (2026-05-29 — Phase 2.2b-v2):
+        "financial_quality", "financial_recovery",
+        "quality_basis", "recovery_basis",
         "gross_npa_pct", "net_npa_pct", "nii_margin_pct", "np_margin_pct",
         "cost_of_funds_pct",
         "computed_at",

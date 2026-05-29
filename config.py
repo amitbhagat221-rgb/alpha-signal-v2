@@ -84,53 +84,53 @@ SIGNAL_WEIGHTS = {
 # Choose by passing --variant {return,sharpe} to scoring/screener.
 
 # MaxReturn: w_i ∝ |t_stat_i| × sign(IC_i). Favours absolute IC magnitude.
+# Refresh: python -m tools.optimize_weights --filter-wired
+# 2026-05-29: pledge_quality + delivery_anomaly_z now wired (Next-3 #3), so SMALL
+# includes both; MID stays at 2 factors until interest_coverage/ccc/etc are wired.
 SIGNAL_WEIGHTS_RETURN = {
     "LARGE": {
-        "pt_upside":      0.4679,  # t=7.15
-        "eps_growth":     0.3475,  # t=5.31
-        "consensus":      0.1846,  # t=2.82
+        "pt_upside":         0.4679,  # t=7.15
+        "eps_growth":        0.3475,  # t=5.31
+        "consensus":         0.1846,  # t=2.82
     },
     "MID": {
-        "pt_upside":      0.6500,  # t=8.40  (only WIRED KEEP at MID; un-wired interest_coverage/ccc/etc deferred)
-        "accruals":      -0.2000,  # t=-2.53 (inverse — high accruals predicts under-performance)
-        "consensus":      0.1500,  # NOTE: MID consensus is t=-1.16 in v2 backtest, but kept as a stabiliser
+        "pt_upside":         0.7241,  # t=8.40
+        "accruals":         -0.2759,  # t=-3.20 (inverse)
     },
     "SMALL": {
-        "pt_upside":      0.2880,  # t=9.14
-        "smart_money":    0.1378,  # t=4.37 (avg_delivery_pct_30d)
-        "eps_growth":     0.1018,  # t=3.23
-        "earnings_yield": 0.0987,  # t=3.13
-        "consensus":      0.0946,  # t=3.00
-        "promoter":       0.0826,  # t=2.62
-        "piotroski":      0.0791,  # t=2.51
-        "book_to_price":  0.0800,  # t=2.54
-        "accruals":      -0.0374,  # t=-2.10 (inverse)
+        "pt_upside":         0.2364,  # t=9.14
+        "pledge_quality":    0.1526,  # t=5.90
+        "delivery_anomaly_z":0.1232,  # t=4.76
+        "smart_money":       0.1131,  # t=4.37 (avg_delivery_pct_30d)
+        "eps_growth":        0.0836,  # t=3.23
+        "earnings_yield":    0.0809,  # t=3.13
+        "consensus":         0.0776,  # t=3.00
+        "promoter":          0.0678,  # t=2.62
+        "piotroski":         0.0649,  # t=2.51
     },
 }
 
 # MaxSharpe: w_i ∝ |ICIR_i| × sign(IC_i). Favours information ratio (mean/vol of IC).
-# Stocks selected here will have lower expected return per trade but lower variance.
 SIGNAL_WEIGHTS_SHARPE = {
     "LARGE": {
-        "eps_growth":     0.5239,  # ICIR=1.88
-        "pt_upside":      0.3371,  # ICIR=1.21
-        "consensus":      0.1390,  # ICIR=0.50
+        "eps_growth":        0.5239,  # ICIR=1.88
+        "pt_upside":         0.3371,  # ICIR=1.21
+        "consensus":         0.1390,  # ICIR=0.50
     },
     "MID": {
-        "pt_upside":      0.6700,  # ICIR=1.42
-        "accruals":      -0.2300,  # ICIR=-0.60
-        "consensus":      0.1000,  # stabiliser
+        "pt_upside":         0.6533,  # ICIR=1.42
+        "accruals":         -0.3467,  # ICIR=-0.75 (inverse)
     },
     "SMALL": {
-        "pt_upside":      0.2693,  # ICIR=1.54
-        "eps_growth":     0.1782,  # ICIR=1.02
-        "earnings_yield": 0.1222,  # ICIR=0.70
-        "smart_money":    0.1135,  # ICIR=0.65
-        "piotroski":      0.0955,  # ICIR=0.55
-        "consensus":      0.0925,  # ICIR=0.53
-        "promoter":       0.0897,  # ICIR=0.51
-        "book_to_price":  0.0631,  # ICIR=0.43
-        "accruals":      -0.0760,  # ICIR=-0.50 (inverse)
+        "pt_upside":         0.2169,  # ICIR=1.54
+        "pledge_quality":    0.1488,  # ICIR=1.06
+        "eps_growth":        0.1435,  # ICIR=1.02
+        "earnings_yield":    0.0983,  # ICIR=0.70
+        "smart_money":       0.0914,  # ICIR=0.65
+        "delivery_anomaly_z":0.0775,  # ICIR=0.55
+        "piotroski":         0.0768,  # ICIR=0.55
+        "consensus":         0.0745,  # ICIR=0.53
+        "promoter":          0.0722,  # ICIR=0.51
     },
 }
 
@@ -533,6 +533,23 @@ PIPELINE_STEPS = [
     # mature rows daily. Idempotent upsert by (sid, pick_date, window_days).
     {"name": "compute_pick_outcomes", "module": "tools.compute_pick_outcomes", "function": "compute", "critical": False,
      "table": "pick_outcomes",     "source": "daily_picks + stock_prices + nse_index_history",
+     "data_freq": "daily",         "frequency": "daily"},
+
+    # Sector briefs — plan 0006 Phase A. One sector_briefs row per sector per
+    # date with macro + model + regulatory rollup and a bucket classifier
+    # (BOOMING / LIKELY / HEADWIND / QUIET). Drives the /sectors digest UX
+    # in Phase C. Non-critical: a failure here doesn't block dossiers or
+    # email. Idempotent (INSERT OR REPLACE on sector + date).
+    {"name": "compute_sector_briefs", "module": "signals.sector_briefs", "function": "compute", "critical": False,
+     "table": "sector_briefs",     "source": "macro_sector_signals + daily_picks + regulatory_signals",
+     "data_freq": "daily",         "frequency": "daily"},
+
+    # Sector force breakdown — plan 0006 Phase B. Sits on top of sector_briefs.
+    # Per (sector, date) emits up to 4 rows, one per force {macro, regulation,
+    # tech, market}. Market is reserved for v2 (no sector-level FII/DII data).
+    # Powers the "BY FORCE" 2×2 grid in the Phase C /sectors digest UX.
+    {"name": "compute_sector_forces", "module": "signals.sector_forces", "function": "compute", "critical": False,
+     "table": "sector_force_breakdown", "source": "sector_briefs + regulatory_signals + sector_metadata",
      "data_freq": "daily",         "frequency": "daily"},
 
     # ── Output ──

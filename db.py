@@ -98,6 +98,18 @@ _COLUMN_MIGRATIONS = [
     # 2026-05-29: Track 2.2b — Financial sub-model PIT column. NULL for non-
     # financials (Banks + NBFCs scope per ADR 0030).
     ("daily_snapshots_pit", "financial_signal", "REAL"),
+    # 2026-05-29 (session #2): Phase 2.2b-v2 — split into quality (SMALL) +
+    # recovery (LARGE/MID) per the direction-flip backtest finding. Both
+    # columns; screener picks one based on cap_tier. `financial_signal`
+    # retained as alias for the quality variant for back-compat.
+    ("daily_snapshots_pit", "financial_quality",  "REAL"),
+    ("daily_snapshots_pit", "financial_recovery", "REAL"),
+    ("financial_signal_scores", "financial_quality",  "REAL"),
+    ("financial_signal_scores", "financial_recovery", "REAL"),
+    ("financial_signal_scores", "quality_basis",      "TEXT"),
+    ("financial_signal_scores", "recovery_basis",     "TEXT"),
+    ("financial_signal_scores", "asset_quality_quality_z",  "REAL"),
+    ("financial_signal_scores", "asset_quality_recovery_z", "REAL"),
 ]
 
 
@@ -2128,17 +2140,45 @@ BACKTEST_SIGNALS = [
     },
     {
         "signal": "financial_signal",
-        "label": "Financial Sub-Model (Banks + NBFCs)",
+        "label": "Financial Sub-Model (Banks + NBFCs) — legacy single-direction",
         "group": "Track 2 — Portfolio",
-        "description": "Per-stock composite for Banks + NBFCs only: 40% asset_quality (GNPA/NNPA) + 30% profitability (NII/NP margin) + 15% capital (NULL pre-2.2c) + 15% funding (cost_of_funds). Z-scored within (industry, cap_tier).",
+        "description": "Per-stock composite for Banks + NBFCs only: 40% asset_quality (GNPA/NNPA, direction=lower) + 30% profitability + 15% capital + 15% funding. SUPERSEDED 2026-05-29 by financial_quality + financial_recovery split after backtest showed AQ direction flips by tier. Kept here as the alias column (= financial_quality) so historical PIT and the existing optimizer entry survive.",
         "source_tables": ["banking_metrics"],
         "source_columns": ["gross_npa_pct, net_npa_pct, interest_earned, net_interest_income, net_profit, cost_of_funds_pct"],
         "filing_lag": "60d quarterly + 75d annual",
         "pit_column_v1": None,
         "pit_column_v2": "financial_signal",
-        "v1_verdict_summary": "(v2-only; Plan 0001 §2.2 done gate is t-stat ≥ 2.0 within Financial Services subset)",
+        "v1_verdict_summary": "Phase 2.2d backtest FAILED done gate (t = -0.75 / -1.30 / -0.34 LARGE/MID/SMALL) — direction-flip diagnostic surfaced. Split into financial_quality + financial_recovery 2026-05-29 session #2.",
+        "status": "SUPERSEDED",
+        "status_reason": "Single-direction composite invalid by backtest. Use financial_quality (SMALL) + financial_recovery (LARGE/MID) instead.",
+    },
+    {
+        "signal": "financial_quality",
+        "label": "Financial Quality — SMALL banks/NBFCs (low NPA = strong franchise)",
+        "group": "Track 2 — Portfolio",
+        "description": "Quality direction of Phase 2.2b composite — asset_quality z-scored as direction='lower' (low NPA good). Other 3 components shared with financial_recovery: profitability (NII/NP margin), capital (NULL pre-2.2c), funding (cost_of_funds). Composite renormalised over present components. Backtest hypothesis: SMALL banks' gross_npa_pct t=-3.09 (low NPA persists, quality compounds).",
+        "source_tables": ["banking_metrics"],
+        "source_columns": ["gross_npa_pct, net_npa_pct, interest_earned, net_interest_income, net_profit, cost_of_funds_pct"],
+        "filing_lag": "60d quarterly + 75d annual",
+        "pit_column_v1": None,
+        "pit_column_v2": "financial_quality",
+        "v1_verdict_summary": "(v2-only; SMALL-tier validation pending Phase 2.2d-v2 backtest run)",
         "status": "READY",
-        "status_reason": "Phase 2.2b shipped 2026-05-29 (ADR 0030, Screener.in source). PIT helper reconstructs across existing eval dates. Routing in scoring/screener.py gated on backtest validation.",
+        "status_reason": "Phase 2.2b-v2 (split) shipped 2026-05-29. PIT helper writes both columns; screener will read this one for SMALL tier post-validation.",
+    },
+    {
+        "signal": "financial_recovery",
+        "label": "Financial Recovery — LARGE/MID banks/NBFCs (high NPA = mean-reversion)",
+        "group": "Track 2 — Portfolio",
+        "description": "Recovery direction of Phase 2.2b composite — asset_quality z-scored as direction='higher' (high NPA = distressed-recovery opportunity). Other 3 components shared with financial_quality. Backtest hypothesis: LARGE net_npa_pct t=+2.39, MID t=+4.16 (NPA-stressed names mean-revert).",
+        "source_tables": ["banking_metrics"],
+        "source_columns": ["gross_npa_pct, net_npa_pct, interest_earned, net_interest_income, net_profit, cost_of_funds_pct"],
+        "filing_lag": "60d quarterly + 75d annual",
+        "pit_column_v1": None,
+        "pit_column_v2": "financial_recovery",
+        "v1_verdict_summary": "(v2-only; LARGE/MID-tier validation pending Phase 2.2d-v2 backtest run)",
+        "status": "READY",
+        "status_reason": "Phase 2.2b-v2 (split) shipped 2026-05-29. PIT helper writes both columns; screener will read this one for LARGE/MID tiers post-validation.",
     },
 ]
 

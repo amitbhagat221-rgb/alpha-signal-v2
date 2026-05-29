@@ -166,6 +166,9 @@ PIT_COLUMNS = [
     # Track 2.2b (2026-05-29) — Financial sub-model. NULL for non-financials;
     # only Banks + NBFCs get a score. Scope clarification in ADR 0030.
     "financial_signal",
+    # Phase 2.2b-v2 (2026-05-29 #2): tier-aware split — quality (SMALL),
+    # recovery (LARGE/MID) per direction-flip backtest finding.
+    "financial_quality", "financial_recovery",
 ]
 
 
@@ -2205,7 +2208,9 @@ def reconstruct_one_date(eval_date, raw, signals_to_run):
         base = base.merge(pit_insider_signal(raw["stocks"], ins_pit, eval_date), on="sid", how="left")
 
     # ── Track 2.2b — Financial sub-model (Banks + NBFCs only) ──
-    if "financial_signal" in signals_to_run and "banking_metrics" in raw:
+    # All three names trigger the same compute (it returns all three columns).
+    if any(s in signals_to_run for s in ("financial_signal", "financial_quality", "financial_recovery")) \
+            and "banking_metrics" in raw:
         base = base.merge(pit_financial_signal(raw["banking_metrics"], eval_date),
                           on="sid", how="left")
 
@@ -2327,23 +2332,32 @@ def reconstruct_one_date(eval_date, raw, signals_to_run):
 
 
 def pit_financial_signal(banking_metrics_full, eval_date):
-    """Reconstruct financial_signal at eval_date using PIT-filtered banking_metrics.
+    """Reconstruct financial_quality + financial_recovery at eval_date.
 
-    Delegates to signals.financial_signal.compute_pit which applies the
-    quarterly_lag (60d) + annual_lag (75d) filters internally and runs the
-    same algorithm as the live signal (40% asset quality + 30% profitability
-    + 15% capital [NULL pre-2.2c] + 15% funding, renormalized).
+    Delegates to signals.financial_signal.compute_pit which returns both signals
+    (each is a renormalised weighted average; only the asset-quality direction
+    differs — low NPA good for quality, high NPA good for recovery). The legacy
+    `financial_signal` column is set to financial_quality as the back-compat
+    alias.
 
-    Returns DataFrame[sid, financial_signal] — NULL for non-financials and
-    for insufficient-data stocks. Caller merges onto base; the upsert into
-    daily_snapshots_pit naturally leaves financial_signal NULL for stocks
-    not in the (Banks ∪ NBFCs) universe.
+    Returns DataFrame[sid, financial_signal, financial_quality, financial_recovery]
+    — NULL for non-financials and for insufficient-data stocks. Caller merges
+    onto base; the upsert into daily_snapshots_pit naturally leaves NULL for
+    stocks not in the (Banks ∪ NBFCs) universe.
     """
+    empty = pd.DataFrame(columns=["sid", "financial_signal", "financial_quality", "financial_recovery"])
     if banking_metrics_full is None or banking_metrics_full.empty:
-        return pd.DataFrame(columns=["sid", "financial_signal"])
+        return empty
     from signals.financial_signal import compute_pit
     eval_str = eval_date.isoformat() if hasattr(eval_date, "isoformat") else str(eval_date)
-    return compute_pit(eval_str, banking_metrics_full)
+    out = compute_pit(eval_str, banking_metrics_full)
+    if out.empty:
+        return empty
+    # financial_signal alias = quality variant (back-compat for older consumers
+    # of daily_snapshots_pit + the backtest_pit harness's SIGNAL_COLUMN_MAP).
+    out = out.copy()
+    out["financial_signal"] = out["financial_quality"]
+    return out[["sid", "financial_signal", "financial_quality", "financial_recovery"]]
 
 
 def load_raw():
@@ -2507,7 +2521,8 @@ def main():
                                  "goodwill_to_assets", "debt_structure",
                                  "asset_tangibility",
                                  "smart_money",
-                                 "financial_signal"],
+                                 "financial_signal",
+                                 "financial_quality", "financial_recovery"],
                         help="Compute only this signal (repeatable)")
     parser.add_argument("--date", action="append", default=None,
                         help="Explicit eval date (YYYY-MM-DD, repeatable). "

@@ -101,8 +101,12 @@ def _load_signals():
         "SELECT sid, consensus_signal, pt_upside, eps_growth FROM consensus_signals "
         "WHERE (sid, snapshot_date) IN (SELECT sid, MAX(snapshot_date) FROM consensus_signals GROUP BY sid)"
     )
+    # promoter_signal (composite) + pledge_quality (SMALL t=5.90, KEEP).
+    # pledge_quality directly proxies promoter-pledge stress; coverage ~97% of the
+    # promoter_signals universe. Non-colinear with promoter_signal per the 2026-05-29
+    # factor-correlation diagnostic (different cluster).
     promoter = read_sql(
-        "SELECT sid, promoter_signal FROM promoter_signals "
+        "SELECT sid, promoter_signal, pledge_quality FROM promoter_signals "
         "WHERE (sid, snapshot_date) IN (SELECT sid, MAX(snapshot_date) FROM promoter_signals GROUP BY sid)"
     )
     forensic = read_sql(
@@ -117,9 +121,11 @@ def _load_signals():
     # Inline signals (no DB table — compute on the fly)
     from signals.momentum import compute_momentum
     from signals.earnings_yield import compute_earnings_yield
+    from signals.delivery_anomaly import compute_delivery_anomaly_z
 
     momentum = compute_momentum()
     earnings_yield = compute_earnings_yield()
+    delivery_anomaly = compute_delivery_anomaly_z()
 
     # Book-to-price: total_equity / (shares_outstanding * close_price)
     book_to_price = _compute_book_to_price()
@@ -135,6 +141,7 @@ def _load_signals():
     df = df.merge(momentum, on="sid", how="left")
     df = df.merge(earnings_yield, on="sid", how="left")
     df = df.merge(book_to_price, on="sid", how="left")
+    df = df.merge(delivery_anomaly, on="sid", how="left")
     df = df.merge(price_counts, on="sid", how="left")
     df["price_rows"] = df["price_rows"].fillna(0).astype(int)
 
@@ -204,6 +211,9 @@ def score_universe(df, weights: dict = None):
         # Wired 2026-05-28 — dominant in PIT IC backtest, were missing from screener:
         "pt_upside": "pt_upside",    # t=7.15 LARGE / 8.40 MID / 9.14 SMALL
         "eps_growth": "eps_growth",  # t=5.31 LARGE / 3.23 SMALL
+        # Wired 2026-05-29 (Next-3 #3) — non-colinear bench factors per factor-correlation diagnostic:
+        "pledge_quality":     "pledge_quality",      # t=5.90 SMALL (KEEP)
+        "delivery_anomaly_z": "delivery_anomaly_z",  # t=4.76 SMALL (KEEP)
     }
 
     # Percentile-rank all signals within tier (higher = better for all)

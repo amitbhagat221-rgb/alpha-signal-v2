@@ -61,6 +61,8 @@ WIRED_KEYS = {
     "momentum", "book_to_price", "promoter", "smart_money",
     # Wired 2026-05-28 (from consensus_signals, both columns already present):
     "pt_upside", "eps_growth",
+    # Wired 2026-05-29 (Next-3 #3):
+    "pledge_quality", "delivery_anomaly_z",
 }
 
 
@@ -81,6 +83,23 @@ def _load_canonical_ics():
         subset=["signal", "cap_tier"], keep="first"
     )
     return df
+
+
+def _filter_wired(weights_by_tier: dict) -> dict:
+    """Drop unwired keys and renormalize within each tier so |w| sums to 1.0.
+
+    The full dicts (unfiltered) show what's *theoretically* worth; this is what's
+    *actually scoreable today*. Use this for config.py SIGNAL_WEIGHTS_* writes.
+    """
+    out = {}
+    for tier, items in weights_by_tier.items():
+        wired = {k: w for k, w in items.items() if k in WIRED_KEYS}
+        abs_total = sum(abs(w) for w in wired.values())
+        if abs_total <= 0:
+            out[tier] = {}
+            continue
+        out[tier] = {k: round(w / abs_total, 4) for k, w in wired.items()}
+    return out
 
 
 def _build_weights(df, objective: str) -> dict:
@@ -177,6 +196,8 @@ def _coverage_report(weights_by_tier: dict):
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--objective", choices=["return", "sharpe", "both"], default="both")
+    p.add_argument("--filter-wired", action="store_true",
+                   help="Drop unwired keys + renormalise per tier — paste-ready for config.py.")
     args = p.parse_args()
 
     df = _load_canonical_ics()
@@ -184,12 +205,16 @@ def main():
 
     if args.objective in ("return", "both"):
         w_ret = _build_weights(df, "return")
+        if args.filter_wired:
+            w_ret = _filter_wired(w_ret)
         _print_block("SIGNAL_WEIGHTS_RETURN", w_ret, df)
         if args.objective == "return":
             _coverage_report(w_ret)
 
     if args.objective in ("sharpe", "both"):
         w_sh = _build_weights(df, "sharpe")
+        if args.filter_wired:
+            w_sh = _filter_wired(w_sh)
         _print_block("SIGNAL_WEIGHTS_SHARPE", w_sh, df)
         _coverage_report(w_sh)
 
