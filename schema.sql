@@ -556,6 +556,45 @@ CREATE INDEX IF NOT EXISTS idx_banking_metrics_period ON banking_metrics(period_
 CREATE INDEX IF NOT EXISTS idx_banking_metrics_sid    ON banking_metrics(sid);
 
 
+-- ── Financial signal scores (Track 2.2b output) ─────────────────────
+-- Per-stock composite score for Banks + NBFCs, replacing Piotroski/
+-- accruals/value_composite for these stocks in the main screener (when
+-- routing is enabled in Phase 2.2d — currently print-only).
+--
+-- Components (z-scored within (industry, cap_tier), each in ~[-3, +3]):
+--   asset_quality_z  40%  ← -(gross_npa_pct + 2 × net_npa_pct)
+--   profitability_z  30%  ← NII margin + 0.5 × net-profit margin
+--   capital_z        15%  ← NULL until Phase 2.2c (RBI CAR/CRAR)
+--   funding_z        15%  ← -cost_of_funds_pct (proxy for CASA / NBFC funding edge)
+--
+-- composite renormalized over present components; <2 present → INSUFFICIENT.
+CREATE TABLE IF NOT EXISTS financial_signal_scores (
+    sid                 TEXT NOT NULL,
+    snapshot_date       TEXT NOT NULL,
+    industry            TEXT,
+    cap_tier            TEXT,
+    -- Component z-scores (~[-3, +3], NULL if input missing)
+    asset_quality_z     REAL,
+    profitability_z     REAL,
+    capital_z           REAL,
+    funding_z           REAL,
+    -- Bookkeeping
+    components_present  INTEGER,
+    score_basis         TEXT,                 -- e.g. "AQ+P+F", "P+F", "INSUFFICIENT"
+    -- Final composite (renormalized weighted avg over present, clip [-3, +3])
+    financial_signal    REAL,
+    -- Raw inputs for transparency (latest quarterly + annual)
+    gross_npa_pct       REAL,
+    net_npa_pct         REAL,
+    nii_margin_pct      REAL,
+    np_margin_pct       REAL,
+    cost_of_funds_pct   REAL,
+    computed_at         TEXT DEFAULT (datetime('now')),
+    PRIMARY KEY (sid, snapshot_date)
+);
+CREATE INDEX IF NOT EXISTS idx_financial_signal_date ON financial_signal_scores(snapshot_date);
+
+
 -- ── Pick outcomes: realized forward returns per pick ────────────────
 -- Closes the loop on `daily_picks`. For each (sid, pick_date) the screener
 -- writes, compute the realized close-to-close return over a fixed forward

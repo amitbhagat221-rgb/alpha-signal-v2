@@ -515,6 +515,15 @@ PIPELINE_STEPS = [
     {"name": "regime_update",      "module": "scoring.regime",      "function": "compute",  "critical": False,
      "table": "regime_state",      "source": "vix_history",         "data_freq": "daily",   "frequency": "daily"},
 
+    # Financial sub-model (Track 2.2b, ADR 0030) — daily snapshot of per-
+    # stock score for 158 Banks + NBFCs. Reads latest quarterly + annual
+    # from banking_metrics; renormalizes 40% AQ + 30% P + 15% C (NULL
+    # until 2.2c) + 15% F over present components. Currently print-only:
+    # the screener doesn't route Financials through it yet (Phase 2.2d
+    # decision pending t-stat ≥ 2.0 backtest validation).
+    {"name": "compute_financial_signal", "module": "signals.financial_signal", "function": "compute", "critical": False,
+     "table": "financial_signal_scores", "source": "banking_metrics", "data_freq": "daily", "frequency": "daily"},
+
     {"name": "screener",           "module": "scoring.screener",    "function": "compute",  "critical": True,
      "table": "daily_picks",       "source": "all signals",         "data_freq": "daily",   "frequency": "daily"},
 
