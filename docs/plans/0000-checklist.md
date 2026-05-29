@@ -4,10 +4,10 @@ _Glyphs: ✅ done · ⏳ next/in-progress · 🚫 blocked · 💤 parked · ↔ 
 _Convention: [ADR 0015](../decisions/0015-track-numbering-and-rename.md) (tracks) + [ADR 0016](../decisions/0016-plan-numbering-fresh-start.md) (plans)._
 
 ## Next 3
-1. ⏳ **Phase 2.2a-ii — `sources/banking_metrics.py`** — Screener.in bank-page parser → `banking_metrics` (28-col table just created). 158 SID backfill. After this lands, coverage report tells us whether to ship RBI fallback for CASA/PCR/CAR (Phase 2.2c) or proceed straight to signal (Phase 2.2b). ADR 0030 has the rationale.
-2. ⏳ **Wire 2 non-colinear bench factors** — `pledge_quality` (SMALL t=5.9) + `delivery_anomaly_z` (SMALL t=4.76). Correlation diagnostic killed the other 5 proposed wirings as redundant.
-3. ⏳ **Variant promotion decision** — `SIGNAL_WEIGHTS_RETURN`/`SHARPE` print-only today. Honest answer: gated on orthogonalization (3.3b) because variants weight a colinearity-confounded basis. Kill-switch 2026-06-28; promote-or-abandon. Schema cost if promoting via `variant` PK column: 1-2 day refactor touching 6+ cockpit endpoints + dossier + morning_brief + PIT anchors.
-4. ⏳ **Refresh `nse_index_history`** — NIFTY 50 latest = 2026-04-30, blocks `pick_outcomes` bench columns for newer picks.
+1. ⏳ **Phase 2.2b — `signals/financial_signal.py` implementation** — skeleton + spec committed. Banks (41 stocks) can compute fully today (Screener gives 5/5 ratios). NBFCs (100) need graceful degradation pending Phase 2.2c. ETA 1 session: implement load → score → write, add `financial_signal` to `daily_snapshots_pit`, add PIT helper, route in `scoring/screener.py` (industry branch).
+2. ⏳ **Phase 2.2c — NBFC GNPA fallback** — only 20/100 NBFCs publish quarterly NPA on Screener.in. Without RBI/SEBI/AR fallback, financial_signal for NBFCs runs on 2-3/4 core ratios (right at Plan 0001 minimum). Probe: RBI's NBFC database (XBRL), SEBI's Form A filings, individual NBFC investor presentations.
+3. ⏳ **Wire 2 non-colinear bench factors** — `pledge_quality` (SMALL t=5.9) + `delivery_anomaly_z` (SMALL t=4.76).
+4. ⏳ **Variant promotion** + **Refresh `nse_index_history`** — both queued.
 
 ## Shipped today (2026-05-29)
 - ✅ **Factor correlation diagnostic** — [tools/factor_correlation.py](../../tools/factor_correlation.py). Findings: 5 clusters per tier at |ρ|≥0.6, including a "is this a strong business" mega-cluster of 8-12 factors (roe / roa / roic / interest_coverage / debt_to_equity / fcf_margin / fcf_yield / profit_margin / z_score / quality_composite). Killed 5 of 7 proposed wirings as colinear. Output: `data/factor_correlation_{LARGE,MID,SMALL}.json` + `output/factor_correlation_report.txt`.
@@ -22,10 +22,14 @@ Audit + tier infra + stratified backtest + 36mo PIT + cutover. See ADRs 0009-001
 - ✅ 2.1 Small-cap quality gate
 - ⏳ 2.2 Financial sub-model — **source decision flipped 2026-05-29: Screener.in, not Tickertape** ([ADR 0030](../decisions/0030-banking-metrics-screener-first.md)). Probe showed Tickertape carries no banking-specific ratios; Screener.in stock pages have GNPA/NNPA/NII/Interest/Deposits. Scope clarified to **158 Banks+NBFCs** (the 91 AMC+Insurance+Capital-Markets stay on main screener).
    - ✅ Phase 2.2a-i: probe + ADR + `banking_metrics` table (28 cols, schema in `schema.sql`)
-   - ⏳ Phase 2.2a-ii: `sources/banking_metrics.py` — Screener.in bank-page parser, 158-SID backfill
-   - ⏳ Phase 2.2b: `signals/financial_signal.py` + routing in `scoring/screener.py`
-   - ⏳ Phase 2.2c: RBI fallback for CASA/PCR/CAR — gated on 2.2a coverage report
+   - ✅ Phase 2.2a-ii: `sources/banking_metrics.py` — Screener.in bank-page parser, 158-SID backfill **DONE 2026-05-29 (9.1 min)**. Coverage: **131/132 ex-MICRO (99.2%)** — Banks 41/41 (100%), NBFCs LARGE/MID/SMALL 80/81 (98.8%), NBFCs MICRO 20/36 (excluded anyway). 17 failures all 404'd both standalone+consolidated (delisted/micro-shells). 3,365 rows total. PIPELINE wired (`fetch_banking_metrics`, monthly).
+   - ⏳ Phase 2.2b: `signals/financial_signal.py` — skeleton committed [signals/financial_signal.py](../../signals/financial_signal.py) with full spec + benchmarks + migration checklist. Implementation: load latest quarterly + annual per sid, compute asset_quality (40%) + profitability (30%) + capital (15%) + funding (15%), z-score within (industry, cap_tier). Route in scoring/screener.py.
+   - ⏳ Phase 2.2c: RBI fallback **— priority confirmed high** for NBFC GNPA (only 20/100 quarterly NPA from Screener — NBFCs don't publish in standard format). Also PCR/CASA/CAR universally missing. Banks need nothing extra (Screener covers fully). Possible sources: RBI XBRL, AR PDFs, SEBI filings.
    - ⏳ Phase 2.2d: cockpit financial sub-model page + backtest validation (t-stat ≥ 2.0 within Financial subset = Plan 0001 done gate)
+
+   **Coverage report (latest-quarterly per stock, 2026-05-29):**
+   - Banks: 41/41 stocks · GNPA 40/41 · NNPA 40/41 · NII 41/41 · BVPS 41/41 · Deposits 41/41 · COF 41/41 ✓
+   - NBFCs: 100/100 stocks · GNPA 20/100 (big gap) · NNPA 19/100 · NII 70/100 · BVPS 95/100 · Borrowings 70/100 · COF 63/100 · Deposits 0/100 (expected — non-deposit-taking)
 - ⏳ 2.3 Cyclical overlay (parallel-able with 2.2)
 - ⏳ 2.4 Segment models + portfolio (capstone) **↔ 3.3c**
 - 🚫 2.5 XGBoost overlay **↔ 3.3b** — needs ≥6mo PIT, ETA early 2027
