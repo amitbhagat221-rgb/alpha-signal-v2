@@ -4,9 +4,10 @@ _Glyphs: ✅ done · ⏳ next/in-progress · 🚫 blocked · 💤 parked · ↔ 
 _Convention: [ADR 0015](../decisions/0015-track-numbering-and-rename.md) (tracks) + [ADR 0016](../decisions/0016-plan-numbering-fresh-start.md) (plans)._
 
 ## Next 3
-1. ⏳ **Wire ONLY the 2 non-colinear bench factors** — correlation diagnostic (✅ 2026-05-29) showed 5 of the 7 proposed bench factors (`interest_coverage`, `ccc`, `roic`, `fcf_margin`, `nwc_to_revenue`) cluster with already-wired signals at |ρ|≥0.6. Only `pledge_quality` (SMALL, promoter family) and `delivery_anomaly_z` (SMALL, smart-money family) are genuinely additive. Wire them; skip the rest until orthogonalization (3.3b) lands. Re-run `python -m tools.optimize_weights` after.
-2. ⏳ **Promote a variant to production?** — `SIGNAL_WEIGHTS_RETURN`/`SHARPE` print-only today. Set kill-switch date 2026-06-28 (one variant in or both abandoned). Either replace `SIGNAL_WEIGHTS` in [config.py:51](../../config.py#L51) or add `variant` column to `daily_picks` (PK becomes (sid, pick_date, variant)).
-3. ⏳ **Refresh `nse_index_history`** — NIFTY 50 latest = 2026-04-30 (29d stale), blocking bench/excess columns in `pick_outcomes` for any pick newer than that. [sources/nse_indices.py](../../sources/nse_indices.py) (or wherever it lives) needs a daily cron entry.
+1. ⏳ **Phase 2.2a-ii — `sources/banking_metrics.py`** — Screener.in bank-page parser → `banking_metrics` (28-col table just created). 158 SID backfill. After this lands, coverage report tells us whether to ship RBI fallback for CASA/PCR/CAR (Phase 2.2c) or proceed straight to signal (Phase 2.2b). ADR 0030 has the rationale.
+2. ⏳ **Wire 2 non-colinear bench factors** — `pledge_quality` (SMALL t=5.9) + `delivery_anomaly_z` (SMALL t=4.76). Correlation diagnostic killed the other 5 proposed wirings as redundant.
+3. ⏳ **Variant promotion decision** — `SIGNAL_WEIGHTS_RETURN`/`SHARPE` print-only today. Honest answer: gated on orthogonalization (3.3b) because variants weight a colinearity-confounded basis. Kill-switch 2026-06-28; promote-or-abandon. Schema cost if promoting via `variant` PK column: 1-2 day refactor touching 6+ cockpit endpoints + dossier + morning_brief + PIT anchors.
+4. ⏳ **Refresh `nse_index_history`** — NIFTY 50 latest = 2026-04-30, blocks `pick_outcomes` bench columns for newer picks.
 
 ## Shipped today (2026-05-29)
 - ✅ **Factor correlation diagnostic** — [tools/factor_correlation.py](../../tools/factor_correlation.py). Findings: 5 clusters per tier at |ρ|≥0.6, including a "is this a strong business" mega-cluster of 8-12 factors (roe / roa / roic / interest_coverage / debt_to_equity / fcf_margin / fcf_yield / profit_margin / z_score / quality_composite). Killed 5 of 7 proposed wirings as colinear. Output: `data/factor_correlation_{LARGE,MID,SMALL}.json` + `output/factor_correlation_report.txt`.
@@ -19,7 +20,12 @@ Audit + tier infra + stratified backtest + 36mo PIT + cutover. See ADRs 0009-001
 
 ## Track 2 — Portfolio  · [plan 0001](0001-mother-plan.md)
 - ✅ 2.1 Small-cap quality gate
-- ⏳ 2.2 Financial sub-model — `sources/banking_metrics.py` + `banking_metrics` table + `signals/financial_signal.py`
+- ⏳ 2.2 Financial sub-model — **source decision flipped 2026-05-29: Screener.in, not Tickertape** ([ADR 0030](../decisions/0030-banking-metrics-screener-first.md)). Probe showed Tickertape carries no banking-specific ratios; Screener.in stock pages have GNPA/NNPA/NII/Interest/Deposits. Scope clarified to **158 Banks+NBFCs** (the 91 AMC+Insurance+Capital-Markets stay on main screener).
+   - ✅ Phase 2.2a-i: probe + ADR + `banking_metrics` table (28 cols, schema in `schema.sql`)
+   - ⏳ Phase 2.2a-ii: `sources/banking_metrics.py` — Screener.in bank-page parser, 158-SID backfill
+   - ⏳ Phase 2.2b: `signals/financial_signal.py` + routing in `scoring/screener.py`
+   - ⏳ Phase 2.2c: RBI fallback for CASA/PCR/CAR — gated on 2.2a coverage report
+   - ⏳ Phase 2.2d: cockpit financial sub-model page + backtest validation (t-stat ≥ 2.0 within Financial subset = Plan 0001 done gate)
 - ⏳ 2.3 Cyclical overlay (parallel-able with 2.2)
 - ⏳ 2.4 Segment models + portfolio (capstone) **↔ 3.3c**
 - 🚫 2.5 XGBoost overlay **↔ 3.3b** — needs ≥6mo PIT, ETA early 2027

@@ -501,6 +501,61 @@ CREATE TABLE IF NOT EXISTS pipeline_log (
 CREATE INDEX IF NOT EXISTS idx_pipeline_log_date ON pipeline_log(run_date);
 
 
+-- ── Banking metrics (Track 2.2 Financial sub-model) ────────────────
+-- Per-bank-per-quarter regulatory disclosures that the main screener can't
+-- produce. Scope: 158 Banks + NBFCs (the 91 other "Financials" — AMC,
+-- Insurance, Capital Markets — keep using the main screener with caveats).
+--
+-- Primary source: Screener.in stock page (ADR 0030, supersedes Plan 0001
+-- "Tickertape-first" answer). Tickertape's libraries don't expose bank-
+-- specific ratios. RBI fallback gated on Phase 2.2a coverage report.
+--
+-- Some columns will be NULL on initial backfill — Screener.in carries
+-- GNPA/NNPA/NII/Interest/Deposits/Advances but NOT CASA/PCR/CAR. The
+-- nullability is intentional, not a bug. financial_signal.py must
+-- gracefully score on the subset present (Plan 0001 §2.2 "≥3/5 core
+-- ratios" gate).
+CREATE TABLE IF NOT EXISTS banking_metrics (
+    sid                      TEXT NOT NULL,
+    period_end               TEXT NOT NULL,         -- YYYY-MM-DD, quarter end
+    period_type              TEXT NOT NULL,         -- 'quarterly' / 'annual'
+    -- Income statement
+    interest_earned          REAL,                  -- "Sales" on Screener for banks
+    interest_expended        REAL,                  -- "Interest" line on Screener
+    net_interest_income      REAL,                  -- "Financing Profit" on Screener
+    other_income             REAL,
+    provisions               REAL,
+    pre_provision_op_profit  REAL,                  -- PPOP
+    net_profit               REAL,
+    -- Asset quality
+    gross_npa_pct            REAL,                  -- "Gross NPA %" on Screener
+    net_npa_pct              REAL,                  -- "Net NPA %"  on Screener
+    pcr_pct                  REAL,                  -- RBI fallback
+    slippage_pct             REAL,                  -- derived
+    credit_cost_pct          REAL,                  -- provisions / avg advances
+    -- Balance sheet
+    advances                 REAL,                  -- "Loans n Advances"
+    deposits                 REAL,
+    borrowings               REAL,
+    book_value_per_share     REAL,
+    casa_pct                 REAL,                  -- RBI fallback
+    -- Capital adequacy
+    car_pct                  REAL,                  -- Banks; RBI fallback
+    crar_pct                 REAL,                  -- NBFCs; RBI fallback
+    -- Derived
+    nim_pct                  REAL,                  -- 4 × NII / avg advances
+    roa_pct                  REAL,
+    cost_of_funds_pct        REAL,
+    adj_book_per_share       REAL,                  -- BV - GNPA × (1 - PCR/100); BV - GNPA if PCR null
+    -- Provenance
+    source                   TEXT NOT NULL DEFAULT 'screener_in',
+    fetched_at               TEXT DEFAULT (datetime('now')),
+    PRIMARY KEY (sid, period_end, period_type)
+);
+CREATE INDEX IF NOT EXISTS idx_banking_metrics_period ON banking_metrics(period_end);
+CREATE INDEX IF NOT EXISTS idx_banking_metrics_sid    ON banking_metrics(sid);
+
+
 -- ── Pick outcomes: realized forward returns per pick ────────────────
 -- Closes the loop on `daily_picks`. For each (sid, pick_date) the screener
 -- writes, compute the realized close-to-close return over a fixed forward
