@@ -585,6 +585,14 @@ PIPELINE_STEPS = [
     # populated for 2336 stocks).
     {"name": "fetch_broker_recos", "module": "sources.moneycontrol_recos", "function": "compute", "critical": False,
      "table": "broker_recommendations", "source": "Moneycontrol HTML (12s/req)",   "data_freq": "weekly", "frequency": "weekly"},
+
+    # Banking metrics — Screener.in HTML scrape, 158 Banks + NBFCs (ADR 0030,
+    # Phase 2.2a-ii). Underlying data is quarterly so MONTHLY cron suffices.
+    # ~3 s/stock × 158 = ~8 min. Function signature differs from pipeline's
+    # standard `compute()` — banking_metrics.main() takes argparse args; the
+    # runner needs `--universe`. Wrapped via `compute()` helper.
+    {"name": "fetch_banking_metrics", "module": "sources.banking_metrics", "function": "compute_universe", "critical": False,
+     "table": "banking_metrics",    "source": "Screener.in stock pages (158 banks+NBFCs)", "data_freq": "quarterly", "frequency": "monthly"},
 ]
 
 # Also track raw data tables (not pipeline steps — populated by migration / fetchers)
