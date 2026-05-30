@@ -111,6 +111,9 @@
     <button class="tab-button" :class="{ active: tab === 'consensus' }" @click="tab = 'consensus'; loaded.consensus = true; $nextTick(() => initConsensusCharts())">Consensus</button>
     <button class="tab-button" :class="{ active: tab === 'forensic' }" @click="tab = 'forensic'">Forensic</button>
     <button class="tab-button" :class="{ active: tab === 'price' }" @click="tab = 'price'; loaded.price = true; $nextTick(() => initPriceChart('1y'))">Price &amp; Technicals</button>
+    {% if s.uhs and s.uhs.score_pct is not none %}
+    <button class="tab-button" :class="{ active: tab === 'trust' }" @click="tab = 'trust'">Trust</button>
+    {% endif %}
 </div>
 
 {# ════════════════════════════════════════════ #}
@@ -1220,6 +1223,57 @@
 </div>
 
 </div> {# end price tab #}
+
+{# ════════════════════════════════════════════ #}
+{# ─────────────── TRUST TAB ───────────────────  #}
+{# ════════════════════════════════════════════ #}
+{% if s.uhs and s.uhs.score_pct is not none %}
+<div x-show="tab === 'trust'" x-cloak>
+
+<div class="card" style="margin-bottom: 16px;">
+    <div class="section-title">Unified Health Score · Plan 0007</div>
+    <div class="section-desc">One number per pick (0-100). Five dimensions sum to the score. Below 60 → AVOID; 60-79 → REVIEW; ≥80 → TRUSTED. Today's pick is read-only — gates run at fetch time and at the nightly UHS rollup.</div>
+
+    {% set u = s.uhs %}
+    {% set uhs_color = "score-green" if u.score_pct >= 80 else ("score-amber" if u.score_pct >= 60 else "score-red") %}
+
+    <div style="display: flex; align-items: center; gap: 24px; margin-top: 18px; margin-bottom: 18px;">
+        <div style="font-size: 56px; font-weight: 800;" class="{{ uhs_color }}">
+            {% if u.score_pct >= 80 %}🟢{% elif u.score_pct >= 60 %}🟡{% else %}🔴{% endif %} {{ u.score_pct }}
+        </div>
+        <div>
+            <div style="font-size: 22px; font-weight: 700;" class="{{ uhs_color }}">{{ u.label }}</div>
+            <div style="font-size: 12px; color: var(--text-muted); margin-top: 4px;">Pick UHS for {{ s.ticker }} on the latest pick date.</div>
+        </div>
+    </div>
+
+    <div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px;">
+        {% for label, key in [
+            ("Provenance",   "dim_provenance"),
+            ("Freshness",    "dim_freshness"),
+            ("Plausibility", "dim_plausibility"),
+            ("Consistency",  "dim_consistency"),
+            ("Coverage",     "dim_coverage"),
+        ] %}
+            {% set v = u[key] %}
+            {% set dim_color = "score-green" if v is not none and v >= 16 else ("score-amber" if v is not none and v >= 12 else ("score-red" if v is not none else "")) %}
+            <div style="background: var(--bg-card-hover); border-radius: 8px; padding: 12px; text-align: center;">
+                <div style="font-size: 10px; color: var(--text-muted); letter-spacing: 0.5px; text-transform: uppercase;">{{ label }}</div>
+                <div style="font-size: 24px; font-weight: 800; margin: 6px 0;" class="{{ dim_color }}">
+                    {% if v is not none %}{{ v }}{% else %}—{% endif %}
+                </div>
+                <div style="font-size: 9.5px; color: var(--text-muted);">/ 20</div>
+            </div>
+        {% endfor %}
+    </div>
+
+    <div style="margin-top: 16px; padding: 12px; background: var(--bg-card-hover); border-radius: 8px; font-size: 11.5px; color: var(--text-secondary); line-height: 1.6;">
+        <b>Score rule</b>: each dim is 0-20. Score = sum of non-NULL dims, normalized to 100. PRELIMINARY = score ≥80 but some dims are NULL (gate from a later phase isn't producing data yet). TRUSTED = score ≥80 with all 5 dims populated.<br>
+        <b>This pick's worst dim</b>: <code style="color: var(--text-primary);">{{ u.reasons or "—" }}</code>
+    </div>
+</div>
+</div> {# end trust tab #}
+{% endif %}
 
 </div> {# end alpine wrapper #}
 

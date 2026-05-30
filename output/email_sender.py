@@ -173,6 +173,10 @@ def _build_pick_card(row, dossier, idx):
     sector = row["sector"] or "—"
     score = row["final_score"]
     rank = row["rank"]
+    # Plan 0007 Phase 5 — per-pick UHS
+    uhs_score = row.get("uhs_score")
+    uhs_label = row.get("uhs_label")
+    uhs_worst = row.get("uhs_worst_dim")
 
     price = row.get("close_price")
     pe = row.get("pe_ratio")
@@ -312,6 +316,27 @@ def _build_pick_card(row, dossier, idx):
         </div>
         """
 
+    # Plan 0007 Phase 5 — UHS footer line
+    uhs_footer = ""
+    if uhs_score is not None:
+        if uhs_score >= 80:
+            uhs_emoji = "🟢"
+            uhs_color = C_GREEN
+        elif uhs_score >= 60:
+            uhs_emoji = "🟡"
+            uhs_color = C_AMBER
+        else:
+            uhs_emoji = "🔴"
+            uhs_color = C_RED
+        worst_text = f" · weakest dim: {uhs_worst}" if uhs_worst else ""
+        uhs_footer = (
+            f'<div style="font-size:10.5px;color:{C_MUTED};'
+            f'padding-top:8px;margin-top:6px;border-top:1px solid {C_BORDER}">'
+            f'{uhs_emoji} <b style="color:{uhs_color}">UHS {uhs_score} · {uhs_label or ""}</b>'
+            f'{worst_text}'
+            f'</div>'
+        )
+
     return f"""
     <div style="background:{C_CARD};border:1px solid {C_BORDER};
           border-left:4px solid {accent_color};border-radius:8px;
@@ -320,6 +345,7 @@ def _build_pick_card(row, dossier, idx):
       {stat_row}
       {pills_block}
       {dossier_block}
+      {uhs_footer}
     </div>
     """
 
@@ -332,6 +358,7 @@ def _build_html():
     picks = read_sql("""
         SELECT
           dp.sid, dp.final_score, dp.rank, dp.cap_tier, dp.sector,
+          dp.uhs_score, dp.uhs_label, dp.uhs_worst_dim,
           s.ticker, s.name, s.pe_ratio, s.pb_ratio, s.roe, s.market_cap_cr,
           ds.close_price, ds.piotroski_f, ds.earnings_yield, ds.delivery_pct,
           ds.consensus_signal, ds.promoter_qoq, ds.cf_accruals, ds.smart_money,
@@ -342,6 +369,11 @@ def _build_html():
               AND ds.snapshot_date = dp.pick_date
         WHERE dp.pick_date = (SELECT MAX(pick_date) FROM daily_picks)
           AND (dp.integrity_status IS NULL OR dp.integrity_status != 'FAIL')
+          -- Plan 0007 Phase 5 — UHS pick gate. Picks with score < 60 → AVOID
+          -- band: shown nowhere in action_queue/morning_brief/email. NULL
+          -- fallback covers rows pre-dating Phase 5; once UHS is universal
+          -- the NULL branch becomes dead code (Phase 8 will remove it).
+          AND (dp.uhs_score IS NULL OR dp.uhs_score >= 60)
         ORDER BY dp.cap_tier, dp.rank
     """)
 

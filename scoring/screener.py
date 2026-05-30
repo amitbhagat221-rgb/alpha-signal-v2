@@ -498,6 +498,19 @@ def compute(dry_run=False, top=None, variant: str = "production"):
 
     rows = upsert_df(picks_out, "daily_picks")
     print(f"\nSaved {rows} rows to daily_picks (date={pick_date})")
+
+    # Plan 0007 Phase 5 — write per-pick UHS (uhs_score / uhs_label /
+    # uhs_breakdown_json / uhs_worst_dim) for every row just landed.
+    # Reads health_score for input factors + signal_lineage for Gate 6
+    # coverage. Non-critical: a UHS write failure must NOT block the
+    # primary pick write that just succeeded.
+    try:
+        from scoring.confidence import batch_write_pick_uhs
+        batch_write_pick_uhs(pick_date)
+    except Exception as e:
+        import sys
+        print(f"  ⚠ pick UHS write failed (non-critical): {e}", file=sys.stderr)
+
     return rows
 
 

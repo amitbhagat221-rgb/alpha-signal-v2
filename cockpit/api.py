@@ -700,11 +700,16 @@ def get_top_picks(tier=None, top=5):
     df = read_sql(f"""
         SELECT dp.sid, dp.final_score, dp.rank, dp.cap_tier, dp.sector,
                dp.base_score, dp.forensic_adj,
+               dp.uhs_score, dp.uhs_label, dp.uhs_worst_dim,
                s.ticker, s.name, s.market_cap_cr, s.pe_ratio, s.roe
         FROM daily_picks dp
         JOIN stocks s ON dp.sid = s.sid
         WHERE dp.pick_date = (SELECT MAX(pick_date) FROM daily_picks)
           AND (dp.integrity_status IS NULL OR dp.integrity_status != 'FAIL')
+          -- Plan 0007 Phase 5 — UHS pick gate. Morning-brief + action_queue
+          -- hide picks with uhs_score < 60 (AVOID band). NULL fallback for
+          -- legacy rows; Phase 8 will drop NULL once UHS is universal.
+          AND (dp.uhs_score IS NULL OR dp.uhs_score >= 60)
         {where}
         ORDER BY dp.cap_tier, dp.rank
     """)

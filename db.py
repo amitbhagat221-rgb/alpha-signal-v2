@@ -110,6 +110,16 @@ _COLUMN_MIGRATIONS = [
     ("financial_signal_scores", "recovery_basis",     "TEXT"),
     ("financial_signal_scores", "asset_quality_quality_z",  "REAL"),
     ("financial_signal_scores", "asset_quality_recovery_z", "REAL"),
+    # ── Plan 0007 Phase 5: per-pick UHS columns ──
+    # uhs_score is the 0-100 normalized score for THIS pick at pick_date.
+    # uhs_breakdown_json keeps the 5 dim values + reasons for the explorer
+    # Trust panel and the dossier prompt. uhs_label is the UHS band
+    # (UNKNOWN/AVOID/REVIEW/PRELIMINARY/TRUSTED). uhs_worst_dim is the lowest-
+    # scoring dim (drives the dossier's "weak dim" disclosure).
+    ("daily_picks", "uhs_score",          "INTEGER"),
+    ("daily_picks", "uhs_breakdown_json", "TEXT"),
+    ("daily_picks", "uhs_label",          "TEXT"),
+    ("daily_picks", "uhs_worst_dim",      "TEXT"),
 ]
 
 
