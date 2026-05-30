@@ -1,0 +1,165 @@
+
+━━━ LARGE ─ |ρ| ≥ 0.6 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  factors with PIT data: 57 / 58
+
+  EXPECTED (composite ↔ component, 9 pairs) — sanity check, not a finding:
+    +1.00  consensus_signal_combined      ↔ eps_revision_yoy
+    +0.85  earnings_yield                 ↔ value_composite
+    +0.84  book_to_price                  ↔ value_composite
+    +0.83  eps_growth_yoy                 ↔ growth_composite
+    +0.83  growth_composite               ↔ revenue_growth_yoy
+    +0.80  quality_composite              ↔ roe
+    … (+3 more)
+
+  WITHIN-GROUP redundancy (11 pairs) — same family, often by construction:
+      +1.00  [Track 3 — Library] ccc                            ↔ wc_intensity
+      +0.98  [Track 3 — Library] nwc_to_revenue                 ↔ wc_intensity
+      +0.97  [Track 3 — Library] ccc                            ↔ nwc_to_revenue
+      +0.79  [Track 3 — Library] fcf_margin                     ↔ fcf_yield
+      +0.77  [Track 3 — Library] interest_coverage              ↔ roic
+      +0.75  [Value     ] book_to_price                  ↔ earnings_yield
+      -0.75  [Track 3 — Library] nwc_to_revenue                 ↔ relative_turnover
+      -0.74  [Track 3 — Library] relative_turnover              ↔ wc_intensity
+      -0.74  [Track 3 — Library] ccc                            ↔ relative_turnover
+      +0.72  [Quality   ] roa                            ↔ roe
+      +0.72  [Momentum  ] mom_12m                        ↔ mom_6m
+
+  ★ CROSS-GROUP redundancy (21 pairs) — the interesting finding:
+    -0.84  [Quality   ↔Track 3 — Library]  debt_to_equity                 ↔ interest_coverage
+    +0.83  [Quality   ↔Forensic  ]  cf_accruals                    ↔ m_score
+    +0.82  [Quality   ↔Track 3 — Library]  roa                            ↔ roic
+    +0.82  [Composite ↔Track 3 — Library]  quality_composite              ↔ roic
+    +0.74  [Quality   ↔Track 3 — Library]  roe                            ↔ roic
+    +0.73  [Track 3 — Library↔Composite ]  interest_coverage              ↔ quality_composite
+    +0.72  [Track 3 — Library↔Forensic  ]  interest_coverage              ↔ z_score
+    -0.71  [Quality   ↔Forensic  ]  debt_to_equity                 ↔ z_score
+    +0.69  [Track 3 — Library↔Quality   ]  interest_coverage              ↔ roa
+    +0.66  [Momentum  ↔Value     ]  mom_6m                         ↔ position_52w
+    +0.66  [Quality   ↔Composite ]  profit_margin                  ↔ quality_composite
+    +0.65  [Quality   ↔Track 3 — Library]  roe                            ↔ roiic
+    +0.64  [Track 3 — Library↔Quality   ]  fcf_margin                     ↔ profit_margin
+    +0.64  [Track 3 — Library↔Composite ]  fcf_margin                     ↔ quality_composite
+    +0.63  [Growth    ↔Consensus ]  eps_growth_yoy                 ↔ eps_revision_yoy
+    -0.63  [Quality   ↔Composite ]  debt_to_equity                 ↔ quality_composite
+    +0.63  [Consensus ↔Growth    ]  consensus_signal_combined      ↔ eps_growth_yoy
+    -0.63  [Track 3 — Library↔Forensic  ]  debt_structure                 ↔ z_score
+    +0.62  [Quality   ↔Forensic  ]  roa                            ↔ z_score
+    +0.61  [Composite ↔Track 3 — Library]  quality_composite              ↔ roiic
+    … (+1 more)
+
+  CLUSTERS at |ρ| ≥ 0.6 (excluding composites):
+    cluster 1 (4 factors): ccc, nwc_to_revenue, relative_turnover, wc_intensity
+    cluster 2 (12 factors): debt_structure, debt_to_equity, fcf_margin, fcf_yield, interest_coverage, profit_margin, quality_composite, roa, roe, roic, roiic, z_score
+    cluster 3 (2 factors): cf_accruals, m_score
+    cluster 4 (2 factors): book_to_price, earnings_yield
+    cluster 5 (3 factors): mom_12m, mom_6m, position_52w
+    cluster 6 (3 factors): consensus_signal_combined, eps_growth_yoy, eps_revision_yoy
+
+  → /home/ubuntu/alpha-signal-v2/data/factor_correlation_LARGE.json
+
+━━━ MID ─ |ρ| ≥ 0.6 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  factors with PIT data: 57 / 58
+
+  EXPECTED (composite ↔ component, 9 pairs) — sanity check, not a finding:
+    +1.00  consensus_signal_combined      ↔ eps_revision_yoy
+    +0.87  quality_composite              ↔ roe
+    +0.84  eps_growth_yoy                 ↔ growth_composite
+    +0.84  growth_composite               ↔ revenue_growth_yoy
+    +0.84  earnings_yield                 ↔ value_composite
+    +0.82  book_to_price                  ↔ value_composite
+    … (+3 more)
+
+  WITHIN-GROUP redundancy (11 pairs) — same family, often by construction:
+      +1.00  [Track 3 — Library] ccc                            ↔ wc_intensity
+      +0.96  [Track 3 — Library] nwc_to_revenue                 ↔ wc_intensity
+      +0.96  [Track 3 — Library] ccc                            ↔ nwc_to_revenue
+      +0.86  [Track 3 — Library] fcf_margin                     ↔ fcf_yield
+      +0.80  [Quality   ] roa                            ↔ roe
+      +0.76  [Momentum  ] mom_12m                        ↔ mom_6m
+      +0.67  [Track 3 — Library] interest_coverage              ↔ roic
+      -0.62  [Track 3 — Library] ccc                            ↔ relative_turnover
+      -0.62  [Track 3 — Library] relative_turnover              ↔ wc_intensity
+      +0.62  [Value     ] book_to_price                  ↔ earnings_yield
+      -0.60  [Quality   ] debt_to_equity                 ↔ roa
+
+  ★ CROSS-GROUP redundancy (16 pairs) — the interesting finding:
+    -0.77  [Quality   ↔Track 3 — Library]  debt_to_equity                 ↔ interest_coverage
+    +0.75  [Quality   ↔Track 3 — Library]  roa                            ↔ roic
+    +0.74  [Track 3 — Library↔Composite ]  interest_coverage              ↔ quality_composite
+    +0.74  [Composite ↔Track 3 — Library]  quality_composite              ↔ roic
+    +0.73  [Quality   ↔Composite ]  profit_margin                  ↔ quality_composite
+    +0.72  [Track 3 — Library↔Quality   ]  interest_coverage              ↔ roa
+    +0.71  [Quality   ↔Track 3 — Library]  roe                            ↔ roic
+    -0.70  [Quality   ↔Composite ]  debt_to_equity                 ↔ quality_composite
+    -0.70  [Quality   ↔Forensic  ]  debt_to_equity                 ↔ z_score
+    +0.70  [Momentum  ↔Value     ]  mom_6m                         ↔ position_52w
+    +0.70  [Quality   ↔Forensic  ]  roa                            ↔ z_score
+    +0.68  [Track 3 — Library↔Forensic  ]  interest_coverage              ↔ z_score
+    +0.66  [Quality   ↔Forensic  ]  cf_accruals                    ↔ m_score
+    +0.63  [Momentum  ↔Value     ]  mom_12m                        ↔ position_52w
+    +0.62  [Growth    ↔Consensus ]  eps_growth_yoy                 ↔ eps_revision_yoy
+    +0.61  [Value     ↔Track 3 — Library]  position_52w                   ↔ share_momentum
+
+  CLUSTERS at |ρ| ≥ 0.6 (excluding composites):
+    cluster 1 (4 factors): ccc, nwc_to_revenue, relative_turnover, wc_intensity
+    cluster 2 (2 factors): fcf_margin, fcf_yield
+    cluster 3 (8 factors): debt_to_equity, interest_coverage, profit_margin, quality_composite, roa, roe, roic, z_score
+    cluster 4 (4 factors): mom_12m, mom_6m, position_52w, share_momentum
+    cluster 5 (2 factors): cf_accruals, m_score
+    cluster 6 (2 factors): eps_growth_yoy, eps_revision_yoy
+    cluster 7 (2 factors): book_to_price, earnings_yield
+
+  → /home/ubuntu/alpha-signal-v2/data/factor_correlation_MID.json
+
+━━━ SMALL ─ |ρ| ≥ 0.6 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  factors with PIT data: 57 / 58
+
+  EXPECTED (composite ↔ component, 9 pairs) — sanity check, not a finding:
+    +1.00  consensus_signal_combined      ↔ eps_revision_yoy
+    +0.89  quality_composite              ↔ roa
+    +0.85  growth_composite               ↔ revenue_growth_yoy
+    +0.84  eps_growth_yoy                 ↔ growth_composite
+    +0.84  quality_composite              ↔ roe
+    +0.82  mom_12m                        ↔ mom_composite
+    … (+3 more)
+
+  WITHIN-GROUP redundancy (12 pairs) — same family, often by construction:
+      +1.00  [Track 3 — Library] ccc                            ↔ wc_intensity
+      +0.95  [Track 3 — Library] nwc_to_revenue                 ↔ wc_intensity
+      +0.94  [Track 3 — Library] ccc                            ↔ nwc_to_revenue
+      +0.89  [Quality   ] roa                            ↔ roe
+      +0.89  [Track 3 — Library] fcf_margin                     ↔ fcf_yield
+      +0.76  [Momentum  ] mom_12m                        ↔ mom_6m
+      -0.70  [Track 3 — Library] ccc                            ↔ relative_turnover
+      -0.69  [Track 3 — Library] relative_turnover              ↔ wc_intensity
+      +0.69  [Quality   ] profit_margin                  ↔ roa
+      -0.66  [Track 3 — Library] nwc_to_revenue                 ↔ relative_turnover
+      +0.63  [Track 3 — Library] interest_coverage              ↔ roic
+      +0.62  [Quality   ] bs_accruals                    ↔ cf_accruals
+
+  ★ CROSS-GROUP redundancy (15 pairs) — the interesting finding:
+    +0.84  [Quality   ↔Composite ]  profit_margin                  ↔ quality_composite
+    +0.73  [Quality   ↔Forensic  ]  cf_accruals                    ↔ m_score
+    -0.72  [Quality   ↔Forensic  ]  debt_to_equity                 ↔ z_score
+    +0.71  [Momentum  ↔Value     ]  mom_6m                         ↔ position_52w
+    +0.69  [Momentum  ↔Value     ]  mom_12m                        ↔ position_52w
+    +0.68  [Value     ↔Track 3 — Library]  position_52w                   ↔ share_momentum
+    +0.65  [Track 3 — Library↔Forensic  ]  interest_coverage              ↔ z_score
+    +0.64  [Quality   ↔Track 3 — Library]  roa                            ↔ roic
+    +0.63  [Quality   ↔Track 3 — Library]  roe                            ↔ roic
+    +0.63  [Quality   ↔Track 3 — Library]  bs_accruals                    ↔ sloan_accruals_full
+    +0.63  [Growth    ↔Consensus ]  eps_growth_yoy                 ↔ eps_revision_yoy
+    +0.63  [Quality   ↔Track 3 — Library]  roe                            ↔ roiic
+    +0.62  [Track 3 — Library↔Composite ]  interest_coverage              ↔ quality_composite
+    +0.61  [Composite ↔Track 3 — Library]  quality_composite              ↔ roic
+    -0.60  [Quality   ↔Track 3 — Library]  debt_to_equity                 ↔ interest_coverage
+
+  CLUSTERS at |ρ| ≥ 0.6 (excluding composites):
+    cluster 1 (4 factors): ccc, nwc_to_revenue, relative_turnover, wc_intensity
+    cluster 2 (9 factors): debt_to_equity, interest_coverage, profit_margin, quality_composite, roa, roe, roic, roiic, z_score
+    cluster 3 (2 factors): fcf_margin, fcf_yield
+    cluster 4 (4 factors): mom_12m, mom_6m, position_52w, share_momentum
+    cluster 5 (4 factors): bs_accruals, cf_accruals, m_score, sloan_accruals_full
+    cluster 6 (2 factors): eps_growth_yoy, eps_revision_yoy
+
+  → /home/ubuntu/alpha-signal-v2/data/factor_correlation_SMALL.json
