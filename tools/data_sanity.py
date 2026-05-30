@@ -163,6 +163,7 @@ CHECKS = [
     # ═══════════════════════════════════════════════════════════════════
     {
         "code": "PT_EQUALS_PRICE",
+        "deprecated_in_plan_0007": "Plan 0007 Gate 4 (cross_source)",
         "table": "analyst_consensus",
         "column": "price_target",
         "message": "analyst PT equals current close (feed misread — see HANDOFF 2026-05-22)",
@@ -186,6 +187,7 @@ CHECKS = [
     },
     {
         "code": "FORECAST_HISTORY_IS_PRICE_HISTORY",
+        "deprecated_in_plan_0007": "Plan 0007 Gate 4 (cross_source)",
         "table": "forecast_history",
         "column": "value (metric=price)",
         "message": "forecast_history.value (metric=price) matches stock_prices.close — not a real PT history",
@@ -256,6 +258,7 @@ CHECKS = [
     # ═══════════════════════════════════════════════════════════════════
     {
         "code": "PIOTROSKI_OUT_OF_RANGE",
+        "deprecated_in_plan_0007": "Plan 0007 Gate 2 (plausibility)",
         "table": "daily_snapshots",
         "column": "piotroski_f",
         "message": "piotroski_f outside [0, 9]",
@@ -268,6 +271,7 @@ CHECKS = [
     },
     {
         "code": "FINAL_SCORE_OUT_OF_RANGE",
+        "deprecated_in_plan_0007": "Plan 0007 Gate 2 (plausibility)",
         "table": "daily_picks",
         "column": "final_score",
         "message": "final_score outside [0, 1]",
@@ -280,6 +284,7 @@ CHECKS = [
     },
     {
         "code": "BUY_PCT_OUT_OF_RANGE",
+        "deprecated_in_plan_0007": "Plan 0007 Gate 2 (plausibility)",
         "table": "analyst_consensus",
         "column": "buy_pct",
         "message": "buy_pct outside [0, 100]",
@@ -291,6 +296,7 @@ CHECKS = [
     },
     {
         "code": "PT_UPSIDE_OUT_OF_RANGE",
+        "deprecated_in_plan_0007": "Plan 0007 Gate 2 (plausibility)",
         "table": "consensus_signals",
         "column": "pt_upside",
         # consensus_signals.pt_upside is in PERCENT units (signals/consensus.py
@@ -306,6 +312,7 @@ CHECKS = [
     },
     {
         "code": "M_SCORE_OUT_OF_RANGE",
+        "deprecated_in_plan_0007": "Plan 0007 Gate 2 (plausibility)",
         "table": "forensic_scores",
         "column": "m_score",
         "message": "m_score outside [-20, 20]",
@@ -317,6 +324,7 @@ CHECKS = [
     },
     {
         "code": "Z_SCORE_OUT_OF_RANGE",
+        "deprecated_in_plan_0007": "Plan 0007 Gate 2 (plausibility)",
         "table": "forensic_scores",
         "column": "z_score",
         "message": "z_score outside [-50, 200]",
@@ -328,6 +336,7 @@ CHECKS = [
     },
     {
         "code": "PROMOTER_PCT_OUT_OF_RANGE",
+        "deprecated_in_plan_0007": "Plan 0007 Gate 2 (plausibility)",
         "table": "shareholding",
         "column": "promoter_pct",
         "message": "promoter_pct outside [0, 100]",
@@ -338,6 +347,7 @@ CHECKS = [
     },
     {
         "code": "PLEDGE_PCT_OUT_OF_RANGE",
+        "deprecated_in_plan_0007": "Plan 0007 Gate 2 (plausibility)",
         "table": "shareholding",
         "column": "pledge_pct",
         "message": "pledge_pct outside [0, 100]",
@@ -348,6 +358,7 @@ CHECKS = [
     },
     {
         "code": "MOM_OUT_OF_RANGE",
+        "deprecated_in_plan_0007": "Plan 0007 Gate 2 (plausibility)",
         "table": "daily_snapshots",
         "column": "mom_6m / mom_12m",
         "message": "risk-adjusted momentum outside [-100, 100]",
@@ -359,6 +370,7 @@ CHECKS = [
     },
     {
         "code": "CLOSE_PRICE_BAD",
+        "deprecated_in_plan_0007": "Plan 0007 Gate 2 (plausibility)",
         "table": "stock_prices",
         "column": "close",
         "message": "stock_prices.close ≤ 0 (impossible)",
@@ -734,6 +746,7 @@ CHECKS = [
     # (where they would be eligible for dossier generation if we extended it).
     {
         "code": "EXTREME_GROWTH_PCT_IN_TOP_PICKS",
+        "deprecated_in_plan_0007": "Plan 0007 Gate 2 (plausibility)",
         "table": "analyst_consensus",
         "column": "eps_growth_pct",
         "message": "Top-100 picks have |eps_growth_pct| or |revenue_growth_pct| > 300% (likely div-by-near-zero artifacts)",
@@ -816,6 +829,7 @@ CHECKS = [
     # source divergence.
     {
         "code": "CROSS_SOURCE_PT_MISMATCH",
+        "deprecated_in_plan_0007": "Plan 0007 Gate 4 (cross_source)",
         "table": "analyst_consensus",
         "column": "price_target",
         "message": "yfinance consensus PT and broker-mean PT differ by >30% (consensus-of-consensuses divergence, ≥10 broker recos)",
@@ -914,6 +928,32 @@ CHECKS = [
         "warn_pct": 0.5,
         "fn": lambda: _mc_slug_name_mismatch_check(),
     },
+    # ═══════════════════════════════════════════════════════════════════
+    # Plan 0007 Phase 6 — External Anchor drift sentinel.
+    # Offline auditor of the live Gate 7 (tools/anchor_audit.py).
+    # If the live gate ever regresses, this nightly check resurfaces it.
+    # ═══════════════════════════════════════════════════════════════════
+    {
+        "code": "EXTERNAL_ANCHOR_DRIFT",
+        "table": "trust_verdicts",
+        "column": "gate_7_anchor",
+        "message": "yfinance close drifted from NSE bhavcopy anchor by >0.5% (Plan 0007 Gate 7)",
+        "critical_pct": 5,
+        "warn_pct": 1,
+        "sql": """
+            SELECT
+              SUM(CASE WHEN gate_7_anchor = 0 THEN 1 ELSE 0 END) AS n_bad,
+              COUNT(*) AS n_total,
+              (SELECT sid || ': ' || json_extract(reasons_json, '$.gate_7_anchor.drift_pct') || '%'
+               FROM trust_verdicts
+               WHERE gate_7_anchor = 0
+                 AND snapshot_date >= date('now', '-7 days')
+               ORDER BY snapshot_date DESC LIMIT 1) AS sample
+            FROM trust_verdicts
+            WHERE gate_7_anchor IS NOT NULL
+              AND snapshot_date >= date('now', '-7 days')
+        """,
+    },
 ]
 
 
@@ -984,7 +1024,16 @@ def _mc_slug_name_mismatch_check():
 
 
 def run(only_code=None):
-    """Run all checks, return list of violations (each a result dict)."""
+    """Run all checks, return list of violations (each a result dict).
+
+    Plan 0007 Phase 7: checks tagged with `deprecated_in_plan_0007` are
+    skipped here — their detection logic now lives in the runtime Trust
+    Pipeline gates (validators/identity_check.py, plausibility.py,
+    temporal_continuity.py, cross_source.py, unit_contract.py, anchor_audit.py).
+    The deprecated entries stay in CHECKS as historical record + audit trail;
+    a future plan can delete them once burn-in confirms the gates haven't
+    regressed.
+    """
     # Auto-generated coverage checks (one per table in COVERAGE_THRESHOLDS).
     # Lives outside CHECKS so future per-sid tables can be covered just by
     # adding to db.COVERAGE_THRESHOLDS.
@@ -992,6 +1041,8 @@ def run(only_code=None):
     violations = []
     with get_db() as conn:
         for check in all_checks:
+            if check.get("deprecated_in_plan_0007"):
+                continue
             if only_code and check["code"] != only_code:
                 continue
             try:
