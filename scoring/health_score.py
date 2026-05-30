@@ -314,6 +314,7 @@ def dim_consistency_for_factor(factor_id: str, snapshot_date: str) -> tuple[Opti
         ("gate_3_temporal",     "g3"),
         ("gate_4_cross_source", "g4"),
         ("gate_5_unit",         "g5"),
+        ("gate_7_anchor",       "g7"),   # Plan 0007 Phase 6 — external anchor
     ]
     rates = {}
     for col, key in gates:

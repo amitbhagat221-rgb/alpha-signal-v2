@@ -1472,3 +1472,32 @@ CREATE TABLE IF NOT EXISTS trust_verdicts (
 );
 CREATE INDEX IF NOT EXISTS idx_trust_verdicts_table_date ON trust_verdicts(source_table, snapshot_date);
 CREATE INDEX IF NOT EXISTS idx_trust_verdicts_verdict ON trust_verdicts(verdict_overall);
+
+-- ── Plan 0007 Phase 6: External Anchor (Gate 7) ──
+-- The closed-loop fix. Every existing data quality check today compares values
+-- to other internal values; nothing compares to an independent ground truth.
+-- This table holds the few free anchors we can afford at our scale:
+--   Anchor A — NSE bhavcopy (authoritative for close/volume/delivery_pct)
+--   Anchor B — BSE official site spot-check (top-50 LARGE close prices,
+--              manually seeded weekly via tools/anchor_audit.py)
+--   Anchor C — AMC factsheets (top-50 MF schemes, monthly manual parse)
+--
+-- HONEST SCOPE: fundamentals (revenue, NPA, EPS) have NO external anchor at
+-- our scale — that's a structural ceiling, ~95/100 not 100/100. Gate 4
+-- cross-source agreement is the best free proxy. See ADR 0033.
+--
+-- Drift is detected by tools/anchor_audit.py comparing our consumer value
+-- (yfinance / Tickertape / Screener.in) to the anchor; mismatches emit
+-- trust_verdicts.gate_7_anchor=0 + EXTERNAL_ANCHOR_DRIFT data_sanity check.
+CREATE TABLE IF NOT EXISTS external_anchors (
+    datum_class       TEXT NOT NULL,         -- close / volume / delivery_pct / mf_ret_1y / mf_ret_3y_cagr
+    sid_or_segment    TEXT NOT NULL,         -- stocks.sid OR mf_scheme_master.scheme_code
+    anchor_value      REAL,
+    anchor_source     TEXT NOT NULL,         -- 'nse_bhavcopy' | 'bse_manual' | 'amc_factsheet'
+    anchor_date       TEXT NOT NULL,
+    notes             TEXT,
+    fetched_at        TEXT DEFAULT (datetime('now')),
+    PRIMARY KEY (datum_class, sid_or_segment, anchor_source, anchor_date)
+);
+CREATE INDEX IF NOT EXISTS idx_external_anchors_date ON external_anchors(anchor_date);
+CREATE INDEX IF NOT EXISTS idx_external_anchors_class ON external_anchors(datum_class, anchor_date);

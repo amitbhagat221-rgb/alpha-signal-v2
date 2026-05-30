@@ -170,6 +170,63 @@ def bug_2026_05_29_watchdog_check_constraint_crash() -> bool:
     return True
 
 
+def bug_2026_05_30_external_anchor_drift_synthetic() -> bool:
+    """Phase 6 Gate 7 regression fixture. Deliberately corrupt a yfinance close
+    by 5% off the NSE bhavcopy anchor; audit_drift() must catch it (write
+    gate_7_anchor=0 verdict) and the live row must NOT pass.
+
+    Synthetic test using a test SID — no impact on live data.
+    """
+    from db import get_db, read_sql
+    from tools.anchor_audit import audit_drift
+
+    # Use a real SID (FK constraint to stocks) — and a far-past date to avoid
+    # collision with real stock_prices history.
+    test_sid = "RELI"
+    test_date = "1999-01-15"
+
+    # Cleanup from any prior run
+    with get_db() as conn:
+        conn.execute("DELETE FROM external_anchors WHERE sid_or_segment=?", (test_sid,))
+        conn.execute("DELETE FROM trust_verdicts WHERE sid=?", (test_sid,))
+        conn.execute("DELETE FROM stock_prices WHERE sid=? AND date=?", (test_sid, test_date))
+
+    # Seed anchor + corrupted yfinance row
+    with get_db() as conn:
+        conn.execute(
+            """INSERT INTO external_anchors
+               (datum_class, sid_or_segment, anchor_value, anchor_source, anchor_date)
+               VALUES ('close', ?, 1000.0, 'nse_bhavcopy', ?)""",
+            (test_sid, test_date),
+        )
+        # yfinance row 5% off (>0.5% tolerance → DRIFT)
+        conn.execute(
+            """INSERT INTO stock_prices (sid, date, open, high, low, close, volume, source)
+               VALUES (?, ?, 1050.0, 1060.0, 1040.0, 1050.0, 100000, 'yfinance.NS')""",
+            (test_sid, test_date),
+        )
+
+    counts = audit_drift(test_date)
+    assert counts["drifted"] >= 1, (
+        f"anchor-drift regression: expected ≥1 drift, got {counts['drifted']}"
+    )
+
+    with get_db() as conn:
+        v = conn.execute(
+            "SELECT gate_7_anchor, verdict_overall FROM trust_verdicts WHERE sid=?",
+            (test_sid,),
+        ).fetchone()
+        assert v is not None, "no trust_verdicts row for poisoned SID"
+        assert v[0] == 0, f"gate_7_anchor should be 0 (FAIL), got {v[0]}"
+        assert v[1] == "QUARANTINED", f"verdict_overall should be QUARANTINED, got {v[1]}"
+
+        # Cleanup
+        conn.execute("DELETE FROM external_anchors WHERE sid_or_segment=?", (test_sid,))
+        conn.execute("DELETE FROM trust_verdicts WHERE sid=?", (test_sid,))
+        conn.execute("DELETE FROM stock_prices WHERE sid=? AND date=?", (test_sid, test_date))
+    return True
+
+
 def bug_2026_05_29_dossier_mm_regex_false_positive() -> bool:
     """The dossier-hygiene regex misfired on 'M&M' (Mahindra & Mahindra)
     flagging it as a CRITICAL hallucination. Fix tightened the rupee-symbol
@@ -244,6 +301,7 @@ FIXTURES: dict[str, Callable[[], bool]] = {
     "bug_2026_05_29_financial_signal_tier_direction_flip": bug_2026_05_29_financial_signal_tier_direction_flip,
     "bug_2026_05_29_watchdog_check_constraint_crash":    bug_2026_05_29_watchdog_check_constraint_crash,
     "bug_2026_05_29_dossier_mm_regex_false_positive":    bug_2026_05_29_dossier_mm_regex_false_positive,
+    "bug_2026_05_30_external_anchor_drift_synthetic":    bug_2026_05_30_external_anchor_drift_synthetic,
 }
 
 

@@ -544,6 +544,15 @@ PIPELINE_STEPS = [
      "table": "health_score",      "source": "universe_eligibility + data_health + FACTOR_LINEAGE",
      "data_freq": "daily",         "frequency": "daily"},
 
+    # Plan 0007 Phase 6 — External Anchor (Gate 7). Promotes yesterday's NSE
+    # bhavcopy rows to external_anchors then audits non-NSE sources (yfinance)
+    # for drift. Writes gate_7_anchor verdicts feeding UHS Consistency dim.
+    # Non-critical: anchor data is the foundation of the closed-loop fix,
+    # but a failure to audit doesn't compromise the primary pick pipeline.
+    {"name": "anchor_audit", "module": "tools.anchor_audit", "function": "compute", "critical": False,
+     "table": "external_anchors",  "source": "stock_prices (bhavcopy + yfinance)",
+     "data_freq": "daily",         "frequency": "daily"},
+
     # Sector briefs — plan 0006 Phase A. One sector_briefs row per sector per
     # date with macro + model + regulatory rollup and a bucket classifier
     # (BOOMING / LIKELY / HEADWIND / QUIET). Drives the /sectors digest UX
