@@ -416,6 +416,46 @@ def fetch_one(session, sid: str, ticker: str, dry_run: bool = False) -> tuple[st
             print(f"  ⚠ identity_check failed for {sid}: {e}", file=sys.stderr)
         shares = _get_shares(sid)
         df = _derive_bvps_and_adj_book(df, shares)
+
+        # Plan 0007 Phase 3 — Plausibility Gate on banking metrics.
+        # GNPA > 35% / NNPA > 15% / CAR < 5% are almost-certainly parse errors
+        # (consolidated/standalone mix-up, decimal-place shift). Hard-out-of-
+        # range rows route to banking_metrics_quarantine before write.
+        try:
+            from validators.plausibility import verify_plausibility, route_on_plausibility
+            keep_idx = []
+            for ix, parsed_row in df.iterrows():
+                row_dict = parsed_row.to_dict()
+                quarantined_this_row = False
+                for col, datum_class in (
+                    ("gross_npa_pct", "bank_gnpa_pct"),
+                    ("net_npa_pct",   "bank_nnpa_pct"),
+                    ("nim_pct",       "bank_nim_pct"),
+                    ("car_pct",       "bank_car_pct"),
+                    ("roa_pct",       "bank_roa_pct"),
+                ):
+                    val = row_dict.get(col)
+                    if val is None:
+                        continue
+                    pv = verify_plausibility(datum_class, value=val, segment="*")
+                    if pv.status == "OUT_OF_RANGE_HARD":
+                        route_on_plausibility(
+                            pv, source_table="banking_metrics",
+                            row=row_dict, sid=sid, datum_class=datum_class,
+                        )
+                        quarantined_this_row = True
+                        break  # don't double-quarantine the same row
+                if not quarantined_this_row:
+                    keep_idx.append(ix)
+            if len(keep_idx) < len(df):
+                df = df.loc[keep_idx]
+                if df.empty:
+                    last_err = f"{view}: all rows quarantined by plausibility gate"
+                    continue
+        except Exception as e:
+            import sys
+            print(f"  ⚠ plausibility gate failed for {sid}: {e}", file=sys.stderr)
+
         # Drop helper columns + align to schema
         schema_cols = [
             "sid", "period_end", "period_type",

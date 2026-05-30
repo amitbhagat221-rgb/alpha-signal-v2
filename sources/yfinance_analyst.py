@@ -239,6 +239,40 @@ def compute(limit=None, ticker=None, tier=None, snapshot=False, dry_run=False):
             if close and data["target_mean"] and abs(data["target_mean"] - close) / close > 0.02:
                 n_real_spread += 1
 
+            # Plan 0007 Phase 3 — Plausibility Gate on pt_upside.
+            # CCAVENUE-class: yfinance returned +33,522% upside for a thin-
+            # coverage SMALL cap (2026-05-28). The hard cap in PLAUSIBILITY_
+            # RANGES routes that row to consensus_signals_quarantine instead
+            # of the live table. Existing clip at ±50/+150 in signals/
+            # consensus.py (commit 0d8d8bd) stays as a backstop.
+            if close and data["target_mean"] and close > 0:
+                pt_upside_pct = 100 * (data["target_mean"] / close - 1)
+                try:
+                    from validators.plausibility import verify_plausibility, route_on_plausibility
+                    pv = verify_plausibility("pt_upside_pct", value=pt_upside_pct,
+                                             segment=cap_tier or "*")
+                    if pv.status == "OUT_OF_RANGE_HARD":
+                        # Quarantine + skip live write for this SID's analyst row
+                        route_on_plausibility(
+                            pv, source_table="consensus_signals",
+                            row={"sid": sid, "snapshot_date": fetched_at[:10],
+                                 "pt_upside": pt_upside_pct, "fetched_at": fetched_at},
+                            sid=sid, datum_class="pt_upside_pct",
+                        )
+                        n_no_data += 1   # treat as no_data from accounting POV
+                        time.sleep(DELAY)
+                        continue
+                    elif pv.status in ("PASS", "EXTREME"):
+                        route_on_plausibility(
+                            pv, source_table="consensus_signals",
+                            row={"sid": sid, "snapshot_date": fetched_at[:10],
+                                 "pt_upside": pt_upside_pct, "fetched_at": fetched_at},
+                            sid=sid, datum_class="pt_upside_pct",
+                        )
+                except Exception as e:
+                    import sys
+                    print(f"  ⚠ plausibility gate failed for {sid}: {e}", file=sys.stderr)
+
             # Narrow column set so upsert_df only updates these fields,
             # leaving Tickertape-sourced forward_eps / eps_growth_pct /
             # forward_revenue / revenue_growth_pct intact (those are real).

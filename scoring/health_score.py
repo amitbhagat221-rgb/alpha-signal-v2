@@ -178,10 +178,30 @@ def write_uhs(rows: list[dict]) -> int:
     return upsert_df(df, "health_score")
 
 
-# ── Phase 1 dim computers ──
+# ── Phase 1/3 dim computers ──
 # Each returns (score_0_to_20, reason_string) or (None, reason).
-# Plausibility + Consistency are NOT in Phase 1 — they return (None, "phase_3_pending") /
-# (None, "phase_4_pending") and are populated later.
+# Phase 1 ships provenance/freshness/coverage; Phase 3 adds plausibility + consistency
+# from trust_verdicts.gate_2_plausibility + gate_3_temporal pass-rates.
+
+
+# Map factor → source_tables relevant for plausibility/consistency rollup.
+# Used by dim_plausibility_for_factor / dim_consistency_for_factor to count
+# pass vs fail per gate within the factor's upstream data scope.
+FACTOR_UPSTREAM_TABLES = {
+    "consensus":          ["consensus_signals", "analyst_consensus", "broker_recommendations"],
+    "earnings_yield":     ["stock_prices", "quarterly_income"],
+    "accruals":           ["annual_cash_flow", "annual_balance_sheet"],
+    "piotroski":          ["quarterly_income", "annual_balance_sheet", "annual_cash_flow"],
+    "momentum":           ["stock_prices"],
+    "book_to_price":      ["annual_balance_sheet", "stock_prices"],
+    "promoter":           [],   # shareholding — no quarantine table yet
+    "smart_money":        ["stock_prices"],
+    "pt_upside":          ["consensus_signals"],
+    "eps_growth":         ["consensus_signals", "quarterly_income"],
+    "pledge_quality":     [],   # shareholding
+    "delivery_anomaly_z": ["stock_prices"],
+}
+
 
 def dim_provenance_for_factor(factor_id: str) -> tuple[Optional[int], str]:
     """Score from lineage.FACTOR_LINEAGE presence. Binary 0 or 20 in Phase 1.
@@ -233,6 +253,67 @@ def dim_freshness_for_table(table: str, age_days: Optional[float]) -> tuple[Opti
     return max(0, min(20, int(score))), f"degraded ({age_days}d, threshold {threshold}d)"
 
 
+def _gate_pass_rate(gate_col: str, tables: list[str], snapshot_date: str,
+                     lookback_days: int = 7) -> Optional[float]:
+    """Compute pass-rate of a trust_verdicts gate over a recent window.
+
+    Returns fraction in [0, 1] or None if no rows in window.
+    """
+    if not tables:
+        return None
+    placeholders = ",".join("?" * len(tables))
+    df = read_sql(
+        f"""
+        SELECT {gate_col} AS gate, COUNT(*) AS n
+        FROM trust_verdicts
+        WHERE source_table IN ({placeholders})
+          AND snapshot_date >= date(?, '-{lookback_days} days')
+          AND snapshot_date <= ?
+          AND {gate_col} IS NOT NULL
+        GROUP BY {gate_col}
+        """,
+        params=tables + [snapshot_date, snapshot_date],
+    )
+    if df.empty:
+        return None
+    total = df["n"].sum()
+    pass_count = int(df.loc[df["gate"] == 1, "n"].sum())
+    return pass_count / total if total > 0 else None
+
+
+def dim_plausibility_for_factor(factor_id: str, snapshot_date: str) -> tuple[Optional[int], str]:
+    """Phase 3: pass-rate of gate_2_plausibility over the factor's upstream tables.
+
+    Returns None if no upstream rows have a verdict yet (gate not wired for
+    those tables). When rows exist, maps fraction f → score: f=1.0 → 20;
+    f=0.0 → 0; linear.
+    """
+    tables = FACTOR_UPSTREAM_TABLES.get(factor_id, [])
+    if not tables:
+        return None, "no upstream tables registered in FACTOR_UPSTREAM_TABLES"
+    rate = _gate_pass_rate("gate_2_plausibility", tables, snapshot_date)
+    if rate is None:
+        return None, f"no gate_2 verdicts in last 7d for tables {tables}"
+    score = int(round(20 * rate))
+    return max(0, min(20, score)), f"gate_2 pass-rate {rate*100:.1f}% over {tables}"
+
+
+def dim_consistency_for_factor(factor_id: str, snapshot_date: str) -> tuple[Optional[int], str]:
+    """Phase 3: pass-rate of gate_3_temporal over the factor's upstream tables.
+
+    Phases 4 (cross-source) + 5 (unit-contract) will add additional gate
+    contributions; for now consistency = gate_3 pass-rate only.
+    """
+    tables = FACTOR_UPSTREAM_TABLES.get(factor_id, [])
+    if not tables:
+        return None, "no upstream tables registered in FACTOR_UPSTREAM_TABLES"
+    rate = _gate_pass_rate("gate_3_temporal", tables, snapshot_date)
+    if rate is None:
+        return None, f"no gate_3 verdicts in last 7d for tables {tables}"
+    score = int(round(20 * rate))
+    return max(0, min(20, score)), f"gate_3 pass-rate {rate*100:.1f}% over {tables}"
+
+
 def dim_coverage_for_factor(factor_id: str, snapshot_date: str) -> tuple[Optional[int], str]:
     """Score from universe_eligibility.eligible / universe size on snapshot_date.
 
@@ -264,9 +345,17 @@ def dim_coverage_for_factor(factor_id: str, snapshot_date: str) -> tuple[Optiona
 # ── Roll-ups ──
 
 def rollup_factor_uhs(factor_id: str, snapshot_date: str) -> dict:
-    """Compute UHS for one factor as of snapshot_date. Phase 1: 3 of 5 dims."""
+    """Compute UHS for one factor as of snapshot_date.
+
+    Phases 1+3 active: provenance, freshness, coverage (Phase 1) +
+    plausibility, consistency (Phase 3). Each returns None if its source
+    data isn't available; NULL dims drop out of score_max so the label
+    distinguishes PRELIMINARY from TRUSTED.
+    """
     prov_score, prov_reason = dim_provenance_for_factor(factor_id)
     cov_score, cov_reason = dim_coverage_for_factor(factor_id, snapshot_date)
+    plaus_score, plaus_reason = dim_plausibility_for_factor(factor_id, snapshot_date)
+    cons_score, cons_reason = dim_consistency_for_factor(factor_id, snapshot_date)
     # Freshness for a factor = freshness of its primary upstream table.
     factor_table_map = {
         "consensus": "consensus_signals",
@@ -294,12 +383,14 @@ def rollup_factor_uhs(factor_id: str, snapshot_date: str) -> dict:
         dim_provenance=prov_score,
         dim_freshness=fresh_score,
         dim_coverage=cov_score,
+        dim_plausibility=plaus_score,
+        dim_consistency=cons_score,
         reasons={
             "provenance": prov_reason,
             "freshness": fresh_reason,
             "coverage": cov_reason,
-            "plausibility": "phase_3_pending",
-            "consistency": "phase_4_pending",
+            "plausibility": plaus_reason,
+            "consistency": cons_reason,
         },
     )
 
