@@ -382,6 +382,38 @@ def fetch_one(session, sid: str, ticker: str, dry_run: bool = False) -> tuple[st
         if df.empty:
             last_err = f"{view}: parsed 0 rows"
             continue
+        # Plan 0007 Phase 2 — Identity Gate. The Screener.in URL is keyed by
+        # ticker; if a redirect (rebrand, delisting, ticker recycling) makes
+        # the response page about a different company, the H1 won't contain
+        # the stock name. Route the parsed rows to banking_metrics_quarantine
+        # instead of the live table.
+        try:
+            from validators.identity_check import verify_identity, quarantine_row, record_verdict
+            name_row = read_sql("SELECT name FROM stocks WHERE sid=?", params=[sid])
+            expected_name = name_row.iloc[0]["name"] if not name_row.empty else None
+            v = verify_identity(sid, r.text, source="screener_in",
+                                expected_name=expected_name)
+            if v.status == "WRONG_ENTITY":
+                # Quarantine + skip live write. Try the next view (consolidated)
+                # in case standalone got redirected.
+                for _, row in df.iterrows():
+                    quarantine_row(
+                        source_table="banking_metrics",
+                        row=row.to_dict(), sid=sid, datum_class="banking_metric",
+                        verdict=v,
+                    )
+                last_err = f"{view}: identity_gate WRONG_ENTITY ({v.reason})"
+                continue
+            elif v.status == "PASS":
+                record_verdict(
+                    sid=sid, source_table="banking_metrics",
+                    source_key=f'{{"sid":"{sid}","view":"{view}"}}',
+                    datum_class="banking_metric", verdict=v,
+                )
+        except Exception as e:
+            # Never let an identity-gate exception block the write — log + carry on.
+            import sys
+            print(f"  ⚠ identity_check failed for {sid}: {e}", file=sys.stderr)
         shares = _get_shares(sid)
         df = _derive_bvps_and_adj_book(df, shares)
         # Drop helper columns + align to schema

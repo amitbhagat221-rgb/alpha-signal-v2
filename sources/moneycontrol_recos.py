@@ -337,6 +337,7 @@ def compute(limit=None, ticker=None, discover_only=False, aggregate_only=False, 
     no_page = 0
     no_recos = 0
     n_recos_total = 0
+    gate_quarantined = 0   # Plan 0007 Phase 2 — identity-gate failures (WRONG_ENTITY)
 
     for i, (sid, ticker_str, slug) in enumerate(stocks.itertuples(index=False), 1):
         if not slug:
@@ -359,6 +360,38 @@ def compute(limit=None, ticker=None, discover_only=False, aggregate_only=False, 
             continue
 
         recos = fetch_for_sid(sid, slug, fetched_at)
+        # Plan 0007 Phase 2 — Identity Gate at the producer boundary.
+        # `slug` is the page URL we fetched from; the gate checks the slug
+        # contains the ticker. If not, the reco rows we parsed are for the
+        # wrong company — route them to broker_recommendations_quarantine
+        # instead of the live table. The legacy autosuggest exact-match fix
+        # (2026-05-25 / commit 0d8d8bd) is the upstream safety net; this gate
+        # is the per-write defense in depth.
+        if recos:
+            from validators.identity_check import (
+                verify_identity, quarantine_row, record_verdict,
+            )
+            v = verify_identity(sid, slug, source="moneycontrol",
+                                expected_name=ticker_str)
+            if v.status == "WRONG_ENTITY":
+                # Quarantine every parsed reco row + record one verdict per SID.
+                for r in recos:
+                    quarantine_row(
+                        source_table="broker_recommendations",
+                        row=r, sid=sid, datum_class="broker_target_price",
+                        verdict=v,
+                    )
+                recos = []  # never write these to live table
+                gate_quarantined += 1
+            else:
+                # PASS or UNRESOLVED — record the verdict so UHS provenance
+                # can read it later.
+                record_verdict(
+                    sid=sid, source_table="broker_recommendations",
+                    source_key=f'{{"sid":"{sid}"}}',
+                    datum_class="broker_target_price", verdict=v,
+                )
+
         if not recos:
             no_recos += 1
         else:
@@ -378,7 +411,7 @@ def compute(limit=None, ticker=None, discover_only=False, aggregate_only=False, 
         saved += len(buf)
 
     print(f"Done. {saved} broker recos written ({n_recos_total} parsed). "
-          f"no_slug={no_slug}, no_recos={no_recos}")
+          f"no_slug={no_slug}, no_recos={no_recos}, gate_quarantined={gate_quarantined}")
 
     if not discover_only and not dry_run:
         aggregate_consensus()

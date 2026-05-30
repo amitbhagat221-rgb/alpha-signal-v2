@@ -62,12 +62,17 @@ def _first_business_day(d=None):
     return first.isoformat()
 
 
-def _fetch_one(ticker):
+def _fetch_one(ticker, sid_for_gate=None):
     """Return dict of analyst fields, or None if no coverage.
 
     Adds rating-mix counts (`n_strong_buy` ... `n_strong_sell`) from
     `.recommendations` DataFrame's most recent period — used for the
     cockpit's rating-distribution bar.
+
+    Plan 0007 Phase 2: passes the response `info` dict through the Identity
+    Gate. yfinance's `info["symbol"]` must equal what we queried; mismatches
+    (rare but possible on rebrands or delisted ticker recycling) route to
+    analyst_consensus_quarantine and return None to the caller.
     """
     import yfinance as yf
     try:
@@ -77,6 +82,31 @@ def _fetch_one(ticker):
         return None
     if not info:
         return None
+
+    # Identity gate
+    if sid_for_gate is not None:
+        try:
+            from validators.identity_check import verify_identity, quarantine_row, record_verdict
+            v = verify_identity(sid_for_gate, info, source="yfinance",
+                                expected_name=ticker)
+            if v.status == "WRONG_ENTITY":
+                quarantine_row(
+                    source_table="analyst_consensus",
+                    row={"sid": sid_for_gate, "has_analyst_data": 1,
+                         "fetched_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")},
+                    sid=sid_for_gate, datum_class="analyst_pt", verdict=v,
+                )
+                return None
+            elif v.status == "PASS":
+                record_verdict(
+                    sid=sid_for_gate, source_table="analyst_consensus",
+                    source_key=f'{{"sid":"{sid_for_gate}"}}',
+                    datum_class="analyst_pt", verdict=v,
+                )
+        except Exception as e:
+            import sys
+            print(f"  ⚠ yfinance identity_check failed for {sid_for_gate}: {e}", file=sys.stderr)
+
     tgt_mean = info.get("targetMeanPrice")
     if tgt_mean is None:
         return None
@@ -200,7 +230,7 @@ def compute(limit=None, ticker=None, tier=None, snapshot=False, dry_run=False):
 
     t_start = time.time()
     for i, (sid, t, cap_tier) in enumerate(stocks.itertuples(index=False), 1):
-        data = _fetch_one(t)
+        data = _fetch_one(t, sid_for_gate=sid)
         if data is None:
             n_no_data += 1
         else:

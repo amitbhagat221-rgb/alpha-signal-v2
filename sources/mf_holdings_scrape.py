@@ -499,6 +499,54 @@ def scrape(limit: int | None = None, scheme: str | None = None,
             time.sleep(DELAY)
             continue
 
+        # Plan 0007 Phase 2 — Identity Gate. ETMoney URL slug must contain the
+        # expected etm_slug (the mapping we built in mf_scheme_master). If the
+        # response page has a different slug — possible if ETMoney redirects
+        # closed schemes — the holdings belong to the WRONG fund.
+        try:
+            from validators.identity_check import verify_identity, quarantine_row, record_verdict
+            # `as_of` (raw) carries the page url segment that fetch_holdings parsed.
+            # Pass row.etm_slug as the expected_url_segment; verifier checks containment.
+            page_id = f"etm_id={row.etm_id} slug={row.etm_slug}"
+            v = verify_identity(
+                row.scheme_name, page_id, source="etmoney",
+                expected_url_segment=row.etm_slug,
+            )
+            if v.status == "WRONG_ENTITY":
+                # Quarantine the holdings + sector rows for every sibling
+                for sc in (row.sibling_codes.split(",") if row.sibling_codes else []):
+                    for h in holdings:
+                        quarantine_row(
+                            source_table="mf_holdings",
+                            row={
+                                "scheme_code": sc,
+                                "as_of_date": as_of or datetime.now().strftime("%Y-%m-%d"),
+                                "holding_rank": h.get("rank"),
+                                "instrument_type": "EQUITY",
+                                "instrument_name": h.get("instrument_name"),
+                                "sector": h.get("sector"),
+                                "pct_of_aum": h.get("pct_of_aum"),
+                                "market_value_cr": h.get("market_value_cr"),
+                            },
+                            sid=sc, datum_class="mf_holding",
+                            verdict=v,
+                        )
+                n_no_data += 1  # treat as no_data from the caller's perspective
+                time.sleep(DELAY)
+                continue
+            elif v.status == "PASS":
+                # Record verdict for the first sibling (covers the slug-level check)
+                first_sib = (row.sibling_codes.split(",") if row.sibling_codes else [""])[0]
+                if first_sib:
+                    record_verdict(
+                        sid=first_sib, source_table="mf_holdings",
+                        source_key=f'{{"etm_id":{row.etm_id}}}',
+                        datum_class="mf_holding", verdict=v,
+                    )
+        except Exception as e:
+            import sys
+            print(f"  ⚠ identity_check failed for etm_id={row.etm_id}: {e}", file=sys.stderr)
+
         as_of_date = as_of or datetime.now().strftime("%Y-%m-%d")
         sibling_codes = row.sibling_codes.split(",") if row.sibling_codes else []
 
