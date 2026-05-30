@@ -90,6 +90,84 @@ TABLE_COLUMN_SOURCES = {
 }
 
 
+# ─────────────────────── Unit Contracts (Plan 0007 Phase 4 — Gate 5) ───────────────────────
+# Declarative registry of expected units for (table, column). Producers and
+# consumers reference this via validators.unit_contract — mismatches raise
+# UnitMismatchError at the boundary (LOUD, not silent quarantine — a unit
+# mismatch is a code bug, not data corruption).
+#
+# UNITS
+#   pct_100       0..100 (or -100..+1000 for ratios)
+#   ratio_1       0..1 (or -1..+10)
+#   inr_crore     ₹ in crores
+#   inr_lakh      ₹ in lakhs
+#   inr_raw       ₹ raw rupees
+#   days          calendar days
+#   timestamp_iso ISO 8601 string
+#   timestamp_unix Unix epoch seconds
+#   sid           Tickertape SID (TEXT, opaque)
+#   ticker        NSE ticker (TEXT, opaque)
+#
+# Adding a new entry below means the producer/consumer pair gets a runtime
+# contract assertion. Don't add a unit you can't enforce — undeclared columns
+# default to "trust the caller".
+UNIT_CONTRACTS = {
+    # ─── consensus_signals ───
+    # pt_upside is canonically PERCENT (signals/consensus.py line 178 clips
+    # to [-50, +150]). The %-vs-fraction bug class (CCAVENUE was an outlier
+    # AT the % scale, not a unit mismatch — but the unit mismatch would be
+    # if a future fetcher returned 0.45 (45% as ratio) and overwrote.
+    ("consensus_signals", "pt_upside"):     "pct_100",
+    ("consensus_signals", "eps_growth"):    "pct_100",
+    ("consensus_signals", "revenue_growth"): "pct_100",
+    ("consensus_signals", "consensus_signal"): "ratio_1",  # composite 0-1
+    # ─── analyst_consensus ───
+    ("analyst_consensus", "buy_pct"):       "pct_100",
+    ("analyst_consensus", "price_target"):  "inr_raw",
+    ("analyst_consensus", "forward_eps"):   "inr_raw",
+    ("analyst_consensus", "eps_growth_pct"): "pct_100",
+    ("analyst_consensus", "revenue_growth_pct"): "pct_100",
+    # ─── stock_prices ───
+    ("stock_prices", "close"):              "inr_raw",
+    ("stock_prices", "open"):               "inr_raw",
+    ("stock_prices", "high"):               "inr_raw",
+    ("stock_prices", "low"):                "inr_raw",
+    ("stock_prices", "delivery_pct"):       "pct_100",
+    # ─── banking_metrics ───
+    ("banking_metrics", "gross_npa_pct"):   "pct_100",
+    ("banking_metrics", "net_npa_pct"):     "pct_100",
+    ("banking_metrics", "nim_pct"):         "pct_100",
+    ("banking_metrics", "roa_pct"):         "pct_100",
+    ("banking_metrics", "car_pct"):         "pct_100",
+    ("banking_metrics", "crar_pct"):        "pct_100",
+    ("banking_metrics", "cost_of_funds_pct"): "pct_100",
+    ("banking_metrics", "casa_pct"):        "pct_100",
+    ("banking_metrics", "interest_earned"): "inr_crore",
+    ("banking_metrics", "net_interest_income"): "inr_crore",
+    ("banking_metrics", "net_profit"):      "inr_crore",
+    ("banking_metrics", "advances"):        "inr_crore",
+    ("banking_metrics", "deposits"):        "inr_crore",
+    # ─── daily_picks ───
+    ("daily_picks", "final_score"):         "ratio_1",
+    ("daily_picks", "base_score"):          "ratio_1",
+    ("daily_picks", "weight_coverage"):     "ratio_1",
+    ("daily_picks", "eligible_coverage"):   "ratio_1",
+    ("daily_picks", "fundamental_coverage"): "ratio_1",
+    # ─── piotroski_scores ───
+    # f_score is an integer 0-9 — neither ratio nor percent. Omit from the
+    # unit registry; consumers know it's the canonical Piotroski 0-9 score.
+    # ─── stocks ───
+    ("stocks", "adtv_6m_cr"):               "inr_crore",
+    ("stocks", "market_cap_cr"):            "inr_crore",
+    ("stocks", "shares_outstanding"):       "ratio_1",   # raw count
+    # ─── mf_metrics ───
+    ("mf_metrics", "composite_score"):      "pct_100",   # 0-100 absolute quality score
+    ("mf_metrics", "ret_1y"):               "pct_100",
+    ("mf_metrics", "ret_3y_cagr"):          "pct_100",
+    ("mf_metrics", "max_drawdown"):         "pct_100",
+}
+
+
 # ─────────────────────── Read-spec builders ───────────────────────
 
 

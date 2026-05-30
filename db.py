@@ -489,6 +489,57 @@ def emit_lineage(records, snapshot_date=None, replace_factor=True):
         return cursor.rowcount
 
 
+def _check_frame_units(df, table_name: str, declared_units: dict) -> None:
+    """Plan 0007 Phase 4 — heuristic unit-contract assertion at producer boundary.
+
+    For each declared (col, unit) on this table, inspect the frame's value
+    range and raise UnitMismatchError if it disagrees with the unit class.
+    Heuristic only — many fields legitimately span a wide range — but catches
+    the obvious flips (a `pct_100` column populated with 0..1 values, or vice
+    versa).
+    """
+    from validators.unit_contract import UnitMismatchError
+
+    for col, unit in declared_units.items():
+        if col not in df.columns:
+            continue
+        # Drop NaNs for range inspection
+        try:
+            non_null = df[col].dropna()
+        except Exception:
+            continue
+        if len(non_null) < 5:
+            continue   # too few rows for a heuristic
+        try:
+            mn = float(non_null.min())
+            mx = float(non_null.max())
+        except (TypeError, ValueError):
+            continue   # non-numeric column with a declared numeric unit — skip
+        # Heuristics by unit
+        if unit == "pct_100":
+            # If 95%+ of values are in [-1.5, 1.5], it's almost-certainly ratio_1
+            in_ratio = ((non_null >= -1.5) & (non_null <= 1.5)).mean()
+            if in_ratio > 0.95 and abs(mx) < 5 and len(non_null) >= 20:
+                raise UnitMismatchError(
+                    f"{table_name}.{col}: declared 'pct_100' but {in_ratio*100:.0f}% of "
+                    f"{len(non_null)} non-null values are in [-1.5, 1.5] (range {mn:.4f}..{mx:.4f}) "
+                    f"— looks like ratio_1. Producer using wrong scale?"
+                )
+        elif unit == "ratio_1":
+            # If any value is >5 or <-5, it's almost-certainly pct_100
+            if (mx > 5 or mn < -5) and len(non_null) >= 5:
+                # Allow up to 5% outliers (sloppy_ratio_1 columns sometimes carry log/z)
+                out_of_band = ((non_null > 5) | (non_null < -5)).mean()
+                if out_of_band > 0.05:
+                    raise UnitMismatchError(
+                        f"{table_name}.{col}: declared 'ratio_1' but {out_of_band*100:.0f}% of "
+                        f"values are outside [-5, +5] (range {mn:.2f}..{mx:.2f}) — "
+                        f"looks like pct_100 or unbounded. Producer using wrong scale?"
+                    )
+        # Other units (inr_*, days, timestamp_*) — no automatic heuristic;
+        # rely on consumer-side assert_unit at read_typed boundaries.
+
+
 def upsert_df(df, table_name, conn=None):
     """
     Upsert DataFrame rows: INSERT, or UPDATE only the provided columns on PK conflict.
@@ -500,9 +551,26 @@ def upsert_df(df, table_name, conn=None):
 
     For tables without a declared primary key, falls back to INSERT OR REPLACE
     with a warning — those callers should be migrated.
+
+    Plan 0007 Phase 4 — Gate 5 unit contract assertion. Before write, asserts
+    every (table_name, col) registered in lineage.UNIT_CONTRACTS still matches
+    the declared unit on the frame's value range. Catches the producer-side
+    %-vs-fraction class. Undeclared columns pass through silently; declared
+    columns whose value distribution looks wrong raise UnitMismatchError.
     """
     if df.empty:
         return 0
+
+    # Gate 5: producer-side unit-contract check
+    try:
+        from validators.unit_contract import units_for_table, UnitMismatchError
+        declared = units_for_table(table_name)
+        if declared:
+            _check_frame_units(df, table_name, declared)
+    except UnitMismatchError:
+        raise
+    except Exception:
+        pass  # Never let unit-check failure break writes for unrelated reasons
 
     df_cols = list(df.columns)
     cols = ", ".join(f"[{c}]" for c in df_cols)

@@ -299,19 +299,33 @@ def dim_plausibility_for_factor(factor_id: str, snapshot_date: str) -> tuple[Opt
 
 
 def dim_consistency_for_factor(factor_id: str, snapshot_date: str) -> tuple[Optional[int], str]:
-    """Phase 3: pass-rate of gate_3_temporal over the factor's upstream tables.
+    """Phase 3+4: average pass-rate across gates 3 (temporal), 4 (cross-source),
+    and 5 (unit-contract) over the factor's upstream tables.
 
-    Phases 4 (cross-source) + 5 (unit-contract) will add additional gate
-    contributions; for now consistency = gate_3 pass-rate only.
+    Each gate contributes equally; a gate with no verdicts is dropped from the
+    average (so a factor with only gate_3 data still gets a score). Returns
+    None only if NONE of the three gates have verdicts.
     """
     tables = FACTOR_UPSTREAM_TABLES.get(factor_id, [])
     if not tables:
         return None, "no upstream tables registered in FACTOR_UPSTREAM_TABLES"
-    rate = _gate_pass_rate("gate_3_temporal", tables, snapshot_date)
-    if rate is None:
-        return None, f"no gate_3 verdicts in last 7d for tables {tables}"
-    score = int(round(20 * rate))
-    return max(0, min(20, score)), f"gate_3 pass-rate {rate*100:.1f}% over {tables}"
+
+    gates = [
+        ("gate_3_temporal",     "g3"),
+        ("gate_4_cross_source", "g4"),
+        ("gate_5_unit",         "g5"),
+    ]
+    rates = {}
+    for col, key in gates:
+        r = _gate_pass_rate(col, tables, snapshot_date)
+        if r is not None:
+            rates[key] = r
+    if not rates:
+        return None, f"no gate_3/4/5 verdicts in last 7d for tables {tables}"
+    avg = sum(rates.values()) / len(rates)
+    score = int(round(20 * avg))
+    detail = ", ".join(f"{k}={r*100:.0f}%" for k, r in rates.items())
+    return max(0, min(20, score)), f"consistency avg {avg*100:.1f}% ({detail}) over {tables}"
 
 
 def dim_coverage_for_factor(factor_id: str, snapshot_date: str) -> tuple[Optional[int], str]:
