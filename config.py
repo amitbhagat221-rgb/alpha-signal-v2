@@ -535,6 +535,15 @@ PIPELINE_STEPS = [
      "table": "pick_outcomes",     "source": "daily_picks + stock_prices + nse_index_history",
      "data_freq": "daily",         "frequency": "daily"},
 
+    # Plan 0007 Phase 1 — daily Unified Health Score (UHS) writer. Computes
+    # factor + table + system UHS for today's snapshot. include_picks=True so
+    # the daily_picks UHS rollup is also persisted alongside factors. Reads from
+    # universe_eligibility (eligibility/registry), data_health (db.py), and
+    # FACTOR_LINEAGE (lineage.py). Non-critical (UHS is observation, not gate).
+    {"name": "compute_health_score", "module": "scoring.health_score", "function": "compute", "critical": False,
+     "table": "health_score",      "source": "universe_eligibility + data_health + FACTOR_LINEAGE",
+     "data_freq": "daily",         "frequency": "daily"},
+
     # Sector briefs — plan 0006 Phase A. One sector_briefs row per sector per
     # date with macro + model + regulatory rollup and a bucket classifier
     # (BOOMING / LIKELY / HEADWIND / QUIET). Drives the /sectors digest UX

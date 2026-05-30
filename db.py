@@ -122,6 +122,93 @@ def _ensure_columns():
                 if "duplicate column" not in str(e).lower():
                     raise
     _ensure_pipeline_log_status_check()
+    _ensure_quarantine_tables()
+
+
+# ── Plan 0007 Phase 1: quarantine mirror tables ──
+# Each source-fetching table gets a sibling `<table>_quarantine`. The Trust
+# Pipeline's gate failures route rejected rows here instead of the live table,
+# so forensics + re-instate-as-trusted workflows have schema-correct storage
+# (not a JSON blob).
+#
+# Phase 2+ will write here from each fetcher. Phase 1 just creates the mirrors
+# so consumers can `LEFT JOIN <table>_quarantine` from day 1.
+#
+# Mirror creation by introspection: read source DDL from sqlite_master, rewrite
+# the name, drop PK + FK clauses (quarantined rows can duplicate and may have
+# invalid SIDs by definition), then ALTER to append 3 forensic-metadata columns.
+QUARANTINE_SOURCE_TABLES = [
+    "broker_recommendations",
+    "forecast_history",
+    "analyst_consensus",
+    "analyst_consensus_snapshots",
+    "consensus_signals",
+    "quarterly_income",
+    "annual_balance_sheet",
+    "annual_cash_flow",
+    "banking_metrics",
+    "mf_holdings",
+    "mf_sector_allocation",
+]
+
+
+def _ensure_quarantine_tables():
+    """Ensure `<table>_quarantine` exists for every QUARANTINE_SOURCE_TABLES entry."""
+    import re
+    with get_db() as conn:
+        for source in QUARANTINE_SOURCE_TABLES:
+            mirror = f"{source}_quarantine"
+            # Already exists?
+            row = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name=?", (mirror,)
+            ).fetchone()
+            if row:
+                continue
+            # Read source DDL
+            row = conn.execute(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name=?", (source,)
+            ).fetchone()
+            if not row:
+                # Source table doesn't exist yet (e.g. legacy code path). Skip.
+                continue
+            source_ddl = row[0]
+            mirror_ddl = _rewrite_ddl_for_quarantine(source_ddl, source, mirror)
+            conn.execute(mirror_ddl)
+            # Append 3 forensic-metadata columns (always at the end so source-row
+            # offsets stay aligned for blob-copy code paths).
+            for col, typ in [
+                ("_q_failed_gate", "TEXT"),
+                ("_q_reason", "TEXT"),
+                ("_q_quarantined_at", "TEXT DEFAULT (datetime('now'))"),
+            ]:
+                try:
+                    conn.execute(f"ALTER TABLE {mirror} ADD COLUMN {col} {typ}")
+                except sqlite3.OperationalError:
+                    pass
+
+
+def _rewrite_ddl_for_quarantine(source_ddl: str, source_name: str, mirror_name: str) -> str:
+    """Source CREATE TABLE → quarantine CREATE TABLE. Strips PK + FK clauses."""
+    import re
+    ddl = source_ddl
+    # Replace table name (first occurrence after CREATE TABLE)
+    ddl = re.sub(
+        rf"CREATE TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?{re.escape(source_name)}",
+        f"CREATE TABLE IF NOT EXISTS {mirror_name}",
+        ddl, count=1, flags=re.IGNORECASE,
+    )
+    # Strip standalone PRIMARY KEY (...) constraints — quarantined rows can
+    # duplicate (e.g. same sid quarantined for two different gates same day).
+    ddl = re.sub(r",\s*PRIMARY\s+KEY\s*\([^)]+\)", "", ddl, flags=re.IGNORECASE)
+    # Strip REFERENCES clauses — quarantined data may include invalid SIDs by
+    # definition (a misidentified stock has no FK match in stocks).
+    ddl = re.sub(r"\s+REFERENCES\s+\w+\s*\([^)]*\)(\s+ON\s+\w+\s+\w+)*", "", ddl, flags=re.IGNORECASE)
+    # Strip per-column UNIQUE constraints for the same reason.
+    ddl = re.sub(r"\s+UNIQUE", "", ddl, flags=re.IGNORECASE)
+    # Strip NOT NULL on potentially-null fields the quarantine can receive
+    # (we don't know which gate filled which columns). Leave only TYPE.
+    # Simpler: keep NOT NULL — the writer must populate everything.
+    return ddl
 
 
 def _ensure_pipeline_log_status_check():

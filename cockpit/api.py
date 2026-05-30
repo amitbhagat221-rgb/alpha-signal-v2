@@ -897,6 +897,35 @@ def get_stock_detail(sid):
         detail["close_price"] = price.iloc[0]["close"]
         detail["price_date"] = price.iloc[0]["date"]
 
+    # Plan 0007 Phase 1: UHS rollup for this stock's latest pick. The pick-level
+    # rollup writes were not in the 30-day backfill (factor + table only); read
+    # the latest pick UHS if it exists, otherwise compute the most-recent pick
+    # row's UHS on demand.
+    pick_for_uhs = read_sql(
+        "SELECT sid, pick_date FROM daily_picks WHERE sid=? ORDER BY pick_date DESC LIMIT 1",
+        params=[sid],
+    )
+    if not pick_for_uhs.empty:
+        from scoring.health_score import get_uhs, rollup_pick_uhs
+        pd_str = pick_for_uhs.iloc[0]["pick_date"]
+        entity_id = f"{sid}|{pd_str}"
+        uhs = get_uhs("pick", entity_id)
+        if uhs is None:
+            # On-demand compute (one row, cheap). Don't persist — that's the
+            # nightly cron's job; cockpit reads should be idempotent.
+            uhs = rollup_pick_uhs(sid, pd_str)
+        if uhs:
+            detail["uhs"] = {
+                "score_pct":    uhs.get("score_pct"),
+                "label":        uhs.get("label"),
+                "dim_provenance":   uhs.get("dim_provenance"),
+                "dim_freshness":    uhs.get("dim_freshness"),
+                "dim_plausibility": uhs.get("dim_plausibility"),
+                "dim_consistency":  uhs.get("dim_consistency"),
+                "dim_coverage":     uhs.get("dim_coverage"),
+                "reasons":      uhs.get("reasons_json"),
+            }
+
     return detail
 
 

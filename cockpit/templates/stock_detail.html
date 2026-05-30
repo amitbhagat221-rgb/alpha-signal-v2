@@ -41,6 +41,15 @@
             {% if dos.get("conviction") %}
             <span class="stock-badge">{{ dos.conviction }} CONVICTION</span>
             {% endif %}
+            {% if s.uhs and s.uhs.score_pct is not none %}
+                {% set uhs_color = "score-green" if s.uhs.score_pct >= 80 else ("score-amber" if s.uhs.score_pct >= 60 else "score-red") %}
+            <span class="stock-badge {{ uhs_color }}"
+                  title="Unified Health Score (Plan 0007 Phase 1) — Provenance {{ s.uhs.dim_provenance or '-' }} · Freshness {{ s.uhs.dim_freshness or '-' }} · Plausibility {{ s.uhs.dim_plausibility or '-' }} · Consistency {{ s.uhs.dim_consistency or '-' }} · Coverage {{ s.uhs.dim_coverage or '-' }} (each 0-20)"
+                  style="display:inline-flex; align-items:center; gap:4px;">
+                {% if s.uhs.score_pct >= 80 %}🟢{% elif s.uhs.score_pct >= 60 %}🟡{% else %}🔴{% endif %}
+                UHS {{ s.uhs.score_pct }} · {{ s.uhs.label }}
+            </span>
+            {% endif %}
         </div>
         <div class="stock-name">{{ s.name }} &middot; <span style="color: var(--accent);">{{ s.sector }}</span>{% if s.industry %} &middot; {{ s.industry }}{% endif %}</div>
     </div>

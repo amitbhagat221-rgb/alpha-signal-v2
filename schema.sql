@@ -1408,3 +1408,67 @@ CREATE TABLE IF NOT EXISTS signal_lineage (
 CREATE INDEX IF NOT EXISTS idx_lineage_sid_factor ON signal_lineage(sid, factor);
 CREATE INDEX IF NOT EXISTS idx_lineage_snapshot ON signal_lineage(snapshot_date);
 CREATE INDEX IF NOT EXISTS idx_lineage_source_table ON signal_lineage(source_table);
+
+-- ── Plan 0007: Trust Pipeline + Unified Health Score (UHS) ──
+-- Single source of truth for "is this entity trustworthy right now?". Replaces
+-- 11+ disparate quality vocabularies (weight_coverage, eligible_coverage,
+-- TRUSTED/WOUND_UP/SEGREGATED, KEEP/WEAK/DROP, CRITICAL/WARN/INFO, …) with
+-- one number (score_pct, 0-100) and one label (UNKNOWN / AVOID / REVIEW /
+-- PRELIMINARY / TRUSTED).
+--
+-- Entity kinds: 'datum' (one row of source data), 'factor' (one signal module),
+-- 'pick' (one daily_picks row, key = sid|pick_date), 'table' (one DB table),
+-- 'system' (overall geometric mean of tier-1 critical tables).
+--
+-- Five universal dimensions, 0-20 each. NULL dims mean "not evaluated yet"
+-- (gates from a later phase aren't live); score_pct is normalised over
+-- non-NULL dims so a Phase 1 entity with 3 active dims still gets a
+-- meaningful 0-100 number, with `label='PRELIMINARY'` distinguishing it
+-- from a fully-evaluated entity at the same percentage.
+--
+-- See plan docs/plans/0007-trust-pipeline-uhs.md.
+CREATE TABLE IF NOT EXISTS health_score (
+    entity_kind       TEXT NOT NULL,         -- datum | factor | pick | table | system
+    entity_id         TEXT NOT NULL,         -- factor name, sid|date, table name, 'SYSTEM', etc.
+    snapshot_date     TEXT NOT NULL,
+    dim_provenance    INTEGER,               -- 0..20; NULL = not evaluated this phase
+    dim_freshness     INTEGER,
+    dim_plausibility  INTEGER,
+    dim_consistency   INTEGER,
+    dim_coverage      INTEGER,
+    score_total       INTEGER,               -- sum of non-NULL dims
+    score_max         INTEGER,               -- 20 × count(non-NULL dims)
+    score_pct         INTEGER,               -- round(100 × score_total / score_max)
+    label             TEXT,                  -- UNKNOWN | AVOID | REVIEW | PRELIMINARY | TRUSTED
+    reasons_json      TEXT,                  -- JSON dict {dim_name: explanation, …}
+    computed_at       TEXT DEFAULT (datetime('now')),
+    PRIMARY KEY (entity_kind, entity_id, snapshot_date)
+);
+CREATE INDEX IF NOT EXISTS idx_health_score_kind_date ON health_score(entity_kind, snapshot_date);
+CREATE INDEX IF NOT EXISTS idx_health_score_label ON health_score(label);
+
+-- Per-datum gate verdicts — the auditable receipt each datum-of-record carries
+-- after passing (or failing) the 7-gate Trust Pipeline. Feeds UHS dimensions.
+-- Each gate column: 0=FAIL, 1=PASS, 2=PENDING_REVIEW, NULL=not yet evaluated.
+-- verdict_overall: TRUSTED if all evaluated gates pass; QUARANTINED if any
+-- FAIL; PENDING_REVIEW if any PENDING and no FAIL.
+CREATE TABLE IF NOT EXISTS trust_verdicts (
+    sid               TEXT NOT NULL,
+    source_table      TEXT NOT NULL,
+    source_key        TEXT NOT NULL,         -- JSON dict {col: value} identifying source row
+    datum_class       TEXT NOT NULL,         -- e.g. 'pt_upside_pct', 'gnpa_pct', 'close'
+    snapshot_date     TEXT NOT NULL,
+    gate_1_identity      INTEGER,            -- Phase 2 populates
+    gate_2_plausibility  INTEGER,            -- Phase 3
+    gate_3_temporal      INTEGER,            -- Phase 3
+    gate_4_cross_source  INTEGER,            -- Phase 4
+    gate_5_unit          INTEGER,            -- Phase 4
+    gate_6_lineage       INTEGER,            -- Phase 5
+    gate_7_anchor        INTEGER,            -- Phase 6
+    verdict_overall      TEXT,               -- TRUSTED | QUARANTINED | PENDING_REVIEW
+    reasons_json         TEXT,
+    computed_at          TEXT DEFAULT (datetime('now')),
+    PRIMARY KEY (sid, source_table, source_key, datum_class, snapshot_date)
+);
+CREATE INDEX IF NOT EXISTS idx_trust_verdicts_table_date ON trust_verdicts(source_table, snapshot_date);
+CREATE INDEX IF NOT EXISTS idx_trust_verdicts_verdict ON trust_verdicts(verdict_overall);
