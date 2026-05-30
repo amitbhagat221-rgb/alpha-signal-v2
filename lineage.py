@@ -405,6 +405,73 @@ FACTOR_LINEAGE = {
         "sector_exclusions": [],
     },
 
+    # ════════════════════════════ Track 2 — Financial sub-model (Banks + NBFCs) ════════════════════════════
+    # Financial-ONLY factors (inverse of the usual sector_exclusions=["Financials"]):
+    # they run exclusively on industry IN ("Banks", "NBFCs / Finance"). Shared read
+    # spec across all three (per signals/financial_signal.py:_load_inputs) — latest
+    # knowable quarterly + latest knowable annual row per sid from banking_metrics,
+    # z-scored within (industry, cap_tier). PIT filing lags: 60d quarterly, 75d annual.
+    "financial_quality": {
+        "status": "candidate", "module": "signals/financial_signal.py",
+        "reads": [
+            {"table": "banking_metrics",
+             "cols": ["gross_npa_pct", "net_npa_pct", "interest_earned",
+                      "net_interest_income", "net_profit"],
+             "key": ["sid", "period_end", "period_type"],
+             "select": "latest_quarterly_per_sid",
+             "filter": "period_type='quarterly' AND period_end ≤ pit_date − 60d",
+             "contribution": "asset_quality(direction=lower)_+_profitability"},
+            {"table": "banking_metrics",
+             "cols": ["cost_of_funds_pct"],
+             "key": ["sid", "period_end", "period_type"],
+             "select": "latest_annual_per_sid",
+             "filter": "period_type='annual' AND period_end ≤ pit_date − 75d",
+             "contribution": "funding_cost"},
+            _stocks(("sid", "industry", "cap_tier"), contribution="financial_segment"),
+        ],
+        "sector_exclusions": [],
+        "note": "Financials-only (Banks + NBFCs). SMALL-tier direction (low NPA = strong franchise).",
+        "validation": {"weekly_NW_t": -1.88, "tier": "SMALL"},   # WEAK; on bench, re-test ~Q1 FY27
+    },
+    "financial_recovery": {
+        "status": "candidate", "module": "signals/financial_signal.py",
+        "reads": [
+            {"table": "banking_metrics",
+             "cols": ["gross_npa_pct", "net_npa_pct", "interest_earned",
+                      "net_interest_income", "net_profit"],
+             "key": ["sid", "period_end", "period_type"],
+             "select": "latest_quarterly_per_sid",
+             "filter": "period_type='quarterly' AND period_end ≤ pit_date − 60d",
+             "contribution": "asset_quality(direction=higher)_+_profitability"},
+            {"table": "banking_metrics",
+             "cols": ["cost_of_funds_pct"],
+             "key": ["sid", "period_end", "period_type"],
+             "select": "latest_annual_per_sid",
+             "filter": "period_type='annual' AND period_end ≤ pit_date − 75d",
+             "contribution": "funding_cost"},
+            _stocks(("sid", "industry", "cap_tier"), contribution="financial_segment"),
+        ],
+        "sector_exclusions": [],
+        "note": "Financials-only (Banks + NBFCs). LARGE/MID-tier direction (high NPA = mean-reversion).",
+        "validation": {"weekly_NW_t": 1.55, "tier": "MID"},   # WEAK; on bench, re-test ~Q1 FY27
+    },
+    "financial_signal": {
+        "status": "superseded", "module": "signals/financial_signal.py",
+        "reads": [
+            {"table": "banking_metrics",
+             "cols": ["gross_npa_pct", "net_npa_pct", "interest_earned",
+                      "net_interest_income", "net_profit", "cost_of_funds_pct"],
+             "key": ["sid", "period_end", "period_type"],
+             "select": "latest_quarterly_+_annual_per_sid",
+             "contribution": "back_compat_alias_=_financial_quality"},
+            _stocks(("sid", "industry", "cap_tier"), contribution="financial_segment"),
+        ],
+        "sector_exclusions": [],
+        "note": "SUPERSEDED 2026-05-29 by financial_quality + financial_recovery split "
+                "(ADR 0032). Kept as the alias column (= financial_quality) so historical "
+                "PIT and the optimizer entry survive; not routed live.",
+    },
+
     # ════════════════════════════ Analyst consensus + PT family ════════════════════════════
     # `consensus` doesn't appear in BACKTEST_SIGNALS by that name — the
     # consumer-facing factors are pt_upside, eps_growth_yoy (consensus

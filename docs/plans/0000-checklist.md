@@ -55,6 +55,7 @@ Audit + tier infra + stratified backtest + 36mo PIT + cutover. See ADRs 0009-001
    - 💤 Phase 2.2c: NBFC GNPA fallback — **PROBED + PARKED 2026-05-29**. Gap confirmed data-not-on-source (33/81 NBFCs Screener-empty: REC/IRFC/BAJAJFINSV/JIOFIN). RBI XBRL portal dead; NSE corporate-filings XBRL lacks GNPA% tag (has stage-3 financial assets + ECL but not the ratio); NSE quarterly results PDF is best-fidelity (2-3 day PDF extraction build). Parked because backtest sample size dominates as the rate-limiter — `financial_recovery` MID at t=1.55 crosses 2.0 with ~6 more quarterly periods if mechanism holds.
    - ⚠ Phase 2.2d: PIT + backtest **DONE 2026-05-29**. Composite FAILED done gate (t = -0.75 / -1.30 / -0.34). Diagnostic surfaced direction-flip on NPA — see 2.2b-v2 below.
    - ✅ Phase 2.2b-v2: **DONE 2026-05-29** (commit `0d8d8bd`) — split into `financial_quality` (SMALL, direction='lower') + `financial_recovery` (LARGE/MID, direction='higher'), shared profitability/capital/funding components. Schema migrated; PIT helper writes both columns + back-compat `financial_signal` alias. Backtest on 30 monthly PIT anchors: `financial_recovery` MID **t=+1.55 WEAK** (mechanism confirmed), SMALL **t=-1.88 WEAK** (confirms SMALL quality direction). Neither clears |t|≥2.0; both stay on bench, NOT routed into screener. Re-test ~Q1 FY27. See [proposed ADR 0032](../decisions/0032-tier-direction-flip-split-signal.md) for the generalizable methodology.
+   - ✅ Phase 2.2b-v2 follow-up: **FACTOR_LINEAGE entries for the 3 split factors** (`financial_quality` / `financial_recovery` / `financial_signal`) — 2026-05-30. They shipped into `BACKTEST_SIGNALS` without lineage entries, firing the `LINEAGE_REGISTRY_DRIFT` CRITICAL ("lineage before ranking"). Backfilled in [lineage.py](../../lineage.py); health pulse green.
 
    **Coverage report (latest-quarterly per stock, 2026-05-29):**
    - Banks: 41/41 stocks · GNPA 40/41 · NNPA 40/41 · NII 41/41 · BVPS 41/41 · Deposits 41/41 · COF 41/41 ✓
@@ -92,6 +93,7 @@ Audit + tier infra + stratified backtest + 36mo PIT + cutover. See ADRs 0009-001
 - ✅ Ops cockpit split — Stage 1 (service-level :3001) + Stage 2 (code-level extraction).
 - ✅ Cockpit cold-restart perf rewrite — `/system` 140×, `/news` 50×, `/portfolio` 100×.
 - ✅ Health Center cockpit redesign (ADR 0023).
+- ✅ Health drive-by (2026-05-30): `pick_outcomes` STALENESS_OVERRIDE → 14d ([db.py](../../db.py)). `latest_date`=MAX(pick_date) is forward-return-window-bound (shortest 5d window ≈ 7-10 cal days), so the daily(3) default flagged STALE every day + the watchdog heal step FAILED daily trying to "fix" a structural lag. Same class as the filing-cycle overrides.
 - ⏳ [0007 Market-share momentum cluster](0003-market-share-momentum-factor.md) — 4 factors, ~7 hr, proposed
 - ⏳ [0008 Consumer demand pulse](0004-consumer-demand-pulse.md) — research-gated
 
