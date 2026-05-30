@@ -1,31 +1,25 @@
 # Alpha Signal v2 — Progress Checklist
-_Last updated: 2026-05-29 (DuckDB + Plan 0006 A+B+C + Track 2.2b-v2 + 2 bench factors + Walk-forward OOS + Plan 0007 proposed-and-active — Trust Pipeline + Unified Health Score) · Plans are truth, this is the view. Update via `/handoff`._
+_Last updated: 2026-05-30 (Plan 0007 fully shipped — 8 of 8 phases · ADR 0033 · Trust Pipeline live with 7 gates · per-pick UHS on every daily_picks row · 14 redundant data_sanity checks deprecated) · Plans are truth, this is the view. Update via `/handoff`._
 _Glyphs: ✅ done · ⏳ next/in-progress · 🚫 blocked · 💤 parked · ↔ cross-track integration point_
 _Convention: [ADR 0015](../decisions/0015-track-numbering-and-rename.md) (tracks) + [ADR 0016](../decisions/0016-plan-numbering-fresh-start.md) (plans)._
 
 ## Next 3
-1. ⏳ **Plan 0007 Phase 1 — UHS schema + score writer** ([plan 0007](0007-trust-pipeline-uhs.md)). Foundation for the Trust Pipeline + Unified Health Score. New tables `health_score` + `trust_verdicts`; new module `scoring/health_score.py` with rollup functions; cockpit `/explorer/<sid>` renders UHS badge + 5-dim breakdown. Supersedes the prior Next 3 per user direction 2026-05-29 — data quality is upstream of every pick.
-2. ⏳ **Plan 0007 Phase 2 — Identity Gate** ([plan 0007 §Phase 2](0007-trust-pipeline-uhs.md)). The BAJAJHLDNG fix at runtime — `validators/identity_check.py` + wire into 5 source fetchers + `*_quarantine` tables + pre-push poison test. Kills the BAJAJHLDNG class immediately.
-3. ⏳ **Plan 0007 Phase 3 — Plausibility + Temporal + Regression Fixtures** ([plan 0007 §Phase 3](0007-trust-pipeline-uhs.md)). `PLAUSIBILITY_RANGES` per-class-per-tier; temporal-continuity thresholds; 8 historic bugs become permanent regression fixtures wired into `tools/pit_replay.py`. Kills Franklin + CCAVENUE classes.
-
-**Deferred while Plan 0007 lands** (resume after Phase 5 ships):
-- Plan 0006 Phase D — LLM-narrated sector dossiers
-- Track 3.1b — NSE F&O OI probe
-- `financial_recovery` accumulator gate (calendar-blocked until Q1 FY27 anyway)
-- Variant promotion + `nse_index_history` refresh
+1. ⏳ **Plan 0007 Phase 8 burn-in monitoring (7-day)** — UHS verdict pools fill across gate_4 + gate_5 + gate_7 as producers run. Expected: most PRELIMINARY labels flip to TRUSTED by ~2026-06-06. Watch for ≥1 pick UHS-downgraded over the week (proves gates work, not theatre). Manual seed for Anchor B (top-50 BSE close) via `python -m tools.anchor_audit --seed-bse-csv` — first due ~2026-06-06.
+2. ⏳ **Plan 0006 Phase D — LLM-narrated sector dossiers** (resumes from deferred state). New `sector_dossiers` table; 11 LLM calls/night (~₹3-5). Mirror `output/dossier.py:_build_uhs_block()` for sector hygiene.
+3. ⏳ **Track 3.1b — NSE F&O OI probe** — unblocks `§3.2.2` options-implied (8 factors). Probe `nselib.derivatives`; design `fno_option_chain` + `fno_oi_history` schemas. Independent of UHS.
 
 ## Queued
-- ⏳ **[Plan 0007 — Trust Pipeline + Unified Health Score](0007-trust-pipeline-uhs.md)** — **active 2026-05-29**, supersedes prior Next 3. Goal: 95/100 data quality (honest ceiling at our scale; true 100 needs paid Bloomberg/Refinitiv); single UHS 0-100 score replaces 11+ disparate quality vocabularies. 7-gate Trust Pipeline catches the BAJAJHLDNG + forecast_history silent-bug classes at ingest. Phases:
-   - ⏳ Phase 1 — UHS schema + score writer (1 session) ← **active**
-   - ⏳ Phase 2 — Identity Gate (1 session)
-   - ⏳ Phase 3 — Plausibility + Temporal + Regression Fixtures (1 session)
-   - ⏳ Phase 4 — Cross-Source + Unit Contract (1 session)
-   - ⏳ Phase 5 — Lineage + Pick-Level UHS rollup (2 sessions)
-   - ⏳ Phase 6 — External Anchor (1 session) — the closed-loop fix
-   - ⏳ Phase 7 — Streamlining + vocabulary collapse (1 session)
-   - ⏳ Phase 8 — Confidence-aware orchestration + ADR 0033 (2 sessions)
-- ⏳ **[Plan 0006 — Sector dossiers](0006-sector-dossiers.md)** — `/sectors` front door rebuild. MVP **A + B + C shipped 2026-05-29** (see Shipped today). Remaining:
-   - ⏳ Phase D — LLM-narrated per-sector thesis. **Deferred until Plan 0007 Phase 5 lands** (UHS feeds the LLM prompt for hygiene).
+- ✅ **[Plan 0007 — Trust Pipeline + Unified Health Score](0007-trust-pipeline-uhs.md)** — **fully shipped 2026-05-30 across 4 sessions** ([ADR 0033](../decisions/0033-trust-pipeline-uhs.md)). 7 gates live · per-pick UHS on every daily_picks row · 11+ vocabularies collapsed to one 🟢/🟡/🔴 scale · 9 historic bugs as permanent pre-push regression fixtures · 14 redundant data_sanity checks deprecated. Honest ceiling at our scale = 95/100; true 100 needs paid Bloomberg/Refinitiv.
+   - ✅ Phase 1 — UHS schema + score writer · commit `18ecaed`
+   - ✅ Phase 2 — Identity Gate (Gate 1) · commit `c901c6e`
+   - ✅ Phase 3 — Plausibility + Temporal + Regression Fixtures · commit `d1d0d14`
+   - ✅ Phase 4 — Cross-Source + Unit Contract (Gates 4 + 5) · commit `46e6b98`
+   - ✅ Phase 5 — Lineage + Pick-Level UHS rollup (Gate 6) · commit `b00374f`
+   - ✅ Phase 6 — External Anchor (Gate 7) · commit `9ec28e9`
+   - ✅ Phase 7 — Streamlining (38→25 active checks) · commit `ce5cd58`
+   - ✅ Phase 8 — Confidence orchestration + ADR 0033 + calibration scaffold · this commit
+- ⏳ **[Plan 0006 — Sector dossiers](0006-sector-dossiers.md)** — `/sectors` front door rebuild. MVP **A + B + C shipped 2026-05-29**. Remaining:
+   - ⏳ Phase D — LLM-narrated per-sector thesis. **Resume from deferred state** — mirror `output/dossier.py:_build_uhs_block()` for sector hygiene.
    - ⏳ Phase E — per-sector horizon scores (short / medium / long badges). Needs new `signals/sector_momentum.py` factor.
 
 ## Shipped today (2026-05-29, cont.)

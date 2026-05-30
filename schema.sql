@@ -1501,3 +1501,24 @@ CREATE TABLE IF NOT EXISTS external_anchors (
 );
 CREATE INDEX IF NOT EXISTS idx_external_anchors_date ON external_anchors(anchor_date);
 CREATE INDEX IF NOT EXISTS idx_external_anchors_class ON external_anchors(datum_class, anchor_date);
+
+-- ── Plan 0007 Phase 8: UHS calibration log ──
+-- Joins every pick_outcomes row to its daily_picks.uhs_score at the pick_date.
+-- Once 6+ months accumulate (~late Nov 2026), `fwd_return_pct` per
+-- (window_days, uhs_score_bucket) can be regressed against UHS to validate
+-- the uniform 20/20/20/20/20 dim weighting. Until then, this is observation
+-- scaffold — a population query running nightly off pick_outcomes + daily_picks.
+CREATE TABLE IF NOT EXISTS uhs_calibration_log (
+    sid                TEXT NOT NULL,
+    pick_date          TEXT NOT NULL,
+    window_days        INTEGER NOT NULL,    -- 5, 20, 60 from pick_outcomes
+    fwd_return_pct     REAL,                -- realised forward return
+    uhs_score          INTEGER,             -- 0-100 score at pick_date
+    uhs_label          TEXT,                -- TRUSTED/PRELIMINARY/REVIEW/AVOID
+    uhs_worst_dim      TEXT,
+    cap_tier           TEXT,
+    written_at         TEXT DEFAULT (datetime('now')),
+    PRIMARY KEY (sid, pick_date, window_days)
+);
+CREATE INDEX IF NOT EXISTS idx_uhs_cal_window_score ON uhs_calibration_log(window_days, uhs_score);
+CREATE INDEX IF NOT EXISTS idx_uhs_cal_pick_date ON uhs_calibration_log(pick_date);

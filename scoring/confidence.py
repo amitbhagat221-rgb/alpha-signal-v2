@@ -229,6 +229,44 @@ def batch_write_pick_uhs(pick_date: Optional[str] = None) -> int:
     return n
 
 
+def update_calibration_log() -> int:
+    """Populate uhs_calibration_log with every (pick_outcomes row × daily_picks.uhs_score).
+
+    Runs nightly. The table is the scaffold for retrospective validation of the
+    uniform 20/20/20/20/20 dim weighting once 6+ months of forward-return data
+    accumulate (~late Nov 2026). Until then, this is observation only.
+
+    Idempotent: INSERT OR REPLACE on PK (sid, pick_date, window_days).
+    """
+    df = read_sql(
+        """
+        SELECT po.sid, po.pick_date, po.window_days, po.fwd_return_pct,
+               dp.uhs_score, dp.uhs_label, dp.uhs_worst_dim, dp.cap_tier
+        FROM pick_outcomes po
+        JOIN daily_picks dp ON po.sid = dp.sid AND po.pick_date = dp.pick_date
+        WHERE dp.uhs_score IS NOT NULL
+        """
+    )
+    if df.empty:
+        return 0
+    rows = df.to_dict("records")
+    with get_db() as conn:
+        for r in rows:
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO uhs_calibration_log
+                  (sid, pick_date, window_days, fwd_return_pct, uhs_score,
+                   uhs_label, uhs_worst_dim, cap_tier)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (r["sid"], r["pick_date"], r["window_days"],
+                 r["fwd_return_pct"], r["uhs_score"], r["uhs_label"],
+                 r["uhs_worst_dim"], r["cap_tier"]),
+            )
+    print(f"  Updated uhs_calibration_log with {len(rows)} rows")
+    return len(rows)
+
+
 def compute(snapshot_date: Optional[str] = None, dry_run: bool = False) -> int:
     """Pipeline entry point. Writes pick-level UHS for today's daily_picks."""
     if dry_run:

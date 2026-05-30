@@ -260,12 +260,18 @@ def _build_stock_context(sid):
 
     # Pick score
     pick = read_sql(
-        "SELECT final_score, rank FROM daily_picks WHERE sid = ? ORDER BY pick_date DESC LIMIT 1",
+        "SELECT final_score, rank, uhs_score, uhs_label, uhs_worst_dim, uhs_breakdown_json "
+        "FROM daily_picks WHERE sid = ? ORDER BY pick_date DESC LIMIT 1",
         params=[sid],
     )
     if not pick.empty:
         s["final_score"] = pick.iloc[0]["final_score"]
         s["rank"] = pick.iloc[0]["rank"]
+        # Plan 0007 Phase 8 — UHS context for the LLM prompt
+        s["uhs_score"] = pick.iloc[0]["uhs_score"]
+        s["uhs_label"] = pick.iloc[0]["uhs_label"]
+        s["uhs_worst_dim"] = pick.iloc[0]["uhs_worst_dim"]
+        s["uhs_breakdown_json"] = pick.iloc[0]["uhs_breakdown_json"]
 
     return s
 
@@ -343,6 +349,50 @@ def _build_signals_section(context):
     return "\n".join(lines)
 
 
+def _build_uhs_block(context):
+    """Plan 0007 Phase 8 — UHS context block in the LLM prompt.
+
+    Surfaces uhs_score + uhs_label + uhs_worst_dim so the narrative
+    must acknowledge data-confidence weakness. Adds a hard hygiene rule
+    that BANS strength claims about dims that scored <12: cannot claim
+    "strong fundamentals" if dim_provenance < 12 or dim_consistency < 12.
+    """
+    score = context.get("uhs_score")
+    label = context.get("uhs_label")
+    worst = context.get("uhs_worst_dim")
+    breakdown = context.get("uhs_breakdown_json")
+    if score is None:
+        return "DATA-CONFIDENCE: (not yet computed)\n"
+
+    constraints = []
+    if breakdown:
+        try:
+            import json as _json
+            dims = (_json.loads(breakdown).get("dims") or {})
+            if (dims.get("provenance") or 99) < 12:
+                constraints.append(
+                    "  - dim_provenance < 12 — DO NOT claim 'strong fundamentals' or 'verified data'"
+                )
+            if (dims.get("consistency") or 99) < 12:
+                constraints.append(
+                    "  - dim_consistency < 12 — DO NOT claim 'consistent signal' or 'reliable trajectory'"
+                )
+            if (dims.get("freshness") or 99) < 12:
+                constraints.append(
+                    "  - dim_freshness < 12 — bull/bear must acknowledge data is stale"
+                )
+        except Exception:
+            pass
+    constraints_text = "\n".join(constraints) if constraints else ""
+
+    return (
+        f"\nDATA-CONFIDENCE (Plan 0007 UHS):\n"
+        f"- score = {score}/100 · {label} · weakest dim = {worst or 'n/a'}\n"
+        f"- HYGIENE CONSTRAINTS (override defaults):\n"
+        f"{constraints_text or '  - none active for this pick'}\n"
+    )
+
+
 def _build_prompt(context):
     """Build the Claude prompt for investment thesis.
 
@@ -361,11 +411,13 @@ def _build_prompt(context):
         in narrative either — the validator now enforces that.
     """
     signals_block = _build_signals_section(context)
+    uhs_block = _build_uhs_block(context)
     return f"""You are an expert Indian equity analyst. Generate a concise investment dossier for this stock.
 
 STOCK: {context.get('name', 'Unknown')} ({context.get('ticker', '?')})
 SECTOR: {context.get('sector', '?')} | TIER: {context.get('cap_tier', '?')}
 PRICE: ₹{context.get('current_price', '?')} ({context.get('price_date', '?')})
+{uhs_block}
 
 SIGNALS (only signals listed here are valid to reference — do not invent absent ones):
 {signals_block}

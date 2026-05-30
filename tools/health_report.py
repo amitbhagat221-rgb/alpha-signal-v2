@@ -485,16 +485,52 @@ def format_email_html(state):
 
 
 def format_push_text(state):
-    """Short text for ntfy.sh / SMS-equivalent push. ≤200 chars."""
+    """Short text for ntfy.sh / SMS-equivalent push. ≤200 chars.
+
+    Pushes on EITHER:
+      - any CRITICAL issue (existing behaviour), OR
+      - Plan 0007 Phase 8: system UHS dropping below 60 (any tier-1 table
+        UHS <60 → system geomean falls; user gets alerted before any pick
+        based on that stale/broken table reaches morning_brief).
+    """
     s = state["summary"]
-    if s["critical"] == 0:
-        return None  # don't push if nothing critical
     critical_issues = [i for i in state["issues"] if i["severity"] == CRITICAL]
-    head = f"⚠ Alpha Signal: {s['critical']} CRITICAL"
+
+    # Plan 0007 Phase 8 — system UHS check
+    uhs_alert = _system_uhs_alert()
+
+    if s["critical"] == 0 and not uhs_alert:
+        return None  # nothing critical AND system UHS healthy
+    head_lines = []
+    if s["critical"]:
+        head_lines.append(f"⚠ Alpha Signal: {s['critical']} CRITICAL")
+    if uhs_alert:
+        head_lines.append(uhs_alert)
     body_lines = [f"• {i['message']}" for i in critical_issues[:3]]
     if len(critical_issues) > 3:
         body_lines.append(f"…+{len(critical_issues)-3} more")
-    return head + "\n" + "\n".join(body_lines)
+    return "\n".join(head_lines + body_lines)
+
+
+def _system_uhs_alert():
+    """Return alert string if system UHS < 60 in the latest snapshot, else None."""
+    try:
+        from db import read_sql
+        df = read_sql(
+            """
+            SELECT score_pct FROM health_score
+            WHERE entity_kind = 'system' AND entity_id = 'SYSTEM'
+            ORDER BY snapshot_date DESC LIMIT 1
+            """
+        )
+        if df.empty or df.iloc[0]["score_pct"] is None:
+            return None
+        score = int(df.iloc[0]["score_pct"])
+        if score < 60:
+            return f"🔴 System UHS {score} (<60 = AVOID — tier-1 table compromised)"
+    except Exception:
+        return None
+    return None
 
 
 def _html_escape(s):

@@ -553,6 +553,16 @@ PIPELINE_STEPS = [
      "table": "external_anchors",  "source": "stock_prices (bhavcopy + yfinance)",
      "data_freq": "daily",         "frequency": "daily"},
 
+    # Plan 0007 Phase 8 — UHS calibration log. Joins every pick_outcomes row
+    # to its daily_picks.uhs_score so that once 6+ months of forward returns
+    # accumulate (~late Nov 2026) the uniform 20/20/20/20/20 dim weighting can
+    # be regression-validated against realised return. Until then: observation
+    # only. Non-critical.
+    {"name": "update_uhs_calibration", "module": "scoring.confidence", "function": "update_calibration_log",
+     "critical": False, "table": "uhs_calibration_log",
+     "source": "pick_outcomes + daily_picks.uhs_score",
+     "data_freq": "daily",         "frequency": "daily"},
+
     # Sector briefs — plan 0006 Phase A. One sector_briefs row per sector per
     # date with macro + model + regulatory rollup and a bucket classifier
     # (BOOMING / LIKELY / HEADWIND / QUIET). Drives the /sectors digest UX
