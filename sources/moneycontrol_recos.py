@@ -75,6 +75,36 @@ QUOTE_URL_TEMPLATE = "https://www.moneycontrol.com{slug}"
 SEARCH_URL = "https://www.moneycontrol.com/mccode/common/autosuggestion_solr.php"
 
 
+# ─────────────────────── Curated slug overrides ───────────────────────
+# Companies where MC autosuggest cannot recover the correct page —
+# hand-verified 2026-05-31 during the Plan 0007 slug triage. This is the
+# single source of truth for both slug discovery (skip autosuggest) and the
+# data_sanity name-mismatch auditor (suppress false positives).
+#
+#   sid → "<slug>" : pin this verified slug; discovery never calls autosuggest
+#                    and the auditor allowlists the (legitimate) name mismatch.
+#   sid → None     : autosuggest returns a WRONG entity OR no MC page exists —
+#                    never write a slug, never scrape.
+#
+# Why each entry is here (autosuggest is name/symbol-based and these break it):
+#   DPSC  — India Power Corporation Ltd still lives under its legacy 'dpsc'
+#           slug (ex-Dishergarh Power / DPSC Ltd). Page title = "DPSC Ltd."
+#   CUBEI — Cube Highways Trust is hosted as the 'cubeinvit' InvIT page.
+#   BRIGT — ticker "BRIGHT" autosuggests to 'brightsolar' (Bright Solar Ltd),
+#           a different company. Bright Outdoor Media has no MC quote page.
+#   APPA/DED/MER/PUNI — MICRO-tier shells with no MC coverage at all
+#           (autosuggest returns nothing); recorded so they stop being re-probed.
+MC_SLUG_OVERRIDES = {
+    "DPSC":  "/india/stockpricequote/power-generationdistribution/dpsc/DPS",
+    "CUBEI": "/india/stockpricequote/miscellaneous/cubeinvit/CUBEI15078",
+    "BRIGT": None,
+    "APPA":  None,
+    "DED":   None,
+    "MER":   None,
+    "PUNI":  None,
+}
+
+
 # ─────────────────────── Schema bootstrap ───────────────────────
 
 CREATE_TABLES_SQL = """
@@ -168,6 +198,14 @@ def _autosuggest(ticker):
 
 
 def discover_slug_for(sid, ticker):
+    # Curated overrides win over autosuggest — these are the SIDs where
+    # autosuggest is known to return the wrong entity (or nothing). Pin the
+    # verified slug (or None) and never re-probe. See MC_SLUG_OVERRIDES.
+    if sid in MC_SLUG_OVERRIDES:
+        slug = MC_SLUG_OVERRIDES[sid]
+        with get_db() as conn:
+            conn.execute("UPDATE stocks SET mc_slug = ? WHERE sid = ?", (slug, sid))
+        return slug
     slug = _autosuggest(ticker)
     if not slug:
         return None

@@ -117,10 +117,28 @@ async def index(request: Request):
 @app.get("/system", response_class=HTMLResponse)
 async def system(request: Request, refresh: int = 0):
     """Health Center page. Pass ?refresh=1 to force a recompute."""
-    pipeline = api.get_pipeline_status()
-    health = api.get_data_freshness()
-    summary = api.get_db_summary()
-    health_scores = api.get_data_health_scores(force=bool(refresh))
+    # These calls are independent and each is individually cached, but on a cold
+    # (cache-expired) load the slow ones — get_health_overview ~14s, freshness
+    # ~7s, db_summary ~3s — ran serially (~24s). Fire them concurrently; the
+    # data_health(cache_ttl) memo dedupes the freshness scan shared with
+    # get_health_overview. Wall-clock collapses to the slowest single call.
+    import asyncio
+
+    async def _overview():
+        try:
+            return await asyncio.to_thread(api.get_health_overview)
+        except Exception:
+            import traceback; traceback.print_exc()
+            return None
+
+    pipeline, health, summary, health_scores, factor_health, overview = await asyncio.gather(
+        asyncio.to_thread(api.get_pipeline_status),
+        asyncio.to_thread(api.get_data_freshness),
+        asyncio.to_thread(api.get_db_summary),
+        asyncio.to_thread(api.get_data_health_scores, bool(refresh)),
+        asyncio.to_thread(api.get_factor_health),
+        _overview(),
+    )
 
     from db import DOMAIN_ORDER
     by_domain: dict[str, list[dict]] = {}
@@ -130,13 +148,6 @@ async def system(request: Request, refresh: int = 0):
         {"domain": d, "rows": by_domain[d]}
         for d in DOMAIN_ORDER if d in by_domain
     ]
-
-    factor_health = api.get_factor_health()
-    try:
-        overview = api.get_health_overview()
-    except Exception as e:
-        overview = None
-        import traceback; traceback.print_exc()
 
     return templates.TemplateResponse(request, "system.html", {
         "page": "system", "pipeline": pipeline, "health": health,

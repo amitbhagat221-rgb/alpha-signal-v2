@@ -309,6 +309,14 @@ PIPELINE_STEPS = [
     {"name": "fetch_prices_fallback", "module": "sources.yfinance_prices", "function": "compute", "critical": False,
      "table": "stock_prices",      "source": "yfinance .BO / .NS (gap-fill)", "data_freq": "daily", "frequency": "daily"},
 
+    # Corporate actions (splits/bonuses/special dividends) over a short trailing
+    # window. Feeds Gate 3 temporal-continuity's escape hatch so real ex-date
+    # price step-changes (LIC 1:2 split, LEM 11.5×, …) classify as CONTINUOUS
+    # instead of generating noise verdicts. Idempotent INSERT OR IGNORE; the
+    # monthly `--source corp --months 24` deep backfill is the gap-repair path.
+    {"name": "fetch_corp_actions", "module": "sources.nselib_pull", "function": "compute_corp_actions", "critical": False,
+     "table": "corporate_actions", "source": "NSE corporate-actions (nselib)", "data_freq": "daily", "frequency": "daily"},
+
     {"name": "universe_liveness",  "module": "sources.universe",     "function": "compute", "critical": False,
      "table": "stocks",            "source": "stock_prices (recent activity)", "data_freq": "daily", "frequency": "daily"},
 
@@ -578,6 +586,14 @@ PIPELINE_STEPS = [
     # Powers the "BY FORCE" 2×2 grid in the Phase C /sectors digest UX.
     {"name": "compute_sector_forces", "module": "signals.sector_forces", "function": "compute", "critical": False,
      "table": "sector_force_breakdown", "source": "sector_briefs + regulatory_signals + sector_metadata",
+     "data_freq": "daily",         "frequency": "daily"},
+
+    # Sector dossiers — plan 0006 Phase D. LLM-narrated per-sector thesis on top
+    # of briefs + forces + sector_metadata. ~11 Claude calls/night (~₹3-5).
+    # Non-critical: a failure must not block the stock dossier or email. Same
+    # no-raw-numbers hygiene contract as output.dossier; invalid → valid=0.
+    {"name": "compute_sector_dossiers", "module": "output.sector_dossier", "function": "compute", "critical": False,
+     "table": "sector_dossiers",   "source": "sector_briefs + sector_force_breakdown + sector_metadata (Claude API)",
      "data_freq": "daily",         "frequency": "daily"},
 
     # ── Output ──

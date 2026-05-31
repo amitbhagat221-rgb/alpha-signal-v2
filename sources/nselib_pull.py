@@ -154,12 +154,16 @@ def pull_corporate_actions(months=24):
     sid_map = _get_sid_map()
     chunks = _months_back(months)
     total = 0
+    n_ok = 0       # chunks where NSE returned a (possibly empty) frame
+    n_err = 0      # chunks where the NSE call threw
     for start, end in chunks:
         from_str = start.strftime("%d-%m-%Y")
         to_str = end.strftime("%d-%m-%Y")
         try:
             df = cm.corporate_actions_for_equity(from_date=from_str, to_date=to_str)
+            n_ok += 1
         except Exception as e:
+            n_err += 1
             print(f"  corp {from_str}→{to_str}: ❌ {str(e)[:100]}")
             time.sleep(DELAY_SEC)
             continue
@@ -207,7 +211,28 @@ def pull_corporate_actions(months=24):
             total += n
             print(f"  corp {from_str}→{to_str}: ✅ {len(out_rows)} parsed → {n} new")
         time.sleep(DELAY_SEC)
+
+    # Silent-failure contract (CLAUDE.md): 0 NEW rows is normal (idempotent
+    # INSERT OR IGNORE), but every chunk erroring means NSE was unreachable —
+    # raise so the watchdog sees a real stall, not a flat fetched_at.
+    if chunks and n_ok == 0:
+        raise RuntimeError(
+            f"corporate_actions: all {n_err} NSE chunks failed — endpoint unreachable"
+        )
     return total
+
+
+def compute_corp_actions(months=2):
+    """Daily pipeline producer — refresh corporate_actions over a short
+    trailing window (default 2 months, ~2 NSE calls) so Gate 3 temporal
+    continuity can distinguish real splits/bonuses/special-dividends from
+    sourcing artifacts via the corporate_actions escape hatch
+    (validators.temporal_continuity._has_recent_corp_action).
+
+    Short window keeps it cheap for daily cadence; INSERT OR IGNORE makes it
+    idempotent. The monthly `--source corp --months 24` deep backfill still
+    exists for first-load / gap repair. Returns rows newly inserted."""
+    return pull_corporate_actions(months=months)
 
 
 # ───────────────────────── Move 3: short selling ─────────────────────────

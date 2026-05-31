@@ -700,6 +700,75 @@
     </div>
 </div>
 
+<!-- Promotion funnel + orthogonality — "where does every factor sit?" -->
+{% set fn = fs.funnel %}
+{% set ort = fs.orthogonality %}
+{% if fn %}
+<div class="card" style="margin-bottom: 20px;">
+    <div class="section-title">Promotion Funnel &amp; Orthogonality</div>
+    <div class="section-desc" style="margin-bottom: 12px;">
+        Where every registered factor sits, and whether the waiting queue is really independent ideas.
+        <strong>Validated</strong> = passed backtest (|t|≥1.5, ≥12 periods). <strong>Live</strong> = wired into a production weight scheme.
+        <strong>Waiting</strong> = validated but not yet wired. <strong>Insufficient</strong> = promising t-stat but too few periods to trust yet.
+    </div>
+
+    <!-- Funnel tiles -->
+    <div style="display: flex; flex-wrap: wrap; gap: 10px;">
+        {% for lbl, val, col, sub in [
+            ('Total',        fn.total,             'var(--text-primary)', 'registered'),
+            ('Validated',    fn.validated,         '#2ecc71',             fn.keep ~ ' KEEP · ' ~ fn.weak ~ ' WEAK'),
+            ('Live',         fn.live,              '#2ecc71',             'wired into weights'),
+            ('Waiting',      fn.waiting,           '#4d8eff',             'validated, not wired'),
+            ('Insufficient', fn.insufficient_data, '#9b59b6',             'too few periods'),
+            ('Dropped',      fn.dropped,           '#e74c3c',             'failed backtest'),
+            ('No backtest',  fn.no_backtest,       'var(--text-muted)',   'not yet tested'),
+        ] %}
+        <div style="flex: 1 1 110px; background: var(--bg-primary); border-radius: 8px; padding: 10px 12px; min-width: 110px;">
+            <div style="font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">{{ lbl }}</div>
+            <div class="mono" style="font-size: 24px; font-weight: 700; color: {{ col }}; line-height: 1.1;">{{ val }}</div>
+            <div style="font-size: 9px; color: var(--text-muted); margin-top: 2px;">{{ sub }}</div>
+        </div>
+        {% endfor %}
+    </div>
+    <div style="font-size: 10px; color: var(--text-muted); margin-top: 8px; font-style: italic;">
+        {{ fn.total }} = {{ fn.validated }} validated + {{ fn.insufficient_data }} insufficient + {{ fn.dropped }} dropped + {{ fn.no_backtest }} no-backtest.
+        Of validated, {{ fn.live }} are live and {{ fn.waiting }} wait in the queue.
+    </div>
+
+    <!-- Orthogonality -->
+    {% if ort and ort.available %}
+    <div style="margin-top: 16px; border-top: 1px solid var(--border); padding-top: 12px;">
+        <div style="display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 8px;">
+            <div style="font-size: 11px; font-weight: 700; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px;">
+                Orthogonality — redundant pairs (|ρ| ≥ {{ ort.threshold }})
+            </div>
+            <div style="font-size: 10px; color: var(--text-muted);">
+                {{ ort.n_redundant }} pairs · {{ ort.n_waiting_dupes }} duplicate a live factor · last run {{ (ort.computed_at or '—')[:10] }}
+            </div>
+        </div>
+        <div style="font-size: 10px; color: var(--text-muted); margin: 4px 0 8px; font-style: italic;">
+            Two factors at high |ρ| are one idea. Promoting both double-counts it. Composite↔component pairs are expected and hidden.
+        </div>
+        <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+            {% for p in ort.redundant_pairs %}
+            <div class="mono" style="font-size: 11px; padding: 3px 9px; border-radius: 12px;
+                background: {% if p.duplicates_live %}rgba(231,76,60,0.16){% else %}var(--bg-primary){% endif %};
+                color: {% if p.duplicates_live %}#e74c3c{% else %}var(--text-secondary){% endif %};
+                border: 1px solid var(--border);"
+                title="{{ 'A waiting factor here duplicates a LIVE one — do not promote.' if p.duplicates_live else 'Both in library/waiting — pick one.' }} (tier {{ p.tier }})">
+                {{ p.a }} ~ {{ p.b }} <span style="opacity: 0.7;">{{ '%+.2f'|format(p.rho) }}</span>{% if p.duplicates_live %} ⚠{% endif %}
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    {% else %}
+    <div style="margin-top: 12px; font-size: 10px; color: var(--text-muted); font-style: italic;">
+        Orthogonality data unavailable — run <span class="mono">python -m tools.factor_correlation</span> to refresh.
+    </div>
+    {% endif %}
+</div>
+{% endif %}
+
 <!-- Per-factor table -->
 <div class="card" x-data="{ status: 'all', validation: 'all', track: 'all', search: '' }">
     <div class="section-title">Per-Factor — Data Health & Validation</div>

@@ -127,7 +127,9 @@ def get_data_freshness():
     payload is JSON-safe (Jinja's tojson preserves NaN literals which break
     JSON.parse in the browser)."""
     from db import data_health
-    return safe_json_records(data_health())
+    # cache_ttl shares the scan with health_report._gather_tables so a cold
+    # /system load runs the ~7s freshness scan once, not twice. See ADR 0031.
+    return safe_json_records(data_health(cache_ttl=60))
 
 
 @_persisted_cache(300, name="get_db_summary")
@@ -972,6 +974,110 @@ def get_factor_health():
         by_data_grade[r["data_grade"]] = by_data_grade.get(r["data_grade"], 0) + 1
         by_validation[r["validation_verdict"]] = by_validation.get(r["validation_verdict"], 0) + 1
     avg_data_health = round(sum(r["data_health"] for r in out) / n, 1) if n else 0
+
+    # ── Promotion funnel — answers "where does every factor sit?" in one place.
+    # The four questions Amit keeps re-deriving (total / validated / live /
+    # waiting / trustworthy). Single source of truth so the cockpit, ops API and
+    # any chat read the same numbers. See HANDOFF 2026-05-31.
+    #
+    # LIVE = actually wired into a production weight scheme (config.SIGNAL_WEIGHTS
+    #   / _RETURN / _SHARPE). NOTE: the per-row `in_model` flag means "READY &
+    #   |t|>=1.5" — that conflates live + waiting, so it is NOT used here.
+    # The screener's weight keys are abstracted names ("consensus", "smart_money")
+    # mapping to one canonical signal; keep in sync with screener.SIGNAL_COLS.
+    import config as _cfg
+    _WEIGHT_KEY_TO_SIGNAL = {
+        "consensus":          "consensus_signal_combined",
+        "earnings_yield":     "earnings_yield",
+        "accruals":           "cf_accruals_ratio",
+        "piotroski":          "piotroski_f_score",
+        "momentum":           "mom_6m_adj",
+        "book_to_price":      "book_to_price",
+        "promoter":           "promoter_qoq",
+        "smart_money":        "avg_delivery_pct_30d",
+        "pt_upside":          "pt_upside",
+        "eps_growth":         "eps_growth_yoy",
+        "pledge_quality":     "pledge_quality",
+        "delivery_anomaly_z": "delivery_anomaly_z",
+    }
+    wired = set()
+    for _sch in ("SIGNAL_WEIGHTS", "SIGNAL_WEIGHTS_RETURN", "SIGNAL_WEIGHTS_SHARPE"):
+        for _tier_w in (getattr(_cfg, _sch, {}) or {}).values():
+            for _k in _tier_w:
+                wired.add(_WEIGHT_KEY_TO_SIGNAL.get(_k, _k))
+    if "mom_6m_adj" in wired:
+        wired.add("mom_12m_adj")  # SMALL tier swaps in the 12m variant
+
+    live_l, waiting_l, insuff_l = [], [], []
+    for r in out:
+        r["in_production"] = r["signal"] in wired
+        v = r["validation_verdict"]
+        if r["in_production"]:
+            live_l.append(r["signal"])
+        elif v in ("KEEP", "WEAK"):
+            waiting_l.append(r["signal"])
+        if v == "INSUFFICIENT":
+            insuff_l.append(r["signal"])
+
+    vd = by_validation
+    funnel = {
+        "total":             n,
+        "validated":         vd.get("KEEP", 0) + vd.get("WEAK", 0),  # |t|>=1.5, n>=12
+        "keep":              vd.get("KEEP", 0),
+        "weak":              vd.get("WEAK", 0),
+        "insufficient_data": vd.get("INSUFFICIENT", 0),  # promising t, too few periods
+        "dropped":           vd.get("DROP", 0),
+        "no_backtest":       vd.get("NONE", 0),
+        "live":              len(live_l),      # wired into a production weight scheme
+        "waiting":           len(waiting_l),   # validated but not yet wired
+        "live_factors":         sorted(live_l),
+        "waiting_factors":       sorted(waiting_l),
+        "insufficient_factors":  sorted(insuff_l),
+    }
+
+    # ── Orthogonality — last factor_correlation run (offline, tools/
+    # factor_correlation.py). Surfaces redundant pairs so promoting a "waiting"
+    # factor doesn't double-count an idea already live. Composite↔component
+    # overlap is expected by construction, so *_composite pairs are excluded.
+    ORTHO_THRESHOLD = 0.8
+    best_pair = {}  # (a,b) sorted tuple -> {a,b,rho,tier}
+    ortho_computed_at = None
+    for _tier in ("LARGE", "MID", "SMALL"):
+        _p = PROJECT_ROOT / "data" / f"factor_correlation_{_tier}.json"
+        if not _p.exists():
+            continue
+        try:
+            _d = json.loads(_p.read_text())
+        except Exception:
+            continue
+        ortho_computed_at = _d.get("computed_at", ortho_computed_at)
+        _m = _d.get("matrix", {})
+        for _a, _row in _m.items():
+            if _a.endswith("_composite"):
+                continue
+            for _b, _rho in _row.items():
+                if _a >= _b or _b.endswith("_composite") or _rho is None:
+                    continue
+                if abs(_rho) < ORTHO_THRESHOLD:
+                    continue
+                key = (_a, _b)
+                if key not in best_pair or abs(_rho) > abs(best_pair[key]["rho"]):
+                    best_pair[key] = {"a": _a, "b": _b, "rho": round(_rho, 2), "tier": _tier}
+    redundant_pairs = sorted(best_pair.values(), key=lambda x: -abs(x["rho"]))
+    # Flag pairs where a waiting factor duplicates a live one (the actionable bit).
+    waiting_set, live_set = set(waiting_l), set(live_l)
+    for p in redundant_pairs:
+        sides = {p["a"], p["b"]}
+        p["duplicates_live"] = bool(sides & live_set) and bool(sides & waiting_set)
+    orthogonality = {
+        "available":      bool(redundant_pairs),
+        "computed_at":    ortho_computed_at,
+        "threshold":      ORTHO_THRESHOLD,
+        "redundant_pairs": redundant_pairs[:12],
+        "n_redundant":    len(redundant_pairs),
+        "n_waiting_dupes": sum(1 for p in redundant_pairs if p["duplicates_live"]),
+    }
+
     summary = {
         "total": n,
         "in_model": sum(1 for r in out if r["in_model"]),
@@ -986,6 +1092,9 @@ def get_factor_health():
         "avg_data_health": avg_data_health,
         "data_grade_dist": by_data_grade,
         "validation_dist": by_validation,
+        # Promotion funnel + orthogonality (2026-05-31)
+        "funnel": funnel,
+        "orthogonality": orthogonality,
     }
 
     return {"summary": summary, "factors": out}

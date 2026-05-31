@@ -12,6 +12,8 @@ import glob
 import json
 import re
 import sqlite3
+import threading
+import time as _time_module
 import pandas as pd
 from pathlib import Path
 from contextlib import contextmanager
@@ -1176,6 +1178,12 @@ STALENESS_OVERRIDES = {
     # trying to "fix" a structural lag. 14 tolerates the 5d-window lag + a
     # holiday cluster, yet still flags a genuinely stalled producer in <2wk.
     "pick_outcomes":          14,
+    # corporate_actions producer runs daily but the freshness anchor is
+    # fetched_at (ex_date isn't a _table_date_range candidate), which only
+    # advances on a day with a NEW ex-date row. NSE announces something most
+    # trading days, but holiday clusters (Diwali, year-end) can go several
+    # quiet days. 10d tolerates that yet flags a genuinely stalled fetcher.
+    "corporate_actions":      10,
 }
 
 # Per-stock coverage gates. A table that should have a row per universe stock
@@ -2414,7 +2422,11 @@ DOMAIN_ORDER = [
 ]
 
 
-def data_health():
+_data_health_lock = threading.Lock()
+_data_health_memo = {"value": None, "ts": 0.0}
+
+
+def data_health(cache_ttl=0):
     """
     Comprehensive data health report. Merges DB row counts with pipeline-step
     metadata from config.PIPELINE_STEPS + config.RAW_TABLES, per-table
@@ -2424,7 +2436,27 @@ def data_health():
     Returns DataFrame with: table, rows, kind, depth, description, source,
     frequency, earliest_date, latest_date, date_span, freshness, age_days,
     threshold_days, produced_by, consumed_by, status.
+
+    cache_ttl > 0 returns an in-process memoized result if the last full scan
+    was within `cache_ttl` seconds — shared across callers, lock-guarded so
+    concurrent callers compute it exactly once. Default 0 = always recompute.
+    The /system page sets cache_ttl so the freshness scan (~7s) isn't run twice
+    per cold load (get_data_freshness + health_report._gather_tables). Keep it 0
+    for freshness_watchdog's compute→heal→re-verify loop, which needs live counts.
     """
+    if cache_ttl and cache_ttl > 0:
+        now = _time_module.time()
+        with _data_health_lock:
+            m = _data_health_memo
+            if m["value"] is not None and (now - m["ts"]) < cache_ttl:
+                return m["value"]
+            df = _data_health_impl()
+            m["value"], m["ts"] = df, now
+            return df
+    return _data_health_impl()
+
+
+def _data_health_impl():
     from config import PIPELINE_STEPS, RAW_TABLES
 
     # Build lookup: table → registered metadata (source, refresh frequency)

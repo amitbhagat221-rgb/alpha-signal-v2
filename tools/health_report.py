@@ -97,11 +97,22 @@ def gather(since_days=1):
     """
     out = {"as_of": datetime.now().isoformat(timespec="seconds")}
 
-    out["pipeline"] = _gather_pipeline(since_days)
-    out["tables"] = _gather_tables()
-    out["watchdog"] = _gather_watchdog()
-    out["dossiers"] = _gather_dossiers()
-    out["sanity"] = _gather_sanity()
+    # The five sub-gatherers are independent (each opens its own read-only DB
+    # connection and returns a distinct key). Run them concurrently — the slow
+    # pair (_gather_sanity ~11s, _gather_tables ~7s) dominated a serial ~18s
+    # gather(); overlapping them takes the cold /system page off that floor.
+    import concurrent.futures as _cf
+    _tasks = {
+        "pipeline": lambda: _gather_pipeline(since_days),
+        "tables":   _gather_tables,
+        "watchdog": _gather_watchdog,
+        "dossiers": _gather_dossiers,
+        "sanity":   _gather_sanity,
+    }
+    with _cf.ThreadPoolExecutor(max_workers=len(_tasks)) as _ex:
+        _futs = {k: _ex.submit(fn) for k, fn in _tasks.items()}
+        for k, fut in _futs.items():
+            out[k] = fut.result()
 
     issues = _classify(out)
     out["issues"] = issues
@@ -190,7 +201,9 @@ def _gather_pipeline(since_days):
 
 def _gather_tables():
     """Freshness breakdown from data_health()."""
-    df = data_health()
+    # cache_ttl lets this share the scan with cockpit's get_data_freshness on a
+    # cold /system load (same 60s window) instead of recomputing the ~7s scan.
+    df = data_health(cache_ttl=60)
     fresh = int((df["freshness"] == "FRESH").sum())
     stale = [
         (r["table"], r["age_days"], r["threshold_days"], r["produced_by"])

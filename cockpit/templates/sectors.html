@@ -292,6 +292,39 @@
         line-height: 1.5;
     }
 
+    /* Plan 0006 Phase D — per-sector LLM dossier inside the bucket row */
+    .sd-row-link { display: block; text-decoration: none; color: inherit; }
+    .sd-dossier { margin-top: 9px; padding-top: 9px; border-top: 1px dashed var(--border); }
+    .sd-thesis { font-size: 12px; line-height: 1.5; color: var(--text-secondary); margin-bottom: 8px; }
+    .sd-conv {
+        display: inline-block; font-size: 9px; font-weight: 700; letter-spacing: 0.5px;
+        padding: 1px 5px; border-radius: 4px; border: 1px solid var(--border);
+        color: var(--text-muted); margin-left: 6px; vertical-align: middle;
+    }
+    .sd-watch { display: flex; flex-direction: column; gap: 5px; }
+    .sd-watch-item {
+        font-size: 11.5px; line-height: 1.45; color: var(--text-secondary);
+        display: flex; gap: 7px; align-items: baseline;
+    }
+    .sd-hbadge {
+        flex: 0 0 auto; font-family: var(--mono, monospace); font-size: 9px; font-weight: 700;
+        width: 15px; text-align: center; border-radius: 4px; padding: 1px 0; color: #fff;
+    }
+    .sd-hbadge.h-s { background: #4d8eff; }
+    .sd-hbadge.h-m { background: #7cb305; }
+    .sd-hbadge.h-l { background: #9254de; }
+    .sd-dmore { margin-top: 9px; }
+    .sd-dmore > summary {
+        list-style: none; cursor: pointer; font-size: 11px; font-weight: 600; color: var(--text-muted);
+    }
+    .sd-dmore > summary::-webkit-details-marker { display: none; }
+    .sd-dmore > summary::before { content: "▸"; margin-right: 5px; display: inline-block; transition: transform 0.15s; }
+    .sd-dmore[open] > summary::before { transform: rotate(90deg); }
+    .sd-case { margin-top: 8px; }
+    .sd-case-h { font-size: 10px; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; margin-bottom: 3px; }
+    .sd-case ul { margin: 0; padding-left: 16px; }
+    .sd-case li { font-size: 11px; line-height: 1.45; color: var(--text-secondary); margin-bottom: 3px; }
+
     .sd-quiet { margin-bottom: 18px; }
     .sd-quiet summary {
         list-style: none; cursor: pointer;
@@ -408,30 +441,66 @@
 {# ───────────── BUCKETS ───────────── #}
 
 {% macro sector_row(s, accent, hint_label) %}
-<a class="sd-row" href="/sectors?sector={{ s.sector | urlencode }}#per-sector"
-   style="border-left: 3px solid {{ accent }};">
-    <div class="sd-row-head">
-        <span class="sd-sector">{{ s.sector }}</span>
-        <span class="sd-picks">
-            <span class="sd-picks-n">{{ s.n_picks_top30 }}</span>
-            <span class="sd-picks-label">{{ 'pick' if s.n_picks_top30 == 1 else 'picks' }}</span>
-        </span>
-    </div>
-    {% if s.driver_preview %}
-    <div class="sd-driver" style="color: {{ accent }};">
-        <span class="sd-arrow">{{ hint_label }}</span>
-        <span class="sd-driver-text">{{ s.driver_preview }}</span>
+<div class="sd-row" style="border-left: 3px solid {{ accent }};">
+    <a class="sd-row-link" href="/sectors?sector={{ s.sector | urlencode }}#per-sector">
+        <div class="sd-row-head">
+            <span class="sd-sector">{{ s.sector }}</span>
+            <span class="sd-picks">
+                <span class="sd-picks-n">{{ s.n_picks_top30 }}</span>
+                <span class="sd-picks-label">{{ 'pick' if s.n_picks_top30 == 1 else 'picks' }}</span>
+            </span>
+        </div>
+        {% if s.driver_preview %}
+        <div class="sd-driver" style="color: {{ accent }};">
+            <span class="sd-arrow">{{ hint_label }}</span>
+            <span class="sd-driver-text">{{ s.driver_preview }}</span>
+        </div>
+        {% endif %}
+        {% if s.alignment_hint %}
+        <div class="sd-hint">⚠ {{ s.alignment_hint }}</div>
+        {% endif %}
+        {% if s.top_picks %}
+        <div class="sd-tickers">
+            {% for p in s.top_picks %}{{ p.ticker }}{% if not loop.last %}<span class="sd-tk-sep">·</span>{% endif %}{% endfor %}
+        </div>
+        {% endif %}
+    </a>
+    {# Plan 0006 Phase D — LLM-narrated dossier (thesis + horizon watch-items;
+       bull/bear/tech behind a disclosure). Absent/invalid → block omitted. #}
+    {% set d = s.dossier %}
+    {% if d and d.thesis %}
+    <div class="sd-dossier">
+        <div class="sd-thesis">{{ d.thesis }}{% if d.conviction %}<span class="sd-conv">{{ d.conviction }}</span>{% endif %}</div>
+        {% if d.what_to_watch %}
+        <div class="sd-watch">
+            {% for w in d.what_to_watch %}
+            <div class="sd-watch-item">
+                <span class="sd-hbadge h-{{ (w.horizon or '')|lower }}">{{ w.horizon }}</span>
+                <span>{{ w.item }}</span>
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+        {% if d.bull_case or d.bear_case or d.tech_innovation_drivers %}
+        <details class="sd-dmore">
+            <summary>Bull · bear · tech</summary>
+            {% if d.bull_case %}
+            <div class="sd-case"><div class="sd-case-h" style="color: var(--green);">Bull case</div>
+                <ul>{% for b in d.bull_case %}<li>{{ b }}</li>{% endfor %}</ul></div>
+            {% endif %}
+            {% if d.bear_case %}
+            <div class="sd-case"><div class="sd-case-h" style="color: var(--red);">Bear case</div>
+                <ul>{% for b in d.bear_case %}<li>{{ b }}</li>{% endfor %}</ul></div>
+            {% endif %}
+            {% if d.tech_innovation_drivers %}
+            <div class="sd-case"><div class="sd-case-h" style="color: var(--accent);">Tech / innovation</div>
+                <ul>{% for t in d.tech_innovation_drivers %}<li>{{ t }}</li>{% endfor %}</ul></div>
+            {% endif %}
+        </details>
+        {% endif %}
     </div>
     {% endif %}
-    {% if s.alignment_hint %}
-    <div class="sd-hint">⚠ {{ s.alignment_hint }}</div>
-    {% endif %}
-    {% if s.top_picks %}
-    <div class="sd-tickers">
-        {% for p in s.top_picks %}{{ p.ticker }}{% if not loop.last %}<span class="sd-tk-sep">·</span>{% endif %}{% endfor %}
-    </div>
-    {% endif %}
-</a>
+</div>
 {% endmacro %}
 
 {# 🔥 BOOMING NOW #}

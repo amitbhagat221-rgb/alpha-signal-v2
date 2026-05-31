@@ -1538,6 +1538,38 @@ def get_sector_digest():
 
     snapshot_date = briefs.iloc[0]["snapshot_date"]
 
+    # Plan 0006 Phase D — attach the LLM-narrated dossier per sector. Only
+    # valid=1 rows are surfaced (mirror of get_dossier() returning {} for
+    # invalid stock dossiers); a missing/invalid dossier yields {} so the
+    # template degrades gracefully to the deterministic digest.
+    dossier_map = {}
+    try:
+        ddf = read_sql(
+            """
+            SELECT sector, thesis, bull_case, bear_case, what_to_watch,
+                   tech_innovation_drivers, conviction
+            FROM sector_dossiers
+            WHERE snapshot_date = ? AND valid = 1
+            """,
+            params=[snapshot_date],
+        )
+        for _, dr in ddf.iterrows():
+            def _jl(v):
+                try:
+                    return json.loads(v) if v else []
+                except (json.JSONDecodeError, TypeError):
+                    return []
+            dossier_map[dr["sector"]] = {
+                "thesis": dr["thesis"],
+                "conviction": dr["conviction"],
+                "bull_case": _jl(dr["bull_case"]),
+                "bear_case": _jl(dr["bear_case"]),
+                "what_to_watch": _jl(dr["what_to_watch"]),
+                "tech_innovation_drivers": _jl(dr["tech_innovation_drivers"]),
+            }
+    except Exception:
+        dossier_map = {}
+
     def _f(v, places=None):
         if v is None or (isinstance(v, float) and pd.isna(v)):
             return None
@@ -1579,6 +1611,7 @@ def get_sector_digest():
             "alignment_hint": hint,
             "n_regulatory_30d": int(r["n_regulatory_30d"] or 0),
             "n_stocks": int(r["n_stocks"] or 0),
+            "dossier": dossier_map.get(r["sector"], {}),
         }
 
     buckets = {"BOOMING": [], "LIKELY": [], "HEADWIND": [], "QUIET": []}

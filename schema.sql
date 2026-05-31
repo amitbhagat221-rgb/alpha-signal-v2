@@ -497,6 +497,28 @@ CREATE TABLE IF NOT EXISTS sector_force_breakdown (
 
 CREATE INDEX IF NOT EXISTS idx_sector_force_date_force ON sector_force_breakdown(snapshot_date, force);
 
+-- Plan 0006 Phase D — LLM-narrated per-sector dossier (parallel to the
+-- per-stock dossier). One row per sector per snapshot_date. Narrative fields
+-- carry NO raw numbers (same hygiene contract as output/dossier.py); invalid
+-- dossiers are kept with valid=0 and surfaced as {} by the cockpit.
+CREATE TABLE IF NOT EXISTS sector_dossiers (
+    sector                   TEXT NOT NULL,
+    snapshot_date            TEXT NOT NULL,
+    thesis                   TEXT,
+    bull_case                TEXT,   -- JSON list of strings
+    bear_case                TEXT,   -- JSON list of strings
+    what_to_watch            TEXT,   -- JSON list of {horizon: S|M|L, item: str}
+    tech_innovation_drivers  TEXT,   -- JSON list of strings
+    conviction               TEXT,   -- HIGH / MEDIUM / LOW (sector tilt)
+    valid                    INTEGER NOT NULL DEFAULT 0,
+    validation_json          TEXT,
+    model                    TEXT,
+    generated_at             TEXT NOT NULL,
+    PRIMARY KEY (sector, snapshot_date)
+);
+
+CREATE INDEX IF NOT EXISTS idx_sector_dossiers_date ON sector_dossiers(snapshot_date);
+
 
 -- ═══════════════════════════════════════════════════
 -- GROUP 4: OUTPUT

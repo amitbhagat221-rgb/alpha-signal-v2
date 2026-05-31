@@ -994,6 +994,16 @@ def _mc_slug_name_mismatch_check():
     import re as _re
     from difflib import SequenceMatcher as _SM
 
+    # Hand-verified slugs whose company segment legitimately doesn't match the
+    # stock name (renamed entity, InvIT short-name, etc.). Single source of
+    # truth lives next to slug discovery. e.g. India Power Corp → 'dpsc',
+    # Cube Highways Trust → 'cubeinvit'. See MC_SLUG_OVERRIDES.
+    try:
+        from sources.moneycontrol_recos import MC_SLUG_OVERRIDES
+        _verified = {sid for sid, slug in MC_SLUG_OVERRIDES.items() if slug}
+    except Exception:
+        _verified = set()
+
     rows = read_sql("SELECT sid, name, ticker, mc_slug FROM stocks WHERE mc_slug IS NOT NULL")
     if rows.empty:
         return {"n_bad": 0, "n_total": 0, "sample": None}
@@ -1009,6 +1019,8 @@ def _mc_slug_name_mismatch_check():
     bad_list = []
     n_bad = 0
     for sid, name, ticker, slug in rows.itertuples(index=False):
+        if sid in _verified:
+            continue
         sc_n = _norm(_slug_co(slug)); name_n = _norm(name); ticker_n = _norm(ticker)
         ratio = _SM(None, sc_n, name_n).ratio()
         # ticker_in dropped entirely 2026-05-31 after a 2nd sweep caught 6
