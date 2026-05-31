@@ -49,36 +49,46 @@ EXCLUDED_FROM_PICKS = ("MICRO",)
 # t < 0.5 → 0x (excluded)
 
 SIGNAL_WEIGHTS = {
+    # 2026-05-31 promotion wave: idle-but-validated factors brought into production
+    # after an orthogonality sweep (each new factor max |ρ|≤0.27 vs wired). pt_upside
+    # is CAPPED well below its t=7-9 implied share — the |t| is still pending an
+    # artifact re-verification (analyst-PT PIT history; open question, recheck 2026-08),
+    # so it gets a strong-but-not-dominant weight. eps_growth held back (ρ=0.63 with
+    # consensus → redundant). Each tier renormalised to Σ=1.
     "LARGE": {
-        "consensus":      0.40,   # t=3.52 primary
-        "earnings_yield": 0.20,   # t=1.57 secondary
-        "accruals":       0.15,   # t=0.20 tertiary
-        "piotroski":      0.10,   # t=0.51 tertiary
-        "momentum":       0.05,   # t=0.00 tertiary
-        "book_to_price":  0.10,   # t=0.79 tertiary
+        "consensus":      0.30,   # t=3.52 primary
+        "pt_upside":      0.25,   # t=7.15 primary (capped — artifact re-verify 2026-08)
+        "earnings_yield": 0.15,   # t=1.57 secondary
+        "accruals":       0.11,   # t=0.20 tertiary
+        "book_to_price":  0.08,   # t=0.79 tertiary
+        "piotroski":      0.07,   # t=0.51 tertiary
+        "momentum":       0.04,   # t=0.00 tertiary
     },
     "MID": {
-        # iv_skew_25d added 2026-05-31 (ADR 0035): MID t=+3.16 KEEP over 48 weekly
-        # periods, orthogonal to all existing factors (|ρ|<0.15). Given primary
-        # weight 0.18 (conservative for a single-derivative-class factor on ~11mo
-        # vs the others' 36mo v1 history); existing 6 scaled ×0.82 to keep Σ=1.
-        # F&O-only coverage → renormalises over present signals for non-F&O names.
-        "accruals":       0.25,   # t=3.20 primary
-        "iv_skew_25d":    0.18,   # t=3.16 primary (MID, F&O stocks)
-        "piotroski":      0.16,   # t=2.23 secondary
-        "book_to_price":  0.16,   # t=2.33 secondary
-        "consensus":      0.12,   # t=2.20 secondary
-        "earnings_yield": 0.08,   # t=1.01 tertiary
-        "promoter":       0.05,   # t=0.83 tertiary
+        # iv_skew_25d added 2026-05-31 (ADR 0035): MID t=+3.16 KEEP, 48 wk, orthogonal.
+        # pt_upside added in the same promotion wave (MID t=8.40, capped).
+        "pt_upside":      0.25,   # t=8.40 primary (capped — artifact re-verify 2026-08)
+        "accruals":       0.19,   # t=3.20 primary
+        "iv_skew_25d":    0.14,   # t=3.16 primary (MID, F&O stocks)
+        "piotroski":      0.12,   # t=2.23 secondary
+        "book_to_price":  0.12,   # t=2.33 secondary
+        "consensus":      0.09,   # t=2.20 secondary
+        "earnings_yield": 0.05,   # t=1.01 tertiary
+        "promoter":       0.04,   # t=0.83 tertiary
     },
     "SMALL": {
-        "promoter":       0.25,   # t=3.20 primary
-        "earnings_yield": 0.20,   # t=3.13 primary
-        "piotroski":      0.15,   # t=2.81 primary
-        "book_to_price":  0.15,   # t=2.54 primary
-        "smart_money":    0.10,   # t=2.49 secondary
-        "accruals":       0.10,   # t=2.10 secondary
-        "momentum":       0.05,   # t=1.76 secondary
+        # promotion wave: pt_upside (t=9.14, capped), pledge_quality (t=5.90),
+        # delivery_anomaly_z (t=4.76, n=103) — all orthogonal (max |ρ|≤0.08 vs wired).
+        "pt_upside":          0.16,   # t=9.14 primary (capped — artifact re-verify 2026-08)
+        "promoter":           0.15,   # t=3.20 primary
+        "pledge_quality":     0.13,   # t=5.90 primary (orthogonal to promoter, ρ=0.04)
+        "earnings_yield":     0.12,   # t=3.13 primary
+        "delivery_anomaly_z": 0.11,   # t=4.76 primary (n=103, orthogonal)
+        "piotroski":          0.09,   # t=2.81 secondary
+        "book_to_price":      0.09,   # t=2.54 secondary
+        "smart_money":        0.06,   # t=2.49 secondary
+        "accruals":           0.06,   # t=2.10 secondary
+        "momentum":           0.03,   # t=1.76 tertiary
     },
 }
 
