@@ -809,6 +809,39 @@ FACTOR_LINEAGE = {
         "sector_exclusions": [],
     },
 
+    # ════════════════════════════ Event-time / PEAD factors (§3.2.5) ════════════════════════════
+    "earnings_surprise_std": {
+        "status": "candidate", "module": "signals/pead.py",
+        "reads": [{"table": "quarterly_income", "cols": ["eps", "end_date"],
+                   "key": ["sid", "end_date"], "select": "window", "filter": "last ~8 quarters",
+                   "contribution": "seasonal_random_walk_SUE"}],
+        "sector_exclusions": [],
+    },
+    "pead_drift_60d": {
+        "status": "candidate", "module": "signals/pead.py",
+        "reads": [
+            {"table": "quarterly_income", "cols": ["end_date"], "key": ["sid", "end_date"],
+             "select": "row", "filter": "latest knowable", "contribution": "announce_anchor"},
+            {"table": "stock_prices", "cols": ["close"], "key": ["sid", "date"],
+             "select": "window", "filter": "announce→eval", "contribution": "abnormal_return"},
+            {"table": "macro_history", "cols": ["value", "date"], "key": ["indicator_id", "date"],
+             "select": "window", "filter": "nifty50 announce→eval", "contribution": "benchmark_return"},
+        ],
+        "sector_exclusions": [],
+    },
+    "corporate_action_density": {
+        "status": "candidate", "module": "signals/pead.py",
+        "reads": [{"table": "corporate_actions", "cols": ["ex_date"], "key": ["sid", "ex_date"],
+                   "select": "window", "filter": "last 365d", "contribution": "action_count"}],
+        "sector_exclusions": [],
+    },
+    "buyback_announcement_30d": {
+        "status": "candidate", "module": "signals/pead.py",
+        "reads": [{"table": "corporate_actions", "cols": ["ex_date", "subject"], "key": ["sid", "ex_date"],
+                   "select": "window", "filter": "last 30d, subject~buyback", "contribution": "buyback_flag"}],
+        "sector_exclusions": [],
+    },
+
     # ════════════════════════════ Fundamentals_screener factors (16) ════════════════════════════
     "roic": {
         "status": "candidate", "module": "signals/roic.py",

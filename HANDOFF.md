@@ -1,24 +1,27 @@
 # HANDOFF
-Updated: 2026-05-31 | Branch: master (4 unpushed) | HEAD (pre-commit): `feat(microstructure): 6 daily-derivable §3.2.3 factors (kyle_lambda LARGE+MID KEEP)`
+Updated: 2026-05-31 | Branch: master (5 unpushed) | HEAD (pre-commit): `feat(screener): promote iv_skew_25d → live MID factor (first Track-3 promotion)`
 
 ## Left off
-**Promoted `iv_skew_25d` into the live MID screener** — the first §3.2.x factor to reach production. Did the deliberate promotion review of the two KEEP candidates:
-- **Extended the IV backtest 25 → 48 weekly periods** (reconstructed earlier Fridays + fwd_return back to ~2025-06, since `fno_iv_history` goes to 2025-05). `iv_skew_25d` MID **holds at t=+3.16 KEEP** (~11mo, multi-regime; was 4.61 on 25 periods), **LARGE t=1.37 / SMALL t=0.17 DROP** → MID-only.
-- **Colinearity**: `iv_skew_25d` is orthogonal to size/adtv/existing factors (|ρ|<0.15) — genuinely new info. **`kyle_lambda`** is ρ=−0.73 with ln(ADTV) — a cost-coupled liquidity tilt, MID IC decaying → **benched as diagnostic, NOT wired.**
-- **Wired** `iv_skew_25d` into `config.SIGNAL_WEIGHTS[MID]=0.18` (conservative vs the t-tier's 1.0×, given single-derivative-class novelty + ~11mo vs the others' 36mo history; existing 6 scaled ×0.82, Σ=1.0) + `scoring/screener.py` (`_load_signals` reads `fno_iv_history` latest-per-stock; `SIGNAL_COLS` mapping). Smoke-tested in-process: 101/149 MID stocks scored, high-skew names boosted (SAIL→rank 3, PLNG→rank 6); non-F&O MID names renormalise over present signals. Removed from `FACTOR_LIBRARY` (now live). signal-weights.md updated. **0 CRITICAL, health green.**
+Built **§3.2.5 event-time/PEAD (4 of 6 factors)** — and the honest headline: **the core PEAD did NOT replicate.** [signals/pead.py](signals/pead.py), backtested on the deep panel:
+- `earnings_surprise_std` (seasonal-random-walk SUE): **DROP all tiers** (best LARGE t=0.52).
+- `pead_drift_60d`: SMALL t=-1.54 **WEAK with a reversal sign** (opposite of drift), LARGE/MID DROP.
+- `corporate_action_density`: LARGE **t=-3.67 KEEP** (CI [-5.99,-2.06] strictly <0) but **mechanism unclear** (likely a maturity/value proxy) + corporate_actions only 2yr deep → **NOT promoted**, verify vs value factors first.
+- `buyback_announcement_30d`: DROP (too sparse, ~9/date, n=2 periods LARGE/MID).
 
-Also this session (committed): graphify auto-rebuild git hooks **disabled** (`.git/hooks/post-commit.disabled` + `post-checkout.disabled`, reversible).
+**Root cause** (recorded in memory `pead_needs_announce_dates`): `quarterly_income` has no earnings-announcement date (`reporting` = consolidation basis) and we have no quarterly consensus EPS → the SUE/drift construction is too noisy. PEAD needs a real earnings-calendar + consensus feed. Deferred `dividend_change_signal` (brittle text-parse) + `index_inclusion_proximity` (needs historical mcap — current snapshot = look-ahead). All 4 built → bench. 0 CRITICAL, health green.
+
+Fully wired like the prior batches (PIT helper `pit_pead` + 4 cols + BACKTEST_SIGNALS group "Event/PEAD" + SIGNAL_COLUMN_MAP + 4 lineage, drift clean); `corp_actions` added to `load_raw`; reconstructed over all 149 panel dates; monthly cadence.
 
 ## Pick up here
-1. **Confirm `iv_skew_25d` flows to `daily_picks`** after the next pipeline run (it's wired but the live screener hasn't re-run since). Spot-check a MID pick's component breakdown.
-2. **§3.2.5 event-time / PEAD (6 factors)** — feasible now, no blocked data; post-earnings drift is a robust anomaly → best shot at the next KEEP. `signals/pead.py` off `quarterly_income` + `stock_prices`.
-3. **Phase E badges deploy** (`systemctl restart alpha-cockpit`) + **Kite activation** when creds land (3 held intraday §3.2.3 factors).
+1. **§3.2.6 industry dummies (1) + §3.2.7 macro extensions (4)** — the last §3.2 factors not blocked on Kite/NLP. `industry_id` one-hot is trivial. §3.2.7 (`inr_carry_proxy`, `india_credit_spread`, `commodity_beta_oil/metals`) needs INR-forward / G-Sec / commodity series — **check `macro_history` coverage first** (may need new sources).
+2. **Deploy Phase E badges** (`systemctl restart alpha-cockpit`) + **Kite activation** when creds land (3 held intraday §3.2.3 factors).
+3. **Confirm `iv_skew_25d` reaches `daily_picks`** after the next pipeline run (wired last commit, screener hasn't re-run).
 
 ## Watch out
-- **`iv_skew_25d` weight is conservative (0.18) on purpose** — it's validated on ~11mo / one derivative class, vs the v1 factors' 36mo. Revisit the weight as weekly periods accumulate; don't bump it mechanically.
-- **It only differentiates the ~101 F&O MID names** (others NULL → renormalise). That's correct (only F&O stocks have options) but means it's inert for non-F&O MID picks.
-- **graphify MCP query server (`graphify.serve`) was killed** as collateral when I `pkill`'d the rebuild — `mcp__graphify__*` query tools are down until that MCP server respawns (harness-managed). Graph data untouched; auto-rebuild hooks intentionally disabled.
-- HEAD is still the microstructure commit; this session's promotion + hook-disable is uncommitted until the commit below.
+- **Don't re-attempt PEAD with the time-series proxy** — it's a data problem (missing announce dates + consensus), not a tuning problem. See memory.
+- `corporate_action_density`'s KEEP is **suspect** — negative-IC count factor over a single 2yr regime with no clean mechanism. Run `factor_correlation` vs value factors before ever trusting it.
+- This session shipped a lot (6 commits): F&O OI+IV, microstructure, iv_skew promotion, graphify-disable, PEAD. Factor model now **42/50 PIT-shipped**; one live production promotion (`iv_skew_25d` MID).
+- graphify MCP query server still down (killed earlier); auto-rebuild hooks disabled.
 
 ## Active plan
-[docs/plans/0002-100-factors-and-model.md](docs/plans/0002-100-factors-and-model.md) — §3.2.2 done (8/8), §3.2.3 6/9 (3 on hold). **First factor-model promotion to production from the Track-3 batch: `iv_skew_25d` MID.** State: 38/50 PIT-shipped.
+[docs/plans/0002-100-factors-and-model.md](docs/plans/0002-100-factors-and-model.md) — §3.2.1✅ §3.2.2✅(8/8) §3.2.3 6/9 §3.2.5 4/6; remaining buildable-now: §3.2.6 (1) + §3.2.7 (4). §3.2.3-rest/§3.2.4 blocked on Kite/NLP. State: 42/50 PIT-shipped.

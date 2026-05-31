@@ -95,6 +95,11 @@ CREATE TABLE IF NOT EXISTS daily_snapshots_pit (
     vwap_deviation_5d          REAL,
     bidask_spread_proxy        REAL,
     kyle_lambda                REAL,
+    -- Plan 0002 §3.2.5 — event-time / PEAD factors
+    earnings_surprise_std      REAL,
+    pead_drift_60d             REAL,
+    corporate_action_density   REAL,
+    buyback_announcement_30d   REAL,
     fwd_return_20d   REAL,
     m_score          REAL,
     z_score          REAL,
@@ -152,6 +157,9 @@ PIT_COLUMNS = [
     # Plan 0002 §3.2.3 — daily-derivable microstructure factors (off stock_prices)
     "intraday_range_compression", "closing_strength_1m", "opening_gap_freq_1m",
     "vwap_deviation_5d", "bidask_spread_proxy", "kyle_lambda",
+    # Plan 0002 §3.2.5 — event-time / PEAD factors
+    "earnings_surprise_std", "pead_drift_60d",
+    "corporate_action_density", "buyback_announcement_30d",
     "fwd_return_20d",
     "m_score", "z_score",
     # Tier 2 — fundamentals
@@ -236,6 +244,11 @@ VALIDATION_RANGES = {
     "vwap_deviation_5d":          (-0.5, 0.5, True),  # (close−typical_price)/TP
     "bidask_spread_proxy":        (0, 1, True),  # Corwin-Schultz spread fraction
     "kyle_lambda":                (0, 1, True),  # Amihud illiquidity
+    # Event-time / PEAD factors (§3.2.5)
+    "earnings_surprise_std":      (-5, 5, True),   # seasonal-random-walk SUE
+    "pead_drift_60d":             (-1, 1, True),   # abnormal return since announce
+    "corporate_action_density":   (0, 20, True),   # corp actions in trailing 1y
+    "buyback_announcement_30d":   (0, 1, True),    # binary flag
     "fwd_return_20d":        (-1, 5, True),  # cap extreme returns
     "m_score":               (-20, 20, True),
     "z_score":               (-50, 100, True),
@@ -1279,6 +1292,32 @@ def pit_microstructure(ohlc_full, eval_date):
     return compute_microstructure(prices=pit)
 
 
+def pit_pead(qi_pit, px_pit, macro_hist, corp_full, eval_date):
+    """Event-time / PEAD factors, PIT — Plan 0002 §3.2.5.
+
+    qi_pit is the knowable-quarterly slice (announcement lag already applied);
+    px_pit is prices ≤ eval (adjusted); nifty50 + corporate_actions filtered to
+    ≤ eval. Reuses signals.pead's core verbatim.
+
+    Returns DataFrame[sid, earnings_surprise_std, pead_drift_60d,
+    corporate_action_density, buyback_announcement_30d].
+    """
+    from signals.pead import compute_pead
+    cols = ["sid", "earnings_surprise_std", "pead_drift_60d",
+            "corporate_action_density", "buyback_announcement_30d"]
+    eval_str = eval_date.isoformat() if hasattr(eval_date, "isoformat") else str(eval_date)
+    qi = qi_pit[["sid", "end_date", "eps"]].dropna(subset=["eps"]) if qi_pit is not None and not qi_pit.empty else pd.DataFrame()
+    if qi.empty:
+        return pd.DataFrame(columns=cols)
+    nifty = (macro_hist[(macro_hist["indicator_id"] == "nifty50")
+                        & (macro_hist["date"] <= eval_str)][["date", "value"]]
+             if macro_hist is not None and not macro_hist.empty else pd.DataFrame(columns=["date", "value"]))
+    prices = px_pit[["sid", "date", "close"]] if px_pit is not None and not px_pit.empty else pd.DataFrame()
+    corp = (corp_full[corp_full["ex_date"] <= eval_str]
+            if corp_full is not None and not corp_full.empty else pd.DataFrame(columns=["sid", "ex_date", "subject"]))
+    return compute_pead(qi=qi, prices=prices, nifty=nifty, corp_actions=corp, as_of_date=eval_str)
+
+
 def pit_macro_sector(macro_history_pit, macro_sector_map, sectors_list, eval_date):
     """Per-sector macro score from macro_history × macro_sector_map.
 
@@ -2282,6 +2321,13 @@ def reconstruct_one_date(eval_date, raw, signals_to_run):
     if "microstructure" in signals_to_run and "prices_ohlc" in raw and not raw["prices_ohlc"].empty:
         base = base.merge(pit_microstructure(raw["prices_ohlc"], eval_date), on="sid", how="left")
 
+    # ── §3.2.5 — event-time / PEAD factors ──
+    if "pead" in signals_to_run:
+        base = base.merge(
+            pit_pead(qi_pit, px_pit, raw["macro_hist"], raw.get("corp_actions"), eval_date),
+            on="sid", how="left",
+        )
+
     if "pledge" in signals_to_run:
         base = base.merge(pit_pledge_quality(raw["stocks"], sh_pit), on="sid", how="left")
 
@@ -2634,6 +2680,14 @@ def load_raw():
         "SELECT sid, date, open, high, low, close, volume FROM stock_prices "
         "WHERE close > 0 ORDER BY sid, date"
     )
+    # §3.2.5 — corporate actions for PEAD event factors (ex_date is the PIT anchor).
+    try:
+        corp_actions = read_sql(
+            "SELECT sid, ex_date, subject FROM corporate_actions "
+            "WHERE ex_date IS NOT NULL AND sid IS NOT NULL ORDER BY sid, ex_date"
+        )
+    except Exception:
+        corp_actions = pd.DataFrame()
     print(f"  stocks={len(stocks)} qi={len(qi)} bs={len(bs)} cf={len(cf)} sh={len(sh)} "
           f"prices={len(prices)} adj={len(adjustments)} fh={len(fh)} acs={len(acs)} "
           f"bulk={len(bulk)} "
@@ -2650,6 +2704,7 @@ def load_raw():
         "fno_pcr": fno_pcr,
         "fno_iv": fno_iv,
         "prices_ohlc": prices_ohlc,
+        "corp_actions": corp_actions,
         "reg_events": reg_events, "reg_signals": reg_signals,
         "macro_hist": macro_hist, "macro_map": macro_map,
     }
@@ -2669,7 +2724,7 @@ def main():
                         choices=["piotroski", "accruals", "promoter", "forensic",
                                  "earnings_yield", "book_to_price", "momentum",
                                  "position_52w", "delivery", "sector_momentum",
-                                 "fno_oi", "fno_iv", "microstructure", "pledge",
+                                 "fno_oi", "fno_iv", "microstructure", "pead", "pledge",
                                  "promoter_trend", "macd", "fwd_return",
                                  "mom_composite",
                                  "quality_fundamentals", "growth_fundamentals",
@@ -2748,6 +2803,8 @@ def main():
         "fno_oi", "fno_iv",
         # Plan 0002 §3.2.3 — daily-derivable microstructure factors
         "microstructure",
+        # Plan 0002 §3.2.5 — event-time / PEAD factors
+        "pead",
         # Plan 0005 Phase E composite (smart_money — accruals/promoter/forensic
         # composites flow through their existing _compute_scores)
         "smart_money",

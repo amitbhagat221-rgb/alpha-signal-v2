@@ -91,6 +91,11 @@ SIGNAL_COLUMN_MAP = {
     "vwap_deviation_5d":          (None, "vwap_deviation_5d"),
     "bidask_spread_proxy":        (None, "bidask_spread_proxy"),
     "kyle_lambda":                (None, "kyle_lambda"),
+    # Event-time / PEAD factors — Plan 0002 §3.2.5 (monthly cadence)
+    "earnings_surprise_std":      (None, "earnings_surprise_std"),
+    "pead_drift_60d":             (None, "pead_drift_60d"),
+    "corporate_action_density":   (None, "corporate_action_density"),
+    "buyback_announcement_30d":   (None, "buyback_announcement_30d"),
     # Behavior tier — PIT helpers shipped 2026-05-24
     "insider_signal":      (None, "insider_score"),
     "sentiment_7d":        (None, "sentiment_7d"),

@@ -146,6 +146,11 @@ _COLUMN_MIGRATIONS = [
     ("daily_snapshots_pit", "vwap_deviation_5d",          "REAL"),
     ("daily_snapshots_pit", "bidask_spread_proxy",        "REAL"),
     ("daily_snapshots_pit", "kyle_lambda",                "REAL"),
+    # 2026-05-31: Plan 0002 §3.2.5 — event-time / PEAD PIT columns.
+    ("daily_snapshots_pit", "earnings_surprise_std",      "REAL"),
+    ("daily_snapshots_pit", "pead_drift_60d",             "REAL"),
+    ("daily_snapshots_pit", "corporate_action_density",   "REAL"),
+    ("daily_snapshots_pit", "buyback_announcement_30d",   "REAL"),
 ]
 
 
@@ -2073,6 +2078,68 @@ BACKTEST_SIGNALS = [
         "status_reason": "Shipped 2026-05-31 (§3.2.3 daily half). Backtest 39 monthly periods: LARGE t=+4.24 KEEP + MID t=+4.14 KEEP (both CI strictly >0), SMALL t=+1.65 WEAK — the Amihud illiquidity premium (illiquid -> higher fwd returns). Strong + economically grounded. PROMOTION CANDIDATE but trading-cost-coupled (you pay the spread youre compensated for) + likely colinear with size/adtv -> needs factor_correlation + cost-aware review before wiring.",
     },
     {
+        "signal": "earnings_surprise_std",
+        "label": "Earnings Surprise (SUE)",
+        "group": "Event/PEAD",
+        "description": "Standardised unexpected earnings — seasonal random walk: "
+                       "(EPS_t − EPS_{t-4}) / stdev(trailing YoY EPS changes). The "
+                       "classic PEAD signal; no analyst-consensus dependency.",
+        "source_tables": ["quarterly_income"],
+        "source_columns": ["quarterly_income.eps"],
+        "filing_lag": "~45d announcement approx (period_end + 45d)",
+        "pit_column_v1": None,
+        "pit_column_v2": "earnings_surprise_std",
+        "v1_verdict_summary": "(new — Plan 0002 §3.2.5, time-series SUE)",
+        "status": "READY",
+        "status_reason": "Shipped 2026-05-31 (§3.2.5). Backtest 13-16 monthly periods: all tiers DROP (best LARGE t=0.52). Time-series seasonal-RW SUE proxy too noisy without true earnings-announcement dates + analyst consensus (quarterly_income has neither) — PEAD did not replicate via this proxy. Bench (FACTOR_LIBRARY).",
+    },
+    {
+        "signal": "pead_drift_60d",
+        "label": "PEAD Drift (post-earnings, 60d)",
+        "group": "Event/PEAD",
+        "description": "Abnormal return (stock − NIFTY) since the most recent "
+                       "earnings announcement (≈period_end+45d), if within a ~60-day "
+                       "post-announcement window; else NULL. Drift-in-progress.",
+        "source_tables": ["quarterly_income", "stock_prices", "macro_history"],
+        "source_columns": ["quarterly_income.end_date", "stock_prices.close", "macro_history.nifty50"],
+        "filing_lag": "~45d announcement approx",
+        "pit_column_v1": None,
+        "pit_column_v2": "pead_drift_60d",
+        "v1_verdict_summary": "(new — Plan 0002 §3.2.5)",
+        "status": "READY",
+        "status_reason": "Shipped 2026-05-31 (§3.2.5). Backtest 25 monthly periods: SMALL t=-1.54 WEAK (NEGATIVE — post-earnings drift reverses in small caps, opposite of classic PEAD; likely illiquid-reversal noise), LARGE/MID DROP. Active only post-earnings (~600-800/date). Bench.",
+    },
+    {
+        "signal": "corporate_action_density",
+        "label": "Corporate Action Density (1y)",
+        "group": "Event/PEAD",
+        "description": "Count of corporate actions (dividends/splits/bonus/etc.) in "
+                       "the trailing 1 year. Higher = more capital-action activity.",
+        "source_tables": ["corporate_actions"],
+        "source_columns": ["corporate_actions.ex_date"],
+        "filing_lag": "0d (ex_date anchor)",
+        "pit_column_v1": None,
+        "pit_column_v2": "corporate_action_density",
+        "v1_verdict_summary": "(new — Plan 0002 §3.2.5)",
+        "status": "READY",
+        "status_reason": "Shipped 2026-05-31 (§3.2.5). Backtest 20-21 monthly periods: LARGE t=-3.67 KEEP (CI [-5.99,-2.06]; more corp actions -> lower fwd returns), MID/SMALL DROP. NOT promoted — mechanism unclear (likely a maturity/value proxy), corporate_actions only 2yr deep (single regime); verify non-colinear with value factors before trusting. Bench (FACTOR_LIBRARY).",
+    },
+    {
+        "signal": "buyback_announcement_30d",
+        "label": "Buyback Announcement (30d)",
+        "group": "Event/PEAD",
+        "description": "1 if a buyback corporate action appears in the last 30 days "
+                       "(subject ~ 'buy back'), else 0. Sparse binary event flag.",
+        "source_tables": ["corporate_actions"],
+        "source_columns": ["corporate_actions.{ex_date,subject}"],
+        "filing_lag": "0d (ex_date anchor)",
+        "pit_column_v1": None,
+        "pit_column_v2": "buyback_announcement_30d",
+        "v1_verdict_summary": "(new — Plan 0002 §3.2.5)",
+        "status": "READY",
+        "status_reason": "Shipped 2026-05-31 (§3.2.5). Backtest: DROP all tiers (LARGE/MID only n=2 periods, SMALL t=-0.65) — too sparse (~9 buybacks/date) for power. Bench.",
+    },
+    {
         "signal": "bulk_deal_signal",
         "label": "Bulk/Block Deal Activity",
         "group": "Smart Money",
@@ -2734,6 +2801,11 @@ FACTOR_LIBRARY = [
     "closing_strength_1m",  # best |t|=0.98 SMALL — DROP
     "vwap_deviation_5d",    # best |t|=0.96 SMALL — DROP
     "intraday_range_compression",  # best |t|=0.92 LARGE — DROP
+    # Event-time / PEAD factors (§3.2.5) — earnings half didn't replicate
+    "corporate_action_density",  # LARGE t=-3.67 KEEP but unclear mechanism (maturity/value proxy?) — NOT promoted
+    "pead_drift_60d",            # SMALL t=-1.54 WEAK (reversal sign)
+    "earnings_surprise_std",     # DROP — SUE proxy too noisy w/o announce dates + consensus
+    "buyback_announcement_30d",  # DROP — too sparse
 ]
 
 
