@@ -78,6 +78,11 @@ CREATE TABLE IF NOT EXISTS daily_snapshots_pit (
     avg_delivery_pct_30d REAL,
     delivery_anomaly_z REAL,
     sector_momentum REAL,
+    -- Plan 0002 §3.2.2 — F&O open-interest factors (off fno_pcr_history)
+    pcr_oi            REAL,
+    pcr_volume        REAL,
+    max_pain_distance REAL,
+    oi_buildup_signal REAL,
     fwd_return_20d   REAL,
     m_score          REAL,
     z_score          REAL,
@@ -128,6 +133,8 @@ PIT_COLUMNS = [
     "mom_6m", "mom_12m", "mom_composite", "macd_bullish",
     "position_52w", "avg_delivery_pct_30d", "delivery_anomaly_z",
     "sector_momentum",
+    # Plan 0002 §3.2.2 — F&O open-interest factors (off fno_pcr_history)
+    "pcr_oi", "pcr_volume", "max_pain_distance", "oi_buildup_signal",
     "fwd_return_20d",
     "m_score", "z_score",
     # Tier 2 — fundamentals
@@ -195,6 +202,11 @@ VALIDATION_RANGES = {
     "avg_delivery_pct_30d":  (0, 100, True),
     "delivery_anomaly_z":    (-5, 5, True),  # clip extreme z
     "sector_momentum":       (-3, 3, True),  # cross-sector RS z-score
+    # F&O OI factors (§3.2.2) — bounds mirror signals/fno_oi_factors.py clips
+    "pcr_oi":                (0, 20, True),   # put_oi / call_oi, tail-capped
+    "pcr_volume":            (0, 20, True),   # put_vol / call_vol, tail-capped
+    "max_pain_distance":     (-1, 1, True),   # (spot − max_pain) / spot
+    "oi_buildup_signal":     (-1, 1, True),   # 4-state regime score
     "fwd_return_20d":        (-1, 5, True),  # cap extreme returns
     "m_score":               (-20, 20, True),
     "z_score":               (-50, 100, True),
@@ -1178,6 +1190,26 @@ def pit_sector_momentum(stocks, px_pit, macro_hist, eval_date):
     stk = stocks[["sid", "sector", "market_cap_cr"]]
     sm = compute_sector_momentum(prices=prices, nifty=nifty, stocks=stk)
     return sector_momentum_for_stocks(sector_mom=sm, stocks=stocks[["sid", "sector"]])
+
+
+def pit_fno_oi(fno_pcr_full, eval_date):
+    """F&O open-interest factors, PIT — Plan 0002 §3.2.2 (OI half).
+
+    Reuses signals.fno_oi_factors's core verbatim, fed an as-of-frozen slice of
+    fno_pcr_history (trade_date ≤ eval_date). The core itself takes the latest
+    row per stock for the level factors and the most recent same-expiry prior row
+    for oi_buildup — so passing the frozen frame is all the PIT-ness it needs.
+
+    Returns DataFrame[sid, pcr_oi, pcr_volume, max_pain_distance, oi_buildup_signal].
+    NULL for any date before the fno_pcr_history backfill begins (2025-11-27).
+    """
+    cols = ["sid", "pcr_oi", "pcr_volume", "max_pain_distance", "oi_buildup_signal"]
+    if fno_pcr_full is None or fno_pcr_full.empty:
+        return pd.DataFrame(columns=cols)
+    from signals.fno_oi_factors import compute_oi_factors
+    eval_str = eval_date.isoformat() if hasattr(eval_date, "isoformat") else str(eval_date)
+    pit = fno_pcr_full[fno_pcr_full["trade_date"] <= eval_str]
+    return compute_oi_factors(pcr_hist=pit)
 
 
 def pit_macro_sector(macro_history_pit, macro_sector_map, sectors_list, eval_date):
@@ -2171,6 +2203,10 @@ def reconstruct_one_date(eval_date, raw, signals_to_run):
         )
         base = base.merge(pit_delivery_anomaly_z(px_pit), on="sid", how="left")
 
+    # ── §3.2.2 — F&O OI factors (NULL before fno_pcr_history backfill 2025-11-27) ──
+    if "fno_oi" in signals_to_run and "fno_pcr" in raw and not raw["fno_pcr"].empty:
+        base = base.merge(pit_fno_oi(raw["fno_pcr"], eval_date), on="sid", how="left")
+
     if "pledge" in signals_to_run:
         base = base.merge(pit_pledge_quality(raw["stocks"], sh_pit), on="sid", how="left")
 
@@ -2499,6 +2535,16 @@ def load_raw():
         )
     except Exception:
         banking_metrics = pd.DataFrame()
+    # Track 3.1b — F&O OI rollup for §3.2.2 factors. ~26K rows (216 underlyings
+    # × 122 dates), so load all and filter per eval_date inside the helper.
+    try:
+        fno_pcr = read_sql(
+            "SELECT sid, trade_date, expiry_date, underlying_price, "
+            "total_call_oi, total_put_oi, pcr_oi, pcr_volume, max_pain_distance "
+            "FROM fno_pcr_history WHERE sid IS NOT NULL ORDER BY sid, trade_date"
+        )
+    except Exception:
+        fno_pcr = pd.DataFrame()
     print(f"  stocks={len(stocks)} qi={len(qi)} bs={len(bs)} cf={len(cf)} sh={len(sh)} "
           f"prices={len(prices)} adj={len(adjustments)} fh={len(fh)} acs={len(acs)} "
           f"bulk={len(bulk)} "
@@ -2512,6 +2558,7 @@ def load_raw():
         "news_text": news_text, "insider_trades": insider_trades,
         "fund_screener": fund_screener,
         "banking_metrics": banking_metrics,
+        "fno_pcr": fno_pcr,
         "reg_events": reg_events, "reg_signals": reg_signals,
         "macro_hist": macro_hist, "macro_map": macro_map,
     }
@@ -2530,7 +2577,8 @@ def main():
     parser.add_argument("--signal", action="append", default=None,
                         choices=["piotroski", "accruals", "promoter", "forensic",
                                  "earnings_yield", "book_to_price", "momentum",
-                                 "position_52w", "delivery", "sector_momentum", "pledge",
+                                 "position_52w", "delivery", "sector_momentum",
+                                 "fno_oi", "pledge",
                                  "promoter_trend", "macd", "fwd_return",
                                  "mom_composite",
                                  "quality_fundamentals", "growth_fundamentals",
@@ -2605,6 +2653,8 @@ def main():
         "debt_structure", "asset_tangibility",
         # Plan 0006 Phase E — sector momentum (per-stock = sector's medium RS z)
         "sector_momentum",
+        # Plan 0002 §3.2.2 — F&O open-interest factors (off fno_pcr_history)
+        "fno_oi",
         # Plan 0005 Phase E composite (smart_money — accruals/promoter/forensic
         # composites flow through their existing _compute_scores)
         "smart_money",

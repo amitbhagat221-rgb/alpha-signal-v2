@@ -129,6 +129,11 @@ _COLUMN_MIGRATIONS = [
     ("sector_briefs", "horizon_long",   "TEXT"),
     # Per-stock sector-momentum factor PIT column (medium-horizon RS z-score).
     ("daily_snapshots_pit", "sector_momentum", "REAL"),
+    # 2026-05-31: Plan 0002 §3.2.2 — F&O open-interest factor PIT columns.
+    ("daily_snapshots_pit", "pcr_oi",            "REAL"),
+    ("daily_snapshots_pit", "pcr_volume",        "REAL"),
+    ("daily_snapshots_pit", "max_pain_distance", "REAL"),
+    ("daily_snapshots_pit", "oi_buildup_signal", "REAL"),
 ]
 
 
@@ -1368,6 +1373,11 @@ BACKTEST_CADENCE = {
     "news_volume":              "weekly",
     "fii_dii_cash_net":         "weekly",
     "fii_dii_fno_positioning":  "weekly",
+    # ── Weekly: options/F&O OI factors (§3.2.2) — daily-flow, fast-decay ──
+    "pcr_oi":                   "weekly",
+    "pcr_volume":               "weekly",
+    "max_pain_distance":        "weekly",
+    "oi_buildup_signal":        "weekly",
     # ── Sector-portfolio: sector-level signals (not per-stock IC) ──
     "regulatory_sector_signal": "sector_portfolio",
     "macro_sector_signal":      "sector_portfolio",
@@ -1792,6 +1802,84 @@ BACKTEST_SIGNALS = [
                          "below the 2.0 screener-promotion gate; not wired to "
                          "SIGNAL_WEIGHTS. Also powers the /sectors S/M/L horizon "
                          "badges. Re-test as PIT panel deepens.",
+    },
+    {
+        "signal": "pcr_oi",
+        "label": "Put-Call Ratio (Open Interest)",
+        "group": "Options/F&O",
+        "description": "Nearest-expiry total put OI / total call OI for the F&O "
+                       "underlying. High = put-heavy positioning (bearish, or "
+                       "contrarian-bullish on excess fear). Sign decided by backtest.",
+        "source_tables": ["fno_pcr_history"],
+        "source_columns": ["fno_pcr_history.pcr_oi"],
+        "filing_lag": "0d (EOD F&O bhavcopy)",
+        "pit_column_v1": None,
+        "pit_column_v2": "pcr_oi",
+        "v1_verdict_summary": "(new — Plan 0002 §3.2.2 OI half, no v1 counterpart)",
+        "status": "READY",
+        "status_reason": "Shipped 2026-05-31 (Track 3.1b → §3.2.2). Backtest on 22 "
+                         "weekly PIT periods (NW3): best |t|=0.36 LARGE — DROP all "
+                         "tiers. On the bench (FACTOR_LIBRARY). Re-test as the 6mo "
+                         "fno_pcr_history window deepens past one regime.",
+    },
+    {
+        "signal": "pcr_volume",
+        "label": "Put-Call Ratio (Volume)",
+        "group": "Options/F&O",
+        "description": "Nearest-expiry total put volume / total call volume — the "
+                       "same-day flow analogue of PCR(OI). Sign decided by backtest.",
+        "source_tables": ["fno_pcr_history"],
+        "source_columns": ["fno_pcr_history.pcr_volume"],
+        "filing_lag": "0d (EOD F&O bhavcopy)",
+        "pit_column_v1": None,
+        "pit_column_v2": "pcr_volume",
+        "v1_verdict_summary": "(new — Plan 0002 §3.2.2 OI half, no v1 counterpart)",
+        "status": "READY",
+        "status_reason": "Shipped 2026-05-31 (Track 3.1b → §3.2.2). Backtest on 22 "
+                         "weekly PIT periods (NW3): SMALL t=-1.69 WEAK (high put-vol "
+                         "→ mild underperformance, sensible sign; CI straddles 0), "
+                         "LARGE/MID DROP. Below 2.0 gate — on the bench "
+                         "(FACTOR_LIBRARY). Re-test as window deepens.",
+    },
+    {
+        "signal": "max_pain_distance",
+        "label": "Max-Pain Distance",
+        "group": "Options/F&O",
+        "description": "(spot − max_pain_strike) / spot, where max-pain is the "
+                       "argmin total-writer-payout strike on the nearest expiry. "
+                       "Tests the 'price drifts toward max-pain into expiry' lore.",
+        "source_tables": ["fno_pcr_history"],
+        "source_columns": ["fno_pcr_history.max_pain_distance"],
+        "filing_lag": "0d (EOD F&O bhavcopy)",
+        "pit_column_v1": None,
+        "pit_column_v2": "max_pain_distance",
+        "v1_verdict_summary": "(new — Plan 0002 §3.2.2 OI half, no v1 counterpart)",
+        "status": "READY",
+        "status_reason": "Shipped 2026-05-31 (Track 3.1b → §3.2.2). Backtest on 22 "
+                         "weekly PIT periods (NW3): MID t=-1.68 WEAK (spot above "
+                         "max-pain → drifts back, sensible mean-reversion sign; CI "
+                         "straddles 0), LARGE/SMALL DROP. Below 2.0 gate — on the "
+                         "bench (FACTOR_LIBRARY). Re-test as window deepens.",
+    },
+    {
+        "signal": "oi_buildup_signal",
+        "label": "OI Buildup Regime",
+        "group": "Options/F&O",
+        "description": "Four-state score from the same-expiry day-over-day change "
+                       "in total OI vs underlying price: long buildup +1 / short "
+                       "covering +0.5 / long unwinding −0.5 / short buildup −1. "
+                       "Δ taken only within one expiry series (roll-safe).",
+        "source_tables": ["fno_pcr_history"],
+        "source_columns": ["fno_pcr_history.{total_call_oi,total_put_oi,underlying_price,expiry_date}"],
+        "filing_lag": "0d (EOD F&O bhavcopy)",
+        "pit_column_v1": None,
+        "pit_column_v2": "oi_buildup_signal",
+        "v1_verdict_summary": "(new — Plan 0002 §3.2.2 OI half, no v1 counterpart)",
+        "status": "READY",
+        "status_reason": "Shipped 2026-05-31 (Track 3.1b → §3.2.2). Backtest on 22 "
+                         "weekly PIT periods (NW3): best |t|=0.45 MID — DROP all "
+                         "tiers (4-state Δ is noisy at weekly cadence). On the bench "
+                         "(FACTOR_LIBRARY). Re-test as window deepens.",
     },
     {
         "signal": "bulk_deal_signal",
@@ -2438,6 +2526,11 @@ FACTOR_LIBRARY = [
     "capex_to_dep",         # best |t|=0.94 SMALL
     "goodwill_to_assets",   # best |t|=0.89 MID
     "debt_structure",       # best |t|=1.15 LARGE
+    # Options/F&O OI factors (§3.2.2) — 22 weekly periods, single 6mo regime
+    "pcr_volume",           # SMALL t=-1.69 WEAK (sensible bearish sign)
+    "max_pain_distance",    # MID t=-1.68 WEAK (mean-reversion to max-pain)
+    "pcr_oi",               # best |t|=0.36 LARGE
+    "oi_buildup_signal",    # best |t|=0.45 MID
 ]
 
 

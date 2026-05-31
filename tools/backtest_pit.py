@@ -74,6 +74,11 @@ SIGNAL_COLUMN_MAP = {
     "short_selling_signal": (None, "short_selling_signal"),
     # Sector momentum — Plan 0006 Phase E (per-stock = sector's medium RS z)
     "sector_momentum":     (None, "sector_momentum"),
+    # Options/F&O OI factors — Plan 0002 §3.2.2 (off fno_pcr_history)
+    "pcr_oi":              (None, "pcr_oi"),
+    "pcr_volume":          (None, "pcr_volume"),
+    "max_pain_distance":   (None, "max_pain_distance"),
+    "oi_buildup_signal":   (None, "oi_buildup_signal"),
     # Behavior tier — PIT helpers shipped 2026-05-24
     "insider_signal":      (None, "insider_score"),
     "sentiment_7d":        (None, "sentiment_7d"),
@@ -264,6 +269,12 @@ _NW_LAG_WEEKLY = {
     "news_volume":           3,   # same
     "fii_dii_cash_net":      3,
     "fii_dii_fno_positioning": 3,
+    # Options/F&O OI factors — same-day reads (buildup is a ~1d Δ within one
+    # expiry), so only the fwd_return_20d ≈ 4-week overlap drives the lag.
+    "pcr_oi":                3,
+    "pcr_volume":            3,
+    "max_pain_distance":     3,
+    "oi_buildup_signal":     3,
 }
 
 

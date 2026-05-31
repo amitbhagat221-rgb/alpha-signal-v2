@@ -678,6 +678,48 @@ FACTOR_LINEAGE = {
         "sector_exclusions": [],
     },
 
+    # ════════════════════════════ Options / F&O OI factors (§3.2.2) ════════════════════════════
+    # All four read the pre-computed nearest-expiry rollup in fno_pcr_history
+    # (ADR 0034). Stock-only: index underlyings carry sid=NULL and are filtered.
+    "pcr_oi": {
+        "status": "candidate", "module": "signals/fno_oi_factors.py",
+        "reads": [
+            {"table": "fno_pcr_history", "cols": ["pcr_oi"],
+             "key": ["sid", "trade_date"], "select": "row",
+             "filter": "latest ≤ as-of", "contribution": "put_oi_over_call_oi"},
+        ],
+        "sector_exclusions": [],
+    },
+    "pcr_volume": {
+        "status": "candidate", "module": "signals/fno_oi_factors.py",
+        "reads": [
+            {"table": "fno_pcr_history", "cols": ["pcr_volume"],
+             "key": ["sid", "trade_date"], "select": "row",
+             "filter": "latest ≤ as-of", "contribution": "put_vol_over_call_vol"},
+        ],
+        "sector_exclusions": [],
+    },
+    "max_pain_distance": {
+        "status": "candidate", "module": "signals/fno_oi_factors.py",
+        "reads": [
+            {"table": "fno_pcr_history", "cols": ["max_pain_distance"],
+             "key": ["sid", "trade_date"], "select": "row",
+             "filter": "latest ≤ as-of", "contribution": "spot_minus_maxpain_over_spot"},
+        ],
+        "sector_exclusions": [],
+    },
+    "oi_buildup_signal": {
+        "status": "candidate", "module": "signals/fno_oi_factors.py",
+        "reads": [
+            {"table": "fno_pcr_history",
+             "cols": ["total_call_oi", "total_put_oi", "underlying_price", "expiry_date"],
+             "key": ["sid", "trade_date"], "select": "window",
+             "filter": "latest + prior same-expiry row",
+             "contribution": "4state_oi_vs_price_buildup"},
+        ],
+        "sector_exclusions": [],
+    },
+
     # ════════════════════════════ Fundamentals_screener factors (16) ════════════════════════════
     "roic": {
         "status": "candidate", "module": "signals/roic.py",
