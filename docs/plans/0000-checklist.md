@@ -1,15 +1,15 @@
 # Alpha Signal v2 — Progress Checklist
-_Last updated: 2026-05-30 (Plan 0007 fully shipped — 8 of 8 phases · ADR 0033 · Trust Pipeline live with 7 gates · per-pick UHS on every daily_picks row · 14 redundant data_sanity checks deprecated) · Plans are truth, this is the view. Update via `/handoff`._
+_Last updated: 2026-05-31 (Plan 0007 closed end-to-end — backfill + 4 root-cause fixes + 46 wrong-entity slug remediation + /system Trust Pipeline card live; commit `22f1dcf`) · Plans are truth, this is the view. Update via `/handoff`._
 _Glyphs: ✅ done · ⏳ next/in-progress · 🚫 blocked · 💤 parked · ↔ cross-track integration point_
 _Convention: [ADR 0015](../decisions/0015-track-numbering-and-rename.md) (tracks) + [ADR 0016](../decisions/0016-plan-numbering-fresh-start.md) (plans)._
 
 ## Next 3
-1. ⏳ **Plan 0007 Phase 8 burn-in monitoring (7-day)** — UHS verdict pools fill across gate_4 + gate_5 + gate_7 as producers run. Expected: most PRELIMINARY labels flip to TRUSTED by ~2026-06-06. Watch for ≥1 pick UHS-downgraded over the week (proves gates work, not theatre). Manual seed for Anchor B (top-50 BSE close) via `python -m tools.anchor_audit --seed-bse-csv` — first due ~2026-06-06.
-2. ⏳ **Plan 0006 Phase D — LLM-narrated sector dossiers** (resumes from deferred state). New `sector_dossiers` table; 11 LLM calls/night (~₹3-5). Mirror `output/dossier.py:_build_uhs_block()` for sector hygiene.
-3. ⏳ **Track 3.1b — NSE F&O OI probe** — unblocks `§3.2.2` options-implied (8 factors). Probe `nselib.derivatives`; design `fno_option_chain` + `fno_oi_history` schemas. Independent of UHS.
+1. ⏳ **`corporate_actions` backfill** — Gate 3 today flagged 9 stock_close discontinuities (LIC 802→411 = 1:2 split 2026-05-29; LEM 11.5×; PRAM 2.6×; …) — all real corp actions our table doesn't carry. Scrape NSE corp-actions feed daily into [sources/](../../sources/); dedup vs existing rows in [validators/temporal_continuity.py:_has_recent_corp_action](../../validators/temporal_continuity.py). Without it Gate 3 keeps adding 5-15 noise verdicts per ex-date.
+2. ⏳ **3 stubborn auditor slugs + 4 dark SIDs** — 30-min manual triage. Auditor flags `DPSC`/`BRIGT`/`CUBEI` (autosuggest can't recover correct slug). Round-2 fetch found no slug for `APPA`/`DED`/`MER`/`PUNI`. Hand-map via `UPDATE stocks SET mc_slug=? WHERE sid=?` then `python -m sources.moneycontrol_recos --ticker <T>`.
+3. ⏳ **Plan 0006 Phase D — LLM-narrated sector dossiers** (carried from yesterday). New `sector_dossiers` table; 11 LLM calls/night (~₹3-5). Mirror [output/dossier.py:_build_uhs_block()](../../output/dossier.py) for sector hygiene.
 
 ## Queued
-- ✅ **[Plan 0007 — Trust Pipeline + Unified Health Score](0007-trust-pipeline-uhs.md)** — **fully shipped 2026-05-30 across 4 sessions** ([ADR 0033](../decisions/0033-trust-pipeline-uhs.md)). 7 gates live · per-pick UHS on every daily_picks row · 11+ vocabularies collapsed to one 🟢/🟡/🔴 scale · 9 historic bugs as permanent pre-push regression fixtures · 14 redundant data_sanity checks deprecated. Honest ceiling at our scale = 95/100; true 100 needs paid Bloomberg/Refinitiv.
+- ✅ **[Plan 0007 — Trust Pipeline + Unified Health Score](0007-trust-pipeline-uhs.md)** — **fully shipped 2026-05-30 across 4 sessions + remediation pass 2026-05-31** ([ADR 0033](../decisions/0033-trust-pipeline-uhs.md)). 7 gates live · per-pick UHS on every daily_picks row · 11+ vocabularies collapsed to one 🟢/🟡/🔴 scale · 9 historic bugs as permanent pre-push regression fixtures · 14 redundant data_sanity checks deprecated. Honest ceiling at our scale = 95/100; true 100 needs paid Bloomberg/Refinitiv.
    - ✅ Phase 1 — UHS schema + score writer · commit `18ecaed`
    - ✅ Phase 2 — Identity Gate (Gate 1) · commit `c901c6e`
    - ✅ Phase 3 — Plausibility + Temporal + Regression Fixtures · commit `d1d0d14`
@@ -17,7 +17,8 @@ _Convention: [ADR 0015](../decisions/0015-track-numbering-and-rename.md) (tracks
    - ✅ Phase 5 — Lineage + Pick-Level UHS rollup (Gate 6) · commit `b00374f`
    - ✅ Phase 6 — External Anchor (Gate 7) · commit `9ec28e9`
    - ✅ Phase 7 — Streamlining (38→25 active checks) · commit `ce5cd58`
-   - ✅ Phase 8 — Confidence orchestration + ADR 0033 + calibration scaffold · this commit
+   - ✅ Phase 8 — Confidence orchestration + ADR 0033 + calibration scaffold · commit `549083d`
+   - ✅ Remediation 2026-05-31 — [tools/trust_backfill.py](../../tools/trust_backfill.py) exercises Gates 2/3/4/5/7 against existing rows · surfaced 4 root-cause bugs (Tickertape `.change` field unreliable, autosuggest parser reading non-existent fields, `_mc_slug_name_mismatch_check` ticker-substring shortcut, `rollup_pick_uhs` Phase-1 stub reading 3-of-5 dims) · 46 wrong-entity SIDs quarantined + 43 re-slugged · 35 EPS-growth values NULL'd · `/system` Trust Pipeline card live on port 3001 · pick UHS distribution flipped 1689 PRELIMINARY → 149 TRUSTED + 1440 PRELIMINARY + 100 REVIEW · commit `22f1dcf`
 - ⏳ **[Plan 0006 — Sector dossiers](0006-sector-dossiers.md)** — `/sectors` front door rebuild. MVP **A + B + C shipped 2026-05-29**. Remaining:
    - ⏳ Phase D — LLM-narrated per-sector thesis. **Resume from deferred state** — mirror `output/dossier.py:_build_uhs_block()` for sector hygiene.
    - ⏳ Phase E — per-sector horizon scores (short / medium / long badges). Needs new `signals/sector_momentum.py` factor.
@@ -87,6 +88,7 @@ Audit + tier infra + stratified backtest + 36mo PIT + cutover. See ADRs 0009-001
 - ✅ Ops cockpit split — Stage 1 (service-level :3001) + Stage 2 (code-level extraction).
 - ✅ Cockpit cold-restart perf rewrite — `/system` 140×, `/news` 50×, `/portfolio` 100×.
 - ✅ Health Center cockpit redesign (ADR 0023).
+- ✅ Cockpit mechanical cleanup (2026-05-31, commits `3be4e9a` + cockpit_ops half in `22f1dcf`) — **zero behavior change, verified**. New [cockpit/_shared.py](../../cockpit/_shared.py) (cache decorators + canonical `safe_json_records`, breaks the cockpit_ops→cockpit.api coupling) + [cockpit/mf.py](../../cockpit/mf.py) (9 MF fns lifted out, re-exported from api). `cockpit/api.py` −439 LOC; `get_command_centre` 671→467 LOC split into `_cc_plans_and_adrs` + `_cc_factor_library`; 3 divergent NaN→None coercions deduped. Excluded deliberately (behavior changes, not splits): grade-threshold "dedup" (two genuinely different scales), `macro_gov.py` hardcoded key, and the signal-scoring drift-killers (PIT-gated). Evidence-based critique found NO dead code; db.py/health.py length is principled config-as-code.
 - ✅ Health drive-by (2026-05-30): `pick_outcomes` STALENESS_OVERRIDE → 14d ([db.py](../../db.py)). `latest_date`=MAX(pick_date) is forward-return-window-bound (shortest 5d window ≈ 7-10 cal days), so the daily(3) default flagged STALE every day + the watchdog heal step FAILED daily trying to "fix" a structural lag. Same class as the filing-cycle overrides.
 - ⏳ [0007 Market-share momentum cluster](0003-market-share-momentum-factor.md) — 4 factors, ~7 hr, proposed
 - ⏳ [0008 Consumer demand pulse](0004-consumer-demand-pulse.md) — research-gated
