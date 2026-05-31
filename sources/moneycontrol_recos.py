@@ -377,7 +377,8 @@ def compute(limit=None, ticker=None, discover_only=False, aggregate_only=False, 
         where = "WHERE ticker = ?"
         params = [ticker]
     stocks = read_sql(
-        f"SELECT sid, ticker, COALESCE(mc_slug, '') AS mc_slug FROM stocks {where} ORDER BY sid",
+        f"SELECT sid, ticker, COALESCE(name, '') AS name, COALESCE(mc_slug, '') AS mc_slug "
+        f"FROM stocks {where} ORDER BY sid",
         params=params,
     )
     if limit:
@@ -393,7 +394,7 @@ def compute(limit=None, ticker=None, discover_only=False, aggregate_only=False, 
     n_recos_total = 0
     gate_quarantined = 0   # Plan 0007 Phase 2 — identity-gate failures (WRONG_ENTITY)
 
-    for i, (sid, ticker_str, slug) in enumerate(stocks.itertuples(index=False), 1):
+    for i, (sid, ticker_str, name_str, slug) in enumerate(stocks.itertuples(index=False), 1):
         if not slug:
             slug = discover_slug_for(sid, ticker_str)
             time.sleep(DELAY)
@@ -425,8 +426,12 @@ def compute(limit=None, ticker=None, discover_only=False, aggregate_only=False, 
             from validators.identity_check import (
                 verify_identity, quarantine_row, record_verdict,
             )
+            # Verify the slug's company segment against the stock NAME (not the
+            # ticker — MC slugs are name-derived). expected_url_segment carries
+            # the SID so the gate can allowlist MC_SLUG_OVERRIDES.
             v = verify_identity(sid, slug, source="moneycontrol",
-                                expected_name=ticker_str)
+                                expected_name=name_str or ticker_str,
+                                expected_url_segment=sid)
             if v.status == "WRONG_ENTITY":
                 # Quarantine every parsed reco row + record one verdict per SID.
                 for r in recos:

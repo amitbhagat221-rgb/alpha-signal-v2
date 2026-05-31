@@ -124,11 +124,46 @@ def _normalise_company_name(s: str) -> str:
     return re.sub(r"[^a-z0-9]", "", (s or "").lower())
 
 
+def _mc_slug_company(slug: str) -> str:
+    """Company segment of a Moneycontrol slug URL.
+
+    /india/stockpricequote/{industry}/{company}/{MC_CODE} → {company}.
+    Mirrors tools/data_sanity.py:_mc_slug_name_mismatch_check._slug_co.
+    """
+    parts = (slug or "").strip("/").split("/")
+    return parts[-2] if len(parts) >= 2 else ""
+
+
 def _verify_moneycontrol(sid: str, payload, expected_name: Optional[str] = None,
                          expected_url_segment: Optional[str] = None) -> IdentityVerdict:
-    """Moneycontrol identity: the slug URL path must contain the ticker (case-insensitive)
-    OR (better) the autosuggest match record's `symbol` field equals our ticker."""
-    # If payload is a dict with `symbol` (the autosuggest record), require exact match.
+    """Moneycontrol identity: the slug's company segment must match the stock's
+    COMPANY NAME — not the ticker.
+
+    Moneycontrol slugs are company-name-derived (RELIANCE → 'relianceindustries'),
+    so the NSE ticker is usually NOT in the slug at all. The previous ticker-
+    substring check therefore failed BOTH ways:
+      - false PASS  — short ticker accidentally embedded in a wrong company's
+                      slug ('cera' in 'kajariaceramics' → Cera Sanitaryware
+                      wrongly accepted as Kajaria Ceramics).
+      - false QUARANTINE — correct mapping where ticker ≠ company slug
+                      (CEATLTD vs 'ceat', BHARTIARTL vs 'bhartiairtel').
+
+    This now mirrors the canonical accept logic in
+    tools/data_sanity.py:_mc_slug_name_mismatch_check (its regression twin):
+    accept if the normalised slug-company is a substring of the normalised
+    company name (or vice versa) OR SequenceMatcher ratio >= 0.55. The ticker-
+    substring shortcut was deliberately dropped there 2026-05-31 (it let
+    STYL/MUT/APLL wrong-entity slugs through) — keep it dropped here too.
+
+    `expected_name` carries the company name (stocks.name). `expected_url_segment`
+    optionally carries the SID so MC_SLUG_OVERRIDES (hand-verified slugs whose
+    company segment legitimately differs, e.g. India Power Corp → 'dpsc') can be
+    allowlisted, matching the auditor.
+    """
+    from difflib import SequenceMatcher
+
+    # If payload is a dict with `symbol` (the autosuggest record), require exact
+    # match — discovery's upstream safety net (BAJAJHLDNG fix, 2026-05-25).
     if isinstance(payload, dict) and "symbol" in payload:
         returned = (payload.get("symbol") or "").strip().upper()
         if not returned:
@@ -138,17 +173,40 @@ def _verify_moneycontrol(sid: str, payload, expected_name: Optional[str] = None,
         return IdentityVerdict("WRONG_ENTITY", expected_name or sid, returned,
                                 f"autosuggest returned '{returned}' for query '{expected_name or sid}'")
 
-    # Otherwise treat payload as URL/slug — segment must include ticker.
+    # Otherwise treat payload as the slug/URL we fetched from.
     url = payload if isinstance(payload, str) else (
         payload.get("url") if isinstance(payload, dict) else None
     )
     if not url:
         return IdentityVerdict("UNRESOLVED", sid, None, "no url in moneycontrol payload")
-    ticker = (expected_name or sid).strip().upper()
-    if ticker.lower() in url.lower():
-        return IdentityVerdict("PASS", ticker, url, "url contains ticker segment")
-    return IdentityVerdict("WRONG_ENTITY", ticker, url,
-                            f"url '{url}' does not contain ticker '{ticker}'")
+
+    # Allowlist hand-verified slugs whose company segment legitimately differs.
+    override_sid = expected_url_segment or sid
+    try:
+        from sources.moneycontrol_recos import MC_SLUG_OVERRIDES
+        if override_sid in {s for s, slug in MC_SLUG_OVERRIDES.items() if slug}:
+            return IdentityVerdict("PASS", expected_name or sid, url,
+                                    "MC_SLUG_OVERRIDES hand-verified slug")
+    except Exception:
+        pass
+
+    if not expected_name:
+        return IdentityVerdict("UNRESOLVED", sid, url,
+                                "moneycontrol needs expected_name (stocks.name) to verify")
+
+    slug_co = _normalise_company_name(_mc_slug_company(url))
+    name_n = _normalise_company_name(expected_name)
+    if not slug_co or not name_n:
+        return IdentityVerdict("UNRESOLVED", expected_name, url,
+                                "slug company segment or name normalises to empty")
+    name_in = slug_co in name_n or name_n in slug_co
+    ratio = SequenceMatcher(None, slug_co, name_n).ratio()
+    if name_in or ratio >= 0.55:
+        return IdentityVerdict("PASS", expected_name, url,
+                                f"slug '{slug_co}' matches name (ratio={ratio:.2f})")
+    return IdentityVerdict("WRONG_ENTITY", expected_name, url,
+                            f"slug company '{slug_co}' does not match name "
+                            f"'{expected_name}' (ratio={ratio:.2f})")
 
 
 def _verify_yfinance(sid: str, payload, expected_name: Optional[str] = None,

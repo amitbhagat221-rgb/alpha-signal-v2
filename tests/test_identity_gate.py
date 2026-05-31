@@ -49,21 +49,57 @@ def test_moneycontrol_autosuggest_quarantines_wrong_symbol():
 
 
 def test_moneycontrol_url_segment_pass():
-    """When payload is just a URL string, gate checks segment contains ticker."""
+    """When payload is a URL string, the gate matches the slug's company segment
+    against the COMPANY NAME (slugs are name-derived, not ticker-derived)."""
     url = "/india/stockpricequote/finance-investments/relianceindustries/REI"
     v = verify_identity("RELI", url, source="moneycontrol",
-                        expected_name="RELIANCE")
+                        expected_name="Reliance Industries Ltd")
     assert v.status == "PASS", v.reason
 
 
 def test_moneycontrol_url_segment_quarantine():
-    """URL containing a DIFFERENT ticker should not pass for our SID."""
-    url = "/india/stockpricequote/finance-investments/itc/ITC"
-    v = verify_identity("IOC", url, source="moneycontrol",
-                        expected_name="IOC")
+    """URL pointing at a DIFFERENT company must quarantine."""
+    url = "/india/stockpricequote/refineries/indianoilcorporation/IOC"
+    v = verify_identity("ITC", url, source="moneycontrol",
+                        expected_name="ITC Ltd")
     assert v.status == "WRONG_ENTITY", (
-        f"IOC ticker URL=ITC must quarantine; got {v.status}: {v.reason}"
+        f"ITC name vs indianoilcorporation slug must quarantine; got {v.status}: {v.reason}"
     )
+
+
+def test_moneycontrol_no_false_pass_on_embedded_ticker():
+    """Regression (audit 2026-05-31): the old ticker-substring check FALSE-PASSED
+    when a short ticker was embedded in a wrong company's slug — 'cera' lives
+    inside 'kajariacera-mics'. Name-based matching must reject it."""
+    url = "/india/stockpricequote/sanitaryware/kajariaceramics/KC11"
+    v = verify_identity("CERA", url, source="moneycontrol",
+                        expected_name="Cera Sanitaryware Ltd")
+    assert v.status == "WRONG_ENTITY", (
+        f"Cera Sanitaryware ≠ Kajaria Ceramics must quarantine; got {v.status}: {v.reason}"
+    )
+
+
+def test_moneycontrol_no_false_quarantine_when_ticker_unlike_slug():
+    """Regression (audit 2026-05-31): the old check FALSE-QUARANTINED correct
+    mappings where the NSE ticker differs from the company slug
+    (CEATLTD→'ceat', BHARTIARTL→'bhartiairtel'). Name-based matching passes them."""
+    for ticker, name, url in [
+        ("CEATLTD",   "CEAT Ltd",          "/india/stockpricequote/tyres/ceat/C07"),
+        ("BHARTIARTL","Bharti Airtel Ltd", "/india/stockpricequote/telecommunications-service/bhartiairtel/BA08"),
+    ]:
+        v = verify_identity(ticker, url, source="moneycontrol", expected_name=name)
+        assert v.status == "PASS", f"{ticker} should PASS; got {v.status}: {v.reason}"
+
+
+def test_moneycontrol_override_allowlist_passes_legit_mismatch():
+    """MC_SLUG_OVERRIDES pins hand-verified slugs whose company segment
+    legitimately differs from the name (India Power Corp → 'dpsc'). Passing the
+    SID via expected_url_segment must allowlist it."""
+    url = "/india/stockpricequote/power-generationdistribution/dpsc/DPS"
+    v = verify_identity("DPSC", url, source="moneycontrol",
+                        expected_name="India Power Corporation Ltd",
+                        expected_url_segment="DPSC")
+    assert v.status == "PASS", f"override should PASS; got {v.status}: {v.reason}"
 
 
 # ─────────── yfinance identity verifier ───────────
