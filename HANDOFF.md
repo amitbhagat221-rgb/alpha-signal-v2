@@ -1,30 +1,18 @@
 # HANDOFF
-Updated: 2026-05-31 | Branch: master (7 unpushed) | HEAD (pre-commit): `feat(pead): §3.2.5 event-time factors (4/6) — core PEAD did not replicate`
+Updated: 2026-05-31 | Branch: master (0 unpushed) | HEAD: `df3c744` fix(identity-gate): name-aware MoneyControl verification + recover false quarantines
 
 ## Left off
-**Promotion wave — put idle validated alpha to work in production.** `pt_upside` (LARGE/MID/SMALL t=7.15/8.40/9.14), `pledge_quality` (SMALL t=5.90), `delivery_anomaly_z` (SMALL t=4.76, n=103) were computed + ranked daily (in screener `SIGNAL_COLS` + the MaxReturn/MaxSharpe variants) but carried **zero production weight** — now wired into `config.SIGNAL_WEIGHTS`. Gated by a user-requested **orthogonality sweep**: each promoted factor max |ρ|≤0.27 vs already-wired. **`eps_growth` HELD** (ρ=0.63 with consensus → redundant); `kyle_lambda` held (cost-coupled liquidity tilt); contrarian-sign/tiny-n bench factors held. **`pt_upside` CAPPED** at 0.16–0.25 (well under its t=7–9 share) pending the artifact re-verify (open question, **due 2026-08**). Tiers Σ=1.0 → LARGE 7 / MID 8 / SMALL 10 factors. Screener smoke-tested live (coverage pt_upside L100/M142/S683, pledge 97%, delivery 94%); signal-weights.md updated; 0 CRITICAL. No screener code change needed — these were already in `SIGNAL_COLS`, just a config reweight.
-
-Earlier this session — built **§3.2.5 event-time/PEAD (4 of 6 factors)**: **the core PEAD did NOT replicate.** [signals/pead.py](signals/pead.py), backtested on the deep panel:
-- `earnings_surprise_std` (seasonal-random-walk SUE): **DROP all tiers** (best LARGE t=0.52).
-- `pead_drift_60d`: SMALL t=-1.54 **WEAK with a reversal sign** (opposite of drift), LARGE/MID DROP.
-- `corporate_action_density`: LARGE **t=-3.67 KEEP** (CI [-5.99,-2.06] strictly <0) but **mechanism unclear** (likely a maturity/value proxy) + corporate_actions only 2yr deep → **NOT promoted**, verify vs value factors first.
-- `buyback_announcement_30d`: DROP (too sparse, ~9/date, n=2 periods LARGE/MID).
-
-**Root cause** (recorded in memory `pead_needs_announce_dates`): `quarterly_income` has no earnings-announcement date (`reporting` = consolidation basis) and we have no quarterly consensus EPS → the SUE/drift construction is too noisy. PEAD needs a real earnings-calendar + consensus feed. Deferred `dividend_change_signal` (brittle text-parse) + `index_inclusion_proximity` (needs historical mcap — current snapshot = look-ahead). All 4 built → bench. 0 CRITICAL, health green.
-
-Fully wired like the prior batches (PIT helper `pit_pead` + 4 cols + BACKTEST_SIGNALS group "Event/PEAD" + SIGNAL_COLUMN_MAP + 4 lineage, drift clean); `corp_actions` added to `load_raw`; reconstructed over all 149 panel dates; monthly cadence.
+Shipped the full feasible-now §3.2 build-out in one session — 18 new factors (4 F&O OI + 4 in-house Black-76 IV + 6 daily microstructure + 4 PEAD) — and put idle validated alpha to work: **5 factors now carry production weight** (`iv_skew_25d` MID, `pt_upside` L/M/S, `pledge_quality` + `delivery_anomaly_z` SMALL), each orthogonality-gated. Manual actions done: cockpit-ops restarted (`/system` funnel now 85, Phase E sector badges live) and the screener re-ran so today's `daily_picks` reflect the new weights.
 
 ## Pick up here
-0. **Confirm the promotion wave reaches `daily_picks`** after the next pipeline run — pt_upside + pledge_quality + delivery_anomaly_z + iv_skew_25d now carry weight; spot-check a few picks' component breakdown. **pt_upside artifact re-verify due 2026-08** (capped until then; if it proves inflated, pull/shrink it).
-1. **§3.2.6 industry dummies (1) + §3.2.7 macro extensions (4)** — the last §3.2 factors not blocked on Kite/NLP. `industry_id` one-hot is trivial. §3.2.7 (`inr_carry_proxy`, `india_credit_spread`, `commodity_beta_oil/metals`) needs INR-forward / G-Sec / commodity series — **check `macro_history` coverage first** (may need new sources).
-2. **Deploy Phase E badges** (`systemctl restart alpha-cockpit`) + **Kite activation** when creds land (3 held intraday §3.2.3 factors).
-3. **Confirm `iv_skew_25d` reaches `daily_picks`** after the next pipeline run (wired last commit, screener hasn't re-run).
+1. **§3.2.6 `industry_id` one-hot + §3.2.7 macro betas** — the last build-now §3.2 factors. Check `macro_history` for INR-forward / G-Sec / commodity series *first* (§3.2.7 may need new sources); `industry_id` is trivial. New `signals/` + `tools/reconstruct_pit.py` wiring.
+2. **`pt_upside` artifact re-verify (due 2026-08)** — it's CAPPED in `config.SIGNAL_WEIGHTS` (0.16–0.25) pending this. Re-run `python -m tools.backtest_pit --signal pt_upside` once ≥3 fresh monthly `analyst_consensus_snapshots` exist; un-cap or pull based on whether t=7–9 holds on clean-PT periods.
+3. **Kite activation** — user adds 5 Connect creds to `run_pipeline.sh` (see `docs/reference/kite-setup.md`), then `sources/kite_pull.py --check-auth` → `--instruments` → `--backfill-bars`, wire `fetch_kite_bars` into `PIPELINE_STEPS`. Starts the ~90d clock for the 3 held intraday §3.2.3 factors.
 
 ## Watch out
-- **Don't re-attempt PEAD with the time-series proxy** — it's a data problem (missing announce dates + consensus), not a tuning problem. See memory.
-- `corporate_action_density`'s KEEP is **suspect** — negative-IC count factor over a single 2yr regime with no clean mechanism. Run `factor_correlation` vs value factors before ever trusting it.
-- This session shipped a lot (6 commits): F&O OI+IV, microstructure, iv_skew promotion, graphify-disable, PEAD. Factor model now **42/50 PIT-shipped**; one live production promotion (`iv_skew_25d` MID).
-- graphify MCP query server still down (killed earlier); auto-rebuild hooks disabled.
+- **Long-running cockpit services cache the factor registry in memory + a 300s disk cache** (`get_factor_health` `@_persisted_cache`). Any future `BACKTEST_SIGNALS`/`SIGNAL_WEIGHTS` edit needs `sudo systemctl restart alpha-cockpit-ops` to show in `/system` — editing `db.py`/`config.py` alone won't (this is why it read 66 not 85 today).
+- **`kyle_lambda` (t=4.24) and `corporate_action_density` (t=−3.67) are statistical KEEPs deliberately NOT promoted** (cost-coupled liquidity tilt / unclear mechanism). Don't let a future mechanical sweep wire them — see signal-weights.md "On the bench".
+- **PEAD factors approximate announcement = period_end + 45d** (no real announce dates); don't treat `pead_drift_60d` / `earnings_surprise_std` as precise event-time, and don't re-attempt PEAD without an earnings-calendar feed (memory `pead_needs_announce_dates`).
 
 ## Active plan
-[docs/plans/0002-100-factors-and-model.md](docs/plans/0002-100-factors-and-model.md) — §3.2.1✅ §3.2.2✅(8/8) §3.2.3 6/9 §3.2.5 4/6; remaining buildable-now: §3.2.6 (1) + §3.2.7 (4). §3.2.3-rest/§3.2.4 blocked on Kite/NLP. State: 42/50 PIT-shipped.
+[docs/plans/0002-100-factors-and-model.md](docs/plans/0002-100-factors-and-model.md) — Phase 3.2, **42/50 PIT-shipped**. §3.2.1✅ §3.2.2✅(8/8) §3.2.3 6/9 §3.2.5 4/6; §3.2.6+§3.2.7 next; §3.2.3-rest + §3.2.4 blocked on Kite/NLP (3.1c/3.1d).
