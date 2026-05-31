@@ -139,6 +139,13 @@ _COLUMN_MIGRATIONS = [
     ("daily_snapshots_pit", "iv_term_structure",  "REAL"),
     ("daily_snapshots_pit", "iv_realised_spread", "REAL"),
     ("daily_snapshots_pit", "iv_percentile_1y",   "REAL"),
+    # 2026-05-31: Plan 0002 §3.2.3 — daily-derivable microstructure PIT columns.
+    ("daily_snapshots_pit", "intraday_range_compression", "REAL"),
+    ("daily_snapshots_pit", "closing_strength_1m",        "REAL"),
+    ("daily_snapshots_pit", "opening_gap_freq_1m",        "REAL"),
+    ("daily_snapshots_pit", "vwap_deviation_5d",          "REAL"),
+    ("daily_snapshots_pit", "bidask_spread_proxy",        "REAL"),
+    ("daily_snapshots_pit", "kyle_lambda",                "REAL"),
 ]
 
 
@@ -1976,6 +1983,96 @@ BACKTEST_SIGNALS = [
                          "so the trailing-1y window is full. Bench (FACTOR_LIBRARY).",
     },
     {
+        "signal": "intraday_range_compression",
+        "label": "Intraday Range Compression (ATR5/ATR20)",
+        "group": "Microstructure",
+        "description": "5-day ATR / 20-day ATR. <1 = recent daily ranges tighter "
+                       "than the longer run (volatility compression). Daily OHLC.",
+        "source_tables": ["stock_prices"],
+        "source_columns": ["stock_prices.{high,low,close}"],
+        "filing_lag": "0d",
+        "pit_column_v1": None,
+        "pit_column_v2": "intraday_range_compression",
+        "v1_verdict_summary": "(new — Plan 0002 §3.2.3, daily-derivable, no Kite)",
+        "status": "READY",
+        "status_reason": "Shipped 2026-05-31 (§3.2.3 daily half). Backtest 39 monthly periods: best |t|=0.92 LARGE — DROP all tiers. Bench (FACTOR_LIBRARY).",
+    },
+    {
+        "signal": "closing_strength_1m",
+        "label": "Closing Strength (1mo)",
+        "group": "Microstructure",
+        "description": "Mean (close−low)/(high−low) over ~21d — where in the daily "
+                       "range the close lands. High = persistent late-day buying.",
+        "source_tables": ["stock_prices"],
+        "source_columns": ["stock_prices.{high,low,close}"],
+        "filing_lag": "0d",
+        "pit_column_v1": None,
+        "pit_column_v2": "closing_strength_1m",
+        "v1_verdict_summary": "(new — Plan 0002 §3.2.3, daily-derivable, no Kite)",
+        "status": "READY",
+        "status_reason": "Shipped 2026-05-31 (§3.2.3 daily half). Backtest 39 monthly periods: best |t|=0.98 SMALL — DROP all tiers. Bench (FACTOR_LIBRARY).",
+    },
+    {
+        "signal": "opening_gap_freq_1m",
+        "label": "Opening Gap Frequency (1mo)",
+        "group": "Microstructure",
+        "description": "Fraction of last ~21d with a >1% overnight gap "
+                       "(|open/prev_close − 1|). News/event sensitivity proxy.",
+        "source_tables": ["stock_prices"],
+        "source_columns": ["stock_prices.{open,close}"],
+        "filing_lag": "0d",
+        "pit_column_v1": None,
+        "pit_column_v2": "opening_gap_freq_1m",
+        "v1_verdict_summary": "(new — Plan 0002 §3.2.3, daily-derivable, no Kite)",
+        "status": "READY",
+        "status_reason": "Shipped 2026-05-31 (§3.2.3 daily half). Backtest 39 monthly periods: MID t=1.31 weak hint, DROP all tiers. Bench (FACTOR_LIBRARY).",
+    },
+    {
+        "signal": "vwap_deviation_5d",
+        "label": "VWAP Deviation (5d, OHLC proxy)",
+        "group": "Microstructure",
+        "description": "Mean 5d (close − typical_price)/typical_price, TP=(H+L+C)/3 "
+                       "(daily VWAP proxy — traded_value is ~17% NULL). Late-day strength.",
+        "source_tables": ["stock_prices"],
+        "source_columns": ["stock_prices.{high,low,close}"],
+        "filing_lag": "0d",
+        "pit_column_v1": None,
+        "pit_column_v2": "vwap_deviation_5d",
+        "v1_verdict_summary": "(new — Plan 0002 §3.2.3, daily-derivable proxy, no Kite)",
+        "status": "READY",
+        "status_reason": "Shipped 2026-05-31 (§3.2.3 daily half). Backtest 39 monthly periods: best |t|=0.96 SMALL — DROP (OHLC typical-price proxy; true VWAP needs intraday). Bench (FACTOR_LIBRARY).",
+    },
+    {
+        "signal": "bidask_spread_proxy",
+        "label": "Bid-Ask Spread (Corwin-Schultz)",
+        "group": "Microstructure",
+        "description": "Corwin-Schultz 2-day high/low spread estimator, ~20d mean. "
+                       "Illiquidity proxy (higher = wider effective spread). Daily H/L.",
+        "source_tables": ["stock_prices"],
+        "source_columns": ["stock_prices.{high,low}"],
+        "filing_lag": "0d",
+        "pit_column_v1": None,
+        "pit_column_v2": "bidask_spread_proxy",
+        "v1_verdict_summary": "(new — Plan 0002 §3.2.3, daily-derivable proxy, no Kite)",
+        "status": "READY",
+        "status_reason": "Shipped 2026-05-31 (§3.2.3 daily half). Backtest 39 monthly periods: MID t=1.30 weak hint, DROP all tiers. Bench (FACTOR_LIBRARY).",
+    },
+    {
+        "signal": "kyle_lambda",
+        "label": "Kyle Lambda (Amihud illiquidity)",
+        "group": "Microstructure",
+        "description": "Amihud: mean |daily return| / turnover(₹cr) over ~21d. "
+                       "Price impact per unit volume; higher = more illiquid.",
+        "source_tables": ["stock_prices"],
+        "source_columns": ["stock_prices.{close,volume}"],
+        "filing_lag": "0d",
+        "pit_column_v1": None,
+        "pit_column_v2": "kyle_lambda",
+        "v1_verdict_summary": "(new — Plan 0002 §3.2.3, daily-derivable proxy, no Kite)",
+        "status": "READY",
+        "status_reason": "Shipped 2026-05-31 (§3.2.3 daily half). Backtest 39 monthly periods: LARGE t=+4.24 KEEP + MID t=+4.14 KEEP (both CI strictly >0), SMALL t=+1.65 WEAK — the Amihud illiquidity premium (illiquid -> higher fwd returns). Strong + economically grounded. PROMOTION CANDIDATE but trading-cost-coupled (you pay the spread youre compensated for) + likely colinear with size/adtv -> needs factor_correlation + cost-aware review before wiring.",
+    },
+    {
         "signal": "bulk_deal_signal",
         "label": "Bulk/Block Deal Activity",
         "group": "Smart Money",
@@ -2630,6 +2727,13 @@ FACTOR_LIBRARY = [
     "iv_realised_spread",   # MID t=-1.95 WEAK (CI excludes 0)
     "iv_term_structure",    # MID t=-1.80 WEAK; SMALL KEEP is a thin-sample artifact
     "iv_percentile_1y",     # best |t|=1.18 LARGE — DROP (regime signal)
+    # Microstructure factors (§3.2.3 daily-derivable) — 39 monthly periods
+    "kyle_lambda",          # LARGE t=+4.24 + MID t=+4.14 KEEP — Amihud illiquidity premium; promotion candidate (cost-coupled)
+    "bidask_spread_proxy",  # MID t=1.30 — DROP
+    "opening_gap_freq_1m",  # MID t=1.31 — DROP
+    "closing_strength_1m",  # best |t|=0.98 SMALL — DROP
+    "vwap_deviation_5d",    # best |t|=0.96 SMALL — DROP
+    "intraday_range_compression",  # best |t|=0.92 LARGE — DROP
 ]
 
 

@@ -88,6 +88,13 @@ CREATE TABLE IF NOT EXISTS daily_snapshots_pit (
     iv_term_structure  REAL,
     iv_realised_spread REAL,
     iv_percentile_1y   REAL,
+    -- Plan 0002 §3.2.3 — daily-derivable microstructure factors (off stock_prices)
+    intraday_range_compression REAL,
+    closing_strength_1m        REAL,
+    opening_gap_freq_1m        REAL,
+    vwap_deviation_5d          REAL,
+    bidask_spread_proxy        REAL,
+    kyle_lambda                REAL,
     fwd_return_20d   REAL,
     m_score          REAL,
     z_score          REAL,
@@ -142,6 +149,9 @@ PIT_COLUMNS = [
     "pcr_oi", "pcr_volume", "max_pain_distance", "oi_buildup_signal",
     # Plan 0002 §3.2.2 — F&O implied-volatility factors (off fno_iv_history)
     "iv_skew_25d", "iv_term_structure", "iv_realised_spread", "iv_percentile_1y",
+    # Plan 0002 §3.2.3 — daily-derivable microstructure factors (off stock_prices)
+    "intraday_range_compression", "closing_strength_1m", "opening_gap_freq_1m",
+    "vwap_deviation_5d", "bidask_spread_proxy", "kyle_lambda",
     "fwd_return_20d",
     "m_score", "z_score",
     # Tier 2 — fundamentals
@@ -219,6 +229,13 @@ VALIDATION_RANGES = {
     "iv_term_structure":     (-0.5, 0.5, True),  # near−far ATM IV, vol points
     "iv_realised_spread":    (-1.0, 1.0, True),  # ATM IV − realised vol
     "iv_percentile_1y":      (0, 1, True),       # percentile rank in trailing ≤1y
+    # Microstructure factors (§3.2.3) — bounds mirror signals/microstructure.py CLIPS
+    "intraday_range_compression": (0, 5, True),  # ATR5/ATR20
+    "closing_strength_1m":        (0, 1, True),  # (close−low)/(high−low)
+    "opening_gap_freq_1m":        (0, 1, True),  # frac of days with >1% gap
+    "vwap_deviation_5d":          (-0.5, 0.5, True),  # (close−typical_price)/TP
+    "bidask_spread_proxy":        (0, 1, True),  # Corwin-Schultz spread fraction
+    "kyle_lambda":                (0, 1, True),  # Amihud illiquidity
     "fwd_return_20d":        (-1, 5, True),  # cap extreme returns
     "m_score":               (-20, 20, True),
     "z_score":               (-50, 100, True),
@@ -1244,6 +1261,24 @@ def pit_fno_iv(fno_iv_full, px_pit, eval_date):
     return compute_iv_factors(iv_hist=iv_pit, prices=prices)
 
 
+def pit_microstructure(ohlc_full, eval_date):
+    """Daily microstructure factors, PIT — Plan 0002 §3.2.3 (the 6 daily-derivable).
+
+    Reuses signals.microstructure's core verbatim, fed an as-of-frozen OHLCV slice
+    (date ≤ eval_date). Raw (unadjusted) prices, same split stance as the live path.
+
+    Returns DataFrame[sid, intraday_range_compression, closing_strength_1m,
+    opening_gap_freq_1m, vwap_deviation_5d, bidask_spread_proxy, kyle_lambda].
+    """
+    from signals.microstructure import compute_microstructure, CLIPS
+    cols = ["sid", *CLIPS.keys()]
+    if ohlc_full is None or ohlc_full.empty:
+        return pd.DataFrame(columns=cols)
+    eval_str = eval_date.isoformat() if hasattr(eval_date, "isoformat") else str(eval_date)
+    pit = ohlc_full[ohlc_full["date"] <= eval_str]
+    return compute_microstructure(prices=pit)
+
+
 def pit_macro_sector(macro_history_pit, macro_sector_map, sectors_list, eval_date):
     """Per-sector macro score from macro_history × macro_sector_map.
 
@@ -2243,6 +2278,10 @@ def reconstruct_one_date(eval_date, raw, signals_to_run):
     if "fno_iv" in signals_to_run and "fno_iv" in raw and not raw["fno_iv"].empty:
         base = base.merge(pit_fno_iv(raw["fno_iv"], px_pit, eval_date), on="sid", how="left")
 
+    # ── §3.2.3 — daily-derivable microstructure factors (off raw OHLCV) ──
+    if "microstructure" in signals_to_run and "prices_ohlc" in raw and not raw["prices_ohlc"].empty:
+        base = base.merge(pit_microstructure(raw["prices_ohlc"], eval_date), on="sid", how="left")
+
     if "pledge" in signals_to_run:
         base = base.merge(pit_pledge_quality(raw["stocks"], sh_pit), on="sid", how="left")
 
@@ -2589,6 +2628,12 @@ def load_raw():
         )
     except Exception:
         fno_iv = pd.DataFrame()
+    # §3.2.3 — daily OHLCV for microstructure factors (raw; split stance per
+    # signals/microstructure.py). open/high/low/volume aren't in `prices` above.
+    prices_ohlc = read_sql(
+        "SELECT sid, date, open, high, low, close, volume FROM stock_prices "
+        "WHERE close > 0 ORDER BY sid, date"
+    )
     print(f"  stocks={len(stocks)} qi={len(qi)} bs={len(bs)} cf={len(cf)} sh={len(sh)} "
           f"prices={len(prices)} adj={len(adjustments)} fh={len(fh)} acs={len(acs)} "
           f"bulk={len(bulk)} "
@@ -2604,6 +2649,7 @@ def load_raw():
         "banking_metrics": banking_metrics,
         "fno_pcr": fno_pcr,
         "fno_iv": fno_iv,
+        "prices_ohlc": prices_ohlc,
         "reg_events": reg_events, "reg_signals": reg_signals,
         "macro_hist": macro_hist, "macro_map": macro_map,
     }
@@ -2623,7 +2669,7 @@ def main():
                         choices=["piotroski", "accruals", "promoter", "forensic",
                                  "earnings_yield", "book_to_price", "momentum",
                                  "position_52w", "delivery", "sector_momentum",
-                                 "fno_oi", "fno_iv", "pledge",
+                                 "fno_oi", "fno_iv", "microstructure", "pledge",
                                  "promoter_trend", "macd", "fwd_return",
                                  "mom_composite",
                                  "quality_fundamentals", "growth_fundamentals",
@@ -2700,6 +2746,8 @@ def main():
         "sector_momentum",
         # Plan 0002 §3.2.2 — F&O open-interest + implied-volatility factors
         "fno_oi", "fno_iv",
+        # Plan 0002 §3.2.3 — daily-derivable microstructure factors
+        "microstructure",
         # Plan 0005 Phase E composite (smart_money — accruals/promoter/forensic
         # composites flow through their existing _compute_scores)
         "smart_money",

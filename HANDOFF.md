@@ -1,28 +1,25 @@
 # HANDOFF
-Updated: 2026-05-31 | Branch: master (2 unpushed) | HEAD (pre-commit): `feat(fno): 4 F&O OI factors built + backtested (Track 3.2.2 OI half)`
+Updated: 2026-05-31 | Branch: master (3 unpushed) | HEAD (pre-commit): `feat(fno): IV factors derived in-house from bhavcopy (§3.2.2 IV half, 8/8)`
 
 ## Left off
-**Closed §3.2.2 options-implied (8/8)** by shipping the 4 IV factors — and the key win: the IV half was *not* forward-only/blocked as feared. `sources/fno_iv.py` recovers the EOD IV surface by **Black-76 inversion of the settle prices already in `fno_bhav`** (implied forward via put-call parity, OTM-wing IVs, ±25Δ skew interpolation) → `fno_iv_history` + daily `compute_fno_iv` step. **Validated**: NIFTY ATM IV tracks India VIX (our own `macro_history`) to ~0.1-2 vol pts and sits just below it (textbook-correct); CE/PE IV match exactly at ATM (parity holds). `fno_bhav` **backfilled 6mo→12mo (250 dates)** so `iv_percentile_1y`'s 1y window fills. New [signals/fno_iv_factors.py](signals/fno_iv_factors.py) (4 factors) fully wired (PIT helper, cols, BACKTEST_SIGNALS/CADENCE/MAP, lineage — drift clean). [ADR 0035](docs/decisions/0035-fno-iv-derived-from-bhav.md).
+Shipped **6 of the 9 §3.2.3 microstructure factors** — the daily-derivable ones, off `stock_prices` OHLCV, no Kite. [signals/microstructure.py](signals/microstructure.py): 3 clean (`intraday_range_compression`=ATR5/ATR20, `closing_strength_1m`, `opening_gap_freq_1m`) + 3 proxies (`vwap_deviation_5d`=close-vs-typical-price since `traded_value` is ~17% NULL incl. all recent; `bidask_spread_proxy`=Corwin-Schultz; `kyle_lambda`=Amihud illiquidity). `prev_close` self-computed as lag(close), turnover=close×volume. ~99% coverage (NULLs are legit: <22d-history IPOs + circuit-frozen `high==low` untraded names). Fully wired (PIT helper `pit_microstructure` + 6 cols + BACKTEST_SIGNALS group "Microstructure" + SIGNAL_COLUMN_MAP + 6 FACTOR_LINEAGE, drift clean); monthly cadence → reconstructed over the **deep 39-month panel** (149 dates, 2022-08→2026-05) and backtested on years of price history.
 
-**Backtest (25 weekly periods, NW3):**
-- **`iv_skew_25d` MID t=+4.61 KEEP** — IC +0.096, bootstrap CI [2.28, 9.84] strictly >0. First F&O factor to clear the bar; downside put-skew → MID outperformance. Standout promotion candidate.
-- `iv_realised_spread` MID t=-1.95 WEAK (CI excludes 0; rich variance premium → underperformance).
-- `iv_term_structure` MID t=-1.80 WEAK. **SMALL "KEEP" t=-4.94 is a 7-period/23-stock ARTIFACT** (CI [-32.7,-3.1]) — flagged, NOT promoted. ~20% stock coverage (index-level signal at heart).
-- `iv_percentile_1y` DROP all tiers (regime/timing read, not cross-sectional).
+**Backtest (39 monthly periods):**
+- **`kyle_lambda` LARGE t=+4.24 KEEP + MID t=+4.14 KEEP** (CIs [2.33,6.86]/[2.11,6.97] strictly >0), SMALL t=+1.65 WEAK. The **Amihud illiquidity premium** — illiquid → higher forward returns. Strongest, most robust factor in the whole F&O/micro batch (39 periods).
+- Other 5 DROP: `opening_gap_freq` MID t=1.31, `bidask_spread_proxy` MID t=1.30 (weak hints); `closing_strength`/`vwap_deviation`/`range_compression` no signal.
 
-All 4 on the bench (`FACTOR_LIBRARY`); none wired. Also shipped: **Kite Connect scaffold** ([sources/kite_pull.py](sources/kite_pull.py) + [setup doc](docs/reference/kite-setup.md)) — auth/TOTP token-refresh + instrument map + bar backfill + aggregates, **pending live creds, NOT in PIPELINE_STEPS**.
+All 6 on the bench (`FACTOR_LIBRARY`); none wired. 0 CRITICAL, health green.
 
 ## Pick up here
-1. **`iv_skew_25d` promotion review** — strongest candidate from the whole F&O batch. Run `tools/walk_forward.py` OOS before any `SCREEN.weight_tiers` add (signal-weights.md — never mechanical). Caveat: single ~6mo regime.
-2. **Build 6 daily-derivable §3.2.3 microstructure factors** — `signals/microstructure.py` off `stock_prices` OHLCV (3 clean: range-compression, closing-strength, opening-gap-freq; 3 proxies: vwap-dev, Corwin-Schultz spread, Amihud-kyle). Feasible now, no Kite, deep daily backtest. Only `volume_clock_concentration`/`tick_imbalance_5d`/`intraday_momentum_persistence` need Kite (3.1c).
-3. **Kite activation** — user has a trading account; needs a Connect dev-app (₹500/mo) + 5 env exports in `run_pipeline.sh` (see setup doc). Then `--check-auth` → `--instruments` → `--backfill-bars`, wire `fetch_kite_bars` into PIPELINE_STEPS. Starts the ~90d clock for the 3 intraday factors.
+1. **Promotion review of the 2 KEEP candidates** — `kyle_lambda` (LARGE+MID) + `iv_skew_25d` (MID, from the prior commit). Both earned it. For each: `tools/walk_forward.py` OOS + `tools/factor_correlation.py`. **`kyle_lambda` caveats**: (a) trading-cost-coupled — the illiquidity premium is literally compensation for the spread you'd pay, so net-of-cost it may shrink; (b) likely colinear with size/adtv and may already be partly captured by the pick-eligibility gate (ADR 0021). Then a deliberate `SCREEN.weight_tiers` call (signal-weights.md — never mechanical).
+2. **§3.2.5 event-time / PEAD (6 factors)** — feasible now, no blocked data; post-earnings drift is a robust anomaly → best shot at more KEEPs. `signals/pead.py` off `quarterly_income` + `stock_prices`.
+3. **Phase E badges deploy** (`systemctl restart alpha-cockpit`) + **Kite activation** when creds land → unblocks the 3 held intraday §3.2.3 factors (`volume_clock_concentration`, `tick_imbalance_5d`, `intraday_momentum_persistence`).
 
 ## Watch out
-- **The IV-surface compute is CPU-heavy (~1hr for 250 dates).** The daily incremental (`compute_fno_iv`, 1 date) is ~15s — fine. But a full recompute is long; it self-heals (skips done dates).
-- **`iv_term_structure` is ~20% stock coverage** by nature (Indian single-stock options are liquid only in the near month). Its backtest runs on a thin, liquidity-biased subset — the SMALL "KEEP" is the canonical small-sample trap. Treat as index-level.
-- **`fno_iv_history` not in the DuckDB mirror until tonight's `duckdb_refresh`** — backtest reads SQLite, fine; cockpit reads via `read_sql_fast` would miss it until rebuild.
-- **Kite headless TOTP login is undocumented/brittle** — if it breaks, the `--request-token` manual fallback always works (see setup doc).
-- HEAD is still the OI commit; this session's work (IV factors + Kite scaffold + 12mo backfill) is uncommitted until the commit below lands.
+- **`kyle_lambda` is a long-only-portfolio trap if wired naively** — buying the illiquidity premium means buying names you can't cheaply trade. Treat the t=4.24 as real *gross* alpha that needs a net-of-cost haircut before sizing.
+- **3 IV/micro factors use raw (unadjusted) prices** crossing day boundaries (opening_gap, kyle, iv_realised_spread realised leg) → rare split-day noise, bounded by clips (same stance as sector_momentum). Not adjusted by design.
+- The 6 micro cols + IV cols aren't in the DuckDB mirror until tonight's `duckdb_refresh`; backtest reads SQLite (fine).
+- HEAD is still the IV commit; this session's microstructure work is uncommitted until the commit below.
 
 ## Active plan
-[docs/plans/0002-100-factors-and-model.md](docs/plans/0002-100-factors-and-model.md) — §3.2.2 **fully done (8/8)**; §3.2.3 reframed (6 of 9 daily-derivable, feasible now). State: 32/50 PIT-shipped.
+[docs/plans/0002-100-factors-and-model.md](docs/plans/0002-100-factors-and-model.md) — §3.2.2 done (8/8); §3.2.3 6/9 (3 on hold, Kite). State: 38/50 PIT-shipped; 2 promotion candidates banked (kyle_lambda, iv_skew_25d).

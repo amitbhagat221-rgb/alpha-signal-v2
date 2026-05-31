@@ -763,6 +763,52 @@ FACTOR_LINEAGE = {
         "sector_exclusions": [],
     },
 
+    # ════════════════════════════ Microstructure factors (§3.2.3, daily-derivable) ════════════════════════════
+    # All read daily OHLCV from stock_prices — no Kite. (The other 3 §3.2.3 factors
+    # need intraday/tick → gated on 3.1c, on hold.)
+    "intraday_range_compression": {
+        "status": "candidate", "module": "signals/microstructure.py",
+        "reads": [{"table": "stock_prices", "cols": ["high", "low", "close"],
+                   "key": ["sid", "date"], "select": "window", "filter": "last 21d",
+                   "contribution": "atr5_over_atr20"}],
+        "sector_exclusions": [],
+    },
+    "closing_strength_1m": {
+        "status": "candidate", "module": "signals/microstructure.py",
+        "reads": [{"table": "stock_prices", "cols": ["high", "low", "close"],
+                   "key": ["sid", "date"], "select": "window", "filter": "last 21d",
+                   "contribution": "mean_close_position_in_range"}],
+        "sector_exclusions": [],
+    },
+    "opening_gap_freq_1m": {
+        "status": "candidate", "module": "signals/microstructure.py",
+        "reads": [{"table": "stock_prices", "cols": ["open", "close"],
+                   "key": ["sid", "date"], "select": "window", "filter": "last 21d",
+                   "contribution": "freq_overnight_gap_gt_1pct"}],
+        "sector_exclusions": [],
+    },
+    "vwap_deviation_5d": {
+        "status": "candidate", "module": "signals/microstructure.py",
+        "reads": [{"table": "stock_prices", "cols": ["high", "low", "close"],
+                   "key": ["sid", "date"], "select": "window", "filter": "last 5d",
+                   "contribution": "close_vs_typical_price"}],
+        "sector_exclusions": [],
+    },
+    "bidask_spread_proxy": {
+        "status": "candidate", "module": "signals/microstructure.py",
+        "reads": [{"table": "stock_prices", "cols": ["high", "low"],
+                   "key": ["sid", "date"], "select": "window", "filter": "last 20d pairs",
+                   "contribution": "corwin_schultz_spread"}],
+        "sector_exclusions": [],
+    },
+    "kyle_lambda": {
+        "status": "candidate", "module": "signals/microstructure.py",
+        "reads": [{"table": "stock_prices", "cols": ["close", "volume"],
+                   "key": ["sid", "date"], "select": "window", "filter": "last 21d",
+                   "contribution": "amihud_illiquidity"}],
+        "sector_exclusions": [],
+    },
+
     # ════════════════════════════ Fundamentals_screener factors (16) ════════════════════════════
     "roic": {
         "status": "candidate", "module": "signals/roic.py",

@@ -84,6 +84,13 @@ SIGNAL_COLUMN_MAP = {
     "iv_term_structure":   (None, "iv_term_structure"),
     "iv_realised_spread":  (None, "iv_realised_spread"),
     "iv_percentile_1y":    (None, "iv_percentile_1y"),
+    # Microstructure factors — Plan 0002 §3.2.3 (daily-derivable, monthly cadence)
+    "intraday_range_compression": (None, "intraday_range_compression"),
+    "closing_strength_1m":        (None, "closing_strength_1m"),
+    "opening_gap_freq_1m":        (None, "opening_gap_freq_1m"),
+    "vwap_deviation_5d":          (None, "vwap_deviation_5d"),
+    "bidask_spread_proxy":        (None, "bidask_spread_proxy"),
+    "kyle_lambda":                (None, "kyle_lambda"),
     # Behavior tier — PIT helpers shipped 2026-05-24
     "insider_signal":      (None, "insider_score"),
     "sentiment_7d":        (None, "sentiment_7d"),
