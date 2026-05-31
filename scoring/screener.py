@@ -117,6 +117,15 @@ def _load_signals():
         "SELECT sid, smart_money_score FROM smart_money_scores "
         "WHERE (sid, snapshot_date) IN (SELECT sid, MAX(snapshot_date) FROM smart_money_scores GROUP BY sid)"
     )
+    # iv_skew_25d — MID t=+3.16 KEEP over 48 weekly periods (wired 2026-05-31,
+    # ADR 0035). In-house IV-surface skew; latest row per F&O stock. Orthogonal to
+    # size/adtv/existing factors (|ρ|<0.15). Only F&O stocks have it → non-F&O MID
+    # names get NULL and renormalise over present signals (correct: only F&O names
+    # have options). Weighted in MID only (LARGE t=1.37 / SMALL t=0.17 DROP).
+    iv_skew = read_sql(
+        "SELECT sid, iv_skew_25d FROM fno_iv_history WHERE sid IS NOT NULL "
+        "AND (sid, trade_date) IN (SELECT sid, MAX(trade_date) FROM fno_iv_history GROUP BY sid)"
+    )
 
     # Inline signals (no DB table — compute on the fly)
     from signals.momentum import compute_momentum
@@ -142,6 +151,7 @@ def _load_signals():
     df = df.merge(earnings_yield, on="sid", how="left")
     df = df.merge(book_to_price, on="sid", how="left")
     df = df.merge(delivery_anomaly, on="sid", how="left")
+    df = df.merge(iv_skew, on="sid", how="left")
     df = df.merge(price_counts, on="sid", how="left")
     df["price_rows"] = df["price_rows"].fillna(0).astype(int)
 
@@ -214,6 +224,8 @@ def score_universe(df, weights: dict = None):
         # Wired 2026-05-29 (Next-3 #3) — non-colinear bench factors per factor-correlation diagnostic:
         "pledge_quality":     "pledge_quality",      # t=5.90 SMALL (KEEP)
         "delivery_anomaly_z": "delivery_anomaly_z",  # t=4.76 SMALL (KEEP)
+        # Wired 2026-05-31 (ADR 0035) — in-house IV skew, MID only:
+        "iv_skew_25d":        "iv_skew_25d",          # t=+3.16 MID (KEEP, 48 wk periods)
     }
 
     # Percentile-rank all signals within tier (higher = better for all)

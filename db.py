@@ -1913,12 +1913,12 @@ BACKTEST_SIGNALS = [
         "v1_verdict_summary": "(new — Plan 0002 §3.2.2 IV half, no v1 counterpart)",
         "status": "READY",
         "status_reason": "Shipped 2026-05-31 (Track 3.1b → §3.2.2 IV half, ADR 0035). "
-                         "Backtest 25 weekly periods (NW3): MID t=+4.61 KEEP (IC "
-                         "+0.096, bootstrap CI [2.28, 9.84] strictly >0 — the standout "
-                         "F&O factor; high put-skew → MID outperformance), LARGE/SMALL "
-                         "DROP. ~97% coverage. CANDIDATE for deliberate promotion "
-                         "(signal-weights.md) — not yet wired; single ~6mo regime, "
-                         "wants walk-forward OOS first.",
+                         "WIRED into SIGNAL_WEIGHTS[MID]=0.18 on 2026-05-31. Backtest "
+                         "on the EXTENDED 48 weekly periods (~11mo, multi-regime): MID "
+                         "t=+3.16 KEEP (IC +0.060, CI [2.13,7.15] strictly >0; held "
+                         "from the 25-period t=4.61), LARGE t=1.37 / SMALL t=0.17 DROP "
+                         "→ MID-only. Orthogonal to size/adtv/existing factors "
+                         "(|ρ|<0.15) — adds genuinely new info. F&O-stock coverage.",
     },
     {
         "signal": "iv_term_structure",
@@ -2722,8 +2722,8 @@ FACTOR_LIBRARY = [
     "max_pain_distance",    # MID t=-1.68 WEAK (mean-reversion to max-pain)
     "pcr_oi",               # best |t|=0.36 LARGE
     "oi_buildup_signal",    # best |t|=0.45 MID
-    # Options/F&O IV factors (§3.2.2 IV half) — 25 weekly periods
-    "iv_skew_25d",          # MID t=+4.61 KEEP — strong candidate for promotion (not yet wired)
+    # Options/F&O IV factors (§3.2.2 IV half) — 25-48 weekly periods
+    # NOTE: iv_skew_25d PROMOTED to SIGNAL_WEIGHTS[MID] 2026-05-31 — no longer bench.
     "iv_realised_spread",   # MID t=-1.95 WEAK (CI excludes 0)
     "iv_term_structure",    # MID t=-1.80 WEAK; SMALL KEEP is a thin-sample artifact
     "iv_percentile_1y",     # best |t|=1.18 LARGE — DROP (regime signal)

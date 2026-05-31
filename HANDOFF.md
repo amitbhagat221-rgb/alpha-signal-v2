@@ -1,25 +1,24 @@
 # HANDOFF
-Updated: 2026-05-31 | Branch: master (3 unpushed) | HEAD (pre-commit): `feat(fno): IV factors derived in-house from bhavcopy (§3.2.2 IV half, 8/8)`
+Updated: 2026-05-31 | Branch: master (4 unpushed) | HEAD (pre-commit): `feat(microstructure): 6 daily-derivable §3.2.3 factors (kyle_lambda LARGE+MID KEEP)`
 
 ## Left off
-Shipped **6 of the 9 §3.2.3 microstructure factors** — the daily-derivable ones, off `stock_prices` OHLCV, no Kite. [signals/microstructure.py](signals/microstructure.py): 3 clean (`intraday_range_compression`=ATR5/ATR20, `closing_strength_1m`, `opening_gap_freq_1m`) + 3 proxies (`vwap_deviation_5d`=close-vs-typical-price since `traded_value` is ~17% NULL incl. all recent; `bidask_spread_proxy`=Corwin-Schultz; `kyle_lambda`=Amihud illiquidity). `prev_close` self-computed as lag(close), turnover=close×volume. ~99% coverage (NULLs are legit: <22d-history IPOs + circuit-frozen `high==low` untraded names). Fully wired (PIT helper `pit_microstructure` + 6 cols + BACKTEST_SIGNALS group "Microstructure" + SIGNAL_COLUMN_MAP + 6 FACTOR_LINEAGE, drift clean); monthly cadence → reconstructed over the **deep 39-month panel** (149 dates, 2022-08→2026-05) and backtested on years of price history.
+**Promoted `iv_skew_25d` into the live MID screener** — the first §3.2.x factor to reach production. Did the deliberate promotion review of the two KEEP candidates:
+- **Extended the IV backtest 25 → 48 weekly periods** (reconstructed earlier Fridays + fwd_return back to ~2025-06, since `fno_iv_history` goes to 2025-05). `iv_skew_25d` MID **holds at t=+3.16 KEEP** (~11mo, multi-regime; was 4.61 on 25 periods), **LARGE t=1.37 / SMALL t=0.17 DROP** → MID-only.
+- **Colinearity**: `iv_skew_25d` is orthogonal to size/adtv/existing factors (|ρ|<0.15) — genuinely new info. **`kyle_lambda`** is ρ=−0.73 with ln(ADTV) — a cost-coupled liquidity tilt, MID IC decaying → **benched as diagnostic, NOT wired.**
+- **Wired** `iv_skew_25d` into `config.SIGNAL_WEIGHTS[MID]=0.18` (conservative vs the t-tier's 1.0×, given single-derivative-class novelty + ~11mo vs the others' 36mo history; existing 6 scaled ×0.82, Σ=1.0) + `scoring/screener.py` (`_load_signals` reads `fno_iv_history` latest-per-stock; `SIGNAL_COLS` mapping). Smoke-tested in-process: 101/149 MID stocks scored, high-skew names boosted (SAIL→rank 3, PLNG→rank 6); non-F&O MID names renormalise over present signals. Removed from `FACTOR_LIBRARY` (now live). signal-weights.md updated. **0 CRITICAL, health green.**
 
-**Backtest (39 monthly periods):**
-- **`kyle_lambda` LARGE t=+4.24 KEEP + MID t=+4.14 KEEP** (CIs [2.33,6.86]/[2.11,6.97] strictly >0), SMALL t=+1.65 WEAK. The **Amihud illiquidity premium** — illiquid → higher forward returns. Strongest, most robust factor in the whole F&O/micro batch (39 periods).
-- Other 5 DROP: `opening_gap_freq` MID t=1.31, `bidask_spread_proxy` MID t=1.30 (weak hints); `closing_strength`/`vwap_deviation`/`range_compression` no signal.
-
-All 6 on the bench (`FACTOR_LIBRARY`); none wired. 0 CRITICAL, health green.
+Also this session (committed): graphify auto-rebuild git hooks **disabled** (`.git/hooks/post-commit.disabled` + `post-checkout.disabled`, reversible).
 
 ## Pick up here
-1. **Promotion review of the 2 KEEP candidates** — `kyle_lambda` (LARGE+MID) + `iv_skew_25d` (MID, from the prior commit). Both earned it. For each: `tools/walk_forward.py` OOS + `tools/factor_correlation.py`. **`kyle_lambda` caveats**: (a) trading-cost-coupled — the illiquidity premium is literally compensation for the spread you'd pay, so net-of-cost it may shrink; (b) likely colinear with size/adtv and may already be partly captured by the pick-eligibility gate (ADR 0021). Then a deliberate `SCREEN.weight_tiers` call (signal-weights.md — never mechanical).
-2. **§3.2.5 event-time / PEAD (6 factors)** — feasible now, no blocked data; post-earnings drift is a robust anomaly → best shot at more KEEPs. `signals/pead.py` off `quarterly_income` + `stock_prices`.
-3. **Phase E badges deploy** (`systemctl restart alpha-cockpit`) + **Kite activation** when creds land → unblocks the 3 held intraday §3.2.3 factors (`volume_clock_concentration`, `tick_imbalance_5d`, `intraday_momentum_persistence`).
+1. **Confirm `iv_skew_25d` flows to `daily_picks`** after the next pipeline run (it's wired but the live screener hasn't re-run since). Spot-check a MID pick's component breakdown.
+2. **§3.2.5 event-time / PEAD (6 factors)** — feasible now, no blocked data; post-earnings drift is a robust anomaly → best shot at the next KEEP. `signals/pead.py` off `quarterly_income` + `stock_prices`.
+3. **Phase E badges deploy** (`systemctl restart alpha-cockpit`) + **Kite activation** when creds land (3 held intraday §3.2.3 factors).
 
 ## Watch out
-- **`kyle_lambda` is a long-only-portfolio trap if wired naively** — buying the illiquidity premium means buying names you can't cheaply trade. Treat the t=4.24 as real *gross* alpha that needs a net-of-cost haircut before sizing.
-- **3 IV/micro factors use raw (unadjusted) prices** crossing day boundaries (opening_gap, kyle, iv_realised_spread realised leg) → rare split-day noise, bounded by clips (same stance as sector_momentum). Not adjusted by design.
-- The 6 micro cols + IV cols aren't in the DuckDB mirror until tonight's `duckdb_refresh`; backtest reads SQLite (fine).
-- HEAD is still the IV commit; this session's microstructure work is uncommitted until the commit below.
+- **`iv_skew_25d` weight is conservative (0.18) on purpose** — it's validated on ~11mo / one derivative class, vs the v1 factors' 36mo. Revisit the weight as weekly periods accumulate; don't bump it mechanically.
+- **It only differentiates the ~101 F&O MID names** (others NULL → renormalise). That's correct (only F&O stocks have options) but means it's inert for non-F&O MID picks.
+- **graphify MCP query server (`graphify.serve`) was killed** as collateral when I `pkill`'d the rebuild — `mcp__graphify__*` query tools are down until that MCP server respawns (harness-managed). Graph data untouched; auto-rebuild hooks intentionally disabled.
+- HEAD is still the microstructure commit; this session's promotion + hook-disable is uncommitted until the commit below.
 
 ## Active plan
-[docs/plans/0002-100-factors-and-model.md](docs/plans/0002-100-factors-and-model.md) — §3.2.2 done (8/8); §3.2.3 6/9 (3 on hold, Kite). State: 38/50 PIT-shipped; 2 promotion candidates banked (kyle_lambda, iv_skew_25d).
+[docs/plans/0002-100-factors-and-model.md](docs/plans/0002-100-factors-and-model.md) — §3.2.2 done (8/8), §3.2.3 6/9 (3 on hold). **First factor-model promotion to production from the Track-3 batch: `iv_skew_25d` MID.** State: 38/50 PIT-shipped.

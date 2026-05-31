@@ -58,11 +58,17 @@ SIGNAL_WEIGHTS = {
         "book_to_price":  0.10,   # t=0.79 tertiary
     },
     "MID": {
-        "accruals":       0.30,   # t=3.20 primary
-        "piotroski":      0.20,   # t=2.23 secondary
-        "consensus":      0.15,   # t=2.20 secondary
-        "book_to_price":  0.20,   # t=2.33 secondary
-        "earnings_yield": 0.10,   # t=1.01 tertiary
+        # iv_skew_25d added 2026-05-31 (ADR 0035): MID t=+3.16 KEEP over 48 weekly
+        # periods, orthogonal to all existing factors (|ρ|<0.15). Given primary
+        # weight 0.18 (conservative for a single-derivative-class factor on ~11mo
+        # vs the others' 36mo v1 history); existing 6 scaled ×0.82 to keep Σ=1.
+        # F&O-only coverage → renormalises over present signals for non-F&O names.
+        "accruals":       0.25,   # t=3.20 primary
+        "iv_skew_25d":    0.18,   # t=3.16 primary (MID, F&O stocks)
+        "piotroski":      0.16,   # t=2.23 secondary
+        "book_to_price":  0.16,   # t=2.33 secondary
+        "consensus":      0.12,   # t=2.20 secondary
+        "earnings_yield": 0.08,   # t=1.01 tertiary
         "promoter":       0.05,   # t=0.83 tertiary
     },
     "SMALL": {
