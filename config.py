@@ -580,6 +580,14 @@ PIPELINE_STEPS = [
      "table": "sector_briefs",     "source": "macro_sector_signals + daily_picks + regulatory_signals",
      "data_freq": "daily",         "frequency": "daily"},
 
+    # Sector momentum — plan 0006 Phase E. Per-sector S/M/L relative strength vs
+    # NIFTY 50 (constituent cap-weighted), classified strong/neutral/weak by
+    # tercile. UPDATEs sector_briefs.horizon_* in place, so it runs AFTER
+    # compute_sector_briefs. Powers the horizon badges on the /sectors digest.
+    {"name": "compute_sector_momentum", "module": "signals.sector_momentum", "function": "compute", "critical": False,
+     "table": "sector_briefs",     "source": "stock_prices + stocks + macro_history (nifty50)",
+     "data_freq": "daily",         "frequency": "daily"},
+
     # Sector force breakdown — plan 0006 Phase B. Sits on top of sector_briefs.
     # Per (sector, date) emits up to 4 rows, one per force {macro, regulation,
     # tech, market}. Market is reserved for v2 (no sector-level FII/DII data).

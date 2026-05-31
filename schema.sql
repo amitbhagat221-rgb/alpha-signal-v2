@@ -456,6 +456,11 @@ CREATE TABLE IF NOT EXISTS sector_briefs (
     fii_net_30d         REAL,
     dii_net_30d         REAL,
     bucket              TEXT NOT NULL CHECK (bucket IN ('BOOMING','LIKELY','HEADWIND','QUIET')),
+    -- Plan 0006 Phase E — per-sector S/M/L momentum horizon {strong/neutral/weak},
+    -- written by signals.sector_momentum (UPDATE after the brief row exists).
+    horizon_short       TEXT,
+    horizon_medium      TEXT,
+    horizon_long        TEXT,
     computed_at         TEXT NOT NULL,
     PRIMARY KEY (sector, snapshot_date)
 );

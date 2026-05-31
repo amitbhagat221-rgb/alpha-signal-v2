@@ -122,6 +122,13 @@ _COLUMN_MIGRATIONS = [
     ("daily_picks", "uhs_breakdown_json", "TEXT"),
     ("daily_picks", "uhs_label",          "TEXT"),
     ("daily_picks", "uhs_worst_dim",      "TEXT"),
+    # 2026-05-31: Plan 0006 Phase E — per-sector S/M/L momentum horizon badges.
+    # Categorical {strong/neutral/weak} written by signals.sector_momentum.
+    ("sector_briefs", "horizon_short",  "TEXT"),
+    ("sector_briefs", "horizon_medium", "TEXT"),
+    ("sector_briefs", "horizon_long",   "TEXT"),
+    # Per-stock sector-momentum factor PIT column (medium-horizon RS z-score).
+    ("daily_snapshots_pit", "sector_momentum", "REAL"),
 ]
 
 
@@ -1757,6 +1764,28 @@ BACKTEST_SIGNALS = [
         "v1_verdict_summary": "(component of v1 smart_money_score)",
         "status": "READY",
         "status_reason": "",
+    },
+    {
+        "signal": "sector_momentum",
+        "label": "Sector Momentum (relative strength vs NIFTY)",
+        "group": "Momentum",
+        "description": "Stock inherits its GICS sector's medium-horizon (≈3m) "
+                       "constituent cap-weighted return minus NIFTY 50, z-scored "
+                       "across sectors. Classic sector-momentum anomaly.",
+        "source_tables": ["stock_prices", "stocks", "macro_history"],
+        "source_columns": ["stock_prices.close", "stocks.{sector,market_cap_cr}",
+                           "macro_history.nifty50"],
+        "filing_lag": "0d",
+        "pit_column_v1": None,
+        "pit_column_v2": "sector_momentum",
+        "v1_verdict_summary": "(new — Plan 0006 Phase E, no v1 counterpart)",
+        "status": "READY",
+        "status_reason": "Shipped 2026-05-31 (Plan 0006 Phase E). Backtest on 29 "
+                         "monthly PIT periods: SMALL t=1.88 WEAK (IC +0.016), "
+                         "MID t=0.33 DROP, LARGE t=-0.60 DROP. Stays on bench — "
+                         "below the 2.0 screener-promotion gate; not wired to "
+                         "SIGNAL_WEIGHTS. Also powers the /sectors S/M/L horizon "
+                         "badges. Re-test as PIT panel deepens.",
     },
     {
         "signal": "bulk_deal_signal",

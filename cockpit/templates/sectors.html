@@ -292,6 +292,18 @@
         line-height: 1.5;
     }
 
+    /* Plan 0006 Phase E — S/M/L momentum horizon badges next to sector name */
+    .sd-horizons { display: inline-flex; gap: 3px; margin-left: 8px; vertical-align: middle; }
+    .sd-hz {
+        font-size: 8.5px; font-weight: 700; font-family: var(--mono, monospace);
+        width: 14px; height: 14px; line-height: 14px; text-align: center;
+        border-radius: 3px; border: 1px solid transparent;
+    }
+    .sd-hz.strong  { background: rgba(124,179,5,0.18);  color: var(--green); border-color: rgba(124,179,5,0.35); }
+    .sd-hz.weak    { background: rgba(255,77,79,0.15);   color: var(--red);   border-color: rgba(255,77,79,0.32); }
+    .sd-hz.neutral { background: var(--bg-card-hover);   color: var(--text-muted); }
+    .sd-hz.na      { background: transparent; color: var(--border); border-color: var(--border); }
+
     /* Plan 0006 Phase D — per-sector LLM dossier inside the bucket row */
     .sd-row-link { display: block; text-decoration: none; color: inherit; }
     .sd-dossier { margin-top: 9px; padding-top: 9px; border-top: 1px dashed var(--border); }
@@ -444,7 +456,11 @@
 <div class="sd-row" style="border-left: 3px solid {{ accent }};">
     <a class="sd-row-link" href="/sectors?sector={{ s.sector | urlencode }}#per-sector">
         <div class="sd-row-head">
-            <span class="sd-sector">{{ s.sector }}</span>
+            <span class="sd-sector">{{ s.sector }}{% if s.horizons %}{% set hz = s.horizons %}<span class="sd-horizons" title="Momentum vs NIFTY — Short ≈1m · Medium ≈3m · Long ≈12m">
+                <span class="sd-hz {{ hz.short or 'na' }}">S</span>
+                <span class="sd-hz {{ hz.medium or 'na' }}">M</span>
+                <span class="sd-hz {{ hz.long or 'na' }}">L</span>
+            </span>{% endif %}</span>
             <span class="sd-picks">
                 <span class="sd-picks-n">{{ s.n_picks_top30 }}</span>
                 <span class="sd-picks-label">{{ 'pick' if s.n_picks_top30 == 1 else 'picks' }}</span>

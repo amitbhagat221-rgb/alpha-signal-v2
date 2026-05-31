@@ -77,6 +77,7 @@ CREATE TABLE IF NOT EXISTS daily_snapshots_pit (
     position_52w     REAL,
     avg_delivery_pct_30d REAL,
     delivery_anomaly_z REAL,
+    sector_momentum REAL,
     fwd_return_20d   REAL,
     m_score          REAL,
     z_score          REAL,
@@ -126,6 +127,7 @@ PIT_COLUMNS = [
     "promoter_qoq", "promoter_trend_4q", "pledge_quality",
     "mom_6m", "mom_12m", "mom_composite", "macd_bullish",
     "position_52w", "avg_delivery_pct_30d", "delivery_anomaly_z",
+    "sector_momentum",
     "fwd_return_20d",
     "m_score", "z_score",
     # Tier 2 — fundamentals
@@ -192,6 +194,7 @@ VALIDATION_RANGES = {
     "position_52w":          (0, 1, True),
     "avg_delivery_pct_30d":  (0, 100, True),
     "delivery_anomaly_z":    (-5, 5, True),  # clip extreme z
+    "sector_momentum":       (-3, 3, True),  # cross-sector RS z-score
     "fwd_return_20d":        (-1, 5, True),  # cap extreme returns
     "m_score":               (-20, 20, True),
     "z_score":               (-50, 100, True),
@@ -1151,6 +1154,30 @@ def pit_regulatory_sector(reg_events_pit, reg_signals, sectors_list, eval_date,
         out.append({"sector": sector, "regulatory_score": round(normalized, 3),
                     "n_reg_events": int(n)})
     return out
+
+
+def pit_sector_momentum(stocks, px_pit, macro_hist, eval_date):
+    """Per-stock sector-momentum factor, PIT — Plan 0006 Phase E.
+
+    Reuses signals.sector_momentum's core verbatim (the "ship factor + PIT as one
+    unit" rule): the same constituent cap-weighted relative-strength-vs-NIFTY
+    computation, fed PIT-frozen frames. px_pit is already filtered through
+    eval_date; nifty50 history and the (current) sector/market_cap map are passed
+    in. Returns DataFrame[sid, sector_momentum].
+    """
+    from signals.sector_momentum import (
+        compute_sector_momentum, sector_momentum_for_stocks,
+    )
+    eval_str = eval_date.isoformat() if hasattr(eval_date, "isoformat") else str(eval_date)
+    if macro_hist is None or macro_hist.empty:
+        return pd.DataFrame(columns=["sid", "sector_momentum"])
+    nifty = (macro_hist[(macro_hist["indicator_id"] == "nifty50")
+                        & (macro_hist["date"] <= eval_str)][["date", "value"]]
+             .sort_values("date"))
+    prices = px_pit[["sid", "date", "close"]].sort_values(["sid", "date"])
+    stk = stocks[["sid", "sector", "market_cap_cr"]]
+    sm = compute_sector_momentum(prices=prices, nifty=nifty, stocks=stk)
+    return sector_momentum_for_stocks(sector_mom=sm, stocks=stocks[["sid", "sector"]])
 
 
 def pit_macro_sector(macro_history_pit, macro_sector_map, sectors_list, eval_date):
@@ -2136,6 +2163,12 @@ def reconstruct_one_date(eval_date, raw, signals_to_run):
 
     if "delivery" in signals_to_run:
         base = base.merge(pit_avg_delivery(px_pit), on="sid", how="left")
+
+    if "sector_momentum" in signals_to_run:
+        base = base.merge(
+            pit_sector_momentum(raw["stocks"], px_pit, raw["macro_hist"], eval_date),
+            on="sid", how="left",
+        )
         base = base.merge(pit_delivery_anomaly_z(px_pit), on="sid", how="left")
 
     if "pledge" in signals_to_run:
@@ -2363,7 +2396,7 @@ def pit_financial_signal(banking_metrics_full, eval_date):
 def load_raw():
     """Load all raw history once. Avoids re-querying per eval_date."""
     print("Loading raw data...")
-    stocks = read_sql("SELECT sid, cap_tier, sector FROM stocks")
+    stocks = read_sql("SELECT sid, cap_tier, sector, market_cap_cr FROM stocks")
     qi = read_sql(
         "SELECT sid, period, end_date, reporting, revenue, operating_profit, "
         "net_income, eps, interest, pbt, ebitda "
@@ -2497,7 +2530,7 @@ def main():
     parser.add_argument("--signal", action="append", default=None,
                         choices=["piotroski", "accruals", "promoter", "forensic",
                                  "earnings_yield", "book_to_price", "momentum",
-                                 "position_52w", "delivery", "pledge",
+                                 "position_52w", "delivery", "sector_momentum", "pledge",
                                  "promoter_trend", "macd", "fwd_return",
                                  "mom_composite",
                                  "quality_fundamentals", "growth_fundamentals",
@@ -2570,6 +2603,8 @@ def main():
         "nwc_to_revenue", "sloan_accruals_full", "sga_to_revenue_change",
         "fcf_margin", "capex_to_dep", "goodwill_to_assets",
         "debt_structure", "asset_tangibility",
+        # Plan 0006 Phase E — sector momentum (per-stock = sector's medium RS z)
+        "sector_momentum",
         # Plan 0005 Phase E composite (smart_money — accruals/promoter/forensic
         # composites flow through their existing _compute_scores)
         "smart_money",

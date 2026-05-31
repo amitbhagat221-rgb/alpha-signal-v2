@@ -1529,7 +1529,8 @@ def get_sector_digest():
     briefs = read_sql("""
         SELECT sector, n_stocks, mcap_total_cr, macro_score, macro_signal,
                macro_drivers, breadth_pct, avg_score, n_picks_top30, top_picks,
-               n_regulatory_30d, bucket, snapshot_date
+               n_regulatory_30d, bucket, snapshot_date,
+               horizon_short, horizon_medium, horizon_long
         FROM sector_briefs
         WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM sector_briefs)
     """)
@@ -1612,6 +1613,11 @@ def get_sector_digest():
             "n_regulatory_30d": int(r["n_regulatory_30d"] or 0),
             "n_stocks": int(r["n_stocks"] or 0),
             "dossier": dossier_map.get(r["sector"], {}),
+            "horizons": {
+                "short": r.get("horizon_short"),
+                "medium": r.get("horizon_medium"),
+                "long": r.get("horizon_long"),
+            },
         }
 
     buckets = {"BOOMING": [], "LIKELY": [], "HEADWIND": [], "QUIET": []}

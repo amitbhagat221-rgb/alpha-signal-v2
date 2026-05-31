@@ -72,6 +72,8 @@ SIGNAL_COLUMN_MAP = {
     "delivery_anomaly_z":  (None, "delivery_anomaly_z"),
     "bulk_deal_signal":    (None, "bulk_deal_signal"),
     "short_selling_signal": (None, "short_selling_signal"),
+    # Sector momentum — Plan 0006 Phase E (per-stock = sector's medium RS z)
+    "sector_momentum":     (None, "sector_momentum"),
     # Behavior tier — PIT helpers shipped 2026-05-24
     "insider_signal":      (None, "insider_score"),
     "sentiment_7d":        (None, "sentiment_7d"),
@@ -255,6 +257,7 @@ _NW_LAG_WEEKLY = {
     "insider_signal":       13,   # 90d insider window / 7d ≈ 13
     "avg_delivery_pct_30d":  4,   # 30d / 7d ≈ 4
     "delivery_anomaly_z":   13,   # 90d / 7d ≈ 13
+    "sector_momentum":       9,   # 63d medium window / 7d ≈ 9
     "bulk_deal_signal":      4,   # 30d aggregation window
     "short_selling_signal":  4,   # 30d aggregation window
     "sentiment_7d":          3,   # 7d window, only fwd-return overlap matters

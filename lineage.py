@@ -664,6 +664,20 @@ FACTOR_LINEAGE = {
         "sector_exclusions": [],
     },
 
+    "sector_momentum": {
+        "status": "candidate", "module": "signals/sector_momentum.py",
+        "reads": [
+            {"table": "stock_prices", "cols": ["close"],
+             "key": ["sid", "date"], "select": "window",
+             "filter": "last 252d", "contribution": "sector_cap_weighted_return"},
+            {"table": "macro_history", "cols": ["value", "date"],
+             "key": ["indicator_id", "date"], "select": "window",
+             "filter": "nifty50 last 252d", "contribution": "benchmark_return"},
+            _stocks(("sid", "sector", "market_cap_cr")),
+        ],
+        "sector_exclusions": [],
+    },
+
     # ════════════════════════════ Fundamentals_screener factors (16) ════════════════════════════
     "roic": {
         "status": "candidate", "module": "signals/roic.py",

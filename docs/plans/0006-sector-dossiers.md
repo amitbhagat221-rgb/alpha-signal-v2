@@ -1,6 +1,6 @@
 # Plan 0006 — Sector dossiers (sector-as-stock daily read)
 
-**Status**: active · proposed 2026-05-29 · **Phases A + B + C shipped 2026-05-29** · D + E remain
+**Status**: implemented · proposed 2026-05-29 · **A + B + C shipped 2026-05-29 · D + E shipped 2026-05-31** · archive ~2026-06-30
 **Goal**: turn `/sectors` from a useless 47-card industry heatmap into a daily narrative read shaped like a stock dossier — horizon-aware, with tailwinds/headwinds decomposed by force (regulation, tech, market, macro), and a curated bucketed digest at the front door.
 **Total estimated effort**: ~4-6 sessions across 5 phases. Phases A-C are the MVP and ship the new UX; D and E are quality upgrades.
 
