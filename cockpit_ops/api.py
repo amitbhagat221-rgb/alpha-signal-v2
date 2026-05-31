@@ -48,7 +48,7 @@ from db import read_sql, get_db
 
 # Shared decorators — implementations live in cockpit/api.py (single-source).
 # One-way import so cockpit doesn't need to know about cockpit_ops.
-from cockpit.api import _ttl_cache, _persisted_cache
+from cockpit._shared import _ttl_cache, _persisted_cache, safe_json_records
 
 
 # ───────────────────────────── Ops functions ─────────────────────────────
@@ -110,28 +110,9 @@ def run_sql_query(query, max_rows=500):
     if df is None or df.empty:
         return {"columns": list(df.columns) if df is not None else [],
                 "rows": [], "error": None, "row_count": 0}
-    # Convert to JSON-safe values. Order matters: check NaN/None first because
-    # numpy NaN is a float and would bypass the float branch otherwise.
-    import math
-    rows = []
-    for record in df.to_dict("records"):
-        clean = {}
-        for k, v in record.items():
-            if v is None:
-                clean[k] = None
-            elif isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
-                clean[k] = None
-            elif isinstance(v, (int, float, str, bool)):
-                clean[k] = v
-            else:
-                try:
-                    if pd.isna(v):
-                        clean[k] = None
-                        continue
-                except (TypeError, ValueError):
-                    pass
-                clean[k] = str(v)
-        rows.append(clean)
+    # JSON-safe coercion via the shared helper (cockpit/_shared.safe_json_records) —
+    # this function was the canonical superset the helper was lifted from.
+    rows = safe_json_records(df)
     return {
         "columns": list(df.columns),
         "rows": rows,
@@ -145,15 +126,8 @@ def get_data_freshness():
     """Data health from db.data_health(). NaN floats are coerced to None so the
     payload is JSON-safe (Jinja's tojson preserves NaN literals which break
     JSON.parse in the browser)."""
-    import math
     from db import data_health
-    df = data_health()
-    records = df.to_dict("records")
-    for r in records:
-        for k, v in r.items():
-            if isinstance(v, float) and math.isnan(v):
-                r[k] = None
-    return records
+    return safe_json_records(data_health())
 
 
 @_persisted_cache(300, name="get_db_summary")
@@ -1054,12 +1028,9 @@ def _parse_plan_frontmatter(md_path: Path) -> dict:
     return fm
 
 
-@_persisted_cache(300, name="get_command_centre")
-def get_command_centre():
-    """Assemble the command-centre payload — plans, factor library, data layer,
-    pending actions. Server-rendered; no live polling."""
-    project_root = Path(__file__).resolve().parent.parent
-
+def _cc_plans_and_adrs(project_root):
+    """Filesystem half of the command centre — scan docs/plans + docs/decisions.
+    Extracted from get_command_centre 2026-05-30 (mechanical split, no behaviour change)."""
     # ── Plans ────────────────────────────────────────────────
     plans = []
     for p in sorted((project_root / "docs" / "plans").glob("000*.md")):
@@ -1090,7 +1061,12 @@ def get_command_centre():
             "status": status_line.replace("**Status:**", "").strip().rstrip("*").strip() or "—",
             "date": date_line.replace("**Date:**", "").strip().rstrip("*").strip() or "—",
         })
+    return plans, adrs
 
+
+def _cc_factor_library():
+    """DB-introspection half — factor roster + counts from BACKTEST_SIGNALS ×
+    pit_ic_by_tier_v2. Extracted from get_command_centre 2026-05-30 (mechanical split)."""
     # ── Factor library ───────────────────────────────────────
     # Source of truth: BACKTEST_SIGNALS in db.py (42 v1-derived signals) plus
     # Track 3 additions (ROIC, FCF Yield, …). Each factor's t-stat is looked
@@ -1237,6 +1213,20 @@ def get_command_centre():
     n_built = len([f for f in factors if f["stocks"] > 0 or f["t_stat"] is not None])
     n_in_prod = len([f for f in factors if f["in_production"]])
     n_in_library = n_built - n_in_prod
+    return factors, n_built, n_in_prod, n_in_library
+
+
+@_persisted_cache(300, name="get_command_centre")
+def get_command_centre():
+    """Assemble the command-centre payload — plans, factor library, data layer,
+    pending actions. Server-rendered; no live polling."""
+    project_root = Path(__file__).resolve().parent.parent
+
+    # ── Plans + ADRs (filesystem scan of docs/) ──
+    plans, adrs = _cc_plans_and_adrs(project_root)
+
+    # ── Factor library (BACKTEST_SIGNALS × pit_ic_by_tier_v2) ──
+    factors, n_built, n_in_prod, n_in_library = _cc_factor_library()
 
     # ── Data layer (lightweight, for the architecture flow header stats) ──
     data_layer = {}
@@ -2227,4 +2217,155 @@ def get_health_overview(force=False):
             "fails": (integrity_rows[integrity_rows["integrity_status"] == "FAIL"].to_dict("records") if not integrity_rows.empty else []),
             "warns": (integrity_rows[integrity_rows["integrity_status"] == "WARN"].to_dict("records") if not integrity_rows.empty else []),
         },
+        "trust": _trust_overview(),
+    }
+
+
+def _trust_overview() -> dict:
+    """Plan 0007 Trust Pipeline + UHS summary block for /system.
+
+    Reads health_score (entity_kind='system' + 'pick'), trust_verdicts (last 7d
+    per-gate pass-rate), external_anchors (anchor coverage), and quarantine
+    tables (row counts). Returns the data the Overview tab's Trust card needs."""
+    from db import read_sql as _rs
+
+    # ── system UHS pulse ──
+    sys_df = _rs(
+        """SELECT score_pct, label,
+                  dim_provenance, dim_freshness, dim_plausibility,
+                  dim_consistency, dim_coverage, snapshot_date
+           FROM health_score
+           WHERE entity_kind='system'
+           ORDER BY snapshot_date DESC LIMIT 1"""
+    )
+    system_row = sys_df.iloc[0].to_dict() if not sys_df.empty else None
+
+    # ── pick UHS distribution today ──
+    picks_df = _rs(
+        """SELECT uhs_label, COUNT(*) AS n,
+                  ROUND(AVG(uhs_score),1) AS avg_score
+           FROM daily_picks
+           WHERE pick_date=(SELECT MAX(pick_date) FROM daily_picks)
+             AND uhs_score IS NOT NULL
+           GROUP BY uhs_label"""
+    )
+    pick_dist = {r["uhs_label"]: {"n": int(r["n"]), "avg": float(r["avg_score"])}
+                  for _, r in picks_df.iterrows()}
+
+    # ── per-gate verdict stats (last 7d) ──
+    gates = [
+        ("gate_1_identity",     "Identity (Gate 1)"),
+        ("gate_2_plausibility", "Plausibility (Gate 2)"),
+        ("gate_3_temporal",     "Temporal (Gate 3)"),
+        ("gate_4_cross_source", "Cross-source (Gate 4)"),
+        ("gate_5_unit",         "Unit contract (Gate 5)"),
+        ("gate_6_lineage",      "Lineage (Gate 6)"),
+        ("gate_7_anchor",       "Anchor (Gate 7)"),
+    ]
+    gate_stats = []
+    for col, label in gates:
+        try:
+            df = _rs(
+                f"""SELECT
+                    SUM(CASE WHEN {col}=1 THEN 1 ELSE 0 END) AS n_pass,
+                    SUM(CASE WHEN {col}=0 THEN 1 ELSE 0 END) AS n_fail,
+                    SUM(CASE WHEN {col}=2 THEN 1 ELSE 0 END) AS n_pending,
+                    COUNT({col}) AS n_total
+                  FROM trust_verdicts
+                  WHERE snapshot_date >= date('now','-7 days')
+                    AND {col} IS NOT NULL"""
+            )
+            if df.empty or int(df.iloc[0]["n_total"] or 0) == 0:
+                gate_stats.append({"col": col, "label": label, "n_pass": 0,
+                                    "n_fail": 0, "n_pending": 0, "n_total": 0,
+                                    "pass_pct": None})
+                continue
+            r = df.iloc[0]
+            n_total = int(r["n_total"])
+            n_pass = int(r["n_pass"] or 0)
+            n_fail = int(r["n_fail"] or 0)
+            n_pending = int(r["n_pending"] or 0)
+            pass_pct = round(100 * n_pass / n_total, 1) if n_total else None
+            gate_stats.append({"col": col, "label": label,
+                                "n_pass": n_pass, "n_fail": n_fail,
+                                "n_pending": n_pending, "n_total": n_total,
+                                "pass_pct": pass_pct})
+        except Exception:
+            gate_stats.append({"col": col, "label": label, "n_pass": 0,
+                                "n_fail": 0, "n_pending": 0, "n_total": 0,
+                                "pass_pct": None})
+
+    # ── quarantine row counts ──
+    quarantine_tables = [
+        "broker_recommendations_quarantine", "forecast_history_quarantine",
+        "analyst_consensus_quarantine", "consensus_signals_quarantine",
+        "banking_metrics_quarantine", "analyst_consensus_snapshots_quarantine",
+        "quarterly_income_quarantine", "annual_balance_sheet_quarantine",
+        "annual_cash_flow_quarantine", "mf_holdings_quarantine",
+        "mf_sector_allocation_quarantine",
+    ]
+    quarantine_counts = []
+    for tbl in quarantine_tables:
+        try:
+            df = _rs(f"SELECT COUNT(*) AS n FROM {tbl}")
+            n = int(df.iloc[0]["n"]) if not df.empty else 0
+            if n > 0:
+                quarantine_counts.append({"table": tbl.replace("_quarantine", ""),
+                                            "n": n})
+        except Exception:
+            continue
+    quarantine_counts.sort(key=lambda r: -r["n"])
+
+    # ── external_anchors ──
+    anchor_df = _rs(
+        """SELECT anchor_source, COUNT(*) AS n, MAX(anchor_date) AS last_date
+           FROM external_anchors
+           WHERE anchor_date >= date('now','-30 days')
+           GROUP BY anchor_source
+           ORDER BY n DESC"""
+    )
+    anchor_sources = [
+        {"source": r["anchor_source"], "n": int(r["n"]), "last": r["last_date"]}
+        for _, r in anchor_df.iterrows()
+    ]
+
+    # ── factor table — worst factors right now ──
+    factor_df = _rs(
+        """SELECT entity_id, score_pct, label, uhs_worst_dim_alias AS worst_dim
+           FROM (
+             SELECT entity_id, score_pct, label,
+                    -- compute worst dim inline
+                    CASE
+                      WHEN dim_provenance IS NOT NULL AND dim_provenance <= COALESCE(dim_freshness,99)
+                       AND dim_provenance <= COALESCE(dim_plausibility,99)
+                       AND dim_provenance <= COALESCE(dim_consistency,99)
+                       AND dim_provenance <= COALESCE(dim_coverage,99) THEN 'provenance'
+                      WHEN dim_freshness IS NOT NULL AND dim_freshness <= COALESCE(dim_plausibility,99)
+                       AND dim_freshness <= COALESCE(dim_consistency,99)
+                       AND dim_freshness <= COALESCE(dim_coverage,99) THEN 'freshness'
+                      WHEN dim_plausibility IS NOT NULL AND dim_plausibility <= COALESCE(dim_consistency,99)
+                       AND dim_plausibility <= COALESCE(dim_coverage,99) THEN 'plausibility'
+                      WHEN dim_consistency IS NOT NULL AND dim_consistency <= COALESCE(dim_coverage,99) THEN 'consistency'
+                      WHEN dim_coverage IS NOT NULL THEN 'coverage'
+                      ELSE NULL
+                    END AS uhs_worst_dim_alias
+             FROM health_score
+             WHERE entity_kind='factor'
+               AND snapshot_date=(SELECT MAX(snapshot_date) FROM health_score WHERE entity_kind='factor')
+           )
+           ORDER BY score_pct ASC LIMIT 12"""
+    )
+    factor_breakdown = [
+        {"factor": r["entity_id"], "score": int(r["score_pct"]) if r["score_pct"] else None,
+         "label": r["label"], "worst_dim": r["worst_dim"]}
+        for _, r in factor_df.iterrows()
+    ]
+
+    return {
+        "system": system_row,
+        "pick_distribution": pick_dist,
+        "gate_stats": gate_stats,
+        "quarantine_counts": quarantine_counts,
+        "anchor_sources": anchor_sources,
+        "factor_breakdown": factor_breakdown,
     }

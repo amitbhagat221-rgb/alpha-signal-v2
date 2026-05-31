@@ -1006,18 +1006,30 @@ def _mc_slug_name_mismatch_check():
         return parts[-2] if len(parts) >= 2 else ""
 
     bad_sample = None
+    bad_list = []
     n_bad = 0
     for sid, name, ticker, slug in rows.itertuples(index=False):
         sc_n = _norm(_slug_co(slug)); name_n = _norm(name); ticker_n = _norm(ticker)
         ratio = _SM(None, sc_n, name_n).ratio()
-        ticker_in = (ticker_n in sc_n or sc_n in ticker_n) if ticker_n else False
+        # ticker_in dropped entirely 2026-05-31 after a 2nd sweep caught 6
+        # more wrong-entity slugs that startswith(ticker) still passed:
+        #   STYL → "stylamindustries" (Stylam, not Seshaasai)
+        #   MUT  → "muthootfinance"   (Muthoot Finance, not Muthoot Microfin)
+        #   APLL → "apollohospitals"  (Apollo Hospitals, not Apollo Micro)
+        # The name-based check (substring or SequenceMatcher ratio ≥ 0.55) is
+        # enough — every legitimate slug has the stock's name embedded in the
+        # slug-company segment (RELIANCE→relianceindustries is name_in=True).
+        # Ticker shortcuts can ONLY introduce false negatives, never true
+        # positives that the name check would miss.
         name_in = sc_n in name_n or name_n in sc_n
-        if not (name_in or ratio >= 0.55 or ticker_in):
+        if not (name_in or ratio >= 0.55):
             n_bad += 1
+            bad_list.append((sid, name, _slug_co(slug)))
             if bad_sample is None:
                 bad_sample = f"{sid}: name='{name[:30]}' → slug='{_slug_co(slug)}'"
 
-    return {"n_bad": n_bad, "n_total": len(rows), "sample": bad_sample}
+    return {"n_bad": n_bad, "n_total": len(rows), "sample": bad_sample,
+            "bad_list": bad_list}
 
 
 # ─────────────────────── Driver ───────────────────────

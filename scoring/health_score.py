@@ -495,7 +495,9 @@ def rollup_pick_uhs(sid: str, pick_date: str) -> dict:
     placeholders = ",".join("?" * len(factor_ids))
     fdf = read_sql(
         f"""
-        SELECT entity_id, dim_provenance, dim_freshness, dim_coverage, score_pct
+        SELECT entity_id,
+               dim_provenance, dim_freshness, dim_plausibility,
+               dim_consistency, dim_coverage, score_pct
         FROM health_score
         WHERE entity_kind='factor'
           AND entity_id IN ({placeholders})
@@ -536,12 +538,12 @@ def rollup_pick_uhs(sid: str, pick_date: str) -> dict:
         snapshot_date=pick_date,
         dim_provenance=_wmean("dim_provenance"),
         dim_freshness=_wmean("dim_freshness"),
+        dim_plausibility=_wmean("dim_plausibility"),
+        dim_consistency=_wmean("dim_consistency"),
         dim_coverage=_wmean("dim_coverage"),
         reasons={
             "weight_mean": f"across {n_contributing} factors of {len(weights)} weighted",
             "tier": tier,
-            "plausibility": "phase_3_pending",
-            "consistency": "phase_4_pending",
         },
     )
 

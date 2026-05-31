@@ -85,6 +85,144 @@
     {% endfor %}
 </div>
 
+{% if overview.trust %}
+{# ────────── TRUST PIPELINE — Plan 0007 ────────── #}
+{% set tr = overview.trust %}
+{% set sys_score = (tr.system.score_pct|int) if tr.system and tr.system.score_pct is not none else None %}
+{% set sys_color = ('var(--green)' if sys_score and sys_score >= 80 else ('var(--amber)' if sys_score and sys_score >= 60 else ('var(--red)' if sys_score is not none else 'var(--text-muted)'))) %}
+{% set sys_emoji = ('🟢' if sys_score and sys_score >= 80 else ('🟡' if sys_score and sys_score >= 60 else ('🔴' if sys_score is not none else '⚪'))) %}
+
+<div class="card" style="margin-bottom: 18px; border-left: 4px solid {{ sys_color }};">
+    <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; margin-bottom: 12px;">
+        <div>
+            <div class="section-title" style="margin-bottom: 4px;">Trust Pipeline · Plan 0007</div>
+            <div class="section-desc" style="margin-bottom: 0;">
+                Seven gates running against every datum before it reaches a pick. Each datum carries a verdict;
+                each pick rolls those verdicts into a 0-100 UHS score across 5 dimensions
+                (provenance · freshness · plausibility · consistency · coverage).
+                System UHS is the geometric mean across tier-1 critical tables — a single broken table drags it down.
+            </div>
+        </div>
+        <div style="display: flex; gap: 14px; align-items: center;">
+            {% if sys_score is not none %}
+            <div style="text-align: center; padding: 10px 18px; border: 1px solid {{ sys_color }}; border-radius: 10px; min-width: 110px;">
+                <div style="font-size: 28px; font-weight: 800; color: {{ sys_color }}; line-height: 1;">{{ sys_emoji }} {{ sys_score }}</div>
+                <div style="font-size: 9.5px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-top: 4px;">System UHS · {{ tr.system.label }}</div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    {# Pick distribution today #}
+    {% if tr.pick_distribution %}
+    <div style="background: var(--bg-primary); border-radius: 8px; padding: 12px 14px; margin-bottom: 12px;">
+        <div style="font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.7px; margin-bottom: 8px;">Today's picks — UHS label distribution</div>
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px;">
+            {% for label, color, emoji in [
+                ('TRUSTED', 'var(--green)', '🟢'),
+                ('PRELIMINARY', 'var(--accent)', '🟦'),
+                ('REVIEW', 'var(--amber)', '🟡'),
+                ('AVOID', 'var(--red)', '🔴'),
+            ] %}
+            {% set d = tr.pick_distribution.get(label) %}
+            <div style="display: flex; align-items: center; gap: 10px; padding: 6px 10px; background: var(--bg-card); border-radius: 6px; border-left: 3px solid {{ color }};">
+                <div style="font-size: 18px;">{{ emoji }}</div>
+                <div>
+                    <div class="mono" style="font-size: 16px; font-weight: 800; color: {{ color }}; line-height: 1;">{{ d.n if d else 0 }}</div>
+                    <div style="font-size: 9.5px; color: var(--text-muted); margin-top: 2px;">
+                        {{ label }}{% if d %} · avg {{ d.avg }}{% endif %}
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        <div style="font-size: 10.5px; color: var(--text-muted); margin-top: 8px;">
+            <b>AVOID</b> picks (UHS &lt; 60) and <b>REVIEW</b> picks are hidden from morning_brief + action_queue. PRELIMINARY = score ≥ 80 but one or more dims still NULL (gate verdict pool still filling).
+        </div>
+    </div>
+    {% endif %}
+
+    {# Gate verdict counts — last 7d #}
+    <div style="background: var(--bg-primary); border-radius: 8px; padding: 12px 14px; margin-bottom: 12px;">
+        <div style="font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.7px; margin-bottom: 8px;">Gate verdicts · last 7 days</div>
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px;">
+            {% for g in tr.gate_stats %}
+            {% set g_color = ('var(--green)' if g.pass_pct is not none and g.pass_pct >= 95 else ('var(--amber)' if g.pass_pct is not none and g.pass_pct >= 80 else ('var(--red)' if g.pass_pct is not none else 'var(--text-muted)'))) %}
+            <div style="padding: 8px 12px; background: var(--bg-card); border-radius: 6px; border-left: 3px solid {{ g_color }};">
+                <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 4px;">
+                    <span style="font-size: 11px; font-weight: 700; color: var(--text-primary);">{{ g.label }}</span>
+                    <span class="mono" style="font-size: 12px; font-weight: 700; color: {{ g_color }};">
+                        {% if g.pass_pct is not none %}{{ g.pass_pct }}%{% else %}—{% endif %}
+                    </span>
+                </div>
+                <div style="font-size: 10px; color: var(--text-muted);">
+                    <span style="color: var(--green); font-weight: 600;">{{ g.n_pass }}</span> pass ·
+                    <span style="color: var(--red); font-weight: 600;">{{ g.n_fail }}</span> fail{% if g.n_pending %} · <span style="color: var(--amber);">{{ g.n_pending }}</span> review{% endif %}
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        <div style="font-size: 10.5px; color: var(--text-muted); margin-top: 8px;">
+            Gates 2/3/4/5/7 ran via <code class="mono">tools.trust_backfill</code> against today's existing rows. Gate 1 (Identity) and producer-side gates write forward-only on next fetch.
+        </div>
+    </div>
+
+    {# Quarantine + Anchors #}
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+        <div style="background: var(--bg-primary); border-radius: 8px; padding: 12px 14px;">
+            <div style="font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.7px; margin-bottom: 8px;">Quarantined rows</div>
+            {% if tr.quarantine_counts %}
+                {% for q in tr.quarantine_counts %}
+                <div style="display: flex; justify-content: space-between; padding: 4px 0; font-size: 11.5px;">
+                    <span class="mono" style="color: var(--text-secondary);">{{ q.table }}</span>
+                    <span class="mono" style="color: var(--red); font-weight: 700;">{{ q.n }}</span>
+                </div>
+                {% endfor %}
+            {% else %}
+                <div style="font-size: 11px; color: var(--text-muted);">
+                    No rows in quarantine. Producer-side gates haven't fired since Plan 0007 Phase 2-4 shipped; forward fetches will route fails into <code class="mono">*_quarantine</code>.
+                </div>
+            {% endif %}
+        </div>
+        <div style="background: var(--bg-primary); border-radius: 8px; padding: 12px 14px;">
+            <div style="font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.7px; margin-bottom: 8px;">External anchors · last 30 days</div>
+            {% if tr.anchor_sources %}
+                {% for a in tr.anchor_sources %}
+                <div style="display: flex; justify-content: space-between; padding: 4px 0; font-size: 11.5px;">
+                    <span class="mono" style="color: var(--text-secondary);">{{ a.source }}</span>
+                    <span class="mono" style="color: var(--green); font-weight: 700;">{{ a.n }} <span style="color: var(--text-muted); font-weight: 400;">· {{ a.last }}</span></span>
+                </div>
+                {% endfor %}
+            {% else %}
+                <div style="font-size: 11px; color: var(--text-muted);">No anchor rows yet. Run <code class="mono">python -m tools.anchor_audit</code>.</div>
+            {% endif %}
+            <div style="font-size: 10px; color: var(--text-muted); margin-top: 8px;">
+                Anchor B (top-50 BSE close, weekly) — first due 2026-06-06.
+            </div>
+        </div>
+    </div>
+
+    {# Factor health table #}
+    {% if tr.factor_breakdown %}
+    <div style="background: var(--bg-primary); border-radius: 8px; padding: 12px 14px; margin-top: 12px;">
+        <div style="font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.7px; margin-bottom: 8px;">Factor UHS today · sorted weakest first</div>
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 6px;">
+            {% for f in tr.factor_breakdown %}
+            {% set f_color = ('var(--green)' if f.score and f.score >= 80 else ('var(--amber)' if f.score and f.score >= 60 else 'var(--red)')) %}
+            <div style="display: flex; justify-content: space-between; padding: 6px 10px; background: var(--bg-card); border-radius: 6px; border-left: 3px solid {{ f_color }};">
+                <div>
+                    <div class="mono" style="font-size: 12px; font-weight: 700; color: var(--text-primary);">{{ f.factor }}</div>
+                    <div style="font-size: 9.5px; color: var(--text-muted);">worst: {{ f.worst_dim or '—' }}</div>
+                </div>
+                <div class="mono" style="font-size: 18px; font-weight: 800; color: {{ f_color }};">{{ f.score or '—' }}</div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+</div>
+{% endif %}
+
 {% if overview.eligibility %}
 <!-- Universe coverage per signal (plan 0005 Phase A) -->
 <div class="card" style="margin-bottom: 18px;">

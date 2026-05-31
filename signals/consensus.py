@@ -107,13 +107,19 @@ def _compute_scores(stocks, consensus, prices):
         if sid in pt_upside_map:
             row["pt_upside"] = pt_upside_map[sid]
 
-        # EPS and revenue growth from consensus
+        # EPS and revenue growth from consensus. Defense-in-depth: drop
+        # values outside the plausibility-gate hard range. The producer
+        # (sources/tickertape_analyst.py) was patched 2026-05-31 to NULL these
+        # at write time, but legacy rows in analyst_consensus still carry the
+        # bad values (DWNH 306,231%, JSTL 696%, ...). NULL beats poison.
         if sid in consensus_map.index:
             c = consensus_map.loc[sid]
-            if pd.notna(c.get("eps_growth_pct")):
-                row["eps_growth"] = c["eps_growth_pct"]
-            if pd.notna(c.get("revenue_growth_pct")):
-                row["revenue_growth"] = c["revenue_growth_pct"]
+            eps_g = c.get("eps_growth_pct")
+            if pd.notna(eps_g) and -200 <= float(eps_g) <= 500:
+                row["eps_growth"] = eps_g
+            rev_g = c.get("revenue_growth_pct")
+            if pd.notna(rev_g) and -90 <= float(rev_g) <= 500:
+                row["revenue_growth"] = rev_g
 
             row["total_analysts"] = c.get("total_analysts")
 

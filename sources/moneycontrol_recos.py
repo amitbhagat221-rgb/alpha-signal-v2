@@ -137,12 +137,28 @@ def _autosuggest(ticker):
             return None
         want = (ticker or "").strip().upper()
         for rec in results:
-            sym = (rec.get("symbol") or rec.get("nse_symbol") or "").strip().upper()
             slug = rec.get("link_src") or rec.get("seo_name") or rec.get("link") or ""
-            if not slug or not sym:
+            if not slug:
                 continue
             slug_m = re.search(r"(/india/stockpricequote/[a-z0-9-]+/[a-z0-9-]+/[A-Z0-9]+)", slug)
             if not slug_m:
+                continue
+            # Symbol extraction. Moneycontrol's autosuggest does NOT carry a
+            # top-level `symbol` / `nse_symbol` field — the prior code reading
+            # rec.get("symbol") was silently returning None for every probe
+            # (bug surfaced 2026-05-31 by Plan 0007 slug audit). The NSE
+            # ticker lives inside pdt_dis_nm as:
+            #     "<Company Name>&nbsp;<span>ISIN, NSE_SYM, BSE_CODE</span>"
+            # We extract the second comma-separated value in the span.
+            sym = (rec.get("symbol") or rec.get("nse_symbol") or "").strip().upper()
+            if not sym:
+                dis = rec.get("pdt_dis_nm") or ""
+                m_span = re.search(r"<span>([^<]+)</span>", dis)
+                if m_span:
+                    parts = [p.strip() for p in m_span.group(1).split(",")]
+                    if len(parts) >= 2:
+                        sym = parts[1].upper()
+            if not sym:
                 continue
             if sym == want:
                 return slug_m.group(1)

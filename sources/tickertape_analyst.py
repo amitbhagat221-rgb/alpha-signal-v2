@@ -27,6 +27,7 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
+from typing import Optional
 
 import pandas as pd
 import requests
@@ -79,6 +80,35 @@ def _fetch_next_data(slug):
     return None
 
 
+def _safe_growth_pct(hist: list) -> Optional[float]:
+    """Recompute forward growth % from a forecastsHistory.{eps,revenue} array.
+
+    Returns NULL when the base is too small or non-positive — Tickertape's own
+    .change field divides into those bases and produces absurd ratios (DWNH
+    eps_growth_pct = 306,231% surfaced by Plan 0007 Gate 2 backfill on
+    2026-05-31). Caps the magnitude at the plausibility-gate hard range
+    (-200..+500 for EPS, -90..+500 for revenue) so we never write a known-bad
+    value even if Tickertape's `.value` field itself is malformed.
+    """
+    if not hist or len(hist) < 2:
+        return None
+    fwd = hist[-1].get("value")
+    base = hist[-2].get("value")
+    try:
+        fwd = float(fwd) if fwd is not None else None
+        base = float(base) if base is not None else None
+    except (TypeError, ValueError):
+        return None
+    if fwd is None or base is None:
+        return None
+    if base <= 0.5:                       # turnaround / sign-flip — undefined
+        return None
+    growth = (fwd - base) / base * 100
+    if growth < -200 or growth > 500:     # outside gate hard range
+        return None
+    return round(growth, 2)
+
+
 def _extract_analyst_row(sid, data, fetched_at):
     """Flatten __NEXT_DATA__ into a single analyst_consensus row.
 
@@ -115,15 +145,22 @@ def _extract_analyst_row(sid, data, fetched_at):
         # Year-end snapshots still flow to forecast_history (long format) via
         # _extract_forecast_rows below; backtest pulls from there.
 
+        # NOTE: do NOT use Tickertape's `.change` field. Trust Backfill
+        # 2026-05-31 surfaced 35 hard-fail rows (DWNH 306,231%, JSTL 696%,
+        # TTCH -907%, PPL -457%, ...). Tickertape divides forward EPS by the
+        # most-recent point in eps_hist regardless of whether that point is a
+        # quarterly snapshot or a near-zero turnaround base. We recompute from
+        # values, requiring a positive base ≥ ₹0.5 — anything below is a
+        # turnaround case where percentage growth is mathematically undefined.
         eps_hist = fh.get("eps", [])
         if eps_hist:
             rec["forward_eps"] = eps_hist[-1].get("value")
-            rec["eps_growth_pct"] = eps_hist[-1].get("change")
+            rec["eps_growth_pct"] = _safe_growth_pct(eps_hist)
 
         rev_hist = fh.get("revenue", [])
         if rev_hist:
             rec["forward_revenue"] = rev_hist[-1].get("value")
-            rec["revenue_growth_pct"] = rev_hist[-1].get("change")
+            rec["revenue_growth_pct"] = _safe_growth_pct(rev_hist)
 
         if rec["total_analysts"] or rec["forward_eps"]:
             rec["has_analyst_data"] = 1
