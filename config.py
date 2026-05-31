@@ -317,6 +317,17 @@ PIPELINE_STEPS = [
     {"name": "fetch_corp_actions", "module": "sources.nselib_pull", "function": "compute_corp_actions", "critical": False,
      "table": "corporate_actions", "source": "NSE corporate-actions (nselib)", "data_freq": "daily", "frequency": "daily"},
 
+    # Track 3.1b — NSE F&O EOD grid. One nselib.fno_bhav_copy call = the whole
+    # market (~16K info-carrying rows/day). Runs in the morning pipeline against
+    # the prior session's archive, exactly like fetch_bhavcopy. compute() walks a
+    # short trailing window so a missed day self-heals. compute_pcr() must run
+    # AFTER (it aggregates the rows just written) — keep this ordering.
+    {"name": "fetch_fno_bhav",     "module": "sources.fno_pull",     "function": "compute", "critical": False,
+     "table": "fno_bhav",          "source": "NSE F&O bhavcopy (nselib UDiFF)", "data_freq": "daily", "frequency": "daily"},
+
+    {"name": "compute_fno_pcr",    "module": "sources.fno_pull",     "function": "compute_pcr", "critical": False,
+     "table": "fno_pcr_history",   "source": "fno_bhav (nearest-expiry rollup)", "data_freq": "daily", "frequency": "daily"},
+
     {"name": "universe_liveness",  "module": "sources.universe",     "function": "compute", "critical": False,
      "table": "stocks",            "source": "stock_prices (recent activity)", "data_freq": "daily", "frequency": "daily"},
 

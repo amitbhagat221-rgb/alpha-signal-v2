@@ -1191,6 +1191,12 @@ STALENESS_OVERRIDES = {
     # trading days, but holiday clusters (Diwali, year-end) can go several
     # quiet days. 10d tolerates that yet flags a genuinely stalled fetcher.
     "corporate_actions":      10,
+    # F&O EOD grid + its rollup advance only on trading days, fetched the next
+    # morning. MAX(trade_date) sits at Friday's session across a weekend (≈3d),
+    # and a holiday adjacent to the weekend stretches it to ≈5-6d. 6 tolerates
+    # that cluster yet still flags a genuinely stalled fetcher inside a week.
+    "fno_bhav":               6,
+    "fno_pcr_history":        6,
 }
 
 # Per-stock coverage gates. A table that should have a row per universe stock

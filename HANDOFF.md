@@ -1,18 +1,19 @@
 # HANDOFF
-Updated: 2026-05-31 | Branch: master (1 commit → pushed) | HEAD: `feat(signals): sector_momentum factor + /sectors horizon badges (Plan 0006 Phase E)`
+Updated: 2026-05-31 | Branch: master (1 unpushed) | HEAD: `feat(fno): F&O OI data foundation (Track 3.1b) + nightly DB backup to Drive`
 
 ## Left off
-Plan 0006 is now **fully shipped (Phases A–E)**. Today closed the three Next-3 items (corp_actions daily wiring, the slug-override registry, Phase D LLM sector dossiers) and then Phase E: a `sector_momentum` factor driving S/M/L horizon badges on `/sectors`. The factor backtested **SMALL t=1.88 WEAK** (MID 0.33 / LARGE −0.60 DROP) → stays on the bench, not wired into screener weights.
+Built **Track 3.1b F&O data foundation**: [sources/fno_pull.py](sources/fno_pull.py) ingests the whole NSE F&O EOD grid via `nselib.derivatives.fno_bhav_copy` (one call = entire market, backfillable) into `fno_bhav` (raw grid, **2.83M rows / 122 dates / 6mo backfill**) + `fno_pcr_history` (PCR + max-pain rollup, 216 underlyings/day), wired as two daily `PIPELINE_STEPS`. Also stood up **offsite DB backup** — `backup_db.sh` (VACUUM-INTO → integrity → gzip 534MB → rclone to a 5 TiB Google Drive) on a 05:00 UTC cron; first upload confirmed in Drive.
 
 ## Pick up here
-1. **Deploy the Phase E badges** — live `:3000/sectors` shows 0 `sd-horizons` because [cockpit/api.py](cockpit/api.py) + [cockpit/templates/sectors.html](cockpit/templates/sectors.html) changed *after* the last cockpit restart. `sudo systemctl restart alpha-cockpit.service`, then confirm 11 sectors render S/M/L badges (verified in-process, not yet live).
-2. **Track 3.1b — NSE F&O OI** (next frontier, unblocks §3.2.2 options cluster) — [sources/nselib_pull.py](sources/nselib_pull.py) already has `pull_fii_positioning` via `nselib.derivatives`; extend to participant/strike OI, design the schema + a daily/forward cron line.
-3. **sector_momentum medium-horizon breadth trend** — Plan 0006 Phase E spec wanted the medium horizon to fold in a 4-week `breadth_pct` trend, but `sector_briefs` only has 3 days of history (2026-05-29→31). Once ≥4 weeks accrue, add it to [signals/sector_momentum.py](signals/sector_momentum.py) (currently medium = 3m price-RS only).
+1. **Build + backtest the 4 OI factors** — `pcr_oi`, `pcr_volume`, `oi_buildup_signal`, `max_pain_distance` off [fno_pcr_history] — new `signals/` modules + PIT helpers + `BACKTEST_SIGNALS`. **NOT clock-gated** (6mo backfill already exists). Plan 0002 §3.2.2.
+2. **Phase E badge deploy still pending** — `sudo systemctl restart alpha-cockpit.service`; confirm `:3000/sectors` renders 11 sectors' S/M/L badges ([cockpit/api.py](cockpit/api.py) + [cockpit/templates/sectors.html](cockpit/templates/sectors.html) changed after last restart).
+3. **IV path verify (weekday)** — confirm `nselib.nse_live_option_chain` / NSE `option-chain-equities` exposes IV (today Sun = empty payload). Gates the *other* 4 §3.2.2 factors (`iv_skew_25d`, `iv_term_structure`, `iv_percentile_1y`, `iv_realised_spread`) → then add `fno_iv_snapshot`.
 
 ## Watch out
-- **`sector_momentum` is sector-CONSTANT** — every stock in a sector shares the value (z-score of its sector's medium RS). Within-sector ranking is unaffected; it only differentiates *across* sectors within a cap_tier. On the bench (SMALL t=1.88), **NOT in `SIGNAL_WEIGHTS`** — see its `status_reason` in [db.py](db.py) `BACKTEST_SIGNALS`.
-- **PIT backfill onto an existing panel must use explicit `--date`** — I ran `reconstruct_pit --signal sector_momentum --date …` ×148 (existing dates only). Using `--cadence weekly/monthly` would *generate new Fridays* and INSERT partial rows (only sector_momentum + close populated, NaN elsewhere), polluting the panel.
-- **sector_momentum uses raw (unadjusted) `stock_prices.close`**, winsorized per-constituent to [−0.6, 3.0] to bound split artifacts — chosen so the live and PIT paths run *identical* logic (no adj_close divergence). A large-cap constituent split still nudges its sector's RS slightly.
+- `fno_bhav` stores **only rows with oi>0 OR volume>0** (16.3K of 35.6K/day) — dead far-OTM strikes dropped. Fine for PCR/max-pain; a future factor needing the *full* grid must re-fetch raw.
+- Index underlyings (NIFTY/BANKNIFTY/FINNIFTY/MIDCPNIFTY/NIFTYNXT50) carry **sid=NULL** in both tables — symbol-keyed. Filter `instrument_type='STO'` or `sid IS NOT NULL` for stock-only factor work.
+- `compute_fno_pcr` MUST stay ordered **after** `fetch_fno_bhav` in `PIPELINE_STEPS` (it aggregates rows just written). `STALENESS_OVERRIDE=6` on both tables — `trade_date` sits at Friday across weekend+holiday clusters.
+- `backup_db.sh` is **VM-only** (`*.sh` gitignored, [.gitignore:94](.gitignore)) — like `run_pipeline.sh`, not in git. rclone remote `gdrive` (scope=drive.file) authed to amitbhagat221@. Restore = `gunzip` → plain sqlite db (verified restorable).
 
 ## Active plan
-[Plan 0006 — Sector dossiers](docs/plans/0006-sector-dossiers.md) — **fully implemented (A–E)**; archive in ~30 days. Next frontier: Track 3 §3.1b (NSE F&O OI), [plan 0002](docs/plans/0002-100-factors-and-model.md).
+[docs/plans/0002-100-factors-and-model.md](docs/plans/0002-100-factors-and-model.md) — Phase 3.1b data **done**; §3.2.2 options factors next (OI half now unblocked, IV half pending weekday verify).

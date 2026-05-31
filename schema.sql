@@ -1549,3 +1549,62 @@ CREATE TABLE IF NOT EXISTS uhs_calibration_log (
 );
 CREATE INDEX IF NOT EXISTS idx_uhs_cal_window_score ON uhs_calibration_log(window_days, uhs_score);
 CREATE INDEX IF NOT EXISTS idx_uhs_cal_pick_date ON uhs_calibration_log(pick_date);
+
+-- ═══════════════════════════════════════════════════
+-- GROUP 6: DERIVATIVES (F&O) — Track 3.1b
+-- ═══════════════════════════════════════════════════
+-- Source: nselib.derivatives.fno_bhav_copy(trade_date) — one call returns the
+-- entire EOD F&O grid (UDiFF format, ~35K rows/day: every strike × CE/PE ×
+-- expiry × ~211 stock + 5 index underlyings). Backfillable ≥6mo from NSE
+-- archives. No per-symbol loop. See docs/plans/0002 §3.1b.
+--
+-- We persist only rows carrying information (oi>0 OR volume>0) — dead far-OTM
+-- strikes contribute nothing to any §3.2.2 factor and ~halve storage.
+
+-- Raw per-contract EOD grid. sid is NULL for the 5 index underlyings
+-- (NIFTY/BANKNIFTY/FINNIFTY/MIDCPNIFTY/NIFTYNXT50) — they're symbol-keyed.
+-- For futures (STF/IDF) strike=0 and option_type='XX' so the UNIQUE composite
+-- stays deterministic (SQLite treats NULLs as distinct → would break idempotency).
+CREATE TABLE IF NOT EXISTS fno_bhav (
+    sid               TEXT,                         -- mapped from TckrSymb; NULL for indices
+    symbol            TEXT NOT NULL,                -- TckrSymb (NSE underlying)
+    instrument_type   TEXT NOT NULL,                -- STO/IDO (option) · STF/IDF (future)
+    expiry_date       TEXT NOT NULL,                -- ISO
+    strike            REAL NOT NULL DEFAULT 0,      -- 0 for futures
+    option_type       TEXT NOT NULL DEFAULT 'XX',   -- CE/PE; XX for futures
+    trade_date        TEXT NOT NULL,                -- ISO
+    close             REAL,                         -- ClsPric
+    settle            REAL,                         -- SttlmPric
+    underlying_price  REAL,                         -- UndrlygPric (spot)
+    oi                INTEGER,                      -- OpnIntrst
+    chg_oi            INTEGER,                      -- ChngInOpnIntrst
+    volume            INTEGER,                      -- TtlTradgVol
+    num_trades        INTEGER,                      -- TtlNbOfTxsExctd
+    fetched_at        TEXT DEFAULT (datetime('now')),
+    UNIQUE(symbol, instrument_type, expiry_date, strike, option_type, trade_date)
+);
+CREATE INDEX IF NOT EXISTS idx_fno_bhav_sid_date ON fno_bhav(sid, trade_date);
+CREATE INDEX IF NOT EXISTS idx_fno_bhav_date ON fno_bhav(trade_date);
+
+-- Computed per-(underlying, date) options rollup on the NEAREST expiry (the
+-- liquid one — standard PCR/max-pain convention). INSERT OR REPLACE (snapshot).
+-- Feeds §3.2.2 factors pcr_oi, pcr_volume, oi_buildup_signal, max_pain_distance.
+CREATE TABLE IF NOT EXISTS fno_pcr_history (
+    sid               TEXT,
+    symbol            TEXT NOT NULL,
+    trade_date        TEXT NOT NULL,
+    expiry_date       TEXT,                         -- nearest expiry used
+    underlying_price  REAL,
+    total_call_oi     INTEGER,
+    total_put_oi      INTEGER,
+    pcr_oi            REAL,                          -- put_oi / call_oi
+    total_call_vol    INTEGER,
+    total_put_vol     INTEGER,
+    pcr_volume        REAL,                          -- put_vol / call_vol
+    max_pain          REAL,                          -- argmin writer-payout strike
+    max_pain_distance REAL,                          -- (spot - max_pain) / spot
+    n_strikes         INTEGER,
+    computed_at       TEXT DEFAULT (datetime('now')),
+    UNIQUE(symbol, trade_date)
+);
+CREATE INDEX IF NOT EXISTS idx_fno_pcr_sid_date ON fno_pcr_history(sid, trade_date);
