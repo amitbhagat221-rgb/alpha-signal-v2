@@ -720,6 +720,49 @@ FACTOR_LINEAGE = {
         "sector_exclusions": [],
     },
 
+    # ════════════════════════════ Options / F&O IV factors (§3.2.2, ADR 0035) ════════════════════════════
+    # All read fno_iv_history (Black-76 inversion of fno_bhav settle prices). The
+    # surface itself is built by sources/fno_iv.py; these factors derive from it.
+    "iv_skew_25d": {
+        "status": "candidate", "module": "signals/fno_iv_factors.py",
+        "reads": [
+            {"table": "fno_iv_history", "cols": ["iv_skew_25d"],
+             "key": ["sid", "trade_date"], "select": "row",
+             "filter": "latest ≤ as-of", "contribution": "iv_25d_put_minus_call"},
+        ],
+        "sector_exclusions": [],
+    },
+    "iv_term_structure": {
+        "status": "candidate", "module": "signals/fno_iv_factors.py",
+        "reads": [
+            {"table": "fno_iv_history", "cols": ["iv_term_structure"],
+             "key": ["sid", "trade_date"], "select": "row",
+             "filter": "latest ≤ as-of", "contribution": "atm_iv_near_minus_far"},
+        ],
+        "sector_exclusions": [],
+    },
+    "iv_realised_spread": {
+        "status": "candidate", "module": "signals/fno_iv_factors.py",
+        "reads": [
+            {"table": "fno_iv_history", "cols": ["atm_iv"],
+             "key": ["sid", "trade_date"], "select": "row",
+             "filter": "latest ≤ as-of", "contribution": "atm_iv_level"},
+            {"table": "stock_prices", "cols": ["close"],
+             "key": ["sid", "date"], "select": "window",
+             "filter": "last 21d", "contribution": "realised_vol_subtrahend"},
+        ],
+        "sector_exclusions": [],
+    },
+    "iv_percentile_1y": {
+        "status": "candidate", "module": "signals/fno_iv_factors.py",
+        "reads": [
+            {"table": "fno_iv_history", "cols": ["atm_iv"],
+             "key": ["sid", "trade_date"], "select": "window",
+             "filter": "trailing ≤252d", "contribution": "percentile_rank_of_latest_atm_iv"},
+        ],
+        "sector_exclusions": [],
+    },
+
     # ════════════════════════════ Fundamentals_screener factors (16) ════════════════════════════
     "roic": {
         "status": "candidate", "module": "signals/roic.py",

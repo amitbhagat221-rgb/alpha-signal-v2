@@ -1608,3 +1608,25 @@ CREATE TABLE IF NOT EXISTS fno_pcr_history (
     UNIQUE(symbol, trade_date)
 );
 CREATE INDEX IF NOT EXISTS idx_fno_pcr_sid_date ON fno_pcr_history(sid, trade_date);
+
+-- Computed per-(underlying, date) implied-volatility surface rollup, derived by
+-- Black-76 inversion of the EOD settlement prices in fno_bhav (no external IV
+-- feed — validated 2026-05-31 against India VIX: NIFTY atm_iv tracks VIX to
+-- ~0.1-2 vol pts, correctly just below it). INSERT OR REPLACE (snapshot).
+-- Feeds §3.2.2 IV factors iv_skew_25d, iv_term_structure, iv_realised_spread,
+-- iv_percentile_1y. See ADR 0035.
+CREATE TABLE IF NOT EXISTS fno_iv_history (
+    sid               TEXT,
+    symbol            TEXT NOT NULL,
+    trade_date        TEXT NOT NULL,
+    target_expiry     TEXT,                         -- expiry closest to ~30d (atm_iv basis)
+    days_to_target    INTEGER,
+    forward           REAL,                         -- implied forward (put-call parity)
+    atm_iv            REAL,                         -- ATM IV on the ~30d expiry (the VIX-comparable level)
+    iv_skew_25d       REAL,                         -- iv(25Δ put) − iv(25Δ call), ~30d expiry
+    iv_term_structure REAL,                         -- atm_iv(nearest ≥5d) − atm_iv(next expiry); +ve = backwardation
+    n_strikes         INTEGER,
+    computed_at       TEXT DEFAULT (datetime('now')),
+    UNIQUE(symbol, trade_date)
+);
+CREATE INDEX IF NOT EXISTS idx_fno_iv_sid_date ON fno_iv_history(sid, trade_date);

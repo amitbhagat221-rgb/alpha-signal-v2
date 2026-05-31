@@ -79,6 +79,11 @@ SIGNAL_COLUMN_MAP = {
     "pcr_volume":          (None, "pcr_volume"),
     "max_pain_distance":   (None, "max_pain_distance"),
     "oi_buildup_signal":   (None, "oi_buildup_signal"),
+    # Options/F&O IV factors — Plan 0002 §3.2.2 (off fno_iv_history)
+    "iv_skew_25d":         (None, "iv_skew_25d"),
+    "iv_term_structure":   (None, "iv_term_structure"),
+    "iv_realised_spread":  (None, "iv_realised_spread"),
+    "iv_percentile_1y":    (None, "iv_percentile_1y"),
     # Behavior tier — PIT helpers shipped 2026-05-24
     "insider_signal":      (None, "insider_score"),
     "sentiment_7d":        (None, "sentiment_7d"),
@@ -275,6 +280,12 @@ _NW_LAG_WEEKLY = {
     "pcr_volume":            3,
     "max_pain_distance":     3,
     "oi_buildup_signal":     3,
+    # IV factors — same-day reads (percentile/realised use trailing windows but the
+    # cross-sectional signal is the same-day value); fwd_return_20d overlap → lag 3.
+    "iv_skew_25d":           3,
+    "iv_term_structure":     3,
+    "iv_realised_spread":    3,
+    "iv_percentile_1y":      3,
 }
 
 

@@ -328,6 +328,9 @@ PIPELINE_STEPS = [
     {"name": "compute_fno_pcr",    "module": "sources.fno_pull",     "function": "compute_pcr", "critical": False,
      "table": "fno_pcr_history",   "source": "fno_bhav (nearest-expiry rollup)", "data_freq": "daily", "frequency": "daily"},
 
+    {"name": "compute_fno_iv",     "module": "sources.fno_iv",       "function": "compute", "critical": False,
+     "table": "fno_iv_history",    "source": "fno_bhav (Black-76 IV surface inversion)", "data_freq": "daily", "frequency": "daily"},
+
     {"name": "universe_liveness",  "module": "sources.universe",     "function": "compute", "critical": False,
      "table": "stocks",            "source": "stock_prices (recent activity)", "data_freq": "daily", "frequency": "daily"},
 

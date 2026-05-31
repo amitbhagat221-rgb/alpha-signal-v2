@@ -134,6 +134,11 @@ _COLUMN_MIGRATIONS = [
     ("daily_snapshots_pit", "pcr_volume",        "REAL"),
     ("daily_snapshots_pit", "max_pain_distance", "REAL"),
     ("daily_snapshots_pit", "oi_buildup_signal", "REAL"),
+    # 2026-05-31: Plan 0002 §3.2.2 — F&O implied-volatility factor PIT columns.
+    ("daily_snapshots_pit", "iv_skew_25d",        "REAL"),
+    ("daily_snapshots_pit", "iv_term_structure",  "REAL"),
+    ("daily_snapshots_pit", "iv_realised_spread", "REAL"),
+    ("daily_snapshots_pit", "iv_percentile_1y",   "REAL"),
 ]
 
 
@@ -1202,6 +1207,7 @@ STALENESS_OVERRIDES = {
     # that cluster yet still flags a genuinely stalled fetcher inside a week.
     "fno_bhav":               6,
     "fno_pcr_history":        6,
+    "fno_iv_history":         6,
 }
 
 # Per-stock coverage gates. A table that should have a row per universe stock
@@ -1378,6 +1384,10 @@ BACKTEST_CADENCE = {
     "pcr_volume":               "weekly",
     "max_pain_distance":        "weekly",
     "oi_buildup_signal":        "weekly",
+    "iv_skew_25d":              "weekly",
+    "iv_term_structure":        "weekly",
+    "iv_realised_spread":       "weekly",
+    "iv_percentile_1y":         "weekly",
     # ── Sector-portfolio: sector-level signals (not per-stock IC) ──
     "regulatory_sector_signal": "sector_portfolio",
     "macro_sector_signal":      "sector_portfolio",
@@ -1880,6 +1890,90 @@ BACKTEST_SIGNALS = [
                          "weekly PIT periods (NW3): best |t|=0.45 MID — DROP all "
                          "tiers (4-state Δ is noisy at weekly cadence). On the bench "
                          "(FACTOR_LIBRARY). Re-test as window deepens.",
+    },
+    {
+        "signal": "iv_skew_25d",
+        "label": "IV Skew (25Δ put − call)",
+        "group": "Options/F&O",
+        "description": "iv(25-delta put) − iv(25-delta call) on the ~30d expiry, from "
+                       "Black-76 inversion of fno_bhav settle prices. Positive = "
+                       "downside protection bid up (fear). Sign decided by backtest.",
+        "source_tables": ["fno_iv_history"],
+        "source_columns": ["fno_iv_history.iv_skew_25d"],
+        "filing_lag": "0d (EOD F&O bhavcopy)",
+        "pit_column_v1": None,
+        "pit_column_v2": "iv_skew_25d",
+        "v1_verdict_summary": "(new — Plan 0002 §3.2.2 IV half, no v1 counterpart)",
+        "status": "READY",
+        "status_reason": "Shipped 2026-05-31 (Track 3.1b → §3.2.2 IV half, ADR 0035). "
+                         "Backtest 25 weekly periods (NW3): MID t=+4.61 KEEP (IC "
+                         "+0.096, bootstrap CI [2.28, 9.84] strictly >0 — the standout "
+                         "F&O factor; high put-skew → MID outperformance), LARGE/SMALL "
+                         "DROP. ~97% coverage. CANDIDATE for deliberate promotion "
+                         "(signal-weights.md) — not yet wired; single ~6mo regime, "
+                         "wants walk-forward OOS first.",
+    },
+    {
+        "signal": "iv_term_structure",
+        "label": "IV Term Structure (near − far)",
+        "group": "Options/F&O",
+        "description": "ATM IV(nearest ≥5d expiry) − ATM IV(next month). Positive = "
+                       "inverted/backwardated curve (near-term stress). NOTE: thin "
+                       "single-stock coverage (~20%) — next-month stock options are "
+                       "illiquid; really an index-level signal.",
+        "source_tables": ["fno_iv_history"],
+        "source_columns": ["fno_iv_history.iv_term_structure"],
+        "filing_lag": "0d (EOD F&O bhavcopy)",
+        "pit_column_v1": None,
+        "pit_column_v2": "iv_term_structure",
+        "v1_verdict_summary": "(new — Plan 0002 §3.2.2 IV half, no v1 counterpart)",
+        "status": "READY",
+        "status_reason": "Shipped 2026-05-31 (Track 3.1b → §3.2.2 IV half, ADR 0035). "
+                         "Backtest (NW3): MID t=-1.80 WEAK (17 periods). SMALL 'KEEP' "
+                         "t=-4.94 is a 7-period/23-stock SMALL-SAMPLE ARTIFACT (CI "
+                         "[-32.7,-3.1]) — NOT trusted, NOT promoted. ~20% stock "
+                         "coverage (far-month liquidity gap; index-level signal at "
+                         "heart). Bench (FACTOR_LIBRARY).",
+    },
+    {
+        "signal": "iv_realised_spread",
+        "label": "IV − Realised Vol Spread",
+        "group": "Options/F&O",
+        "description": "ATM IV − 21d annualised realised vol — the variance risk "
+                       "premium. Positive = options pricing more vol than has been "
+                       "realised (rich). Sign decided by backtest.",
+        "source_tables": ["fno_iv_history", "stock_prices"],
+        "source_columns": ["fno_iv_history.atm_iv", "stock_prices.close (21d)"],
+        "filing_lag": "0d (EOD F&O bhavcopy + 0d price)",
+        "pit_column_v1": None,
+        "pit_column_v2": "iv_realised_spread",
+        "v1_verdict_summary": "(new — Plan 0002 §3.2.2 IV half, no v1 counterpart)",
+        "status": "READY",
+        "status_reason": "Shipped 2026-05-31 (Track 3.1b → §3.2.2 IV half, ADR 0035). "
+                         "Backtest 25 weekly periods (NW3): MID t=-1.95 WEAK (CI "
+                         "[-5.94,-0.31] excludes 0; rich variance premium → MID "
+                         "underperformance, sensible sign), LARGE/SMALL DROP. ~99% "
+                         "coverage. Bench (FACTOR_LIBRARY).",
+    },
+    {
+        "signal": "iv_percentile_1y",
+        "label": "IV Percentile (trailing ≤1y)",
+        "group": "Options/F&O",
+        "description": "Percentile rank of today's ATM IV within its own trailing "
+                       "≤252-day history. High = vol is expensive vs its own recent "
+                       "range (mean-reversion / regime). Sign decided by backtest.",
+        "source_tables": ["fno_iv_history"],
+        "source_columns": ["fno_iv_history.atm_iv (trailing series)"],
+        "filing_lag": "0d (EOD F&O bhavcopy)",
+        "pit_column_v1": None,
+        "pit_column_v2": "iv_percentile_1y",
+        "v1_verdict_summary": "(new — Plan 0002 §3.2.2 IV half, no v1 counterpart)",
+        "status": "READY",
+        "status_reason": "Shipped 2026-05-31 (Track 3.1b → §3.2.2 IV half, ADR 0035). "
+                         "Backtest 25 weekly periods (NW3): best LARGE t=1.18 — DROP "
+                         "all tiers (IV percentile is a regime/timing read, not a "
+                         "cross-sectional stock-picker). fno_bhav backfilled to ~1yr "
+                         "so the trailing-1y window is full. Bench (FACTOR_LIBRARY).",
     },
     {
         "signal": "bulk_deal_signal",
@@ -2531,6 +2625,11 @@ FACTOR_LIBRARY = [
     "max_pain_distance",    # MID t=-1.68 WEAK (mean-reversion to max-pain)
     "pcr_oi",               # best |t|=0.36 LARGE
     "oi_buildup_signal",    # best |t|=0.45 MID
+    # Options/F&O IV factors (§3.2.2 IV half) — 25 weekly periods
+    "iv_skew_25d",          # MID t=+4.61 KEEP — strong candidate for promotion (not yet wired)
+    "iv_realised_spread",   # MID t=-1.95 WEAK (CI excludes 0)
+    "iv_term_structure",    # MID t=-1.80 WEAK; SMALL KEEP is a thin-sample artifact
+    "iv_percentile_1y",     # best |t|=1.18 LARGE — DROP (regime signal)
 ]
 
 

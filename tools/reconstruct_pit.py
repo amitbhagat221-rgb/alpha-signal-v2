@@ -83,6 +83,11 @@ CREATE TABLE IF NOT EXISTS daily_snapshots_pit (
     pcr_volume        REAL,
     max_pain_distance REAL,
     oi_buildup_signal REAL,
+    -- Plan 0002 §3.2.2 — F&O implied-volatility factors (off fno_iv_history)
+    iv_skew_25d        REAL,
+    iv_term_structure  REAL,
+    iv_realised_spread REAL,
+    iv_percentile_1y   REAL,
     fwd_return_20d   REAL,
     m_score          REAL,
     z_score          REAL,
@@ -135,6 +140,8 @@ PIT_COLUMNS = [
     "sector_momentum",
     # Plan 0002 §3.2.2 — F&O open-interest factors (off fno_pcr_history)
     "pcr_oi", "pcr_volume", "max_pain_distance", "oi_buildup_signal",
+    # Plan 0002 §3.2.2 — F&O implied-volatility factors (off fno_iv_history)
+    "iv_skew_25d", "iv_term_structure", "iv_realised_spread", "iv_percentile_1y",
     "fwd_return_20d",
     "m_score", "z_score",
     # Tier 2 — fundamentals
@@ -207,6 +214,11 @@ VALIDATION_RANGES = {
     "pcr_volume":            (0, 20, True),   # put_vol / call_vol, tail-capped
     "max_pain_distance":     (-1, 1, True),   # (spot − max_pain) / spot
     "oi_buildup_signal":     (-1, 1, True),   # 4-state regime score
+    # F&O IV factors (§3.2.2) — bounds mirror signals/fno_iv_factors.py clips
+    "iv_skew_25d":           (-0.5, 0.5, True),  # 25Δ put−call IV, vol points
+    "iv_term_structure":     (-0.5, 0.5, True),  # near−far ATM IV, vol points
+    "iv_realised_spread":    (-1.0, 1.0, True),  # ATM IV − realised vol
+    "iv_percentile_1y":      (0, 1, True),       # percentile rank in trailing ≤1y
     "fwd_return_20d":        (-1, 5, True),  # cap extreme returns
     "m_score":               (-20, 20, True),
     "z_score":               (-50, 100, True),
@@ -1212,6 +1224,26 @@ def pit_fno_oi(fno_pcr_full, eval_date):
     return compute_oi_factors(pcr_hist=pit)
 
 
+def pit_fno_iv(fno_iv_full, px_pit, eval_date):
+    """F&O implied-volatility factors, PIT — Plan 0002 §3.2.2 (IV half).
+
+    Reuses signals.fno_iv_factors's core verbatim, fed an as-of-frozen slice of
+    fno_iv_history (≤ eval_date) for the skew/term/percentile inputs and the
+    PIT-adjusted price frame for the realised-vol leg of iv_realised_spread.
+
+    Returns DataFrame[sid, iv_skew_25d, iv_term_structure, iv_realised_spread,
+    iv_percentile_1y]. NULL before the fno_iv_history backfill begins.
+    """
+    cols = ["sid", "iv_skew_25d", "iv_term_structure", "iv_realised_spread", "iv_percentile_1y"]
+    if fno_iv_full is None or fno_iv_full.empty:
+        return pd.DataFrame(columns=cols)
+    from signals.fno_iv_factors import compute_iv_factors
+    eval_str = eval_date.isoformat() if hasattr(eval_date, "isoformat") else str(eval_date)
+    iv_pit = fno_iv_full[fno_iv_full["trade_date"] <= eval_str]
+    prices = px_pit[["sid", "date", "close"]] if px_pit is not None and not px_pit.empty else None
+    return compute_iv_factors(iv_hist=iv_pit, prices=prices)
+
+
 def pit_macro_sector(macro_history_pit, macro_sector_map, sectors_list, eval_date):
     """Per-sector macro score from macro_history × macro_sector_map.
 
@@ -2207,6 +2239,10 @@ def reconstruct_one_date(eval_date, raw, signals_to_run):
     if "fno_oi" in signals_to_run and "fno_pcr" in raw and not raw["fno_pcr"].empty:
         base = base.merge(pit_fno_oi(raw["fno_pcr"], eval_date), on="sid", how="left")
 
+    # ── §3.2.2 — F&O IV factors (NULL before fno_iv_history backfill) ──
+    if "fno_iv" in signals_to_run and "fno_iv" in raw and not raw["fno_iv"].empty:
+        base = base.merge(pit_fno_iv(raw["fno_iv"], px_pit, eval_date), on="sid", how="left")
+
     if "pledge" in signals_to_run:
         base = base.merge(pit_pledge_quality(raw["stocks"], sh_pit), on="sid", how="left")
 
@@ -2545,6 +2581,14 @@ def load_raw():
         )
     except Exception:
         fno_pcr = pd.DataFrame()
+    # Track 3.1b — F&O IV surface rollup for §3.2.2 IV factors.
+    try:
+        fno_iv = read_sql(
+            "SELECT sid, trade_date, atm_iv, iv_skew_25d, iv_term_structure "
+            "FROM fno_iv_history WHERE sid IS NOT NULL ORDER BY sid, trade_date"
+        )
+    except Exception:
+        fno_iv = pd.DataFrame()
     print(f"  stocks={len(stocks)} qi={len(qi)} bs={len(bs)} cf={len(cf)} sh={len(sh)} "
           f"prices={len(prices)} adj={len(adjustments)} fh={len(fh)} acs={len(acs)} "
           f"bulk={len(bulk)} "
@@ -2559,6 +2603,7 @@ def load_raw():
         "fund_screener": fund_screener,
         "banking_metrics": banking_metrics,
         "fno_pcr": fno_pcr,
+        "fno_iv": fno_iv,
         "reg_events": reg_events, "reg_signals": reg_signals,
         "macro_hist": macro_hist, "macro_map": macro_map,
     }
@@ -2578,7 +2623,7 @@ def main():
                         choices=["piotroski", "accruals", "promoter", "forensic",
                                  "earnings_yield", "book_to_price", "momentum",
                                  "position_52w", "delivery", "sector_momentum",
-                                 "fno_oi", "pledge",
+                                 "fno_oi", "fno_iv", "pledge",
                                  "promoter_trend", "macd", "fwd_return",
                                  "mom_composite",
                                  "quality_fundamentals", "growth_fundamentals",
@@ -2653,8 +2698,8 @@ def main():
         "debt_structure", "asset_tangibility",
         # Plan 0006 Phase E — sector momentum (per-stock = sector's medium RS z)
         "sector_momentum",
-        # Plan 0002 §3.2.2 — F&O open-interest factors (off fno_pcr_history)
-        "fno_oi",
+        # Plan 0002 §3.2.2 — F&O open-interest + implied-volatility factors
+        "fno_oi", "fno_iv",
         # Plan 0005 Phase E composite (smart_money — accruals/promoter/forensic
         # composites flow through their existing _compute_scores)
         "smart_money",
