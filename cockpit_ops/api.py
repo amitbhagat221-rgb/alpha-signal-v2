@@ -1954,14 +1954,23 @@ def get_health_overview(force=False):
             "n_bad": round(age), "n_total": round(threshold),
         })
     for tbl in report["tables"].get("empty", []):
+        # Shared policy (one source of truth = health_report.empty_table_severity):
+        #   *_quarantine → OK (empty = nothing quarantined = clean) → suppress
+        #   paper_* / uhs_calibration_log → INFO (feature not yet populated)
+        #   anything else → CRITICAL (a producer wrote 0 rows where rows expected)
+        sev = _hr.empty_table_severity(tbl)
+        if sev == "OK":
+            continue
         issues.append({
-            "severity": "CRITICAL",
+            "severity": sev,
             "source": "freshness",
             "category": "Data freshness",
             "code": f"EMPTY:{tbl}",
             "table": tbl, "column": "—",
-            "message": f"{tbl} is EMPTY (table exists but no rows)",
-            "detail": "",
+            "message": (f"{tbl} is EMPTY — feature not yet populated"
+                        if sev == "INFO" else
+                        f"{tbl} is EMPTY (table exists but no rows)"),
+            "detail": "expected-empty feature table" if sev == "INFO" else "",
             "sample": None, "pct": None, "n_bad": 0, "n_total": None,
         })
 

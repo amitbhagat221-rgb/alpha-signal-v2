@@ -62,6 +62,31 @@ CRITICAL_TABLE_OUTDATED = {
     "_file_dossiers",       # LLM thesis output
 }
 
+# ── Empty-table policy (the ONE source of truth; cockpit consumes this) ──
+# An empty table is not automatically a failure. Two classes are benign:
+#   *_quarantine — Trust-Pipeline (Plan 0007) reject sinks. Rows here = bad
+#                  news; EMPTY means nothing was quarantined, i.e. clean. (OK)
+#   the set below — features that legitimately have no rows yet. (INFO)
+# Anything else empty = a producer wrote 0 rows where rows are expected. (CRITICAL)
+EXPECTED_EMPTY_SUFFIXES = ("_quarantine",)
+EXPECTED_EMPTY_TABLES = {
+    "paper_trades",        # paper-trading not live yet
+    "paper_positions",
+    "paper_nav_history",
+    "uhs_calibration_log", # Plan 0007 Phase 8 calibration scaffold — not yet populated
+}
+
+
+def empty_table_severity(table):
+    """Severity for an EMPTY table. OK = healthy/expected (suppress),
+    INFO = known-not-yet-populated, CRITICAL = unexpected 0-row producer."""
+    if table.endswith(EXPECTED_EMPTY_SUFFIXES):
+        return OK
+    if table in EXPECTED_EMPTY_TABLES:
+        return INFO
+    return CRITICAL
+
+
 # A step name failing on 2+ consecutive days = systemic, not a fluke
 FAILURE_STREAK_DAYS = 2
 
@@ -336,6 +361,20 @@ def _classify(state):
             "code": "TABLE_STALE",
             "message": f"{tbl} is STALE ({age}d / threshold {threshold}d)",
             "detail": f"producer: {producer}",
+        })
+
+    # Empty tables — benign quarantine sinks (OK) and not-yet-live feature
+    # tables (INFO) are suppressed from the email; only an *unexpected* 0-row
+    # producer (CRITICAL) is actionable. The cockpit applies the full
+    # OK/INFO/CRITICAL policy via empty_table_severity() for its richer pane.
+    for tbl in state["tables"].get("empty", []):
+        if empty_table_severity(tbl) != CRITICAL:
+            continue
+        issues.append({
+            "severity": CRITICAL,
+            "code": f"TABLE_EMPTY:{tbl}",
+            "message": f"{tbl} is EMPTY (table exists but no rows)",
+            "detail": "producer wrote 0 rows where rows are expected",
         })
 
     # Data sanity violations — catches "rows are wrong" (PT==price, rank dups, etc.)
