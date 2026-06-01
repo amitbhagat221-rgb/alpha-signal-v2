@@ -1198,15 +1198,19 @@ STALENESS_OVERRIDES = {
     "annual_balance_sheet":  220,  # annual filings; ~12mo max gap, 220 catches a missed cycle in ~7mo
     "annual_cash_flow":      220,
     "forecast_history":      220,  # Tickertape stores PT only at FY year-end → annual cadence
+    # 2026-06-01: index history is trading-days only; a Fri close read on Mon
+    # is ~3d old, plus nselib's T+1 posting lag → 6 tolerates a long weekend.
+    # (Was untracked entirely until fetch_nse_indices became a pipeline step.)
+    "nse_index_history":       6,
     # ── Forward-return-window-bound table ──
     # 2026-05-30: pick_outcomes producer runs daily, but `latest_date` =
     # MAX(pick_date) only advances once a pick has a COMPLETED forward
-    # return. The table's max is governed by its shortest window (5 trading
-    # days ≈ 7-10 calendar with weekends/holidays), so the daily(3) default
-    # flagged STALE every single day and the watchdog heal step FAILED daily
-    # trying to "fix" a structural lag. 14 tolerates the 5d-window lag + a
-    # holiday cluster, yet still flags a genuinely stalled producer in <2wk.
-    "pick_outcomes":          14,
+    # return. The table's max is governed by its SHORTEST window.
+    # 2026-06-01: dropped the 5d window (noise) → shortest is now 20 trading
+    # days ≈ 28 calendar with weekends/holidays, so the prior 14 would flag
+    # STALE every day. 35 tolerates the 20d-window lag + a holiday cluster,
+    # yet still flags a genuinely stalled producer in ~5wk.
+    "pick_outcomes":          35,
     # corporate_actions producer runs daily but the freshness anchor is
     # fetched_at (ex_date isn't a _table_date_range candidate), which only
     # advances on a day with a NEW ex-date row. NSE announces something most

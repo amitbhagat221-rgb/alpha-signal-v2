@@ -529,6 +529,16 @@ def pull_nse_indices(months=120):  # 10 years default
     return total
 
 
+def compute_nse_indices():
+    """Daily PIPELINE_STEPS wrapper — keep nse_index_history fresh with a short
+    rolling window (the 120-month default is a one-off backfill, not a daily
+    fetch). INSERT OR IGNORE makes this idempotent, so 0 new rows on a non-
+    trading day is expected — staleness is caught by the freshness watchdog
+    (nse_index_history is now a pipeline-output table, so it's tracked), not by
+    raising here. Benchmark history feeds pick_outcomes' excess returns."""
+    return pull_nse_indices(months=2)
+
+
 # ───────────────────────── Move 4 (extended): surveillance + F&O ban ─────────────────────────
 
 def pull_surveillance_today():

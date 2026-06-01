@@ -565,10 +565,20 @@ PIPELINE_STEPS = [
     {"name": "screener",           "module": "scoring.screener",    "function": "compute",  "critical": True,
      "table": "daily_picks",       "source": "all signals",         "data_freq": "daily",   "frequency": "daily"},
 
+    # Benchmark + smart-beta index history (NIFTY 50 / Midcap 150 / Smallcap
+    # 250 …). Was manual-only → went 32d stale (2026-06-01) → pick_outcomes
+    # excess returns silently NULL'd, and nse_index_history wasn't even
+    # freshness-tracked (not a pipeline-output table). Now a daily step:
+    # short rolling window, idempotent INSERT OR IGNORE. Must run BEFORE
+    # compute_pick_outcomes so the benchmark is current when excess is computed.
+    {"name": "fetch_nse_indices",  "module": "sources.nselib_pull", "function": "compute_nse_indices", "critical": False,
+     "table": "nse_index_history", "source": "NSE index history (nselib)",
+     "data_freq": "daily",         "frequency": "daily"},
+
     # Live equity curve — realized forward returns on every daily_picks row.
-    # Runs after screener (today's picks land first) but needs ≥5 trading days
-    # of forward data to write a row, so it's writing yesterday's-and-prior
-    # mature rows daily. Idempotent upsert by (sid, pick_date, window_days).
+    # Runs after screener (today's picks land first) but needs ≥20 trading days
+    # of forward data to write a row, so it's writing prior mature rows daily.
+    # Idempotent upsert by (sid, pick_date, window_days).
     {"name": "compute_pick_outcomes", "module": "tools.compute_pick_outcomes", "function": "compute", "critical": False,
      "table": "pick_outcomes",     "source": "daily_picks + stock_prices + nse_index_history",
      "data_freq": "daily",         "frequency": "daily"},

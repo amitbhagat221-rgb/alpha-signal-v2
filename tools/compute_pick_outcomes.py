@@ -2,16 +2,25 @@
 Alpha Signal v2 — Pick Outcomes Computation
 
 For every (sid, pick_date) in `daily_picks`, compute the realized close-to-
-close return over fixed forward windows (default 5/20/60d) using
-`stock_prices.close`, plus the matching benchmark return:
+close return over fixed forward windows (default 20/63/126 TRADING days ≈
+1mo / 3mo / 6mo) using `stock_prices.close`, plus the matching benchmark:
 
   cap_tier  → benchmark
   LARGE     → NIFTY 50
   MID       → NIFTY MIDCAP 150
   SMALL     → NIFTY SMALLCAP 250
 
+Windows are TRADING days (rows in the stock's own price series), NOT calendar
+days. This matches the backtest's `fwd_return_20d` (reconstruct_pit.py:
+anchor_idx + 20 trading days), so the live mirror measures the same horizon
+the factor model was validated on. 20d = model-native reference; 63d/126d =
+the positional (1–6 month) holding horizon the product actually targets. The
+old 5d window (≈3 trading days) was microstructure noise and was dropped.
+
 Writes to `pick_outcomes` (PK = sid + pick_date + window_days). Idempotent;
-re-runs UPDATE existing rows in place via upsert_df.
+re-runs UPDATE existing rows in place via upsert_df. A pick only gets a row
+for window N once it has N trading days of prices after entry — newer picks
+stay absent for the longer windows until they mature (~3mo / ~6mo out).
 
 WHY: the factor model is hypothesis; this is the realization. ADR 0028 ships
 factor-weight variants on |t-stat| and ICIR — both derived from BACKTEST
@@ -36,7 +45,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from db import read_sql, upsert_df
 
-DEFAULT_WINDOWS = (5, 20, 60)
+DEFAULT_WINDOWS = (20, 63, 126)  # trading days ≈ 1mo / 3mo / 6mo
 TIER_BENCHMARKS = {
     "LARGE": "NIFTY 50",
     "MID":   "NIFTY MIDCAP 150",
@@ -70,39 +79,42 @@ def _load_bench_panel():
     return panel
 
 
-def _forward_close(panel, sid, entry_date, window_days):
-    """Close on the first trading day on/after entry_date+window_days.
+def _build_series(panel):
+    """sid -> NaN-dropped, date-sorted close Series. Built once so the
+    per-pick trading-day offset is a cheap positional lookup."""
+    return {c: panel[c].dropna().sort_index()
+            for c in panel.columns if panel[c].notna().any()}
 
-    Returns (exit_date, exit_close) or (None, None) if no row available.
+
+def _entry(series_map, sid, entry_date):
+    """First trading row on/after entry_date (handles pick made on a holiday).
+
+    Returns (pos, exit_date, close) where pos is the row index in the stock's
+    own trading series — the anchor for the forward trading-day offset. None if
+    the stock has no price on/after entry_date.
     """
-    if sid not in panel.columns:
-        return None, None
-    target = entry_date + pd.Timedelta(days=window_days)
-    col = panel[sid].dropna()
-    if col.empty:
-        return None, None
-    eligible = col[col.index >= target]
-    if eligible.empty:
-        return None, None
-    exit_date = eligible.index[0]
-    return exit_date, float(eligible.iloc[0])
+    s = series_map.get(sid)
+    if s is None or s.empty:
+        return None
+    pos = int(s.index.searchsorted(entry_date, side="left"))
+    if pos >= len(s):
+        return None
+    return pos, s.index[pos], float(s.iloc[pos])
 
 
-def _entry_close(panel, sid, entry_date):
-    """Close on entry_date itself (or the next trading day if entry was a holiday).
+def _exit_trading(series_map, sid, entry_pos, window):
+    """Close `window` TRADING days after the anchor (entry_pos + window rows in
+    the stock's own series — matches reconstruct_pit.pit_fwd_return_20d).
 
-    The screener writes daily_picks every calendar day; not every calendar day
-    is a trading day. Use first available close on/after entry_date.
+    Returns (exit_date, close) or None if the window hasn't matured yet.
     """
-    if sid not in panel.columns:
-        return None, None
-    col = panel[sid].dropna()
-    if col.empty:
-        return None, None
-    eligible = col[col.index >= entry_date]
-    if eligible.empty:
-        return None, None
-    return eligible.index[0], float(eligible.iloc[0])
+    s = series_map.get(sid)
+    if s is None:
+        return None
+    tgt = entry_pos + window
+    if tgt >= len(s):
+        return None
+    return s.index[tgt], float(s.iloc[tgt])
 
 
 def compute(windows=DEFAULT_WINDOWS, since=None, include_bench=True):
@@ -122,43 +134,45 @@ def compute(windows=DEFAULT_WINDOWS, since=None, include_bench=True):
     price_panel = _load_price_panel()
     if price_panel.empty:
         raise RuntimeError("stock_prices empty — cannot compute outcomes")
+    price_series = _build_series(price_panel)
 
     bench_panel = _load_bench_panel() if include_bench else pd.DataFrame()
+    bench_series = _build_series(bench_panel) if not bench_panel.empty else {}
     bench_max = bench_panel.index.max() if not bench_panel.empty else None
     if bench_max is not None and bench_max.date() < datetime.now().date():
         stale_d = (datetime.now().date() - bench_max.date()).days
         print(f"⚠ NIFTY benchmark latest = {bench_max.date()} ({stale_d}d stale) — "
-              f"newer picks will have NULL bench_return_pct")
+              f"recent picks will have NULL bench_return_pct until it matures")
 
     out_rows = []
-    today = pd.Timestamp.now().normalize()
 
     for window in windows:
-        # Only score picks whose forward window has fully realized
-        cutoff = today - pd.Timedelta(days=window)
-        mature = picks[picks["pick_date"] <= cutoff]
-        print(f"  window {window:>2}d: {len(mature):,} mature picks "
-              f"(out of {len(picks):,} total)")
-
-        for _, row in mature.iterrows():
+        scored = 0
+        for _, row in picks.iterrows():
             sid = row["sid"]
             entry_dt = row["pick_date"]
             tier = row["cap_tier"]
 
-            _, entry_close = _entry_close(price_panel, sid, entry_dt)
-            exit_dt, exit_close = _forward_close(price_panel, sid, entry_dt, window)
-            if entry_close is None or exit_close is None:
+            entry = _entry(price_series, sid, entry_dt)
+            if entry is None:
                 continue
+            entry_pos, entry_used_dt, entry_close = entry
+            ex = _exit_trading(price_series, sid, entry_pos, window)
+            if ex is None:  # window not yet matured for this pick
+                continue
+            exit_dt, exit_close = ex
 
             fwd_ret = 100.0 * (exit_close / entry_close - 1.0)
 
             bench_ret = None
             bench_name = TIER_BENCHMARKS.get(tier)
-            if include_bench and bench_name and not bench_panel.empty and bench_name in bench_panel.columns:
-                _, b_entry = _entry_close(bench_panel.rename_axis(index="date"), bench_name, entry_dt)
-                _, b_exit = _forward_close(bench_panel.rename_axis(index="date"), bench_name, entry_dt, window)
-                if b_entry is not None and b_exit is not None:
-                    bench_ret = 100.0 * (b_exit / b_entry - 1.0)
+            if include_bench and bench_name and bench_name in bench_series:
+                b_entry = _entry(bench_series, bench_name, entry_dt)
+                if b_entry is not None:
+                    b_ex = _exit_trading(bench_series, bench_name, b_entry[0], window)
+                    if b_ex is not None:
+                        bench_ret = 100.0 * (b_ex[1] / b_entry[2] - 1.0)
+            scored += 1
 
             out_rows.append({
                 "sid": sid,
@@ -177,6 +191,9 @@ def compute(windows=DEFAULT_WINDOWS, since=None, include_bench=True):
                 "computed_at": datetime.now().isoformat(timespec="seconds"),
             })
 
+        print(f"  window {window:>3}d: scored {scored:,} matured picks "
+              f"(of {len(picks):,} total)")
+
     if not out_rows:
         print("⚠ no outcomes computed (no mature picks?)")
         return 0
@@ -189,8 +206,8 @@ def compute(windows=DEFAULT_WINDOWS, since=None, include_bench=True):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--windows", type=str, default="5,20,60",
-                        help="Comma-separated forward windows in days")
+    parser.add_argument("--windows", type=str, default="20,63,126",
+                        help="Comma-separated forward windows in TRADING days")
     parser.add_argument("--since", type=str, default=None,
                         help="Only score picks made on/after this date (YYYY-MM-DD)")
     parser.add_argument("--no-bench", action="store_true",
