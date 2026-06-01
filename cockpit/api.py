@@ -2441,13 +2441,36 @@ def get_pick_outcomes_summary(top_n=10):
         "SELECT MAX(trade_date) AS d FROM nse_index_history WHERE index_symbol='NIFTY 50'"
     ).iloc[0]["d"]
 
-    from datetime import datetime as _dt
+    from datetime import datetime as _dt, timedelta as _td
     bench_staleness = None
     if bench_max:
         try:
             bench_staleness = (_dt.now().date() - _dt.fromisoformat(bench_max).date()).days
         except Exception:
             pass
+
+    # Holding-horizon status. Windows are TRADING days (20≈1mo model-native,
+    # 63≈3mo, 126≈6mo positional). The longer ones stay empty until picks
+    # mature — surface that as "maturing" with an ETA rather than a blank card.
+    from tools.compute_pick_outcomes import DEFAULT_WINDOWS
+    earliest_pick = read_sql("SELECT MIN(pick_date) AS d FROM daily_picks").iloc[0]["d"]
+    rows_by_w = base.groupby("window_days")["pick_date"].nunique().to_dict() if not base.empty else {}
+    windows_status = []
+    for w in sorted(DEFAULT_WINDOWS):
+        n_dates = int(rows_by_w.get(w, 0))
+        status = "live" if n_dates >= 2 else "maturing"
+        eta = None
+        if status == "maturing" and earliest_pick:
+            try:  # first row appears ~w trading days (≈ w*7/5 calendar) after the earliest pick
+                eta = (_dt.fromisoformat(earliest_pick) + _td(days=round(w * 7 / 5))).date().isoformat()
+            except Exception:
+                pass
+        windows_status.append({"window_days": w, "n_dates": n_dates,
+                               "status": status, "first_outcome_eta": eta,
+                               "model_native": w == 20})
+    # Headline = longest matured window (positional intent); fall back to 20d.
+    live_ws = [w["window_days"] for w in windows_status if w["status"] == "live"]
+    headline_window = max(live_ws) if live_ws else 20
 
     by_window_tier = []
     if not base.empty:
@@ -2484,32 +2507,33 @@ def get_pick_outcomes_summary(top_n=10):
                 "n_excess_obs": int(g["excess_return_pct"].notna().sum()),
             })
 
-    # Rank-decile analysis (20d only — the canonical window)
+    # Rank-decile analysis at the headline (positional) horizon.
     rank_deciles = []
     deciles_df = read_sql(
         """
         WITH ranked AS (
             SELECT cap_tier, fwd_return_pct, excess_return_pct,
                    NTILE(10) OVER (PARTITION BY pick_date, cap_tier ORDER BY rank_at_pick) AS d
-            FROM pick_outcomes WHERE window_days = 20
+            FROM pick_outcomes WHERE window_days = ?
         )
         SELECT cap_tier, d AS decile, COUNT(*) n,
                AVG(fwd_return_pct) avg_fwd,
                AVG(excess_return_pct) avg_excess
         FROM ranked GROUP BY cap_tier, d ORDER BY cap_tier, d
-        """
+        """,
+        params=[headline_window],
     )
     for _, row in deciles_df.iterrows():
         rank_deciles.append({
             "cap_tier": row["cap_tier"],
-            "window_days": 20,
+            "window_days": headline_window,
             "decile": int(row["decile"]),
             "n": int(row["n"]),
             "avg_fwd": round(float(row["avg_fwd"]), 3) if pd.notna(row["avg_fwd"]) else None,
             "avg_excess": round(float(row["avg_excess"]), 3) if pd.notna(row["avg_excess"]) else None,
         })
 
-    # Time series of avg top-N fwd return per pick_date (20d window)
+    # Time series of avg top-N fwd return per pick_date at the headline horizon
     time_series = []
     ts_df = read_sql(
         """
@@ -2518,17 +2542,17 @@ def get_pick_outcomes_summary(top_n=10):
                AVG(excess_return_pct) avg_excess,
                COUNT(*) n
         FROM pick_outcomes
-        WHERE window_days = 20 AND rank_at_pick <= ?
+        WHERE window_days = ? AND rank_at_pick <= ?
         GROUP BY pick_date, cap_tier
         ORDER BY pick_date, cap_tier
         """,
-        params=[top_n],
+        params=[headline_window, top_n],
     )
     for _, row in ts_df.iterrows():
         time_series.append({
             "pick_date": row["pick_date"],
             "cap_tier": row["cap_tier"],
-            "window_days": 20,
+            "window_days": headline_window,
             "avg_fwd_top_n": round(float(row["avg_fwd"]), 3) if pd.notna(row["avg_fwd"]) else None,
             "avg_excess_top_n": (round(float(row["avg_excess"]), 3)
                                   if pd.notna(row["avg_excess"]) else None),
@@ -2540,6 +2564,8 @@ def get_pick_outcomes_summary(top_n=10):
         "bench_max_date": bench_max,
         "bench_staleness_days": bench_staleness,
         "top_n": top_n,
+        "headline_window": headline_window,
+        "windows_status": windows_status,
         "by_window_tier": by_window_tier,
         "rank_deciles": rank_deciles,
         "time_series": time_series,
