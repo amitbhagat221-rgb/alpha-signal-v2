@@ -1,6 +1,13 @@
 {% extends "base.html" %}
+{% from "_components.html" import page_nav %}
 
 {% block content %}
+
+{{ page_nav([
+    ('/model',          'Backtest',      'model'),
+    ('/model/variants', 'Variants',      'model-variants'),
+    ('/model/outcomes', 'Pick Outcomes', 'model-outcomes'),
+], page) }}
 
 <style>
 .mo-hero { display:grid; grid-template-columns: 1.6fr 1fr; gap:20px; margin-bottom:24px; }

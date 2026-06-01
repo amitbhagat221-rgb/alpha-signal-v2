@@ -45,10 +45,6 @@
                 <span class="nav-icon">{{ icon("sun") }}</span>
                 <span class="nav-text"><span class="nav-title">Morning Brief</span><span class="nav-subtitle">Today's read &amp; top picks</span></span>
             </a>
-            <a href="/signals" class="nav-item {% if page == 'signals' %}active{% endif %}">
-                <span class="nav-icon">{{ icon("activity") }}</span>
-                <span class="nav-text"><span class="nav-title">Signals</span><span class="nav-subtitle">Factor scores &amp; ICs</span></span>
-            </a>
             <a href="/actions" class="nav-item {% if page == 'actions' %}active{% endif %}">
                 <span class="nav-icon">{{ icon("target") }}</span>
                 <span class="nav-text"><span class="nav-title">Action Queue</span><span class="nav-subtitle">Buys &amp; sells to act on</span></span>
@@ -73,17 +69,9 @@
                 <span class="nav-icon">{{ icon("layers") }}</span>
                 <span class="nav-text"><span class="nav-title">Sectors</span><span class="nav-subtitle">Industry rotation</span></span>
             </a>
-            <a href="/model" class="nav-item {% if page == 'model' %}active{% endif %}">
+            <a href="/model" class="nav-item {% if page in ['model','model-variants','model-outcomes'] %}active{% endif %}">
                 <span class="nav-icon">{{ icon("sliders") }}</span>
-                <span class="nav-text"><span class="nav-title">Model &amp; Backtest</span><span class="nav-subtitle">Weights, t-stats, validation</span></span>
-            </a>
-            <a href="/model/variants" class="nav-item {% if page == 'model-variants' %}active{% endif %}">
-                <span class="nav-icon">{{ icon("bar-chart") }}</span>
-                <span class="nav-text"><span class="nav-title">Model Variants</span><span class="nav-subtitle">Production · Max-Return · Max-Sharpe</span></span>
-            </a>
-            <a href="/model/outcomes" class="nav-item {% if page == 'model-outcomes' %}active{% endif %}">
-                <span class="nav-icon">{{ icon("trending-up") }}</span>
-                <span class="nav-text"><span class="nav-title">Pick Outcomes</span><span class="nav-subtitle">Live realized returns vs benchmark</span></span>
+                <span class="nav-text"><span class="nav-title">Model &amp; Backtest</span><span class="nav-subtitle">Weights · variants · outcomes</span></span>
             </a>
         </div>
 
@@ -110,8 +98,8 @@
         <a href="/" class="mobile-tab {% if page == 'brief' %}active{% endif %}">
             <span class="mobile-tab-icon">{{ icon("sun", 22) }}</span><span class="mobile-tab-label">Brief</span>
         </a>
-        <a href="/signals" class="mobile-tab {% if page == 'signals' %}active{% endif %}">
-            <span class="mobile-tab-icon">{{ icon("activity", 22) }}</span><span class="mobile-tab-label">Signals</span>
+        <a href="/news" class="mobile-tab {% if page == 'news' %}active{% endif %}">
+            <span class="mobile-tab-icon">{{ icon("activity", 22) }}</span><span class="mobile-tab-label">News</span>
         </a>
         <a href="/actions" class="mobile-tab {% if page == 'actions' %}active{% endif %}">
             <span class="mobile-tab-icon">{{ icon("target", 22) }}</span><span class="mobile-tab-label">Actions</span>
@@ -119,7 +107,7 @@
         <a href="/explorer" class="mobile-tab {% if page == 'explorer' %}active{% endif %}">
             <span class="mobile-tab-icon">{{ icon("search", 22) }}</span><span class="mobile-tab-label">Explore</span>
         </a>
-        <button type="button" class="mobile-tab {% if page in ['portfolio','sectors','model','flow','command','system','sql'] %}active{% endif %}"
+        <button type="button" class="mobile-tab {% if page in ['portfolio','sectors','model','model-variants','model-outcomes','flow','command','system','sql'] %}active{% endif %}"
                 @click="moreOpen = !moreOpen">
             <span class="mobile-tab-icon">{{ icon("menu", 22) }}</span><span class="mobile-tab-label">More</span>
         </button>

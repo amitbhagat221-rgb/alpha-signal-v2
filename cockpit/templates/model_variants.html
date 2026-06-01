@@ -1,6 +1,13 @@
 {% extends "base.html" %}
+{% from "_components.html" import page_nav %}
 
 {% block content %}
+
+{{ page_nav([
+    ('/model',          'Backtest',      'model'),
+    ('/model/variants', 'Variants',      'model-variants'),
+    ('/model/outcomes', 'Pick Outcomes', 'model-outcomes'),
+], page) }}
 
 <style>
 .mv-grid { display:grid; grid-template-columns: repeat(3, 1fr); gap:16px; margin-bottom:24px; }

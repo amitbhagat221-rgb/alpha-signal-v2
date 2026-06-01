@@ -73,6 +73,8 @@ def init_db():
 # whenever a new column is added to an existing table; never edit existing
 # entries (they're idempotent by design).
 _COLUMN_MIGRATIONS = [
+    # 2026-06-01: fast-read keyword tags per article (LLM-generated, JSON array)
+    ("news_enriched", "keywords", "TEXT"),
     ("daily_picks", "weight_coverage", "REAL"),
     ("daily_picks", "price_rows", "INTEGER"),
     ("daily_picks", "fundamental_coverage", "REAL"),

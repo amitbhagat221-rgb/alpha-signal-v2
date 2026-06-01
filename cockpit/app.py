@@ -219,14 +219,6 @@ async def morning_brief(request: Request):
     })
 
 
-@app.get("/signals", response_class=HTMLResponse)
-async def signals(request: Request):
-    signal_data = api.get_active_signals()
-    return templates.TemplateResponse(request, "signals.html", {
-        "page": "signals", "signals": signal_data, "tooltips": api.SIGNAL_TOOLTIPS,
-    })
-
-
 @app.get("/actions", response_class=HTMLResponse)
 async def actions(request: Request):
     action_data = api.get_action_candidates()

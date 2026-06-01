@@ -6,6 +6,25 @@
    The radio_group sets its own scoped Alpine state, name-keyed.
 #}
 
+{# ─────────────── page_nav ───────────────
+   Cross-PAGE sub-navigation (real links, not Alpine tabs). Use to group
+   sibling routes under one left-rail entry (e.g. Model → Backtest/Variants/
+   Outcomes). items: list of (href, label, page_key); active = current `page`.
+#}
+{% macro page_nav(items, active) -%}
+<div class="page-nav">
+  {% for href, label, key in items %}
+  <a href="{{ href }}" class="page-nav-item {% if key == active %}active{% endif %}">{{ label }}</a>
+  {% endfor %}
+</div>
+<style>
+.page-nav { display:flex; gap:4px; margin:0 0 18px; border-bottom:1px solid var(--border); }
+.page-nav-item { padding:8px 16px; font-size:13px; font-weight:600; color:var(--text-muted); text-decoration:none; border-bottom:2px solid transparent; margin-bottom:-1px; transition:color .12s, border-color .12s; }
+.page-nav-item:hover { color:var(--text-primary); }
+.page-nav-item.active { color:var(--accent); border-bottom-color:var(--accent); }
+</style>
+{%- endmacro %}
+
 {# ─────────────── tab_bar ───────────────
    tabs: list of (key, label) tuples — first tuple is the default active tab.
    Use inside a parent `x-data="{ tab: '<first key>', loaded: { '<first key>': true } }"`.

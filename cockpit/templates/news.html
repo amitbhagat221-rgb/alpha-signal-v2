@@ -89,6 +89,8 @@
 </nav>
 
 <!-- ────────── Sticky toolbar ────────── -->
+{# Advanced filters (sentiment/tier/confidence/sort) start collapsed unless one is active. #}
+{% set adv_active = active_sentiment or active_tier or active_confidence or (active_sort and active_sort != 'smart') %}
 <form method="get" action="/news" class="news-toolbar" id="newsToolbar">
     {# Persist topic + tier in hidden inputs so submitting search keeps filters #}
     {% if topic %}<input type="hidden" name="topic" value="{{ topic }}">{% endif %}
@@ -109,26 +111,29 @@
     </div>
 
     <div class="tb-right">
-        <label class="tb-select" title="Sort">
-            <span class="tb-sel-label">Sort</span>
-            <select name="sort" onchange="this.form.submit()">
-                <option value="smart"   {% if active_sort=='smart' %}selected{% endif %}>Smart (tier × recency)</option>
-                <option value="recent"  {% if active_sort=='recent' %}selected{% endif %}>Most recent</option>
-                <option value="trust"   {% if active_sort=='trust' %}selected{% endif %}>Most trusted source</option>
-                <option value="numbers" {% if active_sort=='numbers' %}selected{% endif %}>Most key numbers</option>
-            </select>
-        </label>
-
         <div class="tb-group" title="Time window">
             {% for h, lbl in [(24,'24h'),(72,'3d'),(168,'7d'),(720,'30d')] %}
             <a href="{{ url_keep('hours', h) }}" class="tb-chip {% if active_hours == h %}active{% endif %}">{{ lbl }}</a>
             {% endfor %}
         </div>
+        <button type="button" class="tb-filterbtn" :class="{ 'is-open': showFilters }"
+                @click="showFilters = !showFilters" title="Sort, sentiment, source tier, confidence">
+            <span>⚙ Filters</span>{% if adv_active %}<span class="tb-filt-dot"></span>{% endif %}
+        </button>
     </div>
 </form>
 
-<!-- ────────── Secondary filter row ────────── -->
-<div class="news-filters">
+<!-- ────────── Secondary filter row (collapsible) ────────── -->
+<div class="news-filters" x-show="showFilters" x-cloak>
+    <div class="filt-group">
+        <span class="filt-label">Sort</span>
+        <select class="filt-select" onchange="location.href=this.options[this.selectedIndex].dataset.href">
+            <option data-href="{{ url_keep('sort','smart') }}"   {% if active_sort=='smart' %}selected{% endif %}>Smart (tier × recency)</option>
+            <option data-href="{{ url_keep('sort','recent') }}"  {% if active_sort=='recent' %}selected{% endif %}>Most recent</option>
+            <option data-href="{{ url_keep('sort','trust') }}"   {% if active_sort=='trust' %}selected{% endif %}>Most trusted source</option>
+            <option data-href="{{ url_keep('sort','numbers') }}" {% if active_sort=='numbers' %}selected{% endif %}>Most key numbers</option>
+        </select>
+    </div>
     <div class="filt-group">
         <span class="filt-label">Sentiment</span>
         {% set sentcounts = feed.sentiment_counts %}
@@ -164,8 +169,19 @@
 {% set hero = feed.cards[0] %}
 {% set rest = feed.cards[1:] %}
 
+{# On-brand topic glyphs — replace slow/broken scraped og:images with a
+   consistent generated visual (gradient + glyph + lead key-number). #}
+{% set TOPIC_GLYPHS = {
+   'Macro':'🌐', 'Global Economy':'🌍', 'India Markets':'📈',
+   'Finance & Banking':'🏦', 'Earnings & Companies':'🏢', 'Deals, IPOs & M&A':'🤝',
+   'AI & Tech':'🤖', 'Politics & Policy':'🏛', 'Energy & Commodities':'⚡',
+   'Consumer & Retail':'🛒', 'Industrial & Infra':'🏗', 'Pharma & Health':'💊',
+   'Other':'📰' } %}
+
 {# ────── Hero card ────── #}
-{% set hero_color = hero.topic_color or '#666' %}
+{# Many items aren't topic-classified (enrichment gap) — fall back to the brand
+   accent so the visual is always vibrant, never a dull grey box. #}
+{% set hero_color = hero.topic_color or '#7c3aed' %}
 <article class="hero-card"
          id="card-{{ hero.id }}"
          :class="{ 'is-saved': saved.has('{{ hero.id }}') }"
@@ -174,8 +190,19 @@
          data-card-id="{{ hero.id }}"
          data-card-title="{{ hero.headline|e }}"
          @click="open = !open">
-    <div class="hero-imgwrap" style="background: linear-gradient(135deg, {{ hero_color }} 0%, rgba(0,0,0,0.6) 90%);">
-        {% if hero.image_url %}<img src="{{ hero.image_url }}" loading="lazy" alt="">{% endif %}
+    <div class="hero-imgwrap" style="background: linear-gradient(135deg, {{ hero_color }} 0%, {{ hero_color }} 42%, rgba(0,0,0,0.55) 100%);">
+        {% if hero.bg_image %}<img class="media-bg" src="{{ hero.bg_image }}" loading="lazy" alt="">{% endif %}
+        <div class="hero-visual">
+            {% if hero.key_numbers %}
+            {% set lead = hero.key_numbers[0] %}
+            <span class="hero-glyph-sm">{{ TOPIC_GLYPHS.get(hero.topic_label, '📰') }}</span>
+            <div class="hero-stat-value mono">{{ lead.value }}</div>
+            <div class="hero-stat-label">{{ lead.label }}</div>
+            {% else %}
+            <span class="hero-glyph">{{ TOPIC_GLYPHS.get(hero.topic_label, '📊') }}</span>
+            <div class="hero-glyph-cap">{{ hero.topic_label or hero.source_label }}</div>
+            {% endif %}
+        </div>
         <div class="hero-imgmask"></div>
         {% if hero.topic_label %}
         <span class="hero-topic" style="background:{{ hero_color }};">{{ hero.topic_label }}</span>
@@ -196,6 +223,9 @@
         <h1 class="hero-headline">{{ hero.headline }}</h1>
         {% if hero.one_liner %}
         <p class="hero-oneliner">{{ hero.one_liner }}</p>
+        {% endif %}
+        {% if hero.keywords %}
+        <div class="kw-tags">{% for k in hero.keywords %}<span class="kw-tag">{{ k }}</span>{% endfor %}</div>
         {% endif %}
         {% if hero.key_numbers %}
         <div class="kn-row">
@@ -231,7 +261,7 @@
 <div class="news-grid">
 {% for card in rest %}
 {% set idx = loop.index %}
-{% set tcolor = card.topic_color or '#555570' %}
+{% set tcolor = card.topic_color or '#7c3aed' %}
 {% set tier_color = '#2ecc71' if card.source_tier==1 else ('#4d8eff' if card.source_tier==2 else '#888') %}
 <article class="news-card"
          id="card-{{ card.id }}"
@@ -242,8 +272,16 @@
          data-card-title="{{ card.headline|e }}"
          @click="open = !open; activeIdx = {{ idx }}"
          style="--accent-color:{{ tcolor }};">
-    {# Topic accent stripe #}
-    <div class="card-stripe" style="background:{{ tcolor }};"></div>
+    {# On-brand visual thumbnail (topic color when enriched, else brand accent) #}
+    <div class="card-visual" style="background: linear-gradient(150deg, {{ tcolor }} 0%, {{ tcolor }} 48%, rgba(0,0,0,0.5) 100%);">
+        {% if card.bg_image %}<img class="media-bg" src="{{ card.bg_image }}" loading="lazy" alt="">{% endif %}
+        {% if card.key_numbers %}
+        <span class="cv-glyph">{{ TOPIC_GLYPHS.get(card.topic_label, '📊') }}</span>
+        <span class="cv-stat mono">{{ card.key_numbers[0].value }}</span>
+        {% else %}
+        <span class="cv-glyph-lg">{{ TOPIC_GLYPHS.get(card.topic_label, '📊') }}</span>
+        {% endif %}
+    </div>
 
     <div class="card-body">
         <div class="card-meta">
@@ -268,6 +306,10 @@
         <p class="card-preview" x-show="!open">
             {{ card.one_liner if card.one_liner else (card.summary[:180] + ('…' if card.summary|length > 178 else '')) }}
         </p>
+
+        {% if card.keywords %}
+        <div class="kw-tags" x-show="!open">{% for k in card.keywords %}<span class="kw-tag">{{ k }}</span>{% endfor %}</div>
+        {% endif %}
 
         {% if card.key_numbers %}
         <div class="kn-row kn-row-compact" x-show="!open">
@@ -396,6 +438,13 @@
 .tb-chip { padding: 4px 10px; border:1px solid var(--border); border-radius:6px; font-size:11px; font-weight:600; color:var(--text-secondary); text-decoration:none; }
 .tb-chip:hover { color: var(--text-primary); border-color: var(--text-primary); }
 .tb-chip.active { background: var(--accent); border-color: var(--accent); color:#fff; }
+.tb-filterbtn { display:inline-flex; align-items:center; gap:7px; padding:5px 12px; background: var(--bg-card); border:1px solid var(--border); border-radius:6px; font-size:12px; font-weight:600; color: var(--text-secondary); cursor:pointer; }
+.tb-filterbtn:hover { color: var(--text-primary); border-color: var(--text-primary); }
+.tb-filterbtn.is-open { background: var(--accent); border-color: var(--accent); color:#fff; }
+.tb-filt-dot { width:6px; height:6px; border-radius:50%; background: var(--accent); }
+.tb-filterbtn.is-open .tb-filt-dot { background:#fff; }
+.filt-select { background: var(--bg-card); color: var(--text-primary); border:1px solid var(--border); border-radius:6px; padding:4px 8px; font-size:11px; cursor:pointer; }
+.filt-select:focus { outline:none; border-color: var(--accent); }
 
 /* Secondary filters */
 .news-filters { display:flex; gap:18px; align-items:center; flex-wrap:wrap; padding: 12px 0 14px; border-bottom: 1px solid var(--border); margin-bottom: 18px; }
@@ -416,9 +465,16 @@
 .hero-card { display:grid; grid-template-columns: 1.1fr 1fr; gap:0; background: var(--bg-card); border:1px solid var(--border); border-radius:10px; overflow:hidden; cursor:pointer; margin-bottom: 22px; transition: border-color 0.15s; }
 .hero-card:hover { border-color: var(--accent); }
 .hero-card.is-saved { box-shadow: inset 3px 0 0 #f1c40f; }
-.hero-imgwrap { position:relative; min-height: 220px; }
-.hero-imgwrap img { width:100%; height:100%; object-fit:cover; }
-.hero-imgmask { position:absolute; inset:0; background: linear-gradient(180deg, transparent 50%, rgba(0,0,0,0.55) 100%); }
+.hero-imgwrap { position:relative; min-height: 220px; display:flex; align-items:center; justify-content:center; overflow:hidden; }
+.hero-imgmask { position:absolute; inset:0; background: linear-gradient(180deg, transparent 62%, rgba(0,0,0,0.32) 100%); pointer-events:none; }
+.hero-visual { position:relative; z-index:1; display:flex; flex-direction:column; align-items:center; gap:6px; padding:18px; text-align:center; }
+/* Stat-forward (story has a key number) */
+.hero-glyph-sm { font-size:30px; line-height:1; filter: drop-shadow(0 2px 6px rgba(0,0,0,0.4)); }
+.hero-stat-value { font-size:42px; font-weight:800; color:#fff; letter-spacing:-1px; line-height:1.05; text-shadow:0 2px 12px rgba(0,0,0,0.5); }
+.hero-stat-label { font-size:11.5px; color:rgba(255,255,255,0.92); text-transform:uppercase; letter-spacing:0.6px; font-weight:600; max-width:220px; }
+/* Glyph fallback (no key number) */
+.hero-glyph { font-size:72px; line-height:1; filter: drop-shadow(0 4px 14px rgba(0,0,0,0.45)); user-select:none; }
+.hero-glyph-cap { font-size:13px; font-weight:700; color:rgba(255,255,255,0.95); text-transform:uppercase; letter-spacing:0.8px; text-shadow:0 2px 8px rgba(0,0,0,0.5); }
 .hero-topic { position:absolute; top:14px; left:14px; padding: 4px 12px; border-radius: 12px; color:#fff; font-size: 11px; font-weight: 800; letter-spacing: 0.5px; text-transform: uppercase; }
 .hero-sent { position:absolute; top:14px; right:14px; padding: 4px 10px; border-radius:12px; font-size:11px; font-weight:800; }
 .hero-sent.sent-bullish { background: rgba(46,204,113,0.95); color:#fff; }
@@ -439,7 +495,13 @@
 .news-card:hover { border-color: var(--accent-color); transform: translateY(-1px); }
 .news-card.is-saved { box-shadow: inset 3px 0 0 #f1c40f; }
 .news-card.is-active { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(139,92,246,0.25); }
-.card-stripe { width: 4px; flex-shrink:0; }
+.card-visual { position:relative; width: 88px; flex-shrink:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:4px; color:#fff; overflow:hidden; }
+.cv-glyph, .cv-glyph-lg, .cv-stat { position:relative; z-index:1; }
+.cv-glyph { font-size:22px; line-height:1; filter: drop-shadow(0 2px 5px rgba(0,0,0,0.4)); }
+.cv-glyph-lg { font-size:32px; line-height:1; filter: drop-shadow(0 2px 6px rgba(0,0,0,0.4)); }
+.cv-stat { font-size:14px; font-weight:800; color:#fff; text-shadow:0 1px 4px rgba(0,0,0,0.55); text-align:center; padding:0 4px; }
+/* Stock-photo layer (rotated pool) — tinted by the topic gradient behind it */
+.media-bg { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; opacity:0.45; z-index:0; }
 .card-body { flex:1; padding: 14px 16px; min-width:0; }
 .card-meta { display:flex; align-items:center; gap:7px; flex-wrap:wrap; margin-bottom:6px; font-size:11px; color: var(--text-muted); }
 .topic-pill { padding: 2px 8px; border-radius: 10px; color:#fff; font-size: 9px; font-weight: 800; letter-spacing: 0.3px; text-transform: uppercase; }
@@ -455,6 +517,11 @@
 .card-save:hover, .card-save.is-on { color: #f1c40f; }
 .card-headline { font-size: 15px; font-weight: 700; color: var(--text-primary); line-height: 1.35; margin: 0 0 8px; }
 .card-preview { font-size: 12.5px; color: var(--text-secondary); line-height: 1.55; margin: 0; }
+
+/* Fast-read keyword tags */
+.kw-tags { display:flex; flex-wrap:wrap; gap:5px; margin:8px 0 2px; }
+.kw-tag { font-size:10px; font-weight:600; color:var(--text-secondary); background:rgba(255,255,255,0.05); border:1px solid var(--border); border-radius:5px; padding:2px 8px; white-space:nowrap; }
+.kw-tag::before { content:"#"; opacity:0.45; margin-right:1px; }
 
 .kn-row { display:flex; gap: 8px; flex-wrap:wrap; margin: 10px 0 4px; }
 .kn-row-compact { margin: 8px 0 0; gap:6px; }
@@ -510,6 +577,7 @@ function newsFeed() {
         savedTitles: new Map(),
         savedCount: 0,
         showSaved: false,
+        showFilters: {{ 'true' if adv_active else 'false' }},
         activeIdx: -1,
         init() {
             this.savedCount = this.saved.size;

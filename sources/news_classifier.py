@@ -85,6 +85,7 @@ CLASSIFY_PROMPT = """You are an Indian financial-news analyst. Given the article
 - what_to_watch: max 30 words. Next concrete thing to look for. Empty string if nothing forming.
 - confidence: "high" | "medium" | "low". Your confidence in source accuracy + the implication's correctness.
 - sentiment: "bullish" | "bearish" | "neutral". From the perspective of Indian equities. Only "bullish"/"bearish" if a directional read is genuinely warranted; default "neutral".
+- keywords: array of 3-5 SHORT tags (1-2 words each, Title Case) that let a reader grasp the story at a glance — the concrete entities + the action. Prefer specific names (companies, indices, people, instruments, sectors) and the key event ("Q4 Results", "Rate Hold", "Buyback", "Stake Sale"). No generic filler ("News", "Update", "Market").
 
 Rules:
 - Never speculate beyond what's in the article.
@@ -177,8 +178,93 @@ def _classify_one(client, title, summary, source):
         "what_to_watch":  (data.get("what_to_watch") or "")[:300],
         "confidence":     (data.get("confidence") or "medium") if data.get("confidence") in ("high","medium","low") else "medium",
         "sentiment":      (data.get("sentiment") or "neutral") if data.get("sentiment") in ("bullish","bearish","neutral") else "neutral",
+        "keywords":       json.dumps(_clean_keywords(data.get("keywords"))),
         "classifier_status": "done",
     }
+
+
+_GENERIC_KW = {"news", "update", "market", "markets", "stock", "stocks", "india", "report", "today"}
+
+
+def _clean_keywords(kws):
+    """Normalize the LLM keyword list: strings only, trimmed, deduped (case-
+    insensitive), drop generic filler, max 5."""
+    if not isinstance(kws, list):
+        return []
+    out, seen = [], set()
+    for k in kws:
+        if not isinstance(k, str):
+            continue
+        k = k.strip()[:28]
+        low = k.lower()
+        if not k or low in _GENERIC_KW or low in seen:
+            continue
+        seen.add(low)
+        out.append(k)
+        if len(out) >= 5:
+            break
+    return out
+
+
+KEYWORDS_PROMPT = """Extract 3-5 SHORT fast-read tags (1-2 words each, Title Case) from this Indian-market news item. Output a JSON array of strings ONLY (no prose). Prefer concrete entities (companies, indices, people, sectors, instruments) + the key event ("Q4 Results", "Rate Hold", "Buyback"). No generic filler ("News", "Market", "Update").
+
+TITLE: {title}
+SUMMARY: {summary}"""
+
+
+def _keywords_one(client, title, summary):
+    """Cheap keyword-only Haiku call for backfilling already-classified rows."""
+    try:
+        resp = client.messages.create(
+            model=HAIKU_MODEL,
+            max_tokens=120,
+            messages=[{"role": "user", "content": KEYWORDS_PROMPT.format(
+                title=(title or "").replace("\n", " ")[:300],
+                summary=(summary or "").replace("\n", " ")[:1000])}],
+        )
+        raw = resp.content[0].text.strip()
+        raw = re.sub(r"^```(?:json)?\n?", "", raw)
+        raw = re.sub(r"\n?```$", "", raw)
+        return _clean_keywords(json.loads(raw))
+    except Exception:
+        return None
+
+
+def backfill_keywords(days=30, limit=None):
+    """Populate `keywords` on already-classified rows that lack it (the main
+    classifier only touches unclassified articles, so existing rows need this)."""
+    pending = read_sql(
+        """
+        SELECT na.article_id, na.title, na.summary
+        FROM news_enriched ne JOIN news_articles na ON na.article_id = ne.article_id
+        WHERE ne.classifier_status = 'done'
+          AND (ne.keywords IS NULL OR ne.keywords = '' OR ne.keywords = '[]')
+          AND na.published_at >= date('now', ?)
+        ORDER BY na.published_at DESC
+        """,
+        params=[f"-{days} days"],
+    )
+    if limit:
+        pending = pending.head(limit)
+    total = len(pending)
+    print(f"Keyword backfill: {total} classified articles missing keywords (last {days}d)")
+    if total == 0:
+        return 0
+    client = _get_client()
+    n_done = 0
+    t0 = time.time()
+    for i, (article_id, title, summary) in enumerate(pending.itertuples(index=False), 1):
+        kws = _keywords_one(client, title, summary)
+        if kws is None:
+            continue
+        with get_db() as conn:
+            conn.execute("UPDATE news_enriched SET keywords = ? WHERE article_id = ?",
+                         (json.dumps(kws), article_id))
+        n_done += 1
+        if i % 50 == 0 or i == total:
+            print(f"  [{i}/{total}] {n_done} filled · {(time.time()-t0)/i:.2f}s/article")
+    print(f"Keyword backfill done in {time.time()-t0:.0f}s. {n_done} filled.")
+    return n_done
 
 
 def compute(limit=None, dry_run=False, days=7):
@@ -227,12 +313,12 @@ def compute(limit=None, dry_run=False, days=7):
             conn.execute(
                 """INSERT OR REPLACE INTO news_enriched
                    (article_id, topics, primary_topic, one_liner, why_it_matters,
-                    key_numbers, what_to_watch, confidence, sentiment,
+                    key_numbers, what_to_watch, confidence, sentiment, keywords,
                     classifier_status, classified_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))""",
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))""",
                 (article_id, out["topics"], out["primary_topic"], out["one_liner"],
                  out["why_it_matters"], out["key_numbers"], out["what_to_watch"],
-                 out["confidence"], out["sentiment"], out["classifier_status"]),
+                 out["confidence"], out["sentiment"], out["keywords"], out["classifier_status"]),
             )
         n_done += 1
         if i % 25 == 0 or i == total:
@@ -248,5 +334,10 @@ if __name__ == "__main__":
     p.add_argument("--limit", type=int, help="Max articles to process")
     p.add_argument("--days", type=int, default=7, help="Lookback window")
     p.add_argument("--dry-run", action="store_true")
+    p.add_argument("--backfill-keywords", action="store_true",
+                   help="Fill `keywords` on already-classified rows (uses --days, --limit)")
     args = p.parse_args()
-    compute(limit=args.limit, dry_run=args.dry_run, days=args.days)
+    if args.backfill_keywords:
+        backfill_keywords(days=args.days, limit=args.limit)
+    else:
+        compute(limit=args.limit, dry_run=args.dry_run, days=args.days)

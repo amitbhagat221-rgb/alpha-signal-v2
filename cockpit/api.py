@@ -2194,6 +2194,39 @@ _NEWS_TOPICS = [
 _NEWS_TOPIC_MAP = {tid: (label, color) for tid, label, color in _NEWS_TOPICS}
 
 
+# Local stock-photo pool (downloaded by sources/news_images.py). Cards rotate
+# through it per topic + a stable per-article hash. Empty until images are
+# downloaded → cards fall back to the on-brand gradient visual.
+_NEWS_IMG_DIR = Path(__file__).resolve().parent / "static" / "news_img"
+_news_img_pool_cache = None
+
+
+def _news_image_pool():
+    """{topic_id: [/static/... urls]}. Cached for the process (cockpit restarts
+    when the pool changes)."""
+    global _news_img_pool_cache
+    if _news_img_pool_cache is None:
+        pool = {}
+        if _NEWS_IMG_DIR.exists():
+            for d in sorted(_NEWS_IMG_DIR.iterdir()):
+                if d.is_dir():
+                    imgs = sorted(f"/static/news_img/{d.name}/{f.name}" for f in d.glob("*.jpg"))
+                    if imgs:
+                        pool[d.name] = imgs
+        _news_img_pool_cache = pool
+    return _news_img_pool_cache
+
+
+def _pick_news_bg(primary_topic, article_id, pool):
+    """Deterministic per-article pick: same article → same photo across reloads."""
+    if not pool:
+        return None
+    cands = pool.get(primary_topic) or pool.get("generic") or [x for v in pool.values() for x in v]
+    if not cands:
+        return None
+    return cands[(hash(str(article_id)) & 0x7FFFFFFF) % len(cands)]
+
+
 @_persisted_cache(300, name="_get_news_pool")
 def _get_news_pool(hours=720):
     """Cached pool: full ranked+deduped feed for the requested window.
@@ -2208,7 +2241,7 @@ def _get_news_pool(hours=720):
                na.url AS source_url, na.source, na.published_at,
                ne.primary_topic, ne.topics, ne.one_liner, ne.why_it_matters,
                ne.key_numbers, ne.what_to_watch, ne.confidence, ne.sentiment,
-               ne.classifier_status, ne.image_url
+               ne.keywords, ne.classifier_status, ne.image_url
         FROM news_articles na
         LEFT JOIN news_enriched ne ON ne.article_id = na.article_id
         WHERE na.published_at >= datetime('now', ? )
@@ -2221,6 +2254,7 @@ def _get_news_pool(hours=720):
         return []
 
     now = pd.Timestamp.now(tz="UTC")
+    img_pool = _news_image_pool()
     cards = []
     for _, r in df.iterrows():
         label, tier_num, tier_score = _news_tier(r["source"])
@@ -2244,6 +2278,13 @@ def _get_news_pool(hours=720):
                 key_numbers = _json.loads(r["key_numbers"]) or []
             except Exception:
                 key_numbers = []
+
+        keywords = []
+        if r.get("keywords") and pd.notna(r.get("keywords")):
+            try:
+                keywords = [str(k) for k in (_json.loads(r["keywords"]) or [])][:5]
+            except Exception:
+                keywords = []
 
         primary_topic = r.get("primary_topic") if pd.notna(r.get("primary_topic")) else None
         topic_label, topic_color = _NEWS_TOPIC_MAP.get(primary_topic or "", (None, None))
@@ -2269,6 +2310,8 @@ def _get_news_pool(hours=720):
             "why_it_matters": r.get("why_it_matters") if pd.notna(r.get("why_it_matters")) else None,
             "key_numbers": key_numbers,
             "n_key_numbers": len(key_numbers),
+            "keywords": keywords,
+            "bg_image": _pick_news_bg(primary_topic, r["id"], img_pool),
             "what_to_watch": r.get("what_to_watch") if pd.notna(r.get("what_to_watch")) else None,
             "confidence": r.get("confidence") if pd.notna(r.get("confidence")) else None,
             "sentiment": r.get("sentiment") if pd.notna(r.get("sentiment")) else None,
