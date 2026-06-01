@@ -1,18 +1,19 @@
 # HANDOFF
-Updated: 2026-05-31 | Branch: master (0 unpushed) | HEAD: `df3c744` fix(identity-gate): name-aware MoneyControl verification + recover false quarantines
+Updated: 2026-06-01 | Branch: master (4 unpushed) | HEAD: `0fb4ef1` feat(cockpit): headline holding horizon + maturing state on /model/outcomes
 
 ## Left off
-Shipped the full feasible-now §3.2 build-out in one session — 18 new factors (4 F&O OI + 4 in-house Black-76 IV + 6 daily microstructure + 4 PEAD) — and put idle validated alpha to work: **5 factors now carry production weight** (`iv_skew_25d` MID, `pt_upside` L/M/S, `pledge_quality` + `delivery_anomaly_z` SMALL), each orthogonality-gated. Manual actions done: cockpit-ops restarted (`/system` funnel now 85, Phase E sector badges live) and the screener re-ran so today's `daily_picks` reflect the new weights.
+Started on a cockpit/email health divergence (`/system` read 14 CRITICAL, email read 0) and it cascaded into an evaluation-methodology thread. Fixed the false alarm (all 14 were expected-empty quarantine/paper/calibration tables), switched `pick_outcomes` to trading-day horizons 20/63/126, wired the silently-dead benchmark fetch, and shipped a read-only IC-decay diagnostic that confirms factors have heterogeneous natural horizons — the registry's single-20d t-stat is the wrong lens for slow factors. **Nothing in the live model changed.**
 
 ## Pick up here
-1. **§3.2.6 `industry_id` one-hot + §3.2.7 macro betas** — the last build-now §3.2 factors. Check `macro_history` for INR-forward / G-Sec / commodity series *first* (§3.2.7 may need new sources); `industry_id` is trivial. New `signals/` + `tools/reconstruct_pit.py` wiring.
-2. **`pt_upside` artifact re-verify (due 2026-08)** — it's CAPPED in `config.SIGNAL_WEIGHTS` (0.16–0.25) pending this. Re-run `python -m tools.backtest_pit --signal pt_upside` once ≥3 fresh monthly `analyst_consensus_snapshots` exist; un-cap or pull based on whether t=7–9 holds on clean-PT periods.
-3. **Kite activation** — user adds 5 Connect creds to `run_pipeline.sh` (see `docs/reference/kite-setup.md`), then `sources/kite_pull.py --check-auth` → `--instruments` → `--backfill-bars`, wire `fetch_kite_bars` into `PIPELINE_STEPS`. Starts the ~90d clock for the 3 held intraday §3.2.3 factors.
+1. **Decide ADR 0036's follow-up** — store `natural_horizon` in the registry + switch the promotion gate to net-of-cost IR at that horizon (data already in [tools/ic_decay.py](tools/ic_decay.py) / `data/ic_decay.json`; needs `backtest_pit.py` + registry + a turnover/cost model). The real lever from today; ties into Track 3.3a.
+2. **Resume §3.2.6 `industry_id` one-hot + §3.2.7 macro betas** — today's *intended* work before the drive-bys. Check `macro_history` coverage first; new `signals/` + `tools/reconstruct_pit.py` wiring.
+3. **`pt_upside` artifact re-verify (due 2026-08)** — now reinforced: ic_decay shows IC=0.67 / t=28 at 252d (survivorship). Re-run `python -m tools.backtest_pit --signal pt_upside` once ≥3 fresh `analyst_consensus_snapshots` exist → un-cap or pull.
 
 ## Watch out
-- **Long-running cockpit services cache the factor registry in memory + a 300s disk cache** (`get_factor_health` `@_persisted_cache`). Any future `BACKTEST_SIGNALS`/`SIGNAL_WEIGHTS` edit needs `sudo systemctl restart alpha-cockpit-ops` to show in `/system` — editing `db.py`/`config.py` alone won't (this is why it read 66 not 85 today).
-- **`kyle_lambda` (t=4.24) and `corporate_action_density` (t=−3.67) are statistical KEEPs deliberately NOT promoted** (cost-coupled liquidity tilt / unclear mechanism). Don't let a future mechanical sweep wire them — see signal-weights.md "On the bench".
-- **PEAD factors approximate announcement = period_end + 45d** (no real announce dates); don't treat `pead_drift_60d` / `earnings_surprise_std` as precise event-time, and don't re-attempt PEAD without an earnings-calendar feed (memory `pead_needs_announce_dates`).
+- **ic_decay raw-|IC| "peak" classifies almost everything SLOW@252d** — partly mechanical (IC grows with horizon) + long-horizon survivorship (current-names-only universe). Read shape + sign-stability, NOT absolute peak. Do **not** wire a natural-horizon off raw peak |IC| without the net-of-cost normalization.
+- **`pick_outcomes` 63d/126d are EMPTY until ~2026-07-06 / ~2026-10-02** (picks maturing). `/model` `headline_window` auto-promotes; empty is expected, not broken.
+- `data/ic_decay.json` is gitignored → `--plot-only` reads it, so the committed `output/ic_decay_curves.png` can't be redrawn without the full ~3-min recompute.
+- ic_decay graph "bold = live" matches only 4 factors (`config.SIGNAL_WEIGHTS` uses screener names ≠ backtest signal-ids) — known impedance mismatch, not a bug.
 
 ## Active plan
-[docs/plans/0002-100-factors-and-model.md](docs/plans/0002-100-factors-and-model.md) — Phase 3.2, **42/50 PIT-shipped**. §3.2.1✅ §3.2.2✅(8/8) §3.2.3 6/9 §3.2.5 4/6; §3.2.6+§3.2.7 next; §3.2.3-rest + §3.2.4 blocked on Kite/NLP (3.1c/3.1d).
+[docs/plans/0002-100-factors-and-model.md](docs/plans/0002-100-factors-and-model.md) — Phase 3.2, 42/50 PIT-shipped; §3.2.6 + §3.2.7 next. [ADR 0036](docs/decisions/0036-horizon-resolved-factor-evaluation.md) opens a Track-3.3a-adjacent methodology thread.
