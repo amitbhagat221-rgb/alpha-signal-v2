@@ -110,6 +110,13 @@ def _fetch_one(ticker, sid_for_gate=None):
     tgt_mean = info.get("targetMeanPrice")
     if tgt_mean is None:
         return None
+    # NOTE: implausible-PT rejection is handled downstream by the per-fetch
+    # plausibility gate in compute() (tier-aware pt_upside_pct ranges →
+    # route_on_plausibility → quarantine + gate_2_plausibility=0 verdict, which
+    # feeds the per-stock UHS). Stale/pre-gate garbage already in the table is
+    # caught by sweep_pt_plausibility(). We deliberately do NOT silently drop
+    # here — that would bypass the verdict and the stock's UHS wouldn't reflect
+    # the rejected datum.
     rec_mix = {}
     rating_mix_history = None
     try:
@@ -182,6 +189,43 @@ def _fetch_one(ticker, sid_for_gate=None):
         "next_earnings_date":  next_earnings_date,
         "rating_mix_history":  rating_mix_history,
     }
+
+
+def sweep_pt_plausibility(snapshot_date=None):
+    """Backstop over STORED analyst_consensus PTs: null any target implausible
+    vs the latest close (>3× / <0.33×, the SMALL hard cap) AND record a per-sid
+    gate_2_plausibility=0 verdict so the stock's UHS reflects the rejected datum.
+
+    The per-fetch gate in compute() only sees freshly-fetched values; this
+    catches stale/pre-gate garbage (e.g. SPRE ₹3960 written before the gate
+    existed, then Yahoo went quiet). Runs daily after the fetch."""
+    from datetime import datetime
+    from db import read_sql, get_db
+    from validators.plausibility import record_pt_plausibility_fail
+    snapshot_date = snapshot_date or datetime.now().date().isoformat()
+    df = read_sql(
+        """
+        WITH px AS (SELECT sid, close FROM stock_prices sp
+                    WHERE date=(SELECT MAX(date) FROM stock_prices WHERE sid=sp.sid))
+        SELECT ac.sid, ac.price_target, px.close
+        FROM analyst_consensus ac JOIN px ON px.sid = ac.sid
+        WHERE ac.price_target IS NOT NULL AND px.close > 0
+          AND (ac.price_target > 3.0 * px.close OR ac.price_target < 0.33 * px.close)
+        """
+    )
+    n = 0
+    for _, r in df.iterrows():
+        ratio = r["price_target"] / r["close"]
+        record_pt_plausibility_fail(
+            r["sid"], snapshot_date,
+            f"PT {r['price_target']:.0f} vs close {r['close']:.1f} = {ratio:.1f}x (implausible)")
+        with get_db() as conn:
+            conn.execute(
+                "UPDATE analyst_consensus SET price_target=NULL, price_target_median=NULL, "
+                "price_target_high=NULL, price_target_low=NULL WHERE sid=?", (r["sid"],))
+        n += 1
+    print(f"sweep_pt_plausibility: flagged + nulled {n} implausible stored PTs ({snapshot_date})")
+    return n
 
 
 def compute(limit=None, ticker=None, tier=None, snapshot=False, dry_run=False):
@@ -335,6 +379,11 @@ def compute(limit=None, ticker=None, tier=None, snapshot=False, dry_run=False):
         upsert_df(pd.DataFrame(consensus_rows), "analyst_consensus")
     if snapshot_rows:
         upsert_df(pd.DataFrame(snapshot_rows), "analyst_consensus_snapshots")
+
+    # Backstop: null + flag any stored implausible PT (stale/pre-gate garbage
+    # the per-fetch gate above can't see). Skip on single-ticker smoke runs.
+    if not ticker:
+        sweep_pt_plausibility(snapshot_date=fetched_at[:10])
 
     pct_have    = 100 * n_with_data / len(stocks) if len(stocks) else 0
     pct_spread  = 100 * n_real_spread / n_with_data if n_with_data else 0

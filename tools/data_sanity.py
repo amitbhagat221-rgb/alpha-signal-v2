@@ -186,6 +186,31 @@ CHECKS = [
         """,
     },
     {
+        "code": "PT_RATIO_IMPLAUSIBLE",
+        "table": "analyst_consensus",
+        "column": "price_target",
+        "message": "analyst PT implies >3x or <0.33x the close (Yahoo garbage for thin-coverage small-caps — SPRE ₹3960 vs ₹110)",
+        "critical_pct": 3,
+        "warn_pct": 0.5,
+        "sql": """
+            WITH latest_px AS (
+                SELECT sid, close FROM stock_prices
+                WHERE (sid, date) IN (SELECT sid, MAX(date) FROM stock_prices GROUP BY sid)
+            )
+            SELECT
+                SUM(CASE WHEN ac.price_target > 3.0 * lp.close OR ac.price_target < 0.33 * lp.close THEN 1 ELSE 0 END) AS n_bad,
+                COUNT(*) AS n_total,
+                (SELECT ac2.sid || ': PT=' || ROUND(ac2.price_target,1) || ' / close=' || ROUND(lp2.close,1)
+                 FROM analyst_consensus ac2 JOIN latest_px lp2 ON ac2.sid = lp2.sid
+                 WHERE (ac2.price_target > 3.0 * lp2.close OR ac2.price_target < 0.33 * lp2.close)
+                   AND ac2.has_analyst_data = 1 AND ac2.price_target IS NOT NULL
+                 ORDER BY ac2.price_target / lp2.close DESC LIMIT 1) AS sample
+            FROM analyst_consensus ac
+            JOIN latest_px lp ON ac.sid = lp.sid
+            WHERE ac.has_analyst_data = 1 AND ac.price_target IS NOT NULL AND lp.close > 0
+        """,
+    },
+    {
         "code": "FORECAST_HISTORY_IS_PRICE_HISTORY",
         "deprecated_in_plan_0007": "Plan 0007 Gate 4 (cross_source)",
         "table": "forecast_history",

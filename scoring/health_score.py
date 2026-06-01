@@ -254,14 +254,17 @@ def dim_freshness_for_table(table: str, age_days: Optional[float]) -> tuple[Opti
 
 
 def _gate_pass_rate(gate_col: str, tables: list[str], snapshot_date: str,
-                     lookback_days: int = 7) -> Optional[float]:
+                     lookback_days: int = 7, sid: Optional[str] = None) -> Optional[float]:
     """Compute pass-rate of a trust_verdicts gate over a recent window.
 
+    When `sid` is given, restrict to THAT stock's verdicts (per-stock UHS);
+    otherwise compute the universe-wide rate (legacy factor-level behaviour).
     Returns fraction in [0, 1] or None if no rows in window.
     """
     if not tables:
         return None
     placeholders = ",".join("?" * len(tables))
+    sid_clause = " AND sid = ?" if sid else ""
     df = read_sql(
         f"""
         SELECT {gate_col} AS gate, COUNT(*) AS n
@@ -269,10 +272,10 @@ def _gate_pass_rate(gate_col: str, tables: list[str], snapshot_date: str,
         WHERE source_table IN ({placeholders})
           AND snapshot_date >= date(?, '-{lookback_days} days')
           AND snapshot_date <= ?
-          AND {gate_col} IS NOT NULL
+          AND {gate_col} IS NOT NULL{sid_clause}
         GROUP BY {gate_col}
         """,
-        params=tables + [snapshot_date, snapshot_date],
+        params=tables + [snapshot_date, snapshot_date] + ([sid] if sid else []),
     )
     if df.empty:
         return None
@@ -532,18 +535,42 @@ def rollup_pick_uhs(sid: str, pick_date: str) -> dict:
     n_contributing = sum(1 for f in weights if f in fmap)
     if n_contributing == 0:
         return compute_uhs("pick", f"{sid}|{pick_date}", pick_date)
+
+    # Per-STOCK dims: for the verdict-based dimensions (provenance / plausibility
+    # / consistency) use THIS sid's own trust_verdicts over the pick's upstream
+    # tables, so the badge reflects the individual stock's data quality — not the
+    # universe-wide average that made every tier-mate identical. Fall back to the
+    # factor-weighted mean when the stock has no per-sid verdict for that gate
+    # (keeps coverage broad — no mass-PRELIMINARY). Freshness + coverage stay
+    # table/factor-level (a table's recency/completeness isn't per-stock).
+    up_tables = sorted({t for fid in weights for t in FACTOR_UPSTREAM_TABLES.get(fid, [])})
+
+    def _sid_dim(gate_col, fallback_dim):
+        rate = _gate_pass_rate(gate_col, up_tables, pick_date, sid=sid)
+        return int(round(20 * rate)) if rate is not None else _wmean(fallback_dim)
+
+    def _sid_consistency():
+        rates = [r for r in (
+            _gate_pass_rate("gate_3_temporal",     up_tables, pick_date, sid=sid),
+            _gate_pass_rate("gate_4_cross_source", up_tables, pick_date, sid=sid),
+            _gate_pass_rate("gate_5_unit",         up_tables, pick_date, sid=sid),
+            _gate_pass_rate("gate_7_anchor",       up_tables, pick_date, sid=sid),
+        ) if r is not None]
+        return int(round(20 * (sum(rates) / len(rates)))) if rates else _wmean("dim_consistency")
+
     return compute_uhs(
         entity_kind="pick",
         entity_id=f"{sid}|{pick_date}",
         snapshot_date=pick_date,
-        dim_provenance=_wmean("dim_provenance"),
+        dim_provenance=_sid_dim("gate_1_identity", "dim_provenance"),
         dim_freshness=_wmean("dim_freshness"),
-        dim_plausibility=_wmean("dim_plausibility"),
-        dim_consistency=_wmean("dim_consistency"),
+        dim_plausibility=_sid_dim("gate_2_plausibility", "dim_plausibility"),
+        dim_consistency=_sid_consistency(),
         dim_coverage=_wmean("dim_coverage"),
         reasons={
             "weight_mean": f"across {n_contributing} factors of {len(weights)} weighted",
             "tier": tier,
+            "per_sid": f"prov/plaus/consistency from {sid}'s verdicts over {up_tables}",
         },
     )
 

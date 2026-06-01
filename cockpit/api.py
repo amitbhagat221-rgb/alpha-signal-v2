@@ -147,6 +147,15 @@ def get_analyst_consensus(sid):
         cmp = price.iloc[0]["close"]
         if cmp > 0:
             r["current_price"] = round(cmp, 2)
+            # Display guard: never surface an implausible PT (>3x / <0.33x the
+            # price = Yahoo garbage for thin-coverage small-caps). Mirrors the
+            # source guard in sources/yfinance_analyst.py so a leaked row can't
+            # reach the user as a confident "+3474%" target.
+            _pt = r.get("price_target")
+            if _pt and (_pt > 3 * cmp or _pt < 0.33 * cmp):
+                for _k in ("price_target", "price_target_median",
+                           "price_target_high", "price_target_low"):
+                    r[_k] = None
             if r.get("price_target"):
                 r["pt_upside_pct"] = round((r["price_target"] / cmp - 1) * 100, 1)
             if r.get("price_target_median"):
@@ -800,30 +809,50 @@ def get_stock_detail(sid):
     # rollup writes were not in the 30-day backfill (factor + table only); read
     # the latest pick UHS if it exists, otherwise compute the most-recent pick
     # row's UHS on demand.
+    # UHS badge = the CANONICAL per-pick value persisted on daily_picks
+    # (per-sid rollup + Gate-6 cap, same value the morning-brief gate uses).
+    # Reading the daily_picks columns avoids the stale health_score 'pick' rows
+    # that an earlier nightly run may have left (ADR 0037). Falls back to an
+    # on-demand per-sid rollup only when daily_picks hasn't been scored yet.
     pick_for_uhs = read_sql(
-        "SELECT sid, pick_date FROM daily_picks WHERE sid=? ORDER BY pick_date DESC LIMIT 1",
+        "SELECT pick_date, uhs_score, uhs_label, uhs_breakdown_json "
+        "FROM daily_picks WHERE sid=? ORDER BY pick_date DESC LIMIT 1",
         params=[sid],
     )
     if not pick_for_uhs.empty:
-        from scoring.health_score import get_uhs, rollup_pick_uhs
-        pd_str = pick_for_uhs.iloc[0]["pick_date"]
-        entity_id = f"{sid}|{pd_str}"
-        uhs = get_uhs("pick", entity_id)
-        if uhs is None:
-            # On-demand compute (one row, cheap). Don't persist — that's the
-            # nightly cron's job; cockpit reads should be idempotent.
-            uhs = rollup_pick_uhs(sid, pd_str)
-        if uhs:
+        import json as _json
+        prow = pick_for_uhs.iloc[0]
+        if pd.notna(prow["uhs_score"]):
+            bd = {}
+            try:
+                bd = _json.loads(prow["uhs_breakdown_json"] or "{}")
+            except Exception:
+                bd = {}
+            dims = bd.get("dims", {})
             detail["uhs"] = {
-                "score_pct":    uhs.get("score_pct"),
-                "label":        uhs.get("label"),
-                "dim_provenance":   uhs.get("dim_provenance"),
-                "dim_freshness":    uhs.get("dim_freshness"),
-                "dim_plausibility": uhs.get("dim_plausibility"),
-                "dim_consistency":  uhs.get("dim_consistency"),
-                "dim_coverage":     uhs.get("dim_coverage"),
-                "reasons":      uhs.get("reasons_json"),
+                "score_pct":        int(prow["uhs_score"]),
+                "label":            prow["uhs_label"],
+                "dim_provenance":   dims.get("provenance"),
+                "dim_freshness":    dims.get("freshness"),
+                "dim_plausibility": dims.get("plausibility"),
+                "dim_consistency":  dims.get("consistency"),
+                "dim_coverage":     dims.get("coverage"),
+                "reasons":          _json.dumps(bd.get("reasons", {})),
             }
+        else:
+            from scoring.health_score import rollup_pick_uhs
+            uhs = rollup_pick_uhs(sid, prow["pick_date"])
+            if uhs:
+                detail["uhs"] = {
+                    "score_pct":        uhs.get("score_pct"),
+                    "label":            uhs.get("label"),
+                    "dim_provenance":   uhs.get("dim_provenance"),
+                    "dim_freshness":    uhs.get("dim_freshness"),
+                    "dim_plausibility": uhs.get("dim_plausibility"),
+                    "dim_consistency":  uhs.get("dim_consistency"),
+                    "dim_coverage":     uhs.get("dim_coverage"),
+                    "reasons":          uhs.get("reasons_json"),
+                }
 
     return detail
 

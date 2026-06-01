@@ -212,6 +212,27 @@ def route_on_plausibility(
     return "PASS_THROUGH"
 
 
+def record_pt_plausibility_fail(sid, snapshot_date, reason, source_table="consensus_signals"):
+    """Record a per-sid gate_2_plausibility=0 verdict for an implausible PT.
+
+    Lightweight verdict-only write (no quarantine-table row) used by the stored-
+    PT sweep — so the stock's per-sid UHS Plausibility dim drops to reflect the
+    rejected target. Idempotent per (sid, source_table, datum_class, snapshot)."""
+    import json
+    from db import get_db
+    with get_db() as conn:
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO trust_verdicts
+              (sid, source_table, source_key, datum_class, snapshot_date,
+               gate_2_plausibility, reasons_json, verdict_overall)
+            VALUES (?, ?, ?, ?, ?, 0, ?, 'QUARANTINED')
+            """,
+            (sid, source_table, json.dumps({"sid": sid}), "pt_upside_pct", snapshot_date,
+             json.dumps({"gate_2_plausibility": {"reason": reason}})),
+        )
+
+
 def _quarantine_for_plausibility(source_table, row, sid, datum_class, verdict, snapshot_date):
     """Atomic write: append row to <source_table>_quarantine + insert
     trust_verdicts with gate_2_plausibility=0 + verdict_overall=QUARANTINED."""
