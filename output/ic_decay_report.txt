@@ -1,0 +1,245 @@
+IC TERM STRUCTURE — mean Spearman IC by forward horizon (trading days)
+natural horizon = peak |IC|.  ⚠ = sign flips across horizons (reversal).
+
+
+── FAST (54) ──
+signal                       tier          5d       20d       63d      126d      252d   peak   bucket
+asset_tangibility            SMALL     -0.021    -0.011    -0.004    +0.004    +0.007     5d     FAST ⚠
+ccc                          LARGE     +0.002    +0.050    +0.040    -0.001    +0.001    20d     FAST ⚠
+consensus_signal_combined    SMALL     +0.013    +0.031    +0.026    +0.018    +0.009    20d     FAST
+corporate_action_density     SMALL     -0.023    -0.015    +0.011    +0.014    -0.007     5d     FAST ⚠
+delivery_anomaly_z           SMALL     +0.033    +0.022    +0.021    +0.020    +0.019     5d     FAST
+earnings_beat_rate           MID       -0.032    +0.032    -0.025    -0.050         —     5d     FAST ⚠
+earnings_persistence         LARGE     -0.068    -0.016    -0.000    +0.091         —     5d     FAST
+eps_growth_yoy               MID       -0.017    +0.026    -0.017    -0.039         —    20d     FAST ⚠
+eps_revision_yoy             LARGE     -0.020    +0.047    +0.039    +0.039    +0.037    20d     FAST ⚠
+eps_revision_yoy             SMALL     +0.005    +0.024    +0.014    -0.000    -0.009    20d     FAST ⚠
+financial_quality            MID       -0.038    -0.026    -0.018    -0.013         —     5d     FAST
+financial_recovery           SMALL     -0.076    -0.041    +0.004    -0.001    +0.021     5d     FAST ⚠
+financial_signal             MID       -0.040    -0.029    -0.029    -0.013         —     5d     FAST
+goodwill_to_assets           SMALL     -0.025    -0.017    -0.008    -0.009    +0.015     5d     FAST ⚠
+growth_composite             MID       -0.013    +0.041    -0.007    -0.089         —    20d     FAST ⚠
+growth_composite             SMALL     -0.073    -0.024    +0.041    +0.025         —     5d     FAST ⚠
+intraday_range_compression   LARGE     -0.037    -0.022    -0.025    +0.015    +0.022     5d     FAST ⚠
+iv_skew_25d                  SMALL     -0.006    +0.004    -0.005    -0.005         —     5d     FAST ⚠
+iv_term_structure            SMALL     -0.075    -0.143    -0.065    -0.072         —    20d     FAST
+m_score                      SMALL     -0.009    +0.025    +0.019    +0.005         —    20d     FAST ⚠
+macd_signal                  MID       -0.020    -0.002    +0.002    -0.006    -0.014     5d     FAST ⚠
+macd_signal                  SMALL     -0.037    -0.020    -0.021    -0.013    -0.013     5d     FAST
+margin_slope                 LARGE     +0.058    +0.029    +0.027    +0.018    -0.003     5d     FAST ⚠
+max_pain_distance            LARGE     +0.041    -0.009    +0.003         —         —     5d     FAST ⚠
+oi_buildup_signal            LARGE     +0.048    -0.000    -0.005         —         —     5d     FAST ⚠
+oi_buildup_signal            SMALL     +0.028    +0.006    -0.016         —         —     5d     FAST ⚠
+pcr_oi                       LARGE     +0.037    -0.004    -0.010         —         —     5d     FAST ⚠
+pcr_volume                   MID       -0.036    -0.013    +0.001         —         —     5d     FAST ⚠
+pcr_volume                   SMALL     -0.043    -0.084    +0.018         —         —    20d     FAST ⚠
+pead_drift_60d               SMALL     -0.047    -0.026    -0.036    -0.036    -0.016     5d     FAST
+pledge_quality               SMALL     -0.020    +0.057    -0.013    -0.015    -0.006    20d     FAST ⚠
+profit_margin                SMALL     +0.043    -0.009    +0.002    -0.009    -0.005     5d     FAST ⚠
+promoter_qoq                 SMALL     +0.049    +0.087    +0.045    +0.056    +0.067    20d     FAST
+promoter_trend_4q            LARGE     -0.064    -0.020    -0.024         —         —     5d     FAST
+promoter_trend_4q            MID       -0.007    +0.080    +0.074         —         —    20d     FAST ⚠
+quality_composite            SMALL     +0.054    +0.034    -0.001    -0.019    -0.019     5d     FAST ⚠
+revenue_growth_yoy           LARGE     +0.101    +0.032    +0.071    +0.077         —     5d     FAST
+revenue_growth_yoy           MID       -0.006    +0.042    -0.006    -0.128         —    20d     FAST ⚠
+revenue_growth_yoy           SMALL     -0.105    -0.053    +0.026    +0.010         —     5d     FAST ⚠
+roa                          SMALL     +0.046    +0.031    -0.005    -0.031    -0.040     5d     FAST ⚠
+roe                          LARGE     +0.024    -0.022    -0.010    -0.002    +0.003     5d     FAST ⚠
+roiic                        LARGE     +0.055    +0.009    +0.008    -0.010    -0.044     5d     FAST ⚠
+sector_momentum              SMALL     +0.017    +0.016    +0.010    +0.006    +0.010     5d     FAST
+sentiment_7d                 LARGE     -0.091    -0.149         —         —         —     5d     FAST
+sentiment_7d                 MID       -0.074    -0.064         —         —         —     5d     FAST
+sentiment_7d                 SMALL     -0.151    -0.012         —         —         —     5d     FAST
+share_momentum               LARGE     -0.025    -0.011    -0.017    +0.000    -0.009     5d     FAST ⚠
+share_momentum               MID       -0.031    -0.018    -0.019    +0.008    +0.004     5d     FAST ⚠
+short_selling_signal         LARGE     -0.023    -0.019    -0.022    +0.001    +0.004     5d     FAST ⚠
+sloan_accruals_full          MID       +0.016    +0.040    +0.004    -0.023    -0.035    20d     FAST ⚠
+vwap_deviation_5d            LARGE     -0.033    -0.000    +0.019    +0.023    -0.009     5d     FAST ⚠
+vwap_deviation_5d            MID       -0.029    -0.018    -0.012    -0.010    -0.019     5d     FAST
+vwap_deviation_5d            SMALL     -0.033    -0.014    -0.003    +0.004    -0.000     5d     FAST ⚠
+wc_intensity                 LARGE     +0.002    +0.045    +0.037    -0.002    +0.001    20d     FAST ⚠
+
+── MEDIUM (41) ──
+signal                       tier          5d       20d       63d      126d      252d   peak   bucket
+book_to_price                LARGE     -0.019    +0.026    +0.050    +0.044    +0.016    63d   MEDIUM ⚠
+bs_accruals_ratio            MID       -0.011    +0.002    +0.022    +0.015    +0.002    63d   MEDIUM ⚠
+ccc                          MID       +0.056    +0.048    +0.101    +0.070    +0.085    63d   MEDIUM
+ccc                          SMALL     +0.016    +0.023    +0.031    +0.029    +0.029    63d   MEDIUM
+delivery_anomaly_z           LARGE     +0.022    -0.002    -0.025    -0.012    -0.004    63d   MEDIUM ⚠
+earnings_beat_rate           LARGE     +0.080    +0.047    +0.093    +0.112         —    63d   MEDIUM
+earnings_beat_rate           SMALL     -0.002    +0.017    +0.041    +0.038         —    63d   MEDIUM ⚠
+earnings_persistence         MID       +0.020    -0.024    -0.038    -0.058         —    63d   MEDIUM ⚠
+earnings_persistence         SMALL     -0.045    -0.055    -0.084    -0.097         —    63d   MEDIUM
+earnings_surprise_std        MID       -0.010    +0.006    +0.010    -0.004    -0.029    63d   MEDIUM ⚠
+eps_growth_yoy               LARGE     +0.046    +0.123    +0.185    +0.236         —    63d   MEDIUM
+eps_growth_yoy               SMALL     -0.006    +0.006    +0.044    +0.034         —    63d   MEDIUM ⚠
+fcf_margin                   SMALL     +0.010    -0.012    -0.015    -0.011    -0.012    63d   MEDIUM ⚠
+fcf_yield                    LARGE     +0.015    +0.019    +0.032    +0.020    -0.022    63d   MEDIUM ⚠
+growth_composite             LARGE     +0.093    +0.097    +0.158    +0.205         —    63d   MEDIUM
+iv_percentile_1y             LARGE     +0.023    +0.035    +0.056    +0.017         —    63d   MEDIUM
+iv_percentile_1y             SMALL     -0.012    +0.026    +0.031    +0.017         —    63d   MEDIUM ⚠
+iv_realised_spread           LARGE     +0.024    +0.019    -0.032    +0.031         —    63d   MEDIUM ⚠
+iv_realised_spread           MID       -0.025    -0.014    -0.032    -0.013         —    63d   MEDIUM
+iv_skew_25d                  MID       +0.032    +0.060    +0.067    +0.021         —    63d   MEDIUM
+m_score                      LARGE     -0.004    -0.063    -0.074    -0.106         —    63d   MEDIUM
+m_score                      MID       -0.029    -0.035    -0.105    -0.210         —    63d   MEDIUM
+margin_slope                 MID       +0.001    +0.006    -0.022    -0.021    -0.007    63d   MEDIUM ⚠
+max_pain_distance            MID       +0.032    -0.022    -0.074         —         —    63d   MEDIUM ⚠
+max_pain_distance            SMALL     +0.002    -0.054    -0.176         —         —    63d   MEDIUM ⚠
+mom_12m_adj                  LARGE     -0.028    -0.052    -0.068    -0.045    -0.001    63d   MEDIUM
+mom_composite                SMALL     +0.015    +0.025    +0.029    +0.029    +0.002    63d   MEDIUM
+nwc_to_revenue               MID       +0.052    +0.043    +0.057    +0.027    +0.035    63d   MEDIUM
+oi_buildup_signal            MID       +0.004    -0.011    -0.030         —         —    63d   MEDIUM ⚠
+pcr_oi                       MID       +0.014    +0.007    -0.026         —         —    63d   MEDIUM ⚠
+pcr_oi                       SMALL     +0.029    +0.008    +0.060         —         —    63d   MEDIUM
+pcr_volume                   LARGE     -0.008    -0.042    -0.065         —         —    63d   MEDIUM
+pead_drift_60d               LARGE     -0.049    -0.022    -0.076    -0.040    -0.038    63d   MEDIUM
+pead_drift_60d               MID       -0.048    -0.035    -0.068    -0.025    -0.064    63d   MEDIUM
+piotroski_f_score            MID       +0.028    +0.037    +0.052    +0.032    -0.006    63d   MEDIUM ⚠
+pledge_quality               MID       -0.013    -0.016    -0.020    +0.000    +0.007    63d   MEDIUM ⚠
+position_52w                 LARGE     -0.051    -0.031    -0.062    -0.044    -0.043    63d   MEDIUM
+promoter_trend_4q            SMALL     -0.029    -0.023    +0.044         —         —    63d   MEDIUM ⚠
+sector_momentum              LARGE     -0.048    -0.017    -0.058    -0.009    +0.011    63d   MEDIUM ⚠
+sector_momentum              MID       +0.020    +0.012    -0.024    +0.018    +0.014    63d   MEDIUM ⚠
+wc_intensity                 MID       +0.050    +0.040    +0.085    +0.054    +0.066    63d   MEDIUM
+
+── SLOW (132) ──
+signal                       tier          5d       20d       63d      126d      252d   peak   bucket
+asset_tangibility            LARGE     -0.024    -0.007    -0.021    -0.097    -0.124   252d     SLOW
+asset_tangibility            MID       +0.007    -0.018    +0.032    +0.044    +0.014   126d     SLOW ⚠
+avg_delivery_pct_30d         LARGE     -0.001    +0.011    +0.025    +0.029    -0.030   252d     SLOW ⚠
+avg_delivery_pct_30d         MID       +0.012    +0.018    +0.052    +0.065    +0.071   252d     SLOW
+avg_delivery_pct_30d         SMALL     +0.038    +0.062    +0.097    +0.121    +0.116   126d     SLOW
+bidask_spread_proxy          LARGE     +0.032    +0.021    +0.080    +0.126    +0.135   252d     SLOW
+bidask_spread_proxy          MID       +0.012    +0.028    +0.064    +0.099    +0.097   126d     SLOW
+bidask_spread_proxy          SMALL     +0.027    +0.010    +0.031    +0.048    +0.065   252d     SLOW
+book_to_price                MID       +0.034    +0.051    +0.083    +0.115    +0.126   252d     SLOW
+book_to_price                SMALL     +0.017    +0.038    +0.076    +0.109    +0.142   252d     SLOW
+bs_accruals_ratio            LARGE     -0.024    +0.028    +0.053    +0.064    +0.033   126d     SLOW ⚠
+bs_accruals_ratio            SMALL     +0.001    -0.016    -0.010    -0.024    -0.012   126d     SLOW ⚠
+bulk_deal_signal             SMALL     +0.035    +0.056    +0.080    +0.080    +0.080   126d     SLOW
+buyback_announcement_30d     SMALL     -0.003    -0.003    -0.011    +0.002    -0.012   252d     SLOW ⚠
+capex_to_dep                 LARGE     -0.073    -0.051    -0.068    -0.083    -0.098   252d     SLOW
+capex_to_dep                 MID       +0.001    +0.010    -0.018    -0.020    -0.023   252d     SLOW ⚠
+capex_to_dep                 SMALL     -0.010    -0.005    -0.014    -0.050    -0.057   252d     SLOW
+cf_accruals_ratio            LARGE     +0.002    +0.004    -0.020    -0.072    +0.012   126d     SLOW ⚠
+cf_accruals_ratio            MID       -0.035    -0.056    -0.104    -0.162    -0.200   252d     SLOW
+cf_accruals_ratio            SMALL     +0.004    -0.015    -0.022    -0.033    -0.035   252d     SLOW ⚠
+closing_strength_1m          LARGE     +0.029    +0.014    -0.030    -0.032    -0.031   126d     SLOW ⚠
+closing_strength_1m          MID       -0.020    +0.002    -0.023    -0.043    -0.060   252d     SLOW ⚠
+closing_strength_1m          SMALL     -0.015    +0.015    +0.021    +0.029    +0.004   126d     SLOW ⚠
+consensus_signal_combined    LARGE     -0.005    +0.056    +0.046    +0.062    +0.035   126d     SLOW ⚠
+consensus_signal_combined    MID       -0.035    -0.017    -0.054    -0.048    -0.061   252d     SLOW
+corporate_action_density     LARGE     -0.039    -0.086    -0.144    -0.149    -0.101   126d     SLOW
+corporate_action_density     MID       -0.030    -0.013    -0.020    -0.047    -0.026   126d     SLOW
+debt_structure               LARGE     -0.044    +0.003    +0.039    +0.037    +0.094   252d     SLOW ⚠
+debt_structure               MID       +0.021    +0.005    +0.024    +0.043    +0.085   252d     SLOW
+debt_structure               SMALL     +0.002    -0.002    +0.021    +0.034    +0.062   252d     SLOW ⚠
+debt_to_equity               LARGE     -0.003    +0.042    +0.027    +0.051    +0.067   252d     SLOW ⚠
+debt_to_equity               MID       -0.001    +0.046    +0.065    +0.105    +0.099   126d     SLOW ⚠
+debt_to_equity               SMALL     +0.000    +0.007    +0.015    +0.022    +0.026   252d     SLOW
+delivery_anomaly_z           MID       +0.005    -0.016    -0.014    -0.011    -0.017   252d     SLOW ⚠
+dio_change_yoy               LARGE     -0.005    +0.005    -0.010    -0.029    -0.051   252d     SLOW ⚠
+dio_change_yoy               MID       -0.019    +0.008    -0.039    -0.071    -0.102   252d     SLOW ⚠
+dio_change_yoy               SMALL     +0.001    -0.001    -0.006    -0.016    -0.018   252d     SLOW ⚠
+dso_change_yoy               LARGE     -0.028    -0.028    -0.054    -0.075    -0.103   252d     SLOW
+dso_change_yoy               MID       -0.002    -0.003    -0.031    -0.041    -0.030   126d     SLOW
+dso_change_yoy               SMALL     +0.004    -0.001    -0.008    -0.021    -0.036   252d     SLOW ⚠
+earnings_surprise_std        LARGE     -0.009    +0.010    +0.051    +0.060    +0.116   126d     SLOW ⚠
+earnings_surprise_std        SMALL     -0.017    +0.003    +0.016    +0.018    +0.019   126d     SLOW ⚠
+earnings_yield               LARGE     +0.026    +0.046    +0.071    +0.062    +0.072   252d     SLOW
+earnings_yield               MID       -0.004    +0.021    +0.041    +0.048    +0.081   252d     SLOW ⚠
+earnings_yield               SMALL     +0.053    +0.058    +0.044    +0.058    +0.073   252d     SLOW
+eps_revision_yoy             MID       -0.051    -0.026    -0.036    -0.040    -0.059   252d     SLOW
+fcf_margin                   LARGE     +0.011    +0.002    -0.009    -0.047    -0.087   252d     SLOW ⚠
+fcf_margin                   MID       -0.016    -0.026    -0.052    -0.070    -0.084   252d     SLOW
+fcf_yield                    MID       +0.047    +0.027    +0.041    +0.050    +0.062   252d     SLOW
+fcf_yield                    SMALL     +0.011    +0.005    +0.013    +0.016    +0.027   252d     SLOW
+financial_quality            SMALL     +0.019    +0.013    +0.029    +0.068    +0.133   252d     SLOW
+financial_recovery           MID       +0.006    +0.072    +0.099    +0.164         —   126d     SLOW
+financial_signal             SMALL     +0.019    +0.011    +0.001    +0.013    +0.051   252d     SLOW
+goodwill_to_assets           LARGE     +0.059    -0.019    -0.023    -0.064    -0.103   252d     SLOW ⚠
+goodwill_to_assets           MID       -0.049    -0.075    -0.075    -0.079    -0.149   252d     SLOW
+insider_signal               LARGE     +0.023    -0.023    +0.006    -0.088    -0.152   252d     SLOW ⚠
+insider_signal               MID       -0.018    -0.018    -0.009    -0.044    +0.005   126d     SLOW ⚠
+insider_signal               SMALL     +0.018    +0.025    +0.021    +0.019    +0.035   252d     SLOW
+interest_coverage            LARGE     -0.034    -0.052    -0.083    -0.105    -0.105   252d     SLOW
+interest_coverage            MID       -0.030    -0.071    -0.087    -0.141    -0.163   252d     SLOW
+interest_coverage            SMALL     -0.023    -0.022    -0.033    -0.066    -0.093   252d     SLOW
+intraday_range_compression   MID       -0.015    +0.015    +0.007    +0.022    +0.018   126d     SLOW ⚠
+intraday_range_compression   SMALL     -0.011    +0.006    +0.001    +0.016    +0.007   126d     SLOW ⚠
+iv_percentile_1y             MID       -0.008    +0.010    +0.032    +0.082         —   126d     SLOW ⚠
+iv_realised_spread           SMALL     -0.004    +0.037    +0.017    -0.058         —   126d     SLOW ⚠
+iv_skew_25d                  LARGE     +0.018    +0.027    +0.002    +0.031         —   126d     SLOW
+iv_term_structure            LARGE     -0.034    -0.012    -0.033    -0.098         —   126d     SLOW
+iv_term_structure            MID       +0.032    -0.026    +0.030    +0.038         —   126d     SLOW ⚠
+kyle_lambda                  LARGE     +0.036    +0.089    +0.177    +0.245    +0.338   252d     SLOW
+kyle_lambda                  MID       +0.042    +0.071    +0.147    +0.196    +0.264   252d     SLOW
+kyle_lambda                  SMALL     +0.044    +0.021    +0.063    +0.104    +0.120   252d     SLOW
+macd_signal                  LARGE     -0.018    +0.015    -0.005    +0.018    +0.000   126d     SLOW ⚠
+margin_slope                 SMALL     -0.006    -0.004    -0.009    -0.041    -0.063   252d     SLOW
+mom_12m_adj                  MID       +0.006    -0.001    -0.051    -0.099    -0.187   252d     SLOW ⚠
+mom_12m_adj                  SMALL     +0.016    +0.015    +0.021    +0.016    -0.040   252d     SLOW ⚠
+mom_6m_adj                   LARGE     -0.033    -0.019    -0.034    -0.035    -0.049   252d     SLOW
+mom_6m_adj                   MID       +0.028    +0.013    +0.008    +0.013    -0.091   252d     SLOW ⚠
+mom_6m_adj                   SMALL     +0.004    -0.005    +0.009    +0.025    -0.016   126d     SLOW ⚠
+mom_composite                LARGE     -0.044    -0.026    -0.048    -0.053    -0.021   126d     SLOW
+mom_composite                MID       -0.007    +0.007    +0.005    -0.020    -0.127   252d     SLOW ⚠
+nwc_to_revenue               LARGE     -0.017    +0.021    +0.020    +0.035    +0.034   126d     SLOW ⚠
+nwc_to_revenue               SMALL     +0.008    +0.024    +0.040    +0.036    +0.041   252d     SLOW
+opening_gap_freq_1m          LARGE     +0.004    +0.024    +0.018    -0.007    +0.028   252d     SLOW ⚠
+opening_gap_freq_1m          MID       +0.010    +0.029    +0.046    +0.043    +0.046   252d     SLOW
+opening_gap_freq_1m          SMALL     +0.020    +0.000    +0.021    +0.046    +0.044   126d     SLOW
+piotroski_f_score            LARGE     -0.014    -0.003    +0.005    +0.010    -0.038   252d     SLOW ⚠
+piotroski_f_score            SMALL     +0.014    +0.022    +0.022    +0.033    +0.027   126d     SLOW
+pledge_quality               LARGE     -0.020    +0.001    +0.011    +0.011    +0.023   252d     SLOW ⚠
+position_52w                 MID       -0.020    -0.001    -0.008    +0.019    -0.026   252d     SLOW ⚠
+position_52w                 SMALL     -0.013    +0.026    +0.039    +0.052    +0.038   126d     SLOW ⚠
+profit_margin                LARGE     +0.041    +0.006    -0.020    -0.098    -0.205   252d     SLOW ⚠
+profit_margin                MID       -0.031    -0.025    -0.057    -0.108    -0.147   252d     SLOW
+promoter_qoq                 LARGE     -0.024    -0.008    -0.010    +0.024    -0.025   252d     SLOW ⚠
+promoter_qoq                 MID       +0.016    +0.021    +0.033    +0.065    +0.076   252d     SLOW
+pt_upside                    LARGE     +0.188    +0.281    +0.438    +0.580    +0.653   252d     SLOW
+pt_upside                    MID       +0.213    +0.324    +0.523    +0.639    +0.670   252d     SLOW
+pt_upside                    SMALL     +0.162    +0.289    +0.480    +0.637    +0.669   252d     SLOW
+quality_composite            LARGE     +0.043    -0.007    -0.006    -0.033    -0.099   252d     SLOW ⚠
+quality_composite            MID       -0.030    -0.039    -0.073    -0.137    -0.170   252d     SLOW
+relative_growth              LARGE     -0.027    +0.003    +0.002    +0.008    -0.095   252d     SLOW ⚠
+relative_growth              MID       +0.024    +0.018    +0.002    +0.006    -0.050   252d     SLOW ⚠
+relative_growth              SMALL     -0.001    +0.002    -0.014    -0.030    -0.043   252d     SLOW ⚠
+relative_turnover            LARGE     -0.003    -0.005    -0.009    +0.003    +0.018   252d     SLOW ⚠
+relative_turnover            MID       +0.016    +0.006    -0.005    -0.021    +0.011   126d     SLOW ⚠
+relative_turnover            SMALL     -0.008    -0.017    -0.020    -0.024    +0.000   126d     SLOW ⚠
+revenue_cv_5y                LARGE     -0.005    +0.015    +0.033    +0.073    +0.178   252d     SLOW ⚠
+revenue_cv_5y                MID       -0.024    +0.009    +0.024    +0.046    +0.090   252d     SLOW ⚠
+revenue_cv_5y                SMALL     +0.004    -0.002    +0.008    +0.039    +0.061   252d     SLOW ⚠
+roa                          LARGE     +0.012    -0.028    -0.041    -0.082    -0.117   252d     SLOW ⚠
+roa                          MID       -0.009    -0.023    -0.040    -0.115    -0.171   252d     SLOW
+roe                          MID       -0.032    -0.035    -0.060    -0.132    -0.176   252d     SLOW
+roe                          SMALL     +0.015    +0.021    -0.003    -0.024    -0.036   252d     SLOW ⚠
+roic                         LARGE     -0.003    -0.026    -0.042    -0.040    -0.074   252d     SLOW
+roic                         MID       -0.001    -0.022    -0.052    -0.107    -0.115   252d     SLOW
+roic                         SMALL     -0.009    -0.020    -0.034    -0.070    -0.114   252d     SLOW
+roiic                        MID       -0.020    -0.003    +0.011    -0.007    -0.047   252d     SLOW ⚠
+roiic                        SMALL     -0.013    +0.003    -0.008    -0.028    -0.063   252d     SLOW ⚠
+sga_to_revenue_change        LARGE     +0.011    -0.020    -0.025    -0.042    +0.001   126d     SLOW ⚠
+sga_to_revenue_change        MID       -0.003    +0.004    -0.002    +0.017    +0.032   252d     SLOW ⚠
+sga_to_revenue_change        SMALL     -0.006    -0.005    -0.006    +0.002    +0.013   252d     SLOW ⚠
+share_momentum               SMALL     -0.021    +0.004    +0.014    +0.027    +0.032   252d     SLOW ⚠
+short_selling_signal         MID       +0.014    +0.014    +0.034    +0.076    +0.155   252d     SLOW
+short_selling_signal         SMALL     -0.004    -0.011    -0.009    -0.013    +0.018   252d     SLOW ⚠
+sloan_accruals_full          LARGE     +0.006    +0.009    +0.019    +0.000    -0.096   252d     SLOW ⚠
+sloan_accruals_full          SMALL     +0.007    +0.002    -0.015    -0.031    -0.049   252d     SLOW ⚠
+value_composite              LARGE     -0.032    +0.004    +0.008    +0.065    +0.109   252d     SLOW ⚠
+value_composite              MID       +0.018    +0.040    +0.061    +0.113    +0.154   252d     SLOW
+value_composite              SMALL     +0.013    +0.035    +0.083    +0.136    +0.205   252d     SLOW
+wc_intensity                 SMALL     +0.017    +0.023    +0.031    +0.033    +0.029   126d     SLOW
+z_score                      LARGE     +0.011    -0.074    -0.076    -0.113    -0.106   126d     SLOW ⚠
+z_score                      MID       +0.022    -0.033    -0.040    -0.105    -0.115   252d     SLOW ⚠
+z_score                      SMALL     +0.005    +0.002    +0.006    -0.011    -0.007   126d     SLOW ⚠
+
+── INSUFFICIENT (3) ──
+signal                       tier          5d       20d       63d      126d      252d   peak   bucket
+bulk_deal_signal             MID            —         —         —         —         —      — INSUFFICIENT
+buyback_announcement_30d     LARGE          —         —         —         —         —      — INSUFFICIENT
+buyback_announcement_30d     MID            —         —         —         —         —      — INSUFFICIENT
