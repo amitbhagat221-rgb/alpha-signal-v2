@@ -185,19 +185,36 @@ def write_uhs(rows: list[dict]) -> int:
 
 
 # Map factor → source_tables relevant for plausibility/consistency rollup.
-# Used by dim_plausibility_for_factor / dim_consistency_for_factor to count
-# pass vs fail per gate within the factor's upstream data scope.
+# Used by dim_plausibility_for_factor / dim_consistency_for_factor (per-factor)
+# AND by rollup_pick_uhs's per-sid gate union to count pass vs fail per gate
+# within the factor's upstream data scope.
+#
+# ADR 0037 follow-up (2026-06-02): these must point at the tables that actually
+# CARRY trust_verdicts — the DERIVED tables — not the raw upstream financials.
+# trust_verdicts.source_table only ever holds: analyst_consensus, consensus_signals,
+# stock_prices, piotroski_scores, broker_recommendations, banking_metrics, mf_holdings.
+# Raw tables (quarterly_income, annual_balance_sheet, annual_cash_flow) carry ZERO
+# verdicts, so mapping a factor to them yielded no per-sid gate rows → the pick's
+# plausibility/consistency dims silently fell back to the universe mean. The worst
+# offender was the fundamental side: `piotroski_scores` holds a per-sid gate_2
+# plausibility verdict for ~1,979 stocks, but the `piotroski` factor pointed at
+# raw quarterly/annual tables, so fundamental-data plausibility never reached any
+# pick UHS — the dim was driven only by `consensus_signals` (analyst data), and
+# fell back to the mean for the 734/1,440 analyst-thin SMALL picks with no
+# consensus row. Pointing the fundamental factors at `piotroski_scores` (the
+# per-sid fundamental-plausibility verdict, same quarterly/annual inputs) closes
+# that gap for every tier.
 FACTOR_UPSTREAM_TABLES = {
     "consensus":          ["consensus_signals", "analyst_consensus", "broker_recommendations"],
-    "earnings_yield":     ["stock_prices", "quarterly_income"],
-    "accruals":           ["annual_cash_flow", "annual_balance_sheet"],
-    "piotroski":          ["quarterly_income", "annual_balance_sheet", "annual_cash_flow"],
+    "earnings_yield":     ["stock_prices", "piotroski_scores"],   # E/P: price + fundamental plausibility
+    "accruals":           ["piotroski_scores"],                   # accruals IS a Piotroski component
+    "piotroski":          ["piotroski_scores"],                   # derived table holds the verdict (was raw)
     "momentum":           ["stock_prices"],
-    "book_to_price":      ["annual_balance_sheet", "stock_prices"],
-    "promoter":           [],   # shareholding — no quarantine table yet
+    "book_to_price":      ["stock_prices", "piotroski_scores"],   # B/P: price + fundamental plausibility
+    "promoter":           [],   # shareholding — no verdict table yet
     "smart_money":        ["stock_prices"],
     "pt_upside":          ["consensus_signals"],
-    "eps_growth":         ["consensus_signals", "quarterly_income"],
+    "eps_growth":         ["consensus_signals"],                  # dropped quarterly_income (no verdicts)
     "pledge_quality":     [],   # shareholding
     "delivery_anomaly_z": ["stock_prices"],
 }
