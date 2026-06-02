@@ -96,6 +96,12 @@ SIGNAL_COLUMN_MAP = {
     "pead_drift_60d":             (None, "pead_drift_60d"),
     "corporate_action_density":   (None, "corporate_action_density"),
     "buyback_announcement_30d":   (None, "buyback_announcement_30d"),
+    # Macro betas — Plan 0002 §3.2.7 (monthly cadence; industry_id is a CONTROL
+    # and deliberately absent — IC of a categorical code is meaningless)
+    "oil_beta":                   (None, "oil_beta"),
+    "metals_beta":                (None, "metals_beta"),
+    "inr_beta":                   (None, "inr_beta"),
+    "gold_beta":                  (None, "gold_beta"),
     # Behavior tier — PIT helpers shipped 2026-05-24
     "insider_signal":      (None, "insider_score"),
     "sentiment_7d":        (None, "sentiment_7d"),

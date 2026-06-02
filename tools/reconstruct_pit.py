@@ -203,6 +203,10 @@ PIT_COLUMNS = [
     # Phase 2.2b-v2 (2026-05-29 #2): tier-aware split — quality (SMALL),
     # recovery (LARGE/MID) per direction-flip backtest finding.
     "financial_quality", "financial_recovery",
+    # Plan 0002 §3.2.6 — industry identity (categorical CONTROL, not IC-ranked)
+    "industry_id",
+    # Plan 0002 §3.2.7 — per-stock macro betas (off stock_prices × macro_history)
+    "oil_beta", "metals_beta", "inr_beta", "gold_beta",
 ]
 
 
@@ -323,6 +327,13 @@ VALIDATION_RANGES = {
     # Sector signals (separate table)
     "regulatory_score":      (-10, 10, True),
     "macro_score":           (-10, 10, True),
+    # Plan 0002 §3.2.6 — industry identity code (0 = unknown, 1..38 frozen)
+    "industry_id":           (0, 50, True),
+    # Plan 0002 §3.2.7 — macro betas (bounds mirror signals/macro_betas.py BETA_CLIP)
+    "oil_beta":              (-5, 5, True),
+    "metals_beta":           (-5, 5, True),
+    "inr_beta":              (-5, 5, True),
+    "gold_beta":             (-5, 5, True),
 }
 
 
@@ -1290,6 +1301,40 @@ def pit_microstructure(ohlc_full, eval_date):
     eval_str = eval_date.isoformat() if hasattr(eval_date, "isoformat") else str(eval_date)
     pit = ohlc_full[ohlc_full["date"] <= eval_str]
     return compute_microstructure(prices=pit)
+
+
+def pit_industry_id(stocks_full):
+    """Industry identity code, PIT — Plan 0002 §3.2.6.
+
+    Reuses signals.industry_id's frozen mapping. Industry is a static stock
+    attribute, so there's no as-of slicing — the code is the same on every date.
+
+    Returns DataFrame[sid, industry_id] (0 = unknown/NULL, 1..38 frozen).
+    """
+    from signals.industry_id import compute_industry_id
+    if stocks_full is None or stocks_full.empty:
+        return pd.DataFrame(columns=["sid", "industry_id"])
+    return compute_industry_id(stocks=stocks_full)
+
+
+def pit_macro_betas(px_pit, macro_hist_full, eval_date):
+    """Per-stock macro betas, PIT — Plan 0002 §3.2.7.
+
+    Reuses signals.macro_betas's core verbatim, fed the PIT-adjusted price frame
+    (sid,date,close ≤ eval_date) and an as-of-frozen slice of macro_history
+    (date ≤ eval_date). NULL for early anchors lacking ~1y of macro lookback
+    (macro_history starts 2023-03-13).
+
+    Returns DataFrame[sid, oil_beta, metals_beta, inr_beta, gold_beta].
+    """
+    from signals.macro_betas import compute_macro_betas, FACTORS
+    cols = ["sid", *FACTORS]
+    if px_pit is None or px_pit.empty or macro_hist_full is None or macro_hist_full.empty:
+        return pd.DataFrame(columns=cols)
+    eval_str = eval_date.isoformat() if hasattr(eval_date, "isoformat") else str(eval_date)
+    macro_pit = macro_hist_full[macro_hist_full["date"] <= eval_str]
+    prices = px_pit[["sid", "date", "close"]]
+    return compute_macro_betas(prices=prices, macro_hist=macro_pit)
 
 
 def pit_pead(qi_pit, px_pit, macro_hist, corp_full, eval_date):
@@ -2321,6 +2366,14 @@ def reconstruct_one_date(eval_date, raw, signals_to_run):
     if "microstructure" in signals_to_run and "prices_ohlc" in raw and not raw["prices_ohlc"].empty:
         base = base.merge(pit_microstructure(raw["prices_ohlc"], eval_date), on="sid", how="left")
 
+    # ── §3.2.6 — industry identity (categorical control; static per sid) ──
+    if "industry_id" in signals_to_run:
+        base = base.merge(pit_industry_id(raw["stocks"]), on="sid", how="left")
+
+    # ── §3.2.7 — per-stock macro betas (NULL until ~1y of macro_history lookback) ──
+    if "macro_betas" in signals_to_run:
+        base = base.merge(pit_macro_betas(px_pit, raw["macro_hist"], eval_date), on="sid", how="left")
+
     # ── §3.2.5 — event-time / PEAD factors ──
     if "pead" in signals_to_run:
         base = base.merge(
@@ -2553,7 +2606,7 @@ def pit_financial_signal(banking_metrics_full, eval_date):
 def load_raw():
     """Load all raw history once. Avoids re-querying per eval_date."""
     print("Loading raw data...")
-    stocks = read_sql("SELECT sid, cap_tier, sector, market_cap_cr FROM stocks")
+    stocks = read_sql("SELECT sid, cap_tier, sector, industry, market_cap_cr FROM stocks")
     qi = read_sql(
         "SELECT sid, period, end_date, reporting, revenue, operating_profit, "
         "net_income, eps, interest, pbt, ebitda "
@@ -2749,7 +2802,8 @@ def main():
                                  "asset_tangibility",
                                  "smart_money",
                                  "financial_signal",
-                                 "financial_quality", "financial_recovery"],
+                                 "financial_quality", "financial_recovery",
+                                 "industry_id", "macro_betas"],
                         help="Compute only this signal (repeatable)")
     parser.add_argument("--date", action="append", default=None,
                         help="Explicit eval date (YYYY-MM-DD, repeatable). "
@@ -2805,6 +2859,8 @@ def main():
         "microstructure",
         # Plan 0002 §3.2.5 — event-time / PEAD factors
         "pead",
+        # Plan 0002 §3.2.6 — industry identity (control) + §3.2.7 macro betas
+        "industry_id", "macro_betas",
         # Plan 0005 Phase E composite (smart_money — accruals/promoter/forensic
         # composites flow through their existing _compute_scores)
         "smart_money",

@@ -153,6 +153,13 @@ _COLUMN_MIGRATIONS = [
     ("daily_snapshots_pit", "pead_drift_60d",             "REAL"),
     ("daily_snapshots_pit", "corporate_action_density",   "REAL"),
     ("daily_snapshots_pit", "buyback_announcement_30d",   "REAL"),
+    # 2026-06-02: Plan 0002 §3.2.6 — industry identity (categorical control).
+    ("daily_snapshots_pit", "industry_id",                "INTEGER"),
+    # 2026-06-02: Plan 0002 §3.2.7 — per-stock macro betas.
+    ("daily_snapshots_pit", "oil_beta",                   "REAL"),
+    ("daily_snapshots_pit", "metals_beta",                "REAL"),
+    ("daily_snapshots_pit", "inr_beta",                   "REAL"),
+    ("daily_snapshots_pit", "gold_beta",                  "REAL"),
 ]
 
 
@@ -2749,6 +2756,80 @@ BACKTEST_SIGNALS = [
         "status": "READY",
         "status_reason": "Phase 2.2b-v2 (split) shipped 2026-05-29. PIT helper writes both columns; screener will read this one for LARGE/MID tiers post-validation.",
     },
+
+    # ═══════════════════════════════════════════════════════════════════
+    # GROUP — INDUSTRY (§3.2.6) + MACRO BETAS (§3.2.7)
+    # ═══════════════════════════════════════════════════════════════════
+    {
+        "signal": "industry_id",
+        "label": "Industry Identity (categorical control)",
+        "group": "Controls",
+        "description": "Frozen integer code (1..38, 0=unknown) for the stock's industry. A NEUTRALISATION CONTROL, not a rankable alpha factor — no directional signal, Spearman IC of an arbitrary code is meaningless. Kept out of SIGNAL_COLUMN_MAP / the IC roster; exists for industry one-hot / neutralisation at model-fit time (Plan 0002 §3.2.6 'industry dummies (1)').",
+        "source_tables": ["stocks"],
+        "source_columns": ["stocks.industry"],
+        "filing_lag": "0d (static attribute)",
+        "pit_column_v1": None,
+        "pit_column_v2": "industry_id",
+        "v1_verdict_summary": "(control — not backtested for IC)",
+        "status": "CONTROL",
+        "status_reason": "Shipped 2026-06-02. Categorical control; not promotable, not IC-gated.",
+    },
+    {
+        "signal": "oil_beta",
+        "label": "Oil Beta (β vs Brent crude)",
+        "group": "Macro Extensions",
+        "description": "Rolling 252-trading-day OLS beta of daily stock returns on Brent crude daily returns. Energy / input-cost exposure (Plan 0002 §3.2.7). Per-stock exposure, NOT the macro level (a level is cross-sectionally constant → 0 IC).",
+        "source_tables": ["stock_prices", "macro_history"],
+        "source_columns": ["stock_prices.close", "macro_history.brent_crude"],
+        "filing_lag": "0d (daily price + daily macro)",
+        "pit_column_v1": None,
+        "pit_column_v2": "oil_beta",
+        "v1_verdict_summary": "(v2-only; macro_history starts 2023-03-13, NULL before ~1y lookback)",
+        "status": "READY",
+        "status_reason": "Shipped + backtested 2026-06-02 (§3.2.7, 23 monthly periods). best |t|=0.36 LARGE → DROP, benched (FACTOR_LIBRARY).",
+    },
+    {
+        "signal": "metals_beta",
+        "label": "Metals Beta (β vs copper+aluminium)",
+        "group": "Macro Extensions",
+        "description": "Rolling 252-trading-day OLS beta of daily stock returns on an equal-weight copper+aluminium daily-return blend. Industrial / capex / metals-cycle exposure (Plan 0002 §3.2.7).",
+        "source_tables": ["stock_prices", "macro_history"],
+        "source_columns": ["stock_prices.close", "macro_history.copper", "macro_history.aluminium"],
+        "filing_lag": "0d (daily price + daily macro)",
+        "pit_column_v1": None,
+        "pit_column_v2": "metals_beta",
+        "v1_verdict_summary": "(v2-only; NULL before ~1y macro lookback)",
+        "status": "READY",
+        "status_reason": "Shipped + backtested 2026-06-02 (§3.2.7, 23 monthly periods). LARGE t=+1.78 WEAK (CI [-0.03,3.80] straddles 0), MID/SMALL DROP → benched.",
+    },
+    {
+        "signal": "inr_beta",
+        "label": "INR Beta (β vs USD/INR)",
+        "group": "Macro Extensions",
+        "description": "Rolling 252-trading-day OLS beta of daily stock returns on USD/INR daily returns. FX / importer-vs-exporter tilt (Plan 0002 §3.2.7). The rankable form of the plan's 'inr_carry_proxy' — a carry LEVEL is cross-sectionally constant, so the per-stock FX exposure is used instead.",
+        "source_tables": ["stock_prices", "macro_history"],
+        "source_columns": ["stock_prices.close", "macro_history.usdinr"],
+        "filing_lag": "0d (daily price + daily macro)",
+        "pit_column_v1": None,
+        "pit_column_v2": "inr_beta",
+        "v1_verdict_summary": "(v2-only; NULL before ~1y macro lookback)",
+        "status": "READY",
+        "status_reason": "Shipped + backtested 2026-06-02 (§3.2.7, 23 monthly periods). best |t|=0.40 MID → DROP (FX exposure not cross-sectionally priced), benched.",
+    },
+    {
+        "signal": "gold_beta",
+        "label": "Gold Beta (β vs gold)",
+        "group": "Macro Extensions",
+        "description": "Rolling 252-trading-day OLS beta of daily stock returns on gold daily returns. Safe-haven / gold-financier tilt (Plan 0002 §3.2.7). Takes the 4th macro-extension slot in place of india_credit_spread, which is DATA-BLOCKED (no daily India G-Sec / credit series; india_money_rate is monthly + stale). Revisit a rate_beta when a daily G-Sec feed lands.",
+        "source_tables": ["stock_prices", "macro_history"],
+        "source_columns": ["stock_prices.close", "macro_history.gold"],
+        "filing_lag": "0d (daily price + daily macro)",
+        "pit_column_v1": None,
+        "pit_column_v2": "gold_beta",
+        "v1_verdict_summary": "(v2-only; NULL before ~1y macro lookback)",
+        "status": "READY",
+        "status_reason": "Shipped + backtested 2026-06-02 (§3.2.7, 23 monthly periods). LARGE t=+1.58 WEAK (CI [-0.33,3.71] straddles 0), MID/SMALL DROP → benched.",
+    },
 ]
 
 
@@ -2812,6 +2893,11 @@ FACTOR_LIBRARY = [
     "pead_drift_60d",            # SMALL t=-1.54 WEAK (reversal sign)
     "earnings_surprise_std",     # DROP — SUE proxy too noisy w/o announce dates + consensus
     "buyback_announcement_30d",  # DROP — too sparse
+    # Macro betas (§3.2.7) — 23 monthly periods, per-stock rolling 252d β
+    "metals_beta",          # LARGE t=+1.78 WEAK (cyclical large-cap exposure; CI straddles 0)
+    "gold_beta",            # LARGE t=+1.58 WEAK (safe-haven/gold-financier tilt; CI straddles 0)
+    "oil_beta",             # best |t|=0.36 LARGE — DROP
+    "inr_beta",             # best |t|=0.40 MID — DROP (FX exposure not cross-sectionally priced)
 ]
 
 

@@ -842,6 +842,59 @@ FACTOR_LINEAGE = {
         "sector_exclusions": [],
     },
 
+    # ════════════════════════════ Industry control (§3.2.6) ════════════════════════════
+    # Categorical neutralisation control — frozen integer code, no source reads
+    # beyond the static stock attribute.
+    "industry_id": {
+        "status": "control", "module": "signals/industry_id.py",
+        "reads": [_stocks(("sid", "industry"), contribution="industry_code")],
+        "sector_exclusions": [],
+    },
+
+    # ════════════════════════════ Macro betas (§3.2.7) ════════════════════════════
+    # Per-stock rolling 252d OLS beta of daily returns on a macro factor's daily
+    # returns. macro_history holds the daily macro series; stock_prices the close.
+    "oil_beta": {
+        "status": "candidate", "module": "signals/macro_betas.py",
+        "reads": [
+            {"table": "stock_prices", "cols": ["close"], "key": ["sid", "date"],
+             "select": "window", "filter": "last 252d", "contribution": "stock_returns"},
+            {"table": "macro_history", "cols": ["value", "date"], "key": ["indicator_id", "date"],
+             "select": "window", "filter": "brent_crude last 252d", "contribution": "oil_returns"},
+        ],
+        "sector_exclusions": [],
+    },
+    "metals_beta": {
+        "status": "candidate", "module": "signals/macro_betas.py",
+        "reads": [
+            {"table": "stock_prices", "cols": ["close"], "key": ["sid", "date"],
+             "select": "window", "filter": "last 252d", "contribution": "stock_returns"},
+            {"table": "macro_history", "cols": ["value", "date"], "key": ["indicator_id", "date"],
+             "select": "window", "filter": "copper+aluminium blend last 252d", "contribution": "metals_returns"},
+        ],
+        "sector_exclusions": [],
+    },
+    "inr_beta": {
+        "status": "candidate", "module": "signals/macro_betas.py",
+        "reads": [
+            {"table": "stock_prices", "cols": ["close"], "key": ["sid", "date"],
+             "select": "window", "filter": "last 252d", "contribution": "stock_returns"},
+            {"table": "macro_history", "cols": ["value", "date"], "key": ["indicator_id", "date"],
+             "select": "window", "filter": "usdinr last 252d", "contribution": "fx_returns"},
+        ],
+        "sector_exclusions": [],
+    },
+    "gold_beta": {
+        "status": "candidate", "module": "signals/macro_betas.py",
+        "reads": [
+            {"table": "stock_prices", "cols": ["close"], "key": ["sid", "date"],
+             "select": "window", "filter": "last 252d", "contribution": "stock_returns"},
+            {"table": "macro_history", "cols": ["value", "date"], "key": ["indicator_id", "date"],
+             "select": "window", "filter": "gold last 252d", "contribution": "gold_returns"},
+        ],
+        "sector_exclusions": [],
+    },
+
     # ════════════════════════════ Fundamentals_screener factors (16) ════════════════════════════
     "roic": {
         "status": "candidate", "module": "signals/roic.py",
