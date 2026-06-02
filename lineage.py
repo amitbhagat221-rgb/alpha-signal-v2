@@ -451,6 +451,22 @@ FACTOR_LINEAGE = {
         "sector_exclusions": [],
         "validation": {"weekly_NW_t": 2.56, "tier": "SMALL"},
     },
+    "smart_money_score": {
+        "status": "candidate", "module": "signals/smart_money.py (composite: bulk_score + delivery_score)",
+        "reads": [
+            {"table": "bulk_deals",
+             "cols": ["sid", "deal_date", "client_name", "buy_sell", "qty"],
+             "key": ["sid", "deal_date", "client_name"], "select": "all",
+             "filter": "last 90d", "contribution": "bulk_score_component"},
+            {"table": "stock_prices", "cols": ["delivery_pct"],
+             "key": ["sid", "date"], "select": "window",
+             "filter": "last 30d", "contribution": "delivery_score_component"},
+            _stocks(("sid", "cap_tier")),
+        ],
+        "sector_exclusions": [],
+        "validation": {"weekly_NW_t": None, "tier": "SMALL",
+                       "note": "registered 2026-06-02; PIT-thin (n≈6, bulk_deals ~1mo depth) — preliminary"},
+    },
     "short_selling_signal": {
         "status": "library", "module": "signals/smart_money.py (sub: short_score)",
         "reads": [

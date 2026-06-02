@@ -37,6 +37,49 @@ an **orthogonality sweep** (each new factor's max |ρ| vs already-wired factors 
 MaxReturn/MaxSharpe variants since 2026-05-28/29, but carried **zero production weight**
 until this wave — they were computed daily and ranked but unused.)
 
+## Horizon-gate weight review (2026-06-02, [ADR 0038](../decisions/0038-horizon-resolved-promotion-gate.md))
+
+Deliberate, non-mechanical review off the net-of-cost gate (`tools/promotion_gate.py`
+→ `factor_horizon_gate`), cross-checked against v1 C13b. **Rule applied: move weight
+only where BOTH lenses agree; hold every gate↔history conflict.** (Also fixed the gate's
+`_live_keys()` alias bug — the live re-eval had been scoring only 6 of the 12 wired
+factors.) Changes:
+
+| Tier | Factor | Was → Now | Why |
+|------|--------|-----------|-----|
+| LARGE | momentum | 0.04 → **0 (dropped)** | t=0.00 broke the t<0.5→0× rule + gate REJECT |
+| LARGE | earnings_yield | 0.15 → **0.12** | over-weighted 0.5×-secondary; gate REJECT in LARGE (strong in SMALL, weak here) |
+| LARGE | accruals / piotroski | 0.11/0.07 → **0.09/0.09** | equalised diversification ballast (both gate-REJECT — kept only to avoid over-concentrating consensus) |
+| LARGE | consensus | 0.30 → **0.35** | doubly-validated anchor; absorbs freed weight |
+| LARGE | book_to_price | 0.08 → **0.10** | gate's only LARGE LIBRARY survivor |
+| SMALL | pledge_quality | 0.13 → **0.10** | gate demotes to LIBRARY (1.96), single-horizon-fragile + sign-unstable; kept for orthogonal pledge-stress info |
+| SMALL | book_to_price | 0.09 → **0.12** | gate's single strongest factor in the model (net_t 13.58 @252d) |
+
+**MID: unchanged.** Its 3 flags are gate↔history *conflicts* — accruals (v1 t=3.20 vs
+gate REJECT), consensus (v1 t=2.20 vs gate REJECT), promoter (gate PROMOTE 4.99 but n=11
+thin) — not acted on. Watch-list for the next monthly anchor.
+
+**MID accruals/consensus conflict** to re-judge once n thickens.
+
+### `smart_money` validated (2026-06-02, closes the never-backtested gap)
+
+`smart_money_score` (SMALL 0.06, the bulk+delivery composite) was wired with **zero
+backtest** — and its config label `t=2.49` was wrong (that was `avg_delivery_pct_30d`'s
+number, borrowed via a mis-alias in `_WEIGHT_KEY_TO_SIGNAL` / health_score / promotion_gate).
+Registered it properly (`SIGNAL_COLUMN_MAP`, `BACKTEST_SIGNALS`, `BACKTEST_CADENCE`=monthly,
+`FACTOR_LINEAGE`) and fixed all three alias maps to point at `smart_money_score`. Verdict:
+
+| Lens | LARGE | MID | SMALL |
+|------|-------|-----|-------|
+| 20d backtest (`backtest_pit`) | t=−0.10 | t=0.54 | **t=1.06** (n=6, DROP) |
+| Net-of-cost gate (natural h) | REJECT 63d | REJECT 63d | **PROMOTE 126d** (net_t 5.03, n=6) |
+
+The two lenses conflict in SMALL (20d weak; a slow-126d edge in the gate), and **n=6 is
+thin with a bulk component that has no historical depth** (reconstructed anchors collapse
+toward delivery — redundant with `avg_delivery_pct_30d`). **Verdict: PRELIMINARY — held at
+0.06, no change.** Now visible to the backtest/gate; re-judge as monthly anchors accrue and
+`bulk_deals` depth grows (then it can move to weekly cadence).
+
 ## On the bench (validated, deliberately NOT wired)
 
 - **eps_growth** (LARGE t=5.31 / SMALL t=3.23) — **redundant**: ρ=0.63 with consensus in LARGE, ρ≈0.3–0.4 with the value/quality cluster in SMALL. Analyst/growth dimension already carried by consensus + pt_upside. Stays in the variants only.

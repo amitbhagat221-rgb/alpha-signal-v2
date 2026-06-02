@@ -994,7 +994,7 @@ def get_factor_health():
         "momentum":           "mom_6m_adj",
         "book_to_price":      "book_to_price",
         "promoter":           "promoter_qoq",
-        "smart_money":        "avg_delivery_pct_30d",
+        "smart_money":        "smart_money_score",
         "pt_upside":          "pt_upside",
         "eps_growth":         "eps_growth_yoy",
         "pledge_quality":     "pledge_quality",
@@ -1078,6 +1078,63 @@ def get_factor_health():
         "n_waiting_dupes": sum(1 for p in redundant_pairs if p["duplicates_live"]),
     }
 
+    # ── Horizon-resolved net-of-cost gate (ADR 0038, tools/promotion_gate.py).
+    # The legacy validation_verdict above reads a single-20d |t|; this re-judges
+    # each factor at its cost-resolved NATURAL horizon, net of turnover cost, so
+    # the funnel shows BOTH lenses side by side. On-demand table (NOT in
+    # PIPELINE_STEPS) — refreshed only when `python -m tools.promotion_gate` runs.
+    # We surface the LIVE re-eval: of the production-wired (signal,tier) pairs,
+    # how many still clear the net-of-cost bar at their own horizon.
+    horizon_gate = {"available": False}
+    try:
+        hg = read_sql(
+            "SELECT signal, cap_tier, natural_horizon, net_t, net_ir_annual, "
+            "n_periods, sign_stable, verdict, turnover_assumed, computed_at "
+            "FROM factor_horizon_gate")
+    except Exception:
+        hg = None
+    if hg is not None and not hg.empty:
+        gv = hg["verdict"].value_counts().to_dict()
+        hg_idx = {(r.signal, r.cap_tier): r for r in hg.itertuples()}
+        # production-wired (signal,tier) pairs ONLY (config.SIGNAL_WEIGHTS — not the
+        # RETURN/SHARPE dry-run variants), so the count matches what's deployed.
+        live_rows = []
+        for _tier, _tw in (getattr(_cfg, "SIGNAL_WEIGHTS", {}) or {}).items():
+            for _k in _tw:
+                _sig = _WEIGHT_KEY_TO_SIGNAL.get(_k, _k)
+                row = hg_idx.get((_sig, _tier))
+                if row is None and _sig == "mom_6m_adj":   # SMALL swaps in the 12m variant
+                    row = hg_idx.get(("mom_12m_adj", _tier))
+                live_rows.append({
+                    "key": _k, "signal": _sig, "tier": _tier,
+                    "weight": round(float(_tw[_k]), 3),
+                    "verdict": row.verdict if row is not None else None,
+                    "natural_horizon": int(row.natural_horizon) if row is not None and row.natural_horizon is not None else None,
+                    "net_t": round(float(row.net_t), 2) if row is not None and row.net_t is not None else None,
+                    "net_ir_annual": round(float(row.net_ir_annual), 3) if row is not None and row.net_ir_annual is not None else None,
+                    "n_periods": int(row.n_periods) if row is not None and row.n_periods is not None else None,
+                    "sign_stable": int(row.sign_stable) if row is not None and row.sign_stable is not None else None,
+                })
+        scored = [r for r in live_rows if r["verdict"]]
+        flagged = [r for r in scored if r["verdict"] != "PROMOTE"]
+        _ca = hg["computed_at"].dropna()
+        _to = hg["turnover_assumed"].dropna()
+        horizon_gate = {
+            "available":   True,
+            "computed_at": _ca.max() if not _ca.empty else None,
+            "turnover":    round(float(_to.iloc[0]), 2) if not _to.empty else None,
+            "promote":     int(gv.get("PROMOTE", 0)),
+            "library":     int(gv.get("LIBRARY", 0)),
+            "reject":      int(gv.get("REJECT", 0)),
+            "insufficient": int(gv.get("INSUFFICIENT", 0)),
+            "live_total":  len(scored),
+            "live_clear":  sum(1 for r in scored if r["verdict"] == "PROMOTE"),
+            "live_flagged": len(flagged),
+            "unscored":    sum(1 for r in live_rows if not r["verdict"]),
+            "live_rows":   sorted(live_rows, key=lambda x: (x["tier"], -(x["net_t"] if x["net_t"] is not None else -99))),
+            "flagged_rows": sorted(flagged, key=lambda x: ({"REJECT": 0, "LIBRARY": 1}.get(x["verdict"], 2), x["tier"])),
+        }
+
     summary = {
         "total": n,
         "in_model": sum(1 for r in out if r["in_model"]),
@@ -1095,6 +1152,8 @@ def get_factor_health():
         # Promotion funnel + orthogonality (2026-05-31)
         "funnel": funnel,
         "orthogonality": orthogonality,
+        # Horizon-resolved net-of-cost gate (ADR 0038, 2026-06-02)
+        "horizon_gate": horizon_gate,
     }
 
     return {"summary": summary, "factors": out}

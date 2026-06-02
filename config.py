@@ -56,13 +56,23 @@ SIGNAL_WEIGHTS = {
     # so it gets a strong-but-not-dominant weight. eps_growth held back (ρ=0.63 with
     # consensus → redundant). Each tier renormalised to Σ=1.
     "LARGE": {
-        "consensus":      0.30,   # t=3.52 primary
+        # 2026-06-02 horizon-gate review (ADR 0038, tools/promotion_gate.py): both
+        # lenses — v1 C13b AND the net-of-cost gate — agree LARGE's value/quality
+        # block is weak (small-cap-grade factors carrying LARGE weight; matches the
+        # walk-forward "LARGE ~zero OOS skill"). momentum (t=0.00) DROPPED — it broke
+        # the config's own t<0.5→0× rule AND the gate REJECTs it. accruals + piotroski
+        # equalised to 0.09 as explicit DIVERSIFICATION ballast (not validated alpha —
+        # both gate-REJECT) kept only to avoid over-concentrating consensus.
+        # earnings_yield trimmed (over-weighted for a 0.5×-secondary; gate REJECT in
+        # LARGE — strong in SMALL, weak here). Freed weight → the only doubly-validated
+        # pair (consensus + book_to_price). MID left untouched (its flags are
+        # gate↔history CONFLICTS, not acted on).
+        "consensus":      0.35,   # t=3.52 primary; gate LIBRARY 2.29 — the LARGE anchor
         "pt_upside":      0.25,   # t=7.15 primary (capped — artifact re-verify 2026-08)
-        "earnings_yield": 0.15,   # t=1.57 secondary
-        "accruals":       0.11,   # t=0.20 tertiary
-        "book_to_price":  0.08,   # t=0.79 tertiary
-        "piotroski":      0.07,   # t=0.51 tertiary
-        "momentum":       0.04,   # t=0.00 tertiary
+        "earnings_yield": 0.12,   # t=1.57 secondary; gate REJECT in LARGE — trimmed
+        "book_to_price":  0.10,   # t=0.79; gate LIBRARY (sign-unstable) — best of the rest
+        "accruals":       0.09,   # t=0.20; gate REJECT — diversifier, not alpha
+        "piotroski":      0.09,   # t=0.51; gate REJECT — diversifier, not alpha
     },
     "MID": {
         # iv_skew_25d added 2026-05-31 (ADR 0035): MID t=+3.16 KEEP, 48 wk, orthogonal.
@@ -79,16 +89,25 @@ SIGNAL_WEIGHTS = {
     "SMALL": {
         # promotion wave: pt_upside (t=9.14, capped), pledge_quality (t=5.90),
         # delivery_anomaly_z (t=4.76, n=103) — all orthogonal (max |ρ|≤0.08 vs wired).
+        # 2026-06-02 horizon-gate review (ADR 0038): SMALL is the healthiest tier
+        # (walk-forward VALIDATED) — most factors PROMOTE in both lenses. One trim:
+        # pledge_quality 0.13→0.10 — the gate demotes it to LIBRARY (1.96) and flags
+        # it single-horizon-fragile (works only @20d) + sign-unstable; kept (not gutted)
+        # for its orthogonal promoter-pledge-stress info. Freed weight → book_to_price,
+        # the gate's single strongest factor in the whole model (net_t 13.58 @252d).
+        # smart_money carries 0.06 but is NOT backtested (no PIT/gate entry) — flagged
+        # to validate or reclassify as a diversifier. accruals = gate↔history conflict,
+        # held.
         "pt_upside":          0.16,   # t=9.14 primary (capped — artifact re-verify 2026-08)
-        "promoter":           0.15,   # t=3.20 primary
-        "pledge_quality":     0.13,   # t=5.90 primary (orthogonal to promoter, ρ=0.04)
-        "earnings_yield":     0.12,   # t=3.13 primary
-        "delivery_anomaly_z": 0.11,   # t=4.76 primary (n=103, orthogonal)
-        "piotroski":          0.09,   # t=2.81 secondary
-        "book_to_price":      0.09,   # t=2.54 secondary
-        "smart_money":        0.06,   # t=2.49 secondary
-        "accruals":           0.06,   # t=2.10 secondary
-        "momentum":           0.03,   # t=1.76 tertiary
+        "promoter":           0.15,   # t=3.20 primary; gate LIBRARY 1.83
+        "earnings_yield":     0.12,   # t=3.13 primary; gate PROMOTE 7.75 @252d
+        "book_to_price":      0.12,   # t=2.54 secondary; gate PROMOTE 13.58 @252d (strongest)
+        "delivery_anomaly_z": 0.11,   # t=4.76 primary (n=103, orthogonal); gate PROMOTE 2.12
+        "pledge_quality":     0.10,   # t=5.90; gate LIBRARY 1.96 fragile — trimmed, kept orthogonal
+        "piotroski":          0.09,   # t=2.81 secondary; gate PROMOTE 4.87
+        "smart_money":        0.06,   # smart_money_score: backtested 2026-06-02 → SMALL t=1.06 (n=6, DROP/thin). Prior "t=2.49" was avg_delivery borrowed via a mis-alias. Diversifier — re-judge as anchors accrue.
+        "accruals":           0.06,   # t=2.10 secondary; gate REJECT — conflict, held
+        "momentum":           0.03,   # t=1.76 tertiary; gate REJECT — token
     },
 }
 

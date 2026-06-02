@@ -272,13 +272,22 @@ def run(only_signal=None, turnover=DEFAULT_TURNOVER, reeval_live=False):
 
 
 def _live_keys():
+    """Production-wired signal ids. config.SIGNAL_WEIGHTS uses short screener
+    names (consensus, accruals, …); the gate keys on registry ids
+    (consensus_signal_combined, cf_accruals_ratio, …). We add BOTH the raw key
+    and its registry alias so `is_live` matches regardless of which name the
+    gate row carries — without the alias, 6 of the 12 wired factors were
+    invisible to --reeval-live and the live count was undercounted."""
     try:
         import config
         keys = set()
         w = getattr(config, "SIGNAL_WEIGHTS", {})
         for tier_w in w.values():
             if isinstance(tier_w, dict):
-                keys.update(tier_w.keys())
+                for k in tier_w:
+                    keys.add(k)
+                    if k in _LIVE_ALIAS:
+                        keys.add(_LIVE_ALIAS[k])
         return keys
     except Exception:
         return set()
@@ -289,7 +298,11 @@ def _live_keys():
 _LIVE_ALIAS = {
     "consensus": "consensus_signal_combined", "accruals": "cf_accruals_ratio",
     "piotroski": "piotroski_f_score", "momentum": "mom_12m_adj",
-    "promoter": "promoter_qoq", "smart_money": "avg_delivery_pct_30d",
+    "promoter": "promoter_qoq",
+    # smart_money_score registered as its own backtest signal 2026-06-02 (was
+    # previously mis-aliased to avg_delivery_pct_30d, borrowing an unrelated
+    # factor's verdict). Now scored on its own thin PIT panel.
+    "smart_money": "smart_money_score",
 }
 
 

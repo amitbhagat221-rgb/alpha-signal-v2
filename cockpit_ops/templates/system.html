@@ -766,6 +766,59 @@
         Orthogonality data unavailable — run <span class="mono">python -m tools.factor_correlation</span> to refresh.
     </div>
     {% endif %}
+
+    <!-- Horizon-resolved net-of-cost gate (ADR 0038) — the second lens -->
+    {% set hg = fs.horizon_gate %}
+    {% if hg and hg.available %}
+    <div style="margin-top: 16px; border-top: 1px solid var(--border); padding-top: 12px;">
+        <div style="display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 8px;">
+            <div style="font-size: 11px; font-weight: 700; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px;">
+                Horizon-Resolved Net-of-Cost Gate
+            </div>
+            <div style="font-size: 10px; color: var(--text-muted);">
+                turnover {{ hg.turnover }} · last run {{ (hg.computed_at or '—')[:10] }}
+            </div>
+        </div>
+        <div style="font-size: 10px; color: var(--text-muted); margin: 4px 0 8px; font-style: italic;">
+            The <em>second lens</em>: re-judges each factor at its cost-resolved <strong>natural horizon</strong>, <strong>net of turnover cost</strong> — vs the validation column's single 20d&nbsp;|t|. On-demand: refresh with <span class="mono">python -m tools.promotion_gate</span>.
+        </div>
+
+        <!-- Verdict tiles + live re-eval -->
+        <div style="display: flex; flex-wrap: wrap; gap: 10px;">
+            {% for lbl, val, col, sub in [
+                ('PROMOTE',      hg.promote,    '#2ecc71',             'net_t ≥ 2.0, sign-stable'),
+                ('Library',      hg.library,    '#4d8eff',             '1.5 ≤ net_t < 2.0'),
+                ('Reject',       hg.reject,     '#e74c3c',             'cost eats the edge'),
+                ('Live clear',   (hg.live_clear ~ ' / ' ~ hg.live_total), '#2ecc71', 'wired pairs that hold'),
+            ] %}
+            <div style="flex: 1 1 120px; background: var(--bg-primary); border-radius: 8px; padding: 10px 12px; min-width: 120px;">
+                <div style="font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">{{ lbl }}</div>
+                <div class="mono" style="font-size: 22px; font-weight: 700; color: {{ col }}; line-height: 1.1;">{{ val }}</div>
+                <div style="font-size: 9px; color: var(--text-muted); margin-top: 2px;">{{ sub }}</div>
+            </div>
+            {% endfor %}
+        </div>
+        <div style="font-size: 10px; color: var(--text-muted); margin-top: 8px; font-style: italic;">
+            Of the {{ hg.live_total }} production-wired (factor, tier) pairs, <strong>{{ hg.live_clear }}</strong> still PROMOTE net-of-cost at their own horizon; <strong>{{ hg.live_flagged }}</strong> are flagged below.
+            A flag isn't an auto-cut — weight changes stay deliberate (gate ↔ history). See <span class="mono">docs/reference/signal-weights.md</span>.
+        </div>
+
+        <!-- Flagged wired pairs -->
+        {% if hg.flagged_rows %}
+        <div style="display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px;">
+            {% for f in hg.flagged_rows %}
+            <div class="mono" style="font-size: 11px; padding: 3px 9px; border-radius: 12px;
+                background: {% if f.verdict == 'REJECT' %}rgba(231,76,60,0.16){% else %}rgba(77,142,255,0.14){% endif %};
+                color: {% if f.verdict == 'REJECT' %}#e74c3c{% else %}#4d8eff{% endif %};
+                border: 1px solid var(--border);"
+                title="{{ f.verdict }} at {{ f.natural_horizon }}d · net_t {{ f.net_t }} · IR/yr {{ f.net_ir_annual }} · n={{ f.n_periods }}{% if f.sign_stable == 0 %} · sign-UNSTABLE{% endif %} · weight {{ f.weight }}">
+                {{ f.key }}/{{ f.tier }} <span style="opacity: 0.7;">w{{ '%.2f'|format(f.weight) }} · {{ f.verdict[:3] }} {{ f.net_t }}@{{ f.natural_horizon }}d</span>
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+    </div>
+    {% endif %}
 </div>
 {% endif %}
 

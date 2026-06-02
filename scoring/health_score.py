@@ -240,7 +240,7 @@ def dim_provenance_for_factor(factor_id: str) -> tuple[Optional[int], str]:
             "momentum": "mom_12m_adj",
             "book_to_price": "book_to_price",
             "promoter": "promoter_qoq",
-            "smart_money": "avg_delivery_pct_30d",
+            "smart_money": "smart_money_score",
             "pt_upside": "pt_upside",
             "eps_growth": "eps_growth_yoy",
             "pledge_quality": "pledge_quality",

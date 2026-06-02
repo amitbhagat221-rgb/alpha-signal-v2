@@ -69,6 +69,7 @@ SIGNAL_COLUMN_MAP = {
     "z_score":             (None, "z_score"),
     # Smart Money
     "avg_delivery_pct_30d": ("avg_delivery_pct_30d", "avg_delivery_pct_30d"),
+    "smart_money_score":   (None, "smart_money_score"),   # composite (bulk+delivery); v2-only, PIT-thin (bulk_deals ~1mo depth)
     "delivery_anomaly_z":  (None, "delivery_anomaly_z"),
     "bulk_deal_signal":    (None, "bulk_deal_signal"),
     "short_selling_signal": (None, "short_selling_signal"),
@@ -284,6 +285,7 @@ def _aggregate(ic_rows, signal, cap_tier, source, cadence="monthly", nw_lag=0):
 _NW_LAG_WEEKLY = {
     "insider_signal":       13,   # 90d insider window / 7d ≈ 13
     "avg_delivery_pct_30d":  4,   # 30d / 7d ≈ 4
+    "smart_money_score":    13,   # 90d composite window / 7d ≈ 13
     "delivery_anomaly_z":   13,   # 90d / 7d ≈ 13
     "sector_momentum":       9,   # 63d medium window / 7d ≈ 9
     "bulk_deal_signal":      4,   # 30d aggregation window

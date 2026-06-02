@@ -1397,6 +1397,10 @@ BACKTEST_CADENCE = {
     # ── Weekly: behavioral / event-driven / news ──
     "insider_signal":           "weekly",
     "avg_delivery_pct_30d":     "weekly",
+    # smart_money_score: behavioural by nature, but its PIT reconstruction only
+    # produced MONTHLY anchors (bulk_deals ~1mo depth blocks weekly Friday replay),
+    # so it's scored on the monthly panel. Revisit → weekly once bulk depth grows.
+    "smart_money_score":        "monthly",
     "delivery_anomaly_z":       "weekly",
     "bulk_deal_signal":         "weekly",
     "short_selling_signal":     "weekly",
@@ -1801,6 +1805,20 @@ BACKTEST_SIGNALS = [
         "v1_verdict_summary": "DROP / DROP / WEAK (t=2.49 SMALL)",
         "status": "READY",
         "status_reason": "Now in both archives.",
+    },
+    {
+        "signal": "smart_money_score",
+        "label": "Smart Money Composite",
+        "group": "Smart Money",
+        "description": "Composite of bulk-deal net-buy depth + delivery-% strength (signals.smart_money). Wired into SMALL screener weight; registered 2026-06-02 to close the never-backtested gap (HANDOFF 2026-06-02).",
+        "source_tables": ["bulk_deals", "stock_prices"],
+        "source_columns": ["bulk_deals.*", "stock_prices.delivery_pct"],
+        "filing_lag": "0d",
+        "pit_column_v1": None,
+        "pit_column_v2": "smart_money_score",
+        "v1_verdict_summary": "(was unbacktested — PIT-thin: bulk_deals ~1mo depth → only 6 reconstructed anchors)",
+        "status": "READY",
+        "status_reason": "PIT helper pit_smart_money exists; thin history (n≈6) — verdict preliminary.",
     },
     {
         "signal": "delivery_anomaly_z",
