@@ -1436,6 +1436,34 @@ CREATE INDEX IF NOT EXISTS idx_lineage_sid_factor ON signal_lineage(sid, factor)
 CREATE INDEX IF NOT EXISTS idx_lineage_snapshot ON signal_lineage(snapshot_date);
 CREATE INDEX IF NOT EXISTS idx_lineage_source_table ON signal_lineage(source_table);
 
+-- ── ADR 0036 follow-up: horizon-resolved, net-of-cost promotion gate ──
+-- One row per (signal, cap_tier). The verdict at the factor's COST-RESOLVED
+-- natural horizon (the horizon maximising net-of-cost annualised IR), replacing
+-- the legacy single-20d t-stat read. Written by tools/promotion_gate.py; it is
+-- an evidence surface, NOT an auto-promoter (weights stay a human decision).
+CREATE TABLE IF NOT EXISTS factor_horizon_gate (
+    signal            TEXT NOT NULL,
+    cap_tier          TEXT NOT NULL,
+    source            TEXT,                 -- v1_archive / v2_recompute
+    cadence           TEXT,
+    natural_horizon   INTEGER,              -- h* in trading days (5/20/63/126/252)
+    gross_ic          REAL,                 -- mean Spearman IC at h*
+    gross_t           REAL,                 -- legacy-style t at h* (pre-cost)
+    sigma_fwd         REAL,                 -- σ of h*-day fwd returns (cost denominator)
+    cost_ic           REAL,                 -- turnover cost expressed in IC units
+    net_ic            REAL,                 -- |IC| − cost, signed
+    net_t             REAL,                 -- net ICIR × √n_periods (the gate metric)
+    net_ir_annual     REAL,                 -- net ICIR × √(252/h*)
+    n_periods         INTEGER,
+    sign_stable       INTEGER,              -- 1 if IC sign is stable across horizons
+    turnover_assumed  REAL,                 -- one-way turnover/rebalance used for cost
+    is_live           INTEGER,              -- 1 if currently in config.SIGNAL_WEIGHTS
+    verdict           TEXT,                 -- PROMOTE / LIBRARY / REJECT / INSUFFICIENT
+    ir_curve_json     TEXT,                 -- {horizon: net_ir_annual} full term structure
+    computed_at       TEXT DEFAULT (datetime('now')),
+    PRIMARY KEY (signal, cap_tier)
+);
+
 -- ── Plan 0007: Trust Pipeline + Unified Health Score (UHS) ──
 -- Single source of truth for "is this entity trustworthy right now?". Replaces
 -- 11+ disparate quality vocabularies (weight_coverage, eligible_coverage,
