@@ -484,6 +484,11 @@ PIPELINE_STEPS = [
      "table": "roiic_scores", "source": "fundamentals_screener — PBT + Tax + Interest + Equity Share Capital + Reserves + Borrowings",
      "data_freq": "annual",        "frequency": "daily"},
 
+    # Gross Profitability (Novy-Marx anchor) — multibagger funnel quality anchor.
+    {"name": "signal_gross_profitability", "module": "signals.gross_profitability", "function": "compute", "critical": False,
+     "table": "gross_profitability_scores", "source": "fundamentals_screener — Sales + Raw Material Cost + Change in Inventory + Power and Fuel + Other Mfr. Exp + Total",
+     "data_freq": "annual",        "frequency": "daily"},
+
     # ── Forensic / capital-allocation batch (plan 0002 §3.2.1) ──
     {"name": "signal_dso_change_yoy", "module": "signals.dso_change_yoy", "function": "compute", "critical": False,
      "table": "dso_change_yoy_scores", "source": "fundamentals_screener — Sales + Receivables",
@@ -758,6 +763,17 @@ RAW_TABLES = [
     {"table": "regulatory_signals",     "source": "AI classification (Haiku+Sonnet)",  "data_freq": "daily",  "frequency": "monthly"},
     # vix_history is mirrored from macro_history.india_vix by sources.macro_yfinance._sync_vix_history.
     {"table": "vix_history",            "source": "yfinance ^INDIAVIX (mirrored from macro_history)", "data_freq": "daily", "frequency": "daily"},
+    # ── Standalone-cron-fed tables (NOT in PIPELINE_STEPS → previously invisible to
+    #    freshness). Registered here 2026-06-03 after the monthly snapshot cron silently
+    #    no-op'd for ~a month (cd-less `python -m` → ModuleNotFoundError). Any table whose
+    #    only producer is a standalone cron MUST be listed here or it gets no benchmark.
+    #    analyst_consensus_snapshots: own cron, 1st biz day of month (see CLAUDE.md cadence rule).
+    {"table": "analyst_consensus_snapshots", "source": "yfinance --snapshot (standalone monthly cron, 1st biz day)", "data_freq": "monthly", "frequency": "monthly"},
+    #    The 3 forward-only NSE tables below are fed by run_daily_forward.sh (14:00 UTC cron).
+    {"table": "surveillance_flags",     "source": "NSE ASM/GSM/F&O-ban (run_daily_forward.sh cron)",   "data_freq": "daily", "frequency": "daily"},
+    {"table": "fii_dii_cash_flow",      "source": "NSE FII/DII cash flow (run_daily_forward.sh cron)", "data_freq": "daily", "frequency": "daily"},
+    {"table": "fii_dii_positioning",    "source": "NSE FII/DII F&O OI (run_daily_forward.sh cron)",    "data_freq": "daily", "frequency": "daily"},
+    {"table": "short_selling_data",     "source": "NSE short selling (run_daily_forward.sh cron, wired 2026-06-03)", "data_freq": "daily", "frequency": "daily"},
 ]
 
 

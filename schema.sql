@@ -886,6 +886,75 @@ CREATE TABLE IF NOT EXISTS roic_scores (
 
 CREATE INDEX IF NOT EXISTS idx_roic_date ON roic_scores(snapshot_date);
 
+-- Gross Profitability (Novy-Marx anchor) — multibagger funnel quality anchor.
+-- Gross Profit = Sales − COGS(materials+inventory+power+mfr), ÷ Total Assets, 3y median.
+CREATE TABLE IF NOT EXISTS gross_profitability_scores (
+    sid                  TEXT NOT NULL REFERENCES stocks(sid),
+    snapshot_date        TEXT NOT NULL,
+    period_end           TEXT,                    -- latest annual period used
+    gross_profit         REAL,                    -- ₹ cr, 3y median
+    total_assets         REAL,                    -- ₹ cr, 3y median
+    gross_profitability  REAL,                    -- Gross Profit / Total Assets
+    PRIMARY KEY (sid, snapshot_date)
+);
+
+CREATE INDEX IF NOT EXISTS idx_gross_profitability_date ON gross_profitability_scores(snapshot_date);
+
+-- Multibagger funnel (v0) — SEPARATE screen, NOT wired into daily_picks.
+-- 3-stage hurdle/filter funnel output: gate/hurdle pass-flags + reasons,
+-- the computed/reused inputs (for cockpit transparency), pillar sub-scores,
+-- and the final composite rank among survivors. See signals/multibagger.py.
+CREATE TABLE IF NOT EXISTS multibagger_scores (
+    sid                   TEXT NOT NULL REFERENCES stocks(sid),
+    snapshot_date         TEXT NOT NULL,
+    cap_tier              TEXT,
+    mcap_cr               REAL,                  -- market cap in ₹ crore
+    survived              INTEGER,               -- 1 = passed all gates + hurdles
+    passed_gates          INTEGER,
+    gate_fail             TEXT,                  -- which Stage-1 gates failed
+    passed_hurdles        INTEGER,
+    hurdle_fail           TEXT,                  -- which Stage-2 hurdles failed
+    de_ratio              REAL,                  -- Borrowings / (EqCap + Reserves)
+    pat_cagr_3y           REAL,
+    earnings_acceleration REAL,                  -- annual growth-of-growth
+    ep_yield              REAL,                  -- latest PAT / market cap
+    peg                   REAL,
+    gross_profitability   REAL,                  -- Novy-Marx anchor (reused)
+    roic                  REAL,
+    roiic                 REAL,
+    margin_slope          REAL,
+    f_score               INTEGER,               -- Piotroski
+    promoter_pct          REAL,
+    pledge_pct            REAL,
+    smart_money_score     REAL,
+    m_score_flag          TEXT,                  -- Beneish CLEAN / LIKELY_MANIPULATOR
+    p_quality             REAL,                  -- Stage-3 pillar sub-scores
+    p_growth              REAL,
+    p_conviction          REAL,
+    interaction           REAL,                  -- growth × cheapness
+    multibagger_score     REAL,                  -- final composite (survivors only)
+    rank_in_tier          REAL,
+    PRIMARY KEY (sid, snapshot_date)
+);
+
+CREATE INDEX IF NOT EXISTS idx_multibagger_date ON multibagger_scores(snapshot_date);
+
+-- Historical universe (multibagger cohort study, Phase 2b) — survivorship-correct
+-- snapshots of the TRUE NSE equity universe at anchor dates, from the bhavcopy
+-- archive (incl. since-delisted names). sid NULL = not in current `stocks`.
+CREATE TABLE IF NOT EXISTS historical_universe (
+    snapshot_date  TEXT NOT NULL,   -- actual bhavcopy trading day used
+    requested_date TEXT,            -- the anchor date requested
+    symbol         TEXT NOT NULL,
+    sid            TEXT,            -- NULL = not in current stocks (delisted/untracked)
+    series         TEXT,
+    close          REAL,
+    delivery_pct   REAL,
+    PRIMARY KEY (snapshot_date, symbol)
+);
+
+CREATE INDEX IF NOT EXISTS idx_histuniv_sid ON historical_universe(sid);
+
 -- FCF Yield — second F-track factor.
 -- FCF = OCF − Capex; Capex ≈ Δ(Net Block + CWIP) + Depreciation (cf. roic.py
 -- comment for derivation). Yield = 3-yr median FCF / current market cap.

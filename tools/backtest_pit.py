@@ -129,6 +129,7 @@ SIGNAL_COLUMN_MAP = {
     "roic":                (None, "roic"),
     "fcf_yield":           (None, "fcf_yield"),
     "roiic":               (None, "roiic"),
+    "gross_profitability": (None, "gross_profitability"),
     # Forensic / capital-allocation batch (plan 0002 §3.2.1)
     "dso_change_yoy":        (None, "dso_change_yoy"),
     "dio_change_yoy":        (None, "dio_change_yoy"),

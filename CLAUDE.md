@@ -24,6 +24,7 @@ Everything else (memory, `_archive/`, slash commands, settings) — Claude handl
 - Activate venv first: `source ~/alpha-signal/venv/bin/activate` (shared with v1)
 - v1 is LIVE on cron — never touch `~/alpha-signal/`. All v2 work in `~/alpha-signal-v2/`
 - Credentials live in v1's `run_pipeline.sh` exports — never in code. v2 imports them at runtime via `eval "$(grep '^export ' /home/ubuntu/alpha-signal/run_pipeline.sh)"` (read-only, no execution of v1 body) — used by `run_pipeline.sh` and the v2 cron lines. Don't duplicate secrets anywhere.
+- Any cron running `python -m <module>` MUST `cd /home/ubuntu/alpha-signal-v2 &&` first — cron's CWD is `$HOME`, so `-m` fails `ModuleNotFoundError: No module named 'sources'` silently into a log no one reads. The monthly `analyst_consensus_snapshots` cron silently no-op'd this way until fixed 2026-06-03. When adding a cron, mirror the watchdog/health lines (they `cd` first).
 
 **Architecture & Code**
 - No frameworks, no base classes, no YAML. Plain functions, Python config dict, SQLite. See `docs/decisions/0004-no-base-classes-no-yaml.md`

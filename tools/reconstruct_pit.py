@@ -188,6 +188,7 @@ PIT_COLUMNS = [
     "roic",
     "fcf_yield",
     "roiic",
+    "gross_profitability",   # Novy-Marx anchor quality factor (multibagger funnel)
     # Forensic / capital-allocation batch (plan 0002 §3.2.1)
     "dso_change_yoy", "dio_change_yoy", "nwc_to_revenue",
     "sloan_accruals_full", "sga_to_revenue_change",
@@ -307,6 +308,9 @@ VALIDATION_RANGES = {
     # ROIIC — 5y marginal NOPAT/IC. Capped to ±5 in the scorer; range is
     # mirrored here so the validator is a no-op except for inf scrubbing.
     "roiic":                 (-5, 5, True),
+    # Gross Profitability — Gross Profit / Total Assets, 3y median. Real-world
+    # band ~0 to 1; pad to (-1, 2) for gross-loss names + asset-light blowups.
+    "gross_profitability":   (-1, 2, True),
     # Forensic / capital-allocation batch (§3.2.1) — bounds are intentionally
     # wide to keep distressed outliers without letting them dominate ranks.
     "dso_change_yoy":        (-365, 365, True),    # days
@@ -1901,6 +1905,66 @@ def pit_roic(stocks, fund_pit):
     return agg[["sid", "roic"]].reset_index(drop=True)
 
 
+# ───── Gross Profitability (paired with signals/gross_profitability.py) ─────
+
+_GP_SMOOTH = 3
+_GP_MIN_YEARS = 2
+_GP_MIN_SALES_CR = 50.0
+_GP_MIN_ASSETS_CR = 50.0
+_GP_MATERIAL_MIN_FRAC = 0.10   # goods-business floor (see signals/gross_profitability.py)
+_GP_CAP = (-1.0, 2.0)
+_GP_REQUIRED = ("Sales", "Raw Material Cost", "Total")
+_GP_OPTIONAL = ("Change in Inventory", "Power and Fuel", "Other Mfr. Exp")
+_GP_ITEMS = _GP_REQUIRED + _GP_OPTIONAL
+
+
+def pit_gross_profitability(stocks, fund_pit):
+    """3y-median gross-profits-to-assets per sid. Mirrors signals/gross_profitability.py.
+
+    COGS = Raw Material Cost + Change in Inventory + Power and Fuel + Other Mfr.
+    Exp; Gross Profit = Sales − COGS; ÷ Total assets. Requires Raw Material Cost
+    (goods businesses only — service/IT names left NaN). Financial sector
+    excluded. The Novy-Marx anchor of the multibagger funnel.
+    """
+    universe = stocks[~stocks["sector"].isin(FINANCIAL_SECTORS)][["sid"]]
+    fp = fund_pit[fund_pit["line_item"].isin(_GP_ITEMS)]
+    if fp.empty:
+        return pd.DataFrame(columns=["sid", "gross_profitability"])
+
+    wide = fp.pivot_table(
+        index=["sid", "period_end"], columns="line_item", values="value", aggfunc="first"
+    ).reset_index()
+    for item in _GP_REQUIRED:
+        if item not in wide.columns:
+            wide[item] = np.nan
+    for item in _GP_OPTIONAL:
+        if item not in wide.columns:
+            wide[item] = 0.0
+    wide = wide.dropna(subset=list(_GP_REQUIRED))
+    if wide.empty:
+        return pd.DataFrame(columns=["sid", "gross_profitability"])
+    for item in _GP_OPTIONAL:
+        wide[item] = wide[item].fillna(0.0)
+
+    cogs = (wide["Raw Material Cost"] + wide["Change in Inventory"]
+            + wide["Power and Fuel"] + wide["Other Mfr. Exp"])
+    wide["gp"] = wide["Sales"] - cogs
+    wide = wide[(wide["Sales"] >= _GP_MIN_SALES_CR)
+                & (wide["Total"] >= _GP_MIN_ASSETS_CR)
+                & (wide["Raw Material Cost"] >= _GP_MATERIAL_MIN_FRAC * wide["Sales"])].copy()
+    wide["gp_yr"] = (wide["gp"] / wide["Total"]).clip(*_GP_CAP)
+
+    wide = wide.sort_values(["sid", "period_end"])
+    last_n = wide.groupby("sid", as_index=False).tail(_GP_SMOOTH)
+    agg = last_n.groupby("sid", as_index=False).agg(
+        gross_profitability=("gp_yr", "median"),
+        years_used=("gp_yr", "count"),
+    )
+    agg = agg[agg["years_used"] >= _GP_MIN_YEARS]
+    agg = agg.merge(universe, on="sid", how="inner")
+    return agg[["sid", "gross_profitability"]].reset_index(drop=True)
+
+
 # ───── FCF Yield (paired with signals/fcf_yield.py) ─────
 
 _FCFY_SMOOTH = 3
@@ -2506,6 +2570,12 @@ def reconstruct_one_date(eval_date, raw, signals_to_run):
             on="sid", how="left",
         )
 
+    if "gross_profitability" in signals_to_run and not fund_pit.empty:
+        base = base.merge(
+            pit_gross_profitability(raw["stocks"], fund_pit),
+            on="sid", how="left",
+        )
+
     if "fcf_yield" in signals_to_run and not fund_pit.empty:
         base = base.merge(
             pit_fcf_yield(raw["stocks"], fund_pit, close_df),
@@ -2794,6 +2864,7 @@ def main():
                                  "working_capital_intensity",
                                  "interest_coverage",
                                  "roic", "fcf_yield", "roiic",
+                                 "gross_profitability",
                                  "dso_change_yoy", "dio_change_yoy",
                                  "nwc_to_revenue", "sloan_accruals_full",
                                  "sga_to_revenue_change",
@@ -2846,6 +2917,7 @@ def main():
         "working_capital_intensity",
         "interest_coverage",
         "roic", "fcf_yield", "roiic",
+        "gross_profitability",
         # Forensic / capital-allocation batch (plan 0002 §3.2.1)
         "dso_change_yoy", "dio_change_yoy",
         "nwc_to_revenue", "sloan_accruals_full", "sga_to_revenue_change",

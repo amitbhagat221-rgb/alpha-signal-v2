@@ -160,6 +160,8 @@ _COLUMN_MIGRATIONS = [
     ("daily_snapshots_pit", "metals_beta",                "REAL"),
     ("daily_snapshots_pit", "inr_beta",                   "REAL"),
     ("daily_snapshots_pit", "gold_beta",                  "REAL"),
+    # 2026-06-03: multibagger funnel — Novy-Marx anchor quality factor.
+    ("daily_snapshots_pit", "gross_profitability",        "REAL"),
 ]
 
 
@@ -1233,6 +1235,24 @@ STALENESS_OVERRIDES = {
     "fno_bhav":               6,
     "fno_pcr_history":        6,
     "fno_iv_history":         6,
+    # ── Standalone-cron tables (registered in RAW_TABLES 2026-06-03) ──
+    # analyst_consensus_snapshots: written 1st business day of each month, so age
+    # oscillates 0→~33d across a normal month (first-biz-day drift). 40 sits above
+    # that ceiling (no month-end false alarm) yet flags a MISSED month by ~day 40
+    # (≈1 week into the next month). This is the gap that hid the June 1 cron crash.
+    "analyst_consensus_snapshots": 40,
+    # FII/DII F&O positioning reports yesterday's settled OI (inherent +1d) and is
+    # pulled days_back=3; over a weekend the freshest row is ~3-4d old. 6 tolerates
+    # a long weekend + the settlement lag, still flags a stalled run_daily_forward.sh.
+    "fii_dii_positioning":     6,
+    # FII/DII cash + surveillance snapshots are trading-day rows published EOD; a
+    # Friday read on Monday is ~3d, +T+1 publish lag. 5 tolerates that, flags a stall.
+    "fii_dii_cash_flow":       5,
+    "surveillance_flags":      5,
+    # short_selling_data: NSE posts T+1 with occasional multi-day gaps (low-activity
+    # days). Wired into run_daily_forward.sh 2026-06-03. 7 tolerates weekend + posting
+    # lag + a quiet gap; provisional — tighten after observing the first cron runs.
+    "short_selling_data":      7,
 }
 
 # Per-stock coverage gates. A table that should have a row per universe stock
@@ -2392,6 +2412,20 @@ BACKTEST_SIGNALS = [
         "status_reason": "Library tier — sub-|t|=1.5 in the 6-period backtest but signs are intuitive (positive marginal ROIC → positive return). Retest as PIT extends.",
     },
     {
+        "signal": "gross_profitability",
+        "label": "Gross Profitability (Novy-Marx)",
+        "group": "Track 3 — Library",
+        "description": "(Sales − COGS) / Total Assets, 3y median. COGS = Raw Material + Change in Inventory + Power & Fuel + Other Mfr. Exp. Anchor quality factor of the multibagger funnel.",
+        "source_tables": ["fundamentals_screener"],
+        "source_columns": ["{Sales, Raw Material Cost, Change in Inventory, Power and Fuel, Other Mfr. Exp, Total} (annual)"],
+        "filing_lag": "75d annual",
+        "pit_column_v1": None,
+        "pit_column_v2": "gross_profitability",
+        "v1_verdict_summary": "v2-only — not yet backtested (built 2026-06-03 for multibagger funnel)",
+        "status": "READY",
+        "status_reason": "Multibagger funnel anchor (docs/reference/multibagger-research.md #1). Computed; awaiting first ic_decay/promotion_gate read.",
+    },
+    {
         "signal": "fcf_yield",
         "label": "Free Cash Flow Yield",
         "group": "Track 3 — Library",
@@ -2882,6 +2916,7 @@ FACTOR_LIBRARY = [
     "roic",                 # best |t|=0.75 LARGE
     "fcf_yield",            # best |t|=1.08 SMALL
     "roiic",                # best |t|=0.91 MID, intuitive sign
+    "gross_profitability",  # Novy-Marx anchor (multibagger funnel) — not yet backtested
     "dio_change_yoy",       # best |t|=0.97 MID
     "sloan_accruals_full",  # best |t|=1.43 SMALL
     "sga_to_revenue_change",  # best |t|=0.69 MID

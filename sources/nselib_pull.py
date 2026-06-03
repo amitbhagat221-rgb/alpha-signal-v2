@@ -606,34 +606,45 @@ def pull_surveillance_today():
     except Exception as e:
         print(f"  GSM: ❌ {str(e)[:100]}")
 
-    # F&O ban list
+    # F&O ban list. nselib currently returns a BARE list of symbol strings
+    # (e.g. ['AMBER', 'KAYNES']) — pd.DataFrame(that) yields an integer column
+    # label, which broke the old `c.strip()` ('int' has no attribute 'strip').
+    # Normalize to a flat symbol list; tolerate list-of-dicts / DataFrame too in
+    # case the upstream shape drifts back (it has before).
     try:
         from nselib import derivatives as dv
         out = dv.fno_security_in_ban_period(trade_date=date.today().strftime("%d-%m-%Y"))
-        if isinstance(out, list):
-            df = pd.DataFrame(out) if out else pd.DataFrame()
+        symbols = []
+        if isinstance(out, pd.DataFrame):
+            if not out.empty:
+                out.columns = [str(c).strip() for c in out.columns]
+                sym_col = next((c for c in out.columns if "symbol" in c.lower()), out.columns[0])
+                symbols = [str(v) for v in out[sym_col].tolist()]
+        elif isinstance(out, list):
+            for item in out:
+                if isinstance(item, dict):
+                    symbols.append(str(item.get("symbol") or item.get("Symbol") or ""))
+                else:
+                    symbols.append(str(item))
+        rows = []
+        for sym in symbols:
+            sym = sym.strip().upper()
+            if not sym:
+                continue
+            rows.append({
+                "sid": sid_map.get(sym),
+                "symbol": sym,
+                "flag_type": "FNO_BAN",
+                "flag_date": today_str,
+                "stage": "",
+                "reason": "",
+            })
+        if rows:
+            n = _insert_or_ignore(pd.DataFrame(rows), "surveillance_flags")
+            inserted += n
+            print(f"  F&O ban: {n} new rows")
         else:
-            df = out
-        if df is not None and not df.empty:
-            df.columns = [c.strip() for c in df.columns]
-            sym_col = next((c for c in df.columns if "symbol" in c.lower()), df.columns[0])
-            rows = []
-            for _, r in df.iterrows():
-                sym = str(r.get(sym_col, "")).strip().upper()
-                if not sym:
-                    continue
-                rows.append({
-                    "sid": sid_map.get(sym),
-                    "symbol": sym,
-                    "flag_type": "FNO_BAN",
-                    "flag_date": today_str,
-                    "stage": "",
-                    "reason": "",
-                })
-            if rows:
-                n = _insert_or_ignore(pd.DataFrame(rows), "surveillance_flags")
-                inserted += n
-                print(f"  F&O ban: {n} new rows")
+            print("  F&O ban: 0 symbols in ban period today")
     except Exception as e:
         print(f"  F&O ban: ❌ {str(e)[:100]}")
 
@@ -697,6 +708,12 @@ def main():
         pull_fii_cash_flow()
         print("\n=== FII/DII F&O positioning (yesterday's reading) ===")
         pull_fii_positioning(days_back=3)  # only check last few days
+        # Short selling — NSE posts with a T+1 lag; a 1-month window each day is
+        # idempotent (INSERT OR IGNORE) and backfills any late-posted rows. Wired
+        # into the daily cron 2026-06-03 (was manual-only `--source short` → 10d stale).
+        print("\n=== Short selling (last month, forward accumulation) ===")
+        n = pull_short_selling(months=1)
+        print(f"  → {n} new short_selling_data rows")
 
 
 if __name__ == "__main__":
