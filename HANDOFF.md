@@ -1,19 +1,18 @@
 # HANDOFF
-Updated: 2026-06-02 | Branch: master (3 unpushed) | HEAD: `f2eb28e` feat(model): horizon-resolved net-of-cost promotion gate (ADR 0038)
+Updated: 2026-06-03 | Branch: master (0 unpushed) | HEAD: `a8ecd4b` feat(model): horizon-gate weight review + /system surface + smart_money validated
 
 ## Left off
-Cleared three stacked items in one session: the ADR 0037 UHS follow-up, the last build-now §3.2 factors (§3.2.6/§3.2.7), and the ADR 0036 promotion-gate follow-up. The promotion gate is the meaty one — it now re-judges every factor at its cost-resolved natural horizon and flagged that 10/18 production (signal,tier) pairs don't clear net-of-cost at their own horizon, which is the live thread to pull next.
+Closed Next-3 #1 — acted on the gate's live re-eval with a deliberate weight review (gate × v1-history agreement, never mechanical): LARGE cleanup (dropped momentum, equalized accruals/piotroski as labelled diversifiers, trimmed earnings_yield, lifted consensus/book_to_price), SMALL pledge_quality 0.13→0.10 → book_to_price 0.12, MID held (its flags are conflicts). Plus both follow-ups: surfaced `factor_horizon_gate` on `/system`, and registered+backtested `smart_money_score` (was wired with zero backtest; verdict thin/DROP). All in `a8ecd4b`.
 
 ## Pick up here
-1. **Act on the gate's live re-eval** — [tools/promotion_gate.py](tools/promotion_gate.py) `--reeval-live` (table `factor_horizon_gate`). Deliberate weight review (signal-weights.md process, never mechanical) on the flagged live factors: `earnings_yield`/MID + `book_to_price`/LARGE are sign-unstable (LIBRARY not PROMOTE); `delivery_anomaly_z` LARGE/MID + `iv_skew_25d` SMALL REJECT (fast, turnover-eaten at 5d). Counterpart: `book_to_price`/`earnings_yield` SMALL validate strongly at their **252d** natural horizon — candidates to weight at horizon, not 20d.
-2. **§3.2.7 betas at their natural horizon** — the gate PROMOTEs `gold_beta` LARGE (126d, net_t 4.7) + `metals_beta` MID (126d, net_t 2.7), better than their raw-20d WEAK in [config.py](config.py) `FACTOR_LIBRARY`. n≈19 is thin — re-check after a few more monthly anchors before considering a wire.
-3. **Surface `factor_horizon_gate` on `/system`** — feed it into the Promotion Funnel tile ([cockpit_ops/api.py](cockpit_ops/api.py) `get_factor_health`), so the horizon-resolved verdict is visible next to the legacy 20d t-stat (ADR 0038 "Next").
+1. **§3.2.7 betas at natural horizon** (Next-3) — gate PROMOTEs `gold_beta` LARGE + `metals_beta` MID @126d vs raw-20d WEAK in [config.py](config.py) `FACTOR_LIBRARY`; n≈19 thin. Re-check after a few more monthly anchors before any wire.
+2. **`pt_upside` artifact re-verify** (Next-3, due 2026-08) — capped 0.16–0.25 in `config.SIGNAL_WEIGHTS`. `python -m tools.backtest_pit --signal pt_upside` once ≥3 fresh `analyst_consensus_snapshots` exist → un-cap or pull.
+3. **MID conflict re-judge** — `accruals`/MID (0.19, v1 t=3.20 vs gate REJECT) + `consensus`/MID (0.09) held this session; revisit via `python -m tools.promotion_gate --reeval-live` once monthly anchors thicken. `smart_money_score` (n=6) firms up the same way.
 
 ## Watch out
-- **promotion_gate.py is on-demand, NOT in PIPELINE_STEPS** — `factor_horizon_gate` only refreshes when you run `python -m tools.promotion_gate`. The first-read rows are turnover=0.3.
-- **252d net_t magnitudes are survivorship-inflated** (v1 archive = current-names-only). The guard only blocks *thin* (n<8) 252d; use the `net_ir_annual` column as the fair cross-horizon comparator, not net_t. pt_upside correctly resolved to 5d (not the 252d artifact) — that self-correction is the gate working.
-- **Macro betas NULL before ~2024-03** — need ≥1y of `macro_history` (starts 2023-03-13) for the 252d window; early PIT anchors are correctly NULL by construction, not a bug. Reconstructed only on the 27 monthly anchors (not weekly dates).
-- **`industry_id` is a CONTROL** — status=CONTROL in BACKTEST_SIGNALS, deliberately absent from SIGNAL_COLUMN_MAP (IC of a categorical code is meaningless). Don't "fix" its missing backtest.
+- **`get_factor_health` is `@_persisted_cache(300)`** — survives restart on disk (`data/.cockpit_cache/get_factor_health.pkl`). After editing `cockpit_ops/api.py`: `rm` the pkl **AND** `sudo systemctl restart alpha-cockpit-ops` — restart alone serves the stale disk cache.
+- **`smart_money_score` is now backtest-registered but PIT-thin** (n=6, monthly cadence). Its gate SMALL-PROMOTE @126d is preliminary — `bulk_deals` has ~1mo depth so the reconstructed composite collapses toward delivery (redundant with `avg_delivery_pct_30d`). Don't act on the 0.06 weight yet.
+- **`factor_horizon_gate.is_live` is per-signal (any tier)** — over-counts non-wired tiers. The `/system` funnel computes per-(signal,tier) wired status separately, so the table's `is_live` column ≠ the cockpit's "11/24 live clear".
 
 ## Active plan
-[docs/plans/0002-100-factors-and-model.md](docs/plans/0002-100-factors-and-model.md) — Phase 3.2 (47/50 PIT-shipped: +industry_id control +4 macro betas) + Track 3.3a promotion gate shipped (ADR 0038).
+[docs/plans/0002-100-factors-and-model.md](docs/plans/0002-100-factors-and-model.md) — Track 3.3a (promotion gate shipped + acted; weights re-reviewed per ADR 0038).
