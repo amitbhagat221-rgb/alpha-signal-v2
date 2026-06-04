@@ -425,6 +425,72 @@ CREATE TABLE IF NOT EXISTS macro_sector_signals (
 CREATE INDEX IF NOT EXISTS idx_macro_sector_date ON macro_sector_signals(snapshot_date);
 
 
+-- ─────────────────────────────────────────────────────────────────────────
+-- Sector at-entry signal history (plan: sector-signal lab, 2026-06).
+-- Three PIT snapshot tables that ACCUMULATE monthly so the corresponding
+-- at-entry sector signals become backtestable in ~12 months. Sourced from
+-- tables that already accrue (analyst_consensus_snapshots, sentiment_scores)
+-- and a curated policy-event store. Sector = GICS (matches stocks.sector).
+-- ─────────────────────────────────────────────────────────────────────────
+
+-- Analyst sector-revision breadth: monthly net upgrade/downgrade pressure per
+-- sector, from MoM change in analyst_consensus_snapshots.target_mean. The
+-- literature's "revision breadth → returns" signal, at sector level. Needs ≥2
+-- monthly snapshots to compute (MoM); accrues one row-set per month thereafter.
+CREATE TABLE IF NOT EXISTS sector_analyst_breadth_pit (
+    sector          TEXT NOT NULL,
+    snapshot_date   TEXT NOT NULL,      -- the later month's snapshot (1st-of-month)
+    n_covered       INTEGER,            -- stocks with coverage in both months
+    pct_pt_up       REAL,               -- share whose target_mean rose MoM
+    pct_pt_down     REAL,
+    mean_pt_chg_pct REAL,               -- mean MoM % change in target_mean
+    mean_reco       REAL,               -- mean recommendation_mean (1=buy..5=sell)
+    breadth         REAL,               -- pct_pt_up − pct_pt_down (the signal)
+    PRIMARY KEY (sector, snapshot_date)
+);
+CREATE INDEX IF NOT EXISTS idx_sabp_date ON sector_analyst_breadth_pit(snapshot_date);
+
+-- News-sentiment breadth: monthly sector aggregate of stock-level 30d news
+-- sentiment. Snapshots the last available sentiment_scores row each month.
+CREATE TABLE IF NOT EXISTS sector_sentiment_breadth_pit (
+    sector          TEXT NOT NULL,
+    snapshot_date   TEXT NOT NULL,      -- last sentiment snapshot date in the month
+    n_stocks        INTEGER,
+    mean_sent_30d   REAL,
+    pct_positive    REAL,               -- share with sentiment_30d > 0
+    article_vol     INTEGER,            -- total articles_30d in sector
+    sent_breadth    REAL,               -- pct_positive − pct_negative (the signal)
+    PRIMARY KEY (sector, snapshot_date)
+);
+CREATE INDEX IF NOT EXISTS idx_ssbp_date ON sector_sentiment_breadth_pit(snapshot_date);
+
+-- Curated policy / budget / scheme event store. Hand-seeded from known major
+-- events (Union Budget capex, PLI, defense/railway orders, key regulation),
+-- appended over time. direction ∈ {+1 tailwind, −1 headwind}; magnitude 0–3.
+CREATE TABLE IF NOT EXISTS policy_events (
+    event_date      TEXT NOT NULL,      -- announcement / effective date
+    sector          TEXT NOT NULL,      -- GICS sector affected
+    event_type      TEXT,               -- BUDGET / PLI / ORDER / REGULATION / TARIFF / THEME
+    direction       INTEGER NOT NULL,   -- +1 tailwind / −1 headwind
+    magnitude       REAL NOT NULL,      -- 0–3 curated importance
+    title           TEXT NOT NULL,
+    source          TEXT,
+    PRIMARY KEY (event_date, sector, title)
+);
+CREATE INDEX IF NOT EXISTS idx_policy_sector ON policy_events(sector);
+
+-- Monthly decayed policy score per sector (trailing-window sum of
+-- direction×magnitude×age-decay over policy_events). Backfilled from the seed.
+CREATE TABLE IF NOT EXISTS sector_policy_pit (
+    sector          TEXT NOT NULL,
+    snapshot_date   TEXT NOT NULL,      -- month-end
+    policy_score    REAL,               -- decayed net tailwind (− = net headwind)
+    n_events        INTEGER,
+    PRIMARY KEY (sector, snapshot_date)
+);
+CREATE INDEX IF NOT EXISTS idx_spp_date ON sector_policy_pit(snapshot_date);
+
+
 -- Per-sector daily brief — plan 0006 Phase A.
 -- One row per sector per snapshot_date with macro + model + regulatory rollup
 -- and a bucket classification (BOOMING / LIKELY / HEADWIND / QUIET) that drives

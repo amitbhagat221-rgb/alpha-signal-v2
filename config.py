@@ -404,6 +404,18 @@ PIPELINE_STEPS = [
     {"name": "scrape_mf_holdings", "module": "sources.mf_holdings_scrape",   "function": "compute", "critical": False,
      "table": "mf_holdings",       "source": "ETMoney portfolio-details (public)", "data_freq": "monthly", "frequency": "monthly"},
 
+    # ── Sector signal history (monthly PIT accumulators, 2026-06) ──
+    # Start the clock on at-entry sector signals so they're backtestable in ~12mo.
+    # Each upserts a monthly snapshot from an already-accruing source. Cheap,
+    # non-blocking; the sector-signal lab validated sector momentum (t+3) — these
+    # accrue the orthogonal candidates (analyst revisions, news, policy).
+    {"name": "sector_analyst_breadth",  "module": "signals.sector_breadth", "function": "compute_analyst", "critical": False,
+     "table": "sector_analyst_breadth_pit",  "source": "analyst_consensus_snapshots (MoM PT revision)", "data_freq": "monthly", "frequency": "monthly"},
+    {"name": "sector_sentiment_breadth","module": "signals.sector_breadth", "function": "compute_sentiment", "critical": False,
+     "table": "sector_sentiment_breadth_pit","source": "sentiment_scores (30d news breadth)", "data_freq": "monthly", "frequency": "monthly"},
+    {"name": "sector_policy",           "module": "signals.sector_policy",  "function": "compute", "critical": False,
+     "table": "sector_policy_pit",            "source": "policy_events (curated store)", "data_freq": "monthly", "frequency": "monthly"},
+
     # NOTE: classify_regulatory, classify_news, news_brief, and fetch_broker_recos
     # all moved to END of pipeline — they were blocking production. See block
     # at the bottom: "Background / non-blocking section".
