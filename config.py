@@ -224,6 +224,23 @@ FORENSIC = {
     "altman_grey": 2.60,       # below → grey zone
 }
 
+# ── Revenue-plausibility hard exclusion (tier-agnostic) ──
+# Catches what Beneish/Altman structurally cannot: a steady-state, internally-
+# consistent revenue fabrication (Rajesh Exports / REXP, SEBI 2026-06-03 — ₹15.15
+# lakh cr fabricated, ~99.8% of consolidated revenue). The accrual/distress models
+# are YoY-change detectors and were defeated by 5yr of stable fake ratios + a
+# fabricated cash side. The tell they ALL miss is the LEVEL: revenue churning many
+# times the asset base at ~zero profit, which no legitimate business produces.
+# Two-part AND so legitimate high-turnover names (distribution/staffing/agri-
+# commodity, ~5-6x at 1-3% margin) are NOT caught — only impossible-turnover-at-
+# zero-margin. On 2026-06-04 data this flags exactly 1 of 1,526 non-financials: REXP.
+# A hard exclusion (drops from daily_picks), NOT a weighted factor → no t-stat gate.
+REVENUE_PLAUSIBILITY = {
+    "min_assets_cr": 100.0,        # below this, the ratio is rounding noise — skip
+    "turnover_max": 8.0,           # TTM revenue / total_assets above this is suspect
+    "abs_net_margin_max": 0.005,   # …AND |net margin| < 0.5% → revenue at ~no profit
+}
+
 # ── Portfolio Construction ──
 
 PORTFOLIO = {

@@ -162,6 +162,16 @@ def _load_signals():
     # Normalize smart_money from 0-100 to 0-1 for consistent percentile ranking
     df["smart_money"] = df["smart_money"] / 100.0
 
+    # Revenue-plausibility hard exclusion (tier-agnostic) — drops stocks whose
+    # reported revenue churns many times the asset base at ~zero profit, the
+    # signature of fabricated revenue that Beneish/Altman structurally miss
+    # (REXP, SEBI 2026-06-03). See signals/revenue_plausibility.py. Left-merge +
+    # fillna(False): stocks without a full TTM/balance sheet are never flagged.
+    from signals.revenue_plausibility import compute_revenue_plausibility
+    implausible = compute_revenue_plausibility()
+    df = df.merge(implausible, on="sid", how="left")
+    df["revenue_implausible"] = df["revenue_implausible"].fillna(False).astype(bool)
+
     return df
 
 
@@ -355,7 +365,13 @@ def _pick_eligible(df, min_eligible: float = None):
     has_weight = df["weight_coverage"].fillna(0) >= MIN_WEIGHT_COVERAGE
     has_prices = df["price_rows"].fillna(0) >= MIN_PRICE_ROWS
     has_fundamentals = df["fundamental_coverage"].fillna(0) >= MIN_FUNDAMENTAL_COVERAGE
-    return has_elig & has_weight & has_prices & has_fundamentals
+    # Revenue-plausibility hard exclusion — fabricated-revenue signature
+    # (impossible asset turnover at ~zero margin). Tier-agnostic. See
+    # signals/revenue_plausibility.py. Default False when the column is absent.
+    plausible = ~df.get(
+        "revenue_implausible", pd.Series(False, index=df.index)
+    ).fillna(False).astype(bool)
+    return has_elig & has_weight & has_prices & has_fundamentals & plausible
 
 
 def select_picks(df, picks_per_tier=None, min_eligible: float = None):
@@ -378,11 +394,18 @@ def select_picks(df, picks_per_tier=None, min_eligible: float = None):
     dropped_coverage = ((df["weight_coverage"].fillna(0) < MIN_WEIGHT_COVERAGE)).sum()
     dropped_prices = ((df["price_rows"].fillna(0) < MIN_PRICE_ROWS)).sum()
     dropped_fundamentals = ((df["fundamental_coverage"].fillna(0) < MIN_FUNDAMENTAL_COVERAGE)).sum()
+    implausible_mask = df.get(
+        "revenue_implausible", pd.Series(False, index=df.index)
+    ).fillna(False).astype(bool)
     print(f"  Pick gate: {(~eligible).sum()} excluded "
           f"({dropped_elig} below {elig_floor:.0%} eligible, "
           f"{dropped_coverage} below {MIN_WEIGHT_COVERAGE:.0%} weight, "
           f"{dropped_prices} below {MIN_PRICE_ROWS}d prices, "
-          f"{dropped_fundamentals} below {MIN_FUNDAMENTAL_COVERAGE:.0%} fundamentals)")
+          f"{dropped_fundamentals} below {MIN_FUNDAMENTAL_COVERAGE:.0%} fundamentals, "
+          f"{implausible_mask.sum()} implausible revenue)")
+    if implausible_mask.any():
+        for _, r in df[implausible_mask].iterrows():
+            print(f"    EXCLUDE {r['sid']} ({r['cap_tier']}): {r.get('implausible_reason')}")
 
     picks = []
     for tier, n in picks_per_tier.items():
