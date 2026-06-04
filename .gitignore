@@ -53,7 +53,8 @@ output/*.json
 output/dossiers_*.json
 output/email_*.html
 output/*.log
-output/promotion_gate.txt   # on-demand promotion_gate.py dump, regenerable
+# on-demand promotion_gate.py dump, regenerable
+output/promotion_gate.txt
 
 # Notebooks (checkpoints)
 .ipynb_checkpoints/
