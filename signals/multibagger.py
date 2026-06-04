@@ -13,9 +13,9 @@ existing factor tables; computes the few genuinely-new inputs inline.
 
   Stage 2 — fundamental hurdles (must clear ALL):
       • Market cap ∈ ₹1,000–20,000 cr   (mid-to-mega sweet spot)
-      • ROIC ≥ 15%                       (reuse roic_scores)
+      • ROIC ≥ 18%                       (reuse roic_scores; tightened from 15%)
       • Piotroski F ≥ 6                  (reuse piotroski_scores)
-      • 3y PAT CAGR ≥ 15%                (Screener annual Net profit)
+      • 3y PAT CAGR ≥ 20%                (Screener annual Net profit; tightened from 15%)
       • Promoter holding ≥ 35%           (shareholding.promoter_pct)
 
   Stage 3 — composite rank of survivors (percentile within cap_tier):
@@ -50,15 +50,19 @@ from scoring.regime_smallcap import classify as classify_smallcap_regime
 FINANCIAL_SECTORS = set(SCREEN["financial_sectors"])
 RUPEES_PER_CRORE = 1e7
 
-# ── Thresholds (research defaults — calibrate on the cohort panel, Phase 2) ──
+# ── Thresholds (calibrated on the live survivor distribution, 2026-06-04) ──
+# Tightened ROIC 0.15→0.18 + PAT CAGR 0.15→0.20 to cut the watchlist from 35 to
+# ~19 high-conviction names (quality + growth bar; the gates do the work, the
+# ranking is noise — ADR 0039/0040). Both bars sit just above the survivor median
+# (ROIC med 0.187, CAGR med 0.40) so they raise quality without over-thinning.
 MCAP_MIN_CR = 1_000.0
 MCAP_MAX_CR = 20_000.0
 BENEISH_EXCLUDE_FLAG = "LIKELY_MANIPULATOR"
 PLEDGE_MAX_PCT = 10.0
 DE_MAX = 0.5
-ROIC_MIN = 0.15
+ROIC_MIN = 0.18
 FSCORE_MIN = 6
-PAT_CAGR_MIN = 0.15
+PAT_CAGR_MIN = 0.20
 PROMOTER_MIN_PCT = 35.0
 
 # Growth-compute guards (annual Net profit, ₹ cr)
