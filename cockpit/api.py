@@ -1470,6 +1470,98 @@ def get_model_variants(top_per_tier: int = 10) -> dict:
     }
 
 
+def _conviction_verdicts(surv):
+    """Per-name conviction verdict for the holding monitor (reframe 2026-06).
+
+    A multibagger you hold draws down ~40% en route (81% of eventual 3x+ winners
+    do) — a stop-loss ejects you from winners. The discriminator between a
+    winner-in-drawdown and a loser-grinding is DEPTH + DURATION + whether SECTOR
+    momentum and RELATIVE STRENGTH are still intact. Verdicts:
+       HOLD   — near highs, or sector momentum AND relative strength intact
+       WATCH  — in a drawdown with mixed signals (hold, but monitor)
+       REVIEW — the loser signature: deep (≤−50%) + prolonged (≥6mo underwater)
+                + sector momentum rolled over + relative strength broken
+    Computed from split-adjusted month-end closes (raw bhavcopy → a bonus is a
+    fake −50% drop, so we back-adjust survivors via corporate_actions). Validated
+    in tools/multibagger_monitor.py: this rule retains 94-100% of winners."""
+    import re
+    import numpy as np
+
+    sids = surv["sid"].dropna().tolist()
+    if not sids:
+        return {}
+    # month-end closes for ALL sids over ~13 months (one row per sid-month)
+    me = read_sql(
+        "WITH r AS (SELECT sid, date, close, ROW_NUMBER() OVER "
+        "(PARTITION BY sid, strftime('%Y-%m', date) ORDER BY date DESC) rn "
+        "FROM stock_prices WHERE date >= date('now','-400 day') AND close > 0) "
+        "SELECT sid, date, close FROM r WHERE rn = 1")
+    if me.empty:
+        return {}
+    me["ym"] = pd.to_datetime(me["date"]).dt.to_period("M")
+    mat = me.pivot_table(index="ym", columns="sid", values="close", aggfunc="last").sort_index()
+    if len(mat) < 7:
+        return {}
+    sector = read_sql("SELECT sid, sector FROM stocks").set_index("sid")["sector"]
+
+    # split/bonus-adjust the survivor columns (medians wash out for baskets)
+    ca = read_sql(
+        "SELECT sid, ex_date, ind, subject FROM corporate_actions "
+        "WHERE ind IN ('SPLIT','BONUS') AND ex_date >= date('now','-400 day') AND sid IS NOT NULL")
+    month_ts = mat.index.to_timestamp("M")
+    for _, r in ca.iterrows():
+        sid = r["sid"]
+        if sid not in mat.columns:
+            continue
+        s = str(r["subject"]).lower()
+        f = 1.0
+        if r["ind"] == "SPLIT" or "split" in s:
+            m = re.search(r"from\s*rs[.]?\s*([\d.]+).*?to\s*rs[.]?\s*([\d.]+)", s)
+            if m and float(m.group(2)) > 0:
+                f = float(m.group(1)) / float(m.group(2))
+        elif r["ind"] == "BONUS" or "bonus" in s:
+            m = re.search(r"(\d+)\s*:\s*(\d+)", s)
+            if m and int(m.group(2)) > 0:
+                f = (int(m.group(1)) + int(m.group(2))) / int(m.group(2))
+        if f > 1.0:
+            mask = month_ts < pd.Timestamp(r["ex_date"])
+            mat.loc[mask, sid] = mat.loc[mask, sid] / f
+
+    n = len(mat)
+    k = min(6, n - 1)                       # ~6-month lookback for momentum
+    ret6 = mat.iloc[-1] / mat.iloc[-1 - k] - 1.0
+    mkt6 = ret6.median(skipna=True)
+    # sector-relative 6m momentum (median of sector's 6m returns − market)
+    sec_mom = {}
+    for sec, grp in sector.groupby(sector):
+        cols = [c for c in mat.columns if c in grp.index]
+        if len(cols) >= 4:
+            sec_mom[sec] = float(ret6[cols].median(skipna=True) - mkt6)
+
+    out = {}
+    for sid in sids:
+        if sid not in mat.columns:
+            continue
+        p = mat[sid].dropna()
+        if len(p) < 7:
+            continue
+        peak = p.cummax()
+        dd = float(p.iloc[-1] / peak.iloc[-1] - 1.0)
+        uw = int(((p / peak - 1.0) < -0.20).sum())
+        rs6 = float((p.iloc[-1] / p.iloc[-1 - min(k, len(p) - 1)] - 1.0) - mkt6)
+        sm = sec_mom.get(sector.get(sid), 0.0)
+        if dd <= -0.50 and uw >= 6 and sm < 0 and rs6 < 0:
+            verdict = "REVIEW"
+        elif dd > -0.25 or (sm >= 0 and rs6 >= 0):
+            verdict = "HOLD"
+        else:
+            verdict = "WATCH"
+        out[sid] = {"verdict": verdict, "drawdown": round(dd, 3),
+                    "months_underwater": uw, "rel_strength": round(rs6, 3),
+                    "sector_mom": round(sm, 3)}
+    return out
+
+
 @_ttl_cache(60)
 def get_multibagger_overview(limit=60):
     """Multibagger watchlist — the SEPARATE 3-stage funnel (plan 0008), kept OUT
@@ -1526,6 +1618,17 @@ def get_multibagger_overview(limit=60):
 
     tier_counts = (surv["cap_tier"].value_counts().to_dict() if not surv.empty else {})
 
+    # ── per-name conviction verdict (the holding monitor — reframe 2026-06) ──
+    verdicts = _conviction_verdicts(surv) if not surv.empty else {}
+    surv_records = safe_json_records(surv)
+    for rec in surv_records:
+        v = verdicts.get(rec.get("sid"))
+        rec["conviction"] = v["verdict"] if v else None
+        rec["dd_pct"] = v["drawdown"] if v else None
+        rec["sector_mom"] = v["sector_mom"] if v else None
+        rec["rel_strength"] = v["rel_strength"] if v else None
+    conv_counts = Counter(v["verdict"] for v in verdicts.values())
+
     return {
         "available": True,
         "snapshot_date": snap,
@@ -1535,8 +1638,9 @@ def get_multibagger_overview(limit=60):
         "funnel": {"universe": n_uni, "passed_gates": n_gates, "survived": n_surv},
         "gate_fails": gate_fails,
         "hurdle_fails": hurdle_fails,
-        "survivors": safe_json_records(surv),
+        "survivors": surv_records,
         "tier_counts": tier_counts,
+        "conviction_counts": dict(conv_counts),
     }
 
 

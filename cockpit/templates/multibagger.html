@@ -85,7 +85,17 @@
         <div class="section-title">Survivors — {{ o.survivors|length }} names</div>
         <div class="mono" style="font-size: 11px; color: var(--text-muted);">as of {{ o.snapshot_date }}{% for t, c in o.tier_counts.items() %} · {{ t }} {{ c }}{% endfor %}</div>
     </div>
-    <div class="section-desc">Ranked by the regime-conditioned composite. Click a name for the full dossier.</div>
+    <div class="section-desc">
+        Buy a <strong>basket</strong> (20–30, equal-weight, spread across sectors), <strong>hold with conviction</strong>,
+        and use the <strong>Conviction</strong> column as your rolling 3–6mo monitor — not a stop-loss.
+        81% of eventual 3×+ winners draw down ≥30% en route, so a stop ejects you from winners.
+        {% if o.conviction_counts %}
+        <span class="mono" style="margin-left:6px;">
+            <span style="color:var(--green);">HOLD {{ o.conviction_counts.get('HOLD', 0) }}</span> ·
+            <span style="color:var(--amber);">WATCH {{ o.conviction_counts.get('WATCH', 0) }}</span> ·
+            <span style="color:var(--red);">REVIEW {{ o.conviction_counts.get('REVIEW', 0) }}</span>
+        </span>{% endif %}
+    </div>
 
     <div style="overflow-x: auto; margin-top: 10px;">
     <table style="width: 100%; border-collapse: collapse; font-size: 12.5px;">
@@ -93,6 +103,7 @@
             <tr style="text-align: right; color: var(--text-muted); font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.4px;">
                 <th style="text-align: left; padding: 8px 6px;">#</th>
                 <th style="text-align: left; padding: 8px 6px;">Stock</th>
+                <th style="text-align: center; padding: 8px 6px;">Conviction</th>
                 <th style="padding: 8px 6px;">M-cap (₹cr)</th>
                 <th style="padding: 8px 6px;">Score</th>
                 <th style="padding: 8px 6px;">Q / G / I / C</th>
@@ -111,6 +122,16 @@
                 <td style="text-align: left; padding: 9px 6px;">
                     <a href="/explorer/{{ s.sid }}" style="color: var(--text-primary); text-decoration: none; font-weight: 600;">{{ s.sid }}</a>
                     <div style="font-size: 10.5px; color: var(--text-muted); max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ s.name }}</div>
+                </td>
+                <td style="padding: 9px 6px; text-align: center;">
+                    {% if s.conviction %}
+                    {% set cv = s.conviction %}
+                    {% set cvcol = 'var(--green)' if cv=='HOLD' else ('var(--amber)' if cv=='WATCH' else 'var(--red)') %}
+                    <span class="mono" style="display:inline-block; padding:2px 7px; border-radius:4px; font-size:9.5px; font-weight:700;
+                          color:{{ cvcol }}; border:1px solid {{ cvcol }}33; background:{{ cvcol }}1a;"
+                          title="drawdown {{ '%.0f%%'|format(s.dd_pct*100) if s.dd_pct is not none else '–' }} · sector mom {{ '%+.0f%%'|format(s.sector_mom*100) if s.sector_mom is not none else '–' }} · rel-str {{ '%+.0f%%'|format(s.rel_strength*100) if s.rel_strength is not none else '–' }}">{{ cv }}</span>
+                    <div style="font-size:9px; color:var(--text-muted); margin-top:2px;">{{ "%.0f%%"|format(s.dd_pct*100) if s.dd_pct is not none else '' }}</div>
+                    {% else %}<span style="color:var(--text-muted);">–</span>{% endif %}
                 </td>
                 <td class="mono" style="padding: 9px 6px;">{{ "{:,.0f}".format(s.mcap_cr) if s.mcap_cr is not none else '–' }}</td>
                 <td class="mono" style="padding: 9px 6px; font-weight: 700; color: var(--text-primary);">{{ "%.2f"|format(s.multibagger_score) if s.multibagger_score is not none else '–' }}</td>
