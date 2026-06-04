@@ -934,6 +934,8 @@ CREATE TABLE IF NOT EXISTS multibagger_scores (
     interaction           REAL,                  -- growth × cheapness
     multibagger_score     REAL,                  -- final composite (survivors only)
     rank_in_tier          REAL,
+    smallcap_regime       TEXT,                  -- UPTREND / DOWNTREND / NEUTRAL at scoring time
+    regime_favorable      INTEGER,               -- 0 = screen historically underperforms (junk rally)
     PRIMARY KEY (sid, snapshot_date)
 );
 

@@ -162,6 +162,13 @@ _COLUMN_MIGRATIONS = [
     ("daily_snapshots_pit", "gold_beta",                  "REAL"),
     # 2026-06-03: multibagger funnel — Novy-Marx anchor quality factor.
     ("daily_snapshots_pit", "gross_profitability",        "REAL"),
+    # 2026-06-04: multibagger Phase 2b+ — small-cap EMA regime gate. The screen
+    # now selects regime-conditioned pillar weights (quality-heavy ↔ DOWNTREND,
+    # growth-heavy ↔ UPTREND, balanced ↔ NEUTRAL), cohort-proven across 3 windows.
+    # smallcap_regime stamps the regime at scoring time; regime_favorable=0 when
+    # the screen historically underperforms (strong UPTREND / junk rally).
+    ("multibagger_scores", "smallcap_regime",   "TEXT"),
+    ("multibagger_scores", "regime_favorable",  "INTEGER"),
 ]
 
 
@@ -1264,6 +1271,10 @@ STALENESS_OVERRIDES = {
     # days). Wired into run_daily_forward.sh 2026-06-03. 7 tolerates weekend + posting
     # lag + a quiet gap; provisional — tighten after observing the first cron runs.
     "short_selling_data":      7,
+    # multibagger_scores: weekly (Sunday) fundamental screen. snapshot_date only
+    # advances on the weekly run, so mid-week it's up to ~6d old; 10 tolerates a
+    # normal week + a holiday-shifted Sunday, flags a genuinely missed weekly run.
+    "multibagger_scores":     10,
 }
 
 # Per-stock coverage gates. A table that should have a row per universe stock

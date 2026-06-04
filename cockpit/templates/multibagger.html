@@ -1,0 +1,138 @@
+{% extends "base.html" %}
+
+{% macro pc(x) %}{% if x is not none %}{{ "%.0f"|format(x*100) }}{% else %}–{% endif %}{% endmacro %}
+
+{% block content %}
+
+<div class="section-title">Multibagger Watchlist</div>
+<div class="section-desc">
+    A <strong>separate</strong> quality-gated screen for 3–10× / 2–4yr candidates in small/mid-caps —
+    deliberately kept <strong>out of your daily picks</strong> (different objective and horizon).
+    Read it as a <strong>junk-stripped watchlist, not a ranked alpha list</strong>: the hard gates do the work;
+    the ordering's edge is weak and regime-dependent (validated — see the banner).
+</div>
+
+{% if not o.available %}
+<div class="card" style="margin-top: 16px;">
+    No multibagger run yet — the screen runs <strong>weekly (Sunday)</strong> in the pipeline.
+    Run it manually with <span class="mono">python -m signals.multibagger</span>.
+</div>
+{% else %}
+
+{% set unfav = (o.regime_favorable == 0) %}
+{% set rd = o.regime_detail %}
+
+{# ───────── Regime banner (the honesty layer) ───────── #}
+<div class="card" style="margin-top: 16px; margin-bottom: 18px; border-left: 4px solid {{ 'var(--amber)' if unfav else 'var(--accent)' }};">
+    <div style="display: flex; align-items: center; gap: 20px; flex-wrap: wrap;">
+        <div>
+            <div style="font-size: 10px; font-weight: 600; letter-spacing: 0.5px; text-transform: uppercase; color: var(--text-muted);">Small-cap regime</div>
+            <div style="font-size: 22px; font-weight: 800; color: var(--text-primary); font-family: 'JetBrains Mono', monospace;">{{ o.regime }}</div>
+        </div>
+        {% if rd and rd.close_vs_slow_pct is not none %}
+        <div style="border-left: 1px solid var(--border); padding-left: 20px;">
+            <div style="font-size: 10px; font-weight: 600; letter-spacing: 0.5px; text-transform: uppercase; color: var(--text-muted);">Close vs EMA200</div>
+            <div class="mono" style="font-size: 18px; font-weight: 700; color: var(--text-primary);">{{ "%+.1f%%"|format(rd.close_vs_slow_pct) }}</div>
+        </div>
+        <div style="border-left: 1px solid var(--border); padding-left: 20px;">
+            <div style="font-size: 10px; font-weight: 600; letter-spacing: 0.5px; text-transform: uppercase; color: var(--text-muted);">EMA50 / EMA200</div>
+            <div class="mono" style="font-size: 18px; font-weight: 700; color: var(--text-primary);">{{ "%+.1f%%"|format(rd.cross_pct) }}</div>
+        </div>
+        {% endif %}
+        <div style="flex: 1; min-width: 280px; border-left: 1px solid var(--border); padding-left: 20px;">
+            <div style="font-size: 10px; font-weight: 600; letter-spacing: 0.5px; text-transform: uppercase; color: {{ 'var(--amber)' if unfav else 'var(--green)' }};">
+                {{ 'Unfavourable regime' if unfav else 'Neutral regime' }}
+            </div>
+            <div style="font-size: 12.5px; color: var(--text-secondary); margin-top: 2px; line-height: 1.45;">
+                {% if unfav %}
+                In small-cap uptrends the screen's <strong>ranking</strong> has historically underperformed a median
+                small-cap (validated: top-decile spread ≈ <span class="mono">−0.27×</span> over 2–4yr). Trust the gates,
+                not the order — weights are tilted growth-heavy here.
+                {% else %}
+                No validated ranking edge either way (top-decile spread ≈ 0). The gates still hold — treat the order as a
+                tie-breaker, not a forecast.
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+{# ───────── Funnel ───────── #}
+<div class="card" style="margin-bottom: 18px;">
+    <div class="section-title">The funnel</div>
+    <div style="display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; margin-top: 10px;">
+        {% set steps = [('Universe', o.funnel.universe, 'ex-fin · ex-micro'), ('Passed gates', o.funnel.passed_gates, 'Beneish · pledge · debt'), ('Survivors', o.funnel.survived, '+ ROIC · F · growth · promoter')] %}
+        {% for label, n, sub in steps %}
+        <div style="flex: 1; min-width: 150px; text-align: center; padding: 6px 10px;">
+            <div class="mono" style="font-size: 28px; font-weight: 800; color: {{ 'var(--green)' if loop.last else 'var(--text-primary)' }};">{{ "{:,}".format(n) }}</div>
+            <div style="font-size: 12px; font-weight: 700; color: var(--text-primary);">{{ label }}</div>
+            <div style="font-size: 10.5px; color: var(--text-muted);">{{ sub }}</div>
+        </div>
+        {% if not loop.last %}<div style="display: flex; align-items: center; color: var(--text-muted); font-size: 22px;">→</div>{% endif %}
+        {% endfor %}
+    </div>
+    <div style="margin-top: 12px; display: flex; gap: 18px; flex-wrap: wrap; font-size: 11px; color: var(--text-muted);">
+        <div><strong style="color: var(--text-secondary);">Gate rejects:</strong>
+            {% for g in o.gate_fails %}<span class="mono">{{ g.reason }}&nbsp;{{ g.n }}</span>{% if not loop.last %} · {% endif %}{% endfor %}</div>
+        <div><strong style="color: var(--text-secondary);">Hurdle misses:</strong>
+            {% for h in o.hurdle_fails %}<span class="mono">{{ h.reason }}&nbsp;{{ h.n }}</span>{% if not loop.last %} · {% endif %}{% endfor %}</div>
+    </div>
+</div>
+
+{# ───────── Watchlist ───────── #}
+<div class="card">
+    <div style="display: flex; justify-content: space-between; align-items: baseline;">
+        <div class="section-title">Survivors — {{ o.survivors|length }} names</div>
+        <div class="mono" style="font-size: 11px; color: var(--text-muted);">as of {{ o.snapshot_date }}{% for t, c in o.tier_counts.items() %} · {{ t }} {{ c }}{% endfor %}</div>
+    </div>
+    <div class="section-desc">Ranked by the regime-conditioned composite. Click a name for the full dossier.</div>
+
+    <div style="overflow-x: auto; margin-top: 10px;">
+    <table style="width: 100%; border-collapse: collapse; font-size: 12.5px;">
+        <thead>
+            <tr style="text-align: right; color: var(--text-muted); font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.4px;">
+                <th style="text-align: left; padding: 8px 6px;">#</th>
+                <th style="text-align: left; padding: 8px 6px;">Stock</th>
+                <th style="padding: 8px 6px;">M-cap (₹cr)</th>
+                <th style="padding: 8px 6px;">Score</th>
+                <th style="padding: 8px 6px;">Q / G / I / C</th>
+                <th style="padding: 8px 6px;">ROIC</th>
+                <th style="padding: 8px 6px;">PAT CAGR</th>
+                <th style="padding: 8px 6px;">F</th>
+                <th style="padding: 8px 6px;">Prom%</th>
+                <th style="padding: 8px 6px;">Pledge%</th>
+                <th style="padding: 8px 6px;">D/E</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for s in o.survivors %}
+            <tr style="border-top: 1px solid var(--border); text-align: right;">
+                <td style="text-align: left; padding: 9px 6px; color: var(--text-muted);" class="mono">{{ loop.index }}</td>
+                <td style="text-align: left; padding: 9px 6px;">
+                    <a href="/explorer/{{ s.sid }}" style="color: var(--text-primary); text-decoration: none; font-weight: 600;">{{ s.sid }}</a>
+                    <div style="font-size: 10.5px; color: var(--text-muted); max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ s.name }}</div>
+                </td>
+                <td class="mono" style="padding: 9px 6px;">{{ "{:,.0f}".format(s.mcap_cr) if s.mcap_cr is not none else '–' }}</td>
+                <td class="mono" style="padding: 9px 6px; font-weight: 700; color: var(--text-primary);">{{ "%.2f"|format(s.multibagger_score) if s.multibagger_score is not none else '–' }}</td>
+                <td class="mono" style="padding: 9px 6px; color: var(--text-secondary); font-size: 11px;">{{ pc(s.p_quality) }}/{{ pc(s.p_growth) }}/{{ pc(s.interaction) }}/{{ pc(s.p_conviction) }}</td>
+                <td class="mono" style="padding: 9px 6px;">{{ "%.0f%%"|format(s.roic*100) if s.roic is not none else '–' }}</td>
+                <td class="mono" style="padding: 9px 6px;">{{ "%.0f%%"|format(s.pat_cagr_3y*100) if s.pat_cagr_3y is not none else '–' }}</td>
+                <td class="mono" style="padding: 9px 6px;">{{ "%.0f"|format(s.f_score) if s.f_score is not none else '–' }}</td>
+                <td class="mono" style="padding: 9px 6px;">{{ "%.0f"|format(s.promoter_pct) if s.promoter_pct is not none else '–' }}</td>
+                <td class="mono" style="padding: 9px 6px; color: {{ 'var(--amber)' if (s.pledge_pct is not none and s.pledge_pct > 0) else 'var(--text-muted)' }};">{{ "%.0f"|format(s.pledge_pct) if s.pledge_pct is not none else '0' }}</td>
+                <td class="mono" style="padding: 9px 6px;">{{ "%.2f"|format(s.de_ratio) if s.de_ratio is not none else '–' }}</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    <div style="margin-top: 12px; font-size: 10.5px; color: var(--text-muted); line-height: 1.5;">
+        Q/G/I/C = within-tier percentile of the Quality / Growth / growth×cheapness Interaction / Conviction pillars (0–100).
+        Gates: Beneish M-score clean · pledge ≤10% · D/E ≤0.5 · ROIC ≥15% · Piotroski F ≥6 · 3y PAT CAGR ≥15% · promoter ≥35% · M-cap ₹1–20k cr.
+        Survivorship-validated as a watchlist, not a return forecast (plan 0008 · ADR 0039).
+    </div>
+</div>
+
+{% endif %}
+
+{% endblock %}

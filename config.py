@@ -562,6 +562,17 @@ PIPELINE_STEPS = [
     {"name": "signal_smart_money", "module": "signals.smart_money", "function": "compute",  "critical": False,
      "table": "smart_money_scores","source": "bulk_deals + stock_prices", "data_freq": "daily", "frequency": "daily"},
 
+    # Multibagger screen (plan 0008) — SEPARATE 3-stage funnel, kept OUT of
+    # daily_picks. Runs LAST in the signal block (reads roic/roiic/gross_prof/
+    # margin/piotroski/smart_money/promoter/forensic scores just written above
+    # + shareholding + annual fundamentals_screener) and picks regime-conditioned
+    # pillar weights off the small-cap EMA regime. Weekly (Sunday): a 2–4yr
+    # fundamental screen doesn't move day-to-day, and validation (ADR 0039) shows
+    # the ranking edge is weak → this is a refreshing watchlist, not a daily signal.
+    {"name": "signal_multibagger", "module": "signals.multibagger", "function": "compute", "critical": False,
+     "table": "multibagger_scores", "source": "roic/roiic/gross_profitability/piotroski/forensic/promoter/smart_money scores + shareholding + fundamentals_screener + small-cap EMA regime",
+     "data_freq": "weekly",         "frequency": "weekly"},
+
     {"name": "signal_macro",       "module": "signals.macro",       "function": "compute",  "critical": False,
      "table": "macro_sector_signals", "source": "macro_indicators", "data_freq": "monthly", "frequency": "daily"},
 

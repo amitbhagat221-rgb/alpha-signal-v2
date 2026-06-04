@@ -24,9 +24,14 @@ Usage:
 
 import argparse
 import re
+import warnings
 
 import numpy as np
 import pandas as pd
+
+# All-NaN pillar rows (no PIT fundamentals) → np.nanmean warns; it correctly
+# yields NaN, which the scheme scorer fills with a neutral. Cosmetic only.
+warnings.filterwarnings("ignore", message="Mean of empty slice")
 
 from config import SCREEN
 from db import read_sql
@@ -115,9 +120,39 @@ def _cum_factors(anchor, end):
     return factors
 
 
+# ───────── regime windows + weight schemes (Phase 2b+ — regime conditioning) ─────────
+#
+# Three independent windows, each its own small-cap regime. We characterise each
+# window by its REALISED broad small-cap strength (universe-median forward
+# multiple) rather than an EMA label — nse_index_history small-cap depth starts
+# 2023-06, so the live EMA classifier (scoring/regime_smallcap.py) can't reach
+# these anchors. universe-median >> 1 ⇒ a rally-like (junk-rally-prone) window;
+# ≈ 1 ⇒ a bear/derating window.
+WINDOWS = {
+    "2018→21 (bear)":     ("2018-04-02", "2021-04-01"),
+    "2019→22 (recovery)": ("2019-04-01", "2022-04-01"),
+    "2022→26 (rally)":    ("2022-08-01", "2026-05-29"),
+}
+
+# Pillar weight schemes tested per window. The cohort decides WHICH scheme wins
+# in which regime — these become the regime-conditioned weights in the live
+# screen (quality-heavy ↔ DOWNTREND, growth-heavy ↔ UPTREND), never hand-set.
+WEIGHT_SCHEMES = {
+    "quality_heavy": {"quality": 0.50, "growth": 0.20, "interaction": 0.30},
+    "balanced":      {"quality": 0.34, "growth": 0.33, "interaction": 0.33},
+    "growth_heavy":  {"quality": 0.20, "growth": 0.30, "interaction": 0.50},
+}
+
+
 # ───────── the study ─────────
 
-def run(anchor, end):
+def _score(anchor, end):
+    """Build the scoreable small-cap cohort for one window.
+
+    Returns (scored, fwd, a_snap, e_snap) where `scored` carries split-adjusted
+    `fwd_mult` plus the three pillar percentiles (p_quality / p_growth /
+    p_interaction) and the legacy `score_quality` / `score` columns. `fwd` is the
+    full true universe (incl. deaths + unmapped) for base-rate / capture stats."""
     # nearest actual bhavcopy snapshot dates we stored
     uni = read_sql("SELECT snapshot_date FROM historical_universe GROUP BY snapshot_date "
                    "ORDER BY ABS(julianday(snapshot_date) - julianday(?)) LIMIT 1", params=[anchor])
@@ -125,7 +160,6 @@ def run(anchor, end):
     uni = read_sql("SELECT snapshot_date FROM historical_universe GROUP BY snapshot_date "
                    "ORDER BY ABS(julianday(snapshot_date) - julianday(?)) LIMIT 1", params=[end])
     e_snap = uni["snapshot_date"].iloc[0]
-    print(f"Anchor snapshot: {a_snap}   End snapshot: {e_snap}")
 
     a = read_sql("SELECT symbol, sid, close c0 FROM historical_universe WHERE snapshot_date=?", params=[a_snap])
     e = read_sql("SELECT symbol, close c1 FROM historical_universe WHERE snapshot_date=?", params=[e_snap])
@@ -160,17 +194,54 @@ def run(anchor, end):
     # leverage gate + require a score
     band = band[~(band["de_ratio"] > DE_MAX)]
     band["ep_yield"] = band["np_latest"] / band["mcap_cr"]    # cheapness (earnings yield)
+
     def pct(s): return s.rank(pct=True)
-    q = np.nanmean(np.vstack([
-        pct(band["gross_profitability"]).values,
-        pct(band["roic"]).values,
-        pct(band["pat_cagr_3y"]).values,
-        pct(band["earnings_acceleration"]).values,
-    ]), axis=0)
-    interaction = (pct(band["pat_cagr_3y"]) * pct(band["ep_yield"])).values   # growth × cheapness
-    band["score_quality"] = q                                  # quality+growth only (run 1)
-    band["score"] = 0.5 * np.nan_to_num(q, nan=0.5) + 0.5 * np.nan_to_num(interaction, nan=0.25)  # QARP
+    # Clean pillars (mirror signals/multibagger.py): quality, growth, growth×cheapness.
+    # Conviction (smart_money/pledge) is omitted — no PIT-deep history pre-2023.
+    band["p_quality"] = np.nanmean(np.vstack([
+        pct(band["gross_profitability"]).values, pct(band["roic"]).values]), axis=0)
+    band["p_growth"] = np.nanmean(np.vstack([
+        pct(band["pat_cagr_3y"]).values, pct(band["earnings_acceleration"]).values]), axis=0)
+    band["p_interaction"] = (pct(band["pat_cagr_3y"]) * pct(band["ep_yield"])).values
+
+    # legacy columns retained for the head-to-head print
+    band["score_quality"] = np.nanmean(np.vstack([
+        pct(band["gross_profitability"]).values, pct(band["roic"]).values,
+        pct(band["pat_cagr_3y"]).values, pct(band["earnings_acceleration"]).values]), axis=0)
+    band["score"] = (0.5 * np.nan_to_num(band["score_quality"].values, nan=0.5)
+                     + 0.5 * np.nan_to_num(band["p_interaction"].values, nan=0.25))
+
     scored = band[band[["gross_profitability", "roic", "pat_cagr_3y"]].notna().any(axis=1)].copy()
+    return scored, fwd, a_snap, e_snap
+
+
+def _scheme_score(scored, weights):
+    """Composite score for a weight scheme; NaN pillars → neutral (0.5 / 0.25)."""
+    return (weights["quality"] * np.nan_to_num(scored["p_quality"].values, nan=0.5)
+            + weights["growth"] * np.nan_to_num(scored["p_growth"].values, nan=0.5)
+            + weights["interaction"] * np.nan_to_num(scored["p_interaction"].values, nan=0.25))
+
+
+def _scheme_metrics(scored, fwd, weights):
+    """Top-decile tail-capture metrics for one weight scheme."""
+    s = scored.assign(_sc=_scheme_score(scored, weights)).sort_values("_sc", ascending=False)
+    n = len(s); k = max(1, n // 10)
+    top, bot = s.head(k), s.tail(k)
+    scored_med = s["fwd_mult"].median()
+    total_3x = int((fwd["fwd_mult"] >= 3).sum())
+    return {
+        "top_med": round(top["fwd_mult"].median(), 2),
+        "spread": round(top["fwd_mult"].median() - scored_med, 2),
+        "lift": round(top["fwd_mult"].median() - bot["fwd_mult"].median(), 2),
+        "ge3_hit": round((top["fwd_mult"] >= 3).mean(), 3),
+        "ge3_capture": round((top["fwd_mult"] >= 3).sum() / total_3x, 3) if total_3x else 0.0,
+        "k": k,
+    }
+
+
+def run(anchor, end):
+    scored, fwd, a_snap, e_snap = _score(anchor, end)
+    print(f"Anchor snapshot: {a_snap}   End snapshot: {e_snap}")
     scored = scored.sort_values("score", ascending=False)
 
     # ── head-to-head: does adding cheapness (QARP) beat quality+growth alone? ──
@@ -183,6 +254,13 @@ def run(anchor, end):
         print(f"  [{label}] top-dec median {mt:.2f}x | scored-median {ma:.2f}x | "
               f"spread {mt-ma:+.2f}x | lift {mt-mb:+.2f}x | ≥3x hit {(t['fwd_mult']>=3).mean():.1%} "
               f"| ≥2x hit {(t['fwd_mult']>=2).mean():.1%}")
+
+    # ── weight-scheme sweep (Phase 2b+): which pillar mix captures best here? ──
+    print(f"\n=== WEIGHT-SCHEME SWEEP ({a_snap}→{e_snap}) ===")
+    for name, w in WEIGHT_SCHEMES.items():
+        m = _scheme_metrics(scored, fwd, w)
+        print(f"  [{name:13s}] top-dec {m['top_med']:.2f}x | spread {m['spread']:+.2f}x | "
+              f"lift {m['lift']:+.2f}x | ≥3x hit {m['ge3_hit']:.1%} | ≥3x capture {m['ge3_capture']:.1%}")
 
     n = len(scored)
     if n < 30:
@@ -224,12 +302,112 @@ def run(anchor, end):
     return scored
 
 
+def run_all_windows():
+    """Run every regime window and print a regime × weight-scheme capture matrix.
+
+    THE deliverable for regime-conditioned weights: read down each window to see
+    which scheme's top decile captures multibaggers best, and whether the winner
+    flips with the window's realised regime (universe-median forward multiple)."""
+    rows = []
+    for label, (anchor, end) in WINDOWS.items():
+        scored, fwd, a_snap, e_snap = _score(anchor, end)
+        uni_med = float(fwd["fwd_mult"].dropna().median())
+        regime = "RALLY" if uni_med >= 1.5 else ("BEAR" if uni_med <= 1.05 else "MIXED")
+        per = {name: _scheme_metrics(scored, fwd, w) for name, w in WEIGHT_SCHEMES.items()}
+        rows.append((label, a_snap, e_snap, len(scored), uni_med, regime, per))
+
+    print("\n" + "=" * 96)
+    print("REGIME × WEIGHT-SCHEME CAPTURE MATRIX  (top-decile spread vs scored-median, ₹cr small-cap band)")
+    print("=" * 96)
+    hdr = f"{'window':22s} {'uni-med':>8s} {'regime':>7s} {'n':>4s} | " + \
+          " | ".join(f"{name:>13s}" for name in WEIGHT_SCHEMES)
+    print(hdr)
+    print("-" * len(hdr))
+    for label, a_snap, e_snap, n, uni_med, regime, per in rows:
+        cells = " | ".join(
+            f"{per[name]['spread']:+.2f}x/{per[name]['ge3_capture']:.0%}".rjust(13)
+            for name in WEIGHT_SCHEMES)
+        print(f"{label:22s} {uni_med:>8.2f} {regime:>7s} {n:>4d} | {cells}")
+    print("-" * len(hdr))
+    print("cell = top-decile spread (x over scored-median) / ≥3x capture. Winner per row = best spread.")
+    print("\nPer-window winner (by top-decile spread):")
+    for label, a_snap, e_snap, n, uni_med, regime, per in rows:
+        win = max(WEIGHT_SCHEMES, key=lambda nm: per[nm]["spread"])
+        print(f"  {label:22s} [{regime:5s}] → {win:13s} "
+              f"(spread {per[win]['spread']:+.2f}x, ≥3x capture {per[win]['ge3_capture']:.0%})")
+
+
+# anchor→end pairs (existing historical_universe snapshots, ≥2yr forward). Several
+# share the 2026-05 endpoint → forward windows overlap, so effective independent
+# N is ~3-4, not 8. Used to validate the live regime_favorable flag.
+REGIME_VALIDATION_PAIRS = [
+    ("2018-04-02", "2021-04-01"), ("2019-04-01", "2022-04-01"),
+    ("2021-04-01", "2024-04-01"), ("2022-04-01", "2026-05-29"),
+    ("2022-08-01", "2026-05-29"), ("2023-04-03", "2026-05-29"),
+    ("2023-10-03", "2026-05-29"), ("2024-04-01", "2026-05-29"),
+]
+
+
+def validate_regime_flag():
+    """Validate the live EMA regime → screen-edge mapping (makes regime_favorable
+    rigorous instead of hand-set). For each anchor: label the small-cap EMA regime
+    AT entry (scoring/regime_smallcap, now backfilled to 2016) and measure the
+    screen's realised forward top-decile spread. If the EMA regime predicts the
+    sign of the forward edge, the live flag is evidence-based.
+
+    Result (2026-06-04): UPTREND → mean spread −0.27x (UNFAVORABLE, robust even
+    after discounting overlap — the strongest uptrend had the worst edge);
+    NEUTRAL ≈ 0; DOWNTREND n=1 inconclusive. No regime is reliably FAVORABLE —
+    the screen's ranking edge is zero-to-negative everywhere, worst in uptrends."""
+    import collections
+    from scoring.regime_smallcap import classify
+
+    rows = []
+    print(f"{'anchor':12s} {'yrs':>4s} {'EMA-regime':>11s} {'c/EMA200':>9s} "
+          f"{'uni-med':>8s} {'bal-spread':>10s} {'qual-spread':>11s}")
+    for anchor, end in REGIME_VALIDATION_PAIRS:
+        reg = classify(as_of=anchor)
+        scored, fwd, a_snap, e_snap = _score(anchor, end)
+        yrs = (pd.Timestamp(e_snap) - pd.Timestamp(a_snap)).days / 365.25
+        uni_med = float(fwd["fwd_mult"].dropna().median())
+        bal = _scheme_metrics(scored, fwd, WEIGHT_SCHEMES["balanced"])["spread"]
+        qual = _scheme_metrics(scored, fwd, WEIGHT_SCHEMES["quality_heavy"])["spread"]
+        cema = reg["close_vs_slow_pct"]
+        rows.append((reg["regime"], bal))
+        print(f"{anchor:12s} {yrs:4.1f} {reg['regime']:>11s} "
+              f"{(f'{cema:+.1f}%' if cema is not None else 'n/a'):>9s} "
+              f"{uni_med:8.2f} {bal:+9.2f}x {qual:+10.2f}x")
+
+    byreg = collections.defaultdict(list)
+    for r, bal in rows:
+        byreg[r].append(bal)
+    print("\nMean BALANCED top-decile spread by ENTRY EMA-regime "
+          "(does regime predict forward edge sign?):")
+    for r in ("UPTREND", "NEUTRAL", "DOWNTREND"):
+        v = byreg.get(r, [])
+        if not v:
+            continue
+        verdict = "UNFAVORABLE" if np.mean(v) < -0.10 else "neutral (edge≈0)"
+        print(f"  {r:11s} n={len(v)}  mean spread {np.mean(v):+.2f}x  → {verdict}")
+    print("\nNote: several anchors share the 2026-05 endpoint → ~3-4 independent windows, not 8.\n"
+          "Validated: strong EMA UPTREND ⇒ negative edge. No regime is reliably favorable.")
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--anchor", default="2023-04-03")
     p.add_argument("--end", default="2026-05-29")
+    p.add_argument("--all-windows", action="store_true",
+                   help="Run the 3 regime windows + print the regime×scheme capture matrix")
+    p.add_argument("--validate-flag", action="store_true",
+                   help="Validate the live regime_favorable flag (EMA regime → forward edge sign)")
     args = p.parse_args()
-    run(args.anchor, args.end)
+    if args.validate_flag:
+        validate_regime_flag()
+    elif args.all_windows:
+        run_all_windows()
+    else:
+        run(args.anchor, args.end)
 
 
 if __name__ == "__main__":

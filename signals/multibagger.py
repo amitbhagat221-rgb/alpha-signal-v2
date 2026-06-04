@@ -45,6 +45,7 @@ import pandas as pd
 
 from config import SCREEN
 from db import read_sql, upsert_df
+from scoring.regime_smallcap import classify as classify_smallcap_regime
 
 FINANCIAL_SECTORS = set(SCREEN["financial_sectors"])
 RUPEES_PER_CRORE = 1e7
@@ -66,8 +67,36 @@ ACCEL_CLIP = (-3.0, 3.0)
 MIN_GROWTH_YEARS = 3           # need ≥3 annual Net-profit periods for accel
 CAGR_WINDOW = 3                # target 3y CAGR (uses earliest available if <4 pts)
 
-# Stage-3 pillar weights (interaction weighted high per Report B)
-PILLAR_WEIGHTS = {"quality": 0.30, "growth": 0.20, "interaction": 0.30, "conviction": 0.20}
+# ── Stage-3 pillar weights — REGIME-CONDITIONED (Phase 2b+, ADR 0039) ──
+# The survivorship cohort (tools/multibagger_cohort.py --all-windows) shows the
+# winning pillar mix FLIPS with the small-cap regime: quality-heavy captures
+# best in a BEAR (2018→21 +0.18x), growth/cheapness-heavy is least-bad in a junk
+# RALLY (2022→26, where every scheme underperforms), balanced wins the MIXED
+# recovery (2019→22 +0.30x). So we pick weights by the live small-cap EMA regime
+# (scoring/regime_smallcap.py) instead of one static set. Conviction is held at a
+# fixed modest weight — it isn't cohort-testable (no PIT smart-money depth pre-2023)
+# — and the three cohort-proven pillars fill the rest (Σ=1.0).
+CONVICTION_WEIGHT = 0.15
+PILLAR_WEIGHTS_BY_REGIME = {
+    "DOWNTREND": {"quality": 0.42, "growth": 0.17, "interaction": 0.26, "conviction": 0.15},
+    "NEUTRAL":   {"quality": 0.29, "growth": 0.28, "interaction": 0.28, "conviction": 0.15},
+    "UPTREND":   {"quality": 0.17, "growth": 0.26, "interaction": 0.42, "conviction": 0.15},
+}
+# regime_favorable — VALIDATED, not hand-set (tools/multibagger_cohort.py
+# --validate-flag, 2026-06-04). We labelled the small-cap EMA regime AT entry
+# across 8 historical anchors (~3-4 independent; the index is backfilled to 2016)
+# and measured the screen's REALISED forward top-decile spread:
+#   UPTREND   → mean −0.27x  (robust; the strongest uptrend had the worst edge −0.64x)
+#   NEUTRAL   → ≈ 0
+#   DOWNTREND → n=1, inconclusive (the lone sample was −0.25x)
+# So the encoding is:
+#   0 = VALIDATED-UNFAVOURABLE — EMA UPTREND, the screen's ranking edge is negative
+#   1 = no validated penalty   — NEUTRAL / DOWNTREND, edge ≈ 0
+# IMPORTANT: NO regime is reliably FAVOURABLE — the screen's ranking edge is
+# zero-to-negative everywhere, worst in uptrends. "1" means "not the validated-bad
+# regime", NOT "proven edge". The gates/hurdles add value (they strip junk); the
+# ranking of survivors does not reliably beat a median small-cap.
+REGIME_FAVORABLE = {"DOWNTREND": 1, "NEUTRAL": 1, "UPTREND": 0}
 
 
 # ───────────────────────── data loading ─────────────────────────
@@ -168,7 +197,7 @@ def _pctile(s):
     return r.fillna(0.5)
 
 
-def _build(stocks, scores, sh, growth):
+def _build(stocks, scores, sh, growth, weights):
     df = stocks.merge(scores, on="sid", how="left") \
                .merge(sh, on="sid", how="left") \
                .merge(growth, on="sid", how="left")
@@ -251,10 +280,10 @@ def _build(stocks, scores, sh, growth):
                 _pctile(grp["promoter_trend"]),
             ], axis=0)
             grp["multibagger_score"] = (
-                PILLAR_WEIGHTS["quality"] * grp["p_quality"]
-                + PILLAR_WEIGHTS["growth"] * grp["p_growth"]
-                + PILLAR_WEIGHTS["interaction"] * grp["interaction"]
-                + PILLAR_WEIGHTS["conviction"] * grp["p_conviction"]
+                weights["quality"] * grp["p_quality"]
+                + weights["growth"] * grp["p_growth"]
+                + weights["interaction"] * grp["interaction"]
+                + weights["conviction"] * grp["p_conviction"]
             )
             grp["rank_in_tier"] = grp["multibagger_score"].rank(ascending=False, method="min")
             parts.append(grp)
@@ -273,6 +302,7 @@ OUTPUT_COLS = [
     "promoter_pct", "pledge_pct", "smart_money_score", "m_score_flag",
     "p_quality", "p_growth", "p_conviction", "interaction",
     "multibagger_score", "rank_in_tier",
+    "smallcap_regime", "regime_favorable",
 ]
 
 
@@ -291,12 +321,27 @@ def compute(dry_run=False):
     sh = _load_shareholding()
     growth = _growth_metrics(_load_annual_fundamentals())
 
-    df = _build(stocks, scores, sh, growth)
+    # Regime gate: pick cohort-proven pillar weights for the live small-cap regime.
+    reg = classify_smallcap_regime()
+    regime = reg["regime"]
+    weights = PILLAR_WEIGHTS_BY_REGIME[regime]
+    favorable = REGIME_FAVORABLE[regime]
+
+    df = _build(stocks, scores, sh, growth, weights)
     df["snapshot_date"] = date.today().isoformat()
+    df["smallcap_regime"] = regime
+    df["regime_favorable"] = favorable
     out = df[OUTPUT_COLS].copy()
 
     n_uni = len(out)
     n_surv = int(out["survived"].sum())
+    reg_note = "" if reg["close_vs_slow_pct"] is None else \
+        f" (close vs EMA200 {reg['close_vs_slow_pct']:+.1f}%)"
+    edge_txt = ("neutral — no validated ranking edge (≈0)" if favorable else
+                "UNFAVOURABLE — validated: top-decile spread ~−0.27x in EMA uptrends")
+    print(f"Small-cap regime: {regime}{reg_note} → weights "
+          f"q{weights['quality']:.2f}/g{weights['growth']:.2f}/"
+          f"i{weights['interaction']:.2f}/c{weights['conviction']:.2f} · edge {edge_txt}")
     print(f"Multibagger funnel: {n_uni} in universe (ex-fin, ex-micro) | "
           f"{int(out['passed_gates'].sum())} pass gates | "
           f"{n_surv} survive all gates+hurdles")

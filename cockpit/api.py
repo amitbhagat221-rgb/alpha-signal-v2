@@ -1470,6 +1470,76 @@ def get_model_variants(top_per_tier: int = 10) -> dict:
     }
 
 
+@_ttl_cache(60)
+def get_multibagger_overview(limit=60):
+    """Multibagger watchlist — the SEPARATE 3-stage funnel (plan 0008), kept OUT
+    of daily_picks. Returns the small-cap regime banner, the gate funnel, and the
+    survivor watchlist.
+
+    Honest framing baked into the payload: the value is the GATES (a junk-stripped
+    watchlist), NOT the ranking — the ranking edge is validated zero-to-negative
+    across regimes (worst in uptrends), see ADR 0039. `regime_favorable=0` flags
+    the validated-unfavourable case so the page can disclose it."""
+    latest = read_sql("SELECT MAX(snapshot_date) d FROM multibagger_scores")
+    if latest.empty or latest.iloc[0]["d"] is None:
+        return {"available": False}
+    snap = latest.iloc[0]["d"]
+
+    rows = read_sql(
+        "SELECT m.*, s.name, s.sector FROM multibagger_scores m "
+        "JOIN stocks s ON m.sid = s.sid WHERE m.snapshot_date = ?",
+        params=[snap],
+    )
+    if rows.empty:
+        return {"available": False}
+
+    n_uni = len(rows)
+    n_gates = int(rows["passed_gates"].sum())
+    n_surv = int(rows["survived"].sum())
+    surv = (rows[rows["survived"] == 1]
+            .sort_values("multibagger_score", ascending=False)
+            .head(limit))
+
+    # ── gate / hurdle fail tally (funnel detail) ──
+    from collections import Counter
+
+    def _tally(col, mask):
+        c = Counter()
+        for v in rows.loc[mask, col].dropna():
+            for tok in str(v).split(","):
+                if tok:
+                    c[tok] += 1
+        return [{"reason": k, "n": v} for k, v in c.most_common()]
+
+    gate_fails = _tally("gate_fail", rows["passed_gates"] == 0)
+    hurdle_fails = _tally("hurdle_fail",
+                          (rows["passed_gates"] == 1) & (rows["passed_hurdles"] == 0))
+
+    # ── regime banner: stored (scoring-time) value + live EMA context ──
+    regime = rows["smallcap_regime"].iloc[0]
+    favorable = int(rows["regime_favorable"].iloc[0]) if pd.notna(rows["regime_favorable"].iloc[0]) else None
+    try:
+        from scoring.regime_smallcap import classify
+        reg_detail = classify()
+    except Exception:
+        reg_detail = {}
+
+    tier_counts = (surv["cap_tier"].value_counts().to_dict() if not surv.empty else {})
+
+    return {
+        "available": True,
+        "snapshot_date": snap,
+        "regime": regime,
+        "regime_favorable": favorable,
+        "regime_detail": reg_detail,
+        "funnel": {"universe": n_uni, "passed_gates": n_gates, "survived": n_surv},
+        "gate_fails": gate_fails,
+        "hurdle_fails": hurdle_fails,
+        "survivors": safe_json_records(surv),
+        "tier_counts": tier_counts,
+    }
+
+
 # ── Mutual Fund research section — extracted to cockpit/mf.py (2026-05-30) ──
 # Re-exported so existing `api.get_mf_*` call sites in cockpit/app.py keep working.
 # cockpit.mf imports only db.read_sql + cockpit._shared, so no circular import.

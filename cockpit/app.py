@@ -405,6 +405,18 @@ async def model_variants_page(request: Request, n: int = 10):
     })
 
 
+@app.get("/multibagger", response_class=HTMLResponse)
+async def multibagger_page(request: Request):
+    """Multibagger watchlist — the SEPARATE quality-gated funnel (plan 0008),
+    kept OUT of daily_picks. Honest framing: the gates are the product (a
+    junk-stripped watchlist); the ranking edge is validated weak/regime-dependent
+    (ADR 0039), surfaced via the regime banner."""
+    overview = api.get_multibagger_overview()
+    return templates.TemplateResponse(request, "multibagger.html", {
+        "page": "multibagger", "o": overview,
+    })
+
+
 # NOTE: /flow, /command, /system, /sql moved to cockpit_ops (port 3001)
 # during Stage 2 split (2026-05-26). Their routes here are removed.
 
