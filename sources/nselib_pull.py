@@ -284,6 +284,79 @@ def pull_short_selling(months=24):
     return total
 
 
+# ───────────────────────── Move 3b: board-meeting / events calendar ─────────────────────────
+
+def pull_event_calendar(days_back=3, days_forward=30):
+    """Pull the NSE board-meeting / corporate-events calendar → earnings_calendar.
+
+    `cm.event_calendar_for_equity(from_date, to_date)` returns the whole-market
+    forthcoming-events frame (symbol, company, purpose, bm_desc, date) in one
+    call — small enough not to chunk. We fetch a window that straddles today so
+    the cockpit's "upcoming earnings" widget (date >= now, +14d) has runway,
+    plus a few days back for just-passed meetings.
+
+    earnings_calendar is forward-dated by nature, so a single daily run keeps it
+    fresh; INSERT OR IGNORE on UNIQUE(symbol, date) makes re-runs idempotent and
+    tolerates a meeting that gets rescheduled to a new date (lands as a new row).
+    """
+    from nselib import capital_market as cm
+    sid_map = _get_sid_map()
+    start = date.today() - timedelta(days=days_back)
+    end = date.today() + timedelta(days=days_forward)
+    from_str = start.strftime("%d-%m-%Y")
+    to_str = end.strftime("%d-%m-%Y")
+
+    try:
+        df = cm.event_calendar_for_equity(from_date=from_str, to_date=to_str)
+    except Exception as e:
+        # Silent-failure contract (CLAUDE.md): the single call erroring means NSE
+        # was unreachable — raise so the watchdog sees a real stall, not a flat
+        # added_date. (0 parsed rows over a quiet window is handled below.)
+        raise RuntimeError(
+            f"event_calendar: NSE call {from_str}→{to_str} failed — {str(e)[:120]}"
+        )
+
+    if df is None or df.empty:
+        print(f"  events {from_str}→{to_str}: 0 rows (quiet window)")
+        return 0
+
+    df.columns = [c.strip() for c in df.columns]
+    today_iso = date.today().isoformat()
+    out_rows = []
+    for _, r in df.iterrows():
+        sym = str(r.get("symbol", "")).strip()
+        sid = sid_map.get(sym)
+        if not sid:
+            continue  # skip symbols outside our universe (FK is NOT NULL)
+        d_raw = str(r.get("date", "")).strip()
+        try:
+            ev_date = pd.to_datetime(d_raw, format="%d-%b-%Y").date().isoformat()
+        except Exception:
+            try:
+                ev_date = pd.to_datetime(d_raw).date().isoformat()
+            except Exception:
+                continue
+        out_rows.append({
+            "date": ev_date, "symbol": sym, "sid": sid,
+            "company": str(r.get("company", "")).strip()[:100],
+            "purpose": str(r.get("purpose", "")).strip(),
+            "bm_desc": str(r.get("bm_desc", "")).strip(),
+            "added_date": today_iso,
+        })
+
+    n = _insert_or_ignore(pd.DataFrame(out_rows), "earnings_calendar") if out_rows else 0
+    print(f"  events {from_str}→{to_str}: ✅ {len(out_rows)} parsed → {n} new")
+    return n
+
+
+def compute_earnings_calendar(days_forward=30):
+    """Daily pipeline producer — refresh the upcoming board-meeting calendar.
+
+    One NSE call over [today-3d, today+30d]. Forward-dated rows keep the table
+    fresh and feed the cockpit's upcoming-events widget. Idempotent."""
+    return pull_event_calendar(days_back=3, days_forward=days_forward)
+
+
 # ───────────────────────── Move 4a: FII/DII F&O positioning ─────────────────────────
 
 def pull_fii_positioning(days_back=180):
@@ -656,8 +729,8 @@ def pull_surveillance_today():
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--source", required=True,
-                        choices=["bulk", "corp", "short", "fii_pos", "fii_cash", "mf_nav",
-                                 "indices", "surveillance", "all", "daily_forward"])
+                        choices=["bulk", "corp", "short", "events", "fii_pos", "fii_cash",
+                                 "mf_nav", "indices", "surveillance", "all", "daily_forward"])
     parser.add_argument("--months", type=int, default=12)
     parser.add_argument("--days-back", type=int, default=180, help="for fii_pos")
     parser.add_argument("--top", type=int, default=50, help="for mf_nav")
@@ -677,6 +750,11 @@ def main():
         print(f"\n=== Short selling ({args.months} months) ===")
         n = pull_short_selling(months=args.months)
         print(f"  → {n} new short_selling_data rows")
+
+    if args.source in ("events", "all"):
+        print("\n=== Board-meeting / events calendar (−3d → +30d) ===")
+        n = pull_event_calendar(days_back=3, days_forward=30)
+        print(f"  → {n} new earnings_calendar rows")
 
     if args.source in ("fii_pos", "all"):
         print(f"\n=== FII/DII F&O positioning ({args.days_back} days) ===")

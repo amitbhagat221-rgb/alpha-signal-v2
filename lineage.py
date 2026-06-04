@@ -911,7 +911,7 @@ FACTOR_LINEAGE = {
         "sector_exclusions": [],
     },
 
-    # ════════════════════════════ Fundamentals_screener factors (16) ════════════════════════════
+    # ════════════════════════════ Fundamentals_screener factors (17) ════════════════════════════
     "roic": {
         "status": "candidate", "module": "signals/roic.py",
         "reads": [_fund(["Profit before tax", "Interest", "Tax", "Equity Share Capital",
@@ -933,6 +933,13 @@ FACTOR_LINEAGE = {
                          "No. of Equity Shares"], n=2),
                   _prices_latest(),
                   _stocks(("sid", "sector", "market_cap_cr"))],
+        "sector_exclusions": ["Financials"],
+    },
+    "gross_profitability": {
+        "status": "library", "module": "signals/gross_profitability.py",
+        "reads": [_fund(["Sales", "Raw Material Cost", "Change in Inventory",
+                         "Power and Fuel", "Other Mfr. Exp", "Total"], n=3),
+                  _stocks(("sid", "sector"))],
         "sector_exclusions": ["Financials"],
     },
     "ccc": {

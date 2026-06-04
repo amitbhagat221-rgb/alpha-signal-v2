@@ -1188,10 +1188,21 @@ STALENESS_THRESHOLDS = {
 # Per-table overrides for tables whose upstream has known publishing lag.
 # Listed by table name; takes precedence over the frequency-based default.
 STALENESS_OVERRIDES = {
-    # NSE PIT filings post with delay AND many stocks have weeks-long quiet
-    # stretches. Bumped 14→30 (2026-05-25) after producer ran daily but
-    # MAX(trade_date) stayed flat because no fresh insider trades were filed.
-    "insider_trades": 30,
+    # NSE PIT insider disclosures lag the trade by WEEKS. Querying by trade_date
+    # (acqfromDt) makes the recent ~6wk window structurally sparse — it backfills
+    # over time as filings are disclosed + indexed. Verified 2026-06-04: the
+    # by-trade-date counts taper monotonically toward today (Mar 2057 → Apr 276/68
+    # → May 1-5: 3 → 0 thereafter), the endpoint itself is healthy. So MAX(trade_date)
+    # trails today by the disclosure lag even when ingestion is perfect.
+    # 14→30 (2026-05-25), 30→45 (2026-06-04) once the real lag was measured; the
+    # producer also widened to a 60d window so late disclosures actually land.
+    "insider_trades": 45,
+    # earnings_calendar is a FORWARD-dated board-meeting calendar; a daily nselib
+    # pull keeps near-future events present so MAX(date) sits ahead of today during
+    # health. Was a one-off v1-CSV import with no producer (→ 6d stale, cockpit
+    # upcoming-events widget empty); wired daily 2026-06-04. 10 flags a genuinely
+    # stalled fetcher once the forward buffer drains, without month-edge noise.
+    "earnings_calendar": 10,
     # 2026-05-23: regulatory_events was registered as "monthly" (50d) and
     # silently went stale for 43d before being noticed (Gillette dossier
     # showing 2023 articles). News/PIB are weekly cadence at worst; if the

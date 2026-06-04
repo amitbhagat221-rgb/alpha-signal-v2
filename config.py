@@ -352,6 +352,13 @@ PIPELINE_STEPS = [
     {"name": "fetch_corp_actions", "module": "sources.nselib_pull", "function": "compute_corp_actions", "critical": False,
      "table": "corporate_actions", "source": "NSE corporate-actions (nselib)", "data_freq": "daily", "frequency": "daily"},
 
+    # Board-meeting / forthcoming-events calendar (one nselib call, −3d→+30d
+    # window). Forward-dated, so a daily run keeps it fresh and feeds the
+    # cockpit's "upcoming earnings" widget. Was a one-off v1-CSV import (notebook)
+    # with no producer → went stale; wired daily 2026-06-04. Idempotent.
+    {"name": "fetch_earnings_calendar", "module": "sources.nselib_pull", "function": "compute_earnings_calendar", "critical": False,
+     "table": "earnings_calendar", "source": "NSE event-calendar (nselib)", "data_freq": "daily", "frequency": "daily"},
+
     # Track 3.1b — NSE F&O EOD grid. One nselib.fno_bhav_copy call = the whole
     # market (~16K info-carrying rows/day). Runs in the morning pipeline against
     # the prior session's archive, exactly like fetch_bhavcopy. compute() walks a

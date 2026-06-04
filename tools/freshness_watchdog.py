@@ -24,7 +24,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from db import data_health, get_db
+from db import data_health, get_db, read_sql
 from config import PIPELINE_STEPS
 from pipeline import run_step
 
@@ -82,8 +82,45 @@ def _report_coverage(coverage_gap, dry_run=False):
     print()
 
 
+def _log_recoveries(df, dry_run=False):
+    """Emit a heal-SUCCESS marker for any table whose LAST watchdog heal FAILED
+    but which is now FRESH — i.e. it recovered without the watchdog acting (late
+    data landed via the normal pipeline, or a structural-lag STALENESS_OVERRIDE
+    was corrected). The failure-streak detector in health_report keys off each
+    step's *latest* status, so without this a self-recovered table shows a
+    phantom "failed N consecutive days" CRITICAL until the old FAILED rows age
+    out of the window. This closes that loop — symmetric with the heal-SUCCESS
+    the scan already logs when it heals a table itself."""
+    latest = read_sql(
+        """
+        WITH ranked AS (
+            SELECT step_name, status,
+                   ROW_NUMBER() OVER (PARTITION BY step_name ORDER BY id DESC) AS rn
+            FROM pipeline_log
+            WHERE step_name LIKE 'watchdog_%\\_heal' ESCAPE '\\'
+              AND status IN ('SUCCESS', 'FAILED')
+        )
+        SELECT step_name FROM ranked WHERE rn = 1 AND status = 'FAILED'
+        """
+    )
+    if latest.empty:
+        return
+    fresh = set(df[df["freshness"] == "FRESH"]["table"])
+    for step in latest["step_name"]:
+        tbl = step[len("watchdog_"):-len("_heal")]  # step_name = watchdog_<table>_heal
+        if tbl in fresh:
+            print(f"  ✓ {tbl:30s} recovered → logging heal SUCCESS (last heal had FAILED)")
+            if not dry_run:
+                _log_watchdog(tbl, "heal", "SUCCESS",
+                              error="recovered — table FRESH without watchdog action")
+
+
 def scan(dry_run=False, only_tables=None):
     df = data_health()
+
+    # Close the loop on self-recovered tables before the stale scan: a table that
+    # went FRESH on its own still carries a FAILED-latest heal log → phantom streak.
+    _log_recoveries(df, dry_run=dry_run)
 
     stale = df[df["freshness"].isin(["STALE", "OUTDATED"])].copy()
     if only_tables:

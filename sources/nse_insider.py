@@ -190,8 +190,16 @@ def fetch_insider(months=1, dry_run=False):
 
 
 def compute(dry_run=False):
-    """Pipeline entry point — fetch last 30 days."""
-    return fetch_insider(months=1, dry_run=dry_run)
+    """Pipeline entry point — fetch last ~60 days.
+
+    NSE PIT disclosures lag the trade by weeks (a trade is queried by `acqfromDt`,
+    but the filing only appears in the API once disclosed + indexed). A 30-day
+    window therefore captures only the freshest — and emptiest — slice; trades
+    disclosed >30d after they occurred would be permanently missed. A 60-day
+    window re-fetches the 30–60d-ago band each day so those late-arriving
+    disclosures backfill in via INSERT OR IGNORE (idempotent, ~2 chunks).
+    See the insider_trades STALENESS_OVERRIDE note in db.py for the lag rationale."""
+    return fetch_insider(months=2, dry_run=dry_run)
 
 
 if __name__ == "__main__":
