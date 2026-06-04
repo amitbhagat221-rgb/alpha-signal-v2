@@ -1480,10 +1480,17 @@ def _conviction_verdicts(surv):
        HOLD   — near highs, or sector momentum AND relative strength intact
        WATCH  — in a drawdown with mixed signals (hold, but monitor)
        REVIEW — the loser signature: deep (≤−50%) + prolonged (≥6mo underwater)
-                + sector momentum rolled over + relative strength broken
+                + sector momentum rolled over + relative strength broken, AND the
+                broad small-cap market is NOT itself in a bear (idiosyncratic only)
     Computed from split-adjusted month-end closes (raw bhavcopy → a bonus is a
-    fake −50% drop, so we back-adjust survivors via corporate_actions). Validated
-    in tools/multibagger_monitor.py: this rule retains 94-100% of winners."""
+    fake −50% drop, so we back-adjust survivors via corporate_actions).
+    MARKET-REGIME GUARD (2026-06-04): a 15yr sector-index bear stress test
+    (tools/multibagger_monitor.py --sector-stress) showed the un-guarded eject
+    rule fired at market-wide capitulations (IT @2008 bottom, PSUBank @COVID
+    bottom) that then ~doubled — so REVIEW is suppressed to WATCH when NIFTY
+    SMALLCAP 250 is itself ≥20% off its trailing peak. Residual limit: an
+    idiosyncratic laggard in a recovered market can still mis-flag (no regime
+    guard catches that) — treat REVIEW as 'reassess', not a mechanical sell."""
     import re
     import numpy as np
 
@@ -1538,6 +1545,23 @@ def _conviction_verdicts(surv):
         if len(cols) >= 4:
             sec_mom[sec] = float(ret6[cols].median(skipna=True) - mkt6)
 
+    # market-regime guard: don't EJECT into a market-wide small-cap bear (the
+    # weakness must be idiosyncratic). NIFTY SMALLCAP 250 is the broad reference
+    # for these upper-small/mid names (same index as scoring/regime_smallcap).
+    market_dd, market_bear = 0.0, False
+    try:
+        sc = read_sql(
+            "SELECT trade_date, close FROM nse_index_history "
+            "WHERE index_symbol='NIFTY SMALLCAP 250' AND trade_date >= date('now','-400 day') "
+            "AND close > 0 ORDER BY trade_date")
+        if len(sc) >= 20:
+            scm = sc.assign(ym=pd.to_datetime(sc["trade_date"]).dt.to_period("M")) \
+                    .groupby("ym")["close"].last()
+            market_dd = float(scm.iloc[-1] / scm.cummax().iloc[-1] - 1.0)
+            market_bear = market_dd <= -0.20            # textbook bear line
+    except Exception:
+        pass                                            # missing index → guard inactive
+
     out = {}
     for sid in sids:
         if sid not in mat.columns:
@@ -1550,7 +1574,8 @@ def _conviction_verdicts(surv):
         uw = int(((p / peak - 1.0) < -0.20).sum())
         rs6 = float((p.iloc[-1] / p.iloc[-1 - min(k, len(p) - 1)] - 1.0) - mkt6)
         sm = sec_mom.get(sector.get(sid), 0.0)
-        if dd <= -0.50 and uw >= 6 and sm < 0 and rs6 < 0:
+        review = dd <= -0.50 and uw >= 6 and sm < 0 and rs6 < 0
+        if review and not market_bear:                  # eject only idiosyncratic weakness
             verdict = "REVIEW"
         elif dd > -0.25 or (sm >= 0 and rs6 >= 0):
             verdict = "HOLD"
@@ -1558,7 +1583,7 @@ def _conviction_verdicts(surv):
             verdict = "WATCH"
         out[sid] = {"verdict": verdict, "drawdown": round(dd, 3),
                     "months_underwater": uw, "rel_strength": round(rs6, 3),
-                    "sector_mom": round(sm, 3)}
+                    "sector_mom": round(sm, 3), "market_dd": round(market_dd, 3)}
     return out
 
 
@@ -1628,10 +1653,13 @@ def get_multibagger_overview(limit=60):
         rec["sector_mom"] = v["sector_mom"] if v else None
         rec["rel_strength"] = v["rel_strength"] if v else None
     conv_counts = Counter(v["verdict"] for v in verdicts.values())
+    market_dd = next((v.get("market_dd") for v in verdicts.values()), None)
 
     return {
         "available": True,
         "snapshot_date": snap,
+        "market_dd": market_dd,
+        "market_guard_active": (market_dd is not None and market_dd <= -0.20),
         "regime": regime,
         "regime_favorable": favorable,
         "regime_detail": reg_detail,

@@ -213,12 +213,158 @@ def run(anchor, end):
     print("  ≥3x retained = % of winners still held all the way to ≥3x.")
 
 
+# ───────── bear-window stress test (sector-index level) ─────────
+#
+# The per-name study run() above only has stock_prices from 2022 — two mostly
+# RISING cycles — so the live REVIEW eject branch barely fired and is under-tested
+# (HANDOFF 2026-06-04). To stress the eject hatch through real bears (2011-13
+# derating / 2015-16 commodity bust / 2018-19 NBFC-credit crisis / 2020 COVID) we
+# replay the LIVE cockpit verdict rule (cockpit/api.py:_conviction_verdicts,
+# byte-for-byte thresholds) on the 11 NSE sector INDICES — the only pre-2022 daily
+# path data we have (15yr yfinance history, /tmp parquet via sector_regime_history).
+#
+# Caveat made explicit: at the index level the "name" IS the sector, so sector
+# momentum (sm) and relative strength (rs6) collapse to ONE quantity (index 6m
+# return − Nifty 6m return). This validates the DEPTH + DURATION + momentum-rollover
+# eject logic and whether it shakes recoverers out; it does NOT exercise the
+# sm-vs-rs split (a genuine "weak stock inside a strong sector" test needs pre-2022
+# per-stock paths we don't have). The market reference is Nifty (live uses the
+# survivor-cohort median; Nifty is the index-level analog).
+
+from tools.sector_regime_history import CACHE as _SECTOR_CACHE, SECTOR_TICKERS as _SECTOR_TICKERS
+
+_TRAIL = 13          # trailing month-ends ≈ live's 400-day window
+_K = 6               # 6-month momentum lookback (live: k=min(6, n-1))
+_MARKET_BEAR_DD = -0.20   # market-regime guard: don't EJECT into a market-wide bear
+                          # (textbook bear-market line). Calibrated on the stress test —
+                          # cleanly separates the 2008/2020 market-wide capitulations
+                          # (false ejects) from idiosyncratic Realty-2011 (correct).
+
+
+def _index_verdict(level_win, mkt6, market_dd=0.0):
+    """LIVE cockpit rule (+ market-regime guard) replayed on one sector index's
+    trailing month-end levels. Returns dict(verdict, dd, uw, rs6) or None.
+    sm==rs6 at index level (see header)."""
+    p = level_win.dropna()
+    if len(p) < 7:
+        return None
+    peak = p.cummax()
+    dd = float(p.iloc[-1] / peak.iloc[-1] - 1.0)
+    uw = int(((p / peak - 1.0) < -0.20).sum())
+    k = min(_K, len(p) - 1)
+    own6 = p.iloc[-1] / p.iloc[-1 - k] - 1.0
+    rs6 = float(own6 - mkt6)
+    sm = rs6                                              # index level: sm == rs6
+    # Eject only on the loser signature AND when the weakness is idiosyncratic —
+    # i.e. the broad market is NOT itself in a deep drawdown. A −50% name inside a
+    # market-wide crash is beta, not a zombie, and mean-reverts hardest.
+    market_bear = market_dd <= _MARKET_BEAR_DD
+    if dd <= -0.50 and uw >= 6 and sm < 0 and rs6 < 0 and not market_bear:
+        v = "REVIEW"
+    elif dd > -0.25 or (sm >= 0 and rs6 >= 0):
+        v = "HOLD"
+    else:
+        v = "WATCH"
+    return {"verdict": v, "dd": dd, "uw": uw, "rs6": rs6}
+
+
+def stress_sector_index(fwds=(12, 24)):
+    import os
+    if not os.path.exists(_SECTOR_CACHE):
+        print(f"⚠ {_SECTOR_CACHE} missing — run `python -m tools.sector_regime_history` first.")
+        return
+    px = pd.read_parquet(_SECTOR_CACHE)
+    px.index = pd.to_datetime(px.index)
+    me = px.resample("ME").last()
+    sectors = [s for s in _SECTOR_TICKERS if s in me.columns]
+    nif = me["Nifty"]
+    nif_peak = nif.cummax()
+    idx = list(me.index)
+
+    recs = []
+    for ti in range(_TRAIL, len(idx)):
+        mkt6 = nif.iloc[ti] / nif.iloc[ti - _K] - 1.0
+        mkt_dd = float(nif.iloc[ti] / nif_peak.iloc[ti] - 1.0)
+        for s in sectors:
+            v = _index_verdict(me[s].iloc[ti - _TRAIL + 1: ti + 1], mkt6, mkt_dd)
+            if v is None:
+                continue
+            rec = {"date": idx[ti], "sector": s, "market_dd": mkt_dd, **v}
+            for fm in fwds:
+                rec[f"fwd{fm}"] = (me[s].iloc[ti + fm] / me[s].iloc[ti] - 1.0
+                                   if ti + fm < len(idx) else np.nan)
+            recs.append(rec)
+    df = pd.DataFrame(recs)
+
+    def fstats(g, col):
+        x = g[col].dropna()
+        return (len(x), x.mean() * 100, x.median() * 100) if len(x) else (0, np.nan, np.nan)
+
+    def rate(g, col, thr):
+        x = g[col].dropna()
+        return (x >= thr).mean() * 100 if len(x) else np.nan
+
+    bear = df[df["market_dd"] <= -0.20]
+    print("\n" + "=" * 88)
+    print("CONVICTION-MONITOR BEAR STRESS TEST  (live eject rule replayed on 11 NSE sector indices)")
+    print("=" * 88)
+    print(f"Months {df['date'].min():%Y-%m}..{df['date'].max():%Y-%m} | {len(df)} sector-month "
+          f"verdicts | bear months (Nifty DD≤−20%): {len(bear)} obs")
+    print("Index-level caveat: sector-momentum == relative-strength here (the name IS the sector).")
+
+    print("\n1) Does the eject hatch FIRE?  verdict distribution  (all | BEAR months):")
+    for v in ["HOLD", "WATCH", "REVIEW"]:
+        a = df[df["verdict"] == v]; b = bear[bear["verdict"] == v]
+        ap = 100 * len(a) / len(df) if len(df) else 0
+        bp = 100 * len(b) / len(bear) if len(bear) else 0
+        print(f"   {v:7s} {len(a):>4d} ({ap:4.1f}%)  |  bear {len(b):>3d} ({bp:4.1f}%)")
+
+    print("\n2) Is the verdict informative?  forward return by verdict (mean / median):")
+    for v in ["HOLD", "WATCH", "REVIEW"]:
+        g = df[df["verdict"] == v]
+        n12, m12, d12 = fstats(g, "fwd12"); n24, m24, d24 = fstats(g, "fwd24")
+        print(f"   {v:7s}  fwd12 {m12:+6.1f}% / {d12:+6.1f}% (n{n12:>3d})   "
+              f"fwd24 {m24:+6.1f}% / {d24:+6.1f}% (n{n24:>3d})")
+
+    deep = df[df["dd"] <= -0.40]
+    rev = deep[deep["verdict"] == "REVIEW"]
+    hold = deep[deep["verdict"].isin(["HOLD", "WATCH"])]
+    print(f"\n3) THE EJECT DISCRIMINATOR — among DEEP drawdowns (own DD≤−40%, n={len(deep)}):")
+    print("   (when you're scared & tempted to sell, does conviction keep recoverers, cut losers?)")
+    for lbl, g in [("REVIEW  → eject", rev), ("HOLD/WATCH → conviction-hold", hold)]:
+        n12, m12, _ = fstats(g, "fwd12"); n24, m24, _ = fstats(g, "fwd24")
+        print(f"   {lbl:30s} fwd12 {m12:+6.1f}% (n{n12:>3d}) | fwd24 {m24:+6.1f}% (n{n24:>3d}) "
+              f"| recovered fwd24≥+50%: {rate(g,'fwd24',0.5):4.0f}%")
+    print("   ↑ conviction-hold recovering = winners correctly retained; REVIEW recovering = shaken out.")
+
+    print("\n4) vs NAIVE STOPS — mean fwd24 among obs where each policy SELLS")
+    print("   (LOWER = sold genuine losers; HIGHER = shook you out of recoverers):")
+    for lbl, g in [("naive stop −30% (any DD≤−30%)", df[df["dd"] <= -0.30]),
+                   ("naive stop −50% (any DD≤−50%)", df[df["dd"] <= -0.50]),
+                   ("conviction REVIEW (loser sig.)", df[df["verdict"] == "REVIEW"])]:
+        n24, m24, _ = fstats(g, "fwd24")
+        print(f"   {lbl:32s} fwd24 {m24:+6.1f}% (n{n24:>3d}) | recovered≥+50%: {rate(g,'fwd24',0.5):4.0f}%")
+
+    if len(rev):
+        print("\n5) REVIEW episodes by sector (where the hatch fired) — count, mean fwd24, recover≥+50%:")
+        for s, g in rev.groupby("sector"):
+            n24, m24, _ = fstats(g, "fwd24")
+            yrs = ", ".join(sorted({f"{d:%Y}" for d in g["date"]}))
+            print(f"   {s:8s} n={len(g):>2d}  fwd24 {m24:+6.1f}%  recover {rate(g,'fwd24',0.5):3.0f}%  [{yrs}]")
+    return df
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--anchor", default="2022-08-01")
     p.add_argument("--end", default="2026-05-29")
+    p.add_argument("--sector-stress", action="store_true",
+                   help="Replay the live eject rule on 15yr of sector indices (bear stress test)")
     args = p.parse_args()
-    run(args.anchor, args.end)
+    if args.sector_stress:
+        stress_sector_index()
+    else:
+        run(args.anchor, args.end)
 
 
 if __name__ == "__main__":

@@ -97,6 +97,65 @@
         </span>{% endif %}
     </div>
 
+    {# ───────── How to use (detailed in-app guide) ───────── #}
+    {% set chip = 'display:inline-block; padding:2px 7px; border-radius:4px; font-size:9.5px; font-weight:700; vertical-align:middle;' %}
+    <details style="margin-top: 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-elevated, transparent);">
+        <summary style="cursor: pointer; padding: 11px 14px; font-size: 12px; font-weight: 700; color: var(--text-primary); user-select: none;">
+            How to use the Conviction column &nbsp;<span style="color: var(--text-muted); font-weight: 500;">— it's a holding monitor, not a stop-loss</span>
+        </summary>
+        <div style="padding: 2px 16px 16px; font-size: 12.5px; color: var(--text-secondary); line-height: 1.6;">
+            <p style="margin: 6px 0;">
+                The edge in multibaggers is <strong>not getting shaken out</strong> of a winner during its
+                inevitable drawdown — <strong>81% of eventual 3×+ winners fall ≥30% en route</strong>, so a price
+                stop-loss ejects you from the very names you're trying to hold. Use this column to reassess each
+                holding on a <strong>rolling 3–6 month cadence</strong>, not daily.
+            </p>
+
+            <div style="display:flex; flex-direction:column; gap:9px; margin:12px 0;">
+                <div>
+                    <span style="{{ chip }} color:var(--green); border:1px solid var(--green)33; background:var(--green)1a;">HOLD</span>
+                    &nbsp;Near its high, or sector momentum <em>and</em> relative strength still intact.
+                    <strong>Action: do nothing</strong> — let the winner run.
+                </div>
+                <div>
+                    <span style="{{ chip }} color:var(--amber); border:1px solid var(--amber)33; background:var(--amber)1a;">WATCH</span>
+                    &nbsp;In a drawdown (roughly −25% to −50%) with mixed signals.
+                    <strong>Action: hold, but monitor</strong> — re-read the thesis; add only on strength, don't cut on the dip alone.
+                </div>
+                <div>
+                    <span style="{{ chip }} color:var(--red); border:1px solid var(--red)33; background:var(--red)1a;">REVIEW</span>
+                    &nbsp;The full loser signature: <strong>deep (≤−50%) + ≥6 months underwater + sector momentum rolled
+                    over + underperforming the market</strong>, <em>and</em> the broad small-cap market isn't itself in a bear
+                    (so the weakness is idiosyncratic). <strong>Action: reassess the thesis — this is a flag to dig in,
+                    NOT a mechanical sell.</strong>
+                </div>
+            </div>
+
+            <p style="margin: 10px 0;">
+                <strong>Why REVIEW is "reassess", not "sell".</strong> A 15-year bear stress test (2008 GFC, 2011–13,
+                2015–16, 2020 COVID) showed deeply beaten-down names mean-revert hard far more often than they die —
+                an un-guarded eject would have sold IT at the 2008 bottom and PSU Banks at the COVID bottom, both of which
+                then ~doubled. So REVIEW is deliberately rare and conservative: it <strong>auto-suppresses during a
+                market-wide small-cap bear</strong> (only an idiosyncratic decline qualifies), and even when it fires you
+                should confirm with the fundamentals — broken thesis, governance red flag, debt blow-up — before acting.
+            </p>
+
+            <p style="margin: 10px 0; color: var(--text-muted);">
+                <strong>Market-regime guard:</strong>
+                <strong style="color: {{ 'var(--amber)' if o.market_guard_active else 'var(--green)' }};">
+                {{ 'ACTIVE — REVIEW suppressed (small-cap market in a bear)' if o.market_guard_active else 'dormant — market not in a bear' }}</strong>{% if o.market_dd is not none %}
+                <span class="mono">(NIFTY SMALLCAP 250 {{ '%+.0f%%'|format(o.market_dd*100) }} off its trailing peak)</span>{% endif %}.
+                Hover any chip to see that name's <span class="mono">drawdown · sector momentum · relative strength</span>.
+            </p>
+
+            <p style="margin: 10px 0 4px;">
+                <strong>Position discipline.</strong> Buy a <strong>basket of 20–30 equal-weight names spread across
+                sectors</strong> — a single multibagger is a coin-flip, but a basket of quality-gated candidates lifts
+                P(≥1.5×) to ≈85–91%. Rebalance by conviction (this column), not by price alerts.
+            </p>
+        </div>
+    </details>
+
     <div style="overflow-x: auto; margin-top: 10px;">
     <table style="width: 100%; border-collapse: collapse; font-size: 12.5px;">
         <thead>
