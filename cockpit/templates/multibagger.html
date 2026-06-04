@@ -143,7 +143,7 @@
             <p style="margin: 10px 0; color: var(--text-muted);">
                 <strong>Market-regime guard:</strong>
                 <strong style="color: {{ 'var(--amber)' if o.market_guard_active else 'var(--green)' }};">
-                {{ 'ACTIVE — REVIEW suppressed (small-cap market in a bear)' if o.market_guard_active else 'dormant — market not in a bear' }}</strong>{% if o.market_dd is not none %}
+                {{ 'ACTIVE — REVIEW suppressed (small-cap market in a bear)' if o.market_guard_active else 'dormant — market not in a bear' }}</strong>{% if o.market_dd is defined and o.market_dd is not none %}
                 <span class="mono">(NIFTY SMALLCAP 250 {{ '%+.0f%%'|format(o.market_dd*100) }} off its trailing peak)</span>{% endif %}.
                 Hover any chip to see that name's <span class="mono">drawdown · sector momentum · relative strength</span>.
             </p>
