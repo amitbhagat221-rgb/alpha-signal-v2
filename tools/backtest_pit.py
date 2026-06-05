@@ -75,6 +75,8 @@ SIGNAL_COLUMN_MAP = {
     "short_selling_signal": (None, "short_selling_signal"),
     # Sector momentum — Plan 0006 Phase E (per-stock = sector's medium RS z)
     "sector_momentum":     (None, "sector_momentum"),
+    # Sector tilt — ADR 0041 (per-stock = sector's 6m-mom + macro z-ensemble)
+    "sector_tilt":         (None, "sector_tilt"),
     # Options/F&O OI factors — Plan 0002 §3.2.2 (off fno_pcr_history)
     "pcr_oi":              (None, "pcr_oi"),
     "pcr_volume":          (None, "pcr_volume"),

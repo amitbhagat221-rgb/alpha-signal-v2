@@ -693,6 +693,19 @@ FACTOR_LINEAGE = {
         ],
         "sector_exclusions": [],
     },
+    "sector_tilt": {
+        "status": "candidate", "module": "signals/sector_tilt.py",
+        "reads": [
+            {"table": "stock_prices", "cols": ["close"],
+             "key": ["sid", "date"], "select": "window",
+             "filter": "last 126d", "contribution": "sector_basket_6m_momentum"},
+            {"table": "macro_sector_signals_pit", "cols": ["macro_score", "snapshot_date"],
+             "key": ["sector", "snapshot_date"], "select": "row",
+             "filter": "latest per sector <= eval_date", "contribution": "macro_score_leg"},
+            _stocks(("sid", "sector")),
+        ],
+        "sector_exclusions": [],
+    },
 
     # ════════════════════════════ Options / F&O OI factors (§3.2.2) ════════════════════════════
     # All four read the pre-computed nearest-expiry rollup in fno_pcr_history

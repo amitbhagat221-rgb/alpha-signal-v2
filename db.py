@@ -131,6 +131,8 @@ _COLUMN_MIGRATIONS = [
     ("sector_briefs", "horizon_long",   "TEXT"),
     # Per-stock sector-momentum factor PIT column (medium-horizon RS z-score).
     ("daily_snapshots_pit", "sector_momentum", "REAL"),
+    # ADR 0041: per-stock sector-tilt factor PIT column (6m-mom + macro z-ensemble).
+    ("daily_snapshots_pit", "sector_tilt", "REAL"),
     # 2026-05-31: Plan 0002 §3.2.2 — F&O open-interest factor PIT columns.
     ("daily_snapshots_pit", "pcr_oi",            "REAL"),
     ("daily_snapshots_pit", "pcr_volume",        "REAL"),
@@ -1899,6 +1901,31 @@ BACKTEST_SIGNALS = [
                          "badges. Re-test as PIT panel deepens.",
     },
     {
+        "signal": "sector_tilt",
+        "label": "Sector Tilt (6m basket momentum + macro ensemble)",
+        "group": "Momentum",
+        "description": "Stock inherits its GICS sector's ensemble = mean of "
+                       "z(trailing-6m median constituent return) and z(latest "
+                       "macro_sector_signals_pit.macro_score), z-scored across "
+                       "the 11 sectors. Validated additive to stock momentum "
+                       "(Fama-MacBeth t+3.34 at 3m horizon, ADR 0041).",
+        "source_tables": ["stock_prices", "stocks", "macro_sector_signals_pit"],
+        "source_columns": ["stock_prices.close", "stocks.sector",
+                           "macro_sector_signals_pit.macro_score"],
+        "filing_lag": "0d (prices) / monthly (macro leg)",
+        "pit_column_v1": None,
+        "pit_column_v2": "sector_tilt",
+        "v1_verdict_summary": "(new — ADR 0041, no v1 counterpart)",
+        "status": "READY",
+        "status_reason": "Shipped 2026-06-05 (ADR 0041). Distinct from the benched "
+                         "sector_momentum cousin (63d cap-wtd RS): this is the 6m "
+                         "absolute median basket + orthogonal macro engine. Backtest "
+                         "on 34 monthly PIT anchors: SMALL t=+3.18 KEEP (IC +0.023, "
+                         "ICIR 0.545, CI [1.14,5.88]) → WIRED SIGNAL_WEIGHTS[SMALL]=0.10. "
+                         "LARGE t=+0.92 / MID t=+0.64 DROP — beats the cousin in every "
+                         "tier but clears only SMALL; not wired LARGE/MID.",
+    },
+    {
         "signal": "pcr_oi",
         "label": "Put-Call Ratio (Open Interest)",
         "group": "Options/F&O",
@@ -2973,6 +3000,8 @@ FACTOR_LIBRARY = [
     "gold_beta",            # LARGE t=+1.58 WEAK (safe-haven/gold-financier tilt; CI straddles 0)
     "oil_beta",             # best |t|=0.36 LARGE — DROP
     "inr_beta",             # best |t|=0.40 MID — DROP (FX exposure not cross-sectionally priced)
+    # sector_tilt (ADR 0041) NOT here — backtest cleared SMALL t=3.18 KEEP → WIRED to
+    # SIGNAL_WEIGHTS[SMALL]=0.10 (2026-06-05). LARGE/MID sub-1.5 but live only in SMALL.
 ]
 
 

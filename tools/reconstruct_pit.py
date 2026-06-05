@@ -78,6 +78,7 @@ CREATE TABLE IF NOT EXISTS daily_snapshots_pit (
     avg_delivery_pct_30d REAL,
     delivery_anomaly_z REAL,
     sector_momentum REAL,
+    sector_tilt     REAL,
     -- Plan 0002 §3.2.2 — F&O open-interest factors (off fno_pcr_history)
     pcr_oi            REAL,
     pcr_volume        REAL,
@@ -149,7 +150,7 @@ PIT_COLUMNS = [
     "promoter_qoq", "promoter_trend_4q", "pledge_quality",
     "mom_6m", "mom_12m", "mom_composite", "macd_bullish",
     "position_52w", "avg_delivery_pct_30d", "delivery_anomaly_z",
-    "sector_momentum",
+    "sector_momentum", "sector_tilt",
     # Plan 0002 §3.2.2 — F&O open-interest factors (off fno_pcr_history)
     "pcr_oi", "pcr_volume", "max_pain_distance", "oi_buildup_signal",
     # Plan 0002 §3.2.2 — F&O implied-volatility factors (off fno_iv_history)
@@ -232,6 +233,7 @@ VALIDATION_RANGES = {
     "avg_delivery_pct_30d":  (0, 100, True),
     "delivery_anomaly_z":    (-5, 5, True),  # clip extreme z
     "sector_momentum":       (-3, 3, True),  # cross-sector RS z-score
+    "sector_tilt":           (-3, 3, True),  # cross-sector 6m-mom + macro z-ensemble
     # F&O OI factors (§3.2.2) — bounds mirror signals/fno_oi_factors.py clips
     "pcr_oi":                (0, 20, True),   # put_oi / call_oi, tail-capped
     "pcr_volume":            (0, 20, True),   # put_vol / call_vol, tail-capped
@@ -1247,6 +1249,36 @@ def pit_sector_momentum(stocks, px_pit, macro_hist, eval_date):
     stk = stocks[["sid", "sector", "market_cap_cr"]]
     sm = compute_sector_momentum(prices=prices, nifty=nifty, stocks=stk)
     return sector_momentum_for_stocks(sector_mom=sm, stocks=stocks[["sid", "sector"]])
+
+
+def pit_sector_tilt(stocks, px_pit, macro_sector_full, eval_date):
+    """Per-stock sector-tilt factor, PIT — the validated 6m-mom + macro ensemble (ADR 0041).
+
+    Reuses signals.sector_tilt's core verbatim ("ship factor + PIT as one unit"):
+      • px_pit is already filtered ≤ eval_date and corp-action-adjusted → the 6m
+        basket-momentum leg.
+      • macro_sector_full (the reconstructed macro_sector_signals_pit) is sliced to
+        snapshot_date ≤ eval_date and reduced to the latest row per sector → the
+        macro_score leg. Empty (before the first macro anchor, 2022-08) → the core
+        falls back to the momentum z alone, matching the validation.
+
+    Returns DataFrame[sid, sector_tilt].
+    """
+    from signals.sector_tilt import compute_sector_tilt
+    cols = ["sid", "sector_tilt"]
+    if px_pit is None or px_pit.empty:
+        return pd.DataFrame(columns=cols)
+    eval_str = eval_date.isoformat() if hasattr(eval_date, "isoformat") else str(eval_date)
+    if macro_sector_full is not None and not macro_sector_full.empty:
+        ms = macro_sector_full[macro_sector_full["snapshot_date"] <= eval_str]
+        ms = (ms.sort_values("snapshot_date").groupby("sector", as_index=False).last()
+              [["sector", "macro_score"]]) if not ms.empty else pd.DataFrame(
+                  columns=["sector", "macro_score"])
+    else:
+        ms = pd.DataFrame(columns=["sector", "macro_score"])
+    prices = px_pit[["sid", "date", "close"]].sort_values(["sid", "date"])
+    return compute_sector_tilt(prices=prices, macro_sector=ms,
+                               stocks=stocks[["sid", "sector"]])
 
 
 def pit_fno_oi(fno_pcr_full, eval_date):
@@ -2418,6 +2450,12 @@ def reconstruct_one_date(eval_date, raw, signals_to_run):
         )
         base = base.merge(pit_delivery_anomaly_z(px_pit), on="sid", how="left")
 
+    if "sector_tilt" in signals_to_run:
+        base = base.merge(
+            pit_sector_tilt(raw["stocks"], px_pit, raw.get("macro_sector"), eval_date),
+            on="sid", how="left",
+        )
+
     # ── §3.2.2 — F&O OI factors (NULL before fno_pcr_history backfill 2025-11-27) ──
     if "fno_oi" in signals_to_run and "fno_pcr" in raw and not raw["fno_pcr"].empty:
         base = base.merge(pit_fno_oi(raw["fno_pcr"], eval_date), on="sid", how="left")
@@ -2763,6 +2801,15 @@ def load_raw():
     macro_map = read_sql(
         "SELECT indicator_id, sector, direction, weight FROM macro_sector_map"
     )
+    # Per-sector macro_score (reconstructed by the `sector_overlays` signal) — the
+    # macro leg of sector_tilt. Sliced ≤ eval_date per-anchor in pit_sector_tilt.
+    try:
+        macro_sector = read_sql(
+            "SELECT sector, snapshot_date, macro_score FROM macro_sector_signals_pit "
+            "WHERE macro_score IS NOT NULL ORDER BY sector, snapshot_date"
+        )
+    except Exception:
+        macro_sector = pd.DataFrame()
     # Track 3 fundamentals (long-format) — annual rows only for the cluster
     fund_screener = read_sql(
         "SELECT sid, period_end, line_item, value FROM fundamentals_screener "
@@ -2830,6 +2877,7 @@ def load_raw():
         "corp_actions": corp_actions,
         "reg_events": reg_events, "reg_signals": reg_signals,
         "macro_hist": macro_hist, "macro_map": macro_map,
+        "macro_sector": macro_sector,
     }
 
 
@@ -2847,6 +2895,7 @@ def main():
                         choices=["piotroski", "accruals", "promoter", "forensic",
                                  "earnings_yield", "book_to_price", "momentum",
                                  "position_52w", "delivery", "sector_momentum",
+                                 "sector_tilt",
                                  "fno_oi", "fno_iv", "microstructure", "pead", "pledge",
                                  "promoter_trend", "macd", "fwd_return",
                                  "mom_composite",
@@ -2925,6 +2974,8 @@ def main():
         "debt_structure", "asset_tangibility",
         # Plan 0006 Phase E — sector momentum (per-stock = sector's medium RS z)
         "sector_momentum",
+        # ADR 0041 — sector tilt (per-stock = sector's 6m-mom + macro z-ensemble)
+        "sector_tilt",
         # Plan 0002 §3.2.2 — F&O open-interest + implied-volatility factors
         "fno_oi", "fno_iv",
         # Plan 0002 §3.2.3 — daily-derivable microstructure factors

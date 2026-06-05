@@ -98,16 +98,26 @@ SIGNAL_WEIGHTS = {
         # smart_money carries 0.06 but is NOT backtested (no PIT/gate entry) — flagged
         # to validate or reclassify as a diversifier. accruals = gate↔history conflict,
         # held.
-        "pt_upside":          0.16,   # t=9.14 primary (capped — artifact re-verify 2026-08)
-        "promoter":           0.15,   # t=3.20 primary; gate LIBRARY 1.83
-        "earnings_yield":     0.12,   # t=3.13 primary; gate PROMOTE 7.75 @252d
-        "book_to_price":      0.12,   # t=2.54 secondary; gate PROMOTE 13.58 @252d (strongest)
-        "delivery_anomaly_z": 0.11,   # t=4.76 primary (n=103, orthogonal); gate PROMOTE 2.12
-        "pledge_quality":     0.10,   # t=5.90; gate LIBRARY 1.96 fragile — trimmed, kept orthogonal
-        "piotroski":          0.09,   # t=2.81 secondary; gate PROMOTE 4.87
-        "smart_money":        0.06,   # smart_money_score: backtested 2026-06-02 → SMALL t=1.06 (n=6, DROP/thin). Prior "t=2.49" was avg_delivery borrowed via a mis-alias. Diversifier — re-judge as anchors accrue.
-        "accruals":           0.06,   # t=2.10 secondary; gate REJECT — conflict, held
-        "momentum":           0.03,   # t=1.76 tertiary; gate REJECT — token
+        # 2026-06-05 (ADR 0041): sector_tilt added at 0.10 — within-tier backtest
+        # SMALL t=+3.18 KEEP (34 monthly anchors, IC +0.023, ICIR 0.545, CI strictly
+        # >0). The 6m-basket-momentum + macro ensemble; ORTHOGONAL to the whole SMALL
+        # block (a new sector/macro dimension, Fama-MacBeth-validated additive to stock
+        # momentum, t+3.34). Weighted alongside the other orthogonal non-fundamental
+        # SMALL signals (delivery_anomaly_z). LARGE (t=0.92) / MID (t=0.64) did NOT
+        # clear |t|≥1.5 → NOT wired there (sector_tilt is SMALL-only, like the cousin's
+        # best tier). Funded by an even −0.01 haircut across the existing ten (ordering
+        # preserved). Distinct from the benched sector_momentum (63d RS, SMALL t=1.88).
+        "pt_upside":          0.15,   # t=9.14 primary (capped — artifact re-verify 2026-08)
+        "promoter":           0.14,   # t=3.20 primary; gate LIBRARY 1.83
+        "earnings_yield":     0.11,   # t=3.13 primary; gate PROMOTE 7.75 @252d
+        "book_to_price":      0.11,   # t=2.54 secondary; gate PROMOTE 13.58 @252d (strongest)
+        "delivery_anomaly_z": 0.10,   # t=4.76 primary (n=103, orthogonal); gate PROMOTE 2.12
+        "sector_tilt":        0.10,   # t=3.18 KEEP (ADR 0041); orthogonal sector/macro tilt
+        "pledge_quality":     0.09,   # t=5.90; gate LIBRARY 1.96 fragile — kept orthogonal
+        "piotroski":          0.08,   # t=2.81 secondary; gate PROMOTE 4.87
+        "smart_money":        0.05,   # smart_money_score: backtested 2026-06-02 → SMALL t=1.06 (n=6, DROP/thin). Prior "t=2.49" was avg_delivery borrowed via a mis-alias. Diversifier — re-judge as anchors accrue.
+        "accruals":           0.05,   # t=2.10 secondary; gate REJECT — conflict, held
+        "momentum":           0.02,   # t=1.76 tertiary; gate REJECT — token
     },
 }
 

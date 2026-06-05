@@ -32,6 +32,7 @@ an **orthogonality sweep** (each new factor's max |ρ| vs already-wired factors 
 | **pledge_quality** | SMALL | 5.90 | 0.13 | 0.08 | promoter-pledge stress; orthogonal to promoter (ρ=0.04) |
 | **delivery_anomaly_z** | SMALL | 4.76 (n=103) | 0.11 | 0.08 | delivery z-spike; orthogonal to avg_delivery (ρ=0.08) |
 | **iv_skew_25d** | MID | +3.16 (48wk) | 0.14 | 0.19 | in-house IV skew (ADR 0035); F&O-only; LARGE/SMALL DROP |
+| **sector_tilt** | SMALL | +3.18 (34mo) | 0.10 | orthogonal (new sector dim) | 6m basket-mom + macro ensemble (ADR 0041); LARGE +0.92 / MID +0.64 DROP |
 
 (pt_upside/pledge/delivery were already in `scoring/screener.py` `SIGNAL_COLS` + the
 MaxReturn/MaxSharpe variants since 2026-05-28/29, but carried **zero production weight**
@@ -79,6 +80,26 @@ thin with a bulk component that has no historical depth** (reconstructed anchors
 toward delivery — redundant with `avg_delivery_pct_30d`). **Verdict: PRELIMINARY — held at
 0.06, no change.** Now visible to the backtest/gate; re-judge as monthly anchors accrue and
 `bulk_deals` depth grows (then it can move to weekly cadence).
+
+### `sector_tilt` — backtest-gated, SMALL-only (2026-06-05, [ADR 0041](../decisions/0041-sector-tilt-backtest-gated-small-only.md))
+
+The daily sector tilt (`mean( z(6m basket momentum), z(macro_score) )` mapped per
+stock) was validated **pooled** via Fama-MacBeth (t+3.34 at 3-month horizon, additive
+to stock momentum). It was **not** wired on that alone — its close cousin
+`sector_momentum` (63d RS) had already backtested WEAK/DROP **within-tier**, and the FM
+horizon ≠ the within-tier lens `daily_picks` ranks on. So it was registered as a proper
+factor and run through `backtest_pit`:
+
+| Tier | `sector_momentum` (cousin) | `sector_tilt` (this) | Action |
+|------|----------------------------|----------------------|--------|
+| LARGE | t=−0.60 DROP | t=+0.92 DROP | not wired |
+| MID | t=+0.33 DROP | t=+0.64 DROP | not wired |
+| SMALL | t=+1.88 WEAK | **t=+3.18 KEEP** (IC +0.023, ICIR 0.545) | **wired 0.10** |
+
+The ensemble beats the cousin in every tier but clears only SMALL → wired SMALL-only at
+**0.10** (even −0.01 haircut across the existing ten; orthogonal new sector/macro
+dimension, so weighted alongside `delivery_anomaly_z`). Sector-constant by design (a
+tilt, not a stock-selector). Re-judge LARGE/MID as the monthly panel deepens.
 
 ## On the bench (validated, deliberately NOT wired)
 

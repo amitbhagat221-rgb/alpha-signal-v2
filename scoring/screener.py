@@ -136,6 +136,14 @@ def _load_signals():
     earnings_yield = compute_earnings_yield()
     delivery_anomaly = compute_delivery_anomaly_z()
 
+    # Sector tilt (ADR 0041) — per-stock = its GICS sector's 6m-basket-momentum +
+    # macro_score z-ensemble. Computed inline (no table), like momentum/EY/delivery.
+    # Wired in SMALL only (backtest SMALL t=3.18 KEEP; LARGE/MID DROP) — the SMALL
+    # tier weight in config.SIGNAL_WEIGHTS picks it up; other tiers renormalise over
+    # their present signals. Sector-constant by design (the tilt).
+    from signals.sector_tilt import compute_sector_tilt
+    sector_tilt = compute_sector_tilt()
+
     # Book-to-price: total_equity / (shares_outstanding * close_price)
     book_to_price = _compute_book_to_price()
 
@@ -151,6 +159,7 @@ def _load_signals():
     df = df.merge(earnings_yield, on="sid", how="left")
     df = df.merge(book_to_price, on="sid", how="left")
     df = df.merge(delivery_anomaly, on="sid", how="left")
+    df = df.merge(sector_tilt, on="sid", how="left")
     df = df.merge(iv_skew, on="sid", how="left")
     df = df.merge(price_counts, on="sid", how="left")
     df["price_rows"] = df["price_rows"].fillna(0).astype(int)
@@ -236,6 +245,8 @@ def score_universe(df, weights: dict = None):
         "delivery_anomaly_z": "delivery_anomaly_z",  # t=4.76 SMALL (KEEP)
         # Wired 2026-05-31 (ADR 0035) — in-house IV skew, MID only:
         "iv_skew_25d":        "iv_skew_25d",          # t=+3.16 MID (KEEP, 48 wk periods)
+        # Wired 2026-06-05 (ADR 0041) — sector 6m-mom + macro tilt, SMALL only:
+        "sector_tilt":        "sector_tilt",          # t=+3.18 SMALL (KEEP, 34 monthly)
     }
 
     # Percentile-rank all signals within tier (higher = better for all)
