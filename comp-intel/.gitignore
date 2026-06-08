@@ -1,0 +1,7 @@
+# comp-intel — keep code + docs in git; keep ALL data + env out
+.venv/
+__pycache__/
+*.pyc
+data/
+*.db
+*.sqlite

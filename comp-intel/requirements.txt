@@ -1,0 +1,5 @@
+# comp-intel — self-contained deps (install into comp-intel/.venv, NOT the alpha-signal venv)
+python-jobspy>=1.1.79     # multi-portal job scraper: Naukri, Indeed, Glassdoor, LinkedIn, Google
+pandas>=2.0
+requests>=2.31
+python-dateutil>=2.8
