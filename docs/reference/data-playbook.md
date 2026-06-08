@@ -251,6 +251,19 @@ For each source: **what it gives**, **endpoint**, **PIT/live access**, **histori
 | **Rate limit** | 1 req/sec safe. |
 | **Used by** | `signals/sentiment.py`, `regulatory_classifier` (one input among many) |
 
+### BSE corporate-announcement EVENT STREAM ⭐ (the richest free unlock found, 2026-06-08)
+
+| Field | Value |
+|---|---|
+| **What** | The full BSE corporate-disclosure feed — every announcement (Result, Board Meeting, Credit Rating, Pledge/SAST, Resignation, Buyback, Corp. Action, AGM/EGM, Company Update) with **exact timestamps**, category/subcategory, BSE's own `CRITICALNEWS` materiality flag, disclosure-latency (`TimeDiff`), `QUARTER_ID`, and attachment flags (PDF / Investor PPT / audio-video). A whole new *event-driven* data category. |
+| **Endpoint** | `https://api.bseindia.com/BseIndiaAPI/api/AnnSubCategoryGetData/w` — **unofficial** (the public bseindia.com site's own backend). Params: `pageno, strCat=-1, subcategory=-1, strPrevDate=YYYYMMDD, strToDate=YYYYMMDD, strSearch=P, strscrip='', strType=C`. Response `{"Table":[rows], "Table1":[{"ROWCNT":<total>}]}`, 50 rows/page. |
+| **PIT access** | `DT_TM` is the look-ahead-safe event time. The all-scrip/all-category "firehose" returns **ONE day per call** (multi-day ranges silently return 0) → harvest day-by-day. |
+| **Historical access** | Confirmed back to **2018** incl. **delisted names** (scrip code persists post-delisting; e.g. DHFL 2018 returns 50 rows) → survivorship-complete by construction. |
+| **v2 depth** | `bse_announcements` — backfilling 2018→present (~700/day × ~250 trading days/yr). `sid` column is NULL until the deferred BSE-scrip-master ↔ ISIN ↔ ticker map is built (`stocks` has no ISIN). |
+| **Gotchas** | (1) **Endpoint is `AnnSubCategoryGetData`, NOT `AnnGetData`** (the latter returns "No Record Found"). (2) Single-day only for the firehose. (3) **Warm the cookie** — GET `bseindia.com/corporates/ann.html` first; browser UA + Referer/Origin required. (4) Same IP-block risk as the PDF harvester — ≥1.5s between pages, single-threaded. (5) Unofficial: BSE can rename params without notice (already did once). (6) **ToS:** fine for personal research; the *real-time feed* is what BSE licenses — get a licensed feed before any commercial redistribution. |
+| **Rate limit** | ≥1.5s between pages; warmed session; never parallel with the transcript/PDF harvester (shares the BSE IP-block surface). |
+| **Used by** | (planned) PEAD announce-dates, transcript look-ahead fix, credit-rating-change factor, promoter-pledge events, auditor/KMP-resignation forensic, governance signals (`critical_news` + `time_diff`), free forward earnings calendar (Board Meeting agenda). Harvester: `sources/bse_announcements.py`. |
+
 ---
 
 ## Cross-Cutting Principles
