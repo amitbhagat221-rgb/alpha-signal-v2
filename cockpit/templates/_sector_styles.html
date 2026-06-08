@@ -1,0 +1,410 @@
+<style>
+    .sec-meta { font-size: 11px; color: var(--text-muted); }
+
+    /* Heatmap: industries grouped by sector */
+    .sec-group {
+        margin-bottom: 18px;
+    }
+    .sec-group-header {
+        display: flex; align-items: baseline; gap: 10px;
+        margin: 0 0 8px 2px;
+        padding-bottom: 4px;
+        border-bottom: 1px solid var(--border);
+    }
+    .sec-group-header .sec-name {
+        font-size: 10px; font-weight: 700; letter-spacing: 1px;
+        text-transform: uppercase; color: var(--accent);
+    }
+    .sec-group-header .sec-meta {
+        font-size: 10px; color: var(--text-muted);
+    }
+    .ind-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+        gap: 8px;
+    }
+    .ind-card {
+        display: block; text-decoration: none; color: inherit;
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 10px 12px;
+        transition: transform 0.12s, border-color 0.12s, box-shadow 0.12s;
+    }
+    .ind-card:hover { transform: translateY(-2px); border-color: var(--accent);
+                       box-shadow: 0 4px 18px rgba(77,142,255,0.10); }
+    .ind-card .row {
+        display: flex; justify-content: space-between; align-items: center;
+        margin-bottom: 5px;
+    }
+    .ind-card .name { font-weight: 700; font-size: 12.5px; color: var(--text-primary); }
+    .ind-card .score {
+        font-family: var(--mono, monospace); font-size: 16px; font-weight: 700;
+    }
+    .ind-card .breadth-row { display: flex; gap: 8px; align-items: center; }
+    .ind-card .breadth-bar {
+        flex: 1; height: 3px; background: var(--border); border-radius: 2px; overflow: hidden;
+    }
+    .ind-card .breadth-fill {
+        height: 100%; background: linear-gradient(90deg, var(--accent), rgba(139,92,246,0.4));
+        border-radius: 2px;
+    }
+    .ind-card .breadth-num { font-size: 9px; color: var(--text-muted); min-width: 32px; text-align: right; }
+
+    /* Per-industry header */
+    .ps-header {
+        display: flex; flex-wrap: wrap; align-items: center; gap: 14px;
+    }
+    .ps-header h1 {
+        margin: 0; font-size: 22px; font-weight: 800; letter-spacing: 0.4px;
+        color: var(--text-primary);
+    }
+    .ps-header .parent-tag {
+        font-size: 10px; padding: 3px 8px; border-radius: 4px;
+        background: var(--bg-card-hover); color: var(--text-secondary);
+        letter-spacing: 0.4px;
+    }
+    .ps-header .industry-tag {
+        font-size: 10px; padding: 3px 8px; border-radius: 4px;
+        background: var(--bg-card-hover); color: var(--text-secondary);
+        letter-spacing: 0.4px;
+    }
+    .ps-header .macro-pill {
+        font-size: 10px; padding: 3px 10px; border-radius: 12px;
+        font-weight: 700; letter-spacing: 0.7px;
+    }
+    .ps-header .macro-pill.tail   { background: var(--green-bg); color: var(--green); }
+    .ps-header .macro-pill.head   { background: var(--red-bg);   color: var(--red); }
+    .ps-header .macro-pill.neutral{ background: var(--bg-card-hover); color: var(--text-muted); }
+
+    .ps-selector select {
+        background: var(--bg-card); color: var(--text-primary);
+        border: 1px solid var(--border); border-radius: 8px;
+        padding: 6px 12px; font-size: 13px; font-weight: 600;
+        font-family: inherit; cursor: pointer;
+    }
+
+    /* Left-to-right value-chain flow */
+    .vc-flow-lr {
+        display: flex; align-items: stretch; gap: 0; overflow-x: auto;
+        padding: 4px 0;
+    }
+    .vc-flow-lr .vc-card {
+        flex: 1 1 0; min-width: 150px;
+        background: var(--bg-card); border: 1px solid var(--border);
+        border-radius: 8px; padding: 10px 12px;
+        position: relative; transition: border-color 0.12s, transform 0.12s;
+    }
+    .vc-flow-lr .vc-card:hover { border-color: var(--accent); transform: translateY(-1px); }
+    .vc-flow-lr .vc-card .num {
+        width: 22px; height: 22px; border-radius: 50%;
+        background: var(--accent); color: white;
+        font-size: 11px; font-weight: 700;
+        display: flex; align-items: center; justify-content: center;
+        margin-bottom: 6px;
+    }
+    .vc-flow-lr .vc-card h4 {
+        font-size: 11px; font-weight: 700; letter-spacing: 0.4px;
+        text-transform: uppercase; color: var(--text-primary);
+        margin: 0 0 6px 0;
+    }
+    .vc-flow-lr .vc-card ul {
+        list-style: none; padding: 0; margin: 0;
+        font-size: 10.5px; line-height: 1.5; color: var(--text-secondary);
+    }
+    .vc-flow-lr .vc-card ul li { padding: 1px 0; }
+    .vc-flow-lr .vc-arrow {
+        align-self: center; padding: 0 6px;
+        color: var(--accent); font-size: 16px; user-select: none;
+        flex-shrink: 0;
+    }
+    @media (max-width: 900px) {
+        .vc-flow-lr { flex-direction: column; }
+        .vc-flow-lr .vc-arrow { transform: rotate(90deg); padding: 4px 0; }
+    }
+
+    .drv-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+    @media (max-width: 720px) { .drv-3 { grid-template-columns: 1fr; } }
+    .drv-card {
+        background: var(--bg-card-hover); border: 1px solid var(--border);
+        border-radius: 8px; padding: 12px;
+    }
+    .drv-card .head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+    .drv-card .icon {
+        width: 24px; height: 24px; border-radius: 6px;
+        display: flex; align-items: center; justify-content: center;
+        font-size: 13px;
+    }
+    .drv-card.rev .icon  { background: rgba(46,204,113,0.15); color: #2ecc71; }
+    .drv-card.cost .icon { background: rgba(231,76,60,0.15);  color: #e74c3c; }
+    .drv-card.grow .icon { background: rgba(77,142,255,0.15); color: #4d8eff; }
+    .drv-card h5 { font-size: 11px; font-weight: 700; letter-spacing: 0.4px;
+                   text-transform: uppercase; color: var(--text-primary); margin: 0; }
+    .drv-pill {
+        font-size: 10.5px; padding: 3px 8px; border-radius: 12px;
+        background: rgba(255,255,255,0.04); border: 1px solid var(--border);
+        color: var(--text-secondary); margin: 2px 2px 2px 0; display: inline-block;
+    }
+
+    /* Progressive-elaboration "slide rows" — bold headline + muted elaboration.
+       Used inside drivers, trends, cyclicality, india-specific. Pattern is fractal:
+       the reader skims headlines, drills into body for the ones that matter. */
+    .slide-stack { display: flex; flex-direction: column; }
+    .slide-row {
+        padding: 7px 0;
+        border-bottom: 1px dashed var(--border);
+    }
+    .slide-row:last-child { border-bottom: none; padding-bottom: 0; }
+    .slide-row:first-child { padding-top: 0; }
+    .slide-row .slide-head {
+        font-size: 12.5px; font-weight: 600; line-height: 1.4;
+        color: var(--text-primary);
+    }
+    .slide-row .slide-body {
+        font-size: 11px; line-height: 1.5;
+        color: var(--text-muted);
+        margin-top: 3px;
+    }
+    /* Slightly more breathing room when slides are the main content
+       (trends tab, cyclicality block) rather than packed in a small card. */
+    .slide-stack.spaced .slide-row { padding: 9px 0; }
+    .slide-stack.spaced .slide-row .slide-head { font-size: 13px; }
+    .slide-stack.spaced .slide-row .slide-body { font-size: 11.5px; margin-top: 4px; }
+
+    .thesis-card .thesis-head {
+        font-size: 16px; font-weight: 700; line-height: 1.4;
+        color: var(--text-primary); margin-top: 6px;
+    }
+    .thesis-card .thesis-body {
+        font-size: 13px; line-height: 1.55;
+        color: var(--text-secondary); margin-top: 5px;
+    }
+
+    .pb-row { display: grid; grid-template-columns: 80px 1fr 60px 80px 50px;
+              gap: 10px; align-items: center; padding: 5px 0;
+              border-bottom: 1px solid var(--border); font-size: 11px; }
+    .pb-row:last-child { border-bottom: none; }
+    .pb-row .ticker { font-weight: 600; color: var(--text-primary); }
+    .pb-track { height: 12px; background: rgba(255,255,255,0.04);
+                border-radius: 3px; overflow: hidden; }
+    .pb-fill { height: 100%; background: linear-gradient(90deg, var(--accent), rgba(139,92,246,0.4)); }
+    .pb-row .num { font-family: var(--mono, monospace); text-align: right; }
+
+    .seg-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px; }
+    .seg-chip {
+        background: var(--bg-card-hover); border: 1px solid var(--border);
+        border-radius: 8px; padding: 10px 12px;
+    }
+    .seg-chip .seg-name { font-size: 12px; font-weight: 700; color: var(--text-primary); margin-bottom: 4px; }
+    .seg-chip .kpi-li {
+        font-size: 10.5px; padding: 1px 0; color: var(--text-secondary);
+    }
+    .seg-chip .kpi-li .arrow { font-weight: 700; margin-right: 4px; }
+    .seg-chip .kpi-li .arrow.up { color: #2ecc71; }
+    .seg-chip .kpi-li .arrow.down { color: #e74c3c; }
+
+    .trend-box {
+        background: var(--bg-card-hover); border: 1px solid var(--border);
+        border-radius: 8px; padding: 12px 16px;
+        font-size: 12.5px; line-height: 1.6;
+        color: var(--text-secondary);
+    }
+    .trend-box ul { margin: 0; padding-left: 18px; }
+    .trend-box li { padding: 3px 0; }
+
+    .pick-row {
+        display: grid; grid-template-columns: 60px 1fr 36px;
+        gap: 8px; padding: 4px 0;
+        font-size: 11.5px; align-items: center;
+    }
+    .pick-row .ticker {
+        color: var(--text-primary); font-weight: 600; text-decoration: none;
+    }
+    .pick-row .name { color: var(--text-secondary);
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .pick-row .score { font-family: var(--mono, monospace); text-align: right; font-weight: 700; }
+    .pdot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; vertical-align: middle; margin-right: 5px; }
+    .pdot.up { background: #2ecc71; } .pdot.down { background: #e74c3c; } .pdot.flat { background: var(--text-muted); }
+
+    /* ── Sector Digest (Plan 0006 Phase C — replaces 47-card industry heatmap) ── */
+    .sd-bucket { margin-bottom: 18px; }
+    .sd-bucket-head {
+        display: flex; align-items: baseline; gap: 10px;
+        margin: 0 0 8px 0;
+        padding-bottom: 4px;
+        border-bottom: 1px solid var(--border);
+    }
+    .sd-bucket-icon { font-size: 18px; }
+    .sd-bucket-title {
+        font-size: 13px; font-weight: 700;
+        letter-spacing: 0.6px; text-transform: uppercase;
+        color: var(--text-primary);
+    }
+    .sd-bucket-sub { font-size: 11px; color: var(--text-muted); }
+
+    .sd-row {
+        display: block; text-decoration: none; color: inherit;
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 11px 14px;
+        margin-bottom: 6px;
+        transition: transform 0.12s, border-color 0.12s, box-shadow 0.12s;
+    }
+    .sd-row:hover { transform: translateX(2px); border-color: var(--accent);
+                    box-shadow: 0 2px 12px rgba(77,142,255,0.10); }
+    .sd-row-head {
+        display: flex; justify-content: space-between; align-items: baseline;
+        margin-bottom: 4px;
+    }
+    .sd-sector { font-size: 14px; font-weight: 700; color: var(--text-primary); letter-spacing: 0.2px; }
+    .sd-picks { display: flex; align-items: baseline; gap: 4px; }
+    .sd-picks-n {
+        font-family: var(--mono, monospace); font-size: 16px; font-weight: 700;
+        color: var(--text-primary);
+    }
+    .sd-picks-label { font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
+    .sd-driver {
+        font-size: 11.5px; line-height: 1.45;
+        display: flex; gap: 6px; margin-bottom: 3px;
+    }
+    .sd-arrow { font-weight: 700; min-width: 12px; }
+    .sd-driver-text { font-family: var(--mono, monospace); color: var(--text-secondary); }
+    .sd-hint {
+        font-size: 11px; color: #f5a623; font-weight: 600;
+        margin: 4px 0 2px 0;
+    }
+    .sd-tickers {
+        font-family: var(--mono, monospace); font-size: 11px;
+        color: var(--text-muted);
+        margin-top: 4px;
+    }
+    .sd-tk-sep { margin: 0 5px; opacity: 0.5; }
+    .sd-empty {
+        font-size: 12px; color: var(--text-muted);
+        background: var(--bg-card); border: 1px dashed var(--border);
+        border-radius: 8px; padding: 14px;
+        line-height: 1.5;
+    }
+
+    /* Plan 0006 Phase E — S/M/L momentum horizon badges next to sector name */
+    .sd-horizons { display: inline-flex; gap: 3px; margin-left: 8px; vertical-align: middle; }
+    .sd-hz {
+        font-size: 8.5px; font-weight: 700; font-family: var(--mono, monospace);
+        width: 14px; height: 14px; line-height: 14px; text-align: center;
+        border-radius: 3px; border: 1px solid transparent;
+    }
+    .sd-hz.strong  { background: rgba(124,179,5,0.18);  color: var(--green); border-color: rgba(124,179,5,0.35); }
+    .sd-hz.weak    { background: rgba(255,77,79,0.15);   color: var(--red);   border-color: rgba(255,77,79,0.32); }
+    .sd-hz.neutral { background: var(--bg-card-hover);   color: var(--text-muted); }
+    .sd-hz.na      { background: transparent; color: var(--border); border-color: var(--border); }
+
+    /* Plan 0006 Phase D — per-sector LLM dossier inside the bucket row */
+    .sd-row-link { display: block; text-decoration: none; color: inherit; }
+    .sd-dossier { margin-top: 9px; padding-top: 9px; border-top: 1px dashed var(--border); }
+    .sd-thesis { font-size: 12px; line-height: 1.5; color: var(--text-secondary); margin-bottom: 8px; }
+    .sd-conv {
+        display: inline-block; font-size: 9px; font-weight: 700; letter-spacing: 0.5px;
+        padding: 1px 5px; border-radius: 4px; border: 1px solid var(--border);
+        color: var(--text-muted); margin-left: 6px; vertical-align: middle;
+    }
+    .sd-watch { display: flex; flex-direction: column; gap: 5px; }
+    .sd-watch-item {
+        font-size: 11.5px; line-height: 1.45; color: var(--text-secondary);
+        display: flex; gap: 7px; align-items: baseline;
+    }
+    .sd-hbadge {
+        flex: 0 0 auto; font-family: var(--mono, monospace); font-size: 9px; font-weight: 700;
+        width: 15px; text-align: center; border-radius: 4px; padding: 1px 0; color: #fff;
+    }
+    .sd-hbadge.h-s { background: #4d8eff; }
+    .sd-hbadge.h-m { background: #7cb305; }
+    .sd-hbadge.h-l { background: #9254de; }
+    .sd-dmore { margin-top: 9px; }
+    .sd-dmore > summary {
+        list-style: none; cursor: pointer; font-size: 11px; font-weight: 600; color: var(--text-muted);
+    }
+    .sd-dmore > summary::-webkit-details-marker { display: none; }
+    .sd-dmore > summary::before { content: "▸"; margin-right: 5px; display: inline-block; transition: transform 0.15s; }
+    .sd-dmore[open] > summary::before { transform: rotate(90deg); }
+    .sd-case { margin-top: 8px; }
+    .sd-case-h { font-size: 10px; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; margin-bottom: 3px; }
+    .sd-case ul { margin: 0; padding-left: 16px; }
+    .sd-case li { font-size: 11px; line-height: 1.45; color: var(--text-secondary); margin-bottom: 3px; }
+
+    .sd-quiet { margin-bottom: 18px; }
+    .sd-quiet summary {
+        list-style: none; cursor: pointer;
+        display: flex; align-items: baseline; gap: 10px;
+        padding-bottom: 4px; border-bottom: 1px solid var(--border);
+        margin-bottom: 8px;
+    }
+    .sd-quiet summary::-webkit-details-marker { display: none; }
+    .sd-quiet summary::before { content: "▸"; color: var(--text-muted); margin-right: 4px; transition: transform 0.15s; display: inline-block; }
+    .sd-quiet[open] summary::before { transform: rotate(90deg); }
+
+    .sd-section-head {
+        font-size: 11px; font-weight: 700; letter-spacing: 0.7px;
+        text-transform: uppercase; color: var(--text-muted);
+        margin: 24px 0 10px 0;
+        padding-bottom: 4px; border-bottom: 1px solid var(--border);
+    }
+
+    .sd-force-grid {
+        display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px;
+        margin-bottom: 16px;
+    }
+    @media (max-width: 720px) { .sd-force-grid { grid-template-columns: 1fr; } }
+    .sd-force {
+        background: var(--bg-card); border: 1px solid var(--border);
+        border-radius: 10px; padding: 14px 16px;
+    }
+    .sd-force-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 10px; }
+    .sd-force-icon { font-size: 15px; }
+    .sd-force-title {
+        font-size: 12px; font-weight: 700; letter-spacing: 0.5px;
+        text-transform: uppercase; color: var(--text-primary);
+    }
+    .sd-force-side { margin-bottom: 10px; }
+    .sd-force-side:last-child { margin-bottom: 0; }
+    .sd-force-arrow { font-size: 11px; font-weight: 700; margin-bottom: 3px; }
+    .sd-force-sectors { font-size: 11.5px; line-height: 1.5; color: var(--text-secondary); }
+    .sd-fs { color: inherit; text-decoration: none; border-bottom: 1px dotted currentColor; }
+    .sd-fs:hover { color: var(--accent); }
+    .sd-force-quote {
+        font-size: 11px; color: var(--text-muted);
+        margin-top: 4px; font-style: italic; line-height: 1.45;
+        padding-left: 8px; border-left: 2px solid var(--border);
+    }
+    .sd-force-empty {
+        font-size: 11px; color: var(--text-muted);
+        font-style: italic; line-height: 1.5;
+    }
+
+    .sd-horizon {
+        display: flex; gap: 8px; align-items: baseline;
+        font-size: 11.5px; color: var(--text-muted); line-height: 1.5;
+        padding: 12px 14px;
+        background: var(--bg-card-hover); border-radius: 8px;
+        margin-top: 16px;
+    }
+    .sd-horizon-icon { font-size: 14px; }
+    .sd-horizon strong { color: var(--text-secondary); }
+
+    /* Rotation table */
+    .rot-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    .rot-table th {
+        text-align: left; padding: 8px 10px;
+        font-size: 10px; font-weight: 700; letter-spacing: 0.6px;
+        text-transform: uppercase; color: var(--text-muted);
+        border-bottom: 1px solid var(--border);
+    }
+    .rot-table td { padding: 8px 10px; border-bottom: 1px solid var(--border); font-size: 12px; }
+    .rot-table td.num { text-align: right; font-family: var(--mono, monospace); }
+    .rot-rank-pill {
+        display: inline-block; width: 24px; height: 24px;
+        background: var(--bg-card-hover); border-radius: 6px;
+        font-weight: 700; font-size: 11px;
+        text-align: center; line-height: 24px;
+    }
+</style>

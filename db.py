@@ -162,6 +162,10 @@ _COLUMN_MIGRATIONS = [
     ("daily_snapshots_pit", "metals_beta",                "REAL"),
     ("daily_snapshots_pit", "inr_beta",                   "REAL"),
     ("daily_snapshots_pit", "gold_beta",                  "REAL"),
+    # 2026-06-07: §3.2.7 rate + credit betas (daily India bond-ETF series now
+    # available — gsec10_etf 2016, credit_excess_idx 2019; was DATA-BLOCKED).
+    ("daily_snapshots_pit", "rate_beta",                  "REAL"),
+    ("daily_snapshots_pit", "credit_beta",                "REAL"),
     # 2026-06-03: multibagger funnel — Novy-Marx anchor quality factor.
     ("daily_snapshots_pit", "gross_profitability",        "REAL"),
     # 2026-06-04: multibagger Phase 2b+ — small-cap EMA regime gate. The screen
@@ -2887,7 +2891,7 @@ BACKTEST_SIGNALS = [
         "pit_column_v2": "oil_beta",
         "v1_verdict_summary": "(v2-only; macro_history starts 2023-03-13, NULL before ~1y lookback)",
         "status": "READY",
-        "status_reason": "Shipped + backtested 2026-06-02 (§3.2.7, 23 monthly periods). best |t|=0.36 LARGE → DROP, benched (FACTOR_LIBRARY).",
+        "status_reason": "Shipped 2026-06-02; re-backtested 2026-06-07 on deepened macro_history (40 monthly periods, was 23). best |t|=0.87 LARGE → DROP, benched (FACTOR_LIBRARY).",
     },
     {
         "signal": "metals_beta",
@@ -2901,7 +2905,7 @@ BACKTEST_SIGNALS = [
         "pit_column_v2": "metals_beta",
         "v1_verdict_summary": "(v2-only; NULL before ~1y macro lookback)",
         "status": "READY",
-        "status_reason": "Shipped + backtested 2026-06-02 (§3.2.7, 23 monthly periods). LARGE t=+1.78 WEAK (CI [-0.03,3.80] straddles 0), MID/SMALL DROP → benched.",
+        "status_reason": "Shipped 2026-06-02; re-backtested 2026-06-07 on deepened macro_history (40 monthly periods, was 23). LARGE t=+1.96 WEAK (CI [-0.10,3.92] straddles 0; firmed from +1.78), MID/SMALL DROP → benched.",
     },
     {
         "signal": "inr_beta",
@@ -2915,7 +2919,7 @@ BACKTEST_SIGNALS = [
         "pit_column_v2": "inr_beta",
         "v1_verdict_summary": "(v2-only; NULL before ~1y macro lookback)",
         "status": "READY",
-        "status_reason": "Shipped + backtested 2026-06-02 (§3.2.7, 23 monthly periods). best |t|=0.40 MID → DROP (FX exposure not cross-sectionally priced), benched.",
+        "status_reason": "Shipped 2026-06-02; re-backtested 2026-06-07 on deepened macro_history (40 monthly periods, was 23). best |t|=1.01 SMALL → DROP (FX exposure not cross-sectionally priced), benched.",
     },
     {
         "signal": "gold_beta",
@@ -2929,7 +2933,35 @@ BACKTEST_SIGNALS = [
         "pit_column_v2": "gold_beta",
         "v1_verdict_summary": "(v2-only; NULL before ~1y macro lookback)",
         "status": "READY",
-        "status_reason": "Shipped + backtested 2026-06-02 (§3.2.7, 23 monthly periods). LARGE t=+1.58 WEAK (CI [-0.33,3.71] straddles 0), MID/SMALL DROP → benched.",
+        "status_reason": "Shipped 2026-06-02; re-backtested 2026-06-07 on deepened macro_history (40 monthly periods, was 23). LARGE t=+1.89 WEAK (CI [-0.21,3.85] straddles 0; firmed from +1.58), MID/SMALL DROP → benched.",
+    },
+    {
+        "signal": "rate_beta",
+        "label": "Rate Beta (β vs 10Y G-Sec gilt ETF)",
+        "group": "Macro Extensions",
+        "description": "Rolling 252-trading-day OLS beta of daily stock returns on the SBI 10Y Gilt ETF (SETF10GILT) daily returns. Rate / duration exposure (Plan 0002 §3.2.7). The gilt ETF RISES when the 10Y yield FALLS, so +rate_beta = co-moves with bond rallies (duration-like: NBFCs, rate-sensitive growth). Resolves the previously DATA-BLOCKED india rate factor — NSE bond ETFs are the only free daily India-rates feed reachable (FBIL/CCIL/RBI walled, FRED monthly).",
+        "source_tables": ["stock_prices", "macro_history"],
+        "source_columns": ["stock_prices.close", "macro_history.gsec10_etf"],
+        "filing_lag": "0d (daily price + daily macro)",
+        "pit_column_v1": None,
+        "pit_column_v2": "rate_beta",
+        "v1_verdict_summary": "(v2-only; gsec10_etf daily from 2016)",
+        "status": "READY",
+        "status_reason": "Shipped + backtested 2026-06-07 (§3.2.7, 40 monthly periods). best |t|=0.77 LARGE → DROP, benched (FACTOR_LIBRARY). Rate-sensitivity not cross-sectionally priced in this sample.",
+    },
+    {
+        "signal": "credit_beta",
+        "label": "Credit Beta (β vs AAA-PSU credit excess)",
+        "group": "Macro Extensions",
+        "description": "Rolling 252-trading-day OLS beta of daily stock returns on credit_excess_idx — the AAA-PSU-over-gilt excess-return index (Bharat Bond EBBETF0430 minus SBI 10Y Gilt). Credit-cycle exposure (Plan 0002 §3.2.7); +credit_beta = rises when credit spreads tighten. CAVEAT: Bharat Bond is target-maturity → residual duration tilt; orthogonalise vs rate_beta before any wiring.",
+        "source_tables": ["stock_prices", "macro_history"],
+        "source_columns": ["stock_prices.close", "macro_history.credit_excess_idx"],
+        "filing_lag": "0d (daily price + daily macro)",
+        "pit_column_v1": None,
+        "pit_column_v2": "credit_beta",
+        "v1_verdict_summary": "(v2-only; credit_excess_idx daily from 2019)",
+        "status": "READY",
+        "status_reason": "Shipped + backtested 2026-06-07 (§3.2.7, 40 monthly periods). best |t|=0.68 SMALL → DROP, benched. Credit stress (2018 IL&FS / 2020 COVID) falls OUTSIDE the price-history window (2022+), so the test period sees credit in a calm regime — low power. Duration-tilt caveat moot (no signal either way).",
     },
 ]
 
@@ -2996,10 +3028,12 @@ FACTOR_LIBRARY = [
     "earnings_surprise_std",     # DROP — SUE proxy too noisy w/o announce dates + consensus
     "buyback_announcement_30d",  # DROP — too sparse
     # Macro betas (§3.2.7) — 23 monthly periods, per-stock rolling 252d β
-    "metals_beta",          # LARGE t=+1.78 WEAK (cyclical large-cap exposure; CI straddles 0)
-    "gold_beta",            # LARGE t=+1.58 WEAK (safe-haven/gold-financier tilt; CI straddles 0)
-    "oil_beta",             # best |t|=0.36 LARGE — DROP
-    "inr_beta",             # best |t|=0.40 MID — DROP (FX exposure not cross-sectionally priced)
+    "metals_beta",          # LARGE t=+1.96 WEAK (40 periods; cyclical large-cap exposure; CI straddles 0)
+    "gold_beta",            # LARGE t=+1.89 WEAK (40 periods; safe-haven/gold-financier tilt; CI straddles 0)
+    "oil_beta",             # best |t|=0.87 LARGE — DROP (40 periods)
+    "inr_beta",             # best |t|=1.01 SMALL — DROP (FX exposure not cross-sectionally priced)
+    "rate_beta",            # §3.2.7 (2026-06-07, 40 periods) — best |t|=0.77 LARGE → DROP
+    "credit_beta",          # §3.2.7 (2026-06-07, 40 periods) — best |t|=0.68 SMALL → DROP (credit stress pre-2022, out of window)
     # sector_tilt (ADR 0041) NOT here — backtest cleared SMALL t=3.18 KEEP → WIRED to
     # SIGNAL_WEIGHTS[SMALL]=0.10 (2026-06-05). LARGE/MID sub-1.5 but live only in SMALL.
 ]

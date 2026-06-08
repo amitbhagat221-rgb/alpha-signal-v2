@@ -359,6 +359,50 @@ def get_sector_averages():
     return {r["sector"]: r for r in df.to_dict("records")} if not df.empty else {}
 
 
+def get_management_score(sid):
+    """Management Quality Scorecard for one stock (signals/management_quality.py).
+
+    Returns None if unscored — financials are excluded (covered by the financial
+    sub-model), as are names missing the capital-allocation anchor.
+    """
+    df = read_sql(
+        "SELECT * FROM management_scores WHERE sid = ? ORDER BY snapshot_date DESC LIMIT 1",
+        params=[sid])
+    if df.empty:
+        return None
+    r = df.iloc[0].to_dict()
+
+    def num(v):
+        return v if (v is not None and pd.notna(v)) else None
+
+    def pct(v):
+        v = num(v)
+        return f"{v*100:.1f}%" if v is not None else "—"
+
+    trend_lbl = {1: "Accumulating", 0: "Stable", -1: "Reducing"}.get(num(r.get("promoter_trend")), "—")
+    fscore = num(r.get("f_score"))
+    accr = num(r.get("accruals_quality"))
+    score = num(r.get("mgmt_quality_score"))
+    r["top_pct"] = round(100 - score) if score is not None else None
+    r["pillars"] = [
+        {"label": "Capital Allocation", "weight": 45, "z": num(r.get("capital_allocation_z")),
+         "blurb": "Do they compound capital?",
+         "components": [("ROIC", pct(r.get("roic"))), ("ROIIC", pct(r.get("roiic"))),
+                        ("FCF margin", pct(r.get("fcf_margin")))]},
+        {"label": "Alignment", "weight": 30, "z": num(r.get("alignment_z")),
+         "blurb": "Skin in the game?",
+         "components": [("Promoter trend", trend_lbl),
+                        ("Pledge quality", pct(r.get("pledge_quality"))),
+                        ("Promoter signal", f"{num(r.get('promoter_signal')):.2f}" if num(r.get('promoter_signal')) is not None else "—")]},
+        {"label": "Credibility", "weight": 25, "z": num(r.get("credibility_z")),
+         "blurb": "Are the earnings real?",
+         "components": [("Piotroski F", f"{int(fscore)}/9" if fscore is not None else "—"),
+                        ("Accruals quality", "✓ clean" if accr == 1 else ("✗ weak" if accr == 0 else "—")),
+                        ("Forensic penalty", f"{num(r.get('forensic_penalty')):.2f}" if num(r.get('forensic_penalty')) is not None else "—")]},
+    ]
+    return r
+
+
 def get_portfolio_analytics(portfolio_data, regime):
     """A11: Portfolio-level analytics."""
     all_stocks = []

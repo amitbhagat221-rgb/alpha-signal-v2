@@ -52,6 +52,14 @@ TICKERS = {
     "usdinr":           ("USDINR=X",    "USD/INR",          "coincident", "inr"),
     # Rates
     "us_10y":           ("^TNX",        "US 10Y Yield",     "leading",    "percent"),
+    # India rates / credit (§3.2.7). NSE-listed ETFs are the only free *daily*
+    # India-rates source reachable from this VM — FBIL/CCIL/RBI are Angular/403-
+    # walled, FRED is monthly + times out, Investing.com/Stooq IP-block datacenters.
+    # Daily *returns* (auto_adjust=True → total return) feed macro_betas:
+    #   gsec10_etf  → rate_beta   (ETF rises when the 10Y yield falls; sign-fixed there)
+    #   aaa_psu_etf → credit leg  (paired vs gilt into credit_excess_idx below)
+    "gsec10_etf":       ("SETF10GILT.NS", "India 10Y G-Sec (SBI Gilt ETF)",  "leading", "inr"),
+    "aaa_psu_etf":      ("EBBETF0430.NS",  "AAA-PSU bond (Bharat Bond ETF)",  "leading", "inr"),
 }
 
 
@@ -168,6 +176,11 @@ def backfill(days=None, dry_run=False):
     if vix_rows:
         print(f"Mirrored {vix_rows} rows into vix_history")
 
+    # Derive the India credit series from the two bond ETFs (full-history recompute).
+    cs_rows = _compute_credit_spread()
+    if cs_rows:
+        print(f"Derived credit_excess_idx: {cs_rows} rows (AAA-PSU − gilt excess index)")
+
     return total_rows
 
 
@@ -181,6 +194,61 @@ def _sync_vix_history():
     if df.empty:
         return 0
     return upsert_df(df, "vix_history")
+
+
+def _compute_credit_spread():
+    """Derive the daily India credit series `credit_excess_idx` from the two ETFs.
+
+    credit factor return = ret(AAA-PSU bond ETF) − ret(10Y gilt ETF)
+      → AAA-PSU *excess* return over a duration-comparable sovereign. Positive when
+        credit spreads TIGHTEN (risk-on credit); negative when they widen (stress —
+        e.g. the Mar-2020 NBFC/credit blowout). Stored as a base-100 cumulative
+        index so the beta machinery (which takes pct_change of the stored level)
+        recovers the daily credit-factor return directly.
+
+    CAVEAT: Bharat Bond is target-maturity, so its duration drifts below the 10Y
+    gilt over time → the spread carries a residual duration tilt. credit_beta must
+    be orthogonalised vs rate_beta before use. (No free/daily constant-maturity AAA
+    index ETF exists; FBIL's true AAA-over-G-Sec spread is the authoritative upgrade
+    once we can reach it.) Always recomputed from full history — idempotent.
+    """
+    g = read_sql("SELECT date, value FROM macro_history WHERE indicator_id='gsec10_etf' "
+                 "AND value IS NOT NULL ORDER BY date")
+    c = read_sql("SELECT date, value FROM macro_history WHERE indicator_id='aaa_psu_etf' "
+                 "AND value IS NOT NULL ORDER BY date")
+    if g.empty or c.empty:
+        return 0
+    m = g.merge(c, on="date", suffixes=("_g", "_c")).sort_values("date")
+    m["ret"] = m["value_c"].pct_change() - m["value_g"].pct_change()
+    m = m.dropna(subset=["ret"])
+    if m.empty:
+        return 0
+    idx = 100.0 * (1.0 + m["ret"]).cumprod()
+    out = pd.DataFrame({
+        "indicator_id": "credit_excess_idx",
+        "date": m["date"].values,
+        "value": idx.values,
+        "source": "derived",
+        "category": "leading",
+        "unit": "index",
+    })
+    out = _compute_changes(out)
+    meta = pd.DataFrame([{
+        "indicator_id": "credit_excess_idx",
+        "name": "India AAA-PSU credit excess index",
+        "source": "derived",
+        "source_ref": "EBBETF0430.NS − SETF10GILT.NS (daily excess return, base100)",
+        "category": "leading",
+        "frequency": "daily",
+        "unit": "index",
+        "description": ("Cumulative AAA-PSU-over-gilt excess-return index (Bharat Bond − "
+                        "SBI 10Y Gilt). Daily return = India credit factor; rises when "
+                        "credit spreads tighten. Duration-tilt caveat — orthogonalise vs "
+                        "rate_beta. §3.2.7."),
+    }])
+    with get_db() as conn:
+        upsert_df(meta, "macro_indicator_meta", conn=conn)
+    return upsert_df(out, "macro_history")
 
 
 def compute(dry_run=False):

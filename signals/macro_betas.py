@@ -1,7 +1,7 @@
 """
 Alpha Signal v2 — Per-stock macro betas — Plan 0002 §3.2.7 (macro extensions).
 
-Four cross-sectional macro-exposure factors: each stock's rolling sensitivity
+Six cross-sectional macro-exposure factors: each stock's rolling sensitivity
 (OLS beta) of daily returns to a macro factor's daily returns over a trailing
 252-trading-day window.
 
@@ -9,27 +9,37 @@ Four cross-sectional macro-exposure factors: each stock's rolling sensitivity
   metals_beta   β(stock, copper+aluminium blend) — industrial / capex / metals cycle
   inr_beta      β(stock, USD/INR)                 — FX / importer-vs-exporter tilt
   gold_beta     β(stock, gold)                    — safe-haven / gold-financier tilt
+  rate_beta     β(stock, 10Y G-Sec gilt ETF)      — rate / duration exposure (§3.2.7)
+  credit_beta   β(stock, AAA-PSU credit excess)   — credit-cycle exposure (§3.2.7)
 
 WHY BETAS, NOT LEVELS.  The plan names §3.2.7 "macro extensions" (inr_carry_proxy,
 india_credit_spread, commodity_beta_oil/metals). A raw macro *level* (a carry rate,
 a credit spread) is identical for every stock on a given date → it has zero
 cross-sectional dispersion and therefore zero cross-sectional IC by construction;
 it can only act as a regime conditioner, not a ranking factor. The rankable form
-of a macro factor is the per-stock *exposure* (beta) — the Barra/BARRA-style macro
-factor. So all four are realised as betas. The named `india_credit_spread` / rate
-beta is DEFERRED: macro_history has no daily India G-Sec / credit series
-(india_money_rate is monthly and stale), so `gold_beta` takes the 4th slot as a
-data-backed substitute (806 daily obs). Revisit a rate_beta when a daily G-Sec
-feed lands (↔ §3.2.7 open item).
+of a macro factor is the per-stock *exposure* (beta) — the Barra-style macro
+factor. So all six are realised as betas.
+
+RATE + CREDIT (2026-06-07).  Previously DEFERRED for lack of a daily India rates /
+credit series. Resolved by sourcing NSE-listed bond ETFs (the only free daily India-
+rates feed reachable from this VM; FBIL/CCIL/RBI are walled, FRED monthly):
+  rate_beta   ← `gsec10_etf` (SBI 10Y Gilt ETF). The ETF RISES when the 10Y yield
+              FALLS, so a +rate_beta stock co-moves with bond rallies (duration-like:
+              NBFCs, rate-sensitive growth). Sign is decided by the backtest.
+  credit_beta ← `credit_excess_idx` (AAA-PSU Bharat Bond minus gilt, base-100 excess-
+              return index). +credit_beta stocks rise when credit spreads TIGHTEN.
+              CAVEAT: Bharat Bond is target-maturity → residual duration tilt;
+              orthogonalise credit_beta vs rate_beta before any wiring (see
+              sources/macro_yfinance._compute_credit_spread).
 
 Injectable `prices` + `macro_hist` frames so the live path and the PIT path
 (tools/reconstruct_pit.py:pit_macro_betas) run identical logic. Sign is decided
-by the backtest. Needs ~1y of macro history before the first computable anchor —
-macro_history starts 2023-03-13, so early v1 PIT anchors (2023-04..2024-03) are
-correctly NULL (not enough lookback for the 252d window).
+by the backtest. Needs ~1y of macro history before the first computable anchor;
+macro_history now reaches back to 2015-06 (gilt ETF 2016, credit index 2019).
 
-Reads:  stock_prices (close), macro_history (brent_crude/copper/aluminium/usdinr/gold)
-Returns: DataFrame[sid, oil_beta, metals_beta, inr_beta, gold_beta]
+Reads:  stock_prices (close), macro_history
+        (brent_crude/copper/aluminium/usdinr/gold/gsec10_etf/credit_excess_idx)
+Returns: DataFrame[sid, oil_beta, metals_beta, inr_beta, gold_beta, rate_beta, credit_beta]
 
 Usage:
     python -m signals.macro_betas            # compute live + print stats
@@ -53,6 +63,8 @@ SERIES = {
     "metals_beta": ["copper", "aluminium"],
     "inr_beta":    ["usdinr"],
     "gold_beta":   ["gold"],
+    "rate_beta":   ["gsec10_etf"],         # 10Y G-Sec gilt ETF (rises when yields fall)
+    "credit_beta": ["credit_excess_idx"],  # AAA-PSU-over-gilt excess-return index
 }
 FACTORS = list(SERIES.keys())
 

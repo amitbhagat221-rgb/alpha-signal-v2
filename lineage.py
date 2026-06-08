@@ -923,6 +923,26 @@ FACTOR_LINEAGE = {
         ],
         "sector_exclusions": [],
     },
+    "rate_beta": {
+        "status": "candidate", "module": "signals/macro_betas.py",
+        "reads": [
+            {"table": "stock_prices", "cols": ["close"], "key": ["sid", "date"],
+             "select": "window", "filter": "last 252d", "contribution": "stock_returns"},
+            {"table": "macro_history", "cols": ["value", "date"], "key": ["indicator_id", "date"],
+             "select": "window", "filter": "gsec10_etf last 252d", "contribution": "gsec_returns"},
+        ],
+        "sector_exclusions": [],
+    },
+    "credit_beta": {
+        "status": "candidate", "module": "signals/macro_betas.py",
+        "reads": [
+            {"table": "stock_prices", "cols": ["close"], "key": ["sid", "date"],
+             "select": "window", "filter": "last 252d", "contribution": "stock_returns"},
+            {"table": "macro_history", "cols": ["value", "date"], "key": ["indicator_id", "date"],
+             "select": "window", "filter": "credit_excess_idx last 252d", "contribution": "credit_returns"},
+        ],
+        "sector_exclusions": [],
+    },
 
     # ════════════════════════════ Fundamentals_screener factors (17) ════════════════════════════
     "roic": {

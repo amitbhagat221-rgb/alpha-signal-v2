@@ -102,7 +102,15 @@
 {% endif %}
 
 {# ─────────── TAB BAR ─────────── #}
-<div x-data="{ tab: 'overview', loaded: { overview: true } }">
+<div x-data="{ tab: 'overview', loaded: { overview: true }, sectorLoaded: false,
+    loadSector() {
+        if (this.sectorLoaded) return;
+        this.sectorLoaded = true;
+        fetch('{% if s.industry %}/partial/industry-card/{{ s.industry|urlencode }}{% else %}/partial/sector-card/{{ s.sector|urlencode }}{% endif %}?sid={{ s.sid }}')
+            .then(r => r.text())
+            .then(h => { this.$refs.sectorBox.innerHTML = h; this.$nextTick(() => window.Alpine.initTree(this.$refs.sectorBox)); })
+            .catch(() => { this.$refs.sectorBox.innerHTML = '<div class=\'card\' style=\'color:var(--text-muted)\'>Could not load industry detail.</div>'; });
+    } }">
 
 <div class="tab-bar">
     <button class="tab-button" :class="{ active: tab === 'overview' }" @click="tab = 'overview'; loaded.overview = true">Overview</button>
@@ -114,7 +122,76 @@
     {% if s.uhs and s.uhs.score_pct is not none %}
     <button class="tab-button" :class="{ active: tab === 'trust' }" @click="tab = 'trust'">Trust</button>
     {% endif %}
+    {% if s.industry or s.sector %}
+    <button class="tab-button" :class="{ active: tab === 'sector' }" @click="tab = 'sector'; loadSector()">{% if s.industry %}Industry{% else %}Sector{% endif %}</button>
+    {% endif %}
+    {% if s.management %}
+    <button class="tab-button" :class="{ active: tab === 'management' }" @click="tab = 'management'">Management</button>
+    {% endif %}
 </div>
+
+{# ════════════════════════════════════════════ #}
+{# ───────────── SECTOR TAB ─────────────────── #}
+{# ════════════════════════════════════════════ #}
+{% if s.industry or s.sector %}
+<div x-show="tab === 'sector'" x-cloak>
+    <div x-ref="sectorBox"><div class="card" style="color:var(--text-muted);">Loading industry detail…</div></div>
+</div>
+{% endif %}
+
+{# ════════════════════════════════════════════ #}
+{# ───────────── MANAGEMENT TAB ─────────────── #}
+{# ════════════════════════════════════════════ #}
+{% if s.management %}
+{% set m = s.management %}
+{% set gcolor = 'score-green' if m.grade in ['A+','A'] else ('score-red' if m.grade in ['C','D'] else '') %}
+<div x-show="tab === 'management'" x-cloak>
+    {# Headline grade + percentile #}
+    <div class="card" style="border-left:4px solid var(--accent); margin-bottom:16px; display:flex; align-items:center; gap:22px; flex-wrap:wrap;">
+        <div style="text-align:center; min-width:64px;">
+            <div class="{{ gcolor }}" style="font-size:38px; font-weight:800; line-height:1;">{{ m.grade }}</div>
+            <div style="font-size:10px; text-transform:uppercase; color:var(--text-muted); letter-spacing:.5px;">mgmt grade</div>
+        </div>
+        <div>
+            <div style="font-size:14px; font-weight:700;">Management Quality</div>
+            <div style="font-size:12px; color:var(--text-muted); margin-top:2px;">
+                Score <span class="mono">{{ m.mgmt_quality_score }}</span>/100 · top <span class="mono">{{ m.top_pct }}%</span> of {{ m.cap_tier }}-cap · {{ m.n_pillars }}/3 pillars
+            </div>
+        </div>
+    </div>
+
+    {# Three pillars as signed bars (z-score within tier, center = peer average) #}
+    <div class="card" style="margin-bottom:16px;">
+        <div class="section-title">Pillars · z-score vs {{ m.cap_tier }}-cap peers</div>
+        {% for p in m.pillars %}
+        <div style="margin:14px 0;">
+            <div style="display:flex; justify-content:space-between; align-items:baseline;">
+                <div><span style="font-weight:600;">{{ p.label }}</span>
+                     <span style="color:var(--text-muted); font-size:11px;"> · {{ p.weight }}% · {{ p.blurb }}</span></div>
+                <span class="mono {% if p.z is not none and p.z > 0 %}score-green{% elif p.z is not none and p.z < 0 %}score-red{% endif %}">{% if p.z is not none %}{{ "%+.2f"|format(p.z) }}σ{% else %}—{% endif %}</span>
+            </div>
+            <div style="position:relative; height:8px; background:rgba(128,128,128,.15); border-radius:4px; margin:6px 0;">
+                <div style="position:absolute; left:50%; top:-2px; bottom:-2px; width:1px; background:rgba(128,128,128,.45);"></div>
+                {% if p.z is not none %}
+                {% set raw = (p.z + 3) / 6 * 100 %}
+                {% set pos = [raw, 2]|max %}{% set pos = [pos, 98]|min %}
+                <div style="position:absolute; left:{{ pos }}%; top:-3px; width:10px; height:14px; margin-left:-5px; border-radius:3px; background:{% if p.z > 0 %}#22c55e{% else %}#ef4444{% endif %};"></div>
+                {% endif %}
+            </div>
+            <div style="display:flex; gap:18px; font-size:11px; color:var(--text-muted); flex-wrap:wrap;">
+                {% for label, val in p.components %}<span>{{ label }}: <span class="mono" style="color:var(--text);">{{ val }}</span></span>{% endfor %}
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+
+    {# How to read it + caveats #}
+    <div class="card" style="font-size:11px; color:var(--text-muted); line-height:1.6;">
+        <strong style="color:var(--text);">How to read this.</strong> A composite of <strong>capital allocation</strong> (do they compound capital?), <strong>alignment</strong> (skin in the game?), and <strong>credibility</strong> (are the earnings real?), ranked within {{ m.cap_tier }}-cap peers from factors the model already validates.
+        It's a <em>current capital-efficiency</em> lens — a great business in heavy-reinvestment mode can score low (low current ROIC ≠ bad management). A diagnostic view, not a model weight. Financials use the separate financial sub-model.
+    </div>
+</div>
+{% endif %}
 
 {# ════════════════════════════════════════════ #}
 {# ───────────── OVERVIEW TAB ───────────────── #}

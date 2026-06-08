@@ -105,6 +105,8 @@ SIGNAL_COLUMN_MAP = {
     "metals_beta":                (None, "metals_beta"),
     "inr_beta":                   (None, "inr_beta"),
     "gold_beta":                  (None, "gold_beta"),
+    "rate_beta":                  (None, "rate_beta"),
+    "credit_beta":                (None, "credit_beta"),
     # Behavior tier — PIT helpers shipped 2026-05-24
     "insider_signal":      (None, "insider_score"),
     "sentiment_7d":        (None, "sentiment_7d"),
@@ -359,7 +361,21 @@ def main():
     # Newey-West variance correction for overlapping signal/return windows.
     from db import get_backtest_cadence
     v2_dates_all = pd.to_datetime(v2_df["snapshot_date"]).dt.date.unique() if not v2_df.empty else []
+    # All Friday anchors — used to KEEP weekly-cadence factors on their weekly grid.
     weekly_dates = {d.isoformat() for d in v2_dates_all if pd.Timestamp(d).weekday() == 4}
+    # Weekly-ONLY Fridays — for EXCLUDING from monthly backtests. A monthly anchor is the
+    # first business day of its month (generate_eval_dates), which is a Friday only when the
+    # 1st itself is a Friday (day==1). Those month-start Fridays are legitimate monthly
+    # observations and must NOT be dropped. The old "drop all Fridays" filter silently
+    # discarded ~1 in 7 monthly anchors (e.g. 6 of 36 financial anchors landed on month-start
+    # Fridays), biasing every monthly factor's n low.
+    def _is_month_start_anchor(d):
+        first = pd.Timestamp(d.year, d.month, 1)
+        while first.weekday() >= 5:
+            first += pd.Timedelta(days=1)
+        return pd.Timestamp(d) == first
+    weekly_only_dates = {d.isoformat() for d in v2_dates_all
+                         if pd.Timestamp(d).weekday() == 4 and not _is_month_start_anchor(d)}
 
     out_rows = []
     for signal, (v1_col, v2_col) in targets:
@@ -381,8 +397,9 @@ def main():
             if cadence == "weekly" and src_name == "v2_recompute":
                 df_use = src_df[src_df["snapshot_date"].isin(weekly_dates)]
             elif cadence == "monthly":
-                # Monthly: keep only first-of-month-style dates (anything not Friday OR is the first day of month)
-                df_use = src_df[~src_df["snapshot_date"].isin(weekly_dates)] if src_name == "v2_recompute" and weekly_dates else src_df
+                # Monthly: drop weekly-ONLY Fridays (mid-month), but KEEP month-start anchors
+                # (incl. month-start Fridays). See weekly_only_dates above.
+                df_use = src_df[~src_df["snapshot_date"].isin(weekly_only_dates)] if src_name == "v2_recompute" and weekly_only_dates else src_df
             else:
                 df_use = src_df
             if df_use.empty:

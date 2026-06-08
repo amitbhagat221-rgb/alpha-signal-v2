@@ -1795,3 +1795,125 @@ CREATE TABLE IF NOT EXISTS fno_iv_history (
     UNIQUE(symbol, trade_date)
 );
 CREATE INDEX IF NOT EXISTS idx_fno_iv_sid_date ON fno_iv_history(sid, trade_date);
+
+-- §3.1d — Earnings-call transcripts (DOCUMENT STORE, not a normalized schema).
+-- Raw PDF text of BSE concall filings, discovered via the Screener concall section
+-- and resolved to the BSE AttachLive/AttachHis PDF. Structured metadata columns +
+-- one raw_text blob, content-addressed by sha256, append-only (INSERT OR IGNORE on
+-- the (sid, source_url) PK → idempotent re-runs). The STRUCTURE (tone, forward-looking
+-- density, uncertainty word counts, QoQ sentiment delta) is derived DOWNSTREAM in
+-- signals/nlp_scores.py → nlp_scores, mirroring news_articles → news_enriched →
+-- sentiment_scores. Storage stays faithful to the source; numbers come later.
+CREATE TABLE IF NOT EXISTS transcripts (
+    sid           TEXT NOT NULL,
+    doc_type      TEXT NOT NULL,                 -- 'transcript' | 'notes' | 'ppt'
+    period_label  TEXT,                          -- raw concall label, e.g. 'Apr 2026'
+    doc_date      TEXT,                          -- YYYY-MM-DD (concall month → first business day)
+    announce_date TEXT,                          -- exact date parsed from PDF page 1, when found
+    source_url    TEXT NOT NULL,                 -- Screener/BSE AnnPdfOpen wrapper URL (stable id)
+    pdf_url       TEXT,                          -- resolved AttachLive/AttachHis PDF URL
+    n_pages       INTEGER,
+    char_count    INTEGER,                       -- length of raw_text (0 ⇒ extraction failed)
+    raw_text      TEXT,                          -- full extracted transcript text
+    sha256        TEXT,                          -- content hash of raw_text (dedup + integrity)
+    fetched_at    TEXT NOT NULL,
+    PRIMARY KEY (sid, source_url)
+);
+CREATE INDEX IF NOT EXISTS idx_transcripts_sid_date ON transcripts(sid, doc_date);
+
+-- Management Quality Scorecard (quick-win composite of already-validated factors).
+-- Three pillars z-scored within cap_tier: A capital-allocation (roic/roiic/fcf —
+-- "do they compound capital?"), B alignment (promoter trend / pledge / insider —
+-- "skin in the game?"), C credibility (Piotroski + accruals + forensic — "are the
+-- earnings real?"). A weighted composite (A-led) + a 0-100 within-tier percentile.
+-- Per-stock, interpretable: powers the Management tab on /explorer. This re-aggregates
+-- EXISTING model factors, so it is a DISPLAY/diagnostic lens — NOT auto-wired into
+-- SIGNAL_WEIGHTS (would be colinear with the quality factors already weighted).
+CREATE TABLE IF NOT EXISTS management_scores (
+    sid                   TEXT NOT NULL,
+    snapshot_date         TEXT NOT NULL,
+    cap_tier              TEXT,
+    capital_allocation_z  REAL,                  -- pillar A  (z within tier)
+    alignment_z           REAL,                  -- pillar B
+    credibility_z         REAL,                  -- pillar C
+    mgmt_quality_z        REAL,                  -- weighted composite z
+    mgmt_quality_score    REAL,                  -- 0-100 percentile within cap_tier
+    grade                 TEXT,                  -- A+/A/B/C/D from the percentile
+    -- raw component values (transparency for the scorecard)
+    roic                  REAL,
+    roiic                 REAL,
+    fcf_margin            REAL,
+    promoter_trend        REAL,
+    pledge_quality        REAL,
+    promoter_signal       REAL,
+    f_score               REAL,
+    accruals_quality      REAL,
+    forensic_penalty      REAL,
+    n_pillars             INTEGER,               -- pillars present (1-3); composite renormalised
+    computed_at           TEXT DEFAULT (datetime('now')),
+    PRIMARY KEY (sid, snapshot_date)
+);
+CREATE INDEX IF NOT EXISTS idx_mgmt_scores_score ON management_scores(snapshot_date, mgmt_quality_score DESC);
+
+-- §3.2.4 — NLP scores derived from earnings-call transcripts (the "enriched" layer,
+-- mirroring news_articles → news_enriched). One row per transcript document; the
+-- per-stock factors (#34 earnings_call_tone_qoq, #36 forward_looking_intensity,
+-- #37 uncertainty_word_density) read the latest / consecutive docs per sid.
+-- Lexicons: curated Loughran-McDonald subsets (signals/nlp_scores.py); full LM
+-- dictionary is a refinement.
+CREATE TABLE IF NOT EXISTS nlp_scores (
+    sid                       TEXT NOT NULL,
+    doc_type                  TEXT NOT NULL,
+    doc_date                  TEXT NOT NULL,
+    word_count                INTEGER,
+    lm_positive               INTEGER,
+    lm_negative               INTEGER,
+    net_tone                  REAL,   -- (pos - neg) / word_count * 100
+    uncertainty_density       REAL,   -- LM-uncertainty hits / word_count * 100   (#37)
+    forward_looking_intensity REAL,   -- forward-looking phrases per 1000 words    (#36)
+    computed_at               TEXT DEFAULT (datetime('now')),
+    PRIMARY KEY (sid, doc_type, doc_date)
+);
+CREATE INDEX IF NOT EXISTS idx_nlp_scores_sid ON nlp_scores(sid, doc_date);
+
+-- BSE corporate-announcement EVENT STREAM (sources/bse_announcements.py).
+-- The full, exchange-verified, timestamped, survivorship-complete disclosure feed
+-- for the whole BSE universe (api.bseindia.com AnnSubCategoryGetData, depth → 2018,
+-- delisted names included). Metadata-only: we keep every announcement's category +
+-- timestamps + flags; PDFs are downloaded selectively elsewhere (transcripts).
+-- One new DATA CATEGORY (event-driven), seeding multiple factor families at once:
+--   * PEAD / earnings-surprise  → exact result-announcement DT_TM + quarter_id
+--   * transcript look-ahead fix  → each call's own filing timestamp (not month proxy)
+--   * credit-rating-change factor → subcategory='Credit Rating' (per-stock, dated)
+--   * promoter-pledge events      → real-time vs quarterly shareholding lag
+--   * auditor/KMP resignation     → forensic / Management-credibility red flag
+--   * governance signals          → critical_news (materiality) + time_diff (disclosure latency)
+-- Universe-join is DEFERRED: rows carry scrip_cd + company_name; `sid` is filled by a
+-- separate static BSE-scrip-master ↔ ISIN ↔ ticker mapping (stocks has no ISIN today).
+-- Idempotent: INSERT OR IGNORE on news_id.
+CREATE TABLE IF NOT EXISTS bse_announcements (
+    news_id           TEXT PRIMARY KEY,   -- BSE NEWSID (stable unique announcement id)
+    scrip_cd          INTEGER NOT NULL,   -- BSE scrip code (→ universe via deferred scrip-master map)
+    sid               TEXT,               -- our universe SID, NULL until mapping built
+    company_name      TEXT,               -- SLONGNAME (also enables name-match fallback)
+    headline          TEXT,               -- HEADLINE
+    news_sub          TEXT,               -- NEWSSUB (subject)
+    category          TEXT,               -- CATEGORYNAME  (Result / Board Meeting / Company Update / ...)
+    subcategory       TEXT,               -- SUBCATNAME    (Credit Rating / Pledge / Resignation / Buyback / ...)
+    announcement_type TEXT,               -- ANNOUNCEMENT_TYPE
+    critical_news     INTEGER,            -- CRITICALNEWS (BSE materiality flag)
+    dt_tm             TEXT,               -- DT_TM  (announcement timestamp — look-ahead-safe event time)
+    submission_dt     TEXT,               -- News_submission_dt
+    dissem_dt         TEXT,               -- DissemDT (public dissemination time)
+    time_diff         TEXT,               -- TimeDiff (submission→dissemination latency = governance signal)
+    quarter_id        TEXT,               -- QUARTER_ID (links result filings to fiscal quarter)
+    attachment        TEXT,               -- ATTACHMENTNAME (PDF GUID → corpfiling/AttachLive|AttachHis)
+    pdf_flag          INTEGER,            -- PDFFLAG
+    has_investor_ppt  INTEGER,            -- Investor_Presentation present
+    has_audio_video   INTEGER,            -- AUDIO_VIDEO_FILE present
+    nsurl             TEXT,               -- NSURL (BSE detail page slug)
+    fetched_at        TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_bse_ann_scrip ON bse_announcements(scrip_cd, dt_tm);
+CREATE INDEX IF NOT EXISTS idx_bse_ann_cat   ON bse_announcements(category, subcategory);
+CREATE INDEX IF NOT EXISTS idx_bse_ann_sid   ON bse_announcements(sid, dt_tm);

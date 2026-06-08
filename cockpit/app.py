@@ -264,6 +264,7 @@ async def stock_detail(request: Request, sid: str):
     detail["regulatory"] = api.get_regulatory_for_sector(detail.get("sector"))
     detail["earnings"] = api.get_earnings_upcoming(sid)
     detail["dossier"] = api.get_dossier(sid)
+    detail["management"] = api.get_management_score(sid)
     detail["quarterly"] = api.get_quarterly_financials(sid)
     detail["annual"] = api.get_annual_financials(sid)
     detail["forecasts"] = api.get_forecast_trend(sid)
@@ -356,6 +357,50 @@ async def api_sector_detail(sector: str):
         "top_players": api.get_sector_top_players(sector, n=10),
         "picks": api.get_sector_picks(sector, top_n=10, bottom_n=5),
         "factor_means": api.get_sector_factor_means(sector),
+        "macro_contributors": api.get_sector_macro_contributors(sector),
+        "regulatory": api.get_sector_recent_regulatory(sector, n=10),
+    })
+
+
+@app.get("/partial/industry-card/{industry}", response_class=HTMLResponse)
+async def partial_industry_card(request: Request, industry: str, sid: str = ""):
+    """Full industry dossier fragment, lazy-loaded into the stock page's Sector
+    tab. Renders the SAME shared _industry_detail.html partial that /sectors uses
+    (metric strip, conviction bar, Overview/Players/Trends/Our-Picks sub-tabs,
+    thesis, value chain, competitive landscape, picks, macro, regulatory) — so the
+    stock page shows identical full detail, no drift."""
+    parent_sector = api.get_industry_parent_sector(industry)
+    detail = {
+        "name": industry,
+        "parent_sector": parent_sector,
+        "narrative": api.get_industry_metadata(industry),
+        "top_players": api.get_industry_top_players(industry, n=10),
+        "competitive_landscape": api.get_industry_competitive_landscape(industry),
+        "picks": api.get_industry_picks(industry, top_n=10, bottom_n=5),
+        "factor_means": api.get_industry_factor_means(industry),
+        "macro_contributors": api.get_sector_macro_contributors(parent_sector) if parent_sector else [],
+        "regulatory": api.get_sector_recent_regulatory(parent_sector, n=10) if parent_sector else [],
+    }
+    return templates.TemplateResponse(request, "_industry_detail.html", {
+        "detail": detail,
+        "industries": api.get_industry_overview(),
+        "industry_list": api.get_industry_list(),
+        "current_sid": sid,
+        "embed": True,
+    })
+
+
+@app.get("/partial/sector-card/{sector}", response_class=HTMLResponse)
+async def partial_sector_card(request: Request, sector: str, sid: str = ""):
+    """Compact sector dossier fragment, lazy-loaded into the stock page's Sector
+    tab (sector context attached to every stock). Peers (with this stock
+    highlighted) + our model's top/bottom + macro drivers + recent regulatory,
+    plus a link to the full /sectors page. Reuses the existing sector functions."""
+    return templates.TemplateResponse(request, "_sector_card.html", {
+        "sector": sector,
+        "sid": sid,
+        "top_players": api.get_sector_top_players(sector, n=10),
+        "picks": api.get_sector_picks(sector, top_n=10, bottom_n=5),
         "macro_contributors": api.get_sector_macro_contributors(sector),
         "regulatory": api.get_sector_recent_regulatory(sector, n=10),
     })

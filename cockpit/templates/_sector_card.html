@@ -1,0 +1,92 @@
+{# Compact sector-context dossier, lazy-loaded into the stock page's "Sector" tab. #}
+{# Server-rendered via /partial/sector-card/{sector}?sid=XXX. Reuses the same #}
+{# sector data behind /sectors, with the current stock highlighted among peers. #}
+
+<div class="card" style="margin-bottom:16px; border-left:4px solid var(--accent); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+    <div>
+        <div style="font-size:11px; text-transform:uppercase; letter-spacing:.5px; color:var(--text-muted);">Sector context</div>
+        <div style="font-size:18px; font-weight:700;">{{ sector }}</div>
+    </div>
+    <a href="/sectors?sector={{ sector|urlencode }}" style="font-size:12px; color:var(--accent); text-decoration:none; font-weight:600;">Open full sector dossier →</a>
+</div>
+
+{# Peers — where this stock sits among sector names by market cap, with our model rank #}
+<div class="card" style="margin-bottom:16px;">
+    <div class="section-title">Sector peers · by market cap</div>
+    {% if top_players %}
+    <div class="table-scroll">
+    <table style="width:100%; font-size:12px; border-collapse:collapse;">
+        <thead><tr style="color:var(--text-muted); text-align:left;">
+            <th style="padding:4px 6px;">Company</th>
+            <th style="padding:4px 6px; text-align:right;">₹ Cr</th>
+            <th style="padding:4px 6px; text-align:right;">Share</th>
+            <th style="padding:4px 6px; text-align:right;">Our rank</th>
+        </tr></thead>
+        <tbody>
+        {% for p in top_players %}
+            <tr style="border-top:1px solid var(--border);{% if p.sid == sid %} background:rgba(124,58,237,.12); font-weight:700;{% endif %}">
+                <td style="padding:5px 6px;">
+                    <a href="/explorer/{{ p.sid }}" style="color:inherit; text-decoration:none;">{{ p.ticker }}</a>
+                    {% if p.sid == sid %}<span style="color:var(--accent); font-size:10px;"> ◀ this stock</span>{% endif %}
+                </td>
+                <td style="padding:5px 6px; text-align:right;" class="mono">{{ "{:,.0f}".format(p.market_cap_cr) }}</td>
+                <td style="padding:5px 6px; text-align:right;" class="mono">{{ p.share_pct }}%</td>
+                <td style="padding:5px 6px; text-align:right;" class="mono">{% if p.rank %}#{{ p.rank }}{% else %}—{% endif %}</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% else %}<div style="color:var(--text-muted); font-size:12px;">No peers found for this sector.</div>{% endif %}
+</div>
+
+{# Our model's top & bottom names in this sector #}
+<div class="card" style="margin-bottom:16px;">
+    <div class="section-title">Our model · in {{ sector }}</div>
+    <div style="display:flex; gap:24px; flex-wrap:wrap;">
+        <div style="flex:1; min-width:200px;">
+            <div style="font-size:10px; text-transform:uppercase; letter-spacing:.5px; color:var(--text-muted); margin-bottom:4px;">Top picks</div>
+            {% for p in picks.top[:6] %}
+            <div style="display:flex; justify-content:space-between; font-size:12px; padding:3px 0; border-top:1px solid var(--border);">
+                <a href="/explorer/{{ p.sid }}" style="text-decoration:none; {% if p.sid == sid %}font-weight:700; color:var(--accent);{% else %}color:inherit;{% endif %}">{{ p.ticker }}{% if p.sid == sid %} ◀{% endif %}</a>
+                <span class="mono">{{ "%.1f"|format(p.final_score) }}</span>
+            </div>
+            {% else %}<div style="color:var(--text-muted); font-size:12px;">—</div>{% endfor %}
+        </div>
+        <div style="flex:1; min-width:200px;">
+            <div style="font-size:10px; text-transform:uppercase; letter-spacing:.5px; color:var(--text-muted); margin-bottom:4px;">Lowest-ranked</div>
+            {% for p in picks.bottom[:5] %}
+            <div style="display:flex; justify-content:space-between; font-size:12px; padding:3px 0; border-top:1px solid var(--border);">
+                <a href="/explorer/{{ p.sid }}" style="text-decoration:none; {% if p.sid == sid %}font-weight:700; color:var(--accent);{% else %}color:inherit;{% endif %}">{{ p.ticker }}{% if p.sid == sid %} ◀{% endif %}</a>
+                <span class="mono">{{ "%.1f"|format(p.final_score) }}</span>
+            </div>
+            {% else %}<div style="color:var(--text-muted); font-size:12px;">—</div>{% endfor %}
+        </div>
+    </div>
+</div>
+
+{# Macro drivers + recent sector regulatory side by side #}
+<div style="display:flex; gap:16px; flex-wrap:wrap;">
+    <div class="card" style="flex:1; min-width:240px; margin-bottom:16px;">
+        <div class="section-title">Macro drivers</div>
+        {% if macro_contributors %}
+            {% for m in macro_contributors[:6] %}
+            <div style="display:flex; justify-content:space-between; font-size:12px; padding:3px 0; border-top:1px solid var(--border);">
+                <span>{{ m.indicator_id }}</span>
+                <span class="mono {% if m.direction == 'positive' %}score-green{% elif m.direction == 'negative' %}score-red{% endif %}">{{ m.direction }} · w{{ "%.2f"|format(m.weight) }}</span>
+            </div>
+            {% endfor %}
+        {% else %}<div style="color:var(--text-muted); font-size:12px;">No macro mapping for this sector.</div>{% endif %}
+    </div>
+    <div class="card" style="flex:1; min-width:240px; margin-bottom:16px;">
+        <div class="section-title">Recent sector regulatory</div>
+        {% if regulatory %}
+            {% for r in regulatory[:5] %}
+            <div style="font-size:12px; padding:5px 0; border-top:1px solid var(--border);">
+                <span class="{% if r.direction == 'positive' %}score-green{% elif r.direction == 'negative' %}score-red{% else %}{% endif %}">●</span>
+                {{ r.title[:100] }}{% if r.title|length > 100 %}…{% endif %}
+            </div>
+            {% endfor %}
+        {% else %}<div style="color:var(--text-muted); font-size:12px;">No recent regulatory events.</div>{% endif %}
+    </div>
+</div>

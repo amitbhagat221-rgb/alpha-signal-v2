@@ -209,6 +209,8 @@ PIT_COLUMNS = [
     "industry_id",
     # Plan 0002 §3.2.7 — per-stock macro betas (off stock_prices × macro_history)
     "oil_beta", "metals_beta", "inr_beta", "gold_beta",
+    # §3.2.7 rate + credit betas (2026-06-07; gilt/credit ETF series)
+    "rate_beta", "credit_beta",
 ]
 
 
@@ -340,6 +342,8 @@ VALIDATION_RANGES = {
     "metals_beta":           (-5, 5, True),
     "inr_beta":              (-5, 5, True),
     "gold_beta":             (-5, 5, True),
+    "rate_beta":             (-5, 5, True),
+    "credit_beta":           (-5, 5, True),
 }
 
 
@@ -1359,9 +1363,11 @@ def pit_macro_betas(px_pit, macro_hist_full, eval_date):
     Reuses signals.macro_betas's core verbatim, fed the PIT-adjusted price frame
     (sid,date,close ≤ eval_date) and an as-of-frozen slice of macro_history
     (date ≤ eval_date). NULL for early anchors lacking ~1y of macro lookback
-    (macro_history starts 2023-03-13).
+    (macro_history now reaches 2015-06; rate_beta computable from ~2017,
+    credit_beta from ~2020 once the gilt/credit ETF series have 252d depth).
 
-    Returns DataFrame[sid, oil_beta, metals_beta, inr_beta, gold_beta].
+    Returns DataFrame[sid, oil_beta, metals_beta, inr_beta, gold_beta,
+                      rate_beta, credit_beta].
     """
     from signals.macro_betas import compute_macro_betas, FACTORS
     cols = ["sid", *FACTORS]
