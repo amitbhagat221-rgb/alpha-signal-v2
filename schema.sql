@@ -1855,6 +1855,40 @@ CREATE TABLE IF NOT EXISTS management_scores (
 );
 CREATE INDEX IF NOT EXISTS idx_mgmt_scores_score ON management_scores(snapshot_date, mgmt_quality_score DESC);
 
+-- Managerial Ability (Demerjian-Lev-McVay 2012) — two-stage DEA → Tobit.
+-- Stage 1: input-oriented VRS DEA efficiency frontier WITHIN sector (financials
+-- excluded), output=operating profit (EBITDA; profit-output departs from textbook
+-- Sales-output DLM so fabricated/zero-margin revenue can't reach the frontier —
+-- the REXP blind spot), inputs={COGS, Employee Cost, Net Block, Intangibles}.
+-- Stage 2: right-censored Tobit of efficiency on firm characteristics (size,
+-- market share, FCF) — the RESIDUAL = manager-attributable efficiency = MA.
+-- The peer-reviewed standard management-quality metric; orthogonal to the
+-- management_scores scorecard (which re-aggregates already-weighted factors).
+CREATE TABLE IF NOT EXISTS managerial_ability_scores (
+    sid                TEXT NOT NULL REFERENCES stocks(sid),
+    snapshot_date      TEXT NOT NULL,
+    cap_tier           TEXT,
+    sector             TEXT,
+    frontier_group     TEXT,                    -- DEA peer group: industry (≥15) else sector
+    period_end         TEXT,                    -- latest annual period used
+    dea_efficiency     REAL,                    -- stage-1 θ (VRS, within frontier_group), (0,1]
+    ma_residual        REAL,                    -- stage-2 Tobit residual = managerial ability
+    ma_score           REAL,                    -- 0-100 percentile of ma_residual within cap_tier
+    grade              TEXT,                    -- A+/A/B/C/D from the percentile
+    -- stage-1 inputs/output (₹ cr, 3y median — transparency)
+    sales              REAL,
+    cogs               REAL,
+    employee_cost      REAL,
+    net_block          REAL,
+    intangibles        REAL,
+    total_assets       REAL,
+    n_peers            INTEGER,                 -- firms in the sector DEA frontier
+    computed_at        TEXT DEFAULT (datetime('now')),
+    PRIMARY KEY (sid, snapshot_date)
+);
+CREATE INDEX IF NOT EXISTS idx_managerial_ability_date ON managerial_ability_scores(snapshot_date);
+CREATE INDEX IF NOT EXISTS idx_managerial_ability_score ON managerial_ability_scores(snapshot_date, ma_score DESC);
+
 -- §3.2.4 — NLP scores derived from earnings-call transcripts (the "enriched" layer,
 -- mirroring news_articles → news_enriched). One row per transcript document; the
 -- per-stock factors (#34 earnings_call_tone_qoq, #36 forward_looking_intensity,
@@ -1917,3 +1951,20 @@ CREATE TABLE IF NOT EXISTS bse_announcements (
 CREATE INDEX IF NOT EXISTS idx_bse_ann_scrip ON bse_announcements(scrip_cd, dt_tm);
 CREATE INDEX IF NOT EXISTS idx_bse_ann_cat   ON bse_announcements(category, subcategory);
 CREATE INDEX IF NOT EXISTS idx_bse_ann_sid   ON bse_announcements(sid, dt_tm);
+
+-- BSE scrip_cd <-> ISIN <-> NSE ticker <-> universe sid crosswalk (sources/scrip_master.py).
+-- Fills bse_announcements.sid (deferred by the harvester). Built from the Upstox instrument
+-- master (assets.upstox.com CDN). ISIN is the bridge; ticker resolved via NSE then BSE symbol.
+-- Refresh weekly; re-run sources.scrip_master after the BSE backfill finishes to fill older dates.
+CREATE TABLE IF NOT EXISTS scrip_master (
+    scrip_cd   INTEGER PRIMARY KEY,  -- BSE security code (== Upstox BSE_EQ exchange_token)
+    isin       TEXT,                 -- universal bridge key
+    nse_symbol TEXT,                 -- NSE trading symbol for this ISIN (reference)
+    sid        TEXT,                 -- our universe sid (NULL if not in the 2,448 universe)
+    name       TEXT,
+    status     TEXT,                 -- Active (Upstox) | Delisted/Suspended (supplement)
+    source     TEXT,                 -- upstox | listofscrips
+    updated_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_scrip_master_sid  ON scrip_master(sid);
+CREATE INDEX IF NOT EXISTS idx_scrip_master_isin ON scrip_master(isin);
