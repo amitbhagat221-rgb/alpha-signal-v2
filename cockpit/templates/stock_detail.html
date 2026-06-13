@@ -125,7 +125,7 @@
     {% if s.industry or s.sector %}
     <button class="tab-button" :class="{ active: tab === 'sector' }" @click="tab = 'sector'; loadSector()">{% if s.industry %}Industry{% else %}Sector{% endif %}</button>
     {% endif %}
-    {% if s.management %}
+    {% if s.management or s.managerial_ability or s.financial_management %}
     <button class="tab-button" :class="{ active: tab === 'management' }" @click="tab = 'management'">Management</button>
     {% endif %}
 </div>
@@ -142,10 +142,12 @@
 {# ════════════════════════════════════════════ #}
 {# ───────────── MANAGEMENT TAB ─────────────── #}
 {# ════════════════════════════════════════════ #}
+{% if s.management or s.managerial_ability or s.financial_management %}
+<div x-show="tab === 'management'" x-cloak>
+
 {% if s.management %}
 {% set m = s.management %}
 {% set gcolor = 'score-green' if m.grade in ['A+','A'] else ('score-red' if m.grade in ['C','D'] else '') %}
-<div x-show="tab === 'management'" x-cloak>
     {# Headline grade + percentile #}
     <div class="card" style="border-left:4px solid var(--accent); margin-bottom:16px; display:flex; align-items:center; gap:22px; flex-wrap:wrap;">
         <div style="text-align:center; min-width:64px;">
@@ -190,6 +192,82 @@
         <strong style="color:var(--text);">How to read this.</strong> A composite of <strong>capital allocation</strong> (do they compound capital?), <strong>alignment</strong> (skin in the game?), and <strong>credibility</strong> (are the earnings real?), ranked within {{ m.cap_tier }}-cap peers from factors the model already validates.
         It's a <em>current capital-efficiency</em> lens — a great business in heavy-reinvestment mode can score low (low current ROIC ≠ bad management). A diagnostic view, not a model weight. Financials use the separate financial sub-model.
     </div>
+{% endif %}{# end management scorecard #}
+
+{# ── Managerial Ability (Demerjian-Lev-McVay) — second, orthogonal lens ── #}
+{% if s.managerial_ability %}
+{% set ma = s.managerial_ability %}
+    <div class="card" style="border-left:4px solid var(--accent); margin-top:16px;">
+        <div style="display:flex; align-items:center; gap:22px; flex-wrap:wrap;">
+            <div style="text-align:center; min-width:64px;">
+                <div class="{{ ma.gcolor }}" style="font-size:38px; font-weight:800; line-height:1;">{{ ma.grade }}</div>
+                <div style="font-size:10px; text-transform:uppercase; color:var(--text-muted); letter-spacing:.5px;">MA grade</div>
+            </div>
+            <div>
+                <div style="font-size:14px; font-weight:700;">Managerial Ability <span style="font-weight:400; color:var(--text-muted); font-size:11px;">· Demerjian-Lev-McVay</span></div>
+                <div style="font-size:12px; color:var(--text-muted); margin-top:2px;">
+                    Score <span class="mono">{{ ma.ma_score }}</span>/100 · top <span class="mono">{{ ma.top_pct }}%</span> of {{ ma.cap_tier }}-cap ·
+                    efficiency θ <span class="mono">{{ ma.dea_pct }}%</span>{% if ma.on_frontier %} <span class="score-green">(on frontier)</span>{% endif %} vs {{ ma.frontier_group }} peers ({{ ma.n_peers }})
+                </div>
+            </div>
+        </div>
+        <div style="font-size:11px; color:var(--text-muted); line-height:1.6; margin-top:12px; border-top:1px solid rgba(128,128,128,.15); padding-top:10px;">
+            <strong style="color:var(--text);">A second, independent lens.</strong> The peer-reviewed DLM measure: a Data-Envelopment-Analysis frontier of how much <em>operating profit</em> a firm wrings from its costs + capital vs <em>industry</em> peers (or sector where an industry is too thin), then a Tobit regression removes size and cash-flow — what's left is efficiency attributable to <em>management</em>, not the firm's built-in scale.
+            <strong style="color:var(--text);">Read it as a <em>current</em> operating-efficiency rank, not a moat/returns verdict.</strong> Two caveats: scale-advantaged blue-chips often land mid-pack (their efficiency is roughly what their size predicts), and firms <strong>mid–capacity-expansion</strong> (a large asset base ahead of current output — e.g. cement makers building plants) score low even against industry peers — a reinvestment-phase signal, not weak management. Output is profit, not revenue, so fabricated / zero-margin sales can't score high. Diagnostic only, not a model weight; financials use the separate sub-model.
+        </div>
+    </div>
+{% endif %}
+
+{# ── Financials (banks/NBFCs) management lens — financial sub-model ── #}
+{% if s.financial_management %}
+{% set fm = s.financial_management %}
+    {# Headline grade + percentile #}
+    <div class="card" style="border-left:4px solid var(--accent); margin-bottom:16px; display:flex; align-items:center; gap:22px; flex-wrap:wrap;">
+        <div style="text-align:center; min-width:64px;">
+            <div class="{{ fm.gcolor }}" style="font-size:38px; font-weight:800; line-height:1;">{{ fm.grade or '—' }}</div>
+            <div style="font-size:10px; text-transform:uppercase; color:var(--text-muted); letter-spacing:.5px;">mgmt grade</div>
+        </div>
+        <div>
+            <div style="font-size:14px; font-weight:700;">Management Quality <span style="font-weight:400; color:var(--text-muted); font-size:11px;">· Banks &amp; NBFCs</span></div>
+            <div style="font-size:12px; color:var(--text-muted); margin-top:2px;">
+                {% if fm.fm_score is not none %}Score <span class="mono">{{ fm.fm_score }}</span>/100 · top <span class="mono">{{ fm.top_pct }}%</span> of {{ fm.cap_tier }}-cap{% else %}financial sub-model signal{% endif %} · {{ fm.pillars|length }} pillars · basis {{ fm.score_basis }}
+            </div>
+        </div>
+    </div>
+
+    {# Pillars as signed bars (z-score within financial peers, center = peer average) #}
+    <div class="card" style="margin-bottom:16px;">
+        <div class="section-title">Pillars · z-score vs {{ fm.cap_tier }}-cap financial peers</div>
+        {% for p in fm.pillars %}
+        <div style="margin:14px 0;">
+            <div style="display:flex; justify-content:space-between; align-items:baseline;">
+                <div><span style="font-weight:600;">{{ p.label }}</span>
+                     <span style="color:var(--text-muted); font-size:11px;"> · {{ p.blurb }}</span></div>
+                <span class="mono {% if p.z is not none and p.z > 0 %}score-green{% elif p.z is not none and p.z < 0 %}score-red{% endif %}">{% if p.z is not none %}{{ "%+.2f"|format(p.z) }}σ{% else %}—{% endif %}</span>
+            </div>
+            <div style="position:relative; height:8px; background:rgba(128,128,128,.15); border-radius:4px; margin:6px 0;">
+                <div style="position:absolute; left:50%; top:-2px; bottom:-2px; width:1px; background:rgba(128,128,128,.45);"></div>
+                {% if p.z is not none %}
+                {% set raw = (p.z + 3) / 6 * 100 %}
+                {% set pos = [raw, 2]|max %}{% set pos = [pos, 98]|min %}
+                <div style="position:absolute; left:{{ pos }}%; top:-3px; width:10px; height:14px; margin-left:-5px; border-radius:3px; background:{% if p.z > 0 %}#22c55e{% else %}#ef4444{% endif %};"></div>
+                {% endif %}
+            </div>
+            {% if p.components %}
+            <div style="display:flex; gap:18px; font-size:11px; color:var(--text-muted); flex-wrap:wrap;">
+                {% for label, val in p.components %}<span>{{ label }}: <span class="mono" style="color:var(--text);">{{ val }}</span></span>{% endfor %}
+            </div>
+            {% endif %}
+        </div>
+        {% endfor %}
+    </div>
+
+    {# How to read it #}
+    <div class="card" style="font-size:11px; color:var(--text-muted); line-height:1.6;">
+        <strong style="color:var(--text);">How to read this.</strong> A lender's management story isn't ROIC or asset turnover — it's <strong>prudent underwriting</strong> (low, stable NPAs &amp; credit cost), <strong>profitability</strong> (margins on assets), <strong>funding</strong> (cheap, stable liabilities) and <strong>capitalisation</strong>. These are the validated pillars of our <em>financial sub-model</em>, ranked within {{ fm.cap_tier }}-cap financial peers. A diagnostic view, not a model weight — and a different lens from the equity scorecard/DLM, which don't apply to financials.
+    </div>
+{% endif %}
+
 </div>
 {% endif %}
 

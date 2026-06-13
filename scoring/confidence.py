@@ -45,7 +45,37 @@ from scoring.health_score import (
 
 # Minimum lineage coverage for Gate 6 to PASS. Below this, the factor's
 # Provenance dim is capped at 10/20 with a warning attached.
+# (Retained for the legacy factor-level `lineage_coverage_for_factor` diagnostic;
+# the live gate_6 in `compute_pick_confidence` is now per-sid — see below.)
 GATE_6_LINEAGE_THRESHOLD = 0.80
+
+
+# Per-pick cache for the lineage-active (top-300, ADR 0027) sid set so a full
+# batch_write_pick_uhs run doesn't re-query it ~1,700 times.
+_ACTIVE_SIDS_CACHE: dict = {}
+
+# Sectors where EVERY row-level-lineage-emitting factor is sector-excluded
+# (Financials route through the financial sub-model; piotroski/eps_growth_yoy/
+# revenue_growth_yoy all carry sector_exclusions=["Financials"] in FACTOR_LINEAGE).
+# For these, zero signal_lineage rows is EXPECTED, not an emission gap → exempt
+# from the gate_6 provenance cap so banks/NBFCs (e.g. MUTT, BOI, BJFN) aren't
+# spuriously flagged "untraceable".
+_LINEAGE_EXEMPT_SECTORS = {"Financials"}
+
+
+def _active_lineage_sids(pick_date: str) -> set:
+    """The set of sids row-level lineage emission is gated to (ADR 0027 top-300).
+
+    Cached per pick_date. Returns an empty set on any failure (→ gate_6 then
+    treats every sid as off-scope / N/A, i.e. never spuriously caps).
+    """
+    if pick_date not in _ACTIVE_SIDS_CACHE:
+        try:
+            from lineage import lineage_active_sids
+            _ACTIVE_SIDS_CACHE[pick_date] = set(lineage_active_sids())
+        except Exception:
+            _ACTIVE_SIDS_CACHE[pick_date] = set()
+    return _ACTIVE_SIDS_CACHE[pick_date]
 
 
 def lineage_coverage_for_factor(factor_id: str, snapshot_date: str) -> tuple[Optional[float], str]:
@@ -111,28 +141,55 @@ def compute_pick_confidence(sid: str, pick_date: str) -> dict:
     """
     base = rollup_pick_uhs(sid, pick_date)
 
-    # Read the pick's tier so we know which factors are weighted
-    df = read_sql("SELECT cap_tier FROM daily_picks WHERE sid=? AND pick_date=?",
+    # Read the pick's tier + sector (sector gates the Financials exemption below)
+    df = read_sql("SELECT cap_tier, sector FROM daily_picks WHERE sid=? AND pick_date=?",
                    params=[sid, pick_date])
     if df.empty:
         return base
+    sector = df.iloc[0]["sector"]
 
-    tier = df.iloc[0]["cap_tier"]
-    from config import SIGNAL_WEIGHTS
-    weights = SIGNAL_WEIGHTS.get(tier, {})
-
-    # Gate 6 — lineage completeness check on each weighted factor.
-    # SMALL caps get a consensus waiver per existing eligibility registry.
+    # Gate 6 — PER-SID lineage traceability (rewritten 2026-06-09).
+    #
+    # OLD bug: `lineage_coverage_for_factor` divided a top-300-gated
+    # signal_lineage numerator (ADR 0027 caps row-level emission to ~300 sids)
+    # by ALL ~1,700 daily_picks → coverage ceiling ≈ 17%, so the 80% threshold
+    # was mathematically unreachable and Provenance was capped at 10 on EVERY
+    # pick — including fully-traced top picks like MUTT. It also applied a
+    # universe-wide statistic to a per-pick decision, and perversely punished
+    # the factors that DID emit lineage while waiving those that emitted none.
+    #
+    # NEW logic asks the question gate_6 actually means: "can we trace THIS
+    # pick's data?" A signal_lineage row IS the per-sid value record —
+    # `db.emit_lineage()` fires exactly when a factor computes a value for an
+    # in-scope sid — so traceability is answerable per sid:
+    #   • off-scope sid (not top-300)       → static lineage by design → N/A
+    #   • in-scope sid WITH lineage rows     → traceable → PASS (no cap)
+    #   • in-scope sid with ZERO lineage rows → genuine emission gap → cap at 10
+    # A weighted factor that simply had no VALUE for this sid (an analyst-thin
+    # name with no PT) is NOT a traceability failure — the sid is still traced
+    # by the factors that did score it, so it is not penalised (value-aware).
+    # Whole sectors whose ONLY applicable emitters are sector-excluded
+    # (Financials) are exempt outright (_LINEAGE_EXEMPT_SECTORS).
     gate_6_penalties = []
-    for fid, w in weights.items():
-        if tier == "SMALL" and fid == "consensus":
-            continue  # waiver
-        coverage, reason = lineage_coverage_for_factor(fid, pick_date)
-        if coverage is None:
-            continue  # lineage not applicable (factor doesn't write lineage)
-        if coverage < GATE_6_LINEAGE_THRESHOLD:
+    if sid in _active_lineage_sids(pick_date) and sector not in _LINEAGE_EXEMPT_SECTORS:
+        n_rows = read_sql(
+            """
+            SELECT COUNT(*) AS n FROM signal_lineage
+            WHERE sid = ?
+              AND snapshot_date = (
+                  SELECT MAX(snapshot_date) FROM signal_lineage
+                  WHERE sid = ? AND snapshot_date <= ?
+              )
+            """,
+            params=[sid, sid, pick_date],
+        )
+        n_traced = int(n_rows.iloc[0]["n"] or 0) if not n_rows.empty else 0
+        if n_traced == 0:
             gate_6_penalties.append({
-                "factor": fid, "weight": w, "coverage": coverage, "reason": reason,
+                "factor": "(all)", "weight": None, "coverage": 0.0,
+                "reason": (f"{sid} is lineage-active (top-300) but has 0 "
+                           f"signal_lineage rows at/≤ {pick_date} — row-level "
+                           f"emission gap; data cannot be traced to source"),
             })
 
     # If Gate 6 fails for any factor, cap dim_provenance at 10
@@ -175,7 +232,11 @@ def _merge_reasons_with_gate6(existing_json, gate_6_penalties):
     except Exception:
         existing = {}
     existing["gate_6_lineage"] = {
-        "policy": f"Provenance capped at 10 when any weighted factor has <{int(GATE_6_LINEAGE_THRESHOLD*100)}% lineage coverage",
+        "policy": ("Provenance capped at 10 only when a lineage-active (top-300, "
+                   "ADR 0027) pick has zero signal_lineage rows — a row-level "
+                   "emission gap. Per-sid, not a universe ratio; off-scope picks "
+                   "use static lineage (N/A) and factors with no value for the "
+                   "sid are not counted against it (value-aware)."),
         "penalties": gate_6_penalties,
     }
     return existing

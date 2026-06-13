@@ -265,6 +265,8 @@ async def stock_detail(request: Request, sid: str):
     detail["earnings"] = api.get_earnings_upcoming(sid)
     detail["dossier"] = api.get_dossier(sid)
     detail["management"] = api.get_management_score(sid)
+    detail["managerial_ability"] = api.get_managerial_ability(sid)
+    detail["financial_management"] = api.get_financial_management(sid)
     detail["quarterly"] = api.get_quarterly_financials(sid)
     detail["annual"] = api.get_annual_financials(sid)
     detail["forecasts"] = api.get_forecast_trend(sid)

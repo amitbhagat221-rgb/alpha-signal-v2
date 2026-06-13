@@ -403,6 +403,103 @@ def get_management_score(sid):
     return r
 
 
+def get_managerial_ability(sid):
+    """Demerjian-Lev-McVay Managerial Ability for one stock (signals/managerial_ability.py).
+
+    A second, ORTHOGONAL management lens beside the scorecard: a DEA operating-
+    efficiency frontier within sector, residualised for size/FCF via Tobit — the
+    manager-attributable slice of efficiency. Diagnostic only (not a model weight).
+    None if unscored (financials, InvITs/REITs/trusts, revenue-implausible names,
+    or missing inputs).
+    """
+    df = read_sql(
+        "SELECT * FROM managerial_ability_scores WHERE sid = ? ORDER BY snapshot_date DESC LIMIT 1",
+        params=[sid])
+    if df.empty:
+        return None
+    r = df.iloc[0].to_dict()
+
+    def num(v):
+        return v if (v is not None and pd.notna(v)) else None
+
+    score = num(r.get("ma_score"))
+    r["top_pct"] = round(100 - score) if score is not None else None
+    eff = num(r.get("dea_efficiency"))
+    r["dea_pct"] = round(eff * 100) if eff is not None else None
+    r["on_frontier"] = (eff is not None and eff >= 0.999)
+    r["gcolor"] = ("score-green" if r.get("grade") in ("A+", "A")
+                   else ("score-red" if r.get("grade") in ("C", "D") else ""))
+    return r
+
+
+def get_financial_management(sid):
+    """Management lens for FINANCIALS (banks/NBFCs).
+
+    Financials are excluded from the equity scorecard + DLM Managerial Ability
+    (ROIC / COGS / DEA-efficiency are meaningless for a lender — they "produce"
+    net interest income from deposits, not goods from inputs), so this gives the
+    Management tab a lender-appropriate view by re-presenting the financial
+    sub-model's already-validated pillar z-scores (financial_signal_scores):
+    prudent underwriting, profitability, funding, capitalisation. Diagnostic
+    only — the model ranks financials via the sub-model, not this card.
+    Returns None for non-financials / unscored names.
+    """
+    df = read_sql(
+        "SELECT * FROM financial_signal_scores WHERE sid = ? ORDER BY snapshot_date DESC LIMIT 1",
+        params=[sid])
+    if df.empty:
+        return None
+    r = df.iloc[0].to_dict()
+
+    def num(v):
+        return v if (v is not None and pd.notna(v)) else None
+
+    def pctv(v):
+        v = num(v)
+        return f"{v:.2f}%" if v is not None else "—"
+
+    tier = r.get("cap_tier")
+    sig = num(r.get("financial_signal"))
+    # within-cap_tier percentile of the composite financial signal (higher=better)
+    score = None
+    if sig is not None and tier:
+        peers = read_sql(
+            "SELECT financial_signal FROM financial_signal_scores "
+            "WHERE cap_tier = ? AND financial_signal IS NOT NULL "
+            "AND snapshot_date = (SELECT MAX(snapshot_date) FROM financial_signal_scores)",
+            params=[tier])
+        if not peers.empty:
+            score = round((peers["financial_signal"] <= sig).mean() * 100, 1)
+    r["fm_score"] = score
+    r["top_pct"] = round(100 - score) if score is not None else None
+    grade = None
+    if score is not None:
+        grade = ("A+" if score >= 90 else "A" if score >= 75 else
+                 "B" if score >= 50 else "C" if score >= 25 else "D")
+    r["grade"] = grade
+    r["gcolor"] = ("score-green" if grade in ("A+", "A")
+                   else ("score-red" if grade in ("C", "D") else ""))
+
+    pillars = [
+        {"label": "Asset Quality", "blurb": "Do they lend prudently?",
+         "z": num(r.get("asset_quality_z")),
+         "components": [("Gross NPA", pctv(r.get("gross_npa_pct"))),
+                        ("Net NPA", pctv(r.get("net_npa_pct")))]},
+        {"label": "Profitability", "blurb": "Earn well on assets?",
+         "z": num(r.get("profitability_z")),
+         "components": [("Net margin", pctv(r.get("np_margin_pct"))),
+                        ("NII margin", pctv(r.get("nii_margin_pct")))]},
+        {"label": "Funding", "blurb": "Funded cheaply & stably?",
+         "z": num(r.get("funding_z")),
+         "components": [("Cost of funds", pctv(r.get("cost_of_funds_pct")))]},
+        {"label": "Capital", "blurb": "Well-capitalised?",
+         "z": num(r.get("capital_z")), "components": []},
+    ]
+    r["pillars"] = [p for p in pillars if p["z"] is not None]
+    r["n_pillars"] = num(r.get("components_present"))
+    return r
+
+
 def get_portfolio_analytics(portfolio_data, regime):
     """A11: Portfolio-level analytics."""
     all_stocks = []
