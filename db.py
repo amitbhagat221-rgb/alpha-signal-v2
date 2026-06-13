@@ -155,6 +155,8 @@ _COLUMN_MIGRATIONS = [
     ("daily_snapshots_pit", "pead_drift_60d",             "REAL"),
     ("daily_snapshots_pit", "corporate_action_density",   "REAL"),
     ("daily_snapshots_pit", "buyback_announcement_30d",   "REAL"),
+    # 2026-06-13: ADR 0042 — BSE governance/forensic resignation event factor.
+    ("daily_snapshots_pit", "governance_resignation",     "REAL"),
     # 2026-06-02: Plan 0002 §3.2.6 — industry identity (categorical control).
     ("daily_snapshots_pit", "industry_id",                "INTEGER"),
     # 2026-06-02: Plan 0002 §3.2.7 — per-stock macro betas.
@@ -1281,6 +1283,16 @@ STALENESS_OVERRIDES = {
     # advances on the weekly run, so mid-week it's up to ~6d old; 10 tolerates a
     # normal week + a holiday-shifted Sunday, flags a genuinely missed weekly run.
     "multibagger_scores":     10,
+    # ── BSE event stream + crosswalk (wired into run_daily_forward.sh 2026-06-13) ──
+    # bse_announcements has no business-date column in _table_date_range's candidate
+    # list (dt_tm isn't one) → freshness anchors on fetched_at, which advances on any
+    # day the --days 7 refresh inserts a NEW filing. The whole-BSE firehose files most
+    # calendar days, but a weekend + adjacent holiday can go quiet; 5 tolerates that,
+    # still flags a genuinely stalled cron within a few days (the 7d window self-heals
+    # a single missed run). scrip_master rebuilds the full map every run (updated_at=now
+    # for every row) so its anchor advances daily regardless; 5 tolerates a skipped run.
+    "bse_announcements":       5,
+    "scrip_master":            5,
 }
 
 # Per-stock coverage gates. A table that should have a row per universe stock
@@ -2242,6 +2254,29 @@ BACKTEST_SIGNALS = [
         "v1_verdict_summary": "(new — Plan 0002 §3.2.5)",
         "status": "READY",
         "status_reason": "Shipped 2026-05-31 (§3.2.5). Backtest: DROP all tiers (LARGE/MID only n=2 periods, SMALL t=-0.65) — too sparse (~9 buybacks/date) for power. Bench.",
+    },
+    {
+        "signal": "governance_resignation",
+        "label": "Governance Resignation Intensity (1y)",
+        "group": "Event/Forensic",
+        "description": "Weighted trailing-365d density of senior-officer + auditor "
+                       "resignation/cessation events from the BSE announcement stream "
+                       "(auditor 3.0 / CFO 2.5 / MD-CEO-Chairman 2.0 / director-CS-cessation 1.0). "
+                       "Higher = more governance instability. Dual-use forensic red-flag.",
+        "source_tables": ["bse_announcements"],
+        "source_columns": ["bse_announcements.{sid,subcategory,dt_tm}"],
+        "filing_lag": "0d (dt_tm event-time anchor)",
+        "pit_column_v1": None,
+        "pit_column_v2": "governance_resignation",
+        "v1_verdict_summary": "(new — ADR 0042 BSE event stream)",
+        "status": "READY",
+        "status_reason": "Shipped 2026-06-13 (ADR 0042). Backtest 46 monthly periods (2018+ BSE depth): "
+                         "MID t=-3.82 KEEP (IC -0.051, ICIR -0.56, CI [-6.57,-1.71]) — NEGATIVE sign as "
+                         "hypothesised (senior/auditor resignations -> lower fwd returns); LARGE t=-1.61 / "
+                         "SMALL t=-1.65 WEAK (same negative direction, not significant). Clear mechanism "
+                         "(governance instability), 8yr deep — stronger than corporate_action_density. "
+                         "Candidate for deliberate weight review (negative-weight penalty in MID) pending "
+                         "orthogonality vs piotroski/forensic/pledge_quality. Dual-use forensic red-flag. NOT yet wired.",
     },
     {
         "signal": "bulk_deal_signal",

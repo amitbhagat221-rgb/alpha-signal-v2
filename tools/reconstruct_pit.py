@@ -161,6 +161,8 @@ PIT_COLUMNS = [
     # Plan 0002 §3.2.5 — event-time / PEAD factors
     "earnings_surprise_std", "pead_drift_60d",
     "corporate_action_density", "buyback_announcement_30d",
+    # ADR 0042 — BSE governance/forensic resignation event factor
+    "governance_resignation",
     "fwd_return_20d",
     "m_score", "z_score",
     # Tier 2 — fundamentals
@@ -258,6 +260,7 @@ VALIDATION_RANGES = {
     "pead_drift_60d":             (-1, 1, True),   # abnormal return since announce
     "corporate_action_density":   (0, 20, True),   # corp actions in trailing 1y
     "buyback_announcement_30d":   (0, 1, True),    # binary flag
+    "governance_resignation":     (0, 12, True),   # weighted trailing-1y resignation intensity
     "fwd_return_20d":        (-1, 5, True),  # cap extreme returns
     "m_score":               (-20, 20, True),
     "z_score":               (-50, 100, True),
@@ -1379,12 +1382,15 @@ def pit_macro_betas(px_pit, macro_hist_full, eval_date):
     return compute_macro_betas(prices=prices, macro_hist=macro_pit)
 
 
-def pit_pead(qi_pit, px_pit, macro_hist, corp_full, eval_date):
+def pit_pead(qi_pit, px_pit, macro_hist, corp_full, bse_results, eval_date):
     """Event-time / PEAD factors, PIT — Plan 0002 §3.2.5.
 
     qi_pit is the knowable-quarterly slice (announcement lag already applied);
     px_pit is prices ≤ eval (adjusted); nifty50 + corporate_actions filtered to
-    ≤ eval. Reuses signals.pead's core verbatim.
+    ≤ eval. bse_results is the BSE 'Result' announcement-date stream [sid, ann_date]
+    — compute_pead anchors the drift window to the real `dt_tm` and itself drops any
+    row after eval (look-ahead safe), so passing the full frame is fine. Reuses
+    signals.pead's core verbatim.
 
     Returns DataFrame[sid, earnings_surprise_std, pead_drift_60d,
     corporate_action_density, buyback_announcement_30d].
@@ -1402,7 +1408,31 @@ def pit_pead(qi_pit, px_pit, macro_hist, corp_full, eval_date):
     prices = px_pit[["sid", "date", "close"]] if px_pit is not None and not px_pit.empty else pd.DataFrame()
     corp = (corp_full[corp_full["ex_date"] <= eval_str]
             if corp_full is not None and not corp_full.empty else pd.DataFrame(columns=["sid", "ex_date", "subject"]))
-    return compute_pead(qi=qi, prices=prices, nifty=nifty, corp_actions=corp, as_of_date=eval_str)
+    ann = (bse_results[["sid", "ann_date"]]
+           if bse_results is not None and not bse_results.empty
+           else pd.DataFrame(columns=["sid", "ann_date"]))
+    return compute_pead(qi=qi, prices=prices, nifty=nifty, corp_actions=corp,
+                        announcements=ann, as_of_date=eval_str)
+
+
+def pit_governance_resignation(stocks, bse_gov, eval_date):
+    """Governance/forensic resignation density, PIT — BSE event stream (ADR 0042).
+
+    bse_gov is the resignation/cessation subcategory slice [sid, subcategory, ev_date];
+    compute_governance_resignation filters ev_date ≤ eval itself (look-ahead safe via
+    the `dt_tm`-derived date), so the full frame can be passed. Reindexed to the
+    universe so non-event names score 0 (flagged-vs-unflagged contrast for the backtest).
+
+    Returns DataFrame[sid, governance_resignation].
+    """
+    from signals.governance_events import compute_governance_resignation
+    eval_str = eval_date.isoformat() if hasattr(eval_date, "isoformat") else str(eval_date)
+    universe = stocks["sid"].tolist() if stocks is not None and not stocks.empty else None
+    ann = (bse_gov[["sid", "subcategory", "ev_date"]]
+           if bse_gov is not None and not bse_gov.empty
+           else pd.DataFrame(columns=["sid", "subcategory", "ev_date"]))
+    return compute_governance_resignation(announcements=ann, universe_sids=universe,
+                                          as_of_date=eval_str)
 
 
 def pit_macro_sector(macro_history_pit, macro_sector_map, sectors_list, eval_date):
@@ -2485,7 +2515,15 @@ def reconstruct_one_date(eval_date, raw, signals_to_run):
     # ── §3.2.5 — event-time / PEAD factors ──
     if "pead" in signals_to_run:
         base = base.merge(
-            pit_pead(qi_pit, px_pit, raw["macro_hist"], raw.get("corp_actions"), eval_date),
+            pit_pead(qi_pit, px_pit, raw["macro_hist"], raw.get("corp_actions"),
+                     raw.get("bse_results"), eval_date),
+            on="sid", how="left",
+        )
+
+    # ── ADR 0042 — governance/forensic resignation density (BSE event stream) ──
+    if "governance" in signals_to_run:
+        base = base.merge(
+            pit_governance_resignation(raw["stocks"], raw.get("bse_gov"), eval_date),
             on="sid", how="left",
         )
 
@@ -2864,12 +2902,34 @@ def load_raw():
         )
     except Exception:
         corp_actions = pd.DataFrame()
+    # §3.2.5 — real BSE result-announcement dates (dt_tm) → PEAD drift anchor.
+    # compute_pead filters these to ≤ eval per date, so load the full stream once.
+    try:
+        bse_results = read_sql(
+            "SELECT sid, date(dt_tm) AS ann_date FROM bse_announcements "
+            "WHERE category='Result' AND sid IS NOT NULL AND dt_tm IS NOT NULL "
+            "ORDER BY sid, dt_tm"
+        )
+    except Exception:
+        bse_results = pd.DataFrame()
+    # ADR 0042 — BSE resignation/cessation events → governance_resignation factor.
+    # compute_governance_resignation filters ev_date ≤ eval per date; load the full slice once.
+    try:
+        from signals.governance_events import RESIGNATION_WEIGHTS
+        _gov_subcats = ", ".join("'" + s.replace("'", "''") + "'" for s in RESIGNATION_WEIGHTS)
+        bse_gov = read_sql(
+            f"SELECT sid, subcategory, date(dt_tm) AS ev_date FROM bse_announcements "
+            f"WHERE sid IS NOT NULL AND dt_tm IS NOT NULL AND subcategory IN ({_gov_subcats}) "
+            f"ORDER BY sid, dt_tm"
+        )
+    except Exception:
+        bse_gov = pd.DataFrame()
     print(f"  stocks={len(stocks)} qi={len(qi)} bs={len(bs)} cf={len(cf)} sh={len(sh)} "
           f"prices={len(prices)} adj={len(adjustments)} fh={len(fh)} acs={len(acs)} "
           f"bulk={len(bulk)} "
           f"reg_events={len(reg_events)} reg_signals={len(reg_signals)} "
           f"macro_hist={len(macro_hist)} macro_map={len(macro_map)} "
-          f"fund_screener={len(fund_screener)}")
+          f"fund_screener={len(fund_screener)} bse_results={len(bse_results)} bse_gov={len(bse_gov)}")
     return {
         "stocks": stocks, "qi": qi, "bs": bs, "cf": cf, "sh": sh, "prices": prices,
         "adjustments": adjustments,
@@ -2881,6 +2941,8 @@ def load_raw():
         "fno_iv": fno_iv,
         "prices_ohlc": prices_ohlc,
         "corp_actions": corp_actions,
+        "bse_results": bse_results,
+        "bse_gov": bse_gov,
         "reg_events": reg_events, "reg_signals": reg_signals,
         "macro_hist": macro_hist, "macro_map": macro_map,
         "macro_sector": macro_sector,
@@ -2902,7 +2964,7 @@ def main():
                                  "earnings_yield", "book_to_price", "momentum",
                                  "position_52w", "delivery", "sector_momentum",
                                  "sector_tilt",
-                                 "fno_oi", "fno_iv", "microstructure", "pead", "pledge",
+                                 "fno_oi", "fno_iv", "microstructure", "pead", "governance", "pledge",
                                  "promoter_trend", "macd", "fwd_return",
                                  "mom_composite",
                                  "quality_fundamentals", "growth_fundamentals",
@@ -2988,6 +3050,8 @@ def main():
         "microstructure",
         # Plan 0002 §3.2.5 — event-time / PEAD factors
         "pead",
+        # ADR 0042 — BSE governance/forensic resignation event factor
+        "governance",
         # Plan 0002 §3.2.6 — industry identity (control) + §3.2.7 macro betas
         "industry_id", "macro_betas",
         # Plan 0005 Phase E composite (smart_money — accruals/promoter/forensic

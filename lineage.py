@@ -870,6 +870,14 @@ FACTOR_LINEAGE = {
                    "select": "window", "filter": "last 30d, subject~buyback", "contribution": "buyback_flag"}],
         "sector_exclusions": [],
     },
+    "governance_resignation": {
+        "status": "candidate", "module": "signals/governance_events.py",
+        "reads": [{"table": "bse_announcements", "cols": ["sid", "subcategory", "dt_tm"],
+                   "key": ["sid", "dt_tm"], "select": "window",
+                   "filter": "last 365d, resignation/cessation subcategories",
+                   "contribution": "weighted_resignation_density"}],
+        "sector_exclusions": [],
+    },
 
     # ════════════════════════════ Industry control (§3.2.6) ════════════════════════════
     # Categorical neutralisation control — frozen integer code, no source reads

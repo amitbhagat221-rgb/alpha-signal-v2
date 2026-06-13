@@ -831,6 +831,13 @@ RAW_TABLES = [
     {"table": "fii_dii_cash_flow",      "source": "NSE FII/DII cash flow (run_daily_forward.sh cron)", "data_freq": "daily", "frequency": "daily"},
     {"table": "fii_dii_positioning",    "source": "NSE FII/DII F&O OI (run_daily_forward.sh cron)",    "data_freq": "daily", "frequency": "daily"},
     {"table": "short_selling_data",     "source": "NSE short selling (run_daily_forward.sh cron, wired 2026-06-03)", "data_freq": "daily", "frequency": "daily"},
+    #    BSE corporate-announcement event stream (--days 7 keep-current) + its scrip→sid
+    #    crosswalk, refreshed by run_daily_forward.sh (14:00 UTC, wired 2026-06-13).
+    #    Freshness anchors: bse_announcements→fetched_at, scrip_master→updated_at (both
+    #    advance per run; see STALENESS_OVERRIDES in db.py). Without this registration the
+    #    cron is invisible to the watchdog — the standalone-cron silent-failure landmine.
+    {"table": "bse_announcements",      "source": "BSE AnnSubCategoryGetData --days 7 (run_daily_forward.sh cron)", "data_freq": "daily", "frequency": "daily"},
+    {"table": "scrip_master",           "source": "Upstox instrument master (run_daily_forward.sh cron)",          "data_freq": "daily", "frequency": "daily"},
 ]
 
 

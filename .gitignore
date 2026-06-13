@@ -60,9 +60,9 @@ output/promotion_gate.txt
 .ipynb_checkpoints/
 *.ipynb_checkpoints
 
-# QA artifacts (Playwright screenshots at repo root)
-news-*.png
-news_*.png
+# QA artifacts / review screenshots (PNGs are local-only; the few already-tracked
+# ones under audit/, docs/_archive/, output/ stay tracked — gitignore only hides untracked)
+*.png
 
 # Local-only git hooks copy (live in .git/hooks/, not versioned by git anyway,
 # but listed here as a reminder that pre-push lives outside source control)

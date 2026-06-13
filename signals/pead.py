@@ -13,17 +13,23 @@ PEAD = post-earnings-announcement drift: stocks that surprise keep drifting in t
 surprise direction for weeks. Two complementary readings — the SURPRISE itself
 (earnings_surprise_std) and the DRIFT already in progress (pead_drift_60d).
 
-quarterly_income carries no announcement date (`reporting` is the consolidation
-basis), so the announcement is approximated as period_end + ANNOUNCE_LAG_DAYS (~45d,
-typical Indian results timing). SUE uses the seasonal random walk (EPS_t − EPS_{t-4})
-standardised by the stdev of trailing YoY EPS changes — no analyst-consensus
-dependency (robust + PIT-clean; consensus EPS in forecast_history is annual/episodic).
+The drift window is anchored to the REAL result-announcement date — the earliest
+`bse_announcements` row with category='Result' for that sid landing in
+(quarter_end, quarter_end + MAX_ANNOUNCE_LAG_DAYS] (look-ahead-safe `dt_tm` event
+time; 81,750 dated events across 2,179 universe names, sid-joined via scrip_master).
+quarterly_income itself carries no announcement date, so names with no BSE match
+(NSE-only / pre-2018 quarters / late filers) fall back to the period_end +
+ANNOUNCE_LAG_DAYS (~45d) proxy — graceful degradation to the old behaviour.
+SUE uses the seasonal random walk (EPS_t − EPS_{t-4}) standardised by the stdev of
+trailing YoY EPS changes — no analyst-consensus dependency (robust + PIT-clean;
+consensus EPS in forecast_history is annual/episodic).
 
 Injectable frames so the live path and the PIT path
 (tools/reconstruct_pit.py:pit_pead) run identical logic. Stock-agnostic; sign
 decided by the backtest.
 
-Reads:  quarterly_income, stock_prices, macro_history(nifty50), corporate_actions
+Reads:  quarterly_income, stock_prices, macro_history(nifty50), corporate_actions,
+        bse_announcements (category='Result')
 Returns: DataFrame[sid, earnings_surprise_std, pead_drift_60d,
                    corporate_action_density, buyback_announcement_30d]
 
@@ -33,6 +39,7 @@ Usage:
 
 from __future__ import annotations
 
+import bisect
 import re
 from datetime import date, timedelta
 
@@ -41,7 +48,10 @@ import pandas as pd
 
 from db import read_sql
 
-ANNOUNCE_LAG_DAYS = 45        # period_end → approx announcement date
+ANNOUNCE_LAG_DAYS = 45        # period_end → announcement-date PROXY (fallback when no BSE match)
+MAX_ANNOUNCE_LAG_DAYS = 80    # search window after quarter-end for the real BSE result filing.
+                              # SEBI LODR caps results at 45d quarterly / 60d annual; 80 adds slack
+                              # yet stays < ~91d next-quarter spacing → MIN-after-end never grabs Q+1.
 DRIFT_WINDOW_DAYS = 90        # calendar days (~60 trading) post-announcement drift window
 MIN_QUARTERS_SUE = 6          # need ≥6 quarters to form a YoY change + a stdev
 SUE_CLIP = (-5.0, 5.0)
@@ -96,6 +106,7 @@ def compute_pead(
     prices: pd.DataFrame | None = None,
     nifty: pd.DataFrame | None = None,
     corp_actions: pd.DataFrame | None = None,
+    announcements: pd.DataFrame | None = None,
     as_of_date: str | None = None,
 ) -> pd.DataFrame:
     """Core: 4 event-time factors as of as_of_date (default today).
@@ -122,6 +133,12 @@ def compute_pead(
         dc = f"AND ex_date <= '{as_of_date}'" if as_of_date else ""
         corp_actions = read_sql(f"SELECT sid, ex_date, subject FROM corporate_actions "
                                 f"WHERE ex_date IS NOT NULL {dc}")
+    if announcements is None:
+        dc = f"AND date(dt_tm) <= '{as_of_date}'" if as_of_date else ""
+        announcements = read_sql(
+            f"SELECT sid, date(dt_tm) AS ann_date FROM bse_announcements "
+            f"WHERE category='Result' AND sid IS NOT NULL AND dt_tm IS NOT NULL {dc} "
+            f"ORDER BY sid, dt_tm")
 
     if qi is None or qi.empty:
         return pd.DataFrame(columns=cols)
@@ -131,16 +148,21 @@ def compute_pead(
     px_by_sid = {s: g for s, g in prices.sort_values(["sid", "date"]).groupby("sid", sort=False)} \
         if prices is not None and not prices.empty else {}
     drift_lo = (date.fromisoformat(eval_iso) - timedelta(days=DRIFT_WINDOW_DAYS)).isoformat()
+    ann_by_sid = _announce_dates_by_sid(announcements, eval_iso)
 
     rows = []
     for sid, g in qi.groupby("sid", sort=False):
         eps = g["eps"].to_numpy(float)
         sue = _sue_one(eps)
 
-        # drift: announcement of the latest quarter ≈ end_date + lag; only if the
+        # drift: anchor to the REAL result-announcement date for the latest quarter
+        # (earliest BSE 'Result' filing in (end, end+MAX_ANNOUNCE_LAG_DAYS]); fall back
+        # to end_date + ANNOUNCE_LAG_DAYS when no BSE match. Only compute if the
         # announcement falls inside the trailing drift window (post-earnings).
         last_end = g["end_date"].iloc[-1]
-        announce = (date.fromisoformat(last_end) + timedelta(days=ANNOUNCE_LAG_DAYS)).isoformat()
+        announce = _match_announce(last_end, ann_by_sid.get(sid))
+        if announce is None:
+            announce = (date.fromisoformat(last_end) + timedelta(days=ANNOUNCE_LAG_DAYS)).isoformat()
         drift = np.nan
         if drift_lo <= announce <= eval_iso and sid in px_by_sid:
             drift = _abnormal_drift(px_by_sid[sid], nifty, announce, eval_iso)
@@ -171,6 +193,39 @@ def compute_pead(
     for c in ("earnings_surprise_std", "pead_drift_60d"):
         out[c] = out[c].round(4)
     return out[cols].reset_index(drop=True)
+
+
+def _announce_dates_by_sid(announcements, eval_iso):
+    """sid → sorted list of result-announcement ISO dates (≤ eval, look-ahead safe).
+
+    Accepts a frame with either `ann_date` (ISO date) or raw `dt_tm` (timestamp);
+    normalises to the date and drops anything after eval so PIT can pass the full
+    frame and rely on this filter for look-ahead safety.
+    """
+    if announcements is None or len(announcements) == 0:
+        return {}
+    col = "ann_date" if "ann_date" in announcements.columns else "dt_tm"
+    a = announcements[["sid", col]].dropna()
+    a = a.assign(ann_date=a[col].astype(str).str.slice(0, 10))
+    a = a[a["ann_date"] <= eval_iso]
+    return {s: sorted(g["ann_date"].tolist()) for s, g in a.groupby("sid", sort=False)}
+
+
+def _match_announce(end_iso, dates_sorted):
+    """Earliest result-announcement strictly after quarter-end, within the lag window.
+
+    Returns the real announcement ISO date, or None if no BSE 'Result' filing landed
+    in (end_iso, end_iso + MAX_ANNOUNCE_LAG_DAYS] → caller falls back to the proxy.
+    Taking the MIN strictly after quarter-end (not just any in-window match) means a
+    later restatement/revision can't displace the genuine first announcement.
+    """
+    if not dates_sorted:
+        return None
+    hi = (date.fromisoformat(end_iso) + timedelta(days=MAX_ANNOUNCE_LAG_DAYS)).isoformat()
+    i = bisect.bisect_right(dates_sorted, end_iso)
+    if i < len(dates_sorted) and dates_sorted[i] <= hi:
+        return dates_sorted[i]
+    return None
 
 
 def _clip(v, lo, hi):
