@@ -36,6 +36,7 @@ Naming + numbering convention: see [ADR 0015](../decisions/0015-track-numbering-
 |---|---|
 | [0003-market-share-momentum-factor.md](0003-market-share-momentum-factor.md) | proposed — 4-factor cluster, ~7 hr |
 | [0004-consumer-demand-pulse.md](0004-consumer-demand-pulse.md) | proposed — research-first, validation-gated |
+| [0009-crypto-convex-cockpit.md](0009-crypto-convex-cockpit.md) | accepted — SEPARATE crypto product; Phase 0 (validation kill-gate) next |
 
 ## Archived (in `_archive/` as `YYYY-MM-DD-plan-NNNN-*.md`)
 

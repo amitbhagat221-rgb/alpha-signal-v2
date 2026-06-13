@@ -1,20 +1,20 @@
 # HANDOFF
-Updated: 2026-06-08 | Branch: master (1 unpushed after this) | HEAD: `7d86f74` feat(signals): wire sector_tilt SMALL-only (ADR 0041)
+Updated: 2026-06-09 | Branch: master (1 unpushed after the handoff commit) | HEAD: `ce05456` docs(crypto): convex cockpit plan 0009 + data-source map
 
 ## Left off
-Shipped the **BSE corporate-announcement event-stream harvester** ([sources/bse_announcements.py](sources/bse_announcements.py) + `bse_announcements` table) — the richest free data unlock found (timestamped, survivorship-complete to 2018, delisted included); full backfill running in background. Also this session: `rate_beta`/`credit_beta` built off a new daily India rates/credit series (both DROP → benched) and a build-not-buy data-source research trail ([ADR 0042](docs/decisions/0042-data-acquisition-build-not-buy.md) + 2 reference docs). Big realization: nearly everything the paid-vendor research priced "enterprise quote" is reachable free (BSE events, SEC-EDGAR ADR PIT fundamentals, TradingView 13k fields).
+Built the **BSE scrip↔ISIN↔sid crosswalk** ([sources/scrip_master.py](sources/scrip_master.py)) off the Upstox instrument master — the BSE backfill **finished** (2.48M filings, 2018→present) and is now **sid-populated** (1.32M filings / 2,197 universe names, incl. **81,750 dated `Result` earnings-announcement events** across 2,179 names), so PEAD finally has real announcement dates. Also this session (all committed `3c4fa01`/`739adaf`/`ce05456`): scoped + accepted a **separate crypto convex/lottery-ticket cockpit** (plan 0009), plus earlier-today's DLM managerial-ability + financial-mgmt lens + gate-6 UHS fix + HRP prototype.
 
 ## Pick up here
-1. **When the BSE backfill finishes** (`tail logs/bse_ann_backfill.log`; ~1.4M rows walking to 2018), build the static **BSE scrip-master ↔ ISIN ↔ ticker map** to fill `bse_announcements.sid` (NULL today) → then wire event-time PEAD dates ([signals/pead.py](signals/pead.py) ~line 44 uses `period_end+45d` proxy) + transcript look-ahead fix ([sources/transcripts_pull.py](sources/transcripts_pull.py) `doc_date` is a month proxy).
-2. **Free quick wins** from [docs/reference/oss-quant-toolbox.md](docs/reference/oss-quant-toolbox.md): SEC-EDGAR ADR PIT pull (look-ahead audit, verified `data.sec.gov`), **Deflated Sharpe Ratio on `pit_ic_by_tier_v2`** (fixes the multiple-testing exposure), `pysentiment2` full LM → [signals/nlp_scores.py](signals/nlp_scores.py) (replace the ~270-word subset).
-3. **Backfill `stock_prices` to 2018 via jugaad-data** (nselib floors at 2022) — the dependency behind credit_beta's backtest window + every deepened backtest (2018 floor approved by user).
+1. **PEAD date-swap** — in [signals/pead.py](signals/pead.py) (~line 44) replace `ANNOUNCE_LAG_DAYS=45` (the `period_end+45d` proxy that failed to replicate) with the real `dt_tm` of the matching `bse_announcements` `category='Result'` row per (sid, quarter) → re-backtest `python -m tools.backtest_pit --signal pead`. The 81,750 dated events are ready.
+2. **Wire 3 keep-current daily steps** into `run_daily_forward.sh`: `bse_announcements --days 7` → `sources.scrip_master` (re-run = refresh + sid-backfill of new rows) → register both in `config.RAW_TABLES` + freshness watchdog (the unregistered-cron silent-failure landmine).
+3. **Crypto Phase 0** (when greenlit, [docs/plans/0009-crypto-convex-cockpit.md](docs/plans/0009-crypto-convex-cockpit.md)) — the validate-before-build kill-gate: right-tail base rates / ex-ante separability / can-the-top-be-called, vs buy-hold-ETH (~$0 + $79 CMC one-shot).
 
 ## Watch out
-- BSE API: endpoint is `AnnSubCategoryGetData` (NOT `AnnGetData`); the all-scrip firehose returns **one day per call** (multi-day → 0 rows); warm cookie + browser UA; **never run alongside `transcripts_pull`** (shared BSE IP-block).
-- `bse_announcements.sid` is NULL until the scrip-master map exists (`stocks` has no ISIN).
-- The macro full-history backfill ([sources/macro_yfinance.py](sources/macro_yfinance.py)) re-wrote `vix_history` (now 2015→) + the `macro_history` baseline → next pipeline run recomputes **regime + the live SMALL `sector_tilt` macro-z** off the deeper baseline; eyeball that daily_picks don't shift oddly.
-- credit_beta is benched mostly because 2018 IL&FS credit stress predates the 2022 price panel — won't un-bench until `stock_prices` reaches 2018.
-- Do **not** commit `amit_personal_docs/` or the `*.png` screenshots (dev artifacts, untracked).
+- `scrip_master` reaches **90% of universe by design** — the ~10% gap is NSE-only names (never appear in `bse_announcements`) + 22 delisted/renamed (RELINFRA/AKZOINDIA). 53% of *all* filings carry a sid (the universe generates the bulk; long-tail BSE scrips don't). Not a bug.
+- Upstox master is the **live** universe → re-run `scrip_master` after each daily forward-harvest or new rows stay sid-NULL. The rohittihiro `ListOfScrips.csv` delisted supplement **404'd** (wrong branch/path) — non-fatal (adds no universe sid); fix the URL later for the survivorship tail.
+- PEAD event dates: `category='Result'` (203K rows) is the clean SUE-event source; some also sit under `category='Board Meeting'` subcat `Financial Results`/`Outcome of Board Meeting` — decide which to treat as the announcement. `dt_tm` is the look-ahead-safe time.
+- Crypto is a **separate product** (own repo + venv + DB) — do NOT add ccxt/web3/solana-py/sanpy to v1's shared venv.
 
 ## Active plan
-docs/plans/0002-*.md §3.2 — §3.2.7 macro betas DONE (all 6 benched); §3.2.4 NLP next (`nlp_scores` shipped, 15,471 transcripts). New thread (no plan doc yet): BSE event stream → PEAD / credit-rating / pledge / governance factors.
+- Equity: BSE event stream → PEAD/governance factors — no plan doc; rides Next-3 #1 ([ADR 0042](docs/decisions/0042-data-acquisition-build-not-buy.md)). Crosswalk done; PEAD date-swap next.
+- Crypto: [docs/plans/0009-crypto-convex-cockpit.md](docs/plans/0009-crypto-convex-cockpit.md) — accepted; Phase 0 (validation kill-gate) next.
