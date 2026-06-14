@@ -33,6 +33,7 @@ an **orthogonality sweep** (each new factor's max |ρ| vs already-wired factors 
 | **delivery_anomaly_z** | SMALL | 4.76 (n=103) | 0.11 | 0.08 | delivery z-spike; orthogonal to avg_delivery (ρ=0.08) |
 | **iv_skew_25d** | MID | +3.16 (48wk) | 0.14 | 0.19 | in-house IV skew (ADR 0035); F&O-only; LARGE/SMALL DROP |
 | **sector_tilt** | SMALL | +3.18 (34mo) | 0.10 | orthogonal (new sector dim) | 6m basket-mom + macro ensemble (ADR 0041); LARGE +0.92 / MID +0.64 DROP |
+| **governance_resignation** | MID | −3.82 (46mo) | **−0.08** | ≈0.09 (vs forensic cluster) | BSE senior/auditor-resignation density (ADR 0042); **first negative weight** — penalty via `1−pctile`; LARGE −1.61 / SMALL −1.65 WEAK |
 
 (pt_upside/pledge/delivery were already in `scoring/screener.py` `SIGNAL_COLS` + the
 MaxReturn/MaxSharpe variants since 2026-05-28/29, but carried **zero production weight**
@@ -60,7 +61,13 @@ factors.) Changes:
 gate REJECT), consensus (v1 t=2.20 vs gate REJECT), promoter (gate PROMOTE 4.99 but n=11
 thin) — not acted on. Watch-list for the next monthly anchor.
 
-**MID accruals/consensus conflict** to re-judge once n thickens.
+**MID accruals/consensus conflict — RESOLVED 2026-06-14** (Next-3 #3) via the horizon-aware
+marginal diagnostic + gate + multiple-testing (3 v2-era lenses vs 1 v1 panel, no one-read
+override): **`accruals` 0.18→0.20 KEEP** — the gate REJECT was a fast-horizon artifact; accruals
+MID is genuine SLOW alpha (incr_t −5.4 @252d, correct sign, v1 3.20), vindicated. **`consensus`
+0.08→0.06 trimmed** — its MID edge DECAYED post-2022 (weak/negative at every v2 horizon, gate
+REJECT, MT-fail; only v1 2019-22 supported it; redundant with pt_upside's analyst dimension).
+Σ|w|=1.0; screener re-run, 0 CRITICAL.
 
 ### `smart_money` validated (2026-06-02, closes the never-backtested gap)
 
@@ -101,11 +108,93 @@ The ensemble beats the cousin in every tier but clears only SMALL → wired SMAL
 dimension, so weighted alongside `delivery_anomaly_z`). Sector-constant by design (a
 tilt, not a stock-selector). Re-judge LARGE/MID as the monthly panel deepens.
 
+### `governance_resignation` — first negative weight, MID-only (2026-06-14, [ADR 0042](../decisions/0042-data-acquisition-build-not-buy.md))
+
+Weighted trailing-365d density of senior-officer + auditor resignations off the
+(kept-current) BSE announcement stream — the subcategory IS the signal, no PDF
+([signals/governance_events.py](../../signals/governance_events.py)). Backtest 46
+monthly anchors / 8yr: **MID t=−3.82 KEEP** (IC −0.051, ICIR −0.56, CI [−6.57,−1.71]),
+**sign-stable NEGATIVE in all three tiers** (LARGE −1.61 / SMALL −1.65 WEAK). The
+deepest-history of any recent candidate. Deliberate review (not the mechanical
+|t|≥2.5→primary):
+
+- **Orthogonality** — within-MID Spearman ρ vs the forensic/quality cluster (the natural
+  redundancy risk) is tiny: piotroski_f −0.04, m_score (Beneish) +0.06, pledge_quality
+  +0.01, forensic_penalty +0.05 → **max |ρ| ≈ 0.09**, well under the 0.27 promotion-wave
+  bar. An event-stream governance dimension is structurally independent of
+  statement-derived forensics — exactly the REXP-lesson complement (Beneish/Altman/Sloan
+  are YoY/distress detectors; "who resigned" is orthogonal information).
+- **Sizing — 0.08, below iv_skew's 0.14 despite a stronger |t|.** It's a tail-penalty
+  (~41% of MID flagged, the rest tied at 0 → the percentile compresses to a ~0.71 max
+  spread, so effective influence ≈ 0.056), it's brand-new with no horizon-gate
+  corroboration yet, and it's the **first genuine negative weight** in the live scheme —
+  all argue for restraint over the t-implied "primary" share.
+- **Negative weight mechanics** — `config.SIGNAL_WEIGHTS["MID"]["governance_resignation"]
+  = −0.08`; [scoring/screener.py](../../scoring/screener.py):296 flips a negative weight
+  to `|w|·(1−pctile)`, so a resignation-heavy name gets a low contribution (a penalty)
+  and a clean name the favourable end. The denominator uses `Σ|w|`, so Σ|w|=1.0 holds.
+- **MID-only** — LARGE/SMALL are WEAK (same sign), not wired (mirrors the sector_tilt
+  SMALL-only call). Funded by an **even −0.01 haircut across the existing eight** MID
+  factors (ordering preserved; deliberately does NOT re-cut the held accruals/consensus/
+  promoter gate↔history conflicts beyond the shared 0.01).
+- **Verified** — production rerun: flagged names demoted (JBCHEPHARM g=5.0 rank 3→32,
+  BOSCHLTD g=3.5 −19, CENTRALBK g=3 −13), top-20 MID picks mean g=0.825 vs universe 1.013
+  (picks lean governance-clean), rank ρ with/without = 0.98 (a tilt, not an upheaval).
+  data_sanity 0 CRITICAL, health green, daily_picks 1697 rows.
+
+Follow-ons: run the horizon-gate (`tools/promotion_gate.py`) on it for net-of-cost
+corroboration as anchors accrue; surface the raw intensity as a cockpit forensic
+red-flag (dual-use, à la REXP) — separate from the cross-sectional weight.
+
+## Multiple-testing reality check (2026-06-14, [ADR 0043](../decisions/0043-multiple-testing-aware-factor-significance.md))
+
+`|t|≥2.5` is **necessary, not sufficient**. Across **269 backtested (signal,tier) hypotheses**,
+naive α=0.05 expects ~13.5 false discoveries; [tools/multiple_testing.py](../../tools/multiple_testing.py)
+(Harvey-Liu-Zhu haircut) puts the Bonferroni bar at **|t|≈4.2** and passes only **8 of 269** under
+Benjamini-Yekutieli FDR (dependence-robust). Read each weight through this lens:
+
+| Robustness (BY-FDR) | Wired factors |
+|---|---|
+| ✓ **survive** (bulletproof) | `pt_upside` (L/M/S), `pledge_quality` (S), `delivery_anomaly_z` (S) |
+| ~ borderline (pass BH, fail BY) | `governance_resignation` (M, p_BY 0.075), `iv_skew_25d` (M), `sector_tilt` (S) |
+| ✗ fail the haircut | `consensus`, `book_to_price`, `piotroski`, `accruals`, `earnings_yield`, `promoter`, `smart_money`, `momentum` |
+
+The ✗-tier is **not** a delisting order — those are kept on the deliberate **diversification-ballast**
+rationale (horizon-gate review) or **doubly-validated v1×v2** history (consensus, book_to_price). The
+rule (ADR 0043): a haircut-failing factor gets **no *added* weight**, and a **new** factor's KEEP must
+clear this lens before wiring. Run it in every promotion review alongside the horizon gate.
+
+## Marginal contribution, HORIZON-AWARE (2026-06-14, Track 3.3b — [tools/factor_marginal.py](../../tools/factor_marginal.py))
+
+Sequential rank-IC Fama-MacBeth (collinearity-robust partial corr) on the WIRED factors, at a
+GRID of horizons {20,63,126,252}d (Newey-West-corrected for forward-window overlap), 46 monthly
+anchors. **Key lesson: marginal contribution is horizon-dependent — judging at 20d alone
+systematically under-credits slow value factors.** A first 20d-only pass flagged
+`book_to_price`/`accruals` as redundant; the horizon sweep shows that was a **horizon artifact**:
+
+| Factor (tier) | incr_t 20d → 252d | Read |
+|---|---|---|
+| `book_to_price` SMALL | −3.9 → −2.5 → +7.2 → **+13.3** | slow value — strong at 6-12mo (gate: 252d PROMOTE 13.58); NOT redundant |
+| `book_to_price` MID | +0.1 → +0.7 → +1.0 → **+2.0** | slow value — earns weight at the value horizon |
+| `accruals` MID | −1.5 → −2.0 → −3.4 → **−5.4** | slow accruals effect (correct sign), grows with horizon |
+| `pt_upside` LARGE/MID | +8→+22 / +9.6→+23 | compounds — even stronger long |
+| `governance_resignation` MID | **−3.4** → −0.1 → −0.4 → −0.6 | FAST forensic — near-term red flag, fades by 1y (natural 20d) |
+| `delivery_anomaly_z` SMALL | **+4.0** → +0.8 → −2.0 | FAST microstructure (natural 20d) |
+| `sector_tilt` SMALL | +3.1 → **+4.1** → +1.9 | 1-3mo sector momentum (natural 63d) |
+
+**Conclusion — no trims.** The model diversifies across HORIZONS (fast forensic/microstructure +
+slow value/analyst); each factor's weight is broadly matched to where its IC peaks. The apparent
+20d redundancies were slow factors mis-judged at a fast horizon — trimming them would delete real
+alpha. **One genuine flag:** `consensus` MID is weak/negative at EVERY horizon (−0.5/−2.4/−1.7/−1.5)
+— the known MID conflict; held only on v1 history → revisit in the MID re-judge (Next-3 #3), don't
+add weight. (Low-cov factors ⚠ are 0.5-imputation-distorted — lean on the backtest; iv_skew weekly.)
+
 ## On the bench (validated, deliberately NOT wired)
 
 - **eps_growth** (LARGE t=5.31 / SMALL t=3.23) — **redundant**: ρ=0.63 with consensus in LARGE, ρ≈0.3–0.4 with the value/quality cluster in SMALL. Analyst/growth dimension already carried by consensus + pt_upside. Stays in the variants only.
 - **kyle_lambda** (LARGE t=+4.24 / MID t=+4.14, 39mo) — Amihud illiquidity premium, but ρ(kyle, ln_ADTV)=−0.73: a cost-coupled liquidity tilt (you'd pay the spread you're paid for), MID IC decaying. Held as diagnostic.
 - **Contrarian/unverified-sign + tiny-n**: interest_coverage (MID t=−3.69, sign-flip vs SMALL), roic/fcf_margin (negative, counterintuitive), iv_term_structure (n=7), sentiment_7d (n=4), eps_growth_yoy LARGE (n=8) — parked pending sign/regime verification or more periods.
+- **§3.2.4 earnings-call NLP factors** (46 monthly anchors, look-ahead-safe on the real BSE filing date — Next-3 #1c). **`uncertainty_word_density`** LARGE **t=+2.90 KEEP** (IC +0.049, CI [1.00,5.24]) — but the sign is **CONTRARIAN** (more hedging/uncertainty → *higher* returns, backwards from the Loughran-McDonald-uncertainty hypothesis) and it's **LARGE-only** (the tier the walk-forward flags as ~zero OOS skill) over a single 2022-26 regime → **NOT wired, parked for sign/regime verification** (same discipline as `ccc`/`nwc_to_revenue`/`corporate_action_density`). `forward_looking_intensity` LARGE +1.67 / SMALL +1.94 WEAK (sensible positive sign, sub-2.5). `earnings_call_tone_qoq` DROP all (tone-momentum didn't replicate). The lasting win is the look-ahead-safe NLP infra; the factors join `FACTOR_LIBRARY`.
 - F&O OI four + iv_realised_spread / iv_term_structure / iv_percentile_1y — see `FACTOR_LIBRARY`.
 
 ## Pending backtesting

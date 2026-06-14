@@ -144,6 +144,81 @@ def _parse_announce_date(text: str) -> str | None:
     return None
 
 
+# ──────────────────── BSE filing-date join (look-ahead) ─────────────────
+# The transcript PDF is a BSE corpfiling attachment whose GUID (Pname=<guid>.pdf)
+# is the SAME key as bse_announcements.attachment. Matching on it gives the real
+# filing dt_tm — the look-ahead-safe availability date — instead of the
+# first-of-month doc_date proxy (which leads the true filing by ~2 weeks). This is
+# the transcript analogue of the PEAD date-swap (signals/pead.py). Next-3 #1c.
+
+def _guid_from_url(url: str | None) -> str | None:
+    """Extract the BSE attachment GUID (`<guid>.pdf`) from a concall/PDF URL.
+
+    `...AnnPdfOpen.aspx?Pname=<guid>.pdf` → '<guid>.pdf'; a direct
+    `.../AttachLive/<guid>.pdf` → '<guid>.pdf'. None for non-BSE direct PDFs
+    (e.g. 'qect_Q2_2020-21.pdf' on a company host — no bse_announcements row).
+    """
+    if not url:
+        return None
+    m = re.search(r"Pname=([^\"&]+)", url)
+    if m:
+        return m.group(1)
+    if url.lower().endswith(".pdf") and "bseindia.com" in url:
+        return url.rsplit("/", 1)[-1]
+    return None
+
+
+def _filing_dates_for_guids(guids) -> dict:
+    """Map {guid → date(dt_tm)} from bse_announcements for the given attachment GUIDs.
+
+    dt_tm == dissem_dt (public dissemination time) on BSE; the date part is the
+    availability date. Returns the earliest dt_tm if a GUID appears twice.
+    """
+    guids = [g for g in dict.fromkeys(guids) if g]
+    if not guids:
+        return {}
+    out = {}
+    CHUNK = 800  # stay under SQLite's variable limit
+    for i in range(0, len(guids), CHUNK):
+        chunk = guids[i:i + CHUNK]
+        ph = ",".join("?" * len(chunk))
+        rows = read_sql(
+            f"SELECT attachment, MIN(date(dt_tm)) AS d FROM bse_announcements "
+            f"WHERE attachment IN ({ph}) AND dt_tm IS NOT NULL GROUP BY attachment",
+            params=chunk)
+        for r in rows.itertuples(index=False):
+            if r.d:
+                out[r.attachment] = r.d
+    return out
+
+
+def backfill_filing_dates(only_null: bool = True) -> int:
+    """Backfill transcripts.bse_filing_date from the BSE GUID join. Idempotent.
+
+    `only_null=True` touches rows where bse_filing_date IS NULL (cheap re-runs as
+    the BSE stream deepens); False recomputes all. Returns rows updated.
+    """
+    where = "WHERE bse_filing_date IS NULL" if only_null else ""
+    docs = read_sql(f"SELECT rowid AS rid, source_url, pdf_url FROM transcripts {where}")
+    if docs.empty:
+        print("backfill_filing_dates: nothing to do.")
+        return 0
+    docs["guid"] = docs["source_url"].map(_guid_from_url)
+    docs.loc[docs["guid"].isna(), "guid"] = docs["pdf_url"].map(_guid_from_url)
+    gmap = _filing_dates_for_guids(docs["guid"].dropna().tolist())
+    updates = [(gmap[g], rid)
+               for rid, g in zip(docs["rid"], docs["guid"])
+               if g in gmap]
+    if updates:
+        with get_db() as conn:
+            conn.executemany(
+                "UPDATE transcripts SET bse_filing_date = ? WHERE rowid = ?", updates)
+    n_total = len(docs)
+    print(f"backfill_filing_dates: {len(updates)}/{n_total} rows filled "
+          f"({len(updates)/n_total*100:.1f}% GUID-matched to bse_announcements)")
+    return len(updates)
+
+
 # ─────────────────────────── fetch + extract ───────────────────────────
 
 def _resolve_and_download(session, ann_url: str) -> tuple[str | None, bytes | None]:
@@ -220,8 +295,8 @@ def _store_rows(rows: list[dict], max_retries: int = 6) -> int:
     if not rows:
         return 0
     cols = ["sid", "doc_type", "period_label", "doc_date", "announce_date",
-            "source_url", "pdf_url", "n_pages", "char_count", "raw_text",
-            "sha256", "fetched_at"]
+            "bse_filing_date", "source_url", "pdf_url", "n_pages", "char_count",
+            "raw_text", "sha256", "fetched_at"]
     payload = [tuple(r.get(c) for c in cols) for r in rows]
     sql = (f"INSERT OR IGNORE INTO transcripts ({','.join(cols)}) "
            f"VALUES ({','.join('?' * len(cols))})")
@@ -277,6 +352,7 @@ def pull_one(session, sid: str, ticker: str, max_docs: int | None = None,
             "period_label": d["period_label"],
             "doc_date": d["doc_date"],
             "announce_date": _parse_announce_date(text),
+            "bse_filing_date": None,  # stamped below from the BSE GUID join
             "source_url": d["url"],
             "pdf_url": pdf_url,
             "n_pages": n_pages,
@@ -285,6 +361,16 @@ def pull_one(session, sid: str, ticker: str, max_docs: int | None = None,
             "sha256": hashlib.sha256(text.encode("utf-8", "replace")).hexdigest(),
             "fetched_at": fetched_at,
         })
+    # Stamp the look-ahead-safe filing date (real BSE dt_tm via the PDF GUID). One
+    # batched lookup per stock; leaves NULL if the filing isn't in the stream yet
+    # (a later backfill_filing_dates() pass fills it; nlp_scores COALESCEs to
+    # announce_date meanwhile). Next-3 #1c.
+    if rows:
+        gmap = _filing_dates_for_guids(
+            [_guid_from_url(r["source_url"]) or _guid_from_url(r["pdf_url"]) for r in rows])
+        for r in rows:
+            g = _guid_from_url(r["source_url"]) or _guid_from_url(r["pdf_url"])
+            r["bse_filing_date"] = gmap.get(g)
     written = _store_rows(rows)
     return {"sid": sid, "ticker": ticker, "status": "ok",
             "found": len(links), "candidates": len(todo),
@@ -345,7 +431,15 @@ def main():
                    help="only stocks with >= N analysts (concall-likely; e.g. 1 for SMALL)")
     p.add_argument("--limit", type=int, default=None, help="cap number of stocks (debug)")
     p.add_argument("--dry-run", action="store_true", help="parse + resolve, no download/write")
+    p.add_argument("--backfill-filing-dates", action="store_true",
+                   help="match existing transcripts to bse_announcements by PDF GUID and "
+                        "fill bse_filing_date (the look-ahead-safe filing date); no fetching")
     args = p.parse_args()
+
+    # Maintenance mode: no Screener auth / fetching needed — pure DB join.
+    if args.backfill_filing_dates:
+        backfill_filing_dates(only_null=True)
+        return 0
 
     if args.smoke and args.max_docs is None:
         args.max_docs = 2

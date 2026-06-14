@@ -77,14 +77,38 @@ SIGNAL_WEIGHTS = {
     "MID": {
         # iv_skew_25d added 2026-05-31 (ADR 0035): MID t=+3.16 KEEP, 48 wk, orthogonal.
         # pt_upside added in the same promotion wave (MID t=8.40, capped).
-        "pt_upside":      0.25,   # t=8.40 primary (capped — artifact re-verify 2026-08)
-        "accruals":       0.19,   # t=3.20 primary
-        "iv_skew_25d":    0.14,   # t=3.16 primary (MID, F&O stocks)
-        "piotroski":      0.12,   # t=2.23 secondary
-        "book_to_price":  0.12,   # t=2.33 secondary
-        "consensus":      0.09,   # t=2.20 secondary
-        "earnings_yield": 0.05,   # t=1.01 tertiary
-        "promoter":       0.04,   # t=0.83 tertiary
+        # 2026-06-14 (ADR 0042): governance_resignation added at −0.08 — the FIRST
+        # genuine NEGATIVE weight in the live scheme (the screener flips it to
+        # abs(w)·(1−pctile), so resignation-heavy names get penalised). Backtest MID
+        # t=−3.82 KEEP (46 monthly anchors / 8yr, IC −0.051, ICIR −0.56), sign-stable
+        # negative in all three tiers; orthogonality max |ρ|≈0.09 vs the MID forensic/
+        # quality cluster (piotroski_f/m_score/pledge_quality/forensic_penalty) — a
+        # genuinely new event-stream dimension (REXP-lesson complement). Sized at 0.08
+        # (below iv_skew's 0.14 despite a stronger |t|): tail-penalty (~41% flagged, the
+        # rest neutral), brand-new, no horizon-gate corroboration yet, first negative
+        # weight → deliberately conservative. MID-only (LARGE −1.61 / SMALL −1.65 WEAK,
+        # same sign — re-judge as anchors deepen). Funded by an even −0.01 haircut across
+        # the existing eight (ordering preserved). Σ|w|=1.0.
+        # 2026-06-14 MID conflict RE-JUDGE (Next-3 #3) — resolved the long-held accruals/
+        # consensus gate↔history conflicts with the horizon-aware marginal diagnostic
+        # (tools/factor_marginal.py, 20/63/126/252d) + the net-of-cost gate + multiple-
+        # testing (ADR 0043). (a) ACCRUALS held at 0.18→0.20: the gate REJECT was a FAST-
+        # horizon artifact — accruals MID is a genuine SLOW factor (incr_t −5.4 @252d,
+        # economically-correct sign; v1 t=3.20). Vindicated, not noise. (b) CONSENSUS
+        # 0.08→0.06: weak/negative at EVERY v2 horizon (20d −0.5 / 63d −2.4 / 126d −1.7 /
+        # 252d −1.5), gate REJECT, multiple-testing fail — its MID edge DECAYED post-2022
+        # (only v1 2019-22 supported it) and it's redundant with pt_upside's analyst
+        # dimension. Modest cut (not zero — still v1-validated), not a one-read override:
+        # 4yr of recent evidence across 3 methods. Σ|w|=1.0 preserved.
+        "pt_upside":              0.24,   # t=8.40 primary (capped — artifact re-verify 2026-08); marginal workhorse, compounds to t≈23 @252d
+        "accruals":               0.20,   # t=3.20 primary; horizon-vindicated SLOW factor (incr −5.4 @252d) — gate REJECT was a fast-horizon artifact
+        "iv_skew_25d":            0.13,   # t=3.16 primary (MID, F&O stocks)
+        "piotroski":              0.11,   # t=2.23 secondary
+        "book_to_price":          0.11,   # t=2.33 secondary; slow value (incr +2.0 @252d)
+        "consensus":              0.06,   # t=2.20 v1 but DECAYED — weak/negative at all v2 horizons, gate REJECT (2026-06-14 trim)
+        "governance_resignation": -0.08,  # t=−3.82 KEEP (ADR 0042); negative — FAST forensic penalty (peaks @20d)
+        "earnings_yield":         0.04,   # t=1.01 tertiary
+        "promoter":               0.03,   # t=0.83 tertiary
     },
     "SMALL": {
         # promotion wave: pt_upside (t=9.14, capped), pledge_quality (t=5.90),

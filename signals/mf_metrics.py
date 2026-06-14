@@ -42,6 +42,40 @@ from db import get_db, read_sql, upsert_df
 RISK_FREE_RATE = 0.065   # 6.5% — Indian 91-day T-bill rough average. Tune later.
 TRADING_DAYS_PER_YEAR = 252
 
+# A single-day NAV jump above this ratio is a DATA ARTIFACT, not a return — no fund
+# (debt or equity) gains >50% in a day. The mfapi/AMFI backfill carries scale errors
+# (early segment stored ÷10 or ÷100, or a leading near-zero point) → the NAV series has
+# a 10×/100×/inf up-step. Anything crossing it (5Y CAGR, since-inception, max-drawdown)
+# computes garbage (e.g. ICICI Overnight 5Y CAGR read +67% off a ÷10 early segment).
+NAV_JUMP_RATIO = 1.5      # >1.5× in one day = artifact
+NAV_FLOOR = 0.5           # drop leading non-positive / near-zero garbage rows
+
+
+def clean_nav_series(df, date_col: str = "nav_date", nav_col: str = "nav",
+                     jump: float = NAV_JUMP_RATIO, floor: float = NAV_FLOOR):
+    """Splice scale discontinuities out of a NAV history (look-ahead-safe, idempotent).
+
+    Trusts the MOST RECENT segment (current NAV is the authoritative AMFI value) and
+    rescales each earlier segment UP by the jump ratio so the series is continuous — so
+    a ÷10 early segment (jump ×10 at the splice) is multiplied back ×10. Only UPWARD
+    jumps are corrected; large DOWN moves are left alone (could be a real default /
+    side-pocket). Drops non-positive / near-zero leading garbage first.
+    """
+    if df is None or len(df) == 0:
+        return df
+    d = df.sort_values(date_col).copy()
+    d[nav_col] = pd.to_numeric(d[nav_col], errors="coerce")
+    d = d[d[nav_col].notna() & (d[nav_col] >= floor)]
+    if len(d) < 2:
+        return d
+    nav = d[nav_col].to_numpy(dtype=float)
+    ratios = nav[1:] / nav[:-1]
+    mult = np.where(ratios > jump, ratios, 1.0)          # ×ratio at each up-artifact gap
+    factor = np.ones(len(nav))
+    factor[:-1] = np.cumprod(mult[::-1])[::-1]           # accumulate from the right
+    d[nav_col] = nav * factor
+    return d
+
 
 # ─── Benchmark NAV — Nifty 50 proxy derived from stock_prices ────────────────
 
@@ -516,6 +550,12 @@ def compute(dry_run: bool = False, scheme: str | None = None) -> int:
     for code in master["scheme_code"]:
         sub = nav_groups.get(code)
         if sub is None or len(sub) < 30:
+            n_skipped_short += 1
+            continue
+        # Splice out NAV scale artifacts (÷10/÷100 early segments, leading garbage) so
+        # CAGR/drawdown reaching across the break aren't garbage. One clean → all 3 uses.
+        sub = clean_nav_series(sub[["nav_date", "nav"]])
+        if len(sub) < 30:
             n_skipped_short += 1
             continue
         m = _compute_one_scheme(sub[["nav_date", "nav"]].copy(), bench)

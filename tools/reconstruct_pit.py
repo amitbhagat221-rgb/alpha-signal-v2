@@ -163,6 +163,8 @@ PIT_COLUMNS = [
     "corporate_action_density", "buyback_announcement_30d",
     # ADR 0042 — BSE governance/forensic resignation event factor
     "governance_resignation",
+    # Plan 0002 §3.2.4 — earnings-call NLP factors (off nlp_scores, look-ahead-safe available_date)
+    "earnings_call_tone_qoq", "forward_looking_intensity", "uncertainty_word_density",
     "fwd_return_20d",
     "m_score", "z_score",
     # Tier 2 — fundamentals
@@ -261,6 +263,10 @@ VALIDATION_RANGES = {
     "corporate_action_density":   (0, 20, True),   # corp actions in trailing 1y
     "buyback_announcement_30d":   (0, 1, True),    # binary flag
     "governance_resignation":     (0, 12, True),   # weighted trailing-1y resignation intensity
+    # Earnings-call NLP factors (§3.2.4) — latest-call values off nlp_scores
+    "earnings_call_tone_qoq":     (-20, 20, True),  # Δ net_tone vs prior call
+    "forward_looking_intensity":  (0, 200, True),   # fwd-looking phrases / 1k words
+    "uncertainty_word_density":   (0, 50, True),    # LM-uncertainty hits / words × 100
     "fwd_return_20d":        (-1, 5, True),  # cap extreme returns
     "m_score":               (-20, 20, True),
     "z_score":               (-50, 100, True),
@@ -1435,6 +1441,26 @@ def pit_governance_resignation(stocks, bse_gov, eval_date):
                                           as_of_date=eval_str)
 
 
+def pit_nlp_factors(stocks, nlp_scores, eval_date):
+    """Earnings-call NLP factors, PIT — off nlp_scores (Plan 0002 §3.2.4).
+
+    nlp_scores is the full enriched frame [sid, doc_date, available_date, net_tone,
+    uncertainty_density, forward_looking_intensity]; compute_nlp_factors filters
+    available_date ≤ eval and within FRESH_DAYS itself (look-ahead safe via the real
+    BSE-filing date carried into available_date — Next-3 #1c). NaN for names with no
+    recent transcript (no 0-fill — a missing call is "no data", not a reading).
+
+    Returns DataFrame[sid, earnings_call_tone_qoq, forward_looking_intensity, uncertainty_word_density].
+    """
+    from signals.nlp_factors import compute_nlp_factors
+    eval_str = eval_date.isoformat() if hasattr(eval_date, "isoformat") else str(eval_date)
+    universe = stocks["sid"].tolist() if stocks is not None and not stocks.empty else None
+    nlp = (nlp_scores if nlp_scores is not None and not nlp_scores.empty
+           else pd.DataFrame(columns=["sid", "doc_date", "available_date", "net_tone",
+                                      "uncertainty_density", "forward_looking_intensity"]))
+    return compute_nlp_factors(nlp=nlp, universe_sids=universe, as_of_date=eval_str)
+
+
 def pit_macro_sector(macro_history_pit, macro_sector_map, sectors_list, eval_date):
     """Per-sector macro score from macro_history × macro_sector_map.
 
@@ -2527,6 +2553,13 @@ def reconstruct_one_date(eval_date, raw, signals_to_run):
             on="sid", how="left",
         )
 
+    # ── §3.2.4 — earnings-call NLP factors (off nlp_scores, look-ahead-safe) ──
+    if "nlp" in signals_to_run:
+        base = base.merge(
+            pit_nlp_factors(raw["stocks"], raw.get("nlp"), eval_date),
+            on="sid", how="left",
+        )
+
     if "pledge" in signals_to_run:
         base = base.merge(pit_pledge_quality(raw["stocks"], sh_pit), on="sid", how="left")
 
@@ -2924,6 +2957,14 @@ def load_raw():
         )
     except Exception:
         bse_gov = pd.DataFrame()
+    # §3.2.4 — earnings-call NLP enriched layer → nlp factors. compute_nlp_factors
+    # filters available_date ≤ eval per date (look-ahead safe), so load the full slice once.
+    try:
+        nlp = read_sql(
+            "SELECT sid, doc_date, available_date, net_tone, uncertainty_density, "
+            "forward_looking_intensity FROM nlp_scores WHERE doc_type = 'transcript'")
+    except Exception:
+        nlp = pd.DataFrame()
     print(f"  stocks={len(stocks)} qi={len(qi)} bs={len(bs)} cf={len(cf)} sh={len(sh)} "
           f"prices={len(prices)} adj={len(adjustments)} fh={len(fh)} acs={len(acs)} "
           f"bulk={len(bulk)} "
@@ -2943,6 +2984,7 @@ def load_raw():
         "corp_actions": corp_actions,
         "bse_results": bse_results,
         "bse_gov": bse_gov,
+        "nlp": nlp,
         "reg_events": reg_events, "reg_signals": reg_signals,
         "macro_hist": macro_hist, "macro_map": macro_map,
         "macro_sector": macro_sector,
@@ -2964,7 +3006,7 @@ def main():
                                  "earnings_yield", "book_to_price", "momentum",
                                  "position_52w", "delivery", "sector_momentum",
                                  "sector_tilt",
-                                 "fno_oi", "fno_iv", "microstructure", "pead", "governance", "pledge",
+                                 "fno_oi", "fno_iv", "microstructure", "pead", "governance", "nlp", "pledge",
                                  "promoter_trend", "macd", "fwd_return",
                                  "mom_composite",
                                  "quality_fundamentals", "growth_fundamentals",
@@ -3052,6 +3094,8 @@ def main():
         "pead",
         # ADR 0042 — BSE governance/forensic resignation event factor
         "governance",
+        # Plan 0002 §3.2.4 — earnings-call NLP factors (off nlp_scores)
+        "nlp",
         # Plan 0002 §3.2.6 — industry identity (control) + §3.2.7 macro betas
         "industry_id", "macro_betas",
         # Plan 0005 Phase E composite (smart_money — accruals/promoter/forensic

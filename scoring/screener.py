@@ -144,6 +144,14 @@ def _load_signals():
     from signals.sector_tilt import compute_sector_tilt
     sector_tilt = compute_sector_tilt()
 
+    # Governance resignation (ADR 0042) — weighted trailing-365d senior/auditor
+    # resignation intensity off the (kept-current) BSE stream. Reindexed to the full
+    # universe with 0 for unflagged names (matches the PIT/backtest flagged-vs-clean
+    # contrast). Wired MID only as a NEGATIVE-weight forensic penalty (backtest MID
+    # t=−3.82 KEEP); other tiers carry no weight and renormalise it away.
+    from signals.governance_events import compute_governance_resignation
+    governance = compute_governance_resignation(universe_sids=stocks["sid"].tolist())
+
     # Book-to-price: total_equity / (shares_outstanding * close_price)
     book_to_price = _compute_book_to_price()
 
@@ -160,6 +168,8 @@ def _load_signals():
     df = df.merge(book_to_price, on="sid", how="left")
     df = df.merge(delivery_anomaly, on="sid", how="left")
     df = df.merge(sector_tilt, on="sid", how="left")
+    df = df.merge(governance, on="sid", how="left")
+    df["governance_resignation"] = df["governance_resignation"].fillna(0.0)
     df = df.merge(iv_skew, on="sid", how="left")
     df = df.merge(price_counts, on="sid", how="left")
     df["price_rows"] = df["price_rows"].fillna(0).astype(int)
@@ -247,6 +257,9 @@ def score_universe(df, weights: dict = None):
         "iv_skew_25d":        "iv_skew_25d",          # t=+3.16 MID (KEEP, 48 wk periods)
         # Wired 2026-06-05 (ADR 0041) — sector 6m-mom + macro tilt, SMALL only:
         "sector_tilt":        "sector_tilt",          # t=+3.18 SMALL (KEEP, 34 monthly)
+        # Wired 2026-06-14 (ADR 0042) — BSE senior/auditor-resignation density, MID only.
+        # NEGATIVE weight in config → screener flips to abs(w)·(1−pctile): a forensic penalty.
+        "governance_resignation": "governance_resignation",  # t=−3.82 MID (KEEP, 46 monthly)
     }
 
     # Percentile-rank all signals within tier (higher = better for all)

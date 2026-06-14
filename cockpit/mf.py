@@ -207,20 +207,26 @@ def get_mf_detail(scheme_code: str) -> dict | None:
 
 
 def get_mf_nav_series(scheme_code: str, days: int = None) -> list[dict]:
-    """NAV time series for the chart. `days` filters to last N days; None = full history."""
+    """NAV time series for the chart. `days` filters to last N days; None = full history.
+
+    NAV is spliced for scale artifacts (÷10/÷100 early segments) via the same
+    clean_nav_series the metrics use — so the chart doesn't show a phantom 10× step.
+    """
     if days:
         df = read_sql(
-            "SELECT nav_date AS date, nav FROM mf_nav_history "
+            "SELECT nav_date, nav FROM mf_nav_history "
             "WHERE scheme_code = ? AND nav_date >= date('now', ?) "
             "ORDER BY nav_date",
             params=[scheme_code, f"-{int(days)} day"],
         )
     else:
         df = read_sql(
-            "SELECT nav_date AS date, nav FROM mf_nav_history "
+            "SELECT nav_date, nav FROM mf_nav_history "
             "WHERE scheme_code = ? ORDER BY nav_date",
             params=[scheme_code],
         )
+    from signals.mf_metrics import clean_nav_series
+    df = clean_nav_series(df).rename(columns={"nav_date": "date"})
     return df.to_dict("records")
 
 

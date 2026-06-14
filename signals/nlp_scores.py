@@ -34,6 +34,12 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from db import read_sql, get_db
 
+# Look-ahead-safe availability date for a transcript: the real BSE filing dt_tm
+# (matched by PDF GUID) when known, else the page-1 text-parsed date, else the
+# first-of-month doc_date proxy (last resort). doc_date LEADS the true filing by
+# ~2 weeks, so any PIT factor MUST anchor on available_date, not doc_date (#1c).
+AVAILABLE_DATE = "COALESCE(t.bse_filing_date, t.announce_date, t.doc_date)"
+
 # ── Curated Loughran-McDonald lexicons (subset) ──
 UNCERTAINTY = frozenset("""
 uncertain uncertainty uncertainties risk risks risky may might could possible possibly
@@ -105,13 +111,14 @@ def score_text(text: str) -> dict | None:
 
 
 def compute(rescore: bool = False, limit: int | None = None, write: bool = True) -> pd.DataFrame:
-    q = """
-        SELECT t.sid, t.doc_type, t.doc_date, t.raw_text
+    q = f"""
+        SELECT t.sid, t.doc_type, t.doc_date, t.raw_text,
+               {AVAILABLE_DATE} AS available_date
         FROM transcripts t
         LEFT JOIN nlp_scores n
           ON n.sid = t.sid AND n.doc_type = t.doc_type AND n.doc_date = t.doc_date
         WHERE t.raw_text IS NOT NULL AND (:rescore = 1 OR n.sid IS NULL)
-        ORDER BY t.doc_date DESC
+        ORDER BY available_date DESC
     """
     df = read_sql(q, params={"rescore": 1 if rescore else 0})
     if limit:
@@ -120,12 +127,14 @@ def compute(rescore: bool = False, limit: int | None = None, write: bool = True)
     for r in df.itertuples(index=False):
         s = score_text(r.raw_text)
         if s:
-            s.update(sid=r.sid, doc_type=r.doc_type, doc_date=r.doc_date)
+            s.update(sid=r.sid, doc_type=r.doc_type, doc_date=r.doc_date,
+                     available_date=r.available_date)
             rows.append(s)
     out = pd.DataFrame(rows)
     if write and not out.empty:
-        cols = ["sid", "doc_type", "doc_date", "word_count", "lm_positive", "lm_negative",
-                "net_tone", "uncertainty_density", "forward_looking_intensity"]
+        cols = ["sid", "doc_type", "doc_date", "available_date", "word_count",
+                "lm_positive", "lm_negative", "net_tone", "uncertainty_density",
+                "forward_looking_intensity"]
         with get_db() as conn:
             conn.executemany(
                 f"INSERT OR REPLACE INTO nlp_scores ({','.join(cols)}) "
@@ -152,7 +161,7 @@ def main():
     # validation: most negative-tone + most uncertain recent calls
     j = df.merge(read_sql("SELECT sid, name FROM stocks"), on="sid", how="left")
     pd.set_option("display.width", 200)
-    show = ["name", "doc_date", "net_tone", "uncertainty_density", "forward_looking_intensity", "word_count"]
+    show = ["name", "doc_date", "available_date", "net_tone", "uncertainty_density", "forward_looking_intensity", "word_count"]
     print("\n=== most NEGATIVE-tone calls ===")
     print(j.nsmallest(8, "net_tone")[show].to_string(index=False))
     print("\n=== most POSITIVE-tone calls ===")

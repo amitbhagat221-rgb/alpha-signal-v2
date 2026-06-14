@@ -1810,6 +1810,7 @@ CREATE TABLE IF NOT EXISTS transcripts (
     period_label  TEXT,                          -- raw concall label, e.g. 'Apr 2026'
     doc_date      TEXT,                          -- YYYY-MM-DD (concall month → first business day)
     announce_date TEXT,                          -- exact date parsed from PDF page 1, when found
+    bse_filing_date TEXT,                         -- real BSE filing dt_tm (date), matched by PDF GUID ↔ bse_announcements.attachment — the look-ahead-safe availability date (Next-3 #1c). Canonical: COALESCE(bse_filing_date, announce_date, doc_date)
     source_url    TEXT NOT NULL,                 -- Screener/BSE AnnPdfOpen wrapper URL (stable id)
     pdf_url       TEXT,                          -- resolved AttachLive/AttachHis PDF URL
     n_pages       INTEGER,
@@ -1899,6 +1900,7 @@ CREATE TABLE IF NOT EXISTS nlp_scores (
     sid                       TEXT NOT NULL,
     doc_type                  TEXT NOT NULL,
     doc_date                  TEXT NOT NULL,
+    available_date            TEXT,   -- look-ahead-safe availability date = COALESCE(transcripts.bse_filing_date, announce_date, doc_date). PIT helpers MUST filter on this, NOT doc_date (Next-3 #1c)
     word_count                INTEGER,
     lm_positive               INTEGER,
     lm_negative               INTEGER,

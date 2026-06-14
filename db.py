@@ -73,6 +73,14 @@ def init_db():
 # whenever a new column is added to an existing table; never edit existing
 # entries (they're idempotent by design).
 _COLUMN_MIGRATIONS = [
+    # 2026-06-14: Next-3 #1c — transcript look-ahead fix. bse_filing_date = the real
+    # BSE filing dt_tm (matched by PDF GUID ↔ bse_announcements.attachment), the
+    # look-ahead-safe availability date. nlp_scores.available_date carries the canonical
+    # COALESCE(bse_filing_date, announce_date, doc_date) into the enriched layer so the
+    # future NLP PIT helper filters on the real date, not the first-of-month doc_date
+    # proxy (median +14d, p90 +27d look-ahead; 95% of rows proxy-earlier-than-filing).
+    ("transcripts", "bse_filing_date", "TEXT"),
+    ("nlp_scores",  "available_date",  "TEXT"),
     # 2026-06-01: fast-read keyword tags per article (LLM-generated, JSON array)
     ("news_enriched", "keywords", "TEXT"),
     ("daily_picks", "weight_coverage", "REAL"),
@@ -157,6 +165,10 @@ _COLUMN_MIGRATIONS = [
     ("daily_snapshots_pit", "buyback_announcement_30d",   "REAL"),
     # 2026-06-13: ADR 0042 — BSE governance/forensic resignation event factor.
     ("daily_snapshots_pit", "governance_resignation",     "REAL"),
+    # 2026-06-14: Plan 0002 §3.2.4 — earnings-call NLP factors (off nlp_scores).
+    ("daily_snapshots_pit", "earnings_call_tone_qoq",     "REAL"),
+    ("daily_snapshots_pit", "forward_looking_intensity",  "REAL"),
+    ("daily_snapshots_pit", "uncertainty_word_density",   "REAL"),
     # 2026-06-02: Plan 0002 §3.2.6 — industry identity (categorical control).
     ("daily_snapshots_pit", "industry_id",                "INTEGER"),
     # 2026-06-02: Plan 0002 §3.2.7 — per-stock macro betas.
@@ -2279,6 +2291,59 @@ BACKTEST_SIGNALS = [
                          "orthogonality vs piotroski/forensic/pledge_quality. Dual-use forensic red-flag. NOT yet wired.",
     },
     {
+        "signal": "earnings_call_tone_qoq",
+        "label": "Earnings-Call Tone QoQ",
+        "group": "NLP/Transcript",
+        "description": "Δ net Loughran-McDonald tone (positive−negative word density) of the "
+                       "latest earnings-call transcript vs the prior call. Tone momentum; "
+                       "look-ahead-safe on the real BSE filing date (available_date, #1c).",
+        "source_tables": ["nlp_scores", "transcripts"],
+        "source_columns": ["nlp_scores.{net_tone,available_date,doc_date}"],
+        "filing_lag": "0d (available_date = real BSE filing dt_tm)",
+        "pit_column_v1": None,
+        "pit_column_v2": "earnings_call_tone_qoq",
+        "v1_verdict_summary": "(new — Plan 0002 §3.2.4)",
+        "status": "READY",
+        "status_reason": "Shipped 2026-06-14 (§3.2.4). Backtest 46 monthly periods: DROP all tiers "
+                         "(LARGE t=0.88 / MID -0.17 / SMALL 0.62) — tone-momentum didn't replicate. Bench (FACTOR_LIBRARY).",
+    },
+    {
+        "signal": "forward_looking_intensity",
+        "label": "Forward-Looking Intensity",
+        "group": "NLP/Transcript",
+        "description": "Forward-looking phrases per 1,000 words in the latest earnings-call "
+                       "transcript (guidance/outlook/expansion language). Look-ahead-safe (#1c).",
+        "source_tables": ["nlp_scores", "transcripts"],
+        "source_columns": ["nlp_scores.{forward_looking_intensity,available_date,doc_date}"],
+        "filing_lag": "0d (available_date = real BSE filing dt_tm)",
+        "pit_column_v1": None,
+        "pit_column_v2": "forward_looking_intensity",
+        "v1_verdict_summary": "(new — Plan 0002 §3.2.4)",
+        "status": "READY",
+        "status_reason": "Shipped 2026-06-14 (§3.2.4). Backtest 46 monthly periods: LARGE t=+1.67 / SMALL t=+1.94 "
+                         "WEAK (positive — more guidance language → better fwd returns, sensible; CIs straddle 0), "
+                         "MID t=0.99 DROP. Sub-2.5, not wired. Bench (FACTOR_LIBRARY); re-test as panel deepens.",
+    },
+    {
+        "signal": "uncertainty_word_density",
+        "label": "Uncertainty Word Density",
+        "group": "NLP/Transcript",
+        "description": "Loughran-McDonald uncertainty-word hits per 100 words in the latest "
+                       "earnings-call transcript (hedged/evasive tone). Look-ahead-safe (#1c).",
+        "source_tables": ["nlp_scores", "transcripts"],
+        "source_columns": ["nlp_scores.{uncertainty_density,available_date,doc_date}"],
+        "filing_lag": "0d (available_date = real BSE filing dt_tm)",
+        "pit_column_v1": None,
+        "pit_column_v2": "uncertainty_word_density",
+        "v1_verdict_summary": "(new — Plan 0002 §3.2.4)",
+        "status": "READY",
+        "status_reason": "Shipped 2026-06-14 (§3.2.4). Backtest 46 monthly periods: LARGE t=+2.90 KEEP "
+                         "(IC +0.049, ICIR 0.43, CI [1.00,5.24]) BUT the sign is CONTRARIAN — more hedging/"
+                         "uncertainty → HIGHER fwd returns, backwards from LM-uncertainty theory; and LARGE-only "
+                         "(the tier walk-forward flags ~zero OOS skill), one 2022-26 regime. MID/SMALL DROP. "
+                         "NOT wired — PARKED pending sign/regime verification (FACTOR_LIBRARY), like ccc/nwc_to_revenue.",
+    },
+    {
         "signal": "bulk_deal_signal",
         "label": "Bulk/Block Deal Activity",
         "group": "Smart Money",
@@ -3069,6 +3134,10 @@ FACTOR_LIBRARY = [
     "inr_beta",             # best |t|=1.01 SMALL — DROP (FX exposure not cross-sectionally priced)
     "rate_beta",            # §3.2.7 (2026-06-07, 40 periods) — best |t|=0.77 LARGE → DROP
     "credit_beta",          # §3.2.7 (2026-06-07, 40 periods) — best |t|=0.68 SMALL → DROP (credit stress pre-2022, out of window)
+    # Earnings-call NLP factors (§3.2.4) — 46 monthly periods, look-ahead-safe (#1c)
+    "uncertainty_word_density",  # LARGE t=+2.90 KEEP but CONTRARIAN sign (more hedging→higher returns, backwards from LM-uncertainty theory) + LARGE-only (OOS-weak tier) — PARKED for sign/regime verification, NOT wired
+    "forward_looking_intensity", # LARGE t=+1.67 / SMALL t=+1.94 WEAK (sensible + sign, CIs straddle 0); MID DROP
+    "earnings_call_tone_qoq",    # best |t|=0.88 LARGE — DROP all tiers (tone-momentum didn't replicate)
     # sector_tilt (ADR 0041) NOT here — backtest cleared SMALL t=3.18 KEEP → WIRED to
     # SIGNAL_WEIGHTS[SMALL]=0.10 (2026-06-05). LARGE/MID sub-1.5 but live only in SMALL.
 ]

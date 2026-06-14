@@ -101,6 +101,10 @@ SIGNAL_COLUMN_MAP = {
     "buyback_announcement_30d":   (None, "buyback_announcement_30d"),
     # ADR 0042 — BSE governance/forensic resignation event factor (monthly cadence)
     "governance_resignation":     (None, "governance_resignation"),
+    # §3.2.4 — earnings-call NLP factors (off nlp_scores, look-ahead-safe available_date)
+    "earnings_call_tone_qoq":     (None, "earnings_call_tone_qoq"),
+    "forward_looking_intensity":  (None, "forward_looking_intensity"),
+    "uncertainty_word_density":   (None, "uncertainty_word_density"),
     # Macro betas — Plan 0002 §3.2.7 (monthly cadence; industry_id is a CONTROL
     # and deliberately absent — IC of a categorical code is meaningless)
     "oil_beta":                   (None, "oil_beta"),

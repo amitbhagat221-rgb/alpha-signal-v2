@@ -879,6 +879,33 @@ FACTOR_LINEAGE = {
         "sector_exclusions": [],
     },
 
+    # ════════════════════════════ Earnings-call NLP (§3.2.4) ════════════════════════════
+    # Latest-call values off the nlp_scores enriched layer, look-ahead-safe on available_date.
+    "earnings_call_tone_qoq": {
+        "status": "candidate", "module": "signals/nlp_factors.py",
+        "reads": [{"table": "nlp_scores", "cols": ["sid", "net_tone", "available_date", "doc_date"],
+                   "key": ["sid", "doc_date"], "select": "window",
+                   "filter": "latest 2 calls within 400d, available_date<=eval",
+                   "contribution": "net_tone_latest_minus_prior"}],
+        "sector_exclusions": [],
+    },
+    "forward_looking_intensity": {
+        "status": "candidate", "module": "signals/nlp_factors.py",
+        "reads": [{"table": "nlp_scores", "cols": ["sid", "forward_looking_intensity", "available_date", "doc_date"],
+                   "key": ["sid", "doc_date"], "select": "latest",
+                   "filter": "latest call within 400d, available_date<=eval",
+                   "contribution": "latest_call_value"}],
+        "sector_exclusions": [],
+    },
+    "uncertainty_word_density": {
+        "status": "candidate", "module": "signals/nlp_factors.py",
+        "reads": [{"table": "nlp_scores", "cols": ["sid", "uncertainty_density", "available_date", "doc_date"],
+                   "key": ["sid", "doc_date"], "select": "latest",
+                   "filter": "latest call within 400d, available_date<=eval",
+                   "contribution": "latest_call_value"}],
+        "sector_exclusions": [],
+    },
+
     # ════════════════════════════ Industry control (§3.2.6) ════════════════════════════
     # Categorical neutralisation control — frozen integer code, no source reads
     # beyond the static stock attribute.
