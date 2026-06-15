@@ -31,7 +31,7 @@ import argparse
 import numpy as np
 import pandas as pd
 
-from config import SIGNAL_WEIGHTS
+from config import SIGNAL_WEIGHTS, SIGNAL_GROUPS
 from db import read_sql
 from tools.backtest_pit import SIGNAL_COLUMN_MAP
 from tools.ic_decay import _fwd_panel, _price_series
@@ -116,9 +116,63 @@ def _marginal_at_horizon(sub, factors, target, nw_lag):
     return out
 
 
+def _avg_within_group_corr(sub, factors):
+    """Mean across anchors of the avg |pairwise rank-corr| among a group's factors.
+    The raw collinearity the within-group residualisation is correcting for."""
+    cols, vals = list(factors.values()), []
+    if len(cols) < 2:
+        return np.nan
+    for d in sorted(sub["snapshot_date"].unique()):
+        g = sub[sub["snapshot_date"] == d]
+        R = g[cols].rank(pct=True)
+        if len(R) < 25:
+            continue
+        C = R.corr(method="pearson").values   # pearson on ranks = Spearman
+        iu = np.triu_indices_from(C, k=1)
+        pair = np.abs(C[iu])
+        pair = pair[~np.isnan(pair)]
+        if pair.size:
+            vals.append(pair.mean())
+    return float(np.mean(vals)) if vals else np.nan
+
+
+def within_group(panel, tier):
+    """3.3b-3 — within-group orthogonalisation diagnostic. For each factor group with
+    ≥2 wired factors in this tier, run the sequential rank-IC residualising ONLY against
+    same-group higher-|t| factors (cross-group kept raw). A factor whose incr_t collapses
+    vs its univariate is redundant WITHIN its family; one that holds is genuinely additive."""
+    wired = {k: c for k in SIGNAL_WEIGHTS[tier] if (c := _v2col(k))}
+    groups = {}
+    for k in wired:
+        groups.setdefault(SIGNAL_GROUPS.get(k, "Other"), {})[k] = wired[k]
+    sub = panel[panel.cap_tier == tier]
+    hdr = "  ".join(f"{h}d" for h in HORIZONS)
+    print(f"{'='*82}\n{tier} — WITHIN-GROUP incremental t by horizon (residualised vs same-group only)\n{'='*82}")
+    multi = {g: f for g, f in groups.items() if len(f) >= 2}
+    if not multi:
+        print("  (no group has ≥2 wired factors in this tier — nothing to orthogonalise)\n")
+        return
+    for g, gf in sorted(multi.items()):
+        rho = _avg_within_group_corr(sub, gf)
+        res = {h: _marginal_at_horizon(sub, gf, f"fwd_{h}", _nw_lag(h)) for h in HORIZONS}
+        print(f"\n  ▸ {g}  (avg within-group |ρ| = {rho:.2f})")
+        print(f"    {'factor':22} {'wt':>6} {'uni_t':>6} {'cov':>5}   {hdr}")
+        for k in sorted(gf, key=lambda k: -abs(SIGNAL_WEIGHTS[tier][k])):
+            row = [res[h][k] for h in HORIZONS]
+            uni = next((r[0] for r in row if not np.isnan(r[0])), np.nan)
+            cov = next((r[2] for r in row if not np.isnan(r[2])), np.nan)
+            cells = "  ".join(f"{(r[1] if not np.isnan(r[1]) else 0):+5.1f}" for r in row)
+            lc = " ⚠" if (not np.isnan(cov) and cov < 0.5) else ""
+            print(f"    {k:22} {SIGNAL_WEIGHTS[tier][k]:+6.2f} {uni:>6.1f} {cov*100:4.0f}%   {cells}{lc}")
+    print("\n  Reading: within a group, a factor with high uni_t but ~0 incr_t is the REDUNDANT")
+    print("  member (its bet is already in a higher-|t| same-group factor). Read-only — no weights changed.\n")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[1])
     ap.add_argument("--tier", choices=["LARGE", "MID", "SMALL"], default=None)
+    ap.add_argument("--within-group", action="store_true",
+                    help="3.3b-3: residualise each factor only against same-group factors")
     args = ap.parse_args()
 
     wired_cols = sorted({c for w in SIGNAL_WEIGHTS.values() for k in w
@@ -140,6 +194,9 @@ def main():
     print("incr_t Newey-West-corrected for forward-window overlap; ⚠ = coverage <50% (imputation-distorted)\n")
 
     for tier in ([args.tier] if args.tier else ["LARGE", "MID", "SMALL"]):
+        if args.within_group:
+            within_group(panel, tier)
+            continue
         factors = {k: c for k in SIGNAL_WEIGHTS[tier] if (c := _v2col(k))}
         results = {h: _marginal_at_horizon(panel[panel.cap_tier == tier], factors,
                                            f"fwd_{h}", _nw_lag(h)) for h in HORIZONS}

@@ -110,6 +110,7 @@ SIGNAL_WEIGHTS = {
         "earnings_yield":         0.04,   # t=1.01 tertiary
         "promoter":               0.03,   # t=0.83 tertiary
     },
+    # SIGNAL_GROUPS defined below SIGNAL_WEIGHTS.
     "SMALL": {
         # promotion wave: pt_upside (t=9.14, capped), pledge_quality (t=5.90),
         # delivery_anomaly_z (t=4.76, n=103) — all orthogonal (max |ρ|≤0.08 vs wired).
@@ -143,6 +144,27 @@ SIGNAL_WEIGHTS = {
         "accruals":           0.05,   # t=2.10 secondary; gate REJECT — conflict, held
         "momentum":           0.02,   # t=1.76 tertiary; gate REJECT — token
     },
+}
+
+
+# ── Factor groups (Track 3.3b-3 — within-group orthogonalization) ──
+# Family classification for the wired + common-library factors. Used by
+# tools/factor_marginal.py --within-group, which residualises each factor only
+# against same-group factors (keeping cross-group raw, the plan-0002 §3.3b-3 hybrid)
+# to surface WITHIN-family redundancy — e.g. is `consensus` additive given `pt_upside`
+# inside Analyst, or `earnings_yield` given `book_to_price` inside Value. Groups mirror
+# plan-0002 §3.2 families + the documented clusters in SIGNAL_WEIGHTS above. Read-only
+# diagnostic; changes no weights (same stance as ADR 0038). Unmapped factors → "Other".
+SIGNAL_GROUPS = {
+    "pt_upside": "Analyst",   "consensus": "Analyst",
+    "book_to_price": "Value", "earnings_yield": "Value", "fcf_yield": "Value",
+    "piotroski": "Quality",   "accruals": "Quality",     "roic": "Quality",
+    "forensic_penalty": "Forensic", "m_score": "Forensic",
+    "promoter": "Ownership",  "pledge_quality": "Ownership",
+    "governance_resignation": "Governance",
+    "iv_skew_25d": "Options",
+    "delivery_anomaly_z": "Microstructure", "smart_money": "Microstructure",
+    "momentum": "Momentum",   "sector_tilt": "Macro",
 }
 
 
