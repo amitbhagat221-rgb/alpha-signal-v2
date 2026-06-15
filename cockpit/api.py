@@ -1495,6 +1495,67 @@ def get_action_candidates():
     return {"buy": buy, "watch": watch, "exit": exit_list}
 
 
+@_persisted_cache(60, name="get_sized_book")
+def get_sized_book():
+    """Track 3.3c — the HRP-sized book from `portfolio_weights` (latest asof_date).
+
+    Pure read of the persisted table (no recompute-on-read, so the page never
+    drifts from the stored book). Per-name HRP weight + percent risk contribution,
+    plus the concentration stats that ARE derivable from the rows. Returns None if
+    no book has been built yet (table empty) — the template guards on that.
+
+    See portfolio_construction.py + ADR 0044. ADVISORY ONLY (no capital deployed
+    until the rank-skill validates)."""
+    import config
+    rows = read_sql(
+        "SELECT pw.sid, s.ticker, pw.name, pw.cap_tier, pw.sector, pw.rank, "
+        "       pw.factor_score, pw.weight, pw.marginal_risk_contrib "
+        "FROM portfolio_weights pw LEFT JOIN stocks s ON pw.sid = s.sid "
+        "WHERE pw.asof_date = (SELECT MAX(asof_date) FROM portfolio_weights) "
+        "ORDER BY pw.weight DESC")
+    if rows.empty:
+        return None
+
+    asof = read_sql("SELECT MAX(asof_date) m FROM portfolio_weights").iloc[0]["m"]
+    w = rows["weight"].fillna(0.0)
+    sector_w = rows.groupby("sector")["weight"].sum().sort_values(ascending=False)
+    tier_w = rows.groupby("cap_tier")["weight"].sum()
+    hrp = config.PORTFOLIO["hrp"]
+
+    # Expected ~1Y return = book-weighted analyst-consensus PT upside, renormalised
+    # over COVERED names (uncovered = no opinion, not 0% — small-caps are often
+    # uncovered). Same source (get_analyst_consensus → pt_upside_pct, ADR-0037
+    # cleaned) the /portfolio "Expected Return" stat uses, so the two agree; here
+    # it's weight-weighted rather than the page's equal-weight. Analyst PTs are
+    # ~12-month targets → a ~1-year expected PRICE return (excludes dividends).
+    cov_w, cov_wu, cov_n = 0.0, 0.0, 0
+    for r in rows.itertuples():
+        ac = get_analyst_consensus(r.sid)
+        up = ac.get("pt_upside_pct")
+        if up is not None and r.weight:
+            cov_w += r.weight
+            cov_wu += r.weight * up
+            cov_n += 1
+    er_1y = round(cov_wu / cov_w, 1) if cov_w else None
+
+    return {
+        "asof_date": asof,
+        "n_names": len(rows),
+        "rows": safe_json_records(rows),
+        "effective_n": round(float(1.0 / (w ** 2).sum()), 1) if (w ** 2).sum() else 0,
+        "sum_weight_pct": round(float(w.sum()) * 100, 1),
+        "max_stock_pct": round(float(w.max()) * 100, 1),
+        "max_sector_pct": round(float(sector_w.max()) * 100, 1),
+        "tier_weights": {t: round(v * 100, 0) for t, v in tier_w.items()},
+        "top_sectors": [(s, round(v * 100, 0)) for s, v in sector_w.head(4).items()],
+        "cap_stock_pct": round(hrp["max_stock_weight"] * 100, 0),
+        "cap_sector_pct": round(hrp["max_sector_weight"] * 100, 0),
+        "expected_return_1y": er_1y,                          # weighted PT upside, %
+        "er_coverage_n": cov_n,                               # names with a target
+        "er_coverage_weight_pct": round(cov_w * 100, 0),      # % of book weight covered
+    }
+
+
 @_persisted_cache(60, name="get_portfolio_bundle")
 def get_portfolio_bundle():
     """Single cacheable bundle for /portfolio render — picks + per-stock enrichment
@@ -1511,7 +1572,8 @@ def get_portfolio_bundle():
             s["return_1m"] = pm.get("return_1m")
             s["price_target"] = ac.get("price_target")
     analytics = get_portfolio_analytics(portfolio_data, regime)
-    return {"regime": regime, "portfolio": portfolio_data, "analytics": analytics}
+    return {"regime": regime, "portfolio": portfolio_data, "analytics": analytics,
+            "sized_book": get_sized_book()}
 
 
 @_persisted_cache(60, name="get_model_portfolio")

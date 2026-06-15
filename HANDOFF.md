@@ -1,19 +1,18 @@
 # HANDOFF
-Updated: 2026-06-14 | Branch: master (this session's commit will be the 1st unpushed) | HEAD: `53a7649` (pre-session)
+Updated: 2026-06-15 | Branch: master (this session's commit = 1st unpushed until push) | HEAD: `e6ca5b5` (pre-commit; today's commit becomes HEAD)
 
 ## Left off
-Big factor-evaluation + cleanup session, all uncommitted on top of `53a7649`: wired `governance_resignation` MID −0.08 (the first NEGATIVE weight in the live scheme), fixed the transcript look-ahead bias + a 247-fund MF NAV-splice bug, built the multiple-testing ([ADR 0043](docs/decisions/0043-multiple-testing-aware-factor-significance.md)) + horizon-aware marginal diagnostics, benched the §3.2.4 NLP factors, resolved the long-held MID accruals/consensus conflict, and compressed the checklist 231→82 lines. Everything verified green (data_sanity 0 CRITICAL, health all-healthy, screener re-run 1698 picks) — nothing committed yet.
+Shipped the **Track 3.3c portfolio-construction spine**: HRP sizing module ([portfolio_construction.py](portfolio_construction.py)) → new `portfolio_weights` table, a cockpit `/portfolio` "Sized Book — HRP" card (incl. weighted analyst-PT **expected-1Y +31.6%**), and a daily `PIPELINE_STEPS` build right after the screener — all **ADVISORY** (no capital until rank-skill clears). Everything verified green (15-name book, ex-ante vol 16.9% < 17.7% eq-wt, eff-N 11.4, health 82→83 fresh, [ADR 0044](docs/decisions/0044-hrp-over-mean-variance-portfolio.md)); uncommitted on top of `e6ca5b5`.
 
 ## Pick up here
-1. **Track 3.3c — portfolio construction** (next 3.3 sub-step): turn within-tier ranks into sized positions; `tools/hrp_prototype.py` is a start. Gated-but-related: re-run `tools/validate_rank_skill.py` (still <6 independent 20d windows → don't deploy capital yet; 63d outcomes mature ~2026-07-06).
-2. **`pt_upside` artifact re-verify** (Next-3 #2, ~2026-08): `python -m tools.backtest_pit --signal pt_upside` once ≥3 fresh `analyst_consensus_snapshots` exist (cron 1st-of-month → 3rd on 2026-08-01) → un-cap (0.16–0.25) or pull. It's the model's load-bearing robust factor.
-3. **3.3b-3 within-group orthogonalization** ([tools/factor_marginal.py](tools/factor_marginal.py) is steps 1-2) OR un-bench `credit_beta` via jugaad-data `stock_prices`→2018 (free quick-win).
+1. **HRP book → realized-return harness** (chosen next track): track the HRP book head-to-head vs the equal-weight Model Portfolio in [paper_portfolio.py](paper_portfolio.py) / [tools/compute_pick_outcomes.py](tools/compute_pick_outcomes.py) — the §3.3c gate evidence; daily `portfolio_weights` history started accumulating 2026-06-15. Add a 3.3c checklist bullet before starting.
+2. **3.3b-3 within-group orthogonalization** — [tools/factor_marginal.py](tools/factor_marginal.py) has steps 1-2; orthogonalize correlated factors within group so the weighted sum stops double-counting.
+3. **`credit_beta` un-bench** via jugaad-data `stock_prices`→2018 (free quick-win). _Date-gated reminders: `validate_rank_skill` re-run ~2026-07-06 (63d outcomes); `pt_upside` re-verify ~2026-08-01._
 
 ## Watch out
-- **`factor_marginal`/`multiple_testing` dedup**: `pit_ic_by_tier_v2` has multiple `source` rows per (signal,tier) — pick the MOST-POWERED (max `n_periods`), NOT "prefer monthly", else `delivery_anomaly_z` reads its n=5 monthly row not the n=103 weekly validation.
-- **The 20d marginal lens UNDER-credits slow factors** — `book_to_price`/`accruals` look redundant at 20d but earn their weight at 252d (`book_to_price` SMALL incr_t −3.9→+13.3). Always sweep horizons in `factor_marginal` before any value-factor trim.
-- **MF `clean_nav_series` is applied at READ-time** (`mf_metrics.compute` + `cockpit/mf.get_mf_nav_series`), NOT stored — raw `mf_nav_history` keeps the ÷10/÷100/leading-zero artifacts. Any NEW consumer of `mf_nav_history` must call `clean_nav_series` or it'll show the phantom step again.
-- **`amit_personal_docs/` is untracked + personal — never commit it.**
+- **Cockpit persisted-cache survives restarts**: `data/.cockpit_cache/*.pkl` hold `(payload, mtime)` with a 60s TTL. After deploying `cockpit/api.py` changes, a pre-edit pickle serves for up to 60s while the new template renders the missing field as Jinja *Undefined* → e.g. "Expected 1Y" showed **+0.0% / blank coverage** for ~1 min post-restart, then self-healed. To force-refresh: delete the pkl. (Today it was the cache, not a code bug.)
+- **`portfolio_weights` covariance uses RAW `stock_prices.close`** winsorized ±0.5 (no adj_close exists) — a genuine >50% one-day move gets clipped. The `config.PORTFOLIO["hrp"]` caps (stock 12% / sector 35%) **intentionally differ** from top-level `max_stock_weight_pct=5.0`, which is infeasible for a 15-name book (1/15≈6.7%).
+- **`portfolio_construction` step is `critical:False`** — a thin-day build failure logs FAILED but never blocks dossier/email; `run()` raises on an empty book (no placeholder). `asof_date` was added to `db._table_date_range` DATE_COLS (only `portfolio_weights` uses it) so it now freshness-tracks like `daily_picks`.
 
 ## Active plan
-docs/plans/0002-100-factors-and-model.md — Track 3.3b done (gate + multiple-testing + horizon-aware marginal); 3.3c (portfolio) next. Rides Next-3 (#1 ✅, #3 ✅, #2 gated).
+docs/plans/0002-100-factors-and-model.md (Phase 3.3c — spine shipped, hard gate pending ~18-24mo).

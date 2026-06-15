@@ -300,6 +300,7 @@ async def portfolio(request: Request):
         "regime": bundle["regime"],
         "portfolio": bundle["portfolio"],
         "analytics": bundle["analytics"],
+        "sized_book": bundle.get("sized_book"),
     })
 
 

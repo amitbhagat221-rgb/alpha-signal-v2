@@ -937,6 +937,12 @@ TABLE_META = {
         "description": "Daily output of the screener — every stock with its final_score, rank within tier, base_score, and forensic_adj. The ranked universe.",
         "consumed_by": "morning_brief, action_queue, signals page, sectors page",
     },
+    "portfolio_weights": {
+        "kind": "COMPUTED",
+        "depth": "Snapshot per build date (asof_date)",
+        "description": "Track 3.3c sized book — HRP risk-parity weights × alpha tilt over the top picks_per_tier names, under per-stock / per-sector / ₹-ADTV liquidity caps. Carries marginal_risk_contrib (percent of portfolio variance per name). ADVISORY only (no capital deployed until rank-skill validates). Built on demand by portfolio_construction.py, not on a cron.",
+        "consumed_by": "(planned) cockpit /portfolio sized view",
+    },
     "daily_snapshots": {
         "kind": "COMPUTED",
         "depth": "Growing daily (PIT archive)",
@@ -1033,7 +1039,7 @@ def _table_date_range(conn, tbl):
     # insider_trades and bulk_deals carry both — we want the trade/deal date span,
     # not when v2 ingested the row (which is bounded by the v2 cutover).
     DATE_COLS = ["snapshot_date", "date", "end_date", "period", "pick_date",
-                 "run_date", "published_at", "deal_date", "trade_date",
+                 "asof_date", "run_date", "published_at", "deal_date", "trade_date",
                  "classified_at", "fetched_at", "updated_at"]
 
     for col in DATE_COLS:
@@ -1409,6 +1415,7 @@ TABLE_DOMAIN = {
     "insider_signals": "Computed Signals",
     # Daily output
     "daily_picks": "Output",
+    "portfolio_weights": "Output",
     "daily_snapshots": "Output",
     "daily_changes": "Output",
     # Backtest (PIT reconstruction)

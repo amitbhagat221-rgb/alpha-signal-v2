@@ -286,6 +286,26 @@ PORTFOLIO = {
         "MID": 5,
         "SMALL": 5,
     },
+    # ── Track 3.3c — HRP position sizing (portfolio_construction.py) ──
+    # The sized book draws picks_per_tier names per tier (the same 5/5/5 = 15-name
+    # holdable book the paper portfolio uses), then HRP-allocates risk under these
+    # caps. ADVISORY only until tools/validate_rank_skill.py clears. See ADR 0044.
+    "hrp": {
+        "cov_lookback_days": 500,   # trading days of daily returns for the covariance
+        "cov_min_obs": 220,         # drop a name with thinner history than this
+        "ledoit_wolf": True,        # shrink the sample covariance toward structure
+        "ret_clip": (-0.5, 0.5),    # daily log-return winsorization — split-defense
+                                    # (stock_prices.close is raw/unadjusted; mirrors
+                                    # the signals/sector_momentum.py RET_CLIP rationale)
+        "tilt_lambda": 0.6,         # alpha-score tilt strength (0 = pure risk parity)
+        "min_adtv_inr": 1.0e7,      # liquidity floor: drop names whose 20d median
+                                    # traded_value < ₹1cr/day (un-sizable for a retail book)
+        # Weight caps for the CONCENTRATED ~15-name book. NOTE these intentionally
+        # differ from the top-level max_stock_weight_pct=5.0, which is infeasible here
+        # (15 names × 5% = 75% < 100%). 1/15≈6.7%, so the per-stock cap must exceed that.
+        "max_stock_weight": 0.12,   # per-name ceiling
+        "max_sector_weight": 0.35,  # per-sector ceiling (concentration guard)
+    },
 }
 
 # ── Transaction Costs (bps) ──
@@ -669,6 +689,15 @@ PIPELINE_STEPS = [
 
     {"name": "screener",           "module": "scoring.screener",    "function": "compute",  "critical": True,
      "table": "daily_picks",       "source": "all signals",         "data_freq": "daily",   "frequency": "daily"},
+
+    # Track 3.3c — HRP position sizing. Turns the within-tier ranked daily_picks
+    # into a sized book (portfolio_weights). Runs right AFTER the screener (needs
+    # today's picks) and after price ingest (covariance + ADTV from stock_prices).
+    # NON-critical: ADVISORY only (no capital until rank-skill validates), and a
+    # thin-day build failure must never block dossier/email. See ADR 0044.
+    {"name": "portfolio_construction", "module": "portfolio_construction", "function": "run", "critical": False,
+     "table": "portfolio_weights", "source": "daily_picks + stock_prices (HRP sizing)",
+     "data_freq": "daily",         "frequency": "daily"},
 
     # Benchmark + smart-beta index history (NIFTY 50 / Midcap 150 / Smallcap
     # 250 …). Was manual-only → went 32d stale (2026-06-01) → pick_outcomes

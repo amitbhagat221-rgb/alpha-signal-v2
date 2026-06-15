@@ -622,6 +622,29 @@ CREATE TABLE IF NOT EXISTS daily_picks (
 
 CREATE INDEX IF NOT EXISTS idx_picks_date ON daily_picks(pick_date);
 
+
+-- Track 3.3c — covariance-aware position sizing (HRP). One row per (asof_date, sid)
+-- in the constructed book. Distinct from daily_picks (a ranked list, no sizing) and
+-- paper_portfolio (equal-weight realized-return loop, ADR 0028): this is the SIZED
+-- book — HRP risk-allocation × alpha tilt, under per-stock / per-sector / liquidity
+-- caps. ADVISORY until tools/validate_rank_skill.py clears (no capital deployed yet).
+-- See ADR 0044 (HRP-over-mean-variance) + plan 0002 §3.3c.
+CREATE TABLE IF NOT EXISTS portfolio_weights (
+    asof_date              TEXT NOT NULL,   -- daily_picks.pick_date the book was built from
+    sid                    TEXT NOT NULL REFERENCES stocks(sid),
+    weight                 REAL,            -- final position weight (0..max_stock_weight), Σ=1
+    factor_score           REAL,            -- daily_picks.final_score (the alpha tilt input)
+    marginal_risk_contrib  REAL,            -- w_i·(Σw)_i / σ_p — fraction of portfolio vol from this name
+    cap_tier               TEXT,
+    sector                 TEXT,
+    name                   TEXT,
+    rank                   INTEGER,         -- within-tier rank carried from daily_picks
+    created_at             TEXT DEFAULT (datetime('now')),
+    PRIMARY KEY (asof_date, sid)
+);
+
+CREATE INDEX IF NOT EXISTS idx_portfolio_weights_date ON portfolio_weights(asof_date);
+
 CREATE TABLE IF NOT EXISTS daily_snapshots (
     sid             TEXT NOT NULL REFERENCES stocks(sid),
     snapshot_date   TEXT NOT NULL,
