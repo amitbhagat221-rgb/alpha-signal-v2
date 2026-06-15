@@ -645,6 +645,31 @@ CREATE TABLE IF NOT EXISTS portfolio_weights (
 
 CREATE INDEX IF NOT EXISTS idx_portfolio_weights_date ON portfolio_weights(asof_date);
 
+
+-- Track 3.3c — realized-return head-to-head for the HRP sized book. One row per
+-- (asof_date, window_days): the book's realized close-to-close return under HRP
+-- weights vs EQUAL-weight on the SAME names (isolates the weighting decision) vs a
+-- tier-weight-blended NIFTY benchmark. Reuses tools/compute_pick_outcomes price
+-- logic (trading-day windows; matches the validated backtest horizons). This is the
+-- evidence accumulating toward the plan-0002 §3.3c hard gate (factor-model book must
+-- beat the current portfolio by ≥1.5% risk-adjusted over 18-24mo). ADVISORY — no
+-- capital deployed. See tools/portfolio_outcomes.py + ADR 0044.
+CREATE TABLE IF NOT EXISTS portfolio_outcomes (
+    asof_date         TEXT NOT NULL,    -- portfolio_weights.asof_date (book date)
+    window_days       INTEGER NOT NULL, -- forward TRADING-day horizon (20/63/126)
+    hrp_return_pct    REAL,             -- Σ(weight × fwd_ret), HRP weights renorm over matured names
+    eqw_return_pct    REAL,             -- mean fwd_ret over the same matured names (equal-weight)
+    bench_return_pct  REAL,             -- tier-weight-blended NIFTY benchmark return
+    hrp_vs_eqw_pct    REAL,             -- hrp_return_pct − eqw_return_pct (the weighting edge)
+    hrp_excess_pct    REAL,             -- hrp_return_pct − bench_return_pct (vs passive)
+    n_names           INTEGER,          -- book size at asof_date
+    n_matured         INTEGER,          -- names with a realized return at this window
+    computed_at       TEXT,
+    PRIMARY KEY (asof_date, window_days)
+);
+
+CREATE INDEX IF NOT EXISTS idx_portfolio_outcomes_window ON portfolio_outcomes(window_days);
+
 CREATE TABLE IF NOT EXISTS daily_snapshots (
     sid             TEXT NOT NULL REFERENCES stocks(sid),
     snapshot_date   TEXT NOT NULL,

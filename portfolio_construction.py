@@ -327,6 +327,31 @@ def store(book):
     return upsert_df(book, "portfolio_weights")
 
 
+def backfill(since=None):
+    """Build + store the HRP book for every historical daily_picks pick_date (≥ since).
+
+    Reuses build(asof) — PIT-clean: the covariance/ADTV read `date<=asof` and the
+    alpha tilt uses that date's `final_score`, so each row is the book we WOULD have
+    held on that date. Skips dates with too few investable names (thin early dates).
+    Powers the realized-return head-to-head (tools/portfolio_outcomes.py) over the
+    daily_picks history we already have, rather than waiting for forward accumulation.
+    Returns the number of dates built."""
+    where = "WHERE pick_date >= ?" if since else ""
+    params = [since] if since else []
+    dates = read_sql(f"SELECT DISTINCT pick_date FROM daily_picks {where} "
+                     f"ORDER BY pick_date", params=params)["pick_date"].tolist()
+    built = skipped = 0
+    for d in dates:
+        try:
+            store(build(d)[0])
+            built += 1
+        except Exception as e:
+            skipped += 1
+            print(f"  skip {d}: {type(e).__name__}: {e}")
+    print(f"backfill: built {built} books, skipped {skipped} of {len(dates)} dates")
+    return built
+
+
 def run():
     """Pipeline entrypoint — build + store the latest book, return rows written.
 
@@ -365,7 +390,14 @@ def main():
     ap = argparse.ArgumentParser(description="Track 3.3c — HRP position sizing")
     ap.add_argument("--date", help="pick_date to build from (default: latest)")
     ap.add_argument("--dry-run", action="store_true", help="print, write nothing")
+    ap.add_argument("--backfill", action="store_true",
+                    help="build + store the book for every historical pick_date")
+    ap.add_argument("--since", help="with --backfill: only dates on/after YYYY-MM-DD")
     args = ap.parse_args()
+
+    if args.backfill:
+        backfill(since=args.since)
+        return
 
     book, diag = build(args.date)
     _print_report(book, diag)

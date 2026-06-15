@@ -717,6 +717,14 @@ PIPELINE_STEPS = [
      "table": "pick_outcomes",     "source": "daily_picks + stock_prices + nse_index_history",
      "data_freq": "daily",         "frequency": "daily"},
 
+    # Track 3.3c — HRP book realized-return head-to-head (HRP vs equal-weight vs
+    # NIFTY) per asof_date × window. Runs AFTER compute_pick_outcomes (reuses its
+    # price logic; both need today's prices). Non-critical, ADVISORY: the §3.3c
+    # gate evidence accumulates here. Idempotent upsert by (asof_date, window_days).
+    {"name": "portfolio_outcomes", "module": "tools.portfolio_outcomes", "function": "compute", "critical": False,
+     "table": "portfolio_outcomes", "source": "portfolio_weights + stock_prices + nse_index_history",
+     "data_freq": "daily",         "frequency": "daily"},
+
     # Plan 0007 Phase 1 — daily Unified Health Score (UHS) writer. Computes
     # factor + table + system UHS for today's snapshot. include_picks=True so
     # the daily_picks UHS rollup is also persisted alongside factors. Reads from

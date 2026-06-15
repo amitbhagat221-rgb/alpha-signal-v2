@@ -940,8 +940,14 @@ TABLE_META = {
     "portfolio_weights": {
         "kind": "COMPUTED",
         "depth": "Snapshot per build date (asof_date)",
-        "description": "Track 3.3c sized book — HRP risk-parity weights × alpha tilt over the top picks_per_tier names, under per-stock / per-sector / ₹-ADTV liquidity caps. Carries marginal_risk_contrib (percent of portfolio variance per name). ADVISORY only (no capital deployed until rank-skill validates). Built on demand by portfolio_construction.py, not on a cron.",
-        "consumed_by": "(planned) cockpit /portfolio sized view",
+        "description": "Track 3.3c sized book — HRP risk-parity weights × alpha tilt over the top picks_per_tier names, under per-stock / per-sector / ₹-ADTV liquidity caps. Carries marginal_risk_contrib (percent of portfolio variance per name). ADVISORY only (no capital deployed until rank-skill validates). Built daily after the screener (PIPELINE_STEPS) + backfilled across daily_picks history.",
+        "consumed_by": "cockpit /portfolio sized view + portfolio_outcomes (realized-return head-to-head)",
+    },
+    "portfolio_outcomes": {
+        "kind": "COMPUTED",
+        "depth": "Per (asof_date, window) — grows as books mature",
+        "description": "Track 3.3c realized-return head-to-head: each HRP book's close-to-close return at 20/63/126 trading-day windows under HRP weights vs equal-weight on the same names (the weighting edge) vs a tier-blended NIFTY benchmark. Evidence accumulating toward the §3.3c hard gate (HRP beats current portfolio by ≥1.5% risk-adjusted over 18-24mo). ADVISORY. Reuses tools/compute_pick_outcomes price logic.",
+        "consumed_by": "tools/portfolio_outcomes.report() (CLI head-to-head)",
     },
     "daily_snapshots": {
         "kind": "COMPUTED",
@@ -1266,6 +1272,11 @@ STALENESS_OVERRIDES = {
     # STALE every day. 35 tolerates the 20d-window lag + a holiday cluster,
     # yet still flags a genuinely stalled producer in ~5wk.
     "pick_outcomes":          35,
+    # portfolio_outcomes (Track 3.3c) is governed by the SAME 20d shortest window
+    # as pick_outcomes — its MAX(asof_date) is the most recent book that has matured
+    # at 20 trading days, so it structurally trails today by ~28-30 calendar days.
+    # Mirror the 35 so the daily producer is flagged only when genuinely stalled.
+    "portfolio_outcomes":     35,
     # corporate_actions producer runs daily but the freshness anchor is
     # fetched_at (ex_date isn't a _table_date_range candidate), which only
     # advances on a day with a NEW ex-date row. NSE announces something most
@@ -1416,6 +1427,7 @@ TABLE_DOMAIN = {
     # Daily output
     "daily_picks": "Output",
     "portfolio_weights": "Output",
+    "portfolio_outcomes": "Output",
     "daily_snapshots": "Output",
     "daily_changes": "Output",
     # Backtest (PIT reconstruction)
