@@ -7,9 +7,9 @@ _Numbering: [ADR 0015](../decisions/0015-track-numbering-and-rename.md) (tracks)
 ## Next 3 (active priorities)
 
 **▶ NOW (2026-06-15): Track 3.3c realized-return harness SHIPPED — accumulating.** Both the sizing spine ([portfolio_construction.py](../../portfolio_construction.py) → `portfolio_weights`, cockpit card, daily build, [ADR 0044](../decisions/0044-hrp-over-mean-variance-portfolio.md)) AND the HRP-vs-equal-weight head-to-head ([tools/portfolio_outcomes.py](../../tools/portfolio_outcomes.py) → `portfolio_outcomes`, daily PIPELINE_STEPS after `compute_pick_outcomes`; 47 historical books backfilled). All ADVISORY. **Early read (20d, n=16):** HRP −2.01% vs eqw −1.91% (edge **−0.10%**, win 38%), both < tier-NIFTY −0.78% — noisy, 20d≠HRP's horizon, don't over-read. Next 3 concrete actions:
-  1. **Risk-adjusted view** — the §3.3c gate is risk-*adjusted*; the head-to-head is raw-return only. Build a book-NAV/Sharpe path (extend [paper_portfolio.py](../../paper_portfolio.py)) for a fair vol-adjusted HRP-vs-eqw comparison.
-  2. Let 63d/126d windows mature (~Jul/Sep) — [tools/portfolio_outcomes.py](../../tools/portfolio_outcomes.py) fills them automatically each daily run.
-  3. 3.3b-3 within-group orthogonalization ([tools/factor_marginal.py](../../tools/factor_marginal.py) has steps 1-2) — OR `credit_beta` un-bench via jugaad-data `stock_prices`→2018 (free quick-win).
+  1. ✅ **Risk-adjusted view shipped 2026-06-15** ([tools/portfolio_nav.py](../../tools/portfolio_nav.py)) — daily-rebal NAV, HRP vs equal-weight (selection held constant). Early read (46d, ADVISORY): **HRP Sharpe 0.83 vs eqw 0.20** (vol −0.8pp, info-ratio +2.12) — flips the raw-20d −0.10% read, confirming the gate must be risk-adjusted; both still < NIFTY (strong-index 2mo). Costs excluded; daily-rebal = high turnover.
+  2. ⏳ 3.3b-3 within-group orthogonalization ([tools/factor_marginal.py](../../tools/factor_marginal.py) has steps 1-2).
+  3. ⏳ `credit_beta` un-bench via jugaad-data `stock_prices`→2018 (free quick-win). _Then: let 63d/126d book windows mature (~Jul/Sep, auto)._
 
 _Completed keystones / gated items below (kept for context):_
 
