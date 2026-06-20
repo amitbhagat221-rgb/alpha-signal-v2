@@ -230,6 +230,31 @@ def backfill(days=30, dry_run=False):
     return total
 
 
+def backfill_range(start, end, dry_run=False):
+    """Backfill bhavcopy for an explicit [start, end] calendar range (YYYY-MM-DD).
+
+    For deep historical fills below the daily-cron floor (e.g. extending PIT before
+    stock_prices' 2022-07 start to test regime-sensitive factors like credit_beta over
+    the 2020-22 credit-stress window). Reuses fetch_bhavcopy → identical mapping /
+    validation / sid-map / source='bhavcopy', so the rows are consistent with the live
+    table. Weekends skip free; holidays 404 and skip. 2s floor between fetches (CLAUDE
+    data rule). NOTE: the sec_bhavdata_full archive only reaches ~2020-01; older dates
+    404 (would need jugaad-data's legacy-format path)."""
+    s = datetime.strptime(start, "%Y-%m-%d").date()
+    e = datetime.strptime(end, "%Y-%m-%d").date()
+    print(f"NSE Bhavcopy: backfilling range {s} → {e}")
+    total = 0
+    d = s
+    while d <= e:
+        if _is_trading_day(d):
+            total += fetch_bhavcopy(d, dry_run=dry_run)
+            if not dry_run:
+                time.sleep(2)
+        d += timedelta(days=1)
+    print(f"\nTotal: {total} new rows ({s} → {e})")
+    return total
+
+
 def compute(dry_run=False):
     """Pipeline entry point — backfill last 7 trading days.
 
@@ -246,10 +271,14 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--date", help="Fetch specific date (YYYY-MM-DD)")
     parser.add_argument("--backfill", type=int, help="Backfill last N days")
+    parser.add_argument("--start", help="Range backfill start (YYYY-MM-DD), with --end")
+    parser.add_argument("--end", help="Range backfill end (YYYY-MM-DD), with --start")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
-    if args.backfill:
+    if args.start and args.end:
+        backfill_range(args.start, args.end, dry_run=args.dry_run)
+    elif args.backfill:
         backfill(days=args.backfill, dry_run=args.dry_run)
     elif args.date:
         print("NSE Bhavcopy:")

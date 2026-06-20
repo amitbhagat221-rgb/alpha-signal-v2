@@ -1,18 +1,19 @@
 # HANDOFF
-Updated: 2026-06-15 | Branch: master | HEAD: `f549e35` (3.3c spine, pushed) + uncommitted realized-return harness on top
+Updated: 2026-06-20 | Branch: master | HEAD: `da4bf40` (model-ID fix) + uncommitted Track C range-backfill on top
 
 ## Left off
-Track 3.3c now has BOTH halves: the **sizing spine** ([portfolio_construction.py](portfolio_construction.py) → `portfolio_weights`, cockpit "Sized Book — HRP" card w/ weighted analyst-PT expected-1Y, daily build, [ADR 0044](docs/decisions/0044-hrp-over-mean-variance-portfolio.md)) committed as `f549e35`, AND the **realized-return harness** ([tools/portfolio_outcomes.py](tools/portfolio_outcomes.py) → `portfolio_outcomes`: 47 historical books backfilled, HRP vs equal-weight-same-names vs tier-NIFTY per asof_date×window, daily after `compute_pick_outcomes`) — this part is **uncommitted** on `f549e35`. Early 20d read (n=16, ADVISORY): HRP −2.01% vs eqw −1.91% (edge −0.10%, win 38%) — noisy/early, 20d≠HRP horizon; health all-green (84 fresh).
+Big multi-track session, all committed except the Track C backfill tool: (1) **HRP portfolio thread end-to-end** — sizing spine (`f549e35`) → realized-return harness (`3fbf2a3`) → risk-adjusted NAV (`f26ac3d`, [tools/portfolio_nav.py](tools/portfolio_nav.py)) showing **HRP Sharpe 0.83 vs eqw 0.20** (the risk-adjusted lens flips the raw-20d −0.10% read in HRP's favor); (2) **3.3b-3 within-group orthogonalization** (`5848bcb`) — Value is the most collinear group (ρ≤0.74); (3) **credit_beta fair-test → definitive DROP** — backfilled `stock_prices` to 2020-01 (+781,884 rows), 65 anchors incl. the 2020-22 stress regime, still no IC ([[credit_beta_benched_signal_not_data]]); (4) **fixed a 4-day CRITICAL** (`da4bf40`) — retired Sonnet model ID `claude-sonnet-4-20250514` → `claude-sonnet-4-6`. Health was 8 CRITICAL from the dead model ID (now fixed; next pipeline run clears it).
 
 ## Pick up here
-1. **Risk-adjusted comparison** — the §3.3c gate is risk-*adjusted* but `portfolio_outcomes` is raw-return only. Build a book-NAV/Sharpe path (extend [paper_portfolio.py](paper_portfolio.py), `paper_nav_history` is empty) so HRP-vs-eqw is compared on vol-adjusted terms, not just mean return.
-2. **Let windows mature** — 63d/126d book outcomes fill automatically (~Jul/Sep) via the daily [tools/portfolio_outcomes.py](tools/portfolio_outcomes.py) step; re-check `python -m tools.portfolio_outcomes --report-only`.
-3. **3.3b-3 within-group orthogonalization** ([tools/factor_marginal.py](tools/factor_marginal.py) steps 1-2) OR **`credit_beta` un-bench** via jugaad-data `stock_prices`→2018 (free quick-win). _Date-gated: `validate_rank_skill` ~2026-07-06; `pt_upside` re-verify ~2026-08-01._
+1. **3.3d Barra-style risk model** (last unbuilt 3.3 piece — style+industry+specific attribution) OR **§3.2.3 microstructure** (3 intraday factors — blocked on Kite creds).
+2. **Wire the small-cap quality gate (2.1) into `daily_picks`** — built but consumed nowhere (latent gap in the screener).
+3. _Date-gated clocks (nothing to code): `validate_rank_skill` ~2026-07-06 · `pt_upside` re-verify ~2026-08-01 · 63d/126d book outcomes mature ~Jul/Sep (auto via the daily `portfolio_outcomes` step)._
 
 ## Watch out
-- **Cockpit persisted-cache survives restarts**: `data/.cockpit_cache/*.pkl` hold `(payload, mtime)` with a 60s TTL. After deploying `cockpit/api.py` changes, a pre-edit pickle serves for up to 60s while the new template renders the missing field as Jinja *Undefined* → e.g. "Expected 1Y" showed **+0.0% / blank coverage** for ~1 min post-restart, then self-healed. To force-refresh: delete the pkl. (Today it was the cache, not a code bug.)
-- **`portfolio_weights` covariance uses RAW `stock_prices.close`** winsorized ±0.5 (no adj_close exists) — a genuine >50% one-day move gets clipped. The `config.PORTFOLIO["hrp"]` caps (stock 12% / sector 35%) **intentionally differ** from top-level `max_stock_weight_pct=5.0`, which is infeasible for a 15-name book (1/15≈6.7%).
-- **`portfolio_construction` step is `critical:False`** — a thin-day build failure logs FAILED but never blocks dossier/email; `run()` raises on an empty book (no placeholder). `asof_date` was added to `db._table_date_range` DATE_COLS (only `portfolio_weights` uses it) so it now freshness-tracks like `daily_picks`.
+- **`stock_prices` now reaches 2020-01** (was 2022-07), but only `macro_betas` + `fwd_return` were PIT-reconstructed for 2020-22. Other factors' PIT still starts later — run `reconstruct_pit --signal X --months N` to extend a specific factor into the new window. The backfill tool is `sources.nse --start YYYY-MM-DD --end YYYY-MM-DD` (archive reaches ~2020-01; older needs jugaad-data's legacy path).
+- **`portfolio_weights` / `portfolio_outcomes` / `portfolio_nav` are ADVISORY** — no capital deployed; the §3.3c head-to-head gate (≥1.5% risk-adj, 18-24mo) is ~2027.
+- **Cockpit persisted-cache survives restarts** (`data/.cockpit_cache/*.pkl`, 60s TTL): after deploying `cockpit/api.py` changes, a pre-edit pickle serves new template fields as Jinja Undefined (e.g. `+0.0%`) for up to 60s, then self-heals; delete the pkl to force-refresh.
+- **`insider_trades` STALE ~49d** is the NSE disclosure lag (override 45d), not a code bug — it backfills as filings are disclosed.
 
 ## Active plan
-docs/plans/0002-100-factors-and-model.md (Phase 3.3c — spine shipped, hard gate pending ~18-24mo).
+docs/plans/0002-100-factors-and-model.md (Phase 3.3c — spine + harness + risk-adjusted NAV done; hard gate ~2027. 3.3b-3 done. 3.3d next.)
