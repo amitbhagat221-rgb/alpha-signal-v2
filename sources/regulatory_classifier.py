@@ -27,7 +27,7 @@ from db import read_sql, get_db, insert_df, upsert_df
 
 # Cost-efficient: Haiku for pre-filter, Sonnet for deep classification
 HAIKU_MODEL = "claude-haiku-4-5-20251001"
-SONNET_MODEL = "claude-sonnet-4-20250514"
+SONNET_MODEL = "claude-sonnet-4-6"
 
 PREFILTER_PROMPT = """Classify this Indian financial news headline+summary.
 Is this about government regulation, policy, court orders, RBI/SEBI decisions,

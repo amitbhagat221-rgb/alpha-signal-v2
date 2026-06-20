@@ -33,7 +33,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from db import read_sql, get_db
 
-SONNET_MODEL = "claude-sonnet-4-20250514"
+SONNET_MODEL = "claude-sonnet-4-6"
 
 BRIEF_PROMPT = """You are writing the daily intelligence brief for one Indian investor / market-aware reader.
 Their top interest areas are Indian markets, macro policy, AI/tech, and global economy.

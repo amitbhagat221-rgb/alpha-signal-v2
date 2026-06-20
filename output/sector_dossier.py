@@ -38,7 +38,7 @@ from db import get_db, read_sql
 from output.dossier import _scan_for_numbers
 
 
-MODEL = "claude-sonnet-4-20250514"
+MODEL = "claude-sonnet-4-6"
 
 # Narrative fields that must stay number-free. what_to_watch / *_case are lists.
 _NARRATIVE_FIELDS = ("thesis", "bull_case", "bear_case",
