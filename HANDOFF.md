@@ -13,7 +13,7 @@ Big multi-track session, all committed except the Track C backfill tool: (1) **H
 - **`stock_prices` now reaches 2020-01** (was 2022-07), but only `macro_betas` + `fwd_return` were PIT-reconstructed for 2020-22. Other factors' PIT still starts later — run `reconstruct_pit --signal X --months N` to extend a specific factor into the new window. The backfill tool is `sources.nse --start YYYY-MM-DD --end YYYY-MM-DD` (archive reaches ~2020-01; older needs jugaad-data's legacy path).
 - **`portfolio_weights` / `portfolio_outcomes` / `portfolio_nav` are ADVISORY** — no capital deployed; the §3.3c head-to-head gate (≥1.5% risk-adj, 18-24mo) is ~2027.
 - **Cockpit persisted-cache survives restarts** (`data/.cockpit_cache/*.pkl`, 60s TTL): after deploying `cockpit/api.py` changes, a pre-edit pickle serves new template fields as Jinja Undefined (e.g. `+0.0%`) for up to 60s, then self-heals; delete the pkl to force-refresh.
-- **`insider_trades` STALE ~49d** is the NSE disclosure lag (override 45d), not a code bug — it backfills as filings are disclosed.
+- **`insider_trades` is now `BEST_EFFORT_STALE`** (db.py) — root cause found 2026-06-22: NSE's `corporates-pit` endpoint STOPPED serving recent PIT ~2026-05 (200+data for Apr [392 rows], ~0 May-on; not a 403/lag). Producer runs clean but lands nothing → frozen at trade_date 2026-05-02. Non-wired factor (zero pick impact); watchdog now skips it + health exempts its heal-streak from CRITICAL (stays an honest WARN). **Revisit = find a working PIT endpoint** (NSE site archaeology).
 
 ## Active plan
 docs/plans/0002-100-factors-and-model.md (Phase 3.3c — spine + harness + risk-adjusted NAV done; hard gate ~2027. 3.3b-3 done. 3.3d next.)

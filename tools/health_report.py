@@ -210,6 +210,11 @@ def _gather_pipeline(since_days):
         """,
         params=[f"-{since_days + FAILURE_STREAK_DAYS} days", FAILURE_STREAK_DAYS],
     )
+    # Exempt best-effort sources' heal steps: a `watchdog_<table>_heal` for a table in
+    # BEST_EFFORT_STALE can't be healed by re-running (the upstream source has no data),
+    # so its "failed N days" is not a systemic failure → don't escalate to CRITICAL.
+    from db import BEST_EFFORT_STALE
+    _exempt = {f"watchdog_{t}_heal" for t in BEST_EFFORT_STALE}
     out["failed_streaks"] = [
         {
             "step": r["step_name"],
@@ -217,6 +222,7 @@ def _gather_pipeline(since_days):
             "sample_error": (r["sample_error"] or "")[:200],
         }
         for _, r in streaks.iterrows()
+        if r["step_name"] not in _exempt
     ]
 
     # Overall run status: SUCCESS if no failures today, FAILED otherwise

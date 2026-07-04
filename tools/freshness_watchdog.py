@@ -24,7 +24,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from db import data_health, get_db, read_sql
+from db import BEST_EFFORT_STALE, data_health, get_db, read_sql
 from config import PIPELINE_STEPS
 from pipeline import run_step
 
@@ -155,6 +155,17 @@ def scan(dry_run=False, only_tables=None):
         age = int(row["age_days"]) if row["age_days"] else "?"
         freshness = row["freshness"]
         producer = _producer_for(tbl, row.get("produced_by"))
+
+        # Best-effort sources (e.g. insider_trades — NSE PIT endpoint stopped serving
+        # recent data ~2026-05) can't be healed by re-running: the upstream has nothing
+        # to fetch. Skip the rerun (don't waste the fetch) and log SKIPPED — health_report
+        # exempts these from the failed-streak CRITICAL. Stays a WARN (honestly stale).
+        if tbl in BEST_EFFORT_STALE:
+            print(f"  ~ {tbl:30s} {freshness:8s} {age}d old — best-effort source, not heal-eligible (upstream has no fresh data)")
+            _log_watchdog(tbl, "heal", "SKIPPED",
+                          error="best-effort source — upstream carries no fresh data; won't self-heal")
+            skipped += 1
+            continue
 
         if producer is None:
             print(f"  ✗ {tbl:30s} {freshness:8s} {age}d old — NO PRODUCER REGISTERED")

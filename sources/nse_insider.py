@@ -108,6 +108,10 @@ def _parse_records(records):
             trade_date = datetime.strptime(raw_dt[:11].strip(), "%d-%b-%Y").strftime("%Y-%m-%d")
         except ValueError:
             continue
+        # Reject future-dated trades — a trade can't be in the future; these are NSE data
+        # glitches (e.g. 2026-11-26 seen on 2026-06-22) that corrupt MAX(trade_date)/freshness.
+        if trade_date > datetime.now().strftime("%Y-%m-%d"):
+            continue
 
         person_cat = rec.get("personCategory", "")
         person = rec.get("acqName", "")

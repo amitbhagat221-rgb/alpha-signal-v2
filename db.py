@@ -1226,15 +1226,25 @@ STALENESS_THRESHOLDS = {
 
 # Per-table overrides for tables whose upstream has known publishing lag.
 # Listed by table name; takes precedence over the frequency-based default.
+# BEST_EFFORT_STALE — tables whose UPSTREAM SOURCE can legitimately carry no fresh
+# data, so persistent staleness is a WARN, never a heal-streak CRITICAL. Re-running
+# the producer can't heal them (nothing to fetch), so the freshness watchdog skips the
+# heal-rerun and health_report exempts their `watchdog_<table>_heal` step from the
+# "failed N consecutive days → CRITICAL" escalation.
+#   insider_trades: NSE's corporates-pit endpoint STOPPED serving recent PIT disclosures
+#   ~2026-05 (verified 2026-06-22: returns 200 + data for Apr [392 rows] but ~0 for
+#   May-onward; the wide Mar-Jun window still has 2452 rows, so it's a recent-data cliff,
+#   not a 403/block). The producer runs clean but lands nothing → table frozen at
+#   trade_date 2026-05-02. insider_score is NOT wired into SIGNAL_WEIGHTS (zero pick
+#   impact). Revisit when a working PIT endpoint is found (NSE site archaeology).
+BEST_EFFORT_STALE = {"insider_trades"}
+
 STALENESS_OVERRIDES = {
-    # NSE PIT insider disclosures lag the trade by WEEKS. Querying by trade_date
-    # (acqfromDt) makes the recent ~6wk window structurally sparse — it backfills
-    # over time as filings are disclosed + indexed. Verified 2026-06-04: the
-    # by-trade-date counts taper monotonically toward today (Mar 2057 → Apr 276/68
-    # → May 1-5: 3 → 0 thereafter), the endpoint itself is healthy. So MAX(trade_date)
-    # trails today by the disclosure lag even when ingestion is perfect.
-    # 14→30 (2026-05-25), 30→45 (2026-06-04) once the real lag was measured; the
-    # producer also widened to a 60d window so late disclosures actually land.
+    # NSE PIT insider disclosures lag the trade by WEEKS (by-trade_date is structurally
+    # sparse near today). UPDATE 2026-06-22: beyond the lag, the corporates-pit endpoint
+    # itself went stale for recent data (~May 2026 cliff) — insider_trades is now in
+    # BEST_EFFORT_STALE so the watchdog won't escalate its unhealable staleness to
+    # CRITICAL. 14→30 (2026-05-25), 30→45 (2026-06-04) as the real lag was measured.
     "insider_trades": 45,
     # earnings_calendar is a FORWARD-dated board-meeting calendar; a daily nselib
     # pull keeps near-future events present so MAX(date) sits ahead of today during
