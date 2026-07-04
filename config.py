@@ -921,6 +921,8 @@ RAW_TABLES = [
     #    cron is invisible to the watchdog — the standalone-cron silent-failure landmine.
     {"table": "bse_announcements",      "source": "BSE AnnSubCategoryGetData --days 7 (run_daily_forward.sh cron)", "data_freq": "daily", "frequency": "daily"},
     {"table": "scrip_master",           "source": "Upstox instrument master (run_daily_forward.sh cron)",          "data_freq": "daily", "frequency": "daily"},
+    # manual pull; auth broken 2026-07-01 — alarm is the point
+    {"table": "fundamentals_screener",  "source": "Screener.in Premium (manual pull, no automated cron)",         "data_freq": "biweekly", "frequency": "weekly"},
 ]
 
 

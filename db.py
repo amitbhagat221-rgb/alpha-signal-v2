@@ -1332,6 +1332,10 @@ STALENESS_OVERRIDES = {
     # for every row) so its anchor advances daily regardless; 5 tolerates a skipped run.
     "bse_announcements":       5,
     "scrip_master":            5,
+    # fundamentals_screener: manual Screener.in Premium pull, roughly fortnightly.
+    # 21d gives one missed cycle before alarm. Auth broken 2026-07-01 — the alarm
+    # firing daily until Amit repairs it is intended (audit Data-F2).
+    "fundamentals_screener":  21,
 }
 
 # Per-stock coverage gates. A table that should have a row per universe stock
