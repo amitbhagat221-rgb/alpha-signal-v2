@@ -1337,6 +1337,10 @@ STALENESS_OVERRIDES = {
     # 21d gives one missed cycle before alarm. Auth broken 2026-07-01 — the alarm
     # firing daily until Amit repairs it is intended (audit Data-F2).
     "fundamentals_screener":  21,
+    # uhs_calibration_log rows mature on a 20d forward window (pick_outcomes join),
+    # so MAX(date) is structurally ~1 month old even when the producer is healthy.
+    # 45d tolerates that lag and only alarms on true death (audit Data-F5).
+    "uhs_calibration_log":    45,
 }
 
 # Per-stock coverage gates. A table that should have a row per universe stock

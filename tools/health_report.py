@@ -73,7 +73,6 @@ EXPECTED_EMPTY_TABLES = {
     "paper_trades",        # paper-trading not live yet
     "paper_positions",
     "paper_nav_history",
-    "uhs_calibration_log", # Plan 0007 Phase 8 calibration scaffold — not yet populated
 }
 
 
