@@ -23,6 +23,14 @@ PROJECT_ROOT = Path(__file__).resolve().parent
 DB_PATH = PROJECT_ROOT / "data" / "alpha_signal.db"
 SCHEMA_PATH = PROJECT_ROOT / "schema.sql"
 
+# Candidate business-date columns, checked by both _table_date_range (freshness
+# scan) and the future-date ingestion guard below. Ordered: business/event dates
+# first, ingestion timestamps last.
+DATE_COLS = ["snapshot_date", "date", "end_date", "period", "pick_date",
+             "asof_date", "as_of_date", "run_date", "published_at", "deal_date",
+             "trade_date", "classified_at", "brief_date", "change_date",
+             "fetched_at", "updated_at"]
+
 
 @contextmanager
 def get_db():
@@ -446,6 +454,28 @@ def get_latest_date(table_name, date_column="snapshot_date"):
 
 # ── Write helpers ──
 
+def _drop_future_dated_rows(df, table_name):
+    """Drop rows whose date column parses to a date > today + 2 days.
+
+    +2d (not +7d) tolerates weekend/T+1 NAV publishing lag. The +7d read-side
+    tolerance in _table_date_range is unaffected — this only guards writes.
+    Checks the first matching DATE_COLS column found on the frame; drop-and-log,
+    never raise (audit Data-F9 — future-dated NAV rows broke freshness math).
+    """
+    date_col = next((c for c in DATE_COLS if c in df.columns), None)
+    if date_col is None:
+        return df
+
+    parsed = pd.to_datetime(df[date_col], errors="coerce", utc=True, format="mixed")
+    upper_bound = pd.Timestamp.utcnow() + pd.Timedelta(days=2)
+    future_mask = parsed.notna() & (parsed > upper_bound)
+    n = int(future_mask.sum())
+    if n > 0:
+        print(f"[future-date guard] {table_name}: dropped {n} rows")
+        df = df.loc[~future_mask]
+    return df
+
+
 def insert_df(df, table_name, conn=None):
     """
     Insert DataFrame rows. Skips rows that violate UNIQUE/PRIMARY KEY
@@ -453,6 +483,10 @@ def insert_df(df, table_name, conn=None):
 
     Use for append-only tables: insider_trades, bulk_deals, news_articles.
     """
+    if df.empty:
+        return 0
+
+    df = _drop_future_dated_rows(df, table_name)
     if df.empty:
         return 0
 
@@ -637,6 +671,10 @@ def upsert_df(df, table_name, conn=None):
     %-vs-fraction class. Undeclared columns pass through silently; declared
     columns whose value distribution looks wrong raise UnitMismatchError.
     """
+    if df.empty:
+        return 0
+
+    df = _drop_future_dated_rows(df, table_name)
     if df.empty:
         return 0
 
@@ -1044,11 +1082,6 @@ def _table_date_range(conn, tbl):
     # Ordered: business/event dates first, ingestion timestamps last. Tables like
     # insider_trades and bulk_deals carry both — we want the trade/deal date span,
     # not when v2 ingested the row (which is bounded by the v2 cutover).
-    DATE_COLS = ["snapshot_date", "date", "end_date", "period", "pick_date",
-                 "asof_date", "as_of_date", "run_date", "published_at", "deal_date",
-                 "trade_date", "classified_at", "brief_date", "change_date",
-                 "fetched_at", "updated_at"]
-
     for col in DATE_COLS:
         try:
             sql_min, sql_max = conn.execute(
