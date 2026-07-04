@@ -578,8 +578,7 @@ def send_email(dry_run=False):
     recipient = os.environ.get("EMAIL_RECIPIENT", gmail_user)
 
     if not gmail_user or not gmail_pass:
-        print("  GMAIL_USER / GMAIL_APP_PASSWORD not set — skipping send.")
-        return 0
+        raise RuntimeError("email send failed: GMAIL_USER / GMAIL_APP_PASSWORD not set")
 
     msg = MIMEMultipart("alternative")
     msg["Subject"] = f"Alpha Signal · {date.today().strftime('%a %d %b')} · Daily Brief"
@@ -595,8 +594,7 @@ def send_email(dry_run=False):
         print(f"  Sent to {recipient}")
         return 1
     except Exception as e:
-        print(f"  Send failed: {e}")
-        return 0
+        raise RuntimeError(f"email send failed: {e}") from e
 
 
 def compute(dry_run=False):
