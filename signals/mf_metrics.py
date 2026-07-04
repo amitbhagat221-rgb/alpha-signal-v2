@@ -160,7 +160,7 @@ def _compute_one_scheme(nav: pd.DataFrame, bench: pd.DataFrame | None) -> dict:
     cutoff_1y = end_date - pd.DateOffset(years=1)
     window_1y = nav[nav["nav_date"] >= cutoff_1y]
     std_1y = window_1y["log_ret"].std() * np.sqrt(TRADING_DAYS_PER_YEAR) * 100 if len(window_1y) > 30 else None
-    sharpe_1y = ((ret_1y or 0) / 100 - RISK_FREE_RATE) / (std_1y / 100) if (std_1y and std_1y > 0) else None
+    sharpe_1y = ((ret_1y or 0) / 100 - RISK_FREE_RATE) / (std_1y / 100) if (std_1y and std_1y > 0 and ret_1y is not None) else None
 
     cutoff_3y = end_date - pd.DateOffset(years=3)
     window_3y = nav[nav["nav_date"] >= cutoff_3y]
@@ -170,7 +170,7 @@ def _compute_one_scheme(nav: pd.DataFrame, bench: pd.DataFrame | None) -> dict:
     # Sortino (downside-only)
     if len(window_1y) > 30:
         downside = window_1y[window_1y["log_ret"] < 0]["log_ret"]
-        sortino_1y = ((ret_1y or 0) / 100 - RISK_FREE_RATE) / (downside.std() * np.sqrt(TRADING_DAYS_PER_YEAR)) if not downside.empty and downside.std() > 0 else None
+        sortino_1y = ((ret_1y or 0) / 100 - RISK_FREE_RATE) / (downside.std() * np.sqrt(TRADING_DAYS_PER_YEAR)) if (not downside.empty and downside.std() > 0 and ret_1y is not None) else None
     else:
         sortino_1y = None
 
