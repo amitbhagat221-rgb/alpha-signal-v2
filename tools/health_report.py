@@ -244,8 +244,13 @@ def _gather_tables():
         (r["table"], r["age_days"], r["threshold_days"], r["produced_by"])
         for _, r in df[df["freshness"] == "OUTDATED"].iterrows()
     ]
+    no_date_anchor = [
+        (r["table"], r["produced_by"])
+        for _, r in df[df["freshness"] == "NO_DATE_ANCHOR"].iterrows()
+    ]
     empty = df[df["status"] == "EMPTY"]["table"].tolist()
-    return {"fresh": fresh, "stale": stale, "outdated": outdated, "empty": empty}
+    return {"fresh": fresh, "stale": stale, "outdated": outdated,
+            "no_date_anchor": no_date_anchor, "empty": empty}
 
 
 def _gather_dossiers():
@@ -366,6 +371,15 @@ def _classify(state):
             "severity": WARN,
             "code": "TABLE_STALE",
             "message": f"{tbl} is STALE ({age}d / threshold {threshold}d)",
+            "detail": f"producer: {producer}",
+        })
+
+    # No date anchor — registered for freshness tracking but no DATE_COLS match. WARN.
+    for tbl, producer in state["tables"].get("no_date_anchor", []):
+        issues.append({
+            "severity": WARN,
+            "code": "TABLE_NO_DATE_ANCHOR",
+            "message": f"{tbl} has no date-column match — freshness cannot be computed",
             "detail": f"producer: {producer}",
         })
 

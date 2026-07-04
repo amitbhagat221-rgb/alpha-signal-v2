@@ -1045,8 +1045,9 @@ def _table_date_range(conn, tbl):
     # insider_trades and bulk_deals carry both — we want the trade/deal date span,
     # not when v2 ingested the row (which is bounded by the v2 cutover).
     DATE_COLS = ["snapshot_date", "date", "end_date", "period", "pick_date",
-                 "asof_date", "run_date", "published_at", "deal_date", "trade_date",
-                 "classified_at", "fetched_at", "updated_at"]
+                 "asof_date", "as_of_date", "run_date", "published_at", "deal_date",
+                 "trade_date", "classified_at", "brief_date", "change_date",
+                 "fetched_at", "updated_at"]
 
     for col in DATE_COLS:
         try:
@@ -1380,9 +1381,16 @@ def _compute_coverage_status(table_name, stock_coverage_pct):
 
 
 def _compute_freshness(latest_date_iso, refresh_freq, table_name=None):
-    """Return (status, age_days, threshold_days). status ∈ FRESH/STALE/OUTDATED/N/A."""
-    if not latest_date_iso or refresh_freq not in STALENESS_THRESHOLDS:
+    """Return (status, age_days, threshold_days). status ∈ FRESH/STALE/OUTDATED/NO_DATE_ANCHOR/N/A.
+
+    NO_DATE_ANCHOR (WARN severity, not CRITICAL): the table has a registered
+    refresh frequency (so it IS expected to be freshness-tracked) but none of
+    DATE_COLS matched a column on it — a blind spot, not a data problem.
+    """
+    if refresh_freq not in STALENESS_THRESHOLDS:
         return "N/A", None, None
+    if not latest_date_iso:
+        return "NO_DATE_ANCHOR", None, None
     try:
         from datetime import datetime
         latest = datetime.strptime(latest_date_iso, "%Y-%m-%d").date()
