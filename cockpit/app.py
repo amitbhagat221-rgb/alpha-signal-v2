@@ -476,7 +476,7 @@ async def mutual_funds_page(
     request: Request,
     category: str = None, amc: str = None,
     plan: str = None, option: str = None,
-    q: str = None, sort: str = "score", page: int = 1,
+    q: str = None, sort: str = "percentile", page: int = 1,
     show_all: int = 0,
 ):
     bundle = api.get_mf_universe_overview(

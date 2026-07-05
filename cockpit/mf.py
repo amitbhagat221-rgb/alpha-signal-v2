@@ -25,7 +25,7 @@ from cockpit._shared import _persisted_cache
 @_persisted_cache(600, name="mf_universe_overview")
 def get_mf_universe_overview(category: str = None, amc: str = None,
                               plan: str = None, option: str = None,
-                              q: str = None, sort: str = "score",
+                              q: str = None, sort: str = "percentile",
                               page: int = 1, page_size: int = 50,
                               include_non_investable: bool = False) -> dict:
     """Filterable + paginated universe browser. Returns dict with rows + facets + counts.
@@ -40,7 +40,8 @@ def get_mf_universe_overview(category: str = None, amc: str = None,
                        investable: data_quality != 'TRUSTED' (wound-up, segregated,
                        interval, bonus, anomalous NAV) OR latest NAV is stale
                        (>30 days old — matured FMPs, delisted plans). Default False.
-    Sort: 'score' (default) / 'ret_1y' / 'ret_3y' / 'sharpe_1y' / 'name'.
+    Sort: 'percentile' (default, within-category — audit MF-F2) / 'score' (absolute,
+      cross-category) / 'ret_1y' / 'ret_3y' / 'sharpe_1y' / 'name'.
     """
     where = ["sm.active = 1"]
     if not include_non_investable:
@@ -73,6 +74,12 @@ def get_mf_universe_overview(category: str = None, amc: str = None,
 
     where_sql = " AND ".join(where)
     sort_map = {
+        # Default (audit MF-F2): within-category percentile. The absolute
+        # composite_score confounds fund skill with which asset class happened
+        # to run recently (equity vs debt vs gold) — percentile compares each
+        # fund only against its own category peers, which is the fair question
+        # ("is this a good large-cap fund?") for a cross-category listing.
+        "percentile": "m.score_percentile DESC NULLS LAST",
         "score":     "m.composite_score DESC NULLS LAST",
         "ret_1y":    "m.ret_1y DESC NULLS LAST",
         "ret_3y":    "m.ret_3y_cagr DESC NULLS LAST",
@@ -81,7 +88,7 @@ def get_mf_universe_overview(category: str = None, amc: str = None,
         "max_dd":    "m.max_drawdown DESC NULLS LAST",
         "name":      "sm.scheme_name ASC",
     }
-    order_by = sort_map.get(sort, sort_map["score"])
+    order_by = sort_map.get(sort, sort_map["percentile"])
 
     # Join to LATEST mf_metrics row per scheme (defensive — table should be clean
     # after the monthly compute, but stale rows from earlier runs can stick around).
