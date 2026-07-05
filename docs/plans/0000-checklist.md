@@ -25,7 +25,7 @@ _Completed keystones / gated items below (kept for context):_
   - 💤 pledge events (buried in Insider/SAST).
   - _Free quick-wins backlog: SEC-EDGAR ADR PIT audit · jugaad-data `stock_prices`→2018 (un-benches `credit_beta`). (✅ Deflated-Sharpe/multiple-testing done — [tools/multiple_testing.py](../../tools/multiple_testing.py)/[ADR 0043](../decisions/0043-multiple-testing-aware-factor-significance.md).)_
 
-**2. `pt_upside` artifact re-verify (due ~2026-08)** — capped 0.16–0.25 in `SIGNAL_WEIGHTS`; gate already self-corrected it to FAST 5d. Re-run `backtest_pit --signal pt_upside` once ≥3 fresh `analyst_consensus_snapshots` exist → un-cap or pull.
+**2. `pt_upside` artifact re-verify — ✅ RESOLVED NEGATIVELY 2026-07-05** (via audit-2026-07-04 remediation, [ADR 0045](../decisions/0045-pull-pt-upside-lookahead.md)): the t=7-9 was `forecast_history` look-ahead contamination (year-ahead realized close), not real alpha. Purged + rebuilt from `analyst_consensus_snapshots` only → n=1 period, INSUFFICIENT all tiers. Pulled from `SIGNAL_WEIGHTS`, remaining weights renormalized. Re-entry: ≥12 clean monthly anchors AND |t|≥1.5 (~2027-05).
 
 **3. MID weight conflicts — ✅ RESOLVED 2026-06-14** (horizon-aware marginal + gate + multiple-testing): **`accruals` 0.18→0.20 KEEP** (gate REJECT was a fast-horizon artifact; it's genuine SLOW alpha, incr_t −5.4 @252d + v1 3.20), **`consensus` 0.08→0.06 trim** (MID edge decayed post-2022 — weak/negative at every v2 horizon, only v1 supported it). 3 v2-lenses vs 1 v1 panel, not a one-read override; Σ|w|=1.0, screener re-run, 0 CRITICAL. _(`smart_money` n=6 / Kite + §3.2.3 intraday still queued.)_
 
@@ -82,7 +82,6 @@ _(Crypto convex cockpit → **decoupled to its own repo `~/crypto-convex`** sinc
 - **2026-05-29→30:** walk-forward OOS (SMALL validated, LARGE/MID ~zero); financial-signal split; DuckDB replica; trust pipeline.
 
 ## Open questions
-- `pt_upside` |t|=7-9 — real alpha or PIT artifact? Re-test after ≥3 monthly snapshots (~2026-08).
 - credit-rating direction — worth a PDF/text-extraction layer to recover the buried downgrades (the valuable half)?
 - 2.3 commodity-data gaps — skip cement/steel until manual curation?
 - insider/regulatory/macro signal weights — tertiary 0.2× for the first two, zero for macro?
