@@ -3184,7 +3184,10 @@ FACTOR_LIBRARY = [
     "roic",                 # best |t|=0.75 LARGE
     "fcf_yield",            # best |t|=1.08 SMALL
     "roiic",                # best |t|=0.91 MID, intuitive sign
-    "gross_profitability",  # Novy-Marx anchor (multibagger funnel) — not yet backtested
+    "gross_profitability",  # Novy-Marx anchor (multibagger funnel). First backtest 2026-07-05
+                             # (audit gap #5): SMALL t=-3.91 KEEP, MID t=-2.18 WEAK, LARGE t=-1.32
+                             # DROP — all NEGATIVE sign (opposite of Novy-Marx). Contrarian-sign
+                             # KEEP, not auto-promotion-eligible — parked pending sign/regime check.
     "dio_change_yoy",       # best |t|=0.97 MID
     "sloan_accruals_full",  # best |t|=1.43 SMALL
     "sga_to_revenue_change",  # best |t|=0.69 MID
