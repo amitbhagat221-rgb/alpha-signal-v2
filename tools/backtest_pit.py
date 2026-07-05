@@ -23,6 +23,16 @@ Usage:
     python -m tools.backtest_pit              # all signals × all tiers
     python -m tools.backtest_pit --signal piotroski_f
     python -m tools.backtest_pit --dry-run    # don't write
+
+SURVIVORSHIP CAVEAT (audit Data-F1): every anchor's cross-section here is
+built from CURRENT sids only — delisted/merged/renamed symbols that were
+part of the true historical NSE universe are silently absent. Worst measured
+snapshot (2018-04-02): 40.1% of that date's true universe never maps to a
+current sid; 1,381 distinct symbols never map at all (1,017 of those still
+active as of 2023+). See `python -m tools.survivorship_exposure` for the
+full per-snapshot breakdown. Not fixed here — rebuilding the panel against
+`historical_universe` has unfixable fundamentals gaps for dead names
+(no quarterly_income/balance_sheet history was ever fetched for them).
 """
 
 import argparse
