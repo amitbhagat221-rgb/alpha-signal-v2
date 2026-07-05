@@ -1374,6 +1374,9 @@ STALENESS_OVERRIDES = {
     # so MAX(date) is structurally ~1 month old even when the producer is healthy.
     # 45d tolerates that lag and only alarms on true death (audit Data-F5).
     "uhs_calibration_log":    45,
+    # DuckDB replica has no cron — rebuilds are manual. 2d catches a failed/stale
+    # rebuild quickly without false-alarming on same-day drift (audit Data-F10).
+    "_file_duckdb_replica":    2,
 }
 
 # Per-stock coverage gates. A table that should have a row per universe stock
@@ -3440,10 +3443,20 @@ def _file_output_state(fo):
     The freshness anchor is the newest file matching the glob *that contains*
     at least one record whose freshness_field is present. A file full of
     placeholders (status: no_api_key) doesn't count — that's the whole point.
+
+    Entries with no freshness_field are non-JSON binary outputs (e.g. the
+    DuckDB replica) — anchor on the newest file's mtime instead of parsing it.
     """
     pattern = str(PROJECT_ROOT / fo["glob"])
     files = sorted(glob.glob(pattern), reverse=True)
     freshness_field = fo.get("freshness_field")
+    if freshness_field is None:
+        if not files:
+            return None, 0
+        f = files[0]
+        from datetime import datetime as _dt
+        ts = _dt.fromtimestamp(Path(f).stat().st_mtime).date()
+        return ts.isoformat(), (1 if Path(f).stat().st_size > 0 else 0)
     for f in files:
         try:
             with open(f) as fh:

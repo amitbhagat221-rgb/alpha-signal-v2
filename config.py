@@ -943,5 +943,17 @@ FILE_OUTPUTS = [
         "frequency":     "daily",
         "producer":      "dossier",    # PIPELINE_STEPS name to retrigger
     },
+    {
+        # Columnar SQLite→DuckDB replica (db.py read_sql_fast). No PIPELINE_STEPS
+        # entry / no cron wires it today — rebuilds are manual (tools.duckdb_refresh).
+        # A failed/stale rebuild was previously silent; this makes it visible (audit Data-F10).
+        "virtual_table": "_file_duckdb_replica",
+        "glob":          "data/alpha_signal.duckdb",
+        "freshness_field": None,       # binary file — mtime-anchored, not JSON-parsed
+        "source":        "tools/duckdb_refresh.py (manual/no cron)",
+        "data_freq":     "daily",
+        "frequency":     "daily",
+        "producer":      "tools.duckdb_refresh",
+    },
 ]
 
