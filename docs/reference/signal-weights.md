@@ -64,11 +64,11 @@ row below is kept for the historical record of why it was promoted in the first 
 | Signal | Tier(s) | t-stat | Weight | Max \|ρ\| vs wired | Notes |
 |--------|---------|--------|--------|---------|-------|
 | ~~**pt_upside**~~ | LARGE/MID/SMALL | 7.15/8.40/9.14 | ~~0.25/0.25/0.16~~ **PULLED** | 0.27 (vs book/EY) | analyst PT upside; n=35. This t-stat was `forecast_history` look-ahead contamination — PULLED 2026-07-05 (ADR 0045), not capped. |
-| **pledge_quality** | SMALL | 5.90 | 0.13 | 0.08 | promoter-pledge stress; orthogonal to promoter (ρ=0.04) |
-| **delivery_anomaly_z** | SMALL | 4.76 (n=103) | 0.11 | 0.08 | delivery z-spike; orthogonal to avg_delivery (ρ=0.08) |
+| **pledge_quality** | SMALL | ~~5.90~~ **1.76** | 0.13 | 0.08 | promoter-pledge stress; orthogonal to promoter (ρ=0.04). **Re-baselined 2026-07-05: 5.90→1.76 (n 31→19) after the fwd_return anchor-proximity guard — the 5.90 rode contaminated pre-2023 pairs; no longer BY-FDR-robust (`rebaseline-2026-07-05.md`). Live edge intact (decay-monitor healthy); weight unchanged pending promotion review.** |
+| **delivery_anomaly_z** | SMALL | ~~4.76 (n=103)~~ **7.78 (n=107)** | 0.11 | 0.08 | delivery z-spike; orthogonal to avg_delivery (ρ=0.08). **Re-baselined 2026-07-05: strengthened 4.76→7.78 once contaminated NULL pairs were dropped — sole wired BY-FDR survivor.** |
 | **iv_skew_25d** | MID | +3.16 (48wk) | 0.14 | 0.19 | in-house IV skew (ADR 0035); F&O-only; LARGE/SMALL DROP |
 | **sector_tilt** | SMALL | +3.18 (34mo) | 0.10 | orthogonal (new sector dim) | 6m basket-mom + macro ensemble (ADR 0041); LARGE +0.92 / MID +0.64 DROP |
-| **governance_resignation** | MID | −3.82 (46mo) | **−0.08** | ≈0.09 (vs forensic cluster) | BSE senior/auditor-resignation density (ADR 0042); **first negative weight** — penalty via `1−pctile`; LARGE −1.61 / SMALL −1.65 WEAK |
+| **governance_resignation** | MID | ~~−3.82 (46mo)~~ **−1.55 (48mo)** | **−0.08** | ≈0.09 (vs forensic cluster) | BSE senior/auditor-resignation density (ADR 0042); **first negative weight** — penalty via `1−pctile`; LARGE −1.61 / SMALL −1.65 WEAK. **Re-baselined 2026-07-05: −3.82→−1.55 after the fwd_return guard (sign preserved, now WEAK not KEEP); fails BH+BY. Weight unchanged pending promotion review.** |
 
 (pt_upside/pledge/delivery were already in `scoring/screener.py` `SIGNAL_COLS` + the
 MaxReturn/MaxSharpe variants since 2026-05-28/29, but carried **zero production weight**
@@ -190,14 +190,23 @@ Benjamini-Yekutieli FDR (dependence-robust). Read each weight through this lens:
 
 | Robustness (BY-FDR) | Wired factors |
 |---|---|
-| ✓ **survive** (bulletproof) | ~~`pt_upside` (L/M/S)~~ **PULLED 2026-07-05 — this "bulletproof" t-stat was look-ahead contamination (ADR 0045); no longer wired**, `pledge_quality` (S), `delivery_anomaly_z` (S) |
-| ~ borderline (pass BH, fail BY) | `governance_resignation` (M, p_BY 0.075), `iv_skew_25d` (M), `sector_tilt` (S) |
-| ✗ fail the haircut | `consensus`, `book_to_price`, `piotroski`, `accruals`, `earnings_yield`, `promoter`, ~~`smart_money`~~ **PULLED 2026-07-05 (n=6, sub-bar; ADR 0045)**, `momentum` |
+| ✓ **survive** (bulletproof) | ~~`pt_upside` (L/M/S)~~ **PULLED 2026-07-05 (ADR 0045)**, ~~`pledge_quality` (S)~~ **DEMOTED 2026-07-05 — re-baselined to t=1.76, no longer BY-robust (see below)**, `delivery_anomaly_z` (S) **— now the ONLY wired BY-FDR survivor** |
+| ~ borderline (pass BH, fail BY) | ~~`governance_resignation` (M, p_BY 0.075)~~ **now fails BH+BY (re-baselined −1.55, 2026-07-05)**, `iv_skew_25d` (M), `sector_tilt` (S) |
+| ✗ fail the haircut | `consensus`, `book_to_price`, `piotroski`, `accruals`, `earnings_yield`, `promoter`, `pledge_quality` (S), `governance_resignation` (M), ~~`smart_money`~~ **PULLED 2026-07-05 (n=6, sub-bar; ADR 0045)**, `momentum` |
 
 The ✗-tier is **not** a delisting order — those are kept on the deliberate **diversification-ballast**
 rationale (horizon-gate review) or **doubly-validated v1×v2** history (consensus, book_to_price). The
 rule (ADR 0043): a haircut-failing factor gets **no *added* weight**, and a **new** factor's KEEP must
 clear this lens before wiring. Run it in every promotion review alongside the horizon gate.
+
+**Re-baselined 2026-07-05** ([rebaseline-2026-07-05.md](rebaseline-2026-07-05.md)): the fwd_return
+anchor-proximity guard (fix in `tools/reconstruct_pit.py`) removed ~40% of contaminated pre-2023
+response pairs. BY-FDR survivor set **shrank from 3 to 2**: `pledge_quality` SMALL fell out entirely
+(t 5.90→1.76, was riding contaminated pairs), while the delivery family strengthened
+(`delivery_anomaly_z` 4.76→7.78, `avg_delivery_pct_30d` 4.37→5.41). **The only wired BY-FDR survivor
+is now `delivery_anomaly_z` SMALL.** `governance_resignation` MID dropped from borderline to fail
+(−3.82→−1.55, sign preserved). SIGNAL_WEIGHTS **unchanged** (no sign-flip+significance-loss → not a
+mandated un-wire; these are promotion-review items). M=277 hypotheses (was 269).
 
 ## Marginal contribution, HORIZON-AWARE (2026-06-14, Track 3.3b — [tools/factor_marginal.py](../../tools/factor_marginal.py))
 
@@ -234,7 +243,7 @@ add weight. (Low-cov factors ⚠ are 0.5-imputation-distorted — lean on the ba
 - **gross_profitability** (audit gap #5, first backtest 2026-07-05) — registered 2026-05 as the multibagger funnel's Novy-Marx quality anchor, never run through `backtest_pit` until now. Full 48-anchor PIT reconstruction (2022-08→2026-07, matching `roic`'s fundamentals_screener-covered range): **SMALL t=−3.91 KEEP, MID t=−2.18 WEAK, LARGE t=−1.32 DROP** — all three tiers **NEGATIVE** sign, the opposite of the textbook Novy-Marx positive quality premium. Contrarian-sign KEEP is not auto-promotion-eligible (same discipline as `uncertainty_word_density`) — **NOT wired**, parked in `FACTOR_LIBRARY` for sign/regime verification. The multibagger funnel's own use of gross_profitability (a holding-screen input, not a cross-sectional rank factor) is a different mechanism and is unaffected.
 - **low_vol_252d** (audit Factor-F3 LARGE-tier rebuild #1, built+backtested 2026-07-05; 68 monthly anchors 2020-11→2026-06 incl. the new 2020 price-backfill anchors) — annualized 252d log-return vol off `stock_prices` (adj closes, min 200 obs). **LARGE t=+1.96 WEAK but CONTRARIAN** (IC +0.057, CI [0.14,3.94]): HIGH vol won in the mostly-bull 2021-26 sample, opposite the canonical low-vol anomaly; MID +1.26 / SMALL −1.04 DROP (SMALL has the expected negative sign). Robust to the timely-anchor response check (+1.99). Contrarian-sign WEAK on the walk-forward-weakest tier → **NOT wired**, `FACTOR_LIBRARY`; re-read once a drawdown regime enters the window.
 - **st_reversal_21d** (audit Factor-F3 #2, built+backtested 2026-07-05; 77 monthly anchors 2020-02→2026-06) — trailing 21d total return off `stock_prices` (adj closes, min 15 obs). **DROP all tiers** (SMALL −1.50 / MID −0.40 / LARGE +0.04); the expected NEGATIVE reversal sign shows in MID+SMALL and SMALL firms to **−1.93 on the timely-anchor slice**, but stays sub-2.5. `FACTOR_LIBRARY`; the natural retest is **weekly cadence** — a 21d fast-decay factor sampled monthly against a 20d response is structurally handicapped.
-- **asset_growth_yoy** (audit Factor-F3 #3, built+backtested 2026-07-05; 78 monthly anchors 2020-01→2026-06) — YoY % Δ total assets from `annual_balance_sheet` (75d filing lag, book_to_price convention; non-financials). Headline **MID t=+2.18 WEAK is an ARTIFACT**: `pit_fwd_return_20d` anchors sids with no prices near an old eval date at their FIRST later price row (~40% of response pairs at pre-2023 anchors are late-anchored — the 2020-22 jugaad backfill covers ~70% of sids), pairing old balance-sheet growth with wrong-period returns. Restricting to responses anchored within 10d of eval flips MID to **−0.92** and yields the expected CMA NEGATIVE sign on all tiers (−0.87/−0.92/−0.70), insignificant. **NOT wired**, `FACTOR_LIBRARY`. ⚠ The late-anchor response contamination is a PANEL-WIDE landmine for every fundamentals factor evaluated at pre-2023 anchors — worth its own follow-up.
+- **asset_growth_yoy** (audit Factor-F3 #3, built+backtested 2026-07-05; 78 monthly anchors 2020-01→2026-06) — YoY % Δ total assets from `annual_balance_sheet` (75d filing lag, book_to_price convention; non-financials). Headline **MID t=+2.18 WEAK is an ARTIFACT**: `pit_fwd_return_20d` anchors sids with no prices near an old eval date at their FIRST later price row (~40% of response pairs at pre-2023 anchors are late-anchored — the 2020-22 jugaad backfill covers ~70% of sids), pairing old balance-sheet growth with wrong-period returns. Restricting to responses anchored within 10d of eval flips MID to **−0.92** and yields the expected CMA NEGATIVE sign on all tiers (−0.87/−0.92/−0.70), insignificant. **NOT wired**, `FACTOR_LIBRARY`. ⚠ The late-anchor response contamination is a PANEL-WIDE landmine for every fundamentals factor evaluated at pre-2023 anchors — worth its own follow-up. **RESOLVED 2026-07-05** — anchor-proximity guard shipped in `tools/reconstruct_pit.py` and the whole `v2_recompute` panel re-baselined; on the clean panel asset_growth_yoy is MID +2.18→**−0.90** (all tiers now negative, insignificant), matching the timely-anchor prediction. See [rebaseline-2026-07-05.md](rebaseline-2026-07-05.md).
 
 ## Pending backtesting
 
