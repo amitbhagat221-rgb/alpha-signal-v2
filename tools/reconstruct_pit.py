@@ -1059,48 +1059,27 @@ def pit_growth_composite(df_in_progress):
     ], "growth_composite")
 
 
-def pit_pt_upside(stocks, fh_pit, close_df, acs_pit=None):
+def pit_pt_upside(stocks, close_df, acs_pit=None):
     """Implied upside from analyst price target.
 
-    Source priority (most recent wins):
-      1. analyst_consensus_snapshots — monthly snapshots of Yahoo's aggregate.
-         Available from 2026-05 onwards. Most recent and most accurate.
-      2. forecast_history (metric='price') — Tickertape year-end snapshots,
-         ~1 per stock per year from 2022 onwards. Real PTs, but stale by up
-         to 12 months. Used when no consensus_snapshots row precedes eval_date.
-
-    PTs are episodic — sell-side analysts revise quarterly at best. The two
-    sources combined cover (a) recent revisions (yfinance monthly) and
-    (b) long-horizon history for backtest (Tickertape year-end). Daily price
-    data masquerading as PT is filtered out at ingestion (see HANDOFF
-    2026-05-22 for the rationale).
+    Source: analyst_consensus_snapshots ONLY — monthly snapshots of Yahoo's
+    aggregate, available from 2026-05 onwards. `forecast_history` (metric=
+    'price') is PERMANENTLY EXCLUDED: those "year-end" rows embed the
+    YEAR-AHEAD realized close, not a real analyst PT (audit Factor-F1,
+    CRITICAL — every pre-2026-05 pt_upside value was built from this
+    contamination). For anchors with no analyst_consensus_snapshots row
+    ≤ eval_date, pt_upside is correctly NULL — do not backfill from any
+    other source.
     """
-    rows = []
-    if acs_pit is not None and not acs_pit.empty:
-        latest_acs = (acs_pit.sort_values(["sid", "snapshot_date"])
-                      .groupby("sid")
-                      .tail(1)[["sid", "target_mean"]]
-                      .rename(columns={"target_mean": "latest_pt"}))
-        rows.append(latest_acs.assign(_priority=1))
-
-    if fh_pit is not None and not fh_pit.empty:
-        pt_only = fh_pit[fh_pit["metric"] == "price"]
-        if not pt_only.empty:
-            latest_fh = (pt_only.sort_values(["sid", "date"])
-                         .groupby("sid")
-                         .tail(1)[["sid", "value"]]
-                         .rename(columns={"value": "latest_pt"}))
-            rows.append(latest_fh.assign(_priority=2))
-
-    if not rows:
+    if acs_pit is None or acs_pit.empty:
         return pd.DataFrame(columns=["sid", "pt_upside"])
 
-    # Stack both sources, keep highest-priority (lowest _priority value) per sid
-    combined = pd.concat(rows, ignore_index=True)
-    combined = (combined.sort_values(["sid", "_priority"])
-                .drop_duplicates(subset=["sid"], keep="first"))
+    latest_acs = (acs_pit.sort_values(["sid", "snapshot_date"])
+                  .groupby("sid")
+                  .tail(1)[["sid", "target_mean"]]
+                  .rename(columns={"target_mean": "latest_pt"}))
 
-    merged = combined.merge(close_df, on="sid", how="left")
+    merged = latest_acs.merge(close_df, on="sid", how="left")
     merged["pt_upside"] = np.where(
         (merged["close_price"].notna()) & (merged["close_price"] > 0)
         & (merged["latest_pt"].notna()) & (merged["latest_pt"] > 0),
@@ -2585,12 +2564,13 @@ def reconstruct_one_date(eval_date, raw, signals_to_run):
     if "consensus" in signals_to_run:
         base = base.merge(pit_consensus(raw["stocks"], fh_pit), on="sid", how="left")
 
-    # ── Tier 3: pt_upside (analyst_consensus_snapshots preferred; year-end fallback) ──
+    # ── Tier 3: pt_upside (analyst_consensus_snapshots ONLY — forecast_history
+    #    metric='price' is permanently excluded, audit Factor-F1) ──
     if "pt_upside" in signals_to_run:
         acs_pit = (raw["acs"][raw["acs"]["snapshot_date"] <= eval_date.isoformat()]
                    if "acs" in raw and not raw["acs"].empty else pd.DataFrame())
         base = base.merge(
-            pit_pt_upside(raw["stocks"], fh_pit, close_df, acs_pit=acs_pit),
+            pit_pt_upside(raw["stocks"], close_df, acs_pit=acs_pit),
             on="sid", how="left",
         )
 
@@ -2821,9 +2801,13 @@ def load_raw():
     adjustments = read_sql(
         "SELECT sid, ex_date, factor FROM corporate_adjustments ORDER BY sid, ex_date"
     )
+    # metric='price' EXCLUDED — those rows embed the year-ahead realized close,
+    # not a real PT (audit Factor-F1, CRITICAL). Only 'eps' (pit_consensus'
+    # eps_revision_yoy) is a genuine forward estimate; nothing in this file
+    # should ever read metric='price' from forecast_history again.
     fh = read_sql(
         "SELECT sid, metric, date, value, change FROM forecast_history "
-        "WHERE metric IN ('price', 'eps') AND value IS NOT NULL ORDER BY sid, metric, date"
+        "WHERE metric = 'eps' AND value IS NOT NULL ORDER BY sid, metric, date"
     )
     # Monthly analyst consensus snapshots — preferred source for pt_upside
     # (more recent than Tickertape's year-end series). See HANDOFF 2026-05-22.
