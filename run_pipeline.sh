@@ -28,6 +28,13 @@ echo "=============================="
 echo "Alpha Signal v2 - $(date)"
 echo "=============================="
 
+# No-two-harvesters-at-once (CLAUDE.md): non-blocking lock shared with
+# run_daily_forward.sh and the watchdog heal runner. If another harvester
+# already holds it, skip this run rather than doubling request rate / risking
+# an IP block (audit Data-F8).
+exec 200>/tmp/alpha_signal_harvest.lock
+flock -n 200 || { echo "another harvester holds the lock, exiting"; exit 0; }
+
 python pipeline.py
 PIPELINE_RC=$?
 

@@ -17,6 +17,7 @@ Usage:
 """
 
 import argparse
+import fcntl
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -27,6 +28,12 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from db import BEST_EFFORT_STALE, data_health, get_db, read_sql
 from config import PIPELINE_STEPS
 from pipeline import run_step
+
+# No-two-harvesters-at-once (CLAUDE.md): same lock file run_pipeline.sh and
+# run_daily_forward.sh take via `flock` before their first python invocation
+# (audit Data-F8). Non-blocking — a heal re-run that can't get the lock is
+# skipped and logged rather than doubling request rate against an external API.
+HARVEST_LOCK_PATH = "/tmp/alpha_signal_harvest.lock"
 
 
 def _producer_for(table_name, row_produced_by=None):
@@ -149,6 +156,10 @@ def scan(dry_run=False, only_tables=None):
     # Dedupe by (module, function): a single producer (e.g. tickertape_analyst)
     # may write multiple tables. Running it twice would just waste 80 min.
     ran_producers = set()
+    # Lazily acquired on the first real heal attempt this scan (dry-run never
+    # fetches, so it never needs the lock). None = not yet tried.
+    lock_fh = None
+    lock_acquired = None
 
     for _, row in stale.sort_values("age_days", ascending=False).iterrows():
         tbl = row["table"]
@@ -187,6 +198,20 @@ def scan(dry_run=False, only_tables=None):
             print("    (dry-run, skipped)")
             continue
 
+        if lock_acquired is None:
+            lock_fh = open(HARVEST_LOCK_PATH, "w")
+            try:
+                fcntl.flock(lock_fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                lock_acquired = True
+            except BlockingIOError:
+                lock_acquired = False
+                print("  ⚠ another harvester holds the lock — skipping heal reruns this scan")
+        if not lock_acquired:
+            print(f"  ~ {tbl:30s} {freshness:8s} {age}d old — skipped heal, harvest lock held by another process")
+            _log_watchdog(tbl, "heal", "SKIPPED", error="harvest lock held by another process")
+            skipped += 1
+            continue
+
         ok = run_step(name, module, func_name, critical)
         if ok:
             # Re-check this row to see if freshness improved.
@@ -207,6 +232,11 @@ def scan(dry_run=False, only_tables=None):
         else:
             failed += 1
             _log_watchdog(tbl, "heal", "FAILED", error="producer raised")
+
+    if lock_fh is not None:
+        if lock_acquired:
+            fcntl.flock(lock_fh, fcntl.LOCK_UN)
+        lock_fh.close()
 
     print()
     print(f"Summary: {healed} healed · {skipped} skipped (no producer) · {failed} failed")
