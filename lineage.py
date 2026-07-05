@@ -887,6 +887,13 @@ FACTOR_LINEAGE = {
                    "contribution": "annualized_logret_std"}],
         "sector_exclusions": [],
     },
+    "st_reversal_21d": {
+        "status": "candidate", "module": "signals/st_reversal.py",
+        "reads": [{"table": "stock_prices", "cols": ["close"], "key": ["sid", "date"],
+                   "select": "window", "filter": "last 21 trading days (adj), min 15 obs",
+                   "contribution": "trailing_21d_total_return"}],
+        "sector_exclusions": [],
+    },
 
     # ════════════════════════════ Earnings-call NLP (§3.2.4) ════════════════════════════
     # Latest-call values off the nlp_scores enriched layer, look-ahead-safe on available_date.

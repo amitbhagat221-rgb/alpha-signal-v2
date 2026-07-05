@@ -192,6 +192,7 @@ _COLUMN_MIGRATIONS = [
     ("daily_snapshots_pit", "gross_profitability",        "REAL"),
     # 2026-07-05: audit Factor-F3 — LARGE-tier canonical rebuild candidates.
     ("daily_snapshots_pit", "low_vol_252d",               "REAL"),
+    ("daily_snapshots_pit", "st_reversal_21d",            "REAL"),
     # 2026-06-04: multibagger Phase 2b+ — small-cap EMA regime gate. The screen
     # now selects regime-conditioned pillar weights (quality-heavy ↔ DOWNTREND,
     # growth-heavy ↔ UPTREND, balanced ↔ NEUTRAL), cohort-proven across 3 windows.
@@ -3183,6 +3184,28 @@ BACKTEST_SIGNALS = [
                          "WEAK on the walk-forward-weakest tier → NOT promotion-eligible; benched "
                          "(FACTOR_LIBRARY). Re-read once a drawdown regime enters the window.",
     },
+    {
+        "signal": "st_reversal_21d",
+        "label": "Short-Term Reversal (21d return)",
+        "group": "Momentum",
+        "description": "Trailing 21-trading-day total return (min 15 obs, split-adjusted "
+                       "closes). Canonical short-term reversal (Jegadeesh 1990): last month's "
+                       "losers win next month — expected IC NEGATIVE. The horizon mom_6m/12m "
+                       "deliberately skip (SKIP_DAYS=22) is exactly this factor.",
+        "source_tables": ["stock_prices"],
+        "source_columns": ["stock_prices.close (adj, rolling 21d)"],
+        "filing_lag": "0d (price)",
+        "pit_column_v1": None,
+        "pit_column_v2": "st_reversal_21d",
+        "v1_verdict_summary": "(new — audit Factor-F3 LARGE-tier rebuild candidate #2)",
+        "status": "READY",
+        "status_reason": "Shipped + backtested 2026-07-05 (audit Factor-F3 #2; 77 monthly anchors "
+                         "2020-02→2026-06). DROP all tiers: SMALL t=−1.50 (expected reversal sign), "
+                         "MID −0.40, LARGE +0.04. On the timely-anchor robustness slice SMALL firms "
+                         "to −1.93 — the reversal direction looks real in SMALL but stays sub-2.5. "
+                         "Benched (FACTOR_LIBRARY); natural retest is weekly cadence (a 21d fast-decay "
+                         "factor sampled monthly with a 20d response is structurally handicapped).",
+    },
 ]
 
 
@@ -3224,6 +3247,7 @@ FACTOR_LIBRARY = [
     # Audit Factor-F3 (2026-07-05) — LARGE-tier canonical rebuild trio. None cleared
     # an honest bar; full evidence in BACKTEST_SIGNALS status_reason + signal-weights.md.
     "low_vol_252d",         # LARGE t=+1.96 WEAK but CONTRARIAN (high vol won, 2021-26 bull sample) — parked, not promotion-eligible
+    "st_reversal_21d",      # DROP all; SMALL −1.50 (−1.93 on timely-anchor slice), expected reversal sign, sub-bar — weekly-cadence retest is the natural next test
     "dio_change_yoy",       # best |t|=0.97 MID
     "sloan_accruals_full",  # best |t|=1.43 SMALL
     "sga_to_revenue_change",  # best |t|=0.69 MID

@@ -217,6 +217,7 @@ PIT_COLUMNS = [
     "rate_beta", "credit_beta",
     # Audit 2026-07-04 Factor-F3 — LARGE-tier canonical rebuild candidates
     "low_vol_252d",
+    "st_reversal_21d",
 ]
 
 
@@ -357,6 +358,7 @@ VALIDATION_RANGES = {
     "credit_beta":           (-5, 5, True),
     # Audit Factor-F3 LARGE-tier candidates — bounds mirror the signal-side clips
     "low_vol_252d":          (0, 5, True),       # annualized log-return vol
+    "st_reversal_21d":       (-1, 5, True),      # 21d total return (fwd_return band)
 }
 
 
@@ -1434,6 +1436,17 @@ def pit_low_vol_252d(px_pit):
     """
     from signals.low_vol import compute_low_vol_252d
     return compute_low_vol_252d(prices=px_pit)
+
+
+def pit_st_reversal_21d(px_pit):
+    """Short-term reversal (trailing 21d total return), PIT — audit Factor-F3 #2.
+
+    px_pit is prices ≤ eval with PIT-strict adj_close applied; the module
+    prefers adj_close so a split inside the month doesn't read as a fake −50%.
+    Returns DataFrame[sid, st_reversal_21d].
+    """
+    from signals.st_reversal import compute_st_reversal_21d
+    return compute_st_reversal_21d(prices=px_pit)
 
 
 def pit_nlp_factors(stocks, nlp_scores, eval_date):
@@ -2552,6 +2565,9 @@ def reconstruct_one_date(eval_date, raw, signals_to_run):
     if "low_vol" in signals_to_run:
         base = base.merge(pit_low_vol_252d(px_pit), on="sid", how="left")
 
+    if "st_reversal" in signals_to_run:
+        base = base.merge(pit_st_reversal_21d(px_pit), on="sid", how="left")
+
     # ── §3.2.4 — earnings-call NLP factors (off nlp_scores, look-ahead-safe) ──
     if "nlp" in signals_to_run:
         base = base.merge(
@@ -3011,7 +3027,7 @@ def main():
                                  "position_52w", "delivery", "sector_momentum",
                                  "sector_tilt",
                                  "fno_oi", "fno_iv", "microstructure", "pead", "governance", "nlp", "pledge",
-                                 "low_vol",
+                                 "low_vol", "st_reversal",
                                  "promoter_trend", "macd", "fwd_return",
                                  "mom_composite",
                                  "quality_fundamentals", "growth_fundamentals",
@@ -3101,6 +3117,7 @@ def main():
         "governance",
         # Audit Factor-F3 — LARGE-tier canonical rebuild candidates
         "low_vol",
+        "st_reversal",
         # Plan 0002 §3.2.4 — earnings-call NLP factors (off nlp_scores)
         "nlp",
         # Plan 0002 §3.2.6 — industry identity (control) + §3.2.7 macro betas
