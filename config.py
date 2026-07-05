@@ -347,6 +347,19 @@ PORTFOLIO = {
             "mode": "banded",   # "banded" (default) | "daily" (legacy full rebuild)
             "rank_exit": 8,     # sell a held name only when its within-tier rank > this
             "drift_pp": 2.0,    # re-run HRP only if a weight drifts > this many pp from target
+            # Iteration 2 (ADR 0046) — the 8/2pp band alone measured 12.0%/day at
+            # net Sharpe -0.84 (cost-fatal): rank instability drove ~2 sells/day and
+            # every trigger re-ran full HRP (~7.4pp jitter in unchanged names). The
+            # tools/rebalance_sim.py --matrix winner (best net Sharpe, tiebreak lower
+            # turnover) is d3/partial/trigger-only: 6.2%/day, net Sharpe +0.11 — the
+            # first cost-POSITIVE cell. Debounce is the turnover lever; partial-resize
+            # is the net-Sharpe lever (removes HRP jitter); a weekly full-resize
+            # calendar HURTS (re-injects jitter) so it stays off.
+            "debounce_days": 3,           # sell only after N consecutive days below rank_exit
+            "resize": "partial",          # on a name change: "partial" (survivors keep drifted
+                                          # weights, vacated mass funds buys) | "full" (re-run HRP)
+            "full_resize_weekday": None,  # 0=Mon: full HRP re-run on the first pick_date of each
+                                          # trade-week; None = trigger-only full re-sizes (winner)
         },
     },
 }
@@ -885,10 +898,18 @@ PIPELINE_STEPS = [
     {"name": "news_brief",          "module": "sources.news_brief",   "function": "compute", "critical": False,
      "table": "news_briefs",       "source": "news_enriched (Claude Sonnet synthesis)", "data_freq": "daily", "frequency": "daily"},
 
-    # Regulatory classifier — hard-capped at DAILY_CLASSIFIER_CAP (500/run) so
-    # the 7.5K-event backlog drains over 15 days without ever blocking cron.
+    # Regulatory classifier — async two-phase via the Anthropic Message Batches
+    # API (audit Eff-F2, migrated 2026-07-05). Each run INGESTs any completed
+    # batch (writing verdicts/signals exactly as the old sync path did) then
+    # SUBMITs the day's pending events (post title-hash dedup, capped at
+    # DAILY_CLASSIFIER_CAP=500/run) as a new Haiku batch; Haiku passers are
+    # submitted as a Sonnet batch on ingest. This took ~54% of the pipeline
+    # wall-clock (~3,467s of the old per-item loop) off the critical path — the
+    # step now just polls + submits (seconds) — at 50% token cost (batch pricing).
+    # ~1-2 day classification latency is fine: output feeds narrative only. The
+    # sync per-item path is kept as a fallback (`--sync`, or auto on batch error).
     {"name": "classify_regulatory","module": "sources.regulatory_classifier", "function": "compute", "critical": False,
-     "table": "regulatory_signals","source": "regulatory_events (AI-classified, capped 500/run)", "data_freq": "daily", "frequency": "daily"},
+     "table": "regulatory_signals","source": "regulatory_events (Message Batches, capped 500/run)", "data_freq": "daily", "frequency": "daily"},
 
     # Moneycontrol broker recos — WEEKLY (Sunday only per `frequency: weekly`).
     # DELAY=12s × 2336 sids ≈ 8 hours. Pipeline runner honors frequency since

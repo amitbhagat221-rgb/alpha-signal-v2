@@ -366,11 +366,15 @@ def _size_book(asof, keep):
     w = alpha_tilt(w, keep.set_index("sid")["final_score"])
     sectors = keep.set_index("sid")["sector"]
     w = apply_caps(w, sectors)
+    w = _cap_guard(w, sectors, asof)
+    return _book_frame(asof, w, cov, keep, cov_obs=len(rets))
 
-    # Cap-violation guard (audit Port-F5): never store a violating book. Retry
-    # with a doubled iteration budget first; if that still leaves a breach,
-    # hard-clip + waterfall-renormalize as the final guarantee. Never raise —
-    # a missing daily book is worse than a clamped one.
+
+def _cap_guard(w, sectors, asof):
+    """Cap-violation guard (audit Port-F5): never store a violating book. Retry
+    with a doubled iteration budget first; if that still leaves a breach,
+    hard-clip + waterfall-renormalize as the final guarantee. Never raise —
+    a missing daily book is worse than a clamped one."""
     stock_cap = HRP["max_stock_weight"]
     sector_cap = HRP["max_sector_weight"]
     sec_w_check = w.groupby(sectors.reindex(w.index).fillna("UNKNOWN")).sum()
@@ -382,8 +386,12 @@ def _size_book(asof, keep):
             sec_w_check = w.groupby(sectors.reindex(w.index).fillna("UNKNOWN")).sum()
             print(f"[cap-guard] {asof}: clamped, max_stock={w.max():.4f}, "
                   f"max_sector={sec_w_check.max():.4f}")
+    return w
 
-    mrc = risk_contributions(w, cov)
+
+def _book_frame(asof, w, cov, keep, cov_obs):
+    """(book_df, diag) from final weights + covariance + daily_picks metadata."""
+    mrc = risk_contributions(w.reindex(cov.index).fillna(0.0), cov)
 
     names = read_sql("SELECT sid, name FROM stocks").set_index("sid")["name"].to_dict()
     meta = keep.set_index("sid")
@@ -400,12 +408,13 @@ def _size_book(asof, keep):
     }).sort_values("weight", ascending=False).reset_index(drop=True)
 
     sec_w = book.groupby("sector")["weight"].sum()
+    n = len(w)
     diag = {
         "asof": asof,
         "n_names": len(book),
-        "cov_obs": len(rets),
+        "cov_obs": cov_obs,
         "ann_vol_pct": ann_vol(w, cov) * 100,
-        "ann_vol_eq_pct": ann_vol(pd.Series(1.0 / len(sids), index=sids), cov) * 100,
+        "ann_vol_eq_pct": ann_vol(pd.Series(1.0 / n, index=w.index), cov) * 100,
         "eff_n": float(1.0 / (w ** 2).sum()),
         "max_weight": float(w.max()),
         "max_sector_weight": float(sec_w.max()),
@@ -478,43 +487,144 @@ def _drifted_weights(prev, asof, from_date=None):
     return grown / grown.sum()
 
 
+def _rank_ok_lastn(sids, asof, n, rank_exit):
+    """Sids whose within-tier rank was ≤ rank_exit on AT LEAST ONE of the last
+    `n` pick_dates ≤ asof (today included). Exit debounce (ADR 0046 iter 2):
+    a held name is sold only after n CONSECUTIVE days below rank_exit —
+    equivalently, kept while this set contains it. Stateless: derived from
+    daily_picks history, nothing carried in portfolio_weights."""
+    dates = read_sql("SELECT DISTINCT pick_date FROM daily_picks WHERE pick_date <= ? "
+                     "ORDER BY pick_date DESC LIMIT ?", params=[asof, n])["pick_date"].tolist()
+    if not dates or not sids:
+        return set()
+    pd_ph, s_ph = ",".join("?" * len(dates)), ",".join("?" * len(sids))
+    ok = read_sql(f"SELECT DISTINCT sid FROM daily_picks WHERE pick_date IN ({pd_ph}) "
+                  f"AND sid IN ({s_ph}) AND rank <= ?",
+                  params=[*dates, *sids, rank_exit])
+    return set(ok["sid"])
+
+
+def _week_key(d, anchor_weekday=0):
+    """Start date of the week containing `d`, weeks anchored on anchor_weekday
+    (0=Monday). Two dates share a key iff they're in the same trade-week."""
+    dt = pd.Timestamp(d)
+    return (dt - pd.Timedelta(days=(dt.weekday() - anchor_weekday) % 7)).date()
+
+
+def _meta_frame(sids, info, prev):
+    """sid/rank/final_score/cap_tier/sector metadata for `sids` — from today's
+    picks where present, else carried from the previous book (a debounce-held
+    name can sit outside the daily_picks pool for up to debounce_days-1 days)."""
+    prev_ix = prev.set_index("sid")
+    rows = []
+    for s in sids:
+        if s in info.index:
+            r = info.loc[s]
+            rows.append((s, int(r["rank"]), float(r["final_score"]),
+                         r["cap_tier"], r["sector"]))
+        else:
+            r = prev_ix.loc[s]
+            rows.append((s, int(r["rank"]), float(r["factor_score"]),
+                         r["cap_tier"], r["sector"]))
+    return pd.DataFrame(rows, columns=["sid", "rank", "final_score",
+                                       "cap_tier", "sector"])
+
+
+def _partial_book(asof, meta, prev, kept, bought, sold, anchor):
+    """Partial re-size (ADR 0046 iter 2): survivors keep their current DRIFTED
+    weights untouched (no HRP jitter); only the vacated mass moves. Each tier's
+    sold drifted mass is split equally across that tier's incoming names; an
+    incoming name with no vacated mass in its tier (refilling a previously thin
+    tier) gets the tier's mean surviving weight (book mean if the tier is new),
+    funded by the closing renormalization. Caps stay hard via clamp_to_caps.
+    Covariance is computed only for diagnostics/risk-contrib, not weights."""
+    drifted = _drifted_weights(prev, asof, from_date=anchor)
+    prev_tier = prev.set_index("sid")["cap_tier"]
+    meta_ix = meta.set_index("sid")
+
+    parts = {s: float(drifted.get(s, 0.0)) for s in kept}
+    vacated = {}
+    for s in sold:
+        t = prev_tier.get(s, "UNKNOWN")
+        vacated[t] = vacated.get(t, 0.0) + float(drifted.get(s, 0.0))
+    book_mean = 1.0 / max(len(kept) + len(bought), 1)
+    for tier in set(meta_ix.loc[bought, "cap_tier"]) if bought else set():
+        buys_t = [b for b in bought if meta_ix.at[b, "cap_tier"] == tier]
+        m = vacated.get(tier, 0.0)
+        if m <= 0:
+            surv_t = [s for s in kept if meta_ix.at[s, "cap_tier"] == tier]
+            each = (np.mean([parts[s] for s in surv_t]) if surv_t else book_mean)
+        else:
+            each = m / len(buys_t)
+        for b in buys_t:
+            parts[b] = each
+
+    w = pd.Series(parts, dtype=float)
+    w = w / w.sum()
+    sectors = meta_ix["sector"]
+    stock_cap, sector_cap = HRP["max_stock_weight"], HRP["max_sector_weight"]
+    sec_w = w.groupby(sectors.reindex(w.index).fillna("UNKNOWN")).sum()
+    if w.max() > stock_cap + 1e-6 or sec_w.max() > sector_cap + 1e-6:
+        w = clamp_to_caps(w, sectors, stock_cap, sector_cap)
+
+    rets = daily_returns(w.index.tolist(), asof)     # diagnostics only
+    cov = shrunk_cov(rets) if not rets.empty else pd.DataFrame()
+    if cov.empty:
+        cov = pd.DataFrame(np.diag(np.ones(len(w))), index=w.index, columns=w.index)
+    return _book_frame(asof, w, cov, meta, cov_obs=len(rets))
+
+
 def _build_banded(asof, prev, history=None):
     """Hysteresis rebalance of the previous book against today's daily_picks.
     `history` (optional {date: book} dict) lets tools/rebalance_sim.py replay
     the same code path in memory without touching portfolio_weights.
 
-    Sell rules (a held name):    within-tier rank > REBAL["rank_exit"], OR gone
-    from the daily_picks pool entirely (treated as below rank_exit), OR fails
-    the existing investability screen (return history + ADTV floor).
+    Sell rules (a held name): within-tier rank > REBAL["rank_exit"] (missing
+    from the pool counts as below) for REBAL["debounce_days"] CONSECUTIVE days,
+    OR fails the existing investability screen (history + ADTV floor, immediate).
     Buy rule: only to refill a tier back toward PICKS_PER_TIER (best-ranked
     investable non-held names; a thin tier just stays short, as in daily mode).
-    Weights: if the name set is UNCHANGED and every drifted weight is within
-    REBAL["drift_pp"] pp of its stored target, today's row CARRIES the stored
-    target weights forward unchanged (simplest + keeps the stored book equal to
-    the standing advisory targets; the drift is execution detail). Otherwise
-    the full HRP + tilt + caps machinery re-runs on the new name set."""
+    Weights (REBAL["resize"]):
+      • first pick_date of a new trade-week (REBAL["full_resize_weekday"] anchor,
+        None disables) → full HRP + tilt + caps re-run ("rebalance (weekly)").
+      • name set changed → "partial": survivors keep drifted weights, vacated
+        mass funds the incoming names; "full": re-run the whole machinery.
+      • name set unchanged → carry the stored targets forward, unless a weight
+        drifted > REBAL["drift_pp"] pp from target since the last actual
+        re-size, which forces a full re-run."""
     rank_exit = int(REBAL.get("rank_exit", 8))
+    debounce = int(REBAL.get("debounce_days", 1))
+    resize = REBAL.get("resize", "full")
+    weekday = REBAL.get("full_resize_weekday", None)
+
     cand = select_candidates(asof, min_depth=rank_exit)
     if cand.empty:
         raise RuntimeError(f"no daily_picks for {asof}")
     held = prev["sid"].tolist()
     investable = _investable_set(sorted(set(cand["sid"]) | set(held)), asof)
     info = cand.set_index("sid")
+    ok_lastn = (_rank_ok_lastn(held, asof, debounce, rank_exit)
+                if debounce > 1 else None)
 
     kept, sold = [], {}
     for s in held:
-        if s not in info.index:
-            sold[s] = "out of daily_picks pool"
-        elif int(info.at[s, "rank"]) > rank_exit:
-            sold[s] = f"rank {int(info.at[s, 'rank'])} > exit {rank_exit}"
-        elif s not in investable:
+        if s not in investable:
             sold[s] = "failed investability (history/ADTV)"
-        else:
+            continue
+        above_today = s in info.index and int(info.at[s, "rank"]) <= rank_exit
+        if above_today or (ok_lastn is not None and s in ok_lastn):
             kept.append(s)
+        else:
+            where = (f"rank {int(info.at[s, 'rank'])}" if s in info.index
+                     else "out of pool")
+            sold[s] = (f"{where} > exit {rank_exit}"
+                       + (f" for {debounce}d" if debounce > 1 else ""))
 
     bought = []
     for tier, target in PICKS_PER_TIER.items():
-        kept_t = [s for s in kept if info.at[s, "cap_tier"] == tier]
+        kept_t = [s for s in kept
+                  if (info.at[s, "cap_tier"] if s in info.index
+                      else prev.set_index("sid").at[s, "cap_tier"]) == tier]
         need = target - len(kept_t)
         if need <= 0:
             continue
@@ -540,9 +650,22 @@ def _build_banded(asof, prev, history=None):
 
     trade = {"mode": "banded", "held": kept, "sold": sold, "bought": bought,
              "prev_asof": prev["asof_date"].iloc[0]}
+    meta = _meta_frame(new_sids, info, prev)
+    anchor = _last_resize_date(prev, history)
+    new_week = (weekday is not None
+                and _week_key(asof, weekday) != _week_key(trade["prev_asof"], weekday))
 
-    if not sold and not bought:
-        anchor = _last_resize_date(prev, history)
+    if new_week:
+        trade["action"] = "rebalance (weekly)"
+        book, diag = _size_book(asof, meta)
+    elif sold or bought:
+        if resize == "partial":
+            trade["action"] = "rebalance (partial)"
+            book, diag = _partial_book(asof, meta, prev, kept, bought, sold, anchor)
+        else:
+            trade["action"] = "rebalance (names)"
+            book, diag = _size_book(asof, meta)
+    else:
         drifted = _drifted_weights(prev, asof, from_date=anchor)
         tgt = prev.set_index("sid")["weight"].astype(float)
         max_drift = float((drifted - tgt).abs().max())
@@ -550,12 +673,14 @@ def _build_banded(asof, prev, history=None):
         trade["drift_since"] = anchor
         if max_drift <= REBAL.get("drift_pp", 2.0) / 100.0:
             # carry-forward day: same names, same target weights; refresh the
-            # informational columns (rank/score/tier/sector) from today's picks.
+            # informational columns from today's picks where present (a
+            # debounce-held name outside the pool keeps its previous values).
             book = prev.copy()
             book["asof_date"] = asof
             for col in ("rank", "final_score", "cap_tier", "sector"):
                 dst = "factor_score" if col == "final_score" else col
-                book[dst] = book["sid"].map(info[col])
+                vals = book["sid"].map(info[col])
+                book[dst] = vals.where(vals.notna(), book[dst])
             book = book.sort_values("weight", ascending=False).reset_index(drop=True)
             w = book.set_index("sid")["weight"]
             sec_w = book.groupby("sector")["weight"].sum()
@@ -573,12 +698,8 @@ def _build_banded(asof, prev, history=None):
             }
             return book, diag
         trade["action"] = "rebalance (drift)"
-    else:
-        trade["action"] = "rebalance (names)"
+        book, diag = _size_book(asof, meta)
 
-    keep = info.loc[[s for s in new_sids]].reset_index()[
-        ["sid", "rank", "final_score", "cap_tier", "sector"]]
-    book, diag = _size_book(asof, keep)
     diag.update(trade)
     return book, diag
 

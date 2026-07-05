@@ -23,8 +23,15 @@ Method — READ-ONLY, writes nothing anywhere:
     T_t = 0.5·Σ|target − drifted| vs the weights you'd hold having not traded;
     cost = per-name |Δw| × config.TRANSACTION_COSTS_BPS at its cap tier.
 
+Iteration 2 (ADR 0046) adds `--matrix`: {debounce 1/2/3} × {full/partial re-size on a name
+change} × {trigger-only/weekly full re-size}, same window + cost model, winner by net Sharpe
+(tiebreak lower turnover). Partial re-size = survivors keep their drifted weights and the sold
+names' vacated mass funds the incoming buys (no HRP re-run) — this kills the ~4.7pp/day of HRP
+jitter that iteration 1's full-rebuild-on-trigger paid in the UNCHANGED names.
+
 Usage:
-    python -m tools.rebalance_sim               # full replay + report
+    python -m tools.rebalance_sim               # daily vs banded (current config)
+    python -m tools.rebalance_sim --matrix      # iteration-2 3×2×2 grid + winner
     python -m tools.rebalance_sim --end 2026-07-04
 """
 
@@ -128,10 +135,12 @@ def nav_replay(books, rets, cost_bps):
 def _row(label, res):
     g = _stats(res["gross"])
     net = _stats(res["gross"] - res["cost"].fillna(0.0))
+    traded = res["n_traded"].dropna()
     return {
         "label": label,
         "turnover_pct": res["turnover"].mean() * 100,
         "n_traded": res["n_traded"].mean(),
+        "trade_days_pct": float((traded > 0).mean() * 100) if len(traded) else float("nan"),
         "gross_sharpe": g.get("sharpe", float("nan")),
         "net_sharpe": net.get("sharpe", float("nan")),
         "gross_ann": g.get("ann_ret_pct", float("nan")),
@@ -139,6 +148,99 @@ def _row(label, res):
         "cost_ann": res["cost"].fillna(0.0).mean() * TRADING_DAYS * 100,
         "n_days": g.get("n_days", 0),
     }
+
+
+# ── fast in-memory price IO (matrix mode) ────────────────────────────────────
+# 12 matrix cells × 65 dates × (returns + ADTV) SQL round-trips is slow;
+# preloading the close/turnover panels once and slicing replicates production
+# semantics at ~20× speed. Patches pc.daily_returns/pc.adtv for THIS PROCESS
+# only — production IO and the DB are untouched. Sanity anchor: the
+# (debounce=1, full, trigger-only) cell must reproduce iteration 1's numbers.
+def _install_fast_io(dates, start_sids):
+    depth = max(int(pc.REBAL.get("rank_exit", 8)),
+                max(pc.PICKS_PER_TIER.values()) * 3)
+    ph = ",".join("?" * len(dates))
+    pool = read_sql(f"SELECT DISTINCT sid FROM daily_picks WHERE pick_date IN ({ph}) "
+                    f"AND rank <= ?", params=[*dates, depth])
+    sids = sorted(set(pool["sid"]) | set(start_sids))
+    s_ph = ",".join("?" * len(sids))
+    px = read_sql(f"SELECT date, sid, close, volume FROM stock_prices "
+                  f"WHERE sid IN ({s_ph}) AND date >= '2023-06-01'", params=sids)
+    close = px.pivot(index="date", columns="sid", values="close").sort_index()
+    valid = (px["close"] > 0) & (px["volume"] > 0)
+    turn = (px[valid].assign(turnover=px["close"] * px["volume"])
+            .pivot(index="date", columns="sid", values="turnover").sort_index())
+
+    def fast_daily_returns(want, asof):
+        cols = sorted(s for s in set(want) if s in close.columns)
+        wide = close.loc[close.index <= asof, cols].dropna(how="all")
+        wide = wide.tail(pc.HRP["cov_lookback_days"] + 1)
+        rets = np.log(wide / wide.shift(1))
+        lo, hi = pc.HRP["ret_clip"]
+        rets = rets.clip(lower=lo, upper=hi)
+        good = [s for s in rets.columns
+                if rets[s].notna().sum() >= pc.HRP["cov_min_obs"]]
+        return rets[good].dropna()
+
+    def fast_adtv(want, asof):
+        cols = [s for s in set(want) if s in turn.columns]
+        sub = turn.loc[turn.index <= asof, cols]
+        return pd.Series({s: sub[s].dropna().tail(pc.ADTV_WINDOW).median()
+                          for s in cols}).dropna()
+
+    pc.daily_returns, pc.adtv = fast_daily_returns, fast_adtv
+
+
+def matrix_report(end=None):
+    """ADR 0046 iteration 2 — {debounce 1/2/3} × {full vs partial re-size} ×
+    {trigger-only vs weekly full re-size}. Winner = best NET Sharpe, tiebreak
+    lower turnover. Read-only."""
+    daily_books = load_stored_books(end)
+    if len(daily_books) < 2:
+        print("⚠ need ≥2 stored portfolio_weights books"); return
+    dates = sorted(daily_books)
+    start = daily_books[dates[0]]
+
+    price = _load_price_panel()
+    rets = price.pct_change(fill_method=None).clip(*RET_CLIP)
+    if end:
+        rets = rets[rets.index <= pd.Timestamp(end)]
+    _install_fast_io(dates[1:], start["sid"].tolist())
+
+    rows = [(_row("daily", nav_replay(daily_books, rets, TRANSACTION_COSTS_BPS)), {})]
+    for db in (1, 2, 3):
+        for rs in ("full", "partial"):
+            for wk in (None, 0):
+                pc.REBAL.update({"debounce_days": db, "resize": rs,
+                                 "full_resize_weekday": wk})
+                books, actions = replay_banded(start, dates[1:])
+                res = nav_replay(books, rets, TRANSACTION_COSTS_BPS)
+                acts = {}
+                for a in actions:
+                    acts[a[1]] = acts.get(a[1], 0) + 1
+                label = f"d{db}/{rs[:4]}/{'wk' if wk is not None else 'trig'}"
+                rows.append((_row(label, res), acts))
+                print(f"  … {label}: {rows[-1][0]['turnover_pct']:.1f}%/day, "
+                      f"net Sharpe {rows[-1][0]['net_sharpe']:+.2f}   [{acts}]")
+
+    print(f"\n══ REBALANCE MATRIX — iter 2 (top-{pc.REBAL['rank_exit']} exit, "
+          f"{pc.REBAL['drift_pp']}pp band), {rows[0][0]['n_days']} trading days, ADVISORY ══\n")
+    print(f"  {'CELL':14}{'TURNOVER':>10}{'NAMES':>8}{'TRD-DAYS':>9}{'GROSS':>8}{'NET':>8}"
+          f"{'GROSS':>8}{'NET':>8}{'COST':>8}")
+    print(f"  {'':14}{'%/day 1-way':>10}{'trd/day':>8}{'% days':>9}{'Shrp':>8}{'Shrp':>8}"
+          f"{'ann%':>8}{'ann%':>8}{'%/yr':>8}")
+    for r, _ in rows:
+        print(f"  {r['label']:14}{r['turnover_pct']:>9.1f}%{r['n_traded']:>8.1f}"
+              f"{r['trade_days_pct']:>8.0f}%{r['gross_sharpe']:>8.2f}{r['net_sharpe']:>8.2f}"
+              f"{r['gross_ann']:>7.1f}%{r['net_ann']:>7.1f}%{r['cost_ann']:>7.1f}%")
+
+    banded = [r for r, _ in rows[1:]]
+    win = max(banded, key=lambda r: (round(r["net_sharpe"], 2), -r["turnover_pct"]))
+    print(f"\n  WINNER (net Sharpe, tiebreak lower turnover): {win['label']} — "
+          f"{win['turnover_pct']:.1f}%/day, net Sharpe {win['net_sharpe']:+.2f} → "
+          f"{'PASS' if win['turnover_pct'] < 5 else 'FAIL'} vs <5%/day target")
+    print(f"  Read-only replay; stored portfolio_weights untouched. ADVISORY.\n")
+    return rows
 
 
 def report(end=None):
@@ -159,10 +261,15 @@ def report(end=None):
     res_d = nav_replay(daily_books, rets, TRANSACTION_COSTS_BPS)
     res_b = nav_replay(banded_books, rets, TRANSACTION_COSTS_BPS)
 
-    n_carry = sum(1 for a in actions if a[1] == "carry")
-    n_names = sum(1 for a in actions if a[1] == "rebalance (names)")
-    n_drift = sum(1 for a in actions if a[1] == "rebalance (drift)")
-    n_skip = len(actions) - n_carry - n_names - n_drift
+    acts = {}
+    for a in actions:
+        key = a[1] if isinstance(a[1], str) and not a[1].startswith("SKIP") else "SKIP"
+        acts[key] = acts.get(key, 0) + 1
+    n_carry = acts.get("carry", 0)
+    n_names = (acts.get("rebalance (names)", 0) + acts.get("rebalance (partial)", 0)
+               + acts.get("rebalance (weekly)", 0))
+    n_drift = acts.get("rebalance (drift)", 0)
+    n_skip = acts.get("SKIP", 0)
 
     print(f"\n══ REBALANCE SIM — daily vs banded (top-{pc.REBAL['rank_exit']} exit / "
           f"{pc.REBAL['drift_pp']}pp band), {res_d['gross'].shape[0]} trading days, ADVISORY ══\n")
@@ -202,12 +309,18 @@ def main():
                          "config untouched)")
     ap.add_argument("--drift-pp", type=float,
                     help="sensitivity override for REBAL['drift_pp'] (sim only)")
+    ap.add_argument("--matrix", action="store_true",
+                    help="iteration-2 grid: {debounce 1/2/3} × {full/partial "
+                         "re-size} × {trigger-only/weekly full re-size}")
     args = ap.parse_args()
     if args.rank_exit is not None:
         pc.REBAL["rank_exit"] = args.rank_exit
     if args.drift_pp is not None:
         pc.REBAL["drift_pp"] = args.drift_pp
-    report(end=args.end)
+    if args.matrix:
+        matrix_report(end=args.end)
+    else:
+        report(end=args.end)
 
 
 if __name__ == "__main__":
