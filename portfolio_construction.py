@@ -28,6 +28,13 @@ Pipeline (mirrors hrp_prototype.py, which stays as the read-only exploration):
   8. risk    — marginal (percent) risk contribution per name.
   9. store   — upsert into portfolio_weights (snapshot, PK = asof_date+sid).
 
+Rebalancing — BANDED by default since 2026-07-05 (ADR 0046): the daily-reset book
+measured 18.5%/day one-way turnover (2026-07-04 audit, Port-F1), cost-fatal vs the
+measured edge. Hysteresis: enter at top-5, exit only below top-8 within-tier; the
+full sizing machinery re-runs only when the name set changes or a weight drifts
+>2pp from target — otherwise the previous book carries forward unchanged.
+config PORTFOLIO["hrp"]["rebalance"]["mode"]="daily" restores the old behavior.
+
 ADVISORY ONLY: no capital is deployed until tools/validate_rank_skill.py clears
 (<6 independent 20d windows as of 2026-06; 63d outcomes mature ~2026-07-06). This
 builds the book on paper so the cockpit + validation have something to read.
@@ -50,10 +57,11 @@ from scipy.spatial.distance import squareform
 from sklearn.covariance import LedoitWolf
 
 import config
-from db import read_sql, upsert_df
+from db import get_db, read_sql, upsert_df
 
 HRP = config.PORTFOLIO["hrp"]
 PICKS_PER_TIER = config.PORTFOLIO["picks_per_tier"]
+REBAL = HRP.get("rebalance", {"mode": "daily"})
 ADTV_WINDOW = 20  # trading days for the median traded-value liquidity screen
 
 
@@ -62,15 +70,17 @@ def latest_pick_date():
     return read_sql("SELECT MAX(pick_date) m FROM daily_picks").iloc[0]["m"]
 
 
-def select_candidates(asof):
+def select_candidates(asof, min_depth=0):
     """Top picks_per_tier names per tier — over-select 3× so liquidity/history
-    drops still leave a full tier (survivors trimmed in build())."""
+    drops still leave a full tier (survivors trimmed in build()). `min_depth`
+    deepens the per-tier pool (banded mode needs it to cover rank_exit, else a
+    held name at rank ≤ rank_exit but > 3k would look 'out of pool')."""
     parts = []
     for tier, k in PICKS_PER_TIER.items():
         parts.append(read_sql(
             "SELECT sid, rank, final_score, cap_tier, sector FROM daily_picks "
             "WHERE pick_date=? AND cap_tier=? ORDER BY rank LIMIT ?",
-            params=[asof, tier, k * 3]))
+            params=[asof, tier, max(k * 3, min_depth)]))
     return pd.concat(parts, ignore_index=True)
 
 
@@ -286,21 +296,48 @@ def ann_vol(w, cov):
 
 
 # ── build ────────────────────────────────────────────────────────────────────
-def build(asof=None):
+def _investable_set(sids, asof):
+    """Existing investability screen: enough return history (cov_min_obs) AND
+    20d-median ₹-turnover above the ADTV floor."""
+    rets = daily_returns(sids, asof)
+    liq = adtv(sids, asof)
+    return {s for s in rets.columns if liq.get(s, 0.0) >= HRP["min_adtv_inr"]}
+
+
+def build(asof=None, mode=None):
     """Construct the sized book for `asof` (default: latest daily_picks date).
 
+    mode (default config REBAL["mode"], "banded" since 2026-07-05 — ADR 0046):
+      • "daily"  — legacy behavior: rebuild the whole book from scratch every day.
+      • "banded" — hysteresis: start from the PREVIOUS stored book; sell a held
+        name only if it falls below rank REBAL["rank_exit"] within its cap tier
+        (or drops out of daily_picks / fails investability), buy only to replace
+        a sold one, and re-run the HRP machinery only when the name set changes
+        or a weight drifts more than REBAL["drift_pp"] pp from its stored target.
+        First run / no previous book → identical to "daily".
+
     Returns (book_df, diagnostics) where book_df has the portfolio_weights
-    columns and diagnostics carries ex-ante risk + concentration for the caller.
-    Raises if there aren't enough investable names to form a book."""
+    columns and diagnostics carries ex-ante risk + concentration + the trade
+    decision for the caller. Raises if there aren't enough investable names."""
     asof = asof or latest_pick_date()
+    mode = mode or REBAL.get("mode", "daily")
+    if mode == "banded":
+        prev = load_previous_book(asof)
+        if prev is not None and not prev.empty:
+            return _build_banded(asof, prev)
+    book, diag = _build_fresh(asof)
+    diag.update({"mode": mode, "action": "rebuild", "held": [], "sold": {},
+                 "bought": list(book["sid"]) if mode == "banded" else []})
+    return book, diag
+
+
+def _build_fresh(asof):
+    """Legacy daily rebuild: select → screen → trim to top-5/tier → size."""
     cand = select_candidates(asof)
     if cand.empty:
         raise RuntimeError(f"no daily_picks for {asof}")
 
-    rets = daily_returns(cand["sid"].tolist(), asof)
-    liq = adtv(cand["sid"].tolist(), asof)
-    investable = {s for s in rets.columns
-                  if liq.get(s, 0.0) >= HRP["min_adtv_inr"]}
+    investable = _investable_set(cand["sid"].tolist(), asof)
     cand = cand[cand["sid"].isin(investable)]
     if cand.empty:
         raise RuntimeError(f"no investable names for {asof} "
@@ -309,6 +346,12 @@ def build(asof=None):
     # trim to top picks_per_tier per tier among the survivors
     keep = pd.concat([g.nsmallest(PICKS_PER_TIER[t], "rank")
                       for t, g in cand.groupby("cap_tier")])
+    return _size_book(asof, keep)
+
+
+def _size_book(asof, keep):
+    """HRP + tilt + caps on the given names → (book_df, diag). `keep` needs
+    columns sid/rank/final_score/cap_tier/sector (daily_picks metadata)."""
     sids = keep["sid"].tolist()
     # Recompute returns on the FINAL names only: the first pass dropna'd across all
     # over-selected candidates, so the shortest-history reject capped the common
@@ -374,20 +417,194 @@ def build(asof=None):
     return book, diag
 
 
+# ── banded/hysteresis rebalancing (ADR 0046) ─────────────────────────────────
+def load_previous_book(asof):
+    """Latest stored book strictly before `asof` (None if none exists)."""
+    d = read_sql("SELECT MAX(asof_date) m FROM portfolio_weights WHERE asof_date < ?",
+                 params=[asof]).iloc[0]["m"]
+    if d is None:
+        return None
+    return read_sql("SELECT asof_date, sid, weight, factor_score, "
+                    "marginal_risk_contrib, cap_tier, sector, name, rank "
+                    "FROM portfolio_weights WHERE asof_date=?", params=[d])
+
+
+def _prev_book(asof, history=None):
+    """Book immediately before `asof` — from an in-memory {date: book} stream
+    (the rebalance_sim replay) if given, else from portfolio_weights."""
+    if history is not None:
+        dates = sorted(d for d in history if d < asof)
+        return history[dates[-1]] if dates else None
+    return load_previous_book(asof)
+
+
+def _last_resize_date(prev, history=None):
+    """Date the current targets were last actually TRADED to — the earliest
+    book of the consecutive run identical (same sids + weights) to `prev`.
+
+    Carry-forward days re-store the same targets under a new asof_date, so
+    drift must be measured from this anchor, not from yesterday's copy —
+    otherwise one-day drift resets nightly and the band can never trigger."""
+    cur = prev
+    for _ in range(250):                       # bounded walk, ~1y of books
+        older = _prev_book(cur["asof_date"].iloc[0], history)
+        if older is None or older.empty:
+            break
+        a = cur.set_index("sid")["weight"].sort_index()
+        b = older.set_index("sid")["weight"].sort_index()
+        if not a.index.equals(b.index) or not np.allclose(a.values, b.values, atol=1e-9):
+            break
+        cur = older
+    return cur["asof_date"].iloc[0]
+
+
+def _drifted_weights(prev, asof, from_date=None):
+    """Targets grown by price moves from `from_date` (default: the prev book's
+    date) to `asof`, renormalized — what you'd hold today having not traded
+    since the last re-size. A name with a missing price on either date drifts
+    at ratio 1.0 (conservative no-op)."""
+    prev_date = from_date or prev["asof_date"].iloc[0]
+    sids = prev["sid"].tolist()
+    ph = ",".join("?" * len(sids))
+    px = read_sql(f"SELECT date, sid, close FROM stock_prices "
+                  f"WHERE sid IN ({ph}) AND date IN (?,?) AND close>0",
+                  params=[*sids, prev_date, asof])
+    w = prev.set_index("sid")["weight"].astype(float)
+    if px.empty or px["date"].nunique() < 2:
+        return w / w.sum()          # no price info → pure carry
+    wide = px.pivot(index="date", columns="sid", values="close")
+    ratio = (wide.loc[asof] / wide.loc[prev_date]).reindex(w.index).fillna(1.0)
+    grown = w * ratio
+    return grown / grown.sum()
+
+
+def _build_banded(asof, prev, history=None):
+    """Hysteresis rebalance of the previous book against today's daily_picks.
+    `history` (optional {date: book} dict) lets tools/rebalance_sim.py replay
+    the same code path in memory without touching portfolio_weights.
+
+    Sell rules (a held name):    within-tier rank > REBAL["rank_exit"], OR gone
+    from the daily_picks pool entirely (treated as below rank_exit), OR fails
+    the existing investability screen (return history + ADTV floor).
+    Buy rule: only to refill a tier back toward PICKS_PER_TIER (best-ranked
+    investable non-held names; a thin tier just stays short, as in daily mode).
+    Weights: if the name set is UNCHANGED and every drifted weight is within
+    REBAL["drift_pp"] pp of its stored target, today's row CARRIES the stored
+    target weights forward unchanged (simplest + keeps the stored book equal to
+    the standing advisory targets; the drift is execution detail). Otherwise
+    the full HRP + tilt + caps machinery re-runs on the new name set."""
+    rank_exit = int(REBAL.get("rank_exit", 8))
+    cand = select_candidates(asof, min_depth=rank_exit)
+    if cand.empty:
+        raise RuntimeError(f"no daily_picks for {asof}")
+    held = prev["sid"].tolist()
+    investable = _investable_set(sorted(set(cand["sid"]) | set(held)), asof)
+    info = cand.set_index("sid")
+
+    kept, sold = [], {}
+    for s in held:
+        if s not in info.index:
+            sold[s] = "out of daily_picks pool"
+        elif int(info.at[s, "rank"]) > rank_exit:
+            sold[s] = f"rank {int(info.at[s, 'rank'])} > exit {rank_exit}"
+        elif s not in investable:
+            sold[s] = "failed investability (history/ADTV)"
+        else:
+            kept.append(s)
+
+    bought = []
+    for tier, target in PICKS_PER_TIER.items():
+        kept_t = [s for s in kept if info.at[s, "cap_tier"] == tier]
+        need = target - len(kept_t)
+        if need <= 0:
+            continue
+        pool = cand[(cand["cap_tier"] == tier)
+                    & cand["sid"].isin(investable)
+                    & ~cand["sid"].isin(kept)]
+        bought += pool.nsmallest(need, "rank")["sid"].tolist()
+
+    # Cancel wash trades: a held name sold on the rank-exit rule can re-enter as
+    # the best-ranked refill of its own slot (e.g. rank 9 with everything above
+    # it already held/uninvestable). Selling and re-buying the same name is pure
+    # churn — treat it as held instead.
+    wash = set(sold) & set(bought)
+    if wash:
+        kept += [s for s in bought if s in wash]
+        bought = [s for s in bought if s not in wash]
+        for s in wash:
+            del sold[s]
+
+    new_sids = kept + bought
+    if not new_sids:
+        raise RuntimeError(f"banded rebalance left no investable names for {asof}")
+
+    trade = {"mode": "banded", "held": kept, "sold": sold, "bought": bought,
+             "prev_asof": prev["asof_date"].iloc[0]}
+
+    if not sold and not bought:
+        anchor = _last_resize_date(prev, history)
+        drifted = _drifted_weights(prev, asof, from_date=anchor)
+        tgt = prev.set_index("sid")["weight"].astype(float)
+        max_drift = float((drifted - tgt).abs().max())
+        trade["max_drift_pp"] = max_drift * 100
+        trade["drift_since"] = anchor
+        if max_drift <= REBAL.get("drift_pp", 2.0) / 100.0:
+            # carry-forward day: same names, same target weights; refresh the
+            # informational columns (rank/score/tier/sector) from today's picks.
+            book = prev.copy()
+            book["asof_date"] = asof
+            for col in ("rank", "final_score", "cap_tier", "sector"):
+                dst = "factor_score" if col == "final_score" else col
+                book[dst] = book["sid"].map(info[col])
+            book = book.sort_values("weight", ascending=False).reset_index(drop=True)
+            w = book.set_index("sid")["weight"]
+            sec_w = book.groupby("sector")["weight"].sum()
+            diag = {
+                "asof": asof, "n_names": len(book), "cov_obs": 0,
+                "ann_vol_pct": float("nan"), "ann_vol_eq_pct": float("nan"),
+                "eff_n": float(1.0 / (w ** 2).sum()),
+                "max_weight": float(w.max()),
+                "max_sector_weight": float(sec_w.max()),
+                "tier_weights": book.groupby("cap_tier")["weight"].sum().to_dict(),
+                "top_sectors": sec_w.sort_values(ascending=False).head(3).to_dict(),
+                "stock_cap_ok": bool(w.max() <= HRP["max_stock_weight"] + 1e-6),
+                "sector_cap_ok": bool(sec_w.max() <= HRP["max_sector_weight"] + 1e-6),
+                "action": "carry", **trade,
+            }
+            return book, diag
+        trade["action"] = "rebalance (drift)"
+    else:
+        trade["action"] = "rebalance (names)"
+
+    keep = info.loc[[s for s in new_sids]].reset_index()[
+        ["sid", "rank", "final_score", "cap_tier", "sector"]]
+    book, diag = _size_book(asof, keep)
+    diag.update(trade)
+    return book, diag
+
+
 def store(book):
-    """Persist the book; replaces any prior rows for the same asof_date."""
-    return upsert_df(book, "portfolio_weights")
+    """Persist the book for its asof_date. Deletes rows for sids NOT in the new
+    book first — the (asof_date, sid) PK upsert alone would leave stale names
+    behind when a same-day rebuild changes the name set — then upserts."""
+    asof = book["asof_date"].iloc[0]
+    ph = ",".join("?" * len(book))
+    with get_db() as conn:
+        conn.execute(f"DELETE FROM portfolio_weights WHERE asof_date=? "
+                     f"AND sid NOT IN ({ph})", [asof, *book["sid"].tolist()])
+        return upsert_df(book, "portfolio_weights", conn=conn)
 
 
 def backfill(since=None):
     """Build + store the HRP book for every historical daily_picks pick_date (≥ since).
 
-    Reuses build(asof) — PIT-clean: the covariance/ADTV read `date<=asof` and the
-    alpha tilt uses that date's `final_score`, so each row is the book we WOULD have
-    held on that date. Skips dates with too few investable names (thin early dates).
-    Powers the realized-return head-to-head (tools/portfolio_outcomes.py) over the
-    daily_picks history we already have, rather than waiting for forward accumulation.
-    Returns the number of dates built."""
+    Always FRESH (mode="daily") builds — PIT-clean: the covariance/ADTV read
+    `date<=asof` and the alpha tilt uses that date's `final_score`, so each row is
+    the book we WOULD have held on that date under the legacy daily rebuild. Banded
+    mode is path-dependent on the stored history, so a backfill must not use it —
+    and do NOT backfill over dates ≥ 2026-07-05, which would overwrite live banded
+    books with daily ones (ADR 0046 regime change). Skips dates with too few
+    investable names (thin early dates). Returns the number of dates built."""
     where = "WHERE pick_date >= ?" if since else ""
     params = [since] if since else []
     dates = read_sql(f"SELECT DISTINCT pick_date FROM daily_picks {where} "
@@ -395,7 +612,7 @@ def backfill(since=None):
     built = skipped = 0
     for d in dates:
         try:
-            store(build(d)[0])
+            store(build(d, mode="daily")[0])
             built += 1
         except Exception as e:
             skipped += 1
@@ -412,14 +629,29 @@ def run():
     book rather than writing a placeholder (CLAUDE.md silent-failure rule); the
     non-critical flag means the pipeline logs FAILED and continues. ADVISORY ONLY
     — no capital deployed until the rank-skill validates."""
-    book, _diag = build()
+    book, diag = build()
     store(book)
+    if diag.get("mode") == "banded":
+        sold = diag.get("sold", {})
+        print(f"[rebalance] {diag['asof']} banded → {diag.get('action')}: "
+              f"held {len(diag.get('held', []))}"
+              + (f", sold {[f'{s} ({r})' for s, r in sold.items()]}" if sold else "")
+              + (f", bought {diag['bought']}" if diag.get("bought") else "")
+              + (f", max drift {diag['max_drift_pp']:.2f}pp" if "max_drift_pp" in diag else ""))
     return len(book)
 
 
 def _print_report(book, diag):
+    mode = diag.get("mode", "daily")
     print(f"\n══ HRP SIZED BOOK  (picks {diag['asof']}, {diag['n_names']} names, "
-          f"{diag['cov_obs']}d covariance) ══\n")
+          f"{mode}/{diag.get('action', 'rebuild')}) ══\n")
+    if mode == "banded" and diag.get("action") != "rebuild":
+        sold = diag.get("sold", {})
+        print(f"   vs {diag.get('prev_asof')}: held {len(diag.get('held', []))}"
+              + (f" · sold " + ", ".join(f"{s} ({r})" for s, r in sold.items()) if sold else "")
+              + (f" · bought {', '.join(diag['bought'])}" if diag.get("bought") else "")
+              + (f" · max drift {diag['max_drift_pp']:.2f}pp" if "max_drift_pp" in diag else "")
+              + "\n")
     print(f"  {'STOCK':28s} {'TIER':5s} {'SECTOR':20s} {'SCORE':>6s} "
           f"{'WEIGHT':>7s} {'%RISK':>6s}")
     for _, r in book.iterrows():
@@ -427,7 +659,11 @@ def _print_report(book, diag):
               f"{str(r['sector'])[:20]:20s} {r['factor_score']:6.3f} "
               f"{r['weight']*100:6.1f}% {r['marginal_risk_contrib']*100:5.0f}%")
     print(f"\n── ex-ante annualised vol ──")
-    print(f"   HRP + tilt   : {diag['ann_vol_pct']:5.1f}%   (equal-weight {diag['ann_vol_eq_pct']:.1f}%)")
+    if diag.get("action") == "carry":
+        print(f"   carried forward from {diag.get('prev_asof')} — no re-size today "
+              f"(vol/risk-contrib as of the last HRP run)")
+    else:
+        print(f"   HRP + tilt   : {diag['ann_vol_pct']:5.1f}%   (equal-weight {diag['ann_vol_eq_pct']:.1f}%)")
     print(f"   effective N  : {diag['eff_n']:.1f} of {diag['n_names']}   "
           f"max stock {diag['max_weight']*100:.1f}% · max sector {diag['max_sector_weight']*100:.0f}%")
     print(f"   tier weights : " + " · ".join(f"{t} {v*100:.0f}%" for t, v in diag["tier_weights"].items()))
@@ -441,9 +677,11 @@ def _print_report(book, diag):
 def main():
     ap = argparse.ArgumentParser(description="Track 3.3c — HRP position sizing")
     ap.add_argument("--date", help="pick_date to build from (default: latest)")
+    ap.add_argument("--mode", choices=["banded", "daily"],
+                    help="rebalance mode (default: config PORTFOLIO.hrp.rebalance.mode)")
     ap.add_argument("--dry-run", action="store_true", help="print, write nothing")
     ap.add_argument("--backfill", action="store_true",
-                    help="build + store the book for every historical pick_date")
+                    help="build + store a FRESH (daily-mode) book for every historical pick_date")
     ap.add_argument("--since", help="with --backfill: only dates on/after YYYY-MM-DD")
     args = ap.parse_args()
 
@@ -451,7 +689,7 @@ def main():
         backfill(since=args.since)
         return
 
-    book, diag = build(args.date)
+    book, diag = build(args.date, mode=args.mode)
     _print_report(book, diag)
     if args.dry_run:
         print("   (--dry-run: portfolio_weights NOT written)\n")

@@ -336,6 +336,18 @@ PORTFOLIO = {
         # (15 names × 5% = 75% < 100%). 1/15≈6.7%, so the per-stock cap must exceed that.
         "max_stock_weight": 0.12,   # per-name ceiling
         "max_sector_weight": 0.35,  # per-sector ceiling (concentration guard)
+        # Banded/hysteresis rebalancing (ADR 0046). The daily-reset book measured
+        # 18.5%/day one-way turnover (2026-07-04 audit, Port-F1) — cost-fatal vs the
+        # measured edge. Hysteresis: enter at top-5, exit only below top-8 within the
+        # tier; carry the previous book unchanged unless a weight drifts >2pp from
+        # target. "mode": "daily" preserves the old rebuild-from-scratch behavior.
+        # DEFAULT flipped to banded 2026-07-05 — regime change in the stored
+        # portfolio_weights evidence stream (books before/after are not comparable).
+        "rebalance": {
+            "mode": "banded",   # "banded" (default) | "daily" (legacy full rebuild)
+            "rank_exit": 8,     # sell a held name only when its within-tier rank > this
+            "drift_pp": 2.0,    # re-run HRP only if a weight drifts > this many pp from target
+        },
     },
 }
 
