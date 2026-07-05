@@ -68,7 +68,29 @@ def _book_as_of(book_dates, t):
     return book_dates[i] if i >= 0 else None
 
 
+def _turnover_and_cost(prev_w, target_w, day_rets, tier_of, cost_bps):
+    """One-way turnover T_t = 0.5·Σ|target − drifted| (drifted = prev_w grown by
+    today's realized returns — what you'd hold if you hadn't traded back to
+    target) + the $-cost of closing that gap at each name's tier bps.
+
+    prev_w=None (first day in the series) → turnover/cost undefined (NaN);
+    there's no "yesterday" to drift from."""
+    if prev_w is None:
+        return float("nan"), float("nan")
+    common = prev_w.index.intersection(day_rets.index)
+    grown = prev_w.reindex(common) * (1 + day_rets.reindex(common))
+    drifted = grown / grown.sum() if grown.sum() else grown
+    all_names = target_w.index.union(drifted.index)
+    dw = target_w.reindex(all_names).fillna(0.0) - drifted.reindex(all_names).fillna(0.0)
+    turnover = 0.5 * dw.abs().sum()
+    bps = tier_of.reindex(all_names).map(cost_bps).fillna(max(cost_bps.values()))
+    cost = float((dw.abs() * bps / 10000.0).sum())
+    return float(turnover), cost
+
+
 def compute_nav():
+    from config import TRANSACTION_COSTS_BPS
+
     books = read_sql("SELECT asof_date, sid, weight, cap_tier FROM portfolio_weights")
     if books.empty:
         print("⚠ no portfolio_weights — run `python -m portfolio_construction --backfill`")
@@ -77,6 +99,10 @@ def compute_nav():
     bw = {d: g.set_index("sid")["weight"] for d, g in books.groupby("asof_date")}
     btier = {d: g.set_index("sid")["cap_tier"] for d, g in books.groupby("asof_date")}
     book_dates = pd.DatetimeIndex(sorted(bw.keys()))
+    # Static sid→cap_tier lookup (most recently seen) — covers names that later
+    # drop out of the book entirely, so an exit still gets priced at ITS tier's
+    # cost rather than falling back to the worst-case default.
+    tier_lookup = books.sort_values("asof_date").groupby("sid")["cap_tier"].last()
 
     price = _load_price_panel()
     # fill_method=None: a stock not priced on day t → NaN return (dropped that day),
@@ -89,6 +115,8 @@ def compute_nav():
                   if not bench_panel.empty else pd.DataFrame())
 
     hrp_r, eqw_r, bmk_r, idx = [], [], [], []
+    hrp_to, eqw_to, hrp_cost, eqw_cost = [], [], [], []
+    prev_hrp_w, prev_eqw_w = None, None   # weights actually held at end of prior day
     for t in rets.index:
         bd = _book_as_of(book_dates, t)
         if bd is None:
@@ -100,8 +128,17 @@ def compute_nav():
         names = day.index
         wsub = w.reindex(names).fillna(0.0)
         wsub = wsub / wsub.sum() if wsub.sum() else wsub
+        eqw_target = pd.Series(1.0 / len(names), index=names)
         hrp_r.append(float((wsub * day).sum()))
         eqw_r.append(float(day.mean()))
+
+        tier_of = tier_lookup.reindex(names.union(
+            prev_hrp_w.index if prev_hrp_w is not None else names))
+        to_h, c_h = _turnover_and_cost(prev_hrp_w, wsub, day, tier_of, TRANSACTION_COSTS_BPS)
+        to_e, c_e = _turnover_and_cost(prev_eqw_w, eqw_target, day, tier_of, TRANSACTION_COSTS_BPS)
+        hrp_to.append(to_h); hrp_cost.append(c_h)
+        eqw_to.append(to_e); eqw_cost.append(c_e)
+        prev_hrp_w, prev_eqw_w = wsub, eqw_target
 
         # tier-weight-blended benchmark for this book
         bmk = np.nan
@@ -119,31 +156,52 @@ def compute_nav():
     if not idx:
         print("⚠ no overlapping trading days between books and prices yet")
         return None
-    return (pd.Series(hrp_r, index=idx), pd.Series(eqw_r, index=idx),
-            pd.Series(bmk_r, index=idx))
+    return {
+        "hrp": pd.Series(hrp_r, index=idx), "eqw": pd.Series(eqw_r, index=idx),
+        "bmk": pd.Series(bmk_r, index=idx),
+        "hrp_turnover": pd.Series(hrp_to, index=idx), "eqw_turnover": pd.Series(eqw_to, index=idx),
+        "hrp_cost": pd.Series(hrp_cost, index=idx), "eqw_cost": pd.Series(eqw_cost, index=idx),
+    }
 
 
 def report():
     res = compute_nav()
     if res is None:
         return
-    hrp, eqw, bmk = res
+    hrp, eqw, bmk = res["hrp"], res["eqw"], res["bmk"]
+    hrp_net = hrp - res["hrp_cost"].fillna(0.0)
+    eqw_net = eqw - res["eqw_cost"].fillna(0.0)
     s_hrp, s_eqw, s_bmk = _stats(hrp), _stats(eqw), _stats(bmk)
+    s_hrp_net, s_eqw_net = _stats(hrp_net), _stats(eqw_net)
     spread = _stats(hrp - eqw)   # HRP-minus-EQW daily spread → info-ratio-like
 
     print(f"\n══ HRP vs EQUAL-WEIGHT — risk-adjusted NAV (daily-rebal, {s_hrp.get('n_days','?')} trading days, ADVISORY) ══\n")
     print(f"  {'':14}{'TOTAL':>9}{'ANN.RET':>9}{'ANN.VOL':>9}{'SHARPE':>8}{'MAX DD':>9}")
-    for label, s in [("HRP", s_hrp), ("Equal-weight", s_eqw), ("Bench (NIFTY)", s_bmk)]:
+    for label, s in [("HRP (gross)", s_hrp), ("HRP (net)", s_hrp_net),
+                     ("Equal-wt (gross)", s_eqw), ("Equal-wt (net)", s_eqw_net),
+                     ("Bench (NIFTY)", s_bmk)]:
         if not s:
             continue
         print(f"  {label:14}{s['total_pct']:>8.2f}%{s['ann_ret_pct']:>8.1f}%"
               f"{s['ann_vol_pct']:>8.1f}%{s['sharpe']:>8.2f}{s['maxdd_pct']:>8.1f}%")
-    print(f"\n  Sharpe edge (HRP − EQW): {s_hrp.get('sharpe', float('nan')) - s_eqw.get('sharpe', float('nan')):+.2f}"
+    print(f"\n  Sharpe edge (HRP − EQW), gross: {s_hrp.get('sharpe', float('nan')) - s_eqw.get('sharpe', float('nan')):+.2f}"
+          f"   ·   net: {s_hrp_net.get('sharpe', float('nan')) - s_eqw_net.get('sharpe', float('nan')):+.2f}"
           f"   ·   vol reduction: {s_eqw.get('ann_vol_pct', 0) - s_hrp.get('ann_vol_pct', 0):+.1f}pp")
     print(f"  HRP−EQW spread: ann {spread.get('ann_ret_pct', float('nan')):+.1f}% at "
           f"{spread.get('ann_vol_pct', float('nan')):.1f}% vol (info-ratio {spread.get('sharpe', float('nan')):+.2f})")
-    print(f"\n  Selection held constant → this is the WEIGHTING edge. Costs excluded (cancel in")
-    print(f"  the spread). EARLY (~2mo books); §3.3c gate wants a durable edge over 18-24mo. ADVISORY.\n")
+
+    to_hrp_mean = res["hrp_turnover"].mean() * 100
+    to_eqw_mean = res["eqw_turnover"].mean() * 100
+    cost_hrp_ann = res["hrp_cost"].fillna(0.0).mean() * TRADING_DAYS * 100
+    cost_eqw_ann = res["eqw_cost"].fillna(0.0).mean() * TRADING_DAYS * 100
+    print(f"\n  Turnover (mean daily, one-way): HRP {to_hrp_mean:.1f}%/day   ·   Equal-wt {to_eqw_mean:.1f}%/day")
+    print(f"  Cost drag (annualised, from daily-rebalance-to-target): HRP {cost_hrp_ann:.1f}%/yr"
+          f"   ·   Equal-wt {cost_eqw_ann:.1f}%/yr")
+    print(f"\n  Selection held constant → gross spread is the WEIGHTING edge; net numbers show what")
+    print(f"  survives daily-rebalance-to-target transaction costs (config.TRANSACTION_COSTS_BPS,")
+    print(f"  per-tier one-way). Real execution would use banded/hysteresis rebalancing (far lower")
+    print(f"  turnover than this daily-reset simulation) — see HUMAN TASKS in plan 0010.")
+    print(f"  EARLY (~2mo books); §3.3c gate wants a durable edge over 18-24mo. ADVISORY.\n")
 
 
 def main():
