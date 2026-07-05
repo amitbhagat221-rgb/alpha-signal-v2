@@ -55,100 +55,49 @@ SIGNAL_WEIGHTS = {
     # artifact re-verification (analyst-PT PIT history; open question, recheck 2026-08),
     # so it gets a strong-but-not-dominant weight. eps_growth held back (ρ=0.63 with
     # consensus → redundant). Each tier renormalised to Σ=1.
+    # ═══════════════════════════════════════════════════════════════════════
+    # 2026-07-05 HONEST RE-DERIVATION (ADR 0049) — supersedes all per-tier notes
+    # below. After the fwd_return anchor-proximity re-baseline (ADR 0047), weights
+    # were re-derived on CLEAN v2 t-stats among the screener-consumable signals,
+    # under five hard rules: (1) clean |t|≥1.5 on the tier; (2) n≥20 anchors
+    # (drops eps_growth n=9); (3) sign must match the economic prior — every
+    # WRONG-SIGN factor excluded (roic/interest_coverage/low_vol "buy junk" are
+    # bull-regime artifacts, not alpha); (4) one representative per orthogonal
+    # group (Value = book_to_price only, NOT +earnings_yield); (5) benched-for-
+    # cause stays benched (kyle_lambda cost-coupled). Weights ∝ shrunk conviction,
+    # single-factor cap ~0.30, Σ|w|=1.0/tier. DROPPED as clean-data noise: promoter
+    # (SMALL 0.47 / MID 1.14), momentum (1.34), MID consensus (−0.13), MID/LARGE
+    # earnings_yield, LARGE accruals/piotroski, SMALL accruals. ADDED (validated,
+    # were unwired in-tier): consensus→SMALL (t=3.74), sector_tilt→LARGE (t=1.58).
+    # BOOSTED: delivery_anomaly_z 0.12→0.28 (the ONLY BY-FDR haircut survivor).
+    # Prior per-tier rationale → git history + ADR 0045/0043/0038. NOTE: the
+    # "latest factors" not yet here (eps_revision_yoy, value_composite, CAR) need
+    # the screener's _load_signals extended first — tracked as Scope B.
+    # ═══════════════════════════════════════════════════════════════════════
     "LARGE": {
-        # 2026-06-02 horizon-gate review (ADR 0038, tools/promotion_gate.py): both
-        # lenses — v1 C13b AND the net-of-cost gate — agree LARGE's value/quality
-        # block is weak (small-cap-grade factors carrying LARGE weight; matches the
-        # walk-forward "LARGE ~zero OOS skill"). momentum (t=0.00) DROPPED — it broke
-        # the config's own t<0.5→0× rule AND the gate REJECTs it. accruals + piotroski
-        # equalised to 0.09 as explicit DIVERSIFICATION ballast (not validated alpha —
-        # both gate-REJECT) kept only to avoid over-concentrating consensus.
-        # earnings_yield trimmed (over-weighted for a 0.5×-secondary; gate REJECT in
-        # LARGE — strong in SMALL, weak here). Freed weight → the only doubly-validated
-        # pair (consensus + book_to_price). MID left untouched (its flags are
-        # gate↔history CONFLICTS, not acted on).
-        # 2026-07-05 (ADR 0045): pt_upside PULLED — its |t| was built entirely from
-        # forecast_history's year-ahead-realized-close contamination (audit Factor-F1,
-        # CRITICAL); clean data gives n<4 anchors, honestly INSUFFICIENT. Remaining
-        # weights renormalized proportionally, Σ|w|=1.0.
-        "consensus":      0.47,   # t=3.52 primary; gate LIBRARY 2.29 — the LARGE anchor
-        "earnings_yield": 0.16,   # t=1.57 secondary; gate REJECT in LARGE — trimmed
-        "book_to_price":  0.13,   # t=0.79; gate LIBRARY (sign-unstable) — best of the rest
-        "accruals":       0.12,   # t=0.20; gate REJECT — diversifier, not alpha
-        "piotroski":      0.12,   # t=0.51; gate REJECT — diversifier, not alpha
+        # Structurally hollow tier (walk-forward "LARGE ~zero OOS skill"). On clean
+        # data only consensus (1.62) + sector_tilt (1.58) clear |t|≥1.5 correct-sign;
+        # book_to_price (0.86) kept as labelled value ballast. LOW CONVICTION — the
+        # real fix is a validated LARGE factor (CAR / low-vol-weekly), not re-weighting.
+        "consensus":      0.42,   # clean t=1.62 — least-weak analyst signal, the anchor
+        "sector_tilt":    0.33,   # clean t=1.58 — ADDED (was unwired in LARGE)
+        "book_to_price":  0.25,   # clean t=0.86 — value ballast, explicitly diversification
     },
     "MID": {
-        # iv_skew_25d added 2026-05-31 (ADR 0035): MID t=+3.16 KEEP, 48 wk, orthogonal.
-        # pt_upside added in the same promotion wave (MID t=8.40, capped).
-        # 2026-06-14 (ADR 0042): governance_resignation added at −0.08 — the FIRST
-        # genuine NEGATIVE weight in the live scheme (the screener flips it to
-        # abs(w)·(1−pctile), so resignation-heavy names get penalised). Backtest MID
-        # t=−3.82 KEEP (46 monthly anchors / 8yr, IC −0.051, ICIR −0.56), sign-stable
-        # negative in all three tiers; orthogonality max |ρ|≈0.09 vs the MID forensic/
-        # quality cluster (piotroski_f/m_score/pledge_quality/forensic_penalty) — a
-        # genuinely new event-stream dimension (REXP-lesson complement). Sized at 0.08
-        # (below iv_skew's 0.14 despite a stronger |t|): tail-penalty (~41% flagged, the
-        # rest neutral), brand-new, no horizon-gate corroboration yet, first negative
-        # weight → deliberately conservative. MID-only (LARGE −1.61 / SMALL −1.65 WEAK,
-        # same sign — re-judge as anchors deepen). Funded by an even −0.01 haircut across
-        # the existing eight (ordering preserved). Σ|w|=1.0.
-        # 2026-06-14 MID conflict RE-JUDGE (Next-3 #3) — resolved the long-held accruals/
-        # consensus gate↔history conflicts with the horizon-aware marginal diagnostic
-        # (tools/factor_marginal.py, 20/63/126/252d) + the net-of-cost gate + multiple-
-        # testing (ADR 0043). (a) ACCRUALS held at 0.18→0.20: the gate REJECT was a FAST-
-        # horizon artifact — accruals MID is a genuine SLOW factor (incr_t −5.4 @252d,
-        # economically-correct sign; v1 t=3.20). Vindicated, not noise. (b) CONSENSUS
-        # 0.08→0.06: weak/negative at EVERY v2 horizon (20d −0.5 / 63d −2.4 / 126d −1.7 /
-        # 252d −1.5), gate REJECT, multiple-testing fail — its MID edge DECAYED post-2022
-        # (only v1 2019-22 supported it) and it's redundant with pt_upside's analyst
-        # dimension. Modest cut (not zero — still v1-validated), not a one-read override:
-        # 4yr of recent evidence across 3 methods. Σ|w|=1.0 preserved.
-        # 2026-07-05 (ADR 0045): pt_upside PULLED — look-ahead artifact (audit
-        # Factor-F1, CRITICAL). Remaining weights renormalized, Σ|w|=1.0.
-        "accruals":               0.27,   # t=3.20 primary; horizon-vindicated SLOW factor (incr −5.4 @252d) — gate REJECT was a fast-horizon artifact
-        "iv_skew_25d":            0.17,   # t=3.16 primary (MID, F&O stocks)
-        "piotroski":              0.14,   # t=2.23 secondary
-        "book_to_price":          0.14,   # t=2.33 secondary; slow value (incr +2.0 @252d)
-        "consensus":              0.08,   # t=2.20 v1 but DECAYED — weak/negative at all v2 horizons, gate REJECT (2026-06-14 trim)
-        "governance_resignation": -0.11,  # t=−3.82 KEEP (ADR 0042); negative — FAST forensic penalty (peaks @20d)
-        "earnings_yield":         0.05,   # t=1.01 tertiary
-        "promoter":               0.04,   # t=0.83 tertiary
+        "iv_skew_25d":            0.26,   # clean t=2.87 — strongest MID, options-implied (ADR 0035)
+        "accruals":               0.22,   # clean cf_accruals t=−2.65 (factor pre-inverted → +w); accruals anomaly, correct sign
+        "book_to_price":          0.20,   # clean t=2.37 — value representative
+        "piotroski":              0.18,   # clean t=2.25 — quality, POSITIVE sign (correct, unlike roic/gross_prof)
+        "governance_resignation": -0.14,  # clean t=−1.55 — event penalty, correct negative sign (ADR 0042); decayed but sign-stable
     },
     # SIGNAL_GROUPS defined below SIGNAL_WEIGHTS.
     "SMALL": {
-        # promotion wave: pt_upside (t=9.14, capped), pledge_quality (t=5.90),
-        # delivery_anomaly_z (t=4.76, n=103) — all orthogonal (max |ρ|≤0.08 vs wired).
-        # 2026-06-02 horizon-gate review (ADR 0038): SMALL is the healthiest tier
-        # (walk-forward VALIDATED) — most factors PROMOTE in both lenses. One trim:
-        # pledge_quality 0.13→0.10 — the gate demotes it to LIBRARY (1.96) and flags
-        # it single-horizon-fragile (works only @20d) + sign-unstable; kept (not gutted)
-        # for its orthogonal promoter-pledge-stress info. Freed weight → book_to_price,
-        # the gate's single strongest factor in the whole model (net_t 13.58 @252d).
-        # smart_money carries 0.06 but is NOT backtested (no PIT/gate entry) — flagged
-        # to validate or reclassify as a diversifier. accruals = gate↔history conflict,
-        # held.
-        # 2026-06-05 (ADR 0041): sector_tilt added at 0.10 — within-tier backtest
-        # SMALL t=+3.18 KEEP (34 monthly anchors, IC +0.023, ICIR 0.545, CI strictly
-        # >0). The 6m-basket-momentum + macro ensemble; ORTHOGONAL to the whole SMALL
-        # block (a new sector/macro dimension, Fama-MacBeth-validated additive to stock
-        # momentum, t+3.34). Weighted alongside the other orthogonal non-fundamental
-        # SMALL signals (delivery_anomaly_z). LARGE (t=0.92) / MID (t=0.64) did NOT
-        # clear |t|≥1.5 → NOT wired there (sector_tilt is SMALL-only, like the cousin's
-        # best tier). Funded by an even −0.01 haircut across the existing ten (ordering
-        # preserved). Distinct from the benched sector_momentum (63d RS, SMALL t=1.88).
-        # 2026-07-05 (ADR 0045): pt_upside PULLED — look-ahead artifact (audit
-        # Factor-F1, CRITICAL). smart_money PULLED — best-ever t=1.06 on n=6
-        # violates the documented |t|≥1.5 promotion bar (audit Factor-F3).
-        # Remaining weights renormalized, Σ|w|=1.0.
-        "promoter":           0.19,   # t=3.20 primary; gate LIBRARY 1.83
-        "earnings_yield":     0.14,   # t=3.13 primary; gate PROMOTE 7.75 @252d
-        "book_to_price":      0.14,   # t=2.54 secondary; gate PROMOTE 13.58 @252d (strongest)
-        "delivery_anomaly_z": 0.12,   # t=4.76 primary (n=103, orthogonal); gate PROMOTE 2.12
-        "sector_tilt":        0.12,   # t=3.18 KEEP (ADR 0041); orthogonal sector/macro tilt
-        "pledge_quality":     0.11,   # t=5.90; gate LIBRARY 1.96 fragile — kept orthogonal
-        "piotroski":          0.10,   # t=2.81 secondary; gate PROMOTE 4.87
-        "accruals":           0.06,   # t=2.10 secondary; gate REJECT — conflict, held
-        "momentum":           0.02,   # t=1.76 tertiary; gate REJECT — token
+        "delivery_anomaly_z": 0.28,   # clean t=7.78 (n=107) — the SOLE BY-FDR haircut survivor; the real core
+        "consensus":          0.18,   # clean t=3.74 (n=38) — ADDED (was unwired in SMALL)
+        "sector_tilt":        0.18,   # clean t=3.69 (n=41) — orthogonal sector/macro (ADR 0041)
+        "book_to_price":      0.14,   # clean t=1.88 — value representative (earnings_yield dropped, redundant)
+        "pledge_quality":     0.12,   # clean t=1.76 — fails haircut but correct sign + orthogonal ownership/stress dim
+        "piotroski":          0.10,   # clean t=1.53 — quality, correct positive sign
     },
 }
 
