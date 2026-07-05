@@ -24,7 +24,9 @@ from config import PIPELINE, LOG_PATH
 from db import get_db
 
 # ── Logging setup ──
-
+# stdout only — cron (run_pipeline.sh) already redirects stdout to LOG_PATH.
+# A FileHandler here used to write the SAME lines to LOG_PATH a second time
+# (audit Eff-F6); interactive runs still print via the StreamHandler.
 LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 logging.basicConfig(
@@ -33,7 +35,6 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
     handlers=[
         logging.StreamHandler(sys.stdout),
-        logging.FileHandler(LOG_PATH, mode="a"),
     ],
 )
 log = logging.getLogger("pipeline")
