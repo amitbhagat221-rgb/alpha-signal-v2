@@ -514,7 +514,14 @@ def compute(dry_run: bool = False, scheme: str | None = None) -> int:
     # Universe — schemes with enough NAV history to score
     # Score TRUSTED schemes only — wound-up / segregated / interval / bonus / anomalous
     # schemes pollute category percentiles. See sources/mf_data_quality.py.
-    where_parts = ["(m.data_quality IS NULL OR m.data_quality = 'TRUSTED')"]
+    # Exclude IDCW/Dividend variants (audit MF-F7): their NAV is payout-depressed
+    # without a dividend adjustment, so price-NAV returns structurally understate
+    # the fund's true performance. They stay in the master (browsable) — just not
+    # scored. Growth/Unknown pass through unchanged.
+    where_parts = [
+        "(m.data_quality IS NULL OR m.data_quality = 'TRUSTED')",
+        "(m.option_type IS NULL OR m.option_type != 'IDCW')",
+    ]
     params: list = []
     if scheme:
         where_parts = ["m.scheme_code = ?"]  # bypass quality filter for explicit single-scheme runs
