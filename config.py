@@ -551,88 +551,88 @@ PIPELINE_STEPS = [
 
     {"name": "signal_forensic",    "module": "signals.forensic",    "function": "compute",  "critical": False,
      "table": "forensic_scores",   "source": "quarterly_income + annual_balance_sheet + annual_cash_flow",
-     "data_freq": "quarterly",     "frequency": "daily"},
+     "data_freq": "quarterly",     "frequency": "weekly"},
 
     {"name": "signal_piotroski",   "module": "signals.piotroski",   "function": "compute",  "critical": False,
      "table": "piotroski_scores",  "source": "quarterly_income + annual_balance_sheet + annual_cash_flow",
-     "data_freq": "quarterly",     "frequency": "daily"},
+     "data_freq": "quarterly",     "frequency": "weekly"},
 
     # ROIC — first Track 3 factor. Reads fundamentals_screener (sourced
     # weekly via sources.screener_pull — separate cadence, not in daily
     # pipeline). Not yet in scoring weights — needs t-stat validation.
     {"name": "signal_roic",        "module": "signals.roic",        "function": "compute",  "critical": False,
      "table": "roic_scores",       "source": "fundamentals_screener (Screener Premium)",
-     "data_freq": "annual",        "frequency": "daily"},
+     "data_freq": "annual",        "frequency": "weekly"},
 
     # FCF Yield — second Track 3 factor. Same data source, same gating —
     # not in scoring weights yet.
     {"name": "signal_fcf_yield",   "module": "signals.fcf_yield",   "function": "compute",  "critical": False,
      "table": "fcf_yield_scores",  "source": "fundamentals_screener (Screener Premium) + stocks.market_cap_cr",
-     "data_freq": "annual",        "frequency": "daily"},
+     "data_freq": "annual",        "frequency": "weekly"},
 
     # Cash Conversion Cycle — third Track 3 factor. DSO + DIO − DPO, 3-yr median.
     # Same gating — not in scoring weights yet.
     {"name": "signal_cash_conversion_cycle", "module": "signals.cash_conversion_cycle", "function": "compute", "critical": False,
      "table": "cash_conversion_cycle_scores", "source": "fundamentals_screener — Sales + Receivables + Inventory + Trade Payables",
-     "data_freq": "annual",        "frequency": "daily"},
+     "data_freq": "annual",        "frequency": "weekly"},
 
     # Operating Margin Trend — 5y OLS slope of EBIT/Sales (pp/year). Same gating.
     {"name": "signal_operating_margin_trend", "module": "signals.operating_margin_trend", "function": "compute", "critical": False,
      "table": "operating_margin_trend_scores", "source": "fundamentals_screener — Sales + PBT + Interest",
-     "data_freq": "annual",        "frequency": "daily"},
+     "data_freq": "annual",        "frequency": "weekly"},
 
     # Working Capital Intensity — (Recv + Inv − Pay) / Sales, 3y median. Same gating.
     {"name": "signal_working_capital_intensity", "module": "signals.working_capital_intensity", "function": "compute", "critical": False,
      "table": "working_capital_intensity_scores", "source": "fundamentals_screener — Sales + Receivables + Inventory + Trade Payables",
-     "data_freq": "annual",        "frequency": "daily"},
+     "data_freq": "annual",        "frequency": "weekly"},
 
     # Interest Coverage — (PBT + Interest) / Interest, 3y median. Same gating.
     {"name": "signal_interest_coverage", "module": "signals.interest_coverage", "function": "compute", "critical": False,
      "table": "interest_coverage_scores", "source": "fundamentals_screener — PBT + Interest",
-     "data_freq": "annual",        "frequency": "daily"},
+     "data_freq": "annual",        "frequency": "weekly"},
 
     # ROIIC — marginal NOPAT/IC over trailing 5y. Sister of ROIC; measures
     # how productive newly-deployed capital has been.
     {"name": "signal_roiic", "module": "signals.roiic", "function": "compute", "critical": False,
      "table": "roiic_scores", "source": "fundamentals_screener — PBT + Tax + Interest + Equity Share Capital + Reserves + Borrowings",
-     "data_freq": "annual",        "frequency": "daily"},
+     "data_freq": "annual",        "frequency": "weekly"},
 
     # Gross Profitability (Novy-Marx anchor) — multibagger funnel quality anchor.
     {"name": "signal_gross_profitability", "module": "signals.gross_profitability", "function": "compute", "critical": False,
      "table": "gross_profitability_scores", "source": "fundamentals_screener — Sales + Raw Material Cost + Change in Inventory + Power and Fuel + Other Mfr. Exp + Total",
-     "data_freq": "annual",        "frequency": "daily"},
+     "data_freq": "annual",        "frequency": "weekly"},
 
     # ── Forensic / capital-allocation batch (plan 0002 §3.2.1) ──
     {"name": "signal_dso_change_yoy", "module": "signals.dso_change_yoy", "function": "compute", "critical": False,
      "table": "dso_change_yoy_scores", "source": "fundamentals_screener — Sales + Receivables",
-     "data_freq": "annual", "frequency": "daily"},
+     "data_freq": "annual", "frequency": "weekly"},
     {"name": "signal_dio_change_yoy", "module": "signals.dio_change_yoy", "function": "compute", "critical": False,
      "table": "dio_change_yoy_scores", "source": "fundamentals_screener — Sales + Inventory",
-     "data_freq": "annual", "frequency": "daily"},
+     "data_freq": "annual", "frequency": "weekly"},
     {"name": "signal_nwc_to_revenue", "module": "signals.nwc_to_revenue", "function": "compute", "critical": False,
      "table": "nwc_to_revenue_scores", "source": "fundamentals_screener — Sales + Receivables + Inventory + Trade Payables",
-     "data_freq": "annual", "frequency": "daily"},
+     "data_freq": "annual", "frequency": "weekly"},
     {"name": "signal_sloan_accruals_full", "module": "signals.sloan_accruals_full", "function": "compute", "critical": False,
      "table": "sloan_accruals_full_scores", "source": "fundamentals_screener — Receivables + Inventory + Trade Payables + Depreciation + Total",
-     "data_freq": "annual", "frequency": "daily"},
+     "data_freq": "annual", "frequency": "weekly"},
     {"name": "signal_sga_to_revenue_change", "module": "signals.sga_to_revenue_change", "function": "compute", "critical": False,
      "table": "sga_to_revenue_change_scores", "source": "fundamentals_screener — Sales + Selling and admin",
-     "data_freq": "annual", "frequency": "daily"},
+     "data_freq": "annual", "frequency": "weekly"},
     {"name": "signal_fcf_margin", "module": "signals.fcf_margin", "function": "compute", "critical": False,
      "table": "fcf_margin_scores", "source": "fundamentals_screener — Sales + OCF + Net Block + CWIP + Depreciation",
-     "data_freq": "annual", "frequency": "daily"},
+     "data_freq": "annual", "frequency": "weekly"},
     {"name": "signal_capex_to_dep", "module": "signals.capex_to_dep", "function": "compute", "critical": False,
      "table": "capex_to_dep_scores", "source": "fundamentals_screener — Net Block + CWIP + Depreciation",
-     "data_freq": "annual", "frequency": "daily"},
+     "data_freq": "annual", "frequency": "weekly"},
     {"name": "signal_goodwill_to_assets", "module": "signals.goodwill_to_assets", "function": "compute", "critical": False,
      "table": "goodwill_to_assets_scores", "source": "fundamentals_screener — Intangible Assets + Total",
-     "data_freq": "annual", "frequency": "daily"},
+     "data_freq": "annual", "frequency": "weekly"},
     {"name": "signal_debt_structure", "module": "signals.debt_structure", "function": "compute", "critical": False,
      "table": "debt_structure_scores", "source": "fundamentals_screener — Long term Borrowings + Borrowings",
-     "data_freq": "annual", "frequency": "daily"},
+     "data_freq": "annual", "frequency": "weekly"},
     {"name": "signal_asset_tangibility", "module": "signals.asset_tangibility", "function": "compute", "critical": False,
      "table": "asset_tangibility_scores", "source": "fundamentals_screener — Net Block + Total",
-     "data_freq": "annual", "frequency": "daily"},
+     "data_freq": "annual", "frequency": "weekly"},
 
     # Sector-narrative-derived cluster (plan 0003) — 4 factors inspired by
     # IIM Ahmedabad sector-narrative pages. None in scoring weights yet;
@@ -640,15 +640,15 @@ PIPELINE_STEPS = [
 
     {"name": "signal_revenue_cv",  "module": "signals.revenue_cv",  "function": "compute",  "critical": False,
      "table": "revenue_cv_scores", "source": "fundamentals_screener — Sales (annual, 6 yrs)",
-     "data_freq": "annual",        "frequency": "daily"},
+     "data_freq": "annual",        "frequency": "weekly"},
 
     {"name": "signal_inventory_turnover", "module": "signals.inventory_turnover", "function": "compute", "critical": False,
      "table": "inventory_turnover_scores", "source": "fundamentals_screener — Sales + Inventory",
-     "data_freq": "annual",                "frequency": "daily"},
+     "data_freq": "annual",                "frequency": "weekly"},
 
     {"name": "signal_sales_growth_relative", "module": "signals.sales_growth_relative", "function": "compute", "critical": False,
      "table": "sales_growth_relative_scores", "source": "fundamentals_screener — Sales + sector peers",
-     "data_freq": "annual",                   "frequency": "daily"},
+     "data_freq": "annual",                   "frequency": "weekly"},
 
     {"name": "signal_share_momentum", "module": "signals.share_momentum", "function": "compute", "critical": False,
      "table": "share_momentum_scores", "source": "stock_prices + fundamentals_screener — No. of Equity Shares",
@@ -656,14 +656,14 @@ PIPELINE_STEPS = [
 
     {"name": "signal_accruals",    "module": "signals.accruals",    "function": "compute",  "critical": False,
      "table": "accruals_scores",   "source": "quarterly_income + annual_balance_sheet + annual_cash_flow",
-     "data_freq": "quarterly",     "frequency": "daily"},
+     "data_freq": "quarterly",     "frequency": "weekly"},
 
     {"name": "signal_consensus",   "module": "signals.consensus",   "function": "compute",  "critical": False,
      "table": "consensus_signals", "source": "analyst_consensus + forecast_history + stock_prices",
      "data_freq": "monthly",       "frequency": "daily"},
 
     {"name": "signal_promoter",    "module": "signals.promoter",    "function": "compute",  "critical": False,
-     "table": "promoter_signals",  "source": "shareholding",        "data_freq": "quarterly", "frequency": "daily"},
+     "table": "promoter_signals",  "source": "shareholding",        "data_freq": "quarterly", "frequency": "weekly"},
 
     {"name": "signal_smart_money", "module": "signals.smart_money", "function": "compute",  "critical": False,
      "table": "smart_money_scores","source": "bulk_deals + stock_prices", "data_freq": "daily", "frequency": "daily"},
@@ -696,7 +696,7 @@ PIPELINE_STEPS = [
 
     {"name": "quality_gate",       "module": "scoring.quality_gate","function": "compute",  "critical": True,
      "table": None,                "source": "piotroski + forensic + shareholding",
-     "data_freq": "quarterly",     "frequency": "daily"},
+     "data_freq": "quarterly",     "frequency": "weekly"},
 
     {"name": "regime_update",      "module": "scoring.regime",      "function": "compute",  "critical": False,
      "table": "regime_state",      "source": "vix_history",         "data_freq": "daily",   "frequency": "daily"},
