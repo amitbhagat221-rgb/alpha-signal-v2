@@ -1374,8 +1374,9 @@ STALENESS_OVERRIDES = {
     # so MAX(date) is structurally ~1 month old even when the producer is healthy.
     # 45d tolerates that lag and only alarms on true death (audit Data-F5).
     "uhs_calibration_log":    45,
-    # DuckDB replica has no cron — rebuilds are manual. 2d catches a failed/stale
-    # rebuild quickly without false-alarming on same-day drift (audit Data-F10).
+    # DuckDB replica rebuilds nightly via run_pipeline.sh's cron tail (non-fatal
+    # on failure). 2d catches a failed/stale rebuild quickly without false-alarming
+    # on same-day timing drift (audit Data-F10).
     "_file_duckdb_replica":    2,
 }
 
