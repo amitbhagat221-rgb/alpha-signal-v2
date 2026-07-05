@@ -31,7 +31,7 @@ Everything else (memory, `_archive/`, slash commands, settings) — Claude handl
 - ETFs excluded — universe is 2,448 stocks, not 2,500
 - `cap_tier` must be assigned before any ranking — never rank without segment
 - Never rank across tiers — always within-segment
-- Financial sector stocks route through the financial sub-model, not the main screener
+- Financial sector stocks rank through the MAIN screener (generic weights), NOT a separate sub-model — with `accruals`+`piotroski` marked INELIGIBLE for Financials in `eligibility/registry.py` (structurally N/A for banks) so `eligible_coverage` renormalizes over the signals that DO apply. `financial_signal_scores` is dossier/display-only, evidence-benched from ranking (within-financials IC t=0.73, fails the bar). See [ADR 0048](docs/decisions/0048-financials-rank-generic-not-submodel.md). (Was mis-documented as "route through the sub-model"; the mis-wired eligibility silently dropped all MID Financials from `daily_picks` post-ADR-0045 until fixed 2026-07-05.)
 - Tickertape SIDs ≠ NSE tickers (e.g. `REDY` not `DRRD`). Always use universe SIDs
 
 **Data Operations**

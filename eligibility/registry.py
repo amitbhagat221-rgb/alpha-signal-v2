@@ -36,16 +36,20 @@ SIGNAL_ELIGIBILITY = {
         """,
     },
     "accruals": {
-        "description": "Stocks with annual_balance_sheet + annual_cash_flow (Sloan accruals needs both)",
+        "description": "Stocks with annual_balance_sheet + annual_cash_flow, EX-Financials "
+                       "(banks have no operating accruals — mirrors lineage.py sector_exclusions / config.financial_sectors)",
         "eligible_sql": """
             SELECT DISTINCT abs.sid FROM annual_balance_sheet abs
             INNER JOIN annual_cash_flow acf ON acf.sid = abs.sid
+            WHERE abs.sid NOT IN (SELECT sid FROM stocks WHERE sector = 'Financials')
         """,
     },
     "piotroski": {
-        "description": "Stocks with ≥2 annual periods (YoY F-score components need prior-year baseline)",
+        "description": "Stocks with ≥2 annual periods (YoY F-score baseline), EX-Financials "
+                       "(F-score components are non-financial-firm constructs — mirrors lineage.py sector_exclusions)",
         "eligible_sql": """
             SELECT sid FROM annual_balance_sheet
+            WHERE sid NOT IN (SELECT sid FROM stocks WHERE sector = 'Financials')
             GROUP BY sid HAVING COUNT(*) >= 2
         """,
     },
