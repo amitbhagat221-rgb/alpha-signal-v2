@@ -207,17 +207,18 @@ def _cap_stocks(w, cap):
     return w / w.sum()
 
 
-def apply_caps(w, sectors):
+def apply_caps(w, sectors, max_iter=50):
     """Project onto BOTH the per-stock and per-sector ceilings.
 
     Alternate the two projections (each renormalises to 1.0) until both hold or
     we hit the iteration budget — converges for feasible cap pairs; for an
     infeasible pair it lands on the closest near-feasible point and build()
-    surfaces any residual breach."""
+    surfaces any residual breach (see clamp_to_caps for the hard-guarantee
+    fallback — audit Port-F5)."""
     stock_cap = HRP["max_stock_weight"]
     sector_cap = HRP["max_sector_weight"]
     sec = sectors.reindex(w.index).fillna("UNKNOWN")
-    for _ in range(50):
+    for _ in range(max_iter):
         w = _cap_stocks(w, stock_cap)
         sw = w.groupby(sec).sum()
         over = sw[sw > sector_cap + 1e-9]
@@ -229,6 +230,39 @@ def apply_caps(w, sectors):
             members = sec[sec == s].index
             w[members] *= sector_cap / sw[s]
         w = w / w.sum()
+    return w
+
+
+def clamp_to_caps(w, sectors, stock_cap=None, sector_cap=None):
+    """Last-resort hard clamp — GUARANTEES the stock cap and makes a bounded,
+    best-effort pass at the sector cap. Used when apply_caps (even with a
+    doubled iteration budget) still leaves a violating book: a missing daily
+    book is worse than a clamped one, but a cap-violating book must never be
+    stored (audit Port-F5 — production found stored books at 12.63%/36.84%
+    against 12%/35% caps).
+
+    Standard waterfall: hard-clip names over the stock cap, redistribute the
+    excess to names strictly under it; hard-clip sectors over the sector cap,
+    redistribute to under-cap names; re-clip the stock cap after each sector
+    pass since redistribution can push a previously-under name over it."""
+    stock_cap = stock_cap if stock_cap is not None else HRP["max_stock_weight"]
+    sector_cap = sector_cap if sector_cap is not None else HRP["max_sector_weight"]
+    w = _cap_stocks(w, stock_cap)
+    sec = sectors.reindex(w.index).fillna("UNKNOWN")
+    for _ in range(10):
+        sw = w.groupby(sec).sum()
+        over = sw[sw > sector_cap + 1e-9]
+        if over.empty:
+            break
+        for s in over.index:
+            members = sec[sec == s].index
+            w[members] *= sector_cap / sw[s]
+        under_names = sec[~sec.isin(over.index)].index
+        freed = 1.0 - w.sum()
+        if len(under_names) and w[under_names].sum() > 0:
+            w[under_names] += freed * w[under_names] / w[under_names].sum()
+        w = w / w.sum()
+        w = _cap_stocks(w, stock_cap)  # guarantee stock cap survives redistribution
     return w
 
 
@@ -287,7 +321,25 @@ def build(asof=None):
     cov = shrunk_cov(rets)
     w = hrp_weights(cov)
     w = alpha_tilt(w, keep.set_index("sid")["final_score"])
-    w = apply_caps(w, keep.set_index("sid")["sector"])
+    sectors = keep.set_index("sid")["sector"]
+    w = apply_caps(w, sectors)
+
+    # Cap-violation guard (audit Port-F5): never store a violating book. Retry
+    # with a doubled iteration budget first; if that still leaves a breach,
+    # hard-clip + waterfall-renormalize as the final guarantee. Never raise —
+    # a missing daily book is worse than a clamped one.
+    stock_cap = HRP["max_stock_weight"]
+    sector_cap = HRP["max_sector_weight"]
+    sec_w_check = w.groupby(sectors.reindex(w.index).fillna("UNKNOWN")).sum()
+    if w.max() > stock_cap + 1e-6 or sec_w_check.max() > sector_cap + 1e-6:
+        w = apply_caps(w, sectors, max_iter=100)
+        sec_w_check = w.groupby(sectors.reindex(w.index).fillna("UNKNOWN")).sum()
+        if w.max() > stock_cap + 1e-6 or sec_w_check.max() > sector_cap + 1e-6:
+            w = clamp_to_caps(w, sectors, stock_cap, sector_cap)
+            sec_w_check = w.groupby(sectors.reindex(w.index).fillna("UNKNOWN")).sum()
+            print(f"[cap-guard] {asof}: clamped, max_stock={w.max():.4f}, "
+                  f"max_sector={sec_w_check.max():.4f}")
+
     mrc = risk_contributions(w, cov)
 
     names = read_sql("SELECT sid, name FROM stocks").set_index("sid")["name"].to_dict()
