@@ -794,26 +794,74 @@ def pit_macd_bullish(prices_pit):
     return pd.DataFrame(rows)
 
 
+_FWD_MAX_GAP_DAYS = 7  # ≤5 trading days ≈ ≤7 calendar days (weekend/holiday slack)
+
+
 def pit_fwd_return_20d(eval_date, raw_prices_full):
-    """20-trading-day forward return per sid.
+    """20-trading-day forward return per sid, with anchor-proximity guards.
 
     Uses the FULL price history (not the PIT-filtered slice) since we need
     prices AFTER eval_date. NULL if 20 trading days haven't elapsed yet.
+
+    ANCHOR-PROXIMITY GUARD (2026-07-05, panel-integrity fix). A sid's forward
+    return is valid ONLY IF:
+      (a) its ENTRY price row (first row on/after eval_date) is within
+          _FWD_MAX_GAP_DAYS calendar days of eval_date, AND
+      (b) its EXIT price row (entry + 20 rows in the sid's own series) is
+          within _FWD_MAX_GAP_DAYS calendar days of the target exit date —
+          i.e. 20 trading days after eval_date on the MARKET calendar.
+    Otherwise emit NULL for that sid/anchor.
+
+    Why: the prior code anchored a sid that had NO price rows near an old
+    eval_date at its FIRST LATER price row (via searchsorted), pairing old
+    fundamentals with a wrong-period return. ~40% of response pairs at
+    pre-2023 anchors were late-anchored (the 2020-22 jugaad backfill covers
+    only ~70% of sids), so every fundamentals-based factor's pre-2023 IC was
+    contaminated. Price-based factors were immune (their signal already
+    requires a price at the anchor). The exit-side guard catches the
+    symmetric case: a sid with a data gap between entry and exit whose
+    "+20 rows" spans far more than 20 real trading days.
     """
     rows = []
     eval_str = eval_date.isoformat()
+    eval_d = eval_date if isinstance(eval_date, date) else \
+        datetime.strptime(eval_str[:10], "%Y-%m-%d").date()
+
+    # Market trading calendar = sorted unique dates across ALL sids. Used to
+    # define what "20 trading days after eval_date" means independent of any
+    # single sid's (possibly gappy) coverage.
+    cal = np.sort(raw_prices_full["date"].unique())
+    m_anchor = int(np.searchsorted(cal, eval_str))
+    all_sids = raw_prices_full["sid"].unique()
+    # eval_date beyond history, or fewer than 20 market days of forward window
+    # remaining → nothing is measurable this anchor.
+    if m_anchor >= len(cal) or m_anchor + 20 >= len(cal):
+        return pd.DataFrame({"sid": all_sids})
+    target_exit_str = str(cal[m_anchor + 20])[:10]
+    target_exit_d = datetime.strptime(target_exit_str, "%Y-%m-%d").date()
 
     # For each sid, find the close at the trading day on/after eval_date
     # and the close 20 trading days later.
     for sid, group in raw_prices_full.groupby("sid"):
         g = group.sort_values("date")
+        dates = g["date"].values
         # First trading day >= eval_date
-        anchor_idx = g["date"].searchsorted(eval_str)
+        anchor_idx = int(np.searchsorted(dates, eval_str))
         if anchor_idx >= len(g):
+            rows.append({"sid": sid})
+            continue
+        # (a) ENTRY proximity guard
+        entry_d = datetime.strptime(str(dates[anchor_idx])[:10], "%Y-%m-%d").date()
+        if abs((entry_d - eval_d).days) > _FWD_MAX_GAP_DAYS:
             rows.append({"sid": sid})
             continue
         target_idx = anchor_idx + 20
         if target_idx >= len(g):
+            rows.append({"sid": sid})
+            continue
+        # (b) EXIT proximity guard
+        exit_d = datetime.strptime(str(dates[target_idx])[:10], "%Y-%m-%d").date()
+        if abs((exit_d - target_exit_d).days) > _FWD_MAX_GAP_DAYS:
             rows.append({"sid": sid})
             continue
         p0 = g.iloc[anchor_idx]["close"]
