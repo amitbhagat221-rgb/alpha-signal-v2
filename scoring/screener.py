@@ -85,21 +85,32 @@ def _load_signals():
         "SELECT sid, COUNT(*) AS quarters_present FROM quarterly_income GROUP BY sid"
     )
 
+    # Staleness floor (audit Port-F6): a "latest snapshot per sid" subquery has no
+    # natural expiry — if a producer freezes (e.g. piotroski for Financials, frozen
+    # 2026-05-09), its last good row keeps feeding ranks forever. Anchoring on
+    # max_signal_age_days treats a too-old row as absent; weight_coverage
+    # renormalizes over whatever signals are still present for that sid.
+    max_age = SCREEN.get("max_signal_age_days", 45)
+    age_cutoff_sql = f"date('now', '-{int(max_age)} day')"
+
     # Signal tables — get latest snapshot per stock
     piotroski = read_sql(
         "SELECT sid, f_score FROM piotroski_scores "
-        "WHERE (sid, snapshot_date) IN (SELECT sid, MAX(snapshot_date) FROM piotroski_scores GROUP BY sid)"
+        "WHERE (sid, snapshot_date) IN (SELECT sid, MAX(snapshot_date) FROM piotroski_scores GROUP BY sid) "
+        f"AND snapshot_date >= {age_cutoff_sql}"
     )
     accruals = read_sql(
         "SELECT sid, accruals_signal FROM accruals_scores "
-        "WHERE (sid, snapshot_date) IN (SELECT sid, MAX(snapshot_date) FROM accruals_scores GROUP BY sid)"
+        "WHERE (sid, snapshot_date) IN (SELECT sid, MAX(snapshot_date) FROM accruals_scores GROUP BY sid) "
+        f"AND snapshot_date >= {age_cutoff_sql}"
     )
     # consensus_signal (composite) + pt_upside (top backtest factor t=7-9) + eps_growth (t=3-5).
     # Backtest evidence: tools/optimize_weights.py shows pt_upside and eps_growth dominate the
     # MaxReturn/MaxSharpe weight schemes (~80% of LARGE/MID weight together).
     consensus = read_sql(
         "SELECT sid, consensus_signal, pt_upside, eps_growth FROM consensus_signals "
-        "WHERE (sid, snapshot_date) IN (SELECT sid, MAX(snapshot_date) FROM consensus_signals GROUP BY sid)"
+        "WHERE (sid, snapshot_date) IN (SELECT sid, MAX(snapshot_date) FROM consensus_signals GROUP BY sid) "
+        f"AND snapshot_date >= {age_cutoff_sql}"
     )
     # promoter_signal (composite) + pledge_quality (SMALL t=5.90, KEEP).
     # pledge_quality directly proxies promoter-pledge stress; coverage ~97% of the
@@ -107,15 +118,18 @@ def _load_signals():
     # factor-correlation diagnostic (different cluster).
     promoter = read_sql(
         "SELECT sid, promoter_signal, pledge_quality FROM promoter_signals "
-        "WHERE (sid, snapshot_date) IN (SELECT sid, MAX(snapshot_date) FROM promoter_signals GROUP BY sid)"
+        "WHERE (sid, snapshot_date) IN (SELECT sid, MAX(snapshot_date) FROM promoter_signals GROUP BY sid) "
+        f"AND snapshot_date >= {age_cutoff_sql}"
     )
     forensic = read_sql(
         "SELECT sid, penalty FROM forensic_scores "
-        "WHERE (sid, snapshot_date) IN (SELECT sid, MAX(snapshot_date) FROM forensic_scores GROUP BY sid)"
+        "WHERE (sid, snapshot_date) IN (SELECT sid, MAX(snapshot_date) FROM forensic_scores GROUP BY sid) "
+        f"AND snapshot_date >= {age_cutoff_sql}"
     )
     smart_money = read_sql(
         "SELECT sid, smart_money_score FROM smart_money_scores "
-        "WHERE (sid, snapshot_date) IN (SELECT sid, MAX(snapshot_date) FROM smart_money_scores GROUP BY sid)"
+        "WHERE (sid, snapshot_date) IN (SELECT sid, MAX(snapshot_date) FROM smart_money_scores GROUP BY sid) "
+        f"AND snapshot_date >= {age_cutoff_sql}"
     )
     # iv_skew_25d — MID t=+3.16 KEEP over 48 weekly periods (wired 2026-05-31,
     # ADR 0035). In-house IV-surface skew; latest row per F&O stock. Orthogonal to
@@ -124,7 +138,8 @@ def _load_signals():
     # have options). Weighted in MID only (LARGE t=1.37 / SMALL t=0.17 DROP).
     iv_skew = read_sql(
         "SELECT sid, iv_skew_25d FROM fno_iv_history WHERE sid IS NOT NULL "
-        "AND (sid, trade_date) IN (SELECT sid, MAX(trade_date) FROM fno_iv_history GROUP BY sid)"
+        "AND (sid, trade_date) IN (SELECT sid, MAX(trade_date) FROM fno_iv_history GROUP BY sid) "
+        f"AND trade_date >= {age_cutoff_sql}"
     )
 
     # Inline signals (no DB table — compute on the fly)

@@ -399,6 +399,13 @@ SCREEN = {
         "Business Parks", "Office Parks",
         "Yield Plus Trust", "Select Trust",
     ],
+    # Staleness floor on every "latest snapshot per sid" subquery in the screener
+    # (audit Port-F6): a signal whose producer froze months ago (e.g. piotroski
+    # for Financials, frozen 2026-05-09) was still feeding ranks forever via
+    # MAX(snapshot_date) — there's no natural expiry. 45d covers the weekly
+    # cadence (Task 2.3, audit Eff-F4) with 6× headroom; older rows are treated
+    # as missing and weight_coverage renormalizes over the signals still present.
+    "max_signal_age_days": 45,
 }
 
 # ── Pipeline ──
