@@ -520,13 +520,14 @@ PIPELINE_STEPS = [
     # Monthly cron entry handles full refresh (run_tickertape_monthly.sh).
 
     # Tickertape HTML scrape — one page hit per stock, writes both analyst_consensus
-    # and forecast_history. Two pipeline entries because each row in PIPELINE_STEPS
-    # maps to one table; watchdog dedupes by (module, function) so it only runs once.
+    # and forecast_history. Single pipeline entry: PIPELINE_STEPS maps one step to
+    # one table, so forecast_history's freshness is tracked via its RAW_TABLES
+    # entry instead of a second step. A second "fetch_forecast" step here used to
+    # call the SAME function again — pipeline.py's runner has no (module, function)
+    # dedup (only the watchdog's heal loop does), so it ran compute() twice every
+    # month: ~1.9h wasted + doubled Tickertape scrape load (audit Eff-F1).
     {"name": "fetch_analyst",      "module": "sources.tickertape_analyst", "function": "compute", "critical": False,
      "table": "analyst_consensus", "source": "Tickertape __NEXT_DATA__", "data_freq": "monthly", "frequency": "monthly"},
-
-    {"name": "fetch_forecast",     "module": "sources.tickertape_analyst", "function": "compute", "critical": False,
-     "table": "forecast_history",  "source": "Tickertape __NEXT_DATA__", "data_freq": "monthly", "frequency": "monthly"},
 
     # Yahoo Finance analyst consensus aggregate. Replaces the Tickertape PT field
     # (which was contaminated with lastPrice — see HANDOFF 2026-05-22). Refreshes
