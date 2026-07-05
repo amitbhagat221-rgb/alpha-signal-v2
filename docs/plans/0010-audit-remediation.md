@@ -1,6 +1,12 @@
 # Plan 0010 — Audit Remediation Roadmap (Sonnet-executable)
 
-**Status:** ready · **Source:** [docs/audit-2026-07-04-report.md](../audit-2026-07-04-report.md) · **Written:** 2026-07-04 by Opus for a Sonnet executor.
+**Status:** done (2026-07-05) · **Source:** [docs/audit-2026-07-04-report.md](../audit-2026-07-04-report.md) · **Written:** 2026-07-04 by Opus for a Sonnet executor.
+
+**Execution summary (2026-07-05):** all 32 tasks across 6 phases completed, 0 BLOCKED. Three tasks
+(3.2 purge, 3.3 evidence re-run, 4.4 paper backfill) were DB-mutation-only with no repo file diff,
+so they carry no dedicated commit — see `git log` for the 25 code/doc commits and this plan's own
+task-level VERIFY output (re-run at each step) for evidence. `git log --oneline` from
+`374a67d`..`7b737d4` covers Phases 1-6.
 
 This plan is deliberately over-specified. Every decision a weaker model might agonize over is
 **pre-answered** in a `DECIDED:` line. Do not re-litigate DECIDED items. Do not invent scope.
