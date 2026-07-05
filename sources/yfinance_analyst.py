@@ -247,6 +247,19 @@ def compute(limit=None, ticker=None, tier=None, snapshot=False, dry_run=False):
     if dry_run:
         return 0
 
+    # Coverage-aware fetch (audit Eff-F3): Yahoo has no coverage at all for
+    # ~1,400 mostly-SMALL sids (price_target IS NULL AND total_analysts IS NULL
+    # in the current row). Hitting those daily is pure wasted request budget —
+    # a stock with zero analysts today doesn't grow one overnight. Re-attempt
+    # them weekly (Mondays) so a genuinely-newly-covered stock is still caught
+    # within a week; everything with existing coverage keeps daily cadence.
+    no_coverage = read_sql(
+        "SELECT sid FROM analyst_consensus WHERE price_target IS NULL AND total_analysts IS NULL"
+    )
+    no_coverage_sids = set(no_coverage["sid"])
+    is_monday = datetime.now(timezone.utc).weekday() == 0
+    n_skipped_no_coverage = 0
+
     fetched_at  = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     snapshot_dt = _first_business_day()
 
@@ -274,6 +287,10 @@ def compute(limit=None, ticker=None, tier=None, snapshot=False, dry_run=False):
 
     t_start = time.time()
     for i, (sid, t, cap_tier) in enumerate(stocks.itertuples(index=False), 1):
+        if sid in no_coverage_sids and not is_monday:
+            n_skipped_no_coverage += 1
+            continue
+
         data = _fetch_one(t, sid_for_gate=sid)
         if data is None:
             n_no_data += 1
@@ -391,6 +408,8 @@ def compute(limit=None, ticker=None, tier=None, snapshot=False, dry_run=False):
     print()
     print(f"Done in {elapsed:.0f}s. {n_with_data}/{len(stocks)} have analyst data ({pct_have:.1f}%).")
     print(f"  {n_real_spread} ({pct_spread:.1f}%) have PT >2% from current close (non-degenerate).")
+    print(f"  {n_skipped_no_coverage} skipped (no-coverage sid, retried Mondays only; today "
+          f"{'IS' if is_monday else 'is NOT'} Monday)")
     if snapshot:
         print(f"  Wrote {len(snapshot_rows)} rows to analyst_consensus_snapshots @ {snapshot_dt}")
     return n_with_data
