@@ -976,3 +976,53 @@ FILE_OUTPUTS = [
     },
 ]
 
+
+# ── Factor registry status (audit Factor-F2, ADR 0017 registry debt) ──
+# Every id in db.BACKTEST_SIGNALS must land in exactly one of: {a SIGNAL_WEIGHTS*
+# key (via the weight-key→signal alias map)} ∪ {db.FACTOR_LIBRARY} ∪ {this dict's
+# keys}. Enforced by tools/verify_factor_library.py — a signal computed and
+# backtested but registered in NONE of the three was the "limbo" gap the audit
+# found (38 ids, 2026-07-05).
+#
+# Status meanings:
+#   PROPOSED   — READY/KEEP-grade or zero-backtest-row; a visible promotion
+#                candidate or pending-evidence id. Wiring is a human decision.
+#   BLOCKED    — data or methodology blocker, not a promotion decision.
+#   SUPERSEDED — replaced by another signal id; kept for lineage/back-compat.
+#   CONTROL    — categorical/structural covariate, not an alpha candidate.
+FACTOR_STATUS = {
+    # KEEP-grade, unwired — visible promotion candidates (do NOT wire here).
+    "value_composite":      "PROPOSED",
+    "eps_revision_yoy":     "PROPOSED",
+    "earnings_persistence": "PROPOSED",
+    # Zero-backtest-row READY ids — computed/registered but never actually run
+    # through backtest_pit (no pit_ic_by_tier_v2 rows yet).
+    "fii_dii_cash_net":         "PROPOSED",
+    "fii_dii_fno_positioning":  "PROPOSED",
+    "macro_sector_signal":      "PROPOSED",
+    "momentum_composite":       "PROPOSED",
+    "news_volume":              "PROPOSED",
+    "regulatory_sector_signal": "PROPOSED",
+    # Categorical control, not an alpha candidate.
+    "industry_id": "CONTROL",
+    # Everything else found by the first checker run (2026-07-05) — not yet
+    # individually reviewed. Defaulted to PROPOSED per plan 0010 Task 6.1.
+    "bs_accruals_ratio":       "PROPOSED",  # TODO amit: classify
+    "roe":                     "PROPOSED",  # TODO amit: classify
+    "roa":                     "PROPOSED",  # TODO amit: classify
+    "macd_signal":             "PROPOSED",  # TODO amit: classify
+    "promoter_trend_4q":       "PROPOSED",  # TODO amit: classify
+    "m_score":                 "PROPOSED",  # TODO amit: classify
+    "z_score":                 "PROPOSED",  # TODO amit: classify
+    "avg_delivery_pct_30d":    "PROPOSED",  # TODO amit: classify
+    "sector_momentum":         "PROPOSED",  # TODO amit: classify
+    "bulk_deal_signal":        "PROPOSED",  # TODO amit: classify
+    "pt_revision_yoy":         "PROPOSED",  # TODO amit: classify
+    "sentiment_7d":            "PROPOSED",  # TODO amit: classify
+    "quality_composite":       "PROPOSED",  # TODO amit: classify
+    "growth_composite":        "PROPOSED",  # TODO amit: classify
+    "screener_final_composite": "PROPOSED",  # TODO amit: classify
+    "financial_signal":        "PROPOSED",  # TODO amit: classify
+    "financial_recovery":      "PROPOSED",  # TODO amit: classify
+}
+

@@ -3227,6 +3227,20 @@ FACTOR_LIBRARY = [
     "earnings_call_tone_qoq",    # best |t|=0.88 LARGE — DROP all tiers (tone-momentum didn't replicate)
     # sector_tilt (ADR 0041) NOT here — backtest cleared SMALL t=3.18 KEEP → WIRED to
     # SIGNAL_WEIGHTS[SMALL]=0.10 (2026-06-05). LARGE/MID sub-1.5 but live only in SMALL.
+
+    # 2026-07-05 (audit Factor-F2, ADR 0017 registry debt): sub-1.5 BACKTEST_SIGNALS
+    # ids the audit named as limbo (computed + backtested, never registered here or
+    # in FACTOR_STATUS) — added so tools/verify_factor_library.py's partition holds.
+    "share_momentum",
+    "debt_to_equity",
+    "position_52w",
+    "profit_margin",
+    "financial_quality",
+    "revenue_growth_yoy",
+    "short_selling_signal",
+    "earnings_beat_rate",
+    # upstream feed frozen 2026-05-02 — see db.STALENESS_OVERRIDES["insider_trades"]
+    "insider_signal",
 ]
 
 

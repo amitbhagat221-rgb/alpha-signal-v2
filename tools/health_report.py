@@ -132,6 +132,7 @@ def gather(since_days=1):
         "watchdog": _gather_watchdog,
         "dossiers": _gather_dossiers,
         "sanity":   _gather_sanity,
+        "factor_registry": _gather_factor_registry,
     }
     with _cf.ThreadPoolExecutor(max_workers=len(_tasks)) as _ex:
         _futs = {k: _ex.submit(fn) for k, fn in _tasks.items()}
@@ -313,6 +314,17 @@ def _gather_sanity():
                  "message": f"data_sanity audit itself raised: {type(e).__name__}: {e}"}]
 
 
+def _gather_factor_registry():
+    """Partition check from tools.verify_factor_library (audit Factor-F2).
+    Returns (ok, missing, duplicated). If the checker itself raises, surfaces
+    that as a WARN (ok=False) rather than crashing health_report."""
+    try:
+        from tools.verify_factor_library import check
+        return check()
+    except Exception as e:
+        return (False, [f"verify_factor_library raised: {type(e).__name__}: {e}"], [])
+
+
 def _gather_watchdog():
     """Last watchdog run summary from pipeline_log."""
     out = {"last_run": None, "healed": 0, "failed": 0, "skipped": 0}
@@ -409,6 +421,26 @@ def _classify(state):
                        f"{v.get('n_violations','?')}/{v.get('n_total','?')}"
                        + (f" ({v['pct_violations']:.1f}%)" if v.get('pct_violations') is not None else "")
                        + (f" · {v['sample']}" if v.get('sample') else "")),
+        })
+
+    # Factor registry partition check (audit Factor-F2) — a signal computed
+    # and backtested but registered in none of {SIGNAL_WEIGHTS*, FACTOR_LIBRARY,
+    # FACTOR_STATUS} is invisible to every promotion review. WARN, not CRITICAL —
+    # this is a registry-hygiene gap, not a data or pipeline failure.
+    fr_ok, fr_missing, fr_duplicated = state.get("factor_registry", (True, [], []))
+    if not fr_ok:
+        detail_bits = []
+        if fr_missing:
+            detail_bits.append(f"missing from all buckets: {', '.join(fr_missing[:10])}"
+                                + (f" (+{len(fr_missing)-10} more)" if len(fr_missing) > 10 else ""))
+        if fr_duplicated:
+            detail_bits.append(f"in more than one bucket: {', '.join(fr_duplicated[:10])}"
+                                + (f" (+{len(fr_duplicated)-10} more)" if len(fr_duplicated) > 10 else ""))
+        issues.append({
+            "severity": WARN,
+            "code": "FACTOR_REGISTRY_PARTITION",
+            "message": f"{len(fr_missing) + len(fr_duplicated)} BACKTEST_SIGNALS id(s) fail the registry partition check",
+            "detail": "; ".join(detail_bits) or "see python -m tools.verify_factor_library",
         })
 
     # Dossier hallucination check — any failed validation in the latest file is CRITICAL.
