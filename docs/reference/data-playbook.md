@@ -113,6 +113,16 @@ For each source: **what it gives**, **endpoint**, **PIT/live access**, **histori
 | **Reconstruction** | PROPOSED — see *Pattern 6: Annual-snapshot PIT* below. |
 | **Used by** | Currently `signals/consensus.py` (forward EPS revision); intended consumer: `tools/reconstruct_consensus_pit.py`. |
 
+#### 2026-07-05 — forecastsHistory contamination MECHANISM (live-probe verdict; audit Factor-F1 follow-up)
+
+**UPSTREAM defect, by design. Source permanently dead for PT/PIT purposes.** Live probe of 8 sids (6 fetched OK, 2 404'd) + DB forensics:
+
+- `forecastsHistory.price` is **not a PT history — it never contains a PT at any point in its life.** Each year-end-dated entry (Dec-Y) is a live price tracker: it floats with lastPrice until ~Dec-26 of **Y+1**, then freezes and a new Dec-Y+1 entry spawns. Verified: live Dec-2024 entry = close(**2025-12-26**) to the paisa on 6/6 probed sids (HALC 872.9, BRTI 2105.4, ABOT 28905, BHEL 281.5, ACC 1735.3, ACEL 951.2); live Dec-2025 entry = close(2026-07-03) on 6/6, identical to the "today" entry. DB-side: 99.3% of 1,775 stored Dec-2025 rows (fetched 2026-07-01) match the **fetch-date** close within 2%; only 7.5% match the actual Dec-2025 close.
+- **Ingest is faithful** — `_extract_forecast_rows` stores the API's own dates/values unchanged. Its ≤90d filter drops the "today"-dated twin but keeps the identically-live Dec-dated entry, and the monthly upsert (PK sid+metric+date) keeps re-floating that row until it freezes a year later at close(Dec-Y+1). Net: every stored Dec-Y price row embeds the year-AHEAD close — pure look-ahead, unfixable by any date filter.
+- Stale vintages corroborate: CIGN (fetched 2026-05-19) Dec-2025 row = close(2026-05-14) 1260.3; NGFR (2026-06-01) = close(2026-05-28) 3.70 exactly. Both slugs now 404 (delisted) — rows frozen at last successful fetch, as the mechanism predicts.
+- **Salvageable: nothing, for PT purposes.** eps/revenue arrays = realized FY actuals (long-decimal computed values we already hold in quarterly_income/annual tables) + ONE live forward consensus point dated at the FY-end being forecast — legitimate only as a current snapshot (analyst_consensus already captures it; Pattern 2 forward accumulation), never as a dated consensus archive.
+- **Epitaph:** Tickertape's forecastsHistory.price is a chart-decoration price track masquerading as forecast history; its Dec-Y "forecasts" are the realized Dec-Y+1 closes by construction. Quarantine metric='price' from every PIT consumer (`pit_pt_upside`, `pit_consensus`/pt_revision_yoy); the only honest PT history is `analyst_consensus_snapshots` accumulated forward. Do not re-probe.
+
 ### yfinance — VIX, Sector Indices, Commodities, FX
 
 | Field | Value |
