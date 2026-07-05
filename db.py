@@ -3335,7 +3335,9 @@ FACTOR_LIBRARY = [
     "vwap_deviation_5d",    # best |t|=0.96 SMALL — DROP
     "intraday_range_compression",  # best |t|=0.92 LARGE — DROP
     # Event-time / PEAD factors (§3.2.5) — earnings half didn't replicate
-    "announcement_car",          # PEAD-via-CAR (2026-07-05, clean post-ADR-0047 panel, 78 anchors): SMALL t=+3.74 KEEP / LARGE +2.23 WEAK / MID +1.20 DROP, ALL POSITIVE (hypothesised drift sign). Best honest LARGE candidate from the rebuild (tops consensus +1.62); SMALL sits with wired sector_tilt/consensus (p_BY ~0.15, fails BY-FDR). Promotion candidate — NOT wired (needs a live daily producer + human weight review)
+    # announcement_car WIRED 2026-07-05 (ADR 0050): LARGE 0.35 lead + SMALL 0.14 — moved
+    # out of FACTOR_LIBRARY into SIGNAL_WEIGHTS (inline screener producer). Was: PEAD-via-CAR,
+    # SMALL t=+3.74 / LARGE +2.23, all positive drift sign, orthogonal (max|ρ|≈0.04).
     "corporate_action_density",  # LARGE t=-3.67 KEEP but unclear mechanism (maturity/value proxy?) — NOT promoted
     "pead_drift_60d",            # SMALL t=-1.54 WEAK (reversal sign)
     "earnings_surprise_std",     # DROP — SUE proxy too noisy w/o announce dates + consensus

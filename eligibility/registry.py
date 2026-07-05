@@ -76,6 +76,16 @@ SIGNAL_ELIGIBILITY = {
             GROUP BY sid HAVING COUNT(*) >= 2
         """,
     },
+    "announcement_car": {
+        "description": "Stocks with a BSE Result announcement in the trailing ~95d (the CAR "
+                       "staleness gate is 90d + window-close; names without a fresh print have "
+                       "no reading and must not be coverage-penalised for it)",
+        "eligible_sql": """
+            SELECT DISTINCT sid FROM bse_announcements
+            WHERE category='Result' AND sid IS NOT NULL AND dt_tm IS NOT NULL
+              AND date(dt_tm) >= date('now', '-95 day') AND date(dt_tm) <= date('now')
+        """,
+    },
     "smart_money": {
         "description": "Stocks with bulk_deals or delivery activity in last 90d (smart-money signal aggregates both)",
         "eligible_sql": """

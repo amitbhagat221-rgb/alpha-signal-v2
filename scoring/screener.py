@@ -170,6 +170,16 @@ def _load_signals():
     # Book-to-price: total_equity / (shares_outstanding * close_price)
     book_to_price = _compute_book_to_price()
 
+    # Announcement-window CAR (ADR 0050, PEAD-via-CAR) — market-adjusted [−1,+1] CAR
+    # around the latest BSE Result print as an earnings-surprise proxy. Computed inline
+    # (no table), like delivery/sector_tilt. PIT-safe: compute_announcement_car() with no
+    # as_of uses today, filters dt_tm≤today, only reads closed windows + a 90d staleness
+    # gate → NULL for names with no fresh print (SIGNAL_ELIGIBILITY marks those ineligible
+    # so eligible_coverage renormalizes). Wired LARGE (t=2.23, its strongest clean factor)
+    # + SMALL (t=3.74, orthogonal max|ρ|≈0.04 vs the SMALL cluster). MID t=1.20 DROP → 0 weight.
+    from signals.announcement_car import compute_announcement_car
+    announcement_car = compute_announcement_car()
+
     # Merge everything onto stocks
     df = stocks.copy()
     df = df.merge(piotroski, on="sid", how="left")
@@ -186,6 +196,7 @@ def _load_signals():
     df = df.merge(governance, on="sid", how="left")
     df["governance_resignation"] = df["governance_resignation"].fillna(0.0)
     df = df.merge(iv_skew, on="sid", how="left")
+    df = df.merge(announcement_car, on="sid", how="left")
     df = df.merge(price_counts, on="sid", how="left")
     df["price_rows"] = df["price_rows"].fillna(0).astype(int)
 
@@ -275,6 +286,9 @@ def score_universe(df, weights: dict = None):
         # Wired 2026-06-14 (ADR 0042) — BSE senior/auditor-resignation density, MID only.
         # NEGATIVE weight in config → screener flips to abs(w)·(1−pctile): a forensic penalty.
         "governance_resignation": "governance_resignation",  # t=−3.82 MID (KEEP, 46 monthly)
+        # Wired 2026-07-05 (ADR 0050) — announcement-window CAR, PEAD-via-CAR earnings-surprise
+        # proxy. LARGE (t=+2.23, its strongest clean factor) + SMALL (t=+3.74, orthogonal). +sign.
+        "announcement_car":       "announcement_car",         # t=+2.23 LARGE / +3.74 SMALL
     }
 
     # Percentile-rank all signals within tier (higher = better for all)

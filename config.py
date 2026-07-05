@@ -75,13 +75,14 @@ SIGNAL_WEIGHTS = {
     # the screener's _load_signals extended first — tracked as Scope B.
     # ═══════════════════════════════════════════════════════════════════════
     "LARGE": {
-        # Structurally hollow tier (walk-forward "LARGE ~zero OOS skill"). On clean
-        # data only consensus (1.62) + sector_tilt (1.58) clear |t|≥1.5 correct-sign;
-        # book_to_price (0.86) kept as labelled value ballast. LOW CONVICTION — the
-        # real fix is a validated LARGE factor (CAR / low-vol-weekly), not re-weighting.
-        "consensus":      0.42,   # clean t=1.62 — least-weak analyst signal, the anchor
-        "sector_tilt":    0.33,   # clean t=1.58 — ADDED (was unwired in LARGE)
-        "book_to_price":  0.25,   # clean t=0.86 — value ballast, explicitly diversification
+        # 2026-07-05 (ADR 0050): announcement_car WIRED as co-lead — at clean t=+2.23 it is
+        # the STRONGEST LARGE factor found (the low-vol/reversal/asset-growth trio all failed;
+        # CAR is the first honest LARGE signal), positive drift sign, orthogonal. Still a
+        # low-conviction tier overall (nothing clears the BY-FDR haircut), but no longer hollow.
+        "announcement_car": 0.35,   # clean t=+2.23 — strongest LARGE factor (PEAD-via-CAR, ADR 0050)
+        "consensus":        0.28,   # clean t=1.62 — analyst anchor
+        "sector_tilt":      0.22,   # clean t=1.58
+        "book_to_price":    0.15,   # clean t=0.86 — value ballast
     },
     "MID": {
         "iv_skew_25d":            0.26,   # clean t=2.87 — strongest MID, options-implied (ADR 0035)
@@ -92,12 +93,16 @@ SIGNAL_WEIGHTS = {
     },
     # SIGNAL_GROUPS defined below SIGNAL_WEIGHTS.
     "SMALL": {
-        "delivery_anomaly_z": 0.28,   # clean t=7.78 (n=107) — the SOLE BY-FDR haircut survivor; the real core
-        "consensus":          0.18,   # clean t=3.74 (n=38) — ADDED (was unwired in SMALL)
-        "sector_tilt":        0.18,   # clean t=3.69 (n=41) — orthogonal sector/macro (ADR 0041)
-        "book_to_price":      0.14,   # clean t=1.88 — value representative (earnings_yield dropped, redundant)
-        "pledge_quality":     0.12,   # clean t=1.76 — fails haircut but correct sign + orthogonal ownership/stress dim
-        "piotroski":          0.10,   # clean t=1.53 — quality, correct positive sign
+        # 2026-07-05 (ADR 0050): announcement_car ADDED as a diversifier — clean t=+3.74
+        # (same conviction band as consensus/sector_tilt), orthogonal (max|ρ|≈0.04 vs the
+        # SMALL cluster), positive drift sign. Existing weights trimmed proportionally to fund it.
+        "delivery_anomaly_z": 0.26,   # clean t=7.78 (n=107) — the SOLE BY-FDR haircut survivor; the real core
+        "consensus":          0.16,   # clean t=3.74 (n=38)
+        "sector_tilt":        0.16,   # clean t=3.69 (n=41) — orthogonal sector/macro (ADR 0041)
+        "announcement_car":   0.14,   # clean t=+3.74 — PEAD-via-CAR, orthogonal earnings-surprise dim (ADR 0050)
+        "book_to_price":      0.12,   # clean t=1.88 — value representative
+        "pledge_quality":     0.10,   # clean t=1.76 — correct sign + orthogonal ownership/stress dim
+        "piotroski":          0.06,   # clean t=1.53 — quality, correct positive sign
     },
 }
 
@@ -120,6 +125,7 @@ SIGNAL_GROUPS = {
     "iv_skew_25d": "Options",
     "delivery_anomaly_z": "Microstructure", "smart_money": "Microstructure",
     "momentum": "Momentum",   "sector_tilt": "Macro",
+    "announcement_car": "Event",  # PEAD-via-CAR earnings-surprise (ADR 0050)
 }
 
 
