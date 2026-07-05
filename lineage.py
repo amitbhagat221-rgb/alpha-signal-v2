@@ -894,6 +894,14 @@ FACTOR_LINEAGE = {
                    "contribution": "trailing_21d_total_return"}],
         "sector_exclusions": [],
     },
+    "asset_growth_yoy": {
+        "status": "candidate", "module": "signals/asset_growth.py",
+        "reads": [{"table": "annual_balance_sheet", "cols": ["total_assets", "end_date"],
+                   "key": ["sid", "end_date"], "select": "window",
+                   "filter": "two latest knowable annual rows (75d lag), prior assets ≥ ₹50 cr",
+                   "contribution": "yoy_total_asset_growth_pct"}],
+        "sector_exclusions": ["financial_sectors"],
+    },
 
     # ════════════════════════════ Earnings-call NLP (§3.2.4) ════════════════════════════
     # Latest-call values off the nlp_scores enriched layer, look-ahead-safe on available_date.

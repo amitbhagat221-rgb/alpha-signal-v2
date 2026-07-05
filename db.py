@@ -193,6 +193,7 @@ _COLUMN_MIGRATIONS = [
     # 2026-07-05: audit Factor-F3 — LARGE-tier canonical rebuild candidates.
     ("daily_snapshots_pit", "low_vol_252d",               "REAL"),
     ("daily_snapshots_pit", "st_reversal_21d",            "REAL"),
+    ("daily_snapshots_pit", "asset_growth_yoy",           "REAL"),
     # 2026-06-04: multibagger Phase 2b+ — small-cap EMA regime gate. The screen
     # now selects regime-conditioned pillar weights (quality-heavy ↔ DOWNTREND,
     # growth-heavy ↔ UPTREND, balanced ↔ NEUTRAL), cohort-proven across 3 windows.
@@ -3206,6 +3207,32 @@ BACKTEST_SIGNALS = [
                          "Benched (FACTOR_LIBRARY); natural retest is weekly cadence (a 21d fast-decay "
                          "factor sampled monthly with a 20d response is structurally handicapped).",
     },
+    {
+        "signal": "asset_growth_yoy",
+        "label": "Asset Growth YoY (CMA)",
+        "group": "Growth",
+        "description": "YoY % change in total assets between the two most recent knowable "
+                       "annual balance sheets (75d filing lag, book_to_price convention; "
+                       "non-financials, prior-year assets ≥ ₹50 cr). Canonical investment "
+                       "factor (Cooper-Gulen-Schill 2008 / FF5 CMA): aggressive balance-sheet "
+                       "expansion underperforms — expected IC NEGATIVE.",
+        "source_tables": ["annual_balance_sheet"],
+        "source_columns": ["bs.total_assets"],
+        "filing_lag": "75d annual",
+        "pit_column_v1": None,
+        "pit_column_v2": "asset_growth_yoy",
+        "v1_verdict_summary": "(new — audit Factor-F3 LARGE-tier rebuild candidate #3)",
+        "status": "READY",
+        "status_reason": "Shipped + backtested 2026-07-05 (audit Factor-F3 #3; 78 monthly anchors "
+                         "2020-01→2026-06). Headline: MID t=+2.18 WEAK / LARGE +1.21 / SMALL −0.30. "
+                         "The MID '+' is an ARTIFACT of late-anchored responses: pit_fwd_return_20d "
+                         "anchors a sid with no prices near an old eval date at its FIRST later price "
+                         "row (~40% of pairs at pre-2023 anchors), pairing 2019-era balance-sheet "
+                         "growth with wrong-period returns. Restricting to pairs whose response "
+                         "anchors within 10d of eval flips MID to −0.92 and gives the expected CMA "
+                         "negative sign on ALL tiers (LARGE −0.87 / MID −0.92 / SMALL −0.70), "
+                         "insignificant. NOT promotion-eligible; benched (FACTOR_LIBRARY).",
+    },
 ]
 
 
@@ -3248,6 +3275,7 @@ FACTOR_LIBRARY = [
     # an honest bar; full evidence in BACKTEST_SIGNALS status_reason + signal-weights.md.
     "low_vol_252d",         # LARGE t=+1.96 WEAK but CONTRARIAN (high vol won, 2021-26 bull sample) — parked, not promotion-eligible
     "st_reversal_21d",      # DROP all; SMALL −1.50 (−1.93 on timely-anchor slice), expected reversal sign, sub-bar — weekly-cadence retest is the natural next test
+    "asset_growth_yoy",     # MID +2.18 WEAK is a late-anchored-fwd_return ARTIFACT (timely-only −0.92); clean sign = CMA negative all tiers, insignificant
     "dio_change_yoy",       # best |t|=0.97 MID
     "sloan_accruals_full",  # best |t|=1.43 SMALL
     "sga_to_revenue_change",  # best |t|=0.69 MID

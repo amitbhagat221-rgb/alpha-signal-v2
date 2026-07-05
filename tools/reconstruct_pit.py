@@ -218,6 +218,7 @@ PIT_COLUMNS = [
     # Audit 2026-07-04 Factor-F3 — LARGE-tier canonical rebuild candidates
     "low_vol_252d",
     "st_reversal_21d",
+    "asset_growth_yoy",
 ]
 
 
@@ -359,6 +360,7 @@ VALIDATION_RANGES = {
     # Audit Factor-F3 LARGE-tier candidates — bounds mirror the signal-side clips
     "low_vol_252d":          (0, 5, True),       # annualized log-return vol
     "st_reversal_21d":       (-1, 5, True),      # 21d total return (fwd_return band)
+    "asset_growth_yoy":      (-100, 1000, True),  # percent (revenue_growth_yoy band)
 }
 
 
@@ -1447,6 +1449,18 @@ def pit_st_reversal_21d(px_pit):
     """
     from signals.st_reversal import compute_st_reversal_21d
     return compute_st_reversal_21d(prices=px_pit)
+
+
+def pit_asset_growth_yoy(stocks, bs_pit):
+    """Asset growth YoY % (CMA investment factor), PIT — audit Factor-F3 #3.
+
+    bs_pit is the knowable-annual slice (75d SEBI filing lag already applied by
+    the orchestrator via knowable_annual — the exact book_to_price/piotroski
+    convention); the module takes the two latest knowable annual rows per sid.
+    Returns DataFrame[sid, asset_growth_yoy] (percent; non-financials only).
+    """
+    from signals.asset_growth import compute_asset_growth_yoy
+    return compute_asset_growth_yoy(bs=bs_pit, stocks=stocks)
 
 
 def pit_nlp_factors(stocks, nlp_scores, eval_date):
@@ -2568,6 +2582,9 @@ def reconstruct_one_date(eval_date, raw, signals_to_run):
     if "st_reversal" in signals_to_run:
         base = base.merge(pit_st_reversal_21d(px_pit), on="sid", how="left")
 
+    if "asset_growth" in signals_to_run:
+        base = base.merge(pit_asset_growth_yoy(raw["stocks"], bs_pit), on="sid", how="left")
+
     # ── §3.2.4 — earnings-call NLP factors (off nlp_scores, look-ahead-safe) ──
     if "nlp" in signals_to_run:
         base = base.merge(
@@ -3027,7 +3044,7 @@ def main():
                                  "position_52w", "delivery", "sector_momentum",
                                  "sector_tilt",
                                  "fno_oi", "fno_iv", "microstructure", "pead", "governance", "nlp", "pledge",
-                                 "low_vol", "st_reversal",
+                                 "low_vol", "st_reversal", "asset_growth",
                                  "promoter_trend", "macd", "fwd_return",
                                  "mom_composite",
                                  "quality_fundamentals", "growth_fundamentals",
@@ -3118,6 +3135,7 @@ def main():
         # Audit Factor-F3 — LARGE-tier canonical rebuild candidates
         "low_vol",
         "st_reversal",
+        "asset_growth",
         # Plan 0002 §3.2.4 — earnings-call NLP factors (off nlp_scores)
         "nlp",
         # Plan 0002 §3.2.6 — industry identity (control) + §3.2.7 macro betas
