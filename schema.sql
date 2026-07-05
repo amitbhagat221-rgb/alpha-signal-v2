@@ -928,6 +928,21 @@ CREATE TABLE IF NOT EXISTS regulatory_signals (
 CREATE INDEX IF NOT EXISTS idx_reg_signals_sector ON regulatory_signals(sector);
 CREATE INDEX IF NOT EXISTS idx_reg_signals_date ON regulatory_signals(classified_at);
 
+-- Anthropic Message Batches bookkeeping for the async two-phase regulatory
+-- classifier (audit Eff-F2, 2026-07-05). One row per submitted batch; the daily
+-- run polls status='submitted' rows, ingests any that have 'ended', and marks
+-- them 'ingested'. See sources/regulatory_classifier.py for the state machine.
+CREATE TABLE IF NOT EXISTS regulatory_batches (
+    batch_id        TEXT PRIMARY KEY,   -- Anthropic msgbatch_… id
+    stage           TEXT NOT NULL,      -- 'haiku' | 'sonnet'
+    submitted_at    TEXT NOT NULL,
+    status          TEXT NOT NULL DEFAULT 'submitted',  -- submitted | ingested
+    n_items         INTEGER,
+    ingested_at     TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_reg_batches_status ON regulatory_batches(status);
+
 
 -- ═══════════════════════════════════════════════════
 -- GROUP 7: COCKPIT — CHANGE DETECTION

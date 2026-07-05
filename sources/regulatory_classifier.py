@@ -609,27 +609,447 @@ def classify_events(limit=None, dry_run=False):
 DAILY_CLASSIFIER_CAP = 500
 
 
-def compute(dry_run=False):
-    """Pipeline entry point — classifies both news_articles and regulatory_events.
+# ─────────────────────────────────────────────────────────────────────────────
+# Message Batches API — async two-phase classifier (audit Eff-F2, migrated 2026-07-05)
+#
+# The sync per-item loop above (classify / classify_events) ran Haiku-then-Sonnet
+# in-process and consumed ~54% of the daily pipeline wall-clock (~3,467s). It is
+# KEPT as an explicit fallback: compute(sync=True) / `--sync`, an SDK without the
+# Batch API, and any Batch-submit error all route back to it (bounded to the cap).
+#
+# The default path decouples classification from the pipeline. Each daily run:
+#   (a) INGEST — poll every in-flight batch; for any that has 'ended', write
+#       verdicts/signals with the *exact* same schema/INSERT semantics as the sync
+#       path, then mark the batch 'ingested'. Haiku passers are submitted as a
+#       Sonnet batch the moment their Haiku batch is ingested.
+#   (b) SUBMIT — materialize new news_articles as pending events, then submit
+#       today's pending events (post title-hash dedup, capped) as a Haiku batch.
+# Net: ~1-2 day latency (fine — output feeds narrative only), near-zero pipeline
+# wall-clock, and 50% token cost (Batch API pricing).
+#
+# classifier_status state machine (regulatory_events.classifier_status):
+#   pending                    → needs Haiku (harvested/ingested, not yet submitted)
+#   haiku_submitted            → in an in-flight Haiku batch
+#   haiku_rejected             → terminal: Haiku said NO
+#   sonnet_submitted           → in an in-flight Sonnet batch
+#   classified                 → terminal: signals saved
+#   haiku_passed_sonnet_failed → Haiku passed but Sonnet errored/bad-JSON → Sonnet retry
+# Batch bookkeeping lives in regulatory_batches (see schema.sql).
 
-    Hard-caps each side at DAILY_CLASSIFIER_CAP to keep the cron run bounded
-    so downstream production steps (signals → screener → dossier → email) run
-    every day. The backlog catches up over multiple days; new daily incoming
-    (~50 events) fits comfortably under the cap.
-    """
-    n1 = classify(limit=DAILY_CLASSIFIER_CAP, dry_run=dry_run)
-    n2 = classify_events(limit=DAILY_CLASSIFIER_CAP, dry_run=dry_run)
+_BATCHES_DDL = """
+CREATE TABLE IF NOT EXISTS regulatory_batches (
+    batch_id        TEXT PRIMARY KEY,
+    stage           TEXT NOT NULL,
+    submitted_at    TEXT NOT NULL,
+    status          TEXT NOT NULL DEFAULT 'submitted',
+    n_items         INTEGER,
+    ingested_at     TEXT
+)
+"""
+
+
+def _ensure_batches_table():
+    """Idempotent runtime guarantee — the daily pipeline does not re-run init_db,
+    so create the batch-bookkeeping table here (mirrors sources/mf_holdings_scrape
+    self-ensuring its columns). Canonical DDL also lives in schema.sql."""
+    with get_db() as conn:
+        conn.execute(_BATCHES_DDL)
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_reg_batches_status ON regulatory_batches(status)"
+        )
+
+
+def _batch_api_available(client):
+    return hasattr(client, "messages") and hasattr(client.messages, "batches")
+
+
+def _custom_id_ok(event_id):
+    """Anthropic custom_id must match ^[a-zA-Z0-9_-]{1,64}$. Our event_ids
+    (news_<int>, gnews_/rbi_/pib_/wb_<hash>) already satisfy this — an event that
+    somehow doesn't is skipped so one bad id can't reject the whole batch."""
+    return bool(re.fullmatch(r"[a-zA-Z0-9_-]{1,64}", str(event_id)))
+
+
+def _haiku_request(event_id, title, summary):
+    from anthropic.types.message_create_params import MessageCreateParamsNonStreaming
+    from anthropic.types.messages.batch_create_params import Request
+    prompt = PREFILTER_PROMPT.format(
+        title=str(title)[:200], summary=str(summary or "")[:300]
+    )
+    return Request(
+        custom_id=event_id,
+        params=MessageCreateParamsNonStreaming(
+            model=HAIKU_MODEL, max_tokens=5,
+            messages=[{"role": "user", "content": prompt}],
+        ),
+    )
+
+
+def _sonnet_request(event_id, title, summary, source, published_at):
+    from anthropic.types.message_create_params import MessageCreateParamsNonStreaming
+    from anthropic.types.messages.batch_create_params import Request
+    prompt = CLASSIFY_PROMPT.format(
+        title=str(title)[:300], summary=str(summary or "")[:1000],
+        source=source, published_at=published_at,
+    )
+    return Request(
+        custom_id=event_id,
+        params=MessageCreateParamsNonStreaming(
+            model=SONNET_MODEL, max_tokens=512,
+            messages=[{"role": "user", "content": prompt}],
+        ),
+    )
+
+
+def _result_text(message):
+    for block in message.content:
+        if block.type == "text":
+            return block.text.strip()
+    return ""
+
+
+def _parse_classification(text):
+    """Same markdown-tolerant JSON parse the sync Sonnet path uses."""
+    if text.startswith("```"):
+        text = text.split("```")[1]
+        if text.startswith("json"):
+            text = text[4:]
+    try:
+        return json.loads(text)
+    except (json.JSONDecodeError, ValueError):
+        return None
+
+
+def _save_signals_for_event(event_id, classification):
+    """Write regulatory_signals for a batch-classified event — identical row
+    shape and INSERT OR IGNORE semantics to the sync _save_signals path."""
+    sectors = classification.get("sectors_affected", [])
+    if not sectors:
+        return 0
+    rows = [{
+        "event_id": event_id,
+        "sector": s.get("sector", "Unknown"),
+        "is_regulatory": 1,
+        "stage": classification.get("stage"),
+        "direction": s.get("direction", 0),
+        "magnitude": s.get("magnitude"),
+        "time_horizon": s.get("time_horizon"),
+        "confidence": s.get("confidence"),
+        "ai_reasoning": s.get("reasoning"),
+    } for s in sectors]
+    insert_df(pd.DataFrame(rows), "regulatory_signals")
+    return len(rows)
+
+
+def _mark_classified(event_id, ministry):
+    with get_db() as conn:
+        conn.execute(
+            "UPDATE regulatory_events SET classifier_status='classified', "
+            "classifier_processed_at=?, ministry=COALESCE(?, ministry) WHERE event_id=?",
+            (datetime.now().isoformat(timespec="seconds"),
+             str(ministry) if ministry else None, event_id),
+        )
+
+
+def _bulk_mark(id_hash_pairs, status):
+    """Mark a set of events with `status` and stamp their title_hash (so dedup
+    can recognise repeat headlines once the verdict lands)."""
+    now = datetime.now().isoformat(timespec="seconds")
+    with get_db() as conn:
+        conn.executemany(
+            "UPDATE regulatory_events SET classifier_status=?, classifier_processed_at=?, "
+            "title_hash=? WHERE event_id=?",
+            [(status, now, th, eid) for eid, th in id_hash_pairs],
+        )
+
+
+def _record_batch(batch_id, stage, n_items):
+    with get_db() as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO regulatory_batches "
+            "(batch_id, stage, submitted_at, status, n_items, ingested_at) "
+            "VALUES (?, ?, ?, 'submitted', ?, NULL)",
+            (batch_id, stage, datetime.now().isoformat(timespec="seconds"), n_items),
+        )
+
+
+def _mark_batch_ingested(batch_id):
+    with get_db() as conn:
+        conn.execute(
+            "UPDATE regulatory_batches SET status='ingested', ingested_at=? WHERE batch_id=?",
+            (datetime.now().isoformat(timespec="seconds"), batch_id),
+        )
+
+
+def _open_batches():
+    return read_sql(
+        "SELECT batch_id, stage, n_items FROM regulatory_batches "
+        "WHERE status='submitted' ORDER BY submitted_at ASC"
+    )
+
+
+# ── SUBMIT helpers ──
+
+def _ingest_news_to_events(cap):
+    """Materialize new news_articles as pending regulatory_events (async submit
+    operates on regulatory_events only). Applies the title-hash dedup so a repeat
+    headline reuses a prior verdict with no API call (audit Eff-F2). KEEP."""
+    unclassified = _get_unclassified().head(cap)
+    if unclassified.empty:
+        return 0, 0
+    n_fresh = n_dedup = 0
+    for _, art in unclassified.iterrows():
+        th = _title_hash(art["title"])
+        status, src = _dedup_lookup(th, {})
+        if status is not None:
+            _save_event_dedup(art, th, status, src)
+            n_dedup += 1
+        else:
+            _save_event(art, is_regulatory=True)  # writes classifier_status='pending'
+            n_fresh += 1
+    if n_fresh or n_dedup:
+        print(f"  [submit] news→events: {n_fresh} new pending, {n_dedup} dedup-reused")
+    return n_fresh, n_dedup
+
+
+def _submit_sonnet(client, event_ids):
+    """Build + submit a Sonnet batch for Haiku passers. Marks them
+    'sonnet_submitted'; on submit error routes them to 'haiku_passed_sonnet_failed'
+    so the next run retries the Sonnet stage. Returns count submitted."""
+    event_ids = [e for e in event_ids if _custom_id_ok(e)]
+    if not event_ids:
+        return 0
+    placeholders = ",".join("?" * len(event_ids))
+    rows = read_sql(
+        f"SELECT event_id, title, summary, source, published_at "
+        f"FROM regulatory_events WHERE event_id IN ({placeholders})",
+        params=list(event_ids),
+    )
+    reqs, ids = [], []
+    for _, ev in rows.iterrows():
+        reqs.append(_sonnet_request(
+            ev["event_id"], ev["title"], ev["summary"], ev["source"], ev["published_at"]))
+        ids.append(ev["event_id"])
+    if not reqs:
+        return 0
+    try:
+        batch = client.messages.batches.create(requests=reqs)
+    except Exception as e:
+        print(f"  [submit] WARN Sonnet batch submit failed ({e}) — passers set to retry")
+        for eid in ids:
+            _update_event_status(eid, "haiku_passed_sonnet_failed")
+        return 0
+    for eid in ids:
+        _update_event_status(eid, "sonnet_submitted")
+    _record_batch(batch.id, "sonnet", len(reqs))
+    print(f"  [submit] Sonnet batch {batch.id}: {len(reqs)} events")
+    return len(reqs)
+
+
+def _submit_haiku_phase(client, cap):
+    """Submit up to `cap` pending events as a Haiku pre-filter batch, after a
+    title-hash dedup pass that reuses prior verdicts for free. On submit error,
+    fall back to the sync path for this run (bounded to the cap)."""
+    pend = read_sql(
+        "SELECT event_id, title, summary FROM regulatory_events "
+        "WHERE classifier_status='pending' AND title IS NOT NULL AND length(title)>10 "
+        "ORDER BY published_at DESC LIMIT ?",
+        params=[cap],
+    )
+    if pend.empty:
+        return 0
+    reqs, submit_ids = [], []
+    dedup_cache = {}
+    n_dedup = 0
+    for _, ev in pend.iterrows():
+        eid = ev["event_id"]
+        if not _custom_id_ok(eid):
+            continue
+        th = _title_hash(ev["title"])
+        status, src = _dedup_lookup(th, dedup_cache)
+        if status is not None and src != eid:
+            _reuse_classification_existing(eid, th, status, src)
+            dedup_cache[th] = (status, eid)
+            n_dedup += 1
+            continue
+        reqs.append(_haiku_request(eid, ev["title"], ev["summary"]))
+        submit_ids.append((eid, th))
+    if n_dedup:
+        print(f"  [submit] Haiku dedup: {n_dedup} reused a prior verdict, no API call")
+    if not reqs:
+        return 0
+    try:
+        batch = client.messages.batches.create(requests=reqs)
+    except Exception as e:
+        print(f"  [submit] WARN Haiku batch submit failed ({e}) — falling back to sync")
+        return classify_events(limit=cap)
+    _bulk_mark(submit_ids, "haiku_submitted")
+    _record_batch(batch.id, "haiku", len(reqs))
+    print(f"  [submit] Haiku batch {batch.id}: {len(reqs)} events")
+    return len(reqs)
+
+
+def _submit_sonnet_stragglers(client, cap):
+    """Sonnet-retry for events that passed Haiku but whose Sonnet stage failed
+    (bad JSON, API error, or a prior batch that errored/expired)."""
+    strag = read_sql(
+        "SELECT event_id FROM regulatory_events "
+        "WHERE classifier_status='haiku_passed_sonnet_failed' "
+        "ORDER BY published_at DESC LIMIT ?",
+        params=[cap],
+    )
+    if strag.empty:
+        return 0
+    return _submit_sonnet(client, list(strag["event_id"]))
+
+
+# ── INGEST helpers ──
+
+def _ingest_haiku(client, results):
+    """YES → collect passer; NO → haiku_rejected; errored/expired/canceled →
+    back to pending (retry next run). Submits a Sonnet batch for the passers."""
+    passers, rejects, requeue = [], [], []
+    for r in results:
+        eid = r.custom_id
+        if r.result.type == "succeeded":
+            ans = _result_text(r.result.message).upper()
+            (passers if "YES" in ans else rejects).append(eid)
+        else:  # errored | expired | canceled — unprocessed, return to pending
+            requeue.append(eid)
+    for eid in rejects:
+        _update_event_status(eid, "haiku_rejected")
+    for eid in requeue:
+        _update_event_status(eid, "pending")
+    if passers:
+        _submit_sonnet(client, passers)
+    return {"verdicts": len(passers) + len(rejects), "requeued": len(requeue)}
+
+
+def _ingest_sonnet(results):
+    """succeeded+parsed → save signals + classified; bad JSON or errored →
+    haiku_passed_sonnet_failed (Sonnet retry). Same INSERT semantics as sync."""
+    n_class = n_sig = requeue = 0
+    for r in results:
+        eid = r.custom_id
+        if r.result.type == "succeeded":
+            cls = _parse_classification(_result_text(r.result.message))
+            if cls:
+                n_sig += _save_signals_for_event(eid, cls)
+                _mark_classified(eid, cls.get("ministry"))
+                n_class += 1
+            else:
+                _update_event_status(eid, "haiku_passed_sonnet_failed")
+        else:  # errored | expired | canceled — retry Sonnet next run
+            _update_event_status(eid, "haiku_passed_sonnet_failed")
+            requeue += 1
+    return {"classified": n_class, "signals": n_sig, "requeued": requeue}
+
+
+def _ingest_phase(client):
+    """Poll every in-flight batch; ingest any that has 'ended'."""
+    stats = {"batches": 0, "haiku": 0, "classified": 0, "signals": 0, "requeued": 0}
+    open_b = _open_batches()
+    for _, row in open_b.iterrows():
+        bid, stage = row["batch_id"], row["stage"]
+        try:
+            b = client.messages.batches.retrieve(bid)
+        except Exception as e:
+            print(f"  [ingest] retrieve {bid} failed ({e}) — leaving for next run")
+            continue
+        if b.processing_status != "ended":
+            print(f"  [ingest] {stage} batch {bid} still '{b.processing_status}' — next run")
+            continue
+        results = list(client.messages.batches.results(bid))
+        if stage == "haiku":
+            h = _ingest_haiku(client, results)
+            stats["haiku"] += h["verdicts"]
+            stats["requeued"] += h["requeued"]
+        else:
+            s = _ingest_sonnet(results)
+            stats["classified"] += s["classified"]
+            stats["signals"] += s["signals"]
+            stats["requeued"] += s["requeued"]
+        _mark_batch_ingested(bid)
+        stats["batches"] += 1
+    return stats
+
+
+def _compute_batch(cap, dry_run, client):
+    _ensure_batches_table()
+
+    if dry_run:
+        pend = read_sql(
+            "SELECT COUNT(*) n FROM regulatory_events WHERE classifier_status='pending'"
+        ).iloc[0]["n"]
+        strag = read_sql(
+            "SELECT COUNT(*) n FROM regulatory_events "
+            "WHERE classifier_status='haiku_passed_sonnet_failed'"
+        ).iloc[0]["n"]
+        open_b = _open_batches()
+        print(f"  [batch dry-run] {len(open_b)} in-flight batch(es); "
+              f"{pend} pending; would submit up to {min(cap, pend)} to Haiku, "
+              f"{min(cap, strag)} to Sonnet-retry")
+        return 0
+
+    ingested = _ingest_phase(client)          # Phase A
+    _ingest_news_to_events(cap)               # Phase B0
+    n_haiku = _submit_haiku_phase(client, cap)  # Phase B1
+    n_sonnet_retry = _submit_sonnet_stragglers(client, cap)  # Phase B2
+
+    print("\n=== Regulatory classifier (Message Batches) ===")
+    print(f"  Ingested {ingested['batches']} batch(es): "
+          f"haiku_verdicts={ingested['haiku']}, classified={ingested['classified']}, "
+          f"signals={ingested['signals']}, requeued={ingested['requeued']}")
+    print(f"  Submitted: haiku={n_haiku} events, sonnet_retry={n_sonnet_retry} events")
+    return ingested["classified"]
+
+
+def _compute_sync(cap, dry_run):
+    """Explicit fallback — the original synchronous per-item Haiku→Sonnet path."""
+    n1 = classify(limit=cap, dry_run=dry_run)
+    n2 = classify_events(limit=cap, dry_run=dry_run)
     return n1 + n2
+
+
+def compute(dry_run=False, sync=False, cap=None):
+    """Pipeline entry point — async two-phase Message Batches classifier.
+
+    Each run ingests any completed batch (writing verdicts/signals exactly as the
+    sync path would) and submits the day's pending events as a new Haiku batch,
+    keeping the DAILY_CLASSIFIER_CAP intake cap. `sync=True` (or `--sync`), an SDK
+    without the Batch API, and any unexpected batch-path error all fall back to the
+    original synchronous per-item path, bounded to the cap.
+    """
+    cap = DAILY_CLASSIFIER_CAP if cap is None else cap
+    if sync:
+        return _compute_sync(cap, dry_run)
+    try:
+        client = _get_client()
+    except RuntimeError as e:
+        print(e)
+        return 0
+    if not _batch_api_available(client):
+        print("  Batch API unavailable in this SDK — using synchronous fallback")
+        return _compute_sync(cap, dry_run)
+    try:
+        return _compute_batch(cap, dry_run, client)
+    except Exception as e:
+        print(f"  WARN batch path errored ({e}) — falling back to sync for this run")
+        return _compute_sync(cap, dry_run)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--limit", type=int, help="Max articles to process")
-    parser.add_argument("--events", action="store_true", help="Classify regulatory_events (not news_articles)")
+    parser.add_argument("--limit", type=int, help="Max items (sync manual backfill)")
+    parser.add_argument("--cap", type=int, help="Override per-run intake cap (batch mode)")
+    parser.add_argument("--events", action="store_true", help="Sync-classify regulatory_events directly (manual backfill)")
+    parser.add_argument("--sync", action="store_true", help="Force the synchronous per-item path")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
     if args.events:
         classify_events(limit=args.limit, dry_run=args.dry_run)
+    elif args.sync:
+        _compute_sync(args.limit or DAILY_CLASSIFIER_CAP, args.dry_run)
     else:
-        classify(limit=args.limit, dry_run=args.dry_run)
+        compute(dry_run=args.dry_run, cap=args.cap)
