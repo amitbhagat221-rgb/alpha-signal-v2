@@ -133,6 +133,7 @@ def gather(since_days=1):
         "dossiers": _gather_dossiers,
         "sanity":   _gather_sanity,
         "factor_registry": _gather_factor_registry,
+        "factor_decay": _gather_factor_decay,
     }
     with _cf.ThreadPoolExecutor(max_workers=len(_tasks)) as _ex:
         _futs = {k: _ex.submit(fn) for k, fn in _tasks.items()}
@@ -325,6 +326,20 @@ def _gather_factor_registry():
         return (False, [f"verify_factor_library raised: {type(e).__name__}: {e}"], [])
 
 
+def _gather_factor_decay():
+    """Rolling-window IC decay check from tools.factor_decay (audit Factor-F4).
+    Returns the list of per-(weight_key, tier) rows; [] on failure (fail-open —
+    a decay-monitor bug shouldn't block the rest of health_report)."""
+    try:
+        from tools.factor_decay import analyze
+        return analyze()
+    except Exception as e:
+        return [{"tier": "?", "weight_key": "factor_decay", "signal_id": None,
+                  "weight": 0, "n_all": 0, "n_recent": 0, "ic_all": None,
+                  "ic_recent": None, "decayed": None,
+                  "note": f"factor_decay raised: {type(e).__name__}: {e}"}]
+
+
 def _gather_watchdog():
     """Last watchdog run summary from pipeline_log."""
     out = {"last_run": None, "healed": 0, "failed": 0, "skipped": 0}
@@ -441,6 +456,22 @@ def _classify(state):
             "code": "FACTOR_REGISTRY_PARTITION",
             "message": f"{len(fr_missing) + len(fr_duplicated)} BACKTEST_SIGNALS id(s) fail the registry partition check",
             "detail": "; ".join(detail_bits) or "see python -m tools.verify_factor_library",
+        })
+
+    # Factor decay — a wired factor whose recent IC has flipped sign or collapsed
+    # in magnitude vs its all-time mean (audit Factor-F4). WARN: a decayed factor
+    # is a review trigger, not a pipeline failure.
+    decayed_rows = [r for r in state.get("factor_decay", []) if r.get("decayed")]
+    if decayed_rows:
+        detail = "; ".join(
+            f"{r['weight_key']} {r['tier']} (IC all={r['ic_all']:+.3f} → recent={r['ic_recent']:+.3f})"
+            for r in decayed_rows
+        )
+        issues.append({
+            "severity": WARN,
+            "code": "FACTOR_DECAY",
+            "message": f"{len(decayed_rows)} wired factor(s) show IC decay vs their all-time mean",
+            "detail": detail,
         })
 
     # Dossier hallucination check — any failed validation in the latest file is CRITICAL.
