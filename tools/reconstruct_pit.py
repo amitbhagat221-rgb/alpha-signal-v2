@@ -215,6 +215,8 @@ PIT_COLUMNS = [
     "oil_beta", "metals_beta", "inr_beta", "gold_beta",
     # §3.2.7 rate + credit betas (2026-06-07; gilt/credit ETF series)
     "rate_beta", "credit_beta",
+    # Audit 2026-07-04 Factor-F3 — LARGE-tier canonical rebuild candidates
+    "low_vol_252d",
 ]
 
 
@@ -353,6 +355,8 @@ VALIDATION_RANGES = {
     "gold_beta":             (-5, 5, True),
     "rate_beta":             (-5, 5, True),
     "credit_beta":           (-5, 5, True),
+    # Audit Factor-F3 LARGE-tier candidates — bounds mirror the signal-side clips
+    "low_vol_252d":          (0, 5, True),       # annualized log-return vol
 }
 
 
@@ -1418,6 +1422,18 @@ def pit_governance_resignation(stocks, bse_gov, eval_date):
            else pd.DataFrame(columns=["sid", "subcategory", "ev_date"]))
     return compute_governance_resignation(announcements=ann, universe_sids=universe,
                                           as_of_date=eval_str)
+
+
+def pit_low_vol_252d(px_pit):
+    """Low volatility (annualized 252d log-return std), PIT — audit Factor-F3 #1.
+
+    px_pit is prices ≤ eval with PIT-strict adj_close already applied by the
+    orchestrator; compute_low_vol_252d prefers adj_close so a split inside the
+    window doesn't manufacture a fake vol spike. Same module, identical logic
+    on the live path. Returns DataFrame[sid, low_vol_252d].
+    """
+    from signals.low_vol import compute_low_vol_252d
+    return compute_low_vol_252d(prices=px_pit)
 
 
 def pit_nlp_factors(stocks, nlp_scores, eval_date):
@@ -2532,6 +2548,10 @@ def reconstruct_one_date(eval_date, raw, signals_to_run):
             on="sid", how="left",
         )
 
+    # ── Audit Factor-F3 — LARGE-tier canonical rebuild candidates ──
+    if "low_vol" in signals_to_run:
+        base = base.merge(pit_low_vol_252d(px_pit), on="sid", how="left")
+
     # ── §3.2.4 — earnings-call NLP factors (off nlp_scores, look-ahead-safe) ──
     if "nlp" in signals_to_run:
         base = base.merge(
@@ -2991,6 +3011,7 @@ def main():
                                  "position_52w", "delivery", "sector_momentum",
                                  "sector_tilt",
                                  "fno_oi", "fno_iv", "microstructure", "pead", "governance", "nlp", "pledge",
+                                 "low_vol",
                                  "promoter_trend", "macd", "fwd_return",
                                  "mom_composite",
                                  "quality_fundamentals", "growth_fundamentals",
@@ -3078,6 +3099,8 @@ def main():
         "pead",
         # ADR 0042 — BSE governance/forensic resignation event factor
         "governance",
+        # Audit Factor-F3 — LARGE-tier canonical rebuild candidates
+        "low_vol",
         # Plan 0002 §3.2.4 — earnings-call NLP factors (off nlp_scores)
         "nlp",
         # Plan 0002 §3.2.6 — industry identity (control) + §3.2.7 macro betas

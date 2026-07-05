@@ -190,6 +190,8 @@ _COLUMN_MIGRATIONS = [
     ("daily_snapshots_pit", "credit_beta",                "REAL"),
     # 2026-06-03: multibagger funnel — Novy-Marx anchor quality factor.
     ("daily_snapshots_pit", "gross_profitability",        "REAL"),
+    # 2026-07-05: audit Factor-F3 — LARGE-tier canonical rebuild candidates.
+    ("daily_snapshots_pit", "low_vol_252d",               "REAL"),
     # 2026-06-04: multibagger Phase 2b+ — small-cap EMA regime gate. The screen
     # now selects regime-conditioned pillar weights (quality-heavy ↔ DOWNTREND,
     # growth-heavy ↔ UPTREND, balanced ↔ NEUTRAL), cohort-proven across 3 windows.
@@ -3150,6 +3152,37 @@ BACKTEST_SIGNALS = [
         "status": "READY",
         "status_reason": "Shipped + backtested 2026-06-07 (§3.2.7, 40 monthly periods). best |t|=0.68 SMALL → DROP, benched. Credit stress (2018 IL&FS / 2020 COVID) falls OUTSIDE the price-history window (2022+), so the test period sees credit in a calm regime — low power. Duration-tilt caveat moot (no signal either way).",
     },
+
+    # ═══════════════════════════════════════════════════════════════════
+    # GROUP — LARGE-TIER CANONICAL REBUILD (audit 2026-07-04 Factor-F3)
+    # The three canonical factors the audit's gap map named as absent with
+    # data already in-house. BUILD + EVIDENCE only — none wired.
+    # ═══════════════════════════════════════════════════════════════════
+
+    {
+        "signal": "low_vol_252d",
+        "label": "Low Volatility (252d annualized)",
+        "group": "Risk",
+        "description": "Annualized std of daily log returns over the trailing 252 trading "
+                       "days (min 200 obs, split-adjusted closes). Canonical low-risk anomaly "
+                       "(Ang 2006, Blitz-van Vliet 2007, BAB): LOW vol → HIGH forward return, "
+                       "so the expected IC of the raw vol value is NEGATIVE.",
+        "source_tables": ["stock_prices"],
+        "source_columns": ["stock_prices.close (adj, rolling 252d)"],
+        "filing_lag": "0d (price)",
+        "pit_column_v1": None,
+        "pit_column_v2": "low_vol_252d",
+        "v1_verdict_summary": "(new — audit Factor-F3 LARGE-tier rebuild candidate #1)",
+        "status": "READY",
+        "status_reason": "Shipped + backtested 2026-07-05 (audit Factor-F3 #1; 68 monthly anchors "
+                         "2020-11→2026-06, incl. the new 2020 price-backfill anchors). LARGE t=+1.96 "
+                         "WEAK (IC +0.057, CI [0.14,3.94]) but CONTRARIAN sign — HIGH vol won in the "
+                         "mostly-bull 2021-26 sample, opposite the canonical low-vol anomaly; MID +1.26 "
+                         "/ SMALL −1.04 DROP (SMALL carries the expected negative sign, insignificant). "
+                         "Robust to the timely-anchor fwd_return check (LARGE +1.99). Contrarian-sign "
+                         "WEAK on the walk-forward-weakest tier → NOT promotion-eligible; benched "
+                         "(FACTOR_LIBRARY). Re-read once a drawdown regime enters the window.",
+    },
 ]
 
 
@@ -3188,6 +3221,9 @@ FACTOR_LIBRARY = [
                              # (audit gap #5): SMALL t=-3.91 KEEP, MID t=-2.18 WEAK, LARGE t=-1.32
                              # DROP — all NEGATIVE sign (opposite of Novy-Marx). Contrarian-sign
                              # KEEP, not auto-promotion-eligible — parked pending sign/regime check.
+    # Audit Factor-F3 (2026-07-05) — LARGE-tier canonical rebuild trio. None cleared
+    # an honest bar; full evidence in BACKTEST_SIGNALS status_reason + signal-weights.md.
+    "low_vol_252d",         # LARGE t=+1.96 WEAK but CONTRARIAN (high vol won, 2021-26 bull sample) — parked, not promotion-eligible
     "dio_change_yoy",       # best |t|=0.97 MID
     "sloan_accruals_full",  # best |t|=1.43 SMALL
     "sga_to_revenue_change",  # best |t|=0.69 MID

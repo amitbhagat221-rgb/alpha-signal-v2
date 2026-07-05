@@ -879,6 +879,15 @@ FACTOR_LINEAGE = {
         "sector_exclusions": [],
     },
 
+    # ═══════════ LARGE-tier canonical rebuild candidates (audit 2026-07-04 Factor-F3) ═══════════
+    "low_vol_252d": {
+        "status": "candidate", "module": "signals/low_vol.py",
+        "reads": [{"table": "stock_prices", "cols": ["close"], "key": ["sid", "date"],
+                   "select": "window", "filter": "last 252 trading days (adj), min 200 obs",
+                   "contribution": "annualized_logret_std"}],
+        "sector_exclusions": [],
+    },
+
     # ════════════════════════════ Earnings-call NLP (§3.2.4) ════════════════════════════
     # Latest-call values off the nlp_scores enriched layer, look-ahead-safe on available_date.
     "earnings_call_tone_qoq": {

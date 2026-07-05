@@ -111,6 +111,8 @@ SIGNAL_COLUMN_MAP = {
     "buyback_announcement_30d":   (None, "buyback_announcement_30d"),
     # ADR 0042 — BSE governance/forensic resignation event factor (monthly cadence)
     "governance_resignation":     (None, "governance_resignation"),
+    # Audit Factor-F3 — LARGE-tier canonical rebuild candidates (monthly cadence)
+    "low_vol_252d":               (None, "low_vol_252d"),
     # §3.2.4 — earnings-call NLP factors (off nlp_scores, look-ahead-safe available_date)
     "earnings_call_tone_qoq":     (None, "earnings_call_tone_qoq"),
     "forward_looking_intensity":  (None, "forward_looking_intensity"),
