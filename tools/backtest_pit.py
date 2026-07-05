@@ -109,6 +109,8 @@ SIGNAL_COLUMN_MAP = {
     "pead_drift_60d":             (None, "pead_drift_60d"),
     "corporate_action_density":   (None, "corporate_action_density"),
     "buyback_announcement_30d":   (None, "buyback_announcement_30d"),
+    # §3.2.5 — announcement-window CAR (market-implied earnings surprise, monthly cadence)
+    "announcement_car":           (None, "announcement_car"),
     # ADR 0042 — BSE governance/forensic resignation event factor (monthly cadence)
     "governance_resignation":     (None, "governance_resignation"),
     # Audit Factor-F3 — LARGE-tier canonical rebuild candidates (monthly cadence)

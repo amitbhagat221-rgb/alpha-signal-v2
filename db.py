@@ -171,6 +171,8 @@ _COLUMN_MIGRATIONS = [
     ("daily_snapshots_pit", "pead_drift_60d",             "REAL"),
     ("daily_snapshots_pit", "corporate_action_density",   "REAL"),
     ("daily_snapshots_pit", "buyback_announcement_30d",   "REAL"),
+    # 2026-07-05: §3.2.5 — announcement-window CAR (market-implied earnings surprise, PEAD-via-CAR).
+    ("daily_snapshots_pit", "announcement_car",           "REAL"),
     # 2026-06-13: ADR 0042 — BSE governance/forensic resignation event factor.
     ("daily_snapshots_pit", "governance_resignation",     "REAL"),
     # 2026-06-14: Plan 0002 §3.2.4 — earnings-call NLP factors (off nlp_scores).
@@ -2359,6 +2361,38 @@ BACKTEST_SIGNALS = [
         "status_reason": "Shipped 2026-05-31 (§3.2.5). Backtest: DROP all tiers (LARGE/MID only n=2 periods, SMALL t=-0.65) — too sparse (~9 buybacks/date) for power. Bench.",
     },
     {
+        "signal": "announcement_car",
+        "label": "Announcement-Window CAR (PEAD proxy)",
+        "group": "Event/PEAD",
+        "description": "Market-adjusted cumulative abnormal return in the [-1,+1] trading-day "
+                       "window around the latest BSE 'Result' announcement (buy at the last "
+                       "pre-print close, measure to +1, minus NIFTY-50 over the same dates). "
+                       "The market's own immediate reaction = a real-time earnings-surprise proxy "
+                       "needing no analyst consensus (which we lack PIT); PEAD hypothesis: a big "
+                       "positive CAR keeps drifting → expected IC POSITIVE. Staleness gate 90d "
+                       "(one reporting quarter); NULL when no qualifying recent print.",
+        "source_tables": ["bse_announcements", "stock_prices", "macro_history"],
+        "source_columns": ["bse_announcements.{sid,dt_tm,category=Result}", "stock_prices.close (adj)", "macro_history.nifty50"],
+        "filing_lag": "0d (dt_tm event-time anchor; CAR window must close ≤ eval)",
+        "pit_column_v1": None,
+        "pit_column_v2": "announcement_car",
+        "v1_verdict_summary": "(new — Plan 0002 §3.2.5, PEAD-via-CAR; audit Factor-F3 sanctioned next candidate)",
+        "status": "READY",
+        "status_reason": "Shipped + backtested 2026-07-05 (PEAD-via-CAR, the sanctioned next step after "
+                         "the SUE/pead_drift PEAD failed — memory pead_needs_announce_dates). 78 monthly "
+                         "anchors on the CLEAN post-ADR-0047 panel (fwd_return anchor-proximity guard). "
+                         "SMALL t=+3.74 KEEP (IC +0.0258, ICIR 0.424, CI [1.99,5.74]); LARGE t=+2.23 WEAK "
+                         "(IC +0.0308, ICIR 0.253, CI [0.22,4.36]); MID t=+1.20 DROP (IC +0.0141, "
+                         "CI [-0.73,3.20]). ALL THREE POSITIVE — the hypothesised sign (a big announcement "
+                         "reaction keeps drifting). This is the FIRST honest thing the LARGE tier has gotten "
+                         "from the rebuild: LARGE +2.23 tops the current best wired LARGE factor (consensus "
+                         "+1.62 on the clean panel). Multiple-testing: SMALL fails BY-FDR (p_BY 0.153, "
+                         "Bonferroni bar |t|≥4.09 not cleared) but sits in the SAME p_BY band as the already-"
+                         "WIRED sector_tilt SMALL (3.69) and consensus SMALL (3.74) — a genuine promotion "
+                         "candidate, not robust-core. NOT wired (human weight review). Benched in FACTOR_LIBRARY. "
+                         "NOTE: a live daily producer is NOT yet built — wiring requires one (see status).",
+    },
+    {
         "signal": "governance_resignation",
         "label": "Governance Resignation Intensity (1y)",
         "group": "Event/Forensic",
@@ -3301,6 +3335,7 @@ FACTOR_LIBRARY = [
     "vwap_deviation_5d",    # best |t|=0.96 SMALL — DROP
     "intraday_range_compression",  # best |t|=0.92 LARGE — DROP
     # Event-time / PEAD factors (§3.2.5) — earnings half didn't replicate
+    "announcement_car",          # PEAD-via-CAR (2026-07-05, clean post-ADR-0047 panel, 78 anchors): SMALL t=+3.74 KEEP / LARGE +2.23 WEAK / MID +1.20 DROP, ALL POSITIVE (hypothesised drift sign). Best honest LARGE candidate from the rebuild (tops consensus +1.62); SMALL sits with wired sector_tilt/consensus (p_BY ~0.15, fails BY-FDR). Promotion candidate — NOT wired (needs a live daily producer + human weight review)
     "corporate_action_density",  # LARGE t=-3.67 KEEP but unclear mechanism (maturity/value proxy?) — NOT promoted
     "pead_drift_60d",            # SMALL t=-1.54 WEAK (reversal sign)
     "earnings_surprise_std",     # DROP — SUE proxy too noisy w/o announce dates + consensus

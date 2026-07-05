@@ -161,6 +161,8 @@ PIT_COLUMNS = [
     # Plan 0002 §3.2.5 — event-time / PEAD factors
     "earnings_surprise_std", "pead_drift_60d",
     "corporate_action_density", "buyback_announcement_30d",
+    # Plan 0002 §3.2.5 — announcement-window CAR (market-implied earnings surprise, PEAD-via-CAR)
+    "announcement_car",
     # ADR 0042 — BSE governance/forensic resignation event factor
     "governance_resignation",
     # Plan 0002 §3.2.4 — earnings-call NLP factors (off nlp_scores, look-ahead-safe available_date)
@@ -266,6 +268,7 @@ VALIDATION_RANGES = {
     "pead_drift_60d":             (-1, 1, True),   # abnormal return since announce
     "corporate_action_density":   (0, 20, True),   # corp actions in trailing 1y
     "buyback_announcement_30d":   (0, 1, True),    # binary flag
+    "announcement_car":           (-1, 1, True),   # market-adj [-1,+1] CAR around latest Result print
     "governance_resignation":     (0, 12, True),   # weighted trailing-1y resignation intensity
     # Earnings-call NLP factors (§3.2.4) — latest-call values off nlp_scores
     "earnings_call_tone_qoq":     (-20, 20, True),  # Δ net_tone vs prior call
@@ -1456,6 +1459,32 @@ def pit_pead(qi_pit, px_pit, macro_hist, corp_full, bse_results, eval_date):
                         announcements=ann, as_of_date=eval_str)
 
 
+def pit_announcement_car(px_pit, macro_hist, bse_results, eval_date):
+    """Announcement-window CAR, PIT — market-implied earnings surprise (Plan 0002 §3.2.5).
+
+    px_pit is prices ≤ eval with PIT-strict adj_close already applied by the
+    orchestrator (a split inside the 3-day event window would otherwise fake a CAR);
+    macro_hist supplies the NIFTY-50 benchmark leg (filtered ≤ eval here); bse_results
+    is the BSE 'Result' announcement-date stream [sid, ann_date] — compute_announcement_car
+    applies the ≤ eval look-ahead filter itself, so the full frame is fine. NaN for names
+    with no qualifying recent print (no 0-fill — a missing print is "no reading").
+
+    Returns DataFrame[sid, announcement_car].
+    """
+    from signals.announcement_car import compute_announcement_car
+    eval_str = eval_date.isoformat() if hasattr(eval_date, "isoformat") else str(eval_date)
+    cols = ["sid", "announcement_car"]
+    if px_pit is None or px_pit.empty or bse_results is None or bse_results.empty:
+        return pd.DataFrame(columns=cols)
+    price_col = "adj_close" if "adj_close" in px_pit.columns else "close"
+    prices = px_pit[["sid", "date", price_col]].rename(columns={price_col: "adj_close"})
+    nifty = (macro_hist[(macro_hist["indicator_id"] == "nifty50")
+                        & (macro_hist["date"] <= eval_str)][["date", "value"]]
+             if macro_hist is not None and not macro_hist.empty else pd.DataFrame(columns=["date", "value"]))
+    ann = bse_results[["sid", "ann_date"]]
+    return compute_announcement_car(prices=prices, nifty=nifty, announcements=ann, as_of_date=eval_str)
+
+
 def pit_governance_resignation(stocks, bse_gov, eval_date):
     """Governance/forensic resignation density, PIT — BSE event stream (ADR 0042).
 
@@ -2616,6 +2645,13 @@ def reconstruct_one_date(eval_date, raw, signals_to_run):
             on="sid", how="left",
         )
 
+    # ── §3.2.5 — announcement-window CAR (market-implied earnings surprise) ──
+    if "announcement_car" in signals_to_run:
+        base = base.merge(
+            pit_announcement_car(px_pit, raw["macro_hist"], raw.get("bse_results"), eval_date),
+            on="sid", how="left",
+        )
+
     # ── ADR 0042 — governance/forensic resignation density (BSE event stream) ──
     if "governance" in signals_to_run:
         base = base.merge(
@@ -3091,7 +3127,7 @@ def main():
                                  "earnings_yield", "book_to_price", "momentum",
                                  "position_52w", "delivery", "sector_momentum",
                                  "sector_tilt",
-                                 "fno_oi", "fno_iv", "microstructure", "pead", "governance", "nlp", "pledge",
+                                 "fno_oi", "fno_iv", "microstructure", "pead", "announcement_car", "governance", "nlp", "pledge",
                                  "low_vol", "st_reversal", "asset_growth",
                                  "promoter_trend", "macd", "fwd_return",
                                  "mom_composite",
@@ -3178,6 +3214,8 @@ def main():
         "microstructure",
         # Plan 0002 §3.2.5 — event-time / PEAD factors
         "pead",
+        # Plan 0002 §3.2.5 — announcement-window CAR (market-implied surprise, PEAD-via-CAR)
+        "announcement_car",
         # ADR 0042 — BSE governance/forensic resignation event factor
         "governance",
         # Audit Factor-F3 — LARGE-tier canonical rebuild candidates
