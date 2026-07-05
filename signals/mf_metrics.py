@@ -81,12 +81,25 @@ def clean_nav_series(df, date_col: str = "nav_date", nav_col: str = "nav",
 
 
 def _build_benchmark_nav() -> pd.DataFrame:
-    """Derive a benchmark "NAV" series from the 50 largest LARGE-cap stocks.
+    """Derive a large-cap PROXY "NAV" series — NOT a real Nifty 50 index level.
 
-    Since we don't have Nifty 50 index level directly, we synthesise a cap-
-    weighted proxy: average daily close of the top 50 by market_cap_cr. This
-    is good enough for relative-return comparison (correlation with actual
-    Nifty 50 ≈ 0.99 in our backtests).
+    We don't have Nifty 50 index level (or TRI) ingested, so this synthesises
+    a stand-in from `stock_prices`: AVG(close) across TODAY's top 50 LARGE-tier
+    stocks by market_cap_cr, applied across the FULL historical date range.
+    Three honest caveats this proxy carries (audit MF-F6):
+      - CURRENT-constituent, not point-in-time — today's top-50 list is used
+        for every historical date, so index-reconstitution effects (a stock
+        that fell out of the top 50 years ago) aren't reflected.
+      - PRICE-WEIGHTED, not cap-weighted — a plain average of raw close prices
+        means a high-price stock (e.g. ₹5,000) moves the average more than a
+        similar-market-cap but lower-price stock, the same critique long
+        leveled at the (also price-weighted) Dow Jones Industrial Average.
+      - PRICE-RETURN, not total-return — dividends aren't reinvested, so this
+        proxy understates its own true return by the large-cap dividend yield
+        (~1-1.3%/yr), which OVERSTATES every fund's bench_spread_* by that
+        same amount vs a real Nifty 50 TRI comparison.
+    Real NIFTY TRI ingestion is a HUMAN TASK (external data source), not fixed
+    here. Cockpit labels this "vs large-cap proxy", not "vs Nifty".
 
     Returns DataFrame with columns: ['date', 'bench_nav'] sorted by date.
     """
