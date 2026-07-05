@@ -327,22 +327,6 @@ def _nw_lag_for(signal_id, cadence):
     return 0  # monthly cadence with fwd_return_20d has ~no overlap
 
 
-def _load_pit(table, columns, fwd_col):
-    """Load PIT table with cap_tier joined from stocks if not present."""
-    cols_sql = ", ".join(f"p.[{c}]" for c in columns + [fwd_col, "snapshot_date", "sid"])
-    # If table has cap_tier, use it; else join stocks
-    df = read_sql(
-        f"SELECT p.*, COALESCE(p.cap_tier, s.cap_tier) AS _tier "
-        f"FROM {table} p LEFT JOIN stocks s ON p.sid = s.sid"
-    )
-    # Use _tier for grouping if cap_tier was null
-    if "cap_tier" in df.columns:
-        df["cap_tier"] = df["cap_tier"].fillna(df.get("_tier"))
-    elif "_tier" in df.columns:
-        df["cap_tier"] = df["_tier"]
-    return df
-
-
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--signal", help="single signal to compute (default: all)")
