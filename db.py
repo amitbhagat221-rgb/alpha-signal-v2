@@ -197,6 +197,11 @@ _COLUMN_MIGRATIONS = [
     # the screen historically underperforms (strong UPTREND / junk rally).
     ("multibagger_scores", "smallcap_regime",   "TEXT"),
     ("multibagger_scores", "regime_favorable",  "INTEGER"),
+    # 2026-07-05: title-hash dedup before LLM classification (audit Eff-F2) —
+    # same regulatory story arrives via Google News + RBI + PIB + Wayback and
+    # was getting classified up to 3x. Lets the classifier reuse a prior
+    # verdict for an identical normalized headline instead of re-calling Haiku/Sonnet.
+    ("regulatory_events", "title_hash", "TEXT"),
 ]
 
 

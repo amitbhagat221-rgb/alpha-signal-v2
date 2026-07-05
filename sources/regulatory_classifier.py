@@ -18,6 +18,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import time
 from datetime import datetime
 
@@ -102,6 +103,54 @@ def _get_unclassified():
     """)
 
 
+def _title_hash(title):
+    """Normalize (lowercase, strip whitespace/punctuation) and hash a headline.
+
+    Same regulatory story arrives via Google News + RBI + PIB + Wayback with
+    near-identical headlines — this hash lets the classifier recognize a repeat
+    and reuse the prior verdict instead of paying for Haiku/Sonnet again
+    (audit Eff-F2)."""
+    normalized = re.sub(r"[^a-z0-9]+", " ", str(title).lower()).strip()
+    return hashlib.md5(normalized.encode()).hexdigest()
+
+
+def _dedup_lookup(title_hash, run_cache):
+    """Return (status, source_event_id) for a prior classification of this
+    title_hash, or (None, None) if this is the first time we've seen it.
+
+    Checks the in-run cache first (catches duplicates arriving in the same
+    run, before either has a DB-persisted terminal status), then falls back
+    to regulatory_events for duplicates resolved in a prior run."""
+    if title_hash in run_cache:
+        return run_cache[title_hash]
+    row = read_sql(
+        "SELECT event_id, classifier_status FROM regulatory_events "
+        "WHERE title_hash = ? AND classifier_status IN ('haiku_rejected', 'classified') "
+        "ORDER BY classifier_processed_at ASC LIMIT 1",
+        params=[title_hash],
+    )
+    if row.empty:
+        return None, None
+    return row.iloc[0]["classifier_status"], row.iloc[0]["event_id"]
+
+
+def _copy_signals(source_event_id, dest_event_id):
+    """Copy regulatory_signals rows from a prior classification to a
+    duplicate-title event, so downstream sector-signal coverage isn't lost
+    just because the API call was skipped. Returns rows copied."""
+    sig = read_sql(
+        "SELECT sector, is_regulatory, stage, direction, magnitude, time_horizon, "
+        "confidence, ai_reasoning FROM regulatory_signals WHERE event_id = ?",
+        params=[source_event_id],
+    )
+    if sig.empty:
+        return 0
+    sig = sig.copy()
+    sig["event_id"] = dest_event_id
+    insert_df(sig, "regulatory_signals")
+    return len(sig)
+
+
 def _prefilter_batch(client, articles):
     """Stage 1: Quick Haiku filter — is this regulatory? Returns list of article_ids that pass."""
     regulatory_ids = []
@@ -176,20 +225,78 @@ def _save_event(article, is_regulatory):
         "source_url": None,
         "published_at": article["published_at"],
         "ministry": None,
+        "title_hash": _title_hash(article["title"]),
         "classifier_status": initial_status,
         "classifier_processed_at": datetime.now().isoformat(timespec="seconds"),
     }])
     insert_df(event, "regulatory_events")
 
 
-def _update_event_status(event_id, status):
+def _save_event_dedup(article, title_hash, status, source_event_id):
+    """Save a news_articles row that duplicates a prior title_hash verdict —
+    no Haiku/Sonnet call. Copies sector signals from the source event if it
+    was fully classified. Returns signal rows copied."""
+    event_id = _event_id(article["article_id"])
+    ministry = None
+    n_signals = 0
+    if status == "classified":
+        src = read_sql("SELECT ministry FROM regulatory_events WHERE event_id = ?",
+                        params=[source_event_id])
+        if not src.empty:
+            ministry = src.iloc[0]["ministry"]
+        n_signals = _copy_signals(source_event_id, event_id)
+    event = pd.DataFrame([{
+        "event_id": event_id,
+        "title": article["title"][:500],
+        "summary": str(article.get("summary", ""))[:2000],
+        "source": f"news_{article['source']}",
+        "source_url": None,
+        "published_at": article["published_at"],
+        "ministry": ministry,
+        "title_hash": title_hash,
+        "classifier_status": status,
+        "classifier_processed_at": datetime.now().isoformat(timespec="seconds"),
+    }])
+    insert_df(event, "regulatory_events")
+    return n_signals
+
+
+def _update_event_status(event_id, status, title_hash=None):
     """UPDATE regulatory_events.classifier_status — called after every Haiku/Sonnet call.
     This is the single source of truth for whether an event has been seen by the classifier."""
     with get_db() as conn:
+        if title_hash is not None:
+            conn.execute(
+                "UPDATE regulatory_events SET classifier_status = ?, classifier_processed_at = ?, "
+                "title_hash = ? WHERE event_id = ?",
+                (status, datetime.now().isoformat(timespec="seconds"), title_hash, event_id),
+            )
+        else:
+            conn.execute(
+                "UPDATE regulatory_events SET classifier_status = ?, classifier_processed_at = ? WHERE event_id = ?",
+                (status, datetime.now().isoformat(timespec="seconds"), event_id),
+            )
+
+
+def _reuse_classification_existing(event_id, title_hash, status, source_event_id):
+    """Same as _save_event_dedup but for a regulatory_events row that already
+    exists (classify_events path — the event was harvested directly, not via
+    news_articles) — UPDATE instead of INSERT. Returns signal rows copied."""
+    ministry = None
+    n_signals = 0
+    if status == "classified":
+        src = read_sql("SELECT ministry FROM regulatory_events WHERE event_id = ?",
+                        params=[source_event_id])
+        if not src.empty:
+            ministry = src.iloc[0]["ministry"]
+        n_signals = _copy_signals(source_event_id, event_id)
+    with get_db() as conn:
         conn.execute(
-            "UPDATE regulatory_events SET classifier_status = ?, classifier_processed_at = ? WHERE event_id = ?",
-            (status, datetime.now().isoformat(timespec="seconds"), event_id),
+            "UPDATE regulatory_events SET classifier_status = ?, classifier_processed_at = ?, "
+            "title_hash = ?, ministry = COALESCE(?, ministry) WHERE event_id = ?",
+            (status, datetime.now().isoformat(timespec="seconds"), title_hash, ministry, event_id),
         )
+    return n_signals
 
 
 def _save_signals(article, classification):
@@ -245,6 +352,8 @@ def classify(limit=None, dry_run=False):
     batch_size = 100
     total_regulatory = 0
     total_signals = 0
+    total_dedup_skipped = 0
+    dedup_cache = {}   # title_hash -> (status, source_event_id), same-run duplicates
 
     for batch_start in range(0, total, batch_size):
         batch = unclassified.iloc[batch_start:batch_start + batch_size]
@@ -253,17 +362,44 @@ def classify(limit=None, dry_run=False):
 
         print(f"\n--- Batch {batch_num}/{total_batches} ({len(batch)} articles) ---")
 
-        # Stage 1: Haiku pre-filter
-        print(f"  Stage 1 (Haiku): filtering...", end=" ", flush=True)
-        regulatory_ids = _prefilter_batch(client, batch)
-        print(f"{len(regulatory_ids)}/{len(batch)} regulatory")
+        # Title-hash dedup: same regulatory story often arrives as multiple
+        # separate news_articles rows. Skip the API entirely for a repeat
+        # headline and reuse the prior verdict (audit Eff-F2).
+        dedup_rows, fresh_rows = [], []
+        for _, art in batch.iterrows():
+            title_hash = _title_hash(art["title"])
+            status, source_event_id = _dedup_lookup(title_hash, dedup_cache)
+            if status is not None:
+                dedup_rows.append((art, title_hash, status, source_event_id))
+            else:
+                fresh_rows.append(art)
+        fresh_batch = pd.DataFrame(fresh_rows) if fresh_rows else batch.iloc[0:0]
+
+        if dedup_rows:
+            print(f"  Dedup: {len(dedup_rows)}/{len(batch)} match a prior headline — reusing verdict, no API call")
+            for art, title_hash, status, source_event_id in dedup_rows:
+                n_sig = _save_event_dedup(art, title_hash, status, source_event_id)
+                total_signals += n_sig
+                if status == "classified":
+                    total_regulatory += 1
+                dedup_cache[title_hash] = (status, _event_id(art["article_id"]))
+            total_dedup_skipped += len(dedup_rows)
+
+        # Stage 1: Haiku pre-filter (fresh headlines only)
+        print(f"  Stage 1 (Haiku): filtering {len(fresh_batch)} fresh headlines...", end=" ", flush=True)
+        regulatory_ids = _prefilter_batch(client, fresh_batch) if len(fresh_batch) else []
+        print(f"{len(regulatory_ids)}/{len(fresh_batch)} regulatory")
 
         # Save non-regulatory as processed (so we don't re-check them)
-        for _, art in batch.iterrows():
+        for _, art in fresh_batch.iterrows():
             _save_event(art, art["article_id"] in regulatory_ids)
+            dedup_cache[_title_hash(art["title"])] = (
+                "pending" if art["article_id"] in regulatory_ids else "haiku_rejected",
+                _event_id(art["article_id"]),
+            )
 
         # Stage 2: Sonnet deep classification for regulatory articles
-        reg_articles = batch[batch["article_id"].isin(regulatory_ids)]
+        reg_articles = fresh_batch[fresh_batch["article_id"].isin(regulatory_ids)] if len(fresh_batch) else fresh_batch
         if len(reg_articles) > 0:
             print(f"  Stage 2 (Sonnet): classifying {len(reg_articles)} articles...")
 
@@ -285,6 +421,7 @@ def classify(limit=None, dry_run=False):
                             ("classified", datetime.now().isoformat(timespec="seconds"),
                              str(ministry) if ministry else None, event_id),
                         )
+                    dedup_cache[_title_hash(art["title"])] = ("classified", event_id)
                 else:
                     # Sonnet failed (API error or bad JSON) — mark accordingly so we can retry
                     _update_event_status(event_id, "haiku_passed_sonnet_failed")
@@ -297,6 +434,7 @@ def classify(limit=None, dry_run=False):
     print(f"  Processed: {total} articles")
     print(f"  Regulatory: {total_regulatory} ({total_regulatory/total*100:.0f}%)")
     print(f"  Sector signals: {total_signals}")
+    print(f"  Dedup-skipped (repeat headline, no API call): {total_dedup_skipped}")
 
     return total_regulatory
 
@@ -340,6 +478,8 @@ def classify_events(limit=None, dry_run=False):
     batch_size = 100
     total_regulatory = 0
     total_signals = 0
+    total_dedup_skipped = 0
+    dedup_cache = {}   # title_hash -> (status, source_event_id), same-run duplicates
 
     for batch_start in range(0, total, batch_size):
         batch = unclassified.iloc[batch_start:batch_start + batch_size]
@@ -348,14 +488,38 @@ def classify_events(limit=None, dry_run=False):
 
         print(f"\n--- Batch {batch_num}/{total_batches} ({len(batch)} events) ---")
 
-        # Stage 1: Haiku pre-filter — update classifier_status after EVERY call
-        print(f"  Stage 1 (Haiku): filtering...", end=" ", flush=True)
-        regulatory_ids = []
+        # Title-hash dedup: the same regulatory story often lands as separate
+        # events from Google News + RBI + PIB + Wayback. Skip the API for a
+        # repeat headline and reuse the prior verdict (audit Eff-F2).
+        dedup_rows, fresh_rows = [], []
         for _, evt in batch.iterrows():
+            title_hash = _title_hash(evt["title"])
+            status, source_event_id = _dedup_lookup(title_hash, dedup_cache)
+            if status is not None and source_event_id != evt["event_id"]:
+                dedup_rows.append((evt, title_hash, status, source_event_id))
+            else:
+                fresh_rows.append(evt)
+        fresh_batch = pd.DataFrame(fresh_rows) if fresh_rows else batch.iloc[0:0]
+
+        if dedup_rows:
+            print(f"  Dedup: {len(dedup_rows)}/{len(batch)} match a prior headline — reusing verdict, no API call")
+            for evt, title_hash, status, source_event_id in dedup_rows:
+                n_sig = _reuse_classification_existing(evt["event_id"], title_hash, status, source_event_id)
+                total_signals += n_sig
+                if status == "classified":
+                    total_regulatory += 1
+                dedup_cache[title_hash] = (status, evt["event_id"])
+            total_dedup_skipped += len(dedup_rows)
+
+        # Stage 1: Haiku pre-filter — update classifier_status after EVERY call
+        print(f"  Stage 1 (Haiku): filtering {len(fresh_batch)} fresh headlines...", end=" ", flush=True)
+        regulatory_ids = []
+        for _, evt in fresh_batch.iterrows():
             prompt = PREFILTER_PROMPT.format(
                 title=str(evt["title"])[:200],
                 summary=str(evt.get("summary", ""))[:300],
             )
+            title_hash = _title_hash(evt["title"])
             try:
                 resp = client.messages.create(
                     model=HAIKU_MODEL, max_tokens=5,
@@ -364,18 +528,20 @@ def classify_events(limit=None, dry_run=False):
                 if "YES" in resp.content[0].text.strip().upper():
                     regulatory_ids.append(evt["event_id"])
                     # Don't update status yet — Sonnet will do it
+                    dedup_cache[title_hash] = ("pending", evt["event_id"])
                 else:
                     # Haiku rejected — mark + done with this event
-                    _update_event_status(evt["event_id"], "haiku_rejected")
+                    _update_event_status(evt["event_id"], "haiku_rejected", title_hash=title_hash)
+                    dedup_cache[title_hash] = ("haiku_rejected", evt["event_id"])
             except Exception as e:
                 print(f"\n  Haiku error: {e}")
                 # Don't change status on API error → leaves as pending → safe to retry
             time.sleep(0.1)
 
-        print(f"{len(regulatory_ids)}/{len(batch)} regulatory")
+        print(f"{len(regulatory_ids)}/{len(fresh_batch)} regulatory")
 
         # Stage 2: Sonnet deep classify
-        reg_events = batch[batch["event_id"].isin(regulatory_ids)]
+        reg_events = fresh_batch[fresh_batch["event_id"].isin(regulatory_ids)] if len(fresh_batch) else fresh_batch
         if len(reg_events) > 0:
             print(f"  Stage 2 (Sonnet): classifying {len(reg_events)} events...")
 
@@ -406,16 +572,19 @@ def classify_events(limit=None, dry_run=False):
                     sector_names = [s["sector"] for s in sectors]
                     print(f"    {str(evt['title'])[:60]}... → {ministry} → {sector_names}")
 
-                    # Mark fully classified + update ministry in one statement
+                    # Mark fully classified + update ministry + title_hash in one statement
+                    evt_title_hash = _title_hash(evt["title"])
                     with get_db() as conn:
                         conn.execute(
-                            "UPDATE regulatory_events SET classifier_status = ?, classifier_processed_at = ?, ministry = COALESCE(?, ministry) WHERE event_id = ?",
-                            ("classified", datetime.now().isoformat(timespec="seconds"),
+                            "UPDATE regulatory_events SET classifier_status = ?, classifier_processed_at = ?, "
+                            "title_hash = ?, ministry = COALESCE(?, ministry) WHERE event_id = ?",
+                            ("classified", datetime.now().isoformat(timespec="seconds"), evt_title_hash,
                              str(ministry) if ministry else None, event_id),
                         )
+                    dedup_cache[evt_title_hash] = ("classified", event_id)
                 else:
                     # Sonnet failed (API error or bad JSON) — mark so we can retry
-                    _update_event_status(event_id, "haiku_passed_sonnet_failed")
+                    _update_event_status(event_id, "haiku_passed_sonnet_failed", title_hash=_title_hash(evt["title"]))
 
                 time.sleep(0.3)
 
@@ -425,6 +594,7 @@ def classify_events(limit=None, dry_run=False):
     print(f"  Processed: {total} events")
     print(f"  Regulatory: {total_regulatory} ({total_regulatory/max(total,1)*100:.0f}%)")
     print(f"  Sector signals: {total_signals}")
+    print(f"  Dedup-skipped (repeat headline, no API call): {total_dedup_skipped}")
 
     return total_regulatory
 
