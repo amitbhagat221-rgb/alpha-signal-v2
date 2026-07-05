@@ -20,15 +20,50 @@ From v1 C13b — 36 monthly periods, reproduced by `tools/backtest_pit.py` in v2
 | 0.5 – 1.5 | 0.2× |
 | < 0.5 | 0× |
 
+## `pt_upside` + `smart_money` PULLED (2026-07-05, [ADR 0045](../decisions/0045-pull-pt-upside-lookahead.md))
+
+`docs/audit-2026-07-04-report.md` (Factor-F1, CRITICAL) found that `pt_upside`'s entire
+t=7–9 edge across all three tiers was built from `forecast_history` (metric='price') rows —
+these "year-end Tickertape snapshots" actually embed the **year-ahead REALIZED CLOSE**, not
+a real analyst price target (worse than the already-documented 2026-05-22 HALC contamination:
+that fix stopped *daily* price masquerading as PT; this one is the *annual* series itself).
+Every pre-2026-05 `pt_upside` value in `daily_snapshots_pit` was look-ahead. Purged
+(`UPDATE ... SET pt_upside = NULL WHERE snapshot_date < '2026-05-01'`) and rebuilt from
+`analyst_consensus_snapshots` ONLY (2026-05+, real monthly PT snapshots — see
+`tools/reconstruct_pit.py::pit_pt_upside`). Clean re-backtest: **n=1 period, INSUFFICIENT**
+in all three tiers — the real edge cannot yet be measured, let alone wired.
+
+`smart_money` pulled in the same pass: best-ever backtest was SMALL t=1.06 on n=6 monthly
+anchors, violating the documented `|t|≥1.5` promotion bar (audit Factor-F3) — it should
+never have carried production weight.
+
+Both removed from `SIGNAL_WEIGHTS`; remaining weights in each tier renormalized
+proportionally (Σ|w|=1.0, signs preserved). New weights:
+
+| Tier | Weights (was → now) |
+|------|----------------------|
+| LARGE | consensus 0.35→**0.47**, earnings_yield 0.12→**0.16**, book_to_price 0.10→**0.13**, accruals 0.09→**0.12**, piotroski 0.09→**0.12** (pt_upside 0.25 removed) |
+| MID | accruals 0.20→**0.27**, iv_skew_25d 0.13→**0.17**, piotroski 0.11→**0.14**, book_to_price 0.11→**0.14**, consensus 0.06→**0.08**, governance_resignation −0.08→**−0.11**, earnings_yield 0.04→**0.05**, promoter 0.03→**0.04** (pt_upside 0.24 removed) |
+| SMALL | promoter 0.14→**0.19**, earnings_yield 0.11→**0.14**, book_to_price 0.11→**0.14**, delivery_anomaly_z 0.10→**0.12**, sector_tilt 0.10→**0.12**, pledge_quality 0.09→**0.11**, piotroski 0.08→**0.10**, accruals 0.05→**0.06**, momentum 0.02 unchanged (pt_upside 0.15 + smart_money 0.05 removed) |
+
+`SIGNAL_WEIGHTS_RETURN` / `SIGNAL_WEIGHTS_SHARPE` (non-production, `--variant` dry-run
+diagnostics only): `pt_upside` set to 0 in place, not renormalized.
+
+**Re-entry condition:** ≥12 clean monthly `analyst_consensus_snapshots`-only anchors
+AND |t|≥1.5 in a tier → revisit (calendar: ~2027-05). Until then `pt_upside` stays
+computed (visible in the cockpit/backtest) but carries zero production weight.
+
 ## In PRODUCTION `SIGNAL_WEIGHTS` beyond the v1 C13b set
 
 Promotion wave 2026-05-31 — idle-but-validated factors brought into production after
 an **orthogonality sweep** (each new factor's max |ρ| vs already-wired factors shown).
-`pt_upside` is **capped** below its t-implied share pending an artifact re-verify (2026-08).
+`pt_upside` was **capped** below its t-implied share pending an artifact re-verify (2026-08)
+— that re-verify happened early: see the PULLED section above (2026-07-05, ADR 0045). The
+row below is kept for the historical record of why it was promoted in the first place.
 
 | Signal | Tier(s) | t-stat | Weight | Max \|ρ\| vs wired | Notes |
 |--------|---------|--------|--------|---------|-------|
-| **pt_upside** | LARGE/MID/SMALL | 7.15/8.40/9.14 | 0.25/0.25/0.16 | 0.27 (vs book/EY) | analyst PT upside; n=35. CAPPED — artifact re-verify 2026-08 (open question). |
+| ~~**pt_upside**~~ | LARGE/MID/SMALL | 7.15/8.40/9.14 | ~~0.25/0.25/0.16~~ **PULLED** | 0.27 (vs book/EY) | analyst PT upside; n=35. This t-stat was `forecast_history` look-ahead contamination — PULLED 2026-07-05 (ADR 0045), not capped. |
 | **pledge_quality** | SMALL | 5.90 | 0.13 | 0.08 | promoter-pledge stress; orthogonal to promoter (ρ=0.04) |
 | **delivery_anomaly_z** | SMALL | 4.76 (n=103) | 0.11 | 0.08 | delivery z-spike; orthogonal to avg_delivery (ρ=0.08) |
 | **iv_skew_25d** | MID | +3.16 (48wk) | 0.14 | 0.19 | in-house IV skew (ADR 0035); F&O-only; LARGE/SMALL DROP |
@@ -155,9 +190,9 @@ Benjamini-Yekutieli FDR (dependence-robust). Read each weight through this lens:
 
 | Robustness (BY-FDR) | Wired factors |
 |---|---|
-| ✓ **survive** (bulletproof) | `pt_upside` (L/M/S), `pledge_quality` (S), `delivery_anomaly_z` (S) |
+| ✓ **survive** (bulletproof) | ~~`pt_upside` (L/M/S)~~ **PULLED 2026-07-05 — this "bulletproof" t-stat was look-ahead contamination (ADR 0045); no longer wired**, `pledge_quality` (S), `delivery_anomaly_z` (S) |
 | ~ borderline (pass BH, fail BY) | `governance_resignation` (M, p_BY 0.075), `iv_skew_25d` (M), `sector_tilt` (S) |
-| ✗ fail the haircut | `consensus`, `book_to_price`, `piotroski`, `accruals`, `earnings_yield`, `promoter`, `smart_money`, `momentum` |
+| ✗ fail the haircut | `consensus`, `book_to_price`, `piotroski`, `accruals`, `earnings_yield`, `promoter`, ~~`smart_money`~~ **PULLED 2026-07-05 (n=6, sub-bar; ADR 0045)**, `momentum` |
 
 The ✗-tier is **not** a delisting order — those are kept on the deliberate **diversification-ballast**
 rationale (horizon-gate review) or **doubly-validated v1×v2** history (consensus, book_to_price). The

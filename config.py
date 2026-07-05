@@ -67,12 +67,15 @@ SIGNAL_WEIGHTS = {
         # LARGE — strong in SMALL, weak here). Freed weight → the only doubly-validated
         # pair (consensus + book_to_price). MID left untouched (its flags are
         # gate↔history CONFLICTS, not acted on).
-        "consensus":      0.35,   # t=3.52 primary; gate LIBRARY 2.29 — the LARGE anchor
-        "pt_upside":      0.25,   # t=7.15 primary (capped — artifact re-verify 2026-08)
-        "earnings_yield": 0.12,   # t=1.57 secondary; gate REJECT in LARGE — trimmed
-        "book_to_price":  0.10,   # t=0.79; gate LIBRARY (sign-unstable) — best of the rest
-        "accruals":       0.09,   # t=0.20; gate REJECT — diversifier, not alpha
-        "piotroski":      0.09,   # t=0.51; gate REJECT — diversifier, not alpha
+        # 2026-07-05 (ADR 0045): pt_upside PULLED — its |t| was built entirely from
+        # forecast_history's year-ahead-realized-close contamination (audit Factor-F1,
+        # CRITICAL); clean data gives n<4 anchors, honestly INSUFFICIENT. Remaining
+        # weights renormalized proportionally, Σ|w|=1.0.
+        "consensus":      0.47,   # t=3.52 primary; gate LIBRARY 2.29 — the LARGE anchor
+        "earnings_yield": 0.16,   # t=1.57 secondary; gate REJECT in LARGE — trimmed
+        "book_to_price":  0.13,   # t=0.79; gate LIBRARY (sign-unstable) — best of the rest
+        "accruals":       0.12,   # t=0.20; gate REJECT — diversifier, not alpha
+        "piotroski":      0.12,   # t=0.51; gate REJECT — diversifier, not alpha
     },
     "MID": {
         # iv_skew_25d added 2026-05-31 (ADR 0035): MID t=+3.16 KEEP, 48 wk, orthogonal.
@@ -100,15 +103,16 @@ SIGNAL_WEIGHTS = {
         # (only v1 2019-22 supported it) and it's redundant with pt_upside's analyst
         # dimension. Modest cut (not zero — still v1-validated), not a one-read override:
         # 4yr of recent evidence across 3 methods. Σ|w|=1.0 preserved.
-        "pt_upside":              0.24,   # t=8.40 primary (capped — artifact re-verify 2026-08); marginal workhorse, compounds to t≈23 @252d
-        "accruals":               0.20,   # t=3.20 primary; horizon-vindicated SLOW factor (incr −5.4 @252d) — gate REJECT was a fast-horizon artifact
-        "iv_skew_25d":            0.13,   # t=3.16 primary (MID, F&O stocks)
-        "piotroski":              0.11,   # t=2.23 secondary
-        "book_to_price":          0.11,   # t=2.33 secondary; slow value (incr +2.0 @252d)
-        "consensus":              0.06,   # t=2.20 v1 but DECAYED — weak/negative at all v2 horizons, gate REJECT (2026-06-14 trim)
-        "governance_resignation": -0.08,  # t=−3.82 KEEP (ADR 0042); negative — FAST forensic penalty (peaks @20d)
-        "earnings_yield":         0.04,   # t=1.01 tertiary
-        "promoter":               0.03,   # t=0.83 tertiary
+        # 2026-07-05 (ADR 0045): pt_upside PULLED — look-ahead artifact (audit
+        # Factor-F1, CRITICAL). Remaining weights renormalized, Σ|w|=1.0.
+        "accruals":               0.27,   # t=3.20 primary; horizon-vindicated SLOW factor (incr −5.4 @252d) — gate REJECT was a fast-horizon artifact
+        "iv_skew_25d":            0.17,   # t=3.16 primary (MID, F&O stocks)
+        "piotroski":              0.14,   # t=2.23 secondary
+        "book_to_price":          0.14,   # t=2.33 secondary; slow value (incr +2.0 @252d)
+        "consensus":              0.08,   # t=2.20 v1 but DECAYED — weak/negative at all v2 horizons, gate REJECT (2026-06-14 trim)
+        "governance_resignation": -0.11,  # t=−3.82 KEEP (ADR 0042); negative — FAST forensic penalty (peaks @20d)
+        "earnings_yield":         0.05,   # t=1.01 tertiary
+        "promoter":               0.04,   # t=0.83 tertiary
     },
     # SIGNAL_GROUPS defined below SIGNAL_WEIGHTS.
     "SMALL": {
@@ -132,16 +136,18 @@ SIGNAL_WEIGHTS = {
         # clear |t|≥1.5 → NOT wired there (sector_tilt is SMALL-only, like the cousin's
         # best tier). Funded by an even −0.01 haircut across the existing ten (ordering
         # preserved). Distinct from the benched sector_momentum (63d RS, SMALL t=1.88).
-        "pt_upside":          0.15,   # t=9.14 primary (capped — artifact re-verify 2026-08)
-        "promoter":           0.14,   # t=3.20 primary; gate LIBRARY 1.83
-        "earnings_yield":     0.11,   # t=3.13 primary; gate PROMOTE 7.75 @252d
-        "book_to_price":      0.11,   # t=2.54 secondary; gate PROMOTE 13.58 @252d (strongest)
-        "delivery_anomaly_z": 0.10,   # t=4.76 primary (n=103, orthogonal); gate PROMOTE 2.12
-        "sector_tilt":        0.10,   # t=3.18 KEEP (ADR 0041); orthogonal sector/macro tilt
-        "pledge_quality":     0.09,   # t=5.90; gate LIBRARY 1.96 fragile — kept orthogonal
-        "piotroski":          0.08,   # t=2.81 secondary; gate PROMOTE 4.87
-        "smart_money":        0.05,   # smart_money_score: backtested 2026-06-02 → SMALL t=1.06 (n=6, DROP/thin). Prior "t=2.49" was avg_delivery borrowed via a mis-alias. Diversifier — re-judge as anchors accrue.
-        "accruals":           0.05,   # t=2.10 secondary; gate REJECT — conflict, held
+        # 2026-07-05 (ADR 0045): pt_upside PULLED — look-ahead artifact (audit
+        # Factor-F1, CRITICAL). smart_money PULLED — best-ever t=1.06 on n=6
+        # violates the documented |t|≥1.5 promotion bar (audit Factor-F3).
+        # Remaining weights renormalized, Σ|w|=1.0.
+        "promoter":           0.19,   # t=3.20 primary; gate LIBRARY 1.83
+        "earnings_yield":     0.14,   # t=3.13 primary; gate PROMOTE 7.75 @252d
+        "book_to_price":      0.14,   # t=2.54 secondary; gate PROMOTE 13.58 @252d (strongest)
+        "delivery_anomaly_z": 0.12,   # t=4.76 primary (n=103, orthogonal); gate PROMOTE 2.12
+        "sector_tilt":        0.12,   # t=3.18 KEEP (ADR 0041); orthogonal sector/macro tilt
+        "pledge_quality":     0.11,   # t=5.90; gate LIBRARY 1.96 fragile — kept orthogonal
+        "piotroski":          0.10,   # t=2.81 secondary; gate PROMOTE 4.87
+        "accruals":           0.06,   # t=2.10 secondary; gate REJECT — conflict, held
         "momentum":           0.02,   # t=1.76 tertiary; gate REJECT — token
     },
 }
@@ -178,18 +184,21 @@ SIGNAL_GROUPS = {
 # Refresh: python -m tools.optimize_weights --filter-wired
 # 2026-05-29: pledge_quality + delivery_anomaly_z now wired (Next-3 #3), so SMALL
 # includes both; MID stays at 2 factors until interest_coverage/ccc/etc are wired.
+#   2026-07-05 (ADR 0045): pt_upside → 0 in both variants below — look-ahead
+#   artifact (audit Factor-F1, CRITICAL). Non-production (dry-run only via
+#   --variant), so left un-renormalized per ADR 0045.
 SIGNAL_WEIGHTS_RETURN = {
     "LARGE": {
-        "pt_upside":         0.4679,  # t=7.15
+        "pt_upside":         0,       # PULLED — look-ahead artifact (was t=7.15)
         "eps_growth":        0.3475,  # t=5.31
         "consensus":         0.1846,  # t=2.82
     },
     "MID": {
-        "pt_upside":         0.7241,  # t=8.40
+        "pt_upside":         0,       # PULLED — look-ahead artifact (was t=8.40)
         "accruals":         -0.2759,  # t=-3.20 (inverse)
     },
     "SMALL": {
-        "pt_upside":         0.2364,  # t=9.14
+        "pt_upside":         0,       # PULLED — look-ahead artifact (was t=9.14)
         "pledge_quality":    0.1526,  # t=5.90
         "delivery_anomaly_z":0.1232,  # t=4.76
         "smart_money":       0.1131,  # t=4.37 (avg_delivery_pct_30d)
@@ -205,15 +214,15 @@ SIGNAL_WEIGHTS_RETURN = {
 SIGNAL_WEIGHTS_SHARPE = {
     "LARGE": {
         "eps_growth":        0.5239,  # ICIR=1.88
-        "pt_upside":         0.3371,  # ICIR=1.21
+        "pt_upside":         0,       # PULLED — look-ahead artifact (was ICIR=1.21)
         "consensus":         0.1390,  # ICIR=0.50
     },
     "MID": {
-        "pt_upside":         0.6533,  # ICIR=1.42
+        "pt_upside":         0,       # PULLED — look-ahead artifact (was ICIR=1.42)
         "accruals":         -0.3467,  # ICIR=-0.75 (inverse)
     },
     "SMALL": {
-        "pt_upside":         0.2169,  # ICIR=1.54
+        "pt_upside":         0,       # PULLED — look-ahead artifact (was ICIR=1.54)
         "pledge_quality":    0.1488,  # ICIR=1.06
         "eps_growth":        0.1435,  # ICIR=1.02
         "earnings_yield":    0.0983,  # ICIR=0.70
