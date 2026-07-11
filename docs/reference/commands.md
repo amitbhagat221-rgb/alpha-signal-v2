@@ -34,3 +34,19 @@ python -m sources.macro_gov
 # SQL explorer
 jupyter notebook notebooks/00_sql_explorer.ipynb
 ```
+
+## Crons (crontab-only, invisible to git — check `crontab -l`)
+
+Cron entries live only in the system crontab, never in this repo — `git log`/`grep`
+will never show them. `crontab -l` is the only source of truth; back it up before
+editing (`crontab -l > backup.txt`).
+
+- **Monthly expected_return prediction snapshot** (plan 0012 B3, added 2026-07-11) —
+  1st of month 05:00 UTC (after the 04:00 health email + 04:30 snapshots cron):
+  ```
+  0 5 1 * * cd /home/ubuntu/alpha-signal-v2 && eval "$(grep '^export ' /home/ubuntu/alpha-signal/run_pipeline.sh)" && /home/ubuntu/alpha-signal/venv/bin/python -m tools.expected_return >> logs/expected_return_cron.log 2>&1
+  ```
+  Appends one JSON line to `data/expected_return_predictions.jsonl` (E[1Y]
+  decomposition — beta/alpha/cost/tax) so the prediction becomes a scoreable
+  track record without anyone remembering to run it by hand. Log:
+  `logs/expected_return_cron.log`.

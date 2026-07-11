@@ -1,0 +1,57 @@
+# Alpha Signal v2 — daily pipeline (replaced v1 on 2026-05-01)
+30 3 * * * /home/ubuntu/alpha-signal-v2/run_pipeline.sh >> /home/ubuntu/alpha-signal-v2/output/pipeline.log 2>&1
+
+# v1 daily — KEPT DISABLED for rollback. Re-enable by uncommenting if v2 fails.
+#30 3 * * * /home/ubuntu/alpha-signal/run_pipeline.sh >> /home/ubuntu/alpha-signal/output/pipeline.log 2>&1
+
+# v2 cockpit (FastAPI on :3000) is run by systemd unit alpha-cockpit.service — auto-starts on reboot.
+# v1 streamlit dashboard (port 8501) — disabled in favour of cockpit. Re-enable by uncommenting.
+#@reboot sleep 30 && cd /home/ubuntu/alpha-signal && source venv/bin/activate && nohup streamlit run dashboard.py --server.port 8501 --server.address 0.0.0.0 --server.headless true > /dev/null 2>&1 &
+
+# Weekend universe + fundamentals refresh — still v1 (v2 has no equivalent yet; non-blocking for v2 daily run).
+#0 5 * * 6 /home/ubuntu/alpha-signal/run_weekend_refresh.sh >> /home/ubuntu/alpha-signal/output/weekend_refresh.log 2>&1
+
+# Unrelated: dynamic DNS + project-rendezvous (untouched).
+*/5 * * * * /home/ubuntu/duckdns/duck.sh >/dev/null 2>&1
+@reboot sleep 15 && /home/ubuntu/project-rendezvous/backend/scripts/start.sh >> /tmp/rendezvous-backend.log 2>&1
+30 20 * * * /home/ubuntu/project-rendezvous/backend/scripts/backup.sh >> /tmp/rendezvous-backup.log 2>&1
+
+# Monthly Tickertape fundamentals refresh — 1st of month at 19:07 UTC (12:37 IST). ~4hr; finishes well before next 03:30 UTC daily.
+7 19 1 * * /home/ubuntu/alpha-signal-v2/run_tickertape_monthly.sh >> /home/ubuntu/alpha-signal-v2/output/tickertape_cron.log 2>&1
+
+# Alpha Signal v2 — daily forward-only accumulation (14:00 UTC = 7:30 PM IST after NSE EOD)
+0 14 * * * /home/ubuntu/alpha-signal-v2/run_daily_forward.sh
+
+
+# Alpha Signal v2 — freshness watchdog (15:00 UTC = 8:30 PM IST, after daily_forward).
+# Sources creds from v1/run_pipeline.sh per CLAUDE.md (single source of truth).
+0 15 * * * /bin/bash -c 'cd /home/ubuntu/alpha-signal-v2 && eval "$(grep "^export " /home/ubuntu/alpha-signal/run_pipeline.sh)"; export GMAIL_USER="$ALPHA_SIGNAL_EMAIL" GMAIL_APP_PASSWORD="$ALPHA_SIGNAL_PASSWORD" EMAIL_RECIPIENT="$ALPHA_SIGNAL_EMAIL"; /home/ubuntu/alpha-signal/venv/bin/python -m tools.freshness_watchdog' >> /home/ubuntu/alpha-signal-v2/output/watchdog.log 2>&1
+
+# Alpha Signal v2 — daily health report (04:00 UTC = 9:30 AM IST, ~30min after pipeline).
+# Sends HTML brief; URGENT email + ntfy push on CRITICAL only.
+0 4 * * * /bin/bash -c 'cd /home/ubuntu/alpha-signal-v2 && eval "$(grep "^export " /home/ubuntu/alpha-signal/run_pipeline.sh)"; export GMAIL_USER="$ALPHA_SIGNAL_EMAIL" GMAIL_APP_PASSWORD="$ALPHA_SIGNAL_PASSWORD" EMAIL_RECIPIENT="$ALPHA_SIGNAL_EMAIL"; /home/ubuntu/alpha-signal/venv/bin/python -m tools.health_report --email --push' >> /home/ubuntu/alpha-signal-v2/output/health.log 2>&1
+
+# Alpha Signal v2 — monthly analyst-consensus snapshot (1st of month, 04:30 UTC).
+# Writes a row per stock to analyst_consensus_snapshots, capturing yfinance's
+# aggregate at month-start. Drives pt_revision signals over 3/12-month windows.
+# Daily yfinance refresh runs as part of the main pipeline (no separate cron).
+30 4 1 * * /bin/bash -c 'cd /home/ubuntu/alpha-signal-v2 && eval "$(grep "^export " /home/ubuntu/alpha-signal/run_pipeline.sh)"; /home/ubuntu/alpha-signal/venv/bin/python -m sources.yfinance_analyst --snapshot' >> /home/ubuntu/alpha-signal-v2/output/yf_snapshot.log 2>&1
+0 5 * * * /home/ubuntu/alpha-signal-v2/backup_db.sh >> /home/ubuntu/alpha-signal-v2/output/backup.log 2>&1
+
+# Alpha Signal v2 -- monthly backtest_pit IC refresh (2nd of month, 05:15 UTC, after the
+# 1st-of-month snapshot cron). pit_ic_by_tier_v2 was 6 anchors stale, hand-refreshed only
+# (audit Eff-F5). Mirrors the watchdog/health cron idiom: cd first, venv, env import.
+15 5 2 * * /bin/bash -c 'cd /home/ubuntu/alpha-signal-v2 && eval "$(grep "^export " /home/ubuntu/alpha-signal/run_pipeline.sh)"; /home/ubuntu/alpha-signal/venv/bin/python -m tools.backtest_pit' >> /home/ubuntu/alpha-signal-v2/output/backtest_refresh.log 2>&1
+
+# Screener.in session keep-alive (added 2026-07-05): touch the session every 8h so the
+# cookie at ~/.cache/screener_cookie.json stays warm, and push to phone the moment auth
+# dies (check-cookie exits 1). Re-auth: paste fresh sessionid into the JSON (path B in
+# sources/screener_pull.py docstring).
+20 4,12,20 * * * /bin/bash -c 'cd /home/ubuntu/alpha-signal-v2 && eval "$(grep "^export " /home/ubuntu/alpha-signal/run_pipeline.sh)"; /home/ubuntu/alpha-signal/venv/bin/python -m sources.screener_pull --check-cookie || { [ -n "$NTFY_TOPIC" ] && curl -s -H "Title: Screener cookie DEAD" -H "Priority: high" -d "Re-extract sessionid from browser into ~/.cache/screener_cookie.json" "https://ntfy.sh/$NTFY_TOPIC"; }' >> /home/ubuntu/alpha-signal-v2/output/screener_keepalive.log 2>&1
+
+# Screener.in fundamentals full refresh (added 2026-07-05): 1st & 15th, 06:00 UTC (after the
+# 03:30 pipeline + 05:00 backup finish; well clear of 14:00/15:00 crons). Was manual-only →
+# silently rotted 55d (audit Data-F2). flock -n on the shared harvest lock so it can NEVER
+# double-harvest against the pipeline/watchdog. On lock contention it skips that cycle (next
+# is ~14d away, inside the 21d staleness alarm's margin). cd-first per the -m landmine rule.
+0 6 1,15 * * /bin/bash -c 'exec 200>/tmp/alpha_signal_harvest.lock && flock -n 200 || exit 0; cd /home/ubuntu/alpha-signal-v2 && eval "$(grep "^export " /home/ubuntu/alpha-signal/run_pipeline.sh)"; /home/ubuntu/alpha-signal/venv/bin/python -m sources.screener_pull --universe' >> /home/ubuntu/alpha-signal-v2/output/screener_universe_refresh.log 2>&1
