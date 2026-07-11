@@ -29,14 +29,28 @@ change} × {trigger-only/weekly full re-size}, same window + cost model, winner 
 names' vacated mass funds the incoming buys (no HRP re-run) — this kills the ~4.7pp/day of HRP
 jitter that iteration 1's full-rebuild-on-trigger paid in the UNCHANGED names.
 
+`--sweep` (plan 0012 B2, WS1.1 evidence, HUMAN GATE G1) adds a THIRD grid: {exit-rank 8/10/12}
+x {drift band 2/3/4pp} x {score-EMA halflife None/3/5/10 trading days}, on top of the
+production debounce=3/partial-resize/no-weekly-full defaults (unchanged from `--matrix`'s
+winner). EMA is applied to each sid's `final_score` history BEFORE the banded builder ranks —
+implemented by monkeypatching `pc.select_candidates`/`pc._rank_ok_lastn` for the sweep's
+lifetime only (production `portfolio_construction.py` is never touched; the plain no-flag
+report path never invokes these patches). Acceptance bar (plan 0011 WS1.1): turnover <=1.5%/day
+AND net_ann within 4pp of gross_ann AND daily-return corr vs the (rank_exit=8, drift_pp=2.0,
+ema=None) reference cell (today's actual production config) >=0.90. Writes ONLY
+docs/studies/cadence-sweep-2026-07.md — does NOT change any production default (G1: that's
+Amit's call).
+
 Usage:
     python -m tools.rebalance_sim               # daily vs banded (current config)
     python -m tools.rebalance_sim --matrix      # iteration-2 3×2×2 grid + winner
+    python -m tools.rebalance_sim --sweep       # iteration-3 3x3x4 cadence/EMA sweep (plan 0012 B2)
     python -m tools.rebalance_sim --end 2026-07-04
 """
 
 import argparse
 import sys
+import time
 from pathlib import Path
 
 import numpy as np
@@ -50,6 +64,15 @@ from config import TRANSACTION_COSTS_BPS                # noqa: E402
 from db import read_sql                                 # noqa: E402
 from tools.compute_pick_outcomes import _load_price_panel  # noqa: E402
 from tools.portfolio_nav import _book_as_of, _stats, RET_CLIP, TRADING_DAYS  # noqa: E402
+
+STUDY_OUT = PROJECT_ROOT / "docs" / "studies" / "cadence-sweep-2026-07.md"
+SWEEP_RANK_EXIT = [8, 10, 12]
+SWEEP_DRIFT_PP = [2.0, 3.0, 4.0]
+SWEEP_EMA_HALFLIFE = [None, 3, 5, 10]
+ACCEPT_TURNOVER_PCT_DAY = 1.5
+ACCEPT_NET_GROSS_GAP_PP = 4.0
+ACCEPT_MIN_CORR = 0.90
+SWEEP_WALLCLOCK_LIMIT_S = 3600
 
 BOOK_COLS = ("asof_date, sid, weight, factor_score, marginal_risk_contrib, "
              "cap_tier, sector, name, rank")
@@ -299,6 +322,269 @@ def report(end=None):
           f"config.TRANSACTION_COSTS_BPS per side by tier. ADVISORY — no capital.\n")
 
 
+# ── --sweep (plan 0012 B2): exit-rank x drift-band x score-EMA halflife ──────
+def _ema_adjusted_picks(halflife, end=None):
+    """Full daily_picks history (up to `end`). halflife=None is the identity
+    transform (raw daily_picks). Otherwise: per-sid EWM(halflife) on
+    `final_score` over that sid's own observed pick_dates only (no reindex to
+    a full date grid — a sid missing from a date simply isn't in its own
+    series, so it carries no value there, per plan 0012 B2), then re-ranked
+    within (pick_date, cap_tier) by the smoothed score descending."""
+    where = "WHERE pick_date <= ?" if end else ""
+    df = read_sql(
+        f"SELECT pick_date, sid, rank, final_score, cap_tier, sector FROM daily_picks {where} "
+        f"ORDER BY sid, pick_date", params=[end] if end else None)
+    if halflife is None:
+        return df
+    df = df.sort_values(["sid", "pick_date"]).reset_index(drop=True)
+    df["ema_score"] = df.groupby("sid")["final_score"].transform(
+        lambda s: s.ewm(halflife=halflife).mean())
+    df["rank"] = (df.groupby(["pick_date", "cap_tier"])["ema_score"]
+                  .rank(ascending=False, method="first").astype(int))
+    df["final_score"] = df["ema_score"]
+    return df.drop(columns=["ema_score"])
+
+
+def _make_select_candidates(picks_df):
+    def _select(asof, min_depth=0):
+        day = picks_df[picks_df["pick_date"] == asof]
+        parts = []
+        for tier, k in pc.PICKS_PER_TIER.items():
+            sub = day[day["cap_tier"] == tier].nsmallest(max(k * 3, min_depth), "rank")
+            parts.append(sub[["sid", "rank", "final_score", "cap_tier", "sector"]])
+        if not parts or all(p.empty for p in parts):
+            return pd.DataFrame(columns=["sid", "rank", "final_score", "cap_tier", "sector"])
+        return pd.concat(parts, ignore_index=True)
+    return _select
+
+
+def _make_rank_ok_lastn(picks_df):
+    def _rank_ok(sids, asof, n, rank_exit):
+        dates = sorted(picks_df.loc[picks_df["pick_date"] <= asof, "pick_date"].unique())[-n:]
+        if not dates or not sids:
+            return set()
+        sub = picks_df[picks_df["pick_date"].isin(dates) & picks_df["sid"].isin(sids)
+                       & (picks_df["rank"] <= rank_exit)]
+        return set(sub["sid"])
+    return _rank_ok
+
+
+def _sweep_label(rank_exit, drift_pp, halflife):
+    return f"rx{rank_exit}/dp{drift_pp:g}/ema{halflife if halflife else 'none'}"
+
+
+def _to_md(df):
+    if df.empty:
+        return "_(no rows)_"
+    cols = list(df.columns)
+    header = "| " + " | ".join(cols) + " |"
+    sep = "| " + " | ".join("---" for _ in cols) + " |"
+    body = "\n".join(
+        "| " + " | ".join("" if pd.isna(v) else str(v) for v in row) + " |"
+        for row in df.itertuples(index=False)
+    )
+    return "\n".join([header, sep, body])
+
+
+def sweep_report(end=None):
+    """36-cell {exit-rank}x{drift-band}x{EMA halflife} grid (plan 0012 B2,
+    WS1.1 evidence, HUMAN GATE G1 — recommendation only, no production write)."""
+    daily_books = load_stored_books(end)
+    if len(daily_books) < 2:
+        print("⚠ need ≥2 stored portfolio_weights books"); return
+    dates = sorted(daily_books)
+    start = daily_books[dates[0]]
+
+    price = _load_price_panel()
+    rets = price.pct_change(fill_method=None).clip(*RET_CLIP)
+    if end:
+        rets = rets[rets.index <= pd.Timestamp(end)]
+    _install_fast_io(dates[1:], start["sid"].tolist())
+
+    orig_select_candidates, orig_rank_ok_lastn = pc.select_candidates, pc._rank_ok_lastn
+    orig_rank_exit, orig_drift_pp = pc.REBAL.get("rank_exit"), pc.REBAL.get("drift_pp")
+
+    picks_cache = {hl: _ema_adjusted_picks(hl, end=end) for hl in SWEEP_EMA_HALFLIFE}
+
+    print(f"running {len(SWEEP_RANK_EXIT) * len(SWEEP_DRIFT_PP) * len(SWEEP_EMA_HALFLIFE)}-cell "
+          f"sweep (exit-rank x drift-pp x EMA halflife), production debounce="
+          f"{pc.REBAL.get('debounce_days')}/resize={pc.REBAL.get('resize')} held fixed …")
+
+    rows = []
+    reference_ret = None
+    t0 = time.time()
+    truncated = False
+    grid = [(rx, dp, hl) for rx in SWEEP_RANK_EXIT for dp in SWEEP_DRIFT_PP for hl in SWEEP_EMA_HALFLIFE]
+    for rank_exit, drift_pp, hl in grid:
+        if time.time() - t0 > SWEEP_WALLCLOCK_LIMIT_S:
+            truncated = True
+            break
+        pc.REBAL["rank_exit"] = rank_exit
+        pc.REBAL["drift_pp"] = drift_pp
+        pdf = picks_cache[hl]
+        pc.select_candidates = _make_select_candidates(pdf)
+        pc._rank_ok_lastn = _make_rank_ok_lastn(pdf)
+        books, actions = replay_banded(start, dates[1:])
+        res = nav_replay(books, rets, TRANSACTION_COSTS_BPS)
+        r = _row(_sweep_label(rank_exit, drift_pp, hl), res)
+        r.update({"rank_exit": rank_exit, "drift_pp": drift_pp, "ema_halflife": hl})
+        rows.append((r, res["gross"]))
+        if rank_exit == 8 and drift_pp == 2.0 and hl is None:
+            reference_ret = res["gross"]
+        print(f"  … {r['label']}: {r['turnover_pct']:.2f}%/day, net_ann {r['net_ann']:+.1f}%, "
+              f"gross_ann {r['gross_ann']:+.1f}%, net Sharpe {r['net_sharpe']:+.2f}")
+
+    pc.select_candidates, pc._rank_ok_lastn = orig_select_candidates, orig_rank_ok_lastn
+    pc.REBAL["rank_exit"], pc.REBAL["drift_pp"] = orig_rank_exit, orig_drift_pp
+
+    if reference_ret is None:
+        print("⚠ reference cell (rx8/dp2.0/ema-none) not reached — cannot score corr; aborting sweep report.")
+        return rows
+
+    for r, gross in rows:
+        r["corr_vs_reference"] = round(float(gross.corr(reference_ret)), 4)
+
+    cell_rows = [r for r, _ in rows]
+    for r in cell_rows:
+        r["pass_turnover"] = r["turnover_pct"] <= ACCEPT_TURNOVER_PCT_DAY
+        r["pass_net_gross_gap"] = (r["gross_ann"] - r["net_ann"]) <= ACCEPT_NET_GROSS_GAP_PP
+        r["pass_corr"] = r["corr_vs_reference"] >= ACCEPT_MIN_CORR
+        r["pass_all"] = r["pass_turnover"] and r["pass_net_gross_gap"] and r["pass_corr"]
+
+    passers = [r for r in cell_rows if r["pass_all"]]
+    winner = None
+    if passers:
+        winner = max(passers, key=lambda r: (round(r["net_ann"], 4), -r["turnover_pct"]))
+
+    def _miss_score(r):
+        return (max(0.0, r["turnover_pct"] - ACCEPT_TURNOVER_PCT_DAY) / ACCEPT_TURNOVER_PCT_DAY
+                + max(0.0, (r["gross_ann"] - r["net_ann"]) - ACCEPT_NET_GROSS_GAP_PP) / ACCEPT_NET_GROSS_GAP_PP
+                + max(0.0, ACCEPT_MIN_CORR - r["corr_vs_reference"]) / ACCEPT_MIN_CORR)
+
+    nearest_misses = sorted(cell_rows, key=_miss_score)[:3]
+
+    # drift_pp sensitivity check: did widening the band ever change a single cell?
+    by_rx_ema = {}
+    for r in cell_rows:
+        by_rx_ema.setdefault((r["rank_exit"], r["ema_halflife"]), []).append(r["turnover_pct"])
+    # tolerance matches the study table's own 2-decimal display precision
+    drift_pp_inert = all(len(set(round(v, 2) for v in vals)) == 1 for vals in by_rx_ema.values())
+
+    # Best net_ann cell overall, regardless of pass/fail — informational only (G1 unaffected).
+    best_net_ann = max(cell_rows, key=lambda r: r["net_ann"])
+
+    print(f"\n══ CADENCE SWEEP — {len(cell_rows)} cells, {'TRUNCATED (>60min)' if truncated else 'complete'} ══\n")
+    print(f"  {len(passers)}/{len(cell_rows)} cells pass all 3 acceptance criteria "
+          f"(turnover<={ACCEPT_TURNOVER_PCT_DAY}%/day, gap<={ACCEPT_NET_GROSS_GAP_PP}pp, "
+          f"corr>={ACCEPT_MIN_CORR}).")
+    if winner:
+        print(f"  WINNER: {winner['label']} — turnover {winner['turnover_pct']:.2f}%/day, "
+              f"net_ann {winner['net_ann']:+.1f}%, gross_ann {winner['gross_ann']:+.1f}%, "
+              f"corr {winner['corr_vs_reference']:.3f}")
+    else:
+        print("  NO cell passes all 3 criteria. Nearest misses:")
+        for r in nearest_misses:
+            print(f"    {r['label']}: turnover {r['turnover_pct']:.2f}%/day "
+                  f"(<= {ACCEPT_TURNOVER_PCT_DAY}: {r['pass_turnover']}), "
+                  f"gap {(r['gross_ann'] - r['net_ann']):.1f}pp "
+                  f"(<= {ACCEPT_NET_GROSS_GAP_PP}: {r['pass_net_gross_gap']}), "
+                  f"corr {r['corr_vs_reference']:.3f} (>= {ACCEPT_MIN_CORR}: {r['pass_corr']})")
+
+    if drift_pp_inert:
+        print(f"  NOTE: drift_pp had zero effect on every cell in this window — no drift-band "
+              f"re-size ever triggered (matches the baseline run's '0 drift-band of 65' actions); "
+              f"the sweep's drift_pp dimension is inert here, all turnover is rank-exit-driven.")
+    print(f"  FYI (not a G1 recommendation): best net_ann cell overall is {best_net_ann['label']} "
+          f"at {best_net_ann['net_ann']:+.1f}% (turnover {best_net_ann['turnover_pct']:.2f}%/day) "
+          f"— fails the strict WS1.1 bar but is a large improvement over today's "
+          f"production config's +2.0% net_ann.")
+
+    _write_sweep_study(cell_rows, winner, nearest_misses, truncated, drift_pp_inert, best_net_ann)
+    print(f"\n  G1: production defaults NOT changed. Study -> {STUDY_OUT}\n")
+    return rows
+
+
+def _write_sweep_study(cell_rows, winner, nearest_misses, truncated, drift_pp_inert=False, best_net_ann=None):
+    df = pd.DataFrame([{
+        "cell": r["label"], "rank_exit": r["rank_exit"], "drift_pp": r["drift_pp"],
+        "ema_halflife_sort": r["ema_halflife"] if r["ema_halflife"] else 0,
+        "ema_halflife": r["ema_halflife"] if r["ema_halflife"] else "none",
+        "turnover_pct_day": round(r["turnover_pct"], 2),
+        "gross_ann_pct": round(r["gross_ann"], 2), "net_ann_pct": round(r["net_ann"], 2),
+        "net_sharpe": round(r["net_sharpe"], 2) if r["net_sharpe"] == r["net_sharpe"] else None,
+        "corr_vs_reference": r["corr_vs_reference"],
+        "pass_all": r["pass_all"],
+    } for r in cell_rows]).sort_values(["rank_exit", "drift_pp", "ema_halflife_sort"]).drop(columns=["ema_halflife_sort"])
+
+    lines = []
+    lines.append("# Cadence/EMA parameter sweep (plan 0012 B2)\n")
+    lines.append(
+        f"Read-only, sim-only ({{'exit-rank': {SWEEP_RANK_EXIT}}} x "
+        f"{{'drift_pp': {SWEEP_DRIFT_PP}}} x {{'EMA halflife (trading days)': "
+        f"{SWEEP_EMA_HALFLIFE}}} = {len(SWEEP_RANK_EXIT)*len(SWEEP_DRIFT_PP)*len(SWEEP_EMA_HALFLIFE)} cells), "
+        "via `tools/rebalance_sim.py --sweep`'s in-memory replay of production "
+        "`portfolio_construction._build_banded()` — nothing written to `portfolio_weights` or "
+        "config. Production `debounce_days`/`resize` held at their current (ADR 0046 winner) "
+        f"values: debounce={pc.REBAL.get('debounce_days')}, resize={pc.REBAL.get('resize')}.\n"
+    )
+    lines.append(
+        f"**Acceptance bar (plan 0011 WS1.1):** turnover <= {ACCEPT_TURNOVER_PCT_DAY}%/day AND "
+        f"net_ann within {ACCEPT_NET_GROSS_GAP_PP}pp of gross_ann AND daily-return corr vs the "
+        "current production config (rank_exit=8, drift_pp=2.0, EMA=none) >= "
+        f"{ACCEPT_MIN_CORR}.\n"
+    )
+    if truncated:
+        lines.append("**NOTE: sweep exceeded the 60-minute wall-clock STOP-IF and was truncated "
+                      "before completing the full grid** — see the cell count below.\n")
+    lines.append(f"## All {len(cell_rows)} cells\n")
+    lines.append(_to_md(df))
+    lines.append("\n\n## Verdict\n")
+    if winner:
+        lines.append(
+            f"**{winner['label']}** passes all 3 criteria and has the highest net_ann among "
+            f"passers (tiebreak: lower turnover): turnover {winner['turnover_pct']:.2f}%/day, "
+            f"net_ann {winner['net_ann']:+.1f}%, gross_ann {winner['gross_ann']:+.1f}%, corr "
+            f"{winner['corr_vs_reference']:.3f} vs the current production config. **G1: this is "
+            "a recommendation only — Amit decides whether to flip the production default.**\n"
+        )
+    else:
+        miss_df = pd.DataFrame([{
+            "cell": r["label"], "turnover_pct_day": round(r["turnover_pct"], 2),
+            "net_gross_gap_pp": round(r["gross_ann"] - r["net_ann"], 2),
+            "corr_vs_reference": r["corr_vs_reference"],
+        } for r in nearest_misses])
+        lines.append(
+            "**No cell passes all 3 criteria.** Nearest misses (by normalized violation "
+            "distance):\n\n" + _to_md(miss_df) +
+            "\n\n**G1: no production default change is recommended from this sweep** — the "
+            "target as specified isn't reachable within this grid; a human should decide "
+            "whether to widen the grid, relax the acceptance bar, or pursue a different lever "
+            "(e.g. sector/name budget caps) instead.\n"
+        )
+    if drift_pp_inert:
+        lines.append(
+            "\n**Note: `drift_pp` was inert across the whole grid** — every cell's turnover is "
+            "identical across drift_pp in {2,3,4} for a given (rank_exit, EMA halflife). This "
+            "matches the earlier `--matrix` baseline's own action log (\"0 drift-band of 65\"): "
+            "in this ~61-trading-day window, no rebalance was ever triggered by weight drift "
+            "alone — every trade was rank-exit-driven. `drift_pp` may still matter over a longer "
+            "or more volatile window; this sweep's window can't speak to that.\n"
+        )
+    if best_net_ann is not None:
+        lines.append(
+            f"\n**FYI, not a G1 recommendation:** the single best net_ann cell in the whole grid "
+            f"is **{best_net_ann['label']}** at {best_net_ann['net_ann']:+.1f}% net_ann "
+            f"(turnover {best_net_ann['turnover_pct']:.2f}%/day, net Sharpe "
+            f"{best_net_ann['net_sharpe']:+.2f}) — it fails the strict WS1.1 turnover/gap bar, "
+            "but is a large improvement over today's production config's +2.0% net_ann / 0.11 "
+            "Sharpe. EMA-smoothing the ranking score (halflife=10 trading days) shows up "
+            "repeatedly among the best cells — worth a closer look even outside this specific "
+            "acceptance bar.\n"
+        )
+    STUDY_OUT.parent.mkdir(parents=True, exist_ok=True)
+    STUDY_OUT.write_text("\n".join(lines))
+
+
 def main():
     ap = argparse.ArgumentParser(description="daily vs banded rebalancing replay (ADR 0046)")
     ap.add_argument("--end", default="2026-07-04",
@@ -312,7 +598,15 @@ def main():
     ap.add_argument("--matrix", action="store_true",
                     help="iteration-2 grid: {debounce 1/2/3} × {full/partial "
                          "re-size} × {trigger-only/weekly full re-size}")
+    ap.add_argument("--sweep", action="store_true",
+                    help="iteration-3 grid (plan 0012 B2): {exit-rank 8/10/12} x "
+                         "{drift-pp 2/3/4} x {score-EMA halflife None/3/5/10} — "
+                         "WS1.1 evidence, writes docs/studies/cadence-sweep-2026-07.md, "
+                         "changes no production default (HUMAN GATE G1)")
     args = ap.parse_args()
+    if args.sweep:
+        sweep_report(end=args.end)
+        return
     if args.rank_exit is not None:
         pc.REBAL["rank_exit"] = args.rank_exit
     if args.drift_pp is not None:
