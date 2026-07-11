@@ -286,4 +286,33 @@ Priority order:
 
 ## Implementation notes
 
+**2026-07-11 — D12 deep-research dives ALL COMPLETE** (4 parallel agents; docs/research/0001-0004):
+- **0001 events (WS2.5):** no clean "in-house data + strong story" intersection. BUILD = index
+  rebalance + IPO/lock-up expiry (both need small scrapes, cleanest PIT dates, orthogonal).
+  Circuit-hit ≈ the queued MAX factor (don't double-build). SCORES = DO NOT BUILD (no evidence).
+  F&O-ban = park. `surveillance_flags` is forward-accumulate/left-censored — can't backtest now.
+- **0002 compounder (WS3.0):** thesis DEFENSIBLE-but-UNPROVEN — quality as a left-tail GATE not a
+  cross-sectional bet reconciles our negative quality-factor sign. Entry rule = PEG≤1 AND EY≥7%
+  AND reverse-DCF growth≤ROIC×reinvest. ABSORB the multibagger sleeve. **Validation BLOCKED by
+  WS2.8** (cohort study needs the survivorship fix).
+- **0003 special-situations (WS4.0):** BUILD = demergers (India-native +2.64% parent CAAR, dates
+  in-house, parent survives → NO survivorship hole) + buyback tender arb (structural retail edge,
+  but capacity-capped ~₹2L/name → return-enhancer not book-mover). SKIP delistings/rights(wrong
+  sign)/holdco(→Engine 2). Needs `tools/event_study.py` + a PDF/LoF parse layer + sid-mapping fix.
+- **0004 regime (WS7.2):** honest prior LEANS FAIL the D9 bar (~30-40% pass) — whipsaw × STCG-20%
+  on V-recoveries + thin bear sample. Zero-parameter ensemble (Nifty vs 12m-SMA + VIX + smallcap
+  breadth); extend Nifty to 1999 for bear regimes. Build the sim, let the number decide — a clean
+  cited negative closes "should we time the market?".
+
+**Critical-path findings (fold into sequencing):**
+1. **WS2.8 survivorship fix is now a HARD BLOCKER for Engine 2** (confirmed by both 0002 cohort
+   validation and 0003 name-removing-event bias). Elevate from "schedule early" to "critical path."
+2. **`tools/event_study.py` is the highest-leverage single build** — generalizing
+   `announcement_car._car_one` unlocks demergers + buyback + index-rebalance + lock-up ALL at once
+   (four top candidates share the event-time-CAR instrument). Build once, add each event thin.
+3. **sid-mapping ~53% halves usable event n** — a shared infra fix that multiplies the whole
+   event/special-situation program.
+4. **Tax (B1) is load-bearing across the roadmap** — makes the compounder engine attractive
+   (LTCG), most likely sinks the regime overlay (STCG whipsaw), shapes special-situation exits.
+
 _(append as work proceeds)_
