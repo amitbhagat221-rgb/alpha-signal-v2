@@ -117,6 +117,8 @@ SIGNAL_COLUMN_MAP = {
     "low_vol_252d":               (None, "low_vol_252d"),
     "st_reversal_21d":            (None, "st_reversal_21d"),
     "asset_growth_yoy":           (None, "asset_growth_yoy"),
+    # Plan 0012 C3 — momentum retest hypothesis (WS2.6, monthly cadence)
+    "residual_momentum_12_1":     (None, "residual_momentum_12_1"),
     # §3.2.4 — earnings-call NLP factors (off nlp_scores, look-ahead-safe available_date)
     "earnings_call_tone_qoq":     (None, "earnings_call_tone_qoq"),
     "forward_looking_intensity":  (None, "forward_looking_intensity"),

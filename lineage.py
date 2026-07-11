@@ -917,6 +917,18 @@ FACTOR_LINEAGE = {
         "sector_exclusions": ["financial_sectors"],
     },
 
+    # ═══════════════════════════ Plan 0012 C3/C4 — momentum/lottery retest (WS2.6/WS2.7) ═══════════════════════════
+    "residual_momentum_12_1": {
+        "status": "candidate", "module": "signals/residual_momentum.py",
+        "reads": [{"table": "stock_prices", "cols": ["close"], "key": ["sid", "date"],
+                   "select": "window", "filter": "trading days [D-252, D-21] (adj), min 150 paired obs vs NIFTY",
+                   "contribution": "12m_momentum_net_of_nifty_beta"},
+                  {"table": "macro_history", "cols": ["value"], "key": ["date"],
+                   "select": "window", "filter": "indicator_id='nifty50', same window",
+                   "contribution": "market_beta_regressor"}],
+        "sector_exclusions": [],
+    },
+
     # ════════════════════════════ Earnings-call NLP (§3.2.4) ════════════════════════════
     # Latest-call values off the nlp_scores enriched layer, look-ahead-safe on available_date.
     "earnings_call_tone_qoq": {

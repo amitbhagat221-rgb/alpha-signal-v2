@@ -88,3 +88,35 @@ specifically in SMALL (higher clean t, lower redundancy), but it's still a
 BY-FDR failure, not a robust factor — "better than a WEAK factor" is not the
 same as "KEEP-grade." A human should weigh the swap against portfolio-construction
 tidiness, not treat this as a slam-dunk promotion.
+
+## C3 — `residual_momentum_12_1` (WS2.6, hypothesis 1 of 2)
+
+Full unit shipped: [signals/residual_momentum.py](../../signals/residual_momentum.py)
++ `pit_residual_momentum_12_1` in `tools/reconstruct_pit.py` + registered in
+`db.BACKTEST_SIGNALS`/`FACTOR_LIBRARY`/`lineage.py` + `backtest_pit.py`
+`SIGNAL_COLUMN_MAP`. **NOT wired** (`SIGNAL_WEIGHTS` untouched). 12-1 momentum
+(skip most recent ~21 trading days), residualized against NIFTY-50 market beta
+(OLS over the same window, min 150 paired daily-return obs) — the designed
+retest of plain momentum (Jegadeesh-Titman 1993 window; Blitz-Huij-Martens
+2011 residualization).
+
+Backtest: 66 monthly anchors, 2020-02→2026-07 (`--months 80` full history).
+
+| cap_tier | n_periods | mean_ic | t_stat | verdict |
+| --- | --- | --- | --- | --- |
+| LARGE | 66 | 0.0293 | 1.33 | DROP |
+| MID | 66 | 0.0210 | 1.11 | DROP |
+| SMALL | 66 | 0.0319 | 2.84 | KEEP |
+
+Multiple-testing: SMALL p_BY = 0.8832 (fails BY-FDR outright).
+
+**Honest read:** SMALL clears the naive |t|≥2.5 KEEP bar with the correct
+hypothesised sign (positive — momentum persists after removing market beta),
+and all three tiers show the same POSITIVE sign (LARGE/MID just weaker) —
+internally consistent, not a sign flip. But p_BY=0.88 means this does not
+survive multiple-testing correction; per ADR 0043, |t|≥2.5 is necessary, not
+sufficient. **Promotion-review candidate on sign/theory grounds, not on
+robustness** — a human should weigh the clean theoretical story (this is
+exactly the retest WS2.6 was designed to run, and it beat plain momentum)
+against the BY-FDR failure before considering it further. Stays in
+FACTOR_LIBRARY per RULE 3.

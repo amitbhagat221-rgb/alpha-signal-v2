@@ -221,6 +221,8 @@ PIT_COLUMNS = [
     "low_vol_252d",
     "st_reversal_21d",
     "asset_growth_yoy",
+    # Plan 0012 C3 — momentum retest hypothesis (WS2.6)
+    "residual_momentum_12_1",
 ]
 
 
@@ -364,6 +366,8 @@ VALIDATION_RANGES = {
     "low_vol_252d":          (0, 5, True),       # annualized log-return vol
     "st_reversal_21d":       (-1, 5, True),      # 21d total return (fwd_return band)
     "asset_growth_yoy":      (-100, 1000, True),  # percent (revenue_growth_yoy band)
+    # Plan 0012 C3 — momentum retest hypothesis
+    "residual_momentum_12_1": (-5, 5, True),      # sum of ~230 daily log returns net of NIFTY beta
 }
 
 
@@ -1528,6 +1532,23 @@ def pit_st_reversal_21d(px_pit):
     return compute_st_reversal_21d(prices=px_pit)
 
 
+def pit_residual_momentum_12_1(px_pit, macro_hist, eval_date):
+    """12-1 momentum residualized against NIFTY-50 beta, PIT — plan 0012 C3 (WS2.6).
+
+    px_pit is prices ≤ eval with PIT-strict adj_close applied; macro_hist is the
+    full macro_history frame (filtered to indicator nifty50, date ≤ eval, inside
+    the module). Returns DataFrame[sid, residual_momentum_12_1].
+    """
+    from signals.residual_momentum import compute_residual_momentum_12_1, NIFTY_ID
+    eval_iso = eval_date.isoformat() if hasattr(eval_date, "isoformat") else str(eval_date)
+    nifty = macro_hist[
+        (macro_hist["indicator_id"] == NIFTY_ID)
+        & (macro_hist["value"] > 0)
+        & (macro_hist["date"] <= eval_iso)
+    ][["date", "value"]].sort_values("date") if macro_hist is not None and not macro_hist.empty else None
+    return compute_residual_momentum_12_1(prices=px_pit, nifty=nifty, as_of_date=eval_iso)
+
+
 def pit_asset_growth_yoy(stocks, bs_pit):
     """Asset growth YoY % (CMA investment factor), PIT — audit Factor-F3 #3.
 
@@ -2669,6 +2690,11 @@ def reconstruct_one_date(eval_date, raw, signals_to_run):
     if "asset_growth" in signals_to_run:
         base = base.merge(pit_asset_growth_yoy(raw["stocks"], bs_pit), on="sid", how="left")
 
+    # ── Plan 0012 C3 — momentum retest hypothesis (WS2.6) ──
+    if "residual_momentum_12_1" in signals_to_run:
+        base = base.merge(
+            pit_residual_momentum_12_1(px_pit, raw["macro_hist"], eval_date), on="sid", how="left")
+
     # ── §3.2.4 — earnings-call NLP factors (off nlp_scores, look-ahead-safe) ──
     if "nlp" in signals_to_run:
         base = base.merge(
@@ -3155,7 +3181,8 @@ def main():
                                  "smart_money",
                                  "financial_signal",
                                  "financial_quality", "financial_recovery",
-                                 "industry_id", "macro_betas"],
+                                 "industry_id", "macro_betas",
+                                 "residual_momentum_12_1"],
                         help="Compute only this signal (repeatable)")
     parser.add_argument("--date", action="append", default=None,
                         help="Explicit eval date (YYYY-MM-DD, repeatable). "
@@ -3222,6 +3249,8 @@ def main():
         "low_vol",
         "st_reversal",
         "asset_growth",
+        # Plan 0012 C3 — momentum retest hypothesis (WS2.6)
+        "residual_momentum_12_1",
         # Plan 0002 §3.2.4 — earnings-call NLP factors (off nlp_scores)
         "nlp",
         # Plan 0002 §3.2.6 — industry identity (control) + §3.2.7 macro betas

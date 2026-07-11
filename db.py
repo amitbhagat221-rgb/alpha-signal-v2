@@ -196,6 +196,8 @@ _COLUMN_MIGRATIONS = [
     ("daily_snapshots_pit", "low_vol_252d",               "REAL"),
     ("daily_snapshots_pit", "st_reversal_21d",            "REAL"),
     ("daily_snapshots_pit", "asset_growth_yoy",           "REAL"),
+    # 2026-07-11: plan 0012 C3 — momentum retest hypothesis (WS2.6).
+    ("daily_snapshots_pit", "residual_momentum_12_1",     "REAL"),
     # 2026-06-04: multibagger Phase 2b+ — small-cap EMA regime gate. The screen
     # now selects regime-conditioned pillar weights (quality-heavy ↔ DOWNTREND,
     # growth-heavy ↔ UPTREND, balanced ↔ NEUTRAL), cohort-proven across 3 windows.
@@ -3267,6 +3269,32 @@ BACKTEST_SIGNALS = [
                          "negative sign on ALL tiers (LARGE −0.87 / MID −0.92 / SMALL −0.70), "
                          "insignificant. NOT promotion-eligible; benched (FACTOR_LIBRARY).",
     },
+    {
+        "signal": "residual_momentum_12_1",
+        "label": "Residual Momentum (12-1, NIFTY-beta-net)",
+        "group": "Momentum",
+        "description": "12-1 momentum (skip most recent ~21 trading days) residualized "
+                       "against NIFTY-50 market beta over the same window (OLS, min 150 "
+                       "paired daily-return obs). Jegadeesh-Titman 1993 / Blitz-Huij-Martens "
+                       "2011 — removing the market-beta component strengthens raw momentum. "
+                       "Designed retest of plain momentum (mom_6m_adj/mom_12m_adj), which "
+                       "failed the clean bar at SMALL t=1.34. Expected IC POSITIVE.",
+        "source_tables": ["stock_prices", "macro_history"],
+        "source_columns": ["stock_prices.close (adj, 252-21d window)", "macro_history.nifty50"],
+        "filing_lag": "0d (price)",
+        "pit_column_v1": None,
+        "pit_column_v2": "residual_momentum_12_1",
+        "v1_verdict_summary": "(new — plan 0012 C3, WS2.6 momentum retest hypothesis 1 of 2)",
+        "status": "READY",
+        "status_reason": "Shipped + backtested 2026-07-11 (plan 0012 C3; 66 monthly anchors "
+                         "2020-02→2026-07). SMALL t=+2.84 KEEP (IC +0.0319), correct hypothesised "
+                         "sign; LARGE +1.33 / MID +1.11 both DROP (also correct sign, just weak). "
+                         "Multiple-testing: SMALL p_BY=0.8832 — fails BY-FDR outright (naive KEEP "
+                         "does not survive correction; likely a false discovery from the ~280-"
+                         "hypothesis factor zoo, though sign is right). NOT promotion-eligible on "
+                         "this evidence; benched (FACTOR_LIBRARY). Report: "
+                         "docs/studies/new-factors-2026-07.md.",
+    },
 ]
 
 
@@ -3310,6 +3338,8 @@ FACTOR_LIBRARY = [
     "low_vol_252d",         # LARGE t=+1.96 WEAK but CONTRARIAN (high vol won, 2021-26 bull sample) — parked, not promotion-eligible
     "st_reversal_21d",      # DROP all; SMALL −1.50 (−1.93 on timely-anchor slice), expected reversal sign, sub-bar — weekly-cadence retest is the natural next test
     "asset_growth_yoy",     # MID +2.18 WEAK is a late-anchored-fwd_return ARTIFACT (timely-only −0.92); clean sign = CMA negative all tiers, insignificant
+    # Plan 0012 C3 (2026-07-11) — momentum retest hypothesis (WS2.6).
+    "residual_momentum_12_1",  # SMALL t=+2.84 KEEP, correct sign, but p_BY=0.8832 fails BY-FDR — not promotion-eligible
     "dio_change_yoy",       # best |t|=0.97 MID
     "sloan_accruals_full",  # best |t|=1.43 SMALL
     "sga_to_revenue_change",  # best |t|=0.69 MID
