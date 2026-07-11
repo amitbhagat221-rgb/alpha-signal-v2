@@ -74,19 +74,25 @@ gross alpha. Nothing else in this plan matters until this is fixed.
   **Test:** replay tier-budget variants through `rebalance_sim`/`portfolio_nav`; adopt the one
   maximizing net return at ≤1.2× current book vol. File an ADR (supersedes HRP tier output).
   PREREQ: decision only — evidence already in the audit (Portfolio-F4).
-- [ ] **1.3 Tax model** — add STCG(20%)/LTCG(12.5%)/STT to the cost layer, per-sleeve holding-
+- [x] **1.3 Tax model** — add STCG(20%)/LTCG(12.5%)/STT to the cost layer, per-sleeve holding-
   period aware; surface in `expected_return.py` and `rebalance_sim`. India-reality: monthly
   churn pays ~8pp more tax on gains than 1yr+ holds — this differential is a standing argument
   for Engines 2/3. **Test:** expected_return decomposition gains a tax line; sim reports
   net-net. PREREQ: none (rates are statutory).
+  **Done 2026-07-11 (plan 0012 B1)** — `expected_return.py` tax line shipped. Finding: neither
+  operating mode reaches LTCG under current turnover assumptions — see implementation notes.
+  `rebalance_sim` net-net (with tax) NOT added — out of B1's scope as specified.
 - [ ] **1.4 Conviction sizing within tier** — replace flat 5-per-tier with score-proportional
   weights (caps: name ≤12%, echoing existing caps).
   PREREQ: 🔬 **mini-study first** — does rank IC localize in the top ranks? (decile-1 vs
   decile-2 spread from `pick_outcomes`/PIT panel). If no localization, skip — flat weights are
   honest.
-- [ ] **1.5 Prediction discipline** — monthly cron: `python -m tools.expected_return` (logs to
+- [x] **1.5 Prediction discipline** — monthly cron: `python -m tools.expected_return` (logs to
   `data/expected_return_predictions.jsonl`); quarterly: score past predictions vs realized
   `portfolio_nav`. **Done when:** first scored quarter exists.
+  **Cron shipped 2026-07-11 (plan 0012 B3)** — first prediction logged by hand-run to verify.
+  "First scored quarter" test criterion still pending (needs ~3 months of cron history, next
+  natural check ~2026-10).
 
 ## WS2 — Factor book: widen the validated base (Q3–Q4 2026) → Alpha 55→64
 
@@ -111,8 +117,12 @@ gross alpha. Nothing else in this plan matters until this is fixed.
   PREREQ: 🔬 **one deep-research pass covering all six** — data recipes (free endpoints,
   history depth, PIT-safety of each date) + what literature exists on each in India. Output:
   build-candidate cards; only carded ones get built (guardrail 3).
-- [ ] **2.6 Residual momentum 12-1** + **2.7 MAX/lottery-avoidance** — cards already written in
+- [x] **2.6 Residual momentum 12-1** + **2.7 MAX/lottery-avoidance** — cards already written in
   the 2026-07-05 report. PREREQ: none (prices in-house).
+  **Done 2026-07-11 (plan 0012 C3/C4)** — both built, backtested (66/77 monthly anchors), NOT
+  wired. `max_lottery_21d` SMALL t=-3.47 is the best result of the plan 0012 batch (promotion-
+  review candidate); `residual_momentum_12_1` SMALL t=+2.84 correct sign, less robust. See
+  implementation notes + docs/studies/new-factors-2026-07.md.
 - [ ] **2.8 Survivorship fix in the backtest panel** (audit Data-F1) — intersect
   `historical_universe` into `reconstruct_pit` eval frames; report per-factor dead-name
   exposure. **This gates trust in every other WS2 number** — schedule early.
@@ -353,5 +363,51 @@ tasks, 0 BLOCKED:**
    event/special-situation program.
 4. **Tax (B1) is load-bearing across the roadmap** — makes the compounder engine attractive
    (LTCG), most likely sinks the regime overlay (STCG whipsaw), shapes special-situation exits.
+
+**2026-07-11 — Plan 0012 (Sonnet tranche) executed, 10/10 tasks, 0 BLOCKED:**
+- **A1 rank-IC localization** — LOCALIZES in LARGE (pick_outcomes lens, bucket 1-5 vs 6-10
+  t=1.78 ≥1.5); MID shows the OPPOSITE (t=-3.40 — bucket 1-5 underperforms 6-10, not just
+  flat); SMALL flat. Per the plan's own verdict rule ("localizes iff t≥1.5 in ≥1 tier") this
+  is evidence FOR prototyping WS1.4, not CLOSED-NO — but MID's negative result argues any
+  conviction-sizing design should be tier-specific, not applied uniformly.
+  [study](../studies/rank-localization-2026-07.md)
+- **A2 registry limbo** — the audit's "38 limbo signals" figure is stale; only **2** remain
+  today (`mom_12m_adj`/`mom_6m_adj`, both clean-panel DROP, orphaned when ADR 0049 dropped
+  momentum from `SIGNAL_WEIGHTS` without a `FACTOR_LIBRARY` add). Recommend both →
+  `FACTOR_LIBRARY`. [study](../studies/registry-limbo-2026-07.md)
+- **A3 survivorship exposure — WORSE than WS2.8 assumed.** Dead-name count by symbol (sid
+  doesn't exist for delisted names — verified 0 dead sids vs 1,381 dead symbols) = 1,381. But
+  `historical_universe` itself has only **9 sparse (~annual) snapshot dates total, 2018-2026**
+  — even the "true universe" reconstruction lacks the temporal density to backtest delisted
+  names at the live panel's monthly/20d-forward cadence. **This changes WS2.8's shape**:
+  fixing it needs a full daily-price backfill project for ~1,381 delisted symbols, not just
+  pointing `reconstruct_pit.py` at `historical_universe` as the plan text assumes.
+  [study](../studies/survivorship-exposure-2026-07.md)
+- **B2 cadence sweep** — no cell in the 36-cell {exit-rank 8/10/12}x{drift-pp 2/3/4}x{EMA
+  halflife None/3/5/10} grid clears the WS1.1 bar (≤1.5%/day, gap≤4pp, corr≥0.90 vs today's
+  config). Best miss: rank_exit=12/EMA halflife=10 at ~4.5%/day (3x the target) — but net_ann
+  +19-21% vs production's +2.0% (net Sharpe ~1.0-1.1 vs 0.11). EMA-smoothing the ranking score
+  materially improves economics even where it misses the strict bar — worth a follow-up sweep
+  with a wider/EMA-focused grid. [study](../studies/cadence-sweep-2026-07.md)
+- **C1/C2 Scope-B wiring** — `eps_revision_yoy`/`value_composite` producers wired into
+  `_load_signals` as computed/zero-weight (the infra half of WS2.1 is done). `value_composite`
+  swap-vs-stack evidence delivered: SMALL ρ(composite, book_to_price)=0.71, clean t=3.32 vs
+  b2p's 1.88. Neither factor's evidence is BY-FDR robust (p_BY 1.00 / 0.36) — the weight-
+  wiring decision (WS2.1's actual point) remains open. [report](../studies/new-factors-2026-07.md)
+- **C3/C4 momentum/lottery retest** — both built + backtested (66/77 monthly anchors,
+  2020-02→2026-07). `max_lottery_21d` SMALL t=-3.47 (p_BY=0.22, correct NEGATIVE sign) is the
+  strongest result and best promotion-review candidate of the WHOLE plan 0012 batch;
+  `residual_momentum_12_1` SMALL t=+2.84 (p_BY=0.88, correct sign, all 3 tiers) is much
+  further from robust. Neither wired; both in `FACTOR_LIBRARY`.
+- **B1 tax model** — STCG/LTCG line added to `expected_return.py`. **Finding that revises
+  point 4 above:** under the CURRENTLY-SHIPPED turnover assumptions, NEITHER operating mode
+  (as-operated OR monthly-cadence) reaches the 1yr LTCG threshold — both classify STCG today.
+  This holds even at WS1.1's own aspirational ≤1.5%/day target (~0.26yr implied hold). The
+  "tax favors slower cadence" argument is directionally correct (STCG 20% > LTCG 12.5%, same
+  gross base) but the FACTOR BOOK itself doesn't currently reach the LTCG regime at any
+  turnover level explored here — the LTCG argument applies cleanly to the compounder engine
+  (WS3, genuinely multi-year holds), not yet to WS1/WS2's active factor book.
+- **B3 cron** — monthly `expected_return` snapshot installed (1st of month 05:00 UTC);
+  first log line verified by hand (exit 0, JSONL 1→2 lines).
 
 _(append as work proceeds)_
