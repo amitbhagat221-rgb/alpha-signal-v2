@@ -180,6 +180,15 @@ def _load_signals():
     from signals.announcement_car import compute_announcement_car
     announcement_car = compute_announcement_car()
 
+    # eps_revision_yoy (plan 0012 C1) — YoY change in the latest forecast_history
+    # metric='eps' snapshot vs ~12mo prior (real forward analyst EPS estimates;
+    # metric='price' is contaminated look-ahead, ADR 0045, never used here).
+    # Computed inline (no table), like announcement_car. Validated SMALL t=2.78,
+    # n=38 on the clean panel, but NOT in config.SIGNAL_WEIGHTS — computed, ZERO
+    # weight, pending human promotion review (plan 0012 C1).
+    from signals.eps_revision import compute_eps_revision_yoy
+    eps_revision_yoy = compute_eps_revision_yoy()
+
     # Merge everything onto stocks
     df = stocks.copy()
     df = df.merge(piotroski, on="sid", how="left")
@@ -197,6 +206,7 @@ def _load_signals():
     df["governance_resignation"] = df["governance_resignation"].fillna(0.0)
     df = df.merge(iv_skew, on="sid", how="left")
     df = df.merge(announcement_car, on="sid", how="left")
+    df = df.merge(eps_revision_yoy, on="sid", how="left")
     df = df.merge(price_counts, on="sid", how="left")
     df["price_rows"] = df["price_rows"].fillna(0).astype(int)
 
@@ -289,6 +299,8 @@ def score_universe(df, weights: dict = None):
         # Wired 2026-07-05 (ADR 0050) — announcement-window CAR, PEAD-via-CAR earnings-surprise
         # proxy. LARGE (t=+2.23, its strongest clean factor) + SMALL (t=+3.74, orthogonal). +sign.
         "announcement_car":       "announcement_car",         # t=+2.23 LARGE / +3.74 SMALL
+        # computed, ZERO weight — pending human promotion review (plan 0012 C1)
+        "eps_revision_yoy":       "eps_revision_yoy",         # clean SMALL t=2.78, n=38
     }
 
     # Percentile-rank all signals within tier (higher = better for all)
