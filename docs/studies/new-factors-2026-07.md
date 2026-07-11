@@ -120,3 +120,52 @@ robustness** — a human should weigh the clean theoretical story (this is
 exactly the retest WS2.6 was designed to run, and it beat plain momentum)
 against the BY-FDR failure before considering it further. Stays in
 FACTOR_LIBRARY per RULE 3.
+
+## C4 — `max_lottery_21d` (WS2.7, hypothesis 2 of 2)
+
+Full unit shipped: [signals/max_lottery.py](../../signals/max_lottery.py) +
+`pit_max_lottery_21d` in `tools/reconstruct_pit.py` + registered in
+`db.BACKTEST_SIGNALS`/`FACTOR_LIBRARY`/`lineage.py` + `backtest_pit.py`
+`SIGNAL_COLUMN_MAP`. **NOT wired**. Bali-Cakici-Whitelaw 2011 MAX/lottery
+factor: mean of the 5 highest daily simple returns over the trailing 21
+trading days — retail lottery preference overprices extreme-daily-return
+names, depressing forward returns.
+
+Backtest: 77 monthly anchors, 2020-02→2026-07 (`--months 80` full history).
+
+| cap_tier | n_periods | mean_ic | t_stat | verdict |
+| --- | --- | --- | --- | --- |
+| LARGE | 77 | 0.0387 | 1.84 | WEAK |
+| MID | 77 | 0.0111 | 0.70 | DROP |
+| SMALL | 77 | -0.0324 | -3.47 | KEEP |
+
+Multiple-testing: SMALL p_BY = 0.2193 — fails the 0.05 BY-FDR bar, but this is
+the closest-to-surviving result among all four plan 0012 factors (C1 p_BY=1.0,
+C2 p_BY=0.36, C3 p_BY=0.88, C4 p_BY=0.22).
+
+**Honest read:** SMALL clears the naive KEEP bar with the correct hypothesised
+NEGATIVE sign (t=-3.47, the strongest clean t-stat of the whole batch) and
+77 monthly anchors of statistical power (the best-powered of the four).
+LARGE is WEAK but CONTRARIAN (+1.84, opposite sign from the lottery-penalty
+hypothesis) — flag this plainly, don't average over it. Per plan text: this
+factor is naturally exclusion/penalty-shaped for long-only use (like
+`governance_resignation`'s negative-weight treatment) — a ranking tilt isn't
+the natural wiring shape even if promoted; a screen/penalty on high-MAX SMALL
+names would be. **Promotion-review candidate** — the best-evidenced of the
+four plan 0012 factors, though still short of BY-FDR robustness. Stays in
+FACTOR_LIBRARY per RULE 3; a human decides whether/how to wire it.
+
+## Summary across C1-C4
+
+| factor | best tier | t | n | p_BY | sign vs hypothesis |
+| --- | --- | --- | --- | --- | --- |
+| eps_revision_yoy | SMALL | +2.78 | 38 | 1.0000 | correct |
+| value_composite | SMALL | +3.32 | 43 | 0.3612 | correct |
+| residual_momentum_12_1 | SMALL | +2.84 | 66 | 0.8832 | correct (all 3 tiers) |
+| max_lottery_21d | SMALL | -3.47 | 77 | 0.2193 | correct (LARGE contrarian) |
+
+None survive BY-FDR at the 0.05 bar. Ranked by robustness: max_lottery_21d >
+value_composite > residual_momentum_12_1 > eps_revision_yoy. All four are
+computed/registered/backtested (or, for C1/C2, computed+wired-zero-weight)
+and none touch `SIGNAL_WEIGHTS` — every promotion call is explicitly a human
+decision per ADR 0043 and plan 0012 RULE 3.

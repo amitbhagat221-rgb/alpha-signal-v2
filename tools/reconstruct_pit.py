@@ -223,6 +223,8 @@ PIT_COLUMNS = [
     "asset_growth_yoy",
     # Plan 0012 C3 — momentum retest hypothesis (WS2.6)
     "residual_momentum_12_1",
+    # Plan 0012 C4 — lottery retest hypothesis (WS2.7)
+    "max_lottery_21d",
 ]
 
 
@@ -368,6 +370,8 @@ VALIDATION_RANGES = {
     "asset_growth_yoy":      (-100, 1000, True),  # percent (revenue_growth_yoy band)
     # Plan 0012 C3 — momentum retest hypothesis
     "residual_momentum_12_1": (-5, 5, True),      # sum of ~230 daily log returns net of NIFTY beta
+    # Plan 0012 C4 — lottery retest hypothesis
+    "max_lottery_21d":        (-1, 2, True),      # mean of top-5 daily simple returns, 21d window
 }
 
 
@@ -1549,6 +1553,14 @@ def pit_residual_momentum_12_1(px_pit, macro_hist, eval_date):
     return compute_residual_momentum_12_1(prices=px_pit, nifty=nifty, as_of_date=eval_iso)
 
 
+def pit_max_lottery_21d(px_pit):
+    """MAX lottery factor (mean of top-5 daily returns, trailing 21d), PIT —
+    plan 0012 C4 (WS2.7). Returns DataFrame[sid, max_lottery_21d].
+    """
+    from signals.max_lottery import compute_max_lottery_21d
+    return compute_max_lottery_21d(prices=px_pit)
+
+
 def pit_asset_growth_yoy(stocks, bs_pit):
     """Asset growth YoY % (CMA investment factor), PIT — audit Factor-F3 #3.
 
@@ -2695,6 +2707,10 @@ def reconstruct_one_date(eval_date, raw, signals_to_run):
         base = base.merge(
             pit_residual_momentum_12_1(px_pit, raw["macro_hist"], eval_date), on="sid", how="left")
 
+    # ── Plan 0012 C4 — lottery retest hypothesis (WS2.7) ──
+    if "max_lottery_21d" in signals_to_run:
+        base = base.merge(pit_max_lottery_21d(px_pit), on="sid", how="left")
+
     # ── §3.2.4 — earnings-call NLP factors (off nlp_scores, look-ahead-safe) ──
     if "nlp" in signals_to_run:
         base = base.merge(
@@ -3182,7 +3198,7 @@ def main():
                                  "financial_signal",
                                  "financial_quality", "financial_recovery",
                                  "industry_id", "macro_betas",
-                                 "residual_momentum_12_1"],
+                                 "residual_momentum_12_1", "max_lottery_21d"],
                         help="Compute only this signal (repeatable)")
     parser.add_argument("--date", action="append", default=None,
                         help="Explicit eval date (YYYY-MM-DD, repeatable). "
@@ -3251,6 +3267,8 @@ def main():
         "asset_growth",
         # Plan 0012 C3 — momentum retest hypothesis (WS2.6)
         "residual_momentum_12_1",
+        # Plan 0012 C4 — lottery retest hypothesis (WS2.7)
+        "max_lottery_21d",
         # Plan 0002 §3.2.4 — earnings-call NLP factors (off nlp_scores)
         "nlp",
         # Plan 0002 §3.2.6 — industry identity (control) + §3.2.7 macro betas

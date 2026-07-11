@@ -928,6 +928,13 @@ FACTOR_LINEAGE = {
                    "contribution": "market_beta_regressor"}],
         "sector_exclusions": [],
     },
+    "max_lottery_21d": {
+        "status": "candidate", "module": "signals/max_lottery.py",
+        "reads": [{"table": "stock_prices", "cols": ["close"], "key": ["sid", "date"],
+                   "select": "window", "filter": "last 21 trading days (adj), min 15 obs",
+                   "contribution": "mean_top5_daily_return"}],
+        "sector_exclusions": [],
+    },
 
     # ════════════════════════════ Earnings-call NLP (§3.2.4) ════════════════════════════
     # Latest-call values off the nlp_scores enriched layer, look-ahead-safe on available_date.

@@ -198,6 +198,8 @@ _COLUMN_MIGRATIONS = [
     ("daily_snapshots_pit", "asset_growth_yoy",           "REAL"),
     # 2026-07-11: plan 0012 C3 — momentum retest hypothesis (WS2.6).
     ("daily_snapshots_pit", "residual_momentum_12_1",     "REAL"),
+    # 2026-07-11: plan 0012 C4 — lottery retest hypothesis (WS2.7).
+    ("daily_snapshots_pit", "max_lottery_21d",            "REAL"),
     # 2026-06-04: multibagger Phase 2b+ — small-cap EMA regime gate. The screen
     # now selects regime-conditioned pillar weights (quality-heavy ↔ DOWNTREND,
     # growth-heavy ↔ UPTREND, balanced ↔ NEUTRAL), cohort-proven across 3 windows.
@@ -3295,6 +3297,32 @@ BACKTEST_SIGNALS = [
                          "this evidence; benched (FACTOR_LIBRARY). Report: "
                          "docs/studies/new-factors-2026-07.md.",
     },
+    {
+        "signal": "max_lottery_21d",
+        "label": "MAX Lottery Factor (21d)",
+        "group": "Momentum",
+        "description": "Mean of the 5 highest daily simple returns over the trailing 21 "
+                       "trading days. Bali-Cakici-Whitelaw 2011: retail lottery preference "
+                       "overprices extreme-daily-return names — expected IC NEGATIVE. "
+                       "Long-only use is naturally exclusion/penalty-shaped (can't short "
+                       "the names to avoid), like governance_resignation.",
+        "source_tables": ["stock_prices"],
+        "source_columns": ["stock_prices.close (adj, rolling 21d, top-5 daily returns)"],
+        "filing_lag": "0d (price)",
+        "pit_column_v1": None,
+        "pit_column_v2": "max_lottery_21d",
+        "v1_verdict_summary": "(new — plan 0012 C4, WS2.7 lottery retest hypothesis 2 of 2)",
+        "status": "READY",
+        "status_reason": "Shipped + backtested 2026-07-11 (plan 0012 C4; 77 monthly anchors "
+                         "2020-02→2026-07). SMALL t=-3.47 KEEP (IC -0.0324), correct hypothesised "
+                         "NEGATIVE sign — the strongest clean result of the plan 0012 factor batch. "
+                         "LARGE t=+1.84 WEAK but CONTRARIAN (positive — opposite of the lottery-"
+                         "penalty hypothesis); MID +0.70 DROP. Multiple-testing: SMALL p_BY=0.2193 "
+                         "— fails the 0.05 BY-FDR bar but far less badly than the plan's other new "
+                         "factors (closest to survival of the batch). NOT promotion-eligible on "
+                         "this evidence; benched (FACTOR_LIBRARY). Report: "
+                         "docs/studies/new-factors-2026-07.md.",
+    },
 ]
 
 
@@ -3340,6 +3368,8 @@ FACTOR_LIBRARY = [
     "asset_growth_yoy",     # MID +2.18 WEAK is a late-anchored-fwd_return ARTIFACT (timely-only −0.92); clean sign = CMA negative all tiers, insignificant
     # Plan 0012 C3 (2026-07-11) — momentum retest hypothesis (WS2.6).
     "residual_momentum_12_1",  # SMALL t=+2.84 KEEP, correct sign, but p_BY=0.8832 fails BY-FDR — not promotion-eligible
+    # Plan 0012 C4 (2026-07-11) — lottery retest hypothesis (WS2.7).
+    "max_lottery_21d",      # SMALL t=-3.47 KEEP, correct NEGATIVE sign, p_BY=0.2193 (closest-to-surviving of the batch); LARGE +1.84 WEAK but contrarian
     "dio_change_yoy",       # best |t|=0.97 MID
     "sloan_accruals_full",  # best |t|=1.43 SMALL
     "sga_to_revenue_change",  # best |t|=0.69 MID

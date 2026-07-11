@@ -119,6 +119,8 @@ SIGNAL_COLUMN_MAP = {
     "asset_growth_yoy":           (None, "asset_growth_yoy"),
     # Plan 0012 C3 — momentum retest hypothesis (WS2.6, monthly cadence)
     "residual_momentum_12_1":     (None, "residual_momentum_12_1"),
+    # Plan 0012 C4 — lottery retest hypothesis (WS2.7, monthly cadence)
+    "max_lottery_21d":            (None, "max_lottery_21d"),
     # §3.2.4 — earnings-call NLP factors (off nlp_scores, look-ahead-safe available_date)
     "earnings_call_tone_qoq":     (None, "earnings_call_tone_qoq"),
     "forward_looking_intensity":  (None, "forward_looking_intensity"),
