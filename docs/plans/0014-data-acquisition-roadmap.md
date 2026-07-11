@@ -111,6 +111,14 @@ historical scrape; when ≥6-8 quarters exist, build the MF-accumulation delta f
 
 ## PAID FORK (the money decision — costed separately, Amit's call)
 
+**STANDING RULE for every paid item below — free route first:** before costing any vendor, run
+the **STEP-0 OSS/GitHub survey** (detailed in P1) — a community library on a free/unofficial public
+endpoint may already supply it, as it does for most of our current stack. Two guardrails apply
+every time: (a) **PIT integrity** — live-only scrapers don't backfill history, so they're the
+"collect-forward" path, not a shortcut; (b) **ToS line** — public/unofficial JSON endpoints are
+fine (what we already use); circumventing auth, using a paid login we don't hold, or redistributing
+someone's paid credentials is not — if that's the only way, buy the legit feed instead.
+
 ### P1 — PIT analyst estimates (queue #6; the single highest ceiling-break potential)
 
 **THE STRATEGIC POINT:** this is the one missing data *type* most likely to open a durable NEW
@@ -119,9 +127,30 @@ is currently CLOSED to this fund — `analyst_consensus_snapshots` has 3 dates. 
 provide PIT estimate history in India; the only paths are **buy it** or **collect forward from
 2026-05** (usable ~2028).
 
-**PREREQ 🔬:** vendor/cost research — who sells PIT Indian consensus-estimate history (Refinitiv/
-LSEG, Bloomberg, FactSet, local: Ace Equity, Capitaline), depth, PIT-integrity, and price vs the
-₹5K/mo `paid_data_sources` budget. **Frame the decision honestly:** does the expected new-family
+**PREREQ 🔬 — STEP 0, do this FIRST (free route before paid):** survey the open-source / GitHub
+ecosystem for libraries that pull the same estimates data via **free public or unofficial
+endpoints** — the fund already runs on exactly this class of tool (nselib, jugaad-data, mfapi,
+the Screener-Premium scrape pattern). **REUSE FIRST:** memory `oss_quant_toolbox` (curated GitHub
+libs mapped to gaps) + `paid_data_sources` (Screener scrape recipe) + `historical_data_sources`.
+Check specifically: nsepython / jugaad-data / bharat-sm-data / tickerdata-style repos, Screener.in
+consensus fields, Trendlyne/MoneyControl estimate endpoints, Tijori.
+**Two hard caveats that usually make the free route insufficient here — state the verdict against both:**
+1. **PIT integrity is the whole game.** A scraper that returns *today's* estimates does NOT solve
+   the gap — the missing thing is **historical point-in-time** estimates (what consensus WAS on
+   date T). Live-only scrapers give you a forward-collectable feed (same as our own 2026-05 snapshot
+   start), not backfillable history. If a repo only serves current values → it's the "collect
+   forward, usable ~2028" path, not a shortcut. (This is exactly the `forecast_history` trap —
+   a live value masquerading as history; see `forecast_history_price_contaminated`.)
+2. **ToS / legality — stay on the right side of the line the fund already respects:** public and
+   unofficial endpoints that return openly-served JSON (what nselib/jugaad already use) are in;
+   anything requiring circumventing authentication, a paid login we don't hold, or redistributing
+   someone else's paid API key/credentials is OUT — do not go there. If a free repo only works by
+   crossing that line, treat the data as PAID (buy the legit feed) rather than use it.
+
+**THEN, only if STEP 0 can't supply honest PIT history:** vendor/cost research — who sells PIT
+Indian consensus-estimate history (Refinitiv/LSEG, Bloomberg, FactSet, local: Ace Equity,
+Capitaline), depth, PIT-integrity, and price vs the ₹5K/mo `paid_data_sources` budget.
+**Frame the decision honestly:** does the expected new-family
 alpha (single-digit, uncertain, India-replication-risky) justify the cost — or is "keep collecting
 forward, revisit 2028" the disciplined answer? Do NOT buy on hope; this plan's job is to cost it,
 not to pre-commit. **REUSE FIRST:** memory `paid_data_sources`, `pt_source_landscape_2026_05_23`
