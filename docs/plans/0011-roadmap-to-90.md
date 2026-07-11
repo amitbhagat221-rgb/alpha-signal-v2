@@ -158,11 +158,13 @@ Raw material already flows through `bse_announcements` + `corporate_actions`.
   (acceptance-ratio math), open offers, delistings, rights issues (promoter participation
   signal), holdco NAV discounts. Output: one card per situation type with expected edge,
   capacity, and the *specific* PIT-safe date fields.
-- [ ] **4.1 Event calendar infra** — normalize the six situation types from the BSE stream
+- [x] **4.1 Event calendar infra** — normalize the six situation types from the BSE stream
   into an `event_calendar` table (announce/record/ex dates). `INSERT OR IGNORE` append-only.
-- [ ] **4.2 `tools/event_study.py`** — event-time CAR framework (the monthly cross-sectional
+  **Done 2026-07-11 (plan 0013 A3), demerger+buyback subset only** — see implementation notes.
+- [x] **4.2 `tools/event_study.py`** — event-time CAR framework (the monthly cross-sectional
   panel is the WRONG instrument for episodic trades; announcement_car proved the event-time
   approach works here). **Test:** reproduces announcement_car's result as a special case.
+  **Done 2026-07-11 (plan 0013 A1)**, 20/20 exact reproduction of `compute_announcement_car()`.
 - [ ] **4.3 Per-situation backtests** on 2018+ event history (survivorship-complete stream).
   Promotion bar: same ADR-0043 discipline, adapted to event counts (n≥30 events/type).
 - [ ] **4.4 Paper sleeve** — 6 months tracked before any capital share (guardrail 4).
@@ -285,6 +287,43 @@ Priority order:
    25%+ via beta+regime; bear-year protected by regime overlay — with the decomposition shown.
 
 ## Implementation notes
+
+**2026-07-11 — Plan 0013 (Sonnet tranche 2) event-infra + demerger/buyback studies DONE, 6/6
+tasks, 0 BLOCKED:**
+- **A1 `tools/event_study.py`** — generalized `event_car`/`car_summary`/`drift_curve` over
+  `signals/announcement_car.py`'s wired [-1,+1] CAR machinery. VERIFY: 20/20 exact
+  reproduction of `compute_announcement_car()` at window (1,1).
+- **A2 `tools/sid_crosswalk.py`** — built the scrip_cd→sid helper (`scrip_master` primary,
+  `bse_announcements`-own-pairs fallback). **Finding: coverage lift is negligible** (2,203 vs
+  2,202 raw-mapped sids) — `sources/scrip_master.py` already backfills
+  `bse_announcements.sid` from the same map on every run, so the research-0003-cited ~53%
+  mapping ceiling is NOT a freshness gap this helper can close; the binding constraint is
+  scrip_cd's absent from BSE/`scrip_master` entirely.
+- **A3 `event_calendar` table** — populated demerger (112 rows / 70 sids, 2018-02→2026-07;
+  NOT "2020+" as the plan text assumed) + buyback (242 rows / 151 sids, 2018-03→2026-07)
+  from in-house `bse_announcements`/`corporate_actions` only. Both well above the n≥30 bar.
+  Landmine found + worked around: the DECIDED PK `(sid, event_type, announce_date)` can't
+  dedupe buyback rows via SQLite alone (every buyback row has `announce_date=NULL`, and
+  SQL treats NULL≠NULL in a UNIQUE index) — `tools/build_event_calendar.py` pre-filters
+  against existing rows in Python before `INSERT OR IGNORE` so re-runs are still idempotent
+  in practice (verified: 2nd run → 0/0 new rows).
+- **B1 demerger parent-drift — NULL result.** No window clears mean>0 & t≥1.5 ([0,+5] t=1.21
+  directionally positive; [0,+20]/[0,+60] flip negative). Does not reproduce research 0003's
+  cited +2.64% parent CAAR — most likely explanation: day0 = announcement date, not the
+  scheme's actual effective/listing date (NCLT approval is typically months-to-years later).
+  [Study](../studies/demerger-drift-2026-07.md).
+- **B2 buyback record-date price-move — NULL result, opposite-signed.** Every window
+  negative; [-1,+1] is large AND highly significant (mean -3.58%, t=-12.2, hit-rate 14%) —
+  a real, high-confidence finding, just not the hypothesized "run-up into record date."
+  Reading: the record-date tender entitlement appears priced in ahead of time and stripped
+  out at/after the record date itself, not paid out afterward. Arb-leg (retail
+  reservation/acceptance-ratio economics) remains genuinely unmeasured — needs the PDF/LoF
+  layer (§OUT). [Study](../studies/buyback-move-2026-07.md).
+- **Net: WS4.1/4.2 infra now reusable for future event factors (index-rebalance, lock-up,
+  open-offers, …) without rebuilding the CAR machinery.** WS4.3's demerger/buyback subset is
+  answered — both null per G2, no capital, no sleeve (D7 human gate untouched). §OUT items
+  (WS2.8 survivorship rewrite, index/lock-up scrapes, buyback PDF/LoF layer) remain
+  supervised-session-only, unattempted.
 
 **2026-07-11 — D12 deep-research dives ALL COMPLETE** (4 parallel agents; docs/research/0001-0004):
 - **0001 events (WS2.5):** no clean "in-house data + strong story" intersection. BUILD = index
