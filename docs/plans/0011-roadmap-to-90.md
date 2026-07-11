@@ -410,4 +410,36 @@ tasks, 0 BLOCKED:**
 - **B3 cron** — monthly `expected_return` snapshot installed (1st of month 05:00 UTC);
   first log line verified by hand (exit 0, JSONL 1→2 lines).
 
+**2026-07-11 — BOARD REASSESSMENT after plans 0012+0013 (Fable, opus session).** Every lever
+came back weaker than the roadmap's targets assumed — the fund's own discipline (multiple-testing
+haircut, honest sims, null-reporting) is what surfaced it. Recalibration:
+
+- **Cadence (WS1.1) — the ≤1.5%/day target is STRUCTURALLY UNREACHABLE.** All 36 sweep cells floor
+  at ~4.47%/day (the signal turns over faster than that). The robust, bankable win is EMA-smoothing
+  cuts turnover ~15-30% at corr≥0.95 (signal preserved). The large net_ann jumps (+2%→+20%) are
+  NOT trustworthy — gross also jumps 30%→47%, which smoothing cannot cause → n=61 in-sample luck.
+  → Adopt a moderate config (EMA halflife=10, rank_exit=10-12) for the COST benefit only, on paper,
+  validate OOS before believing any return improvement. D1 auto-adopt does NOT fire (bar not met).
+- **Factor-book widening (WS2, Alpha 55→64) — MUCH weaker than hoped.** All FOUR new/validated
+  candidates FAIL BY-FDR: eps_revision_yoy p_BY=1.00 (likely false discovery), residual_momentum
+  p_BY=0.88, max_lottery_21d p_BY=0.22 (best of batch, correct sign, academic — but still fails),
+  value_composite p_BY=0.36. Per ADR-0043 a new factor must clear the haircut to wire → NONE do.
+  Only defensible move: SWAP value_composite→book_to_price in SMALL (quality upgrade of an existing
+  slot, t=3.32 vs 1.88, ρ=0.71 — not new weight). This empirically CONFIRMS the return-report's
+  "signal-gen ceiling ~70-75 for free-data long-only" — four more failed candidates.
+- **Engine 3 (WS4) — parked** (0013 nulls). **Engine 2 (WS3) — gated on WS2.8, which A3 revealed
+  is a full PRICE-BACKFILL PROJECT** (historical_universe has only 9 sparse snapshots), not a
+  table-swap. Both missing engines got materially harder.
+- **WS1.4 conviction sizing — NO-GO for now** (A1: localizes only in LARGE t=1.78, the least-
+  validated tier; MID opposite-signed). Revisit if localization appears in SMALL.
+
+**Recalibrated read of the path to 90:** the evidence just proved 90 is NOT reachable by "wire more
+free-data factors" — that ceiling is now empirically confirmed (~Validated-Alpha 60-65, not 70).
+The three levers that remain real: (1) execution/cost (bankable, modest), (2) the WS2.8 price
+backfill (fixes survivorship across ALL backtests — foundational correctness, and the gate on any
+honest Engine-2 validation), (3) Engine 2 compounder (only remaining breadth lever with a story,
+but unproven and backfill-gated). Honest near-term trajectory is ~63-66 by Oct (not 72). Reaching
+the high 80s likely requires EITHER the engines working (unproven) OR paid data to break the
+free-data alpha ceiling — a genuine strategic fork for Amit, not a sequencing detail.
+
 _(append as work proceeds)_
