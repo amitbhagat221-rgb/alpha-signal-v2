@@ -189,6 +189,15 @@ def _load_signals():
     from signals.eps_revision import compute_eps_revision_yoy
     eps_revision_yoy = compute_eps_revision_yoy()
 
+    # value_composite (plan 0012 C2) — 40% earnings_yield + 35% book_to_price + 25%
+    # position_52w, within-tier rank composite (mirrors tools.reconstruct_pit's
+    # pit_value_composite exactly). Reuses the earnings_yield/book_to_price frames
+    # already computed above (no recomputation). Validated SMALL t=3.32 on the
+    # clean panel, but NOT in config.SIGNAL_WEIGHTS — computed, ZERO weight,
+    # pending human promotion review (plan 0012 C2).
+    from signals.value_composite import compute_value_composite
+    value_composite = compute_value_composite(earnings_yield, book_to_price, stocks)
+
     # Merge everything onto stocks
     df = stocks.copy()
     df = df.merge(piotroski, on="sid", how="left")
@@ -207,6 +216,7 @@ def _load_signals():
     df = df.merge(iv_skew, on="sid", how="left")
     df = df.merge(announcement_car, on="sid", how="left")
     df = df.merge(eps_revision_yoy, on="sid", how="left")
+    df = df.merge(value_composite, on="sid", how="left")
     df = df.merge(price_counts, on="sid", how="left")
     df["price_rows"] = df["price_rows"].fillna(0).astype(int)
 
@@ -301,6 +311,8 @@ def score_universe(df, weights: dict = None):
         "announcement_car":       "announcement_car",         # t=+2.23 LARGE / +3.74 SMALL
         # computed, ZERO weight — pending human promotion review (plan 0012 C1)
         "eps_revision_yoy":       "eps_revision_yoy",         # clean SMALL t=2.78, n=38
+        # computed, ZERO weight — pending human promotion review (plan 0012 C2)
+        "value_composite":        "value_composite",          # clean SMALL t=3.32
     }
 
     # Percentile-rank all signals within tier (higher = better for all)
