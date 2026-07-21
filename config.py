@@ -359,6 +359,16 @@ API = {
     "user_agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36",
 }
 
+# ── LLM models (2026-07-21 cost optimization) ──
+# regulatory_deep_model is ~60% of daily Claude spend (~$1.05/day est. of
+# ~$1.70 total). Flip to "claude-haiku-4-5-20251001" ONLY after
+# `python -m tools.compare_reg_models` reports ≥90% agreement vs Sonnet on
+# direction + is_regulatory (needs API credits). Spend is tracked in the
+# `llm_usage` table (db.log_llm_usage).
+LLM = {
+    "regulatory_deep_model": "claude-sonnet-4-6",
+}
+
 # ── Screener Filters ──
 
 SCREEN = {

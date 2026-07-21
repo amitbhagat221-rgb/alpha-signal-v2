@@ -30,7 +30,7 @@ import json
 import os
 from datetime import datetime
 
-from db import get_db, read_sql
+from db import get_db, read_sql, log_llm_usage
 
 # Reuse the stock-dossier number scanner verbatim — single source of truth for
 # "what is a forbidden raw number". Calendar tokens (Q1/FY25/H1) are allowed
@@ -245,6 +245,7 @@ def _call_claude(prompt):
         model=MODEL, max_tokens=1024,
         messages=[{"role": "user", "content": prompt}],
     )
+    log_llm_usage("compute_sector_dossiers", MODEL, resp.usage)
     text = resp.content[0].text
     try:
         return json.loads(text)

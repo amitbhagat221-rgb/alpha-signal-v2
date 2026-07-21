@@ -24,11 +24,14 @@ from datetime import datetime
 
 import pandas as pd
 
-from db import read_sql, get_db, insert_df, upsert_df
+from db import read_sql, get_db, insert_df, upsert_df, log_llm_usage
+from config import LLM
 
-# Cost-efficient: Haiku for pre-filter, Sonnet for deep classification
+# Cost-efficient: Haiku for pre-filter; deep-classify model is config-driven
+# (config.LLM["regulatory_deep_model"] — the ~60%-of-spend lever; downgrade to
+# Haiku only after tools/compare_reg_models passes its agreement gate).
 HAIKU_MODEL = "claude-haiku-4-5-20251001"
-SONNET_MODEL = "claude-sonnet-4-6"
+SONNET_MODEL = LLM["regulatory_deep_model"]
 
 PREFILTER_PROMPT = """Classify this Indian financial news headline+summary.
 Is this about government regulation, policy, court orders, RBI/SEBI decisions,
@@ -167,6 +170,7 @@ def _prefilter_batch(client, articles):
                 max_tokens=5,
                 messages=[{"role": "user", "content": prompt}],
             )
+            log_llm_usage("classify_regulatory_prefilter", HAIKU_MODEL, resp.usage)
             answer = resp.content[0].text.strip().upper()
             if "YES" in answer:
                 regulatory_ids.append(art["article_id"])
@@ -193,6 +197,7 @@ def _deep_classify(client, article):
             max_tokens=512,
             messages=[{"role": "user", "content": prompt}],
         )
+        log_llm_usage("classify_regulatory_deep", SONNET_MODEL, resp.usage)
         text = resp.content[0].text.strip()
 
         # Parse JSON (handle markdown code blocks)
@@ -525,6 +530,7 @@ def classify_events(limit=None, dry_run=False):
                     model=HAIKU_MODEL, max_tokens=5,
                     messages=[{"role": "user", "content": prompt}],
                 )
+                log_llm_usage("classify_regulatory_prefilter", HAIKU_MODEL, resp.usage)
                 if "YES" in resp.content[0].text.strip().upper():
                     regulatory_ids.append(evt["event_id"])
                     # Don't update status yet — Sonnet will do it
@@ -706,6 +712,17 @@ def _result_text(message):
         if block.type == "text":
             return block.text.strip()
     return ""
+
+
+def _accumulate_usage(tot, message):
+    """Sum a batch result message's usage into `tot` (for one aggregate
+    llm_usage row per ingested batch instead of one per result)."""
+    u = getattr(message, "usage", None)
+    if u is None:
+        return
+    tot["input_tokens"] += int(getattr(u, "input_tokens", 0) or 0)
+    tot["output_tokens"] += int(getattr(u, "output_tokens", 0) or 0)
+    tot["n"] += 1
 
 
 def _parse_classification(text):
@@ -909,13 +926,18 @@ def _ingest_haiku(client, results):
     """YES → collect passer; NO → haiku_rejected; errored/expired/canceled →
     back to pending (retry next run). Submits a Sonnet batch for the passers."""
     passers, rejects, requeue = [], [], []
+    usage_tot = {"input_tokens": 0, "output_tokens": 0, "n": 0}
     for r in results:
         eid = r.custom_id
         if r.result.type == "succeeded":
+            _accumulate_usage(usage_tot, r.result.message)
             ans = _result_text(r.result.message).upper()
             (passers if "YES" in ans else rejects).append(eid)
         else:  # errored | expired | canceled — unprocessed, return to pending
             requeue.append(eid)
+    if usage_tot["n"]:
+        log_llm_usage("classify_regulatory_prefilter", HAIKU_MODEL, usage_tot,
+                      mode="batch", n_calls=usage_tot["n"])
     for eid in rejects:
         _update_event_status(eid, "haiku_rejected")
     for eid in requeue:
@@ -929,9 +951,11 @@ def _ingest_sonnet(results):
     """succeeded+parsed → save signals + classified; bad JSON or errored →
     haiku_passed_sonnet_failed (Sonnet retry). Same INSERT semantics as sync."""
     n_class = n_sig = requeue = 0
+    usage_tot = {"input_tokens": 0, "output_tokens": 0, "n": 0}
     for r in results:
         eid = r.custom_id
         if r.result.type == "succeeded":
+            _accumulate_usage(usage_tot, r.result.message)
             cls = _parse_classification(_result_text(r.result.message))
             if cls:
                 n_sig += _save_signals_for_event(eid, cls)
@@ -942,6 +966,9 @@ def _ingest_sonnet(results):
         else:  # errored | expired | canceled — retry Sonnet next run
             _update_event_status(eid, "haiku_passed_sonnet_failed")
             requeue += 1
+    if usage_tot["n"]:
+        log_llm_usage("classify_regulatory_deep", SONNET_MODEL, usage_tot,
+                      mode="batch", n_calls=usage_tot["n"])
     return {"classified": n_class, "signals": n_sig, "requeued": requeue}
 
 

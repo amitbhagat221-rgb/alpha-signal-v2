@@ -34,7 +34,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from db import read_sql, get_db
+from db import read_sql, get_db, log_llm_usage
 
 HAIKU_MODEL = "claude-haiku-4-5-20251001"
 
@@ -149,6 +149,7 @@ def _classify_one(client, title, summary, source):
             max_tokens=500,
             messages=[{"role": "user", "content": prompt}],
         )
+        log_llm_usage("classify_news", HAIKU_MODEL, resp.usage)
         raw = resp.content[0].text.strip()
         # Strip markdown fences if model wraps anyway
         raw = re.sub(r"^```(?:json)?\n?", "", raw)
@@ -222,6 +223,7 @@ def _keywords_one(client, title, summary):
                 title=(title or "").replace("\n", " ")[:300],
                 summary=(summary or "").replace("\n", " ")[:1000])}],
         )
+        log_llm_usage("classify_news_keywords", HAIKU_MODEL, resp.usage)
         raw = resp.content[0].text.strip()
         raw = re.sub(r"^```(?:json)?\n?", "", raw)
         raw = re.sub(r"\n?```$", "", raw)

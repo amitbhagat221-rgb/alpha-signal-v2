@@ -520,6 +520,70 @@ def insert_df(df, table_name, conn=None):
             return _execute(connection)
 
 
+# ── LLM cost ledger ──
+# Every Anthropic call site logs its response.usage here (audit 2026-07-04
+# "no LLM spend visibility" gap; prereq for the plan-0014 D2 cost ledger).
+# Tokens are the source of truth; est_cost_usd is a convenience estimate from
+# the price table below — update prices there when Anthropic changes them.
+
+_LLM_PRICES_PER_MTOK = {
+    # model-id prefix → (input $/MTok, output $/MTok), sync list price
+    "claude-sonnet-4-6": (3.00, 15.00),
+    "claude-sonnet-5":   (3.00, 15.00),
+    "claude-haiku-4-5":  (1.00, 5.00),
+    "claude-opus":       (5.00, 25.00),
+}
+
+_LLM_USAGE_DDL = """
+CREATE TABLE IF NOT EXISTS llm_usage (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    called_at     TEXT NOT NULL DEFAULT (datetime('now')),
+    step          TEXT NOT NULL,
+    model         TEXT NOT NULL,
+    mode          TEXT NOT NULL DEFAULT 'sync',
+    n_calls       INTEGER NOT NULL DEFAULT 1,
+    input_tokens  INTEGER NOT NULL DEFAULT 0,
+    output_tokens INTEGER NOT NULL DEFAULT 0,
+    est_cost_usd  REAL
+)
+"""
+
+
+def _llm_est_cost(model, mode, input_tokens, output_tokens):
+    for prefix, (p_in, p_out) in _LLM_PRICES_PER_MTOK.items():
+        if str(model).startswith(prefix):
+            mult = 0.5 if mode == "batch" else 1.0
+            return mult * (input_tokens * p_in + output_tokens * p_out) / 1e6
+    return None
+
+
+def log_llm_usage(step, model, usage, mode="sync", n_calls=1):
+    """Record one (or an aggregate of) Anthropic API call(s) in llm_usage.
+
+    `usage` is the SDK response.usage object or any object/dict with
+    input_tokens/output_tokens. Telemetry only — never raises, so a ledger
+    hiccup can't take down a producer (producers still fail loudly on their
+    own output; that rule is untouched).
+    """
+    try:
+        if isinstance(usage, dict):
+            inp = int(usage.get("input_tokens", 0) or 0)
+            out = int(usage.get("output_tokens", 0) or 0)
+        else:
+            inp = int(getattr(usage, "input_tokens", 0) or 0)
+            out = int(getattr(usage, "output_tokens", 0) or 0)
+        with get_db() as conn:
+            conn.execute(_LLM_USAGE_DDL)
+            conn.execute(
+                "INSERT INTO llm_usage (step, model, mode, n_calls, input_tokens, "
+                "output_tokens, est_cost_usd) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (step, str(model), mode, int(n_calls), inp, out,
+                 _llm_est_cost(model, mode, inp, out)),
+            )
+    except Exception as e:
+        print(f"  [llm_usage] WARN ledger write failed ({e}) — call not recorded")
+
+
 _PK_CACHE = {}
 
 

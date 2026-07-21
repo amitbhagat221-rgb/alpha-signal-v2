@@ -25,7 +25,7 @@ from pathlib import Path
 import pandas as pd
 
 from config import PROJECT_ROOT
-from db import read_sql
+from db import read_sql, log_llm_usage
 
 OUTPUT_DIR = PROJECT_ROOT / "output"
 
@@ -525,6 +525,7 @@ def generate(top=5, dry_run=False):
                 max_tokens=1024,
                 messages=[{"role": "user", "content": prompt}],
             )
+            log_llm_usage("dossier", "claude-sonnet-4-6", response.usage)
             text = response.content[0].text
             # Try to parse JSON
             try:
@@ -563,7 +564,11 @@ def generate(top=5, dry_run=False):
             print(f"  Error: {e}")
             dossiers.append({"sid": sid, "ticker": pick["ticker"], "status": f"error: {e}"})
 
-    # Save to file
+    # Save to file — but never on dry_run: overwriting today's real output with
+    # dry_run placeholders broke the file freshness contract (found 2026-07-21).
+    if dry_run:
+        print(f"[dry-run] would save {len(dossiers)} dossiers — file NOT written")
+        return len(dossiers)
     out_path = OUTPUT_DIR / f"dossiers_{date.today().isoformat()}.json"
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with open(out_path, "w") as f:

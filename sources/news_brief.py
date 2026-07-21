@@ -31,7 +31,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from db import read_sql, get_db
+from db import read_sql, get_db, log_llm_usage
 
 SONNET_MODEL = "claude-sonnet-4-6"
 
@@ -136,6 +136,7 @@ def compute(target_date=None, dry_run=False, top=25):
         max_tokens=1500,
         messages=[{"role": "user", "content": prompt}],
     )
+    log_llm_usage("news_brief", SONNET_MODEL, resp.usage)
     raw = resp.content[0].text.strip()
     import re
     raw = re.sub(r"^```(?:json)?\n?", "", raw)
