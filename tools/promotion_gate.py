@@ -69,9 +69,9 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 import factors
-from db import read_sql, upsert_df, get_db, get_backtest_cadence
+from db import read_sql, upsert_df, get_db
 from config import TRANSACTION_COSTS_BPS
-from tools.backtest_pit import SIGNAL_COLUMN_MAP, _compute_ic, _aggregate
+from tools.backtest_pit import SIGNAL_COLUMN_MAP, _compute_ic, _aggregate, iter_panels
 from tools.ic_decay import HORIZONS, _price_series, _fwd_panel, _horizon_lag
 
 _CREATE_SQL = """
@@ -193,9 +193,6 @@ def run(only_signal=None, turnover=DEFAULT_TURNOVER, reeval_live=False):
         else:
             v2_df = merged
 
-    v2_dates_all = pd.to_datetime(v2_df["snapshot_date"]).dt.date.unique() if not v2_df.empty else []
-    weekly_dates = {d.isoformat() for d in v2_dates_all if pd.Timestamp(d).weekday() == 4}
-
     live = _live_keys()
     targets = [(s, c) for s, c in SIGNAL_COLUMN_MAP.items() if s != "_response"]
     if only_signal:
@@ -204,70 +201,47 @@ def run(only_signal=None, turnover=DEFAULT_TURNOVER, reeval_live=False):
         targets = [(s, c) for s, c in targets if s in live]
 
     rows = []
-    for signal, (v1_col, v2_col) in targets:
-        cadence = get_backtest_cadence(signal)
-        sources = [("v2_recompute", v2_df, v2_col)]
-        if cadence == "monthly":
-            sources.insert(0, ("v1_archive", v1_df, v1_col))
-
-        scored_any = False
-        for src_name, src_df, signal_col in sources:
-            if signal_col is None or signal_col not in src_df.columns:
+    scored_from = {}   # signal → the source that scored it; one source per signal is enough
+    for signal, cadence, src_name, signal_col, tier, tier_df in iter_panels(v1_df, v2_df, targets):
+        if scored_from.get(signal, src_name) != src_name:
+            continue
+        c_side = TRANSACTION_COSTS_BPS.get(tier, 50) / 1e4
+        by_h = {}
+        for h in HORIZONS:
+            fwd_col = f"fwd_{h}"
+            if fwd_col not in tier_df.columns or tier_df[fwd_col].notna().sum() == 0:
+                by_h[h] = None
                 continue
-            if src_df[signal_col].notna().sum() == 0:
-                continue
-            if cadence == "weekly" and src_name == "v2_recompute":
-                df_use = src_df[src_df["snapshot_date"].isin(weekly_dates)]
-            elif cadence == "monthly" and src_name == "v2_recompute" and weekly_dates:
-                df_use = src_df[~src_df["snapshot_date"].isin(weekly_dates)]
-            else:
-                df_use = src_df
-            if df_use.empty:
-                continue
-
-            for tier in ["LARGE", "MID", "SMALL"]:
-                tier_df = df_use[df_use["cap_tier"] == tier]
-                if tier_df.empty:
-                    continue
-                c_side = TRANSACTION_COSTS_BPS.get(tier, 50) / 1e4
-                by_h = {}
-                for h in HORIZONS:
-                    fwd_col = f"fwd_{h}"
-                    if fwd_col not in tier_df.columns or tier_df[fwd_col].notna().sum() == 0:
-                        by_h[h] = None
-                        continue
-                    ic_rows = _compute_ic(tier_df, signal_col, fwd_col)
-                    res = _aggregate(ic_rows, signal, tier, src_name,
-                                     cadence=cadence, nw_lag=_horizon_lag(signal, cadence, h))
-                    if res:
-                        res["sigma_fwd"] = _sigma_fwd(tier_df, h)
-                    by_h[h] = res
-                best, curve = _resolve_and_score(by_h, tier, c_side, turnover)
-                if best is None and not any(by_h.values()):
-                    continue
-                verdict = _verdict(best)
-                rows.append({
-                    "signal": signal, "cap_tier": tier, "source": src_name,
-                    "cadence": cadence,
-                    "natural_horizon": int(best["horizon"]) if best else None,
-                    "gross_ic": round(best["gross_ic"], 4) if best else None,
-                    "gross_t": round(best["gross_t"], 2) if best and best["gross_t"] is not None else None,
-                    "sigma_fwd": round(best["sigma_fwd"], 4) if best else None,
-                    "cost_ic": round(best["cost_ic"], 4) if best else None,
-                    "net_ic": round(best["net_ic"], 4) if best else None,
-                    "net_t": round(best["net_t"], 2) if best else None,
-                    "net_ir_annual": round(best["net_ir_yr"], 3) if best else None,
-                    "n_periods": int(best["n_periods"]) if best else None,
-                    "sign_stable": int(best["sign_stable"]) if best else None,
-                    "turnover_assumed": turnover,
-                    "is_live": int(signal in live),
-                    "verdict": verdict,
-                    "ir_curve_json": json.dumps(
-                        {h: round(c["net_ir_yr"], 3) for h, c in curve.items()}) if curve else "{}",
-                })
-                scored_any = True
-            if scored_any:
-                break   # one source per signal is enough
+            ic_rows = _compute_ic(tier_df, signal_col, fwd_col)
+            res = _aggregate(ic_rows, signal, tier, src_name,
+                             cadence=cadence, nw_lag=_horizon_lag(signal, cadence, h))
+            if res:
+                res["sigma_fwd"] = _sigma_fwd(tier_df, h)
+            by_h[h] = res
+        best, curve = _resolve_and_score(by_h, tier, c_side, turnover)
+        if best is None and not any(by_h.values()):
+            continue
+        verdict = _verdict(best)
+        rows.append({
+            "signal": signal, "cap_tier": tier, "source": src_name,
+            "cadence": cadence,
+            "natural_horizon": int(best["horizon"]) if best else None,
+            "gross_ic": round(best["gross_ic"], 4) if best else None,
+            "gross_t": round(best["gross_t"], 2) if best and best["gross_t"] is not None else None,
+            "sigma_fwd": round(best["sigma_fwd"], 4) if best else None,
+            "cost_ic": round(best["cost_ic"], 4) if best else None,
+            "net_ic": round(best["net_ic"], 4) if best else None,
+            "net_t": round(best["net_t"], 2) if best else None,
+            "net_ir_annual": round(best["net_ir_yr"], 3) if best else None,
+            "n_periods": int(best["n_periods"]) if best else None,
+            "sign_stable": int(best["sign_stable"]) if best else None,
+            "turnover_assumed": turnover,
+            "is_live": int(signal in live),
+            "verdict": verdict,
+            "ir_curve_json": json.dumps(
+                {h: round(c["net_ir_yr"], 3) for h, c in curve.items()}) if curve else "{}",
+        })
+        scored_from[signal] = src_name
 
     return rows, live
 

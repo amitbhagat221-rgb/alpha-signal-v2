@@ -42,7 +42,7 @@ import numpy as np
 import pandas as pd
 from scipy.stats import spearmanr
 
-from db import get_db, read_sql, upsert_df
+from db import get_db, get_backtest_cadence, read_sql, upsert_df
 
 
 # Mapping: signal_id (registry) → (v1_column, v2_column)
@@ -347,6 +347,66 @@ def _nw_lag_for(signal_id, cadence):
     return 0  # monthly cadence with fwd_return_20d has ~no overlap
 
 
+TIERS = ["LARGE", "MID", "SMALL"]
+
+
+def _is_month_start_anchor(d):
+    """True if `d` is the first business day of its month — generate_eval_dates' monthly anchor."""
+    first = pd.Timestamp(d.year, d.month, 1)
+    while first.weekday() >= 5:
+        first += pd.Timedelta(days=1)
+    return pd.Timestamp(d) == first
+
+
+def iter_panels(v1_df, v2_df, targets):
+    """Yield (signal, cadence, source, signal_col, tier, tier_df) for every
+    (signal, PIT source, cap tier) a backtest scores — one anchor policy for
+    backtest_pit, promotion_gate and ic_decay.
+
+    Cadence dispatch (db.get_backtest_cadence): weekly signals use only the v2
+    panel's Friday anchors; monthly signals use the v1 archive then v2, with v2's
+    weekly-ONLY Fridays dropped. A monthly anchor is the first business day of its
+    month (generate_eval_dates), which is a Friday whenever the 1st itself is — those
+    month-start Fridays are legitimate monthly observations and are KEPT. (The old
+    "drop all Fridays" filter silently discarded ~1 in 7 monthly anchors, e.g. 6 of 36
+    financial anchors, biasing every monthly factor's n low.)
+
+    `targets` = iterable of (signal, (v1_col, v2_col)). Sources whose column is absent
+    or all-NULL, and empty tiers, are skipped.
+    """
+    v2_dates_all = pd.to_datetime(v2_df["snapshot_date"]).dt.date.unique() if not v2_df.empty else []
+    # All Friday anchors — used to KEEP weekly-cadence factors on their weekly grid.
+    weekly_dates = {d.isoformat() for d in v2_dates_all if pd.Timestamp(d).weekday() == 4}
+    # Weekly-ONLY Fridays — for EXCLUDING from monthly backtests.
+    weekly_only_dates = {d.isoformat() for d in v2_dates_all
+                         if pd.Timestamp(d).weekday() == 4 and not _is_month_start_anchor(d)}
+    for signal, (v1_col, v2_col) in targets:
+        if signal == "_response":
+            continue
+        cadence = get_backtest_cadence(signal)
+        # Pick source — for weekly cadence skip v1 archive (monthly only)
+        sources = [("v2_recompute", v2_df, v2_col)]
+        if cadence == "monthly":
+            sources.insert(0, ("v1_archive", v1_df, v1_col))
+        for src_name, src_df, signal_col in sources:
+            if signal_col is None or signal_col not in src_df.columns:
+                continue
+            if src_df[signal_col].notna().sum() == 0:
+                continue
+            if cadence == "weekly" and src_name == "v2_recompute":
+                df_use = src_df[src_df["snapshot_date"].isin(weekly_dates)]
+            elif cadence == "monthly" and src_name == "v2_recompute" and weekly_only_dates:
+                df_use = src_df[~src_df["snapshot_date"].isin(weekly_only_dates)]
+            else:
+                df_use = src_df
+            if df_use.empty:
+                continue
+            for tier in TIERS:
+                tier_df = df_use[df_use["cap_tier"] == tier]
+                if not tier_df.empty:
+                    yield signal, cadence, src_name, signal_col, tier, tier_df
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--signal", help="single signal to compute (default: all)")
@@ -366,64 +426,13 @@ def main():
             print(f"No signal '{args.signal}' in registry")
             return
 
-    # Cadence dispatch — each signal uses the cadence registered in db.py.
-    # For weekly signals we filter v2_df to weekly Friday dates and apply
-    # Newey-West variance correction for overlapping signal/return windows.
-    from db import get_backtest_cadence
-    v2_dates_all = pd.to_datetime(v2_df["snapshot_date"]).dt.date.unique() if not v2_df.empty else []
-    # All Friday anchors — used to KEEP weekly-cadence factors on their weekly grid.
-    weekly_dates = {d.isoformat() for d in v2_dates_all if pd.Timestamp(d).weekday() == 4}
-    # Weekly-ONLY Fridays — for EXCLUDING from monthly backtests. A monthly anchor is the
-    # first business day of its month (generate_eval_dates), which is a Friday only when the
-    # 1st itself is a Friday (day==1). Those month-start Fridays are legitimate monthly
-    # observations and must NOT be dropped. The old "drop all Fridays" filter silently
-    # discarded ~1 in 7 monthly anchors (e.g. 6 of 36 financial anchors landed on month-start
-    # Fridays), biasing every monthly factor's n low.
-    def _is_month_start_anchor(d):
-        first = pd.Timestamp(d.year, d.month, 1)
-        while first.weekday() >= 5:
-            first += pd.Timedelta(days=1)
-        return pd.Timestamp(d) == first
-    weekly_only_dates = {d.isoformat() for d in v2_dates_all
-                         if pd.Timestamp(d).weekday() == 4 and not _is_month_start_anchor(d)}
-
     out_rows = []
-    for signal, (v1_col, v2_col) in targets:
-        if signal == "_response":
-            continue
-        cadence = get_backtest_cadence(signal)
-
-        # Pick source — for weekly cadence skip v1 archive (monthly only)
-        sources = [("v2_recompute", v2_df, v2_col, "fwd_return_20d")]
-        if cadence == "monthly":
-            sources.insert(0, ("v1_archive", v1_df, v1_col, "fwd_return_20d"))
-
-        for src_name, src_df, signal_col, fwd_col in sources:
-            if signal_col is None or signal_col not in src_df.columns or fwd_col not in src_df.columns:
-                continue
-            if src_df[signal_col].notna().sum() == 0:
-                continue
-            # Filter to cadence-appropriate dates
-            if cadence == "weekly" and src_name == "v2_recompute":
-                df_use = src_df[src_df["snapshot_date"].isin(weekly_dates)]
-            elif cadence == "monthly":
-                # Monthly: drop weekly-ONLY Fridays (mid-month), but KEEP month-start anchors
-                # (incl. month-start Fridays). See weekly_only_dates above.
-                df_use = src_df[~src_df["snapshot_date"].isin(weekly_only_dates)] if src_name == "v2_recompute" and weekly_only_dates else src_df
-            else:
-                df_use = src_df
-            if df_use.empty:
-                continue
-
-            nw_lag = _nw_lag_for(signal, cadence)
-            for tier in ["LARGE", "MID", "SMALL"]:
-                tier_df = df_use[df_use["cap_tier"] == tier]
-                if tier_df.empty:
-                    continue
-                ic_rows = _compute_ic(tier_df, signal_col, fwd_col)
-                result = _aggregate(ic_rows, signal, tier, src_name, cadence=cadence, nw_lag=nw_lag)
-                if result:
-                    out_rows.append(result)
+    for signal, cadence, src_name, signal_col, tier, tier_df in iter_panels(v1_df, v2_df, targets):
+        ic_rows = _compute_ic(tier_df, signal_col, "fwd_return_20d")
+        result = _aggregate(ic_rows, signal, tier, src_name, cadence=cadence,
+                            nw_lag=_nw_lag_for(signal, cadence))
+        if result:
+            out_rows.append(result)
 
     if not out_rows:
         print("No IC computed.")
