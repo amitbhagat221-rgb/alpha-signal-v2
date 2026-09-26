@@ -168,13 +168,24 @@ def parse_navall(text: str) -> list[dict]:
     rows: list[dict] = []
     current_category_raw = None
     current_amc = None
+    # Column positions come from the header row. ~2026-08-19 AMFI inserted
+    # `Plan;Option` before NAV (6 → 8 cols); fixed indexes silently parsed
+    # "Direct Plan" as the NAV and every row came back NAV-less. Defaults = legacy layout.
+    col = {"name": 3, "plan": None, "option": None, "nav": 4, "date": 5}
 
     for raw_line in text.splitlines():
         line = raw_line.strip()
         if not line:
             continue
-        # Skip the file header
         if line.startswith("Scheme Code"):
+            hdr = [h.strip().lower() for h in line.split(";")]
+            col = {
+                "name":   hdr.index("scheme name"),
+                "plan":   hdr.index("plan") if "plan" in hdr else None,
+                "option": hdr.index("option") if "option" in hdr else None,
+                "nav":    hdr.index("net asset value"),
+                "date":   hdr.index("date"),
+            }
             continue
 
         # Category header line?
@@ -186,7 +197,7 @@ def parse_navall(text: str) -> list[dict]:
         # Pipe-delimited scheme data?
         if ";" in line:
             parts = line.split(";")
-            if len(parts) < 6:
+            if len(parts) <= max(col["nav"], col["date"]):
                 continue
             code = parts[0].strip()
             if not code.isdigit():
@@ -197,12 +208,18 @@ def parse_navall(text: str) -> list[dict]:
                 isin_growth = None
             if isin_div == "-":
                 isin_div = None
-            scheme_name = parts[3].strip()
+            scheme_name = parts[col["name"]].strip()
+            # Plan/option now have their own columns; append them so _detect
+            # sees "Direct Plan"/"Growth Option" even when the name omits them.
+            detect_text = " ".join(
+                [scheme_name] + [parts[col[k]] for k in ("plan", "option") if col[k] is not None]
+            )
+            nav_raw = parts[col["nav"]].strip()
             try:
-                nav = float(parts[4].strip()) if parts[4].strip() not in ("", "N.A.", "-") else None
+                nav = float(nav_raw) if nav_raw not in ("", "N.A.", "-") else None
             except ValueError:
                 nav = None
-            nav_date = _parse_date(parts[5])
+            nav_date = _parse_date(parts[col["date"]])
 
             rows.append({
                 "scheme_code":   code,
@@ -212,8 +229,8 @@ def parse_navall(text: str) -> list[dict]:
                 "amc":           current_amc,
                 "category_raw":  current_category_raw,
                 "category_norm": _normalise_category(current_category_raw),
-                "plan_type":     _detect(scheme_name, _PLAN_PATTERNS),
-                "option_type":   _detect(scheme_name, _OPTION_PATTERNS),
+                "plan_type":     _detect(detect_text, _PLAN_PATTERNS),
+                "option_type":   _detect(detect_text, _OPTION_PATTERNS),
                 "nav":           nav,
                 "nav_date":      nav_date,
             })
@@ -231,8 +248,9 @@ def fetch_navall_text() -> str:
     for attempt in range(3):
         try:
             r = requests.get(NAVALL_URL, timeout=TIMEOUT, headers=HEADERS)
-            if r.status_code == 200 and r.text:
-                return r.text
+            if r.status_code == 200 and r.content:
+                # Server sends no charset → requests guesses latin-1 → mojibake.
+                return r.content.decode("utf-8", errors="replace")
             last_err = f"HTTP {r.status_code}"
         except requests.RequestException as e:
             last_err = str(e)

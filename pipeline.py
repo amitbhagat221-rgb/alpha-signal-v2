@@ -47,8 +47,8 @@ log = logging.getLogger("pipeline")
 from config import PIPELINE_STEPS
 
 # Honor the `frequency` field so weekly/monthly steps don't run every day.
-# 2026-05-25: fetch_broker_recos is weekly (8hr at 12s rate-limit) — running
-# daily would hammer Moneycontrol's WAF. weekly = Sunday only (weekday 6).
+# weekly = Sunday only (weekday 6). (fetch_broker_recos moved weekly → daily with a
+# 90-min stalest-first budget, 2026-09-26: the ~18h Sunday sweep starved other jobs.)
 # `--step <name>` always overrides this gate (manual runs ignore frequency).
 def _step_should_run_today(spec):
     freq = (spec.get("frequency") or "daily").lower()

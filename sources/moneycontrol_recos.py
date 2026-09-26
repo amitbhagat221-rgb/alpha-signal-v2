@@ -56,6 +56,11 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from db import get_db, read_sql, upsert_df
 
 DELAY = 12.0   # Per docstring: 2s tripped the Moneycontrol WAF. 12s is safe.
+# Pipeline runs daily with a time budget, stalest-first (stocks.mc_checked_at).
+# The old weekly full sweep took ~18h and held the harvest lock all Sunday,
+# starving run_daily_forward.sh. 90 min/day ≈ 300 stocks → full cycle ~8-9 days;
+# broker PTs are episodic, so that cadence loses nothing.
+PIPELINE_BUDGET_MIN = 90
 TIMEOUT = 15
 MAX_RETRIES = 2
 # Browser-like headers. The autosuggest endpoint 403s if Accept doesn't
@@ -135,6 +140,8 @@ def _ensure_schema():
         cols = [c[1] for c in conn.execute("PRAGMA table_info(stocks)").fetchall()]
         if "mc_slug" not in cols:
             conn.execute("ALTER TABLE stocks ADD COLUMN mc_slug TEXT")
+        if "mc_checked_at" not in cols:
+            conn.execute("ALTER TABLE stocks ADD COLUMN mc_checked_at TEXT")
 
 
 # ─────────────────────── Slug discovery ───────────────────────
@@ -364,8 +371,10 @@ def aggregate_consensus():
     return rows
 
 
-def compute(limit=None, ticker=None, discover_only=False, aggregate_only=False, dry_run=False):
-    """Pipeline entry point."""
+def compute(limit=None, ticker=None, discover_only=False, aggregate_only=False, dry_run=False,
+            max_minutes=PIPELINE_BUDGET_MIN):
+    """Pipeline entry point. Visits stocks least-recently-checked first and
+    stops after `max_minutes` (None = no budget, full sweep)."""
     _ensure_schema()
 
     if aggregate_only:
@@ -378,7 +387,7 @@ def compute(limit=None, ticker=None, discover_only=False, aggregate_only=False, 
         params = [ticker]
     stocks = read_sql(
         f"SELECT sid, ticker, COALESCE(name, '') AS name, COALESCE(mc_slug, '') AS mc_slug "
-        f"FROM stocks {where} ORDER BY sid",
+        f"FROM stocks {where} ORDER BY mc_checked_at IS NOT NULL, mc_checked_at, sid",
         params=params,
     )
     if limit:
@@ -393,8 +402,17 @@ def compute(limit=None, ticker=None, discover_only=False, aggregate_only=False, 
     no_recos = 0
     n_recos_total = 0
     gate_quarantined = 0   # Plan 0007 Phase 2 — identity-gate failures (WRONG_ENTITY)
+    deadline = time.monotonic() + max_minutes * 60 if max_minutes else None
+    checked = []           # sids visited this run → stocks.mc_checked_at
+    n_visited = 0
 
     for i, (sid, ticker_str, name_str, slug) in enumerate(stocks.itertuples(index=False), 1):
+        if deadline and time.monotonic() > deadline:
+            print(f"  budget of {max_minutes} min reached after {i - 1} stocks — "
+                  f"rest continue next run (stalest-first)", flush=True)
+            break
+        checked.append(sid)
+        n_visited = i
         if not slug:
             slug = discover_slug_for(sid, ticker_str)
             time.sleep(DELAY)
@@ -457,25 +475,44 @@ def compute(limit=None, ticker=None, discover_only=False, aggregate_only=False, 
             buf.extend(recos)
             n_recos_total += len(recos)
 
-        if i % 50 == 0:
-            if buf and not dry_run:
+        if i % 50 == 0 and not dry_run:
+            if buf:
                 upsert_df(pd.DataFrame(buf), "broker_recommendations")
                 saved += len(buf)
                 buf = []
+            _mark_checked(checked)
+            checked = []
 
         time.sleep(DELAY)
 
-    if buf and not dry_run:
-        upsert_df(pd.DataFrame(buf), "broker_recommendations")
-        saved += len(buf)
+    if not dry_run:
+        if buf:
+            upsert_df(pd.DataFrame(buf), "broker_recommendations")
+            saved += len(buf)
+        _mark_checked(checked)
 
     print(f"Done. {saved} broker recos written ({n_recos_total} parsed). "
           f"no_slug={no_slug}, no_recos={no_recos}, gate_quarantined={gate_quarantined}")
+
+    # ~3/4 of covered stocks carry recos; zero across a real batch = parser or
+    # WAF breakage, not an empty market (CLAUDE.md: raise on 0 output).
+    if not discover_only and not ticker and n_visited >= 50 and n_recos_total == 0:
+        raise RuntimeError(f"0 broker recos parsed across {n_visited} stocks — "
+                           f"Moneycontrol page format or WAF changed")
 
     if not discover_only and not dry_run:
         aggregate_consensus()
 
     return saved
+
+
+def _mark_checked(sids):
+    if not sids:
+        return
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with get_db() as conn:
+        conn.executemany("UPDATE stocks SET mc_checked_at = ? WHERE sid = ?",
+                         [(now, s) for s in sids])
 
 
 if __name__ == "__main__":
@@ -487,8 +524,11 @@ if __name__ == "__main__":
     parser.add_argument("--aggregate-only", action="store_true",
                         help="Rebuild analyst_consensus from existing recos")
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--max-minutes", type=float, default=None,
+                        help=f"Time budget (pipeline uses {PIPELINE_BUDGET_MIN}); default: full sweep")
     args = parser.parse_args()
     compute(limit=args.limit, ticker=args.ticker,
             discover_only=args.discover_only,
             aggregate_only=args.aggregate_only,
-            dry_run=args.dry_run)
+            dry_run=args.dry_run,
+            max_minutes=args.max_minutes)

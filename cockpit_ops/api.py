@@ -418,41 +418,32 @@ def get_flow_overview():
     """)
     status_by_step = {r["step_name"]: r.to_dict() for _, r in latest.iterrows()}
 
-    # Layer assignment based on the step's role.
-    LAYERS = {
-        "fetch_macro_market": "Sources",
-        "fetch_macro_gov":    "Sources",
-        "fetch_insider":      "Sources",
-        "fetch_bulk_deals":   "Sources",
-        "fetch_bhavcopy":     "Sources",
-        "fetch_news":         "Sources",
-        "universe_liveness":  "Sources",
-        "signal_sentiment":   "Signals",
-        "signal_insider":     "Signals",
-        "signal_forensic":    "Signals",
-        "signal_piotroski":   "Signals",
-        "signal_accruals":    "Signals",
-        "signal_consensus":   "Signals",
-        "signal_promoter":    "Signals",
-        "signal_smart_money": "Signals",
-        "signal_macro":       "Signals",
-        "signal_regulatory":  "Signals",
-        "quality_gate":       "Scoring",
-        "regime_update":      "Scoring",
-        "screener":           "Scoring",
-        "snapshot":           "Output",
-        "diff_engine":        "Output",
-        "dossier":            "Output",
-        "email":              "Output",
+    # Layer by name prefix, explicit names for the rest. The old hand-written
+    # 24-entry map silently hid the other ~60 steps (and their failures) from /flow.
+    PREFIX_LAYERS = [
+        (("fetch_", "scrape_", "universe_"), "Sources"),
+        (("signal_", "compute_", "classify_", "sector_"), "Signals"),
+    ]
+    NAMED_LAYERS = {
+        "news_brief": "Signals",
+        "quality_gate": "Scoring", "regime_update": "Scoring", "screener": "Scoring",
+        "refresh_eligibility": "Scoring", "portfolio_construction": "Scoring",
+        "snapshot": "Output", "diff_engine": "Output", "dossier": "Output", "email": "Output",
     }
-    LAYER_ORDER = ["Sources", "Signals", "Scoring", "Output"]
+    LAYER_ORDER = ["Sources", "Signals", "Scoring", "Output", "Other"]
+
+    def _layer(name):
+        if name in NAMED_LAYERS:
+            return NAMED_LAYERS[name]
+        for prefixes, layer in PREFIX_LAYERS:
+            if name.startswith(prefixes):
+                return layer
+        return "Other"
 
     layers = {ln: [] for ln in LAYER_ORDER}
     for step in PIPELINE_STEPS:
         name = step["name"]
-        layer = LAYERS.get(name, "Other")
-        if layer not in layers:
-            layers[layer] = []
+        layer = _layer(name)
         last = status_by_step.get(name, {})
         layers[layer].append({
             "name": name,

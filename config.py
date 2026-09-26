@@ -881,7 +881,7 @@ PIPELINE_STEPS = [
     # 2026-05-25. Discovery one-time: --discover-only (mc_slug already
     # populated for 2336 stocks).
     {"name": "fetch_broker_recos", "module": "sources.moneycontrol_recos", "function": "compute", "critical": False,
-     "table": "broker_recommendations", "source": "Moneycontrol HTML (12s/req)",   "data_freq": "weekly", "frequency": "weekly"},
+     "table": "broker_recommendations", "source": "Moneycontrol HTML (12s/req)",   "data_freq": "weekly", "frequency": "daily"},  # 90-min stalest-first budget/day
 
     # Banking metrics — Screener.in HTML scrape, 158 Banks + NBFCs (ADR 0030,
     # Phase 2.2a-ii). Underlying data is quarterly so MONTHLY cron suffices.

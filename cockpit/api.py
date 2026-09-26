@@ -26,6 +26,7 @@ from db import read_sql, get_db
 # existing `@_persisted_cache` decorators below — and the long-standing
 # `from cockpit.api import _ttl_cache, _persisted_cache` in cockpit_ops — keep working.
 from cockpit._shared import _ttl_cache, _persisted_cache, safe_json_records
+from output.dossier import is_publishable
 
 
 # ═══════════════════════════════════════════════════
@@ -321,13 +322,11 @@ def get_dossier(sid):
                 dossiers = json.load(fh)
             for d in dossiers:
                 if d.get("sid") == sid and d.get("thesis"):
-                    # Reject hallucinated/invalid dossiers — see output/dossier.py
-                    # _validate_dossier. Dossiers without a `validation` block
-                    # are legacy (pre-validator) and we tolerate them but mark
-                    # them as such so the template can show a notice.
-                    v = d.get("validation")
-                    if v and not v.get("ok", False):
+                    # Legacy dossiers (no `validation` block) are tolerated but
+                    # flagged via `validated` so the template can show a notice.
+                    if not is_publishable(d):
                         return {}
+                    v = d.get("validation")
                     return {
                         **d,
                         "as_of": file_date.isoformat(),
@@ -1239,8 +1238,9 @@ def get_annual_financials(sid):
 def get_forecast_trend(sid):
     """Analyst forecast revisions over time (PT, EPS, Revenue)."""
     df = read_sql(
+        # metric='price' excluded: realized year-ahead close, not a PT (ADR 0045).
         "SELECT metric, date, value, change FROM forecast_history "
-        "WHERE sid = ? ORDER BY date ASC",
+        "WHERE sid = ? AND metric IN ('eps', 'revenue') ORDER BY date ASC",
         params=[sid],
     )
     if df.empty:

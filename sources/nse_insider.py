@@ -190,6 +190,14 @@ def fetch_insider(months=1, dry_run=False):
         time.sleep(3)  # be gentle on NSE
 
     print(f"\nTotal: {total_fetched} fetched, {total_saved} new rows saved")
+    # NSE files thousands of PIT disclosures a month — zero records across a
+    # month-plus window means the endpoint changed, not a quiet market. The API
+    # has returned an empty `data` list since ~2026-05 (reported SUCCESS/0 daily).
+    if total_fetched == 0 and months >= 1:
+        raise RuntimeError(
+            f"NSE PIT API returned 0 records for {start} → {end} — endpoint "
+            f"likely changed/deprecated; insider_trades is not being refreshed"
+        )
     return total_saved
 
 

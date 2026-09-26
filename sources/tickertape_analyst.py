@@ -180,25 +180,19 @@ def _extract_forecast_rows(sid, data, fetched_at):
          creates phantom daily PT rows that match close prices and break
          every downstream signal. See HANDOFF 2026-05-22.
 
-    We keep (1) and drop (2). A "today" entry is anything dated within the
-    last 90 days — real broker PT revisions get published quarterly at best,
-    so a fresh entry from this week is the lastPrice contaminant, not new
-    consensus.
+    Both are unusable as PT history — (1) turned out to be the realized
+    year-ahead close (ADR 0045) — so only the eps/revenue series are kept.
     """
-    from datetime import date as _date, timedelta as _timedelta
-    cutoff = (_date.today() - _timedelta(days=90)).isoformat()
     rows = []
     try:
         fh = data.get("props", {}).get("pageProps", {}).get("forecastsHistory", {}) or {}
-        for metric in ("price", "eps", "revenue"):
+        # "price" is NOT ingested: those rows are the realized year-ahead close,
+        # not a PT (ADR 0045) — nothing may read them, so stop rewriting them.
+        for metric in ("eps", "revenue"):
             for entry in fh.get(metric, []):
                 raw_date = entry.get("date", "")
                 d = raw_date[:10] if raw_date else None
                 if not d:
-                    continue
-                # Drop the contaminating "today" entry for the price metric only.
-                # eps/revenue are quarterly fundamentals — those can be recent.
-                if metric == "price" and d >= cutoff:
                     continue
                 rows.append({
                     "sid": sid,

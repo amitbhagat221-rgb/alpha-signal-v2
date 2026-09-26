@@ -5,6 +5,11 @@
 
 set -u
 cd /home/ubuntu/alpha-signal-v2
+
+# No-two-harvesters-at-once (CLAUDE.md) — same lock as run_pipeline.sh /
+# run_daily_forward.sh. This 4-hour harvest used to run unlocked.
+exec 200>/tmp/alpha_signal_harvest.lock
+flock -n 200 || { echo "another harvester holds the lock, exiting $(date)"; exit 0; }
 source /home/ubuntu/alpha-signal/venv/bin/activate
 
 LOG=/home/ubuntu/alpha-signal-v2/output/tickertape_$(date +%Y%m).log

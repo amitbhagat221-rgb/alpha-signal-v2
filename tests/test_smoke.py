@@ -31,7 +31,9 @@ def test_all_pipeline_modules_import():
 
 
 def test_dry_run_executes():
-    """`python pipeline.py --dry-run` must exit 0 and list all configured steps."""
+    """`python pipeline.py --dry-run` must exit 0 and list every step due today
+    (weekly/monthly steps are frequency-gated out on other days)."""
+    from pipeline import _step_should_run_today
     result = subprocess.run(
         [sys.executable, "pipeline.py", "--dry-run"],
         capture_output=True, text=True, timeout=60,
@@ -39,7 +41,8 @@ def test_dry_run_executes():
     assert result.returncode == 0, f"dry-run failed: {result.stderr}"
     out = result.stdout + result.stderr
     for step in PIPELINE_STEPS:
-        assert step["name"] in out, f"step '{step['name']}' missing from dry-run output"
+        if _step_should_run_today(step):
+            assert step["name"] in out, f"step '{step['name']}' missing from dry-run output"
 
 
 def test_critical_steps_marked():
@@ -52,7 +55,7 @@ def test_critical_steps_marked():
 def test_flow_overview_returns_layers_and_failures():
     """get_flow_overview() must return the layered structure the /flow page
     iterates over — and a `failures` list that excludes healthy steps."""
-    from cockpit.api import get_flow_overview
+    from cockpit_ops.api import get_flow_overview
     overview = get_flow_overview()
     assert "layers" in overview and isinstance(overview["layers"], list)
     assert "failures" in overview and isinstance(overview["failures"], list)
@@ -63,7 +66,7 @@ def test_flow_overview_returns_layers_and_failures():
 
 def test_rerun_step_rejects_unknown_step():
     """rerun_step must refuse to spawn a subprocess for a step name not in PIPELINE_STEPS."""
-    from cockpit.api import rerun_step
+    from cockpit_ops.api import rerun_step
     result = rerun_step("definitely_not_a_real_step")
     assert result["ok"] is False
     assert "unknown step" in result["error"].lower()

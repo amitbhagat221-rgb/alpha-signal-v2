@@ -719,28 +719,10 @@ def pit_avg_delivery(prices_pit, window=30):
 
 
 def pit_delivery_anomaly_z(prices_pit, window=90):
-    """Today's delivery % vs 90-day mean, normalized by 90-day std."""
-    if "delivery_pct" not in prices_pit.columns:
-        return pd.DataFrame(columns=["sid", "delivery_anomaly_z"])
-    rows = []
-    for sid, group in prices_pit.groupby("sid"):
-        g = group.sort_values("date").tail(window)
-        if len(g) < 30:
-            rows.append({"sid": sid})
-            continue
-        deliv = g["delivery_pct"].dropna()
-        if len(deliv) < 30:
-            rows.append({"sid": sid})
-            continue
-        latest = deliv.iloc[-1]
-        baseline = deliv.iloc[:-1]
-        mean, std = baseline.mean(), baseline.std()
-        if std and std > 0 and pd.notna(mean):
-            z = (latest - mean) / std
-            rows.append({"sid": sid, "delivery_anomaly_z": round(float(z), 3)})
-        else:
-            rows.append({"sid": sid})
-    return pd.DataFrame(rows)
+    """Today's delivery % vs 90-day mean, normalized by 90-day std.
+    Same function the live screener calls — one implementation, no twin drift."""
+    from signals.delivery_anomaly import delivery_anomaly_z
+    return delivery_anomaly_z(prices_pit, window=window)
 
 
 def pit_pledge_quality(stocks, sh_pit):
@@ -2636,13 +2618,13 @@ def reconstruct_one_date(eval_date, raw, signals_to_run):
 
     if "delivery" in signals_to_run:
         base = base.merge(pit_avg_delivery(px_pit), on="sid", how="left")
+        base = base.merge(pit_delivery_anomaly_z(px_pit), on="sid", how="left")
 
     if "sector_momentum" in signals_to_run:
         base = base.merge(
             pit_sector_momentum(raw["stocks"], px_pit, raw["macro_hist"], eval_date),
             on="sid", how="left",
         )
-        base = base.merge(pit_delivery_anomaly_z(px_pit), on="sid", how="left")
 
     if "sector_tilt" in signals_to_run:
         base = base.merge(

@@ -220,6 +220,19 @@ def _validate_dossier(dossier, context=None):
     }
 
 
+def is_publishable(dossier):
+    """True if a saved dossier may be shown to a reader (cockpit or email).
+
+    Needs a thesis, and a `validation` block (when present) must be ok —
+    generate() still writes failed-validation dossiers to the JSON for audit.
+    Legacy pre-validator dossiers (no block) are tolerated.
+    """
+    if not dossier or not dossier.get("thesis"):
+        return False
+    v = dossier.get("validation")
+    return not v or bool(v.get("ok", False))
+
+
 def _build_stock_context(sid):
     """Build context dict for a single stock."""
     stock = read_sql("SELECT * FROM stocks WHERE sid = ?", params=[sid])

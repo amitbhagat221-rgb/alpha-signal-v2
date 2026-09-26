@@ -215,7 +215,7 @@ async def api_pipeline(days: int = 7):
 @app.post("/api/pipeline/rerun/{step_name}")
 async def api_pipeline_rerun(step_name: str):
     """Trigger a single pipeline step in the background. Returns immediately."""
-    from cockpit.api import rerun_step
+    from cockpit_ops.api import rerun_step
     result = rerun_step(step_name)
     return JSONResponse(result, status_code=200 if result.get("ok") else 409)
 

@@ -29,6 +29,7 @@ from email.mime.text import MIMEText
 
 from config import PROJECT_ROOT
 from db import read_sql
+from output.dossier import is_publishable
 
 COCKPIT_URL = os.environ.get("COCKPIT_BASE_URL", "http://140.245.248.166:3000")
 TOP_N_PER_TIER = 5
@@ -478,7 +479,8 @@ def _build_html():
         try:
             with open(dossier_path) as f:
                 for d in json.load(f):
-                    if "sid" in d:
+                    # Never mail a dossier that failed the numbers validator.
+                    if "sid" in d and is_publishable(d):
                         dossiers_by_sid[d["sid"]] = d
         except (json.JSONDecodeError, OSError):
             pass

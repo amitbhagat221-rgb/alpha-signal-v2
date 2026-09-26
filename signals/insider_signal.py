@@ -173,6 +173,14 @@ def compute(dry_run=False):
 
     df = _compute_scores(trades, stocks)
 
+    # No trade in the whole lookback window = dead feed, not a quiet market.
+    # Writing all-NEUTRAL would mask it (previously surfaced as KeyError).
+    if "signal_type" not in df.columns:
+        raise RuntimeError(
+            f"0 insider trades in the last {LOOKBACK_DAYS}d (latest trade_date "
+            f"{trades['trade_date'].max()}) — upstream insider_trades feed is stale"
+        )
+
     snapshot = date.today().isoformat()
     has_signal = df["signal_type"].notna().sum()
 
