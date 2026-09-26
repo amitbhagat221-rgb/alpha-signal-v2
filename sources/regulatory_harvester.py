@@ -32,6 +32,7 @@ import requests
 
 from config import API
 from db import get_db, insert_df, read_sql
+from sources._http import polite_get
 
 USER_AGENT = API["user_agent"]
 HEADERS = {"User-Agent": USER_AGENT}
@@ -150,6 +151,16 @@ def _parse_google_rss(xml_text):
     return items
 
 
+def _google_rss_items(topic, start, end):
+    """One Google News RSS query for `topic` in [start, end] → parsed items.
+    Paced ≥2s per host by polite_get (was a flat 1s); 429/5xx back off and
+    retry there, then raise."""
+    q = f"{topic}+after:{start}+before:{end}"
+    url = f"https://news.google.com/rss/search?q={q}&hl=en-IN&gl=IN&ceid=IN:en"
+    resp = polite_get(url, headers=HEADERS)
+    return _parse_google_rss(resp.text) if resp is not None else []
+
+
 def harvest_google_news(dry_run=False):
     """Fetch historical news from Google News RSS with date-windowed topic queries."""
     total_queries = len(GOOGLE_TOPICS) * len(GOOGLE_WINDOWS)
@@ -167,30 +178,17 @@ def harvest_google_news(dry_run=False):
     for topic in GOOGLE_TOPICS:
         for start, end in GOOGLE_WINDOWS:
             query_num += 1
-            q = f"{topic}+after:{start}+before:{end}"
-            url = f"https://news.google.com/rss/search?q={q}&hl=en-IN&gl=IN&ceid=IN:en"
-
             try:
-                resp = requests.get(url, headers=HEADERS, timeout=15)
-                if resp.status_code == 200:
-                    items = _parse_google_rss(resp.text)
-                    new_items = [i for i in items if i["event_id"] not in seen_ids]
-                    for i in new_items:
-                        seen_ids.add(i["event_id"])
-                    all_items.extend(new_items)
+                items = _google_rss_items(topic, start, end)
+                new_items = [i for i in items if i["event_id"] not in seen_ids]
+                for i in new_items:
+                    seen_ids.add(i["event_id"])
+                all_items.extend(new_items)
 
-                    if query_num % 20 == 0 or len(new_items) > 0:
-                        print(f"  [{query_num:3d}/{total_queries}] {topic[:40]:40s} {start[:7]}→{end[:7]} +{len(new_items)} (total: {len(all_items)})")
-                elif resp.status_code == 429:
-                    print(f"  Rate limited at query {query_num}. Sleeping 30s...")
-                    time.sleep(30)
-                else:
-                    pass  # silently skip non-200
-
+                if query_num % 20 == 0 or len(new_items) > 0:
+                    print(f"  [{query_num:3d}/{total_queries}] {topic[:40]:40s} {start[:7]}→{end[:7]} +{len(new_items)} (total: {len(all_items)})")
             except Exception as e:
                 print(f"  Error: {e}")
-
-            time.sleep(1.0)  # be gentle
 
     print(f"\nGoogle News: {len(all_items)} unique articles fetched")
 
@@ -264,8 +262,8 @@ def harvest_rbi(start_id=12500, end_id=13370, dry_run=False):
         url = f"https://www.rbi.org.in/Scripts/NotificationUser.aspx?Id={notif_id}&Mode=0"
 
         try:
-            resp = requests.get(url, headers=HEADERS, timeout=15)
-            if resp.status_code == 200 and len(resp.text) > 2000:
+            resp = polite_get(url, headers=HEADERS)   # ≥2s per host
+            if resp is not None and len(resp.text) > 2000:
                 title, pub_date, body = _parse_rbi_notification(resp.text, notif_id)
 
                 if title and len(title) > 10:
@@ -286,8 +284,6 @@ def harvest_rbi(start_id=12500, end_id=13370, dry_run=False):
 
         if (notif_id - start_id) % 50 == 0 and notif_id > start_id:
             print(f"  [{notif_id - start_id}/{total}] {len(items)} circulars found", flush=True)
-
-        time.sleep(2.0)  # 2s delay to be gentle on RBI servers
 
     print(f"\nRBI: {len(items)} circulars fetched")
 
@@ -333,8 +329,8 @@ def harvest_wayback(dry_run=False):
         )
 
         try:
-            resp = requests.get(cdx_url, timeout=30)
-            if resp.status_code != 200:
+            resp = polite_get(cdx_url, timeout=30)
+            if resp is None:
                 continue
 
             rows = resp.json()
@@ -349,8 +345,8 @@ def harvest_wayback(dry_run=False):
                 archive_url = f"https://web.archive.org/web/{timestamp}/{feed_url}"
 
                 try:
-                    r = requests.get(archive_url, headers=HEADERS, timeout=15)
-                    if r.status_code == 200:
+                    r = polite_get(archive_url, headers=HEADERS)   # ≥2s per host (was 1s)
+                    if r is not None:
                         items = _parse_rss_generic(r.text, f"wayback_{feed_url.split('/')[0]}")
                         new = [i for i in items if i["event_id"] not in seen_ids]
                         for i in new:
@@ -358,8 +354,6 @@ def harvest_wayback(dry_run=False):
                         all_items.extend(new)
                 except Exception:
                     pass
-
-                time.sleep(1.0)
 
         except Exception as e:
             print(f"  CDX error for {feed_url}: {e}")
@@ -502,12 +496,13 @@ def harvest_pib(start_prid=2150000, end_prid=2260000, dry_run=False):
         url = f"https://pib.gov.in/PressReleasePage.aspx?PRID={prid}"
 
         try:
-            resp = requests.get(url, headers={
+            # retries=0 as before; polite_get paces ≥2s per host (was 0.3s).
+            resp = polite_get(url, headers={
                 "User-Agent": USER_AGENT,
                 "Accept": "text/html",
-            }, timeout=10)
+            }, timeout=10, retries=0)
 
-            if resp.status_code == 200 and len(resp.text) > 3000:
+            if resp is not None and len(resp.text) > 3000:
                 result = _parse_pib_page(resp.text, prid)
                 if result and result[0]:
                     title, pub_date, body, ministry = result
@@ -523,16 +518,15 @@ def harvest_pib(start_prid=2150000, end_prid=2260000, dry_run=False):
                     })
                 else:
                     skipped += 1
-            elif resp.status_code == 403:
-                time.sleep(5)  # back off on 403
 
+        except requests.HTTPError as e:
+            if e.response is not None and e.response.status_code == 403:
+                time.sleep(5)  # back off on 403
         except Exception:
             pass
 
         if (prid - start_prid) % 500 == 0 and prid > start_prid:
             print(f"  [{prid - start_prid}/{total}] {len(items)} relevant releases, {skipped} skipped")
-
-        time.sleep(0.3)
 
     print(f"\nPIB: {len(items)} relevant releases (of {total} scanned, {skipped} skipped)")
 
@@ -574,27 +568,27 @@ def harvest_incremental(days=30, dry_run=False):
 
     all_items = []
     seen_ids = set()
+    n_err = 0
     for i, topic in enumerate(GOOGLE_TOPICS, 1):
-        q = f"{topic}+after:{window_str_start}+before:{window_str_end}"
-        url = f"https://news.google.com/rss/search?q={q}&hl=en-IN&gl=IN&ceid=IN:en"
         try:
-            resp = requests.get(url, headers=HEADERS, timeout=15)
-            if resp.status_code == 200:
-                items = _parse_google_rss(resp.text)
-                new_items = [it for it in items if it["event_id"] not in seen_ids]
-                for it in new_items:
-                    seen_ids.add(it["event_id"])
-                all_items.extend(new_items)
-                if i % 10 == 0 or len(new_items) > 0:
-                    print(f"  [{i:3d}/{len(GOOGLE_TOPICS)}] {topic[:40]:40s} +{len(new_items)} (total: {len(all_items)})")
-            elif resp.status_code == 429:
-                print(f"  Rate limited at query {i}. Sleeping 30s...")
-                time.sleep(30)
+            items = _google_rss_items(topic, window_str_start, window_str_end)
+            new_items = [it for it in items if it["event_id"] not in seen_ids]
+            for it in new_items:
+                seen_ids.add(it["event_id"])
+            all_items.extend(new_items)
+            if i % 10 == 0 or len(new_items) > 0:
+                print(f"  [{i:3d}/{len(GOOGLE_TOPICS)}] {topic[:40]:40s} +{len(new_items)} (total: {len(all_items)})")
         except Exception as e:
+            n_err += 1
             print(f"  Error on {topic}: {e}")
-        time.sleep(1.0)
 
     print(f"\nRegulatory incremental: {len(all_items)} articles fetched")
+    # A 30-day window across 39 topics normally returns ~1,800-2,100 articles
+    # (pipeline_log, Jul-Sep 2026). Zero = Google blocked us or the RSS shape
+    # changed — the old loop logged SUCCESS/0 then (non-200s were skipped silently).
+    if not all_items:
+        raise RuntimeError(f"regulatory incremental: 0 articles from {len(GOOGLE_TOPICS)} "
+                           f"Google News queries ({n_err} errored) — blocked or feed changed")
     if all_items:
         df = pd.DataFrame(all_items)
         n = insert_df(df, "regulatory_events")

@@ -48,6 +48,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from db import read_sql, upsert_df
+from sources._http import run_harvester
 
 DELAY = 0.3       # Yahoo accepts ~60 req/min; 300ms = safe
 SOURCE = "yfinance"
@@ -263,10 +264,6 @@ def compute(limit=None, ticker=None, tier=None, snapshot=False, dry_run=False):
     fetched_at  = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     snapshot_dt = _first_business_day()
 
-    consensus_rows = []   # writes to analyst_consensus (current)
-    snapshot_rows  = []   # writes to analyst_consensus_snapshots (monthly history)
-    n_with_data    = 0
-    n_no_data      = 0
     n_real_spread  = 0
 
     # Latest close per sid for the spread-check sanity signal
@@ -286,116 +283,117 @@ def compute(limit=None, ticker=None, tier=None, snapshot=False, dry_run=False):
     prior_changed_at = dict(zip(prior["sid"], prior["price_target_changed_at"]))
 
     t_start = time.time()
-    for i, (sid, t, cap_tier) in enumerate(stocks.itertuples(index=False), 1):
+    todo = []
+    for sid, t, cap_tier in stocks.itertuples(index=False, name=None):
         if sid in no_coverage_sids and not is_monday:
             n_skipped_no_coverage += 1
-            continue
+        else:
+            todo.append((sid, t, cap_tier))
 
+    def fetch(item):
+        nonlocal n_real_spread
+        sid, t, cap_tier = item
         data = _fetch_one(t, sid_for_gate=sid)
         if data is None:
-            n_no_data += 1
-        else:
-            n_with_data += 1
-            close = close_map.get(sid)
-            if close and data["target_mean"] and abs(data["target_mean"] - close) / close > 0.02:
-                n_real_spread += 1
+            return []
+        close = close_map.get(sid)
+        if close and data["target_mean"] and abs(data["target_mean"] - close) / close > 0.02:
+            n_real_spread += 1
 
-            # Plan 0007 Phase 3 — Plausibility Gate on pt_upside.
-            # CCAVENUE-class: yfinance returned +33,522% upside for a thin-
-            # coverage SMALL cap (2026-05-28). The hard cap in PLAUSIBILITY_
-            # RANGES routes that row to consensus_signals_quarantine instead
-            # of the live table. Existing clip at ±50/+150 in signals/
-            # consensus.py (commit 0d8d8bd) stays as a backstop.
-            if close and data["target_mean"] and close > 0:
-                pt_upside_pct = 100 * (data["target_mean"] / close - 1)
-                try:
-                    from validators.plausibility import verify_plausibility, route_on_plausibility
-                    pv = verify_plausibility("pt_upside_pct", value=pt_upside_pct,
-                                             segment=cap_tier or "*")
-                    if pv.status == "OUT_OF_RANGE_HARD":
-                        # Quarantine + skip live write for this SID's analyst row
-                        route_on_plausibility(
-                            pv, source_table="consensus_signals",
-                            row={"sid": sid, "snapshot_date": fetched_at[:10],
-                                 "pt_upside": pt_upside_pct, "fetched_at": fetched_at},
-                            sid=sid, datum_class="pt_upside_pct",
-                        )
-                        n_no_data += 1   # treat as no_data from accounting POV
-                        time.sleep(DELAY)
-                        continue
-                    elif pv.status in ("PASS", "EXTREME"):
-                        route_on_plausibility(
-                            pv, source_table="consensus_signals",
-                            row={"sid": sid, "snapshot_date": fetched_at[:10],
-                                 "pt_upside": pt_upside_pct, "fetched_at": fetched_at},
-                            sid=sid, datum_class="pt_upside_pct",
-                        )
-                except Exception as e:
-                    import sys
-                    print(f"  ⚠ plausibility gate failed for {sid}: {e}", file=sys.stderr)
+        # Plan 0007 Phase 3 — Plausibility Gate on pt_upside.
+        # CCAVENUE-class: yfinance returned +33,522% upside for a thin-
+        # coverage SMALL cap (2026-05-28). The hard cap in PLAUSIBILITY_
+        # RANGES routes that row to consensus_signals_quarantine instead
+        # of the live table. Existing clip at ±50/+150 in signals/
+        # consensus.py (commit 0d8d8bd) stays as a backstop.
+        if close and data["target_mean"] and close > 0:
+            pt_upside_pct = 100 * (data["target_mean"] / close - 1)
+            try:
+                from validators.plausibility import verify_plausibility, route_on_plausibility
+                pv = verify_plausibility("pt_upside_pct", value=pt_upside_pct,
+                                         segment=cap_tier or "*")
+                if pv.status == "OUT_OF_RANGE_HARD":
+                    # Quarantine + skip live write for this SID's analyst row
+                    route_on_plausibility(
+                        pv, source_table="consensus_signals",
+                        row={"sid": sid, "snapshot_date": fetched_at[:10],
+                             "pt_upside": pt_upside_pct, "fetched_at": fetched_at},
+                        sid=sid, datum_class="pt_upside_pct",
+                    )
+                    return []   # treat as no_data from accounting POV
+                elif pv.status in ("PASS", "EXTREME"):
+                    route_on_plausibility(
+                        pv, source_table="consensus_signals",
+                        row={"sid": sid, "snapshot_date": fetched_at[:10],
+                             "pt_upside": pt_upside_pct, "fetched_at": fetched_at},
+                        sid=sid, datum_class="pt_upside_pct",
+                    )
+            except Exception as e:
+                import sys
+                print(f"  ⚠ plausibility gate failed for {sid}: {e}", file=sys.stderr)
 
-            # Narrow column set so upsert_df only updates these fields,
-            # leaving Tickertape-sourced forward_eps / eps_growth_pct /
-            # forward_revenue / revenue_growth_pct intact (those are real).
-            # PT change detection — compare new mean PT to prior fetch
-            prior_pt   = prior_pt_map.get(sid)
-            changed_at = prior_changed_at.get(sid)
-            new_pt     = data["target_mean"]
-            pt_prev_to_save = None
-            if (prior_pt is not None and not pd.isna(prior_pt) and prior_pt > 0
-                    and new_pt is not None
-                    and abs(new_pt - prior_pt) / prior_pt > 0.005):
-                # PT moved >0.5% — record prior value + update timestamp
-                pt_prev_to_save = float(prior_pt)
-                changed_at = fetched_at
-            consensus_rows.append({
-                "sid":                       sid,
-                "total_analysts":            data["n_analysts"],
-                "price_target":              new_pt,
-                "price_target_median":       data["target_median"],
-                "price_target_high":         data["target_high"],
-                "price_target_low":          data["target_low"],
-                "recommendation_key":        data["recommendation_key"],
-                "recommendation_mean":       data["recommendation_mean"],
-                "n_strong_buy":              data["n_strong_buy"],
-                "n_buy":                     data["n_buy"],
-                "n_hold":                    data["n_hold"],
-                "n_sell":                    data["n_sell"],
-                "n_strong_sell":             data["n_strong_sell"],
-                "pt_source":                 SOURCE,
-                "next_earnings_date":        data["next_earnings_date"],
-                "rating_mix_history":        data["rating_mix_history"],
-                "price_target_prev":         pt_prev_to_save if pt_prev_to_save else prior_pt_map.get(sid),
-                "price_target_changed_at":   changed_at,
-                "has_analyst_data":          1,
-                "fetched_at":                fetched_at,
-            })
-            if snapshot:
-                snapshot_rows.append({
-                    "sid": sid,
-                    "snapshot_date":       snapshot_dt,
-                    "source":              SOURCE,
-                    "target_mean":         data["target_mean"],
-                    "target_median":       data["target_median"],
-                    "target_high":         data["target_high"],
-                    "target_low":          data["target_low"],
-                    "n_analysts":          data["n_analysts"],
-                    "recommendation_key":  data["recommendation_key"],
-                    "recommendation_mean": data["recommendation_mean"],
-                    "fetched_at":          fetched_at,
-                })
+        # Narrow column set so upsert_df only updates these fields,
+        # leaving Tickertape-sourced forward_eps / eps_growth_pct /
+        # forward_revenue / revenue_growth_pct intact (those are real).
+        # PT change detection — compare new mean PT to prior fetch
+        prior_pt   = prior_pt_map.get(sid)
+        changed_at = prior_changed_at.get(sid)
+        new_pt     = data["target_mean"]
+        pt_prev_to_save = None
+        if (prior_pt is not None and not pd.isna(prior_pt) and prior_pt > 0
+                and new_pt is not None
+                and abs(new_pt - prior_pt) / prior_pt > 0.005):
+            # PT moved >0.5% — record prior value + update timestamp
+            pt_prev_to_save = float(prior_pt)
+            changed_at = fetched_at
+        rows = [("analyst_consensus", {
+            "sid":                       sid,
+            "total_analysts":            data["n_analysts"],
+            "price_target":              new_pt,
+            "price_target_median":       data["target_median"],
+            "price_target_high":         data["target_high"],
+            "price_target_low":          data["target_low"],
+            "recommendation_key":        data["recommendation_key"],
+            "recommendation_mean":       data["recommendation_mean"],
+            "n_strong_buy":              data["n_strong_buy"],
+            "n_buy":                     data["n_buy"],
+            "n_hold":                    data["n_hold"],
+            "n_sell":                    data["n_sell"],
+            "n_strong_sell":             data["n_strong_sell"],
+            "pt_source":                 SOURCE,
+            "next_earnings_date":        data["next_earnings_date"],
+            "rating_mix_history":        data["rating_mix_history"],
+            "price_target_prev":         pt_prev_to_save if pt_prev_to_save else prior_pt_map.get(sid),
+            "price_target_changed_at":   changed_at,
+            "has_analyst_data":          1,
+            "fetched_at":                fetched_at,
+        })]
+        if snapshot:
+            rows.append(("analyst_consensus_snapshots", {
+                "sid": sid,
+                "snapshot_date":       snapshot_dt,
+                "source":              SOURCE,
+                "target_mean":         data["target_mean"],
+                "target_median":       data["target_median"],
+                "target_high":         data["target_high"],
+                "target_low":          data["target_low"],
+                "n_analysts":          data["n_analysts"],
+                "recommendation_key":  data["recommendation_key"],
+                "recommendation_mean": data["recommendation_mean"],
+                "fetched_at":          fetched_at,
+            }))
+        return rows
 
-        if i % 200 == 0:
-            elapsed = time.time() - t_start
-            rate = i / elapsed
-            print(f"  [{i}/{len(stocks)}] coverage={n_with_data} no_data={n_no_data} "
-                  f"spread={n_real_spread} | {rate:.1f}/s")
-        time.sleep(DELAY)
+    def write(tagged):
+        for table in ("analyst_consensus", "analyst_consensus_snapshots"):
+            rows = [r for tb, r in tagged if tb == table]
+            if rows:
+                upsert_df(pd.DataFrame(rows), table)
+        return sum(1 for tb, _ in tagged if tb == "analyst_consensus")
 
-    if consensus_rows:
-        upsert_df(pd.DataFrame(consensus_rows), "analyst_consensus")
-    if snapshot_rows:
-        upsert_df(pd.DataFrame(snapshot_rows), "analyst_consensus_snapshots")
+    # RAISES if not one attempted stock came back with a PT — Yahoo blocked us or
+    # the .info shape changed (was SUCCESS/0 before). Mid-run flushes every 200.
+    n_with_data, _, _ = run_harvester(todo, fetch, write, label="yfinance analyst", delay=DELAY)
 
     # Backstop: null + flag any stored implausible PT (stale/pre-gate garbage
     # the per-fetch gate above can't see). Skip on single-ticker smoke runs.
@@ -411,7 +409,7 @@ def compute(limit=None, ticker=None, tier=None, snapshot=False, dry_run=False):
     print(f"  {n_skipped_no_coverage} skipped (no-coverage sid, retried Mondays only; today "
           f"{'IS' if is_monday else 'is NOT'} Monday)")
     if snapshot:
-        print(f"  Wrote {len(snapshot_rows)} rows to analyst_consensus_snapshots @ {snapshot_dt}")
+        print(f"  Wrote {n_with_data} rows to analyst_consensus_snapshots @ {snapshot_dt}")
     return n_with_data
 
 
