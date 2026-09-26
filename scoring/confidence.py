@@ -37,10 +37,7 @@ from typing import Optional
 import pandas as pd
 
 from db import read_sql, get_db
-from scoring.health_score import (
-    rollup_pick_uhs, compute_uhs, FACTOR_UPSTREAM_TABLES, WIRED_FACTORS,
-    _gate_pass_rate,
-)
+from scoring.health_score import compute_uhs, rollup_picks_uhs
 
 
 # Minimum lineage coverage for Gate 6 to PASS. Below this, the factor's
@@ -134,19 +131,35 @@ def lineage_coverage_for_factor(factor_id: str, snapshot_date: str) -> tuple[Opt
     return coverage, f"{traced} traced / {n_picks} picks = {coverage*100:.1f}%"
 
 
-def compute_pick_confidence(sid: str, pick_date: str) -> dict:
-    """Full per-pick UHS row: 5 dims, score, label, worst dim, breakdown JSON.
+def _lineage_row_counts(sids, pick_date: str) -> dict:
+    """{sid: signal_lineage rows at the sid's latest snapshot ≤ pick_date} (one query)."""
+    if not sids:
+        return {}
+    ph = ",".join("?" * len(sids))
+    df = read_sql(
+        f"""
+        SELECT l.sid, COUNT(*) AS n
+        FROM signal_lineage l
+        JOIN (SELECT sid, MAX(snapshot_date) AS d FROM signal_lineage
+              WHERE sid IN ({ph}) AND snapshot_date <= ? GROUP BY sid) m
+          ON l.sid = m.sid AND l.snapshot_date = m.d
+        GROUP BY l.sid
+        """,
+        params=list(sids) + [pick_date],
+    )
+    return dict(zip(df["sid"], df["n"]))
 
-    Calls rollup_pick_uhs (Phase 1 base) then applies Gate 6 cap.
-    """
-    base = rollup_pick_uhs(sid, pick_date)
 
-    # Read the pick's tier + sector (sector gates the Financials exemption below)
-    df = read_sql("SELECT cap_tier, sector FROM daily_picks WHERE sid=? AND pick_date=?",
-                   params=[sid, pick_date])
-    if df.empty:
-        return base
-    sector = df.iloc[0]["sector"]
+def compute_picks_confidence(pick_date: str, sids=None, factor_rows=None) -> dict:
+    """Full per-pick UHS rows for a pick date: {sid: row} with 5 dims, score, label,
+    worst dim, breakdown JSON. rollup_picks_uhs (Phase 1 base) then the Gate 6 cap.
+    Batched — a handful of reads for the whole pick set (`sids`/`factor_rows` as in
+    rollup_picks_uhs)."""
+    bases = rollup_picks_uhs(pick_date, sids=sids, factor_rows=factor_rows)
+
+    # The pick's sector gates the Financials exemption below.
+    picks = read_sql("SELECT sid, sector FROM daily_picks WHERE pick_date=?", params=[pick_date])
+    sector_of = dict(zip(picks["sid"], picks["sector"]))
 
     # Gate 6 — PER-SID lineage traceability (rewritten 2026-06-09).
     #
@@ -170,21 +183,18 @@ def compute_pick_confidence(sid: str, pick_date: str) -> dict:
     # by the factors that did score it, so it is not penalised (value-aware).
     # Whole sectors whose ONLY applicable emitters are sector-excluded
     # (Financials) are exempt outright (_LINEAGE_EXEMPT_SECTORS).
-    gate_6_penalties = []
-    if sid in _active_lineage_sids(pick_date) and sector not in _LINEAGE_EXEMPT_SECTORS:
-        n_rows = read_sql(
-            """
-            SELECT COUNT(*) AS n FROM signal_lineage
-            WHERE sid = ?
-              AND snapshot_date = (
-                  SELECT MAX(snapshot_date) FROM signal_lineage
-                  WHERE sid = ? AND snapshot_date <= ?
-              )
-            """,
-            params=[sid, sid, pick_date],
-        )
-        n_traced = int(n_rows.iloc[0]["n"] or 0) if not n_rows.empty else 0
-        if n_traced == 0:
+    active = _active_lineage_sids(pick_date)
+    in_scope = [s for s in bases if s in sector_of and s in active
+                and sector_of[s] not in _LINEAGE_EXEMPT_SECTORS]
+    n_traced = _lineage_row_counts(in_scope, pick_date)
+
+    out = {}
+    for sid, base in bases.items():
+        if sid not in sector_of:
+            out[sid] = base
+            continue
+        gate_6_penalties = []
+        if sid in in_scope and int(n_traced.get(sid, 0) or 0) == 0:
             gate_6_penalties.append({
                 "factor": "(all)", "weight": None, "coverage": 0.0,
                 "reason": (f"{sid} is lineage-active (top-300) but has 0 "
@@ -192,37 +202,41 @@ def compute_pick_confidence(sid: str, pick_date: str) -> dict:
                            f"emission gap; data cannot be traced to source"),
             })
 
-    # If Gate 6 fails for any factor, cap dim_provenance at 10
-    if gate_6_penalties:
-        cur_prov = base.get("dim_provenance")
-        if cur_prov is not None and cur_prov > 10:
-            base["dim_provenance"] = 10
-            # Recompute score_total / score_max / score_pct / label
-            base = compute_uhs(
-                entity_kind=base["entity_kind"],
-                entity_id=base["entity_id"],
-                snapshot_date=base["snapshot_date"],
-                dim_provenance=base["dim_provenance"],
-                dim_freshness=base["dim_freshness"],
-                dim_plausibility=base.get("dim_plausibility"),
-                dim_consistency=base.get("dim_consistency"),
-                dim_coverage=base["dim_coverage"],
-                reasons=_merge_reasons_with_gate6(base.get("reasons_json"), gate_6_penalties),
-            )
+        # If Gate 6 fails for any factor, cap dim_provenance at 10
+        if gate_6_penalties:
+            cur_prov = base.get("dim_provenance")
+            if cur_prov is not None and cur_prov > 10:
+                base["dim_provenance"] = 10
+                # Recompute score_total / score_max / score_pct / label
+                base = compute_uhs(
+                    entity_kind=base["entity_kind"],
+                    entity_id=base["entity_id"],
+                    snapshot_date=base["snapshot_date"],
+                    dim_provenance=base["dim_provenance"],
+                    dim_freshness=base["dim_freshness"],
+                    dim_plausibility=base.get("dim_plausibility"),
+                    dim_consistency=base.get("dim_consistency"),
+                    dim_coverage=base["dim_coverage"],
+                    reasons=_merge_reasons_with_gate6(base.get("reasons_json"), gate_6_penalties),
+                )
 
-    # Find worst dim
-    dim_pairs = [
-        ("provenance",   base.get("dim_provenance")),
-        ("freshness",    base.get("dim_freshness")),
-        ("plausibility", base.get("dim_plausibility")),
-        ("consistency",  base.get("dim_consistency")),
-        ("coverage",     base.get("dim_coverage")),
-    ]
-    populated = [(n, v) for n, v in dim_pairs if v is not None]
-    worst = min(populated, key=lambda kv: kv[1])[0] if populated else None
-    base["uhs_worst_dim"] = worst
+        # Find worst dim
+        dim_pairs = [
+            ("provenance",   base.get("dim_provenance")),
+            ("freshness",    base.get("dim_freshness")),
+            ("plausibility", base.get("dim_plausibility")),
+            ("consistency",  base.get("dim_consistency")),
+            ("coverage",     base.get("dim_coverage")),
+        ]
+        populated = [(n, v) for n, v in dim_pairs if v is not None]
+        base["uhs_worst_dim"] = min(populated, key=lambda kv: kv[1])[0] if populated else None
+        out[sid] = base
+    return out
 
-    return base
+
+def compute_pick_confidence(sid: str, pick_date: str) -> dict:
+    """Full per-pick UHS row for one pick (see compute_picks_confidence)."""
+    return compute_picks_confidence(pick_date, sids=[sid])[sid]
 
 
 def _merge_reasons_with_gate6(existing_json, gate_6_penalties):
@@ -250,44 +264,41 @@ def batch_write_pick_uhs(pick_date: Optional[str] = None) -> int:
     Called from scoring/screener.compute() after the daily_picks write.
     """
     pick_date = pick_date or _date.today().isoformat()
-    df = read_sql(
-        "SELECT sid FROM daily_picks WHERE pick_date = ?",
-        params=[pick_date],
-    )
-    if df.empty:
+    uhs = compute_picks_confidence(pick_date)
+    if not uhs:
         print(f"  No daily_picks rows for {pick_date}; skipping UHS write")
         return 0
 
-    n = 0
+    params = [
+        (
+            u.get("score_pct"),
+            json.dumps({
+                "dims": {
+                    "provenance":   u.get("dim_provenance"),
+                    "freshness":    u.get("dim_freshness"),
+                    "plausibility": u.get("dim_plausibility"),
+                    "consistency":  u.get("dim_consistency"),
+                    "coverage":     u.get("dim_coverage"),
+                },
+                "reasons": json.loads(u.get("reasons_json", "{}") or "{}"),
+            }, ensure_ascii=False),
+            u.get("label"),
+            u.get("uhs_worst_dim"),
+            sid, pick_date,
+        )
+        for sid, u in uhs.items()
+    ]
     with get_db() as conn:
-        for sid in df["sid"]:
-            u = compute_pick_confidence(sid, pick_date)
-            conn.execute(
-                """
-                UPDATE daily_picks
-                SET uhs_score = ?, uhs_breakdown_json = ?, uhs_label = ?, uhs_worst_dim = ?
-                WHERE sid = ? AND pick_date = ?
-                """,
-                (
-                    u.get("score_pct"),
-                    json.dumps({
-                        "dims": {
-                            "provenance":   u.get("dim_provenance"),
-                            "freshness":    u.get("dim_freshness"),
-                            "plausibility": u.get("dim_plausibility"),
-                            "consistency":  u.get("dim_consistency"),
-                            "coverage":     u.get("dim_coverage"),
-                        },
-                        "reasons": json.loads(u.get("reasons_json", "{}") or "{}"),
-                    }, ensure_ascii=False),
-                    u.get("label"),
-                    u.get("uhs_worst_dim"),
-                    sid, pick_date,
-                ),
-            )
-            n += 1
-    print(f"  Wrote UHS to {n} daily_picks rows for {pick_date}")
-    return n
+        conn.executemany(
+            """
+            UPDATE daily_picks
+            SET uhs_score = ?, uhs_breakdown_json = ?, uhs_label = ?, uhs_worst_dim = ?
+            WHERE sid = ? AND pick_date = ?
+            """,
+            params,
+        )
+    print(f"  Wrote UHS to {len(params)} daily_picks rows for {pick_date}")
+    return len(params)
 
 
 def update_calibration_log() -> int:

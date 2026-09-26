@@ -51,6 +51,7 @@ from typing import Optional
 
 import pandas as pd
 
+import factors
 from db import read_sql, upsert_df
 
 
@@ -70,24 +71,11 @@ TIER_1_CRITICAL_TABLES = [
 ]
 
 
-# ── Wired factors in the production screener (Phase 1 backfill scope). ──
-# Pulled from scoring/screener.SIGNAL_COLS. Hardcoded here to avoid an import
-# cycle (screener imports config; this file is consumed by cockpit/api which
-# is in a different layer).
-WIRED_FACTORS = [
-    "consensus",
-    "earnings_yield",
-    "accruals",
-    "piotroski",
-    "momentum",
-    "book_to_price",
-    "promoter",
-    "smart_money",
-    "pt_upside",
-    "eps_growth",
-    "pledge_quality",
-    "delivery_anomaly_z",
-]
+# ── Wired factors in the production screener: every weight key carrying a nonzero
+# config.SIGNAL_WEIGHTS weight in some tier. Derived, so pick trust scores roll up
+# over exactly the factors that score the pick (a hand-kept copy here drifted: it
+# still listed pulled pt_upside and missed four wired factors).
+WIRED_FACTORS = factors.wired_weight_keys()
 
 
 # ── Per-table refresh-cadence in days (for the Freshness dim). ──
@@ -106,6 +94,8 @@ FRESHNESS_THRESHOLDS_DAYS = {
     "shareholding":          90,
     "mf_nav_history":         1,
     "mf_scheme_master":       7,
+    "fno_iv_history":         1,
+    "bse_announcements":      1,
 }
 
 
@@ -203,20 +193,15 @@ def write_uhs(rows: list[dict]) -> int:
 # fell back to the mean for the 734/1,440 analyst-thin SMALL picks with no
 # consensus row. Pointing the fundamental factors at `piotroski_scores` (the
 # per-sid fundamental-plausibility verdict, same quarterly/annual inputs) closes
-# that gap for every tier.
+# that gap for every tier. Per-factor values live in factors.FACTORS["uhs_tables"].
 FACTOR_UPSTREAM_TABLES = {
-    "consensus":          ["consensus_signals", "analyst_consensus", "broker_recommendations"],
-    "earnings_yield":     ["stock_prices", "piotroski_scores"],   # E/P: price + fundamental plausibility
-    "accruals":           ["piotroski_scores"],                   # accruals IS a Piotroski component
-    "piotroski":          ["piotroski_scores"],                   # derived table holds the verdict (was raw)
-    "momentum":           ["stock_prices"],
-    "book_to_price":      ["stock_prices", "piotroski_scores"],   # B/P: price + fundamental plausibility
-    "promoter":           [],   # shareholding — no verdict table yet
-    "smart_money":        ["stock_prices"],
-    "pt_upside":          ["consensus_signals"],
-    "eps_growth":         ["consensus_signals"],                  # dropped quarterly_income (no verdicts)
-    "pledge_quality":     [],   # shareholding
-    "delivery_anomaly_z": ["stock_prices"],
+    k: factors.FACTORS[sid]["uhs_tables"]
+    for k, sid in factors.WEIGHT_KEY_TO_SIGNAL.items() if "uhs_tables" in factors.FACTORS[sid]
+}
+# Primary upstream table per factor, for the Freshness dim.
+FACTOR_FRESHNESS_TABLE = {
+    k: factors.FACTORS[sid]["freshness_table"]
+    for k, sid in factors.WEIGHT_KEY_TO_SIGNAL.items() if "freshness_table" in factors.FACTORS[sid]
 }
 
 
@@ -227,27 +212,13 @@ def dim_provenance_for_factor(factor_id: str) -> tuple[Optional[int], str]:
     pass-rate for the factor's upstream data rows.
     """
     try:
-        from lineage import FACTOR_LINEAGE, get_factor_lineage
+        from lineage import FACTOR_LINEAGE
         if factor_id in FACTOR_LINEAGE:
             return 20, "registered in FACTOR_LINEAGE"
-        # Some factor_ids in WIRED_FACTORS use short names; check via mapping
-        # (e.g. "piotroski" → "piotroski_f_score" in the registry)
-        registry_alias = {
-            "consensus": "consensus_signal_combined",
-            "earnings_yield": "earnings_yield",
-            "accruals": "cf_accruals_ratio",
-            "piotroski": "piotroski_f_score",
-            "momentum": "mom_12m_adj",
-            "book_to_price": "book_to_price",
-            "promoter": "promoter_qoq",
-            "smart_money": "smart_money_score",
-            "pt_upside": "pt_upside",
-            "eps_growth": "eps_growth_yoy",
-            "pledge_quality": "pledge_quality",
-            "delivery_anomaly_z": "delivery_anomaly_z",
-        }
-        if factor_id in registry_alias and registry_alias[factor_id] in FACTOR_LINEAGE:
-            return 20, f"registered (alias → {registry_alias[factor_id]})"
+        # WIRED_FACTORS use weight-key short names ("piotroski" → "piotroski_f_score")
+        alias = factors.signal_for(factor_id)
+        if alias in FACTOR_LINEAGE:
+            return 20, f"registered (alias → {alias})"
         return 0, "no FACTOR_LINEAGE entry"
     except Exception as e:
         return None, f"lookup failed: {e}"
@@ -392,21 +363,7 @@ def rollup_factor_uhs(factor_id: str, snapshot_date: str) -> dict:
     plaus_score, plaus_reason = dim_plausibility_for_factor(factor_id, snapshot_date)
     cons_score, cons_reason = dim_consistency_for_factor(factor_id, snapshot_date)
     # Freshness for a factor = freshness of its primary upstream table.
-    factor_table_map = {
-        "consensus": "consensus_signals",
-        "earnings_yield": "stock_prices",
-        "accruals": "annual_cash_flow",
-        "piotroski": "piotroski_scores",
-        "momentum": "stock_prices",
-        "book_to_price": "annual_balance_sheet",
-        "promoter": "shareholding",
-        "smart_money": "stock_prices",
-        "pt_upside": "consensus_signals",
-        "eps_growth": "consensus_signals",
-        "pledge_quality": "shareholding",
-        "delivery_anomaly_z": "stock_prices",
-    }
-    primary_table = factor_table_map.get(factor_id)
+    primary_table = FACTOR_FRESHNESS_TABLE.get(factor_id)
     fresh_score, fresh_reason = None, "no upstream table mapped"
     if primary_table:
         age = _table_age_days(primary_table, as_of=snapshot_date)
@@ -491,33 +448,20 @@ def rollup_system_uhs(snapshot_date: str) -> dict:
     }
 
 
-def rollup_pick_uhs(sid: str, pick_date: str) -> dict:
-    """UHS for one daily_picks row = signal_weight-weighted mean of factor UHS
-    for the factors that actually contributed to this pick's tier.
+_PICK_GATES = ("gate_1_identity", "gate_2_plausibility", "gate_3_temporal",
+               "gate_4_cross_source", "gate_5_unit", "gate_7_anchor")
+_FACTOR_DIMS = ("dim_provenance", "dim_freshness", "dim_plausibility",
+                "dim_consistency", "dim_coverage", "score_pct")
 
-    Phase 1 reads the production SIGNAL_WEIGHTS (not variants). Phase 5 will
-    extend this with the per-row weight_coverage adjustment.
-    """
-    # Fetch the pick row to know its tier
-    df = read_sql(
-        "SELECT cap_tier FROM daily_picks WHERE sid=? AND pick_date=?",
-        params=[sid, pick_date],
-    )
-    if df.empty:
-        return compute_uhs("pick", f"{sid}|{pick_date}", pick_date)
-    tier = df.iloc[0]["cap_tier"]
-    from config import SIGNAL_WEIGHTS
-    weights = SIGNAL_WEIGHTS.get(tier, {})
-    if not weights:
-        return compute_uhs("pick", f"{sid}|{pick_date}", pick_date)
-    # Read each factor's UHS row for this snapshot_date
-    factor_ids = list(weights.keys())
+
+def _latest_factor_uhs(factor_ids, as_of: str) -> dict:
+    """{factor_id: row} of the latest factor UHS snapshot ≤ as_of (one query)."""
+    if not factor_ids:
+        return {}
     placeholders = ",".join("?" * len(factor_ids))
     fdf = read_sql(
         f"""
-        SELECT entity_id,
-               dim_provenance, dim_freshness, dim_plausibility,
-               dim_consistency, dim_coverage, score_pct
+        SELECT entity_id, {", ".join(_FACTOR_DIMS)}
         FROM health_score
         WHERE entity_kind='factor'
           AND entity_id IN ({placeholders})
@@ -526,15 +470,92 @@ def rollup_pick_uhs(sid: str, pick_date: str) -> dict:
               WHERE entity_kind='factor' AND snapshot_date <= ?
           )
         """,
-        params=factor_ids + [pick_date],
+        params=list(factor_ids) + [as_of],
     )
-    if fdf.empty:
-        return compute_uhs("pick", f"{sid}|{pick_date}", pick_date,
-                           reasons={"weight_mean": "no factor UHS rows available"})
-    fmap = {r["entity_id"]: r for _, r in fdf.iterrows()}
+    return {r["entity_id"]: r for r in fdf.to_dict("records")}
 
+
+def _sid_gate_counts(tables: list[str], snapshot_date: str, sids=None,
+                     lookback_days: int = 7) -> dict:
+    """{gate_col: DataFrame[sid, source_table, gate, n]} — per-sid verdict counts over
+    `tables` in the window, one query per gate (the batched _gate_pass_rate). `sids`
+    narrows the scan for small lookups (the cockpit's single-pick call)."""
+    out = {}
+    if not tables:
+        return out
+    placeholders = ",".join("?" * len(tables))
+    sid_clause, sid_params = "", []
+    if sids is not None and len(sids) <= 500:
+        sid_clause = f" AND sid IN ({','.join('?' * len(sids))})"
+        sid_params = list(sids)
+    for gate_col in _PICK_GATES:
+        out[gate_col] = read_sql(
+            f"""
+            SELECT sid, source_table, {gate_col} AS gate, COUNT(*) AS n
+            FROM trust_verdicts
+            WHERE source_table IN ({placeholders})
+              AND snapshot_date >= date(?, '-{lookback_days} days')
+              AND snapshot_date <= ?
+              AND {gate_col} IS NOT NULL AND sid IS NOT NULL{sid_clause}
+            GROUP BY sid, source_table, {gate_col}
+            """,
+            params=tables + [snapshot_date, snapshot_date] + sid_params,
+        )
+    return out
+
+
+def _rate(counts: pd.DataFrame, tables: list[str]) -> Optional[float]:
+    """_gate_pass_rate over pre-fetched counts for one sid."""
+    c = counts[counts["source_table"].isin(tables)]
+    total = c["n"].sum()
+    return int(c.loc[c["gate"] == 1, "n"].sum()) / total if total > 0 else None
+
+
+def rollup_picks_uhs(pick_date: str, sids=None, factor_rows=None) -> dict:
+    """UHS for daily_picks rows = signal_weight-weighted mean of factor UHS for
+    the factors that score each pick's tier. Returns {sid: UHS row}.
+
+    Batched: three reads for the whole pick set instead of ~8 per pick. `sids`
+    restricts to those picks (default: every pick on pick_date). `factor_rows`
+    (list of factor UHS dicts) replaces the health_score read — for callers that
+    just computed them. Phase 1 reads the production SIGNAL_WEIGHTS (not variants).
+    """
+    picks = read_sql("SELECT sid, cap_tier FROM daily_picks WHERE pick_date=?", params=[pick_date])
+    tier_of = dict(zip(picks["sid"], picks["cap_tier"]))
+    sids = list(tier_of) if sids is None else list(sids)
+    from config import SIGNAL_WEIGHTS
+    all_keys = sorted({k for t in tier_of.values() for k in SIGNAL_WEIGHTS.get(t, {})})
+    if factor_rows is None:
+        fmap_all = _latest_factor_uhs(all_keys, pick_date)
+    else:
+        fmap_all = {r["entity_id"]: r for r in factor_rows if r["entity_kind"] == "factor"}
+    up_tables_all = sorted({t for k in all_keys for t in FACTOR_UPSTREAM_TABLES.get(k, [])})
+    gate_counts = _sid_gate_counts(up_tables_all, pick_date, sids) if fmap_all else {}
+    by_sid = {g: dict(tuple(df.groupby("sid"))) for g, df in gate_counts.items()}
+    empty = pd.DataFrame(columns=["sid", "source_table", "gate", "n"])
+
+    out = {}
+    for sid in sids:
+        tier = tier_of.get(sid)
+        weights = SIGNAL_WEIGHTS.get(tier, {}) if tier is not None else {}
+        if not weights:
+            out[sid] = compute_uhs("pick", f"{sid}|{pick_date}", pick_date)
+            continue
+        fmap = {k: fmap_all[k] for k in weights if k in fmap_all}
+        if not fmap:
+            out[sid] = compute_uhs("pick", f"{sid}|{pick_date}", pick_date,
+                                   reasons={"weight_mean": "no factor UHS rows available"})
+            continue
+        out[sid] = _pick_uhs(sid, pick_date, tier, weights, fmap,
+                             {g: by_sid[g].get(sid, empty) for g in by_sid})
+    return out
+
+
+def _pick_uhs(sid, pick_date, tier, weights, fmap, gate_counts) -> dict:
     # Per-dim weighted means — track each dim's numerator + denominator
     # independently so factors with one dim NULL don't poison the others.
+    # |w|: a negative weight (governance_resignation, an inverse signal) is still
+    # a factor the pick depends on — a signed weight would shrink the denominator.
     def _wmean(dim_col: str) -> Optional[int]:
         num = 0.0
         den = 0.0
@@ -543,15 +564,13 @@ def rollup_pick_uhs(sid: str, pick_date: str) -> dict:
                 continue
             v = fmap[fid][dim_col]
             if pd.notna(v):
-                num += w * float(v)
-                den += w
+                num += abs(w) * float(v)
+                den += abs(w)
         if den == 0:
             return None
         return int(round(num / den))
 
     n_contributing = sum(1 for f in weights if f in fmap)
-    if n_contributing == 0:
-        return compute_uhs("pick", f"{sid}|{pick_date}", pick_date)
 
     # Per-STOCK dims: for the verdict-based dimensions (provenance / plausibility
     # / consistency) use THIS sid's own trust_verdicts over the pick's upstream
@@ -562,17 +581,17 @@ def rollup_pick_uhs(sid: str, pick_date: str) -> dict:
     # table/factor-level (a table's recency/completeness isn't per-stock).
     up_tables = sorted({t for fid in weights for t in FACTOR_UPSTREAM_TABLES.get(fid, [])})
 
+    def _sid_rate(gate_col):
+        return _rate(gate_counts[gate_col], up_tables) if gate_col in gate_counts else None
+
     def _sid_dim(gate_col, fallback_dim):
-        rate = _gate_pass_rate(gate_col, up_tables, pick_date, sid=sid)
+        rate = _sid_rate(gate_col)
         return int(round(20 * rate)) if rate is not None else _wmean(fallback_dim)
 
     def _sid_consistency():
-        rates = [r for r in (
-            _gate_pass_rate("gate_3_temporal",     up_tables, pick_date, sid=sid),
-            _gate_pass_rate("gate_4_cross_source", up_tables, pick_date, sid=sid),
-            _gate_pass_rate("gate_5_unit",         up_tables, pick_date, sid=sid),
-            _gate_pass_rate("gate_7_anchor",       up_tables, pick_date, sid=sid),
-        ) if r is not None]
+        rates = [r for r in (_sid_rate(g) for g in
+                             ("gate_3_temporal", "gate_4_cross_source", "gate_5_unit", "gate_7_anchor"))
+                 if r is not None]
         return int(round(20 * (sum(rates) / len(rates)))) if rates else _wmean("dim_consistency")
 
     return compute_uhs(
@@ -592,6 +611,11 @@ def rollup_pick_uhs(sid: str, pick_date: str) -> dict:
     )
 
 
+def rollup_pick_uhs(sid: str, pick_date: str) -> dict:
+    """UHS for one daily_picks row (see rollup_picks_uhs)."""
+    return rollup_picks_uhs(pick_date, sids=[sid])[sid]
+
+
 # ── Helpers ──
 
 _DATE_COL_BY_TABLE = {
@@ -609,6 +633,8 @@ _DATE_COL_BY_TABLE = {
     "shareholding":          "as_of_date",
     "mf_nav_history":        "nav_date",
     "mf_scheme_master":      "last_seen",
+    "fno_iv_history":        "trade_date",
+    "bse_announcements":     "fetched_at",
 }
 
 
@@ -684,16 +710,10 @@ def _compute_snapshot_rows(snapshot_date: str, include_picks: bool = False) -> l
         rows.append(rollup_table_uhs(tbl, snapshot_date))
     rows.append(rollup_system_uhs(snapshot_date))
     if include_picks:
-        # Pick UHS depends on factor UHS for the same snapshot — write factors first
-        # so the read at pick rollup time finds them. write_uhs([factors]) before
-        # invoking rollup_pick_uhs.
-        write_uhs([r for r in rows if r["entity_kind"] == "factor"])
-        picks_df = read_sql(
-            "SELECT sid, pick_date FROM daily_picks WHERE pick_date=?",
-            params=[snapshot_date],
-        )
-        for _, r in picks_df.iterrows():
-            rows.append(rollup_pick_uhs(r["sid"], r["pick_date"]))
+        # Pick UHS rolls up the factor UHS of the same snapshot — hand the rows just
+        # computed straight in (no write-then-read, so --dry-run stays write-free).
+        factor_rows = [r for r in rows if r["entity_kind"] == "factor"]
+        rows.extend(rollup_picks_uhs(snapshot_date, factor_rows=factor_rows).values())
     return rows
 
 
