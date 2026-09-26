@@ -77,141 +77,12 @@ def init_db():
 
 
 # Columns added after a table was first created. SQLite has no "ADD COLUMN
-# IF NOT EXISTS" so we catch the duplicate-column error. Append to this list
-# whenever a new column is added to an existing table; never edit existing
-# entries (they're idempotent by design).
+# IF NOT EXISTS" so we catch the duplicate-column error. When a new column is
+# added to an existing table, add it to schema.sql AND append it here so live
+# DBs pick it up; never edit existing entries (they're idempotent by design).
+# 2026-09-26: schema.sql regenerated from the live DB — the 76 entries that
+# lived here are all in it now, so the list restarts empty.
 _COLUMN_MIGRATIONS = [
-    # 2026-06-14: Next-3 #1c — transcript look-ahead fix. bse_filing_date = the real
-    # BSE filing dt_tm (matched by PDF GUID ↔ bse_announcements.attachment), the
-    # look-ahead-safe availability date. nlp_scores.available_date carries the canonical
-    # COALESCE(bse_filing_date, announce_date, doc_date) into the enriched layer so the
-    # future NLP PIT helper filters on the real date, not the first-of-month doc_date
-    # proxy (median +14d, p90 +27d look-ahead; 95% of rows proxy-earlier-than-filing).
-    ("transcripts", "bse_filing_date", "TEXT"),
-    ("nlp_scores",  "available_date",  "TEXT"),
-    # 2026-06-01: fast-read keyword tags per article (LLM-generated, JSON array)
-    ("news_enriched", "keywords", "TEXT"),
-    ("daily_picks", "weight_coverage", "REAL"),
-    ("daily_picks", "price_rows", "INTEGER"),
-    ("daily_picks", "fundamental_coverage", "REAL"),
-    # 2026-05-24: insider_signal and sentiment_7d now PIT-reconstructible.
-    ("daily_snapshots_pit", "insider_score", "REAL"),
-    ("daily_snapshots_pit", "sentiment_7d", "REAL"),
-    # 2026-05-24 (session #3): plan 0005 Phase A — per-signal eligibility,
-    # plus Phase B — per-stock integrity validator
-    ("daily_picks", "eligible_coverage", "REAL"),
-    ("daily_picks", "integrity_status", "TEXT"),
-    ("daily_picks", "integrity_reasons", "TEXT"),
-    # 2026-05-24 (session #4): plan 0005 Phase D.5 — bootstrap CIs on t-stat
-    ("pit_ic_by_tier_v2", "t_stat_ci_lo", "REAL"),
-    ("pit_ic_by_tier_v2", "t_stat_ci_hi", "REAL"),
-    # 2026-05-26: MF research section (plan prfect-lets-add-a-zazzy-eich)
-    ("mf_schemes", "category_norm",     "TEXT"),
-    ("mf_schemes", "benchmark",         "TEXT"),
-    ("mf_schemes", "inception_date",    "TEXT"),
-    ("mf_schemes", "has_full_history",  "INTEGER DEFAULT 0"),
-    # 2026-05-26: data-quality flag on master — keeps wound-up / segregated /
-    # interval-fund / NAV-anomalous schemes out of the universe browser + scorer.
-    # Values: TRUSTED (default) / WOUND_UP / SEGREGATED / INTERVAL / ANOMALOUS / BONUS
-    ("mf_scheme_master", "data_quality",       "TEXT DEFAULT 'TRUSTED'"),
-    ("mf_scheme_master", "quality_reason",     "TEXT"),
-    # 2026-05-29: Track 2.2b — Financial sub-model PIT column. NULL for non-
-    # financials (Banks + NBFCs scope per ADR 0030).
-    ("daily_snapshots_pit", "financial_signal", "REAL"),
-    # 2026-05-29 (session #2): Phase 2.2b-v2 — split into quality (SMALL) +
-    # recovery (LARGE/MID) per the direction-flip backtest finding. Both
-    # columns; screener picks one based on cap_tier. `financial_signal`
-    # retained as alias for the quality variant for back-compat.
-    ("daily_snapshots_pit", "financial_quality",  "REAL"),
-    ("daily_snapshots_pit", "financial_recovery", "REAL"),
-    ("financial_signal_scores", "financial_quality",  "REAL"),
-    ("financial_signal_scores", "financial_recovery", "REAL"),
-    ("financial_signal_scores", "quality_basis",      "TEXT"),
-    ("financial_signal_scores", "recovery_basis",     "TEXT"),
-    ("financial_signal_scores", "asset_quality_quality_z",  "REAL"),
-    ("financial_signal_scores", "asset_quality_recovery_z", "REAL"),
-    # ── Plan 0007 Phase 5: per-pick UHS columns ──
-    # uhs_score is the 0-100 normalized score for THIS pick at pick_date.
-    # uhs_breakdown_json keeps the 5 dim values + reasons for the explorer
-    # Trust panel and the dossier prompt. uhs_label is the UHS band
-    # (UNKNOWN/AVOID/REVIEW/PRELIMINARY/TRUSTED). uhs_worst_dim is the lowest-
-    # scoring dim (drives the dossier's "weak dim" disclosure).
-    ("daily_picks", "uhs_score",          "INTEGER"),
-    ("daily_picks", "uhs_breakdown_json", "TEXT"),
-    ("daily_picks", "uhs_label",          "TEXT"),
-    ("daily_picks", "uhs_worst_dim",      "TEXT"),
-    # 2026-05-31: Plan 0006 Phase E — per-sector S/M/L momentum horizon badges.
-    # Categorical {strong/neutral/weak} written by signals.sector_momentum.
-    ("sector_briefs", "horizon_short",  "TEXT"),
-    ("sector_briefs", "horizon_medium", "TEXT"),
-    ("sector_briefs", "horizon_long",   "TEXT"),
-    # Per-stock sector-momentum factor PIT column (medium-horizon RS z-score).
-    ("daily_snapshots_pit", "sector_momentum", "REAL"),
-    # ADR 0041: per-stock sector-tilt factor PIT column (6m-mom + macro z-ensemble).
-    ("daily_snapshots_pit", "sector_tilt", "REAL"),
-    # 2026-05-31: Plan 0002 §3.2.2 — F&O open-interest factor PIT columns.
-    ("daily_snapshots_pit", "pcr_oi",            "REAL"),
-    ("daily_snapshots_pit", "pcr_volume",        "REAL"),
-    ("daily_snapshots_pit", "max_pain_distance", "REAL"),
-    ("daily_snapshots_pit", "oi_buildup_signal", "REAL"),
-    # 2026-05-31: Plan 0002 §3.2.2 — F&O implied-volatility factor PIT columns.
-    ("daily_snapshots_pit", "iv_skew_25d",        "REAL"),
-    ("daily_snapshots_pit", "iv_term_structure",  "REAL"),
-    ("daily_snapshots_pit", "iv_realised_spread", "REAL"),
-    ("daily_snapshots_pit", "iv_percentile_1y",   "REAL"),
-    # 2026-05-31: Plan 0002 §3.2.3 — daily-derivable microstructure PIT columns.
-    ("daily_snapshots_pit", "intraday_range_compression", "REAL"),
-    ("daily_snapshots_pit", "closing_strength_1m",        "REAL"),
-    ("daily_snapshots_pit", "opening_gap_freq_1m",        "REAL"),
-    ("daily_snapshots_pit", "vwap_deviation_5d",          "REAL"),
-    ("daily_snapshots_pit", "bidask_spread_proxy",        "REAL"),
-    ("daily_snapshots_pit", "kyle_lambda",                "REAL"),
-    # 2026-05-31: Plan 0002 §3.2.5 — event-time / PEAD PIT columns.
-    ("daily_snapshots_pit", "earnings_surprise_std",      "REAL"),
-    ("daily_snapshots_pit", "pead_drift_60d",             "REAL"),
-    ("daily_snapshots_pit", "corporate_action_density",   "REAL"),
-    ("daily_snapshots_pit", "buyback_announcement_30d",   "REAL"),
-    # 2026-07-05: §3.2.5 — announcement-window CAR (market-implied earnings surprise, PEAD-via-CAR).
-    ("daily_snapshots_pit", "announcement_car",           "REAL"),
-    # 2026-06-13: ADR 0042 — BSE governance/forensic resignation event factor.
-    ("daily_snapshots_pit", "governance_resignation",     "REAL"),
-    # 2026-06-14: Plan 0002 §3.2.4 — earnings-call NLP factors (off nlp_scores).
-    ("daily_snapshots_pit", "earnings_call_tone_qoq",     "REAL"),
-    ("daily_snapshots_pit", "forward_looking_intensity",  "REAL"),
-    ("daily_snapshots_pit", "uncertainty_word_density",   "REAL"),
-    # 2026-06-02: Plan 0002 §3.2.6 — industry identity (categorical control).
-    ("daily_snapshots_pit", "industry_id",                "INTEGER"),
-    # 2026-06-02: Plan 0002 §3.2.7 — per-stock macro betas.
-    ("daily_snapshots_pit", "oil_beta",                   "REAL"),
-    ("daily_snapshots_pit", "metals_beta",                "REAL"),
-    ("daily_snapshots_pit", "inr_beta",                   "REAL"),
-    ("daily_snapshots_pit", "gold_beta",                  "REAL"),
-    # 2026-06-07: §3.2.7 rate + credit betas (daily India bond-ETF series now
-    # available — gsec10_etf 2016, credit_excess_idx 2019; was DATA-BLOCKED).
-    ("daily_snapshots_pit", "rate_beta",                  "REAL"),
-    ("daily_snapshots_pit", "credit_beta",                "REAL"),
-    # 2026-06-03: multibagger funnel — Novy-Marx anchor quality factor.
-    ("daily_snapshots_pit", "gross_profitability",        "REAL"),
-    # 2026-07-05: audit Factor-F3 — LARGE-tier canonical rebuild candidates.
-    ("daily_snapshots_pit", "low_vol_252d",               "REAL"),
-    ("daily_snapshots_pit", "st_reversal_21d",            "REAL"),
-    ("daily_snapshots_pit", "asset_growth_yoy",           "REAL"),
-    # 2026-07-11: plan 0012 C3 — momentum retest hypothesis (WS2.6).
-    ("daily_snapshots_pit", "residual_momentum_12_1",     "REAL"),
-    # 2026-07-11: plan 0012 C4 — lottery retest hypothesis (WS2.7).
-    ("daily_snapshots_pit", "max_lottery_21d",            "REAL"),
-    # 2026-06-04: multibagger Phase 2b+ — small-cap EMA regime gate. The screen
-    # now selects regime-conditioned pillar weights (quality-heavy ↔ DOWNTREND,
-    # growth-heavy ↔ UPTREND, balanced ↔ NEUTRAL), cohort-proven across 3 windows.
-    # smallcap_regime stamps the regime at scoring time; regime_favorable=0 when
-    # the screen historically underperforms (strong UPTREND / junk rally).
-    ("multibagger_scores", "smallcap_regime",   "TEXT"),
-    ("multibagger_scores", "regime_favorable",  "INTEGER"),
-    # 2026-07-05: title-hash dedup before LLM classification (audit Eff-F2) —
-    # same regulatory story arrives via Google News + RBI + PIB + Wayback and
-    # was getting classified up to 3x. Lets the classifier reuse a prior
-    # verdict for an identical normalized headline instead of re-calling Haiku/Sonnet.
-    ("regulatory_events", "title_hash", "TEXT"),
 ]
 
 
@@ -223,7 +94,6 @@ def _ensure_columns():
             except sqlite3.OperationalError as e:
                 if "duplicate column" not in str(e).lower():
                     raise
-    _ensure_pipeline_log_status_check()
     _ensure_quarantine_tables()
 
 
@@ -311,49 +181,6 @@ def _rewrite_ddl_for_quarantine(source_ddl: str, source_name: str, mirror_name: 
     # (we don't know which gate filled which columns). Leave only TYPE.
     # Simpler: keep NOT NULL — the writer must populate everything.
     return ddl
-
-
-def _ensure_pipeline_log_status_check():
-    """Widen pipeline_log.status CHECK to include COVERAGE_GAP/COVERAGE_SEVERE.
-
-    Added 2026-05-29: HANDOFF 2026-05-24 #4 introduced these statuses in
-    tools/freshness_watchdog._report_coverage() without widening the schema
-    constraint, so every daily watchdog run since has crashed with
-    `CHECK constraint failed: status IN (...)`. Idempotent — checks the
-    live table's CHECK string and only recreates if missing.
-    """
-    with get_db() as conn:
-        row = conn.execute(
-            "SELECT sql FROM sqlite_master WHERE type='table' AND name='pipeline_log'"
-        ).fetchone()
-        if not row:
-            return
-        if "COVERAGE_GAP" in row[0]:
-            return
-        conn.executescript(
-            """
-            BEGIN;
-            CREATE TABLE pipeline_log__new (
-                id              INTEGER PRIMARY KEY AUTOINCREMENT,
-                run_date        TEXT NOT NULL DEFAULT (date('now')),
-                step_name       TEXT NOT NULL,
-                status          TEXT CHECK(status IN ('RUNNING', 'SUCCESS', 'FAILED', 'SKIPPED', 'COVERAGE_GAP', 'COVERAGE_SEVERE')),
-                rows_affected   INTEGER,
-                started_at      TEXT DEFAULT (datetime('now')),
-                finished_at     TEXT,
-                duration_sec    REAL,
-                error_message   TEXT
-            );
-            INSERT INTO pipeline_log__new
-                SELECT id, run_date, step_name, status, rows_affected,
-                       started_at, finished_at, duration_sec, error_message
-                FROM pipeline_log;
-            DROP TABLE pipeline_log;
-            ALTER TABLE pipeline_log__new RENAME TO pipeline_log;
-            CREATE INDEX IF NOT EXISTS idx_pipeline_log_date ON pipeline_log(run_date);
-            COMMIT;
-            """
-        )
 
 
 def table_counts():

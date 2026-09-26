@@ -192,24 +192,23 @@ def test_etmoney_url_segment_mismatch_quarantines():
 
 # ─────────── Quarantine + verdict persistence integration ───────────
 
-def test_quarantine_row_writes_to_mirror_and_verdict():
+def test_quarantine_row_writes_to_mirror_and_verdict(tmp_path, monkeypatch):
     """Integration: feeding a poisoned payload through the full producer path
     writes to broker_recommendations_quarantine + trust_verdicts but NOT
     broker_recommendations.
 
-    Uses the real DB (single-user dev environment); cleans up the test rows.
+    Runs on a fresh DB built by db.init_db() from schema.sql — never the live one.
     """
+    import db
     from db import get_db
     from validators.identity_check import quarantine_row, IdentityVerdict
 
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "identity_gate.db")
+    db.init_db()
+
     test_sid = "_TEST_IDENTITY_GATE_BAJHL"
     test_broker = "_TEST_BROKER"
-    test_reco_date = "1999-01-01"   # far past so won't collide with real data
-
-    # Cleanup from prior runs
-    with get_db() as conn:
-        conn.execute("DELETE FROM broker_recommendations_quarantine WHERE sid=?", (test_sid,))
-        conn.execute("DELETE FROM trust_verdicts WHERE sid=?", (test_sid,))
+    test_reco_date = "1999-01-01"
 
     poison_row = {
         "sid": test_sid, "broker": test_broker, "reco_date": test_reco_date,
@@ -247,17 +246,14 @@ def test_quarantine_row_writes_to_mirror_and_verdict():
         assert verdict_row[0] == 0, f"gate_1_identity should be 0 (FAIL), got {verdict_row[0]}"
         assert verdict_row[1] == "QUARANTINED", f"verdict_overall should be QUARANTINED, got {verdict_row[1]}"
 
-        # Cleanup
-        conn.execute("DELETE FROM broker_recommendations_quarantine WHERE sid=?", (test_sid,))
-        conn.execute("DELETE FROM trust_verdicts WHERE sid=?", (test_sid,))
-
 
 if __name__ == "__main__":
     import inspect
     import sys
 
     tests = [(name, fn) for name, fn in globals().items()
-              if name.startswith("test_") and inspect.isfunction(fn)]
+              if name.startswith("test_") and inspect.isfunction(fn)
+              and not inspect.signature(fn).parameters]   # fixture tests: pytest only
     failures = []
     for name, fn in tests:
         try:
