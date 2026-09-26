@@ -1,4 +1,4 @@
-{% extends "base.html" %}
+{% extends "ops_base.html" %}
 
 {% block content %}
 
@@ -18,7 +18,7 @@
     <div class="section-title">Pipeline Flow</div>
     <div style="display: flex; gap: 12px; align-items: center;">
         <span id="flow-toast" class="mono" style="font-size: 11px; color: var(--green); opacity: 0; transition: opacity 0.25s;"></span>
-        <span id="flow-refresh-tick" class="mono" style="font-size: 11px; color: var(--text-muted);">refreshing in 60s</span>
+        <span id="flow-refresh-tick" class="mono u-muted-11">refreshing in 60s</span>
         <a href="/system" style="padding: 8px 16px; background: var(--bg-card-hover); color: var(--text-secondary); border-radius: 8px; text-decoration: none; font-size: 12px; font-weight: 600; letter-spacing: 0.3px;">System &rarr;</a>
     </div>
 </div>
@@ -33,7 +33,7 @@
         <div style="font-size: 13px; font-weight: 800; color: var(--red); letter-spacing: 0.5px;">
             {{ failures|length }} STEP{{ '' if failures|length == 1 else 'S' }} NEEDS ATTENTION
         </div>
-        <div class="mono" style="font-size: 11px; color: var(--text-muted);">click a chip to jump to its card</div>
+        <div class="mono u-muted-11">click a chip to jump to its card</div>
     </div>
     <div style="display: flex; flex-wrap: wrap; gap: 6px;">
         {% for f in failures %}
@@ -79,7 +79,7 @@
         <div style="flex: 1 1 0; min-width: 200px; display: flex; flex-direction: column;">
             <div style="display: flex; justify-content: space-between; align-items: baseline; padding: 6px 10px 8px; border-bottom: 2px solid {{ lc }}; margin-bottom: 8px;">
                 <span style="font-size: 11px; font-weight: 800; letter-spacing: 0.7px; color: {{ lc }}; text-transform: uppercase;">{{ layer.name }}</span>
-                <span class="mono" style="font-size: 10px; color: var(--text-muted);">{{ layer.steps|length }}</span>
+                <span class="mono u-muted-10">{{ layer.steps|length }}</span>
             </div>
             <div style="display: flex; flex-direction: column; gap: 4px; flex: 1;">
                 {% for s in layer.steps %}
@@ -126,7 +126,7 @@
                 {% endif %}
             </div>
         </div>
-        <div class="mono" style="font-size: 11px; color: var(--text-muted);">{{ layer.steps|length }} step{{ '' if layer.steps|length == 1 else 's' }}</div>
+        <div class="mono u-muted-11">{{ layer.steps|length }} step{{ '' if layer.steps|length == 1 else 's' }}</div>
     </div>
 
     <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px;">
@@ -161,7 +161,7 @@
                         {{ status or 'NEVER RUN' }}
                     </span>
                     {% if s.last_rows is not none %}
-                    <span class="mono" style="font-size: 10px; color: var(--text-muted);">{{ "{:,}".format(s.last_rows) }} rows</span>
+                    <span class="mono u-muted-10">{{ "{:,}".format(s.last_rows) }} rows</span>
                     {% endif %}
                 </div>
                 {% if s.last_error %}

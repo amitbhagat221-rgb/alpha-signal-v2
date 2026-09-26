@@ -3,8 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    {% block head_identity %}
     <title>Alpha Signal Cockpit</title>
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%237c3aed'/%3E%3Ctext x='16' y='22' font-size='20' text-anchor='middle' fill='white' font-family='sans-serif' font-weight='700'%3E%E2%97%86%3C/text%3E%3C/svg%3E">
+    {% endblock %}
     <script src="https://cdn.tailwindcss.com"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -29,6 +31,9 @@
 <body class="font-body antialiased">
     {% from "_icons.html" import icon %}
 
+    {# Shared shell for both apps: the ops app overrides the rail + mobile tabs
+       (cockpit_ops/templates/ops_base.html) and keeps everything else. #}
+    {% block nav %}
     <!-- Left Rail Navigation (desktop) -->
     <nav class="left-rail">
         <a href="/" class="brand-row" aria-label="Alpha Signal">
@@ -127,6 +132,7 @@
             <a href="{{ request.url.scheme }}://{{ request.url.hostname }}:3001/system" target="_blank" rel="noopener" class="more-item">{{ icon("zap", 16) }}<span>Ops →</span></a>
         </div>
     </nav>
+    {% endblock %}
 
     <!-- Main Content -->
     <main class="main-content">

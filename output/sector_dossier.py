@@ -30,7 +30,8 @@ import json
 import os
 from datetime import datetime
 
-from db import get_db, read_sql, log_llm_usage
+from db import get_db, read_sql
+from output._llm import llm_json
 
 # Reuse the stock-dossier number scanner verbatim — single source of truth for
 # "what is a forbidden raw number". Calendar tokens (Q1/FY25/H1) are allowed
@@ -239,23 +240,7 @@ Respond in JSON with these exact keys:
 # ─────────────────────── Driver ───────────────────────
 
 def _call_claude(prompt):
-    import anthropic
-    client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
-    resp = client.messages.create(
-        model=MODEL, max_tokens=1024,
-        messages=[{"role": "user", "content": prompt}],
-    )
-    log_llm_usage("compute_sector_dossiers", MODEL, resp.usage)
-    text = resp.content[0].text
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        if "```" in text:
-            blk = text.split("```")[1]
-            if blk.startswith("json"):
-                blk = blk[4:]
-            return json.loads(blk)
-        return {"raw_response": text}
+    return llm_json(prompt, MODEL, "compute_sector_dossiers", max_tokens=1024)
 
 
 def _persist(sector, snapshot_date, dossier, validation):

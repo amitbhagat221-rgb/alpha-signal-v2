@@ -21,7 +21,7 @@
                 / {{ "%.0f"|format(regime.alloc_small * 100) }}<span class="unit">S</span>
             </span>
         </div>
-        <div style="text-align: right;">
+        <div class="u-right">
             <span style="color: var(--text-muted); font-size: 11px;">{{ pick_date }}</span><br>
             <span style="color: var(--text-muted); font-size: 11px;">{{ stock_count }} stocks &middot; {{ tailwinds }} sectors tailwind &middot; {{ headwinds }} headwind</span>
         </div>
@@ -30,7 +30,7 @@
 
 <!-- What Changed -->
 {% if changes %}
-<div style="margin-bottom: 20px;">
+<div class="u-mb20">
     <div class="section-title">What Changed</div>
     <div class="stagger" style="display: flex; flex-direction: column; gap: 6px;">
         {% for change in changes[:6] %}
@@ -52,7 +52,7 @@
 
 <!-- Earnings This Week -->
 {% if earnings %}
-<div style="margin-bottom: 20px;">
+<div class="u-mb20">
     <div class="section-title">Earnings Coming Up</div>
     <div class="card" style="padding: 10px 14px; display: flex; flex-wrap: wrap; gap: 12px;">
         {% for e in earnings %}
@@ -105,16 +105,16 @@
 
             <!-- Price + Target + Returns -->
             <div style="font-size: 11px; color: var(--text-muted); display: flex; gap: 8px; flex-wrap: wrap; padding-left: 36px;">
-                {% if pm.get("close_price") %}<span>&#8377;{{ "%.0f"|format(pm.close_price) }}</span>{% endif %}
+                {% if pm.get("close_price") %}<span>{{ pm.close_price|inr(0) }}</span>{% endif %}
                 {% if ac.get("price_target") and ac.get("pt_upside_pct") is not none %}
-                <span>&rarr; Target &#8377;{{ "%.0f"|format(ac.price_target) }}
-                    <span class="{% if ac.pt_upside_pct > 0 %}score-green{% else %}score-red{% endif %}">
-                        ({{ "%+.0f"|format(ac.pt_upside_pct) }}%)
+                <span>&rarr; Target {{ ac.price_target|inr(0) }}
+                    <span class="{{ ac.pt_upside_pct|tone(zero='score-red') }}">
+                        ({{ ac.pt_upside_pct|pct(0, signed=True) }})
                     </span>
                 </span>
                 {% endif %}
                 {% if pm.get("return_1m") is not none %}
-                <span>1M: <span class="{% if pm.return_1m > 0 %}score-green{% else %}score-red{% endif %}">{{ "%+.0f"|format(pm.return_1m) }}%</span></span>
+                <span>1M: <span class="{{ pm.return_1m|tone(zero='score-red') }}">{{ pm.return_1m|pct(0, signed=True) }}</span></span>
                 {% endif %}
                 {% if pm.get("rsi_14") is not none %}
                 <span>RSI: {{ "%.0f"|format(pm.rsi_14) }}</span>

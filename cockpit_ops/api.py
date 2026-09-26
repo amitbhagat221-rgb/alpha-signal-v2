@@ -20,9 +20,10 @@ Functions defined here (in original cockpit/api.py order):
   - _drilldown_for_issue, _severity_rank        (helpers for health overview)
   - get_health_overview
 
-Shared decorators (_persisted_cache, _ttl_cache) stay in cockpit/api.py and
-are imported one-way here. Same for cross-cutting helpers like read_sql,
-get_db (from db module).
+Shared decorators (_persisted_cache, _ttl_cache) live in cockpit/_shared.py and
+are imported one-way here; cross-cutting helpers (read_sql, get_db) come from
+db. Nothing here imports cockpit/api.py, and cockpit/app.py imports
+get_model_overview from this module directly — no import cycle.
 
 See cockpit_ops/README.md for the split architecture. See ADR 0028 (TBW)
 for the rationale.
@@ -44,10 +45,10 @@ import pandas as pd
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
+import db
 from db import read_sql, get_db
 
-# Shared decorators — implementations live in cockpit/api.py (single-source).
-# One-way import so cockpit doesn't need to know about cockpit_ops.
+# Shared decorators — implementations live in cockpit/_shared.py (single-source).
 from cockpit._shared import _ttl_cache, _persisted_cache, safe_json_records
 
 
@@ -62,7 +63,7 @@ def get_pipeline_status(days=7):
     Also: a step is only treated as RUNNING if its started_at is recent (last 5 minutes)
     AND there's no completion row for it — otherwise it's a stale RUNNING row from a
     previous run that crashed before writing its completion."""
-    df = read_sql(
+    steps = db.rows(
         """
         WITH ranked AS (
             SELECT id, run_date, step_name, status, rows_affected, duration_sec,
@@ -87,17 +88,15 @@ def get_pipeline_status(days=7):
         WHERE rn = 1
         ORDER BY started_at DESC
         """,
-        params=[f"-{days} days"],
+        [f"-{days} days"],
     )
 
     # Mark stale RUNNING rows as ABORTED — they're from runs that crashed mid-step
-    if not df.empty:
-        from datetime import datetime, timedelta
-        cutoff = (datetime.now() - timedelta(minutes=5)).isoformat()
-        df.loc[(df["status"] == "RUNNING") & (df["started_at"] < cutoff), "status"] = "ABORTED"
-
-    df = df.astype(object).where(df.notna(), None)
-    return df.to_dict("records")
+    cutoff = (datetime.now() - timedelta(minutes=5)).isoformat()
+    for r in steps:
+        if r["status"] == "RUNNING" and r["started_at"] and r["started_at"] < cutoff:
+            r["status"] = "ABORTED"
+    return steps
 
 
 def run_sql_query(query, max_rows=500):
@@ -173,8 +172,7 @@ def get_model_overview():
         })
 
     # Current regime so the page can highlight the active row.
-    cur = read_sql("SELECT regime, vix_latest FROM regime_state WHERE id = 1")
-    current_regime = cur.iloc[0].to_dict() if not cur.empty else {}
+    current_regime = db.one("SELECT regime, vix_latest FROM regime_state WHERE id = 1")
 
     # Validation t-stats from v1 backtest (PIT reconstruction, 18 periods).
     validation_csv = V1_BACKTEST_DIR / "reconstructed_ic_by_tier.csv"
@@ -213,11 +211,56 @@ def get_model_overview():
     }
 
 
+IC_MIN_PERIODS = 12  # below this a t-stat is preliminary (plan 0005 Phase D.4)
+
+
+def best_ic_by_signal(per_tier=False):
+    """Best backtest row per signal from pit_ic_by_tier_v2 — the ONE ranking rule
+    shared by /system (factor health), /command (factor library) and /model
+    (backtest roster). Pre-2026-09-26 each surface ranked sources its own way, so
+    /system and /command disagreed on which factors were promoted.
+
+    Rule (plan 0005 Phase D):
+      1. rows with n_periods >= IC_MIN_PERIODS first (statistically meaningful)
+      2. within those, v2_recompute (incl. "v2_recompute:<variant>") before v1_archive
+      3. then highest |t|
+    Falls back to whatever exists when nothing clears the n bar.
+
+    per_tier=False → {signal: row};  per_tier=True → {signal: {cap_tier: row}}.
+    Rows carry signal, cap_tier, source, t_stat, n_periods, mean_ic, verdict,
+    t_stat_ci_lo, t_stat_ci_hi."""
+    try:
+        ic = read_sql(
+            "SELECT signal, cap_tier, source, t_stat, n_periods, mean_ic, verdict, "
+            "t_stat_ci_lo, t_stat_ci_hi FROM pit_ic_by_tier_v2"
+        )
+    except Exception:
+        return {}
+    if ic.empty:
+        return {}
+    ranked = (
+        ic.assign(
+            _abst=ic["t_stat"].abs(),
+            _adequate_n=(ic["n_periods"] >= IC_MIN_PERIODS).astype(int),
+            _src=(~ic["source"].fillna("").str.startswith("v2_recompute")).astype(int),
+        )
+        .sort_values(["_adequate_n", "_src", "_abst"], ascending=[False, True, False])
+        .drop(columns=["_abst", "_adequate_n", "_src"])
+    )
+    if not per_tier:
+        return ranked.drop_duplicates("signal", keep="first").set_index("signal", drop=False).to_dict("index")
+    out = {}
+    for r in ranked.drop_duplicates(["signal", "cap_tier"], keep="first").to_dict("records"):
+        out.setdefault(r["signal"], {})[r["cap_tier"]] = r
+    return out
+
+
 def get_backtest_roster():
     """Signal-level backtest readiness for /model.
 
     For each entry in db.BACKTEST_SIGNALS, enriches with live data:
-      - C13b verdict + t-stat per cap_tier (from pit_ic_by_tier_v1)
+      - best backtest verdict + t-stat per cap_tier (pit_ic_by_tier_v2 via
+        best_ic_by_signal — v1 is a frozen 10-signal 2026-05-03 import)
       - Coverage snapshot (max history available, n_periods)
 
     Returns a dict with:
@@ -234,19 +277,19 @@ def get_backtest_roster():
 
     has_pit_v1 = "daily_snapshots_pit_v1" in names
     has_pit_v2 = "daily_snapshots_pit" in names
-    has_ic = "pit_ic_by_tier_v1" in names
 
-    # ── IC table — group by signal for fast lookup ──
-    ic_by_signal = {}
-    if has_ic:
-        ic_rows = read_sql_fast('SELECT signal, cap_tier, t_stat, verdict, n_periods FROM "pit_ic_by_tier_v1"')
-        for _, r in ic_rows.iterrows():
-            sig = r["signal"]
-            ic_by_signal.setdefault(sig, {})[r["cap_tier"]] = {
+    # ── IC table — best row per (signal, cap_tier) ──
+    ic_by_signal = {
+        sig: {
+            tier: {
                 "t_stat": _safe_float(r["t_stat"], 2),
                 "verdict": r["verdict"],
                 "n_periods": _safe_int(r["n_periods"]),
             }
+            for tier, r in tiers.items()
+        }
+        for sig, tiers in best_ic_by_signal(per_tier=True).items()
+    }
 
     # ── Coverage per PIT column (DuckDB replica — 27× faster on this scan) ──
     def _coverage(table, column):
@@ -283,12 +326,12 @@ def get_backtest_roster():
             ext_tbl = s["external_table"]
             if ext_tbl in names:
                 try:
-                    df = read_sql(f"SELECT COUNT(DISTINCT snapshot_date) AS n, MIN(snapshot_date) AS f, MAX(snapshot_date) AS l FROM [{ext_tbl}]")
-                    if not df.empty and df.iloc[0]["n"] > 0:
+                    r = db.one(f"SELECT COUNT(DISTINCT snapshot_date) AS n, MIN(snapshot_date) AS f, MAX(snapshot_date) AS l FROM [{ext_tbl}]")
+                    if r and r["n"] > 0:
                         cov_ext = {
-                            "n_dates": _safe_int(df.iloc[0]["n"]),
-                            "first_date": df.iloc[0]["f"],
-                            "last_date": df.iloc[0]["l"],
+                            "n_dates": _safe_int(r["n"]),
+                            "first_date": r["f"],
+                            "last_date": r["l"],
                             "table": ext_tbl,
                         }
                 except Exception:
@@ -341,13 +384,15 @@ def get_backtest_roster():
 
     # ── PIT table summary ──
     pit_tables = []
-    for tbl in ["daily_snapshots_pit_v1", "daily_snapshots_pit", "pit_ic_by_tier_v1"]:
+    for tbl in ["daily_snapshots_pit_v1", "daily_snapshots_pit", "pit_ic_by_tier_v2"]:
         if tbl not in names:
             continue
         try:
-            r = read_sql_fast(f'SELECT COUNT(*) AS rows FROM "{tbl}"').iloc[0]
+            # pit_ic_by_tier_v2 isn't in the DuckDB mirror — count it in SQLite.
+            _reader = read_sql if tbl == "pit_ic_by_tier_v2" else read_sql_fast
+            r = _reader(f'SELECT COUNT(*) AS rows FROM "{tbl}"').iloc[0]
             entry = {"table": tbl, "rows": _safe_int(r["rows"])}
-            if tbl != "pit_ic_by_tier_v1":
+            if tbl != "pit_ic_by_tier_v2":
                 d = read_sql_fast(f'SELECT COUNT(DISTINCT snapshot_date) AS n_dates, MIN(snapshot_date) AS f, MAX(snapshot_date) AS l, COUNT(DISTINCT sid) AS sids FROM "{tbl}"').iloc[0]
                 entry.update({
                     "n_dates": _safe_int(d["n_dates"]),
@@ -494,15 +539,15 @@ def rerun_step(step_name: str) -> dict:
     if step_name not in valid:
         return {"ok": False, "error": f"unknown step: {step_name}"}
 
-    recent = read_sql(
+    recent = db.scalar(
         """SELECT started_at FROM pipeline_log
            WHERE step_name = ? AND status = 'RUNNING'
            ORDER BY id DESC LIMIT 1""",
-        params=[step_name],
+        [step_name],
     )
-    if not recent.empty:
+    if recent is not None:
         try:
-            started = datetime.fromisoformat(recent.iloc[0]["started_at"])
+            started = datetime.fromisoformat(recent)
             if datetime.now() - started < timedelta(minutes=5):
                 return {"ok": False, "error": f"{step_name} is already RUNNING"}
         except (ValueError, TypeError):
@@ -526,10 +571,18 @@ def rerun_step(step_name: str) -> dict:
 def get_data_health_scores(force=False):
     """Comprehensive per-table data health from health.compute_db_health().
 
-    Pass force=True to bypass the 5-minute TTL cache.
-    """
+    Pass force=True to recompute now. Otherwise served from a 5-minute
+    _persisted_cache: an expired entry is returned stale and refreshed in the
+    background (health.py's own cache recomputed inline — ~40s on the first
+    /system hit after it lapsed)."""
+    return _data_health_scores(_force=bool(force))
+
+
+@_persisted_cache(300, name="get_data_health_scores")
+def _data_health_scores():
     from health import compute_db_health
-    return compute_db_health(force=force)
+    # This layer owns the TTL, so each (re)compute is a real one.
+    return compute_db_health(force=True)
 
 
 # ═══════════════════════════════════════════════════
@@ -569,34 +622,11 @@ def get_factor_health():
             "SELECT COUNT(*) FROM stocks WHERE ticker IS NOT NULL AND sector != 'Financials'"
         ).fetchone()[0]
 
-        # Best t-stat per signal — plan 0005 Phase D rule:
-        # 1. Prefer sources with n_periods >= 12 (statistically meaningful)
-        # 2. Within those, prefer v2_recompute over v1_archive (cleaner pipeline)
-        # 3. Fall back to whatever has the highest n if nothing meets the bar
+        # Best t-stat per signal — plan 0005 Phase D rule, shared with /command.
         # Pre-fix: always preferred v2_recompute even at n=6, masking the n=35
         # v1_archive result for the same signal. The n<12 gate then nuked the
         # whole factor library to INSUFFICIENT.
-        ic = read_sql(
-            "SELECT signal, source, t_stat, n_periods, t_stat_ci_lo, t_stat_ci_hi "
-            "FROM pit_ic_by_tier_v2"
-        )
-        if ic.empty:
-            best_by_signal = {}
-        else:
-            MIN_N = 12
-            ic = ic.assign(
-                abst=lambda d: d["t_stat"].abs(),
-                _adequate_n=lambda d: (d["n_periods"] >= MIN_N).astype(int),
-                _src=lambda d: d["source"].map({"v2_recompute": 0}).fillna(
-                    d["source"].str.startswith("v2_recompute:").map({True: 0}).fillna(1)
-                ),
-            )
-            # Sort: adequate_n DESC (1 first), _src ASC (v2 first), abst DESC
-            best_by_signal = (ic.sort_values(["_adequate_n", "_src", "abst"],
-                                              ascending=[False, True, False])
-                                .drop_duplicates("signal", keep="first")
-                                .set_index("signal")
-                                .to_dict("index"))
+        best_by_signal = best_ic_by_signal()
 
         # PIT columns actually populated in daily_snapshots_pit (latest snapshot).
         # NOTE: daily_snapshots_pit is the *backtest* reconstruction, only refreshed
@@ -1256,33 +1286,14 @@ def _cc_factor_library():
         },
     ]
 
-    # Promotion criterion: if pit_ic_by_tier_v2 has a row with |t| >= 1.5 in
-    # any cap-tier (preferring v2_recompute over v1_archive when both exist),
-    # the factor is "in model"; otherwise "library".
+    # Promotion criterion: if the best pit_ic_by_tier_v2 row (best_ic_by_signal —
+    # the same rule /system uses) has |t| >= 1.5, the factor is "in model";
+    # otherwise "library".
     PROMOTION_T_THRESHOLD = 1.5
 
     factors = []
+    best = best_ic_by_signal()
     with get_db() as conn:
-        try:
-            ic = read_sql(
-                "SELECT signal, cap_tier, t_stat, mean_ic, source, n_periods "
-                "FROM pit_ic_by_tier_v2"
-            )
-            # Best |t| across cap_tier per signal — prefer v2_recompute over v1_archive.
-            ic = ic.assign(
-                abst=lambda d: d["t_stat"].abs(),
-                src_priority=lambda d: d["source"].map(
-                    {"v2_recompute": 0, "v1_archive": 1}
-                ).fillna(2),
-            )
-            best = (
-                ic.sort_values(["src_priority", "abst"], ascending=[True, False])
-                  .drop_duplicates("signal", keep="first")
-                  .set_index("signal")
-                  .to_dict("index")
-            )
-        except Exception:
-            best = {}
 
         # Score-table count helper (cached per table in this call)
         score_table_counts: dict[str, int] = {}
@@ -2175,7 +2186,7 @@ def get_health_overview(force=False):
     # source stopped delivering). Showing as INFO at baseline so the user has
     # the per-signal eligible/ineligible breakdown without alarm.
     try:
-        elig_today = read_sql(
+        eligibility_block = db.rows(
             "SELECT signal, "
             "       SUM(CASE WHEN eligible=1 THEN 1 ELSE 0 END) AS n_eligible, "
             "       SUM(CASE WHEN eligible=0 THEN 1 ELSE 0 END) AS n_ineligible "
@@ -2184,8 +2195,7 @@ def get_health_overview(force=False):
             "GROUP BY signal ORDER BY signal"
         )
     except Exception:
-        elig_today = pd.DataFrame()
-    eligibility_block = elig_today.to_dict("records") if not elig_today.empty else []
+        eligibility_block = []
 
     # ── attach drilldowns ──
     for i in issues:
@@ -2272,11 +2282,9 @@ def get_health_overview(force=False):
 
     # Picks tile: total picks today + integrity status
     try:
-        picks_row = read_sql(
-            "SELECT COUNT(*) AS n FROM daily_picks "
-            "WHERE pick_date = (SELECT MAX(pick_date) FROM daily_picks)"
-        )
-        n_picks = int(picks_row.iloc[0]["n"]) if not picks_row.empty else 0
+        n_picks = int(db.scalar(
+            "SELECT COUNT(*) FROM daily_picks "
+            "WHERE pick_date = (SELECT MAX(pick_date) FROM daily_picks)", default=0))
     except Exception:
         n_picks = 0
 
@@ -2320,13 +2328,12 @@ def get_health_overview(force=False):
 
     # PIT replay tile (plan 0005 Phase E) — "can current code reproduce frozen picks?"
     try:
-        pit_status_row = read_sql(
+        r = db.one(
             "SELECT MAX(snapshot_date) AS d, COUNT(DISTINCT snapshot_date) AS n, "
             "MAX(frozen_at) AS last_freeze, MAX(frozen_by_commit) AS sha "
             "FROM pit_replay_snapshots"
         )
-        if not pit_status_row.empty and pit_status_row.iloc[0]["d"]:
-            r = pit_status_row.iloc[0]
+        if r.get("d"):
             n_frozen = int(r["n"])
             last_d = r["d"]
             last_freeze = r["last_freeze"] or ""
@@ -2398,15 +2405,14 @@ def _trust_overview() -> dict:
     from db import read_sql as _rs
 
     # ── system UHS pulse ──
-    sys_df = _rs(
+    system_row = db.one(
         """SELECT score_pct, label,
                   dim_provenance, dim_freshness, dim_plausibility,
                   dim_consistency, dim_coverage, snapshot_date
            FROM health_score
            WHERE entity_kind='system'
            ORDER BY snapshot_date DESC LIMIT 1"""
-    )
-    system_row = sys_df.iloc[0].to_dict() if not sys_df.empty else None
+    ) or None
 
     # ── pick UHS distribution today ──
     picks_df = _rs(
@@ -2433,7 +2439,7 @@ def _trust_overview() -> dict:
     gate_stats = []
     for col, label in gates:
         try:
-            df = _rs(
+            r = db.one(
                 f"""SELECT
                     SUM(CASE WHEN {col}=1 THEN 1 ELSE 0 END) AS n_pass,
                     SUM(CASE WHEN {col}=0 THEN 1 ELSE 0 END) AS n_fail,
@@ -2443,12 +2449,11 @@ def _trust_overview() -> dict:
                   WHERE snapshot_date >= date('now','-7 days')
                     AND {col} IS NOT NULL"""
             )
-            if df.empty or int(df.iloc[0]["n_total"] or 0) == 0:
+            if int(r.get("n_total") or 0) == 0:
                 gate_stats.append({"col": col, "label": label, "n_pass": 0,
                                     "n_fail": 0, "n_pending": 0, "n_total": 0,
                                     "pass_pct": None})
                 continue
-            r = df.iloc[0]
             n_total = int(r["n_total"])
             n_pass = int(r["n_pass"] or 0)
             n_fail = int(r["n_fail"] or 0)
@@ -2475,8 +2480,7 @@ def _trust_overview() -> dict:
     quarantine_counts = []
     for tbl in quarantine_tables:
         try:
-            df = _rs(f"SELECT COUNT(*) AS n FROM {tbl}")
-            n = int(df.iloc[0]["n"]) if not df.empty else 0
+            n = int(db.scalar(f"SELECT COUNT(*) FROM {tbl}", default=0))
             if n > 0:
                 quarantine_counts.append({"table": tbl.replace("_quarantine", ""),
                                             "n": n})

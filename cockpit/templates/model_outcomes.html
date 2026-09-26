@@ -118,10 +118,10 @@ table.mo-tbl tr:hover td { background:rgba(255,255,255,0.015); }
         <td><span class="scope-tag {% if row.scope.startswith('top') %}top{% endif %}">{{ row.scope }}</span></td>
         <td class="num">{{ "{:,}".format(row.n) }}</td>
         <td class="num">{{ row.n_dates }}</td>
-        <td class="num {% if row.avg_fwd and row.avg_fwd > 0 %}pos{% elif row.avg_fwd and row.avg_fwd < 0 %}neg{% endif %}">{{ "%+.2f"|format(row.avg_fwd) if row.avg_fwd is not none else "—" }}</td>
-        <td class="num">{{ "%+.2f"|format(row.median_fwd) if row.median_fwd is not none else "—" }}</td>
+        <td class="num {% if row.avg_fwd and row.avg_fwd > 0 %}pos{% elif row.avg_fwd and row.avg_fwd < 0 %}neg{% endif %}">{{ row.avg_fwd|signed(2) if row.avg_fwd is not none else "—" }}</td>
+        <td class="num">{{ row.median_fwd|signed(2) if row.median_fwd is not none else "—" }}</td>
         <td class="num">{{ row.hit_rate }}%</td>
-        <td class="num {% if row.avg_excess and row.avg_excess > 0 %}pos{% elif row.avg_excess and row.avg_excess < 0 %}neg{% endif %}">{{ "%+.2f"|format(row.avg_excess) if row.avg_excess is not none else "—" }}</td>
+        <td class="num {% if row.avg_excess and row.avg_excess > 0 %}pos{% elif row.avg_excess and row.avg_excess < 0 %}neg{% endif %}">{{ row.avg_excess|signed(2) if row.avg_excess is not none else "—" }}</td>
         <td class="num">{{ row.n_excess_obs }}</td>
       </tr>
     {% endfor %}
@@ -144,13 +144,13 @@ table.mo-tbl tr:hover td { background:rgba(255,255,255,0.015); }
       <div style="margin-bottom:12px;">
         <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
           <span style="font-size:11px; color:var(--text-muted);"><span class="tier-tag {{ tier }}">{{ tier }}</span> Decile 1 → 10 spread:
-            <b style="color:var(--text-primary); font-variant-numeric: tabular-nums;">{{ "%+.2f"|format(d1 - d10) if d1 is not none and d10 is not none else "—" }} pp</b></span>
+            <b style="color:var(--text-primary); font-variant-numeric: tabular-nums;">{{ (d1 - d10)|signed(2) if d1 is not none and d10 is not none else "—" }} pp</b></span>
         </div>
         <div class="mo-decile-grid">
           {% for d in deciles %}
             <div class="mo-decile-cell {% if loop.first %}best{% elif loop.last %}worst{% endif %}">
               D{{ d.decile }}<br>
-              <span class="v">{{ "%+.2f"|format(d.avg_fwd) if d.avg_fwd is not none else "—" }}</span>
+              <span class="v">{{ d.avg_fwd|signed(2) if d.avg_fwd is not none else "—" }}</span>
             </div>
           {% endfor %}
         </div>
@@ -173,7 +173,7 @@ table.mo-tbl tr:hover td { background:rgba(255,255,255,0.015); }
       <div class="mo-ts-card">
         <div class="mo-ts-head">
           <span class="tier"><span class="tier-tag {{ tier }}">{{ tier }}</span> n={{ ts|length }}</span>
-          <span class="n">avg {{ "%+.2f"|format((values|sum)/(values|length)) if values else "—" }}%</span>
+          <span class="n">avg {{ ((values|sum)/(values|length))|signed(2) if values else "—" }}%</span>
         </div>
         <div class="mo-ts-svg">
           <svg viewBox="0 0 200 80" preserveAspectRatio="none">

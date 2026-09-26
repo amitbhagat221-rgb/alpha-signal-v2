@@ -1,4 +1,4 @@
-{% extends "base.html" %}
+{% extends "ops_base.html" %}
 {% from "_components.html" import tab_bar, radio_group %}
 
 {% block content %}
@@ -379,7 +379,7 @@
     <strong>t-stat colour key:</strong>
     <span style="color: #2ecc71;">|t| ≥ 2.5 (KEEP)</span> ·
     <span style="color: #4d8eff;">1.5–2.5 (WEAK keep)</span> ·
-    <span style="color: var(--text-muted);">&lt; 1.5 (library)</span>.
+    <span class="u-muted">&lt; 1.5 (library)</span>.
     Reference: pit_ic_by_tier_v2 (preferring v2_recompute over v1_archive).
 </div>
 
@@ -483,7 +483,7 @@
     </summary>
     <div class="v-body">
         <div style="color: var(--text-secondary); margin-bottom: 6px;">{{ t.desc }}</div>
-        {% if t.pk %}<div style="font-size: 11px; color: var(--text-muted);"><strong style="color: #f1c40f;">PK:</strong>
+        {% if t.pk %}<div class="u-muted-11"><strong style="color: #f1c40f;">PK:</strong>
             {% for c in t.pk %}<code>{{ c }}</code>{% if not loop.last %}, {% endif %}{% endfor %}</div>{% endif %}
         {% set fk_cols = t.fks | map(attribute='col') | list %}
         <div class="col-list">

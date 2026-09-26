@@ -71,11 +71,11 @@
 
     <div class="mv-weights">
       <b>LARGE:</b>
-      {% for k, w in v.weights['LARGE'].items() %}<span>{{ k }} {{ "%+.0f"|format(w*100) }}%</span>{% if not loop.last %} · {% endif %}{% endfor %}<br>
+      {% for k, w in v.weights['LARGE'].items() %}<span>{{ k }} {{ (w*100)|pct(0, signed=True) }}</span>{% if not loop.last %} · {% endif %}{% endfor %}<br>
       <b>MID:</b>
-      {% for k, w in v.weights['MID'].items() %}<span>{{ k }} {{ "%+.0f"|format(w*100) }}%</span>{% if not loop.last %} · {% endif %}{% endfor %}<br>
+      {% for k, w in v.weights['MID'].items() %}<span>{{ k }} {{ (w*100)|pct(0, signed=True) }}</span>{% if not loop.last %} · {% endif %}{% endfor %}<br>
       <b>SMALL:</b>
-      {% for k, w in v.weights['SMALL'].items() %}<span>{{ k }} {{ "%+.0f"|format(w*100) }}%</span>{% if not loop.last %} · {% endif %}{% endfor %}
+      {% for k, w in v.weights['SMALL'].items() %}<span>{{ k }} {{ (w*100)|pct(0, signed=True) }}</span>{% if not loop.last %} · {% endif %}{% endfor %}
     </div>
 
     {% for tier in ['LARGE','MID','SMALL'] %}

@@ -7,36 +7,21 @@ Reads from v2 SQLite database via api.py.
 Run: uvicorn cockpit.app:app --host 0.0.0.0 --port 3000 --reload
 """
 
-from pathlib import Path
-
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
+from starlette.middleware.gzip import GZipMiddleware
 
 from cockpit import api
-
-COCKPIT_DIR = Path(__file__).resolve().parent
+from cockpit._shared import COCKPIT_STATIC, COCKPIT_TEMPLATES, make_templates, prewarm
+from cockpit_ops.api import get_model_overview
 
 app = FastAPI(title="Alpha Signal Cockpit")
-app.mount("/static", StaticFiles(directory=COCKPIT_DIR / "static"), name="static")
+# Gzip every response > 1KB — /explorer is 1.27MB of HTML (same as ops).
+app.add_middleware(GZipMiddleware, minimum_size=1024)
+app.mount("/static", StaticFiles(directory=COCKPIT_STATIC), name="static")
 
-# Make Jinja2 treat undefined attributes as None instead of erroring
-from jinja2 import Undefined
-class SilentUndefined(Undefined):
-    def __str__(self): return ""
-    def __bool__(self): return False
-    def __iter__(self): return iter([])
-    def __eq__(self, other): return other is None
-    def __ne__(self, other): return other is not None
-    def __ge__(self, other): return False
-    def __le__(self, other): return False
-    def __gt__(self, other): return False
-    def __lt__(self, other): return False
-    def __float__(self): return 0.0
-    def __int__(self): return 0
-templates = Jinja2Templates(directory=COCKPIT_DIR / "templates")
-templates.env.undefined = SilentUndefined
+templates = make_templates([COCKPIT_TEMPLATES])
 
 
 # ────────────── Startup cache warmer ──────────────
@@ -46,51 +31,18 @@ templates.env.undefined = SilentUndefined
 # at startup so the first visit is always fast.
 @app.on_event("startup")
 def _prewarm_cache():
-    """Background-warm expensive TTL caches in PARALLEL so wall-clock matches the
-    slowest single warmer (data_health_scores ~19s) rather than the sum (~38s).
-    2026-05-25: bumped from sequential after /system cold path was 39s; parallel
-    drops it to ~19s, and the cache survives until TTL expiry."""
-    import threading
-    import concurrent.futures as cf
-
     # Ops-domain warmers (data_freshness, db_summary, data_health_scores,
     # factor_health, model_overview, flow_overview, command_centre,
     # health_overview, pipeline_status) moved to cockpit_ops/app.py during
     # Stage 2 split (2026-05-26).
-    warmers = [
+    prewarm([
         ("top_picks",          lambda: api.get_top_picks()),
         ("action_candidates",  lambda: api.get_action_candidates()),
         ("model_portfolio",    lambda: api.get_model_portfolio()),
         ("news_pool_168",      lambda: api._get_news_pool(hours=168)),
         ("news_pool_720",      lambda: api._get_news_pool(hours=720)),
         ("portfolio_bundle",   lambda: api.get_portfolio_bundle()),
-    ]
-
-    def _warm_one(name, fn):
-        import time as _t
-        t = _t.time()
-        try:
-            fn()
-            return name, _t.time() - t, None
-        except Exception as e:
-            return name, _t.time() - t, str(e)
-
-    def _warm():
-        import time as _t
-        t0 = _t.time()
-        # SQLite is single-writer so unbounded parallelism doesn't help and
-        # can starve user requests; 4 workers is the sweet spot for our mix.
-        with cf.ThreadPoolExecutor(max_workers=4) as ex:
-            futures = [ex.submit(_warm_one, n, f) for n, f in warmers]
-            for fut in cf.as_completed(futures):
-                name, dt, err = fut.result()
-                if err:
-                    print(f"  [cache-warm] {name}: FAILED — {err}")
-                else:
-                    print(f"  [cache-warm] {name}: {dt:.1f}s")
-        print(f"  [cache-warm] total wall-clock: {_t.time()-t0:.1f}s")
-
-    threading.Thread(target=_warm, daemon=True).start()
+    ])
 
 
 # Slide-style "headline + body" split for sector narrative bullets.
@@ -136,16 +88,6 @@ def _sentences(text, max_slides=5):
 templates.env.filters["slidify"] = _slidify
 templates.env.filters["sentences"] = _sentences
 
-# Cache-busting for static assets — appends ?v=<mtime> so browser caches
-# invalidate automatically whenever a static file is edited.
-def _asset_version(filename: str) -> str:
-    p = COCKPIT_DIR / "static" / filename
-    try:
-        return str(int(p.stat().st_mtime))
-    except OSError:
-        return "0"
-templates.env.globals["asset_version"] = _asset_version
-
 
 # Build a URL on the current request preserving all query params except one,
 # which gets set/unset. Used by /news for chip/tab/pagination links so each
@@ -186,7 +128,7 @@ async def _bind_request(request: Request, call_next):
 # ── Page Routes ──
 
 @app.get("/", response_class=HTMLResponse)
-async def morning_brief(request: Request):
+def morning_brief(request: Request):
     regime = api.get_regime()
     picks = api.get_top_picks(top=5)
     pick_date = api.get_pick_date()
@@ -194,17 +136,19 @@ async def morning_brief(request: Request):
     changes = api.get_changes()
     earnings = api.get_earnings_upcoming()
 
-    # Enrich each pick with price metrics + analyst consensus + dossier
+    # Enrich each pick with price metrics + analyst consensus + dossier —
+    # one batched query per source for all 15 picks, not 4 queries per pick.
+    sids = [s["sid"] for stocks in picks.values() for s in stocks]
+    pm = api.get_stock_price_metrics_batch(sids)
+    ac = api.get_analyst_consensus_batch(sids)
+    dominant = api.get_dominant_signal_batch(sids)
     for tier, stocks in picks.items():
         for stock in stocks:
             sid = stock["sid"]
-            pm = api.get_stock_price_metrics(sid)
-            ac = api.get_analyst_consensus(sid)
-            dos = api.get_dossier(sid)
-            stock["pm"] = pm
-            stock["ac"] = ac
-            stock["dossier"] = dos
-            stock["dominant_signal"] = api.get_dominant_signal(sid)
+            stock["pm"] = pm.get(sid, {})
+            stock["ac"] = ac.get(sid, {})
+            stock["dossier"] = api.get_dossier(sid)
+            stock["dominant_signal"] = dominant.get(sid, "")
 
     # Market pulse
     sectors = api.get_sector_overview()
@@ -220,25 +164,31 @@ async def morning_brief(request: Request):
 
 
 @app.get("/actions", response_class=HTMLResponse)
-async def actions(request: Request):
-    action_data = api.get_action_candidates()
-    # Enrich each candidate
+def actions(request: Request):
+    # Copy, don't mutate: get_action_candidates() hands back its cached dicts
+    # and handlers now run concurrently in the threadpool.
+    action_data = {k: [dict(s) for s in v] if isinstance(v, list) else v
+                   for k, v in api.get_action_candidates().items()}
+    # Enrich each candidate — one batched query per source, not 4 per stock.
+    sids = [s.get("sid") for sec in ("buy", "watch", "exit") for s in action_data.get(sec, [])]
+    pm = api.get_stock_price_metrics_batch(sids)
+    ac = api.get_analyst_consensus_batch(sids)
+    insider = api.get_insider_signal_batch(sids)
     for section in ["buy", "watch", "exit"]:
         for stock in action_data.get(section, []):
             sid = stock.get("sid")
             if sid:
-                stock["pm"] = api.get_stock_price_metrics(sid)
-                stock["ac"] = api.get_analyst_consensus(sid)
+                stock["pm"] = pm.get(sid, {})
+                stock["ac"] = ac.get(sid, {})
                 stock["dossier"] = api.get_dossier(sid)
-                ia = api.get_insider_activity(sid)
-                stock["insider_desc"] = ia.get("signal", {}).get("description", "")
+                stock["insider_desc"] = insider.get(sid, {}).get("description", "")
     return templates.TemplateResponse(request, "action_queue.html", {
         "page": "actions", "actions": action_data,
     })
 
 
 @app.get("/explorer", response_class=HTMLResponse)
-async def explorer(request: Request):
+def explorer(request: Request):
     tiers = api.get_heatmap_data()
     # Table view data
     table = api.get_explorer_table()
@@ -248,7 +198,7 @@ async def explorer(request: Request):
 
 
 @app.get("/explorer/{sid}", response_class=HTMLResponse)
-async def stock_detail(request: Request, sid: str):
+def stock_detail(request: Request, sid: str):
     detail = api.get_stock_detail(sid)
     if not detail:
         return HTMLResponse("<h1>Stock not found</h1>", status_code=404)
@@ -293,7 +243,7 @@ async def stock_detail(request: Request, sid: str):
 
 
 @app.get("/portfolio", response_class=HTMLResponse)
-async def portfolio(request: Request):
+def portfolio(request: Request):
     bundle = api.get_portfolio_bundle()
     return templates.TemplateResponse(request, "portfolio.html", {
         "page": "portfolio",
@@ -305,7 +255,7 @@ async def portfolio(request: Request):
 
 
 @app.get("/sectors", response_class=HTMLResponse)
-async def sectors(request: Request, sector: str = "", industry: str = ""):
+def sectors(request: Request, sector: str = "", industry: str = ""):
     # Industry-first overview (drill-down primary); sectors as grouping
     industries_data = api.get_industry_overview()
     industry_list = api.get_industry_list()
@@ -352,21 +302,8 @@ async def sectors(request: Request, sector: str = "", industry: str = ""):
     })
 
 
-@app.get("/api/sector-detail/{sector}")
-async def api_sector_detail(sector: str):
-    """JSON for live tab-2 sector switching without full page reload."""
-    return JSONResponse({
-        "narrative": api.get_sector_metadata(sector),
-        "top_players": api.get_sector_top_players(sector, n=10),
-        "picks": api.get_sector_picks(sector, top_n=10, bottom_n=5),
-        "factor_means": api.get_sector_factor_means(sector),
-        "macro_contributors": api.get_sector_macro_contributors(sector),
-        "regulatory": api.get_sector_recent_regulatory(sector, n=10),
-    })
-
-
 @app.get("/partial/industry-card/{industry}", response_class=HTMLResponse)
-async def partial_industry_card(request: Request, industry: str, sid: str = ""):
+def partial_industry_card(request: Request, industry: str, sid: str = ""):
     """Full industry dossier fragment, lazy-loaded into the stock page's Sector
     tab. Renders the SAME shared _industry_detail.html partial that /sectors uses
     (metric strip, conviction bar, Overview/Players/Trends/Our-Picks sub-tabs,
@@ -394,7 +331,7 @@ async def partial_industry_card(request: Request, industry: str, sid: str = ""):
 
 
 @app.get("/partial/sector-card/{sector}", response_class=HTMLResponse)
-async def partial_sector_card(request: Request, sector: str, sid: str = ""):
+def partial_sector_card(request: Request, sector: str, sid: str = ""):
     """Compact sector dossier fragment, lazy-loaded into the stock page's Sector
     tab (sector context attached to every stock). Peers (with this stock
     highlighted) + our model's top/bottom + macro drivers + recent regulatory,
@@ -410,15 +347,15 @@ async def partial_sector_card(request: Request, sector: str, sid: str = ""):
 
 
 @app.get("/model", response_class=HTMLResponse)
-async def model_page(request: Request):
-    overview = api.get_model_overview()
+def model_page(request: Request):
+    overview = get_model_overview()
     return templates.TemplateResponse(request, "model.html", {
         "page": "model", **overview,
     })
 
 
 @app.get("/model/outcomes", response_class=HTMLResponse)
-async def model_outcomes_page(request: Request, n: int = 10):
+def model_outcomes_page(request: Request, n: int = 10):
     """Live equity curve — realized forward returns on actual picks.
 
     The factor model is hypothesis; this page is the answer. Per-tier × window
@@ -433,12 +370,12 @@ async def model_outcomes_page(request: Request, n: int = 10):
 
 
 @app.get("/api/model/outcomes")
-async def api_model_outcomes(n: int = 10):
+def api_model_outcomes(n: int = 10):
     return api.get_pick_outcomes_summary(top_n=n)
 
 
 @app.get("/model/variants", response_class=HTMLResponse)
-async def model_variants_page(request: Request, n: int = 10):
+def model_variants_page(request: Request, n: int = 10):
     """Side-by-side comparison of production / max-return / max-sharpe weight schemes.
 
     n: picks per tier per variant (default 10). All three variants run on the
@@ -454,7 +391,7 @@ async def model_variants_page(request: Request, n: int = 10):
 
 
 @app.get("/multibagger", response_class=HTMLResponse)
-async def multibagger_page(request: Request):
+def multibagger_page(request: Request):
     """Multibagger watchlist — the SEPARATE quality-gated funnel (plan 0008),
     kept OUT of daily_picks. Honest framing: the gates are the product (a
     junk-stripped watchlist); the ranking edge is validated weak/regime-dependent
@@ -472,7 +409,7 @@ async def multibagger_page(request: Request):
 # ── Mutual Fund research section (plan prfect-lets-add-a-zazzy-eich) ──
 
 @app.get("/mutual-funds", response_class=HTMLResponse)
-async def mutual_funds_page(
+def mutual_funds_page(
     request: Request,
     category: str = None, amc: str = None,
     plan: str = None, option: str = None,
@@ -496,7 +433,7 @@ async def mutual_funds_page(
 
 
 @app.get("/mutual-funds/compare", response_class=HTMLResponse)
-async def mutual_fund_compare(request: Request, codes: str = ""):
+def mutual_fund_compare(request: Request, codes: str = ""):
     """Side-by-side compare. ?codes=A,B,C (2-5 scheme codes)."""
     scheme_codes = [c.strip() for c in (codes or "").split(",") if c.strip()]
     bundle = api.get_mf_compare(scheme_codes) if scheme_codes else {"schemes": [], "categories_seen": []}
@@ -508,7 +445,7 @@ async def mutual_fund_compare(request: Request, codes: str = ""):
 
 
 @app.get("/mutual-funds/{scheme_code}", response_class=HTMLResponse)
-async def mutual_fund_detail(request: Request, scheme_code: str):
+def mutual_fund_detail(request: Request, scheme_code: str):
     detail = api.get_mf_detail(scheme_code)
     if not detail:
         return HTMLResponse(f"Scheme {scheme_code} not found", status_code=404)
@@ -522,22 +459,22 @@ async def mutual_fund_detail(request: Request, scheme_code: str):
 
 
 @app.get("/api/mf-nav-series/{scheme_code}")
-async def api_mf_nav_series(scheme_code: str, days: int = None):
+def api_mf_nav_series(scheme_code: str, days: int = None):
     return api.get_mf_nav_series(scheme_code, days=days)
 
 
 @app.get("/api/mf-rolling/{scheme_code}")
-async def api_mf_rolling(scheme_code: str):
+def api_mf_rolling(scheme_code: str):
     return api.get_mf_rolling_returns(scheme_code)
 
 
 @app.get("/api/mf-search")
-async def api_mf_search(q: str = "", limit: int = 10):
+def api_mf_search(q: str = "", limit: int = 10):
     return api.get_mf_search(q, limit=limit)
 
 
 @app.get("/news", response_class=HTMLResponse)
-async def news_page(
+def news_page(
     request: Request,
     topic: str = "",
     tier: int = 0,
@@ -581,66 +518,41 @@ async def news_page(
 # /api/health/overview also moved.
 
 # ── JSON API Routes ──
-
-@app.get("/api/regime")
-async def api_regime():
-    return api.get_regime()
-
-@app.get("/api/changes")
-async def api_changes(days: int = 1):
-    return api.get_changes(days=days)
-
-@app.get("/api/picks")
-async def api_picks(tier: str = None, top: int = 5):
-    return api.get_top_picks(tier=tier, top=top)
-
-@app.get("/api/stock/{sid}")
-async def api_stock(sid: str):
-    detail = api.get_stock_detail(sid)
-    return detail or {"error": "not found"}
+# 2026-09-26: removed /api/regime, /api/changes, /api/picks, /api/stock/{sid},
+# /api/prices/{sid}, /api/annual/{sid}, /api/sectors, /api/sector-detail/{sector}
+# — no template/JS/doc caller and only 127.0.0.1 hits in output/cockpit.log.
+# /api/model/outcomes and /api/mf-search stay: both had external hits this month.
 
 @app.get("/api/search")
-async def api_search(q: str = ""):
+def api_search(q: str = ""):
     if len(q) < 2:
         return []
     return api.search_stocks(q)
 
-@app.get("/api/prices/{sid}")
-async def api_prices(sid: str, days: int = 365):
-    return api.get_price_series(sid, days=days)
-
 @app.get("/api/prices-extended/{sid}")
-async def api_prices_extended(sid: str, days: int = 365):
+def api_prices_extended(sid: str, days: int = 365):
     return api.get_price_series_extended(sid, days=days)
 
 @app.get("/api/quarterly/{sid}")
-async def api_quarterly(sid: str):
+def api_quarterly(sid: str):
     return api.get_quarterly_financials(sid)
 
-@app.get("/api/annual/{sid}")
-async def api_annual(sid: str):
-    return api.get_annual_financials(sid)
-
 @app.get("/api/shareholding/{sid}")
-async def api_shareholding(sid: str):
+def api_shareholding(sid: str):
     return api.get_shareholding_history(sid)
 
 @app.get("/api/forecasts/{sid}")
-async def api_forecasts(sid: str):
+def api_forecasts(sid: str):
     return api.get_forecast_trend(sid)
 
 @app.get("/api/insider-timeline/{sid}")
-async def api_insider_timeline(sid: str):
+def api_insider_timeline(sid: str):
     return api.get_insider_timeline(sid)
 
 @app.get("/api/lineage/{sid}")
-async def api_stock_lineage(sid: str):
+def api_stock_lineage(sid: str):
     """Per-stock data lineage. See cockpit.api.get_stock_lineage + ADR 0027."""
     return api.get_stock_lineage(sid)
-
-@app.get("/api/sectors")
-async def api_sectors():
-    return api.get_sector_overview()
 
 # NOTE: /api/pipeline, /api/pipeline/rerun, /api/health, /sql, /api/sql
 # all moved to cockpit_ops (port 3001) during Stage 2 split (2026-05-26).

@@ -63,7 +63,7 @@
 <div x-show="tab === 'weights'" x-cloak>
 
 {# ── Per-tier signal weights ── #}
-<div class="card" style="margin-bottom: 20px;">
+<div class="card u-mb20">
     <div class="section-title">Tier Models — Signal Weights</div>
     <div class="section-desc">Each tier scores stocks using a different weighted combination. Weights sum to 1.0 within each tier; the percentage shown is each signal's share.</div>
 
@@ -73,7 +73,7 @@
         <div style="background: var(--bg-card); border: 1px solid var(--border); border-left: 4px solid {{ tier_color }}; border-radius: 8px; padding: 16px;">
             <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 12px;">
                 <div style="font-size: 14px; font-weight: 800; letter-spacing: 0.5px; color: var(--text-primary);">{{ tier_name }}</div>
-                <div class="mono" style="font-size: 11px; color: var(--text-muted);">{{ signals|length }} signals</div>
+                <div class="mono u-muted-11">{{ signals|length }} signals</div>
             </div>
             {% for s in signals %}
             <div style="margin-bottom: 8px;">
@@ -98,7 +98,7 @@
 <div x-show="tab === 'regime'" x-cloak>
 
 {# ── VIX regime allocation ── #}
-<div class="card" style="margin-bottom: 20px;">
+<div class="card u-mb20">
     <div class="section-title">Regime &rarr; Allocation</div>
     <div class="section-desc">The current VIX level decides how the portfolio is split across tiers. Lower VIX favours mid + small caps; higher VIX shifts to large.</div>
 
@@ -140,7 +140,7 @@
 
 {# ── Backtest Roster: what's IN the backtest, what's NOT, and why ── #}
 {% if backtest_roster %}
-<div class="card" style="margin-bottom: 20px;">
+<div class="card u-mb20">
     <div class="section-title">Backtest Factor Roster</div>
     <div class="section-desc">
         Cross-referenced against v1's full factor inventory. Even DROP-verdict signals stay listed — economic regimes shift; today's noise can be tomorrow's alpha.
@@ -176,7 +176,7 @@
                 <th style="padding: 10px 8px; border-bottom: 2px solid var(--border-accent);">Source</th>
                 <th style="padding: 10px 8px; border-bottom: 2px solid var(--border-accent);">Filing lag</th>
                 <th style="padding: 10px 8px; text-align: right; border-bottom: 2px solid var(--border-accent);">History</th>
-                <th style="padding: 10px 8px; border-bottom: 2px solid var(--border-accent);">C13b (L / M / S)</th>
+                <th style="padding: 10px 8px; border-bottom: 2px solid var(--border-accent);">Backtest v2 (L / M / S)</th>
                 <th style="padding: 10px 8px; border-bottom: 2px solid var(--border-accent);">Notes</th>
             </tr>
         </thead>
@@ -192,7 +192,7 @@
         {% for s in grp.signals %}
             {% set status_color = status_color_map.get(s.status, 'var(--text-muted)') %}
             {% set status_icon = status_icon_map.get(s.status, '?') %}
-            <tr style="border-bottom: 1px solid var(--border);">
+            <tr class="u-rule">
                 <td style="padding: 10px 8px; vertical-align: top;">
                     <div class="mono" style="color: var(--text-primary); font-weight: 700;">{{ s.signal }}</div>
                     <div style="color: var(--text-secondary); font-size: 11px; margin-top: 2px;">{{ s.label }}</div>
@@ -237,7 +237,7 @@
                     {% elif s.v1_verdict_summary %}
                         <div style="color: var(--text-muted); font-size: 10px; line-height: 1.4;">{{ s.v1_verdict_summary }}</div>
                     {% else %}
-                        <span style="color: var(--text-muted);">—</span>
+                        <span class="u-muted">—</span>
                     {% endif %}
                 </td>
                 <td style="padding: 10px 8px; vertical-align: top; font-size: 11px; color: var(--text-secondary); max-width: 320px;">
@@ -266,7 +266,7 @@
             <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; font-weight: 700; margin-bottom: 8px;">Response variable (the y in IC)</div>
             <div style="font-size: 12px;">
                 <span class="mono" style="color: var(--text-primary); font-weight: 700;">{{ backtest_roster.response.variable }}</span>
-                <span style="color: var(--text-muted);"> — {{ backtest_roster.response.horizon_days }}-day forward return, computed from <span class="mono">{{ backtest_roster.response.computed_from }}</span></span>
+                <span class="u-muted"> — {{ backtest_roster.response.horizon_days }}-day forward return, computed from <span class="mono">{{ backtest_roster.response.computed_from }}</span></span>
             </div>
             {% for r in backtest_roster.response.available_in %}
             <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">
@@ -285,7 +285,7 @@
 <div x-show="tab === 'validation'" x-cloak>
 
 {# ── Backtest validation (detailed t-stat table) ── #}
-<div class="card" style="margin-bottom: 20px;">
+<div class="card u-mb20">
     <div class="section-title">Backtest — Signal Validation</div>
     <div class="section-desc">
         Source: {{ validation.meta.source or 'n/a' }}. Point-in-time reconstruction across {{ validation.meta.periods or '—' }} monthly periods.
@@ -313,7 +313,7 @@
             {% set t = r.t_stat or 0 %}
             {% set t_color = 'var(--green)' if t|abs >= 2.5 else ('var(--amber)' if t|abs >= 1.5 else ('var(--text-secondary)' if t|abs >= 0.5 else 'var(--text-muted)')) %}
             {% set verdict_color = 'var(--green)' if r.verdict == 'KEEP' else ('var(--amber)' if r.verdict == 'WEAK' else ('var(--red)' if r.verdict == 'DROP' else 'var(--text-muted)')) %}
-            <tr style="border-bottom: 1px solid var(--border);">
+            <tr class="u-rule">
                 <td data-key="signal" class="mono" style="padding: 10px 12px; color: var(--text-primary);">{{ r.signal }}</td>
                 <td data-key="cap_tier" style="padding: 10px 12px;">
                     <span style="font-size: 9px; padding: 2px 6px; color: {{ tier_color }}; border: 1px solid {{ tier_color }}; border-radius: 4px; font-weight: 700; letter-spacing: 0.5px;">{{ r.cap_tier }}</span>
@@ -404,21 +404,21 @@
 
         <table style="width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 12px;">
             <tbody>
-                <tr style="border-bottom: 1px solid var(--border);">
+                <tr class="u-rule">
                     <td style="padding: 8px 12px; color: var(--text-secondary);">Picks per tier</td>
                     <td class="mono num" style="padding: 8px 12px; text-align: right; color: var(--text-primary); font-weight: 600;">
                         L {{ portfolio.picks_per_tier.LARGE }} · M {{ portfolio.picks_per_tier.MID }} · S {{ portfolio.picks_per_tier.SMALL }}
                     </td>
                 </tr>
-                <tr style="border-bottom: 1px solid var(--border);">
+                <tr class="u-rule">
                     <td style="padding: 8px 12px; color: var(--text-secondary);">Max picks per day</td>
                     <td class="mono num" style="padding: 8px 12px; text-align: right; color: var(--text-primary); font-weight: 600;">{{ portfolio.max_daily_picks }}</td>
                 </tr>
-                <tr style="border-bottom: 1px solid var(--border);">
+                <tr class="u-rule">
                     <td style="padding: 8px 12px; color: var(--text-secondary);">Max stocks per sector</td>
                     <td class="mono num" style="padding: 8px 12px; text-align: right; color: var(--text-primary); font-weight: 600;">{{ portfolio.max_stocks_per_sector }}</td>
                 </tr>
-                <tr style="border-bottom: 1px solid var(--border);">
+                <tr class="u-rule">
                     <td style="padding: 8px 12px; color: var(--text-secondary);">Max weight per stock</td>
                     <td class="mono num" style="padding: 8px 12px; text-align: right; color: var(--text-primary); font-weight: 600;">{{ portfolio.max_stock_weight_pct }}%</td>
                 </tr>

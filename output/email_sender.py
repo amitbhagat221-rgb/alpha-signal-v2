@@ -29,6 +29,7 @@ from email.mime.text import MIMEText
 
 from config import PROJECT_ROOT
 from db import read_sql
+from formatting import DASH, _num, crore, inr, pct, signed, tone
 from output.dossier import is_publishable
 
 COCKPIT_URL = os.environ.get("COCKPIT_BASE_URL", "http://140.245.248.166:3000")
@@ -64,9 +65,9 @@ ACTION_STYLES = {
 # Sourced from daily_snapshots (raw signal values), not the legacy daily_picks._adj
 # columns which v2's percentile-rank screener leaves at 0.
 def _fmt_f_score(v):  return f"{int(v)}/9"
-def _fmt_signed(v):   return f"{float(v):+.2f}"
+def _fmt_signed(v):   return signed(v)
 def _fmt_yield(v):    return f"{float(v)*100:.1f}%" if abs(float(v)) < 1 else f"{float(v):.1f}%"
-def _fmt_pct_v(v):    return f"{float(v):.0f}%"
+def _fmt_pct_v(v):    return pct(v, 0)
 
 SNAPSHOT_SIGNALS = [
     ("piotroski_f",      "F-Score",   _fmt_f_score, +1, 5.0,   9.0),
@@ -81,25 +82,16 @@ SNAPSHOT_SIGNALS = [
 ]
 
 
-import math
-
-
 def _has(x):
     """True iff x is a usable number (not None, not NaN)."""
-    if x is None:
-        return False
-    try:
-        return not math.isnan(float(x))
-    except (TypeError, ValueError):
-        return False
+    return _num(x) is not None
 
 
 def _fmt_pct(x, decimals=1):
     if not _has(x):
-        return "—"
-    x = float(x)
-    color = C_GREEN if x > 0 else (C_RED if x < 0 else C_MUTED)
-    return f'<span style="color:{color};font-weight:600">{x:+.{decimals}f}%</span>'
+        return DASH
+    color = tone(x, C_GREEN, C_RED, C_MUTED)
+    return f'<span style="color:{color};font-weight:600">{pct(x, decimals, signed=True)}</span>'
 
 
 def _fmt_num(x, decimals=1, suffix=""):
@@ -109,18 +101,11 @@ def _fmt_num(x, decimals=1, suffix=""):
 
 
 def _fmt_price(x):
-    if not _has(x):
-        return "—"
-    return f"₹{float(x):,.0f}"
+    return inr(x, group=True)
 
 
 def _fmt_mcap(cr):
-    if not _has(cr):
-        return "—"
-    cr = float(cr)
-    if cr >= 100_000:
-        return f"₹{cr/100_000:.1f}L Cr"
-    return f"₹{cr:,.0f} Cr"
+    return crore(cr)
 
 
 def _signal_pills(row):
