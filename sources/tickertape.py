@@ -38,7 +38,7 @@ sys.path.insert(0, str(Path.home() / "alpha-signal" / "scripts"))
 from config import API, PROJECT_ROOT
 from db import read_sql, upsert_df, insert_df
 
-DELAY = API["tickertape_delay"]  # 2 seconds
+DELAY = API["min_gap"]  # 2 seconds
 CHECKPOINT_EVERY = 200
 CHECKPOINT_FILE = PROJECT_ROOT / "output" / "tickertape_harvest_log.json"
 

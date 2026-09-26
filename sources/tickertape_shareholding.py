@@ -48,7 +48,7 @@ sys.path.insert(0, str(Path.home() / "alpha-signal" / "scripts"))
 from config import API
 from db import read_sql, upsert_df
 
-DELAY = API["tickertape_delay"]
+DELAY = API["min_gap"]
 
 
 def _get_client():

@@ -350,13 +350,21 @@ BACKTEST = {
 # ── API / Network ──
 
 API = {
-    "tickertape_delay": 2.0,
-    "nse_delay": 2.0,
-    "slug_delay": 0.3,
-    "default_timeout": 15,
-    "nse_timeout": 30,
-    "max_retries": 2,
+    # Minimum gap between two requests to the same host (CLAUDE.md: ≥2s).
+    # Enforced by sources/_http.polite_get; loops over non-requests clients
+    # (yfinance, Bharat_sm_data) sleep this between items. Single-file bulk
+    # downloads (NAVAll.txt, one bhavcopy/day) are unaffected — one call each.
+    "min_gap": 2.0,
+    # Documented per-host exceptions — slower than the floor, never faster.
+    "host_min_gap": {
+        "www.moneycontrol.com": 12.0,   # 2s tripped the Moneycontrol WAF (moneycontrol_recos docstring)
+        "www.etmoney.com": 2.5,         # ETMoney soft-blocks faster steady-state scraping (mf_holdings_scrape)
+    },
     "user_agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36",
+    # Full desktop-browser UA for sites that gate on it (Tickertape pages, BSE,
+    # Screener, ETMoney). Moneycontrol keeps its own WAF-tuned header set.
+    "browser_user_agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                           "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"),
 }
 
 # ── LLM models (2026-07-21 cost optimization) ──

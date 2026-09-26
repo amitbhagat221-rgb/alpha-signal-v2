@@ -39,7 +39,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from config import API
 from db import read_sql, upsert_df
 
-DELAY = API["tickertape_delay"]  # 2 seconds
+DELAY = API["min_gap"]  # 2 seconds
 TIMEOUT = 15
 MAX_RETRIES = 2
 
