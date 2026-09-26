@@ -22,7 +22,41 @@ from cockpit._shared import _persisted_cache
 #   - mf_category_stats  category medians/deciles
 
 
-@_persisted_cache(600, name="mf_universe_overview")
+@_persisted_cache(600, name="mf_universe_pool")
+def _mf_universe_pool():
+    """Every active scheme joined to its LATEST mf_metrics row, plus an
+    `investable` flag — the unfiltered pool that get_mf_universe_overview
+    filters, sorts and pages in memory (the _get_news_pool pattern). One cache
+    slot; previously every free-text q × page × sort combination persisted its
+    own pickle (unbounded key space).
+
+    investable = data_quality is NULL/'TRUSTED' (not wound-up, segregated,
+    interval, bonus, anomalous NAV) AND a NAV within the last 30 days (not a
+    matured FMP / delisted plan). Rows come in rowid order so the stable sort
+    below breaks ties the way SQLite's scan did."""
+    # Join to LATEST mf_metrics row per scheme (defensive — table should be clean
+    # after the monthly compute, but stale rows from earlier runs can stick around).
+    return read_sql(
+        """SELECT sm.scheme_code, sm.scheme_name, sm.amc, sm.category_norm,
+                  sm.plan_type, sm.option_type,
+                  m.nav, m.nav_date,
+                  m.ret_1y, m.ret_3y_cagr, m.ret_5y_cagr,
+                  m.sharpe_1y, m.max_drawdown,
+                  m.composite_score, m.score_percentile, m.peer_rank_3y,
+                  CASE WHEN (sm.data_quality IS NULL OR sm.data_quality = 'TRUSTED')
+                        AND EXISTS (SELECT 1 FROM mf_nav_history n
+                                    WHERE n.scheme_code = sm.scheme_code
+                                      AND n.nav_date >= date('now','-30 days'))
+                       THEN 1 ELSE 0 END AS investable
+           FROM mf_scheme_master sm
+           LEFT JOIN mf_metrics m
+             ON sm.scheme_code = m.scheme_code
+            AND m.as_of_date = (SELECT MAX(as_of_date) FROM mf_metrics)
+           WHERE sm.active = 1
+           ORDER BY sm.rowid"""
+    )
+
+
 def get_mf_universe_overview(category: str = None, amc: str = None,
                               plan: str = None, option: str = None,
                               q: str = None, sort: str = "percentile",
@@ -42,84 +76,52 @@ def get_mf_universe_overview(category: str = None, amc: str = None,
                        (>30 days old — matured FMPs, delisted plans). Default False.
     Sort: 'percentile' (default, within-category — audit MF-F2) / 'score' (absolute,
       cross-category) / 'ret_1y' / 'ret_3y' / 'sharpe_1y' / 'name'.
+
+    Filters mirror the old SQL: prefix / substring matches are case-insensitive
+    like SQLite's LIKE; plan/option compare upper-cased.
     """
-    where = ["sm.active = 1"]
+    df = _mf_universe_pool()
+    keep = df["scheme_code"].notna()
     if not include_non_investable:
-        where.append("(sm.data_quality IS NULL OR sm.data_quality = 'TRUSTED')")
-        where.append(
-            "EXISTS (SELECT 1 FROM mf_nav_history n "
-            "WHERE n.scheme_code = sm.scheme_code "
-            "AND n.nav_date >= date('now','-30 days'))"
-        )
-    params: list = []
+        keep &= df["investable"] == 1
     if category:
         if "/" in category:
-            where.append("sm.category_norm = ?")
-            params.append(category)
+            keep &= df["category_norm"] == category
         else:
-            where.append("sm.category_norm LIKE ?")
-            params.append(f"{category}%")
+            keep &= df["category_norm"].str.lower().str.startswith(category.lower(), na=False)
     if amc:
-        where.append("sm.amc LIKE ?")
-        params.append(f"%{amc}%")
+        keep &= df["amc"].str.lower().str.contains(amc.lower(), regex=False, na=False)
     if plan:
-        where.append("sm.plan_type = ?")
-        params.append(plan.upper())
+        keep &= df["plan_type"] == plan.upper()
     if option:
-        where.append("sm.option_type = ?")
-        params.append(option.upper())
+        keep &= df["option_type"] == option.upper()
     if q:
-        where.append("sm.scheme_name LIKE ?")
-        params.append(f"%{q}%")
+        keep &= df["scheme_name"].str.lower().str.contains(q.lower(), regex=False, na=False)
 
-    where_sql = " AND ".join(where)
     sort_map = {
         # Default (audit MF-F2): within-category percentile. The absolute
         # composite_score confounds fund skill with which asset class happened
         # to run recently (equity vs debt vs gold) — percentile compares each
         # fund only against its own category peers, which is the fair question
         # ("is this a good large-cap fund?") for a cross-category listing.
-        "percentile": "m.score_percentile DESC NULLS LAST",
-        "score":     "m.composite_score DESC NULLS LAST",
-        "ret_1y":    "m.ret_1y DESC NULLS LAST",
-        "ret_3y":    "m.ret_3y_cagr DESC NULLS LAST",
-        "ret_5y":    "m.ret_5y_cagr DESC NULLS LAST",
-        "sharpe_1y": "m.sharpe_1y DESC NULLS LAST",
-        "max_dd":    "m.max_drawdown DESC NULLS LAST",
-        "name":      "sm.scheme_name ASC",
+        # (column, ascending) — DESC sorts put NULLs last, as the SQL did.
+        "percentile": ("score_percentile", False),
+        "score":     ("composite_score", False),
+        "ret_1y":    ("ret_1y", False),
+        "ret_3y":    ("ret_3y_cagr", False),
+        "ret_5y":    ("ret_5y_cagr", False),
+        "sharpe_1y": ("sharpe_1y", False),
+        "max_dd":    ("max_drawdown", False),
+        "name":      ("scheme_name", True),
     }
-    order_by = sort_map.get(sort, sort_map["percentile"])
-
-    # Join to LATEST mf_metrics row per scheme (defensive — table should be clean
-    # after the monthly compute, but stale rows from earlier runs can stick around).
-    metrics_join = """LEFT JOIN mf_metrics m
-        ON sm.scheme_code = m.scheme_code
-       AND m.as_of_date = (SELECT MAX(as_of_date) FROM mf_metrics)"""
-
-    # Count for pagination
-    total = read_sql(
-        f"""SELECT COUNT(*) AS n FROM mf_scheme_master sm
-            {metrics_join}
-            WHERE {where_sql}""",
-        params=params,
-    ).iloc[0]["n"]
+    col, ascending = sort_map.get(sort, sort_map["percentile"])
+    hits = df[keep].sort_values(col, ascending=ascending, kind="mergesort",
+                                na_position="first" if ascending else "last")
+    total = len(hits)
 
     # Page rows
     offset = max(0, (page - 1) * page_size)
-    rows = read_sql(
-        f"""SELECT sm.scheme_code, sm.scheme_name, sm.amc, sm.category_norm,
-                   sm.plan_type, sm.option_type,
-                   m.nav, m.nav_date,
-                   m.ret_1y, m.ret_3y_cagr, m.ret_5y_cagr,
-                   m.sharpe_1y, m.max_drawdown,
-                   m.composite_score, m.score_percentile, m.peer_rank_3y
-            FROM mf_scheme_master sm
-            {metrics_join}
-            WHERE {where_sql}
-            ORDER BY {order_by}
-            LIMIT ? OFFSET ?""",
-        params=params + [page_size, offset],
-    )
+    rows = hits.iloc[offset:offset + page_size].drop(columns=["investable"])
 
     return {
         "rows":      rows.replace({float("nan"): None}).to_dict("records"),

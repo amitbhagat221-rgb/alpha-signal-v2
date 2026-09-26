@@ -1502,6 +1502,14 @@
 // ───── Chart instances (so we can destroy/recreate) ─────
 const charts = {};
 const SID = '{{ s.sid }}';
+// The route already computed these for the tables above — embed them rather
+// than re-fetching the same four payloads from /api/* after load.
+const EMBEDDED = {
+    quarterly: {{ s.quarterly|tojson }},
+    shareholding: {{ s.shareholding|tojson }},
+    insider_timeline: {{ s.insider_timeline|tojson }},
+    forecasts: {{ s.forecasts|tojson }},
+};
 
 const COLORS = {
     green: '#22c55e', red: '#ef4444', amber: '#f59e0b',
@@ -1578,8 +1586,7 @@ async function initDeliveryChart() {
 
 // ───── Quarterly revenue + PAT chart ─────
 async function initQuarterlyChart() {
-    const resp = await fetch(`/api/quarterly/${SID}`);
-    const data = await resp.json();
+    const data = EMBEDDED.quarterly;
     if (!data.quarters || !data.quarters.length) return;
     if (charts.quarterly) charts.quarterly.destroy();
     const quarters = [...data.quarters].reverse();  // chronological
@@ -1599,8 +1606,7 @@ async function initQuarterlyChart() {
 
 // ───── Shareholding stacked area chart ─────
 async function initShareholdingChart() {
-    const resp = await fetch(`/api/shareholding/${SID}`);
-    const data = await resp.json();
+    const data = EMBEDDED.shareholding;
     if (!data.length) return;
     if (charts.shareholding) charts.shareholding.destroy();
     const quarters = [...data].reverse();  // chronological
@@ -1622,8 +1628,7 @@ async function initShareholdingChart() {
 
 // ───── Insider buy/sell timeline chart ─────
 async function initInsiderChart() {
-    const resp = await fetch(`/api/insider-timeline/${SID}`);
-    const data = await resp.json();
+    const data = EMBEDDED.insider_timeline;
     if (!data.length) return;
     if (charts.insider) charts.insider.destroy();
     const ctx = document.getElementById('insiderChart').getContext('2d');
@@ -1642,8 +1647,7 @@ async function initInsiderChart() {
 
 // ───── Forecast revisions chart ─────
 async function initForecastChart() {
-    const resp = await fetch(`/api/forecasts/${SID}`);
-    const data = await resp.json();
+    const data = EMBEDDED.forecasts;
     if (charts.forecast) charts.forecast.destroy();
     const datasets = [];
     if (data.price_target && data.price_target.length) {
