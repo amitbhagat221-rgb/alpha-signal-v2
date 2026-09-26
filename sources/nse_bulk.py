@@ -56,7 +56,12 @@ def _parse_deals(csv_text, deal_type, deal_date=None):
 
     # Try to identify columns
     sym_col = next((c for c in df.columns if "symbol" in c.lower()), None)
-    client_col = next((c for c in df.columns if "client" in c.lower() or "name" in c.lower()), None)
+    # "Client Name" must win over "Security Name" (which precedes it in NSE's
+    # header) — the old single `client-or-name` scan stored the company name
+    # as client_name for every daily row since ~2026-05, so smart_money's
+    # repeat_buyers collapsed to "stock had buys on ≥2 dates".
+    client_col = (next((c for c in df.columns if "client" in c.lower()), None)
+                  or next((c for c in df.columns if "name" in c.lower()), None))
     bs_col = next((c for c in df.columns if "buy" in c.lower() and "sell" in c.lower()), None)
     qty_col = next((c for c in df.columns if "quant" in c.lower()), None)
     price_col = next((c for c in df.columns if "price" in c.lower()), None)

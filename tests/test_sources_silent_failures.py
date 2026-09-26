@@ -68,8 +68,10 @@ def test_nse_bulk_quiet_on_duplicate_only_day(monkeypatch):
            "25-Sep-2026,RELIANCE,Reliance,SOME FUND,BUY,100000,1400.5,-\n")
     monkeypatch.setattr(nse_bulk._http, "polite_get", lambda url, headers=None: _Resp(csv))
     monkeypatch.setattr(nse_bulk._http, "sid_map", lambda col="ticker": {"RELIANCE": "RELI"})
-    monkeypatch.setattr(nse_bulk, "insert_df", lambda df, t: 0)   # all dupes
+    seen = []
+    monkeypatch.setattr(nse_bulk, "insert_df", lambda df, t: seen.append(df) or 0)   # all dupes
     assert nse_bulk.fetch_today() == 0
+    assert seen[0]["client_name"].iloc[0] == "SOME FUND"   # not the Security Name column
 
 
 def test_macro_gov_raises_naming_dead_source_after_saving_the_rest(monkeypatch):
