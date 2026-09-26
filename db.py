@@ -19,6 +19,11 @@ from pathlib import Path
 from contextlib import contextmanager
 
 from config import PROJECT_ROOT, DB_PATH, SCHEMA_PATH
+# Per-table registry (tables.TABLES) + the views derived from it, re-exported
+# here under their historical names.
+from tables import (TABLES, TABLE_META, TABLE_DOMAIN, STALENESS_OVERRIDES,
+                    COVERAGE_THRESHOLDS, BEST_EFFORT_STALE, QUARANTINE_SOURCE_TABLES,
+                    DUCKDB_MIRRORED_TABLES)
 
 # Candidate business-date columns, checked by both _table_date_range (freshness
 # scan) and the future-date ingestion guard below. Ordered: business/event dates
@@ -106,19 +111,7 @@ def _ensure_columns():
 # Mirror creation by introspection: read source DDL from sqlite_master, rewrite
 # the name, drop PK + FK clauses (quarantined rows can duplicate and may have
 # invalid SIDs by definition), then ALTER to append 3 forensic-metadata columns.
-QUARANTINE_SOURCE_TABLES = [
-    "broker_recommendations",
-    "forecast_history",
-    "analyst_consensus",
-    "analyst_consensus_snapshots",
-    "consensus_signals",
-    "quarterly_income",
-    "annual_balance_sheet",
-    "annual_cash_flow",
-    "banking_metrics",
-    "mf_holdings",
-    "mf_sector_allocation",
-]
+# The source tables are the TABLES entries flagged `quarantine`.
 
 
 def _ensure_quarantine_tables():
@@ -225,18 +218,10 @@ def read_sql(query, params=None):
 
 # ── DuckDB read-replica ──
 # Columnar replica at data/alpha_signal.duckdb, rebuilt by tools.duckdb_refresh.
-# Use for analytical reads on the tables in DUCKDB_MIRRORED_TABLES. SQLite stays
-# the source of truth for writes and for tables not in the mirror list.
+# Use for analytical reads on the tables in DUCKDB_MIRRORED_TABLES (TABLES entries
+# flagged `mirror`). SQLite stays the source of truth for writes and for tables
+# not in the mirror list.
 DUCK_PATH = PROJECT_ROOT / "data" / "alpha_signal.duckdb"
-DUCKDB_MIRRORED_TABLES = frozenset({
-    "daily_snapshots_pit",
-    "daily_snapshots_pit_v1",
-    "pit_ic_by_tier_v1",
-    "stock_prices",
-    "daily_picks",
-    "pick_outcomes",
-    "consensus_signals",
-})
 
 
 def read_sql_fast(query, params=None):
@@ -595,318 +580,8 @@ def upsert_df(df, table_name, conn=None):
 
 
 # ── Data Health ──
-
-# Per-table metadata for the data inventory page.
-# Each entry has four structured fields so the user can scan a row and answer:
-#   - kind:        Is this RAW (fetched), COMPUTED (derived from other tables), or STATE (single-row config/log)?
-#   - depth:       *Why* the time span looks the way it does (10 years history, snapshot only, growing daily, etc.)
-#   - description: What the table actually stores
-#   - consumed_by: Which downstream signals/pages/scripts read from this table
-TABLE_META = {
-    # ── Universe ──
-    "stocks": {
-        "kind": "RAW",
-        "depth": "Snapshot only",
-        "description": "Universe of investable stocks (2,448 NSE-listed, ETFs excluded). Tickers, company names, sectors, market cap tiers (LARGE/MID/SMALL), and yfinance fundamentals (P/E, ROE, D/E). Single source of truth — every other table joins on `sid`.",
-        "consumed_by": "every other table (FK target on `sid`)",
-    },
-
-    # ── Prices & Market ──
-    "stock_prices": {
-        "kind": "RAW",
-        "depth": "3+ years (922 daily files)",
-        "description": "Daily OHLCV bhavcopy per stock — open, high, low, close, volume, traded value, delivery quantity, delivery %. Foundational price table for momentum, RSI, returns, 52-week highs.",
-        "consumed_by": "signals.momentum, smart_money_scores, screener, stock_detail price chart",
-    },
-    "vix_history": {
-        "kind": "RAW",
-        "depth": "3 years daily",
-        "description": "India VIX daily values from yfinance. Used by the regime classifier to determine CALM/NORMAL/CAUTION/CRISIS state and adjust LARGE/MID/SMALL portfolio allocation.",
-        "consumed_by": "scoring.regime → regime_state",
-    },
-    "regime_state": {
-        "kind": "STATE",
-        "depth": "Single row (current state)",
-        "description": "Current VIX regime (CALM/NORMAL/CAUTION/CRISIS) and the corresponding tier allocation weights (alloc_large, alloc_mid, alloc_small).",
-        "consumed_by": "screener (allocation), morning_brief, portfolio page",
-    },
-
-    # ── Tickertape Fundamentals ──
-    "quarterly_income": {
-        "kind": "RAW",
-        "depth": "10 quarters per stock",
-        "description": "Quarterly income statement from Tickertape — revenue, EBITDA, operating profit, PBT, net income, EPS, interest. Powers TTM ratios, YoY growth, Piotroski profitability factors, accruals, forensic Beneish.",
-        "consumed_by": "signals.piotroski, signals.accruals, signals.forensic, stock_detail Financials tab",
-    },
-    "annual_balance_sheet": {
-        "kind": "RAW",
-        "depth": "10 years per stock",
-        "description": "Annual balance sheet from Tickertape — total assets, equity, debt, current assets/liabilities, shares outstanding, retained earnings, net PPE. Powers D/E, ROE, ROA, current ratio, book value, Altman Z, Piotroski leverage.",
-        "consumed_by": "signals.piotroski (leverage), signals.forensic (Altman), stock_detail Financials tab",
-    },
-    "annual_cash_flow": {
-        "kind": "RAW",
-        "depth": "10 years per stock",
-        "description": "Annual cash flow statement from Tickertape — operating CF, capex, free cash flow, financing CF, depreciation. Powers FCF yield, Piotroski CFO/accruals quality, capex ratio.",
-        "consumed_by": "signals.piotroski (CFO), signals.accruals, stock_detail Financials tab",
-    },
-    "shareholding": {
-        "kind": "RAW",
-        "depth": "~6 quarters per stock (window varies by fetch date)",
-        "description": "Quarterly shareholding pattern from Tickertape — promoter %, FII %, MF %, DII %, public %, pledge %, insurance %. Each stock has ~6 trailing quarters at the time it was last fetched, so the calendar span across the table looks much wider than the per-stock depth. Powers promoter signal (QoQ change).",
-        "consumed_by": "signals.promoter, stock_detail Ownership tab",
-    },
-    "analyst_consensus": {
-        "kind": "RAW",
-        "depth": "Latest snapshot per stock",
-        "description": "Latest analyst consensus snapshot from Tickertape — price target, total analysts, buy %, forward EPS/revenue, EPS/revenue growth %. One row per stock.",
-        "consumed_by": "signals.consensus → consensus_signals, stock_detail Consensus tab",
-    },
-    "forecast_history": {
-        "kind": "RAW",
-        "depth": "Time series of revisions",
-        "description": "Time series of analyst forecast revisions — price target, EPS, revenue forecasts over time. Used to compute pt_revision_1yr signal and the forecast revision chart.",
-        "consumed_by": "signals.consensus (PT revision), stock_detail forecast chart",
-    },
-
-    # ── Trades ──
-    "insider_trades": {
-        "kind": "RAW",
-        "depth": "2+ years history (NSE PIT)",
-        "description": "Promoter/KMP/director trades from NSE PIT API — person, transaction type, shares (`secAcq`), value (`secVal`). 1,043 stocks covered.",
-        "consumed_by": "signals.insider_signal → insider_signals, stock_detail Ownership timeline",
-    },
-    "insider_signals": {
-        "kind": "COMPUTED",
-        "depth": "25 months reconstructed",
-        "description": "Computed monthly insider buying/selling signal per stock derived from `insider_trades`. 25 months of history reconstructed for backtesting + the current month.",
-        "consumed_by": "scoring.screener (insider signal), backtester",
-    },
-    "bulk_deals": {
-        "kind": "RAW",
-        "depth": "Growing daily (no historical archive)",
-        "description": "Daily bulk/block deals from NSE archives. NO HISTORICAL ARCHIVE — only today's file is fetchable, so this accumulates one day at a time.",
-        "consumed_by": "signals.smart_money → smart_money_scores",
-    },
-
-    # ── News & Regulatory ──
-    "news_articles": {
-        "kind": "RAW",
-        "depth": "Growing daily from RSS",
-        "description": "RSS news articles from 8-11 financial publications (ET, Mint, BS, Moneycontrol, etc.). Title, summary, URL, publication date.",
-        "consumed_by": "signals.sentiment, regulatory_classifier, stock_detail News card",
-    },
-    "news_article_stocks": {
-        "kind": "COMPUTED",
-        "depth": "Grows with news_articles",
-        "description": "Entity matching: which news articles mention which stocks. Created by string matching company names + tickers against titles and summaries.",
-        "consumed_by": "signals.sentiment (per stock), stock_detail News card",
-    },
-    "earnings_calendar": {
-        "kind": "RAW",
-        "depth": "Forward-looking events",
-        "description": "Upcoming corporate event dates from NSE — earnings, dividends, board meetings. Sparse coverage (~50 stocks at any time).",
-        "consumed_by": "morning_brief Upcoming Earnings, stock_detail Overview",
-    },
-    "regulatory_events": {
-        "kind": "RAW",
-        "depth": "3 years harvested",
-        "description": "Regulatory events harvested from Google News + RBI circulars + Wayback Machine + PIB. 16,523 events spanning 2023-2026. Each event has a `classifier_status` column tracking whether the AI classifier has processed it (see CLAUDE.md rule #17).",
-        "consumed_by": "regulatory_classifier → regulatory_signals",
-    },
-    "regulatory_signals": {
-        "kind": "COMPUTED",
-        "depth": "Partial — ~16% of regulatory_events classified (API budget locked)",
-        "description": "AI-classified sector impacts from `regulatory_events`. Stage 1 Haiku pre-filter + Stage 2 Sonnet deep classify. Each event can produce 1-N sector signals (direction, magnitude, time_horizon, confidence, reasoning). Currently 5,687 signals from 2,702 of 16,523 events; the rest is paused on Anthropic budget cap.",
-        "consumed_by": "signals.regulatory → macro_sector_signals",
-    },
-
-    # ── Macro ──
-    "macro_history": {
-        "kind": "RAW",
-        "depth": "3+ years (50 indicators)",
-        "description": "Time series of 50 macro indicators (Nifty sectors, commodities, FX, rates, IIP, CPI, Core Sector, GST). Sources: yfinance + data.gov.in + FRED. Daily and monthly frequencies.",
-        "consumed_by": "signals.macro → macro_sector_signals",
-    },
-    "macro_indicators": {
-        "kind": "RAW",
-        "depth": "Static snapshot (legacy v1)",
-        "description": "Static snapshot (22 rows) of macro indicators from RBI/PIB/MOSPI. Migrated from v1; replaced by `macro_history` for new work.",
-        "consumed_by": "(legacy — superseded by macro_history)",
-    },
-    "macro_indicator_meta": {
-        "kind": "RAW",
-        "depth": "Registry (50 entries)",
-        "description": "Registry of all 50 macro indicators with source, frequency, sector mapping, and units. Used by the macro signal generator to resolve indicator → sector.",
-        "consumed_by": "signals.macro",
-    },
-    "macro_sector_map": {
-        "kind": "RAW",
-        "depth": "Configuration (30 rules)",
-        "description": "Mapping table: macro indicator → affected sector → direction (+1/-1) → weight. Translates indicator changes into sector scores.",
-        "consumed_by": "signals.macro",
-    },
-    "macro_sector_signals": {
-        "kind": "COMPUTED",
-        "depth": "Latest snapshot per sector",
-        "description": "Sector-level macro and regulatory scores (one row per sector). Combines macro indicator changes + AI-classified regulatory events.",
-        "consumed_by": "screener (sector tilt), morning_brief tailwinds/headwinds, sectors page",
-    },
-
-    # ── Computed Signals ──
-    "piotroski_scores": {
-        "kind": "COMPUTED",
-        "depth": "Latest snapshot per stock",
-        "description": "9-factor Piotroski F-Score per stock — profitability (3), leverage (3), efficiency (3). Range 0-9. Computed from quarterly_income + annual_balance_sheet + annual_cash_flow.",
-        "consumed_by": "screener, quality_gate, stock_detail Forensic tab",
-    },
-    "accruals_scores": {
-        "kind": "COMPUTED",
-        "depth": "Latest snapshot per stock",
-        "description": "Cash flow accruals + balance sheet accruals + earnings persistence per stock. Measures whether reported earnings are backed by cash. Powers the accruals signal.",
-        "consumed_by": "screener, stock_detail Forensic tab",
-    },
-    "consensus_signals": {
-        "kind": "COMPUTED",
-        "depth": "Latest snapshot per stock",
-        "description": "Computed consensus signal per stock — combines pt_upside, pt_revision_1yr, eps_growth, revenue_growth from analyst_consensus + forecast_history.",
-        "consumed_by": "screener, stock_detail Overview signal cards",
-    },
-    "promoter_signals": {
-        "kind": "COMPUTED",
-        "depth": "Latest snapshot per stock",
-        "description": "Computed promoter signal per stock — QoQ change in promoter holding, trend direction, pledge quality. From `shareholding`.",
-        "consumed_by": "screener, stock_detail Ownership tab",
-    },
-    "forensic_scores": {
-        "kind": "COMPUTED",
-        "depth": "Latest snapshot per stock",
-        "description": "Beneish M-Score (earnings manipulation detector, 6-factor) + Altman Z'' (bankruptcy predictor, emerging market variant) per stock. Used as a forensic penalty in the screener.",
-        "consumed_by": "screener (forensic_adj), stock_detail Forensic tab",
-    },
-    "smart_money_scores": {
-        "kind": "COMPUTED",
-        "depth": "Latest snapshot per stock",
-        "description": "Composite institutional accumulation signal — bulk deal activity (60%) + delivery percentage (40%). Range 0-100.",
-        "consumed_by": "screener, stock_detail Overview",
-    },
-    "sentiment_scores": {
-        "kind": "COMPUTED",
-        "depth": "7-day rolling per stock",
-        "description": "VADER sentiment scores from news articles, aggregated to per-stock 7-day windows.",
-        "consumed_by": "screener (sentiment signal), stock_detail",
-    },
-
-    # ── Mutual Fund universe (research-only; standalone from stock model) ──
-    "mf_scheme_master": {
-        "kind": "RAW",
-        "depth": "~14,364 active Indian MF schemes (refreshed weekly from AMFI NAVAll.txt)",
-        "description": "Authoritative MF universe from AMFI. One row per scheme: code, ISINs, name, AMC, raw + normalised category, plan_type (Direct/Regular), option_type (Growth/IDCW), last_seen, active flag.",
-        "consumed_by": "/mutual-funds cockpit page, mf_nav_backfill (selects active+Growth subset)",
-    },
-    "mf_nav_history": {
-        "kind": "RAW",
-        "depth": "~13y daily NAV per scheme (mfapi.in backfill) + ongoing daily (AMFI)",
-        "description": "Per-scheme NAV time series. PK (scheme_code, nav_date). Bootstrap fills via mfapi.in; daily incremental via AMFI NAVAll.txt.",
-        "consumed_by": "mf_metrics, mf_rolling_returns compute; cockpit /mutual-funds/{code} NAV chart",
-    },
-    "mf_schemes": {
-        "kind": "RAW",
-        "depth": "Subset of mf_scheme_master with full backfilled history",
-        "description": "Compat table from v0 — tracks scheme metadata (inception_date, has_full_history) for schemes we've backfilled via mfapi.in. Functionally a join key with mf_scheme_master.",
-        "consumed_by": "mf_nav_backfill (skip already-done), /mutual-funds/{code} detail",
-    },
-    "mf_metrics": {
-        "kind": "COMPUTED",
-        "depth": "One row per (scheme_code, as_of_date); recomputed monthly",
-        "description": "Per-scheme returns + risk snapshot. 1Y/3Y/5Y/10Y CAGR, Sharpe, Sortino, max drawdown, peer rank, plus composite_score (0-100 within category) with 4-way breakdown (3Y CAGR / Sharpe 3Y / max DD / rolling consistency).",
-        "consumed_by": "/mutual-funds universe browser (Score column, sort key), /mutual-funds/{code} detail page",
-    },
-    "mf_calendar_returns": {
-        "kind": "COMPUTED",
-        "depth": "Per-scheme per-calendar-year",
-        "description": "Yearly returns table for the bar chart on the detail page. PK (scheme_code, year).",
-        "consumed_by": "/mutual-funds/{code} Performance tab calendar chart",
-    },
-    "mf_rolling_returns": {
-        "kind": "COMPUTED",
-        "depth": "Monthly anchors (~60 per scheme), 3Y + 5Y rolling CAGR each",
-        "description": "Rolling 3Y and 5Y CAGR sampled on the first business day of each month, plus a flag for whether the rolling window beat category median. Drives the rolling-returns charts + the consistency component of composite_score.",
-        "consumed_by": "/mutual-funds/{code} Performance tab rolling charts; mf_metrics scorer",
-    },
-    "mf_category_stats": {
-        "kind": "COMPUTED",
-        "depth": "One row per (category_norm, as_of_date)",
-        "description": "Category aggregates — median 1Y/3Y/5Y returns, median Sharpe, top/bottom decile cuts. Powers the heatmap on /mutual-funds and peer-rank comparisons.",
-        "consumed_by": "/mutual-funds heatmap, mf_metrics peer ranking",
-    },
-
-    # ── Output ──
-    "daily_picks": {
-        "kind": "COMPUTED",
-        "depth": "Latest pick_date snapshot",
-        "description": "Daily output of the screener — every stock with its final_score, rank within tier, base_score, and forensic_adj. The ranked universe.",
-        "consumed_by": "morning_brief, action_queue, signals page, sectors page",
-    },
-    "portfolio_weights": {
-        "kind": "COMPUTED",
-        "depth": "Snapshot per build date (asof_date)",
-        "description": "Track 3.3c sized book — HRP risk-parity weights × alpha tilt over the top picks_per_tier names, under per-stock / per-sector / ₹-ADTV liquidity caps. Carries marginal_risk_contrib (percent of portfolio variance per name). ADVISORY only (no capital deployed until rank-skill validates). Built daily after the screener (PIPELINE_STEPS) + backfilled across daily_picks history.",
-        "consumed_by": "cockpit /portfolio sized view + portfolio_outcomes (realized-return head-to-head)",
-    },
-    "portfolio_outcomes": {
-        "kind": "COMPUTED",
-        "depth": "Per (asof_date, window) — grows as books mature",
-        "description": "Track 3.3c realized-return head-to-head: each HRP book's close-to-close return at 20/63/126 trading-day windows under HRP weights vs equal-weight on the same names (the weighting edge) vs a tier-blended NIFTY benchmark. Evidence accumulating toward the §3.3c hard gate (HRP beats current portfolio by ≥1.5% risk-adjusted over 18-24mo). ADVISORY. Reuses tools/compute_pick_outcomes price logic.",
-        "consumed_by": "tools/portfolio_outcomes.report() (CLI head-to-head)",
-    },
-    "daily_snapshots": {
-        "kind": "COMPUTED",
-        "depth": "Growing daily (PIT archive)",
-        "description": "Point-in-time archive of all signal values per stock. One row per stock per pick_date. Used for diff engine + signal time series + backtesting.",
-        "consumed_by": "daily_changes (diff engine), backtester",
-    },
-    "daily_changes": {
-        "kind": "COMPUTED",
-        "depth": "Growing daily",
-        "description": "Output of the diff engine — what changed today vs yesterday. ENTRY/EXIT/UPGRADE/DOWNGRADE/SIGNAL_FIRED/REGIME_CHANGE events.",
-        "consumed_by": "morning_brief Today's Changes card",
-    },
-
-    # ── Backtest (PIT) ──
-    "daily_snapshots_pit_v1": {
-        "kind": "RAW",
-        "depth": "35 monthly dates (Apr 2023 → Feb 2026)",
-        "description": "Frozen v1 PIT reconstruction — 1,978 stocks × 35 monthly eval dates × 13 signals + precomputed fwd_return_20d. The canonical historical backtest dataset. Source for the C13b t-stats baked into config.SIGNAL_WEIGHTS. Imported via tools/import_v1_pit.py from /home/ubuntu/alpha-signal/data/backtest/reconstructed_signals.csv.",
-        "consumed_by": "/model Backtest Roster, future tools/backtest_pit.py",
-    },
-    "daily_snapshots_pit": {
-        "kind": "COMPUTED",
-        "depth": "Forward extension (currently 7 monthly dates Nov 2025 → May 2026)",
-        "description": "v2 PIT reconstruction extending forward of the v1 archive. Computed by tools/reconstruct_pit.py with proper filing-lag discipline (75d annual / 60d quarterly / 21d shareholding). Adds m_score and z_score (forensic) which v1 lacks. Use for backtests in dates after 2026-02 where v1 stops.",
-        "consumed_by": "/model Backtest Roster, future tools/backtest_pit.py",
-    },
-    "pit_ic_by_tier_v1": {
-        "kind": "RAW",
-        "depth": "30 rows (10 signals × 3 tiers)",
-        "description": "Canonical IC / t-stat / verdict per signal × cap_tier from v1's 36-period validation. Source-of-truth for every weight in config.SIGNAL_WEIGHTS. Read-only; new t-stats from v2 reconstruction will land in a separate pit_ic_by_tier_v2 table.",
-        "consumed_by": "/model Validation table, /model Backtest Roster",
-    },
-
-    # ── System ──
-    "pipeline_log": {
-        "kind": "LOG",
-        "depth": "Per-step run history (append-only)",
-        "description": "Append-only audit trail of every pipeline step run — start/end timestamps, status (RUNNING/SUCCESS/FAILED), rows affected, duration, error message. Each step writes a RUNNING row on start and a SUCCESS/FAILED row on completion.",
-        "consumed_by": "system page Pipeline Log",
-    },
-    "sqlite_sequence": {
-        "kind": "STATE",
-        "depth": "Internal",
-        "description": "Internal SQLite table tracking AUTOINCREMENT counters. Not user-facing.",
-        "consumed_by": "(internal — SQLite engine)",
-    },
-}
+# Per-table metadata (kind / domain / freshness / coverage / date column /
+# inventory text) lives in tables.TABLES.
 
 
 def _date_span(latest_date_str, earliest_date_str):
@@ -941,21 +616,26 @@ def _date_span(latest_date_str, earliest_date_str):
 
 
 def _table_date_range(conn, tbl):
-    """Find the earliest and latest dates in a table by scanning candidate date columns.
+    """Find the earliest and latest dates in a table's date column.
 
     Strategy:
-      1. For each candidate column, get the row count and the SQL MIN/MAX.
-      2. If both MIN and MAX parse cleanly AND parsed_max > parsed_min, trust them
-         (this is the fast path for clean ISO/single-format columns).
+      1. The column is TABLES[tbl]["date_col"] (None → no date anchor). Tables
+         not in the registry fall back to probing DATE_COLS in order: business/
+         event dates first, ingestion timestamps last (insider_trades and
+         bulk_deals carry both — we want the trade/deal span, not ingestion).
+      2. If both SQL MIN and MAX parse cleanly AND parsed_max > parsed_min, trust
+         them (this is the fast path for clean ISO/single-format columns).
       3. Otherwise (mixed formats — lexical SQL min/max can be wrong) read every
          distinct value, parse all of them, and take the true min/max.
 
     Returns (earliest_iso, latest_iso, span_str) or (None, None, '—').
     """
-    # Ordered: business/event dates first, ingestion timestamps last. Tables like
-    # insider_trades and bulk_deals carry both — we want the trade/deal date span,
-    # not when v2 ingested the row (which is bounded by the v2 cutover).
-    for col in DATE_COLS:
+    if tbl in TABLES:
+        date_col = TABLES[tbl]["date_col"]
+        candidates = [date_col] if date_col else []
+    else:
+        candidates = DATE_COLS
+    for col in candidates:
         try:
             sql_min, sql_max = conn.execute(
                 f"SELECT MIN([{col}]), MAX([{col}]) FROM [{tbl}] WHERE [{col}] IS NOT NULL"
@@ -1028,9 +708,9 @@ _DB_REFERENCES = None  # populated lazily by get_db_references()
 _SCAN_DIRS = ("signals", "scoring", "output", "sources", "cockpit")
 # Top-level files to also scan (pipeline orchestrator etc.)
 _SCAN_ROOT_FILES = ("pipeline.py",)
-# Files to never count (this file is the canonical TABLE_META — every table
-# name appears here, which would otherwise pollute every "consumed_by" cell).
-_SCAN_EXCLUDE = {"db.py"}  # only exclude this file (canonical TABLE_META)
+# Files to never count (every table name appears here, which would otherwise
+# pollute every "consumed_by" cell). tables.py sits outside _SCAN_DIRS.
+_SCAN_EXCLUDE = {"db.py"}
 
 
 def _scan_db_references():
@@ -1048,28 +728,34 @@ def _scan_db_references():
     import re
 
     project_root = Path(__file__).resolve().parent
-    table_names = list(TABLE_META.keys())
+    table_names = [t for t, e in TABLES.items() if e["kind"] != "file"]
 
-    # Pre-compile one regex per table for both directions. \b ensures whole-word
-    # matching so 'stocks' doesn't match 'stock_prices'.
-    write_patterns = {}
-    read_patterns = {}
-    for tbl in table_names:
-        e = re.escape(tbl)
-        write_patterns[tbl] = re.compile(
-            rf'(?:upsert_df\s*\([^,)]*,\s*["\']{e}["\']'
-            rf'|insert_df\s*\([^,)]*,\s*["\']{e}["\']'
-            rf'|INSERT\s+(?:OR\s+(?:IGNORE|REPLACE)\s+)?INTO\s+\[?{e}\b'
-            rf'|UPDATE\s+\[?{e}\b'
-            rf'|REPLACE\s+INTO\s+\[?{e}\b)',
-            re.IGNORECASE,
-        )
-        read_patterns[tbl] = re.compile(
-            rf'(?:read_table\s*\(\s*["\']{e}["\']'
-            rf'|FROM\s+\[?{e}\b'
-            rf'|JOIN\s+\[?{e}\b)',
-            re.IGNORECASE,
-        )
+    # One regex per direction; the captured identifier is kept only if it is a
+    # registered table (whole identifier, so 'stocks' doesn't match
+    # 'stock_prices'). One pass per file instead of one per (file, table) — the
+    # per-table form cost ~19s once every table was registered.
+    write_pattern = re.compile(
+        r'(?:upsert_df\s*\([^,)]*,\s*["\'](\w+)["\']'
+        r'|insert_df\s*\([^,)]*,\s*["\'](\w+)["\']'
+        r'|INSERT\s+(?:OR\s+(?:IGNORE|REPLACE)\s+)?INTO\s+\[?(\w+)'
+        r'|UPDATE\s+\[?(\w+)'
+        r'|REPLACE\s+INTO\s+\[?(\w+))',
+        re.IGNORECASE,
+    )
+    read_pattern = re.compile(
+        r'(?:read_table\s*\(\s*["\'](\w+)["\']'
+        r'|FROM\s+\[?(\w+)'
+        r'|JOIN\s+\[?(\w+))',
+        re.IGNORECASE,
+    )
+
+    def _tables_in(pattern, text):
+        found = set()
+        for m in pattern.finditer(text):
+            name = next(g for g in m.groups() if g).lower()
+            if name in refs:
+                found.add(name)
+        return found
 
     refs = {tbl: {"reads": set(), "writes": set()} for tbl in table_names}
 
@@ -1096,11 +782,10 @@ def _scan_db_references():
             text = f.read_text(encoding="utf-8")
         except Exception:
             continue
-        for tbl in table_names:
-            if write_patterns[tbl].search(text):
-                refs[tbl]["writes"].add(rel)
-            if read_patterns[tbl].search(text):
-                refs[tbl]["reads"].add(rel)
+        for tbl in _tables_in(write_pattern, text):
+            refs[tbl]["writes"].add(rel)
+        for tbl in _tables_in(read_pattern, text):
+            refs[tbl]["reads"].add(rel)
 
     return {
         tbl: {"reads": sorted(v["reads"]), "writes": sorted(v["writes"])}
@@ -1131,150 +816,9 @@ STALENESS_THRESHOLDS = {
     "annual": 400,
 }
 
-# Per-table overrides for tables whose upstream has known publishing lag.
-# Listed by table name; takes precedence over the frequency-based default.
-# BEST_EFFORT_STALE — tables whose UPSTREAM SOURCE can legitimately carry no fresh
-# data, so persistent staleness is a WARN, never a heal-streak CRITICAL. Re-running
-# the producer can't heal them (nothing to fetch), so the freshness watchdog skips the
-# heal-rerun and health_report exempts their `watchdog_<table>_heal` step from the
-# "failed N consecutive days → CRITICAL" escalation.
-#   insider_trades: NSE's corporates-pit endpoint STOPPED serving recent PIT disclosures
-#   ~2026-05 (verified 2026-06-22: returns 200 + data for Apr [392 rows] but ~0 for
-#   May-onward; the wide Mar-Jun window still has 2452 rows, so it's a recent-data cliff,
-#   not a 403/block). The producer runs clean but lands nothing → table frozen at
-#   trade_date 2026-05-02. insider_score is NOT wired into SIGNAL_WEIGHTS (zero pick
-#   impact). Revisit when a working PIT endpoint is found (NSE site archaeology).
-BEST_EFFORT_STALE = {"insider_trades"}
-
-STALENESS_OVERRIDES = {
-    # NSE PIT insider disclosures lag the trade by WEEKS (by-trade_date is structurally
-    # sparse near today). UPDATE 2026-06-22: beyond the lag, the corporates-pit endpoint
-    # itself went stale for recent data (~May 2026 cliff) — insider_trades is now in
-    # BEST_EFFORT_STALE so the watchdog won't escalate its unhealable staleness to
-    # CRITICAL. 14→30 (2026-05-25), 30→45 (2026-06-04) as the real lag was measured.
-    "insider_trades": 45,
-    # earnings_calendar is a FORWARD-dated board-meeting calendar; a daily nselib
-    # pull keeps near-future events present so MAX(date) sits ahead of today during
-    # health. Was a one-off v1-CSV import with no producer (→ 6d stale, cockpit
-    # upcoming-events widget empty); wired daily 2026-06-04. 10 flags a genuinely
-    # stalled fetcher once the forward buffer drains, without month-edge noise.
-    "earnings_calendar": 10,
-    # 2026-05-23: regulatory_events was registered as "monthly" (50d) and
-    # silently went stale for 43d before being noticed (Gillette dossier
-    # showing 2023 articles). News/PIB are weekly cadence at worst; if the
-    # harvester stops, we want a yellow flag in <2 weeks, not 50 days.
-    "regulatory_events": 14,
-    "regulatory_signals": 14,
-    # ── Filing-cycle-bound tables (data only moves when companies file) ──
-    # Producer runs daily, but `latest_date` is the most recent end_date,
-    # which only advances after a fresh filing wave. Threshold is set so
-    # the alarm fires only when the EXPECTED next wave has been missed
-    # (= a real harvester problem), not on the natural lag inside a wave.
-    # 2026-05-25: bumped these from monthly(50)/quarterly(100) defaults
-    # after they flagged STALE 55d when the data is healthy.
-    "quarterly_income":      120,  # quarterly filings; ~90d max gap, 120 tolerates a delayed wave
-    "annual_balance_sheet":  220,  # annual filings; ~12mo max gap, 220 catches a missed cycle in ~7mo
-    "annual_cash_flow":      220,
-    "forecast_history":      220,  # Tickertape stores PT only at FY year-end → annual cadence
-    # 2026-06-01: index history is trading-days only; a Fri close read on Mon
-    # is ~3d old, plus nselib's T+1 posting lag → 6 tolerates a long weekend.
-    # (Was untracked entirely until fetch_nse_indices became a pipeline step.)
-    "nse_index_history":       6,
-    # ── Forward-return-window-bound table ──
-    # 2026-05-30: pick_outcomes producer runs daily, but `latest_date` =
-    # MAX(pick_date) only advances once a pick has a COMPLETED forward
-    # return. The table's max is governed by its SHORTEST window.
-    # 2026-06-01: dropped the 5d window (noise) → shortest is now 20 trading
-    # days ≈ 28 calendar with weekends/holidays, so the prior 14 would flag
-    # STALE every day. 35 tolerates the 20d-window lag + a holiday cluster,
-    # yet still flags a genuinely stalled producer in ~5wk.
-    "pick_outcomes":          35,
-    # portfolio_outcomes (Track 3.3c) is governed by the SAME 20d shortest window
-    # as pick_outcomes — its MAX(asof_date) is the most recent book that has matured
-    # at 20 trading days, so it structurally trails today by ~28-30 calendar days.
-    # Mirror the 35 so the daily producer is flagged only when genuinely stalled.
-    "portfolio_outcomes":     35,
-    # corporate_actions producer runs daily but the freshness anchor is
-    # fetched_at (ex_date isn't a _table_date_range candidate), which only
-    # advances on a day with a NEW ex-date row. NSE announces something most
-    # trading days, but holiday clusters (Diwali, year-end) can go several
-    # quiet days. 10d tolerates that yet flags a genuinely stalled fetcher.
-    "corporate_actions":      10,
-    # F&O EOD grid + its rollup advance only on trading days, fetched the next
-    # morning. MAX(trade_date) sits at Friday's session across a weekend (≈3d),
-    # and a holiday adjacent to the weekend stretches it to ≈5-6d. 6 tolerates
-    # that cluster yet still flags a genuinely stalled fetcher inside a week.
-    "fno_bhav":               6,
-    "fno_pcr_history":        6,
-    "fno_iv_history":         6,
-    # ── Standalone-cron tables (registered in RAW_TABLES 2026-06-03) ──
-    # analyst_consensus_snapshots: written 1st business day of each month, so age
-    # oscillates 0→~33d across a normal month (first-biz-day drift). 40 sits above
-    # that ceiling (no month-end false alarm) yet flags a MISSED month by ~day 40
-    # (≈1 week into the next month). This is the gap that hid the June 1 cron crash.
-    "analyst_consensus_snapshots": 40,
-    # FII/DII F&O positioning reports yesterday's settled OI (inherent +1d) and is
-    # pulled days_back=3; over a weekend the freshest row is ~3-4d old. 6 tolerates
-    # a long weekend + the settlement lag, still flags a stalled run_daily_forward.sh.
-    "fii_dii_positioning":     6,
-    # FII/DII cash + surveillance snapshots are trading-day rows published EOD; a
-    # Friday read on Monday is ~3d, +T+1 publish lag. 5 tolerates that, flags a stall.
-    "fii_dii_cash_flow":       5,
-    "surveillance_flags":      5,
-    # short_selling_data: NSE posts T+1 with occasional multi-day gaps (low-activity
-    # days). Wired into run_daily_forward.sh 2026-06-03. 7 tolerates weekend + posting
-    # lag + a quiet gap; provisional — tighten after observing the first cron runs.
-    "short_selling_data":      7,
-    # multibagger_scores: weekly (Sunday) fundamental screen. snapshot_date only
-    # advances on the weekly run, so mid-week it's up to ~6d old; 10 tolerates a
-    # normal week + a holiday-shifted Sunday, flags a genuinely missed weekly run.
-    "multibagger_scores":     10,
-    # ── BSE event stream + crosswalk (wired into run_daily_forward.sh 2026-06-13) ──
-    # bse_announcements has no business-date column in _table_date_range's candidate
-    # list (dt_tm isn't one) → freshness anchors on fetched_at, which advances on any
-    # day the --days 7 refresh inserts a NEW filing. The whole-BSE firehose files most
-    # calendar days, but a weekend + adjacent holiday can go quiet; 5 tolerates that,
-    # still flags a genuinely stalled cron within a few days (the 7d window self-heals
-    # a single missed run). scrip_master rebuilds the full map every run (updated_at=now
-    # for every row) so its anchor advances daily regardless; 5 tolerates a skipped run.
-    "bse_announcements":       5,
-    "scrip_master":            5,
-    # fundamentals_screener: manual Screener.in Premium pull, roughly fortnightly.
-    # 21d gives one missed cycle before alarm. Auth broken 2026-07-01 — the alarm
-    # firing daily until Amit repairs it is intended (audit Data-F2).
-    "fundamentals_screener":  21,
-    # uhs_calibration_log rows mature on a 20d forward window (pick_outcomes join),
-    # so MAX(date) is structurally ~1 month old even when the producer is healthy.
-    # 45d tolerates that lag and only alarms on true death (audit Data-F5).
-    "uhs_calibration_log":    45,
-    # DuckDB replica rebuilds nightly via run_pipeline.sh's cron tail (non-fatal
-    # on failure). 2d catches a failed/stale rebuild quickly without false-alarming
-    # on same-day timing drift (audit Data-F10).
-    "_file_duckdb_replica":    2,
-}
-
-# Per-stock coverage gates. A table that should have a row per universe stock
-# (or close to it) flips to COVERAGE_GAP / COVERAGE_SEVERE when too many sids
-# are missing. The freshness watchdog logs these — they're typically structural
-# (harvester filter dropping a series, source doesn't cover SME, etc), not
-# something the next cron tick will fix. Pre-2026-05-23 the entire 22% gap on
-# stock_prices was invisible because `MAX(date)` stayed FRESH for the 78% that
-# did exist; that's the gap this is closing.
-COVERAGE_THRESHOLDS = {
-    # table:          (gap_below_pct, severe_below_pct)
-    "stock_prices":   (95.0, 80.0),
-    "analyst_consensus": (60.0, 30.0),  # sell-side doesn't cover every SMALL
-    # Source (Screener.in) doesn't cover all SME-board smallcaps. Verified
-    # 2026-05-25: 100% LARGE + 100% MID; 14.8% of SMALL universe (mostly
-    # SME-board) is structurally absent — not a harvester defect. Lowered
-    # 90→85 to match reality; severe at 70 still catches a real regression.
-    "fundamentals_screener": (85.0, 70.0),
-    "annual_balance_sheet":  (85.0, 70.0),
-    "quarterly_income":      (85.0, 70.0),
-    "promoter_signals":      (90.0, 70.0),
-    "piotroski_scores":      (85.0, 70.0),
-    "smart_money_scores":    (95.0, 80.0),
-}
+# Per-table overrides (`stale_days`), best-effort sources and per-stock
+# coverage gates (`coverage`) are TABLES fields — see tables.py for the
+# reason behind each one.
 
 
 def _compute_coverage_status(table_name, stock_coverage_pct):
@@ -1320,60 +864,7 @@ def _compute_freshness(latest_date_iso, refresh_freq, table_name=None):
         return "N/A", None, None
 
 
-# Domain grouping for the cockpit's Data Inventory section.
-# Add new tables here as they're introduced. Unmapped tables fall to "Other".
-TABLE_DOMAIN = {
-    # Universe & Prices
-    "stocks": "Universe & Prices",
-    "stock_prices": "Universe & Prices",
-    "vix_history": "Universe & Prices",
-    "regime_state": "Universe & Prices",
-    # Fundamentals (Tickertape)
-    "quarterly_income": "Fundamentals",
-    "annual_balance_sheet": "Fundamentals",
-    "annual_cash_flow": "Fundamentals",
-    "shareholding": "Fundamentals",
-    "analyst_consensus": "Fundamentals",
-    "forecast_history": "Fundamentals",
-    # Trades & corporate actions
-    "insider_trades": "Trades & Corporate",
-    "bulk_deals": "Trades & Corporate",
-    "earnings_calendar": "Trades & Corporate",
-    # News
-    "news_articles": "News & Sentiment",
-    "news_article_stocks": "News & Sentiment",
-    # Macro
-    "macro_history": "Macro",
-    "macro_indicators": "Macro",
-    "macro_indicator_meta": "Macro",
-    "macro_sector_map": "Macro",
-    "macro_sector_signals": "Macro",
-    # Regulatory
-    "regulatory_events": "Regulatory",
-    "regulatory_signals": "Regulatory",
-    # Per-stock computed signals
-    "piotroski_scores": "Computed Signals",
-    "accruals_scores": "Computed Signals",
-    "consensus_signals": "Computed Signals",
-    "promoter_signals": "Computed Signals",
-    "forensic_scores": "Computed Signals",
-    "smart_money_scores": "Computed Signals",
-    "sentiment_scores": "Computed Signals",
-    "insider_signals": "Computed Signals",
-    # Daily output
-    "daily_picks": "Output",
-    "portfolio_weights": "Output",
-    "portfolio_outcomes": "Output",
-    "daily_snapshots": "Output",
-    "daily_changes": "Output",
-    # Backtest (PIT reconstruction)
-    "daily_snapshots_pit": "Backtest (PIT)",
-    "daily_snapshots_pit_v1": "Backtest (PIT)",
-    "pit_ic_by_tier_v1": "Backtest (PIT)",
-    # Pipeline / internal
-    "pipeline_log": "Pipeline",
-    "sqlite_sequence": "Pipeline",
-}
+# Domain grouping for the cockpit's Data Inventory section is TABLES[t]["domain"].
 
 
 
@@ -3313,7 +2804,7 @@ _data_health_memo = {"value": None, "ts": 0.0}
 def data_health(cache_ttl=0):
     """
     Comprehensive data health report. Merges DB row counts with pipeline-step
-    metadata from config.PIPELINE_STEPS + config.RAW_TABLES, per-table
+    metadata from config.PIPELINE_STEPS + tables.TABLES, per-table
     descriptions, date spans, freshness benchmark, and dynamic lineage from
     scanning the codebase.
 
@@ -3340,10 +2831,14 @@ def data_health(cache_ttl=0):
     return _data_health_impl()
 
 
-def _data_health_impl():
-    from config import PIPELINE_STEPS, RAW_TABLES
+def table_step_meta():
+    """table → {source, data_freq, frequency, step_name, function}.
 
-    # Build lookup: table → registered metadata (source, refresh frequency)
+    A PIPELINE_STEPS step with `table` wins; otherwise the TABLES entry's
+    freq/source (tables fed by standalone crons or co-written by another step).
+    """
+    from config import PIPELINE_STEPS
+
     meta = {}
     for s in PIPELINE_STEPS:
         if s.get("table"):
@@ -3354,53 +2849,61 @@ def _data_health_impl():
                 "step_name": s["name"],
                 "function": f"{s['module']}.{s['function']}",
             }
-    for r in RAW_TABLES:
-        if r["table"] not in meta:
-            meta[r["table"]] = {
-                "source": r["source"],
-                "data_freq": r["data_freq"],
-                "frequency": r["frequency"],
+    for t, e in TABLES.items():
+        if e.get("freq") and t not in meta:
+            meta[t] = {
+                "source": e.get("source", "—"),
+                "data_freq": e.get("data_freq", "—"),
+                "frequency": e["freq"],
                 "step_name": "—",
                 "function": "—",
             }
+    return meta
+
+
+def _data_health_impl():
+    meta = table_step_meta()
 
     # Dynamic codebase lineage scan
     refs = get_db_references()
 
-    # Walk every table in the DB (including sqlite_sequence — user wants it kept)
+    rows = []
+    # One connection for the whole scan.
     with get_db() as conn:
+        # Walk every table in the DB (including sqlite_sequence — user wants it kept)
         tables = [
             row[0] for row in
             conn.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").fetchall()
         ]
-
-    # Universe size (for stock-coverage column on per-stock tables).
-    try:
-        with get_db() as conn:
+        # Universe size (for stock-coverage column on per-stock tables).
+        try:
             universe_size = conn.execute("SELECT COUNT(*) FROM stocks").fetchone()[0]
-    except Exception:
-        universe_size = 0
-
-    rows = []
-    for tbl in tables:
-        with get_db() as conn:
+        except Exception:
+            universe_size = 0
+        scanned = {}
+        for tbl in tables:
             count = conn.execute(f"SELECT COUNT(*) FROM [{tbl}]").fetchone()[0]
             earliest, latest, date_span = _table_date_range(conn, tbl)
             # Stock coverage: only meaningful for tables with a sid column.
             cols = [r[1] for r in conn.execute(f"PRAGMA table_info([{tbl}])").fetchall()]
+            stock_count = None
             if "sid" in cols and universe_size > 0:
                 stock_count = conn.execute(
                     f"SELECT COUNT(DISTINCT sid) FROM [{tbl}]"
                 ).fetchone()[0] or 0
-                stock_coverage_pct = round(100 * stock_count / universe_size, 1)
-                stock_coverage = f"{stock_count:,} / {universe_size:,} ({stock_coverage_pct:g}%)"
-            else:
-                stock_count = None
-                stock_coverage_pct = None
-                stock_coverage = "—"
+            scanned[tbl] = (count, earliest, latest, date_span, stock_count)
+
+    for tbl in tables:
+        count, earliest, latest, date_span, stock_count = scanned[tbl]
+        if stock_count is not None:
+            stock_coverage_pct = round(100 * stock_count / universe_size, 1)
+            stock_coverage = f"{stock_count:,} / {universe_size:,} ({stock_coverage_pct:g}%)"
+        else:
+            stock_coverage_pct = None
+            stock_coverage = "—"
 
         m = meta.get(tbl, {})
-        tm = TABLE_META.get(tbl, {})
+        tm = TABLES.get(tbl, {})
         ref = refs.get(tbl, {"reads": [], "writes": []})
 
         # Lineage formatting — produced_by from scan, fall back to PIPELINE_STEPS function
@@ -3436,7 +2939,7 @@ def _data_health_impl():
 
         rows.append({
             "table": tbl,
-            "domain": TABLE_DOMAIN.get(tbl, "Other"),
+            "domain": tm.get("domain", "Other"),
             "rows": count,
             "kind": tm.get("kind", "—"),
             "depth": tm.get("depth", "—"),

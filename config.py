@@ -502,7 +502,7 @@ PIPELINE_STEPS = [
 
     # Tickertape HTML scrape — one page hit per stock, writes both analyst_consensus
     # and forecast_history. Single pipeline entry: PIPELINE_STEPS maps one step to
-    # one table, so forecast_history's freshness is tracked via its RAW_TABLES
+    # one table, so forecast_history's freshness is tracked via its tables.TABLES
     # entry instead of a second step. A second "fetch_forecast" step here used to
     # call the SAME function again — pipeline.py's runner has no (module, function)
     # dedup (only the watchdog's heal loop does), so it ran compute() twice every
@@ -867,53 +867,9 @@ PIPELINE_STEPS = [
      "table": "banking_metrics",    "source": "Screener.in stock pages (158 banks+NBFCs)", "data_freq": "quarterly", "frequency": "monthly"},
 ]
 
-# Also track raw data tables (not pipeline steps — populated by migration / fetchers)
-RAW_TABLES = [
-    {"table": "stocks",               "source": "universe.csv (v1 migration)",     "data_freq": "weekly",    "frequency": "weekly"},
-    {"table": "stock_prices",          "source": "NSE Bhavcopy archives",           "data_freq": "daily",     "frequency": "daily"},
-    {"table": "quarterly_income",      "source": "Tickertape API",                  "data_freq": "quarterly", "frequency": "monthly"},
-    {"table": "annual_balance_sheet",  "source": "Tickertape API",                  "data_freq": "annual",    "frequency": "monthly"},
-    {"table": "annual_cash_flow",      "source": "Tickertape API",                  "data_freq": "annual",    "frequency": "monthly"},
-    {"table": "shareholding",          "source": "Tickertape API",                  "data_freq": "quarterly", "frequency": "monthly"},
-    {"table": "analyst_consensus",     "source": "Tickertape API",                  "data_freq": "monthly",   "frequency": "monthly"},
-    {"table": "forecast_history",      "source": "Tickertape API",                  "data_freq": "monthly",   "frequency": "monthly"},
-    {"table": "vix_history",           "source": "yfinance (^INDIAVIX)",            "data_freq": "daily",     "frequency": "daily"},
-    {"table": "insider_trades",        "source": "NSE/BSE insider archives",        "data_freq": "daily",     "frequency": "daily"},
-    {"table": "news_articles",         "source": "RSS feeds (8 sources)",           "data_freq": "daily",     "frequency": "daily"},
-    {"table": "news_article_stocks",   "source": "Entity matching on news_articles","data_freq": "daily",     "frequency": "daily"},
-    {"table": "bulk_deals",            "source": "NSE bulk/block deal archives",    "data_freq": "daily",     "frequency": "daily"},
-    {"table": "earnings_calendar",     "source": "NSE events API",                  "data_freq": "daily",     "frequency": "daily"},
-    # macro_indicators: v1-migration leftover, no v2 producer. Mark annual to silence freshness alarm.
-    {"table": "macro_indicators",      "source": "v1 migration (leftover)",        "data_freq": "static",    "frequency": "annual"},
-    {"table": "macro_history",          "source": "yfinance + data.gov.in + FRED",  "data_freq": "daily",     "frequency": "daily"},
-    {"table": "macro_indicator_meta",   "source": "config (indicator registry)",    "data_freq": "static",    "frequency": "monthly"},
-    {"table": "macro_sector_map",       "source": "config (sector mapping)",        "data_freq": "static",    "frequency": "monthly"},
-    # regulatory_*: harvester paused 2026-04-10 (Anthropic budget). Score against monthly cadence until resumed.
-    {"table": "regulatory_events",      "source": "Google News + RBI + PIB + Wayback", "data_freq": "daily",  "frequency": "monthly"},
-    {"table": "regulatory_signals",     "source": "AI classification (Haiku+Sonnet)",  "data_freq": "daily",  "frequency": "monthly"},
-    # vix_history is mirrored from macro_history.india_vix by sources.macro_yfinance._sync_vix_history.
-    {"table": "vix_history",            "source": "yfinance ^INDIAVIX (mirrored from macro_history)", "data_freq": "daily", "frequency": "daily"},
-    # ── Standalone-cron-fed tables (NOT in PIPELINE_STEPS → previously invisible to
-    #    freshness). Registered here 2026-06-03 after the monthly snapshot cron silently
-    #    no-op'd for ~a month (cd-less `python -m` → ModuleNotFoundError). Any table whose
-    #    only producer is a standalone cron MUST be listed here or it gets no benchmark.
-    #    analyst_consensus_snapshots: own cron, 1st biz day of month (see CLAUDE.md cadence rule).
-    {"table": "analyst_consensus_snapshots", "source": "yfinance --snapshot (standalone monthly cron, 1st biz day)", "data_freq": "monthly", "frequency": "monthly"},
-    #    The 3 forward-only NSE tables below are fed by run_daily_forward.sh (14:00 UTC cron).
-    {"table": "surveillance_flags",     "source": "NSE ASM/GSM/F&O-ban (run_daily_forward.sh cron)",   "data_freq": "daily", "frequency": "daily"},
-    {"table": "fii_dii_cash_flow",      "source": "NSE FII/DII cash flow (run_daily_forward.sh cron)", "data_freq": "daily", "frequency": "daily"},
-    {"table": "fii_dii_positioning",    "source": "NSE FII/DII F&O OI (run_daily_forward.sh cron)",    "data_freq": "daily", "frequency": "daily"},
-    {"table": "short_selling_data",     "source": "NSE short selling (run_daily_forward.sh cron, wired 2026-06-03)", "data_freq": "daily", "frequency": "daily"},
-    #    BSE corporate-announcement event stream (--days 7 keep-current) + its scrip→sid
-    #    crosswalk, refreshed by run_daily_forward.sh (14:00 UTC, wired 2026-06-13).
-    #    Freshness anchors: bse_announcements→fetched_at, scrip_master→updated_at (both
-    #    advance per run; see STALENESS_OVERRIDES in db.py). Without this registration the
-    #    cron is invisible to the watchdog — the standalone-cron silent-failure landmine.
-    {"table": "bse_announcements",      "source": "BSE AnnSubCategoryGetData --days 7 (run_daily_forward.sh cron)", "data_freq": "daily", "frequency": "daily"},
-    {"table": "scrip_master",           "source": "Upstox instrument master (run_daily_forward.sh cron)",          "data_freq": "daily", "frequency": "daily"},
-    # manual pull; auth broken 2026-07-01 — alarm is the point
-    {"table": "fundamentals_screener",  "source": "Screener.in Premium (manual pull, no automated cron)",         "data_freq": "biweekly", "frequency": "weekly"},
-]
+# Tables fed by standalone crons / migrations (not a PIPELINE_STEPS `table`)
+# carry their freshness cadence in tables.TABLES (`freq`) — the old
+# RAW_TABLES list lives there now (tables.RAW_TABLES is derived from it).
 
 
 # File-based outputs that aren't DB tables. Tracked by data_health() so the
