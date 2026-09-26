@@ -11,11 +11,16 @@ Dated history. **Never edit. Never delete. Never reference as authoritative.**
 
 ## What does NOT live here
 
-- Things we might still need: those go in `reference/` or `runbooks/`
+- Things we might still need: those go in `reference/` (or `studies/` for evidence)
 - Decisions: those become ADRs in `decisions/`
 - Active plans: those stay in `plans/`
 
-## Filename format
+## Layout (since 2026-09-26)
+
+- `plans/`, `decisions/` and `reference/` mirror the live `docs/` folders and keep the **original filename**, so old links and `git log --follow` still work.
+- Everything else sits flat in this folder, e.g. `SETUP.md` and the 2026-07-04 audit report and prompts. Older flat files use the dated format below.
+
+## Filename format (flat files)
 
 ```
 YYYY-MM-DD-short-kebab-title.md

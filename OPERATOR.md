@@ -2,214 +2,154 @@
 
 **If you are reading this and Amit Bhagat is not reachable, this is the system you have inherited. Read all of it before touching anything.**
 
-Alpha Signal v2 is an AI-native daily stock-picking system for the Indian equity market (NSE/BSE, 2,448 stocks). It runs on cron, writes top picks to a SQLite DB, generates LLM-narrated dossiers, and emails a health report each morning. One human built it. There is no team.
+Alpha Signal v2 is a daily stock-intelligence system for Indian equities (NSE/BSE; universe = `stocks` table, ETFs excluded). It runs on cron, ranks stocks within market-cap tiers into `daily_picks`, writes LLM-narrated dossiers and emails a health report each morning. One human built it and there is no team. It is a research system: no live capital is managed by it.
 
-This document is the bus factor. It is intentionally short on theory and long on "where is X" / "how do I not break Y" / "what do I do when Z breaks."
-
----
-
-## 0. THE SINGLE BIGGEST RISK — FIX FIRST
-
-**The 2.0 GB SQLite database at `data/alpha_signal.db` has no off-host backup.** It contains:
-- 4 years of NSE stock prices (~2,400 stocks × 963 trading days)
-- 36 months of point-in-time factor snapshots (the entire backtest record)
-- 24,000 regulatory events, 25,000 sentiment scores, 29,000 insider trades
-- Every daily pick + dossier written since 2026-04-09
-
-If the VM dies, all of it is gone. Some of it (PIT snapshots, sentiment) cannot be reconstructed — those depend on accumulating live data over time.
-
-**Day-1 action**: set up a daily off-host backup. Smallest acceptable shape:
-```bash
-sqlite3 data/alpha_signal.db ".backup /tmp/alpha.bak" \
-  && gzip -c /tmp/alpha.bak | <ship to S3 / second VM / wherever>
-```
-Cron at 06:00 UTC, AFTER pipeline + health report finish. 2 GB → ~400 MB compressed.
-
-Until this is done, the system is one disk failure from non-recoverable.
+This document is the bus factor: where things are, how not to break them, what to do when they break. The **working rules** (venv, never touching v1, credentials `eval`, no two harvesters at once, never `pkill -f "uvicorn cockpit.app"`, git hygiene) are in [CLAUDE.md → Critical Rules](CLAUDE.md). They are not repeated here.
 
 ---
 
-## 1. THE MACHINE
+## 0. Backups
 
-- **Host**: `instance-20260320-1928` (Oracle Cloud, Ubuntu 24.04 ARM64, Python 3.12.3)
-- **User**: `ubuntu`
-- **Two directories, one is sacred**:
-  - `/home/ubuntu/alpha-signal/`   — v1, still on disk for credentials + venv. **Do not touch.**
-  - `/home/ubuntu/alpha-signal-v2/` — current development. This repo.
-- **Shared venv**: `/home/ubuntu/alpha-signal/venv/` (used by both v1 and v2). If you `pip install/upgrade`, you're modifying v1's runtime too.
-- **DB**: `/home/ubuntu/alpha-signal-v2/data/alpha_signal.db` (SQLite, ~2 GB)
-
-To activate the env in any shell: `source /home/ubuntu/alpha-signal/venv/bin/activate`
+- **DB, nightly 05:00 UTC:** `backup_db.sh` (in the repo dir, gitignored like all `*.sh` except the two run wrappers). It runs `VACUUM INTO` a snapshot, checks `PRAGMA integrity_check`, gzips it and runs `rclone copy` to `gdrive:alpha-signal-v2-backups`. The remote keeps dailies for 7 days and 1st-of-month snapshots long-term. If the remote is missing, it keeps the last 2 locally in `backups/`. Log: `output/backup.log`. rclone credentials live in `~/.config/rclone/rclone.conf`.
+- **Restore:** `rclone copy gdrive:alpha-signal-v2-backups/alpha_signal_YYYYMMDD.db.gz .`, then `gunzip`. Stop both cockpit services first, then swap the file into `data/alpha_signal.db`.
+- **Secrets + wiring: NOT scheduled.** `backup_secrets.sh` exists and GPG-encrypts credentials, crontab and the rclone token to Drive, but no cron runs it. Its passphrase file lives only on this VM. Schedule it and keep the passphrase in a password manager.
+- Some history cannot be rebuilt from the backup's upstream sources: PIT snapshots, `analyst_consensus_snapshots`, sentiment and forward-only feeds exist only because they accumulated. Guard the backup.
 
 ---
 
-## 2. THE CRON (all UTC; IST = UTC + 5:30)
+## 1. The machine
 
-Live on the VM, **not in git**. Inspect with `crontab -l`. To edit, `crontab -e`. To reinstall after wipe, save current with `crontab -l > ~/crontab.bak` and `crontab ~/crontab.bak`.
+- **Host:** Oracle Cloud VM, Ubuntu 24.04 ARM64, Python 3.12, user `ubuntu`.
+- `/home/ubuntu/alpha-signal/` is **v1**. It holds the shared venv and the credentials file. All of v1's own crontab lines are commented out (kept for rollback).
+- `/home/ubuntu/alpha-signal-v2/` is this repo and production. Sessions work in `.claude/worktrees/*`.
+- **DB:** `data/alpha_signal.db`, a single SQLite file in WAL mode, ~8.6 GB on disk (2026-09-26; check with `ls -la`). For the table list, run `sqlite3 data/alpha_signal.db .tables` (≈135). There is also a DuckDB read replica (ADR 0031).
 
-| When (UTC) | What | Log file |
+---
+
+## 2. The cron (all UTC; IST = UTC + 5:30)
+
+Cron lives only in the crontab, **not in git**, so inspect it with `crontab -l`. Back it up before editing (`crontab -l > ~/crontab.bak`); a 2026-07-06 copy is in [docs/studies/crontab-backup-2026-07-06.txt](docs/studies/crontab-backup-2026-07-06.txt). Every `python -m` line must `cd` into the repo first (CLAUDE.md). Lines that need credentials import them with the `eval` pattern.
+
+| When (UTC) | Job | Log (under `output/` unless noted) |
 |---|---|---|
-| 03:30 daily | Main pipeline — sources, signals, screener, dossier, email | `output/pipeline.log` |
-| 04:00 daily | Health report — email + ntfy.sh push on CRITICAL | `output/health.log` |
-| 14:00 daily | Forward-only — NSE FII/DII flow, F&O OI, ASM/GSM, ban list (post-EOD) | `output/daily_forward.log` |
-| 15:00 daily | Freshness watchdog — re-heal stale tables, log coverage gaps | `output/watchdog.log` |
-| 04:30 (1st of month) | yfinance analyst monthly snapshot | `output/yf_snapshot.log` |
-| 19:07 (1st of month) | Tickertape monthly refresh | `output/tickertape_cron.log` |
+| 03:30 daily | `run_pipeline.sh`: the main pipeline (`pipeline.py` over `config.PIPELINE_STEPS`, under the harvest `flock`) | `pipeline.log` |
+| 04:00 daily | `tools.health_report --email --push`: health email, plus URGENT email and ntfy push on CRITICAL | `health.log` |
+| 04:20 / 12:20 / 20:20 | `sources.screener_pull --check-cookie`: Screener.in session keep-alive, ntfy push when auth dies | `screener_keepalive.log` |
+| 04:30 on the 1st | `sources.yfinance_analyst --snapshot` → `analyst_consensus_snapshots` | `yf_snapshot.log` |
+| 05:00 daily | `backup_db.sh`: DB → Google Drive (§0) | `backup.log` |
+| 05:00 on the 1st | `tools.expected_return`: appends the E[1Y] prediction to `data/expected_return_predictions.jsonl` | `logs/expected_return_cron.log` |
+| 05:15 on the 2nd | `tools.backtest_pit`: monthly IC refresh (`pit_ic_by_tier_v2`) | `backtest_refresh.log` |
+| 06:00 on the 1st + 15th | `sources.screener_pull --universe`: full Screener refresh under the harvest `flock` (skips if the lock is held) | `screener_universe_refresh.log` |
+| 14:00 daily | `run_daily_forward.sh`: forward-only feeds after NSE EOD (FII/DII cash + F&O positioning, ASM/GSM/ban list, short selling, BSE announcements, scrip master) | `daily_forward.log` |
+| 15:00 daily | `tools.freshness_watchdog`: heals stale tables/files, emails on gaps | `watchdog.log` |
+| 19:07 on the 1st | `run_tickertape_monthly.sh`: Tickertape fundamentals (~4h, takes the harvest lock) | `tickertape_cron.log` |
 
-Each cron job sources credentials inline via `eval "$(grep '^export ' /home/ubuntu/alpha-signal/run_pipeline.sh)"`. If that file is missing, every cron silently runs with no auth and produces zero rows.
+Inside the 03:30 pipeline, each step's `frequency` gates it: `daily`, `weekly` (Sundays), or `monthly` (the 1st). `--step <name>` ignores the gate. Only three steps are `critical` and abort the run: `fetch_bhavcopy`, `quality_gate`, `screener`. Slow jobs (news enrichment, regulatory classify, broker recos with a 90-minute daily budget, banking metrics) run after the email so they can't delay it. Every step writes a row to `pipeline_log`.
 
 ---
 
-## 3. THE SERVICES (always-on)
+## 3. The services (always-on)
 
-| Service | Port | What |
+| Unit | Port | What |
 |---|---|---|
-| `alpha-cockpit.service` | 3000 | Main cockpit (trading, factor model, MF research) |
-| `alpha-cockpit-ops.service` | 3001 | Ops cockpit (`/system`, `/sql`, `/flow`, `/command`) |
+| `alpha-cockpit.service` | 3000 | Main cockpit (picks, factor model, portfolio, MF research) |
+| `alpha-cockpit-ops.service` | 3001 | Ops cockpit (`/system` Health Center, `/sql`, `/flow`, `/command`) |
 
-Both are systemd units, auto-start on reboot. Standard ops:
 ```bash
-sudo systemctl restart alpha-cockpit         # main
-sudo systemctl restart alpha-cockpit-ops     # ops
-sudo journalctl -u alpha-cockpit -n 100      # logs
+sudo systemctl restart alpha-cockpit          # or alpha-cockpit-ops
+sudo journalctl -u alpha-cockpit -n 100
 ```
 
-**DO NOT** `pkill -f "uvicorn cockpit.app"` — the pattern matches the live systemd process. Kill by PID or include `--port 3000` in the pattern.
-
 ---
 
-## 4. THE CREDENTIALS
+## 4. The credentials
 
-Every external secret lives in **one shell file**: `/home/ubuntu/alpha-signal/run_pipeline.sh` (2.6 KB, mode 775, owner `ubuntu:ubuntu`). It is read by v1's old cron and **sourced by v2 at runtime** via a one-line `eval` grep.
-
-If you lose this file, every external integration dies the next cron tick. The keys present (values intentionally not here):
+Every external secret is an `export` line in **`/home/ubuntu/alpha-signal/run_pipeline.sh`** (v1's file; read-only for v2). If it is lost, every integration dies at the next cron tick. Keys present (values intentionally not here):
 
 | Key | Service | Reissue at |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | Claude API (dossier LLM, news enrichment) | console.anthropic.com |
-| `ALPHA_SIGNAL_EMAIL` + `ALPHA_SIGNAL_PASSWORD` | Gmail SMTP (health report out) | myaccount.google.com → App Passwords |
-| `SCREENER_USERNAME` + `SCREENER_PASSWORD` | screener.in Premium scrape (fundamentals) | screener.in |
-| `DATAGOV_API_KEY` | data.gov.in (macro + RBI fetcher) | data.gov.in/user/me |
-| `FINNHUB_API_KEY` | Finnhub (held warm; current code paths dead-end) | finnhub.io |
-| `NTFY_TOPIC` *(optional)* | ntfy.sh phone push on CRITICAL health issues | per-operator; just a string |
+| `ANTHROPIC_API_KEY` | Claude API (dossiers, news/regulatory classification) | console.anthropic.com |
+| `ALPHA_SIGNAL_EMAIL` + `ALPHA_SIGNAL_PASSWORD` | Gmail SMTP (health email, digest) | Google account → App Passwords |
+| `SCREENER_USERNAME` + `SCREENER_PASSWORD` | screener.in (the live session is the cookie JSON in `~/.cache/`) | screener.in |
+| `DATAGOV_API_KEY` | data.gov.in macro | data.gov.in/user/me |
+| `FINNHUB_API_KEY` | Finnhub (held warm; code paths dead-end) | finnhub.io |
+| `NTFY_TOPIC` *(optional)* | ntfy.sh phone push on CRITICAL | any string |
 
-**Day-1 action (after backup)**: move these out of a plaintext shell file into 1Password CLI, AWS Secrets Manager, or at minimum an `age`/`gpg`-encrypted file. One unprotected shell script holding everything is fragile.
-
----
-
-## 5. THE 3 (4) FILES THAT BREAK THE PIPELINE
-
-Touch with care. If you don't understand them, ask first.
-
-1. **`config.py`** — the system's configuration in one file.
-   - `PIPELINE_STEPS` list (order matters; `critical=True` steps abort the pipeline on failure)
-   - `SCREEN` constants (eligibility gates, weight thresholds — see ADR 0021)
-   - `SIGNAL_WEIGHTS`, `SIGNAL_WEIGHTS_RETURN`, `SIGNAL_WEIGHTS_SHARPE` (factor weights)
-   - `EXCLUDED_FROM_PICKS = ("MICRO",)` — DO NOT remove without reading ADR 0026
-
-2. **`scoring/screener.py`** — the `critical=True` pipeline step. Writes `daily_picks`. If it raises, the rest of the pipeline aborts and no dossiers or emails go out.
-
-3. **`db.py`** — runs `_ensure_columns()` + `_ensure_pipeline_log_status_check()` on every `init_db()`. New columns get added via `_COLUMN_MIGRATIONS`. CHECK constraint changes need the table-recreate dance (pattern in `_ensure_pipeline_log_status_check`, added 2026-05-29).
-
-Plus one file that lives outside the repo:
-
-4. **`/home/ubuntu/alpha-signal/run_pipeline.sh`** — credentials. Loss = total auth death. See section 4.
+These sit in a plaintext shell file. Move them to a secret manager, or at least an encrypted file (see §0 on `backup_secrets.sh`).
 
 ---
 
-## 6. THE DATA
+## 5. The files that break the pipeline
 
-- **`data/alpha_signal.db`** — load-bearing, no backup. See section 0.
-- **`data/.cockpit_cache/*.pkl`** — persisted disk cache (Stage 2 cockpit split, 140× cold-restart improvement). Survives `systemctl restart`. **After any weight/screener change, `rm data/.cockpit_cache/*.pkl` BEFORE restart** or stale picks keep serving.
-- **`data/health_cache.json`** — health-report cache; safe to delete.
-- **`data/factor_correlation_*.json`** — factor correlation diagnostic output; regenerable via `python -m tools.factor_correlation`.
-
----
-
-## 7. RECOVERY RUNBOOK
-
-**Pipeline didn't run / no email at 09:30 IST**
-```bash
-tail -100 /home/ubuntu/alpha-signal-v2/output/pipeline.log
-# Manual rerun:
-cd /home/ubuntu/alpha-signal-v2 && /home/ubuntu/alpha-signal-v2/run_pipeline.sh
-```
-
-**Cockpit returns 502 / connection refused**
-```bash
-sudo systemctl status alpha-cockpit
-sudo journalctl -u alpha-cockpit -n 100
-sudo systemctl restart alpha-cockpit
-```
-
-**Health report shows CRITICAL**
-```bash
-cd /home/ubuntu/alpha-signal-v2 \
-  && eval "$(grep '^export ' /home/ubuntu/alpha-signal/run_pipeline.sh)" \
-  && /home/ubuntu/alpha-signal/venv/bin/python -m tools.health_report
-```
-Then open the cockpit Health Center at `http://<vm-ip>:3001/system` for the Live Issues Inbox (ADR 0023).
-
-**One pipeline step failed; want to rerun that step only**
-```bash
-cd /home/ubuntu/alpha-signal-v2 \
-  && eval "$(grep '^export ' /home/ubuntu/alpha-signal/run_pipeline.sh)" \
-  && /home/ubuntu/alpha-signal/venv/bin/python -m <module>  # e.g. scoring.screener
-```
-
-**Weights changed but cockpit serves old picks**
-```bash
-rm /home/ubuntu/alpha-signal-v2/data/.cockpit_cache/*.pkl
-sudo systemctl restart alpha-cockpit
-```
-
-**NSE harvester returning 403**
-- Stop. Don't retry. The WAF locks IPs for 30–60 min on repeated hits.
-- Cookie session lives in `data/.nse_cookie_jar` (or similar) — refresh via `sources/nse.py` only after cooldown.
-
-**The DB is corrupt / locked**
-- Check for the SQLite WAL: `ls -la data/alpha_signal.db-{shm,wal}`. Stop both cockpit services first (`sudo systemctl stop alpha-cockpit alpha-cockpit-ops`) before doing anything destructive.
-- `sqlite3 data/alpha_signal.db "PRAGMA integrity_check;"` — if not "ok", restore from backup. (Once you have one.)
+1. **`config.py`**: `PIPELINE_STEPS` (order matters), `SCREEN` gates, `SIGNAL_WEIGHTS` (production; `_RETURN`/`_SHARPE` are non-production diagnostics), `TIER_SIZES`/`ADTV_MIN`, and `EXCLUDED_FROM_PICKS = ("MICRO",)`. Read ADR 0026 before touching the last one.
+2. **`scoring/screener.py`**: the critical step that writes `daily_picks`. If it raises, no dossiers or email go out. The pick gate is in `_pick_eligible` (ADR 0021 → 0024).
+3. **`db.py`**: `init_db()` runs the column migrations (`_COLUMN_MIGRATIONS`). A CHECK-constraint change needs the table-recreate pattern in `_ensure_pipeline_log_status_check`.
+4. **`/home/ubuntu/alpha-signal/run_pipeline.sh`** (outside the repo): the credentials. See §4.
 
 ---
 
-## 8. THINGS YOU MUST NOT DO
+## 6. The data model in one screen
 
-- **`pkill -f "uvicorn cockpit.app"`** — kills live systemd service. Use the unit.
-- **Run two harvesters in parallel** — doubles request rate, risks IP block.
-- **Run `graphify --update`** — graph is frozen on the 2026-05-23 snapshot during a trial period. Revisit cadence ~2026-05-31. The post-commit hook currently violates this — disable if it becomes a problem.
-- **`git commit --amend`, `git add -A`, `git add .`** — per CLAUDE.md project rules.
-- **Modify `/home/ubuntu/alpha-signal/`** — it's v1, still wired to some legacy crons. v2 reads it for credentials only.
-- **Push to main without running `tools/pit_replay.py`** — pre-push hook enforces this for `scoring/`, `signals/`, `sources/`, `eligibility/` changes (ADR 0025). Don't bypass.
+- **Universe and tiers:** `stocks.cap_tier`. LARGE = top 100 by market cap, MID = ranks 101–250, SMALL = the rest, and MICRO = illiquid names carved out of SMALL by `tools/classify_micro_tier.py`. MICRO is classified but never picked (ADR 0026). ADTV floors in ₹ Cr/day are LARGE 10, MID 5, SMALL 1 (`config.ADTV_MIN`). Ranking is always within one tier (ADR 0005).
+- **Financials** rank through the generic screener. `financial_signal_scores` is display-only (ADR 0048).
+- **Factors:** each `signals/*` module writes its own `*_scores` table. Every factor is registered in `db.BACKTEST_SIGNALS` and PIT-backtested. Only validated ones carry weight ([signal-weights.md](docs/reference/signal-weights.md), ADRs 0017/0043/0049).
+- **PIT:** backtests read `daily_snapshots_pit` / `daily_snapshots_pit_v1`, never live tables. Corporate actions are composed at compute time (ADR 0010).
+- **Cache files:** `data/.cockpit_cache/*.pkl` survives restarts. **After any weight or screener change, delete them before restarting**, or stale picks keep serving. `data/health_cache.json` and `data/factor_correlation_*.json` can be regenerated (`python -m tools.factor_correlation`).
 
 ---
 
-## 9. WHERE THE REST OF THE TRUTH LIVES
+## 7. Recovery runbook
+
+**No email by 09:30 IST.** Check `tail -100 output/pipeline.log`, then rerun with `/home/ubuntu/alpha-signal-v2/run_pipeline.sh` (it exits quietly if another harvester holds the lock).
+
+**One step failed.** Run `python pipeline.py --step <name>` from the repo with the venv and credentials loaded (CLAUDE.md). The ops cockpit `/flow` page also has a Rerun button.
+
+**Health report shows CRITICAL.** Run `python -m tools.health_report` (terminal view), then open the Health Center at `http://<vm-ip>:3001/system` (ADR 0023).
+
+**Cockpit 502.** Check `sudo systemctl status alpha-cockpit`, read `journalctl`, then `restart`.
+
+**Weights changed but cockpit shows old picks.** `rm data/.cockpit_cache/*.pkl && sudo systemctl restart alpha-cockpit`.
+
+**NSE returns 403.** Stop and don't retry: the WAF locks the IP for 30–60 minutes. Nothing is persisted; each run warms a fresh cookie session (nselib does this internally).
+
+**Screener cookie dead (ntfy "Screener cookie DEAD").** Paste a fresh `sessionid` from a browser into `~/.cache/screener_cookie.json` (docstring of `sources/screener_pull.py`, path B).
+
+**DB corrupt or locked.** Stop both cockpit services. Check for `data/alpha_signal.db-{wal,shm}` and run `sqlite3 data/alpha_signal.db "PRAGMA integrity_check;"`. If it doesn't report `ok`, restore from Drive (§0).
+
+---
+
+## 8. Operator-specific don'ts (on top of CLAUDE.md)
+
+- **Don't bypass the pre-push hook** (`.git/hooks/pre-push`, not versioned). It runs `tools/pit_replay.py` when `scoring/`, `signals/`, `sources/` or `eligibility/` change (ADR 0025).
+- **Don't run `graphify --update`.** The graph is still frozen on the 2026-05-23 snapshot. The post-commit hook that rebuilt it is disabled (`.git/hooks/post-commit.disabled`).
+- **Don't `pip install`/upgrade** into the shared venv without remembering that v1 uses it too.
+
+---
+
+## 9. Where the rest of the truth lives
 
 | Question | File |
 |---|---|
-| What was Amit working on when he left | `HANDOFF.md` |
-| Where am I in the plan | `docs/plans/0000-checklist.md` |
-| Why did we choose X over Y | `docs/decisions/00NN-*.md` (29 ADRs, ≤30 lines each — read them) |
-| Detailed design for the active work | `docs/plans/0001-*.md` … `0005-*.md` |
-| Project-level rules + landmines | `CLAUDE.md` (this is Claude Code config, but also human-readable) |
+| What was being worked on | `HANDOFF.md`, `docs/plans/0000-checklist.md` |
+| What's being built | [docs/plans/README.md](docs/plans/README.md) (active: 0011, 0014) |
+| Why we chose X | [docs/decisions/README.md](docs/decisions/README.md). Part (a) gives the current decision per topic across 51 ADRs |
+| How data sources behave | [docs/reference/data-playbook.md](docs/reference/data-playbook.md) |
+| Rules + landmines | `CLAUDE.md` |
+| Doc map | [docs/README.md](docs/README.md) |
 | What changed recently | `git log --oneline -30` |
-| Doc map | `docs/README.md` |
 
 ---
 
-## 10. FIRST WEEK — WHAT I WOULD FIX
+## 10. First week: what I would fix
 
-If you're a competent operator inheriting this cold, here's the priority order:
+1. **Schedule `backup_secrets.sh`** and store its passphrase off-host (§0). The DB backup already runs.
+2. **Move secrets out of the plaintext shell file** (§4).
+3. **Retire v1 formally.** Its crontab lines are all commented out; it survives only as the venv and credentials host.
+4. **Read [docs/decisions/README.md](docs/decisions/README.md) part (a)**, then the ADRs it names.
+5. **Run `/catchup` in a Claude Code session.** It reads `HANDOFF.md`, runs the health report and tells you where the last session stopped.
 
-1. **Off-host backup of `data/alpha_signal.db`.** Section 0. Do this on day 1.
-2. **Move secrets out of `run_pipeline.sh`** into a real secret manager. Section 4.
-3. **Audit v1's role.** `/home/ubuntu/alpha-signal/` still has crons in some form. Decide: retire v1, or document why it stays.
-4. **Read `CLAUDE.md` and all 29 ADRs in `docs/decisions/`.** They're each ≤30 lines and they encode every decision someone might argue about. Two hours total.
-5. **Run `/catchup` in a Claude Code session.** It reads `HANDOFF.md`, runs the health report, and tells you where the prior session left off. The skill is in `~/.claude/skills/` if you don't have it.
+## Glossary
 
-If you don't fix #1 and #2, the system will appear to work right up until the day it doesn't.
+**Factor/signal:** one predictive number per stock. **Tier/cap_tier:** market-cap bucket; ranking is always within a tier. **PIT:** point-in-time, meaning only data knowable on the date. **IC/ICIR:** rank correlation of a factor with the forward return, and its mean/σ. **ADTV:** average daily traded value (₹ Cr). **SID:** Tickertape stock ID (≠ NSE ticker). **Dossier:** AI-written one-page thesis per top pick, with no raw numbers in its prose. **UHS:** Unified Health Score (ADR 0033). **SEBI RIA:** the registration required to sell stock advice in India.
 
----
-
-*Last updated 2026-05-29. Update when the cron, services, credentials, or sacred-file list changes.*
+*Last updated 2026-09-26 (facts re-verified against `crontab -l`, `systemctl`, the live DB and `config.py`). Update this file whenever the cron, services, credentials or backup change.*
