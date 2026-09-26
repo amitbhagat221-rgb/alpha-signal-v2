@@ -49,10 +49,11 @@ from datetime import date, datetime, timedelta
 
 import pandas as pd
 
+from config import API
 from db import get_db, read_sql
 
 TOKEN_CACHE = os.path.expanduser("~/.kite_access_token.json")  # {date, access_token}
-HIST_RATE_SLEEP = 0.34   # ≈3 req/s historical-data limit
+HIST_RATE_SLEEP = API["min_gap"]   # CLAUDE.md 2s floor (Kite itself allows ~3 req/s)
 LOGIN_URL = "https://kite.zerodha.com/api/login"
 TWOFA_URL = "https://kite.zerodha.com/api/twofa"
 

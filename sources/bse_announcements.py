@@ -21,7 +21,7 @@ survivorship-free by construction. Metadata only (no PDF download — transcript
 handles selective PDF fetch). Idempotent: INSERT OR IGNORE on news_id, lock-retry on
 the write. Universe-join (scrip_cd → sid) is DEFERRED to a static scrip-master map.
 
-Rate-limited per CLAUDE.md: warmed session, browser headers, ~1.5-3s between pages,
+Rate-limited per CLAUDE.md: warmed session, browser headers, 2-3s between pages,
 single-threaded. Same IP-block hygiene as transcripts_pull.
 
 Usage:
@@ -54,7 +54,7 @@ HEADERS = {
     "Origin": "https://www.bseindia.com",
     "Accept": "application/json, text/plain, */*",
 }
-DELAY_BETWEEN_PAGES = (1.5, 3.0)
+DELAY_BETWEEN_PAGES = (2.0, 3.0)   # was (1.5, 3.0) — floor below CLAUDE.md's 2s
 PAGE_SIZE = 50
 BACKFILL_START = "2018-01-01"
 

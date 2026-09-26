@@ -396,10 +396,10 @@ def pull_fii_positioning(days_back=180):
             df = dv.participant_wise_open_interest(trade_date=d_str)
         except Exception as e:
             # "No data available" is normal for non-trading days
-            time.sleep(DELAY_SEC * 0.5)
+            time.sleep(DELAY_SEC)   # was DELAY_SEC * 0.5 = 1s (below the 2s floor)
             continue
         if df is None or df.empty:
-            time.sleep(DELAY_SEC * 0.5)
+            time.sleep(DELAY_SEC)
             continue
 
         df.columns = [c.strip() for c in df.columns]

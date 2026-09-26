@@ -63,7 +63,7 @@ BSE_HEADERS = {
 }
 ATTACH_BASES = ("AttachLive", "AttachHis")  # recent filings live; older ones archived
 DELAY_BETWEEN_STOCKS = (2.0, 3.5)
-DELAY_BETWEEN_PDFS = (1.5, 3.0)
+DELAY_BETWEEN_PDFS = (2.0, 3.0)   # was (1.5, 3.0) — floor below CLAUDE.md's 2s
 SMOKE_SIDS = ("INFY", "RELI", "TCS")
 
 # doc_type label (lowercased) → we keep these. 'rec' (YouTube video) is skipped.
@@ -231,7 +231,9 @@ def _resolve_and_download(session, ann_url: str) -> tuple[str | None, bytes | No
     m = re.search(r"Pname=([^\"&]+)", ann_url)
     if m:
         guid = m.group(1)
-        for base in ATTACH_BASES:
+        for i, base in enumerate(ATTACH_BASES):
+            if i:  # AttachHis fallback — keep ≥2s after the AttachLive GET
+                time.sleep(random.uniform(*DELAY_BETWEEN_PDFS))
             pdf_url = f"https://www.bseindia.com/xml-data/corpfiling/{base}/{guid}"
             try:
                 r = session.get(pdf_url, headers=BSE_HEADERS, timeout=40)
@@ -265,8 +267,10 @@ def _extract_pdf_text(pdf_bytes: bytes, max_pages: int = 80) -> tuple[str, int]:
 
 def _fetch_company_html(session, ticker: str) -> str | None:
     """GET the consolidated company page, falling back to standalone."""
-    for url in (COMPANY_CONSOLIDATED_URL.format(ticker=ticker),
-                COMPANY_URL.format(ticker=ticker)):
+    for i, url in enumerate((COMPANY_CONSOLIDATED_URL.format(ticker=ticker),
+                             COMPANY_URL.format(ticker=ticker))):
+        if i:  # standalone fallback — keep ≥2s after the consolidated GET
+            time.sleep(random.uniform(*DELAY_BETWEEN_STOCKS))
         try:
             r = session.get(url, timeout=25)
         except Exception:

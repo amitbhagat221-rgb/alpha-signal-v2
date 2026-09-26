@@ -136,7 +136,9 @@ def _plan_marker(s: str) -> str | None:
 def fetch_etm_sitemap_urls() -> dict[str, tuple[str, int]]:
     """Pull all MF detail URLs from ETMoney sitemaps. Returns {normalised_slug: (slug, etm_id)}."""
     out: dict[str, tuple[str, int]] = {}
-    for url in SITEMAPS:
+    for i, url in enumerate(SITEMAPS):
+        if i:
+            time.sleep(DELAY)
         print(f"  Fetching {url}…")
         r = requests.get(url, headers=HEADERS, timeout=30)
         if r.status_code != 200:

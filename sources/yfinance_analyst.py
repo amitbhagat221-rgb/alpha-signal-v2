@@ -47,10 +47,11 @@ import pandas as pd
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
+from config import API
 from db import read_sql, upsert_df
 from sources._http import run_harvester
 
-DELAY = 0.3       # Yahoo accepts ~60 req/min; 300ms = safe
+DELAY = API["min_gap"]   # ≥2s between tickers (CLAUDE.md; was 0.3s)
 SOURCE = "yfinance"
 
 

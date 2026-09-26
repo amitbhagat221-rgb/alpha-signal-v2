@@ -28,19 +28,17 @@ import argparse
 import io
 import os
 import sys
-import time
 from pathlib import Path
-
-import requests
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
+
+from sources._http import polite_get  # ≥2s per host: api.pexels.com (was 1s) / images.pexels.com (was 0.2s)
 
 OUT_DIR = PROJECT_ROOT / "cockpit" / "static" / "news_img"
 PEXELS_URL = "https://api.pexels.com/v1/search"
 THUMB_WIDTH = 600          # downsized thumbnail width
 JPEG_QUALITY = 80
-DELAY_SEC = 1.0            # be polite to the API
 
 # topic_id → Pexels search query (tuned to look like the topic). Keep ids in
 # sync with sources/news_classifier.py TOPIC_TAXONOMY / cockpit _NEWS_TOPICS.
@@ -79,15 +77,14 @@ def _fetch_topic(key, topic, query, per_topic):
     dest = OUT_DIR / topic
     dest.mkdir(parents=True, exist_ok=True)
     # over-fetch a little so we can skip any that fail to decode
-    resp = requests.get(
+    resp = polite_get(
         PEXELS_URL,
         headers={"Authorization": key},
         params={"query": query, "per_page": per_topic + 4,
                 "orientation": "landscape", "size": "medium"},
         timeout=20,
     )
-    resp.raise_for_status()
-    photos = resp.json().get("photos", [])
+    photos = resp.json().get("photos", []) if resp is not None else []
     saved = 0
     for p in photos:
         if saved >= per_topic:
@@ -97,7 +94,10 @@ def _fetch_topic(key, topic, query, per_topic):
         if not url:
             continue
         try:
-            img_bytes = requests.get(url, timeout=20).content
+            img = polite_get(url, timeout=20)
+            if img is None:
+                continue
+            img_bytes = img.content
             im = Image.open(io.BytesIO(img_bytes)).convert("RGB")
             if im.width > THUMB_WIDTH:
                 h = int(im.height * THUMB_WIDTH / im.width)
@@ -107,7 +107,6 @@ def _fetch_topic(key, topic, query, per_topic):
         except Exception as e:
             print(f"    skip ({type(e).__name__})")
             continue
-        time.sleep(0.2)
     return saved
 
 
@@ -119,7 +118,6 @@ def run(per_topic=8, only_topic=None):
         n = _fetch_topic(key, topic, query, per_topic)
         total += n
         print(f"  {topic:15} {n} images  ({query})")
-        time.sleep(DELAY_SEC)
     print(f"✓ {total} images saved under {OUT_DIR.relative_to(PROJECT_ROOT)}")
     if total == 0:
         raise RuntimeError("0 images downloaded — check PEXELS_API_KEY / network")

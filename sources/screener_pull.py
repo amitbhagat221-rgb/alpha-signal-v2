@@ -65,7 +65,7 @@ EXPORT_URL_BASE = "https://www.screener.in"  # form action is relative
 # scraping. Numbers tuned for "looks like a researcher refreshing the page",
 # not a bot. Inter-stock delay is randomized to avoid mechanical patterns.
 DELAY_BETWEEN_STOCKS = (2.5, 4.0)  # seconds — uniform random in this range
-DELAY_BETWEEN_STEPS = (0.5, 1.2)   # seconds — between page GET and export POST
+DELAY_BETWEEN_STEPS = (2.0, 3.0)   # seconds — between page GET and export POST (was 0.5-1.2)
 BACKOFF_ON_429 = 60.0              # seconds to wait if rate-limited
 
 # Section header (col 0 in Data Sheet) → period_type for rows that follow.
@@ -203,10 +203,12 @@ def fetch_export(s: requests.Session, ticker: str) -> tuple[bytes, str]:
     Raises PermissionError on cookie expiry, RuntimeError on parse failures.
     """
     last_err = None
-    for view, page_url in [
+    for i, (view, page_url) in enumerate([
         ("consolidated", COMPANY_CONSOLIDATED_URL.format(ticker=ticker)),
         ("standalone", COMPANY_URL.format(ticker=ticker)),
-    ]:
+    ]):
+        if i:  # standalone fallback — keep ≥2s after the consolidated call(s)
+            time.sleep(random.uniform(*DELAY_BETWEEN_STEPS))
         page = s.get(page_url, timeout=15, allow_redirects=False)
         if page.status_code in (301, 302):
             loc = page.headers.get("location", "")
