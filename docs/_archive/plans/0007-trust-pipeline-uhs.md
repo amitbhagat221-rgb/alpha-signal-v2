@@ -1,6 +1,6 @@
 # Plan 0007 — Data Quality Trust Pipeline + Unified Health Score
 
-**Status**: proposed · 2026-05-29 · supersedes Next 3 per user direction
+**Status**: implemented (shipped via [ADR 0033](../../decisions/0033-trust-pipeline-uhs.md), extended by 0037) · proposed 2026-05-29 · archived 2026-09-26
 **Goal**: every datum-of-record that influences a deployable pick passes 7 independent gates before reaching a snapshot table; one Unified Health Score (UHS, 0-100) replaces the 11+ disparate quality vocabularies the user sees today.
 **Baseline today**: ~80-90 checks across 11 subsystems; Plan 0005 reached ~93/100 by user's own measure. Two bugs (BAJAJHLDNG mc_slug + `forecast_history.price`) lived silently 20+ days each because no single layer caught them.
 **Honest ceiling**: ~95/100 at our scale. True 100 requires a paid ground-truth feed (Bloomberg/Refinitiv ~$20K/yr); we don't pay it. This plan gets us as close as a single VM + single user can.

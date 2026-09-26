@@ -1,6 +1,6 @@
 # Plan 0010 — Audit Remediation Roadmap (Sonnet-executable)
 
-**Status:** done (2026-07-05) · **Source:** [docs/audit-2026-07-04-report.md](../audit-2026-07-04-report.md) · **Written:** 2026-07-04 by Opus for a Sonnet executor.
+**Status:** done (2026-07-05; archived 2026-09-26) · **Source:** [docs/audit-2026-07-04-report.md](../../audit-2026-07-04-report.md) · **Written:** 2026-07-04 by Opus for a Sonnet executor.
 
 **Execution summary (2026-07-05):** all 32 tasks across 6 phases completed, 0 BLOCKED. Three tasks
 (3.2 purge, 3.3 evidence re-run, 4.4 paper backfill) were DB-mutation-only with no repo file diff,
@@ -51,7 +51,7 @@ The repo has uncommitted changes that predate you. Commit them FIRST so your dif
   listed above by explicit path (two commits):
   - Commit A: `git add sources/nse_insider.py tools/freshness_watchdog.py tools/health_report.py db.py tools/risk_decomp.py HANDOFF.md docs/plans/0000-checklist.md` →
     `git commit -m "wip: pre-audit working tree (insider future-date guard, watchdog/health tweaks, risk_decomp step 1)"`
-  - Commit B: `git add docs/audit-prompt.md docs/audit-2026-07-04-report.md docs/plans/0010-audit-remediation.md` →
+  - Commit B: `git add docs/audit-prompt.md docs/audit-2026-07-04-report.md docs/_archive/plans/0010-audit-remediation.md` →
     `git commit -m "docs(audit): 2026-07-04 full-system audit — prompt, report (58/100), remediation plan 0010"`
 - VERIFY: `git status` shows only `amit_personal_docs/` untracked, nothing modified.
 

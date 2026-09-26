@@ -2,7 +2,7 @@
 
 **Status:** Accepted
 **Date:** 2026-05-30
-**Plan:** [0007 — trust pipeline + UHS](../plans/0007-trust-pipeline-uhs.md)
+**Plan:** [0007 — trust pipeline + UHS](../_archive/plans/0007-trust-pipeline-uhs.md)
 
 ## Context
 Two silent bugs lived for 20+ days each because every existing data quality check compared values to other internal values — a closed self-validating loop. The BAJAJHLDNG mc_slug bug (21% of moneycontrol slug mappings wrong → 1,115 contaminated `broker_recommendations` rows) and the `forecast_history.price` contamination (Tickertape returned current close labelled as historic PT → contaminated `pt_revision_yoy` factor ≈14% LARGE weight before drop, ADR 0020) both passed every freshness, range, schema, and null check. Both surfaced only by user spot-check.
@@ -92,7 +92,7 @@ The Trust Pipeline produces the dimensions; UHS rolls them up. Both shipped toge
 
 **Surfaces:** dossier email footer per pick · cockpit `/explorer` Trust tab · cockpit `/morning-brief` UHS filter · `daily_picks.uhs_score` + `uhs_breakdown_json` + `uhs_label` + `uhs_worst_dim`.
 
-**ADR cross-refs:** supersedes parts of [ADR 0019](0019-observability-sensor-surface-alert.md) (sensors-surface-alert pattern still applies for system-level signals; per-row gates absorb the data-quality slice). Extends [ADR 0021](0021-pick-eligibility-gate.md) (UHS ≥60 is the new 4th gate). Extends [ADR 0024](0024-per-signal-eligibility-and-per-stock-integrity.md) (`integrity_status` retained, generalised by UHS Consistency dim). Operates at per-factor level, complementing [ADR 0028](0028-two-variant-factor-model.md)'s per-tier weighting and [ADR 0032](0032-tier-direction-flip-split-signal.md)'s per-signal direction split.
+**ADR cross-refs:** supersedes parts of [ADR 0019](0019-observability-sensor-surface-alert.md) (sensors-surface-alert pattern still applies for system-level signals; per-row gates absorb the data-quality slice). Extends [ADR 0021](0021-pick-eligibility-gate.md) (UHS ≥60 is the new 4th gate). Extends [ADR 0024](0024-per-signal-eligibility-and-per-stock-integrity.md) (`integrity_status` retained, generalised by UHS Consistency dim). Operates at per-factor level, complementing [ADR 0028](../_archive/decisions/0028-two-variant-factor-model.md)'s per-tier weighting and [ADR 0032](../_archive/decisions/0032-tier-direction-flip-split-signal.md)'s per-signal direction split.
 
 ## Trigger to revisit
 

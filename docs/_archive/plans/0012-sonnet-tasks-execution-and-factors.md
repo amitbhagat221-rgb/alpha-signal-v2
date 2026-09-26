@@ -1,6 +1,6 @@
 # Plan 0012 — Sonnet Task List: Execution Layer + Shovel-Ready Factors
 
-**Status:** ready · **Written:** 2026-07-06 by Fable for a Sonnet executor · **Parent:** [Plan 0011](0011-roadmap-to-90.md) (WS1 + WS2 shovel-ready subset)
+**Status:** done (2026-07-11, 10/10 tasks; archived 2026-09-26) · **Written:** 2026-07-06 by Fable for a Sonnet executor · **Parent:** [Plan 0011](../../plans/0011-roadmap-to-90.md) (WS1 + WS2 shovel-ready subset)
 
 This plan is deliberately over-specified. Every judgment call is pre-answered in a `DECIDED:`
 line. Do not re-litigate DECIDED items. Do not invent scope. If a task hits a `STOP-IF`
@@ -335,10 +335,10 @@ governance_resignation" in the lineage description.
 ### D1 — Plan/checklist sync + handoff
 
 **STEPS:**
-1. In [0011-roadmap-to-90.md](0011-roadmap-to-90.md): tick WS1.3 (B1), WS1.5 (B3), WS2.6+2.7
+1. In [0011-roadmap-to-90.md](../../plans/0011-roadmap-to-90.md): tick WS1.3 (B1), WS1.5 (B3), WS2.6+2.7
    (C3, C4) if done; add one-line implementation notes for A1–A3/B2/C1/C2 outcomes under
    "Implementation notes" (they're evidence/gated tasks — the human decisions remain open).
-2. In [0000-checklist.md](0000-checklist.md): update the Plan-0011 NOW block: "Plan 0012
+2. In [0000-checklist.md](../../plans/0000-checklist.md): update the Plan-0011 NOW block: "Plan 0012
    Sonnet tranche executed: <n>/10 tasks, <k> BLOCKED — see plan 0012 for BLOCKED notes."
 3. Overwrite `HANDOFF.md` (Left off / Pick up here / Watch out): Pick-up = the three human
    gates (B2 cadence recommendation → flip production?; C1/C2 promotion review; A1 verdict →

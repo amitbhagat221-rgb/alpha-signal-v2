@@ -1,5 +1,5 @@
 ---
-Status: accepted — open questions resolved 2026-06-09; Phase 0 (validation kill-gate) is next
+Status: paused (2026-09-26) — separate crypto product; open questions resolved 2026-06-09, Phase 0 (validation kill-gate) not started
 Created: 2026-06-09
 Last updated: 2026-06-09
 Owner: Amit

@@ -4,7 +4,7 @@
 **Date:** 2026-05-28
 
 ## Context
-`SIGNAL_WEIGHTS` in [config.py:51](../../config.py#L51) was hand-tuned from the C13b validation in early 2026. The PIT IC backtest has since expanded to **219 (signal × cap_tier) rows** in `pit_ic_by_tier_v2`, but only 8 of those signals carried weight in production. When [tools/optimize_weights.py](../../tools/optimize_weights.py) was run for the first time, the result was stark:
+`SIGNAL_WEIGHTS` in [config.py:51](../../../config.py#L51) was hand-tuned from the C13b validation in early 2026. The PIT IC backtest has since expanded to **219 (signal × cap_tier) rows** in `pit_ic_by_tier_v2`, but only 8 of those signals carried weight in production. When [tools/optimize_weights.py](../../../tools/optimize_weights.py) was run for the first time, the result was stark:
 
 | Tier | Weight on factors already wired into the screener | Weight on backtested-but-unwired factors |
 |---|---:|---:|
@@ -21,16 +21,16 @@ Separately, two objectives are defensible for combining IC into a composite, and
 Production needs to choose; the prior model picked neither explicitly.
 
 ## Decision
-1. **Wire `pt_upside` + `eps_growth` into the production screener** ([scoring/screener.py:_load_signals](../../scoring/screener.py)). Universe coverage: LARGE 100%, MID 95%, SMALL 43%. NULL pt_upside handled by `eligible_coverage`.
-2. **Clip `pt_upside` to ±50/+150% on output** in [signals/consensus.py:178](../../signals/consensus.py#L178) — yfinance occasionally returns broken PTs for thin-coverage SMALL caps (CCAVENUE +33,522%, ABCOTS +15,894%). Spearman IC is rank-invariant so the t=9 backtest is unaffected, but per-stock dashboards would surface the absurdity. 18 existing rows updated in-place.
-3. **Maintain two backtest-derived weight schemes in parallel** in [config.py:79-129](../../config.py#L79-L129):
+1. **Wire `pt_upside` + `eps_growth` into the production screener** ([scoring/screener.py:_load_signals](../../../scoring/screener.py)). Universe coverage: LARGE 100%, MID 95%, SMALL 43%. NULL pt_upside handled by `eligible_coverage`.
+2. **Clip `pt_upside` to ±50/+150% on output** in [signals/consensus.py:178](../../../signals/consensus.py#L178) — yfinance occasionally returns broken PTs for thin-coverage SMALL caps (CCAVENUE +33,522%, ABCOTS +15,894%). Spearman IC is rank-invariant so the t=9 backtest is unaffected, but per-stock dashboards would surface the absurdity. 18 existing rows updated in-place.
+3. **Maintain two backtest-derived weight schemes in parallel** in [config.py:79-129](../../../config.py#L79-L129):
    - `SIGNAL_WEIGHTS_RETURN` — `w_i ∝ |t_i| × sign(IC_i)`, per tier, KEEP-only (|t|≥2.5).
    - `SIGNAL_WEIGHTS_SHARPE` — `w_i ∝ |ICIR_i| × sign(IC_i)`, same filter.
    Both rebuilt by `python -m tools.optimize_weights` from `pit_ic_by_tier_v2`. Aggressive normalisation (no caps, no diversification floor) — pt_upside takes 33-47% in LARGE/MID. Tradeoff accepted: model degrades hard if pt_upside breaks; mitigated by the source-redundancy review in `pt_source_landscape_2026_05_23` memory.
 4. **Negative-weight signals are honoured** in `score_universe()` — inverse-IC factors (e.g. `cf_accruals_ratio` MID t=-2.53) get a sign-flip on the percentile (`1 - pctile`) before the weighted sum. Keeps the directionality consistent across all factors.
 5. **`scoring/screener` accepts `--variant {production, return, sharpe}`**. Variants are print-only — they do NOT write to `daily_picks`. Promoting one to live requires either replacing `SIGNAL_WEIGHTS` outright, OR adding a `variant` column to `daily_picks` (PK becomes (sid, pick_date, variant)) and running all three nightly. Deferred until 30-day side-by-side track.
 6. **Variant runs use a lower `eligible_coverage` gate** (0.40 vs production's 0.60) — the variants concentrate ~40% of SMALL weight on analyst-dependent signals (pt_upside, eps_growth), and the strict gate kicked out 864 SMALL caps without analyst coverage, leaving SMALL top-5 starting at rank 20. The relax keeps the non-analyst-covered SMALL caps rankable.
-7. **Cockpit page** [/model/variants](../../cockpit/templates/model_variants.html) runs all three live (10s cold / 0s warm via 30-min disk cache at `data/.cockpit_cache/model_variants__top_per_tier=N.pkl`); 3-column side-by-side with each variant's per-tier weight breakdown + top-N picks; divergent picks (appearing in only one variant's tier top-N) marked with ★.
+7. **Cockpit page** [/model/variants](../../../cockpit/templates/model_variants.html) runs all three live (10s cold / 0s warm via 30-min disk cache at `data/.cockpit_cache/model_variants__top_per_tier=N.pkl`); 3-column side-by-side with each variant's per-tier weight breakdown + top-N picks; divergent picks (appearing in only one variant's tier top-N) marked with ★.
 
 ## Rationale (alternatives weighed)
 - **Single backtest-derived scheme, hand-pick objective** — clean, but loses the ability to see how much the weight scheme drives the picks. The /model/variants comparison is the most informative diagnostic this codebase has produced; killing one scheme to look cleaner is the wrong tradeoff.
@@ -51,14 +51,14 @@ Production needs to choose; the prior model picked neither explicitly.
 - 4-7 more bench factors (`pledge_quality`, `delivery_anomaly_z`, `interest_coverage`, `ccc`, `roic`, `fcf_margin`, `nwc_to_revenue`) are the next-cheapest wiring targets — 1-2 lines each, would drop the unwired share from 86% to <20% in LARGE/MID.
 
 ## Files
-- [tools/optimize_weights.py](../../tools/optimize_weights.py) — reads `pit_ic_by_tier_v2`, emits the two weight blocks. Maps `signal_id` → production key via `SIGNAL_ID_TO_KEY`; tracks `WIRED_KEYS` set so the coverage report flags "needs wiring" warnings.
-- [config.py:51](../../config.py#L51) — `SIGNAL_WEIGHTS` unchanged (production), `SIGNAL_WEIGHTS_RETURN` + `SIGNAL_WEIGHTS_SHARPE` added at line 79-129.
-- [scoring/screener.py](../../scoring/screener.py) — `_load_signals` reads pt_upside + eps_growth; `score_universe(df, weights=None)` accepts override; `_pick_eligible(df, min_eligible=None)` accepts relaxed gate; `compute(variant=...)` flag.
-- [signals/consensus.py:178](../../signals/consensus.py#L178) — `pt_upside.clip(lower=lo, upper=hi)` on output.
-- [cockpit/api.py:1438-1513](../../cockpit/api.py#L1438) — `get_model_variants(top_per_tier=10)` with 30-min disk cache.
-- [cockpit/app.py:378](../../cockpit/app.py#L378) — `/model/variants` route.
-- [cockpit/templates/model_variants.html](../../cockpit/templates/model_variants.html) — 3-column comparison + divergent-pick ★ + footnote.
-- [cockpit/templates/base.html:80](../../cockpit/templates/base.html#L80) — nav entry.
+- [tools/optimize_weights.py](../../../tools/optimize_weights.py) — reads `pit_ic_by_tier_v2`, emits the two weight blocks. Maps `signal_id` → production key via `SIGNAL_ID_TO_KEY`; tracks `WIRED_KEYS` set so the coverage report flags "needs wiring" warnings.
+- [config.py:51](../../../config.py#L51) — `SIGNAL_WEIGHTS` unchanged (production), `SIGNAL_WEIGHTS_RETURN` + `SIGNAL_WEIGHTS_SHARPE` added at line 79-129.
+- [scoring/screener.py](../../../scoring/screener.py) — `_load_signals` reads pt_upside + eps_growth; `score_universe(df, weights=None)` accepts override; `_pick_eligible(df, min_eligible=None)` accepts relaxed gate; `compute(variant=...)` flag.
+- [signals/consensus.py:178](../../../signals/consensus.py#L178) — `pt_upside.clip(lower=lo, upper=hi)` on output.
+- [cockpit/api.py:1438-1513](../../../cockpit/api.py#L1438) — `get_model_variants(top_per_tier=10)` with 30-min disk cache.
+- [cockpit/app.py:378](../../../cockpit/app.py#L378) — `/model/variants` route.
+- [cockpit/templates/model_variants.html](../../../cockpit/templates/model_variants.html) — 3-column comparison + divergent-pick ★ + footnote.
+- [cockpit/templates/base.html:80](../../../cockpit/templates/base.html#L80) — nav entry.
 
 ## Decision pending
-**Which variant becomes live `daily_picks`?** Track production / return / sharpe side-by-side for 30 trading days starting next session. Decision criterion: realised 20-day forward return per pick, averaged across the cap-tier-weighted portfolio, net of tier-specific transaction costs ([config.py TRANSACTION_COSTS_BPS](../../config.py)). Tie-breaker if returns are within 50bps: pick MaxSharpe (lower variance is the second-order win for retail capital psychology).
+**Which variant becomes live `daily_picks`?** Track production / return / sharpe side-by-side for 30 trading days starting next session. Decision criterion: realised 20-day forward return per pick, averaged across the cap-tier-weighted portfolio, net of tier-specific transaction costs ([config.py TRANSACTION_COSTS_BPS](../../../config.py)). Tie-breaker if returns are within 50bps: pick MaxSharpe (lower variance is the second-order win for retail capital psychology).

@@ -2,7 +2,7 @@
 
 **Status:** Accepted
 **Date:** 2026-05-25
-**Plan:** [0005 Data confidence 75 → 95](../plans/0005-data-confidence-to-95.md) Phase E
+**Plan:** [0005 Data confidence 75 → 95](../_archive/plans/0005-data-confidence-to-95.md) Phase E
 
 ## Context
 We had no way to prove that a code change in `scoring/`, `signals/`, `sources/`, or `eligibility/` didn't silently shift today's picks. The HALC incident (2026-05-22) — a model dossier showing "16.5% downside" while the structured field claimed +8.5% — was a slow drift across multiple producer changes that nobody caught at push time. Producer rewrites, schema migrations, signal weight tweaks, and config edits can all change the output without changing the test suite.

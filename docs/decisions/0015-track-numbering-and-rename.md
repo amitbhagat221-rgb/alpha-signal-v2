@@ -65,8 +65,8 @@ The decision question wasn't "what's the right naming?" but "should we have ONE 
 ## Migration scope (executed this commit)
 
 Doc files rewritten:
-- `docs/plans/0001-mother-plan.md` (D14–D18 → 2.1–2.5)
-- `docs/plans/0002-100-factors-and-model.md` (Phase A/B/C → 3.1/3.2/3.3 with letter-suffix sub-phases)
+- `docs/_archive/plans/0001-mother-plan.md` (D14–D18 → 2.1–2.5)
+- `docs/_archive/plans/0002-100-factors-and-model.md` (Phase A/B/C → 3.1/3.2/3.3 with letter-suffix sub-phases)
 - `docs/plans/0003-market-share-momentum-factor.md` (F-track → Track 3)
 - `docs/plans/0004-consumer-demand-pulse.md` (F-track → Track 3)
 - `docs/plans/README.md`

@@ -1,6 +1,6 @@
 # Plan 0006 — Sector dossiers (sector-as-stock daily read)
 
-**Status**: implemented · proposed 2026-05-29 · **A + B + C shipped 2026-05-29 · D + E shipped 2026-05-31** · archive ~2026-06-30
+**Status**: implemented (archived 2026-09-26) · proposed 2026-05-29 · **A + B + C shipped 2026-05-29 · D + E shipped 2026-05-31** · archive ~2026-06-30
 **Goal**: turn `/sectors` from a useless 47-card industry heatmap into a daily narrative read shaped like a stock dossier — horizon-aware, with tailwinds/headwinds decomposed by force (regulation, tech, market, macro), and a curated bucketed digest at the front door.
 **Total estimated effort**: ~4-6 sessions across 5 phases. Phases A-C are the MVP and ship the new UX; D and E are quality upgrades.
 
@@ -184,7 +184,7 @@ Today the horizon framing is a static footnote ("medium-term lens"). Phase E mak
 
 ## Cross-references
 - [plan 0002](0002-100-factors-and-model.md) — sector momentum factor (Phase E)
-- [ADR 0017](../decisions/0017-factor-library-two-tier-registry.md) — factor registry rules apply to sector_momentum
+- [ADR 0017](../../decisions/0017-factor-library-two-tier-registry.md) — factor registry rules apply to sector_momentum
 - Stock-dossier pattern (`output/dossier.py`) — copy hygiene contract for `output/sector_dossier.py`
 
 ## Out of scope (v1)

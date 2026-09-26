@@ -4,7 +4,7 @@
 **Date:** 2026-05-29
 
 ## Context
-[signals/financial_signal.py](../../signals/financial_signal.py) Phase 2.2b shipped as a single composite (40% asset_quality + 30% profitability + 15% capital + 15% funding), all four sub-components encoded with a single fixed direction. The asset_quality leg was `direction='lower'` — low NPA = good — because the v1 banking reference + every textbook says so.
+[signals/financial_signal.py](../../../signals/financial_signal.py) Phase 2.2b shipped as a single composite (40% asset_quality + 30% profitability + 15% capital + 15% funding), all four sub-components encoded with a single fixed direction. The asset_quality leg was `direction='lower'` — low NPA = good — because the v1 banking reference + every textbook says so.
 
 The Phase 2.2d backtest (148 PIT dates, 14.5K rows) returned `t = -0.75 / -1.30 / -0.34` across LARGE/MID/SMALL — well below the |t| ≥ 2.0 done gate. The composite was effectively noise.
 
@@ -25,12 +25,12 @@ Two paths were available:
 ## Decision
 **Path 2 — split into two named signals**. Whenever a factor's backtest IC flips sign across cap_tiers, ship two parallel signals — one per direction — with names that surface the *mechanism* (`quality`, `recovery`, `mean_reversion`, `momentum`, etc.). Do **not** apply per-tier sign on a single composite.
 
-Implementation pattern (codified in [signals/financial_signal.py](../../signals/financial_signal.py)):
+Implementation pattern (codified in [signals/financial_signal.py](../../../signals/financial_signal.py)):
 1. Compute the raw component once.
 2. Z-score it twice — once per direction — into two columns: `<component>_<direction1>_z` and `<component>_<direction2>_z`.
 3. Pass each variant z-score into the same `_compute_composite(df, aq_col=…, out_col=…, basis_col=…)` helper, producing two parallel composite columns.
 4. Persist both columns + their basis strings in the signal scores table AND in `daily_snapshots_pit` via `_COLUMN_MIGRATIONS`.
-5. Register each in [db.BACKTEST_SIGNALS](../../db.py) with its own row and tier-specific hypothesis text.
+5. Register each in [db.BACKTEST_SIGNALS](../../../db.py) with its own row and tier-specific hypothesis text.
 6. The original single-direction column is retained as a back-compat alias (`= quality variant` in this case) for older consumers; the backtest harness sees all three as distinct signals.
 7. The screener's `SIGNAL_WEIGHTS[tier]` chooses which variant to consume per tier; bench-status variants are computed but not routed.
 
@@ -54,12 +54,12 @@ Implementation pattern (codified in [signals/financial_signal.py](../../signals/
 - The composite-level methodology of [ADR 0028 (two-variant factor model)](0028-two-variant-factor-model.md) is unaffected — that's about weight-scheme selection, not direction. ADR 0028's `SIGNAL_WEIGHTS_RETURN` / `SIGNAL_WEIGHTS_SHARPE` continue to operate at the per-tier composite level; ADR 0032 operates at the per-factor input level.
 
 ## Files
-- [signals/financial_signal.py](../../signals/financial_signal.py) — `_compute_composite(df, aq_col, out_col, basis_col)` refactored; `compute()` + `compute_pit()` produce both `financial_quality` + `financial_recovery`.
-- [db.py:_COLUMN_MIGRATIONS](../../db.py) — `financial_quality`, `financial_recovery`, `quality_basis`, `recovery_basis`, `asset_quality_quality_z`, `asset_quality_recovery_z` on `financial_signal_scores`; first two also on `daily_snapshots_pit`.
-- [db.py:BACKTEST_SIGNALS](../../db.py) — `financial_signal` → SUPERSEDED; `financial_quality` + `financial_recovery` → READY.
-- [tools/reconstruct_pit.py:pit_financial_signal()](../../tools/reconstruct_pit.py) — returns `[sid, financial_signal, financial_quality, financial_recovery]`; dispatch trigger matches any of the three signal names; `PIT_COLUMNS` extended.
-- [tools/backtest_pit.py:SIGNAL_COLUMN_MAP](../../tools/backtest_pit.py) — both new signal IDs registered.
-- [docs/plans/0001-mother-plan.md §2.2](../plans/0001-mother-plan.md) — Phase 2.2d status reflects the diagnostic finding; Phase 2.2b-v2 ships per this ADR.
+- [signals/financial_signal.py](../../../signals/financial_signal.py) — `_compute_composite(df, aq_col, out_col, basis_col)` refactored; `compute()` + `compute_pit()` produce both `financial_quality` + `financial_recovery`.
+- [db.py:_COLUMN_MIGRATIONS](../../../db.py) — `financial_quality`, `financial_recovery`, `quality_basis`, `recovery_basis`, `asset_quality_quality_z`, `asset_quality_recovery_z` on `financial_signal_scores`; first two also on `daily_snapshots_pit`.
+- [db.py:BACKTEST_SIGNALS](../../../db.py) — `financial_signal` → SUPERSEDED; `financial_quality` + `financial_recovery` → READY.
+- [tools/reconstruct_pit.py:pit_financial_signal()](../../../tools/reconstruct_pit.py) — returns `[sid, financial_signal, financial_quality, financial_recovery]`; dispatch trigger matches any of the three signal names; `PIT_COLUMNS` extended.
+- [tools/backtest_pit.py:SIGNAL_COLUMN_MAP](../../../tools/backtest_pit.py) — both new signal IDs registered.
+- [docs/_archive/plans/0001-mother-plan.md §2.2](../plans/0001-mother-plan.md) — Phase 2.2d status reflects the diagnostic finding; Phase 2.2b-v2 ships per this ADR.
 
 ## Trigger to revisit
 A factor's IC backtest produces opposing signs across cap_tiers (e.g. SMALL t < -1.5 while LARGE t > +1.5, OR mirror) → look at this ADR before applying a per-tier sign flag. If the underlying economic mechanism is interpretably different per tier (quality vs recovery, momentum vs reversal), split into two named signals.

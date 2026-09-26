@@ -1,6 +1,6 @@
 # Plan 0013 — Sonnet Task List: Event-Study Infrastructure + In-House Event Factors
 
-**Status:** ready · **Written:** 2026-07-11 by Opus for a Sonnet executor · **Parent:** [Plan 0011](0011-roadmap-to-90.md) (WS4 + shared infra), sourced from [research 0003](../research/0003-special-situations-event-sleeve.md) + [0001](../research/0001-india-structural-event-factors.md); decisions [ADR 0051](../decisions/0051-roadmap-to-90-decisions-d1-d12.md) D7/D12.
+**Status:** done (2026-07-11, 6/6 tasks; archived 2026-09-26) · **Written:** 2026-07-11 by Opus for a Sonnet executor · **Parent:** [Plan 0011](../../plans/0011-roadmap-to-90.md) (WS4 + shared infra), sourced from [research 0003](../../research/0003-special-situations-event-sleeve.md) + [0001](../../research/0001-india-structural-event-factors.md); decisions [ADR 0051](../../decisions/0051-roadmap-to-90-decisions-d1-d12.md) D7/D12.
 
 Over-specified on purpose. Every judgment call is a `DECIDED:` line — do not re-litigate. Do
 not invent scope. On a `STOP-IF`, write `BLOCKED: <reason>` under the task, commit done work
@@ -180,9 +180,9 @@ enhancer, not book-mover). 3. do NOT build the PDF layer.
 
 ### C1 — Plan/checklist/handoff sync
 
-**STEPS:** 1. In [0011-roadmap-to-90.md](0011-roadmap-to-90.md): tick WS4.1 (A3) + WS4.2 (A1);
+**STEPS:** 1. In [0011-roadmap-to-90.md](../../plans/0011-roadmap-to-90.md): tick WS4.1 (A3) + WS4.2 (A1);
 add implementation notes under the 2026-07-11 block summarizing A1/A2/A3 outcomes + B1/B2
-verdicts (reproduced / null / blocked, with n's). 2. In [0000-checklist.md](0000-checklist.md):
+verdicts (reproduced / null / blocked, with n's). 2. In [0000-checklist.md](../../plans/0000-checklist.md):
 update the Plan-0013 line with `<n>/6 done, <k> BLOCKED`. 3. Overwrite `HANDOFF.md`: Pick-up =
 the human gates (B1/B2 verdicts → paper-sleeve decision per D7; the §OUT supervised items:
 survivorship rewrite, index/lockup scrapes, buyback PDF layer). Watch out = new `event_calendar`

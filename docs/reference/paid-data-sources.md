@@ -88,4 +88,4 @@ Sensibull doesn't sell a public retail API; it's B2B (Zerodha embeds them inside
 
 ## Related
 
-- [api-endpoints.md](api-endpoints.md) · [data-playbook.md](data-playbook.md) · [plans/0002-100-factors-and-model.md](../plans/0002-100-factors-and-model.md)
+- [api-endpoints.md](api-endpoints.md) · [data-playbook.md](data-playbook.md) · [plans/0002-100-factors-and-model.md](../_archive/plans/0002-100-factors-and-model.md)

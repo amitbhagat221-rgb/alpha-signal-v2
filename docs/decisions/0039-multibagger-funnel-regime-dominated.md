@@ -23,4 +23,4 @@ Across two regimes, the screen's edge FLIPS sign:
 - A regime gate (small-cap EMA, Report C) is ESSENTIAL, not optional; factor weights should be regime-conditioned.
 - DO NOT calibrate funnel thresholds to any single window — the two known regimes calibrate to opposite extremes.
 - Data unlocked: `corporate_actions` backfilled to 2018 (split adjustment); survivorship-true universe via the bhavcopy archive (`historical_universe`). Free, no paid feed.
-- Pairs with plan `docs/plans/0008-multibagger-model.md`.
+- Pairs with plan `docs/_archive/plans/0008-multibagger-model.md`.

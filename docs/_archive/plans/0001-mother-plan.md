@@ -1,5 +1,5 @@
 ---
-Status: active
+Status: superseded by plan 0011 (roadmap-to-90) — archived 2026-09-26
 Created: 2026-05-03
 Last updated: 2026-05-22
 Owner: Amit Bhagat
@@ -8,7 +8,7 @@ Related ADRs: 0002-no-prefect.md, 0004-no-base-classes-no-yaml.md, 0009-factor-t
 
 # Mother Plan — v2 Roadmap
 
-Three tracks running in parallel ([ADR 0015](../decisions/0015-track-numbering-and-rename.md) for naming + numbering convention):
+Three tracks running in parallel ([ADR 0015](../../decisions/0015-track-numbering-and-rename.md) for naming + numbering convention):
 
 | Track | Name | Status | Lives in |
 |---|---|---|---|
@@ -16,14 +16,14 @@ Three tracks running in parallel ([ADR 0015](../decisions/0015-track-numbering-a
 | **Track 2** | **Portfolio** — segment models + portfolio construction | ⏳ ~40% (2.1 done, 2.2 next) | This plan |
 | **Track 3** | **Factor model** — 42 → 100 factors + factor model upgrade | ⏳ Active | [0002-100-factors-and-model.md](0002-100-factors-and-model.md) |
 
-Track 2 and Track 3 run concurrently with documented integration points ([ADR 0009](../decisions/0009-factor-track-parallel-to-d-track.md)): **2.4 ↔ 3.3c** and **2.5 ↔ 3.3b**. Track 2 phases don't block on Track 3 phases.
+Track 2 and Track 3 run concurrently with documented integration points ([ADR 0009](../../decisions/0009-factor-track-parallel-to-d-track.md)): **2.4 ↔ 3.3c** and **2.5 ↔ 3.3b**. Track 2 phases don't block on Track 3 phases.
 
 ## Track 1 — Foundation ✅ done
 
 - 1.1 v1 audit + rebuild plan
 - 1.2 Tier infrastructure — `cap_tier` ∈ {LARGE, MID, SMALL} assigned before any ranking; within-segment ranking locked
 - 1.3 Stratified backtest + VIX regime — per-tier IC + t-stats; `scoring/regime.py` allocation overlay
-- 1.4 36-month PIT reconstruction — the validated signal map ([signal-weights.md](../reference/signal-weights.md)) and t-stat tiering rules anchor here. Known as **C13b** in code/comments (proper noun)
+- 1.4 36-month PIT reconstruction — the validated signal map ([signal-weights.md](../../reference/signal-weights.md)) and t-stat tiering rules anchor here. Known as **C13b** in code/comments (proper noun)
 - 1.5 v2 cutover (2026-05-01)
 
 ## Track 2 — Portfolio ladder
@@ -37,7 +37,7 @@ Three-tier filter applied to small caps before scoring. Philosophy: *quality is 
 | **HEAVY PENALTY** | Stays, capped –0.60 penalty | Loss 2/3yr (–0.25), neg 3yr FCF (–0.20), pledge >50% (–0.25), F=2–3 (–0.15), Z=0.5–1.1 (–0.15), Beneish > –1.78 (–0.20) |
 | **QUALITY COMPOSITE** | Positive signal contribution | Piotroski 25%, CFO/EBITDA 20%, Beneish 20%, Z 15%, Pledge 10%, FCF years 10% |
 
-Lives in [scoring/quality_gate.py](../../scoring/quality_gate.py). Output: `gate_status` ∈ {EXCLUDED, PENALISED, PASS}.
+Lives in [scoring/quality_gate.py](../../../scoring/quality_gate.py). Output: `gate_status` ∈ {EXCLUDED, PENALISED, PASS}.
 
 ### 2.2 — Financial sub-model ⏳ NEXT
 Banks and NBFCs have no inventory/COGS/op margin — Piotroski/accruals/EBITDA are noise. Route Financials through a sector-specific model.

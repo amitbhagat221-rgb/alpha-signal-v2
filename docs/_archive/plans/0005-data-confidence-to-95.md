@@ -1,6 +1,6 @@
 # Plan 0005 — Data confidence 75 → 95 (institutional-grade)
 
-**Status**: proposed · 2026-05-24
+**Status**: implemented (Phases A+B shipped via [ADR 0024](../../decisions/0024-per-signal-eligibility-and-per-stock-integrity.md)) · proposed 2026-05-24 · archived 2026-09-26
 **Goal**: take the system from "trust it for my own picks if I verify outliers manually" → "trust it blind for institutional capital deployment".
 **Baseline today**: 75/100 (see HANDOFF 2026-05-24 confidence breakdown).
 **Total estimated effort**: ~10-14 sessions across 6 phases. Each phase ships independently and moves the needle.
