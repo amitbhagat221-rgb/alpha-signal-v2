@@ -38,9 +38,6 @@ from pathlib import Path
 
 import pandas as pd
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(PROJECT_ROOT))
-
 # v2's tickertape.py adds v1 scripts path for the Bharat_sm_data library.
 sys.path.insert(0, str(Path.home() / "alpha-signal" / "scripts"))
 

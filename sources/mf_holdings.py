@@ -45,14 +45,11 @@ Usage:
 """
 
 import argparse
-import sys
 from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(PROJECT_ROOT))
 
 from db import get_db, read_sql
 

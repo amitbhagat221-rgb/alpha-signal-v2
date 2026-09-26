@@ -40,12 +40,9 @@ import json
 import sys
 import time
 from datetime import date as _date, datetime, timedelta, timezone
-from pathlib import Path
 
 import pandas as pd
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(PROJECT_ROOT))
 
 from config import API
 from db import read_sql, upsert_df

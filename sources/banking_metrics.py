@@ -57,12 +57,9 @@ import sys
 import random
 import time
 from datetime import datetime
-from pathlib import Path
 
 import pandas as pd
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(PROJECT_ROOT))
 
 from db import read_sql, upsert_df
 from sources.screener_pull import (
