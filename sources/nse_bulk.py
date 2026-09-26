@@ -26,24 +26,14 @@ import re
 from datetime import date
 
 import pandas as pd
-import requests
 
 from config import API
-from db import insert_df, read_sql
+from db import insert_df
+from sources import _http
 
 BULK_URL = "https://archives.nseindia.com/content/equities/bulk.csv"
 BLOCK_URL = "https://archives.nseindia.com/content/equities/block.csv"
 HEADERS = {"User-Agent": API["user_agent"]}
-
-_SID_MAP = None
-
-
-def _get_sid_map():
-    global _SID_MAP
-    if _SID_MAP is None:
-        stocks = read_sql("SELECT sid, ticker FROM stocks")
-        _SID_MAP = stocks.set_index("ticker")["sid"].to_dict()
-    return _SID_MAP
 
 
 def _parse_deals(csv_text, deal_type, deal_date=None):
@@ -62,11 +52,16 @@ def _parse_deals(csv_text, deal_type, deal_date=None):
     # Normalize column names (NSE has leading spaces sometimes)
     df.columns = df.columns.str.strip()
 
-    sid_map = _get_sid_map()
+    sid_map = _http.sid_map()
 
     # Try to identify columns
     sym_col = next((c for c in df.columns if "symbol" in c.lower()), None)
-    client_col = next((c for c in df.columns if "client" in c.lower() or "name" in c.lower()), None)
+    # "Client Name" must win over "Security Name" (which precedes it in NSE's
+    # header) — the old single `client-or-name` scan stored the company name
+    # as client_name for every daily row since ~2026-05, so smart_money's
+    # repeat_buyers collapsed to "stock had buys on ≥2 dates".
+    client_col = (next((c for c in df.columns if "client" in c.lower()), None)
+                  or next((c for c in df.columns if "name" in c.lower()), None))
     bs_col = next((c for c in df.columns if "buy" in c.lower() and "sell" in c.lower()), None)
     qty_col = next((c for c in df.columns if "quant" in c.lower()), None)
     price_col = next((c for c in df.columns if "price" in c.lower()), None)
@@ -124,23 +119,38 @@ def fetch_today(dry_run=False):
         return 0
 
     total = 0
+    parsed = {}      # deal_type → deals matched to the universe
+    problems = []
 
     for url, deal_type in [(BULK_URL, "bulk"), (BLOCK_URL, "block")]:
         try:
-            resp = requests.get(url, headers=HEADERS, timeout=15)
-            if resp.status_code == 200:
-                df = _parse_deals(resp.text, deal_type)
-                if not df.empty:
-                    n = insert_df(df, "bulk_deals")
-                    print(f"  {deal_type}: {len(df)} deals fetched, {n} new")
-                    total += n
-                else:
-                    print(f"  {deal_type}: no deals today")
+            resp = _http.polite_get(url, headers=HEADERS)
+            if resp is None:
+                problems.append(f"{deal_type}: HTTP 404")
+                print(f"  {deal_type}: HTTP 404")
+                continue
+            df = _parse_deals(resp.text, deal_type)
+            parsed[deal_type] = len(df)
+            if not df.empty:
+                n = insert_df(df, "bulk_deals")
+                print(f"  {deal_type}: {len(df)} deals fetched, {n} new")
+                total += n
             else:
-                print(f"  {deal_type}: HTTP {resp.status_code}")
+                print(f"  {deal_type}: no deals today")
         except Exception as e:
+            problems.append(f"{deal_type}: {type(e).__name__}: {e}")
             print(f"  {deal_type}: error — {e}")
 
+    # 0 NEW rows is normal: Sun/Mon/post-holiday runs re-read the last session's
+    # file and INSERT OR IGNORE drops the dupes. But bulk.csv always holds the last
+    # session's deals — ≥3 universe matches on each of 433 sessions since 2025-01 —
+    # so 0 PARSED means the fetch or the CSV shape broke. Block deals are genuinely
+    # absent on many days, so only bulk gates.
+    if not parsed.get("bulk"):
+        raise RuntimeError(
+            "NSE bulk.csv yielded 0 universe deals — archive unreachable or CSV "
+            f"format changed ({'; '.join(problems) or 'parsed empty'})"
+        )
     return total
 
 

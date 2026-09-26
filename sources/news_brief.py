@@ -1,7 +1,7 @@
 """
 Alpha Signal v2 — Daily News Brief Generator (Phase 2)
 
-Per spec at sources/news_app_build_spec.md ("the 10 AM brief — the actual
+Per spec at docs/_archive/2026-09-26-news-app-build-spec.md ("the 10 AM brief — the actual
 product"). At cron-time, pulls the top N enriched articles from the last 24h,
 synthesizes a structured brief via Claude Sonnet.
 
@@ -24,12 +24,8 @@ Usage:
 import argparse
 import json
 import os
-import sys
 from datetime import date as _date
-from pathlib import Path
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(PROJECT_ROOT))
 
 from db import read_sql, get_db, log_llm_usage
 

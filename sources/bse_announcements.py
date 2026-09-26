@@ -21,7 +21,7 @@ survivorship-free by construction. Metadata only (no PDF download — transcript
 handles selective PDF fetch). Idempotent: INSERT OR IGNORE on news_id, lock-retry on
 the write. Universe-join (scrip_cd → sid) is DEFERRED to a static scrip-master map.
 
-Rate-limited per CLAUDE.md: warmed session, browser headers, ~1.5-3s between pages,
+Rate-limited per CLAUDE.md: warmed session, browser headers, 2-3s between pages,
 single-threaded. Same IP-block hygiene as transcripts_pull.
 
 Usage:
@@ -37,25 +37,21 @@ import sqlite3
 import sys
 import time
 from datetime import date, datetime, timedelta
-from pathlib import Path
 
-import requests
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(PROJECT_ROOT))
-
+from config import API as NET  # module-level API below is the BSE endpoint URL
 from db import get_db
+from sources._http import warm_session
 
 API = "https://api.bseindia.com/BseIndiaAPI/api/AnnSubCategoryGetData/w"
 WARM_URL = "https://www.bseindia.com/corporates/ann.html"
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                  "(KHTML, like Gecko) Chrome/120.0 Safari/537.36",
+    "User-Agent": NET["browser_user_agent"],
     "Referer": "https://www.bseindia.com/",
     "Origin": "https://www.bseindia.com",
     "Accept": "application/json, text/plain, */*",
 }
-DELAY_BETWEEN_PAGES = (1.5, 3.0)
+DELAY_BETWEEN_PAGES = (2.0, 3.0)   # was (1.5, 3.0) — floor below CLAUDE.md's 2s
 PAGE_SIZE = 50
 BACKFILL_START = "2018-01-01"
 
@@ -65,16 +61,6 @@ COLS = ["news_id", "scrip_cd", "sid", "company_name", "headline", "news_sub",
         "dt_tm", "submission_dt", "dissem_dt", "time_diff", "quarter_id",
         "attachment", "pdf_flag", "has_investor_ppt", "has_audio_video",
         "nsurl", "fetched_at"]
-
-
-def make_session():
-    s = requests.Session()
-    s.headers.update(HEADERS)
-    try:
-        s.get(WARM_URL, timeout=20)  # warm the cookie jar (BSE bot-gate)
-    except Exception:
-        pass
-    return s
 
 
 def _row_to_record(x, fetched_at):
@@ -189,7 +175,7 @@ def main():
     args = p.parse_args()
 
     today = date.today().isoformat()
-    session = make_session()
+    session = warm_session(WARM_URL, headers=HEADERS)   # BSE bot-gate cookie
 
     if args.smoke:
         seen, _ = harvest_range(session, (date.today() - timedelta(days=1)).isoformat(), today, dry_run=True)
@@ -208,11 +194,12 @@ def main():
         to = today
 
     days = list(_day_iter(frm, to))
-    tot_seen = tot_new = 0
+    tot_seen = tot_new = n_err = 0
     for i, d in enumerate(days, 1):
         try:
             seen, new = harvest_range(session, d, d)
         except Exception as e:
+            n_err += 1
             print(f"  [{d}] ERROR {type(e).__name__}: {str(e)[:70]}", flush=True)
             time.sleep(random.uniform(*DELAY_BETWEEN_PAGES))
             continue
@@ -221,6 +208,12 @@ def main():
             print(f"  [{i:4d}/{len(days)}] {d}: {seen:>4} seen, {new:>4} new (cum new={tot_new})", flush=True)
         time.sleep(random.uniform(*DELAY_BETWEEN_PAGES))
     print(f"\nDone. {frm}..{to}  seen={tot_seen} new_rows={tot_new}")
+    # Weekends/holidays return 0 rows cleanly; an ERROR on EVERY day means the
+    # endpoint is broken/blocked. (Since ~2026-09-19 each call returns a non-JSON
+    # body and run_daily_forward.sh logged exit 0 / seen=0.)
+    if days and n_err == len(days):
+        raise RuntimeError(f"BSE announcements: all {n_err} day-requests errored — endpoint "
+                           "blocked or response format changed")
     return 0
 
 

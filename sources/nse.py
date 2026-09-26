@@ -23,15 +23,14 @@ Usage:
 """
 
 import argparse
-import time
 from datetime import date, datetime, timedelta
 from io import StringIO
 
 import pandas as pd
-import requests
 
 from config import API
-from db import read_sql, insert_df
+from db import insert_df, read_sql
+from sources import _http
 
 BHAVCOPY_URL = "https://archives.nseindia.com/products/content/sec_bhavdata_full_{date}.csv"
 HEADERS = {"User-Agent": API["user_agent"]}
@@ -47,17 +46,6 @@ MIN_CLOSE = 0.01          # penny stock floor
 # from our 2,448-stock universe (SME-listed pharma, etc — e.g. ANO/ANONDITA).
 TRADEABLE_SERIES = {"EQ", "SM", "BE", "ST", "IV", "RR", "BZ"}
 
-_SID_MAP = None
-
-
-def _get_sid_map():
-    global _SID_MAP
-    if _SID_MAP is None:
-        stocks = read_sql("SELECT sid, ticker FROM stocks")
-        _SID_MAP = stocks.set_index("ticker")["sid"].to_dict()
-    return _SID_MAP
-
-
 def _is_trading_day(d):
     """Skip weekends. Holidays will return 404 from NSE."""
     return d.weekday() < 5
@@ -68,12 +56,12 @@ def _fetch_date(target_date):
     date_str = target_date.strftime("%d%m%Y")
     url = BHAVCOPY_URL.format(date=date_str)
 
-    resp = requests.get(url, headers=HEADERS, timeout=30)
-
-    if resp.status_code == 404:
+    try:
+        resp = _http.polite_get(url, headers=HEADERS, timeout=30)
+    except Exception as e:   # a bad day must SKIP, not fail this critical step
+        return None, [f"{type(e).__name__}: {e}"]
+    if resp is None:
         return None, [f"404 — likely holiday ({target_date})"]
-    if resp.status_code != 200:
-        return None, [f"HTTP {resp.status_code}"]
 
     # Parse CSV
     try:
@@ -100,7 +88,7 @@ def _fetch_date(target_date):
         return None, [f"Only {len(df)} EQ rows (expected {MIN_ROWS}+) — possible partial file"]
 
     # Map to our schema
-    sid_map = _get_sid_map()
+    sid_map = _http.sid_map()
 
     # Build clean output
     col_map = {
@@ -223,9 +211,7 @@ def backfill(days=30, dry_run=False):
     for i in range(days, 0, -1):
         d = date.today() - timedelta(days=i)
         n = fetch_bhavcopy(d, dry_run=dry_run)
-        total += n
-        if not dry_run:
-            time.sleep(2)  # 2s delay between requests
+        total += n   # polite_get keeps ≥2s between archive requests
     print(f"\nTotal: {total} new rows")
     return total
 
@@ -247,24 +233,35 @@ def backfill_range(start, end, dry_run=False):
     d = s
     while d <= e:
         if _is_trading_day(d):
-            total += fetch_bhavcopy(d, dry_run=dry_run)
-            if not dry_run:
-                time.sleep(2)
+            total += fetch_bhavcopy(d, dry_run=dry_run)   # polite_get paces ≥2s
         d += timedelta(days=1)
     print(f"\nTotal: {total} new rows ({s} → {e})")
     return total
 
 
+def _loaded_dates(since_iso):
+    df = read_sql("SELECT DISTINCT date FROM stock_prices WHERE source = 'bhavcopy' AND date >= ?",
+                  params=[since_iso])
+    return set(df["date"])
+
+
 def compute(dry_run=False):
-    """Pipeline entry point — backfill last 7 trading days.
+    """Pipeline entry point — fill any of the last 7 days not yet loaded.
 
     Cron runs in the early morning before NSE publishes the day's bhavcopy,
-    so fetching only `date.today()` returns 0 rows on every run. Backfilling
-    a 7-day window (with INSERT OR IGNORE) picks up today's file once it
-    goes live AND self-heals from cron downtime or skipped weekends without
-    re-inserting what we already have.
+    so fetching only `date.today()` returns 0 rows on every run. Walking a
+    7-day window picks up the latest file once it goes live AND self-heals
+    from cron downtime. Days whose bhavcopy rows are already in stock_prices
+    are skipped (mirrors fno_pull.compute) — the old version re-downloaded all
+    ~5 weekday files (~20 MB) every morning to INSERT-OR-IGNORE them away.
+    Holidays aren't "loaded", so they're re-probed (one 404 each) until they
+    age out of the window.
     """
-    return backfill(days=7, dry_run=dry_run)
+    days = [date.today() - timedelta(days=i) for i in range(7, 0, -1)]
+    have = _loaded_dates(days[0].isoformat())
+    todo = [d for d in days if _is_trading_day(d) and d.isoformat() not in have]
+    print(f"NSE Bhavcopy: {len(todo)} of the last 7 days not yet loaded")
+    return sum(fetch_bhavcopy(d, dry_run=dry_run) for d in todo)
 
 
 if __name__ == "__main__":

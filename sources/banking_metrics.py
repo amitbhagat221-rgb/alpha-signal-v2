@@ -57,12 +57,9 @@ import sys
 import random
 import time
 from datetime import datetime
-from pathlib import Path
 
 import pandas as pd
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(PROJECT_ROOT))
 
 from db import read_sql, upsert_df
 from sources.screener_pull import (
@@ -70,6 +67,7 @@ from sources.screener_pull import (
     check_auth,
     COMPANY_CONSOLIDATED_URL,
     COMPANY_URL,
+    DELAY_BETWEEN_STEPS,
     DELAY_BETWEEN_STOCKS,
     BACKOFF_ON_429,
 )
@@ -358,10 +356,12 @@ def fetch_one(session, sid: str, ticker: str, dry_run: bool = False) -> tuple[st
     only publish consolidated — hence the fallback.
     """
     last_err = None
-    for view, url in (
+    for i, (view, url) in enumerate((
         ("standalone",   COMPANY_URL.format(ticker=ticker)),
         ("consolidated", COMPANY_CONSOLIDATED_URL.format(ticker=ticker)),
-    ):
+    )):
+        if i:  # consolidated fallback — keep ≥2s after the standalone GET
+            time.sleep(random.uniform(*DELAY_BETWEEN_STEPS))
         try:
             r = session.get(url, timeout=15, allow_redirects=False)
         except Exception as e:

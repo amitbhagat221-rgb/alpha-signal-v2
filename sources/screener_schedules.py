@@ -72,8 +72,10 @@ def discover_company_id(s: requests.Session, ticker: str) -> tuple[int, str] | N
 
     The companyId appears on the company page as data-url="/api/company/<id>/add/...".
     """
-    for view, url_tmpl in (("consolidated", COMPANY_CONSOLIDATED_URL),
-                           ("standalone",   COMPANY_URL)):
+    for i, (view, url_tmpl) in enumerate((("consolidated", COMPANY_CONSOLIDATED_URL),
+                                          ("standalone",   COMPANY_URL))):
+        if i:  # standalone fallback — keep ≥2s after the consolidated GET
+            time.sleep(random.uniform(*DELAY_BETWEEN_STEPS))
         url = url_tmpl.format(ticker=ticker)
         r = s.get(url, timeout=20)
         if r.status_code == 404:

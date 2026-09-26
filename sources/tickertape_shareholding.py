@@ -33,22 +33,19 @@ Usage:
 
 import argparse
 import sys
-import time
 from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
-
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(PROJECT_ROOT))
 
 # v2's tickertape.py adds v1 scripts path for the Bharat_sm_data library.
 sys.path.insert(0, str(Path.home() / "alpha-signal" / "scripts"))
 
 from config import API
 from db import read_sql, upsert_df
+from sources._http import run_harvester
 
-DELAY = API["tickertape_delay"]
+DELAY = API["min_gap"]
 
 
 def _get_client():
@@ -106,24 +103,13 @@ def compute(limit=None, dry_run=False):
 
     client = _get_client()
     fetched_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    rows = []
-    saved = 0
-    errors = 0
-    no_data = 0
 
-    for i, (sid, slug) in enumerate(stocks.itertuples(index=False), 1):
-        try:
-            sh = client.get_share_holding_pattern(slug)
-        except Exception:
-            errors += 1
-            time.sleep(DELAY)
-            continue
-
+    def fetch(item):
+        sid, slug = item
+        sh = client.get_share_holding_pattern(slug)
         if sh is None or len(sh) == 0:
-            no_data += 1
-            time.sleep(DELAY)
-            continue
-
+            return []
+        rows = []
         for _, r in sh.iterrows():
             raw_date = str(r.get("date", ""))
             end_date = raw_date[:10] if raw_date else None
@@ -144,22 +130,19 @@ def compute(limit=None, dry_run=False):
                 "other_pct": _normalise(r.get("data_othPctT"), sid=sid, col="other_pct", end_date=end_date),
                 "fetched_at": fetched_at,
             })
+        return rows
 
-        if i % 200 == 0:
-            if rows:
-                upsert_df(pd.DataFrame(rows), "shareholding")
-                saved += len(rows)
-                rows = []
-            print(f"  [{i}/{total}] {saved} rows saved")
-
-        time.sleep(DELAY)
-
-    if rows:
+    def write(rows):
         upsert_df(pd.DataFrame(rows), "shareholding")
-        saved += len(rows)
+        return len(rows)
+
+    # Errors (the old bare `except: errors += 1`) are counted and logged by
+    # run_harvester, which RAISES if no stock returned any shareholding rows.
+    _, _, saved = run_harvester(stocks.itertuples(index=False, name=None), fetch, write,
+                                label="shareholding", delay=DELAY)
 
     oor = len(_OUT_OF_RANGE_LOG)
-    print(f"Done: {saved} rows. No data: {no_data}. Errors: {errors}. Out-of-range values dropped: {oor}.")
+    print(f"Done: {saved} rows. Out-of-range values dropped: {oor}.")
     if oor:
         sample = _OUT_OF_RANGE_LOG[:5]
         print(f"  Sample: {sample}")

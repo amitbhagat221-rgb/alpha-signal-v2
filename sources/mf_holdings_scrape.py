@@ -36,21 +36,19 @@ import re
 import sys
 import time
 from datetime import datetime
-from pathlib import Path
 
 import pandas as pd
 import requests
 from bs4 import BeautifulSoup
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(PROJECT_ROOT))
 
+from config import API
 from db import get_db, read_sql
 
 # ── Rate-limit policy ──
 # ETMoney is a free aggregator. They tolerate steady-state polite traffic but
 # rate-limit aggressive scrapers. Empirical defaults:
-DELAY = 2.5              # base delay between requests (~24 req/min steady state)
+DELAY = API["host_min_gap"]["www.etmoney.com"]  # 2.5s base delay (~24 req/min steady state)
 TIMEOUT = 20
 CHUNK_SIZE = 100         # request count between long pauses
 CHUNK_PAUSE = 30         # seconds to pause between chunks (lets any soft-limit reset)
@@ -60,7 +58,7 @@ ERROR_PAUSE_THRESHOLD = 5  # consecutive errors → long pause
 ERROR_PAUSE_SECONDS = 300  # 5 min if we hit rate-limit territory
 
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "User-Agent": API["browser_user_agent"],
     "Accept": "text/html,application/xhtml+xml",
     "Accept-Language": "en-US,en;q=0.9",
 }
@@ -135,7 +133,9 @@ def _plan_marker(s: str) -> str | None:
 def fetch_etm_sitemap_urls() -> dict[str, tuple[str, int]]:
     """Pull all MF detail URLs from ETMoney sitemaps. Returns {normalised_slug: (slug, etm_id)}."""
     out: dict[str, tuple[str, int]] = {}
-    for url in SITEMAPS:
+    for i, url in enumerate(SITEMAPS):
+        if i:
+            time.sleep(DELAY)
         print(f"  Fetching {url}…")
         r = requests.get(url, headers=HEADERS, timeout=30)
         if r.status_code != 200:

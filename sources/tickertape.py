@@ -11,7 +11,8 @@ Guardrails:
   - Revenue/net_income: allows negative (losses are real)
   - Checkpoints every 200 stocks (resume on crash)
   - 2-second delay between API calls
-  - Skips stocks that error without crashing pipeline
+  - Per-stock errors are counted + logged; a run where no stock returns
+    data RAISES (sources/_http.run_harvester)
 
 Reads: Tickertape API (via Bharat_sm_data library)
 Writes: quarterly_income, annual_balance_sheet, annual_cash_flow
@@ -26,7 +27,6 @@ Usage:
 import argparse
 import json
 import sys
-import time
 from datetime import datetime
 from pathlib import Path
 
@@ -36,9 +36,10 @@ import pandas as pd
 sys.path.insert(0, str(Path.home() / "alpha-signal" / "scripts"))
 
 from config import API, PROJECT_ROOT
-from db import read_sql, upsert_df, insert_df
+from db import read_sql, upsert_df
+from sources._http import run_harvester
 
-DELAY = API["tickertape_delay"]  # 2 seconds
+DELAY = API["min_gap"]  # 2 seconds
 CHECKPOINT_EVERY = 200
 CHECKPOINT_FILE = PROJECT_ROOT / "output" / "tickertape_harvest_log.json"
 
@@ -60,6 +61,40 @@ def _save_checkpoint(data):
     """Save harvest checkpoint."""
     CHECKPOINT_FILE.parent.mkdir(parents=True, exist_ok=True)
     CHECKPOINT_FILE.write_text(json.dumps(data, indent=2))
+
+
+def _harvest(sids, key, label, table, fetch_raw, to_frame):
+    """Run one statement type over `sids` via run_harvester, resume-aware.
+
+    The checkpoint (`key` → index of the next sid) is saved at each flush, i.e.
+    only once every sid before it has been fetched AND written. Errors used to be
+    `except: pass` per stock — now counted, logged, and a run where no stock
+    returned data RAISES instead of "succeeding" with 0 rows."""
+    checkpoint = _load_checkpoint()
+    start_idx = checkpoint.get(key, 0)
+    done = start_idx
+    print(f"  {label}: {len(sids)} stocks")
+
+    def fetch(sid):
+        nonlocal done
+        done += 1
+        raw = fetch_raw(sid)
+        if raw is None or raw.empty:
+            return []
+        return to_frame(raw, sid).to_dict("records")
+
+    def write(rows):
+        n = upsert_df(pd.DataFrame(rows), table)
+        checkpoint[key] = done
+        _save_checkpoint(checkpoint)
+        return n
+
+    _, _, total = run_harvester(sids[start_idx:], fetch, write, flush_every=CHECKPOINT_EVERY,
+                                label=label, delay=DELAY)
+    checkpoint[key] = len(sids)
+    _save_checkpoint(checkpoint)
+    print(f"    Done: {total} rows")
+    return total
 
 
 # ── Income ──
@@ -95,60 +130,31 @@ def _validate_income(df, sid):
     return df, errors
 
 
-def fetch_income(client, sids, dry_run=False):
+def _income_frame(raw, sid):
+    # Map columns. NOTE: assigning a scalar to an empty DataFrame creates
+    # a zero-length column — assign sid AFTER period so it broadcasts.
+    df = pd.DataFrame()
+    df["period"] = raw.get("displayPeriod", "")
+    df["end_date"] = raw.get("endDate", "").str[:10]
+    df["reporting"] = raw.get("reporting", "consolidated")
+    df["sid"] = sid
+
+    for tt_col, our_col in INCOME_MAP.items():
+        df[our_col] = pd.to_numeric(raw.get(tt_col), errors="coerce")
+
+    # Derive EBITDA
+    if "pbt" in df.columns and "interest" in df.columns:
+        df["ebitda"] = df["pbt"] + df["interest"].fillna(0)
+
+    df, _ = _validate_income(df, sid)
+    return df
+
+
+def fetch_income(client, sids):
     """Fetch quarterly income for all stocks."""
-    print(f"  Quarterly Income: {len(sids)} stocks")
-    total = 0
-    checkpoint = _load_checkpoint()
-    start_idx = checkpoint.get("income_idx", 0)
-
-    for i, sid in enumerate(sids):
-        if i < start_idx:
-            continue
-
-        if dry_run:
-            continue
-
-        try:
-            raw = client.get_income_data(sid, time_horizon="interim", num_time_periods=10)
-            if raw is None or raw.empty:
-                time.sleep(DELAY)
-                continue
-
-            # Map columns. NOTE: assigning a scalar to an empty DataFrame creates
-            # a zero-length column — assign sid AFTER period so it broadcasts.
-            df = pd.DataFrame()
-            df["period"] = raw.get("displayPeriod", "")
-            df["end_date"] = raw.get("endDate", "").str[:10]
-            df["reporting"] = raw.get("reporting", "consolidated")
-            df["sid"] = sid
-
-            for tt_col, our_col in INCOME_MAP.items():
-                df[our_col] = pd.to_numeric(raw.get(tt_col), errors="coerce")
-
-            # Derive EBITDA
-            if "pbt" in df.columns and "interest" in df.columns:
-                df["ebitda"] = df["pbt"] + df["interest"].fillna(0)
-
-            df, errs = _validate_income(df, sid)
-            if not df.empty:
-                n = upsert_df(df, "quarterly_income")
-                total += n
-
-        except Exception as e:
-            pass  # skip erroring stocks silently
-
-        if (i + 1) % CHECKPOINT_EVERY == 0:
-            checkpoint["income_idx"] = i + 1
-            _save_checkpoint(checkpoint)
-            print(f"    [{i+1}/{len(sids)}] {total} rows saved", flush=True)
-
-        time.sleep(DELAY)
-
-    checkpoint["income_idx"] = len(sids)
-    _save_checkpoint(checkpoint)
-    print(f"    Done: {total} rows")
-    return total
+    return _harvest(sids, "income_idx", "Quarterly Income", "quarterly_income",
+                    lambda sid: client.get_income_data(sid, time_horizon="interim", num_time_periods=10),
+                    _income_frame)
 
 
 # ── Balance Sheet ──
@@ -189,52 +195,23 @@ def _validate_bs(df, sid):
     return df, errors
 
 
-def fetch_balance_sheet(client, sids, dry_run=False):
+def _bs_frame(raw, sid):
+    df = pd.DataFrame()
+    df["period"] = raw.get("displayPeriod", "")
+    df["end_date"] = raw.get("endDate", "").str[:10]
+    df["sid"] = sid  # assign after period to broadcast (see _income_frame note)
+
+    for tt_col, our_col in BS_MAP.items():
+        df[our_col] = pd.to_numeric(raw.get(tt_col), errors="coerce")
+
+    df, _ = _validate_bs(df, sid)
+    return df
+
+
+def fetch_balance_sheet(client, sids):
     """Fetch annual balance sheet for all stocks."""
-    print(f"  Annual Balance Sheet: {len(sids)} stocks")
-    total = 0
-    checkpoint = _load_checkpoint()
-    start_idx = checkpoint.get("bs_idx", 0)
-
-    for i, sid in enumerate(sids):
-        if i < start_idx:
-            continue
-        if dry_run:
-            continue
-
-        try:
-            raw = client.get_balance_sheet_data(sid, num_time_periods=10)
-            if raw is None or raw.empty:
-                time.sleep(DELAY)
-                continue
-
-            df = pd.DataFrame()
-            df["period"] = raw.get("displayPeriod", "")
-            df["end_date"] = raw.get("endDate", "").str[:10]
-            df["sid"] = sid  # assign after period to broadcast (see fetch_income note)
-
-            for tt_col, our_col in BS_MAP.items():
-                df[our_col] = pd.to_numeric(raw.get(tt_col), errors="coerce")
-
-            df, errs = _validate_bs(df, sid)
-            if not df.empty:
-                n = upsert_df(df, "annual_balance_sheet")
-                total += n
-
-        except Exception:
-            pass
-
-        if (i + 1) % CHECKPOINT_EVERY == 0:
-            checkpoint["bs_idx"] = i + 1
-            _save_checkpoint(checkpoint)
-            print(f"    [{i+1}/{len(sids)}] {total} rows saved", flush=True)
-
-        time.sleep(DELAY)
-
-    checkpoint["bs_idx"] = len(sids)
-    _save_checkpoint(checkpoint)
-    print(f"    Done: {total} rows")
-    return total
+    return _harvest(sids, "bs_idx", "Annual Balance Sheet", "annual_balance_sheet",
+                    lambda sid: client.get_balance_sheet_data(sid, num_time_periods=10), _bs_frame)
 
 
 # ── Cash Flow ──
@@ -258,52 +235,23 @@ def _validate_cf(df, sid):
     return df, []
 
 
-def fetch_cash_flow(client, sids, dry_run=False):
+def _cf_frame(raw, sid):
+    df = pd.DataFrame()
+    df["period"] = raw.get("displayPeriod", "")
+    df["end_date"] = raw.get("endDate", "").str[:10]
+    df["sid"] = sid  # assign after period to broadcast (see _income_frame note)
+
+    for tt_col, our_col in CF_MAP.items():
+        df[our_col] = pd.to_numeric(raw.get(tt_col), errors="coerce")
+
+    df, _ = _validate_cf(df, sid)
+    return df
+
+
+def fetch_cash_flow(client, sids):
     """Fetch annual cash flow for all stocks."""
-    print(f"  Annual Cash Flow: {len(sids)} stocks")
-    total = 0
-    checkpoint = _load_checkpoint()
-    start_idx = checkpoint.get("cf_idx", 0)
-
-    for i, sid in enumerate(sids):
-        if i < start_idx:
-            continue
-        if dry_run:
-            continue
-
-        try:
-            raw = client.get_cash_flow_data(sid, num_time_periods=10)
-            if raw is None or raw.empty:
-                time.sleep(DELAY)
-                continue
-
-            df = pd.DataFrame()
-            df["period"] = raw.get("displayPeriod", "")
-            df["end_date"] = raw.get("endDate", "").str[:10]
-            df["sid"] = sid  # assign after period to broadcast (see fetch_income note)
-
-            for tt_col, our_col in CF_MAP.items():
-                df[our_col] = pd.to_numeric(raw.get(tt_col), errors="coerce")
-
-            df, errs = _validate_cf(df, sid)
-            if not df.empty:
-                n = upsert_df(df, "annual_cash_flow")
-                total += n
-
-        except Exception:
-            pass
-
-        if (i + 1) % CHECKPOINT_EVERY == 0:
-            checkpoint["cf_idx"] = i + 1
-            _save_checkpoint(checkpoint)
-            print(f"    [{i+1}/{len(sids)}] {total} rows saved", flush=True)
-
-        time.sleep(DELAY)
-
-    checkpoint["cf_idx"] = len(sids)
-    _save_checkpoint(checkpoint)
-    print(f"    Done: {total} rows")
-    return total
+    return _harvest(sids, "cf_idx", "Annual Cash Flow", "annual_cash_flow",
+                    lambda sid: client.get_cash_flow_data(sid, num_time_periods=10), _cf_frame)
 
 
 def compute(data_type=None, limit=None, dry_run=False):
@@ -324,11 +272,11 @@ def compute(data_type=None, limit=None, dry_run=False):
     total = 0
 
     if data_type in (None, "income"):
-        total += fetch_income(client, sids, dry_run)
+        total += fetch_income(client, sids)
     if data_type in (None, "bs"):
-        total += fetch_balance_sheet(client, sids, dry_run)
+        total += fetch_balance_sheet(client, sids)
     if data_type in (None, "cf"):
-        total += fetch_cash_flow(client, sids, dry_run)
+        total += fetch_cash_flow(client, sids)
 
     # Clear checkpoint on successful completion
     if data_type is None:

@@ -17,15 +17,14 @@ Usage:
 """
 
 import argparse
-import hashlib
-import time
 from datetime import date, datetime, timedelta
 
 import pandas as pd
 import requests
 
 from config import API
-from db import get_db, insert_df, read_sql
+from db import insert_df
+from sources import _http
 
 NSE_PIT_URL = "https://www.nseindia.com/api/corporates-pit"
 HEADERS = {
@@ -34,20 +33,12 @@ HEADERS = {
     "Referer": "https://www.nseindia.com/companies-listing/corporate-filings-insider-trading",
 }
 
-# Map NSE symbols to SIDs
-_SID_MAP = None
-
-
-def _get_sid_map():
-    global _SID_MAP
-    if _SID_MAP is None:
-        stocks = read_sql("SELECT sid, ticker FROM stocks")
-        _SID_MAP = stocks.set_index("ticker")["sid"].to_dict()
-    return _SID_MAP
+NSE_HOME = "https://www.nseindia.com/"
 
 
 def _fetch_chunk(from_date, to_date, session):
-    """Fetch one date range from NSE PIT API."""
+    """Fetch one date range from NSE PIT API. Returns (records, session) —
+    the session is replaced by a freshly cookie-warmed one on a 403."""
     params = {
         "index": "equities",
         "from_date": from_date.strftime("%d-%m-%Y"),
@@ -55,27 +46,26 @@ def _fetch_chunk(from_date, to_date, session):
     }
 
     try:
-        resp = session.get(NSE_PIT_URL, params=params, headers=HEADERS, timeout=30)
-        if resp.status_code == 200:
-            data = resp.json()
-            return data.get("data", [])
-        elif resp.status_code == 403:
-            # Need to refresh session cookie
-            session.get("https://www.nseindia.com/", headers=HEADERS, timeout=10)
-            time.sleep(2)
-            resp = session.get(NSE_PIT_URL, params=params, headers=HEADERS, timeout=30)
-            if resp.status_code == 200:
-                return resp.json().get("data", [])
-        print(f"    HTTP {resp.status_code}", end="", flush=True)
-        return []
+        try:
+            resp = _http.polite_get(NSE_PIT_URL, session=session, params=params, timeout=30)
+        except requests.HTTPError as e:
+            if e.response is None or e.response.status_code != 403:
+                raise
+            # Cookie expired — re-warm once and retry
+            session = _http.warm_session(NSE_HOME, headers=HEADERS)
+            resp = _http.polite_get(NSE_PIT_URL, session=session, params=params, timeout=30)
+        if resp is None:
+            print("    HTTP 404", end="", flush=True)
+            return [], session
+        return resp.json().get("data", []), session
     except Exception as e:
         print(f"    Error: {e}", end="", flush=True)
-        return []
+        return [], session
 
 
 def _parse_records(records):
     """Parse NSE PIT API response into DataFrame matching insider_trades schema."""
-    sid_map = _get_sid_map()
+    sid_map = _http.sid_map()
     rows = []
 
     for rec in records:
@@ -162,10 +152,7 @@ def fetch_insider(months=1, dry_run=False):
             print(f"  Chunk {i+1}: {s} → {e}")
         return 0
 
-    session = requests.Session()
-    # Get initial cookies
-    session.get("https://www.nseindia.com/", headers=HEADERS, timeout=10)
-    time.sleep(2)
+    session = _http.warm_session(NSE_HOME, headers=HEADERS)
 
     total_saved = 0
     total_fetched = 0
@@ -173,7 +160,7 @@ def fetch_insider(months=1, dry_run=False):
     for i, (chunk_start, chunk_end) in enumerate(chunks):
         print(f"  [{i+1}/{len(chunks)}] {chunk_start} → {chunk_end}...", end=" ", flush=True)
 
-        records = _fetch_chunk(chunk_start, chunk_end, session)
+        records, session = _fetch_chunk(chunk_start, chunk_end, session)
         total_fetched += len(records)
 
         if records:
@@ -186,8 +173,7 @@ def fetch_insider(months=1, dry_run=False):
                 print(f"{len(records)} fetched, 0 matched universe")
         else:
             print("0 records")
-
-        time.sleep(3)  # be gentle on NSE
+        # (polite_get paces NSE calls ≥2s apart; was a flat 3s sleep)
 
     print(f"\nTotal: {total_fetched} fetched, {total_saved} new rows saved")
     # NSE files thousands of PIT disclosures a month — zero records across a

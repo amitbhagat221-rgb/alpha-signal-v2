@@ -27,6 +27,7 @@ from datetime import datetime, timedelta
 import feedparser
 import pandas as pd
 
+from config import API
 from db import read_sql, insert_df
 
 # RSS feed URLs
@@ -209,7 +210,7 @@ def fetch_news(dry_run=False):
         except Exception as e:
             print(f"ERROR: {e}")
 
-        time.sleep(1)  # gentle between feeds
+        time.sleep(API["min_gap"])  # ≥2s between feeds (CLAUDE.md; was 1s)
 
     print(f"\nTotal: {total_articles} new articles, {total_links} stock links")
     return total_articles

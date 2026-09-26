@@ -1,5 +1,5 @@
 """
-Alpha Signal v2 — Unified pulls via nselib + mfapi.in + NSE direct cookie session.
+Alpha Signal v2 — Unified pulls via nselib + NSE direct cookie session.
 
 One module, one set of helper functions, all the new sources from the
 2026-05-03 discovery probe (see docs/reference/data-playbook.md):
@@ -9,7 +9,11 @@ One module, one set of helper functions, all the new sources from the
   - nselib.capital_market.corporate_actions_for_equity   (2+ years)
   - nselib.derivatives.participant_wise_open_interest    (Dec 2025+)
   - NSE direct: fiidiiTradeReact                (cash flow, today's row)
-  - mfapi.in                                    (~13 years MF NAV)
+
+MF NAV is NOT here: sources.mf_nav_daily (AMFI, daily) + sources.mf_nav_backfill
+(mfapi.in history) own mf_nav_history / mf_schemes. The old `--source mf_nav`
+(14 hand-listed codes, 2 of them duplicates) raced mf_nav_backfill's mf_schemes
+upsert and was retired 2026-09-26.
 
 All ingests:
   • Chunk long ranges by month (NSE rate limits + API timeouts)
@@ -23,8 +27,12 @@ Usage:
     python -m sources.nselib_pull --source short     --months 24
     python -m sources.nselib_pull --source fii_pos   # latest available (~5mo)
     python -m sources.nselib_pull --source fii_cash  # today's row (forward only)
-    python -m sources.nselib_pull --source mf_nav    --top 50
     python -m sources.nselib_pull --source all       # everything (long-running)
+
+    # Deep backfill (what sources/historical_backfill.py did, now archived):
+    python -m sources.nselib_pull --source bulk    --start 2021-01-01
+    python -m sources.nselib_pull --source short   --start 2022-01-01
+    python -m sources.nselib_pull --source fii_pos --start 2022-01-01   # skips loaded dates
 """
 
 import argparse
@@ -32,13 +40,15 @@ import time
 from datetime import date, timedelta
 
 import pandas as pd
-import requests
 
-from db import get_db, read_sql
+from config import API
+from db import get_db, insert_df, read_sql
+from sources import _http
 
 DELAY_SEC = 2.0  # NSE 2-second floor
 
-UA = "Mozilla/5.0 (X11; Linux x86_64) AlphaSignal/2.0"
+NSE_HOME = "https://www.nseindia.com"
+NSE_JSON_HEADERS = {"User-Agent": API["user_agent"], "Accept": "application/json"}
 
 
 def _months_back(n_months):
@@ -58,14 +68,16 @@ def _months_back(n_months):
     return list(reversed(chunks))
 
 
-def _get_sid_map():
-    """ticker → sid lookup."""
-    df = read_sql("SELECT sid, ticker FROM stocks")
-    return df.set_index("ticker")["sid"].to_dict()
+def _months_since(start):
+    """Month count for _months_back() so its first chunk starts in `start`'s month."""
+    today = date.today()
+    return (today.year - start.year) * 12 + today.month - start.month + 1
 
 
 def _insert_or_ignore(df, table):
-    """Append-only insert with conflict-on-UNIQUE → ignore. Returns rows inserted."""
+    """INSERT OR IGNORE *without* db.insert_df's future-date guard. Only for the
+    forward-dated earnings_calendar: its `date` column runs to today+30d, and
+    insert_df drops rows dated > today+2d. Every other table uses insert_df."""
     if df.empty:
         return 0
     cols = list(df.columns)
@@ -80,7 +92,7 @@ def _insert_or_ignore(df, table):
 
 def pull_bulk_deals(months=12):
     from nselib import capital_market as cm
-    sid_map = _get_sid_map()
+    sid_map = _http.sid_map()
     chunks = _months_back(months)
     total = 0
 
@@ -112,7 +124,10 @@ def pull_bulk_deals(months=12):
                 qty = float(str(qty).replace(",", ""))
             except Exception:
                 qty = 0
-            price = r.get("TradePrice / Wght. Avg.Price", 0) or r.get("TradePrice", 0)
+            # nselib's column is 'TradePrice/Wght.Avg.Price' (constants.bulk_deal_data_columns).
+            # The old spaced spelling never matched → price=0 on all 12.8K rows this
+            # wrote for 2025-26; historical_backfill (archived) had it right.
+            price = r.get("TradePrice/Wght.Avg.Price", 0) or r.get("TradePrice / Wght. Avg.Price", 0)
             try:
                 price = float(str(price).replace(",", ""))
             except Exception:
@@ -137,7 +152,7 @@ def pull_bulk_deals(months=12):
 
         if out_rows:
             df_out = pd.DataFrame(out_rows)
-            n = _insert_or_ignore(df_out, "bulk_deals")
+            n = insert_df(df_out, "bulk_deals")
             total += n
             print(f"  bulk {from_str}→{to_str}: ✅ {len(out_rows)} parsed → {n} new rows")
         else:
@@ -151,7 +166,7 @@ def pull_bulk_deals(months=12):
 
 def pull_corporate_actions(months=24):
     from nselib import capital_market as cm
-    sid_map = _get_sid_map()
+    sid_map = _http.sid_map()
     chunks = _months_back(months)
     total = 0
     n_ok = 0       # chunks where NSE returned a (possibly empty) frame
@@ -207,7 +222,7 @@ def pull_corporate_actions(months=24):
             })
 
         if out_rows:
-            n = _insert_or_ignore(pd.DataFrame(out_rows), "corporate_actions")
+            n = insert_df(pd.DataFrame(out_rows), "corporate_actions")
             total += n
             print(f"  corp {from_str}→{to_str}: ✅ {len(out_rows)} parsed → {n} new")
         time.sleep(DELAY_SEC)
@@ -239,7 +254,7 @@ def compute_corp_actions(months=2):
 
 def pull_short_selling(months=24):
     from nselib import capital_market as cm
-    sid_map = _get_sid_map()
+    sid_map = _http.sid_map()
     chunks = _months_back(months)
     total = 0
     for start, end in chunks:
@@ -277,7 +292,7 @@ def pull_short_selling(months=24):
             })
 
         if out_rows:
-            n = _insert_or_ignore(pd.DataFrame(out_rows), "short_selling_data")
+            n = insert_df(pd.DataFrame(out_rows), "short_selling_data")
             total += n
             print(f"  short {from_str}→{to_str}: ✅ {len(out_rows)} parsed → {n} new")
         time.sleep(DELAY_SEC)
@@ -300,7 +315,7 @@ def pull_event_calendar(days_back=3, days_forward=30):
     tolerates a meeting that gets rescheduled to a new date (lands as a new row).
     """
     from nselib import capital_market as cm
-    sid_map = _get_sid_map()
+    sid_map = _http.sid_map()
     start = date.today() - timedelta(days=days_back)
     end = date.today() + timedelta(days=days_forward)
     from_str = start.strftime("%d-%m-%Y")
@@ -362,27 +377,29 @@ def compute_earnings_calendar(days_forward=30):
 def pull_fii_positioning(days_back=180):
     """Pull participant_wise_open_interest day by day.
 
-    Endpoint accepts only single trade_date. Available depth is ~Dec 2025+ as of 2026-05-03.
-    Skips weekends and "no data" days (typical NSE holidays).
+    Endpoint accepts only single trade_date. Archive reaches back to 2022 (backfilled
+    via `--start`). Skips weekends, "no data" days (typical NSE holidays) and dates
+    already loaded — so a deep `--start` backfill is re-runnable.
     """
     from nselib import derivatives as dv
     today = date.today()
     total = 0
     dates_tried = 0
+    have = set(read_sql("SELECT DISTINCT trade_date FROM fii_dii_positioning")["trade_date"])
 
     for delta in range(days_back):
         d = today - timedelta(days=delta)
-        if d.weekday() >= 5:  # Sat/Sun
+        if d.weekday() >= 5 or d.isoformat() in have:  # Sat/Sun or already loaded
             continue
         d_str = d.strftime("%d-%m-%Y")
         try:
             df = dv.participant_wise_open_interest(trade_date=d_str)
         except Exception as e:
             # "No data available" is normal for non-trading days
-            time.sleep(DELAY_SEC * 0.5)
+            time.sleep(DELAY_SEC)   # was DELAY_SEC * 0.5 = 1s (below the 2s floor)
             continue
         if df is None or df.empty:
-            time.sleep(DELAY_SEC * 0.5)
+            time.sleep(DELAY_SEC)
             continue
 
         df.columns = [c.strip() for c in df.columns]
@@ -407,7 +424,7 @@ def pull_fii_positioning(days_back=180):
         df["trade_date"] = d.isoformat()
         valid_cols = ["trade_date", "client_type"] + [v for v in rename.values() if v != "client_type"]
         df = df[[c for c in valid_cols if c in df.columns]]
-        n = _insert_or_ignore(df, "fii_dii_positioning")
+        n = insert_df(df, "fii_dii_positioning")
         total += n
         dates_tried += 1
         if dates_tried % 10 == 0:
@@ -423,15 +440,10 @@ def pull_fii_cash_flow():
 
     Forward-only (single-day endpoint) — set up daily cron to accumulate.
     """
-    s = requests.Session()
-    s.headers.update({"User-Agent": UA, "Accept": "application/json"})
-    # Cookie warm-up
-    try:
-        s.get("https://www.nseindia.com", timeout=15)
-    except Exception:
-        pass
-    r = s.get("https://www.nseindia.com/api/fiidiiTradeReact", timeout=15)
-    r.raise_for_status()
+    s = _http.warm_session(NSE_HOME, headers=NSE_JSON_HEADERS)
+    r = _http.polite_get("https://www.nseindia.com/api/fiidiiTradeReact", session=s)
+    if r is None:
+        raise RuntimeError("fiidiiTradeReact returned 404")
     data = r.json()
 
     rows = []
@@ -452,77 +464,9 @@ def pull_fii_cash_flow():
         print("  fii_cash: empty response")
         return 0
     df = pd.DataFrame(rows)
-    n = _insert_or_ignore(df, "fii_dii_cash_flow")
+    n = insert_df(df, "fii_dii_cash_flow")
     print(f"  fii_cash: ✅ {len(rows)} rows fetched → {n} new")
     return n
-
-
-# ───────────────────────── Move 5: MF NAV ─────────────────────────
-
-# Top 50 equity-flavored schemes (curated for liquidity + AUM coverage).
-# Direct plans preferred (lower expense ratio = cleaner NAV trend).
-# Codes from mfapi.in/AMFI scheme list. Adjust as fund houses launch/close.
-TOP_EQUITY_SCHEME_CODES = [
-    "122639",  # Parag Parikh Flexi Cap Direct
-    "120505",  # Mirae Asset Large Cap Direct
-    "118989",  # SBI Bluechip Direct
-    "120465",  # Axis Bluechip Direct
-    "118945",  # ICICI Pru Bluechip Direct
-    "119551",  # HDFC Top 100 Direct
-    "120821",  # Kotak Bluechip Direct
-    "120586",  # Nippon Large Cap Direct
-    "118955",  # ICICI Pru Value Discovery Direct
-    "120484",  # Axis Midcap Direct
-    "118566",  # Kotak Emerging Equity Direct
-    "118533",  # SBI Magnum Mid Cap Direct
-    "118566",  # repeat (filler — replace if dup)
-    "120465",  # repeat
-]
-
-
-def pull_mf_nav(scheme_codes=None, top=50):
-    """Pull NAV history from mfapi.in for each scheme code."""
-    if scheme_codes is None:
-        scheme_codes = TOP_EQUITY_SCHEME_CODES[:top]
-
-    total = 0
-    for code in scheme_codes:
-        try:
-            r = requests.get(f"https://api.mfapi.in/mf/{code}", timeout=20)
-            r.raise_for_status()
-            j = r.json()
-        except Exception as e:
-            print(f"  mf {code}: ❌ {str(e)[:100]}")
-            time.sleep(DELAY_SEC)
-            continue
-
-        meta = j.get("meta", {})
-        # Persist scheme metadata
-        with get_db() as conn:
-            conn.execute(
-                "INSERT OR REPLACE INTO mf_schemes "
-                "(scheme_code, scheme_name, fund_house, scheme_type, direct_or_regular, growth_or_dividend, is_top50) "
-                "VALUES (?, ?, ?, ?, ?, ?, 1)",
-                (code, meta.get("scheme_name", ""), meta.get("fund_house", ""),
-                 meta.get("scheme_category", ""), meta.get("scheme_type", ""), "Growth", )
-            )
-
-        nav_data = j.get("data", [])
-        rows = []
-        for nav_row in nav_data:
-            try:
-                d = pd.to_datetime(nav_row["date"], format="%d-%m-%Y").date().isoformat()
-                v = float(nav_row["nav"])
-            except Exception:
-                continue
-            rows.append({"scheme_code": code, "nav_date": d, "nav": v})
-
-        if rows:
-            n = _insert_or_ignore(pd.DataFrame(rows), "mf_nav_history")
-            total += n
-            print(f"  mf {code} ({meta.get('scheme_name', '')[:40]}): ✅ {len(rows)} NAVs → {n} new")
-        time.sleep(DELAY_SEC * 0.5)  # mfapi.in is friendly
-    return total
 
 
 # ───────────────────────── Move 6: NSE Smart-Beta indices history ─────────────────────────
@@ -594,7 +538,7 @@ def pull_nse_indices(months=120):  # 10 years default
                 for c in ["open", "high", "low", "close", "volume", "traded_value"]:
                     if c in df_out.columns:
                         df_out[c] = pd.to_numeric(df_out[c], errors="coerce")
-                n = _insert_or_ignore(df_out, "nse_index_history")
+                n = insert_df(df_out, "nse_index_history")
                 idx_total += n
             time.sleep(DELAY_SEC)
         print(f"  {idx}: ✅ {idx_total} new rows")
@@ -619,18 +563,15 @@ def pull_surveillance_today():
 
     All of these are forward-only (no historical archive). Run daily via cron.
     """
-    s = requests.Session()
-    s.headers.update({"User-Agent": UA, "Accept": "application/json"})
-    try: s.get("https://www.nseindia.com", timeout=15)
-    except: pass
+    s = _http.warm_session(NSE_HOME, headers=NSE_JSON_HEADERS)
 
-    sid_map = _get_sid_map()
+    sid_map = _http.sid_map()
     today_str = date.today().isoformat()
     inserted = 0
 
     # ASM long-term + short-term
     try:
-        r = s.get("https://www.nseindia.com/api/reportASM", timeout=20)
+        r = _http.polite_get("https://www.nseindia.com/api/reportASM", session=s, timeout=20)
         d = r.json()
         for stage_key, flag_type in [("longterm", "ASM_LT"), ("shortterm", "ASM_ST")]:
             stage_data = d.get(stage_key, {}).get("data", [])
@@ -648,7 +589,7 @@ def pull_surveillance_today():
                     "reason": (item.get("longterm_indicator") or "")[:200],
                 })
             if rows:
-                n = _insert_or_ignore(pd.DataFrame(rows), "surveillance_flags")
+                n = insert_df(pd.DataFrame(rows), "surveillance_flags")
                 inserted += n
                 print(f"  ASM {stage_key}: {n} new rows")
     except Exception as e:
@@ -656,7 +597,7 @@ def pull_surveillance_today():
 
     # GSM
     try:
-        r = s.get("https://www.nseindia.com/api/reportGSM", timeout=20)
+        r = _http.polite_get("https://www.nseindia.com/api/reportGSM", session=s, timeout=20)
         d = r.json()
         items = d if isinstance(d, list) else d.get("data", [])
         rows = []
@@ -673,7 +614,7 @@ def pull_surveillance_today():
                 "reason": (item.get("survDesc") or "")[:200],
             })
         if rows:
-            n = _insert_or_ignore(pd.DataFrame(rows), "surveillance_flags")
+            n = insert_df(pd.DataFrame(rows), "surveillance_flags")
             inserted += n
             print(f"  GSM: {n} new rows")
     except Exception as e:
@@ -713,7 +654,7 @@ def pull_surveillance_today():
                 "reason": "",
             })
         if rows:
-            n = _insert_or_ignore(pd.DataFrame(rows), "surveillance_flags")
+            n = insert_df(pd.DataFrame(rows), "surveillance_flags")
             inserted += n
             print(f"  F&O ban: {n} new rows")
         else:
@@ -730,11 +671,16 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--source", required=True,
                         choices=["bulk", "corp", "short", "events", "fii_pos", "fii_cash",
-                                 "mf_nav", "indices", "surveillance", "all", "daily_forward"])
+                                 "indices", "surveillance", "all", "daily_forward"])
     parser.add_argument("--months", type=int, default=12)
     parser.add_argument("--days-back", type=int, default=180, help="for fii_pos")
-    parser.add_argument("--top", type=int, default=50, help="for mf_nav")
+    parser.add_argument("--start", help="YYYY-MM-DD: deep backfill from this date (overrides "
+                                        "--months / --days-back; replaces sources.historical_backfill)")
     args = parser.parse_args()
+    if args.start:
+        start = date.fromisoformat(args.start)
+        args.months = _months_since(start)
+        args.days_back = (date.today() - start).days + 1
 
     if args.source in ("bulk", "all"):
         print(f"\n=== Bulk deals ({args.months} months) ===")
@@ -764,11 +710,6 @@ def main():
     if args.source in ("fii_cash", "all"):
         print(f"\n=== FII/DII cash flow (today's row) ===")
         pull_fii_cash_flow()
-
-    if args.source in ("mf_nav", "all"):
-        print(f"\n=== MF NAV (top {args.top}) ===")
-        n = pull_mf_nav(top=args.top)
-        print(f"  → {n} new mf_nav_history rows")
 
     if args.source in ("indices", "all"):
         print(f"\n=== NSE Smart-Beta indices ({args.months} months back) ===")

@@ -8,9 +8,9 @@ absent from stock_prices entirely; ~70% are reachable via yfinance with `.BO`.
 
 Strategy:
   1. Identify SIDs missing from stock_prices in the last 30 days.
-  2. For each, try `<ticker>.NS` first (rare — would have been caught by NSE
-     harvester, but try anyway in case ticker was added recently).
-  3. Fall back to `<ticker>.BO` (BSE).
+  2. One batched yf.download of every `<ticker>.NS` (rare hits — would have been
+     caught by the NSE harvester, but try anyway in case the ticker is new).
+  3. One batched yf.download of `<ticker>.BO` (BSE) for the .NS misses.
   4. Insert with source='yfinance' so we know which rows came from where.
 
 Runs nightly after fetch_bhavcopy in PIPELINE_STEPS. Plan 0005 Phase C.
@@ -24,19 +24,13 @@ Usage:
 """
 
 import argparse
-import sys
-import time
 from datetime import date, timedelta
-from pathlib import Path
 
 import pandas as pd
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(PROJECT_ROOT))
 
 from db import read_sql, insert_df
 
-DELAY = 1.5   # yfinance is generous but be polite
 DEFAULT_DAYS = 30
 
 
@@ -58,19 +52,29 @@ def _missing_sids(days=DEFAULT_DAYS):
     return df
 
 
-def _fetch_one(ticker, days):
-    """Try `.NS` first, then `.BO`. Return (suffix, DataFrame) or (None, None)."""
+def _download(symbols, period):
+    """One batched yf.download → {symbol: history} for symbols that returned
+    prices. Replaces a Ticker().history() call per symbol + a 1.5s sleep each;
+    same fields (auto_adjust=False → raw OHLC). threads=False keeps yfinance's
+    per-symbol requests sequential. Rows with no Close (a symbol absent on a date
+    another symbol traded) are dropped — per-ticker history() never had them."""
     import yfinance as yf
-    period = f"{max(7, days)}d"
-    for suffix in (".NS", ".BO"):
-        try:
-            tk = yf.Ticker(ticker + suffix)
-            h = tk.history(period=period, auto_adjust=False)
-            if h is not None and not h.empty:
-                return suffix, h
-        except Exception:
-            continue
-    return None, None
+    if not symbols:
+        return {}
+    data = yf.download(symbols, period=period, auto_adjust=False, group_by="ticker",
+                       progress=False, threads=False)
+    out = {}
+    for sym in symbols:
+        if isinstance(data.columns, pd.MultiIndex):
+            if sym not in data.columns.get_level_values(0):
+                continue
+            h = data[sym]
+        else:
+            h = data
+        h = h.dropna(subset=["Close"])
+        if not h.empty:
+            out[sym] = h
+    return out
 
 
 def _normalize(sid, suffix, hist_df):
@@ -105,25 +109,23 @@ def compute(limit=None, days=DEFAULT_DAYS, dry_run=False):
         print(f"  Sample SIDs to fetch: {[r['ticker'] for r in sample]}")
         return 0
 
-    rows_written = 0
+    period = f"{max(7, days)}d"
+    tickers = missing["ticker"].tolist()
+    got = {".NS": _download([t + ".NS" for t in tickers], period)}
+    got[".BO"] = _download([t + ".BO" for t in tickers if t + ".NS" not in got[".NS"]], period)
+
+    rows = []
     sids_with_data = 0
-    sids_no_data = 0
     by_suffix = {".NS": 0, ".BO": 0}
-    for i, (sid, ticker, _) in enumerate(missing.itertuples(index=False), 1):
-        suffix, hist = _fetch_one(ticker, days)
-        if hist is None:
-            sids_no_data += 1
-        else:
-            rows = _normalize(sid, suffix, hist)
-            if rows:
-                df_out = pd.DataFrame(rows)
-                n = insert_df(df_out, "stock_prices")
-                rows_written += n
+    for sid, ticker, _ in missing.itertuples(index=False):
+        for suffix in (".NS", ".BO"):
+            hist = got[suffix].get(ticker + suffix)
+            if hist is not None:
+                rows.extend(_normalize(sid, suffix, hist))
                 sids_with_data += 1
-                by_suffix[suffix] = by_suffix.get(suffix, 0) + 1
-        if i % 25 == 0 or i == total:
-            print(f"  [{i:>3d}/{total}] sids_with_data={sids_with_data} no_data={sids_no_data} rows={rows_written}")
-        time.sleep(DELAY)
+                by_suffix[suffix] += 1
+                break
+    rows_written = insert_df(pd.DataFrame(rows), "stock_prices") if rows else 0
 
     print(f"Done. {sids_with_data}/{total} SIDs filled ({by_suffix.get('.NS',0)} via .NS, {by_suffix.get('.BO',0)} via .BO), {rows_written} price rows written.")
     return rows_written

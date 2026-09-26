@@ -39,13 +39,9 @@ Usage:
 
 import argparse
 import re
-import sys
-from pathlib import Path
 
 import pandas as pd
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(PROJECT_ROOT))
 
 from db import get_db, read_sql
 

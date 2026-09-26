@@ -23,61 +23,40 @@ Usage:
 
 import argparse
 import json
-import sys
-import time
 from datetime import datetime
-from pathlib import Path
 from typing import Optional
 
 import pandas as pd
-import requests
 from bs4 import BeautifulSoup
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(PROJECT_ROOT))
 
 from config import API
 from db import read_sql, upsert_df
+from sources._http import polite_get, run_harvester
 
-DELAY = API["tickertape_delay"]  # 2 seconds
-TIMEOUT = 15
-MAX_RETRIES = 2
+DELAY = API["min_gap"]  # 2 seconds — enforced per host by polite_get
 
 HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/120.0.0.0 Safari/537.36"
-    ),
+    "User-Agent": API["browser_user_agent"],
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "Accept-Language": "en-US,en;q=0.5",
 }
 
 
 def _fetch_next_data(slug):
-    """GET tickertape.in/{slug} and return parsed __NEXT_DATA__ JSON, or None."""
-    url = f"https://tickertape.in/{slug}"
-    for attempt in range(MAX_RETRIES + 1):
-        try:
-            r = requests.get(url, headers=HEADERS, timeout=TIMEOUT)
-            if r.status_code == 404:
-                return None
-            if r.status_code != 200:
-                if attempt < MAX_RETRIES:
-                    time.sleep(2)
-                    continue
-                return None
-            soup = BeautifulSoup(r.text, "html5lib")
-            script = soup.find("script", attrs={"id": "__NEXT_DATA__"})
-            if not script:
-                return None
-            return json.loads(script.contents[0].text)
-        except (requests.exceptions.Timeout, requests.exceptions.RequestException):
-            if attempt < MAX_RETRIES:
-                time.sleep(2)
-                continue
-            return None
-    return None
+    """GET tickertape.in/{slug} and return parsed __NEXT_DATA__ JSON.
+
+    None on 404 (delisted / slug gone). Raises on transport/HTTP failure (after
+    polite_get's retries) and when the page carries no __NEXT_DATA__ blob —
+    run_harvester counts both as errors."""
+    r = polite_get(f"https://tickertape.in/{slug}", headers=HEADERS)
+    if r is None:
+        return None
+    soup = BeautifulSoup(r.text, "html5lib")
+    script = soup.find("script", attrs={"id": "__NEXT_DATA__"})
+    if not script:
+        raise ValueError("page has no __NEXT_DATA__ script")
+    return json.loads(script.contents[0].text)
 
 
 def _safe_growth_pct(hist: list) -> Optional[float]:
@@ -223,48 +202,33 @@ def compute(limit=None, dry_run=False):
         return 0
 
     fetched_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    analyst_rows = []
-    forecast_rows = []
     no_data = 0
-    errors = 0
-    saved_analyst = 0
-    saved_forecast = 0
 
-    for i, (sid, slug) in enumerate(stocks.itertuples(index=False), 1):
+    def fetch(item):
+        nonlocal no_data
+        sid, slug = item
         data = _fetch_next_data(slug)
         if data is None:
-            errors += 1
-        else:
-            arow = _extract_analyst_row(sid, data, fetched_at)
-            analyst_rows.append(arow)
-            if not arow["has_analyst_data"]:
-                no_data += 1
-            forecast_rows.extend(_extract_forecast_rows(sid, data, fetched_at))
+            return []
+        arow = _extract_analyst_row(sid, data, fetched_at)
+        if not arow["has_analyst_data"]:
+            no_data += 1
+        return ([("analyst_consensus", arow)]
+                + [("forecast_history", f) for f in _extract_forecast_rows(sid, data, fetched_at)])
 
-        if i % 200 == 0:
-            # Mid-run checkpoint — flush what we have so a crash doesn't lose progress.
-            if analyst_rows:
-                upsert_df(pd.DataFrame(analyst_rows), "analyst_consensus")
-                saved_analyst += len(analyst_rows)
-                analyst_rows = []
-            if forecast_rows:
-                upsert_df(pd.DataFrame(forecast_rows), "forecast_history")
-                saved_forecast += len(forecast_rows)
-                forecast_rows = []
-            print(f"  [{i}/{total}] {saved_analyst} analyst rows, {saved_forecast} forecast rows saved")
+    def write(tagged):
+        # One page feeds two tables; flush both, count the primary one.
+        for table in ("analyst_consensus", "forecast_history"):
+            rows = [r for t, r in tagged if t == table]
+            if rows:
+                upsert_df(pd.DataFrame(rows), table)
+        return sum(1 for t, _ in tagged if t == "analyst_consensus")
 
-        time.sleep(DELAY)
-
-    # Final flush.
-    if analyst_rows:
-        upsert_df(pd.DataFrame(analyst_rows), "analyst_consensus")
-        saved_analyst += len(analyst_rows)
-    if forecast_rows:
-        upsert_df(pd.DataFrame(forecast_rows), "forecast_history")
-        saved_forecast += len(forecast_rows)
-
-    print(f"Done: {saved_analyst} analyst rows, {saved_forecast} forecast rows. "
-          f"No coverage: {no_data}. Errors: {errors}.")
+    # RAISES if no page parsed at all (Tickertape block / page-shape change) —
+    # the old loop reported SUCCESS with 0 rows in that case.
+    _, n_err, saved_analyst = run_harvester(stocks.itertuples(index=False, name=None),
+                                            fetch, write, label="tickertape analyst")
+    print(f"Done: {saved_analyst} analyst rows. No coverage: {no_data}. Errors: {n_err}.")
     # Return analyst-row count for pipeline_log (tracks the primary table).
     return saved_analyst
 

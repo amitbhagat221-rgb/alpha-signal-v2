@@ -29,22 +29,19 @@ Usage:
 
 import argparse
 import re
-import sys
-import time
 from datetime import datetime, date as _date
-from pathlib import Path
 
 import pandas as pd
 import requests
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(PROJECT_ROOT))
 
+from config import API
 from db import get_db, upsert_df
+from sources._http import polite_get
 
 NAVALL_URL = "https://www.amfiindia.com/spages/NAVAll.txt"
 TIMEOUT = 60
-HEADERS = {"User-Agent": "Mozilla/5.0 alpha-signal-v2/1.0"}
+HEADERS = {"User-Agent": API["user_agent"]}
 
 # Category header lines look like:  "Open Ended Schemes(Equity Scheme - Multi Cap Fund)"
 _CATEGORY_RE = re.compile(r"^(Open Ended|Close Ended|Interval Fund) Schemes?\s*\((.+)\)\s*$")
@@ -243,19 +240,16 @@ def parse_navall(text: str) -> list[dict]:
 
 
 def fetch_navall_text() -> str:
-    """Single HTTP fetch of NAVAll.txt with retry. Returns the text body."""
-    last_err = None
-    for attempt in range(3):
-        try:
-            r = requests.get(NAVALL_URL, timeout=TIMEOUT, headers=HEADERS)
-            if r.status_code == 200 and r.content:
-                # Server sends no charset → requests guesses latin-1 → mojibake.
-                return r.content.decode("utf-8", errors="replace")
-            last_err = f"HTTP {r.status_code}"
-        except requests.RequestException as e:
-            last_err = str(e)
-        time.sleep(2 ** attempt)
-    raise RuntimeError(f"Failed to fetch NAVAll.txt after 3 attempts: {last_err}")
+    """Single HTTP fetch of NAVAll.txt (polite_get: 3 attempts on timeout/5xx).
+    Returns the text body; raises if AMFI didn't serve a non-empty file."""
+    try:
+        r = polite_get(NAVALL_URL, headers=HEADERS, timeout=TIMEOUT, retries=2)
+    except requests.RequestException as e:
+        raise RuntimeError(f"Failed to fetch NAVAll.txt: {e}")
+    if r is None or not r.content:
+        raise RuntimeError("Failed to fetch NAVAll.txt: 404 or empty body")
+    # Server sends no charset → requests guesses latin-1 → mojibake.
+    return r.content.decode("utf-8", errors="replace")
 
 
 # ─── Master ingest (this module's primary entry point) ───────────────────────

@@ -18,15 +18,15 @@ Usage:
 """
 
 import argparse
+import io
 import os
 import re
-import time
-from datetime import datetime
 
 import pandas as pd
 import requests
 
-from db import get_db, upsert_df
+from db import upsert_df
+from sources._http import polite_get
 
 # ═══════════════════════════════════════════════════
 # DATA.GOV.IN
@@ -44,22 +44,15 @@ MONTH_MAP = {
 }
 
 
-def _datagov_fetch(resource_id, limit=500, retries=3):
-    """Fetch from data.gov.in API with retries."""
+def _datagov_fetch(resource_id, limit=500):
+    """Fetch one data.gov.in resource. Raises once polite_get's retries are
+    spent — the old version printed and returned [], so a dead API (read
+    timeouts on every dataset since ≥2026-07) still logged SUCCESS off FRED rows."""
     url = f"https://api.data.gov.in/resource/{resource_id}?api-key={DATAGOV_KEY}&format=json&limit={limit}"
-    for attempt in range(retries):
-        try:
-            resp = requests.get(url, timeout=60)
-            resp.raise_for_status()
-            return resp.json().get("records", [])
-        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
-            if attempt < retries - 1:
-                wait = (attempt + 1) * 10
-                print(f"\n    Timeout, retrying in {wait}s...", end=" ", flush=True)
-                time.sleep(wait)
-            else:
-                print(f"\n    Failed after {retries} attempts: {e}")
-                return []
+    resp = polite_get(url, timeout=60)
+    if resp is None:
+        raise RuntimeError(f"data.gov.in resource {resource_id} returned 404")
+    return resp.json().get("records", [])
 
 
 def _wide_to_long(records, id_field, value_fields_prefix, indicator_prefix, name_field=None):
@@ -323,9 +316,13 @@ def fetch_datagov(dry_run=False):
         try:
             rows = func()
             all_rows.extend(rows)
+        except (requests.Timeout, requests.ConnectionError) as e:
+            # Host unreachable: the other datasets live on the same API and
+            # would each burn another 3 × 60s timeout for nothing.
+            print(f"  {name} FAILED: {e}\n  data.gov.in unreachable — skipping remaining datasets")
+            break
         except Exception as e:
             print(f"  {name} FAILED: {e}")
-        time.sleep(2)
 
     if all_rows:
         df = pd.DataFrame(all_rows)
@@ -371,7 +368,10 @@ def fetch_fred(dry_run=False):
         url = f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={series_id}"
 
         try:
-            df = pd.read_csv(url)
+            resp = polite_get(url, timeout=60)   # paced ≥2s per host (was 0.5s)
+            if resp is None:
+                raise RuntimeError("HTTP 404")
+            df = pd.read_csv(io.StringIO(resp.text))
             df.columns = ["date", "value"]
             df = df[df["value"] != "."]
             df["value"] = pd.to_numeric(df["value"], errors="coerce")
@@ -393,8 +393,6 @@ def fetch_fred(dry_run=False):
             print(f"{len(df)} rows ({df['date'].iloc[0]} → {df['date'].iloc[-1]})")
         except Exception as e:
             print(f"ERROR: {e}")
-
-        time.sleep(0.5)
 
     if all_rows:
         df = pd.DataFrame(all_rows)
@@ -482,11 +480,18 @@ def _update_meta_fred(df):
 # ═══════════════════════════════════════════════════
 
 def compute(dry_run=False):
-    """Pipeline entry point — fetch from both sources."""
-    total = 0
-    total += fetch_datagov(dry_run=dry_run)
-    total += fetch_fred(dry_run=dry_run)
-    return total
+    """Pipeline entry point — fetch from both sources.
+
+    Runs both, then RAISES naming every source that produced 0 rows, so a dead
+    data.gov.in can't hide behind FRED's rows (it did: SUCCESS/~2,500 rows weekly
+    while every data.gov.in call timed out)."""
+    n_gov = fetch_datagov(dry_run=dry_run)
+    n_fred = fetch_fred(dry_run=dry_run)
+    dead = [name for name, n in (("data.gov.in", n_gov), ("FRED", n_fred)) if n == 0]
+    if dead and not dry_run:
+        raise RuntimeError(f"macro_gov: 0 rows from {' + '.join(dead)} "
+                           f"({n_gov + n_fred} rows from the rest were saved)")
+    return n_gov + n_fred
 
 
 if __name__ == "__main__":
