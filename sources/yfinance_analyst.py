@@ -250,15 +250,17 @@ def compute(limit=None, ticker=None, tier=None, snapshot=False, dry_run=False):
 
     # Coverage-aware fetch (audit Eff-F3): Yahoo has no coverage at all for
     # ~1,400 mostly-SMALL sids (price_target IS NULL AND total_analysts IS NULL
-    # in the current row). Hitting those daily is pure wasted request budget —
-    # a stock with zero analysts today doesn't grow one overnight. Re-attempt
-    # them weekly (Mondays) so a genuinely-newly-covered stock is still caught
-    # within a week; everything with existing coverage keeps daily cadence.
+    # in the current row). Hitting those every run is pure wasted request
+    # budget — a stock with zero analysts today doesn't grow one overnight.
+    # Re-attempt them on Sundays only — the day the (now weekly, 2026-09-26)
+    # pipeline step runs — so a newly-covered stock is still caught within a
+    # week. Off-day runs (monthly --snapshot cron, watchdog heals, manual) skip
+    # them, as the old Monday rule did.
     no_coverage = read_sql(
         "SELECT sid FROM analyst_consensus WHERE price_target IS NULL AND total_analysts IS NULL"
     )
     no_coverage_sids = set(no_coverage["sid"])
-    is_monday = datetime.now(timezone.utc).weekday() == 0
+    is_retry_day = datetime.now(timezone.utc).weekday() == 6   # Sunday
     n_skipped_no_coverage = 0
 
     fetched_at  = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -285,7 +287,7 @@ def compute(limit=None, ticker=None, tier=None, snapshot=False, dry_run=False):
     t_start = time.time()
     todo = []
     for sid, t, cap_tier in stocks.itertuples(index=False, name=None):
-        if sid in no_coverage_sids and not is_monday:
+        if sid in no_coverage_sids and not is_retry_day:
             n_skipped_no_coverage += 1
         else:
             todo.append((sid, t, cap_tier))
@@ -406,8 +408,8 @@ def compute(limit=None, ticker=None, tier=None, snapshot=False, dry_run=False):
     print()
     print(f"Done in {elapsed:.0f}s. {n_with_data}/{len(stocks)} have analyst data ({pct_have:.1f}%).")
     print(f"  {n_real_spread} ({pct_spread:.1f}%) have PT >2% from current close (non-degenerate).")
-    print(f"  {n_skipped_no_coverage} skipped (no-coverage sid, retried Mondays only; today "
-          f"{'IS' if is_monday else 'is NOT'} Monday)")
+    print(f"  {n_skipped_no_coverage} skipped (no-coverage sid, retried Sundays only; today "
+          f"{'IS' if is_retry_day else 'is NOT'} Sunday)")
     if snapshot:
         print(f"  Wrote {n_with_data} rows to analyst_consensus_snapshots @ {snapshot_dt}")
     return n_with_data

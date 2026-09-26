@@ -17,7 +17,6 @@ Usage:
 """
 
 import argparse
-import time
 from datetime import date, timedelta
 
 import pandas as pd
@@ -83,31 +82,35 @@ def _populate_meta():
     return len(rows)
 
 
-def _fetch_ticker(indicator_id, ticker, start_date, end_date):
-    """Fetch daily close for one ticker. Returns DataFrame."""
+def _fetch_all(start_date, end_date):
+    """Daily close for every TICKERS entry in ONE batched yf.download (was one
+    download + 0.5s sleep per ticker). Returns {indicator_id: DataFrame}; a
+    ticker with no data maps to an empty frame. The batch's date index is the
+    union across exchanges, so each series drops its NaN (non-trading) rows —
+    leaving exactly what a single-ticker download returned."""
+    symbols = [t for t, _, _, _ in TICKERS.values()]
     try:
-        data = yf.download(ticker, start=start_date, end=end_date,
-                           progress=False, auto_adjust=True)
-        if data.empty:
-            return pd.DataFrame()
-
-        # Handle MultiIndex columns from yfinance
-        if isinstance(data.columns, pd.MultiIndex):
-            data.columns = data.columns.get_level_values(0)
-
-        df = pd.DataFrame({
-            "indicator_id": indicator_id,
-            "date": data.index.strftime("%Y-%m-%d"),
-            "value": data["Close"].values,
-            "source": "yfinance",
-            "category": TICKERS[indicator_id][2],
-            "unit": TICKERS[indicator_id][3],
-        })
-        df = df.dropna(subset=["value"])
-        return df
+        data = yf.download(symbols, start=start_date, end=end_date, progress=False,
+                           auto_adjust=True, group_by="ticker", threads=False)
     except Exception as e:
-        print(f"  Error fetching {ticker}: {e}")
-        return pd.DataFrame()
+        print(f"  Error fetching batch: {e}")
+        return {ind_id: pd.DataFrame() for ind_id in TICKERS}
+
+    out = {}
+    for ind_id, (ticker, _, category, unit) in TICKERS.items():
+        if data.empty or ticker not in data.columns.get_level_values(0):
+            out[ind_id] = pd.DataFrame()
+            continue
+        close = data[ticker]["Close"].dropna()
+        out[ind_id] = pd.DataFrame({
+            "indicator_id": ind_id,
+            "date": close.index.strftime("%Y-%m-%d"),
+            "value": close.values,
+            "source": "yfinance",
+            "category": category,
+            "unit": unit,
+        })
+    return out
 
 
 def _compute_changes(df):
@@ -152,23 +155,26 @@ def backfill(days=None, dry_run=False):
     print("Metadata: populated")
 
     total_rows = 0
+    fetched = _fetch_all(start, end)
     for i, (ind_id, (ticker, name, _, _)) in enumerate(TICKERS.items(), 1):
         print(f"  [{i:2d}/{len(TICKERS)}] {ind_id:20s} {ticker:12s} ", end="", flush=True)
 
-        df = _fetch_ticker(ind_id, ticker, start, end)
+        df = fetched[ind_id]
         if df.empty:
             print("— no data")
             continue
 
         df = _compute_changes(df)
 
-        rows = upsert_df(df, "macro_history")
+        upsert_df(df, "macro_history")
         total_rows += len(df)
         print(f"— {len(df)} rows")
 
-        time.sleep(0.5)  # gentle on yfinance
-
     print(f"\nTotal: {total_rows} rows in macro_history")
+    if total_rows == 0:
+        # One batched call now feeds all tickers — an all-empty result is a
+        # yfinance outage/block, not a quiet market (daily runs return 68-114).
+        raise RuntimeError(f"macro_yfinance: 0 rows for all {len(TICKERS)} tickers {start}→{end}")
 
     # Mirror india_vix into vix_history so regime.py + diff_engine read fresh data.
     # vix_history is the historical contract; macro_history is the firehose.

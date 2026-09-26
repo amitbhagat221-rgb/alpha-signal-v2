@@ -550,7 +550,7 @@ PIPELINE_STEPS = [
     # day of month) — keeping daily history would be phantom precision since
     # PTs are episodic.
     {"name": "fetch_yf_analyst",   "module": "sources.yfinance_analyst",   "function": "compute", "critical": False,
-     "table": "analyst_consensus", "source": "Yahoo Finance (yfinance)",  "data_freq": "monthly", "frequency": "daily"},
+     "table": "analyst_consensus", "source": "Yahoo Finance (yfinance)",  "data_freq": "monthly", "frequency": "weekly"},
 
     # Tickertape shareholding pattern — Bharat_sm_data API (different path from analyst scrape).
     {"name": "fetch_shareholding", "module": "sources.tickertape_shareholding", "function": "compute", "critical": False,
