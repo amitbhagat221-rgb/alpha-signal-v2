@@ -1,6 +1,6 @@
 # ADR 0047 — Anchor-proximity guard on backtest forward returns
 
-Status: accepted 2026-07-05 · Evidence: [rebaseline-2026-07-05.md](../reference/rebaseline-2026-07-05.md) · Commits `528df71`/`2be758b`
+Status: accepted 2026-07-05 · Evidence: [rebaseline-2026-07-05.md](../studies/rebaseline-2026-07-05.md) · Commits `528df71`/`2be758b`
 
 ## Context
 `pit_fwd_return_20d` (`tools/reconstruct_pit.py`) located each sid's entry/exit price by

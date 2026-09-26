@@ -1,7 +1,7 @@
 # ADR 0051 — Roadmap-to-90 strategic decisions (D1–D12)
 
 Status: accepted · 2026-07-11 · Owner: Amit (approved in-session)
-Context: [Plan 0011](../plans/0011-roadmap-to-90.md) (roadmap), [Plan 0012](../_archive/plans/0012-sonnet-tasks-execution-and-factors.md) (Sonnet tranche), [return-prediction-2026-07-05-report.md](../return-prediction-2026-07-05-report.md). Builds on ADR 0043 (weights are human decisions), 0047/0049 (clean panel), 0050.
+Context: [Plan 0011](../plans/0011-roadmap-to-90.md) (roadmap), [Plan 0012](../_archive/plans/0012-sonnet-tasks-execution-and-factors.md) (Sonnet tranche), [return-prediction-2026-07-05-report.md](../studies/return-prediction-2026-07-05-report.md). Builds on ADR 0043 (weights are human decisions), 0047/0049 (clean panel), 0050.
 
 ## Context
 The honest-return audit rated the shop ~60/100 (process 82, execution 45, engine breadth 35).

@@ -9,7 +9,7 @@
 
 **Maintained by:** anyone touching data ingestion or PIT reconstruction.
 **Updated:** with every new source, every reconstruction we ship, every issue we resolve.
-**Last refresh:** 2026-05-03
+**Last refresh:** 2026-09-26: absorbed the former `api-endpoints.md` (archived) and re-checked source statuses against the live DB. Row counts go stale fast, so for live depth run `SELECT COUNT(*), MIN(date_col), MAX(date_col)` on the table; the freshness view is `db.data_health()`.
 
 ---
 
@@ -29,6 +29,48 @@
 2. **Filing lag is a hard rule, not a heuristic.** Annual = 75d, Quarterly = 60d, Shareholding = 21d, Price = 0d. Ignoring this introduces ~37% Piotroski divergence on the latest date alone (we measured this). Lag rules apply *every time* you build a PIT-anchored value.
 
 3. **Reconstruct *and* archive.** The v1 lesson: we ran VADER over news to produce historical `sentiment_scores`, then in v2 we kept only the latest snapshot. The historical CSVs got dropped, the news depth wasn't fully preserved, and we can no longer fully re-derive. **Compute → store → version.** Never rely on re-derivation when the source is gappy.
+
+## Endpoint quick reference (merged from `api-endpoints.md`, 2026-09-26)
+
+Libraries: `pip install --break-system-packages nselib jugaad-data mftool`. nselib 2.5.1 wraps NSE's
+date-range APIs and handles the cookie session; jugaad-data is an alternate NSE wrapper; mftool wraps mfapi.in.
+Every entry below was probed from this VM (first audit 2026-05-03). Sources with their own section in the
+catalog further down are not repeated here.
+
+| Source | Call / endpoint | Depth · notes |
+|---|---|---|
+| NSE block deals | `capital_market.block_deals_data(from_date, to_date)` | Same range as bulk deals; counterparty data |
+| NSE smart-beta indices | `capital_market.index_data(index="NIFTY ALPHA 50", …)` | ~10y older indices, 2–3y newer; cols `TIMESTAMP`, `CLOSE_INDEX_VAL` (not `OPEN`); `nse_index_history`. yfinance returns empty for these |
+| NSE futures per symbol | `nselib.derivatives.future_price_volume_data(symbol, …)` | Multi-month per stock |
+| NSE F&O full EOD | `derivatives.fno_bhav_copy(trade_date)` | Whole market in one call → `fno_bhav` (ADR 0034); IV derived in-house (ADR 0035) |
+| NSE event calendar | `capital_market.event_calendar_for_equity(…)` | Board meetings / results dates, forward + recent past |
+| NSE FII/DII cash flow | `GET nseindia.com/api/fiidiiTradeReact` (cookie warm) | Today only → forward-accumulated in `fii_dii_cash_flow` since 2026-04-30 |
+| NSE ASM / GSM / F&O ban | `api/reportASM` (cookie warm); `derivatives.fno_security_in_ban_period` | Today only → `surveillance_flags` |
+| NSE bulk deals (today) | `archives.nseindia.com/content/equities/bulk.csv` | Daily fresh hit; nselib does history |
+| NSE corporate announcements | `api/corporate-announcements?index=equities` | Latest 20–50; BSE stream (below) is the deep source |
+| AMFI NAVAll.txt | `GET amfiindia.com/spages/NAVAll.txt` | Today's NAV for all schemes, used by the daily MF step (see MF section) |
+| World Bank India | `api.worldbank.org/v2/country/IND/indicator/{code}?format=json` | 9–20y annual/quarterly (GDP, FX, FDI, M2) |
+| AMFI MF portfolio disclosure | monthly PDFs | ~5y but PDF-brittle; holdings come from the ETMoney scrape instead |
+| Tier C (caveats) | AlphaVantage demo (25 calls/day), Twelve Data, SEBI SAST (HTML only), FMP (India patchy) | Not used |
+
+Paid sources: ranked options and costs are in [plan 0014](../plans/0014-data-acquisition-roadmap.md).
+The earlier ₹5K/mo playbook is archived at [paid-data-sources.md](../_archive/reference/paid-data-sources.md), with a summary in memory `paid_data_sources.md`.
+
+**After a long gap, before trusting an endpoint:** hit a known-recent date first (the cookie can fail
+intermittently) · compare the response shape to the schema, because NSE renames columns silently · use `DD-MM-YYYY` for nselib and ISO elsewhere ·
+strip column whitespace on `KeyError: ' SYMBOL'` · treat 403 as a cookie problem, not a dead endpoint · on an empty result, chunk the date range smaller.
+
+**Tried and rejected (don't repeat):**
+
+| Attempted | Result | Use instead |
+|---|---|---|
+| yfinance smart-beta indices | Only NIFTY 50/500/MIDCAP 150 work | `nselib…index_data` |
+| SEBI insider-trade JSON | HTML only | NSE PIT API (now empty too, see Known issues) |
+| AMFI portfolio-disclosure URL | 404 | ETMoney holdings scrape |
+| BSE bulk-deals API | 0 entries | nselib bulk deals |
+| EODHD demo for India | 403 | skip |
+| Wayback Machine for NSE bulk.csv | 1 snapshot | nselib date-range |
+| Sensibull | No retail API | compute from Kite/nselib raw |
 
 ---
 
@@ -56,8 +98,8 @@ For each source: **what it gives**, **endpoint**, **PIT/live access**, **histori
 | **What** | Promoter / KMP / director equity transactions disclosed to NSE under SEBI PIT regulations. |
 | **Endpoint** | `https://www.nseindia.com/api/corporates-pit?...` (JSON) |
 | **PIT access** | Discloses on transaction date — already PIT-clean. |
-| **Historical access** | NSE archive goes back ~5 years. We have 2021-01 → 2026-11. |
-| **v2 depth** | 26,741 transactions in `insider_trades`, 1,043 stocks |
+| **Historical access** | NSE archive goes back ~5 years. `insider_trades` holds 2021-01 → 2026-05-02 (last row fetched 2026-05-24). |
+| **⚠ Status (2026-09-26)** | **The API has returned empty data since ~2026-05.** `fetch_insider` and `signal_insider` now raise with that reason instead of logging SUCCESS/0 (commit 8700769). `insider_signal` is frozen at May 2026 until a replacement source is found (candidates: BSE announcement stream SAST/PIT categories, plan 0014). |
 | **Gotchas** | **`buyQuantity`/`sellquantity` are always 0** — the real values are in `secAcq` and `secVal`. v1 spent 3 weeks on this bug. |
 | **Rate limit** | 2-second floor. Session cookies required (set User-Agent + first-hit Cookie). |
 | **Used by** | `signals/insider_signal.py` |
@@ -70,9 +112,8 @@ For each source: **what it gives**, **endpoint**, **PIT/live access**, **histori
 | **Endpoint** | (1) `archives.nseindia.com/content/equities/bulk.csv` (today only). (2) **`nselib.capital_market.bulk_deal_data(from_date, to_date)`** — date-range, **history back to ≥ June 2023**, requires `pip install nselib`. v1's CLAUDE.md said `www.nseindia.com main is blocked` — that was missing-cookie issue, nselib handles it. |
 | **PIT access** | Today's file or any past day via nselib. |
 | **Historical access** | **2-3 years confirmed via nselib** (probed 2026-05-03). Jan 2024 returned 3,908 rows; June 2023 returned 1,472 rows. |
-| **v2 depth** | 865 deals across 13 dates (legacy archives.nseindia.com fetch). **Backfillable to 3 years via nselib.** |
+| **v2 depth** | `bulk_deals` backfilled via nselib: 2021-01 → present. |
 | **Gotchas** | (1) Date format `DD-MM-YYYY` (not ISO). (2) Symbol matching needs strip+upper. (3) Use 2-second floor between calls; chunk long ranges by month. |
-| **Reconstruction** | **No longer BLOCKED** — switch to nselib for backfill. Plan: replace `sources/nse_bulk.py` fetcher's URL with `nselib.capital_market.bulk_deal_data` call. |
 | **Used by** | `signals/smart_money.py` |
 
 ### Tickertape — Fundamentals (qi, bs, cf, shareholding)
@@ -88,11 +129,11 @@ For each source: **what it gives**, **endpoint**, **PIT/live access**, **histori
 | **Rate limit** | 2-second floor. Checkpoint every 200 stocks; resume via `harvest_log.json`. |
 | **Used by** | `signals/piotroski.py`, `accruals.py`, `forensic.py`, `consensus.py`, plus screener inputs. |
 
-### Tickertape — Analyst Consensus (snapshot)
+### Analyst consensus (`analyst_consensus`): yfinance PT + Tickertape EPS/revenue
 
 | Field | Value |
 |---|---|
-| **What** | Total analysts, buy %, price target, forward EPS, EPS growth %, forward revenue, revenue growth %. |
+| **What** | Total analysts, buy %, price target, forward EPS, EPS growth %, forward revenue, revenue growth %. **Field owners (ADR 0018/0020):** `price_target` + `total_analysts` come only from yfinance (`sources/yfinance_analyst.py`, daily). Tickertape writes only the EPS/revenue fields. The monthly `--snapshot` cron appends `analyst_consensus_snapshots`, which is the only honest PT history. |
 | **Endpoint** | Slug-based `__NEXT_DATA__` scrape (`analyze.api.tickertape.in`) |
 | **PIT access** | Latest snapshot only. Refresh monthly. |
 | **Historical access** | **None.** `analyst_consensus` overwrites itself — no historical archive of buy %, PT, etc. |
@@ -110,8 +151,8 @@ For each source: **what it gives**, **endpoint**, **PIT/live access**, **histori
 | **Historical access** | 10+ years per metric per stock, but **annual granularity** — not monthly revisions. |
 | **v2 depth** | price: 10,543 rows · revenue: 9,235 · eps: 9,235. 2,435 stocks covered. |
 | **Gotchas** | (1) `change` column populated for `eps`/`revenue` but **empty for `price`** — compute PT YoY from value series directly. (2) `fetched_at` is the same for all rows (the date of last harvest); the *event* date is in the `date` column. (3) Annual cadence means a "monthly PIT consensus" reconstruction will have 12 dates per stock per year using forward-fill — coarser than v1's "proxy" t=3.52 implied. |
-| **Reconstruction** | PROPOSED — see *Pattern 6: Annual-snapshot PIT* below. |
-| **Used by** | Currently `signals/consensus.py` (forward EPS revision); intended consumer: `tools/reconstruct_consensus_pit.py`. |
+| **Status (2026-09-26)** | **`metric='price'` rows are no longer ingested or served** (commit 8700769, ADR 0045). The 8K legacy price rows left in the table are look-ahead (see below) and must never be read. `eps`/`revenue` are still ingested monthly. |
+| **Used by** | `signals/consensus.py` + `pit_consensus()` (EPS revision only). |
 
 #### 2026-07-05 — forecastsHistory contamination MECHANISM (live-probe verdict; audit Factor-F1 follow-up)
 
@@ -169,9 +210,9 @@ For each source: **what it gives**, **endpoint**, **PIT/live access**, **histori
 | **Endpoint** | (1) `rbi.org.in/Scripts/NotificationUser.aspx` for circulars. (2) `rbi.org.in/Scripts/QuarterlyPublications.aspx` for bank quarterly data (PDF/Excel — needs scraping). |
 | **PIT access** | Daily for circulars; quarterly with ~6-week lag for bank data. |
 | **Historical access** | Circulars go back 10+ years; bank quarterly data goes back ~5 years. |
-| **v2 depth** | 5,687 regulatory_signals classified from regulatory_events; bank metrics not yet ingested |
+| **v2 depth** | Circulars feed `regulatory_events` → `regulatory_signals`. Bank metrics are **not** taken from RBI: `banking_metrics` comes from Screener.in bank pages (158 banks + NBFCs, monthly `fetch_banking_metrics`) and is display-only (ADR 0048). |
 | **Gotchas** | (1) **2-second delay between requests or RBI blocks**. (2) PDF parsing is brittle; some quarters have format changes. |
-| **Used by** | `sources/regulatory_*` (planned), `sources/banking_metrics.py` (planned for Track 2.2) |
+| **Used by** | `sources/regulatory_harvester.py`, `sources/regulatory_classifier.py` |
 
 ### SEBI — Circulars
 
@@ -206,7 +247,7 @@ For each source: **what it gives**, **endpoint**, **PIT/live access**, **histori
 | **Confirmed-working endpoints** | See [memory/nselib_apis.md](../../../.claude/projects/-home-ubuntu-alpha-signal-v2/memory/nselib_apis.md) for the full table. Highlights: bulk_deal_data + block_deals_data (≥2yr range), corporate_actions_for_equity (splits/divs), short_selling_data (Jan 2024+), bhav_copy_with_delivery, deliverable_position_data per symbol, participant_wise_open_interest (FII/DII positioning, Dec 2025+). |
 | **Quirks** | DD-MM-YYYY date format; `xlrd` dep needed for `fii_derivatives_statistics`; some single-day endpoints return "no data available" for arbitrary recent dates. |
 | **Rate limit** | Treat as 2-second floor (same NSE rule as bhavcopy). Chunk long ranges by month. |
-| **Used by** | (None yet — pending integration as of 2026-05-03) |
+| **Used by** | `sources/nselib_pull.py` (bulk, short selling, corporate actions, FII/DII positioning), `sources/fno_pull.py` (`fno_bhav`), `sources/historical_backfill.py` |
 
 ### Short Selling — NEW signal class via nselib
 
@@ -216,7 +257,7 @@ For each source: **what it gives**, **endpoint**, **PIT/live access**, **histori
 | **Endpoint** | `nselib.capital_market.short_selling_data(from_date, to_date)` |
 | **Historical access** | Back to Jan 2024 confirmed; sparse for older dates. |
 | **Alpha use** | Short-interest spike = bearish positioning; short squeeze candidate when shorts cover. New signal class not in v1's roster. |
-| **Status in v2** | Not yet ingested. PROPOSED for Track 2.4 work. |
+| **Status in v2** | Ingested: `short_selling_data`, 2022-01 → present. |
 
 ### Corporate Actions — fixes the Adj-Close issue
 
@@ -225,7 +266,7 @@ For each source: **what it gives**, **endpoint**, **PIT/live access**, **histori
 | **What** | Splits, bonuses, rights, dividends, ex-dates per symbol. The data needed to reconstruct true split-adjusted prices. |
 | **Endpoint** | `nselib.capital_market.corporate_actions_for_equity(from_date, to_date)`. Confirmed: 2,246 rows for 2025-2026. |
 | **Why important** | Resolves the v1-vs-v2 mom_6m correlation 0.70 issue at the root. v1 used yfinance Adj Close (split-adjusted); v2 uses bhavcopy raw close. With corporate-actions data we can split-adjust the bhavcopy prices ourselves and the divergence disappears. |
-| **Status in v2** | Not yet ingested. Single-session integration. |
+| **Status in v2** | Ingested: `corporate_actions`, 2018-03 → present. PIT factors are pre-multiplied into `corporate_adjustments` by `tools/compute_corporate_adjustments.py` (ADR 0010). **That tool is not a pipeline step, so rebuild it by hand**: as of 2026-09-26 `corporate_adjustments` stops at ex_date 2026-04-30 while `corporate_actions` runs to 2026-09-25. |
 
 ### FII/DII Positioning (F&O segment) — derivatives flow signal
 
@@ -233,11 +274,11 @@ For each source: **what it gives**, **endpoint**, **PIT/live access**, **histori
 |---|---|
 | **What** | Daily participant-wise (Client / DII / FII / Pro) Open Interest and trading volume in F&O. Tells you how each cohort is positioned in futures and options. |
 | **Endpoint** | `nselib.derivatives.participant_wise_open_interest(trade_date)` and `participant_wise_trading_volume(trade_date)`. Single-day signature. |
-| **Historical access** | **Dec 2025+ only** — must accumulate forward. ~5 months of history available as of 2026-05-03. |
+| **Historical access** | The endpoint served ~Dec 2025+ at first probe; `fii_dii_positioning` now holds 2022-01 → present (backfilled). |
 | **Alpha use** | FII net long/short F&O positioning is one of the strongest macro tilts available. Cohort divergence (FII selling vs DII buying) is a regime signal. |
-| **Status in v2** | Not yet ingested. Forward accumulation strategy. |
+| **Status in v2** | Ingested daily by `run_daily_forward.sh` (14:00 UTC). |
 
-### MF NAV via mfapi.in — free JSON API
+### Mutual-fund NAV: AMFI NAVAll.txt (daily) + mfapi.in (backfill)
 
 | Field | Value |
 |---|---|
@@ -246,7 +287,7 @@ For each source: **what it gives**, **endpoint**, **PIT/live access**, **histori
 | **Historical depth** | 13 years confirmed for Parag Parikh Flexi Cap (3,178 daily NAVs from 2013-05-28). |
 | **Alpha use** | MF NAV trends as flow proxy; top-decile MFs' overweighted stocks as smart-money signal (combine with monthly portfolio disclosure). |
 | **Limit** | NAV only — for actual stock holdings need AMFI portfolio disclosures (monthly, ~45-day lag). |
-| **Status in v2** | Not yet ingested. Reference: [memory/mfapi_nav.md](../../../.claude/projects/-home-ubuntu-alpha-signal-v2/memory/mfapi_nav.md) |
+| **Status in v2** | `mf_nav_history` (2006 → present). Daily: `fetch_mf_nav_daily` / `fetch_mf_master` parse AMFI `NAVAll.txt`. Backfill: `sources/mf_nav_backfill.py` (mfapi.in). **AMFI added `Plan;Option` columns ~2026-08-19** (6 → 8 cols), and the fixed-index parser silently read "Direct Plan" as the NAV, so NAVs stopped at 2026-08-18. The parser is now header-driven with a UTF-8 decode (commit 8700769); expect a gap from 2026-08-19 until the fix's first run. Holdings: ETMoney scrape (`sources/mf_holdings_scrape.py`). Memory: `mfapi_nav.md`. |
 
 ### Google News RSS
 
@@ -260,6 +301,23 @@ For each source: **what it gives**, **endpoint**, **PIT/live access**, **histori
 | **Gotchas** | (1) Returns up to 100 items per query — paginate with shifted date windows. (2) Free, no API key. (3) **In v2 we never backfilled the 2024-05 → 2026-01 gap** — sentiment historical reconstruction therefore only feasible 2026-03+. |
 | **Rate limit** | 1 req/sec safe. |
 | **Used by** | `signals/sentiment.py`, `regulatory_classifier` (one input among many) |
+
+### Moneycontrol — broker recommendations
+
+| Field | Value |
+|---|---|
+| **What** | Per-stock sell-side recommendations (broker, target, reco date) → `broker_recommendations` (bad slug matches go to `broker_recommendations_quarantine` via the identity gate, ADR 0033). |
+| **Endpoint** | Moneycontrol HTML per `stocks.mc_slug` (slugs are company-name-derived, not tickers). |
+| **Cadence** | **Daily with a 90-minute stalest-first budget** (`PIPELINE_BUDGET_MIN`, ordered by `stocks.mc_checked_at`; ~300 stocks/day, full cycle ~8–9 days). This replaced the ~18h Sunday full sweep, which held the harvest lock and starved `run_daily_forward.sh` (2026-09-26). It raises on 0 rows. |
+| **Rate limit** | 12 s/request. |
+
+### Screener.in — deep fundamentals + bank pages
+
+| Field | Value |
+|---|---|
+| **What** | `fundamentals_screener` (long format, ADR 0011) and `banking_metrics` (bank pages). |
+| **Access** | Logged-in session cookie at `~/.cache/screener_cookie.json`. A keep-alive cron runs every 8h and pushes to ntfy when auth dies (`sources.screener_pull --check-cookie`). Full refresh `--universe` runs on the 1st and 15th under the shared harvest `flock`. |
+| **⚠ Status (2026-09-26)** | Last successful rows fetched 2026-07-15. The latest `--universe` run logged `failures: 2448/2448, total rows: 0`. Check the cookie before trusting Screener-derived factors. |
 
 ### BSE corporate-announcement EVENT STREAM ⭐ (the richest free unlock found, 2026-06-08)
 
@@ -296,7 +354,7 @@ For each PIT eval date, slice raw data by `record_date + lag <= eval_date`. Anyt
 
 Universe (`stocks` table) is current names only. Stocks delisted before today are missing entirely. Empirical bias: **~4.4% per year**. For backtests over 3+ years this is material; for monthly t-stats over 6 months it's noise.
 
-**Fix path:** scrape NSE delisted-companies archive, mark with `delisted_date`, include in PIT eval if `delisted_date > snapshot_date`. Substantial work — deferred per Plan 0004 §3.2.
+**Fix path (plan 0011 WS2.8):** `historical_universe` (built by `tools/build_historical_universe.py` from bhavcopy, incl. delisted names back to 2018) exists but has only ~9 sparse snapshots. A full price backfill (~1,381 delisted symbols) must come first, and only then can `reconstruct_pit.py` intersect with it ([survivorship study](../studies/survivorship-exposure-2026-07.md)).
 
 ### Look-ahead bias (the live-snapshot trap)
 
@@ -441,7 +499,7 @@ The 6 patterns we've actually used. New reconstruction = pick the matching patte
 
 ### Pattern 5 — DON'T reconstruct (forward-only)
 
-**Used for:** bulk_deal_signal, pt_upside (analyst_consensus snapshot).
+**Used for:** pt_upside (`analyst_consensus_snapshots` only, since 2026-05; ADR 0045), FII/DII cash flow.
 **Recipe:**
 1. Mark NULL for any pre-availability date in the PIT table.
 2. Document the limit in this playbook + the signal's registry entry.
@@ -451,7 +509,7 @@ The 6 patterns we've actually used. New reconstruction = pick the matching patte
 
 ### Pattern 6 — Annual-snapshot PIT (coarse but feasible)
 
-**Used for:** consensus reconstruction (planned), forecast revisions.
+**Used for:** EPS revisions from `forecast_history` eps/revenue. **Never** apply it to `forecast_history` price, which is look-ahead by construction.
 **Recipe:**
 1. Source has annual or quarterly snapshots, not monthly.
 2. For each monthly eval_date D, find the most recent snapshot with `date ≤ D`.
@@ -481,7 +539,14 @@ The bugs and gotchas we've already paid for. Add to this list every time somethi
 | RBI blocks if requests <2s apart | RBI | Hard 2-second floor; longer is safer | v1 |
 | data.gov.in API timeouts common | data.gov.in | 60s timeout + 3 retries with exponential backoff | v1 |
 | data.gov.in Core Sector wide format | data.gov.in | Pivot to long; use `ITEM_CODE` (`INDEX_COAL`) not `ITEM_NAME` (text shifts) | v1 |
-| **bulk_deals — no historical archive** | NSE bulk deals | Today's file only. Forward-only. Backtest BLOCKED. | v1 |
+| bulk_deals "no historical archive" (v1 belief) | NSE bulk deals | Wrong: nselib `bulk_deal_data` backfills (done, 2021+) | v1 → 2026-05 |
+| NSE `api/*` "blocked" | NSE | Missing cookies: GET `https://www.nseindia.com` in the same `requests.Session` (browser UA) first; nselib does this | v1 |
+| Date formats mixed silently return empty | nselib | nselib wants `DD-MM-YYYY`, everything else ISO | 2026-05-03 |
+| `fii_derivatives_statistics` needs `xlrd` | nselib | Skip it; `participant_wise_open_interest` gives the same data | 2026-05-03 |
+| NSE PIT API returns empty data | NSE PIT | Since ~2026-05; producers now raise loudly. Needs a replacement source | 2026-09-26 |
+| AMFI NAVAll.txt gained `Plan;Option` columns | AMFI | Header-driven parse + UTF-8 decode | 2026-09-26 |
+| Moneycontrol full sweep ran ~18h, starved other jobs | Moneycontrol | Daily 90-min stalest-first budget | 2026-09-26 |
+| `forecast_history` price = year-ahead close | Tickertape | Stop ingesting price rows; PT history = `analyst_consensus_snapshots` only | 2026-07-05 |
 | **analyst_consensus — current only** | yfinance daily refresh | PK=sid, daily-refreshed for cockpit "current PT" card. Historical aggregates live in `analyst_consensus_snapshots` (monthly cadence, since 2026-05-22). | v2 |
 | **news_articles 2024-05 → 2026-01 blackout** | Google News RSS | We fetched once in 2024-04, then nothing until 2026-02. Sentiment reconstruction starts at 2026-03. | 2026-05-03 |
 | **v1 sentiment reconstruction lost** | Sentiment / migration | v1 had VADER scores back to ~2023; CSVs were dropped during v2 migration; news depth wasn't preserved either, so re-derivation impossible. **Lesson: archive the computed signal, not just the raw source.** | 2026-05-03 |
@@ -606,27 +671,18 @@ For every signal in [`db.py BACKTEST_SIGNALS`](../../db.py), the exact computati
 
 ### Consensus group
 
-**pt_revision_yoy / eps_revision_yoy / consensus_signal_combined** (READY; cadence corrected 2026-05-22)
-- Inputs: `forecast_history.value` for `metric IN ('eps', 'price')`. Filter `date ≤ eval_date`.
-- For each (sid, metric): latest snapshot with date ≤ D; pick prior-year snapshot (closest to D − 1 year, within 9–18 month window).
-- yoy = `(latest_value / |prior_value|) − 1` (× 100 for percentage units).
-- consensus_signal_combined = mean of pt_revision_yoy + eps_revision_yoy when both available; single value if only one.
-- Pattern: 6 (annual-snapshot PIT). Implementation: `pit_consensus()` in `tools/reconstruct_pit.py`.
-- **Caveat:** annual cadence (FY-end snapshots), not monthly revisions. PTs are episodic — that's the right cadence for this signal.
+**eps_revision_yoy / consensus_signal_combined**
+- Inputs: `forecast_history.value` for `metric='eps'`, filtered `date ≤ eval_date`; latest snapshot vs the one closest to D − 1 year (9–18 month window).
+- yoy = `(latest / |prior|) − 1`. `consensus_signal_combined` = `eps_revision_yoy` only.
+- `pt_revision_yoy` is **DROPPED** (ADR 0020). Rebuild it from `analyst_consensus_snapshots` once ≥12 months exist (~2027-05).
+- Pattern: 6. Implementation: `pit_consensus()` in `tools/reconstruct_pit.py`.
 
-**pt_upside** (re-validated 2026-05-22 — earlier |t|=16 was inflated by data corruption)
-- Sources (priority order):
-  1. `analyst_consensus_snapshots` — monthly yfinance aggregate (2026-05-onwards). Most recent.
-  2. `forecast_history` (metric='price') — Tickertape year-end snapshots, ~1/yr per stock 2022-2025. Real PTs; sparse fallback.
-- Recipe: latest knowable PT for sid (filter source ≤ eval_date) / close at eval_date − 1.
-- Pattern: 6+. Implementation: `pit_pt_upside()` in `tools/reconstruct_pit.py`.
-- **Earlier finding invalidated.** The 2026-05-03 backtest produced |t|=16 from `forecast_history` data that had been silently contaminated by Tickertape's lastPrice "today" entries (see HANDOFF 2026-05-22). Cleaned data + correct sources may yield a real |t| in the 2-5 range, or DROP entirely.
+**pt_upside** (pulled from `SIGNAL_WEIGHTS`, ADR 0045)
+- Source: `analyst_consensus_snapshots` **only** (monthly yfinance aggregate, 2026-05+), NULL before the first snapshot, no fallback.
+- Recipe: latest knowable PT (snapshot ≤ eval_date) / close at eval_date − 1.
+- History: the |t|=16 (2026-05-03) and t=7–9 (2026-05→07) results were `forecast_history` look-ahead artifacts. Re-entry needs ≥12 clean monthly anchors and |t|≥1.5, ~2027-05.
 
-**Cadence reference for PT-class signals (per CLAUDE.md):**
-- Live current view: `analyst_consensus.price_target` (PK=sid, yfinance-sourced, daily refresh)
-- Backtest / revision signals: `analyst_consensus_snapshots` (PK=sid+date+source, MONTHLY snapshots, 1st-of-month cron)
-- Long-horizon historical: `forecast_history` (Tickertape year-end snapshots, ~annual)
-- **Never** write a daily PT row. PTs change episodically; daily storage is phantom precision.
+**PT cadence** (CLAUDE.md "Data-cadence rule"): `analyst_consensus` is the live view, `analyst_consensus_snapshots` holds the monthly history, and a PT row is never written daily.
 
 ### Sentiment group
 
@@ -664,23 +720,20 @@ CREATE TABLE macro_sector_signals_pit (
 - Scaled to ±10 range.
 - Implementation: `pit_macro_sector()`.
 
-**Bulk_deal_signal recipe** (PARTIAL — formerly BLOCKED, now forward-only):
+**Bulk_deal_signal recipe:**
 - Net buy value over trailing 30 days (BUY = +qty×price, SELL = −qty×price), normalized by 30d avg close.
-- NaN where no bulk_deals data exists in the window — naturally sparse pre-2026-03 because NSE has no historical archive.
+- NaN where no bulk_deals data exists in the window (table backfilled to 2021-01 via nselib).
 - Implementation: `pit_bulk_deal_signal()`.
 
 ---
 
 ## Cross-references
 
-- **Per-endpoint catalog:** [api-endpoints.md](api-endpoints.md) — function signatures, install commands, probe dates, NSE quirks, things-tried-and-rejected
-- **Paid data playbook:** [paid-data-sources.md](paid-data-sources.md) — ₹5K/mo budget, Screener scrape pattern, Sensibull skip rationale
-- **Engineering:** [tools/reconstruct_pit.py](../../tools/reconstruct_pit.py) (the reconstruction driver), [tools/import_v1_pit.py](../../tools/import_v1_pit.py) (v1 archive importer)
-- **Plans:** [pit-reconstruction (archived)](../_archive/2026-05-22-plan-0004-pit-reconstruction.md), [0002-100-factors-and-model.md](../_archive/plans/0002-100-factors-and-model.md)
-- **Mother plan:** [docs/_archive/plans/0001-mother-plan.md](../_archive/plans/0001-mother-plan.md)
-- **Registry of signals:** `db.py` → `BACKTEST_SIGNALS` (42 entries, all statuses)
-- **Critical rules:** [CLAUDE.md](../../CLAUDE.md) (filing-lag rule, harvester-rate rule, dedup rule)
-- **v1 backtest source-of-truth:** `daily_snapshots_pit_v1`, `pit_ic_by_tier_v1` (imported from v1 CSV, frozen)
+- **Paid data / acquisition roadmap:** [plan 0014](../plans/0014-data-acquisition-roadmap.md) and [oss-quant-toolbox.md](oss-quant-toolbox.md). Archived research: [pit-data-sources-research.md](../_archive/reference/pit-data-sources-research.md), [api-endpoints.md](../_archive/reference/api-endpoints.md) (pre-merge).
+- **Engineering:** [tools/reconstruct_pit.py](../../tools/reconstruct_pit.py) (reconstruction driver). The v1 archive importer is `_archive/tools/import_v1_pit.py` (one-shot, done).
+- **Registry of signals:** `db.BACKTEST_SIGNALS` (live count lives there, not here); weights in [signal-weights.md](signal-weights.md).
+- **Critical rules:** [CLAUDE.md](../../CLAUDE.md) (filing lag, harvester rate, dedup).
+- **v1 backtest source-of-truth:** `daily_snapshots_pit_v1`, `pit_ic_by_tier_v1` (imported from v1 CSV, frozen).
 
 ---
 

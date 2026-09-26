@@ -1,6 +1,6 @@
 # Crypto data sources — convex/lottery-ticket cockpit
 
-> Companion to [0009-crypto-convex-cockpit.md](../plans/0009-crypto-convex-cockpit.md). Mirrors the equity [historical_data_sources.md] role for the crypto track.
+> Companion to [0009-crypto-convex-cockpit.md](../../plans/0009-crypto-convex-cockpit.md). Mirrors the equity [historical_data_sources.md] role for the crypto track.
 > Researched 2026-06-09 via 6 parallel web-research agents (smart-money / social / derivatives / new-liquidity / token-safety / price-universe), each cross-verified against primary docs + pricing pages. **Prices change fast in crypto — re-verify the specific tier before subscribing.**
 
 ## The thesis this serves

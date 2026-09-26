@@ -1,9 +1,9 @@
 # Honest Return Prediction + Signal-Generation Audit — 2026-07-05
 
-Executed per [return-prediction-and-signal-audit-prompt.md](return-prediction-and-signal-audit-prompt.md).
+Executed per [return-prediction-and-signal-audit-prompt.md](../_archive/return-prediction-and-signal-audit-prompt.md).
 Grounded in the CLEAN post-ADR-0047 panel (`pit_ic_by_tier_v2` `v2_recompute` rows), the
 2026-07-04 audit, the 2026-07-05 re-baseline, ADRs 0043/0045/0047/0049/0050, and a fresh
-`tools/rebalance_sim.py` run. New tool: [tools/expected_return.py](../tools/expected_return.py)
+`tools/rebalance_sim.py` run. New tool: [tools/expected_return.py](../../tools/expected_return.py)
 (prediction logged to `data/expected_return_predictions.jsonl`, scoreable against realized in 2027-07).
 
 ---

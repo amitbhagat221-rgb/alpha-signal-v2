@@ -1,7 +1,7 @@
 # ADR 0046 — Banded/hysteresis rebalancing is the default for the advisory HRP book
 
 **Status:** accepted · 2026-07-05
-**Context:** [docs/audit-2026-07-04-report.md](../audit-2026-07-04-report.md) Port-F1 (HIGH): 18.5%/day one-way turnover on the daily-rebuilt advisory book (~2.7/15 names/day) — cost-fatal vs the measured gross edge. (Same estimator re-run 2026-07-05, `tools/portfolio_nav`: 14.6%/day — the number drifts as books accrue; the conclusion doesn't.)
+**Context:** [docs/_archive/audit-2026-07-04-report.md](../_archive/audit-2026-07-04-report.md) Port-F1 (HIGH): 18.5%/day one-way turnover on the daily-rebuilt advisory book (~2.7/15 names/day) — cost-fatal vs the measured gross edge. (Same estimator re-run 2026-07-05, `tools/portfolio_nav`: 14.6%/day — the number drifts as books accrue; the conclusion doesn't.)
 
 ## Decision
 `PORTFOLIO["hrp"]["rebalance"] = {"mode": "banded", "rank_exit": 8, "drift_pp": 2.0}` — DEFAULT.

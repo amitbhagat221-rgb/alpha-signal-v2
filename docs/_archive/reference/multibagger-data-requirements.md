@@ -85,4 +85,4 @@
 
 ---
 
-*Written 2026-06-03. Pairs with the plan at `~/.claude/plans/i-was-going-theough-polished-dolphin.md` and the research at `docs/reference/multibagger-research.md`. Phase 1 is built; this unblocks Phase 2b.*
+*Written 2026-06-03. Pairs with the plan at `~/.claude/plans/i-was-going-theough-polished-dolphin.md` and the research at `docs/_archive/reference/multibagger-research.md`. Phase 1 is built; this unblocks Phase 2b.*

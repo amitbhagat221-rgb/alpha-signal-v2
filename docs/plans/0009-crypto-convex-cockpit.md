@@ -10,7 +10,7 @@ Decisions (2026-06-09): spot-only v1 (read funding/OI as a signal, do NOT trade 
 
 # 0009 — Crypto Convex Cockpit ("lottery-ticket" book)
 
-> A **separate product** from the equity Alpha Signal, sharing only the engineering spine (plain functions, SQLite, no frameworks, cockpit pattern). Different asset class, different objective function, different data layer. Data-source map: [crypto-data-sources.md](../reference/crypto-data-sources.md).
+> A **separate product** from the equity Alpha Signal, sharing only the engineering spine (plain functions, SQLite, no frameworks, cockpit pattern). Different asset class, different objective function, different data layer. Data-source map (archived with this plan paused, 2026-09-26): [crypto-data-sources.md](../_archive/reference/crypto-data-sources.md); summary in memory `crypto-data-sources.md`.
 
 ## What problem?
 

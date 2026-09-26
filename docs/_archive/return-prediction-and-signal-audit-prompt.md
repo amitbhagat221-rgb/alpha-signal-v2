@@ -22,7 +22,7 @@ number he wants. Three hard rules, non-negotiable:
    the model's expected return. Building a *real* expected-return model is Task 1.
 
 Ground everything in the CLEAN, re-baselined evidence (post-`ADR 0047` anchor-proximity fix).
-Read first: `docs/audit-2026-07-04-report.md`, `docs/reference/rebaseline-2026-07-05.md`,
+Read first: `docs/_archive/audit-2026-07-04-report.md`, `docs/studies/rebaseline-2026-07-05.md`,
 `docs/decisions/0043,0045,0047,0049,0050`, `docs/reference/signal-weights.md`,
 `config.SIGNAL_WEIGHTS`, `pit_ic_by_tier_v2` (use `source LIKE 'v2_recompute%'` — the clean rows).
 

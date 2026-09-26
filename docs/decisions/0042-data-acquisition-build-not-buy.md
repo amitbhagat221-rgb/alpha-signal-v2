@@ -5,7 +5,7 @@
 ## Context
 The benched factor families (PEAD, credit_beta, financial sub-model) and the NLP
 look-ahead/survivorship doubts all reduce to *data depth + point-in-time integrity*, not
-modelling. A money-no-object `deep-research` sweep (`docs/reference/pit-data-sources-research.md`,
+modelling. A money-no-object `deep-research` sweep (`docs/_archive/reference/pit-data-sources-research.md`,
 108 agents) priced the "ideal" sources (CMIE Prowess, LSEG I/B/E/S/Worldscope, Bloomberg) as
 enterprise quotes — and, decisively, **none sold to an individual without a live terminal**, with
 every global vendor's depth claim carrying an India caveat (I/B/E/S India pre-2011 "very limited";

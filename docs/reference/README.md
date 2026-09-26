@@ -1,24 +1,24 @@
 # Reference
 
-How specific things work. Updated when the underlying thing changes.
-
-## Files
+How specific things work. Update a file when the underlying thing changes. Don't copy counts that code already knows; point to the code instead.
 
 | File | Contents |
 |---|---|
-| [architecture.md](architecture.md) | The 5 layers, project layout, pipeline steps, DB groups, data flow |
-| [data-playbook.md](data-playbook.md) | **THE data reference** — every source, PIT rules, reconstruction patterns, gotchas. Read before fetching. |
-| [api-endpoints.md](api-endpoints.md) | Working API catalog — function signatures, history depth, install commands, probe dates |
-| [paid-data-sources.md](paid-data-sources.md) | ₹5K/mo budget allocation + decision tree |
-| [pit-data-sources-research.md](pit-data-sources-research.md) | Deep-research (money-no-object) on 5 PIT gaps: consensus/earnings dates, India rates+curves, survivorship-free fundamentals, NBFC asset-quality, transcripts. Ranked picks + best stack + open questions |
-| [cockpit.md](cockpit.md) | Pages, routes, components, color tokens |
-| [signal-weights.md](signal-weights.md) | Validated signal map (t-stats per tier) + weight tier rules |
+| [architecture.md](architecture.md) | Layers, layout, where the sources of truth live, data flow |
+| [data-playbook.md](data-playbook.md) | **The data reference**: every source and endpoint, PIT rules, reconstruction patterns, known issues. Read it before fetching |
+| [signal-weights.md](signal-weights.md) | Validated signal map (t-stats per tier), wired weights, promotion rules |
+| [cockpit.md](cockpit.md) | Cockpit pages, routes, components, colour tokens |
 | [commands.md](commands.md) | Most-used CLI commands |
+| [kite-setup.md](kite-setup.md) | Zerodha Kite Connect setup |
+| [oss-quant-toolbox.md](oss-quant-toolbox.md) | Open-source libraries mapped to our gaps (step 0 of plan 0014) |
 
-## What's live source-of-truth in code (not duplicated here)
+## Live sources of truth in code (not copied here)
 
-- **Schema** — `db.TABLE_META` and `schema.sql`
-- **Signals registry** — `db.BACKTEST_SIGNALS`
-- **Pipeline steps** — `config.PIPELINE_STEPS`
+- **Pipeline steps + cadence:** `config.PIPELINE_STEPS` (`frequency` = daily / weekly (Sunday) / monthly (1st))
+- **Schema:** `schema.sql` + `db.TABLE_META`; live table list: `sqlite3 data/alpha_signal.db .tables`
+- **Signals registry:** `db.BACKTEST_SIGNALS` + `db.FACTOR_LIBRARY`
+- **Weights:** `config.SIGNAL_WEIGHTS` (rationale in signal-weights.md)
+- **Cron:** `crontab -l` (not in git; the table is in [OPERATOR.md](../../OPERATOR.md), §2)
 
-Code is canonical for these; docs would drift.
+Archived research dumps (multibagger ×4, sector deep-research, PIT-sources research, paid sources, crypto sources, pre-merge api-endpoints) are in [`../_archive/reference/`](../_archive/reference/).
+Evidence write-ups (re-baseline, return-prediction report, plan-0012/0013 studies) are in [`../studies/`](../studies/).

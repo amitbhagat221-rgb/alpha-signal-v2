@@ -28,7 +28,7 @@ This is the canonical spec for **Track 3 — Factor model**. Today: 42 registere
 
 ## Sensibull vs Kite — settled
 
-Sensibull has no retail API; it's B2B (Zerodha embeds them inside Kite). Their analytics (max pain, OI buildup, IV percentile, dispersion) are computable from raw Kite option chain data — and we'd want our own PIT history anyway. **Skip Sensibull.** Paid stack: Kite ₹500/mo + Screener ₹420/mo. Full reasoning in [paid-data-sources.md](../../reference/paid-data-sources.md).
+Sensibull has no retail API; it's B2B (Zerodha embeds them inside Kite). Their analytics (max pain, OI buildup, IV percentile, dispersion) are computable from raw Kite option chain data — and we'd want our own PIT history anyway. **Skip Sensibull.** Paid stack: Kite ₹500/mo + Screener ₹420/mo. Full reasoning in [paid-data-sources.md](../reference/paid-data-sources.md).
 
 ---
 
@@ -43,7 +43,7 @@ Stand up four ingest pipelines with PIT discipline. Until each has ≥90 days of
 | File | `sources/screener_pull.py` + `sources/screener_schedules.py` |
 | Table | `fundamentals_screener` — long format `(sid, period_end, period_type, line_item, value, filing_date, fetched_at)` (see [ADR 0011](../../decisions/0011-long-format-for-new-fundamentals-tables.md)) |
 | Cadence | Full universe weekly (~3hr at 2s delay); incremental daily for new filings |
-| Auth | Cookie-jar pattern from [paid-data-sources.md](../../reference/paid-data-sources.md). Re-login on 401. |
+| Auth | Cookie-jar pattern from [paid-data-sources.md](../reference/paid-data-sources.md). Re-login on 401. |
 
 **Captured (delta vs Tickertape):** COGS, gross profit, SG&A, R&D, working-capital triple (AR/inventory/AP), goodwill, intangibles, treasury stock, standalone+consolidated separately, 10+ years quarterly.
 

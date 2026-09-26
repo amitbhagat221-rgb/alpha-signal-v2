@@ -1,7 +1,7 @@
 # ADR 0045 — Pull pt_upside (look-ahead artifact) + smart_money (sub-bar) from SIGNAL_WEIGHTS
 
 **Status:** accepted · 2026-07-05
-**Context:** [docs/audit-2026-07-04-report.md](../audit-2026-07-04-report.md) Factor-F1 (CRITICAL) + Factor-F3; [docs/_archive/plans/0010-audit-remediation.md](../_archive/plans/0010-audit-remediation.md) Phase 3.
+**Context:** [docs/_archive/audit-2026-07-04-report.md](../_archive/audit-2026-07-04-report.md) Factor-F1 (CRITICAL) + Factor-F3; [docs/_archive/plans/0010-audit-remediation.md](../_archive/plans/0010-audit-remediation.md) Phase 3.
 
 ## What was found
 

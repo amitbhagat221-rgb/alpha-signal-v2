@@ -1,6 +1,6 @@
 # API Endpoints — Working Catalog
 
-Per-endpoint reference for every external data source v2 calls. Every entry was probed from this VM. Re-verify after long gaps. Strategy doc: [data-playbook.md](data-playbook.md). Last audit: **2026-05-03**.
+Per-endpoint reference for every external data source v2 calls. Every entry was probed from this VM. Re-verify after long gaps. Strategy doc: [data-playbook.md](../../reference/data-playbook.md). Last audit: **2026-05-03**.
 
 Tiers: A = free + deep history · B = free + forward-only (must cron) · C = free with caveats · D = paid (see [paid-data-sources.md](paid-data-sources.md)).
 

@@ -2,7 +2,7 @@
 
 **Status:** research complete · **Written:** 2026-07-11 · **Type:** deep-research dive #1 of the roadmap-to-90 queue
 **Gates:** Plan 0011 WS2.5 · Decision D12 (ADR 0051) · **Guardrail:** every card obeys the ADR-0043 lens (|t|≥2.5 necessary-not-sufficient, BY-FDR context, sign matches prior, n≥20) and the ≤10-hypotheses/month budget (guardrail 3). A card is a licence to *test*, not to wire.
-**Companion format:** [return-prediction-2026-07-05-report.md](../return-prediction-2026-07-05-report.md) Task-3 house card.
+**Companion format:** [return-prediction-2026-07-05-report.md](../studies/return-prediction-2026-07-05-report.md) Task-3 house card.
 **Reuse-first assets consulted (per D12):** memory `bse_announcements_event_stream`, `bse_event_factors_governance`, `nselib_apis`, `historical_data_sources`, `survivorship_universe_via_bhavcopy`; `docs/reference/data-playbook.md`; live read-only DB inspection of `surveillance_flags`, `fno_bhav`, `nse_index_history`, `corporate_actions`, `bse_announcements`, `stock_prices`, `shareholding`.
 
 > **Method note.** READ-ONLY + web-search only. No harvester was run, no endpoint probed, no code/DB touched. Where a recipe needs a live endpoint probe it is flagged **NEEDS LIVE PROBE (single-threaded)** as a follow-up — never run concurrent with another BSE/NSE harvester (documented IP-block rule).
