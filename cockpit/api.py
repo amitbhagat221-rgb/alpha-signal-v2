@@ -18,6 +18,7 @@ import pandas as pd
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
+import db
 from db import read_sql, get_db
 
 
@@ -33,13 +34,48 @@ from output.dossier import is_publishable
 # A1-A12: NEW DATA FUNCTIONS
 # ═══════════════════════════════════════════════════
 
-@_ttl_cache(60)
-def get_stock_price_metrics(sid):
-    """A1: Returns, RSI-14, 52W high/low from stock_prices."""
-    df = read_sql(
-        "SELECT date, close FROM stock_prices WHERE sid = ? AND close > 0 ORDER BY date DESC LIMIT 260",
-        params=[sid],
+# ── Batch reads keyed by a list of sids ──
+# `/` and `/actions` used to issue 4 queries per pick/candidate (N+1). The
+# *_batch functions below answer the same question for every sid in one
+# `WHERE sid IN (...)` query; the per-sid functions delegate to them so the
+# derivation logic lives once.
+
+def _sid_params(sids):
+    """De-duplicated, None-free sid list + its `?,?,…` placeholder string."""
+    sids = list(dict.fromkeys(s for s in sids if s))
+    return sids, ",".join("?" * len(sids))
+
+
+def _native_rows(sql, params):
+    """Rows as dicts with sqlite3's own per-row types. Batch reads use this, not
+    pandas: in a multi-sid frame one sid's NULL turns every other sid's ints into
+    floats ("12.0 analysts"), which the single-sid reads they replace never did."""
+    with get_db() as conn:
+        cur = conn.execute(sql, params)
+        cols = [d[0] for d in cur.description]
+        return [dict(zip(cols, r)) for r in cur.fetchall()]
+
+
+def _latest_per_sid(table, cols, sids, order_col="snapshot_date", n=1, where=None):
+    """The newest `n` rows per sid (by `order_col`) for every sid in `sids`, as
+    record dicts with a leading `sid` key — the batched form of
+    `... WHERE sid = ? ORDER BY <order_col> DESC LIMIT n`."""
+    sids, ph = _sid_params(sids)
+    if not sids:
+        return []
+    extra = f"AND ({where})" if where else ""
+    return _native_rows(
+        f"SELECT sid, {cols} FROM ("
+        f"  SELECT sid, {cols}, ROW_NUMBER() OVER ("
+        f"    PARTITION BY sid ORDER BY [{order_col}] DESC) AS _rn"
+        f"  FROM [{table}] WHERE sid IN ({ph}) {extra}"
+        f") WHERE _rn <= {int(n)}",
+        sids,
     )
+
+
+def _price_metrics(df):
+    """A1 metrics from one sid's (date, close) rows (any order)."""
     if df.empty or len(df) < 5:
         return {}
 
@@ -74,6 +110,48 @@ def get_stock_price_metrics(sid):
     return result
 
 
+def get_stock_price_metrics_batch(sids):
+    """A1 for many sids at once → {sid: metrics} ({} when <5 prices)."""
+    recs = _latest_per_sid("stock_prices", "date, close", sids,
+                           order_col="date", n=260, where="close > 0")
+    out = {sid: {} for sid in _sid_params(sids)[0]}
+    if recs:
+        for sid, g in pd.DataFrame(recs).groupby("sid", sort=False):
+            out[sid] = _price_metrics(g.reset_index(drop=True))
+    return out
+
+
+@_ttl_cache(60)
+def get_stock_price_metrics(sid):
+    """A1: Returns, RSI-14, 52W high/low from stock_prices."""
+    return get_stock_price_metrics_batch([sid]).get(sid, {})
+
+
+_CONSENSUS_COLS = (
+    "price_target, price_target_median, price_target_high, price_target_low, "
+    "total_analysts, buy_pct, eps_growth_pct, revenue_growth_pct, forward_eps, "
+    "recommendation_key, recommendation_mean, "
+    "n_strong_buy, n_buy, n_hold, n_sell, n_strong_sell, "
+    "pt_source, next_earnings_date, rating_mix_history, "
+    "price_target_prev, price_target_changed_at, fetched_at"
+)
+
+
+def get_analyst_consensus_batch(sids):
+    """A2 for many sids at once → {sid: consensus dict} ({} when uncovered)."""
+    sids, ph = _sid_params(sids)
+    out = {sid: {} for sid in sids}
+    if not sids:
+        return out
+    cmp_by_sid = {r["sid"]: r["close"]
+                  for r in _latest_per_sid("stock_prices", "close", sids, order_col="date")}
+    for r in _native_rows(f"SELECT sid, {_CONSENSUS_COLS} FROM analyst_consensus WHERE sid IN ({ph})",
+                          sids):
+        sid = r.pop("sid")
+        out[sid] = _enrich_consensus(r, cmp_by_sid.get(sid))
+    return out
+
+
 @_ttl_cache(60)
 def get_analyst_consensus(sid):
     """A2: Price target, analyst count, buy%, growth from analyst_consensus.
@@ -81,20 +159,11 @@ def get_analyst_consensus(sid):
     Includes Tier-1 extended yfinance fields (added 2026-05-23): median PT,
     high/low range, rating mix counts, qualitative recommendation key.
     """
-    row = read_sql(
-        "SELECT price_target, price_target_median, price_target_high, price_target_low, "
-        "total_analysts, buy_pct, eps_growth_pct, revenue_growth_pct, forward_eps, "
-        "recommendation_key, recommendation_mean, "
-        "n_strong_buy, n_buy, n_hold, n_sell, n_strong_sell, "
-        "pt_source, next_earnings_date, rating_mix_history, "
-        "price_target_prev, price_target_changed_at, fetched_at "
-        "FROM analyst_consensus WHERE sid = ?",
-        params=[sid],
-    )
-    if row.empty:
-        return {}
-    r = row.iloc[0].to_dict()
+    return get_analyst_consensus_batch([sid]).get(sid, {})
 
+
+def _enrich_consensus(r, cmp):
+    """Derived A2 fields on one analyst_consensus row; `cmp` = latest close."""
     # PT-freshness derived fields (added 2026-05-23)
     import json as _json
     from datetime import date as _date_, datetime as _dt_
@@ -140,12 +209,7 @@ def get_analyst_consensus(sid):
         except Exception:
             pass
     # Compute upside vs current price (use median when available — robust to outliers)
-    price = read_sql(
-        "SELECT close FROM stock_prices WHERE sid = ? ORDER BY date DESC LIMIT 1",
-        params=[sid],
-    )
-    if not price.empty and price.iloc[0]["close"]:
-        cmp = price.iloc[0]["close"]
+    if cmp:
         if cmp > 0:
             r["current_price"] = round(cmp, 2)
             # Display guard: never surface an implausible PT (>3x / <0.33x the
@@ -201,15 +265,20 @@ def get_insider_activity(sid):
         "ORDER BY trade_date DESC LIMIT 10",
         params=[sid],
     )
-    signal = read_sql(
-        "SELECT signal_type, strength, score_impact, description "
-        "FROM insider_signals WHERE sid = ? ORDER BY snapshot_date DESC LIMIT 1",
-        params=[sid],
-    )
     return {
         "trades": trades.to_dict("records") if not trades.empty else [],
-        "signal": signal.iloc[0].to_dict() if not signal.empty else {},
+        "signal": get_insider_signal_batch([sid]).get(sid, {}),
     }
+
+
+def get_insider_signal_batch(sids):
+    """Latest insider_signals row per sid → {sid: {signal_type, strength,
+    score_impact, description}} ({} when the sid has none)."""
+    out = {sid: {} for sid in _sid_params(sids)[0]}
+    for r in _latest_per_sid("insider_signals",
+                             "signal_type, strength, score_impact, description", sids):
+        out[r.pop("sid")] = r
+    return out
 
 
 def get_stock_news(sid):
@@ -292,19 +361,17 @@ DOSSIER_MAX_AGE_DAYS = 3  # honest staleness cap; matches data_health "daily" th
 
 
 @_ttl_cache(60)
-def get_dossier(sid):
-    """A9: AI investment dossier from latest JSON file.
-
-    Refuses to serve theses older than DOSSIER_MAX_AGE_DAYS — previously this
-    function walked back through history until it found ANY thesis, which
-    silently surfaced 20-day-old text as if it were current (see HALC bug
-    2026-05-22).
-    """
+def _dossier_index():
+    """{sid: (dossier, file_date, age_days)} — the newest dossier with a thesis
+    per sid, across the dossier files young enough to serve. Parsed once per
+    minute instead of once per get_dossier() call (`/` asked for 15 sids, each
+    re-reading up to 4 JSON files)."""
     import re
     from datetime import datetime as _dt
     dossier_dir = PROJECT_ROOT / "output"
     files = sorted(glob.glob(str(dossier_dir / "dossiers_*.json")), reverse=True)
     today = _dt.now().date()
+    index = {}
     for f in files:
         # File-date from filename for honest "as_of" labeling. If the filename
         # doesn't carry a date, skip — the dossier card can't be honest.
@@ -314,28 +381,44 @@ def get_dossier(sid):
         file_date = _dt.strptime(m.group(1), "%Y-%m-%d").date()
         age_days = (today - file_date).days
         if age_days > DOSSIER_MAX_AGE_DAYS:
-            # Anything older isn't current truth — bail. The template's
+            # Anything older isn't current truth — stop. The template's
             # `{% if dos.get("thesis") %}` will hide the card.
-            return {}
+            break
         try:
             with open(f) as fh:
                 dossiers = json.load(fh)
-            for d in dossiers:
-                if d.get("sid") == sid and d.get("thesis"):
-                    # Legacy dossiers (no `validation` block) are tolerated but
-                    # flagged via `validated` so the template can show a notice.
-                    if not is_publishable(d):
-                        return {}
-                    v = d.get("validation")
-                    return {
-                        **d,
-                        "as_of": file_date.isoformat(),
-                        "age_days": age_days,
-                        "validated": bool(v and v.get("ok")),
-                    }
         except (json.JSONDecodeError, IOError):
             continue
-    return {}
+        for d in dossiers:
+            if d.get("thesis") and d.get("sid") not in index:
+                index[d.get("sid")] = (d, file_date, age_days)
+    return index
+
+
+@_ttl_cache(60)
+def get_dossier(sid):
+    """A9: AI investment dossier from latest JSON file.
+
+    Refuses to serve theses older than DOSSIER_MAX_AGE_DAYS — previously this
+    function walked back through history until it found ANY thesis, which
+    silently surfaced 20-day-old text as if it were current (see HALC bug
+    2026-05-22).
+    """
+    hit = _dossier_index().get(sid)
+    if not hit:
+        return {}
+    d, file_date, age_days = hit
+    # Legacy dossiers (no `validation` block) are tolerated but
+    # flagged via `validated` so the template can show a notice.
+    if not is_publishable(d):
+        return {}
+    v = d.get("validation")
+    return {
+        **d,
+        "as_of": file_date.isoformat(),
+        "age_days": age_days,
+        "validated": bool(v and v.get("ok")),
+    }
 
 
 @_ttl_cache(60)
@@ -350,11 +433,11 @@ def get_sector_averages():
                ROUND(AVG(ds.consensus_signal), 3) as avg_consensus
         FROM daily_picks dp
         JOIN daily_snapshots ds ON dp.sid = ds.sid
-        WHERE dp.pick_date = (SELECT MAX(pick_date) FROM daily_picks)
+        WHERE dp.pick_date = ?
         AND ds.snapshot_date = (SELECT MAX(snapshot_date) FROM daily_snapshots)
         AND dp.sector IS NOT NULL
         GROUP BY dp.sector
-    """)
+    """, params=[latest_pick_date()])
     return {r["sector"]: r for r in df.to_dict("records")} if not df.empty else {}
 
 
@@ -517,8 +600,9 @@ def get_portfolio_analytics(portfolio_data, regime):
 
     # Expected return from analyst consensus
     upsides = []
+    ac_by_sid = get_analyst_consensus_batch([s["sid"] for s in all_stocks])
     for s in all_stocks:
-        ac = get_analyst_consensus(s["sid"])
+        ac = ac_by_sid.get(s["sid"], {})
         if ac.get("pt_upside_pct") is not None:
             upsides.append(ac["pt_upside_pct"])
 
@@ -526,8 +610,8 @@ def get_portfolio_analytics(portfolio_data, regime):
     avg_score = round(sum(s.get("final_score", 0) for s in all_stocks) / len(all_stocks) * 100, 0) if all_stocks else 0
 
     # Universe average score
-    univ = read_sql("SELECT AVG(final_score) as avg FROM daily_picks WHERE pick_date = (SELECT MAX(pick_date) FROM daily_picks)")
-    univ_avg = round(univ.iloc[0]["avg"] * 100, 0) if not univ.empty and univ.iloc[0]["avg"] else 0
+    univ = db.scalar("SELECT AVG(final_score) FROM daily_picks WHERE pick_date = ?", [latest_pick_date()])
+    univ_avg = round(univ * 100, 0) if univ else 0
 
     return {
         "sector_allocation": sector_alloc,
@@ -706,6 +790,7 @@ PIOTROSKI_FACTORS = [
 ]
 
 
+@_ttl_cache(60)
 def get_changes(days=1):
     """Get recent change events from diff engine."""
     df = read_sql(
@@ -723,6 +808,7 @@ def get_changes(days=1):
     return df.to_dict("records")
 
 
+@_ttl_cache(60)
 def get_regime():
     """Current VIX regime + allocation weights."""
     row = read_sql("SELECT * FROM regime_state WHERE id = 1")
@@ -752,7 +838,7 @@ def get_top_picks(tier=None, top=5):
                s.ticker, s.name, s.market_cap_cr, s.pe_ratio, s.roe
         FROM daily_picks dp
         JOIN stocks s ON dp.sid = s.sid
-        WHERE dp.pick_date = (SELECT MAX(pick_date) FROM daily_picks)
+        WHERE dp.pick_date = ?
           AND (dp.integrity_status IS NULL OR dp.integrity_status != 'FAIL')
           -- Plan 0007 Phase 5 — UHS pick gate. Morning-brief + action_queue
           -- hide picks with uhs_score < 60 (AVOID band). NULL fallback for
@@ -760,7 +846,7 @@ def get_top_picks(tier=None, top=5):
           AND (dp.uhs_score IS NULL OR dp.uhs_score >= 60)
         {where}
         ORDER BY dp.cap_tier, dp.rank
-    """)
+    """, params=[latest_pick_date()])
     # JSON-safe coercion (NaN/Inf → None) via the shared helper in cockpit/_shared.
     _records = safe_json_records
 
@@ -774,52 +860,69 @@ def get_top_picks(tier=None, top=5):
     return result
 
 
+@_ttl_cache(60)
+def latest_pick_date():
+    """MAX(pick_date) in daily_picks (None when empty) — the date every "today's
+    picks" query in this module pins to. Was an inline `(SELECT MAX(pick_date)
+    FROM daily_picks)` subquery repeated 19 times."""
+    return db.scalar("SELECT MAX(pick_date) FROM daily_picks")
+
+
 def get_pick_date():
     """Latest pick date."""
-    row = read_sql("SELECT MAX(pick_date) as d FROM daily_picks")
-    return row.iloc[0]["d"] if not row.empty else "unknown"
+    return latest_pick_date()
 
 
 def get_stock_count():
     """Total scored stocks."""
-    row = read_sql("SELECT COUNT(*) as n FROM daily_picks WHERE pick_date = (SELECT MAX(pick_date) FROM daily_picks)")
-    return row.iloc[0]["n"] if not row.empty else 0
+    return db.scalar("SELECT COUNT(*) FROM daily_picks WHERE pick_date = ?",
+                     [latest_pick_date()], default=0)
 
 
+_DOMINANT_SIGNAL_SOURCES = [
+    ("consensus_signals", "consensus_signal", "Consensus"),
+    ("promoter_signals", "promoter_signal", "Promoter"),
+    ("piotroski_scores", "f_score", "Piotroski"),
+    ("accruals_scores", "accruals_signal", "Accruals"),
+    ("insider_signals", "score_impact", "Insider"),
+]
+
+
+def get_dominant_signal_batch(sids):
+    """Strongest two signals per sid (display string under the ticker) →
+    {sid: "Consensus: 0.82 | Piotroski: 8/9"}; "" when the sid has none."""
+    values = {sid: {} for sid in _sid_params(sids)[0]}
+    # Check each signal table for the stock's latest value
+    for table, col, label in _DOMINANT_SIGNAL_SOURCES:
+        try:
+            recs = _latest_per_sid(table, f"[{col}]", sids)
+        except Exception:
+            continue
+        for r in recs:
+            try:
+                if r[col] is not None:
+                    values[r["sid"]][label] = float(r[col])
+            except (TypeError, ValueError):
+                pass
+
+    out = {}
+    for sid, signals in values.items():
+        # Top 2 signals by |value|
+        sorted_sigs = sorted(signals.items(), key=lambda x: abs(x[1]), reverse=True)
+        parts = []
+        for name, val in sorted_sigs[:2]:
+            if name == "Piotroski":
+                parts.append(f"{name}: {int(val)}/9")
+            else:
+                parts.append(f"{name}: {val:.2f}")
+        out[sid] = " | ".join(parts)
+    return out
+
+
+@_ttl_cache(60)
 def get_dominant_signal(sid):
     """Find the strongest signal for a stock (for display under ticker)."""
-    # Check each signal table for the stock's strongest value
-    signals = {}
-
-    for table, col, label in [
-        ("consensus_signals", "consensus_signal", "Consensus"),
-        ("promoter_signals", "promoter_signal", "Promoter"),
-        ("piotroski_scores", "f_score", "Piotroski"),
-        ("accruals_scores", "accruals_signal", "Accruals"),
-        ("insider_signals", "score_impact", "Insider"),
-    ]:
-        try:
-            row = read_sql(f"""
-                SELECT [{col}] as val FROM [{table}]
-                WHERE sid = ? ORDER BY snapshot_date DESC LIMIT 1
-            """, params=[sid])
-            if not row.empty and row.iloc[0]["val"] is not None:
-                signals[label] = float(row.iloc[0]["val"])
-        except Exception:
-            pass
-
-    if not signals:
-        return ""
-
-    # Return top 2 signals by value
-    sorted_sigs = sorted(signals.items(), key=lambda x: abs(x[1]), reverse=True)
-    parts = []
-    for name, val in sorted_sigs[:2]:
-        if name == "Piotroski":
-            parts.append(f"{name}: {int(val)}/9")
-        else:
-            parts.append(f"{name}: {val:.2f}")
-    return " | ".join(parts)
+    return get_dominant_signal_batch([sid]).get(sid, "")
 
 
 def get_heatmap_data():
@@ -830,10 +933,10 @@ def get_heatmap_data():
     df = read_sql("""
         SELECT dp.sid, s.ticker, s.name, dp.final_score as score, dp.cap_tier
         FROM daily_picks dp JOIN stocks s ON dp.sid = s.sid
-        WHERE dp.pick_date = (SELECT MAX(pick_date) FROM daily_picks)
+        WHERE dp.pick_date = ?
           AND s.cap_tier != 'MICRO'
         ORDER BY dp.cap_tier, dp.final_score DESC
-    """)
+    """, params=[latest_pick_date()])
     micro_df = read_sql("""
         SELECT sid, ticker, name, 0.0 AS score, cap_tier
         FROM stocks WHERE cap_tier = 'MICRO'
@@ -862,7 +965,7 @@ def get_explorer_table():
           JOIN stocks s ON dp.sid = s.sid
           LEFT JOIN daily_snapshots ds ON dp.sid = ds.sid
               AND ds.snapshot_date = (SELECT MAX(snapshot_date) FROM daily_snapshots)
-          WHERE dp.pick_date = (SELECT MAX(pick_date) FROM daily_picks)
+          WHERE dp.pick_date = ?
             AND s.cap_tier != 'MICRO'
           UNION ALL
           SELECT s.sid, s.ticker, s.name, s.sector, s.cap_tier,
@@ -874,7 +977,7 @@ def get_explorer_table():
           WHERE s.cap_tier = 'MICRO'
         )
         ORDER BY cap_tier, rank
-    """)
+    """, params=[latest_pick_date()])
     if df.empty:
         return []
     df = df.astype(object).where(df.notna(), None)
@@ -1300,11 +1403,11 @@ def get_sector_comparison(sid, sector):
             COUNT(*) as stock_count
         FROM daily_picks dp
         JOIN daily_snapshots ds ON dp.sid = ds.sid
-        WHERE dp.pick_date = (SELECT MAX(pick_date) FROM daily_picks)
+        WHERE dp.pick_date = ?
         AND ds.snapshot_date = (SELECT MAX(snapshot_date) FROM daily_snapshots)
         AND dp.sector = ?
         """,
-        params=[sector],
+        params=[latest_pick_date(), sector],
     )
     base = df.iloc[0].to_dict() if not df.empty else {}
 
@@ -1474,11 +1577,11 @@ def get_action_candidates():
         FROM forensic_scores fs
         JOIN stocks s ON fs.sid = s.sid
         JOIN daily_picks dp ON fs.sid = dp.sid
-        WHERE dp.pick_date = (SELECT MAX(pick_date) FROM daily_picks)
+        WHERE dp.pick_date = ?
         AND dp.rank <= 20
         AND (fs.m_score_flag = 'LIKELY_MANIPULATOR' OR fs.z_score_flag = 'DISTRESS')
         ORDER BY dp.rank LIMIT 10
-    """)
+    """, params=[latest_pick_date()])
     for _, r in forensic_alerts.iterrows():
         flags = []
         if r.get("m_score_flag") == "LIKELY_MANIPULATOR":
@@ -1529,8 +1632,9 @@ def get_sized_book():
     # it's weight-weighted rather than the page's equal-weight. Analyst PTs are
     # ~12-month targets → a ~1-year expected PRICE return (excludes dividends).
     cov_w, cov_wu, cov_n = 0.0, 0.0, 0
+    ac_by_sid = get_analyst_consensus_batch(rows["sid"].tolist())
     for r in rows.itertuples():
-        ac = get_analyst_consensus(r.sid)
+        ac = ac_by_sid.get(r.sid, {})
         up = ac.get("pt_upside_pct")
         if up is not None and r.weight:
             cov_w += r.weight
@@ -1563,10 +1667,13 @@ def get_portfolio_bundle():
     we'd otherwise loop ~30 stocks × 2 API calls. 2026-05-25 perf pass."""
     regime = get_regime()
     portfolio_data = get_model_portfolio()
+    sids = [s["sid"] for key in ("large", "mid", "small") for s in portfolio_data.get(key, [])]
+    ac_by_sid = get_analyst_consensus_batch(sids)
+    pm_by_sid = get_stock_price_metrics_batch(sids)
     for key in ["large", "mid", "small"]:
         for s in portfolio_data.get(key, []):
-            ac = get_analyst_consensus(s["sid"])
-            pm = get_stock_price_metrics(s["sid"])
+            ac = ac_by_sid.get(s["sid"], {})
+            pm = pm_by_sid.get(s["sid"], {})
             s["pt_upside"] = ac.get("pt_upside_pct")
             s["price"] = pm.get("close_price")
             s["return_1m"] = pm.get("return_1m")
@@ -1885,6 +1992,7 @@ from cockpit.mf import (
 )
 
 
+@_ttl_cache(60)
 def get_sector_overview():
     """Sector scores + stock counts. avg_score is MARKET-CAP WEIGHTED."""
     df = read_sql("""
@@ -1898,11 +2006,11 @@ def get_sector_overview():
                MIN(dp.rank) as best_rank
         FROM daily_picks dp
         JOIN stocks s ON s.sid = dp.sid
-        WHERE dp.pick_date = (SELECT MAX(pick_date) FROM daily_picks)
+        WHERE dp.pick_date = ?
         AND dp.sector IS NOT NULL
         GROUP BY dp.sector
         ORDER BY avg_score DESC NULLS LAST
-    """)
+    """, params=[latest_pick_date()])
 
     # Merge with macro sector signals (latest snapshot only — table keeps history)
     macro = read_sql("""
@@ -1919,10 +2027,10 @@ def get_sector_overview():
                ROUND(100.0 * SUM(CASE WHEN final_score >= 0.55 THEN 1 ELSE 0 END) / COUNT(*), 1)
                    AS breadth_pct
         FROM daily_picks
-        WHERE pick_date = (SELECT MAX(pick_date) FROM daily_picks)
+        WHERE pick_date = ?
           AND sector IS NOT NULL
         GROUP BY sector
-    """)
+    """, params=[latest_pick_date()])
     if not breadth.empty:
         df = df.merge(breadth, on="sector", how="left")
 
@@ -1932,12 +2040,12 @@ def get_sector_overview():
                    ROW_NUMBER() OVER (PARTITION BY dp.sector ORDER BY dp.final_score DESC) AS r
             FROM daily_picks dp
             JOIN stocks s ON s.sid = dp.sid
-            WHERE dp.pick_date = (SELECT MAX(pick_date) FROM daily_picks)
+            WHERE dp.pick_date = ?
               AND dp.sector IS NOT NULL
         )
         SELECT sector, ticker, final_score
         FROM ranked WHERE r <= 3
-    """)
+    """, params=[latest_pick_date()])
     top_by_sector = {}
     if not top_n.empty:
         for _, r in top_n.iterrows():
@@ -2141,12 +2249,12 @@ def get_sector_top_players(sector, n=10):
         FROM stocks s
         LEFT JOIN daily_picks dp
           ON dp.sid = s.sid
-         AND dp.pick_date = (SELECT MAX(pick_date) FROM daily_picks)
+         AND dp.pick_date = ?
         WHERE s.sector = ? AND s.ticker IS NOT NULL
         ORDER BY s.market_cap_cr DESC
         LIMIT ?
         """,
-        params=[sector, n],
+        params=[latest_pick_date(), sector, n],
     )
     if df.empty:
         return []
@@ -2165,10 +2273,10 @@ def get_sector_picks(sector, top_n=10, bottom_n=5):
         FROM daily_picks dp
         JOIN stocks s ON s.sid = dp.sid
         WHERE dp.sector = ?
-          AND dp.pick_date = (SELECT MAX(pick_date) FROM daily_picks)
+          AND dp.pick_date = ?
         ORDER BY dp.final_score DESC
         """,
-        params=[sector],
+        params=[sector, latest_pick_date()],
     )
     if df.empty:
         return {"top": [], "bottom": []}
@@ -2276,11 +2384,11 @@ def get_industry_overview():
         FROM stocks s
         LEFT JOIN daily_picks dp
           ON dp.sid = s.sid
-         AND dp.pick_date = (SELECT MAX(pick_date) FROM daily_picks)
+         AND dp.pick_date = ?
         WHERE s.industry IS NOT NULL AND s.ticker IS NOT NULL
         GROUP BY s.industry, s.sector
         ORDER BY avg_score DESC NULLS LAST
-    """)
+    """, params=[latest_pick_date()])
     if df.empty:
         return []
 
@@ -2300,10 +2408,10 @@ def get_industry_overview():
                    AS breadth_pct
         FROM daily_picks dp
         JOIN stocks s ON s.sid = dp.sid
-        WHERE dp.pick_date = (SELECT MAX(pick_date) FROM daily_picks)
+        WHERE dp.pick_date = ?
           AND s.industry IS NOT NULL
         GROUP BY s.industry
-    """)
+    """, params=[latest_pick_date()])
     if not breadth.empty:
         df = df.merge(breadth, on="industry", how="left")
 
@@ -2314,11 +2422,11 @@ def get_industry_overview():
                    ROW_NUMBER() OVER (PARTITION BY s.industry ORDER BY dp.final_score DESC) AS r
             FROM daily_picks dp
             JOIN stocks s ON s.sid = dp.sid
-            WHERE dp.pick_date = (SELECT MAX(pick_date) FROM daily_picks)
+            WHERE dp.pick_date = ?
               AND s.industry IS NOT NULL
         )
         SELECT industry, ticker FROM ranked WHERE r <= 3
-    """)
+    """, params=[latest_pick_date()])
     top_by_ind = {}
     if not top_n.empty:
         for _, r in top_n.iterrows():
@@ -2373,14 +2481,14 @@ def get_industry_top_players(industry, n=10):
         FROM stocks s
         LEFT JOIN daily_picks dp
           ON dp.sid = s.sid
-         AND dp.pick_date = (SELECT MAX(pick_date) FROM daily_picks)
+         AND dp.pick_date = ?
         WHERE s.industry = ?
           AND s.ticker IS NOT NULL
           AND s.market_cap_cr IS NOT NULL
         ORDER BY s.market_cap_cr DESC
         LIMIT ?
         """,
-        params=[industry, n],
+        params=[latest_pick_date(), industry, n],
     )
     if df.empty:
         return []
@@ -2424,10 +2532,10 @@ def get_industry_competitive_landscape(industry):
         FROM stocks s
         LEFT JOIN daily_picks dp
           ON dp.sid = s.sid
-         AND dp.pick_date = (SELECT MAX(pick_date) FROM daily_picks)
+         AND dp.pick_date = ?
         WHERE s.industry = ? AND s.ticker IS NOT NULL
         """,
-        params=[industry],
+        params=[latest_pick_date(), industry],
     )
     by_ticker = {row["ticker"]: row for _, row in df.iterrows()}
 
@@ -2480,10 +2588,10 @@ def get_industry_picks(industry, top_n=10, bottom_n=5):
         FROM daily_picks dp
         JOIN stocks s ON s.sid = dp.sid
         WHERE s.industry = ?
-          AND dp.pick_date = (SELECT MAX(pick_date) FROM daily_picks)
+          AND dp.pick_date = ?
         ORDER BY dp.final_score DESC
         """,
-        params=[industry],
+        params=[industry, latest_pick_date()],
     )
     if df.empty:
         return {"top": [], "bottom": []}

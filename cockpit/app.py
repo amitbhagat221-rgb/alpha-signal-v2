@@ -197,17 +197,19 @@ def morning_brief(request: Request):
     changes = api.get_changes()
     earnings = api.get_earnings_upcoming()
 
-    # Enrich each pick with price metrics + analyst consensus + dossier
+    # Enrich each pick with price metrics + analyst consensus + dossier —
+    # one batched query per source for all 15 picks, not 4 queries per pick.
+    sids = [s["sid"] for stocks in picks.values() for s in stocks]
+    pm = api.get_stock_price_metrics_batch(sids)
+    ac = api.get_analyst_consensus_batch(sids)
+    dominant = api.get_dominant_signal_batch(sids)
     for tier, stocks in picks.items():
         for stock in stocks:
             sid = stock["sid"]
-            pm = api.get_stock_price_metrics(sid)
-            ac = api.get_analyst_consensus(sid)
-            dos = api.get_dossier(sid)
-            stock["pm"] = pm
-            stock["ac"] = ac
-            stock["dossier"] = dos
-            stock["dominant_signal"] = api.get_dominant_signal(sid)
+            stock["pm"] = pm.get(sid, {})
+            stock["ac"] = ac.get(sid, {})
+            stock["dossier"] = api.get_dossier(sid)
+            stock["dominant_signal"] = dominant.get(sid, "")
 
     # Market pulse
     sectors = api.get_sector_overview()
@@ -224,17 +226,23 @@ def morning_brief(request: Request):
 
 @app.get("/actions", response_class=HTMLResponse)
 def actions(request: Request):
-    action_data = api.get_action_candidates()
-    # Enrich each candidate
+    # Copy, don't mutate: get_action_candidates() hands back its cached dicts
+    # and handlers now run concurrently in the threadpool.
+    action_data = {k: [dict(s) for s in v] if isinstance(v, list) else v
+                   for k, v in api.get_action_candidates().items()}
+    # Enrich each candidate — one batched query per source, not 4 per stock.
+    sids = [s.get("sid") for sec in ("buy", "watch", "exit") for s in action_data.get(sec, [])]
+    pm = api.get_stock_price_metrics_batch(sids)
+    ac = api.get_analyst_consensus_batch(sids)
+    insider = api.get_insider_signal_batch(sids)
     for section in ["buy", "watch", "exit"]:
         for stock in action_data.get(section, []):
             sid = stock.get("sid")
             if sid:
-                stock["pm"] = api.get_stock_price_metrics(sid)
-                stock["ac"] = api.get_analyst_consensus(sid)
+                stock["pm"] = pm.get(sid, {})
+                stock["ac"] = ac.get(sid, {})
                 stock["dossier"] = api.get_dossier(sid)
-                ia = api.get_insider_activity(sid)
-                stock["insider_desc"] = ia.get("signal", {}).get("description", "")
+                stock["insider_desc"] = insider.get(sid, {}).get("description", "")
     return templates.TemplateResponse(request, "action_queue.html", {
         "page": "actions", "actions": action_data,
     })
