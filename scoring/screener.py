@@ -24,8 +24,9 @@ import factors
 from config import SIGNAL_WEIGHTS, PORTFOLIO, SCREEN
 from db import read_sql, get_db, upsert_df
 
-# The last production run's frames in this process ({date, inputs, scored}) — the
-# pit_replay_freeze step freezes exactly these instead of re-running _load_signals().
+# The last production run's frames in this process ({date, inputs, scored, prices}) —
+# pit_replay_freeze freezes exactly these instead of re-running _load_signals(), and
+# output/snapshot reuses the loaded price history.
 LAST_SCORED = {}
 
 
@@ -45,7 +46,7 @@ def _load_eligibility_wide():
     return long.pivot(index="sid", columns="signal", values="eligible").fillna(1).astype(int)
 
 
-def _load_signals():
+def _load_signals(return_prices=False):
     """Load all signal values for the latest snapshot date.
     Excludes MICRO tier (config.EXCLUDED_FROM_PICKS) — they're too illiquid + data-thin
     to recommend; see tools/classify_micro_tier.py for the spec."""
@@ -255,7 +256,7 @@ def _load_signals():
     df = df.merge(implausible, on="sid", how="left")
     df["revenue_implausible"] = df["revenue_implausible"].fillna(False).astype(bool)
 
-    return df
+    return (df, prices) if return_prices else df
 
 
 def _compute_book_to_price():
@@ -482,13 +483,14 @@ def compute(dry_run=False, top=None, variant: str = "production"):
     }[variant]
     print(f"Variant: {variant}")
     print("Loading signals...")
-    df = _load_signals()
+    df, prices = _load_signals(return_prices=True)
     inputs = df.copy()
 
     print("Scoring universe...")
     df = score_universe(df, weights=weights)
     if variant == "production":
-        LAST_SCORED.update(date=date.today().isoformat(), inputs=inputs, scored=df.copy())
+        LAST_SCORED.update(date=date.today().isoformat(), inputs=inputs, scored=df.copy(),
+                           prices=prices)
     # Variants concentrate weight on pt_upside/eps_growth which have ~43%
     # coverage in SMALL — relax the eligibility floor for variants only.
     variant_gate = 0.40 if variant in ("return", "sharpe") else None
