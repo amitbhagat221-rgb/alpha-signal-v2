@@ -26,14 +26,13 @@ Usage:
     python -m signals.share_momentum --dry-run
 """
 
-import argparse
-from datetime import date, timedelta
+from datetime import timedelta
 
-import numpy as np
 import pandas as pd
 
 from config import SCREEN
-from db import read_sql, upsert_df
+from db import read_sql
+from signals import _annual
 
 FINANCIAL_SECTORS = set(SCREEN["financial_sectors"])
 WINDOW_DAYS = 90
@@ -73,6 +72,29 @@ def _load_data():
     return stocks, shares, prices
 
 
+def sector_share_change(df):
+    """df = [sid, sector, close_t, close_p, shares_outstanding] → adds market_cap_t,
+    sector_share_t and share_momentum = sector_share_t / sector_share_p − 1, dropping
+    rows whose past share is missing or zero (newly listed). Both market caps use the
+    same latest share count. Shared with tools/reconstruct_pit:pit_share_momentum."""
+    df = df.copy()
+    # Market cap in ₹cr (close in ₹, shares in lakhs/cr per Screener — but Screener
+    # returns "No. of Equity Shares" already in cr units; multiply by close in ₹
+    # then convert close-rupees × cr-shares = ₹cr directly, no further scaling).
+    df["market_cap_t"] = df["close_t"] * df["shares_outstanding"]
+    df["market_cap_p"] = df["close_p"] * df["shares_outstanding"]
+
+    # Share within sector at each timestamp
+    sector_total_t = df.groupby("sector")["market_cap_t"].sum().to_dict()
+    sector_total_p = df.groupby("sector")["market_cap_p"].sum().to_dict()
+    df["sector_share_t"] = df["market_cap_t"] / df["sector"].map(sector_total_t)
+    df["sector_share_p"] = df["market_cap_p"] / df["sector"].map(sector_total_p)
+
+    df = df[(df["sector_share_p"] > 0) & df["sector_share_p"].notna()].copy()
+    df["share_momentum"] = df["sector_share_t"] / df["sector_share_p"] - 1
+    return df
+
+
 def _compute(stocks, shares, prices):
     if prices.empty or shares.empty:
         return pd.DataFrame(columns=["sid", "market_cap_cr", "sector_share", "share_momentum"])
@@ -91,22 +113,7 @@ def _compute(stocks, shares, prices):
     df = latest.merge(past, on="sid", how="inner")
     df = df.merge(shares[["sid", "shares_outstanding"]], on="sid", how="inner")
     df = df.merge(stocks[["sid", "sector"]], on="sid", how="inner")
-
-    # Market cap in ₹cr (close in ₹, shares in lakhs/cr per Screener — but Screener
-    # returns "No. of Equity Shares" already in cr units; multiply by close in ₹
-    # then convert close-rupees × cr-shares = ₹cr directly, no further scaling).
-    df["market_cap_t"] = df["close_t"] * df["shares_outstanding"]
-    df["market_cap_p"] = df["close_p"] * df["shares_outstanding"]
-
-    # Share within sector at each timestamp
-    sector_total_t = df.groupby("sector")["market_cap_t"].sum().to_dict()
-    sector_total_p = df.groupby("sector")["market_cap_p"].sum().to_dict()
-    df["sector_share_t"] = df["market_cap_t"] / df["sector"].map(sector_total_t)
-    df["sector_share_p"] = df["market_cap_p"] / df["sector"].map(sector_total_p)
-
-    # Drop stocks where past-share is missing or zero (newly listed)
-    df = df[(df["sector_share_p"] > 0) & df["sector_share_p"].notna()]
-    df["share_momentum"] = df["sector_share_t"] / df["sector_share_p"] - 1
+    df = sector_share_change(df)
 
     df = df.rename(columns={"market_cap_t": "market_cap_cr",
                             "sector_share_t": "sector_share"})
@@ -114,31 +121,9 @@ def _compute(stocks, shares, prices):
 
 
 def compute(dry_run=False):
-    stocks, shares, prices = _load_data()
-    df = _compute(stocks, shares, prices)
-
-    df["snapshot_date"] = date.today().isoformat()
-    df = df[["sid", "snapshot_date", "market_cap_cr", "sector_share", "share_momentum"]]
-
-    n = len(df)
-    if n:
-        sm = df["share_momentum"]
-        print(f"Share momentum: {n} stocks scored | "
-              f"median={sm.median():+.3%} | p25={sm.quantile(0.25):+.3%} · p75={sm.quantile(0.75):+.3%}")
-    else:
-        print("Share momentum: 0 stocks scored — price/shares history thin.")
-
-    if dry_run:
-        print("Dry run — not saving.")
-        return n
-
-    rows = upsert_df(df, "share_momentum_scores")
-    print(f"Saved {rows} rows to share_momentum_scores")
-    return rows
+    return _annual.save(_compute(*_load_data()), "share_momentum_scores", "Share momentum",
+                        "share_momentum", dry_run, fmt="+.3%")
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--dry-run", action="store_true")
-    args = parser.parse_args()
-    compute(dry_run=args.dry_run)
+    _annual.cli(compute)

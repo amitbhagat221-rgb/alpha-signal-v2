@@ -34,7 +34,6 @@ import json
 from datetime import date as _date
 from typing import Optional
 
-import pandas as pd
 
 from db import read_sql, get_db
 from scoring.health_score import compute_uhs, rollup_picks_uhs

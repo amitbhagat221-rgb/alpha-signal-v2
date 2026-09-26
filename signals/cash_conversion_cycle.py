@@ -30,16 +30,10 @@ Usage:
     python -m signals.cash_conversion_cycle --dry-run
 """
 
-import argparse
-from datetime import date
-
 import numpy as np
 import pandas as pd
 
-from config import SCREEN
-from db import read_sql, upsert_df
-
-FINANCIAL_SECTORS = set(SCREEN["financial_sectors"])
+from signals import _annual
 
 REQUIRED_ITEMS = [
     "Sales",
@@ -55,22 +49,7 @@ MIN_SALES_CR = 50.0
 
 
 def _load_data():
-    placeholders = ",".join("?" for _ in FINANCIAL_SECTORS)
-    stocks = read_sql(
-        f"SELECT sid, sector FROM stocks WHERE sector NOT IN ({placeholders})",
-        params=list(FINANCIAL_SECTORS),
-    )
-    sids = set(stocks["sid"])
-
-    fund = read_sql(
-        "SELECT sid, period_end, line_item, value "
-        "FROM fundamentals_screener "
-        "WHERE period_type = 'annual' AND line_item IN "
-        f"({','.join('?' for _ in REQUIRED_ITEMS)})",
-        params=REQUIRED_ITEMS,
-    )
-    fund = fund[fund["sid"].isin(sids)].copy()
-    return stocks, fund
+    return _annual.load(REQUIRED_ITEMS)
 
 
 def _compute(stocks, fund):
@@ -109,33 +88,9 @@ def _compute(stocks, fund):
 
 
 def compute(dry_run=False):
-    stocks, fund = _load_data()
-    df = _compute(stocks, fund)
-
-    df["snapshot_date"] = date.today().isoformat()
-    df = df[["sid", "snapshot_date", "period_end", "dso", "dio", "dpo", "ccc"]]
-
-    n = len(df)
-    if n:
-        c = df["ccc"]
-        print(f"CCC: {n} stocks scored | "
-              f"median={c.median():.1f}d | "
-              f"p25={c.quantile(0.25):.1f}d | p75={c.quantile(0.75):.1f}d | "
-              f"negative={(c < 0).sum()}")
-    else:
-        print("CCC: 0 stocks scored — fundamentals_screener has no qualifying annual rows yet.")
-
-    if dry_run:
-        print("Dry run — not saving.")
-        return n
-
-    rows = upsert_df(df, "cash_conversion_cycle_scores")
-    print(f"Saved {rows} rows to cash_conversion_cycle_scores")
-    return rows
+    return _annual.save(_compute(*_load_data()), "cash_conversion_cycle_scores", "CCC", "ccc",
+                        dry_run, fmt=".1f", unit="d")
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--dry-run", action="store_true")
-    args = parser.parse_args()
-    compute(dry_run=args.dry_run)
+    _annual.cli(compute)

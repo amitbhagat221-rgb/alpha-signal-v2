@@ -15,35 +15,17 @@ Usage:
     python -m signals.nwc_to_revenue
 """
 
-import argparse
-from datetime import date
-
 import numpy as np
 import pandas as pd
 
-from config import SCREEN
-from db import read_sql, upsert_df
+from signals import _annual
 
-FINANCIAL_SECTORS = set(SCREEN["financial_sectors"])
 REQUIRED_ITEMS = ["Sales", "Receivables", "Inventory", "Trade Payables"]
 MIN_SALES_CR = 50.0
 
 
 def _load_data():
-    placeholders = ",".join("?" for _ in FINANCIAL_SECTORS)
-    stocks = read_sql(
-        f"SELECT sid, sector FROM stocks WHERE sector NOT IN ({placeholders})",
-        params=list(FINANCIAL_SECTORS),
-    )
-    sids = set(stocks["sid"])
-    fund = read_sql(
-        "SELECT sid, period_end, line_item, value "
-        "FROM fundamentals_screener WHERE period_type = 'annual' "
-        f"AND line_item IN ({','.join('?' for _ in REQUIRED_ITEMS)})",
-        params=REQUIRED_ITEMS,
-    )
-    fund = fund[fund["sid"].isin(sids)].copy()
-    return stocks, fund
+    return _annual.load(REQUIRED_ITEMS)
 
 
 def _compute(stocks, fund):
@@ -66,26 +48,9 @@ def _compute(stocks, fund):
 
 
 def compute(dry_run=False):
-    stocks, fund = _load_data()
-    df = _compute(stocks, fund)
-    df["snapshot_date"] = date.today().isoformat()
-    df = df[["sid", "snapshot_date", "period_end", "nwc_to_revenue"]]
-    n = len(df)
-    if n:
-        v = df["nwc_to_revenue"]
-        print(f"NWC/Revenue: {n} stocks | median={v.median():.3f} | p25={v.quantile(0.25):.3f} | p75={v.quantile(0.75):.3f}")
-    else:
-        print("NWC/Revenue: 0 stocks scored.")
-    if dry_run:
-        print("Dry run — not saving.")
-        return n
-    rows = upsert_df(df, "nwc_to_revenue_scores")
-    print(f"Saved {rows} rows to nwc_to_revenue_scores")
-    return rows
+    return _annual.save(_compute(*_load_data()), "nwc_to_revenue_scores", "NWC/Revenue", "nwc_to_revenue",
+                        dry_run, fmt=".3f")
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--dry-run", action="store_true")
-    args = parser.parse_args()
-    compute(dry_run=args.dry_run)
+    _annual.cli(compute)

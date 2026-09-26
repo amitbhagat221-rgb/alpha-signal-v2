@@ -31,16 +31,10 @@ Usage:
     python -m signals.roiic --dry-run
 """
 
-import argparse
-from datetime import date
-
 import numpy as np
 import pandas as pd
 
-from config import SCREEN
-from db import read_sql, upsert_df
-
-FINANCIAL_SECTORS = set(SCREEN["financial_sectors"])
+from signals import _annual
 
 REQUIRED_ITEMS = [
     "Profit before tax",
@@ -59,22 +53,7 @@ ROIIC_CAP = 5.0
 
 
 def _load_data():
-    placeholders = ",".join("?" for _ in FINANCIAL_SECTORS)
-    stocks = read_sql(
-        f"SELECT sid, sector FROM stocks WHERE sector NOT IN ({placeholders})",
-        params=list(FINANCIAL_SECTORS),
-    )
-    sids = set(stocks["sid"])
-
-    fund = read_sql(
-        "SELECT sid, period_end, line_item, value "
-        "FROM fundamentals_screener "
-        "WHERE period_type = 'annual' AND line_item IN "
-        f"({','.join('?' for _ in REQUIRED_ITEMS)})",
-        params=REQUIRED_ITEMS,
-    )
-    fund = fund[fund["sid"].isin(sids)].copy()
-    return stocks, fund
+    return _annual.load(REQUIRED_ITEMS)
 
 
 def _compute(stocks, fund):
@@ -128,33 +107,9 @@ def _compute(stocks, fund):
 
 
 def compute(dry_run=False):
-    stocks, fund = _load_data()
-    df = _compute(stocks, fund)
-
-    df["snapshot_date"] = date.today().isoformat()
-    df = df[["sid", "snapshot_date", "period_end", "delta_nopat", "delta_ic", "roiic"]]
-
-    n = len(df)
-    if n:
-        r = df["roiic"]
-        print(f"ROIIC: {n} stocks scored | "
-              f"median={r.median():.3f} | "
-              f"p25={r.quantile(0.25):.3f} | p75={r.quantile(0.75):.3f} | "
-              f"negative={(r < 0).sum()}")
-    else:
-        print("ROIIC: 0 stocks scored — fundamentals_screener thin or no qualifying ΔIC.")
-
-    if dry_run:
-        print("Dry run — not saving.")
-        return n
-
-    rows = upsert_df(df, "roiic_scores")
-    print(f"Saved {rows} rows to roiic_scores")
-    return rows
+    return _annual.save(_compute(*_load_data()), "roiic_scores", "ROIIC", "roiic",
+                        dry_run, fmt=".3f")
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--dry-run", action="store_true")
-    args = parser.parse_args()
-    compute(dry_run=args.dry_run)
+    _annual.cli(compute)

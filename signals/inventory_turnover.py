@@ -25,14 +25,11 @@ Usage:
     python -m signals.inventory_turnover --dry-run
 """
 
-import argparse
-from datetime import date
-
 import numpy as np
 import pandas as pd
 
 from config import SCREEN
-from db import read_sql, upsert_df
+from signals import _annual
 
 # Sectors where inventory is structurally absent or meaningless
 EXCLUDED_SECTORS = set(SCREEN["financial_sectors"]) | {
@@ -46,20 +43,7 @@ MIN_AVG_INVENTORY_CR = 1.0
 
 
 def _load_data():
-    placeholders = ",".join("?" for _ in EXCLUDED_SECTORS)
-    stocks = read_sql(
-        f"SELECT sid, sector FROM stocks WHERE sector NOT IN ({placeholders})",
-        params=list(EXCLUDED_SECTORS),
-    )
-    sids = set(stocks["sid"])
-
-    fund = read_sql(
-        "SELECT sid, period_end, line_item, value "
-        "FROM fundamentals_screener "
-        "WHERE period_type = 'annual' AND line_item IN ('Sales', 'Inventory')"
-    )
-    fund = fund[fund["sid"].isin(sids)].copy()
-    return stocks, fund
+    return _annual.load(["Sales", "Inventory"], EXCLUDED_SECTORS)
 
 
 def _compute(stocks, fund):
@@ -99,32 +83,9 @@ def _compute(stocks, fund):
 
 
 def compute(dry_run=False):
-    stocks, fund = _load_data()
-    df = _compute(stocks, fund)
-
-    df["snapshot_date"] = date.today().isoformat()
-    df = df[["sid", "snapshot_date", "period_end", "inventory_turnover", "sector_p50", "relative_turnover"]]
-
-    n = len(df)
-    if n:
-        rt = df["relative_turnover"]
-        print(f"Inventory turnover: {n} stocks scored | "
-              f"absolute median={df['inventory_turnover'].median():.2f}× | "
-              f"relative median={rt.median():.2f} | p25={rt.quantile(0.25):.2f} | p75={rt.quantile(0.75):.2f}")
-    else:
-        print("Inventory turnover: 0 stocks scored.")
-
-    if dry_run:
-        print("Dry run — not saving.")
-        return n
-
-    rows = upsert_df(df, "inventory_turnover_scores")
-    print(f"Saved {rows} rows to inventory_turnover_scores")
-    return rows
+    return _annual.save(_compute(*_load_data()), "inventory_turnover_scores", "Inventory turnover", "relative_turnover",
+                        dry_run, fmt=".3f")
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--dry-run", action="store_true")
-    args = parser.parse_args()
-    compute(dry_run=args.dry_run)
+    _annual.cli(compute)

@@ -23,34 +23,15 @@ Usage:
     python -m signals.sales_growth_relative --dry-run
 """
 
-import argparse
-from datetime import date
-
-import numpy as np
 import pandas as pd
 
-from config import SCREEN
-from db import read_sql, upsert_df
+from signals import _annual
 
-FINANCIAL_SECTORS = set(SCREEN["financial_sectors"])
 SMOOTH_YEARS = 3
 
 
 def _load_data():
-    placeholders = ",".join("?" for _ in FINANCIAL_SECTORS)
-    stocks = read_sql(
-        f"SELECT sid, sector FROM stocks WHERE sector NOT IN ({placeholders})",
-        params=list(FINANCIAL_SECTORS),
-    )
-    sids = set(stocks["sid"])
-
-    fund = read_sql(
-        "SELECT sid, period_end, value "
-        "FROM fundamentals_screener "
-        "WHERE period_type = 'annual' AND line_item = 'Sales'"
-    )
-    fund = fund[fund["sid"].isin(sids)].copy()
-    return stocks, fund
+    return _annual.load(["Sales"])
 
 
 def _compute(stocks, fund):
@@ -82,32 +63,9 @@ def _compute(stocks, fund):
 
 
 def compute(dry_run=False):
-    stocks, fund = _load_data()
-    df = _compute(stocks, fund)
-
-    df["snapshot_date"] = date.today().isoformat()
-    df = df[["sid", "snapshot_date", "period_end", "sales_growth", "sector_median", "relative_growth"]]
-
-    n = len(df)
-    if n:
-        rg = df["relative_growth"]
-        print(f"Sales growth (sector-relative): {n} stocks scored | "
-              f"absolute median={df['sales_growth'].median():.2%} | "
-              f"relative p25={rg.quantile(0.25):.2%} · p75={rg.quantile(0.75):.2%}")
-    else:
-        print("Sales growth (sector-relative): 0 stocks scored.")
-
-    if dry_run:
-        print("Dry run — not saving.")
-        return n
-
-    rows = upsert_df(df, "sales_growth_relative_scores")
-    print(f"Saved {rows} rows to sales_growth_relative_scores")
-    return rows
+    return _annual.save(_compute(*_load_data()), "sales_growth_relative_scores", "Sales growth (sector-relative)", "relative_growth",
+                        dry_run, fmt=".3f")
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--dry-run", action="store_true")
-    args = parser.parse_args()
-    compute(dry_run=args.dry_run)
+    _annual.cli(compute)

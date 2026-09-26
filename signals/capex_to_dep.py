@@ -20,16 +20,11 @@ Usage:
     python -m signals.capex_to_dep
 """
 
-import argparse
-from datetime import date
-
 import numpy as np
 import pandas as pd
 
-from config import SCREEN
-from db import read_sql, upsert_df
+from signals import _annual
 
-FINANCIAL_SECTORS = set(SCREEN["financial_sectors"])
 REQUIRED_ITEMS = ["Net Block", "Capital Work in Progress", "Depreciation"]
 SMOOTH_YEARS = 3
 MIN_DEPRECIATION_CR = 1.0
@@ -37,20 +32,7 @@ RATIO_CAP = 20.0
 
 
 def _load_data():
-    placeholders = ",".join("?" for _ in FINANCIAL_SECTORS)
-    stocks = read_sql(
-        f"SELECT sid, sector FROM stocks WHERE sector NOT IN ({placeholders})",
-        params=list(FINANCIAL_SECTORS),
-    )
-    sids = set(stocks["sid"])
-    fund = read_sql(
-        "SELECT sid, period_end, line_item, value "
-        "FROM fundamentals_screener WHERE period_type = 'annual' "
-        f"AND line_item IN ({','.join('?' for _ in REQUIRED_ITEMS)})",
-        params=REQUIRED_ITEMS,
-    )
-    fund = fund[fund["sid"].isin(sids)].copy()
-    return stocks, fund
+    return _annual.load(REQUIRED_ITEMS)
 
 
 def _compute(stocks, fund):
@@ -82,26 +64,9 @@ def _compute(stocks, fund):
 
 
 def compute(dry_run=False):
-    stocks, fund = _load_data()
-    df = _compute(stocks, fund)
-    df["snapshot_date"] = date.today().isoformat()
-    df = df[["sid", "snapshot_date", "period_end", "capex_to_dep"]]
-    n = len(df)
-    if n:
-        v = df["capex_to_dep"]
-        print(f"Capex/Dep: {n} stocks | median={v.median():.2f}x | p25={v.quantile(0.25):.2f}x | p75={v.quantile(0.75):.2f}x")
-    else:
-        print("Capex/Dep: 0 stocks scored.")
-    if dry_run:
-        print("Dry run — not saving.")
-        return n
-    rows = upsert_df(df, "capex_to_dep_scores")
-    print(f"Saved {rows} rows to capex_to_dep_scores")
-    return rows
+    return _annual.save(_compute(*_load_data()), "capex_to_dep_scores", "Capex/Dep", "capex_to_dep",
+                        dry_run, fmt=".2f", unit="x")
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--dry-run", action="store_true")
-    args = parser.parse_args()
-    compute(dry_run=args.dry_run)
+    _annual.cli(compute)
