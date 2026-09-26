@@ -49,9 +49,14 @@ def _ttl_cache(ttl_seconds, max_entries=512):
 
 # Persistent TTL cache — same as _ttl_cache but also pickles to disk so a
 # systemd restart doesn't reset the cache. First call after restart loads
-# from disk (~ms) instead of recomputing (~5-17s). Background refresh kicks
-# off the next time TTL expires. Use for the heaviest cockpit endpoints.
+# from disk (~ms) instead of recomputing (~5-17s). Use for the heaviest
+# cockpit endpoints.
 # 2026-05-25: added after /system cold-restart was 28-39s.
+# 2026-09-26: stale-while-revalidate. Past the TTL the stale value is returned
+# at once and ONE daemon thread per key recomputes it; before this an expired
+# /system recomputed inline (40-68s on the live DB). Only a true cold start
+# (no memo, no pickle) or `_force=True` computes inline — and concurrent cold
+# callers of the same key share one compute via the per-key lock.
 # COCKPIT_CACHE_DIR overrides the location so test instances (worktrees, ad-hoc
 # uvicorn on another port) never write pickles into prod's cache.
 import os as _os
@@ -61,11 +66,14 @@ _PERSISTED_CACHE_DIR = Path(
 )
 
 
-def _persisted_cache(ttl_seconds, name=None):
+def _persisted_cache(ttl_seconds, name=None, max_entries=128):
     """Disk-backed sibling of _ttl_cache. Keyed by (args, kwargs) — each unique
     arg combo gets its own pickle file. Use sparingly for heavy functions where
-    the arg space is small (e.g. news pool keyed by hours ∈ {24,72,168,720})."""
+    the arg space is small (e.g. news pool keyed by hours ∈ {24,72,168,720}).
+    `max_entries` bounds the in-process memo (oldest evicted first)."""
     import pickle as _pickle
+    import threading
+    import traceback
 
     def _key_to_slot(slot_base, args, kwargs):
         if not args and not kwargs:
@@ -80,6 +88,12 @@ def _persisted_cache(ttl_seconds, name=None):
     def decorator(fn):
         slot_base = name or f"{fn.__module__}.{fn.__name__}"
         memo: dict = {}  # key -> (value, mtime)
+        locks: dict = {}  # key -> Lock held while that key computes
+        locks_guard = threading.Lock()
+
+        def _lock_for(slot):
+            with locks_guard:
+                return locks.setdefault(slot, threading.Lock())
 
         def _path_for(slot):
             return _PERSISTED_CACHE_DIR / f"{slot}.pkl"
@@ -96,30 +110,69 @@ def _persisted_cache(ttl_seconds, name=None):
                 return None, 0
 
         def _save(slot, payload, mtime):
+            # Write-then-rename so a reader (another worker / the other app)
+            # never unpickles a half-written file.
             try:
                 _PERSISTED_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-                with _path_for(slot).open("wb") as f:
+                tmp = _path_for(slot).with_suffix(f".tmp{threading.get_ident()}")
+                with tmp.open("wb") as f:
                     _pickle.dump((payload, mtime), f)
+                tmp.replace(_path_for(slot))
             except Exception:
                 pass
+
+        def _store(slot, value, mtime):
+            memo[slot] = (value, mtime)
+            if len(memo) > max_entries:
+                for k, _ in sorted(memo.items(), key=lambda kv: kv[1][1])[: len(memo) - max_entries]:
+                    memo.pop(k, None)
+            _save(slot, value, mtime)
+
+        def _compute(slot, args, kwargs):
+            now = _time.time()
+            value = fn(*args, **kwargs)
+            _store(slot, value, now)
+            return value
+
+        def _refresh_in_background(slot, args, kwargs):
+            lock = _lock_for(slot)
+            if not lock.acquire(blocking=False):
+                return  # a refresh for this key is already running
+
+            def _run():
+                try:
+                    _compute(slot, args, kwargs)
+                except Exception:
+                    print(f"  [persisted-cache] background refresh of {slot} failed:")
+                    traceback.print_exc()
+                finally:
+                    lock.release()
+
+            threading.Thread(target=_run, daemon=True, name=f"swr:{slot}").start()
 
         @functools.wraps(fn)
         def wrapper(*args, **kwargs):
             force = kwargs.pop("_force", False)
-            now = _time.time()
             slot = _key_to_slot(slot_base, args, kwargs)
+            if force:
+                with _lock_for(slot):
+                    return _compute(slot, args, kwargs)
             entry = memo.get(slot)
-            if entry is None and not force:
+            if entry is None:
                 payload, mtime = _load(slot)
                 if payload is not None:
                     entry = (payload, mtime)
                     memo[slot] = entry
-            if not force and entry is not None and (now - entry[1]) < ttl_seconds:
+            if entry is not None:
+                if (_time.time() - entry[1]) >= ttl_seconds:
+                    _refresh_in_background(slot, args, kwargs)
                 return entry[0]
-            value = fn(*args, **kwargs)
-            memo[slot] = (value, now)
-            _save(slot, value, now)
-            return value
+            # Cold: nothing cached anywhere — compute inline, once per key.
+            with _lock_for(slot):
+                entry = memo.get(slot)
+                if entry is not None:
+                    return entry[0]  # a concurrent caller just computed it
+                return _compute(slot, args, kwargs)
 
         wrapper.cache_clear = lambda: memo.clear()
         return wrapper
