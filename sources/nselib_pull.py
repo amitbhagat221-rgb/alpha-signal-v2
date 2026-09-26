@@ -1,5 +1,5 @@
 """
-Alpha Signal v2 — Unified pulls via nselib + mfapi.in + NSE direct cookie session.
+Alpha Signal v2 — Unified pulls via nselib + NSE direct cookie session.
 
 One module, one set of helper functions, all the new sources from the
 2026-05-03 discovery probe (see docs/reference/data-playbook.md):
@@ -9,7 +9,11 @@ One module, one set of helper functions, all the new sources from the
   - nselib.capital_market.corporate_actions_for_equity   (2+ years)
   - nselib.derivatives.participant_wise_open_interest    (Dec 2025+)
   - NSE direct: fiidiiTradeReact                (cash flow, today's row)
-  - mfapi.in                                    (~13 years MF NAV)
+
+MF NAV is NOT here: sources.mf_nav_daily (AMFI, daily) + sources.mf_nav_backfill
+(mfapi.in history) own mf_nav_history / mf_schemes. The old `--source mf_nav`
+(14 hand-listed codes, 2 of them duplicates) raced mf_nav_backfill's mf_schemes
+upsert and was retired 2026-09-26.
 
 All ingests:
   • Chunk long ranges by month (NSE rate limits + API timeouts)
@@ -23,8 +27,12 @@ Usage:
     python -m sources.nselib_pull --source short     --months 24
     python -m sources.nselib_pull --source fii_pos   # latest available (~5mo)
     python -m sources.nselib_pull --source fii_cash  # today's row (forward only)
-    python -m sources.nselib_pull --source mf_nav    --top 50
     python -m sources.nselib_pull --source all       # everything (long-running)
+
+    # Deep backfill (what sources/historical_backfill.py did, now archived):
+    python -m sources.nselib_pull --source bulk    --start 2021-01-01
+    python -m sources.nselib_pull --source short   --start 2022-01-01
+    python -m sources.nselib_pull --source fii_pos --start 2022-01-01   # skips loaded dates
 """
 
 import argparse
@@ -56,6 +64,12 @@ def _months_back(n_months):
         chunks.append((chunk_start, end))
         cursor = chunk_start - timedelta(days=1)
     return list(reversed(chunks))
+
+
+def _months_since(start):
+    """Month count for _months_back() so its first chunk starts in `start`'s month."""
+    today = date.today()
+    return (today.year - start.year) * 12 + today.month - start.month + 1
 
 
 def _get_sid_map():
@@ -112,7 +126,10 @@ def pull_bulk_deals(months=12):
                 qty = float(str(qty).replace(",", ""))
             except Exception:
                 qty = 0
-            price = r.get("TradePrice / Wght. Avg.Price", 0) or r.get("TradePrice", 0)
+            # nselib's column is 'TradePrice/Wght.Avg.Price' (constants.bulk_deal_data_columns).
+            # The old spaced spelling never matched → price=0 on all 12.8K rows this
+            # wrote for 2025-26; historical_backfill (archived) had it right.
+            price = r.get("TradePrice/Wght.Avg.Price", 0) or r.get("TradePrice / Wght. Avg.Price", 0)
             try:
                 price = float(str(price).replace(",", ""))
             except Exception:
@@ -362,17 +379,19 @@ def compute_earnings_calendar(days_forward=30):
 def pull_fii_positioning(days_back=180):
     """Pull participant_wise_open_interest day by day.
 
-    Endpoint accepts only single trade_date. Available depth is ~Dec 2025+ as of 2026-05-03.
-    Skips weekends and "no data" days (typical NSE holidays).
+    Endpoint accepts only single trade_date. Archive reaches back to 2022 (backfilled
+    via `--start`). Skips weekends, "no data" days (typical NSE holidays) and dates
+    already loaded — so a deep `--start` backfill is re-runnable.
     """
     from nselib import derivatives as dv
     today = date.today()
     total = 0
     dates_tried = 0
+    have = set(read_sql("SELECT DISTINCT trade_date FROM fii_dii_positioning")["trade_date"])
 
     for delta in range(days_back):
         d = today - timedelta(days=delta)
-        if d.weekday() >= 5:  # Sat/Sun
+        if d.weekday() >= 5 or d.isoformat() in have:  # Sat/Sun or already loaded
             continue
         d_str = d.strftime("%d-%m-%Y")
         try:
@@ -455,74 +474,6 @@ def pull_fii_cash_flow():
     n = _insert_or_ignore(df, "fii_dii_cash_flow")
     print(f"  fii_cash: ✅ {len(rows)} rows fetched → {n} new")
     return n
-
-
-# ───────────────────────── Move 5: MF NAV ─────────────────────────
-
-# Top 50 equity-flavored schemes (curated for liquidity + AUM coverage).
-# Direct plans preferred (lower expense ratio = cleaner NAV trend).
-# Codes from mfapi.in/AMFI scheme list. Adjust as fund houses launch/close.
-TOP_EQUITY_SCHEME_CODES = [
-    "122639",  # Parag Parikh Flexi Cap Direct
-    "120505",  # Mirae Asset Large Cap Direct
-    "118989",  # SBI Bluechip Direct
-    "120465",  # Axis Bluechip Direct
-    "118945",  # ICICI Pru Bluechip Direct
-    "119551",  # HDFC Top 100 Direct
-    "120821",  # Kotak Bluechip Direct
-    "120586",  # Nippon Large Cap Direct
-    "118955",  # ICICI Pru Value Discovery Direct
-    "120484",  # Axis Midcap Direct
-    "118566",  # Kotak Emerging Equity Direct
-    "118533",  # SBI Magnum Mid Cap Direct
-    "118566",  # repeat (filler — replace if dup)
-    "120465",  # repeat
-]
-
-
-def pull_mf_nav(scheme_codes=None, top=50):
-    """Pull NAV history from mfapi.in for each scheme code."""
-    if scheme_codes is None:
-        scheme_codes = TOP_EQUITY_SCHEME_CODES[:top]
-
-    total = 0
-    for code in scheme_codes:
-        try:
-            r = requests.get(f"https://api.mfapi.in/mf/{code}", timeout=20)
-            r.raise_for_status()
-            j = r.json()
-        except Exception as e:
-            print(f"  mf {code}: ❌ {str(e)[:100]}")
-            time.sleep(DELAY_SEC)
-            continue
-
-        meta = j.get("meta", {})
-        # Persist scheme metadata
-        with get_db() as conn:
-            conn.execute(
-                "INSERT OR REPLACE INTO mf_schemes "
-                "(scheme_code, scheme_name, fund_house, scheme_type, direct_or_regular, growth_or_dividend, is_top50) "
-                "VALUES (?, ?, ?, ?, ?, ?, 1)",
-                (code, meta.get("scheme_name", ""), meta.get("fund_house", ""),
-                 meta.get("scheme_category", ""), meta.get("scheme_type", ""), "Growth", )
-            )
-
-        nav_data = j.get("data", [])
-        rows = []
-        for nav_row in nav_data:
-            try:
-                d = pd.to_datetime(nav_row["date"], format="%d-%m-%Y").date().isoformat()
-                v = float(nav_row["nav"])
-            except Exception:
-                continue
-            rows.append({"scheme_code": code, "nav_date": d, "nav": v})
-
-        if rows:
-            n = _insert_or_ignore(pd.DataFrame(rows), "mf_nav_history")
-            total += n
-            print(f"  mf {code} ({meta.get('scheme_name', '')[:40]}): ✅ {len(rows)} NAVs → {n} new")
-        time.sleep(DELAY_SEC * 0.5)  # mfapi.in is friendly
-    return total
 
 
 # ───────────────────────── Move 6: NSE Smart-Beta indices history ─────────────────────────
@@ -730,11 +681,16 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--source", required=True,
                         choices=["bulk", "corp", "short", "events", "fii_pos", "fii_cash",
-                                 "mf_nav", "indices", "surveillance", "all", "daily_forward"])
+                                 "indices", "surveillance", "all", "daily_forward"])
     parser.add_argument("--months", type=int, default=12)
     parser.add_argument("--days-back", type=int, default=180, help="for fii_pos")
-    parser.add_argument("--top", type=int, default=50, help="for mf_nav")
+    parser.add_argument("--start", help="YYYY-MM-DD: deep backfill from this date (overrides "
+                                        "--months / --days-back; replaces sources.historical_backfill)")
     args = parser.parse_args()
+    if args.start:
+        start = date.fromisoformat(args.start)
+        args.months = _months_since(start)
+        args.days_back = (date.today() - start).days + 1
 
     if args.source in ("bulk", "all"):
         print(f"\n=== Bulk deals ({args.months} months) ===")
@@ -764,11 +720,6 @@ def main():
     if args.source in ("fii_cash", "all"):
         print(f"\n=== FII/DII cash flow (today's row) ===")
         pull_fii_cash_flow()
-
-    if args.source in ("mf_nav", "all"):
-        print(f"\n=== MF NAV (top {args.top}) ===")
-        n = pull_mf_nav(top=args.top)
-        print(f"  → {n} new mf_nav_history rows")
 
     if args.source in ("indices", "all"):
         print(f"\n=== NSE Smart-Beta indices ({args.months} months back) ===")

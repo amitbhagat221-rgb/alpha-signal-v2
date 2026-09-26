@@ -8,8 +8,8 @@
 - Sonnet failures were indistinguishable from rejections
 - When the 2026-04-10 run hit budget cap, no way to know what had processed
 
-**Verifier required.** `python -m sources.verify_classifier_trace` mocks all four code paths and asserts state. Run after any classifier change.
+**Verifier required.** `python -m sources.verify_classifier_trace` mocks all four code paths and asserts state. Run after any classifier change. *(2026-09-26: archived to `_archive/sources/verify_classifier_trace.py` — it INSERTs/DELETEs in the live regulatory tables; port it to an isolated-DB test before running again.)*
 
 **Trade-offs.** One-shot ALTER TABLE + backfill. Every classifier call must update the column — no "forget to update" code paths.
 
-**References.** `sources/regulatory_classifier.py` · `sources/verify_classifier_trace.py`
+**References.** `sources/regulatory_classifier.py` · `_archive/sources/verify_classifier_trace.py`

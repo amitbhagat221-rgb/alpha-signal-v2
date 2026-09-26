@@ -95,7 +95,7 @@ Pre-fix: PIT was ~36 months for fundamentals, ~52 weekly Fridays for behavioural
 
 ### Shipped
 1. ✅ **Extended monthly PIT 7 → 60 snapshots** via `tools.reconstruct_pit --months 60`. New depth: **147 distinct snapshot dates** (60 monthly 2022-08 → 2026-05 + 87 weekly Fridays). 112,608 rows written.
-2. ✅ **Behavioural backfill already in raw tables** (bulk_deals 2021+, short_selling 2022+, FII F&O 2022+ from yesterday's `sources/historical_backfill.py`). Now picked up by deeper PIT reconstruction.
+2. ✅ **Behavioural backfill already in raw tables** (bulk_deals 2021+, short_selling 2022+, FII F&O 2022+ from yesterday's `sources/historical_backfill.py`, archived 2026-09-26 to `_archive/sources/` — use `python -m sources.nselib_pull --source … --start` now). Now picked up by deeper PIT reconstruction.
 3. ✅ **Backtest re-run** with deeper window — `tools.backtest_pit` wrote 197 rows to `pit_ic_by_tier_v2`. Most factors now have n=18-40 (was n=6).
 4. ✅ **n < 12 INSUFFICIENT verdict** — `cockpit.api.get_factor_health` classifies factors with `n_periods < 12` as INSUFFICIENT regardless of t-stat. Source selection also fixed: prefer adequate-n sources (v1_archive when v2_recompute has n<12).
 5. ✅ **Bootstrap 95% CI on t-stat** — `tools.backtest_pit._bootstrap_t_ci()` resamples IC series B=1000 times, percentile CI. Columns `t_stat_ci_lo/_hi` added to `pit_ic_by_tier_v2`. Cockpit displays `95% CI [lo, hi]` inline.
