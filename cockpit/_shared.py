@@ -52,7 +52,13 @@ def _ttl_cache(ttl_seconds, max_entries=512):
 # from disk (~ms) instead of recomputing (~5-17s). Background refresh kicks
 # off the next time TTL expires. Use for the heaviest cockpit endpoints.
 # 2026-05-25: added after /system cold-restart was 28-39s.
-_PERSISTED_CACHE_DIR = Path(__file__).resolve().parent.parent / "data" / ".cockpit_cache"
+# COCKPIT_CACHE_DIR overrides the location so test instances (worktrees, ad-hoc
+# uvicorn on another port) never write pickles into prod's cache.
+import os as _os
+_PERSISTED_CACHE_DIR = Path(
+    _os.environ.get("COCKPIT_CACHE_DIR")
+    or Path(__file__).resolve().parent.parent / "data" / ".cockpit_cache"
+)
 
 
 def _persisted_cache(ttl_seconds, name=None):
