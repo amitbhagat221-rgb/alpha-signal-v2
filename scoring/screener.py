@@ -73,13 +73,17 @@ def _load_signals():
             print(f"  Excluded {dropped} InvIT/REIT/trust instruments from screener universe")
         stocks = stocks[~trust_mask].reset_index(drop=True)
 
+    # The full price history, loaded ONCE and passed to every price-based inline
+    # signal (was re-read by four of them). Carries adj_close — split/bonus-adjusted
+    # exactly as the PIT backtest adjusts it (signals/_prices.py).
+    from signals._prices import load_prices
+    prices = load_prices()
+
     # Per-sid price-row count, used by the has-prices pick-eligibility gate.
     # A stock with zero (or near-zero) price history can't be charted, can't
     # have momentum/EY/B-P computed, and isn't really actionable even if it
     # scores well on fundamentals alone.
-    price_counts = read_sql(
-        "SELECT sid, COUNT(*) AS price_rows FROM stock_prices WHERE close > 0 GROUP BY sid"
-    )
+    price_counts = prices.groupby("sid").size().rename("price_rows").reset_index()
 
     # Per-sid quarterly_income row count → fundamental_coverage. INPUT-side
     # coverage (vs weight_coverage which is OUTPUT-side). 2026-05-24 audit:
@@ -146,13 +150,16 @@ def _load_signals():
         "AND (sid, trade_date) IN (SELECT sid, MAX(trade_date) FROM fno_iv_history GROUP BY sid) "
         f"AND trade_date >= {age_cutoff_sql}"
     )
+    # Same bound + precision the PIT factor carries (signals/fno_iv_factors.py).
+    from signals.fno_iv_factors import SKEW_CLIP
+    iv_skew["iv_skew_25d"] = iv_skew["iv_skew_25d"].clip(*SKEW_CLIP).round(4)
 
     # Inline signals (no DB table — compute on the fly)
     from signals.momentum import compute_momentum
     from signals.earnings_yield import compute_earnings_yield
     from signals.delivery_anomaly import compute_delivery_anomaly_z
 
-    momentum = compute_momentum()
+    momentum = compute_momentum(prices)
     earnings_yield = compute_earnings_yield()
     delivery_anomaly = compute_delivery_anomaly_z()
 
@@ -162,7 +169,7 @@ def _load_signals():
     # tier weight in config.SIGNAL_WEIGHTS picks it up; other tiers renormalise over
     # their present signals. Sector-constant by design (the tilt).
     from signals.sector_tilt import compute_sector_tilt
-    sector_tilt = compute_sector_tilt()
+    sector_tilt = compute_sector_tilt(prices=prices)
 
     # Governance resignation (ADR 0042) — weighted trailing-365d senior/auditor
     # resignation intensity off the (kept-current) BSE stream. Reindexed to the full
@@ -173,7 +180,8 @@ def _load_signals():
     governance = compute_governance_resignation(universe_sids=stocks["sid"].tolist())
 
     # Book-to-price: total_equity / (shares_outstanding * close_price)
-    book_to_price = _compute_book_to_price()
+    from signals.book_to_price import compute_book_to_price
+    book_to_price = compute_book_to_price()
 
     # Announcement-window CAR (ADR 0050, PEAD-via-CAR) — market-adjusted [−1,+1] CAR
     # around the latest BSE Result print as an earnings-surprise proxy. Computed inline
@@ -183,7 +191,7 @@ def _load_signals():
     # so eligible_coverage renormalizes). Wired LARGE (t=2.23, its strongest clean factor)
     # + SMALL (t=3.74, orthogonal max|ρ|≈0.04 vs the SMALL cluster). MID t=1.20 DROP → 0 weight.
     from signals.announcement_car import compute_announcement_car
-    announcement_car = compute_announcement_car()
+    announcement_car = compute_announcement_car(prices=prices)
 
     # eps_revision_yoy (plan 0012 C1) — YoY change in the latest forecast_history
     # metric='eps' snapshot vs ~12mo prior (real forward analyst EPS estimates;
@@ -200,8 +208,9 @@ def _load_signals():
     # already computed above (no recomputation). Validated SMALL t=3.32 on the
     # clean panel, but NOT in config.SIGNAL_WEIGHTS — computed, ZERO weight,
     # pending human promotion review (plan 0012 C2).
-    from signals.value_composite import compute_value_composite
-    value_composite = compute_value_composite(earnings_yield, book_to_price, stocks)
+    from signals.value_composite import compute_position_52w, compute_value_composite
+    value_composite = compute_value_composite(earnings_yield, book_to_price, stocks,
+                                              position_52w=compute_position_52w(prices))
 
     # Merge everything onto stocks
     df = stocks.copy()
@@ -225,6 +234,10 @@ def _load_signals():
     df = df.merge(price_counts, on="sid", how="left")
     df["price_rows"] = df["price_rows"].fillna(0).astype(int)
 
+    # Live values of the factors the backtest validated on the SAME quantity get the
+    # backtest's range rule: out-of-range → NaN (discarded, not clipped).
+    factors.discard_out_of_range(df, factors.LIVE_PIT_COLS)
+
     df = df.merge(fundamental_counts, on="sid", how="left")
     df["quarters_present"] = df["quarters_present"].fillna(0).astype(int)
     df["fundamental_coverage"] = (df["quarters_present"] / 8.0).clip(upper=1.0)
@@ -246,29 +259,9 @@ def _load_signals():
 
 
 def _compute_book_to_price():
-    """Compute B/P = book value per share / price."""
-    bs = read_sql(
-        "SELECT sid, total_equity, shares_outstanding FROM annual_balance_sheet "
-        "WHERE (sid, period) IN (SELECT sid, MAX(period) FROM annual_balance_sheet GROUP BY sid)"
-    )
-    prices = read_sql(
-        "SELECT sid, close FROM stock_prices "
-        "WHERE (sid, date) IN (SELECT sid, MAX(date) FROM stock_prices GROUP BY sid)"
-    )
-
-    merged = bs.merge(prices, on="sid")
-    rows = []
-    for _, r in merged.iterrows():
-        bvps = None
-        if (pd.notna(r["total_equity"]) and pd.notna(r["shares_outstanding"])
-                and r["shares_outstanding"] > 0 and r["close"] > 0):
-            bvps = r["total_equity"] / r["shares_outstanding"]
-            bp = bvps / r["close"]
-            rows.append({"sid": r["sid"], "book_to_price": bp})
-        else:
-            rows.append({"sid": r["sid"], "book_to_price": None})
-
-    return pd.DataFrame(rows)
+    """Compute B/P = book value per share / price (signals/book_to_price.py)."""
+    from signals.book_to_price import compute_book_to_price
+    return compute_book_to_price()
 
 
 def _percentile_rank_within_tier(df, col):

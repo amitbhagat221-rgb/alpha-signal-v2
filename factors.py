@@ -38,6 +38,8 @@ No imports of db/config at module level — db.py re-exports the registry views,
 config is only read lazily (weights) — so both can import this module.
 """
 
+import numpy as np
+
 FACTORS = {
 
     # ═══════════════════════════════════════════════════════════════════
@@ -2428,6 +2430,24 @@ VALIDATION_RANGES = {
 }
 PIT_COLUMN_TYPES = {"industry_id": "INTEGER", "piotroski_f": "INTEGER", "macd_bullish": "INTEGER"}
 
+
+def discard_out_of_range(df, cols):
+    """The range rule the validated backtest saw: ±inf and values outside a column's
+    VALIDATION_RANGES become NaN — DISCARDED, never clipped. In place; returns
+    {col: n_out_of_range}. Used by reconstruct_pit._validate_and_clean and, for the
+    same quantities (LIVE_PIT_COLS), by the live screener."""
+    n_out = {}
+    for col in cols:
+        rule = VALIDATION_RANGES.get(col)
+        if col not in df.columns or rule is None:
+            continue
+        lo, hi, _allow_nan = rule
+        df[col] = df[col].replace([np.inf, -np.inf], np.nan)
+        bad = (df[col] < lo) | (df[col] > hi)
+        n_out[col] = int(bad.sum())
+        df.loc[bad, col] = np.nan
+    return n_out
+
 # --signal choices; the default run is every producer.
 PIT_SIGNALS = list(PIT_PRODUCERS) + [a for s in PIT_PRODUCERS.values() for a in s.get("aliases", ())]
 
@@ -2460,6 +2480,10 @@ SCREENER_INPUT_COLS = (
     + list(dict.fromkeys([*SCREENER_COLS.values(), *SCREENER_TIER_COLS.values(), "penalty"]))
     + ["price_rows", "quarters_present", "fundamental_coverage"]
 )
+# Screener columns that ARE their factor's PIT quantity (same name in both, same
+# function computes both) — the live screener applies the PIT range rule to them.
+LIVE_PIT_COLS = [f["screener_col"] for sid, f in FACTORS.items()
+                 if f.get("screener_col") and f["screener_col"] == f.get("replay_col") == pit_column(sid)]
 # Plan 0005 eligibility: weight_key → {description, eligible_sql}.
 SIGNAL_ELIGIBILITY = {f["weight_key"]: f["eligibility"] for f in FACTORS.values() if "eligibility" in f}
 

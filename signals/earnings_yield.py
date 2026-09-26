@@ -25,58 +25,60 @@ import pandas as pd
 from db import read_sql
 
 
-def compute_earnings_yield():
-    """
-    Compute earnings yield (E/P) for all stocks.
-    Returns DataFrame: sid, earnings_yield
-    """
-    # TTM EPS: sum of last 4 quarters
-    qi = read_sql(
-        "SELECT sid, period, end_date, reporting, eps "
-        "FROM quarterly_income ORDER BY sid, end_date"
-    )
-
-    # Prefer consolidated
+def ttm_eps(qi):
+    """{sid: sum of the last 4 quarters' EPS}, consolidated preferred per sid;
+    sids with <4 quarters are absent. `qi` = [sid, end_date, reporting, eps]."""
     has_consol = set(qi[qi["reporting"] == "consolidated"]["sid"])
     qi = qi[
         ((qi["sid"].isin(has_consol)) & (qi["reporting"] == "consolidated"))
         | (~qi["sid"].isin(has_consol))
     ]
-
-    ttm_eps = {}
+    out = {}
     for sid, group in qi.groupby("sid"):
         g = group.sort_values("end_date")
         if len(g) >= 4:
             eps_sum = g.tail(4)["eps"].sum()
             if pd.notna(eps_sum):
-                ttm_eps[sid] = eps_sum
+                out[sid] = eps_sum
+    return out
 
+
+def earnings_yield(qi, close):
+    """E/P = TTM EPS / close. `close` = [sid, close_price]; NaN where the close is
+    missing or ≤ 0. Returns DataFrame[sid, earnings_yield] for sids with a TTM EPS.
+    Shared by the live screener and tools/reconstruct_pit:pit_earnings_yield."""
+    eps = ttm_eps(qi)
+    if not eps:
+        return pd.DataFrame(columns=["sid", "earnings_yield"])
+    merged = pd.DataFrame({"sid": list(eps), "ttm_eps": list(eps.values())}).merge(
+        close, on="sid", how="left")
+    merged["earnings_yield"] = np.where(
+        (merged["close_price"].notna()) & (merged["close_price"] > 0),
+        (merged["ttm_eps"] / merged["close_price"]).round(6),
+        np.nan,
+    )
+    return merged[["sid", "earnings_yield"]]
+
+
+def compute_earnings_yield():
+    """
+    Compute earnings yield (E/P) for all stocks.
+    Returns DataFrame: sid, earnings_yield (NaN where not computable)
+    """
+    qi = read_sql(
+        "SELECT sid, period, end_date, reporting, eps "
+        "FROM quarterly_income ORDER BY sid, end_date"
+    )
     # Latest close price per stock
-    prices = read_sql(
-        "SELECT sid, close FROM stock_prices "
+    close = read_sql(
+        "SELECT sid, close AS close_price FROM stock_prices "
         "WHERE (sid, date) IN ("
         "  SELECT sid, MAX(date) FROM stock_prices GROUP BY sid"
         ")"
     )
-    price_map = prices.set_index("sid")["close"].to_dict()
-
-    # Compute E/P
-    rows = []
-    for sid, eps in ttm_eps.items():
-        price = price_map.get(sid)
-        if price and price > 0:
-            ey = round(eps / price, 6)
-            rows.append({"sid": sid, "earnings_yield": ey})
-        else:
-            rows.append({"sid": sid, "earnings_yield": None})
-
-    # Add stocks with no EPS data
-    all_sids = set(read_sql("SELECT sid FROM stocks")["sid"])
-    computed_sids = {r["sid"] for r in rows}
-    for sid in all_sids - computed_sids:
-        rows.append({"sid": sid, "earnings_yield": None})
-
-    return pd.DataFrame(rows)
+    ey = earnings_yield(qi, close)
+    all_sids = read_sql("SELECT sid FROM stocks")[["sid"]]
+    return all_sids.merge(ey, on="sid", how="left")
 
 
 def compute(dry_run=False):
