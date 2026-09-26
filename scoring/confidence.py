@@ -39,13 +39,6 @@ from db import read_sql, get_db
 from scoring.health_score import compute_uhs, rollup_picks_uhs
 
 
-# Minimum lineage coverage for Gate 6 to PASS. Below this, the factor's
-# Provenance dim is capped at 10/20 with a warning attached.
-# (Retained for the legacy factor-level `lineage_coverage_for_factor` diagnostic;
-# the live gate_6 in `compute_pick_confidence` is now per-sid — see below.)
-GATE_6_LINEAGE_THRESHOLD = 0.80
-
-
 # Per-pick cache for the lineage-active (top-300, ADR 0027) sid set so a full
 # batch_write_pick_uhs run doesn't re-query it ~1,700 times.
 _ACTIVE_SIDS_CACHE: dict = {}
@@ -72,62 +65,6 @@ def _active_lineage_sids(pick_date: str) -> set:
         except Exception:
             _ACTIVE_SIDS_CACHE[pick_date] = set()
     return _ACTIVE_SIDS_CACHE[pick_date]
-
-
-def lineage_coverage_for_factor(factor_id: str, snapshot_date: str) -> tuple[Optional[float], str]:
-    """Fraction of (signal_lineage rows for this factor) over (production picks).
-
-    Reads signal_lineage for the most recent snapshot ≤ snapshot_date. Returns
-    None if signal_lineage is empty for the factor (interpretation: lineage
-    tracking is gated to top-300 SIDs per ADR 0027 — for factors that don't
-    write lineage in this snapshot, treat as "lineage not applicable" not
-    "lineage failed").
-    """
-    # Try canonical factor name first; fall back to short alias.
-    alias = {
-        "consensus": "consensus_signal_combined",
-        "earnings_yield": "earnings_yield",
-        "accruals": "cf_accruals_ratio",
-        "piotroski": "piotroski_f_score",
-        "momentum": "mom_12m_adj",
-        "book_to_price": "book_to_price",
-        "promoter": "promoter_qoq",
-        "smart_money": "smart_money_score",
-        "pt_upside": "pt_upside",
-        "eps_growth": "eps_growth_yoy",
-        "pledge_quality": "pledge_quality",
-        "delivery_anomaly_z": "delivery_anomaly_z",
-    }
-    factor_canonical = alias.get(factor_id, factor_id)
-
-    df = read_sql(
-        """
-        SELECT COUNT(DISTINCT sid) AS traced
-        FROM signal_lineage
-        WHERE factor = ?
-          AND snapshot_date = (
-              SELECT MAX(snapshot_date) FROM signal_lineage
-              WHERE factor = ? AND snapshot_date <= ?
-          )
-        """,
-        params=[factor_canonical, factor_canonical, snapshot_date],
-    )
-    traced = int(df.iloc[0]["traced"] or 0) if not df.empty else 0
-
-    if traced == 0:
-        return None, f"no signal_lineage rows for factor '{factor_canonical}' — lineage gating not applied"
-
-    # Denominator: production-pick SIDs at that snapshot
-    picks_df = read_sql(
-        "SELECT COUNT(DISTINCT sid) AS n FROM daily_picks WHERE pick_date = ?",
-        params=[snapshot_date],
-    )
-    n_picks = int(picks_df.iloc[0]["n"] or 0) if not picks_df.empty else 0
-    if n_picks == 0:
-        return None, "no daily_picks rows on snapshot date"
-
-    coverage = traced / n_picks
-    return coverage, f"{traced} traced / {n_picks} picks = {coverage*100:.1f}%"
 
 
 def _lineage_row_counts(sids, pick_date: str) -> dict:

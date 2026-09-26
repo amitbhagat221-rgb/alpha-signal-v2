@@ -83,8 +83,9 @@ def _nifty_asof(n_dates, n_vals, d):
     return float(n_vals[i])
 
 
-def _car_one(pdates, pcloses, n_dates, n_vals, ann_iso, eval_iso):
-    """Market-adjusted [−CAR_PRE, +CAR_POST] CAR around one announcement. NaN if not measurable.
+def _car_one(pdates, pcloses, n_dates, n_vals, ann_iso, eval_iso, pre=CAR_PRE, post=CAR_POST):
+    """Market-adjusted [−pre, +post] CAR around one announcement (default the factor's
+    [−CAR_PRE, +CAR_POST]; tools/event_study varies the window). NaN if not measurable.
 
     day0 = first price row with date ≥ ann_iso. Requires the window's END close to
     exist AND its date ≤ eval_iso (look-ahead guard). Market leg = NIFTY over the
@@ -93,7 +94,7 @@ def _car_one(pdates, pcloses, n_dates, n_vals, ann_iso, eval_iso):
     i0 = bisect.bisect_left(pdates, ann_iso)
     if i0 >= len(pdates):
         return np.nan
-    start, end = i0 - CAR_PRE, i0 + CAR_POST
+    start, end = i0 - pre, i0 + post
     if start < 0 or end >= len(pdates):
         return np.nan
     d_start, d_end = pdates[start], pdates[end]

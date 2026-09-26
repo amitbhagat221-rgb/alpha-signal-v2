@@ -381,35 +381,6 @@ def replay_all(top_n: int = 30) -> int:
     return worst
 
 
-def replay_status():
-    """Return dict summary for cockpit tile / CI integration.
-    Runs replay against the most recent frozen snapshot (lightweight, ~10s)."""
-    _ensure_schema()
-    last = read_sql("SELECT MAX(snapshot_date) AS d FROM pit_replay_snapshots")
-    if last.empty or last.iloc[0]["d"] is None:
-        return {"verdict": "NEVER_RUN", "snapshot_date": None, "frozen_at": None, "diffs": {}}
-    d = last.iloc[0]["d"]
-    # Run silently and capture the diff
-    import io, contextlib
-    buf = io.StringIO()
-    with contextlib.redirect_stdout(buf):
-        rc = replay(snapshot_date=d)
-    out = buf.getvalue()
-    verdict = "PASS" if rc == 0 else ("WARN" if rc == 1 else "FAIL")
-    meta = read_sql(
-        "SELECT MIN(frozen_at) frozen_at, MIN(frozen_by_commit) sha, COUNT(DISTINCT snapshot_date) n_frozen "
-        "FROM pit_replay_snapshots"
-    ).iloc[0].to_dict()
-    return {
-        "verdict": verdict,
-        "snapshot_date": d,
-        "frozen_at": meta.get("frozen_at"),
-        "frozen_by_commit": meta.get("sha"),
-        "n_frozen_dates": int(meta.get("n_frozen") or 0),
-        "raw_output": out,
-    }
-
-
 def list_snapshots():
     """Print all frozen dates with row counts + commit sha."""
     _ensure_schema()

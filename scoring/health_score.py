@@ -663,42 +663,6 @@ def _table_age_days(table: str, as_of: Optional[str] = None) -> Optional[float]:
         return None
 
 
-# ── Read helpers (consumed by cockpit) ──
-
-def get_uhs(entity_kind: str, entity_id: str) -> Optional[dict]:
-    """Most recent UHS row for an entity, or None."""
-    df = read_sql(
-        """
-        SELECT * FROM health_score
-        WHERE entity_kind=? AND entity_id=?
-        ORDER BY snapshot_date DESC LIMIT 1
-        """,
-        params=[entity_kind, entity_id],
-    )
-    if df.empty:
-        return None
-    return df.iloc[0].to_dict()
-
-
-def get_factor_uhs_summary() -> pd.DataFrame:
-    """Latest UHS for every wired factor — used by cockpit /system and /model pages."""
-    placeholders = ",".join("?" * len(WIRED_FACTORS))
-    return read_sql(
-        f"""
-        SELECT h.*
-        FROM health_score h
-        WHERE h.entity_kind='factor'
-          AND h.entity_id IN ({placeholders})
-          AND h.snapshot_date = (
-              SELECT MAX(snapshot_date) FROM health_score
-              WHERE entity_kind='factor' AND entity_id = h.entity_id
-          )
-        ORDER BY h.score_pct DESC NULLS LAST
-        """,
-        params=WIRED_FACTORS,
-    )
-
-
 # ── CLI ──
 
 def _compute_snapshot_rows(snapshot_date: str, include_picks: bool = False) -> list[dict]:

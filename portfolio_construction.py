@@ -5,7 +5,8 @@ Turns the within-tier RANKED list (`daily_picks`) into a SIZED book and persists
 it to `portfolio_weights`. This is the piece neither of the existing portfolio
 surfaces does:
   • daily_picks        — ranked, no sizing.
-  • paper_portfolio.py — equal-weight realized-return loop (ADR 0028).
+  • paper_portfolio.py — equal-weight realized-return loop (ADR 0028; never
+                         run, archived to _archive/paper_portfolio.py).
   • cockpit /portfolio — DESCRIPTIVE (equal-weight view + Barra-style tilts).
   • THIS                — risk-allocated weights under real caps.
 
@@ -16,7 +17,7 @@ on a 15-name book estimated from 500 noisy daily returns. We then gently tilt by
 alpha score and clamp under per-stock / per-sector / liquidity caps. Rationale +
 the deviation from the plan are recorded in ADR 0044.
 
-Pipeline (mirrors hrp_prototype.py, which stays as the read-only exploration):
+Pipeline (grew out of tools/hrp_prototype.py, now _archive/tools/ — its HRP core is here):
   1. select  — top `picks_per_tier` names per cap tier from the latest daily_picks.
   2. returns — daily log returns from stock_prices.close, winsorized (split-defense,
                raw/unadjusted closes — same rationale as signals/sector_momentum.py).
