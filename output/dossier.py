@@ -25,7 +25,8 @@ from pathlib import Path
 import pandas as pd
 
 from config import PROJECT_ROOT
-from db import read_sql, log_llm_usage
+from db import read_sql
+from output._llm import llm_json
 
 OUTPUT_DIR = PROJECT_ROOT / "output"
 
@@ -528,30 +529,8 @@ def generate(top=5, dry_run=False):
             dossiers.append({"sid": sid, "ticker": pick["ticker"], "status": "dry_run"})
             continue
 
-        api_key = os.environ.get("ANTHROPIC_API_KEY")
-
         try:
-            import anthropic
-            client = anthropic.Anthropic(api_key=api_key)
-            response = client.messages.create(
-                model="claude-sonnet-4-6",
-                max_tokens=1024,
-                messages=[{"role": "user", "content": prompt}],
-            )
-            log_llm_usage("dossier", "claude-sonnet-4-6", response.usage)
-            text = response.content[0].text
-            # Try to parse JSON
-            try:
-                dossier = json.loads(text)
-            except json.JSONDecodeError:
-                # Extract JSON from markdown code block if present
-                if "```" in text:
-                    text = text.split("```")[1]
-                    if text.startswith("json"):
-                        text = text[4:]
-                    dossier = json.loads(text)
-                else:
-                    dossier = {"raw_response": text}
+            dossier = llm_json(prompt, "claude-sonnet-4-6", "dossier", max_tokens=1024)
 
             dossier["sid"] = sid
             dossier["ticker"] = pick["ticker"]

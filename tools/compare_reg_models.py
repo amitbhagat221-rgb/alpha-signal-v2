@@ -25,7 +25,8 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from db import read_sql, log_llm_usage
+from db import read_sql
+from output._llm import llm_text
 from config import LLM
 from sources.regulatory_classifier import (
     CLASSIFY_PROMPT, _parse_classification,
@@ -41,12 +42,10 @@ def _classify_with(client, model, ev):
         title=str(ev["title"])[:300], summary=str(ev.get("summary") or "")[:1000],
         source=ev["source"], published_at=ev["published_at"],
     )
-    resp = client.messages.create(
-        model=model, max_tokens=512,
-        messages=[{"role": "user", "content": prompt}],
-    )
-    log_llm_usage(f"compare_reg_models[{model.split('-')[1]}]", model, resp.usage)
-    text = resp.content[0].text.strip()
+    text = llm_text(prompt, model, f"compare_reg_models[{model.split('-')[1]}]",
+                    max_tokens=512, client=client).strip()
+    # Production's parser, not llm_json: the gate measures what the live
+    # classifier would parse (leading fence only).
     if text.startswith("```"):
         text = text.split("```")[1]
         if text.startswith("json"):
