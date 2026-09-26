@@ -109,7 +109,7 @@ Touch with care. If you don't understand them, ask first.
 
 2. **`scoring/screener.py`** — the `critical=True` pipeline step. Writes `daily_picks`. If it raises, the rest of the pipeline aborts and no dossiers or emails go out.
 
-3. **`db.py`** — runs `_ensure_columns()` + `_ensure_pipeline_log_status_check()` on every `init_db()`. New columns get added via `_COLUMN_MIGRATIONS`. CHECK constraint changes need the table-recreate dance (pattern in `_ensure_pipeline_log_status_check`, added 2026-05-29).
+3. **`db.py`** + **`schema.sql`** — `init_db()` executes `schema.sql` (the full DDL, regenerated from the live DB 2026-09-26) then `_ensure_columns()`. A new column goes in `schema.sql` AND `_COLUMN_MIGRATIONS` (so existing DBs pick it up). CHECK constraint changes need the table-recreate dance (create `<t>__new`, copy, drop, rename — the removed `_ensure_pipeline_log_status_check` in git history is the pattern).
 
 Plus one file that lives outside the repo:
 
