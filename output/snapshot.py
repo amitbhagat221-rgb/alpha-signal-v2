@@ -68,26 +68,22 @@ def compute(dry_run=False):
     sent = _latest("sentiment_scores", ["sentiment_7d"])
     df = df.merge(sent, on="sid", how="left")
 
-    # Earnings yield + momentum (inline)
+    # Earnings yield + momentum + book-to-price (the screener signal functions).
+    # Momentum reuses the price history the screener step already loaded in this
+    # pipeline run (split/bonus-adjusted) instead of re-reading 2.4M rows.
+    from scoring.screener import LAST_SCORED
+    from signals.book_to_price import compute_book_to_price
     from signals.earnings_yield import compute_earnings_yield
     from signals.momentum import compute_momentum
 
     ey = compute_earnings_yield()[["sid", "earnings_yield"]]
     df = df.merge(ey, on="sid", how="left")
 
-    mom = compute_momentum()[["sid", "mom_6m", "mom_12m"]]
+    prices = LAST_SCORED.get("prices") if LAST_SCORED.get("date") == today else None
+    mom = compute_momentum(prices)[["sid", "mom_6m", "mom_12m"]]
     df = df.merge(mom, on="sid", how="left")
 
-    # Book-to-price
-    bp = read_sql(
-        "SELECT sid, total_equity / shares_outstanding / sp.close AS book_to_price "
-        "FROM annual_balance_sheet bs "
-        "JOIN (SELECT sid, close FROM stock_prices "
-        "      WHERE (sid, date) IN (SELECT sid, MAX(date) FROM stock_prices GROUP BY sid)) sp USING(sid) "
-        "WHERE (bs.sid, bs.period) IN (SELECT sid, MAX(period) FROM annual_balance_sheet GROUP BY sid) "
-        "AND shares_outstanding > 0 AND sp.close > 0"
-    )
-    df = df.merge(bp, on="sid", how="left")
+    df = df.merge(compute_book_to_price(), on="sid", how="left")
 
     # Delivery % (latest 30d avg)
     deliv = read_sql(

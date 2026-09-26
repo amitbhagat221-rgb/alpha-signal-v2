@@ -34,16 +34,10 @@ Usage:
     python -m signals.gross_profitability --dry-run
 """
 
-import argparse
-from datetime import date
-
 import numpy as np
 import pandas as pd
 
-from config import SCREEN
-from db import read_sql, upsert_df
-
-FINANCIAL_SECTORS = set(SCREEN["financial_sectors"])
+from signals import _annual
 
 # COGS = sum of direct-manufacturing cost lines. Raw Material Cost is the
 # gating component (absent → not a goods business → unscored).
@@ -65,22 +59,7 @@ GP_CAP = (-1.0, 2.0)   # GP/assets real-world band; cap tail names
 
 
 def _load_data():
-    placeholders = ",".join("?" for _ in FINANCIAL_SECTORS)
-    stocks = read_sql(
-        f"SELECT sid, sector FROM stocks WHERE sector NOT IN ({placeholders})",
-        params=list(FINANCIAL_SECTORS),
-    )
-    sids = set(stocks["sid"])
-
-    fund = read_sql(
-        "SELECT sid, period_end, line_item, value "
-        "FROM fundamentals_screener "
-        "WHERE period_type = 'annual' AND line_item IN "
-        f"({','.join('?' for _ in ALL_ITEMS)})",
-        params=ALL_ITEMS,
-    )
-    fund = fund[fund["sid"].isin(sids)].copy()
-    return stocks, fund
+    return _annual.load(ALL_ITEMS)
 
 
 def _compute(stocks, fund):
@@ -126,34 +105,9 @@ def _compute(stocks, fund):
 
 
 def compute(dry_run=False):
-    stocks, fund = _load_data()
-    df = _compute(stocks, fund)
-
-    df["snapshot_date"] = date.today().isoformat()
-    df = df[["sid", "snapshot_date", "period_end",
-             "gross_profit", "total_assets", "gross_profitability"]]
-
-    n = len(df)
-    if n:
-        g = df["gross_profitability"]
-        print(f"Gross Profitability: {n} stocks scored | "
-              f"median={g.median():.3f} | "
-              f"p25={g.quantile(0.25):.3f} | p75={g.quantile(0.75):.3f}")
-    else:
-        print("Gross Profitability: 0 stocks scored — "
-              "fundamentals_screener thin or no qualifying goods businesses.")
-
-    if dry_run:
-        print("Dry run — not saving.")
-        return n
-
-    rows = upsert_df(df, "gross_profitability_scores")
-    print(f"Saved {rows} rows to gross_profitability_scores")
-    return rows
+    return _annual.save(_compute(*_load_data()), "gross_profitability_scores", "Gross Profitability", "gross_profitability",
+                        dry_run, fmt=".3f")
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--dry-run", action="store_true")
-    args = parser.parse_args()
-    compute(dry_run=args.dry_run)
+    _annual.cli(compute)

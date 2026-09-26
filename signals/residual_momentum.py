@@ -39,6 +39,7 @@ import numpy as np
 import pandas as pd
 
 from db import read_sql
+from signals._prices import load_prices
 
 NIFTY_ID = "nifty50"
 WINDOW_START = 252    # trading days back from eval
@@ -53,11 +54,7 @@ def compute_residual_momentum_12_1(
 ) -> pd.DataFrame:
     cols = ["sid", "residual_momentum_12_1"]
     if prices is None:
-        dc = f"AND date <= '{as_of_date}'" if as_of_date else ""
-        prices = read_sql(
-            f"SELECT sid, date, close FROM stock_prices WHERE close > 0 {dc} "
-            f"ORDER BY sid, date"
-        )
+        prices = load_prices(as_of_date)   # split/bonus-adjusted, as the PIT path passes
     if nifty is None:
         dc = f"AND date <= '{as_of_date}'" if as_of_date else ""
         nifty = read_sql(

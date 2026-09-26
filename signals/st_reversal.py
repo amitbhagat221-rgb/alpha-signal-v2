@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from db import read_sql
+from signals._prices import load_prices
 
 WINDOW_DAYS = 21     # return horizon in trading days (22 closes = 21 intervals)
 MIN_OBS = 15         # minimum return intervals in the window, else NULL
@@ -51,11 +51,7 @@ def compute_st_reversal_21d(
     """
     cols = ["sid", "st_reversal_21d"]
     if prices is None:
-        dc = f"AND date <= '{as_of_date}'" if as_of_date else ""
-        prices = read_sql(
-            f"SELECT sid, date, close FROM stock_prices WHERE close > 0 {dc} "
-            f"ORDER BY sid, date"
-        )
+        prices = load_prices(as_of_date)   # split/bonus-adjusted, as the PIT path passes
     if prices is None or len(prices) == 0:
         return pd.DataFrame(columns=cols)
 

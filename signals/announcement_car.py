@@ -65,6 +65,7 @@ import numpy as np
 import pandas as pd
 
 from db import read_sql
+from signals._prices import load_prices
 from signals.pead import _announce_dates_by_sid
 
 NIFTY_ID = "nifty50"
@@ -82,8 +83,9 @@ def _nifty_asof(n_dates, n_vals, d):
     return float(n_vals[i])
 
 
-def _car_one(pdates, pcloses, n_dates, n_vals, ann_iso, eval_iso):
-    """Market-adjusted [−CAR_PRE, +CAR_POST] CAR around one announcement. NaN if not measurable.
+def _car_one(pdates, pcloses, n_dates, n_vals, ann_iso, eval_iso, pre=CAR_PRE, post=CAR_POST):
+    """Market-adjusted [−pre, +post] CAR around one announcement (default the factor's
+    [−CAR_PRE, +CAR_POST]; tools/event_study varies the window). NaN if not measurable.
 
     day0 = first price row with date ≥ ann_iso. Requires the window's END close to
     exist AND its date ≤ eval_iso (look-ahead guard). Market leg = NIFTY over the
@@ -92,7 +94,7 @@ def _car_one(pdates, pcloses, n_dates, n_vals, ann_iso, eval_iso):
     i0 = bisect.bisect_left(pdates, ann_iso)
     if i0 >= len(pdates):
         return np.nan
-    start, end = i0 - CAR_PRE, i0 + CAR_POST
+    start, end = i0 - pre, i0 + post
     if start < 0 or end >= len(pdates):
         return np.nan
     d_start, d_end = pdates[start], pdates[end]
@@ -149,9 +151,7 @@ def compute_announcement_car(
             f"WHERE category='Result' AND sid IS NOT NULL AND dt_tm IS NOT NULL {dc} "
             f"ORDER BY sid, dt_tm")
     if prices is None:
-        dc = f"AND date <= '{as_of_date}'" if as_of_date else ""
-        prices = read_sql(
-            f"SELECT sid, date, close FROM stock_prices WHERE close > 0 {dc} ORDER BY sid, date")
+        prices = load_prices(as_of_date)   # split/bonus-adjusted, as the PIT path passes
     if nifty is None:
         dc = f"AND date <= '{as_of_date}'" if as_of_date else ""
         nifty = read_sql(

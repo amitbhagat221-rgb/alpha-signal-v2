@@ -43,12 +43,13 @@ import pandas as pd
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from db import read_sql, get_backtest_cadence
+from db import read_sql
 from tools.backtest_pit import (
     SIGNAL_COLUMN_MAP,
     _compute_ic,
     _aggregate,
     _nw_lag_for,
+    iter_panels,
 )
 
 HORIZONS = [5, 20, 63, 126, 252]  # trading days ≈ 1w / 1mo / 3mo / 6mo / 1yr
@@ -149,9 +150,6 @@ def compute(only_signal=None, min_periods=5):
             print(f"  sanity: recomputed fwd_20 vs stored fwd_return_20d ρ={corr:.3f} "
                   f"(n={len(chk):,})")
 
-    v2_dates_all = pd.to_datetime(v2_df["snapshot_date"]).dt.date.unique() if not v2_df.empty else []
-    weekly_dates = {d.isoformat() for d in v2_dates_all if pd.Timestamp(d).weekday() == 4}
-
     targets = [(s, c) for s, c in SIGNAL_COLUMN_MAP.items() if s != "_response"]
     if only_signal:
         targets = [(s, c) for s, c in targets if s == only_signal]
@@ -161,59 +159,37 @@ def compute(only_signal=None, min_periods=5):
 
     results = []  # one dict per (signal, tier, horizon)
     summary = []  # one dict per (signal, tier) with natural-horizon classification
-
-    for signal, (v1_col, v2_col) in targets:
-        cadence = get_backtest_cadence(signal)
-        # Source pick mirrors backtest_pit: monthly prefers the v1 archive
-        # (it carries the long horizons), weekly uses the live v2 panel.
-        sources = [("v2_recompute", v2_df, v2_col)]
-        if cadence == "monthly":
-            sources.insert(0, ("v1_archive", v1_df, v1_col))
-
-        for src_name, src_df, signal_col in sources:
-            if signal_col is None or signal_col not in src_df.columns:
+    # Source pick mirrors backtest_pit (iter_panels): monthly prefers the v1 archive
+    # (it carries the long horizons), weekly uses the live v2 panel; one source per
+    # signal is enough once it produced data.
+    scored_from = {}
+    for signal, cadence, src_name, signal_col, tier, tier_df in iter_panels(v1_df, v2_df, targets):
+        if scored_from.get(signal, src_name) != src_name:
+            continue
+        by_h = {}
+        for h in HORIZONS:
+            fwd_col = f"fwd_{h}"
+            if fwd_col not in tier_df.columns or tier_df[fwd_col].notna().sum() == 0:
+                by_h[h] = None
                 continue
-            if src_df[signal_col].notna().sum() == 0:
-                continue
-            if cadence == "weekly" and src_name == "v2_recompute":
-                df_use = src_df[src_df["snapshot_date"].isin(weekly_dates)]
-            elif cadence == "monthly" and src_name == "v2_recompute" and weekly_dates:
-                df_use = src_df[~src_df["snapshot_date"].isin(weekly_dates)]
-            else:
-                df_use = src_df
-            if df_use.empty:
-                continue
-
-            for tier in ["LARGE", "MID", "SMALL"]:
-                tier_df = df_use[df_use["cap_tier"] == tier]
-                if tier_df.empty:
-                    continue
-                by_h = {}
-                for h in HORIZONS:
-                    fwd_col = f"fwd_{h}"
-                    if fwd_col not in tier_df.columns or tier_df[fwd_col].notna().sum() == 0:
-                        by_h[h] = None
-                        continue
-                    ic_rows = _compute_ic(tier_df, signal_col, fwd_col)
-                    res = _aggregate(ic_rows, signal, tier, src_name,
-                                     cadence=cadence, nw_lag=_horizon_lag(signal, cadence, h))
-                    by_h[h] = res
-                    if res:
-                        results.append({**res, "horizon_days": h, "source": src_name})
-                bucket, peak, flip = _classify(by_h, min_periods)
-                if bucket != "INSUFFICIENT" or any(by_h.values()):
-                    summary.append({
-                        "signal": signal, "cap_tier": tier, "source": src_name,
-                        "cadence": cadence, "natural_horizon": peak,
-                        "bucket": bucket, "sign_flip": flip,
-                        "ic_by_h": {h: (round(by_h[h]["mean_ic"], 4) if by_h[h] and by_h[h]["mean_ic"] is not None else None)
-                                    for h in HORIZONS},
-                        "t_by_h": {h: (by_h[h]["t_stat"] if by_h[h] else None) for h in HORIZONS},
-                        "n_by_h": {h: (by_h[h]["n_periods"] if by_h[h] else 0) for h in HORIZONS},
-                    })
-            # one source is enough per signal once it produced data
-            if any(s["signal"] == signal for s in summary):
-                break
+            ic_rows = _compute_ic(tier_df, signal_col, fwd_col)
+            res = _aggregate(ic_rows, signal, tier, src_name,
+                             cadence=cadence, nw_lag=_horizon_lag(signal, cadence, h))
+            by_h[h] = res
+            if res:
+                results.append({**res, "horizon_days": h, "source": src_name})
+        bucket, peak, flip = _classify(by_h, min_periods)
+        if bucket != "INSUFFICIENT" or any(by_h.values()):
+            summary.append({
+                "signal": signal, "cap_tier": tier, "source": src_name,
+                "cadence": cadence, "natural_horizon": peak,
+                "bucket": bucket, "sign_flip": flip,
+                "ic_by_h": {h: (round(by_h[h]["mean_ic"], 4) if by_h[h] and by_h[h]["mean_ic"] is not None else None)
+                            for h in HORIZONS},
+                "t_by_h": {h: (by_h[h]["t_stat"] if by_h[h] else None) for h in HORIZONS},
+                "n_by_h": {h: (by_h[h]["n_periods"] if by_h[h] else 0) for h in HORIZONS},
+            })
+            scored_from[signal] = src_name
 
     return summary, results
 

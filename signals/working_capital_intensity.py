@@ -18,16 +18,10 @@ Usage:
     python -m signals.working_capital_intensity --dry-run
 """
 
-import argparse
-from datetime import date
-
 import numpy as np
 import pandas as pd
 
-from config import SCREEN
-from db import read_sql, upsert_df
-
-FINANCIAL_SECTORS = set(SCREEN["financial_sectors"])
+from signals import _annual
 
 REQUIRED_ITEMS = ["Sales", "Receivables", "Inventory", "Trade Payables"]
 SMOOTH_YEARS = 3
@@ -35,22 +29,7 @@ MIN_SALES_CR = 50.0
 
 
 def _load_data():
-    placeholders = ",".join("?" for _ in FINANCIAL_SECTORS)
-    stocks = read_sql(
-        f"SELECT sid, sector FROM stocks WHERE sector NOT IN ({placeholders})",
-        params=list(FINANCIAL_SECTORS),
-    )
-    sids = set(stocks["sid"])
-
-    fund = read_sql(
-        "SELECT sid, period_end, line_item, value "
-        "FROM fundamentals_screener "
-        "WHERE period_type = 'annual' AND line_item IN "
-        f"({','.join('?' for _ in REQUIRED_ITEMS)})",
-        params=REQUIRED_ITEMS,
-    )
-    fund = fund[fund["sid"].isin(sids)].copy()
-    return stocks, fund
+    return _annual.load(REQUIRED_ITEMS)
 
 
 def _compute(stocks, fund):
@@ -82,33 +61,9 @@ def _compute(stocks, fund):
 
 
 def compute(dry_run=False):
-    stocks, fund = _load_data()
-    df = _compute(stocks, fund)
-
-    df["snapshot_date"] = date.today().isoformat()
-    df = df[["sid", "snapshot_date", "period_end", "wc_intensity"]]
-
-    n = len(df)
-    if n:
-        w = df["wc_intensity"]
-        print(f"WC intensity: {n} stocks scored | "
-              f"median={w.median():.3f} | "
-              f"p25={w.quantile(0.25):.3f} | p75={w.quantile(0.75):.3f} | "
-              f"negative={(w < 0).sum()}")
-    else:
-        print("WC intensity: 0 stocks scored — thin fundamentals.")
-
-    if dry_run:
-        print("Dry run — not saving.")
-        return n
-
-    rows = upsert_df(df, "working_capital_intensity_scores")
-    print(f"Saved {rows} rows to working_capital_intensity_scores")
-    return rows
+    return _annual.save(_compute(*_load_data()), "working_capital_intensity_scores", "WC intensity", "wc_intensity",
+                        dry_run, fmt=".3f")
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--dry-run", action="store_true")
-    args = parser.parse_args()
-    compute(dry_run=args.dry_run)
+    _annual.cli(compute)

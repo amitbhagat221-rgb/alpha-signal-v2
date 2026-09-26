@@ -31,100 +31,39 @@ Usage:
 """
 
 import argparse
-import calendar
+import importlib
 from datetime import date, datetime, timedelta
 
 import numpy as np
 import pandas as pd
 
+import factors
+from config import SCREEN
 from db import get_db, read_sql, upsert_df
-from config import SCREEN, BACKTEST
+from signals import _annual
+from signals._prices import apply_adjustments
 
 # ── Filing lags ──
 ANNUAL_LAG = 75
 QUARTERLY_LAG = 60
 SHAREHOLDING_LAG = 21
 
-# ── Momentum windows (must match signals/momentum.py) ──
-SKIP_DAYS = BACKTEST["momentum_skip_days"]      # 22
-WINDOW_6M = BACKTEST["momentum_6m_days"]        # 154
-WINDOW_12M = BACKTEST["momentum_12m_days"]      # 252
-
 FINANCIAL_SECTORS = set(SCREEN["financial_sectors"])
 
 
 # ─────────────────────────── Schema ───────────────────────────
 
-CREATE_TABLE_SQL = """
-CREATE TABLE IF NOT EXISTS daily_snapshots_pit (
-    sid              TEXT NOT NULL REFERENCES stocks(sid),
-    snapshot_date    TEXT NOT NULL,
-    cap_tier         TEXT,
-    close_price      REAL,
-    piotroski_f      INTEGER,
-    cf_accruals      REAL,
-    bs_accruals      REAL,
-    earnings_persistence REAL,
-    earnings_yield   REAL,
-    book_to_price    REAL,
-    promoter_qoq     REAL,
-    promoter_trend_4q REAL,
-    pledge_quality   REAL,
-    mom_6m           REAL,
-    mom_12m          REAL,
-    mom_composite    REAL,
-    macd_bullish     INTEGER,
-    position_52w     REAL,
-    avg_delivery_pct_30d REAL,
-    delivery_anomaly_z REAL,
-    sector_momentum REAL,
-    sector_tilt     REAL,
-    -- Plan 0002 §3.2.2 — F&O open-interest factors (off fno_pcr_history)
-    pcr_oi            REAL,
-    pcr_volume        REAL,
-    max_pain_distance REAL,
-    oi_buildup_signal REAL,
-    -- Plan 0002 §3.2.2 — F&O implied-volatility factors (off fno_iv_history)
-    iv_skew_25d        REAL,
-    iv_term_structure  REAL,
-    iv_realised_spread REAL,
-    iv_percentile_1y   REAL,
-    -- Plan 0002 §3.2.3 — daily-derivable microstructure factors (off stock_prices)
-    intraday_range_compression REAL,
-    closing_strength_1m        REAL,
-    opening_gap_freq_1m        REAL,
-    vwap_deviation_5d          REAL,
-    bidask_spread_proxy        REAL,
-    kyle_lambda                REAL,
-    -- Plan 0002 §3.2.5 — event-time / PEAD factors
-    earnings_surprise_std      REAL,
-    pead_drift_60d             REAL,
-    corporate_action_density   REAL,
-    buyback_announcement_30d   REAL,
-    fwd_return_20d   REAL,
-    m_score          REAL,
-    z_score          REAL,
-    roe              REAL,
-    roa              REAL,
-    debt_to_equity   REAL,
-    profit_margin    REAL,
-    revenue_growth_yoy REAL,
-    eps_growth_yoy   REAL,
-    pt_revision_yoy  REAL,
-    eps_revision_yoy REAL,
-    consensus_signal_combined REAL,
-    value_composite  REAL,
-    quality_composite REAL,
-    growth_composite REAL,
-    -- Behavior tier — added 2026-05-24 (audit: were missing PIT helpers)
-    insider_score    REAL,
-    sentiment_7d     REAL,
-    -- Track 2.2b — Financial sub-model (Banks + NBFCs only)
-    financial_signal REAL,
-    reconstructed_at TEXT DEFAULT (datetime('now')),
-    PRIMARY KEY (sid, snapshot_date)
-);
-CREATE INDEX IF NOT EXISTS idx_pit_date ON daily_snapshots_pit(snapshot_date);
+CREATE_TABLE_SQL = (
+    "CREATE TABLE IF NOT EXISTS daily_snapshots_pit (\n"
+    "    sid              TEXT NOT NULL REFERENCES stocks(sid),\n"
+    "    snapshot_date    TEXT NOT NULL,\n"
+    "    cap_tier         TEXT,\n"
+    + "".join(f"    {c} {factors.PIT_COLUMN_TYPES.get(c, 'REAL')},\n"
+              for c in factors.PIT_COLUMNS[3:])
+    + "    reconstructed_at TEXT DEFAULT (datetime('now')),\n"
+    "    PRIMARY KEY (sid, snapshot_date)\n"
+    ");\n"
+    """CREATE INDEX IF NOT EXISTS idx_pit_date ON daily_snapshots_pit(snapshot_date);
 CREATE INDEX IF NOT EXISTS idx_pit_tier ON daily_snapshots_pit(cap_tier);
 
 CREATE TABLE IF NOT EXISTS pit_reconstruction_log (
@@ -142,270 +81,29 @@ CREATE TABLE IF NOT EXISTS pit_reconstruction_log (
 );
 CREATE INDEX IF NOT EXISTS idx_pit_log_date ON pit_reconstruction_log(eval_date);
 """
+)
 
-PIT_COLUMNS = [
-    "sid", "snapshot_date", "cap_tier", "close_price",
-    "piotroski_f", "cf_accruals", "bs_accruals", "earnings_persistence",
-    "earnings_yield", "book_to_price",
-    "promoter_qoq", "promoter_trend_4q", "pledge_quality",
-    "mom_6m", "mom_12m", "mom_composite", "macd_bullish",
-    "position_52w", "avg_delivery_pct_30d", "delivery_anomaly_z",
-    "sector_momentum", "sector_tilt",
-    # Plan 0002 §3.2.2 — F&O open-interest factors (off fno_pcr_history)
-    "pcr_oi", "pcr_volume", "max_pain_distance", "oi_buildup_signal",
-    # Plan 0002 §3.2.2 — F&O implied-volatility factors (off fno_iv_history)
-    "iv_skew_25d", "iv_term_structure", "iv_realised_spread", "iv_percentile_1y",
-    # Plan 0002 §3.2.3 — daily-derivable microstructure factors (off stock_prices)
-    "intraday_range_compression", "closing_strength_1m", "opening_gap_freq_1m",
-    "vwap_deviation_5d", "bidask_spread_proxy", "kyle_lambda",
-    # Plan 0002 §3.2.5 — event-time / PEAD factors
-    "earnings_surprise_std", "pead_drift_60d",
-    "corporate_action_density", "buyback_announcement_30d",
-    # Plan 0002 §3.2.5 — announcement-window CAR (market-implied earnings surprise, PEAD-via-CAR)
-    "announcement_car",
-    # ADR 0042 — BSE governance/forensic resignation event factor
-    "governance_resignation",
-    # Plan 0002 §3.2.4 — earnings-call NLP factors (off nlp_scores, look-ahead-safe available_date)
-    "earnings_call_tone_qoq", "forward_looking_intensity", "uncertainty_word_density",
-    "fwd_return_20d",
-    "m_score", "z_score",
-    # Tier 2 — fundamentals
-    "roe", "roa", "debt_to_equity", "profit_margin",
-    "revenue_growth_yoy", "eps_growth_yoy",
-    # Tier 2 — consensus
-    "pt_revision_yoy", "eps_revision_yoy", "consensus_signal_combined",
-    # Tier 2 — composites
-    "value_composite", "quality_composite", "growth_composite",
-    # Tier 3 — unblocked
-    "pt_upside", "bulk_deal_signal",
-    # Tier 4 — new signal classes
-    "short_selling_signal",
-    # Tier 4 — quality + sentiment
-    "earnings_beat_rate", "news_volume_7d",
-    # Track 3 cluster (plan 0003) — sector-narrative-derived factors
-    "revenue_cv_5y", "relative_turnover", "relative_growth", "share_momentum",
-    # Behavior tier — added 2026-05-24 (audit: were missing PIT helpers)
-    "insider_score",    # net-weighted insider buys/sells, last 90d
-    "sentiment_7d",     # VADER compound score, mean over last 7d articles
-    # Track 3 standalone factors
-    "ccc",
-    "margin_slope",
-    "wc_intensity",
-    "interest_coverage",
-    "roic",
-    "fcf_yield",
-    "roiic",
-    "gross_profitability",   # Novy-Marx anchor quality factor (multibagger funnel)
-    # Forensic / capital-allocation batch (plan 0002 §3.2.1)
-    "dso_change_yoy", "dio_change_yoy", "nwc_to_revenue",
-    "sloan_accruals_full", "sga_to_revenue_change",
-    "fcf_margin", "capex_to_dep", "goodwill_to_assets",
-    "debt_structure", "asset_tangibility",
-    # Plan 0005 Phase E "full fix" — composite signals so historical PIT
-    # replay can validate all 8 screener inputs end-to-end (not just the 4
-    # that were derivable from raw cols).
-    "accruals_signal", "promoter_signal", "forensic_penalty", "smart_money_score",
-    # Track 2.2b (2026-05-29) — Financial sub-model. NULL for non-financials;
-    # only Banks + NBFCs get a score. Scope clarification in ADR 0030.
-    "financial_signal",
-    # Phase 2.2b-v2 (2026-05-29 #2): tier-aware split — quality (SMALL),
-    # recovery (LARGE/MID) per direction-flip backtest finding.
-    "financial_quality", "financial_recovery",
-    # Plan 0002 §3.2.6 — industry identity (categorical CONTROL, not IC-ranked)
-    "industry_id",
-    # Plan 0002 §3.2.7 — per-stock macro betas (off stock_prices × macro_history)
-    "oil_beta", "metals_beta", "inr_beta", "gold_beta",
-    # §3.2.7 rate + credit betas (2026-06-07; gilt/credit ETF series)
-    "rate_beta", "credit_beta",
-    # Audit 2026-07-04 Factor-F3 — LARGE-tier canonical rebuild candidates
-    "low_vol_252d",
-    "st_reversal_21d",
-    "asset_growth_yoy",
-    # Plan 0012 C3 — momentum retest hypothesis (WS2.6)
-    "residual_momentum_12_1",
-    # Plan 0012 C4 — lottery retest hypothesis (WS2.7)
-    "max_lottery_21d",
-]
-
-
-# ── Validation guardrails per signal ──
-# (min_val, max_val, allow_nan). None means no bound.
-VALIDATION_RANGES = {
-    "close_price":           (0.01, 1_000_000, True),
-    "piotroski_f":           (0, 9, True),
-    "cf_accruals":           (-100, 100, True),
-    "bs_accruals":           (-10, 10, True),
-    "earnings_persistence":  (0, 1000, True),
-    "earnings_yield":        (-10, 10, True),
-    "book_to_price":         (-100, 1000, True),
-    "promoter_qoq":          (-100, 100, True),
-    "promoter_trend_4q":     (-100, 100, True),
-    "pledge_quality":        (0, 1, True),
-    "mom_6m":                (-100, 100, True),
-    "mom_12m":               (-100, 100, True),
-    "mom_composite":         (0, 1, True),
-    "macd_bullish":          (0, 1, True),
-    "position_52w":          (0, 1, True),
-    "avg_delivery_pct_30d":  (0, 100, True),
-    "delivery_anomaly_z":    (-5, 5, True),  # clip extreme z
-    "sector_momentum":       (-3, 3, True),  # cross-sector RS z-score
-    "sector_tilt":           (-3, 3, True),  # cross-sector 6m-mom + macro z-ensemble
-    # F&O OI factors (§3.2.2) — bounds mirror signals/fno_oi_factors.py clips
-    "pcr_oi":                (0, 20, True),   # put_oi / call_oi, tail-capped
-    "pcr_volume":            (0, 20, True),   # put_vol / call_vol, tail-capped
-    "max_pain_distance":     (-1, 1, True),   # (spot − max_pain) / spot
-    "oi_buildup_signal":     (-1, 1, True),   # 4-state regime score
-    # F&O IV factors (§3.2.2) — bounds mirror signals/fno_iv_factors.py clips
-    "iv_skew_25d":           (-0.5, 0.5, True),  # 25Δ put−call IV, vol points
-    "iv_term_structure":     (-0.5, 0.5, True),  # near−far ATM IV, vol points
-    "iv_realised_spread":    (-1.0, 1.0, True),  # ATM IV − realised vol
-    "iv_percentile_1y":      (0, 1, True),       # percentile rank in trailing ≤1y
-    # Microstructure factors (§3.2.3) — bounds mirror signals/microstructure.py CLIPS
-    "intraday_range_compression": (0, 5, True),  # ATR5/ATR20
-    "closing_strength_1m":        (0, 1, True),  # (close−low)/(high−low)
-    "opening_gap_freq_1m":        (0, 1, True),  # frac of days with >1% gap
-    "vwap_deviation_5d":          (-0.5, 0.5, True),  # (close−typical_price)/TP
-    "bidask_spread_proxy":        (0, 1, True),  # Corwin-Schultz spread fraction
-    "kyle_lambda":                (0, 1, True),  # Amihud illiquidity
-    # Event-time / PEAD factors (§3.2.5)
-    "earnings_surprise_std":      (-5, 5, True),   # seasonal-random-walk SUE
-    "pead_drift_60d":             (-1, 1, True),   # abnormal return since announce
-    "corporate_action_density":   (0, 20, True),   # corp actions in trailing 1y
-    "buyback_announcement_30d":   (0, 1, True),    # binary flag
-    "announcement_car":           (-1, 1, True),   # market-adj [-1,+1] CAR around latest Result print
-    "governance_resignation":     (0, 12, True),   # weighted trailing-1y resignation intensity
-    # Earnings-call NLP factors (§3.2.4) — latest-call values off nlp_scores
-    "earnings_call_tone_qoq":     (-20, 20, True),  # Δ net_tone vs prior call
-    "forward_looking_intensity":  (0, 200, True),   # fwd-looking phrases / 1k words
-    "uncertainty_word_density":   (0, 50, True),    # LM-uncertainty hits / words × 100
-    "fwd_return_20d":        (-1, 5, True),  # cap extreme returns
-    "m_score":               (-20, 20, True),
-    "z_score":               (-50, 100, True),
-    # Tier 2 — fundamentals (TTM ratios; allow negatives for distressed names)
-    "roe":                   (-200, 1000, True),   # negative-equity stocks → NaN
-    "roa":                   (-100, 200, True),
-    "debt_to_equity":        (0, 50, True),        # negative-equity → NaN
-    "profit_margin":         (-100, 100, True),
-    "revenue_growth_yoy":    (-100, 1000, True),
-    "eps_growth_yoy":        (-1000, 1000, True),
-    # Tier 2 — consensus
-    "pt_revision_yoy":       (-100, 500, True),
-    "eps_revision_yoy":      (-500, 500, True),
-    "consensus_signal_combined": (-100, 500, True),
-    # Tier 2 — composites (within-tier rank, in [0, 1])
-    "value_composite":       (0, 1, True),
-    "quality_composite":     (0, 1, True),
-    "growth_composite":      (0, 1, True),
-    # Tier 3
-    "pt_upside":             (-1, 5, True),     # -100% (zero PT) to +500%
-    "bulk_deal_signal":      (-100, 100, True), # net buy value normalized
-    "short_selling_signal":  (0, 10, True),     # short qty / avg volume ratio
-    # Tier 4 — quality + sentiment
-    "earnings_beat_rate":    (0, 1, True),      # fraction of last-N quarters beating
-    "news_volume_7d":        (0, 100, True),    # article count in last 7d
-    "insider_score":         (-1, 1, True),     # weighted net buys/sells, clipped
-    "sentiment_7d":          (-1, 1, True),     # VADER compound score, mean over 7d
-    "financial_signal":      (-3, 3, True),     # z-composite, clipped to ±3 (signals.financial_signal)
-    # Track 3 cluster (plan 0003)
-    "revenue_cv_5y":         (0, 50, True),     # CV; >50 means mean ~ 0
-    "relative_turnover":     (0, 20, True),     # ratio vs sector p50
-    "relative_growth":       (-2, 5, True),     # growth − sector_median
-    "share_momentum":        (-1, 5, True),     # share[t]/share[t-90d] − 1
-    # Cash conversion cycle — in days. Real-world spans -100 to +400d.
-    # Pad bounds to (-365, 730) to keep distressed outliers (huge unpaid
-    # payables, near-zero turnover) without letting them dominate the rank.
-    "ccc":                   (-365, 730, True),
-    # Operating margin slope — percentage-points/year. ±50pp/yr is a
-    # massive shift; anything beyond is data error.
-    "margin_slope":          (-50, 50, True),
-    # Working capital intensity — (Recv + Inv − Pay) / Sales. Real-world
-    # band roughly -0.5 to +2; pad to (-2, 5) for distressed names.
-    "wc_intensity":          (-2, 5, True),
-    # Interest coverage — capped to ±200 in the signal itself.
-    "interest_coverage":     (-200, 200, True),
-    # ROIC — 3y median NOPAT/IC. Signal-side filter keeps roic > 0; pad bounds
-    # to (-2, 5) so anything outside (200% return on capital) is data error.
-    "roic":                  (-2, 5, True),
-    # FCF Yield — 3y median FCF / market_cap. Real-world band ±0.5; pad to
-    # (-2, 2) for negative-FCF growth names + tiny-cap blowups.
-    "fcf_yield":             (-2, 2, True),
-    # ROIIC — 5y marginal NOPAT/IC. Capped to ±5 in the scorer; range is
-    # mirrored here so the validator is a no-op except for inf scrubbing.
-    "roiic":                 (-5, 5, True),
-    # Gross Profitability — Gross Profit / Total Assets, 3y median. Real-world
-    # band ~0 to 1; pad to (-1, 2) for gross-loss names + asset-light blowups.
-    "gross_profitability":   (-1, 2, True),
-    # Forensic / capital-allocation batch (§3.2.1) — bounds are intentionally
-    # wide to keep distressed outliers without letting them dominate ranks.
-    "dso_change_yoy":        (-365, 365, True),    # days
-    "dio_change_yoy":        (-365, 365, True),    # days
-    "nwc_to_revenue":        (-2, 5, True),        # ratio
-    "sloan_accruals_full":   (-1, 1, True),        # ratio of avg total assets
-    "sga_to_revenue_change": (-1, 1, True),        # YoY pp change in SGA intensity
-    "fcf_margin":            (-2, 2, True),        # 3y median FCF/Sales
-    "capex_to_dep":          (-20, 20, True),      # capped in scorer to ±20
-    "goodwill_to_assets":    (0, 1, True),         # bounded ratio
-    "debt_structure":        (0, 1, True),         # LT/total share
-    "asset_tangibility":     (0, 1, True),         # Net Block/total
-    # Plan 0005 Phase E composites (used by screener directly)
-    "accruals_signal":       (0, 1, True),         # within-tier percentile blend
-    "promoter_signal":       (0, 1, True),         # within-tier percentile blend
-    "forensic_penalty":      (-1, 0, True),        # 0 / -0.10 / -0.20 / -0.30
-    "smart_money_score":     (0, 100, True),       # min-max-normalised 0-100
-    # Sector signals (separate table)
-    "regulatory_score":      (-10, 10, True),
-    "macro_score":           (-10, 10, True),
-    # Plan 0002 §3.2.6 — industry identity code (0 = unknown, 1..38 frozen)
-    "industry_id":           (0, 50, True),
-    # Plan 0002 §3.2.7 — macro betas (bounds mirror signals/macro_betas.py BETA_CLIP)
-    "oil_beta":              (-5, 5, True),
-    "metals_beta":           (-5, 5, True),
-    "inr_beta":              (-5, 5, True),
-    "gold_beta":             (-5, 5, True),
-    "rate_beta":             (-5, 5, True),
-    "credit_beta":           (-5, 5, True),
-    # Audit Factor-F3 LARGE-tier candidates — bounds mirror the signal-side clips
-    "low_vol_252d":          (0, 5, True),       # annualized log-return vol
-    "st_reversal_21d":       (-1, 5, True),      # 21d total return (fwd_return band)
-    "asset_growth_yoy":      (-100, 1000, True),  # percent (revenue_growth_yoy band)
-    # Plan 0012 C3 — momentum retest hypothesis
-    "residual_momentum_12_1": (-5, 5, True),      # sum of ~230 daily log returns net of NIFTY beta
-    # Plan 0012 C4 — lottery retest hypothesis
-    "max_lottery_21d":        (-1, 2, True),      # mean of top-5 daily simple returns, 21d window
-}
+# Columns + per-column validation ranges ((min, max, allow_nan), out-of-range → NaN)
+# come from the factor registry (factors.py): a factor entry carries its
+# "producer" and "pit_range". Never hand-edit a copy here.
+PIT_COLUMNS = factors.PIT_COLUMNS
+VALIDATION_RANGES = factors.VALIDATION_RANGES
 
 
 def _validate_and_clean(df, columns):
-    """Apply per-column range gates. Out-of-range → NaN. Returns (df, summary).
+    """Apply per-column range gates (factors.discard_out_of_range): ±inf and
+    out-of-range → NaN. Returns (df, summary).
 
     summary rows = {column: {n_valid, n_nan, n_out_of_range, min, max}}
     """
+    out_of_range = factors.discard_out_of_range(df, columns)
     summary = {}
-    for col in columns:
-        if col not in df.columns:
-            continue
-        rule = VALIDATION_RANGES.get(col)
-        if rule is None:
-            continue
-        min_v, max_v, _allow_nan = rule
-        n_total = len(df)
-        before_nan = df[col].isna().sum()
-
-        # Drop infinities first
-        df[col] = df[col].replace([np.inf, -np.inf], np.nan)
-
-        if min_v is not None and max_v is not None:
-            out_of_range = ((df[col] < min_v) | (df[col] > max_v)).sum()
-            df.loc[(df[col] < min_v) | (df[col] > max_v), col] = np.nan
-        else:
-            out_of_range = 0
-
-        after_nan = df[col].isna().sum()
-        n_valid = n_total - after_nan
+    for col, n_out in out_of_range.items():
+        n_valid = int(df[col].notna().sum())
         summary[col] = {
-            "valid": int(n_valid),
-            "nan": int(after_nan),
-            "out_of_range": int(out_of_range),
+            "valid": n_valid,
+            "nan": int(len(df) - n_valid),
+            "out_of_range": n_out,
             "min": float(df[col].min()) if n_valid else None,
             "max": float(df[col].max()) if n_valid else None,
         }
@@ -490,47 +188,9 @@ def prices_through(prices, eval_date):
 
 
 def apply_pit_adjustments(prices_pit, adjustments, eval_date):
-    """Add `adj_close` column to prices_pit using PIT-strict corporate adjustment.
-
-    Only events with ex_date <= eval_date are visible. For each (sid, date),
-    adj_close = close × Π factor[e] for e where e.sid == sid AND date < e.ex_date <= eval_date.
-
-    Vectorized per-sid via reverse cumprod + searchsorted — O(N log M) per sid.
-    """
-    snap_str = eval_date.isoformat()
-    visible = adjustments[adjustments["ex_date"] <= snap_str]
-    out = prices_pit.copy()
-
-    if visible.empty:
-        out["adj_close"] = out["close"]
-        return out
-
-    out["adj_close"] = out["close"].astype(float)
-    events_by_sid = dict(tuple(visible.groupby("sid")))
-
-    closes = out["close"].astype(float).values
-    adj_factors = np.ones(len(out), dtype=float)
-
-    for sid, idxs in out.groupby("sid").indices.items():
-        if sid not in events_by_sid:
-            continue
-        g = events_by_sid[sid].sort_values("ex_date")
-        ex_dates = g["ex_date"].values
-        factors = g["factor"].values.astype(float)
-
-        n = len(factors)
-        rev_cum = np.empty(n + 1)
-        rev_cum[n] = 1.0
-        for i in range(n - 1, -1, -1):
-            rev_cum[i] = factors[i] * rev_cum[i + 1]
-
-        sid_dates = out["date"].values[idxs]
-        # side='right' → first event with ex_date > date; product of factors[idx:] applies
-        idx_arr = np.searchsorted(ex_dates, sid_dates, side="right")
-        adj_factors[idxs] = rev_cum[idx_arr]
-
-    out["adj_close"] = (closes * adj_factors).round(4)
-    return out
+    """Add `adj_close` (PIT-strict corporate adjustment, ex_date ≤ eval_date) —
+    signals._prices.apply_adjustments, shared with the live screener."""
+    return apply_adjustments(prices_pit, adjustments, eval_date)
 
 
 # ─────────────────────── Per-signal PIT calc ───────────────────────
@@ -617,87 +277,23 @@ def pit_smart_money(stocks, bulk_pit, prices_pit, eval_date, window_days=90):
 
 
 def pit_earnings_yield(qi_pit, close_df):
-    """TTM EPS as of eval_date / close as of eval_date."""
-    qi = qi_pit.copy()
-    has_consol = set(qi[qi["reporting"] == "consolidated"]["sid"])
-    qi = qi[
-        ((qi["sid"].isin(has_consol)) & (qi["reporting"] == "consolidated"))
-        | (~qi["sid"].isin(has_consol))
-    ]
-
-    rows = []
-    for sid, group in qi.groupby("sid"):
-        g = group.sort_values("end_date")
-        if len(g) < 4:
-            continue
-        eps_sum = g.tail(4)["eps"].sum()
-        if pd.notna(eps_sum):
-            rows.append({"sid": sid, "ttm_eps": eps_sum})
-
-    eps_df = pd.DataFrame(rows)
-    if eps_df.empty:
-        return pd.DataFrame(columns=["sid", "earnings_yield"])
-
-    merged = eps_df.merge(close_df, on="sid", how="left")
-    merged["earnings_yield"] = np.where(
-        (merged["close_price"].notna()) & (merged["close_price"] > 0),
-        (merged["ttm_eps"] / merged["close_price"]).round(6),
-        np.nan,
-    )
-    return merged[["sid", "earnings_yield"]]
+    """TTM EPS as of eval_date / close as of eval_date (signals.earnings_yield)."""
+    from signals.earnings_yield import earnings_yield
+    return earnings_yield(qi_pit, close_df)
 
 
 def pit_book_to_price(bs_pit, close_df):
-    """Latest known book equity per share / close price as of eval_date.
-
-    Per-share book value uses shares_outstanding from same balance sheet row.
-    """
-    if bs_pit.empty:
-        return pd.DataFrame(columns=["sid", "book_to_price"])
-
-    latest_bs = (bs_pit.sort_values(["sid", "end_date"])
-                 .groupby("sid")
-                 .tail(1)[["sid", "total_equity", "shares_outstanding"]])
-
-    latest_bs["book_per_share"] = np.where(
-        (latest_bs["shares_outstanding"].notna()) & (latest_bs["shares_outstanding"] > 0),
-        latest_bs["total_equity"] / latest_bs["shares_outstanding"],
-        np.nan,
-    )
-
-    merged = latest_bs.merge(close_df, on="sid", how="left")
-    merged["book_to_price"] = np.where(
-        (merged["close_price"].notna()) & (merged["close_price"] > 0)
-        & (merged["book_per_share"].notna()),
-        (merged["book_per_share"] / merged["close_price"]).round(6),
-        np.nan,
-    )
-    return merged[["sid", "book_to_price"]]
+    """Latest known book equity per share / close as of eval_date (signals.book_to_price)."""
+    from signals.book_to_price import book_to_price
+    return book_to_price(bs_pit, close_df)
 
 
 def pit_position_52w(prices_pit, eval_date):
-    """For each sid, position within trailing 252 trading days.
-    Formula: (close - 52w_low) / (52w_high - 52w_low) — values in [0, 1].
-    NaN if <60 trading days of price history (insufficient).
-    Uses adj_close so a stock split inside the window doesn't artificially expand the range.
-    """
-    rows = []
-    price_col = "adj_close" if "adj_close" in prices_pit.columns else "close"
-    for sid, group in prices_pit.groupby("sid"):
-        g = group.sort_values("date")
-        # Take last 252 trading days
-        recent = g.tail(252)
-        if len(recent) < 60:
-            rows.append({"sid": sid})
-            continue
-        closes = recent[price_col].values
-        last = closes[-1]
-        lo, hi = closes.min(), closes.max()
-        if hi <= lo or hi <= 0:
-            rows.append({"sid": sid})
-            continue
-        rows.append({"sid": sid, "position_52w": round((last - lo) / (hi - lo), 4)})
-    return pd.DataFrame(rows)
+    """(close − 52w_low) / (52w_high − 52w_low) over the trailing 252 trading days,
+    NaN below 60 days (signals.value_composite.position_52w — the live function;
+    adj_close, so a split inside the window does not stretch the range)."""
+    from signals.value_composite import position_52w
+    return position_52w(prices_pit)
 
 
 def pit_avg_delivery(prices_pit, window=30):
@@ -723,6 +319,11 @@ def pit_delivery_anomaly_z(prices_pit, window=90):
     Same function the live screener calls — one implementation, no twin drift."""
     from signals.delivery_anomaly import delivery_anomaly_z
     return delivery_anomaly_z(prices_pit, window=window)
+
+
+def pit_delivery(prices_pit):
+    """The `delivery` producer: avg_delivery_pct_30d + delivery_anomaly_z."""
+    return pit_avg_delivery(prices_pit).merge(pit_delivery_anomaly_z(prices_pit), on="sid", how="outer")
 
 
 def pit_pledge_quality(stocks, sh_pit):
@@ -1000,80 +601,27 @@ def pit_growth_fundamentals(stocks, qi_pit):
 def pit_consensus(stocks, fh_pit):
     """EPS revision YoY + combined consensus signal.
 
-    `pt_revision_yoy` was DROPPED 2026-05-23 — `forecast_history.metric='price'`
+    `pt_revision_yoy` was DROPPED 2026-05-23 — `forecast_history.metric=price`
     is current-close masquerading as PT, so its YoY = 1-year price return, not
     PT revision. The combined signal is now eps-revision only until the
     `analyst_consensus_snapshots` monthly history accumulates ≥12 months
     (calendar: 2027-05). See memory `forecast_history_price_contaminated`.
+    eps_revision_yoy is signals.eps_revision.eps_revision_yoy — the live producer.
     """
     if fh_pit.empty:
         return pd.DataFrame(columns=["sid", "pt_revision_yoy", "eps_revision_yoy", "consensus_signal_combined"])
-
-    fh_by_sid_metric = {}
-    for (sid, metric), group in fh_pit.groupby(["sid", "metric"]):
-        fh_by_sid_metric[(sid, metric)] = group.sort_values("date")
-
-    def _yoy(series_df):
-        """For a per-metric, per-sid sorted DataFrame: return YoY % change between latest and prior-year snapshot."""
-        if series_df is None or len(series_df) < 2:
-            return None
-        latest = series_df.iloc[-1]
-        latest_dt = latest["date"]
-        # Find prior snapshot ~12 months earlier (between 9 and 18 months prior)
-        latest_year = int(latest_dt[:4])
-        prior_candidates = series_df[
-            (series_df["date"] >= f"{latest_year - 2}-01-01")
-            & (series_df["date"] < f"{latest_year}-{latest_dt[5:]}")
-        ]
-        if prior_candidates.empty:
-            return None
-        # Pick the one closest to latest_dt − 1 year
-        target_year = latest_year - 1
-        prior = prior_candidates.iloc[
-            (prior_candidates["date"].str[:4].astype(int) - target_year).abs().argmin()
-        ]
-        latest_v = latest["value"]
-        prior_v = prior["value"]
-        if pd.isna(latest_v) or pd.isna(prior_v) or abs(prior_v) < 1e-9:
-            return None
-        return round((float(latest_v) / abs(float(prior_v)) - 1) * 100, 2)
-
-    rows = []
-    for sid in stocks["sid"]:
-        row = {"sid": sid, "pt_revision_yoy": None}  # always NULL; data source contaminated
-        eps_yoy = _yoy(fh_by_sid_metric.get((sid, "eps")))
-        if eps_yoy is not None:
-            row["eps_revision_yoy"] = eps_yoy
-            row["consensus_signal_combined"] = eps_yoy
-        rows.append(row)
-    return pd.DataFrame(rows)
+    from signals.eps_revision import eps_revision_yoy
+    eps = eps_revision_yoy(fh_pit[fh_pit["metric"] == "eps"])
+    out = stocks[["sid"]].merge(eps, on="sid", how="left")
+    out["pt_revision_yoy"] = None  # always NULL; data source contaminated
+    out["consensus_signal_combined"] = out["eps_revision_yoy"]
+    return out[["sid", "pt_revision_yoy", "eps_revision_yoy", "consensus_signal_combined"]]
 
 
 def _within_tier_rank_composite(df, components, name):
-    """Generic NaN-tolerant within-cap_tier rank composite.
-
-    components: list of (column_name, weight)
-    Returns DataFrame with [sid, name].
-
-    For each stock: rank each component within its tier, then weighted average
-    of ranks where the rank exists. If all components are NaN, output is NaN.
-    """
-    cols = [c for c, _ in components]
-    out = df[["sid", "cap_tier"] + cols].copy()
-    for col in cols:
-        out[f"_r_{col}"] = out.groupby("cap_tier")[col].rank(pct=True)
-
-    weighted_score = pd.Series(0.0, index=out.index)
-    weight_sum = pd.Series(0.0, index=out.index)
-    for col, w in components:
-        rank_col = out[f"_r_{col}"]
-        has = rank_col.notna()
-        weighted_score[has] += w * rank_col[has]
-        weight_sum[has] += w
-
-    composite = weighted_score / weight_sum.replace(0, np.nan)
-    out[name] = composite.round(4)
-    return out[["sid", name]]
+    """NaN-tolerant within-cap_tier rank composite (signals.value_composite)."""
+    from signals.value_composite import within_tier_rank_composite
+    return within_tier_rank_composite(df, components, name)
 
 
 def pit_value_composite(df_in_progress):
@@ -1727,146 +1275,53 @@ def pit_insider_signal(stocks, insider_trades_pit, eval_date):
 
 
 def pit_momentum(prices_pit):
-    """Risk-adjusted 6M and 12M momentum as of eval_date.
-
-    Uses `adj_close` (split/bonus-adjusted) when present, falls back to raw close.
-    Mirrors signals/momentum.py logic but operates on date-bounded prices.
-    """
-    rows = []
-    price_col = "adj_close" if "adj_close" in prices_pit.columns else "close"
-    for sid, group in prices_pit.groupby("sid"):
-        g = group.sort_values("date")
-        closes = g[price_col].values
-        n = len(closes)
-
-        row = {"sid": sid}
-
-        if n >= WINDOW_6M + SKIP_DAYS:
-            p_skip = closes[-SKIP_DAYS - 1]
-            p_6m = closes[-(WINDOW_6M + SKIP_DAYS)]
-            if p_6m > 0 and p_skip > 0:
-                ret_6m = p_skip / p_6m - 1
-                window = closes[-(WINDOW_6M + SKIP_DAYS):(-SKIP_DAYS)]
-                daily_rets = np.diff(window) / window[:-1]
-                vol_6m = daily_rets.std()
-                if vol_6m > 0:
-                    row["mom_6m"] = round(ret_6m / vol_6m, 4)
-
-        if n >= WINDOW_12M + SKIP_DAYS:
-            p_skip = closes[-SKIP_DAYS - 1]
-            p_12m = closes[-(WINDOW_12M + SKIP_DAYS)]
-            if p_12m > 0 and p_skip > 0:
-                ret_12m = p_skip / p_12m - 1
-                window = closes[-(WINDOW_12M + SKIP_DAYS):(-SKIP_DAYS)]
-                daily_rets = np.diff(window) / window[:-1]
-                vol_12m = daily_rets.std()
-                if vol_12m > 0:
-                    row["mom_12m"] = round(ret_12m / vol_12m, 4)
-
-        rows.append(row)
-
-    return pd.DataFrame(rows)
+    """Risk-adjusted 6M and 12M momentum as of eval_date (signals.momentum.momentum —
+    the live function; adj_close preferred)."""
+    from signals.momentum import momentum
+    return momentum(prices_pit)
 
 
-# ───── Plan-0007 cluster: 4 factors derived from fundamentals_screener ─────
+# ───── Screener-ratio factors (fundamentals_screener) ─────
+# Each delegates to its signals/<name>.py `_compute` on the filing-lagged fund_pit
+# slice, scoped to that module live universe/line items (signals/_annual.py) —
+# one implementation per factor, live and PIT.
 
-_REVCV_MIN_YEARS = 6
-_REVCV_MIN_ABS_MEAN = 0.02
-_FCLUSTER_SMOOTH = 3
+def _fund_factor(module, col, stocks, fund_pit, items=None, excluded=None):
+    mod = importlib.import_module(f"signals.{module}")
+    return _annual.pit_frame(mod._compute, stocks, fund_pit,
+                             items if items is not None else mod.REQUIRED_ITEMS, col,
+                             excluded if excluded is not None else _annual.FINANCIAL_SECTORS)
 
 
 def pit_revenue_cv(stocks, fund_pit):
     """Revenue volatility 5y CV — stdev/|mean| of last 5 YoY Sales growth rates."""
-    sales = fund_pit[fund_pit["line_item"] == "Sales"]
-    sales = sales.sort_values(["sid", "period_end"])
-    rows = []
-    for sid, g in sales.groupby("sid"):
-        vals = g["value"].dropna().tolist()
-        if len(vals) < _REVCV_MIN_YEARS:
-            continue
-        window = vals[-_REVCV_MIN_YEARS:]
-        growth = []
-        for i in range(1, len(window)):
-            prev = window[i - 1]
-            if prev is None or prev <= 0:
-                continue
-            growth.append(window[i] / prev - 1)
-        if len(growth) < _REVCV_MIN_YEARS - 1:
-            continue
-        m = float(np.mean(growth))
-        if abs(m) < _REVCV_MIN_ABS_MEAN:
-            continue
-        cv = float(np.std(growth, ddof=1) / abs(m))
-        rows.append({"sid": sid, "revenue_cv_5y": round(cv, 4)})
-    return pd.DataFrame(rows)
+    return _fund_factor("revenue_cv", "revenue_cv_5y", stocks, fund_pit, ["Sales"], set())
 
 
 def pit_inventory_turnover(stocks, fund_pit):
     """Sales/Inventory, 3-yr median, ranked vs sector p50."""
-    inv_excluded = set(FINANCIAL_SECTORS) | {"Information Technology",
-                                             "Communication Services", "Utilities"}
-    universe = stocks[~stocks["sector"].isin(inv_excluded)][["sid", "sector"]]
-    fp = fund_pit[fund_pit["line_item"].isin(["Sales", "Inventory"])].copy()
-    if fp.empty:
-        return pd.DataFrame(columns=["sid", "relative_turnover"])
-    wide = fp.pivot_table(index=["sid", "period_end"], columns="line_item",
-                          values="value", aggfunc="first").reset_index()
-    for col in ("Sales", "Inventory"):
-        if col not in wide.columns:
-            wide[col] = np.nan
-    wide = wide.dropna(subset=["Sales", "Inventory"])
-    wide = wide[(wide["Inventory"] >= 1.0) & (wide["Sales"] > 0)]
-    wide["turnover_yr"] = wide["Sales"] / wide["Inventory"]
-    wide = wide.sort_values(["sid", "period_end"])
-    last_n = wide.groupby("sid", as_index=False).tail(_FCLUSTER_SMOOTH)
-    agg = last_n.groupby("sid", as_index=False).agg(
-        inventory_turnover=("turnover_yr", "median"),
-        years_used=("turnover_yr", "count"),
-    )
-    agg = agg[agg["years_used"] >= _FCLUSTER_SMOOTH]
-    agg = agg.merge(universe, on="sid", how="inner")
-    if agg.empty:
-        return pd.DataFrame(columns=["sid", "relative_turnover"])
-    p50 = agg.groupby("sector")["inventory_turnover"].median().to_dict()
-    agg["sector_p50"] = agg["sector"].map(p50)
-    agg["relative_turnover"] = agg["inventory_turnover"] / agg["sector_p50"]
-    return agg[["sid", "relative_turnover"]].copy()
+    from signals.inventory_turnover import EXCLUDED_SECTORS
+    return _fund_factor("inventory_turnover", "relative_turnover", stocks, fund_pit,
+                        ["Sales", "Inventory"], EXCLUDED_SECTORS)
 
 
 def pit_sales_growth_relative(stocks, fund_pit):
     """3-yr median YoY Sales growth minus sector median."""
-    universe = stocks[~stocks["sector"].isin(FINANCIAL_SECTORS)][["sid", "sector"]]
-    sales = fund_pit[fund_pit["line_item"] == "Sales"].copy()
-    sales = sales.sort_values(["sid", "period_end"])
-    sales["prev"] = sales.groupby("sid")["value"].shift(1)
-    sales = sales.dropna(subset=["prev"])
-    sales = sales[sales["prev"] > 0]
-    sales["growth_yr"] = sales["value"] / sales["prev"] - 1
-    last_n = sales.groupby("sid", as_index=False).tail(_FCLUSTER_SMOOTH)
-    agg = last_n.groupby("sid", as_index=False).agg(
-        sales_growth=("growth_yr", "median"),
-        years_used=("growth_yr", "count"),
-    )
-    agg = agg[agg["years_used"] >= _FCLUSTER_SMOOTH]
-    agg = agg.merge(universe, on="sid", how="inner")
-    if agg.empty:
-        return pd.DataFrame(columns=["sid", "relative_growth"])
-    sec_med = agg.groupby("sector")["sales_growth"].median().to_dict()
-    agg["sector_median"] = agg["sector"].map(sec_med)
-    agg["relative_growth"] = agg["sales_growth"] - agg["sector_median"]
-    return agg[["sid", "relative_growth"]].copy()
+    return _fund_factor("sales_growth_relative", "relative_growth", stocks, fund_pit, ["Sales"])
 
 
 def pit_share_momentum(stocks, fund_pit, prices_pit, eval_date,
                        window_days=90):
-    """Δ market_cap_share within sector over `window_days` calendar days."""
+    """Δ market_cap_share within sector over `window_days` calendar days
+    (signals/share_momentum.sector_share_change on the as-of closes + latest known shares)."""
+    from signals.share_momentum import sector_share_change
     universe = stocks[~stocks["sector"].isin(FINANCIAL_SECTORS)][["sid", "sector"]]
     shares = fund_pit[fund_pit["line_item"] == "No. of Equity Shares"]
     if shares.empty or prices_pit.empty:
         return pd.DataFrame(columns=["sid", "share_momentum"])
     shares = (shares.sort_values(["sid", "period_end"])
                     .groupby("sid", as_index=False).tail(1)
-                    [["sid", "value"]].rename(columns={"value": "shares"}))
+                    [["sid", "value"]].rename(columns={"value": "shares_outstanding"}))
 
     price_col = "adj_close" if "adj_close" in prices_pit.columns else "close"
     cutoff_t = eval_date.isoformat()
@@ -1885,671 +1340,98 @@ def pit_share_momentum(stocks, fund_pit, prices_pit, eval_date,
                 .merge(universe, on="sid", how="inner"))
     if df.empty:
         return pd.DataFrame(columns=["sid", "share_momentum"])
-    df["mc_t"] = df["close_t"] * df["shares"]
-    df["mc_p"] = df["close_p"] * df["shares"]
-    sec_t = df.groupby("sector")["mc_t"].sum().to_dict()
-    sec_p = df.groupby("sector")["mc_p"].sum().to_dict()
-    df["share_t"] = df["mc_t"] / df["sector"].map(sec_t)
-    df["share_p"] = df["mc_p"] / df["sector"].map(sec_p)
-    df = df[(df["share_p"] > 0) & df["share_p"].notna()]
-    df["share_momentum"] = df["share_t"] / df["share_p"] - 1
-    return df[["sid", "share_momentum"]].copy()
-
-
-# ───── Cash Conversion Cycle (paired with signals/cash_conversion_cycle.py) ─────
-
-_CCC_SMOOTH_YEARS = 3
-_CCC_MIN_SALES_CR = 50.0
-_CCC_ITEMS = ("Sales", "Receivables", "Inventory", "Trade Payables")
+    return sector_share_change(df)[["sid", "share_momentum"]].copy()
 
 
 def pit_cash_conversion_cycle(stocks, fund_pit):
-    """3-yr median CCC = DSO + DIO − DPO, all using Sales/365 as denominator.
-
-    Mirrors signals/cash_conversion_cycle.py — see that module for the rationale
-    on using Sales (not COGS) and the financial-sector exclusion.
-    """
-    universe = stocks[~stocks["sector"].isin(FINANCIAL_SECTORS)][["sid"]]
-    fp = fund_pit[fund_pit["line_item"].isin(_CCC_ITEMS)]
-    if fp.empty:
-        return pd.DataFrame(columns=["sid", "ccc"])
-
-    wide = fp.pivot_table(
-        index=["sid", "period_end"], columns="line_item", values="value", aggfunc="first"
-    ).reset_index()
-    for item in _CCC_ITEMS:
-        if item not in wide.columns:
-            wide[item] = np.nan
-    wide = wide.dropna(subset=list(_CCC_ITEMS))
-    wide = wide[wide["Sales"] >= _CCC_MIN_SALES_CR]
-    if wide.empty:
-        return pd.DataFrame(columns=["sid", "ccc"])
-
-    daily_sales = wide["Sales"] / 365.0
-    wide["ccc_yr"] = (
-        wide["Receivables"] / daily_sales
-        + wide["Inventory"] / daily_sales
-        - wide["Trade Payables"] / daily_sales
-    )
-
-    wide = wide.sort_values(["sid", "period_end"])
-    last_n = wide.groupby("sid", as_index=False).tail(_CCC_SMOOTH_YEARS)
-    agg = last_n.groupby("sid", as_index=False).agg(
-        ccc=("ccc_yr", "median"),
-        years_used=("ccc_yr", "count"),
-    )
-    agg = agg[agg["years_used"] >= _CCC_SMOOTH_YEARS]
-    agg = agg.merge(universe, on="sid", how="inner")
-    return agg[["sid", "ccc"]].reset_index(drop=True)
-
-
-# ───── Operating Margin Trend (paired with signals/operating_margin_trend.py) ─────
-
-_OMTREND_WINDOW = 5
-_OMTREND_MIN_SALES_CR = 50.0
-_OMTREND_ITEMS = ("Sales", "Profit before tax", "Interest")
+    """3-yr median CCC = DSO + DIO − DPO, all using Sales/365 as denominator."""
+    return _fund_factor("cash_conversion_cycle", "ccc", stocks, fund_pit)
 
 
 def pit_operating_margin_trend(stocks, fund_pit):
     """OLS slope (pp/yr) of last 5y EBIT/Sales per sid."""
-    universe = stocks[~stocks["sector"].isin(FINANCIAL_SECTORS)][["sid"]]
-    fp = fund_pit[fund_pit["line_item"].isin(_OMTREND_ITEMS)]
-    if fp.empty:
-        return pd.DataFrame(columns=["sid", "margin_slope"])
-
-    wide = fp.pivot_table(
-        index=["sid", "period_end"], columns="line_item", values="value", aggfunc="first"
-    ).reset_index()
-    for item in _OMTREND_ITEMS:
-        if item not in wide.columns:
-            wide[item] = np.nan
-    wide = wide.dropna(subset=list(_OMTREND_ITEMS))
-    wide = wide[wide["Sales"] >= _OMTREND_MIN_SALES_CR].copy()
-    wide["margin"] = (wide["Profit before tax"] + wide["Interest"]) / wide["Sales"]
-    wide = wide[wide["margin"].between(-2.0, 2.0)]
-
-    wide = wide.sort_values(["sid", "period_end"])
-    last_n = wide.groupby("sid", as_index=False).tail(_OMTREND_WINDOW)
-
-    rows = []
-    for sid, g in last_n.groupby("sid"):
-        if len(g) < _OMTREND_WINDOW:
-            continue
-        x = np.arange(len(g), dtype=float)
-        y = g["margin"].values
-        slope_frac = np.polyfit(x, y, 1)[0]
-        rows.append({"sid": sid, "margin_slope": float(slope_frac) * 100.0})
-    if not rows:
-        return pd.DataFrame(columns=["sid", "margin_slope"])
-    out = pd.DataFrame(rows).merge(universe, on="sid", how="inner")
-    return out[["sid", "margin_slope"]]
-
-
-# ───── Working Capital Intensity (paired with signals/working_capital_intensity.py) ─────
-
-_WCI_SMOOTH = 3
-_WCI_MIN_SALES_CR = 50.0
-_WCI_ITEMS = ("Sales", "Receivables", "Inventory", "Trade Payables")
+    return _fund_factor("operating_margin_trend", "margin_slope", stocks, fund_pit)
 
 
 def pit_working_capital_intensity(stocks, fund_pit):
     """3y median (Recv + Inv − Pay) / Sales per sid."""
-    universe = stocks[~stocks["sector"].isin(FINANCIAL_SECTORS)][["sid"]]
-    fp = fund_pit[fund_pit["line_item"].isin(_WCI_ITEMS)]
-    if fp.empty:
-        return pd.DataFrame(columns=["sid", "wc_intensity"])
-
-    wide = fp.pivot_table(
-        index=["sid", "period_end"], columns="line_item", values="value", aggfunc="first"
-    ).reset_index()
-    for item in _WCI_ITEMS:
-        if item not in wide.columns:
-            wide[item] = np.nan
-    wide = wide.dropna(subset=list(_WCI_ITEMS))
-    wide = wide[wide["Sales"] >= _WCI_MIN_SALES_CR].copy()
-    wide["wci_yr"] = (
-        wide["Receivables"] + wide["Inventory"] - wide["Trade Payables"]
-    ) / wide["Sales"]
-
-    wide = wide.sort_values(["sid", "period_end"])
-    last_n = wide.groupby("sid", as_index=False).tail(_WCI_SMOOTH)
-    agg = last_n.groupby("sid", as_index=False).agg(
-        wc_intensity=("wci_yr", "median"),
-        years_used=("wci_yr", "count"),
-    )
-    agg = agg[agg["years_used"] >= _WCI_SMOOTH]
-    agg = agg.merge(universe, on="sid", how="inner")
-    return agg[["sid", "wc_intensity"]].reset_index(drop=True)
-
-
-# ───── Interest Coverage (paired with signals/interest_coverage.py) ─────
-
-_ICOV_SMOOTH = 3
-_ICOV_MIN_INTEREST_CR = 1.0
-_ICOV_CAP = 200.0
-_ICOV_ITEMS = ("Profit before tax", "Interest")
+    return _fund_factor("working_capital_intensity", "wc_intensity", stocks, fund_pit)
 
 
 def pit_interest_coverage(stocks, fund_pit):
     """3y median (PBT + Interest) / Interest per sid, capped at ±200."""
-    universe = stocks[~stocks["sector"].isin(FINANCIAL_SECTORS)][["sid"]]
-    fp = fund_pit[fund_pit["line_item"].isin(_ICOV_ITEMS)]
-    if fp.empty:
-        return pd.DataFrame(columns=["sid", "interest_coverage"])
-
-    wide = fp.pivot_table(
-        index=["sid", "period_end"], columns="line_item", values="value", aggfunc="first"
-    ).reset_index()
-    for item in _ICOV_ITEMS:
-        if item not in wide.columns:
-            wide[item] = np.nan
-    wide = wide.dropna(subset=list(_ICOV_ITEMS))
-    wide = wide[wide["Interest"] >= _ICOV_MIN_INTEREST_CR].copy()
-    wide["cov_yr"] = (
-        (wide["Profit before tax"] + wide["Interest"]) / wide["Interest"]
-    ).clip(-_ICOV_CAP, _ICOV_CAP)
-
-    wide = wide.sort_values(["sid", "period_end"])
-    last_n = wide.groupby("sid", as_index=False).tail(_ICOV_SMOOTH)
-    agg = last_n.groupby("sid", as_index=False).agg(
-        interest_coverage=("cov_yr", "median"),
-        years_used=("cov_yr", "count"),
-    )
-    agg = agg[agg["years_used"] >= _ICOV_SMOOTH]
-    agg = agg.merge(universe, on="sid", how="inner")
-    return agg[["sid", "interest_coverage"]].reset_index(drop=True)
-
-
-# ───── ROIC (paired with signals/roic.py) ─────
-
-_ROIC_SMOOTH = 3
-_ROIC_MIN_IC_CR = 50.0
-_ROIC_ITEMS = (
-    "Profit before tax", "Tax", "Interest",
-    "Equity Share Capital", "Reserves", "Borrowings",
-)
+    return _fund_factor("interest_coverage", "interest_coverage", stocks, fund_pit)
 
 
 def pit_roic(stocks, fund_pit):
-    """3y median ROIC = NOPAT / Invested Capital per sid.
-
-    Mirrors signals/roic.py: NOPAT = (PBT + Interest) × (1 − Tax/PBT), tax
-    rate clipped to [0, 1] when PBT > 0 and treated as 0 in loss years.
-    Invested Capital = Equity Share Capital + Reserves + Borrowings.
-    Financial sector excluded (semantics differ for banks).
-    """
-    universe = stocks[~stocks["sector"].isin(FINANCIAL_SECTORS)][["sid"]]
-    fp = fund_pit[fund_pit["line_item"].isin(_ROIC_ITEMS)]
-    if fp.empty:
-        return pd.DataFrame(columns=["sid", "roic"])
-
-    wide = fp.pivot_table(
-        index=["sid", "period_end"], columns="line_item", values="value", aggfunc="first"
-    ).reset_index()
-    for item in _ROIC_ITEMS:
-        if item not in wide.columns:
-            wide[item] = np.nan
-    wide = wide.dropna(subset=list(_ROIC_ITEMS))
-
-    pbt = wide["Profit before tax"]
-    tax = wide["Tax"]
-    interest = wide["Interest"]
-    tax_rate = np.where(pbt > 0, (tax / pbt.replace(0, np.nan)).clip(0.0, 1.0), 0.0)
-    wide["nopat"] = (pbt + interest) * (1 - tax_rate)
-    wide["invested_capital"] = (
-        wide["Equity Share Capital"] + wide["Reserves"] + wide["Borrowings"]
-    )
-    wide = wide[wide["invested_capital"] >= _ROIC_MIN_IC_CR].copy()
-    wide["roic_yr"] = wide["nopat"] / wide["invested_capital"]
-
-    wide = wide.sort_values(["sid", "period_end"])
-    last_n = wide.groupby("sid", as_index=False).tail(_ROIC_SMOOTH)
-    agg = last_n.groupby("sid", as_index=False).agg(
-        roic=("roic_yr", "median"),
-        years_used=("roic_yr", "count"),
-    )
-    agg = agg[(agg["years_used"] >= _ROIC_SMOOTH) & (agg["roic"] > 0)]
-    agg = agg.merge(universe, on="sid", how="inner")
-    return agg[["sid", "roic"]].reset_index(drop=True)
-
-
-# ───── Gross Profitability (paired with signals/gross_profitability.py) ─────
-
-_GP_SMOOTH = 3
-_GP_MIN_YEARS = 2
-_GP_MIN_SALES_CR = 50.0
-_GP_MIN_ASSETS_CR = 50.0
-_GP_MATERIAL_MIN_FRAC = 0.10   # goods-business floor (see signals/gross_profitability.py)
-_GP_CAP = (-1.0, 2.0)
-_GP_REQUIRED = ("Sales", "Raw Material Cost", "Total")
-_GP_OPTIONAL = ("Change in Inventory", "Power and Fuel", "Other Mfr. Exp")
-_GP_ITEMS = _GP_REQUIRED + _GP_OPTIONAL
+    """3y median ROIC = NOPAT / Invested Capital per sid (signals/roic.py)."""
+    return _fund_factor("roic", "roic", stocks, fund_pit)
 
 
 def pit_gross_profitability(stocks, fund_pit):
-    """3y-median gross-profits-to-assets per sid. Mirrors signals/gross_profitability.py.
-
-    COGS = Raw Material Cost + Change in Inventory + Power and Fuel + Other Mfr.
-    Exp; Gross Profit = Sales − COGS; ÷ Total assets. Requires Raw Material Cost
-    (goods businesses only — service/IT names left NaN). Financial sector
-    excluded. The Novy-Marx anchor of the multibagger funnel.
-    """
-    universe = stocks[~stocks["sector"].isin(FINANCIAL_SECTORS)][["sid"]]
-    fp = fund_pit[fund_pit["line_item"].isin(_GP_ITEMS)]
-    if fp.empty:
-        return pd.DataFrame(columns=["sid", "gross_profitability"])
-
-    wide = fp.pivot_table(
-        index=["sid", "period_end"], columns="line_item", values="value", aggfunc="first"
-    ).reset_index()
-    for item in _GP_REQUIRED:
-        if item not in wide.columns:
-            wide[item] = np.nan
-    for item in _GP_OPTIONAL:
-        if item not in wide.columns:
-            wide[item] = 0.0
-    wide = wide.dropna(subset=list(_GP_REQUIRED))
-    if wide.empty:
-        return pd.DataFrame(columns=["sid", "gross_profitability"])
-    for item in _GP_OPTIONAL:
-        wide[item] = wide[item].fillna(0.0)
-
-    cogs = (wide["Raw Material Cost"] + wide["Change in Inventory"]
-            + wide["Power and Fuel"] + wide["Other Mfr. Exp"])
-    wide["gp"] = wide["Sales"] - cogs
-    wide = wide[(wide["Sales"] >= _GP_MIN_SALES_CR)
-                & (wide["Total"] >= _GP_MIN_ASSETS_CR)
-                & (wide["Raw Material Cost"] >= _GP_MATERIAL_MIN_FRAC * wide["Sales"])].copy()
-    wide["gp_yr"] = (wide["gp"] / wide["Total"]).clip(*_GP_CAP)
-
-    wide = wide.sort_values(["sid", "period_end"])
-    last_n = wide.groupby("sid", as_index=False).tail(_GP_SMOOTH)
-    agg = last_n.groupby("sid", as_index=False).agg(
-        gross_profitability=("gp_yr", "median"),
-        years_used=("gp_yr", "count"),
-    )
-    agg = agg[agg["years_used"] >= _GP_MIN_YEARS]
-    agg = agg.merge(universe, on="sid", how="inner")
-    return agg[["sid", "gross_profitability"]].reset_index(drop=True)
-
-
-# ───── FCF Yield (paired with signals/fcf_yield.py) ─────
-
-_FCFY_SMOOTH = 3
-_FCFY_RUPEES_PER_CRORE = 1e7
-_FCFY_MIN_MARKET_CAP_CR = SCREEN["min_market_cap_cr"]
-_FCFY_ITEMS = (
-    "Cash from Operating Activity",
-    "Net Block",
-    "Capital Work in Progress",
-    "Depreciation",
-)
-
-
-_ROIIC_WINDOW = 5
-_ROIIC_MIN_DELTA_IC_CR = 50.0
-_ROIIC_CAP = 5.0
-_ROIIC_ITEMS = (
-    "Profit before tax", "Tax", "Interest",
-    "Equity Share Capital", "Reserves", "Borrowings",
-)
+    """3y-median gross-profits-to-assets per sid (signals/gross_profitability.py) —
+    the Novy-Marx anchor of the multibagger funnel."""
+    from signals.gross_profitability import ALL_ITEMS
+    return _fund_factor("gross_profitability", "gross_profitability", stocks, fund_pit, ALL_ITEMS)
 
 
 def pit_roiic(stocks, fund_pit):
-    """5y endpoint ROIIC = (NOPAT_t − NOPAT_{t-5}) / (IC_t − IC_{t-5}) per sid.
-
-    Mirrors signals/roiic.py: same NOPAT and IC formulas as pit_roic, but
-    measured as a *change* over the trailing 5 annual periods. Drops sids
-    where ΔIC < ₹50 cr (denominator blow-up + sign-inverted capital returners).
-    Capped to ±5 to match the scorer.
-    """
-    universe = stocks[~stocks["sector"].isin(FINANCIAL_SECTORS)][["sid"]]
-    fp = fund_pit[fund_pit["line_item"].isin(_ROIIC_ITEMS)]
-    if fp.empty:
-        return pd.DataFrame(columns=["sid", "roiic"])
-
-    wide = fp.pivot_table(
-        index=["sid", "period_end"], columns="line_item", values="value", aggfunc="first"
-    ).reset_index()
-    for item in _ROIIC_ITEMS:
-        if item not in wide.columns:
-            wide[item] = np.nan
-    wide = wide.dropna(subset=list(_ROIIC_ITEMS))
-    if wide.empty:
-        return pd.DataFrame(columns=["sid", "roiic"])
-
-    pbt = wide["Profit before tax"]
-    tax = wide["Tax"]
-    interest = wide["Interest"]
-    tax_rate = np.where(pbt > 0, (tax / pbt.replace(0, np.nan)).clip(0.0, 1.0), 0.0)
-    wide["nopat"] = (pbt + interest) * (1 - tax_rate)
-    wide["ic"] = (
-        wide["Equity Share Capital"] + wide["Reserves"] + wide["Borrowings"]
-    )
-
-    wide = wide.sort_values(["sid", "period_end"])
-    rows = []
-    for sid, g in wide.groupby("sid"):
-        if len(g) < _ROIIC_WINDOW + 1:
-            continue
-        nopat_old = g["nopat"].iloc[-(_ROIIC_WINDOW + 1)]
-        nopat_new = g["nopat"].iloc[-1]
-        ic_old = g["ic"].iloc[-(_ROIIC_WINDOW + 1)]
-        ic_new = g["ic"].iloc[-1]
-        delta_ic = ic_new - ic_old
-        if delta_ic < _ROIIC_MIN_DELTA_IC_CR:
-            continue
-        roiic = float(np.clip((nopat_new - nopat_old) / delta_ic, -_ROIIC_CAP, _ROIIC_CAP))
-        rows.append({"sid": sid, "roiic": roiic})
-
-    if not rows:
-        return pd.DataFrame(columns=["sid", "roiic"])
-    out = pd.DataFrame(rows).merge(universe, on="sid", how="inner")
-    return out[["sid", "roiic"]].reset_index(drop=True)
+    """5y endpoint ROIIC = ΔNOPAT / ΔIC per sid, capped ±5 (signals/roiic.py)."""
+    return _fund_factor("roiic", "roiic", stocks, fund_pit)
 
 
-# ───── Forensic / capital-allocation batch (plan 0002 §3.2.1) ─────
-# All paired with signals/{name}.py — same formulas, just sourced from
-# the PIT-filtered fund_pit slice instead of the live fundamentals_screener.
-
-_FBATCH_MIN_SALES_CR = 50.0
-_FBATCH_MIN_ASSETS_CR = 50.0
-_FBATCH_MIN_BORROW_CR = 50.0
-_FBATCH_MIN_DEP_CR = 1.0
-_FBATCH_SMOOTH = 3
-_CAPEX2DEP_CAP = 20.0
-
-
-def _yoy_change_per_day(fund_pit, stocks, item_num, denom_item="Sales", out_col=None):
-    """Generic YoY change in days: (item_t/(denom_t/365)) − (item_{t-1}/(denom_{t-1}/365))."""
-    universe = stocks[~stocks["sector"].isin(FINANCIAL_SECTORS)][["sid"]]
-    fp = fund_pit[fund_pit["line_item"].isin([item_num, denom_item])]
-    if fp.empty:
-        return pd.DataFrame(columns=["sid", out_col])
-    wide = fp.pivot_table(
-        index=["sid", "period_end"], columns="line_item", values="value", aggfunc="first"
-    ).reset_index()
-    for item in (item_num, denom_item):
-        if item not in wide.columns:
-            wide[item] = np.nan
-    wide = wide.dropna(subset=[item_num, denom_item])
-    wide = wide[wide[denom_item] >= _FBATCH_MIN_SALES_CR].copy()
-    wide["days"] = wide[item_num] / (wide[denom_item] / 365.0)
-    wide = wide.sort_values(["sid", "period_end"])
-    rows = []
-    for sid, g in wide.groupby("sid"):
-        if len(g) < 2:
-            continue
-        rows.append({"sid": sid, out_col: float(g["days"].iloc[-1] - g["days"].iloc[-2])})
-    if not rows:
-        return pd.DataFrame(columns=["sid", out_col])
-    return pd.DataFrame(rows).merge(universe, on="sid", how="inner")[["sid", out_col]]
-
+# Forensic / capital-allocation batch (plan 0002 §3.2.1)
 
 def pit_dso_change_yoy(stocks, fund_pit):
-    return _yoy_change_per_day(fund_pit, stocks, "Receivables", "Sales", "dso_change_yoy")
+    return _fund_factor("dso_change_yoy", "dso_change_yoy", stocks, fund_pit)
 
 
 def pit_dio_change_yoy(stocks, fund_pit):
-    return _yoy_change_per_day(fund_pit, stocks, "Inventory", "Sales", "dio_change_yoy")
-
-
-_NWC2REV_ITEMS = ("Sales", "Receivables", "Inventory", "Trade Payables")
+    return _fund_factor("dio_change_yoy", "dio_change_yoy", stocks, fund_pit)
 
 
 def pit_nwc_to_revenue(stocks, fund_pit):
-    universe = stocks[~stocks["sector"].isin(FINANCIAL_SECTORS)][["sid"]]
-    fp = fund_pit[fund_pit["line_item"].isin(_NWC2REV_ITEMS)]
-    if fp.empty:
-        return pd.DataFrame(columns=["sid", "nwc_to_revenue"])
-    wide = fp.pivot_table(
-        index=["sid", "period_end"], columns="line_item", values="value", aggfunc="first"
-    ).reset_index()
-    for item in _NWC2REV_ITEMS:
-        if item not in wide.columns:
-            wide[item] = np.nan
-    wide = wide.dropna(subset=list(_NWC2REV_ITEMS))
-    wide = wide[wide["Sales"] >= _FBATCH_MIN_SALES_CR].copy()
-    wide["nwc_to_revenue"] = (
-        wide["Receivables"] + wide["Inventory"] - wide["Trade Payables"]
-    ) / wide["Sales"]
-    wide = wide.sort_values(["sid", "period_end"])
-    latest = wide.groupby("sid", as_index=False).tail(1)
-    return latest.merge(universe, on="sid", how="inner")[["sid", "nwc_to_revenue"]].reset_index(drop=True)
-
-
-_SLOAN_ITEMS = ("Receivables", "Inventory", "Trade Payables", "Depreciation", "Total")
+    return _fund_factor("nwc_to_revenue", "nwc_to_revenue", stocks, fund_pit)
 
 
 def pit_sloan_accruals_full(stocks, fund_pit):
-    universe = stocks[~stocks["sector"].isin(FINANCIAL_SECTORS)][["sid"]]
-    fp = fund_pit[fund_pit["line_item"].isin(_SLOAN_ITEMS)]
-    if fp.empty:
-        return pd.DataFrame(columns=["sid", "sloan_accruals_full"])
-    wide = fp.pivot_table(
-        index=["sid", "period_end"], columns="line_item", values="value", aggfunc="first"
-    ).reset_index()
-    for item in _SLOAN_ITEMS:
-        if item not in wide.columns:
-            wide[item] = np.nan
-    wide = wide.dropna(subset=list(_SLOAN_ITEMS))
-    wide = wide[wide["Total"] >= _FBATCH_MIN_ASSETS_CR].copy()
-    wide["nwc"] = wide["Receivables"] + wide["Inventory"] - wide["Trade Payables"]
-    wide = wide.sort_values(["sid", "period_end"])
-    rows = []
-    for sid, g in wide.groupby("sid"):
-        if len(g) < 2:
-            continue
-        latest, prior = g.iloc[-1], g.iloc[-2]
-        ta_avg = (latest["Total"] + prior["Total"]) / 2.0
-        if ta_avg <= 0:
-            continue
-        sloan = (latest["nwc"] - prior["nwc"] - latest["Depreciation"]) / ta_avg
-        rows.append({"sid": sid, "sloan_accruals_full": float(sloan)})
-    if not rows:
-        return pd.DataFrame(columns=["sid", "sloan_accruals_full"])
-    return pd.DataFrame(rows).merge(universe, on="sid", how="inner")[["sid", "sloan_accruals_full"]]
-
-
-_SGA_ITEMS = ("Sales", "Selling and admin")
+    return _fund_factor("sloan_accruals_full", "sloan_accruals_full", stocks, fund_pit)
 
 
 def pit_sga_to_revenue_change(stocks, fund_pit):
-    universe = stocks[~stocks["sector"].isin(FINANCIAL_SECTORS)][["sid"]]
-    fp = fund_pit[fund_pit["line_item"].isin(_SGA_ITEMS)]
-    if fp.empty:
-        return pd.DataFrame(columns=["sid", "sga_to_revenue_change"])
-    wide = fp.pivot_table(
-        index=["sid", "period_end"], columns="line_item", values="value", aggfunc="first"
-    ).reset_index()
-    for item in _SGA_ITEMS:
-        if item not in wide.columns:
-            wide[item] = np.nan
-    wide = wide.dropna(subset=list(_SGA_ITEMS))
-    wide = wide[wide["Sales"] >= _FBATCH_MIN_SALES_CR].copy()
-    wide["sga_int"] = wide["Selling and admin"] / wide["Sales"]
-    wide = wide.sort_values(["sid", "period_end"])
-    rows = []
-    for sid, g in wide.groupby("sid"):
-        if len(g) < 2:
-            continue
-        rows.append({
-            "sid": sid,
-            "sga_to_revenue_change": float(g["sga_int"].iloc[-1] - g["sga_int"].iloc[-2]),
-        })
-    if not rows:
-        return pd.DataFrame(columns=["sid", "sga_to_revenue_change"])
-    return pd.DataFrame(rows).merge(universe, on="sid", how="inner")[["sid", "sga_to_revenue_change"]]
-
-
-_FCFM_ITEMS = (
-    "Sales", "Cash from Operating Activity", "Net Block",
-    "Capital Work in Progress", "Depreciation",
-)
+    return _fund_factor("sga_to_revenue_change", "sga_to_revenue_change", stocks, fund_pit)
 
 
 def pit_fcf_margin(stocks, fund_pit):
-    universe = stocks[~stocks["sector"].isin(FINANCIAL_SECTORS)][["sid"]]
-    fp = fund_pit[fund_pit["line_item"].isin(_FCFM_ITEMS)]
-    if fp.empty:
-        return pd.DataFrame(columns=["sid", "fcf_margin"])
-    wide = fp.pivot_table(
-        index=["sid", "period_end"], columns="line_item", values="value", aggfunc="first"
-    ).reset_index().sort_values(["sid", "period_end"])
-    for item in _FCFM_ITEMS:
-        if item not in wide.columns:
-            wide[item] = np.nan
-    wide = wide.dropna(subset=list(_FCFM_ITEMS))
-    wide = wide[wide["Sales"] >= _FBATCH_MIN_SALES_CR].copy()
-    wide["ppe"] = wide["Net Block"] + wide["Capital Work in Progress"]
-    wide["ppe_prev"] = wide.groupby("sid")["ppe"].shift(1)
-    wide = wide.dropna(subset=["ppe_prev"])
-    delta_ppe = (wide["ppe"] - wide["ppe_prev"]).clip(lower=0.0)
-    wide["capex"] = delta_ppe + wide["Depreciation"]
-    wide["fcf_margin_yr"] = (wide["Cash from Operating Activity"] - wide["capex"]) / wide["Sales"]
-    last_n = wide.groupby("sid", as_index=False).tail(_FBATCH_SMOOTH)
-    agg = last_n.groupby("sid", as_index=False).agg(
-        fcf_margin=("fcf_margin_yr", "median"),
-        years_used=("fcf_margin_yr", "count"),
-    )
-    agg = agg[agg["years_used"] >= _FBATCH_SMOOTH]
-    return agg.merge(universe, on="sid", how="inner")[["sid", "fcf_margin"]].reset_index(drop=True)
-
-
-_CAPEX_ITEMS = ("Net Block", "Capital Work in Progress", "Depreciation")
+    return _fund_factor("fcf_margin", "fcf_margin", stocks, fund_pit)
 
 
 def pit_capex_to_dep(stocks, fund_pit):
-    universe = stocks[~stocks["sector"].isin(FINANCIAL_SECTORS)][["sid"]]
-    fp = fund_pit[fund_pit["line_item"].isin(_CAPEX_ITEMS)]
-    if fp.empty:
-        return pd.DataFrame(columns=["sid", "capex_to_dep"])
-    wide = fp.pivot_table(
-        index=["sid", "period_end"], columns="line_item", values="value", aggfunc="first"
-    ).reset_index().sort_values(["sid", "period_end"])
-    for item in _CAPEX_ITEMS:
-        if item not in wide.columns:
-            wide[item] = np.nan
-    wide = wide.dropna(subset=list(_CAPEX_ITEMS))
-    wide = wide[wide["Depreciation"] >= _FBATCH_MIN_DEP_CR].copy()
-    wide["ppe"] = wide["Net Block"] + wide["Capital Work in Progress"]
-    wide["ppe_prev"] = wide.groupby("sid")["ppe"].shift(1)
-    wide = wide.dropna(subset=["ppe_prev"])
-    delta_ppe = (wide["ppe"] - wide["ppe_prev"]).clip(lower=0.0)
-    wide["capex"] = delta_ppe + wide["Depreciation"]
-    wide["ratio_yr"] = (wide["capex"] / wide["Depreciation"]).clip(-_CAPEX2DEP_CAP, _CAPEX2DEP_CAP)
-    last_n = wide.groupby("sid", as_index=False).tail(_FBATCH_SMOOTH)
-    agg = last_n.groupby("sid", as_index=False).agg(
-        capex_to_dep=("ratio_yr", "median"),
-        years_used=("ratio_yr", "count"),
-    )
-    agg = agg[agg["years_used"] >= _FBATCH_SMOOTH]
-    return agg.merge(universe, on="sid", how="inner")[["sid", "capex_to_dep"]].reset_index(drop=True)
-
-
-_GW_ITEMS = ("Intangible Assets", "Total")
+    return _fund_factor("capex_to_dep", "capex_to_dep", stocks, fund_pit)
 
 
 def pit_goodwill_to_assets(stocks, fund_pit):
-    universe = stocks[~stocks["sector"].isin(FINANCIAL_SECTORS)][["sid"]]
-    fp = fund_pit[fund_pit["line_item"].isin(_GW_ITEMS)]
-    if fp.empty:
-        return pd.DataFrame(columns=["sid", "goodwill_to_assets"])
-    wide = fp.pivot_table(
-        index=["sid", "period_end"], columns="line_item", values="value", aggfunc="first"
-    ).reset_index()
-    for item in _GW_ITEMS:
-        if item not in wide.columns:
-            wide[item] = np.nan
-    wide = wide.dropna(subset=list(_GW_ITEMS))
-    wide = wide[wide["Total"] >= _FBATCH_MIN_ASSETS_CR].copy()
-    wide["goodwill_to_assets"] = wide["Intangible Assets"] / wide["Total"]
-    wide = wide.sort_values(["sid", "period_end"])
-    latest = wide.groupby("sid", as_index=False).tail(1)
-    return latest.merge(universe, on="sid", how="inner")[["sid", "goodwill_to_assets"]].reset_index(drop=True)
-
-
-_DBT_ITEMS = ("Long term Borrowings", "Borrowings")
+    return _fund_factor("goodwill_to_assets", "goodwill_to_assets", stocks, fund_pit)
 
 
 def pit_debt_structure(stocks, fund_pit):
-    universe = stocks[~stocks["sector"].isin(FINANCIAL_SECTORS)][["sid"]]
-    fp = fund_pit[fund_pit["line_item"].isin(_DBT_ITEMS)]
-    if fp.empty:
-        return pd.DataFrame(columns=["sid", "debt_structure"])
-    wide = fp.pivot_table(
-        index=["sid", "period_end"], columns="line_item", values="value", aggfunc="first"
-    ).reset_index()
-    for item in _DBT_ITEMS:
-        if item not in wide.columns:
-            wide[item] = np.nan
-    wide = wide.dropna(subset=list(_DBT_ITEMS))
-    wide = wide[wide["Borrowings"] >= _FBATCH_MIN_BORROW_CR].copy()
-    wide["debt_structure"] = (
-        wide["Long term Borrowings"] / wide["Borrowings"]
-    ).clip(0.0, 1.0)
-    wide = wide.sort_values(["sid", "period_end"])
-    latest = wide.groupby("sid", as_index=False).tail(1)
-    return latest.merge(universe, on="sid", how="inner")[["sid", "debt_structure"]].reset_index(drop=True)
-
-
-_ASSTAN_ITEMS = ("Net Block", "Total")
+    return _fund_factor("debt_structure", "debt_structure", stocks, fund_pit)
 
 
 def pit_asset_tangibility(stocks, fund_pit):
-    universe = stocks[~stocks["sector"].isin(FINANCIAL_SECTORS)][["sid"]]
-    fp = fund_pit[fund_pit["line_item"].isin(_ASSTAN_ITEMS)]
-    if fp.empty:
-        return pd.DataFrame(columns=["sid", "asset_tangibility"])
-    wide = fp.pivot_table(
-        index=["sid", "period_end"], columns="line_item", values="value", aggfunc="first"
-    ).reset_index()
-    for item in _ASSTAN_ITEMS:
-        if item not in wide.columns:
-            wide[item] = np.nan
-    wide = wide.dropna(subset=list(_ASSTAN_ITEMS))
-    wide = wide[wide["Total"] >= _FBATCH_MIN_ASSETS_CR].copy()
-    wide["asset_tangibility"] = (wide["Net Block"] / wide["Total"]).clip(0.0, 1.0)
-    wide = wide.sort_values(["sid", "period_end"])
-    latest = wide.groupby("sid", as_index=False).tail(1)
-    return latest.merge(universe, on="sid", how="inner")[["sid", "asset_tangibility"]].reset_index(drop=True)
+    return _fund_factor("asset_tangibility", "asset_tangibility", stocks, fund_pit)
 
 
 def pit_fcf_yield(stocks, fund_pit, close_df):
-    """3y median FCF / PIT market_cap_cr per sid.
+    """3y median FCF (signals/fcf_yield.fcf_median) / PIT market_cap_cr per sid.
 
-    Mirrors signals/fcf_yield.py: FCF = OCF − (max(Δ(NetBlock+CWIP),0) +
-    Depreciation). Market cap is reconstructed PIT as
-    (close × No. of Equity Shares) / 1e7 (rupees → ₹cr) so the yield is
-    dimensionless, matching the live signal's output.
+    Market cap is reconstructed PIT as (close × No. of Equity Shares) / 1e7
+    (rupees → ₹cr) so the yield is dimensionless — the live signal divides by
+    the stocks table current market cap instead.
     """
-    universe = stocks[~stocks["sector"].isin(FINANCIAL_SECTORS)][["sid"]]
-    fp = fund_pit[fund_pit["line_item"].isin(_FCFY_ITEMS)]
-    if fp.empty:
-        return pd.DataFrame(columns=["sid", "fcf_yield"])
-
-    wide = fp.pivot_table(
-        index=["sid", "period_end"], columns="line_item", values="value", aggfunc="first"
-    ).reset_index().sort_values(["sid", "period_end"])
-    for item in _FCFY_ITEMS:
-        if item not in wide.columns:
-            wide[item] = np.nan
-    wide = wide.dropna(subset=list(_FCFY_ITEMS))
-
-    wide["ppe"] = wide["Net Block"] + wide["Capital Work in Progress"]
-    wide["ppe_prev"] = wide.groupby("sid")["ppe"].shift(1)
-    wide = wide.dropna(subset=["ppe_prev"])
-    delta_ppe = (wide["ppe"] - wide["ppe_prev"]).clip(lower=0.0)
-    wide["capex"] = delta_ppe + wide["Depreciation"]
-    wide["fcf_yr"] = wide["Cash from Operating Activity"] - wide["capex"]
-
-    last_n = wide.groupby("sid", as_index=False).tail(_FCFY_SMOOTH)
-    agg = last_n.groupby("sid", as_index=False).agg(
-        fcf=("fcf_yr", "median"),
-        years_used=("fcf_yr", "count"),
-    )
-    agg = agg[agg["years_used"] >= _FCFY_SMOOTH]
-    agg = agg.merge(universe, on="sid", how="inner")
+    from signals.fcf_yield import MIN_MARKET_CAP_CR, REQUIRED_ITEMS, RUPEES_PER_CRORE, fcf_median
+    _, fund_u = _annual.scope(stocks, fund_pit, REQUIRED_ITEMS)
+    agg = fcf_median(fund_u)
     if agg.empty:
         return pd.DataFrame(columns=["sid", "fcf_yield"])
 
@@ -2563,8 +1445,8 @@ def pit_fcf_yield(stocks, fund_pit, close_df):
     shares = shares[shares["shares"] > 0]
 
     mc = (close_df.merge(shares, on="sid", how="inner"))
-    mc["market_cap_cr"] = (mc["close_price"] * mc["shares"]) / _FCFY_RUPEES_PER_CRORE
-    mc = mc[mc["market_cap_cr"] >= _FCFY_MIN_MARKET_CAP_CR]
+    mc["market_cap_cr"] = (mc["close_price"] * mc["shares"]) / RUPEES_PER_CRORE
+    mc = mc[mc["market_cap_cr"] >= MIN_MARKET_CAP_CR]
 
     out = agg.merge(mc[["sid", "market_cap_cr"]], on="sid", how="inner")
     out["fcf_yield"] = out["fcf"] / out["market_cap_cr"]
@@ -2573,312 +1455,74 @@ def pit_fcf_yield(stocks, fund_pit, close_df):
 
 # ─────────────────────── Driver ───────────────────────
 
+def _pit_input(ctx, raw, key, eval_date):
+    """One per-date input frame for the producers (factors.PIT_PRODUCERS "inputs"),
+    sliced to what was knowable on eval_date on first use and memoised in `ctx`."""
+    if key in ctx:
+        return ctx[key]
+    d = eval_date.isoformat()
+    if key == "fh":
+        v = raw["fh"][raw["fh"]["date"] <= d] if "fh" in raw else pd.DataFrame()
+    elif key == "acs":
+        v = (raw["acs"][raw["acs"]["snapshot_date"] <= d]
+             if "acs" in raw and not raw["acs"].empty else pd.DataFrame())
+    elif key == "bulk":
+        v = raw["bulk"][raw["bulk"]["deal_date"] <= d]
+    elif key == "short":
+        v = raw["short"][raw["short"]["short_date"] <= d]
+    elif key in ("news", "news_text"):
+        v = raw[key][raw[key]["published_date"] <= d]
+    elif key == "insider_trades":
+        v = raw["insider_trades"][raw["insider_trades"]["trade_date"] <= d]
+    elif key == "fund":
+        v = knowable_screener(raw["fund_screener"], eval_date) if "fund_screener" in raw else pd.DataFrame()
+    elif key == "financial_sids":
+        v = set(raw["stocks"][raw["stocks"]["sector"].isin(FINANCIAL_SECTORS)]["sid"])
+    else:   # full-history frames the helpers filter themselves (or None when not loaded)
+        v = raw.get(key)
+    ctx[key] = v
+    return v
+
+
 def reconstruct_one_date(eval_date, raw, signals_to_run):
-    """Reconstruct all enabled signals for a single eval_date.
+    """Reconstruct all enabled signals for a single eval_date. No DB writes.
 
     `raw` is a dict of full-history DataFrames (loaded once, reused across dates).
-    Returns one DataFrame with one row per stock.
+    Every producer in factors.PIT_PRODUCERS whose name (or alias) is in
+    `signals_to_run` runs, in registry order, and merges its columns onto the
+    universe frame. Returns (DataFrame one row per stock, validation summary).
     """
-    qi_pit = knowable_quarterly(raw["qi"], eval_date)
-    bs_pit = knowable_annual(raw["bs"], eval_date)
-    cf_pit = knowable_annual(raw["cf"], eval_date)
-    sh_pit = knowable_shareholding(raw["sh"], eval_date)
     px_pit = prices_through(raw["prices"], eval_date)
     px_pit = apply_pit_adjustments(px_pit, raw["adjustments"], eval_date)
-
     close_df = pit_close_price(px_pit)
+    ctx = {
+        "stocks": raw["stocks"],
+        "qi": knowable_quarterly(raw["qi"], eval_date),
+        "bs": knowable_annual(raw["bs"], eval_date),
+        "cf": knowable_annual(raw["cf"], eval_date),
+        "sh": knowable_shareholding(raw["sh"], eval_date),
+        "px": px_pit,
+        "close": close_df,
+        "eval_date": eval_date,
+    }
 
     # Start with the universe + close + tier
     base = raw["stocks"][["sid", "cap_tier"]].merge(close_df, on="sid", how="left")
     base["snapshot_date"] = eval_date.isoformat()
 
-    if "piotroski" in signals_to_run:
-        base = base.merge(pit_piotroski(raw["stocks"], qi_pit, bs_pit, cf_pit), on="sid", how="left")
-
-    if "accruals" in signals_to_run:
-        base = base.merge(pit_accruals(raw["stocks"], qi_pit, bs_pit, cf_pit), on="sid", how="left")
-
-    if "promoter" in signals_to_run:
-        base = base.merge(pit_promoter(raw["stocks"], sh_pit), on="sid", how="left")
-
-    if "forensic" in signals_to_run:
-        base = base.merge(pit_forensic(raw["stocks"], qi_pit, bs_pit, cf_pit), on="sid", how="left")
-
-    if "earnings_yield" in signals_to_run:
-        base = base.merge(pit_earnings_yield(qi_pit, close_df), on="sid", how="left")
-
-    if "book_to_price" in signals_to_run:
-        base = base.merge(pit_book_to_price(bs_pit, close_df), on="sid", how="left")
-
-    if "momentum" in signals_to_run:
-        base = base.merge(pit_momentum(px_pit), on="sid", how="left")
-
-    if "position_52w" in signals_to_run:
-        base = base.merge(pit_position_52w(px_pit, eval_date), on="sid", how="left")
-
-    if "delivery" in signals_to_run:
-        base = base.merge(pit_avg_delivery(px_pit), on="sid", how="left")
-        base = base.merge(pit_delivery_anomaly_z(px_pit), on="sid", how="left")
-
-    if "sector_momentum" in signals_to_run:
-        base = base.merge(
-            pit_sector_momentum(raw["stocks"], px_pit, raw["macro_hist"], eval_date),
-            on="sid", how="left",
-        )
-
-    if "sector_tilt" in signals_to_run:
-        base = base.merge(
-            pit_sector_tilt(raw["stocks"], px_pit, raw.get("macro_sector"), eval_date),
-            on="sid", how="left",
-        )
-
-    # ── §3.2.2 — F&O OI factors (NULL before fno_pcr_history backfill 2025-11-27) ──
-    if "fno_oi" in signals_to_run and "fno_pcr" in raw and not raw["fno_pcr"].empty:
-        base = base.merge(pit_fno_oi(raw["fno_pcr"], eval_date), on="sid", how="left")
-
-    # ── §3.2.2 — F&O IV factors (NULL before fno_iv_history backfill) ──
-    if "fno_iv" in signals_to_run and "fno_iv" in raw and not raw["fno_iv"].empty:
-        base = base.merge(pit_fno_iv(raw["fno_iv"], px_pit, eval_date), on="sid", how="left")
-
-    # ── §3.2.3 — daily-derivable microstructure factors (off raw OHLCV) ──
-    if "microstructure" in signals_to_run and "prices_ohlc" in raw and not raw["prices_ohlc"].empty:
-        base = base.merge(pit_microstructure(raw["prices_ohlc"], eval_date), on="sid", how="left")
-
-    # ── §3.2.6 — industry identity (categorical control; static per sid) ──
-    if "industry_id" in signals_to_run:
-        base = base.merge(pit_industry_id(raw["stocks"]), on="sid", how="left")
-
-    # ── §3.2.7 — per-stock macro betas (NULL until ~1y of macro_history lookback) ──
-    if "macro_betas" in signals_to_run:
-        base = base.merge(pit_macro_betas(px_pit, raw["macro_hist"], eval_date), on="sid", how="left")
-
-    # ── §3.2.5 — event-time / PEAD factors ──
-    if "pead" in signals_to_run:
-        base = base.merge(
-            pit_pead(qi_pit, px_pit, raw["macro_hist"], raw.get("corp_actions"),
-                     raw.get("bse_results"), eval_date),
-            on="sid", how="left",
-        )
-
-    # ── §3.2.5 — announcement-window CAR (market-implied earnings surprise) ──
-    if "announcement_car" in signals_to_run:
-        base = base.merge(
-            pit_announcement_car(px_pit, raw["macro_hist"], raw.get("bse_results"), eval_date),
-            on="sid", how="left",
-        )
-
-    # ── ADR 0042 — governance/forensic resignation density (BSE event stream) ──
-    if "governance" in signals_to_run:
-        base = base.merge(
-            pit_governance_resignation(raw["stocks"], raw.get("bse_gov"), eval_date),
-            on="sid", how="left",
-        )
-
-    # ── Audit Factor-F3 — LARGE-tier canonical rebuild candidates ──
-    if "low_vol" in signals_to_run:
-        base = base.merge(pit_low_vol_252d(px_pit), on="sid", how="left")
-
-    if "st_reversal" in signals_to_run:
-        base = base.merge(pit_st_reversal_21d(px_pit), on="sid", how="left")
-
-    if "asset_growth" in signals_to_run:
-        base = base.merge(pit_asset_growth_yoy(raw["stocks"], bs_pit), on="sid", how="left")
-
-    # ── Plan 0012 C3 — momentum retest hypothesis (WS2.6) ──
-    if "residual_momentum_12_1" in signals_to_run:
-        base = base.merge(
-            pit_residual_momentum_12_1(px_pit, raw["macro_hist"], eval_date), on="sid", how="left")
-
-    # ── Plan 0012 C4 — lottery retest hypothesis (WS2.7) ──
-    if "max_lottery_21d" in signals_to_run:
-        base = base.merge(pit_max_lottery_21d(px_pit), on="sid", how="left")
-
-    # ── §3.2.4 — earnings-call NLP factors (off nlp_scores, look-ahead-safe) ──
-    if "nlp" in signals_to_run:
-        base = base.merge(
-            pit_nlp_factors(raw["stocks"], raw.get("nlp"), eval_date),
-            on="sid", how="left",
-        )
-
-    if "pledge" in signals_to_run:
-        base = base.merge(pit_pledge_quality(raw["stocks"], sh_pit), on="sid", how="left")
-
-    if "promoter_trend" in signals_to_run:
-        base = base.merge(pit_promoter_trend_4q(raw["stocks"], sh_pit), on="sid", how="left")
-
-    if "macd" in signals_to_run:
-        base = base.merge(pit_macd_bullish(px_pit), on="sid", how="left")
-
-    if "fwd_return" in signals_to_run:
-        base = base.merge(pit_fwd_return_20d(eval_date, raw["prices"]), on="sid", how="left")
-
-    # ── Tier 2: fundamentals ──
-    if "quality_fundamentals" in signals_to_run:
-        financial_sids = set(raw["stocks"][raw["stocks"]["sector"].isin(FINANCIAL_SECTORS)]["sid"])
-        base = base.merge(pit_quality_fundamentals(raw["stocks"], qi_pit, bs_pit, financial_sids), on="sid", how="left")
-
-    if "growth_fundamentals" in signals_to_run:
-        base = base.merge(pit_growth_fundamentals(raw["stocks"], qi_pit), on="sid", how="left")
-
-    # ── Tier 2: consensus from forecast_history ──
-    fh_pit = raw["fh"][raw["fh"]["date"] <= eval_date.isoformat()] if "fh" in raw else pd.DataFrame()
-    if "consensus" in signals_to_run:
-        base = base.merge(pit_consensus(raw["stocks"], fh_pit), on="sid", how="left")
-
-    # ── Tier 3: pt_upside (analyst_consensus_snapshots ONLY — forecast_history
-    #    metric='price' is permanently excluded, audit Factor-F1) ──
-    if "pt_upside" in signals_to_run:
-        acs_pit = (raw["acs"][raw["acs"]["snapshot_date"] <= eval_date.isoformat()]
-                   if "acs" in raw and not raw["acs"].empty else pd.DataFrame())
-        base = base.merge(
-            pit_pt_upside(raw["stocks"], close_df, acs_pit=acs_pit),
-            on="sid", how="left",
-        )
-
-    # ── Tier 3: bulk_deal_signal (sparse — NULL for dates without bulk_deals data) ──
-    if "bulk_deal" in signals_to_run and "bulk" in raw:
-        bulk_pit = raw["bulk"][raw["bulk"]["deal_date"] <= eval_date.isoformat()]
-        base = base.merge(pit_bulk_deal_signal(raw["stocks"], bulk_pit, px_pit, eval_date), on="sid", how="left")
-
-    # ── Plan 0005 Phase E: composite smart_money for full screener-input replay ──
-    if "smart_money" in signals_to_run and "bulk" in raw:
-        bulk_pit = raw["bulk"][raw["bulk"]["deal_date"] <= eval_date.isoformat()]
-        base = base.merge(pit_smart_money(raw["stocks"], bulk_pit, px_pit, eval_date), on="sid", how="left")
-
-    # ── Tier 4: short_selling_signal (Jan 2024+ data) ──
-    if "short_selling" in signals_to_run and "short" in raw:
-        short_pit = raw["short"][raw["short"]["short_date"] <= eval_date.isoformat()]
-        base = base.merge(pit_short_selling_signal(raw["stocks"], short_pit, px_pit, eval_date), on="sid", how="left")
-
-    # ── Tier 4: earnings_beat_rate (proxy via QoQ-positive rate over last 8 quarters) ──
-    if "earnings_beat_rate" in signals_to_run:
-        base = base.merge(pit_earnings_beat_rate(raw["stocks"], qi_pit), on="sid", how="left")
-
-    # ── Tier 4: news_volume_7d (article count tagged to each stock in last 7d) ──
-    if "news_volume" in signals_to_run and "news" in raw:
-        news_pit = raw["news"][raw["news"]["published_date"] <= eval_date.isoformat()]
-        base = base.merge(pit_news_volume(raw["stocks"], news_pit, eval_date), on="sid", how="left")
-
-    # ── Behavior tier: sentiment_7d (VADER on PIT-filtered articles, last 7d) ──
-    # Pre-2024-04 eval dates: news_articles started 2024-04-23, output will be empty.
-    if "sentiment_7d" in signals_to_run and "news_text" in raw:
-        news_text_pit = raw["news_text"][raw["news_text"]["published_date"] <= eval_date.isoformat()]
-        base = base.merge(pit_sentiment_7d(news_text_pit, eval_date), on="sid", how="left")
-
-    # ── Behavior tier: insider_score (net-weighted Promoter/Director/KMP, 90d) ──
-    if "insider_signal" in signals_to_run and "insider_trades" in raw:
-        ins_pit = raw["insider_trades"][raw["insider_trades"]["trade_date"] <= eval_date.isoformat()]
-        base = base.merge(pit_insider_signal(raw["stocks"], ins_pit, eval_date), on="sid", how="left")
-
-    # ── Track 2.2b — Financial sub-model (Banks + NBFCs only) ──
-    # All three names trigger the same compute (it returns all three columns).
-    if any(s in signals_to_run for s in ("financial_signal", "financial_quality", "financial_recovery")) \
-            and "banking_metrics" in raw:
-        base = base.merge(pit_financial_signal(raw["banking_metrics"], eval_date),
-                          on="sid", how="left")
-
-    # ── Track 3 cluster (plan 0003) — sector-narrative-derived factors ──
-    fund_pit = (knowable_screener(raw["fund_screener"], eval_date)
-                if "fund_screener" in raw else pd.DataFrame())
-
-    if "revenue_cv" in signals_to_run and not fund_pit.empty:
-        base = base.merge(pit_revenue_cv(raw["stocks"], fund_pit), on="sid", how="left")
-
-    if "inventory_turnover" in signals_to_run and not fund_pit.empty:
-        base = base.merge(pit_inventory_turnover(raw["stocks"], fund_pit), on="sid", how="left")
-
-    if "sales_growth_relative" in signals_to_run and not fund_pit.empty:
-        base = base.merge(pit_sales_growth_relative(raw["stocks"], fund_pit), on="sid", how="left")
-
-    if "share_momentum" in signals_to_run and not fund_pit.empty:
-        base = base.merge(
-            pit_share_momentum(raw["stocks"], fund_pit, px_pit, eval_date),
-            on="sid", how="left",
-        )
-
-    if "cash_conversion_cycle" in signals_to_run and not fund_pit.empty:
-        base = base.merge(
-            pit_cash_conversion_cycle(raw["stocks"], fund_pit),
-            on="sid", how="left",
-        )
-
-    if "operating_margin_trend" in signals_to_run and not fund_pit.empty:
-        base = base.merge(
-            pit_operating_margin_trend(raw["stocks"], fund_pit),
-            on="sid", how="left",
-        )
-
-    if "working_capital_intensity" in signals_to_run and not fund_pit.empty:
-        base = base.merge(
-            pit_working_capital_intensity(raw["stocks"], fund_pit),
-            on="sid", how="left",
-        )
-
-    if "interest_coverage" in signals_to_run and not fund_pit.empty:
-        base = base.merge(
-            pit_interest_coverage(raw["stocks"], fund_pit),
-            on="sid", how="left",
-        )
-
-    if "roic" in signals_to_run and not fund_pit.empty:
-        base = base.merge(
-            pit_roic(raw["stocks"], fund_pit),
-            on="sid", how="left",
-        )
-
-    if "gross_profitability" in signals_to_run and not fund_pit.empty:
-        base = base.merge(
-            pit_gross_profitability(raw["stocks"], fund_pit),
-            on="sid", how="left",
-        )
-
-    if "fcf_yield" in signals_to_run and not fund_pit.empty:
-        base = base.merge(
-            pit_fcf_yield(raw["stocks"], fund_pit, close_df),
-            on="sid", how="left",
-        )
-
-    if "roiic" in signals_to_run and not fund_pit.empty:
-        base = base.merge(
-            pit_roiic(raw["stocks"], fund_pit),
-            on="sid", how="left",
-        )
-
-    # Forensic / capital-allocation batch (plan 0002 §3.2.1)
-    if "dso_change_yoy" in signals_to_run and not fund_pit.empty:
-        base = base.merge(pit_dso_change_yoy(raw["stocks"], fund_pit), on="sid", how="left")
-    if "dio_change_yoy" in signals_to_run and not fund_pit.empty:
-        base = base.merge(pit_dio_change_yoy(raw["stocks"], fund_pit), on="sid", how="left")
-    if "nwc_to_revenue" in signals_to_run and not fund_pit.empty:
-        base = base.merge(pit_nwc_to_revenue(raw["stocks"], fund_pit), on="sid", how="left")
-    if "sloan_accruals_full" in signals_to_run and not fund_pit.empty:
-        base = base.merge(pit_sloan_accruals_full(raw["stocks"], fund_pit), on="sid", how="left")
-    if "sga_to_revenue_change" in signals_to_run and not fund_pit.empty:
-        base = base.merge(pit_sga_to_revenue_change(raw["stocks"], fund_pit), on="sid", how="left")
-    if "fcf_margin" in signals_to_run and not fund_pit.empty:
-        base = base.merge(pit_fcf_margin(raw["stocks"], fund_pit), on="sid", how="left")
-    if "capex_to_dep" in signals_to_run and not fund_pit.empty:
-        base = base.merge(pit_capex_to_dep(raw["stocks"], fund_pit), on="sid", how="left")
-    if "goodwill_to_assets" in signals_to_run and not fund_pit.empty:
-        base = base.merge(pit_goodwill_to_assets(raw["stocks"], fund_pit), on="sid", how="left")
-    if "debt_structure" in signals_to_run and not fund_pit.empty:
-        base = base.merge(pit_debt_structure(raw["stocks"], fund_pit), on="sid", how="left")
-    if "asset_tangibility" in signals_to_run and not fund_pit.empty:
-        base = base.merge(pit_asset_tangibility(raw["stocks"], fund_pit), on="sid", how="left")
-
-    # Composite: needs mom_6m + mom_12m already computed in `base`
-    if "mom_composite" in signals_to_run and "mom_6m" in base.columns and "mom_12m" in base.columns:
-        base = base.merge(pit_mom_composite(base), on="sid", how="left")
-
-    # ── Tier 2: factor composites — must run AFTER all sub-signals ──
-    if "value_composite" in signals_to_run and {"earnings_yield", "book_to_price", "position_52w"}.issubset(base.columns):
-        base = base.merge(pit_value_composite(base), on="sid", how="left")
-
-    if "quality_composite" in signals_to_run and {"roe", "debt_to_equity", "profit_margin"}.issubset(base.columns):
-        base = base.merge(pit_quality_composite(base), on="sid", how="left")
-
-    if "growth_composite" in signals_to_run and {"revenue_growth_yoy", "eps_growth_yoy"}.issubset(base.columns):
-        base = base.merge(pit_growth_composite(base), on="sid", how="left")
+    for name, spec in factors.PIT_PRODUCERS.items():
+        if not spec["fn"] or not ({name, *spec.get("aliases", ())} & set(signals_to_run)):
+            continue
+        if any(k not in raw for k in spec.get("needs", ())):
+            continue
+        if any(_pit_input(ctx, raw, k, eval_date) is None or _pit_input(ctx, raw, k, eval_date).empty
+               for k in spec.get("nonempty", ())):
+            continue
+        if not set(spec.get("after", ())).issubset(base.columns):
+            continue
+        ctx["base"] = base
+        args = [_pit_input(ctx, raw, k, eval_date) for k in spec["inputs"]]
+        base = base.merge(globals()[spec["fn"]](*args), on="sid", how="left")
 
     # Emit ONLY the columns the requested signals actually produced.
     #
@@ -2898,7 +1542,6 @@ def reconstruct_one_date(eval_date, raw, signals_to_run):
     df, validation_summary = _validate_and_clean(df, cols_to_emit)
 
     return df, validation_summary
-
 
 def pit_financial_signal(banking_metrics_full, eval_date):
     """Reconstruct financial_quality + financial_recovery at eval_date.
@@ -3147,40 +1790,7 @@ def main():
     parser.add_argument("--dry-run", action="store_true",
                         help="Compute but don't write to daily_snapshots_pit")
     parser.add_argument("--signal", action="append", default=None,
-                        choices=["piotroski", "accruals", "promoter", "forensic",
-                                 "earnings_yield", "book_to_price", "momentum",
-                                 "position_52w", "delivery", "sector_momentum",
-                                 "sector_tilt",
-                                 "fno_oi", "fno_iv", "microstructure", "pead", "announcement_car", "governance", "nlp", "pledge",
-                                 "low_vol", "st_reversal", "asset_growth",
-                                 "promoter_trend", "macd", "fwd_return",
-                                 "mom_composite",
-                                 "quality_fundamentals", "growth_fundamentals",
-                                 "consensus",
-                                 "value_composite", "quality_composite", "growth_composite",
-                                 "pt_upside", "bulk_deal", "sector_overlays",
-                                 "short_selling",
-                                 "earnings_beat_rate", "news_volume",
-                                 "sentiment_7d", "insider_signal",
-                                 "revenue_cv", "inventory_turnover",
-                                 "sales_growth_relative", "share_momentum",
-                                 "cash_conversion_cycle",
-                                 "operating_margin_trend",
-                                 "working_capital_intensity",
-                                 "interest_coverage",
-                                 "roic", "fcf_yield", "roiic",
-                                 "gross_profitability",
-                                 "dso_change_yoy", "dio_change_yoy",
-                                 "nwc_to_revenue", "sloan_accruals_full",
-                                 "sga_to_revenue_change",
-                                 "fcf_margin", "capex_to_dep",
-                                 "goodwill_to_assets", "debt_structure",
-                                 "asset_tangibility",
-                                 "smart_money",
-                                 "financial_signal",
-                                 "financial_quality", "financial_recovery",
-                                 "industry_id", "macro_betas",
-                                 "residual_momentum_12_1", "max_lottery_21d"],
+                        choices=factors.PIT_SIGNALS,
                         help="Compute only this signal (repeatable)")
     parser.add_argument("--date", action="append", default=None,
                         help="Explicit eval date (YYYY-MM-DD, repeatable). "
@@ -3199,68 +1809,8 @@ def main():
     else:
         eval_dates = generate_eval_dates(months_back=args.months)
         print(f"  Cadence: monthly · {len(eval_dates)} dates · {eval_dates[0]} → {eval_dates[-1]}")
-    DEFAULT_SIGNALS = {
-        "piotroski", "accruals", "promoter", "forensic",
-        "earnings_yield", "book_to_price", "momentum",
-        "position_52w", "delivery", "pledge", "promoter_trend",
-        "macd", "fwd_return", "mom_composite",
-        "quality_fundamentals", "growth_fundamentals", "consensus",
-        "value_composite", "quality_composite", "growth_composite",
-        # Tier 3 unblocks
-        "pt_upside", "bulk_deal", "sector_overlays",
-        # Tier 4 new signal classes
-        "short_selling",
-        # Tier 4 quality + sentiment
-        "earnings_beat_rate", "news_volume",
-        # Behavior tier — added 2026-05-24
-        "sentiment_7d", "insider_signal",
-        # Track 3 cluster (plan 0003)
-        "revenue_cv", "inventory_turnover",
-        "sales_growth_relative", "share_momentum",
-        # Track 3 standalone factors
-        "cash_conversion_cycle",
-        "operating_margin_trend",
-        "working_capital_intensity",
-        "interest_coverage",
-        "roic", "fcf_yield", "roiic",
-        "gross_profitability",
-        # Forensic / capital-allocation batch (plan 0002 §3.2.1)
-        "dso_change_yoy", "dio_change_yoy",
-        "nwc_to_revenue", "sloan_accruals_full", "sga_to_revenue_change",
-        "fcf_margin", "capex_to_dep", "goodwill_to_assets",
-        "debt_structure", "asset_tangibility",
-        # Plan 0006 Phase E — sector momentum (per-stock = sector's medium RS z)
-        "sector_momentum",
-        # ADR 0041 — sector tilt (per-stock = sector's 6m-mom + macro z-ensemble)
-        "sector_tilt",
-        # Plan 0002 §3.2.2 — F&O open-interest + implied-volatility factors
-        "fno_oi", "fno_iv",
-        # Plan 0002 §3.2.3 — daily-derivable microstructure factors
-        "microstructure",
-        # Plan 0002 §3.2.5 — event-time / PEAD factors
-        "pead",
-        # Plan 0002 §3.2.5 — announcement-window CAR (market-implied surprise, PEAD-via-CAR)
-        "announcement_car",
-        # ADR 0042 — BSE governance/forensic resignation event factor
-        "governance",
-        # Audit Factor-F3 — LARGE-tier canonical rebuild candidates
-        "low_vol",
-        "st_reversal",
-        "asset_growth",
-        # Plan 0012 C3 — momentum retest hypothesis (WS2.6)
-        "residual_momentum_12_1",
-        # Plan 0012 C4 — lottery retest hypothesis (WS2.7)
-        "max_lottery_21d",
-        # Plan 0002 §3.2.4 — earnings-call NLP factors (off nlp_scores)
-        "nlp",
-        # Plan 0002 §3.2.6 — industry identity (control) + §3.2.7 macro betas
-        "industry_id", "macro_betas",
-        # Plan 0005 Phase E composite (smart_money — accruals/promoter/forensic
-        # composites flow through their existing _compute_scores)
-        "smart_money",
-        # Track 2.2b (2026-05-29) — Financial sub-model for Banks + NBFCs
-        "financial_signal",
-    }
+    # Default run = every producer in the registry (factors.PIT_PRODUCERS).
+    DEFAULT_SIGNALS = set(factors.PIT_PRODUCERS)
     signals_to_run = set(args.signal) if args.signal else DEFAULT_SIGNALS
     signals_label = ",".join(sorted(signals_to_run))
 

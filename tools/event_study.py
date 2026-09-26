@@ -8,11 +8,9 @@ aggregator with a t-stat and a multi-window drift curve. Read-only — event
 studies produce EVIDENCE (drift curves + t-stats), not production signals; no
 weight in `config.SIGNAL_WEIGHTS` is touched by this module or its callers.
 
-`_nifty_asof` is imported directly from signals.announcement_car (identical
-logic, no reason to duplicate). `_car_one`'s CAR math is mirrored here — not
-imported — because that module hardcodes its window as CAR_PRE=1/CAR_POST=1
-module constants; `_event_car_one` below is the same algorithm parameterized
-on (pre, post) so callers can study any window.
+`_car_one` (window parameterized on (pre, post), default the factor's [-1,+1])
+and `_nifty_asof` are imported from signals.announcement_car — one CAR
+implementation for the wired factor and every event study.
 
 Usage:
     from tools.event_study import event_car, car_summary, drift_curve
@@ -20,41 +18,19 @@ Usage:
 """
 from __future__ import annotations
 
-import bisect
 from datetime import date
 
 import numpy as np
 import pandas as pd
 
-from signals.announcement_car import NIFTY_ID, _nifty_asof
+from signals.announcement_car import NIFTY_ID, _car_one, _nifty_asof
 
 CAR_CLIP = (-0.5, 0.5)   # a multi-day abnormal return beyond ±50% is almost always a data error
 
 
 def _event_car_one(pdates, pcloses, n_dates, n_vals, event_iso, eval_iso, pre, post):
-    """Market-adjusted [-pre,+post] CAR around one event. NaN if not measurable.
-
-    day0 = first price row with date >= event_iso. Requires the window's END
-    close to exist AND its date <= eval_iso (look-ahead guard). Mirrors
-    signals.announcement_car._car_one exactly, parameterized on (pre, post).
-    """
-    i0 = bisect.bisect_left(pdates, event_iso)
-    if i0 >= len(pdates):
-        return np.nan
-    start, end = i0 - pre, i0 + post
-    if start < 0 or end >= len(pdates):
-        return np.nan
-    d_start, d_end = pdates[start], pdates[end]
-    if d_end > eval_iso:                      # window not fully closed by eval → look-ahead guard
-        return np.nan
-    p0, p1 = pcloses[start], pcloses[end]
-    if not (p0 > 0 and p1 > 0):
-        return np.nan
-    n0 = _nifty_asof(n_dates, n_vals, d_start)
-    n1 = _nifty_asof(n_dates, n_vals, d_end)
-    if n0 is None or n1 is None or n0 <= 0:
-        return np.nan
-    return float((p1 / p0 - 1.0) - (n1 / n0 - 1.0))
+    """Market-adjusted [-pre,+post] CAR around one event (signals.announcement_car._car_one)."""
+    return _car_one(pdates, pcloses, n_dates, n_vals, event_iso, eval_iso, pre, post)
 
 
 def event_car(events_df: pd.DataFrame, prices: pd.DataFrame, nifty: pd.DataFrame,

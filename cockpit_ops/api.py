@@ -1007,20 +1007,7 @@ def get_factor_health():
     # The screener's weight keys are abstracted names ("consensus", "smart_money")
     # mapping to one canonical signal; keep in sync with screener.SIGNAL_COLS.
     import config as _cfg
-    _WEIGHT_KEY_TO_SIGNAL = {
-        "consensus":          "consensus_signal_combined",
-        "earnings_yield":     "earnings_yield",
-        "accruals":           "cf_accruals_ratio",
-        "piotroski":          "piotroski_f_score",
-        "momentum":           "mom_6m_adj",
-        "book_to_price":      "book_to_price",
-        "promoter":           "promoter_qoq",
-        "smart_money":        "smart_money_score",
-        "pt_upside":          "pt_upside",
-        "eps_growth":         "eps_growth_yoy",
-        "pledge_quality":     "pledge_quality",
-        "delivery_anomaly_z": "delivery_anomaly_z",
-    }
+    from factors import WEIGHT_KEY_TO_SIGNAL as _WEIGHT_KEY_TO_SIGNAL
     wired = set()
     for _sch in ("SIGNAL_WEIGHTS", "SIGNAL_WEIGHTS_RETURN", "SIGNAL_WEIGHTS_SHARPE"):
         for _tier_w in (getattr(_cfg, _sch, {}) or {}).values():

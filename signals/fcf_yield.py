@@ -20,14 +20,12 @@ Usage:
     python -m signals.fcf_yield --dry-run
 """
 
-import argparse
-from datetime import date
-
 import numpy as np
 import pandas as pd
 
 from config import SCREEN
-from db import read_sql, upsert_df
+from db import read_sql
+from signals import _annual
 
 FINANCIAL_SECTORS = set(SCREEN["financial_sectors"])
 
@@ -69,9 +67,13 @@ def _load_data():
     return stocks, fund
 
 
-def _compute(stocks, fund):
+def fcf_median(fund):
+    """Per-sid median FCF (₹cr) over the last SMOOTH_YEARS years, all slots filled —
+    the numerator the live yield and tools/reconstruct_pit:pit_fcf_yield share
+    (they differ only in the market-cap denominator's source).
+    Returns DataFrame[sid, period_end, fcf, years_used]."""
     if fund.empty:
-        return pd.DataFrame(columns=["sid", "period_end", "fcf", "market_cap_cr", "fcf_yield"])
+        return pd.DataFrame(columns=["sid", "period_end", "fcf", "years_used"])
 
     wide = fund.pivot_table(
         index=["sid", "period_end"], columns="line_item", values="value", aggfunc="first"
@@ -100,8 +102,13 @@ def _compute(stocks, fund):
         fcf=("fcf_yr", "median"),
         years_used=("fcf_yr", "count"),
     )
-    agg = agg[agg["years_used"] >= SMOOTH_YEARS]
+    return agg[agg["years_used"] >= SMOOTH_YEARS]
 
+
+def _compute(stocks, fund):
+    if fund.empty:
+        return pd.DataFrame(columns=["sid", "period_end", "fcf", "market_cap_cr", "fcf_yield"])
+    agg = fcf_median(fund)
     agg = agg.merge(stocks[["sid", "market_cap_cr"]], on="sid", how="left")
     agg = agg[agg["market_cap_cr"].notna() & (agg["market_cap_cr"] > 0)]
     # market_cap is in ₹cr; FCF is in ₹cr; yield is dimensionless.
@@ -110,32 +117,9 @@ def _compute(stocks, fund):
 
 
 def compute(dry_run=False):
-    stocks, fund = _load_data()
-    df = _compute(stocks, fund)
-
-    df["snapshot_date"] = date.today().isoformat()
-    df = df[["sid", "snapshot_date", "period_end", "fcf", "market_cap_cr", "fcf_yield"]]
-
-    n = len(df)
-    if n:
-        y = df["fcf_yield"]
-        print(f"FCF Yield: {n} stocks scored | "
-              f"median={y.median():.3f} | "
-              f"p25={y.quantile(0.25):.3f} | p75={y.quantile(0.75):.3f}")
-    else:
-        print("FCF Yield: 0 stocks scored — fundamentals_screener thin.")
-
-    if dry_run:
-        print("Dry run — not saving.")
-        return n
-
-    rows = upsert_df(df, "fcf_yield_scores")
-    print(f"Saved {rows} rows to fcf_yield_scores")
-    return rows
+    return _annual.save(_compute(*_load_data()), "fcf_yield_scores", "FCF Yield", "fcf_yield",
+                        dry_run, fmt=".3f")
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--dry-run", action="store_true")
-    args = parser.parse_args()
-    compute(dry_run=args.dry_run)
+    _annual.cli(compute)

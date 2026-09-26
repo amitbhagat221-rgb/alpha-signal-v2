@@ -21,16 +21,10 @@ Usage:
     python -m signals.operating_margin_trend --dry-run
 """
 
-import argparse
-from datetime import date
-
 import numpy as np
 import pandas as pd
 
-from config import SCREEN
-from db import read_sql, upsert_df
-
-FINANCIAL_SECTORS = set(SCREEN["financial_sectors"])
+from signals import _annual
 
 REQUIRED_ITEMS = ["Sales", "Profit before tax", "Interest"]
 WINDOW_YEARS = 5
@@ -38,22 +32,7 @@ MIN_SALES_CR = 50.0
 
 
 def _load_data():
-    placeholders = ",".join("?" for _ in FINANCIAL_SECTORS)
-    stocks = read_sql(
-        f"SELECT sid, sector FROM stocks WHERE sector NOT IN ({placeholders})",
-        params=list(FINANCIAL_SECTORS),
-    )
-    sids = set(stocks["sid"])
-
-    fund = read_sql(
-        "SELECT sid, period_end, line_item, value "
-        "FROM fundamentals_screener "
-        "WHERE period_type = 'annual' AND line_item IN "
-        f"({','.join('?' for _ in REQUIRED_ITEMS)})",
-        params=REQUIRED_ITEMS,
-    )
-    fund = fund[fund["sid"].isin(sids)].copy()
-    return stocks, fund
+    return _annual.load(REQUIRED_ITEMS)
 
 
 def _compute(stocks, fund):
@@ -97,34 +76,9 @@ def _compute(stocks, fund):
 
 
 def compute(dry_run=False):
-    stocks, fund = _load_data()
-    df = _compute(stocks, fund)
-
-    df["snapshot_date"] = date.today().isoformat()
-    df = df[["sid", "snapshot_date", "period_end",
-             "margin_latest", "margin_5y_avg", "margin_slope"]]
-
-    n = len(df)
-    if n:
-        s = df["margin_slope"]
-        print(f"OpMargin trend: {n} stocks scored | "
-              f"median_slope={s.median():.2f}pp/yr | "
-              f"p25={s.quantile(0.25):.2f} | p75={s.quantile(0.75):.2f} | "
-              f"improving={(s > 0).sum()} deteriorating={(s < 0).sum()}")
-    else:
-        print("OpMargin trend: 0 stocks scored — thin fundamentals.")
-
-    if dry_run:
-        print("Dry run — not saving.")
-        return n
-
-    rows = upsert_df(df, "operating_margin_trend_scores")
-    print(f"Saved {rows} rows to operating_margin_trend_scores")
-    return rows
+    return _annual.save(_compute(*_load_data()), "operating_margin_trend_scores", "OpMargin trend", "margin_slope",
+                        dry_run, fmt=".2f", unit="pp")
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--dry-run", action="store_true")
-    args = parser.parse_args()
-    compute(dry_run=args.dry_run)
+    _annual.cli(compute)
