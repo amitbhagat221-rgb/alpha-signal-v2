@@ -42,25 +42,24 @@ from db import get_db, read_sql
 # ────────────────────────────────────────────────────────────────────────────
 
 def _batch_write_verdicts(rows: list[tuple], gate_col: str) -> int:
-    """Bulk INSERT OR REPLACE rows into trust_verdicts.
+    """Bulk-upsert rows into trust_verdicts via the shared gate writer (sets
+    only `gate_col`, so other gates' verdicts on the same key survive).
 
     Each row tuple shape:
         (sid, source_table, source_key_json, datum_class, snapshot_date,
          gate_value, reasons_json, verdict_overall)
 
-    The gate_col argument names which gate column the gate_value lands in.
+    verdict_overall is recomputed across all gates by the writer.
     """
     if not rows:
         return 0
-    sql = f"""
-        INSERT OR REPLACE INTO trust_verdicts
-          (sid, source_table, source_key, datum_class, snapshot_date,
-           {gate_col}, reasons_json, verdict_overall)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    """
-    with get_db() as conn:
-        conn.executemany(sql, rows)
-    return len(rows)
+    from validators._verdicts import write_verdicts
+    return write_verdicts(
+        {"gate": gate_col, "sid": sid, "source_table": table, "source_key": key,
+         "datum_class": datum_class, "snapshot_date": snap, "value": value,
+         "reasons": json.loads(reasons).get(gate_col)}
+        for sid, table, key, datum_class, snap, value, reasons, _overall in rows
+    )
 
 
 def _segment_for_sid(sid: str, sid_to_tier: dict) -> str:

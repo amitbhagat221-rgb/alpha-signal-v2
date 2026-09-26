@@ -103,31 +103,3 @@ def units_for_table(table: str) -> dict:
     except ImportError:
         return {}
     return {col: unit for (t, col), unit in UNIT_CONTRACTS.items() if t == table}
-
-
-def _record_unit_verdict(sid: str, source_table: str, source_key: str,
-                          datum_class: str, status: int, reason: str,
-                          snapshot_date: Optional[str] = None):
-    """Persist a gate_5 verdict to trust_verdicts (best-effort; never raises)."""
-    import json
-    from datetime import datetime
-    from db import get_db
-
-    snapshot_date = snapshot_date or datetime.now().date().isoformat()
-    try:
-        with get_db() as conn:
-            conn.execute(
-                """
-                INSERT OR REPLACE INTO trust_verdicts
-                  (sid, source_table, source_key, datum_class, snapshot_date,
-                   gate_5_unit, reasons_json, verdict_overall)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (sid, source_table, source_key, datum_class, snapshot_date,
-                 status,
-                 json.dumps({"gate_5_unit": {"reason": reason}}),
-                 "TRUSTED" if status == 1 else "QUARANTINED"),
-            )
-    except Exception as e:
-        import sys
-        print(f"  ⚠ _record_unit_verdict failed: {e}", file=sys.stderr)

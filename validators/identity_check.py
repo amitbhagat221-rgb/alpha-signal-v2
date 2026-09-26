@@ -59,10 +59,8 @@ DOWNSTREAM
     Phase 5's lineage-completeness gate will leverage this.
 """
 
-import json
 import re
 from collections import namedtuple
-from datetime import datetime
 from typing import Optional
 
 
@@ -293,6 +291,15 @@ def _verify_etmoney(sid: str, payload, expected_name: Optional[str] = None,
 # ─────────── Quarantine + verdict persistence ───────────
 
 
+def _identity_reasons(verdict: IdentityVerdict) -> dict:
+    return {
+        "status":   verdict.status,
+        "expected": str(verdict.expected),
+        "returned": str(verdict.returned),
+        "reason":   verdict.reason,
+    }
+
+
 def quarantine_row(
     source_table: str,
     row: dict,
@@ -301,58 +308,16 @@ def quarantine_row(
     verdict: IdentityVerdict,
     snapshot_date: Optional[str] = None,
 ) -> bool:
-    """Atomic write: append `row` to <source_table>_quarantine + insert a
-    trust_verdicts row with gate_1_identity=0 (FAIL) and verdict_overall='QUARANTINED'.
+    """Atomic write: append `row` to <source_table>_quarantine + record
+    gate_1_identity=0 (FAIL) in trust_verdicts (→ verdict_overall QUARANTINED).
 
-    Returns True if both writes succeeded.
+    Returns True if both writes succeeded. Never raises — on failure the caller
+    falls back to "drop the row, don't write live".
     """
-    from db import get_db
-    snapshot_date = snapshot_date or datetime.now().date().isoformat()
-    mirror_table = f"{source_table}_quarantine"
-    forensic = {
-        "_q_failed_gate":     "gate_1_identity",
-        "_q_reason":          verdict.reason,
-        "_q_quarantined_at":  datetime.now().isoformat(timespec="seconds"),
-    }
-    payload = {**row, **forensic}
-    cols = list(payload.keys())
-    placeholders = ",".join("?" * len(cols))
-    cols_sql = ",".join(f'"{c}"' for c in cols)
-    insert_sql = f'INSERT INTO {mirror_table} ({cols_sql}) VALUES ({placeholders})'
-    source_key = json.dumps({k: row.get(k) for k in _likely_pk_cols(source_table)
-                              if k in row}, default=str)
-    verdict_row = (
-        sid, source_table, source_key, datum_class, snapshot_date,
-        0,  # gate_1_identity = FAIL
-        json.dumps({
-            "gate_1_identity": {
-                "status":   verdict.status,
-                "expected": str(verdict.expected),
-                "returned": str(verdict.returned),
-                "reason":   verdict.reason,
-            }
-        }),
-        "QUARANTINED",
-    )
-    try:
-        with get_db() as conn:
-            conn.execute(insert_sql, [payload[c] for c in cols])
-            conn.execute(
-                """
-                INSERT OR REPLACE INTO trust_verdicts
-                  (sid, source_table, source_key, datum_class, snapshot_date,
-                   gate_1_identity, reasons_json, verdict_overall)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                verdict_row,
-            )
-        return True
-    except Exception as e:
-        # Never let quarantine write failure crash the producer — log and return False
-        # so the caller can fall back to "drop the row, don't write live".
-        import sys
-        print(f"  ⚠ quarantine_row failed for {source_table}/{sid}: {e}", file=sys.stderr)
-        return False
+    from validators._verdicts import write_verdict
+    return write_verdict("gate_1_identity", sid, source_table, datum_class, 0,
+                         _identity_reasons(verdict), row=row,
+                         snapshot_date=snapshot_date, quarantine=True)
 
 
 def record_verdict(
@@ -368,52 +333,8 @@ def record_verdict(
     Cheap. Reads at the UHS Provenance roll-up time become a single JOIN on
     trust_verdicts. Use whenever a writer calls verify_identity, even on PASS.
     """
-    from db import get_db
-    snapshot_date = snapshot_date or datetime.now().date().isoformat()
-    try:
-        with get_db() as conn:
-            conn.execute(
-                """
-                INSERT OR REPLACE INTO trust_verdicts
-                  (sid, source_table, source_key, datum_class, snapshot_date,
-                   gate_1_identity, reasons_json, verdict_overall)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (sid, source_table, source_key, datum_class, snapshot_date,
-                 1 if verdict.status == "PASS" else (0 if verdict.status == "WRONG_ENTITY" else 2),
-                 json.dumps({
-                     "gate_1_identity": {
-                         "status":   verdict.status,
-                         "expected": str(verdict.expected),
-                         "returned": str(verdict.returned),
-                         "reason":   verdict.reason,
-                     }
-                 }),
-                 "TRUSTED" if verdict.status == "PASS" else
-                 ("QUARANTINED" if verdict.status == "WRONG_ENTITY" else "PENDING_REVIEW")),
-            )
-    except Exception as e:
-        import sys
-        print(f"  ⚠ record_verdict failed for {source_table}/{sid}: {e}", file=sys.stderr)
-
-
-def _likely_pk_cols(source_table: str) -> list[str]:
-    """Best-effort PK identification used to build source_key JSON.
-
-    The table's PK is the deterministic anchor we use to look up the original
-    row later (e.g. during forensic review of a quarantine). Hand-mapped per
-    table; falls back to ['sid'] if unknown.
-    """
-    return {
-        "broker_recommendations":      ["sid", "broker", "reco_date"],
-        "forecast_history":            ["sid", "metric", "period"],
-        "analyst_consensus":           ["sid"],
-        "analyst_consensus_snapshots": ["sid", "snapshot_date", "source"],
-        "consensus_signals":           ["sid", "snapshot_date"],
-        "quarterly_income":            ["sid", "period", "end_date"],
-        "annual_balance_sheet":        ["sid", "period", "end_date"],
-        "annual_cash_flow":            ["sid", "period", "end_date"],
-        "banking_metrics":             ["sid", "period_end", "period_type"],
-        "mf_holdings":                 ["scheme_code", "as_of_date", "holding_rank"],
-        "mf_sector_allocation":        ["scheme_code", "as_of_date", "sector"],
-    }.get(source_table, ["sid"])
+    from validators._verdicts import write_verdict
+    value = 1 if verdict.status == "PASS" else (0 if verdict.status == "WRONG_ENTITY" else 2)
+    write_verdict("gate_1_identity", sid, source_table, datum_class, value,
+                  _identity_reasons(verdict), source_key=source_key,
+                  snapshot_date=snapshot_date)
