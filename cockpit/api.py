@@ -115,6 +115,7 @@ def _price_metrics(df):
     return result
 
 
+@_ttl_cache(60)
 def get_stock_price_metrics_batch(sids):
     """A1 for many sids at once → {sid: metrics} ({} when <5 prices)."""
     recs = _latest_per_sid("stock_prices", "date, close", sids,
@@ -142,6 +143,7 @@ _CONSENSUS_COLS = (
 )
 
 
+@_ttl_cache(60)
 def get_analyst_consensus_batch(sids):
     """A2 for many sids at once → {sid: consensus dict} ({} when uncovered)."""
     sids, ph = _sid_params(sids)
@@ -270,6 +272,7 @@ def get_insider_activity(sid):
     }
 
 
+@_ttl_cache(60)
 def get_insider_signal_batch(sids):
     """Latest insider_signals row per sid → {sid: {signal_type, strength,
     score_impact, description}} ({} when the sid has none)."""
@@ -878,6 +881,7 @@ _DOMINANT_SIGNAL_SOURCES = [
 ]
 
 
+@_ttl_cache(60)
 def get_dominant_signal_batch(sids):
     """Strongest two signals per sid (display string under the ticker) →
     {sid: "Consensus: 0.82 | Piotroski: 8/9"}; "" when the sid has none."""

@@ -571,10 +571,18 @@ def rerun_step(step_name: str) -> dict:
 def get_data_health_scores(force=False):
     """Comprehensive per-table data health from health.compute_db_health().
 
-    Pass force=True to bypass the 5-minute TTL cache.
-    """
+    Pass force=True to recompute now. Otherwise served from a 5-minute
+    _persisted_cache: an expired entry is returned stale and refreshed in the
+    background (health.py's own cache recomputed inline — ~40s on the first
+    /system hit after it lapsed)."""
+    return _data_health_scores(_force=bool(force))
+
+
+@_persisted_cache(300, name="get_data_health_scores")
+def _data_health_scores():
     from health import compute_db_health
-    return compute_db_health(force=force)
+    # This layer owns the TTL, so each (re)compute is a real one.
+    return compute_db_health(force=True)
 
 
 # ═══════════════════════════════════════════════════

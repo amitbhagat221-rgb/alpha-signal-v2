@@ -20,7 +20,8 @@ import pandas as pd
 # Pages call these on every render, but the underlying SQLite tables only
 # change when the daily cron pipeline runs — so a 60s TTL is invisible to
 # users and shaves 1-2 seconds off /system, /command, /model, /actions, /portfolio.
-# Args are tuple-keyed; pass `_force=True` to bypass.
+# Args are tuple-keyed (list args — e.g. a list of sids — are keyed as tuples);
+# pass `_force=True` to bypass.
 def _ttl_cache(ttl_seconds, max_entries=512):
     def decorator(fn):
         cache: dict = {}
@@ -28,7 +29,8 @@ def _ttl_cache(ttl_seconds, max_entries=512):
         @functools.wraps(fn)
         def wrapper(*args, **kwargs):
             force = kwargs.pop("_force", False)
-            key = (args, tuple(sorted(kwargs.items())))
+            key = (tuple(tuple(a) if isinstance(a, list) else a for a in args),
+                   tuple(sorted(kwargs.items())))
             now = _time.time()
             entry = cache.get(key)
             if not force and entry is not None and (now - entry[1]) < ttl_seconds:
