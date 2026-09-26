@@ -3,7 +3,7 @@
 Date: 2026-06-03 · Status: accepted (validation-stage; NOT wired to production)
 
 ## Context
-User asked for a model to identify multibaggers (3–10x / 2–4yr) in Indian small/mid caps. Three research passes (`docs/reference/multibagger-research.md` [adversarially verified, 17 confirmed/8 refuted], `Quantifying Indian Multibagger Stocks.md`, `deep-research-report.md`) converged on a quality-gated value funnel with a hard forensic exclusion; the strongest standalone factor is Novy-Marx gross-profitability, which we didn't have.
+User asked for a model to identify multibaggers (3–10x / 2–4yr) in Indian small/mid caps. Three research passes (`docs/_archive/reference/multibagger-research.md` [adversarially verified, 17 confirmed/8 refuted], `Quantifying Indian Multibagger Stocks.md`, `deep-research-report.md`) converged on a quality-gated value funnel with a hard forensic exclusion; the strongest standalone factor is Novy-Marx gross-profitability, which we didn't have.
 
 ## Decision
 - A **SEPARATE** screen (`multibagger_scores`, `/multibagger`), OUT of `daily_picks` — different objective + horizon.
@@ -23,4 +23,4 @@ Across two regimes, the screen's edge FLIPS sign:
 - A regime gate (small-cap EMA, Report C) is ESSENTIAL, not optional; factor weights should be regime-conditioned.
 - DO NOT calibrate funnel thresholds to any single window — the two known regimes calibrate to opposite extremes.
 - Data unlocked: `corporate_actions` backfilled to 2018 (split adjustment); survivorship-true universe via the bhavcopy archive (`historical_universe`). Free, no paid feed.
-- Pairs with plan `docs/plans/0008-multibagger-model.md`.
+- Pairs with plan `docs/_archive/plans/0008-multibagger-model.md`.

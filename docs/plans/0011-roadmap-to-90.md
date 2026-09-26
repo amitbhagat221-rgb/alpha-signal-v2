@@ -1,7 +1,7 @@
 # Plan 0011 — Roadmap to a 90/100 Shop
 
 **Status:** active · **Written:** 2026-07-06 (from the 2026-07-05/06 honest-return audit + holistic strategy session)
-**Source evidence:** [return-prediction-2026-07-05-report.md](../return-prediction-2026-07-05-report.md) · [audit-2026-07-04-report.md](../audit-2026-07-04-report.md) · ADRs 0043/0045/0047/0049/0050
+**Source evidence:** [return-prediction-2026-07-05-report.md](../studies/return-prediction-2026-07-05-report.md) · [audit-2026-07-04-report.md](../_archive/audit-2026-07-04-report.md) · ADRs 0043/0045/0047/0049/0050
 **Companion tool:** [tools/expected_return.py](../../tools/expected_return.py) (prediction log = the plan's own scoreboard)
 
 ## Why this plan exists
@@ -242,16 +242,16 @@ MoneyControl PT sources, SUE-PEAD, NLP-lexicon factors, credit_beta un-bench) is
 violation. General-purpose assets that apply to nearly every dive:
 [data-playbook.md](../reference/data-playbook.md) ·
 [historical_data_sources](memory: master map of all confirmed-working free sources) ·
-[paid-data-sources.md](../reference/paid-data-sources.md) (₹5K budget, if a recipe needs paid) ·
+[paid-data-sources.md](../_archive/reference/paid-data-sources.md) (₹5K budget, if a recipe needs paid) ·
 [oss-quant-toolbox.md](../reference/oss-quant-toolbox.md) (libs mapped to gaps) ·
-[pit-data-sources-research.md](../reference/pit-data-sources-research.md).
+[pit-data-sources-research.md](../_archive/reference/pit-data-sources-research.md).
 
 Per-dive prior-asset map:
 
 | # | Research item | START from these existing assets |
 |---|---|---|
 | 1 | Event-factor recipes (WS2.5) | memory `bse_announcements_event_stream` (endpoint recipe + 3 gotchas, 2018 depth), `bse_event_factors_governance` (which subcategories yield factors + full registration touchpoint list), `nselib_apis` (bulk deals, short selling, corporate actions) |
-| 2 | Compounder charter (WS3.0) | [multibagger-research.md](../reference/multibagger-research.md), [Quantifying Indian Multibagger Stocks.md](../reference/Quantifying%20Indian%20Multibagger%20Stocks.md), [multibagger-data-requirements.md](../reference/multibagger-data-requirements.md), ADR 0039/0040 (regime + holding-vs-selection lessons), [sector_deep_research.md](../reference/sector_deep_research.md), DLM managerial-ability lens (2026-06-09) |
+| 2 | Compounder charter (WS3.0) | [multibagger-research.md](../_archive/reference/multibagger-research.md), [Quantifying Indian Multibagger Stocks.md](../_archive/reference/Quantifying%20Indian%20Multibagger%20Stocks.md), [multibagger-data-requirements.md](../_archive/reference/multibagger-data-requirements.md), ADR 0039/0040 (regime + holding-vs-selection lessons), [sector_deep_research.md](../_archive/reference/sector_deep_research.md), DLM managerial-ability lens (2026-06-09) |
 | 3 | Special-situations studies (WS4.0) | memory `bse_announcements_event_stream` + `survivorship_universe_via_bhavcopy` (corporate_actions backfilled to 2022-05, delisted coverage), `nselib_apis` |
 | 4 | Regime overlay (WS7.2) | ADR 0039 (the regime-dominance finding IS the motivating evidence), ADR 0041 (macro ensemble already built for sector_tilt), regime_state/macro_score tables |
 | 5 | SHP recipe (WS2.4) | memory `historical_data_sources` + data-playbook FIRST — check if SHP already mapped before probing |

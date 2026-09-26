@@ -3,7 +3,7 @@
 **Status:** research complete · **Date:** 2026-07-11 · **Type:** deep-research dive #4 of the roadmap-to-90 queue
 **Gates:** plan [0011](../plans/0011-roadmap-to-90.md) WS7.2 · decision [ADR 0051](../decisions/0051-roadmap-to-90-decisions-d1-d12.md) D9
 **Motivating evidence + cautionary tale:** [ADR 0039](../decisions/0039-multibagger-funnel-regime-dominated.md) (regime-dominance finding) · [ADR 0041](../decisions/0041-sector-tilt-backtest-gated-small-only.md) (macro ensemble already built)
-**Source evidence:** [return-prediction-2026-07-05-report.md](../return-prediction-2026-07-05-report.md) (E[1Y] ≈ 90% market beta → regime is the only honest bear-year lever)
+**Source evidence:** [return-prediction-2026-07-05-report.md](../studies/return-prediction-2026-07-05-report.md) (E[1Y] ≈ 90% market beta → regime is the only honest bear-year lever)
 
 > **The pre-committed bar (D9, non-negotiable):** adopt the overlay ONLY IF a walk-forward test on
 > survivorship-free index history shows **max-drawdown reduction ≥10pp for a CAGR give-up ≤2pp**.

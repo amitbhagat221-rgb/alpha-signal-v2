@@ -1,5 +1,5 @@
 ---
-Status: proposed
+Status: paused (2026-09-26) — not scheduled under plan 0011; resume only via a checklist bullet
 Created: 2026-05-12
 Last updated: 2026-05-12
 Owner: Amit Bhagat

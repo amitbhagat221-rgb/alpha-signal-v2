@@ -1,5 +1,6 @@
 # 0018 — Analyst PT data model: episodic, three-table
-**2026-05-23 · Accepted**
+**2026-05-23 · Accepted**  
+**Status (2026-09-26): Partly superseded by [0020](0020-pt-data-model-v2-sell-side-only-llm-narrative-only.md) and [0045](0045-pull-pt-upside-lookahead.md)** — `forecast_history` price rows are no longer consumed or ingested; PIT `pt_upside` reads `analyst_consensus_snapshots` only. The three-table cadence itself stands.
 
 **Decision.** Analyst price targets live in three tables, not one, because PTs are episodic events (sell-side analysts revise ~quarterly) and the three views serve different consumers:
 

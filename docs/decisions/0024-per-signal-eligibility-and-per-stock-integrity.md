@@ -1,7 +1,7 @@
 # ADR 0024 — Per-signal eligibility + per-stock integrity validator
 
 **Status**: accepted · 2026-05-24
-**Implements**: [plan 0005 Phase A + B](../plans/0005-data-confidence-to-95.md)
+**Implements**: [plan 0005 Phase A + B](../_archive/plans/0005-data-confidence-to-95.md)
 
 ## Context
 

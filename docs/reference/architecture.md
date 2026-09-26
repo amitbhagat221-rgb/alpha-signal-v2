@@ -1,76 +1,48 @@
 # Architecture
 
-How the system fits today. Update when reality changes.
+How the system fits together today. This doc names where each fact lives instead of copying counts that drift.
 
-## Five layers
-
-```
-                  ORCHESTRATION
-        pipeline.py reads PIPELINE_STEPS from config.py
-        24 steps; each logged to pipeline_log; --step to isolate
-
-   SOURCES        →        SIGNALS        →        SCORING
-   external → DB           DB → DB                 DB → DB + ranking
-   ~10 source families     12 modules → 42         screener, quality_gate,
-                           registered factors      regime
-                                  ↓
-                       SQLite (alpha_signal.db)
-                       51 tables, WAL, single file
-                                  ↓
-                            OUTPUT
-                       snapshot → dossier → email
-```
-
-## Project layout
+## Layers
 
 ```
-config.py / db.py / pipeline.py / validate.py / health.py / schema.sql
+                        ORCHESTRATION
+   pipeline.py runs config.PIPELINE_STEPS in order (85 steps as of 2026-09-26)
+   each step: {name, module, function, critical, table, source, data_freq, frequency}
+   frequency gate: daily · weekly (Sunday) · monthly (1st); --step overrides
+   critical=True (fetch_bhavcopy, quality_gate, screener) aborts the run
+   every step → one pipeline_log row
 
-sources/
-  macro_yfinance · macro_gov · nse (bhavcopy) · nse_insider · nse_bulk
-  regulatory_harvester · regulatory_classifier · rss
-  tickertape · tickertape_analyst · tickertape_shareholding (monthly cron)
-  screener_pull · screener_schedules (Track 3 xlsx + JSON ingest)
-
-signals/
-  piotroski · accruals · consensus · promoter · forensic
-  smart_money · sentiment · momentum · earnings_yield
-  insider_signal · macro · regulatory
-  roic · fcf_yield (Track 3 Phase 3.2)
-
-scoring/
-  screener (tier-aware weighted scoring + forensic penalty)
-  quality_gate (small-cap 3-tier: EXCLUDED/PENALISED/PASS)
-  regime (VIX → allocation weights)
-
-output/   snapshot · dossier (Claude API) · email_sender (Gmail SMTP)
-tools/    reconstruct_pit · backtest_pit · compute_corporate_adjustments · freshness_watchdog
-cockpit/  FastAPI ops console + read-mostly UI
+ SOURCES  ────────→  SIGNALS  ────────→  SCORING  ────────→  OUTPUT
+ sources/*           signals/*           scoring/*           output/*
+ external → DB       DB → *_scores       quality_gate,       snapshot → dossier
+ (+ run_daily_       (+ inline factors   regime, screener    (Claude API) → email
+  forward.sh at      in screener         → daily_picks       (Gmail SMTP)
+  14:00 UTC)         _load_signals)
+                              ↓
+               SQLite data/alpha_signal.db (WAL, single file)
+               + DuckDB read replica for analytical scans (ADR 0031)
+                              ↓
+            TRUST & OBSERVABILITY: eligibility/ · validators/ (7 gates, UHS)
+            · tools/data_sanity · health_report · freshness_watchdog · lineage.py
+                              ↓
+            cockpit/ (:3000) · cockpit_ops/ (:3001 Health Center, /flow, /sql)
 ```
 
-## Pipeline steps (current)
+Heavy or slow steps (news enrichment, regulatory classification, broker recos with a 90-minute daily budget, banking metrics) come **after** the email in `PIPELINE_STEPS`, so they can't delay the digest.
 
-| # | Stage | Step | Module |
-|---|---|---|---|
-| 1–4 | Fetch | macro_market, macro_gov, insider, bulk_deals | sources/* |
-| 5–14 | Signals | sentiment, insider, forensic, piotroski, accruals, consensus, promoter, smart_money, macro, regulatory | signals/* |
-| 15–17 | Score | quality_gate, regime_update, screener | scoring/* |
-| 18–20 | Output | snapshot, dossier, email | output/* |
+## Where the truth lives
 
-Steps defined in `config.PIPELINE_STEPS`. Change frequency/order there; orchestrator adapts.
-
-## Database (51 tables, 6 groups)
-
-| Group | Tables | Rows | Purpose |
-|---|---|---|---|
-| Raw data | 16 | ~1.4M | External, fetched |
-| Computed signals | 9 | ~21K | Per-stock per-snapshot |
-| Macro & regulatory | 5 | ~40K | Indicators + classified events |
-| Fundamentals (Track 3) | ~6 | ~700K | Long-format Screener Premium ingest |
-| Output | 2 | ~5K | Picks + snapshots |
-| Pipeline / ops | 13 | grows | Logs, sector metadata, PIT archives, etc. |
-
-Schema in `schema.sql`. Live source-of-truth: `db.TABLE_META`.
+| Fact | Source of truth |
+|---|---|
+| Steps, order, cadence | `config.PIPELINE_STEPS` (`python pipeline.py --dry-run` lists what runs today) |
+| Tables + descriptions | `schema.sql`, `db.TABLE_META`; live: `sqlite3 data/alpha_signal.db .tables` |
+| Factor registry | `db.BACKTEST_SIGNALS` (all), `db.FACTOR_LIBRARY` (sub-bar), `db.BACKTEST_CADENCE` |
+| Production weights | `config.SIGNAL_WEIGHTS` → [signal-weights.md](signal-weights.md) for the rationale |
+| Tiers + liquidity floors | `config.TIER_SIZES`, `config.ADTV_MIN`, `config.EXCLUDED_FROM_PICKS` |
+| Per-signal eligibility | `eligibility/registry.py` → `universe_eligibility` |
+| Factor lineage | `lineage.FACTOR_LINEAGE` (ADR 0027) |
+| File outputs watched for freshness | `config.FILE_OUTPUTS` |
+| Cron | `crontab -l` (table in [OPERATOR.md](../../OPERATOR.md)) |
 
 ## Data flow (example: piotroski)
 
@@ -79,24 +51,20 @@ tickertape → quarterly_income, annual_balance_sheet, annual_cash_flow
            ↓
 signals.piotroski → piotroski_scores  (per sid per snapshot_date)
            ↓
-scoring.screener  → daily_picks  (with piotroski_adj contribution)
+scoring.screener  → daily_picks  (full ranked, eligible universe per date)
            ↓
-output.email_sender → Gmail HTML email
+output.dossier → output.email_sender
 ```
 
-Every signal follows this shape: read raw → compute → write to `*_scores` indexed by `(sid, snapshot_date)`.
+Every signal has the same shape: read raw data, compute, and write a `*_scores` table keyed by `(sid, snapshot_date)`. The PIT twin of each signal lives in `tools/reconstruct_pit.py` and writes `daily_snapshots_pit` (ship them together, per CLAUDE.md).
 
 ## Tier-aware scoring
 
-- LARGE (~100) · MID (~150) · SMALL (~2,200) by market cap
-- Each tier has its own weight vector for the 12 signals (`config.WEIGHTS`)
-- Percentile-rank within tier → weight → re-rank within tier → top 5–15 per tier
-- See [ADR 0005](../decisions/0005-tier-aware-scoring.md) for why
+- `stocks.cap_tier` is assigned before any ranking: LARGE (top 100), MID (101–250), SMALL (rest), MICRO (carved out of SMALL, never picked; ADR 0026).
+- Each tier has its own weight vector in `config.SIGNAL_WEIGHTS`. Signals are percentile-ranked **within tier**, weighted, and re-ranked within tier (ADR 0005).
+- Pick gate: `eligible_coverage` plus weight-coverage and price-row floors (ADR 0021 → 0024). Financials use the generic weights (ADR 0048).
+- The advisory sized book is HRP with banded rebalancing (ADRs 0044/0046; `portfolio_construction.py`).
 
 ## Run wrapper
 
-`run_pipeline.sh` sets credentials (exports inherited from v1) and calls `python pipeline.py`. Cron entry at 03:30 IST.
-
-## v1 relationship
-
-v1 (`~/alpha-signal/`) kept for rollback only. v2 owns the cron slot since 2026-05-01. See [ADR 0007](../decisions/0007-fresh-rebuild-v2.md).
+`run_pipeline.sh` takes the shared harvest `flock`, imports the credentials read-only from v1's `run_pipeline.sh` and runs `python pipeline.py`. The cron fires it at **03:30 UTC** (09:00 IST).

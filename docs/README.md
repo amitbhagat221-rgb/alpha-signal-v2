@@ -1,49 +1,38 @@
 # Documentation Index
 
-3 files in head, 3 folders in head. That's the whole system.
-
----
-
-## Root (3 files)
+## Root files
 
 | File | Question |
 |---|---|
 | [../README.md](../README.md) | What is this project? |
 | [../CLAUDE.md](../CLAUDE.md) | What are the rules? |
 | [../HANDOFF.md](../HANDOFF.md) | Where am I right now? (overwritten each session) |
+| [../OPERATOR.md](../OPERATOR.md) | How do I run, recover or inherit it? (cron, services, backups, credentials) |
 
-No other files belong at root.
+## docs/ folders
 
----
+| Folder | Question | Lifecycle |
+|---|---|---|
+| [plans/](plans/) | What am I building? Index: [plans/README.md](plans/README.md) | active → done/superseded → `_archive/plans/` |
+| [decisions/](decisions/) | Why did we choose X? [decisions/README.md](decisions/README.md) gives the current decision per topic plus the full ADR index | write-once; superseded ADRs get a forward `Status:` line |
+| [reference/](reference/) | How does X work? Architecture, data playbook, weights, cockpit, commands | edited in place when reality changes |
+| [research/](research/) | What did deep research conclude before we build? Charters that gate plan-0011 workstreams | written once per question |
+| [studies/](studies/) | What did the evidence say? Backtest/re-baseline/event-study write-ups that ADRs and plans cite | write-once, dated |
 
-## docs/ (3 folders)
-
-| Folder | Question |
-|---|---|
-| [plans/](plans/) | What am I building? Numbered proposals with status (proposed / active / implemented). |
-| [decisions/](decisions/) | Why did we choose X? ADRs, write-once, ≤30 lines each. |
-| [reference/](reference/) | How does X work? Schema, signals, data sources, architecture, commands. |
-
-[`_archive/`](_archive/) is dated history — never edit, search when you wonder "did we try this?".
-
----
+[`_archive/`](_archive/) is history. Don't edit it or treat it as authoritative, but search it when you wonder "did we try this?". Subfolders mirror the live tree: `_archive/plans/`, `_archive/decisions/`, `_archive/reference/`. Older flat files use `YYYY-MM-DD-*.md` names. Retired code lives in the repo-root `_archive/`.
 
 ## Routing by question
 
 | Your question | Where |
 |---|---|
-| Where am I right now? | [../HANDOFF.md](../HANDOFF.md) |
+| Where am I right now? | [../HANDOFF.md](../HANDOFF.md), [plans/0000-checklist.md](plans/0000-checklist.md) |
 | What's the rule for X? | [../CLAUDE.md](../CLAUDE.md) |
 | How does the system fit together? | [reference/architecture.md](reference/architecture.md) |
-| Where does data come from? | [reference/data-playbook.md](reference/data-playbook.md) ⚠ read before fetching |
-| What's the schema / signal weights / commands? | [reference/](reference/) |
-| Why did we choose X? | [decisions/](decisions/) |
-| What's planned next? | [plans/](plans/) |
-| What did v1 look like? | [_archive/](_archive/) |
+| Where does data come from? | [reference/data-playbook.md](reference/data-playbook.md). Read it before fetching |
+| Which factors carry weight and why? | [reference/signal-weights.md](reference/signal-weights.md) |
+| What runs when? | [../OPERATOR.md](../OPERATOR.md) §2, `config.PIPELINE_STEPS` |
 | What changed recently? | `git log` |
-
----
 
 ## The rule
 
-If a new doc doesn't fit `plans/`, `decisions/`, or `reference/`, ask: would I open this in 3 months? If no, skip. If yes, force one of the three.
+If a new doc doesn't fit a folder above, ask: would I open this in 3 months? If not, skip it. If so, put it in the closest folder. Prefer pointing at code (`config.PIPELINE_STEPS`, `db.BACKTEST_SIGNALS`, `schema.sql`) over copying counts that drift.

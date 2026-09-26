@@ -6,11 +6,11 @@ Decision anchor: [ADR 0051](../decisions/0051-roadmap-to-90-decisions-d1-d12.md)
 Written 2026-07-11 · Status: **charter (research output, not yet built)** · Author: skeptical value quant.
 
 **Reuse-first ledger (read, delta-only research):** ADR 0039/0040 (multibagger regime + holding-vs-selection),
-[multibagger-research.md](../reference/multibagger-research.md) (17 confirmed / 8 killed),
-[Quantifying Indian Multibagger Stocks.md](../reference/Quantifying%20Indian%20Multibagger%20Stocks.md),
-[multibagger-data-requirements.md](../reference/multibagger-data-requirements.md),
+[multibagger-research.md](../_archive/reference/multibagger-research.md) (17 confirmed / 8 killed),
+[Quantifying Indian Multibagger Stocks.md](../_archive/reference/Quantifying%20Indian%20Multibagger%20Stocks.md),
+[multibagger-data-requirements.md](../_archive/reference/multibagger-data-requirements.md),
 [signal-weights.md](../reference/signal-weights.md) "On the bench",
-[return-prediction-2026-07-05-report.md](../return-prediction-2026-07-05-report.md),
+[return-prediction-2026-07-05-report.md](../studies/return-prediction-2026-07-05-report.md),
 DLM lens (`signals/management_quality.py` + `signals/managerial_ability.py`, git 2026-06-09).
 DB inspected live 2026-07-11. **No new web search was required** — the prior corpus + our own panel answer the charter questions;
 the honest gaps are data-depth gaps, not knowledge gaps.
