@@ -1,5 +1,6 @@
 """
-Alpha Signal Cockpit — shared helpers (cache decorators + JSON coercion).
+Alpha Signal Cockpit — shared helpers for both apps (trading :3000, ops :3001):
+cache decorators, JSON coercion, Jinja template setup and the startup prewarm.
 
 Lives below both cockpit/api.py and cockpit_ops/api.py so neither has to import
 the other just to reuse the caches. Previously these decorators lived in
@@ -217,3 +218,90 @@ def safe_json_records(data):
                 clean[k] = str(v)
         out.append(clean)
     return out
+
+
+# ═══════════════════════════════════════════════════
+# App scaffolding shared by cockpit/app.py and cockpit_ops/app.py
+# ═══════════════════════════════════════════════════
+
+COCKPIT_DIR = Path(__file__).resolve().parent
+COCKPIT_TEMPLATES = COCKPIT_DIR / "templates"
+COCKPIT_STATIC = COCKPIT_DIR / "static"  # both apps mount this as /static
+
+from jinja2 import Undefined
+
+
+class SilentUndefined(Undefined):
+    """Jinja undefined that renders as empty / falsy / None-equal instead of
+    raising, so templates don't blow up on a missing attribute."""
+    def __str__(self): return ""
+    def __bool__(self): return False
+    def __iter__(self): return iter([])
+    def __eq__(self, other): return other is None
+    def __ne__(self, other): return other is not None
+    def __ge__(self, other): return False
+    def __le__(self, other): return False
+    def __gt__(self, other): return False
+    def __lt__(self, other): return False
+    def __float__(self): return 0.0
+    def __int__(self): return 0
+
+
+# Cache-busting for static assets — appends ?v=<mtime> so browser caches
+# invalidate automatically whenever a static file is edited.
+def asset_version(filename: str) -> str:
+    try:
+        return str(int((COCKPIT_STATIC / filename).stat().st_mtime))
+    except OSError:
+        return "0"
+
+
+def make_templates(dirs):
+    """Jinja2Templates searching `dirs` in order, then cockpit/templates — so
+    base.html, _components.html and _icons.html exist once and the ops app
+    (which passes its own templates dir first) shares them. Registers
+    SilentUndefined and the asset_version global."""
+    from fastapi.templating import Jinja2Templates
+    from jinja2 import ChoiceLoader, FileSystemLoader
+
+    search = [Path(d) for d in dirs]
+    if COCKPIT_TEMPLATES not in search:
+        search.append(COCKPIT_TEMPLATES)
+    templates = Jinja2Templates(directory=search[0])
+    templates.env.loader = ChoiceLoader([FileSystemLoader(d) for d in search])
+    templates.env.undefined = SilentUndefined
+    templates.env.globals["asset_version"] = asset_version
+    return templates
+
+
+def prewarm(warmers, label="cache-warm", max_workers=4):
+    """Background-warm expensive caches in PARALLEL so wall-clock matches the
+    slowest single warmer rather than the sum. `warmers` is [(name, fn), ...].
+    Returns immediately; results are printed as each warmer finishes.
+    2026-05-25: parallel after /system's sequential cold path was 39s.
+    SQLite is single-writer so unbounded parallelism doesn't help and can
+    starve user requests; 4 workers is the sweet spot for our mix."""
+    import threading
+    import concurrent.futures as cf
+
+    def _warm_one(name, fn):
+        t = _time.time()
+        try:
+            fn()
+            return name, _time.time() - t, None
+        except Exception as e:
+            return name, _time.time() - t, str(e)
+
+    def _warm():
+        t0 = _time.time()
+        with cf.ThreadPoolExecutor(max_workers=max_workers) as ex:
+            futures = [ex.submit(_warm_one, n, f) for n, f in warmers]
+            for fut in cf.as_completed(futures):
+                name, dt, err = fut.result()
+                if err:
+                    print(f"  [{label}] {name}: FAILED — {err}")
+                else:
+                    print(f"  [{label}] {name}: {dt:.1f}s")
+        print(f"  [{label}] total wall-clock: {_time.time()-t0:.1f}s")
+
+    threading.Thread(target=_warm, daemon=True).start()

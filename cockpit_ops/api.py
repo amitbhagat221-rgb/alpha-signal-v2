@@ -20,9 +20,10 @@ Functions defined here (in original cockpit/api.py order):
   - _drilldown_for_issue, _severity_rank        (helpers for health overview)
   - get_health_overview
 
-Shared decorators (_persisted_cache, _ttl_cache) stay in cockpit/api.py and
-are imported one-way here. Same for cross-cutting helpers like read_sql,
-get_db (from db module).
+Shared decorators (_persisted_cache, _ttl_cache) live in cockpit/_shared.py and
+are imported one-way here; cross-cutting helpers (read_sql, get_db) come from
+db. Nothing here imports cockpit/api.py, and cockpit/app.py imports
+get_model_overview from this module directly — no import cycle.
 
 See cockpit_ops/README.md for the split architecture. See ADR 0028 (TBW)
 for the rationale.
@@ -46,8 +47,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from db import read_sql, get_db
 
-# Shared decorators — implementations live in cockpit/api.py (single-source).
-# One-way import so cockpit doesn't need to know about cockpit_ops.
+# Shared decorators — implementations live in cockpit/_shared.py (single-source).
 from cockpit._shared import _ttl_cache, _persisted_cache, safe_json_records
 
 

@@ -7,39 +7,21 @@ Reads from v2 SQLite database via api.py.
 Run: uvicorn cockpit.app:app --host 0.0.0.0 --port 3000 --reload
 """
 
-from pathlib import Path
-
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
 from starlette.middleware.gzip import GZipMiddleware
 
 from cockpit import api
-
-COCKPIT_DIR = Path(__file__).resolve().parent
+from cockpit._shared import COCKPIT_STATIC, COCKPIT_TEMPLATES, make_templates, prewarm
+from cockpit_ops.api import get_model_overview
 
 app = FastAPI(title="Alpha Signal Cockpit")
 # Gzip every response > 1KB — /explorer is 1.27MB of HTML (same as ops).
 app.add_middleware(GZipMiddleware, minimum_size=1024)
-app.mount("/static", StaticFiles(directory=COCKPIT_DIR / "static"), name="static")
+app.mount("/static", StaticFiles(directory=COCKPIT_STATIC), name="static")
 
-# Make Jinja2 treat undefined attributes as None instead of erroring
-from jinja2 import Undefined
-class SilentUndefined(Undefined):
-    def __str__(self): return ""
-    def __bool__(self): return False
-    def __iter__(self): return iter([])
-    def __eq__(self, other): return other is None
-    def __ne__(self, other): return other is not None
-    def __ge__(self, other): return False
-    def __le__(self, other): return False
-    def __gt__(self, other): return False
-    def __lt__(self, other): return False
-    def __float__(self): return 0.0
-    def __int__(self): return 0
-templates = Jinja2Templates(directory=COCKPIT_DIR / "templates")
-templates.env.undefined = SilentUndefined
+templates = make_templates([COCKPIT_TEMPLATES])
 
 
 # ────────────── Startup cache warmer ──────────────
@@ -49,51 +31,18 @@ templates.env.undefined = SilentUndefined
 # at startup so the first visit is always fast.
 @app.on_event("startup")
 def _prewarm_cache():
-    """Background-warm expensive TTL caches in PARALLEL so wall-clock matches the
-    slowest single warmer (data_health_scores ~19s) rather than the sum (~38s).
-    2026-05-25: bumped from sequential after /system cold path was 39s; parallel
-    drops it to ~19s, and the cache survives until TTL expiry."""
-    import threading
-    import concurrent.futures as cf
-
     # Ops-domain warmers (data_freshness, db_summary, data_health_scores,
     # factor_health, model_overview, flow_overview, command_centre,
     # health_overview, pipeline_status) moved to cockpit_ops/app.py during
     # Stage 2 split (2026-05-26).
-    warmers = [
+    prewarm([
         ("top_picks",          lambda: api.get_top_picks()),
         ("action_candidates",  lambda: api.get_action_candidates()),
         ("model_portfolio",    lambda: api.get_model_portfolio()),
         ("news_pool_168",      lambda: api._get_news_pool(hours=168)),
         ("news_pool_720",      lambda: api._get_news_pool(hours=720)),
         ("portfolio_bundle",   lambda: api.get_portfolio_bundle()),
-    ]
-
-    def _warm_one(name, fn):
-        import time as _t
-        t = _t.time()
-        try:
-            fn()
-            return name, _t.time() - t, None
-        except Exception as e:
-            return name, _t.time() - t, str(e)
-
-    def _warm():
-        import time as _t
-        t0 = _t.time()
-        # SQLite is single-writer so unbounded parallelism doesn't help and
-        # can starve user requests; 4 workers is the sweet spot for our mix.
-        with cf.ThreadPoolExecutor(max_workers=4) as ex:
-            futures = [ex.submit(_warm_one, n, f) for n, f in warmers]
-            for fut in cf.as_completed(futures):
-                name, dt, err = fut.result()
-                if err:
-                    print(f"  [cache-warm] {name}: FAILED — {err}")
-                else:
-                    print(f"  [cache-warm] {name}: {dt:.1f}s")
-        print(f"  [cache-warm] total wall-clock: {_t.time()-t0:.1f}s")
-
-    threading.Thread(target=_warm, daemon=True).start()
+    ])
 
 
 # Slide-style "headline + body" split for sector narrative bullets.
@@ -138,16 +87,6 @@ def _sentences(text, max_slides=5):
 
 templates.env.filters["slidify"] = _slidify
 templates.env.filters["sentences"] = _sentences
-
-# Cache-busting for static assets — appends ?v=<mtime> so browser caches
-# invalidate automatically whenever a static file is edited.
-def _asset_version(filename: str) -> str:
-    p = COCKPIT_DIR / "static" / filename
-    try:
-        return str(int(p.stat().st_mtime))
-    except OSError:
-        return "0"
-templates.env.globals["asset_version"] = _asset_version
 
 
 # Build a URL on the current request preserving all query params except one,
@@ -422,7 +361,7 @@ def partial_sector_card(request: Request, sector: str, sid: str = ""):
 
 @app.get("/model", response_class=HTMLResponse)
 def model_page(request: Request):
-    overview = api.get_model_overview()
+    overview = get_model_overview()
     return templates.TemplateResponse(request, "model.html", {
         "page": "model", **overview,
     })

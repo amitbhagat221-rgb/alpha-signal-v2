@@ -22,10 +22,8 @@ import db
 from db import read_sql, get_db
 
 
-# Cache decorators + JSON coercion now live in cockpit/_shared.py so cockpit_ops
-# can import them without pulling in this 2,900-LOC module. Re-exported here so
-# existing `@_persisted_cache` decorators below — and the long-standing
-# `from cockpit.api import _ttl_cache, _persisted_cache` in cockpit_ops — keep working.
+# Cache decorators + JSON coercion live in cockpit/_shared.py so cockpit_ops
+# can import them without pulling in this 3,000-LOC module.
 from cockpit._shared import _ttl_cache, _persisted_cache, safe_json_records
 from output.dossier import is_publishable
 
@@ -3155,18 +3153,4 @@ def get_pick_outcomes_summary(top_n=10):
         "rank_deciles": rank_deciles,
         "time_series": time_series,
     }
-
-
-# ── Re-exports from cockpit_ops ──
-# Stage 2 split (2026-05-26) moved Ops functions to cockpit_ops/api.py, but the
-# main cockpit's /model page (and a few other surfaces) still calls them through
-# `api.get_model_overview()`. Re-export at the very end of this module — after
-# every cockpit.api function is fully defined — so the back-import from
-# cockpit_ops (which `from cockpit.api import _ttl_cache, _persisted_cache`) sees
-# a fully-populated module. Anything imported here also stays available as
-# `cockpit.api.<name>` for callers that haven't been migrated.
-from cockpit_ops.api import (  # noqa: E402
-    get_model_overview,
-    get_backtest_roster,
-)
 
