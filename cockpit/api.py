@@ -2602,7 +2602,10 @@ def _pick_news_bg(primary_topic, article_id, pool):
     cands = pool.get(primary_topic) or pool.get("generic") or [x for v in pool.values() for x in v]
     if not cands:
         return None
-    return cands[(hash(str(article_id)) & 0x7FFFFFFF) % len(cands)]
+    # crc32, not hash(): str hashes are salted per process (PYTHONHASHSEED), so
+    # hash() re-shuffled every photo on each cockpit restart.
+    import zlib
+    return cands[zlib.crc32(str(article_id).encode()) % len(cands)]
 
 
 @_persisted_cache(300, name="_get_news_pool")
