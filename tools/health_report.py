@@ -49,9 +49,7 @@ COCKPIT_URL = os.environ.get("COCKPIT_BASE_URL", "http://140.245.248.166:3000")
 
 # ─────────────────────── Severity classification ───────────────────────
 
-CRITICAL = "CRITICAL"
-WARN = "WARN"
-INFO = "INFO"
+from tools.data_sanity import CRITICAL, WARN, INFO   # one definition, shared
 OK = "OK"
 
 # Tables whose staleness should page (not just warn). Keep this short.

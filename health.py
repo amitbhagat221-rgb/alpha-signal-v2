@@ -1175,12 +1175,6 @@ def compute_db_health(force=False):
     return payload
 
 
-def invalidate_health_cache():
-    """Force the next compute_db_health() call to recompute from scratch."""
-    global _HEALTH_CACHE
-    _HEALTH_CACHE = None
-
-
 # ── CLI quick-test ───────────────────────────────────────────────────────────
 if __name__ == "__main__":
     import json

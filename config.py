@@ -14,27 +14,10 @@ PROJECT_ROOT = Path(__file__).resolve().parent
 DB_PATH = PROJECT_ROOT / "data" / "alpha_signal.db"
 SCHEMA_PATH = PROJECT_ROOT / "schema.sql"
 LOG_PATH = PROJECT_ROOT / "output" / "pipeline.log"
-V1_ROOT = Path.home() / "alpha-signal"
 
 # ── Universe ──
 
 TIERS = ("LARGE", "MID", "SMALL", "MICRO")
-
-TIER_SIZES = {
-    "LARGE": 100,    # top 100 by market cap
-    "MID": 150,      # 101-250
-    "SMALL": 2200,   # 251+, minus MICRO carveout
-    # MICRO: composite spec, see tools/classify_micro_tier.py — not size-ranked
-}
-
-# Minimum ADTV (₹ Cr) to be investable per tier. MICRO are below this
-# threshold by definition (the manipulation pre-requisite) and excluded from picks.
-ADTV_MIN = {
-    "LARGE": 10.0,
-    "MID": 5.0,
-    "SMALL": 1.0,
-    "MICRO": 0.0,   # advisory only — MICRO are excluded by tier, not by ADTV
-}
 
 # Tiers excluded from daily_picks / dossier / morning_brief / action_queue.
 # MICRO stocks are CLASSIFIED but never recommended — they're too illiquid +
@@ -325,14 +308,6 @@ TRANSACTION_COSTS_BPS = {
     "LARGE": 30,
     "MID": 50,
     "SMALL": 150,
-}
-
-# ── Rebalance Frequencies ──
-
-REBALANCE_FREQ = {
-    "LARGE": "monthly",
-    "MID": "quarterly",
-    "SMALL": "semi-annual",
 }
 
 # ── Backtester ──

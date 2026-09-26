@@ -49,6 +49,10 @@ USAGE — CONSUMER
 
 from typing import Optional
 
+# lineage has no module-level db import, so this does not close the
+# db → validators.unit_contract → lineage → db loop at import time.
+from lineage import UNIT_CONTRACTS
+
 
 class UnitMismatchError(Exception):
     """Raised when a producer or consumer declares a unit incompatible with
@@ -58,10 +62,6 @@ class UnitMismatchError(Exception):
 
 def get_unit(table: str, col: str) -> Optional[str]:
     """Look up the registered unit for (table, col). Returns None if undeclared."""
-    try:
-        from lineage import UNIT_CONTRACTS
-    except ImportError:
-        return None
     return UNIT_CONTRACTS.get((table, col))
 
 
@@ -82,24 +82,6 @@ def assert_unit(table: str, col: str, expected_unit: str) -> None:
         )
 
 
-def assert_frame_units(df, table: str, expected_units: dict) -> None:
-    """Assert each column in `expected_units` matches the registered unit.
-
-    Producer-side helper, called inside db.upsert_df. `expected_units` maps
-    column name → expected unit string.
-    """
-    if df is None or len(df) == 0:
-        return
-    for col, expected in expected_units.items():
-        if col not in df.columns:
-            continue
-        assert_unit(table, col, expected)
-
-
 def units_for_table(table: str) -> dict:
     """All registered unit declarations for a table. Returns {col: unit}."""
-    try:
-        from lineage import UNIT_CONTRACTS
-    except ImportError:
-        return {}
     return {col: unit for (t, col), unit in UNIT_CONTRACTS.items() if t == table}

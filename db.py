@@ -5,7 +5,7 @@ Single point of access for all database operations.
 Every other module imports from here. Never open sqlite3 directly.
 
 Usage:
-    from db import get_db, read_table, get_universe, init_db
+    from db import get_db, read_table, read_sql, upsert_df
 """
 
 import glob
@@ -18,10 +18,7 @@ import pandas as pd
 from pathlib import Path
 from contextlib import contextmanager
 
-# ── Paths ──
-PROJECT_ROOT = Path(__file__).resolve().parent
-DB_PATH = PROJECT_ROOT / "data" / "alpha_signal.db"
-SCHEMA_PATH = PROJECT_ROOT / "schema.sql"
+from config import PROJECT_ROOT, DB_PATH, SCHEMA_PATH
 
 # Candidate business-date columns, checked by both _table_date_range (freshness
 # scan) and the future-date ingestion guard below. Ordered: business/event dates
@@ -262,36 +259,6 @@ def read_sql_fast(query, params=None):
         finally:
             con.close()
     return read_sql(query, params)
-
-
-def get_universe(tier=None, sector=None):
-    """
-    Load the stock universe.
-
-    get_universe()                    → all 2,500 stocks
-    get_universe(tier="LARGE")        → 100 large caps
-    get_universe(sector="IT")         → all IT stocks
-    """
-    conditions = []
-    params = []
-    if tier:
-        conditions.append("cap_tier = ?")
-        params.append(tier)
-    if sector:
-        conditions.append("sector = ?")
-        params.append(sector)
-
-    where = " AND ".join(conditions) if conditions else None
-    return read_table("stocks", where=where, params=params or None)
-
-
-def get_latest_date(table_name, date_column="snapshot_date"):
-    """Get the most recent date in a signal/snapshot table."""
-    with get_db() as conn:
-        row = conn.execute(
-            f"SELECT MAX([{date_column}]) FROM [{table_name}]"
-        ).fetchone()
-        return row[0] if row else None
 
 
 # ── Write helpers ──
@@ -1060,7 +1027,7 @@ _DB_REFERENCES = None  # populated lazily by get_db_references()
 # Directories to walk recursively for .py files
 _SCAN_DIRS = ("signals", "scoring", "output", "sources", "cockpit")
 # Top-level files to also scan (pipeline orchestrator etc.)
-_SCAN_ROOT_FILES = ("pipeline.py", "validate.py")
+_SCAN_ROOT_FILES = ("pipeline.py",)
 # Files to never count (this file is the canonical TABLE_META — every table
 # name appears here, which would otherwise pollute every "consumed_by" cell).
 _SCAN_EXCLUDE = {"db.py"}  # only exclude this file (canonical TABLE_META)

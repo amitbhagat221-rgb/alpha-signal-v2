@@ -29,7 +29,7 @@ More commands: [docs/reference/commands.md](docs/reference/commands.md)
 ## Layout
 
 ```
-config.py / db.py / pipeline.py / validate.py / health.py / schema.sql
+config.py / db.py / pipeline.py / health.py / schema.sql
 sources/   data fetchers
 signals/   12 modules → 42 factors
 scoring/   screener · quality_gate · regime

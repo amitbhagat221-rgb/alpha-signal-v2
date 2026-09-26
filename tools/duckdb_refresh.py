@@ -15,20 +15,12 @@ from pathlib import Path
 import duckdb
 
 ROOT = Path(__file__).resolve().parents[1]
-SQLITE_PATH = ROOT / "data" / "alpha_signal.db"
-DUCK_PATH = ROOT / "data" / "alpha_signal.duckdb"
+sys.path.insert(0, str(ROOT))
 
-# Curated pilot set — expand once the pattern is trusted.
-# All are nightly-written by the 03:30 pipeline.
-MIRROR_TABLES = [
-    "daily_snapshots_pit",
-    "daily_snapshots_pit_v1",
-    "pit_ic_by_tier_v1",
-    "stock_prices",
-    "daily_picks",
-    "pick_outcomes",
-    "consensus_signals",
-]
+# One declaration of the mirror set + paths, shared with db.read_sql_fast.
+from db import DB_PATH as SQLITE_PATH, DUCK_PATH, DUCKDB_MIRRORED_TABLES
+
+MIRROR_TABLES = sorted(DUCKDB_MIRRORED_TABLES)
 
 
 def refresh() -> dict:

@@ -1211,29 +1211,6 @@ def get_factor_lineage(factor_name):
     return entry
 
 
-def get_column_sources(table_name, column_name):
-    """Return list of sources for a mixed-source table column.
-
-    Returns None for single-source tables (caller treats as "single implicit source").
-    """
-    table_map = TABLE_COLUMN_SOURCES.get(table_name)
-    if not table_map:
-        return None
-    return table_map.get(column_name)
-
-
-def get_factor_status(factor_name):
-    """Quick lookup: factor's tier label (model_active/candidate/library/computed/composite)."""
-    entry = FACTOR_LINEAGE.get(factor_name) or {}
-    return entry.get("status", "unknown")
-
-
-def factors_by_status(status):
-    """Return list of factor names matching a given status tag."""
-    return [name for name, entry in FACTOR_LINEAGE.items()
-            if entry.get("status") == status]
-
-
 def lineage_active_sids():
     """Return the SID set to emit dynamic lineage for.
 

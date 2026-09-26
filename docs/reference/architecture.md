@@ -24,7 +24,7 @@ How the system fits today. Update when reality changes.
 ## Project layout
 
 ```
-config.py / db.py / pipeline.py / validate.py / health.py / schema.sql
+config.py / db.py / pipeline.py / health.py / schema.sql
 
 sources/
   macro_yfinance · macro_gov · nse (bhavcopy) · nse_insider · nse_bulk
