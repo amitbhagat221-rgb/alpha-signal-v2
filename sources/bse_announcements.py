@@ -194,11 +194,12 @@ def main():
         to = today
 
     days = list(_day_iter(frm, to))
-    tot_seen = tot_new = 0
+    tot_seen = tot_new = n_err = 0
     for i, d in enumerate(days, 1):
         try:
             seen, new = harvest_range(session, d, d)
         except Exception as e:
+            n_err += 1
             print(f"  [{d}] ERROR {type(e).__name__}: {str(e)[:70]}", flush=True)
             time.sleep(random.uniform(*DELAY_BETWEEN_PAGES))
             continue
@@ -207,6 +208,12 @@ def main():
             print(f"  [{i:4d}/{len(days)}] {d}: {seen:>4} seen, {new:>4} new (cum new={tot_new})", flush=True)
         time.sleep(random.uniform(*DELAY_BETWEEN_PAGES))
     print(f"\nDone. {frm}..{to}  seen={tot_seen} new_rows={tot_new}")
+    # Weekends/holidays return 0 rows cleanly; an ERROR on EVERY day means the
+    # endpoint is broken/blocked. (Since ~2026-09-19 each call returns a non-JSON
+    # body and run_daily_forward.sh logged exit 0 / seen=0.)
+    if days and n_err == len(days):
+        raise RuntimeError(f"BSE announcements: all {n_err} day-requests errored — endpoint "
+                           "blocked or response format changed")
     return 0
 
 
