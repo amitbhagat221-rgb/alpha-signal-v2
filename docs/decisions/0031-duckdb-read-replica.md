@@ -13,7 +13,7 @@ It IS the bottleneck for **wide column-scan queries** that the cockpit + backtes
 
 The `.pkl` cache layer existed *because* of this. 140× cold-restart improvement (ADR-adjacent — see Stage 2 cockpit split in [HANDOFF 2026-05-28](../../HANDOFF.md)) was load-bearing. If SQLite reads were fast we wouldn't need it.
 
-Benchmark on the live 2.0 GB DB ([tools/bench_duckdb_vs_sqlite.py](../../tools/bench_duckdb_vs_sqlite.py)) — same query, three execution paths:
+Benchmark on the live 2.0 GB DB ([_archive/tools/bench_duckdb_vs_sqlite.py](../../_archive/tools/bench_duckdb_vs_sqlite.py)) — same query, three execution paths:
 
 | Query | SQLite | DuckDB ATTACH→SQLite | DuckDB native |
 |---|---:|---:|---:|
@@ -69,7 +69,7 @@ Specifics:
 - Future cockpit functions touching slow paths should be patched one-at-a-time and benched. The remaining big targets are `get_factor_health` (cached at 5min TTL but slow underneath), `get_pick_outcomes_summary` (76K-row aggregations), and any backtest tool that scans `daily_snapshots_pit`.
 
 ## References
-- Benchmark code + results: [tools/bench_duckdb_vs_sqlite.py](../../tools/bench_duckdb_vs_sqlite.py)
+- Benchmark code + results: [_archive/tools/bench_duckdb_vs_sqlite.py](../../_archive/tools/bench_duckdb_vs_sqlite.py)
 - Refresh script: [tools/duckdb_refresh.py](../../tools/duckdb_refresh.py)
 - Read helper: [db.read_sql_fast()](../../db.py#L229)
 - First adoption: [cockpit_ops/api.py:get_backtest_roster](../../cockpit_ops/api.py)

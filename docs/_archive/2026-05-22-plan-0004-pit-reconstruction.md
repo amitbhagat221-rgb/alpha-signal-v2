@@ -3,7 +3,7 @@ Status: active
 Created: 2026-05-03
 Last updated: 2026-05-09
 Owner: Amit Bhagat
-Implementation: tools/reconstruct_pit.py, tools/import_v1_pit.py, tools/compute_corporate_adjustments.py, tools/backtest_pit.py; tables daily_snapshots_pit, daily_snapshots_pit_v1, pit_ic_by_tier_v1, corporate_adjustments
+Implementation: tools/reconstruct_pit.py, _archive/tools/import_v1_pit.py, tools/compute_corporate_adjustments.py, tools/backtest_pit.py; tables daily_snapshots_pit, daily_snapshots_pit_v1, pit_ic_by_tier_v1, corporate_adjustments
 Related ADRs: 0010-pit-strict-corporate-action-adjustment.md
 ---
 
@@ -55,7 +55,7 @@ Filing lags:
 
 ### What's already built (Phase 1.5 — done 2026-05-03, AFTER initial Phase 1)
 
-`tools/import_v1_pit.py` migrates v1's frozen 36-month reconstruction into v2 SQLite. **This is the canonical historical PIT dataset.**
+`_archive/tools/import_v1_pit.py` migrates v1's frozen 36-month reconstruction into v2 SQLite. **This is the canonical historical PIT dataset.**
 
 - `daily_snapshots_pit_v1` — 60,168 rows, **35 monthly eval dates (2023-04-03 → 2026-02-02)**, 1,978 stocks, 13 signal columns + precomputed `fwd_return_20d`.
 - `pit_ic_by_tier_v1` — 30 rows of canonical per-signal per-tier IC/t-stat. **This is the source table for the C13b numbers in CLAUDE.md.**
