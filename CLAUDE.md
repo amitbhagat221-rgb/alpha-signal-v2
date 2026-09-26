@@ -22,7 +22,7 @@ Everything else (memory, `_archive/`, slash commands, settings) — Claude handl
 
 **Environment**
 - Activate venv first: `source ~/alpha-signal/venv/bin/activate` (shared with v1)
-- v1 is LIVE on cron — never touch `~/alpha-signal/`. All v2 work in `~/alpha-signal-v2/`
+- v1 has no active cron, but v2 runs on its venv and reads its credentials — never touch `~/alpha-signal/`. All v2 work in `~/alpha-signal-v2/`
 - Credentials live in v1's `run_pipeline.sh` exports — never in code. v2 imports them at runtime via `eval "$(grep '^export ' /home/ubuntu/alpha-signal/run_pipeline.sh)"` (read-only, no execution of v1 body) — used by `run_pipeline.sh` and the v2 cron lines. Don't duplicate secrets anywhere.
 - Any cron running `python -m <module>` MUST `cd /home/ubuntu/alpha-signal-v2 &&` first — cron's CWD is `$HOME`, so `-m` fails `ModuleNotFoundError: No module named 'sources'` silently into a log no one reads. The monthly `analyst_consensus_snapshots` cron silently no-op'd this way until fixed 2026-06-03. When adding a cron, mirror the watchdog/health lines (they `cd` first).
 
@@ -56,12 +56,13 @@ Everything else (memory, `_archive/`, slash commands, settings) — Claude handl
 - Three tables, three rhythms — keep them straight:
   - `analyst_consensus` (PK=sid, daily-refreshed): cockpit "current PT" view. Daily yfinance refresh updates `price_target` + `total_analysts` only; leaves Tickertape-sourced `forward_eps` / growth fields intact.
   - `analyst_consensus_snapshots` (PK=sid+date+source, MONTHLY): backtest + revision signals. Cron: 1st of month 04:30 UTC. NEVER write a daily row to this table.
-  - `forecast_history` (year-end snapshots from Tickertape's `forecastsHistory.price`): ~1 row per stock per year (Dec 27-28). The `_extract_forecast_rows` fetcher filters out the contaminating "today" entry — anything dated within 90 days is treated as `lastPrice`, not a PT.
+  - `forecast_history` (Tickertape year-end eps/revenue snapshots). The `price` metric is NOT ingested — it was the realized year-ahead close, not a PT (ADR 0045). The only honest PT history is `analyst_consensus_snapshots`.
 - When adding any new "PT-like" producer: ask first "is this episodic?". If yes, snapshot table at the natural cadence (monthly or quarterly), not daily.
 
 **Backtest hygiene**
 - Ship a factor module and its PIT helper as one unit — never separately
-- Register every shipped factor in `BACKTEST_SIGNALS`; sub-|t|=1.5 ids also go in `FACTOR_LIBRARY`. See [ADR 0017](docs/decisions/0017-factor-library-two-tier-registry.md)
+- Register every factor ONCE in `factors.FACTORS` (one dict: compute fn, PIT columns + validation ranges, cadence, library status). `BACKTEST_SIGNALS`, `FACTOR_LIBRARY`, `PIT_COLUMNS`, lineage status etc. are derived — never hand-edit a list; `tests/test_factor_registry.py` enforces it. Live and PIT call the SAME compute function. See [ADR 0017](docs/decisions/0017-factor-library-two-tier-registry.md)
+- New table → `schema.sql` AND `tables.TABLES` (`tests/test_tables.py` enforces it)
 - Don't add to `SCREEN.weight_tiers` until t-stat ≥ 1.5 on at least one cap tier, and never mechanically — see `docs/reference/signal-weights.md`
 - `reconstruct_pit.py` writes only the columns the requested signals produced — `--signal X` is safe on existing dates by construction. If you ever pad missing PIT_COLUMNS with NaN before the write, you'll wipe every untouched column on UPDATE — don't.
 
@@ -72,7 +73,7 @@ Everything else (memory, `_archive/`, slash commands, settings) — Claude handl
 **Graph-first lookup**
 - Before any cross-file grep/read sweep, query the graphify MCP first (`mcp__graphify__*`). The graph indexes 1,792 nodes / 2,801 edges at 90% extraction confidence — use it for navigation and recall, then read only the specific files it points to.
 - Do NOT query the graph for files you're about to edit — read them directly. Graph is for finding things, not for the working file.
-- Do NOT run `graphify --update` yet. Graph is frozen on the 2026-05-23 snapshot until Amit rebuilds without image extraction. Trial period: ~1 week from 2026-05-24, then revisit cadence.
+- Do NOT run `graphify --update` yet. Graph is frozen on the 2026-05-23 snapshot until Amit rebuilds without image extraction — it predates the 2026-09-26 cleanup (factors.py, tables.py, archived modules), so verify any path it returns before trusting it.
 
 ---
 
@@ -89,7 +90,7 @@ Skipping `/handoff` is the single biggest source of context loss. Working on som
 
 | Trigger | Where it goes |
 |---|---|
-| Non-obvious technical choice | New ADR in `docs/decisions/` (write-once, ≤30 lines) |
+| Non-obvious technical choice | New ADR in `docs/decisions/` (write-once; decision in the first 10 lines, ≤60 total; mark the ADR it supersedes) |
 | Detail diverges from active plan | Append to that plan's "Implementation notes" |
 | New recurring landmine | One-line rule in this file's Critical Rules |
 | Plan reaches "Done when" | Status → implemented; reflect in `docs/reference/`; archive in 30 days |
