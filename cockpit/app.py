@@ -13,12 +13,15 @@ from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from starlette.middleware.gzip import GZipMiddleware
 
 from cockpit import api
 
 COCKPIT_DIR = Path(__file__).resolve().parent
 
 app = FastAPI(title="Alpha Signal Cockpit")
+# Gzip every response > 1KB — /explorer is 1.27MB of HTML (same as ops).
+app.add_middleware(GZipMiddleware, minimum_size=1024)
 app.mount("/static", StaticFiles(directory=COCKPIT_DIR / "static"), name="static")
 
 # Make Jinja2 treat undefined attributes as None instead of erroring
@@ -186,7 +189,7 @@ async def _bind_request(request: Request, call_next):
 # ── Page Routes ──
 
 @app.get("/", response_class=HTMLResponse)
-async def morning_brief(request: Request):
+def morning_brief(request: Request):
     regime = api.get_regime()
     picks = api.get_top_picks(top=5)
     pick_date = api.get_pick_date()
@@ -220,7 +223,7 @@ async def morning_brief(request: Request):
 
 
 @app.get("/actions", response_class=HTMLResponse)
-async def actions(request: Request):
+def actions(request: Request):
     action_data = api.get_action_candidates()
     # Enrich each candidate
     for section in ["buy", "watch", "exit"]:
@@ -238,7 +241,7 @@ async def actions(request: Request):
 
 
 @app.get("/explorer", response_class=HTMLResponse)
-async def explorer(request: Request):
+def explorer(request: Request):
     tiers = api.get_heatmap_data()
     # Table view data
     table = api.get_explorer_table()
@@ -248,7 +251,7 @@ async def explorer(request: Request):
 
 
 @app.get("/explorer/{sid}", response_class=HTMLResponse)
-async def stock_detail(request: Request, sid: str):
+def stock_detail(request: Request, sid: str):
     detail = api.get_stock_detail(sid)
     if not detail:
         return HTMLResponse("<h1>Stock not found</h1>", status_code=404)
@@ -293,7 +296,7 @@ async def stock_detail(request: Request, sid: str):
 
 
 @app.get("/portfolio", response_class=HTMLResponse)
-async def portfolio(request: Request):
+def portfolio(request: Request):
     bundle = api.get_portfolio_bundle()
     return templates.TemplateResponse(request, "portfolio.html", {
         "page": "portfolio",
@@ -305,7 +308,7 @@ async def portfolio(request: Request):
 
 
 @app.get("/sectors", response_class=HTMLResponse)
-async def sectors(request: Request, sector: str = "", industry: str = ""):
+def sectors(request: Request, sector: str = "", industry: str = ""):
     # Industry-first overview (drill-down primary); sectors as grouping
     industries_data = api.get_industry_overview()
     industry_list = api.get_industry_list()
@@ -353,7 +356,7 @@ async def sectors(request: Request, sector: str = "", industry: str = ""):
 
 
 @app.get("/api/sector-detail/{sector}")
-async def api_sector_detail(sector: str):
+def api_sector_detail(sector: str):
     """JSON for live tab-2 sector switching without full page reload."""
     return JSONResponse({
         "narrative": api.get_sector_metadata(sector),
@@ -366,7 +369,7 @@ async def api_sector_detail(sector: str):
 
 
 @app.get("/partial/industry-card/{industry}", response_class=HTMLResponse)
-async def partial_industry_card(request: Request, industry: str, sid: str = ""):
+def partial_industry_card(request: Request, industry: str, sid: str = ""):
     """Full industry dossier fragment, lazy-loaded into the stock page's Sector
     tab. Renders the SAME shared _industry_detail.html partial that /sectors uses
     (metric strip, conviction bar, Overview/Players/Trends/Our-Picks sub-tabs,
@@ -394,7 +397,7 @@ async def partial_industry_card(request: Request, industry: str, sid: str = ""):
 
 
 @app.get("/partial/sector-card/{sector}", response_class=HTMLResponse)
-async def partial_sector_card(request: Request, sector: str, sid: str = ""):
+def partial_sector_card(request: Request, sector: str, sid: str = ""):
     """Compact sector dossier fragment, lazy-loaded into the stock page's Sector
     tab (sector context attached to every stock). Peers (with this stock
     highlighted) + our model's top/bottom + macro drivers + recent regulatory,
@@ -410,7 +413,7 @@ async def partial_sector_card(request: Request, sector: str, sid: str = ""):
 
 
 @app.get("/model", response_class=HTMLResponse)
-async def model_page(request: Request):
+def model_page(request: Request):
     overview = api.get_model_overview()
     return templates.TemplateResponse(request, "model.html", {
         "page": "model", **overview,
@@ -418,7 +421,7 @@ async def model_page(request: Request):
 
 
 @app.get("/model/outcomes", response_class=HTMLResponse)
-async def model_outcomes_page(request: Request, n: int = 10):
+def model_outcomes_page(request: Request, n: int = 10):
     """Live equity curve — realized forward returns on actual picks.
 
     The factor model is hypothesis; this page is the answer. Per-tier × window
@@ -433,12 +436,12 @@ async def model_outcomes_page(request: Request, n: int = 10):
 
 
 @app.get("/api/model/outcomes")
-async def api_model_outcomes(n: int = 10):
+def api_model_outcomes(n: int = 10):
     return api.get_pick_outcomes_summary(top_n=n)
 
 
 @app.get("/model/variants", response_class=HTMLResponse)
-async def model_variants_page(request: Request, n: int = 10):
+def model_variants_page(request: Request, n: int = 10):
     """Side-by-side comparison of production / max-return / max-sharpe weight schemes.
 
     n: picks per tier per variant (default 10). All three variants run on the
@@ -454,7 +457,7 @@ async def model_variants_page(request: Request, n: int = 10):
 
 
 @app.get("/multibagger", response_class=HTMLResponse)
-async def multibagger_page(request: Request):
+def multibagger_page(request: Request):
     """Multibagger watchlist — the SEPARATE quality-gated funnel (plan 0008),
     kept OUT of daily_picks. Honest framing: the gates are the product (a
     junk-stripped watchlist); the ranking edge is validated weak/regime-dependent
@@ -472,7 +475,7 @@ async def multibagger_page(request: Request):
 # ── Mutual Fund research section (plan prfect-lets-add-a-zazzy-eich) ──
 
 @app.get("/mutual-funds", response_class=HTMLResponse)
-async def mutual_funds_page(
+def mutual_funds_page(
     request: Request,
     category: str = None, amc: str = None,
     plan: str = None, option: str = None,
@@ -496,7 +499,7 @@ async def mutual_funds_page(
 
 
 @app.get("/mutual-funds/compare", response_class=HTMLResponse)
-async def mutual_fund_compare(request: Request, codes: str = ""):
+def mutual_fund_compare(request: Request, codes: str = ""):
     """Side-by-side compare. ?codes=A,B,C (2-5 scheme codes)."""
     scheme_codes = [c.strip() for c in (codes or "").split(",") if c.strip()]
     bundle = api.get_mf_compare(scheme_codes) if scheme_codes else {"schemes": [], "categories_seen": []}
@@ -508,7 +511,7 @@ async def mutual_fund_compare(request: Request, codes: str = ""):
 
 
 @app.get("/mutual-funds/{scheme_code}", response_class=HTMLResponse)
-async def mutual_fund_detail(request: Request, scheme_code: str):
+def mutual_fund_detail(request: Request, scheme_code: str):
     detail = api.get_mf_detail(scheme_code)
     if not detail:
         return HTMLResponse(f"Scheme {scheme_code} not found", status_code=404)
@@ -522,22 +525,22 @@ async def mutual_fund_detail(request: Request, scheme_code: str):
 
 
 @app.get("/api/mf-nav-series/{scheme_code}")
-async def api_mf_nav_series(scheme_code: str, days: int = None):
+def api_mf_nav_series(scheme_code: str, days: int = None):
     return api.get_mf_nav_series(scheme_code, days=days)
 
 
 @app.get("/api/mf-rolling/{scheme_code}")
-async def api_mf_rolling(scheme_code: str):
+def api_mf_rolling(scheme_code: str):
     return api.get_mf_rolling_returns(scheme_code)
 
 
 @app.get("/api/mf-search")
-async def api_mf_search(q: str = "", limit: int = 10):
+def api_mf_search(q: str = "", limit: int = 10):
     return api.get_mf_search(q, limit=limit)
 
 
 @app.get("/news", response_class=HTMLResponse)
-async def news_page(
+def news_page(
     request: Request,
     topic: str = "",
     tier: int = 0,
@@ -583,63 +586,63 @@ async def news_page(
 # ── JSON API Routes ──
 
 @app.get("/api/regime")
-async def api_regime():
+def api_regime():
     return api.get_regime()
 
 @app.get("/api/changes")
-async def api_changes(days: int = 1):
+def api_changes(days: int = 1):
     return api.get_changes(days=days)
 
 @app.get("/api/picks")
-async def api_picks(tier: str = None, top: int = 5):
+def api_picks(tier: str = None, top: int = 5):
     return api.get_top_picks(tier=tier, top=top)
 
 @app.get("/api/stock/{sid}")
-async def api_stock(sid: str):
+def api_stock(sid: str):
     detail = api.get_stock_detail(sid)
     return detail or {"error": "not found"}
 
 @app.get("/api/search")
-async def api_search(q: str = ""):
+def api_search(q: str = ""):
     if len(q) < 2:
         return []
     return api.search_stocks(q)
 
 @app.get("/api/prices/{sid}")
-async def api_prices(sid: str, days: int = 365):
+def api_prices(sid: str, days: int = 365):
     return api.get_price_series(sid, days=days)
 
 @app.get("/api/prices-extended/{sid}")
-async def api_prices_extended(sid: str, days: int = 365):
+def api_prices_extended(sid: str, days: int = 365):
     return api.get_price_series_extended(sid, days=days)
 
 @app.get("/api/quarterly/{sid}")
-async def api_quarterly(sid: str):
+def api_quarterly(sid: str):
     return api.get_quarterly_financials(sid)
 
 @app.get("/api/annual/{sid}")
-async def api_annual(sid: str):
+def api_annual(sid: str):
     return api.get_annual_financials(sid)
 
 @app.get("/api/shareholding/{sid}")
-async def api_shareholding(sid: str):
+def api_shareholding(sid: str):
     return api.get_shareholding_history(sid)
 
 @app.get("/api/forecasts/{sid}")
-async def api_forecasts(sid: str):
+def api_forecasts(sid: str):
     return api.get_forecast_trend(sid)
 
 @app.get("/api/insider-timeline/{sid}")
-async def api_insider_timeline(sid: str):
+def api_insider_timeline(sid: str):
     return api.get_insider_timeline(sid)
 
 @app.get("/api/lineage/{sid}")
-async def api_stock_lineage(sid: str):
+def api_stock_lineage(sid: str):
     """Per-stock data lineage. See cockpit.api.get_stock_lineage + ADR 0027."""
     return api.get_stock_lineage(sid)
 
 @app.get("/api/sectors")
-async def api_sectors():
+def api_sectors():
     return api.get_sector_overview()
 
 # NOTE: /api/pipeline, /api/pipeline/rerun, /api/health, /sql, /api/sql

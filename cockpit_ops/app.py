@@ -159,7 +159,7 @@ async def system(request: Request, refresh: int = 0):
 
 
 @app.get("/flow", response_class=HTMLResponse)
-async def flow_page(request: Request):
+def flow_page(request: Request):
     overview = api.get_flow_overview()
     return templates.TemplateResponse(request, "flow.html", {
         "page": "flow", **overview,
@@ -167,7 +167,7 @@ async def flow_page(request: Request):
 
 
 @app.get("/command", response_class=HTMLResponse)
-async def command_centre(request: Request):
+def command_centre(request: Request):
     """Command centre — collapsible view of plans, factor library, data layer,
     pending actions. Updates whenever HANDOFF / plans / git change."""
     payload = api.get_command_centre()
@@ -177,7 +177,7 @@ async def command_centre(request: Request):
 
 
 @app.get("/sql", response_class=HTMLResponse)
-async def sql_console(request: Request, table: str = None, q: str = None):
+def sql_console(request: Request, table: str = None, q: str = None):
     """Read-only SQL query interface.
 
     Pre-fill via ?table=foo (SELECT * FROM foo LIMIT 20, auto-runs) or
@@ -198,22 +198,22 @@ async def sql_console(request: Request, table: str = None, q: str = None):
 # ────────────── JSON API endpoints ──────────────
 
 @app.get("/api/health/overview")
-async def api_health_overview():
+def api_health_overview():
     return api.get_health_overview()
 
 
 @app.get("/api/health")
-async def api_health():
+def api_health():
     return api.get_data_freshness()
 
 
 @app.get("/api/pipeline")
-async def api_pipeline(days: int = 7):
+def api_pipeline(days: int = 7):
     return api.get_pipeline_status(days=days)
 
 
 @app.post("/api/pipeline/rerun/{step_name}")
-async def api_pipeline_rerun(step_name: str):
+def api_pipeline_rerun(step_name: str):
     """Trigger a single pipeline step in the background. Returns immediately."""
     from cockpit_ops.api import rerun_step
     result = rerun_step(step_name)
@@ -223,6 +223,8 @@ async def api_pipeline_rerun(step_name: str):
 @app.post("/api/sql")
 async def api_sql(request: Request):
     """Execute a read-only SQL query and return JSON results."""
+    import asyncio
     body = await request.json()
     query = body.get("query", "").strip()
-    return api.run_sql_query(query, max_rows=500)
+    # async only to await the body; the query itself runs off the event loop.
+    return await asyncio.to_thread(api.run_sql_query, query, max_rows=500)
