@@ -5,7 +5,7 @@ Set up the venv and credentials first; the steps are in [CLAUDE.md → Critical 
 ```bash
 # Database health
 python db.py
-python validate.py
+python -m tools.data_sanity          # semantic sanity checks (validate.py retired 2026-09-26)
 python -c "from db import data_health; print(data_health().to_string())"
 python -c "from db import table_counts; table_counts()"
 python -m tools.health_report                 # same report as the 04:00 UTC email

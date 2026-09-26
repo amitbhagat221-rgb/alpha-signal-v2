@@ -20,14 +20,14 @@ POLICY
     Fundamentals annual 5× — turnaround years are real (small base).
 
 USAGE
-    from validators.temporal_continuity import verify_continuity, route_on_continuity
+    from validators.temporal_continuity import verify_continuity
     v = verify_continuity(
         sid="118566", datum_class="mf_nav",
         new_value=4383.0,
         baseline_table="mf_nav_history", baseline_col="nav", lookback_days=30,
     )
     if v.status == "DISCONTINUOUS":
-        # Route to quarantine via route_on_continuity()
+        # Record via validators._verdicts.write_verdict("gate_3_temporal", ..., quarantine=True)
         ...
 """
 
@@ -179,114 +179,3 @@ def _likely_sid_col(table: str) -> str:
     if table.startswith("mf_"):
         return "scheme_code"
     return "sid"
-
-
-def route_on_continuity(
-    verdict: TemporalVerdict,
-    source_table: str,
-    row: dict,
-    sid: str,
-    datum_class: str,
-    snapshot_date: Optional[str] = None,
-) -> str:
-    """Dispatch a row based on its continuity verdict.
-
-    Returns: "WRITE_LIVE" | "QUARANTINED" | "PASS_THROUGH"
-    """
-    if verdict.status == "DISCONTINUOUS":
-        _quarantine_for_continuity(source_table, row, sid, datum_class, verdict, snapshot_date)
-        return "QUARANTINED"
-    if verdict.status == "CONTINUOUS":
-        _record_continuity_verdict(sid, source_table, row, datum_class, verdict,
-                                    gate_value=1, overall="TRUSTED", snapshot_date=snapshot_date)
-        return "WRITE_LIVE"
-    return "PASS_THROUGH"
-
-
-def _quarantine_for_continuity(source_table, row, sid, datum_class, verdict, snapshot_date):
-    import json
-    from db import get_db
-    from validators.identity_check import _likely_pk_cols
-
-    snapshot_date = snapshot_date or datetime.now().date().isoformat()
-    mirror_table = f"{source_table}_quarantine"
-    forensic = {
-        "_q_failed_gate":     "gate_3_temporal",
-        "_q_reason":          verdict.reason,
-        "_q_quarantined_at":  datetime.now().isoformat(timespec="seconds"),
-    }
-    payload = {**row, **forensic}
-    cols = list(payload.keys())
-    placeholders = ",".join("?" * len(cols))
-    cols_sql = ",".join(f'"{c}"' for c in cols)
-    insert_sql = f'INSERT INTO {mirror_table} ({cols_sql}) VALUES ({placeholders})'
-    source_key = json.dumps(
-        {k: row.get(k) for k in _likely_pk_cols(source_table) if k in row},
-        default=str,
-    )
-    reasons_blob = {
-        "gate_3_temporal": {
-            "status": verdict.status,
-            "value": str(verdict.value),
-            "baseline": str(verdict.baseline),
-            "ratio": str(verdict.ratio),
-            "threshold": verdict.threshold,
-            "reason": verdict.reason,
-        }
-    }
-    try:
-        with get_db() as conn:
-            conn.execute(insert_sql, [payload[c] for c in cols])
-            conn.execute(
-                """
-                INSERT OR REPLACE INTO trust_verdicts
-                  (sid, source_table, source_key, datum_class, snapshot_date,
-                   gate_3_temporal, reasons_json, verdict_overall)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (sid, source_table, source_key, datum_class, snapshot_date,
-                 0, json.dumps(reasons_blob), "QUARANTINED"),
-            )
-    except Exception as e:
-        import sys
-        print(f"  ⚠ _quarantine_for_continuity failed for {source_table}/{sid}: {e}",
-              file=sys.stderr)
-
-
-def _record_continuity_verdict(sid, source_table, row, datum_class, verdict,
-                                gate_value, overall, snapshot_date):
-    import json
-    from db import get_db
-    from validators.identity_check import _likely_pk_cols
-
-    snapshot_date = snapshot_date or datetime.now().date().isoformat()
-    source_key = json.dumps(
-        {k: row.get(k) for k in _likely_pk_cols(source_table) if k in row},
-        default=str,
-    )
-    reasons_blob = {
-        "gate_3_temporal": {
-            "status": verdict.status,
-            "value": str(verdict.value),
-            "baseline": str(verdict.baseline),
-            "ratio": str(verdict.ratio),
-            "threshold": verdict.threshold,
-            "reason": verdict.reason,
-        }
-    }
-    try:
-        with get_db() as conn:
-            conn.execute(
-                """
-                INSERT OR REPLACE INTO trust_verdicts
-                  (sid, source_table, source_key, datum_class, snapshot_date,
-                   gate_3_temporal, reasons_json, verdict_overall)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (sid, source_table, source_key, datum_class, snapshot_date,
-                 gate_value, json.dumps(reasons_blob), overall),
-            )
-    except Exception as e:
-        import sys
-        print(f"  ⚠ _record_continuity_verdict failed for {source_table}/{sid}: {e}",
-              file=sys.stderr)

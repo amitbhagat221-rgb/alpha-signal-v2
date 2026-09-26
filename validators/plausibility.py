@@ -190,23 +190,22 @@ def route_on_plausibility(
             return  # already in quarantine table
         # else write to live as normal
     """
+    from validators._verdicts import write_verdict
     if verdict.status == "OUT_OF_RANGE_HARD":
-        # Quarantine + record verdict
-        from validators.identity_check import quarantine_row, record_verdict, IdentityVerdict
-        # Reuse the same quarantine_row helper — it doesn't care which gate
-        # failed, just that a row should not reach the live table. We mark
-        # gate_2_plausibility=0 via a fresh trust_verdicts write below.
-        _quarantine_for_plausibility(source_table, row, sid, datum_class, verdict, snapshot_date)
+        # Row goes to <source_table>_quarantine + gate_2_plausibility=0.
+        write_verdict("gate_2_plausibility", sid, source_table, datum_class, 0,
+                      _plausibility_reasons(verdict), row=row,
+                      snapshot_date=snapshot_date, quarantine=True)
         return "QUARANTINED"
     if verdict.status == "EXTREME":
         # Allow live write but mark the verdict — UHS Plausibility dim shows
         # a degraded score and Live Issues Inbox surfaces the row.
-        _record_plausibility_verdict(sid, source_table, row, datum_class, verdict,
-                                      gate_value=2, overall="PENDING_REVIEW", snapshot_date=snapshot_date)
+        write_verdict("gate_2_plausibility", sid, source_table, datum_class, 2,
+                      _plausibility_reasons(verdict), row=row, snapshot_date=snapshot_date)
         return "WRITE_LIVE_WITH_WARN"
     if verdict.status == "PASS":
-        _record_plausibility_verdict(sid, source_table, row, datum_class, verdict,
-                                      gate_value=1, overall="TRUSTED", snapshot_date=snapshot_date)
+        write_verdict("gate_2_plausibility", sid, source_table, datum_class, 1,
+                      _plausibility_reasons(verdict), row=row, snapshot_date=snapshot_date)
         return "WRITE_LIVE"
     # UNDEFINED / NULL_VALUE: pass through silently — caller's NULL handling applies.
     return "PASS_THROUGH"
@@ -219,111 +218,18 @@ def record_pt_plausibility_fail(sid, snapshot_date, reason, source_table="consen
     PT sweep — so the stock's per-sid UHS Plausibility dim drops to reflect the
     rejected target. Idempotent per (sid, source_table, datum_class, snapshot)."""
     import json
-    from db import get_db
-    with get_db() as conn:
-        conn.execute(
-            """
-            INSERT OR REPLACE INTO trust_verdicts
-              (sid, source_table, source_key, datum_class, snapshot_date,
-               gate_2_plausibility, reasons_json, verdict_overall)
-            VALUES (?, ?, ?, ?, ?, 0, ?, 'QUARANTINED')
-            """,
-            (sid, source_table, json.dumps({"sid": sid}), "pt_upside_pct", snapshot_date,
-             json.dumps({"gate_2_plausibility": {"reason": reason}})),
-        )
+    from validators._verdicts import write_verdict
+    write_verdict("gate_2_plausibility", sid, source_table, "pt_upside_pct", 0,
+                  {"reason": reason}, source_key=json.dumps({"sid": sid}),
+                  snapshot_date=snapshot_date)
 
 
-def _quarantine_for_plausibility(source_table, row, sid, datum_class, verdict, snapshot_date):
-    """Atomic write: append row to <source_table>_quarantine + insert
-    trust_verdicts with gate_2_plausibility=0 + verdict_overall=QUARANTINED."""
-    from datetime import datetime
-    import json
-    from db import get_db
-
-    from validators.identity_check import _likely_pk_cols
-
-    snapshot_date = snapshot_date or datetime.now().date().isoformat()
-    mirror_table = f"{source_table}_quarantine"
-    forensic = {
-        "_q_failed_gate":     "gate_2_plausibility",
-        "_q_reason":          verdict.reason,
-        "_q_quarantined_at":  datetime.now().isoformat(timespec="seconds"),
+def _plausibility_reasons(verdict: PlausibilityVerdict) -> dict:
+    return {
+        "status": verdict.status,
+        "value": str(verdict.value),
+        "hard": list(verdict.hard_range) if verdict.hard_range else None,
+        "extreme": list(verdict.extreme_range) if verdict.extreme_range else None,
+        "segment": verdict.segment,
+        "reason": verdict.reason,
     }
-    payload = {**row, **forensic}
-    cols = list(payload.keys())
-    placeholders = ",".join("?" * len(cols))
-    cols_sql = ",".join(f'"{c}"' for c in cols)
-    insert_sql = f'INSERT INTO {mirror_table} ({cols_sql}) VALUES ({placeholders})'
-
-    source_key = json.dumps(
-        {k: row.get(k) for k in _likely_pk_cols(source_table) if k in row},
-        default=str,
-    )
-    reasons_blob = {
-        "gate_2_plausibility": {
-            "status": verdict.status,
-            "value": str(verdict.value),
-            "hard": list(verdict.hard_range) if verdict.hard_range else None,
-            "extreme": list(verdict.extreme_range) if verdict.extreme_range else None,
-            "segment": verdict.segment,
-            "reason": verdict.reason,
-        }
-    }
-    try:
-        with get_db() as conn:
-            conn.execute(insert_sql, [payload[c] for c in cols])
-            conn.execute(
-                """
-                INSERT OR REPLACE INTO trust_verdicts
-                  (sid, source_table, source_key, datum_class, snapshot_date,
-                   gate_2_plausibility, reasons_json, verdict_overall)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (sid, source_table, source_key, datum_class, snapshot_date,
-                 0, json.dumps(reasons_blob), "QUARANTINED"),
-            )
-    except Exception as e:
-        import sys
-        print(f"  ⚠ _quarantine_for_plausibility failed for {source_table}/{sid}: {e}",
-              file=sys.stderr)
-
-
-def _record_plausibility_verdict(sid, source_table, row, datum_class, verdict,
-                                  gate_value, overall, snapshot_date):
-    """For PASS / EXTREME rows: persist the verdict so UHS roll-up can read it."""
-    from datetime import datetime
-    import json
-    from db import get_db
-    from validators.identity_check import _likely_pk_cols
-
-    snapshot_date = snapshot_date or datetime.now().date().isoformat()
-    source_key = json.dumps(
-        {k: row.get(k) for k in _likely_pk_cols(source_table) if k in row},
-        default=str,
-    )
-    reasons_blob = {
-        "gate_2_plausibility": {
-            "status": verdict.status,
-            "value": str(verdict.value),
-            "hard": list(verdict.hard_range) if verdict.hard_range else None,
-            "extreme": list(verdict.extreme_range) if verdict.extreme_range else None,
-            "segment": verdict.segment,
-            "reason": verdict.reason,
-        }
-    }
-    try:
-        with get_db() as conn:
-            conn.execute(
-                """
-                INSERT OR REPLACE INTO trust_verdicts
-                  (sid, source_table, source_key, datum_class, snapshot_date,
-                   gate_2_plausibility, reasons_json, verdict_overall)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (sid, source_table, source_key, datum_class, snapshot_date,
-                 gate_value, json.dumps(reasons_blob), overall),
-            )
-    except Exception as e:
-        import sys
-        print(f"  ⚠ _record_plausibility_verdict failed for {source_table}/{sid}: {e}",
-              file=sys.stderr)

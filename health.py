@@ -38,25 +38,17 @@ from typing import Optional
 
 import pandas as pd
 
-from db import get_db, read_sql, _table_date_range, TABLE_META
+from db import (get_db, read_sql, _table_date_range, _compute_freshness, data_health,
+                table_step_meta, TABLES)
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
-# Refresh intervals in days. Used by the freshness factor.
-# Slow-cadence data (annual filings) is fresh for up to 1 year.
-# "daily" = 3 because Indian markets have 2-day weekends and most daily
-# producers publish EOD with a 1-day lag — pure 1-day cycle would flag
-# every Monday morning as stale.
-REFRESH_INTERVALS = {
-    "daily":     3,
-    "weekly":    7,
-    "monthly":   30,
-    "quarterly": 91,
-    "annual":    365,
-}
+# Freshness has ONE engine: db._compute_freshness (freq default thresholds +
+# tables.TABLES `stale_days` overrides), the same verdict data_health() and the
+# freshness watchdog use. factor_freshness only turns it into a 0-100 score.
 
-# Universe size for coverage checks (NSE non-ETF stocks)
-UNIVERSE_SIZE = 2448
+# `expected_rows` sentinel: the live universe size (COUNT(*) FROM stocks).
+UNIVERSE = "universe"
 
 # Letter-grade thresholds — sorted high to low so the first match wins
 GRADE_THRESHOLDS = [
@@ -99,52 +91,30 @@ def _factor(name, score, severity, message, fix=None, drill_sql=None, weight=1.0
 def factor_freshness(tbl, count, dates, meta, profile, conn):
     """Smart freshness: if next refresh isn't due yet, the data is fresh.
 
-    Uses the table's registered refresh frequency (daily/weekly/monthly/...)
-    as the interval. If `latest_date` is within one interval, score=100.
-    Past one interval, score declines linearly until severely outdated.
+    Scores the db._compute_freshness verdict (meta["freshness"] = (status,
+    age_days, threshold_days)): within one threshold → 100; past it the score
+    declines linearly with age/threshold until severely outdated.
     """
     weight = profile.get("freshness_weight", 0.20)
-    freq = profile.get("refresh_freq_override") or meta.get("frequency")
-    latest = dates.get("latest_date")
+    freq = meta.get("frequency")
+    status, age, threshold = meta["freshness"]
 
-    # For tables where event date naturally lags ingestion (insider_trades:
-    # filings cover past trades; bulk_deals: deal_date is the actual deal day),
-    # freshness should track when the producer last ran, not the most recent
-    # event. Producer-run cadence lives in fetched_at.
-    fresh_col = profile.get("freshness_column")
-    if fresh_col:
-        try:
-            row = conn.execute(
-                f"SELECT MAX([{fresh_col}]) FROM [{tbl}] WHERE [{fresh_col}] IS NOT NULL"
-            ).fetchone()
-            if row and row[0]:
-                # fetched_at is a datetime ('YYYY-MM-DD HH:MM:SS'); take date prefix.
-                latest = str(row[0])[:10]
-        except Exception:
-            pass
-
-    if not latest or freq not in REFRESH_INTERVALS:
+    if status == "N/A":
         return _factor("freshness", 100, "ok",
                        "No refresh schedule (config / state table)",
                        weight=weight)
-
-    # Absolute-day override wins over the frequency-mapped interval. Use for
-    # tables whose upstream has a structural lag (NSE PIT filings come with a
-    # 7-14 day delay regardless of how often we fetch).
-    interval = profile.get("refresh_interval_days") or REFRESH_INTERVALS[freq]
-    try:
-        latest_d = datetime.strptime(latest, "%Y-%m-%d").date()
-    except Exception:
+    if status == "NO_DATE_ANCHOR":
         return _factor("freshness", 50, "warn",
-                       f"Could not parse latest_date='{latest}'", weight=weight)
+                       f"Registered {freq} but no date column to anchor freshness on",
+                       fix=f"Set TABLES['{tbl}']['date_col'] in tables.py",
+                       weight=weight)
 
-    age = (datetime.now().date() - latest_d).days
-    overdue = age / interval if interval else 0
+    overdue = age / threshold if threshold else 0
 
     # Brackets: 1× = fresh, 1-2× = slightly stale, 2-3× = stale, >3× = severely outdated.
     # Severity tracks "real" producer drift, not single-cycle slippage.
     if overdue <= 1.0:
-        days_until_due = max(0, interval - age)
+        days_until_due = max(0, threshold - age)
         return _factor("freshness", 100, "ok",
                        f"Fresh — {age}d old, next {freq} refresh due in {days_until_due}d",
                        weight=weight)
@@ -152,7 +122,7 @@ def factor_freshness(tbl, count, dates, meta, profile, conn):
     if overdue <= 2.0:
         score = 100 - 40 * (overdue - 1.0)  # 100 → 60
         return _factor("freshness", score, "warn",
-                       f"Slightly stale — {age}d old, {age - interval}d past {freq} cycle",
+                       f"Slightly stale — {age}d old, {age - threshold}d past {freq} cycle",
                        fix=f"Run the producer that writes {tbl}",
                        weight=weight)
 
@@ -175,6 +145,8 @@ def factor_completeness(tbl, count, dates, meta, profile, conn):
     """Row count vs expected size."""
     weight = profile.get("completeness_weight", 0.15)
     expected = profile.get("expected_rows")
+    if expected == UNIVERSE:
+        expected = meta.get("universe_size") or None
     min_rows = profile.get("min_rows", 1)
 
     if count == 0:
@@ -212,32 +184,32 @@ def factor_completeness(tbl, count, dates, meta, profile, conn):
 # ── Factor 3: Coverage ───────────────────────────────────────────────────────
 
 def factor_coverage(tbl, count, dates, meta, profile, conn):
-    """For per-stock tables: what % of the 2,448-stock universe has rows here?"""
+    """For per-stock tables: what % of the stock universe has rows here?"""
     if not profile.get("per_stock"):
         return None
     weight = profile.get("coverage_weight", 0.15)
 
-    try:
-        n_stocks = conn.execute(f"SELECT COUNT(DISTINCT sid) FROM [{tbl}]").fetchone()[0]
-    except Exception:
+    n_stocks = meta.get("stock_count")
+    universe = meta.get("universe_size") or 0
+    if n_stocks is None:
         return None
 
-    coverage = n_stocks / UNIVERSE_SIZE if UNIVERSE_SIZE else 0
-    missing = UNIVERSE_SIZE - n_stocks
+    coverage = n_stocks / universe if universe else 0
+    missing = universe - n_stocks
 
     if coverage >= 0.95:
         return _factor("coverage", 100, "ok",
-                       f"{n_stocks:,} of {UNIVERSE_SIZE:,} stocks ({100 * coverage:.0f}%)",
+                       f"{n_stocks:,} of {universe:,} stocks ({100 * coverage:.0f}%)",
                        weight=weight)
     if coverage >= 0.80:
         score = 60 + 40 * (coverage - 0.80) / 0.15
         return _factor("coverage", score, "warn",
-                       f"{n_stocks:,} of {UNIVERSE_SIZE:,} stocks ({100 * coverage:.0f}%) — {missing} missing",
+                       f"{n_stocks:,} of {universe:,} stocks ({100 * coverage:.0f}%) — {missing} missing",
                        fix="Some stocks have no data. May be dormant micro-caps; check quality_gate.",
                        drill_sql=f"SELECT s.sid, s.name, s.cap_tier FROM stocks s LEFT JOIN [{tbl}] t ON s.sid = t.sid WHERE t.sid IS NULL LIMIT 100",
                        weight=weight)
     return _factor("coverage", max(0, 60 * coverage / 0.80), "error",
-                   f"Only {n_stocks:,} of {UNIVERSE_SIZE:,} stocks ({100 * coverage:.0f}%) — {missing} missing",
+                   f"Only {n_stocks:,} of {universe:,} stocks ({100 * coverage:.0f}%) — {missing} missing",
                    fix="Major coverage gap. Re-run signal/producer for missing stocks.",
                    drill_sql=f"SELECT s.sid, s.name, s.cap_tier FROM stocks s LEFT JOIN [{tbl}] t ON s.sid = t.sid WHERE t.sid IS NULL LIMIT 100",
                    weight=weight)
@@ -684,14 +656,13 @@ def factor_duplicates(tbl, count, dates, meta, profile, conn):
 TABLE_PROFILES = {
     # ── Universe & Reference ──
     "stocks": {
-        "expected_rows": UNIVERSE_SIZE,
+        "expected_rows": UNIVERSE,
         "critical_columns": ["sid", "name", "sector", "cap_tier"],
         "validity_checks": [
             {"column": "cap_tier", "in": ["LARGE", "MID", "SMALL"], "label": "cap_tier value"},
         ],
         "outlier_columns": ["pe_ratio", "pb_ratio", "roe", "debt_to_equity"],
         "natural_key": ["sid"],
-        "refresh_freq_override": "weekly",  # universe migrated weekly
     },
     "stock_prices": {
         "per_stock": True,
@@ -721,14 +692,9 @@ TABLE_PROFILES = {
     },
 
     # ── Tickertape Fundamentals ──
-    # Freshness overrides: config registers these as "monthly" (how often the
-    # fetcher should poll), but the underlying data only changes when companies
-    # actually file new statements. The user wants "if next update is in a month
-    # the data is fresh" — so we score against the *data update* cadence, not
-    # the fetcher cadence.
+    # (Freshness thresholds for filing-cycle tables: tables.TABLES `stale_days`.)
     "quarterly_income": {
         "per_stock": True,
-        "refresh_freq_override": "quarterly",
         "critical_columns": ["sid", "period", "revenue"],
         "validity_checks": [
             {"column": "revenue", "not_negative": True, "label": "revenue"},
@@ -739,7 +705,6 @@ TABLE_PROFILES = {
     },
     "annual_balance_sheet": {
         "per_stock": True,
-        "refresh_freq_override": "annual",
         "critical_columns": ["sid", "period", "total_assets"],
         "outlier_columns": ["total_assets", "total_equity", "total_debt"],
         "min_backtest": {"target_days": 1825, "minimum_days": 1095},  # 5y target / 3y min
@@ -747,14 +712,12 @@ TABLE_PROFILES = {
     },
     "annual_cash_flow": {
         "per_stock": True,
-        "refresh_freq_override": "annual",
         "critical_columns": ["sid", "period"],
         "outlier_columns": ["operating_cash_flow", "free_cash_flow"],
         "natural_key": ["sid", "period"],
     },
     "shareholding": {
         "per_stock": True,
-        "refresh_freq_override": "quarterly",
         "critical_columns": ["sid", "end_date", "promoter_pct"],
         "validity_checks": [
             {"column": "promoter_pct", "min": 0, "max": 100, "label": "promoter %"},
@@ -808,13 +771,6 @@ TABLE_PROFILES = {
         ],
         "outlier_columns": ["value_lakhs", "shares"],
         "min_backtest": {"target_days": 730, "minimum_days": 365},
-        # Freshness tracks producer cadence, not the most recent filing date —
-        # insider filings are sparse (some days have none).
-        "freshness_column": "fetched_at",
-        # NSE PIT API publishes filings with a 7-14 day delay — even a same-day
-        # fetch shows ~10 day staleness on `trade_date`. 14-day interval avoids
-        # flagging an otherwise-working fetcher as outdated.
-        "refresh_interval_days": 14,
     },
     "bulk_deals": {
         "critical_columns": ["sid", "deal_date", "client_name", "buy_sell"],
@@ -822,7 +778,6 @@ TABLE_PROFILES = {
             {"column": "buy_sell", "in": ["BUY", "SELL", "Buy", "Sell"], "label": "buy/sell"},
             {"column": "quantity", "not_negative": True, "label": "quantity"},
         ],
-        "freshness_column": "fetched_at",
     },
     "earnings_calendar": {
         "critical_columns": ["sid", "date"],
@@ -837,9 +792,6 @@ TABLE_PROFILES = {
     },
     "macro_indicators": {
         "min_rows": 10,
-        # v1-migration leftover. v2's macro pipeline writes to macro_sector_signals
-        # (via signals.macro), not here. Mark static so it stops tripping freshness.
-        "refresh_freq_override": "annual",
     },
     "macro_indicator_meta": {
         "expected_rows": 50,
@@ -869,9 +821,6 @@ TABLE_PROFILES = {
                     "haiku_passed_sonnet_failed", "classified", "unknown"],
              "label": "classifier status"},
         ],
-        # Harvester paused 2026-04-10 (Anthropic budget). Resumes May 2026; until
-        # then, score against the manual cadence rather than daily.
-        "refresh_freq_override": "monthly",
     },
     "regulatory_signals": {
         "critical_columns": ["event_id", "sector", "is_regulatory"],
@@ -879,14 +828,12 @@ TABLE_PROFILES = {
             {"column": "direction", "min": -1, "max": 1, "label": "direction"},
         ],
         "natural_key": ["event_id", "sector"],
-        # See regulatory_events note: same paused-harvester reason.
-        "refresh_freq_override": "monthly",
     },
 
     # ── Computed Signals ──  (one row per stock per snapshot_date)
     "piotroski_scores": {
         "per_stock": True,
-        "expected_rows": UNIVERSE_SIZE,
+        "expected_rows": UNIVERSE,
         "critical_columns": ["sid", "f_score"],
         "validity_checks": [
             {"column": "f_score", "min": 0, "max": 9, "label": "F-score"},
@@ -894,36 +841,36 @@ TABLE_PROFILES = {
     },
     "accruals_scores": {
         "per_stock": True,
-        "expected_rows": UNIVERSE_SIZE,
+        "expected_rows": UNIVERSE,
         "critical_columns": ["sid"],
         "outlier_columns": ["cf_accruals_ratio", "bs_accruals_ratio"],
     },
     "consensus_signals": {
         "per_stock": True,
-        "expected_rows": UNIVERSE_SIZE,
+        "expected_rows": UNIVERSE,
         "critical_columns": ["sid"],
         "outlier_columns": ["pt_upside", "pt_revision_1yr"],
     },
     "promoter_signals": {
         "per_stock": True,
-        "expected_rows": UNIVERSE_SIZE,
+        "expected_rows": UNIVERSE,
         "critical_columns": ["sid"],
     },
     "forensic_scores": {
         "per_stock": True,
-        "expected_rows": UNIVERSE_SIZE,
+        "expected_rows": UNIVERSE,
         "critical_columns": ["sid", "m_score", "z_score"],
         "outlier_columns": ["m_score", "z_score"],
     },
     "smart_money_scores": {
         "per_stock": True,
-        "expected_rows": UNIVERSE_SIZE,
+        "expected_rows": UNIVERSE,
         "critical_columns": ["sid"],
         "outlier_columns": ["smart_money_score"],
     },
     "sentiment_scores": {
         "per_stock": True,
-        "expected_rows": UNIVERSE_SIZE,
+        "expected_rows": UNIVERSE,
         "critical_columns": ["sid"],
         "validity_checks": [
             {"column": "sentiment_7d", "min": -1, "max": 1, "label": "7d sentiment"},
@@ -939,7 +886,7 @@ TABLE_PROFILES = {
     # ── Output ──
     "daily_picks": {
         "per_stock": True,
-        "expected_rows": UNIVERSE_SIZE,
+        "expected_rows": UNIVERSE,
         "critical_columns": ["sid", "pick_date", "final_score"],
         "validity_checks": [
             {"column": "cap_tier", "in": ["LARGE", "MID", "SMALL"], "label": "cap_tier"},
@@ -987,45 +934,69 @@ ALL_FACTORS = [
 ]
 
 
-def _meta_for(tbl):
-    """Look up registered metadata (frequency, source) for a table."""
-    from config import PIPELINE_STEPS, RAW_TABLES
-    for s in PIPELINE_STEPS:
-        if s.get("table") == tbl:
-            return {
-                "source": s["source"],
-                "frequency": s["frequency"],
-                "function": f"{s['module']}.{s['function']}",
-            }
-    for r in RAW_TABLES:
-        if r["table"] == tbl:
-            return {
-                "source": r["source"],
-                "frequency": r["frequency"],
-                "function": "—",
-            }
-    return {"source": "—", "frequency": None, "function": "—"}
+def _scan_row(tbl, conn):
+    """Stand-alone equivalent of one data_health() row (compute_table_health
+    called for a single table)."""
+    count = conn.execute(f"SELECT COUNT(*) FROM [{tbl}]").fetchone()[0]
+    earliest, latest, span = _table_date_range(conn, tbl)
+    cols = [r[1] for r in conn.execute(f"PRAGMA table_info([{tbl}])").fetchall()]
+    stock_count = (conn.execute(f"SELECT COUNT(DISTINCT sid) FROM [{tbl}]").fetchone()[0]
+                   if "sid" in cols else None)
+    freq = table_step_meta().get(tbl, {}).get("frequency")
+    freshness, age, threshold = _compute_freshness(latest, freq, tbl)
+    return {"rows": count, "earliest_date": earliest, "latest_date": latest,
+            "date_span": span, "stock_count": stock_count, "frequency": freq,
+            "freshness": freshness, "age_days": age, "threshold_days": threshold}
 
 
-def compute_table_health(tbl):
-    """Run all applicable factors for one table. Returns aggregated diagnostics."""
+def _nan_to_none(v):
+    return None if isinstance(v, float) and math.isnan(v) else v
+
+
+def compute_table_health(tbl, row=None, universe_size=None):
+    """Run all applicable factors for one table. Returns aggregated diagnostics.
+
+    `row` is this table's data_health() row (counts, date range, freshness
+    verdict, stock count) — compute_db_health passes it so nothing is rescanned;
+    None scans the table here.
+    """
     profile = TABLE_PROFILES.get(tbl, {})
-    meta = _meta_for(tbl)
+    kind = TABLES.get(tbl, {}).get("kind", "—")
 
     with get_db() as conn:
         try:
-            count = conn.execute(f"SELECT COUNT(*) FROM [{tbl}]").fetchone()[0]
+            if row is None:
+                row = _scan_row(tbl, conn)
+                if universe_size is None:
+                    universe_size = conn.execute("SELECT COUNT(*) FROM stocks").fetchone()[0]
         except Exception as e:
             return {
                 "table": tbl, "score": 0, "grade": "F",
                 "grade_color": "var(--red)", "rows": 0,
                 "factors": [], "issue_count": 1,
                 "fixes": [f"Cannot read table: {type(e).__name__}: {e}"],
-                "kind": TABLE_META.get(tbl, {}).get("kind", "—"),
+                "kind": kind,
             }
 
-        earliest, latest, span = _table_date_range(conn, tbl)
+        count = int(row["rows"])
+        earliest = _nan_to_none(row["earliest_date"])
+        latest = _nan_to_none(row["latest_date"])
+        span = _nan_to_none(row["date_span"])
         dates = {"earliest_date": earliest, "latest_date": latest}
+        step = table_step_meta().get(tbl, {})
+        age = _nan_to_none(row["age_days"])
+        threshold = _nan_to_none(row["threshold_days"])
+        stock_count = _nan_to_none(row["stock_count"])
+        meta = {
+            "source": step.get("source", "—"),
+            "frequency": step.get("frequency"),
+            "function": step.get("function", "—"),
+            "freshness": (row["freshness"],
+                          int(age) if age is not None else None,
+                          int(threshold) if threshold is not None else None),
+            "stock_count": int(stock_count) if stock_count is not None else None,
+            "universe_size": universe_size,
+        }
 
         factors = []
         for fn in ALL_FACTORS:
@@ -1054,7 +1025,7 @@ def compute_table_health(tbl):
         "grade": grade_letter,
         "grade_color": grade_color,
         "rows": count,
-        "kind": TABLE_META.get(tbl, {}).get("kind", "—"),
+        "kind": kind,
         "factors": factors,
         "issue_count": len(issues),
         "issues": [{"factor": i["name"], "msg": i["message"], "severity": i["severity"]} for i in issues],
@@ -1129,16 +1100,18 @@ def compute_db_health(force=False):
     if not force and _HEALTH_CACHE is not None and (now - _HEALTH_CACHE_TIME) < _HEALTH_TTL:
         return _HEALTH_CACHE
 
-    with get_db() as conn:
-        tables = [
-            row[0] for row in
-            conn.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").fetchall()
-        ]
+    # Counts / date ranges / freshness / per-stock coverage come from the same
+    # data_health() scan the Data Inventory uses (memoized, so the /system page's
+    # concurrent get_data_freshness call shares it) — no second full-table pass.
+    dh = data_health(cache_ttl=0 if force else 60)
+    dh = dh[dh["kind"] != "file"]
+    universe_size = int(dh.loc[dh["table"] == "stocks", "rows"].iloc[0]) if (dh["table"] == "stocks").any() else 0
+    rows = {r["table"]: r for r in dh.to_dict("records")}
 
     results = []
-    for tbl in tables:
+    for tbl in sorted(rows):
         try:
-            results.append(compute_table_health(tbl))
+            results.append(compute_table_health(tbl, rows[tbl], universe_size))
         except Exception as e:
             results.append({
                 "table": tbl, "score": 0, "grade": "F", "grade_color": "var(--red)",
@@ -1173,12 +1146,6 @@ def compute_db_health(force=False):
     _HEALTH_CACHE_TIME = now
     _save_disk_cache(payload)
     return payload
-
-
-def invalidate_health_cache():
-    """Force the next compute_db_health() call to recompute from scratch."""
-    global _HEALTH_CACHE
-    _HEALTH_CACHE = None
 
 
 # ── CLI quick-test ───────────────────────────────────────────────────────────

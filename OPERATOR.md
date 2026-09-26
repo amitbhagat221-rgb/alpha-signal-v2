@@ -81,16 +81,16 @@ These sit in a plaintext shell file. Move them to a secret manager, or at least 
 
 ## 5. The files that break the pipeline
 
-1. **`config.py`**: `PIPELINE_STEPS` (order matters), `SCREEN` gates, `SIGNAL_WEIGHTS` (production; `_RETURN`/`_SHARPE` are non-production diagnostics), `TIER_SIZES`/`ADTV_MIN`, and `EXCLUDED_FROM_PICKS = ("MICRO",)`. Read ADR 0026 before touching the last one.
+1. **`config.py`**: `PIPELINE_STEPS` (order matters), `SCREEN` gates, `SIGNAL_WEIGHTS` (production; `_RETURN`/`_SHARPE` are non-production diagnostics), and `EXCLUDED_FROM_PICKS = ("MICRO",)`. Read ADR 0026 before touching the last one.
 2. **`scoring/screener.py`**: the critical step that writes `daily_picks`. If it raises, no dossiers or email go out. The pick gate is in `_pick_eligible` (ADR 0021 → 0024).
-3. **`db.py`**: `init_db()` runs the column migrations (`_COLUMN_MIGRATIONS`). A CHECK-constraint change needs the table-recreate pattern in `_ensure_pipeline_log_status_check`.
+3. **`db.py` + `schema.sql` + `tables.py`**: `init_db()` executes `schema.sql` (full DDL, regenerated from the live DB 2026-09-26), then `_COLUMN_MIGRATIONS`. A new column goes in `schema.sql` AND `_COLUMN_MIGRATIONS`; a new table in `schema.sql` AND `tables.TABLES` (`tests/test_tables.py` enforces it). CHECK-constraint changes need the table-recreate pattern (create `<t>__new`, copy, drop, rename).
 4. **`/home/ubuntu/alpha-signal/run_pipeline.sh`** (outside the repo): the credentials. See §4.
 
 ---
 
 ## 6. The data model in one screen
 
-- **Universe and tiers:** `stocks.cap_tier`. LARGE = top 100 by market cap, MID = ranks 101–250, SMALL = the rest, and MICRO = illiquid names carved out of SMALL by `tools/classify_micro_tier.py`. MICRO is classified but never picked (ADR 0026). ADTV floors in ₹ Cr/day are LARGE 10, MID 5, SMALL 1 (`config.ADTV_MIN`). Ranking is always within one tier (ADR 0005).
+- **Universe and tiers:** `stocks.cap_tier`. LARGE = top 100 by market cap, MID = ranks 101–250, SMALL = the rest, and MICRO = illiquid names carved out of SMALL by `tools/classify_micro_tier.py`. MICRO is classified but never picked (ADR 0026). The liquidity floor is `config.SCREEN["min_adtv_inr"]` (₹1 Cr/day, 20d median); MICRO uses its own ₹1 Cr ADTV gate in `classify_micro_tier.py`. Ranking is always within one tier (ADR 0005).
 - **Financials** rank through the generic screener. `financial_signal_scores` is display-only (ADR 0048).
 - **Factors:** each `signals/*` module writes its own `*_scores` table. Every factor is registered in `db.BACKTEST_SIGNALS` and PIT-backtested. Only validated ones carry weight ([signal-weights.md](docs/reference/signal-weights.md), ADRs 0017/0043/0049).
 - **PIT:** backtests read `daily_snapshots_pit` / `daily_snapshots_pit_v1`, never live tables. Corporate actions are composed at compute time (ADR 0010).

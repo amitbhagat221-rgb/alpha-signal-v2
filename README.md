@@ -32,7 +32,7 @@ More: [docs/reference/commands.md](docs/reference/commands.md). The cockpit runs
 ## Layout
 
 ```
-config.py · db.py · pipeline.py · schema.sql · lineage.py · health.py · validate.py
+config.py · db.py · tables.py · pipeline.py · schema.sql · lineage.py · health.py
 sources/      fetchers (NSE, BSE, Tickertape, yfinance, Screener, AMFI, Moneycontrol, RSS…)
 signals/      one module per factor family → *_scores tables
 scoring/      screener · quality_gate · regime · confidence · health_score

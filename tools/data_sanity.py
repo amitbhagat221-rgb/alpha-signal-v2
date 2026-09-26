@@ -32,6 +32,8 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
+import pandas as pd
+
 from db import get_db, read_sql
 
 
@@ -55,8 +57,8 @@ def _severity_for(pct, critical_pct=10, warn_pct=1):
 
 
 def _run_sql_check(check, conn):
-    """SQL-form check. Returns result dict or None."""
-    df = read_sql(check["sql"])
+    """SQL-form check on the caller's connection. Returns result dict or None."""
+    df = pd.read_sql_query(check["sql"], conn)
     if df.empty:
         return None
     row = df.iloc[0].to_dict()
@@ -163,7 +165,6 @@ CHECKS = [
     # ═══════════════════════════════════════════════════════════════════
     {
         "code": "PT_EQUALS_PRICE",
-        "deprecated_in_plan_0007": "Plan 0007 Gate 4 (cross_source)",
         "table": "analyst_consensus",
         "column": "price_target",
         "message": "analyst PT equals current close (feed misread — see HANDOFF 2026-05-22)",
@@ -212,7 +213,6 @@ CHECKS = [
     },
     {
         "code": "FORECAST_HISTORY_IS_PRICE_HISTORY",
-        "deprecated_in_plan_0007": "Plan 0007 Gate 4 (cross_source)",
         "table": "forecast_history",
         "column": "value (metric=price)",
         "message": "forecast_history.value (metric=price) matches stock_prices.close — not a real PT history",
@@ -230,10 +230,9 @@ CHECKS = [
         #      SAME DATE. JOIN every metric=price row to its same-date stock_prices
         #      close and count matches within ₹1. A real year-end PT differs from
         #      that day's close (sell-side optimism / time value); a lastPrice
-        #      contaminant equals it. NOTE: deprecated/skipped at runtime — the live
-        #      defense is sources/tickertape_analyst._extract_forecast_rows (90-day
-        #      filter) + the non-deprecated FORECAST_HISTORY_NON_YEAREND_PRICE check.
-        #      This stays as a valid --only audit/regression backstop.
+        #      contaminant equals it. The write-time defense is
+        #      sources/tickertape_analyst._extract_forecast_rows (90-day filter) +
+        #      FORECAST_HISTORY_NON_YEAREND_PRICE; this is the nightly backstop.
         "sql": """
             SELECT
                 SUM(CASE WHEN ABS(fh.value - sp.close) < 1.0 THEN 1 ELSE 0 END) AS n_bad,
@@ -287,7 +286,6 @@ CHECKS = [
     # ═══════════════════════════════════════════════════════════════════
     {
         "code": "PIOTROSKI_OUT_OF_RANGE",
-        "deprecated_in_plan_0007": "Plan 0007 Gate 2 (plausibility)",
         "table": "daily_snapshots",
         "column": "piotroski_f",
         "message": "piotroski_f outside [0, 9]",
@@ -300,7 +298,6 @@ CHECKS = [
     },
     {
         "code": "FINAL_SCORE_OUT_OF_RANGE",
-        "deprecated_in_plan_0007": "Plan 0007 Gate 2 (plausibility)",
         "table": "daily_picks",
         "column": "final_score",
         "message": "final_score outside [0, 1]",
@@ -313,7 +310,6 @@ CHECKS = [
     },
     {
         "code": "BUY_PCT_OUT_OF_RANGE",
-        "deprecated_in_plan_0007": "Plan 0007 Gate 2 (plausibility)",
         "table": "analyst_consensus",
         "column": "buy_pct",
         "message": "buy_pct outside [0, 100]",
@@ -324,24 +320,7 @@ CHECKS = [
                   FROM analyst_consensus WHERE buy_pct IS NOT NULL""",
     },
     {
-        "code": "PT_UPSIDE_OUT_OF_RANGE",
-        "deprecated_in_plan_0007": "Plan 0007 Gate 2 (plausibility)",
-        "table": "consensus_signals",
-        "column": "pt_upside",
-        # consensus_signals.pt_upside is in PERCENT units (signals/consensus.py
-        # stores `(pt/close - 1) * 100`). PIT table uses ratio units (no ×100).
-        # Bounds here are for the percent form.
-        "message": "pt_upside outside [-100%, +500%]",
-        "critical_pct": 1,
-        "sql": """SELECT
-                    SUM(CASE WHEN pt_upside < -100 OR pt_upside > 500 THEN 1 ELSE 0 END) AS n_bad,
-                    COUNT(*) AS n_total,
-                    MAX(pt_upside) AS sample
-                  FROM consensus_signals WHERE pt_upside IS NOT NULL""",
-    },
-    {
         "code": "M_SCORE_OUT_OF_RANGE",
-        "deprecated_in_plan_0007": "Plan 0007 Gate 2 (plausibility)",
         "table": "forensic_scores",
         "column": "m_score",
         "message": "m_score outside [-20, 20]",
@@ -353,7 +332,6 @@ CHECKS = [
     },
     {
         "code": "Z_SCORE_OUT_OF_RANGE",
-        "deprecated_in_plan_0007": "Plan 0007 Gate 2 (plausibility)",
         "table": "forensic_scores",
         "column": "z_score",
         "message": "z_score outside [-50, 200]",
@@ -365,7 +343,6 @@ CHECKS = [
     },
     {
         "code": "PROMOTER_PCT_OUT_OF_RANGE",
-        "deprecated_in_plan_0007": "Plan 0007 Gate 2 (plausibility)",
         "table": "shareholding",
         "column": "promoter_pct",
         "message": "promoter_pct outside [0, 100]",
@@ -376,7 +353,6 @@ CHECKS = [
     },
     {
         "code": "PLEDGE_PCT_OUT_OF_RANGE",
-        "deprecated_in_plan_0007": "Plan 0007 Gate 2 (plausibility)",
         "table": "shareholding",
         "column": "pledge_pct",
         "message": "pledge_pct outside [0, 100]",
@@ -387,7 +363,6 @@ CHECKS = [
     },
     {
         "code": "MOM_OUT_OF_RANGE",
-        "deprecated_in_plan_0007": "Plan 0007 Gate 2 (plausibility)",
         "table": "daily_snapshots",
         "column": "mom_6m / mom_12m",
         "message": "risk-adjusted momentum outside [-100, 100]",
@@ -399,7 +374,6 @@ CHECKS = [
     },
     {
         "code": "CLOSE_PRICE_BAD",
-        "deprecated_in_plan_0007": "Plan 0007 Gate 2 (plausibility)",
         "table": "stock_prices",
         "column": "close",
         "message": "stock_prices.close ≤ 0 (impossible)",
@@ -775,7 +749,6 @@ CHECKS = [
     # (where they would be eligible for dossier generation if we extended it).
     {
         "code": "EXTREME_GROWTH_PCT_IN_TOP_PICKS",
-        "deprecated_in_plan_0007": "Plan 0007 Gate 2 (plausibility)",
         "table": "analyst_consensus",
         "column": "eps_growth_pct",
         "message": "Top-100 picks have |eps_growth_pct| or |revenue_growth_pct| > 300% (likely div-by-near-zero artifacts)",
@@ -858,7 +831,6 @@ CHECKS = [
     # source divergence.
     {
         "code": "CROSS_SOURCE_PT_MISMATCH",
-        "deprecated_in_plan_0007": "Plan 0007 Gate 4 (cross_source)",
         "table": "analyst_consensus",
         "column": "price_target",
         "message": "yfinance consensus PT and broker-mean PT differ by >30% (consensus-of-consensuses divergence, ≥10 broker recos)",
@@ -1079,13 +1051,13 @@ def _mc_slug_name_mismatch_check():
 def run(only_code=None):
     """Run all checks, return list of violations (each a result dict).
 
-    Plan 0007 Phase 7: checks tagged with `deprecated_in_plan_0007` are
-    skipped here — their detection logic now lives in the runtime Trust
-    Pipeline gates (validators/identity_check.py, plausibility.py,
-    temporal_continuity.py, cross_source.py, unit_contract.py, anchor_audit.py).
-    The deprecated entries stay in CHECKS as historical record + audit trail;
-    a future plan can delete them once burn-in confirms the gates haven't
-    regressed.
+    Every check runs nightly. Plan 0007 Phase 7 used to skip checks whose
+    detection "moved" into the runtime Trust Pipeline gates, but Gates 3/4
+    (temporal / cross-source) only ever ran via the manual tools/trust_backfill
+    — so PT_EQUALS_PRICE (the HALC bug class) and friends were switched off
+    with nothing live behind them. Only checks whose gate runs at write time in
+    production were deleted (2026-09-26 audit: PT_UPSIDE_OUT_OF_RANGE, covered
+    by yfinance_analyst's Gate 2 + sweep_pt_plausibility).
     """
     # Auto-generated coverage checks (one per table in COVERAGE_THRESHOLDS).
     # Lives outside CHECKS so future per-sid tables can be covered just by
@@ -1095,11 +1067,6 @@ def run(only_code=None):
     with get_db() as conn:
         for check in all_checks:
             if only_code and check["code"] != only_code:
-                continue
-            # Deprecated checks are skipped in the nightly sweep (Trust Pipeline
-            # gates own live detection) but remain runnable on demand via an
-            # explicit --check <code> — that's their audit/regression-backstop role.
-            if check.get("deprecated_in_plan_0007") and not only_code:
                 continue
             try:
                 if "sql" in check:

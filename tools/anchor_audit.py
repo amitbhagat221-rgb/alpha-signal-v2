@@ -39,7 +39,7 @@ from typing import Optional
 
 import pandas as pd
 
-from db import get_db, read_sql, upsert_df
+from db import read_sql, upsert_df
 
 
 # Tolerance for drift detection: |diff| / anchor > tolerance → DRIFTED
@@ -142,59 +142,24 @@ def audit_drift(anchor_date: Optional[str] = None) -> dict:
     drifted = merged[merged["drift_pct"] > tol]
     counts["drifted"] = len(drifted)
 
-    # Write per-(sid, datum_class) gate_7 verdicts
-    with get_db() as conn:
-        for _, r in drifted.iterrows():
-            conn.execute(
-                """
-                INSERT OR REPLACE INTO trust_verdicts
-                  (sid, source_table, source_key, datum_class, snapshot_date,
-                   gate_7_anchor, reasons_json, verdict_overall)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (r["sid"], "stock_prices",
-                 json.dumps({"sid": r["sid"], "date": anchor_date, "source": "yfinance"}),
-                 "close", anchor_date,
-                 0,
-                 json.dumps({
-                     "gate_7_anchor": {
-                         "status": "DRIFTED",
-                         "value":  str(r["close"]),
-                         "anchor": str(r["anchor"]),
-                         "drift_pct": f"{r['drift_pct']:.2f}",
-                         "tolerance_pct": tol,
-                         "anchor_source": "nse_bhavcopy",
-                     }
-                 }),
-                 "QUARANTINED"),
-            )
-            counts["written_verdicts"] += 1
-
-        # Write PASS verdicts for the non-drifted yfinance rows (so UHS rollup
-        # has positive evidence, not just absence).
-        passing = merged[merged["drift_pct"] <= tol]
-        for _, r in passing.iterrows():
-            conn.execute(
-                """
-                INSERT OR REPLACE INTO trust_verdicts
-                  (sid, source_table, source_key, datum_class, snapshot_date,
-                   gate_7_anchor, reasons_json, verdict_overall)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (r["sid"], "stock_prices",
-                 json.dumps({"sid": r["sid"], "date": anchor_date, "source": "yfinance"}),
-                 "close", anchor_date,
-                 1,
-                 json.dumps({
-                     "gate_7_anchor": {
-                         "status": "PASS",
-                         "drift_pct": f"{r['drift_pct']:.2f}",
-                         "tolerance_pct": tol,
-                     }
-                 }),
-                 "TRUSTED"),
-            )
-            counts["written_verdicts"] += 1
+    # Write per-(sid, datum_class) gate_7 verdicts — FAIL for drifted rows,
+    # PASS for the rest (so UHS rollup has positive evidence, not just absence).
+    from validators._verdicts import write_verdicts
+    verdicts = []
+    for _, r in merged.iterrows():
+        drifted_row = r["drift_pct"] > tol
+        reasons = {"status": "DRIFTED" if drifted_row else "PASS",
+                   "drift_pct": f"{r['drift_pct']:.2f}", "tolerance_pct": tol}
+        if drifted_row:
+            reasons.update(value=str(r["close"]), anchor=str(r["anchor"]),
+                           anchor_source="nse_bhavcopy")
+        verdicts.append({
+            "gate": "gate_7_anchor", "sid": r["sid"], "source_table": "stock_prices",
+            "source_key": json.dumps({"sid": r["sid"], "date": anchor_date, "source": "yfinance"}),
+            "datum_class": "close", "snapshot_date": anchor_date,
+            "value": 0 if drifted_row else 1, "reasons": reasons,
+        })
+    counts["written_verdicts"] = write_verdicts(verdicts)
 
     print(f"  Drift audit (close) for {anchor_date}: "
           f"{counts['audited']} audited · {counts['drifted']} drifted "
