@@ -7,6 +7,7 @@ Functions are unchanged and re-exported from cockpit.api, so existing
 `api.get_mf_*` call sites keep resolving.
 """
 
+import db
 from db import read_sql
 from cockpit._shared import _persisted_cache
 
@@ -180,7 +181,7 @@ def get_mf_category_heatmap(include_non_investable: bool = False) -> list[dict]:
 
 def get_mf_detail(scheme_code: str) -> dict | None:
     """Per-scheme deep-dive payload — identity, snapshot, returns, risk, scorer breakdown."""
-    info = read_sql(
+    info_dict = db.one(
         """SELECT sm.scheme_code, sm.scheme_name, sm.amc, sm.category_norm, sm.category_raw,
                   sm.plan_type, sm.option_type, sm.isin_growth, sm.isin_div,
                   sm.aum_cr, sm.expense_ratio, sm.benchmark,
@@ -189,17 +190,15 @@ def get_mf_detail(scheme_code: str) -> dict | None:
            FROM mf_scheme_master sm
            LEFT JOIN mf_schemes ms ON sm.scheme_code = ms.scheme_code
            WHERE sm.scheme_code = ?""",
-        params=[scheme_code],
+        [scheme_code],
     )
-    if info.empty:
+    if not info_dict:
         return None
-    info_dict = info.iloc[0].replace({float("nan"): None}).to_dict()
 
-    metrics = read_sql(
+    metrics_dict = db.one(
         "SELECT * FROM mf_metrics WHERE scheme_code = ? ORDER BY as_of_date DESC LIMIT 1",
-        params=[scheme_code],
+        [scheme_code],
     )
-    metrics_dict = metrics.iloc[0].replace({float("nan"): None}).to_dict() if not metrics.empty else {}
 
     calendar = read_sql(
         "SELECT year, ret_pct, bench_ret_pct FROM mf_calendar_returns "
@@ -254,13 +253,12 @@ def get_mf_rolling_returns(scheme_code: str) -> list[dict]:
 
 def get_mf_peer_rank(scheme_code: str, top_n: int = 10) -> dict:
     """Peer comparison — top N schemes in same category_norm by composite_score."""
-    cat = read_sql(
+    category = db.scalar(
         "SELECT category_norm FROM mf_scheme_master WHERE scheme_code = ?",
-        params=[scheme_code],
+        [scheme_code],
     )
-    if cat.empty or not cat.iloc[0]["category_norm"]:
+    if not category:
         return {"category": None, "peers": []}
-    category = cat.iloc[0]["category_norm"]
 
     peers = read_sql(
         """SELECT sm.scheme_code, sm.scheme_name, sm.amc,
@@ -299,13 +297,12 @@ def get_mf_holdings(scheme_code: str) -> dict:
            ORDER BY pct_of_aum DESC""",
         params=[scheme_code, scheme_code],
     )
-    as_of = top["holding_rank"].iloc[0] if False else None
+    as_of = None
     if not top.empty:
-        as_of_row = read_sql(
-            "SELECT MAX(as_of_date) AS d FROM mf_holdings WHERE scheme_code = ?",
-            params=[scheme_code],
+        as_of = db.scalar(
+            "SELECT MAX(as_of_date) FROM mf_holdings WHERE scheme_code = ?",
+            [scheme_code],
         )
-        as_of = as_of_row.iloc[0]["d"] if not as_of_row.empty else None
     return {
         "top":         top.replace({float("nan"): None}).to_dict("records"),
         "sectors":     sectors.replace({float("nan"): None}).to_dict("records"),

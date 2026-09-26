@@ -45,6 +45,7 @@ import pandas as pd
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
+import db
 from db import read_sql, get_db
 
 # Shared decorators — implementations live in cockpit/_shared.py (single-source).
@@ -62,7 +63,7 @@ def get_pipeline_status(days=7):
     Also: a step is only treated as RUNNING if its started_at is recent (last 5 minutes)
     AND there's no completion row for it — otherwise it's a stale RUNNING row from a
     previous run that crashed before writing its completion."""
-    df = read_sql(
+    steps = db.rows(
         """
         WITH ranked AS (
             SELECT id, run_date, step_name, status, rows_affected, duration_sec,
@@ -87,17 +88,15 @@ def get_pipeline_status(days=7):
         WHERE rn = 1
         ORDER BY started_at DESC
         """,
-        params=[f"-{days} days"],
+        [f"-{days} days"],
     )
 
     # Mark stale RUNNING rows as ABORTED — they're from runs that crashed mid-step
-    if not df.empty:
-        from datetime import datetime, timedelta
-        cutoff = (datetime.now() - timedelta(minutes=5)).isoformat()
-        df.loc[(df["status"] == "RUNNING") & (df["started_at"] < cutoff), "status"] = "ABORTED"
-
-    df = df.astype(object).where(df.notna(), None)
-    return df.to_dict("records")
+    cutoff = (datetime.now() - timedelta(minutes=5)).isoformat()
+    for r in steps:
+        if r["status"] == "RUNNING" and r["started_at"] and r["started_at"] < cutoff:
+            r["status"] = "ABORTED"
+    return steps
 
 
 def run_sql_query(query, max_rows=500):
@@ -173,8 +172,7 @@ def get_model_overview():
         })
 
     # Current regime so the page can highlight the active row.
-    cur = read_sql("SELECT regime, vix_latest FROM regime_state WHERE id = 1")
-    current_regime = cur.iloc[0].to_dict() if not cur.empty else {}
+    current_regime = db.one("SELECT regime, vix_latest FROM regime_state WHERE id = 1")
 
     # Validation t-stats from v1 backtest (PIT reconstruction, 18 periods).
     validation_csv = V1_BACKTEST_DIR / "reconstructed_ic_by_tier.csv"
@@ -328,12 +326,12 @@ def get_backtest_roster():
             ext_tbl = s["external_table"]
             if ext_tbl in names:
                 try:
-                    df = read_sql(f"SELECT COUNT(DISTINCT snapshot_date) AS n, MIN(snapshot_date) AS f, MAX(snapshot_date) AS l FROM [{ext_tbl}]")
-                    if not df.empty and df.iloc[0]["n"] > 0:
+                    r = db.one(f"SELECT COUNT(DISTINCT snapshot_date) AS n, MIN(snapshot_date) AS f, MAX(snapshot_date) AS l FROM [{ext_tbl}]")
+                    if r and r["n"] > 0:
                         cov_ext = {
-                            "n_dates": _safe_int(df.iloc[0]["n"]),
-                            "first_date": df.iloc[0]["f"],
-                            "last_date": df.iloc[0]["l"],
+                            "n_dates": _safe_int(r["n"]),
+                            "first_date": r["f"],
+                            "last_date": r["l"],
                             "table": ext_tbl,
                         }
                 except Exception:
@@ -541,15 +539,15 @@ def rerun_step(step_name: str) -> dict:
     if step_name not in valid:
         return {"ok": False, "error": f"unknown step: {step_name}"}
 
-    recent = read_sql(
+    recent = db.scalar(
         """SELECT started_at FROM pipeline_log
            WHERE step_name = ? AND status = 'RUNNING'
            ORDER BY id DESC LIMIT 1""",
-        params=[step_name],
+        [step_name],
     )
-    if not recent.empty:
+    if recent is not None:
         try:
-            started = datetime.fromisoformat(recent.iloc[0]["started_at"])
+            started = datetime.fromisoformat(recent)
             if datetime.now() - started < timedelta(minutes=5):
                 return {"ok": False, "error": f"{step_name} is already RUNNING"}
         except (ValueError, TypeError):
@@ -2180,7 +2178,7 @@ def get_health_overview(force=False):
     # source stopped delivering). Showing as INFO at baseline so the user has
     # the per-signal eligible/ineligible breakdown without alarm.
     try:
-        elig_today = read_sql(
+        eligibility_block = db.rows(
             "SELECT signal, "
             "       SUM(CASE WHEN eligible=1 THEN 1 ELSE 0 END) AS n_eligible, "
             "       SUM(CASE WHEN eligible=0 THEN 1 ELSE 0 END) AS n_ineligible "
@@ -2189,8 +2187,7 @@ def get_health_overview(force=False):
             "GROUP BY signal ORDER BY signal"
         )
     except Exception:
-        elig_today = pd.DataFrame()
-    eligibility_block = elig_today.to_dict("records") if not elig_today.empty else []
+        eligibility_block = []
 
     # ── attach drilldowns ──
     for i in issues:
@@ -2277,11 +2274,9 @@ def get_health_overview(force=False):
 
     # Picks tile: total picks today + integrity status
     try:
-        picks_row = read_sql(
-            "SELECT COUNT(*) AS n FROM daily_picks "
-            "WHERE pick_date = (SELECT MAX(pick_date) FROM daily_picks)"
-        )
-        n_picks = int(picks_row.iloc[0]["n"]) if not picks_row.empty else 0
+        n_picks = int(db.scalar(
+            "SELECT COUNT(*) FROM daily_picks "
+            "WHERE pick_date = (SELECT MAX(pick_date) FROM daily_picks)", default=0))
     except Exception:
         n_picks = 0
 
@@ -2325,13 +2320,12 @@ def get_health_overview(force=False):
 
     # PIT replay tile (plan 0005 Phase E) — "can current code reproduce frozen picks?"
     try:
-        pit_status_row = read_sql(
+        r = db.one(
             "SELECT MAX(snapshot_date) AS d, COUNT(DISTINCT snapshot_date) AS n, "
             "MAX(frozen_at) AS last_freeze, MAX(frozen_by_commit) AS sha "
             "FROM pit_replay_snapshots"
         )
-        if not pit_status_row.empty and pit_status_row.iloc[0]["d"]:
-            r = pit_status_row.iloc[0]
+        if r.get("d"):
             n_frozen = int(r["n"])
             last_d = r["d"]
             last_freeze = r["last_freeze"] or ""
@@ -2403,15 +2397,14 @@ def _trust_overview() -> dict:
     from db import read_sql as _rs
 
     # ── system UHS pulse ──
-    sys_df = _rs(
+    system_row = db.one(
         """SELECT score_pct, label,
                   dim_provenance, dim_freshness, dim_plausibility,
                   dim_consistency, dim_coverage, snapshot_date
            FROM health_score
            WHERE entity_kind='system'
            ORDER BY snapshot_date DESC LIMIT 1"""
-    )
-    system_row = sys_df.iloc[0].to_dict() if not sys_df.empty else None
+    ) or None
 
     # ── pick UHS distribution today ──
     picks_df = _rs(
@@ -2438,7 +2431,7 @@ def _trust_overview() -> dict:
     gate_stats = []
     for col, label in gates:
         try:
-            df = _rs(
+            r = db.one(
                 f"""SELECT
                     SUM(CASE WHEN {col}=1 THEN 1 ELSE 0 END) AS n_pass,
                     SUM(CASE WHEN {col}=0 THEN 1 ELSE 0 END) AS n_fail,
@@ -2448,12 +2441,11 @@ def _trust_overview() -> dict:
                   WHERE snapshot_date >= date('now','-7 days')
                     AND {col} IS NOT NULL"""
             )
-            if df.empty or int(df.iloc[0]["n_total"] or 0) == 0:
+            if int(r.get("n_total") or 0) == 0:
                 gate_stats.append({"col": col, "label": label, "n_pass": 0,
                                     "n_fail": 0, "n_pending": 0, "n_total": 0,
                                     "pass_pct": None})
                 continue
-            r = df.iloc[0]
             n_total = int(r["n_total"])
             n_pass = int(r["n_pass"] or 0)
             n_fail = int(r["n_fail"] or 0)
@@ -2480,8 +2472,7 @@ def _trust_overview() -> dict:
     quarantine_counts = []
     for tbl in quarantine_tables:
         try:
-            df = _rs(f"SELECT COUNT(*) AS n FROM {tbl}")
-            n = int(df.iloc[0]["n"]) if not df.empty else 0
+            n = int(db.scalar(f"SELECT COUNT(*) FROM {tbl}", default=0))
             if n > 0:
                 quarantine_counts.append({"table": tbl.replace("_quarantine", ""),
                                             "n": n})
