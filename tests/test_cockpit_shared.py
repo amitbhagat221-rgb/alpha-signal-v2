@@ -86,3 +86,26 @@ def test_persisted_cache_max_entries_bounds_memo(tmp_path, monkeypatch):
     for i in range(10):
         assert f(i) == i
     assert f(9) == 9
+
+
+def test_db_rows_one_scalar(tmp_path, monkeypatch):
+    import sqlite3
+    import db
+    p = tmp_path / "t.db"
+    c = sqlite3.connect(p)
+    c.execute("CREATE TABLE t (sid TEXT, x REAL, n INTEGER)")
+    c.executemany("INSERT INTO t VALUES (?,?,?)",
+                  [("A", 1.5, 1), ("B", None, 2), ("C", float("inf"), None)])
+    c.commit()
+    c.close()
+    monkeypatch.setattr(db, "DB_PATH", p)
+
+    rs = db.rows("SELECT * FROM t ORDER BY sid")
+    assert rs[0] == {"sid": "A", "x": 1.5, "n": 1.0}
+    assert rs[1]["x"] is None and rs[2]["x"] is None and rs[2]["n"] is None
+    assert db.rows("SELECT * FROM t WHERE sid = ?", ["Z"]) == []
+    assert db.one("SELECT sid, n FROM t WHERE sid = ?", ["B"]) == {"sid": "B", "n": 2}
+    assert db.one("SELECT * FROM t WHERE sid = 'Z'") == {}
+    assert db.scalar("SELECT MAX(n) FROM t") == 2
+    assert db.scalar("SELECT n FROM t WHERE sid = 'C'", default=0) == 0
+    assert db.scalar("SELECT n FROM t WHERE sid = 'Z'", default="x") == "x"

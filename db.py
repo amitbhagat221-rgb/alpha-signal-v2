@@ -3872,3 +3872,36 @@ if __name__ == "__main__":
     init_db()
     print("\nTable inventory:")
     table_counts()
+
+
+# ── Read shorthands for the cockpit's query sites ──
+# Kept at the very end of the module on purpose (other work edits the body).
+# rows()/one() go through read_sql so column dtypes match the pandas paths they
+# replace; scalar() reads one cell straight off sqlite3.
+
+def rows(sql, params=None):
+    """Run SQL → list[dict]. NaN/±Inf become None (the same coercion as
+    cockpit._shared.safe_json_records), so the result is JSON- and Jinja-safe.
+    Replaces `df.to_dict("records") if not df.empty else []` and the
+    hand-written `df.astype(object).where(df.notna(), None)` dance."""
+    import math
+    out = read_sql(sql, params=params).to_dict("records")
+    for rec in out:
+        for k, v in rec.items():
+            if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
+                rec[k] = None
+    return out
+
+
+def one(sql, params=None):
+    """First row of rows() as a dict, or {} when the query returns nothing."""
+    r = rows(sql, params)
+    return r[0] if r else {}
+
+
+def scalar(sql, params=None, default=None):
+    """First column of the first row, or `default` when there is no row or the
+    value is NULL. Replaces `read_sql(...).iloc[0]["x"] if not df.empty else d`."""
+    with get_db() as conn:
+        row = conn.execute(sql, params or []).fetchone()
+    return default if row is None or row[0] is None else row[0]
