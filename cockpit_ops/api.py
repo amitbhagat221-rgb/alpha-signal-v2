@@ -213,11 +213,56 @@ def get_model_overview():
     }
 
 
+IC_MIN_PERIODS = 12  # below this a t-stat is preliminary (plan 0005 Phase D.4)
+
+
+def best_ic_by_signal(per_tier=False):
+    """Best backtest row per signal from pit_ic_by_tier_v2 — the ONE ranking rule
+    shared by /system (factor health), /command (factor library) and /model
+    (backtest roster). Pre-2026-09-26 each surface ranked sources its own way, so
+    /system and /command disagreed on which factors were promoted.
+
+    Rule (plan 0005 Phase D):
+      1. rows with n_periods >= IC_MIN_PERIODS first (statistically meaningful)
+      2. within those, v2_recompute (incl. "v2_recompute:<variant>") before v1_archive
+      3. then highest |t|
+    Falls back to whatever exists when nothing clears the n bar.
+
+    per_tier=False → {signal: row};  per_tier=True → {signal: {cap_tier: row}}.
+    Rows carry signal, cap_tier, source, t_stat, n_periods, mean_ic, verdict,
+    t_stat_ci_lo, t_stat_ci_hi."""
+    try:
+        ic = read_sql(
+            "SELECT signal, cap_tier, source, t_stat, n_periods, mean_ic, verdict, "
+            "t_stat_ci_lo, t_stat_ci_hi FROM pit_ic_by_tier_v2"
+        )
+    except Exception:
+        return {}
+    if ic.empty:
+        return {}
+    ranked = (
+        ic.assign(
+            _abst=ic["t_stat"].abs(),
+            _adequate_n=(ic["n_periods"] >= IC_MIN_PERIODS).astype(int),
+            _src=(~ic["source"].fillna("").str.startswith("v2_recompute")).astype(int),
+        )
+        .sort_values(["_adequate_n", "_src", "_abst"], ascending=[False, True, False])
+        .drop(columns=["_abst", "_adequate_n", "_src"])
+    )
+    if not per_tier:
+        return ranked.drop_duplicates("signal", keep="first").set_index("signal", drop=False).to_dict("index")
+    out = {}
+    for r in ranked.drop_duplicates(["signal", "cap_tier"], keep="first").to_dict("records"):
+        out.setdefault(r["signal"], {})[r["cap_tier"]] = r
+    return out
+
+
 def get_backtest_roster():
     """Signal-level backtest readiness for /model.
 
     For each entry in db.BACKTEST_SIGNALS, enriches with live data:
-      - C13b verdict + t-stat per cap_tier (from pit_ic_by_tier_v1)
+      - best backtest verdict + t-stat per cap_tier (pit_ic_by_tier_v2 via
+        best_ic_by_signal — v1 is a frozen 10-signal 2026-05-03 import)
       - Coverage snapshot (max history available, n_periods)
 
     Returns a dict with:
@@ -234,19 +279,19 @@ def get_backtest_roster():
 
     has_pit_v1 = "daily_snapshots_pit_v1" in names
     has_pit_v2 = "daily_snapshots_pit" in names
-    has_ic = "pit_ic_by_tier_v1" in names
 
-    # ── IC table — group by signal for fast lookup ──
-    ic_by_signal = {}
-    if has_ic:
-        ic_rows = read_sql_fast('SELECT signal, cap_tier, t_stat, verdict, n_periods FROM "pit_ic_by_tier_v1"')
-        for _, r in ic_rows.iterrows():
-            sig = r["signal"]
-            ic_by_signal.setdefault(sig, {})[r["cap_tier"]] = {
+    # ── IC table — best row per (signal, cap_tier) ──
+    ic_by_signal = {
+        sig: {
+            tier: {
                 "t_stat": _safe_float(r["t_stat"], 2),
                 "verdict": r["verdict"],
                 "n_periods": _safe_int(r["n_periods"]),
             }
+            for tier, r in tiers.items()
+        }
+        for sig, tiers in best_ic_by_signal(per_tier=True).items()
+    }
 
     # ── Coverage per PIT column (DuckDB replica — 27× faster on this scan) ──
     def _coverage(table, column):
@@ -341,13 +386,15 @@ def get_backtest_roster():
 
     # ── PIT table summary ──
     pit_tables = []
-    for tbl in ["daily_snapshots_pit_v1", "daily_snapshots_pit", "pit_ic_by_tier_v1"]:
+    for tbl in ["daily_snapshots_pit_v1", "daily_snapshots_pit", "pit_ic_by_tier_v2"]:
         if tbl not in names:
             continue
         try:
-            r = read_sql_fast(f'SELECT COUNT(*) AS rows FROM "{tbl}"').iloc[0]
+            # pit_ic_by_tier_v2 isn't in the DuckDB mirror — count it in SQLite.
+            _reader = read_sql if tbl == "pit_ic_by_tier_v2" else read_sql_fast
+            r = _reader(f'SELECT COUNT(*) AS rows FROM "{tbl}"').iloc[0]
             entry = {"table": tbl, "rows": _safe_int(r["rows"])}
-            if tbl != "pit_ic_by_tier_v1":
+            if tbl != "pit_ic_by_tier_v2":
                 d = read_sql_fast(f'SELECT COUNT(DISTINCT snapshot_date) AS n_dates, MIN(snapshot_date) AS f, MAX(snapshot_date) AS l, COUNT(DISTINCT sid) AS sids FROM "{tbl}"').iloc[0]
                 entry.update({
                     "n_dates": _safe_int(d["n_dates"]),
@@ -569,34 +616,11 @@ def get_factor_health():
             "SELECT COUNT(*) FROM stocks WHERE ticker IS NOT NULL AND sector != 'Financials'"
         ).fetchone()[0]
 
-        # Best t-stat per signal — plan 0005 Phase D rule:
-        # 1. Prefer sources with n_periods >= 12 (statistically meaningful)
-        # 2. Within those, prefer v2_recompute over v1_archive (cleaner pipeline)
-        # 3. Fall back to whatever has the highest n if nothing meets the bar
+        # Best t-stat per signal — plan 0005 Phase D rule, shared with /command.
         # Pre-fix: always preferred v2_recompute even at n=6, masking the n=35
         # v1_archive result for the same signal. The n<12 gate then nuked the
         # whole factor library to INSUFFICIENT.
-        ic = read_sql(
-            "SELECT signal, source, t_stat, n_periods, t_stat_ci_lo, t_stat_ci_hi "
-            "FROM pit_ic_by_tier_v2"
-        )
-        if ic.empty:
-            best_by_signal = {}
-        else:
-            MIN_N = 12
-            ic = ic.assign(
-                abst=lambda d: d["t_stat"].abs(),
-                _adequate_n=lambda d: (d["n_periods"] >= MIN_N).astype(int),
-                _src=lambda d: d["source"].map({"v2_recompute": 0}).fillna(
-                    d["source"].str.startswith("v2_recompute:").map({True: 0}).fillna(1)
-                ),
-            )
-            # Sort: adequate_n DESC (1 first), _src ASC (v2 first), abst DESC
-            best_by_signal = (ic.sort_values(["_adequate_n", "_src", "abst"],
-                                              ascending=[False, True, False])
-                                .drop_duplicates("signal", keep="first")
-                                .set_index("signal")
-                                .to_dict("index"))
+        best_by_signal = best_ic_by_signal()
 
         # PIT columns actually populated in daily_snapshots_pit (latest snapshot).
         # NOTE: daily_snapshots_pit is the *backtest* reconstruction, only refreshed
@@ -1256,33 +1280,14 @@ def _cc_factor_library():
         },
     ]
 
-    # Promotion criterion: if pit_ic_by_tier_v2 has a row with |t| >= 1.5 in
-    # any cap-tier (preferring v2_recompute over v1_archive when both exist),
-    # the factor is "in model"; otherwise "library".
+    # Promotion criterion: if the best pit_ic_by_tier_v2 row (best_ic_by_signal —
+    # the same rule /system uses) has |t| >= 1.5, the factor is "in model";
+    # otherwise "library".
     PROMOTION_T_THRESHOLD = 1.5
 
     factors = []
+    best = best_ic_by_signal()
     with get_db() as conn:
-        try:
-            ic = read_sql(
-                "SELECT signal, cap_tier, t_stat, mean_ic, source, n_periods "
-                "FROM pit_ic_by_tier_v2"
-            )
-            # Best |t| across cap_tier per signal — prefer v2_recompute over v1_archive.
-            ic = ic.assign(
-                abst=lambda d: d["t_stat"].abs(),
-                src_priority=lambda d: d["source"].map(
-                    {"v2_recompute": 0, "v1_archive": 1}
-                ).fillna(2),
-            )
-            best = (
-                ic.sort_values(["src_priority", "abst"], ascending=[True, False])
-                  .drop_duplicates("signal", keep="first")
-                  .set_index("signal")
-                  .to_dict("index")
-            )
-        except Exception:
-            best = {}
 
         # Score-table count helper (cached per table in this call)
         score_table_counts: dict[str, int] = {}
