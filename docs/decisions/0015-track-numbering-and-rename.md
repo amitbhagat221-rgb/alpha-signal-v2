@@ -1,5 +1,6 @@
 # 0015 — Track numbering and project-wide rename
-**2026-05-22 · Accepted**
+**2026-05-22 · Accepted**  
+**Status (2026-09-26): Partly superseded by [0016](0016-plan-numbering-fresh-start.md)** (plan filenames) — Track labels are historical; [plan 0011](../plans/0011-roadmap-to-90.md) uses WS workstreams.
 
 **Decision.** Three workstreams, numbered. Each named by what it delivers.
 

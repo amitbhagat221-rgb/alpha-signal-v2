@@ -1,5 +1,6 @@
 # 0021 — Pick eligibility gate: weight coverage + price-rows requirement
-**2026-05-24 · Accepted**
+**2026-05-24 · Accepted**  
+**Status (2026-09-26): Partly superseded by [0024](0024-per-signal-eligibility-and-per-stock-integrity.md)** — the primary pick gate is now `eligible_coverage` (see `scoring/screener.py::_pick_eligible`); `weight_coverage ≥ 0.50` and `price_rows ≥ 60` remain as floors.
 
 **Decision.** A stock qualifies for `daily_picks` only if it satisfies both gates ([scoring/screener.py:`_pick_eligible`](../../scoring/screener.py)):
 

@@ -1,6 +1,6 @@
 # 0030 — Banking metrics source: Screener.in stock page, not Tickertape
 
-**Status:** Accepted
+**Status:** Moot after [ADR 0048](../../decisions/0048-financials-rank-generic-not-submodel.md) (2026-07-05) — Financials rank through the generic screener; `banking_metrics` (Screener.in) now feeds only the dossier-only `financial_signal_scores`. Archived 2026-09-26.
 **Date:** 2026-05-29
 **Supersedes (partially):** [Plan 0001 Open Question #3](../plans/0001-mother-plan.md) ("Tickertape-first; promote RBI to primary only if Tickertape gaps cost real signal")
 

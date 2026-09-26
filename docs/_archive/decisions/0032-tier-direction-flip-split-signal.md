@@ -1,6 +1,6 @@
 # 0032 — Tier direction-flip → split-signal methodology
 
-**Status:** Accepted
+**Status:** Moot after [ADR 0048](../../decisions/0048-financials-rank-generic-not-submodel.md) (2026-07-05) — the financial sub-model is not in the ranking path. Archived 2026-09-26.
 **Date:** 2026-05-29
 
 ## Context

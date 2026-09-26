@@ -1,6 +1,6 @@
 # 0028 — Two-variant factor model: MaxReturn + MaxSharpe from PIT IC
 
-**Status:** Accepted
+**Status:** Superseded by [ADR 0049](../../decisions/0049-honest-weight-rederivation.md) (2026-07-05) — archived 2026-09-26. `SIGNAL_WEIGHTS_RETURN`/`_SHARPE` survive only as non-production `--variant` diagnostics.
 **Date:** 2026-05-28
 
 ## Context

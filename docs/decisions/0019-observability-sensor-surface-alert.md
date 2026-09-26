@@ -1,5 +1,6 @@
 # 0019 — Observability layer: sensor + sanity + surface + alert
-**2026-05-23 · Accepted**
+**2026-05-23 · Accepted**  
+**Status (2026-09-26): Partly superseded by [0023](0023-health-center-cockpit-as-single-window.md)** (surface = cockpit Health Center) **and [0033](0033-trust-pipeline-uhs.md)** (trust pipeline + UHS). Sensor/sanity/alert layers stand.
 
 **Decision.** A system that catches silent failures needs four layers, and we were missing two of them:
 

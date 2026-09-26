@@ -1,5 +1,6 @@
 # 0009 — Track 3 (Factor model) runs parallel to Track 2 (Portfolio), no blocking
-**2026-05-04 · Accepted**
+**2026-05-04 · Accepted**  
+**Status (2026-09-26): Historical** — Track 1/2/3 labels are retired; work is now organised by [plan 0011](../plans/0011-roadmap-to-90.md) workstreams, decided in [ADR 0051](0051-roadmap-to-90-decisions-d1-d12.md).
 
 > **Terminology updated 2026-05-22 per [ADR 0015](0015-track-numbering-and-rename.md)** — what this ADR originally called "F-track" is now "Track 3 (Factor model)"; "D-track" is "Track 2 (Portfolio)". Integration points F3.3 → 3.3c, F3.2 → 3.3b. The decision itself is unchanged; only the labels.
 >
