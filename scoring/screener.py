@@ -20,6 +20,7 @@ from datetime import date
 import numpy as np
 import pandas as pd
 
+import factors
 from config import SIGNAL_WEIGHTS, PORTFOLIO, SCREEN
 from db import read_sql, get_db, upsert_df
 
@@ -287,48 +288,17 @@ def score_universe(df, weights: dict = None):
     """
     if weights is None:
         weights = SIGNAL_WEIGHTS
-    # Signal column mapping: config key → DataFrame column
-    SIGNAL_COLS = {
-        "consensus": "consensus",
-        "earnings_yield": "earnings_yield",
-        "accruals": "accruals",
-        "piotroski": "f_score",
-        "momentum": "mom_6m",        # 6M for LARGE, 12M for SMALL (handled below)
-        "book_to_price": "book_to_price",
-        "promoter": "promoter",
-        "smart_money": "smart_money",
-        # Wired 2026-05-28 — dominant in PIT IC backtest, were missing from screener:
-        "pt_upside": "pt_upside",    # t=7.15 LARGE / 8.40 MID / 9.14 SMALL
-        "eps_growth": "eps_growth",  # t=5.31 LARGE / 3.23 SMALL
-        # Wired 2026-05-29 (Next-3 #3) — non-colinear bench factors per factor-correlation diagnostic:
-        "pledge_quality":     "pledge_quality",      # t=5.90 SMALL (KEEP)
-        "delivery_anomaly_z": "delivery_anomaly_z",  # t=4.76 SMALL (KEEP)
-        # Wired 2026-05-31 (ADR 0035) — in-house IV skew, MID only:
-        "iv_skew_25d":        "iv_skew_25d",          # t=+3.16 MID (KEEP, 48 wk periods)
-        # Wired 2026-06-05 (ADR 0041) — sector 6m-mom + macro tilt, SMALL only:
-        "sector_tilt":        "sector_tilt",          # t=+3.18 SMALL (KEEP, 34 monthly)
-        # Wired 2026-06-14 (ADR 0042) — BSE senior/auditor-resignation density, MID only.
-        # NEGATIVE weight in config → screener flips to abs(w)·(1−pctile): a forensic penalty.
-        "governance_resignation": "governance_resignation",  # t=−3.82 MID (KEEP, 46 monthly)
-        # Wired 2026-07-05 (ADR 0050) — announcement-window CAR, PEAD-via-CAR earnings-surprise
-        # proxy. LARGE (t=+2.23, its strongest clean factor) + SMALL (t=+3.74, orthogonal). +sign.
-        "announcement_car":       "announcement_car",         # t=+2.23 LARGE / +3.74 SMALL
-        # computed, ZERO weight — pending human promotion review (plan 0012 C1)
-        "eps_revision_yoy":       "eps_revision_yoy",         # clean SMALL t=2.78, n=38
-        # computed, ZERO weight — pending human promotion review (plan 0012 C2)
-        "value_composite":        "value_composite",          # clean SMALL t=3.32
-    }
-
-    # Percentile-rank all signals within tier (higher = better for all)
-    for signal_key, col in SIGNAL_COLS.items():
+    # Percentile-rank every screener signal within tier (higher = better for all).
+    # config weight key → DataFrame column comes from the factor registry
+    # (factors.SCREENER_COLS); a tier-specific column overrides it in that tier
+    # (momentum ranks mom_12m in SMALL, mom_6m elsewhere).
+    for signal_key, col in factors.SCREENER_COLS.items():
         if col in df.columns:
             df[f"{signal_key}_pctile"] = _percentile_rank_within_tier(df, col)
-
-    # For SMALL cap momentum, use 12M instead of 6M
-    if "mom_12m" in df.columns:
-        mom_12m_pctile = _percentile_rank_within_tier(df, "mom_12m")
-        small_mask = df["cap_tier"] == "SMALL"
-        df.loc[small_mask, "momentum_pctile"] = mom_12m_pctile[small_mask]
+    for (signal_key, tier), col in factors.SCREENER_TIER_COLS.items():
+        if col in df.columns:
+            tier_mask = df["cap_tier"] == tier
+            df.loc[tier_mask, f"{signal_key}_pctile"] = _percentile_rank_within_tier(df, col)[tier_mask]
 
     # Compute weighted score per tier. We track:
     #   • scores             : weight × pctile, summed over non-NULL signals (the numerator)

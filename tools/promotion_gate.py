@@ -68,6 +68,7 @@ import pandas as pd
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
+import factors
 from db import read_sql, upsert_df, get_db, get_backtest_cadence
 from config import TRANSACTION_COSTS_BPS
 from tools.backtest_pit import SIGNAL_COLUMN_MAP, _compute_ic, _aggregate
@@ -275,35 +276,10 @@ def _live_keys():
     """Production-wired signal ids. config.SIGNAL_WEIGHTS uses short screener
     names (consensus, accruals, …); the gate keys on registry ids
     (consensus_signal_combined, cf_accruals_ratio, …). We add BOTH the raw key
-    and its registry alias so `is_live` matches regardless of which name the
-    gate row carries — without the alias, 6 of the 12 wired factors were
-    invisible to --reeval-live and the live count was undercounted."""
-    try:
-        import config
-        keys = set()
-        w = getattr(config, "SIGNAL_WEIGHTS", {})
-        for tier_w in w.values():
-            if isinstance(tier_w, dict):
-                for k in tier_w:
-                    keys.add(k)
-                    if k in _LIVE_ALIAS:
-                        keys.add(_LIVE_ALIAS[k])
-        return keys
-    except Exception:
-        return set()
-
-
-# screener-name → backtest signal-id (the production weights use short names;
-# the gate keys on registry ids). Mirrors the alias map in health_score.py.
-_LIVE_ALIAS = {
-    "consensus": "consensus_signal_combined", "accruals": "cf_accruals_ratio",
-    "piotroski": "piotroski_f_score", "momentum": "mom_12m_adj",
-    "promoter": "promoter_qoq",
-    # smart_money_score registered as its own backtest signal 2026-06-02 (was
-    # previously mis-aliased to avg_delivery_pct_30d, borrowing an unrelated
-    # factor's verdict). Now scored on its own thin PIT panel.
-    "smart_money": "smart_money_score",
-}
+    and its registry id (factors.signal_for, tier-aware: momentum scores the 12m
+    variant in SMALL) so `is_live` matches regardless of which name the gate
+    row carries."""
+    return set(factors.wired_weight_keys()) | factors.wired_signal_ids()
 
 
 def _fmt(rows, live):

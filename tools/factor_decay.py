@@ -27,26 +27,9 @@ sys.path.insert(0, str(PROJECT_ROOT))
 import numpy as np
 
 import config
+import factors
 from db import read_sql
 from tools.backtest_pit import SIGNAL_COLUMN_MAP, _compute_ic
-
-# Mirrors cockpit_ops/api.py's _WEIGHT_KEY_TO_SIGNAL / tools/verify_factor_library.py's
-# WEIGHT_KEY_TO_SIGNAL — the screener's weight keys are abstracted names that map to
-# one canonical BACKTEST_SIGNALS / SIGNAL_COLUMN_MAP id. Keep all copies in sync.
-WEIGHT_KEY_TO_SIGNAL = {
-    "consensus":          "consensus_signal_combined",
-    "earnings_yield":     "earnings_yield",
-    "accruals":           "cf_accruals_ratio",
-    "piotroski":          "piotroski_f_score",
-    "momentum":           "mom_6m_adj",
-    "book_to_price":      "book_to_price",
-    "promoter":           "promoter_qoq",
-    "smart_money":        "smart_money_score",
-    "pt_upside":          "pt_upside",
-    "eps_growth":         "eps_growth_yoy",
-    "pledge_quality":     "pledge_quality",
-    "delivery_anomaly_z": "delivery_anomaly_z",
-}
 
 RECENT_WINDOW = 12
 DECAY_MAGNITUDE_FLOOR = 0.25   # last-12 |mean IC| < 25% of all-time |mean IC| → decayed
@@ -74,7 +57,7 @@ def analyze():
         for weight_key, weight in weights.items():
             if weight == 0:
                 continue
-            signal_id = WEIGHT_KEY_TO_SIGNAL.get(weight_key, weight_key)
+            signal_id = factors.signal_for(weight_key, tier)
             col_map = SIGNAL_COLUMN_MAP.get(signal_id)
             v2_col = col_map[1] if col_map else None
             if not v2_col:

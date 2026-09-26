@@ -32,17 +32,12 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
-from config import SIGNAL_WEIGHTS
+import factors
 from db import read_sql
 
-# config SIGNAL_WEIGHTS key → backtest signal id (canonical, from promotion_gate._LIVE_ALIAS)
-_ALIAS = {
-    "consensus": "consensus_signal_combined", "accruals": "cf_accruals_ratio",
-    "piotroski": "piotroski_f_score", "momentum": "mom_12m_adj",
-    "promoter": "promoter_qoq", "smart_money": "smart_money_score",
-}
 def _wired_pairs() -> set:
-    return {(_ALIAS.get(k, k), tier) for tier, w in SIGNAL_WEIGHTS.items() for k in w}
+    """(backtest signal id, tier) for every nonzero production weight (factors.signal_for)."""
+    return factors.wired_pairs()
 
 
 def load_tests(min_n: int = 4) -> pd.DataFrame:
