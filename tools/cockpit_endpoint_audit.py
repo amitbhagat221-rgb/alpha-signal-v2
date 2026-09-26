@@ -1,9 +1,13 @@
 """
 Alpha Signal v2 — Cockpit Endpoint Coverage Audit
 
-Calls every per-stock cockpit endpoint against a stratified sample of the
-universe and reports which endpoints return empty for which stocks. This is
-the missing pre-2026-05-23 check that would have caught:
+Calls the data function behind every per-stock cockpit surface against a
+stratified sample of the universe and reports which return empty for which
+stocks. "Endpoint" labels are historical (they name pipeline_log rows the
+Health Center reads): since 2026-09-26 quarterly / annual / shareholding /
+forecasts / insider_timeline are rendered or embedded server-side by
+/explorer/{sid} (/api/annual was removed; the other /api/* routes remain).
+This is the missing pre-2026-05-23 check that would have caught:
 
   • ANO price chart empty (no stock_prices rows)
   • Gillette regulatory items showing 2023 articles (sort bug)
@@ -52,7 +56,7 @@ def _endpoint_callables():
             "eligible_sql": "SELECT DISTINCT sid FROM quarterly_income",
         },
         {
-            "label": "annual",
+            "label": "annual",           # /explorer/{sid} financials tab (no /api route)
             "fn":    api.get_annual_financials,
             "eligible_sql": "SELECT DISTINCT sid FROM annual_balance_sheet",
         },

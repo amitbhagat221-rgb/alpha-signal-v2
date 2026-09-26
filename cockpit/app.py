@@ -8,7 +8,7 @@ Run: uvicorn cockpit.app:app --host 0.0.0.0 --port 3000 --reload
 """
 
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.gzip import GZipMiddleware
 
@@ -302,19 +302,6 @@ def sectors(request: Request, sector: str = "", industry: str = ""):
     })
 
 
-@app.get("/api/sector-detail/{sector}")
-def api_sector_detail(sector: str):
-    """JSON for live tab-2 sector switching without full page reload."""
-    return JSONResponse({
-        "narrative": api.get_sector_metadata(sector),
-        "top_players": api.get_sector_top_players(sector, n=10),
-        "picks": api.get_sector_picks(sector, top_n=10, bottom_n=5),
-        "factor_means": api.get_sector_factor_means(sector),
-        "macro_contributors": api.get_sector_macro_contributors(sector),
-        "regulatory": api.get_sector_recent_regulatory(sector, n=10),
-    })
-
-
 @app.get("/partial/industry-card/{industry}", response_class=HTMLResponse)
 def partial_industry_card(request: Request, industry: str, sid: str = ""):
     """Full industry dossier fragment, lazy-loaded into the stock page's Sector
@@ -531,33 +518,16 @@ def news_page(
 # /api/health/overview also moved.
 
 # ── JSON API Routes ──
-
-@app.get("/api/regime")
-def api_regime():
-    return api.get_regime()
-
-@app.get("/api/changes")
-def api_changes(days: int = 1):
-    return api.get_changes(days=days)
-
-@app.get("/api/picks")
-def api_picks(tier: str = None, top: int = 5):
-    return api.get_top_picks(tier=tier, top=top)
-
-@app.get("/api/stock/{sid}")
-def api_stock(sid: str):
-    detail = api.get_stock_detail(sid)
-    return detail or {"error": "not found"}
+# 2026-09-26: removed /api/regime, /api/changes, /api/picks, /api/stock/{sid},
+# /api/prices/{sid}, /api/annual/{sid}, /api/sectors, /api/sector-detail/{sector}
+# — no template/JS/doc caller and only 127.0.0.1 hits in output/cockpit.log.
+# /api/model/outcomes and /api/mf-search stay: both had external hits this month.
 
 @app.get("/api/search")
 def api_search(q: str = ""):
     if len(q) < 2:
         return []
     return api.search_stocks(q)
-
-@app.get("/api/prices/{sid}")
-def api_prices(sid: str, days: int = 365):
-    return api.get_price_series(sid, days=days)
 
 @app.get("/api/prices-extended/{sid}")
 def api_prices_extended(sid: str, days: int = 365):
@@ -566,10 +536,6 @@ def api_prices_extended(sid: str, days: int = 365):
 @app.get("/api/quarterly/{sid}")
 def api_quarterly(sid: str):
     return api.get_quarterly_financials(sid)
-
-@app.get("/api/annual/{sid}")
-def api_annual(sid: str):
-    return api.get_annual_financials(sid)
 
 @app.get("/api/shareholding/{sid}")
 def api_shareholding(sid: str):
@@ -587,10 +553,6 @@ def api_insider_timeline(sid: str):
 def api_stock_lineage(sid: str):
     """Per-stock data lineage. See cockpit.api.get_stock_lineage + ADR 0027."""
     return api.get_stock_lineage(sid)
-
-@app.get("/api/sectors")
-def api_sectors():
-    return api.get_sector_overview()
 
 # NOTE: /api/pipeline, /api/pipeline/rerun, /api/health, /sql, /api/sql
 # all moved to cockpit_ops (port 3001) during Stage 2 split (2026-05-26).

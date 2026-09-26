@@ -1175,19 +1175,6 @@ def get_stock_lineage(sid):
     }
 
 
-def get_price_series(sid, days=365):
-    """Price time series for charts."""
-    df = read_sql(
-        "SELECT date, close, volume FROM stock_prices "
-        "WHERE sid = ? ORDER BY date DESC LIMIT ?",
-        params=[sid, days],
-    )
-    if df.empty:
-        return []
-    df = df.sort_values("date").astype(object).where(df.notna(), None)
-    return df.to_dict("records")
-
-
 def get_price_series_extended(sid, days=365):
     """Extended price series with OHLCV + delivery % for technicals tab.
     NaN → None so FastAPI's JSON encoder doesn't 500 on sparse delivery_pct rows."""
@@ -1426,108 +1413,6 @@ def get_sector_comparison(sid, sector):
         base["avg_de"] = round(float(de_df.iloc[0]["avg_de"]), 2)
 
     return base
-
-
-def get_active_signals():
-    """Get stocks with strong active signals, grouped by signal type."""
-    signals = {}
-
-    # Promoter Buying
-    df = read_sql("""
-        SELECT ps.sid, s.ticker, s.name, s.cap_tier, ps.promoter_qoq, ps.promoter_signal,
-               ps.promoter_trend, ps.pledge_quality
-        FROM promoter_signals ps JOIN stocks s ON ps.sid = s.sid
-        WHERE ps.snapshot_date = (SELECT MAX(snapshot_date) FROM promoter_signals)
-        AND ps.promoter_qoq > 0.5
-        ORDER BY ps.promoter_qoq DESC LIMIT 20
-    """)
-    signals["Promoter Buying"] = [
-        {**r, "explanation": f"Promoters increased stake by +{r['promoter_qoq']:.2f}% QoQ. Trend: {r.get('promoter_trend', 'N/A')}",
-         "strength": r["promoter_signal"], "color": "green"}
-        for r in df.to_dict("records")
-    ]
-
-    # Consensus Upgrade
-    df = read_sql("""
-        SELECT cs.sid, s.ticker, s.name, s.cap_tier, cs.consensus_signal,
-               cs.pt_upside, cs.eps_growth, cs.revenue_growth
-        FROM consensus_signals cs JOIN stocks s ON cs.sid = s.sid
-        WHERE cs.snapshot_date = (SELECT MAX(snapshot_date) FROM consensus_signals)
-        AND cs.consensus_signal > 0.65
-        ORDER BY cs.consensus_signal DESC LIMIT 20
-    """)
-    signals["Consensus Upgrade"] = [
-        {**r, "explanation": f"Strong analyst consensus ({r['consensus_signal']:.2f}). EPS growth: {r.get('eps_growth', 0):.0f}%",
-         "strength": r["consensus_signal"], "color": "green"}
-        for r in df.to_dict("records")
-    ]
-
-    # Forensic Alert
-    df = read_sql("""
-        SELECT fs.sid, s.ticker, s.name, s.cap_tier, fs.m_score, fs.m_score_flag,
-               fs.z_score, fs.z_score_flag, fs.penalty
-        FROM forensic_scores fs JOIN stocks s ON fs.sid = s.sid
-        WHERE fs.snapshot_date = (SELECT MAX(snapshot_date) FROM forensic_scores)
-        AND (fs.m_score_flag = 'LIKELY_MANIPULATOR' OR fs.z_score_flag = 'DISTRESS')
-        ORDER BY fs.penalty ASC LIMIT 20
-    """)
-    signals["Forensic Alert"] = [
-        {**r, "explanation": f"M-Score: {r.get('m_score', 'N/A')} ({r.get('m_score_flag', '')}), Z-Score: {r.get('z_score', 'N/A')} ({r.get('z_score_flag', '')})",
-         "strength": abs(r.get("penalty") or 0), "color": "red"}
-        for r in df.to_dict("records")
-    ]
-
-    # Insider Activity
-    df = read_sql("""
-        SELECT iss.sid, s.ticker, s.name, s.cap_tier, iss.signal_type, iss.strength,
-               iss.score_impact, iss.description
-        FROM insider_signals iss JOIN stocks s ON iss.sid = s.sid
-        WHERE iss.snapshot_date = (SELECT MAX(snapshot_date) FROM insider_signals)
-        AND iss.signal_type IN ('STRONG_BUY', 'STRONG_SELL')
-        ORDER BY ABS(iss.score_impact) DESC LIMIT 20
-    """)
-    signals["Insider Activity"] = [
-        {**r, "explanation": r.get("description", f"{r['signal_type']}"),
-         "strength": abs(r.get("score_impact") or 0),
-         "color": "green" if "BUY" in r.get("signal_type", "") else "red"}
-        for r in df.to_dict("records")
-    ]
-
-    # Smart Money
-    df = read_sql("""
-        SELECT sm.sid, s.ticker, s.name, s.cap_tier, sm.smart_money_score,
-               sm.delivery_score, sm.net_buy_qty
-        FROM smart_money_scores sm JOIN stocks s ON sm.sid = s.sid
-        WHERE sm.snapshot_date = (SELECT MAX(snapshot_date) FROM smart_money_scores)
-        AND sm.smart_money_score > 70
-        ORDER BY sm.smart_money_score DESC LIMIT 20
-    """)
-    signals["Smart Money"] = [
-        {**r, "explanation": f"Smart money score: {r['smart_money_score']:.0f}/100. Delivery: {r.get('delivery_score', 0):.0f}",
-         "strength": r["smart_money_score"] / 100, "color": "green"}
-        for r in df.to_dict("records")
-    ]
-
-    # Regulatory
-    df = read_sql("""
-        SELECT rs.sector, rs.direction, rs.magnitude, rs.ai_reasoning, re.title,
-               re.published_at
-        FROM regulatory_signals rs
-        JOIN regulatory_events re ON rs.event_id = re.event_id
-        WHERE rs.magnitude IN ('major', 'moderate')
-        AND re.published_at >= date('now', '-7 days')
-        ORDER BY re.published_at DESC LIMIT 15
-    """)
-    signals["Regulatory"] = [
-        {**r, "explanation": r.get("ai_reasoning", r.get("title", "")),
-         "ticker": r["sector"], "name": r.get("title", "")[:80],
-         "strength": 1.0 if r.get("magnitude") == "major" else 0.6,
-         "color": "green" if r.get("direction", 0) > 0 else "red",
-         "cap_tier": r.get("magnitude", "").upper()}
-        for r in df.to_dict("records")
-    ]
-
-    return signals
 
 
 @_persisted_cache(60, name="get_action_candidates")
@@ -2628,23 +2513,6 @@ def get_industry_factor_means(industry):
         })
     rows.sort(key=lambda r: -abs(r["mean"]))
     return rows
-
-
-def get_sector_trend(months=12):
-    """Sector-avg composite over time, monthly snapshots — Tab 3 source."""
-    df = read_sql(
-        """
-        SELECT pick_date, sector, ROUND(AVG(final_score), 3) AS avg_score,
-               COUNT(*) AS n_stocks
-        FROM daily_picks
-        WHERE pick_date >= date('now', :since)
-          AND sector IS NOT NULL
-        GROUP BY pick_date, sector
-        ORDER BY pick_date, sector
-        """,
-        params={"since": f"-{months * 31} days"},
-    )
-    return df.to_dict("records") if not df.empty else []
 
 
 # Source tier map — per news_app_build_spec.md.
