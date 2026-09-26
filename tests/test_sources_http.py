@@ -119,3 +119,17 @@ def test_run_harvester_raises_when_nothing_returned():
 
 def test_run_harvester_empty_items_is_quiet():
     assert _http.run_harvester([], lambda i: [1], lambda rows: None, label="t") == (0, 0, 0)
+
+
+def test_every_sources_module_imports():
+    """Not just PIPELINE_STEPS modules — cron/manual harvesters (bse_announcements,
+    transcripts_pull, screener_pull …) must import too."""
+    import importlib
+    import pathlib
+    failed = []
+    for f in sorted(pathlib.Path(_http.__file__).parent.glob("*.py")):
+        try:
+            importlib.import_module(f"sources.{f.stem}")
+        except Exception as e:
+            failed.append(f"{f.stem}: {type(e).__name__}: {e}")
+    assert not failed, "\n".join(failed)

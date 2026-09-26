@@ -37,19 +37,16 @@ import sqlite3
 import sys
 import time
 from datetime import date, datetime, timedelta
-from pathlib import Path
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(PROJECT_ROOT))
 
-from config import API
+from config import API as NET  # module-level API below is the BSE endpoint URL
 from db import get_db
 from sources._http import warm_session
 
 API = "https://api.bseindia.com/BseIndiaAPI/api/AnnSubCategoryGetData/w"
 WARM_URL = "https://www.bseindia.com/corporates/ann.html"
 HEADERS = {
-    "User-Agent": API["browser_user_agent"],
+    "User-Agent": NET["browser_user_agent"],
     "Referer": "https://www.bseindia.com/",
     "Origin": "https://www.bseindia.com",
     "Accept": "application/json, text/plain, */*",
