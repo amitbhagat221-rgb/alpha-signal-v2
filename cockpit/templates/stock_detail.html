@@ -53,13 +53,13 @@
         </div>
         <div class="stock-name">{{ s.name }} &middot; <span style="color: var(--accent);">{{ s.sector }}</span>{% if s.industry %} &middot; {{ s.industry }}{% endif %}</div>
     </div>
-    <div style="text-align: right;">
+    <div class="u-right">
         {% if pm.get("close_price") %}
         <div class="stock-price"><span class="unit">&#8377;</span>{{ "%.2f"|format(pm.close_price) }}</div>
         <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">
             {% if pm.get("return_1m") is not none %}
-            <span class="mono {% if pm.return_1m > 0 %}score-green{% elif pm.return_1m < 0 %}score-red{% endif %}">
-                {{ "%+.1f"|format(pm.return_1m) }}%
+            <span class="mono {{ pm.return_1m|tone }}">
+                {{ pm.return_1m|pct(1, signed=True) }}
             </span> 1M &middot;
             {% endif %}
             {{ pm.get("price_date", "") }}
@@ -73,10 +73,10 @@
 <div class="card" style="padding: 14px 18px; margin-bottom: 16px; display: flex; flex-wrap: wrap; gap: 20px; align-items: center;">
     {% if pm.get("high_52w") %}
     <div style="font-size: 12px; color: var(--text-muted);">
-        52W: <span class="mono">&#8377;{{ "%.0f"|format(pm.low_52w) }}</span> — <span class="mono">&#8377;{{ "%.0f"|format(pm.high_52w) }}</span>
+        52W: <span class="mono">{{ pm.low_52w|inr(0) }}</span> — <span class="mono">{{ pm.high_52w|inr(0) }}</span>
         {% if pm.get("pct_from_52w_high") is not none %}
         <span class="mono {% if pm.pct_from_52w_high > -10 %}score-green{% elif pm.pct_from_52w_high > -25 %}score-amber{% else %}score-red{% endif %}" style="margin-left: 4px;">
-            ({{ "%+.0f"|format(pm.pct_from_52w_high) }}% from high)
+            ({{ pm.pct_from_52w_high|pct(0, signed=True) }} from high)
         </span>
         {% endif %}
     </div>
@@ -84,14 +84,14 @@
     {% for label, key in [("3M", "return_3m"), ("6M", "return_6m"), ("1Y", "return_1y")] %}
     {% if pm.get(key) is not none %}
     <div style="font-size: 12px;">
-        <span style="color: var(--text-muted);">{{ label }}:</span>
-        <span class="mono {% if pm[key] > 0 %}score-green{% elif pm[key] < 0 %}score-red{% endif %}" style="font-weight: 600;">{{ "%+.1f"|format(pm[key]) }}%</span>
+        <span class="u-muted">{{ label }}:</span>
+        <span class="mono {{ pm[key]|tone }}" style="font-weight: 600;">{{ pm[key]|pct(1, signed=True) }}</span>
     </div>
     {% endif %}
     {% endfor %}
     {% if pm.get("rsi_14") is not none %}
     <div style="font-size: 12px;">
-        <span style="color: var(--text-muted);">RSI:</span>
+        <span class="u-muted">RSI:</span>
         <span class="mono {% if pm.rsi_14 < 30 %}score-green{% elif pm.rsi_14 > 70 %}score-red{% endif %}" style="font-weight: 600;">
             {{ "%.0f"|format(pm.rsi_14) }}{% if pm.rsi_14 < 30 %} oversold{% elif pm.rsi_14 > 70 %} overbought{% endif %}
         </span>
@@ -170,7 +170,7 @@
             <div style="display:flex; justify-content:space-between; align-items:baseline;">
                 <div><span style="font-weight:600;">{{ p.label }}</span>
                      <span style="color:var(--text-muted); font-size:11px;"> · {{ p.weight }}% · {{ p.blurb }}</span></div>
-                <span class="mono {% if p.z is not none and p.z > 0 %}score-green{% elif p.z is not none and p.z < 0 %}score-red{% endif %}">{% if p.z is not none %}{{ "%+.2f"|format(p.z) }}σ{% else %}—{% endif %}</span>
+                <span class="mono {% if p.z is not none and p.z > 0 %}score-green{% elif p.z is not none and p.z < 0 %}score-red{% endif %}">{% if p.z is not none %}{{ p.z|signed(2) }}σ{% else %}—{% endif %}</span>
             </div>
             <div style="position:relative; height:8px; background:rgba(128,128,128,.15); border-radius:4px; margin:6px 0;">
                 <div style="position:absolute; left:50%; top:-2px; bottom:-2px; width:1px; background:rgba(128,128,128,.45);"></div>
@@ -243,7 +243,7 @@
             <div style="display:flex; justify-content:space-between; align-items:baseline;">
                 <div><span style="font-weight:600;">{{ p.label }}</span>
                      <span style="color:var(--text-muted); font-size:11px;"> · {{ p.blurb }}</span></div>
-                <span class="mono {% if p.z is not none and p.z > 0 %}score-green{% elif p.z is not none and p.z < 0 %}score-red{% endif %}">{% if p.z is not none %}{{ "%+.2f"|format(p.z) }}σ{% else %}—{% endif %}</span>
+                <span class="mono {% if p.z is not none and p.z > 0 %}score-green{% elif p.z is not none and p.z < 0 %}score-red{% endif %}">{% if p.z is not none %}{{ p.z|signed(2) }}σ{% else %}—{% endif %}</span>
             </div>
             <div style="position:relative; height:8px; background:rgba(128,128,128,.15); border-radius:4px; margin:6px 0;">
                 <div style="position:absolute; left:50%; top:-2px; bottom:-2px; width:1px; background:rgba(128,128,128,.45);"></div>
@@ -334,7 +334,7 @@
 {# LEFT: Conviction + Signals #}
 <div>
     {% if s.get("final_score") is not none %}
-    <div class="card" style="margin-bottom: 16px;">
+    <div class="card u-mb16">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
             <span class="section-title" style="margin-bottom: 0;">Conviction Score</span>
             <span class="mono" style="font-size: 28px; font-weight: 800;
@@ -372,7 +372,7 @@
                     {% else %}color: var(--red);{% endif %}">
                     {% if key == 'piotroski' %}{{ value|int }}/9
                     {% elif key == 'smart_money' %}{{ "%.0f"|format(value) }}/100
-                    {% elif key == 'ey' %}{{ "%.1f"|format(value * 100) }}%
+                    {% elif key == 'ey' %}{{ (value * 100)|pct(1) }}
                     {% else %}{{ "%.2f"|format(value) }}{% endif %}
                 </span>
             </div>
@@ -387,13 +387,13 @@
             {% if key == 'consensus_signal' %}
             <div class="signal-subcomp">
                 {# pt_revision_1yr removed 2026-05-23 — was contaminated 1yr return, not PT revision. See ADR 0020. #}
-                {% if s.get('pt_upside') is not none %}<div><span class="label">PT Upside:</span> <span class="val">{{ "%+.1f"|format(s.pt_upside) }}%</span></div>{% endif %}
-                {% if s.get('eps_growth') is not none %}<div><span class="label">EPS Growth:</span> <span class="val">{{ "%+.1f"|format(s.eps_growth) }}%</span></div>{% endif %}
-                {% if s.get('revenue_growth') is not none %}<div><span class="label">Rev Growth:</span> <span class="val">{{ "%+.1f"|format(s.revenue_growth) }}%</span></div>{% endif %}
+                {% if s.get('pt_upside') is not none %}<div><span class="label">PT Upside:</span> <span class="val">{{ s.pt_upside|pct(1, signed=True) }}</span></div>{% endif %}
+                {% if s.get('eps_growth') is not none %}<div><span class="label">EPS Growth:</span> <span class="val">{{ s.eps_growth|pct(1, signed=True) }}</span></div>{% endif %}
+                {% if s.get('revenue_growth') is not none %}<div><span class="label">Rev Growth:</span> <span class="val">{{ s.revenue_growth|pct(1, signed=True) }}</span></div>{% endif %}
             </div>
             {% elif key == 'promoter_signal' %}
             <div class="signal-subcomp">
-                {% if s.get('promoter_qoq') is not none %}<div><span class="label">QoQ Change:</span> <span class="val">{{ "%+.2f"|format(s.promoter_qoq) }}%</span></div>{% endif %}
+                {% if s.get('promoter_qoq') is not none %}<div><span class="label">QoQ Change:</span> <span class="val">{{ s.promoter_qoq|pct(2, signed=True) }}</span></div>{% endif %}
                 {% if s.get('promoter_trend') %}<div><span class="label">Trend:</span> <span class="val">{{ s.promoter_trend|lower }}</span></div>{% endif %}
                 {% if s.get('pledge_quality') is not none %}<div><span class="label">Pledge Quality:</span> <span class="val">{{ "%.2f"|format(s.pledge_quality) }}</span></div>{% endif %}
             </div>
@@ -412,14 +412,14 @@
 
     {# News & Sentiment #}
     {% if s.get("news") or s.get("sentiment_7d") is not none %}
-    <div class="card" style="margin-bottom: 16px;">
+    <div class="card u-mb16">
         <div class="section-title">News &amp; Sentiment</div>
         <div class="section-desc">Recent news headlines from financial publications. Sentiment computed via VADER NLP on article text.</div>
         {% if s.get("sentiment_7d") is not none %}
         <div style="font-size: 13px; margin-bottom: 12px; padding: 10px 14px; background: var(--bg-primary); border-radius: 8px;">
-            <span style="color: var(--text-muted);">7-day sentiment:</span>
-            <span class="mono {% if s.sentiment_7d > 0.1 %}score-green{% elif s.sentiment_7d < -0.1 %}score-red{% endif %}" style="font-weight: 700; margin-left: 6px;">{{ "%+.2f"|format(s.sentiment_7d) }}</span>
-            {% if s.get("articles_7d") %} <span style="color: var(--text-muted);">&middot; {{ s.articles_7d|int }} articles</span>{% endif %}
+            <span class="u-muted">7-day sentiment:</span>
+            <span class="mono {% if s.sentiment_7d > 0.1 %}score-green{% elif s.sentiment_7d < -0.1 %}score-red{% endif %}" style="font-weight: 700; margin-left: 6px;">{{ s.sentiment_7d|signed(2) }}</span>
+            {% if s.get("articles_7d") %} <span class="u-muted">&middot; {{ s.articles_7d|int }} articles</span>{% endif %}
         </div>
         {% endif %}
         {% for article in s.get("news", []) %}
@@ -445,7 +445,7 @@
     {% if ac and ac.get("price_target") %}
     {% set fetched_short = (ac.get("fetched_at") or "")[:10] %}
     {% set fetched_today = fetched_short == today_iso %}
-    <div class="card" style="margin-bottom: 16px;">
+    <div class="card u-mb16">
         <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 4px;">
             <span class="section-title" style="margin-bottom: 0;">Sell-side Price Target</span>
             <span style="font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;"
@@ -461,10 +461,10 @@
         {% set headline_label = "Median" if ac.get("price_target_median") else "Mean" %}
         <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px;">
             <div>
-                <span class="mono" style="font-size: 24px; font-weight: 700;">&#8377;{{ "%.0f"|format(headline_pt) }}</span>
+                <span class="mono" style="font-size: 24px; font-weight: 700;">{{ headline_pt|inr(0) }}</span>
                 {% if headline_upside is not none %}
-                <span class="mono {% if headline_upside > 0 %}score-green{% else %}score-red{% endif %}" style="font-size: 15px; margin-left: 6px; font-weight: 600;">
-                    ({{ "%+.1f"|format(headline_upside) }}%)
+                <span class="mono {{ headline_upside|tone(zero='score-red') }}" style="font-size: 15px; margin-left: 6px; font-weight: 600;">
+                    ({{ headline_upside|pct(1, signed=True) }})
                 </span>
                 {% endif %}
                 <span style="font-size: 10px; color: var(--text-muted); margin-left: 6px;">{{ headline_label }} of {{ ac.get("total_analysts")|int if ac.get("total_analysts") else "?" }}</span>
@@ -478,7 +478,7 @@
         {% if d2e is not none or dpt is not none %}
         <div style="display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; font-size: 11px;">
             {% if d2e is not none %}
-            <span style="color: var(--text-muted);" title="Analysts typically revise PTs within 10 days of earnings. Proximity = freshness hint.">
+            <span class="u-muted" title="Analysts typically revise PTs within 10 days of earnings. Proximity = freshness hint.">
                 Next earnings:
                 {% if d2e > 0 %}
                     <span style="color: var(--text-secondary); font-weight: 600;">in {{ d2e }}d</span> ({{ ac.next_earnings_date }})
@@ -490,9 +490,9 @@
             </span>
             {% endif %}
             {% if dpt is not none and dpt <= 30 and ac.get("pt_change_pct") is not none %}
-            <span style="color: var(--text-muted);" title="Our own change-detection: when the yfinance aggregate moves >0.5% between fetches, we record the prior value and timestamp.">
+            <span class="u-muted" title="Our own change-detection: when the yfinance aggregate moves >0.5% between fetches, we record the prior value and timestamp.">
                 PT moved
-                <span class="mono {% if ac.pt_change_pct > 0 %}score-green{% else %}score-red{% endif %}" style="font-weight: 600;">{{ "%+.1f"|format(ac.pt_change_pct) }}%</span>
+                <span class="mono {{ ac.pt_change_pct|tone(zero='score-red') }}" style="font-weight: 600;">{{ ac.pt_change_pct|pct(1, signed=True) }}</span>
                 {% if dpt == 0 %}today{% elif dpt == 1 %}yesterday{% else %}{{ dpt }}d ago{% endif %}
             </span>
             {% endif %}
@@ -514,18 +514,18 @@
         {% set cp_pos = ((cp - range_min) / span * 100) %}
         <div style="margin-bottom: 14px;">
             <div style="display: flex; justify-content: space-between; font-size: 10px; color: var(--text-muted); margin-bottom: 4px;">
-                <span>Low &#8377;{{ "%.0f"|format(lo) }}</span>
-                <span>High &#8377;{{ "%.0f"|format(hi) }}</span>
+                <span>Low {{ lo|inr(0) }}</span>
+                <span>High {{ hi|inr(0) }}</span>
             </div>
             <div style="position: relative; height: 8px; border-radius: 4px; background: linear-gradient(to right, var(--red), var(--amber), var(--green)); overflow: visible;">
                 {# Current price marker (white) #}
-                <div style="position: absolute; left: {{ cp_pos }}%; top: -4px; transform: translateX(-50%); width: 3px; height: 16px; background: var(--text-primary); border-radius: 1px;" title="Current ₹{{ '%.0f'|format(cp) }}"></div>
+                <div style="position: absolute; left: {{ cp_pos }}%; top: -4px; transform: translateX(-50%); width: 3px; height: 16px; background: var(--text-primary); border-radius: 1px;" title="Current {{ cp|inr(0) }}"></div>
                 {# Median target marker (dark dot) #}
-                <div style="position: absolute; left: {{ md_pos }}%; top: -3px; transform: translateX(-50%); width: 14px; height: 14px; border-radius: 50%; background: white; border: 2px solid var(--accent);" title="Median target ₹{{ '%.0f'|format(md) }}"></div>
+                <div style="position: absolute; left: {{ md_pos }}%; top: -3px; transform: translateX(-50%); width: 14px; height: 14px; border-radius: 50%; background: white; border: 2px solid var(--accent);" title="Median target {{ md|inr(0) }}"></div>
             </div>
             <div style="display: flex; justify-content: space-between; font-size: 10px; color: var(--text-muted); margin-top: 5px;">
-                <span>Now &#8377;{{ "%.0f"|format(cp) }}</span>
-                <span>Target &#8377;{{ "%.0f"|format(md) }}</span>
+                <span>Now {{ cp|inr(0) }}</span>
+                <span>Target {{ md|inr(0) }}</span>
             </div>
         </div>
         {% endif %}
@@ -577,7 +577,7 @@
                         {% elif ac.bullish_pct_delta and ac.bullish_pct_delta < 0 %}
                             <span style="color: var(--red); font-weight: 600;">↓{{ (-ac.bullish_pct_delta)|int }}</span>
                         {% else %}
-                            <span style="color: var(--text-muted);">→</span>
+                            <span class="u-muted">→</span>
                         {% endif %}
                     </span>
                     {% endif %}
@@ -617,7 +617,7 @@
     </div>
     {% elif ac %}
     {# Stock has an analyst_consensus row but no price_target — partial coverage #}
-    <div class="card" style="margin-bottom: 16px;">
+    <div class="card u-mb16">
         <div class="section-title">Sell-side Price Target</div>
         <div style="padding: 10px 12px; border-radius: 8px; background: rgba(245, 158, 11, 0.08); border-left: 3px solid var(--amber); font-size: 12px; color: var(--text-secondary);">
             No analyst price target available from yfinance for this stock. This is common for SMALL caps where no sell-side broker publishes targets.
@@ -625,7 +625,7 @@
     </div>
     {% else %}
     {# Stock has no analyst_consensus row at all #}
-    <div class="card" style="margin-bottom: 16px;">
+    <div class="card u-mb16">
         <div class="section-title">Sell-side Price Target</div>
         <div style="padding: 10px 12px; border-radius: 8px; background: rgba(107, 114, 128, 0.1); border-left: 3px solid var(--text-muted); font-size: 12px; color: var(--text-secondary);">
             No analyst coverage for this stock.
@@ -634,7 +634,7 @@
     {% endif %}
 
     {# Forensic snapshot #}
-    <div class="card" style="margin-bottom: 16px;">
+    <div class="card u-mb16">
         <div class="section-title">Forensic Health</div>
         <div class="section-desc">Earnings manipulation and bankruptcy risk indicators.</div>
         {% if s.get("m_score") is not none %}
@@ -662,7 +662,7 @@
 
     {# Regulatory #}
     {% if s.get("regulatory") %}
-    <div class="card" style="margin-bottom: 16px;">
+    <div class="card u-mb16">
         <div class="section-title">Regulatory &mdash; {{ s.sector }}</div>
         <div class="section-desc">AI-classified policy events affecting this sector. Direction shows likely impact.</div>
         {% for evt in s.regulatory[:4] %}
@@ -701,7 +701,7 @@
 {# ════════════════════════════════════════════ #}
 <div x-show="tab === 'financials'" x-cloak>
 
-<div class="card" style="margin-bottom: 16px;">
+<div class="card u-mb16">
     <div class="section-title">Key Metrics</div>
     <div class="section-desc">Computed from latest annual financials and TTM income statement. Sector averages shown for context.</div>
 
@@ -736,7 +736,7 @@
                 {% if s.earnings_yield > 0.08 %}score-green{% elif s.earnings_yield > 0.04 %}score-amber{% else %}score-red{% endif %}">
                 {{ "%.1f"|format(s.earnings_yield * 100) }}<span class="unit">%</span>
             </div>
-            {% if sa.get("avg_ey") %}<div class="metric-context">Sector avg: {{ "%.1f"|format(sa.avg_ey * 100) }}%</div>{% endif %}
+            {% if sa.get("avg_ey") %}<div class="metric-context">Sector avg: {{ (sa.avg_ey * 100)|pct(1) }}</div>{% endif %}
         </div>
         {% endif %}
 
@@ -804,7 +804,7 @@
         {% if ratios.get("book_value") %}
         <div class="metric-card">
             <div class="metric-label">Book Value/Sh{{ tooltip(m_tt.book_value) }}</div>
-            <div class="metric-value">&#8377;{{ "%.0f"|format(ratios.book_value) }}</div>
+            <div class="metric-value">{{ ratios.book_value|inr(0) }}</div>
             {% if pm.get("close_price") %}
             <div class="metric-context">P/B: {{ "%.1f"|format(pm.close_price / ratios.book_value) }}x</div>
             {% endif %}
@@ -829,7 +829,7 @@
             <div class="metric-label">Revenue Growth YoY{{ tooltip(m_tt.revenue_growth) }}</div>
             <div class="metric-value
                 {% if qf.yoy.revenue_growth > 15 %}score-green{% elif qf.yoy.revenue_growth > 5 %}score-amber{% else %}score-red{% endif %}">
-                {{ "%+.1f"|format(qf.yoy.revenue_growth) }}<span class="unit">%</span>
+                {{ qf.yoy.revenue_growth|signed(1) }}<span class="unit">%</span>
             </div>
             <div class="metric-context">Latest quarter vs same quarter prior year</div>
         </div>
@@ -851,7 +851,7 @@
 
 {# Quarterly results table #}
 {% if qf.get('quarters') %}
-<div class="card" style="margin-bottom: 16px;">
+<div class="card u-mb16">
     <div class="section-title">Quarterly Results</div>
     <div class="section-desc">Last {{ qf.quarters|length }} quarters of consolidated income statement. Most recent first.</div>
     <div class="table-scroll">
@@ -869,8 +869,8 @@
             </tr>
             <tr>
                 <td>Rev YoY %</td>
-                {% for q in qf.quarters %}<td class="{% if q.revenue_yoy is not none %}{% if q.revenue_yoy > 0 %}score-green{% elif q.revenue_yoy < 0 %}score-red{% endif %}{% endif %}">
-                    {% if q.revenue_yoy is not none %}{{ "%+.1f"|format(q.revenue_yoy) }}%{% else %}—{% endif %}
+                {% for q in qf.quarters %}<td class="{% if q.revenue_yoy is not none %}{{ q.revenue_yoy|tone }}{% endif %}">
+                    {% if q.revenue_yoy is not none %}{{ q.revenue_yoy|pct(1, signed=True) }}{% else %}—{% endif %}
                 </td>{% endfor %}
             </tr>
             <tr>
@@ -879,7 +879,7 @@
             </tr>
             <tr>
                 <td>EBITDA Margin</td>
-                {% for q in qf.quarters %}<td>{% if q.ebitda_margin is not none %}{{ "%.1f"|format(q.ebitda_margin) }}%{% else %}—{% endif %}</td>{% endfor %}
+                {% for q in qf.quarters %}<td>{% if q.ebitda_margin is not none %}{{ q.ebitda_margin|pct(1) }}{% else %}—{% endif %}</td>{% endfor %}
             </tr>
             <tr>
                 <td>Net Profit (Cr)</td>
@@ -887,8 +887,8 @@
             </tr>
             <tr>
                 <td>PAT YoY %</td>
-                {% for q in qf.quarters %}<td class="{% if q.pat_yoy is not none %}{% if q.pat_yoy > 0 %}score-green{% elif q.pat_yoy < 0 %}score-red{% endif %}{% endif %}">
-                    {% if q.pat_yoy is not none %}{{ "%+.1f"|format(q.pat_yoy) }}%{% else %}—{% endif %}
+                {% for q in qf.quarters %}<td class="{% if q.pat_yoy is not none %}{{ q.pat_yoy|tone }}{% endif %}">
+                    {% if q.pat_yoy is not none %}{{ q.pat_yoy|pct(1, signed=True) }}{% else %}—{% endif %}
                 </td>{% endfor %}
             </tr>
             <tr>
@@ -901,7 +901,7 @@
 </div>
 
 {# Revenue + PAT bar chart #}
-<div class="card" style="margin-bottom: 16px;">
+<div class="card u-mb16">
     <div class="section-title">Revenue &amp; Profit Trend</div>
     <div class="section-desc">Quarterly revenue (blue) and net profit (green) over time.</div>
     <div style="position: relative; height: 280px;">
@@ -951,7 +951,7 @@
 
 {% if s.get("shareholding") %}
 {% set sh = s.shareholding[0] if s.shareholding else {} %}
-<div class="card" style="margin-bottom: 16px;">
+<div class="card u-mb16">
     <div class="section-title">Current Ownership ({{ sh.get("end_date", "")[:10] }})</div>
     <div class="section-desc">Latest quarter shareholding pattern with QoQ change indicators.</div>
     {% for label, key, color in [("Promoter", "promoter_pct", "accent"), ("FII", "fii_pct", "blue"), ("Mutual Funds", "mf_pct", "green"), ("DII", "dii_pct", "amber"), ("Insurance", "insurance_pct", "blue"), ("Retail/HNI", "retail_hni_pct", "green")] %}
@@ -961,11 +961,11 @@
         <div style="flex: 1; height: 8px; border-radius: 4px; background: var(--border);">
             <div style="height: 100%; border-radius: 4px; width: {{ sh[key] }}%; background: var(--{{ color }});"></div>
         </div>
-        <span class="mono" style="font-size: 13px; width: 60px; text-align: right; font-weight: 700;">{{ "%.1f"|format(sh[key]) }}%</span>
+        <span class="mono" style="font-size: 13px; width: 60px; text-align: right; font-weight: 700;">{{ sh[key]|pct(1) }}</span>
         {% set qoq_key = key ~ '_qoq' %}
         {% if sh.get(qoq_key) is not none %}
-        <span class="mono {% if sh[qoq_key] > 0 %}score-green{% elif sh[qoq_key] < 0 %}score-red{% endif %}" style="font-size: 11px; width: 50px; text-align: right;">
-            {{ "%+.2f"|format(sh[qoq_key]) }}
+        <span class="mono {{ sh[qoq_key]|tone }}" style="font-size: 11px; width: 50px; text-align: right;">
+            {{ sh[qoq_key]|signed(2) }}
         </span>
         {% else %}
         <span style="width: 50px;"></span>
@@ -975,13 +975,13 @@
     {% endfor %}
     {% if sh.get("pledge_pct") is not none and sh.pledge_pct > 0 %}
     <div style="margin-top: 12px; padding: 10px; background: var(--red-bg); border-left: 3px solid var(--red); border-radius: 6px; font-size: 12px;">
-        &#9888; <strong>Pledge:</strong> {{ "%.1f"|format(sh.pledge_pct) }}% of promoter holding is pledged.
+        &#9888; <strong>Pledge:</strong> {{ sh.pledge_pct|pct(1) }} of promoter holding is pledged.
     </div>
     {% endif %}
 </div>
 
 {# Shareholding trend chart #}
-<div class="card" style="margin-bottom: 16px;">
+<div class="card u-mb16">
     <div class="section-title">Shareholding Trend</div>
     <div class="section-desc">Last {{ s.shareholding|length }} quarters showing how each ownership category has evolved.</div>
     <div style="position: relative; height: 280px;">
@@ -993,7 +993,7 @@
 {# Insider activity #}
 {% set ins = s.get("insider", {}) %}
 {% if ins.get("signal") or ins.get("trades") %}
-<div class="card" style="margin-bottom: 16px;">
+<div class="card u-mb16">
     <div class="section-title">Insider Trades</div>
     <div class="section-desc">Promoter, KMP, and director transactions reported to NSE in the last 6 months.</div>
     {% if ins.get("signal") and ins.signal.get("signal_type") %}
@@ -1021,12 +1021,12 @@
         {% for t in ins.trades[:10] %}
         <tr style="border-top: 1px solid var(--border);">
             <td class="mono" style="padding: 8px 0; color: var(--text-muted);">{{ t.trade_date }}</td>
-            <td style="padding: 8px 6px;">{{ t.person_category }}</td>
+            <td class="u-cell">{{ t.person_category }}</td>
             <td style="padding: 8px 6px; font-weight: 600;
                 {% if t.transaction_type == 'Buy' %}color: var(--green);
                 {% elif t.transaction_type == 'Sell' %}color: var(--red);{% endif %}">{{ t.transaction_type }}</td>
             <td class="mono" style="padding: 8px 0; text-align: right;">{% if t.shares %}{{ "{:,.0f}".format(t.shares) }}{% endif %}</td>
-            <td class="mono" style="padding: 8px 0; text-align: right;">{% if t.value_lakhs %}&#8377;{{ "%.0f"|format(t.value_lakhs) }}{% endif %}</td>
+            <td class="mono" style="padding: 8px 0; text-align: right;">{% if t.value_lakhs %}{{ t.value_lakhs|inr(0) }}{% endif %}</td>
         </tr>
         {% endfor %}
         </tbody>
@@ -1037,7 +1037,7 @@
 
 {# Insider timeline chart #}
 {% if s.get("insider_timeline") %}
-<div class="card" style="margin-bottom: 16px;">
+<div class="card u-mb16">
     <div class="section-title">Insider Activity Timeline (24 months)</div>
     <div class="section-desc">Monthly aggregated buy (green) vs sell (red) values in lakhs of rupees.</div>
     <div style="position: relative; height: 240px;">
@@ -1065,12 +1065,12 @@
         {% for d in s.bulk_deals[:10] %}
         <tr style="border-top: 1px solid var(--border);">
             <td class="mono" style="padding: 8px 0; color: var(--text-muted);">{{ d.deal_date }}</td>
-            <td style="padding: 8px 6px;">{{ d.client_name[:40] }}</td>
+            <td class="u-cell">{{ d.client_name[:40] }}</td>
             <td style="padding: 8px 6px; font-weight: 600;
                 {% if d.buy_sell == 'BUY' or d.buy_sell == 'B' %}color: var(--green);
                 {% elif d.buy_sell == 'SELL' or d.buy_sell == 'S' %}color: var(--red);{% endif %}">{{ d.buy_sell }}</td>
             <td class="mono" style="padding: 8px 0; text-align: right;">{{ "{:,.0f}".format(d.quantity) }}</td>
-            <td class="mono" style="padding: 8px 0; text-align: right;">&#8377;{{ "%.0f"|format(d.price) }}</td>
+            <td class="mono" style="padding: 8px 0; text-align: right;">{{ d.price|inr(0) }}</td>
         </tr>
         {% endfor %}
         </tbody>
@@ -1086,7 +1086,7 @@
 <div x-show="tab === 'consensus'" x-cloak>
 
 {% if ac %}
-<div class="card" style="margin-bottom: 16px;">
+<div class="card u-mb16">
     <div class="section-title">Analyst Consensus</div>
     <div class="section-desc">Aggregated forecasts from {{ ac.get('total_analysts', 0)|int }} sell-side analysts covering this stock.</div>
 
@@ -1099,9 +1099,9 @@
     {% set target_pos = ((ac.price_target - low) / (high - low) * 100) %}
     <div style="margin: 32px 0;">
         <div class="range-bar">
-            <span class="range-label" style="left: {{ price_pos }}%;">Price &#8377;{{ "%.0f"|format(pm.close_price) }}</span>
+            <span class="range-label" style="left: {{ price_pos }}%;">Price {{ pm.close_price|inr(0) }}</span>
             <div class="range-marker" style="left: {{ price_pos }}%;"></div>
-            <span class="range-label" style="left: {{ target_pos }}%; top: 16px; bottom: auto; color: var(--green);">Target &#8377;{{ "%.0f"|format(ac.price_target) }} ({{ "%+.1f"|format(ac.pt_upside_pct) }}%)</span>
+            <span class="range-label" style="left: {{ target_pos }}%; top: 16px; bottom: auto; color: var(--green);">Target {{ ac.price_target|inr(0) }} ({{ ac.pt_upside_pct|pct(1, signed=True) }})</span>
             <div class="range-marker" style="left: {{ target_pos }}%; background: var(--green);"></div>
         </div>
     </div>
@@ -1125,21 +1125,21 @@
         {% if ac.get("eps_growth_pct") is not none %}
         <div class="metric-card">
             <div class="metric-label">EPS Growth Forecast</div>
-            <div class="metric-value {% if ac.eps_growth_pct > 0 %}score-green{% else %}score-red{% endif %}">{{ "%+.1f"|format(ac.eps_growth_pct) }}<span class="unit">%</span></div>
+            <div class="metric-value {{ ac.eps_growth_pct|tone(zero='score-red') }}">{{ ac.eps_growth_pct|signed(1) }}<span class="unit">%</span></div>
             <div class="metric-context">FY forward consensus</div>
         </div>
         {% endif %}
         {% if ac.get("revenue_growth_pct") is not none %}
         <div class="metric-card">
             <div class="metric-label">Revenue Growth Forecast</div>
-            <div class="metric-value {% if ac.revenue_growth_pct > 0 %}score-green{% else %}score-red{% endif %}">{{ "%+.1f"|format(ac.revenue_growth_pct) }}<span class="unit">%</span></div>
+            <div class="metric-value {{ ac.revenue_growth_pct|tone(zero='score-red') }}">{{ ac.revenue_growth_pct|signed(1) }}<span class="unit">%</span></div>
             <div class="metric-context">FY forward consensus</div>
         </div>
         {% endif %}
         {% if ac.get("forward_eps") %}
         <div class="metric-card">
             <div class="metric-label">Forward EPS</div>
-            <div class="metric-value">&#8377;{{ "%.2f"|format(ac.forward_eps) }}</div>
+            <div class="metric-value">{{ ac.forward_eps|inr(2) }}</div>
             {% if pm.get("close_price") %}
             <div class="metric-context">Forward P/E: {{ "%.1f"|format(pm.close_price / ac.forward_eps) }}x</div>
             {% endif %}
@@ -1148,7 +1148,7 @@
         {% if s.get("pt_revision_1yr") is not none %}
         <div class="metric-card">
             <div class="metric-label">PT Revision (1yr)</div>
-            <div class="metric-value {% if s.pt_revision_1yr > 0 %}score-green{% else %}score-red{% endif %}">{{ "%+.1f"|format(s.pt_revision_1yr) }}<span class="unit">%</span></div>
+            <div class="metric-value {{ s.pt_revision_1yr|tone(zero='score-red') }}">{{ s.pt_revision_1yr|signed(1) }}<span class="unit">%</span></div>
             <div class="metric-context">Target change YoY</div>
         </div>
         {% endif %}
@@ -1233,7 +1233,7 @@
 </div>
 
 {# Piotroski 9-factor breakdown #}
-<div class="card" style="margin-bottom: 16px;">
+<div class="card u-mb16">
     <div class="section-title">Piotroski F-Score Breakdown ({% if s.f_score is not none %}{{ s.f_score|int }}/9{% endif %})</div>
     <div class="section-desc">9-point checklist created by Prof. Joseph Piotroski (Stanford). Each factor scores 1 (pass) or 0 (fail).</div>
 
@@ -1299,7 +1299,7 @@
 {# ════════════════════════════════════════════ #}
 <div x-show="tab === 'price'" x-cloak x-data="{ tf: '1y' }">
 
-<div class="card" style="margin-bottom: 16px;">
+<div class="card u-mb16">
     <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
         <div>
             <div class="section-title" style="margin-bottom: 4px;">Price Chart</div>
@@ -1319,7 +1319,7 @@
 </div>
 
 {# Delivery % chart #}
-<div class="card" style="margin-bottom: 16px;">
+<div class="card u-mb16">
     <div class="section-title">Delivery % Trend (90 Days)</div>
     <div class="section-desc">% of traded volume taken to delivery. High delivery % indicates accumulation by long-term holders.</div>
     <div style="position: relative; height: 200px;">
@@ -1347,30 +1347,30 @@
         {% if pm.get("return_6m") is not none %}
         <div class="metric-card">
             <div class="metric-label">6-Month Return</div>
-            <div class="metric-value {% if pm.return_6m > 0 %}score-green{% else %}score-red{% endif %}">{{ "%+.1f"|format(pm.return_6m) }}<span class="unit">%</span></div>
+            <div class="metric-value {{ pm.return_6m|tone(zero='score-red') }}">{{ pm.return_6m|signed(1) }}<span class="unit">%</span></div>
             <div class="metric-context">Last 130 trading days</div>
         </div>
         {% endif %}
         {% if pm.get("return_1y") is not none %}
         <div class="metric-card">
             <div class="metric-label">1-Year Return</div>
-            <div class="metric-value {% if pm.return_1y > 0 %}score-green{% else %}score-red{% endif %}">{{ "%+.1f"|format(pm.return_1y) }}<span class="unit">%</span></div>
+            <div class="metric-value {{ pm.return_1y|tone(zero='score-red') }}">{{ pm.return_1y|signed(1) }}<span class="unit">%</span></div>
             <div class="metric-context">Last 252 trading days</div>
         </div>
         {% endif %}
         {% if pm.get("high_52w") %}
         <div class="metric-card">
             <div class="metric-label">52W High</div>
-            <div class="metric-value">&#8377;{{ "%.0f"|format(pm.high_52w) }}</div>
-            <div class="metric-context {% if pm.pct_from_52w_high > -10 %}score-green{% else %}score-red{% endif %}">{{ "%+.1f"|format(pm.pct_from_52w_high) }}% from high</div>
+            <div class="metric-value">{{ pm.high_52w|inr(0) }}</div>
+            <div class="metric-context {% if pm.pct_from_52w_high > -10 %}score-green{% else %}score-red{% endif %}">{{ pm.pct_from_52w_high|pct(1, signed=True) }} from high</div>
         </div>
         {% endif %}
         {% if pm.get("low_52w") %}
         <div class="metric-card">
             <div class="metric-label">52W Low</div>
-            <div class="metric-value">&#8377;{{ "%.0f"|format(pm.low_52w) }}</div>
+            <div class="metric-value">{{ pm.low_52w|inr(0) }}</div>
             {% if pm.get("close_price") %}
-            <div class="metric-context score-green">{{ "%+.1f"|format((pm.close_price / pm.low_52w - 1) * 100) }}% from low</div>
+            <div class="metric-context score-green">{{ ((pm.close_price / pm.low_52w - 1) * 100)|pct(1, signed=True) }} from low</div>
             {% endif %}
         </div>
         {% endif %}
@@ -1385,7 +1385,7 @@
 {% if s.uhs and s.uhs.score_pct is not none %}
 <div x-show="tab === 'trust'" x-cloak>
 
-<div class="card" style="margin-bottom: 16px;">
+<div class="card u-mb16">
     <div class="section-title">Unified Health Score · Plan 0007</div>
     <div class="section-desc">One number per pick (0-100). Five dimensions sum to the score. Below 60 → AVOID; 60-79 → REVIEW; ≥80 → TRUSTED. Today's pick is read-only — gates run at fetch time and at the nightly UHS rollup.</div>
 
@@ -1454,7 +1454,7 @@
                     <div style="margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid var(--border);">
                         <div style="font-weight: 600; font-size: 13px; margin-bottom: 6px;" x-text="factor"></div>
                         <table style="width: 100%; font-size: 11px;">
-                            <thead><tr style="color: var(--text-muted);">
+                            <thead><tr class="u-muted">
                                 <th style="text-align: left; padding: 4px 0;">Source table</th>
                                 <th style="text-align: left;">Role</th>
                                 <th style="text-align: left;">Source key</th>
@@ -1465,10 +1465,10 @@
                                 <template x-for="(r, i) in rows" :key="i">
                                     <tr style="border-top: 1px solid var(--border);">
                                         <td class="mono" style="padding: 4px 4px 4px 0;" x-text="r.table"></td>
-                                        <td style="color: var(--text-muted);" x-text="r.contribution || '-'"></td>
+                                        <td class="u-muted" x-text="r.contribution || '-'"></td>
                                         <td class="mono" style="font-size: 10px;" x-text="JSON.stringify(r.key)"></td>
                                         <td class="mono" style="font-size: 10px;" x-text="(r.cols || []).join(', ')"></td>
-                                        <td class="mono" style="font-size: 10px; color: var(--text-muted);" x-text="r.column_sources ? Object.entries(r.column_sources).map(([c,v])=>c+': '+ (v||['?']).join('|')).join('; ') : '—'"></td>
+                                        <td class="mono u-muted-10" x-text="r.column_sources ? Object.entries(r.column_sources).map(([c,v])=>c+': '+ (v||['?']).join('|')).join('; ') : '—'"></td>
                                     </tr>
                                 </template>
                             </tbody>

@@ -10,25 +10,25 @@
     <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 16px;">
         {% if analytics.get("expected_return") is not none %}
         <div>
-            <div style="font-size: 10px; color: var(--text-muted);">Expected Return</div>
-            <div class="mono {% if analytics.expected_return > 0 %}score-green{% else %}score-red{% endif %}" style="font-size: 22px; font-weight: 700;">
-                {{ "%+.1f"|format(analytics.expected_return) }}%
+            <div class="u-muted-10">Expected Return</div>
+            <div class="mono {{ analytics.expected_return|tone(zero='score-red') }}" style="font-size: 22px; font-weight: 700;">
+                {{ analytics.expected_return|pct(1, signed=True) }}
             </div>
-            <div style="font-size: 10px; color: var(--text-muted);">weighted avg analyst upside ({{ analytics.stocks_with_targets }} stocks)</div>
+            <div class="u-muted-10">weighted avg analyst upside ({{ analytics.stocks_with_targets }} stocks)</div>
         </div>
         {% endif %}
         <div>
-            <div style="font-size: 10px; color: var(--text-muted);">Portfolio Avg Score</div>
+            <div class="u-muted-10">Portfolio Avg Score</div>
             <div class="mono" style="font-size: 22px; font-weight: 700; color: var(--green);">{{ "%.0f"|format(analytics.avg_score) }}</div>
-            <div style="font-size: 10px; color: var(--text-muted);">vs universe {{ "%.0f"|format(analytics.universe_avg_score) }} (+{{ "%.0f"|format(analytics.score_premium) }} premium)</div>
+            <div class="u-muted-10">vs universe {{ "%.0f"|format(analytics.universe_avg_score) }} (+{{ "%.0f"|format(analytics.score_premium) }} premium)</div>
         </div>
         <div>
-            <div style="font-size: 10px; color: var(--text-muted);">Stocks</div>
+            <div class="u-muted-10">Stocks</div>
             <div class="mono" style="font-size: 22px; font-weight: 700;">{{ analytics.total_stocks }}</div>
-            <div style="font-size: 10px; color: var(--text-muted);">Top 3 weight: {{ "%.1f"|format(analytics.top3_weight) }}%</div>
+            <div class="u-muted-10">Top 3 weight: {{ analytics.top3_weight|pct(1) }}</div>
         </div>
         <div>
-            <div style="font-size: 10px; color: var(--text-muted);">Regime</div>
+            <div class="u-muted-10">Regime</div>
             <div class="regime-badge {{ regime.color }}" style="font-size: 14px; display: inline-block;">{{ regime.regime }}</div>
         </div>
     </div>
@@ -42,7 +42,7 @@
         <div style="flex: 1; height: 6px; border-radius: 3px; background: var(--border);">
             <div style="height: 100%; border-radius: 3px; width: {{ weight }}%; background: var(--accent);"></div>
         </div>
-        <span class="mono" style="font-size: 11px; width: 35px; text-align: right;">{{ "%.0f"|format(weight) }}%</span>
+        <span class="mono" style="font-size: 11px; width: 35px; text-align: right;">{{ weight|pct(0) }}</span>
     </div>
     {% endfor %}
     {% endif %}
@@ -59,20 +59,20 @@
             <div style="font-size: 11px; color: var(--text-muted); margin-top: 2px;">Across {{ rd.n_picks }} picks · Barra-style z-tilts vs universe + sector HHI + cap-tier mix</div>
         </div>
         <div style="display: flex; gap: 18px; align-items: center;">
-            <div style="text-align: right;">
+            <div class="u-right">
                 <div style="font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Sector HHI</div>
                 <div class="mono" style="font-size: 18px; font-weight: 700;
                     {% if rd.sector_hhi > 2500 %}color: var(--red);
                     {% elif rd.sector_hhi > 1500 %}color: var(--amber);
                     {% else %}color: var(--green);{% endif %}">{{ rd.sector_hhi }}</div>
-                <div style="font-size: 10px; color: var(--text-muted);">{{ rd.sector_hhi_label }}</div>
+                <div class="u-muted-10">{{ rd.sector_hhi_label }}</div>
             </div>
-            <div style="text-align: right;">
+            <div class="u-right">
                 <div style="font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Top sector</div>
                 <div class="mono" style="font-size: 12px; font-weight: 700;">{{ rd.top_sector }}</div>
-                <div style="font-size: 10px; color: var(--text-muted);">{{ "%.0f"|format(rd.top_sector_pct) }}% · top-3 {{ "%.0f"|format(rd.sector_top3_pct) }}%</div>
+                <div class="u-muted-10">{{ rd.top_sector_pct|pct(0) }} · top-3 {{ rd.sector_top3_pct|pct(0) }}</div>
             </div>
-            <div style="text-align: right;">
+            <div class="u-right">
                 <div style="font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Cap mix</div>
                 <div class="mono" style="font-size: 11px;">
                     <span style="color: #3b82f6;">{{ rd.cap_mix.LARGE }}L</span>
@@ -91,7 +91,7 @@
     {% if bar_pct > 100 %}{% set bar_pct = 100 %}{% endif %}
     <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 5px; font-size: 11px;">
         <span style="width: 95px; color: var(--text-secondary);">{{ t.group }}</span>
-        <span style="width: 38px; text-align: right; font-weight: 700; color: {{ bar_color }};" class="mono" title="{{ t.magnitude }} {{ t.direction }} {{ t.group }}">{{ "%+.2f"|format(z) }}</span>
+        <span style="width: 38px; text-align: right; font-weight: 700; color: {{ bar_color }};" class="mono" title="{{ t.magnitude }} {{ t.direction }} {{ t.group }}">{{ z|signed(2) }}</span>
         <div style="flex: 1; height: 5px; border-radius: 3px; background: var(--border); display: flex; justify-content: center; position: relative;">
             <div style="position: absolute; left: 50%; top: -1px; bottom: -1px; width: 1px; background: var(--text-muted); opacity: 0.4;"></div>
             <div style="position: absolute; top: 0; bottom: 0;
@@ -123,26 +123,26 @@
         </div>
         <div style="display: flex; gap: 18px; align-items: center;">
             {% if sb.expected_return_1y is not none %}
-            <div style="text-align: right;">
+            <div class="u-right">
                 <div style="font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Expected 1Y</div>
-                <div class="mono {% if sb.expected_return_1y > 0 %}score-green{% else %}score-red{% endif %}" style="font-size: 18px; font-weight: 700;">{{ "%+.1f"|format(sb.expected_return_1y) }}%</div>
-                <div style="font-size: 10px; color: var(--text-muted);" title="Book-weighted analyst price-target upside, over the {{ sb.er_coverage_n }} covered names ({{ "%.0f"|format(sb.er_coverage_weight_pct) }}% of book weight)">analyst PT · {{ sb.er_coverage_n }}/{{ sb.n_names }} covered</div>
+                <div class="mono {{ sb.expected_return_1y|tone(zero='score-red') }}" style="font-size: 18px; font-weight: 700;">{{ sb.expected_return_1y|pct(1, signed=True) }}</div>
+                <div style="font-size: 10px; color: var(--text-muted);" title="Book-weighted analyst price-target upside, over the {{ sb.er_coverage_n }} covered names ({{ sb.er_coverage_weight_pct|pct(0) }} of book weight)">analyst PT · {{ sb.er_coverage_n }}/{{ sb.n_names }} covered</div>
             </div>
             {% endif %}
-            <div style="text-align: right;">
+            <div class="u-right">
                 <div style="font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Effective N</div>
                 <div class="mono" style="font-size: 18px; font-weight: 700; color: var(--green);">{{ sb.effective_n }}</div>
-                <div style="font-size: 10px; color: var(--text-muted);">of {{ sb.n_names }} (1/Σw²)</div>
+                <div class="u-muted-10">of {{ sb.n_names }} (1/Σw²)</div>
             </div>
-            <div style="text-align: right;">
+            <div class="u-right">
                 <div style="font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Max stock</div>
-                <div class="mono" style="font-size: 14px; font-weight: 700;">{{ "%.1f"|format(sb.max_stock_pct) }}%</div>
-                <div style="font-size: 10px; color: var(--text-muted);">cap {{ "%.0f"|format(sb.cap_stock_pct) }}%</div>
+                <div class="mono" style="font-size: 14px; font-weight: 700;">{{ sb.max_stock_pct|pct(1) }}</div>
+                <div class="u-muted-10">cap {{ sb.cap_stock_pct|pct(0) }}</div>
             </div>
-            <div style="text-align: right;">
+            <div class="u-right">
                 <div style="font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Max sector</div>
-                <div class="mono" style="font-size: 14px; font-weight: 700;">{{ "%.0f"|format(sb.max_sector_pct) }}%</div>
-                <div style="font-size: 10px; color: var(--text-muted);">cap {{ "%.0f"|format(sb.cap_sector_pct) }}%</div>
+                <div class="mono" style="font-size: 14px; font-weight: 700;">{{ sb.max_sector_pct|pct(0) }}</div>
+                <div class="u-muted-10">cap {{ sb.cap_sector_pct|pct(0) }}</div>
             </div>
         </div>
     </div>
@@ -153,9 +153,9 @@
                 <th style="padding: 6px 8px;">Ticker</th>
                 <th style="padding: 6px;">Tier</th>
                 <th style="padding: 6px;">Sector</th>
-                <th style="padding: 6px; text-align: right;">Score</th>
-                <th style="padding: 6px; text-align: right;">Weight</th>
-                <th style="padding: 6px; text-align: right;" title="Percent of portfolio variance this name carries (Σ=100%)">% Risk</th>
+                <th class="u-cell-r">Score</th>
+                <th class="u-cell-r">Weight</th>
+                <th class="u-cell-r" title="Percent of portfolio variance this name carries (Σ=100%)">% Risk</th>
             </tr>
         </thead>
         <tbody>
@@ -167,8 +167,8 @@
                 <td style="padding: 6px; text-align: right;" class="mono
                     {% if r.factor_score >= 0.7 %} score-green{% elif r.factor_score >= 0.5 %} score-amber{% else %} score-red{% endif %}">
                     {{ "%.0f"|format(r.factor_score * 100) }}</td>
-                <td style="padding: 6px; text-align: right;" class="mono" style="font-weight: 600;">{{ "%.1f"|format(r.weight * 100) }}%</td>
-                <td style="padding: 6px; text-align: right; color: var(--text-secondary);" class="mono">{{ "%.0f"|format(r.marginal_risk_contrib * 100) }}%</td>
+                <td style="padding: 6px; text-align: right;" class="mono" style="font-weight: 600;">{{ (r.weight * 100)|pct(1) }}</td>
+                <td style="padding: 6px; text-align: right; color: var(--text-secondary);" class="mono">{{ (r.marginal_risk_contrib * 100)|pct(0) }}</td>
             </tr>
             {% endfor %}
         </tbody>
@@ -186,7 +186,7 @@
             <canvas id="allocChart"></canvas>
             <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center;">
                 <div class="mono" style="font-size: 22px; font-weight: 700;">{{ "%.1f"|format(regime.vix_latest) }}</div>
-                <div style="font-size: 10px; color: var(--text-muted);">VIX</div>
+                <div class="u-muted-10">VIX</div>
             </div>
         </div>
     </div>
@@ -199,7 +199,7 @@
         <div style="margin-bottom: 10px;">
             <div style="display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 4px;">
                 <span style="color: var(--text-secondary);">{{ tier_name }}</span>
-                <span class="mono">{{ "%.0f"|format(alloc * 100) }}% &middot; {{ count }} stocks</span>
+                <span class="mono">{{ (alloc * 100)|pct(0) }} &middot; {{ count }} stocks</span>
             </div>
             <div style="height: 6px; border-radius: 3px; background: var(--border);">
                 <div style="height: 100%; border-radius: 3px; width: {{ alloc * 100 }}%; background: var(--{{ color }});"></div>
@@ -220,12 +220,12 @@
                 <th style="padding: 6px 14px;">#</th>
                 <th style="padding: 6px;">Ticker</th>
                 <th style="padding: 6px;">Sector</th>
-                <th style="padding: 6px; text-align: right;">Score</th>
-                <th style="padding: 6px; text-align: right;">Weight</th>
-                <th style="padding: 6px; text-align: right;">Price</th>
-                <th style="padding: 6px; text-align: right;">Target</th>
-                <th style="padding: 6px; text-align: right;">Upside</th>
-                <th style="padding: 6px; text-align: right;">1M</th>
+                <th class="u-cell-r">Score</th>
+                <th class="u-cell-r">Weight</th>
+                <th class="u-cell-r">Price</th>
+                <th class="u-cell-r">Target</th>
+                <th class="u-cell-r">Upside</th>
+                <th class="u-cell-r">1M</th>
             </tr>
         </thead>
         <tbody>
@@ -237,15 +237,15 @@
                 <td style="padding: 6px; text-align: right;" class="mono
                     {% if stock.final_score >= 0.7 %} score-green{% elif stock.final_score >= 0.5 %} score-amber{% else %} score-red{% endif %}">
                     {{ "%.0f"|format(stock.final_score * 100) }}</td>
-                <td style="padding: 6px; text-align: right;" class="mono">{{ "%.1f"|format(stock.weight) }}%</td>
-                <td style="padding: 6px; text-align: right;" class="mono">{% if stock.get("price") %}&#8377;{{ "%.0f"|format(stock.price) }}{% endif %}</td>
-                <td style="padding: 6px; text-align: right;" class="mono">{% if stock.get("price_target") %}&#8377;{{ "%.0f"|format(stock.price_target) }}{% endif %}</td>
+                <td class="mono u-cell-r">{{ stock.weight|pct(1) }}</td>
+                <td class="mono u-cell-r">{% if stock.get("price") %}{{ stock.price|inr(0) }}{% endif %}</td>
+                <td class="mono u-cell-r">{% if stock.get("price_target") %}{{ stock.price_target|inr(0) }}{% endif %}</td>
                 <td style="padding: 6px; text-align: right;" class="mono
                     {% if stock.get('pt_upside') and stock.pt_upside > 0 %} score-green{% elif stock.get('pt_upside') %} score-red{% endif %}">
-                    {% if stock.get("pt_upside") is not none %}{{ "%+.0f"|format(stock.pt_upside) }}%{% endif %}</td>
+                    {% if stock.get("pt_upside") is not none %}{{ stock.pt_upside|pct(0, signed=True) }}{% endif %}</td>
                 <td style="padding: 6px; text-align: right;" class="mono
                     {% if stock.get('return_1m') and stock.return_1m > 0 %} score-green{% elif stock.get('return_1m') %} score-red{% endif %}">
-                    {% if stock.get("return_1m") is not none %}{{ "%+.0f"|format(stock.return_1m) }}%{% endif %}</td>
+                    {% if stock.get("return_1m") is not none %}{{ stock.return_1m|pct(0, signed=True) }}{% endif %}</td>
             </tr>
             {% endfor %}
         </tbody>

@@ -260,7 +260,9 @@ def make_templates(dirs):
     """Jinja2Templates searching `dirs` in order, then cockpit/templates — so
     base.html, _components.html and _icons.html exist once and the ops app
     (which passes its own templates dir first) shares them. Registers
-    SilentUndefined and the asset_version global."""
+    SilentUndefined, the asset_version global and the formatting.py filters
+    (signed / pct / inr / crore / tone)."""
+    from formatting import FILTERS
     from fastapi.templating import Jinja2Templates
     from jinja2 import ChoiceLoader, FileSystemLoader
 
@@ -271,6 +273,7 @@ def make_templates(dirs):
     templates.env.loader = ChoiceLoader([FileSystemLoader(d) for d in search])
     templates.env.undefined = SilentUndefined
     templates.env.globals["asset_version"] = asset_version
+    templates.env.filters.update(FILTERS)
     return templates
 
 

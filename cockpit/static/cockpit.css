@@ -1427,3 +1427,18 @@ table tbody tr:hover {
 .factor-grid-card .fg-chip.t-medium .fg-t  { color: #4d8eff; }
 .factor-grid-card .fg-chip.t-weak   .fg-t  { color: var(--text-muted); }
 
+
+/* ── Utility classes (2026-09-26) ──
+   The ten most-repeated inline style="" attributes across the templates, one
+   class each. !important keeps inline-style precedence: these used to be
+   inline, so page-level <style> blocks and component classes must not win. */
+.u-muted    { color: var(--text-muted) !important; }
+.u-muted-10 { font-size: 10px !important; color: var(--text-muted) !important; }
+.u-muted-11 { font-size: 11px !important; color: var(--text-muted) !important; }
+.u-label    { font-size: 9px !important; color: var(--text-muted) !important; text-transform: uppercase !important; letter-spacing: 0.5px !important; margin-bottom: 4px !important; }
+.u-mb16     { margin-bottom: 16px !important; }
+.u-mb20     { margin-bottom: 20px !important; }
+.u-right    { text-align: right !important; }
+.u-cell     { padding: 8px 6px !important; }
+.u-cell-r   { padding: 6px !important; text-align: right !important; }
+.u-rule     { border-bottom: 1px solid var(--border) !important; }

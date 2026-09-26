@@ -96,7 +96,7 @@
 <div class="card" style="margin-bottom: 14px; padding: 12px 18px;">
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
         <span class="section-title" style="margin-bottom: 0;">Where this industry stands</span>
-        <span class="mono" style="font-size: 11px; color: var(--text-muted);">avg composite vs full universe</span>
+        <span class="mono u-muted-11">avg composite vs full universe</span>
     </div>
     <div class="conviction-bar" style="height: 10px; margin-bottom: 6px;">
         <div class="conviction-marker" style="left: {{ ind_match.avg_score * 100 }}%;"></div>
@@ -127,7 +127,7 @@
 </div>
 {% elif not narr %}
 <div class="card" style="margin-bottom: 14px; border-left: 4px solid var(--amber); padding: 12px 16px;">
-    <span style="font-size: 11px; color: var(--text-muted);">
+    <span class="u-muted-11">
         ⚠ Structured narrative not generated for this industry. Run
         <code style="font-size: 11px;">python -m tools.sector_narrative_fetcher --sector "{{ detail.name }}"</code>.
     </span>
@@ -228,7 +228,7 @@
     </div>
     <div style="margin-top: 12px;">
         <div class="pb-row" style="font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid var(--border-accent);">
-            <span>Player</span><span>Share bar</span><span style="text-align: right;">Share %</span><span style="text-align: right;">Listed?</span><span style="text-align: right;">Our score</span>
+            <span>Player</span><span>Share bar</span><span class="u-right">Share %</span><span class="u-right">Listed?</span><span class="u-right">Our score</span>
         </div>
         {% for p in cl.players %}
         <div class="pb-row">
@@ -238,7 +238,7 @@
               <span style="color: var(--text-secondary);">{{ p.name }}<span style="color: var(--text-muted); font-size: 10px;"> {% if p.note %}· {{ p.note }}{% endif %}</span></span>
             {% endif %}
             <div class="pb-track"><div class="pb-fill" style="width: {{ p.share_pct or 0 }}%;{% if not p.listed %} background: var(--text-muted);{% endif %}"></div></div>
-            <span class="num" style="font-weight: 700;">{{ "%.1f"|format(p.share_pct or 0) }}%</span>
+            <span class="num" style="font-weight: 700;">{{ (p.share_pct or 0)|pct(1) }}</span>
             <span class="num" style="color: {{ 'var(--accent)' if p.listed else 'var(--text-muted)' }};">{{ 'Listed' if p.listed else 'Private' }}</span>
             <span class="num
                 {% if p.final_score and p.final_score >= 0.7 %}score-green
@@ -252,8 +252,8 @@
         <div class="pb-row" style="opacity: 0.6;">
             <span style="color: var(--text-muted); font-style: italic;">Others / long tail</span>
             <div class="pb-track"><div class="pb-fill" style="width: {{ cl.other_pct }}%; background: var(--text-muted);"></div></div>
-            <span class="num">{{ "%.1f"|format(cl.other_pct) }}%</span>
-            <span class="num" style="color: var(--text-muted);">—</span>
+            <span class="num">{{ cl.other_pct|pct(1) }}</span>
+            <span class="num u-muted">—</span>
             <span class="num">—</span>
         </div>
         {% endif %}
@@ -266,13 +266,13 @@
     <div class="section-desc">Share of LISTED universe only (denominator = full listed industry mcap). For true share that includes private players, see the card above.</div>
     <div style="margin-top: 12px;">
         <div class="pb-row" style="font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid var(--border-accent);">
-            <span>Ticker</span><span>Share bar</span><span style="text-align: right;">Listed share %</span><span style="text-align: right;">Mcap ₹cr</span><span style="text-align: right;">Score</span>
+            <span>Ticker</span><span>Share bar</span><span class="u-right">Listed share %</span><span class="u-right">Mcap ₹cr</span><span class="u-right">Score</span>
         </div>
         {% for p in detail.top_players[:10] %}
         <div class="pb-row">
             <a href="/explorer/{{ p.sid }}" class="ticker" style="text-decoration: none;">{{ p.ticker }}</a>
             <div class="pb-track"><div class="pb-fill" style="width: {{ p.share_pct }}%;"></div></div>
-            <span class="num" style="font-weight: 700;">{{ "%.1f"|format(p.share_pct) }}%</span>
+            <span class="num" style="font-weight: 700;">{{ p.share_pct|pct(1) }}</span>
             <span class="num">{{ "{:,.0f}".format(p.market_cap_cr) }}</span>
             <span class="num
                 {% if p.final_score >= 0.7 %}score-green
@@ -297,7 +297,7 @@
             <div class="kpi-li">
                 <span class="arrow {{ 'up' if kpi.direction == 'higher_is_better' else 'down' }}">{{ '↑' if kpi.direction == 'higher_is_better' else '↓' }}</span>
                 <strong style="color: var(--text-primary);">{{ kpi.name }}</strong>
-                <span style="color: var(--text-muted);">· {{ kpi.formula[:50] }}</span>
+                <span class="u-muted">· {{ kpi.formula[:50] }}</span>
             </div>
             {% endfor %}
         </div>
@@ -375,11 +375,11 @@
             {% for m in detail.macro_contributors[:5] %}
             <div class="pick-row" style="grid-template-columns: 1fr 50px 36px;">
                 <span style="color: var(--text-secondary); font-size: 11px;">{{ m.indicator_id[:26] }}</span>
-                <span style="font-size: 10px; color: var(--text-muted);">{{ m.direction or '—' }}</span>
+                <span class="u-muted-10">{{ m.direction or '—' }}</span>
                 <span class="score">{{ "%.2f"|format(m.weight) if m.weight is not none else '' }}</span>
             </div>
             {% endfor %}
-        {% else %}<div style="font-size: 11px; color: var(--text-muted);">No mappings.</div>{% endif %}
+        {% else %}<div class="u-muted-11">No mappings.</div>{% endif %}
         </div>
     </div>
     <div class="card">
@@ -394,7 +394,7 @@
                 <span style="margin-left: 4px;">{{ r.title[:65] }}</span>
             </div>
             {% endfor %}
-        {% else %}<div style="font-size: 11px; color: var(--text-muted);">None.</div>{% endif %}
+        {% else %}<div class="u-muted-11">None.</div>{% endif %}
         </div>
     </div>
 </div>

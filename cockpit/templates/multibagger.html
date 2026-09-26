@@ -32,11 +32,11 @@
         {% if rd and rd.close_vs_slow_pct is not none %}
         <div style="border-left: 1px solid var(--border); padding-left: 20px;">
             <div style="font-size: 10px; font-weight: 600; letter-spacing: 0.5px; text-transform: uppercase; color: var(--text-muted);">Close vs EMA200</div>
-            <div class="mono" style="font-size: 18px; font-weight: 700; color: var(--text-primary);">{{ "%+.1f%%"|format(rd.close_vs_slow_pct) }}</div>
+            <div class="mono" style="font-size: 18px; font-weight: 700; color: var(--text-primary);">{{ rd.close_vs_slow_pct|pct(1, signed=True) }}</div>
         </div>
         <div style="border-left: 1px solid var(--border); padding-left: 20px;">
             <div style="font-size: 10px; font-weight: 600; letter-spacing: 0.5px; text-transform: uppercase; color: var(--text-muted);">EMA50 / EMA200</div>
-            <div class="mono" style="font-size: 18px; font-weight: 700; color: var(--text-primary);">{{ "%+.1f%%"|format(rd.cross_pct) }}</div>
+            <div class="mono" style="font-size: 18px; font-weight: 700; color: var(--text-primary);">{{ rd.cross_pct|pct(1, signed=True) }}</div>
         </div>
         {% endif %}
         <div style="flex: 1; min-width: 280px; border-left: 1px solid var(--border); padding-left: 20px;">
@@ -83,7 +83,7 @@
 <div class="card">
     <div style="display: flex; justify-content: space-between; align-items: baseline;">
         <div class="section-title">Survivors — {{ o.survivors|length }} names</div>
-        <div class="mono" style="font-size: 11px; color: var(--text-muted);">as of {{ o.snapshot_date }}{% for t, c in o.tier_counts.items() %} · {{ t }} {{ c }}{% endfor %}</div>
+        <div class="mono u-muted-11">as of {{ o.snapshot_date }}{% for t, c in o.tier_counts.items() %} · {{ t }} {{ c }}{% endfor %}</div>
     </div>
     <div class="section-desc">
         Buy a <strong>basket</strong> (20–30, equal-weight, spread across sectors), <strong>hold with conviction</strong>,
@@ -144,7 +144,7 @@
                 <strong>Market-regime guard:</strong>
                 <strong style="color: {{ 'var(--amber)' if o.market_guard_active else 'var(--green)' }};">
                 {{ 'ACTIVE — REVIEW suppressed (small-cap market in a bear)' if o.market_guard_active else 'dormant — market not in a bear' }}</strong>{% if o.market_dd is defined and o.market_dd is not none %}
-                <span class="mono">(NIFTY SMALLCAP 250 {{ '%+.0f%%'|format(o.market_dd*100) }} off its trailing peak)</span>{% endif %}.
+                <span class="mono">(NIFTY SMALLCAP 250 {{ (o.market_dd*100)|pct(0, signed=True) }} off its trailing peak)</span>{% endif %}.
                 Hover any chip to see that name's <span class="mono">drawdown · sector momentum · relative strength</span>.
             </p>
 
@@ -163,15 +163,15 @@
                 <th style="text-align: left; padding: 8px 6px;">#</th>
                 <th style="text-align: left; padding: 8px 6px;">Stock</th>
                 <th style="text-align: center; padding: 8px 6px;">Conviction</th>
-                <th style="padding: 8px 6px;">M-cap (₹cr)</th>
-                <th style="padding: 8px 6px;">Score</th>
-                <th style="padding: 8px 6px;">Q / G / I / C</th>
-                <th style="padding: 8px 6px;">ROIC</th>
-                <th style="padding: 8px 6px;">PAT CAGR</th>
-                <th style="padding: 8px 6px;">F</th>
-                <th style="padding: 8px 6px;">Prom%</th>
-                <th style="padding: 8px 6px;">Pledge%</th>
-                <th style="padding: 8px 6px;">D/E</th>
+                <th class="u-cell">M-cap (₹cr)</th>
+                <th class="u-cell">Score</th>
+                <th class="u-cell">Q / G / I / C</th>
+                <th class="u-cell">ROIC</th>
+                <th class="u-cell">PAT CAGR</th>
+                <th class="u-cell">F</th>
+                <th class="u-cell">Prom%</th>
+                <th class="u-cell">Pledge%</th>
+                <th class="u-cell">D/E</th>
             </tr>
         </thead>
         <tbody>
@@ -188,15 +188,15 @@
                     {% set cvcol = 'var(--green)' if cv=='HOLD' else ('var(--amber)' if cv=='WATCH' else 'var(--red)') %}
                     <span class="mono" style="display:inline-block; padding:2px 7px; border-radius:4px; font-size:9.5px; font-weight:700;
                           color:{{ cvcol }}; border:1px solid {{ cvcol }}33; background:{{ cvcol }}1a;"
-                          title="drawdown {{ '%.0f%%'|format(s.dd_pct*100) if s.dd_pct is not none else '–' }} · sector mom {{ '%+.0f%%'|format(s.sector_mom*100) if s.sector_mom is not none else '–' }} · rel-str {{ '%+.0f%%'|format(s.rel_strength*100) if s.rel_strength is not none else '–' }}">{{ cv }}</span>
-                    <div style="font-size:9px; color:var(--text-muted); margin-top:2px;">{{ "%.0f%%"|format(s.dd_pct*100) if s.dd_pct is not none else '' }}</div>
+                          title="drawdown {{ (s.dd_pct*100)|pct(0) if s.dd_pct is not none else '–' }} · sector mom {{ (s.sector_mom*100)|pct(0, signed=True) if s.sector_mom is not none else '–' }} · rel-str {{ (s.rel_strength*100)|pct(0, signed=True) if s.rel_strength is not none else '–' }}">{{ cv }}</span>
+                    <div style="font-size:9px; color:var(--text-muted); margin-top:2px;">{{ (s.dd_pct*100)|pct(0) if s.dd_pct is not none else '' }}</div>
                     {% else %}<span style="color:var(--text-muted);">–</span>{% endif %}
                 </td>
                 <td class="mono" style="padding: 9px 6px;">{{ "{:,.0f}".format(s.mcap_cr) if s.mcap_cr is not none else '–' }}</td>
                 <td class="mono" style="padding: 9px 6px; font-weight: 700; color: var(--text-primary);">{{ "%.2f"|format(s.multibagger_score) if s.multibagger_score is not none else '–' }}</td>
                 <td class="mono" style="padding: 9px 6px; color: var(--text-secondary); font-size: 11px;">{{ pc(s.p_quality) }}/{{ pc(s.p_growth) }}/{{ pc(s.interaction) }}/{{ pc(s.p_conviction) }}</td>
-                <td class="mono" style="padding: 9px 6px;">{{ "%.0f%%"|format(s.roic*100) if s.roic is not none else '–' }}</td>
-                <td class="mono" style="padding: 9px 6px;">{{ "%.0f%%"|format(s.pat_cagr_3y*100) if s.pat_cagr_3y is not none else '–' }}</td>
+                <td class="mono" style="padding: 9px 6px;">{{ (s.roic*100)|pct(0) if s.roic is not none else '–' }}</td>
+                <td class="mono" style="padding: 9px 6px;">{{ (s.pat_cagr_3y*100)|pct(0) if s.pat_cagr_3y is not none else '–' }}</td>
                 <td class="mono" style="padding: 9px 6px;">{{ "%.0f"|format(s.f_score) if s.f_score is not none else '–' }}</td>
                 <td class="mono" style="padding: 9px 6px;">{{ "%.0f"|format(s.promoter_pct) if s.promoter_pct is not none else '–' }}</td>
                 <td class="mono" style="padding: 9px 6px; color: {{ 'var(--amber)' if (s.pledge_pct is not none and s.pledge_pct > 0) else 'var(--text-muted)' }};">{{ "%.0f"|format(s.pledge_pct) if s.pledge_pct is not none else '0' }}</td>
