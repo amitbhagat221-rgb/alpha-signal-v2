@@ -54,7 +54,7 @@ Banks and NBFCs have no inventory/COGS/op margin — Piotroski/accruals/EBITDA a
 
 **Why first:** Financials = ~12% of universe, ~25% of Nifty 500 weight. Highest leverage per unit of work.
 
-Reference: v1's [docs/financial_model_reference.md](../../../alpha-signal/docs/financial_model_reference.md).
+Reference: v1's [docs/financial_model_reference.md](../../../../alpha-signal/docs/financial_model_reference.md).
 
 ### 2.3 — Cyclical overlay ⏳
 Metals, Oil & Gas, Chemicals, Cement trade on commodity cycles. Raw P/E misleading at peaks (bear trap) and troughs (buy signal). Normalize across 7-year cycle.
@@ -67,7 +67,7 @@ Metals, Oil & Gas, Chemicals, Cement trade on commodity cycles. Raw P/E misleadi
 
 **Parallelizable with 2.2.** Smaller blast radius (~10% of universe).
 
-Reference: v1's [docs/cyclical_overlay_reference.md](../../../alpha-signal/docs/cyclical_overlay_reference.md).
+Reference: v1's [docs/cyclical_overlay_reference.md](../../../../alpha-signal/docs/cyclical_overlay_reference.md).
 
 ### 2.4 — Segment models + portfolio construction ⏳ ★ CAPSTONE
 The phase that turns daily ranking into a daily portfolio.

@@ -1,5 +1,7 @@
 # Alpha Signal v2 — Full System Setup & Context
 
+> **Archived 2026-09-26.** This is a 2026-05-29 snapshot and is stale in places: Financials "sub-model", 03:30 "IST", 2 GB / ~80 tables / ~40 steps, and pre-rebaseline validation numbers. Its still-true parts now live in [OPERATOR.md](../../OPERATOR.md).
+
 > **Purpose of this document.** This is a complete, self-contained description of
 > everything built in the Alpha Signal v2 project, written so that an external
 > AI assistant (or a new collaborator) can read it cold and give informed advice
@@ -87,8 +89,8 @@ system, not a deployed fund** — no live capital is managed by it yet, and (see
    BACKGROUND (news AI-enrichment, regulatory classify, broker recos, banking metrics)
 ```
 
-- **Orchestrator:** [pipeline.py](pipeline.py). Reads a single list, `PIPELINE_STEPS`,
-  in [config.py](config.py) — the one source of truth. Each step is a dict:
+- **Orchestrator:** [pipeline.py](../../pipeline.py). Reads a single list, `PIPELINE_STEPS`,
+  in [config.py](../../config.py) — the one source of truth. Each step is a dict:
   `{name, module, function, critical, table, source, data_freq, frequency}`.
 - **`critical: True`** steps (bhavcopy price fetch, quality_gate, screener) stop the
   pipeline on failure. Everything else is non-blocking.
@@ -160,7 +162,7 @@ table, and is registered for backtesting.
     + delivery), insider signal, share-count momentum.
   - **Sentiment / external:** news sentiment, consensus (analyst PT upside +
     EPS growth + revisions), macro sector signal, regulatory signal.
-- **Two-tier factor registry** (in [db.py](db.py): `BACKTEST_SIGNALS` + `FACTOR_LIBRARY`,
+- **Two-tier factor registry** (in [db.py](../../db.py): `BACKTEST_SIGNALS` + `FACTOR_LIBRARY`,
   ADR 0017):
   - A factor is computed and **PIT-backtested** the moment it ships.
   - If it clears a statistical bar (|t-stat| ≥ 1.5 in at least one tier) it becomes

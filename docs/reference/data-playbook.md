@@ -149,7 +149,7 @@ For each source: **what it gives**, **endpoint**, **PIT/live access**, **histori
 | **Endpoint** | Slug-based `__NEXT_DATA__` (`forecastsHistory` path) |
 | **PIT access** | Pulled at fetch time, dates back to 2015. |
 | **Historical access** | 10+ years per metric per stock, but **annual granularity** — not monthly revisions. |
-| **v2 depth** | price: 10,543 rows · revenue: 9,235 · eps: 9,235. 2,435 stocks covered. |
+| **v2 depth** | eps + revenue: ~11.7K rows each (monthly refresh); 8.1K legacy price rows frozen at 2026-05-11 (never read). |
 | **Gotchas** | (1) `change` column populated for `eps`/`revenue` but **empty for `price`** — compute PT YoY from value series directly. (2) `fetched_at` is the same for all rows (the date of last harvest); the *event* date is in the `date` column. (3) Annual cadence means a "monthly PIT consensus" reconstruction will have 12 dates per stock per year using forward-fill — coarser than v1's "proxy" t=3.52 implied. |
 | **Status (2026-09-26)** | **`metric='price'` rows are no longer ingested or served** (commit 8700769, ADR 0045). The 8K legacy price rows left in the table are look-ahead (see below) and must never be read. `eps`/`revenue` are still ingested monthly. |
 | **Used by** | `signals/consensus.py` + `pit_consensus()` (EPS revision only). |
@@ -244,7 +244,7 @@ For each source: **what it gives**, **endpoint**, **PIT/live access**, **histori
 |---|---|
 | **What** | Python wrapper around NSE's date-range historical APIs that requires session cookies. v1's CLAUDE.md called these "blocked" — they're not, just need cookie warm-up. nselib handles it. |
 | **Install** | `pip install --break-system-packages nselib` (v2.5.1 confirmed working 2026-05-03) |
-| **Confirmed-working endpoints** | See [memory/nselib_apis.md](../../../.claude/projects/-home-ubuntu-alpha-signal-v2/memory/nselib_apis.md) for the full table. Highlights: bulk_deal_data + block_deals_data (≥2yr range), corporate_actions_for_equity (splits/divs), short_selling_data (Jan 2024+), bhav_copy_with_delivery, deliverable_position_data per symbol, participant_wise_open_interest (FII/DII positioning, Dec 2025+). |
+| **Confirmed-working endpoints** | See memory `nselib_apis.md` (Claude auto-memory, outside the repo) for the full table. Highlights: bulk_deal_data + block_deals_data (≥2yr range), corporate_actions_for_equity (splits/divs), short_selling_data (Jan 2024+), bhav_copy_with_delivery, deliverable_position_data per symbol, participant_wise_open_interest (FII/DII positioning, Dec 2025+). |
 | **Quirks** | DD-MM-YYYY date format; `xlrd` dep needed for `fii_derivatives_statistics`; some single-day endpoints return "no data available" for arbitrary recent dates. |
 | **Rate limit** | Treat as 2-second floor (same NSE rule as bhavcopy). Chunk long ranges by month. |
 | **Used by** | `sources/nselib_pull.py` (bulk, short selling, corporate actions, FII/DII positioning), `sources/fno_pull.py` (`fno_bhav`), `sources/historical_backfill.py` |
@@ -553,7 +553,7 @@ The bugs and gotchas we've already paid for. Add to this list every time somethi
 | Live snapshots ≠ PIT (37% Piotroski divergence) | daily_snapshots vs daily_snapshots_pit | Use `daily_snapshots_pit_v1` for backtests. Live is for daily ranking only. | 2026-05-03 |
 | Adj Close vs Raw Close (mom corr 0.67) | yfinance vs NSE bhavcopy | v1 used yfinance Adj Close; v2 uses bhavcopy raw close. Pick one and stay. v1 canonical for historical. | 2026-05-03 |
 | Smart quotes from copy-paste break shells | run_pipeline.sh | Always retype quotes manually; never paste from docs | v1 |
-| Cap_tier drift across history | tools/reconstruct_pit.py | Currently uses *current* cap_tier for historical eval dates. Material for 36mo+ backtests; benign for 6mo. (Plan 0004 §3.1) | 2026-05-03 |
+| Cap_tier drift across history | tools/reconstruct_pit.py | Currently uses *current* cap_tier for historical eval dates. Material for 36mo+ backtests; benign for 6mo. (archived [pit-reconstruction plan](../_archive/2026-05-22-plan-0004-pit-reconstruction.md) §3.1; the survivorship side is WS2.8 in plan 0011) | 2026-05-03 |
 | Financial sector accidentally included in forensic | signals/forensic.py | The exclusion via `FINANCIAL_SECTORS` config doesn't fire when stock.sector strings vary. Live signal bug (will inherit fix automatically into PIT). | 2026-05-03 |
 
 ---
