@@ -54,6 +54,10 @@ def get_db():
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
     conn.execute("PRAGMA busy_timeout=5000")
+    conn.execute("PRAGMA synchronous=NORMAL")    # durable across app crashes in WAL mode
+    conn.execute("PRAGMA cache_size=-65536")     # 64 MB page cache per connection
+    conn.execute("PRAGMA temp_store=MEMORY")
+    conn.execute("PRAGMA mmap_size=268435456")   # 256 MB memory-mapped reads
     try:
         yield conn
         conn.commit()
