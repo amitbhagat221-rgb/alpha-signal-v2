@@ -43,16 +43,14 @@ from pathlib import Path
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+import factors
 from db import get_db, read_sql
 
-# Signal columns that score_universe reads. Order matters — must match
-# what _load_signals() produces so a frozen df can be rebuilt and re-scored.
-INPUT_COLS = [
-    "sid", "ticker", "name", "sector", "cap_tier",
-    "f_score", "accruals", "consensus", "promoter", "penalty",
-    "smart_money", "mom_6m", "mom_12m", "earnings_yield", "book_to_price",
-    "price_rows", "quarters_present", "fundamental_coverage",
-]
+# Every column score_universe reads, in _load_signals() shape — derived from the
+# factor registry so a newly wired factor is frozen too (a hand-kept copy missed
+# six wired factors, so replays re-scored without them and could never PASS).
+INPUT_COLS = factors.SCREENER_INPUT_COLS
+_META_COLS = {"sid", "ticker", "name", "sector", "cap_tier"}
 
 # Output columns we persist per pick.
 OUTPUT_COLS = [
@@ -93,9 +91,13 @@ def _ensure_schema():
 
 
 def _run_live_pipeline():
-    """Call screener._load_signals() + score_universe(). Returns (input_df, scored_df).
-    No daily_picks write — we want the in-memory result, not the DB side effect."""
+    """Today's screener frames: (input_df, scored_df). Reuses the frames the screener
+    step scored earlier in this process (pipeline run) — freezing exactly what was
+    scored — else calls _load_signals() + score_universe() (no daily_picks write)."""
     from scoring import screener
+    last = screener.LAST_SCORED
+    if last.get("date") == date.today().isoformat():
+        return last["inputs"], last["scored"]
     input_df = screener._load_signals()
     scored_df = screener.score_universe(input_df.copy())
     return input_df, scored_df
@@ -108,22 +110,10 @@ def _run_live_pipeline():
 # promoter_signal, forensic.penalty, smart_money) get NaN and score_universe normalizes
 # by the weight that *did* contribute. This is a known coverage gap — the validator catches
 # score_universe code drift but not signal-composite drift for historical dates. Production
-# (today's) freeze uses the full pipeline and has no such gap.
-PIT_TO_INPUT_COLS = {
-    "piotroski_f": "f_score",
-    "mom_6m": "mom_6m",
-    "mom_12m": "mom_12m",
-    "earnings_yield": "earnings_yield",
-    "book_to_price": "book_to_price",
-    "consensus_signal_combined": "consensus",
-    # Plan 0005 Phase E "full fix" (2026-05-25) — composite signals now persisted
-    # in daily_snapshots_pit by reconstruct_pit, so historical replays cover all
-    # 8 screener inputs end-to-end.
-    "accruals_signal": "accruals",
-    "promoter_signal": "promoter",
-    "forensic_penalty": "penalty",
-    "smart_money_score": "smart_money",
-}
+# (today's) freeze uses the full pipeline and has no such gap. Plan 0005 Phase E "full fix"
+# (2026-05-25): the screener composites (accruals_signal, promoter_signal, forensic_penalty,
+# smart_money_score) are persisted in daily_snapshots_pit too. Map derived from the registry.
+PIT_TO_INPUT_COLS = factors.PIT_TO_SCREENER_COLS
 
 
 def _run_historical_pipeline(snapshot_date: str):
@@ -143,23 +133,15 @@ def _run_historical_pipeline(snapshot_date: str):
     # Smart_money is persisted on 0-100 scale; screener._load_signals divides by 100.
     if "smart_money" in df.columns:
         df["smart_money"] = pd.to_numeric(df["smart_money"], errors="coerce") / 100.0
-    # Defensive fill — if reconstruct_pit hasn't backfilled a composite for this
-    # date yet (or signal was missing), score_universe normalizes by weight.
-    for col in ("accruals", "promoter", "penalty", "smart_money", "consensus"):
-        if col not in df.columns:
-            df[col] = pd.NA
     # price_rows / quarters_present / fundamental_coverage aren't in PIT either, but
     # score_universe needs them only for COVERAGE math (not scoring). Stub at the live
     # values so the eligibility math doesn't crash.
     df["price_rows"] = 252  # ≥ MIN_PRICE_ROWS=60 — historical stocks all had trading history
     df["quarters_present"] = 8
     df["fundamental_coverage"] = 1.0
-    input_df = df[[
-        "sid", "ticker", "name", "sector", "cap_tier",
-        "f_score", "accruals", "consensus", "promoter", "penalty",
-        "smart_money", "mom_6m", "mom_12m", "earnings_yield", "book_to_price",
-        "price_rows", "quarters_present", "fundamental_coverage",
-    ]]
+    # Screener inputs with no PIT column (e.g. eps_growth) stay NaN; score_universe
+    # normalizes by the weight that did contribute.
+    input_df = df.reindex(columns=INPUT_COLS)
     scored_df = screener.score_universe(input_df.copy())
     return input_df, scored_df
 
@@ -324,8 +306,8 @@ def replay(snapshot_date: str | None = None, top_n: int = 30) -> int:
     # Rebuild df in the shape score_universe() expects.
     df = frozen_inp.copy()
     # Ensure dtype for object cols that came in as Python None from JSON (smart_money etc).
-    for c in ("accruals", "promoter", "penalty", "smart_money", "consensus"):
-        if c in df.columns:
+    for c in df.columns:
+        if c not in _META_COLS:
             df[c] = pd.to_numeric(df[c], errors="coerce")
 
     current_scored = screener.score_universe(df)
