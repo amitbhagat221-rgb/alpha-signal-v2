@@ -47,6 +47,7 @@ from bs4 import BeautifulSoup
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
+from config import API
 from db import get_db, read_sql
 from sources.screener_pull import (
     COMPANY_CONSOLIDATED_URL,
@@ -57,8 +58,7 @@ from sources.screener_pull import (
 
 # BSE serves filing PDFs only with a browser UA + a bseindia referer.
 BSE_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-                  "(KHTML, like Gecko) Chrome/120.0 Safari/537.36",
+    "User-Agent": API["browser_user_agent"],
     "Referer": "https://www.bseindia.com/",
 }
 ATTACH_BASES = ("AttachLive", "AttachHis")  # recent filings live; older ones archived

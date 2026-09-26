@@ -49,12 +49,10 @@ from pathlib import Path
 import pandas as pd
 import requests
 
+from config import API
 from db import get_db, insert_df, read_sql, upsert_df
 
-UA = (
-    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
-)
+UA = API["browser_user_agent"]
 
 COOKIE_FILE = Path.home() / ".cache" / "screener_cookie.json"
 HOME_URL = "https://www.screener.in/"

@@ -39,6 +39,7 @@ from datetime import date, timedelta
 import pandas as pd
 
 from db import get_db, insert_df, read_sql
+from sources import _http
 
 DELAY_SEC = 2.0  # NSE 2-second floor
 
@@ -47,13 +48,6 @@ DELAY_SEC = 2.0  # NSE 2-second floor
 OPTION_TYPES = ("STO", "IDO")
 FUTURE_TYPES = ("STF", "IDF")
 FNO_TYPES = OPTION_TYPES + FUTURE_TYPES
-
-
-def _get_sid_map():
-    """NSE ticker → sid. Index underlyings (NIFTY, BANKNIFTY…) won't be present
-    and resolve to None — we still store them, symbol-keyed."""
-    df = read_sql("SELECT ticker, sid FROM stocks")
-    return df.set_index("ticker")["sid"].to_dict()
 
 
 def _iso(val):
@@ -117,7 +111,7 @@ def pull_fno_bhav(trade_date, sid_map=None):
     no-trade day."""
     from nselib import derivatives as dv
     if sid_map is None:
-        sid_map = _get_sid_map()
+        sid_map = _http.sid_map()  # index underlyings (NIFTY…) → None, stored symbol-keyed
     d_str = trade_date.strftime("%d-%m-%Y") if hasattr(trade_date, "strftime") else str(trade_date)
     try:
         raw = dv.fno_bhav_copy(trade_date=d_str)
@@ -153,7 +147,7 @@ def backfill_fno_bhav(months=6):
     dates, fetch each. Idempotent. Raises if EVERY attempted NSE call erred
     (endpoint unreachable) — a flat table from a real stall must not pass
     silently (CLAUDE.md)."""
-    sid_map = _get_sid_map()
+    sid_map = _http.sid_map()
     have = _existing_trade_dates()
     days = _weekdays_back(int(months * 31))
     total, n_ok, n_err, n_skip = 0, 0, 0, 0
@@ -187,7 +181,7 @@ def compute(lookback_days=5):
     Raises if every call in the window erred (real NSE stall); a window that is
     fully already-loaded (n_new==0, no errors) is the normal steady state and
     returns 0 quietly."""
-    sid_map = _get_sid_map()
+    sid_map = _http.sid_map()
     have = _existing_trade_dates()
     total, n_ok, n_err = 0, 0, 0
     for d in _weekdays_back(lookback_days):

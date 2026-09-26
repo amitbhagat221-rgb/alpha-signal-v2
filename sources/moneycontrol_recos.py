@@ -53,9 +53,11 @@ from bs4 import BeautifulSoup
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
+from config import API
 from db import get_db, read_sql, upsert_df
+from sources._http import polite_get
 
-DELAY = 12.0   # Per docstring: 2s tripped the Moneycontrol WAF. 12s is safe.
+DELAY = API["host_min_gap"]["www.moneycontrol.com"]   # 12s — 2s tripped the WAF (docstring)
 # Pipeline runs daily with a time budget, stalest-first (stocks.mc_checked_at).
 # The old weekly full sweep took ~18h and held the harvest lock all Sunday,
 # starving run_daily_forward.sh. 90 min/day ≈ 300 stocks → full cycle ~8-9 days;
@@ -159,8 +161,8 @@ def _autosuggest(ticker):
     """
     params = {"query": ticker, "type": 1, "format": "json"}
     try:
-        r = requests.get(SEARCH_URL, headers=HEADERS, params=params, timeout=TIMEOUT)
-        if r.status_code != 200 or not r.text.strip():
+        r = polite_get(SEARCH_URL, headers=HEADERS, params=params, timeout=TIMEOUT, retries=0)
+        if r is None or not r.text.strip():
             return None
         # Strip JSONP wrapper if present.
         text = r.text.strip()
@@ -225,19 +227,15 @@ def discover_slug_for(sid, ticker):
 
 
 def _fetch_html(slug):
-    """GET the Moneycontrol quote page. Retry on transient failure."""
-    url = QUOTE_URL_TEMPLATE.format(slug=slug)
-    for attempt in range(MAX_RETRIES + 1):
-        try:
-            r = requests.get(url, headers=HEADERS, timeout=TIMEOUT)
-            if r.status_code == 200:
-                return r.text
-            if r.status_code in (404, 410):
-                return None
-            time.sleep(2)
-        except (requests.exceptions.Timeout, requests.exceptions.RequestException):
-            time.sleep(2)
-    return None
+    """GET the Moneycontrol quote page, or None on any failure. polite_get keeps
+    ≥12s between Moneycontrol calls and retries only 429/5xx/timeouts (a 403 from
+    the WAF is not re-hit 2s later any more)."""
+    try:
+        r = polite_get(QUOTE_URL_TEMPLATE.format(slug=slug), headers=HEADERS,
+                       timeout=TIMEOUT, retries=MAX_RETRIES)
+    except requests.RequestException:
+        return None
+    return r.text if r is not None else None
 
 
 def _parse_reco_block(block):

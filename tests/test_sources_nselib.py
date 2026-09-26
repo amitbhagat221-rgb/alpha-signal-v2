@@ -25,9 +25,9 @@ def test_bulk_deals_reads_nselib_price_column(monkeypatch):
         "TradePrice/Wght.Avg.Price": "1,400.50", "Remarks": "-",
     }])
     _fake_nselib(monkeypatch, bulk_deal_data=lambda from_date, to_date: frame.copy())
-    monkeypatch.setattr(nselib_pull, "_get_sid_map", lambda: {"RELIANCE": "RELI"})
+    monkeypatch.setattr(nselib_pull._http, "sid_map", lambda col="ticker": {"RELIANCE": "RELI"})
     got = []
-    monkeypatch.setattr(nselib_pull, "_insert_or_ignore", lambda df, t: got.append(df) or len(df))
+    monkeypatch.setattr(nselib_pull, "insert_df", lambda df, t: got.append(df) or len(df))
     nselib_pull.pull_bulk_deals(months=1)
     row = got[0].iloc[0]
     assert row["price"] == 1400.5 and row["quantity"] == 100000 and row["client_name"] == "SOME FUND"
@@ -46,3 +46,17 @@ def test_fii_positioning_skips_loaded_dates(monkeypatch):
                         lambda q, params=None: pd.DataFrame({"trade_date": loaded}))
     nselib_pull.pull_fii_positioning(days_back=10)
     assert asked == []
+
+
+def test_earnings_calendar_keeps_forward_dated_rows(monkeypatch):
+    """earnings_calendar must bypass insert_df's >today+2d guard (it's forward-dated)."""
+    fwd = (date.today() + timedelta(days=20)).strftime("%d-%b-%Y")
+    frame = pd.DataFrame([{"symbol": "RELIANCE", "company": "Reliance", "purpose": "Results",
+                           "bm_desc": "Q2", "date": fwd}])
+    _fake_nselib(monkeypatch, event_calendar_for_equity=lambda from_date, to_date: frame.copy())
+    monkeypatch.setattr(nselib_pull._http, "sid_map", lambda col="ticker": {"RELIANCE": "RELI"})
+    got = []
+    monkeypatch.setattr(nselib_pull, "_insert_or_ignore", lambda df, t: got.append((t, df)) or len(df))
+    monkeypatch.setattr(nselib_pull, "insert_df", lambda df, t: 1 / 0)
+    assert nselib_pull.pull_event_calendar() == 1
+    assert got[0][0] == "earnings_calendar"

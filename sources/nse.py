@@ -28,10 +28,10 @@ from datetime import date, datetime, timedelta
 from io import StringIO
 
 import pandas as pd
-import requests
 
 from config import API
-from db import read_sql, insert_df
+from db import insert_df
+from sources import _http
 
 BHAVCOPY_URL = "https://archives.nseindia.com/products/content/sec_bhavdata_full_{date}.csv"
 HEADERS = {"User-Agent": API["user_agent"]}
@@ -47,17 +47,6 @@ MIN_CLOSE = 0.01          # penny stock floor
 # from our 2,448-stock universe (SME-listed pharma, etc — e.g. ANO/ANONDITA).
 TRADEABLE_SERIES = {"EQ", "SM", "BE", "ST", "IV", "RR", "BZ"}
 
-_SID_MAP = None
-
-
-def _get_sid_map():
-    global _SID_MAP
-    if _SID_MAP is None:
-        stocks = read_sql("SELECT sid, ticker FROM stocks")
-        _SID_MAP = stocks.set_index("ticker")["sid"].to_dict()
-    return _SID_MAP
-
-
 def _is_trading_day(d):
     """Skip weekends. Holidays will return 404 from NSE."""
     return d.weekday() < 5
@@ -68,12 +57,12 @@ def _fetch_date(target_date):
     date_str = target_date.strftime("%d%m%Y")
     url = BHAVCOPY_URL.format(date=date_str)
 
-    resp = requests.get(url, headers=HEADERS, timeout=30)
-
-    if resp.status_code == 404:
+    try:
+        resp = _http.polite_get(url, headers=HEADERS, timeout=30)
+    except Exception as e:   # a bad day must SKIP, not fail this critical step
+        return None, [f"{type(e).__name__}: {e}"]
+    if resp is None:
         return None, [f"404 — likely holiday ({target_date})"]
-    if resp.status_code != 200:
-        return None, [f"HTTP {resp.status_code}"]
 
     # Parse CSV
     try:
@@ -100,7 +89,7 @@ def _fetch_date(target_date):
         return None, [f"Only {len(df)} EQ rows (expected {MIN_ROWS}+) — possible partial file"]
 
     # Map to our schema
-    sid_map = _get_sid_map()
+    sid_map = _http.sid_map()
 
     # Build clean output
     col_map = {

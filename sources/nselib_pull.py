@@ -40,13 +40,15 @@ import time
 from datetime import date, timedelta
 
 import pandas as pd
-import requests
 
-from db import get_db, read_sql
+from config import API
+from db import get_db, insert_df, read_sql
+from sources import _http
 
 DELAY_SEC = 2.0  # NSE 2-second floor
 
-UA = "Mozilla/5.0 (X11; Linux x86_64) AlphaSignal/2.0"
+NSE_HOME = "https://www.nseindia.com"
+NSE_JSON_HEADERS = {"User-Agent": API["user_agent"], "Accept": "application/json"}
 
 
 def _months_back(n_months):
@@ -72,14 +74,10 @@ def _months_since(start):
     return (today.year - start.year) * 12 + today.month - start.month + 1
 
 
-def _get_sid_map():
-    """ticker → sid lookup."""
-    df = read_sql("SELECT sid, ticker FROM stocks")
-    return df.set_index("ticker")["sid"].to_dict()
-
-
 def _insert_or_ignore(df, table):
-    """Append-only insert with conflict-on-UNIQUE → ignore. Returns rows inserted."""
+    """INSERT OR IGNORE *without* db.insert_df's future-date guard. Only for the
+    forward-dated earnings_calendar: its `date` column runs to today+30d, and
+    insert_df drops rows dated > today+2d. Every other table uses insert_df."""
     if df.empty:
         return 0
     cols = list(df.columns)
@@ -94,7 +92,7 @@ def _insert_or_ignore(df, table):
 
 def pull_bulk_deals(months=12):
     from nselib import capital_market as cm
-    sid_map = _get_sid_map()
+    sid_map = _http.sid_map()
     chunks = _months_back(months)
     total = 0
 
@@ -154,7 +152,7 @@ def pull_bulk_deals(months=12):
 
         if out_rows:
             df_out = pd.DataFrame(out_rows)
-            n = _insert_or_ignore(df_out, "bulk_deals")
+            n = insert_df(df_out, "bulk_deals")
             total += n
             print(f"  bulk {from_str}→{to_str}: ✅ {len(out_rows)} parsed → {n} new rows")
         else:
@@ -168,7 +166,7 @@ def pull_bulk_deals(months=12):
 
 def pull_corporate_actions(months=24):
     from nselib import capital_market as cm
-    sid_map = _get_sid_map()
+    sid_map = _http.sid_map()
     chunks = _months_back(months)
     total = 0
     n_ok = 0       # chunks where NSE returned a (possibly empty) frame
@@ -224,7 +222,7 @@ def pull_corporate_actions(months=24):
             })
 
         if out_rows:
-            n = _insert_or_ignore(pd.DataFrame(out_rows), "corporate_actions")
+            n = insert_df(pd.DataFrame(out_rows), "corporate_actions")
             total += n
             print(f"  corp {from_str}→{to_str}: ✅ {len(out_rows)} parsed → {n} new")
         time.sleep(DELAY_SEC)
@@ -256,7 +254,7 @@ def compute_corp_actions(months=2):
 
 def pull_short_selling(months=24):
     from nselib import capital_market as cm
-    sid_map = _get_sid_map()
+    sid_map = _http.sid_map()
     chunks = _months_back(months)
     total = 0
     for start, end in chunks:
@@ -294,7 +292,7 @@ def pull_short_selling(months=24):
             })
 
         if out_rows:
-            n = _insert_or_ignore(pd.DataFrame(out_rows), "short_selling_data")
+            n = insert_df(pd.DataFrame(out_rows), "short_selling_data")
             total += n
             print(f"  short {from_str}→{to_str}: ✅ {len(out_rows)} parsed → {n} new")
         time.sleep(DELAY_SEC)
@@ -317,7 +315,7 @@ def pull_event_calendar(days_back=3, days_forward=30):
     tolerates a meeting that gets rescheduled to a new date (lands as a new row).
     """
     from nselib import capital_market as cm
-    sid_map = _get_sid_map()
+    sid_map = _http.sid_map()
     start = date.today() - timedelta(days=days_back)
     end = date.today() + timedelta(days=days_forward)
     from_str = start.strftime("%d-%m-%Y")
@@ -426,7 +424,7 @@ def pull_fii_positioning(days_back=180):
         df["trade_date"] = d.isoformat()
         valid_cols = ["trade_date", "client_type"] + [v for v in rename.values() if v != "client_type"]
         df = df[[c for c in valid_cols if c in df.columns]]
-        n = _insert_or_ignore(df, "fii_dii_positioning")
+        n = insert_df(df, "fii_dii_positioning")
         total += n
         dates_tried += 1
         if dates_tried % 10 == 0:
@@ -442,15 +440,10 @@ def pull_fii_cash_flow():
 
     Forward-only (single-day endpoint) — set up daily cron to accumulate.
     """
-    s = requests.Session()
-    s.headers.update({"User-Agent": UA, "Accept": "application/json"})
-    # Cookie warm-up
-    try:
-        s.get("https://www.nseindia.com", timeout=15)
-    except Exception:
-        pass
-    r = s.get("https://www.nseindia.com/api/fiidiiTradeReact", timeout=15)
-    r.raise_for_status()
+    s = _http.warm_session(NSE_HOME, headers=NSE_JSON_HEADERS)
+    r = _http.polite_get("https://www.nseindia.com/api/fiidiiTradeReact", session=s)
+    if r is None:
+        raise RuntimeError("fiidiiTradeReact returned 404")
     data = r.json()
 
     rows = []
@@ -471,7 +464,7 @@ def pull_fii_cash_flow():
         print("  fii_cash: empty response")
         return 0
     df = pd.DataFrame(rows)
-    n = _insert_or_ignore(df, "fii_dii_cash_flow")
+    n = insert_df(df, "fii_dii_cash_flow")
     print(f"  fii_cash: ✅ {len(rows)} rows fetched → {n} new")
     return n
 
@@ -545,7 +538,7 @@ def pull_nse_indices(months=120):  # 10 years default
                 for c in ["open", "high", "low", "close", "volume", "traded_value"]:
                     if c in df_out.columns:
                         df_out[c] = pd.to_numeric(df_out[c], errors="coerce")
-                n = _insert_or_ignore(df_out, "nse_index_history")
+                n = insert_df(df_out, "nse_index_history")
                 idx_total += n
             time.sleep(DELAY_SEC)
         print(f"  {idx}: ✅ {idx_total} new rows")
@@ -570,18 +563,15 @@ def pull_surveillance_today():
 
     All of these are forward-only (no historical archive). Run daily via cron.
     """
-    s = requests.Session()
-    s.headers.update({"User-Agent": UA, "Accept": "application/json"})
-    try: s.get("https://www.nseindia.com", timeout=15)
-    except: pass
+    s = _http.warm_session(NSE_HOME, headers=NSE_JSON_HEADERS)
 
-    sid_map = _get_sid_map()
+    sid_map = _http.sid_map()
     today_str = date.today().isoformat()
     inserted = 0
 
     # ASM long-term + short-term
     try:
-        r = s.get("https://www.nseindia.com/api/reportASM", timeout=20)
+        r = _http.polite_get("https://www.nseindia.com/api/reportASM", session=s, timeout=20)
         d = r.json()
         for stage_key, flag_type in [("longterm", "ASM_LT"), ("shortterm", "ASM_ST")]:
             stage_data = d.get(stage_key, {}).get("data", [])
@@ -599,7 +589,7 @@ def pull_surveillance_today():
                     "reason": (item.get("longterm_indicator") or "")[:200],
                 })
             if rows:
-                n = _insert_or_ignore(pd.DataFrame(rows), "surveillance_flags")
+                n = insert_df(pd.DataFrame(rows), "surveillance_flags")
                 inserted += n
                 print(f"  ASM {stage_key}: {n} new rows")
     except Exception as e:
@@ -607,7 +597,7 @@ def pull_surveillance_today():
 
     # GSM
     try:
-        r = s.get("https://www.nseindia.com/api/reportGSM", timeout=20)
+        r = _http.polite_get("https://www.nseindia.com/api/reportGSM", session=s, timeout=20)
         d = r.json()
         items = d if isinstance(d, list) else d.get("data", [])
         rows = []
@@ -624,7 +614,7 @@ def pull_surveillance_today():
                 "reason": (item.get("survDesc") or "")[:200],
             })
         if rows:
-            n = _insert_or_ignore(pd.DataFrame(rows), "surveillance_flags")
+            n = insert_df(pd.DataFrame(rows), "surveillance_flags")
             inserted += n
             print(f"  GSM: {n} new rows")
     except Exception as e:
@@ -664,7 +654,7 @@ def pull_surveillance_today():
                 "reason": "",
             })
         if rows:
-            n = _insert_or_ignore(pd.DataFrame(rows), "surveillance_flags")
+            n = insert_df(pd.DataFrame(rows), "surveillance_flags")
             inserted += n
             print(f"  F&O ban: {n} new rows")
         else:
