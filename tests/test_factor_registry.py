@@ -1,73 +1,69 @@
-"""factors.py is the one factor registry — every hand-maintained factor list must
-equal its derived version. Where the two disagreed, the discrepancy is spelled out
-here and resolved to the correct value in factors.py.
-"""
-import textwrap
+"""factors.py is the one factor registry; every factor list is derived from it.
 
+The hand-kept lists it replaced were checked equal to their derived versions
+before deletion (commit "feat(factors): one factor registry"); the resolved
+discrepancies are pinned here, plus the invariants that keep the registry whole.
+"""
 import config
 import db
 import factors
-from tools import backtest_pit, reconstruct_pit
+from eligibility import registry as eligibility
+from tools import backtest_pit, pit_replay, reconstruct_pit
+from scoring import health_score
 
 
-def test_backtest_signals_metadata_unchanged():
-    assert factors.BACKTEST_SIGNALS == db.BACKTEST_SIGNALS
+def test_consumers_use_the_registry():
+    assert db.BACKTEST_SIGNALS is factors.BACKTEST_SIGNALS
+    assert db.FACTOR_LIBRARY is factors.FACTOR_LIBRARY
+    assert db.get_backtest_cadence is factors.get_backtest_cadence
+    assert config.FACTOR_STATUS is factors.FACTOR_STATUS
+    assert config.SIGNAL_GROUPS is factors.SIGNAL_GROUPS
+    assert backtest_pit.SIGNAL_COLUMN_MAP is factors.SIGNAL_COLUMN_MAP
+    assert reconstruct_pit.PIT_COLUMNS is factors.PIT_COLUMNS
+    assert reconstruct_pit.VALIDATION_RANGES is factors.VALIDATION_RANGES
+    assert eligibility.SIGNAL_ELIGIBILITY is factors.SIGNAL_ELIGIBILITY
+    assert pit_replay.INPUT_COLS is factors.SCREENER_INPUT_COLS
 
 
-def test_cadence():
-    # db's dict also spelled out smart_money_score: "monthly" (the default) — same lookup.
-    assert {s: factors.get_backtest_cadence(s) for s in factors.FACTORS} == \
-        {s: db.get_backtest_cadence(s) for s in factors.FACTORS}
-
-
-def test_factor_library():
-    # Resolved: momentum was dropped from SIGNAL_WEIGHTS 2026-07-05 (clean t=1.34) but never
-    # benched, so the partition check failed for both ids → LIBRARY.
-    assert set(factors.FACTOR_LIBRARY) == set(db.FACTOR_LIBRARY) | {"mom_6m_adj", "mom_12m_adj"}
-
-
-def test_factor_status():
-    # Resolved: pt_upside only had zero weights left (pulled, ADR 0045) — BLOCKED.
-    assert factors.FACTOR_STATUS == {**config.FACTOR_STATUS, "pt_upside": "BLOCKED"}
-
-
-def test_signal_groups():
-    assert factors.SIGNAL_GROUPS == config.SIGNAL_GROUPS
-
-
-def test_pit_columns_and_ranges():
-    assert set(factors.PIT_COLUMNS) == set(reconstruct_pit.PIT_COLUMNS)
-    # Resolved: financial_quality/_recovery had no range (financial_signal, their alias, had ±3).
-    assert factors.VALIDATION_RANGES == {**reconstruct_pit.VALIDATION_RANGES,
-                                         "financial_quality": (-3, 3, True),
-                                         "financial_recovery": (-3, 3, True)}
-
-
-def test_signal_column_map():
-    old = dict(backtest_pit.SIGNAL_COLUMN_MAP)
-    # Resolved: the registry id is momentum_composite (FACTOR_STATUS said "zero backtest
-    # rows" because the backtest wrote it as mom_composite); news_volume was never in the
-    # map at all; earnings_beat_rate's v2 column exists since the v2 writer shipped.
-    old["momentum_composite"] = old.pop("mom_composite")
-    old["news_volume"] = (None, "news_volume_7d")
-    old["earnings_beat_rate"] = ("earnings_beat_rate", "earnings_beat_rate")
-    assert factors.SIGNAL_COLUMN_MAP == old
-
-
-def test_eligibility():
-    from eligibility.registry import SIGNAL_ELIGIBILITY
-
-    def norm(d):
-        return {k: (v["description"], " ".join(textwrap.dedent(v["eligible_sql"]).split()))
-                for k, v in d.items()}
-    assert norm(factors.SIGNAL_ELIGIBILITY) == norm(SIGNAL_ELIGIBILITY)
+def test_resolved_discrepancies():
+    # momentum: dropped from SIGNAL_WEIGHTS 2026-07-05 but never benched
+    assert {"mom_6m_adj", "mom_12m_adj"} <= set(factors.FACTOR_LIBRARY)
+    # pt_upside: pulled (ADR 0045), only zero weights were left
+    assert factors.FACTOR_STATUS["pt_upside"] == "BLOCKED"
+    # financial_quality/_recovery carry their alias financial_signal range
+    assert factors.VALIDATION_RANGES["financial_quality"] == (-3, 3, True)
+    # backtest keys on the registry id; news_volume is backtested; v2 column known
+    assert "momentum_composite" in factors.SIGNAL_COLUMN_MAP and "mom_composite" not in factors.SIGNAL_COLUMN_MAP
+    assert factors.SIGNAL_COLUMN_MAP["news_volume"] == (None, "news_volume_7d")
+    assert factors.SIGNAL_COLUMN_MAP["earnings_beat_rate"] == ("earnings_beat_rate", "earnings_beat_rate")
+    # momentum ranks mom_12m in SMALL, mom_6m elsewhere — one alias, tier-aware
+    assert factors.signal_for("momentum", "SMALL") == "mom_12m_adj"
+    assert factors.signal_for("momentum", "LARGE") == factors.signal_for("momentum") == "mom_6m_adj"
 
 
 def test_partition_holds():
     assert factors.partition_check() == ([], [])
 
 
-def test_every_producer_fn_exists():
+def test_wired_factors_follow_weights():
+    wired = {k for tw in config.SIGNAL_WEIGHTS.values() for k, w in tw.items() if w}
+    assert set(health_score.WIRED_FACTORS) == wired
+    for key in wired:   # every wired factor is scored, frozen and trust-rolled-up
+        assert key in factors.SCREENER_COLS
+        assert factors.SCREENER_COLS[key] in pit_replay.INPUT_COLS
+        assert key in health_score.FACTOR_UPSTREAM_TABLES
+        assert factors.status(factors.signal_for(key)) == "WIRED"
+
+
+def test_pit_columns_ranged_and_produced():
+    for col in factors.PIT_COLUMNS[3:]:
+        assert col in factors.VALIDATION_RANGES, col
     for name, spec in factors.PIT_PRODUCERS.items():
         if spec["fn"]:
-            assert callable(getattr(reconstruct_pit, spec["fn"], None)) or spec["fn"] == "pit_delivery", name
+            assert callable(getattr(reconstruct_pit, spec["fn"], None)), name
+    for sid, (v1, v2) in factors.SIGNAL_COLUMN_MAP.items():
+        assert v2 is None or v2 in factors.PIT_COLUMNS, sid
+
+
+def test_live_pit_cols_are_screener_columns():
+    assert set(factors.LIVE_PIT_COLS) <= set(factors.SCREENER_INPUT_COLS)

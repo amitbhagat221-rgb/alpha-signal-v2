@@ -16,87 +16,10 @@ Consumed by:
 Plan 0005 Phase A. See docs/plans/0005-data-confidence-to-95.md.
 """
 
-# Each entry: signal_id (matches scoring/screener.py SIGNAL_COLS key) →
+# Each entry: signal_id (the config.SIGNAL_WEIGHTS key) →
 # dict with `description` (human) and `eligible_sql` (returns DISTINCT sid).
-SIGNAL_ELIGIBILITY = {
-    "consensus": {
-        "description": "Stocks with sell-side analyst attribution (yfinance: total_analysts > 0 OR price_target IS NOT NULL)",
-        "eligible_sql": """
-            SELECT DISTINCT sid FROM analyst_consensus
-            WHERE total_analysts IS NOT NULL OR price_target IS NOT NULL
-        """,
-    },
-    "earnings_yield": {
-        "description": "Stocks with ≥4 quarters of EPS in quarterly_income AND a close price",
-        "eligible_sql": """
-            SELECT DISTINCT qi.sid FROM quarterly_income qi
-            WHERE qi.sid IN (SELECT DISTINCT sid FROM stock_prices)
-              AND qi.eps IS NOT NULL
-            GROUP BY qi.sid HAVING COUNT(*) >= 4
-        """,
-    },
-    "accruals": {
-        "description": "Stocks with annual_balance_sheet + annual_cash_flow, EX-Financials "
-                       "(banks have no operating accruals — mirrors lineage.py sector_exclusions / config.financial_sectors)",
-        "eligible_sql": """
-            SELECT DISTINCT abs.sid FROM annual_balance_sheet abs
-            INNER JOIN annual_cash_flow acf ON acf.sid = abs.sid
-            WHERE abs.sid NOT IN (SELECT sid FROM stocks WHERE sector = 'Financials')
-        """,
-    },
-    "piotroski": {
-        "description": "Stocks with ≥2 annual periods (YoY F-score baseline), EX-Financials "
-                       "(F-score components are non-financial-firm constructs — mirrors lineage.py sector_exclusions)",
-        "eligible_sql": """
-            SELECT sid FROM annual_balance_sheet
-            WHERE sid NOT IN (SELECT sid FROM stocks WHERE sector = 'Financials')
-            GROUP BY sid HAVING COUNT(*) >= 2
-        """,
-    },
-    "momentum": {
-        "description": "Stocks with ≥126 trading days of price history (~6mo for mom_6m / mom_12m)",
-        "eligible_sql": """
-            SELECT sid FROM stock_prices
-            GROUP BY sid HAVING COUNT(*) >= 126
-        """,
-    },
-    "book_to_price": {
-        "description": "Stocks with annual_balance_sheet.total_equity + shares_outstanding>0 + a close price",
-        "eligible_sql": """
-            SELECT DISTINCT abs.sid FROM annual_balance_sheet abs
-            WHERE abs.total_equity IS NOT NULL
-              AND abs.shares_outstanding IS NOT NULL AND abs.shares_outstanding > 0
-              AND abs.sid IN (SELECT DISTINCT sid FROM stock_prices)
-        """,
-    },
-    "promoter": {
-        "description": "Stocks with ≥2 quarterly shareholding snapshots (promoter QoQ delta needs prior quarter)",
-        "eligible_sql": """
-            SELECT sid FROM shareholding
-            GROUP BY sid HAVING COUNT(*) >= 2
-        """,
-    },
-    "announcement_car": {
-        "description": "Stocks with a BSE Result announcement in the trailing ~95d (the CAR "
-                       "staleness gate is 90d + window-close; names without a fresh print have "
-                       "no reading and must not be coverage-penalised for it)",
-        "eligible_sql": """
-            SELECT DISTINCT sid FROM bse_announcements
-            WHERE category='Result' AND sid IS NOT NULL AND dt_tm IS NOT NULL
-              AND date(dt_tm) >= date('now', '-95 day') AND date(dt_tm) <= date('now')
-        """,
-    },
-    "smart_money": {
-        "description": "Stocks with bulk_deals or delivery activity in last 90d (smart-money signal aggregates both)",
-        "eligible_sql": """
-            SELECT sid FROM (
-                SELECT DISTINCT sid FROM bulk_deals WHERE deal_date >= date('now', '-90 days')
-                UNION
-                SELECT DISTINCT sid FROM stock_prices WHERE date >= date('now', '-90 days')
-            )
-        """,
-    },
-}
+# Declared per factor ("eligibility") in factors.py; this is the derived view.
+from factors import SIGNAL_ELIGIBILITY  # noqa: E402
 
 
 # Universe baseline — every sid we're tracking. Used to compute INELIGIBLE rows.

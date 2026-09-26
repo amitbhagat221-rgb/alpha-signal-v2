@@ -31,18 +31,18 @@ import argparse
 import numpy as np
 import pandas as pd
 
+import factors
 from config import SIGNAL_WEIGHTS, SIGNAL_GROUPS
 from db import read_sql
 from tools.backtest_pit import SIGNAL_COLUMN_MAP
 from tools.ic_decay import _fwd_panel, _price_series
-from tools.multiple_testing import _ALIAS
 
 HORIZONS = [20, 63, 126, 252]      # trading days ≈ 1mo / 3mo / 6mo / 1yr
 ANCHOR_GAP = 21                    # monthly anchors ≈ 21 trading days apart
 
 
 def _v2col(config_key: str) -> str | None:
-    bid = _ALIAS.get(config_key, config_key)
+    bid = factors.signal_for(config_key)
     return SIGNAL_COLUMN_MAP.get(bid, (None, None))[1]
 
 

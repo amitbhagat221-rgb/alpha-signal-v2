@@ -31,6 +31,9 @@ import factors
 from db import read_sql
 from tools.backtest_pit import SIGNAL_COLUMN_MAP, _compute_ic
 
+# weight key → registry id (tier-default); re-exported for tools/expected_return.
+WEIGHT_KEY_TO_SIGNAL = factors.WEIGHT_KEY_TO_SIGNAL
+
 RECENT_WINDOW = 12
 DECAY_MAGNITUDE_FLOOR = 0.25   # last-12 |mean IC| < 25% of all-time |mean IC| → decayed
 

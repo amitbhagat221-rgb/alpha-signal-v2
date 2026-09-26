@@ -36,149 +36,20 @@ full per-snapshot breakdown. Not fixed here — rebuilding the panel against
 """
 
 import argparse
-from datetime import datetime
 
 import numpy as np
 import pandas as pd
 from scipy.stats import spearmanr
 
-from db import get_db, get_backtest_cadence, read_sql, upsert_df
+import factors
+from db import get_backtest_cadence, read_sql, upsert_df
 
 
-# Mapping: signal_id (registry) → (v1_column, v2_column)
-# v1 column may be None for v2-only signals (m_score, z_score, etc.)
-# Some signals are pure-stock-feature → ranked vs forward return
-SIGNAL_COLUMN_MAP = {
-    # Quality
-    "piotroski_f_score":   ("piotroski_f", "piotroski_f"),
-    "cf_accruals_ratio":   ("cf_accruals", "cf_accruals"),
-    "bs_accruals_ratio":   ("bs_accruals", "bs_accruals"),
-    "earnings_persistence": ("eps_cv", "earnings_persistence"),
-    "earnings_beat_rate":  ("earnings_beat_rate", None),
-    "roe":                 (None, "roe"),
-    "roa":                 (None, "roa"),
-    "debt_to_equity":      (None, "debt_to_equity"),
-    "profit_margin":       (None, "profit_margin"),
-    # Value
-    "earnings_yield":      ("earnings_yield", "earnings_yield"),
-    "book_to_price":       ("book_to_price", "book_to_price"),
-    "position_52w":        (None, "position_52w"),
-    # Growth
-    "revenue_growth_yoy":  (None, "revenue_growth_yoy"),
-    "eps_growth_yoy":      (None, "eps_growth_yoy"),
-    # Momentum
-    "mom_6m_adj":          ("mom_6m", "mom_6m"),
-    "mom_12m_adj":         ("mom_12m", "mom_12m"),
-    "macd_signal":         (None, "macd_bullish"),
-    # Ownership
-    "promoter_qoq":        ("promoter_qoq", "promoter_qoq"),
-    "promoter_trend_4q":   (None, "promoter_trend_4q"),
-    "pledge_quality":      ("pledge_quality", "pledge_quality"),
-    # Forensic
-    "m_score":             (None, "m_score"),
-    "z_score":             (None, "z_score"),
-    # Smart Money
-    "avg_delivery_pct_30d": ("avg_delivery_pct_30d", "avg_delivery_pct_30d"),
-    "smart_money_score":   (None, "smart_money_score"),   # composite (bulk+delivery); v2-only, PIT-thin (bulk_deals ~1mo depth)
-    "delivery_anomaly_z":  (None, "delivery_anomaly_z"),
-    "bulk_deal_signal":    (None, "bulk_deal_signal"),
-    "short_selling_signal": (None, "short_selling_signal"),
-    # Sector momentum — Plan 0006 Phase E (per-stock = sector's medium RS z)
-    "sector_momentum":     (None, "sector_momentum"),
-    # Sector tilt — ADR 0041 (per-stock = sector's 6m-mom + macro z-ensemble)
-    "sector_tilt":         (None, "sector_tilt"),
-    # Options/F&O OI factors — Plan 0002 §3.2.2 (off fno_pcr_history)
-    "pcr_oi":              (None, "pcr_oi"),
-    "pcr_volume":          (None, "pcr_volume"),
-    "max_pain_distance":   (None, "max_pain_distance"),
-    "oi_buildup_signal":   (None, "oi_buildup_signal"),
-    # Options/F&O IV factors — Plan 0002 §3.2.2 (off fno_iv_history)
-    "iv_skew_25d":         (None, "iv_skew_25d"),
-    "iv_term_structure":   (None, "iv_term_structure"),
-    "iv_realised_spread":  (None, "iv_realised_spread"),
-    "iv_percentile_1y":    (None, "iv_percentile_1y"),
-    # Microstructure factors — Plan 0002 §3.2.3 (daily-derivable, monthly cadence)
-    "intraday_range_compression": (None, "intraday_range_compression"),
-    "closing_strength_1m":        (None, "closing_strength_1m"),
-    "opening_gap_freq_1m":        (None, "opening_gap_freq_1m"),
-    "vwap_deviation_5d":          (None, "vwap_deviation_5d"),
-    "bidask_spread_proxy":        (None, "bidask_spread_proxy"),
-    "kyle_lambda":                (None, "kyle_lambda"),
-    # Event-time / PEAD factors — Plan 0002 §3.2.5 (monthly cadence)
-    "earnings_surprise_std":      (None, "earnings_surprise_std"),
-    "pead_drift_60d":             (None, "pead_drift_60d"),
-    "corporate_action_density":   (None, "corporate_action_density"),
-    "buyback_announcement_30d":   (None, "buyback_announcement_30d"),
-    # §3.2.5 — announcement-window CAR (market-implied earnings surprise, monthly cadence)
-    "announcement_car":           (None, "announcement_car"),
-    # ADR 0042 — BSE governance/forensic resignation event factor (monthly cadence)
-    "governance_resignation":     (None, "governance_resignation"),
-    # Audit Factor-F3 — LARGE-tier canonical rebuild candidates (monthly cadence)
-    "low_vol_252d":               (None, "low_vol_252d"),
-    "st_reversal_21d":            (None, "st_reversal_21d"),
-    "asset_growth_yoy":           (None, "asset_growth_yoy"),
-    # Plan 0012 C3 — momentum retest hypothesis (WS2.6, monthly cadence)
-    "residual_momentum_12_1":     (None, "residual_momentum_12_1"),
-    # Plan 0012 C4 — lottery retest hypothesis (WS2.7, monthly cadence)
-    "max_lottery_21d":            (None, "max_lottery_21d"),
-    # §3.2.4 — earnings-call NLP factors (off nlp_scores, look-ahead-safe available_date)
-    "earnings_call_tone_qoq":     (None, "earnings_call_tone_qoq"),
-    "forward_looking_intensity":  (None, "forward_looking_intensity"),
-    "uncertainty_word_density":   (None, "uncertainty_word_density"),
-    # Macro betas — Plan 0002 §3.2.7 (monthly cadence; industry_id is a CONTROL
-    # and deliberately absent — IC of a categorical code is meaningless)
-    "oil_beta":                   (None, "oil_beta"),
-    "metals_beta":                (None, "metals_beta"),
-    "inr_beta":                   (None, "inr_beta"),
-    "gold_beta":                  (None, "gold_beta"),
-    "rate_beta":                  (None, "rate_beta"),
-    "credit_beta":                (None, "credit_beta"),
-    # Behavior tier — PIT helpers shipped 2026-05-24
-    "insider_signal":      (None, "insider_score"),
-    "sentiment_7d":        (None, "sentiment_7d"),
-    # Consensus
-    "pt_upside":           (None, "pt_upside"),
-    "pt_revision_yoy":     (None, "pt_revision_yoy"),
-    "eps_revision_yoy":    (None, "eps_revision_yoy"),
-    "consensus_signal_combined": (None, "consensus_signal_combined"),
-    # Composites
-    "value_composite":     (None, "value_composite"),
-    "quality_composite":   (None, "quality_composite"),
-    "growth_composite":    (None, "growth_composite"),
-    "mom_composite":       (None, "mom_composite"),
-    # Track 3 cluster (plan 0003)
-    "revenue_cv_5y":       (None, "revenue_cv_5y"),
-    "relative_turnover":   (None, "relative_turnover"),
-    "relative_growth":     (None, "relative_growth"),
-    "share_momentum":      (None, "share_momentum"),
-    # Track 3 standalone factors
-    "ccc":                 (None, "ccc"),
-    "margin_slope":        (None, "margin_slope"),
-    "wc_intensity":        (None, "wc_intensity"),
-    "interest_coverage":   (None, "interest_coverage"),
-    "roic":                (None, "roic"),
-    "fcf_yield":           (None, "fcf_yield"),
-    "roiic":               (None, "roiic"),
-    "gross_profitability": (None, "gross_profitability"),
-    # Forensic / capital-allocation batch (plan 0002 §3.2.1)
-    "dso_change_yoy":        (None, "dso_change_yoy"),
-    "dio_change_yoy":        (None, "dio_change_yoy"),
-    "nwc_to_revenue":        (None, "nwc_to_revenue"),
-    "sloan_accruals_full":   (None, "sloan_accruals_full"),
-    "sga_to_revenue_change": (None, "sga_to_revenue_change"),
-    "fcf_margin":            (None, "fcf_margin"),
-    "capex_to_dep":          (None, "capex_to_dep"),
-    "goodwill_to_assets":    (None, "goodwill_to_assets"),
-    "debt_structure":        (None, "debt_structure"),
-    "asset_tangibility":     (None, "asset_tangibility"),
-    # Track 2.2b — Financial sub-model (Banks + NBFCs only)
-    "financial_signal":      (None, "financial_signal"),
-    # Phase 2.2b-v2 (2026-05-29 #2) — direction-split:
-    "financial_quality":     (None, "financial_quality"),
-    "financial_recovery":    (None, "financial_recovery"),
-    # forward return — same column in both
-    "_response": ("fwd_return_20d", "fwd_return_20d"),
-}
+# Mapping: signal_id (registry) → (v1_column, v2_column) for every IC-rankable
+# factor (v1 column None for v2-only signals), plus "_response" → fwd_return_20d.
+# Derived from factors.py — sector/portfolio-level and CONTROL factors (industry_id:
+# the IC of a categorical code is meaningless) are not in it.
+SIGNAL_COLUMN_MAP = factors.SIGNAL_COLUMN_MAP
 
 
 def _verdict(t):

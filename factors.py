@@ -22,8 +22,15 @@ Entry fields (keyed by the registry signal id — the old BACKTEST_SIGNALS "sign
   cadence          backtest cadence: monthly | weekly | sector_portfolio | portfolio
   producer         tools/reconstruct_pit --signal group that writes pit_column_v2
   pit_range        (lo, hi) — values outside are DISCARDED (NaN), in PIT and live
-  bench            non-wired home: LIBRARY (sub-bar, ADR 0017) | PROPOSED |
-                   BLOCKED | SUPERSEDED | CONTROL. Ignored while weighted.
+  bench            non-wired home (ADR 0017; audit Factor-F2 — every factor must
+                   be weighted or benched, factors.partition_check()):
+                     LIBRARY    computed + PIT-reconstructable, below the |t|≥1.5
+                                promotion bar (or parked pending sign/regime review)
+                     PROPOSED   KEEP-grade or zero-backtest-row; a visible
+                                promotion candidate. Wiring is a human decision.
+                     BLOCKED    data or methodology blocker
+                     SUPERSEDED replaced by another id; kept for lineage/back-compat
+                     CONTROL    categorical/structural covariate, not alpha
   weight_key       config.SIGNAL_WEIGHTS key that scores this factor
   tiers            restrict weight_key → this id to these tiers (momentum 12m ↔ SMALL)
   screener_col     column in scoring.screener._load_signals() output
@@ -33,6 +40,19 @@ Entry fields (keyed by the registry signal id — the old BACKTEST_SIGNALS "sign
   uhs_tables       trust_verdicts tables behind the factor (scoring/health_score)
   freshness_table  primary upstream table for the UHS freshness dim
   eligibility      {description, eligible_sql} — who SHOULD have a score (plan 0005)
+
+Cadence taxonomy (2026-05-24, ADR 0022):
+  monthly          slow-moving fundamentals/momentum/shareholding/analyst; C13b
+                   framework; fwd_return_20d, no Newey-West. The default.
+  weekly           behavioural / event / news / daily-published; Friday anchors,
+                   Newey-West when the signal window overlaps the eval gap.
+  sector_portfolio sector-level signals — a sector-tilt portfolio test, not IC.
+  portfolio        the end-state composite — Track 2.4 portfolio backtest.
+Data status taxonomy ("status", readiness — NOT lifecycle): READY (in a PIT table),
+PARTIAL, MISSING (raw data exists, reconstruction not written), PROPOSED (v1
+inventory, no v2 module), BLOCKED (raw data insufficient), plus DROPPED /
+DEGRADED / SUPERSEDED / CONTROL markers. Everything — even DROP verdicts — stays
+registered: regimes shift. IC / t / verdict live in pit_ic_by_tier_v2, never here.
 
 No imports of db/config at module level — db.py re-exports the registry views, and
 config is only read lazily (weights) — so both can import this module.
