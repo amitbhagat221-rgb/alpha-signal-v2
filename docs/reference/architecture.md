@@ -38,7 +38,7 @@ Heavy or slow steps (news enrichment, regulatory classification, broker recos wi
 | Tables + descriptions | `schema.sql`, `tables.TABLES`; live: `sqlite3 data/alpha_signal.db .tables` |
 | Factor registry | `db.BACKTEST_SIGNALS` (all), `db.FACTOR_LIBRARY` (sub-bar), `db.BACKTEST_CADENCE` |
 | Production weights | `config.SIGNAL_WEIGHTS` → [signal-weights.md](signal-weights.md) for the rationale |
-| Tiers + liquidity floors | `stocks.cap_tier`, `config.SCREEN["min_adtv_inr"]`, `tools/classify_micro_tier.py`, `config.EXCLUDED_FROM_PICKS` |
+| Tiers + liquidity floors | `stocks.cap_tier`, `config.PORTFOLIO["min_adtv_inr"]`, `tools/classify_micro_tier.py`, `config.EXCLUDED_FROM_PICKS` |
 | Per-signal eligibility | `eligibility/registry.py` → `universe_eligibility` |
 | Factor lineage | `lineage.FACTOR_LINEAGE` (ADR 0027) |
 | File outputs watched for freshness | `config.FILE_OUTPUTS` |

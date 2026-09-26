@@ -90,7 +90,7 @@ These sit in a plaintext shell file. Move them to a secret manager, or at least 
 
 ## 6. The data model in one screen
 
-- **Universe and tiers:** `stocks.cap_tier`. LARGE = top 100 by market cap, MID = ranks 101–250, SMALL = the rest, and MICRO = illiquid names carved out of SMALL by `tools/classify_micro_tier.py`. MICRO is classified but never picked (ADR 0026). The liquidity floor is `config.SCREEN["min_adtv_inr"]` (₹1 Cr/day, 20d median); MICRO uses its own ₹1 Cr ADTV gate in `classify_micro_tier.py`. Ranking is always within one tier (ADR 0005).
+- **Universe and tiers:** `stocks.cap_tier`. LARGE = top 100 by market cap, MID = ranks 101–250, SMALL = the rest, and MICRO = illiquid names carved out of SMALL by `tools/classify_micro_tier.py`. MICRO is classified but never picked (ADR 0026). The screener has no ADTV floor; the ₹1 Cr/day liquidity floor is applied at portfolio construction (`config.PORTFOLIO["min_adtv_inr"]`), and MICRO uses its own ₹1 Cr ADTV gate in `classify_micro_tier.py`. Ranking is always within one tier (ADR 0005).
 - **Financials** rank through the generic screener. `financial_signal_scores` is display-only (ADR 0048).
 - **Factors:** each `signals/*` module writes its own `*_scores` table. Every factor is registered in `db.BACKTEST_SIGNALS` and PIT-backtested. Only validated ones carry weight ([signal-weights.md](docs/reference/signal-weights.md), ADRs 0017/0043/0049).
 - **PIT:** backtests read `daily_snapshots_pit` / `daily_snapshots_pit_v1`, never live tables. Corporate actions are composed at compute time (ADR 0010).
