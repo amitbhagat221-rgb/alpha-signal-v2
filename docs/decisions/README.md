@@ -83,3 +83,4 @@ Status key: **A** accepted · **P→N** partly superseded by N · **S→N** supe
 | 0049 | [Honest weight re-derivation](0049-honest-weight-rederivation.md) | A |
 | 0050 | [Wire announcement_car](0050-wire-announcement-car.md) | A |
 | 0051 | [Roadmap-to-90 decisions D1–D12](0051-roadmap-to-90-decisions-d1-d12.md) | A (decision register for plan 0011) |
+| 0052 | [Seven building blocks: one as-of dataflow graph](0052-seven-building-blocks.md) | P (proposed; plan 0015) |
