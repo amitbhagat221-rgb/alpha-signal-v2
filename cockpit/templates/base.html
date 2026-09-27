@@ -31,107 +31,16 @@
 <body class="font-body antialiased">
     {% from "_icons.html" import icon %}
 
-    {# Shared shell for both apps: the ops app overrides the rail + mobile tabs
-       (cockpit_ops/templates/ops_base.html) and keeps everything else. #}
+    {# Shared shell for both apps: the rail + mobile bar render from the app's PAGES
+       list (cockpit/pages.py, cockpit_ops/pages.py → `nav`); ops_base.html only
+       swaps the head identity. #}
     {% block nav %}
+    {% from "_nav.html" import rail, mobile with context %}
     <!-- Left Rail Navigation (desktop) -->
-    <nav class="left-rail">
-        <a href="/" class="brand-row" aria-label="Alpha Signal">
-            <span class="brand-mark">{{ icon("diamond", 20) }}</span>
-            <span class="brand-text">
-                <span class="brand-title">Alpha Signal</span>
-                <span class="brand-subtitle">v2 cockpit</span>
-            </span>
-        </a>
-
-        <div class="nav-section">
-            <div class="nav-section-label">Daily</div>
-            <a href="/" class="nav-item {% if page == 'brief' %}active{% endif %}">
-                <span class="nav-icon">{{ icon("sun") }}</span>
-                <span class="nav-text"><span class="nav-title">Morning Brief</span><span class="nav-subtitle">Today's read &amp; top picks</span></span>
-            </a>
-            <a href="/actions" class="nav-item {% if page == 'actions' %}active{% endif %}">
-                <span class="nav-icon">{{ icon("target") }}</span>
-                <span class="nav-text"><span class="nav-title">Action Queue</span><span class="nav-subtitle">Buys &amp; sells to act on</span></span>
-            </a>
-            <a href="/explorer" class="nav-item {% if page == 'explorer' %}active{% endif %}">
-                <span class="nav-icon">{{ icon("search") }}</span>
-                <span class="nav-text"><span class="nav-title">Explorer</span><span class="nav-subtitle">Browse 2,448 stocks</span></span>
-            </a>
-            <a href="/news" class="nav-item {% if page == 'news' %}active{% endif %}">
-                <span class="nav-icon">{{ icon("activity") }}</span>
-                <span class="nav-text"><span class="nav-title">News</span><span class="nav-subtitle">Inshorts-style daily feed</span></span>
-            </a>
-        </div>
-
-        <div class="nav-section">
-            <div class="nav-section-label">Analysis</div>
-            <a href="/portfolio" class="nav-item {% if page == 'portfolio' %}active{% endif %}">
-                <span class="nav-icon">{{ icon("briefcase") }}</span>
-                <span class="nav-text"><span class="nav-title">Portfolio</span><span class="nav-subtitle">Holdings &amp; tier mix</span></span>
-            </a>
-            <a href="/sectors" class="nav-item {% if page == 'sectors' %}active{% endif %}">
-                <span class="nav-icon">{{ icon("layers") }}</span>
-                <span class="nav-text"><span class="nav-title">Sectors</span><span class="nav-subtitle">Industry rotation</span></span>
-            </a>
-            <a href="/model" class="nav-item {% if page in ['model','model-variants','model-outcomes'] %}active{% endif %}">
-                <span class="nav-icon">{{ icon("sliders") }}</span>
-                <span class="nav-text"><span class="nav-title">Model &amp; Backtest</span><span class="nav-subtitle">Weights · variants · outcomes</span></span>
-            </a>
-            <a href="/multibagger" class="nav-item {% if page == 'multibagger' %}active{% endif %}">
-                <span class="nav-icon">{{ icon("trending-up") }}</span>
-                <span class="nav-text"><span class="nav-title">Multibagger</span><span class="nav-subtitle">Quality-gated watchlist</span></span>
-            </a>
-        </div>
-
-        <div class="nav-section">
-            <div class="nav-section-label">Funds</div>
-            <a href="/mutual-funds" class="nav-item {% if page == 'mutual-funds' %}active{% endif %}">
-                <span class="nav-icon">{{ icon("pie-chart") }}</span>
-                <span class="nav-text"><span class="nav-title">Mutual Funds</span><span class="nav-subtitle">~14k schemes · scored + ranked</span></span>
-            </a>
-        </div>
-
-        <div class="nav-section" style="margin-top: auto; padding-top: 24px;">
-            <div class="nav-section-label">Ops console</div>
-            <a href="{{ request.url.scheme }}://{{ request.url.hostname }}:3001/system" class="nav-item" target="_blank" rel="noopener"
-               title="Health Center, Pipeline, Command, SQL — runs on port 3001">
-                <span class="nav-icon">{{ icon("zap") }}</span>
-                <span class="nav-text"><span class="nav-title">Open Ops →</span><span class="nav-subtitle">port 3001 (separate service)</span></span>
-            </a>
-        </div>
-    </nav>
+    {{ rail() }}
 
     <!-- Mobile Bottom Tab Bar -->
-    <nav class="mobile-tabs" x-data="{ moreOpen: false }">
-        <a href="/" class="mobile-tab {% if page == 'brief' %}active{% endif %}">
-            <span class="mobile-tab-icon">{{ icon("sun", 22) }}</span><span class="mobile-tab-label">Brief</span>
-        </a>
-        <a href="/news" class="mobile-tab {% if page == 'news' %}active{% endif %}">
-            <span class="mobile-tab-icon">{{ icon("activity", 22) }}</span><span class="mobile-tab-label">News</span>
-        </a>
-        <a href="/actions" class="mobile-tab {% if page == 'actions' %}active{% endif %}">
-            <span class="mobile-tab-icon">{{ icon("target", 22) }}</span><span class="mobile-tab-label">Actions</span>
-        </a>
-        <a href="/explorer" class="mobile-tab {% if page == 'explorer' %}active{% endif %}">
-            <span class="mobile-tab-icon">{{ icon("search", 22) }}</span><span class="mobile-tab-label">Explore</span>
-        </a>
-        <button type="button" class="mobile-tab {% if page in ['portfolio','sectors','model','model-variants','model-outcomes','flow','command','system','sql'] %}active{% endif %}"
-                @click="moreOpen = !moreOpen">
-            <span class="mobile-tab-icon">{{ icon("menu", 22) }}</span><span class="mobile-tab-label">More</span>
-        </button>
-
-        <!-- More sheet -->
-        <div x-show="moreOpen" x-cloak x-transition:enter.duration.150ms x-transition:enter-start.opacity.0.transform.translate-y-2 x-transition:enter-end.opacity.100
-             @click.away="moreOpen = false" class="more-sheet">
-            <a href="/portfolio" class="more-item {% if page == 'portfolio' %}active{% endif %}">{{ icon("briefcase", 16) }}<span>Portfolio</span></a>
-            <a href="/sectors" class="more-item {% if page == 'sectors' %}active{% endif %}">{{ icon("layers", 16) }}<span>Sectors</span></a>
-            <a href="/model" class="more-item {% if page == 'model' %}active{% endif %}">{{ icon("sliders", 16) }}<span>Model</span></a>
-            <a href="/news" class="more-item {% if page == 'news' %}active{% endif %}">{{ icon("activity", 16) }}<span>News</span></a>
-            <a href="/mutual-funds" class="more-item {% if page == 'mutual-funds' %}active{% endif %}">{{ icon("pie-chart", 16) }}<span>Funds</span></a>
-            <a href="{{ request.url.scheme }}://{{ request.url.hostname }}:3001/system" target="_blank" rel="noopener" class="more-item">{{ icon("zap", 16) }}<span>Ops →</span></a>
-        </div>
-    </nav>
+    {{ mobile() }}
     {% endblock %}
 
     <!-- Main Content -->

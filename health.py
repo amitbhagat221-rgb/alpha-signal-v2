@@ -38,7 +38,7 @@ from typing import Optional
 
 import pandas as pd
 
-from config import EXCLUDED_FROM_PICKS, TIERS, VIX_REGIMES
+from config import EXCLUDED_FROM_PICKS, REGIMES, TIERS
 
 from db import (get_db, read_sql, _table_date_range, _compute_freshness, data_health,
                 table_step_meta, TABLES)
@@ -688,7 +688,7 @@ TABLE_PROFILES = {
         "expected_rows": 1,
         "critical_columns": ["regime", "alloc_large", "alloc_mid", "alloc_small"],
         "validity_checks": [
-            {"column": "regime", "in": list(VIX_REGIMES), "label": "regime"},
+            {"column": "regime", "in": list(REGIMES), "label": "regime"},
             {"column": "alloc_large", "min": 0, "max": 1, "label": "alloc_large"},
         ],
     },

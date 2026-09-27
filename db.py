@@ -773,7 +773,7 @@ _DB_REFERENCES = None  # populated lazily by get_db_references()
 # Directories to walk recursively for .py files
 _SCAN_DIRS = ("signals", "scoring", "output", "sources", "cockpit")
 # Top-level files to also scan (pipeline orchestrator etc.)
-_SCAN_ROOT_FILES = ("pipeline.py",)
+_SCAN_ROOT_FILES = ("pipeline.py", "views.py")
 # Files to never count (every table name appears here, which would otherwise
 # pollute every "consumed_by" cell). tables.py sits outside _SCAN_DIRS.
 _SCAN_EXCLUDE = {"db.py"}

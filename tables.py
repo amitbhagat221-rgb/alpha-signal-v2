@@ -494,7 +494,7 @@ TABLES = {
     "daily_snapshots_pit_v1": {
         "kind": "RAW", "domain": "Backtest (PIT)", "date_col": "snapshot_date", "mirror": True,
         "depth": "35 monthly dates (Apr 2023 → Feb 2026)",
-        "description": "Frozen v1 PIT reconstruction — 1,978 stocks × 35 monthly eval dates × 13 signals + precomputed fwd_return_20d. The canonical historical backtest dataset. Source for the C13b t-stats baked into config.SIGNAL_WEIGHTS. Imported via tools/import_v1_pit.py from /home/ubuntu/alpha-signal/data/backtest/reconstructed_signals.csv.",
+        "description": "Frozen v1 PIT reconstruction — 1,978 stocks × 35 monthly eval dates × 13 signals + precomputed fwd_return_20d. The canonical historical backtest dataset. Source for the C13b t-stats behind the factor weights (factors.SIGNAL_WEIGHTS). Imported via tools/import_v1_pit.py from /home/ubuntu/alpha-signal/data/backtest/reconstructed_signals.csv.",
     },
     "factor_horizon_gate": {"kind": "COMPUTED", "domain": "Backtest (PIT)", "date_col": None},
     "historical_universe": {"kind": "COMPUTED", "domain": "Backtest (PIT)", "date_col": "snapshot_date"},
@@ -504,7 +504,7 @@ TABLES = {
     "pit_ic_by_tier_v1": {
         "kind": "RAW", "domain": "Backtest (PIT)", "date_col": None, "mirror": True,
         "depth": "30 rows (10 signals × 3 tiers)",
-        "description": "Canonical IC / t-stat / verdict per signal × cap_tier from v1's 36-period validation. Source-of-truth for every weight in config.SIGNAL_WEIGHTS. Read-only; new t-stats from v2 reconstruction will land in a separate pit_ic_by_tier_v2 table.",
+        "description": "Canonical IC / t-stat / verdict per signal × cap_tier from v1's 36-period validation. Source-of-truth for every weight in factors.SIGNAL_WEIGHTS. Read-only; new t-stats from v2 reconstruction will land in a separate pit_ic_by_tier_v2 table.",
     },
     "pit_ic_by_tier_v2": {"kind": "COMPUTED", "domain": "Backtest (PIT)", "date_col": None},
     "pit_reconstruction_log": {"kind": "LOG", "domain": "Backtest (PIT)", "date_col": None},

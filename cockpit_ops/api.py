@@ -29,16 +29,10 @@ See cockpit_ops/README.md for the split architecture. See ADR 0028 (TBW)
 for the rationale.
 """
 
-import functools
-import glob
 import json
-import re
 import sys
-import time as _time
-from datetime import datetime, date as _date, timedelta
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 
 # Ensure project root is importable (cockpit_ops/ lives at the root)
@@ -46,6 +40,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 import db
+import views
 from db import read_sql, get_db
 
 # Shared decorators — implementations live in cockpit/_shared.py (single-source).
@@ -56,47 +51,9 @@ from cockpit._shared import _ttl_cache, _persisted_cache, safe_json_records
 
 
 def get_pipeline_status(days=7):
-    """Pipeline log for last N days — deduped to one row per (date, step) showing the FINAL state.
-
-    The pipeline writes 2 rows per step: a 'RUNNING' row when the step starts, then a
-    'SUCCESS' or 'FAILED' row when it finishes. We only want to show the latest state.
-    Also: a step is only treated as RUNNING if its started_at is recent (last 5 minutes)
-    AND there's no completion row for it — otherwise it's a stale RUNNING row from a
-    previous run that crashed before writing its completion."""
-    steps = db.rows(
-        """
-        WITH ranked AS (
-            SELECT id, run_date, step_name, status, rows_affected, duration_sec,
-                   error_message, started_at, finished_at,
-                   ROW_NUMBER() OVER (
-                       PARTITION BY run_date, step_name
-                       ORDER BY
-                           CASE status
-                               WHEN 'SUCCESS' THEN 1
-                               WHEN 'FAILED'  THEN 2
-                               WHEN 'RUNNING' THEN 3
-                               ELSE 4
-                           END,
-                           id DESC
-                   ) AS rn
-            FROM pipeline_log
-            WHERE run_date >= date('now', ?)
-        )
-        SELECT run_date, step_name, status, rows_affected, duration_sec,
-               error_message, started_at, finished_at
-        FROM ranked
-        WHERE rn = 1
-        ORDER BY started_at DESC
-        """,
-        [f"-{days} days"],
-    )
-
-    # Mark stale RUNNING rows as ABORTED — they're from runs that crashed mid-step
-    cutoff = (datetime.now() - timedelta(minutes=5)).isoformat()
-    for r in steps:
-        if r["status"] == "RUNNING" and r["started_at"] and r["started_at"] < cutoff:
-            r["status"] = "ABORTED"
-    return steps
+    """Pipeline log for the last N days, one row per (date, step) in its FINAL
+    state, stale RUNNING rows marked ABORTED — views.pipeline_status."""
+    return views.pipeline_status(days)
 
 
 def run_sql_query(query, max_rows=500):
@@ -150,7 +107,8 @@ V1_BACKTEST_DIR = Path("/home/ubuntu/alpha-signal/data/backtest")
 @_persisted_cache(300, name="get_model_overview")
 def get_model_overview():
     """Tier weight tables, signal validation, regime rules. Used by /model."""
-    from config import SIGNAL_WEIGHTS, VIX_REGIMES, PORTFOLIO, TRANSACTION_COSTS_BPS
+    from config import REGIMES, PORTFOLIO, TRANSACTION_COSTS_BPS
+    from factors import SIGNAL_WEIGHTS
 
     # Per-tier signal weights — convert dict to ordered list of (signal, weight, pct).
     tiers = {}
@@ -164,15 +122,16 @@ def get_model_overview():
 
     # VIX regime → allocation table.
     regimes = []
-    for name, (vlo, vhi, large, mid, small) in VIX_REGIMES.items():
+    for name, spec in REGIMES.items():
+        vlo, vhi = spec["vix"]
         regimes.append({
             "regime": name,
             "vix_lo": vlo, "vix_hi": vhi,
-            "alloc_large": large, "alloc_mid": mid, "alloc_small": small,
+            **{f"alloc_{t.lower()}": a for t, a in spec["alloc"].items()},
         })
 
     # Current regime so the page can highlight the active row.
-    current_regime = db.one("SELECT regime, vix_latest FROM regime_state WHERE id = 1")
+    current_regime = views.regime() or {}
 
     # Validation t-stats from v1 backtest (PIT reconstruction, 18 periods).
     validation_csv = V1_BACKTEST_DIR / "reconstructed_ic_by_tier.csv"
@@ -446,57 +405,59 @@ def _safe_float(v, places=2):
 
 @_ttl_cache(300)
 def get_flow_overview():
-    """Pipeline DAG: source → raw → signals → scoring → output. Used by /flow.
-
-    Builds the layered flow from PIPELINE_STEPS with the latest pipeline_log
-    status overlaid so the page shows what last ran and how it went.
-    """
+    """The pipeline as its dataflow graph, for /flow. Everything is derived from the
+    step declarations (graph.py): edges are graph.edges() collapsed to step pairs
+    (blocking = the reader sees this run's write; lagged = the previous run's),
+    layers are the steps' module packages ordered left→right by their mean dataflow
+    depth (longest chain of blocking edges above a step; steps keep run order inside
+    a layer), and each step carries its latest views.step_status() row."""
+    import graph
     from config import PIPELINE_STEPS
 
-    # Latest status per step from pipeline_log.
-    latest = read_sql("""
-        SELECT step_name, status, rows_affected, finished_at, duration_sec, error_message
-        FROM pipeline_log p
-        WHERE p.id = (SELECT MAX(id) FROM pipeline_log
-                      WHERE step_name = p.step_name)
-    """)
-    status_by_step = {r["step_name"]: r.to_dict() for _, r in latest.iterrows()}
+    status_by_step = views.step_status()
+    try:
+        derived = graph.order(PIPELINE_STEPS)
+    except ValueError:  # a declaration cycle — fall back to list order, still render
+        derived = [s["name"] for s in PIPELINE_STEPS]
+    position = {n: i for i, n in enumerate(derived)}
+    parents = {}
+    for w, r, _, kind in graph.edges(PIPELINE_STEPS):
+        if kind == "blocking":
+            parents.setdefault(r, set()).add(w)
+    depth = {}
+    for n in derived:
+        depth[n] = 1 + max((depth[p] for p in parents.get(n, ()) if p in depth), default=-1)
 
-    # Layer by name prefix, explicit names for the rest. The old hand-written
-    # 24-entry map silently hid the other ~60 steps (and their failures) from /flow.
-    PREFIX_LAYERS = [
-        (("fetch_", "scrape_", "universe_"), "Sources"),
-        (("signal_", "compute_", "classify_", "sector_"), "Signals"),
-    ]
-    NAMED_LAYERS = {
-        "news_brief": "Signals",
-        "regime_update": "Scoring", "screener": "Scoring",
-        "refresh_eligibility": "Scoring", "portfolio_construction": "Scoring",
-        "snapshot": "Output", "diff_engine": "Output", "dossier": "Output", "email": "Output",
-    }
-    LAYER_ORDER = ["Sources", "Signals", "Scoring", "Output", "Other"]
+    edges = {}
+    for writer, reader, dataset, kind in graph.edges(PIPELINE_STEPS):
+        e = edges.setdefault((writer, reader), {"from": writer, "to": reader,
+                                                 "kind": kind, "datasets": []})
+        e["datasets"].append(dataset)
+        if kind == "blocking":
+            e["kind"] = "blocking"
+    upstream, downstream = {}, {}
+    for (w, r) in edges:
+        upstream.setdefault(r, []).append(w)
+        downstream.setdefault(w, []).append(r)
 
-    def _layer(name):
-        if name in NAMED_LAYERS:
-            return NAMED_LAYERS[name]
-        for prefixes, layer in PREFIX_LAYERS:
-            if name.startswith(prefixes):
-                return layer
-        return "Other"
+    def _layer(module):
+        return module.split(".")[0].replace("_", " ").title() if "." in module else "Other"
 
-    layers = {ln: [] for ln in LAYER_ORDER}
-    for step in PIPELINE_STEPS:
+    layers = {}
+    for step in PIPELINE_STEPS:   # run order (list order) within a layer
         name = step["name"]
-        layer = _layer(name)
         last = status_by_step.get(name, {})
-        layers[layer].append({
+        layers.setdefault(_layer(step["module"]), []).append({
             "name": name,
             "module": step["module"],
             "function": step["function"],
             "table": step.get("table"),
+            "writes": graph.writes(step),
             "source": step.get("source"),
             "frequency": step.get("frequency"),
             "critical": step.get("critical", False),
+            "upstream": sorted(upstream.get(name, []), key=position.get),
+            "downstream": sorted(downstream.get(name, []), key=position.get),
             "last_status": last.get("status"),
             "last_finished_at": last.get("finished_at"),
             "last_duration_sec": last.get("duration_sec"),
@@ -504,11 +465,21 @@ def get_flow_overview():
             "last_error": last.get("error_message"),
         })
 
-    layered = [{"name": ln, "steps": layers[ln]} for ln in LAYER_ORDER if layers[ln]]
+    def _mean_depth(steps):
+        return sum(depth[s["name"]] for s in steps) / len(steps)
+
+    layered = [{"name": ln, "steps": steps}
+               for ln, steps in sorted(layers.items(), key=lambda kv: _mean_depth(kv[1]))]
+    layer_of = {s["name"]: layer["name"] for layer in layered for s in layer["steps"]}
+    for e in edges.values():
+        e["cross_layer"] = layer_of.get(e["from"]) != layer_of.get(e["to"])
 
     return {
         "layers": layered,
-        "step_count": sum(len(v) for v in layers.values()),
+        "step_count": sum(len(layer["steps"]) for layer in layered),
+        "edges": sorted(edges.values(), key=lambda e: (position[e["from"]], position[e["to"]])),
+        "n_blocking": sum(1 for e in edges.values() if e["kind"] == "blocking"),
+        "n_lagged": sum(1 for e in edges.values() if e["kind"] == "lagged"),
         "failures": [
             s for layer in layered for s in layer["steps"]
             if s.get("last_status") in ("FAILED", "ABORTED")
@@ -532,7 +503,7 @@ def rerun_step(step_name: str) -> dict:
     import sys
     from datetime import datetime, timedelta
     from pathlib import Path
-    from config import PIPELINE_STEPS, LOG_PATH
+    from config import PIPELINE_STEPS
 
     valid = {s["name"] for s in PIPELINE_STEPS}
     if step_name not in valid:
@@ -1012,16 +983,16 @@ def get_factor_health():
     # waiting / trustworthy). Single source of truth so the cockpit, ops API and
     # any chat read the same numbers. See HANDOFF 2026-05-31.
     #
-    # LIVE = actually wired into a production weight scheme (config.SIGNAL_WEIGHTS
+    # LIVE = actually wired into a production weight scheme (factors.SIGNAL_WEIGHTS
     #   / _RETURN / _SHARPE). NOTE: the per-row `in_model` flag means "READY &
     #   |t|>=1.5" — that conflates live + waiting, so it is NOT used here.
     # The screener's weight keys are abstracted names ("consensus", "smart_money")
     # mapping to one canonical signal; keep in sync with screener.SIGNAL_COLS.
-    import config as _cfg
+    import factors as _factors
     from factors import WEIGHT_KEY_TO_SIGNAL as _WEIGHT_KEY_TO_SIGNAL
     wired = set()
     for _sch in ("SIGNAL_WEIGHTS", "SIGNAL_WEIGHTS_RETURN", "SIGNAL_WEIGHTS_SHARPE"):
-        for _tier_w in (getattr(_cfg, _sch, {}) or {}).values():
+        for _tier_w in (getattr(_factors, _sch, {}) or {}).values():
             for _k in _tier_w:
                 wired.add(_WEIGHT_KEY_TO_SIGNAL.get(_k, _k))
     if "mom_6m_adj" in wired:
@@ -1061,7 +1032,7 @@ def get_factor_health():
     ORTHO_THRESHOLD = 0.8
     best_pair = {}  # (a,b) sorted tuple -> {a,b,rho,tier}
     ortho_computed_at = None
-    for _tier in ("LARGE", "MID", "SMALL"):
+    for _tier in views.pickable_tiers():
         _p = PROJECT_ROOT / "data" / f"factor_correlation_{_tier}.json"
         if not _p.exists():
             continue
@@ -1115,10 +1086,10 @@ def get_factor_health():
     if hg is not None and not hg.empty:
         gv = hg["verdict"].value_counts().to_dict()
         hg_idx = {(r.signal, r.cap_tier): r for r in hg.itertuples()}
-        # production-wired (signal,tier) pairs ONLY (config.SIGNAL_WEIGHTS — not the
+        # production-wired (signal,tier) pairs ONLY (factors.SIGNAL_WEIGHTS — not the
         # RETURN/SHARPE dry-run variants), so the count matches what's deployed.
         live_rows = []
-        for _tier, _tw in (getattr(_cfg, "SIGNAL_WEIGHTS", {}) or {}).items():
+        for _tier, _tw in _factors.SIGNAL_WEIGHTS.items():
             for _k in _tw:
                 _sig = _WEIGHT_KEY_TO_SIGNAL.get(_k, _k)
                 row = hg_idx.get((_sig, _tier))
@@ -1382,6 +1353,28 @@ def _cc_factor_library():
     n_in_prod = len([f for f in factors if f["in_production"]])
     n_in_library = n_built - n_in_prod
     return factors, n_built, n_in_prod, n_in_library
+
+
+def _tier_weight_items():
+    """One ("TIER: n weighted signals", "top-3 weights") line per pickable tier,
+    read from factors.SIGNAL_WEIGHTS (was hand-written and had gone stale)."""
+    from factors import weights
+    items = []
+    for tier in views.pickable_tiers():
+        w = weights().get(tier, {})
+        top = sorted(w.items(), key=lambda kv: -kv[1])[:3]
+        items.append((f"{tier}: {len(w)} weighted signals",
+                      " / ".join(f"{k} {v:.2f}" for k, v in top) + (" ..." if len(w) > 3 else "")))
+    return items
+
+
+def _book_label():
+    """"Top 5 LARGE / MID / SMALL" from config.PORTFOLIO["picks_per_tier"]."""
+    from config import PORTFOLIO
+    n = PORTFOLIO["picks_per_tier"]
+    sizes = {n.get(t) for t in views.pickable_tiers()}
+    head = f"Top {sizes.pop()}" if len(sizes) == 1 else "Top N"
+    return f"{head} " + " / ".join(views.pickable_tiers())
 
 
 @_persisted_cache(300, name="get_command_centre")
@@ -1776,9 +1769,7 @@ def get_command_centre():
             "name": "Cap-tier composite",
             "summary": "Within-tier weighted sum of validated signals (cf C13b rubric)",
             "items": [
-                ("LARGE: 7 weighted signals", "consensus 1.0× / piotroski 0.1× / EY 0.5× ..."),
-                ("MID: 7 weighted signals", "consensus 0.5× / piotroski 0.2× / EY 0.5× ..."),
-                ("SMALL: 7 weighted signals", "EY 1.0× / piotroski 0.15× / promoter 1.0× ..."),
+                *_tier_weight_items(),
                 ("Weight tiers", "|t|≥2.5 → 1.0× / 1.5-2.5 → 0.5× / 0.5-1.5 → 0.2× / <0.5 → 0×"),
             ],
         },
@@ -1807,7 +1798,7 @@ def get_command_centre():
             "summary": "Top picks per cap tier with regime context, dossiers",
             "items": [
                 ("/", "Cockpit Morning Brief route"),
-                ("Top 5 LARGE / MID / SMALL", "Ranked by composite within tier, then the pick gate"),
+                (_book_label(), "Ranked by composite within tier, then the pick gate"),
                 ("Regime banner", "Bullish/Neutral/Bearish header"),
             ],
         },
@@ -1824,7 +1815,6 @@ def get_command_centre():
             "items": [
                 ("/explorer", "Universe scan + per-stock detail"),
                 ("/actions", "Buy / Watch / Exit candidates"),
-                ("/signals", "Per-signal cross-section"),
                 ("/portfolio", "Personal position tracking"),
             ],
         },
@@ -2271,9 +2261,7 @@ def get_health_overview(force=False):
 
     # Picks tile: total picks today + integrity status
     try:
-        n_picks = int(db.scalar(
-            "SELECT COUNT(*) FROM daily_picks "
-            "WHERE pick_date = (SELECT MAX(pick_date) FROM daily_picks)", default=0))
+        n_picks = int(views.pick_count())
     except Exception:
         n_picks = 0
 

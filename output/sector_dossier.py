@@ -30,6 +30,7 @@ import json
 import os
 from datetime import datetime
 
+import views
 from db import get_db, read_sql
 from output._llm import MODELS, llm_json
 
@@ -153,14 +154,10 @@ def _build_sector_context(sector, snapshot_date):
         )
 
     # Long-horizon structural context from the auto-generated sector dossier.
-    meta = read_sql(
-        "SELECT payload FROM sector_metadata WHERE sector = ? ORDER BY source DESC LIMIT 1",
-        params=[sector],
-    )
+    p = views.sector_narrative(sector)
     summary = ""
     growth_themes, segments, india_specific, cyclicality = [], [], "", ""
-    if not meta.empty:
-        p = _loads(meta.iloc[0]["payload"], {})
+    if p:
         summary = p.get("summary", "") or ""
         drivers = p.get("drivers", {}) or {}
         growth_themes = [d.get("item", "") for d in (drivers.get("growth") or [])][:5]

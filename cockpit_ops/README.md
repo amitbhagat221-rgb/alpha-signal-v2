@@ -22,15 +22,21 @@ Console) split out of the main trading cockpit so:
 | `/api/pipeline/rerun/{step_name}` | POST | `rerun_step` |
 | `/api/sql` | POST | `run_sql_query` |
 
+Nav: the rail and mobile bar render from `cockpit_ops/pages.py` `PAGES`
+(the trading cockpit's from `cockpit/pages.py`) via `cockpit/templates/_nav.html`
+— a new page is a route, its template and one `PAGES` entry. Shared read-models
+(pipeline status, regime, picks, …) come from `views.py` (plan 0015 Phase 5);
+`/flow` draws `graph.edges()` and groups steps by module package.
+
 ## How it's wired (Stage 2 shipped 2026-05-26)
 
 `cockpit_ops/api.py` is now standalone — the 10 Ops functions and their
 private helpers were physically moved out of `cockpit/api.py`. Shared
-decorators (`_persisted_cache`, `_ttl_cache`) stay in `cockpit.api` and
-are imported one-way:
+decorators (`_persisted_cache`, `_ttl_cache`) live in `cockpit/_shared.py`
+and are imported one-way:
 
 ```python
-from cockpit.api import _ttl_cache, _persisted_cache
+from cockpit._shared import _ttl_cache, _persisted_cache
 ```
 
 Final file sizes after Stage 2:

@@ -17,17 +17,10 @@ from datetime import date
 
 import pandas as pd
 
+import views
 from db import read_sql, upsert_df
 
-
-def _latest(table, cols, key="sid"):
-    """Get latest snapshot per stock from a signal table."""
-    col_list = ", ".join(cols)
-    return read_sql(
-        f"SELECT {key}, {col_list} FROM [{table}] "
-        f"WHERE ({key}, snapshot_date) IN "
-        f"(SELECT {key}, MAX(snapshot_date) FROM [{table}] GROUP BY {key})"
-    )
+_latest = views.latest_per_sid   # newest row per sid of a signal table
 
 
 def compute(dry_run=False):
@@ -38,10 +31,8 @@ def compute(dry_run=False):
     df = stocks.copy()
 
     # Latest close price
-    prices = read_sql(
-        "SELECT sid, close AS close_price FROM stock_prices "
-        "WHERE (sid, date) IN (SELECT sid, MAX(date) FROM stock_prices GROUP BY sid)"
-    )
+    prices = pd.DataFrame([(sid, close) for sid, (close, _) in views.latest_close().items()],
+                          columns=["sid", "close_price"])
     df = df.merge(prices, on="sid", how="left")
 
     # Piotroski

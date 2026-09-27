@@ -70,12 +70,10 @@
 <div class="section-title">Top Picks</div>
 <div class="tier-grid stagger" style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px;">
 
-    {% for tier_name in ["LARGE", "MID", "SMALL"] %}
+    {% for tier_name in pickable_tiers() %}
     <div class="card" style="padding: 0; overflow: hidden;">
         <div class="tier-header" style="padding: 10px 14px; margin-bottom: 0;
-            {% if tier_name == 'LARGE' %}border-left: 3px solid var(--blue);
-            {% elif tier_name == 'MID' %}border-left: 3px solid var(--accent);
-            {% else %}border-left: 3px solid var(--green);{% endif %}">
+            border-left: 3px solid {{ tier_name|tier_color }};">
             {{ tier_name }} CAP
         </div>
 

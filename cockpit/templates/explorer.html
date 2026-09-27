@@ -54,27 +54,20 @@
 
 <div x-data="{ tab: 'all', loaded: { all: true } }" x-cloak>
 
-{{ tab_bar([
-    ('all',   'All Tiers'),
-    ('LARGE', 'Large Cap'),
-    ('MID',   'Mid Cap'),
-    ('SMALL', 'Small Cap'),
-    ('MICRO', 'Micro · excluded from picks'),
-]) }}
+{% set tier_tabs = [('all', 'All Tiers')] %}
+{% for t in all_tiers() %}{% set _ = tier_tabs.append((t, t|tier_label ~ ('' if t in pickable_tiers() else ' · excluded from picks'))) %}{% endfor %}
+{{ tab_bar(tier_tabs) }}
 
 <!-- Tier Heat Maps -->
 <div style="display: flex; flex-direction: column; gap: 20px;">
     {% for tier_name, tier_stocks in tiers.items() %}
     <div class="card" x-show="tab === 'all' || tab === '{{ tier_name }}'" style="padding: 16px;">
         <div class="tier-header" style="margin-bottom: 12px;
-            {% if tier_name == 'LARGE' %}border-left: 3px solid var(--blue); padding-left: 12px;
-            {% elif tier_name == 'MID' %}border-left: 3px solid var(--accent); padding-left: 12px;
-            {% elif tier_name == 'MICRO' %}border-left: 3px solid #e74c3c; padding-left: 12px;
-            {% else %}border-left: 3px solid var(--green); padding-left: 12px;{% endif %}">
+            border-left: 3px solid {{ tier_name|tier_color }}; padding-left: 12px;">
             {{ tier_name }} CAP
             <span style="color: var(--text-muted); font-weight: 400; letter-spacing: 0;">
                 ({{ tier_stocks|length }} stocks)
-                {% if tier_name == 'MICRO' %} · ADTV&lt;₹1Cr + (mcap&lt;₹500Cr OR Piot≤3 OR &lt;4q) · excluded from daily_picks{% endif %}
+                {% if tier_name not in pickable_tiers() %}{% if tier_name == 'MICRO' %} · ADTV&lt;₹1Cr + (mcap&lt;₹500Cr OR Piot≤3 OR &lt;4q){% endif %} · excluded from daily_picks{% endif %}
             </span>
         </div>
         <div style="display: flex; flex-wrap: wrap; gap: 4px;">

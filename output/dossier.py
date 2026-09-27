@@ -20,12 +20,11 @@ import json
 import os
 import re
 from datetime import date, datetime
-from pathlib import Path
 
 import pandas as pd
 
+import views
 from config import PROJECT_ROOT
-from db import read_sql
 from output._llm import MODELS, llm_json
 
 OUTPUT_DIR = PROJECT_ROOT / "output"
@@ -235,58 +234,14 @@ def is_publishable(dossier):
 
 
 def _build_stock_context(sid):
-    """Build context dict for a single stock."""
-    stock = read_sql("SELECT * FROM stocks WHERE sid = ?", params=[sid])
-    if stock.empty:
+    """Context dict for one stock: views.stock(sid) — the stocks row, its newest
+    pick (score, rank, UHS), every registry signal table's newest row and its
+    latest close (as `current_price`, the key the prompt and validator read)."""
+    s = views.stock(sid)
+    if s is None:
         return None
-
-    s = stock.iloc[0].to_dict()
-
-    # Latest signals
-    for table, cols in [
-        ("piotroski_scores", "f_score"),
-        ("accruals_scores", "accruals_signal, cf_accruals_ratio"),
-        ("consensus_signals", "consensus_signal, pt_upside, eps_growth, revenue_growth"),
-        ("promoter_signals", "promoter_signal, promoter_qoq, promoter_trend, pledge_quality"),
-        ("forensic_scores", "m_score, m_score_flag, z_score, z_score_flag"),
-        ("smart_money_scores", "smart_money_score"),
-        ("sentiment_scores", "sentiment_7d, articles_7d, latest_headline"),
-    ]:
-        try:
-            row = read_sql(
-                f"SELECT {cols} FROM [{table}] WHERE sid = ? "
-                f"ORDER BY snapshot_date DESC LIMIT 1",
-                params=[sid],
-            )
-            if not row.empty:
-                s.update(row.iloc[0].to_dict())
-        except Exception:
-            pass
-
-    # Latest price
-    price = read_sql(
-        "SELECT close, date FROM stock_prices WHERE sid = ? ORDER BY date DESC LIMIT 1",
-        params=[sid],
-    )
-    if not price.empty:
-        s["current_price"] = price.iloc[0]["close"]
-        s["price_date"] = price.iloc[0]["date"]
-
-    # Pick score
-    pick = read_sql(
-        "SELECT final_score, rank, uhs_score, uhs_label, uhs_worst_dim, uhs_breakdown_json "
-        "FROM daily_picks WHERE sid = ? ORDER BY pick_date DESC LIMIT 1",
-        params=[sid],
-    )
-    if not pick.empty:
-        s["final_score"] = pick.iloc[0]["final_score"]
-        s["rank"] = pick.iloc[0]["rank"]
-        # Plan 0007 Phase 8 — UHS context for the LLM prompt
-        s["uhs_score"] = pick.iloc[0]["uhs_score"]
-        s["uhs_label"] = pick.iloc[0]["uhs_label"]
-        s["uhs_worst_dim"] = pick.iloc[0]["uhs_worst_dim"]
-        s["uhs_breakdown_json"] = pick.iloc[0]["uhs_breakdown_json"]
-
+    if "close_price" in s:
+        s["current_price"] = s["close_price"]
     return s
 
 
@@ -503,8 +458,7 @@ def generate(top=None, dry_run=False):
     # Plan 0015 Phase 0: the SAME published set the email shows (views.published_picks,
     # incl. the UHS ≥ 60 gate), top N per tier. The old `ORDER BY cap_tier … head(5)`
     # sorted tiers alphabetically, so only the LARGE top 5 ever got a dossier.
-    from views import published_picks
-    picks = published_picks("book" if top is None else top)
+    picks = views.published_picks("book" if top is None else top)
     print(f"Generating dossiers for {len(picks)} stocks...\n")
 
     dossiers = []

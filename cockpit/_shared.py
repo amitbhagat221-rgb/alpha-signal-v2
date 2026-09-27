@@ -258,12 +258,33 @@ def asset_version(filename: str) -> str:
         return "0"
 
 
-def make_templates(dirs):
+def nav_model(pages, other_app, brand):
+    """The nav a PAGES list renders as (cockpit/templates/_nav.html): rail sections
+    in list order, the mobile bar's tabs (entries with a `mobile` position) and its
+    "More" sheet (the rest), plus the link to the other app and the brand row."""
+    sections = []
+    for p in pages:
+        if not sections or sections[-1][0] != p["section"]:
+            sections.append((p["section"], []))
+        sections[-1][1].append(p)
+    more = [p for p in pages if not p.get("mobile")]
+    return {
+        "sections": sections,
+        "tabs": sorted((p for p in pages if p.get("mobile")), key=lambda p: p["mobile"]),
+        "more": more,
+        "more_ids": [i for p in more for i in (p["id"], *p.get("also", ()))],
+        "other": other_app,
+        "brand": brand,
+    }
+
+
+def make_templates(dirs, nav=None):
     """Jinja2Templates searching `dirs` in order, then cockpit/templates — so
-    base.html, _components.html and _icons.html exist once and the ops app
-    (which passes its own templates dir first) shares them. Registers
-    SilentUndefined, the asset_version global and the formatting.py filters
-    (signed / pct / inr / crore / tone)."""
+    base.html, _components.html, _icons.html and _nav.html exist once and the ops
+    app (which passes its own templates dir first) shares them. Registers
+    SilentUndefined, the asset_version global, the app's `nav` (nav_model of its
+    PAGES), the tier lists (all_tiers / pickable_tiers from views) and the formatting.py
+    filters (signed / pct / inr / crore / tone / tier_label / tier_color)."""
     from formatting import FILTERS
     from fastapi.templating import Jinja2Templates
     from jinja2 import ChoiceLoader, FileSystemLoader
@@ -275,6 +296,10 @@ def make_templates(dirs):
     templates.env.loader = ChoiceLoader([FileSystemLoader(d) for d in search])
     templates.env.undefined = SilentUndefined
     templates.env.globals["asset_version"] = asset_version
+    templates.env.globals["nav"] = nav
+    import views
+    templates.env.globals["all_tiers"] = views.tiers
+    templates.env.globals["pickable_tiers"] = views.pickable_tiers
     templates.env.filters.update(FILTERS)
     return templates
 

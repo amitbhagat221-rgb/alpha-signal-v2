@@ -56,7 +56,7 @@ def test_dossiers_cover_the_emailed_book(monkeypatch):
     import views
     from config import PORTFOLIO
     rows = [{"sid": f"{t}{i}", "cap_tier": t, "rank": i} for t in ("LARGE", "MID", "SMALL") for i in range(1, 9)]
-    monkeypatch.setattr(views, "read_sql", lambda q: pd.DataFrame(rows))
+    monkeypatch.setattr(views, "read_sql", lambda q, params=None: pd.DataFrame(rows))
     book = views.published_picks("book")
     assert book.groupby("cap_tier").size().to_dict() == dict(PORTFOLIO["picks_per_tier"])
     assert set(book[book.cap_tier == "MID"]["rank"]) == {1, 2, 3, 4, 5}

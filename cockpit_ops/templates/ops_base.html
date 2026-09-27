@@ -1,69 +1,10 @@
 {# Ops shell: cockpit/templates/base.html (shared head, fonts, cache-busted CSS,
-   main + scripts) with the Ops identity and nav swapped in. Ops pages extend this. #}
+   nav rendered from cockpit_ops/pages.py, main + scripts) with the Ops identity
+   swapped in. Ops pages extend this. #}
 {% extends "base.html" %}
 {% from "_icons.html" import icon %}
 
 {% block head_identity %}
     <title>Alpha Signal — Ops</title>
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23ef4444'/%3E%3Ctext x='16' y='22' font-size='20' text-anchor='middle' fill='white' font-family='sans-serif' font-weight='700'%3E%E2%9A%99%3C/text%3E%3C/svg%3E">
-{% endblock %}
-
-{% block nav %}
-    <!-- Left rail — Ops-only nav -->
-    <nav class="left-rail">
-        <a href="/system" class="brand-row" aria-label="Alpha Signal Ops">
-            <span class="brand-mark" style="background: linear-gradient(135deg, #ef4444 0%, #b91c1c 100%);">{{ icon("zap", 20) }}</span>
-            <span class="brand-text">
-                <span class="brand-title">Alpha Signal</span>
-                <span class="brand-subtitle">ops · port 3001</span>
-            </span>
-        </a>
-
-        <div class="nav-section">
-            <div class="nav-section-label">Ops</div>
-            <a href="/system" class="nav-item {% if page == 'system' %}active{% endif %}">
-                <span class="nav-icon">{{ icon("zap") }}</span>
-                <span class="nav-text"><span class="nav-title">Health Center</span><span class="nav-subtitle">Issues · data · factors · pipeline</span></span>
-            </a>
-            <a href="/flow" class="nav-item {% if page == 'flow' %}active{% endif %}">
-                <span class="nav-icon">{{ icon("git-branch") }}</span>
-                <span class="nav-text"><span class="nav-title">Pipeline Flow</span><span class="nav-subtitle">Producer/consumer DAG</span></span>
-            </a>
-            <a href="/command" class="nav-item {% if page == 'command' %}active{% endif %}">
-                <span class="nav-icon">{{ icon("compass") }}</span>
-                <span class="nav-text"><span class="nav-title">Command Centre</span><span class="nav-subtitle">Scripts &amp; rebuilds</span></span>
-            </a>
-            <a href="/sql" class="nav-item {% if page == 'sql' %}active{% endif %}">
-                <span class="nav-icon">{{ icon("terminal") }}</span>
-                <span class="nav-text"><span class="nav-title">SQL Console</span><span class="nav-subtitle">Ad-hoc queries</span></span>
-            </a>
-        </div>
-
-        <div class="nav-section" style="margin-top: auto; padding-top: 24px;">
-            <div class="nav-section-label">Trading cockpit</div>
-            <a href="{{ request.url.scheme }}://{{ request.url.hostname }}:3000/" class="nav-item" target="_blank" rel="noopener">
-                <span class="nav-icon">{{ icon("compass") }}</span>
-                <span class="nav-text"><span class="nav-title">Open trading →</span><span class="nav-subtitle">port 3000 (separate)</span></span>
-            </a>
-        </div>
-    </nav>
-
-    <!-- Mobile bottom bar — Ops-only -->
-    <nav class="mobile-tabs">
-        <a href="/system" class="mobile-tab {% if page == 'system' %}active{% endif %}">
-            <span class="mobile-tab-icon">{{ icon("zap", 22) }}</span><span class="mobile-tab-label">Health</span>
-        </a>
-        <a href="/flow" class="mobile-tab {% if page == 'flow' %}active{% endif %}">
-            <span class="mobile-tab-icon">{{ icon("git-branch", 22) }}</span><span class="mobile-tab-label">Pipeline</span>
-        </a>
-        <a href="/command" class="mobile-tab {% if page == 'command' %}active{% endif %}">
-            <span class="mobile-tab-icon">{{ icon("compass", 22) }}</span><span class="mobile-tab-label">Command</span>
-        </a>
-        <a href="/sql" class="mobile-tab {% if page == 'sql' %}active{% endif %}">
-            <span class="mobile-tab-icon">{{ icon("terminal", 22) }}</span><span class="mobile-tab-label">SQL</span>
-        </a>
-        <a href="{{ request.url.scheme }}://{{ request.url.hostname }}:3000/" class="mobile-tab" target="_blank" rel="noopener">
-            <span class="mobile-tab-icon">{{ icon("compass", 22) }}</span><span class="mobile-tab-label">Trading</span>
-        </a>
-    </nav>
 {% endblock %}

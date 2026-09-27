@@ -58,17 +58,6 @@ TIER_HYSTERESIS = 0.10
 # `weights: {tier: w}` (ADR 0052 D4, amends ADR 0017). factors.SIGNAL_WEIGHTS is the
 # derived {tier: {weight_key: w}} view every consumer imports; the two dry-run
 # variant schemes (SIGNAL_WEIGHTS_RETURN / _SHARPE) also live in factors.py.
-# config.SIGNAL_WEIGHTS* (resolved by __getattr__) are LEGACY read-only aliases kept for
-# cockpit/api.py and cockpit_ops/api.py — delete once they import factors.
-_FACTORS_ALIASES = ("SIGNAL_WEIGHTS", "SIGNAL_WEIGHTS_RETURN", "SIGNAL_WEIGHTS_SHARPE")
-
-
-def __getattr__(name):
-    """PEP 562: resolve the legacy aliases lazily (factors imports config)."""
-    if name in _FACTORS_ALIASES:
-        import factors
-        return getattr(factors, name)
-    raise AttributeError(f"module 'config' has no attribute {name!r}")
 
 
 # ── VIX Regime ──
@@ -80,12 +69,6 @@ REGIMES = {
     "CAUTION": {"vix": (25.0, 35.0),  "alloc": {"LARGE": 0.55, "MID": 0.25, "SMALL": 0.20}},
     "CRISIS":  {"vix": (35.0, 999.0), "alloc": {"LARGE": 0.70, "MID": 0.20, "SMALL": 0.10}},
 }
-# LEGACY positional view (vix_low, vix_high, *alloc in PICKABLE_TIERS order) — kept
-# only for output/diff_engine.py and cockpit_ops/api.py, which unpack 5-tuples.
-# Delete once they read REGIMES.
-VIX_REGIMES = {name: (*r["vix"], *(r["alloc"][t] for t in PICKABLE_TIERS))
-               for name, r in REGIMES.items()}
-
 # Days in new regime before switching (hysteresis)
 VIX_HYSTERESIS_DAYS = 3
 

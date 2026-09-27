@@ -17,9 +17,7 @@ def test_consumers_use_the_registry():
     assert db.BACKTEST_SIGNALS is factors.BACKTEST_SIGNALS
     assert db.FACTOR_LIBRARY is factors.FACTOR_LIBRARY
     assert db.get_backtest_cadence is factors.get_backtest_cadence
-    # legacy read-only aliases (cockpit/, cockpit_ops/) resolve to the derived views
-    assert config.SIGNAL_WEIGHTS is factors.SIGNAL_WEIGHTS
-    assert config.SIGNAL_WEIGHTS_RETURN is factors.SIGNAL_WEIGHTS_RETURN
+    assert not hasattr(config, "SIGNAL_WEIGHTS")          # weights live on the factor (D4)
     assert backtest_pit.SIGNAL_COLUMN_MAP is factors.SIGNAL_COLUMN_MAP
     assert pit.PIT_COLUMNS is factors.PIT_COLUMNS
     assert pit.VALIDATION_RANGES is factors.VALIDATION_RANGES

@@ -136,7 +136,7 @@ table.mo-tbl tr:hover td { background:rgba(255,255,255,0.015); }
       <div class="mo-sec-sub">Does rank predict return? Decile 1 = best-ranked, 10 = worst. Spread 1-vs-10 is the model's actual edge.</div>
     </div>
   </div>
-  {% for tier in ['LARGE', 'MID', 'SMALL'] %}
+  {% for tier in pickable_tiers() %}
     {% set deciles = s.rank_deciles | selectattr('cap_tier', 'equalto', tier) | list %}
     {% if deciles %}
       {% set d1 = deciles[0].avg_fwd %}
@@ -167,7 +167,7 @@ table.mo-tbl tr:hover td { background:rgba(255,255,255,0.015); }
     </div>
   </div>
   <div class="mo-ts-grid">
-    {% for tier in ['LARGE', 'MID', 'SMALL'] %}
+    {% for tier in pickable_tiers() %}
       {% set ts = s.time_series | selectattr('cap_tier', 'equalto', tier) | list %}
       {% set values = ts | map(attribute='avg_fwd_top_n') | reject('none') | list %}
       <div class="mo-ts-card">
