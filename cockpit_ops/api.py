@@ -523,8 +523,8 @@ def rerun_step(step_name: str) -> dict:
         except (ValueError, TypeError):
             pass
 
-    # No-two-harvesters (CLAUDE.md): a rerun takes the same lock as run_pipeline.sh,
-    # run_daily_forward.sh and the watchdog. Refuse now if it is held; the child
+    # No-two-harvesters (CLAUDE.md): a rerun takes the same lock as run.sh harvesting jobs
+    # and the watchdog. Refuse now if it is held; the child
     # re-takes it with `flock -n` for its whole run (plan 0015 D6).
     import fcntl
     lock_path = "/tmp/alpha_signal_harvest.lock"

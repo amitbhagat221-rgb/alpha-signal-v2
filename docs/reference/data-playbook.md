@@ -122,7 +122,7 @@ For each source: **what it gives**, **endpoint**, **PIT/live access**, **histori
 |---|---|
 | **What** | Quarterly income statement, annual balance sheet, annual cash flow, quarterly shareholding. **The fundamentals backbone.** |
 | **Endpoint** | Two-tier API: (1) sid-based `from Fundamentals.TickerTape import Tickertape; tt.get_income_data(sid)` etc. (2) slug-based `__NEXT_DATA__` scrape from page HTML for fields the SDK doesn't expose. |
-| **PIT access** | Latest filing per stock; refresh monthly via `run_tickertape_monthly.sh` cron. |
+| **PIT access** | Latest filing per stock; refresh monthly via the `run.sh tickertape` cron. |
 | **Historical access** | Up to ~10 years per stock for income/BS/CF; ~6 quarters for shareholding (window depends on fetch date — older quarters fall off). |
 | **v2 depth** | qi: 21,955 rows / 46 quarters · bs: 19,227 rows / 44 years · cf: 19,185 rows · sh: 14,128 rows / 53 quarters |
 | **Gotchas** | (1) **SIDs ≠ NSE tickers** — `REDY` not `DRRD`, `BJFN` not `BJFIN`. Always use universe `sid`. (2) `operating_profit` column is **100% NULL** — derive EBITDA = `pbt + interest + (annual_depreciation/4)`. (3) `consolidated` reporting is preferred when present; fall back to `standalone`. (4) **Curated subset** — no COGS, SGA, inventory, goodwill. Beneish reduced to 6-factor as a result. (5) Network blocks: `tickertape.in` and `analyze.api.tickertape.in` work; `get_ticker()` search is blocked, MoneyControl is blocked. |
@@ -276,7 +276,7 @@ For each source: **what it gives**, **endpoint**, **PIT/live access**, **histori
 | **Endpoint** | `nselib.derivatives.participant_wise_open_interest(trade_date)` and `participant_wise_trading_volume(trade_date)`. Single-day signature. |
 | **Historical access** | The endpoint served ~Dec 2025+ at first probe; `fii_dii_positioning` now holds 2022-01 → present (backfilled). |
 | **Alpha use** | FII net long/short F&O positioning is one of the strongest macro tilts available. Cohort divergence (FII selling vs DII buying) is a regime signal. |
-| **Status in v2** | Ingested daily by `run_daily_forward.sh` (14:00 UTC). |
+| **Status in v2** | Ingested daily by `run.sh forward` (14:00 UTC). |
 
 ### Mutual-fund NAV: AMFI NAVAll.txt (daily) + mfapi.in (backfill)
 

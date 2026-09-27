@@ -57,7 +57,7 @@ from sources._http import polite_get
 # the WAF), WAF-tuned browser headers (Referer pin + JSON-advertising Accept), and
 # the daily time budget — pipeline runs stalest-first (stocks.mc_checked_at). The
 # old weekly full sweep took ~18h and held the harvest lock all Sunday, starving
-# run_daily_forward.sh. 90 min/day ≈ 300 stocks → full cycle ~8-9 days; broker
+# run.sh forward. 90 min/day ≈ 300 stocks → full cycle ~8-9 days; broker
 # PTs are episodic, so that cadence loses nothing.
 TIMEOUT = 15
 MAX_RETRIES = 2

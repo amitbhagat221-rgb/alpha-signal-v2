@@ -381,7 +381,7 @@ PIPELINE_STEPS = [
     #  "table": "quarterly_income",  "source": "Tickertape API",     "data_freq": "quarterly", "frequency": "monthly"},
     # NOTE: Tickertape fetcher takes ~4 hours for full universe (2,448 × 3 calls × 2s).
     # Run manually: python -m sources.tickertape --limit 10 (test) then full run overnight.
-    # Monthly cron entry handles full refresh (run_tickertape_monthly.sh).
+    # Monthly cron entry handles full refresh (run.sh tickertape).
 
     # Tickertape HTML scrape — one page hit per stock, writes both analyst_consensus
     # and forecast_history. Single pipeline entry: PIPELINE_STEPS maps one step to
@@ -619,7 +619,7 @@ PIPELINE_STEPS = [
      "critical": False,
      "table": "universe_eligibility", "source": "eligibility/registry.py — 8 signals × universe",
      "data_freq": "daily",         "frequency": "daily",
-     "reads": ["analyst_consensus", "annual_balance_sheet", "annual_cash_flow", "bse_announcements", "bulk_deals", "quarterly_income", "shareholding", "stock_prices", "stocks", "universe_eligibility"],
+     "reads": ["analyst_consensus", "annual_balance_sheet", "annual_cash_flow", "bse_announcements", "bulk_deals", "forecast_history", "quarterly_income", "shareholding", "stock_prices", "stocks", "universe_eligibility"],
      "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
 
     {"name": "regime_update",      "module": "scoring.regime",      "function": "compute",  "critical": False,
@@ -905,14 +905,14 @@ FILE_OUTPUTS = [
     },
     {
         # Columnar SQLite→DuckDB replica (db.py read_sql_fast). Rebuilt at the tail
-        # of run_pipeline.sh's daily cron (non-fatal — a failed rebuild just leaves
+        # of the run.sh morning cron (non-fatal — a failed rebuild just leaves
         # the previous file in place and logs a warning, invisible to health checks
         # until now). No PIPELINE_STEPS entry, so the watchdog can't auto-heal it —
         # this registration only makes a stale/failed rebuild visible (audit Data-F10).
         "virtual_table": "_file_duckdb_replica",
         "glob":          "data/alpha_signal.duckdb",
         "freshness_field": None,       # binary file — mtime-anchored, not JSON-parsed
-        "source":        "tools/duckdb_refresh.py (run_pipeline.sh cron tail, non-fatal)",
+        "source":        "tools/duckdb_refresh.py (run.sh morning cron tail, non-fatal)",
         "data_freq":     "daily",
         "frequency":     "daily",
         "producer":      "tools.duckdb_refresh",

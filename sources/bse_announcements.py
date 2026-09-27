@@ -201,7 +201,7 @@ def main():
     print(f"\nDone. {frm}..{to}  seen={tot_seen} new_rows={tot_new}")
     # Weekends/holidays return 0 rows cleanly; an ERROR on EVERY day means the
     # endpoint is broken/blocked. (Since ~2026-09-19 each call returns a non-JSON
-    # body and run_daily_forward.sh logged exit 0 / seen=0.)
+    # body and the daily-forward cron logged exit 0 / seen=0.)
     if days and n_err == len(days):
         raise RuntimeError(f"BSE announcements: all {n_err} day-requests errored — endpoint "
                            "blocked or response format changed")

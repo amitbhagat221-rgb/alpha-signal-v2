@@ -1,7 +1,7 @@
 """
 Alpha Signal v2 — Pipeline Orchestrator
 
-THE replacement for run_pipeline.sh. Runs steps in order, logs everything
+Runs the steps in the order graph.py derives, logs everything
 to pipeline_log table, retries on failure, emails on critical errors.
 
 Usage:
@@ -25,7 +25,7 @@ import db
 from db import get_db
 
 # ── Logging setup ──
-# stdout only — cron (run_pipeline.sh) already redirects stdout to LOG_PATH.
+# stdout only — cron (run.sh morning) already redirects stdout to LOG_PATH.
 # A FileHandler here used to write the SAME lines to LOG_PATH a second time
 # (audit Eff-F6); interactive runs still print via the StreamHandler.
 LOG_PATH.parent.mkdir(parents=True, exist_ok=True)

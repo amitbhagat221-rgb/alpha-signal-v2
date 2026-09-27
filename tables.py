@@ -66,10 +66,10 @@ TABLES = {
     },
     # scrip_master rebuilds the full scrip→sid map every run (updated_at=now for every
     # row) so its anchor advances daily regardless; 5 tolerates a skipped run. Fed by
-    # run_daily_forward.sh (14:00 UTC, wired 2026-06-13).
+    # run.sh forward (14:00 UTC, wired 2026-06-13).
     "scrip_master": {
         "kind": "RAW", "domain": "Universe & Prices", "freq": "daily", "data_freq": "daily",
-        "source": "Upstox instrument master (run_daily_forward.sh cron)", "date_col": "updated_at",
+        "source": "Upstox instrument master (run.sh forward)", "date_col": "updated_at",
         "stale_days": 5,
     },
     # Per-stock coverage gate (`coverage`): pre-2026-05-23 the entire 22%
@@ -176,14 +176,14 @@ TABLES = {
 
     # ── Trades & Corporate ──
     # BSE corporate-announcement event stream (--days 7 keep-current), refreshed by
-    # run_daily_forward.sh (14:00 UTC, wired 2026-06-13). No business-date column
+    # run.sh forward (14:00 UTC, wired 2026-06-13). No business-date column
     # among the DATE_COLS candidates (dt_tm isn't one) → freshness anchors on
     # fetched_at, which advances on any day the refresh inserts a NEW filing. The
     # whole-BSE firehose files most calendar days, but a weekend + adjacent holiday
     # can go quiet; 5 tolerates that, still flags a stalled cron within a few days.
     "bse_announcements": {
         "kind": "RAW", "domain": "Trades & Corporate", "freq": "daily", "data_freq": "daily",
-        "source": "BSE AnnSubCategoryGetData --days 7 (run_daily_forward.sh cron)",
+        "source": "BSE AnnSubCategoryGetData --days 7 (run.sh forward)",
         "date_col": "fetched_at", "stale_days": 5,
     },
     "bulk_deals": {
@@ -212,22 +212,22 @@ TABLES = {
         "description": "Upcoming corporate event dates from NSE — earnings, dividends, board meetings. Sparse coverage (~50 stocks at any time).",
     },
     "event_calendar": {"kind": "COMPUTED", "domain": "Trades & Corporate", "date_col": None},
-    # The forward-only NSE tables below are fed by run_daily_forward.sh (14:00 UTC
+    # The forward-only NSE tables below are fed by run.sh forward (14:00 UTC
     # cron), not PIPELINE_STEPS — any table whose only producer is a standalone cron
     # MUST carry `freq` here or it gets no freshness benchmark.
     # FII/DII cash + surveillance snapshots are trading-day rows published EOD; a
     # Friday read on Monday is ~3d, +T+1 publish lag. 5 tolerates that, flags a stall.
     "fii_dii_cash_flow": {
         "kind": "RAW", "domain": "Trades & Corporate", "freq": "daily", "data_freq": "daily",
-        "source": "NSE FII/DII cash flow (run_daily_forward.sh cron)", "date_col": "fetched_at",
+        "source": "NSE FII/DII cash flow (run.sh forward)", "date_col": "fetched_at",
         "stale_days": 5,
     },
     # Reports yesterday's settled OI (inherent +1d) and is pulled days_back=3; over a
     # weekend the freshest row is ~3-4d old. 6 tolerates a long weekend + the
-    # settlement lag, still flags a stalled run_daily_forward.sh.
+    # settlement lag, still flags a stalled run.sh forward.
     "fii_dii_positioning": {
         "kind": "RAW", "domain": "Trades & Corporate", "freq": "daily", "data_freq": "daily",
-        "source": "NSE FII/DII F&O OI (run_daily_forward.sh cron)", "date_col": "trade_date",
+        "source": "NSE FII/DII F&O OI (run.sh forward)", "date_col": "trade_date",
         "stale_days": 6,
     },
     # NSE PIT insider disclosures lag the trade by WEEKS (by-trade_date is structurally
@@ -245,16 +245,16 @@ TABLES = {
         "description": "Promoter/KMP/director trades from NSE PIT API — person, transaction type, shares (`secAcq`), value (`secVal`). 1,043 stocks covered.",
     },
     # NSE posts T+1 with occasional multi-day gaps (low-activity days). Wired into
-    # run_daily_forward.sh 2026-06-03. 7 tolerates weekend + posting lag + a quiet gap;
+    # the daily-forward cron (run.sh forward) 2026-06-03. 7 tolerates weekend + posting lag + a quiet gap;
     # provisional — tighten after observing the first cron runs.
     "short_selling_data": {
         "kind": "RAW", "domain": "Trades & Corporate", "freq": "daily", "data_freq": "daily",
-        "source": "NSE short selling (run_daily_forward.sh cron, wired 2026-06-03)",
+        "source": "NSE short selling (run.sh forward, wired 2026-06-03)",
         "date_col": "fetched_at", "stale_days": 7,
     },
     "surveillance_flags": {
         "kind": "RAW", "domain": "Trades & Corporate", "freq": "daily", "data_freq": "daily",
-        "source": "NSE ASM/GSM/F&O-ban (run_daily_forward.sh cron)", "date_col": "fetched_at",
+        "source": "NSE ASM/GSM/F&O-ban (run.sh forward)", "date_col": "fetched_at",
         "stale_days": 5,
     },
 
@@ -617,7 +617,7 @@ TABLES = {
     },
 
     # ── File outputs (virtual tables from config.FILE_OUTPUTS) ──
-    # DuckDB replica rebuilds nightly via run_pipeline.sh's cron tail (non-fatal on
+    # DuckDB replica rebuilds nightly via the run.sh morning cron tail (non-fatal on
     # failure). 2d catches a failed/stale rebuild quickly without false-alarming on
     # same-day timing drift (audit Data-F10).
     "_file_duckdb_replica": {"kind": "file", "domain": "Output", "date_col": None, "stale_days": 2},
