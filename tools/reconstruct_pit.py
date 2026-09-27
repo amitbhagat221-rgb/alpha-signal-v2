@@ -1455,7 +1455,13 @@ def _pit_input(ctx, raw, key, eval_date):
     if key in ctx:
         return ctx[key]
     d = eval_date.isoformat()
-    if key == "fh":
+    if key == "qi":
+        v = knowable_quarterly(raw["qi"], eval_date)
+    elif key in ("bs", "cf"):
+        v = knowable_annual(raw[key], eval_date)
+    elif key == "sh":
+        v = knowable_shareholding(raw["sh"], eval_date)
+    elif key == "fh":
         v = raw["fh"][raw["fh"]["date"] <= d] if "fh" in raw else pd.DataFrame()
     elif key == "acs":
         v = (raw["acs"][raw["acs"]["snapshot_date"] <= d]
@@ -1489,12 +1495,10 @@ def reconstruct_one_date(eval_date, raw, signals_to_run):
     px_pit = prices_through(raw["prices"], eval_date)
     px_pit = apply_pit_adjustments(px_pit, raw["adjustments"], eval_date)
     close_df = pit_close_price(px_pit)
+    # Statement slices (qi/bs/cf/sh) are built lazily in _pit_input, so a caller
+    # that loaded only some raw frames (load_raw(raw_keys_for(...))) still works.
     ctx = {
         "stocks": raw["stocks"],
-        "qi": knowable_quarterly(raw["qi"], eval_date),
-        "bs": knowable_annual(raw["bs"], eval_date),
-        "cf": knowable_annual(raw["cf"], eval_date),
-        "sh": knowable_shareholding(raw["sh"], eval_date),
         "px": px_pit,
         "close": close_df,
         "eval_date": eval_date,
@@ -1566,211 +1570,85 @@ def pit_financial_signal(banking_metrics_full, eval_date):
     return out[["sid", "financial_signal", "financial_quality", "financial_recovery"]]
 
 
-def load_raw():
-    """Load all raw history once. Avoids re-querying per eval_date."""
+# ── The as-of datasets the PIT features read (Dataset block, ADR 0052) ──
+# One query per raw frame; load_raw(keys) loads only what the requested
+# producers need (raw_keys_for), so the live screener can use this path too.
+RAW_SQL = {
+    "stocks": 'SELECT sid, cap_tier, sector, industry, market_cap_cr FROM stocks',
+    "qi": 'SELECT sid, period, end_date, reporting, revenue, operating_profit, net_income, eps, interest, pbt, ebitda FROM quarterly_income WHERE end_date IS NOT NULL ORDER BY sid, end_date',
+    "bs": 'SELECT sid, period, end_date, total_assets, total_equity, total_debt, current_assets, current_liabilities, cash_and_equivalents, receivables, retained_earnings, net_ppe, total_liabilities, shares_outstanding, long_term_debt FROM annual_balance_sheet WHERE end_date IS NOT NULL ORDER BY sid, end_date',
+    "cf": 'SELECT sid, period, end_date, operating_cash_flow, capex, free_cash_flow, investing_cash_flow, financing_cash_flow, working_capital_change, depreciation, net_change_in_cash FROM annual_cash_flow WHERE end_date IS NOT NULL ORDER BY sid, end_date',
+    "sh": 'SELECT sid, end_date, promoter_pct, pledge_pct, fii_pct, mf_pct, dii_pct, public_pct, insurance_pct, retail_hni_pct, other_pct FROM shareholding ORDER BY sid, end_date',
+    "prices": 'SELECT sid, date, close, delivery_pct FROM stock_prices WHERE close > 0 ORDER BY sid, date',
+    "adjustments": 'SELECT sid, ex_date, factor FROM corporate_adjustments ORDER BY sid, ex_date',
+    "fh": "SELECT sid, metric, date, value, change FROM forecast_history WHERE metric = 'eps' AND value IS NOT NULL ORDER BY sid, metric, date",
+    "acs": 'SELECT sid, snapshot_date, source, target_mean, target_median, n_analysts, recommendation_mean FROM analyst_consensus_snapshots WHERE target_mean IS NOT NULL ORDER BY sid, snapshot_date',
+    "bulk": 'SELECT sid, deal_date, quantity, price, buy_sell, client_name, symbol FROM bulk_deals ORDER BY sid, deal_date',
+    "short": 'SELECT sid, short_date, quantity FROM short_selling_data WHERE sid IS NOT NULL ORDER BY sid, short_date',
+    "news": 'SELECT na.article_id, nas.sid,        SUBSTR(na.published_at, 1, 10) AS published_date FROM news_articles na JOIN news_article_stocks nas ON na.article_id = nas.article_id WHERE na.published_at IS NOT NULL',
+    "news_text": 'SELECT na.article_id, nas.sid,        SUBSTR(na.published_at, 1, 10) AS published_date,        na.title, na.summary FROM news_articles na JOIN news_article_stocks nas ON na.article_id = nas.article_id WHERE na.published_at IS NOT NULL',
+    "insider_trades": 'SELECT sid, person_category, transaction_type, shares, value_lakhs, trade_date FROM insider_trades WHERE trade_date IS NOT NULL',
+    "reg_events": 'SELECT event_id, published_at FROM regulatory_events WHERE published_at IS NOT NULL',
+    "reg_signals": 'SELECT event_id, sector, direction, magnitude, confidence FROM regulatory_signals WHERE is_regulatory = 1 AND direction IS NOT NULL',
+    "macro_hist": 'SELECT indicator_id, date, value FROM macro_history WHERE value IS NOT NULL ORDER BY indicator_id, date',
+    "macro_map": 'SELECT indicator_id, sector, direction, weight FROM macro_sector_map',
+    "macro_sector": 'SELECT sector, snapshot_date, macro_score FROM macro_sector_signals_pit WHERE macro_score IS NOT NULL ORDER BY sector, snapshot_date',
+    "fund_screener": "SELECT sid, period_end, line_item, value FROM fundamentals_screener WHERE period_type = 'annual'",
+    "banking_metrics": 'SELECT sid, period_end, period_type, gross_npa_pct, net_npa_pct,        interest_earned, net_interest_income, net_profit, cost_of_funds_pct FROM banking_metrics',
+    "fno_pcr": 'SELECT sid, trade_date, expiry_date, underlying_price, total_call_oi, total_put_oi, pcr_oi, pcr_volume, max_pain_distance FROM fno_pcr_history WHERE sid IS NOT NULL ORDER BY sid, trade_date',
+    "fno_iv": 'SELECT sid, trade_date, atm_iv, iv_skew_25d, iv_term_structure FROM fno_iv_history WHERE sid IS NOT NULL ORDER BY sid, trade_date',
+    "prices_ohlc": 'SELECT sid, date, open, high, low, close, volume FROM stock_prices WHERE close > 0 ORDER BY sid, date',
+    "corp_actions": 'SELECT sid, ex_date, subject FROM corporate_actions WHERE ex_date IS NOT NULL AND sid IS NOT NULL ORDER BY sid, ex_date',
+    "bse_results": "SELECT sid, date(dt_tm) AS ann_date FROM bse_announcements WHERE category='Result' AND sid IS NOT NULL AND dt_tm IS NOT NULL ORDER BY sid, dt_tm",
+    "bse_gov": lambda: _bse_gov_sql(),
+    "nlp": "SELECT sid, doc_date, available_date, net_tone, uncertainty_density, forward_looking_intensity FROM nlp_scores WHERE doc_type = 'transcript'",
+}
+RAW_OPTIONAL = ['acs', 'banking_metrics', 'bse_gov', 'bse_results', 'corp_actions', 'fno_iv', 'fno_pcr', 'macro_sector', 'nlp']   # empty frame when the table is absent/unreadable
+
+
+
+def _bse_gov_sql():
+    from signals.governance_events import RESIGNATION_WEIGHTS
+    subcats = ", ".join("'" + s.replace("'", "''") + "'" for s in RESIGNATION_WEIGHTS)
+    return (f"SELECT sid, subcategory, date(dt_tm) AS ev_date FROM bse_announcements "
+            f"WHERE sid IS NOT NULL AND dt_tm IS NOT NULL AND subcategory IN ({subcats}) "
+            f"ORDER BY sid, dt_tm")
+
+
+# Per-date inputs (factors.PIT_PRODUCERS "inputs") → the raw frames they slice.
+_INPUT_RAW = {"px": ("prices", "adjustments"), "close": ("prices", "adjustments"),
+              "fund": ("fund_screener",), "financial_sids": ("stocks",),
+              "eval_date": (), "base": ()}
+_BASE_RAW = ("stocks", "prices", "adjustments")
+
+
+def raw_keys_for(signals):
+    """The raw frames the given PIT producers (or aliases) need."""
+    keys = set(_BASE_RAW)
+    for name, spec in factors.PIT_PRODUCERS.items():
+        if {name, *spec.get("aliases", ())} & set(signals):
+            for k in (*spec.get("inputs", ()), *spec.get("needs", ()), *spec.get("nonempty", ())):
+                keys.update(_INPUT_RAW.get(k, (k,)))
+    return {k for k in keys if k in RAW_SQL}
+
+
+def load_raw(keys=None):
+    """Load raw history once (all frames, or only `keys`). Avoids re-querying per eval_date."""
+    keys = list(RAW_SQL) if keys is None else [k for k in RAW_SQL if k in set(keys)]
     print("Loading raw data...")
-    stocks = read_sql("SELECT sid, cap_tier, sector, industry, market_cap_cr FROM stocks")
-    qi = read_sql(
-        "SELECT sid, period, end_date, reporting, revenue, operating_profit, "
-        "net_income, eps, interest, pbt, ebitda "
-        "FROM quarterly_income WHERE end_date IS NOT NULL ORDER BY sid, end_date"
-    )
-    bs = read_sql(
-        "SELECT sid, period, end_date, total_assets, total_equity, total_debt, "
-        "current_assets, current_liabilities, cash_and_equivalents, receivables, "
-        "retained_earnings, net_ppe, total_liabilities, shares_outstanding, long_term_debt "
-        "FROM annual_balance_sheet WHERE end_date IS NOT NULL ORDER BY sid, end_date"
-    )
-    cf = read_sql(
-        "SELECT sid, period, end_date, operating_cash_flow, capex, free_cash_flow, "
-        "investing_cash_flow, financing_cash_flow, working_capital_change, "
-        "depreciation, net_change_in_cash "
-        "FROM annual_cash_flow WHERE end_date IS NOT NULL ORDER BY sid, end_date"
-    )
-    sh = read_sql(
-        "SELECT sid, end_date, promoter_pct, pledge_pct, fii_pct, mf_pct, dii_pct, "
-        "public_pct, insurance_pct, retail_hni_pct, other_pct "
-        "FROM shareholding ORDER BY sid, end_date"
-    )
-    prices = read_sql(
-        "SELECT sid, date, close, delivery_pct "
-        "FROM stock_prices WHERE close > 0 ORDER BY sid, date"
-    )
-    adjustments = read_sql(
-        "SELECT sid, ex_date, factor FROM corporate_adjustments ORDER BY sid, ex_date"
-    )
-    # metric='price' EXCLUDED — those rows embed the year-ahead realized close,
-    # not a real PT (audit Factor-F1, CRITICAL). Only 'eps' (pit_consensus'
-    # eps_revision_yoy) is a genuine forward estimate; nothing in this file
-    # should ever read metric='price' from forecast_history again.
-    fh = read_sql(
-        "SELECT sid, metric, date, value, change FROM forecast_history "
-        "WHERE metric = 'eps' AND value IS NOT NULL ORDER BY sid, metric, date"
-    )
-    # Monthly analyst consensus snapshots — preferred source for pt_upside
-    # (more recent than Tickertape's year-end series). See HANDOFF 2026-05-22.
-    try:
-        acs = read_sql(
-            "SELECT sid, snapshot_date, source, target_mean, target_median, "
-            "n_analysts, recommendation_mean "
-            "FROM analyst_consensus_snapshots "
-            "WHERE target_mean IS NOT NULL ORDER BY sid, snapshot_date"
-        )
-    except Exception:
-        acs = pd.DataFrame()
-    bulk = read_sql(
-        "SELECT sid, deal_date, quantity, price, buy_sell, client_name, symbol "
-        "FROM bulk_deals ORDER BY sid, deal_date"
-    )
-    short = read_sql(
-        "SELECT sid, short_date, quantity FROM short_selling_data WHERE sid IS NOT NULL ORDER BY sid, short_date"
-    )
-    # News volume: join articles to stocks, keep only date (not full timestamp)
-    news = read_sql(
-        "SELECT na.article_id, nas.sid, "
-        "       SUBSTR(na.published_at, 1, 10) AS published_date "
-        "FROM news_articles na "
-        "JOIN news_article_stocks nas ON na.article_id = nas.article_id "
-        "WHERE na.published_at IS NOT NULL"
-    )
-    # News article text — needed for sentiment_7d PIT (VADER on title+summary)
-    news_text = read_sql(
-        "SELECT na.article_id, nas.sid, "
-        "       SUBSTR(na.published_at, 1, 10) AS published_date, "
-        "       na.title, na.summary "
-        "FROM news_articles na "
-        "JOIN news_article_stocks nas ON na.article_id = nas.article_id "
-        "WHERE na.published_at IS NOT NULL"
-    )
-    # Insider trades — depth from 2021-01 supports v1 PIT eval dates (2023-04+)
-    insider_trades = read_sql(
-        "SELECT sid, person_category, transaction_type, shares, value_lakhs, trade_date "
-        "FROM insider_trades WHERE trade_date IS NOT NULL"
-    )
-    reg_events = read_sql(
-        "SELECT event_id, published_at FROM regulatory_events WHERE published_at IS NOT NULL"
-    )
-    reg_signals = read_sql(
-        "SELECT event_id, sector, direction, magnitude, confidence FROM regulatory_signals "
-        "WHERE is_regulatory = 1 AND direction IS NOT NULL"
-    )
-    macro_hist = read_sql(
-        "SELECT indicator_id, date, value FROM macro_history WHERE value IS NOT NULL ORDER BY indicator_id, date"
-    )
-    macro_map = read_sql(
-        "SELECT indicator_id, sector, direction, weight FROM macro_sector_map"
-    )
-    # Per-sector macro_score (reconstructed by the `sector_overlays` signal) — the
-    # macro leg of sector_tilt. Sliced ≤ eval_date per-anchor in pit_sector_tilt.
-    try:
-        macro_sector = read_sql(
-            "SELECT sector, snapshot_date, macro_score FROM macro_sector_signals_pit "
-            "WHERE macro_score IS NOT NULL ORDER BY sector, snapshot_date"
-        )
-    except Exception:
-        macro_sector = pd.DataFrame()
-    # Track 3 fundamentals (long-format) — annual rows only for the cluster
-    fund_screener = read_sql(
-        "SELECT sid, period_end, line_item, value FROM fundamentals_screener "
-        "WHERE period_type = 'annual'"
-    )
-    # Track 2.2b — Banking metrics for financial_signal PIT reconstruction.
-    # Only ~3,400 rows (158 stocks × ~25 periods), so load all and filter
-    # per eval_date inside the helper.
-    try:
-        banking_metrics = read_sql(
-            "SELECT sid, period_end, period_type, gross_npa_pct, net_npa_pct, "
-            "       interest_earned, net_interest_income, net_profit, cost_of_funds_pct "
-            "FROM banking_metrics"
-        )
-    except Exception:
-        banking_metrics = pd.DataFrame()
-    # Track 3.1b — F&O OI rollup for §3.2.2 factors. ~26K rows (216 underlyings
-    # × 122 dates), so load all and filter per eval_date inside the helper.
-    try:
-        fno_pcr = read_sql(
-            "SELECT sid, trade_date, expiry_date, underlying_price, "
-            "total_call_oi, total_put_oi, pcr_oi, pcr_volume, max_pain_distance "
-            "FROM fno_pcr_history WHERE sid IS NOT NULL ORDER BY sid, trade_date"
-        )
-    except Exception:
-        fno_pcr = pd.DataFrame()
-    # Track 3.1b — F&O IV surface rollup for §3.2.2 IV factors.
-    try:
-        fno_iv = read_sql(
-            "SELECT sid, trade_date, atm_iv, iv_skew_25d, iv_term_structure "
-            "FROM fno_iv_history WHERE sid IS NOT NULL ORDER BY sid, trade_date"
-        )
-    except Exception:
-        fno_iv = pd.DataFrame()
-    # §3.2.3 — daily OHLCV for microstructure factors (raw; split stance per
-    # signals/microstructure.py). open/high/low/volume aren't in `prices` above.
-    prices_ohlc = read_sql(
-        "SELECT sid, date, open, high, low, close, volume FROM stock_prices "
-        "WHERE close > 0 ORDER BY sid, date"
-    )
-    # §3.2.5 — corporate actions for PEAD event factors (ex_date is the PIT anchor).
-    try:
-        corp_actions = read_sql(
-            "SELECT sid, ex_date, subject FROM corporate_actions "
-            "WHERE ex_date IS NOT NULL AND sid IS NOT NULL ORDER BY sid, ex_date"
-        )
-    except Exception:
-        corp_actions = pd.DataFrame()
-    # §3.2.5 — real BSE result-announcement dates (dt_tm) → PEAD drift anchor.
-    # compute_pead filters these to ≤ eval per date, so load the full stream once.
-    try:
-        bse_results = read_sql(
-            "SELECT sid, date(dt_tm) AS ann_date FROM bse_announcements "
-            "WHERE category='Result' AND sid IS NOT NULL AND dt_tm IS NOT NULL "
-            "ORDER BY sid, dt_tm"
-        )
-    except Exception:
-        bse_results = pd.DataFrame()
-    # ADR 0042 — BSE resignation/cessation events → governance_resignation factor.
-    # compute_governance_resignation filters ev_date ≤ eval per date; load the full slice once.
-    try:
-        from signals.governance_events import RESIGNATION_WEIGHTS
-        _gov_subcats = ", ".join("'" + s.replace("'", "''") + "'" for s in RESIGNATION_WEIGHTS)
-        bse_gov = read_sql(
-            f"SELECT sid, subcategory, date(dt_tm) AS ev_date FROM bse_announcements "
-            f"WHERE sid IS NOT NULL AND dt_tm IS NOT NULL AND subcategory IN ({_gov_subcats}) "
-            f"ORDER BY sid, dt_tm"
-        )
-    except Exception:
-        bse_gov = pd.DataFrame()
-    # §3.2.4 — earnings-call NLP enriched layer → nlp factors. compute_nlp_factors
-    # filters available_date ≤ eval per date (look-ahead safe), so load the full slice once.
-    try:
-        nlp = read_sql(
-            "SELECT sid, doc_date, available_date, net_tone, uncertainty_density, "
-            "forward_looking_intensity FROM nlp_scores WHERE doc_type = 'transcript'")
-    except Exception:
-        nlp = pd.DataFrame()
-    print(f"  stocks={len(stocks)} qi={len(qi)} bs={len(bs)} cf={len(cf)} sh={len(sh)} "
-          f"prices={len(prices)} adj={len(adjustments)} fh={len(fh)} acs={len(acs)} "
-          f"bulk={len(bulk)} "
-          f"reg_events={len(reg_events)} reg_signals={len(reg_signals)} "
-          f"macro_hist={len(macro_hist)} macro_map={len(macro_map)} "
-          f"fund_screener={len(fund_screener)} bse_results={len(bse_results)} bse_gov={len(bse_gov)}")
-    return {
-        "stocks": stocks, "qi": qi, "bs": bs, "cf": cf, "sh": sh, "prices": prices,
-        "adjustments": adjustments,
-        "fh": fh, "acs": acs, "bulk": bulk, "short": short, "news": news,
-        "news_text": news_text, "insider_trades": insider_trades,
-        "fund_screener": fund_screener,
-        "banking_metrics": banking_metrics,
-        "fno_pcr": fno_pcr,
-        "fno_iv": fno_iv,
-        "prices_ohlc": prices_ohlc,
-        "corp_actions": corp_actions,
-        "bse_results": bse_results,
-        "bse_gov": bse_gov,
-        "nlp": nlp,
-        "reg_events": reg_events, "reg_signals": reg_signals,
-        "macro_hist": macro_hist, "macro_map": macro_map,
-        "macro_sector": macro_sector,
-    }
+    raw = {}
+    for k in keys:
+        sql = RAW_SQL[k]() if callable(RAW_SQL[k]) else RAW_SQL[k]
+        if k in RAW_OPTIONAL:
+            try:
+                raw[k] = read_sql(sql)
+            except Exception:
+                raw[k] = pd.DataFrame()
+        else:
+            raw[k] = read_sql(sql)
+    print("  " + " ".join(f"{k}={len(v)}" for k, v in raw.items()))
+    return raw
+
 
 
 def refresh(today=None):
