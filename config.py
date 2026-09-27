@@ -3,7 +3,8 @@ Alpha Signal v2 — Configuration
 
 Every tunable value lives here. No magic numbers in source/signal/scoring code.
 Import what you need:
-    from config import SIGNAL_WEIGHTS, API, DB_PATH
+    from config import PIPELINE_STEPS, PORTFOLIO, DB_PATH
+(External hosts — rate limits, headers, LLM model ids — live in hosts.py.)
 """
 
 from pathlib import Path
@@ -279,11 +280,7 @@ BACKTEST = {
     "momentum_12m_days": 252,
 }
 
-# ── Hosts (API politeness + LLM models) live in hosts.HOSTS (plan 0015 Phase 2) ──
-# LLM is a derived alias kept only for tools/compare_reg_models.py (outside the
-# Phase 2 change set); new code reads hosts.HOSTS["anthropic"]["models"].
-from hosts import HOSTS as _HOSTS  # noqa: E402
-LLM = {"regulatory_deep_model": _HOSTS["anthropic"]["models"]["regulatory_deep"]}
+# ── Hosts (API politeness + LLM model ids) live in hosts.HOSTS (plan 0015 Phase 2) ──
 
 # ── Screener Filters ──
 

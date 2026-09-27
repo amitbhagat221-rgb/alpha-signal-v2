@@ -59,16 +59,19 @@ def test_llm_models_read_from_the_anthropic_host():
     assert _llm.MODELS is models
     assert sector_dossier.MODEL == models["sector_dossier"]
     assert news_brief.SONNET_MODEL == models["news_brief"]
+    # sources/news_classifier.py keeps its literal id until another session's uncommitted
+    # edit to that file lands (plan 0015 integration note); the value must still agree.
     assert news_classifier.HAIKU_MODEL == models["news_classify"]
     assert regulatory_classifier.HAIKU_MODEL == models["regulatory_prefilter"]
     assert regulatory_classifier.SONNET_MODEL == models["regulatory_deep"]
     # the hard-coded ids are gone from every LLM call site
     for rel in ("output/dossier.py", "output/sector_dossier.py", "sources/news_brief.py",
-                "sources/news_classifier.py", "sources/regulatory_classifier.py"):
+                "sources/regulatory_classifier.py", "tools/classify_industries.py",
+                "tools/sector_narrative_fetcher.py"):
         assert not re.search(r"[\"']claude-[a-z0-9-]+[\"']", (ROOT / rel).read_text()), rel
 
 
 def test_config_api_block_is_gone():
     import config
     assert not hasattr(config, "API")
-    assert config.LLM["regulatory_deep_model"] == HOSTS["anthropic"]["models"]["regulatory_deep"]
+    assert not hasattr(config, "LLM")

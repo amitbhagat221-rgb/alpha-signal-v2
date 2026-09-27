@@ -97,5 +97,7 @@ HOSTS = {
                              "regulatory_prefilter": "claude-haiku-4-5-20251001",
                              "regulatory_deep": "claude-sonnet-4-6",
                              "dossier": "claude-sonnet-4-6",
+                             "industry_classify": "claude-haiku-4-5-20251001",
+                             "sector_narrative": "claude-sonnet-4-6",
                              "sector_dossier": "claude-sonnet-4-6"}},
 }

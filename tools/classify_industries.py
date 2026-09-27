@@ -31,8 +31,9 @@ import time
 from datetime import datetime
 
 from db import get_db, read_sql
+from hosts import HOSTS
 
-HAIKU_MODEL = "claude-haiku-4-5-20251001"
+HAIKU_MODEL = HOSTS["anthropic"]["models"]["industry_classify"]
 BATCH_SIZE = 25       # stocks per Haiku call — small payload, ~1 token / stock
 
 # Industry taxonomy: 25 industries grouped under 11 GICS sectors.

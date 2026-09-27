@@ -1,7 +1,7 @@
 """Agreement gate for downgrading the regulatory deep-classify model.
 
 Runs a sample of already-Haiku-passed regulatory events through BOTH the
-current deep model (config.LLM["regulatory_deep_model"], Sonnet today) and the
+current deep model (hosts.HOSTS["anthropic"]["models"]["regulatory_deep"], Sonnet today) and the
 candidate cheap model (Haiku), using the exact production CLASSIFY_PROMPT and
 parser, then reports field-level agreement.
 
@@ -27,7 +27,7 @@ from pathlib import Path
 
 from db import read_sql
 from output._llm import llm_text
-from config import LLM
+from hosts import HOSTS
 from sources.regulatory_classifier import (
     CLASSIFY_PROMPT, _parse_classification,
 )
@@ -69,10 +69,10 @@ def main(n=200, delay=0.2):
     import anthropic
     client = anthropic.Anthropic()
 
-    base_model = LLM["regulatory_deep_model"]
+    base_model = HOSTS["anthropic"]["models"]["regulatory_deep"]
     if base_model == CANDIDATE_MODEL:
         raise RuntimeError(
-            "config.LLM['regulatory_deep_model'] is already the candidate model — "
+            "hosts.HOSTS['anthropic']['models']['regulatory_deep'] is already the candidate model — "
             "nothing to compare. Gate must run BEFORE flipping the flag.")
 
     # Sample events the production pipeline actually deep-classified —
@@ -156,7 +156,7 @@ def main(n=200, delay=0.2):
     print(f"  stage agreement:        {stage_agree:.1%}  (informational)")
     print(f"  VERDICT: {verdict}")
     if verdict == "PASS":
-        print(f"  → flip config.LLM['regulatory_deep_model'] to {CANDIDATE_MODEL} "
+        print(f"  → flip hosts.HOSTS['anthropic']['models']['regulatory_deep'] to {CANDIDATE_MODEL} "
               f"(saves ~$0.7/day est.)")
     else:
         print("  → keep Sonnet; do NOT flip the flag. Consider a richer prompt or a bigger sample.")

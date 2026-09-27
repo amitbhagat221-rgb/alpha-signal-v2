@@ -32,10 +32,11 @@ import time
 from datetime import date, datetime
 
 from db import get_db, read_sql
+from hosts import HOSTS
 
 # Latest production-grade Claude with web-search; sector content is structured
 # generation, not novel reasoning, so Sonnet over Opus for cost-efficiency.
-SONNET_MODEL = "claude-sonnet-4-6"
+SONNET_MODEL = HOSTS["anthropic"]["models"]["sector_narrative"]
 
 # GICS sector → dominant IIM industry (legacy — kept for back-compat
 # with sector-keyed runs; new runs default to the industry-level list below).
