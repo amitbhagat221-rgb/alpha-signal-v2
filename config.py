@@ -397,16 +397,9 @@ PIPELINE_STEPS = [
     # call the SAME function again — pipeline.py's runner has no (module, function)
     # dedup (only the watchdog's heal loop does), so it ran compute() twice every
     # month: ~1.9h wasted + doubled Tickertape scrape load (audit Eff-F1).
-    {"name": "fetch_analyst",      "module": "sources.tickertape_analyst", "function": "compute", "critical": False,
-     "table": "analyst_consensus", "source": "Tickertape __NEXT_DATA__", "data_freq": "monthly", "frequency": "monthly",
-     "reads": ["stocks"],
-     "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
-
-    # Tickertape shareholding pattern — Bharat_sm_data API (different path from analyst scrape).
-    {"name": "fetch_shareholding", "module": "sources.tickertape_shareholding", "function": "compute", "critical": False,
-     "table": "shareholding",      "source": "Tickertape API",        "data_freq": "quarterly", "frequency": "monthly",
-     "reads": ["stocks"],
-     "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
+    # fetch_analyst + fetch_shareholding (monthly Tickertape scrapes, ~1.9h + ~1.7h) moved to
+    # the END of this list on 2026-09-27 with their writes declared lagged (ADR 0053): on the
+    # 1st they sat on the email's critical path (email 07:47 UTC on 2026-09-01).
 
     # ── Signals ──
     {"name": "signal_sentiment",   "module": "signals.sentiment",   "function": "compute",  "critical": False,
@@ -886,6 +879,25 @@ PIPELINE_STEPS = [
      "table": "banking_metrics",    "source": "Screener.in stock pages (158 banks+NBFCs)", "data_freq": "quarterly", "frequency": "monthly",
      "reads": ["broker_recommendations", "fundamentals_screener", "stocks"],
      "lagged_writes": ["banking_metrics"]},
+
+    # ── Monthly Tickertape scrapes: after the email (review F1, 2026-09-27) ──
+    # Their writes are LAGGED: on the 1st every reader (signals, screener, snapshot,
+    # fetch_yf_analyst) sees the previous run's analyst_consensus / shareholding, and the
+    # ~3.6h of scraping runs after the email. Shareholding is quarterly and Tickertape PT
+    # fields are monthly, so a one-day lag on the 1st changes nothing material.
+    # Tickertape HTML scrape — one page hit per stock, writes both analyst_consensus
+    # and forecast_history (forecast_history's freshness comes from its tables.TABLES entry;
+    # a second "fetch_forecast" step calling the same compute() doubled the scrape — Eff-F1).
+    {"name": "fetch_analyst",      "module": "sources.tickertape_analyst", "function": "compute", "critical": False,
+     "table": "analyst_consensus", "source": "Tickertape __NEXT_DATA__", "data_freq": "monthly", "frequency": "monthly",
+     "reads": ["stocks"],
+     "lagged_writes": ["analyst_consensus"]},
+
+    # Tickertape shareholding pattern — Bharat_sm_data API (different path from analyst scrape).
+    {"name": "fetch_shareholding", "module": "sources.tickertape_shareholding", "function": "compute", "critical": False,
+     "table": "shareholding",      "source": "Tickertape API",        "data_freq": "quarterly", "frequency": "monthly",
+     "reads": ["stocks"],
+     "lagged_writes": ["shareholding"]},
 ]
 
 # Tables fed by standalone crons / migrations (not a PIPELINE_STEPS `table`)

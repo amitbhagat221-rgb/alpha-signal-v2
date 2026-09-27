@@ -93,7 +93,7 @@ def test_every_step_declares_reads_and_the_graph_orders():
     for s in config.PIPELINE_STEPS:
         assert "reads" in s, s["name"]
         assert set(s["reads"]) <= known, (s["name"], set(s["reads"]) - known)
-    for d in [date(2026, 9, 28) + timedelta(days=i) for i in range(7)] + [date(2026, 11, 1)]:
+    for d in [date(2026, 9, 28) + timedelta(days=i) for i in range(7)] + [date(2026, 10, 1), date(2026, 11, 1)]:
         class D(date):
             @classmethod
             def today(cls):
@@ -140,3 +140,25 @@ def test_post_check_failure_fails_the_step_without_retry(monkeypatch):
     assert calls == ["RUNNING", "FAILED"]
     monkeypatch.setattr(pipeline, "_post_check", lambda n: [])
     assert pipeline.run_step("x", "fake_step_mod", "run", False) is True
+
+
+def test_month_start_scrapes_stay_off_the_email_path():
+    """Review F1 (2026-09-27): the monthly Tickertape scrapes (~3.6h together) were
+    email ancestors on the 1st — the 2026-09-01 email went out at 07:47 UTC. Their
+    writes are declared lagged, so on a weekday 1st neither may precede the email."""
+    from datetime import date
+    import config
+    import pipeline
+
+    class D(date):
+        @classmethod
+        def today(cls):
+            return date(2026, 10, 1)            # a Thursday
+    real, pipeline.date = pipeline.date, D
+    try:
+        act = [s for s in config.PIPELINE_STEPS if pipeline._step_should_run_today(s)]
+    finally:
+        pipeline.date = real
+    names = {s["name"] for s in act}
+    assert {"fetch_analyst", "fetch_shareholding"} <= names
+    assert not {"fetch_analyst", "fetch_shareholding"} & graph.ancestors(act)
