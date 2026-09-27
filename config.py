@@ -273,6 +273,13 @@ PIPELINE_STEPS = [
      "table": "corporate_actions", "source": "NSE corporate-actions (nselib)", "data_freq": "daily", "frequency": "daily",
      "reads": ["fii_dii_positioning", "stocks"],
      "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos", "stocks@segment_tiers", "stocks@universe_liveness"]},
+    # Split/bonus/dividend factors composed PIT-strict by pit.py/_prices. Hand-run only
+    # until 2026-09-27 (froze 2026-04-30: LIC 1:1 bonus, Trent 1:2 … unadjusted). ~6 s.
+    {"name": "compute_corporate_adjustments", "module": "tools.compute_corporate_adjustments", "function": "compute",
+     "critical": False, "table": "corporate_adjustments", "source": "corporate_actions + stock_prices",
+     "data_freq": "daily", "frequency": "daily",
+     "reads": ["corporate_actions", "corporate_adjustments", "stock_prices"],
+     "writes": ["corporate_adjustments"]},
 
     # Board-meeting / forthcoming-events calendar (one nselib call, −3d→+30d
     # window). Forward-dated, so a daily run keeps it fresh and feeds the

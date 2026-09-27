@@ -110,8 +110,13 @@ def _ensure_table():
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--dry-run", action="store_true")
-    args = parser.parse_args()
+    return compute(dry_run=parser.parse_args().dry_run)
 
+
+def compute(dry_run=False):
+    """Pipeline step `compute_corporate_adjustments` (daily, after fetch_corp_actions).
+    Until 2026-09-27 this ran only by hand and froze at 2026-04-30 — 30 splits/bonuses
+    (LIC, Trent, …) went unadjusted for five months."""
     _ensure_table()
 
     actions = read_sql(
@@ -120,7 +125,15 @@ def main():
         "ORDER BY sid, ex_date, ind"
     )
     prices = read_sql("SELECT sid, date, close FROM stock_prices WHERE close > 0")
-    prices_idx = prices.set_index(["sid", "date"])["close"]
+    # Close on the last trading day BEFORE each dividend's ex_date, in one as-of join.
+    # (Was a full-table boolean scan per dividend: O(dividends × price rows), which
+    # ran for hours once stock_prices grew — corporate_adjustments froze at 2026-04-30.)
+    divs = actions.loc[actions["ind"] == "DIVIDEND", ["sid", "ex_date"]].drop_duplicates()
+    divs = divs.assign(_t=pd.to_datetime(divs["ex_date"], errors="coerce")).dropna(subset=["_t"])
+    px = prices.assign(_t=pd.to_datetime(prices["date"])).sort_values("_t")
+    pre = pd.merge_asof(divs.sort_values("_t"), px[["sid", "_t", "close"]], on="_t", by="sid",
+                        direction="backward", allow_exact_matches=False)
+    close_before = {(r.sid, r.ex_date): r.close for r in pre.itertuples() if pd.notna(r.close)}
 
     parsed = []  # (sid, ex_date, ind, factor, subject)
     skipped = {"SPLIT": 0, "BONUS": 0, "DIVIDEND_NO_AMOUNT": 0, "DIVIDEND_NO_PRE_CLOSE": 0,
@@ -146,17 +159,11 @@ def main():
             if amount is None:
                 skipped["DIVIDEND_NO_AMOUNT"] += 1
                 continue
-            # Look up close on the trading day BEFORE ex_date
-            try:
-                pre_dates = prices.loc[(prices["sid"] == sid) & (prices["date"] < ex_date), "date"]
-                if pre_dates.empty:
-                    skipped["DIVIDEND_NO_PRE_CLOSE"] += 1
-                    continue
-                last_pre = pre_dates.max()
-                close_pre = float(prices_idx.loc[(sid, last_pre)])
-            except (KeyError, ValueError):
+            close_pre = close_before.get((sid, ex_date))
+            if close_pre is None:
                 skipped["DIVIDEND_NO_PRE_CLOSE"] += 1
                 continue
+            close_pre = float(close_pre)
             if close_pre <= 0 or amount >= close_pre:
                 skipped["INVALID_FACTOR"] += 1
                 continue
@@ -192,16 +199,18 @@ def main():
     print(f"\nFactor distribution:")
     print(grouped["factor"].describe().to_string())
 
-    if args.dry_run:
+    if dry_run:
         print(f"\n[dry-run] would write {len(grouped)} rows to corporate_adjustments")
-        return
+        return len(grouped)
 
-    # Wipe and rewrite (idempotent rebuild)
+    # Wipe and rewrite (idempotent rebuild) in ONE transaction — a failed write must
+    # never leave the screener with no split/bonus adjustments at all.
     with get_db() as conn:
         conn.execute("DELETE FROM corporate_adjustments")
-    n = upsert_df(grouped[["sid", "ex_date", "factor", "n_events", "inds", "subjects"]],
-                  "corporate_adjustments")
+        n = upsert_df(grouped[["sid", "ex_date", "factor", "n_events", "inds", "subjects"]],
+                      "corporate_adjustments", conn=conn)
     print(f"\n→ wrote {n} rows to corporate_adjustments")
+    return n
 
 
 if __name__ == "__main__":
