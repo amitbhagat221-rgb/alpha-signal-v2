@@ -434,11 +434,27 @@ sqlite3 data/alpha_signal.db \
 
 **`--skip-existing` is keyed on the exact `signals_run` set.** Adding a new signal to the default set changes the key, and previously-done dates will re-run (correct — they need the new column populated). If you want to rerun only one signal across all dates, use `--signal X` and existing dates with that signal-set in the log will be skipped.
 
-### Rate-limit floor
+### Rate-limit floor — the Host door
 
-**2 seconds between any external API call.** Faster works for short bursts; sustained faster gets you blocked (NSE blocks for hours, Tickertape blocks for ~30 min, RBI hard-blocks the IP).
+**2 seconds between any two calls to the same host.** Faster works for short bursts; sustained faster gets you blocked (NSE blocks for hours, Tickertape blocks for ~30 min, RBI hard-blocks the IP).
 
-For batch operations: chunk + checkpoint every 200 items. Resume via a JSON state file. Never run two harvesters simultaneously.
+Politeness is declared once per host in [`hosts.HOSTS`](../../hosts.py) (ADR 0052 invariant 5) and enforced by one door, [`sources/_http.py`](../../sources/_http.py). A harvester never sleeps for pacing and never keeps its own `HEADERS` / `DELAY` constants.
+
+| Call shape | Use |
+|---|---|
+| plain GET (404 → None, retry 429/5xx/timeouts) | `polite_get(url)` |
+| POST, or the module reads redirects / status codes itself | `polite_request(method, url, check=False, retries=0, ...)` |
+| library client with its own HTTP (yfinance, nselib, feedparser, kiteconnect, Bharat_sm_data) | `with pace("yahoo"): yf.download(...)`, or `run_harvester(..., host="tickertape")` |
+| run-length budget (Moneycontrol 90 min/day) | `over = time_budget("moneycontrol")` then `if over(): break` |
+| NSE / BSE cookie gate | `warm_session(home_url)` (the home host's headers by default) |
+
+- **Gap** is measured from the END of the previous call to the same host, so a slow response never shortens it. All netlocs of one host share a gap. An undeclared netloc gets the default politeness (2 s, plain UA, 2 retries) and its own gap.
+- **Declared exceptions** are slower, never faster: Moneycontrol 12 s (2 s tripped the WAF), ETMoney 2.5 s, Screener 2.5–4 s jittered (Screener has banned accounts), BSE 2–3 s jittered.
+- **Headers** are the host's unless the caller passes a session (which carries its own) or explicit headers.
+- **Adding a source:** add its entry to `hosts.HOSTS` first. `tests/test_hosts.py` fails on any URL literal in `sources/` whose host isn't declared.
+- The gap is per process. Two harvesters in two processes still double the rate, so never run two at once.
+
+For batch operations: chunk + checkpoint every 200 items. Resume via a JSON state file.
 
 ---
 
