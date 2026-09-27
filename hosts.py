@@ -72,7 +72,7 @@ HOSTS = {
     "etmoney": {"netlocs": ["www.etmoney.com"], "gap": 2.5,
                 "headers": {"User-Agent": BROWSER_UA, "Accept": "text/html,application/xhtml+xml",
                             "Accept-Language": "en-US,en;q=0.9"}},
-    "amfi": {"netlocs": ["www.amfiindia.com"]},
+    "amfi": {"netlocs": ["www.amfiindia.com", "portal.amfiindia.com"]},
     "mfapi": {"netlocs": ["api.mfapi.in"]},
 
     # ── Macro, news, regulatory ──
