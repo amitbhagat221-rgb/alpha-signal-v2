@@ -20,7 +20,8 @@ cap ~0.30, Σ|w| = 1.0 per tier (tests/test_factor_registry.py enforces the sum)
 
 Entry fields (keyed by the registry signal id — the old BACKTEST_SIGNALS "signal").
 [default] = inferred by _fill_defaults() when absent; write the field only when it differs.
-  metadata         label, group, description, source_tables, source_columns,
+  metadata         label, group, description, source_tables [its producer's
+                   tables — factors.producer_tables()], source_columns,
                    filing_lag, pit_column_v1 [None], pit_column_v2 [the key],
                    [external_table], v1_verdict_summary, status (DATA readiness:
                    READY/DEGRADED/DROPPED/PROPOSED/SUPERSEDED/CONTROL) [READY],
@@ -80,7 +81,6 @@ FACTORS = {
         "label": "Earnings Yield (TTM E/P)",
         "group": "Value",
         "description": "Trailing 12-month EPS / current price",
-        "source_tables": ["quarterly_income", "stock_prices"],
         "source_columns": ["qi.eps", "stock_prices.close"],
         "filing_lag": "60d quarterly + 0d price",
         "pit_column_v1": "earnings_yield",
@@ -105,7 +105,6 @@ FACTORS = {
         "label": "Book-to-Price",
         "group": "Value",
         "description": "Per-share book equity / price",
-        "source_tables": ["annual_balance_sheet", "stock_prices"],
         "source_columns": ["bs.total_equity", "bs.shares_outstanding", "stock_prices.close"],
         "filing_lag": "75d annual + 0d price",
         "pit_column_v1": "book_to_price",
@@ -130,7 +129,6 @@ FACTORS = {
         "label": "52-Week Range Position",
         "group": "Value",
         "description": "(close − 52w_low) / (52w_high − 52w_low) — proximity to lows is value-positive",
-        "source_tables": ["stock_prices"],
         "source_columns": ["stock_prices.close (rolling 252d high/low)"],
         "filing_lag": "0d",
         "v1_verdict_summary": "(used as 25% of value composite, not separately validated)",
@@ -147,7 +145,6 @@ FACTORS = {
         "label": "Piotroski F-Score",
         "group": "Quality",
         "description": "9-factor profitability + leverage + efficiency score (0-9)",
-        "source_tables": ["quarterly_income", "annual_balance_sheet", "annual_cash_flow"],
         "source_columns": ["qi.{eps,net_income,revenue}", "bs.{total_assets,equity,debt,shares_outstanding}", "cf.operating_cash_flow"],
         "filing_lag": "75d annual + 60d quarterly",
         "pit_column_v1": "piotroski_f",
@@ -174,7 +171,6 @@ FACTORS = {
         "label": "CF Accruals (Sloan)",
         "group": "Quality",
         "description": "(Net income − operating CF) / total assets — earnings backed by cash",
-        "source_tables": ["quarterly_income", "annual_cash_flow", "annual_balance_sheet"],
         "source_columns": ["qi.net_income", "cf.operating_cash_flow", "bs.total_assets"],
         "filing_lag": "75d annual + 60d quarterly",
         "pit_column_v1": "cf_accruals",
@@ -201,7 +197,6 @@ FACTORS = {
         "label": "BS Accruals",
         "group": "Quality",
         "description": "ΔWorking capital − capex − depreciation, scaled by assets",
-        "source_tables": ["annual_balance_sheet", "annual_cash_flow"],
         "source_columns": ["bs.{current_assets,liabilities,cash}", "cf.{capex,depreciation}"],
         "filing_lag": "75d annual",
         "pit_column_v1": "bs_accruals",
@@ -216,7 +211,6 @@ FACTORS = {
         "label": "Earnings Persistence (EPS CV)",
         "group": "Quality",
         "description": "Coefficient of variation of trailing-8-quarter EPS — lower = more persistent",
-        "source_tables": ["quarterly_income"],
         "source_columns": ["qi.eps"],
         "filing_lag": "60d quarterly",
         "pit_column_v1": "eps_cv",
@@ -229,7 +223,6 @@ FACTORS = {
         "label": "Earnings Beat Rate",
         "group": "Quality",
         "description": "Fraction of last-N quarters where actual EPS beat consensus (proxy: vs prev-quarter run-rate)",
-        "source_tables": ["quarterly_income"],
         "source_columns": ["qi.eps"],
         "filing_lag": "60d quarterly",
         "pit_column_v1": "earnings_beat_rate",
@@ -243,7 +236,6 @@ FACTORS = {
         "label": "Return on Equity",
         "group": "Quality",
         "description": "Net income / total equity (TTM)",
-        "source_tables": ["quarterly_income", "annual_balance_sheet"],
         "source_columns": ["qi.net_income (TTM)", "bs.total_equity"],
         "filing_lag": "75d annual + 60d quarterly",
         "v1_verdict_summary": "(45% of quality composite — quality_recon: DROP all tiers)",
@@ -256,7 +248,6 @@ FACTORS = {
         "label": "Return on Assets",
         "group": "Quality",
         "description": "Net income / total assets (TTM)",
-        "source_tables": ["quarterly_income", "annual_balance_sheet"],
         "source_columns": ["qi.net_income (TTM)", "bs.total_assets"],
         "filing_lag": "75d annual + 60d quarterly",
         "v1_verdict_summary": "(component of Track 2.2 financial sub-model; not in main C13b)",
@@ -268,7 +259,6 @@ FACTORS = {
         "label": "Debt-to-Equity",
         "group": "Quality",
         "description": "Total debt / total equity (lower better; financial sector excluded)",
-        "source_tables": ["annual_balance_sheet"],
         "source_columns": ["bs.total_debt", "bs.total_equity"],
         "filing_lag": "75d annual",
         "v1_verdict_summary": "(30% of quality composite)",
@@ -281,7 +271,6 @@ FACTORS = {
         "label": "Profit Margin",
         "group": "Quality",
         "description": "Net income / revenue (TTM)",
-        "source_tables": ["quarterly_income"],
         "source_columns": ["qi.net_income", "qi.revenue"],
         "filing_lag": "60d quarterly",
         "v1_verdict_summary": "(25% of quality composite)",
@@ -298,7 +287,6 @@ FACTORS = {
         "label": "Revenue YoY Growth",
         "group": "Growth",
         "description": "Trailing 4Q revenue / prior 4Q revenue − 1",
-        "source_tables": ["quarterly_income"],
         "source_columns": ["qi.revenue (8 quarters)"],
         "filing_lag": "60d quarterly",
         "v1_verdict_summary": "growth_recon: DROP all tiers (n=16)",
@@ -311,7 +299,6 @@ FACTORS = {
         "label": "EPS YoY Growth",
         "group": "Growth",
         "description": "Trailing 4Q EPS / prior 4Q EPS − 1",
-        "source_tables": ["quarterly_income"],
         "source_columns": ["qi.eps (8 quarters)"],
         "filing_lag": "60d quarterly",
         "v1_verdict_summary": "growth_recon: DROP all tiers",
@@ -332,7 +319,6 @@ FACTORS = {
         "label": "Risk-Adj 6M Momentum",
         "group": "Momentum",
         "description": "6-month return / 6-month daily-return std, with 22-day skip window",
-        "source_tables": ["stock_prices"],
         "source_columns": ["stock_prices.close"],
         "filing_lag": "0d",
         "pit_column_v1": "mom_6m",
@@ -359,7 +345,6 @@ FACTORS = {
         "label": "Risk-Adj 12M Momentum",
         "group": "Momentum",
         "description": "12-month return / 12-month daily-return std, with 22-day skip",
-        "source_tables": ["stock_prices"],
         "source_columns": ["stock_prices.close"],
         "filing_lag": "0d",
         "pit_column_v1": "mom_12m",
@@ -377,7 +362,6 @@ FACTORS = {
         "label": "MACD Bullish Crossover",
         "group": "Momentum",
         "description": "12/26 EMA crossover state — binary signal from price",
-        "source_tables": ["stock_prices"],
         "source_columns": ["stock_prices.close (252d)"],
         "filing_lag": "0d",
         "pit_column_v2": "macd_bullish",
@@ -395,7 +379,6 @@ FACTORS = {
         "label": "Promoter QoQ Change",
         "group": "Ownership",
         "description": "Quarter-over-quarter change in promoter holding %",
-        "source_tables": ["shareholding"],
         "source_columns": ["shareholding.promoter_pct"],
         "filing_lag": "21d",
         "pit_column_v1": "promoter_qoq",
@@ -420,7 +403,6 @@ FACTORS = {
         "label": "Promoter 1-Year Trend",
         "group": "Ownership",
         "description": "Latest promoter % minus value 5 quarters ago",
-        "source_tables": ["shareholding"],
         "source_columns": ["shareholding.promoter_pct (5 quarters)"],
         "filing_lag": "21d",
         "v1_verdict_summary": "(35% of promoter composite, not separately validated)",
@@ -432,7 +414,6 @@ FACTORS = {
         "label": "Pledge Quality",
         "group": "Ownership",
         "description": "1 − (promoter pledge %) — higher better",
-        "source_tables": ["shareholding"],
         "source_columns": ["shareholding.pledge_pct"],
         "filing_lag": "21d",
         "pit_column_v1": "pledge_quality",
@@ -449,7 +430,6 @@ FACTORS = {
         "label": "Insider Trading Signal",
         "group": "Ownership",
         "description": "Promoter/KMP buy-vs-sell over trailing 90 days",
-        "source_tables": ["insider_trades"],
         "source_columns": ["insider_trades.{person_category, transaction_type, value_lakhs, trade_date}"],
         "filing_lag": "0d (NSE PIT discloses on transaction)",
         "pit_column_v2": "insider_score",  # PIT helper added 2026-05-24
@@ -470,7 +450,6 @@ FACTORS = {
         "label": "Beneish M-Score",
         "group": "Forensic",
         "description": "Earnings manipulation detector (6-factor reduced model)",
-        "source_tables": ["quarterly_income", "annual_balance_sheet", "annual_cash_flow"],
         "source_columns": ["qi.revenue", "bs.{receivables,current_assets,total_assets}", "cf.depreciation"],
         "filing_lag": "75d annual + 60d quarterly",
         "v1_verdict_summary": "(not in C13b; new in v2)",
@@ -484,7 +463,6 @@ FACTORS = {
         "label": "Altman Z'' (emerging market)",
         "group": "Forensic",
         "description": "Bankruptcy predictor, 4-factor emerging-market variant",
-        "source_tables": ["annual_balance_sheet", "annual_cash_flow"],
         "source_columns": ["bs.{current_assets,liabilities,retained_earnings,total_assets}", "cf.operating_cash_flow"],
         "filing_lag": "75d annual",
         "v1_verdict_summary": "(not in C13b; new in v2)",
@@ -502,7 +480,6 @@ FACTORS = {
         "label": "30-Day Avg Delivery %",
         "group": "Smart Money",
         "description": "Mean delivery percentage over trailing 30 days",
-        "source_tables": ["stock_prices"],
         "source_columns": ["stock_prices.delivery_pct"],
         "filing_lag": "0d",
         "pit_column_v1": "avg_delivery_pct_30d",
@@ -517,7 +494,6 @@ FACTORS = {
         "label": "Smart Money Composite",
         "group": "Smart Money",
         "description": "Composite of bulk-deal net-buy depth + delivery-% strength (signals.smart_money). Wired into SMALL screener weight; registered 2026-06-02 to close the never-backtested gap (HANDOFF 2026-06-02).",
-        "source_tables": ["bulk_deals", "stock_prices"],
         "source_columns": ["bulk_deals.*", "stock_prices.delivery_pct"],
         "filing_lag": "0d",
         "v1_verdict_summary": "(was unbacktested — PIT-thin: bulk_deals ~1mo depth → only 6 reconstructed anchors)",
@@ -543,7 +519,6 @@ FACTORS = {
         "label": "Delivery % Anomaly (z-score)",
         "group": "Smart Money",
         "description": "Today's delivery % vs 90-day mean, normalized",
-        "source_tables": ["stock_prices"],
         "source_columns": ["stock_prices.delivery_pct (rolling 90d)"],
         "filing_lag": "0d",
         "v1_verdict_summary": "(component of v1 smart_money_score)",
@@ -561,7 +536,6 @@ FACTORS = {
         "description": "Stock inherits its GICS sector's medium-horizon (≈3m) "
                        "constituent cap-weighted return minus NIFTY 50, z-scored "
                        "across sectors. Classic sector-momentum anomaly.",
-        "source_tables": ["stock_prices", "stocks", "macro_history"],
         "source_columns": ["stock_prices.close", "stocks.{sector,market_cap_cr}",
                            "macro_history.nifty50"],
         "filing_lag": "0d",
@@ -584,7 +558,6 @@ FACTORS = {
                        "macro_sector_signals_pit.macro_score), z-scored across "
                        "the 11 sectors. Validated additive to stock momentum "
                        "(Fama-MacBeth t+3.34 at 3m horizon, ADR 0041).",
-        "source_tables": ["stock_prices", "stocks", "macro_sector_signals_pit"],
         "source_columns": ["stock_prices.close", "stocks.sector",
                            "macro_sector_signals_pit.macro_score"],
         "filing_lag": "0d (prices) / monthly (macro leg)",
@@ -609,7 +582,6 @@ FACTORS = {
         "description": "Nearest-expiry total put OI / total call OI for the F&O "
                        "underlying. High = put-heavy positioning (bearish, or "
                        "contrarian-bullish on excess fear). Sign decided by backtest.",
-        "source_tables": ["fno_pcr_history"],
         "source_columns": ["fno_pcr_history.pcr_oi"],
         "filing_lag": "0d (EOD F&O bhavcopy)",
         "v1_verdict_summary": "(new — Plan 0002 §3.2.2 OI half, no v1 counterpart)",
@@ -627,7 +599,6 @@ FACTORS = {
         "group": "Options/F&O",
         "description": "Nearest-expiry total put volume / total call volume — the "
                        "same-day flow analogue of PCR(OI). Sign decided by backtest.",
-        "source_tables": ["fno_pcr_history"],
         "source_columns": ["fno_pcr_history.pcr_volume"],
         "filing_lag": "0d (EOD F&O bhavcopy)",
         "v1_verdict_summary": "(new — Plan 0002 §3.2.2 OI half, no v1 counterpart)",
@@ -647,7 +618,6 @@ FACTORS = {
         "description": "(spot − max_pain_strike) / spot, where max-pain is the "
                        "argmin total-writer-payout strike on the nearest expiry. "
                        "Tests the 'price drifts toward max-pain into expiry' lore.",
-        "source_tables": ["fno_pcr_history"],
         "source_columns": ["fno_pcr_history.max_pain_distance"],
         "filing_lag": "0d (EOD F&O bhavcopy)",
         "v1_verdict_summary": "(new — Plan 0002 §3.2.2 OI half, no v1 counterpart)",
@@ -668,7 +638,6 @@ FACTORS = {
                        "in total OI vs underlying price: long buildup +1 / short "
                        "covering +0.5 / long unwinding −0.5 / short buildup −1. "
                        "Δ taken only within one expiry series (roll-safe).",
-        "source_tables": ["fno_pcr_history"],
         "source_columns": ["fno_pcr_history.{total_call_oi,total_put_oi,underlying_price,expiry_date}"],
         "filing_lag": "0d (EOD F&O bhavcopy)",
         "v1_verdict_summary": "(new — Plan 0002 §3.2.2 OI half, no v1 counterpart)",
@@ -687,7 +656,6 @@ FACTORS = {
         "description": "iv(25-delta put) − iv(25-delta call) on the ~30d expiry, from "
                        "Black-76 inversion of fno_bhav settle prices. Positive = "
                        "downside protection bid up (fear). Sign decided by backtest.",
-        "source_tables": ["fno_iv_history"],
         "source_columns": ["fno_iv_history.iv_skew_25d"],
         "filing_lag": "0d (EOD F&O bhavcopy)",
         "v1_verdict_summary": "(new — Plan 0002 §3.2.2 IV half, no v1 counterpart)",
@@ -713,7 +681,6 @@ FACTORS = {
                        "inverted/backwardated curve (near-term stress). NOTE: thin "
                        "single-stock coverage (~20%) — next-month stock options are "
                        "illiquid; really an index-level signal.",
-        "source_tables": ["fno_iv_history"],
         "source_columns": ["fno_iv_history.iv_term_structure"],
         "filing_lag": "0d (EOD F&O bhavcopy)",
         "v1_verdict_summary": "(new — Plan 0002 §3.2.2 IV half, no v1 counterpart)",
@@ -734,7 +701,6 @@ FACTORS = {
         "description": "ATM IV − 21d annualised realised vol — the variance risk "
                        "premium. Positive = options pricing more vol than has been "
                        "realised (rich). Sign decided by backtest.",
-        "source_tables": ["fno_iv_history", "stock_prices"],
         "source_columns": ["fno_iv_history.atm_iv", "stock_prices.close (21d)"],
         "filing_lag": "0d (EOD F&O bhavcopy + 0d price)",
         "v1_verdict_summary": "(new — Plan 0002 §3.2.2 IV half, no v1 counterpart)",
@@ -754,7 +720,6 @@ FACTORS = {
         "description": "Percentile rank of today's ATM IV within its own trailing "
                        "≤252-day history. High = vol is expensive vs its own recent "
                        "range (mean-reversion / regime). Sign decided by backtest.",
-        "source_tables": ["fno_iv_history"],
         "source_columns": ["fno_iv_history.atm_iv (trailing series)"],
         "filing_lag": "0d (EOD F&O bhavcopy)",
         "v1_verdict_summary": "(new — Plan 0002 §3.2.2 IV half, no v1 counterpart)",
@@ -773,7 +738,6 @@ FACTORS = {
         "group": "Microstructure",
         "description": "5-day ATR / 20-day ATR. <1 = recent daily ranges tighter "
                        "than the longer run (volatility compression). Daily OHLC.",
-        "source_tables": ["stock_prices"],
         "source_columns": ["stock_prices.{high,low,close}"],
         "filing_lag": "0d",
         "v1_verdict_summary": "(new — Plan 0002 §3.2.3, daily-derivable, no Kite)",
@@ -787,7 +751,6 @@ FACTORS = {
         "group": "Microstructure",
         "description": "Mean (close−low)/(high−low) over ~21d — where in the daily "
                        "range the close lands. High = persistent late-day buying.",
-        "source_tables": ["stock_prices"],
         "source_columns": ["stock_prices.{high,low,close}"],
         "filing_lag": "0d",
         "v1_verdict_summary": "(new — Plan 0002 §3.2.3, daily-derivable, no Kite)",
@@ -801,7 +764,6 @@ FACTORS = {
         "group": "Microstructure",
         "description": "Fraction of last ~21d with a >1% overnight gap "
                        "(|open/prev_close − 1|). News/event sensitivity proxy.",
-        "source_tables": ["stock_prices"],
         "source_columns": ["stock_prices.{open,close}"],
         "filing_lag": "0d",
         "v1_verdict_summary": "(new — Plan 0002 §3.2.3, daily-derivable, no Kite)",
@@ -815,7 +777,6 @@ FACTORS = {
         "group": "Microstructure",
         "description": "Mean 5d (close − typical_price)/typical_price, TP=(H+L+C)/3 "
                        "(daily VWAP proxy — traded_value is ~17% NULL). Late-day strength.",
-        "source_tables": ["stock_prices"],
         "source_columns": ["stock_prices.{high,low,close}"],
         "filing_lag": "0d",
         "v1_verdict_summary": "(new — Plan 0002 §3.2.3, daily-derivable proxy, no Kite)",
@@ -829,7 +790,6 @@ FACTORS = {
         "group": "Microstructure",
         "description": "Corwin-Schultz 2-day high/low spread estimator, ~20d mean. "
                        "Illiquidity proxy (higher = wider effective spread). Daily H/L.",
-        "source_tables": ["stock_prices"],
         "source_columns": ["stock_prices.{high,low}"],
         "filing_lag": "0d",
         "v1_verdict_summary": "(new — Plan 0002 §3.2.3, daily-derivable proxy, no Kite)",
@@ -843,7 +803,6 @@ FACTORS = {
         "group": "Microstructure",
         "description": "Amihud: mean |daily return| / turnover(₹cr) over ~21d. "
                        "Price impact per unit volume; higher = more illiquid.",
-        "source_tables": ["stock_prices"],
         "source_columns": ["stock_prices.{close,volume}"],
         "filing_lag": "0d",
         "v1_verdict_summary": "(new — Plan 0002 §3.2.3, daily-derivable proxy, no Kite)",
@@ -858,7 +817,6 @@ FACTORS = {
         "description": "Standardised unexpected earnings — seasonal random walk: "
                        "(EPS_t − EPS_{t-4}) / stdev(trailing YoY EPS changes). The "
                        "classic PEAD signal; no analyst-consensus dependency.",
-        "source_tables": ["quarterly_income"],
         "source_columns": ["quarterly_income.eps"],
         "filing_lag": "~45d announcement approx (period_end + 45d)",
         "v1_verdict_summary": "(new — Plan 0002 §3.2.5, time-series SUE)",
@@ -873,7 +831,6 @@ FACTORS = {
         "description": "Abnormal return (stock − NIFTY) since the most recent "
                        "earnings announcement (≈period_end+45d), if within a ~60-day "
                        "post-announcement window; else NULL. Drift-in-progress.",
-        "source_tables": ["quarterly_income", "stock_prices", "macro_history"],
         "source_columns": ["quarterly_income.end_date", "stock_prices.close", "macro_history.nifty50"],
         "filing_lag": "~45d announcement approx",
         "v1_verdict_summary": "(new — Plan 0002 §3.2.5)",
@@ -887,7 +844,6 @@ FACTORS = {
         "group": "Event/PEAD",
         "description": "Count of corporate actions (dividends/splits/bonus/etc.) in "
                        "the trailing 1 year. Higher = more capital-action activity.",
-        "source_tables": ["corporate_actions"],
         "source_columns": ["corporate_actions.ex_date"],
         "filing_lag": "0d (ex_date anchor)",
         "v1_verdict_summary": "(new — Plan 0002 §3.2.5)",
@@ -901,7 +857,6 @@ FACTORS = {
         "group": "Event/PEAD",
         "description": "1 if a buyback corporate action appears in the last 30 days "
                        "(subject ~ 'buy back'), else 0. Sparse binary event flag.",
-        "source_tables": ["corporate_actions"],
         "source_columns": ["corporate_actions.{ex_date,subject}"],
         "filing_lag": "0d (ex_date anchor)",
         "v1_verdict_summary": "(new — Plan 0002 §3.2.5)",
@@ -920,7 +875,6 @@ FACTORS = {
                        "needing no analyst consensus (which we lack PIT); PEAD hypothesis: a big "
                        "positive CAR keeps drifting → expected IC POSITIVE. Staleness gate 90d "
                        "(one reporting quarter); NULL when no qualifying recent print.",
-        "source_tables": ["bse_announcements", "stock_prices", "macro_history"],
         "source_columns": ["bse_announcements.{sid,dt_tm,category=Result}", "stock_prices.close (adj)", "macro_history.nifty50"],
         "filing_lag": "0d (dt_tm event-time anchor; CAR window must close ≤ eval)",
         "v1_verdict_summary": "(new — Plan 0002 §3.2.5, PEAD-via-CAR; audit Factor-F3 sanctioned next candidate)",
@@ -959,7 +913,6 @@ FACTORS = {
                        "resignation/cessation events from the BSE announcement stream "
                        "(auditor 3.0 / CFO 2.5 / MD-CEO-Chairman 2.0 / director-CS-cessation 1.0). "
                        "Higher = more governance instability. Dual-use forensic red-flag.",
-        "source_tables": ["bse_announcements"],
         "source_columns": ["bse_announcements.{sid,subcategory,dt_tm}"],
         "filing_lag": "0d (dt_tm event-time anchor)",
         "v1_verdict_summary": "(new — ADR 0042 BSE event stream)",
@@ -983,7 +936,6 @@ FACTORS = {
         "description": "Δ net Loughran-McDonald tone (positive−negative word density) of the "
                        "latest earnings-call transcript vs the prior call. Tone momentum; "
                        "look-ahead-safe on the real BSE filing date (available_date, #1c).",
-        "source_tables": ["nlp_scores", "transcripts"],
         "source_columns": ["nlp_scores.{net_tone,available_date,doc_date}"],
         "filing_lag": "0d (available_date = real BSE filing dt_tm)",
         "v1_verdict_summary": "(new — Plan 0002 §3.2.4)",
@@ -998,7 +950,6 @@ FACTORS = {
         "group": "NLP/Transcript",
         "description": "Forward-looking phrases per 1,000 words in the latest earnings-call "
                        "transcript (guidance/outlook/expansion language). Look-ahead-safe (#1c).",
-        "source_tables": ["nlp_scores", "transcripts"],
         "source_columns": ["nlp_scores.{forward_looking_intensity,available_date,doc_date}"],
         "filing_lag": "0d (available_date = real BSE filing dt_tm)",
         "v1_verdict_summary": "(new — Plan 0002 §3.2.4)",
@@ -1014,7 +965,6 @@ FACTORS = {
         "group": "NLP/Transcript",
         "description": "Loughran-McDonald uncertainty-word hits per 100 words in the latest "
                        "earnings-call transcript (hedged/evasive tone). Look-ahead-safe (#1c).",
-        "source_tables": ["nlp_scores", "transcripts"],
         "source_columns": ["nlp_scores.{uncertainty_density,available_date,doc_date}"],
         "filing_lag": "0d (available_date = real BSE filing dt_tm)",
         "v1_verdict_summary": "(new — Plan 0002 §3.2.4)",
@@ -1031,7 +981,6 @@ FACTORS = {
         "label": "Bulk/Block Deal Activity",
         "group": "Smart Money",
         "description": "Net bulk-deal value over trailing 30 days, normalized by avg close",
-        "source_tables": ["bulk_deals", "stock_prices"],
         "source_columns": ["bulk_deals.{quantity, price, buy_sell, deal_date}"],
         "filing_lag": "0d",
         "v1_verdict_summary": "(60% weight in v1 smart_money_score)",
@@ -1045,7 +994,6 @@ FACTORS = {
         "label": "Short-Selling Activity",
         "group": "Smart Money",
         "description": "Reported short-sold quantity over trailing 30 days, normalized by 30d avg volume",
-        "source_tables": ["short_selling_data", "stock_prices"],
         "source_columns": ["short_selling_data.{quantity, short_date}"],
         "filing_lag": "0d",
         "v1_verdict_summary": "(NEW signal class — not in v1 roster)",
@@ -1090,7 +1038,6 @@ FACTORS = {
         "label": "Price Target Upside",
         "group": "Consensus",
         "description": "(Latest analyst PT − current price) / current price",
-        "source_tables": ["forecast_history", "stock_prices"],
         "source_columns": ["forecast_history.value WHERE metric='price'", "stock_prices.close"],
         "filing_lag": "0d (use forecast.date for knowability)",
         "v1_verdict_summary": "(component of v1 consensus signal)",
@@ -1108,7 +1055,6 @@ FACTORS = {
         "label": "PT Revision YoY",
         "group": "Consensus",
         "description": "(Latest PT / prior-year PT) − 1, from forecast_history.price snapshots",
-        "source_tables": ["forecast_history"],
         "source_columns": ["forecast_history.value WHERE metric='price'"],
         "filing_lag": "0d (use forecast.date as knowability)",
         "v1_verdict_summary": "(component of v1 consensus signal)",
@@ -1122,7 +1068,6 @@ FACTORS = {
         "label": "EPS Forecast Revision YoY",
         "group": "Consensus",
         "description": "Year-over-year change in consensus FY EPS estimate",
-        "source_tables": ["forecast_history"],
         "source_columns": ["forecast_history.{value, change} WHERE metric='eps'"],
         "filing_lag": "0d (use forecast.date as knowability)",
         "v1_verdict_summary": "(component of v1 consensus signal)",
@@ -1136,7 +1081,6 @@ FACTORS = {
         "label": "Consensus (PT + EPS revision)",
         "group": "Consensus",
         "description": "v1's headline consensus signal — was mean of pt_revision_yoy + eps_revision_yoy; now eps_revision_yoy only after pt source contaminated 2026-05-23",
-        "source_tables": ["forecast_history"],
         "source_columns": ["forecast_history.{value} WHERE metric='eps'"],
         "filing_lag": "0d",
         "v1_verdict_summary": "KEEP / WEAK / WEAK (t=3.52 LARGE — proxy validation in v1, included pt component)",
@@ -1171,7 +1115,6 @@ FACTORS = {
         "label": "News Sentiment (VADER 7d)",
         "group": "Sentiment",
         "description": "Rolling 7-day mean VADER sentiment across articles tagged for the stock",
-        "source_tables": ["news_articles", "news_article_stocks"],
         "source_columns": ["news_articles.{title, summary, published_at}", "news_article_stocks.sid"],
         "filing_lag": "0d",
         "v1_verdict_summary": "(used as adjustment in v1 screener, not in C13b)",
@@ -1185,7 +1128,6 @@ FACTORS = {
         "label": "News Article Volume (7d)",
         "group": "Sentiment",
         "description": "Count of articles in trailing 7 days — attention proxy",
-        "source_tables": ["news_articles", "news_article_stocks"],
         "source_columns": ["news_article_stocks.sid (count)"],
         "filing_lag": "0d",
         "pit_column_v2": "news_volume_7d",
@@ -1245,7 +1187,6 @@ FACTORS = {
         "label": "Return on Invested Capital",
         "group": "Track 3 — Library",
         "description": "NOPAT / Invested Capital, 3-yr median. NOPAT = (PBT + Interest) × (1 − Tax/PBT)",
-        "source_tables": ["fundamentals_screener"],
         "source_columns": ["{PBT, Interest, Tax, Equity Share Capital, Reserves, Borrowings}"],
         "filing_lag": "75d annual",
         "v1_verdict_summary": "v2-only — DROP all tiers (best |t|=0.75 LARGE)",
@@ -1259,7 +1200,6 @@ FACTORS = {
         "label": "Return on Incremental Invested Capital",
         "group": "Track 3 — Library",
         "description": "(NOPAT_t − NOPAT_{t-5}) / (IC_t − IC_{t-5}). Marginal-ROIC over trailing 5y; sister of ROIC. ΔIC ≥ ₹50 cr filter, capped ±5.",
-        "source_tables": ["fundamentals_screener"],
         "source_columns": ["{PBT, Tax, Interest, Equity Share Capital, Reserves, Borrowings} (annual, 6 yrs)"],
         "filing_lag": "75d annual",
         "v1_verdict_summary": "v2-only — DROP all tiers (best |t|=0.91 MID, intuitive sign)",
@@ -1272,7 +1212,6 @@ FACTORS = {
         "label": "Gross Profitability (Novy-Marx)",
         "group": "Track 3 — Library",
         "description": "(Sales − COGS) / Total Assets, 3y median. COGS = Raw Material + Change in Inventory + Power & Fuel + Other Mfr. Exp. Anchor quality factor of the multibagger funnel.",
-        "source_tables": ["fundamentals_screener"],
         "source_columns": ["{Sales, Raw Material Cost, Change in Inventory, Power and Fuel, Other Mfr. Exp, Total} (annual)"],
         "filing_lag": "75d annual",
         "v1_verdict_summary": "v2-only — not yet backtested (built 2026-06-03 for multibagger funnel)",
@@ -1285,7 +1224,6 @@ FACTORS = {
         "label": "Free Cash Flow Yield",
         "group": "Track 3 — Library",
         "description": "3-yr median FCF / PIT market_cap. FCF = OCF − (max(Δ(Net Block + CWIP), 0) + Depreciation). PIT market cap uses close × No. of Equity Shares.",
-        "source_tables": ["fundamentals_screener", "stock_prices"],
         "source_columns": ["{OCF, Net Block, CWIP, Depreciation, No. of Equity Shares}", "stock_prices.close (PIT)"],
         "filing_lag": "75d annual",
         "v1_verdict_summary": "v2-only — DROP all tiers (best |t|=1.08 SMALL)",
@@ -1299,7 +1237,6 @@ FACTORS = {
         "label": "Cash Conversion Cycle",
         "group": "Track 3 — Library",
         "description": "DSO + DIO − DPO, 3-yr median. Sales used as denominator (no clean COGS line in Screener).",
-        "source_tables": ["fundamentals_screener"],
         "source_columns": ["{Sales, Receivables, Inventory, Trade Payables}"],
         "filing_lag": "75d annual",
         "v1_verdict_summary": "v2-only — LARGE WEAK (t=+1.87, n=5, contrarian sign), MID/SMALL DROP",
@@ -1312,7 +1249,6 @@ FACTORS = {
         "label": "Operating Margin Trend (5y slope)",
         "group": "Track 3 — Library",
         "description": "OLS slope of last 5y EBIT/Sales in percentage-points/year. EBIT = PBT + Interest.",
-        "source_tables": ["fundamentals_screener"],
         "source_columns": ["{Sales, PBT, Interest}"],
         "filing_lag": "75d annual",
         "v1_verdict_summary": "v2-only — DROP all tiers (best |t|=1.30 MID)",
@@ -1325,7 +1261,6 @@ FACTORS = {
         "label": "Working Capital Intensity",
         "group": "Track 3 — Library",
         "description": "(Receivables + Inventory − Trade Payables) / Sales, 3-yr median. Sibling of CCC in ratio form.",
-        "source_tables": ["fundamentals_screener"],
         "source_columns": ["{Sales, Receivables, Inventory, Trade Payables}"],
         "filing_lag": "75d annual",
         "v1_verdict_summary": "v2-only — DROP all tiers (best |t|=1.48 LARGE)",
@@ -1338,7 +1273,6 @@ FACTORS = {
         "label": "DSO YoY Change",
         "group": "Track 3 — Library",
         "description": "Receivables/(Sales/365) − prior year. Rising DSO = receivables outpacing sales (forensic yellow flag). Days.",
-        "source_tables": ["fundamentals_screener"],
         "source_columns": ["{Sales, Receivables}"],
         "filing_lag": "75d annual",
         "v1_verdict_summary": "v2-only — LARGE KEEP (t=-2.81), MID WEAK (t=-1.71), SMALL DROP (t=+1.49)",
@@ -1351,7 +1285,6 @@ FACTORS = {
         "label": "DIO YoY Change",
         "group": "Track 3 — Library",
         "description": "Inventory/(Sales/365) − prior year. Rising DIO = inventory accumulating faster than sales. Days.",
-        "source_tables": ["fundamentals_screener"],
         "source_columns": ["{Sales, Inventory}"],
         "filing_lag": "75d annual",
         "v1_verdict_summary": "v2-only — DROP all tiers (best |t|=0.97 MID)",
@@ -1364,7 +1297,6 @@ FACTORS = {
         "label": "NWC / Revenue (latest)",
         "group": "Track 3 — Library",
         "description": "(Receivables + Inventory − Trade Payables) / Sales, latest annual. Spot sibling of wc_intensity (which is 3y median).",
-        "source_tables": ["fundamentals_screener"],
         "source_columns": ["{Sales, Receivables, Inventory, Trade Payables}"],
         "filing_lag": "75d annual",
         "v1_verdict_summary": "v2-only — LARGE WEAK (t=+1.68), SMALL WEAK (t=+1.92), MID DROP (t=+1.29)",
@@ -1377,7 +1309,6 @@ FACTORS = {
         "label": "Sloan Accruals (full BS formula)",
         "group": "Track 3 — Library",
         "description": "(ΔNWC − Depreciation) / avg(Total assets). The original Sloan (1996) measure. Lower = cash-rich earnings.",
-        "source_tables": ["fundamentals_screener"],
         "source_columns": ["{Receivables, Inventory, Trade Payables, Depreciation, Total}"],
         "filing_lag": "75d annual",
         "v1_verdict_summary": "v2-only — DROP all tiers (best |t|=1.43 SMALL)",
@@ -1390,7 +1321,6 @@ FACTORS = {
         "label": "Δ SG&A Intensity",
         "group": "Track 3 — Library",
         "description": "Selling and admin / Sales − prior year. Rising intensity = operating discipline slipping.",
-        "source_tables": ["fundamentals_screener"],
         "source_columns": ["{Sales, Selling and admin}"],
         "filing_lag": "75d annual",
         "v1_verdict_summary": "v2-only — DROP all tiers (best |t|=0.69 MID)",
@@ -1403,7 +1333,6 @@ FACTORS = {
         "label": "FCF Margin",
         "group": "Track 3 — Library",
         "description": "3y median (OCF − Capex) / Sales. Fundamental sibling of fcf_yield (no valuation input).",
-        "source_tables": ["fundamentals_screener"],
         "source_columns": ["{Sales, OCF, Net Block, CWIP, Depreciation}"],
         "filing_lag": "75d annual",
         "v1_verdict_summary": "v2-only — DROP all tiers (best |t|=1.28 LARGE)",
@@ -1416,7 +1345,6 @@ FACTORS = {
         "label": "CapEx / Depreciation",
         "group": "Track 3 — Library",
         "description": "3y median (max(Δ(Net Block + CWIP), 0) + Depreciation) / Depreciation. >1 = growing, <1 = harvesting.",
-        "source_tables": ["fundamentals_screener"],
         "source_columns": ["{Net Block, CWIP, Depreciation}"],
         "filing_lag": "75d annual",
         "v1_verdict_summary": "v2-only — DROP all tiers (best |t|=0.94 SMALL)",
@@ -1429,7 +1357,6 @@ FACTORS = {
         "label": "Intangibles / Total Assets",
         "group": "Track 3 — Library",
         "description": "Intangible Assets / Total. Goodwill proxy — Screener doesn't separate goodwill from other intangibles.",
-        "source_tables": ["fundamentals_screener"],
         "source_columns": ["{Intangible Assets, Total}"],
         "filing_lag": "75d annual",
         "v1_verdict_summary": "v2-only — DROP all tiers (best |t|=0.89 MID)",
@@ -1442,7 +1369,6 @@ FACTORS = {
         "label": "LT Borrowings Share",
         "group": "Track 3 — Library",
         "description": "Long term Borrowings / Borrowings, latest annual. Higher = safer debt maturity profile.",
-        "source_tables": ["fundamentals_screener"],
         "source_columns": ["{Long term Borrowings, Borrowings}"],
         "filing_lag": "75d annual",
         "v1_verdict_summary": "v2-only — DROP all tiers (best |t|=1.15 LARGE)",
@@ -1455,7 +1381,6 @@ FACTORS = {
         "label": "Asset Tangibility (Net Block / Total)",
         "group": "Track 3 — Library",
         "description": "Net Block / Total assets, latest annual. Higher = capex-heavy / asset-rich business model.",
-        "source_tables": ["fundamentals_screener"],
         "source_columns": ["{Net Block, Total}"],
         "filing_lag": "75d annual",
         "v1_verdict_summary": "v2-only — MID WEAK (t=+2.06), LARGE/SMALL DROP",
@@ -1468,7 +1393,6 @@ FACTORS = {
         "label": "Interest Coverage Ratio",
         "group": "Track 3 — Library",
         "description": "(PBT + Interest) / Interest, 3-yr median, capped ±200. Stocks with Interest<₹1cr excluded.",
-        "source_tables": ["fundamentals_screener"],
         "source_columns": ["{PBT, Interest}"],
         "filing_lag": "75d annual",
         "v1_verdict_summary": "v2-only — SMALL WEAK (t=+2.41, n=5, intuitive sign), LARGE/MID DROP",
@@ -1481,7 +1405,6 @@ FACTORS = {
         "label": "Revenue CV (5y stability)",
         "group": "Track 3 — Library",
         "description": "Stdev/|mean| of last 5 YoY Sales growth rates. Lower = more stable top line.",
-        "source_tables": ["fundamentals_screener"],
         "source_columns": ["Sales (annual, 6 yrs)"],
         "filing_lag": "75d annual",
         "v1_verdict_summary": "v2-only — DROP all tiers (best |t|=1.28)",
@@ -1494,7 +1417,6 @@ FACTORS = {
         "label": "Inventory Turnover vs Sector",
         "group": "Track 3 — Library",
         "description": "Sales/Inventory 3-yr median, divided by sector p50. IT/Comm/Utilities + financials excluded.",
-        "source_tables": ["fundamentals_screener"],
         "source_columns": ["{Sales, Inventory}"],
         "filing_lag": "75d annual",
         "v1_verdict_summary": "v2-only — DROP all tiers (best |t|=1.07)",
@@ -1507,7 +1429,6 @@ FACTORS = {
         "label": "Sales Growth vs Sector Median",
         "group": "Track 3 — Library",
         "description": "3-yr median YoY Sales growth minus sector median. Financials excluded.",
-        "source_tables": ["fundamentals_screener"],
         "source_columns": ["Sales (annual)"],
         "filing_lag": "75d annual",
         "v1_verdict_summary": "v2-only — DROP all tiers (best |t|=1.19)",
@@ -1520,7 +1441,6 @@ FACTORS = {
         "label": "Market-Cap Share Momentum",
         "group": "Track 3 — Library",
         "description": "Δ market_cap_share within sector over trailing 90 calendar days. Financials excluded.",
-        "source_tables": ["stock_prices", "fundamentals_screener"],
         "source_columns": ["close (PIT-adjusted)", "No. of Equity Shares"],
         "filing_lag": "0d price + 75d shares",
         "v1_verdict_summary": "v2-only — KEEP on at least one tier (best |t|=3.21)",
@@ -1606,7 +1526,6 @@ FACTORS = {
         "label": "Financial Sub-Model (Banks + NBFCs) — legacy single-direction",
         "group": "Track 2 — Portfolio",
         "description": "Per-stock composite for Banks + NBFCs only: 40% asset_quality (GNPA/NNPA, direction=lower) + 30% profitability + 15% capital + 15% funding. SUPERSEDED 2026-05-29 by financial_quality + financial_recovery split after backtest showed AQ direction flips by tier. Kept here as the alias column (= financial_quality) so historical PIT and the existing optimizer entry survive.",
-        "source_tables": ["banking_metrics"],
         "source_columns": ["gross_npa_pct, net_npa_pct, interest_earned, net_interest_income, net_profit, cost_of_funds_pct"],
         "filing_lag": "60d quarterly + 75d annual",
         "v1_verdict_summary": "Phase 2.2d backtest FAILED done gate (t = -0.75 / -1.30 / -0.34 LARGE/MID/SMALL) — direction-flip diagnostic surfaced. Split into financial_quality + financial_recovery 2026-05-29 session #2.",
@@ -1620,7 +1539,6 @@ FACTORS = {
         "label": "Financial Quality — SMALL banks/NBFCs (low NPA = strong franchise)",
         "group": "Track 2 — Portfolio",
         "description": "Quality direction of Phase 2.2b composite — asset_quality z-scored as direction='lower' (low NPA good). Other 3 components shared with financial_recovery: profitability (NII/NP margin), capital (NULL pre-2.2c), funding (cost_of_funds). Composite renormalised over present components. Backtest hypothesis: SMALL banks' gross_npa_pct t=-3.09 (low NPA persists, quality compounds).",
-        "source_tables": ["banking_metrics"],
         "source_columns": ["gross_npa_pct, net_npa_pct, interest_earned, net_interest_income, net_profit, cost_of_funds_pct"],
         "filing_lag": "60d quarterly + 75d annual",
         "v1_verdict_summary": "(v2-only; SMALL-tier validation pending Phase 2.2d-v2 backtest run)",
@@ -1633,7 +1551,6 @@ FACTORS = {
         "label": "Financial Recovery — LARGE/MID banks/NBFCs (high NPA = mean-reversion)",
         "group": "Track 2 — Portfolio",
         "description": "Recovery direction of Phase 2.2b composite — asset_quality z-scored as direction='higher' (high NPA = distressed-recovery opportunity). Other 3 components shared with financial_quality. Backtest hypothesis: LARGE net_npa_pct t=+2.39, MID t=+4.16 (NPA-stressed names mean-revert).",
-        "source_tables": ["banking_metrics"],
         "source_columns": ["gross_npa_pct, net_npa_pct, interest_earned, net_interest_income, net_profit, cost_of_funds_pct"],
         "filing_lag": "60d quarterly + 75d annual",
         "v1_verdict_summary": "(v2-only; LARGE/MID-tier validation pending Phase 2.2d-v2 backtest run)",
@@ -1650,7 +1567,6 @@ FACTORS = {
         "label": "Industry Identity (categorical control)",
         "group": "Controls",
         "description": "Frozen integer code (1..38, 0=unknown) for the stock's industry. A NEUTRALISATION CONTROL, not a rankable alpha factor — no directional signal, Spearman IC of an arbitrary code is meaningless. Kept out of SIGNAL_COLUMN_MAP / the IC roster; exists for industry one-hot / neutralisation at model-fit time (Plan 0002 §3.2.6 'industry dummies (1)').",
-        "source_tables": ["stocks"],
         "source_columns": ["stocks.industry"],
         "filing_lag": "0d (static attribute)",
         "v1_verdict_summary": "(control — not backtested for IC)",
@@ -1664,7 +1580,6 @@ FACTORS = {
         "label": "Oil Beta (β vs Brent crude)",
         "group": "Macro Extensions",
         "description": "Rolling 252-trading-day OLS beta of daily stock returns on Brent crude daily returns. Energy / input-cost exposure (Plan 0002 §3.2.7). Per-stock exposure, NOT the macro level (a level is cross-sectionally constant → 0 IC).",
-        "source_tables": ["stock_prices", "macro_history"],
         "source_columns": ["stock_prices.close", "macro_history.brent_crude"],
         "filing_lag": "0d (daily price + daily macro)",
         "v1_verdict_summary": "(v2-only; macro_history starts 2023-03-13, NULL before ~1y lookback)",
@@ -1677,7 +1592,6 @@ FACTORS = {
         "label": "Metals Beta (β vs copper+aluminium)",
         "group": "Macro Extensions",
         "description": "Rolling 252-trading-day OLS beta of daily stock returns on an equal-weight copper+aluminium daily-return blend. Industrial / capex / metals-cycle exposure (Plan 0002 §3.2.7).",
-        "source_tables": ["stock_prices", "macro_history"],
         "source_columns": ["stock_prices.close", "macro_history.copper", "macro_history.aluminium"],
         "filing_lag": "0d (daily price + daily macro)",
         "v1_verdict_summary": "(v2-only; NULL before ~1y macro lookback)",
@@ -1690,7 +1604,6 @@ FACTORS = {
         "label": "INR Beta (β vs USD/INR)",
         "group": "Macro Extensions",
         "description": "Rolling 252-trading-day OLS beta of daily stock returns on USD/INR daily returns. FX / importer-vs-exporter tilt (Plan 0002 §3.2.7). The rankable form of the plan's 'inr_carry_proxy' — a carry LEVEL is cross-sectionally constant, so the per-stock FX exposure is used instead.",
-        "source_tables": ["stock_prices", "macro_history"],
         "source_columns": ["stock_prices.close", "macro_history.usdinr"],
         "filing_lag": "0d (daily price + daily macro)",
         "v1_verdict_summary": "(v2-only; NULL before ~1y macro lookback)",
@@ -1703,7 +1616,6 @@ FACTORS = {
         "label": "Gold Beta (β vs gold)",
         "group": "Macro Extensions",
         "description": "Rolling 252-trading-day OLS beta of daily stock returns on gold daily returns. Safe-haven / gold-financier tilt (Plan 0002 §3.2.7). Takes the 4th macro-extension slot in place of india_credit_spread, which is DATA-BLOCKED (no daily India G-Sec / credit series; india_money_rate is monthly + stale). Revisit a rate_beta when a daily G-Sec feed lands.",
-        "source_tables": ["stock_prices", "macro_history"],
         "source_columns": ["stock_prices.close", "macro_history.gold"],
         "filing_lag": "0d (daily price + daily macro)",
         "v1_verdict_summary": "(v2-only; NULL before ~1y macro lookback)",
@@ -1716,7 +1628,6 @@ FACTORS = {
         "label": "Rate Beta (β vs 10Y G-Sec gilt ETF)",
         "group": "Macro Extensions",
         "description": "Rolling 252-trading-day OLS beta of daily stock returns on the SBI 10Y Gilt ETF (SETF10GILT) daily returns. Rate / duration exposure (Plan 0002 §3.2.7). The gilt ETF RISES when the 10Y yield FALLS, so +rate_beta = co-moves with bond rallies (duration-like: NBFCs, rate-sensitive growth). Resolves the previously DATA-BLOCKED india rate factor — NSE bond ETFs are the only free daily India-rates feed reachable (FBIL/CCIL/RBI walled, FRED monthly).",
-        "source_tables": ["stock_prices", "macro_history"],
         "source_columns": ["stock_prices.close", "macro_history.gsec10_etf"],
         "filing_lag": "0d (daily price + daily macro)",
         "v1_verdict_summary": "(v2-only; gsec10_etf daily from 2016)",
@@ -1729,7 +1640,6 @@ FACTORS = {
         "label": "Credit Beta (β vs AAA-PSU credit excess)",
         "group": "Macro Extensions",
         "description": "Rolling 252-trading-day OLS beta of daily stock returns on credit_excess_idx — the AAA-PSU-over-gilt excess-return index (Bharat Bond EBBETF0430 minus SBI 10Y Gilt). Credit-cycle exposure (Plan 0002 §3.2.7); +credit_beta = rises when credit spreads tighten. CAVEAT: Bharat Bond is target-maturity → residual duration tilt; orthogonalise vs rate_beta before any wiring.",
-        "source_tables": ["stock_prices", "macro_history"],
         "source_columns": ["stock_prices.close", "macro_history.credit_excess_idx"],
         "filing_lag": "0d (daily price + daily macro)",
         "v1_verdict_summary": "(v2-only; credit_excess_idx daily from 2019)",
@@ -1752,7 +1662,6 @@ FACTORS = {
                        "days (min 200 obs, split-adjusted closes). Canonical low-risk anomaly "
                        "(Ang 2006, Blitz-van Vliet 2007, BAB): LOW vol → HIGH forward return, "
                        "so the expected IC of the raw vol value is NEGATIVE.",
-        "source_tables": ["stock_prices"],
         "source_columns": ["stock_prices.close (adj, rolling 252d)"],
         "filing_lag": "0d (price)",
         "v1_verdict_summary": "(new — audit Factor-F3 LARGE-tier rebuild candidate #1)",
@@ -1775,7 +1684,6 @@ FACTORS = {
                        "closes). Canonical short-term reversal (Jegadeesh 1990): last month's "
                        "losers win next month — expected IC NEGATIVE. The horizon mom_6m/12m "
                        "deliberately skip (SKIP_DAYS=22) is exactly this factor.",
-        "source_tables": ["stock_prices"],
         "source_columns": ["stock_prices.close (adj, rolling 21d)"],
         "filing_lag": "0d (price)",
         "v1_verdict_summary": "(new — audit Factor-F3 LARGE-tier rebuild candidate #2)",
@@ -1797,7 +1705,6 @@ FACTORS = {
                        "non-financials, prior-year assets ≥ ₹50 cr). Canonical investment "
                        "factor (Cooper-Gulen-Schill 2008 / FF5 CMA): aggressive balance-sheet "
                        "expansion underperforms — expected IC NEGATIVE.",
-        "source_tables": ["annual_balance_sheet"],
         "source_columns": ["bs.total_assets"],
         "filing_lag": "75d annual",
         "v1_verdict_summary": "(new — audit Factor-F3 LARGE-tier rebuild candidate #3)",
@@ -1823,7 +1730,6 @@ FACTORS = {
                        "2011 — removing the market-beta component strengthens raw momentum. "
                        "Designed retest of plain momentum (mom_6m_adj/mom_12m_adj), which "
                        "failed the clean bar at SMALL t=1.34. Expected IC POSITIVE.",
-        "source_tables": ["stock_prices", "macro_history"],
         "source_columns": ["stock_prices.close (adj, 252-21d window)", "macro_history.nifty50"],
         "filing_lag": "0d (price)",
         "v1_verdict_summary": "(new — plan 0012 C3, WS2.6 momentum retest hypothesis 1 of 2)",
@@ -1847,7 +1753,6 @@ FACTORS = {
                        "overprices extreme-daily-return names — expected IC NEGATIVE. "
                        "Long-only use is naturally exclusion/penalty-shaped (can't short "
                        "the names to avoid), like governance_resignation.",
-        "source_tables": ["stock_prices"],
         "source_columns": ["stock_prices.close (adj, rolling 21d, top-5 daily returns)"],
         "filing_lag": "0d (price)",
         "v1_verdict_summary": "(new — plan 0012 C4, WS2.7 lottery retest hypothesis 2 of 2)",
@@ -1975,6 +1880,37 @@ PIT_PRODUCERS = {
 }
 
 
+# ── The tables behind each producer input (Dataset reads, ADR 0052) ──
+# pit._pit_input key → the tables its raw frame(s) are loaded from (pit.RAW_SQL,
+# via pit._INPUT_RAW). A factor's `source_tables` DEFAULTS to the union over its
+# producer's inputs — the table-level reads, stated once (lineage.FACTOR_LINEAGE and
+# the /model page derive from it). tests/test_factor_registry.py checks this map
+# against pit.RAW_SQL, so it cannot drift from what the code actually loads.
+INPUT_TABLES = {
+    "stocks": ("stocks",), "financial_sids": ("stocks",),
+    "qi": ("quarterly_income",), "bs": ("annual_balance_sheet",), "cf": ("annual_cash_flow",),
+    "sh": ("shareholding",), "fund": ("fundamentals_screener",),
+    "px": ("stock_prices", "corporate_adjustments"), "close": ("stock_prices", "corporate_adjustments"),
+    "prices": ("stock_prices",), "prices_ohlc": ("stock_prices",),
+    "fh": ("forecast_history",), "acs": ("analyst_consensus_snapshots",),
+    "bulk": ("bulk_deals",), "short": ("short_selling_data",),
+    "news": ("news_articles", "news_article_stocks"), "news_text": ("news_articles", "news_article_stocks"),
+    "insider_trades": ("insider_trades",), "banking_metrics": ("banking_metrics",),
+    "macro_hist": ("macro_history",), "macro_sector": ("macro_sector_signals_pit",),
+    "fno_pcr": ("fno_pcr_history",), "fno_iv": ("fno_iv_history",),
+    "corp_actions": ("corporate_actions",), "bse_results": ("bse_announcements",),
+    "bse_gov": ("bse_announcements",), "nlp": ("nlp_scores",),
+    "eval_date": (), "base": (),
+}
+
+
+def producer_tables(producer):
+    """Sorted tables a PIT producer reads (its inputs + needs + nonempty)."""
+    spec = PIT_PRODUCERS.get(producer) or {}
+    keys = (*spec.get("inputs", ()), *spec.get("needs", ()), *spec.get("nonempty", ()))
+    return sorted({t for k in keys for t in INPUT_TABLES[k]})
+
+
 # ── Dry-run weight variants (ADR 0028 → superseded by ADR 0049; non-production) ──
 # ONE owner: here, as whole-scheme tables — they are tools/optimize_weights.py output
 # (pasted wholesale, never tuned per factor) and only feed `scoring.screener
@@ -2069,6 +2005,8 @@ def _fill_defaults():
         f.setdefault("status", "READY")
         f.setdefault("status_reason", "")
         f.setdefault("cadence", "monthly")
+        if producer_tables(f.get("producer")):
+            f.setdefault("source_tables", producer_tables(f["producer"]))
         if "weights" in f:
             f.setdefault("weight_key", sid)
         if "weight_key" in f:

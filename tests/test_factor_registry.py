@@ -149,3 +149,51 @@ def test_inferred_fields_are_not_restated():
         restated += [(sid, k) for k, d in defaults.items() if k in fields and lit(k) == d]
     assert restated == []
     assert not any("live_table" in f for f in factors.FACTORS.values())   # read by nothing
+
+
+# ── Table-level reads are stated once (FACTORS.source_tables); lineage derives ──
+
+def _raw_sql_tables(key):
+    import re
+    sql = pit.RAW_SQL[key]
+    sql = sql() if callable(sql) else sql
+    return set(re.findall(r"(?:FROM|JOIN)\s+(\w+)", sql))
+
+
+def test_input_tables_match_pit_raw_sql():
+    """factors.INPUT_TABLES (producer input → tables) is what pit actually loads."""
+    used = {k for spec in factors.PIT_PRODUCERS.values()
+            for k in (*spec.get("inputs", ()), *spec.get("needs", ()), *spec.get("nonempty", ()))}
+    assert used <= set(factors.INPUT_TABLES)
+    for key in used:
+        raw_keys = [r for r in pit._INPUT_RAW.get(key, (key,)) if r in pit.RAW_SQL]
+        expect = set().union(*(_raw_sql_tables(r) for r in raw_keys)) if raw_keys else set()
+        assert set(factors.INPUT_TABLES[key]) == expect, key
+
+
+def test_source_tables_are_the_producer_tables():
+    for sid, f in factors.FACTORS.items():
+        derived = factors.producer_tables(f.get("producer"))
+        if derived:
+            assert f["source_tables"] == derived, sid
+
+
+def test_lineage_is_derived_for_every_factor():
+    import lineage
+    import sqlite3
+    assert list(lineage.FACTOR_LINEAGE) == list(factors.FACTORS)
+    assert lineage.missing_factors() == [] and lineage.orphan_factors() == []
+    conn = sqlite3.connect(":memory:")
+    conn.executescript(open(config.SCHEMA_PATH).read())
+    schema = {t: {c[1] for c in conn.execute(f"PRAGMA table_info('{t}')")}
+              for (t,) in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    for sid, detail in lineage.LINEAGE_DETAIL.items():
+        tables = set(factors.FACTORS[sid]["source_tables"])
+        for spec in detail.get("reads", []):
+            # column detail only for tables the factor reads, naming real columns
+            assert spec["table"] in tables, (sid, spec["table"])
+            assert set(spec["cols"]) <= schema[spec["table"]], (sid, spec["table"])
+    for sid, entry in lineage.FACTOR_LINEAGE.items():
+        if "composite_of" not in entry:
+            assert {r["table"] for r in entry["reads"]} == \
+                set(factors.FACTORS[sid]["source_tables"]) - {"—"}, sid
