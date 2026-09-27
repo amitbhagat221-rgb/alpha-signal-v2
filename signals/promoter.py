@@ -159,8 +159,10 @@ def _compute_scores(stocks, sh):
     df["promoter_trend"] = df.apply(_trend_label, axis=1)
 
     # Output columns matching v2 schema
-    out = df[["sid", "promoter_qoq", "promoter_trend", "pledge_quality",
-              "promoter_signal"]].copy()
+    # reindex, not [[...]]: on an early PIT anchor no sid has 2 quarters yet, so
+    # promoter_qoq is never created — that is "no value", not an error.
+    out = df.reindex(columns=["sid", "promoter_qoq", "promoter_trend", "pledge_quality",
+                              "promoter_signal"]).copy()
     return out
 
 
