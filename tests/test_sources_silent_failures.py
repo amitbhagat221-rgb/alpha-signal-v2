@@ -76,20 +76,13 @@ def test_nse_bulk_quiet_on_duplicate_only_day(monkeypatch):
 
 def test_macro_gov_raises_naming_dead_source_after_saving_the_rest(monkeypatch):
     from sources import macro_gov
-    calls = []
-
-    def fake_get(url, timeout=None):
-        calls.append(url)
-        if "data.gov.in" in url:
-            raise requests.Timeout("read timed out")
-        return _Resp("observation_date,X\n2026-01-01,1.5\n2026-02-01,1.6\n")
-
-    monkeypatch.setattr(macro_gov, "polite_get", fake_get)
+    monkeypatch.setattr(macro_gov.macro_official, "fetch_all", lambda dry_run=False: 0)   # MoSPI/OEA dead
+    monkeypatch.setattr(macro_gov, "polite_get",
+                        lambda url, timeout=None: _Resp("observation_date,X\n2026-01-01,1.5\n2026-02-01,1.6\n"))
     saved = []
     monkeypatch.setattr(macro_gov, "upsert_df", lambda df, t: saved.append(t))
-    with pytest.raises(RuntimeError, match="0 rows from data.gov.in"):
+    with pytest.raises(RuntimeError, match="0 rows from MoSPI/OEA"):
         macro_gov.compute()
-    assert sum("data.gov.in" in u for u in calls) == 1   # fail-fast after first timeout
     assert "macro_history" in saved                        # FRED rows still written
 
 

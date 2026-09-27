@@ -5,7 +5,7 @@ Maps 22 macro indicators to sector scores using a rules table.
 Signal → Score: STRONG=80, IMPROVING=65, STABLE=50, DETERIORATING=30.
 Per-sector score = average of mapped indicator scores.
 
-Reads: macro_indicators
+Reads: macro_indicators (latest snapshot; produced by sources/macro_official.py)
 Writes: macro_sector_signals
 
 Usage:
@@ -61,7 +61,10 @@ def _sector_signal(score):
 
 def compute(dry_run=False):
     """Compute macro sector signals from indicator data."""
-    indicators = read_sql("SELECT indicator, signal, detail FROM macro_indicators")
+    # Latest snapshot only: macro_indicators keeps one row per (indicator, snapshot_date)
+    # and an unfiltered read would let an older label overwrite a newer one.
+    indicators = read_sql("SELECT indicator, signal, detail FROM macro_indicators "
+                          "WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM macro_indicators)")
 
     if indicators.empty:
         print("No macro indicators found.")

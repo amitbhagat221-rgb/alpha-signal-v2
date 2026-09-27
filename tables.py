@@ -288,10 +288,11 @@ TABLES = {
     },
     # v1-migration leftover, no v2 producer. Marked annual to silence the freshness alarm.
     "macro_indicators": {
-        "kind": "RAW", "domain": "Macro", "freq": "annual", "data_freq": "static",
-        "source": "v1 migration (leftover)", "date_col": "snapshot_date",
-        "depth": "Static snapshot (legacy v1)",
-        "description": "Static snapshot (22 rows) of macro indicators from RBI/PIB/MOSPI. Migrated from v1; replaced by `macro_history` for new work.",
+        "kind": "COMPUTED", "domain": "Macro", "freq": "weekly", "data_freq": "monthly",
+        "source": "sources/macro_official.py (MoSPI IIP + OEA core YoY → v1 thresholds)",
+        "date_col": "snapshot_date",
+        "depth": "One label snapshot per weekly macro run (2026-09-27 →); a 2026-04-09 v1 snapshot before",
+        "description": "Per-indicator STRONG/IMPROVING/STABLE/DETERIORATING labels (+ macro_overall) from the latest official IIP and core-sector YoY. signals/macro.py reads the latest snapshot into sector scores. Indicators older than 150 days get no label.",
     },
     "macro_sector_map": {
         "kind": "RAW", "domain": "Macro", "freq": "monthly", "data_freq": "static",

@@ -157,12 +157,12 @@ def polite_get(url, **kwargs):
     return polite_request("GET", url, **kwargs)
 
 
-def warm_session(home_url, headers=None):
-    """A session carrying `headers` (default: the home host's), with its
-    cookie jar warmed by one paced GET of `home_url` — NSE and BSE bot gates set
-    their cookies there. A failed warm-up is logged, not raised: the API call that
-    follows fails loudly on its own."""
-    entry = host(home_url)[1]
+def session(url, headers=None):
+    """A session for `url`'s host carrying `headers` (default: the host's): a
+    curl_cffi browser session when the host declares `impersonate` (WAFs that
+    reject python-requests' TLS fingerprint, or servers whose legacy TLS
+    renegotiation OpenSSL 3 refuses), else requests.Session. No request is made."""
+    entry = host(url)[1]
     headers = dict(headers or entry["headers"])
     if entry.get("impersonate") and _cffi is not None:
         # The browser fingerprint must stay consistent: let curl_cffi send its own UA.
@@ -171,6 +171,14 @@ def warm_session(home_url, headers=None):
     else:
         s = requests.Session()
     s.headers.update(headers)
+    return s
+
+
+def warm_session(home_url, headers=None):
+    """session(home_url) with its cookie jar warmed by one paced GET of
+    `home_url` — NSE and BSE bot gates set their cookies there. A failed warm-up
+    is logged, not raised: the API call that follows fails loudly on its own."""
+    s = session(home_url, headers)
     try:
         polite_get(home_url, session=s, retries=0)
     except _REQ_ERRORS as e:

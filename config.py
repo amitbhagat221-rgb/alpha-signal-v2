@@ -235,9 +235,9 @@ PIPELINE_STEPS = [
      "lagged_reads": ["macro_history@fetch_macro_gov"]},
 
     {"name": "fetch_macro_gov",    "module": "sources.macro_gov",     "function": "compute", "critical": False,
-     "table": "macro_history",     "source": "data.gov.in + FRED",    "data_freq": "monthly", "frequency": "weekly",
-     "reads": ["stocks"],
-     "writes": ["macro_history", "macro_indicator_meta"],
+     "table": "macro_history",     "source": "MoSPI (IIP, CPI) + OEA (core) + FRED", "data_freq": "monthly", "frequency": "weekly",
+     "reads": ["macro_history", "stocks"],
+     "writes": ["macro_history", "macro_indicator_meta", "macro_indicators"],
      "lagged_writes": ["macro_indicator_meta"],
      "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos", "stocks@segment_tiers", "stocks@universe_liveness"]},
 

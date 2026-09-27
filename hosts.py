@@ -76,7 +76,11 @@ HOSTS = {
     "mfapi": {"netlocs": ["api.mfapi.in"]},
 
     # ── Macro, news, regulatory ──
-    "data_gov": {"netlocs": ["api.data.gov.in"]},
+    # Official macro (replaced data.gov.in 2026-09-27: its gateway 502s/times out and
+    # the IIP/CPI/core datasets it served stopped updating in 2023-24). Both are
+    # government servers whose legacy TLS OpenSSL 3 refuses → browser TLS client.
+    "mospi": {"netlocs": ["api.mospi.gov.in"], "impersonate": "chrome"},      # IIP, CPI
+    "oea": {"netlocs": ["eaindustry.nic.in"], "impersonate": "chrome"},       # core sector
     "fred": {"netlocs": ["fred.stlouisfed.org"]},
     "rbi": {"netlocs": ["www.rbi.org.in"]},
     "pib": {"netlocs": ["pib.gov.in"], "headers": {"User-Agent": UA, "Accept": "text/html"}},

@@ -177,18 +177,18 @@ For each source: **what it gives**, **endpoint**, **PIT/live access**, **histori
 | **Rate limit** | 1-second floor, but yfinance internally batches and caches. Heavy parallel calls get 429-throttled. |
 | **Used by** | `signals/macro.py`, `scoring/regime.py`, `sources/macro_yfinance.py` |
 
-### data.gov.in — IIP, CPI, WPI, Core Sector, GST
+### MoSPI API + OEA — IIP, CPI, Core Sector (replaced data.gov.in 2026-09-27)
 
 | Field | Value |
 |---|---|
-| **What** | Government statistics: IIP general + sectoral subindices, CPI all-India + components, WPI commodity-wise, Eight Core Industries, GST collections, electricity generation. |
-| **Endpoint** | `https://api.data.gov.in/resource/{resource_id}` with API key (free tier). `datagovindia` Python package wraps it. |
-| **PIT access** | Monthly, with 4-8 week publication lag. |
-| **Historical access** | 3-7 years depending on indicator. |
-| **v2 depth** | macro_history covers IIP, CPI, WPI, Core Sector since 2022-01 — 1,143 dates × ~50 indicators |
-| **Gotchas** | (1) **API timeouts are common** — use 60s timeout + 3 retries. (2) Wide format (months as columns) — needs pivot to long format. (3) For Core Sector: use `ITEM_CODE` (e.g. `INDEX_COAL`) not `ITEM_NAME` (e.g. "Growth of Coal (%)"). (4) GST collections: 1-week lag, fastest of the lot. |
-| **Rate limit** | Free tier: 100 calls/day shared across all `data.gov.in` resources. Plan accordingly. |
-| **Used by** | `sources/macro_gov.py`, `signals/macro.py` |
+| **What** | IIP (General, Sectoral, Use-based), CPI (All-India Combined: General + 12 divisions), Index of Eight Core Industries (+ iron ore). Index + the publisher's own YoY. |
+| **Endpoint** | MoSPI `https://api.mospi.gov.in/api/iip/getIipData?base_year=2022-23&frequency=Monthly&type=All&year=Y&limit≤200&page=N&Format=JSON`; `…/api/cpi/getCPIData?base_year=2024&series=Current&year=Y&month_code=M&state_code=1&sector_code=3&limit=20&Format=JSON` (division rows = `group` null, listed first). Core: newest `eight_core_infra/Core_Industries_2022_23_<YYYYMMDD>.xlsx` linked from `https://eaindustry.nic.in/ici_download_data.asp` (sheets `Index`, `Growth (%)`). No API key (the manual's signup/token is not enforced). Endpoint map: github.com/nso-india/esankhyiki-mcp. |
+| **PIT access** | Monthly; IIP ~6 weeks after the month, core ~3-4 weeks, CPI ~2 weeks. `date` = reference month. |
+| **Historical access** | New bases only: IIP/core Apr-2023 →, CPI Jan-2025 →. Older bases (IIP 2011-12, CPI 2012) are separate series — never splice levels; use the published YoY. |
+| **Gotchas** | (1) Both hosts need a browser TLS client (`hosts` `impersonate`): python-requests fails with `UNSAFE_LEGACY_RENEGOTIATION_DISABLED`. (2) MoSPI `limit` > 200 → error; CPI filtered by division still returns the whole subtree (668 rows/month) — take page 1 and keep `group is None`. (3) MoSPI names "Mining & Quarrying" / "Electricity, Gas, …" — mapped to `iip_mining` / `iip_electricity`. (4) OEA file name carries the release date — scrape the page. (5) All three rebased in 2026 (IIP/WPI 2022-23, CPI 2024). |
+| **Not covered** | GST (gst.gov.in is an Angular app; monthly PDFs with unstable names) and bank credit growth — `macro_indicators` omits them rather than invent values (v1 hard-coded credit_growth = 11.5%). |
+| **Used by** | `sources/macro_official.py` (via `macro_gov.compute`) → `macro_history`, `macro_indicators` → `signals/macro.py` (display-only sector macro scores). Not used by `sector_tilt` (yfinance series). |
+| **Dead** | data.gov.in (`api.data.gov.in`): gateway 502 / 60 s timeouts since ≥2026-07, and its IIP/CPI/core/GST resources stopped updating Feb-2023…Jul-2024. |
 
 ### FRED — Cross-border / US macro
 
