@@ -297,7 +297,9 @@ def _compute_penalty(m_flag, z_flag):
 
 
 def _compute_scores(stocks, financial_sids, qi, bs, cf):
-    """Compute forensic scores for all non-financial stocks."""
+    """Compute forensic scores for all non-financial stocks (live AND PIT call this)."""
+    from signals._fundamentals import prefer_consolidated
+    qi = prefer_consolidated(qi)
     qi_by_sid = dict(list(qi.groupby("sid")))
     bs_by_sid = dict(list(bs.groupby("sid")))
     cf_by_sid = dict(list(cf.groupby("sid")))

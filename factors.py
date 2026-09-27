@@ -1384,17 +1384,21 @@ FACTORS = {
         "producer": "consensus",
         "pit_range": (-100, 500),
         "weight_key": "consensus",
-        "screener_col": "consensus",
+        # Plan 0015 D1 (2026-09-27): the `consensus` weight now scores the quantity its
+        # evidence was measured on — EPS revision (the screener's inline eps_revision_yoy,
+        # = this PIT column). It used to score consensus_signals.consensus_signal (a PT /
+        # growth tier blend) that no backtest had validated.
+        "screener_col": "eps_revision_yoy",
         "replay_col": "consensus_signal_combined",
-        "live_table": "consensus_signals.consensus_signal",
+        "live_table": None,
         "family": "Analyst",
-        "uhs_tables": ["consensus_signals", "analyst_consensus", "broker_recommendations"],
-        "freshness_table": "consensus_signals",
+        "uhs_tables": ["forecast_history"],
+        "freshness_table": "forecast_history",
         "eligibility": {
-            "description": "Stocks with sell-side analyst attribution (yfinance: total_analysts > 0 OR price_target IS NOT NULL)",
+            "description": "Stocks with Tickertape forward-EPS history (forecast_history metric='eps')",
             "eligible_sql": """
-                SELECT DISTINCT sid FROM analyst_consensus
-                WHERE total_analysts IS NOT NULL OR price_target IS NOT NULL
+                SELECT DISTINCT sid FROM forecast_history
+                WHERE metric = 'eps' AND value IS NOT NULL
             """,
         },
     },

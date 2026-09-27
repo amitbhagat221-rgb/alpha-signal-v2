@@ -99,7 +99,10 @@ def _compute_ltm(qi_group):
 
 
 def _compute_scores(stocks, qi, bs, cf):
-    """Compute Piotroski F-Score for each stock."""
+    """Compute Piotroski F-Score for each stock (live AND PIT call this)."""
+    from signals._fundamentals import prefer_consolidated, without_financials
+    stocks = without_financials(stocks)
+    qi = prefer_consolidated(qi)
     rows = []
 
     # Pre-group data

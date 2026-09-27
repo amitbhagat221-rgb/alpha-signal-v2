@@ -327,21 +327,13 @@ def pit_delivery(prices_pit):
 
 
 def pit_pledge_quality(stocks, sh_pit):
-    """1 - (latest pledge_pct / 100). Higher is better."""
-    rows = []
-    sh_by_sid = dict(list(sh_pit.groupby("sid")))
-    for sid in stocks["sid"]:
-        g = sh_by_sid.get(sid)
-        if g is None or g.empty:
-            rows.append({"sid": sid})
-            continue
-        latest = g.sort_values("end_date").iloc[-1]
-        pledge = latest.get("pledge_pct")
-        if pd.notna(pledge):
-            rows.append({"sid": sid, "pledge_quality": round(1.0 - float(pledge) / 100.0, 4)})
-        else:
-            rows.append({"sid": sid})
-    return pd.DataFrame(rows)
+    """1 - (latest pledge_pct / 100), from the live producer (signals.promoter) —
+    plan 0015 Phase 3 replaced a copy here that rounded to 4dp."""
+    from signals.promoter import _compute_scores
+    df = _compute_scores(stocks, sh_pit)
+    if "pledge_quality" not in df.columns:
+        return pd.DataFrame({"sid": stocks["sid"]})
+    return df[["sid", "pledge_quality"]].copy()
 
 
 def pit_promoter_trend_4q(stocks, sh_pit):
@@ -907,7 +899,9 @@ def pit_fno_iv(fno_iv_full, px_pit, eval_date):
     eval_str = eval_date.isoformat() if hasattr(eval_date, "isoformat") else str(eval_date)
     iv_pit = fno_iv_full[fno_iv_full["trade_date"] <= eval_str]
     prices = px_pit[["sid", "date", "close"]] if px_pit is not None and not px_pit.empty else None
-    return compute_iv_factors(iv_hist=iv_pit, prices=prices)
+    from config import SCREEN
+    return compute_iv_factors(iv_hist=iv_pit, prices=prices, as_of_date=eval_str,
+                              max_age_days=SCREEN.get("max_signal_age_days", 45))
 
 
 def pit_microstructure(ohlc_full, eval_date):

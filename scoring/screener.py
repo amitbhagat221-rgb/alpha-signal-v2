@@ -146,14 +146,11 @@ def _load_signals(return_prices=False):
     # size/adtv/existing factors (|ρ|<0.15). Only F&O stocks have it → non-F&O MID
     # names get NULL and renormalise over present signals (correct: only F&O names
     # have options). Weighted in MID only (LARGE t=1.37 / SMALL t=0.17 DROP).
-    iv_skew = read_sql(
-        "SELECT sid, iv_skew_25d FROM fno_iv_history WHERE sid IS NOT NULL "
-        "AND (sid, trade_date) IN (SELECT sid, MAX(trade_date) FROM fno_iv_history GROUP BY sid) "
-        f"AND trade_date >= {age_cutoff_sql}"
-    )
-    # Same bound + precision the PIT factor carries (signals/fno_iv_factors.py).
-    from signals.fno_iv_factors import SKEW_CLIP
-    iv_skew["iv_skew_25d"] = iv_skew["iv_skew_25d"].clip(*SKEW_CLIP).round(4)
+    # Plan 0015 Phase 3: the SAME function the PIT backtest calls (was a raw
+    # latest-row read with a hand-copied clip).
+    from signals.fno_iv_factors import compute_iv_factors
+    iv_skew = compute_iv_factors(prices=prices[["sid", "date", "close"]], as_of_date=date.today().isoformat(),
+                                 max_age_days=max_age)[["sid", "iv_skew_25d"]]
 
     # Inline signals (no DB table — compute on the fly)
     from signals.momentum import compute_momentum

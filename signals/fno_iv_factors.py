@@ -59,6 +59,7 @@ def compute_iv_factors(
     iv_hist: pd.DataFrame | None = None,
     prices: pd.DataFrame | None = None,
     as_of_date: str | None = None,
+    max_age_days: int | None = None,
 ) -> pd.DataFrame:
     """Core: per-stock IV factors as of the latest available trade_date.
 
@@ -81,6 +82,16 @@ def compute_iv_factors(
         return pd.DataFrame(columns=cols)
 
     iv = iv_hist[iv_hist["sid"].notna()].copy().sort_values(["sid", "trade_date"])
+    # Staleness (plan 0015 Phase 3): a sid whose latest IV row is older than
+    # max_age_days before as_of is no longer an F&O underlying worth scoring — the
+    # live screener always applied this (SCREEN max_signal_age_days); PIT now too.
+    if max_age_days is not None:
+        ref = pd.Timestamp(as_of_date) if as_of_date else pd.Timestamp(iv["trade_date"].max())
+        cutoff = (ref - pd.Timedelta(days=int(max_age_days))).strftime("%Y-%m-%d")
+        latest = iv.groupby("sid")["trade_date"].transform("max")
+        iv = iv[latest >= cutoff]
+        if iv.empty:
+            return pd.DataFrame(columns=cols)
 
     # Realised vol per sid from the close series (only need a short tail).
     if prices is None:

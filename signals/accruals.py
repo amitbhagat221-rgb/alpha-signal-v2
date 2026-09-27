@@ -237,7 +237,9 @@ def _compute_composite(df):
 
 
 def _compute_scores(stocks, qi, bs, cf):
-    """Compute accruals signal for all stocks."""
+    """Compute accruals signal for all stocks (live AND PIT call this)."""
+    from signals._fundamentals import prefer_consolidated
+    qi = prefer_consolidated(qi)
     qi_by_sid = dict(list(qi.groupby("sid")))
     bs_by_sid = dict(list(bs.groupby("sid")))
     cf_by_sid = dict(list(cf.groupby("sid")))
