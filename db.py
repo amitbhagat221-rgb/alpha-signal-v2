@@ -34,6 +34,35 @@ DATE_COLS = ["snapshot_date", "date", "end_date", "period", "pick_date",
              "fetched_at", "updated_at"]
 
 
+# ── Read tracing (plan 0015 Phase 1a) ──
+# pipeline.run_step records which tables each step actually reads/writes through
+# get_db(), so a step's declared `reads` can be checked against real runs. SQLite
+# calls the authorizer when it compiles a statement, not per row — negligible cost.
+_TRACE = None
+
+
+def trace_start():
+    global _TRACE
+    _TRACE = {"reads": set(), "writes": set()}
+
+
+def trace_stop():
+    """End tracing; return {"reads": set, "writes": set} (tables, sqlite_* excluded)."""
+    global _TRACE
+    out, _TRACE = _TRACE, None
+    return out or {"reads": set(), "writes": set()}
+
+
+def _trace_authorizer(action, a1, a2, dbname, source):
+    t = _TRACE
+    if t is not None and a1 and not a1.startswith("sqlite_"):
+        if action == sqlite3.SQLITE_READ:
+            t["reads"].add(a1)
+        elif action in (sqlite3.SQLITE_INSERT, sqlite3.SQLITE_UPDATE, sqlite3.SQLITE_DELETE):
+            t["writes"].add(a1)
+    return sqlite3.SQLITE_OK
+
+
 @contextmanager
 def get_db():
     """
@@ -54,6 +83,8 @@ def get_db():
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
     conn.execute("PRAGMA busy_timeout=5000")
+    if _TRACE is not None:
+        conn.set_authorizer(_trace_authorizer)
     try:
         yield conn
         conn.commit()

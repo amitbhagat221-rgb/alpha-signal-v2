@@ -21,6 +21,7 @@ import traceback
 from datetime import date, datetime
 
 from config import PIPELINE, LOG_PATH
+import db
 from db import get_db
 
 # ── Logging setup ──
@@ -96,6 +97,29 @@ def log_step(step_name: str, status: str, rows: int = None,
         )
 
 
+UNDECLARED = {}   # step → {"reads": [...], "writes": [...]} seen at run time but not declared
+
+
+def _check_declared(name, seen):
+    """Plan 0015 Phase 1a: compare a step's traced tables with its declaration.
+    Records mismatches in UNDECLARED (written out by run_pipeline); never raises."""
+    try:
+        import graph
+        spec = STEP_SPECS.get(name)
+        if not spec or "reads" not in spec:
+            return
+        declared_w = set(graph.writes(spec))
+        declared_r = set(spec["reads"]) | declared_w
+        skip = graph.RUNNER_TABLES | {"pipeline_log"}
+        r = sorted(seen["reads"] - declared_r - skip)
+        w = sorted(seen["writes"] - declared_w - skip)
+        if r or w:
+            UNDECLARED[name] = {"reads": r, "writes": w}
+            log.warning(f"[GRAPH] {name}: undeclared reads {r} writes {w}")
+    except Exception as e:
+        log.warning(f"[GRAPH] declaration check failed for {name}: {e}")
+
+
 def run_step(name: str, module_path: str, func_name: str, critical: bool) -> bool:
     """
     Import module, call function, log result. Returns True on success.
@@ -105,21 +129,61 @@ def run_step(name: str, module_path: str, func_name: str, critical: bool) -> boo
     log_step(name, "RUNNING", started=started)
     log.info(f"[START] {name}")
 
+    db.trace_start()
     try:
         mod = importlib.import_module(module_path)
         func = getattr(mod, func_name)
         result = func()
+        _check_declared(name, db.trace_stop())
         rows = result if isinstance(result, int) else None
         log_step(name, "SUCCESS", rows=rows, started=started)
         log.info(f"[DONE]  {name}  ({rows} rows)" if rows else f"[DONE]  {name}")
         return True
 
     except Exception as e:
+        _check_declared(name, db.trace_stop())
         error_msg = f"{type(e).__name__}: {e}"
         log_step(name, "FAILED", started=started, error=error_msg)
         log.error(f"[FAIL]  {name}  — {error_msg}")
         log.debug(traceback.format_exc())
         return False
+
+
+def shadow_order(steps: list[tuple], write: bool = True):
+    """Plan 0015 Phase 1a — SHADOW MODE. Derive today's order from the steps'
+    declared reads/writes (graph.py) and record how it differs from the hand
+    order. Never changes what runs; never raises. Returns the report dict."""
+    try:
+        import json
+        import graph
+        from config import PROJECT_ROOT
+        specs = [STEP_SPECS[s[0]] for s in steps]
+        undeclared = [s["name"] for s in specs if "reads" not in s]
+        if undeclared:
+            log.info(f"graph shadow: {len(undeclared)} step(s) without `reads` — skipped")
+            return None
+        derived = graph.order(specs)
+        before, after = graph.diff(specs, derived)
+        report = {
+            "date": date.today().isoformat(),
+            "current": [s["name"] for s in specs],
+            "derived": derived,
+            "critical_path": sorted(graph.ancestors(specs)),
+            "needed_by_email": sorted(graph.ancestors(specs, needed_only=True)),
+            "moved_before_email": before,
+            "moved_after_email": after,
+        }
+        if write:
+            out = PROJECT_ROOT / "output" / "graph_shadow"
+            out.mkdir(parents=True, exist_ok=True)
+            (out / f"{report['date']}.json").write_text(json.dumps(report, indent=1))
+        log.info(f"graph shadow: {len(report['critical_path'])} steps precede the email "
+                 f"({len(report['needed_by_email'])} needed by it); "
+                 f"derived order would move {len(before)} before / {len(after)} after the email")
+        return report
+    except Exception as e:  # shadow mode must never affect the run
+        log.warning(f"graph shadow failed: {type(e).__name__}: {e}")
+        return None
 
 
 def run_pipeline(steps: list[tuple], dry_run: bool = False):
@@ -130,6 +194,8 @@ def run_pipeline(steps: list[tuple], dry_run: bool = False):
     log.info(f"{'=' * 50}")
     log.info(f"Pipeline run — {date.today()} — {len(steps)} steps")
     log.info(f"{'=' * 50}")
+    if len(steps) > 1:
+        shadow_order(steps, write=not dry_run)
 
     if dry_run:
         for name, module, func, critical in steps:
@@ -162,6 +228,19 @@ def run_pipeline(steps: list[tuple], dry_run: bool = False):
             if critical:
                 log.error(f"Critical step '{name}' failed — skipping remaining steps.")
                 failed_critical = True
+
+    try:
+        import json
+        from config import PROJECT_ROOT
+        out = PROJECT_ROOT / "output" / "graph_shadow"
+        out.mkdir(parents=True, exist_ok=True)
+        f = out / f"{date.today().isoformat()}_undeclared.json"
+        merged = json.loads(f.read_text()) if f.exists() else {}   # reruns add, never erase
+        merged.update(UNDECLARED)
+        f.write_text(json.dumps(merged, indent=1))
+        log.info(f"graph shadow: {len(UNDECLARED)} step(s) touched undeclared tables")
+    except Exception as e:
+        log.warning(f"graph shadow: could not write undeclared report: {e}")
 
     elapsed = round(time.time() - t_start, 1)
     log.info(f"{'=' * 50}")

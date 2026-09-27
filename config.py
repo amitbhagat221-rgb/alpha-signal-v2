@@ -363,25 +363,40 @@ PIPELINE = {
 PIPELINE_STEPS = [
     # ── Data Sources ──
     {"name": "fetch_macro_market", "module": "sources.macro_yfinance", "function": "compute", "critical": False,
-     "table": "macro_history",     "source": "yfinance (20 tickers)",  "data_freq": "daily",  "frequency": "daily"},
+     "table": "macro_history",     "source": "yfinance (20 tickers)",  "data_freq": "daily",  "frequency": "daily",
+     "reads": ["macro_history", "macro_indicator_meta"],
+     "writes": ["macro_history", "macro_indicator_meta", "vix_history"],
+     "lagged_reads": ["macro_history@fetch_macro_gov"]},
 
     {"name": "fetch_macro_gov",    "module": "sources.macro_gov",     "function": "compute", "critical": False,
-     "table": "macro_history",     "source": "data.gov.in + FRED",    "data_freq": "monthly", "frequency": "weekly"},
+     "table": "macro_history",     "source": "data.gov.in + FRED",    "data_freq": "monthly", "frequency": "weekly",
+     "reads": ["stocks"],
+     "writes": ["macro_history", "macro_indicator_meta"],
+     "lagged_writes": ["macro_indicator_meta"],
+     "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos", "stocks@universe_liveness"]},
 
     {"name": "fetch_insider",      "module": "sources.nse_insider",   "function": "compute", "critical": False,
-     "table": "insider_trades",    "source": "NSE PIT API",          "data_freq": "daily",  "frequency": "daily"},
+     "table": "insider_trades",    "source": "NSE PIT API",          "data_freq": "daily",  "frequency": "daily",
+     "reads": ["stocks"],
+     "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos", "stocks@universe_liveness"]},
 
     {"name": "fetch_bulk_deals",   "module": "sources.nse_bulk",     "function": "compute", "critical": False,
-     "table": "bulk_deals",        "source": "NSE archives CSV",     "data_freq": "daily",  "frequency": "daily"},
+     "table": "bulk_deals",        "source": "NSE archives CSV",     "data_freq": "daily",  "frequency": "daily",
+     "reads": ["stocks"],
+     "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos", "stocks@universe_liveness"]},
 
     {"name": "fetch_bhavcopy",     "module": "sources.nse",          "function": "compute", "critical": True,
-     "table": "stock_prices",      "source": "NSE Archives bhavcopy", "data_freq": "daily", "frequency": "daily"},
+     "table": "stock_prices",      "source": "NSE Archives bhavcopy", "data_freq": "daily", "frequency": "daily",
+     "reads": ["stock_prices"],
+     "lagged_reads": ["stock_prices@fetch_prices_fallback"]},
 
     # Plan 0005 Phase C: yfinance fallback for SIDs not in NSE bhavcopy
     # (InvITs, REITs, BSE-only listings, recent IPOs). Tries .NS first then
     # .BO. Empirically 90% hit rate on the 339 missing SIDs as of 2026-05-24.
     {"name": "fetch_prices_fallback", "module": "sources.yfinance_prices", "function": "compute", "critical": False,
-     "table": "stock_prices",      "source": "yfinance .BO / .NS (gap-fill)", "data_freq": "daily", "frequency": "daily"},
+     "table": "stock_prices",      "source": "yfinance .BO / .NS (gap-fill)", "data_freq": "daily", "frequency": "daily",
+     "reads": ["stock_prices", "stocks"],
+     "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos", "stocks@universe_liveness"]},
 
     # Corporate actions (splits/bonuses/special dividends) over a short trailing
     # window. Feeds Gate 3 temporal-continuity's escape hatch so real ex-date
@@ -389,14 +404,18 @@ PIPELINE_STEPS = [
     # instead of generating noise verdicts. Idempotent INSERT OR IGNORE; the
     # monthly `--source corp --months 24` deep backfill is the gap-repair path.
     {"name": "fetch_corp_actions", "module": "sources.nselib_pull", "function": "compute_corp_actions", "critical": False,
-     "table": "corporate_actions", "source": "NSE corporate-actions (nselib)", "data_freq": "daily", "frequency": "daily"},
+     "table": "corporate_actions", "source": "NSE corporate-actions (nselib)", "data_freq": "daily", "frequency": "daily",
+     "reads": ["fii_dii_positioning", "stocks"],
+     "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos", "stocks@universe_liveness"]},
 
     # Board-meeting / forthcoming-events calendar (one nselib call, −3d→+30d
     # window). Forward-dated, so a daily run keeps it fresh and feeds the
     # cockpit's "upcoming earnings" widget. Was a one-off v1-CSV import (notebook)
     # with no producer → went stale; wired daily 2026-06-04. Idempotent.
     {"name": "fetch_earnings_calendar", "module": "sources.nselib_pull", "function": "compute_earnings_calendar", "critical": False,
-     "table": "earnings_calendar", "source": "NSE event-calendar (nselib)", "data_freq": "daily", "frequency": "daily"},
+     "table": "earnings_calendar", "source": "NSE event-calendar (nselib)", "data_freq": "daily", "frequency": "daily",
+     "reads": ["fii_dii_positioning", "stocks"],
+     "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos", "stocks@universe_liveness"]},
 
     # Track 3.1b — NSE F&O EOD grid. One nselib.fno_bhav_copy call = the whole
     # market (~16K info-carrying rows/day). Runs in the morning pipeline against
@@ -404,44 +423,63 @@ PIPELINE_STEPS = [
     # short trailing window so a missed day self-heals. compute_pcr() must run
     # AFTER (it aggregates the rows just written) — keep this ordering.
     {"name": "fetch_fno_bhav",     "module": "sources.fno_pull",     "function": "compute", "critical": False,
-     "table": "fno_bhav",          "source": "NSE F&O bhavcopy (nselib UDiFF)", "data_freq": "daily", "frequency": "daily"},
+     "table": "fno_bhav",          "source": "NSE F&O bhavcopy (nselib UDiFF)", "data_freq": "daily", "frequency": "daily",
+     "reads": ["fno_bhav"]},
 
     {"name": "compute_fno_pcr",    "module": "sources.fno_pull",     "function": "compute_pcr", "critical": False,
-     "table": "fno_pcr_history",   "source": "fno_bhav (nearest-expiry rollup)", "data_freq": "daily", "frequency": "daily"},
+     "table": "fno_pcr_history",   "source": "fno_bhav (nearest-expiry rollup)", "data_freq": "daily", "frequency": "daily",
+     "reads": ["fno_bhav", "fno_pcr_history"]},
 
     {"name": "compute_fno_iv",     "module": "sources.fno_iv",       "function": "compute", "critical": False,
-     "table": "fno_iv_history",    "source": "fno_bhav (Black-76 IV surface inversion)", "data_freq": "daily", "frequency": "daily"},
+     "table": "fno_iv_history",    "source": "fno_bhav (Black-76 IV surface inversion)", "data_freq": "daily", "frequency": "daily",
+     "reads": ["fno_bhav", "fno_iv_history"]},
 
     {"name": "universe_liveness",  "module": "sources.universe",     "function": "compute", "critical": False,
-     "table": "stocks",            "source": "stock_prices (recent activity)", "data_freq": "daily", "frequency": "daily"},
+     "table": "stocks",            "source": "stock_prices (recent activity)", "data_freq": "daily", "frequency": "daily",
+     "reads": ["stock_prices", "stocks"],
+     "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
 
     {"name": "fetch_news",         "module": "sources.rss",          "function": "compute", "critical": False,
-     "table": "news_articles",     "source": "RSS feeds (8 sources)", "data_freq": "daily", "frequency": "daily"},
+     "table": "news_articles",     "source": "RSS feeds (8 sources)", "data_freq": "daily", "frequency": "daily",
+     "reads": ["news_articles"]},
 
     # Regulatory harvester is daily (cheap incremental, ~5 min).
     {"name": "fetch_regulatory",   "module": "sources.regulatory_harvester", "function": "harvest_incremental", "critical": False,
-     "table": "regulatory_events", "source": "Google News last 30d", "data_freq": "daily", "frequency": "daily"},
+     "table": "regulatory_events", "source": "Google News last 30d", "data_freq": "daily", "frequency": "daily",
+     "reads": ["regulatory_events", "stocks"],
+     "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
 
     # ── Mutual Fund universe (research-only, plan prfect-lets-add-a-zazzy-eich, 2026-05-26) ──
     # Weekly: refresh scheme master from AMFI NAVAll.txt (~14k schemes, single HTTP).
     {"name": "fetch_mf_master",    "module": "sources.mf_amfi_master",       "function": "compute", "critical": False,
-     "table": "mf_scheme_master",  "source": "AMFI NAVAll.txt",       "data_freq": "weekly", "frequency": "weekly"},
+     "table": "mf_scheme_master",  "source": "AMFI NAVAll.txt",       "data_freq": "weekly", "frequency": "weekly",
+     "reads": ["mf_scheme_master", "stocks"],
+     "lagged_reads": ["mf_scheme_master@classify_mf_quality", "stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
     # Weekly: classify data quality — flag wound-up / segregated / interval / bonus / anomalous schemes
     # so they don't pollute the universe browser, scorer, or category stats. Runs AFTER master refresh
     # so new schemes get classified; metric-based ANOMALOUS flags get picked up on the next monthly
     # metrics recompute (the classifier reads from mf_metrics if present).
     {"name": "classify_mf_quality","module": "sources.mf_data_quality",      "function": "compute", "critical": False,
-     "table": "mf_scheme_master",  "source": "name patterns + NAV jumps", "data_freq": "weekly", "frequency": "weekly"},
+     "table": "mf_scheme_master",  "source": "name patterns + NAV jumps", "data_freq": "weekly", "frequency": "weekly",
+     "reads": ["mf_metrics", "mf_nav_history", "mf_scheme_master"],
+     "lagged_reads": ["mf_metrics@compute_mf_metrics", "mf_nav_history@fetch_mf_nav_daily"]},
     # Daily: refresh today's NAVs for all schemes from same source (single HTTP, idempotent).
     {"name": "fetch_mf_nav_daily", "module": "sources.mf_nav_daily",         "function": "compute", "critical": False,
-     "table": "mf_nav_history",    "source": "AMFI NAVAll.txt",       "data_freq": "daily",  "frequency": "daily"},
+     "table": "mf_nav_history",    "source": "AMFI NAVAll.txt",       "data_freq": "daily",  "frequency": "daily",
+     "reads": ["mf_nav_history", "mf_scheme_master", "stocks"],
+     "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
     # Monthly: recompute returns + risk + scorer + rolling-returns + category aggregates.
     {"name": "compute_mf_metrics", "module": "signals.mf_metrics",           "function": "compute", "critical": False,
-     "table": "mf_metrics",        "source": "mf_nav_history + Nifty50 benchmark", "data_freq": "monthly", "frequency": "monthly"},
+     "table": "mf_metrics",        "source": "mf_nav_history + Nifty50 benchmark", "data_freq": "monthly", "frequency": "monthly",
+     "reads": ["mf_calendar_returns", "mf_category_stats", "mf_metrics", "mf_nav_history", "mf_rolling_returns", "mf_scheme_master", "stock_prices", "stocks"],
+     "writes": ["mf_calendar_returns", "mf_category_stats", "mf_metrics", "mf_rolling_returns"],
+     "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
     # Monthly: refresh top-N MF holdings via ETMoney scrape (AMFI's holdings data has 45d lag,
     # monthly refresh is sufficient). Rate-limited at 2.5s/req with 30s pause every 100 reqs.
     {"name": "scrape_mf_holdings", "module": "sources.mf_holdings_scrape",   "function": "compute", "critical": False,
-     "table": "mf_holdings",       "source": "ETMoney portfolio-details (public)", "data_freq": "monthly", "frequency": "monthly"},
+     "table": "mf_holdings",       "source": "ETMoney portfolio-details (public)", "data_freq": "monthly", "frequency": "monthly",
+     "reads": ["mf_holdings", "mf_metrics", "mf_scheme_master", "stocks"],
+     "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
 
     # ── Sector signal history (monthly PIT accumulators, 2026-06) ──
     # Start the clock on at-entry sector signals so they're backtestable in ~12mo.
@@ -449,11 +487,16 @@ PIPELINE_STEPS = [
     # non-blocking; the sector-signal lab validated sector momentum (t+3) — these
     # accrue the orthogonal candidates (analyst revisions, news, policy).
     {"name": "sector_analyst_breadth",  "module": "signals.sector_breadth", "function": "compute_analyst", "critical": False,
-     "table": "sector_analyst_breadth_pit",  "source": "analyst_consensus_snapshots (MoM PT revision)", "data_freq": "monthly", "frequency": "monthly"},
+     "table": "sector_analyst_breadth_pit",  "source": "analyst_consensus_snapshots (MoM PT revision)", "data_freq": "monthly", "frequency": "monthly",
+     "reads": ["analyst_consensus_snapshots", "sector_analyst_breadth_pit", "stocks"],
+     "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
     {"name": "sector_sentiment_breadth","module": "signals.sector_breadth", "function": "compute_sentiment", "critical": False,
-     "table": "sector_sentiment_breadth_pit","source": "sentiment_scores (30d news breadth)", "data_freq": "monthly", "frequency": "monthly"},
+     "table": "sector_sentiment_breadth_pit","source": "sentiment_scores (30d news breadth)", "data_freq": "monthly", "frequency": "monthly",
+     "reads": ["sector_sentiment_breadth_pit", "sentiment_scores", "stocks"],
+     "lagged_reads": ["sentiment_scores@signal_sentiment", "stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
     {"name": "sector_policy",           "module": "signals.sector_policy",  "function": "compute", "critical": False,
-     "table": "sector_policy_pit",            "source": "policy_events (curated store)", "data_freq": "monthly", "frequency": "monthly"},
+     "table": "sector_policy_pit",            "source": "policy_events (curated store)", "data_freq": "monthly", "frequency": "monthly",
+     "reads": ["policy_events", "sector_policy_pit"]},
 
     # NOTE: classify_regulatory, classify_news, news_brief, and fetch_broker_recos
     # all moved to END of pipeline — they were blocking production. See block
@@ -473,103 +516,152 @@ PIPELINE_STEPS = [
     # dedup (only the watchdog's heal loop does), so it ran compute() twice every
     # month: ~1.9h wasted + doubled Tickertape scrape load (audit Eff-F1).
     {"name": "fetch_analyst",      "module": "sources.tickertape_analyst", "function": "compute", "critical": False,
-     "table": "analyst_consensus", "source": "Tickertape __NEXT_DATA__", "data_freq": "monthly", "frequency": "monthly"},
+     "table": "analyst_consensus", "source": "Tickertape __NEXT_DATA__", "data_freq": "monthly", "frequency": "monthly",
+     "reads": ["stocks"],
+     "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
 
     # Tickertape shareholding pattern — Bharat_sm_data API (different path from analyst scrape).
     {"name": "fetch_shareholding", "module": "sources.tickertape_shareholding", "function": "compute", "critical": False,
-     "table": "shareholding",      "source": "Tickertape API",        "data_freq": "quarterly", "frequency": "monthly"},
+     "table": "shareholding",      "source": "Tickertape API",        "data_freq": "quarterly", "frequency": "monthly",
+     "reads": ["stocks"],
+     "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
 
     # ── Signals ──
     {"name": "signal_sentiment",   "module": "signals.sentiment",   "function": "compute",  "critical": False,
-     "table": "sentiment_scores",  "source": "news_articles",       "data_freq": "daily",   "frequency": "daily"},
+     "table": "sentiment_scores",  "source": "news_articles",       "data_freq": "daily",   "frequency": "daily",
+     "reads": ["news_article_stocks", "news_articles", "sentiment_scores", "stocks"],
+     "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
 
     {"name": "signal_insider",     "module": "signals.insider_signal", "function": "compute", "critical": False,
-     "table": "insider_signals",   "source": "insider_trades (NSE PIT)", "data_freq": "daily", "frequency": "daily"},
+     "table": "insider_signals",   "source": "insider_trades (NSE PIT)", "data_freq": "daily", "frequency": "daily",
+     "reads": ["insider_trades", "stocks"],
+     "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
 
     {"name": "signal_forensic",    "module": "signals.forensic",    "function": "compute",  "critical": False,
      "table": "forensic_scores",   "source": "quarterly_income + annual_balance_sheet + annual_cash_flow",
-     "data_freq": "quarterly",     "frequency": "weekly"},
+     "data_freq": "quarterly",     "frequency": "weekly",
+     "reads": ["annual_balance_sheet", "annual_cash_flow", "forensic_scores", "quarterly_income", "stocks"],
+     "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
 
     {"name": "signal_piotroski",   "module": "signals.piotroski",   "function": "compute",  "critical": False,
      "table": "piotroski_scores",  "source": "quarterly_income + annual_balance_sheet + annual_cash_flow",
-     "data_freq": "quarterly",     "frequency": "weekly"},
+     "data_freq": "quarterly",     "frequency": "weekly",
+     "reads": ["annual_balance_sheet", "annual_cash_flow", "daily_picks", "piotroski_scores", "quarterly_income", "stocks"],
+     "writes": ["piotroski_scores", "signal_lineage"],
+     "lagged_reads": ["daily_picks@screener", "stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
 
     # ROIC — first Track 3 factor. Reads fundamentals_screener (sourced
     # weekly via sources.screener_pull — separate cadence, not in daily
     # pipeline). Not yet in scoring weights — needs t-stat validation.
     {"name": "signal_roic",        "module": "signals.roic",        "function": "compute",  "critical": False,
      "table": "roic_scores",       "source": "fundamentals_screener (Screener Premium)",
-     "data_freq": "annual",        "frequency": "weekly"},
+     "data_freq": "annual",        "frequency": "weekly",
+     "reads": ["fundamentals_screener", "roic_scores", "stocks"],
+     "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
 
     # FCF Yield — second Track 3 factor. Same data source, same gating —
     # not in scoring weights yet.
     {"name": "signal_fcf_yield",   "module": "signals.fcf_yield",   "function": "compute",  "critical": False,
      "table": "fcf_yield_scores",  "source": "fundamentals_screener (Screener Premium) + stocks.market_cap_cr",
-     "data_freq": "annual",        "frequency": "weekly"},
+     "data_freq": "annual",        "frequency": "weekly",
+     "reads": ["fcf_yield_scores", "fundamentals_screener", "stocks"],
+     "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
 
     # Cash Conversion Cycle — third Track 3 factor. DSO + DIO − DPO, 3-yr median.
     # Same gating — not in scoring weights yet.
     {"name": "signal_cash_conversion_cycle", "module": "signals.cash_conversion_cycle", "function": "compute", "critical": False,
      "table": "cash_conversion_cycle_scores", "source": "fundamentals_screener — Sales + Receivables + Inventory + Trade Payables",
-     "data_freq": "annual",        "frequency": "weekly"},
+     "data_freq": "annual",        "frequency": "weekly",
+     "reads": ["cash_conversion_cycle_scores", "fundamentals_screener", "stocks"],
+     "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
 
     # Operating Margin Trend — 5y OLS slope of EBIT/Sales (pp/year). Same gating.
     {"name": "signal_operating_margin_trend", "module": "signals.operating_margin_trend", "function": "compute", "critical": False,
      "table": "operating_margin_trend_scores", "source": "fundamentals_screener — Sales + PBT + Interest",
-     "data_freq": "annual",        "frequency": "weekly"},
+     "data_freq": "annual",        "frequency": "weekly",
+     "reads": ["fundamentals_screener", "operating_margin_trend_scores", "stocks"],
+     "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
 
     # Working Capital Intensity — (Recv + Inv − Pay) / Sales, 3y median. Same gating.
     {"name": "signal_working_capital_intensity", "module": "signals.working_capital_intensity", "function": "compute", "critical": False,
      "table": "working_capital_intensity_scores", "source": "fundamentals_screener — Sales + Receivables + Inventory + Trade Payables",
-     "data_freq": "annual",        "frequency": "weekly"},
+     "data_freq": "annual",        "frequency": "weekly",
+     "reads": ["fundamentals_screener", "stocks", "working_capital_intensity_scores"],
+     "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
 
     # Interest Coverage — (PBT + Interest) / Interest, 3y median. Same gating.
     {"name": "signal_interest_coverage", "module": "signals.interest_coverage", "function": "compute", "critical": False,
      "table": "interest_coverage_scores", "source": "fundamentals_screener — PBT + Interest",
-     "data_freq": "annual",        "frequency": "weekly"},
+     "data_freq": "annual",        "frequency": "weekly",
+     "reads": ["fundamentals_screener", "interest_coverage_scores", "stocks"],
+     "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
 
     # ROIIC — marginal NOPAT/IC over trailing 5y. Sister of ROIC; measures
     # how productive newly-deployed capital has been.
     {"name": "signal_roiic", "module": "signals.roiic", "function": "compute", "critical": False,
      "table": "roiic_scores", "source": "fundamentals_screener — PBT + Tax + Interest + Equity Share Capital + Reserves + Borrowings",
-     "data_freq": "annual",        "frequency": "weekly"},
+     "data_freq": "annual",        "frequency": "weekly",
+     "reads": ["fundamentals_screener", "roiic_scores", "stocks"],
+     "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
 
     # Gross Profitability (Novy-Marx anchor) — multibagger funnel quality anchor.
     {"name": "signal_gross_profitability", "module": "signals.gross_profitability", "function": "compute", "critical": False,
      "table": "gross_profitability_scores", "source": "fundamentals_screener — Sales + Raw Material Cost + Change in Inventory + Power and Fuel + Other Mfr. Exp + Total",
-     "data_freq": "annual",        "frequency": "weekly"},
+     "data_freq": "annual",        "frequency": "weekly",
+     "reads": ["fundamentals_screener", "gross_profitability_scores", "stocks"],
+     "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
 
     # ── Forensic / capital-allocation batch (plan 0002 §3.2.1) ──
     {"name": "signal_dso_change_yoy", "module": "signals.dso_change_yoy", "function": "compute", "critical": False,
      "table": "dso_change_yoy_scores", "source": "fundamentals_screener — Sales + Receivables",
-     "data_freq": "annual", "frequency": "weekly"},
+     "data_freq": "annual", "frequency": "weekly",
+     "reads": ["dso_change_yoy_scores", "fundamentals_screener", "stocks"],
+     "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
     {"name": "signal_dio_change_yoy", "module": "signals.dio_change_yoy", "function": "compute", "critical": False,
      "table": "dio_change_yoy_scores", "source": "fundamentals_screener — Sales + Inventory",
-     "data_freq": "annual", "frequency": "weekly"},
+     "data_freq": "annual", "frequency": "weekly",
+     "reads": ["dio_change_yoy_scores", "fundamentals_screener", "stocks"],
+     "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
     {"name": "signal_nwc_to_revenue", "module": "signals.nwc_to_revenue", "function": "compute", "critical": False,
      "table": "nwc_to_revenue_scores", "source": "fundamentals_screener — Sales + Receivables + Inventory + Trade Payables",
-     "data_freq": "annual", "frequency": "weekly"},
+     "data_freq": "annual", "frequency": "weekly",
+     "reads": ["fundamentals_screener", "nwc_to_revenue_scores", "stocks"],
+     "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
     {"name": "signal_sloan_accruals_full", "module": "signals.sloan_accruals_full", "function": "compute", "critical": False,
      "table": "sloan_accruals_full_scores", "source": "fundamentals_screener — Receivables + Inventory + Trade Payables + Depreciation + Total",
-     "data_freq": "annual", "frequency": "weekly"},
+     "data_freq": "annual", "frequency": "weekly",
+     "reads": ["fundamentals_screener", "sloan_accruals_full_scores", "stocks"],
+     "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
     {"name": "signal_sga_to_revenue_change", "module": "signals.sga_to_revenue_change", "function": "compute", "critical": False,
      "table": "sga_to_revenue_change_scores", "source": "fundamentals_screener — Sales + Selling and admin",
-     "data_freq": "annual", "frequency": "weekly"},
+     "data_freq": "annual", "frequency": "weekly",
+     "reads": ["fundamentals_screener", "sga_to_revenue_change_scores", "stocks"],
+     "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
     {"name": "signal_fcf_margin", "module": "signals.fcf_margin", "function": "compute", "critical": False,
      "table": "fcf_margin_scores", "source": "fundamentals_screener — Sales + OCF + Net Block + CWIP + Depreciation",
-     "data_freq": "annual", "frequency": "weekly"},
+     "data_freq": "annual", "frequency": "weekly",
+     "reads": ["fcf_margin_scores", "fundamentals_screener", "stocks"],
+     "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
     {"name": "signal_capex_to_dep", "module": "signals.capex_to_dep", "function": "compute", "critical": False,
      "table": "capex_to_dep_scores", "source": "fundamentals_screener — Net Block + CWIP + Depreciation",
-     "data_freq": "annual", "frequency": "weekly"},
+     "data_freq": "annual", "frequency": "weekly",
+     "reads": ["capex_to_dep_scores", "fundamentals_screener", "stocks"],
+     "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
     {"name": "signal_goodwill_to_assets", "module": "signals.goodwill_to_assets", "function": "compute", "critical": False,
      "table": "goodwill_to_assets_scores", "source": "fundamentals_screener — Intangible Assets + Total",
-     "data_freq": "annual", "frequency": "weekly"},
+     "data_freq": "annual", "frequency": "weekly",
+     "reads": ["fundamentals_screener", "goodwill_to_assets_scores", "stocks"],
+     "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
     {"name": "signal_debt_structure", "module": "signals.debt_structure", "function": "compute", "critical": False,
      "table": "debt_structure_scores", "source": "fundamentals_screener — Long term Borrowings + Borrowings",
-     "data_freq": "annual", "frequency": "weekly"},
+     "data_freq": "annual", "frequency": "weekly",
+     "reads": ["debt_structure_scores", "fundamentals_screener", "stocks"],
+     "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
     {"name": "signal_asset_tangibility", "module": "signals.asset_tangibility", "function": "compute", "critical": False,
      "table": "asset_tangibility_scores", "source": "fundamentals_screener — Net Block + Total",
-     "data_freq": "annual", "frequency": "weekly"},
+     "data_freq": "annual", "frequency": "weekly",
+     "reads": ["asset_tangibility_scores", "fundamentals_screener", "stocks"],
+     "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
 
     # Sector-narrative-derived cluster (plan 0003) — 4 factors inspired by
     # IIM Ahmedabad sector-narrative pages. None in scoring weights yet;
@@ -577,33 +669,50 @@ PIPELINE_STEPS = [
 
     {"name": "signal_revenue_cv",  "module": "signals.revenue_cv",  "function": "compute",  "critical": False,
      "table": "revenue_cv_scores", "source": "fundamentals_screener — Sales (annual, 6 yrs)",
-     "data_freq": "annual",        "frequency": "weekly"},
+     "data_freq": "annual",        "frequency": "weekly",
+     "reads": ["fundamentals_screener", "revenue_cv_scores", "stocks"],
+     "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
 
     {"name": "signal_inventory_turnover", "module": "signals.inventory_turnover", "function": "compute", "critical": False,
      "table": "inventory_turnover_scores", "source": "fundamentals_screener — Sales + Inventory",
-     "data_freq": "annual",                "frequency": "weekly"},
+     "data_freq": "annual",                "frequency": "weekly",
+     "reads": ["fundamentals_screener", "inventory_turnover_scores", "stocks"],
+     "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
 
     {"name": "signal_sales_growth_relative", "module": "signals.sales_growth_relative", "function": "compute", "critical": False,
      "table": "sales_growth_relative_scores", "source": "fundamentals_screener — Sales + sector peers",
-     "data_freq": "annual",                   "frequency": "weekly"},
+     "data_freq": "annual",                   "frequency": "weekly",
+     "reads": ["fundamentals_screener", "sales_growth_relative_scores", "stocks"],
+     "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
 
     {"name": "signal_share_momentum", "module": "signals.share_momentum", "function": "compute", "critical": False,
      "table": "share_momentum_scores", "source": "stock_prices + fundamentals_screener — No. of Equity Shares",
-     "data_freq": "daily",             "frequency": "daily"},
+     "data_freq": "daily",             "frequency": "daily",
+     "reads": ["fundamentals_screener", "share_momentum_scores", "stock_prices", "stocks"],
+     "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
 
     {"name": "signal_accruals",    "module": "signals.accruals",    "function": "compute",  "critical": False,
      "table": "accruals_scores",   "source": "quarterly_income + annual_balance_sheet + annual_cash_flow",
-     "data_freq": "quarterly",     "frequency": "weekly"},
+     "data_freq": "quarterly",     "frequency": "weekly",
+     "reads": ["accruals_scores", "annual_balance_sheet", "annual_cash_flow", "quarterly_income", "stocks"],
+     "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
 
     {"name": "signal_consensus",   "module": "signals.consensus",   "function": "compute",  "critical": False,
      "table": "consensus_signals", "source": "analyst_consensus + forecast_history + stock_prices",
-     "data_freq": "monthly",       "frequency": "daily"},
+     "data_freq": "monthly",       "frequency": "daily",
+     "reads": ["analyst_consensus", "consensus_signals", "daily_picks", "stock_prices", "stocks"],
+     "writes": ["consensus_signals", "signal_lineage"],
+     "lagged_reads": ["daily_picks@screener", "stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
 
     {"name": "signal_promoter",    "module": "signals.promoter",    "function": "compute",  "critical": False,
-     "table": "promoter_signals",  "source": "shareholding",        "data_freq": "quarterly", "frequency": "weekly"},
+     "table": "promoter_signals",  "source": "shareholding",        "data_freq": "quarterly", "frequency": "weekly",
+     "reads": ["promoter_signals", "shareholding", "stocks"],
+     "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
 
     {"name": "signal_smart_money", "module": "signals.smart_money", "function": "compute",  "critical": False,
-     "table": "smart_money_scores","source": "bulk_deals + stock_prices", "data_freq": "daily", "frequency": "daily"},
+     "table": "smart_money_scores","source": "bulk_deals + stock_prices", "data_freq": "daily", "frequency": "daily",
+     "reads": ["bulk_deals", "smart_money_scores", "stock_prices", "stocks"],
+     "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
 
     # Multibagger screen (plan 0008) — SEPARATE 3-stage funnel, kept OUT of
     # daily_picks. Runs LAST in the signal block (reads roic/roiic/gross_prof/
@@ -614,14 +723,19 @@ PIPELINE_STEPS = [
     # the ranking edge is weak → this is a refreshing watchlist, not a daily signal.
     {"name": "signal_multibagger", "module": "signals.multibagger", "function": "compute", "critical": False,
      "table": "multibagger_scores", "source": "roic/roiic/gross_profitability/piotroski/forensic/promoter/smart_money scores + shareholding + fundamentals_screener + small-cap EMA regime",
-     "data_freq": "weekly",         "frequency": "weekly"},
+     "data_freq": "weekly",         "frequency": "weekly",
+     "reads": ["forensic_scores", "fundamentals_screener", "gross_profitability_scores", "multibagger_scores", "nse_index_history", "operating_margin_trend_scores", "piotroski_scores", "promoter_signals", "roic_scores", "roiic_scores", "shareholding", "smart_money_scores", "stocks"],
+     "lagged_reads": ["nse_index_history@fetch_nse_indices", "stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
 
     {"name": "signal_macro",       "module": "signals.macro",       "function": "compute",  "critical": False,
-     "table": "macro_sector_signals", "source": "macro_indicators", "data_freq": "monthly", "frequency": "daily"},
+     "table": "macro_sector_signals", "source": "macro_indicators", "data_freq": "monthly", "frequency": "daily",
+     "reads": ["macro_indicators", "macro_sector_signals"],
+     "lagged_reads": ["macro_sector_signals@signal_regulatory"]},
 
     {"name": "signal_regulatory", "module": "signals.regulatory",  "function": "compute",  "critical": False,
      "table": "macro_sector_signals", "source": "regulatory_events + regulatory_signals (AI classified)",
-     "data_freq": "daily",           "frequency": "daily"},
+     "data_freq": "daily",           "frequency": "daily",
+     "reads": ["macro_sector_signals", "regulatory_events", "regulatory_signals"]},
 
     # ── Scoring ──
     # Plan 0005 Phase A: refresh eligibility BEFORE screener so eligible_coverage
@@ -629,10 +743,13 @@ PIPELINE_STEPS = [
     {"name": "refresh_eligibility", "module": "tools.refresh_eligibility", "function": "refresh",
      "critical": False,
      "table": "universe_eligibility", "source": "eligibility/registry.py — 8 signals × universe",
-     "data_freq": "daily",         "frequency": "daily"},
+     "data_freq": "daily",         "frequency": "daily",
+     "reads": ["analyst_consensus", "annual_balance_sheet", "annual_cash_flow", "bse_announcements", "bulk_deals", "quarterly_income", "shareholding", "stock_prices", "stocks", "universe_eligibility"],
+     "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
 
     {"name": "regime_update",      "module": "scoring.regime",      "function": "compute",  "critical": False,
-     "table": "regime_state",      "source": "vix_history",         "data_freq": "daily",   "frequency": "daily"},
+     "table": "regime_state",      "source": "vix_history",         "data_freq": "daily",   "frequency": "daily",
+     "reads": ["vix_history"]},
 
     # Financial sub-model (Track 2.2b, ADR 0030) — daily snapshot of per-
     # stock score for 158 Banks + NBFCs. Reads latest quarterly + annual
@@ -641,10 +758,14 @@ PIPELINE_STEPS = [
     # the screener doesn't route Financials through it yet (Phase 2.2d
     # decision pending t-stat ≥ 2.0 backtest validation).
     {"name": "compute_financial_signal", "module": "signals.financial_signal", "function": "compute", "critical": False,
-     "table": "financial_signal_scores", "source": "banking_metrics", "data_freq": "daily", "frequency": "daily"},
+     "table": "financial_signal_scores", "source": "banking_metrics", "data_freq": "daily", "frequency": "daily",
+     "reads": ["banking_metrics", "financial_signal_scores", "stocks"],
+     "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
 
     {"name": "screener",           "module": "scoring.screener",    "function": "compute",  "critical": True,
-     "table": "daily_picks",       "source": "all signals",         "data_freq": "daily",   "frequency": "daily"},
+     "table": "daily_picks",       "source": "all signals",         "data_freq": "daily",   "frequency": "daily",
+     "reads": ["accruals_scores", "analyst_consensus", "annual_balance_sheet", "bse_announcements", "consensus_signals", "corporate_adjustments", "daily_picks", "fno_iv_history", "forecast_history", "forensic_scores", "health_score", "macro_history", "macro_sector_signals_pit", "piotroski_scores", "promoter_signals", "quarterly_income", "signal_lineage", "smart_money_scores", "stock_prices", "stocks", "trust_verdicts", "universe_eligibility"],
+     "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
 
     # Track 3.3c — HRP position sizing. Turns the within-tier ranked daily_picks
     # into a sized book (portfolio_weights). Runs right AFTER the screener (needs
@@ -653,7 +774,9 @@ PIPELINE_STEPS = [
     # thin-day build failure must never block dossier/email. See ADR 0044.
     {"name": "portfolio_construction", "module": "portfolio_construction", "function": "run", "critical": False,
      "table": "portfolio_weights", "source": "daily_picks + stock_prices (HRP sizing)",
-     "data_freq": "daily",         "frequency": "daily"},
+     "data_freq": "daily",         "frequency": "daily",
+     "reads": ["daily_picks", "portfolio_weights", "stock_prices", "stocks"],
+     "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
 
     # Benchmark + smart-beta index history (NIFTY 50 / Midcap 150 / Smallcap
     # 250 …). Was manual-only → went 32d stale (2026-06-01) → pick_outcomes
@@ -663,7 +786,8 @@ PIPELINE_STEPS = [
     # compute_pick_outcomes so the benchmark is current when excess is computed.
     {"name": "fetch_nse_indices",  "module": "sources.nselib_pull", "function": "compute_nse_indices", "critical": False,
      "table": "nse_index_history", "source": "NSE index history (nselib)",
-     "data_freq": "daily",         "frequency": "daily"},
+     "data_freq": "daily",         "frequency": "daily",
+     "reads": []},
 
     # Live equity curve — realized forward returns on every daily_picks row.
     # Runs after screener (today's picks land first) but needs ≥20 trading days
@@ -671,7 +795,8 @@ PIPELINE_STEPS = [
     # Idempotent upsert by (sid, pick_date, window_days).
     {"name": "compute_pick_outcomes", "module": "tools.compute_pick_outcomes", "function": "compute", "critical": False,
      "table": "pick_outcomes",     "source": "daily_picks + stock_prices + nse_index_history",
-     "data_freq": "daily",         "frequency": "daily"},
+     "data_freq": "daily",         "frequency": "daily",
+     "reads": ["daily_picks", "nse_index_history", "pick_outcomes", "stock_prices"]},
 
     # Track 3.3c — HRP book realized-return head-to-head (HRP vs equal-weight vs
     # NIFTY) per asof_date × window. Runs AFTER compute_pick_outcomes (reuses its
@@ -679,7 +804,8 @@ PIPELINE_STEPS = [
     # gate evidence accumulates here. Idempotent upsert by (asof_date, window_days).
     {"name": "portfolio_outcomes", "module": "tools.portfolio_outcomes", "function": "compute", "critical": False,
      "table": "portfolio_outcomes", "source": "portfolio_weights + stock_prices + nse_index_history",
-     "data_freq": "daily",         "frequency": "daily"},
+     "data_freq": "daily",         "frequency": "daily",
+     "reads": ["nse_index_history", "portfolio_outcomes", "portfolio_weights", "stock_prices"]},
 
     # Plan 0007 Phase 1 — daily Unified Health Score (UHS) writer. Computes
     # factor + table + system UHS for today's snapshot. include_picks=True so
@@ -688,7 +814,10 @@ PIPELINE_STEPS = [
     # FACTOR_LINEAGE (lineage.py). Non-critical (UHS is observation, not gate).
     {"name": "compute_health_score", "module": "scoring.health_score", "function": "compute", "critical": False,
      "table": "health_score",      "source": "universe_eligibility + data_health + FACTOR_LINEAGE",
-     "data_freq": "daily",         "frequency": "daily"},
+     "data_freq": "daily",         "frequency": "daily",
+     "reads": ["analyst_consensus", "annual_balance_sheet", "annual_cash_flow", "bse_announcements", "consensus_signals", "daily_picks", "daily_snapshots", "fno_iv_history", "health_score", "piotroski_scores", "quarterly_income", "stock_prices", "stocks", "trust_verdicts", "universe_eligibility"],
+     "lagged_writes": ["health_score"],
+     "lagged_reads": ["daily_snapshots@snapshot", "stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
 
     # Plan 0007 Phase 6 — External Anchor (Gate 7). Promotes yesterday's NSE
     # bhavcopy rows to external_anchors then audits non-NSE sources (yfinance)
@@ -697,7 +826,8 @@ PIPELINE_STEPS = [
     # but a failure to audit doesn't compromise the primary pick pipeline.
     {"name": "anchor_audit", "module": "tools.anchor_audit", "function": "compute", "critical": False,
      "table": "external_anchors",  "source": "stock_prices (bhavcopy + yfinance)",
-     "data_freq": "daily",         "frequency": "daily"},
+     "data_freq": "daily",         "frequency": "daily",
+     "reads": ["stock_prices"]},
 
     # Plan 0007 Phase 8 — UHS calibration log. Joins every pick_outcomes row
     # to its daily_picks.uhs_score so that once 6+ months of forward returns
@@ -707,7 +837,8 @@ PIPELINE_STEPS = [
     {"name": "update_uhs_calibration", "module": "scoring.confidence", "function": "update_calibration_log",
      "critical": False, "table": "uhs_calibration_log",
      "source": "pick_outcomes + daily_picks.uhs_score",
-     "data_freq": "daily",         "frequency": "daily"},
+     "data_freq": "daily",         "frequency": "daily",
+     "reads": ["daily_picks", "pick_outcomes"]},
 
     # Sector briefs — plan 0006 Phase A. One sector_briefs row per sector per
     # date with macro + model + regulatory rollup and a bucket classifier
@@ -716,7 +847,9 @@ PIPELINE_STEPS = [
     # email. Idempotent (INSERT OR REPLACE on sector + date).
     {"name": "compute_sector_briefs", "module": "signals.sector_briefs", "function": "compute", "critical": False,
      "table": "sector_briefs",     "source": "macro_sector_signals + daily_picks + regulatory_signals",
-     "data_freq": "daily",         "frequency": "daily"},
+     "data_freq": "daily",         "frequency": "daily",
+     "reads": ["daily_picks", "macro_sector_signals", "regulatory_events", "regulatory_signals", "stocks"],
+     "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
 
     # Sector momentum — plan 0006 Phase E. Per-sector S/M/L relative strength vs
     # NIFTY 50 (constituent cap-weighted), classified strong/neutral/weak by
@@ -724,7 +857,9 @@ PIPELINE_STEPS = [
     # compute_sector_briefs. Powers the horizon badges on the /sectors digest.
     {"name": "compute_sector_momentum", "module": "signals.sector_momentum", "function": "compute", "critical": False,
      "table": "sector_briefs",     "source": "stock_prices + stocks + macro_history (nifty50)",
-     "data_freq": "daily",         "frequency": "daily"},
+     "data_freq": "daily",         "frequency": "daily",
+     "reads": ["macro_history", "sector_briefs", "stock_prices", "stocks"],
+     "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
 
     # Sector force breakdown — plan 0006 Phase B. Sits on top of sector_briefs.
     # Per (sector, date) emits up to 4 rows, one per force {macro, regulation,
@@ -732,7 +867,9 @@ PIPELINE_STEPS = [
     # Powers the "BY FORCE" 2×2 grid in the Phase C /sectors digest UX.
     {"name": "compute_sector_forces", "module": "signals.sector_forces", "function": "compute", "critical": False,
      "table": "sector_force_breakdown", "source": "sector_briefs + regulatory_signals + sector_metadata",
-     "data_freq": "daily",         "frequency": "daily"},
+     "data_freq": "daily",         "frequency": "daily",
+     "reads": ["regulatory_events", "regulatory_signals", "sector_briefs", "sector_metadata", "stocks"],
+     "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
 
     # Sector dossiers — plan 0006 Phase D. LLM-narrated per-sector thesis on top
     # of briefs + forces + sector_metadata. ~11 Claude calls/night (~₹3-5).
@@ -740,24 +877,35 @@ PIPELINE_STEPS = [
     # no-raw-numbers hygiene contract as output.dossier; invalid → valid=0.
     {"name": "compute_sector_dossiers", "module": "output.sector_dossier", "function": "compute", "critical": False,
      "table": "sector_dossiers",   "source": "sector_briefs + sector_force_breakdown + sector_metadata (Claude API)",
-     "data_freq": "daily",         "frequency": "daily"},
+     "data_freq": "daily",         "frequency": "daily",
+     "reads": ["daily_picks", "daily_snapshots", "sector_briefs", "sector_force_breakdown", "sector_metadata", "stock_prices", "stocks"],
+     "lagged_reads": ["daily_snapshots@snapshot", "stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
 
     # ── Output ──
     {"name": "snapshot",           "module": "output.snapshot",     "function": "compute",  "critical": False,
      "table": "daily_snapshots",   "source": "all signals + stock_prices",
-     "data_freq": "daily",         "frequency": "daily"},
+     "data_freq": "daily",         "frequency": "daily",
+     "reads": ["accruals_scores", "annual_balance_sheet", "consensus_signals", "daily_picks", "daily_snapshots", "piotroski_scores", "promoter_signals", "quarterly_income", "sentiment_scores", "smart_money_scores", "stock_prices", "stocks"],
+     "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
 
     {"name": "diff_engine",        "module": "output.diff_engine",  "function": "compute",  "critical": False,
      "table": "daily_changes",     "source": "daily_picks + daily_snapshots (diff)",
-     "data_freq": "daily",         "frequency": "daily"},
+     "data_freq": "daily",         "frequency": "daily",
+     "reads": ["daily_changes", "daily_picks", "daily_snapshots", "stocks", "vix_history"],
+     "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
 
     {"name": "dossier",            "module": "output.dossier",      "function": "compute",  "critical": False,
      "table": None,                "source": "daily_picks + all signals (Claude API)",
-     "data_freq": "daily",         "frequency": "daily"},
+     "data_freq": "daily",         "frequency": "daily",
+     "reads": ["accruals_scores", "consensus_signals", "daily_picks", "daily_snapshots", "forensic_scores", "piotroski_scores", "promoter_signals", "sentiment_scores", "smart_money_scores", "stock_prices", "stocks"],
+     "writes": ["file:dossiers"],
+     "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
 
     {"name": "email",              "module": "output.email_sender", "function": "compute",  "critical": False,
      "table": None,                "source": "daily_picks + dossiers (Gmail SMTP)",
-     "data_freq": "daily",         "frequency": "daily"},
+     "data_freq": "daily",         "frequency": "daily",
+     "reads": ["daily_changes", "daily_picks", "daily_snapshots", "file:dossiers", "regime_state", "stock_prices", "stocks"],
+     "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
 
     # PIT replay freeze — captures today's pipeline inputs+outputs as a
     # frozen anchor. Daily cadence means every day becomes a regression-test
@@ -765,7 +913,8 @@ PIPELINE_STEPS = [
     # See [tools/pit_replay.py] and Plan 0005 Phase E.
     {"name": "pit_replay_freeze",  "module": "tools.pit_replay",    "function": "freeze",   "critical": False,
      "table": "pit_replay_snapshots", "source": "scoring.screener._load_signals + score_universe (frozen)",
-     "data_freq": "daily",         "frequency": "daily"},
+     "data_freq": "daily",         "frequency": "daily",
+     "reads": ["daily_picks"]},
 
     # Plan 0015 Phase 0: the PIT panel (daily_snapshots_pit) was hand-rebuilt only
     # and froze at 2026-07-01 while the monthly backtest cron re-scored it. Weekly,
@@ -773,14 +922,20 @@ PIPELINE_STEPS = [
     # and catch up missed ones. ~13 dates × ~40s.
     {"name": "refresh_pit_panel",  "module": "tools.reconstruct_pit", "function": "refresh", "critical": False,
      "table": "daily_snapshots_pit", "source": "all PIT producers over recent anchors",
-     "data_freq": "weekly",        "frequency": "weekly"},
+     "data_freq": "weekly",        "frequency": "weekly",
+     "reads": ["accruals_scores", "analyst_consensus_snapshots", "annual_balance_sheet", "annual_cash_flow", "banking_metrics", "bse_announcements", "bulk_deals", "consensus_signals", "corporate_actions", "corporate_adjustments", "daily_picks", "daily_snapshots", "daily_snapshots_pit", "fno_iv_history", "fno_pcr_history", "forecast_history", "forensic_scores", "fundamentals_screener", "insider_trades", "macro_history", "macro_sector_map", "macro_sector_signals_pit", "news_article_stocks", "news_articles", "nlp_scores", "piotroski_scores", "pit_reconstruction_log", "promoter_signals", "quarterly_income", "regulatory_events", "regulatory_signals", "sector_briefs", "shareholding", "short_selling_data", "smart_money_scores", "stock_prices", "stocks", "universe_eligibility"],
+     "writes": ["daily_snapshots_pit", "macro_sector_signals_pit", "pit_reconstruction_log"],
+     "lagged_writes": ["macro_sector_signals_pit"],
+     "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
 
     # MICRO tier reclassifier — keeps the SMALL/MICRO boundary fresh as ADTV,
     # quality scores, and fundamental depth change. Idempotent. Demotes any
     # MICRO that re-qualifies for SMALL. See tools/classify_micro_tier.py.
     {"name": "classify_micro_tier","module": "tools.classify_micro_tier", "function": "reclassify", "critical": False,
      "table": "stocks",            "source": "stocks + stock_prices + piotroski_scores + quarterly_income",
-     "data_freq": "daily",         "frequency": "daily"},
+     "data_freq": "daily",         "frequency": "daily",
+     "reads": ["piotroski_scores", "quarterly_income", "stock_prices", "stocks"],
+     "lagged_reads": ["stocks@fetch_broker_recos"]},
 
     # ── Background / non-blocking section ──
     # Heavy enrichment + scrapes that don't gate today's picks. Moved AFTER
@@ -792,11 +947,13 @@ PIPELINE_STEPS = [
 
     # News Phase 2 enrichment — Claude Haiku (~$0.001/article, ~$1/day).
     {"name": "classify_news",       "module": "sources.news_classifier", "function": "compute", "critical": False,
-     "table": "news_enriched",     "source": "news_articles (Claude Haiku enrich)", "data_freq": "daily", "frequency": "daily"},
+     "table": "news_enriched",     "source": "news_articles (Claude Haiku enrich)", "data_freq": "daily", "frequency": "daily",
+     "reads": ["news_articles", "news_enriched"]},
 
     # Daily news brief — Claude Sonnet (~$0.05/day). After classify_news.
     {"name": "news_brief",          "module": "sources.news_brief",   "function": "compute", "critical": False,
-     "table": "news_briefs",       "source": "news_enriched (Claude Sonnet synthesis)", "data_freq": "daily", "frequency": "daily"},
+     "table": "news_briefs",       "source": "news_enriched (Claude Sonnet synthesis)", "data_freq": "daily", "frequency": "daily",
+     "reads": ["news_articles", "news_enriched"]},
 
     # Regulatory classifier — async two-phase via the Anthropic Message Batches
     # API (audit Eff-F2, migrated 2026-07-05). Each run INGESTs any completed
@@ -809,7 +966,11 @@ PIPELINE_STEPS = [
     # ~1-2 day classification latency is fine: output feeds narrative only. The
     # sync per-item path is kept as a fallback (`--sync`, or auto on batch error).
     {"name": "classify_regulatory","module": "sources.regulatory_classifier", "function": "compute", "critical": False,
-     "table": "regulatory_signals","source": "regulatory_events (Message Batches, capped 500/run)", "data_freq": "daily", "frequency": "daily"},
+     "table": "regulatory_signals","source": "regulatory_events (Message Batches, capped 500/run)", "data_freq": "daily", "frequency": "daily",
+     "reads": ["news_articles", "regulatory_batches", "regulatory_events", "regulatory_signals", "stocks"],
+     "writes": ["regulatory_batches", "regulatory_events", "regulatory_signals"],
+     "lagged_writes": ["regulatory_events", "regulatory_signals"],
+     "lagged_reads": ["stocks@fetch_broker_recos"]},
 
     # Yahoo Finance analyst consensus aggregate. Replaces the Tickertape PT field
     # (which was contaminated with lastPrice — see HANDOFF 2026-05-22). Refreshes
@@ -820,14 +981,19 @@ PIPELINE_STEPS = [
     # 2s floor and must not delay screener/email (2026-09-27); signal_consensus
     # picks up the refreshed rows on the next run.
     {"name": "fetch_yf_analyst",   "module": "sources.yfinance_analyst",   "function": "compute", "critical": False,
-     "table": "analyst_consensus", "source": "Yahoo Finance (yfinance)",  "data_freq": "monthly", "frequency": "weekly"},
+     "table": "analyst_consensus", "source": "Yahoo Finance (yfinance)",  "data_freq": "monthly", "frequency": "weekly",
+     "reads": ["analyst_consensus", "broker_recommendations", "stock_prices", "stocks"],
+     "lagged_writes": ["analyst_consensus"],
+     "lagged_reads": ["broker_recommendations@fetch_broker_recos", "stocks@fetch_broker_recos"]},
 
     # Moneycontrol broker recos — DAILY with a 90-min stalest-first budget
     # (stocks.mc_checked_at); DELAY=12s → ~300 stocks/day, full cycle ~8-9 days.
     # The old weekly full sweep ran ~18h and held the harvest lock all Sunday.
     # Discovery one-time: --discover-only (mc_slug already populated).
     {"name": "fetch_broker_recos", "module": "sources.moneycontrol_recos", "function": "compute", "critical": False,
-     "table": "broker_recommendations", "source": "Moneycontrol HTML (12s/req)",   "data_freq": "weekly", "frequency": "daily"},
+     "table": "broker_recommendations", "source": "Moneycontrol HTML (12s/req)",   "data_freq": "weekly", "frequency": "daily",
+     "reads": ["broker_recommendations", "stocks"],
+     "writes": ["broker_recommendations", "stocks"]},
 
     # Banking metrics — Screener.in HTML scrape, 158 Banks + NBFCs (ADR 0030,
     # Phase 2.2a-ii). Underlying data is quarterly so MONTHLY cron suffices.
@@ -835,7 +1001,9 @@ PIPELINE_STEPS = [
     # standard `compute()` — banking_metrics.main() takes argparse args; the
     # runner needs `--universe`. Wrapped via `compute()` helper.
     {"name": "fetch_banking_metrics", "module": "sources.banking_metrics", "function": "compute_universe", "critical": False,
-     "table": "banking_metrics",    "source": "Screener.in stock pages (158 banks+NBFCs)", "data_freq": "quarterly", "frequency": "monthly"},
+     "table": "banking_metrics",    "source": "Screener.in stock pages (158 banks+NBFCs)", "data_freq": "quarterly", "frequency": "monthly",
+     "reads": ["broker_recommendations", "fundamentals_screener", "stocks"],
+     "lagged_writes": ["banking_metrics"]},
 ]
 
 # Tables fed by standalone crons / migrations (not a PIPELINE_STEPS `table`)
