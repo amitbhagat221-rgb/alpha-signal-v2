@@ -105,11 +105,12 @@ def test_pipeline_status_marks_aborted_and_prefers_completion(tmpdb):
     assert views.step_status()["d"]["status"] == "FAILED"          # all history for /flow
 
 
-def test_signal_tables_come_from_the_registry(monkeypatch):
-    from factors import FACTORS
-    monkeypatch.setattr(views, "_columns", lambda t: ("sid", "snapshot_date", "x"))
-    live = {f["live_table"].split(".")[0] for f in FACTORS.values() if f.get("live_table")}
-    assert set(views.signal_tables()) == live | set(views._DISPLAY_SIGNAL_TABLES)
+def test_signal_tables_are_the_display_list(monkeypatch):
+    """One display list, in order; tables lacking (sid, snapshot_date) are skipped."""
+    monkeypatch.setattr(views, "_columns",
+                        lambda t: ("sid", "x") if t == "insider_signals" else ("sid", "snapshot_date", "x"))
+    expected = [t for t in views._DISPLAY_SIGNAL_TABLES if t != "insider_signals"]
+    assert views.signal_tables() == expected
 
 
 @pytest.mark.parametrize("app_mod, pages_mod", [("cockpit.app", "cockpit.pages"),

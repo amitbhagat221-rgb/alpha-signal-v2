@@ -21,6 +21,7 @@ idempotent, tolerate missing fields (return PASS), and be fast (no I/O).
 
 import pandas as pd
 
+from checks import ranges
 from db import read_sql
 
 
@@ -70,32 +71,30 @@ def consensus_requires_attribution(row):
     return "FAIL", f"consensus_signal={cs:.3f} but no analyst attribution (n=NULL, PT=NULL)"
 
 
-def f_score_range(row):
-    """Piotroski F-score must be integer in [0, 9] when present."""
-    f = row.get("f_score")
-    if f is None or (isinstance(f, float) and pd.isna(f)):
+def _registered_range(row, field, table, column):
+    """FAIL when `field` is present and outside the column's ONE registered range
+    (checks/ranges.py), else PASS."""
+    v = row.get(field)
+    if v is None or (isinstance(v, float) and pd.isna(v)):
         return "PASS", None
     try:
-        f = float(f)
+        v = float(v)
     except (TypeError, ValueError):
         return "PASS", None
-    if not (0 <= f <= 9):
-        return "FAIL", f"f_score={f} outside [0, 9]"
+    if not ranges.in_range(table, column, v):
+        return "FAIL", f"{field}={v:g} outside {ranges.describe(table, column)}"
     return "PASS", None
+
+
+def f_score_range(row):
+    """Piotroski F-score within its registered range [0, 9] when present."""
+    return _registered_range(row, "f_score", "piotroski_scores", "f_score")
 
 
 def m_score_realistic(row):
-    """Beneish M-score realistic range: typically -5 to +5. Outside that = junk input."""
-    m = row.get("m_score")
-    if m is None or (isinstance(m, float) and pd.isna(m)):
-        return "PASS", None
-    try:
-        m = float(m)
-    except (TypeError, ValueError):
-        return "PASS", None
-    if not (-10 <= m <= 10):
-        return "FAIL", f"m_score={m:.2f} outside realistic [-10, +10]"
-    return "PASS", None
+    """Beneish M-score within its registered range (the factor's backtest range).
+    Outside = junk input."""
+    return _registered_range(row, "m_score", "forensic_scores", "m_score")
 
 
 def forward_pe_consistency(row):
@@ -150,17 +149,8 @@ def extreme_growth_clipped(row):
 
 
 def base_score_realistic(row):
-    """base_score is a 0-1 weighted percentile rank. >1.0 or <0 = arithmetic broken."""
-    bs = row.get("base_score")
-    if bs is None or (isinstance(bs, float) and pd.isna(bs)):
-        return "PASS", None
-    try:
-        bs = float(bs)
-    except (TypeError, ValueError):
-        return "PASS", None
-    if bs < -0.001 or bs > 1.001:
-        return "FAIL", f"base_score={bs:.3f} outside [0, 1]"
-    return "PASS", None
+    """base_score is a 0-1 weighted percentile rank. Outside = arithmetic broken."""
+    return _registered_range(row, "base_score", "daily_picks", "base_score")
 
 
 def market_cap_consistency(row):

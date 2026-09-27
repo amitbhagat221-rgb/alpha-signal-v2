@@ -16,7 +16,7 @@ Consumed by:
 Plan 0005 Phase A. See docs/plans/0005-data-confidence-to-95.md.
 """
 
-# Each entry: signal_id (the config.SIGNAL_WEIGHTS key) →
+# Each entry: signal_id (a factors.SIGNAL_WEIGHTS weight key) →
 # dict with `description` (human) and `eligible_sql` (returns DISTINCT sid).
 # Declared per factor ("eligibility") in factors.py; this is the derived view.
 from factors import SIGNAL_ELIGIBILITY  # noqa: E402

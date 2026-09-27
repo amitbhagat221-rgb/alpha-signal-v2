@@ -174,8 +174,4 @@ def _has_recent_corp_action(sid, table, as_of_date, window_days):
 
 def _likely_sid_col(table: str) -> str:
     """Most source tables key on `sid`; MF tables use `scheme_code`."""
-    if table.startswith("mf_") and "nav" in table:
-        return "scheme_code"
-    if table.startswith("mf_"):
-        return "scheme_code"
-    return "sid"
+    return "scheme_code" if table.startswith("mf_") else "sid"

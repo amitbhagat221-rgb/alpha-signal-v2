@@ -12,7 +12,7 @@ ARCHITECTURE
     instead of the live table. UHS Provenance dimension drops to 0 for the
     quarantined row.
 
-    Offline auditor: tools/data_sanity.py:_mc_slug_name_mismatch_check (existing
+    Offline auditor: checks/custom.py:_mc_slug_name_mismatch_check (existing
     nightly audit) becomes the regression-gate of the live identity check
     here. If the live gate ever regresses, the nightly audit re-surfaces the
     drift.
@@ -126,7 +126,7 @@ def _mc_slug_company(slug: str) -> str:
     """Company segment of a Moneycontrol slug URL.
 
     /india/stockpricequote/{industry}/{company}/{MC_CODE} → {company}.
-    Mirrors tools/data_sanity.py:_mc_slug_name_mismatch_check._slug_co.
+    Mirrors checks/custom.py:_mc_slug_name_mismatch_check._slug_co.
     """
     parts = (slug or "").strip("/").split("/")
     return parts[-2] if len(parts) >= 2 else ""
@@ -147,7 +147,7 @@ def _verify_moneycontrol(sid: str, payload, expected_name: Optional[str] = None,
                       (CEATLTD vs 'ceat', BHARTIARTL vs 'bhartiairtel').
 
     This now mirrors the canonical accept logic in
-    tools/data_sanity.py:_mc_slug_name_mismatch_check (its regression twin):
+    checks/custom.py:_mc_slug_name_mismatch_check (its regression twin):
     accept if the normalised slug-company is a substring of the normalised
     company name (or vice versa) OR SequenceMatcher ratio >= 0.55. The ticker-
     substring shortcut was deliberately dropped there 2026-05-31 (it let

@@ -48,40 +48,15 @@ COCKPIT_URL = os.environ.get("COCKPIT_BASE_URL", "http://140.245.248.166:3000")
 
 
 # ─────────────────────── Severity classification ───────────────────────
+# Every severity rule lives in checks/ (plan 0015 Phase 4); this module gathers
+# state and renders it. Alert criticality is DERIVED, not hand-kept: a failed
+# step pages when the email needs its output (graph.py critical path), and an
+# OUTDATED table pages when such a step writes it.
 
-from tools.data_sanity import CRITICAL, WARN, INFO   # one definition, shared
-OK = "OK"
+import checks
+from checks import CRITICAL, INFO, OK, WARN, empty_table_severity  # noqa: F401  (re-exported: cockpit_ops)
 
-# Tables whose staleness should page (not just warn). Keep this short.
-CRITICAL_TABLE_OUTDATED = {
-    "daily_picks",          # screener output — the whole point of the system
-    "daily_snapshots",      # signal store
-    "stock_prices",         # underlying universe data
-    "_file_dossiers",       # LLM thesis output
-}
-
-# ── Empty-table policy (the ONE source of truth; cockpit consumes this) ──
-# An empty table is not automatically a failure. Two classes are benign:
-#   *_quarantine — Trust-Pipeline (Plan 0007) reject sinks. Rows here = bad
-#                  news; EMPTY means nothing was quarantined, i.e. clean. (OK)
-#   the set below — features that legitimately have no rows yet. (INFO)
-# Anything else empty = a producer wrote 0 rows where rows are expected. (CRITICAL)
-EXPECTED_EMPTY_SUFFIXES = ("_quarantine",)
-EXPECTED_EMPTY_TABLES = {
-    "paper_trades",        # paper-trading not live yet
-    "paper_positions",
-    "paper_nav_history",
-}
-
-
-def empty_table_severity(table):
-    """Severity for an EMPTY table. OK = healthy/expected (suppress),
-    INFO = known-not-yet-populated, CRITICAL = unexpected 0-row producer."""
-    if table.endswith(EXPECTED_EMPTY_SUFFIXES):
-        return OK
-    if table in EXPECTED_EMPTY_TABLES:
-        return INFO
-    return CRITICAL
+CRITICAL_TABLE_OUTDATED = checks.critical_tables()   # read by cockpit_ops Health Center
 
 
 # A step name failing on 2+ consecutive days = systemic, not a fluke
@@ -358,68 +333,15 @@ def _gather_watchdog():
 
 def _classify(state):
     """Generate issue list with severities from the gathered state."""
-    issues = []
-
-    # Pipeline failures today
-    for f in state["pipeline"]["failed_steps_today"]:
-        sev = CRITICAL if any(crit in f["step"] for crit in ("screener", "snapshot", "dossier")) else WARN
-        issues.append({
-            "severity": sev,
-            "code": "PIPELINE_STEP_FAILED",
-            "message": f"{f['step']} failed in latest pipeline run",
-            "detail": f["error"],
-        })
-
-    # Streaks always escalate
-    for s in state["pipeline"]["failed_streaks"]:
-        issues.append({
-            "severity": CRITICAL,
-            "code": "PIPELINE_STREAK",
-            "message": f"{s['step']} has failed {s['days']} consecutive days",
-            "detail": s["sample_error"],
-        })
-
-    # Outdated tables — critical if in the page-set, warn otherwise
-    for tbl, age, threshold, producer in state["tables"]["outdated"]:
-        sev = CRITICAL if tbl in CRITICAL_TABLE_OUTDATED else WARN
-        issues.append({
-            "severity": sev,
-            "code": "TABLE_OUTDATED",
-            "message": f"{tbl} is OUTDATED ({age}d old, threshold {threshold}d)",
-            "detail": f"producer: {producer}",
-        })
-
-    # Stale = warn only (within 2× threshold)
-    for tbl, age, threshold, producer in state["tables"]["stale"]:
-        issues.append({
-            "severity": WARN,
-            "code": "TABLE_STALE",
-            "message": f"{tbl} is STALE ({age}d / threshold {threshold}d)",
-            "detail": f"producer: {producer}",
-        })
-
-    # No date anchor — registered for freshness tracking but no DATE_COLS match. WARN.
-    for tbl, producer in state["tables"].get("no_date_anchor", []):
-        issues.append({
-            "severity": WARN,
-            "code": "TABLE_NO_DATE_ANCHOR",
-            "message": f"{tbl} has no date-column match — freshness cannot be computed",
-            "detail": f"producer: {producer}",
-        })
-
-    # Empty tables — benign quarantine sinks (OK) and not-yet-live feature
-    # tables (INFO) are suppressed from the email; only an *unexpected* 0-row
-    # producer (CRITICAL) is actionable. The cockpit applies the full
-    # OK/INFO/CRITICAL policy via empty_table_severity() for its richer pane.
-    for tbl in state["tables"].get("empty", []):
-        if empty_table_severity(tbl) != CRITICAL:
-            continue
-        issues.append({
-            "severity": CRITICAL,
-            "code": f"TABLE_EMPTY:{tbl}",
-            "message": f"{tbl} is EMPTY (table exists but no rows)",
-            "detail": "producer wrote 0 rows where rows are expected",
-        })
+    # Pipeline failures (critical steps page, streaks always), then freshness —
+    # verdicts from checks/. EMPTY tables that are benign (a clean quarantine
+    # mirror = OK, a not-yet-live feature = INFO) stay out of the alerts pane;
+    # the cockpit applies the full policy via empty_table_severity().
+    issues = [
+        {"severity": v["severity"], "code": v["code"], "message": v["message"], "detail": v["detail"]}
+        for v in checks.pipeline_verdicts(state["pipeline"]) + checks.freshness_verdicts(state["tables"])
+        if v["severity"] in (CRITICAL, WARN)
+    ]
 
     # Data sanity violations — catches "rows are wrong" (PT==price, rank dups, etc.)
     # Severity comes from the assertion itself; we just rebadge with the SANITY_ prefix.
