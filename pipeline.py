@@ -150,9 +150,9 @@ def run_step(name: str, module_path: str, func_name: str, critical: bool) -> boo
 
 
 def shadow_order(steps: list[tuple], write: bool = True):
-    """Plan 0015 Phase 1a — SHADOW MODE. Derive today's order from the steps'
-    declared reads/writes (graph.py) and record how it differs from the hand
-    order. Never changes what runs; never raises. Returns the report dict."""
+    """Derive today's order from the steps' declared reads/writes (graph.py) and
+    record it vs the hand order (output/graph_shadow/). Never raises; returns the
+    report dict, or None when the order can't be derived (then the list order runs)."""
     try:
         import json
         import graph
@@ -195,10 +195,16 @@ def run_pipeline(steps: list[tuple], dry_run: bool = False):
     log.info(f"Pipeline run — {date.today()} — {len(steps)} steps")
     log.info(f"{'=' * 50}")
     if len(steps) > 1:
-        shadow_order(steps, write=not dry_run)
+        report = shadow_order(steps, write=not dry_run)
+        if PIPELINE.get("derived_order") and report:
+            by_name = {s[0]: s for s in steps}
+            steps = [by_name[n] for n in report["derived"]]
+            log.info("Running the DERIVED order (config.PIPELINE['derived_order'])")
+        elif PIPELINE.get("derived_order"):
+            log.warning("derived order unavailable — running the PIPELINE_STEPS list order")
 
     if dry_run:
-        for name, module, func, critical in steps:
+        for name, module, func, critical in steps:   # in the order that would run
             tag = "CRITICAL" if critical else "optional"
             log.info(f"  [{tag:8s}] {name:25s} → {module}.{func}()")
         log.info("Dry run — nothing executed.")

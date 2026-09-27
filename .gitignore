@@ -102,6 +102,7 @@ tmp/
 
 # Shell scripts
 *.sh
+!run.sh          # the one tracked cron entry point (plan 0015 Phase 1b)
 
 # Playwright MCP verification artifacts (per-session DOM snapshots + screenshots)
 .playwright-mcp/

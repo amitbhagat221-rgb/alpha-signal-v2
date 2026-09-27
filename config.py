@@ -343,6 +343,11 @@ SCREEN = {
 PIPELINE = {
     "retry_count": 1,
     "email_on_failure": True,
+    # Plan 0015 Phase 1b: run steps in the order graph.py derives from their
+    # declared reads/writes (the email's critical path first; every read keeps
+    # the data version it saw under the hand order — tests/test_graph.py).
+    # False = the PIPELINE_STEPS list order (instant revert).
+    "derived_order": True,
 }
 
 # ── Pipeline Steps ──

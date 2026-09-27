@@ -106,3 +106,22 @@ def test_every_step_declares_reads_and_the_graph_orders():
             pipeline.date = monkeypatch_date
         cur = [s["name"] for s in act]
         assert graph.read_versions(act, cur) == graph.read_versions(act, graph.order(act)), d
+
+
+def test_runner_executes_the_derived_order(monkeypatch, caplog):
+    """config.PIPELINE['derived_order'] → run_pipeline runs graph.order, not list order."""
+    import logging
+    import pipeline
+    steps = [("b", "m", "f", False), ("a", "m", "f", False)]
+    monkeypatch.setitem(pipeline.PIPELINE, "derived_order", True)
+    monkeypatch.setattr(pipeline, "shadow_order", lambda s, write=True: {"derived": ["a", "b"]})
+    with caplog.at_level(logging.INFO, logger="pipeline"):
+        pipeline.run_pipeline(steps, dry_run=True)
+    lines = [r.getMessage() for r in caplog.records if "→ m.f()" in r.getMessage()]
+    assert [l.split()[1] for l in lines] == ["a", "b"]
+    monkeypatch.setitem(pipeline.PIPELINE, "derived_order", False)
+    caplog.clear()
+    with caplog.at_level(logging.INFO, logger="pipeline"):
+        pipeline.run_pipeline(steps, dry_run=True)
+    lines = [r.getMessage() for r in caplog.records if "→ m.f()" in r.getMessage()]
+    assert [l.split()[1] for l in lines] == ["b", "a"]
