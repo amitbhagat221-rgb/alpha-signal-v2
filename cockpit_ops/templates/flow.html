@@ -241,6 +241,8 @@
     });
     window.addEventListener("resize", drawEdges);
     document.addEventListener("click", () => setTimeout(drawEdges, 50));   // tab switches
+    document.addEventListener("alpine:initialized", () => setTimeout(drawEdges, 50));  // x-cloak lifted
+    window.addEventListener("load", () => setTimeout(drawEdges, 100));
     setTimeout(drawEdges, 0);
 
     // ── Auto-refresh countdown ──

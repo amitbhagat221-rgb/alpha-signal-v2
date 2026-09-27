@@ -187,6 +187,12 @@ def published_picks(per_tier=None):
 
 # ═══════════════════════════ stock ═══════════════════════════
 
+# Lineage note: db._scan_db_references() sees only literal table names, and these
+# are read through f-strings (signals(), latest_rows callers). Spelled out so the
+# /system "used by" column credits this module: reads FROM consensus_signals,
+# FROM promoter_signals, FROM piotroski_scores, FROM accruals_scores,
+# FROM insider_signals, FROM smart_money_scores, FROM forensic_scores,
+# FROM sentiment_scores.
 # Signal tables whose newest row describes a stock: every table a registered factor
 # is read from live (factors.FACTORS[*]["live_table"]) plus the display-only signal
 # tables that no factor entry names yet. Only (sid, snapshot_date) tables qualify.

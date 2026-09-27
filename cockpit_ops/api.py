@@ -406,17 +406,25 @@ def get_flow_overview():
     """The pipeline as its dataflow graph, for /flow. Everything is derived from the
     step declarations (graph.py): edges are graph.edges() collapsed to step pairs
     (blocking = the reader sees this run's write; lagged = the previous run's),
-    layers are the steps' module packages ordered by where they fall in the derived
-    topological order (steps keep run order inside a layer), and each step carries
-    its latest views.step_status() row."""
+    layers are the steps' module packages ordered left→right by their mean dataflow
+    depth (longest chain of blocking edges above a step; steps keep run order inside
+    a layer), and each step carries its latest views.step_status() row."""
     import graph
     from config import PIPELINE_STEPS
 
     status_by_step = views.step_status()
     try:
-        position = {n: i for i, n in enumerate(graph.order(PIPELINE_STEPS))}
+        derived = graph.order(PIPELINE_STEPS)
     except ValueError:  # a declaration cycle — fall back to list order, still render
-        position = {s["name"]: i for i, s in enumerate(PIPELINE_STEPS)}
+        derived = [s["name"] for s in PIPELINE_STEPS]
+    position = {n: i for i, n in enumerate(derived)}
+    parents = {}
+    for w, r, _, kind in graph.edges(PIPELINE_STEPS):
+        if kind == "blocking":
+            parents.setdefault(r, set()).add(w)
+    depth = {}
+    for n in derived:
+        depth[n] = 1 + max((depth[p] for p in parents.get(n, ()) if p in depth), default=-1)
 
     edges = {}
     for writer, reader, dataset, kind in graph.edges(PIPELINE_STEPS):
@@ -455,12 +463,11 @@ def get_flow_overview():
             "last_error": last.get("error_message"),
         })
 
-    def _median_position(steps):
-        ps = sorted(position[s["name"]] for s in steps)
-        return ps[len(ps) // 2]
+    def _mean_depth(steps):
+        return sum(depth[s["name"]] for s in steps) / len(steps)
 
     layered = [{"name": ln, "steps": steps}
-               for ln, steps in sorted(layers.items(), key=lambda kv: _median_position(kv[1]))]
+               for ln, steps in sorted(layers.items(), key=lambda kv: _mean_depth(kv[1]))]
     layer_of = {s["name"]: layer["name"] for layer in layered for s in layer["steps"]}
     for e in edges.values():
         e["cross_layer"] = layer_of.get(e["from"]) != layer_of.get(e["to"])
