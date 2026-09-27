@@ -1,6 +1,6 @@
 # Architecture
 
-> **Status:** the "Target" part of this doc is **PROPOSED** ([ADR 0052](../decisions/0052-seven-building-blocks.md) and [plan 0015](../plans/0015-first-principles-architecture.md)). It is not built yet. As each migration phase ships, the matching part of "Today" is deleted. Until then, "Today" describes the running code.
+> **Status:** the "Target" part of this doc is the accepted design ([ADR 0052](../decisions/0052-seven-building-blocks.md), [plan 0015](../plans/0015-first-principles-architecture.md)), built phase by phase. **Shipped 2026-09-27:** Phase 0 (bug batch), Phase 1a (steps declare reads/writes; derived order runs in SHADOW only) and Phase 3 (live = PIT: `pit.py`, `views.py`). "Today" describes the running code.
 
 ## Target: one page
 
@@ -76,7 +76,10 @@ tools/        research only: nothing in the graph imports tools/
 ```
                         ORCHESTRATION
    pipeline.py runs config.PIPELINE_STEPS in list order (85 steps)
-   each step: {name, module, function, critical, table, source, data_freq, frequency}
+   each step: {name, module, function, critical, table, source, data_freq, frequency,
+               reads, [writes, lagged_reads, lagged_writes]}
+   graph.py derives the order from reads/writes — SHADOW only (output/graph_shadow/),
+   and every step's real SQLite reads are checked against its declaration
    frequency gate: daily · weekly (Sunday) · monthly (1st); --step overrides
    critical=True (fetch_bhavcopy, screener) aborts the run
    every step → one pipeline_log row; 11 crontab lines run jobs outside the list
@@ -84,9 +87,11 @@ tools/        research only: nothing in the graph imports tools/
  SOURCES  ────────→  SIGNALS  ────────→  SCORING  ────────→  OUTPUT
  sources/*           signals/*           scoring/*           output/*
  external → DB       DB → *_scores       regime,             snapshot → dossier
-                     (+ inline factors   screener            (Claude API) → email
-                      in screener)       → daily_picks
-      PIT twin: tools/reconstruct_pit.py → daily_snapshots_pit (not scheduled)
+                     (display + UHS)     screener            (Claude API) → email
+                                         → daily_picks
+ pit.py: RAW_SQL as-of datasets → the SAME factor functions at any t
+      screener = pit.features_at(today) · tools/reconstruct_pit.py → daily_snapshots_pit
+      (refresh_pit_panel, weekly) · tools/pit_replay: the real screener as_of any date
                               ↓
                SQLite data/alpha_signal.db (WAL) + DuckDB read replica (ADR 0031)
                               ↓
@@ -98,7 +103,9 @@ tools/        research only: nothing in the graph imports tools/
 
 | Fact | Source of truth today |
 |---|---|
-| Steps, order, cadence | `config.PIPELINE_STEPS` (hand-ordered; heavy steps kept after `email` by position) |
+| Steps, order, cadence | `config.PIPELINE_STEPS` (hand order runs; `graph.py` derives the order in shadow) |
+| Live and PIT factor values | `pit.py` (`features_at(t)`); the screener and the panel call the same code |
+| Picks the email + dossier show | `views.published_picks()` |
 | Tables | `schema.sql` + `tables.TABLES` (`tests/test_tables.py`) |
 | Factor registry | `factors.FACTORS` (+ `PIT_PRODUCERS`); db re-exports the derived views |
 | Production weights | `config.SIGNAL_WEIGHTS` → [signal-weights.md](signal-weights.md) |

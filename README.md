@@ -32,13 +32,15 @@ More: [docs/reference/commands.md](docs/reference/commands.md). The cockpit runs
 ## Layout
 
 ```
-config.py · db.py · tables.py · pipeline.py · schema.sql · lineage.py · health.py
+config.py · db.py · tables.py · pipeline.py · graph.py · schema.sql · lineage.py · health.py
+pit.py        as-of datasets + factor computation at any date (live = backtest at t=today)
+views.py      named read-models shared by the email/dossier (ADR 0052)
 sources/      fetchers (NSE, BSE, Tickertape, yfinance, Screener, AMFI, Moneycontrol, RSS…)
 signals/      one module per factor family → *_scores tables
 scoring/      screener · regime · confidence · health_score
 eligibility/  per-signal eligibility registry     validators/  trust-pipeline gates
 output/       snapshot · dossier · email (plus generated reports, gitignored)
-tools/        PIT reconstruction, backtests, promotion gate, health/watchdog, studies
+tools/        PIT panel writer, backtests, promotion gate, health/watchdog, studies
 cockpit/      main FastAPI UI (:3000)             cockpit_ops/  ops console (:3001)
 tests/        smoke + regression tests            _archive/     retired one-off code
 docs/         see docs/README.md
