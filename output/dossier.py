@@ -26,7 +26,7 @@ import pandas as pd
 
 from config import PROJECT_ROOT
 from db import read_sql
-from output._llm import llm_json
+from output._llm import MODELS, llm_json
 
 OUTPUT_DIR = PROJECT_ROOT / "output"
 
@@ -524,7 +524,7 @@ def generate(top=None, dry_run=False):
             continue
 
         try:
-            dossier = llm_json(prompt, "claude-sonnet-4-6", "dossier", max_tokens=1024)
+            dossier = llm_json(prompt, MODELS["dossier"], "dossier", max_tokens=1024)
 
             dossier["sid"] = sid
             dossier["ticker"] = pick["ticker"]
