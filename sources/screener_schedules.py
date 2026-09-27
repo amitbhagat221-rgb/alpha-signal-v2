@@ -34,9 +34,7 @@ rate, easy way to trip Screener's bot detection.
 
 import argparse
 import calendar
-import random
 import re
-import time
 from datetime import date
 from typing import Iterable
 
@@ -44,11 +42,10 @@ import pandas as pd
 import requests
 
 from db import insert_df, read_sql, upsert_df
+from sources import _http
 from sources.screener_pull import (
     COMPANY_CONSOLIDATED_URL,
     COMPANY_URL,
-    DELAY_BETWEEN_STEPS,
-    DELAY_BETWEEN_STOCKS,
     log_error,
     make_session,
 )
@@ -72,12 +69,10 @@ def discover_company_id(s: requests.Session, ticker: str) -> tuple[int, str] | N
 
     The companyId appears on the company page as data-url="/api/company/<id>/add/...".
     """
-    for i, (view, url_tmpl) in enumerate((("consolidated", COMPANY_CONSOLIDATED_URL),
-                                          ("standalone",   COMPANY_URL))):
-        if i:  # standalone fallback — keep ≥2s after the consolidated GET
-            time.sleep(random.uniform(*DELAY_BETWEEN_STEPS))
+    for view, url_tmpl in (("consolidated", COMPANY_CONSOLIDATED_URL),
+                           ("standalone",   COMPANY_URL)):
         url = url_tmpl.format(ticker=ticker)
-        r = s.get(url, timeout=20)
+        r = _http.polite_request("GET", url, session=s, check=False, retries=0, timeout=20)
         if r.status_code == 404:
             continue
         if r.status_code in (401, 403):
@@ -132,8 +127,8 @@ def fetch_schedule(
     if consolidated:
         params["consolidated"] = ""
     url = API_SCHEDULES_URL.format(cid=cid)
-    r = s.get(url, params=params, timeout=20,
-              headers={"X-Requested-With": "XMLHttpRequest"})
+    r = _http.polite_request("GET", url, session=s, check=False, retries=0, params=params,
+                             timeout=20, headers={"X-Requested-With": "XMLHttpRequest"})
     if r.status_code == 404:
         return {}
     if r.status_code in (401, 403):
@@ -188,8 +183,7 @@ def pull_one(
     consolidated = view == "consolidated"
 
     all_rows: list[dict] = []
-    for parent, section in SCHEDULES_TO_PULL:
-        time.sleep(random.uniform(*DELAY_BETWEEN_STEPS))
+    for parent, section in SCHEDULES_TO_PULL:   # the door paces each call
         try:
             data = fetch_schedule(s, cid, parent, section, consolidated)
         except PermissionError:
@@ -265,8 +259,6 @@ def main():
             print(f"\nAUTH FAILURE on {sid} ({ticker}): {e}")
             print("→ Re-extract the cookie from your browser and retry.")
             return 2
-        if i < len(targets):
-            time.sleep(random.uniform(*DELAY_BETWEEN_STOCKS))
 
     print(f"\ntotal rows: {total_rows}  |  failures: {failures}/{len(targets)}")
     return 0

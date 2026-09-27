@@ -22,16 +22,14 @@ from datetime import date, datetime, timedelta
 import pandas as pd
 import requests
 
-from config import API
 from db import insert_df
+from hosts import HOSTS
 from sources import _http
 
 NSE_PIT_URL = "https://www.nseindia.com/api/corporates-pit"
-HEADERS = {
-    "User-Agent": API["user_agent"],
-    "Accept": "application/json",
-    "Referer": "https://www.nseindia.com/companies-listing/corporate-filings-insider-trading",
-}
+# NSE's JSON headers (hosts.HOSTS["nse"]) + the insider-filings page as referer.
+SESSION_HEADERS = {**HOSTS["nse"]["headers"],
+                   "Referer": "https://www.nseindia.com/companies-listing/corporate-filings-insider-trading"}
 
 NSE_HOME = "https://www.nseindia.com/"
 
@@ -52,7 +50,7 @@ def _fetch_chunk(from_date, to_date, session):
             if e.response is None or e.response.status_code != 403:
                 raise
             # Cookie expired — re-warm once and retry
-            session = _http.warm_session(NSE_HOME, headers=HEADERS)
+            session = _http.warm_session(NSE_HOME, headers=SESSION_HEADERS)
             resp = _http.polite_get(NSE_PIT_URL, session=session, params=params, timeout=30)
         if resp is None:
             print("    HTTP 404", end="", flush=True)
@@ -152,7 +150,7 @@ def fetch_insider(months=1, dry_run=False):
             print(f"  Chunk {i+1}: {s} → {e}")
         return 0
 
-    session = _http.warm_session(NSE_HOME, headers=HEADERS)
+    session = _http.warm_session(NSE_HOME, headers=SESSION_HEADERS)
 
     total_saved = 0
     total_fetched = 0

@@ -114,7 +114,6 @@ def test_yfinance_analyst_raises_when_no_stock_has_data(monkeypatch):
 
     monkeypatch.setattr(ya, "read_sql", fake_read_sql)
     monkeypatch.setattr(ya, "_fetch_one", lambda t, sid_for_gate=None: None)
-    monkeypatch.setattr(ya, "DELAY", 0)
     with pytest.raises(RuntimeError, match="yfinance analyst: 0 of 2"):
         ya.compute(ticker=None)
 

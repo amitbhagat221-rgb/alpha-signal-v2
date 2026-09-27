@@ -40,19 +40,16 @@ import argparse
 import io
 import json
 import os
-import random
 import re
-import time
 from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
 import requests
 
-from config import API
 from db import get_db, insert_df, read_sql, upsert_df
-
-UA = API["browser_user_agent"]
+from hosts import HOSTS
+from sources import _http
 
 COOKIE_FILE = Path.home() / ".cache" / "screener_cookie.json"
 HOME_URL = "https://www.screener.in/"
@@ -61,12 +58,15 @@ COMPANY_URL = "https://www.screener.in/company/{ticker}/"
 COMPANY_CONSOLIDATED_URL = "https://www.screener.in/company/{ticker}/consolidated/"
 EXPORT_URL_BASE = "https://www.screener.in"  # form action is relative
 
-# Rate-limit policy. Conservative — Screener has banned accounts for aggressive
-# scraping. Numbers tuned for "looks like a researcher refreshing the page",
-# not a bot. Inter-stock delay is randomized to avoid mechanical patterns.
-DELAY_BETWEEN_STOCKS = (2.5, 4.0)  # seconds — uniform random in this range
-DELAY_BETWEEN_STEPS = (2.0, 3.0)   # seconds — between page GET and export POST (was 0.5-1.2)
+# Rate limit: the door paces every www.screener.in call 2.5–4 s apart, jittered
+# (hosts.HOSTS["screener"] — Screener has banned accounts for aggressive scraping).
 BACKOFF_ON_429 = 60.0              # seconds to wait if rate-limited
+
+
+def _req(method, url, session, **kw):
+    """One Screener call through the host door. Raw Response back (redirects and
+    status codes are read here), no automatic retry — as before the door."""
+    return _http.polite_request(method, url, session=session, check=False, retries=0, **kw)
 
 # Section header (col 0 in Data Sheet) → period_type for rows that follow.
 # 'Quarters' starts a quarterly section; everything else is annual fiscal.
@@ -93,7 +93,7 @@ def load_cookies() -> dict:
 
 def make_session() -> requests.Session:
     s = requests.Session()
-    s.headers.update({"User-Agent": UA, "Accept": "*/*"})
+    s.headers.update(HOSTS["screener"]["headers"])
     for name, value in load_cookies().items():
         s.cookies.set(name, value, domain="www.screener.in")
     return s
@@ -115,10 +115,10 @@ def do_login() -> tuple[bool, str]:
         )
 
     s = requests.Session()
-    s.headers.update({"User-Agent": UA, "Accept": "text/html,*/*"})
+    s.headers.update({**HOSTS["screener"]["headers"], "Accept": "text/html,*/*"})
 
     # Step 1: GET login page to receive csrftoken cookie + form's csrfmiddlewaretoken.
-    r = s.get(LOGIN_URL, timeout=15)
+    r = _req("GET", LOGIN_URL, s, timeout=15)
     if r.status_code != 200:
         return False, f"GET {LOGIN_URL} returned HTTP {r.status_code}"
     csrf_form = re.search(
@@ -129,8 +129,8 @@ def do_login() -> tuple[bool, str]:
     csrf_token = csrf_form.group(1)
 
     # Step 2: POST credentials. Django CSRF requires Referer header on POST.
-    r2 = s.post(
-        LOGIN_URL,
+    r2 = _req(
+        "POST", LOGIN_URL, s,
         data={
             "csrfmiddlewaretoken": csrf_token,
             "username": user,
@@ -178,7 +178,7 @@ def do_login() -> tuple[bool, str]:
 
 def check_auth(s: requests.Session) -> tuple[bool, str]:
     """Hit homepage and look for logged-in markers. Returns (ok, detail)."""
-    r = s.get(HOME_URL, timeout=15, allow_redirects=False)
+    r = _req("GET", HOME_URL, s, timeout=15, allow_redirects=False)
     if r.status_code != 200:
         return False, f"HTTP {r.status_code} on /"
     text = r.text.lower()
@@ -203,13 +203,11 @@ def fetch_export(s: requests.Session, ticker: str) -> tuple[bytes, str]:
     Raises PermissionError on cookie expiry, RuntimeError on parse failures.
     """
     last_err = None
-    for i, (view, page_url) in enumerate([
+    for view, page_url in [
         ("consolidated", COMPANY_CONSOLIDATED_URL.format(ticker=ticker)),
         ("standalone", COMPANY_URL.format(ticker=ticker)),
-    ]):
-        if i:  # standalone fallback — keep ≥2s after the consolidated call(s)
-            time.sleep(random.uniform(*DELAY_BETWEEN_STEPS))
-        page = s.get(page_url, timeout=15, allow_redirects=False)
+    ]:
+        page = _req("GET", page_url, s, timeout=15, allow_redirects=False)
         if page.status_code in (301, 302):
             loc = page.headers.get("location", "")
             if "/login/" in loc:
@@ -239,11 +237,8 @@ def fetch_export(s: requests.Session, ticker: str) -> tuple[bytes, str]:
         if not csrf:
             raise PermissionError("no csrftoken in cookie jar — re-login")
 
-        # Pause briefly between page-load and export-POST to look human.
-        time.sleep(random.uniform(*DELAY_BETWEEN_STEPS))
-
-        post = s.post(
-            export_url,
+        post = _req(   # the door keeps the human-looking pause after the page load
+            "POST", export_url, s,
             data={"csrfmiddlewaretoken": csrf},
             headers={"Referer": page_url},
             timeout=30,
@@ -494,8 +489,6 @@ def main():
             print(f"\nAUTH FAILURE on {sid} ({ticker}): {e}")
             print("→ Re-extract the cookie from your browser and retry.")
             return 2
-        if i < len(targets):
-            time.sleep(random.uniform(*DELAY_BETWEEN_STOCKS))
 
     print(f"\ntotal rows: {total_rows}  |  failures: {failures}/{len(targets)}")
     return 0

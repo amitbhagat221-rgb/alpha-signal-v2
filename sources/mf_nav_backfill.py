@@ -31,18 +31,16 @@ import time
 from datetime import datetime
 
 
-from config import API
 from db import get_db, read_sql
 from sources._http import polite_get, run_harvester
 
 MFAPI_URL = "https://api.mfapi.in/mf/{code}"
-HEADERS = {"User-Agent": API["user_agent"]}
 
 
 def fetch_scheme_history(scheme_code: str) -> dict | None:
     """GET mfapi.in/mf/{code} → {meta, data}. None on 404/410; raises once
     polite_get's retries (timeouts / 429 / 5xx) are spent."""
-    r = polite_get(MFAPI_URL.format(code=scheme_code), headers=HEADERS)
+    r = polite_get(MFAPI_URL.format(code=scheme_code))
     return r.json() if r is not None else None
 
 

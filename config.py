@@ -279,35 +279,11 @@ BACKTEST = {
     "momentum_12m_days": 252,
 }
 
-# ── API / Network ──
-
-API = {
-    # Minimum gap between two requests to the same host (CLAUDE.md: ≥2s).
-    # Enforced by sources/_http.polite_get; loops over non-requests clients
-    # (yfinance, Bharat_sm_data) sleep this between items. Single-file bulk
-    # downloads (NAVAll.txt, one bhavcopy/day) are unaffected — one call each.
-    "min_gap": 2.0,
-    # Documented per-host exceptions — slower than the floor, never faster.
-    "host_min_gap": {
-        "www.moneycontrol.com": 12.0,   # 2s tripped the Moneycontrol WAF (moneycontrol_recos docstring)
-        "www.etmoney.com": 2.5,         # ETMoney soft-blocks faster steady-state scraping (mf_holdings_scrape)
-    },
-    "user_agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36",
-    # Full desktop-browser UA for sites that gate on it (Tickertape pages, BSE,
-    # Screener, ETMoney). Moneycontrol keeps its own WAF-tuned header set.
-    "browser_user_agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                           "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"),
-}
-
-# ── LLM models (2026-07-21 cost optimization) ──
-# regulatory_deep_model is ~60% of daily Claude spend (~$1.05/day est. of
-# ~$1.70 total). Flip to "claude-haiku-4-5-20251001" ONLY after
-# `python -m tools.compare_reg_models` reports ≥90% agreement vs Sonnet on
-# direction + is_regulatory (needs API credits). Spend is tracked in the
-# `llm_usage` table (db.log_llm_usage).
-LLM = {
-    "regulatory_deep_model": "claude-sonnet-4-6",
-}
+# ── Hosts (API politeness + LLM models) live in hosts.HOSTS (plan 0015 Phase 2) ──
+# LLM is a derived alias kept only for tools/compare_reg_models.py (outside the
+# Phase 2 change set); new code reads hosts.HOSTS["anthropic"]["models"].
+from hosts import HOSTS as _HOSTS  # noqa: E402
+LLM = {"regulatory_deep_model": _HOSTS["anthropic"]["models"]["regulatory_deep"]}
 
 # ── Screener Filters ──
 

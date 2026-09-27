@@ -8,7 +8,7 @@ Guardrails:
   - Validates article has title and published_at
   - Entity matching against full 2,448 stock universe (not just Nifty 500)
   - Skips articles older than 7 days (stale)
-  - Rate-limited: 1 request per feed
+  - Rate-limited: 1 request per feed, paced per host by the door (hosts.HOSTS)
 
 Reads: RSS feeds (ET, LiveMint, MoneyControl)
 Writes: news_articles, news_article_stocks
@@ -21,14 +21,13 @@ Usage:
 import argparse
 import hashlib
 import re
-import time
 from datetime import datetime, timedelta
 
 import feedparser
 import pandas as pd
 
-from config import API
 from db import read_sql, insert_df
+from sources import _http
 
 # RSS feed URLs
 FEEDS = {
@@ -147,7 +146,8 @@ def fetch_news(dry_run=False):
             continue
 
         try:
-            feed = feedparser.parse(url)
+            with _http.pace(url):   # feedparser does its own HTTP; the door paces it
+                feed = feedparser.parse(url)
             entries = feed.entries
 
             if not entries:
@@ -209,8 +209,6 @@ def fetch_news(dry_run=False):
 
         except Exception as e:
             print(f"ERROR: {e}")
-
-        time.sleep(API["min_gap"])  # ≥2s between feeds (CLAUDE.md; was 1s)
 
     print(f"\nTotal: {total_articles} new articles, {total_links} stock links")
     return total_articles

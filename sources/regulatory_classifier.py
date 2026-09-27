@@ -25,13 +25,13 @@ from datetime import datetime
 import pandas as pd
 
 from db import read_sql, get_db, insert_df, upsert_df, log_llm_usage
-from config import LLM
+from hosts import HOSTS
 
-# Cost-efficient: Haiku for pre-filter; deep-classify model is config-driven
-# (config.LLM["regulatory_deep_model"] — the ~60%-of-spend lever; downgrade to
-# Haiku only after tools/compare_reg_models passes its agreement gate).
-HAIKU_MODEL = "claude-haiku-4-5-20251001"
-SONNET_MODEL = LLM["regulatory_deep_model"]
+# Cost-efficient: Haiku for pre-filter; the deep-classify model is the ~60%-of-spend
+# lever (hosts.HOSTS["anthropic"]["models"]["regulatory_deep"]; downgrade to Haiku
+# only after tools/compare_reg_models passes its agreement gate).
+HAIKU_MODEL = HOSTS["anthropic"]["models"]["regulatory_prefilter"]
+SONNET_MODEL = HOSTS["anthropic"]["models"]["regulatory_deep"]
 
 PREFILTER_PROMPT = """Classify this Indian financial news headline+summary.
 Is this about government regulation, policy, court orders, RBI/SEBI decisions,

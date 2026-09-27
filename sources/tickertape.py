@@ -35,11 +35,9 @@ import pandas as pd
 # Add v1 scripts to path for Tickertape library
 sys.path.insert(0, str(Path.home() / "alpha-signal" / "scripts"))
 
-from config import API, PROJECT_ROOT
+from config import PROJECT_ROOT
 from db import read_sql, upsert_df
-from sources._http import run_harvester
-
-DELAY = API["min_gap"]  # 2 seconds
+from sources._http import host, run_harvester
 CHECKPOINT_EVERY = 200
 CHECKPOINT_FILE = PROJECT_ROOT / "output" / "tickertape_harvest_log.json"
 
@@ -90,7 +88,7 @@ def _harvest(sids, key, label, table, fetch_raw, to_frame):
         return n
 
     _, _, total = run_harvester(sids[start_idx:], fetch, write, flush_every=CHECKPOINT_EVERY,
-                                label=label, delay=DELAY)
+                                label=label, host="tickertape")   # Bharat_sm_data, paced by the door
     checkpoint[key] = len(sids)
     _save_checkpoint(checkpoint)
     print(f"    Done: {total} rows")
@@ -265,7 +263,8 @@ def compute(data_type=None, limit=None, dry_run=False):
 
     if dry_run:
         print(f"  Would fetch income + BS + CF for {len(sids)} stocks")
-        print(f"  Estimated time: ~{len(sids) * 3 * DELAY / 60:.0f} min (3 calls × {DELAY}s delay)")
+        gap = host("tickertape")[1]["gap"]
+        print(f"  Estimated time: ~{len(sids) * 3 * gap / 60:.0f} min (3 calls × {gap}s gap)")
         return 0
 
     client = _get_client()

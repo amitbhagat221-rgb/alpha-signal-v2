@@ -28,8 +28,9 @@ from datetime import date as _date
 
 
 from db import read_sql, get_db, log_llm_usage
+from hosts import HOSTS
 
-SONNET_MODEL = "claude-sonnet-4-6"
+SONNET_MODEL = HOSTS["anthropic"]["models"]["news_brief"]
 
 BRIEF_PROMPT = """You are writing the daily intelligence brief for one Indian investor / market-aware reader.
 Their top interest areas are Indian markets, macro policy, AI/tech, and global economy.

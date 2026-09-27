@@ -33,7 +33,6 @@ Usage:
 """
 
 import argparse
-import time
 from datetime import date, timedelta
 
 import pandas as pd
@@ -41,7 +40,7 @@ import pandas as pd
 from db import get_db, insert_df, read_sql
 from sources import _http
 
-DELAY_SEC = 2.0  # NSE 2-second floor
+# Each nselib call is paced by the host door (_http.pace("nse"), 2s floor).
 
 # Instrument-type taxonomy in the UDiFF bhavcopy (FinInstrmTp):
 #   STO = stock option · IDO = index option · STF = stock future · IDF = index future
@@ -114,7 +113,8 @@ def pull_fno_bhav(trade_date, sid_map=None):
         sid_map = _http.sid_map()  # index underlyings (NIFTY…) → None, stored symbol-keyed
     d_str = trade_date.strftime("%d-%m-%Y") if hasattr(trade_date, "strftime") else str(trade_date)
     try:
-        raw = dv.fno_bhav_copy(trade_date=d_str)
+        with _http.pace("nse"):
+            raw = dv.fno_bhav_copy(trade_date=d_str)
     except Exception:
         # "No data" for non-trading days arrives as an exception too; the caller
         # distinguishes by counting how many calls erred vs. how many were tried.
@@ -163,7 +163,6 @@ def backfill_fno_bhav(months=6):
             total += n
             if n:
                 print(f"  fno_bhav {d.isoformat()}: ✅ {n} new rows")
-        time.sleep(DELAY_SEC)
     attempted = n_ok + n_err
     if attempted and n_ok == 0:
         raise RuntimeError(
@@ -195,7 +194,6 @@ def compute(lookback_days=5):
             total += n
             if n:
                 print(f"  fno_bhav {d.isoformat()}: ✅ {n} new rows")
-        time.sleep(DELAY_SEC)
     if (n_ok + n_err) and n_ok == 0 and n_err == lookback_days:
         raise RuntimeError(
             f"fno_bhav daily: all {n_err} NSE calls erred over {lookback_days}d — endpoint unreachable")

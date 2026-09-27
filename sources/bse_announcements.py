@@ -21,8 +21,8 @@ survivorship-free by construction. Metadata only (no PDF download — transcript
 handles selective PDF fetch). Idempotent: INSERT OR IGNORE on news_id, lock-retry on
 the write. Universe-join (scrip_cd → sid) is DEFERRED to a static scrip-master map.
 
-Rate-limited per CLAUDE.md: warmed session, browser headers, 2-3s between pages,
-single-threaded. Same IP-block hygiene as transcripts_pull.
+Rate-limited by the host door (hosts.HOSTS["bse_api"]): warmed session, browser
+headers, 2-3s between calls, single-threaded. Same IP-block hygiene as transcripts_pull.
 
 Usage:
     python -m sources.bse_announcements --days 7              # recent 7 days (daily refresh)
@@ -32,26 +32,18 @@ Usage:
 """
 
 import argparse
-import random
 import sqlite3
 import sys
 import time
 from datetime import date, datetime, timedelta
 
 
-from config import API as NET  # module-level API below is the BSE endpoint URL
 from db import get_db
-from sources._http import warm_session
+from hosts import HOSTS
+from sources import _http
 
 API = "https://api.bseindia.com/BseIndiaAPI/api/AnnSubCategoryGetData/w"
 WARM_URL = "https://www.bseindia.com/corporates/ann.html"
-HEADERS = {
-    "User-Agent": NET["browser_user_agent"],
-    "Referer": "https://www.bseindia.com/",
-    "Origin": "https://www.bseindia.com",
-    "Accept": "application/json, text/plain, */*",
-}
-DELAY_BETWEEN_PAGES = (2.0, 3.0)   # was (1.5, 3.0) — floor below CLAUDE.md's 2s
 PAGE_SIZE = 50
 BACKFILL_START = "2018-01-01"
 
@@ -96,7 +88,8 @@ def _fetch_page(session, frm, to, pageno):
     params = {"pageno": pageno, "strCat": "-1", "subcategory": "-1",
               "strPrevDate": frm, "strToDate": to, "strSearch": "P",
               "strscrip": "", "strType": "C"}
-    r = session.get(API, params=params, timeout=30)
+    r = _http.polite_request("GET", API, session=session, check=False, retries=0,
+                             params=params, timeout=30)
     j = r.json()
     if not isinstance(j, dict):
         return [], 0
@@ -138,7 +131,6 @@ def harvest_range(session, frm_iso, to_iso, dry_run=False):
     n_pages = max(1, -(-total // PAGE_SIZE))  # ceil
     all_rows = list(rows)
     for pg in range(2, n_pages + 1):
-        time.sleep(random.uniform(*DELAY_BETWEEN_PAGES))
         try:
             more, _ = _fetch_page(session, frm, to, pg)
         except Exception as e:
@@ -175,7 +167,8 @@ def main():
     args = p.parse_args()
 
     today = date.today().isoformat()
-    session = warm_session(WARM_URL, headers=HEADERS)   # BSE bot-gate cookie
+    # BSE bot-gate cookie, warmed with the API host's headers (Origin + JSON Accept)
+    session = _http.warm_session(WARM_URL, headers=HOSTS["bse_api"]["headers"])
 
     if args.smoke:
         seen, _ = harvest_range(session, (date.today() - timedelta(days=1)).isoformat(), today, dry_run=True)
@@ -201,12 +194,10 @@ def main():
         except Exception as e:
             n_err += 1
             print(f"  [{d}] ERROR {type(e).__name__}: {str(e)[:70]}", flush=True)
-            time.sleep(random.uniform(*DELAY_BETWEEN_PAGES))
             continue
         tot_seen += seen; tot_new += new
         if seen or i % 30 == 0:   # skip silent weekend/holiday spam, but heartbeat every 30 days
             print(f"  [{i:4d}/{len(days)}] {d}: {seen:>4} seen, {new:>4} new (cum new={tot_new})", flush=True)
-        time.sleep(random.uniform(*DELAY_BETWEEN_PAGES))
     print(f"\nDone. {frm}..{to}  seen={tot_seen} new_rows={tot_new}")
     # Weekends/holidays return 0 rows cleanly; an ERROR on EVERY day means the
     # endpoint is broken/blocked. (Since ~2026-09-19 each call returns a non-JSON

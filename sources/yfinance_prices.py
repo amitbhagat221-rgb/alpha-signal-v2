@@ -30,6 +30,7 @@ import pandas as pd
 
 
 from db import read_sql, insert_df
+from sources import _http
 
 DEFAULT_DAYS = 30
 
@@ -57,12 +58,14 @@ def _download(symbols, period):
     prices. Replaces a Ticker().history() call per symbol + a 1.5s sleep each;
     same fields (auto_adjust=False → raw OHLC). threads=False keeps yfinance's
     per-symbol requests sequential. Rows with no Close (a symbol absent on a date
-    another symbol traded) are dropped — per-ticker history() never had them."""
+    another symbol traded) are dropped — per-ticker history() never had them.
+    Paced as one call to the yahoo host (the .NS and .BO batches ≥2s apart)."""
     import yfinance as yf
     if not symbols:
         return {}
-    data = yf.download(symbols, period=period, auto_adjust=False, group_by="ticker",
-                       progress=False, threads=False)
+    with _http.pace("yahoo"):
+        data = yf.download(symbols, period=period, auto_adjust=False, group_by="ticker",
+                           progress=False, threads=False)
     out = {}
     for sym in symbols:
         if isinstance(data.columns, pd.MultiIndex):

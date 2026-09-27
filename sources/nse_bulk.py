@@ -27,13 +27,11 @@ from datetime import date
 
 import pandas as pd
 
-from config import API
 from db import insert_df
 from sources import _http
 
 BULK_URL = "https://archives.nseindia.com/content/equities/bulk.csv"
 BLOCK_URL = "https://archives.nseindia.com/content/equities/block.csv"
-HEADERS = {"User-Agent": API["user_agent"]}
 
 
 def _parse_deals(csv_text, deal_type, deal_date=None):
@@ -124,7 +122,7 @@ def fetch_today(dry_run=False):
 
     for url, deal_type in [(BULK_URL, "bulk"), (BLOCK_URL, "block")]:
         try:
-            resp = _http.polite_get(url, headers=HEADERS)
+            resp = _http.polite_get(url)
             if resp is None:
                 problems.append(f"{deal_type}: HTTP 404")
                 print(f"  {deal_type}: HTTP 404")

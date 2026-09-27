@@ -41,11 +41,8 @@ import pandas as pd
 # v2's tickertape.py adds v1 scripts path for the Bharat_sm_data library.
 sys.path.insert(0, str(Path.home() / "alpha-signal" / "scripts"))
 
-from config import API
 from db import read_sql, upsert_df
-from sources._http import run_harvester
-
-DELAY = API["min_gap"]
+from sources._http import host, run_harvester
 
 
 def _get_client():
@@ -98,7 +95,8 @@ def compute(limit=None, dry_run=False):
     print(f"Tickertape Shareholding: {total} stocks")
 
     if dry_run:
-        print(f"  Estimated time: ~{total * DELAY / 60:.0f} min ({DELAY}s × {total} stocks)")
+        gap = host("tickertape")[1]["gap"]
+        print(f"  Estimated time: ~{total * gap / 60:.0f} min ({gap}s × {total} stocks)")
         return 0
 
     client = _get_client()
@@ -139,7 +137,7 @@ def compute(limit=None, dry_run=False):
     # Errors (the old bare `except: errors += 1`) are counted and logged by
     # run_harvester, which RAISES if no stock returned any shareholding rows.
     _, _, saved = run_harvester(stocks.itertuples(index=False, name=None), fetch, write,
-                                label="shareholding", delay=DELAY)
+                                label="shareholding", host="tickertape")
 
     oor = len(_OUT_OF_RANGE_LOG)
     print(f"Done: {saved} rows. Out-of-range values dropped: {oor}.")

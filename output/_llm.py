@@ -5,11 +5,17 @@ generators share (stock dossiers, sector dossiers, tools/compare_reg_models).
 Each call is logged to llm_usage via db.log_llm_usage(step, model, usage),
 exactly as the inline copies did. sources/regulatory_classifier.py keeps its
 own client code (batch API, owned by another session).
+
+Model ids by purpose live in the `anthropic` host (hosts.HOSTS, plan 0015
+Phase 2) — callers pass MODELS[<purpose>]. No call/spend cap exists yet.
 """
 
 import json
 
 from db import log_llm_usage
+from hosts import HOSTS
+
+MODELS = HOSTS["anthropic"]["models"]   # purpose → Claude model id
 
 
 def llm_text(prompt, model, step, max_tokens=1024, client=None):

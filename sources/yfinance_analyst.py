@@ -44,11 +44,8 @@ from datetime import date as _date, datetime, timedelta, timezone
 import pandas as pd
 
 
-from config import API
 from db import read_sql, upsert_df
 from sources._http import run_harvester
-
-DELAY = API["min_gap"]   # ≥2s between tickers (CLAUDE.md; was 0.3s)
 SOURCE = "yfinance"
 
 
@@ -393,7 +390,8 @@ def compute(limit=None, ticker=None, tier=None, snapshot=False, dry_run=False):
 
     # RAISES if not one attempted stock came back with a PT — Yahoo blocked us or
     # the .info shape changed (was SUCCESS/0 before). Mid-run flushes every 200.
-    n_with_data, _, _ = run_harvester(todo, fetch, write, label="yfinance analyst", delay=DELAY)
+    # Each ticker's yfinance calls run as one paced call to the yahoo host (≥2s apart).
+    n_with_data, _, _ = run_harvester(todo, fetch, write, label="yfinance analyst", host="yahoo")
 
     # Backstop: null + flag any stored implausible PT (stale/pre-gate garbage
     # the per-fetch gate above can't see). Skip on single-ticker smoke runs.

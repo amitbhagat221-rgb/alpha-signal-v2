@@ -35,8 +35,9 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from db import read_sql, get_db, log_llm_usage
+from hosts import HOSTS
 
-HAIKU_MODEL = "claude-haiku-4-5-20251001"
+HAIKU_MODEL = HOSTS["anthropic"]["models"]["news_classify"]
 
 # ─────────────────────── Topic taxonomy ───────────────────────
 # Top-level "sections" (Inshorts-style top-tabs). Each is broad on purpose
