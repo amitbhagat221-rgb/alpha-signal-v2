@@ -60,11 +60,13 @@ def apply_adjustments(prices, adjustments, as_of):
 
 
 def load_prices(as_of=None):
-    """[sid, date, close, adj_close] for every sid, ordered by sid, date — close > 0,
-    ≤ as_of when given (default: all history, adjusted as of today)."""
+    """[sid, date, close, delivery_pct, adj_close] for every sid, ordered by sid, date —
+    close > 0, ≤ as_of when given (default: all history, adjusted as of today). Same
+    rows the PIT backtest loads (tools/reconstruct_pit.load_raw)."""
     date_clause = f"AND date <= '{as_of}'" if as_of else ""
     prices = read_sql(
-        f"SELECT sid, date, close FROM stock_prices WHERE close > 0 {date_clause} ORDER BY sid, date"
+        f"SELECT sid, date, close, delivery_pct FROM stock_prices WHERE close > 0 {date_clause} "
+        "ORDER BY sid, date"
     )
     adjustments = read_sql("SELECT sid, ex_date, factor FROM corporate_adjustments ORDER BY sid, ex_date")
     return apply_adjustments(prices, adjustments, as_of or pd.Timestamp.today().date())

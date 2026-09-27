@@ -17,7 +17,6 @@ Usage:
 
 import pandas as pd
 
-from db import read_sql
 
 
 WINDOW_DAYS = 90
@@ -52,13 +51,14 @@ def delivery_anomaly_z(prices: pd.DataFrame, window: int = WINDOW_DAYS) -> pd.Da
     return pd.DataFrame(rows, columns=["sid", "delivery_anomaly_z"])
 
 
-def compute_delivery_anomaly_z() -> pd.DataFrame:
-    """Live: today's value per sid from the last ~180 calendar days of prices."""
-    prices = read_sql(
-        "SELECT sid, date, delivery_pct FROM stock_prices "
-        "WHERE date >= date('now','-180 days')"
-    )
-    return delivery_anomaly_z(prices)
+def compute_delivery_anomaly_z(prices: pd.DataFrame | None = None) -> pd.DataFrame:
+    """Live: today's value per sid over the SAME rows the PIT backtest uses — full
+    close > 0 history (signals._prices.load_prices). A 180-calendar-day window used to
+    drop thin traders whose last 90 valid rows reach further back (plan 0015 Phase 3)."""
+    if prices is None:
+        from signals._prices import load_prices
+        prices = load_prices()
+    return delivery_anomaly_z(prices[["sid", "date", "delivery_pct"]])
 
 
 if __name__ == "__main__":

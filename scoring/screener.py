@@ -159,7 +159,7 @@ def _load_signals(return_prices=False):
 
     momentum = compute_momentum(prices)
     earnings_yield = compute_earnings_yield()
-    delivery_anomaly = compute_delivery_anomaly_z()
+    delivery_anomaly = compute_delivery_anomaly_z(prices)
 
     # Sector tilt (ADR 0041) — per-stock = its GICS sector's 6m-basket-momentum +
     # macro_score z-ensemble. Computed inline (no table), like momentum/EY/delivery.
