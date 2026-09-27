@@ -37,9 +37,8 @@ import json
 import sys
 from datetime import datetime, timezone
 
-import requests
-
 from db import get_db, read_sql
+from sources import _http
 
 UPSTOX_URL = "https://assets.upstox.com/market-quote/instruments/exchange/complete.json.gz"
 LISTOFSCRIPS_URL = (
@@ -79,7 +78,7 @@ def fetch_upstox():
       bse_sym2isin {bse_symbol: isin}           — BSE_EQ trading_symbol → isin (catches BSE-primary names)
       nse_isin2sym {isin: nse_symbol}           — reverse, for the stored nse_symbol column
     """
-    r = requests.get(UPSTOX_URL, timeout=120)
+    r = _http.polite_request("GET", UPSTOX_URL, check=False, retries=0, timeout=120)
     r.raise_for_status()
     data = json.load(gzip.open(io.BytesIO(r.content)))
     bse_scrips, nse_sym2isin, bse_sym2isin, nse_isin2sym = {}, {}, {}, {}
@@ -109,7 +108,7 @@ def fetch_upstox():
 def fetch_listofscrips():
     """Optional delisted supplement → {scrip_cd: (isin, name, status)}. Non-fatal."""
     try:
-        r = requests.get(LISTOFSCRIPS_URL, timeout=60)
+        r = _http.polite_request("GET", LISTOFSCRIPS_URL, check=False, retries=0, timeout=60)
         r.raise_for_status()
         out = {}
         reader = csv.DictReader(io.StringIO(r.text))

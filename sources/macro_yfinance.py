@@ -23,6 +23,7 @@ import pandas as pd
 import yfinance as yf
 
 from db import get_db, upsert_df, insert_df, read_sql
+from sources import _http
 
 # Ticker registry: indicator_id → (yf_ticker, name, category, unit)
 TICKERS = {
@@ -90,8 +91,9 @@ def _fetch_all(start_date, end_date):
     leaving exactly what a single-ticker download returned."""
     symbols = [t for t, _, _, _ in TICKERS.values()]
     try:
-        data = yf.download(symbols, start=start_date, end=end_date, progress=False,
-                           auto_adjust=True, group_by="ticker", threads=False)
+        with _http.pace("yahoo"):
+            data = yf.download(symbols, start=start_date, end=end_date, progress=False,
+                               auto_adjust=True, group_by="ticker", threads=False)
     except Exception as e:
         print(f"  Error fetching batch: {e}")
         return {ind_id: pd.DataFrame() for ind_id in TICKERS}

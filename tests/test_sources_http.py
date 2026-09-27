@@ -76,10 +76,88 @@ def test_polite_get_raises_after_retries_exhausted():
     assert len(s.calls) == 3
 
 
-def test_host_gap_from_config():
-    from config import API
-    assert API["min_gap"] >= 2.0
-    assert all(g >= API["min_gap"] for g in API["host_min_gap"].values())
+def test_polite_get_uses_host_gap_and_headers(monkeypatch):
+    """No min_gap/headers passed → the declared host's gap and headers apply;
+    two netlocs of one host share a single gap."""
+    from hosts import HOSTS
+    sent = []
+
+    def fake_get(url, headers=None, params=None, timeout=None):
+        sent.append((time.monotonic(), headers))
+        return _resp(200)
+
+    monkeypatch.setattr(_http.requests, "get", fake_get)
+    monkeypatch.setitem(HOSTS, "t_host", {"netlocs": ["a.t.test", "b.t.test"], "gap": 0.3,
+                                          "headers": {"User-Agent": "T"}})
+    monkeypatch.setattr(_http, "_NETLOC_HOST", {**_http._NETLOC_HOST,
+                                                "a.t.test": "t_host", "b.t.test": "t_host"})
+    _http.polite_get("https://a.t.test/1")
+    _http.polite_get("https://b.t.test/2")
+    assert sent[1][0] - sent[0][0] >= 0.29
+    assert sent[0][1] == {"User-Agent": "T"}
+
+
+def test_polite_request_check_false_returns_raw_response():
+    s = FakeSession(_resp(302, {"location": "/login/"}))
+    r = _http.polite_request("GET", "https://a.test/", session=s, min_gap=0, check=False)
+    assert r.status_code == 302 and len(s.calls) == 1
+
+
+def test_polite_request_check_false_still_retries_transport_errors():
+    s = FakeSession(requests.ConnectionError("c"), _resp(500))
+    r = _http.polite_request("GET", "https://a.test/", session=s, min_gap=0, check=False, retries=1)
+    assert r.status_code == 500 and len(s.calls) == 2
+
+
+@pytest.fixture
+def vclock(monkeypatch):
+    """Virtual monotonic clock: sleep() advances it instantly."""
+    now = [1000.0]
+    monkeypatch.setattr(_http.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(_http.time, "sleep", lambda s: now.__setitem__(0, now[0] + max(s, 0)))
+    return now
+
+
+def test_pace_spaces_library_calls(vclock):
+    stamps = []
+    for _ in range(2):
+        with _http.pace("t_pace_host.test"):
+            stamps.append(time.monotonic())
+    assert stamps[1] - stamps[0] == 2.0   # undeclared → DEFAULT gap
+
+
+def test_pace_stamps_end_even_when_the_call_raises():
+    with pytest.raises(ValueError):
+        with _http.pace("https://x.test/"):
+            raise ValueError("boom")
+    assert "x.test" in _http._LAST_CALL
+
+
+def test_host_resolution():
+    assert _http.host("https://api.bseindia.com/x?y=1")[0] == "bse_api"
+    assert _http.host("www.screener.in")[0] == "screener"            # bare netloc
+    key, entry = _http.host("https://unknown.example/")
+    assert key == "unknown.example" and entry["gap"] == 2.0
+    with pytest.raises(KeyError):
+        _http.host("yahooo")                                          # typo'd host name
+
+
+def test_time_budget(monkeypatch):
+    now = [100.0]
+    monkeypatch.setattr(_http.time, "monotonic", lambda: now[0])
+    over = _http.time_budget("moneycontrol")          # host default: 90 min
+    now[0] += 89 * 60
+    assert not over()
+    now[0] += 2 * 60
+    assert over()
+    assert not _http.time_budget("moneycontrol", None)()   # None = no budget
+
+
+def test_run_harvester_paces_per_host(vclock):
+    stamps = []
+    _http.run_harvester(range(3), lambda i: stamps.append(time.monotonic()) or [i],
+                        lambda rows: None, label="t", host="t_harvest_host.test")
+    assert [b - a for a, b in zip(stamps, stamps[1:])] == [2.0, 2.0]
 
 
 def test_sid_map_is_cached(monkeypatch):

@@ -29,12 +29,10 @@ from io import StringIO
 import numpy as np
 import pandas as pd
 
-from config import API
 from db import insert_df, read_sql
 from sources import _http
 
 BHAVCOPY_URL = "https://archives.nseindia.com/products/content/sec_bhavdata_full_{date}.csv"
-HEADERS = {"User-Agent": API["user_agent"]}
 
 # Validation thresholds
 MIN_ROWS = 1000           # typical trading day has 1500+ EQ rows
@@ -58,7 +56,7 @@ def _fetch_date(target_date):
     url = BHAVCOPY_URL.format(date=date_str)
 
     try:
-        resp = _http.polite_get(url, headers=HEADERS, timeout=30)
+        resp = _http.polite_get(url, timeout=30)
     except Exception as e:   # a bad day must SKIP, not fail this critical step
         return None, [f"{type(e).__name__}: {e}"]
     if resp is None:

@@ -6,7 +6,7 @@ aggregate at 98% LARGE / 92% MID coverage with better fields (mean/median/
 high/low/recommendation_key) and no WAF risk. See sources/yfinance_analyst.py
 and HANDOFF 2026-05-22. This Moneycontrol scraper is kept for a future Phase
 where we want per-broker dispersion + PDF report links. When resuming:
-  - Bump DELAY to 12s (the previous 2s tripped the WAF)
+  - Keep the 12s host gap (hosts.HOSTS["moneycontrol"]; 2s tripped the WAF)
   - Run --discover-only first to populate stocks.mc_slug for the universe
   - Then run incrementally; full universe = ~10 hours at 12s/stock
 
@@ -41,7 +41,6 @@ Usage:
 
 import argparse
 import re
-import time
 from datetime import date as _date, datetime
 
 import pandas as pd
@@ -49,30 +48,19 @@ import requests
 from bs4 import BeautifulSoup
 
 
-from config import API
 from db import get_db, read_sql, upsert_df
+from hosts import HOSTS
+from sources import _http
 from sources._http import polite_get
 
-DELAY = API["host_min_gap"]["www.moneycontrol.com"]   # 12s — 2s tripped the WAF (docstring)
-# Pipeline runs daily with a time budget, stalest-first (stocks.mc_checked_at).
-# The old weekly full sweep took ~18h and held the harvest lock all Sunday,
-# starving run_daily_forward.sh. 90 min/day ≈ 300 stocks → full cycle ~8-9 days;
-# broker PTs are episodic, so that cadence loses nothing.
-PIPELINE_BUDGET_MIN = 90
+# Politeness lives in hosts.HOSTS["moneycontrol"]: 12s between calls (2s tripped
+# the WAF), WAF-tuned browser headers (Referer pin + JSON-advertising Accept), and
+# the daily time budget — pipeline runs stalest-first (stocks.mc_checked_at). The
+# old weekly full sweep took ~18h and held the harvest lock all Sunday, starving
+# run_daily_forward.sh. 90 min/day ≈ 300 stocks → full cycle ~8-9 days; broker
+# PTs are episodic, so that cadence loses nothing.
 TIMEOUT = 15
 MAX_RETRIES = 2
-# Browser-like headers. The autosuggest endpoint 403s if Accept doesn't
-# advertise JSON, and 403s if we look too much like a bot. The Referer pin
-# matters — without it the WAF blocks.
-HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-    ),
-    "Accept": "*/*",
-    "Accept-Language": "en-US,en;q=0.9",
-    "Referer": "https://www.moneycontrol.com/",
-}
 
 QUOTE_URL_TEMPLATE = "https://www.moneycontrol.com{slug}"
 SEARCH_URL = "https://www.moneycontrol.com/mccode/common/autosuggestion_solr.php"
@@ -157,7 +145,7 @@ def _autosuggest(ticker):
     """
     params = {"query": ticker, "type": 1, "format": "json"}
     try:
-        r = polite_get(SEARCH_URL, headers=HEADERS, params=params, timeout=TIMEOUT, retries=0)
+        r = polite_get(SEARCH_URL, params=params, timeout=TIMEOUT, retries=0)
         if r is None or not r.text.strip():
             return None
         # Strip JSONP wrapper if present.
@@ -223,11 +211,11 @@ def discover_slug_for(sid, ticker):
 
 
 def _fetch_html(slug):
-    """GET the Moneycontrol quote page, or None on any failure. polite_get keeps
+    """GET the Moneycontrol quote page, or None on any failure. The door keeps
     ≥12s between Moneycontrol calls and retries only 429/5xx/timeouts (a 403 from
     the WAF is not re-hit 2s later any more)."""
     try:
-        r = polite_get(QUOTE_URL_TEMPLATE.format(slug=slug), headers=HEADERS,
+        r = polite_get(QUOTE_URL_TEMPLATE.format(slug=slug),
                        timeout=TIMEOUT, retries=MAX_RETRIES)
     except requests.RequestException:
         return None
@@ -366,9 +354,11 @@ def aggregate_consensus():
 
 
 def compute(limit=None, ticker=None, discover_only=False, aggregate_only=False, dry_run=False,
-            max_minutes=PIPELINE_BUDGET_MIN):
+            max_minutes=_http.HOST_BUDGET):
     """Pipeline entry point. Visits stocks least-recently-checked first and
-    stops after `max_minutes` (None = no budget, full sweep)."""
+    stops after `max_minutes` (default: the host's budget_min; None = no budget,
+    full sweep). Pacing is the host door's alone (12s per call) — no extra
+    sleeps between stocks."""
     _ensure_schema()
 
     if aggregate_only:
@@ -396,12 +386,14 @@ def compute(limit=None, ticker=None, discover_only=False, aggregate_only=False, 
     no_recos = 0
     n_recos_total = 0
     gate_quarantined = 0   # Plan 0007 Phase 2 — identity-gate failures (WRONG_ENTITY)
-    deadline = time.monotonic() + max_minutes * 60 if max_minutes else None
+    if max_minutes is _http.HOST_BUDGET:
+        max_minutes = HOSTS["moneycontrol"]["budget_min"]
+    over_budget = _http.time_budget("moneycontrol", max_minutes)
     checked = []           # sids visited this run → stocks.mc_checked_at
     n_visited = 0
 
     for i, (sid, ticker_str, name_str, slug) in enumerate(stocks.itertuples(index=False), 1):
-        if deadline and time.monotonic() > deadline:
+        if over_budget():
             print(f"  budget of {max_minutes} min reached after {i - 1} stocks — "
                   f"rest continue next run (stalest-first)", flush=True)
             break
@@ -409,7 +401,6 @@ def compute(limit=None, ticker=None, discover_only=False, aggregate_only=False, 
         n_visited = i
         if not slug:
             slug = discover_slug_for(sid, ticker_str)
-            time.sleep(DELAY)
             if not slug:
                 no_slug += 1
 
@@ -423,7 +414,6 @@ def compute(limit=None, ticker=None, discover_only=False, aggregate_only=False, 
                   + (f" · recos={n_recos_total}" if not discover_only else ""), flush=True)
 
         if discover_only:
-            time.sleep(DELAY)
             continue
 
         recos = fetch_for_sid(sid, slug, fetched_at)
@@ -477,8 +467,6 @@ def compute(limit=None, ticker=None, discover_only=False, aggregate_only=False, 
             _mark_checked(checked)
             checked = []
 
-        time.sleep(DELAY)
-
     if not dry_run:
         if buf:
             upsert_df(pd.DataFrame(buf), "broker_recommendations")
@@ -519,7 +507,8 @@ if __name__ == "__main__":
                         help="Rebuild analyst_consensus from existing recos")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--max-minutes", type=float, default=None,
-                        help=f"Time budget (pipeline uses {PIPELINE_BUDGET_MIN}); default: full sweep")
+                        help=f"Time budget (pipeline uses {HOSTS['moneycontrol']['budget_min']}); "
+                             "default: full sweep")
     args = parser.parse_args()
     compute(limit=args.limit, ticker=args.ticker,
             discover_only=args.discover_only,

@@ -44,16 +44,16 @@ from __future__ import annotations
 
 import argparse
 import os
-import time
 from datetime import date, datetime, timedelta
 
 import pandas as pd
 
-from config import API
 from db import get_db, read_sql
+from sources import _http
 
 TOKEN_CACHE = os.path.expanduser("~/.kite_access_token.json")  # {date, access_token}
-HIST_RATE_SLEEP = API["min_gap"]   # CLAUDE.md 2s floor (Kite itself allows ~3 req/s)
+# Every Kite call (login, instruments, historical bars) goes through the host door
+# as _http.pace("kite"): CLAUDE.md 2s floor (Kite itself allows ~3 req/s).
 LOGIN_URL = "https://kite.zerodha.com/api/login"
 TWOFA_URL = "https://kite.zerodha.com/api/twofa"
 
@@ -102,20 +102,23 @@ def _auto_request_token(api_key):
     import requests
 
     s = requests.Session()
-    r = s.post(LOGIN_URL, data={"user_id": _env("KITE_USER_ID"),
-                                "password": _env("KITE_PASSWORD")})
+    with _http.pace("kite"):
+        r = s.post(LOGIN_URL, data={"user_id": _env("KITE_USER_ID"),
+                                    "password": _env("KITE_PASSWORD")})
     r.raise_for_status()
     request_id = r.json()["data"]["request_id"]
-    totp = pyotp.TOTP(_env("KITE_TOTP_SECRET")).now()
-    r2 = s.post(TWOFA_URL, data={"user_id": _env("KITE_USER_ID"),
-                                 "request_id": request_id, "twofa_value": totp})
+    with _http.pace("kite"):   # TOTP minted AFTER the gap wait, so it can't expire in it
+        totp = pyotp.TOTP(_env("KITE_TOTP_SECRET")).now()
+        r2 = s.post(TWOFA_URL, data={"user_id": _env("KITE_USER_ID"),
+                                     "request_id": request_id, "twofa_value": totp})
     r2.raise_for_status()
     # Hitting the connect login URL now 302-redirects to the app's registered
     # redirect_url with ?request_token=…. If that URL isn't a live server the
     # request errors — we parse the attempted URL for the token either way.
     try:
-        resp = s.get(f"https://kite.trade/connect/login?api_key={api_key}&v=3",
-                     allow_redirects=True)
+        with _http.pace("kite"):
+            resp = s.get(f"https://kite.trade/connect/login?api_key={api_key}&v=3",
+                         allow_redirects=True)
         m = re.search(r"request_token=([\w]+)", resp.url)
     except requests.exceptions.RequestException as e:
         attempted = getattr(getattr(e, "request", None), "url", "") or ""
@@ -141,7 +144,8 @@ def kite(request_token=None):
 
     if request_token is None:
         request_token = _auto_request_token(api_key)
-    data = kc.generate_session(request_token, api_secret=_env("KITE_API_SECRET"))
+    with _http.pace("kite"):
+        data = kc.generate_session(request_token, api_secret=_env("KITE_API_SECRET"))
     _cache_token(data["access_token"])
     kc.set_access_token(data["access_token"])
     return kc
@@ -153,7 +157,8 @@ def build_instrument_map(kc=None):
     """Map our universe (stocks.ticker) → Kite NSE equity instrument_token.
     Writes kite_instruments(sid, ticker, instrument_token, tradingsymbol). Returns n."""
     kc = kc or kite()
-    instruments = pd.DataFrame(kc.instruments("NSE"))
+    with _http.pace("kite"):
+        instruments = pd.DataFrame(kc.instruments("NSE"))
     eq = instruments[instruments["instrument_type"] == "EQ"][["tradingsymbol", "instrument_token"]]
     uni = read_sql("SELECT sid, ticker FROM stocks WHERE ticker IS NOT NULL")
     merged = uni.merge(eq, left_on="ticker", right_on="tradingsymbol", how="inner")
@@ -202,7 +207,8 @@ def backfill_bars(days=60, universe="fno", kc=None):
     total, n_ok, n_err = 0, 0, 0
     for _, row in toks.iterrows():
         try:
-            bars = kc.historical_data(int(row["instrument_token"]), frm, to, "minute")
+            with _http.pace("kite"):
+                bars = kc.historical_data(int(row["instrument_token"]), frm, to, "minute")
             recs = [(row["sid"], int(row["instrument_token"]), b["date"].isoformat(),
                      b["open"], b["high"], b["low"], b["close"], b["volume"]) for b in bars]
             with get_db() as conn:
@@ -213,7 +219,6 @@ def backfill_bars(days=60, universe="fno", kc=None):
         except Exception as e:
             n_err += 1
             print(f"  {row['ticker']}: {e}")
-        time.sleep(HIST_RATE_SLEEP)
     if n_ok == 0 and n_err:
         raise RuntimeError(f"kite backfill: all {n_err} calls failed — auth/endpoint issue")
     print(f"  kite_intraday_bars: {total} rows · {n_ok} ok · {n_err} err")

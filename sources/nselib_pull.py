@@ -36,19 +36,16 @@ Usage:
 """
 
 import argparse
-import time
 from datetime import date, timedelta
 
 import pandas as pd
 
-from config import API
 from db import get_db, insert_df, read_sql
 from sources import _http
 
-DELAY_SEC = 2.0  # NSE 2-second floor
-
+# Every nselib call runs inside _http.pace("nse") — the host door's 2s NSE floor,
+# shared with the direct www.nseindia.com calls below (JSON headers: hosts.HOSTS).
 NSE_HOME = "https://www.nseindia.com"
-NSE_JSON_HEADERS = {"User-Agent": API["user_agent"], "Accept": "application/json"}
 
 
 def _months_back(n_months):
@@ -100,15 +97,14 @@ def pull_bulk_deals(months=12):
         from_str = start.strftime("%d-%m-%Y")
         to_str = end.strftime("%d-%m-%Y")
         try:
-            df = cm.bulk_deal_data(from_date=from_str, to_date=to_str)
+            with _http.pace("nse"):
+                df = cm.bulk_deal_data(from_date=from_str, to_date=to_str)
         except Exception as e:
             print(f"  bulk {from_str}→{to_str}: ❌ {str(e)[:100]}")
-            time.sleep(DELAY_SEC)
             continue
 
         if df is None or df.empty:
             print(f"  bulk {from_str}→{to_str}: empty")
-            time.sleep(DELAY_SEC)
             continue
 
         # Normalize columns to bulk_deals schema
@@ -158,7 +154,6 @@ def pull_bulk_deals(months=12):
         else:
             print(f"  bulk {from_str}→{to_str}: 0 valid rows")
 
-        time.sleep(DELAY_SEC)
     return total
 
 
@@ -175,15 +170,14 @@ def pull_corporate_actions(months=24):
         from_str = start.strftime("%d-%m-%Y")
         to_str = end.strftime("%d-%m-%Y")
         try:
-            df = cm.corporate_actions_for_equity(from_date=from_str, to_date=to_str)
+            with _http.pace("nse"):
+                df = cm.corporate_actions_for_equity(from_date=from_str, to_date=to_str)
             n_ok += 1
         except Exception as e:
             n_err += 1
             print(f"  corp {from_str}→{to_str}: ❌ {str(e)[:100]}")
-            time.sleep(DELAY_SEC)
             continue
         if df is None or df.empty:
-            time.sleep(DELAY_SEC)
             continue
 
         df.columns = [c.strip() for c in df.columns]
@@ -225,7 +219,6 @@ def pull_corporate_actions(months=24):
             n = insert_df(pd.DataFrame(out_rows), "corporate_actions")
             total += n
             print(f"  corp {from_str}→{to_str}: ✅ {len(out_rows)} parsed → {n} new")
-        time.sleep(DELAY_SEC)
 
     # Silent-failure contract (CLAUDE.md): 0 NEW rows is normal (idempotent
     # INSERT OR IGNORE), but every chunk erroring means NSE was unreachable —
@@ -261,13 +254,12 @@ def pull_short_selling(months=24):
         from_str = start.strftime("%d-%m-%Y")
         to_str = end.strftime("%d-%m-%Y")
         try:
-            df = cm.short_selling_data(from_date=from_str, to_date=to_str)
+            with _http.pace("nse"):
+                df = cm.short_selling_data(from_date=from_str, to_date=to_str)
         except Exception as e:
             print(f"  short {from_str}→{to_str}: ❌ {str(e)[:100]}")
-            time.sleep(DELAY_SEC)
             continue
         if df is None or df.empty:
-            time.sleep(DELAY_SEC)
             continue
 
         df.columns = [c.strip() for c in df.columns]
@@ -295,7 +287,6 @@ def pull_short_selling(months=24):
             n = insert_df(pd.DataFrame(out_rows), "short_selling_data")
             total += n
             print(f"  short {from_str}→{to_str}: ✅ {len(out_rows)} parsed → {n} new")
-        time.sleep(DELAY_SEC)
     return total
 
 
@@ -322,7 +313,8 @@ def pull_event_calendar(days_back=3, days_forward=30):
     to_str = end.strftime("%d-%m-%Y")
 
     try:
-        df = cm.event_calendar_for_equity(from_date=from_str, to_date=to_str)
+        with _http.pace("nse"):
+            df = cm.event_calendar_for_equity(from_date=from_str, to_date=to_str)
     except Exception as e:
         # Silent-failure contract (CLAUDE.md): the single call erroring means NSE
         # was unreachable — raise so the watchdog sees a real stall, not a flat
@@ -393,13 +385,12 @@ def pull_fii_positioning(days_back=180):
             continue
         d_str = d.strftime("%d-%m-%Y")
         try:
-            df = dv.participant_wise_open_interest(trade_date=d_str)
+            with _http.pace("nse"):
+                df = dv.participant_wise_open_interest(trade_date=d_str)
         except Exception as e:
             # "No data available" is normal for non-trading days
-            time.sleep(DELAY_SEC)   # was DELAY_SEC * 0.5 = 1s (below the 2s floor)
             continue
         if df is None or df.empty:
-            time.sleep(DELAY_SEC)
             continue
 
         df.columns = [c.strip() for c in df.columns]
@@ -429,7 +420,6 @@ def pull_fii_positioning(days_back=180):
         dates_tried += 1
         if dates_tried % 10 == 0:
             print(f"  fii_pos checkpoint: {dates_tried} dates, {total} rows so far")
-        time.sleep(DELAY_SEC)
     return total
 
 
@@ -440,7 +430,7 @@ def pull_fii_cash_flow():
 
     Forward-only (single-day endpoint) — set up daily cron to accumulate.
     """
-    s = _http.warm_session(NSE_HOME, headers=NSE_JSON_HEADERS)
+    s = _http.warm_session(NSE_HOME)
     r = _http.polite_get("https://www.nseindia.com/api/fiidiiTradeReact", session=s)
     if r is None:
         raise RuntimeError("fiidiiTradeReact returned 404")
@@ -501,13 +491,12 @@ def pull_nse_indices(months=120):  # 10 years default
             from_str = start.strftime("%d-%m-%Y")
             to_str = end.strftime("%d-%m-%Y")
             try:
-                df = cm.index_data(index=idx, from_date=from_str, to_date=to_str)
+                with _http.pace("nse"):
+                    df = cm.index_data(index=idx, from_date=from_str, to_date=to_str)
             except Exception as e:
                 # Some indices have shorter history — skip silently
-                time.sleep(DELAY_SEC)
                 continue
             if df is None or df.empty:
-                time.sleep(DELAY_SEC)
                 continue
             df.columns = [c.strip() for c in df.columns]
 
@@ -540,7 +529,6 @@ def pull_nse_indices(months=120):  # 10 years default
                         df_out[c] = pd.to_numeric(df_out[c], errors="coerce")
                 n = insert_df(df_out, "nse_index_history")
                 idx_total += n
-            time.sleep(DELAY_SEC)
         print(f"  {idx}: ✅ {idx_total} new rows")
         total += idx_total
     return total
@@ -563,7 +551,7 @@ def pull_surveillance_today():
 
     All of these are forward-only (no historical archive). Run daily via cron.
     """
-    s = _http.warm_session(NSE_HOME, headers=NSE_JSON_HEADERS)
+    s = _http.warm_session(NSE_HOME)
 
     sid_map = _http.sid_map()
     today_str = date.today().isoformat()
@@ -627,7 +615,8 @@ def pull_surveillance_today():
     # case the upstream shape drifts back (it has before).
     try:
         from nselib import derivatives as dv
-        out = dv.fno_security_in_ban_period(trade_date=date.today().strftime("%d-%m-%Y"))
+        with _http.pace("nse"):
+            out = dv.fno_security_in_ban_period(trade_date=date.today().strftime("%d-%m-%Y"))
         symbols = []
         if isinstance(out, pd.DataFrame):
             if not out.empty:

@@ -30,17 +30,10 @@ import pandas as pd
 from bs4 import BeautifulSoup
 
 
-from config import API
 from db import read_sql, upsert_df
-from sources._http import polite_get, run_harvester
+from sources._http import host, polite_get, run_harvester
 
-DELAY = API["min_gap"]  # 2 seconds — enforced per host by polite_get
-
-HEADERS = {
-    "User-Agent": API["browser_user_agent"],
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    "Accept-Language": "en-US,en;q=0.5",
-}
+# Gap (2 s) and browser headers come from the host door: hosts.HOSTS["tickertape"].
 
 
 def _fetch_next_data(slug):
@@ -49,7 +42,7 @@ def _fetch_next_data(slug):
     None on 404 (delisted / slug gone). Raises on transport/HTTP failure (after
     polite_get's retries) and when the page carries no __NEXT_DATA__ blob —
     run_harvester counts both as errors."""
-    r = polite_get(f"https://tickertape.in/{slug}", headers=HEADERS)
+    r = polite_get(f"https://tickertape.in/{slug}")
     if r is None:
         return None
     soup = BeautifulSoup(r.text, "html5lib")
@@ -198,7 +191,8 @@ def compute(limit=None, dry_run=False):
     print(f"Tickertape Analyst+Forecast (HTML scrape): {total} stocks")
 
     if dry_run:
-        print(f"  Estimated time: ~{total * DELAY / 60:.0f} min ({DELAY}s × {total} pages)")
+        gap = host("tickertape")[1]["gap"]
+        print(f"  Estimated time: ~{total * gap / 60:.0f} min ({gap}s × {total} pages)")
         return 0
 
     fetched_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")

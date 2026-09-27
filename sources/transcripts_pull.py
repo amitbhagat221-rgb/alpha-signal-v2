@@ -18,7 +18,7 @@ raw_text blob, content-addressed by sha256, append-only (INSERT OR IGNORE on
 DOWNSTREAM in signals/nlp_scores.py — NOT here. (See schema.sql `transcripts`.)
 
 Auth: reuses the Screener session from sources.screener_pull (cookie jar).
-Rate-limited: ≥2s between stocks, ≥1.5s between BSE PDF downloads (CLAUDE.md).
+Rate-limited by the host door: Screener 2.5–4 s, BSE 2–3 s per call (hosts.HOSTS).
 Idempotent: skips (sid, source_url) pairs already stored.
 
 Usage:
@@ -33,7 +33,6 @@ Usage:
 import argparse
 import hashlib
 import io
-import random
 import re
 import sqlite3
 import sys
@@ -44,8 +43,9 @@ import pandas as pd
 from bs4 import BeautifulSoup
 
 
-from config import API
 from db import get_db, read_sql
+from hosts import HOSTS
+from sources import _http
 from sources.screener_pull import (
     COMPANY_CONSOLIDATED_URL,
     COMPANY_URL,
@@ -53,14 +53,7 @@ from sources.screener_pull import (
     make_session,
 )
 
-# BSE serves filing PDFs only with a browser UA + a bseindia referer.
-BSE_HEADERS = {
-    "User-Agent": API["browser_user_agent"],
-    "Referer": "https://www.bseindia.com/",
-}
 ATTACH_BASES = ("AttachLive", "AttachHis")  # recent filings live; older ones archived
-DELAY_BETWEEN_STOCKS = (2.0, 3.5)
-DELAY_BETWEEN_PDFS = (2.0, 3.0)   # was (1.5, 3.0) — floor below CLAUDE.md's 2s
 SMOKE_SIDS = ("INFY", "RELI", "TCS")
 
 # doc_type label (lowercased) → we keep these. 'rec' (YouTube video) is skipped.
@@ -218,6 +211,17 @@ def backfill_filing_dates(only_null: bool = True) -> int:
 
 # ─────────────────────────── fetch + extract ───────────────────────────
 
+def _get(session, url, **kw):
+    """GET through the host door on the shared Screener session; raw Response,
+    no automatic retry (as before the door)."""
+    return _http.polite_request("GET", url, session=session, check=False, retries=0, **kw)
+
+
+# Filing PDFs are served only with a browser UA + a bseindia referer — sent on
+# every PDF fetch (direct company-hosted .pdf links included, as before).
+PDF_HEADERS = HOSTS["bse"]["headers"]
+
+
 def _resolve_and_download(session, ann_url: str) -> tuple[str | None, bytes | None]:
     """Resolve a Screener concall link to the real BSE PDF bytes.
 
@@ -228,12 +232,10 @@ def _resolve_and_download(session, ann_url: str) -> tuple[str | None, bytes | No
     m = re.search(r"Pname=([^\"&]+)", ann_url)
     if m:
         guid = m.group(1)
-        for i, base in enumerate(ATTACH_BASES):
-            if i:  # AttachHis fallback — keep ≥2s after the AttachLive GET
-                time.sleep(random.uniform(*DELAY_BETWEEN_PDFS))
+        for base in ATTACH_BASES:
             pdf_url = f"https://www.bseindia.com/xml-data/corpfiling/{base}/{guid}"
             try:
-                r = session.get(pdf_url, headers=BSE_HEADERS, timeout=40)
+                r = _get(session, pdf_url, headers=PDF_HEADERS, timeout=40)
             except Exception:
                 continue
             if r.status_code == 200 and r.content[:4] == b"%PDF":
@@ -242,7 +244,7 @@ def _resolve_and_download(session, ann_url: str) -> tuple[str | None, bytes | No
     # direct PDF link
     if ann_url.lower().endswith(".pdf"):
         try:
-            r = session.get(ann_url, headers=BSE_HEADERS, timeout=40)
+            r = _get(session, ann_url, headers=PDF_HEADERS, timeout=40)
             if r.status_code == 200 and r.content[:4] == b"%PDF":
                 return ann_url, r.content
         except Exception:
@@ -264,12 +266,10 @@ def _extract_pdf_text(pdf_bytes: bytes, max_pages: int = 80) -> tuple[str, int]:
 
 def _fetch_company_html(session, ticker: str) -> str | None:
     """GET the consolidated company page, falling back to standalone."""
-    for i, url in enumerate((COMPANY_CONSOLIDATED_URL.format(ticker=ticker),
-                             COMPANY_URL.format(ticker=ticker))):
-        if i:  # standalone fallback — keep ≥2s after the consolidated GET
-            time.sleep(random.uniform(*DELAY_BETWEEN_STOCKS))
+    for url in (COMPANY_CONSOLIDATED_URL.format(ticker=ticker),
+                COMPANY_URL.format(ticker=ticker)):
         try:
-            r = session.get(url, timeout=25)
+            r = _get(session, url, timeout=25)
         except Exception:
             continue
         if r.status_code == 200 and len(r.text) > 2000:
@@ -338,9 +338,7 @@ def pull_one(session, sid: str, ticker: str, max_docs: int | None = None,
                 "sample": [(d["period_label"], d["doc_type"], d["url"][:70]) for d in todo[:3]]}
 
     rows, fetched_at = [], datetime.now().isoformat(timespec="seconds")
-    for i, d in enumerate(todo):
-        if i:
-            time.sleep(random.uniform(*DELAY_BETWEEN_PDFS))
+    for d in todo:
         pdf_url, pdf_bytes = _resolve_and_download(session, d["url"])
         if not pdf_bytes:
             continue
@@ -461,9 +459,7 @@ def main():
     print(f"transcripts_pull — {len(tgt)} stock(s), doc_types={doc_types}, "
           f"max_docs={args.max_docs}, dry_run={args.dry_run}")
     tot_new = tot_dl = tot_cand = 0
-    for i, r in enumerate(tgt.itertuples(index=False)):
-        if i:
-            time.sleep(random.uniform(*DELAY_BETWEEN_STOCKS))
+    for r in tgt.itertuples(index=False):
         try:
             rep = pull_one(session, r.sid, r.ticker, max_docs=args.max_docs,
                            doc_types=doc_types, dry_run=args.dry_run)

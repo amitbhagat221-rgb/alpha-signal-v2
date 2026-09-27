@@ -14,7 +14,7 @@ def _fake_nselib(monkeypatch, **fns):
     pkg.capital_market = cm
     pkg.derivatives = cm
     monkeypatch.setitem(sys.modules, "nselib", pkg)
-    monkeypatch.setattr(nselib_pull.time, "sleep", lambda s: None)
+    monkeypatch.setattr(nselib_pull._http.time, "sleep", lambda s: None)   # door pacing
 
 
 def test_bulk_deals_reads_nselib_price_column(monkeypatch):

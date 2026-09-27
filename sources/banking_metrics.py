@@ -39,7 +39,7 @@ Not scraped (Plan 2.2c — RBI fallback gated on coverage report):
 
 Reuses sources/screener_pull infra:
   - ~/.cache/screener_cookie.json auth
-  - Rate-limit policy (2.5–4 s between stocks, jittered)
+  - Rate limit: the host door (hosts.HOSTS["screener"], 2.5–4 s per call, jittered)
   - SID → ticker mapping from stocks.ticker
 
 Usage:
@@ -54,7 +54,6 @@ Usage:
 import argparse
 import re
 import sys
-import random
 import time
 from datetime import datetime
 
@@ -62,13 +61,12 @@ import pandas as pd
 
 
 from db import read_sql, upsert_df
+from sources import _http
 from sources.screener_pull import (
     make_session,
     check_auth,
     COMPANY_CONSOLIDATED_URL,
     COMPANY_URL,
-    DELAY_BETWEEN_STEPS,
-    DELAY_BETWEEN_STOCKS,
     BACKOFF_ON_429,
 )
 
@@ -356,14 +354,13 @@ def fetch_one(session, sid: str, ticker: str, dry_run: bool = False) -> tuple[st
     only publish consolidated — hence the fallback.
     """
     last_err = None
-    for i, (view, url) in enumerate((
+    for view, url in (
         ("standalone",   COMPANY_URL.format(ticker=ticker)),
         ("consolidated", COMPANY_CONSOLIDATED_URL.format(ticker=ticker)),
-    )):
-        if i:  # consolidated fallback — keep ≥2s after the standalone GET
-            time.sleep(random.uniform(*DELAY_BETWEEN_STEPS))
+    ):
         try:
-            r = session.get(url, timeout=15, allow_redirects=False)
+            r = _http.polite_request("GET", url, session=session, check=False, retries=0,
+                                     timeout=15, allow_redirects=False)
         except Exception as e:
             last_err = f"{view}: {type(e).__name__}: {e}"
             continue
@@ -546,8 +543,6 @@ def compute_universe():
                 print(f"  [{i+1}/{len(targets)}] {sid} → {n} rows ({status})")
         except Exception as e:
             print(f"  ✗ {sid}: {type(e).__name__}: {e}")
-        if i < len(targets) - 1:
-            time.sleep(random.uniform(*DELAY_BETWEEN_STOCKS))
     print(f"✓ banking_metrics: {rows_total:,} rows across {len(targets)} stocks")
     return rows_total
 
@@ -595,10 +590,6 @@ def main():
         except Exception as e:
             print(f"  [{i+1:3d}/{len(targets)}] {sid:6s} ✗ {type(e).__name__}: {e}")
             errors.append((sid, str(e)))
-        # Rate-limit jitter
-        if i < len(targets) - 1:
-            delay = random.uniform(*DELAY_BETWEEN_STOCKS)
-            time.sleep(delay)
 
     elapsed = time.time() - started
     print(f"\n{'═' * 60}")

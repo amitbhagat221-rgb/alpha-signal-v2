@@ -42,13 +42,13 @@ import requests
 from bs4 import BeautifulSoup
 
 
-from config import API
 from db import get_db, read_sql
+from sources import _http
 
 # ── Rate-limit policy ──
 # ETMoney is a free aggregator. They tolerate steady-state polite traffic but
-# rate-limit aggressive scrapers. Empirical defaults:
-DELAY = API["host_min_gap"]["www.etmoney.com"]  # 2.5s base delay (~24 req/min steady state)
+# rate-limit aggressive scrapers. The host door keeps calls ≥2.5 s apart
+# (hosts.HOSTS["etmoney"], ~24 req/min steady state, browser headers); on top:
 TIMEOUT = 20
 CHUNK_SIZE = 100         # request count between long pauses
 CHUNK_PAUSE = 30         # seconds to pause between chunks (lets any soft-limit reset)
@@ -57,11 +57,11 @@ BACKOFF_BASE = 5         # 5s, 15s, 45s on retries
 ERROR_PAUSE_THRESHOLD = 5  # consecutive errors → long pause
 ERROR_PAUSE_SECONDS = 300  # 5 min if we hit rate-limit territory
 
-HEADERS = {
-    "User-Agent": API["browser_user_agent"],
-    "Accept": "text/html,application/xhtml+xml",
-    "Accept-Language": "en-US,en;q=0.9",
-}
+
+def _get(url, timeout):
+    """One ETMoney GET through the host door: raw Response, no door retry
+    (fetch_holdings runs its own backoff ladder)."""
+    return _http.polite_request("GET", url, check=False, retries=0, timeout=timeout)
 
 SITEMAPS = [
     "https://www.etmoney.com/mf-schemes-sitemap.xml",
@@ -133,11 +133,9 @@ def _plan_marker(s: str) -> str | None:
 def fetch_etm_sitemap_urls() -> dict[str, tuple[str, int]]:
     """Pull all MF detail URLs from ETMoney sitemaps. Returns {normalised_slug: (slug, etm_id)}."""
     out: dict[str, tuple[str, int]] = {}
-    for i, url in enumerate(SITEMAPS):
-        if i:
-            time.sleep(DELAY)
+    for url in SITEMAPS:
         print(f"  Fetching {url}…")
-        r = requests.get(url, headers=HEADERS, timeout=30)
+        r = _get(url, timeout=30)
         if r.status_code != 200:
             print(f"    HTTP {r.status_code} — skipping")
             continue
@@ -388,7 +386,7 @@ def fetch_holdings(etm_slug: str, etm_id: int) -> tuple[list[dict], list[dict], 
     last_err: str | None = None
     for attempt in range(MAX_RETRIES + 1):
         try:
-            r = requests.get(url, headers=HEADERS, timeout=TIMEOUT)
+            r = _get(url, timeout=TIMEOUT)
             if r.status_code == 200:
                 # ETMoney sometimes returns 200 with a "blocked" page (~5KB).
                 # Real holdings pages are >100KB.
@@ -491,12 +489,10 @@ def scrape(limit: int | None = None, scheme: str | None = None,
         except Exception as e:
             n_err += 1
             consecutive_errors += 1
-            time.sleep(DELAY)
             continue
 
         if not holdings:
             n_no_data += 1
-            time.sleep(DELAY)
             continue
 
         # Plan 0007 Phase 2 — Identity Gate. ETMoney URL slug must contain the
@@ -532,7 +528,6 @@ def scrape(limit: int | None = None, scheme: str | None = None,
                             verdict=v,
                         )
                 n_no_data += 1  # treat as no_data from the caller's perspective
-                time.sleep(DELAY)
                 continue
             elif v.status == "PASS":
                 # Record verdict for the first sibling (covers the slug-level check)
@@ -606,8 +601,6 @@ def scrape(limit: int | None = None, scheme: str | None = None,
         if i % CHUNK_SIZE == 0:
             print(f"  [chunk-pause {CHUNK_PAUSE}s after {i} requests]", flush=True)
             time.sleep(CHUNK_PAUSE)
-        else:
-            time.sleep(DELAY)
 
     elapsed = time.time() - t0
     print(f"\nDone in {elapsed/60:.1f}min.")

@@ -35,13 +35,11 @@ import pandas as pd
 import requests
 
 
-from config import API
 from db import get_db, upsert_df
 from sources._http import polite_get
 
 NAVALL_URL = "https://www.amfiindia.com/spages/NAVAll.txt"
 TIMEOUT = 60
-HEADERS = {"User-Agent": API["user_agent"]}
 
 # Category header lines look like:  "Open Ended Schemes(Equity Scheme - Multi Cap Fund)"
 _CATEGORY_RE = re.compile(r"^(Open Ended|Close Ended|Interval Fund) Schemes?\s*\((.+)\)\s*$")
@@ -243,7 +241,7 @@ def fetch_navall_text() -> str:
     """Single HTTP fetch of NAVAll.txt (polite_get: 3 attempts on timeout/5xx).
     Returns the text body; raises if AMFI didn't serve a non-empty file."""
     try:
-        r = polite_get(NAVALL_URL, headers=HEADERS, timeout=TIMEOUT, retries=2)
+        r = polite_get(NAVALL_URL, timeout=TIMEOUT, retries=2)
     except requests.RequestException as e:
         raise RuntimeError(f"Failed to fetch NAVAll.txt: {e}")
     if r is None or not r.content:

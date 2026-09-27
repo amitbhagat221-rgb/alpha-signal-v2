@@ -30,12 +30,8 @@ from html import unescape
 import pandas as pd
 import requests
 
-from config import API
 from db import get_db, insert_df, read_sql
 from sources._http import polite_get
-
-USER_AGENT = API["user_agent"]
-HEADERS = {"User-Agent": USER_AGENT}
 
 
 # ═══════════════════════════════════════════════════
@@ -157,7 +153,7 @@ def _google_rss_items(topic, start, end):
     retry there, then raise."""
     q = f"{topic}+after:{start}+before:{end}"
     url = f"https://news.google.com/rss/search?q={q}&hl=en-IN&gl=IN&ceid=IN:en"
-    resp = polite_get(url, headers=HEADERS)
+    resp = polite_get(url)
     return _parse_google_rss(resp.text) if resp is not None else []
 
 
@@ -262,7 +258,7 @@ def harvest_rbi(start_id=12500, end_id=13370, dry_run=False):
         url = f"https://www.rbi.org.in/Scripts/NotificationUser.aspx?Id={notif_id}&Mode=0"
 
         try:
-            resp = polite_get(url, headers=HEADERS)   # ≥2s per host
+            resp = polite_get(url)   # ≥2s per host
             if resp is not None and len(resp.text) > 2000:
                 title, pub_date, body = _parse_rbi_notification(resp.text, notif_id)
 
@@ -345,7 +341,7 @@ def harvest_wayback(dry_run=False):
                 archive_url = f"https://web.archive.org/web/{timestamp}/{feed_url}"
 
                 try:
-                    r = polite_get(archive_url, headers=HEADERS)   # ≥2s per host (was 1s)
+                    r = polite_get(archive_url)   # ≥2s per host (was 1s)
                     if r is not None:
                         items = _parse_rss_generic(r.text, f"wayback_{feed_url.split('/')[0]}")
                         new = [i for i in items if i["event_id"] not in seen_ids]
@@ -496,11 +492,9 @@ def harvest_pib(start_prid=2150000, end_prid=2260000, dry_run=False):
         url = f"https://pib.gov.in/PressReleasePage.aspx?PRID={prid}"
 
         try:
-            # retries=0 as before; polite_get paces ≥2s per host (was 0.3s).
-            resp = polite_get(url, headers={
-                "User-Agent": USER_AGENT,
-                "Accept": "text/html",
-            }, timeout=10, retries=0)
+            # retries=0 as before; the door paces ≥2s per host (was 0.3s) and
+            # sends the pib host's headers (Accept: text/html).
+            resp = polite_get(url, timeout=10, retries=0)
 
             if resp is not None and len(resp.text) > 3000:
                 result = _parse_pib_page(resp.text, prid)

@@ -90,10 +90,13 @@ class Net:
     def requests_view(self):
         return [{k: v for k, v in r.items() if k != "t"} for r in self.log]
 
-    def gaps(self, host):
-        """Seconds between consecutive calls to `host` (HTTP + library)."""
-        ts = sorted([r["t"] for r in self.log if urlsplit(r["url"]).netloc == host]
-                    + [c["t"] for c in self.lib if c["host"] == host])
+    def gaps(self, netloc):
+        """Seconds between consecutive calls to the host serving `netloc` (HTTP +
+        library calls; all netlocs of one hosts.HOSTS entry count as one host)."""
+        key = _http.host(f"https://{netloc}/")[0]
+        same = lambda n: _http.host(f"https://{n}/")[0] == key   # noqa: E731
+        ts = sorted([r["t"] for r in self.log if same(urlsplit(r["url"]).netloc)]
+                    + [c["t"] for c in self.lib if same(c["host"])])
         return [b - a for a, b in zip(ts, ts[1:])]
 
 
@@ -190,14 +193,17 @@ def check(name, obj):
 
 
 def gap_note(net, host):
-    """Capture mode: log the min gap the code kept per host (evidence for the
-    'never lower' gate). The door's own gap guarantees are asserted separately."""
+    """Assert the calls to `host` went through the door and kept the declared gap
+    (DOOR_GAPS_OUT: also log the min gap kept — 'never lower' gate evidence)."""
+    g = net.gaps(host)
     out = os.environ.get("DOOR_GAPS_OUT")
     if out:
-        g = net.gaps(host)
         test = os.environ.get("PYTEST_CURRENT_TEST", "").split(" ")[0].split("::")[-1]
         with open(out, "a") as f:
             f.write(f"{test}\t{host}\tcalls={len(g) + 1}\tmin_gap={min(g) if g else None}\n")
+    key, entry = _http.host(f"https://{host}/")
+    assert key in _http._LAST_CALL, f"{host}: calls bypassed the host door"
+    assert not g or min(g) >= entry["gap"] - 1e-9, f"{host}: gap {min(g)} < {entry['gap']}"
 
 
 class _Verdict:
@@ -513,6 +519,7 @@ def test_kite_auto_request_token(net, monkeypatch):
     net.route("GET", r"kite\.trade/connect/login", r)
     assert kp._auto_request_token("key1") == "tok789"
     check("kite_pull.login_requests", net.requests_view())
+    gap_note(net, "kite.zerodha.com")   # login steps now paced too (were back-to-back)
 
 
 # ───────────────────────────── Yahoo ─────────────────────────────
@@ -540,6 +547,7 @@ def test_macro_yfinance_fetch_all(net, monkeypatch):
     out = my._fetch_all("2026-09-01", "2026-09-25")
     check("macro_yfinance.out", {k: records(v) for k, v in out.items()})
     check("macro_yfinance.calls", [{k: v for k, v in c.items() if k != "t"} for c in net.lib])
+    gap_note(net, "query2.finance.yahoo.com")
 
 
 def test_yfinance_prices_compute(net, monkeypatch):
@@ -560,6 +568,7 @@ def test_yfinance_prices_compute(net, monkeypatch):
     assert yp.compute() == 5
     check("yfinance_prices.written", written)
     check("yfinance_prices.calls", [{k: v for k, v in c.items() if k != "t"} for c in net.lib])
+    gap_note(net, "query2.finance.yahoo.com")   # .NS then .BO batch, now ≥2s apart
 
 
 # ───────────────────────────── Upstox / GitHub (scrip master) ─────────────────────────────
@@ -584,6 +593,8 @@ def test_scrip_master_build_rows(net, monkeypatch):
     monkeypatch.setattr(sm, "_now", lambda: "2026-09-25T00:00:00+00:00")
     check("scrip_master.rows", sm.build_rows())
     check("scrip_master.requests", net.requests_view())
+    gap_note(net, "assets.upstox.com")
+    gap_note(net, "raw.githubusercontent.com")
 
 
 # ───────────────────────────── RSS ─────────────────────────────
@@ -777,6 +788,82 @@ def test_polite_get_callers_send_same_headers(net, monkeypatch):
         regulatory_harvester.harvest_pib(start_prid=1, end_prid=2)
     assert tickertape_analyst._fetch_next_data("stocks/x-X") == {"a": 1}
     check("polite_get_callers.requests", net.requests_view())
+    for n in ("archives.nseindia.com", "www.nseindia.com", "www.amfiindia.com", "api.mfapi.in",
+              "news.google.com", "pib.gov.in", "tickertape.in"):
+        gap_note(net, n)
+
+
+# ───────────────────── door-only behaviour (intentional changes) ─────────────────────
+
+def test_moneycontrol_budget_and_single_pacing(net, monkeypatch):
+    """Pacing is the door's alone: no sleep after the last stock before the budget
+    check (the old loop slept 12 s there, on top of polite_get's own 12 s gap)."""
+    from sources import moneycontrol_recos as mc
+    _patch_identity(monkeypatch)
+    net.route("GET", r"/india/stockpricequote/", resp(200, _MC_PAGE))
+    monkeypatch.setattr(mc, "_ensure_schema", lambda: None)
+    monkeypatch.setattr(mc, "read_sql", lambda q, params=None: pd.DataFrame({
+        "sid": ["A", "B", "C"], "ticker": ["A", "B", "C"], "name": ["A", "B", "C"],
+        "mc_slug": ["/india/stockpricequote/x/a/A", "/india/stockpricequote/x/b/B",
+                    "/india/stockpricequote/x/c/C"]}))
+    monkeypatch.setattr(mc, "get_db", fake_get_db([]))
+    monkeypatch.setattr(mc, "upsert_df", lambda df, t: len(df))
+    monkeypatch.setattr(mc, "aggregate_consensus", lambda: 0)
+    mc.compute(max_minutes=0.15)            # 9 s: A at t=0, B at t=12, budget spent → stop
+    assert [r["url"][-1] for r in net.log] == ["A", "B"]
+    assert net.sleeps == [12.0]             # one wait, the door's
+    gap_note(net, "www.moneycontrol.com")
+
+
+def test_moneycontrol_default_budget_is_the_hosts(net, monkeypatch):
+    from hosts import HOSTS
+    from sources import moneycontrol_recos as mc
+    seen = []
+    monkeypatch.setattr(mc._http, "time_budget", lambda h, m: seen.append((h, m)) or (lambda: True))
+    monkeypatch.setattr(mc, "_ensure_schema", lambda: None)
+    monkeypatch.setattr(mc, "read_sql", lambda q, params=None: pd.DataFrame(
+        {"sid": [], "ticker": [], "name": [], "mc_slug": []}))
+    monkeypatch.setattr(mc, "get_db", fake_get_db([]))
+    monkeypatch.setattr(mc, "aggregate_consensus", lambda: 0)
+    mc.compute()
+    assert seen == [("moneycontrol", HOSTS["moneycontrol"]["budget_min"])]
+
+
+def test_library_harvesters_paced_by_host(net, monkeypatch, tmp_path):
+    """tickertape / tickertape_shareholding / yfinance_analyst: each item's library
+    calls run as one paced call to their host (was a sleep between items)."""
+    from sources import tickertape, tickertape_shareholding, yfinance_analyst
+    monkeypatch.setattr(tickertape, "CHECKPOINT_FILE", tmp_path / "ck.json")
+    for mod in (tickertape, tickertape_shareholding, yfinance_analyst):
+        monkeypatch.setattr(mod, "upsert_df", lambda df, t: len(df))
+    stamps = []
+    tickertape._harvest(["A", "B", "C"], "k", "income", "quarterly_income",
+                        lambda sid: stamps.append(("tt", net.now)) or pd.DataFrame({"x": [1]}),
+                        lambda raw, sid: pd.DataFrame({"sid": [sid]}))
+    client = types.SimpleNamespace(get_share_holding_pattern=lambda slug: stamps.append(
+        ("sh", net.now)) or pd.DataFrame([{"date": "2026-06-30", "data_pmPctT": 50.0}]))
+    monkeypatch.setattr(tickertape_shareholding, "_get_client", lambda: client)
+    monkeypatch.setattr(tickertape_shareholding, "read_sql", lambda q, params=None: pd.DataFrame(
+        {"sid": ["A", "B"], "slug": ["stocks/a-A", "stocks/b-B"]}))
+    tickertape_shareholding.compute()
+    monkeypatch.setattr(yfinance_analyst, "_fetch_one", lambda t, sid_for_gate=None: stamps.append(
+        ("yf", net.now)) or None)
+
+    def ya_read_sql(q, params=None):
+        if "FROM stocks" in q:
+            return pd.DataFrame({"sid": ["A", "B"], "ticker": ["AAA", "BBB"], "cap_tier": ["LARGE"] * 2})
+        if "stock_prices" in q:
+            return pd.DataFrame({"sid": [], "close": []})
+        if "price_target IS NULL" in q:
+            return pd.DataFrame({"sid": []})
+        return pd.DataFrame({"sid": [], "price_target": [], "price_target_changed_at": []})
+
+    monkeypatch.setattr(yfinance_analyst, "read_sql", ya_read_sql)
+    with contextlib.suppress(RuntimeError):     # no PT anywhere → raises by design
+        yfinance_analyst.compute(ticker=None)
+    for tag, want in (("tt", 2.0), ("sh", 2.0), ("yf", 2.0)):
+        ts = [t for g, t in stamps if g == tag]
+        assert len(ts) >= 2 and min(b - a for a, b in zip(ts, ts[1:])) >= want, tag
 
 
 # ───────────────────────────── snapshots ─────────────────────────────
