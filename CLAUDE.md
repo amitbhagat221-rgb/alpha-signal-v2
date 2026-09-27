@@ -29,17 +29,16 @@ Everything else (memory, `_archive/`, slash commands, settings) — Claude handl
 **Architecture & Code**
 - No frameworks, no base classes, no YAML. Plain functions, Python config dict, SQLite. See `docs/decisions/0004-no-base-classes-no-yaml.md`
 - ETFs excluded — universe is 2,448 stocks, not 2,500
-- `cap_tier` must be assigned before any ranking — never rank without segment
+- Tiers are data (`config.TIERS`: rank rule, `pickable`, picks, costs). `scoring/segment.py` re-tiers LARGE/MID/SMALL monthly (±10% hysteresis) before the screener; `tools/classify_micro_tier.py` carves MICRO. Never hard-code a tier list — iterate `config.TIERS` / `PICKABLE_TIERS`
 - Never rank across tiers — always within-segment
 - Financial sector stocks rank through the MAIN screener (generic weights), NOT a separate sub-model — with `accruals`+`piotroski` marked INELIGIBLE for Financials in `eligibility/registry.py` (structurally N/A for banks) so `eligible_coverage` renormalizes over the signals that DO apply. `financial_signal_scores` is dossier/display-only, evidence-benched from ranking (within-financials IC t=0.73, fails the bar). See [ADR 0048](docs/decisions/0048-financials-rank-generic-not-submodel.md). (Was mis-documented as "route through the sub-model"; the mis-wired eligibility silently dropped all MID Financials from `daily_picks` post-ADR-0045 until fixed 2026-07-05.)
 - Tickertape SIDs ≠ NSE tickers (e.g. `REDY` not `DRRD`). Always use universe SIDs
 
 **Data Operations**
 - Never run two harvester scripts simultaneously — doubles request rate, risks IP block
-- 2-second delay minimum between external API calls
+- Every external call goes through the host door (`sources/_http` + `hosts.HOSTS`: gap ≥2 s, headers, retries, budgets). Never `requests.get`/`sleep` for pacing in a module — declare the host
 - Smoke test with 3 stocks before any full run
-- `INSERT OR IGNORE` for append-only tables (insider_trades, bulk_deals, news_articles)
-- `INSERT OR REPLACE` for snapshot tables (analyst_consensus, regime_state, signal tables)
+- `INSERT OR IGNORE` for append-only tables (insider_trades, bulk_deals, news_articles); column-level `db.upsert_df` for snapshot/state tables — never `INSERT OR REPLACE` there (it NULLs columns another producer owns, e.g. analyst_consensus)
 - Read `docs/reference/data-playbook.md` before fetching from any new source
 
 **Health & observability**
@@ -60,10 +59,10 @@ Everything else (memory, `_archive/`, slash commands, settings) — Claude handl
 - When adding any new "PT-like" producer: ask first "is this episodic?". If yes, snapshot table at the natural cadence (monthly or quarterly), not daily.
 
 **Backtest hygiene**
-- Ship a factor module and its PIT helper as one unit — never separately
-- Register every factor ONCE in `factors.FACTORS` (one dict: compute fn, PIT columns + validation ranges, cadence, library status). `BACKTEST_SIGNALS`, `FACTOR_LIBRARY`, `PIT_COLUMNS`, lineage status etc. are derived — never hand-edit a list; `tests/test_factor_registry.py` enforces it. Live and PIT call the SAME compute function. See [ADR 0017](docs/decisions/0017-factor-library-two-tier-registry.md)
+- A factor is ONE compute function called by both live and PIT: the screener takes every factor from `pit.features_at(today)` — the same code the backtest panel stores. Input hygiene (consolidated filter, Financials exclusion) lives INSIDE the compute function, never in a live-only loader
+- Register every factor ONCE in `factors.FACTORS` (compute producer, range, cadence, eligibility, bench, and — if wired — `weights: {tier: w}`). `BACKTEST_SIGNALS`, `FACTOR_LIBRARY`, `PIT_COLUMNS`, `SIGNAL_WEIGHTS`, lineage table reads etc. are derived — never hand-edit a list; `tests/test_factor_registry.py` enforces it. See ADRs 0017, 0052
 - New table → `schema.sql` AND `tables.TABLES` (`tests/test_tables.py` enforces it)
-- Don't add to `SCREEN.weight_tiers` until t-stat ≥ 1.5 on at least one cap tier, and never mechanically — see `docs/reference/signal-weights.md`
+- Don't give a factor `weights` until t-stat ≥ 1.5 on at least one cap tier, and never mechanically — see `docs/reference/signal-weights.md`
 - `reconstruct_pit.py` writes only the columns the requested signals produced — `--signal X` is safe on existing dates by construction. If you ever pad missing PIT_COLUMNS with NaN before the write, you'll wipe every untouched column on UPDATE — don't.
 
 **Git**
