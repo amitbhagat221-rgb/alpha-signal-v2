@@ -256,17 +256,17 @@ PIPELINE_STEPS = [
      "reads": ["stocks"],
      "writes": ["macro_history", "macro_indicator_meta"],
      "lagged_writes": ["macro_indicator_meta"],
-     "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos", "stocks@universe_liveness"]},
+     "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos", "stocks@segment_tiers", "stocks@universe_liveness"]},
 
     {"name": "fetch_insider",      "module": "sources.nse_insider",   "function": "compute", "critical": False,
      "table": "insider_trades",    "source": "NSE PIT API",          "data_freq": "daily",  "frequency": "daily",
      "reads": ["stocks"],
-     "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos", "stocks@universe_liveness"]},
+     "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos", "stocks@segment_tiers", "stocks@universe_liveness"]},
 
     {"name": "fetch_bulk_deals",   "module": "sources.nse_bulk",     "function": "compute", "critical": False,
      "table": "bulk_deals",        "source": "NSE archives CSV",     "data_freq": "daily",  "frequency": "daily",
      "reads": ["stocks"],
-     "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos", "stocks@universe_liveness"]},
+     "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos", "stocks@segment_tiers", "stocks@universe_liveness"]},
 
     {"name": "fetch_bhavcopy",     "module": "sources.nse",          "function": "compute", "critical": True,
      "table": "stock_prices",      "source": "NSE Archives bhavcopy", "data_freq": "daily", "frequency": "daily",
@@ -279,7 +279,7 @@ PIPELINE_STEPS = [
     {"name": "fetch_prices_fallback", "module": "sources.yfinance_prices", "function": "compute", "critical": False,
      "table": "stock_prices",      "source": "yfinance .BO / .NS (gap-fill)", "data_freq": "daily", "frequency": "daily",
      "reads": ["stock_prices", "stocks"],
-     "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos", "stocks@universe_liveness"]},
+     "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos", "stocks@segment_tiers", "stocks@universe_liveness"]},
 
     # Corporate actions (splits/bonuses/special dividends) over a short trailing
     # window. Feeds Gate 3 temporal-continuity's escape hatch so real ex-date
@@ -289,7 +289,7 @@ PIPELINE_STEPS = [
     {"name": "fetch_corp_actions", "module": "sources.nselib_pull", "function": "compute_corp_actions", "critical": False,
      "table": "corporate_actions", "source": "NSE corporate-actions (nselib)", "data_freq": "daily", "frequency": "daily",
      "reads": ["fii_dii_positioning", "stocks"],
-     "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos", "stocks@universe_liveness"]},
+     "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos", "stocks@segment_tiers", "stocks@universe_liveness"]},
 
     # Board-meeting / forthcoming-events calendar (one nselib call, −3d→+30d
     # window). Forward-dated, so a daily run keeps it fresh and feeds the
@@ -298,7 +298,7 @@ PIPELINE_STEPS = [
     {"name": "fetch_earnings_calendar", "module": "sources.nselib_pull", "function": "compute_earnings_calendar", "critical": False,
      "table": "earnings_calendar", "source": "NSE event-calendar (nselib)", "data_freq": "daily", "frequency": "daily",
      "reads": ["fii_dii_positioning", "stocks"],
-     "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos", "stocks@universe_liveness"]},
+     "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos", "stocks@segment_tiers", "stocks@universe_liveness"]},
 
     # Track 3.1b — NSE F&O EOD grid. One nselib.fno_bhav_copy call = the whole
     # market (~16K info-carrying rows/day). Runs in the morning pipeline against
@@ -320,6 +320,15 @@ PIPELINE_STEPS = [
     {"name": "universe_liveness",  "module": "sources.universe",     "function": "compute", "critical": False,
      "table": "stocks",            "source": "stock_prices (recent activity)", "data_freq": "daily", "frequency": "daily",
      "reads": ["stock_prices", "stocks"],
+     "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos", "stocks@segment_tiers"]},
+
+    # Plan 0015 D3: LARGE (top 100) / MID (101-250) / SMALL by fresh market cap on the
+    # 1st, with ±10% hysteresis (scoring/segment.py). Before this nothing re-tiered:
+    # cap_tier was a one-time April 2026 load. MICRO carve-out stays in classify_micro_tier.
+    {"name": "segment_tiers", "module": "scoring.segment", "function": "compute", "critical": False,
+     "table": "stocks", "source": "stock_prices + fundamentals_screener + annual_balance_sheet + corporate_adjustments",
+     "data_freq": "monthly", "frequency": "monthly",
+     "reads": ["annual_balance_sheet", "corporate_adjustments", "fundamentals_screener", "stock_prices", "stocks"],
      "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
 
     {"name": "fetch_news",         "module": "sources.rss",          "function": "compute", "critical": False,
