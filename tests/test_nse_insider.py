@@ -40,6 +40,7 @@ def test_rows_keep_the_old_vocabulary_and_drop_future_trades():
     assert (r["sid"], r["symbol"], r["transaction_type"], r["shares"]) == ("DAMO", "DAMODARIND", "Sell", 4200.0)
     assert abs(r["value_lakhs"] - 1.2411) < 1e-9             # rupees → lakhs
     assert r["source"] == "nse_pit"
+    assert r["person_category"] == "Promoter Group"
     assert r["filing_id"] == "IT_13962_WebXMLFile_20260926_200221686.xml"
 
 
@@ -108,3 +109,16 @@ def test_empty_listing_over_a_week_fails_loudly(monkeypatch):
     _offline(monkeypatch, [])
     with pytest.raises(RuntimeError, match="0 filings"):
         ni.fetch_insider(date(2026, 9, 20), date(2026, 9, 27))
+
+
+def test_categories_map_onto_what_insider_signal_weights():
+    from signals.insider_signal import CATEGORY_WEIGHTS
+    got = {c: ni._category(c) for c in ("Promoter", "Promoter and Director", "KMP", "Designated Person",
+                                          "Immediate Relative", "Promoter Group", "Director", "Trust")}
+    assert got["Promoter"] == got["Promoter and Director"] == "Promoters"
+    assert got["KMP"] == "Key Managerial Personnel"
+    assert got["Designated Person"] == "Employees/Designated Employees"
+    assert got["Trust"] == "Trust"                                   # unknown: kept verbatim
+    weighted = [c for c in got.values() if any(k.lower() in c.lower() for k in CATEGORY_WEIGHTS)]
+    assert {"Promoters", "Promoter Group", "Director", "Key Managerial Personnel",
+            "Immediate relative"} <= set(weighted)

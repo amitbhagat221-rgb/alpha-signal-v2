@@ -72,6 +72,25 @@ def _direction(tx):
     return t
 
 
+# XBRL CategoryOfPerson → the labels the old API stored. signals/insider_signal.py
+# weights categories by case-insensitive SUBSTRING ("Promoters", "Key Managerial
+# Personnel", …), so an unmapped "Promoter" or "KMP" row would be silently ignored.
+_CATEGORY = {
+    "promoter": "Promoters",
+    "promoter and director": "Promoters",
+    "designated person": "Employees/Designated Employees",
+    "kmp": "Key Managerial Personnel",
+    "immediate relative": "Immediate relative",
+    "promoter immediate relative": "Immediate relative",
+    "directors immediate relative": "Immediate relative",
+}
+
+
+def _category(cat):
+    c = (cat or "").strip()
+    return _CATEGORY.get(c.lower(), c)
+
+
 def _safe_float(val):
     if val is None or val == "" or val == "-":
         return None
@@ -126,7 +145,7 @@ def _rows_for_filing(filing, disclosures, sid, today_iso):
             "symbol": filing["symbol"].strip(),
             "company_name": (filing.get("companyName") or "")[:100],
             "person": (x.get("person") or "")[:200],
-            "person_category": x.get("person_category") or "",
+            "person_category": _category(x.get("person_category")),
             "transaction_type": _direction(x.get("tx_type")),
             "shares": _safe_float(x.get("shares")) or 0,
             "value_lakhs": value / 100000 if value else None,   # rupees → lakhs
