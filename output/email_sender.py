@@ -24,16 +24,20 @@ import json
 import os
 import smtplib
 from datetime import date, datetime
+from zoneinfo import ZoneInfo
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
-from config import PROJECT_ROOT
+from config import PORTFOLIO, PROJECT_ROOT
 from db import read_sql
-from formatting import DASH, _num, crore, inr, pct, signed, tone
+from formatting import DASH, REGIME_COLORS, _num, crore, inr, pct, signed, tone
 from output.dossier import is_publishable
+from views import published_picks
 
 COCKPIT_URL = os.environ.get("COCKPIT_BASE_URL", "http://140.245.248.166:3000")
-TOP_N_PER_TIER = 5
+OPS_URL = os.environ.get("OPS_BASE_URL", COCKPIT_URL.rsplit(":", 1)[0] + ":3001")
+IST = ZoneInfo("Asia/Kolkata")
+TOP_N_PER_TIER = PORTFOLIO["picks_per_tier"]   # same 5/5/5 set the dossiers narrate
 
 # ── Color palette (match cockpit dark-on-light email skin) ──
 C_BG = "#f5f6f8"
@@ -179,17 +183,6 @@ def _build_pick_card(row, dossier, idx):
     action = (dossier or {}).get("action")
     conviction = (dossier or {}).get("conviction")
     accent_color, _, _ = ACTION_STYLES.get(action or "", (C_MUTED, "", ""))
-    target = (dossier or {}).get("target_price")
-    stop = (dossier or {}).get("stop_loss")
-    upside_html = ""
-    if _has(target) and _has(price) and float(price) > 0:
-        upside = (float(target) / float(price) - 1) * 100
-        upside_html = (
-            f'<span style="color:{C_MUTED}">·&nbsp;Target&nbsp;</span>'
-            f'<span style="color:{C_TEXT};font-weight:600">{_fmt_price(target)}'
-            f'</span> <span style="color:{C_GREEN if upside>0 else C_RED};font-weight:600">'
-            f'({upside:+.0f}%)</span>'
-        )
 
     cockpit_link = f"{COCKPIT_URL}/explorer/{sid}"
 
@@ -273,7 +266,6 @@ def _build_pick_card(row, dossier, idx):
               border-radius:0 6px 6px 0;padding:11px 14px;margin-top:6px">
           <div style="font-size:11px;font-weight:700;color:{C_PURPLE};
                 margin-bottom:6px;letter-spacing:0.4px">🧠 AI THESIS
-            <span style="color:{C_MUTED};font-weight:500;margin-left:6px">{upside_html}</span>
           </div>
           <div style="font-size:12px;color:{C_TEXT};line-height:1.55;margin-bottom:8px">{thesis}</div>
           <table width="100%" cellpadding="0" cellspacing="0" border="0">
@@ -341,27 +333,7 @@ def _build_html():
     today_human = date.today().strftime("%A, %d %B %Y")
 
     # Picks + fundamentals + snapshot signals + price metrics
-    picks = read_sql("""
-        SELECT
-          dp.sid, dp.final_score, dp.rank, dp.cap_tier, dp.sector,
-          dp.uhs_score, dp.uhs_label, dp.uhs_worst_dim,
-          s.ticker, s.name, s.pe_ratio, s.pb_ratio, s.roe, s.market_cap_cr,
-          ds.close_price, ds.piotroski_f, ds.earnings_yield, ds.delivery_pct,
-          ds.consensus_signal, ds.promoter_qoq, ds.cf_accruals, ds.smart_money,
-          ds.mom_6m, ds.mom_12m, ds.sentiment_7d
-        FROM daily_picks dp
-        JOIN stocks s ON dp.sid = s.sid
-        LEFT JOIN daily_snapshots ds ON dp.sid = ds.sid
-              AND ds.snapshot_date = dp.pick_date
-        WHERE dp.pick_date = (SELECT MAX(pick_date) FROM daily_picks)
-          AND (dp.integrity_status IS NULL OR dp.integrity_status != 'FAIL')
-          -- Plan 0007 Phase 5 — UHS pick gate. Picks with score < 60 → AVOID
-          -- band: shown nowhere in action_queue/morning_brief/email. NULL
-          -- fallback covers rows pre-dating Phase 5; once UHS is universal
-          -- the NULL branch becomes dead code (Phase 8 will remove it).
-          AND (dp.uhs_score IS NULL OR dp.uhs_score >= 60)
-        ORDER BY dp.cap_tier, dp.rank
-    """)
+    picks = published_picks()
 
     if picks.empty:
         return "<p>No picks today.</p>", 0
@@ -402,10 +374,8 @@ def _build_html():
     regime_html = ""
     if not regime.empty:
         r = regime.iloc[0]
-        regime_color = {
-            "PANIC": C_RED, "STRESS": C_AMBER, "CAUTION": C_AMBER,
-            "NEUTRAL": C_BLUE, "EUPHORIA": C_GREEN,
-        }.get(r["regime"], C_BLUE)
+        regime_color = {"green": C_GREEN, "blue": C_BLUE, "amber": C_AMBER, "red": C_RED}[
+            REGIME_COLORS.get(r["regime"], "blue")]
         regime_html = f"""
         <div style="background:{C_CARD};border:1px solid {C_BORDER};border-radius:8px;
               padding:12px 16px;margin-bottom:14px;font-size:13px">
@@ -478,7 +448,7 @@ def _build_html():
         "SMALL": ("Small Cap", regime.iloc[0]["alloc_small"] if not regime.empty else None),
     }
     for tier_key, (tier_name, alloc) in tier_meta.items():
-        tier_picks = picks[picks["cap_tier"] == tier_key].head(TOP_N_PER_TIER)
+        tier_picks = picks[picks["cap_tier"] == tier_key].head(TOP_N_PER_TIER.get(tier_key, 0))
         if tier_picks.empty:
             continue
         cards = "".join(
@@ -495,7 +465,7 @@ def _build_html():
           <span style="font-size:14px;font-weight:800;color:{C_TEXT};
                 letter-spacing:0.5px;text-transform:uppercase">{tier_name}</span>
           <span style="color:{C_FAINT};font-size:12px;margin-left:6px">
-            top {min(TOP_N_PER_TIER, len(tier_picks))}</span>
+            top {len(tier_picks)}</span>
           {alloc_html}
         </div>
         {cards}
@@ -521,11 +491,10 @@ def _build_html():
     footer = f"""
     <div style="border-top:1px solid {C_BORDER};margin-top:18px;padding-top:14px;
           font-size:11px;color:{C_FAINT};text-align:center">
-      Generated {datetime.now().strftime("%H:%M IST")} · {len(picks)} stocks scored
+      Generated {datetime.now(IST).strftime("%H:%M IST")} · {len(picks)} stocks scored
       · <a href="{COCKPIT_URL}/" style="color:{C_BLUE};text-decoration:none">Cockpit</a>
       · <a href="{COCKPIT_URL}/explorer" style="color:{C_BLUE};text-decoration:none">Explorer</a>
-      · <a href="{COCKPIT_URL}/signals" style="color:{C_BLUE};text-decoration:none">Signals</a>
-      · <a href="{COCKPIT_URL}/system" style="color:{C_BLUE};text-decoration:none">System</a>
+      · <a href="{OPS_URL}/system" style="color:{C_BLUE};text-decoration:none">System</a>
     </div>
     """
 

@@ -1779,7 +1779,36 @@ def load_raw():
     }
 
 
-def main():
+def refresh(today=None):
+    """Pipeline entry point (plan 0015 Phase 0): keep the PIT panel current.
+
+    The panel was only ever rebuilt by hand, so it froze at 2026-07-01 while the
+    monthly backtest cron kept re-scoring it. This re-runs the recent anchors —
+    their fwd_return_20d fills in only once 20 trading days have passed — and
+    catches up any anchors missed since the last run: monthly (first business day)
+    and weekly (Friday), all producers. Raises if any date fails.
+    """
+    today = today or date.today()
+    def _last(where):
+        d = read_sql(f"SELECT MAX(snapshot_date) AS d FROM daily_snapshots_pit WHERE {where}")["d"].iloc[0]
+        return date.fromisoformat(d[:10]) if d else today - timedelta(days=365)
+    last_m = _last("CAST(strftime('%d', snapshot_date) AS INTEGER) <= 7")   # monthly anchors
+    last_w = _last("strftime('%w', snapshot_date) = '5'")                   # Friday anchors
+    months_back = max(3, (today.year - last_m.year) * 12 + today.month - last_m.month + 1)
+    weeks_back = max(10, (today - last_w).days // 7 + 1)
+    dates = sorted(set(generate_eval_dates(months_back, today))
+                   | set(generate_weekly_eval_dates(weeks_back, today)))
+    argv = [a for d in dates for a in ("--date", d.isoformat())]
+    stats = {}
+    n = main(argv, stats=stats)
+    if stats.get("failed"):
+        raise RuntimeError(f"PIT refresh: {stats['failed']} of {len(dates)} dates FAILED: {stats['failed_dates']}")
+    if not n:
+        raise RuntimeError(f"PIT refresh wrote 0 rows for {len(dates)} dates")
+    return n
+
+
+def main(argv=None, stats=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("--months", type=int, default=7,
                         help="Number of monthly eval dates back from today (default 7). Ignored when --cadence weekly.")
@@ -1797,7 +1826,9 @@ def main():
                              "Overrides --months/--weeks/--cadence date generation.")
     parser.add_argument("--skip-existing", action="store_true",
                         help="Skip eval dates that already have a SUCCESS row in pit_reconstruction_log")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
+    stats = stats if stats is not None else {}
+    stats.update(failed=0, failed_dates=[])
 
     if args.date:
         from datetime import date as _date
@@ -1886,6 +1917,8 @@ def main():
                 except Exception:
                     pass
             print(f"FAILED — {e}")
+            stats["failed"] += 1
+            stats["failed_dates"].append(eval_str)
             continue
 
         # Diagnostic: how many stocks have at least one signal?

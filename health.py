@@ -38,6 +38,8 @@ from typing import Optional
 
 import pandas as pd
 
+from config import EXCLUDED_FROM_PICKS, TIERS, VIX_REGIMES
+
 from db import (get_db, read_sql, _table_date_range, _compute_freshness, data_health,
                 table_step_meta, TABLES)
 
@@ -205,7 +207,7 @@ def factor_coverage(tbl, count, dates, meta, profile, conn):
         score = 60 + 40 * (coverage - 0.80) / 0.15
         return _factor("coverage", score, "warn",
                        f"{n_stocks:,} of {universe:,} stocks ({100 * coverage:.0f}%) — {missing} missing",
-                       fix="Some stocks have no data. May be dormant micro-caps; check quality_gate.",
+                       fix="Some stocks have no data. May be dormant micro-caps; check universe_liveness.",
                        drill_sql=f"SELECT s.sid, s.name, s.cap_tier FROM stocks s LEFT JOIN [{tbl}] t ON s.sid = t.sid WHERE t.sid IS NULL LIMIT 100",
                        weight=weight)
     return _factor("coverage", max(0, 60 * coverage / 0.80), "error",
@@ -659,7 +661,7 @@ TABLE_PROFILES = {
         "expected_rows": UNIVERSE,
         "critical_columns": ["sid", "name", "sector", "cap_tier"],
         "validity_checks": [
-            {"column": "cap_tier", "in": ["LARGE", "MID", "SMALL"], "label": "cap_tier value"},
+            {"column": "cap_tier", "in": list(TIERS), "label": "cap_tier value"},
         ],
         "outlier_columns": ["pe_ratio", "pb_ratio", "roe", "debt_to_equity"],
         "natural_key": ["sid"],
@@ -686,7 +688,7 @@ TABLE_PROFILES = {
         "expected_rows": 1,
         "critical_columns": ["regime", "alloc_large", "alloc_mid", "alloc_small"],
         "validity_checks": [
-            {"column": "regime", "in": ["CALM", "NORMAL", "CAUTION", "CRISIS"], "label": "regime"},
+            {"column": "regime", "in": list(VIX_REGIMES), "label": "regime"},
             {"column": "alloc_large", "min": 0, "max": 1, "label": "alloc_large"},
         ],
     },
@@ -889,7 +891,7 @@ TABLE_PROFILES = {
         "expected_rows": UNIVERSE,
         "critical_columns": ["sid", "pick_date", "final_score"],
         "validity_checks": [
-            {"column": "cap_tier", "in": ["LARGE", "MID", "SMALL"], "label": "cap_tier"},
+            {"column": "cap_tier", "in": [t for t in TIERS if t not in EXCLUDED_FROM_PICKS], "label": "cap_tier"},
             {"column": "final_score", "min": 0, "max": 1, "label": "final score"},
         ],
         "outlier_columns": ["final_score"],

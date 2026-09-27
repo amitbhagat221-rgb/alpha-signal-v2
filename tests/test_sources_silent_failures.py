@@ -117,3 +117,44 @@ def test_yfinance_analyst_raises_when_no_stock_has_data(monkeypatch):
     monkeypatch.setattr(ya, "DELAY", 0)
     with pytest.raises(RuntimeError, match="yfinance analyst: 0 of 2"):
         ya.compute(ticker=None)
+
+
+# ── bhavcopy: the one CRITICAL fetcher (plan 0015 Phase 0) ──
+
+def _bhav_env(monkeypatch, newest, fetch_result):
+    """nse.compute() for a fixed today (Tue 2026-09-29) with offline stubs."""
+    import datetime as _dt
+    from sources import nse
+
+    class _D(_dt.date):
+        @classmethod
+        def today(cls):
+            return cls(2026, 9, 29)
+    monkeypatch.setattr(nse, "date", _D)
+    monkeypatch.setattr(nse, "_loaded_dates", lambda since: set())
+    monkeypatch.setattr(nse, "_fetch_date", lambda d: fetch_result)
+    monkeypatch.setattr(nse, "read_sql", lambda q, params=None: pd.DataFrame({"d": [newest]}))
+    return nse
+
+
+def test_bhavcopy_raises_on_download_error(monkeypatch):
+    nse = _bhav_env(monkeypatch, "2026-09-28", (None, ["ConnectionError: unreachable"]))
+    with pytest.raises(RuntimeError, match="download failed"):
+        nse.compute()
+
+
+def test_bhavcopy_404_is_holiday_not_failure(monkeypatch):
+    nse = _bhav_env(monkeypatch, "2026-09-28", (None, ["404 — likely holiday"]))
+    assert nse.compute() == 0            # nothing new, prices fresh → a no-op, not a failure
+
+
+def test_bhavcopy_raises_when_prices_stale(monkeypatch):
+    # newest Wed 09-23 → Thu, Fri, Mon missing before Tue 09-29 = 3 weekdays
+    nse = _bhav_env(monkeypatch, "2026-09-23", (None, ["404 — likely holiday"]))
+    with pytest.raises(RuntimeError, match="stale"):
+        nse.compute()
+
+
+def test_bhavcopy_two_holidays_tolerated(monkeypatch):
+    nse = _bhav_env(monkeypatch, "2026-09-24", (None, ["404 — likely holiday"]))  # Fri, Mon missing
+    assert nse.compute() == 0

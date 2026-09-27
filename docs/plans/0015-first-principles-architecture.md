@@ -181,3 +181,15 @@ Every phase must pass the full test suite, `pipeline.py --dry-run`, and an impor
 ## Implementation notes
 - **2026-09-27 — approved.** Merge/deploy gate kept: every merge to master (prod runs from it) and every service restart still needs Amit's explicit OK. Phase 1 shadow mode needs a merge to run in prod, so phases are built on branches up to that gate.
 - D6 scope decision: code-level hardening only (read-only SQL connection + query timeout + harvest lock on rerun). Binding 3001 to localhost or adding auth would lock out remote access via the DuckDNS host — left to Amit.
+- **Phase 0 (2026-09-27, branch `arch-first-principles`).** Done: §9 items 1–8, 11, 12, 13, plus D5 (quality_gate deleted: step, module, config block, model-page card) and D6 (console on a `mode=ro` + `query_only` connection with a 20 s limit and 500-row fetch; rerun takes the harvest lock via `flock -n`). A new bug was found and fixed as item 14: the email footer printed the server's UTC time labelled "IST". Deferred: item 9 (critical-step lists) moves to Phase 1, where "alert-critical" becomes the email's derived critical path; item 10 (ranges) moves to Phase 4, where it becomes one range per column.
+  - Intentional behaviour changes:
+    - Dossiers now narrate the email's 5/5/5 set: 15 LLM calls a day instead of 5.
+    - bhavcopy aborts the run on a non-404 download error, or when 3+ weekdays are missing. That never happened in 4 years of history.
+    - macro_history freshness is now judged daily.
+    - analyst_consensus is now healed by the weekly yfinance step.
+    - `refresh_pit_panel` runs weekly after the email. Its first run catches up about 21 anchors.
+    - The email shows CALM in green, has no dead links, and prints a true IST time.
+  - Equivalence:
+    - Email HTML rendered on a DB copy with old and new code differs only in the regime colour and the footer links.
+    - Promotion-gate `fwd_20` now equals the PIT panel's guarded `fwd_return_20d` on 4,317 rows at 3 anchors, with max diff 0.
+  - Incident: the first read-trace run blocked only Python sockets, so yfinance (libcurl) made one real batched request for about 22 macro tickers before I stopped it. Writes went only to a scratch DB copy. Tracing now runs under an LD_PRELOAD shim that refuses every IPv4/IPv6 `connect()` and `sendto()`.

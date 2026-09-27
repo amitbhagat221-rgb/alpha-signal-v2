@@ -11,7 +11,7 @@
 
 <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">
     <div class="section-title">Model</div>
-    <a href="/system" style="padding: 8px 16px; background: var(--bg-card-hover); color: var(--text-secondary); border-radius: 8px; text-decoration: none; font-size: 12px; font-weight: 600; letter-spacing: 0.3px;">System &rarr;</a>
+    <a href="{{ request.url.scheme }}://{{ request.url.hostname }}:3001/system" target="_blank" rel="noopener" style="padding: 8px 16px; background: var(--bg-card-hover); color: var(--text-secondary); border-radius: 8px; text-decoration: none; font-size: 12px; font-weight: 600; letter-spacing: 0.3px;">System &rarr;</a>
 </div>
 <div class="section-desc">
     The within-tier scoring model: signal weights per cap tier, the C13b validation that picked them, the
@@ -23,7 +23,7 @@
 {{ tab_bar([
     ('regime',     'Regime'),
     ('weights',    'Weights'),
-    ('gate',       'Quality Gate'),
+    ('gate',       'Portfolio Rules'),
     ('backtests',  'Backtests'),
     ('validation', 'Validation'),
 ]) }}
@@ -368,36 +368,11 @@
 
 </div>{# / validation panel #}
 
-{# ────────── QUALITY GATE TAB ────────── #}
+{# ────────── PORTFOLIO RULES TAB ────────── #}
 <div x-show="tab === 'gate'" x-cloak>
 
-{# ── Quality gate + portfolio rules side-by-side ── #}
+{# ── Portfolio rules ── #}
 <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 16px;">
-    <div class="card">
-        <div class="section-title">Quality Gate (Small Caps)</div>
-        <div class="section-desc">Three-tier graduated filter applied before the SMALL screener weights.</div>
-
-        <div style="margin-top: 12px; font-size: 12px; color: var(--text-secondary); line-height: 1.7;">
-            <div style="font-weight: 700; color: var(--red); font-size: 11px; letter-spacing: 0.5px; text-transform: uppercase; margin-top: 8px;">Tier 1 — Hard Exclusion</div>
-            Piotroski F &le; {{ quality_gate.min_piotroski_exclude }} or Altman Z'' &lt; {{ quality_gate.min_altman_z_exclude }}.
-
-            <div style="font-weight: 700; color: var(--amber); font-size: 11px; letter-spacing: 0.5px; text-transform: uppercase; margin-top: 12px;">Tier 2 — Penalty (cap {{ quality_gate.penalty_cap }})</div>
-            <ul style="margin: 4px 0 0 18px;">
-                <li>Loss in 2 of 3 years &rarr; {{ quality_gate.penalty_loss_majority }}</li>
-                <li>Negative 3yr cumulative FCF &rarr; {{ quality_gate.penalty_neg_fcf_3yr }}</li>
-                <li>Pledge &gt; {{ quality_gate.pledge_high_pct }}% &rarr; {{ quality_gate.penalty_pledge_high }}</li>
-                <li>F = 2&ndash;3 &rarr; {{ quality_gate.penalty_low_piotroski }}</li>
-                <li>Altman Z'' = {{ quality_gate.altman_grey_range[0] }}&ndash;{{ quality_gate.altman_grey_range[1] }} &rarr; {{ quality_gate.penalty_altman_grey }}</li>
-                <li>Beneish M &gt; {{ quality_gate.beneish_manipulator }} &rarr; {{ quality_gate.penalty_beneish_flag }}</li>
-            </ul>
-
-            <div style="font-weight: 700; color: var(--green); font-size: 11px; letter-spacing: 0.5px; text-transform: uppercase; margin-top: 12px;">Tier 3 — Quality Composite</div>
-            {% for k, v in quality_gate.composite_weights.items() %}
-                {{ k }}: {{ "%.0f" | format(v * 100) }}%{{ ", " if not loop.last else "" }}
-            {% endfor %}
-        </div>
-    </div>
-
     <div class="card">
         <div class="section-title">Portfolio Rules</div>
         <div class="section-desc">Hard caps applied after scoring to prevent concentration risk.</div>

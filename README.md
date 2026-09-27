@@ -35,7 +35,7 @@ More: [docs/reference/commands.md](docs/reference/commands.md). The cockpit runs
 config.py · db.py · tables.py · pipeline.py · schema.sql · lineage.py · health.py
 sources/      fetchers (NSE, BSE, Tickertape, yfinance, Screener, AMFI, Moneycontrol, RSS…)
 signals/      one module per factor family → *_scores tables
-scoring/      screener · quality_gate · regime · confidence · health_score
+scoring/      screener · regime · confidence · health_score
 eligibility/  per-signal eligibility registry     validators/  trust-pipeline gates
 output/       snapshot · dossier · email (plus generated reports, gitignored)
 tools/        PIT reconstruction, backtests, promotion gate, health/watchdog, studies

@@ -242,7 +242,7 @@ def _detect_regime_change():
     regime_yesterday = _regime_for_vix(vix.iloc[1]["vix"])
 
     if regime_today != regime_yesterday:
-        colors = {"CALM": "green", "NORMAL": "blue", "CAUTION": "amber", "CRISIS": "red"}
+        from formatting import REGIME_COLORS as colors
         changes.append({
             "change_type": "REGIME_CHANGE", "severity": "HIGH",
             "color": colors.get(regime_today, "amber"),

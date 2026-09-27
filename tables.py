@@ -154,7 +154,7 @@ TABLES = {
     # real regression.
     "fundamentals_screener": {
         "kind": "RAW", "domain": "Fundamentals", "freq": "weekly", "data_freq": "biweekly",
-        "source": "Screener.in Premium (manual pull, no automated cron)", "date_col": "fetched_at",
+        "source": "Screener.in Premium (cron `screener_pull --universe`, 1st + 15th 06:00 UTC)", "date_col": "fetched_at",
         "stale_days": 21, "coverage": (85.0, 70.0),
     },
     # Quarterly filings; ~90d max gap, 120 tolerates a delayed wave.
@@ -488,7 +488,7 @@ TABLES = {
     # ── Backtest (PIT) ──
     "daily_snapshots_pit": {
         "kind": "COMPUTED", "domain": "Backtest (PIT)", "date_col": "snapshot_date", "mirror": True,
-        "depth": "Forward extension (currently 7 monthly dates Nov 2025 → May 2026)",
+        "depth": "Monthly anchors from 2019-12 + Friday anchors; refreshed weekly by refresh_pit_panel",
         "description": "v2 PIT reconstruction extending forward of the v1 archive. Computed by tools/reconstruct_pit.py with proper filing-lag discipline (75d annual / 60d quarterly / 21d shareholding). Adds m_score and z_score (forensic) which v1 lacks. Use for backtests in dates after 2026-02 where v1 stops.",
     },
     "daily_snapshots_pit_v1": {

@@ -479,7 +479,7 @@ Respond in JSON with these exact keys:
 Be specific to THIS stock. No generic statements."""
 
 
-def generate(top=5, dry_run=False):
+def generate(top=None, dry_run=False):
     """Generate dossiers for top picks.
 
     Raises RuntimeError if ANTHROPIC_API_KEY is missing (in non-dry-run) or
@@ -500,17 +500,11 @@ def generate(top=5, dry_run=False):
     # have a dossier written. The SID remains in daily_picks for review in
     # cockpit but doesn't get LLM-narrated. WARN-status picks still get
     # dossiers (the WARN is surfaced in cockpit, not blocking).
-    picks = read_sql(
-        "SELECT dp.sid, dp.final_score, dp.rank, dp.cap_tier, s.ticker, s.name "
-        "FROM daily_picks dp JOIN stocks s ON dp.sid = s.sid "
-        "WHERE dp.pick_date = (SELECT MAX(pick_date) FROM daily_picks) "
-        "  AND (dp.integrity_status IS NULL OR dp.integrity_status != 'FAIL') "
-        "ORDER BY dp.cap_tier, dp.rank LIMIT ?",
-        params=[top * 3],
-    )
-
-    # Take top N overall
-    picks = picks.head(top)
+    # Plan 0015 Phase 0: the SAME published set the email shows (views.published_picks,
+    # incl. the UHS ≥ 60 gate), top N per tier. The old `ORDER BY cap_tier … head(5)`
+    # sorted tiers alphabetically, so only the LARGE top 5 ever got a dossier.
+    from views import published_picks
+    picks = published_picks("book" if top is None else top)
     print(f"Generating dossiers for {len(picks)} stocks...\n")
 
     dossiers = []
@@ -586,12 +580,12 @@ def generate(top=5, dry_run=False):
 
 def compute(dry_run=False):
     """Pipeline entry point."""
-    return generate(top=5, dry_run=dry_run)
+    return generate(dry_run=dry_run)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--top", type=int, default=5)
+    parser.add_argument("--top", type=int, default=None, help="per tier (default: PORTFOLIO picks_per_tier)")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
     generate(top=args.top, dry_run=args.dry_run)

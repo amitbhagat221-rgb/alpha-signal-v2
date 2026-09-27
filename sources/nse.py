@@ -26,6 +26,7 @@ import argparse
 from datetime import date, datetime, timedelta
 from io import StringIO
 
+import numpy as np
 import pandas as pd
 
 from config import API
@@ -173,8 +174,12 @@ def _fetch_date(target_date):
     return df[out_cols], errors
 
 
-def fetch_bhavcopy(target_date=None, dry_run=False):
-    """Fetch bhavcopy for a single date."""
+def fetch_bhavcopy(target_date=None, dry_run=False, failures=None):
+    """Fetch bhavcopy for a single date.
+
+    `failures` (optional list): a day that could not be loaded for a reason OTHER
+    than 404 (not published / holiday) is appended as "YYYY-MM-DD: reason".
+    """
     if target_date is None:
         target_date = date.today()
     elif isinstance(target_date, str):
@@ -194,6 +199,8 @@ def fetch_bhavcopy(target_date=None, dry_run=False):
 
     if df is None:
         print(f"SKIP — {errors}")
+        if failures is not None and not errors[0].startswith("404"):
+            failures.append(f"{target_date}: {errors[0]}")
         return 0
 
     for e in errors:
@@ -257,11 +264,36 @@ def compute(dry_run=False):
     Holidays aren't "loaded", so they're re-probed (one 404 each) until they
     age out of the window.
     """
-    days = [date.today() - timedelta(days=i) for i in range(7, 0, -1)]
+    today = date.today()
+    days = [today - timedelta(days=i) for i in range(7, 0, -1)]
     have = _loaded_dates(days[0].isoformat())
     todo = [d for d in days if _is_trading_day(d) and d.isoformat() not in have]
     print(f"NSE Bhavcopy: {len(todo)} of the last 7 days not yet loaded")
-    return sum(fetch_bhavcopy(d, dry_run=dry_run) for d in todo)
+    failures = []
+    n = sum(fetch_bhavcopy(d, dry_run=dry_run, failures=failures) for d in todo)
+    if not dry_run:
+        _assert_fresh(today, failures)
+    return n
+
+
+# Weekdays with no bhavcopy between the newest loaded day and today. Holidays make
+# 1 normal (49× since 2022-08) and 2 rare (once); 3+ has never happened. This is a
+# CRITICAL step: returning 0 here used to log SUCCESS and let the screener rank on
+# stale prices (plan 0015 Phase 0).
+STALE_WEEKDAYS = 3
+
+
+def _assert_fresh(today, failures):
+    """Raise if a day failed for a non-404 reason, or if prices are stale."""
+    if failures:
+        raise RuntimeError("bhavcopy download failed (not a 404/holiday): " + "; ".join(failures))
+    newest = read_sql("SELECT MAX(date) AS d FROM stock_prices WHERE source = 'bhavcopy'")["d"].iloc[0]
+    if newest is None:
+        raise RuntimeError("stock_prices has no bhavcopy rows")
+    missing = int(np.busday_count(newest, today.isoformat())) - 1
+    if missing >= STALE_WEEKDAYS:
+        raise RuntimeError(f"bhavcopy stale: newest loaded day {newest}, {missing} weekdays "
+                           f"missing before {today} (threshold {STALE_WEEKDAYS})")
 
 
 if __name__ == "__main__":

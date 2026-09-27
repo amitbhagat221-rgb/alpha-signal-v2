@@ -78,13 +78,13 @@ tools/        research only: nothing in the graph imports tools/
    pipeline.py runs config.PIPELINE_STEPS in list order (85 steps)
    each step: {name, module, function, critical, table, source, data_freq, frequency}
    frequency gate: daily · weekly (Sunday) · monthly (1st); --step overrides
-   critical=True (fetch_bhavcopy, quality_gate, screener) aborts the run
+   critical=True (fetch_bhavcopy, screener) aborts the run
    every step → one pipeline_log row; 11 crontab lines run jobs outside the list
 
  SOURCES  ────────→  SIGNALS  ────────→  SCORING  ────────→  OUTPUT
  sources/*           signals/*           scoring/*           output/*
- external → DB       DB → *_scores       quality_gate,       snapshot → dossier
-                     (+ inline factors   regime, screener    (Claude API) → email
+ external → DB       DB → *_scores       regime,             snapshot → dossier
+                     (+ inline factors   screener            (Claude API) → email
                       in screener)       → daily_picks
       PIT twin: tools/reconstruct_pit.py → daily_snapshots_pit (not scheduled)
                               ↓

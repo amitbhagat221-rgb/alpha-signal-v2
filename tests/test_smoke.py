@@ -46,9 +46,9 @@ def test_dry_run_executes():
 
 
 def test_critical_steps_marked():
-    """The three critical steps (bhavcopy, quality_gate, screener) must stay critical."""
+    """The critical steps (bhavcopy, screener) must stay critical."""
     by_name = {s["name"]: s for s in PIPELINE_STEPS}
-    for name in ("fetch_bhavcopy", "quality_gate", "screener"):
+    for name in ("fetch_bhavcopy", "screener"):
         assert by_name[name]["critical"], f"step '{name}' must be critical=True"
 
 

@@ -36,9 +36,9 @@ CREATE TABLE IF NOT EXISTS analyst_consensus (
 , price_target_median REAL, price_target_high REAL, price_target_low REAL, recommendation_key TEXT, recommendation_mean REAL, n_strong_buy INTEGER, n_buy INTEGER, n_hold INTEGER, n_sell INTEGER, n_strong_sell INTEGER, pt_source TEXT, next_earnings_date TEXT, rating_mix_history TEXT, price_target_prev REAL, price_target_changed_at TEXT);
 
 CREATE TABLE IF NOT EXISTS analyst_consensus_quarantine (
-    sid             TEXT PRIMARY KEY,
+    sid             TEXT,
     total_analysts  INTEGER,
-    buy_pct         REAL CHECK(buy_pct BETWEEN 0 AND 100),
+    buy_pct         REAL,
     price_target    REAL,
     forward_eps     REAL,
     eps_growth_pct  REAL,

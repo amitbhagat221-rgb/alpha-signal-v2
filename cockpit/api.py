@@ -789,7 +789,7 @@ def get_changes(days=1):
     """Get recent change events from diff engine."""
     changes = db.rows(
         "SELECT * FROM daily_changes WHERE change_date >= date('now', ?) "
-        "ORDER BY CASE severity WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END, id DESC",
+        "ORDER BY CASE UPPER(severity) WHEN 'HIGH' THEN 0 WHEN 'MEDIUM' THEN 1 ELSE 2 END, id DESC",
         [f"-{days} days"],
     )
     if not changes:
@@ -810,8 +810,8 @@ def get_regime():
         return {"regime": "UNKNOWN", "vix_latest": 0, "vix_20d_avg": 0,
                 "alloc_large": 0.4, "alloc_mid": 0.3, "alloc_small": 0.3}
     # Add color mapping
-    colors = {"CALM": "green", "NORMAL": "blue", "CAUTION": "amber", "CRISIS": "red"}
-    r["color"] = colors.get(r.get("regime"), "blue")
+    from formatting import REGIME_COLORS
+    r["color"] = REGIME_COLORS.get(r.get("regime"), "blue")
     return r
 
 

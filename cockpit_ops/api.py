@@ -150,7 +150,7 @@ V1_BACKTEST_DIR = Path("/home/ubuntu/alpha-signal/data/backtest")
 @_persisted_cache(300, name="get_model_overview")
 def get_model_overview():
     """Tier weight tables, signal validation, regime rules. Used by /model."""
-    from config import SIGNAL_WEIGHTS, VIX_REGIMES, QUALITY_GATE, PORTFOLIO, TRANSACTION_COSTS_BPS
+    from config import SIGNAL_WEIGHTS, VIX_REGIMES, PORTFOLIO, TRANSACTION_COSTS_BPS
 
     # Per-tier signal weights — convert dict to ordered list of (signal, weight, pct).
     tiers = {}
@@ -204,7 +204,6 @@ def get_model_overview():
         "regimes": regimes,
         "current_regime": current_regime,
         "validation": {"rows": validation_rows, "meta": validation_meta},
-        "quality_gate": QUALITY_GATE,
         "portfolio": PORTFOLIO,
         "transaction_costs_bps": TRANSACTION_COSTS_BPS,
         "backtest_roster": get_backtest_roster(),
@@ -471,7 +470,7 @@ def get_flow_overview():
     ]
     NAMED_LAYERS = {
         "news_brief": "Signals",
-        "quality_gate": "Scoring", "regime_update": "Scoring", "screener": "Scoring",
+        "regime_update": "Scoring", "screener": "Scoring",
         "refresh_eligibility": "Scoring", "portfolio_construction": "Scoring",
         "snapshot": "Output", "diff_engine": "Output", "dossier": "Output", "email": "Output",
     }
@@ -553,13 +552,25 @@ def rerun_step(step_name: str) -> dict:
         except (ValueError, TypeError):
             pass
 
+    # No-two-harvesters (CLAUDE.md): a rerun takes the same lock as run_pipeline.sh,
+    # run_daily_forward.sh and the watchdog. Refuse now if it is held; the child
+    # re-takes it with `flock -n` for its whole run (plan 0015 D6).
+    import fcntl
+    lock_path = "/tmp/alpha_signal_harvest.lock"
+    with open(lock_path, "a") as lf:
+        try:
+            fcntl.flock(lf, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            fcntl.flock(lf, fcntl.LOCK_UN)
+        except BlockingIOError:
+            return {"ok": False, "error": "another pipeline/harvester run holds the lock — try later"}
+
     project_root = Path(__file__).resolve().parent.parent
     rerun_log = project_root / "output" / "rerun.log"
     rerun_log.parent.mkdir(parents=True, exist_ok=True)
     log_fp = open(rerun_log, "ab")
 
     subprocess.Popen(
-        [sys.executable, "pipeline.py", "--step", step_name],
+        ["flock", "-n", lock_path, sys.executable, "pipeline.py", "--step", step_name],
         cwd=project_root,
         stdout=log_fp,
         stderr=subprocess.STDOUT,
@@ -1762,15 +1773,6 @@ def get_command_centre():
 
     arch_model = [
         {
-            "name": "Quality gate",
-            "summary": "Excludes F-Score ≤ 1, distress flags, dilution",
-            "items": [
-                ("scoring/quality_gate.py", "Hard exclusions before scoring"),
-                ("Penalty: low Piotroski (F=2-3) → −0.15", "Soft penalty"),
-                ("Penalty: distress (Z<1.81) → fixed", "Forensic penalty"),
-            ],
-        },
-        {
             "name": "Cap-tier composite",
             "summary": "Within-tier weighted sum of validated signals (cf C13b rubric)",
             "items": [
@@ -1805,7 +1807,7 @@ def get_command_centre():
             "summary": "Top picks per cap tier with regime context, dossiers",
             "items": [
                 ("/", "Cockpit Morning Brief route"),
-                ("Top 5 LARGE / MID / SMALL", "Ranked by composite, gated by quality_gate"),
+                ("Top 5 LARGE / MID / SMALL", "Ranked by composite within tier, then the pick gate"),
                 ("Regime banner", "Bullish/Neutral/Bearish header"),
             ],
         },

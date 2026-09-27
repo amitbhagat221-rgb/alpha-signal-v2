@@ -25,7 +25,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from db import BEST_EFFORT_STALE, data_health, get_db, read_sql
+from db import BEST_EFFORT_STALE, data_health, get_db, read_sql, table_producer
 from config import PIPELINE_STEPS
 from pipeline import run_step
 
@@ -40,14 +40,14 @@ def _producer_for(table_name, row_produced_by=None):
     """Return the (name, module, function, critical) tuple for a table's producer.
 
     Match priority:
-      1. PIPELINE_STEPS row with matching `table`
+      1. db.table_producer(table) — the same primary producer freshness is judged on
       2. PIPELINE_STEPS row whose `name` matches `row_produced_by` (file outputs
          have `table: None`, so data_health() carries the step name in
          `produced_by` instead).
     """
-    for s in PIPELINE_STEPS:
-        if s.get("table") and s["table"] == table_name:
-            return (s["name"], s["module"], s["function"], s["critical"])
+    s = table_producer(table_name)
+    if s:
+        return (s["name"], s["module"], s["function"], s["critical"])
     if row_produced_by:
         for s in PIPELINE_STEPS:
             if s["name"] == row_produced_by:

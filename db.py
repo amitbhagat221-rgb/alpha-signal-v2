@@ -114,6 +114,13 @@ def _ensure_columns():
 # The source tables are the TABLES entries flagged `quarantine`.
 
 
+_QUARANTINE_META_COLS = [
+    ("_q_failed_gate", "TEXT"),
+    ("_q_reason", "TEXT"),
+    ("_q_quarantined_at", "TEXT DEFAULT (datetime('now'))"),
+]
+
+
 def _ensure_quarantine_tables():
     """Ensure `<table>_quarantine` exists for every QUARANTINE_SOURCE_TABLES entry."""
     import re
@@ -122,9 +129,15 @@ def _ensure_quarantine_tables():
             mirror = f"{source}_quarantine"
             # Already exists?
             row = conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name=?", (mirror,)
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name=?", (mirror,)
             ).fetchone()
+            if row and not _QUARANTINE_BAD_CONSTRAINT.search(row[0]):
+                continue
             if row:
+                # Legacy mirror still carries an inline PK / CHECK (the old regex only
+                # stripped table-level PKs): a sid could be quarantined once, and a row
+                # failing a range gate could not be quarantined at all. Rebuild it.
+                _rebuild_quarantine_mirror(conn, source, mirror)
                 continue
             # Read source DDL
             row = conn.execute(
@@ -138,19 +151,37 @@ def _ensure_quarantine_tables():
             conn.execute(mirror_ddl)
             # Append 3 forensic-metadata columns (always at the end so source-row
             # offsets stay aligned for blob-copy code paths).
-            for col, typ in [
-                ("_q_failed_gate", "TEXT"),
-                ("_q_reason", "TEXT"),
-                ("_q_quarantined_at", "TEXT DEFAULT (datetime('now'))"),
-            ]:
+            for col, typ in _QUARANTINE_META_COLS:
                 try:
                     conn.execute(f"ALTER TABLE {mirror} ADD COLUMN {col} {typ}")
                 except sqlite3.OperationalError:
                     pass
 
 
+# An inline `PRIMARY KEY` or any `CHECK(...)` has no place in a quarantine mirror.
+_QUARANTINE_BAD_CONSTRAINT = re.compile(r"PRIMARY\s+KEY|\bCHECK\s*\(", re.IGNORECASE)
+_CHECK_CLAUSE = re.compile(r"\s*(?:CONSTRAINT\s+\w+\s+)?CHECK\s*\((?:[^()]|\([^()]*\))*\)", re.IGNORECASE)
+
+
+def _rebuild_quarantine_mirror(conn, source, mirror):
+    """Recreate `mirror` from the source DDL, keeping its rows (shared columns)."""
+    src_ddl = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name=?", (source,)
+    ).fetchone()[0]
+    old = f"{mirror}__old"
+    conn.execute(f"ALTER TABLE {mirror} RENAME TO {old}")
+    conn.execute(_rewrite_ddl_for_quarantine(src_ddl, source, mirror))
+    for col, typ in _QUARANTINE_META_COLS:
+        conn.execute(f"ALTER TABLE {mirror} ADD COLUMN {col} {typ}")
+    new_cols = {r[1] for r in conn.execute(f"PRAGMA table_info({mirror})")}
+    cols = [r[1] for r in conn.execute(f"PRAGMA table_info({old})") if r[1] in new_cols]
+    col_sql = ", ".join(cols)
+    conn.execute(f"INSERT INTO {mirror} ({col_sql}) SELECT {col_sql} FROM {old}")
+    conn.execute(f"DROP TABLE {old}")
+
+
 def _rewrite_ddl_for_quarantine(source_ddl: str, source_name: str, mirror_name: str) -> str:
-    """Source CREATE TABLE → quarantine CREATE TABLE. Strips PK + FK clauses."""
+    """Source CREATE TABLE → quarantine CREATE TABLE. Strips PK, FK, UNIQUE, CHECK."""
     import re
     ddl = source_ddl
     # Replace table name (first occurrence after CREATE TABLE)
@@ -162,6 +193,10 @@ def _rewrite_ddl_for_quarantine(source_ddl: str, source_name: str, mirror_name: 
     # Strip standalone PRIMARY KEY (...) constraints — quarantined rows can
     # duplicate (e.g. same sid quarantined for two different gates same day).
     ddl = re.sub(r",\s*PRIMARY\s+KEY\s*\([^)]+\)", "", ddl, flags=re.IGNORECASE)
+    # …and inline column PKs (`sid TEXT PRIMARY KEY [AUTOINCREMENT]`).
+    ddl = re.sub(r"\s+PRIMARY\s+KEY(\s+AUTOINCREMENT)?", "", ddl, flags=re.IGNORECASE)
+    # CHECK constraints: a row that failed a range gate must still be storable here.
+    ddl = _CHECK_CLAUSE.sub("", ddl)
     # Strip REFERENCES clauses — quarantined data may include invalid SIDs by
     # definition (a misidentified stock has no FK match in stocks).
     ddl = re.sub(r"\s+REFERENCES\s+\w+\s*\([^)]*\)(\s+ON\s+\w+\s+\w+)*", "", ddl, flags=re.IGNORECASE)
@@ -933,18 +968,39 @@ def data_health(cache_ttl=0):
     return _data_health_impl()
 
 
+_CADENCE_RANK = {"daily": 0, "weekly": 1, "monthly": 2, "quarterly": 3}
+
+
+def table_producer(table_name):
+    """The ONE primary producer step of a table (plan 0015 Phase 0).
+
+    Several steps can write the same table (macro_history, analyst_consensus, …).
+    Freshness is judged on — and the watchdog heals via — the same step: the one
+    with the finest `frequency`; ties go to the first listed. Before this, freshness
+    took the LAST writer and the watchdog the FIRST, so e.g. analyst_consensus was
+    judged on the weekly yfinance cadence but healed by the monthly Tickertape step.
+    """
+    from config import PIPELINE_STEPS
+
+    steps = [s for s in PIPELINE_STEPS if s.get("table") == table_name]
+    if not steps:
+        return None
+    return min(steps, key=lambda s: _CADENCE_RANK.get(s["frequency"], 9))  # min() is stable
+
+
 def table_step_meta():
     """table → {source, data_freq, frequency, step_name, function}.
 
-    A PIPELINE_STEPS step with `table` wins; otherwise the TABLES entry's
-    freq/source (tables fed by standalone crons or co-written by another step).
+    The table's primary producer (`table_producer`) wins; otherwise the TABLES
+    entry's freq/source (tables fed by standalone crons).
     """
     from config import PIPELINE_STEPS
 
     meta = {}
-    for s in PIPELINE_STEPS:
-        if s.get("table"):
-            meta[s["table"]] = {
+    for t in dict.fromkeys(s["table"] for s in PIPELINE_STEPS if s.get("table")):
+        s = table_producer(t)
+        if s:
+            meta[t] = {
                 "source": s["source"],
                 "data_freq": s["data_freq"],
                 "frequency": s["frequency"],
@@ -1218,6 +1274,9 @@ SQL_FORBIDDEN = (
 )
 
 
+SQL_CONSOLE_TIMEOUT_S = 20
+
+
 def safe_read_sql(query, max_rows=500):
     """
     Run a single read-only SQL statement and return (DataFrame, error_message).
@@ -1249,19 +1308,29 @@ def safe_read_sql(query, max_rows=500):
     if not (upper.startswith("SELECT") or upper.startswith("WITH")):
         return None, "Query must start with SELECT or WITH"
 
-    # Add row cap if not already present
-    if "LIMIT" not in upper:
-        q += f" LIMIT {int(max_rows)}"
-
+    # Execute on a connection that CANNOT write (plan 0015 D6): read-only URI +
+    # query_only, a wall-clock limit, and at most max_rows fetched. The keyword
+    # screen above stays as a friendlier first error, not as the guarantee.
+    deadline = _time_module.monotonic() + SQL_CONSOLE_TIMEOUT_S
+    conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
     try:
-        with get_db() as conn:
-            df = pd.read_sql_query(q, conn)
+        conn.execute("PRAGMA query_only = ON")
+        conn.set_progress_handler(lambda: _time_module.monotonic() > deadline, 10_000)
+        cur = conn.execute(q)
+        cols = [d[0] for d in cur.description or []]
+        df = pd.DataFrame(cur.fetchmany(int(max_rows)), columns=cols)
         return df, None
+    except sqlite3.OperationalError as e:
+        if "interrupted" in str(e).lower():
+            return None, f"Query exceeded {SQL_CONSOLE_TIMEOUT_S}s and was stopped"
+        return None, str(e)
     except Exception as e:
         # pandas wraps sqlite errors as `DatabaseError: Execution failed on sql '...': <real msg>`.
         # Surface only the sqlite portion to keep the console message friendly.
         msg = str(e.__cause__) if e.__cause__ else str(e)
         return None, msg
+    finally:
+        conn.close()
 
 
 # ── Quick self-test ──

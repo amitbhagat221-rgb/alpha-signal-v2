@@ -44,7 +44,7 @@ Cron lives only in the crontab, **not in git**, so inspect it with `crontab -l`.
 | 15:00 daily | `tools.freshness_watchdog`: heals stale tables/files, emails on gaps | `watchdog.log` |
 | 19:07 on the 1st | `run_tickertape_monthly.sh`: Tickertape fundamentals (~4h, takes the harvest lock) | `tickertape_cron.log` |
 
-Inside the 03:30 pipeline, each step's `frequency` gates it: `daily`, `weekly` (Sundays), or `monthly` (the 1st). `--step <name>` ignores the gate. Only three steps are `critical` and abort the run: `fetch_bhavcopy`, `quality_gate`, `screener`. Slow jobs (news enrichment, regulatory classify, broker recos with a 90-minute daily budget, banking metrics) run after the email so they can't delay it. Every step writes a row to `pipeline_log`.
+Inside the 03:30 pipeline, each step's `frequency` gates it: `daily`, `weekly` (Sundays), or `monthly` (the 1st). `--step <name>` ignores the gate. Only two steps are `critical` and abort the run: `fetch_bhavcopy` (also when prices are stale) and `screener`. Slow jobs (news enrichment, regulatory classify, broker recos with a 90-minute daily budget, banking metrics) run after the email so they can't delay it. Every step writes a row to `pipeline_log`.
 
 ---
 

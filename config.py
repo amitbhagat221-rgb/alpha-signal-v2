@@ -175,39 +175,6 @@ VIX_REGIMES = {
 # Days in new regime before switching (hysteresis)
 VIX_HYSTERESIS_DAYS = 3
 
-# ── Quality Gate (Small Caps Only) ──
-
-QUALITY_GATE = {
-    # Tier 1: Hard exclusions
-    "min_piotroski_exclude": 1,      # F <= 1 → excluded
-    "min_altman_z_exclude": 0.5,     # Z < 0.5 → excluded
-
-    # Tier 2: Penalties (capped at total of -0.60)
-    "penalty_cap": -0.60,
-    "penalty_loss_majority": -0.25,   # loss 2/3 years
-    "penalty_neg_fcf_3yr": -0.20,     # negative 3yr cumulative FCF
-    "penalty_pledge_high": -0.25,     # pledge > 50%
-    "penalty_low_piotroski": -0.15,   # F = 2-3
-    "penalty_altman_grey": -0.15,     # Z = 0.5-1.1
-    "penalty_beneish_flag": -0.20,    # M > -1.78
-
-    # Tier 2 thresholds
-    "pledge_high_pct": 50.0,
-    "piotroski_low_range": (2, 3),
-    "altman_grey_range": (0.5, 1.1),
-    "beneish_manipulator": -1.78,
-
-    # Tier 3: Quality composite weights
-    "composite_weights": {
-        "piotroski":    0.25,
-        "cfo_ebitda":   0.20,
-        "beneish":      0.20,
-        "altman_z":     0.15,
-        "pledge":       0.10,
-        "fcf_years":    0.10,
-    },
-}
-
 # ── Forensic Thresholds ──
 
 FORENSIC = {
@@ -664,10 +631,6 @@ PIPELINE_STEPS = [
      "table": "universe_eligibility", "source": "eligibility/registry.py — 8 signals × universe",
      "data_freq": "daily",         "frequency": "daily"},
 
-    {"name": "quality_gate",       "module": "scoring.quality_gate","function": "compute",  "critical": True,
-     "table": None,                "source": "piotroski + forensic + shareholding",
-     "data_freq": "quarterly",     "frequency": "weekly"},
-
     {"name": "regime_update",      "module": "scoring.regime",      "function": "compute",  "critical": False,
      "table": "regime_state",      "source": "vix_history",         "data_freq": "daily",   "frequency": "daily"},
 
@@ -803,6 +766,14 @@ PIPELINE_STEPS = [
     {"name": "pit_replay_freeze",  "module": "tools.pit_replay",    "function": "freeze",   "critical": False,
      "table": "pit_replay_snapshots", "source": "scoring.screener._load_signals + score_universe (frozen)",
      "data_freq": "daily",         "frequency": "daily"},
+
+    # Plan 0015 Phase 0: the PIT panel (daily_snapshots_pit) was hand-rebuilt only
+    # and froze at 2026-07-01 while the monthly backtest cron re-scored it. Weekly,
+    # after the email: re-run recent monthly + Friday anchors (fwd returns mature)
+    # and catch up missed ones. ~13 dates × ~40s.
+    {"name": "refresh_pit_panel",  "module": "tools.reconstruct_pit", "function": "refresh", "critical": False,
+     "table": "daily_snapshots_pit", "source": "all PIT producers over recent anchors",
+     "data_freq": "weekly",        "frequency": "weekly"},
 
     # MICRO tier reclassifier — keeps the SMALL/MICRO boundary fresh as ADTV,
     # quality scores, and fundamental depth change. Idempotent. Demotes any

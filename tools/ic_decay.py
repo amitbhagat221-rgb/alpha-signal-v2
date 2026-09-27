@@ -73,23 +73,35 @@ def _fwd_panel(panel, price_series):
     """Long frame [snapshot_date, sid, fwd_5 … fwd_252] for the (date, sid)
     pairs present in `panel`. fwd_H = close H trading days after the first
     trading day on/after snapshot_date (matches pit_fwd_return_20d's
-    anchor_idx + H), NaN where the horizon hasn't matured."""
+    anchor_idx + H), NaN where the horizon hasn't matured.
+
+    Same ANCHOR-PROXIMITY GUARD as reconstruct_pit.pit_fwd_return_20d (ADR 0047;
+    plan 0015 Phase 0 — this copy lacked it): the entry row must lie within
+    _FWD_MAX_GAP_DAYS of snapshot_date, and the exit row within _FWD_MAX_GAP_DAYS
+    of the date H MARKET trading days later. Otherwise that horizon is NaN."""
+    from tools.reconstruct_pit import _FWD_MAX_GAP_DAYS
+    gap = pd.Timedelta(days=_FWD_MAX_GAP_DAYS)
+    cal = pd.DatetimeIndex(sorted(set().union(*(s.index for s in price_series.values()))))
     pairs = panel[["snapshot_date", "sid"]].drop_duplicates()
     rows = []
     for snapshot_date, sid in pairs.itertuples(index=False):
         s = price_series.get(sid)
         if s is None or s.empty:
             continue
-        pos = int(s.index.searchsorted(pd.Timestamp(snapshot_date), side="left"))
-        if pos >= len(s):
+        t0 = pd.Timestamp(snapshot_date)
+        pos = int(s.index.searchsorted(t0, side="left"))
+        if pos >= len(s) or abs(s.index[pos] - t0) > gap:    # (a) entry guard
             continue
         p0 = float(s.iloc[pos])
         if not (p0 > 0):
             continue
+        m_anchor = int(cal.searchsorted(t0, side="left"))
         rec = {"snapshot_date": snapshot_date, "sid": sid}
         for h in HORIZONS:
             tgt = pos + h
-            if tgt < len(s):
+            if tgt < len(s) and m_anchor + h < len(cal):
+                if abs(s.index[tgt] - cal[m_anchor + h]) > gap:   # (b) exit guard
+                    continue
                 p1 = float(s.iloc[tgt])
                 if p1 > 0:
                     rec[f"fwd_{h}"] = p1 / p0 - 1.0

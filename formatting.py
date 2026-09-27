@@ -66,3 +66,8 @@ def tone(x, pos="score-green", neg="score-red", zero=""):
 
 
 FILTERS = {"signed": signed, "pct": pct, "inr": inr, "crore": crore, "tone": tone}
+
+
+# VIX regime → colour name. One map for cockpit, change feed and email; the
+# regime vocabulary itself is config.VIX_REGIMES (CALM/NORMAL/CAUTION/CRISIS).
+REGIME_COLORS = {"CALM": "green", "NORMAL": "blue", "CAUTION": "amber", "CRISIS": "red"}
