@@ -105,15 +105,17 @@ tools/        research only: nothing in the graph imports tools/
 |---|---|
 | Steps, order, cadence | `config.PIPELINE_STEPS` (hand order runs; `graph.py` derives the order in shadow) |
 | Live and PIT factor values | `pit.py` (`features_at(t)`); the screener and the panel call the same code |
-| Picks the email + dossier show | `views.published_picks()` |
+| What any surface shows | `views.py` read-models (picks with one gate, stock, signals, price metrics, pipeline status); nav from `cockpit/pages.py` / `cockpit_ops/pages.py` |
+| Hosts, rate limits, LLM model ids | `hosts.HOSTS`, enforced by `sources/_http` |
+| Ranges, custom checks, alert criticality | `checks/` (`checks.ranges.COLUMNS`, `checks.custom`, derived critical steps, `post_step`) |
 | Tables | `schema.sql` + `tables.TABLES` (`tests/test_tables.py`) |
 | Factor registry | `factors.FACTORS` (+ `PIT_PRODUCERS`); db re-exports the derived views |
-| Production weights | `config.SIGNAL_WEIGHTS` → [signal-weights.md](signal-weights.md) |
-| Tiers | `stocks.cap_tier`, `config.TIERS`, `config.EXCLUDED_FROM_PICKS`, `tools/classify_micro_tier.py` |
+| Production weights | each wired factor's `weights` in `factors.FACTORS` → derived `factors.SIGNAL_WEIGHTS`; rationale in [signal-weights.md](signal-weights.md) |
+| Tiers | `config.TIERS` (rules, pickable, picks, costs) → `scoring/segment.py` (monthly) + `tools/classify_micro_tier.py` → `stocks.cap_tier` |
 | Eligibility | `factors` eligibility → `tools/refresh_eligibility` → `universe_eligibility` |
-| Factor lineage | `lineage.FACTOR_LINEAGE` (hand-kept, same keys as FACTORS) |
+| Factor lineage | derived: `factors.INPUT_TABLES` + `lineage.LINEAGE_DETAIL` (column-level only) |
 | Freshness-watched files | `config.FILE_OUTPUTS` |
-| Cron | `crontab -l` (table in [OPERATOR.md](../../OPERATOR.md)) |
+| Cron | `crontab -l`: one `run.sh <job>` line per job (table in [OPERATOR.md](../../OPERATOR.md)) |
 
 Tier-aware scoring:
 - LARGE is the top 100, MID is 101–250, SMALL is the rest.
