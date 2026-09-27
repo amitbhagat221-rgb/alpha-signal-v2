@@ -12,6 +12,8 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.gzip import GZipMiddleware
 
+from webauth import LoginRequired
+
 import views
 from cockpit import api, pages
 from cockpit._shared import COCKPIT_STATIC, COCKPIT_TEMPLATES, make_templates, nav_model, prewarm
@@ -20,6 +22,7 @@ from cockpit_ops.api import get_model_overview
 app = FastAPI(title="Alpha Signal Cockpit")
 # Gzip every response > 1KB — /explorer is 1.27MB of HTML (same as ops).
 app.add_middleware(GZipMiddleware, minimum_size=1024)
+app.add_middleware(LoginRequired, app_name="Cockpit")     # webauth.py — password login (review F5)
 app.mount("/static", StaticFiles(directory=COCKPIT_STATIC), name="static")
 
 templates = make_templates([COCKPIT_TEMPLATES], nav=nav_model(pages.PAGES, pages.OTHER_APP, pages.BRAND))

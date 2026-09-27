@@ -44,6 +44,7 @@ FILES=(
   /home/ubuntu/alpha-signal/run_pipeline.sh           # v1 — holds the real credentials
   /home/ubuntu/.config/rclone/rclone.conf             # Drive OAuth token
   /home/ubuntu/.cache/screener_cookie.json            # Screener session (re-creatable via --login)
+  /home/ubuntu/.config/alpha-signal/cockpit_auth.json # cockpit login: password HASH + session secret
   /etc/systemd/system/alpha-cockpit.service           # (also versioned in ops/systemd/)
   /etc/systemd/system/alpha-cockpit-ops.service
   # run.sh, backup_db.sh and this script are in git since 2026-09-27 (review F13)

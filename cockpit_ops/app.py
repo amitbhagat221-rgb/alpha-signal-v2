@@ -20,6 +20,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.gzip import GZipMiddleware
 
+from webauth import LoginRequired
 from cockpit._shared import COCKPIT_STATIC, make_templates, nav_model, prewarm
 from cockpit_ops import api, pages
 
@@ -30,6 +31,7 @@ app = FastAPI(title="Alpha Signal Ops")
 # to ~150KB; for users on WAN (especially the Bengaluru → Oracle Cloud round
 # trip) this is the difference between 3-5s and sub-second download.
 app.add_middleware(GZipMiddleware, minimum_size=1024)
+app.add_middleware(LoginRequired, app_name="Ops console")  # webauth.py — password login (review F5)
 # Shared static assets from the main cockpit. No need to duplicate CSS/JS.
 app.mount("/static", StaticFiles(directory=COCKPIT_STATIC), name="static")
 
