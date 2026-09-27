@@ -34,7 +34,7 @@
                                                                  │
                              View(read-models) ─→ cockpit · ops · email · dossier(LLM Host)
  Check: attached to every Dataset/Node/Feature edge ──→ verdicts ──→ health email · push · watchdog · ops page
- Order = topological sort of blocking edges; lagged edges (coarser cadence or slow writer) run after the email
+ Order = topological sort; a read is blocking unless declared lagged (lagged reader runs before its writer, ADR 0053)
 ```
 
 ### Directory layout (one top-level home per block)

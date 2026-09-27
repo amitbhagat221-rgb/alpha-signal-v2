@@ -18,7 +18,7 @@ Track 1/2/3 labels ([ADR 0015](../decisions/0015-track-numbering-and-rename.md))
 |---|---|
 | [0011-roadmap-to-90.md](0011-roadmap-to-90.md) | **Master plan.** Roadmap to a 90/100 shop — workstreams WS1–WS7; decisions D1–D12 in [ADR 0051](../decisions/0051-roadmap-to-90-decisions-d1-d12.md) |
 | [0014-data-acquisition-roadmap.md](0014-data-acquisition-roadmap.md) | Data-layer view across plan 0011's workstreams — free-first; paid fork costed separately |
-| [0015-first-principles-architecture.md](0015-first-principles-architecture.md) | **Proposed.** First-principles architecture: 7 building blocks, 5 invariants, strangler migration P0–P6 ([ADR 0052](../decisions/0052-seven-building-blocks.md)) |
+| [0015-first-principles-architecture.md](0015-first-principles-architecture.md) | **Implemented 2026-09-27.** First-principles architecture: 7 building blocks, 5 invariants, phases P0–P6 all shipped ([ADR 0052](../decisions/0052-seven-building-blocks.md)); archive after 2026-10-27 |
 
 ## Paused (kept live; resume only via a checklist bullet)
 

@@ -1,6 +1,6 @@
 # ADR 0052 — Seven building blocks: the system is one as-of dataflow graph
 
-Status: **accepted** 2026-09-27 (Amit: "agree with all", incl. D1–D6) · Amends [ADR 0004](0004-no-base-classes-no-yaml.md) (one inversion, see below) and [ADR 0017](0017-factor-library-two-tier-registry.md) (weights move into the factor entry) · Plan [0015](../plans/0015-first-principles-architecture.md)
+Status: **accepted** 2026-09-27 (Amit: "agree with all", incl. D1–D6) · Amends [ADR 0004](0004-no-base-classes-no-yaml.md) (one inversion, see below) and [ADR 0017](0017-factor-library-two-tier-registry.md) (weights move into the factor entry) · Plan [0015](../plans/0015-first-principles-architecture.md) · Lag semantics partly superseded by [ADR 0053](0053-declared-lag-not-cadence-lag.md)
 
 ## Decision
 The whole system is built from 7 building blocks, **Host, Dataset, Node, Feature, Model, Check, View**, and 5 invariants that the runner enforces.
