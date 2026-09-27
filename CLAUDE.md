@@ -23,8 +23,8 @@ Everything else (memory, `_archive/`, slash commands, settings) — Claude handl
 **Environment**
 - Activate venv first: `source ~/alpha-signal/venv/bin/activate` (shared with v1)
 - v1 has no active cron, but v2 runs on its venv and reads its credentials — never touch `~/alpha-signal/`. All v2 work in `~/alpha-signal-v2/`
-- Credentials live in v1's `run_pipeline.sh` exports — never in code. v2 imports them at runtime via `eval "$(grep '^export ' /home/ubuntu/alpha-signal/run_pipeline.sh)"` (read-only, no execution of v1 body) — used by `run_pipeline.sh` and the v2 cron lines. Don't duplicate secrets anywhere.
-- Any cron running `python -m <module>` MUST `cd /home/ubuntu/alpha-signal-v2 &&` first — cron's CWD is `$HOME`, so `-m` fails `ModuleNotFoundError: No module named 'sources'` silently into a log no one reads. The monthly `analyst_consensus_snapshots` cron silently no-op'd this way until fixed 2026-06-03. When adding a cron, mirror the watchdog/health lines (they `cd` first).
+- Credentials live in v1's `run_pipeline.sh` exports — never in code. v2 imports them at runtime via `eval "$(grep '^export ' /home/ubuntu/alpha-signal/run_pipeline.sh)"` (read-only, no execution of v1 body) — done once, in `run.sh`. Don't duplicate secrets anywhere.
+- Every v2 cron line is `/home/ubuntu/alpha-signal-v2/run.sh <job> >> <log> 2>&1` (plan 0015): `run.sh` owns the `cd`, venv, credential import and harvest lock. Never add an inline cron one-liner — add a `case` to `run.sh` (the monthly snapshot cron once silently no-op'd for lack of a `cd`).
 
 **Architecture & Code**
 - No frameworks, no base classes, no YAML. Plain functions, Python config dict, SQLite. See `docs/decisions/0004-no-base-classes-no-yaml.md`

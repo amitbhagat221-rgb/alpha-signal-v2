@@ -43,4 +43,4 @@ The v1-port validation notebooks (01–14) are retired to `_archive/notebooks/`.
 
 ## Crons
 
-Cron entries live only in the system crontab, never in this repo. `crontab -l` is the source of truth; the annotated table is in [OPERATOR.md §2](../../OPERATOR.md). Back up before editing: `crontab -l > ~/crontab.bak`.
+Cron entries live in the system crontab and each calls `run.sh <job>` (`DRY=1 ./run.sh <job>` shows what it runs); the annotated table is in [OPERATOR.md](../../OPERATOR.md#2-the-cron-all-utc-ist--utc--530).

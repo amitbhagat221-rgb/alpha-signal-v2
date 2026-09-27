@@ -28,23 +28,25 @@ This document is the bus factor: where things are, how not to break them, what t
 
 ## 2. The cron (all UTC; IST = UTC + 5:30)
 
-Cron lives only in the crontab, **not in git**, so inspect it with `crontab -l`. Back it up before editing (`crontab -l > ~/crontab.bak`); a 2026-07-06 copy is in [docs/studies/crontab-backup-2026-07-06.txt](docs/studies/crontab-backup-2026-07-06.txt). Every `python -m` line must `cd` into the repo first (CLAUDE.md). Lines that need credentials import them with the `eval` pattern.
+Cron lives in the crontab (`crontab -l`); back it up before editing (`crontab -l > ~/crontab.bak`). Since plan 0015 every v2 line except the backup is `/home/ubuntu/alpha-signal-v2/run.sh <job> >> <log> 2>&1`: **`run.sh` (in git) is the one preamble** — repo dir, venv, the read-only credential import, email variables, and the harvest `flock` for harvesting jobs. `DRY=1 ./run.sh <job>` prints what a job runs. Never add an inline cron one-liner; add a `case` to `run.sh`.
 
 | When (UTC) | Job | Log (under `output/` unless noted) |
 |---|---|---|
-| 03:30 daily | `run_pipeline.sh`: the main pipeline (`pipeline.py` over `config.PIPELINE_STEPS`, under the harvest `flock`) | `pipeline.log` |
-| 04:00 daily | `tools.health_report --email --push`: health email, plus URGENT email and ntfy push on CRITICAL | `health.log` |
-| 04:20 / 12:20 / 20:20 | `sources.screener_pull --check-cookie`: Screener.in session keep-alive, ntfy push when auth dies | `screener_keepalive.log` |
-| 04:30 on the 1st | `sources.yfinance_analyst --snapshot` → `analyst_consensus_snapshots` | `yf_snapshot.log` |
-| 05:00 daily | `backup_db.sh`: DB → Google Drive (§0) | `backup.log` |
-| 05:00 on the 1st | `tools.expected_return`: appends the E[1Y] prediction to `data/expected_return_predictions.jsonl` | `logs/expected_return_cron.log` |
-| 05:15 on the 2nd | `tools.backtest_pit`: monthly IC refresh (`pit_ic_by_tier_v2`) | `backtest_refresh.log` |
-| 06:00 on the 1st + 15th | `sources.screener_pull --universe`: full Screener refresh under the harvest `flock` (skips if the lock is held) | `screener_universe_refresh.log` |
-| 14:00 daily | `run_daily_forward.sh`: forward-only feeds after NSE EOD (FII/DII cash + F&O positioning, ASM/GSM/ban list, short selling, BSE announcements, scrip master) | `daily_forward.log` |
-| 15:00 daily | `tools.freshness_watchdog`: heals stale tables/files, emails on gaps | `watchdog.log` |
-| 19:07 on the 1st | `run_tickertape_monthly.sh`: Tickertape fundamentals (~4h, takes the harvest lock) | `tickertape_cron.log` |
+| When (UTC) | `run.sh` job | What | Log (under `output/` unless noted) |
+|---|---|---|---|
+| 03:30 daily | `morning` | the main pipeline (`pipeline.py`, harvest `flock`), then the DuckDB replica | `pipeline.log` |
+| 04:00 daily | `health` | health email, plus URGENT email and ntfy push on CRITICAL | `health.log` |
+| 04:20 / 12:20 / 20:20 | `screener_cookie` | Screener.in session keep-alive, ntfy push when auth dies | `screener_keepalive.log` |
+| 04:30 on the 1st | `pt_snapshot` | `yfinance_analyst --snapshot` → `analyst_consensus_snapshots` | `yf_snapshot.log` |
+| 05:00 daily | (`backup_db.sh`, own script) | DB → Google Drive (§0) | `backup.log` |
+| 05:00 on the 1st | `expected_return` | appends the E[1Y] prediction to `data/expected_return_predictions.jsonl` | `logs/expected_return_cron.log` |
+| 05:15 on the 2nd | `backtest` | monthly IC refresh (`pit_ic_by_tier_v2`) | `backtest_refresh.log` |
+| 06:00 on the 1st + 15th | `screener_universe` | full Screener refresh (harvest `flock`) | `screener_universe_refresh.log` |
+| 14:00 daily | `forward` | forward-only feeds after NSE EOD (FII/DII, surveillance, BSE announcements, scrip master; harvest `flock`) | `daily_forward.log` |
+| 15:00 daily | `watchdog` | heals stale tables/files, emails on gaps | `watchdog.log` |
+| 19:07 on the 1st | `tickertape` | Tickertape fundamentals (~4h, harvest `flock`) | `tickertape_cron.log` |
 
-Inside the 03:30 pipeline, each step's `frequency` gates it: `daily`, `weekly` (Sundays), or `monthly` (the 1st). `--step <name>` ignores the gate. Only two steps are `critical` and abort the run: `fetch_bhavcopy` (also when prices are stale) and `screener`. Slow jobs (news enrichment, regulatory classify, broker recos with a 90-minute daily budget, banking metrics) run after the email so they can't delay it. Every step writes a row to `pipeline_log`.
+Inside the 03:30 pipeline, each step's `frequency` gates it: `daily`, `weekly` (Sundays), or `monthly` (the 1st); `--step <name>` ignores the gate. **Order is derived, not listed:** `graph.py` sorts the steps by their declared `reads`/`writes` with the email's critical path first (`config.PIPELINE['derived_order']`; set False to run the list order). Slow jobs the email doesn't need land after it by construction. Only two steps are `critical` and abort the run: `fetch_bhavcopy` (also when prices are stale) and `screener`. Every step writes a row to `pipeline_log`; `output/graph_shadow/` records the order and any table a step read without declaring it.
 
 ---
 
@@ -100,7 +102,7 @@ These sit in a plaintext shell file. Move them to a secret manager, or at least 
 
 ## 7. Recovery runbook
 
-**No email by 09:30 IST.** Check `tail -100 output/pipeline.log`, then rerun with `/home/ubuntu/alpha-signal-v2/run_pipeline.sh` (it exits quietly if another harvester holds the lock).
+**No email by 09:30 IST.** Check `tail -100 output/pipeline.log`, then rerun with `/home/ubuntu/alpha-signal-v2/run.sh morning >> output/pipeline.log 2>&1` (it exits quietly if another harvester holds the lock).
 
 **One step failed.** Run `python pipeline.py --step <name>` from the repo with the venv and credentials loaded (CLAUDE.md). The ops cockpit `/flow` page also has a Rerun button.
 
