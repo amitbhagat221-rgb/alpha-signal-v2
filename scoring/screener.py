@@ -103,7 +103,13 @@ def _load_signals(return_prices=False, as_of=None):
     import pit
     t = as_of or date.today()
     pit_cols = [c for c in factors.PIT_TO_SCREENER_COLS if c != "consensus_signal_combined"]
-    feats = pit.features_at(t, pit_cols)
+    # Reuse the price history loaded above (the same close>0 rows RAW_SQL["prices"]
+    # selects) instead of reading 2.4M rows a second time.
+    producers = pit.producers_for(pit_cols)
+    keys = pit.raw_keys_for(producers) - {"prices"}
+    raw = pit.load_raw(keys)
+    raw["prices"] = prices[["sid", "date", "close", "delivery_pct"]]
+    feats = pit.features_at(t, pit_cols, raw=raw)
     feats = feats.drop(columns=[c for c in ("cap_tier", "snapshot_date", "close_price") if c in feats.columns])
     feats = feats.rename(columns=factors.PIT_TO_SCREENER_COLS)
 
