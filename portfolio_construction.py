@@ -76,12 +76,15 @@ def select_candidates(asof, min_depth=0):
     drops still leave a full tier (survivors trimmed in build()). `min_depth`
     deepens the per-tier pool (banded mode needs it to cover rank_exit, else a
     held name at rank ≤ rank_exit but > 3k would look 'out of pool')."""
+    # Through the ONE pick gate (views.PICK_GATE_SQL: integrity FAIL / UHS < 60 never
+    # reach a reader) — review F15: this read daily_picks raw, so a name the email
+    # gated out (LIC on 2026-06-01, UHS 59) could still enter the HRP book.
+    import views
     parts = []
     for tier, k in PICKS_PER_TIER.items():
-        parts.append(read_sql(
-            "SELECT sid, rank, final_score, cap_tier, sector FROM daily_picks "
-            "WHERE pick_date=? AND cap_tier=? ORDER BY rank LIMIT ?",
-            params=[asof, tier, max(k * 3, min_depth)]))
+        gated = views.picks(pick_date=asof, gated=True, tier=tier)
+        parts.append(gated[["sid", "rank", "final_score", "cap_tier", "sector"]]
+                     .head(max(k * 3, min_depth)))
     return pd.concat(parts, ignore_index=True)
 
 
