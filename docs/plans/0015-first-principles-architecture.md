@@ -1,6 +1,6 @@
 # Plan 0015 — First-principles architecture: seven blocks, one as-of graph
 
-**Status:** active — approved 2026-09-27 (Amit: "agree with all", D1–D6 as recommended) · **Decision:** [ADR 0052](../decisions/0052-seven-building-blocks.md) · **Target one-pager:** [architecture.md](../reference/architecture.md)
+**Status:** implemented (all phases shipped 2026-09-27) — approved 2026-09-27 (Amit: "agree with all", D1–D6 as recommended) · **Decision:** [ADR 0052](../decisions/0052-seven-building-blocks.md) · **Target one-pager:** [architecture.md](../reference/architecture.md)
 **Method:** Step 1 ("what is this system?") was written from README, CLAUDE.md and architecture.md only. Four read-only auditors then mapped the repo (orchestration+quality, data, features+evidence, presentation). Every load-bearing claim below was re-verified in code or with read-only SQL. About 1 in 10 auditor claims was wrong and has been corrected here (e.g. "CLAUDE.md has no 2 s rule": it does, at line 39).
 
 ## 1. What the system is
@@ -210,3 +210,18 @@ Every phase must pass the full test suite, `pipeline.py --dry-run`, and an impor
   - Replay: `_load_signals(as_of=t)`/`score_universe(as_of=t)` replaces pit_replay's stubbed historical mode.
   - **Finding (invariant 1 is approximate):** a replay of 2026-05-01 matches the May-built panel exactly only for factors whose inputs are never revised (CAR, IV, delivery, momentum 99.9–100%). Statement-based and macro inputs differ because `end_date + lag` is applied to TODAY's data, which includes later restatements and backfills. Exact as-of needs first-seen timestamps: series datasets insert-only with `fetched_at`, never updated in place. This becomes a Dataset-kind rule in Phase 4.
   - Also found: the pristine panel's 2026-06-01 and 2026-07-01 anchors were only partly rebuilt (most factor columns NULL). `refresh_pit_panel` (all producers, recent anchors) closes that.
+- **Phases 1b, 2, 4, 5, 6 (2026-09-27, Amit: "complete all phases now").** Built in parallel on per-phase branches (4 subagents + lead), integrated on `plan15-int`, each gated before merge.
+  - **1b:** the runner executes `graph.order` (`config.PIPELINE['derived_order']`, instant revert). `run.sh <job>` is the one cron entry point. It replaces run_pipeline.sh, run_tickertape_monthly.sh, the untracked run_daily_forward.sh and 7 inline one-liners, and `DRY=1` prints each job. The 3-day shadow wait was skipped at Amit's request; the runtime declaration check still flags any undeclared read.
+  - **2:** `hosts.HOSTS` plus `sources/_http` form the one door per host. 14 modules were migrated; request snapshots are byte-identical to the pre-change code on recorded fixtures. The effective gap is never lower: Screener 2.0 → 2.5 s, Yahoo batches 0 → 2 s, Moneycontrol's double pacing removed. LLM model ids come from HOSTS; `sources/news_classifier.py` keeps its literal because another session has uncommitted edits there (same value, tested).
+  - **4:** `checks/` holds one runner, one range per column (`checks.ranges`, 45 entries, factor columns via factors) and the custom checks. `tools/data_sanity` went from 1,136 to 97 LOC.
+    - Criticality is derived (critical steps plus the email's needed ancestors: 25 steps).
+    - `checks.post_step` is wired into the runner: a step whose declared output is still OUTDATED is FAILED and not retried.
+    - Dataset kinds are inferred from the PK: 15 event, 20 series, 15 state, 69 feature, 16 log.
+    - Intentional changes: M-score range ±20, close range 1e7, z-score (−50, 100), `macro_signal` UNKNOWN allowed, derived severity. New real findings: 13 bank cost-of-funds rows out of range.
+  - **5:** `views.py` owns the read-models: picks with one gate, stock, signals, price metrics, pipeline status. The sector/industry twins collapsed into one function each; nav comes from PAGES; /flow draws the 382 graph edges.
+    - Gates: all 62 routes 200; 31 routes identical and 31 with listed intended diffs.
+    - Email returns now use trading days: 1M mean |Δ| 1.2 pp, 12M 3.6 pp.
+  - **6:** weights live on the factor (`factors.SIGNAL_WEIGHTS` derived; config.SIGNAL_WEIGHTS gone) and inferable fields are derived (532 restated lines removed). Lineage table reads are derived (82 `source_tables` corrected to what the code reads). Tiers are data (`config.TIERS` dict, `REGIMES`); `RENAMES` plus `apply_renames()` added.
+    - D3 `segment_tiers` runs monthly with ±10% hysteresis: 24 tier changes on the first run (vs 50 without hysteresis); churn over 24 months is 6.3/month.
+    - Derived-view JSON is identical (60 views, 3 intended lineage diffs); the screener step writes identical `daily_picks`.
+  - **Findings needing a decision:** `stocks.market_cap_cr` is in rupees, never refreshed, and NULL for 726 stocks. So MICRO's "< ₹500 Cr" rule only fires on NULLs; a correct cap would move 54 SMALL→MICRO and 47 MICRO→SMALL. Not applied (changes picks).

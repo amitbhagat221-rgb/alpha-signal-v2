@@ -1,6 +1,6 @@
 # Architecture
 
-> **Status:** the "Target" part of this doc is the accepted design ([ADR 0052](../decisions/0052-seven-building-blocks.md), [plan 0015](../plans/0015-first-principles-architecture.md)), built phase by phase. **Shipped 2026-09-27:** Phase 0 (bug batch), Phase 1a (steps declare reads/writes; derived order runs in SHADOW only) and Phase 3 (live = PIT: `pit.py`, `views.py`). "Today" describes the running code.
+> **Status:** built — [ADR 0052](../decisions/0052-seven-building-blocks.md), [plan 0015](../plans/0015-first-principles-architecture.md); all phases shipped 2026-09-27. Deviations from the target (e.g. steps still declared in `config.PIPELINE_STEPS` rather than module-level `NODE` dicts; `checks/` instead of a verdict table) are listed in the plan's implementation notes. "Today" below is the running code.
 
 ## Target: one page
 
