@@ -162,3 +162,33 @@ def test_month_start_scrapes_stay_off_the_email_path():
     names = {s["name"] for s in act}
     assert {"fetch_analyst", "fetch_shareholding"} <= names
     assert not {"fetch_analyst", "fetch_shareholding"} & graph.ancestors(act)
+
+
+def test_critical_failure_aborts_alerts_once_and_exits_nonzero(monkeypatch, tmp_path):
+    """Review F3: a critical failure used to log 'Email alert would fire here' and exit 0."""
+    import sys
+    import config
+    import pipeline
+    ran, alerts = [], []
+    monkeypatch.setattr(config, "PROJECT_ROOT", tmp_path)            # graph_shadow report
+    monkeypatch.setattr(pipeline, "shadow_order", lambda s, write=True: None)
+    monkeypatch.setattr(pipeline, "log_step", lambda *a, **k: None)
+    monkeypatch.setattr(pipeline, "time", type("T", (), {"time": staticmethod(lambda: 0.0),
+                                                         "sleep": staticmethod(lambda s: None)}))
+    monkeypatch.setattr(pipeline, "run_step",
+                        lambda name, *a: ran.append(name) or name != "fetch_bhavcopy")
+    monkeypatch.setattr(pipeline, "_alert_critical", lambda names: alerts.append(list(names)))
+    steps = [("fetch_bhavcopy", "m", "f", True), ("screener", "m", "f", True), ("email", "m", "f", False)]
+    res = pipeline.run_pipeline(steps)
+    assert res["failed_critical"] and alerts == [["fetch_bhavcopy"]]
+    assert ran == ["fetch_bhavcopy", "fetch_bhavcopy"]                  # retried once, then abort
+    monkeypatch.setattr(pipeline, "run_pipeline", lambda s, dry_run=False: res)
+    monkeypatch.setattr(sys, "argv", ["pipeline.py"])
+    monkeypatch.setattr(pipeline, "STEPS", steps)
+    monkeypatch.setattr(pipeline, "_step_should_run_today", lambda spec: True)
+    monkeypatch.setattr(pipeline, "STEP_SPECS", {n: {} for n, *_ in steps})
+    try:
+        pipeline.main()
+        raise AssertionError("main() returned normally after a critical failure")
+    except SystemExit as e:
+        assert e.code == 1

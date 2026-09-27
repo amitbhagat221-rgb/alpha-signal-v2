@@ -141,10 +141,15 @@ def _gather_pipeline(since_days):
     last_date = latest.iloc[0]["d"]
     out["last_run_date"] = last_date
 
-    # Failed steps on the latest run
+    # Failed steps on the latest run — plus run.sh cron-only jobs (cron_*, logged since
+    # 2026-09-27) whose latest run in the last 26h failed: the 14:00 forward job lands
+    # on the previous run_date, so the morning report would otherwise never see it.
     failed_today = read_sql(
         "SELECT step_name, status, started_at, error_message "
-        "FROM pipeline_log WHERE run_date = ? AND status = 'FAILED' "
+        "FROM pipeline_log WHERE status = 'FAILED' AND (run_date = ? OR ("
+        "  step_name LIKE 'cron\\_%' ESCAPE '\\' "
+        "  AND replace(finished_at, 'T', ' ') >= datetime('now', '-26 hours') "
+        "  AND id = (SELECT MAX(id) FROM pipeline_log p2 WHERE p2.step_name = pipeline_log.step_name))) "
         "ORDER BY started_at",
         params=[last_date],
     )

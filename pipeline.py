@@ -214,6 +214,7 @@ def run_pipeline(steps: list[tuple], dry_run: bool = False):
     """Run all steps in order. Retry failed steps once. Stop on critical failure."""
     retry_count = PIPELINE["retry_count"]
     failed_critical = False
+    critical_failed = []
 
     log.info(f"{'=' * 50}")
     log.info(f"Pipeline run — {date.today()} — {len(steps)} steps")
@@ -258,6 +259,7 @@ def run_pipeline(steps: list[tuple], dry_run: bool = False):
             if critical:
                 log.error(f"Critical step '{name}' failed — skipping remaining steps.")
                 failed_critical = True
+                critical_failed.append(name)
 
     try:
         import json
@@ -277,8 +279,32 @@ def run_pipeline(steps: list[tuple], dry_run: bool = False):
     log.info(f"Done in {elapsed}s — {passed} passed, {failed} failed, {skipped} skipped")
     log.info(f"{'=' * 50}")
 
-    if failed_critical and PIPELINE.get("email_on_failure"):
-        log.info("Email alert would fire here (email_sender not yet built)")
+    if failed_critical and PIPELINE.get("email_on_failure") and not dry_run:
+        _alert_critical(critical_failed)
+    return {"passed": passed, "failed": failed, "skipped": skipped,
+            "failed_critical": failed_critical}
+
+
+def _alert_critical(names):
+    """URGENT email + push the moment a critical step aborts the run (review F3: this
+    was a log line, so a dead bhavcopy/screener waited for the 04:00 digest). The
+    alert must never raise — a failed alert is logged and the run's exit code stands."""
+    try:
+        from db import read_sql
+        from tools.health_report import send_email, send_ntfy
+        errs = read_sql(
+            "SELECT step_name, error_message FROM pipeline_log WHERE run_date = ? "
+            "AND step_name IN ({}) AND status = 'FAILED' ORDER BY id".format(",".join("?" * len(names))),
+            params=[date.today().isoformat(), *names])
+        lines = [f"{r.step_name}: {(r.error_message or '')[:300]}" for r in errs.itertuples()] or names
+        subject = f"Pipeline ABORTED {date.today()} — critical step failed: {', '.join(names)}"
+        html = ("<p>The morning run stopped; no picks or email follow until it is fixed.</p><ul>"
+                + "".join(f"<li><code>{l}</code></li>" for l in lines)
+                + "</ul><p>Runbook: OPERATOR.md §7.</p>")
+        send_email(html, subject, urgent=True)
+        send_ntfy(subject, urgent=True)
+    except Exception as e:                           # alerting must not mask the failure
+        log.error(f"critical-failure alert could not be sent: {e}")
 
 
 def show_status(days: int = 1):
@@ -339,7 +365,11 @@ def main():
                         print(f"  - {name.group(1)}")
         return
 
-    run_pipeline(active_steps, dry_run=args.dry_run)
+    result = run_pipeline(active_steps, dry_run=args.dry_run)
+    # Non-zero exit when the run aborted, or when a --step run failed, so run.sh, cron
+    # logs and manual callers can tell (review F3: it always exited 0).
+    if result and (result["failed_critical"] or (args.step and result["failed"])):
+        sys.exit(1)
 
 
 if __name__ == "__main__":
