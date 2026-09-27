@@ -138,6 +138,16 @@ def test_post_step_fails_only_on_an_outdated_declared_output(temp_db):
     assert checks.post_step(fresh) == []
 
 
+def test_post_step_exempts_best_effort_tables(temp_db):
+    old = (date.today() - timedelta(days=400)).isoformat()
+    conn = sqlite3.connect(temp_db)
+    conn.execute("INSERT INTO insider_trades (sid, trade_date) VALUES ('A', ?)", (old,))
+    conn.commit()
+    conn.close()
+    assert "insider_trades" in db.BEST_EFFORT_STALE
+    assert checks.post_step({"name": "fetch_insider", "writes": ["insider_trades"]}) == []
+
+
 # ── dataset kinds (H3) ──
 
 def test_every_table_gets_exactly_one_kind():

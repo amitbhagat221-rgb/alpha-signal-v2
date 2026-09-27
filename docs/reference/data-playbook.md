@@ -371,33 +371,28 @@ Live snapshot tables (`daily_snapshots`, all `*_scores`, `daily_picks`) include 
 
 UNIQUE constraints on append-only tables prevent the v1 disaster: insider_archive had 96.5% duplicates because dedup was app-level and broke. Now it's DB-level and unfixable.
 
-### Validation guardrails (per-column range gates)
+### Validation guardrails (one range per column, one check runner)
 
-Every PIT signal column has a `(min_val, max_val)` rule in [`tools/reconstruct_pit.py VALIDATION_RANGES`](../../tools/reconstruct_pit.py). At write time:
+Plan 0015 Phase 4 (ADR 0052 Check block). Every legal-value rule is declared ONCE and every consumer reads it — before this, M-score alone had three ranges in three files.
 
-1. Replace `±inf` with NaN.
-2. Set values outside `[min_val, max_val]` to NaN (not raised — silently dropped to NaN with a count).
-3. Track per-column: `n_valid`, `n_nan`, `n_out_of_range`, observed `min`/`max`. Stored as JSON in `pit_reconstruction_log.validation_summary`.
-4. Flag any column where `out_of_range > 5%` of rows in the run-end summary.
-
-Why this design: bad data corrupting a column silently is worse than crashing — but crashing on every NaN is too noisy (legitimate NaN is common). Setting outliers to NaN keeps the row but quarantines the bad value. The flag in the run-end output gives early warning.
-
-**Current ranges** (extend as new signals land):
-
-| Signal | Range | Why |
+| Rule | Declared in | Read by |
 |---|---|---|
-| close_price | (0.01, 1M) | Excludes negative prices, sanity-caps top |
-| piotroski_f | (0, 9) | Definitionally 0-9 |
-| earnings_yield | (-10, 10) | Caps absurd EPS/price ratios |
-| book_to_price | (-100, 1000) | Allows negative-equity stocks; caps tail |
-| mom_6m / mom_12m | (-100, 100) | Caps risk-adjusted momentum tail |
-| mom_composite | (0, 1) | Within-tier rank |
-| position_52w | (0, 1) | Within range bounds |
-| pledge_quality | (0, 1) | 1 − pct |
-| avg_delivery_pct_30d | (0, 100) | Pct |
-| delivery_anomaly_z | (-5, 5) | Clip extreme z-scores |
-| fwd_return_20d | (-1, 5) | -100% (zero) to 500% — caps takeover blowups |
-| m_score | (-20, 20), z_score | (-50, 100) | Forensic outlier caps |
+| Factor / PIT column range | `factors.FACTORS[...]["pit_range"]` → `factors.VALIDATION_RANGES` | `pit.py` and the live screener (`discard_out_of_range`: out of range → NaN, never clipped); stored columns of the same quantity via `{"factor": ...}` |
+| Stored column range / enum | `checks/ranges.py COLUMNS[(table, column)]` — `factor` / `range` / `min` / `in`, optional `typical` review band | `health.factor_validity` (per-table score), the range verdicts of `checks.run()` (→ `tools/data_sanity`, health email, ops Health page), `validators/plausibility` (column datum classes via `DATUM_COLUMNS`), `validators/per_stock_integrity` |
+| Tier / regime enums | `config.TIERS`, `EXCLUDED_FROM_PICKS`, `VIX_REGIMES` | `checks/ranges.py` |
+| Per-stock coverage | `tables.TABLES[...]["coverage"]` | derived coverage checks + watchdog |
+| Semantic checks (PT == close, rank duplicates, feed dark…) | `checks/custom.py CHECKS` | `checks.run()` |
+| Segment priors for write-time quantities (pt_upside by tier, NAV day-change by fund type) | `validators/plausibility.PLAUSIBILITY_RANGES` | the write-time plausibility gate |
+
+PIT write path (`pit._validate_and_clean`): `±inf` → NaN, out-of-range → NaN with a count, per-column `n_valid / n_nan / n_out_of_range / min / max` stored as JSON in `pit_reconstruction_log.validation_summary`; a column with > 5% out of range is flagged in the run summary. Setting outliers to NaN keeps the row but quarantines the bad value. Print the current factor ranges with `python -c "import factors; print(factors.VALIDATION_RANGES)"` — never copy them into a doc or another module.
+
+**One runner, one verdict shape.** `checks.run()` returns `{check_id, target, severity, status, detail, …}` per check (PASS / FAIL / ERROR). Range-verdict severity is derived, not per-check: a column on the email's critical path is CRITICAL from 1% of rows violating, any other from 10%; WARN from 1%; INFO below. Custom checks keep their own `critical_pct` / `warn_pct`.
+
+**Alert criticality is derived.** A failed step pages when it is `critical` or the email transitively needs its output (`checks.critical_steps()` = `critical` ∪ `graph.ancestors(steps, "email", needed_only=True)` ∪ email); an OUTDATED table pages when such a step writes it (`checks.critical_tables()`). Adding a step or a read edge updates both — there is no list to edit.
+
+**Post-step check (invariant 4).** `checks.post_step(step)` fails a step when a table it declares writing (`graph.writes`, `file:*` and `best_effort` tables skipped) is OUTDATED by the freshness rule right after it ran. Zero rows into a still-fresh table is a no-op; zero rows into a stale one is a failure (the bhavcopy "returned 0, logged SUCCESS" class).
+
+**Dataset kinds.** `tables.dataset_kinds()` infers one kind per table from its schema.sql PK (+ `DATASET_KIND_OVERRIDES`): `event` (surrogate / event-id key), `series` (fetched entity × date), `state` (entity → current value), `feature` (computed entity × date), `log`. **Vintage rule for series (documented, not yet enforced):** a series row is insert-only with `fetched_at` = first seen; a restatement is a new row, never an in-place UPDATE; `asof(series, t)` = per key the latest `fetched_at <= t` among rows whose business date + availability lag `<= t`. Until then a replay applies `end_date + lag` to today's restated values (plan 0015 Phase 3 finding).
 
 ### Checkpoint & resume (no progress lost)
 

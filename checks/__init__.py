@@ -285,14 +285,17 @@ def post_step(step_spec):
     it declares writing (graph.writes, `file:*` hand-offs skipped) must not be
     OUTDATED by the freshness rule db.data_health uses (the table's primary
     producer cadence + tables.TABLES `stale_days`). Zero rows written into a table
-    that is still fresh is a no-op, not a failure. Returns [] when the step passes."""
+    that is still fresh is a no-op, not a failure. A `best_effort` table (upstream
+    legitimately carries no fresh data) is exempt, as it is from heals and streak
+    alerts. Returns [] when the step passes."""
     import graph
-    from db import _compute_freshness, _table_date_range, get_db, table_step_meta
+    from db import (BEST_EFFORT_STALE, _compute_freshness, _table_date_range, get_db,
+                    table_step_meta)
     meta = table_step_meta()
     fails = []
     with get_db() as conn:
         for table in graph.writes(step_spec):
-            if table.startswith("file:"):
+            if table.startswith("file:") or table in BEST_EFFORT_STALE:
                 continue
             try:
                 _, latest, _ = _table_date_range(conn, table)
