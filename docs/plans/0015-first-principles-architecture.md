@@ -225,3 +225,9 @@ Every phase must pass the full test suite, `pipeline.py --dry-run`, and an impor
     - D3 `segment_tiers` runs monthly with ±10% hysteresis: 24 tier changes on the first run (vs 50 without hysteresis); churn over 24 months is 6.3/month.
     - Derived-view JSON is identical (60 views, 3 intended lineage diffs); the screener step writes identical `daily_picks`.
   - **Findings needing a decision:** `stocks.market_cap_cr` is in rupees, never refreshed, and NULL for 726 stocks. So MICRO's "< ₹500 Cr" rule only fires on NULLs; a correct cap would move 54 SMALL→MICRO and 47 MICRO→SMALL. Not applied (changes picks).
+- **2026-09-27 — deviations found by the [architecture review](../studies/architecture-review-2026-09-27.md) (not previously recorded here).**
+  - **Invariant 1:** there was no "signals/ cannot import db" test, and 42 of 69 `signals/` files import `db`. It is now a ratchet: `tests/test_invariant_ratchets.py` freezes the 42 files and fails on a new one.
+  - **Invariant 3:** `write(dataset, df)` and `asof()` were never built. Writers choose their own mode at about 170 sites, and `tables.dataset_kinds()` feeds tests only. Nothing rejects an off-cadence snapshot row. A ratchet now freezes the 19 files that use `INSERT OR REPLACE`. `db.write` dispatching on kind is still open (review F10).
+  - **Invariant 5:** Anthropic calls bypassed the door and had no budget. That is superseded by [plan 0016](0016-alpha-signal-mcp.md): no API calls. The runtime undeclared-read check only writes a JSON report and never raises. A ratchet now freezes the 4 files making raw HTTP calls outside `sources/_http`.
+  - **§6 deletions not done:** `PIT_PRODUCERS`, `TABLE_PROFILES` and `_producer_for` are still present. `table_step_meta` now derives from declared writes (F12, 725e872).
+  - **§4 replay:** `pipeline.py --asof/--db` does not exist. `apply_renames` has no caller outside tests.
