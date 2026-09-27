@@ -764,7 +764,7 @@ PIPELINE_STEPS = [
 
     {"name": "screener",           "module": "scoring.screener",    "function": "compute",  "critical": True,
      "table": "daily_picks",       "source": "all signals",         "data_freq": "daily",   "frequency": "daily",
-     "reads": ["accruals_scores", "analyst_consensus", "annual_balance_sheet", "bse_announcements", "consensus_signals", "corporate_adjustments", "daily_picks", "fno_iv_history", "forecast_history", "forensic_scores", "health_score", "macro_history", "macro_sector_signals_pit", "piotroski_scores", "promoter_signals", "quarterly_income", "signal_lineage", "smart_money_scores", "stock_prices", "stocks", "trust_verdicts", "universe_eligibility"],
+     "reads": ["analyst_consensus", "annual_balance_sheet", "annual_cash_flow", "bse_announcements", "bulk_deals", "consensus_signals", "corporate_adjustments", "daily_picks", "fno_iv_history", "forecast_history", "forensic_scores", "health_score", "macro_history", "macro_sector_signals_pit", "piotroski_scores", "quarterly_income", "shareholding", "signal_lineage", "stock_prices", "stocks", "trust_verdicts", "universe_eligibility"],
      "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
 
     # Track 3.3c — HRP position sizing. Turns the within-tier ranked daily_picks
