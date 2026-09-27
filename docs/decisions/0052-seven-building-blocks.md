@@ -1,6 +1,6 @@
 # ADR 0052 — Seven building blocks: the system is one as-of dataflow graph
 
-Status: **proposed** 2026-09-27 (awaiting Amit) · Amends [ADR 0004](0004-no-base-classes-no-yaml.md) (one inversion, see below) and [ADR 0017](0017-factor-library-two-tier-registry.md) (weights move into the factor entry) · Plan [0015](../plans/0015-first-principles-architecture.md)
+Status: **accepted** 2026-09-27 (Amit: "agree with all", incl. D1–D6) · Amends [ADR 0004](0004-no-base-classes-no-yaml.md) (one inversion, see below) and [ADR 0017](0017-factor-library-two-tier-registry.md) (weights move into the factor entry) · Plan [0015](../plans/0015-first-principles-architecture.md)
 
 ## Decision
 The whole system is built from 7 building blocks, **Host, Dataset, Node, Feature, Model, Check, View**, and 5 invariants that the runner enforces.
@@ -42,3 +42,6 @@ A Node or Feature may **return frames and let the runner write them**. It may al
 - **Projected LOC change: about −4.5K net (range −3.5K to −6K), roughly 8% of the 59K live Python.** This is 5.6K removed and 1.1K added (runner, graph, views, checks). The bigger cut is to hand-kept entries: lineage (105), PIT_PRODUCERS (68), TABLE_PROFILES (36), tier literals (43) and the critical-step lists all disappear. `tools/` (14.5K, mostly research) is out of scope.
 - **Unifying live and PIT changes the numbers for 6 wired factors.** It is listed as an intentional behaviour change needing per-factor sign-off (plan 0015 D1). Every other phase must be equivalence-gated to identical output.
 - **Not chosen:** a workflow engine such as Airflow or Dagster, because SQLite plus one runner is enough; an ORM; DDL generated from dicts, because schema.sql remains the column owner; and module-level class registries.
+
+## Accepted decisions (plan 0015 §8)
+D1 shared fn keeps live's hygiene filters, re-backtest, weight kept only if t holds; `consensus` live = PIT quantity (EPS revision) until snapshots reach 12 months (2027-05) · D2 Phase-0 bug batch · D3 a segment node refreshes LARGE/MID/SMALL monthly · D4 this amendment + weights into FACTORS · D5 quality_gate step deleted · D6 ops console hardened (read-only SQL, lock on rerun); network exposure is Amit's call.

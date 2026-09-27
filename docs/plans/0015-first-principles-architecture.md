@@ -1,6 +1,6 @@
 # Plan 0015 — First-principles architecture: seven blocks, one as-of graph
 
-**Status:** proposed, awaiting approval (2026-09-27) · **Decision:** [ADR 0052](../decisions/0052-seven-building-blocks.md) · **Target one-pager:** [architecture.md](../reference/architecture.md)
+**Status:** active — approved 2026-09-27 (Amit: "agree with all", D1–D6 as recommended) · **Decision:** [ADR 0052](../decisions/0052-seven-building-blocks.md) · **Target one-pager:** [architecture.md](../reference/architecture.md)
 **Method:** Step 1 ("what is this system?") was written from README, CLAUDE.md and architecture.md only. Four read-only auditors then mapped the repo (orchestration+quality, data, features+evidence, presentation). Every load-bearing claim below was re-verified in code or with read-only SQL. About 1 in 10 auditor claims was wrong and has been corrected here (e.g. "CLAUDE.md has no 2 s rule": it does, at line 39).
 
 ## 1. What the system is
@@ -179,4 +179,5 @@ Every phase must pass the full test suite, `pipeline.py --dry-run`, and an impor
 7. **Deploys touch production cron and systemd.** Every merge and restart needs Amit's explicit OK.
 
 ## Implementation notes
-_(append as phases land)_
+- **2026-09-27 — approved.** Merge/deploy gate kept: every merge to master (prod runs from it) and every service restart still needs Amit's explicit OK. Phase 1 shadow mode needs a merge to run in prod, so phases are built on branches up to that gate.
+- D6 scope decision: code-level hardening only (read-only SQL connection + query timeout + harvest lock on rerun). Binding 3001 to localhost or adding auth would lock out remote access via the DuckDNS host — left to Amit.
