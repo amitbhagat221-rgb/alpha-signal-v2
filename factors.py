@@ -1361,7 +1361,7 @@ FACTORS = {
         "status_reason": "Pattern 6. Small-base-EPS stocks produce noise; combined signal mitigates.",
         "cadence": "monthly",
         "producer": "consensus",
-        "pit_range": (-500, 500),
+        "pit_range": (-100, 500),   # plan 0015: same quantity as consensus_signal_combined → ONE range
         "bench": "PROPOSED",
         "weight_key": "eps_revision_yoy",
         "screener_col": "eps_revision_yoy",

@@ -67,3 +67,11 @@ def test_pit_columns_ranged_and_produced():
 
 def test_live_pit_cols_are_screener_columns():
     assert set(factors.LIVE_PIT_COLS) <= set(factors.SCREENER_INPUT_COLS)
+
+
+def test_one_range_per_column():
+    """A PIT column registered under two factor ids must carry ONE validation range
+    (plan 0015: eps_revision_yoy vs consensus_signal_combined disagreed)."""
+    import factors
+    eps = {tuple(factors.FACTORS[k]["pit_range"]) for k in ("eps_revision_yoy", "consensus_signal_combined")}
+    assert len(eps) == 1
