@@ -1001,6 +1001,11 @@ def _ingest_phase(client):
     return stats
 
 
+class ClassifierStalled(RuntimeError):
+    """Pending work but nothing submitted or ingested — API-side failure.
+    Deliberately NOT swallowed by compute()'s sync fallback."""
+
+
 def _compute_batch(cap, dry_run, client):
     _ensure_batches_table()
 
@@ -1018,6 +1023,9 @@ def _compute_batch(cap, dry_run, client):
               f"{min(cap, strag)} to Sonnet-retry")
         return 0
 
+    n_pending = read_sql(
+        "SELECT COUNT(*) n FROM regulatory_events WHERE classifier_status='pending'"
+    ).iloc[0]["n"]
     ingested = _ingest_phase(client)          # Phase A
     _ingest_news_to_events(cap)               # Phase B0
     n_haiku = _submit_haiku_phase(client, cap)  # Phase B1
@@ -1028,6 +1036,12 @@ def _compute_batch(cap, dry_run, client):
           f"haiku_verdicts={ingested['haiku']}, classified={ingested['classified']}, "
           f"signals={ingested['signals']}, requeued={ingested['requeued']}")
     print(f"  Submitted: haiku={n_haiku} events, sonnet_retry={n_sonnet_retry} events")
+    # Every submit WARN-and-returns-0 on API errors, so an exhausted credit
+    # balance used to log SUCCESS/0 daily (2026-08 → 09). Raise instead.
+    if n_pending and not (ingested["batches"] or n_haiku or n_sonnet_retry):
+        raise ClassifierStalled(
+            f"classify_regulatory: {n_pending} pending but 0 batches ingested/submitted "
+            f"— Anthropic API failing (credits/key/model?); see WARN lines above")
     return ingested["classified"]
 
 
@@ -1050,16 +1064,14 @@ def compute(dry_run=False, sync=False, cap=None):
     cap = DAILY_CLASSIFIER_CAP if cap is None else cap
     if sync:
         return _compute_sync(cap, dry_run)
-    try:
-        client = _get_client()
-    except RuntimeError as e:
-        print(e)
-        return 0
+    client = _get_client()  # raises on missing key — a silent 0 hid outages
     if not _batch_api_available(client):
         print("  Batch API unavailable in this SDK — using synchronous fallback")
         return _compute_sync(cap, dry_run)
     try:
         return _compute_batch(cap, dry_run, client)
+    except ClassifierStalled:
+        raise
     except Exception as e:
         print(f"  WARN batch path errored ({e}) — falling back to sync for this run")
         return _compute_sync(cap, dry_run)
