@@ -622,6 +622,7 @@ TABLES = {
     # failure). 2d catches a failed/stale rebuild quickly without false-alarming on
     # same-day timing drift (audit Data-F10).
     "_file_duckdb_replica": {"kind": "file", "domain": "Output", "date_col": None, "stale_days": 2},
+    "_file_db_backup": {"kind": "file", "domain": "Output", "date_col": None, "stale_days": 2},
 }
 
 

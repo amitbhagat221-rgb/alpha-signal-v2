@@ -82,6 +82,8 @@ case "$JOB" in
         logged cron_screener_cookie cookie_ok || {
             [ -n "${NTFY_TOPIC:-}" ] && run curl -s -H "Title: Screener cookie DEAD" -H "Priority: high" \
                 -d "Re-extract sessionid from browser into ~/.cache/screener_cookie.json" "https://ntfy.sh/$NTFY_TOPIC"; } ;;
+    secrets_backup)     # 05:30 UTC — GPG-encrypted VM-only secrets + wiring → Drive (review F13)
+        logged cron_secrets_backup run "$ROOT/backup_secrets.sh" ;;
     screener_universe)  # 1st + 15th — Screener fundamentals harvest
         harvest_lock
         logged cron_screener_universe run python -m sources.screener_pull --universe ;;
@@ -95,6 +97,6 @@ case "$JOB" in
         echo "Tickertape finished rc=$RC at $(date -u)"
         exit $RC ;;
     *)
-        echo "unknown job '$JOB' (morning forward watchdog health pt_snapshot backtest expected_return screener_cookie screener_universe tickertape)"
+        echo "unknown job '$JOB' (morning forward watchdog health pt_snapshot backtest expected_return screener_cookie secrets_backup screener_universe tickertape)"
         exit 2 ;;
 esac

@@ -114,7 +114,10 @@ backups/
 
 # Downloaded news stock photos (regenerate via `python -m sources.news_images`)
 cockpit/static/news_img/
-backup_secrets.sh
 
 # dev-only tools (pytest) installed outside the shared venv — requirements-dev.txt
 .devlib/
+
+# ops scripts cron runs are versioned (review F13) — they hold no secrets
+!backup_db.sh
+!backup_secrets.sh

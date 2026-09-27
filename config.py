@@ -936,4 +936,15 @@ FILE_OUTPUTS = [
         "frequency":     "daily",
         "producer":      "tools.duckdb_refresh",
     },
+    {
+        # backup_db.sh touches this only after a successful Drive upload (review F13:
+        # nothing noticed a failed or skipped nightly backup). No step can heal it.
+        "virtual_table": "_file_db_backup",
+        "glob":          "output/backup_last_ok",
+        "freshness_field": None,       # mtime-anchored
+        "source":        "backup_db.sh (05:00 UTC cron) → gdrive:alpha-signal-v2-backups",
+        "data_freq":     "daily",
+        "frequency":     "daily",
+        "producer":      "backup_db.sh",
+    },
 ]
