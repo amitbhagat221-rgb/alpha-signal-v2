@@ -53,7 +53,7 @@ if rclone listremotes 2>/dev/null | grep -q '^gdrive:'; then
         log "uploaded $(basename "$GZ") -> $REMOTE"
         # Success marker — config.FILE_OUTPUTS watches its mtime (review F13: a failed
         # or skipped backup was invisible; backup.log is appended either way).
-        touch /home/ubuntu/alpha-signal-v2/output/backup_last_ok
+        echo "$(date -u +%FT%TZ) $(basename "$GZ")" > /home/ubuntu/alpha-signal-v2/output/backup_last_ok
         # Retention: delete dailies older than N days, but keep month-1st snapshots.
         rclone delete "$REMOTE/" --min-age "${RETAIN_DAILY_DAYS}d" \
             --include 'alpha_signal_*.db.gz' --exclude 'alpha_signal_*01.db.gz' 2>/dev/null
