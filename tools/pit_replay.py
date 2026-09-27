@@ -44,6 +44,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import factors
+from config import PICKABLE_TIERS
 from db import get_db, read_sql
 
 # Every column score_universe reads, in _load_signals() shape — derived from the
@@ -292,7 +293,7 @@ def replay(snapshot_date: str | None = None, top_n: int = 30) -> int:
     current_scored["rank"] = pd.to_numeric(current_scored["rank"], errors="coerce")
     current_scored["final_score"] = pd.to_numeric(current_scored["final_score"], errors="coerce")
     diffs = {}
-    for tier in ["LARGE", "MID", "SMALL"]:
+    for tier in PICKABLE_TIERS:
         f_top = (frozen_out[(frozen_out["cap_tier"] == tier) & frozen_out["rank"].notna()]
                  .nsmallest(top_n, "rank")[["sid", "rank", "final_score"]])
         c_top = (current_scored[(current_scored["cap_tier"] == tier) & current_scored["rank"].notna()]
@@ -311,7 +312,7 @@ def replay(snapshot_date: str | None = None, top_n: int = 30) -> int:
     # Show specific changes if WARN/FAIL
     if verdict != "PASS":
         print(f"\n  Diff detail — sids that moved in/out of top-{top_n}:")
-        for tier in ["LARGE", "MID", "SMALL"]:
+        for tier in PICKABLE_TIERS:
             f_top = frozen_out[frozen_out["cap_tier"] == tier].nsmallest(top_n, "rank")
             c_top = current_scored[current_scored["cap_tier"] == tier].nsmallest(top_n, "rank")
             dropped = set(f_top["sid"]) - set(c_top["sid"])

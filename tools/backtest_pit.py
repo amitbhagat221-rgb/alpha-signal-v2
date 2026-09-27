@@ -42,6 +42,7 @@ import pandas as pd
 from scipy.stats import spearmanr
 
 import factors
+from config import PICKABLE_TIERS
 from db import get_backtest_cadence, read_sql, upsert_df
 
 
@@ -218,7 +219,7 @@ def _nw_lag_for(signal_id, cadence):
     return 0  # monthly cadence with fwd_return_20d has ~no overlap
 
 
-TIERS = ["LARGE", "MID", "SMALL"]
+TIERS = list(PICKABLE_TIERS)
 
 
 def _is_month_start_anchor(d):

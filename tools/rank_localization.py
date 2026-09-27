@@ -27,6 +27,7 @@ import numpy as np
 import pandas as pd
 from scipy.stats import ttest_ind
 
+from config import PICKABLE_TIERS
 from db import read_sql
 
 OUT_PATH = PROJECT_ROOT / "docs" / "studies" / "rank-localization-2026-07.md"
@@ -46,7 +47,7 @@ def _to_md(df):
     return "\n".join([header, sep, body])
 
 RANK_BUCKETS = [(1, 5), (6, 10), (11, 20), (21, 50)]
-TIERS = ["LARGE", "MID", "SMALL"]
+TIERS = list(PICKABLE_TIERS)
 N_ANCHORS = 24
 
 

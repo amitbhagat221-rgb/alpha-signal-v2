@@ -21,7 +21,14 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from config import TIERS
 from db import get_db, read_sql
+
+# The carve-out tier and the tier it is carved from (config.TIERS, ADR 0026). Runs
+# AFTER the segment node (scoring/segment.py), which assigns LARGE/MID/SMALL and
+# leaves this tier's members alone.
+MICRO = next(t for t, spec in TIERS.items() if spec.get("carve_from"))
+CARVE_FROM = TIERS[MICRO]["carve_from"]
 
 
 # Spec (locked 2026-05-25): liquidity-gate ALL of, quality OR data fail.
@@ -37,7 +44,7 @@ def candidates() -> "pandas.DataFrame":
     return read_sql(
         """
         WITH small AS (
-            SELECT sid, cap_tier FROM stocks WHERE cap_tier IN ('SMALL', 'MICRO')
+            SELECT sid, cap_tier FROM stocks WHERE cap_tier IN (?, ?)
         ),
         prices AS (
             SELECT sid, AVG(close * volume) / 1e7 AS adtv_cr_90d
@@ -67,7 +74,7 @@ def candidates() -> "pandas.DataFrame":
               OR COALESCE(f.n_quarters, 0) < ?
           )
         """,
-        params=[ADTV_GATE_CR, MCAP_LIMIT_CR, PIOTROSKI_LIMIT, MIN_QUARTERS],
+        params=[CARVE_FROM, MICRO, ADTV_GATE_CR, MCAP_LIMIT_CR, PIOTROSKI_LIMIT, MIN_QUARTERS],
     )
 
 
@@ -85,20 +92,20 @@ def reclassify(dry_run: bool = False) -> int:
         with get_db() as conn:
             still_micro = set(micro_sids)
             currently_micro = {
-                r[0] for r in conn.execute("SELECT sid FROM stocks WHERE cap_tier='MICRO'").fetchall()
+                r[0] for r in conn.execute("SELECT sid FROM stocks WHERE cap_tier=?", (MICRO,)).fetchall()
             }
             to_promote = currently_micro - still_micro
             if to_promote:
                 placeholders = ",".join("?" * len(to_promote))
                 conn.execute(
-                    f"UPDATE stocks SET cap_tier = 'SMALL' WHERE sid IN ({placeholders})",
-                    list(to_promote),
+                    f"UPDATE stocks SET cap_tier = ? WHERE sid IN ({placeholders})",
+                    [CARVE_FROM, *to_promote],
                 )
                 print(f"  Promoted {len(to_promote)} stocks MICRO → SMALL (no longer meeting MICRO criteria)")
             placeholders = ",".join("?" * len(micro_sids))
             conn.execute(
-                f"UPDATE stocks SET cap_tier = 'MICRO' WHERE sid IN ({placeholders}) AND cap_tier != 'MICRO'",
-                micro_sids,
+                f"UPDATE stocks SET cap_tier = ? WHERE sid IN ({placeholders}) AND cap_tier != ?",
+                [MICRO, *micro_sids, MICRO],
             )
 
     print(f"\nMICRO criteria:")
