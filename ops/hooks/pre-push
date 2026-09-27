@@ -1,0 +1,80 @@
+#!/bin/bash
+# Pre-push gates (versioned; enabled with `git config core.hooksPath ops/hooks`):
+#   0. Unit/regression test suite (tests/, pytest from .devlib — requirements-dev.txt)
+#   1. Plan 0007 Phase 3 — Regression fixtures (historic bugs + identity gate; always run)
+#   2. Plan 0005 Phase E  — PIT replay (only on scoring/signals/sources/eligibility changes)
+# Skip with: git push --no-verify (do not skip casually).
+#
+# Review F4 (2026-09-27): the previous copy read `rc=$?` after `cmd | tail`, i.e. tail's
+# status, so no gate could ever fail. pipefail + PIPESTATUS fix that.
+# Known hazard: gate 1 inserts and deletes synthetic rows in the LIVE DB
+# (tools/regression_fixtures.py) — tracked on the checklist; don't add more of that.
+
+set -uo pipefail
+cd "$(git rev-parse --show-toplevel)" || exit 1
+
+# Activate venv (shared with v1)
+if [ -f /home/ubuntu/alpha-signal/venv/bin/activate ]; then
+    source /home/ubuntu/alpha-signal/venv/bin/activate
+fi
+
+gate_fail() { echo ""; echo "✖ $1"; echo "  To bypass (NOT recommended): git push --no-verify"; exit 1; }
+
+# ─────────── 0. Test suite ───────────
+echo "▷ pre-push: test suite"
+if [ ! -d .devlib ]; then
+    gate_fail "pytest not installed. Run: pip install --target .devlib -r requirements-dev.txt"
+fi
+start=$(date +%s)
+PYTHONPATH=.devlib python -m pytest -q -p no:cacheprovider tests/ 2>&1 | tail -5
+rc=${PIPESTATUS[0]}
+elapsed=$(( $(date +%s) - start ))
+[ "$rc" -eq 0 ] || gate_fail "Test suite FAILED (${elapsed}s)."
+echo "✓ Test suite PASS (${elapsed}s)"
+
+# ─────────── 1. Regression fixtures (Plan 0007 Phase 3) ───────────
+echo "▷ pre-push: Plan 0007 regression fixtures + identity-gate tests"
+start=$(date +%s)
+python -m tools.regression_fixtures verify_all 2>&1 | tail -12
+rc=${PIPESTATUS[0]}
+elapsed=$(( $(date +%s) - start ))
+[ "$rc" -eq 0 ] || gate_fail "Regression fixtures FAILED (${elapsed}s) — your changes regressed against a documented bug pattern."
+echo "✓ Regression fixtures PASS (${elapsed}s)"
+
+start=$(date +%s)
+python -m tests.test_identity_gate 2>&1 | tail -3
+rc=${PIPESTATUS[0]}
+elapsed=$(( $(date +%s) - start ))
+[ "$rc" -eq 0 ] || gate_fail "Identity-gate unit tests FAILED (${elapsed}s)."
+echo "✓ Identity-gate unit tests PASS (${elapsed}s)"
+
+# ─────────── 2. PIT replay (only on factor/source code changes) ───────────
+changed=$(git diff --name-only @{u} HEAD 2>/dev/null | grep -E "^(scoring|signals|sources|eligibility)/" || true)
+if [ -z "$changed" ]; then
+    exit 0
+fi
+
+echo ""
+echo "▷ pre-push: PIT replay (Phase E gate) — code change detected in:"
+echo "$changed" | sed 's/^/    /'
+
+start=$(date +%s)
+python -m tools.pit_replay replay 2>&1 | tail -10
+rc=${PIPESTATUS[0]}
+elapsed=$(( $(date +%s) - start ))
+
+if [ "$rc" -eq 2 ]; then
+    echo ""
+    echo "✖ PIT replay FAILED (${elapsed}s) — your changes shift picks beyond tolerance."
+    echo "  Fix the drift or, if intended, re-freeze:"
+    echo "    python -m tools.pit_replay freeze"
+    echo "  Then push again. To bypass (NOT recommended): git push --no-verify"
+    exit 1
+fi
+if [ "$rc" -eq 1 ]; then
+    echo "⚠  PIT replay WARN (${elapsed}s) — minor drift, push allowed."
+elif [ "$rc" -ne 0 ]; then
+    gate_fail "PIT replay crashed (rc=$rc, ${elapsed}s)."
+fi
+echo "✓ PIT replay PASS (${elapsed}s)"
+exit 0

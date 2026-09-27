@@ -1,0 +1,4 @@
+# Dev-only tools, installed OUTSIDE the shared venv (v1 uses it):
+#   pip install --target .devlib -r requirements-dev.txt
+# Tests then run with: PYTHONPATH=.devlib python -m pytest -q -p no:cacheprovider tests/
+pytest==9.1.1

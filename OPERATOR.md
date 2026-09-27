@@ -122,7 +122,7 @@ These sit in a plaintext shell file. Move them to a secret manager, or at least 
 
 ## 8. Operator-specific don'ts (on top of CLAUDE.md)
 
-- **Don't bypass the pre-push hook** (`.git/hooks/pre-push`, not versioned). It runs `tools/pit_replay.py` when `scoring/`, `signals/`, `sources/` or `eligibility/` change (ADR 0025).
+- **Don't bypass the pre-push hook** (`ops/hooks/pre-push`, versioned; enabled by `git config core.hooksPath ops/hooks`). It runs the `tests/` suite (pytest lives in `.devlib/`, outside the shared venv: `pip install --target .devlib -r requirements-dev.txt`), the regression fixtures, and `tools/pit_replay.py` when `scoring/`, `signals/`, `sources/` or `eligibility/` change (ADR 0025). A PIT-replay FAIL after an intended pick change is cleared with `python -m tools.pit_replay freeze`.
 - **Don't run `graphify --update`.** The graph is still frozen on the 2026-05-23 snapshot. The post-commit hook that rebuilt it is disabled (`.git/hooks/post-commit.disabled`).
 - **Don't `pip install`/upgrade** into the shared venv without remembering that v1 uses it too.
 
