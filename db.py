@@ -116,6 +116,8 @@ def init_db():
 # 2026-09-26: schema.sql regenerated from the live DB — the 76 entries that
 # lived here are all in it now, so the list restarts empty.
 _COLUMN_MIGRATIONS = [
+    # XBRL filing the trade came from — nse_insider skips filings already stored (2026-09-27)
+    ("insider_trades", "filing_id", "TEXT"),
 ]
 
 

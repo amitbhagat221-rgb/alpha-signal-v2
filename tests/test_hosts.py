@@ -6,7 +6,7 @@ import re
 from hosts import DEFAULT, HOSTS
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-_KEYS = {"netlocs", "gap", "jitter", "headers", "retries", "budget_min", "models"}
+_KEYS = {"netlocs", "gap", "jitter", "headers", "retries", "budget_min", "models", "impersonate"}
 
 
 def test_every_host_is_polite():
@@ -75,3 +75,17 @@ def test_config_api_block_is_gone():
     import config
     assert not hasattr(config, "API")
     assert not hasattr(config, "LLM")
+
+
+def test_impersonating_host_gets_a_browser_tls_session(monkeypatch):
+    """BSE's Akamai 403s python-requests' TLS fingerprint (2026-09-19): warm_session
+    must hand BSE a curl_cffi Chrome session without our fixed UA, others plain requests."""
+    import requests
+    from curl_cffi import requests as cffi
+    from sources import _http
+    monkeypatch.setattr(_http, "polite_get", lambda *a, **k: None)      # no network
+    s = _http.warm_session("https://www.bseindia.com/corporates/ann.html",
+                           headers=HOSTS["bse_api"]["headers"])
+    assert isinstance(s, cffi.Session) and "User-Agent" not in s.headers
+    assert s.headers["Origin"] == "https://www.bseindia.com"
+    assert type(_http.warm_session("https://www.nseindia.com/")) is requests.Session

@@ -491,6 +491,11 @@ def main():
             return 2
 
     print(f"\ntotal rows: {total_rows}  |  failures: {failures}/{len(targets)}")
+    # A dead session makes every stock return 0 rows instead of raising, so the
+    # 2026-09 harvests "succeeded" with 2448/2448 failures. Fail loudly instead.
+    if total_rows == 0 or failures > len(targets) / 2:
+        print("FAILED: most targets returned no rows — check auth (--check-cookie / --login)")
+        return 1
     return 0
 
 

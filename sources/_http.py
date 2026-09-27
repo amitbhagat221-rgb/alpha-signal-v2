@@ -26,6 +26,16 @@ from urllib.parse import urlsplit
 
 import requests
 
+try:                                   # browser-TLS client for hosts whose WAF fingerprints
+    from curl_cffi import requests as _cffi     # python-requests (hosts.HOSTS "impersonate")
+    _NET_ERRORS = (requests.ConnectionError, requests.Timeout,
+                   _cffi.exceptions.ConnectionError, _cffi.exceptions.Timeout)
+    _REQ_ERRORS = (requests.RequestException, _cffi.exceptions.RequestException)
+except ImportError:                    # pragma: no cover — curl_cffi ships with yfinance
+    _cffi = None
+    _NET_ERRORS = (requests.ConnectionError, requests.Timeout)
+    _REQ_ERRORS = (requests.RequestException,)
+
 from db import read_sql
 from hosts import DEFAULT, HOSTS
 
@@ -124,7 +134,7 @@ def polite_request(method, url, *, session=None, headers=None, params=None, time
         resp = None
         try:
             resp = call(url, headers=headers, params=params, timeout=timeout, **kwargs)
-        except (requests.ConnectionError, requests.Timeout) as e:
+        except _NET_ERRORS as e:
             err = e
         finally:
             _LAST_CALL[key] = time.monotonic()
@@ -148,15 +158,22 @@ def polite_get(url, **kwargs):
 
 
 def warm_session(home_url, headers=None):
-    """requests.Session carrying `headers` (default: the home host's), with its
+    """A session carrying `headers` (default: the home host's), with its
     cookie jar warmed by one paced GET of `home_url` — NSE and BSE bot gates set
     their cookies there. A failed warm-up is logged, not raised: the API call that
     follows fails loudly on its own."""
-    s = requests.Session()
-    s.headers.update(headers or host(home_url)[1]["headers"])
+    entry = host(home_url)[1]
+    headers = dict(headers or entry["headers"])
+    if entry.get("impersonate") and _cffi is not None:
+        # The browser fingerprint must stay consistent: let curl_cffi send its own UA.
+        headers.pop("User-Agent", None)
+        s = _cffi.Session(impersonate=entry["impersonate"])
+    else:
+        s = requests.Session()
+    s.headers.update(headers)
     try:
         polite_get(home_url, session=s, retries=0)
-    except requests.RequestException as e:
+    except _REQ_ERRORS as e:
         print(f"  cookie warm-up {home_url} failed: {type(e).__name__}: {e}")
     return s
 

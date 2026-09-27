@@ -1,123 +1,75 @@
 """
 Alpha Signal v2 — NSE Insider Trading (PIT) Fetcher
 
-Fetches insider trade disclosures from NSE's PIT API.
-2+ years of history available. Rich data: promoter buys/sells, pledges,
-KMP trades, employee transactions.
+Fetches SEBI PIT Reg 7 insider-trade disclosures from NSE in two steps:
 
-API: https://www.nseindia.com/api/corporates-pit?index=equities&from_date=DD-MM-YYYY&to_date=DD-MM-YYYY
+  1. LIST  https://www.nseindia.com/api/corporates-pit-gg?index=equities&from_date=DD-MM-YYYY&to_date=DD-MM-YYYY
+           one row per FILING (broadcast time, symbol, XBRL/XML links) — no trade fields.
+  2. XML   https://nsearchives.nseindia.com/corporate/xbrl/IT_…_WebXMLFile_….xml
+           one XBRL instance per filing; each `DisclosureN` context is one trade
+           (person, category, Buy/Sell/Pledge…, shares, value, trade dates).
 
-Reads: NSE PIT API
+The old one-step endpoint (/api/corporates-pit, trade fields inline) has returned an
+empty `data` list since ~2026-05-02; NSE's own filings page moved to -gg (2026-09).
+Only universe symbols are fetched, and a filing already stored (insider_trades.filing_id)
+is never fetched again, so the daily run costs ~one XML per new universe filing.
+
+Reads: NSE PIT list API + filing XBRL (nse_archives), stocks, insider_trades.filing_id
 Writes: insider_trades
 
 Usage:
-    python -m sources.nse_insider                   # fetch last 30 days
-    python -m sources.nse_insider --months 24       # backfill 2 years
-    python -m sources.nse_insider --dry-run
+    python -m sources.nse_insider                                  # last 10 days (daily)
+    python -m sources.nse_insider --from 2026-05-01 --to 2026-09-27  # backfill a window
+    python -m sources.nse_insider --days 30 --dry-run              # list + parse, no write
 """
 
 import argparse
+import xml.etree.ElementTree as ET
+from collections import defaultdict
 from datetime import date, datetime, timedelta
 
 import pandas as pd
-import requests
 
-from db import insert_df
+from db import insert_df, read_sql
 from hosts import HOSTS
 from sources import _http
 
-NSE_PIT_URL = "https://www.nseindia.com/api/corporates-pit"
+NSE_PIT_LIST_URL = "https://www.nseindia.com/api/corporates-pit-gg"
 # NSE's JSON headers (hosts.HOSTS["nse"]) + the insider-filings page as referer.
 SESSION_HEADERS = {**HOSTS["nse"]["headers"],
                    "Referer": "https://www.nseindia.com/companies-listing/corporate-filings-insider-trading"}
 
 NSE_HOME = "https://www.nseindia.com/"
+DAILY_DAYS = 10          # disclosures are indexed days after the trade; re-list 10 days
+LIST_CHUNK_DAYS = 31     # one list call per month (~600 filings) — no truncation seen
+
+# XBRL element local-name → field
+_XBRL = {
+    "NameOfThePerson": "person",
+    "CategoryOfPerson": "person_category",
+    "SecuritiesAcquiredOrDisposedTransactionType": "tx_type",
+    "SecuritiesAcquiredOrDisposedNumberOfSecurity": "shares",
+    "SecuritiesAcquiredOrDisposedValueOfSecurity": "value",
+    "DateOfAllotmentAdviceOrAcquisitionOfSharesOrSaleOfSharesSpecifyFromDate": "trade_date",
+}
 
 
-def _fetch_chunk(from_date, to_date, session):
-    """Fetch one date range from NSE PIT API. Returns (records, session) —
-    the session is replaced by a freshly cookie-warmed one on a 403."""
-    params = {
-        "index": "equities",
-        "from_date": from_date.strftime("%d-%m-%Y"),
-        "to_date": to_date.strftime("%d-%m-%Y"),
-    }
-
-    try:
-        try:
-            resp = _http.polite_get(NSE_PIT_URL, session=session, params=params, timeout=30)
-        except requests.HTTPError as e:
-            if e.response is None or e.response.status_code != 403:
-                raise
-            # Cookie expired — re-warm once and retry
-            session = _http.warm_session(NSE_HOME, headers=SESSION_HEADERS)
-            resp = _http.polite_get(NSE_PIT_URL, session=session, params=params, timeout=30)
-        if resp is None:
-            print("    HTTP 404", end="", flush=True)
-            return [], session
-        return resp.json().get("data", []), session
-    except Exception as e:
-        print(f"    Error: {e}", end="", flush=True)
-        return [], session
-
-
-def _parse_records(records):
-    """Parse NSE PIT API response into DataFrame matching insider_trades schema."""
-    sid_map = _http.sid_map()
-    rows = []
-
-    for rec in records:
-        symbol = rec.get("symbol", "").strip()
-        sid = sid_map.get(symbol)
-        if not sid:
-            continue  # skip stocks not in our universe
-
-        # Determine transaction type and values
-        # NSE PIT API: buyQuantity/sellquantity are always 0
-        # Real data is in secAcq (shares) and secVal (value in rupees)
-        tx_type = rec.get("tdpTransactionType", "")
-        sec_acq = _safe_float(rec.get("secAcq"))
-        sec_val = _safe_float(rec.get("secVal"))
-
-        shares = sec_acq or 0
-        value = sec_val / 100000 if sec_val else None  # convert rupees → lakhs
-
-        if tx_type in ("Buy", "Acquisition"):
-            direction = "Buy"
-        elif tx_type in ("Sell", "Disposal"):
-            direction = "Sell"
-        else:
-            direction = tx_type  # Pledge, Pledge Revoke, Pledge Invoke, etc.
-
-        # Parse trade date. NSE PIT occasionally returns placeholder records where
-        # every field is "-"; reject anything that doesn't parse as DD-Mon-YYYY.
-        raw_dt = (rec.get("acqfromDt") or "").strip()
-        try:
-            trade_date = datetime.strptime(raw_dt[:11].strip(), "%d-%b-%Y").strftime("%Y-%m-%d")
-        except ValueError:
-            continue
-        # Reject future-dated trades — a trade can't be in the future; these are NSE data
-        # glitches (e.g. 2026-11-26 seen on 2026-06-22) that corrupt MAX(trade_date)/freshness.
-        if trade_date > datetime.now().strftime("%Y-%m-%d"):
-            continue
-
-        person_cat = rec.get("personCategory", "")
-        person = rec.get("acqName", "")
-
-        rows.append({
-            "sid": sid,
-            "symbol": symbol,
-            "company_name": rec.get("company", "")[:100],
-            "person": person[:200],
-            "person_category": person_cat,
-            "transaction_type": direction,
-            "shares": shares,
-            "value_lakhs": value,
-            "trade_date": trade_date,
-            "source": "nse_pit",
-        })
-
-    return pd.DataFrame(rows) if rows else pd.DataFrame()
+def _direction(tx):
+    """Map an XBRL transaction type onto the vocabulary insider_trades already holds
+    (Buy / Sell / Pledge / Pledge Revoke / Pledge Invoke), else keep it verbatim."""
+    t = (tx or "").strip()
+    low = t.lower()
+    if "revok" in low or "release" in low:
+        return "Pledge Revoke"
+    if "invo" in low:
+        return "Pledge Invoke"
+    if "pledge" in low or "creation" in low:
+        return "Pledge"
+    if low in ("buy", "acquisition", "purchase") or low.startswith("buy"):
+        return "Buy"
+    if low in ("sell", "disposal", "sale") or low.startswith("sell"):
+        return "Sell"
+    return t
 
 
 def _safe_float(val):
@@ -129,78 +81,126 @@ def _safe_float(val):
         return None
 
 
-def fetch_insider(months=1, dry_run=False):
-    """Fetch insider trades from NSE PIT API."""
-    end = date.today()
-    start = end - timedelta(days=months * 30)
-
-    # Fetch in 3-month chunks (API handles ~13K records per year)
-    chunk_days = 90
-    chunks = []
-    d = start
-    while d < end:
-        chunk_end = min(d + timedelta(days=chunk_days), end)
-        chunks.append((d, chunk_end))
+def list_filings(start, end, session):
+    """Filings broadcast in [start, end] (dates), one list call per month."""
+    out, d = [], start
+    while d <= end:
+        chunk_end = min(d + timedelta(days=LIST_CHUNK_DAYS - 1), end)
+        params = {"index": "equities", "from_date": d.strftime("%d-%m-%Y"),
+                  "to_date": chunk_end.strftime("%d-%m-%Y")}
+        resp = _http.polite_get(NSE_PIT_LIST_URL, session=session, params=params, timeout=60)
+        rows = (resp.json().get("data") or []) if resp is not None else []
+        print(f"  list {d} → {chunk_end}: {len(rows)} filings", flush=True)
+        out.extend(rows)
         d = chunk_end + timedelta(days=1)
+    return out
 
-    print(f"NSE Insider Trades: {start} → {end} ({len(chunks)} chunks)")
 
-    if dry_run:
-        for i, (s, e) in enumerate(chunks):
-            print(f"  Chunk {i+1}: {s} → {e}")
-        return 0
+def parse_xbrl(xml_text):
+    """[{person, person_category, tx_type, shares, value, trade_date}] — one per
+    Disclosure context. Matches elements by local name, whatever the namespace prefix."""
+    root = ET.fromstring(xml_text)
+    by_ctx = defaultdict(dict)
+    for el in root.iter():
+        name = el.tag.rsplit("}", 1)[-1]
+        field = _XBRL.get(name)
+        ctx = el.get("contextRef")
+        if field and ctx:
+            by_ctx[ctx][field] = (el.text or "").strip()
+    return [v for v in by_ctx.values() if v.get("tx_type") or v.get("person")]
 
+
+def _rows_for_filing(filing, disclosures, sid, today_iso):
+    rows = []
+    for x in disclosures:
+        trade_date = (x.get("trade_date") or "")[:10]
+        try:
+            datetime.strptime(trade_date, "%Y-%m-%d")
+        except ValueError:
+            continue
+        if trade_date > today_iso:          # future-dated = filing glitch; corrupts MAX(trade_date)
+            continue
+        value = _safe_float(x.get("value"))
+        rows.append({
+            "sid": sid,
+            "symbol": filing["symbol"].strip(),
+            "company_name": (filing.get("companyName") or "")[:100],
+            "person": (x.get("person") or "")[:200],
+            "person_category": x.get("person_category") or "",
+            "transaction_type": _direction(x.get("tx_type")),
+            "shares": _safe_float(x.get("shares")) or 0,
+            "value_lakhs": value / 100000 if value else None,   # rupees → lakhs
+            "trade_date": trade_date,
+            "source": "nse_pit",
+            "filing_id": filing["xmlFileName"].rsplit("/", 1)[-1],
+        })
+    return rows
+
+
+def fetch_insider(start, end, dry_run=False):
+    """List filings broadcast in [start, end], fetch the XBRL of each new universe
+    filing, write insider_trades. Returns rows written (parsed, when dry_run)."""
+    print(f"NSE Insider Trades: filings broadcast {start} → {end}")
     session = _http.warm_session(NSE_HOME, headers=SESSION_HEADERS)
+    filings = list_filings(start, end, session)
+    # NSE files hundreds of PIT disclosures a week — an empty list over a week-plus
+    # window means the endpoint changed again, not a quiet market (the old API sat
+    # empty for 5 months while the step logged SUCCESS).
+    if not filings and (end - start).days >= 6:
+        raise RuntimeError(f"NSE PIT list returned 0 filings for {start} → {end} — endpoint "
+                           "likely changed; insider_trades is not being refreshed")
 
-    total_saved = 0
-    total_fetched = 0
+    sids = _http.sid_map()
+    seen = set(read_sql("SELECT DISTINCT filing_id FROM insider_trades "
+                        "WHERE filing_id IS NOT NULL")["filing_id"])
+    todo = [f for f in filings
+            if f.get("xmlFileName") and sids.get((f.get("symbol") or "").strip())
+            and f["xmlFileName"].rsplit("/", 1)[-1] not in seen]
+    print(f"  {len(filings)} filings · {len(todo)} new universe filings to fetch")
 
-    for i, (chunk_start, chunk_end) in enumerate(chunks):
-        print(f"  [{i+1}/{len(chunks)}] {chunk_start} → {chunk_end}...", end=" ", flush=True)
+    today_iso = date.today().isoformat()
+    rows, n_err, written = [], 0, 0
+    for i, f in enumerate(todo, 1):
+        try:
+            resp = _http.polite_get(f["xmlFileName"], timeout=30)
+            if resp is None:
+                n_err += 1
+                continue
+            rows += _rows_for_filing(f, parse_xbrl(resp.content), sids[f["symbol"].strip()], today_iso)
+        except Exception as e:                       # one bad filing must not sink the run
+            n_err += 1
+            print(f"    [{f.get('symbol')}] {type(e).__name__}: {str(e)[:80]}", flush=True)
+        if len(rows) >= 500 or i == len(todo):
+            if rows and not dry_run:
+                written += insert_df(pd.DataFrame(rows), "insider_trades")
+            elif dry_run:
+                written += len(rows)
+            rows = []
+        if i % 100 == 0:
+            print(f"  [{i}/{len(todo)}] written={written} errors={n_err}", flush=True)
 
-        records, session = _fetch_chunk(chunk_start, chunk_end, session)
-        total_fetched += len(records)
-
-        if records:
-            df = _parse_records(records)
-            if not df.empty:
-                n = insert_df(df, "insider_trades")
-                total_saved += n
-                print(f"{len(records)} fetched, {n} new")
-            else:
-                print(f"{len(records)} fetched, 0 matched universe")
-        else:
-            print("0 records")
-        # (polite_get paces NSE calls ≥2s apart; was a flat 3s sleep)
-
-    print(f"\nTotal: {total_fetched} fetched, {total_saved} new rows saved")
-    # NSE files thousands of PIT disclosures a month — zero records across a
-    # month-plus window means the endpoint changed, not a quiet market. The API
-    # has returned an empty `data` list since ~2026-05 (reported SUCCESS/0 daily).
-    if total_fetched == 0 and months >= 1:
-        raise RuntimeError(
-            f"NSE PIT API returned 0 records for {start} → {end} — endpoint "
-            f"likely changed/deprecated; insider_trades is not being refreshed"
-        )
-    return total_saved
+    print(f"\nTotal: {len(todo)} filings fetched, {n_err} errors, {written} rows "
+          f"{'parsed (dry run)' if dry_run else 'new'}")
+    if todo and n_err > len(todo) / 2:
+        raise RuntimeError(f"NSE PIT XBRL: {n_err}/{len(todo)} filings failed to fetch/parse")
+    return written
 
 
 def compute(dry_run=False):
-    """Pipeline entry point — fetch last ~60 days.
-
-    NSE PIT disclosures lag the trade by weeks (a trade is queried by `acqfromDt`,
-    but the filing only appears in the API once disclosed + indexed). A 30-day
-    window therefore captures only the freshest — and emptiest — slice; trades
-    disclosed >30d after they occurred would be permanently missed. A 60-day
-    window re-fetches the 30–60d-ago band each day so those late-arriving
-    disclosures backfill in via INSERT OR IGNORE (idempotent, ~2 chunks).
-    See the insider_trades STALENESS_OVERRIDE note in db.py for the lag rationale."""
-    return fetch_insider(months=2, dry_run=dry_run)
+    """Pipeline entry point — filings broadcast in the last DAILY_DAYS days. Trades are
+    disclosed days-to-weeks after they happen; filtering by BROADCAST date (not trade
+    date, as the old API did) means every filing is seen once, the day it appears."""
+    end = date.today()
+    return fetch_insider(end - timedelta(days=DAILY_DAYS), end, dry_run=dry_run)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--months", type=int, default=1, help="How many months to fetch (default: 1)")
-    parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--days", type=int, default=DAILY_DAYS, help="broadcast window (default 10)")
+    parser.add_argument("--from", dest="frm", help="backfill start YYYY-MM-DD")
+    parser.add_argument("--to", dest="to", help="backfill end YYYY-MM-DD (default today)")
+    parser.add_argument("--dry-run", action="store_true", help="list + parse, no write")
     args = parser.parse_args()
-    fetch_insider(months=args.months, dry_run=args.dry_run)
+    end = date.fromisoformat(args.to) if args.to else date.today()
+    start = date.fromisoformat(args.frm) if args.frm else end - timedelta(days=args.days)
+    fetch_insider(start, end, dry_run=args.dry_run)

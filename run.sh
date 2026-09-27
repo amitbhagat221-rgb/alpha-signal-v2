@@ -61,8 +61,11 @@ case "$JOB" in
         run python -m tools.backtest_pit ;;
     expected_return)    # 1st of month
         run python -m tools.expected_return ;;
-    screener_cookie)    # 3x/day — keep the Screener session alive; push when it dies
-        run python -m sources.screener_pull --check-cookie || {
+    screener_cookie)    # 3x/day — keep the Screener session alive; re-login (path A) when it
+                        # dies, push only if that fails too (the cookie sat dead Jul→Sep with
+                        # no re-login attempt and no NTFY_TOPIC to deliver the push)
+        run python -m sources.screener_pull --check-cookie || \
+        { run python -m sources.screener_pull --login && run python -m sources.screener_pull --check-cookie; } || {
             [ -n "${NTFY_TOPIC:-}" ] && run curl -s -H "Title: Screener cookie DEAD" -H "Priority: high" \
                 -d "Re-extract sessionid from browser into ~/.cache/screener_cookie.json" "https://ntfy.sh/$NTFY_TOPIC"; } ;;
     screener_universe)  # 1st + 15th — Screener fundamentals harvest

@@ -17,6 +17,8 @@ Per host — every key optional, missing keys fall back to DEFAULT:
               ({} = the HTTP library's defaults)
   retries     polite_get retries on timeout / connection error / 429 / 5xx
   budget_min  wall-clock minutes one run may spend on the host (time_budget)
+  impersonate curl_cffi browser profile for warm_session (e.g. "chrome") — for WAFs
+              that reject python-requests' TLS fingerprint (BSE/Akamai, 2026-09-19)
 An undeclared netloc gets DEFAULT and its own gap. Plain dicts (ADR 0004).
 """
 
@@ -26,7 +28,7 @@ BROWSER_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
               "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 
 DEFAULT = {"gap": 2.0, "jitter": 0.0, "headers": {"User-Agent": UA}, "retries": 2,
-           "budget_min": None}
+           "budget_min": None, "impersonate": None}
 
 HOSTS = {
     # ── Exchanges ──
@@ -35,9 +37,11 @@ HOSTS = {
             "headers": {"User-Agent": UA, "Accept": "application/json"}},
     "nse_archives": {"netlocs": ["archives.nseindia.com", "nsearchives.nseindia.com"]},
     # Filing PDFs are served only with a browser UA + a bseindia referer.
-    "bse": {"netlocs": ["www.bseindia.com"], "jitter": 1.0,
+    # Akamai 403s python-requests on api.bseindia.com since ~2026-09-19 (TLS fingerprint);
+    # a Chrome-impersonating session passes. The warm-up host decides the session type.
+    "bse": {"netlocs": ["www.bseindia.com"], "jitter": 1.0, "impersonate": "chrome",
             "headers": {"User-Agent": BROWSER_UA, "Referer": "https://www.bseindia.com/"}},
-    "bse_api": {"netlocs": ["api.bseindia.com"], "jitter": 1.0,
+    "bse_api": {"netlocs": ["api.bseindia.com"], "jitter": 1.0, "impersonate": "chrome",
                 "headers": {"User-Agent": BROWSER_UA, "Referer": "https://www.bseindia.com/",
                             "Origin": "https://www.bseindia.com",
                             "Accept": "application/json, text/plain, */*"}},

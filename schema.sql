@@ -732,7 +732,7 @@ CREATE TABLE IF NOT EXISTS insider_trades (
     value_lakhs     REAL,
     trade_date      TEXT,
     source          TEXT,
-    fetched_at      TEXT DEFAULT (datetime('now')),
+    fetched_at      TEXT DEFAULT (datetime('now')), filing_id TEXT,
     UNIQUE(sid, person_category, transaction_type, trade_date, shares)
 );
 CREATE INDEX IF NOT EXISTS idx_insider_date ON insider_trades(trade_date);

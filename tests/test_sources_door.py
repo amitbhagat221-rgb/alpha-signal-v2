@@ -121,6 +121,9 @@ def net(monkeypatch):
     monkeypatch.setattr(time, "sleep", n.sleep)
     monkeypatch.setattr(_http, "_LAST_CALL", {})
     monkeypatch.setattr(_http, "_SID_MAPS", {})
+    # Impersonating hosts (BSE) would get a curl_cffi session that bypasses the
+    # requests interception below and reaches the real network — keep them on requests.
+    monkeypatch.setattr(_http, "_cffi", None)
 
     def fake_request(self, method, url, **kw):
         return n._handle(self, method, url, **kw)
@@ -759,13 +762,13 @@ def test_fno_pull_compute(net, monkeypatch):
 # ─────────────── modules that only swap config.API for the host entry ───────────────
 
 def test_polite_get_callers_send_same_headers(net, monkeypatch):
-    """nse, nse_bulk, nse_insider, mf_amfi_master, mf_nav_backfill,
-    regulatory_harvester, tickertape_analyst: identical requests before/after."""
-    from sources import (mf_amfi_master, mf_nav_backfill, nse, nse_bulk, nse_insider,
+    """nse, nse_bulk, mf_amfi_master, mf_nav_backfill, regulatory_harvester,
+    tickertape_analyst: identical requests before/after. (nse_insider left this
+    equivalence set on 2026-09-27 when NSE moved to corporates-pit-gg + XBRL —
+    an intentional change; tests/test_nse_insider.py covers it.)"""
+    from sources import (mf_amfi_master, mf_nav_backfill, nse, nse_bulk,
                          regulatory_harvester, tickertape_analyst)
     net.route("GET", r"archives\.nseindia\.com/", resp(200, "SYMBOL,SERIES\n"))
-    net.route("GET", r"www\.nseindia\.com/?$", resp(200, "home"))
-    net.route("GET", r"/api/corporates-pit$", jresp({"data": [{"symbol": "X"}]}))
     net.route("GET", r"amfiindia\.com/", resp(200, "NAV"))
     net.route("GET", r"api\.mfapi\.in/", jresp({"meta": {}, "data": []}))
     net.route("GET", r"news\.google\.com/", resp(200, "<rss></rss>"))
@@ -775,9 +778,6 @@ def test_polite_get_callers_send_same_headers(net, monkeypatch):
     monkeypatch.setattr(nse_bulk, "insert_df", lambda df, t: 0)
     with contextlib.suppress(RuntimeError):
         nse_bulk.fetch_today()
-    monkeypatch.setattr(nse_insider, "date", frozen_date(2026, 9, 25))
-    monkeypatch.setattr(nse_insider, "_parse_records", lambda recs: pd.DataFrame())
-    nse_insider.fetch_insider(months=1)
     mf_amfi_master.fetch_navall_text()
     mf_nav_backfill.fetch_scheme_history("100")
     regulatory_harvester._google_rss_items("rbi", "2026-09-01", "2026-09-02")
@@ -788,7 +788,7 @@ def test_polite_get_callers_send_same_headers(net, monkeypatch):
         regulatory_harvester.harvest_pib(start_prid=1, end_prid=2)
     assert tickertape_analyst._fetch_next_data("stocks/x-X") == {"a": 1}
     check("polite_get_callers.requests", net.requests_view())
-    for n in ("archives.nseindia.com", "www.nseindia.com", "www.amfiindia.com", "api.mfapi.in",
+    for n in ("archives.nseindia.com", "www.amfiindia.com", "api.mfapi.in",
               "news.google.com", "pib.gov.in", "tickertape.in"):
         gap_note(net, n)
 
@@ -2635,40 +2635,6 @@ SNAP = json.loads(r"""
    "params": null,
    "timeout": 15,
    "url": "https://archives.nseindia.com/content/equities/block.csv"
-  },
-  {
-   "allow_redirects": true,
-   "data": null,
-   "headers": {
-    "Accept": "application/json",
-    "Accept-Encoding": "gzip, deflate, br",
-    "Connection": "keep-alive",
-    "Referer": "https://www.nseindia.com/companies-listing/corporate-filings-insider-trading",
-    "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36"
-   },
-   "method": "GET",
-   "params": null,
-   "timeout": 15,
-   "url": "https://www.nseindia.com/"
-  },
-  {
-   "allow_redirects": true,
-   "data": null,
-   "headers": {
-    "Accept": "application/json",
-    "Accept-Encoding": "gzip, deflate, br",
-    "Connection": "keep-alive",
-    "Referer": "https://www.nseindia.com/companies-listing/corporate-filings-insider-trading",
-    "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36"
-   },
-   "method": "GET",
-   "params": {
-    "from_date": "26-08-2026",
-    "index": "equities",
-    "to_date": "25-09-2026"
-   },
-   "timeout": 30,
-   "url": "https://www.nseindia.com/api/corporates-pit"
   },
   {
    "allow_redirects": true,
