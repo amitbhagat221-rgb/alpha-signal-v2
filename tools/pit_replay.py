@@ -103,46 +103,19 @@ def _run_live_pipeline():
     return input_df, scored_df
 
 
-# ─── Historical reconstruction ───
-# For pre-today freezes we don't have signal tables (piotroski_scores, accruals_scores, etc)
-# as they were on that date — only the raw inputs in daily_snapshots_pit. We map raw cols
-# to the score_universe input shape; composites we can't reconstruct (accruals_signal,
-# promoter_signal, forensic.penalty, smart_money) get NaN and score_universe normalizes
-# by the weight that *did* contribute. This is a known coverage gap — the validator catches
-# score_universe code drift but not signal-composite drift for historical dates. Production
-# (today's) freeze uses the full pipeline and has no such gap. Plan 0005 Phase E "full fix"
-# (2026-05-25): the screener composites (accruals_signal, promoter_signal, forensic_penalty,
-# smart_money_score) are persisted in daily_snapshots_pit too. Map derived from the registry.
-PIT_TO_INPUT_COLS = factors.PIT_TO_SCREENER_COLS
-
-
 def _run_historical_pipeline(snapshot_date: str):
-    """Build input_df from daily_snapshots_pit for the given date, run score_universe."""
+    """The REAL screener evaluated as of `snapshot_date` (plan 0015 Phase 3: live =
+    PIT at t) — same factor computation, as-of prices / statement counts /
+    revenue-plausibility / eligibility. Caveat: the universe and cap tiers are
+    today's (survivorship; plan 0011 WS2.8)."""
+    from datetime import date as _date
     from scoring import screener
-    cols = list(PIT_TO_INPUT_COLS.keys())
-    pit_df = read_sql(
-        f"""SELECT sid, cap_tier, {', '.join(cols)}
-            FROM daily_snapshots_pit WHERE snapshot_date = ?""",
-        params=[snapshot_date],
-    )
-    if pit_df.empty:
+    t = _date.fromisoformat(snapshot_date)
+    df = screener._load_signals(as_of=t)
+    if df.empty:
         return None, None
-    # Join in ticker/name/sector from stocks (universe-static, OK to use current)
-    meta = read_sql("SELECT sid, ticker, name, sector FROM stocks")
-    df = pit_df.merge(meta, on="sid", how="left").rename(columns=PIT_TO_INPUT_COLS)
-    # Smart_money is persisted on 0-100 scale; screener._load_signals divides by 100.
-    if "smart_money" in df.columns:
-        df["smart_money"] = pd.to_numeric(df["smart_money"], errors="coerce") / 100.0
-    # price_rows / quarters_present / fundamental_coverage aren't in PIT either, but
-    # score_universe needs them only for COVERAGE math (not scoring). Stub at the live
-    # values so the eligibility math doesn't crash.
-    df["price_rows"] = 252  # ≥ MIN_PRICE_ROWS=60 — historical stocks all had trading history
-    df["quarters_present"] = 8
-    df["fundamental_coverage"] = 1.0
-    # Screener inputs with no PIT column (e.g. eps_growth) stay NaN; score_universe
-    # normalizes by the weight that did contribute.
     input_df = df.reindex(columns=INPUT_COLS)
-    scored_df = screener.score_universe(input_df.copy())
+    scored_df = screener.score_universe(df.copy(), as_of=t)
     return input_df, scored_df
 
 

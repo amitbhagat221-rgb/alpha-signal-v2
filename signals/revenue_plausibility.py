@@ -75,30 +75,36 @@ def flag_revenue_implausible(rev_ttm, ni_ttm, total_assets, sector, *, cfg=RP):
     return True, reason
 
 
-def compute_revenue_plausibility():
-    """Evaluate the whole universe.
+def compute_revenue_plausibility(as_of=None):
+    """Evaluate the whole universe (as of `as_of`: only statements knowable then —
+    the PIT filing lags, 60d quarterly / 75d annual; None = everything in the DB).
 
     Returns DataFrame[sid, revenue_implausible(bool), implausible_reason(str|None)],
     one row per stock that has a full TTM (4 consolidated quarters) AND a balance
     sheet. Stocks without enough data simply don't appear (treated as not-flagged
     by the consumer's left-merge + fillna(False)).
     """
+    from pit import ANNUAL_LAG, QUARTERLY_LAG
+    q_asof = a_asof = ""
+    if as_of is not None:
+        q_asof = f"AND date(end_date, '+{QUARTERLY_LAG} day') <= '{as_of}'"
+        a_asof = f"AND date(end_date, '+{ANNUAL_LAG} day') <= '{as_of}'"
     rows = read_sql(
-        """
+        f"""
         WITH ttm AS (
           SELECT sid, SUM(revenue) AS ttm_rev, SUM(net_income) AS ttm_ni, COUNT(*) AS nq
           FROM (
             SELECT sid, revenue, net_income,
                    ROW_NUMBER() OVER (PARTITION BY sid ORDER BY end_date DESC) AS rn
             FROM quarterly_income
-            WHERE reporting = 'consolidated' AND revenue IS NOT NULL
+            WHERE reporting = 'consolidated' AND revenue IS NOT NULL {q_asof}
           ) WHERE rn <= 4 GROUP BY sid HAVING nq = 4
         ),
         bs AS (
           SELECT sid, total_assets FROM (
             SELECT sid, total_assets,
                    ROW_NUMBER() OVER (PARTITION BY sid ORDER BY end_date DESC) AS rn
-            FROM annual_balance_sheet WHERE total_assets IS NOT NULL
+            FROM annual_balance_sheet WHERE total_assets IS NOT NULL {a_asof}
           ) WHERE rn = 1
         )
         SELECT s.sid, s.sector, t.ttm_rev, t.ttm_ni, b.total_assets

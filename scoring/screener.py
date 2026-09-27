@@ -30,14 +30,15 @@ from db import read_sql, get_db, upsert_df
 LAST_SCORED = {}
 
 
-def _load_eligibility_wide():
-    """Load latest universe_eligibility, pivot to wide (sid index × signal cols).
-    Values are 0/1. Empty DataFrame if the table is empty (e.g. before first refresh).
+def _load_eligibility_wide(as_of=None):
+    """Load the latest universe_eligibility snapshot (on or before `as_of`), pivot to
+    wide (sid index × signal cols). Values are 0/1. Empty if there is no snapshot.
     """
     try:
+        cutoff = f"WHERE snapshot_date <= '{as_of}'" if as_of else ""
         long = read_sql(
             "SELECT sid, signal, eligible FROM universe_eligibility "
-            "WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM universe_eligibility)"
+            f"WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM universe_eligibility {cutoff})"
         )
     except Exception:
         long = pd.DataFrame(columns=["sid", "signal", "eligible"])
@@ -78,7 +79,7 @@ def _load_signals(return_prices=False, as_of=None):
     # signal (was re-read by four of them). Carries adj_close — split/bonus-adjusted
     # exactly as the PIT backtest adjusts it (signals/_prices.py).
     from signals._prices import load_prices
-    prices = load_prices()
+    prices = load_prices(as_of.isoformat() if as_of else None)
 
     # Per-sid price-row count, used by the has-prices pick-eligibility gate.
     # A stock with zero (or near-zero) price history can't be charted, can't
@@ -91,8 +92,11 @@ def _load_signals(return_prices=False, as_of=None):
     # ABSM ranked #164 SMALL with weight_coverage~0.6 because signal modules
     # emit non-NULL outputs from partial inputs (accruals_signal from BS
     # alone, consensus_signal from growth-only). Input coverage catches that.
+    # as_of (replay): only quarters knowable then (PIT 60-day filing lag).
+    from pit import QUARTERLY_LAG
+    q_asof = (f"WHERE date(end_date, '+{QUARTERLY_LAG} day') <= '{as_of.isoformat()}'" if as_of else "")
     fundamental_counts = read_sql(
-        "SELECT sid, COUNT(*) AS quarters_present FROM quarterly_income GROUP BY sid"
+        f"SELECT sid, COUNT(*) AS quarters_present FROM quarterly_income {q_asof} GROUP BY sid"
     )
 
     # Every factor column comes from the SAME computation the backtest panel stores
@@ -142,7 +146,7 @@ def _load_signals(return_prices=False, as_of=None):
     # (REXP, SEBI 2026-06-03). See signals/revenue_plausibility.py. Left-merge +
     # fillna(False): stocks without a full TTM/balance sheet are never flagged.
     from signals.revenue_plausibility import compute_revenue_plausibility
-    implausible = compute_revenue_plausibility()
+    implausible = compute_revenue_plausibility(as_of.isoformat() if as_of else None)
     df = df.merge(implausible, on="sid", how="left")
     df["revenue_implausible"] = df["revenue_implausible"].fillna(False).astype(bool)
 
@@ -160,7 +164,7 @@ def _percentile_rank_within_tier(df, col):
     return df.groupby("cap_tier")[col].rank(pct=True)
 
 
-def score_universe(df, weights: dict = None):
+def score_universe(df, weights: dict = None, as_of=None):
     """
     Apply tier-specific weights, rank within segment, apply forensic penalty.
     Returns scored DataFrame with final_score and rank columns.
@@ -198,7 +202,7 @@ def score_universe(df, weights: dict = None):
     # Load today's eligibility snapshot, pivot to wide (sid × signal). Missing
     # (sid, signal) defaults to ELIGIBLE=1 (back-compat for signals not yet
     # in registry) — registered signals will have explicit rows.
-    elig_wide = _load_eligibility_wide()
+    elig_wide = _load_eligibility_wide(as_of)
 
     for tier in ["LARGE", "MID", "SMALL"]:
         tier_mask = df["cap_tier"] == tier
