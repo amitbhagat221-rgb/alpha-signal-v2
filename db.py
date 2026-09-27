@@ -916,6 +916,8 @@ def _compute_freshness(latest_date_iso, refresh_freq, table_name=None):
     if refresh_freq not in STALENESS_THRESHOLDS:
         return "N/A", None, None
     if not latest_date_iso:
+        if table_name in TABLES and "date_col" in TABLES[table_name] and TABLES[table_name]["date_col"] is None:
+            return "N/A", None, None  # declared timeless (meta, per-year tables): not a blind spot
         return "NO_DATE_ANCHOR", None, None
     try:
         from datetime import datetime
@@ -1014,8 +1016,11 @@ def table_producer(table_name):
     judged on the weekly yfinance cadence but healed by the monthly Tickertape step.
     """
     from config import PIPELINE_STEPS
+    from graph import writes
 
-    steps = [s for s in PIPELINE_STEPS if s.get("table") == table_name]
+    # Every DECLARED write counts (review F12: only the legacy single `table` field did,
+    # so a multi-output step's other tables had no producer and could never go stale).
+    steps = [s for s in PIPELINE_STEPS if table_name in writes(s)]
     if not steps:
         return None
     return min(steps, key=lambda s: _CADENCE_RANK.get(s["frequency"], 9))  # min() is stable
@@ -1028,9 +1033,10 @@ def table_step_meta():
     entry's freq/source (tables fed by standalone crons).
     """
     from config import PIPELINE_STEPS
+    from graph import writes
 
     meta = {}
-    for t in dict.fromkeys(s["table"] for s in PIPELINE_STEPS if s.get("table")):
+    for t in dict.fromkeys(t for s in PIPELINE_STEPS for t in writes(s)):
         s = table_producer(t)
         if s:
             meta[t] = {

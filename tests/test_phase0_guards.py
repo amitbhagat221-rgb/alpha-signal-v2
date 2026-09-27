@@ -67,3 +67,22 @@ def test_health_tier_enum_follows_config():
     from checks import ranges
     from config import TIERS
     assert set(ranges.COLUMNS[("stocks", "cap_tier")]["in"]) == set(TIERS)
+
+
+def test_every_declared_write_has_a_producer():
+    """Review F12: freshness/heal found producers from the legacy single `table` field,
+    so a multi-output step's other tables (mf_rolling_returns, pit_reconstruction_log, …)
+    had none and could never be judged stale."""
+    import config
+    import db
+    import graph
+    for s in config.PIPELINE_STEPS:
+        for t in graph.writes(s):
+            assert db.table_producer(t) is not None, (s["name"], t)
+            assert t in db.table_step_meta(), (s["name"], t)
+
+
+def test_declared_timeless_table_is_not_a_blind_spot():
+    import db
+    assert db._compute_freshness(None, "monthly", "mf_calendar_returns")[0] == "N/A"
+    assert db._compute_freshness(None, "monthly", "_no_such_registered_table")[0] == "NO_DATE_ANCHOR"

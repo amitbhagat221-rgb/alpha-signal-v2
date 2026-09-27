@@ -314,7 +314,7 @@ TABLES = {
 
     # ── Regulatory ──
     "policy_events": {"kind": "RAW", "domain": "Regulatory", "date_col": None},
-    "regulatory_batches": {"kind": "STATE", "domain": "Regulatory", "date_col": None},
+    "regulatory_batches": {"kind": "STATE", "domain": "Regulatory", "date_col": "submitted_at"},
     # 2026-05-23: regulatory_events was scored as "monthly" (50d) and silently went
     # stale for 43d before being noticed (Gillette dossier showing 2023 articles).
     # News/PIB are weekly cadence at worst; if the harvester stops, we want a yellow
@@ -512,7 +512,7 @@ TABLES = {
         "description": "Canonical IC / t-stat / verdict per signal × cap_tier from v1's 36-period validation. Source-of-truth for every weight in factors.SIGNAL_WEIGHTS. Read-only; new t-stats from v2 reconstruction will land in a separate pit_ic_by_tier_v2 table.",
     },
     "pit_ic_by_tier_v2": {"kind": "COMPUTED", "domain": "Backtest (PIT)", "date_col": None},
-    "pit_reconstruction_log": {"kind": "LOG", "domain": "Backtest (PIT)", "date_col": None},
+    "pit_reconstruction_log": {"kind": "LOG", "domain": "Backtest (PIT)", "date_col": "finished_at"},
     "pit_replay_snapshots": {
         "kind": "COMPUTED", "domain": "Backtest (PIT)", "date_col": "snapshot_date",
     },
@@ -597,7 +597,7 @@ TABLES = {
         "description": "Per-scheme NAV time series. PK (scheme_code, nav_date). Bootstrap fills via mfapi.in; daily incremental via AMFI NAVAll.txt.",
     },
     "mf_rolling_returns": {
-        "kind": "COMPUTED", "domain": "Other", "date_col": None,
+        "kind": "COMPUTED", "domain": "Other", "date_col": "anchor_date",
         "depth": "Monthly anchors (~60 per scheme), 3Y + 5Y rolling CAGR each",
         "description": "Rolling 3Y and 5Y CAGR sampled on the first business day of each month, plus a flag for whether the rolling window beat category median. Drives the rolling-returns charts + the consistency component of composite_score.",
     },
