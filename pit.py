@@ -1549,3 +1549,35 @@ def load_raw(keys=None):
             raw[k] = read_sql(sql)
     print("  " + " ".join(f"{k}={len(v)}" for k, v in raw.items()))
     return raw
+
+
+# ── One-date entry point (plan 0015 Phase 3: live = PIT at t = today) ──
+
+def producers_for(columns):
+    """PIT producers that emit `columns`, plus the producers whose output they
+    need first (spec "after"), transitively."""
+    col_to_prod = {c: p for p, cols in factors.PIT_COLUMNS_BY_PRODUCER.items() for c in cols}
+    want = {col_to_prod[c] for c in columns if c in col_to_prod}
+    frontier = set(want)
+    while frontier:
+        nxt = set()
+        for p in frontier:
+            for c in factors.PIT_PRODUCERS[p].get("after", ()):
+                q = col_to_prod.get(c)
+                if q and q not in want:
+                    nxt.add(q)
+        want |= nxt
+        frontier = nxt
+    return want
+
+
+def features_at(t, columns, raw=None):
+    """PIT feature frame [sid, cap_tier, snapshot_date, close_price, *columns] as
+    knowable at date `t` — the computation the backtest panel stores, for any t.
+    Loads only the raw datasets the needed producers read (unless `raw` is given)."""
+    producers = producers_for(columns)
+    if raw is None:
+        raw = load_raw(raw_keys_for(producers))
+    df, _ = reconstruct_one_date(t, raw, producers)
+    keep = [c for c in ("sid", "cap_tier", "snapshot_date", "close_price", *columns) if c in df.columns]
+    return df[keep]

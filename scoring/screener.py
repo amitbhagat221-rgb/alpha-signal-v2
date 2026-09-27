@@ -46,7 +46,7 @@ def _load_eligibility_wide():
     return long.pivot(index="sid", columns="signal", values="eligible").fillna(1).astype(int)
 
 
-def _load_signals(return_prices=False):
+def _load_signals(return_prices=False, as_of=None):
     """Load all signal values for the latest snapshot date.
     Excludes MICRO tier (config.EXCLUDED_FROM_PICKS) — they're too illiquid + data-thin
     to recommend; see tools/classify_micro_tier.py for the spec."""
@@ -95,146 +95,33 @@ def _load_signals(return_prices=False):
         "SELECT sid, COUNT(*) AS quarters_present FROM quarterly_income GROUP BY sid"
     )
 
-    # Staleness floor (audit Port-F6): a "latest snapshot per sid" subquery has no
-    # natural expiry — if a producer freezes (e.g. piotroski for Financials, frozen
-    # 2026-05-09), its last good row keeps feeding ranks forever. Anchoring on
-    # max_signal_age_days treats a too-old row as absent; weight_coverage
-    # renormalizes over whatever signals are still present for that sid.
+    # Every factor column comes from the SAME computation the backtest panel stores
+    # (pit.features_at — plan 0015 Phase 3, ADR 0052 invariant 1): live is the PIT
+    # reconstruction evaluated at t = today, so the weights are applied to exactly
+    # the quantities their evidence was measured on. No per-table "latest row within
+    # max_signal_age_days" reads any more: values are computed as of t, never stale.
+    import pit
+    t = as_of or date.today()
+    pit_cols = [c for c in factors.PIT_TO_SCREENER_COLS if c != "consensus_signal_combined"]
+    feats = pit.features_at(t, pit_cols)
+    feats = feats.drop(columns=[c for c in ("cap_tier", "snapshot_date", "close_price") if c in feats.columns])
+    feats = feats.rename(columns=factors.PIT_TO_SCREENER_COLS)
+
+    # Unweighted analyst display columns with no PIT twin (ADR 0045: no honest PT
+    # history yet) — carried for pit_replay/cockpit continuity only.
     max_age = SCREEN.get("max_signal_age_days", 45)
-    age_cutoff_sql = f"date('now', '-{int(max_age)} day')"
-
-    # Signal tables — get latest snapshot per stock
-    piotroski = read_sql(
-        "SELECT sid, f_score FROM piotroski_scores "
-        "WHERE (sid, snapshot_date) IN (SELECT sid, MAX(snapshot_date) FROM piotroski_scores GROUP BY sid) "
-        f"AND snapshot_date >= {age_cutoff_sql}"
-    )
-    accruals = read_sql(
-        "SELECT sid, accruals_signal FROM accruals_scores "
-        "WHERE (sid, snapshot_date) IN (SELECT sid, MAX(snapshot_date) FROM accruals_scores GROUP BY sid) "
-        f"AND snapshot_date >= {age_cutoff_sql}"
-    )
-    # consensus_signal (composite) + pt_upside (top backtest factor t=7-9) + eps_growth (t=3-5).
-    # Backtest evidence: tools/optimize_weights.py shows pt_upside and eps_growth dominate the
-    # MaxReturn/MaxSharpe weight schemes (~80% of LARGE/MID weight together).
-    consensus = read_sql(
-        "SELECT sid, consensus_signal, pt_upside, eps_growth FROM consensus_signals "
+    analyst_display = read_sql(
+        "SELECT sid, pt_upside, eps_growth FROM consensus_signals "
         "WHERE (sid, snapshot_date) IN (SELECT sid, MAX(snapshot_date) FROM consensus_signals GROUP BY sid) "
-        f"AND snapshot_date >= {age_cutoff_sql}"
+        f"AND snapshot_date >= date(?, '-{int(max_age)} day')",
+        params=[t.isoformat()],
     )
-    # promoter_signal (composite) + pledge_quality (SMALL t=5.90, KEEP).
-    # pledge_quality directly proxies promoter-pledge stress; coverage ~97% of the
-    # promoter_signals universe. Non-colinear with promoter_signal per the 2026-05-29
-    # factor-correlation diagnostic (different cluster).
-    promoter = read_sql(
-        "SELECT sid, promoter_signal, pledge_quality FROM promoter_signals "
-        "WHERE (sid, snapshot_date) IN (SELECT sid, MAX(snapshot_date) FROM promoter_signals GROUP BY sid) "
-        f"AND snapshot_date >= {age_cutoff_sql}"
-    )
-    forensic = read_sql(
-        "SELECT sid, penalty FROM forensic_scores "
-        "WHERE (sid, snapshot_date) IN (SELECT sid, MAX(snapshot_date) FROM forensic_scores GROUP BY sid) "
-        f"AND snapshot_date >= {age_cutoff_sql}"
-    )
-    smart_money = read_sql(
-        "SELECT sid, smart_money_score FROM smart_money_scores "
-        "WHERE (sid, snapshot_date) IN (SELECT sid, MAX(snapshot_date) FROM smart_money_scores GROUP BY sid) "
-        f"AND snapshot_date >= {age_cutoff_sql}"
-    )
-    # iv_skew_25d — MID t=+3.16 KEEP over 48 weekly periods (wired 2026-05-31,
-    # ADR 0035). In-house IV-surface skew; latest row per F&O stock. Orthogonal to
-    # size/adtv/existing factors (|ρ|<0.15). Only F&O stocks have it → non-F&O MID
-    # names get NULL and renormalise over present signals (correct: only F&O names
-    # have options). Weighted in MID only (LARGE t=1.37 / SMALL t=0.17 DROP).
-    # Plan 0015 Phase 3: the SAME function the PIT backtest calls (was a raw
-    # latest-row read with a hand-copied clip).
-    from signals.fno_iv_factors import compute_iv_factors
-    iv_skew = compute_iv_factors(prices=prices[["sid", "date", "close"]], as_of_date=date.today().isoformat(),
-                                 max_age_days=max_age)[["sid", "iv_skew_25d"]]
 
-    # Inline signals (no DB table — compute on the fly)
-    from signals.momentum import compute_momentum
-    from signals.earnings_yield import compute_earnings_yield
-    from signals.delivery_anomaly import compute_delivery_anomaly_z
-
-    momentum = compute_momentum(prices)
-    earnings_yield = compute_earnings_yield()
-    delivery_anomaly = compute_delivery_anomaly_z(prices)
-
-    # Sector tilt (ADR 0041) — per-stock = its GICS sector's 6m-basket-momentum +
-    # macro_score z-ensemble. Computed inline (no table), like momentum/EY/delivery.
-    # Wired in SMALL only (backtest SMALL t=3.18 KEEP; LARGE/MID DROP) — the SMALL
-    # tier weight in config.SIGNAL_WEIGHTS picks it up; other tiers renormalise over
-    # their present signals. Sector-constant by design (the tilt).
-    from signals.sector_tilt import compute_sector_tilt
-    sector_tilt = compute_sector_tilt(prices=prices)
-
-    # Governance resignation (ADR 0042) — weighted trailing-365d senior/auditor
-    # resignation intensity off the (kept-current) BSE stream. Reindexed to the full
-    # universe with 0 for unflagged names (matches the PIT/backtest flagged-vs-clean
-    # contrast). Wired MID only as a NEGATIVE-weight forensic penalty (backtest MID
-    # t=−3.82 KEEP); other tiers carry no weight and renormalise it away.
-    from signals.governance_events import compute_governance_resignation
-    governance = compute_governance_resignation(universe_sids=stocks["sid"].tolist())
-
-    # Book-to-price: total_equity / (shares_outstanding * close_price)
-    from signals.book_to_price import compute_book_to_price
-    book_to_price = compute_book_to_price()
-
-    # Announcement-window CAR (ADR 0050, PEAD-via-CAR) — market-adjusted [−1,+1] CAR
-    # around the latest BSE Result print as an earnings-surprise proxy. Computed inline
-    # (no table), like delivery/sector_tilt. PIT-safe: compute_announcement_car() with no
-    # as_of uses today, filters dt_tm≤today, only reads closed windows + a 90d staleness
-    # gate → NULL for names with no fresh print (SIGNAL_ELIGIBILITY marks those ineligible
-    # so eligible_coverage renormalizes). Wired LARGE (t=2.23, its strongest clean factor)
-    # + SMALL (t=3.74, orthogonal max|ρ|≈0.04 vs the SMALL cluster). MID t=1.20 DROP → 0 weight.
-    from signals.announcement_car import compute_announcement_car
-    announcement_car = compute_announcement_car(prices=prices)
-
-    # eps_revision_yoy (plan 0012 C1) — YoY change in the latest forecast_history
-    # metric='eps' snapshot vs ~12mo prior (real forward analyst EPS estimates;
-    # metric='price' is contaminated look-ahead, ADR 0045, never used here).
-    # Computed inline (no table), like announcement_car. Validated SMALL t=2.78,
-    # n=38 on the clean panel, but NOT in config.SIGNAL_WEIGHTS — computed, ZERO
-    # weight, pending human promotion review (plan 0012 C1).
-    from signals.eps_revision import compute_eps_revision_yoy
-    eps_revision_yoy = compute_eps_revision_yoy()
-
-    # value_composite (plan 0012 C2) — 40% earnings_yield + 35% book_to_price + 25%
-    # position_52w, within-tier rank composite (mirrors pit's
-    # pit_value_composite exactly). Reuses the earnings_yield/book_to_price frames
-    # already computed above (no recomputation). Validated SMALL t=3.32 on the
-    # clean panel, but NOT in config.SIGNAL_WEIGHTS — computed, ZERO weight,
-    # pending human promotion review (plan 0012 C2).
-    from signals.value_composite import compute_position_52w, compute_value_composite
-    value_composite = compute_value_composite(earnings_yield, book_to_price, stocks,
-                                              position_52w=compute_position_52w(prices))
-
-    # Merge everything onto stocks
-    df = stocks.copy()
-    df = df.merge(piotroski, on="sid", how="left")
-    df = df.merge(accruals.rename(columns={"accruals_signal": "accruals"}), on="sid", how="left")
-    df = df.merge(consensus.rename(columns={"consensus_signal": "consensus"}), on="sid", how="left")
-    df = df.merge(promoter.rename(columns={"promoter_signal": "promoter"}), on="sid", how="left")
-    df = df.merge(forensic, on="sid", how="left")
-    df = df.merge(smart_money.rename(columns={"smart_money_score": "smart_money"}), on="sid", how="left")
-    df = df.merge(momentum, on="sid", how="left")
-    df = df.merge(earnings_yield, on="sid", how="left")
-    df = df.merge(book_to_price, on="sid", how="left")
-    df = df.merge(delivery_anomaly, on="sid", how="left")
-    df = df.merge(sector_tilt, on="sid", how="left")
-    df = df.merge(governance, on="sid", how="left")
+    df = stocks.merge(feats, on="sid", how="left")
+    df = df.merge(analyst_display, on="sid", how="left")
     df["governance_resignation"] = df["governance_resignation"].fillna(0.0)
-    df = df.merge(iv_skew, on="sid", how="left")
-    df = df.merge(announcement_car, on="sid", how="left")
-    df = df.merge(eps_revision_yoy, on="sid", how="left")
-    df = df.merge(value_composite, on="sid", how="left")
     df = df.merge(price_counts, on="sid", how="left")
     df["price_rows"] = df["price_rows"].fillna(0).astype(int)
-
-    # Live values of the factors the backtest validated on the SAME quantity get the
-    # backtest's range rule: out-of-range → NaN (discarded, not clipped).
-    factors.discard_out_of_range(df, factors.LIVE_PIT_COLS)
 
     df = df.merge(fundamental_counts, on="sid", how="left")
     df["quarters_present"] = df["quarters_present"].fillna(0).astype(int)
