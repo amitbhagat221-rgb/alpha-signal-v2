@@ -427,7 +427,6 @@ def compute(dry_run=False, top=None, variant: str = "production"):
     ).astype("Int64")
 
     out = eligible[["sid", "final_score", "rank", "base_score", "cap_tier", "sector",
-                    "consensus", "accruals", "promoter",
                     "weight_coverage", "price_rows", "fundamental_coverage",
                     "eligible_coverage"]].copy()
     out["pick_date"] = pick_date
