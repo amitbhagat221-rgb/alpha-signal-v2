@@ -120,9 +120,27 @@ def _check_declared(name, seen):
         log.warning(f"[GRAPH] declaration check failed for {name}: {e}")
 
 
-def run_step(name: str, module_path: str, func_name: str, critical: bool) -> bool:
+def _post_check(name):
+    """Plan 0015 invariant 4: a step succeeds only if the tables it declares writing
+    are not OUTDATED afterwards (checks.post_step). A check that itself errors is
+    logged and ignored — it must never break the run."""
+    spec = STEP_SPECS.get(name)
+    if not spec:
+        return []
+    try:
+        import checks
+        return checks.post_step(spec)
+    except Exception as e:
+        log.warning(f"[CHECK] post-check for {name} could not run: {type(e).__name__}: {e}")
+        return []
+
+
+def run_step(name: str, module_path: str, func_name: str, critical: bool):
     """
-    Import module, call function, log result. Returns True on success.
+    Import module, call function, check its outputs, log the result.
+    Returns True on success, False when the step raised (worth one retry), and None
+    when it ran but its post-check failed (its output is still OUTDATED — re-running
+    it now would not help, so it is not retried).
     The called function should return an int (rows affected) or None.
     """
     started = datetime.now().isoformat(timespec="seconds")
@@ -136,6 +154,12 @@ def run_step(name: str, module_path: str, func_name: str, critical: bool) -> boo
         result = func()
         _check_declared(name, db.trace_stop())
         rows = result if isinstance(result, int) else None
+        failures = _post_check(name)
+        if failures:
+            error_msg = "post-check: " + "; ".join(failures)
+            log_step(name, "FAILED", rows=rows, started=started, error=error_msg)
+            log.error(f"[FAIL]  {name}  — {error_msg}")
+            return None
         log_step(name, "SUCCESS", rows=rows, started=started)
         log.info(f"[DONE]  {name}  ({rows} rows)" if rows else f"[DONE]  {name}")
         return True
@@ -222,7 +246,7 @@ def run_pipeline(steps: list[tuple], dry_run: bool = False):
 
         success = run_step(name, module_path, func_name, critical)
 
-        if not success and retry_count > 0:
+        if success is False and retry_count > 0:      # None = post-check failed: no retry
             log.info(f"[RETRY] {name}  (attempt 2/{retry_count + 1})")
             time.sleep(2)
             success = run_step(name, module_path, func_name, critical)

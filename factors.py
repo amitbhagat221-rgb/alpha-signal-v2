@@ -1776,7 +1776,7 @@ FACTORS = {
 # The per-date base price, the backtest response, and the screener composites
 # pit_replay needs to replay the live score end-to-end (plan 0005 Phase E).
 PIT_EXTRA = {
-    "close_price":      {"producer": "base", "pit_range": (0.01, 1_000_000)},
+    "close_price":      {"producer": "base", "pit_range": (0.01, 10_000_000)},   # = checks.ranges stock_prices.close (SM-REITs trade ~₹10-12 lakh)
     "fwd_return_20d":   {"producer": "fwd_return", "pit_range": (-1, 5)},   # cap extreme returns
     "accruals_signal":  {"producer": "accruals", "pit_range": (0, 1)},      # within-tier percentile blend
     "promoter_signal":  {"producer": "promoter", "pit_range": (0, 1)},      # within-tier percentile blend

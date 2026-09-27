@@ -125,3 +125,18 @@ def test_runner_executes_the_derived_order(monkeypatch, caplog):
         pipeline.run_pipeline(steps, dry_run=True)
     lines = [r.getMessage() for r in caplog.records if "→ m.f()" in r.getMessage()]
     assert [l.split()[1] for l in lines] == ["b", "a"]
+
+
+def test_post_check_failure_fails_the_step_without_retry(monkeypatch):
+    import pipeline
+    calls = []
+    monkeypatch.setattr(pipeline, "log_step", lambda *a, **k: calls.append(a[1]))
+    monkeypatch.setitem(pipeline.STEP_SPECS, "x", {"name": "x", "table": "t", "reads": []})
+    monkeypatch.setattr(pipeline, "_post_check", lambda n: ["t is OUTDATED after x"])
+    import types, sys
+    mod = types.ModuleType("fake_step_mod"); mod.run = lambda: 3
+    monkeypatch.setitem(sys.modules, "fake_step_mod", mod)
+    assert pipeline.run_step("x", "fake_step_mod", "run", False) is None
+    assert calls == ["RUNNING", "FAILED"]
+    monkeypatch.setattr(pipeline, "_post_check", lambda n: [])
+    assert pipeline.run_step("x", "fake_step_mod", "run", False) is True
