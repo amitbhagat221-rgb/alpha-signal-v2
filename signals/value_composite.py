@@ -3,7 +3,7 @@ Alpha Signal v2 — value_composite, live producer (plan 0012 C2; WS2.1b).
 
 `value_composite` validated on the clean re-baselined panel (SMALL t=3.32) but
 had no live producer. This is a computed, ZERO-WEIGHT signal (pending human
-promotion review); it does NOT change `config.SIGNAL_WEIGHTS`.
+promotion review); it does NOT change `factors.SIGNAL_WEIGHTS`.
 
 40% earnings_yield + 35% book_to_price + 25% position_52w, within-cap_tier
 percentile-rank composite — `within_tier_rank_composite` below IS the one

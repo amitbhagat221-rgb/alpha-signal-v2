@@ -32,14 +32,15 @@ import argparse
 import numpy as np
 import pandas as pd
 
-from config import SIGNAL_WEIGHTS
+from config import PICKABLE_TIERS
+from factors import SIGNAL_WEIGHTS
 from db import read_sql
 
 # Style factors for the risk model — keyed by their daily_snapshots_pit COLUMN, value =
 # display name. (Direct PIT columns; high-coverage cross-sectional exposures.)
 STYLE = {"book_to_price": "value_bp", "earnings_yield": "value_ey", "mom_12m": "momentum",
          "piotroski_f": "quality", "pt_upside": "analyst"}
-# config SIGNAL_WEIGHTS key → its PIT style column (for the model-tilted basket score)
+# factors.SIGNAL_WEIGHTS key → its PIT style column (for the model-tilted basket score)
 WEIGHT_TO_STYLE = {"book_to_price": "book_to_price", "earnings_yield": "earnings_yield",
                    "momentum": "mom_12m", "piotroski": "piotroski_f", "pt_upside": "pt_upside"}
 
@@ -158,7 +159,7 @@ def attribute(panel, anchor_g, fac, resid_var, industries, style_names):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[1])
-    ap.add_argument("--tier", choices=["LARGE", "MID", "SMALL"], default=None)
+    ap.add_argument("--tier", choices=list(PICKABLE_TIERS), default=None)
     args = ap.parse_args()
     panel, style_cols = load_panel()
     fac, resid_var, industries, style_names = estimate_factor_returns(panel, style_cols)
@@ -170,7 +171,7 @@ def main():
 
     latest = sorted(panel["snapshot_date"].unique())[-1]
     col_for = {disp: col for col, disp in STYLE.items()}
-    for tier in ([args.tier] if args.tier else ["LARGE", "MID", "SMALL"]):
+    for tier in ([args.tier] if args.tier else PICKABLE_TIERS):
         g = panel[(panel["snapshot_date"] == latest) & (panel["cap_tier"] == tier)].copy()
         if len(g) < 50:
             continue

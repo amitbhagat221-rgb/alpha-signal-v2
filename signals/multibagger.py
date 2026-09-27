@@ -43,7 +43,7 @@ from datetime import date
 import numpy as np
 import pandas as pd
 
-from config import SCREEN
+from config import EXCLUDED_FROM_PICKS, SCREEN
 from db import read_sql, upsert_df
 from scoring.regime_smallcap import classify as classify_smallcap_regime
 
@@ -118,10 +118,11 @@ def _latest(table, value_cols):
 
 def _load_universe():
     placeholders = ",".join("?" for _ in FINANCIAL_SECTORS)
+    excluded = ",".join("?" for _ in EXCLUDED_FROM_PICKS)
     stocks = read_sql(
         f"SELECT sid, name, sector, cap_tier, market_cap_cr "
-        f"FROM stocks WHERE sector NOT IN ({placeholders}) AND cap_tier != 'MICRO'",
-        params=list(FINANCIAL_SECTORS),
+        f"FROM stocks WHERE sector NOT IN ({placeholders}) AND cap_tier NOT IN ({excluded})",
+        params=[*FINANCIAL_SECTORS, *EXCLUDED_FROM_PICKS],
     )
     stocks["mcap_cr"] = stocks["market_cap_cr"] / RUPEES_PER_CRORE
     return stocks

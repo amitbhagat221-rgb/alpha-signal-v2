@@ -23,6 +23,7 @@ Usage:
 """
 
 import argparse
+from config import PICKABLE_TIERS
 from db import read_sql
 
 
@@ -72,12 +73,12 @@ def _load_canonical_ics():
     Multiple backtest runs across v1/v2 PIT sources leave duplicate rows.
     The row with the most observations is the most reliable estimate.
     """
-    df = read_sql("""
+    df = read_sql(f"""
         SELECT signal, cap_tier, n_periods, mean_ic, icir, t_stat, verdict
         FROM pit_ic_by_tier_v2
-        WHERE cap_tier IN ('LARGE','MID','SMALL')
+        WHERE cap_tier IN ({",".join("?" * len(PICKABLE_TIERS))})
           AND t_stat IS NOT NULL
-    """)
+    """, params=list(PICKABLE_TIERS))
     # Keep row with most periods per (signal, cap_tier)
     df = df.sort_values("n_periods", ascending=False).drop_duplicates(
         subset=["signal", "cap_tier"], keep="first"
@@ -126,7 +127,7 @@ def _build_weights(df, objective: str) -> dict:
     keep["signed"] = keep["raw"] * keep["mean_ic"].apply(lambda x: 1.0 if x >= 0 else -1.0)
 
     out = {}
-    for tier in ["LARGE", "MID", "SMALL"]:
+    for tier in PICKABLE_TIERS:
         sub = keep[keep["cap_tier"] == tier].copy()
         if sub.empty:
             out[tier] = {}
@@ -157,7 +158,7 @@ def _print_block(name: str, weights_by_tier: dict, df: 'pd.DataFrame'):
     print(f"{name}")
     print(f"{'='*78}")
     print(f"{name} = {{")
-    for tier in ["LARGE", "MID", "SMALL"]:
+    for tier in PICKABLE_TIERS:
         items = weights_by_tier.get(tier, {})
         print(f"    {tier!r}: {{")
         # Sort by abs weight desc for readability
@@ -184,7 +185,7 @@ def _coverage_report(weights_by_tier: dict):
     print(f"{'='*78}")
     print(f"{'Tier':<8} {'Wired weight':>15} {'Unwired weight':>17} {'Unwired share':>15}")
     print("-" * 78)
-    for tier in ["LARGE", "MID", "SMALL"]:
+    for tier in PICKABLE_TIERS:
         items = weights_by_tier.get(tier, {})
         wired = sum(abs(w) for k, w in items.items() if k in WIRED_KEYS)
         unwired = sum(abs(w) for k, w in items.items() if k not in WIRED_KEYS)

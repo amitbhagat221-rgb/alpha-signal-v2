@@ -1,5 +1,22 @@
 # Validated Signal Map
 
+> **Where weights live (2026-09-27, plan 0015 Phase 6 / ADR 0052 D4):** each wired factor's
+> `factors.FACTORS` entry carries `weights: {tier: w}` — hand-set, never derived from the
+> evidence (this doc's rules unchanged; only the location moved). `factors.SIGNAL_WEIGHTS`
+> is the derived `{tier: {weight_key: w}}` view every consumer imports (heaviest first, ties
+> by key — the screener's summation order). `tests/test_factor_registry.py` enforces
+> Σ|w| = 1.0 per rankable tier (`config.TIERS` with `pickable=True`), no weight on a benched
+> factor, and negative weights only where listed. The dry-run variants
+> `SIGNAL_WEIGHTS_RETURN` / `_SHARPE` (tools/optimize_weights.py output) live in `factors.py`
+> as whole-scheme tables. `config.SIGNAL_WEIGHTS*` survive only as lazy read-only aliases for
+> cockpit/ + cockpit_ops/. References below to "`SIGNAL_WEIGHTS`" mean that derived view.
+
+| Tier | Production weights (2026-07-05, ADR 0049 / 0050) |
+|------|--------------------------------------------------|
+| LARGE | announcement_car 0.35 · consensus 0.28 · sector_tilt 0.22 · book_to_price 0.15 |
+| MID | iv_skew_25d 0.26 · accruals 0.22 · book_to_price 0.20 · piotroski 0.18 · governance_resignation −0.14 |
+| SMALL | delivery_anomaly_z 0.26 · consensus 0.16 · sector_tilt 0.16 · announcement_car 0.14 · book_to_price 0.12 · pledge_quality 0.10 · piotroski 0.06 |
+
 From v1 C13b — 36 monthly periods, reproduced by `tools/backtest_pit.py` in v2.
 
 | Signal | LARGE | MID | SMALL |
@@ -164,7 +181,7 @@ deepest-history of any recent candidate. Deliberate review (not the mechanical
   spread, so effective influence ≈ 0.056), it's brand-new with no horizon-gate
   corroboration yet, and it's the **first genuine negative weight** in the live scheme —
   all argue for restraint over the t-implied "primary" share.
-- **Negative weight mechanics** — `config.SIGNAL_WEIGHTS["MID"]["governance_resignation"]
+- **Negative weight mechanics** — `factors.SIGNAL_WEIGHTS["MID"]["governance_resignation"]
   = −0.08`; [scoring/screener.py](../../scoring/screener.py):296 flips a negative weight
   to `|w|·(1−pctile)`, so a resignation-heavy name gets a low contribution (a penalty)
   and a clean name the favourable end. The denominator uses `Σ|w|`, so Σ|w|=1.0 holds.

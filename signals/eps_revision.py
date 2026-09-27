@@ -4,7 +4,7 @@ Alpha Signal v2 — EPS revision YoY, live producer (plan 0012 C1; WS2.1a).
 `eps_revision_yoy` validated on the clean re-baselined panel (SMALL t=2.78,
 n=38) but had no live producer — the screener couldn't see it. This is a
 computed, ZERO-WEIGHT signal (pending human promotion review); it does NOT
-change `config.SIGNAL_WEIGHTS`.
+change `factors.SIGNAL_WEIGHTS`.
 
 `eps_revision_yoy()` below IS what `pit.pit_consensus` calls,
 evaluated as-of today instead of a historical anchor: YoY % change between the latest

@@ -72,7 +72,7 @@ TIER_1_CRITICAL_TABLES = [
 
 
 # ── Wired factors in the production screener: every weight key carrying a nonzero
-# config.SIGNAL_WEIGHTS weight in some tier. Derived, so pick trust scores roll up
+# factors.SIGNAL_WEIGHTS weight in some tier. Derived, so pick trust scores roll up
 # over exactly the factors that score the pick (a hand-kept copy here drifted: it
 # still listed pulled pt_upside and missed four wired factors).
 WIRED_FACTORS = factors.wired_weight_keys()
@@ -523,8 +523,7 @@ def rollup_picks_uhs(pick_date: str, sids=None, factor_rows=None) -> dict:
     picks = read_sql("SELECT sid, cap_tier FROM daily_picks WHERE pick_date=?", params=[pick_date])
     tier_of = dict(zip(picks["sid"], picks["cap_tier"]))
     sids = list(tier_of) if sids is None else list(sids)
-    from config import SIGNAL_WEIGHTS
-    all_keys = sorted({k for t in tier_of.values() for k in SIGNAL_WEIGHTS.get(t, {})})
+    all_keys = sorted({k for t in tier_of.values() for k in factors.SIGNAL_WEIGHTS.get(t, {})})
     if factor_rows is None:
         fmap_all = _latest_factor_uhs(all_keys, pick_date)
     else:
@@ -537,7 +536,7 @@ def rollup_picks_uhs(pick_date: str, sids=None, factor_rows=None) -> dict:
     out = {}
     for sid in sids:
         tier = tier_of.get(sid)
-        weights = SIGNAL_WEIGHTS.get(tier, {}) if tier is not None else {}
+        weights = factors.SIGNAL_WEIGHTS.get(tier, {}) if tier is not None else {}
         if not weights:
             out[sid] = compute_uhs("pick", f"{sid}|{pick_date}", pick_date)
             continue

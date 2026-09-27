@@ -38,6 +38,7 @@ import numpy as np
 import pandas as pd
 from scipy.stats import spearmanr
 
+from config import PICKABLE_TIERS
 from db import read_sql
 
 RESPONSE = "fwd_return_20d"
@@ -121,9 +122,9 @@ def run(min_train=12, rolling=None):
           f"OOS test periods per tier ≈ {len(dates) - min_train}\n")
 
     strategies = ["ic_weighted", "equal", "best_single"]
-    results = {tier: {s: [] for s in strategies} for tier in ["LARGE", "MID", "SMALL"]}
+    results = {tier: {s: [] for s in strategies} for tier in PICKABLE_TIERS}
 
-    for tier in ["LARGE", "MID", "SMALL"]:
+    for tier in PICKABLE_TIERS:
         tdf = df[df["cap_tier"] == tier]
         by_date = {d: g for d, g in tdf.groupby("snapshot_date")}
 
@@ -164,7 +165,7 @@ def run(min_train=12, rolling=None):
     print(f"{'tier':6} {'strategy':12} {'n':>3} {'meanIC':>8} {'ICIR':>6} "
           f"{'t':>6} {'95% CI (mean IC)':>20} {'%+':>5}")
     print("-" * 74)
-    for tier in ["LARGE", "MID", "SMALL"]:
+    for tier in PICKABLE_TIERS:
         for s in strategies:
             r = _summary(results[tier][s])
             ci = f"[{r['ci'][0]:+.3f},{r['ci'][1]:+.3f}]" if not np.isnan(r['ci'][0]) else "—"

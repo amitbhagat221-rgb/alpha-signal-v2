@@ -32,10 +32,11 @@ import numpy as np
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
+from config import PICKABLE_TIERS
 from db import read_sql, BACKTEST_SIGNALS
 
 OUT_DIR = PROJECT_ROOT / "data"
-TIERS = ("LARGE", "MID", "SMALL")
+TIERS = PICKABLE_TIERS
 
 # Composites are flagged differently — high |ρ| with a component is
 # expected by construction, not a model bug. Keep this list in sync with

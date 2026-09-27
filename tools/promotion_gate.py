@@ -44,7 +44,7 @@ VERDICT (at the cost-resolved natural horizon h*)
   REJECT   net_t < 1.5  OR cost eats the whole edge (net_ic ≤ 0)
 
 This writes the evidence table `factor_horizon_gate` and prints a roster. It does
-NOT touch config.SIGNAL_WEIGHTS — promotion stays a human decision (CLAUDE.md:
+NOT touch the factor weights (factors.FACTORS `weights`) — promotion stays a human decision (CLAUDE.md:
 "never mechanically"); this is the evidence surface that decision now reads.
 
 Reuses ic_decay / backtest_pit IC machinery in a single pass (so σ_fwd_h is
@@ -247,7 +247,7 @@ def run(only_signal=None, turnover=DEFAULT_TURNOVER, reeval_live=False):
 
 
 def _live_keys():
-    """Production-wired signal ids. config.SIGNAL_WEIGHTS uses short screener
+    """Production-wired signal ids. factors.SIGNAL_WEIGHTS uses short screener
     names (consensus, accruals, …); the gate keys on registry ids
     (consensus_signal_combined, cf_accruals_ratio, …). We add BOTH the raw key
     and its registry id (factors.signal_for, tier-aware: momentum scores the 12m

@@ -3,8 +3,9 @@ Alpha Signal v2 — Configuration
 
 Every tunable value lives here. No magic numbers in source/signal/scoring code.
 Import what you need:
-    from config import PIPELINE_STEPS, PORTFOLIO, DB_PATH
-(External hosts — rate limits, headers, LLM model ids — live in hosts.py.)
+    from config import TIERS, PIPELINE_STEPS, DB_PATH
+(External hosts — rate limits, headers, LLM model ids — live in hosts.py; factor
+weights live on each factor in factors.py.)
 """
 
 from pathlib import Path
@@ -17,161 +18,73 @@ SCHEMA_PATH = PROJECT_ROOT / "schema.sql"
 LOG_PATH = PROJECT_ROOT / "output" / "pipeline.log"
 
 # ── Universe ──
-
-TIERS = ("LARGE", "MID", "SMALL", "MICRO")
-
+# The segments (ADR 0052 "Segment" invariant): ranking happens only inside a tier,
+# and a tier with pickable=False never reaches daily_picks. Everything tier-keyed
+# (picks per tier, transaction costs, outcome benchmarks, regime allocations, the
+# segment rule, EXCLUDED_FROM_PICKS, factors.TIERS) is derived from — or keyed by —
+# this one dict, so adding a tier = one entry here (+ its weight content in
+# factors.FACTORS). schema.sql's stocks.cap_tier CHECK is the one other place.
+#   rank_max   segment rule (scoring/segment.py): market-cap rank ≤ rank_max, after
+#              the previous tier (None = the rest). SEBI/AMFI cut-offs: 100 / 250.
+#   carve_from a tier assigned by its own classifier out of another tier's members
+#              (MICRO ← SMALL: tools/classify_micro_tier.py — ADR 0026; it runs
+#              AFTER the segment node).
+#   pickable   False → classified and scored, never recommended.
+#   picks      names per tier in the published 5/5/5 book (PORTFOLIO["picks_per_tier"]).
+#   cost_bps   one-way transaction cost (TRANSACTION_COSTS_BPS).
+#   benchmark  nse_index_history index the pick outcomes are measured against.
+TIERS = {
+    "LARGE": {"rank_max": 100, "pickable": True, "picks": 5, "cost_bps": 30,
+              "benchmark": "NIFTY 50"},
+    "MID":   {"rank_max": 250, "pickable": True, "picks": 5, "cost_bps": 50,
+              "benchmark": "NIFTY MIDCAP 150"},
+    "SMALL": {"rank_max": None, "pickable": True, "picks": 5, "cost_bps": 150,
+              "benchmark": "NIFTY SMALLCAP 250"},
+    # Too illiquid + data-thin to trust, and trivially manipulatable by any
+    # operator with size — CLASSIFIED but never recommended (ADR 0026).
+    "MICRO": {"carve_from": "SMALL", "pickable": False},
+}
+PICKABLE_TIERS = tuple(t for t, spec in TIERS.items() if spec["pickable"])
 # Tiers excluded from daily_picks / dossier / morning_brief / action_queue.
-# MICRO stocks are CLASSIFIED but never recommended — they're too illiquid +
-# data-thin to trust, and trivially manipulatable by any operator with size.
-# See tools/classify_micro_tier.py for the composite criteria.
-EXCLUDED_FROM_PICKS = ("MICRO",)
+EXCLUDED_FROM_PICKS = tuple(t for t, spec in TIERS.items() if not spec["pickable"])
+# Segment-node hysteresis (scoring/segment.py): a stock already in a tier keeps it
+# until its market-cap rank leaves the boundary by more than this fraction of the
+# boundary rank (±10 at 100, ±25 at 250). Measured, see scoring/segment.py.
+TIER_HYSTERESIS = 0.10
 
-# ── Signal Weights per Tier (from C13b validation) ──
-# t >= 2.5 → 1.0x (primary)
-# t = 1.5-2.5 → 0.5x (secondary)
-# t = 0.5-1.5 → 0.2x (tertiary)
-# t < 0.5 → 0x (excluded)
-
-SIGNAL_WEIGHTS = {
-    # 2026-05-31 promotion wave: idle-but-validated factors brought into production
-    # after an orthogonality sweep (each new factor max |ρ|≤0.27 vs wired). pt_upside
-    # is CAPPED well below its t=7-9 implied share — the |t| is still pending an
-    # artifact re-verification (analyst-PT PIT history; open question, recheck 2026-08),
-    # so it gets a strong-but-not-dominant weight. eps_growth held back (ρ=0.63 with
-    # consensus → redundant). Each tier renormalised to Σ=1.
-    # ═══════════════════════════════════════════════════════════════════════
-    # 2026-07-05 HONEST RE-DERIVATION (ADR 0049) — supersedes all per-tier notes
-    # below. After the fwd_return anchor-proximity re-baseline (ADR 0047), weights
-    # were re-derived on CLEAN v2 t-stats among the screener-consumable signals,
-    # under five hard rules: (1) clean |t|≥1.5 on the tier; (2) n≥20 anchors
-    # (drops eps_growth n=9); (3) sign must match the economic prior — every
-    # WRONG-SIGN factor excluded (roic/interest_coverage/low_vol "buy junk" are
-    # bull-regime artifacts, not alpha); (4) one representative per orthogonal
-    # group (Value = book_to_price only, NOT +earnings_yield); (5) benched-for-
-    # cause stays benched (kyle_lambda cost-coupled). Weights ∝ shrunk conviction,
-    # single-factor cap ~0.30, Σ|w|=1.0/tier. DROPPED as clean-data noise: promoter
-    # (SMALL 0.47 / MID 1.14), momentum (1.34), MID consensus (−0.13), MID/LARGE
-    # earnings_yield, LARGE accruals/piotroski, SMALL accruals. ADDED (validated,
-    # were unwired in-tier): consensus→SMALL (t=3.74), sector_tilt→LARGE (t=1.58).
-    # BOOSTED: delivery_anomaly_z 0.12→0.28 (the ONLY BY-FDR haircut survivor).
-    # Prior per-tier rationale → git history + ADR 0045/0043/0038. NOTE: the
-    # "latest factors" not yet here (eps_revision_yoy, value_composite, CAR) need
-    # the screener's _load_signals extended first — tracked as Scope B.
-    # ═══════════════════════════════════════════════════════════════════════
-    "LARGE": {
-        # 2026-07-05 (ADR 0050): announcement_car WIRED as co-lead — at clean t=+2.23 it is
-        # the STRONGEST LARGE factor found (the low-vol/reversal/asset-growth trio all failed;
-        # CAR is the first honest LARGE signal), positive drift sign, orthogonal. Still a
-        # low-conviction tier overall (nothing clears the BY-FDR haircut), but no longer hollow.
-        "announcement_car": 0.35,   # clean t=+2.23 — strongest LARGE factor (PEAD-via-CAR, ADR 0050)
-        "consensus":        0.28,   # clean t=1.62 — analyst anchor
-        "sector_tilt":      0.22,   # clean t=1.58
-        "book_to_price":    0.15,   # clean t=0.86 — value ballast
-    },
-    "MID": {
-        "iv_skew_25d":            0.26,   # clean t=2.87 — strongest MID, options-implied (ADR 0035)
-        "accruals":               0.22,   # clean cf_accruals t=−2.65 (factor pre-inverted → +w); accruals anomaly, correct sign
-        "book_to_price":          0.20,   # clean t=2.37 — value representative
-        "piotroski":              0.18,   # clean t=2.25 — quality, POSITIVE sign (correct, unlike roic/gross_prof)
-        "governance_resignation": -0.14,  # clean t=−1.55 — event penalty, correct negative sign (ADR 0042); decayed but sign-stable
-    },
-    # SIGNAL_GROUPS defined below SIGNAL_WEIGHTS.
-    "SMALL": {
-        # 2026-07-05 (ADR 0050): announcement_car ADDED as a diversifier — clean t=+3.74
-        # (same conviction band as consensus/sector_tilt), orthogonal (max|ρ|≈0.04 vs the
-        # SMALL cluster), positive drift sign. Existing weights trimmed proportionally to fund it.
-        "delivery_anomaly_z": 0.26,   # clean t=7.78 (n=107) — the SOLE BY-FDR haircut survivor; the real core
-        "consensus":          0.16,   # clean t=3.74 (n=38)
-        "sector_tilt":        0.16,   # clean t=3.69 (n=41) — orthogonal sector/macro (ADR 0041)
-        "announcement_car":   0.14,   # clean t=+3.74 — PEAD-via-CAR, orthogonal earnings-surprise dim (ADR 0050)
-        "book_to_price":      0.12,   # clean t=1.88 — value representative
-        "pledge_quality":     0.10,   # clean t=1.76 — correct sign + orthogonal ownership/stress dim
-        "piotroski":          0.06,   # clean t=1.53 — quality, correct positive sign
-    },
-}
+# ── Signal weights ──
+# Hand-set, never derived (CLAUDE.md "Backtest hygiene", docs/reference/signal-weights.md)
+# — but they live ON the factor: each wired factors.FACTORS entry carries
+# `weights: {tier: w}` (ADR 0052 D4, amends ADR 0017). factors.SIGNAL_WEIGHTS is the
+# derived {tier: {weight_key: w}} view every consumer imports; the two dry-run
+# variant schemes (SIGNAL_WEIGHTS_RETURN / _SHARPE) also live in factors.py.
+# config.SIGNAL_WEIGHTS* (resolved by __getattr__) are LEGACY read-only aliases kept for
+# cockpit/api.py and cockpit_ops/api.py — delete once they import factors.
+_FACTORS_ALIASES = ("SIGNAL_WEIGHTS", "SIGNAL_WEIGHTS_RETURN", "SIGNAL_WEIGHTS_SHARPE")
 
 
-# ── Factor groups (Track 3.3b-3 — within-group orthogonalization) ──
-# Family classification for the wired + common-library factors. Used by
-# tools/factor_marginal.py --within-group, which residualises each factor only
-# against same-group factors (keeping cross-group raw, the plan-0002 §3.3b-3 hybrid)
-# to surface WITHIN-family redundancy — e.g. is `consensus` additive given `pt_upside`
-# inside Analyst, or `earnings_yield` given `book_to_price` inside Value. Groups mirror
-# plan-0002 §3.2 families + the documented clusters in SIGNAL_WEIGHTS above. Read-only
-# diagnostic; changes no weights (same stance as ADR 0038). Unmapped factors → "Other".
-# Per-factor "family" in factors.py; derived there, keyed by SIGNAL_WEIGHTS key.
-from factors import SIGNAL_GROUPS  # noqa: E402
+def __getattr__(name):
+    """PEP 562: resolve the legacy aliases lazily (factors imports config)."""
+    if name in _FACTORS_ALIASES:
+        import factors
+        return getattr(factors, name)
+    raise AttributeError(f"module 'config' has no attribute {name!r}")
 
-
-# ── Two optimized weight schemes from PIT IC backtest (2026-05-28) ──
-# Source: tools/optimize_weights.py reads pit_ic_by_tier_v2 and normalises by tier.
-# Each scheme is "aggressive" — no caps, no diversification floor. pt_upside +
-# eps_growth dominate because their t-stats earn it (t=7-9 and t=5 respectively).
-# Choose by passing --variant {return,sharpe} to scoring/screener.
-
-# MaxReturn: w_i ∝ |t_stat_i| × sign(IC_i). Favours absolute IC magnitude.
-# Refresh: python -m tools.optimize_weights --filter-wired
-# 2026-05-29: pledge_quality + delivery_anomaly_z now wired (Next-3 #3), so SMALL
-# includes both; MID stays at 2 factors until interest_coverage/ccc/etc are wired.
-#   2026-07-05 (ADR 0045): pt_upside → 0 in both variants below — look-ahead
-#   artifact (audit Factor-F1, CRITICAL). Non-production (dry-run only via
-#   --variant), so left un-renormalized per ADR 0045.
-SIGNAL_WEIGHTS_RETURN = {
-    "LARGE": {
-        "pt_upside":         0,       # PULLED — look-ahead artifact (was t=7.15)
-        "eps_growth":        0.3475,  # t=5.31
-        "consensus":         0.1846,  # t=2.82
-    },
-    "MID": {
-        "pt_upside":         0,       # PULLED — look-ahead artifact (was t=8.40)
-        "accruals":         -0.2759,  # t=-3.20 (inverse)
-    },
-    "SMALL": {
-        "pt_upside":         0,       # PULLED — look-ahead artifact (was t=9.14)
-        "pledge_quality":    0.1526,  # t=5.90
-        "delivery_anomaly_z":0.1232,  # t=4.76
-        "smart_money":       0.1131,  # t=4.37 (avg_delivery_pct_30d)
-        "eps_growth":        0.0836,  # t=3.23
-        "earnings_yield":    0.0809,  # t=3.13
-        "consensus":         0.0776,  # t=3.00
-        "promoter":          0.0678,  # t=2.62
-        "piotroski":         0.0649,  # t=2.51
-    },
-}
-
-# MaxSharpe: w_i ∝ |ICIR_i| × sign(IC_i). Favours information ratio (mean/vol of IC).
-SIGNAL_WEIGHTS_SHARPE = {
-    "LARGE": {
-        "eps_growth":        0.5239,  # ICIR=1.88
-        "pt_upside":         0,       # PULLED — look-ahead artifact (was ICIR=1.21)
-        "consensus":         0.1390,  # ICIR=0.50
-    },
-    "MID": {
-        "pt_upside":         0,       # PULLED — look-ahead artifact (was ICIR=1.42)
-        "accruals":         -0.3467,  # ICIR=-0.75 (inverse)
-    },
-    "SMALL": {
-        "pt_upside":         0,       # PULLED — look-ahead artifact (was ICIR=1.54)
-        "pledge_quality":    0.1488,  # ICIR=1.06
-        "eps_growth":        0.1435,  # ICIR=1.02
-        "earnings_yield":    0.0983,  # ICIR=0.70
-        "smart_money":       0.0914,  # ICIR=0.65
-        "delivery_anomaly_z":0.0775,  # ICIR=0.55
-        "piotroski":         0.0768,  # ICIR=0.55
-        "consensus":         0.0745,  # ICIR=0.53
-        "promoter":          0.0722,  # ICIR=0.51
-    },
-}
 
 # ── VIX Regime ──
-
-VIX_REGIMES = {
-    #              vix_low  vix_high  large  mid   small
-    "CALM":       (0.0,     13.0,     0.30,  0.35, 0.35),
-    "NORMAL":     (13.0,    25.0,     0.40,  0.30, 0.30),
-    "CAUTION":    (25.0,    35.0,     0.55,  0.25, 0.20),
-    "CRISIS":     (35.0,    999.0,    0.70,  0.20, 0.10),
+# India-VIX band → allocation across the PICKABLE tiers (keyed by tier name; each
+# regime's alloc sums to 1). scoring/regime.py reads REGIMES.
+REGIMES = {
+    "CALM":    {"vix": (0.0, 13.0),   "alloc": {"LARGE": 0.30, "MID": 0.35, "SMALL": 0.35}},
+    "NORMAL":  {"vix": (13.0, 25.0),  "alloc": {"LARGE": 0.40, "MID": 0.30, "SMALL": 0.30}},
+    "CAUTION": {"vix": (25.0, 35.0),  "alloc": {"LARGE": 0.55, "MID": 0.25, "SMALL": 0.20}},
+    "CRISIS":  {"vix": (35.0, 999.0), "alloc": {"LARGE": 0.70, "MID": 0.20, "SMALL": 0.10}},
 }
+# LEGACY positional view (vix_low, vix_high, *alloc in PICKABLE_TIERS order) — kept
+# only for output/diff_engine.py and cockpit_ops/api.py, which unpack 5-tuples.
+# Delete once they read REGIMES.
+VIX_REGIMES = {name: (*r["vix"], *(r["alloc"][t] for t in PICKABLE_TIERS))
+               for name, r in REGIMES.items()}
 
 # Days in new regime before switching (hysteresis)
 VIX_HYSTERESIS_DAYS = 3
@@ -208,11 +121,7 @@ PORTFOLIO = {
     "max_stocks_per_sector": 5,
     "max_stock_weight_pct": 5.0,
     "max_daily_picks": 15,
-    "picks_per_tier": {
-        "LARGE": 5,
-        "MID": 5,
-        "SMALL": 5,
-    },
+    "picks_per_tier": {t: TIERS[t]["picks"] for t in PICKABLE_TIERS},
     # ── Track 3.3c — HRP position sizing (portfolio_construction.py) ──
     # The sized book draws picks_per_tier names per tier (the same 5/5/5 = 15-name
     # holdable book the paper portfolio uses), then HRP-allocates risk under these
@@ -262,11 +171,7 @@ PORTFOLIO = {
 
 # ── Transaction Costs (bps) ──
 
-TRANSACTION_COSTS_BPS = {
-    "LARGE": 30,
-    "MID": 50,
-    "SMALL": 150,
-}
+TRANSACTION_COSTS_BPS = {t: spec["cost_bps"] for t, spec in TIERS.items() if "cost_bps" in spec}
 
 # ── Backtester ──
 
@@ -1021,12 +926,3 @@ FILE_OUTPUTS = [
         "producer":      "tools.duckdb_refresh",
     },
 ]
-
-
-# ── Factor registry status (audit Factor-F2, ADR 0017 registry debt) ──
-# The non-wired home of a factor ("bench": LIBRARY / PROPOSED / BLOCKED / SUPERSEDED /
-# CONTROL) lives on its factors.FACTORS entry; FACTOR_STATUS is the derived
-# non-LIBRARY view, re-exported for existing importers. The partition check
-# (tools/verify_factor_library.py) is factors.partition_check().
-from factors import FACTOR_STATUS  # noqa: E402
-

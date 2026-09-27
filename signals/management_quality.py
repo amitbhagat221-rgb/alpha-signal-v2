@@ -42,6 +42,7 @@ import pandas as pd
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
+from config import PICKABLE_TIERS
 from db import read_sql, upsert_df
 
 Z_CLIP = 3.0
@@ -185,7 +186,7 @@ def main():
     scored = df[df["mgmt_quality_score"].notna()].copy()
     show = ["name", "cap_tier", "mgmt_quality_score", "grade",
             "capital_allocation_z", "alignment_z", "credibility_z"]
-    for tier in ["LARGE", "MID", "SMALL"]:
+    for tier in PICKABLE_TIERS:
         t = scored[scored["cap_tier"] == tier].sort_values("mgmt_quality_score", ascending=False)
         if t.empty:
             continue

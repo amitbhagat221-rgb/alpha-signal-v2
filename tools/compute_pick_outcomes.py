@@ -43,14 +43,11 @@ import pandas as pd
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
+from config import TIERS
 from db import read_sql, upsert_df
 
 DEFAULT_WINDOWS = (20, 63, 126)  # trading days ≈ 1mo / 3mo / 6mo
-TIER_BENCHMARKS = {
-    "LARGE": "NIFTY 50",
-    "MID":   "NIFTY MIDCAP 150",
-    "SMALL": "NIFTY SMALLCAP 250",
-}
+TIER_BENCHMARKS = {t: spec["benchmark"] for t, spec in TIERS.items() if "benchmark" in spec}
 
 
 def _load_price_panel():

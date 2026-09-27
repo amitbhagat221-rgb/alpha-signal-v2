@@ -18,22 +18,22 @@ from datetime import date
 
 import pandas as pd
 
-from config import VIX_REGIMES, VIX_HYSTERESIS_DAYS
+from config import PICKABLE_TIERS, REGIMES, VIX_HYSTERESIS_DAYS
 from db import read_sql, get_db
 
 
 def _get_regime_for_vix(vix):
     """Determine regime based on VIX level."""
-    for regime, (lo, hi, _, _, _) in VIX_REGIMES.items():
+    for regime, spec in REGIMES.items():
+        lo, hi = spec["vix"]
         if lo <= vix < hi:
             return regime
     return "NORMAL"
 
 
 def _get_allocations(regime):
-    """Get allocation weights for a regime."""
-    _, _, alloc_l, alloc_m, alloc_s = VIX_REGIMES[regime]
-    return alloc_l, alloc_m, alloc_s
+    """{tier: allocation} for a regime (config.REGIMES, keyed by tier name)."""
+    return dict(REGIMES[regime]["alloc"])
 
 
 def compute(dry_run=False):
@@ -66,24 +66,26 @@ def compute(dry_run=False):
     else:
         confirmed_regime = new_regime
 
-    alloc_l, alloc_m, alloc_s = _get_allocations(confirmed_regime)
+    alloc = _get_allocations(confirmed_regime)
 
     print(f"VIX Regime Update:")
     print(f"  Latest VIX: {latest_vix:.1f} (date: {latest_date})")
     print(f"  20-day avg: {vix_20d:.1f}")
     print(f"  Regime: {confirmed_regime}")
-    print(f"  Allocation: LARGE={alloc_l:.0%} MID={alloc_m:.0%} SMALL={alloc_s:.0%}")
+    print("  Allocation: " + " ".join(f"{t}={alloc[t]:.0%}" for t in PICKABLE_TIERS))
 
     if dry_run:
         print("\nDry run — not saving.")
         return 1
 
+    # regime_state stores one alloc_<tier> column per pickable tier (schema.sql).
+    alloc_cols = [f"alloc_{t.lower()}" for t in PICKABLE_TIERS]
     with get_db() as conn:
         conn.execute(
-            """INSERT OR REPLACE INTO regime_state
-               (id, regime, vix_latest, vix_20d_avg, alloc_large, alloc_mid, alloc_small, updated_at)
-               VALUES (1, ?, ?, ?, ?, ?, ?, datetime('now'))""",
-            (confirmed_regime, latest_vix, vix_20d, alloc_l, alloc_m, alloc_s),
+            f"""INSERT OR REPLACE INTO regime_state
+               (id, regime, vix_latest, vix_20d_avg, {", ".join(alloc_cols)}, updated_at)
+               VALUES (1, ?, ?, ?, {", ".join("?" * len(alloc_cols))}, datetime('now'))""",
+            (confirmed_regime, latest_vix, vix_20d, *(alloc[t] for t in PICKABLE_TIERS)),
         )
 
     print(f"Saved regime_state: {confirmed_regime}")

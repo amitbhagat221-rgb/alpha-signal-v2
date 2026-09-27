@@ -4,12 +4,12 @@ Alpha Signal v2 — Factor registry partition check (audit Factor-F2, ADR 0017 d
 ADR 0017 promised a two-tier registry (wired vs library) but nothing ever
 enforced that every backtested signal actually LANDS in one of the tiers. A
 signal can be computed, backtested (has rows in pit_ic_by_tier_v2), and yet
-be registered in NEITHER config.SIGNAL_WEIGHTS* NOR db.FACTOR_LIBRARY NOR
-config.FACTOR_STATUS — invisible to any promotion review. This checker makes
+be registered in NEITHER factors.SIGNAL_WEIGHTS* NOR db.FACTOR_LIBRARY NOR
+factors.FACTOR_STATUS — invisible to any promotion review. This checker makes
 that gap a hard, visible failure instead of a silent one.
 
 Partition rule: every factor in factors.FACTORS must be in EXACTLY ONE of:
-  - a nonzero config.SIGNAL_WEIGHTS / SIGNAL_WEIGHTS_RETURN / SIGNAL_WEIGHTS_SHARPE
+  - a nonzero factors.SIGNAL_WEIGHTS / SIGNAL_WEIGHTS_RETURN / SIGNAL_WEIGHTS_SHARPE
     weight (weight key resolved to its registry id by factors.signal_for)
   - a bench: LIBRARY (factors.FACTOR_LIBRARY) or PROPOSED / BLOCKED /
     SUPERSEDED / CONTROL (factors.FACTOR_STATUS)

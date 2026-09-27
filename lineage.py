@@ -6,14 +6,11 @@ into this value? Today's BAJA bug (mc_slug pointed to Bajaj Finance, so
 analyst_consensus.price_target was wrong) lived in column-level provenance
 inside a single table. Catching that class of bug needs three layers:
 
-  1. STATIC factor lineage (FACTOR_LINEAGE) — declarative mapping of every
-     canonical factor in `db.BACKTEST_SIGNALS` to its source reads. Sub-
-     factors of the same producer share a parent via `inherits_from`;
-     composites enumerate their constituents via `composite_of`. This is
-     the source of truth — the drift validator in tools/data_sanity.py
-     (`LINEAGE_REGISTRY_DRIFT`) ENFORCES that every BACKTEST_SIGNALS entry
-     has a FACTOR_LINEAGE entry. Adding a new factor without lineage =
-     CRITICAL on every health report.
+  1. STATIC factor lineage (FACTOR_LINEAGE) — DERIVED for every factors.FACTORS
+     key: table-level reads from the entry's `source_tables` (its PIT producer's
+     input tables), plus the column-level / sector-exclusion detail in
+     LINEAGE_DETAIL below. Composites enumerate constituents via `composite_of`.
+     A factor cannot lack lineage (no drift check needed — plan 0015 Phase 6).
 
   2. COLUMN-level provenance (TABLE_COLUMN_SOURCES) — for tables that
      blend multiple feeds at the column level. analyst_consensus is the
@@ -28,7 +25,7 @@ inside a single table. Catching that class of bug needs three layers:
      from latest `daily_picks`, via `LINEAGE_SIDS` env var).
 
 Factor status (informational — comes from the BACKTEST_SIGNALS verdict):
-  - "model_active"  — appears in config.SIGNAL_WEIGHTS for ≥1 cap tier
+  - "model_active"  — carries a nonzero weight (factors.SIGNAL_WEIGHTS) in ≥1 tier
   - "candidate"     — KEEP/WEAK verdict in pit_ic_by_tier_v2, queued for promotion
   - "library"       — registered in FACTOR_LIBRARY, awaiting validation depth
   - "computed"      — produced as a side-output (sector tilt, macro state)
@@ -158,7 +155,10 @@ UNIT_CONTRACTS = {
     # unit registry; consumers know it's the canonical Piotroski 0-9 score.
     # ─── stocks ───
     ("stocks", "adtv_6m_cr"):               "inr_crore",
-    ("stocks", "market_cap_cr"):            "inr_crore",
+    # MISNAMED: the values are RUPEES (frozen v1 universe.csv snapshot, April 2026,
+    # NULL for 726 stocks) — verified 2026-09-27 (RELIANCE 1.83e13). scoring/segment.py
+    # computes a fresh ₹-crore market cap instead of reading this column.
+    ("stocks", "market_cap_cr"):            "inr_raw",
     ("stocks", "shares_outstanding"):       "ratio_1",   # raw count
     # ─── mf_metrics ───
     ("mf_metrics", "composite_score"):      "pct_100",   # 0-100 absolute quality score
@@ -213,38 +213,39 @@ def _cf(cols, n=1):
             "key": ["sid", "period"], "select": "last_n_periods", "n": n}
 
 
-# ─────────────────────── Factor → source mapping (all 63 canonical factors) ───────────────────────
+# ─────────────────────── Factor lineage: only what the registry can't say ───────────────────────
 #
-# Keyed by `signal` field of db.BACKTEST_SIGNALS.
-# Three entry shapes:
-#   (A) Full read spec:  {"module":..., "reads":[...], ...}   (status: computed below)
-#   (B) Sub-factor:      {"inherits_from": "<parent_factor>", "sub_contribution": "..."}
-#   (C) Composite:       {"composite_of": [<factor>, <factor>, ...], "weights": {...}}
+# The TABLE-level reads of every factor are stated once, in factors.FACTORS
+# `source_tables` (by default its PIT producer's input tables — factors.
+# producer_tables, checked against pit.RAW_SQL by a test). FACTOR_LINEAGE below is
+# DERIVED from it for every registry key, so a factor can never lack lineage
+# (the old LINEAGE_REGISTRY_DRIFT check is vacuous) and lineage can never claim a
+# table the code doesn't read. LINEAGE_DETAIL keeps only the genuinely extra facts:
+#   reads              column-level specs (cols/key/select/filter/line_items) for SOME
+#                      of the factor's tables — a table without a spec gets a bare one;
+#                      a spec for a table outside source_tables fails the tests
+#   sector_exclusions  sectors the factor is structurally N/A for      [default: []]
+#   module             only for factors with no PIT producer            [default: pit.<fn>]
+#   composite_of       constituents of a composite factor
+#   validation / note  free-text evidence pointers
+# Keyed by the factors.FACTORS id.
 
-FACTOR_LINEAGE = {
+LINEAGE_DETAIL = {
 
     # ════════════════════════════ Value family ════════════════════════════
     "earnings_yield": {
-        "module": "signals/earnings_yield.py",
         "reads": [
             _qi(["revenue", "net_income", "pbt", "interest"], n=4),
-            {"table": "stocks", "cols": ["sid", "shares_outstanding"], "key": ["sid"], "select": "row"},
             _prices_latest(),
         ],
-        "sector_exclusions": [],
     },
     "book_to_price": {
-        "module": "scoring/screener.py (inline)",
         "reads": [
-            {"table": "stocks", "cols": ["sid", "market_cap_cr"], "key": ["sid"], "select": "row"},
             _bs(["total_assets", "long_term_debt", "current_liabilities", "shares_outstanding"], n=1),
         ],
-        "sector_exclusions": [],
     },
     "position_52w": {
-        "module": "scoring/screener.py (inline)",
         "reads": [_prices_window(252, contribution="52w_high_low")],
-        "sector_exclusions": [],
     },
     "value_composite": {
         "composite_of": ["earnings_yield", "book_to_price", "position_52w"],
@@ -252,7 +253,6 @@ FACTOR_LINEAGE = {
 
     # ════════════════════════════ Quality / Forensic / Accruals ════════════════════════════
     "piotroski_f_score": {
-        "module": "signals/piotroski.py",
         "reads": [
             _qi(["revenue", "net_income", "pbt", "interest"], n=8),
             _bs(["total_assets", "current_assets", "current_liabilities",
@@ -263,17 +263,15 @@ FACTOR_LINEAGE = {
         "sector_exclusions": ["Financials"],
     },
     "m_score": {
-        "module": "signals/forensic.py",
         "reads": [
-            _qi(["revenue", "net_income", "pbt", "depreciation"], n=8),
-            _bs(["total_assets", "current_assets", "receivables", "inventory"], n=2),
+            _qi(["revenue", "net_income", "pbt"], n=8),
+            _bs(["total_assets", "current_assets", "receivables"], n=2),
             _cf(["operating_cash_flow"], n=1),
             _stocks(("sid", "sector")),
         ],
         "sector_exclusions": ["Financials"],
     },
     "z_score": {
-        "module": "signals/forensic.py",
         "reads": [
             _bs(["total_assets", "current_assets", "current_liabilities", "long_term_debt"], n=2),
             _cf(["operating_cash_flow"], n=1),
@@ -282,15 +280,13 @@ FACTOR_LINEAGE = {
         "sector_exclusions": ["Financials"],
     },
     "bs_accruals_ratio": {
-        "module": "signals/accruals.py",
         "reads": [
-            _bs(["current_assets", "current_liabilities", "cash_equivalents"], n=2),
+            _bs(["current_assets", "current_liabilities", "cash_and_equivalents"], n=2),
             _cf(["capex", "depreciation"], n=1),
         ],
         "sector_exclusions": ["Financials"],
     },
     "cf_accruals_ratio": {
-        "module": "signals/accruals.py",
         "reads": [
             _qi(["net_income"], n=4),
             _cf(["operating_cash_flow"], n=1),
@@ -299,34 +295,23 @@ FACTOR_LINEAGE = {
         "sector_exclusions": ["Financials"],
     },
     "earnings_persistence": {
-        "module": "signals/earnings_yield.py (derivative)",
         "reads": [_qi(["net_income"], n=8, reporting_preference="consolidated")],
-        "sector_exclusions": [],
     },
     "earnings_beat_rate": {
-        "module": "signals/earnings_yield.py (derivative)",
         "reads": [_qi(["net_income"], n=8)],
-        "sector_exclusions": [],
     },
     "roe": {
-        "module": "scoring/screener.py (inline)",
         "reads": [_qi(["net_income"], n=4), _bs(["total_equity"], n=1)],
-        "sector_exclusions": [],
     },
     "roa": {
-        "module": "scoring/screener.py (inline)",
         "reads": [_qi(["net_income"], n=4), _bs(["total_assets"], n=1)],
-        "sector_exclusions": [],
     },
     "debt_to_equity": {
-        "module": "scoring/screener.py (inline)",
         "reads": [_bs(["long_term_debt", "total_equity"], n=1)],
         "sector_exclusions": ["Financials"],
     },
     "profit_margin": {
-        "module": "scoring/screener.py (inline)",
         "reads": [_qi(["revenue", "net_income"], n=4)],
-        "sector_exclusions": [],
     },
     "quality_composite": {
         "composite_of": ["roe", "debt_to_equity", "profit_margin"],
@@ -334,15 +319,10 @@ FACTOR_LINEAGE = {
 
     # ════════════════════════════ Growth ════════════════════════════
     "revenue_growth_yoy": {
-        "module": "scoring/screener.py (inline)",
         "reads": [_qi(["revenue"], n=8)],
-        "sector_exclusions": [],
     },
     "eps_growth_yoy": {
-        "module": "scoring/screener.py (inline)",
-        "reads": [_qi(["net_income"], n=8),
-                  _bs(["shares_outstanding"], n=1)],
-        "sector_exclusions": [],
+        "reads": [_qi(["net_income"], n=8)],
     },
     "growth_composite": {
         "composite_of": ["revenue_growth_yoy", "eps_growth_yoy"],
@@ -350,19 +330,13 @@ FACTOR_LINEAGE = {
 
     # ════════════════════════════ Momentum (price-based) ════════════════════════════
     "mom_6m_adj": {
-        "module": "signals/momentum.py",
         "reads": [_prices_window(126, contribution="6m_minus_1m_return")],
-        "sector_exclusions": [],
     },
     "mom_12m_adj": {
-        "module": "signals/momentum.py",
         "reads": [_prices_window(252, contribution="12m_minus_1m_return")],
-        "sector_exclusions": [],
     },
     "macd_signal": {
-        "module": "signals/momentum.py",
         "reads": [_prices_window(252, contribution="ema_12_26_9")],
-        "sector_exclusions": [],
     },
     "momentum_composite": {
         "composite_of": ["mom_6m_adj", "mom_12m_adj"],
@@ -370,35 +344,28 @@ FACTOR_LINEAGE = {
 
     # ════════════════════════════ Shareholding / Insider ════════════════════════════
     "promoter_qoq": {
-        "module": "signals/promoter.py",
         "reads": [
             {"table": "shareholding", "cols": ["promoter_pct"],
              "key": ["sid", "period_end"], "select": "last_n_periods", "n": 2,
              "contribution": "qoq_promoter_delta"},
             _stocks(("sid", "cap_tier")),
         ],
-        "sector_exclusions": [],
     },
     "promoter_trend_4q": {
-        "module": "signals/promoter.py",
         "reads": [
             {"table": "shareholding", "cols": ["promoter_pct"],
              "key": ["sid", "period_end"], "select": "last_n_periods", "n": 5,
              "contribution": "trend_slope_5q"},
         ],
-        "sector_exclusions": [],
     },
     "pledge_quality": {
-        "module": "signals/promoter.py",
         "reads": [
-            {"table": "shareholding", "cols": ["promoter_pledged_pct"],
+            {"table": "shareholding", "cols": ["pledge_pct"],
              "key": ["sid", "period_end"], "select": "last_n_periods", "n": 4,
              "contribution": "pledge_level_+_trend"},
         ],
-        "sector_exclusions": [],
     },
     "insider_signal": {
-        "module": "signals/insider_signal.py",
         "reads": [
             {"table": "insider_trades",
              "cols": ["sid", "trade_date", "person_category", "transaction_type", "value_lakhs"],
@@ -407,51 +374,41 @@ FACTOR_LINEAGE = {
              "contribution": "category_weighted_net_flow"},
             _stocks(("sid",)),
         ],
-        "sector_exclusions": [],
         "validation": {"weekly_NW_t": None, "tier": None},   # SMALL t≈DROP per current PIT
     },
 
     # ════════════════════════════ Smart money / Micro-flow ════════════════════════════
     "avg_delivery_pct_30d": {
-        "module": "signals/smart_money.py (sub: delivery_score)",
         "reads": [
             {"table": "stock_prices", "cols": ["delivery_pct"],
              "key": ["sid", "date"], "select": "window",
              "filter": "last 30d", "contribution": "30d_mean_delivery_pct"},
-            _stocks(("sid", "cap_tier")),
         ],
-        "sector_exclusions": [],
         "validation": {"weekly_NW_t": 4.21, "tier": "SMALL"},
     },
     "delivery_anomaly_z": {
-        "module": "signals/smart_money.py (sub: anomaly_z)",
         "reads": [
             {"table": "stock_prices", "cols": ["delivery_pct"],
              "key": ["sid", "date"], "select": "window",
              "filter": "last 90d", "contribution": "z_score_of_30d_vs_90d_baseline"},
-            _stocks(("sid", "cap_tier")),
         ],
-        "sector_exclusions": [],
         "validation": {"weekly_NW_t": 4.11, "tier": "SMALL"},
     },
     "bulk_deal_signal": {
-        "module": "signals/smart_money.py (sub: bulk_score)",
         "reads": [
             {"table": "bulk_deals",
-             "cols": ["sid", "deal_date", "client_name", "buy_sell", "qty"],
+             "cols": ["sid", "deal_date", "client_name", "buy_sell", "quantity"],
              "key": ["sid", "deal_date", "client_name"], "select": "all",
              "filter": "last 90d", "contribution": "net_qty_by_qib_repeat_buyer"},
             _prices_window(90, contribution="adv_normaliser"),
             _stocks(("sid", "cap_tier")),
         ],
-        "sector_exclusions": [],
         "validation": {"weekly_NW_t": 2.56, "tier": "SMALL"},
     },
     "smart_money_score": {
-        "module": "signals/smart_money.py (composite: bulk_score + delivery_score)",
         "reads": [
             {"table": "bulk_deals",
-             "cols": ["sid", "deal_date", "client_name", "buy_sell", "qty"],
+             "cols": ["sid", "deal_date", "client_name", "buy_sell", "quantity"],
              "key": ["sid", "deal_date", "client_name"], "select": "all",
              "filter": "last 90d", "contribution": "bulk_score_component"},
             {"table": "stock_prices", "cols": ["delivery_pct"],
@@ -459,12 +416,10 @@ FACTOR_LINEAGE = {
              "filter": "last 30d", "contribution": "delivery_score_component"},
             _stocks(("sid", "cap_tier")),
         ],
-        "sector_exclusions": [],
         "validation": {"weekly_NW_t": None, "tier": "SMALL",
                        "note": "registered 2026-06-02; PIT-thin (n≈6, bulk_deals ~1mo depth) — preliminary"},
     },
     "short_selling_signal": {
-        "module": "signals/smart_money.py (sub: short_score)",
         "reads": [
             {"table": "short_selling_data",
              "cols": ["sid", "short_date", "quantity"],
@@ -472,7 +427,6 @@ FACTOR_LINEAGE = {
              "contribution": "short_qty_vs_adv"},
             _prices_window(30, contribution="adv_normaliser"),
         ],
-        "sector_exclusions": [],
     },
     "fii_dii_cash_net": {
         "module": "(sector-level, applied to all stocks in sector)",
@@ -481,7 +435,6 @@ FACTOR_LINEAGE = {
              "key": ["date", "category"], "select": "window", "filter": "last 30d",
              "contribution": "sector_flow"},
         ],
-        "sector_exclusions": [],
     },
     "fii_dii_fno_positioning": {
         "module": "(market-level signal)",
@@ -492,7 +445,6 @@ FACTOR_LINEAGE = {
              "key": ["date", "client_type"], "select": "window", "filter": "last 30d",
              "contribution": "fii_net_positioning"},
         ],
-        "sector_exclusions": [],
     },
 
     # ════════════════════════════ Track 2 — Financial sub-model (Banks + NBFCs) ════════════════════════════
@@ -502,7 +454,6 @@ FACTOR_LINEAGE = {
     # knowable quarterly + latest knowable annual row per sid from banking_metrics,
     # z-scored within (industry, cap_tier). PIT filing lags: 60d quarterly, 75d annual.
     "financial_quality": {
-        "module": "signals/financial_signal.py",
         "reads": [
             {"table": "banking_metrics",
              "cols": ["gross_npa_pct", "net_npa_pct", "interest_earned",
@@ -517,14 +468,11 @@ FACTOR_LINEAGE = {
              "select": "latest_annual_per_sid",
              "filter": "period_type='annual' AND period_end ≤ pit_date − 75d",
              "contribution": "funding_cost"},
-            _stocks(("sid", "industry", "cap_tier"), contribution="financial_segment"),
         ],
-        "sector_exclusions": [],
         "note": "Financials-only (Banks + NBFCs). SMALL-tier direction (low NPA = strong franchise).",
         "validation": {"weekly_NW_t": -1.88, "tier": "SMALL"},   # WEAK; on bench, re-test ~Q1 FY27
     },
     "financial_recovery": {
-        "module": "signals/financial_signal.py",
         "reads": [
             {"table": "banking_metrics",
              "cols": ["gross_npa_pct", "net_npa_pct", "interest_earned",
@@ -539,14 +487,11 @@ FACTOR_LINEAGE = {
              "select": "latest_annual_per_sid",
              "filter": "period_type='annual' AND period_end ≤ pit_date − 75d",
              "contribution": "funding_cost"},
-            _stocks(("sid", "industry", "cap_tier"), contribution="financial_segment"),
         ],
-        "sector_exclusions": [],
         "note": "Financials-only (Banks + NBFCs). LARGE/MID-tier direction (high NPA = mean-reversion).",
         "validation": {"weekly_NW_t": 1.55, "tier": "MID"},   # WEAK; on bench, re-test ~Q1 FY27
     },
     "financial_signal": {
-        "module": "signals/financial_signal.py",
         "reads": [
             {"table": "banking_metrics",
              "cols": ["gross_npa_pct", "net_npa_pct", "interest_earned",
@@ -554,9 +499,7 @@ FACTOR_LINEAGE = {
              "key": ["sid", "period_end", "period_type"],
              "select": "latest_quarterly_+_annual_per_sid",
              "contribution": "back_compat_alias_=_financial_quality"},
-            _stocks(("sid", "industry", "cap_tier"), contribution="financial_segment"),
         ],
-        "sector_exclusions": [],
         "note": "SUPERSEDED 2026-05-29 by financial_quality + financial_recovery split "
                 "(ADR 0032). Kept as the alias column (= financial_quality) so historical "
                 "PIT and the optimizer entry survive; not routed live.",
@@ -568,22 +511,19 @@ FACTOR_LINEAGE = {
     # version uses analyst_consensus.eps_growth_pct), pt_revision_yoy
     # (DROPPED 2026-05-23), eps_revision_yoy, consensus_signal_combined.
     "pt_upside": {
-        "module": "signals/consensus.py (sub: pt_up_score)",
         "reads": [
-            {"table": "analyst_consensus",
-             "cols": ["price_target", "total_analysts"],
-             "key": ["sid"], "select": "row",
-             "filter": "has_analyst_data=1 AND price_target NOT NULL"},
+            {"table": "analyst_consensus_snapshots",
+             "cols": ["snapshot_date", "target_mean", "n_analysts"],
+             "key": ["sid", "snapshot_date", "source"], "select": "latest_per_sid_asof",
+             "filter": "target_mean NOT NULL (monthly snapshots only — ADR 0045)"},
             _prices_latest(contribution="pt_upside_denominator"),
             _stocks(("sid", "cap_tier"), contribution="ranking_segment"),
         ],
-        "sector_exclusions": [],
-        # CRITICAL: this factor reads analyst_consensus.price_target which
-        # has column-level provenance — see TABLE_COLUMN_SOURCES. Today's
-        # BAJA bug contaminated this field via wrong stocks.mc_slug.
+        # The display-only live pt_upside (consensus_signals) still derives from
+        # analyst_consensus.price_target — column-level provenance in
+        # TABLE_COLUMN_SOURCES (the BAJA mc_slug contamination class).
     },
     "pt_revision_yoy": {
-        "module": "DROPPED 2026-05-23 (ADR 0020)",
         "reads": [
             {"table": "forecast_history",
              "cols": ["value", "date"],
@@ -592,10 +532,8 @@ FACTOR_LINEAGE = {
              "filter": "metric='price' AND year-end snapshots only",
              "contribution": "contaminated_currently — see ADR 0020"},
         ],
-        "sector_exclusions": [],
     },
     "eps_revision_yoy": {
-        "module": "(awaiting 12mo analyst_consensus_snapshots)",
         "reads": [
             {"table": "forecast_history",
              "cols": ["value", "change", "date"],
@@ -603,23 +541,19 @@ FACTOR_LINEAGE = {
              "select": "all", "filter": "metric='eps'",
              "contribution": "yoy_revision"},
         ],
-        "sector_exclusions": [],
     },
     "consensus_signal_combined": {
-        "module": "signals/consensus.py (degraded — eps only)",
         "reads": [
-            {"table": "analyst_consensus",
-             "cols": ["eps_growth_pct", "total_analysts"],
-             "key": ["sid"], "select": "row",
-             "filter": "has_analyst_data=1"},
+            {"table": "forecast_history",
+             "cols": ["metric", "date", "value", "change"],
+             "key": ["sid", "metric", "date"], "select": "window",
+             "filter": "metric='eps' (EPS revision — the D1 quantity, plan 0015)"},
             _stocks(("sid", "cap_tier")),
         ],
-        "sector_exclusions": [],
     },
 
     # ════════════════════════════ News / Sentiment ════════════════════════════
     "sentiment_7d": {
-        "module": "signals/sentiment.py",
         "reads": [
             {"table": "news_articles",
              "cols": ["article_id", "title", "summary", "published_at"],
@@ -627,16 +561,10 @@ FACTOR_LINEAGE = {
             {"table": "news_article_stocks",
              "cols": ["article_id", "sid"], "key": ["article_id", "sid"], "select": "all",
              "contribution": "article_sid_linkage"},
-            {"table": "sentiment_scores",
-             "cols": ["article_id", "score"], "key": ["article_id"], "select": "all",
-             "contribution": "per_article_sentiment"},
-            _stocks(("sid",)),
         ],
-        "sector_exclusions": [],
         "validation": {"weekly_NW_t": -3.88, "tier": "LARGE"},   # preliminary, n=4
     },
     "news_volume": {
-        "module": "signals/sentiment.py (sub: volume)",
         "reads": [
             {"table": "news_article_stocks",
              "cols": ["article_id", "sid"], "key": ["article_id", "sid"], "select": "all",
@@ -644,40 +572,32 @@ FACTOR_LINEAGE = {
              "contribution": "article_count_per_sid"},
             _stocks(("sid",)),
         ],
-        "sector_exclusions": [],
     },
 
     # ════════════════════════════ Regulatory / Macro ════════════════════════════
     "regulatory_sector_signal": {
-        "module": "signals/regulatory.py",
         "reads": [
-            {"table": "regulatory_events", "cols": ["sector", "published_at"],
+            {"table": "regulatory_events", "cols": ["event_id", "published_at"],
              "key": ["event_id"], "select": "all", "filter": "last 30d",
              "contribution": "raw_event_count"},
             {"table": "regulatory_signals", "cols": ["direction", "magnitude", "confidence"],
              "key": ["event_id"], "select": "all",
              "contribution": "classified_tilt"},
-            _stocks(("sid", "sector")),
         ],
-        "sector_exclusions": [],
     },
     "macro_sector_signal": {
-        "module": "signals/macro.py",
         "reads": [
             {"table": "macro_history", "cols": ["value", "date"],
              "key": ["indicator", "date"], "select": "window",
              "filter": "last 90d per indicator"},
-            {"table": "macro_indicator_meta", "cols": ["indicator", "direction"],
-             "key": ["indicator"], "select": "all"},
+            {"table": "macro_indicator_meta", "cols": ["indicator_id", "category"],
+             "key": ["indicator_id"], "select": "all"},
             {"table": "macro_sector_map", "cols": ["sector", "direction", "weight"],
              "key": ["indicator", "sector"], "select": "all"},
-            _stocks(("sid", "sector")),
         ],
-        "sector_exclusions": [],
     },
 
     "sector_momentum": {
-        "module": "signals/sector_momentum.py",
         "reads": [
             {"table": "stock_prices", "cols": ["close"],
              "key": ["sid", "date"], "select": "window",
@@ -687,10 +607,8 @@ FACTOR_LINEAGE = {
              "filter": "nifty50 last 252d", "contribution": "benchmark_return"},
             _stocks(("sid", "sector", "market_cap_cr")),
         ],
-        "sector_exclusions": [],
     },
     "sector_tilt": {
-        "module": "signals/sector_tilt.py",
         "reads": [
             {"table": "stock_prices", "cols": ["close"],
              "key": ["sid", "date"], "select": "window",
@@ -700,41 +618,33 @@ FACTOR_LINEAGE = {
              "filter": "latest per sector <= eval_date", "contribution": "macro_score_leg"},
             _stocks(("sid", "sector")),
         ],
-        "sector_exclusions": [],
     },
 
     # ════════════════════════════ Options / F&O OI factors (§3.2.2) ════════════════════════════
     # All four read the pre-computed nearest-expiry rollup in fno_pcr_history
     # (ADR 0034). Stock-only: index underlyings carry sid=NULL and are filtered.
     "pcr_oi": {
-        "module": "signals/fno_oi_factors.py",
         "reads": [
             {"table": "fno_pcr_history", "cols": ["pcr_oi"],
              "key": ["sid", "trade_date"], "select": "row",
              "filter": "latest ≤ as-of", "contribution": "put_oi_over_call_oi"},
         ],
-        "sector_exclusions": [],
     },
     "pcr_volume": {
-        "module": "signals/fno_oi_factors.py",
         "reads": [
             {"table": "fno_pcr_history", "cols": ["pcr_volume"],
              "key": ["sid", "trade_date"], "select": "row",
              "filter": "latest ≤ as-of", "contribution": "put_vol_over_call_vol"},
         ],
-        "sector_exclusions": [],
     },
     "max_pain_distance": {
-        "module": "signals/fno_oi_factors.py",
         "reads": [
             {"table": "fno_pcr_history", "cols": ["max_pain_distance"],
              "key": ["sid", "trade_date"], "select": "row",
              "filter": "latest ≤ as-of", "contribution": "spot_minus_maxpain_over_spot"},
         ],
-        "sector_exclusions": [],
     },
     "oi_buildup_signal": {
-        "module": "signals/fno_oi_factors.py",
         "reads": [
             {"table": "fno_pcr_history",
              "cols": ["total_call_oi", "total_put_oi", "underlying_price", "expiry_date"],
@@ -742,32 +652,26 @@ FACTOR_LINEAGE = {
              "filter": "latest + prior same-expiry row",
              "contribution": "4state_oi_vs_price_buildup"},
         ],
-        "sector_exclusions": [],
     },
 
     # ════════════════════════════ Options / F&O IV factors (§3.2.2, ADR 0035) ════════════════════════════
     # All read fno_iv_history (Black-76 inversion of fno_bhav settle prices). The
     # surface itself is built by sources/fno_iv.py; these factors derive from it.
     "iv_skew_25d": {
-        "module": "signals/fno_iv_factors.py",
         "reads": [
             {"table": "fno_iv_history", "cols": ["iv_skew_25d"],
              "key": ["sid", "trade_date"], "select": "row",
              "filter": "latest ≤ as-of", "contribution": "iv_25d_put_minus_call"},
         ],
-        "sector_exclusions": [],
     },
     "iv_term_structure": {
-        "module": "signals/fno_iv_factors.py",
         "reads": [
             {"table": "fno_iv_history", "cols": ["iv_term_structure"],
              "key": ["sid", "trade_date"], "select": "row",
              "filter": "latest ≤ as-of", "contribution": "atm_iv_near_minus_far"},
         ],
-        "sector_exclusions": [],
     },
     "iv_realised_spread": {
-        "module": "signals/fno_iv_factors.py",
         "reads": [
             {"table": "fno_iv_history", "cols": ["atm_iv"],
              "key": ["sid", "trade_date"], "select": "row",
@@ -776,74 +680,56 @@ FACTOR_LINEAGE = {
              "key": ["sid", "date"], "select": "window",
              "filter": "last 21d", "contribution": "realised_vol_subtrahend"},
         ],
-        "sector_exclusions": [],
     },
     "iv_percentile_1y": {
-        "module": "signals/fno_iv_factors.py",
         "reads": [
             {"table": "fno_iv_history", "cols": ["atm_iv"],
              "key": ["sid", "trade_date"], "select": "window",
              "filter": "trailing ≤252d", "contribution": "percentile_rank_of_latest_atm_iv"},
         ],
-        "sector_exclusions": [],
     },
 
     # ════════════════════════════ Microstructure factors (§3.2.3, daily-derivable) ════════════════════════════
     # All read daily OHLCV from stock_prices — no Kite. (The other 3 §3.2.3 factors
     # need intraday/tick → gated on 3.1c, on hold.)
     "intraday_range_compression": {
-        "module": "signals/microstructure.py",
         "reads": [{"table": "stock_prices", "cols": ["high", "low", "close"],
                    "key": ["sid", "date"], "select": "window", "filter": "last 21d",
                    "contribution": "atr5_over_atr20"}],
-        "sector_exclusions": [],
     },
     "closing_strength_1m": {
-        "module": "signals/microstructure.py",
         "reads": [{"table": "stock_prices", "cols": ["high", "low", "close"],
                    "key": ["sid", "date"], "select": "window", "filter": "last 21d",
                    "contribution": "mean_close_position_in_range"}],
-        "sector_exclusions": [],
     },
     "opening_gap_freq_1m": {
-        "module": "signals/microstructure.py",
         "reads": [{"table": "stock_prices", "cols": ["open", "close"],
                    "key": ["sid", "date"], "select": "window", "filter": "last 21d",
                    "contribution": "freq_overnight_gap_gt_1pct"}],
-        "sector_exclusions": [],
     },
     "vwap_deviation_5d": {
-        "module": "signals/microstructure.py",
         "reads": [{"table": "stock_prices", "cols": ["high", "low", "close"],
                    "key": ["sid", "date"], "select": "window", "filter": "last 5d",
                    "contribution": "close_vs_typical_price"}],
-        "sector_exclusions": [],
     },
     "bidask_spread_proxy": {
-        "module": "signals/microstructure.py",
         "reads": [{"table": "stock_prices", "cols": ["high", "low"],
                    "key": ["sid", "date"], "select": "window", "filter": "last 20d pairs",
                    "contribution": "corwin_schultz_spread"}],
-        "sector_exclusions": [],
     },
     "kyle_lambda": {
-        "module": "signals/microstructure.py",
         "reads": [{"table": "stock_prices", "cols": ["close", "volume"],
                    "key": ["sid", "date"], "select": "window", "filter": "last 21d",
                    "contribution": "amihud_illiquidity"}],
-        "sector_exclusions": [],
     },
 
     # ════════════════════════════ Event-time / PEAD factors (§3.2.5) ════════════════════════════
     "earnings_surprise_std": {
-        "module": "signals/pead.py",
         "reads": [{"table": "quarterly_income", "cols": ["eps", "end_date"],
                    "key": ["sid", "end_date"], "select": "window", "filter": "last ~8 quarters",
                    "contribution": "seasonal_random_walk_SUE"}],
-        "sector_exclusions": [],
     },
     "pead_drift_60d": {
-        "module": "signals/pead.py",
         "reads": [
             {"table": "quarterly_income", "cols": ["end_date"], "key": ["sid", "end_date"],
              "select": "row", "filter": "latest knowable", "contribution": "announce_anchor"},
@@ -852,22 +738,16 @@ FACTOR_LINEAGE = {
             {"table": "macro_history", "cols": ["value", "date"], "key": ["indicator_id", "date"],
              "select": "window", "filter": "nifty50 announce→eval", "contribution": "benchmark_return"},
         ],
-        "sector_exclusions": [],
     },
     "corporate_action_density": {
-        "module": "signals/pead.py",
         "reads": [{"table": "corporate_actions", "cols": ["ex_date"], "key": ["sid", "ex_date"],
                    "select": "window", "filter": "last 365d", "contribution": "action_count"}],
-        "sector_exclusions": [],
     },
     "buyback_announcement_30d": {
-        "module": "signals/pead.py",
         "reads": [{"table": "corporate_actions", "cols": ["ex_date", "subject"], "key": ["sid", "ex_date"],
                    "select": "window", "filter": "last 30d, subject~buyback", "contribution": "buyback_flag"}],
-        "sector_exclusions": [],
     },
     "announcement_car": {
-        "module": "signals/announcement_car.py",
         "reads": [{"table": "bse_announcements", "cols": ["sid", "dt_tm", "category"],
                    "key": ["sid", "dt_tm"], "select": "window",
                    "filter": "latest Result print ≤ eval within 90d, window closed",
@@ -878,34 +758,26 @@ FACTOR_LINEAGE = {
                   {"table": "macro_history", "cols": ["value"], "key": ["date"],
                    "select": "window", "filter": "nifty50 over the same window dates",
                    "contribution": "benchmark_leg_return"}],
-        "sector_exclusions": [],
     },
     "governance_resignation": {
-        "module": "signals/governance_events.py",
         "reads": [{"table": "bse_announcements", "cols": ["sid", "subcategory", "dt_tm"],
                    "key": ["sid", "dt_tm"], "select": "window",
                    "filter": "last 365d, resignation/cessation subcategories",
                    "contribution": "weighted_resignation_density"}],
-        "sector_exclusions": [],
     },
 
     # ═══════════ LARGE-tier canonical rebuild candidates (audit 2026-07-04 Factor-F3) ═══════════
     "low_vol_252d": {
-        "module": "signals/low_vol.py",
         "reads": [{"table": "stock_prices", "cols": ["close"], "key": ["sid", "date"],
                    "select": "window", "filter": "last 252 trading days (adj), min 200 obs",
                    "contribution": "annualized_logret_std"}],
-        "sector_exclusions": [],
     },
     "st_reversal_21d": {
-        "module": "signals/st_reversal.py",
         "reads": [{"table": "stock_prices", "cols": ["close"], "key": ["sid", "date"],
                    "select": "window", "filter": "last 21 trading days (adj), min 15 obs",
                    "contribution": "trailing_21d_total_return"}],
-        "sector_exclusions": [],
     },
     "asset_growth_yoy": {
-        "module": "signals/asset_growth.py",
         "reads": [{"table": "annual_balance_sheet", "cols": ["total_assets", "end_date"],
                    "key": ["sid", "end_date"], "select": "window",
                    "filter": "two latest knowable annual rows (75d lag), prior assets ≥ ₹50 cr",
@@ -915,140 +787,113 @@ FACTOR_LINEAGE = {
 
     # ═══════════════════════════ Plan 0012 C3/C4 — momentum/lottery retest (WS2.6/WS2.7) ═══════════════════════════
     "residual_momentum_12_1": {
-        "module": "signals/residual_momentum.py",
         "reads": [{"table": "stock_prices", "cols": ["close"], "key": ["sid", "date"],
                    "select": "window", "filter": "trading days [D-252, D-21] (adj), min 150 paired obs vs NIFTY",
                    "contribution": "12m_momentum_net_of_nifty_beta"},
                   {"table": "macro_history", "cols": ["value"], "key": ["date"],
                    "select": "window", "filter": "indicator_id='nifty50', same window",
                    "contribution": "market_beta_regressor"}],
-        "sector_exclusions": [],
     },
     "max_lottery_21d": {
-        "module": "signals/max_lottery.py",
         "reads": [{"table": "stock_prices", "cols": ["close"], "key": ["sid", "date"],
                    "select": "window", "filter": "last 21 trading days (adj), min 15 obs",
                    "contribution": "mean_top5_daily_return"}],
-        "sector_exclusions": [],
     },
 
     # ════════════════════════════ Earnings-call NLP (§3.2.4) ════════════════════════════
     # Latest-call values off the nlp_scores enriched layer, look-ahead-safe on available_date.
     "earnings_call_tone_qoq": {
-        "module": "signals/nlp_factors.py",
         "reads": [{"table": "nlp_scores", "cols": ["sid", "net_tone", "available_date", "doc_date"],
                    "key": ["sid", "doc_date"], "select": "window",
                    "filter": "latest 2 calls within 400d, available_date<=eval",
                    "contribution": "net_tone_latest_minus_prior"}],
-        "sector_exclusions": [],
     },
     "forward_looking_intensity": {
-        "module": "signals/nlp_factors.py",
         "reads": [{"table": "nlp_scores", "cols": ["sid", "forward_looking_intensity", "available_date", "doc_date"],
                    "key": ["sid", "doc_date"], "select": "latest",
                    "filter": "latest call within 400d, available_date<=eval",
                    "contribution": "latest_call_value"}],
-        "sector_exclusions": [],
     },
     "uncertainty_word_density": {
-        "module": "signals/nlp_factors.py",
         "reads": [{"table": "nlp_scores", "cols": ["sid", "uncertainty_density", "available_date", "doc_date"],
                    "key": ["sid", "doc_date"], "select": "latest",
                    "filter": "latest call within 400d, available_date<=eval",
                    "contribution": "latest_call_value"}],
-        "sector_exclusions": [],
     },
 
     # ════════════════════════════ Industry control (§3.2.6) ════════════════════════════
     # Categorical neutralisation control — frozen integer code, no source reads
     # beyond the static stock attribute.
     "industry_id": {
-        "module": "signals/industry_id.py",
         "reads": [_stocks(("sid", "industry"), contribution="industry_code")],
-        "sector_exclusions": [],
     },
 
     # ════════════════════════════ Macro betas (§3.2.7) ════════════════════════════
     # Per-stock rolling 252d OLS beta of daily returns on a macro factor's daily
     # returns. macro_history holds the daily macro series; stock_prices the close.
     "oil_beta": {
-        "module": "signals/macro_betas.py",
         "reads": [
             {"table": "stock_prices", "cols": ["close"], "key": ["sid", "date"],
              "select": "window", "filter": "last 252d", "contribution": "stock_returns"},
             {"table": "macro_history", "cols": ["value", "date"], "key": ["indicator_id", "date"],
              "select": "window", "filter": "brent_crude last 252d", "contribution": "oil_returns"},
         ],
-        "sector_exclusions": [],
     },
     "metals_beta": {
-        "module": "signals/macro_betas.py",
         "reads": [
             {"table": "stock_prices", "cols": ["close"], "key": ["sid", "date"],
              "select": "window", "filter": "last 252d", "contribution": "stock_returns"},
             {"table": "macro_history", "cols": ["value", "date"], "key": ["indicator_id", "date"],
              "select": "window", "filter": "copper+aluminium blend last 252d", "contribution": "metals_returns"},
         ],
-        "sector_exclusions": [],
     },
     "inr_beta": {
-        "module": "signals/macro_betas.py",
         "reads": [
             {"table": "stock_prices", "cols": ["close"], "key": ["sid", "date"],
              "select": "window", "filter": "last 252d", "contribution": "stock_returns"},
             {"table": "macro_history", "cols": ["value", "date"], "key": ["indicator_id", "date"],
              "select": "window", "filter": "usdinr last 252d", "contribution": "fx_returns"},
         ],
-        "sector_exclusions": [],
     },
     "gold_beta": {
-        "module": "signals/macro_betas.py",
         "reads": [
             {"table": "stock_prices", "cols": ["close"], "key": ["sid", "date"],
              "select": "window", "filter": "last 252d", "contribution": "stock_returns"},
             {"table": "macro_history", "cols": ["value", "date"], "key": ["indicator_id", "date"],
              "select": "window", "filter": "gold last 252d", "contribution": "gold_returns"},
         ],
-        "sector_exclusions": [],
     },
     "rate_beta": {
-        "module": "signals/macro_betas.py",
         "reads": [
             {"table": "stock_prices", "cols": ["close"], "key": ["sid", "date"],
              "select": "window", "filter": "last 252d", "contribution": "stock_returns"},
             {"table": "macro_history", "cols": ["value", "date"], "key": ["indicator_id", "date"],
              "select": "window", "filter": "gsec10_etf last 252d", "contribution": "gsec_returns"},
         ],
-        "sector_exclusions": [],
     },
     "credit_beta": {
-        "module": "signals/macro_betas.py",
         "reads": [
             {"table": "stock_prices", "cols": ["close"], "key": ["sid", "date"],
              "select": "window", "filter": "last 252d", "contribution": "stock_returns"},
             {"table": "macro_history", "cols": ["value", "date"], "key": ["indicator_id", "date"],
              "select": "window", "filter": "credit_excess_idx last 252d", "contribution": "credit_returns"},
         ],
-        "sector_exclusions": [],
     },
 
     # ════════════════════════════ Fundamentals_screener factors (17) ════════════════════════════
     "roic": {
-        "module": "signals/roic.py",
         "reads": [_fund(["Profit before tax", "Interest", "Tax", "Equity Share Capital",
                          "Reserves", "Borrowings"], n=2),
                   _stocks(("sid", "sector"))],
         "sector_exclusions": ["Financials"],
     },
     "roiic": {
-        "module": "signals/roiic.py",
         "reads": [_fund(["Profit before tax", "Tax", "Interest", "Equity Share Capital",
                          "Reserves", "Borrowings"], n=6),
                   _stocks(("sid", "sector"))],
         "sector_exclusions": ["Financials"],
     },
     "fcf_yield": {
-        "module": "signals/fcf_yield.py",
         "reads": [_fund(["Cash from Operating Activity", "Net Block",
                          "Capital Work in Progress", "Depreciation",
                          "No. of Equity Shares"], n=2),
@@ -1057,123 +902,100 @@ FACTOR_LINEAGE = {
         "sector_exclusions": ["Financials"],
     },
     "gross_profitability": {
-        "module": "signals/gross_profitability.py",
         "reads": [_fund(["Sales", "Raw Material Cost", "Change in Inventory",
                          "Power and Fuel", "Other Mfr. Exp", "Total"], n=3),
                   _stocks(("sid", "sector"))],
         "sector_exclusions": ["Financials"],
     },
     "ccc": {
-        "module": "signals/cash_conversion_cycle.py",
         "reads": [_fund(["Sales", "Receivables", "Inventory", "Trade Payables"], n=2),
                   _stocks(("sid", "sector"))],
         "sector_exclusions": ["Financials"],
     },
     "margin_slope": {
-        "module": "signals/operating_margin_trend.py",
         "reads": [_fund(["Sales", "Profit before tax", "Interest"], n=3),
                   _stocks(("sid", "sector"))],
         "sector_exclusions": ["Financials"],
     },
     "wc_intensity": {
-        "module": "signals/working_capital_intensity.py",
         "reads": [_fund(["Sales", "Receivables", "Inventory", "Trade Payables"], n=2),
                   _stocks(("sid", "sector"))],
         "sector_exclusions": ["Financials"],
     },
     "dso_change_yoy": {
-        "module": "signals/dso_change_yoy.py",
         "reads": [_fund(["Sales", "Receivables"], n=2),
                   _stocks(("sid", "sector"))],
         "sector_exclusions": ["Financials"],
     },
     "dio_change_yoy": {
-        "module": "signals/dio_change_yoy.py",
         "reads": [_fund(["Sales", "Inventory"], n=2),
                   _stocks(("sid", "sector"))],
         "sector_exclusions": ["Financials"],
     },
     "nwc_to_revenue": {
-        "module": "signals/nwc_to_revenue.py",
         "reads": [_fund(["Sales", "Receivables", "Inventory", "Trade Payables"], n=2),
                   _stocks(("sid", "sector"))],
         "sector_exclusions": ["Financials"],
     },
     "sloan_accruals_full": {
-        "module": "signals/sloan_accruals_full.py",
         "reads": [_fund(["Receivables", "Inventory", "Trade Payables",
                          "Depreciation", "Total"], n=2),
                   _stocks(("sid", "sector"))],
         "sector_exclusions": ["Financials"],
     },
     "sga_to_revenue_change": {
-        "module": "signals/sga_to_revenue_change.py",
         "reads": [_fund(["Sales", "Selling and admin"], n=2),
                   _stocks(("sid", "sector"))],
         "sector_exclusions": ["Financials"],
     },
     "fcf_margin": {
-        "module": "signals/fcf_margin.py",
         "reads": [_fund(["Sales", "Cash from Operating Activity", "Net Block",
                          "Capital Work in Progress", "Depreciation"], n=2),
                   _stocks(("sid", "sector"))],
         "sector_exclusions": ["Financials"],
     },
     "capex_to_dep": {
-        "module": "signals/capex_to_dep.py",
         "reads": [_fund(["Net Block", "Capital Work in Progress", "Depreciation"], n=2),
                   _stocks(("sid", "sector"))],
         "sector_exclusions": ["Financials"],
     },
     "goodwill_to_assets": {
-        "module": "signals/goodwill_to_assets.py",
         "reads": [_fund(["Intangible Assets", "Total"], n=1),
                   _stocks(("sid", "sector"))],
         "sector_exclusions": ["Financials"],
     },
     "debt_structure": {
-        "module": "signals/debt_structure.py",
         "reads": [_fund(["Long term Borrowings", "Borrowings"], n=1),
                   _stocks(("sid", "sector"))],
         "sector_exclusions": ["Financials"],
     },
     "asset_tangibility": {
-        "module": "signals/asset_tangibility.py",
         "reads": [_fund(["Net Block", "Total"], n=1),
                   _stocks(("sid", "sector"))],
         "sector_exclusions": ["Financials"],
     },
     "interest_coverage": {
-        "module": "signals/interest_coverage.py",
         "reads": [_fund(["Profit before tax", "Interest"], n=2),
                   _stocks(("sid", "sector"))],
         "sector_exclusions": ["Financials"],
     },
     "revenue_cv_5y": {
-        "module": "signals/revenue_cv.py",
         "reads": [_fund(["Sales"], n=6),
                   _stocks(("sid", "sector"))],
-        "sector_exclusions": [],
     },
     "relative_turnover": {
-        "module": "signals/sales_growth_relative.py (related)",
         "reads": [_fund(["Sales", "Inventory"], n=1),
                   _stocks(("sid", "sector"))],
-        "sector_exclusions": [],
     },
     "relative_growth": {
-        "module": "signals/sales_growth_relative.py",
         "reads": [_fund(["Sales"], n=3),
                   _stocks(("sid", "sector"))],
-        "sector_exclusions": [],
     },
     "share_momentum": {
-        "module": "signals/share_momentum.py",
         "reads": [_prices_window(252, contribution="pit_adjusted_price"),
                   _fund(["No. of Equity Shares"], n=2,
                         contribution="share_count_pit"),
                   _stocks(("sid", "sector", "market_cap_cr"))],
-        "sector_exclusions": [],
     },
 
     # ════════════════════════════ Top-level composites ════════════════════════════
@@ -1183,21 +1005,48 @@ FACTOR_LINEAGE = {
             "momentum_composite", "pt_upside", "piotroski_f_score",
             "promoter_qoq", "delivery_anomaly_z", "bulk_deal_signal",
         ],
-        "weight_lookup": "config.SIGNAL_WEIGHTS (per cap-tier)",
+        "weight_lookup": "factors.SIGNAL_WEIGHTS (per cap-tier)",
     },
 }
 
 
-# Lifecycle status is COMPUTED, never stored: factors.status() from the nonzero
-# config.SIGNAL_WEIGHTS / the factor bench (a hand-kept copy here went stale — it
-# still called pulled pt_upside model_active and missed most wired factors).
-import factors  # noqa: E402  (kept inside the registry block)
+import factors  # noqa: E402  (after the detail literal; factors never imports lineage)
 
+# Lifecycle status is COMPUTED, never stored: factors.status() from the factor's
+# weights / bench (a hand-kept copy here went stale — it still called pulled
+# pt_upside model_active and missed most wired factors).
 _LINEAGE_STATUS = {"WIRED": "model_active", "VARIANT": "candidate",
                    "LIBRARY": "library", "PROPOSED": "candidate"}
-for _name, _entry in FACTOR_LINEAGE.items():
-    _st = factors.status(_name)
-    _entry["status"] = _LINEAGE_STATUS.get(_st, _st.lower())
+
+
+def _bare_read(table):
+    """A table the factor reads with no column-level detail declared."""
+    return {"table": table, "cols": [], "key": ["sid"], "select": "as_of",
+            "contribution": "producer_input"}
+
+
+def _derive(sid, f):
+    detail = LINEAGE_DETAIL.get(sid, {})
+    st = factors.status(sid)
+    if "composite_of" in detail:
+        return {**detail, "status": _LINEAGE_STATUS.get(st, st.lower())}
+    tables = [t for t in f.get("source_tables", []) if t != "—"]
+    specs = [r for r in detail.get("reads", []) if r["table"] in tables]
+    have = {r["table"] for r in specs}
+    producer = factors.PIT_PRODUCERS.get(f.get("producer")) or {}
+    entry = {
+        "module": detail.get("module") or (f"pit.{producer['fn']}" if producer.get("fn") else
+                                           f"tools/reconstruct_pit ({f.get('producer')})"),
+        "reads": specs + [_bare_read(t) for t in tables if t not in have],
+        "sector_exclusions": detail.get("sector_exclusions", []),
+    }
+    entry.update({k: v for k, v in detail.items() if k not in ("module", "reads", "sector_exclusions")})
+    entry["status"] = _LINEAGE_STATUS.get(st, st.lower())
+    return entry
+
+
+# Every registry factor, in registry order.
+FACTOR_LINEAGE = {sid: _derive(sid, f) for sid, f in factors.FACTORS.items()}
 
 
 # ─────────────────────── Helpers ───────────────────────
@@ -1248,11 +1097,9 @@ def lineage_active_sids():
 
 
 def missing_factors():
-    """Return list of BACKTEST_SIGNALS factors that lack a FACTOR_LINEAGE entry.
-
-    Used by the LINEAGE_REGISTRY_DRIFT sanity check — any new factor added
-    to BACKTEST_SIGNALS without a corresponding lineage entry fires CRITICAL.
-    """
+    """BACKTEST_SIGNALS factors that lack a FACTOR_LINEAGE entry — always [] now that
+    FACTOR_LINEAGE is derived from the registry (kept for tools/data_sanity's
+    LINEAGE_REGISTRY_DRIFT until that check is dropped)."""
     from db import BACKTEST_SIGNALS
     declared = {s["signal"] for s in BACKTEST_SIGNALS}
     in_registry = set(FACTOR_LINEAGE.keys())
@@ -1260,12 +1107,6 @@ def missing_factors():
 
 
 def orphan_factors():
-    """Factors in FACTOR_LINEAGE that no longer exist in BACKTEST_SIGNALS.
-
-    Surfaces as INFO — drift in the other direction (a factor was removed
-    from the canonical list but lineage entry was not cleaned up).
-    """
-    from db import BACKTEST_SIGNALS
-    declared = {s["signal"] for s in BACKTEST_SIGNALS}
-    in_registry = set(FACTOR_LINEAGE.keys())
-    return sorted(in_registry - declared)
+    """LINEAGE_DETAIL keys that are no longer registry factors (stale detail).
+    tests/test_factor_registry.py asserts this is empty."""
+    return sorted(set(LINEAGE_DETAIL) - set(factors.FACTORS))
