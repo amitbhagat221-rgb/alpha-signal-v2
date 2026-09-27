@@ -53,7 +53,7 @@
 {# Pre-compute divergence: a pick is "divergent" if it appears in only this variant's tier top-N #}
 {% set tickers_by_variant_tier = {} %}
 {% for vk in variant_keys %}
-  {% for tier in ['LARGE','MID','SMALL'] %}
+  {% for tier in pickable_tiers() %}
     {% set key = vk ~ '_' ~ tier %}
     {% set _ = tickers_by_variant_tier.update({key: bundle.variants[vk].picks[tier] | map(attribute='ticker') | list}) %}
   {% endfor %}
@@ -70,15 +70,13 @@
     <div class="mv-desc">{{ v.description }}</div>
 
     <div class="mv-weights">
-      <b>LARGE:</b>
-      {% for k, w in v.weights['LARGE'].items() %}<span>{{ k }} {{ (w*100)|pct(0, signed=True) }}</span>{% if not loop.last %} · {% endif %}{% endfor %}<br>
-      <b>MID:</b>
-      {% for k, w in v.weights['MID'].items() %}<span>{{ k }} {{ (w*100)|pct(0, signed=True) }}</span>{% if not loop.last %} · {% endif %}{% endfor %}<br>
-      <b>SMALL:</b>
-      {% for k, w in v.weights['SMALL'].items() %}<span>{{ k }} {{ (w*100)|pct(0, signed=True) }}</span>{% if not loop.last %} · {% endif %}{% endfor %}
+      {% for tier in pickable_tiers() %}
+      <b>{{ tier }}:</b>
+      {% for k, w in v.weights[tier].items() %}<span>{{ k }} {{ (w*100)|pct(0, signed=True) }}</span>{% if not loop.last %} · {% endif %}{% endfor %}{% if not loop.last %}<br>{% endif %}
+      {% endfor %}
     </div>
 
-    {% for tier in ['LARGE','MID','SMALL'] %}
+    {% for tier in pickable_tiers() %}
     <div class="mv-tier-block">
       <div class="mv-tier-label tier-{{ tier|lower }}"><span class="pip"></span>{{ tier }} ({{ v.picks[tier]|length }})</div>
       {% for p in v.picks[tier] %}

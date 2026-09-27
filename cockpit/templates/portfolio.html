@@ -75,9 +75,8 @@
             <div class="u-right">
                 <div style="font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Cap mix</div>
                 <div class="mono" style="font-size: 11px;">
-                    <span style="color: #3b82f6;">{{ rd.cap_mix.LARGE }}L</span>
-                    · <span style="color: #8b5cf6;">{{ rd.cap_mix.MID }}M</span>
-                    · <span style="color: #22c55e;">{{ rd.cap_mix.SMALL }}S</span>
+                    {% for t, n in rd.cap_mix.items() %}{% if not loop.first %}
+                    · {% endif %}<span style="color: {{ t|tier_color }};">{{ n }}{{ t[0] }}</span>{% endfor %}
                 </div>
             </div>
         </div>
@@ -191,18 +190,16 @@
         </div>
     </div>
     <div class="card">
-        {% for tier_name, alloc, count, color in [
-            ("LARGE", regime.alloc_large, portfolio.large|length, "blue"),
-            ("MID", regime.alloc_mid, portfolio.mid|length, "accent"),
-            ("SMALL", regime.alloc_small, portfolio.small|length, "green"),
-        ] %}
+        {% for tier_name in pickable_tiers() %}
+        {% set alloc = regime['alloc_' ~ tier_name|lower] or 0 %}
+        {% set count = portfolio[tier_name|lower]|length %}
         <div style="margin-bottom: 10px;">
             <div style="display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 4px;">
                 <span style="color: var(--text-secondary);">{{ tier_name }}</span>
                 <span class="mono">{{ (alloc * 100)|pct(0) }} &middot; {{ count }} stocks</span>
             </div>
             <div style="height: 6px; border-radius: 3px; background: var(--border);">
-                <div style="height: 100%; border-radius: 3px; width: {{ alloc * 100 }}%; background: var(--{{ color }});"></div>
+                <div style="height: 100%; border-radius: 3px; width: {{ alloc * 100 }}%; background: {{ tier_name|tier_color }};"></div>
             </div>
         </div>
         {% endfor %}
@@ -210,7 +207,7 @@
 </div>
 
 <!-- Model Portfolio Tables -->
-{% for tier_name, stocks in [("LARGE", portfolio.large), ("MID", portfolio.mid), ("SMALL", portfolio.small)] %}
+{% for tier_name in pickable_tiers() %}{% set stocks = portfolio[tier_name|lower] %}
 {% if stocks %}
 <div class="card" style="margin-bottom: 12px; padding: 0; overflow: hidden;">
     <div class="tier-header" style="padding: 10px 14px; margin-bottom: 0;">{{ tier_name }} CAP</div>

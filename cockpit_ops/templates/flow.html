@@ -2,7 +2,8 @@
 
 {% block content %}
 
-{# ── Phase header colors (used by mini-DAG and detail cards) ── #}
+{# ── Layer = the steps' module package (derived in cockpit_ops.api.get_flow_overview);
+      colours for the known packages, muted for the rest ── #}
 {% set phase_color = {
     'Sources': 'var(--accent)',
     'Signals': 'var(--green)',
@@ -23,7 +24,9 @@
     </div>
 </div>
 <div class="section-desc">
-    {{ step_count }} steps that run daily at 03:30 UTC (09:00 IST). Click <span class="mono" style="color: var(--text-secondary);">↻</span> on any step to rerun it; status colors update on the next auto-refresh.
+    {{ step_count }} steps that run daily at 03:30 UTC (09:00 IST), grouped by module package. Lines are the declared dataflow
+    ({{ n_blocking }} blocking step→step edges, {{ n_lagged }} lagged — the reader sees the previous run); hover a step to trace it.
+    Click <span class="mono" style="color: var(--text-secondary);">↻</span> on any step to rerun it; status colors update on the next auto-refresh.
 </div>
 
 {# ── Failure banner ── #}
@@ -70,10 +73,13 @@
             <span><span style="display:inline-block;width:9px;height:9px;background:#7f1d1d;border-radius:2px;vertical-align:middle;margin-right:4px;"></span>CRITICAL FAIL</span>
             <span><span style="display:inline-block;width:9px;height:9px;background:var(--amber);border-radius:2px;vertical-align:middle;margin-right:4px;"></span>RUNNING</span>
             <span><span style="display:inline-block;width:9px;height:9px;background:var(--bg-card-hover);border:1px solid var(--border);border-radius:2px;vertical-align:middle;margin-right:4px;"></span>NEVER RUN</span>
+            <span><span style="display:inline-block;width:16px;border-top:2px solid var(--accent);vertical-align:middle;margin-right:4px;"></span>FEEDS</span>
+            <span><span style="display:inline-block;width:16px;border-top:2px dashed var(--text-muted);vertical-align:middle;margin-right:4px;"></span>LAGGED</span>
         </div>
     </div>
 
-    <div style="display: flex; align-items: stretch; gap: 0; min-width: max-content;">
+    <div id="flow-dag" style="position: relative; display: flex; align-items: stretch; gap: 36px; min-width: max-content;">
+        <svg id="flow-edges" style="position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible;"></svg>
         {% for layer in layers %}
         {% set lc = phase_color.get(layer.name, 'var(--text-muted)') %}
         <div style="flex: 1 1 0; min-width: 200px; display: flex; flex-direction: column;">
@@ -83,8 +89,8 @@
             </div>
             <div style="display: flex; flex-direction: column; gap: 4px; flex: 1;">
                 {% for s in layer.steps %}
-                <a href="#step-{{ s.name }}" class="dag-pill"
-                   style="display: flex; align-items: center; justify-content: space-between; gap: 6px;
+                <a href="#step-{{ s.name }}" class="dag-pill" data-step="{{ s.name }}"
+                   style="position: relative; display: flex; align-items: center; justify-content: space-between; gap: 6px;
                           padding: 5px 8px; border-radius: 4px; text-decoration: none;
                           background: {{ status_bg(s) }}; color: {{ status_fg(s) }};
                           {% if s.last_status == 'FAILED' and s.critical %}border: 2px solid var(--red);{% else %}border: 1px solid transparent;{% endif %}
@@ -98,9 +104,6 @@
                 {% endfor %}
             </div>
         </div>
-        {% if not loop.last %}
-        <div style="display: flex; align-items: center; padding: 0 8px; font-size: 22px; color: var(--text-muted);">→</div>
-        {% endif %}
         {% endfor %}
     </div>
 </div>
@@ -122,7 +125,8 @@
                 {% if layer.name == 'Sources' %}fetch external data &rarr; raw tables
                 {% elif layer.name == 'Signals' %}raw tables &rarr; per-stock signals
                 {% elif layer.name == 'Scoring' %}signals + regime &rarr; daily picks
-                {% else %}picks &rarr; snapshot, dossier, email
+                {% elif layer.name == 'Output' %}picks &rarr; snapshot, dossier, email
+                {% else %}{{ layer.name|lower }} modules
                 {% endif %}
             </div>
         </div>
@@ -133,7 +137,7 @@
         {% for s in layer.steps %}
         {% set status = s.last_status %}
         {% set status_color = 'var(--green)' if status == 'SUCCESS' else ('var(--red)' if status in ['FAILED', 'ABORTED'] else ('var(--amber)' if status == 'RUNNING' else 'var(--text-muted)')) %}
-        {% set step_link = '/sql?table=' ~ s.table if s.table else '#' %}
+        {% set step_link = '/sql?table=' ~ s.writes[0] if s.writes else '#' %}
         <div id="step-{{ s.name }}" style="position: relative; background: var(--bg-card); border: 1px solid var(--border); border-left: 3px solid {{ status_color }}; border-radius: 6px; padding: 10px 12px;">
             <button type="button" class="rerun-btn" data-step="{{ s.name }}" title="Rerun {{ s.name }}"
                 style="position: absolute; top: 8px; right: 8px; background: var(--bg-card-hover); color: var(--text-secondary); border: 1px solid var(--border); cursor: pointer; padding: 3px 8px; border-radius: 4px; font-size: 11px; font-family: 'JetBrains Mono', monospace;">↻ Rerun</button>
@@ -146,9 +150,9 @@
                     {{ s.module }}{% if s.frequency and s.frequency != 'daily' %} · <span style="color: var(--amber);">{{ s.frequency }}</span>{% endif %}
                 </div>
 
-                {% if s.table %}
+                {% if s.writes %}
                 <div class="mono" style="font-size: 10px; color: var(--text-secondary); margin-bottom: 4px;">
-                    &rarr; <span style="color: var(--accent);">{{ s.table }}</span>
+                    &rarr; <span style="color: var(--accent);">{{ s.writes|join(', ') }}</span>
                 </div>
                 {% endif %}
 
@@ -168,6 +172,12 @@
                 <div style="margin-top: 6px; font-size: 10px; color: var(--red); font-family: 'JetBrains Mono', monospace; word-break: break-word;">{{ s.last_error[:100] }}{% if s.last_error|length > 100 %}…{% endif %}</div>
                 {% endif %}
             </a>
+            {% if s.upstream or s.downstream %}
+            <div class="mono" style="margin-top: 6px; font-size: 10px; line-height: 1.5; color: var(--text-muted);">
+                {% if s.upstream %}<div>&larr; {% for u in s.upstream %}<a href="#step-{{ u }}" style="color: var(--text-secondary);">{{ u }}</a>{% if not loop.last %}, {% endif %}{% endfor %}</div>{% endif %}
+                {% if s.downstream %}<div>&rarr; {% for d in s.downstream %}<a href="#step-{{ d }}" style="color: var(--text-secondary);">{{ d }}</a>{% if not loop.last %}, {% endif %}{% endfor %}</div>{% endif %}
+            </div>
+            {% endif %}
         </div>
         {% endfor %}
     </div>
@@ -184,6 +194,55 @@
 
 <script>
 (function () {
+    // ── Dataflow edges (graph.edges collapsed to step pairs) drawn over the DAG ──
+    const EDGES = {{ edges|tojson }};
+    const dag = document.getElementById("flow-dag");
+    const svg = document.getElementById("flow-edges");
+    const NS = "http://www.w3.org/2000/svg";
+    function drawEdges() {
+        if (!dag || !svg || !dag.offsetParent) return;          // hidden tab: draw when shown
+        while (svg.firstChild) svg.removeChild(svg.firstChild);
+        const box = dag.getBoundingClientRect();
+        const pill = {};
+        dag.querySelectorAll(".dag-pill").forEach((el) => { pill[el.dataset.step] = el.getBoundingClientRect(); });
+        EDGES.forEach((e) => {
+            const a = pill[e.from], b = pill[e.to];
+            if (!a || !b) return;
+            const x1 = a.right - box.left, y1 = a.top + a.height / 2 - box.top;
+            const x2 = b.left - box.left, y2 = b.top + b.height / 2 - box.top;
+            const bend = x2 > x1 ? Math.max(24, (x2 - x1) / 2) : 60;   // same-column / backward: loop out
+            const path = document.createElementNS(NS, "path");
+            path.setAttribute("d", `M${x1},${y1} C${x1 + bend},${y1} ${x2 - bend},${y2} ${x2},${y2}`);
+            path.setAttribute("fill", "none");
+            path.setAttribute("stroke", e.kind === "lagged" ? "var(--text-muted)" : "var(--accent)");
+            path.setAttribute("stroke-width", "1");
+            if (e.kind === "lagged") path.setAttribute("stroke-dasharray", "3 3");
+            path.setAttribute("opacity", e.kind === "lagged" ? "0.10" : "0.18");
+            path.dataset.from = e.from; path.dataset.to = e.to;
+            const title = document.createElementNS(NS, "title");
+            title.textContent = `${e.from} → ${e.to}: ${e.datasets.join(", ")}${e.kind === "lagged" ? " (lagged)" : ""}`;
+            path.appendChild(title);
+            svg.appendChild(path);
+        });
+    }
+    function highlight(step) {
+        svg.querySelectorAll("path").forEach((p) => {
+            const on = step && (p.dataset.from === step || p.dataset.to === step);
+            const lagged = p.getAttribute("stroke-dasharray");
+            p.setAttribute("opacity", step ? (on ? "0.95" : "0.04") : (lagged ? "0.10" : "0.18"));
+            p.setAttribute("stroke-width", on ? "2" : "1");
+            if (on) p.setAttribute("stroke", p.dataset.to === step ? "var(--amber)" : "var(--accent)");
+            else if (!lagged) p.setAttribute("stroke", "var(--accent)");
+        });
+    }
+    document.querySelectorAll(".dag-pill").forEach((el) => {
+        el.addEventListener("mouseenter", () => highlight(el.dataset.step));
+        el.addEventListener("mouseleave", () => highlight(null));
+    });
+    window.addEventListener("resize", drawEdges);
+    document.addEventListener("click", () => setTimeout(drawEdges, 50));   // tab switches
+    setTimeout(drawEdges, 0);
+
     // ── Auto-refresh countdown ──
     let remaining = 60;
     const tick = document.getElementById("flow-refresh-tick");

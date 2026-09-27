@@ -95,7 +95,6 @@ templates.env.filters["sentences"] = _sentences
 # action keeps the rest of the user's filter state. Pass value="" to drop a key.
 from urllib.parse import urlencode
 def _url_keep(key, value):
-    import contextvars
     req = _current_request.get()
     if req is None:
         return f"?{key}={value}" if value not in ("", None) else "?"

@@ -69,7 +69,7 @@
 
     <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 16px; margin-top: 14px;">
     {% for tier_name, signals in tiers.items() %}
-        {% set tier_color = 'var(--accent)' if tier_name == 'LARGE' else ('var(--amber)' if tier_name == 'MID' else 'var(--green)') %}
+        {% set tier_color = tier_name|tier_color %}
         <div style="background: var(--bg-card); border: 1px solid var(--border); border-left: 4px solid {{ tier_color }}; border-radius: 8px; padding: 16px;">
             <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 12px;">
                 <div style="font-size: 14px; font-weight: 800; letter-spacing: 0.5px; color: var(--text-primary);">{{ tier_name }}</div>
@@ -223,7 +223,7 @@
                 </td>
                 <td style="padding: 10px 8px; vertical-align: top; font-size: 11px;">
                     {% if s.ic_by_tier %}
-                        {% for tier in ['LARGE', 'MID', 'SMALL'] %}
+                        {% for tier in pickable_tiers() %}
                             {% set ic = s.ic_by_tier.get(tier) %}
                             {% if ic %}
                                 {% set v_color = 'var(--green)' if ic.verdict == 'KEEP' else ('var(--amber)' if ic.verdict == 'WEAK' else 'var(--text-muted)') %}
@@ -309,7 +309,7 @@
         </thead>
         <tbody>
         {% for r in validation.rows %}
-            {% set tier_color = 'var(--accent)' if r.cap_tier == 'LARGE' else ('var(--amber)' if r.cap_tier == 'MID' else 'var(--green)') %}
+            {% set tier_color = r.cap_tier|tier_color %}
             {% set t = r.t_stat or 0 %}
             {% set t_color = 'var(--green)' if t|abs >= 2.5 else ('var(--amber)' if t|abs >= 1.5 else ('var(--text-secondary)' if t|abs >= 0.5 else 'var(--text-muted)')) %}
             {% set verdict_color = 'var(--green)' if r.verdict == 'KEEP' else ('var(--amber)' if r.verdict == 'WEAK' else ('var(--red)' if r.verdict == 'DROP' else 'var(--text-muted)')) %}
@@ -382,7 +382,7 @@
                 <tr class="u-rule">
                     <td style="padding: 8px 12px; color: var(--text-secondary);">Picks per tier</td>
                     <td class="mono num" style="padding: 8px 12px; text-align: right; color: var(--text-primary); font-weight: 600;">
-                        L {{ portfolio.picks_per_tier.LARGE }} · M {{ portfolio.picks_per_tier.MID }} · S {{ portfolio.picks_per_tier.SMALL }}
+                        {% for t in pickable_tiers() %}{{ t[0] }} {{ portfolio.picks_per_tier[t] }}{% if not loop.last %} · {% endif %}{% endfor %}
                     </td>
                 </tr>
                 <tr class="u-rule">
@@ -400,7 +400,7 @@
                 <tr>
                     <td style="padding: 8px 12px; color: var(--text-secondary);">Transaction cost (bps)</td>
                     <td class="mono num" style="padding: 8px 12px; text-align: right; color: var(--text-primary); font-weight: 600;">
-                        L {{ transaction_costs_bps.LARGE }} · M {{ transaction_costs_bps.MID }} · S {{ transaction_costs_bps.SMALL }}
+                        {% for t in pickable_tiers() %}{{ t[0] }} {{ transaction_costs_bps[t] }}{% if not loop.last %} · {% endif %}{% endfor %}
                     </td>
                 </tr>
             </tbody>

@@ -1391,9 +1391,6 @@ def _conviction_verdicts(surv):
     SMALLCAP 250 is itself ≥20% off its trailing peak. Residual limit: an
     idiosyncratic laggard in a recovered market can still mis-flag (no regime
     guard catches that) — treat REVIEW as 'reassess', not a mechanical sell."""
-    import re
-    import numpy as np
-
     sids = surv["sid"].dropna().tolist()
     if not sids:
         return {}

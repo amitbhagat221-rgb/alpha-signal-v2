@@ -31,7 +31,6 @@ for the rationale.
 
 import json
 import sys
-from datetime import datetime, timedelta
 from pathlib import Path
 
 import pandas as pd
@@ -495,7 +494,7 @@ def rerun_step(step_name: str) -> dict:
     import sys
     from datetime import datetime, timedelta
     from pathlib import Path
-    from config import PIPELINE_STEPS, LOG_PATH
+    from config import PIPELINE_STEPS
 
     valid = {s["name"] for s in PIPELINE_STEPS}
     if step_name not in valid:
