@@ -2188,3 +2188,42 @@ def partition_check():
     missing = sorted(s for s, f in FACTORS.items() if s not in weighted and not f.get("bench"))
     duplicated = sorted(s for s, f in FACTORS.items() if s in weighted and f.get("bench"))
     return missing, duplicated
+
+
+# ═══════════════════════ Renames (plan 0015 "rename a factor" = 2 places) ═══════════════════════
+# {old: new} for a factor id and/or its PIT column. To rename: change the FACTORS key
+# (and pit_column_v2 if explicit) in code, add the pair here, and run apply_renames()
+# once per database (db migration). Entries stay forever — cheap, and an old DB copy
+# still migrates. Idempotent: a pair whose old name is gone is a no-op.
+RENAMES = {}
+RENAME_PANEL = "daily_snapshots_pit"                          # a column per factor
+RENAME_EVIDENCE = ("pit_ic_by_tier_v2", "factor_horizon_gate")   # rows keyed by signal id
+
+
+def apply_renames(conn, renames=None):
+    """Apply RENAMES (or `renames`) to an open sqlite3 connection and commit.
+    Panel: ALTER TABLE … RENAME COLUMN old → new (raises if both columns exist — a
+    human merges). Evidence: signal ids old → new; where the new id already has a row
+    for the same key, that newer row wins and the old row is dropped.
+    Returns [(kind, table, old, new, n)] for what changed."""
+    renames = RENAMES if renames is None else renames
+    tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    done = []
+    for old, new in renames.items():
+        if RENAME_PANEL in tables:
+            cols = {r[1] for r in conn.execute(f'PRAGMA table_info("{RENAME_PANEL}")')}
+            if old in cols and new in cols:
+                raise ValueError(f"{RENAME_PANEL} has both {old!r} and {new!r} — merge by hand")
+            if old in cols:
+                conn.execute(f'ALTER TABLE "{RENAME_PANEL}" RENAME COLUMN "{old}" TO "{new}"')
+                done.append(("column", RENAME_PANEL, old, new, 1))
+        for table in RENAME_EVIDENCE:
+            if table not in tables:
+                continue
+            n = conn.execute(f'UPDATE OR IGNORE "{table}" SET signal = ? WHERE signal = ?',
+                             (new, old)).rowcount
+            n_dup = conn.execute(f'DELETE FROM "{table}" WHERE signal = ?', (old,)).rowcount
+            if n or n_dup:
+                done.append(("rows", table, old, new, n))
+    conn.commit()
+    return done
