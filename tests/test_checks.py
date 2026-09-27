@@ -163,3 +163,12 @@ def test_kind_inference_examples():
     assert k["stock_prices"] == "series" and k["analyst_consensus"] == "state"
     assert k["bulk_deals"] == "event" and k["daily_picks"] == "feature"
     assert k["pipeline_log"] == "log" and k["analyst_consensus_snapshots"] == "series"
+
+
+def test_health_report_holds_no_hand_criticality():
+    from tools import health_report
+    assert health_report.CRITICAL_TABLE_OUTDATED == checks.critical_tables()
+    # every quarantine mirror is registered as such, so "empty = clean" needs no name rule
+    for t in tables.TABLES:
+        if t.endswith("_quarantine"):
+            assert tables.TABLES[t]["kind"] == "QUARANTINE", t
