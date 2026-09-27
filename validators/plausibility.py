@@ -17,10 +17,11 @@ POLICY
     PASS — value in extreme range. Normal write path.
 
 RANGES
-    Hand-curated from domain priors + historic bug analysis. Keyed by
-    (datum_class, segment) where segment is cap_tier ("LARGE"/"MID"/"SMALL")
-    or industry tag ("Banks"/"NBFCs / Finance") or fund category
-    ("equity_fund"/"debt_fund") or "*" for universal.
+    A datum class that is a stored column (bank ratios, Piotroski) reads its hard
+    range and review band from the one column registry, checks/ranges.py, via
+    DATUM_COLUMNS. PLAUSIBILITY_RANGES keeps only segment priors for write-time
+    quantities: keyed by (datum_class, segment) where segment is cap_tier
+    ("LARGE"/"MID"/"SMALL") or fund category ("equity_fund"/"debt_fund") or "*".
 
 USAGE
     from validators.plausibility import verify_plausibility, route_on_plausibility
@@ -40,9 +41,25 @@ PlausibilityVerdict = namedtuple(
 )
 
 
-# (datum_class, segment) → ((hard_lo, hard_hi), (extreme_lo, extreme_hi))
-# Hard range: outside → auto-quarantine (almost-certainly broken data)
-# Extreme range: outside extreme but inside hard → TRUSTED_PENDING_REVIEW
+# Datum classes that ARE a stored column take their hard range and review band
+# from the ONE column registry (checks/ranges.py: `range` → hard, `typical` →
+# extreme) — the same range health, the sanity audit and the integrity checks use.
+DATUM_COLUMNS = {
+    "bank_gnpa_pct": ("banking_metrics", "gross_npa_pct"),
+    "bank_nnpa_pct": ("banking_metrics", "net_npa_pct"),
+    "bank_nim_pct":  ("banking_metrics", "nim_pct"),
+    "bank_cof_pct":  ("banking_metrics", "cost_of_funds_pct"),
+    "bank_roa_pct":  ("banking_metrics", "roa_pct"),
+    "bank_car_pct":  ("banking_metrics", "car_pct"),
+    "bank_casa_pct": ("banking_metrics", "casa_pct"),
+    "piotroski_f":   ("piotroski_scores", "f_score"),
+}
+
+# Segment priors for write-time quantities that are not one stored column (or
+# whose prior differs by segment): (datum_class, segment) →
+# ((hard_lo, hard_hi), (extreme_lo, extreme_hi)). Hard: outside → auto-quarantine
+# (almost-certainly broken data). Extreme: outside extreme but inside hard →
+# TRUSTED_PENDING_REVIEW.
 PLAUSIBILITY_RANGES = {
     # ─── Analyst-derived prices ───
     # Verified from 2026-05-28 CCAVENUE incident: yfinance returned +33,522%
@@ -64,59 +81,22 @@ PLAUSIBILITY_RANGES = {
     ("nav_dod_change_pct", "gold_fund"):   ((-10, +10), (-5, +5)),
     ("nav_dod_change_pct", "*"):           ((-20, +20), (-10, +10)),
 
-    # ─── Banking metrics ───
-    # GNPA > 20% is almost always a parse error (consolidated/standalone
-    # mix-up). UCO Bank's all-time worst was ~24% (2018 Q1) so we don't
-    # auto-quarantine at 20 but anything beyond 35 is virtually impossible.
-    ("bank_gnpa_pct",  "*"): ((0, 35), (0, 20)),
-    ("bank_nnpa_pct",  "*"): ((0, 15), (0, 8)),
-    ("bank_nim_pct",   "*"): ((-2, 20), (0, 10)),
-    ("bank_cof_pct",   "*"): ((0, 25), (3, 15)),
-    ("bank_roa_pct",   "*"): ((-10, 8), (-3, 3)),
-    # Capital adequacy ratio — by RBI mandate must be ≥9%; if we see <5%
-    # something is broken (bank would have been liquidated).
-    ("bank_car_pct",   "*"): ((5, 35), (8, 25)),
-    ("bank_casa_pct",  "*"): ((0, 100), (10, 80)),
-
-    # ─── Shareholding fields ───
-    ("promoter_pct",   "*"): ((0, 100),  (0, 100)),
-    ("pledge_pct",     "*"): ((0, 100),  (0, 100)),
-    ("fii_pct",        "*"): ((0, 100),  (0, 100)),
-    ("dii_pct",        "*"): ((0, 100),  (0, 100)),
-
-    # ─── Earnings + value ratios ───
-    # EPS growth: turnaround years are real but >500% is usually base-effect
-    # from a tiny prior; extreme >200% flags the case for review.
-    ("eps_growth_pct",   "*"): ((-200, +500), (-100, +200)),
-    ("revenue_growth_pct","*"): ((-90,  +500), (-50,  +200)),
-    ("earnings_yield_pct","*"): ((-50,  +50),  (-20,  +25)),
-    ("book_to_price",     "*"): ((0,    20),   (0,    5)),
-    ("price_to_earnings", "*"): ((-100, 500),  (1,    150)),
-
-    # ─── Forensic / quality ───
-    # Piotroski 0-9 is the schema range; hard outside is parse error.
-    ("piotroski_f",   "*"): ((0, 9), (0, 9)),
-    ("altman_z",      "*"): ((-5, 15), (0.5, 8)),
-    ("beneish_m",     "*"): ((-5, 2), (-3.5, -0.5)),
-
-    # ─── Momentum + delivery ───
-    ("mom_6m_adj",    "*"): ((-5, 5), (-3, 3)),     # vol-scaled
-    ("mom_12m_adj",   "*"): ((-5, 5), (-3, 3)),
-    ("delivery_pct",  "*"): ((0, 100), (10, 90)),
-    ("delivery_anomaly_z", "*"): ((-5, 5), (-3, 3)),
-
-    # ─── Price + volume ───
-    # No useful universal hard range on stock close — caught at the
-    # source-of-truth level (NSE bhavcopy is Gate 7 anchor in Phase 6).
-    # Day-over-day change is more meaningful as a temporal-continuity
-    # check (Gate 3); plausibility just catches the impossible.
-    ("close_price",    "*"): ((0.01, 1_000_000), (0.5, 200_000)),
-    ("volume_shares",  "*"): ((0, 1e12), (0, 1e10)),
-
-    # ─── Composite scores ───
-    # final_score is the screener's 0-1 normalised; outside [0,1] is bug.
-    ("final_score",    "*"): ((0, 1.01), (0, 1)),
+    # ─── Earnings growth ───
+    # Turnaround years are real but >500% is usually base-effect from a tiny
+    # prior; extreme >200% flags the case for review.
+    ("eps_growth_pct", "*"): ((-200, +500), (-100, +200)),
 }
+
+
+def _ranges_for(datum_class, segment, fallback_segment):
+    ranges = PLAUSIBILITY_RANGES.get((datum_class, segment))
+    if ranges is None and segment != fallback_segment:
+        ranges = PLAUSIBILITY_RANGES.get((datum_class, fallback_segment))
+    if ranges is None and datum_class in DATUM_COLUMNS:
+        from checks.ranges import bounds, typical
+        table, column = DATUM_COLUMNS[datum_class]
+        ranges = (bounds(table, column), typical(table, column))
+    return ranges
 
 
 def verify_plausibility(
@@ -128,7 +108,8 @@ def verify_plausibility(
     """Check `value` against the registered range for (datum_class, segment).
 
     Lookup order:
-        (datum_class, segment) → (datum_class, fallback_segment) → UNDEFINED
+        (datum_class, segment) → (datum_class, fallback_segment)
+        → DATUM_COLUMNS (checks/ranges.py) → UNDEFINED
 
     Returns PlausibilityVerdict with status:
         PASS                 — value within extreme range
@@ -151,11 +132,8 @@ def verify_plausibility(
         return PlausibilityVerdict("UNDEFINED", value, None, None, segment,
                                     f"value '{value}' is not numeric")
 
-    # Lookup
-    key = (datum_class, segment)
-    ranges = PLAUSIBILITY_RANGES.get(key)
-    if ranges is None and segment != fallback_segment:
-        ranges = PLAUSIBILITY_RANGES.get((datum_class, fallback_segment))
+    # Lookup: segment prior → fallback segment → the column registry
+    ranges = _ranges_for(datum_class, segment, fallback_segment)
     if ranges is None:
         return PlausibilityVerdict("UNDEFINED", v, None, None, segment,
                                     f"no range registered for ({datum_class}, {segment})")

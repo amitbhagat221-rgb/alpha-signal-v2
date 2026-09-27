@@ -38,9 +38,8 @@ from typing import Optional
 
 import pandas as pd
 
-from config import EXCLUDED_FROM_PICKS, TIERS, VIX_REGIMES
-
-from db import (get_db, read_sql, _table_date_range, _compute_freshness, data_health,
+from checks import range_counts, ranges
+from db import (get_db, _table_date_range, _compute_freshness, data_health,
                 table_step_meta, TABLES)
 
 # ── Constants ─────────────────────────────────────────────────────────────────
@@ -265,45 +264,33 @@ def factor_null_rate(tbl, count, dates, meta, profile, conn):
 # ── Factor 5: Validity (range / enum / type) ─────────────────────────────────
 
 def factor_validity(tbl, count, dates, meta, profile, conn):
-    """Range / enum / not-negative checks declared in the profile."""
-    checks = profile.get("validity_checks", [])
-    if not checks or count == 0:
+    """Range / enum checks: the columns checks/ranges.py registers for this table
+    (one range per column, shared with the sanity audit and the write-time gates)."""
+    if count == 0:
+        return None
+    try:
+        counts = range_counts(conn, tbl)
+    except Exception:
+        return None
+    if not counts:
         return None
     weight = profile.get("validity_weight", 0.15)
 
     issues = []
     worst_score = 100
     worst_drill = None
-
-    for check in checks:
-        col = check["column"]
-        if "min" in check and "max" in check:
-            cond = f"[{col}] IS NOT NULL AND ([{col}] < {check['min']} OR [{col}] > {check['max']})"
-        elif "in" in check:
-            in_list = ",".join(f"'{v}'" for v in check["in"])
-            cond = f"[{col}] IS NOT NULL AND [{col}] NOT IN ({in_list})"
-        elif check.get("not_negative"):
-            cond = f"[{col}] IS NOT NULL AND [{col}] < 0"
-        else:
-            continue
-
-        try:
-            bad = conn.execute(f"SELECT COUNT(*) FROM [{tbl}] WHERE {cond}").fetchone()[0]
-        except Exception:
-            continue
-
+    for col, (bad, _non_null) in counts.items():
         if bad > 0:
-            label = check.get("label", col)
             rate = bad / count
-            issues.append(f"{label}: {bad:,} invalid ({100 * rate:.1f}%)")
+            issues.append(f"{col}: {bad:,} invalid ({100 * rate:.1f}%)")
             score = max(0, 100 - 100 * rate)
             if score < worst_score:
                 worst_score = score
-                worst_drill = f"SELECT * FROM [{tbl}] WHERE {cond} LIMIT 100"
+                worst_drill = f"SELECT * FROM [{tbl}] WHERE {ranges.bad_sql(tbl, col)} LIMIT 100"
 
     if not issues:
         return _factor("validity", 100, "ok",
-                       f"All {len(checks)} range/type checks pass",
+                       f"All {len(counts)} range/type checks pass",
                        weight=weight)
 
     severity = "error" if worst_score < 50 else "warn"
@@ -653,44 +640,33 @@ def factor_duplicates(tbl, count, dates, meta, profile, conn):
 
 
 # ── Table profiles ────────────────────────────────────────────────────────────
-# What to check for each table. Empty dict = run only universal factors.
+# What to check for each table beyond the universal factors — only the genuinely
+# table-specific expectations (row count, per-stock, critical / outlier columns,
+# backtest depth, natural key). Column ranges and enums are NOT here: they live
+# once in checks/ranges.py and factor_validity reads them for every table.
 
 TABLE_PROFILES = {
     # ── Universe & Reference ──
     "stocks": {
         "expected_rows": UNIVERSE,
         "critical_columns": ["sid", "name", "sector", "cap_tier"],
-        "validity_checks": [
-            {"column": "cap_tier", "in": list(TIERS), "label": "cap_tier value"},
-        ],
         "outlier_columns": ["pe_ratio", "pb_ratio", "roe", "debt_to_equity"],
         "natural_key": ["sid"],
     },
     "stock_prices": {
         "per_stock": True,
         "critical_columns": ["sid", "date", "close"],
-        "validity_checks": [
-            {"column": "close", "min": 0.01, "max": 10000000, "label": "close price"},
-            {"column": "delivery_pct", "min": 0, "max": 100, "label": "delivery %"},
-        ],
         "outlier_columns": ["close", "volume", "delivery_pct"],
         "min_backtest": {"target_days": 1095, "minimum_days": 252},  # 3y target / 1y min
         "natural_key": ["sid", "date"],
     },
     "vix_history": {
         "critical_columns": ["date", "vix"],
-        "validity_checks": [
-            {"column": "vix", "min": 5, "max": 100, "label": "VIX value"},
-        ],
         "min_backtest": {"target_days": 1095, "minimum_days": 252},
     },
     "regime_state": {
         "expected_rows": 1,
         "critical_columns": ["regime", "alloc_large", "alloc_mid", "alloc_small"],
-        "validity_checks": [
-            {"column": "regime", "in": list(VIX_REGIMES), "label": "regime"},
-            {"column": "alloc_large", "min": 0, "max": 1, "label": "alloc_large"},
-        ],
     },
 
     # ── Tickertape Fundamentals ──
@@ -698,9 +674,6 @@ TABLE_PROFILES = {
     "quarterly_income": {
         "per_stock": True,
         "critical_columns": ["sid", "period", "revenue"],
-        "validity_checks": [
-            {"column": "revenue", "not_negative": True, "label": "revenue"},
-        ],
         "outlier_columns": ["revenue", "net_income", "eps"],
         "min_backtest": {"target_days": 1095, "minimum_days": 730},
         "natural_key": ["sid", "period", "reporting"],
@@ -721,11 +694,6 @@ TABLE_PROFILES = {
     "shareholding": {
         "per_stock": True,
         "critical_columns": ["sid", "end_date", "promoter_pct"],
-        "validity_checks": [
-            {"column": "promoter_pct", "min": 0, "max": 100, "label": "promoter %"},
-            {"column": "fii_pct", "min": 0, "max": 100, "label": "FII %"},
-            {"column": "pledge_pct", "min": 0, "max": 100, "label": "pledge %"},
-        ],
         "natural_key": ["sid", "end_date"],
     },
     "analyst_consensus": {
@@ -736,10 +704,6 @@ TABLE_PROFILES = {
         #   - total_analysts written by both, last-writer-wins (yfinance daily overrides Tickertape monthly)
         # See HANDOFF 2026-05-22 for the migration off Tickertape's contaminated price feed.
         "critical_columns": ["sid", "price_target"],
-        "validity_checks": [
-            {"column": "price_target", "not_negative": True, "label": "price target"},
-            {"column": "buy_pct", "min": 0, "max": 100, "label": "buy %"},
-        ],
         "outlier_columns": ["price_target", "forward_eps"],
     },
     "analyst_consensus_snapshots": {
@@ -768,18 +732,11 @@ TABLE_PROFILES = {
     },
     "insider_trades": {
         "critical_columns": ["sid", "trade_date", "transaction_type"],
-        "validity_checks": [
-            {"column": "value_lakhs", "not_negative": True, "label": "trade value"},
-        ],
         "outlier_columns": ["value_lakhs", "shares"],
         "min_backtest": {"target_days": 730, "minimum_days": 365},
     },
     "bulk_deals": {
         "critical_columns": ["sid", "deal_date", "client_name", "buy_sell"],
-        "validity_checks": [
-            {"column": "buy_sell", "in": ["BUY", "SELL", "Buy", "Sell"], "label": "buy/sell"},
-            {"column": "quantity", "not_negative": True, "label": "quantity"},
-        ],
     },
     "earnings_calendar": {
         "critical_columns": ["sid", "date"],
@@ -802,33 +759,17 @@ TABLE_PROFILES = {
     },
     "macro_sector_map": {
         "critical_columns": ["indicator_id", "sector", "direction"],
-        "validity_checks": [
-            {"column": "direction", "min": -1, "max": 1, "label": "direction"},
-        ],
         "natural_key": ["indicator_id", "sector"],
     },
     "macro_sector_signals": {
         "expected_rows": 18,
         "critical_columns": ["sector", "macro_score"],
-        "validity_checks": [
-            {"column": "macro_score", "min": 0, "max": 100, "label": "macro score"},
-            {"column": "macro_signal", "in": ["TAILWIND", "FAVORABLE", "NEUTRAL", "HEADWIND", "ADVERSE"], "label": "macro signal"},
-        ],
     },
     "regulatory_events": {
         "critical_columns": ["title", "published_at", "source"],
-        "validity_checks": [
-            {"column": "classifier_status",
-             "in": ["pending", "haiku_rejected", "haiku_rejected_inferred",
-                    "haiku_passed_sonnet_failed", "classified", "unknown"],
-             "label": "classifier status"},
-        ],
     },
     "regulatory_signals": {
         "critical_columns": ["event_id", "sector", "is_regulatory"],
-        "validity_checks": [
-            {"column": "direction", "min": -1, "max": 1, "label": "direction"},
-        ],
         "natural_key": ["event_id", "sector"],
     },
 
@@ -837,9 +778,6 @@ TABLE_PROFILES = {
         "per_stock": True,
         "expected_rows": UNIVERSE,
         "critical_columns": ["sid", "f_score"],
-        "validity_checks": [
-            {"column": "f_score", "min": 0, "max": 9, "label": "F-score"},
-        ],
     },
     "accruals_scores": {
         "per_stock": True,
@@ -874,9 +812,6 @@ TABLE_PROFILES = {
         "per_stock": True,
         "expected_rows": UNIVERSE,
         "critical_columns": ["sid"],
-        "validity_checks": [
-            {"column": "sentiment_7d", "min": -1, "max": 1, "label": "7d sentiment"},
-        ],
     },
     "insider_signals": {
         "per_stock": True,
@@ -890,10 +825,6 @@ TABLE_PROFILES = {
         "per_stock": True,
         "expected_rows": UNIVERSE,
         "critical_columns": ["sid", "pick_date", "final_score"],
-        "validity_checks": [
-            {"column": "cap_tier", "in": [t for t in TIERS if t not in EXCLUDED_FROM_PICKS], "label": "cap_tier"},
-            {"column": "final_score", "min": 0, "max": 1, "label": "final score"},
-        ],
         "outlier_columns": ["final_score"],
         "natural_key": ["sid", "pick_date"],
     },
@@ -905,17 +836,11 @@ TABLE_PROFILES = {
     },
     "daily_changes": {
         "critical_columns": ["change_date", "change_type", "headline"],
-        "validity_checks": [
-            {"column": "severity", "in": ["LOW", "MEDIUM", "HIGH", "CRITICAL"], "label": "severity"},
-        ],
     },
 
     # ── Pipeline / Internal ──
     "pipeline_log": {
         "critical_columns": ["run_date", "step_name", "status"],
-        "validity_checks": [
-            {"column": "status", "in": ["RUNNING", "SUCCESS", "FAILED", "SKIPPED", "ABORTED"], "label": "status"},
-        ],
     },
     "sqlite_sequence": {},  # internal — only existence matters
 }

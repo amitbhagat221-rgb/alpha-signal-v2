@@ -63,7 +63,7 @@ def test_dossiers_cover_the_emailed_book(monkeypatch):
 
 
 def test_health_tier_enum_follows_config():
-    import health
+    """The cap_tier enum health validates (via checks/ranges.py) is config.TIERS."""
+    from checks import ranges
     from config import TIERS
-    checks = health.TABLE_PROFILES["stocks"]["validity_checks"]
-    assert any(c.get("column") == "cap_tier" and set(c["in"]) == set(TIERS) for c in checks)
+    assert set(ranges.COLUMNS[("stocks", "cap_tier")]["in"]) == set(TIERS)

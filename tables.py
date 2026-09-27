@@ -28,6 +28,9 @@ Fields (only `kind`, `domain`, `date_col` are always present):
     best_effort  upstream can legitimately carry no fresh data — staleness is a
                  WARN, never a heal-streak CRITICAL, and the watchdog skips heals
     quarantine   gets a <table>_quarantine mirror (Trust Pipeline, Plan 0007)
+    may_be_empty an EMPTY table is expected (a feature not live yet): the health
+                 report shows INFO instead of the 0-row CRITICAL (checks.empty_table_severity;
+                 an empty QUARANTINE mirror is always OK — nothing was quarantined)
     mirror       copied into the DuckDB read replica (tools/duckdb_refresh)
     depth / description   Data Inventory text
 
@@ -459,9 +462,10 @@ TABLES = {
         "depth": "Growing daily (PIT archive)",
         "description": "Point-in-time archive of all signal values per stock. One row per stock per pick_date. Used for diff engine + signal time series + backtesting.",
     },
-    "paper_nav_history": {"kind": "COMPUTED", "domain": "Output", "date_col": None},
-    "paper_positions": {"kind": "STATE", "domain": "Output", "date_col": None},
-    "paper_trades": {"kind": "COMPUTED", "domain": "Output", "date_col": "trade_date"},
+    # Paper trading is not live yet: empty is expected (INFO, not a 0-row CRITICAL).
+    "paper_nav_history": {"kind": "COMPUTED", "domain": "Output", "date_col": None, "may_be_empty": True},
+    "paper_positions": {"kind": "STATE", "domain": "Output", "date_col": None, "may_be_empty": True},
+    "paper_trades": {"kind": "COMPUTED", "domain": "Output", "date_col": "trade_date", "may_be_empty": True},
     # ── Forward-return-window-bound tables ──
     # Producer runs daily, but MAX(pick_date) only advances once a pick has a COMPLETED
     # forward return — governed by the SHORTEST window, 20 trading days ≈ 28 calendar
@@ -618,6 +622,92 @@ TABLES = {
     # same-day timing drift (audit Data-F10).
     "_file_duckdb_replica": {"kind": "file", "domain": "Output", "date_col": None, "stale_days": 2},
 }
+
+
+
+# ── Dataset kind (plan 0015 H3, ADR 0052 Dataset block) — DERIVED ──
+# `kind` above is provenance (RAW / COMPUTED / …). The dataset kind is semantics,
+# inferred from the table's PRIMARY KEY in schema.sql, never hand-kept:
+#
+#   event    append-only facts: a surrogate / event-id key (bulk deal, filing,
+#            news article). Write rule: insert-or-ignore; never updated.
+#   series   entity × date [× source] observations fetched from outside.
+#   state    entity → current value (no date in the key): stocks, analyst_consensus.
+#   feature  derived per entity × date (COMPUTED with a date in the key).
+#   log      runner / audit trails and quarantine mirrors (append).
+#
+# Vintage rule for series (documented, NOT yet enforced — plan 0015 Phase 3
+# finding "invariant 1 is approximate"): an exact as-of read needs first-seen
+# timestamps. A series row is insert-only and carries `fetched_at` (when WE first
+# saw it); a restatement or backfill is a NEW row (new fetched_at), never an
+# in-place UPDATE. asof(series, t) = for each key, the row with the latest
+# fetched_at <= t among rows whose business date + availability lag <= t.
+# Today statement tables are upserted in place, so a replay applies
+# `end_date + lag` to today's (restated) values; the rule removes that gap.
+DATASET_KINDS = ("event", "series", "state", "feature", "log")
+
+# Explicit overrides — only where the PK shape says something else.
+DATASET_KIND_OVERRIDES = {
+    # A broker call / surveillance flag / policy event / corporate event is a
+    # one-off fact even though a date sits in its key.
+    "broker_recommendations": "event",
+    "surveillance_flags": "event",
+    "policy_events": "event",
+    "event_calendar": "event",
+    # The archived v1 PIT panel is derived per sid × date (provenance says RAW
+    # only because it was imported, not computed here).
+    "daily_snapshots_pit_v1": "feature",
+}
+
+# Key columns that identify an event (not an entity) when no date is in the key.
+_EVENT_KEYS = {"article_id", "news_id", "event_id", "source_url"}
+
+
+def _is_date_key(col):
+    return col == "date" or col.endswith("_date") or col in ("period", "period_end", "year")
+
+
+def dataset_kind(table, pk, provenance, date_col=None, autoincrement=False):
+    """The one dataset kind of a table from its PK columns and provenance."""
+    if table in DATASET_KIND_OVERRIDES:
+        return DATASET_KIND_OVERRIDES[table]
+    if provenance in ("LOG", "QUARANTINE"):
+        return "log"
+    if provenance == "STATE":
+        return "state"
+    if autoincrement:                       # surrogate id: one row per fact
+        return "event"
+    keys = list(pk) or ([date_col] if date_col else [])
+    if any(_is_date_key(c) for c in keys):
+        return "feature" if provenance == "COMPUTED" else "series"
+    if any(c in _EVENT_KEYS for c in keys):
+        return "feature" if provenance == "COMPUTED" else "event"
+    return "state"
+
+
+def dataset_kinds(conn=None):
+    """{table: dataset kind} for every table in TABLES (file outputs excluded),
+    reading PKs from `conn` or, by default, from a DB built from schema.sql."""
+    import sqlite3
+    own = conn is None
+    if own:
+        from config import SCHEMA_PATH
+        conn = sqlite3.connect(":memory:")
+        conn.executescript(SCHEMA_PATH.read_text())
+    try:
+        out = {}
+        for t, e in TABLES.items():
+            if e["kind"] == "file":
+                continue
+            info = conn.execute(f"PRAGMA table_info([{t}])").fetchall()
+            pk = [r[1] for r in sorted(info, key=lambda r: r[5]) if r[5] > 0]
+            ddl = conn.execute("SELECT sql FROM sqlite_master WHERE name=?", (t,)).fetchone()
+            auto = bool(ddl and ddl[0] and "AUTOINCREMENT" in ddl[0].upper())
+            out[t] = dataset_kind(t, pk, e["kind"], e.get("date_col"), auto)
+        return out
+    finally:
+        if own:
+            conn.close()
 
 
 # ── Derived views (historical names, re-exported by db) ──
