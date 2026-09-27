@@ -120,7 +120,7 @@ def run(alpha: float = 0.05, min_n: int = 4) -> pd.DataFrame:
 
     # ── wired factors: are the weights we deploy multiple-testing-robust? ──
     w = df[df["wired"]].sort_values("p_by")
-    print(f"\n{'─'*78}\nWIRED factors (config.SIGNAL_WEIGHTS) — robustness to multiple testing")
+    print(f"\n{'─'*78}\nWIRED factors (factors.SIGNAL_WEIGHTS) — robustness to multiple testing")
     print(f"{'─'*78}\n{'signal':28} {'tier':5} {'n':>3} {'t':>6} {'p':>8} {'p_BH':>7} {'p_BY':>7}  BY?")
     for _, r in w.iterrows():
         flag = "✓ real" if r["p_by"] <= alpha else ("~ FDR-only" if r["p_bh"] <= alpha else "✗ fails")

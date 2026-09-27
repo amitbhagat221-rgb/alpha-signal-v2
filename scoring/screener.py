@@ -4,7 +4,7 @@ Alpha Signal v2 — Tier-Aware Scoring Engine
 THE replacement for v1's 03_screener.py + 08_integrate_sentiment.py.
 
 Reads all signal tables + inline signals (momentum, earnings yield).
-Applies tier-specific weights from config.SIGNAL_WEIGHTS.
+Applies tier-specific weights from factors.SIGNAL_WEIGHTS (hand-set on each factor).
 Ranks within each cap_tier. Applies forensic penalty.
 Outputs scored universe to daily_picks table.
 
@@ -21,7 +21,7 @@ import numpy as np
 import pandas as pd
 
 import factors
-from config import SIGNAL_WEIGHTS, PORTFOLIO, SCREEN
+from config import PICKABLE_TIERS, PORTFOLIO, SCREEN
 from db import read_sql, get_db, upsert_df
 
 # The last production run's frames in this process ({date, inputs, scored, prices}) —
@@ -169,13 +169,13 @@ def score_universe(df, weights: dict = None, as_of=None):
     Apply tier-specific weights, rank within segment, apply forensic penalty.
     Returns scored DataFrame with final_score and rank columns.
 
-    `weights` — optional override. Defaults to config.SIGNAL_WEIGHTS. Pass
-    SIGNAL_WEIGHTS_RETURN or SIGNAL_WEIGHTS_SHARPE to score with an alternate
+    `weights` — optional override. Defaults to factors.SIGNAL_WEIGHTS. Pass
+    factors.SIGNAL_WEIGHTS_RETURN or SIGNAL_WEIGHTS_SHARPE to score with an alternate
     scheme. Negative weights are honoured — inverse signals get a sign-flip
     on the percentile (1 - pctile) so the weighted sum stays directional.
     """
     if weights is None:
-        weights = SIGNAL_WEIGHTS
+        weights = factors.SIGNAL_WEIGHTS
     # Percentile-rank every screener signal within tier (higher = better for all).
     # config weight key → DataFrame column comes from the factor registry
     # (factors.SCREENER_COLS); a tier-specific column overrides it in that tier
@@ -204,7 +204,7 @@ def score_universe(df, weights: dict = None, as_of=None):
     # in registry) — registered signals will have explicit rows.
     elig_wide = _load_eligibility_wide(as_of)
 
-    for tier in ["LARGE", "MID", "SMALL"]:
+    for tier in PICKABLE_TIERS:
         tier_mask = df["cap_tier"] == tier
         tier_weights = weights.get(tier, {})
         # Use abs(weight) for the denominator so negative-weight signals
@@ -358,9 +358,9 @@ def compute(dry_run=False, top=None, variant: str = "production"):
     """Main entry point. Returns row count.
 
     variant:
-      'production'  → use config.SIGNAL_WEIGHTS (the current live weights)
-      'return'      → use config.SIGNAL_WEIGHTS_RETURN (MaxReturn, t-weighted)
-      'sharpe'      → use config.SIGNAL_WEIGHTS_SHARPE (MaxSharpe, ICIR-weighted)
+      'production'  → factors.SIGNAL_WEIGHTS (the live weights, hand-set on each factor)
+      'return'      → factors.SIGNAL_WEIGHTS_RETURN (MaxReturn, t-weighted)
+      'sharpe'      → factors.SIGNAL_WEIGHTS_SHARPE (MaxSharpe, ICIR-weighted)
 
     Non-production variants are dry-run only — they print top picks but
     don't write to daily_picks (no schema change needed yet). Compare with
@@ -369,11 +369,10 @@ def compute(dry_run=False, top=None, variant: str = "production"):
         python -m scoring.screener --variant return --top 10
         python -m scoring.screener --variant sharpe --top 10
     """
-    from config import SIGNAL_WEIGHTS, SIGNAL_WEIGHTS_RETURN, SIGNAL_WEIGHTS_SHARPE
     weights = {
-        "production": SIGNAL_WEIGHTS,
-        "return":     SIGNAL_WEIGHTS_RETURN,
-        "sharpe":     SIGNAL_WEIGHTS_SHARPE,
+        "production": factors.SIGNAL_WEIGHTS,
+        "return":     factors.SIGNAL_WEIGHTS_RETURN,
+        "sharpe":     factors.SIGNAL_WEIGHTS_SHARPE,
     }[variant]
     print(f"Variant: {variant}")
     print("Loading signals...")
@@ -392,14 +391,14 @@ def compute(dry_run=False, top=None, variant: str = "production"):
     today = date.today().isoformat()
 
     # Summary
-    for tier in ["LARGE", "MID", "SMALL"]:
+    for tier in PICKABLE_TIERS:
         t = df[df["cap_tier"] == tier]
         scored = t["final_score"].notna().sum()
         print(f"  {tier}: {scored} scored, mean={t['final_score'].dropna().mean():.3f}")
 
     # Show top picks
     show_n = top or 5
-    picks = select_picks(df, {t: show_n for t in ["LARGE", "MID", "SMALL"]},
+    picks = select_picks(df, {t: show_n for t in PICKABLE_TIERS},
                           min_eligible=variant_gate)
     print(f"\nTop {show_n} per tier:")
     display_cols = ["rank", "cap_tier", "sid", "ticker", "sector", "final_score", "base_score", "penalty"]

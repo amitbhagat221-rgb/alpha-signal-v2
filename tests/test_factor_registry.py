@@ -17,8 +17,9 @@ def test_consumers_use_the_registry():
     assert db.BACKTEST_SIGNALS is factors.BACKTEST_SIGNALS
     assert db.FACTOR_LIBRARY is factors.FACTOR_LIBRARY
     assert db.get_backtest_cadence is factors.get_backtest_cadence
-    assert config.FACTOR_STATUS is factors.FACTOR_STATUS
-    assert config.SIGNAL_GROUPS is factors.SIGNAL_GROUPS
+    # legacy read-only aliases (cockpit/, cockpit_ops/) resolve to the derived views
+    assert config.SIGNAL_WEIGHTS is factors.SIGNAL_WEIGHTS
+    assert config.SIGNAL_WEIGHTS_RETURN is factors.SIGNAL_WEIGHTS_RETURN
     assert backtest_pit.SIGNAL_COLUMN_MAP is factors.SIGNAL_COLUMN_MAP
     assert pit.PIT_COLUMNS is factors.PIT_COLUMNS
     assert pit.VALIDATION_RANGES is factors.VALIDATION_RANGES
@@ -47,7 +48,7 @@ def test_partition_holds():
 
 
 def test_wired_factors_follow_weights():
-    wired = {k for tw in config.SIGNAL_WEIGHTS.values() for k, w in tw.items() if w}
+    wired = {k for tw in factors.SIGNAL_WEIGHTS.values() for k, w in tw.items() if w}
     assert set(health_score.WIRED_FACTORS) == wired
     for key in wired:   # every wired factor is scored, frozen and trust-rolled-up
         assert key in factors.SCREENER_COLS
@@ -76,3 +77,75 @@ def test_one_range_per_column():
     import factors
     eps = {tuple(factors.FACTORS[k]["pit_range"]) for k in ("eps_revision_yoy", "consensus_signal_combined")}
     assert len(eps) == 1
+
+
+# ── Weights live on the factor (ADR 0052 D4); SIGNAL_WEIGHTS is derived ──
+
+def test_weights_sum_to_one_per_tier():
+    """Σ|w| = 1.0 in every rankable tier (ADR 0049 rule; the screener's
+    weight_coverage denominator assumes it)."""
+    assert tuple(factors.SIGNAL_WEIGHTS) == factors.TIERS == config.PICKABLE_TIERS
+    for tier, tw in factors.SIGNAL_WEIGHTS.items():
+        assert tw, tier
+        assert abs(sum(abs(w) for w in tw.values()) - 1.0) < 1e-9, (tier, tw)
+
+
+def test_weight_sign_and_tier_sanity():
+    for sid, f in factors.FACTORS.items():
+        w = f.get("weights")
+        if not w:
+            continue
+        assert set(w) <= set(factors.TIERS), sid            # only rankable tiers
+        assert all(v != 0 and abs(v) <= 0.35 for v in w.values()), sid   # no zero rows; cap ~0.30
+        assert not f.get("bench"), sid                      # wired ⇒ not benched
+        assert "tiers" not in f or set(w) <= set(f["tiers"]), sid
+        assert f["weight_key"] in factors.SCREENER_COLS or "tiers" in f, sid
+        # sign: negative only for event penalties (ADR 0042) — a new negative weight
+        # must be added here deliberately, with its evidence.
+        if any(v < 0 for v in w.values()):
+            assert sid in {"governance_resignation"}, sid
+    # the derived view keys each weight by the screener's name, tier-aware
+    for tier, tw in factors.SIGNAL_WEIGHTS.items():
+        for key, w in tw.items():
+            assert factors.FACTORS[factors.signal_for(key, tier)]["weights"][tier] == w
+
+
+def test_signal_weights_order_is_canonical():
+    """Heaviest |w| first, ties by key — the screener sums in this order."""
+    for tw in factors.SIGNAL_WEIGHTS.values():
+        items = list(tw.items())
+        assert items == sorted(items, key=lambda kw: (-abs(kw[1]), kw[0]))
+
+
+def test_variants_are_weight_keys():
+    for scheme in factors.WEIGHT_SCHEMES[1:]:
+        for tier, tw in getattr(factors, scheme).items():
+            assert tier in factors.TIERS
+            for key in tw:
+                assert factors.signal_for(key, tier) in factors.FACTORS, (scheme, key)
+
+
+def test_inferred_fields_are_not_restated():
+    """An explicit field equal to its inferred default is noise (plan 0015 Phase 6)."""
+    import ast, re
+    src = open(factors.__file__).read()
+    body = src[src.index("FACTORS = {"):src.index("\n}\n", src.index("FACTORS = {"))]
+    restated = []
+    for m in re.finditer(r'^    "(\w+)": \{\n(.*?)^    \},', body, re.S | re.M):
+        sid, entry = m.group(1), m.group(2)
+        fields = dict(re.findall(r'^        "(\w+)": (.*?),\s*(?:#.*)?$', entry, re.M))
+        def lit(k):
+            try:
+                return ast.literal_eval(fields[k])
+            except Exception:
+                return object()
+        f = factors.FACTORS[sid]
+        defaults = {"pit_column_v1": None, "pit_column_v2": sid, "status": "READY",
+                    "status_reason": "", "cadence": "monthly",
+                    "screener_col": f.get("weight_key"),
+                    "replay_col": factors.pit_column(sid) if "weight_key" in f else object()}
+        if "weights" in fields:
+            defaults["weight_key"] = sid
+        restated += [(sid, k) for k, d in defaults.items() if k in fields and lit(k) == d]
+    assert restated == []
+    assert not any("live_table" in f for f in factors.FACTORS.values())   # read by nothing

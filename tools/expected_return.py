@@ -37,7 +37,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from db import read_sql                                    # noqa: E402
-from config import SIGNAL_WEIGHTS, TRANSACTION_COSTS_BPS   # noqa: E402
+from config import PICKABLE_TIERS, TRANSACTION_COSTS_BPS   # noqa: E402
+from factors import SIGNAL_WEIGHTS                        # noqa: E402
 from tools.factor_decay import WEIGHT_KEY_TO_SIGNAL        # noqa: E402
 
 PRED_LOG = Path(__file__).resolve().parent.parent / "data" / "expected_return_predictions.jsonl"
@@ -162,7 +163,7 @@ def _tax_drag(one_way_annual_turnover, gross_pretax_return):
 
 def run(log=True):
     asof, tier_w = _book_tier_weights()
-    tiers = [t for t in ("LARGE", "MID", "SMALL") if t in tier_w]
+    tiers = [t for t in PICKABLE_TIERS if t in tier_w]
 
     # ── ALPHA per tier ──
     alpha_ann, alpha_detail = {}, {}

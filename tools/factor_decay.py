@@ -26,7 +26,6 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 import numpy as np
 
-import config
 import factors
 from db import read_sql
 from tools.backtest_pit import SIGNAL_COLUMN_MAP, _compute_ic
@@ -56,7 +55,7 @@ def analyze():
     """Return a list of dicts: one row per (weight_key, tier) that resolves to
     a scored v2 column, with all-time / recent mean IC, n anchors, and verdict."""
     rows = []
-    for tier, weights in (config.SIGNAL_WEIGHTS or {}).items():
+    for tier, weights in factors.SIGNAL_WEIGHTS.items():
         for weight_key, weight in weights.items():
             if weight == 0:
                 continue

@@ -6,7 +6,7 @@ Generalizes signals/announcement_car.py's wired [-1,+1] earnings-CAR machinery
 arbitrary event set (not just 'Result' announcements), plus a cross-sectional
 aggregator with a t-stat and a multi-window drift curve. Read-only — event
 studies produce EVIDENCE (drift curves + t-stats), not production signals; no
-weight in `config.SIGNAL_WEIGHTS` is touched by this module or its callers.
+weight in `factors.SIGNAL_WEIGHTS` is touched by this module or its callers.
 
 `_car_one` (window parameterized on (pre, post), default the factor's [-1,+1])
 and `_nifty_asof` are imported from signals.announcement_car — one CAR

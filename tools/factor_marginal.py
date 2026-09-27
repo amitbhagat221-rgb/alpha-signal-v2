@@ -32,7 +32,8 @@ import numpy as np
 import pandas as pd
 
 import factors
-from config import SIGNAL_WEIGHTS, SIGNAL_GROUPS
+from config import PICKABLE_TIERS
+from factors import SIGNAL_GROUPS, SIGNAL_WEIGHTS
 from db import read_sql
 from tools.backtest_pit import SIGNAL_COLUMN_MAP
 from tools.ic_decay import _fwd_panel, _price_series
@@ -170,7 +171,7 @@ def within_group(panel, tier):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[1])
-    ap.add_argument("--tier", choices=["LARGE", "MID", "SMALL"], default=None)
+    ap.add_argument("--tier", choices=list(PICKABLE_TIERS), default=None)
     ap.add_argument("--within-group", action="store_true",
                     help="3.3b-3: residualise each factor only against same-group factors")
     args = ap.parse_args()
@@ -193,7 +194,7 @@ def main():
     print(f"monthly anchors: {len(monthly)} · incremental IC = partial rank-corr after the higher-|t| factors")
     print("incr_t Newey-West-corrected for forward-window overlap; ⚠ = coverage <50% (imputation-distorted)\n")
 
-    for tier in ([args.tier] if args.tier else ["LARGE", "MID", "SMALL"]):
+    for tier in ([args.tier] if args.tier else PICKABLE_TIERS):
         if args.within_group:
             within_group(panel, tier)
             continue

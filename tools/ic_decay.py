@@ -43,6 +43,7 @@ import pandas as pd
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
+from config import PICKABLE_TIERS
 from db import read_sql
 from tools.backtest_pit import (
     SIGNAL_COLUMN_MAP,
@@ -251,9 +252,9 @@ def _plot(summary, live_keys):
         print(f"⚠ matplotlib unavailable — skipping graphs ({e})")
         return None
 
-    tiers = ["LARGE", "MID", "SMALL"]
+    tiers = list(PICKABLE_TIERS)
     x = list(range(len(HORIZONS)))
-    fig, axes = plt.subplots(1, 3, figsize=(16, 5.5), sharey=True)
+    fig, axes = plt.subplots(1, len(tiers), figsize=(16, 5.5), sharey=True)
     fig.patch.set_facecolor("#0f1115")
 
     for ax, tier in zip(axes, tiers):
@@ -301,18 +302,9 @@ def _plot(summary, live_keys):
 
 
 def _live_keys():
-    """Signal ids currently carrying production weight (config.SIGNAL_WEIGHTS*)."""
-    try:
-        import config
-        keys = set()
-        for attr in ("SIGNAL_WEIGHTS",):
-            w = getattr(config, attr, {})
-            for tier_w in w.values():
-                if isinstance(tier_w, dict):
-                    keys.update(tier_w.keys())
-        return keys
-    except Exception:
-        return set()
+    """Weight keys currently carrying production weight (factors.SIGNAL_WEIGHTS)."""
+    import factors
+    return {k for tier_w in factors.SIGNAL_WEIGHTS.values() for k in tier_w}
 
 
 def main():
