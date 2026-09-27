@@ -20,8 +20,8 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.gzip import GZipMiddleware
 
-from cockpit._shared import COCKPIT_STATIC, make_templates, prewarm
-from cockpit_ops import api
+from cockpit._shared import COCKPIT_STATIC, make_templates, nav_model, prewarm
+from cockpit_ops import api, pages
 
 OPS_DIR = Path(__file__).resolve().parent
 
@@ -35,7 +35,8 @@ app.mount("/static", StaticFiles(directory=COCKPIT_STATIC), name="static")
 
 # Ops pages first, then cockpit/templates for the shared base.html /
 # _components.html / _icons.html (single copies — the ops forks went stale).
-templates = make_templates([OPS_DIR / "templates"])
+templates = make_templates([OPS_DIR / "templates"],
+                           nav=nav_model(pages.PAGES, pages.OTHER_APP, pages.BRAND))
 
 
 # ────────────── Startup cache warmer ──────────────

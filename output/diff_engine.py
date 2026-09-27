@@ -25,6 +25,7 @@ from datetime import date
 
 import pandas as pd
 
+import views
 from db import read_sql, get_db, insert_df
 
 # Signal thresholds for "fired" detection
@@ -54,11 +55,7 @@ def _get_snapshot_dates():
 
 def _get_pick_dates():
     """Get the two most recent pick dates."""
-    df = read_sql(
-        "SELECT DISTINCT pick_date FROM daily_picks "
-        "ORDER BY pick_date DESC LIMIT 2"
-    )
-    dates = df["pick_date"].tolist()
+    dates = views.pick_dates(2)
     if len(dates) < 2:
         return None, None
     return dates[0], dates[1]
@@ -68,22 +65,11 @@ def _detect_rank_changes(today_date, yesterday_date):
     """Detect entries, exits, upgrades, and downgrades in top picks."""
     changes = []
 
-    # Plan 0005 Phase B: exclude integrity-FAIL picks from rank-change diffs
-    # so a FAIL never surfaces as a "new entry" or "upgrade" headline.
-    today = read_sql(
-        "SELECT dp.sid, dp.rank, dp.cap_tier, dp.final_score, s.ticker, s.name "
-        "FROM daily_picks dp JOIN stocks s ON dp.sid = s.sid "
-        "WHERE dp.pick_date = ? "
-        "  AND (dp.integrity_status IS NULL OR dp.integrity_status != 'FAIL')",
-        params=[today_date],
-    )
-    yesterday = read_sql(
-        "SELECT dp.sid, dp.rank, dp.cap_tier, dp.final_score, s.ticker "
-        "FROM daily_picks dp JOIN stocks s ON dp.sid = s.sid "
-        "WHERE dp.pick_date = ? "
-        "  AND (dp.integrity_status IS NULL OR dp.integrity_status != 'FAIL')",
-        params=[yesterday_date],
-    )
+    # Only PUBLISHED picks (views.picks — the one gate: integrity != FAIL and
+    # UHS >= 60) can surface as a "new entry" or "upgrade": the action queue
+    # must never recommend a pick the brief and the email hide.
+    today = views.picks(today_date)
+    yesterday = views.picks(yesterday_date)
 
     if today.empty or yesterday.empty:
         return changes

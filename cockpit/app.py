@@ -12,8 +12,9 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.gzip import GZipMiddleware
 
-from cockpit import api
-from cockpit._shared import COCKPIT_STATIC, COCKPIT_TEMPLATES, make_templates, prewarm
+import views
+from cockpit import api, pages
+from cockpit._shared import COCKPIT_STATIC, COCKPIT_TEMPLATES, make_templates, nav_model, prewarm
 from cockpit_ops.api import get_model_overview
 
 app = FastAPI(title="Alpha Signal Cockpit")
@@ -21,7 +22,7 @@ app = FastAPI(title="Alpha Signal Cockpit")
 app.add_middleware(GZipMiddleware, minimum_size=1024)
 app.mount("/static", StaticFiles(directory=COCKPIT_STATIC), name="static")
 
-templates = make_templates([COCKPIT_TEMPLATES])
+templates = make_templates([COCKPIT_TEMPLATES], nav=nav_model(pages.PAGES, pages.OTHER_APP, pages.BRAND))
 
 
 # ────────────── Startup cache warmer ──────────────
@@ -131,8 +132,8 @@ async def _bind_request(request: Request, call_next):
 def morning_brief(request: Request):
     regime = api.get_regime()
     picks = api.get_top_picks(top=5)
-    pick_date = api.get_pick_date()
-    stock_count = api.get_stock_count()
+    pick_date = api.latest_pick_date()
+    stock_count = views.pick_count(pick_date)
     changes = api.get_changes()
     earnings = api.get_earnings_upcoming()
 
@@ -151,7 +152,7 @@ def morning_brief(request: Request):
             stock["dominant_signal"] = dominant.get(sid, "")
 
     # Market pulse
-    sectors = api.get_sector_overview()
+    sectors = api.get_group_overview("sector")
     tailwinds = sum(1 for s in sectors if s.get("macro_signal") in ("TAILWIND", "FAVORABLE"))
     headwinds = sum(1 for s in sectors if s.get("macro_signal") in ("HEADWIND", "ADVERSE"))
 
@@ -211,7 +212,7 @@ def stock_detail(request: Request, sid: str):
     detail["insider_timeline"] = api.get_insider_timeline(sid)
     detail["news"] = api.get_stock_news(sid)
     detail["bulk_deals"] = api.get_bulk_deals(sid)
-    detail["regulatory"] = api.get_regulatory_for_sector(detail.get("sector"))
+    detail["regulatory"] = api.get_sector_regulatory(detail.get("sector"), n=8, material=True)
     detail["earnings"] = api.get_earnings_upcoming(sid)
     detail["dossier"] = api.get_dossier(sid)
     detail["management"] = api.get_management_score(sid)
@@ -254,39 +255,39 @@ def portfolio(request: Request):
     })
 
 
+def _group_detail(by, name):
+    """The /sectors detail pane for one industry (with its parent sector's macro
+    and regulatory context) or one sector — also served as the stock page's lazy
+    industry card."""
+    parent = api.get_industry_parent_sector(name) if by == "industry" else None
+    context = parent if by == "industry" else name
+    return {
+        "name": name,
+        "parent_sector": parent,
+        "narrative": api.get_group_metadata(name),
+        "top_players": api.get_group_top_players(by, name, n=10),
+        **({"competitive_landscape": api.get_industry_competitive_landscape(name)}
+           if by == "industry" else {}),
+        "picks": api.get_group_picks(by, name, top_n=10, bottom_n=5),
+        "factor_means": api.get_group_factor_means(by, name),
+        "macro_contributors": api.get_sector_macro_contributors(context) if context else [],
+        "regulatory": api.get_sector_regulatory(context, n=10) if context else [],
+    }
+
+
 @app.get("/sectors", response_class=HTMLResponse)
 def sectors(request: Request, sector: str = "", industry: str = ""):
     # Industry-first overview (drill-down primary); sectors as grouping
-    industries_data = api.get_industry_overview()
-    industry_list = api.get_industry_list()
-    sector_list = api.get_sector_list()
+    industries_data = api.get_group_overview("industry")
+    industry_list = api.get_group_list("industry")
+    sector_list = api.get_group_list("sector")
 
     detail = None
     if industry and industry in industry_list:
-        parent_sector = api.get_industry_parent_sector(industry)
-        detail = {
-            "name": industry,
-            "parent_sector": parent_sector,
-            "narrative": api.get_industry_metadata(industry),
-            "top_players": api.get_industry_top_players(industry, n=10),
-            "competitive_landscape": api.get_industry_competitive_landscape(industry),
-            "picks": api.get_industry_picks(industry, top_n=10, bottom_n=5),
-            "factor_means": api.get_industry_factor_means(industry),
-            "macro_contributors": api.get_sector_macro_contributors(parent_sector) if parent_sector else [],
-            "regulatory": api.get_sector_recent_regulatory(parent_sector, n=10) if parent_sector else [],
-        }
+        detail = _group_detail("industry", industry)
     elif sector and sector in sector_list:
         # Back-compat: ?sector=X falls back to sector-level detail
-        detail = {
-            "name": sector,
-            "parent_sector": None,
-            "narrative": api.get_sector_metadata(sector),
-            "top_players": api.get_sector_top_players(sector, n=10),
-            "picks": api.get_sector_picks(sector, top_n=10, bottom_n=5),
-            "factor_means": api.get_sector_factor_means(sector),
-            "macro_contributors": api.get_sector_macro_contributors(sector),
-            "regulatory": api.get_sector_recent_regulatory(sector, n=10),
-        }
+        detail = _group_detail("sector", sector)
 
     digest = api.get_sector_digest()
 
@@ -309,22 +310,10 @@ def partial_industry_card(request: Request, industry: str, sid: str = ""):
     (metric strip, conviction bar, Overview/Players/Trends/Our-Picks sub-tabs,
     thesis, value chain, competitive landscape, picks, macro, regulatory) — so the
     stock page shows identical full detail, no drift."""
-    parent_sector = api.get_industry_parent_sector(industry)
-    detail = {
-        "name": industry,
-        "parent_sector": parent_sector,
-        "narrative": api.get_industry_metadata(industry),
-        "top_players": api.get_industry_top_players(industry, n=10),
-        "competitive_landscape": api.get_industry_competitive_landscape(industry),
-        "picks": api.get_industry_picks(industry, top_n=10, bottom_n=5),
-        "factor_means": api.get_industry_factor_means(industry),
-        "macro_contributors": api.get_sector_macro_contributors(parent_sector) if parent_sector else [],
-        "regulatory": api.get_sector_recent_regulatory(parent_sector, n=10) if parent_sector else [],
-    }
     return templates.TemplateResponse(request, "_industry_detail.html", {
-        "detail": detail,
-        "industries": api.get_industry_overview(),
-        "industry_list": api.get_industry_list(),
+        "detail": _group_detail("industry", industry),
+        "industries": api.get_group_overview("industry"),
+        "industry_list": api.get_group_list("industry"),
         "current_sid": sid,
         "embed": True,
     })
@@ -335,14 +324,14 @@ def partial_sector_card(request: Request, sector: str, sid: str = ""):
     """Compact sector dossier fragment, lazy-loaded into the stock page's Sector
     tab (sector context attached to every stock). Peers (with this stock
     highlighted) + our model's top/bottom + macro drivers + recent regulatory,
-    plus a link to the full /sectors page. Reuses the existing sector functions."""
+    plus a link to the full /sectors page."""
     return templates.TemplateResponse(request, "_sector_card.html", {
         "sector": sector,
         "sid": sid,
-        "top_players": api.get_sector_top_players(sector, n=10),
-        "picks": api.get_sector_picks(sector, top_n=10, bottom_n=5),
+        "top_players": api.get_group_top_players("sector", sector, n=10),
+        "picks": api.get_group_picks("sector", sector, top_n=10, bottom_n=5),
         "macro_contributors": api.get_sector_macro_contributors(sector),
-        "regulatory": api.get_sector_recent_regulatory(sector, n=10),
+        "regulatory": api.get_sector_regulatory(sector, n=10),
     })
 
 

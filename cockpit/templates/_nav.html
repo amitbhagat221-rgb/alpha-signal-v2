@@ -1,0 +1,66 @@
+{# Left rail + mobile bottom bar, rendered from the app's PAGES list
+   (cockpit/pages.py or cockpit_ops/pages.py → `nav`, built by _shared.nav_model). #}
+{% from "_icons.html" import icon %}
+{% macro active(p) %}{% if page == p.id or page in (p.also or []) %}active{% endif %}{% endmacro %}
+{% macro other_href() %}{{ request.url.scheme }}://{{ request.url.hostname }}:{{ nav.other.port }}{{ nav.other.path }}{% endmacro %}
+
+{% macro rail() %}
+    <nav class="left-rail">
+        <a href="{{ nav.brand.href }}" class="brand-row" aria-label="{{ nav.brand.aria }}">
+            <span class="brand-mark"{% if nav.brand.style %} style="{{ nav.brand.style }}"{% endif %}>{{ icon(nav.brand.icon, 20) }}</span>
+            <span class="brand-text">
+                <span class="brand-title">{{ nav.brand.label }}</span>
+                <span class="brand-subtitle">{{ nav.brand.subtitle }}</span>
+            </span>
+        </a>
+        {% for section, items in nav.sections %}
+        <div class="nav-section">
+            <div class="nav-section-label">{{ section }}</div>
+            {% for p in items %}
+            <a href="{{ p.path }}" class="nav-item {{ active(p) }}">
+                <span class="nav-icon">{{ icon(p.icon) }}</span>
+                <span class="nav-text"><span class="nav-title">{{ p.title }}</span><span class="nav-subtitle">{{ p.subtitle }}</span></span>
+            </a>
+            {% endfor %}
+        </div>
+        {% endfor %}
+
+        <div class="nav-section" style="margin-top: auto; padding-top: 24px;">
+            <div class="nav-section-label">{{ nav.other.section }}</div>
+            <a href="{{ other_href() }}" class="nav-item" target="_blank" rel="noopener"{% if nav.other.tooltip %}
+               title="{{ nav.other.tooltip }}"{% endif %}>
+                <span class="nav-icon">{{ icon(nav.other.icon) }}</span>
+                <span class="nav-text"><span class="nav-title">{{ nav.other.title }}</span><span class="nav-subtitle">{{ nav.other.subtitle }}</span></span>
+            </a>
+        </div>
+    </nav>
+{% endmacro %}
+
+{% macro mobile() %}
+    <nav class="mobile-tabs"{% if nav.more %} x-data="{ moreOpen: false }"{% endif %}>
+        {% for p in nav.tabs %}
+        <a href="{{ p.path }}" class="mobile-tab {{ active(p) }}">
+            <span class="mobile-tab-icon">{{ icon(p.icon, 22) }}</span><span class="mobile-tab-label">{{ p.short }}</span>
+        </a>
+        {% endfor %}
+        {% if nav.more %}
+        <button type="button" class="mobile-tab {% if page in nav.more_ids %}active{% endif %}"
+                @click="moreOpen = !moreOpen">
+            <span class="mobile-tab-icon">{{ icon("menu", 22) }}</span><span class="mobile-tab-label">More</span>
+        </button>
+
+        <!-- More sheet -->
+        <div x-show="moreOpen" x-cloak x-transition:enter.duration.150ms x-transition:enter-start.opacity.0.transform.translate-y-2 x-transition:enter-end.opacity.100
+             @click.away="moreOpen = false" class="more-sheet">
+            {% for p in nav.more %}
+            <a href="{{ p.path }}" class="more-item {{ active(p) }}">{{ icon(p.icon, 16) }}<span>{{ p.short }}</span></a>
+            {% endfor %}
+            <a href="{{ other_href() }}" target="_blank" rel="noopener" class="more-item">{{ icon(nav.other.icon, 16) }}<span>{{ nav.other.short }}</span></a>
+        </div>
+        {% else %}
+        <a href="{{ other_href() }}" class="mobile-tab" target="_blank" rel="noopener">
+            <span class="mobile-tab-icon">{{ icon(nav.other.icon, 22) }}</span><span class="mobile-tab-label">{{ nav.other.short }}</span>
+        </a>
+        {% endif %}
+    </nav>
+{% endmacro %}

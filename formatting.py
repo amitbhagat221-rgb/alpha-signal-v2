@@ -71,3 +71,25 @@ FILTERS = {"signed": signed, "pct": pct, "inr": inr, "crore": crore, "tone": ton
 # VIX regime → colour name. One map for cockpit, change feed and email; the
 # regime vocabulary itself is config.VIX_REGIMES (CALM/NORMAL/CAUTION/CRISIS).
 REGIME_COLORS = {"CALM": "green", "NORMAL": "blue", "CAUTION": "amber", "CRISIS": "red"}
+
+
+# Cap tier → (label, CSS colour). One map for every cockpit/ops page and the email;
+# the tier list itself is config.TIERS (views.tiers / views.pickable_tiers). A tier
+# missing here (a new config.TIERS entry) still renders: "<Name> Cap", muted.
+TIER_STYLES = {
+    "LARGE": ("Large Cap", "var(--blue)"),
+    "MID":   ("Mid Cap",   "var(--accent)"),
+    "SMALL": ("Small Cap", "var(--green)"),
+    "MICRO": ("Micro",     "#e74c3c"),
+}
+
+
+def tier_label(tier):
+    return TIER_STYLES.get(tier, (f"{str(tier).title()} Cap", ""))[0]
+
+
+def tier_color(tier):
+    return TIER_STYLES.get(tier, ("", "var(--text-muted)"))[1]
+
+
+FILTERS.update({"tier_label": tier_label, "tier_color": tier_color})

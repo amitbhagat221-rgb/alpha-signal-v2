@@ -1,8 +1,9 @@
 """
 Alpha Signal v2 — Email Sender
 
-Sends daily picks via Gmail SMTP. Builds a rich HTML email from daily_picks +
-daily_snapshots + dossiers + regime + daily_changes.
+Sends daily picks via Gmail SMTP. Builds a rich HTML email from the views.py
+read-models: the published picks (+ their snapshot signals), price returns,
+dossiers, regime and daily changes — the same ones the cockpit shows.
 
 Design goals:
   - Tier-aware layout (LARGE / MID / SMALL sections, matches v2 architecture).
@@ -20,7 +21,6 @@ Usage:
 """
 
 import argparse
-import json
 import os
 import smtplib
 from datetime import date, datetime
@@ -28,11 +28,10 @@ from zoneinfo import ZoneInfo
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
+import views
 from config import PORTFOLIO, PROJECT_ROOT
-from db import read_sql
-from formatting import DASH, REGIME_COLORS, _num, crore, inr, pct, signed, tone
+from formatting import DASH, _num, crore, inr, pct, signed, tier_label, tone
 from output.dossier import is_publishable
-from views import published_picks
 
 COCKPIT_URL = os.environ.get("COCKPIT_BASE_URL", "http://140.245.248.166:3000")
 OPS_URL = os.environ.get("OPS_BASE_URL", COCKPIT_URL.rsplit(":", 1)[0] + ":3001")
@@ -329,53 +328,26 @@ def _build_pick_card(row, dossier, idx):
 
 
 def _build_html():
-    today_iso = date.today().isoformat()
     today_human = date.today().strftime("%A, %d %B %Y")
 
-    # Picks + fundamentals + snapshot signals + price metrics
-    picks = published_picks()
+    # Picks + fundamentals + snapshot signals + price returns
+    picks = views.published_picks()
 
     if picks.empty:
         return "<p>No picks today.</p>", 0
 
-    # Latest price returns per sid (1M/3M/12M)
-    returns = read_sql("""
-        WITH latest AS (
-          SELECT sid, MAX(date) AS d FROM stock_prices GROUP BY sid
-        ),
-        cur AS (
-          SELECT sp.sid, sp.date, sp.close FROM stock_prices sp
-          JOIN latest USING(sid) WHERE sp.date = latest.d
-        )
-        SELECT cur.sid,
-               cur.close AS close_now,
-               (SELECT close FROM stock_prices p
-                  WHERE p.sid=cur.sid AND p.date <= date(cur.date,'-1 month')
-                  ORDER BY p.date DESC LIMIT 1) AS close_1m,
-               (SELECT close FROM stock_prices p
-                  WHERE p.sid=cur.sid AND p.date <= date(cur.date,'-3 months')
-                  ORDER BY p.date DESC LIMIT 1) AS close_3m,
-               (SELECT close FROM stock_prices p
-                  WHERE p.sid=cur.sid AND p.date <= date(cur.date,'-12 months')
-                  ORDER BY p.date DESC LIMIT 1) AS close_12m
-        FROM cur
-    """)
-    if not returns.empty:
-        returns["ret_1m_pct"] = (returns["close_now"] / returns["close_1m"] - 1) * 100
-        returns["ret_3m_pct"] = (returns["close_now"] / returns["close_3m"] - 1) * 100
-        returns["ret_12m_pct"] = (returns["close_now"] / returns["close_12m"] - 1) * 100
-        picks = picks.merge(
-            returns[["sid", "ret_1m_pct", "ret_3m_pct", "ret_12m_pct"]],
-            on="sid", how="left",
-        )
+    # 1M / 3M / 12M returns — the one trading-day definition the cockpit shows
+    # (views.price_metrics: 22 / 65 / 252 sessions back).
+    pm = views.price_metrics(picks["sid"].tolist())
+    for col, key in (("ret_1m_pct", "return_1m"), ("ret_3m_pct", "return_3m"), ("ret_12m_pct", "return_1y")):
+        picks[col] = picks["sid"].map(lambda s: pm.get(s, {}).get(key))
 
     # Regime
-    regime = read_sql("SELECT * FROM regime_state WHERE id = 1")
+    regime = views.regime()
     regime_html = ""
-    if not regime.empty:
-        r = regime.iloc[0]
-        regime_color = {"green": C_GREEN, "blue": C_BLUE, "amber": C_AMBER, "red": C_RED}[
-            REGIME_COLORS.get(r["regime"], "blue")]
+    if regime:
+        r = regime
+        regime_color = {"green": C_GREEN, "blue": C_BLUE, "amber": C_AMBER, "red": C_RED}[r["color"]]
         regime_html = f"""
         <div style="background:{C_CARD};border:1px solid {C_BORDER};border-radius:8px;
               padding:12px 16px;margin-bottom:14px;font-size:13px">
@@ -395,13 +367,7 @@ def _build_html():
         """
 
     # Today's changes summary
-    changes_summary = read_sql("""
-        SELECT change_type, COUNT(*) AS c
-        FROM daily_changes
-        WHERE change_date = (SELECT MAX(change_date) FROM daily_changes)
-        GROUP BY change_type
-    """)
-    changes_dict = dict(zip(changes_summary["change_type"], changes_summary["c"])) if not changes_summary.empty else {}
+    changes_dict = views.change_counts()
     changes_html = ""
     if changes_dict:
         chips = []
@@ -427,27 +393,15 @@ def _build_html():
             </div>
             """
 
-    # Load dossiers
-    dossiers_by_sid = {}
-    dossier_path = PROJECT_ROOT / "output" / f"dossiers_{today_iso}.json"
-    if dossier_path.exists():
-        try:
-            with open(dossier_path) as f:
-                for d in json.load(f):
-                    # Never mail a dossier that failed the numbers validator.
-                    if "sid" in d and is_publishable(d):
-                        dossiers_by_sid[d["sid"]] = d
-        except (json.JSONDecodeError, OSError):
-            pass
+    # Today's dossiers — never mail one that failed the numbers validator.
+    dossiers_by_sid = {sid: d for sid, (d, _, _) in views.dossier_index(max_age_days=0).items()
+                       if is_publishable(d)}
 
-    # Per-tier sections
+    # Per-tier sections, one per pickable tier (config.TIERS)
     tier_blocks = []
-    tier_meta = {
-        "LARGE": ("Large Cap", regime.iloc[0]["alloc_large"] if not regime.empty else None),
-        "MID":   ("Mid Cap",   regime.iloc[0]["alloc_mid"]   if not regime.empty else None),
-        "SMALL": ("Small Cap", regime.iloc[0]["alloc_small"] if not regime.empty else None),
-    }
-    for tier_key, (tier_name, alloc) in tier_meta.items():
+    for tier_key in views.pickable_tiers():
+        tier_name = tier_label(tier_key)
+        alloc = (regime or {}).get(f"alloc_{tier_key.lower()}")
         tier_picks = picks[picks["cap_tier"] == tier_key].head(TOP_N_PER_TIER.get(tier_key, 0))
         if tier_picks.empty:
             continue
