@@ -16,7 +16,7 @@ Returns: DataFrame[sid, asset_growth_yoy]   — in PERCENT (mirrors
          revenue_growth_yoy's unit convention)
 
 PIT convention: identical to book_to_price/piotroski — the PIT path
-(tools/reconstruct_pit.py:pit_asset_growth_yoy) passes the knowable_annual
+(pit.py:pit_asset_growth_yoy) passes the knowable_annual
 slice (end_date + 75d SEBI filing lag ≤ eval), then the two most recent rows
 per sid are the endpoints (same latest-vs-prior convention as
 dso_change_yoy). No extra staleness gate — same as book_to_price.

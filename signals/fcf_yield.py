@@ -69,7 +69,7 @@ def _load_data():
 
 def fcf_median(fund):
     """Per-sid median FCF (₹cr) over the last SMOOTH_YEARS years, all slots filled —
-    the numerator the live yield and tools/reconstruct_pit:pit_fcf_yield share
+    the numerator the live yield and pit.py:pit_fcf_yield share
     (they differ only in the market-cap denominator's source).
     Returns DataFrame[sid, period_end, fcf, years_used]."""
     if fund.empty:

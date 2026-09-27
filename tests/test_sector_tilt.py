@@ -12,7 +12,7 @@ import numpy as np
 import pandas as pd
 
 from signals.sector_tilt import compute_sector_tilt, MOM_WINDOW, MIN_CONSTITUENTS
-from tools.reconstruct_pit import pit_sector_tilt
+from pit import pit_sector_tilt
 
 
 # ─────────── builders ───────────

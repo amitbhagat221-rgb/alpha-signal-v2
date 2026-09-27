@@ -33,7 +33,7 @@ rates feed reachable from this VM; FBIL/CCIL/RBI are walled, FRED monthly):
               sources/macro_yfinance._compute_credit_spread).
 
 Injectable `prices` + `macro_hist` frames so the live path and the PIT path
-(tools/reconstruct_pit.py:pit_macro_betas) run identical logic. Sign is decided
+(pit.py:pit_macro_betas) run identical logic. Sign is decided
 by the backtest. Needs ~1y of macro history before the first computable anchor;
 macro_history now reaches back to 2015-06 (gilt ETF 2016, credit index 2019).
 

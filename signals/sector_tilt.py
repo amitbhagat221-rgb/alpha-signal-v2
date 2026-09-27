@@ -24,7 +24,7 @@ NIFTY 50) — that cousin backtested WEAK/DROP within-tier and sits in FACTOR_LI
 This is the richer 6m-absolute + macro ensemble that the validation cleared.
 
 The core takes injectable price / macro / stocks frames so the live path and the
-PIT path (tools/reconstruct_pit.py:pit_sector_tilt) run identical logic on different
+PIT path (pit.py:pit_sector_tilt) run identical logic on different
 as-of data — never a second copy.
 
 Reads:  stock_prices, stocks, macro_sector_signals_pit (macro_score)

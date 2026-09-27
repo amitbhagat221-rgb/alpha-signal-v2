@@ -24,7 +24,7 @@ Reads:  stock_prices (close)
 Returns: DataFrame[sid, max_lottery_21d]
 
 Look-ahead-safe: injectable frame so the live path and the PIT path
-(tools/reconstruct_pit.py:pit_max_lottery_21d) run identical logic. Uses
+(pit.py:pit_max_lottery_21d) run identical logic. Uses
 `adj_close` when present (a split inside the 21d window would otherwise
 manufacture a fake outsized daily return).
 

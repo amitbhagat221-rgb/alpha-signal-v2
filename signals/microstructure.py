@@ -21,7 +21,7 @@ recently). Raw (unadjusted) prices + winsorisation — same split-defense stance
 signals/sector_momentum.py (cross-day legs see rare split noise, bounded by clips).
 
 Injectable `prices` frame so the live path and the PIT path
-(tools/reconstruct_pit.py:pit_microstructure) run identical logic. Sign decided
+(pit.py:pit_microstructure) run identical logic. Sign decided
 by the backtest. Unlike the F&O factors these have years of price history → they
 backtest on the full ~149-date v2 panel (monthly cadence).
 
@@ -48,7 +48,7 @@ CS_WIN = 20               # Corwin-Schultz day-pairs
 GAP_THRESHOLD = 0.01      # >1% overnight gap
 _K_CS = 3 - 2 * np.sqrt(2)
 
-# Bounds mirror tools/reconstruct_pit.py VALIDATION_RANGES.
+# Bounds mirror factors.VALIDATION_RANGES.
 CLIPS = {
     "intraday_range_compression": (0.0, 5.0),
     "closing_strength_1m":        (0.0, 1.0),

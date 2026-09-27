@@ -16,7 +16,7 @@ miss, which our YoY/distress detectors — Beneish/Altman/Sloan — could not se
 
 Look-ahead-safe: anchored on `dt_tm` (the announcement timestamp), filtered ≤ as_of.
 Injectable frame so the live path and the PIT path
-(tools/reconstruct_pit.py:pit_governance_resignation) run identical logic. Stock-
+(pit.py:pit_governance_resignation) run identical logic. Stock-
 agnostic; no sector exclusion (governance events apply to every sector incl. financials).
 
 Coverage caveat: the BSE stream reaches ~90% of the universe; the ~10% NSE-only names

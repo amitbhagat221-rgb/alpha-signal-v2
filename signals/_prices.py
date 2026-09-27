@@ -3,7 +3,7 @@ Alpha Signal v2 — the price frame the price-based signals share.
 
 One loader for the live screener (load once, pass `prices=` to every inline
 signal) and the split/bonus adjustment the PIT backtest applies
-(tools/reconstruct_pit uses the same apply_adjustments), so the live path ranks
+(pit.py uses the same apply_adjustments), so the live path ranks
 on the same adj_close the validated backtest did.
 
 Reads: stock_prices (close > 0), corporate_adjustments
@@ -62,7 +62,7 @@ def apply_adjustments(prices, adjustments, as_of):
 def load_prices(as_of=None):
     """[sid, date, close, delivery_pct, adj_close] for every sid, ordered by sid, date —
     close > 0, ≤ as_of when given (default: all history, adjusted as of today). Same
-    rows the PIT backtest loads (tools/reconstruct_pit.load_raw)."""
+    rows the PIT backtest loads (pit.load_raw)."""
     date_clause = f"AND date <= '{as_of}'" if as_of else ""
     prices = read_sql(
         f"SELECT sid, date, close, delivery_pct FROM stock_prices WHERE close > 0 {date_clause} "

@@ -16,7 +16,7 @@ bench is the passive-alternative check. Writes `portfolio_outcomes`
 
 Reuses the price-series + trading-day entry/exit logic from
 tools.compute_pick_outcomes, so the horizon matches the validated backtest
-(reconstruct_pit fwd_return_20d). A book only gets a row for window N once ≥80% of
+(pit.py fwd_return_20d). A book only gets a row for window N once ≥80% of
 its names have N trading days of forward prices; weights are renormalised over the
 matured subset so a not-yet-matured / delisted name doesn't leak in.
 

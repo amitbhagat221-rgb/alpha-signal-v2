@@ -201,7 +201,7 @@ def _load_signals(return_prices=False):
     eps_revision_yoy = compute_eps_revision_yoy()
 
     # value_composite (plan 0012 C2) — 40% earnings_yield + 35% book_to_price + 25%
-    # position_52w, within-tier rank composite (mirrors tools.reconstruct_pit's
+    # position_52w, within-tier rank composite (mirrors pit's
     # pit_value_composite exactly). Reuses the earnings_yield/book_to_price frames
     # already computed above (no recomputation). Validated SMALL t=3.32 on the
     # clean panel, but NOT in config.SIGNAL_WEIGHTS — computed, ZERO weight,

@@ -28,7 +28,7 @@ Stock-only by construction: index underlyings (NIFTY/BANKNIFTY/…) carry sid=NU
 in fno_pcr_history (symbol-keyed), so the `sid IS NOT NULL` filter drops them.
 
 The core takes an injectable `pcr_hist` frame so the live path and the backtest
-PIT path (tools/reconstruct_pit.py:pit_fno_oi) run identical logic on different
+PIT path (pit.py:pit_fno_oi) run identical logic on different
 as-of data — never a second copy. Sign/strength is decided by the backtest; no
 direction is assumed here.
 
@@ -46,7 +46,7 @@ import pandas as pd
 
 from db import read_sql
 
-# Clip bounds mirror tools/reconstruct_pit.py VALIDATION_RANGES so the live and
+# Clip bounds mirror factors.VALIDATION_RANGES so the live and
 # PIT paths produce identically-bounded values.
 PCR_CLIP = (0.0, 20.0)          # raw PCR can spike on thin call OI; cap the tail
 MAXPAIN_CLIP = (-1.0, 1.0)      # fraction of spot

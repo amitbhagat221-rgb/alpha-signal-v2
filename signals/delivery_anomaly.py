@@ -22,7 +22,7 @@ import pandas as pd
 WINDOW_DAYS = 90
 MIN_HISTORY = 30
 # |z| beyond this is discarded (NaN), NOT clipped — that is what the validated
-# backtest saw (reconstruct_pit VALIDATION_RANGES NaNs out-of-range values).
+# backtest saw (factors.VALIDATION_RANGES NaNs out-of-range values).
 # Live used to clip to ±5, ranking the biggest spikes top on a region the
 # backtest never tested. Live and PIT now share delivery_anomaly_z() below.
 Z_LIMIT = 5.0

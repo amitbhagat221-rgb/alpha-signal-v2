@@ -11,7 +11,7 @@ close return over fixed forward windows (default 20/63/126 TRADING days ≈
   SMALL     → NIFTY SMALLCAP 250
 
 Windows are TRADING days (rows in the stock's own price series), NOT calendar
-days. This matches the backtest's `fwd_return_20d` (reconstruct_pit.py:
+days. This matches the backtest's `fwd_return_20d` (pit.py:
 anchor_idx + 20 trading days), so the live mirror measures the same horizon
 the factor model was validated on. 20d = model-native reference; 63d/126d =
 the positional (1–6 month) holding horizon the product actually targets. The
@@ -104,7 +104,7 @@ def _entry(series_map, sid, entry_date):
 
 def _exit_trading(series_map, sid, entry_pos, window):
     """Close `window` TRADING days after the anchor (entry_pos + window rows in
-    the stock's own series — matches reconstruct_pit.pit_fwd_return_20d).
+    the stock's own series — matches pit.pit_fwd_return_20d).
 
     Returns (exit_date, close) or None if the window hasn't matured yet.
     """

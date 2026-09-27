@@ -75,11 +75,11 @@ def _fwd_panel(panel, price_series):
     trading day on/after snapshot_date (matches pit_fwd_return_20d's
     anchor_idx + H), NaN where the horizon hasn't matured.
 
-    Same ANCHOR-PROXIMITY GUARD as reconstruct_pit.pit_fwd_return_20d (ADR 0047;
+    Same ANCHOR-PROXIMITY GUARD as pit.pit_fwd_return_20d (ADR 0047;
     plan 0015 Phase 0 — this copy lacked it): the entry row must lie within
     _FWD_MAX_GAP_DAYS of snapshot_date, and the exit row within _FWD_MAX_GAP_DAYS
     of the date H MARKET trading days later. Otherwise that horizon is NaN."""
-    from tools.reconstruct_pit import _FWD_MAX_GAP_DAYS
+    from pit import _FWD_MAX_GAP_DAYS
     gap = pd.Timedelta(days=_FWD_MAX_GAP_DAYS)
     cal = pd.DatetimeIndex(sorted(set().union(*(s.index for s in price_series.values()))))
     pairs = panel[["snapshot_date", "sid"]].drop_duplicates()

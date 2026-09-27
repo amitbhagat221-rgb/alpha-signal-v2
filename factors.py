@@ -3,7 +3,7 @@ Alpha Signal v2 — the factor registry. One entry per factor; every factor list
 in the codebase is DERIVED from it (bottom of this file) — never hand-edit a copy.
 
 Adding a factor = one FACTORS entry + its signals/<name>.py module + its pit_*
-helper in tools/reconstruct_pit.py (+ a PIT_PRODUCERS row if it is a new
+helper in pit.py (+ a PIT_PRODUCERS row if it is a new
 --signal group). Everything else — PIT_COLUMNS, VALIDATION_RANGES, the
 backtest column map, cadence, FACTOR_LIBRARY / FACTOR_STATUS, the screener's
 column map, the weight-key alias map, WIRED_FACTORS, pit_replay inputs,
@@ -2296,8 +2296,8 @@ PIT_EXTRA = {
 
 
 # ── PIT producers: the tools/reconstruct_pit --signal groups, in run order ──
-#   fn        pit_* helper in tools/reconstruct_pit.py (by name)
-#   inputs    per-date frames it is called with, positionally (reconstruct_pit._pit_input)
+#   fn        pit_* helper in pit.py (by name)
+#   inputs    per-date frames it is called with, positionally (pit._pit_input)
 #   needs     raw frames that must be LOADED for it to run
 #   nonempty  inputs that must be non-empty for it to run
 #   after     base columns it composes (composites run after their parts)
@@ -2458,7 +2458,7 @@ PIT_COLUMN_TYPES = {"industry_id": "INTEGER", "piotroski_f": "INTEGER", "macd_bu
 def discard_out_of_range(df, cols):
     """The range rule the validated backtest saw: ±inf and values outside a column's
     VALIDATION_RANGES become NaN — DISCARDED, never clipped. In place; returns
-    {col: n_out_of_range}. Used by reconstruct_pit._validate_and_clean and, for the
+    {col: n_out_of_range}. Used by pit._validate_and_clean and, for the
     same quantities (LIVE_PIT_COLS), by the live screener."""
     n_out = {}
     for col in cols:

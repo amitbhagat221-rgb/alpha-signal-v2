@@ -4,7 +4,7 @@ Alpha Signal v2 — Book-to-Price.
   book_to_price = (total_equity / shares_outstanding) / close
 
 off the latest annual balance sheet. One implementation for the live screener,
-output/snapshot and tools/reconstruct_pit:pit_book_to_price (which passes the
+output/snapshot and pit.py:pit_book_to_price (which passes the
 filing-lagged balance sheet and the as-of close).
 
 Reads: annual_balance_sheet, stock_prices

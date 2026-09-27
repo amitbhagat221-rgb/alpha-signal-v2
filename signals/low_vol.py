@@ -15,7 +15,7 @@ Reads:  stock_prices (close)
 Returns: DataFrame[sid, low_vol_252d]
 
 Look-ahead-safe: only closes with date ≤ as_of enter the window. Injectable
-frame so the live path and the PIT path (tools/reconstruct_pit.py:
+frame so the live path and the PIT path (pit.py:
 pit_low_vol_252d) run identical logic. Uses `adj_close` when present — the PIT
 path passes PIT-strict split/bonus-adjusted closes; a split inside the window
 would otherwise manufacture a fake vol spike (live standalone run uses raw

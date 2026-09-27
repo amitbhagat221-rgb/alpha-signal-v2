@@ -641,7 +641,7 @@ def get_factor_health():
 
         # PIT columns actually populated in daily_snapshots_pit (latest snapshot).
         # NOTE: daily_snapshots_pit is the *backtest* reconstruction, only refreshed
-        # when tools/reconstruct_pit.py runs (manually, periodically). Use this
+        # when pit.py runs (manually, periodically). Use this
         # only for PIT-readiness flag (does the column exist) — NOT for factor
         # freshness shown in the UI. For production freshness see latest_live below.
         try:
@@ -1635,7 +1635,7 @@ def get_command_centre():
     for f in f_track_no_pit:
         todos.append({
             "title": f"Add PIT helper for {f['name']}",
-            "detail": f"Has {f['stocks']} stocks scored today but no `pit_{f['signal']}(sid, eval_date)` in tools/reconstruct_pit.py — can't be backtested. Pair the module with its PIT version on next ship.",
+            "detail": f"Has {f['stocks']} stocks scored today but no `pit_{f['signal']}(sid, eval_date)` in pit.py — can't be backtested. Pair the module with its PIT version on next ship.",
             "status": "todo",
         })
 

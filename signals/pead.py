@@ -25,7 +25,7 @@ trailing YoY EPS changes — no analyst-consensus dependency (robust + PIT-clean
 consensus EPS in forecast_history is annual/episodic).
 
 Injectable frames so the live path and the PIT path
-(tools/reconstruct_pit.py:pit_pead) run identical logic. Stock-agnostic; sign
+(pit.py:pit_pead) run identical logic. Stock-agnostic; sign
 decided by the backtest.
 
 Reads:  quarterly_income, stock_prices, macro_history(nifty50), corporate_actions,

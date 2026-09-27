@@ -34,7 +34,7 @@ def momentum(prices):
 
     `prices` = [sid, date, close(, adj_close)]; adj_close (split/bonus-adjusted)
     is preferred when present, so a split inside the window isn't read as a crash.
-    Shared by the live screener and tools/reconstruct_pit:pit_momentum.
+    Shared by the live screener and pit.py:pit_momentum.
     Returns DataFrame[sid, mom_6m, mom_12m] (NaN where history is too short).
     """
     rows = []

@@ -8,7 +8,8 @@ import config
 import db
 import factors
 from eligibility import registry as eligibility
-from tools import backtest_pit, pit_replay, reconstruct_pit
+import pit
+from tools import backtest_pit, pit_replay
 from scoring import health_score
 
 
@@ -19,8 +20,8 @@ def test_consumers_use_the_registry():
     assert config.FACTOR_STATUS is factors.FACTOR_STATUS
     assert config.SIGNAL_GROUPS is factors.SIGNAL_GROUPS
     assert backtest_pit.SIGNAL_COLUMN_MAP is factors.SIGNAL_COLUMN_MAP
-    assert reconstruct_pit.PIT_COLUMNS is factors.PIT_COLUMNS
-    assert reconstruct_pit.VALIDATION_RANGES is factors.VALIDATION_RANGES
+    assert pit.PIT_COLUMNS is factors.PIT_COLUMNS
+    assert pit.VALIDATION_RANGES is factors.VALIDATION_RANGES
     assert eligibility.SIGNAL_ELIGIBILITY is factors.SIGNAL_ELIGIBILITY
     assert pit_replay.INPUT_COLS is factors.SCREENER_INPUT_COLS
 
@@ -60,7 +61,7 @@ def test_pit_columns_ranged_and_produced():
         assert col in factors.VALIDATION_RANGES, col
     for name, spec in factors.PIT_PRODUCERS.items():
         if spec["fn"]:
-            assert callable(getattr(reconstruct_pit, spec["fn"], None)), name
+            assert callable(getattr(pit, spec["fn"], None)), name
     for sid, (v1, v2) in factors.SIGNAL_COLUMN_MAP.items():
         assert v2 is None or v2 in factors.PIT_COLUMNS, sid
 

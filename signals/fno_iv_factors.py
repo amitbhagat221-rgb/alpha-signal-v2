@@ -17,7 +17,7 @@ expect a small, liquidity-biased cross-section. Skew + the two atm_iv-derived
 factors are near-fully covered.
 
 The core takes injectable iv_hist / prices frames so the live path and the
-backtest PIT path (tools/reconstruct_pit.py:pit_fno_iv) run identical logic on
+backtest PIT path (pit.py:pit_fno_iv) run identical logic on
 different as-of data. Stock-only (fno_iv_history index rows carry sid=NULL).
 Sign/strength is decided by the backtest; no direction is assumed here.
 

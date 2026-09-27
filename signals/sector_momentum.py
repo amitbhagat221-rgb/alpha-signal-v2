@@ -23,7 +23,7 @@ Data flow (two consumers, one core):
     sector_briefs.horizon_{short,medium,long} for the cockpit badges.
   • sector_momentum_for_stocks() — assigns each stock its sector's medium-horizon
     RS (z-scored across sectors). This is the per-stock factor the Track-3
-    backtest scores; its PIT helper lives in tools/reconstruct_pit.py.
+    backtest scores; its PIT helper lives in pit.py.
 
 The core takes injectable price / nifty / stocks frames so the live path and the
 PIT path run identical logic on different as-of data — never a second copy.

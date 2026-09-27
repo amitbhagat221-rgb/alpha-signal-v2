@@ -6,7 +6,7 @@ fundamentals_screener rows).
 Each module keeps only its math: a pure `_compute(stocks, fund)` on frames.
 This module holds what every one of them repeated verbatim — the live loader,
 the universe/line-item scoping the PIT backtest applies to its filing-lagged
-slice (so tools/reconstruct_pit's pit_* helpers call the SAME `_compute`), and
+slice (so pit.py's pit_* helpers call the SAME `_compute`), and
 the compute()/CLI wrapper that stamps, prints and saves the frame.
 """
 

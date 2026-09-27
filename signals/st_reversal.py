@@ -16,7 +16,7 @@ Reads:  stock_prices (close)
 Returns: DataFrame[sid, st_reversal_21d]
 
 Look-ahead-safe: only closes with date ≤ as_of enter the window. Injectable
-frame so the live path and the PIT path (tools/reconstruct_pit.py:
+frame so the live path and the PIT path (pit.py:
 pit_st_reversal_21d) run identical logic. Uses `adj_close` when present — the
 PIT path passes PIT-strict split/bonus-adjusted closes; a split inside the
 window would otherwise read as a fake −50% month. Sector-agnostic.

@@ -7,7 +7,7 @@ promotion review); it does NOT change `config.SIGNAL_WEIGHTS`.
 
 40% earnings_yield + 35% book_to_price + 25% position_52w, within-cap_tier
 percentile-rank composite — `within_tier_rank_composite` below IS the one
-tools.reconstruct_pit's composites call: a NaN-TOLERANT weighted average of
+pit's composites call: a NaN-TOLERANT weighted average of
 whichever component ranks exist for a sid (renormalized over the present
 components), not a strict all-or-nothing NULL. This intentionally diverges
 from plan 0012 C2's STEPS gloss ("NULL if any component missing") because the
@@ -18,7 +18,7 @@ evidence it's supposed to represent.
 
 position_52w = (close - 52w_low) / (52w_high - 52w_low) over the last 252
 trading days (min 60 obs) on split/bonus-adjusted closes — the same function
-tools.reconstruct_pit.pit_position_52w calls.
+pit.pit_position_52w calls.
 
 Reads:  stock_prices + corporate_adjustments (position_52w only — earnings_yield/book_to_price are
         passed in by the caller to avoid recomputation, see `_load_signals`)
@@ -42,7 +42,7 @@ POSITION_52W_MIN_OBS = 60
 def position_52w(prices):
     """(close − 52w_low) / (52w_high − 52w_low) over each sid's last 252 trading days
     (min 60 obs), on adj_close when present so a split inside the window doesn't
-    stretch the range. Shared by the live path and tools/reconstruct_pit:pit_position_52w.
+    stretch the range. Shared by the live path and pit.py:pit_position_52w.
     Returns DataFrame[sid, position_52w] (sids without a value omitted)."""
     price_col = "adj_close" if "adj_close" in prices.columns else "close"
     rows = []
@@ -70,7 +70,7 @@ def within_tier_rank_composite(df, components, name):
     components: list of (column_name, weight); `df` has sid, cap_tier + those columns.
     Each component is percentile-ranked within its tier; a sid's composite is the
     weighted average of whichever component ranks exist (renormalized), NaN if none.
-    Returns DataFrame[sid, name]. Shared with tools/reconstruct_pit's composites.
+    Returns DataFrame[sid, name]. Shared with pit.py's composites.
     """
     cols = [c for c, _ in components]
     out = df[["sid", "cap_tier"] + cols].copy()

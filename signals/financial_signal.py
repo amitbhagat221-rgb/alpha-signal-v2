@@ -92,7 +92,7 @@ NBFC_BENCHMARKS = {
 }
 
 
-# Filing lags (mirror tools/reconstruct_pit.py constants — period_end + lag is
+# Filing lags (mirror pit.py constants — period_end + lag is
 # when the row becomes "knowable" to a real-time observer).
 QUARTERLY_LAG = 60
 ANNUAL_LAG = 75

@@ -17,7 +17,7 @@ QoQ additionally needs the prior call's tone. Names with no recent transcript ge
 NOT 0, which would be a real reading).
 
 Injectable `nlp` frame so the live path and the PIT path
-(tools/reconstruct_pit.py:pit_nlp_factors) run identical logic.
+(pit.py:pit_nlp_factors) run identical logic.
 
 Sign hypotheses (the backtest decides): tone_qoq POSITIVE (improving tone → better
 fwd returns); uncertainty_word_density NEGATIVE (hedged/evasive calls → worse);

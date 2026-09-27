@@ -25,7 +25,7 @@ Reads:  stock_prices (close), macro_history (nifty50)
 Returns: DataFrame[sid, residual_momentum_12_1]
 
 Look-ahead-safe: injectable frames so the live path and the PIT path
-(tools/reconstruct_pit.py:pit_residual_momentum_12_1) run identical logic.
+(pit.py:pit_residual_momentum_12_1) run identical logic.
 Uses `adj_close` when present (a split inside the 252d window would otherwise
 manufacture a fake momentum spike).
 

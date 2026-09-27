@@ -12,7 +12,7 @@ Same-day events on the same sid are *multiplied* into a single combined factor
 (solves the same-day SPLIT+BONUS PK collision in the older split_adjustments table).
 
 This script is the upstream half of PIT-strict adjustment. The downstream half lives
-in tools/reconstruct_pit.py — it composes these per-event factors at signal-compute
+in pit.py — it composes these per-event factors at signal-compute
 time, only including events with ex_date <= snapshot_date (no forward leakage).
 
 Run:

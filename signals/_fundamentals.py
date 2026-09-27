@@ -1,7 +1,7 @@
 """Shared input hygiene for statement-based factors (plan 0015 Phase 3, ADR 0052).
 
 Applied INSIDE each factor's _compute_scores, so the live signal step and the PIT
-reconstruction (tools/reconstruct_pit.py) — which call the same function with
+reconstruction (pit.py) — which call the same function with
 as-of-sliced frames — see identically cleaned inputs. Before this, the filters
 lived only in each module's live `_load_data`, and the backtest measured a
 slightly different factor (piotroski: 819 of 2,220 overlapping rows differed).

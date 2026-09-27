@@ -43,7 +43,7 @@ drift further — deferred; the hard 90d cutoff is the interpretable v1.)
 
 Look-ahead-safe: only dt_tm ≤ eval_date announcements, only prices whose window
 END date ≤ eval_date. Injectable frames so the live path and the PIT path
-(tools/reconstruct_pit.py:pit_announcement_car) run identical logic. Uses
+(pit.py:pit_announcement_car) run identical logic. Uses
 `adj_close` when present (PIT path passes split/bonus-adjusted closes; a split
 inside the 3-day window would otherwise manufacture a fake CAR). Sector-agnostic
 — every sector reports results incl. financials; tier segmentation is at backtest.

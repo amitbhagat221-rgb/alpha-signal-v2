@@ -45,7 +45,7 @@ def ttm_eps(qi):
 def earnings_yield(qi, close):
     """E/P = TTM EPS / close. `close` = [sid, close_price]; NaN where the close is
     missing or ≤ 0. Returns DataFrame[sid, earnings_yield] for sids with a TTM EPS.
-    Shared by the live screener and tools/reconstruct_pit:pit_earnings_yield."""
+    Shared by the live screener and pit.py:pit_earnings_yield."""
     eps = ttm_eps(qi)
     if not eps:
         return pd.DataFrame(columns=["sid", "earnings_yield"])

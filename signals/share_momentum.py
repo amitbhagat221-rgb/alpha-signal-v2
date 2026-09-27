@@ -76,7 +76,7 @@ def sector_share_change(df):
     """df = [sid, sector, close_t, close_p, shares_outstanding] → adds market_cap_t,
     sector_share_t and share_momentum = sector_share_t / sector_share_p − 1, dropping
     rows whose past share is missing or zero (newly listed). Both market caps use the
-    same latest share count. Shared with tools/reconstruct_pit:pit_share_momentum."""
+    same latest share count. Shared with pit.py:pit_share_momentum."""
     df = df.copy()
     # Market cap in ₹cr (close in ₹, shares in lakhs/cr per Screener — but Screener
     # returns "No. of Equity Shares" already in cr units; multiply by close in ₹
