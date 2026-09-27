@@ -508,15 +508,6 @@ PIPELINE_STEPS = [
     {"name": "fetch_analyst",      "module": "sources.tickertape_analyst", "function": "compute", "critical": False,
      "table": "analyst_consensus", "source": "Tickertape __NEXT_DATA__", "data_freq": "monthly", "frequency": "monthly"},
 
-    # Yahoo Finance analyst consensus aggregate. Replaces the Tickertape PT field
-    # (which was contaminated with lastPrice — see HANDOFF 2026-05-22). Refreshes
-    # the live `analyst_consensus` row per stock. The monthly snapshot to
-    # `analyst_consensus_snapshots` runs from its own cron entry (1st business
-    # day of month) — keeping daily history would be phantom precision since
-    # PTs are episodic.
-    {"name": "fetch_yf_analyst",   "module": "sources.yfinance_analyst",   "function": "compute", "critical": False,
-     "table": "analyst_consensus", "source": "Yahoo Finance (yfinance)",  "data_freq": "monthly", "frequency": "weekly"},
-
     # Tickertape shareholding pattern — Bharat_sm_data API (different path from analyst scrape).
     {"name": "fetch_shareholding", "module": "sources.tickertape_shareholding", "function": "compute", "critical": False,
      "table": "shareholding",      "source": "Tickertape API",        "data_freq": "quarterly", "frequency": "monthly"},
@@ -849,12 +840,23 @@ PIPELINE_STEPS = [
     {"name": "classify_regulatory","module": "sources.regulatory_classifier", "function": "compute", "critical": False,
      "table": "regulatory_signals","source": "regulatory_events (Message Batches, capped 500/run)", "data_freq": "daily", "frequency": "daily"},
 
-    # Moneycontrol broker recos — WEEKLY (Sunday only per `frequency: weekly`).
-    # DELAY=12s × 2336 sids ≈ 8 hours. Pipeline runner honors frequency since
-    # 2026-05-25. Discovery one-time: --discover-only (mc_slug already
-    # populated for 2336 stocks).
+    # Yahoo Finance analyst consensus aggregate. Replaces the Tickertape PT field
+    # (which was contaminated with lastPrice — see HANDOFF 2026-05-22). Refreshes
+    # the live `analyst_consensus` row per stock. The monthly snapshot to
+    # `analyst_consensus_snapshots` runs from its own cron entry (1st business
+    # day of month) — keeping daily history would be phantom precision since
+    # PTs are episodic. Background section: the weekly run is ~1.5h at the
+    # 2s floor and must not delay screener/email (2026-09-27); signal_consensus
+    # picks up the refreshed rows on the next run.
+    {"name": "fetch_yf_analyst",   "module": "sources.yfinance_analyst",   "function": "compute", "critical": False,
+     "table": "analyst_consensus", "source": "Yahoo Finance (yfinance)",  "data_freq": "monthly", "frequency": "weekly"},
+
+    # Moneycontrol broker recos — DAILY with a 90-min stalest-first budget
+    # (stocks.mc_checked_at); DELAY=12s → ~300 stocks/day, full cycle ~8-9 days.
+    # The old weekly full sweep ran ~18h and held the harvest lock all Sunday.
+    # Discovery one-time: --discover-only (mc_slug already populated).
     {"name": "fetch_broker_recos", "module": "sources.moneycontrol_recos", "function": "compute", "critical": False,
-     "table": "broker_recommendations", "source": "Moneycontrol HTML (12s/req)",   "data_freq": "weekly", "frequency": "daily"},  # 90-min stalest-first budget/day
+     "table": "broker_recommendations", "source": "Moneycontrol HTML (12s/req)",   "data_freq": "weekly", "frequency": "daily"},
 
     # Banking metrics — Screener.in HTML scrape, 158 Banks + NBFCs (ADR 0030,
     # Phase 2.2a-ii). Underlying data is quarterly so MONTHLY cron suffices.
