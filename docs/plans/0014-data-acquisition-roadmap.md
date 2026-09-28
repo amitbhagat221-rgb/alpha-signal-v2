@@ -189,3 +189,9 @@ the free track lands and P1 is decided.
 ## Implementation notes
 
 _(append as work proceeds)_
+
+- **2026-09-28 — source-gap sweep ([research 0005](../research/0005-source-gap-sweep.md)).** Corrections to this plan:
+  - **D3's "~2023 floor" and the "Pre-2023 delisted prices — gone" permanent gap are WRONG.** The legacy NSE CM bhavcopy (`…/content/historical/EQUITIES/{YYYY}/{MMM}/cm…bhav.csv.zip`) carries every traded symbol, delisted ones included, back to the 1990s. Verified: `tools/build_historical_universe.py::_old_bhav` already reads it, and its 2018-04-02 snapshot has 651 non-universe symbols (FRETAIL, RELCAPITAL…). Adjustment factor = `PREVCLOSE(t)/CLOSE(t-1)`; renames via `symbolchange.csv`.
+  - D1: retail shareholder counts, named holders and FPI names come from the exchange shareholding XBRL (BSE `Corp_Shareholding_ng`, NSE `corporate-share-holdings-master`), PIT via broadcast time.
+  - P1 stays a real fork: free PIT revision history before 2026 = no. Yahoo `earningsTrend` (90-day lookback per snapshot) shortens forward collection to about a quarter.
+  - Intraday (P2 / plan 0002 §3.1c) is no longer paid-only: Fyers 1-min from 2017-07 on a free account; Kite reportedly ₹500/mo with history.

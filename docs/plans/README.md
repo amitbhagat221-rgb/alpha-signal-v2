@@ -19,6 +19,7 @@ Track 1/2/3 labels ([ADR 0015](../decisions/0015-track-numbering-and-rename.md))
 | [0011-roadmap-to-90.md](0011-roadmap-to-90.md) | **Master plan.** Roadmap to a 90/100 shop — workstreams WS1–WS7; decisions D1–D12 in [ADR 0051](../decisions/0051-roadmap-to-90-decisions-d1-d12.md) |
 | [0014-data-acquisition-roadmap.md](0014-data-acquisition-roadmap.md) | Data-layer view across plan 0011's workstreams — free-first; paid fork costed separately |
 | [0015-first-principles-architecture.md](0015-first-principles-architecture.md) | **Implemented 2026-09-27.** First-principles architecture: 7 building blocks, 5 invariants, phases P0–P6 all shipped ([ADR 0052](../decisions/0052-seven-building-blocks.md)); archive after 2026-10-27 |
+| [0018-data-supply-strategy.md](0018-data-supply-strategy.md) | **Approved 2026-09-28; P0 + canaries/Gates 1–2 shipped** (`feeds.py`, `tools/canary.py`, ops `/feeds`). Data supply: one feed registry (family × derived tier × ordered routes × contract), fallbacks, 3-gate upstream DQ, canaries + 5-rung test ladder, discovery funnel with a clock, 8-class known-issue runbook, DQ-agent permission ladder (L0–L2); 6 phases |
 
 ## Paused (kept live; resume only via a checklist bullet)
 
