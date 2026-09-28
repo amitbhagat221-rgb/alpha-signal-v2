@@ -226,6 +226,7 @@ CREATE TABLE IF NOT EXISTS broker_recommendations (
     target_price     REAL NOT NULL,          -- the analyst target
     report_url       TEXT,                   -- PDF link if any
     fetched_at       TEXT,
+    reco_date_imputed INTEGER,
     PRIMARY KEY (sid, broker, reco_date, target_price)
 );
 CREATE INDEX IF NOT EXISTS idx_brec_date ON broker_recommendations(reco_date);
@@ -239,7 +240,8 @@ CREATE TABLE IF NOT EXISTS broker_recommendations_quarantine (
     reco_price       REAL,                   -- price when call was made
     target_price     REAL NOT NULL,          -- the analyst target
     report_url       TEXT,                   -- PDF link if any
-    fetched_at       TEXT
+    fetched_at       TEXT,
+    reco_date_imputed INTEGER
 , _q_failed_gate TEXT, _q_reason TEXT, _q_quarantined_at TEXT DEFAULT (datetime('now')));
 
 CREATE TABLE IF NOT EXISTS bse_announcements (

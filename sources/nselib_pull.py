@@ -87,7 +87,11 @@ def _insert_or_ignore(df, table):
 
 # ───────────────────────── Move 1: bulk deals backfill ─────────────────────────
 
-def pull_bulk_deals(months=12):
+def pull_bulk_deals(months=12, repair_prices=False):
+    """Bulk deals by monthly chunk (INSERT OR IGNORE). repair_prices=True also fills
+    price on rows that already exist with price 0 / NULL — the 12.8K 2025-26 rows the
+    old column spelling wrote (INSERT OR IGNORE never revisits them). Update-only on
+    those rows: nothing else is touched."""
     from nselib import capital_market as cm
     sid_map = _http.sid_map()
     chunks = _months_back(months)
@@ -150,7 +154,17 @@ def pull_bulk_deals(months=12):
             df_out = pd.DataFrame(out_rows)
             n = insert_df(df_out, "bulk_deals")
             total += n
-            print(f"  bulk {from_str}→{to_str}: ✅ {len(out_rows)} parsed → {n} new rows")
+            fixed = 0
+            if repair_prices:
+                from db import get_db
+                upd = [(r["price"], r["symbol"], r["client_name"], r["deal_date"], r["quantity"])
+                       for r in out_rows if r["price"]]
+                with get_db() as conn:
+                    fixed = conn.executemany(
+                        "UPDATE bulk_deals SET price = ? WHERE symbol = ? AND client_name = ? AND deal_date = ? "
+                        "AND quantity = ? AND (price = 0 OR price IS NULL)", upd).rowcount
+            print(f"  bulk {from_str}→{to_str}: ✅ {len(out_rows)} parsed → {n} new rows"
+                  + (f", {fixed} prices repaired" if repair_prices else ""))
         else:
             print(f"  bulk {from_str}→{to_str}: 0 valid rows")
 
@@ -663,6 +677,8 @@ def main():
                                  "indices", "surveillance", "all", "daily_forward"])
     parser.add_argument("--months", type=int, default=12)
     parser.add_argument("--days-back", type=int, default=180, help="for fii_pos")
+    parser.add_argument("--repair-prices", action="store_true",
+                        help="with --source bulk: fill price on existing price-0 rows (one-off repair)")
     parser.add_argument("--start", help="YYYY-MM-DD: deep backfill from this date (overrides "
                                         "--months / --days-back; replaces sources.historical_backfill)")
     args = parser.parse_args()
@@ -673,7 +689,7 @@ def main():
 
     if args.source in ("bulk", "all"):
         print(f"\n=== Bulk deals ({args.months} months) ===")
-        n = pull_bulk_deals(months=args.months)
+        n = pull_bulk_deals(months=args.months, repair_prices=args.repair_prices)
         print(f"  → {n} new bulk_deals rows")
 
     if args.source in ("corp", "all"):

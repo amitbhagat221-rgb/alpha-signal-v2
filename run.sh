@@ -71,6 +71,17 @@ case "$JOB" in
                         # T1 daily, T2 on Sundays; verdicts → feed_checks → health report
         harvest_lock
         logged cron_canary run python -m tools.canary --due ;;
+    transcripts)        # Sunday 07:00 UTC — concall transcripts for stocks that reported in the last
+                        # 45 days (they appear 1-4 weeks after results), then their BSE filing dates
+                        # (the look-ahead-safe availability) — plan 0018; orphaned since 2026-06-07
+        harvest_lock
+        logged cron_transcripts run python -m sources.transcripts_pull --reported-days 45 --min-analysts 1 --max-docs 2
+        logged cron_transcripts_dates run python -m sources.transcripts_pull --backfill-filing-dates ;;
+    screener_schedules) # 3rd + 4th of Jan/Apr/Jul/Oct 20:30 UTC — Screener '+'-row breakdowns
+                        # (Intangible Assets etc., annual items): ~9 h for the universe, so two
+                        # resumable 5-hour night windows per quarter, clear of every other job
+        harvest_lock
+        logged cron_screener_schedules run python -m sources.screener_schedules --universe --budget-min 300 ;;
     estimates)          # Saturday 10:00 UTC — Yahoo EPS trend snapshots (covered stocks) + surprises
                         # for stocks that reported in the last 3 weeks (plan 0018)
         harvest_lock
@@ -109,6 +120,6 @@ case "$JOB" in
         echo "Tickertape finished rc=$RC at $(date -u)"
         exit $RC ;;
     *)
-        echo "unknown job '$JOB' (morning forward canary estimates watchdog health pt_snapshot backtest expected_return screener_cookie secrets_backup screener_universe tickertape)"
+        echo "unknown job '$JOB' (morning forward canary estimates transcripts screener_schedules watchdog health pt_snapshot backtest expected_return screener_cookie secrets_backup screener_universe tickertape)"
         exit 2 ;;
 esac

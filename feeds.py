@@ -162,13 +162,14 @@ FEEDS = {
         "family": "fundamentals", "status": "production",
         "what": "Company financials from Screener.in (our paid account)",
         "modules": ["sources.screener_pull", "sources.screener_schedules"],
-        "schedule": ["cron:screener_universe", "cron:screener_cookie"],
+        "schedule": ["cron:screener_universe", "cron:screener_cookie", "cron:screener_schedules"],
         "writes": ["fundamentals_screener", "shareholding"], "hosts": ["screener"], "cadence": "fortnightly",
         "routes": [_r("screener_export", "primary", "screener", "session cookie → per-stock Excel export")],
         "serve_stale_days": 45, "canary": "screener",
         "pit": "period end; no filing timestamp (lag rule)", "tos": "our paid Premium account",
         "notes": "Session has a fixed ~30-day life; cron:screener_cookie re-logs in 3x/day. "
-                 "screener_schedules ('+' rows) is manual-only — never scheduled",
+                 "screener_schedules ('+' rows: Intangible Assets …) runs quarterly in two resumable night windows "
+                 "(scheduled 2026-09-28; had been manual-only, Intangible Assets 4.5 months stale)",
     },
     "banking_metrics": {
         "family": "fundamentals", "status": "production",
@@ -238,8 +239,9 @@ FEEDS = {
         "writes": ["broker_recommendations"], "hosts": ["moneycontrol"], "cadence": "weekly",
         "routes": [_r("mc_stock_page", "primary", "moneycontrol", "stock page broker-reco block")],
         "serve_stale_days": 30, "canary": "moneycontrol_recos",
-        "pit": "reco_date — falls back to TODAY when missing (census: fabricated date)", "tos": "public page",
-        "notes": "Module header still says PAUSED 2026-05-22 but the step runs daily — decide",
+        "pit": "reco_date; undated calls carry reco_date_imputed=1 (fetch date, not an event time)", "tos": "public page",
+        "notes": "Decided 2026-09-28: keep (dispersion + cross-source PT check), not a factor input; "
+                 "71% of stored dates were imputed — now flagged",
     },
 
     # ═══════════════════════════════ Events & documents ═══════════════════════════════
@@ -273,14 +275,14 @@ FEEDS = {
         "pit": "announced date", "tos": "public exchange data",
     },
     "transcripts": {
-        "family": "events", "status": "degraded",
+        "family": "events", "status": "production",
         "what": "Earnings-call transcripts",
-        "modules": ["sources.transcripts_pull"], "schedule": [],
+        "modules": ["sources.transcripts_pull"], "schedule": ["cron:transcripts"],
         "writes": ["transcripts"], "hosts": ["screener", "bse"], "cadence": "weekly",
         "routes": [_r("screener_concalls", "primary", "screener", "concall section → BSE AttachLive/AttachHis PDF")],
-        "canary": None, "canary_waiver": "unscheduled — canary lands with its schedule",
-        "pit": "available_date (look-ahead safe)", "tos": "public filings",
-        "notes": "ORPHAN: no step or cron since 2026-06-07 (research 0005 A5)",
+        "canary": "screener", "serve_stale_days": 14,
+        "pit": "bse_filing_date (look-ahead safe; filled by --backfill-filing-dates)", "tos": "public filings",
+        "notes": "Scheduled weekly 2026-09-28 (was orphaned since 2026-06-07); one-off catch-up for Jun→Sep run the same day",
     },
 
     # ═══════════════════════════════ Macro & flows ═══════════════════════════════
@@ -620,7 +622,7 @@ INCIDENTS = [
     ("2026-08-24", "llm_enrichment", "G", "400 credit balance too low", "API credits exhausted",
      "session backlog clear; plan 0016 routines", "checklist (e)"),
     ("2026-06-07", "transcripts", "H", "no new transcripts", "module never scheduled",
-     "OPEN — needs a step or run.sh case", "research 0005 A5"),
+     "weekly run.sh transcripts (reported in last 45 days) + Jun→Sep catch-up, 2026-09-28", "plan 0018"),
     ("2026-05-02", "nse_insider", "B", "corporates-pit returns 200 with ~0 rows", "endpoint silently deprecated",
      "corporates-pit-gg list + per-filing XBRL", "0642a6a"),
     ("2026-07-05", "tickertape_analyst", "F", "pt_upside t=7-9 in backtest",

@@ -2168,6 +2168,7 @@ SNAP = json.loads(r"""
     {
      "broker": "Motilal Oswal",
      "reco_date": "2026-09-12",
+     "reco_date_imputed": 0,
      "reco_price": 1000.0,
      "reco_type": "BUY",
      "report_url": "https://x.test/r.pdf",
@@ -2177,6 +2178,7 @@ SNAP = json.loads(r"""
     {
      "broker": "Emkay",
      "reco_date": "2026-09-25",
+     "reco_date_imputed": 1,
      "reco_price": null,
      "reco_type": "HOLD",
      "report_url": null,
@@ -2186,6 +2188,7 @@ SNAP = json.loads(r"""
     {
      "broker": "Motilal Oswal",
      "reco_date": "2026-09-12",
+     "reco_date_imputed": 0,
      "reco_price": 1000.0,
      "reco_type": "BUY",
      "report_url": "https://x.test/r.pdf",
@@ -2195,6 +2198,7 @@ SNAP = json.loads(r"""
     {
      "broker": "Emkay",
      "reco_date": "2026-09-25",
+     "reco_date_imputed": 1,
      "reco_price": null,
      "reco_type": "HOLD",
      "report_url": null,

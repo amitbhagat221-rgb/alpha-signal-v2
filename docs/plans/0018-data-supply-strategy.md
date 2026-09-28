@@ -382,4 +382,15 @@ The checks runner (ADR 0052) and `db.write` (plan 0017) already exist. This plan
     - `analyst_estimates` freshness now keys on `last_seen_at`.
   - **Tests:** `tests/test_new_sources.py` (15).
   - **Backfill discipline:** one sequential queue under the harvest lock, clear of the 14:00 / 15:00 crons, with budgeted resumable Yahoo passes.
+- **2026-09-28: Ingestion close-out** (before moving on to data sources → factors → models → portfolio).
+  - **transcripts** scheduled: weekly `run.sh transcripts` (Sunday 07:00) covers stocks reported in the last 45 days, then fills BSE filing dates. It had been orphaned since 2026-06-07. A Jun→Sep catch-up is queued tonight.
+  - **bulk_deals:** `--repair-prices` refills the 12,787 price-0 rows (Jun 2025 – Apr 2026) as an update-only run.
+  - **insider July:** the low count (314) matches SEBI's trading-window closure after the June quarter-end (April shows the same dip). A re-list of July is queued to confirm.
+  - **moneycontrol:** decided keep (dispersion + cross-source price-target check), not a factor input.
+    - 71% of stored reco dates were imputed. They now carry `reco_date_imputed = 1`: exact going forward, a date = fetch-day heuristic for history.
+    - Header un-PAUSED.
+    - `db._ensure_columns` now applies column migrations to quarantine mirrors too. A missing mirror column would have broken quarantine writes, the same class as the `_book_value_cr` bug.
+  - **screener_schedules** scheduled quarterly (3rd + 4th of Jan/Apr/Jul/Oct, 20:30 UTC) as two resumable 5-hour windows (`--budget-min` + checkpoint).
+    - It is the only source of "Intangible Assets" (goodwill_to_assets, asset_tangibility), which was 4.5 months stale.
+    - A first pass is queued tonight, budgeted to stop by 02:30.
 

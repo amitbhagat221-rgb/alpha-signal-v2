@@ -375,6 +375,17 @@ def _targets(args) -> pd.DataFrame:
             "SELECT DISTINCT t.sid, s.ticker FROM transcripts t "
             "JOIN stocks s ON s.sid = t.sid "
             "WHERE s.ticker IS NOT NULL ORDER BY s.market_cap_cr DESC")
+    if getattr(args, "reported_days", None):
+        # Weekly incremental (plan 0018): transcripts appear 1-4 weeks after results,
+        # so re-visit only stocks that reported recently (earnings_calendar), with the
+        # same analyst-coverage gate. Existing documents are skipped by URL.
+        min_an = getattr(args, "min_analysts", 0) or 0
+        return read_sql(
+            "SELECT DISTINCT s.sid, s.ticker FROM stocks s "
+            "JOIN earnings_calendar e ON e.sid = s.sid AND e.date BETWEEN date('now', ?) AND date('now') "
+            + ("JOIN analyst_consensus a ON a.sid = s.sid AND a.total_analysts >= ? " if min_an > 0 else "")
+            + "WHERE s.ticker IS NOT NULL ORDER BY s.market_cap_cr DESC",
+            params=[f"-{int(args.reported_days)} days"] + ([min_an] if min_an > 0 else []))
     if args.tier or args.universe:
         # Optional analyst-coverage gate: a stock with ≥N analysts almost always
         # holds a concall; one with none almost never does. For SMALL this skips
@@ -400,6 +411,8 @@ def main():
     p.add_argument("--sid", help="single stock SID")
     p.add_argument("--tier", choices=["LARGE", "MID", "SMALL", "MICRO"])
     p.add_argument("--universe", action="store_true")
+    p.add_argument("--reported-days", type=int, default=None,
+                   help="only stocks with results in the last N days (weekly incremental)")
     p.add_argument("--deepen", action="store_true",
                    help="re-visit every stock already in `transcripts`, uncapped — "
                         "pull the FULL concall history Screener exposes (back-populates "

@@ -37,6 +37,8 @@ import calendar
 import re
 from datetime import date
 
+from config import PROJECT_ROOT
+
 import pandas as pd
 import requests
 
@@ -210,6 +212,33 @@ def pull_one(
 
 
 
+PROGRESS_FILE = PROJECT_ROOT / "output" / "screener_schedules_progress.json"
+PROGRESS_DAYS = 20
+
+
+def _load_progress() -> set:
+    import json
+    try:
+        p = json.loads(PROGRESS_FILE.read_text())
+    except (OSError, ValueError):
+        return set()
+    if (date.today() - date.fromisoformat(p["started"])).days > PROGRESS_DAYS:
+        return set()                                   # a new cycle
+    return set(p["done"])
+
+
+def _mark_done(sid):
+    import json
+    try:
+        p = json.loads(PROGRESS_FILE.read_text())
+        if (date.today() - date.fromisoformat(p["started"])).days > PROGRESS_DAYS:
+            raise ValueError("stale cycle")
+    except (OSError, ValueError, KeyError):
+        p = {"started": date.today().isoformat(), "done": []}
+    p["done"].append(sid)
+    PROGRESS_FILE.write_text(json.dumps(p))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[1])
     parser.add_argument("--sid", help="single stock SID")
@@ -217,6 +246,8 @@ def main():
     parser.add_argument("--universe", action="store_true")
     parser.add_argument("--dry-run", action="store_true",
                         help="fetch + parse but don't write")
+    parser.add_argument("--budget-min", type=float,
+                        help="stop cleanly after N minutes; the next run resumes (plan 0018)")
     args = parser.parse_args()
 
     s = make_session()
@@ -225,12 +256,21 @@ def main():
     if targets.empty:
         parser.error("no targets — specify --sid, --tier, or --universe")
 
-    print(f"targets: {len(targets)} stocks")
+    # Resume: a quarterly universe pass (~9 h) runs in two night windows. Stocks done
+    # in the last 20 days are skipped; the checkpoint restarts itself after that.
+    done = _load_progress() if args.universe and not args.dry_run else set()
+    if done:
+        targets = targets[~targets["sid"].isin(done)]
+    out_of_time = _http.time_budget("screener", args.budget_min) if args.budget_min else (lambda: False)
+    print(f"targets: {len(targets)} stocks" + (f" ({len(done)} already done this cycle)" if done else ""))
     total_rows = 0
     failures = 0
     for i, (sid, ticker) in enumerate(
         targets[["sid", "ticker"]].itertuples(index=False), 1,
     ):
+        if out_of_time():
+            print(f"\nstopped at the {args.budget_min:.0f}-min budget after {i - 1} stocks — rerun to resume")
+            break
         try:
             n = pull_one(s, sid, ticker, dry_run=args.dry_run)
             status = "✓" if n > 0 else "·"
@@ -238,6 +278,8 @@ def main():
             total_rows += n
             if n == 0:
                 failures += 1
+            if args.universe and not args.dry_run:
+                _mark_done(sid)
         except PermissionError as e:
             print(f"\nAUTH FAILURE on {sid} ({ticker}): {e}")
             print("→ Re-extract the cookie from your browser and retry.")

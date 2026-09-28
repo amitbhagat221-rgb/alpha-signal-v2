@@ -120,17 +120,27 @@ _COLUMN_MIGRATIONS = [
     ("insider_trades", "filing_id", "TEXT"),
     # total shareholder count per quarter (Screener page, plan 0018) — crowding signal
     ("shareholding", "n_shareholders", "INTEGER"),
+    # 1 = Moneycontrol gave no call date; reco_date is the fetch date (plan 0018)
+    ("broker_recommendations", "reco_date_imputed", "INTEGER"),
 ]
 
 
 def _ensure_columns():
+    """Apply _COLUMN_MIGRATIONS — to the table AND its quarantine mirror, if it has
+    one: a column the source rows carry but the mirror lacks makes every quarantine
+    write fail (found 2026-09-28: banking_metrics' helper column did exactly that)."""
     with get_db() as conn:
+        mirrors = {r[0] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE '%\\_quarantine' ESCAPE '\\'")}
         for tbl, col, typ in _COLUMN_MIGRATIONS:
-            try:
-                conn.execute(f"ALTER TABLE {tbl} ADD COLUMN {col} {typ}")
-            except sqlite3.OperationalError as e:
-                if "duplicate column" not in str(e).lower():
-                    raise
+            for target in (tbl, f"{tbl}_quarantine"):
+                if target != tbl and target not in mirrors:
+                    continue
+                try:
+                    conn.execute(f"ALTER TABLE {target} ADD COLUMN {col} {typ}")
+                except sqlite3.OperationalError as e:
+                    if "duplicate column" not in str(e).lower():
+                        raise
     _ensure_quarantine_tables()
 
 

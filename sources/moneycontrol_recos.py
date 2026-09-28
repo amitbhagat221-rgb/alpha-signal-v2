@@ -1,11 +1,13 @@
 """
 Alpha Signal v2 — Moneycontrol Broker Recommendations
 
-STATUS: PAUSED (2026-05-22) — yfinance now provides the analyst-consensus
-aggregate at 98% LARGE / 92% MID coverage with better fields (mean/median/
-high/low/recommendation_key) and no WAF risk. See sources/yfinance_analyst.py
-and HANDOFF 2026-05-22. This Moneycontrol scraper is kept for a future Phase
-where we want per-broker dispersion + PDF report links. When resuming:
+STATUS: ACTIVE (daily step fetch_broker_recos, 90-min host budget) — decided
+2026-09-28 (plan 0018). NOT a factor input: yfinance carries the consensus
+aggregate. Kept for per-broker dispersion, PDF report links and the cross-source
+price-target check (validators/cross_source, trust layer), which read the target,
+not the date. PIT: Moneycontrol often omits the call date; such rows get today's
+date WITH reco_date_imputed = 1 — never use an imputed date as event time.
+Operating notes:
   - Keep the 12s host gap (hosts.HOSTS["moneycontrol"]; 2s tripped the WAF)
   - Run --discover-only first to populate stocks.mc_slug for the universe
   - Then run incrementally; full universe = ~10 hours at 12s/stock
@@ -297,8 +299,12 @@ def fetch_for_sid(sid, slug, fetched_at):
     for r in recos:
         r["sid"] = sid
         r["fetched_at"] = fetched_at
+        r["reco_date_imputed"] = 0
         if not r["reco_date"]:
-            r["reco_date"] = today  # fall back to today; better than dropping the row
+            # keep the row (its target feeds the cross-source check) but say the date
+            # is ours, not the broker's: an imputed date must never be an event time
+            r["reco_date"] = today
+            r["reco_date_imputed"] = 1
     return recos
 
 
