@@ -393,4 +393,25 @@ The checks runner (ADR 0052) and `db.write` (plan 0017) already exist. This plan
   - **screener_schedules** scheduled quarterly (3rd + 4th of Jan/Apr/Jul/Oct, 20:30 UTC) as two resumable 5-hour windows (`--budget-min` + checkpoint).
     - It is the only source of "Intangible Assets" (goodwill_to_assets, asset_tangibility), which was 4.5 months stale.
     - A first pass is queued tonight, budgeted to stop by 02:30.
+- **2026-09-28: The four DQ gaps closed** (P1 core + test-ladder rung 1).
+  1. **Write contracts: gate BEFORE write.**
+     - `tables.TABLES[t]["contract"]` (`max_null`, `not_all_zero`) for 14 raw tables.
+     - Enforced in `db.insert_df` / `upsert_df` on every batch of ≥ 20 rows, on the columns the batch carries. A violation raises `db.ContractViolation` (run log class F) and **nothing is written**.
+     - Thresholds validated against every live batch since 2025-06: they flag only the 2026-05-03 price-0 bulk_deals backfill, which would have been blocked.
+  2. **Row-count band** (`checks/feeds.volume_bands`).
+     - Latest rows vs the median of the previous 20 runs (`pipeline_log.rows_affected` + `run_events` `run_end`).
+     - **Self-calibrated:** only steps whose own history falls below 0.6× in ≤ 5% of runs are judged, so news, corporate actions and calendars aren't.
+     - Below 0.6× → WARN (T1 below 0.25× → CRITICAL); above 3× → WARN.
+  3. **Gate 3** (`tools/reconcile.py`, daily inside `run.sh canary`):
+     - **Prices:** NSE close vs Yahoo's unadjusted close on 20 random LARGE/MID stocks (±0.5%, PASS ≥ 90%).
+     - **Fundamentals:** Tickertape vs Screener quarterly revenue on up to 200 stocks (±5%, PASS ≥ 80%; the sources define revenue differently: RELIANCE Jun-26 2.1% apart).
+     - Results go to `feed_checks` (`reconcile`). A T1 FAIL → CRITICAL.
+     - First run: fundamentals PASS, 85% agree. It surfaced **MMTC 156.68 vs 0.68 Cr** and **GOCL 66.65 vs 4.29**, unit or company errors in one source, to investigate.
+  4. **Replay tests** (`tests/test_fixture_replay.py`). 8 scrubbed real-response fixtures in `tests/fixtures/feeds/`, refreshed with `python -m tools.canary --save-fixtures`. They run the **real** code:
+     - `nse._fetch_date` with the HTTP call patched, guardrails included, plus the stock_prices contract
+     - `nse_bulk._parse_deals` + contract (and the price-0 bug replayed)
+     - `parse_navall`, `parse_shareholders`, the rss parser, the ETMoney portfolio URL shape, NSE JSON keys
+  - Canary raw captures are now JSON, not `repr`, so future captures are replayable.
+  - **Also fixed:** Screener shareholder counts now UPDATE Tickertape rows only. The first version created 6,755 NULL-% rows that would have become the "latest" shareholding row for `pledge_quality`; they were deleted, and a waiter re-cleans after tonight's in-flight harvest.
+  - Tests: 295.
 

@@ -84,6 +84,21 @@ This is what an outside agent (MCP, plan 0016) reads.
 - Use `_http.run_harvester` and the door. Item errors, request failures and write counts are then logged automatically.
 - With a custom loop, call `runlog.item_error(label, item, exc)` in the `except`, or `runlog.item_failed(label, item, message, symptom)` when an item fails without an exception.
 
+## Gates on full harvests (not just probes)
+- **Write contracts:** `tables.TABLES[t]["contract"]`.
+  - `insert_df` / `upsert_df` raise `ContractViolation` before writing a batch (≥ 20 rows) that breaks it. Examples: `price` all zero, `close` > 2% null.
+  - A harvest that "fails" on this is doing its job: read the note in `python -m runlog events --feed <f> --level ERROR`, fix the parser, and never loosen the contract to make it pass.
+- **Row-count band:** `FEED_VOLUME_DROP` / `FEED_VOLUME_SPIKE` in the health email.
+  - Stable steps only; the threshold self-calibrates from each step's own history.
+  - First check for a holiday or a half-day, then the run log's `rows_written`.
+- **Gate 3** (`tools/reconcile.py`, daily after the canaries):
+  - **Prices:** NSE close vs Yahoo unadjusted, ±0.5%.
+  - **Fundamentals:** Tickertape vs Screener quarterly revenue, ±5%.
+  - A FAIL on a T1 feed is CRITICAL: the data looks fine but means something else. `feed_checks.detail.worst` lists the 5 worst stocks.
+  - Run by hand with `python -m tools.reconcile [--only prices|fundamentals] [--dry-run]`.
+- **Replay fixtures:** `tests/fixtures/feeds/` (scrubbed slices of real responses).
+  - After `--accept`ing a new shape, refresh them with `python -m tools.canary --save-fixtures`, then fix `tests/test_fixture_replay.py` if the parser changed.
+
 ## Raw landing zone
 `data/raw/<canary>/` holds:
 - `baseline.json`: the accepted shape

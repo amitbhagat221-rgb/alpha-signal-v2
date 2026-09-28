@@ -85,3 +85,4 @@ Status key: **A** accepted · **P→N** partly superseded by N · **S→N** supe
 | 0051 | [Roadmap-to-90 decisions D1–D12](0051-roadmap-to-90-decisions-d1-d12.md) | A (decision register for plan 0011) |
 | 0052 | [Seven building blocks: one as-of dataflow graph](0052-seven-building-blocks.md) | P→0053 (plan 0015) |
 | 0053 | [Lag is declared; a lagged read sees the previous run](0053-declared-lag-not-cadence-lag.md) | A (partly supersedes 0052) |
+| 0055 | [Data supply: feeds, canaries, run log](0055-data-supply-feeds-canaries-runlog.md) | A (plan 0018) |

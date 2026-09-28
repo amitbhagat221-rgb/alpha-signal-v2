@@ -1,22 +1,31 @@
 # HANDOFF
-Updated: 2026-09-27 | Branch: master (113 unpushed) | HEAD: d400a20 chore: retire run_pipeline.sh/run_tickertape_monthly.sh (run.sh jobs)
+Updated: 2026-09-28 | Branch: master (pushed) | HEAD: see `git log -1` (plan 0018 DQ gates + handoff)
 
 ## Left off
-Plan 0015 (ADR 0052) is fully shipped. Master is deployed, the cockpit services were restarted at about 09:47 UTC, and the crontab now calls `run.sh <job>` (the old crontab and wrapper scripts are in `backups/plan15-deploy/`). The full offline pipeline gate, old code against new on identical DB copies, differed only as intended: the PSP/PST close range and trading-day email returns. The next 03:30 UTC run is the first production run of the derived order, the host door, post-step checks and `pit.features_at`.
+Ingestion is closed (plan 0018 / ADR 0055).
+- **Supply map and monitoring:** `feeds.py` registry, 02:45 canaries + Gate 3 `tools/reconcile.py`, write contracts enforced in `db.insert_df/upsert_df`, a self-calibrated row-count band, the `run_events` run log, replay fixtures, and the ops `/feeds` page.
+- **5 new sources:** `market_events`, `analyst_estimates`, `shareholding.n_shareholders`.
+- **Overnight, still running** from the two scratchpad queues:
+  - Screener universe, then the F&O 2024-07+ backfill + IV, bulk price repair, July insider re-list, transcripts catch-up and the first `screener_schedules` pass, all stopping before 02:30
+  - a waiter that deletes Screener-created NULL-% shareholding rows when the in-flight harvest exits
 
 ## Pick up here
-1. Check the 2026-09-28 run:
-   - `tail -200 output/pipeline.log`: look for "Running the DERIVED order" and any `[GRAPH] … undeclared` or `post-check:` lines.
-   - `output/graph_shadow/2026-09-28_undeclared.json` must be `{}`. Otherwise add the table to that step's `reads` in `config.py`.
-2. Decide the MICRO fix. `stocks.market_cap_cr` is in rupees, never refreshed, and NULL for 726 stocks, so `tools/classify_micro_tier.py`'s "< ₹500 Cr" rule only fires on NULLs. Using `scoring/segment.py`'s crore cap instead would move 54 stocks SMALL→MICRO and 47 MICRO→SMALL.
-3. Run `/architecture-review` (`.claude/commands/architecture-review.md`), then take the next work from its ranked list. Also re-extract the Screener `sessionid` into `~/.cache/screener_cookie.json`: it has been dead since about August (see `output/screener_keepalive.log`).
+1. **Verify the overnight work:**
+   - `python -m runlog runs --limit 40`
+   - `SELECT COUNT(*) FROM shareholding WHERE promoter_pct IS NULL AND n_shareholders IS NOT NULL` → 0
+   - `bulk_deals` price=0 → 0
+   - `fno_bhav` MIN(trade_date) ≈ 2024-07
+   - the first prices reconcile: `SELECT * FROM feed_checks WHERE check_kind='reconcile'`
+2. **Investigate the Gate 3 outliers:** MMTC (Tickertape 156.68 vs Screener 0.68 Cr) and GOCL (66.65 vs 4.29), in `quarterly_income` vs `fundamentals_screener`. Find which source has the wrong units or company.
+3. **Before any factor reads `analyst_estimates`** (source `yahoo_calendar`, `pit_unverified`): after October results, compare it with the pre-report `yahoo_trend` snapshot. Then start the data-sources stage.
 
 ## Watch out
-- The first `segment_tiers` run is 2026-10-01 (monthly). It re-tiers 24 stocks (±10% hysteresis) before the screener, so LARGE/MID/SMALL picks shift that day by design.
-- The first Sunday `refresh_pit_panel` step on prod takes about 35 min after the email. The 15:00 watchdog may heal it sooner, since the panel shows as OUTDATED at 88 days.
-- A step whose declared output stays OUTDATED is now logged FAILED and is not retried (`pipeline._post_check`). `signal_insider`, `news_brief` and `compute_sector_dossiers` already fail this way while LLM credits are empty; `fetch_broker_recos` can too.
-- Flip `config.PIPELINE["derived_order"] = False` to fall back to the list order instantly.
-- `sources/news_classifier.py` still hard-codes its model id, because another session has uncommitted edits in that file. The value matches `hosts.HOSTS` (tested).
+- **Write contracts now raise before writing.** A harvest that "fails" with `ContractViolation` (run log class F) caught garbage. Fix the parser; never loosen the contract.
+- **Screener shareholder counts are UPDATE-only** (`sources/screener_pull.py`). Upserting created rows that would have blanked `pledge_quality`.
+- **`broker_recommendations.reco_date_imputed = 1`:** 71% of rows carry the fetch date, not a broker date.
+- **New crons can skip each other:** `estimates` (Sat 10:00), `transcripts` (Sun 07:00) and `screener_schedules` (3rd/4th of Jan/Apr/Jul/Oct, 20:30) all take the harvest lock and skip if it's held.
+- **Scratchpad logs vanish on reboot;** `run_events` is the durable record.
+- **Uncommitted, from other sessions** (left untouched): `sources/news_classifier.py`, plans 0016/0017, `architecture.md`, and the 0054 row in `docs/decisions/README.md`.
 
 ## Active plan
-docs/plans/0015-first-principles-architecture.md (implemented; follow-ups above). Master plan: docs/plans/0011-roadmap-to-90.md
+docs/plans/0018-data-supply-strategy.md (P0 + P1 core shipped; next P3 fallbacks) · master plan docs/plans/0011-roadmap-to-90.md
