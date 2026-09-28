@@ -32,6 +32,7 @@ import pandas as pd
 
 from db import insert_df, read_sql
 from hosts import HOSTS
+import runlog
 from sources import _http
 
 NSE_PIT_LIST_URL = "https://www.nseindia.com/api/corporates-pit-gg"
@@ -91,13 +92,6 @@ def _category(cat):
     return _CATEGORY.get(c.lower(), c)
 
 
-def _safe_float(val):
-    if val is None or val == "" or val == "-":
-        return None
-    try:
-        return float(val)
-    except (ValueError, TypeError):
-        return None
 
 
 def list_filings(start, end, session):
@@ -139,7 +133,7 @@ def _rows_for_filing(filing, disclosures, sid, today_iso):
             continue
         if trade_date > today_iso:          # future-dated = filing glitch; corrupts MAX(trade_date)
             continue
-        value = _safe_float(x.get("value"))
+        value = _http.to_float(x.get("value"))
         rows.append({
             "sid": sid,
             "symbol": filing["symbol"].strip(),
@@ -147,7 +141,7 @@ def _rows_for_filing(filing, disclosures, sid, today_iso):
             "person": (x.get("person") or "")[:200],
             "person_category": _category(x.get("person_category")),
             "transaction_type": _direction(x.get("tx_type")),
-            "shares": _safe_float(x.get("shares")) or 0,
+            "shares": _http.to_float(x.get("shares")) or 0,
             "value_lakhs": value / 100000 if value else None,   # rupees → lakhs
             "trade_date": trade_date,
             "source": "nse_pit",
@@ -184,10 +178,12 @@ def fetch_insider(start, end, dry_run=False):
             resp = _http.polite_get(f["xmlFileName"], timeout=30)
             if resp is None:
                 n_err += 1
+                runlog.item_failed("nse_insider xbrl", f.get("symbol"), f"404 {f['xmlFileName']}", symptom="B")
                 continue
             rows += _rows_for_filing(f, parse_xbrl(resp.content), sids[f["symbol"].strip()], today_iso)
         except Exception as e:                       # one bad filing must not sink the run
             n_err += 1
+            runlog.item_error("nse_insider xbrl", f.get("symbol"), e)
             print(f"    [{f.get('symbol')}] {type(e).__name__}: {str(e)[:80]}", flush=True)
         if len(rows) >= 500 or i == len(todo):
             if rows and not dry_run:

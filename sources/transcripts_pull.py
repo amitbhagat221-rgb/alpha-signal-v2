@@ -34,17 +34,16 @@ import argparse
 import hashlib
 import io
 import re
-import sqlite3
 import sys
-import time
-from datetime import date, datetime
+from datetime import datetime
 
 import pandas as pd
 from bs4 import BeautifulSoup
 
 
-from db import get_db, read_sql
+from db import get_db, insert_df, read_sql
 from hosts import HOSTS
+import runlog
 from sources import _http
 from sources.screener_pull import (
     COMPANY_CONSOLIDATED_URL,
@@ -284,34 +283,16 @@ def _existing_urls(sid: str) -> set[str]:
     return set(df["source_url"].tolist()) if not df.empty else set()
 
 
-def _store_rows(rows: list[dict], max_retries: int = 6) -> int:
-    """INSERT OR IGNORE content-addressed transcript rows. Returns rows actually written.
-
-    Retries on transient `database is locked`. get_db() already sets
-    busy_timeout=5000, but *write-write* contention (the nightly backup's VACUUM,
-    the daily pipeline, a DuckDB refresh) raises SQLITE_BUSY immediately for
-    deadlock-avoidance regardless of the timeout. A linear backoff covers that
-    gap so a multi-hour harvest is never lost to a one-second lock.
-    """
+def _store_rows(rows: list[dict]) -> int:
+    """INSERT OR IGNORE content-addressed transcript rows; returns rows actually
+    written. Write-write locks are retried by db.insert_df (lock_retries)."""
     if not rows:
         return 0
     cols = ["sid", "doc_type", "period_label", "doc_date", "announce_date",
             "bse_filing_date", "source_url", "pdf_url", "n_pages", "char_count",
             "raw_text", "sha256", "fetched_at"]
-    payload = [tuple(r.get(c) for c in cols) for r in rows]
-    sql = (f"INSERT OR IGNORE INTO transcripts ({','.join(cols)}) "
-           f"VALUES ({','.join('?' * len(cols))})")
-    for attempt in range(max_retries):
-        try:
-            with get_db() as conn:
-                before = conn.total_changes
-                conn.executemany(sql, payload)
-                return conn.total_changes - before
-        except sqlite3.OperationalError as e:
-            if "locked" not in str(e).lower() or attempt == max_retries - 1:
-                raise
-            time.sleep(2.0 * (attempt + 1))  # 2,4,6,8,10s
-    return 0
+    return insert_df(pd.DataFrame([[r.get(c) for c in cols] for r in rows], columns=cols),
+                     "transcripts", lock_retries=5)
 
 
 # ──────────────────────────────── pull ─────────────────────────────────
@@ -470,6 +451,7 @@ def main():
             rep = {"sid": r.sid, "ticker": r.ticker,
                    "status": f"ERROR:{type(e).__name__}", "found": 0, "new": 0}
             print(f"  [{r.sid:>6} {r.ticker:<14}] {rep}  ({e})", flush=True)
+            runlog.item_error("transcripts", f"{r.sid}/{r.ticker}", e)
             continue
         tot_new += rep.get("new", 0)
         tot_dl += rep.get("downloaded", 0)

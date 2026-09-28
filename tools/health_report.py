@@ -107,6 +107,7 @@ def gather(since_days=1):
         "sanity":   _gather_sanity,
         "factor_registry": _gather_factor_registry,
         "factor_decay": _gather_factor_decay,
+        "feeds": _gather_feeds,
     }
     with _cf.ThreadPoolExecutor(max_workers=len(_tasks)) as _ex:
         _futs = {k: _ex.submit(fn) for k, fn in _tasks.items()}
@@ -283,6 +284,17 @@ def _gather_dossiers():
     return out
 
 
+def _gather_feeds():
+    """Per-feed state + verdicts (plan 0018: canaries, orphans, resilience, registry
+    drift). A failure to compute them is itself reported — never silently empty."""
+    try:
+        from checks.feeds import feed_state, feed_verdicts, registry_drift
+        rows = feed_state()
+        return {"rows": rows, "verdicts": feed_verdicts(rows, drift=registry_drift()), "error": None}
+    except Exception as e:                                   # noqa: BLE001
+        return {"rows": [], "verdicts": [], "error": f"{type(e).__name__}: {e}"}
+
+
 def _gather_sanity():
     """Run the assertion suite from tools/data_sanity. Returns the violation list."""
     try:
@@ -414,6 +426,23 @@ def _classify(state):
             "message": f"{d['n_failed_validation']}/{d['n_thesis']} dossiers smuggled numbers into narrative",
             "detail": f"latest={d['latest_file']}; samples: {sample_text}",
         })
+
+    # Feeds (plan 0018) — canary verdicts, orphans, missing fallbacks, registry drift.
+    # Three or more "no recent canary" collapse into one issue: that is the canary
+    # cron itself being dead, not N separate feed problems.
+    fstate = state.get("feeds") or {}
+    if fstate.get("error"):
+        issues.append({"severity": WARN, "code": "FEED_STATE_ERROR",
+                       "message": "feed checks could not be computed", "detail": fstate["error"]})
+    fv = [v for v in fstate.get("verdicts", []) if v["severity"] in (CRITICAL, WARN)]
+    missing = [v for v in fv if v["code"] == "FEED_CANARY_MISSING"]
+    if len(missing) >= 3:
+        fv = [v for v in fv if v["code"] != "FEED_CANARY_MISSING"]
+        issues.append({"severity": WARN, "code": "FEED_CANARY_MISSING",
+                       "message": f"{len(missing)} feeds have no recent canary verdict — is `run.sh canary` (02:45 UTC) running?",
+                       "detail": ", ".join(v["target"] for v in missing)})
+    issues += [{"severity": v["severity"], "code": f"{v['code']}:{v['target']}",
+                "message": v["message"], "detail": v["detail"]} for v in fv]
 
     # Watchdog hasn't run at all → critical (covers the original 2026-05-22 bug)
     if state["watchdog"]["last_run"] is None:

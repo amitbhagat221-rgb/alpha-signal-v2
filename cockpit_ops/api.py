@@ -2518,3 +2518,164 @@ def _trust_overview() -> dict:
         "anchor_sources": anchor_sources,
         "factor_breakdown": factor_breakdown,
     }
+
+
+# ─────────────── Data Supply (plan 0018): feeds, canaries, discovery, known issues ───────────────
+
+def _clean(o):
+    """NaN/NaT → None, recursively, so templates and JSON see plain values."""
+    if isinstance(o, dict):
+        return {k: _clean(v) for k, v in o.items()}
+    if isinstance(o, (list, tuple)):
+        return [_clean(v) for v in o]
+    try:
+        if o is not None and not isinstance(o, str) and pd.isna(o):
+            return None
+    except (TypeError, ValueError):
+        pass
+    return o
+
+
+_PLAIN = {   # verdict code → plain words for the page (the email keeps the precise codes)
+    "FEED_CANARY_FAIL": "Health check failed",
+    "FEED_CANARY_WARN": "Health check warning",
+    "FEED_CANARY_ERROR": "Health check crashed (our code)",
+    "FEED_CANARY_MISSING": "Health check hasn't run recently",
+    "FEED_RUN_FAILED": "Last run failed",
+    "FEED_OUTDATED": "Data is out of date",
+    "FEED_ORPHAN": "Not scheduled to run",
+    "FEED_NO_FALLBACK": "Critical, and no backup source",
+}
+
+
+def _age_label(days):
+    if days is None:
+        return None
+    d = int(round(float(days)))
+    # age of the newest data point (e.g. a quarter-end), not of the fetch — "on
+    # schedule" / "overdue" beside it comes from the freshness rule, which knows the lag
+    return "today" if d <= 0 else ("1 day ago" if d == 1 else f"{d} days ago")
+
+
+def _plain(r):
+    """Plain-language fields for the simplified Data Supply page."""
+    last = r.get("canary_last") or {}
+    r["state"] = {"CRITICAL": "Broken", "WARN": "Needs a look"}.get(r.get("health"), "OK")
+    r["importance"] = {"T1": "Critical", "T2": "Normal"}.get(r.get("tier"), "")
+    if not r.get("canary"):
+        r["check"] = "no check"
+    elif not last:
+        r["check"] = "not run yet"
+    else:
+        r["check"] = {"PASS": "passed", "FAIL": "failed", "WARN": "warning", "ERROR": "crashed"}.get(last["status"], last["status"])
+    r["check_when"] = (last.get("checked_at") or "")[5:16].replace("T", " ") if last else ""
+    wf = r.get("worst_freshness") or {}
+    r["age"] = _age_label(wf.get("age_days"))
+    r["age_bad"] = wf.get("freshness") in ("OUTDATED", "STALE")
+    r["backup"] = {"fallback": "Yes", "serve-stale": "No — keeps using the last good data",
+                   "none": "No"}.get(r.get("resilience"), "—")
+    problems, labels = [], []
+    for v in r.get("verdicts", []):
+        # T2 canary warnings are INFO for the email, but the page shows them: a
+        # "warning" health check next to an "OK" status reads as a contradiction.
+        shown = v["severity"] in ("CRITICAL", "WARN") or v["code"] == "FEED_CANARY_WARN"
+        if shown and v["code"] in _PLAIN:
+            detail = (v.get("detail") or "").strip()
+            labels.append(_PLAIN[v["code"]])
+            problems.append(_PLAIN[v["code"]] + (f": {detail[:200]}" if detail and v["code"] != "FEED_ORPHAN" else ""))
+    r["problems"], r["problem_labels"] = problems, labels
+    if r["state"] == "OK" and labels:
+        r["state"] = "Needs a look"
+    r["where"] = next((e.get("location") for e in r.get("log_problems") or [] if e.get("location")), None)
+    return r
+
+
+@_ttl_cache(60)
+def get_feed_overview():
+    """Everything the /feeds page shows, from feeds.FEEDS + checks.feeds (one source
+    of truth with the health report — the page and the email cannot disagree)."""
+    import feeds
+    from checks import CRITICAL, WARN
+    from checks.feeds import feed_state, feed_verdicts, registry_drift
+
+    rows = _clean(feed_state())
+    drift = registry_drift()
+    verdicts = feed_verdicts(rows, drift=drift)
+    by_feed = {}
+    for v in verdicts:
+        by_feed.setdefault(v["target"], []).append(v)
+    sev_rank = {CRITICAL: 0, WARN: 1, "INFO": 2}
+    for r in rows:
+        vs = list(by_feed.get(r["feed"], []))
+        # The page's dot is OVERALL health: canary/registry verdicts (the email's),
+        # plus the feed's last run and the freshness of what it writes (the email
+        # reports those through its pipeline/freshness verdicts).
+        live_feed = r["status"] in feeds.LIVE and r["tier"] in ("T1", "T2")
+        lr = r.get("last_run") or {}
+        if live_feed and lr.get("status") == "FAILED":
+            vs.append({"severity": WARN, "code": "FEED_RUN_FAILED", "target": r["feed"],
+                       "message": f"{r['feed']} last run FAILED ({lr.get('step_name')})",
+                       "detail": (lr.get("error_message") or "")[:200]})
+        wf = r.get("worst_freshness") or {}
+        if live_feed and wf.get("freshness") == "OUTDATED":
+            vs.append({"severity": WARN, "code": "FEED_OUTDATED", "target": r["feed"],
+                       "message": f"{r['feed']} writes {wf['table']}, OUTDATED ({wf.get('age_days')}d old)",
+                       "detail": ""})
+        vs.sort(key=lambda v: sev_rank.get(v["severity"], 3))
+        r["verdicts"] = vs
+        r["health"] = vs[0]["severity"] if vs and vs[0]["severity"] in (CRITICAL, WARN) else "OK"
+        last = r.get("canary_last") or {}
+        r["canary_status"] = last.get("status")
+
+    # Run log (runlog.py): each feed's latest run and its recent WARN/ERROR events.
+    import runlog
+    try:
+        last_runs, recent = {}, {}
+        for x in runlog.runs(limit=600):
+            if x.get("feed"):
+                last_runs.setdefault(x["feed"], x)
+        for e in runlog.events(level="WARN", since="7d", limit=1500):
+            if e.get("feed") and len(recent.setdefault(e["feed"], [])) < 5:
+                recent[e["feed"]].append({k: e.get(k) for k in ("ts", "level", "event", "symptom", "message",
+                                                                 "location", "http_status", "item", "run_id")})
+    except Exception:                                     # noqa: BLE001 — table absent on a fresh DB
+        last_runs, recent = {}, {}
+    for r in rows:
+        r["log_run"] = _clean(last_runs.get(r["feed"]))
+        r["log_problems"] = _clean(recent.get(r["feed"], []))
+
+    for r in rows:
+        _plain(r)
+
+    live = [r for r in rows if r["status"] in feeds.LIVE]
+    probed = [r for r in live if r["canary"]]
+    t1 = [r for r in live if r["tier"] == "T1"]
+
+    def count(pred, rs=live):
+        return sum(1 for r in rs if pred(r))
+
+    summary = {
+        "live": len(live), "t1": len(t1), "t2": count(lambda r: r["tier"] == "T2"),
+        "discovery": count(lambda r: r["status"] in feeds.DISCOVERY + ("probation",), rows),
+        "retired": count(lambda r: r["status"] == "retired", rows),
+        "canary_total": len(probed), "canary_pass": count(lambda r: r["canary_status"] == "PASS", probed),
+        "canary_fail": count(lambda r: r["canary_status"] in ("FAIL", "ERROR"), probed),
+        "canary_warn": count(lambda r: r["canary_status"] == "WARN", probed),
+        "drift": count(lambda r: (r.get("canary_last") or {}).get("symptom") == "D", probed),
+        "critical": count(lambda r: r["health"] == CRITICAL), "warn": count(lambda r: r["health"] == WARN),
+        "t1_fallback": count(lambda r: r["resilience"] == "fallback", t1),
+        "t1_single": count(lambda r: r["resilience"] == "serve-stale", t1),
+        "orphans": count(lambda r: not r["schedule"]), "registry_drift": len(drift),
+        "last_canary": max((r["canary_last"]["checked_at"] for r in probed if r.get("canary_last")), default=None),
+    }
+    order = {"Broken": 0, "Needs a look": 1, "OK": 2}
+    summary.update(n_ok=sum(r["state"] == "OK" for r in live),
+                   n_look=sum(r["state"] == "Needs a look" for r in live),
+                   n_broken=sum(r["state"] == "Broken" for r in live),
+                   critical_no_backup=sum(r["tier"] == "T1" and r["resilience"] != "fallback" for r in live))
+    return {
+        "summary": summary,
+        "simple": sorted(live, key=lambda r: (order[r["state"]], r["tier"] != "T1", r["feed"])),
+        "new_sources": [r for r in rows if r["status"] in ("wanted", "candidate", "probation")],
+        "drift": [{"what": w, "name": n} for w, n in drift],
+    }

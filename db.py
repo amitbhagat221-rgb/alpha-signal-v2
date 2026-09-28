@@ -118,6 +118,8 @@ def init_db():
 _COLUMN_MIGRATIONS = [
     # XBRL filing the trade came from — nse_insider skips filings already stored (2026-09-27)
     ("insider_trades", "filing_id", "TEXT"),
+    # total shareholder count per quarter (Screener page, plan 0018) — crowding signal
+    ("shareholding", "n_shareholders", "INTEGER"),
 ]
 
 
@@ -338,12 +340,26 @@ def _drop_future_dated_rows(df, table_name):
     return df
 
 
-def insert_df(df, table_name, conn=None):
+def _count_write(table, n):
+    """Rows written per table for the run log's run_end (best-effort)."""
+    try:
+        import runlog
+        runlog.count_write(table, n)
+    except Exception:                                   # noqa: BLE001
+        pass
+
+
+def insert_df(df, table_name, conn=None, lock_retries=0):
     """
     Insert DataFrame rows. Skips rows that violate UNIQUE/PRIMARY KEY
-    constraints (idempotent — safe to re-run).
+    constraints (idempotent — safe to re-run). Returns rows actually inserted.
 
     Use for append-only tables: insider_trades, bulk_deals, news_articles.
+
+    lock_retries > 0 retries `database is locked` with a linear 2 s, 4 s, … backoff.
+    busy_timeout does not cover *write-write* contention (the nightly backup's
+    VACUUM, the pipeline, a DuckDB refresh raise SQLITE_BUSY at once for deadlock
+    avoidance), so multi-hour harvests pass lock_retries to never lose a batch.
     """
     if df.empty:
         return 0
@@ -358,13 +374,20 @@ def insert_df(df, table_name, conn=None):
 
     def _execute(connection):
         cursor = connection.executemany(sql, df.values.tolist())
+        _count_write(table_name, cursor.rowcount)
         return cursor.rowcount
 
     if conn is not None:
         return _execute(conn)
-    else:
-        with get_db() as connection:
-            return _execute(connection)
+    for attempt in range(lock_retries + 1):
+        try:
+            with get_db() as connection:
+                return _execute(connection)
+        except sqlite3.OperationalError as e:
+            if "locked" not in str(e).lower() or attempt == lock_retries:
+                raise
+            _time_module.sleep(2.0 * (attempt + 1))
+    return 0
 
 
 # ── LLM cost ledger ──
@@ -638,6 +661,7 @@ def upsert_df(df, table_name, conn=None):
                 # df contains only PK cols — INSERT OR IGNORE (no-op on conflict)
                 sql = f"INSERT OR IGNORE INTO [{table_name}] ({cols}) VALUES ({placeholders})"
         cursor = connection.executemany(sql, df.values.tolist())
+        _count_write(table_name, cursor.rowcount)
         return cursor.rowcount
 
     if conn is not None:

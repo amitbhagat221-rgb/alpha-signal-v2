@@ -32,7 +32,8 @@ def test_tickertape_analyst_raises_when_every_page_fails(monkeypatch):
     monkeypatch.setattr(ta, "read_sql", lambda q, params=None: pd.DataFrame(
         {"sid": ["A", "B", "C"], "slug": ["stocks/a-A", "stocks/b-B", "stocks/c-C"]}))
     monkeypatch.setattr(ta, "polite_get", _down)
-    monkeypatch.setattr(ta, "upsert_df", lambda df, t: pytest.fail("must not write"))
+    import db                       # writes go through sources._http.write_tagged → db.upsert_df
+    monkeypatch.setattr(db, "upsert_df", lambda df, t: pytest.fail("must not write"))
     with pytest.raises(RuntimeError, match="0 of 3"):
         ta.compute()
 
@@ -48,7 +49,8 @@ def test_tickertape_analyst_writes_both_tables(monkeypatch):
         {"sid": ["A", "B"], "slug": ["stocks/a-A", "stocks/b-B"]}))
     monkeypatch.setattr(ta, "polite_get", lambda url, headers=None: _Resp(html))
     written = {}
-    monkeypatch.setattr(ta, "upsert_df", lambda df, t: written.setdefault(t, []).append(df))
+    import db
+    monkeypatch.setattr(db, "upsert_df", lambda df, t: written.setdefault(t, []).append(df))
     assert ta.compute() == 2
     assert len(written["analyst_consensus"][0]) == 2
     fh = written["forecast_history"][0]

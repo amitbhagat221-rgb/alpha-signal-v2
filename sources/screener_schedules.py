@@ -36,16 +36,16 @@ import argparse
 import calendar
 import re
 from datetime import date
-from typing import Iterable
 
 import pandas as pd
 import requests
 
-from db import insert_df, read_sql, upsert_df
+from db import upsert_df
 from sources import _http
 from sources.screener_pull import (
     COMPANY_CONSOLIDATED_URL,
     COMPANY_URL,
+    get_targets,
     log_error,
     make_session,
 )
@@ -208,23 +208,6 @@ def pull_one(
     return upsert_df(df, "fundamentals_screener")
 
 
-def get_targets(args) -> pd.DataFrame:
-    if args.sid:
-        return read_sql(
-            "SELECT sid, ticker FROM stocks WHERE sid = ?", params=[args.sid]
-        )
-    if args.tier:
-        return read_sql(
-            "SELECT sid, ticker FROM stocks WHERE cap_tier = ? AND ticker IS NOT NULL "
-            "ORDER BY market_cap_cr DESC",
-            params=[args.tier],
-        )
-    if args.universe:
-        return read_sql(
-            "SELECT sid, ticker FROM stocks WHERE ticker IS NOT NULL "
-            "ORDER BY market_cap_cr DESC"
-        )
-    return pd.DataFrame()
 
 
 def main():

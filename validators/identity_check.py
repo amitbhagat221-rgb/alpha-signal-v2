@@ -59,6 +59,7 @@ DOWNSTREAM
     Phase 5's lineage-completeness gate will leverage this.
 """
 
+import html
 import re
 from collections import namedtuple
 from typing import Optional
@@ -118,8 +119,12 @@ def verify_identity(
 # ─────────── Per-source verifiers ───────────
 
 def _normalise_company_name(s: str) -> str:
-    """Strip non-alphanumeric + lowercase. Same pattern as v1 mc_slug matcher."""
-    return re.sub(r"[^a-z0-9]", "", (s or "").lower())
+    """Strip non-alphanumeric + lowercase. Same pattern as v1 mc_slug matcher.
+    HTML entities are decoded and '&' reads as 'and' first — Screener's h1 says
+    'Bajaj Holdings &amp; Investment Ltd' where stocks.name says '… and …' (a false
+    WRONG_ENTITY found by the run log, 2026-09-28)."""
+    s = html.unescape(s or "").lower().replace("&", " and ")
+    return re.sub(r"[^a-z0-9]", "", s)
 
 
 def _mc_slug_company(slug: str) -> str:
@@ -315,6 +320,9 @@ def quarantine_row(
     falls back to "drop the row, don't write live".
     """
     from validators._verdicts import write_verdict
+    # Underscore keys are in-flight helper values (banking_metrics' _book_value_cr),
+    # never table columns — writing them failed every quarantine (run log, 2026-09-28).
+    row = {k: v for k, v in row.items() if not str(k).startswith("_")}
     return write_verdict("gate_1_identity", sid, source_table, datum_class, 0,
                          _identity_reasons(verdict), row=row,
                          snapshot_date=snapshot_date, quarantine=True)

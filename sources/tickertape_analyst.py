@@ -26,12 +26,11 @@ import json
 from datetime import datetime
 from typing import Optional
 
-import pandas as pd
 from bs4 import BeautifulSoup
 
 
-from db import read_sql, upsert_df
-from sources._http import host, polite_get, run_harvester
+from db import read_sql
+from sources._http import host, polite_get, run_harvester, write_tagged
 
 # Gap (2 s) and browser headers come from the host door: hosts.HOSTS["tickertape"].
 
@@ -210,13 +209,8 @@ def compute(limit=None, dry_run=False):
         return ([("analyst_consensus", arow)]
                 + [("forecast_history", f) for f in _extract_forecast_rows(sid, data, fetched_at)])
 
-    def write(tagged):
-        # One page feeds two tables; flush both, count the primary one.
-        for table in ("analyst_consensus", "forecast_history"):
-            rows = [r for t, r in tagged if t == table]
-            if rows:
-                upsert_df(pd.DataFrame(rows), table)
-        return sum(1 for t, _ in tagged if t == "analyst_consensus")
+    def write(tagged):   # one page feeds two tables; count the primary one
+        return write_tagged(tagged, ("analyst_consensus", "forecast_history"))
 
     # RAISES if no page parsed at all (Tickertape block / page-shape change) —
     # the old loop reported SUCCESS with 0 rows in that case.

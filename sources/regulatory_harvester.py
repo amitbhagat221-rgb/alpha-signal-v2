@@ -31,6 +31,7 @@ import pandas as pd
 import requests
 
 from db import get_db, insert_df, read_sql
+import runlog
 from sources._http import polite_get
 
 
@@ -575,6 +576,7 @@ def harvest_incremental(days=30, dry_run=False):
         except Exception as e:
             n_err += 1
             print(f"  Error on {topic}: {e}")
+            runlog.item_error("google news topic", topic, e)
 
     print(f"\nRegulatory incremental: {len(all_items)} articles fetched")
     # A 30-day window across 39 topics normally returns ~1,800-2,100 articles

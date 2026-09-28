@@ -1,6 +1,8 @@
+45 2 * * * /home/ubuntu/alpha-signal-v2/run.sh canary >> /home/ubuntu/alpha-signal-v2/output/canary.log 2>&1
 30 3 * * * /home/ubuntu/alpha-signal-v2/run.sh morning >> /home/ubuntu/alpha-signal-v2/output/pipeline.log 2>&1
 7 19 1 * * /home/ubuntu/alpha-signal-v2/run.sh tickertape >> /home/ubuntu/alpha-signal-v2/output/tickertape_cron.log 2>&1
 0 14 * * * /home/ubuntu/alpha-signal-v2/run.sh forward >> /home/ubuntu/alpha-signal-v2/output/daily_forward.log 2>&1
+0 10 * * 6 /home/ubuntu/alpha-signal-v2/run.sh estimates >> /home/ubuntu/alpha-signal-v2/output/estimates.log 2>&1
 0 15 * * * /home/ubuntu/alpha-signal-v2/run.sh watchdog >> /home/ubuntu/alpha-signal-v2/output/watchdog.log 2>&1
 0 4 * * * /home/ubuntu/alpha-signal-v2/run.sh health >> /home/ubuntu/alpha-signal-v2/output/health.log 2>&1
 30 4 1 * * /home/ubuntu/alpha-signal-v2/run.sh pt_snapshot >> /home/ubuntu/alpha-signal-v2/output/yf_snapshot.log 2>&1

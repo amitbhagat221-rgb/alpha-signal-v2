@@ -43,6 +43,7 @@ from bs4 import BeautifulSoup
 
 
 from db import get_db, read_sql
+import runlog
 from sources import _http
 
 # ── Rate-limit policy ──
@@ -483,12 +484,14 @@ def scrape(limit: int | None = None, scheme: str | None = None,
         except RateLimited as e:
             consecutive_errors += 1
             n_err += 1
+            runlog.item_failed("etmoney holdings", row.etm_slug, f"rate limited: {e}", symptom="G")
             print(f"  [{i}] RATE-LIMITED ({e}) — pausing {ERROR_PAUSE_SECONDS}s before continuing", flush=True)
             time.sleep(ERROR_PAUSE_SECONDS if consecutive_errors >= ERROR_PAUSE_THRESHOLD else 60)
             continue
         except Exception as e:
             n_err += 1
             consecutive_errors += 1
+            runlog.item_error("etmoney holdings", row.etm_slug, e)
             continue
 
         if not holdings:

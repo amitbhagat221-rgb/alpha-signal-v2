@@ -49,6 +49,7 @@ import requests
 
 from db import get_db, insert_df, read_sql, upsert_df
 from hosts import HOSTS
+import runlog
 from sources import _http
 
 COOKIE_FILE = Path.home() / ".cache" / "screener_cookie.json"
@@ -190,6 +191,36 @@ def check_auth(s: requests.Session) -> tuple[bool, str]:
     return False, "could not determine auth state from homepage"
 
 
+_SHAREHOLDERS = {}   # ticker → [(end_date, n)] parsed from the company page fetch_export loads anyway
+_MONTH = {m: i for i, m in enumerate(("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"), 1)}
+
+
+def parse_shareholders(html: str) -> list[tuple[str, int]]:
+    """The 'No. of Shareholders' row of Screener's quarterly shareholding table →
+    [(quarter_end_iso, count)]. ~12 quarters; [] when the table/row is absent.
+    Same period + filing lag as the shareholding % columns (plan 0018)."""
+    import calendar
+    try:
+        m = re.search(r'<table[^>]*id="quarterly-shp".*?</table>', html or "", re.S)
+        if not m:
+            return []
+        tbl = pd.read_html(io.StringIO(m.group(0)))[0]
+    except Exception as e:                      # noqa: BLE001 — a bonus field must never cost the fundamentals
+        runlog.note(f"shareholder-count parse failed: {type(e).__name__}: {e}", "WARN")
+        return []
+    hit = tbl[tbl.iloc[:, 0].astype(str).str.contains("No. of Shareholders", na=False)]
+    if hit.empty:
+        return []
+    out = []
+    for col in tbl.columns[1:]:
+        mm = re.match(r"([A-Z][a-z]{2})\s+(\d{4})", str(col))
+        n = pd.to_numeric(str(hit.iloc[0][col]).replace(",", ""), errors="coerce")
+        if mm and mm.group(1) in _MONTH and pd.notna(n):
+            y, mo = int(mm.group(2)), _MONTH[mm.group(1)]
+            out.append((f"{y:04d}-{mo:02d}-{calendar.monthrange(y, mo)[1]:02d}", int(n)))
+    return out
+
+
 def fetch_export(s: requests.Session, ticker: str) -> tuple[bytes, str]:
     """Download Excel export for a single stock. Returns (xlsx_bytes, basis).
 
@@ -220,6 +251,8 @@ def fetch_export(s: requests.Session, ticker: str) -> tuple[bytes, str]:
         if page.status_code != 200:
             last_err = f"{view}: page HTTP {page.status_code}"
             continue
+
+        _SHAREHOLDERS[ticker] = parse_shareholders(page.text)   # free: the page is loaded anyway
 
         # Screener puts the export endpoint on a button via HTML5 `formaction=`,
         # not on the parent <form>'s `action=` attribute.
@@ -385,6 +418,9 @@ def log_error(
         ]
     )
     insert_df(df, "screener_pull_errors")
+    sym = {"http": {401: "C", 403: "A", 404: "B", 429: "G"}.get(http_status, "E"), "parse": "D",
+           "empty": "B", "fetch": "E"}.get(error_type)
+    runlog.item_failed("screener", f"{sid}/{ticker}", f"{error_type}: {message}", symptom=sym)
 
 
 def pull_one(s: requests.Session, sid: str, ticker: str, dry_run: bool = False) -> int:
@@ -419,9 +455,13 @@ def pull_one(s: requests.Session, sid: str, ticker: str, dry_run: bool = False) 
         )
         # Log but still write — partial data is better than nothing.
 
+    shp = _SHAREHOLDERS.pop(ticker, [])
     if dry_run:
         return len(long_df)
 
+    if shp:     # column-level upsert: leaves Tickertape's % columns on the same rows intact
+        upsert_df(pd.DataFrame([{"sid": sid, "end_date": d, "n_shareholders": n} for d, n in shp]),
+                  "shareholding")
     return upsert_df(long_df, "fundamentals_screener")
 
 

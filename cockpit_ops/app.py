@@ -13,6 +13,7 @@ Run: uvicorn cockpit_ops.app:app --host 0.0.0.0 --port 3001 --reload
 Production: systemctl restart alpha-cockpit-ops
 """
 
+import json
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -56,6 +57,7 @@ def _prewarm_cache():
         ("command_centre",     lambda: api.get_command_centre()),
         ("health_overview",    lambda: api.get_health_overview()),
         ("pipeline_status",    lambda: api.get_pipeline_status()),
+        ("feed_overview",      lambda: api.get_feed_overview()),
     ], label="ops cache-warm")
 
 
@@ -117,6 +119,47 @@ def flow_page(request: Request):
     return templates.TemplateResponse(request, "flow.html", {
         "page": "flow", **overview,
     })
+
+
+@app.get("/feeds", response_class=HTMLResponse)
+def feeds_page(request: Request):
+    """Data Supply — feeds by family, canaries, resilience, discovery funnel,
+    known issues (plan 0018). Same checks.feeds verdicts as the health email."""
+    return templates.TemplateResponse(request, "feeds.html", {
+        "page": "feeds", **api.get_feed_overview(),
+    })
+
+
+@app.get("/api/feeds")
+def api_feeds():
+    return api.get_feed_overview()
+
+
+@app.get("/api/feeds/{feed}/incident")
+def api_feed_incident(feed: str):
+    """Incident bundle for one feed (runlog.bundle): registry facts, code paths,
+    canary verdicts, recent runs, the failing run's events with exact file:line and
+    redacted upstream responses, the symptom playbook and past incidents — what an
+    outside agent needs to diagnose and instruct a fix."""
+    import feeds
+    import runlog
+    if feed not in feeds.FEEDS:
+        return JSONResponse({"error": f"unknown feed {feed}"}, status_code=404)
+    return JSONResponse(json.loads(json.dumps(runlog.bundle(feed), default=str)))
+
+
+@app.get("/api/runs")
+def api_runs(feed: str = None, step: str = None, limit: int = 20):
+    import runlog
+    return runlog.runs(feed=feed, step=step, limit=min(limit, 200))
+
+
+@app.get("/api/run-events")
+def api_run_events(run: str = None, feed: str = None, step: str = None, level: str = None,
+                   since: str = None, limit: int = 100):
+    """Filterable run log: ?feed=bse_announcements&level=ERROR&since=24h"""
+    import runlog
+    return json.loads(json.dumps(runlog.events(run, feed, step, level, since, min(limit, 500)), default=str))
 
 
 @app.get("/command", response_class=HTMLResponse)

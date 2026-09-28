@@ -543,6 +543,26 @@ TABLES = {
     "mf_sector_allocation_quarantine": {
         "kind": "QUARANTINE", "domain": "Pipeline", "date_col": "as_of_date",
     },
+    "feed_checks": {
+        "kind": "LOG", "domain": "Pipeline", "date_col": "run_date", "freq": "daily",
+        "depth": "Per-feed canary / gate verdicts (append-only, plan 0018)",
+        "description": "One row per feed check: canary (1-item live probe before the morning run), gate or reconcile. Status PASS/WARN/FAIL/ERROR, symptom class A-H, HTTP status, rows, bytes, shape fingerprint vs the accepted baseline, and a JSON detail with the gate results and any drift diff. Read by the ops Data Supply page and the health report's feed verdicts.",
+    },
+    "run_events": {
+        "kind": "LOG", "domain": "Pipeline", "date_col": "ts", "freq": "daily",
+        "depth": "Structured run log, 90-day retention (plan 0018, runlog.py)",
+        "description": "One row per event of a step / cron / manual source run, keyed by run_id: run_start, request (failed or retried HTTP call with host, redacted URL, status, latency and a redacted response snippet), item_error, exception (exact file:line, symptom class, frames), summary, run_end (per-host request/status counters, retries, rows written per table, output tail), run_exit (shell exit code). Queried by the ops Data Supply page, `python -m runlog`, and agents over MCP.",
+    },
+    "market_events": {
+        "kind": "RAW", "domain": "Trades & Corporate", "date_col": "fetched_at", "freq": "daily",
+        "depth": "Credit ratings from 2025-01, IPO listings from 2012, index changes 1996-2020 (plan 0018)",
+        "description": "One row per market event, all event streams in one table (plan 0017 `events` shape): type = credit_rating (NSE Reg-30 feed with the earlier rating, direction derived), ipo_listing (NSE past issues + anchor lock-in dates by rule), index_change (NSE inclusion/exclusion log). event_time = when it happened; available_at = when the market could know it (PIT); payload = the source row as JSON.",
+    },
+    "analyst_estimates": {
+        "kind": "RAW", "domain": "Fundamentals", "date_col": "last_seen_at", "freq": "weekly",
+        "depth": "Yahoo EPS estimate vs actual per report back to ~2007 (L/M), EPS trend snapshots from 2026-09 (plan 0018)",
+        "description": "Versioned analyst estimates (plan 0017 `estimates` shape): eps_estimate / eps_actual / eps_surprise_pct per earnings report (target_period = report date), and weekly EPS-trend snapshots (current and 7/30/60/90 days ago, revisions up/down, low/high, analyst count; target_period = Yahoo period label). available_at: the fetch time for snapshots; the report time for historical rows, labelled pit_unverified until the estimate's freeze-at-report is verified.",
+    },
     "pipeline_log": {
         "kind": "LOG", "domain": "Pipeline", "date_col": "run_date",
         "depth": "Per-step run history (append-only)",

@@ -32,12 +32,14 @@ logged() {         # logged <step_name> <cmd...>: run a cron-only job and record
     local step="$1"; shift  # (review F3: cron jobs wrote no log row, so a dead one — the Screener
                             # harvest at 2448/2448 failures, BSE at 8/8 day errors — was invisible)
     if [ -n "${DRY:-}" ]; then echo "+ [pipeline_log ← $step]"; "$@"; return; fi
-    local t0 rc; t0=$(date +%Y-%m-%dT%H:%M:%S)
-    "$@"; rc=$?
-    python -c 'import sys; from pipeline import log_step; ok = sys.argv[2] == "0"
+    local t0 rc run_id; t0=$(date +%Y-%m-%dT%H:%M:%S)
+    run_id="$step:$(date -u +%Y%m%dT%H%M%S):$$"   # plan 0018: every python process of this job
+    ALPHA_STEP="$step" ALPHA_RUN_ID="$run_id" "$@"; rc=$?   # logs to run_events under this run_id
+    python -c 'import sys; from pipeline import log_step; import runlog; ok = sys.argv[2] == "0"
 log_step(sys.argv[1], "SUCCESS" if ok else "FAILED", started=sys.argv[3],
-         error=None if ok else f"exit {sys.argv[2]} (see the run.sh {sys.argv[4]} log)")' \
-        "$step" "$rc" "$t0" "$JOB" >/dev/null || echo "[warn] could not log $step to pipeline_log"
+         error=None if ok else f"exit {sys.argv[2]} (python -m runlog events --run {sys.argv[5]})")
+runlog.exit_code(sys.argv[5], sys.argv[1], sys.argv[2], started=sys.argv[3])' \
+        "$step" "$rc" "$t0" "$JOB" "$run_id" >/dev/null || echo "[warn] could not log $step to pipeline_log"
     return $rc
 }
 
@@ -63,7 +65,17 @@ case "$JOB" in
         logged cron_nselib_daily_forward run python -m sources.nselib_pull --source daily_forward; echo "Exit code (nselib daily_forward): $?"
         # scrip_master must follow bse_announcements (it backfills sid on the new rows)
         logged cron_bse_announcements run python -m sources.bse_announcements --days 7; echo "Exit code (bse_announcements): $?"
-        logged cron_scrip_master run python -m sources.scrip_master;          echo "Exit code (scrip_master): $?" ;;
+        logged cron_scrip_master run python -m sources.scrip_master;          echo "Exit code (scrip_master): $?"
+        logged cron_nse_events run python -m sources.nse_events --ratings --days 10 --ipos; echo "Exit code (nse_events): $?" ;;
+    canary)             # 02:45 UTC — 1-item live probe per feed before the morning run (plan 0018):
+                        # T1 daily, T2 on Sundays; verdicts → feed_checks → health report
+        harvest_lock
+        logged cron_canary run python -m tools.canary --due ;;
+    estimates)          # Saturday 10:00 UTC — Yahoo EPS trend snapshots (covered stocks) + surprises
+                        # for stocks that reported in the last 3 weeks (plan 0018)
+        harvest_lock
+        logged cron_estimates run python -m sources.yahoo_estimates --trend --covered
+        logged cron_estimates_history run python -m sources.yahoo_estimates --history --reported-days 21 ;;
     watchdog)           # 15:00 UTC — re-run producers of stale tables (takes the lock itself)
         run python -m tools.freshness_watchdog ;;
     health)             # 04:00 UTC — health email + push
@@ -97,6 +109,6 @@ case "$JOB" in
         echo "Tickertape finished rc=$RC at $(date -u)"
         exit $RC ;;
     *)
-        echo "unknown job '$JOB' (morning forward watchdog health pt_snapshot backtest expected_return screener_cookie secrets_backup screener_universe tickertape)"
+        echo "unknown job '$JOB' (morning forward canary estimates watchdog health pt_snapshot backtest expected_return screener_cookie secrets_backup screener_universe tickertape)"
         exit 2 ;;
 esac

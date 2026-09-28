@@ -18,6 +18,8 @@ import logging
 import sys
 import time
 import traceback
+
+import runlog
 from datetime import date, datetime
 
 from config import PIPELINE, LOG_PATH
@@ -146,6 +148,7 @@ def run_step(name: str, module_path: str, func_name: str, critical: bool):
     started = datetime.now().isoformat(timespec="seconds")
     log_step(name, "RUNNING", started=started)
     log.info(f"[START] {name}")
+    runlog.start(name, module=module_path)          # structured run log (plan 0018)
 
     db.trace_start()
     try:
@@ -159,17 +162,23 @@ def run_step(name: str, module_path: str, func_name: str, critical: bool):
             error_msg = "post-check: " + "; ".join(failures)
             log_step(name, "FAILED", rows=rows, started=started, error=error_msg)
             log.error(f"[FAIL]  {name}  — {error_msg}")
+            runlog.note(error_msg, "ERROR", post_check=failures)
+            runlog.end("FAILED", rows=rows, error=error_msg)
             return None
         log_step(name, "SUCCESS", rows=rows, started=started)
         log.info(f"[DONE]  {name}  ({rows} rows)" if rows else f"[DONE]  {name}")
+        runlog.end("SUCCESS", rows=rows)
         return True
 
     except Exception as e:
         _check_declared(name, db.trace_stop())
-        error_msg = f"{type(e).__name__}: {e}"
+        ev = runlog.exception(e)
+        where = f" @ {ev['location']}" if ev and ev.get("location") else ""
+        error_msg = f"{type(e).__name__}: {e}{where}"
         log_step(name, "FAILED", started=started, error=error_msg)
         log.error(f"[FAIL]  {name}  — {error_msg}")
         log.debug(traceback.format_exc())
+        runlog.end("FAILED", error=error_msg)
         return False
 
 

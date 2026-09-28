@@ -14,11 +14,15 @@ Console) split out of the main trading cockpit so:
 | `/` | redirects to `/system` | — |
 | `/system` | Health Center (Live Issues Inbox, Data, Factors, Pipeline tabs) | `get_health_overview` + 4 others |
 | `/flow` | Pipeline producer/consumer DAG | `get_flow_overview` |
+| `/feeds` | Data Supply — feeds by family, canaries, T1 resilience, discovery funnel, known issues (plan 0018) | `get_feed_overview` |
 | `/command` | Command Centre — plans, factor library, data layer | `get_command_centre` |
 | `/sql` | Read-only SQL console | `run_sql_query` |
 | `/api/health/overview` | JSON | `get_health_overview` |
 | `/api/health` | JSON | `get_data_freshness` |
 | `/api/pipeline` | JSON | `get_pipeline_status` |
+| `/api/feeds` | JSON | `get_feed_overview` |
+| `/api/feeds/{feed}/incident` | JSON — incident bundle for an agent | `runlog.bundle` |
+| `/api/runs` · `/api/run-events` | JSON — run log (`?feed=&level=&since=`) | `runlog.runs` / `runlog.events` |
 | `/api/pipeline/rerun/{step_name}` | POST | `rerun_step` |
 | `/api/sql` | POST | `run_sql_query` |
 

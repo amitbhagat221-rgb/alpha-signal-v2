@@ -44,8 +44,8 @@ from datetime import date as _date, datetime, timedelta, timezone
 import pandas as pd
 
 
-from db import read_sql, upsert_df
-from sources._http import run_harvester
+from db import read_sql
+from sources._http import run_harvester, write_tagged
 SOURCE = "yfinance"
 
 
@@ -382,11 +382,7 @@ def compute(limit=None, ticker=None, tier=None, snapshot=False, dry_run=False):
         return rows
 
     def write(tagged):
-        for table in ("analyst_consensus", "analyst_consensus_snapshots"):
-            rows = [r for tb, r in tagged if tb == table]
-            if rows:
-                upsert_df(pd.DataFrame(rows), table)
-        return sum(1 for tb, _ in tagged if tb == "analyst_consensus")
+        return write_tagged(tagged, ("analyst_consensus", "analyst_consensus_snapshots"))
 
     # RAISES if not one attempted stock came back with a PT — Yahoo blocked us or
     # the .info shape changed (was SUCCESS/0 before). Mid-run flushes every 200.

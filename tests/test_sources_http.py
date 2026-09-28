@@ -211,3 +211,49 @@ def test_every_sources_module_imports():
         except Exception as e:
             failed.append(f"{f.stem}: {type(e).__name__}: {e}")
     assert not failed, "\n".join(failed)
+
+
+# ── shared helpers consolidated from per-module copies (plan 0018 ingestor audit) ──
+
+def test_to_float():
+    from sources._http import to_float
+    assert [to_float(v) for v in (None, "", "-", "x", "1.5", 2)] == [None, None, None, None, 1.5, 2.0]
+
+
+def test_write_tagged_upserts_each_table_and_counts_primary(monkeypatch):
+    import db
+    from sources._http import write_tagged
+    seen = {}
+    monkeypatch.setattr(db, "upsert_df", lambda df, t: seen.setdefault(t, len(df)))
+    n = write_tagged([("a", {"x": 1}), ("b", {"y": 2}), ("a", {"x": 3})], ("a", "b"))
+    assert n == 2 and seen == {"a": 2, "b": 1}
+
+
+def test_insert_df_retries_write_write_locks(monkeypatch, tmp_path):
+    import sqlite3
+    import contextlib
+    import pandas as pd
+    import db
+    path = tmp_path / "t.db"
+    sqlite3.connect(path).execute("CREATE TABLE t (k TEXT PRIMARY KEY)").connection.commit()
+    calls = {"n": 0}
+
+    @contextlib.contextmanager
+    def flaky():
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise sqlite3.OperationalError("database is locked")
+        conn = sqlite3.connect(path)
+        yield conn
+        conn.commit()
+        conn.close()
+
+    monkeypatch.setattr(db, "get_db", flaky)
+    monkeypatch.setattr(db._time_module, "sleep", lambda s: None)
+    assert db.insert_df(pd.DataFrame({"k": ["a", "b"]}), "t", lock_retries=5) == 2
+    assert calls["n"] == 3
+    assert db.insert_df(pd.DataFrame({"k": ["a", "c"]}), "t", lock_retries=5) == 1   # OR IGNORE
+    calls["n"] = 0
+    import pytest
+    with pytest.raises(sqlite3.OperationalError):
+        db.insert_df(pd.DataFrame({"k": ["z"]}), "t")                                  # no retries by default

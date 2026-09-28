@@ -155,4 +155,11 @@ def write_verdicts(verdicts) -> int:
         first = verdicts[0]
         print(f"  ⚠ write_verdicts failed ({len(verdicts)} × {first.get('gate')} "
               f"on {first.get('source_table')}/{first.get('sid')}): {e}", file=sys.stderr)
+        try:                                    # queryable, not just a line on stderr (plan 0018)
+            import runlog
+            runlog.note(f"write_verdicts failed on {first.get('source_table')}/{first.get('sid')} "
+                        f"({first.get('gate')}): {type(e).__name__}: {e}", "WARN",
+                        n=len(verdicts), gate=first.get("gate"))
+        except Exception:                       # noqa: BLE001
+            pass
         return 0

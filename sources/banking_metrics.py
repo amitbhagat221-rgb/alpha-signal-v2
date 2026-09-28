@@ -61,6 +61,7 @@ import pandas as pd
 
 
 from db import read_sql, upsert_df
+import runlog
 from sources import _http
 from sources.screener_pull import (
     make_session,
@@ -587,9 +588,12 @@ def main():
             print(f"  [{i+1:3d}/{len(targets)}] {sid:6s} ({ticker:14s}) → {n:3d} rows ({status})")
             if status.startswith("ALL_FAIL"):
                 errors.append((sid, status))
+                runlog.item_failed("banking_metrics", f"{sid}/{ticker}", status,
+                                   symptom="F" if "identity_gate" in status else None)
         except Exception as e:
             print(f"  [{i+1:3d}/{len(targets)}] {sid:6s} ✗ {type(e).__name__}: {e}")
             errors.append((sid, str(e)))
+            runlog.item_error("banking_metrics", f"{sid}/{ticker}", e)
 
     elapsed = time.time() - started
     print(f"\n{'═' * 60}")

@@ -13,6 +13,8 @@ hosts.HOSTS (ADR 0052 invariant 5 "Politeness"). Plain functions (ADR 0004):
   warm_session(home_url, ...)   requests.Session cookie-warmed on NSE/BSE's home page
   sid_map(col)                  cached {stocks.<col>: sid} lookup
   run_harvester(items, ...)     fetch → count errors → flush every N → RAISE on 0
+  write_tagged(tagged, tables)  run_harvester write_fn for one page → several tables
+  to_float(v)                   exchange-number parsing: None / "" / "-" → None
 
 Gap rule: ≥ the host's gap (+ jitter) between calls to the same host, measured
 from the END of the previous call, so a slow response never shortens it. All of
@@ -36,6 +38,7 @@ except ImportError:                    # pragma: no cover — curl_cffi ships wi
     _NET_ERRORS = (requests.ConnectionError, requests.Timeout)
     _REQ_ERRORS = (requests.RequestException,)
 
+import runlog
 from db import read_sql
 from hosts import DEFAULT, HOSTS
 
@@ -80,6 +83,7 @@ def pace(url_or_name):
             data = yf.download(...)"""
     key, entry = host(url_or_name)
     _wait_turn(key, _gap(entry))
+    runlog.library_call(key)
     try:
         yield
     finally:
@@ -131,13 +135,19 @@ def polite_request(method, url, *, session=None, headers=None, params=None, time
 
     for attempt in range(retries + 1):
         _wait_turn(key, base_gap if min_gap is not None else _gap(entry))
-        resp = None
+        resp, net_err, t0 = None, None, time.monotonic()
         try:
             resp = call(url, headers=headers, params=params, timeout=timeout, **kwargs)
         except _NET_ERRORS as e:
-            err = e
+            err = net_err = e
         finally:
             _LAST_CALL[key] = time.monotonic()
+        retrying = attempt < retries and (net_err is not None or (
+            check and resp is not None and resp.status_code in RETRY_STATUS))
+        runlog.request(key, _full_url(url, params), status=getattr(resp, "status_code", None),
+                       attempt=attempt, duration_ms=int((time.monotonic() - t0) * 1000),
+                       nbytes=len(resp.content) if resp is not None and not kwargs.get("stream") else None,
+                       error=net_err, response=resp, will_retry=retrying)
         if resp is not None:
             if not check:
                 return resp
@@ -150,6 +160,17 @@ def polite_request(method, url, *, session=None, headers=None, params=None, time
         if attempt < retries:
             time.sleep(_backoff(resp, base_gap, attempt))
     raise err
+
+
+def _full_url(url, params):
+    """The URL as called (query included) for the run log; runlog redacts secrets."""
+    if not params:
+        return url
+    try:
+        from urllib.parse import urlencode
+        return f"{url}{'&' if '?' in url else '?'}{urlencode(params, doseq=True)}"
+    except (TypeError, ValueError):
+        return url
 
 
 def polite_get(url, **kwargs):
@@ -226,9 +247,11 @@ def run_harvester(items, fetch_fn, write_fn, *, flush_every=200, label, host=Non
             last_err = f"{item!r}: {type(e).__name__}: {e}"
             if n_err <= 3:
                 print(f"  {label}: {last_err}", flush=True)
+            runlog.item_error(label, item, e)       # every failure, with its file:line
             rows = None
         if rows:
             n_ok += 1
+            runlog.item_ok()
             buf.extend(rows)
         if buf and (i % flush_every == 0 or i == total):
             n = write_fn(buf)
@@ -239,9 +262,36 @@ def run_harvester(items, fetch_fn, write_fn, *, flush_every=200, label, host=Non
 
     print(f"  {label}: {total} items · {n_ok} with data · {n_err} errors · {n_written} rows written",
           flush=True)
+    runlog.harvest_summary(label, total, n_ok, n_err, n_written)
     if total and n_ok == 0:
         raise RuntimeError(
             f"{label}: 0 of {total} items returned data ({n_err} errors"
             + (f"; last: {last_err}" if last_err else "") + ") — source broken or blocked?"
         )
     return n_ok, n_err, n_written
+
+
+def write_tagged(tagged, tables):
+    """write_fn for a fetch that yields rows for several tables: `tagged` is
+    [(table, row)]; each table in `tables` is upserted (db.upsert_df: column-level, so it
+    never NULLs columns another producer owns). Returns the count for tables[0], the primary table."""
+    import pandas as pd
+    from db import upsert_df
+    for table in tables:
+        rows = [r for t, r in tagged if t == table]
+        if rows:
+            upsert_df(pd.DataFrame(rows), table)
+    return sum(1 for t, _ in tagged if t == tables[0])
+
+
+def to_float(val):
+    """Exchange-number parsing: None / "" / "-" / unparseable → None."""
+    if val is None or val in ("", "-"):
+        return None
+    try:
+        return float(val)
+    except (ValueError, TypeError):
+        return None
+
+
+runlog.maybe_auto_start()   # cron child (ALPHA_STEP) or `python -m sources.x`: open its run

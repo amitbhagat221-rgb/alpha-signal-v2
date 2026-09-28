@@ -93,19 +93,14 @@ def _parse_deals(csv_text, deal_type, deal_date=None):
             "client_name": str(r.get(client_col, ""))[:200] if client_col else None,
             "deal_type": deal_type,
             "buy_sell": str(r.get(bs_col, ""))[:10] if bs_col else None,
-            "quantity": _safe_float(r.get(qty_col)) if qty_col else None,
-            "price": _safe_float(r.get(price_col)) if price_col else None,
+            "quantity": _http.to_float(r.get(qty_col)) if qty_col else None,
+            "price": _http.to_float(r.get(price_col)) if price_col else None,
             "deal_date": d,
         })
 
     return pd.DataFrame(rows) if rows else pd.DataFrame()
 
 
-def _safe_float(val):
-    try:
-        return float(val) if val not in (None, "", "-") else None
-    except (ValueError, TypeError):
-        return None
 
 
 def fetch_today(dry_run=False):

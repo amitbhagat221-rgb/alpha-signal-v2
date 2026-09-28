@@ -1251,6 +1251,88 @@ CREATE TABLE IF NOT EXISTS piotroski_scores (
 );
 CREATE INDEX IF NOT EXISTS idx_piotroski_date ON piotroski_scores(snapshot_date);
 
+-- Plan 0018: one row per feed check (canary / gate / reconcile). Maps onto plan 0017's
+-- check_results (+ row_issues for row-level rejects) when that table lands.
+CREATE TABLE IF NOT EXISTS feed_checks (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_date     TEXT NOT NULL DEFAULT (date('now')),
+    feed         TEXT NOT NULL,
+    check_kind   TEXT NOT NULL CHECK(check_kind IN ('canary', 'gate', 'reconcile')),
+    route        TEXT,
+    status       TEXT NOT NULL CHECK(status IN ('PASS', 'WARN', 'FAIL', 'ERROR')),
+    symptom      TEXT,
+    http_status  INTEGER,
+    n_rows       INTEGER,
+    bytes        INTEGER,
+    fingerprint  TEXT,
+    baseline     TEXT,
+    duration_sec REAL,
+    detail       TEXT,
+    checked_at   TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_feed_checks_feed ON feed_checks(feed, id);
+
+-- Plan 0018: structured run log — one row per event of an ingestor / step run (runlog.py).
+-- Queryable by the ops page, `python -m runlog`, and an outside agent over MCP.
+CREATE TABLE IF NOT EXISTS run_events (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id       TEXT NOT NULL,
+    ts           TEXT NOT NULL,
+    step         TEXT,
+    feed         TEXT,
+    event        TEXT NOT NULL,
+    level        TEXT NOT NULL CHECK(level IN ('INFO', 'WARN', 'ERROR')),
+    host         TEXT,
+    url          TEXT,
+    http_status  INTEGER,
+    attempt      INTEGER,
+    duration_ms  INTEGER,
+    item         TEXT,
+    rows         INTEGER,
+    symptom      TEXT,
+    error_type   TEXT,
+    message      TEXT,
+    location     TEXT,
+    detail       TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_run_events_run ON run_events(run_id);
+CREATE INDEX IF NOT EXISTS idx_run_events_feed ON run_events(feed, id);
+CREATE INDEX IF NOT EXISTS idx_run_events_level ON run_events(level, id);
+
+-- Plan 0018 new sources, shaped like plan 0017's concept tables so its migration is a rename:
+-- market_events ≈ 0017 `events` (one table for every event stream: credit ratings, IPO
+-- listings, index changes …); analyst_estimates ≈ 0017 `estimates` (versioned: a changed
+-- value is a new row, an unchanged one only bumps last_seen_at).
+CREATE TABLE IF NOT EXISTS market_events (
+    event_id     INTEGER PRIMARY KEY AUTOINCREMENT,
+    type         TEXT NOT NULL,
+    subtype      TEXT,
+    sid          TEXT,
+    event_time   TEXT NOT NULL,
+    available_at TEXT NOT NULL,
+    source       TEXT NOT NULL,
+    source_key   TEXT NOT NULL,
+    payload      TEXT,
+    fetched_at   TEXT NOT NULL,
+    UNIQUE (type, source, source_key)
+);
+CREATE INDEX IF NOT EXISTS idx_market_events_sid ON market_events(sid, type, event_time);
+CREATE INDEX IF NOT EXISTS idx_market_events_type ON market_events(type, subtype, event_time);
+
+CREATE TABLE IF NOT EXISTS analyst_estimates (
+    sid           TEXT NOT NULL,
+    metric        TEXT NOT NULL,
+    target_period TEXT NOT NULL,
+    source        TEXT NOT NULL,
+    value         REAL,
+    label         TEXT,
+    available_at  TEXT NOT NULL,
+    fetched_at    TEXT NOT NULL,
+    last_seen_at  TEXT NOT NULL,
+    PRIMARY KEY (sid, metric, target_period, source, fetched_at)
+);
+CREATE INDEX IF NOT EXISTS idx_analyst_estimates_metric ON analyst_estimates(metric, target_period);
+
 CREATE TABLE IF NOT EXISTS "pipeline_log" (
                 id              INTEGER PRIMARY KEY AUTOINCREMENT,
                 run_date        TEXT NOT NULL DEFAULT (date('now')),
@@ -1680,6 +1762,7 @@ CREATE TABLE IF NOT EXISTS shareholding (
     insurance_pct   REAL CHECK(insurance_pct BETWEEN 0 AND 100),
     retail_hni_pct  REAL CHECK(retail_hni_pct BETWEEN 0 AND 100),
     other_pct       REAL CHECK(other_pct BETWEEN 0 AND 100),
+    n_shareholders  INTEGER,
     fetched_at      TEXT DEFAULT (datetime('now')),
     PRIMARY KEY (sid, end_date)
 );

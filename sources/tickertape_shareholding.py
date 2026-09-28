@@ -32,22 +32,13 @@ Usage:
 """
 
 import argparse
-import sys
 from datetime import datetime
-from pathlib import Path
 
 import pandas as pd
 
-# v2's tickertape.py adds v1 scripts path for the Bharat_sm_data library.
-sys.path.insert(0, str(Path.home() / "alpha-signal" / "scripts"))
-
 from db import read_sql, upsert_df
 from sources._http import host, run_harvester
-
-
-def _get_client():
-    from Fundamentals.TickerTape import Tickertape
-    return Tickertape()
+from sources.tickertape import _get_client   # one Tickertape client (+ its Bharat_sm_data path)
 
 
 _OUT_OF_RANGE_LOG: list = []  # populated per-run; surfaced in summary

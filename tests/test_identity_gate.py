@@ -268,3 +268,26 @@ if __name__ == "__main__":
     print(f"\n{len(tests) - len(failures)}/{len(tests)} passed")
     if failures:
         sys.exit(1)
+
+
+def test_screener_h1_ampersand_entity_matches_and():
+    """Run-log find 2026-09-28: BJAT failed as WRONG_ENTITY on '&amp;' vs 'and'."""
+    from validators.identity_check import verify_identity
+    v = verify_identity("BJAT", "<h1>Bajaj Holdings &amp; Investment Ltd</h1>", source="screener_in",
+                        expected_name="Bajaj Holdings and Investment Ltd")
+    assert v.status == "PASS", v.reason
+    v = verify_identity("BJAT", "<h1>Bajaj Finance Ltd</h1>", source="screener_in",
+                        expected_name="Bajaj Holdings and Investment Ltd")
+    assert v.status == "WRONG_ENTITY"
+
+
+
+def test_quarantine_row_drops_helper_columns(monkeypatch):
+    """Run-log find 2026-09-28: `_book_value_cr` made every banking quarantine write fail."""
+    import validators._verdicts as V
+    from validators.identity_check import IdentityVerdict, quarantine_row
+    seen = {}
+    monkeypatch.setattr(V, "write_verdict", lambda *a, **k: seen.update(k) or True)
+    quarantine_row("banking_metrics", {"sid": "BJAT", "gnpa": 1.2, "_book_value_cr": 9.0}, "BJAT",
+                   "banking_metric", IdentityVerdict("WRONG_ENTITY", "x", "y", "r"))
+    assert seen["row"] == {"sid": "BJAT", "gnpa": 1.2}

@@ -32,14 +32,15 @@ Usage:
 """
 
 import argparse
-import sqlite3
 import sys
-import time
 from datetime import date, datetime, timedelta
 
 
-from db import get_db
+import pandas as pd
+
+from db import insert_df
 from hosts import HOSTS
+import runlog
 from sources import _http
 
 API = "https://api.bseindia.com/BseIndiaAPI/api/AnnSubCategoryGetData/w"
@@ -99,25 +100,13 @@ def _fetch_page(session, frm, to, pageno):
     return rows, total
 
 
-def _store(records, max_retries=6):
-    """INSERT OR IGNORE with lock-retry (same hardening as transcripts_pull)."""
+def _store(records):
+    """INSERT OR IGNORE, retrying write-write locks (db.insert_df lock_retries)."""
     records = [r for r in records if r.get("news_id")]
     if not records:
         return 0
-    sql = (f"INSERT OR IGNORE INTO bse_announcements ({','.join(COLS)}) "
-           f"VALUES ({','.join('?' * len(COLS))})")
-    payload = [tuple(r.get(c) for c in COLS) for r in records]
-    for attempt in range(max_retries):
-        try:
-            with get_db() as conn:
-                before = conn.total_changes
-                conn.executemany(sql, payload)
-                return conn.total_changes - before
-        except sqlite3.OperationalError as e:
-            if "locked" not in str(e).lower() or attempt == max_retries - 1:
-                raise
-            time.sleep(2.0 * (attempt + 1))
-    return 0
+    return insert_df(pd.DataFrame([[r.get(c) for c in COLS] for r in records], columns=COLS),
+                     "bse_announcements", lock_retries=5)
 
 
 def harvest_range(session, frm_iso, to_iso, dry_run=False):
@@ -194,6 +183,7 @@ def main():
         except Exception as e:
             n_err += 1
             print(f"  [{d}] ERROR {type(e).__name__}: {str(e)[:70]}", flush=True)
+            runlog.item_error("bse day", d, e)
             continue
         tot_seen += seen; tot_new += new
         if seen or i % 30 == 0:   # skip silent weekend/holiday spam, but heartbeat every 30 days

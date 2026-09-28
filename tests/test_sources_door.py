@@ -281,11 +281,12 @@ def test_screener_schedules_main(net, monkeypatch, tmp_path):
     net.route("GET", r"/api/company/\d+/schedules/", lambda url, kw: jresp(
         {f"{kw['params']['parent']} A": {"Mar 2024": "1,234", "Mar 2025": "-", "Dec 2025": 7},
          "junk": [1, 2]}))
-    monkeypatch.setattr(ss, "read_sql", lambda q, params=None: pd.DataFrame(
+    from sources import screener_pull as sp       # get_targets + log_error live there (one copy)
+    monkeypatch.setattr(sp, "read_sql", lambda q, params=None: pd.DataFrame(
         {"sid": ["TCS", "INFY"], "ticker": ["TCS", "INFY"]}))
     written = []
     monkeypatch.setattr(ss, "upsert_df", lambda df, t: written.append((t, records(df))) or len(df))
-    monkeypatch.setattr(ss, "insert_df", lambda df, t: pytest.fail("no errors expected"))
+    monkeypatch.setattr(sp, "insert_df", lambda df, t: pytest.fail("no errors expected"))
     monkeypatch.setattr(sys, "argv", ["screener_schedules", "--tier", "LARGE"])
     assert ss.main() == 0
     check("screener_schedules.written", written)
@@ -832,9 +833,10 @@ def test_moneycontrol_default_budget_is_the_hosts(net, monkeypatch):
 def test_library_harvesters_paced_by_host(net, monkeypatch, tmp_path):
     """tickertape / tickertape_shareholding / yfinance_analyst: each item's library
     calls run as one paced call to their host (was a sleep between items)."""
+    import db
     from sources import tickertape, tickertape_shareholding, yfinance_analyst
     monkeypatch.setattr(tickertape, "CHECKPOINT_FILE", tmp_path / "ck.json")
-    for mod in (tickertape, tickertape_shareholding, yfinance_analyst):
+    for mod in (tickertape, tickertape_shareholding, db):    # yfinance_analyst writes via _http.write_tagged → db
         monkeypatch.setattr(mod, "upsert_df", lambda df, t: len(df))
     stamps = []
     tickertape._harvest(["A", "B", "C"], "k", "income", "quarterly_income",
