@@ -16,6 +16,13 @@ feed_verdicts()  checks/ verdict rows. Severity follows the tier (plan 0018 §2.
   FEED_NO_FALLBACK      WARN — a T1 feed with neither a live fallback nor a serve-stale limit
   FEED_SINGLE_SOURCE    INFO — a T1 feed that can only serve stale (page, not email)
   FEED_REGISTRY_DRIFT   WARN — a source module / source step / RAW table no feed covers
+  FEED_VOLUME_DROP      a stable step wrote < 0.6× its trailing-20 median rows (T1 < 0.25× →
+                        CRITICAL, else WARN). "Stable" is self-calibrated: only steps whose own
+                        history falls below 0.6× in ≤ 5% of runs are judged (news, corporate
+                        actions, calendars … swing by nature and are skipped)
+  FEED_VOLUME_SPIKE     WARN — > 3× the median (duplicate writes, a changed unit of work)
+  FEED_RECONCILE_FAIL   Gate 3 (tools/reconcile.py): this feed disagrees with an independent
+                        source — T1 CRITICAL on FAIL, WARN on WARN
 """
 
 import json
@@ -24,6 +31,49 @@ from datetime import datetime, timedelta
 from checks import CRITICAL, FAIL, INFO, WARN, verdict
 
 MISSING_HOURS = {"T1": 36, "T2": 8 * 24}
+BAND_WINDOW, BAND_MIN_HISTORY, BAND_DROP, BAND_SPIKE, BAND_CRIT = 20, 10, 0.6, 3.0, 0.25
+STABLE_MAX_LOW_SHARE = 0.05
+
+
+def volume_bands(steps):
+    """{step: {last, median, ratio, stable, n}} from each step's row-count history:
+    pipeline_log.rows_affected (months of history) and, for cron jobs, run_events
+    run_end rows. The latest run is judged against the median of the previous 20."""
+    import pandas as pd
+    from db import read_sql
+    if not steps:
+        return {}
+    ph = ",".join("?" * len(steps))
+    hist = read_sql(f"""SELECT step_name AS step, id AS ord, rows_affected AS rows FROM pipeline_log
+                        WHERE status = 'SUCCESS' AND rows_affected > 0 AND step_name IN ({ph})""", params=list(steps))
+    try:
+        ev = read_sql(f"""SELECT step, id AS ord, rows FROM run_events
+                          WHERE event = 'run_end' AND rows > 0 AND step IN ({ph})""", params=list(steps))
+        hist = pd.concat([hist, ev], ignore_index=True)
+    except Exception:                                   # noqa: BLE001 — run_events absent on a fresh DB
+        pass
+    out = {}
+    for step, g in hist.sort_values("ord").groupby("step"):
+        r = g["rows"].astype(float).reset_index(drop=True)
+        if len(r) <= BAND_MIN_HISTORY:
+            continue
+        med = r.rolling(BAND_WINDOW, min_periods=5).median().shift(1)
+        ratio = (r / med).dropna()
+        prior = ratio.iloc[:-1]
+        out[step] = {"last": int(r.iloc[-1]), "median": float(med.iloc[-1]), "ratio": float(ratio.iloc[-1]),
+                     "stable": bool(len(prior) >= BAND_MIN_HISTORY and (prior < BAND_DROP).mean() <= STABLE_MAX_LOW_SHARE),
+                     "n": len(r)}
+    return out
+
+
+def _latest_reconciles():
+    from db import read_sql
+    try:
+        df = read_sql("""SELECT * FROM (SELECT *, ROW_NUMBER() OVER (PARTITION BY feed ORDER BY id DESC) rn
+                         FROM feed_checks WHERE check_kind = 'reconcile') WHERE rn = 1""")
+    except Exception:                                   # noqa: BLE001
+        return {}
+    return {r["feed"]: r for r in df.to_dict("records")}
 
 
 def _latest_canaries():
@@ -95,7 +145,13 @@ def feed_state():
     import feeds
     tiers = feeds.tiers()
     canaries, rates = _latest_canaries()
-    runs = _latest_runs({s for name in feeds.FEEDS for s in feeds.log_steps(name)})
+    all_steps = {s for name in feeds.FEEDS for s in feeds.log_steps(name)}
+    runs = _latest_runs(all_steps)
+    try:
+        bands = volume_bands(sorted(all_steps))
+    except Exception:                                   # noqa: BLE001 — a check must never break the report
+        bands = {}
+    reconciles = _latest_reconciles()
     fresh = _freshness()
     rows = []
     for name, f in feeds.FEEDS.items():
@@ -131,6 +187,8 @@ def feed_state():
             "last_run": run, "tables": tables, "worst_freshness": worst,
             "derived_from": f.get("derived_from") or [], "pit": f.get("pit"), "tos": f.get("tos"),
             "notes": f.get("notes"), "probe": f.get("probe"), "ref": f.get("ref"), "need": f.get("need"),
+            "volume": {s: bands[s] for s in feeds.log_steps(name) if s in bands},
+            "reconcile": reconciles.get(name),
         })
     return rows
 
@@ -174,6 +232,27 @@ def feed_verdicts(rows, drift=None, now=None):
                                    "never probed" if age is None else f"last canary {age:.0f} h ago",
                                    code="FEED_CANARY_MISSING",
                                    message=f"{name} ({tier}) has no recent canary verdict — is `run.sh canary` running?"))
+        for step, b in (r.get("volume") or {}).items():
+            if not b["stable"]:
+                continue
+            if b["ratio"] < BAND_DROP:
+                sev = CRITICAL if t1 and b["ratio"] < BAND_CRIT else WARN
+                out.append(verdict(f"FEED_VOLUME_DROP:{name}:{step}", name, sev, FAIL,
+                                   f"{step}: {b['last']:,} rows vs median {b['median']:,.0f}",
+                                   code="FEED_VOLUME_DROP",
+                                   message=f"{name} ({tier}) wrote {b['ratio']:.0%} of its usual rows ({step})"))
+            elif b["ratio"] > BAND_SPIKE:
+                out.append(verdict(f"FEED_VOLUME_SPIKE:{name}:{step}", name, WARN, FAIL,
+                                   f"{step}: {b['last']:,} rows vs median {b['median']:,.0f}",
+                                   code="FEED_VOLUME_SPIKE",
+                                   message=f"{name} ({tier}) wrote {b['ratio']:.1f}× its usual rows ({step})"))
+        rec = r.get("reconcile")
+        if rec and rec.get("status") in ("FAIL", "WARN"):
+            sev = CRITICAL if (t1 and rec["status"] == "FAIL") else WARN
+            out.append(verdict(f"FEED_RECONCILE_FAIL:{name}", name, sev, FAIL, (rec.get("detail") or "")[:240],
+                               code="FEED_RECONCILE_FAIL",
+                               message=f"{name} ({tier}) disagrees with an independent source — "
+                                       f"cross-source check {rec['status']}"))
         if not r["schedule"]:
             out.append(verdict(f"FEED_ORPHAN:{name}", name, WARN, FAIL, r.get("notes") or "",
                                code="FEED_ORPHAN", message=f"{name} is live but nothing schedules it (class H)"))

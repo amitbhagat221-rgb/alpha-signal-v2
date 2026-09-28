@@ -2545,6 +2545,9 @@ _PLAIN = {   # verdict code → plain words for the page (the email keeps the pr
     "FEED_OUTDATED": "Data is out of date",
     "FEED_ORPHAN": "Not scheduled to run",
     "FEED_NO_FALLBACK": "Critical, and no backup source",
+    "FEED_VOLUME_DROP": "Wrote far fewer rows than usual",
+    "FEED_VOLUME_SPIKE": "Wrote far more rows than usual",
+    "FEED_RECONCILE_FAIL": "Disagrees with an independent source",
 }
 
 

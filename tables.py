@@ -32,6 +32,12 @@ Fields (only `kind`, `domain`, `date_col` are always present):
                  report shows INFO instead of the 0-row CRITICAL (checks.empty_table_severity;
                  an empty QUARANTINE mirror is always OK — nothing was quarantined)
     mirror       copied into the DuckDB read replica (tools/duckdb_refresh)
+    contract     write gate (plan 0018): checked in db.insert_df / upsert_df on every
+                 batch of ≥ 20 rows BEFORE it is written, on the columns the batch
+                 carries — max_null {col: share}, not_all_zero [cols]. A violation
+                 raises db.ContractViolation and nothing is written. Thresholds were
+                 validated against every live batch since 2025-06 (they flag only the
+                 2026-05-03 price=0 bulk_deals backfill).
     depth / description   Data Inventory text
 
 Adding a table: add it to schema.sql AND here (tests/test_tables.py checks both
@@ -45,6 +51,7 @@ TABLES = {
     # and a holiday adjacent to the weekend stretches it to ≈5-6d. 6 tolerates
     # that cluster yet still flags a genuinely stalled fetcher inside a week.
     "fno_bhav": {
+        "contract": {"max_null": {"settle": 0.05}, "not_all_zero": ["settle", "underlying_price"]},
         "kind": "RAW", "domain": "Universe & Prices", "date_col": "trade_date", "stale_days": 6,
     },
     "fno_iv_history": {
@@ -76,6 +83,7 @@ TABLES = {
     # gap on stock_prices was invisible because MAX(date) stayed FRESH for the 78%
     # that did exist.
     "stock_prices": {
+        "contract": {"max_null": {"close": 0.02}, "not_all_zero": ["close", "volume"]},
         "kind": "RAW", "domain": "Universe & Prices", "date_col": "date", "coverage": (95.0, 80.0),
         "mirror": True,
         "depth": "3+ years (922 daily files)",
@@ -124,6 +132,7 @@ TABLES = {
     # after they flagged STALE 55d when the data is healthy. Annual filings: ~12mo max
     # gap, 220 catches a missed cycle in ~7mo.
     "annual_balance_sheet": {
+        "contract": {"max_null": {"total_assets": 0.5}},
         "kind": "RAW", "domain": "Fundamentals", "freq": "monthly", "data_freq": "annual",
         "source": "Tickertape API", "date_col": "end_date", "stale_days": 220,
         "coverage": (85.0, 70.0), "quarantine": True,
@@ -131,6 +140,7 @@ TABLES = {
         "description": "Annual balance sheet from Tickertape — total assets, equity, debt, current assets/liabilities, shares outstanding, retained earnings, net PPE. Powers D/E, ROE, ROA, current ratio, book value, Altman Z, Piotroski leverage.",
     },
     "annual_cash_flow": {
+        "contract": {"max_null": {"operating_cash_flow": 0.6}},
         "kind": "RAW", "domain": "Fundamentals", "freq": "monthly", "data_freq": "annual",
         "source": "Tickertape API", "date_col": "end_date", "stale_days": 220, "quarantine": True,
         "depth": "10 years per stock",
@@ -144,6 +154,7 @@ TABLES = {
     },
     # Tickertape stores PT only at FY year-end → annual cadence (220).
     "forecast_history": {
+        "contract": {"max_null": {"value": 0.5}},
         "kind": "RAW", "domain": "Fundamentals", "freq": "monthly", "data_freq": "monthly",
         "source": "Tickertape API", "date_col": "date", "stale_days": 220, "quarantine": True,
         "depth": "Time series of revisions",
@@ -156,12 +167,14 @@ TABLES = {
     # structurally absent — coverage gap lowered 90→85, severe at 70 still catches a
     # real regression.
     "fundamentals_screener": {
+        "contract": {"max_null": {"value": 0.6}},
         "kind": "RAW", "domain": "Fundamentals", "freq": "weekly", "data_freq": "biweekly",
         "source": "Screener.in Premium (cron `screener_pull --universe`, 1st + 15th 06:00 UTC)", "date_col": "fetched_at",
         "stale_days": 21, "coverage": (85.0, 70.0),
     },
     # Quarterly filings; ~90d max gap, 120 tolerates a delayed wave.
     "quarterly_income": {
+        "contract": {"max_null": {"revenue": 0.5}},
         "kind": "RAW", "domain": "Fundamentals", "freq": "monthly", "data_freq": "quarterly",
         "source": "Tickertape API", "date_col": "end_date", "stale_days": 120,
         "coverage": (85.0, 70.0), "quarantine": True,
@@ -169,6 +182,7 @@ TABLES = {
         "description": "Quarterly income statement from Tickertape — revenue, EBITDA, operating profit, PBT, net income, EPS, interest. Powers TTM ratios, YoY growth, Piotroski profitability factors, accruals, forensic Beneish.",
     },
     "shareholding": {
+        "contract": {"max_null": {"promoter_pct": 0.5}},
         "kind": "RAW", "domain": "Fundamentals", "date_col": "end_date",
         "depth": "~6 quarters per stock (window varies by fetch date)",
         "description": "Quarterly shareholding pattern from Tickertape — promoter %, FII %, MF %, DII %, public %, pledge %, insurance %. Each stock has ~6 trailing quarters at the time it was last fetched, so the calendar span across the table looks much wider than the per-stock depth. Powers promoter signal (QoQ change).",
@@ -182,11 +196,13 @@ TABLES = {
     # whole-BSE firehose files most calendar days, but a weekend + adjacent holiday
     # can go quiet; 5 tolerates that, still flags a stalled cron within a few days.
     "bse_announcements": {
+        "contract": {"max_null": {"headline": 0.3, "dt_tm": 0.05}},
         "kind": "RAW", "domain": "Trades & Corporate", "freq": "daily", "data_freq": "daily",
         "source": "BSE AnnSubCategoryGetData --days 7 (run.sh forward)",
         "date_col": "fetched_at", "stale_days": 5,
     },
     "bulk_deals": {
+        "contract": {"max_null": {"price": 0.05, "quantity": 0.05}, "not_all_zero": ["price", "quantity"]},
         "kind": "RAW", "domain": "Trades & Corporate", "date_col": "deal_date",
         "depth": "Growing daily (no historical archive)",
         "description": "Daily bulk/block deals from NSE archives. NO HISTORICAL ARCHIVE — only today's file is fetchable, so this accumulates one day at a time.",
@@ -266,6 +282,7 @@ TABLES = {
         "description": "Entity matching: which news articles mention which stocks. Created by string matching company names + tickers against titles and summaries.",
     },
     "news_articles": {
+        "contract": {"max_null": {"title": 0.01}},
         "kind": "RAW", "domain": "News & Sentiment", "date_col": "published_at",
         "depth": "Growing daily from RSS",
         "description": "RSS news articles from 8-11 financial publications (ET, Mint, BS, Moneycontrol, etc.). Title, summary, URL, publication date.",
@@ -276,6 +293,7 @@ TABLES = {
 
     # ── Macro ──
     "macro_history": {
+        "contract": {"max_null": {"value": 0.1}, "not_all_zero": ["value"]},
         "kind": "RAW", "domain": "Macro", "date_col": "date",
         "depth": "3+ years (50 indicators)",
         "description": "Time series of 50 macro indicators (Nifty sectors, commodities, FX, rates, IIP, CPI, Core Sector, GST). Sources: yfinance + data.gov.in + FRED. Daily and monthly frequencies.",
@@ -554,11 +572,13 @@ TABLES = {
         "description": "One row per event of a step / cron / manual source run, keyed by run_id: run_start, request (failed or retried HTTP call with host, redacted URL, status, latency and a redacted response snippet), item_error, exception (exact file:line, symptom class, frames), summary, run_end (per-host request/status counters, retries, rows written per table, output tail), run_exit (shell exit code). Queried by the ops Data Supply page, `python -m runlog`, and agents over MCP.",
     },
     "market_events": {
+        "contract": {"max_null": {"event_time": 0.0, "available_at": 0.0}},
         "kind": "RAW", "domain": "Trades & Corporate", "date_col": "fetched_at", "freq": "daily",
         "depth": "Credit ratings from 2025-01, IPO listings from 2012, index changes 1996-2020 (plan 0018)",
         "description": "One row per market event, all event streams in one table (plan 0017 `events` shape): type = credit_rating (NSE Reg-30 feed with the earlier rating, direction derived), ipo_listing (NSE past issues + anchor lock-in dates by rule), index_change (NSE inclusion/exclusion log). event_time = when it happened; available_at = when the market could know it (PIT); payload = the source row as JSON.",
     },
     "analyst_estimates": {
+        "contract": {"max_null": {"value": 0.05}},
         "kind": "RAW", "domain": "Fundamentals", "date_col": "last_seen_at", "freq": "weekly",
         "depth": "Yahoo EPS estimate vs actual per report back to ~2007 (L/M), EPS trend snapshots from 2026-09 (plan 0018)",
         "description": "Versioned analyst estimates (plan 0017 `estimates` shape): eps_estimate / eps_actual / eps_surprise_pct per earnings report (target_period = report date), and weekly EPS-trend snapshots (current and 7/30/60/90 days ago, revisions up/down, low/high, analyst count; target_period = Yahoo period label). available_at: the fetch time for snapshots; the report time for historical rows, labelled pit_unverified until the estimate's freeze-at-report is verified.",

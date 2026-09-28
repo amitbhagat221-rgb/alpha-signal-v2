@@ -143,6 +143,8 @@ def classify_exception(exc):
     must not page as an upstream outage); transport errors are A/E; anything the
     payload did to a parser (KeyError, ValueError, JSON decode…) is shape drift D."""
     name, msg = type(exc).__name__, str(exc).lower()
+    if name == "ContractViolation":
+        return "FAIL", "F"                      # the batch looked like data but was garbage
     if isinstance(exc, (ImportError, NameError, AttributeError, SyntaxError)):
         return "ERROR", None
     mod = type(exc).__module__ or ""

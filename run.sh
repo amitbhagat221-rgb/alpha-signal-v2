@@ -70,7 +70,8 @@ case "$JOB" in
     canary)             # 02:45 UTC — 1-item live probe per feed before the morning run (plan 0018):
                         # T1 daily, T2 on Sundays; verdicts → feed_checks → health report
         harvest_lock
-        logged cron_canary run python -m tools.canary --due ;;
+        logged cron_canary run python -m tools.canary --due
+        logged cron_reconcile run python -m tools.reconcile ;;     # Gate 3 cross-source checks
     transcripts)        # Sunday 07:00 UTC — concall transcripts for stocks that reported in the last
                         # 45 days (they appear 1-4 weeks after results), then their BSE filing dates
                         # (the look-ahead-safe availability) — plan 0018; orphaned since 2026-06-07

@@ -201,10 +201,16 @@ def parse_shareholders(html: str) -> list[tuple[str, int]]:
     Same period + filing lag as the shareholding % columns (plan 0018)."""
     import calendar
     try:
-        m = re.search(r'<table[^>]*id="quarterly-shp".*?</table>', html or "", re.S)
+        # the id sits on the table OR on a wrapper around it: take the first
+        # <table>…</table> at/after the id (real pages use the wrapper form)
+        m = (re.search(r'(?<![-\w])id="quarterly-shp"', html or "")
+             or re.search(r'id="quarterly-shp"', html or ""))   # the element itself, else the tab button
         if not m:
             return []
-        tbl = pd.read_html(io.StringIO(m.group(0)))[0]
+        t = re.search(r"<table.*?</table>", html[max(0, html.rfind("<", 0, m.start())):], re.S)
+        if not t:
+            return []
+        tbl = pd.read_html(io.StringIO(t.group(0)))[0]
     except Exception as e:                      # noqa: BLE001 — a bonus field must never cost the fundamentals
         runlog.note(f"shareholder-count parse failed: {type(e).__name__}: {e}", "WARN")
         return []
@@ -459,9 +465,13 @@ def pull_one(s: requests.Session, sid: str, ticker: str, dry_run: bool = False) 
     if dry_run:
         return len(long_df)
 
-    if shp:     # column-level upsert: leaves Tickertape's % columns on the same rows intact
-        upsert_df(pd.DataFrame([{"sid": sid, "end_date": d, "n_shareholders": n} for d, n in shp]),
-                  "shareholding")
+    if shp:     # UPDATE-only: enrich Tickertape's rows, never create one — a Screener-only
+        # (sid, end_date) row has NULL promoter/pledge % and would become the "latest"
+        # shareholding row that pledge_quality & co. read (plan 0018, 2026-09-28)
+        from db import get_db
+        with get_db() as conn:
+            conn.executemany("UPDATE shareholding SET n_shareholders = ? WHERE sid = ? AND end_date = ?",
+                             [(n, sid, d) for d, n in shp])
     return upsert_df(long_df, "fundamentals_screener")
 
 

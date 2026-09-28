@@ -87,5 +87,8 @@ def test_parse_shareholders():
             '</thead><tbody><tr><td>Promoters</td><td>50.1</td><td>49.9</td></tr><tr><td>No. of Shareholders</td>'
             '<td>36,98,648</td><td>46,51,863</td></tr></tbody></table>')
     assert parse_shareholders(html) == [("2023-09-30", 3698648), ("2026-06-30", 4651863)]
+    wrapped = ('<div id="quarterly-shp" class="responsive-holder"><table class="data-table"><thead><tr><th></th>'
+               '<th>Mar 2026</th></tr></thead><tbody><tr><td>No. of Shareholders</td><td>1,234</td></tr></tbody></table></div>')
+    assert parse_shareholders(wrapped) == [("2026-03-31", 1234)], "real pages put the id on a wrapper"
     assert parse_shareholders("<html>no table</html>") == []
     assert parse_shareholders(None) == []

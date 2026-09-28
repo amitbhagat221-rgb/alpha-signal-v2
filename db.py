@@ -350,6 +350,48 @@ def _drop_future_dated_rows(df, table_name):
     return df
 
 
+CONTRACT_MIN_ROWS = 20
+
+
+class ContractViolation(ValueError):
+    """A batch broke its table's write contract (tables.TABLES `contract`). Raised
+    BEFORE the write: a harvest whose output is garbage fails loudly instead of
+    storing it (plan 0018 — the 12.8K price-0 bulk_deals rows would have stopped here)."""
+
+
+def check_contract(df, table_name):
+    """[] or the list of violations of `table_name`'s write contract for this batch.
+    Only columns present in the batch are checked (column-level upserts write
+    subsets); batches under CONTRACT_MIN_ROWS rows are too small to judge."""
+    c = TABLES.get(table_name, {}).get("contract")
+    if not c or df is None or len(df) < CONTRACT_MIN_ROWS:
+        return []
+    bad = []
+    for col, share in (c.get("max_null") or {}).items():
+        if col in df.columns:
+            frac = float(df[col].isna().mean())
+            if frac > share:
+                bad.append(f"{col}: {frac:.0%} null (max {share:.0%})")
+    for col in c.get("not_all_zero") or []:
+        if col in df.columns:
+            v = pd.to_numeric(df[col], errors="coerce").fillna(0)
+            if (v == 0).all():
+                bad.append(f"{col}: all {len(df)} values zero/empty")
+    return bad
+
+
+def _enforce_contract(df, table_name):
+    bad = check_contract(df, table_name)
+    if bad:
+        try:
+            import runlog
+            runlog.note(f"write contract violated on {table_name}: {'; '.join(bad)}", "ERROR",
+                        table=table_name, rows=len(df), violations=bad)
+        except Exception:                               # noqa: BLE001
+            pass
+        raise ContractViolation(f"{table_name} write blocked ({len(df)} rows): {'; '.join(bad)}")
+
+
 def _count_write(table, n):
     """Rows written per table for the run log's run_end (best-effort)."""
     try:
@@ -377,6 +419,7 @@ def insert_df(df, table_name, conn=None, lock_retries=0):
     df = _drop_future_dated_rows(df, table_name)
     if df.empty:
         return 0
+    _enforce_contract(df, table_name)
 
     cols = ", ".join(f"[{c}]" for c in df.columns)
     placeholders = ", ".join(["?"] * len(df.columns))
@@ -636,6 +679,7 @@ def upsert_df(df, table_name, conn=None):
     df = _drop_future_dated_rows(df, table_name)
     if df.empty:
         return 0
+    _enforce_contract(df, table_name)     # plan 0018 write gate (tables.TABLES `contract`)
 
     # Gate 5: producer-side unit-contract check
     try:

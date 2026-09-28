@@ -283,6 +283,66 @@ def record(results, dry_run=False):
     return rows
 
 
+# ─────────────────────────────── replay fixtures (test ladder rung 1) ───────────────────────────────
+
+FIXTURE_DIR = PROJECT_ROOT / "tests" / "fixtures" / "feeds"
+_SCRUB = [(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", "user@example.invalid"),
+          (r'(csrfmiddlewaretoken"?\s*(?:value=)?["\']?)[^"\'\s>]+', r"\1***"),
+          (r"(sessionid|csrftoken)=[^;&\s\"']+", r"\1=***")]
+
+
+def _scrub(text):
+    import re
+    text = runlog.redact(text)
+    for pat, rep in _SCRUB:
+        text = re.sub(pat, rep, text)
+    return text
+
+
+def _slice(key, text):
+    """The minimal real slice a replay test needs — never a whole logged-in page."""
+    import re
+    lines = text.splitlines(keepends=True)
+    if key == "amfi_nav":
+        return "".join(lines[:400])
+    if key == "nse_bulk_deals":
+        return "".join(lines[:61])
+    if key == "screener":
+        m = re.search(r'(?<![-\w])id="quarterly-shp"', text)
+        t = re.search(r"<table.*?</table>", text[m.start():], re.S) if m else None
+        form = re.search(r'formaction=["\'](/user/company/export/\d+/)["\']', text)
+        return ('<div id="quarterly-shp">' + (t.group(0) if t else "") + "</div>\n"
+                + (f'<button formaction="{form.group(1)}">Export</button>\n' if form else ""))
+    if key == "nse_insider":
+        js = json.loads(text)
+        js["data"] = (js.get("data") or [])[:20]
+        return json.dumps(js)
+    return text                                             # small enough whole (bhavcopy, rss, sitemap, json)
+
+
+FIXTURE_KEYS = ("nse_bhavcopy", "nse_bulk_deals", "amfi_nav", "screener", "rss_news", "mf_holdings",
+                "nse_insider", "nse_market_daily")
+
+
+def save_fixtures(keys=FIXTURE_KEYS, root=None):
+    """Copy the last good raw response of each canary into tests/fixtures/feeds/,
+    sliced to what the replay test needs and scrubbed of secrets / identities.
+    Rerun after an accepted shape change (--accept) so replay tests follow it."""
+    FIXTURE_DIR.mkdir(parents=True, exist_ok=True)
+    saved = {}
+    for key in keys:
+        src = next(iter(sorted(((root or RAW_ROOT) / key).glob("last_good.*.gz"))), None)
+        if src is None:
+            continue
+        ext = src.name.split(".")[1]
+        text = _scrub(_slice(key, gzip.decompress(src.read_bytes()).decode("utf-8", "replace")))
+        dst = FIXTURE_DIR / f"{key}.{ext}.gz"
+        dst.write_bytes(gzip.compress(text.encode(), mtime=0))
+        saved[key] = {"file": dst.name, "bytes": len(text), "captured": datetime.fromtimestamp(src.stat().st_mtime).isoformat(timespec="seconds")}
+    (FIXTURE_DIR / "MANIFEST.json").write_text(json.dumps(saved, indent=1, sort_keys=True))
+    return saved
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Run feed canaries (plan 0018)")
     ap.add_argument("--due", action="store_true", help="T1 daily + T2 on Sundays (cron)")
@@ -291,8 +351,14 @@ def main(argv=None):
     ap.add_argument("--all", action="store_true")
     ap.add_argument("--accept", metavar="KEY", help="accept the current shape of a canary as its baseline")
     ap.add_argument("--list", action="store_true")
+    ap.add_argument("--save-fixtures", action="store_true", help="refresh tests/fixtures/feeds from the raw zone")
     ap.add_argument("--dry-run", action="store_true", help="probe but do not write feed_checks")
     a = ap.parse_args(argv)
+
+    if a.save_fixtures:
+        for k, v in save_fixtures().items():
+            print(f"  {k:18} {v['file']:26} {v['bytes']:>8} bytes  captured {v['captured']}")
+        return 0
 
     if a.list:
         for key, fs in sorted(canary_feeds().items()):

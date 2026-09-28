@@ -24,6 +24,7 @@ Plain functions (ADR 0004).
 """
 
 import io
+import json
 import re
 from datetime import date, timedelta
 
@@ -174,7 +175,7 @@ def tickertape_analyst():
     rec = {"pageProps." + k: 1 for k in pp} | {"forecast." + k: 1 for k in fc}
     checks = [("forecast_block", bool(fc), "securitySummary.forecast present"),
               ("forecasts_history", bool(pp.get("forecastsHistory")), "forecastsHistory present")]
-    return {"expect": "json", "records": [rec] if rec else None, "raw": repr(pp)[:20000].encode(),
+    return {"expect": "json", "records": [rec] if rec else None, "raw": json.dumps(pp, default=str)[:200000].encode(),
             "http": 200 if data else 404, "url": f"https://tickertape.in/{REF_SLUG}", "checks": checks,
             "required": ["forecast.totalReco", "pageProps.forecastsHistory"]}
 
@@ -183,7 +184,7 @@ def yfinance_analyst():
     import yfinance as yf
     with _http.pace("yahoo"):
         t = yf.Ticker("RELIANCE.NS").analyst_price_targets or {}
-    return {"expect": "json", "records": [t] if t else None, "raw": repr(t).encode(), "http": None,
+    return {"expect": "json", "records": [t] if t else None, "raw": json.dumps(t, default=str).encode(), "http": None,
             "url": "yf RELIANCE.NS analyst_price_targets", "required": ["current", "mean", "high", "low"]}
 
 
@@ -204,7 +205,7 @@ def bse_announcements():
     s = _http.warm_session(WARM_URL, headers=HOSTS["bse_api"]["headers"])
     day = str(_latest("bse_announcements", "dt_tm"))[:10].replace("-", "")   # a day we know has filings
     rows, total = _fetch_page(s, day, day, 1)        # single day: the API returns 0 for date RANGES
-    return {"expect": "json", "records": rows or None, "raw": repr(rows[:20]).encode(), "http": 200 if rows else None,
+    return {"expect": "json", "records": rows or None, "raw": json.dumps(rows[:20], default=str).encode(), "http": 200 if rows else None,
             "url": f"api.bseindia.com AnnSubCategoryGetData {day} page 1",
             "required": ["NEWSID", "SCRIP_CD", "NEWSSUB", "DT_TM", "ATTACHMENTNAME", "SUBCATNAME"],
             "checks": [("total_count", total > 0, f"ROWCNT={total}")]}
@@ -242,7 +243,7 @@ def macro_official():
     js = _mospi(_http.session(MOSPI), "/api/iip/getIipData", base_year="2022-23", frequency="Monthly",
                 type="All", year=str(date.today().year), limit=50, page="1") or {}
     rows = js.get("data") if isinstance(js, dict) else None
-    return {"expect": "json", "records": rows or None, "raw": repr(js)[:20000].encode(),
+    return {"expect": "json", "records": rows or None, "raw": json.dumps(js, default=str)[:200000].encode(),
             "http": 200 if js else None, "url": MOSPI + "/api/iip/getIipData",
             "required": ["category", "month", "year", "index"]}
 
