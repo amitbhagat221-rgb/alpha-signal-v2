@@ -824,16 +824,18 @@ def sync_features(c, run_id, full, since):
                         cat_set_spec(c, "feature", fname, {**cat_spec(c, "feature", fname), **fspec})
                     c.execute(f"DELETE FROM feature_values WHERE feature_id={fid} AND date IN (SELECT d FROM _dates)")
                     sw = "" if sv is None else f"AND t.{split} = '{str(sv).replace(chr(39), chr(39) * 2)}'"
-                    n_rows += c.execute(f"""INSERT OR REPLACE INTO feature_values(feature_id, date, entity_id, value, run_id)
+                    n_rows += c.execute(f"""INSERT INTO feature_values(feature_id, date, entity_id, value, run_id)
                         SELECT {fid}, {dexpr}, {eid}, {vexpr}, {run_id} FROM {t} t {ej} {dw} {sw} AND t.{q(col)} IS NOT NULL
-                        ORDER BY 2, 3""").rowcount
+                        ORDER BY 2, 3
+                        ON CONFLICT(feature_id, date, entity_id) DO UPDATE SET value=excluded.value, run_id=excluded.run_id""").rowcount
             if t in MEMBERSHIP:
                 fname = MEMBERSHIP[t]
                 cat_ensure(c, "feature", [fname], spec={fname: {"origin_table": t, "value_kind": "membership"}})
                 fid = c.execute("SELECT catalog_id FROM catalog WHERE kind='feature' AND name=?", (fname,)).fetchone()[0]
                 c.execute(f"DELETE FROM feature_values WHERE feature_id={fid} AND date IN (SELECT d FROM _dates)")
-                n_rows += c.execute(f"""INSERT OR REPLACE INTO feature_values(feature_id, date, entity_id, value, run_id)
-                    SELECT {fid}, {dexpr}, {eid}, 1, {run_id} FROM {t} t {ej} {dw}""").rowcount
+                n_rows += c.execute(f"""INSERT INTO feature_values(feature_id, date, entity_id, value, run_id)
+                    SELECT {fid}, {dexpr}, {eid}, 1, {run_id} FROM {t} t {ej} {dw} AND true
+                    ON CONFLICT(feature_id, date, entity_id) DO UPDATE SET value=excluded.value, run_id=excluded.run_id""").rowcount
             # PIT panel tiers / v1 labels → classifications history under their own schemes
             for (tt, col), scheme in TIER_TO_CLS.items():
                 if tt != t:
@@ -1004,7 +1006,8 @@ def sync_contributions(c, full):
                             continue
                         out.append((rid[0], e, fids[sk], _clean(float(raw[i])) if pd.notna(raw[i]) else None, float(p[i]), float(w),
                                     float(term[i] / wsum[i])))
-            c.executemany("INSERT OR REPLACE INTO pick_contributions VALUES (?,?,?,?,?,?,?)", out)
+            c.executemany("""INSERT INTO pick_contributions VALUES (?,?,?,?,?,?,?) ON CONFLICT(run_id, entity_id, feature_id)
+                DO UPDATE SET raw=excluded.raw, pctile=excluded.pctile, weight=excluded.weight, contribution=excluded.contribution""", out)
             kept += 1
     log(f"contributions: {kept} dates kept, {skipped} skipped (weights differed from today's), {len(dates) - len(todo)} unchanged")
     return kept
