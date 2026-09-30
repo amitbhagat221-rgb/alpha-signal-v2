@@ -259,7 +259,9 @@ def checks(c):
            _one(c, "SELECT COUNT(*) FROM row_issues WHERE rule NOT LIKE 'trust:%'")[0] + _one(c, "SELECT COUNT(*) FROM mf.row_issues")[0],
            None, None, "")
     # mutual funds (mf.db)
-    yield ("mf_scheme_master+mf_schemes", *_one(c, "SELECT COUNT(*) FROM (SELECT scheme_code FROM mf_scheme_master UNION SELECT scheme_code FROM mf_schemes)"),
+    yield ("mf_scheme_master+mf_schemes", *_one(c, """SELECT COUNT(*) FROM (SELECT scheme_code FROM mf_scheme_master UNION SELECT scheme_code FROM mf_schemes
+               UNION SELECT scheme_code FROM mf_nav_history UNION SELECT scheme_code FROM mf_holdings UNION SELECT scheme_code FROM mf_sector_allocation
+               UNION SELECT scheme_code FROM mf_metrics UNION SELECT scheme_code FROM mf_rolling_returns UNION SELECT scheme_code FROM mf_calendar_returns)"""),
            *_one(c, "SELECT COUNT(*) FROM mf.funds"), None, None, "")
     yield ("mf_nav_history", *_one(c, "SELECT COUNT(*) FROM mf_nav_history"), *_one(c, "SELECT COUNT(*) FROM mf.fund_nav"),
            *_one(c, "SELECT SUM(nav) FROM mf_nav_history"), *_one(c, "SELECT SUM(nav) FROM mf.fund_nav"), "")
