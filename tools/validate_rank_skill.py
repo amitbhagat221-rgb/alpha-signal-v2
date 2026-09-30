@@ -19,7 +19,7 @@ import math
 import sqlite3
 from datetime import date
 
-DB = "data/alpha_signal.db"
+from config import DB_PATH as DB
 MIN_PERIODS = 6          # don't call anything "proven" on fewer independent windows than this
 
 

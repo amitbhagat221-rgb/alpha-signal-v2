@@ -70,7 +70,7 @@ def get_db():
 
     WAL mode:       allows concurrent readers
     foreign_keys:   enforces REFERENCES constraints (bad sid = error, not silent)
-    busy_timeout:   waits 5s if another writer holds the lock
+    busy_timeout:   waits 30s if another writer holds the lock
 
     Each call opens a new connection — no pooling needed for batch pipeline.
 
@@ -82,7 +82,7 @@ def get_db():
     conn = sqlite3.connect(DB_PATH)
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
-    conn.execute("PRAGMA busy_timeout=5000")
+    conn.execute("PRAGMA busy_timeout=30000")
     if _TRACE is not None:
         conn.set_authorizer(_trace_authorizer)
     try:
@@ -301,7 +301,7 @@ def read_sql(query, params=None):
 # Use for analytical reads on the tables in DUCKDB_MIRRORED_TABLES (TABLES entries
 # flagged `mirror`). SQLite stays the source of truth for writes and for tables
 # not in the mirror list.
-DUCK_PATH = PROJECT_ROOT / "data" / "alpha_signal.duckdb"
+DUCK_PATH = DB_PATH.with_suffix(".duckdb")   # follows ALPHA_DB
 
 
 def read_sql_fast(query, params=None):

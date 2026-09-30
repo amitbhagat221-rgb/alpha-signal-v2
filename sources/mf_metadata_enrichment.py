@@ -126,8 +126,7 @@ def status() -> None:
         FROM mf_scheme_master
         WHERE active = 1
     """).iloc[0]
-    cols = [r[1] for r in
-            __import__("sqlite3").connect("data/alpha_signal.db").execute("PRAGMA table_info(mf_scheme_master)")]
+    cols = read_sql("PRAGMA table_info(mf_scheme_master)")["name"].tolist()
     has_fm = "fund_manager" in cols
     print(f"mf_scheme_master enrichment coverage (active schemes only):")
     print(f"  Total active schemes:  {counts['total']}")

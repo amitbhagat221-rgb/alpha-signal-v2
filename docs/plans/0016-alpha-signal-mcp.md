@@ -1,6 +1,13 @@
 # Plan 0016 — Alpha Signal MCP + LLM work as Claude routines
 
-**Status:** proposed 2026-09-27 — decisions D1–D6 (§9) needed before Phase 2 · **Supersedes (when done):** the 7 Anthropic-API call paths · **Builds on:** [ADR 0052](../decisions/0052-seven-building-blocks.md) (View block = the read surface; Host block = politeness), `tools/session_classify.py` (the export → worker → validated-ingest protocol this generalises)
+**Status:** approved 2026-09-30 (D1–D6 decided, §9 — executor is **local `claude -p` only**, no cloud routine) · waiting on plan 0017 stage 0 · **Supersedes (when done):** the 7 Anthropic-API call paths · **Builds on:** [ADR 0052](../decisions/0052-seven-building-blocks.md) (View block = the read surface; Host block = politeness), `tools/session_classify.py` (the export → worker → validated-ingest protocol this generalises)
+
+**Sequencing with [plan 0017](0017-data-model-redesign.md)** (data model, [ADR 0054](../decisions/0054-tables-grow-with-concepts.md); agreed with Amit 2026-09-28):
+1. **Plan 0017 stage 0 first.** This plan's phase-1 gate ("tool snapshot tests on a DB copy") needs its `ALPHA_DB` override. It also moves the pre-push regression fixtures off the live DB, and this plan will push often.
+2. **Phases 1–3 here.** They restore the LLM outputs (5 standing CRITICALs).
+3. **Plan 0017 stages 1–2.** Catalog, `db.write`, per-run explainable picks; this plan then adds `explain_pick`.
+4. **Phases 4–5 here.**
+5. **Plan 0017 stages 3–8.**
 
 ## 1. Why
 - **Every LLM step has been dead since 2026-08-24.** The API credit balance is empty, so dossiers, sector dossiers, the news brief, news enrichment and regulatory classification all return HTTP 400. That's 5 of the ~16 CRITICALs in each morning's health email. The regulatory backlog is **11,526 pending events**.
@@ -86,6 +93,12 @@
 | `sql` | query, max_rows≤500 | `db.safe_read_sql` (ro URI, `query_only`, 20 s) |
 | `schema` | table? | `sqlite_master` + `tables.TABLES` description |
 
+**Stable under plan 0017.**
+- Every research tool calls a `views.py` or cockpit function, never a table name. Plan 0017 renames and merges tables stage by stage, and routing through functions keeps the tools unchanged.
+- If a tool needs data that no function returns yet, add a `views.py` function rather than SQL in the tool. (`ic_evidence` and `macro` above should call `best_ic_by_signal` and a `views.macro` rather than name `pit_ic_by_tier_v2` / `macro_history`.)
+- `sql` and `schema` are the exceptions: they expose physical names. Their descriptions must say that names change under plan 0017 (old names survive as compatibility views until each drop commit).
+- The tool snapshot tests from phase 1 become part of plan 0017's standard stage gate (k).
+
 **ops** (read-only)
 - `health` → `health_report.gather()` + `_classify`
 - `pipeline_status` (days) → `views.pipeline_status`
@@ -117,7 +130,7 @@ CREATE TABLE llm_tasks (           -- Dataset kind: log
 | `regulatory` | `classify_regulatory` (Haiku→Sonnet) | ~730 (+11.5K backlog) | `session_classify.export-reg` (title-hash dedup) | `validate_reg` whitelist (stricter than today's API path) | `_save_signals_for_event` / `_bulk_mark` |
 | `news_enrich` | `classify_news` | ~190 | `export-news` | `news_classifier.normalize` + `_verify_numbers_in_source` | `news_enriched` save |
 | `news_brief` | `news_brief` | 1 | top 25 via `_pick_top_articles` | schema + non-empty sections | `news_briefs` |
-| `dossier` | `dossier` | 15 | `views.stock` context per published pick | `dossier._validate_dossier` (no numbers) + `is_publishable` | dossier file (→ later a table) |
+| `dossier` | `dossier` | 15 | `views.stock` context per published pick | `dossier._validate_dossier` (no numbers) + `is_publishable` | dossier file (→ a `documents` row in plan 0017 stage 6) |
 | `sector_dossier` | `compute_sector_dossiers` | 11 | `sector_briefs` + forces + narrative | `_validate_sector_dossier` | `sector_dossiers` |
 | `industry_classify` | manual `tools/classify_industries` | on demand | stocks with no industry | closed-set check | `stocks.industry` |
 | `sector_narrative` | manual `tools/sector_narrative_fetcher` | monthly | sector + top stocks + headlines (the routine does the web search) | `_validate_payload` | `sector_metadata` (source='auto') |
@@ -125,6 +138,11 @@ CREATE TABLE llm_tasks (           -- Dataset kind: log
 - **Lifecycle:** enqueue → claimed (lease) → done, or invalid (item retried) → failed after 3 attempts. Leases are reclaimed by `claim` itself; no cron is needed.
 - **Idempotent:** the same `input_hash` is never re-queued. `submit` on a done item is a no-op.
 - **Audit:** every write logs to `llm_usage` with `mode='routine'` and to a manifest (a `rollback(kind, since)` tool is ops-only, and later).
+- **Fit with ADR 0054** (plan 0017):
+  - `llm_tasks` is an Ops-concept table. Register it in `schema.sql` + `tables.TABLES` (`kind: log`) as usual; plan 0017 counts it (24 main tables).
+  - Its write rule: insert-if-new on `task_id`, then status changes only through `claim`/`submit`/`fail`.
+  - Keep each kind's `ingest` the **single** write point for that kind's output. Plan 0017 stage 6 then switches it to `db.write("documents" | "events", …)` in one place per kind, and the dossier file becomes a `documents` row.
+  - `llm_usage` gains `mode` values `api|session|routine`; plan 0017 adds `run_id`.
 
 ## 6. Scheduling: deterministic pipeline, one worker routine
 - **Pipeline changes:**
@@ -173,16 +191,27 @@ CREATE TABLE llm_tasks (           -- Dataset kind: log
 - **D5 — three profiles** (research / ops / work, recommended) or one server with per-tool token scopes.
 - **D6 — regulatory backlog:** drain all 11.5K (about 2 days of worker runs) or only the 60-day window the signal reads (recommended, since `signals/regulatory` looks back 60 days).
 
+**Decided 2026-09-30 (Amit):**
+- **D1 = local only / D2 = no HTTPS exposure.** The worker is `run.sh llm_local` (`claude -p` + stdio MCP), started from cron. Nothing is served on the internet. §6's `/fire` and §7's nginx/token work are out of scope. If a cloud routine is ever wanted, it's a new decision that reopens phase 4.
+- **D3 = keep the API paths behind a flag** (`config.LLM["executor"] = "queue" | "api"`, default `queue`). This is the paid fallback for when credits get topped up. The model-id literals stay.
+- **D4 = 20 min** for `await_dossiers`, then the email says "thesis pending".
+- **D5 = three profiles** (research / ops / work), as proposed.
+- **D6 = drain the full regulatory backlog** (~11.5K plus the older pending rows), not only the 60-day window. `regulatory` stays lowest priority so it never delays dossiers.
+
 ## 10. Phases (each ships alone; strangler rule from plan 0015)
 | # | Phase | Gate |
 |---|---|---|
-| 1 | `alpha_mcp` package: research + ops tools over **stdio**; the project's `.mcp.json` for local sessions | offline tool snapshot tests on a DB copy; every tool ≤25K tokens; a connect guard proves the ro connection |
+| 1 | `alpha_mcp` package: research + ops tools over **stdio**; the project's `.mcp.json` for local sessions | offline tool snapshot tests on a DB copy (via plan 0017 stage 0's `ALPHA_DB`); no tool names a table except `sql`/`schema`; every tool ≤25K tokens; a connect guard proves the ro connection |
 | 2 | `llm_tasks` + `TASK_KINDS` for `regulatory` and `news_enrich` (port `session_classify`) + work tools; local `claude -p` worker | calibration vs prior API verdicts ≥90% agreement (reuse `score-calib`); 60-day backlog drained |
 | 3 | `dossier`, `sector_dossier` and `news_brief` kinds; `enqueue_*` nodes; `await_dossiers`; remove the 5 LLM steps from `PIPELINE_STEPS` | 3 mornings: email on time, dossiers published and valid, zero LLM CRITICALs |
-| 4 | HTTPS endpoint + auth + `mcp_calls` audit; the `alpha-llm-worker` routine (`/schedule`) + pipeline `/fire` | a routine run drains a seeded queue end-to-end; token scoping tested (the `work` token can't read ops; `research` can't submit); measure run duration and cap |
+| 4 | ~~HTTPS endpoint + auth + routine + `/fire`~~ **dropped by D1/D2 (2026-09-30).** What remains: `mcp_calls` audit; `run.sh llm_local` cron runs (after the pipeline + 05:07 + 14:37 UTC) | a cron run drains a seeded queue end-to-end; measure run duration against subscription limits |
 | 5 | `industry_classify` and `sector_narrative` kinds; claude.ai connector for research/ops (phone) | the manual tools deleted |
 
 Rough size: P1 1 session · P2 1–2 · P3 1–2 · P4 1 · P5 1.
+
+**Order with plan 0017:**
+- 0017 stage 0 → P1–P3 → 0017 stages 1–2 → P4–P5 → 0017 stages 3–8.
+- After 0017 stage 2, add the research tool `explain_pick(sid, date | run_id)` → `views.explain`. It answers "why was X picked / why did it drop out" in one query.
 
 ## 11. Non-goals
 - Pipeline control via MCP (no rerun or deploy tools).
@@ -193,3 +222,6 @@ Rough size: P1 1 session · P2 1–2 · P3 1–2 · P4 1 · P5 1.
 
 ## Implementation notes
 - 2026-09-27: facts in §2 checked against the routines and headless docs. The inventory of the 7 LLM call paths and the read surface is from a read-only audit; spot-checked are `regulatory_events` status counts (11,526 pending, 71 `haiku_passed_sonnet_failed`), the `views` functions and `db.safe_read_sql`. `mcp` 1.27.1 (FastMCP) is already in the venv.
+- **2026-09-28:** sequencing with plan 0017 agreed (header). Phase 1 waits for plan 0017 stage 0 (`ALPHA_DB`; fixtures off the live DB). Added the plan-0017 fit rules: tools go through `views.py`, `llm_tasks` is Ops, one `ingest` per kind.
+- **2026-09-30:** D1–D6 decided (§9). Local executor only, so phase 4 shrinks to the cron schedule + audit. API paths are kept behind `config.LLM["executor"]`. Full backlog drain. The next step is still plan 0017 stage 0.
+- **2026-09-30:** plan 0017 stage 0 items (1)–(3) shipped, which is what phase 1 needs. `ALPHA_DB` redirects config/db/DuckDB/runlog. `tools.regression_fixtures` runs in a throwaway schema-built DB, and the live DB is untouched across a run (mtime + size identical). `busy_timeout` is 30 s. Items (4) quarantine → `row_issues` and (5) drops are left to the plan-0017 datamodel session, which is editing `schema.sql`/`tables.py`. Next: phase 1.

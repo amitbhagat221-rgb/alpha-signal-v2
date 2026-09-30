@@ -9,6 +9,8 @@ Usage:
     python -m tools.regression_fixtures list         # show all fixture ids
     python -m tools.regression_fixtures bug_2026_05_25_bajajhldng_slug   # run one
 
+    Every run uses a throwaway schema-built DB (ALPHA_DB → temp dir), never the live one.
+
 Convention:
     Each fixture is a (name, callable) entry in FIXTURES. The callable returns
     True on PASS, raises AssertionError with a message on FAIL.
@@ -32,8 +34,34 @@ Phase 4 will activate the forecast_history fixture (Gate 4); kept as
 PENDING in this file with a stub assertion until then.
 """
 
+import atexit
+import os
+import shutil
 import sys
+import tempfile
+from pathlib import Path
 from typing import Callable
+
+
+def _use_scratch_db() -> Path:
+    """Point every DB reader/writer at a fresh schema-built DB in a temp dir, so no
+    fixture can touch live rows (plan 0017 stage 0: the fixtures used to insert and
+    delete in the live DB, wiping RELI's trust_verdicts on every push). Must run
+    before anything imports config/db; seeds the one stock the fixtures use."""
+    if "config" in sys.modules or "db" in sys.modules:
+        raise RuntimeError("_use_scratch_db() must run before config/db are imported")
+    tmp = tempfile.mkdtemp(prefix="regfix_")
+    atexit.register(shutil.rmtree, tmp, ignore_errors=True)
+    path = Path(tmp) / "fixtures.db"
+    os.environ["ALPHA_DB"] = str(path)
+    os.environ["ALPHA_RUNLOG_DB"] = str(path)
+    import db
+    db.init_db()
+    with db.get_db() as conn:
+        conn.execute("INSERT INTO stocks (sid, ticker, name, cap_tier) "
+                     "VALUES ('RELI', 'RELIANCE', 'Reliance Industries', 'LARGE')")
+        conn.execute("INSERT INTO stock_prices (sid, date, close) VALUES ('RELI', '2026-01-02', 1400.0)")
+    return path
 
 
 # ────────────── Phase 3 fixtures (gates 1-3 live) ──────────────
@@ -175,7 +203,7 @@ def bug_2026_05_30_external_anchor_drift_synthetic() -> bool:
     by 5% off the NSE bhavcopy anchor; audit_drift() must catch it (write
     gate_7_anchor=0 verdict) and the live row must NOT pass.
 
-    Synthetic test using a test SID — no impact on live data.
+    Synthetic rows only — runs in the scratch DB (_use_scratch_db).
     """
     from db import get_db, read_sql
     from tools.anchor_audit import audit_drift
@@ -324,6 +352,8 @@ def verify_all() -> int:
 
 
 def main():
+    if len(sys.argv) < 2 or sys.argv[1] != "list":
+        _use_scratch_db()
     if len(sys.argv) < 2 or sys.argv[1] == "verify_all":
         sys.exit(verify_all())
     if sys.argv[1] == "list":

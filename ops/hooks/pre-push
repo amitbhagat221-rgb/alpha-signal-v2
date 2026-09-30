@@ -7,8 +7,8 @@
 #
 # Review F4 (2026-09-27): the previous copy read `rc=$?` after `cmd | tail`, i.e. tail's
 # status, so no gate could ever fail. pipefail + PIPESTATUS fix that.
-# Known hazard: gate 1 inserts and deletes synthetic rows in the LIVE DB
-# (tools/regression_fixtures.py) — tracked on the checklist; don't add more of that.
+# Gate 1 runs in a throwaway schema-built DB (tools/regression_fixtures.py sets
+# ALPHA_DB to a temp file), never the live one — plan 0017 stage 0.
 
 set -uo pipefail
 cd "$(git rev-parse --show-toplevel)" || exit 1

@@ -8,12 +8,15 @@ Import what you need:
 weights live on each factor in factors.py.)
 """
 
+import os
 from pathlib import Path
 
 # ── Paths ──
 
 PROJECT_ROOT = Path(__file__).resolve().parent
-DB_PATH = PROJECT_ROOT / "data" / "alpha_signal.db"
+# ALPHA_DB points every reader/writer at another DB file (a copy for tests, gates and
+# migrations — plan 0017 stage 0). Unset = the live DB.
+DB_PATH = Path(os.environ.get("ALPHA_DB") or PROJECT_ROOT / "data" / "alpha_signal.db")
 SCHEMA_PATH = PROJECT_ROOT / "schema.sql"
 LOG_PATH = PROJECT_ROOT / "output" / "pipeline.log"
 
