@@ -297,7 +297,7 @@ _NEWS_COLS = ("topics", "primary_topic", "one_liner", "why_it_matters", "key_num
 
 def _ingest_news(clean, payload):
     """Column-level upsert of the classifier's columns only — unlike the API path's
-    INSERT OR REPLACE it leaves image_url (another producer's column) intact."""
+    whole-row replace it leaves image_url (another producer's column) intact."""
     aid = payload["article_id"]
     prior = db.one(f"SELECT {', '.join(_NEWS_COLS)}, classified_at FROM news_enriched WHERE article_id = ?",
                    [aid])
