@@ -1,0 +1,22 @@
+{
+  "mcpServers": {
+    "alpha-research": {
+      "type": "stdio",
+      "command": "/home/ubuntu/alpha-signal/venv/bin/python",
+      "args": ["-m", "alpha_mcp.research"],
+      "env": {"PYTHONPATH": "/home/ubuntu/alpha-signal-v2", "ALPHA_MCP_ROLE": "llm-worker"}
+    },
+    "alpha-ops": {
+      "type": "stdio",
+      "command": "/home/ubuntu/alpha-signal/venv/bin/python",
+      "args": ["-m", "alpha_mcp.ops"],
+      "env": {"PYTHONPATH": "/home/ubuntu/alpha-signal-v2", "ALPHA_MCP_ROLE": "llm-worker"}
+    },
+    "alpha-work": {
+      "type": "stdio",
+      "command": "/home/ubuntu/alpha-signal/venv/bin/python",
+      "args": ["-m", "alpha_mcp.work"],
+      "env": {"PYTHONPATH": "/home/ubuntu/alpha-signal-v2", "ALPHA_MCP_ROLE": "llm-worker", "ALPHA_MCP_MODE": "local"}
+    }
+  }
+}

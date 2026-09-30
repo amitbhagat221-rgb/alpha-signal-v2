@@ -125,3 +125,4 @@ cockpit/static/news_img/
 # MCP server registration (plan 0016): stdio only, no secrets
 !.mcp.json
 !ops/mcp.local.json
+!ops/llm_worker_local.sh

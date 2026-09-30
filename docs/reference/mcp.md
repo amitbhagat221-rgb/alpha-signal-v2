@@ -97,4 +97,4 @@ ALPHA_DB=/path/to/copy.db ops/llm_worker_local.sh 5    # against a DB copy (cali
 - **Where it logs:** `output/llm_worker.log`.
 - **Exit codes:** non-zero if claude fails, the run reports an error, or items were claimable and none got done.
 - **Not yet scheduled.** Phase 3 adds a `run.sh` case, `llm_local) logged llm_local ops/llm_worker_local.sh ;;`, plus cron after the morning run and at 05:07/14:37 UTC.
-- **Measured throughput** (calibration, 2026-09-30): 120 items in 129 s over 16 turns (Sonnet).
+- **Measured throughput** (calibration, 2026-09-30): 120 items in 129 s over 16 turns; 300 items in about 5 min (Sonnet, 0 invalid results).

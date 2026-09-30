@@ -225,3 +225,38 @@ Rough size: P1 1 session · P2 1–2 · P3 1–2 · P4 1 · P5 1.
 - **2026-09-28:** sequencing with plan 0017 agreed (header). Phase 1 waits for plan 0017 stage 0 (`ALPHA_DB`; fixtures off the live DB). Added the plan-0017 fit rules: tools go through `views.py`, `llm_tasks` is Ops, one `ingest` per kind.
 - **2026-09-30:** D1–D6 decided (§9). Local executor only, so phase 4 shrinks to the cron schedule + audit. API paths are kept behind `config.LLM["executor"]`. Full backlog drain. The next step is still plan 0017 stage 0.
 - **2026-09-30:** plan 0017 stage 0 items (1)–(3) shipped, which is what phase 1 needs. `ALPHA_DB` redirects config/db/DuckDB/runlog. `tools.regression_fixtures` runs in a throwaway schema-built DB, and the live DB is untouched across a run (mtime + size identical). `busy_timeout` is 30 s. Items (4) quarantine → `row_issues` and (5) drops are left to the plan-0017 datamodel session, which is editing `schema.sql`/`tables.py`. Next: phase 1.
+- **2026-09-30 (from the agent-org design session, parked until 0016+0017 finish; will be plan 0019):** three shape requests, cheap now and painful to retrofit. (1) `TASK_KINDS` should allow an ingest whose output is a document / PR / hypothesis row, not only a producer table row — agent roles (promotion pack, data triage, scout brief) emit markdown; if that doesn't fit, reserve an `agent_runs` kind. (2) Carry a role name (`claimed_by` on `llm_tasks`, a `role`/profile column on `mcp_calls`) so LLM cost is attributable per role from day one. (3) For plan 0017: a `hypotheses` concept (card in → verdict out; shared inbox for CIO / researchers / sector desk) — decide whether it fits stage 1 or 2. None of these change 0016's phases or gates.
+- **2026-09-30, phases 1–2 built** (code: `alpha_mcp/`, reference: [mcp.md](../reference/mcp.md)).
+  - **Phase 1.** `alpha-research` has 31 tools and `alpha-ops` has 6, over stdio, registered in `.mcp.json` (research + ops only).
+    - Read-only by construction: `_core.install_readonly()` swaps `db.get_db` for a `mode=ro` + `query_only` connection, points `runlog` at a read-only connection, and points `COCKPIT_CACHE_DIR` at a temp dir. A test proves that INSERT, UPDATE, DELETE and DDL raise.
+    - Audit: `mcp_calls` has a `role` column (per the agent-org request). It's written by a connection whose authorizer allows only that INSERT.
+    - Wire format: compact JSON, 34% smaller than FastMCP's indented dicts.
+  - **Deviations from §4:**
+    - Added `pick_breakdown`. It gives the exact per-factor contribution, rebuilt from `pit_replay_snapshots` (the screener's frozen inputs per date), and reproduces `base_score` with 0.0 error across all 1,860 stocks on 2026-09-30. This is most of `explain_pick` now; the plan-0017 stage-2 `runs` version still replaces it.
+    - `stock_lineage` takes a `factor` filter; the full payload was about 240K chars.
+    - Added `feed_incident` (ops): the `runlog.bundle` for one feed, as the checklist asked.
+    - `macro` and `regulatory` read tables directly, because `views.py` has no function for them yet. They belong in `views.py`, as `views.macro` and `views.regulatory`.
+  - **Latency, warm, on a DB copy:**
+    - Heaviest research tools: `news` 3.1 s (the news pool), `pick_outcomes` 2.6 s, `sector` 2.4 s, `regulatory` 1.2 s, `sectors` 0.8 s. Everything else is under 0.5 s.
+    - `health` (the `gather()` scan) and `freshness` (`data_health`) took 5–9 min on a cold 9.8 GB copy, while the copy and the live DB competed for 14 GB of page cache. On the warm live DB they're the ~18 s scan the cockpit already runs. `health` caches for 5 min.
+  - **Phase-1 gate passed.** `claude -p` with only `alpha-research`/`alpha-ops` (`--tools ""`) answered "today's LARGE picks and why #1 is first": ULTC, 0.8118, with announcement_car / consensus / sector_tilt / book_to_price contributions, verified against the stored score. That took 2 tool calls in 12 s. Side finding: `stocks.pe_ratio`/`pb_ratio`/`roe` are null for all 10 LARGE picks.
+  - **Phase 2.** `llm_tasks` (+ `undo_json`, which drives `rollback`) and `mcp_calls` are in `schema.sql` + `tables.TABLES`. There's also `alpha_mcp/tasks.py` (`TASK_KINDS` regulatory + news_enrich; the `enqueue`/`status`/`rollback`/`retry` CLI), the `alpha-work` server, the `.claude/routines/llm-worker.md` prompt and `ops/llm_worker_local.sh`.
+  - **Phase-2 deviations:**
+    - `submit` takes a batch (`[{task_id, result}]`, one call per claimed batch). One call per item would have meant ~13K model turns for the backlog.
+    - `validate_reg` and `news_classifier.normalize` are copied into `tasks.py`. `session_classify` is another session's untracked file, and `normalize` exists only in an uncommitted edit of `news_classifier.py`. Switch back when both are committed.
+    - The news ingest is a column-level upsert. The API path's `INSERT OR REPLACE` nulls `image_url`, which the ingest now keeps.
+    - Regulatory backlog: 60-day items get priority 8, older items 9 (D6 = full drain, newest first).
+    - The worker runs with `--tools ""`, so it has no built-in tools at all. `task_kinds` reports the DB path, so a calibration run can prove it is on the copy.
+  - **Calibration.** Run on a DB copy with the real local worker (`ops/llm_worker_local.sh`, Sonnet, subscription). Samples were API-era verdicts (classified before 2026-08-25, published 2026-06 onward), reset to pending on the copy, with every other claimable item held back.
+
+    | Round | Sample | is_regulatory agreement | Direction on shared sectors | News sentiment / primary topic |
+    |---|---|---|---|---|
+    | 1 | 40 + 40 | 72/80 = 90.0% | 32/37 = 86.5% (3 of the 5 misses are one "RBI holds rate" headline: hold = +1 "stable" vs −1 "no cut") | 75% / 55% (n=40) |
+    | 2 | 100 + 100 | 170/200 = 85.0% (recall 78/100 on API-classified, 92/100 on API-rejected) | 65/69 = 94.2% | 72% / 71% |
+    | 3 (instructions changed, fresh sample) | 100 + 100 | **183/200 = 91.5%** (93/100, 90/100) | 55/65 = 84.6% | 77% / 72% |
+
+    - Throughput: 300 items in about 5 min, 0 invalid results. The only rejection came from a fabricated task_id, and nothing was written for it.
+    - The change between rounds 2 and 3: the instructions now say outright that explainers, retrospectives and opinion pieces whose *subject* is a named policy count as regulatory (low / minor). That is the inclusive series the signal is calibrated on. The worker had been applying the "opinion pieces are not regulatory" clause literally.
+    - Direction pooled over all rounds is 152/171 = 88.9%, just under the 90% bar. The disagreements are perspective calls, not errors: the worker scores the listed companies' shareholders (a pro-buyer RERA ruling is −1 for Real Estate; a regulator refusing a higher solar payout is +1 for Utilities), where the API often scored consumers. Neither side is ground truth. Tuning towards the API's mixed perspective would be overfitting.
+    - **Decision for Amit:** accept direction at 88.9% (the regulatory factor is benched and moves no picks), or add an explicit "direction = impact on the sector's listed equities" rule and run one more fresh round.
+
