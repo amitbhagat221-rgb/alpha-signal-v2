@@ -58,6 +58,10 @@ case "$JOB" in
         run python pipeline.py
         RC=$?
         run python -m tools.duckdb_refresh || echo "[warn] duckdb_refresh failed; cockpit falls back to SQLite reads"
+        # Data model v3 shadow (ADR 0054): mirror into the new tables, then record old-vs-new parity.
+        # After the email, so a failure here never touches picks; `logged` puts it in pipeline_log.
+        logged datamodel_sync run python -m datamodel.sync || echo "[warn] datamodel sync failed (v3 shadow only)"
+        logged datamodel_reconcile run python -m datamodel.reconcile || echo "[warn] datamodel parity FAIL: python -m datamodel.reconcile --show"
         echo "Done $(date -u) (pipeline rc=$RC)"
         exit $RC ;;
     forward)            # 14:00 UTC — forward-only sources with no historical archive

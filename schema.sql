@@ -1991,3 +1991,304 @@ CREATE TABLE IF NOT EXISTS mcp_calls (
     error     TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_mcp_calls_ts ON mcp_calls(ts);
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Data model v3 — ADR 0054 / plan 0017. Tables grow with concepts, not things.
+-- Filled by datamodel/sync.py from the legacy tables (shadow week, 2026-09-30 →);
+-- datamodel/reconcile.py records parity in check_results. Portable SQL: no tier
+-- CHECK lists, JSON as TEXT read with ->>. mf.db has its own file: datamodel/mf_schema.sql.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- ── Reference ──
+CREATE TABLE IF NOT EXISTS catalog (
+    catalog_id   INTEGER PRIMARY KEY,
+    kind         TEXT NOT NULL,          -- feature|series|event_type|doc_type|metric|dataset|check|model
+    name         TEXT NOT NULL,
+    unit         TEXT,
+    lo           REAL,
+    hi           REAL,
+    cadence      TEXT,
+    lag_days     INTEGER,
+    spec         TEXT,                   -- JSON: origin, enum codes, registry entry
+    first_seen   TEXT NOT NULL,
+    retired_at   TEXT,
+    renamed_from TEXT,
+    UNIQUE (kind, name)
+);
+CREATE TABLE IF NOT EXISTS entities (
+    entity_id   INTEGER PRIMARY KEY,
+    kind        TEXT NOT NULL,           -- security|sector|industry|index|market|portfolio
+    key         TEXT NOT NULL,
+    market      TEXT NOT NULL DEFAULT 'IN',
+    name        TEXT,
+    listed_on   TEXT,
+    delisted_on TEXT,
+    attrs       TEXT,
+    created_at  TEXT NOT NULL,
+    updated_at  TEXT NOT NULL,
+    UNIQUE (kind, market, key)
+);
+CREATE TABLE IF NOT EXISTS classifications (
+    entity_id  INTEGER NOT NULL,
+    scheme     TEXT NOT NULL,            -- tier|sector|industry|nifty500
+    value      TEXT NOT NULL,
+    valid_from TEXT NOT NULL,
+    valid_to   TEXT,                     -- NULL = current
+    source     TEXT,
+    run_id     INTEGER,
+    PRIMARY KEY (entity_id, scheme, valid_from)
+) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS ix_cls_scheme ON classifications (scheme, valid_to);
+CREATE TABLE IF NOT EXISTS identifiers (
+    entity_id  INTEGER NOT NULL,
+    namespace  TEXT NOT NULL,            -- nse_symbol|tickertape_slug|mc_slug|bse_scrip|isin|upstox
+    value      TEXT NOT NULL,
+    valid_from TEXT NOT NULL,
+    valid_to   TEXT,
+    attrs      TEXT,
+    PRIMARY KEY (namespace, value, valid_from)
+) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS ix_ident_entity ON identifiers (entity_id, namespace);
+
+-- ── Bars ──
+CREATE TABLE IF NOT EXISTS bars_daily (
+    entity_id    INTEGER NOT NULL,
+    date         TEXT NOT NULL,
+    source       TEXT NOT NULL,
+    open REAL, high REAL, low REAL, close REAL, prev_close REAL, volume REAL,
+    delivery_qty REAL, delivery_pct REAL, trades REAL, turnover REAL,
+    attrs        TEXT,                   -- source-specific extras (e.g. historical_universe series / requested_date)
+    fetched_at   TEXT NOT NULL,
+    PRIMARY KEY (entity_id, date, source)
+) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS ix_bars_date ON bars_daily (date);
+CREATE TABLE IF NOT EXISTS derivative_bars (
+    underlying_id INTEGER,
+    symbol        TEXT NOT NULL,
+    instrument    TEXT NOT NULL,
+    expiry        TEXT NOT NULL,
+    strike        REAL NOT NULL,         -- 0 for futures
+    option_type   TEXT NOT NULL,         -- '' for futures
+    date          TEXT NOT NULL,
+    close REAL, settle REAL, underlying_price REAL, oi REAL, oi_change REAL, volume REAL, trades REAL,
+    fetched_at    TEXT NOT NULL,
+    PRIMARY KEY (symbol, instrument, expiry, strike, option_type, date)
+) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS ix_dbars_date ON derivative_bars (date);
+
+-- ── Series (versioned: a revision appends) ──
+CREATE TABLE IF NOT EXISTS series_values (
+    series_id    INTEGER NOT NULL,
+    date         TEXT NOT NULL,
+    value        REAL,
+    available_at TEXT NOT NULL,
+    fetched_at   TEXT NOT NULL,
+    last_seen_at TEXT NOT NULL,
+    PRIMARY KEY (series_id, date, fetched_at)
+) WITHOUT ROWID;
+
+-- ── Events ──
+CREATE TABLE IF NOT EXISTS events (
+    event_id     INTEGER PRIMARY KEY,
+    type_id      INTEGER NOT NULL,
+    subtype      TEXT,
+    entity_id    INTEGER,
+    event_time   TEXT NOT NULL,
+    available_at TEXT NOT NULL,
+    source       TEXT NOT NULL,
+    source_key   TEXT NOT NULL,
+    payload      TEXT,
+    fetched_at   TEXT NOT NULL,
+    UNIQUE (type_id, source, source_key)
+);
+CREATE INDEX IF NOT EXISTS ix_events_entity ON events (entity_id, type_id, event_time);
+CREATE INDEX IF NOT EXISTS ix_events_type   ON events (type_id, subtype, event_time);
+CREATE TABLE IF NOT EXISTS event_links (
+    event_id  INTEGER NOT NULL,
+    entity_id INTEGER NOT NULL,
+    role      TEXT NOT NULL,
+    weight    REAL,
+    PRIMARY KEY (event_id, entity_id, role)
+) WITHOUT ROWID;
+
+-- ── Documents (source texts and model outputs; numbers only in `fields`) ──
+CREATE TABLE IF NOT EXISTS documents (
+    doc_id        INTEGER PRIMARY KEY,
+    type_id       INTEGER NOT NULL,
+    entity_id     INTEGER,
+    event_id      INTEGER,
+    parent_doc_id INTEGER,
+    doc_date      TEXT NOT NULL,
+    available_at  TEXT NOT NULL,
+    source        TEXT NOT NULL,
+    source_key    TEXT NOT NULL,
+    run_id        INTEGER,
+    model         TEXT,
+    title         TEXT,
+    fields        TEXT,
+    body          BLOB,                  -- zlib-compressed text
+    body_path     TEXT,
+    content_hash  TEXT NOT NULL,
+    status        TEXT NOT NULL DEFAULT 'valid',   -- valid|invalid|superseded
+    created_at    TEXT NOT NULL,
+    UNIQUE (type_id, source, source_key, content_hash)
+);
+CREATE INDEX IF NOT EXISTS ix_docs_entity ON documents (entity_id, type_id, doc_date);
+
+-- ── Company facts (versioned) ──
+CREATE TABLE IF NOT EXISTS fundamentals (
+    entity_id    INTEGER NOT NULL,
+    metric_id    INTEGER NOT NULL,
+    period_end   TEXT NOT NULL,
+    period_type  TEXT NOT NULL,
+    basis        TEXT NOT NULL,
+    source       TEXT NOT NULL,
+    value        REAL,
+    available_at TEXT NOT NULL,
+    fetched_at   TEXT NOT NULL,
+    last_seen_at TEXT NOT NULL,
+    PRIMARY KEY (entity_id, metric_id, period_end, period_type, basis, source, fetched_at)
+) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS estimates (
+    entity_id     INTEGER NOT NULL,
+    metric_id     INTEGER NOT NULL,
+    target_period TEXT NOT NULL,
+    source        TEXT NOT NULL,
+    value         REAL,
+    label         TEXT,
+    as_of         TEXT,                  -- the date the source says it is as of (monthly snapshot date)
+    available_at  TEXT NOT NULL,
+    fetched_at    TEXT NOT NULL,
+    last_seen_at  TEXT NOT NULL,
+    PRIMARY KEY (entity_id, metric_id, target_period, source, fetched_at)
+) WITHOUT ROWID;
+
+-- ── Features (numeric; enums are catalog-declared codes) ──
+CREATE TABLE IF NOT EXISTS feature_values (
+    feature_id INTEGER NOT NULL,
+    date       TEXT NOT NULL,
+    entity_id  INTEGER NOT NULL,
+    value      REAL,
+    run_id     INTEGER NOT NULL,
+    PRIMARY KEY (feature_id, date, entity_id)
+) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS ix_fv_entity ON feature_values (entity_id, date);
+
+-- ── Decisions (appended per run) ──
+CREATE TABLE IF NOT EXISTS runs (
+    run_id      INTEGER PRIMARY KEY,
+    kind        TEXT NOT NULL,           -- morning|forward|watchdog|reconstruct|endpoint_audit|llm|datamodel_sync
+    as_of_date  TEXT NOT NULL,
+    started_at  TEXT NOT NULL,
+    finished_at TEXT,
+    status      TEXT NOT NULL,
+    official    INTEGER NOT NULL DEFAULT 0,
+    git_sha     TEXT,
+    dirty       INTEGER,
+    config_hash TEXT,
+    model_id    INTEGER,
+    attrs       TEXT
+);
+CREATE INDEX IF NOT EXISTS ix_runs_kind_date ON runs (kind, as_of_date);
+CREATE TABLE IF NOT EXISTS picks (
+    run_id    INTEGER NOT NULL,
+    entity_id INTEGER NOT NULL,
+    tier      TEXT NOT NULL,
+    rank      INTEGER,
+    score     REAL,
+    selected  INTEGER NOT NULL,
+    gate      TEXT,
+    uhs       REAL,
+    attrs     TEXT,
+    PRIMARY KEY (run_id, entity_id)
+) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS pick_contributions (
+    run_id       INTEGER NOT NULL,
+    entity_id    INTEGER NOT NULL,
+    feature_id   INTEGER NOT NULL,
+    raw          REAL,
+    pctile       REAL,
+    weight       REAL,
+    contribution REAL,                   -- share of base score; Σ over features = picks base score
+    PRIMARY KEY (run_id, entity_id, feature_id)
+) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS book_weights (
+    run_id    INTEGER NOT NULL,
+    entity_id INTEGER NOT NULL,
+    weight    REAL,
+    attrs     TEXT,
+    PRIMARY KEY (run_id, entity_id)
+) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS outcomes (
+    run_id       INTEGER NOT NULL,
+    entity_id    INTEGER NOT NULL,
+    horizon_days INTEGER NOT NULL,
+    start_date   TEXT,
+    end_date     TEXT,
+    ret          REAL,
+    bench_ret    REAL,
+    excess       REAL,
+    attrs        TEXT,
+    computed_at  TEXT NOT NULL,
+    PRIMARY KEY (run_id, entity_id, horizon_days)
+) WITHOUT ROWID;
+
+-- ── Research ──
+CREATE TABLE IF NOT EXISTS factor_tests (
+    test_id      INTEGER PRIMARY KEY,
+    feature_id   INTEGER NOT NULL,
+    tier         TEXT NOT NULL,
+    horizon_days INTEGER NOT NULL DEFAULT 0,
+    method       TEXT NOT NULL,          -- ic_by_tier|horizon_gate
+    source       TEXT NOT NULL,
+    period_start TEXT,
+    period_end   TEXT,
+    n            INTEGER,
+    ic           REAL,
+    t_stat       REAL,
+    icir         REAL,
+    verdict      TEXT,
+    run_id       INTEGER,
+    computed_at  TEXT NOT NULL,
+    attrs        TEXT,
+    UNIQUE (feature_id, tier, horizon_days, method, source)
+);
+
+-- ── Ops ──
+CREATE TABLE IF NOT EXISTS step_runs (
+    run_id      INTEGER NOT NULL,
+    step        TEXT NOT NULL,
+    attempt     INTEGER NOT NULL DEFAULT 1,
+    status      TEXT NOT NULL,
+    started_at  TEXT NOT NULL,
+    finished_at TEXT,
+    rows        INTEGER,
+    error       TEXT,
+    attrs       TEXT,
+    PRIMARY KEY (run_id, step, attempt)
+);
+CREATE TABLE IF NOT EXISTS check_results (
+    check_id   INTEGER NOT NULL,
+    subject    TEXT NOT NULL,
+    entity_id  INTEGER NOT NULL DEFAULT 0,
+    date       TEXT NOT NULL,
+    status     TEXT NOT NULL,
+    score      REAL,
+    detail     TEXT,
+    run_id     INTEGER,
+    checked_at TEXT NOT NULL,
+    PRIMARY KEY (check_id, subject, entity_id, date)
+);
+CREATE TABLE IF NOT EXISTS row_issues (
+    issue_id    INTEGER PRIMARY KEY,
+    dataset     TEXT NOT NULL,
+    row_key     TEXT NOT NULL,
+    rule        TEXT NOT NULL,
+    severity    TEXT NOT NULL,           -- quarantine|review|error
+    payload     TEXT,
+    run_id      INTEGER,
+    detected_at TEXT NOT NULL,
+    resolved_at TEXT,
+    resolution  TEXT,
+    UNIQUE (dataset, row_key, rule, detected_at)
+);

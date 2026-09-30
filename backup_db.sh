@@ -69,4 +69,29 @@ fi
 
 # Keep only the newest 2 local fallback copies (offsite is the real backup).
 ls -1t "$LOCAL_DIR"/alpha_signal_*.db.gz 2>/dev/null | tail -n +3 | xargs -r rm -f
+
+# mf.db (ADR 0054: mutual funds live in their own file, backed up on their own)
+MF_DB="/home/ubuntu/alpha-signal-v2/data/mf.db"
+if [ -f "$MF_DB" ]; then
+    MF_GZ="$TMP/mf_${STAMP}.db.gz"
+    if sqlite3 "$MF_DB" "VACUUM INTO '$TMP/mf_snap.db'" \
+       && [ "$(sqlite3 "$TMP/mf_snap.db" 'PRAGMA integrity_check;' | head -1)" = "ok" ] \
+       && gzip -1 -c "$TMP/mf_snap.db" > "$MF_GZ"; then
+        rm -f "$TMP/mf_snap.db"
+        log "mf.db snapshot ok ($(du -h "$MF_GZ" | cut -f1))"
+        if rclone listremotes 2>/dev/null | grep -q '^gdrive:' && rclone copy "$MF_GZ" "$REMOTE/" 2>&1; then
+            log "uploaded $(basename "$MF_GZ") -> $REMOTE"
+            rclone delete "$REMOTE/" --min-age "${RETAIN_DAILY_DAYS}d" --include 'mf_*.db.gz' --exclude 'mf_*01.db.gz' 2>/dev/null
+            rm -f "$MF_GZ"
+        else
+            log "mf.db upload skipped/failed — keeping local copy in $LOCAL_DIR"
+            mv "$MF_GZ" "$LOCAL_DIR/"
+            ls -1t "$LOCAL_DIR"/mf_*.db.gz 2>/dev/null | tail -n +3 | xargs -r rm -f
+        fi
+    else
+        rm -f "$TMP/mf_snap.db"
+        log "mf.db snapshot FAILED"
+        exit 1
+    fi
+fi
 log "done"

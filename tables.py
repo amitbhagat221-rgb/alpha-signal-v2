@@ -673,6 +673,98 @@ TABLES = {
     # same-day timing drift (audit Data-F10).
     "_file_duckdb_replica": {"kind": "file", "domain": "Output", "date_col": None, "stale_days": 2},
     "_file_db_backup": {"kind": "file", "domain": "Output", "date_col": None, "stale_days": 2},
+    # ── Data model v3 (ADR 0054 / plan 0017) — shadow tables filled by datamodel/sync.py from the
+    # legacy tables and reconciled daily (datamodel/reconcile.py → check_results). Timeless for the
+    # freshness scan except bars_daily (a stalled sync shows there); parity is the health signal.
+    "bars_daily": {
+        "kind": "COMPUTED", "domain": "Universe & Prices", "date_col": "date", "freq": "daily", "stale_days": 6,
+        "best_effort": True,
+        "description": "Daily OHLCV for securities and indices (v3; mirror of stock_prices + nse_index_history, source in the PK).",
+    },
+    "catalog": {
+        "kind": "COMPUTED", "domain": "Universe & Prices", "date_col": None,
+        "description": 'Every name the system knows (features, metrics, series, event/doc types, datasets, checks) with an append-only integer id; generated from the code registries and the legacy columns the sync maps.',
+    },
+    "entities": {
+        "kind": "COMPUTED", "domain": "Universe & Prices", "date_col": None,
+        "description": 'Anything a value can be about: securities (incl. dead names), sectors, industries, indices, the market, the book.',
+    },
+    "classifications": {
+        "kind": "COMPUTED", "domain": "Universe & Prices", "date_col": None,
+        "description": 'SCD2 history of tier / sector / industry / Nifty-500 membership (valid_from, valid_to). Seeded 2026-09-30 from stocks + daily_picks history.',
+    },
+    "identifiers": {
+        "kind": "COMPUTED", "domain": "Universe & Prices", "date_col": None,
+        "description": 'External ids per entity over time: NSE symbol, Tickertape slug, Moneycontrol slug, BSE scrip, ISIN.',
+    },
+    "derivative_bars": {
+        "kind": "COMPUTED", "domain": "Universe & Prices", "date_col": None,
+        "description": "F&O EOD grid (mirror of fno_bhav; strike 0 / option_type '' for futures).",
+    },
+    "series_values": {
+        "kind": "COMPUTED", "domain": "Macro", "date_col": None,
+        "description": 'Entity-less observations (macro, FII/DII flows), versioned: a revision appends a row (fetched_at + last_seen_at).',
+    },
+    "events": {
+        "kind": "COMPUTED", "domain": "Trades & Corporate", "date_col": None,
+        "description": 'Point-in-time occurrences (BSE announcements, corporate actions, insider trades, bulk deals, short selling, surveillance, earnings dates, regulatory/policy events, news, broker recos, market events) with event_time, available_at and a JSON payload.',
+    },
+    "event_links": {
+        "kind": "COMPUTED", "domain": "Trades & Corporate", "date_col": None,
+        "description": 'An event about several entities (news → stocks).',
+    },
+    "documents": {
+        "kind": "COMPUTED", "domain": "News & Sentiment", "date_col": None,
+        "description": 'Source texts and model outputs (transcripts, news classifications, regulatory labels, briefs, sector dossiers, free-text feature attributes); numbers only in `fields`.',
+    },
+    "fundamentals": {
+        "kind": "COMPUTED", "domain": "Fundamentals", "date_col": None,
+        "description": 'Reported company facts (statements, Screener line items, bank metrics, shareholding pattern), versioned; available_at = period_end + filing lag.',
+    },
+    "estimates": {
+        "kind": "COMPUTED", "domain": "Fundamentals", "date_col": None,
+        "description": 'Forward-looking opinions (PTs, EPS/revenue estimates, recos), versioned; the monthly snapshot is a view.',
+    },
+    "feature_values": {
+        "kind": "COMPUTED", "domain": "Computed Signals", "date_col": None,
+        "description": 'Every derived number: feature × date × entity, slice-replaced per (feature, date); enums are catalog-declared codes.',
+    },
+    "runs": {
+        "kind": "COMPUTED", "domain": "Output", "date_col": None,
+        "description": 'One row per run (morning, watchdog, reconstruct, …) with git sha and attrs; decisions hang off run_id.',
+    },
+    "picks": {
+        "kind": "COMPUTED", "domain": "Output", "date_col": None,
+        "description": 'Every ranked stock per run: tier, rank, score, selected, gate, UHS.',
+    },
+    "pick_contributions": {
+        "kind": "COMPUTED", "domain": "Output", "date_col": None,
+        "description": 'Per pick × factor: raw input, within-tier percentile, weight, contribution (Σ = base score). Rebuilt from pit_replay inputs and kept only when the rebuilt score matches daily_picks.',
+    },
+    "book_weights": {
+        "kind": "COMPUTED", "domain": "Output", "date_col": None,
+        "description": 'HRP book weights per run.',
+    },
+    "outcomes": {
+        "kind": "COMPUTED", "domain": "Output", "date_col": None,
+        "description": 'Forward returns per run × entity (a security, or the book) × horizon.',
+    },
+    "factor_tests": {
+        "kind": "COMPUTED", "domain": "Backtest (PIT)", "date_col": None,
+        "description": 'Evidence about features: IC by tier, horizon gate.',
+    },
+    "step_runs": {
+        "kind": "COMPUTED", "domain": "Pipeline", "date_col": None,
+        "description": 'One row per step attempt within a run (pipeline, watchdog heals, endpoint audits, PIT reconstructions, LLM batches).',
+    },
+    "check_results": {
+        "kind": "COMPUTED", "domain": "Pipeline", "date_col": None,
+        "description": 'Check outcomes per subject/date: UHS, trust-gate pass counts, feed checks, data-model parity.',
+    },
+    "row_issues": {
+        "kind": "COMPUTED", "domain": "Pipeline", "date_col": None,
+        "description": 'Rows rejected or flagged (quarantine, trust-gate failures, pull errors), with the row as JSON and a resolution slot.',
+    },
 }
 
 
