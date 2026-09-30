@@ -557,6 +557,16 @@ TABLES = {
     "forecast_history_quarantine": {"kind": "QUARANTINE", "domain": "Pipeline", "date_col": "date"},
     "health_score": {"kind": "COMPUTED", "domain": "Pipeline", "date_col": "snapshot_date"},
     "llm_usage": {"kind": "LOG", "domain": "Pipeline", "date_col": None},
+    "llm_tasks": {
+        "kind": "LOG", "domain": "Pipeline", "date_col": "created_at",
+        "depth": "The LLM work queue (plan 0016)",
+        "description": "One row per unit of LLM work (a regulatory headline, a news article; later a dossier or brief). Queued by `python -m alpha_mcp.tasks enqueue <kind>`, leased by a worker over the alpha-work MCP (`claim`), and written only by `submit`, which validates the result server-side and ingests it through the producer's own save path. status: queued / claimed / done / invalid / failed. undo_json lets `rollback(kind, since)` restore what an ingest changed.",
+    },
+    "mcp_calls": {
+        "kind": "LOG", "domain": "Pipeline", "date_col": "ts",
+        "depth": "Audit log of MCP tool calls (plan 0016)",
+        "description": "One row per alpha-research / alpha-ops / alpha-work MCP tool call: profile, role (ALPHA_MCP_ROLE), tool, a hash of the arguments, rows returned, latency in ms and any error. Written by a connection that may insert into this table and nothing else.",
+    },
     "mf_holdings_quarantine": {"kind": "QUARANTINE", "domain": "Pipeline", "date_col": "as_of_date"},
     "mf_sector_allocation_quarantine": {
         "kind": "QUARANTINE", "domain": "Pipeline", "date_col": "as_of_date",

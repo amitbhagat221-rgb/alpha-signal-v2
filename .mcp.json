@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "alpha-research": {
+      "type": "stdio",
+      "command": "/home/ubuntu/alpha-signal/venv/bin/python",
+      "args": ["-m", "alpha_mcp.research"],
+      "env": {"PYTHONPATH": "/home/ubuntu/alpha-signal-v2", "ALPHA_MCP_ROLE": "claude-code"}
+    },
+    "alpha-ops": {
+      "type": "stdio",
+      "command": "/home/ubuntu/alpha-signal/venv/bin/python",
+      "args": ["-m", "alpha_mcp.ops"],
+      "env": {"PYTHONPATH": "/home/ubuntu/alpha-signal-v2", "ALPHA_MCP_ROLE": "claude-code"}
+    }
+  }
+}

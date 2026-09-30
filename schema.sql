@@ -1952,3 +1952,42 @@ CREATE TABLE IF NOT EXISTS working_capital_intensity_scores (
     PRIMARY KEY (sid, snapshot_date)
 );
 CREATE INDEX IF NOT EXISTS idx_wci_date ON working_capital_intensity_scores(snapshot_date);
+
+-- ── LLM work queue + MCP audit (plan 0016) ──
+-- One row per unit of LLM work. task_id = kind:item_key:input_hash (the same input is never
+-- queued twice). Written only by alpha_mcp.tasks: enqueue (INSERT OR IGNORE), then status
+-- changes via claim / submit / fail. payload keys starting with "_" never leave the server.
+-- undo_json = what the kind's ingest changed, so rollback(kind, since) can restore it.
+CREATE TABLE IF NOT EXISTS llm_tasks (
+    task_id      TEXT PRIMARY KEY,
+    kind         TEXT NOT NULL,
+    item_key     TEXT NOT NULL,
+    input_hash   TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    status       TEXT NOT NULL CHECK(status IN ('queued','claimed','done','invalid','failed','expired')),
+    priority     INTEGER DEFAULT 5,
+    deadline_at  TEXT,
+    attempts     INTEGER DEFAULT 0,
+    claimed_by   TEXT,
+    lease_until  TEXT,
+    result_json  TEXT,
+    undo_json    TEXT,
+    error        TEXT,
+    created_at   TEXT DEFAULT (datetime('now')),
+    done_at      TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_llm_tasks_claim ON llm_tasks(kind, status, priority);
+
+-- Audit of every MCP tool call (alpha_mcp._core.audit): who (profile + role), what, how long.
+CREATE TABLE IF NOT EXISTS mcp_calls (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts        TEXT NOT NULL,
+    profile   TEXT NOT NULL,
+    role      TEXT,
+    tool      TEXT NOT NULL,
+    args_hash TEXT,
+    rows      INTEGER,
+    ms        INTEGER,
+    error     TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_mcp_calls_ts ON mcp_calls(ts);
