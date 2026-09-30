@@ -69,6 +69,27 @@ def tx(c):
         raise
 
 
+CHUNK = 250_000
+
+
+def breathe(c):
+    """Commit and reopen: called between slices so other writers (busy_timeout 30 s) never wait long on a backfill."""
+    c.execute("COMMIT")
+    c.execute("BEGIN IMMEDIATE")
+
+
+def chunked(c, src, alias, sql):
+    """Run `sql` (containing /*RANGE*/ inside its WHERE) over rowid chunks of `src`, committing between chunks."""
+    lo, hi = c.execute(f"SELECT MIN(rowid), MAX(rowid) FROM {src}").fetchone()
+    if lo is None:
+        return 0
+    n = 0
+    for a in range(lo, hi + 1, CHUNK):
+        n += c.execute(sql.replace("/*RANGE*/", f"AND {alias}.rowid BETWEEN {a} AND {a + CHUNK - 1}")).rowcount
+        breathe(c)
+    return n
+
+
 def ensure_schema(c):
     text = (ROOT / "schema.sql").read_text()
     i = text.index(V3_MARK)
@@ -321,25 +342,25 @@ def sync_bars(c, full):
           "volume=excluded.volume, delivery_qty=excluded.delivery_qty, delivery_pct=excluded.delivery_pct, " \
           "trades=excluded.trades, turnover=excluded.turnover"
     with tx(c):
-        n1 = c.execute(f"""INSERT INTO bars_daily(entity_id, date, source, open, high, low, close, prev_close, volume,
+        n1 = chunked(c, "stock_prices", "p", f"""INSERT INTO bars_daily(entity_id, date, source, open, high, low, close, prev_close, volume,
                 delivery_qty, delivery_pct, trades, turnover, fetched_at)
             SELECT e.entity_id, p.date, COALESCE(p.source, 'unknown'), p.open, p.high, p.low, p.close, p.prev_close, p.volume,
                    p.delivered_qty, p.delivery_pct, p.num_trades, p.traded_value, '{NOW}'
-            FROM stock_prices p JOIN entities e ON {SEC}=p.sid WHERE true {w}
-            ON CONFLICT(entity_id, date, source) DO UPDATE SET {upd}""").rowcount
+            FROM stock_prices p JOIN entities e ON {SEC}=p.sid WHERE true {w} /*RANGE*/
+            ON CONFLICT(entity_id, date, source) DO UPDATE SET {upd}""")
         n2 = c.execute(f"""INSERT INTO bars_daily(entity_id, date, source, open, high, low, close, volume, turnover, fetched_at)
             SELECT e.entity_id, p.trade_date, 'nse_index', p.open, p.high, p.low, p.close, p.volume, p.traded_value, COALESCE(p.fetched_at, '{NOW}')
             FROM nse_index_history p JOIN entities e ON e.kind='index' AND e.market='IN' AND e.key=p.index_symbol WHERE true {wi}
             ON CONFLICT(entity_id, date, source) DO UPDATE SET open=excluded.open, high=excluded.high, low=excluded.low,
                close=excluded.close, volume=excluded.volume, turnover=excluded.turnover""").rowcount
-        n3 = c.execute(f"""INSERT INTO derivative_bars(underlying_id, symbol, instrument, expiry, strike, option_type, date,
+        n3 = chunked(c, "fno_bhav", "p", f"""INSERT INTO derivative_bars(underlying_id, symbol, instrument, expiry, strike, option_type, date,
                 close, settle, underlying_price, oi, oi_change, volume, trades, fetched_at)
             SELECT e.entity_id, p.symbol, p.instrument_type, p.expiry_date, COALESCE(p.strike, 0), COALESCE(p.option_type, ''),
                    p.trade_date, p.close, p.settle, p.underlying_price, p.oi, p.chg_oi, p.volume, p.num_trades, COALESCE(p.fetched_at, '{NOW}')
-            FROM fno_bhav p LEFT JOIN entities e ON {SEC}=p.sid WHERE true {wi}
+            FROM fno_bhav p LEFT JOIN entities e ON {SEC}=p.sid WHERE true {wi} /*RANGE*/
             ON CONFLICT(symbol, instrument, expiry, strike, option_type, date) DO UPDATE SET close=excluded.close,
                settle=excluded.settle, underlying_price=excluded.underlying_price, oi=excluded.oi, oi_change=excluded.oi_change,
-               volume=excluded.volume, trades=excluded.trades""").rowcount
+               volume=excluded.volume, trades=excluded.trades""")
         n4 = c.execute(f"""INSERT INTO bars_daily(entity_id, date, source, close, delivery_pct, attrs, fetched_at)
             SELECT COALESCE(e.entity_id, d.entity_id), h.snapshot_date, 'historical_universe', h.close, h.delivery_pct,
                    json_object('symbol', h.symbol, 'series', h.series, 'requested_date', h.requested_date), '{NOW}'
@@ -556,10 +577,10 @@ def sync_events(c, full, since):
             pc = [x for x in cols(c, t) if x not in skip]
             ej, eid = _entity_join(ent)
             where = f"WHERE substr(COALESCE(t.fetched_at, ''), 1, 10) >= '{wm}'" if (wm and "fetched_at" in cols(c, t)) else ""
-            tot[t] = c.execute(f"""INSERT OR IGNORE INTO events(type_id, subtype, entity_id, event_time, available_at, source, source_key, payload, fetched_at)
+            tot[t] = chunked(c, t, "t", f"""INSERT OR IGNORE INTO events(type_id, subtype, entity_id, event_time, available_at, source, source_key, payload, fetched_at)
                 SELECT {types[etype]}, {sub}, {eid}, {et}, {av}, '{t}', CAST({key} AS TEXT), {jobj("t.", pc)},
                        {"COALESCE(t.fetched_at, '" + NOW + "')" if "fetched_at" in cols(c, t) else "'" + NOW + "'"}
-                FROM {t} t {ej} {where}""").rowcount
+                FROM {t} t {ej} {where or "WHERE true"} /*RANGE*/""")
         # market_events is already event-shaped (plan 0018)
         tot["market_events"] = c.execute(f"""INSERT OR IGNORE INTO events(type_id, subtype, entity_id, event_time, available_at, source, source_key, payload, fetched_at)
             SELECT k.catalog_id, t.subtype, e.entity_id, t.event_time, t.available_at, t.source, t.source_key, t.payload, t.fetched_at
@@ -671,6 +692,7 @@ def sync_documents(c, full, since):
                              "status": "invalid" if t == "sector_dossiers" and r.get("valid") == 0 else "valid"})
             tot[t] = _insert_docs(c, dtypes[dtype], rows)
             _supersede(c, dtypes[dtype])
+            breathe(c)
     log("documents: " + ", ".join(f"{k}+{v}" for k, v in tot.items()))
 
 
@@ -828,6 +850,7 @@ def sync_features(c, run_id, full, since):
                         SELECT {fid}, {dexpr}, {eid}, {vexpr}, {run_id} FROM {t} t {ej} {dw} {sw} AND t.{q(col)} IS NOT NULL
                         ORDER BY 2, 3
                         ON CONFLICT(feature_id, date, entity_id) DO UPDATE SET value=excluded.value, run_id=excluded.run_id""").rowcount
+                    breathe(c)
             if t in MEMBERSHIP:
                 fname = MEMBERSHIP[t]
                 cat_ensure(c, "feature", [fname], spec={fname: {"origin_table": t, "value_kind": "membership"}})
@@ -1168,9 +1191,11 @@ def sync_mf(c, full):
             c.execute(f"""INSERT OR IGNORE INTO mf.funds(scheme_code, attrs, updated_at)
                 SELECT DISTINCT scheme_code, json_object('orphan_from', '{t}'), '{NOW}' FROM {t} WHERE scheme_code IS NOT NULL""")
         w = "" if full else f"AND n.nav_date >= date('{TODAY}', '-{WINDOW_DAYS} day') OR n.fetched_at >= date('{TODAY}', '-2 day')"
-        n_nav = c.execute(f"""INSERT INTO mf.fund_nav(fund_id, date, nav, fetched_at)
-            SELECT f.fund_id, n.nav_date, n.nav, n.fetched_at FROM mf_nav_history n JOIN mf.funds f ON f.scheme_code=n.scheme_code WHERE true {w}
-            ON CONFLICT(fund_id, date) DO UPDATE SET nav=excluded.nav, fetched_at=excluded.fetched_at""").rowcount
+        breathe(c)
+        n_nav = chunked(c, "mf_nav_history", "n", f"""INSERT INTO mf.fund_nav(fund_id, date, nav, fetched_at)
+            SELECT f.fund_id, n.nav_date, n.nav, n.fetched_at FROM mf_nav_history n JOIN mf.funds f ON f.scheme_code=n.scheme_code
+            WHERE (true {w}) /*RANGE*/
+            ON CONFLICT(fund_id, date) DO UPDATE SET nav=excluded.nav, fetched_at=excluded.fetched_at""")
         c.execute("DELETE FROM mf.fund_holdings")   # holdings are small; rebuilt whole so a re-scrape replaces cleanly
         n_h = c.execute("""INSERT INTO mf.fund_holdings(fund_id, as_of, available_at, holding_type, holding_key, sid, isin, name, sector,
                 instrument, weight, value)
