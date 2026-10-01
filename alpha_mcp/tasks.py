@@ -602,7 +602,8 @@ def kinds_spec():
     and the current queue depth. Drain in ascending priority."""
     status = queue_status()["kinds"]
     kinds = {k: {"instructions": s["instructions"](), "result_schema": s["schema"], "batch": s["batch"],
-                 "claimable": sum(status.get(k, {}).get("counts", {}).get(x, 0) for x in ("queued", "invalid"))}
+                 "claimable": sum(status.get(k, {}).get("counts", {}).get(x, 0) for x in ("queued", "invalid"))
+                              + status.get(k, {}).get("expired_leases", 0)}
              for k, s in TASK_KINDS.items()}
     return {"drain_order": DRAIN_ORDER, "kinds": kinds}
 

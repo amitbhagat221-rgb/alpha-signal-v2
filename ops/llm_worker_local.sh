@@ -22,7 +22,7 @@ MODEL=${LLM_WORKER_MODEL:-sonnet}
 ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 claimable() { python -m alpha_mcp.tasks status | python -c "
 import json,sys; k=json.load(sys.stdin).get('kinds',{})
-print(sum(v.get('counts',{}).get(s,0) for v in k.values() for s in ('queued','invalid')))"; }
+print(sum(v.get('counts',{}).get(s,0) for v in k.values() for s in ('queued','invalid')) + sum(v.get('expired_leases',0) for v in k.values()))"; }   # claim also reclaims expired leases
 
 before=$(claimable) || { echo "$(ts) llm_worker: cannot read llm_tasks (table missing?)" >> "$LOG"; exit 1; }
 echo "$(ts) llm_worker start db=${ALPHA_DB:-live} model=$MODEL claimable=$before max_batches=$MAX_BATCHES" >> "$LOG"

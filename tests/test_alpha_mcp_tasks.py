@@ -136,3 +136,12 @@ def test_queue_status_and_kinds_spec(qdb):
     spec = qdb.kinds_spec()
     assert spec["drain_order"] == ["news_enrich", "regulatory"]
     assert spec["kinds"]["regulatory"]["claimable"] == 2 and "Financials" in spec["kinds"]["regulatory"]["instructions"]
+
+
+def test_expired_lease_counts_as_claimable(qdb):
+    qdb.enqueue("regulatory")
+    for i in qdb.claim("regulatory", 10, worker="w"):
+        with db.get_db() as c:
+            c.execute("UPDATE llm_tasks SET lease_until = '2000-01-01T00:00:00' WHERE task_id = ?", (i["task_id"],))
+    assert qdb.queue_status()["kinds"]["regulatory"]["expired_leases"] == 2
+    assert qdb.kinds_spec()["kinds"]["regulatory"]["claimable"] == 2
