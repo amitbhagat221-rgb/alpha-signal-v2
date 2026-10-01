@@ -259,4 +259,16 @@ Rough size: P1 1 session · P2 1–2 · P3 1–2 · P4 1 · P5 1.
     - The change between rounds 2 and 3: the instructions now say outright that explainers, retrospectives and opinion pieces whose *subject* is a named policy count as regulatory (low / minor). That is the inclusive series the signal is calibrated on. The worker had been applying the "opinion pieces are not regulatory" clause literally.
     - Direction pooled over all rounds is 152/171 = 88.9%, just under the 90% bar. The disagreements are perspective calls, not errors: the worker scores the listed companies' shareholders (a pro-buyer RERA ruling is −1 for Real Estate; a regulator refusing a higher solar payout is +1 for Utilities), where the API often scored consumers. Neither side is ground truth. Tuning towards the API's mixed perspective would be overfitting.
     - **Decision for Amit:** accept direction at 88.9% (the regulatory factor is benched and moves no picks), or add an explicit "direction = impact on the sector's listed equities" rule and run one more fresh round.
+- **2026-10-01, production drain (Amit approved: create the tables, drain everything).**
+  - `llm_tasks` and `mcp_calls` were created on the live DB by running only their CREATE statements.
+  - Queued: regulatory 13,075 unique headlines (the full backlog; the morning harvest had added some) and news_enrich 774 (7-day window).
+  - Drained by `ops/llm_worker_local.sh` over 18 runs, 06:24–09:47 UTC (about 3 h 20 min, Sonnet, subscription).
+  - Results: 13,074 + 774 tasks done, 0 invalid, 0 failed. 6,750 regulatory_signals rows added. 1,180 `mcp_calls`, 0 errors. Every write went through `submit`.
+  - The last task was left leased by the worker and was re-run after its lease expired.
+  - Spot checks of 20 news and 20 regulatory rows looked right (IPO/GMP/market wraps rejected; Green Energy Corridor III → Utilities/Industrials +1).
+  - Rollback is available: `python -m alpha_mcp.tasks rollback regulatory --since 2026-10-01T06:24`.
+  - **Operational findings for phase 3:**
+    - The worker sometimes stops after 5–6 submits (it reports `stopped_because: error`, not a failure); a loop simply restarts it.
+    - It occasionally mistypes the long task_ids. The server rejects those entries and writes nothing, and the lease expires. A fix: give the worker short per-claim aliases (e.g. `t1`…`t25`) that the server maps back to task_ids.
+    - The direction decision (accept 88.9%, or add the "listed equities" rule) is still open with Amit.
 
