@@ -81,3 +81,21 @@ def test_reconcile_passes(v3):
     rows = reconcile.run(write=True)
     fails = [r for r in rows if r[1] == "FAIL"]
     assert not fails, fails
+
+
+def test_seed_from_snapshot(v3, tmp_path):
+    path, sync = v3
+    sync.main([])                                                # history starts today (no daily_picks row for BBB)
+    snap = tmp_path / "old.db"
+    c = sqlite3.connect(path)
+    c.execute(f"VACUUM INTO '{snap}'")
+    c.close()
+    o = sqlite3.connect(snap)                                    # the old snapshot: BBB was MICRO, AAA unchanged
+    o.execute("UPDATE stocks SET cap_tier='MICRO' WHERE sid='BBB'")
+    o.commit()
+    o.close()
+    assert sync.main(["--seed-from", str(snap), "--seed-date", "2020-01-01"]) == 0
+    rows = _q(path, """SELECT e.key, k.value, k.valid_from, k.valid_to FROM classifications k JOIN entities e USING (entity_id)
+                       WHERE k.scheme='tier' AND e.key='BBB' ORDER BY k.valid_from""")
+    assert rows[0][1:] == ("MICRO", "2020-01-01", rows[1][2]) and rows[1][1] == "SMALL" and rows[1][3] is None
+

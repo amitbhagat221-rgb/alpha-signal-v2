@@ -1226,6 +1226,39 @@ def sync_mf(c, full):
     log(f"mf.db: nav {n_nav}, holdings {n_h}, metrics {n_m}")
 
 
+# ─────────────────────────── history seed from an older snapshot ───────────────────────────
+
+def seed_from_snapshot(c, path, as_of):
+    """Extend tier/sector/industry/nifty500 history back to `as_of` from an older DB snapshot (a backup or a
+    VACUUM INTO copy): for each entity × scheme whose first row starts after `as_of`, either move that row's
+    valid_from back (same value then) or add the earlier value as a closed row. Read-only on the snapshot."""
+    c.execute(f"ATTACH DATABASE 'file:{path}?mode=ro' AS snap")
+    try:
+        with tx(c):
+            c.execute("DROP TABLE IF EXISTS temp._old")
+            c.execute(" UNION ALL ".join(
+                ("CREATE TEMP TABLE _old AS " if i == 0 else "") +
+                f"SELECT e.entity_id, '{scheme}' AS scheme, CAST(s.{col} AS TEXT) AS value FROM snap.stocks s JOIN entities e ON {SEC}=s.sid "
+                f"WHERE s.{col} IS NOT NULL"
+                for i, (scheme, col) in enumerate((("tier", "cap_tier"), ("sector", "sector"), ("industry", "industry"), ("nifty500", "in_nifty500")))))
+            c.execute("DROP TABLE IF EXISTS temp._first")
+            c.execute(f"""CREATE TEMP TABLE _first AS SELECT k.entity_id, k.scheme, k.value, k.valid_from FROM classifications k
+                JOIN (SELECT entity_id, scheme, MIN(valid_from) AS vf FROM classifications GROUP BY entity_id, scheme) m
+                  ON m.entity_id=k.entity_id AND m.scheme=k.scheme AND m.vf=k.valid_from
+                WHERE k.valid_from > '{as_of}'""")
+            moved = c.execute(f"""UPDATE classifications SET valid_from='{as_of}', source=COALESCE(source,'') || '+snapshot'
+                WHERE EXISTS (SELECT 1 FROM _first f JOIN _old o ON o.entity_id=f.entity_id AND o.scheme=f.scheme AND o.value=f.value
+                              WHERE f.entity_id=classifications.entity_id AND f.scheme=classifications.scheme
+                                AND f.valid_from=classifications.valid_from)""").rowcount
+            added = c.execute(f"""INSERT OR IGNORE INTO classifications(entity_id, scheme, value, valid_from, valid_to, source)
+                SELECT o.entity_id, o.scheme, o.value, '{as_of}', f.valid_from, 'snapshot:{as_of}'
+                FROM _old o JOIN _first f ON f.entity_id=o.entity_id AND f.scheme=o.scheme WHERE o.value <> f.value""").rowcount
+    finally:
+        c.execute("DETACH DATABASE snap")
+    log(f"seed from {path} as of {as_of}: {moved} rows extended back, {added} earlier values added")
+    return moved, added
+
+
 # ─────────────────────────── driver ───────────────────────────
 
 STEPS = ["catalog", "entities", "classifications", "identifiers", "bars", "series", "fundamentals", "estimates", "events",
@@ -1236,7 +1269,16 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--full", action="store_true", help="rebuild every slice from all history")
     ap.add_argument("--only", default="", help="comma-separated subset of: " + ",".join(STEPS))
+    ap.add_argument("--seed-from", help="older DB snapshot to extend classification history from (with --seed-date)")
+    ap.add_argument("--seed-date", help="the date that snapshot describes (YYYY-MM-DD)")
     a = ap.parse_args(argv)
+    if a.seed_from:
+        if not a.seed_date:
+            sys.exit("--seed-from needs --seed-date")
+        c = connect()
+        ensure_schema(c)
+        seed_from_snapshot(c, a.seed_from, a.seed_date)
+        return 0
     only = [s for s in a.only.split(",") if s] or STEPS
     bad = set(only) - set(STEPS)
     if bad:
