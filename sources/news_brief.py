@@ -101,17 +101,12 @@ def _pick_top_articles(target_date, top=25):
     return picked
 
 
-def compute(target_date=None, dry_run=False, top=25):
-    """Generate the daily brief for target_date (defaults to today)."""
-    target_date = target_date or _date.today().isoformat()
+def build_prompt(target_date, top=25):
+    """(prompt, n_articles) for target_date's brief, or (None, 0) when no enriched
+    articles exist. Shared by the API path below and the plan-0016 queue kind."""
     picks = _pick_top_articles(target_date, top=top)
     if len(picks) == 0:
-        print(f"No enriched articles for {target_date} — skipping brief")
-        return 0
-
-    print(f"News brief: synthesizing from {len(picks)} top enriched articles for {target_date}")
-
-    # Compact each article for the prompt
+        return None, 0
     chunks = []
     for i, r in enumerate(picks, 1):
         chunks.append(
@@ -121,7 +116,34 @@ def compute(target_date=None, dry_run=False, top=25):
             f"WHY-IT-MATTERS: {r.get('why_it_matters') or ''}\n"
         )
     articles_text = "".join(chunks)
-    prompt = BRIEF_PROMPT.format(n_articles=len(picks), articles_text=articles_text)
+    return BRIEF_PROMPT.format(n_articles=len(picks), articles_text=articles_text), len(picks)
+
+
+def persist(target_date, brief, n_articles):
+    """Write one brief to news_briefs (the single write point for this table)."""
+    with get_db() as conn:
+        conn.execute(
+            """INSERT OR REPLACE INTO news_briefs
+               (brief_date, big_one, five_fast, one_to_watch, zoom_out, n_articles_used, generated_at)
+               VALUES (?, ?, ?, ?, ?, ?, datetime('now'))""",
+            (target_date,
+             brief.get("big_one", ""),
+             json.dumps(brief.get("five_fast", [])),
+             brief.get("one_to_watch", ""),
+             brief.get("zoom_out", ""),
+             n_articles),
+        )
+
+
+def compute(target_date=None, dry_run=False, top=25):
+    """Generate the daily brief for target_date (defaults to today)."""
+    target_date = target_date or _date.today().isoformat()
+    prompt, n_articles = build_prompt(target_date, top=top)
+    if prompt is None:
+        print(f"No enriched articles for {target_date} — skipping brief")
+        return 0
+
+    print(f"News brief: synthesizing from {n_articles} top enriched articles for {target_date}")
 
     if dry_run:
         print(f"  Estimated cost: ~$0.05 (Sonnet, ~{len(prompt)//4} input tokens)")
@@ -145,21 +167,8 @@ def compute(target_date=None, dry_run=False, top=25):
         print(f"  Raw: {raw[:400]}")
         return 0
 
-    # Persist
-    with get_db() as conn:
-        conn.execute(
-            """INSERT OR REPLACE INTO news_briefs
-               (brief_date, big_one, five_fast, one_to_watch, zoom_out, n_articles_used, generated_at)
-               VALUES (?, ?, ?, ?, ?, ?, datetime('now'))""",
-            (target_date,
-             brief.get("big_one", ""),
-             json.dumps(brief.get("five_fast", [])),
-             brief.get("one_to_watch", ""),
-             brief.get("zoom_out", ""),
-             len(picks)),
-        )
-
-    print(f"  Saved brief for {target_date} ({len(picks)} articles used)")
+    persist(target_date, brief, n_articles)
+    print(f"  Saved brief for {target_date} ({n_articles} articles used)")
     print(f"\n  THE BIG ONE: {brief.get('big_one', '')[:200]}")
     return 1
 

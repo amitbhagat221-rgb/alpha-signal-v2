@@ -240,7 +240,7 @@ def _call_claude(prompt):
     return llm_json(prompt, MODEL, "compute_sector_dossiers", max_tokens=1024)
 
 
-def _persist(sector, snapshot_date, dossier, validation):
+def _persist(sector, snapshot_date, dossier, validation, model=MODEL):
     valid = 1 if (dossier.get("thesis") and validation["ok"]) else 0
     with get_db() as conn:
         conn.execute(
@@ -261,7 +261,7 @@ def _persist(sector, snapshot_date, dossier, validation):
                 dossier.get("conviction"),
                 valid,
                 json.dumps(validation),
-                MODEL,
+                model,
                 datetime.now().isoformat(timespec="seconds"),
             ),
         )

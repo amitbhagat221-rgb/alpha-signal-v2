@@ -271,4 +271,14 @@ Rough size: P1 1 session · P2 1–2 · P3 1–2 · P4 1 · P5 1.
     - The worker sometimes stops after 5–6 submits (it reports `stopped_because: error`, not a failure); a loop simply restarts it.
     - It occasionally mistypes the long task_ids. The server rejects those entries and writes nothing, and the lease expires. A fix: give the worker short per-claim aliases (e.g. `t1`…`t25`) that the server maps back to task_ids.
     - The direction decision (accept 88.9%, or add the "listed equities" rule) is still open with Amit.
+- **2026-10-01, Amit:** direction accepted as is (88.9% pooled; perspective calls). The calibration gate is closed.
+- **2026-10-01, phase 3 (partial):**
+  - **Shipped:**
+    - The kinds `dossier`, `sector_dossier` and `news_brief` are prompt-backed: the export is the producer's own prompt, validation is the producer's validator, and the write is the producer's save path. `news_brief` is split into `build_prompt` + `persist` (the API path is unchanged), and `sector_dossier._persist` takes a model label.
+    - `DRAIN_ORDER` is dossier → news_brief → sector_dossier → news_enrich → regulatory.
+    - Worker hardening: `LLM_WORKER_KINDS` restricts a run to the given kinds; `ANTHROPIC_API_KEY` is unset for the claude call (`run.sh` exports it and the CLI would bill it); `claude` is called by absolute path (cron's PATH lacks `~/.local/bin`).
+    - A `claimable` CLI. A fix for news rollback when there was no prior row (`db.one` returns `{}`).
+  - **Blocked:** the pipeline wiring was refused by the auto-mode permission classifier and is pending Amit's explicit approval. That's `alpha_mcp/steps.py` with the five step functions (executor switch; queue → enqueue + run the worker on that kind with a deadline; the dossier step waits ≤ 20 min, then marks unfinished picks `thesis pending`), `config.LLM = {"executor": "queue", "deadline_min": …}`, and repointing the five `PIPELINE_STEPS` entries.
+  - **Not started, waiting on the wiring:** the email "thesis pending" line, the `run.sh llm_local` case + cron (05:07 / 14:37 UTC), the `llm_enrichment` feed route, the 3-morning gate. Phase 4 is otherwise dropped by D1/D2. Phase 5 (`industry_classify`, `sector_narrative` kinds) follows the wiring.
+  - **Meanwhile, by hand:** `python -m alpha_mcp.tasks enqueue dossier && LLM_WORKER_KINDS=dossier ops/llm_worker_local.sh` (same for `sector_dossier`, `news_brief`).
 

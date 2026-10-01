@@ -77,12 +77,18 @@ python -m alpha_mcp.tasks enqueue news_enrich [--days 7]
 python -m alpha_mcp.tasks status
 python -m alpha_mcp.tasks rollback <kind> --since <ISO UTC>  # undo ingests newest-first → failed
 python -m alpha_mcp.tasks retry <kind>                      # failed → queued
+python -m alpha_mcp.tasks claimable [kind ...]              # queued + invalid + expired leases
 ```
 
 | Kind | Replaces | Validate | Ingest |
 |---|---|---|---|
 | `regulatory` | `classify_regulatory` (Haiku → Sonnet) | `session_classify.validate_reg` (sector/enum whitelist) | `_save_signals_for_event` + `_mark_classified`, or `_bulk_mark('haiku_rejected')`; duplicate headlines copy through `_reuse_classification_existing` |
 | `news_enrich` | `classify_news` | non-empty fields + enums, then `news_classifier.normalize` (drops numbers not in the source) | column-level upsert into `news_enriched` (keeps `image_url`) |
+| `dossier` | `output.dossier` (per published pick, daily) | key/enum checks, then `dossier._validate_dossier` with a freshly built context; violations go back to the worker as reasons | today's `output/dossiers_<date>.json` (locked read-modify-write) |
+| `sector_dossier` | `output.sector_dossier` (per sector) | shape checks + `_validate_sector_dossier` | `sector_dossier._persist` |
+| `news_brief` | `sources.news_brief` (one per day) | shape checks | `news_brief.persist` |
+
+The last three are **prompt-backed**: the payload's `brief` is the producer's own prompt, the exact text the API path sends.
 
 **Adding a kind** takes one `TASK_KINDS` entry in [alpha_mcp/tasks.py](../../alpha_mcp/tasks.py): `export(days)` → `[(item_key, payload, priority)]`, `validate(result, payload)` → a clean dict or `ValueError`, `ingest(clean, payload)` → an undo record (it may write any row: a document, a hypothesis, a producer table), `undo(record)`, `schema`, `instructions`, `batch`, `ledger_step`. Add it to `DRAIN_ORDER` and write a test in `tests/test_alpha_mcp_tasks.py`.
 
@@ -91,8 +97,10 @@ python -m alpha_mcp.tasks retry <kind>                      # failed → queued
 ## Running the local worker
 ```
 ops/llm_worker_local.sh [MAX_BATCHES]                  # default 40 submits, 45-min timeout, model sonnet
+LLM_WORKER_KINDS=dossier ops/llm_worker_local.sh       # only these kinds this run
 ALPHA_DB=/path/to/copy.db ops/llm_worker_local.sh 5    # against a DB copy (calibration)
 ```
+- **Subscription, never the API key:** the script unsets `ANTHROPIC_API_KEY`, because `run.sh` exports it for the old API paths and the CLI would otherwise bill it. It calls `claude` by absolute path, since cron's PATH lacks `~/.local/bin`.
 - **What it runs:** `claude -p` with the prompt in [.claude/routines/llm-worker.md](../../.claude/routines/llm-worker.md), `--mcp-config ops/mcp.local.json --strict-mcp-config --tools "" --permission-mode dontAsk`, allowing only `mcp__alpha-work__*` and `mcp__alpha-research__*`. There are no built-in tools, so no shell or file access. It is not `--bare`, which needs an API key.
 - **Where it logs:** `output/llm_worker.log`.
 - **Exit codes:** non-zero if claude fails, the run reports an error, or items were claimable and none got done.

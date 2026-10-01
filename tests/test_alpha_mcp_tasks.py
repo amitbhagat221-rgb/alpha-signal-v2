@@ -134,7 +134,7 @@ def test_queue_status_and_kinds_spec(qdb):
     qs = qdb.queue_status()["kinds"]
     assert qs["regulatory"]["counts"] == {"queued": 2}
     spec = qdb.kinds_spec()
-    assert spec["drain_order"] == ["news_enrich", "regulatory"]
+    assert spec["drain_order"][-2:] == ["news_enrich", "regulatory"]
     assert spec["kinds"]["regulatory"]["claimable"] == 2 and "Financials" in spec["kinds"]["regulatory"]["instructions"]
 
 
@@ -145,3 +145,74 @@ def test_expired_lease_counts_as_claimable(qdb):
             c.execute("UPDATE llm_tasks SET lease_until = '2000-01-01T00:00:00' WHERE task_id = ?", (i["task_id"],))
     assert qdb.queue_status()["kinds"]["regulatory"]["expired_leases"] == 2
     assert qdb.kinds_spec()["kinds"]["regulatory"]["claimable"] == 2
+
+
+# ── phase-3 prompt-backed kinds: validate → ingest → undo through the producers' own code ──
+
+def test_dossier_kind_rejects_numbers_and_writes_the_days_file(qdb, tmp_path, monkeypatch):
+    from output import dossier as od
+    monkeypatch.setattr(od, "OUTPUT_DIR", tmp_path)
+    with db.get_db() as c:
+        c.execute("INSERT INTO stocks (sid, ticker, name, cap_tier, sector) VALUES ('RELI','RELIANCE','Reliance','LARGE','Energy')")
+    k = qdb.TASK_KINDS["dossier"]
+    payload = {"sid": "RELI", "ticker": "RELIANCE", "_day": "2026-10-01"}
+    good = {"thesis": "Integrated energy major with a steady retail and digital engine.",
+            "bull_case": ["Retail scale keeps widening", "Digital monetisation improving"],
+            "bear_case": ["Refining margins are cyclical", "Capex intensity stays heavy"],
+            "catalysts": ["New energy commissioning", "Tariff action in telecom"],
+            "risks": ["Execution on new energy", "Commodity swings"], "conviction": "MEDIUM", "action": "WATCH"}
+    with pytest.raises(ValueError, match="validator rejected"):
+        k["validate"]({**good, "thesis": "Shares could rise 16.5% from here."}, payload)
+    clean = k["validate"](good, payload)
+    undo = k["ingest"](clean, payload)
+    saved = json.loads((tmp_path / "dossiers_2026-10-01.json").read_text())
+    assert saved[0]["sid"] == "RELI" and saved[0]["validation"]["ok"] and od.is_publishable(saved[0])
+    k["undo"](undo)
+    assert json.loads((tmp_path / "dossiers_2026-10-01.json").read_text()) == []
+
+
+def test_sector_dossier_kind_persists_and_undoes(qdb):
+    from output import sector_dossier as sd
+    sd._ensure_schema()
+    k = qdb.TASK_KINDS["sector_dossier"]
+    payload = {"sector": "Energy", "snapshot_date": "2026-10-01"}
+    good = {"thesis": "Policy-led capex keeps the sector constructive.", "bull_case": ["Grid build-out"],
+            "bear_case": ["Crude volatility"], "tech_innovation_drivers": ["Green hydrogen"],
+            "what_to_watch": [{"horizon": "S", "item": "Monsoon demand"}], "conviction": "MEDIUM"}
+    with pytest.raises(ValueError, match="what_to_watch"):
+        k["validate"]({**good, "what_to_watch": ["no horizon"]}, payload)
+    with pytest.raises(ValueError, match="validator rejected"):
+        k["validate"]({**good, "thesis": "Margins expand 12.5x."}, payload)
+    undo = k["ingest"](k["validate"](good, payload), payload)
+    row = db.one("SELECT * FROM sector_dossiers WHERE sector = 'Energy'")
+    assert row["valid"] == 1 and row["model"] == qdb.SESSION_MODEL
+    k["undo"](undo)
+    assert not db.one("SELECT * FROM sector_dossiers WHERE sector = 'Energy'")
+
+
+def test_news_brief_kind_persists_and_undoes(qdb):
+    k = qdb.TASK_KINDS["news_brief"]
+    payload = {"brief_date": "2026-10-01", "n_articles": 25}
+    good = {"big_one": "RBI holds rates.", "five_fast": ["One", "Two"], "one_to_watch": "Monsoon.",
+            "zoom_out": "Liquidity cycle."}
+    with pytest.raises(ValueError):
+        k["validate"]({**good, "five_fast": []}, payload)
+    undo = k["ingest"](k["validate"](good, payload), payload)
+    row = db.one("SELECT * FROM news_briefs WHERE brief_date = '2026-10-01'")
+    assert row["big_one"] == "RBI holds rates." and json.loads(row["five_fast"]) == ["One", "Two"]
+    k["undo"](undo)
+    assert not db.one("SELECT * FROM news_briefs WHERE brief_date = '2026-10-01'")
+
+
+def test_drain_order_puts_dossiers_first(qdb):
+    assert qdb.DRAIN_ORDER == ["dossier", "news_brief", "sector_dossier", "news_enrich", "regulatory"]
+
+
+def test_news_rollback_when_there_was_no_prior_row(qdb):
+    with db.get_db() as c:
+        c.execute("DELETE FROM news_enriched")
+    qdb.enqueue("news_enrich")
+    item = qdb.claim("news_enrich", 1, worker="w")[0]
+    assert qdb.submit([{"task_id": item["task_id"], "result": NEWS_OK}], worker="w")["counts"] == {"done": 1}
+    assert qdb.rollback("news_enrich", "2000-01-01")["rolled_back"] == 1
+    assert not db.one("SELECT * FROM news_enriched WHERE article_id = 'a1'")
