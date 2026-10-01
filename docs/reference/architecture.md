@@ -57,19 +57,21 @@ tools/        research only: nothing in the graph imports tools/
 ```
 
 ### Where the truth lives (exactly one owner per concept)
-| Concept | Owner |
-|---|---|
-| Columns, PK | `schema.sql` |
-| Table semantics (write mode, time column, staleness) | Dataset kind (inferred) plus `datasets.py` overrides |
-| What a step reads, writes, and when it runs | that step's `NODE` dict |
-| Run order, critical path, lineage, /flow | derived by `graph.py`, never written |
-| Politeness and budgets | `hosts.HOSTS` |
-| Factor math | its `signals/` function |
-| Factor metadata and weights | its `factors.FACTORS` entry |
-| Tiers | `config.TIERS` |
-| Expectations and health | Check verdicts (derived plus `checks/` custom) |
-| What a page or email shows | a `views.py` read-model |
-| Schedule | crontab has one line per slot, and every line calls `run.sh <slot>` |
+| Concept | Owner | Proposed by ADR 0054 / plan 0017 (not built) |
+|---|---|---|
+| Columns, PK | `schema.sql` | 24 fixed concept tables + 5 in `mf.db`; a new thing is a row, never a table |
+| Table semantics (write mode, time column, staleness) | Dataset kind (inferred) plus `datasets.py` overrides | `tables.TABLES[ds]["concept"]`: one write rule per concept via `db.write(dataset, df)` |
+| What a step reads, writes, and when it runs | that step's `NODE` dict | — |
+| Run order, critical path, lineage, /flow | derived by `graph.py`, never written | — |
+| Politeness and budgets | `hosts.HOSTS` | — |
+| Factor math | its `signals/` function | — |
+| Factor metadata and weights | its `factors.FACTORS` entry | unchanged; mirrored into the generated `catalog` (append-only ids) |
+| Tiers | `config.TIERS` | unchanged; tier *history* in `classifications` (valid_from/valid_to) |
+| Expectations and health | Check verdicts (derived plus `checks/` custom) | — |
+| What a page or email shows | a `views.py` read-model | unchanged; `views.py` is the only long→wide layer (SQLite hot ∪ Parquet history via DuckDB) |
+| Schedule | crontab has one line per slot, and every line calls `run.sh <slot>` | — |
+| Why a pick was made (run, model, per-factor contributions) | nowhere today (review F6/F7) | `runs` ⋈ `picks` ⋈ `pick_contributions`, one query (`views.explain`) |
+| What was knowable on date D | lag constants in `pit.py` | `available_at` on every fact; versioned facts (`fetched_at` + `last_seen_at`) |
 
 ## Today (until plan 0015 lands)
 

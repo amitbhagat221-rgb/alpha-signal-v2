@@ -419,7 +419,7 @@ def compute(limit=None, ticker=None, discover_only=False, aggregate_only=False, 
             print(f"  [{i}/{len(stocks)}] {mode} · slugs_found={i - no_slug} · no_slug={no_slug}"
                   + (f" · recos={n_recos_total}" if not discover_only else ""), flush=True)
 
-        if discover_only:
+        if discover_only or not slug:   # no MC page (override None / autosuggest miss) → nothing to fetch
             continue
 
         recos = fetch_for_sid(sid, slug, fetched_at)
