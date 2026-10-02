@@ -332,7 +332,10 @@ TABLES = {
 
     # ── Regulatory ──
     "policy_events": {"kind": "RAW", "domain": "Regulatory", "date_col": None},
-    "regulatory_batches": {"kind": "STATE", "domain": "Regulatory", "date_col": "submitted_at"},
+    # Anthropic Batch-API bookkeeping: written only by the API fallback (config.LLM_WORK["executor"]
+    # == "api"). The default queue executor never touches it (plan 0016), so it is not tracked.
+    "regulatory_batches": {"kind": "STATE", "domain": "Regulatory", "date_col": "submitted_at",
+                           "best_effort": True},
     # 2026-05-23: regulatory_events was scored as "monthly" (50d) and silently went
     # stale for 43d before being noticed (Gillette dossier showing 2023 articles).
     # News/PIB are weekly cadence at worst; if the harvester stops, we want a yellow

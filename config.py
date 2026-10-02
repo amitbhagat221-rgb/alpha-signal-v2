@@ -20,6 +20,17 @@ DB_PATH = Path(os.environ.get("ALPHA_DB") or PROJECT_ROOT / "data" / "alpha_sign
 SCHEMA_PATH = PROJECT_ROOT / "schema.sql"
 LOG_PATH = PROJECT_ROOT / "output" / "pipeline.log"
 
+# ── LLM work (plan 0016, ADR 0056) ──
+# executor "queue": the LLM steps (alpha_mcp/steps.py) queue their items in llm_tasks and run the
+# local worker (ops/llm_worker_local.sh — claude -p on the Claude subscription) on them, waiting at
+# most deadline_min per step (the dossier deadline is how long the email waits, D4). "api": the old
+# Anthropic API paths (paid credits, empty since 2026-08-24) — kept as a fallback (D3).
+LLM_WORK = {
+    "executor": "queue",
+    "deadline_min": {"dossier": 20, "compute_sector_dossiers": 20, "news_brief": 10,
+                     "classify_news": 30, "classify_regulatory": 45},
+}
+
 # ── Universe ──
 # The segments (ADR 0052 "Segment" invariant): ranking happens only inside a tier,
 # and a tier with pickable=False never reaches daily_picks. Everything tier-keyed
@@ -753,8 +764,8 @@ PIPELINE_STEPS = [
     # of briefs + forces + sector_metadata. ~11 Claude calls/night (~₹3-5).
     # Non-critical: a failure must not block the stock dossier or email. Same
     # no-raw-numbers hygiene contract as output.dossier; invalid → valid=0.
-    {"name": "compute_sector_dossiers", "module": "output.sector_dossier", "function": "compute", "critical": False,
-     "table": "sector_dossiers",   "source": "sector_briefs + sector_force_breakdown + sector_metadata (Claude API)",
+    {"name": "compute_sector_dossiers", "module": "alpha_mcp.steps", "function": "compute_sector_dossiers", "critical": False,
+     "table": "sector_dossiers",   "source": "sector_briefs + sector_force_breakdown + sector_metadata (llm_tasks queue)",
      "data_freq": "daily",         "frequency": "daily",
      "reads": ["daily_picks", "daily_snapshots", "sector_briefs", "sector_force_breakdown", "sector_metadata", "stock_prices", "stocks"],
      "lagged_reads": ["daily_snapshots@snapshot", "stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
@@ -772,8 +783,8 @@ PIPELINE_STEPS = [
      "reads": ["daily_changes", "daily_picks", "daily_snapshots", "stocks", "vix_history"],
      "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
 
-    {"name": "dossier",            "module": "output.dossier",      "function": "compute",  "critical": False,
-     "table": None,                "source": "daily_picks + all signals (Claude API)",
+    {"name": "dossier",            "module": "alpha_mcp.steps",      "function": "dossier",  "critical": False,
+     "table": None,                "source": "daily_picks + all signals (llm_tasks queue → local claude -p)",
      "data_freq": "daily",         "frequency": "daily",
      "reads": ["accruals_scores", "consensus_signals", "daily_picks", "daily_snapshots", "forensic_scores", "piotroski_scores", "promoter_signals", "sentiment_scores", "smart_money_scores", "stock_prices", "stocks"],
      "writes": ["file:dossiers"],
@@ -824,12 +835,12 @@ PIPELINE_STEPS = [
     # runtime even when there's a large backlog.
 
     # News Phase 2 enrichment — Claude Haiku (~$0.001/article, ~$1/day).
-    {"name": "classify_news",       "module": "sources.news_classifier", "function": "compute", "critical": False,
+    {"name": "classify_news",       "module": "alpha_mcp.steps", "function": "classify_news", "critical": False,
      "table": "news_enriched",     "source": "news_articles (Claude Haiku enrich)", "data_freq": "daily", "frequency": "daily",
      "reads": ["news_articles", "news_enriched"]},
 
     # Daily news brief — Claude Sonnet (~$0.05/day). After classify_news.
-    {"name": "news_brief",          "module": "sources.news_brief",   "function": "compute", "critical": False,
+    {"name": "news_brief",          "module": "alpha_mcp.steps",   "function": "news_brief", "critical": False,
      "table": "news_briefs",       "source": "news_enriched (Claude Sonnet synthesis)", "data_freq": "daily", "frequency": "daily",
      "reads": ["news_articles", "news_enriched"]},
 
@@ -843,7 +854,7 @@ PIPELINE_STEPS = [
     # step now just polls + submits (seconds) — at 50% token cost (batch pricing).
     # ~1-2 day classification latency is fine: output feeds narrative only. The
     # sync per-item path is kept as a fallback (`--sync`, or auto on batch error).
-    {"name": "classify_regulatory","module": "sources.regulatory_classifier", "function": "compute", "critical": False,
+    {"name": "classify_regulatory","module": "alpha_mcp.steps", "function": "classify_regulatory", "critical": False,
      "table": "regulatory_signals","source": "regulatory_events (Message Batches, capped 500/run)", "data_freq": "daily", "frequency": "daily",
      "reads": ["news_articles", "regulatory_batches", "regulatory_events", "regulatory_signals", "stocks"],
      "writes": ["regulatory_batches", "regulatory_events", "regulatory_signals"],

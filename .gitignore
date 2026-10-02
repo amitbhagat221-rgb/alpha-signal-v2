@@ -126,3 +126,5 @@ cockpit/static/news_img/
 !.mcp.json
 !ops/mcp.local.json
 !ops/llm_worker_local.sh
+# alpha_mcp.tasks file lock for the day's dossier JSON
+output/*.json.lock

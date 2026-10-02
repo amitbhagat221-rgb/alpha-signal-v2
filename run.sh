@@ -92,6 +92,10 @@ case "$JOB" in
         harvest_lock
         logged cron_estimates run python -m sources.yahoo_estimates --trend --covered
         logged cron_estimates_history run python -m sources.yahoo_estimates --history --reported-days 21 ;;
+    llm_local)          # 05:07 + 14:37 UTC — catch-up drain of the llm_tasks queue (plan 0016): the
+                        # morning LLM steps run the worker inline with deadlines; this picks up leftovers
+                        # (expired leases, items past a deadline). No harvest lock: no external fetch.
+        logged cron_llm_local run "$ROOT/ops/llm_worker_local.sh" 40 ;;
     watchdog)           # 15:00 UTC — re-run producers of stale tables (takes the lock itself)
         run python -m tools.freshness_watchdog ;;
     health)             # 04:00 UTC — health email + push
@@ -125,6 +129,6 @@ case "$JOB" in
         echo "Tickertape finished rc=$RC at $(date -u)"
         exit $RC ;;
     *)
-        echo "unknown job '$JOB' (morning forward canary estimates transcripts screener_schedules watchdog health pt_snapshot backtest expected_return screener_cookie secrets_backup screener_universe tickertape)"
+        echo "unknown job '$JOB' (morning forward canary estimates transcripts screener_schedules llm_local watchdog health pt_snapshot backtest expected_return screener_cookie secrets_backup screener_universe tickertape)"
         exit 2 ;;
 esac

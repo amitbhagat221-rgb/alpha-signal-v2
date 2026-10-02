@@ -292,6 +292,12 @@ def _build_pick_card(row, dossier, idx):
           </table>
         </div>
         """
+    else:
+        # No validated thesis yet (plan 0016 D4: the email waits at most the dossier
+        # deadline, then sends) — say so rather than silently dropping the block.
+        dossier_block = f"""
+        <div style="font-size:11px;color:{C_MUTED};margin-top:6px">🧠 AI thesis pending</div>
+        """
 
     # Plan 0007 Phase 5 — UHS footer line
     uhs_footer = ""
