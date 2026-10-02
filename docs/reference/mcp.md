@@ -104,5 +104,8 @@ ALPHA_DB=/path/to/copy.db ops/llm_worker_local.sh 5    # against a DB copy (cali
 - **What it runs:** `claude -p` with the prompt in [.claude/routines/llm-worker.md](../../.claude/routines/llm-worker.md), `--mcp-config ops/mcp.local.json --strict-mcp-config --tools "" --permission-mode dontAsk`, allowing only `mcp__alpha-work__*` and `mcp__alpha-research__*`. There are no built-in tools, so no shell or file access. It is not `--bare`, which needs an API key.
 - **Where it logs:** `output/llm_worker.log`.
 - **Exit codes:** non-zero if claude fails, the run reports an error, or items were claimable and none got done.
-- **Not yet scheduled.** Phase 3 adds a `run.sh` case, `llm_local) logged llm_local ops/llm_worker_local.sh ;;`, plus cron after the morning run and at 05:07/14:37 UTC.
+- **How it is scheduled:**
+  - **Inline:** the pipeline's LLM steps (`alpha_mcp/steps.py`, `config.LLM_WORK`) run it on their own kind, with a deadline per step. The dossier step's 20-min deadline is how long the email waits.
+  - **Catch-up:** `run.sh llm_local` (cron 05:07 and 14:37 UTC) drains anything left over.
+  - **Fallback:** `config.LLM_WORK["executor"] = "api"` switches the steps back to the paid API paths.
 - **Measured throughput** (calibration, 2026-09-30): 120 items in 129 s over 16 turns; 300 items in about 5 min (Sonnet, 0 invalid results).

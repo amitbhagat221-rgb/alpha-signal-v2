@@ -1,24 +1,24 @@
 # HANDOFF
-Updated: 2026-09-28 | Branch: master (0 unpushed) | HEAD: 723d2b2 docs(handoff): ingestion closed — ADR 0055, plan 0018 DQ notes, runbook, checklist
+Updated: 2026-10-02 | Branch: master (0 unpushed) | HEAD: 2e43462 feat(pipeline): LLM steps run through the llm_tasks queue on the subscription (+ this handoff commit)
 
 ## Left off
-Ingestion is closed and gated (plan 0018 / ADR 0055): `feeds.py`, 02:45 canaries + `tools/reconcile.py`, write contracts in `db.insert_df/upsert_df`, a row-count band, the `run_events` log, replay fixtures, and 5 new sources. Overnight, the scratchpad queues finish the Screener universe (with shareholder counts) → F&O/IV backfill → bulk price repair → July insider re-list → transcripts catch-up → first `screener_schedules` pass, all before 02:30; a waiter deletes any NULL-% shareholding rows the old-code Screener run still creates.
+Plan 0016 P1–P3 are live. The five LLM pipeline steps (`dossier`, `compute_sector_dossiers`, `news_brief`, `classify_news`, `classify_regulatory`) now run through `alpha_mcp/steps.py` → `llm_tasks` → `ops/llm_worker_local.sh` (`claude -p` on the subscription), switched by `config.LLM_WORK`. On 10-02 each was run through `pipeline.py --step` with SUCCESS (15/15 dossiers, 11/11 sector dossiers, the brief, 183 news, 508 regulatory), and health dropped from 13 CRITICALs to 6. The rest of the 6 clear with tomorrow's run, except SPRE's garbage Yahoo price target.
 
 ## Pick up here
-1. **Verify the overnight work:**
-   - `python -m runlog runs --limit 40`
-   - `SELECT COUNT(*) FROM shareholding WHERE promoter_pct IS NULL AND n_shareholders IS NOT NULL` → 0
-   - `bulk_deals` price=0 → 0
-   - `fno_bhav` MIN(trade_date) ≈ 2024-07
-   - `SELECT * FROM feed_checks WHERE check_kind='reconcile'` (first prices run)
-2. **Chase the Gate 3 outliers:** MMTC (Tickertape 156.68 vs Screener 0.68 Cr) and GOCL (66.65 vs 4.29), in `quarterly_income` vs `fundamentals_screener`.
-3. **Before any factor reads `analyst_estimates`:** check that Yahoo froze each estimate at the report. After the October results, compare `yahoo_calendar` estimates with the pre-report `yahoo_trend` snapshot.
+1. Check the 2026-10-03 03:30 run (the first fully queue-driven morning):
+   - `SELECT step_name,status,rows_affected FROM pipeline_log WHERE run_date='2026-10-03' AND step_name IN ('dossier','compute_sector_dossiers','news_brief','classify_news','classify_regulatory')`
+   - the email shows theses (or "AI thesis pending")
+   - `tail output/llm_worker.log`
+   - the plan 0016 P3 gate is 3 clean mornings
+2. Check that `datamodel.reconcile` parity is back to PASS: run `python -m datamodel.reconcile --show`. The 10-02 FAILs (news_briefs, news_enriched, regulatory_signals, sector_dossiers, pipeline_log) came from my manual refresh writing during the first live sync.
+3. P5: the `industry_classify` and `sector_narrative` kinds in `alpha_mcp/tasks.py`, then delete `tools/classify_industries.py` and `tools/sector_narrative_fetcher.py`.
 
 ## Watch out
-- **A `ContractViolation` means the gate worked.** It blocks the batch before any write. Fix the parser; never loosen the contract.
-- **A same-day resume of `sources/yahoo_estimates.py` raises "0 of N items"** when only data-less stocks remain (16:00 today). It is benign; the fix is to skip *attempted* stocks, not only ones that returned data. Saturday's weekly cron is unaffected.
-- **Screener shareholder counts are UPDATE-only.** Upserting blanked `pledge_quality`'s latest shareholding row.
-- **`broker_recommendations.reco_date_imputed = 1`:** 71% of rows carry the fetch date, not a broker date.
+- **The worker must never see `ANTHROPIC_API_KEY`.** `run.sh` exports it, and the claude CLI would then bill the empty-credit API key. `ops/llm_worker_local.sh` unsets it; keep that in any wrapper.
+- **Never edit `run.sh` while a cron job is running it.** Bash reads the script as it runs, and the 10-01 datamodel steps were silently skipped after a 06:27 edit mid-run. Check with `ps -eo args | grep "[r]un.sh"`.
+- **Never use `pgrep -f`/`pkill -f` with a pattern that appears in your own command.** It matches its own shell: it killed one shell (exit 144) and gave a false "still running" twice.
+- **`crontab <file>` fails on long scratchpad paths.** Use `crontab - < file`.
+- **The worker sometimes quits after 5–6 submits and mistypes long task_ids.** The server rejects the bad id and the lease expires. The `llm_local` cron (05:07 / 14:37) drains leftovers.
 
 ## Active plan
-docs/plans/0018-data-supply-strategy.md (P0 + P1 core shipped; next P3 fallbacks) · master plan docs/plans/0011-roadmap-to-90.md
+docs/plans/0016-alpha-signal-mcp.md (P3 live, 3-morning gate pending; P5 next) · docs/plans/0017-data-model-redesign.md (v3 shadow tables live since 10-02, parity week, other session)

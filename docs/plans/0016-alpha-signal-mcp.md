@@ -1,6 +1,6 @@
 # Plan 0016 — Alpha Signal MCP + LLM work as Claude routines
 
-**Status:** approved 2026-09-30 (D1–D6 decided, §9 — executor is **local `claude -p` only**, no cloud routine) · waiting on plan 0017 stage 0 · **Supersedes (when done):** the 7 Anthropic-API call paths · **Builds on:** [ADR 0052](../decisions/0052-seven-building-blocks.md) (View block = the read surface; Host block = politeness), `tools/session_classify.py` (the export → worker → validated-ingest protocol this generalises)
+**Status:** active — P1–P3 implemented (2026-09-30 → 10-02); the backlog is drained and the 5 LLM steps run through the queue from the 2026-10-03 03:30 run. Open: the 3-morning gate and P5 kinds. D1–D6 decided (§9): executor is **local `claude -p` only**, no cloud routine · [ADR 0056](../decisions/0056-llm-work-local-worker-queue.md)
 
 **Sequencing with [plan 0017](0017-data-model-redesign.md)** (data model, [ADR 0054](../decisions/0054-tables-grow-with-concepts.md); agreed with Amit 2026-09-28):
 1. **Plan 0017 stage 0 first.** This plan's phase-1 gate ("tool snapshot tests on a DB copy") needs its `ALPHA_DB` override. It also moves the pre-push regression fixtures off the live DB, and this plan will push often.
@@ -193,7 +193,7 @@ CREATE TABLE llm_tasks (           -- Dataset kind: log
 
 **Decided 2026-09-30 (Amit):**
 - **D1 = local only / D2 = no HTTPS exposure.** The worker is `run.sh llm_local` (`claude -p` + stdio MCP), started from cron. Nothing is served on the internet. §6's `/fire` and §7's nginx/token work are out of scope. If a cloud routine is ever wanted, it's a new decision that reopens phase 4.
-- **D3 = keep the API paths behind a flag** (`config.LLM["executor"] = "queue" | "api"`, default `queue`). This is the paid fallback for when credits get topped up. The model-id literals stay.
+- **D3 = keep the API paths behind a flag** (`config.LLM_WORK["executor"] = "queue" | "api"`, default `queue`). This is the paid fallback for when credits get topped up. The model-id literals stay.
 - **D4 = 20 min** for `await_dossiers`, then the email says "thesis pending".
 - **D5 = three profiles** (research / ops / work), as proposed.
 - **D6 = drain the full regulatory backlog** (~11.5K plus the older pending rows), not only the 60-day window. `regulatory` stays lowest priority so it never delays dossiers.
@@ -223,7 +223,7 @@ Rough size: P1 1 session · P2 1–2 · P3 1–2 · P4 1 · P5 1.
 ## Implementation notes
 - 2026-09-27: facts in §2 checked against the routines and headless docs. The inventory of the 7 LLM call paths and the read surface is from a read-only audit; spot-checked are `regulatory_events` status counts (11,526 pending, 71 `haiku_passed_sonnet_failed`), the `views` functions and `db.safe_read_sql`. `mcp` 1.27.1 (FastMCP) is already in the venv.
 - **2026-09-28:** sequencing with plan 0017 agreed (header). Phase 1 waits for plan 0017 stage 0 (`ALPHA_DB`; fixtures off the live DB). Added the plan-0017 fit rules: tools go through `views.py`, `llm_tasks` is Ops, one `ingest` per kind.
-- **2026-09-30:** D1–D6 decided (§9). Local executor only, so phase 4 shrinks to the cron schedule + audit. API paths are kept behind `config.LLM["executor"]`. Full backlog drain. The next step is still plan 0017 stage 0.
+- **2026-09-30:** D1–D6 decided (§9). Local executor only, so phase 4 shrinks to the cron schedule + audit. API paths are kept behind `config.LLM_WORK["executor"]`. Full backlog drain. The next step is still plan 0017 stage 0.
 - **2026-09-30:** plan 0017 stage 0 items (1)–(3) shipped, which is what phase 1 needs. `ALPHA_DB` redirects config/db/DuckDB/runlog. `tools.regression_fixtures` runs in a throwaway schema-built DB, and the live DB is untouched across a run (mtime + size identical). `busy_timeout` is 30 s. Items (4) quarantine → `row_issues` and (5) drops are left to the plan-0017 datamodel session, which is editing `schema.sql`/`tables.py`. Next: phase 1.
 - **2026-09-30 (from the agent-org design session, parked until 0016+0017 finish; will be plan 0019):** three shape requests, cheap now and painful to retrofit. (1) `TASK_KINDS` should allow an ingest whose output is a document / PR / hypothesis row, not only a producer table row — agent roles (promotion pack, data triage, scout brief) emit markdown; if that doesn't fit, reserve an `agent_runs` kind. (2) Carry a role name (`claimed_by` on `llm_tasks`, a `role`/profile column on `mcp_calls`) so LLM cost is attributable per role from day one. (3) For plan 0017: a `hypotheses` concept (card in → verdict out; shared inbox for CIO / researchers / sector desk) — decide whether it fits stage 1 or 2. None of these change 0016's phases or gates.
 - **2026-09-30, phases 1–2 built** (code: `alpha_mcp/`, reference: [mcp.md](../reference/mcp.md)).
@@ -278,7 +278,22 @@ Rough size: P1 1 session · P2 1–2 · P3 1–2 · P4 1 · P5 1.
     - `DRAIN_ORDER` is dossier → news_brief → sector_dossier → news_enrich → regulatory.
     - Worker hardening: `LLM_WORKER_KINDS` restricts a run to the given kinds; `ANTHROPIC_API_KEY` is unset for the claude call (`run.sh` exports it and the CLI would bill it); `claude` is called by absolute path (cron's PATH lacks `~/.local/bin`).
     - A `claimable` CLI. A fix for news rollback when there was no prior row (`db.one` returns `{}`).
-  - **Blocked:** the pipeline wiring was refused by the auto-mode permission classifier and is pending Amit's explicit approval. That's `alpha_mcp/steps.py` with the five step functions (executor switch; queue → enqueue + run the worker on that kind with a deadline; the dossier step waits ≤ 20 min, then marks unfinished picks `thesis pending`), `config.LLM = {"executor": "queue", "deadline_min": …}`, and repointing the five `PIPELINE_STEPS` entries.
+  - **Blocked:** the pipeline wiring was refused by the auto-mode permission classifier and is pending Amit's explicit approval. That's `alpha_mcp/steps.py` with the five step functions (executor switch; queue → enqueue + run the worker on that kind with a deadline; the dossier step waits ≤ 20 min, then marks unfinished picks `thesis pending`), `config.LLM_WORK = {"executor": "queue", "deadline_min": …}`, and repointing the five `PIPELINE_STEPS` entries.
   - **Not started, waiting on the wiring:** the email "thesis pending" line, the `run.sh llm_local` case + cron (05:07 / 14:37 UTC), the `llm_enrichment` feed route, the 3-morning gate. Phase 4 is otherwise dropped by D1/D2. Phase 5 (`industry_classify`, `sector_narrative` kinds) follows the wiring.
   - **Meanwhile, by hand:** `python -m alpha_mcp.tasks enqueue dossier && LLM_WORKER_KINDS=dossier ops/llm_worker_local.sh` (same for `sector_dossier`, `news_brief`).
+- **2026-10-02, P3 wired (Amit approved explicitly after the classifier block):**
+  - `alpha_mcp/steps.py` holds the 5 step functions, with the executor switch in `config.LLM_WORK` (`{"executor": "queue", "deadline_min": …}`).
+    - It is named `LLM_WORK` because `tests/test_hosts.py` forbids a `config.LLM` block: model ids live in `hosts.py`.
+    - `config.PIPELINE_STEPS` keeps each step's name, reads and writes; only `module`/`function` point at `alpha_mcp.steps`.
+  - Each step runs `run_kind`: it enqueues, then runs the local worker on that kind until the kind drains, the deadline passes, or two runs make no progress. It then applies the API path's raise-on-zero contract.
+  - The dossier step finishes today's file: a pick still without a thesis is written as `thesis pending`, and `output/email_sender.py` prints "AI thesis pending" for it.
+  - `regulatory_batches` (Batch-API bookkeeping, written only by the API fallback) is marked `best_effort` in `tables.TABLES`, so the post-check and heals ignore it.
+  - `feeds.py` `llm_enrichment`: the queue is now the primary route and the API the fallback.
+  - **Live proof the same day.** Each step ran through `pipeline.py --step` (pipeline_log SUCCESS):
+    - classify_news: 183 articles in 7.9 min
+    - news_brief: 25 s
+    - dossier: 15/15 validated theses in 88 s
+    - compute_sector_dossiers: 11/11 valid in 66 s
+    - classify_regulatory: the day's 508 headlines; one run was killed by a session restart, then rerun detached
+  - **Known:** the graph shadow notes `llm_tasks` as an undeclared read/write of these steps. This is a warning only; declare it if plan 0017 tightens the graph.
 

@@ -87,3 +87,4 @@ Status key: **A** accepted · **P→N** partly superseded by N · **S→N** supe
 | 0053 | [Lag is declared; a lagged read sees the previous run](0053-declared-lag-not-cadence-lag.md) | A (partly supersedes 0052) |
 | 0054 | [Tables grow with concepts, not things](0054-tables-grow-with-concepts.md) | A (plan 0017) |
 | 0055 | [Data supply: feeds, canaries, run log](0055-data-supply-feeds-canaries-runlog.md) | A (plan 0018) |
+| 0056 | [LLM work runs on a local subscription worker through a validated queue](0056-llm-work-local-worker-queue.md) | A (plan 0016) |
