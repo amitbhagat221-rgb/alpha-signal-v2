@@ -556,9 +556,15 @@ TABLES = {
     "consensus_signals_quarantine": {
         "kind": "QUARANTINE", "domain": "Pipeline", "date_col": "snapshot_date",
     },
-    "external_anchors": {"kind": "RAW", "domain": "Pipeline", "date_col": "fetched_at"},
+    "external_anchors": {"kind": "RAW", "domain": "Pipeline", "date_col": "fetched_at",
+                         "description": "History only (ADR 0061): Gate 7's NSE-close anchors. The step that wrote it, "
+                                        "anchor_audit, never produced a verdict and was retired; tools/reconcile.py "
+                                        "does the cross-source price check daily."},
     "forecast_history_quarantine": {"kind": "QUARANTINE", "domain": "Pipeline", "date_col": "date"},
-    "health_score": {"kind": "COMPUTED", "domain": "Pipeline", "date_col": "snapshot_date"},
+    "health_score": {"kind": "COMPUTED", "domain": "Pipeline", "date_col": "snapshot_date",
+                     "description": "History only (ADR 0061): the retired UHS data-trust score per factor / table / "
+                                    "system / pick, 2026-05 → 2026-10-02. Nothing writes it; daily_picks.uhs_* hold "
+                                    "the per-pick values of the same period."},
     "llm_usage": {"kind": "LOG", "domain": "Pipeline", "date_col": None},
     "llm_tasks": {
         "kind": "LOG", "domain": "Pipeline", "date_col": "created_at",
@@ -617,7 +623,8 @@ TABLES = {
     },
     "trust_verdicts": {
         "kind": "COMPUTED", "domain": "Pipeline", "freq": "daily", "data_freq": "daily",
-        "source": "per-gate validators (yfinance_analyst, banking_metrics, anchor_audit …)",
+        "source": "the write-time gates (validators._verdicts.GATES: identity, plausibility) called by "
+                  "yfinance_analyst, banking_metrics, moneycontrol_recos, mf_holdings; the gate_3..7 columns are history (ADR 0061)",
         "date_col": "snapshot_date",
     },
     # Rows mature on a 20d forward window (pick_outcomes join), so MAX(date) is
@@ -625,6 +632,7 @@ TABLES = {
     # lag and only alarms on true death (audit Data-F5).
     "uhs_calibration_log": {
         "kind": "COMPUTED", "domain": "Pipeline", "date_col": "pick_date", "stale_days": 45,
+        "description": "History only (ADR 0061): UHS score × forward return, never reached the 6 months it needed.",
     },
 
     # ── Other ──

@@ -663,7 +663,7 @@ def get_regime():
 
 
 def get_top_picks(tier=None, top=5):
-    """The published picks (views.picks — one gate: integrity != FAIL, UHS >= 60)
+    """The published picks (views.picks — one gate: integrity != FAIL)
     with stock metadata: `top` of one tier, or {tier: top N} for every pickable tier."""
     df = views.picks(latest_pick_date(), tier=tier)
     if tier:
@@ -785,43 +785,11 @@ def search_stocks(query):
 
 def get_stock_detail(sid):
     """Full stock data bundle for the detail view: views.stock(sid) (stocks row,
-    newest pick, every registry signal table's newest row, latest close) plus the
-    UHS badge. The badge is the CANONICAL per-pick value persisted on daily_picks
-    (per-sid rollup + Gate-6 cap — the value the pick gate uses, ADR 0037); it is
-    rolled up on demand only when the newest pick row has not been scored yet."""
+    newest pick, every registry signal table's newest row, latest close) with the data
+    behind the pick already worded (`data`: views.pick_data, ADR 0061)."""
     detail = views.stock(sid)
     if not detail:
         return None
-    if detail.get("uhs_score") is not None:
-        try:
-            bd = json.loads(detail.get("uhs_breakdown_json") or "{}")
-        except Exception:
-            bd = {}
-        dims = bd.get("dims", {})
-        detail["uhs"] = {
-            "score_pct":        int(detail["uhs_score"]),
-            "label":            detail.get("uhs_label"),
-            "dim_provenance":   dims.get("provenance"),
-            "dim_freshness":    dims.get("freshness"),
-            "dim_plausibility": dims.get("plausibility"),
-            "dim_consistency":  dims.get("consistency"),
-            "dim_coverage":     dims.get("coverage"),
-            "reasons":          json.dumps(bd.get("reasons", {})),
-        }
-    elif detail.get("pick_date"):
-        from scoring.health_score import rollup_pick_uhs
-        uhs = rollup_pick_uhs(sid, detail["pick_date"])
-        if uhs:
-            detail["uhs"] = {
-                "score_pct":        uhs.get("score_pct"),
-                "label":            uhs.get("label"),
-                "dim_provenance":   uhs.get("dim_provenance"),
-                "dim_freshness":    uhs.get("dim_freshness"),
-                "dim_plausibility": uhs.get("dim_plausibility"),
-                "dim_consistency":  uhs.get("dim_consistency"),
-                "dim_coverage":     uhs.get("dim_coverage"),
-                "reasons":          uhs.get("reasons_json"),
-            }
     return detail
 
 

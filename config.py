@@ -66,6 +66,14 @@ EXCLUDED_FROM_PICKS = tuple(t for t, spec in TIERS.items() if not spec["pickable
 # boundary rank (±10 at 100, ±25 at 250). Measured, see scoring/segment.py.
 TIER_HYSTERESIS = 0.10
 
+# ── The pick gate (scoring/screener._pick_eligible; thresholds + rationale: ADR 0021) ──
+# A ranked stock is published only if enough of its ELIGIBLE factor weight produced a
+# value, enough of the tier's total weight did (backstop), it has ~3 months of prices
+# and 4 of 8 quarters of fundamentals. `complete_from`: at or above this share of
+# eligible weight the pick's data is described as complete (views.pick_data).
+PICK_GATE = {"min_eligible_coverage": 0.60, "min_weight_coverage": 0.50,
+             "min_price_rows": 60, "min_fundamental_coverage": 0.50, "complete_from": 0.99}
+
 # ── Signal weights ──
 # Hand-set, never derived (CLAUDE.md "Backtest hygiene", docs/reference/signal-weights.md)
 # — but they live ON the factor: each wired factors.FACTORS entry carries
@@ -653,7 +661,7 @@ PIPELINE_STEPS = [
 
     {"name": "screener",           "module": "scoring.screener",    "function": "compute",  "critical": True,
      "table": "daily_picks",       "source": "all signals",         "data_freq": "daily",   "frequency": "daily",
-     "reads": ["analyst_consensus", "annual_balance_sheet", "annual_cash_flow", "bse_announcements", "bulk_deals", "consensus_signals", "corporate_adjustments", "daily_picks", "fno_iv_history", "forecast_history", "forensic_scores", "health_score", "macro_history", "macro_sector_signals_pit", "piotroski_scores", "quarterly_income", "shareholding", "signal_lineage", "stock_prices", "stocks", "trust_verdicts", "universe_eligibility"],
+     "reads": ["analyst_consensus", "annual_balance_sheet", "annual_cash_flow", "bse_announcements", "bulk_deals", "consensus_signals", "corporate_adjustments", "daily_picks", "fno_iv_history", "forecast_history", "forensic_scores", "macro_history", "macro_sector_signals_pit", "piotroski_scores", "quarterly_income", "shareholding", "stock_prices", "stocks", "universe_eligibility"],
      "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
 
     # Track 3.3c — HRP position sizing. Turns the within-tier ranked daily_picks
@@ -696,38 +704,8 @@ PIPELINE_STEPS = [
      "data_freq": "daily",         "frequency": "daily",
      "reads": ["nse_index_history", "portfolio_outcomes", "portfolio_weights", "stock_prices"]},
 
-    # Plan 0007 Phase 1 — daily Unified Health Score (UHS) writer. Computes
-    # factor + table + system UHS for today's snapshot. include_picks=True so
-    # the daily_picks UHS rollup is also persisted alongside factors. Reads from
-    # universe_eligibility (eligibility/registry), data_health (db.py), and
-    # FACTOR_LINEAGE (lineage.py). Non-critical (UHS is observation, not gate).
-    {"name": "compute_health_score", "module": "scoring.health_score", "function": "compute", "critical": False,
-     "table": "health_score",      "source": "universe_eligibility + data_health + FACTOR_LINEAGE",
-     "data_freq": "daily",         "frequency": "daily",
-     "reads": ["analyst_consensus", "annual_balance_sheet", "annual_cash_flow", "bse_announcements", "consensus_signals", "daily_picks", "daily_snapshots", "fno_iv_history", "health_score", "piotroski_scores", "quarterly_income", "stock_prices", "stocks", "trust_verdicts", "universe_eligibility"],
-     "lagged_writes": ["health_score"],
-     "lagged_reads": ["daily_snapshots@snapshot", "stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
 
-    # Plan 0007 Phase 6 — External Anchor (Gate 7). Promotes yesterday's NSE
-    # bhavcopy rows to external_anchors then audits non-NSE sources (yfinance)
-    # for drift. Writes gate_7_anchor verdicts feeding UHS Consistency dim.
-    # Non-critical: anchor data is the foundation of the closed-loop fix,
-    # but a failure to audit doesn't compromise the primary pick pipeline.
-    {"name": "anchor_audit", "module": "tools.anchor_audit", "function": "compute", "critical": False,
-     "table": "external_anchors",  "source": "stock_prices (bhavcopy + yfinance)",
-     "data_freq": "daily",         "frequency": "daily",
-     "reads": ["stock_prices"]},
 
-    # Plan 0007 Phase 8 — UHS calibration log. Joins every pick_outcomes row
-    # to its daily_picks.uhs_score so that once 6+ months of forward returns
-    # accumulate (~late Nov 2026) the uniform 20/20/20/20/20 dim weighting can
-    # be regression-validated against realised return. Until then: observation
-    # only. Non-critical.
-    {"name": "update_uhs_calibration", "module": "scoring.confidence", "function": "update_calibration_log",
-     "critical": False, "table": "uhs_calibration_log",
-     "source": "pick_outcomes + daily_picks.uhs_score",
-     "data_freq": "daily",         "frequency": "daily",
-     "reads": ["daily_picks", "pick_outcomes"]},
 
     # Sector briefs — plan 0006 Phase A. One sector_briefs row per sector per
     # date with macro + model + regulatory rollup and a bucket classifier
@@ -790,20 +768,22 @@ PIPELINE_STEPS = [
      "writes": ["file:dossiers"],
      "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
 
-    {"name": "email",              "module": "output.email_sender", "function": "compute",  "critical": False,
-     "table": None,                "source": "daily_picks + dossiers (Gmail SMTP)",
-     "data_freq": "daily",         "frequency": "daily",
-     "reads": ["daily_changes", "daily_picks", "daily_snapshots", "file:dossiers", "regime_state", "stock_prices", "stocks"],
-     "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
-
     # PIT replay freeze — captures today's pipeline inputs+outputs as a
     # frozen anchor. Daily cadence means every day becomes a regression-test
-    # case going forward. Non-critical: a freeze failure shouldn't gate email.
+    # case going forward. It runs BEFORE the email (the email reads it): the
+    # pre-send model checks judge the factor inputs frozen here (ADR 0060).
+    # Non-critical: without it the email still goes, with a warning banner.
     # See [tools/pit_replay.py] and Plan 0005 Phase E.
     {"name": "pit_replay_freeze",  "module": "tools.pit_replay",    "function": "freeze",   "critical": False,
      "table": "pit_replay_snapshots", "source": "scoring.screener._load_signals + score_universe (frozen)",
      "data_freq": "daily",         "frequency": "daily",
      "reads": ["daily_picks"]},
+
+    {"name": "email",              "module": "output.email_sender", "function": "compute",  "critical": False,
+     "table": None,                "source": "daily_picks + dossiers (Gmail SMTP)",
+     "data_freq": "daily",         "frequency": "daily",
+     "reads": ["daily_changes", "daily_picks", "daily_snapshots", "file:dossiers", "pit_replay_snapshots", "regime_state", "stock_prices", "stocks"],
+     "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
 
     # Plan 0015 Phase 0: the PIT panel (daily_snapshots_pit) was hand-rebuilt only
     # and froze at 2026-07-01 while the monthly backtest cron re-scored it. Weekly,

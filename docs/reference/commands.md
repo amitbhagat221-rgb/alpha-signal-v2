@@ -8,7 +8,8 @@ python db.py
 python -m tools.data_sanity          # semantic sanity checks (validate.py retired 2026-09-26)
 python -c "from db import data_health; print(data_health().to_string())"
 python -c "from db import table_counts; table_counts()"
-python -m tools.health_report                 # same report as the 04:00 UTC email
+python -m tools.health_report                 # five questions + today's issues (same as the 04:00 UTC email)
+python -m tools.health_report --catalog       # every check, by question: what it means, its status now
 
 # Pipeline
 python pipeline.py --dry-run                  # steps due today (frequency-gated)

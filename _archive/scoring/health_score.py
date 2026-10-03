@@ -41,6 +41,10 @@ In Phase 1 only 3 of 5 dims are populated (provenance, freshness, coverage);
 plausibility (Phase 3) and consistency (Phase 4) land later. Until then,
 score_pct is over those 3 and `label` is PRELIMINARY for any ≥80.
 
+Every surface words a score through describe() (PARTS + BANDS below, bands from
+config.TRUST_BANDS) — "Data trust 97/100 · Good · 3 of 5 parts measured" — so the
+stored labels above never need explaining to a reader.
+
 Plan: docs/plans/0007-trust-pipeline-uhs.md
 """
 
@@ -52,6 +56,7 @@ from typing import Optional
 import pandas as pd
 
 import factors
+from config import TRUST_BANDS
 from db import read_sql, upsert_df
 
 
@@ -99,15 +104,62 @@ FRESHNESS_THRESHOLDS_DAYS = {
 }
 
 
-# ── Score → label mapping ──
+# ── Score → label mapping (bands: config.TRUST_BANDS) ──
 def _label(score_pct: Optional[int], all_dims_populated: bool) -> str:
     if score_pct is None:
         return "UNKNOWN"
-    if score_pct < 60:
+    if score_pct < TRUST_BANDS["blocked_below"]:
         return "AVOID"
-    if score_pct < 80:
+    if score_pct < TRUST_BANDS["good_from"]:
         return "REVIEW"
     return "TRUSTED" if all_dims_populated else "PRELIMINARY"
+
+
+# ── The score in plain words: the ONE wording every surface shows ──
+# column → (name, the question that part answers). Each part is scored 0-20.
+PARTS = {
+    "dim_provenance":   ("Source known", "Do we know where each input came from, and is it the right company?"),
+    "dim_freshness":    ("Up to date", "Were the input tables refreshed on schedule?"),
+    "dim_plausibility": ("Believable values", "Are the inputs inside sane ranges?"),
+    "dim_consistency":  ("Sources agree", "Do independent sources, and yesterday's values, agree?"),
+    "dim_coverage":     ("Complete", "Of the stocks that should have each input, how many do?"),
+}
+BANDS = {   # band → (word, what it means for the reader, colour)
+    "good":    ("Good", "shown as a pick", "green"),
+    "review":  ("Review", "shown as a pick, with a caution", "amber"),
+    "blocked": ("Blocked", "hidden from the picks", "red"),
+}
+
+
+def band(score) -> Optional[str]:
+    """'good' / 'review' / 'blocked' for a 0-100 data-trust score (None → None)."""
+    if score is None or pd.isna(score):
+        return None
+    return ("blocked" if score < TRUST_BANDS["blocked_below"]
+            else "review" if score < TRUST_BANDS["good_from"] else "good")
+
+
+def describe(score, dims: Optional[dict] = None) -> Optional[dict]:
+    """A data-trust score as every surface words it: {score, band, word, meaning,
+    colour, parts: [{name, asks, score (0-20 or None)}], measured, headline}.
+    `dims` is any mapping carrying the dim_* values (a health_score row, a pick's
+    breakdown); parts with no value are 'not measured' and say so."""
+    b = band(score)
+    if b is None:
+        return None
+    word, meaning, colour = BANDS[b]
+    dims = dims or {}
+    parts = [{"name": name, "asks": asks,
+              "score": None if dims.get(col) is None or pd.isna(dims.get(col)) else int(dims[col])}
+             for col, (name, asks) in PARTS.items()]
+    measured = sum(p["score"] is not None for p in parts)
+    weakest = min((p for p in parts if p["score"] is not None), key=lambda p: p["score"], default=None)
+    headline = f"Data trust {int(score)}/100 · {word}"
+    if dims and measured < len(parts):
+        headline += f" · {measured} of {len(parts)} parts measured"
+    return {"score": int(score), "band": b, "word": word, "meaning": meaning, "colour": colour,
+            "parts": parts, "measured": measured, "headline": headline,
+            "weakest": weakest["name"] if weakest and weakest["score"] < 20 else None}
 
 
 def compute_uhs(

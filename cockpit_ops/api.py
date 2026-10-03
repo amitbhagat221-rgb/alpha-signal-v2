@@ -83,7 +83,7 @@ def get_data_freshness():
     payload is JSON-safe (Jinja's tojson preserves NaN literals which break
     JSON.parse in the browser)."""
     from db import data_health
-    # cache_ttl shares the scan with health_report._gather_tables so a cold
+    # cache_ttl shares the scan with checks.system.table_facts so a cold
     # /system load runs the ~7s freshness scan once, not twice. See ADR 0031.
     return safe_json_records(data_health(cache_ttl=60))
 
@@ -1852,672 +1852,67 @@ def get_command_centre():
 
 
 # ═══════════════════════════════════════════════════
-# Health Center — unified one-screen pulse
+# Health Center — a VIEW over the health report (ADR 0059)
 #
-# Surfaces ALL findings inside cockpit so the user never has to read terminal
-# health_report output or email digests to know if the system is healthy:
-#   1. tools.health_report.gather()  — pipeline + tables + watchdog + dossiers
-#   2. tools.data_sanity.run()       — semantic invariants (CRITICAL/WARN/INFO)
-#   3. pipeline_log endpoint_audit_* — per-endpoint cockpit coverage gaps
-#   4. failed_streaks                — steps currently broken (not historical)
-# Each issue is one row with severity / code / source / message / sample /
-# drilldown URL, ready for filter+render in the template.
+# checks.report.gather() is the one state: the terminal block, the email,
+# the push, the MCP and this page all render it. Nothing here decides what is an
+# issue or how severe it is — this only adds a drill-down link per issue and the
+# catalog of every check.
 # ═══════════════════════════════════════════════════
 
-def _drilldown_for_issue(issue):
-    """Return ('/sql?q=...', label) for an issue, or (None, None) if no drilldown.
-
-    Looks at the issue's source ('sanity'/'freshness'/'pipeline'/'endpoint'/'dossier')
-    and table/code to pick the most useful SQL probe.
-    """
-    src = issue.get("source")
-    table = issue.get("table")
-    col = issue.get("column")
-    if src == "pipeline" and issue.get("step"):
-        sql = f"SELECT run_date, status, started_at, error_message FROM pipeline_log WHERE step_name='{issue['step']}' ORDER BY id DESC LIMIT 20"
-        return (f"/sql?q={sql}", "Last 20 runs →")
-    if src == "endpoint" and issue.get("endpoint"):
-        sql = f"SELECT * FROM pipeline_log WHERE step_name='endpoint_audit_{issue['endpoint']}' ORDER BY id DESC LIMIT 10"
-        return (f"/sql?q={sql}", "Endpoint audit log →")
-    if src == "freshness" and table:
-        sql = f"SELECT MAX(date) AS latest FROM {table}" if table else None
-        return (f"/sql?table={table}", "Inspect table →") if table else (None, None)
-    if src == "sanity":
-        # If we have a sample sid, link to its stock detail (always useful)
-        sample = issue.get("sample")
-        sample = str(sample) if sample is not None else ""
-        if sample and len(sample.split()) == 1 and len(sample) <= 12 and "@" not in sample:
-            # Looks like a sid
-            return (f"/explorer/{sample}", f"Inspect {sample} →")
-        if table:
-            return (f"/sql?table={table}", f"Inspect {table} →")
-    return (None, None)
-
-
-def _severity_rank(sev):
-    return {"CRITICAL": 0, "WARN": 1, "INFO": 2}.get(sev, 3)
-
-
-# ═══════════════════════════════════════════════════
-# News feed — Inshorts/Finshots style
-#
-# Lightweight: pull from news_articles, rank by recency × source tier, dedupe
-# by title-similarity. No per-article LLM call (would add cost + complexity).
-# The spec calls for an LLM brief; we do that as a separate optional pass.
-# ═══════════════════════════════════════════════════
-
-# NOTE: `_NEWS_SOURCE_TIERS` lived here briefly after the Stage 2 extraction
-# (2026-05-26) but was moved back to cockpit/api.py because `_news_tier()` —
-# its only consumer — lives in the trading cockpit's news section.
-
-
+def _drilldown(issue):
+    """('/sql?…', label) for an issue, or (None, None)."""
+    code, target = issue["code"], issue["target"]
+    if code.startswith("PIPELINE_"):
+        sql = ("SELECT run_date, status, started_at, error_message FROM pipeline_log "
+               f"WHERE step_name='{target}' ORDER BY id DESC LIMIT 20")
+        return f"/sql?q={sql}", "Last 20 runs →"
+    if code.startswith("FEED_"):
+        return "/feeds", "Data Supply →"
+    table = target if code.startswith("TABLE_") else issue.get("table")
+    if table and table in db.TABLES:
+        return f"/sql?table={table}", f"Inspect {table} →"
+    return None, None
 
 
 @_persisted_cache(300, name="get_health_overview")
 def get_health_overview(force=False):
-    """One-stop Health Center overview.
+    """The Health Center overview: {as_of, verdict, verdict_severity, counts,
+    scorecard (five questions), issues + tolerated (each with a drill-down link),
+    catalog (every check), severity_meaning, watchdog, pipeline_summary,
+    eligibility, integrity}."""
+    from checks import SEVERITY_MEANING, report
 
-    Returns:
-        {
-            "as_of":            ISO datetime,
-            "verdict":          human string (e.g. "1 CRITICAL · 12 WARN"),
-            "verdict_severity": "CRITICAL" | "WARN" | "INFO" | "OK",
-            "counts":           {critical, warn, info, total},
-            "tiles":            {data, factors, pipeline, dossiers}  each {grade, color, headline, detail, link},
-            "issues":           [issue dicts] sorted CRITICAL → WARN → INFO,
-            "categories":       list of category labels present (for filter dropdown),
-            "sources":          list of source labels present,
-        }
-    """
-    from tools import health_report as _hr
-    try:
-        from tools import data_sanity as _sanity
-    except Exception:
-        _sanity = None
+    st = report.gather()
 
-    report = _hr.gather()
-    issues = []
+    def linked(rows):
+        return [dict(i, drilldown_url=u, drilldown_label=l) for i in rows for u, l in [_drilldown(i)]]
 
-    # ── pipeline failures (today) + streaks (currently broken only) ──
-    for f in report["pipeline"]["failed_steps_today"]:
-        issues.append({
-            "severity": "CRITICAL",
-            "source": "pipeline",
-            "category": "Pipeline",
-            "code": f"PIPELINE_FAILED:{f['step']}",
-            "table": None, "column": None,
-            "step": f["step"],
-            "message": f"Pipeline step '{f['step']}' failed today",
-            "detail": (f.get("error") or "")[:240],
-            "sample": None, "pct": None, "n_bad": None, "n_total": None,
-        })
-    for s in report["pipeline"]["failed_streaks"]:
-        # Skip if it's already in today's failures (avoid duplicate)
-        if any(i["code"] == f"PIPELINE_FAILED:{s['step']}" for i in issues):
-            continue
-        issues.append({
-            "severity": "CRITICAL",
-            "source": "pipeline",
-            "category": "Pipeline",
-            "code": f"PIPELINE_STREAK:{s['step']}",
-            "table": None, "column": None,
-            "step": s["step"],
-            "message": f"Pipeline step '{s['step']}' has failed {s['days']} consecutive days (currently broken)",
-            "detail": (s.get("sample_error") or "")[:240],
-            "sample": None, "pct": None, "n_bad": s["days"], "n_total": None,
-        })
-
-    # ── freshness (stale / outdated / empty tables) ──
-    for tbl, age, threshold, producer in report["tables"].get("outdated", []):
-        sev = "CRITICAL" if tbl in _hr.CRITICAL_TABLE_OUTDATED else "WARN"
-        issues.append({
-            "severity": sev,
-            "source": "freshness",
-            "category": "Data freshness",
-            "code": f"OUTDATED:{tbl}",
-            "table": tbl, "column": "—",
-            "message": f"{tbl} is OUTDATED ({age:.0f}d old, threshold {threshold:.0f}d)",
-            "detail": f"producer: {producer}" if producer else "",
-            "sample": None, "pct": None,
-            "n_bad": round(age), "n_total": round(threshold),
-        })
-    for tbl, age, threshold, producer in report["tables"].get("stale", []):
-        issues.append({
-            "severity": "WARN",
-            "source": "freshness",
-            "category": "Data freshness",
-            "code": f"STALE:{tbl}",
-            "table": tbl, "column": "—",
-            "message": f"{tbl} is STALE ({age:.0f}d / threshold {threshold:.0f}d)",
-            "detail": f"producer: {producer}" if producer else "",
-            "sample": None, "pct": None,
-            "n_bad": round(age), "n_total": round(threshold),
-        })
-    for tbl in report["tables"].get("empty", []):
-        # Shared policy (one source of truth = health_report.empty_table_severity):
-        #   *_quarantine → OK (empty = nothing quarantined = clean) → suppress
-        #   paper_* / uhs_calibration_log → INFO (feature not yet populated)
-        #   anything else → CRITICAL (a producer wrote 0 rows where rows expected)
-        sev = _hr.empty_table_severity(tbl)
-        if sev == "OK":
-            continue
-        issues.append({
-            "severity": sev,
-            "source": "freshness",
-            "category": "Data freshness",
-            "code": f"EMPTY:{tbl}",
-            "table": tbl, "column": "—",
-            "message": (f"{tbl} is EMPTY — feature not yet populated"
-                        if sev == "INFO" else
-                        f"{tbl} is EMPTY (table exists but no rows)"),
-            "detail": "expected-empty feature table" if sev == "INFO" else "",
-            "sample": None, "pct": None, "n_bad": 0, "n_total": None,
-        })
-
-    # ── data_sanity violations ──
-    # Performance: health_report.gather() already runs data_sanity.run()
-    # internally (stored as report["sanity"]). Re-running it here was wasted
-    # ~14s every page load. Reuse the existing output.
-    sanity_violations = report.get("sanity") or []
-    if not sanity_violations and _sanity is not None:
-        # Fallback if health_report didn't include sanity for some reason
-        try:
-            sanity_violations = _sanity.run()
-        except Exception as e:
-            sanity_violations = []
-            issues.append({
-                "severity": "WARN",
-                "source": "sanity",
-                "category": "Data sanity",
-                "code": "SANITY_RUN_FAILED",
-                "table": None, "column": None,
-                "message": f"data_sanity.run() itself raised: {type(e).__name__}",
-                "detail": str(e)[:240],
-                "sample": None, "pct": None, "n_bad": None, "n_total": None,
-            })
-    for v in sanity_violations:
-        # categorize by code prefix for filter
-        code = v.get("code", "")
-        if any(p in code for p in ("CONSENSUS", "ANALYST", "PT_", "FORECAST")):
-            cat = "Analyst / PT"
-        elif any(p in code for p in ("REGULATORY", "NEWS", "SENTIMENT")):
-            cat = "News / regulatory"
-        elif any(p in code for p in ("FACTOR", "PIT", "BACKTEST", "PIOTROSKI", "M_SCORE")):
-            cat = "Factors / backtest"
-        elif any(p in code for p in ("DAILY_PICK", "SCORE_TABLE", "UNIVERSE", "PROMOTER", "INSIDER", "BULK")):
-            cat = "Signals / picks"
-        elif "COVERAGE" in code:
-            cat = "Coverage"
-        else:
-            cat = "Data sanity"
-        issues.append({
-            "severity": v.get("severity", "WARN"),
-            "source": "sanity",
-            "category": cat,
-            "code": code,
-            "table": v.get("table"),
-            "column": v.get("column"),
-            "message": v.get("message", ""),
-            "detail": "",
-            "sample": v.get("sample"),
-            "pct": v.get("pct_violations"),
-            "n_bad": v.get("n_violations"),
-            "n_total": v.get("n_total"),
-        })
-
-    # ── cockpit endpoint audit (most-recent per endpoint) ──
-    try:
-        ep = read_sql(
-            """
-            WITH ranked AS (
-                SELECT step_name, status, error_message, started_at,
-                       ROW_NUMBER() OVER (PARTITION BY step_name ORDER BY id DESC) AS rn
-                FROM pipeline_log
-                WHERE step_name LIKE 'endpoint_audit_%'
-            )
-            SELECT step_name, status, error_message, started_at
-            FROM ranked WHERE rn = 1
-            """
-        )
-    except Exception:
-        ep = pd.DataFrame()
-    for _, r in ep.iterrows():
-        if r["status"] == "SUCCESS":
-            continue  # endpoint is fine — message carries an [OK] summary we don't surface
-        endpoint = r["step_name"].replace("endpoint_audit_", "")
-        err = (r.get("error_message") or "").strip()
-        # Derive severity from the message tag if present, else from status
-        if "[CRITICAL]" in err:
-            sev = "CRITICAL"
-        elif "[WARN]" in err:
-            sev = "WARN"
-        else:
-            sev = "CRITICAL" if r["status"] == "FAILED" else "WARN"
-        issues.append({
-            "severity": sev,
-            "source": "endpoint",
-            "category": "Cockpit endpoints",
-            "code": f"ENDPOINT_AUDIT:{endpoint}",
-            "table": None, "column": None,
-            "endpoint": endpoint,
-            "message": f"Cockpit endpoint `{endpoint}` has audit issues",
-            "detail": err[:240] or f"status={r['status']}",
-            "sample": None, "pct": None, "n_bad": None, "n_total": None,
-        })
-
-    # ── dossier validator failures ──
-    dossiers_block = report.get("dossiers", {}) or {}
-    invalid = dossiers_block.get("invalid_count", 0) or 0
-    if invalid:
-        issues.append({
-            "severity": "WARN",
-            "source": "dossier",
-            "category": "Dossiers (LLM)",
-            "code": "DOSSIER_VALIDATOR_FAILED",
-            "table": None, "column": None,
-            "message": f"{invalid} dossier(s) failed the narrative validator (raw numbers in prose, or signal mention without context)",
-            "detail": ", ".join((dossiers_block.get("invalid_sample") or [])[:5]),
-            "sample": None, "pct": None,
-            "n_bad": invalid, "n_total": dossiers_block.get("total"),
-        })
-
-    # ── per-stock integrity violations (plan 0005 Phase B) ──
-    try:
-        integrity_rows = read_sql(
-            "SELECT sid, integrity_status, integrity_reasons FROM daily_picks "
-            "WHERE pick_date = (SELECT MAX(pick_date) FROM daily_picks) "
-            "  AND integrity_status IN ('FAIL', 'WARN')"
-        )
-    except Exception:
-        integrity_rows = pd.DataFrame()
-    n_fail = int((integrity_rows["integrity_status"] == "FAIL").sum()) if not integrity_rows.empty else 0
-    n_warn = int((integrity_rows["integrity_status"] == "WARN").sum()) if not integrity_rows.empty else 0
-    if n_fail:
-        sample = integrity_rows[integrity_rows["integrity_status"] == "FAIL"].iloc[0]
-        issues.append({
-            "severity": "CRITICAL",
-            "source": "integrity",
-            "category": "Per-stock integrity",
-            "code": "INTEGRITY_FAIL",
-            "table": "daily_picks", "column": "integrity_status",
-            "message": f"{n_fail} pick(s) failed per-stock integrity validator — bumped from action_queue",
-            "detail": f"{sample['sid']}: {sample['integrity_reasons'][:160]}",
-            "sample": sample["sid"], "pct": None,
-            "n_bad": n_fail, "n_total": None,
-        })
-    if n_warn:
-        sample = integrity_rows[integrity_rows["integrity_status"] == "WARN"].iloc[0]
-        issues.append({
-            "severity": "WARN",
-            "source": "integrity",
-            "category": "Per-stock integrity",
-            "code": "INTEGRITY_WARN",
-            "table": "daily_picks", "column": "integrity_status",
-            "message": f"{n_warn} pick(s) flagged with WARN by integrity validator — surfaced but not gated",
-            "detail": f"{sample['sid']}: {sample['integrity_reasons'][:160]}",
-            "sample": sample["sid"], "pct": None,
-            "n_bad": n_warn, "n_total": None,
-        })
-
-    # ── universe eligibility coverage gaps (plan 0005 Phase A) ──
-    # Surface per-signal eligibility deltas vs prior snapshot — a sudden jump
-    # in INELIGIBLE count means a source went dark (yfinance broke, screener
-    # source stopped delivering). Showing as INFO at baseline so the user has
-    # the per-signal eligible/ineligible breakdown without alarm.
-    try:
-        eligibility_block = db.rows(
+    s = st["summary"]
+    integrity = (st["integrity"] or {}).get("rows") or []
+    return _clean({
+        "as_of": st["as_of"],
+        "verdict": s["verdict"],
+        "verdict_severity": "CRITICAL" if s["critical"] else "WARN" if s["warn"] else "OK",
+        "counts": {"critical": s["critical"], "warn": s["warn"], "info": len(st["tolerated"])},
+        "scorecard": st["scorecard"],
+        "issues": linked(st["issues"]),
+        "tolerated": linked(st["tolerated"]),
+        "catalog": report.catalog(st),
+        "severity_meaning": SEVERITY_MEANING,
+        "watchdog": st["watchdog"],
+        "pipeline_summary": st["pipeline"],
+        # per-signal "who should have a score" vs "who lacks it" (plan 0005 Phase A)
+        "eligibility": db.rows(
             "SELECT signal, "
             "       SUM(CASE WHEN eligible=1 THEN 1 ELSE 0 END) AS n_eligible, "
             "       SUM(CASE WHEN eligible=0 THEN 1 ELSE 0 END) AS n_ineligible "
             "FROM universe_eligibility "
             "WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM universe_eligibility) "
-            "GROUP BY signal ORDER BY signal"
-        )
-    except Exception:
-        eligibility_block = []
-
-    # ── attach drilldowns ──
-    for i in issues:
-        url, label = _drilldown_for_issue(i)
-        i["drilldown_url"] = url
-        i["drilldown_label"] = label
-
-    # ── sort: severity then code ──
-    issues.sort(key=lambda i: (_severity_rank(i["severity"]), i.get("code", "")))
-
-    # ── counts + verdict ──
-    counts = {"critical": 0, "warn": 0, "info": 0, "total": len(issues)}
-    for i in issues:
-        if i["severity"] == "CRITICAL": counts["critical"] += 1
-        elif i["severity"] == "WARN":   counts["warn"]     += 1
-        elif i["severity"] == "INFO":   counts["info"]     += 1
-    if counts["critical"]:
-        verdict_sev = "CRITICAL"
-        verdict = f"⚠ {counts['critical']} CRITICAL · {counts['warn']} warn · {counts['info']} info"
-    elif counts["warn"]:
-        verdict_sev = "WARN"
-        verdict = f"⚠ {counts['warn']} warn · {counts['info']} info"
-    elif counts["info"]:
-        verdict_sev = "INFO"
-        verdict = f"{counts['info']} info"
-    else:
-        verdict_sev = "OK"
-        verdict = "✓ all healthy"
-
-    # ── tiles: one grade per pillar ──
-    def _pillar_grade(critical_n, warn_n):
-        if critical_n: return ("F", "#e74c3c")
-        if warn_n >= 5: return ("C", "#f1c40f")
-        if warn_n: return ("B", "#4d8eff")
-        return ("A", "#2ecc71")
-
-    def _count_by(src):
-        c = sum(1 for i in issues if i["source"] == src and i["severity"] == "CRITICAL")
-        w = sum(1 for i in issues if i["source"] == src and i["severity"] == "WARN")
-        info = sum(1 for i in issues if i["source"] == src and i["severity"] == "INFO")
-        return c, w, info
-
-    data_c, data_w, data_i = (lambda: (
-        sum(1 for i in issues if i["source"] in ("freshness", "sanity") and i["severity"] == "CRITICAL"),
-        sum(1 for i in issues if i["source"] in ("freshness", "sanity") and i["severity"] == "WARN"),
-        sum(1 for i in issues if i["source"] in ("freshness", "sanity") and i["severity"] == "INFO"),
-    ))()
-
-    pipe_c, pipe_w, pipe_i = _count_by("pipeline")
-    ep_c, ep_w, ep_i = _count_by("endpoint")
-    dos_c, dos_w, dos_i = _count_by("dossier")
-
-    # Factor tile derives from get_factor_health()
-    try:
-        fh = get_factor_health() or {}
-        fh_summary = fh.get("summary", {}) or {}
-        # Crude factor pillar grade: F if any in_model factor has data F-grade
-        f_grade_dist = fh_summary.get("data_grade_dist", {}) or {}
-        f_validation = fh_summary.get("validation_dist", {}) or {}
-        if f_grade_dist.get("F", 0):
-            f_grade, f_color = ("D", "#e67e22")
-        elif f_grade_dist.get("D", 0):
-            f_grade, f_color = ("C", "#f1c40f")
-        elif f_grade_dist.get("C", 0):
-            f_grade, f_color = ("B", "#4d8eff")
-        else:
-            f_grade, f_color = ("A", "#2ecc71")
-        f_headline = f"{fh_summary.get('in_model', 0)} in model · {fh_summary.get('in_library', 0)} library"
-        f_detail = (
-            f"{f_validation.get('KEEP', 0)} KEEP · "
-            f"{f_validation.get('WEAK', 0)} WEAK · "
-            f"{f_validation.get('DROP', 0)} DROP · "
-            f"{f_validation.get('NONE', 0)} NONE"
-        )
-    except Exception:
-        f_grade, f_color, f_headline, f_detail = ("?", "#888", "—", "factor health unavailable")
-
-    int_c, int_w, int_i = _count_by("integrity")
-
-    data_grade, data_color = _pillar_grade(data_c, data_w)
-    pipe_grade, pipe_color = _pillar_grade(pipe_c, pipe_w)
-    dos_grade, dos_color = _pillar_grade(dos_c, dos_w)
-    int_grade, int_color = _pillar_grade(int_c, int_w)
-
-    # Picks tile: total picks today + integrity status
-    try:
-        n_picks = int(views.pick_count())
-    except Exception:
-        n_picks = 0
-
-    tiles = {
-        "data": {
-            "label": "Data",
-            "grade": data_grade, "color": data_color,
-            "headline": f"{data_c} critical · {data_w} warn",
-            "detail": f"freshness + sanity invariants across {len(report['tables'])} table-state slots",
-            "link": "#data",
-        },
-        "factors": {
-            "label": "Factors",
-            "grade": f_grade, "color": f_color,
-            "headline": f_headline,
-            "detail": f_detail,
-            "link": "#factors",
-        },
-        "picks": {
-            "label": "Picks integrity",
-            "grade": int_grade, "color": int_color,
-            "headline": f"{n_picks} ranked · {n_fail} FAIL · {n_warn} WARN",
-            "detail": "per-stock cross-source assertions (plan 0005 Phase B)",
-            "link": "#overview",
-        },
-        "pipeline": {
-            "label": "Pipeline",
-            "grade": pipe_grade, "color": pipe_color,
-            "headline": f"last run: {report['pipeline'].get('last_run_status') or '—'}",
-            "detail": f"{pipe_c} broken streak(s) · {len(report['pipeline'].get('failed_steps_today', []))} failure(s) today",
-            "link": "#pipeline",
-        },
-        "dossiers": {
-            "label": "Dossiers",
-            "grade": dos_grade, "color": dos_color,
-            "headline": f"{dossiers_block.get('total', 0)} total · {dossiers_block.get('invalid_count', 0)} invalid",
-            "detail": "narrative validator (raw numbers / signal-without-context)",
-            "link": "#overview",
-        },
-    }
-
-    # PIT replay tile (plan 0005 Phase E) — "can current code reproduce frozen picks?"
-    try:
-        r = db.one(
-            "SELECT MAX(snapshot_date) AS d, COUNT(DISTINCT snapshot_date) AS n, "
-            "MAX(frozen_at) AS last_freeze, MAX(frozen_by_commit) AS sha "
-            "FROM pit_replay_snapshots"
-        )
-        if r.get("d"):
-            n_frozen = int(r["n"])
-            last_d = r["d"]
-            last_freeze = r["last_freeze"] or ""
-            # We don't run replay here (would block page load 5-10s). Instead show
-            # freeze recency + count of historical anchors. Replay verdict is
-            # surfaced via dedicated /pit-replay endpoint if/when added.
-            age_days = None
-            try:
-                from datetime import datetime as _dt
-                last_dt = _dt.fromisoformat(last_freeze.split(".")[0]) if last_freeze else None
-                age_days = (_dt.now() - last_dt).days if last_dt else None
-            except Exception:
-                pass
-            if age_days is not None and age_days <= 2:
-                pit_grade, pit_color = "OK", "var(--green)"
-                pit_headline = f"{n_frozen} dates frozen · last {age_days}d ago"
-            elif age_days is not None and age_days <= 7:
-                pit_grade, pit_color = "STALE", "var(--amber)"
-                pit_headline = f"{n_frozen} dates frozen · stale ({age_days}d)"
-            else:
-                pit_grade, pit_color = "OK", "var(--green)"
-                pit_headline = f"{n_frozen} dates frozen"
-            pit_detail = f"latest anchor: {last_d} · run `python -m tools.pit_replay replay-all` to verify"
-        else:
-            pit_grade, pit_color = "INFO", "var(--text-muted)"
-            pit_headline = "no anchors yet"
-            pit_detail = "run `python -m tools.pit_replay freeze` to create first anchor"
-        tiles["pit_replay"] = {
-            "label": "PIT replay",
-            "grade": pit_grade, "color": pit_color,
-            "headline": pit_headline,
-            "detail": pit_detail,
-            "link": "#pit-replay",
-        }
-    except Exception:
-        pass
-
-    categories = sorted({i["category"] for i in issues})
-    sources = sorted({i["source"] for i in issues})
-
-    return {
-        "as_of": report["as_of"],
-        "verdict": verdict,
-        "verdict_severity": verdict_sev,
-        "counts": counts,
-        "tiles": tiles,
-        "issues": issues,
-        "categories": categories,
-        "sources": sources,
-        "watchdog": report.get("watchdog", {}),
-        "pipeline_summary": report.get("pipeline", {}),
-        "eligibility": eligibility_block,
-        "integrity": {
-            "n_fail": n_fail,
-            "n_warn": n_warn,
-            "fails": (integrity_rows[integrity_rows["integrity_status"] == "FAIL"].to_dict("records") if not integrity_rows.empty else []),
-            "warns": (integrity_rows[integrity_rows["integrity_status"] == "WARN"].to_dict("records") if not integrity_rows.empty else []),
-        },
-        "trust": _trust_overview(),
-    }
-
-
-def _trust_overview() -> dict:
-    """Plan 0007 Trust Pipeline + UHS summary block for /system.
-
-    Reads health_score (entity_kind='system' + 'pick'), trust_verdicts (last 7d
-    per-gate pass-rate), external_anchors (anchor coverage), and quarantine
-    tables (row counts). Returns the data the Overview tab's Trust card needs."""
-    from db import read_sql as _rs
-
-    # ── system UHS pulse ──
-    system_row = db.one(
-        """SELECT score_pct, label,
-                  dim_provenance, dim_freshness, dim_plausibility,
-                  dim_consistency, dim_coverage, snapshot_date
-           FROM health_score
-           WHERE entity_kind='system'
-           ORDER BY snapshot_date DESC LIMIT 1"""
-    ) or None
-
-    # ── pick UHS distribution today ──
-    picks_df = _rs(
-        """SELECT uhs_label, COUNT(*) AS n,
-                  ROUND(AVG(uhs_score),1) AS avg_score
-           FROM daily_picks
-           WHERE pick_date=(SELECT MAX(pick_date) FROM daily_picks)
-             AND uhs_score IS NOT NULL
-           GROUP BY uhs_label"""
-    )
-    pick_dist = {r["uhs_label"]: {"n": int(r["n"]), "avg": float(r["avg_score"])}
-                  for _, r in picks_df.iterrows()}
-
-    # ── per-gate verdict stats (last 7d) ──
-    gates = [
-        ("gate_1_identity",     "Identity (Gate 1)"),
-        ("gate_2_plausibility", "Plausibility (Gate 2)"),
-        ("gate_3_temporal",     "Temporal (Gate 3)"),
-        ("gate_4_cross_source", "Cross-source (Gate 4)"),
-        ("gate_5_unit",         "Unit contract (Gate 5)"),
-        ("gate_6_lineage",      "Lineage (Gate 6)"),
-        ("gate_7_anchor",       "Anchor (Gate 7)"),
-    ]
-    gate_stats = []
-    for col, label in gates:
-        try:
-            r = db.one(
-                f"""SELECT
-                    SUM(CASE WHEN {col}=1 THEN 1 ELSE 0 END) AS n_pass,
-                    SUM(CASE WHEN {col}=0 THEN 1 ELSE 0 END) AS n_fail,
-                    SUM(CASE WHEN {col}=2 THEN 1 ELSE 0 END) AS n_pending,
-                    COUNT({col}) AS n_total
-                  FROM trust_verdicts
-                  WHERE snapshot_date >= date('now','-7 days')
-                    AND {col} IS NOT NULL"""
-            )
-            if int(r.get("n_total") or 0) == 0:
-                gate_stats.append({"col": col, "label": label, "n_pass": 0,
-                                    "n_fail": 0, "n_pending": 0, "n_total": 0,
-                                    "pass_pct": None})
-                continue
-            n_total = int(r["n_total"])
-            n_pass = int(r["n_pass"] or 0)
-            n_fail = int(r["n_fail"] or 0)
-            n_pending = int(r["n_pending"] or 0)
-            pass_pct = round(100 * n_pass / n_total, 1) if n_total else None
-            gate_stats.append({"col": col, "label": label,
-                                "n_pass": n_pass, "n_fail": n_fail,
-                                "n_pending": n_pending, "n_total": n_total,
-                                "pass_pct": pass_pct})
-        except Exception:
-            gate_stats.append({"col": col, "label": label, "n_pass": 0,
-                                "n_fail": 0, "n_pending": 0, "n_total": 0,
-                                "pass_pct": None})
-
-    # ── quarantine row counts ──
-    quarantine_tables = [
-        "broker_recommendations_quarantine", "forecast_history_quarantine",
-        "analyst_consensus_quarantine", "consensus_signals_quarantine",
-        "banking_metrics_quarantine", "analyst_consensus_snapshots_quarantine",
-        "quarterly_income_quarantine", "annual_balance_sheet_quarantine",
-        "annual_cash_flow_quarantine", "mf_holdings_quarantine",
-        "mf_sector_allocation_quarantine",
-    ]
-    quarantine_counts = []
-    for tbl in quarantine_tables:
-        try:
-            n = int(db.scalar(f"SELECT COUNT(*) FROM {tbl}", default=0))
-            if n > 0:
-                quarantine_counts.append({"table": tbl.replace("_quarantine", ""),
-                                            "n": n})
-        except Exception:
-            continue
-    quarantine_counts.sort(key=lambda r: -r["n"])
-
-    # ── external_anchors ──
-    anchor_df = _rs(
-        """SELECT anchor_source, COUNT(*) AS n, MAX(anchor_date) AS last_date
-           FROM external_anchors
-           WHERE anchor_date >= date('now','-30 days')
-           GROUP BY anchor_source
-           ORDER BY n DESC"""
-    )
-    anchor_sources = [
-        {"source": r["anchor_source"], "n": int(r["n"]), "last": r["last_date"]}
-        for _, r in anchor_df.iterrows()
-    ]
-
-    # ── factor table — worst factors right now ──
-    factor_df = _rs(
-        """SELECT entity_id, score_pct, label, uhs_worst_dim_alias AS worst_dim
-           FROM (
-             SELECT entity_id, score_pct, label,
-                    -- compute worst dim inline
-                    CASE
-                      WHEN dim_provenance IS NOT NULL AND dim_provenance <= COALESCE(dim_freshness,99)
-                       AND dim_provenance <= COALESCE(dim_plausibility,99)
-                       AND dim_provenance <= COALESCE(dim_consistency,99)
-                       AND dim_provenance <= COALESCE(dim_coverage,99) THEN 'provenance'
-                      WHEN dim_freshness IS NOT NULL AND dim_freshness <= COALESCE(dim_plausibility,99)
-                       AND dim_freshness <= COALESCE(dim_consistency,99)
-                       AND dim_freshness <= COALESCE(dim_coverage,99) THEN 'freshness'
-                      WHEN dim_plausibility IS NOT NULL AND dim_plausibility <= COALESCE(dim_consistency,99)
-                       AND dim_plausibility <= COALESCE(dim_coverage,99) THEN 'plausibility'
-                      WHEN dim_consistency IS NOT NULL AND dim_consistency <= COALESCE(dim_coverage,99) THEN 'consistency'
-                      WHEN dim_coverage IS NOT NULL THEN 'coverage'
-                      ELSE NULL
-                    END AS uhs_worst_dim_alias
-             FROM health_score
-             WHERE entity_kind='factor'
-               AND snapshot_date=(SELECT MAX(snapshot_date) FROM health_score WHERE entity_kind='factor')
-           )
-           ORDER BY score_pct ASC LIMIT 12"""
-    )
-    factor_breakdown = [
-        {"factor": r["entity_id"], "score": int(r["score_pct"]) if r["score_pct"] else None,
-         "label": r["label"], "worst_dim": r["worst_dim"]}
-        for _, r in factor_df.iterrows()
-    ]
-
-    return {
-        "system": system_row,
-        "pick_distribution": pick_dist,
-        "gate_stats": gate_stats,
-        "quarantine_counts": quarantine_counts,
-        "anchor_sources": anchor_sources,
-        "factor_breakdown": factor_breakdown,
-    }
+            "GROUP BY signal ORDER BY signal"),
+        "integrity": {status.lower() + "s": [r for r in integrity if r["integrity_status"] == status]
+                      for status in ("FAIL", "WARN")},
+    })
 
 
 # ─────────────── Data Supply (plan 0018): feeds, canaries, discovery, known issues ───────────────
@@ -2543,8 +1938,6 @@ _PLAIN = {   # verdict code → plain words for the page (the email keeps the pr
     "FEED_CANARY_MISSING": "Health check hasn't run recently",
     "FEED_RUN_FAILED": "Last run failed",
     "FEED_OUTDATED": "Data is out of date",
-    "FEED_ORPHAN": "Not scheduled to run",
-    "FEED_NO_FALLBACK": "Critical, and no backup source",
     "FEED_VOLUME_DROP": "Wrote far fewer rows than usual",
     "FEED_VOLUME_SPIKE": "Wrote far more rows than usual",
     "FEED_RECONCILE_FAIL": "Disagrees with an independent source",
@@ -2577,7 +1970,10 @@ def _plain(r):
     r["age_bad"] = wf.get("freshness") in ("OUTDATED", "STALE")
     r["backup"] = {"fallback": "Yes", "serve-stale": "No — keeps using the last good data",
                    "none": "No"}.get(r.get("resilience"), "—")
-    problems, labels = [], []
+    # registry facts (held by tests/test_feeds.py, shown here because the page lists them)
+    labels = (["Not scheduled to run"] if not r.get("schedule") else []) + \
+             (["Critical, and no backup source"] if r.get("tier") == "T1" and r.get("resilience") == "none" else [])
+    problems = list(labels)
     for v in r.get("verdicts", []):
         # T2 canary warnings are INFO for the email, but the page shows them: a
         # "warning" health check next to an "OK" status reads as a contradiction.
@@ -2585,7 +1981,7 @@ def _plain(r):
         if shown and v["code"] in _PLAIN:
             detail = (v.get("detail") or "").strip()
             labels.append(_PLAIN[v["code"]])
-            problems.append(_PLAIN[v["code"]] + (f": {detail[:200]}" if detail and v["code"] != "FEED_ORPHAN" else ""))
+            problems.append(_PLAIN[v["code"]] + (f": {detail[:200]}" if detail else ""))
     r["problems"], r["problem_labels"] = problems, labels
     if r["state"] == "OK" and labels:
         r["state"] = "Needs a look"
@@ -2603,7 +1999,7 @@ def get_feed_overview():
 
     rows = _clean(feed_state())
     drift = registry_drift()
-    verdicts = feed_verdicts(rows, drift=drift)
+    verdicts = feed_verdicts(rows)
     by_feed = {}
     for v in verdicts:
         by_feed.setdefault(v["target"], []).append(v)

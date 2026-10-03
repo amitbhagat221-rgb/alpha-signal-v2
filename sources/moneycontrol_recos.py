@@ -346,6 +346,24 @@ def aggregate_consensus():
         latest_reco_date=("reco_date", "max"),
     ).reset_index()
     agg["price_target"] = agg["price_target"].round(2)
+    # A broker's latest call can be years old (pre-split, pre-crash): the mean then sits
+    # at many times today's price. This aggregate runs daily and used to rewrite those
+    # targets every morning, a week ahead of the Yahoo sweep that nulls them. The same
+    # rule now applies at the write (validators.plausibility.PT_CLOSE_RATIO).
+    import views
+    from validators.plausibility import pt_implausible, record_pt_plausibility_fail
+    closes = views.latest_close(agg["sid"].tolist())
+    today = datetime.now().date().isoformat()
+    rejected = 0
+    for i, r in agg.iterrows():
+        close = closes.get(r["sid"], (None, None))[0]
+        if pt_implausible(r["price_target"], close):
+            record_pt_plausibility_fail(r["sid"], today,
+                                        f"broker-mean PT {r['price_target']:.0f} vs close {close:.1f} (implausible)")
+            agg.at[i, "price_target"] = None
+            rejected += 1
+    if rejected:
+        print(f"aggregate_consensus: {rejected} implausible broker-mean targets not written (verdicts recorded).")
     agg["buy_pct"] = agg["buy_pct"].round(2)
     agg["has_analyst_data"] = (agg["total_analysts"] > 0).astype(int)
     agg["fetched_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")

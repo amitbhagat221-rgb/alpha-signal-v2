@@ -37,7 +37,7 @@ pit.py        as-of datasets + factor computation at any date (live = backtest a
 views.py      named read-models shared by the email/dossier (ADR 0052)
 sources/      fetchers (NSE, BSE, Tickertape, yfinance, Screener, AMFI, Moneycontrol, RSS…)
 signals/      one module per factor family → *_scores tables
-scoring/      screener · regime · confidence · health_score
+scoring/      screener · regime · segment
 eligibility/  per-signal eligibility registry     validators/  trust-pipeline gates
 output/       snapshot · dossier · email (plus generated reports, gitignored)
 tools/        PIT panel writer, backtests, promotion gate, health/watchdog, studies

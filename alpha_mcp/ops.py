@@ -3,7 +3,7 @@ alpha-ops — read-only system health for the MCP (plan 0016 §4 "ops").
 
     python -m alpha_mcp.ops        # stdio server
 
-Same checks as the 04:00 UTC health email (tools/health_report.gather — one source
+Same checks as the 04:00 UTC health email (checks.report.gather — one source
 of truth), pipeline step state, table freshness, the LLM ledger, the llm_tasks
 queue and the per-feed incident bundle. Nothing here writes, sends or reruns.
 """
@@ -20,7 +20,7 @@ from mcp.server.fastmcp import FastMCP      # noqa: E402
 
 INSTRUCTIONS = """\
 Alpha Signal v2 operations view (read-only). health = the same verdicts as the daily 04:00 UTC health email
-(CRITICAL / WARN issues with codes). pipeline_status = each pipeline step's final state per run date.
+(five questions, each OK / WATCH / BROKEN, and the CRITICAL / WARN issues behind them with what to do first). pipeline_status = each pipeline step's final state per run date.
 freshness = every table's age vs its threshold. llm_usage = the LLM ledger (mode api = paid API, session / local /
 routine = Claude subscription). queue_status = the llm_tasks work queue. feed_incident = everything needed to
 diagnose one data feed. Nothing here can rerun, fix or send anything: report what you find and propose the fix.
@@ -36,23 +36,27 @@ _health_memo = {"ts": 0.0, "value": None}
 def _gather():
     now = time.monotonic()
     if _health_memo["value"] is None or now - _health_memo["ts"] > HEALTH_TTL_S:
-        from tools.health_report import gather
+        from checks.report import gather
         _health_memo["value"], _health_memo["ts"] = gather(), now
     return _health_memo["value"]
 
 
 @tool()
 def health(severity: str | None = None) -> dict:
-    """System health as the daily email sees it: verdict, CRITICAL/WARN counts, every issue (severity, code,
-    message, detail), failed steps today and multi-day failure streaks, and the watchdog summary. Cached for
-    5 minutes (a full scan takes ~15-20 s). severity: CRITICAL or WARN to filter the issues."""
+    """System health as the daily email sees it. scorecard = the five questions (did everything run, did the
+    data arrive, is the data right, can today's picks be trusted, is the model still sound), each OK / WATCH /
+    BROKEN. issues = every CRITICAL / WARN finding: theme (which question), code, message (what was found),
+    detail (the evidence), why (why it matters), fix (what to do first). CRITICAL = act today, WARN = look this
+    week. Also failed steps today, multi-day failure streaks and the watchdog summary. Cached for 5 minutes
+    (a full scan takes ~15-20 s). severity: CRITICAL or WARN to filter the issues."""
     st = _gather()
     issues = st.get("issues") or []
     if severity:
         issues = [i for i in issues if i["severity"] == severity.upper()]
     p = st.get("pipeline") or {}
     t = st.get("tables") or {}
-    return {"as_of": st.get("as_of"), "summary": st.get("summary"), "issues": issues,
+    return {"as_of": st.get("as_of"), "summary": st.get("summary"), "scorecard": st.get("scorecard"),
+            "issues": issues,
             "pipeline": {k: p.get(k) for k in ("last_run_date", "last_run_status",
                                                "failed_steps_today", "failed_streaks")},
             "tables": {"fresh": t.get("fresh"), "n_stale": len(t.get("stale") or []),

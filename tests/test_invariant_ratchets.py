@@ -61,7 +61,7 @@ def test_inv1_signals_do_not_import_db():
 INSERT_OR_REPLACE = {
     "db.py",                       # upsert_df fallback for PK-less tables
     "output/sector_dossier.py",    # sector_dossiers — moves to the plan 0016 task queue
-    "scoring/confidence.py", "scoring/regime.py",
+    "scoring/regime.py",
     "signals/management_quality.py", "signals/nlp_scores.py", "signals/sector_briefs.py",
     "signals/sector_forces.py",
     "sources/fno_iv.py", "sources/fno_pull.py", "sources/kite_pull.py", "sources/mf_holdings.py",

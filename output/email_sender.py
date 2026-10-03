@@ -163,9 +163,7 @@ def _build_pick_card(row, dossier, idx):
     score = row["final_score"]
     rank = row["rank"]
     # Plan 0007 Phase 5 — per-pick UHS
-    uhs_score = row.get("uhs_score")
-    uhs_label = row.get("uhs_label")
-    uhs_worst = row.get("uhs_worst_dim")
+    data = views.pick_data(row)                       # the data behind the pick (ADR 0061)
 
     price = row.get("close_price")
     pe = row.get("pe_ratio")
@@ -299,25 +297,15 @@ def _build_pick_card(row, dossier, idx):
         <div style="font-size:11px;color:{C_MUTED};margin-top:6px">🧠 AI thesis pending</div>
         """
 
-    # Plan 0007 Phase 5 — UHS footer line
-    uhs_footer = ""
-    if uhs_score is not None:
-        if uhs_score >= 80:
-            uhs_emoji = "🟢"
-            uhs_color = C_GREEN
-        elif uhs_score >= 60:
-            uhs_emoji = "🟡"
-            uhs_color = C_AMBER
-        else:
-            uhs_emoji = "🔴"
-            uhs_color = C_RED
-        worst_text = f" · weakest dim: {uhs_worst}" if uhs_worst else ""
-        uhs_footer = (
+    # Footer: what the ranking had to work with for this stock — one wording (views.pick_data)
+    data_footer = ""
+    if data:
+        colour = {"green": C_GREEN, "amber": C_AMBER}[data["colour"]]
+        data_footer = (
             f'<div style="font-size:10.5px;color:{C_MUTED};'
             f'padding-top:8px;margin-top:6px;border-top:1px solid {C_BORDER}">'
-            f'{uhs_emoji} <b style="color:{uhs_color}">UHS {uhs_score} · {uhs_label or ""}</b>'
-            f'{worst_text}'
-            f'</div>'
+            f'<b style="color:{colour}">Data {data["score"]}% · {data["word"]}</b> · {data["meaning"]}'
+            '</div>'
         )
 
     return f"""
@@ -328,12 +316,46 @@ def _build_pick_card(row, dossier, idx):
       {stat_row}
       {pills_block}
       {dossier_block}
-      {uhs_footer}
+      {data_footer}
     </div>
     """
 
 
-def _build_html():
+def model_warnings():
+    """Today's ranking, checked BEFORE the picks go out: the failing checks of the
+    question "can today's picks be trusted?" (checks.run(theme="picks"): a dead
+    factor input, a ranking that broke from yesterday's, a thin tier) as
+    [{severity, message, detail}]. If the checks themselves cannot run, that is
+    the warning — the reader is never told nothing when nothing was checked."""
+    import checks
+    try:
+        return [{"severity": v["severity"], "message": v["message"], "detail": v["detail"]}
+                for v in checks.run(theme="picks") if v["severity"] in (checks.CRITICAL, checks.WARN)]
+    except Exception as e:                          # noqa: BLE001
+        return [{"severity": checks.WARN, "message": "The pre-send checks on today's ranking could not run",
+                 "detail": f"{type(e).__name__}: {e}"}]
+
+
+def _warning_banner(warnings):
+    if not warnings:
+        return ""
+    rows = "".join(
+        f'<div style="margin-top:6px"><b>{w["message"]}</b>'
+        + (f'<br><span style="font-size:12px">{w["detail"]}</span>' if w["detail"] else "") + "</div>"
+        for w in warnings)
+    return f"""
+    <div style="background:{C_CARD};border:1px solid {C_RED};border-left:4px solid {C_RED};border-radius:8px;
+          padding:12px 16px;margin-bottom:14px;font-size:13px;color:{C_TEXT}">
+      <div style="font-size:11px;font-weight:700;letter-spacing:1px;color:{C_RED};text-transform:uppercase">
+        Read before acting on today's picks</div>
+      {rows}
+      <div style="font-size:11px;color:{C_MUTED};margin-top:8px">The ranking below was built with this problem present.
+        Details: <a href="{OPS_URL}/system" style="color:{C_BLUE}">Health Center</a>.</div>
+    </div>
+    """
+
+
+def _build_html(warnings=()):
     today_human = date.today().strftime("%A, %d %B %Y")
 
     # Picks + fundamentals + snapshot signals + price returns
@@ -464,6 +486,7 @@ def _build_html():
       <div style="max-width:680px;margin:0 auto;background:{C_BG};">
         {header}
         <div style="background:{C_BG};padding:18px 22px 22px">
+          {_warning_banner(warnings)}
           {regime_html}
           {changes_html}
           {"".join(tier_blocks)}
@@ -476,9 +499,12 @@ def _build_html():
 
 
 def send_email(dry_run=False):
-    html, pick_count = _build_html()
+    warnings = model_warnings()
+    html, pick_count = _build_html(warnings)
     today = date.today().isoformat()
-    print(f"Email: {pick_count} picks for {today}")
+    print(f"Email: {pick_count} picks for {today}" + (f" — {len(warnings)} model warning(s) in the banner" if warnings else ""))
+    for w in warnings:
+        print(f"  ⚠ [{w['severity']}] {w['message']}: {w['detail']}")
 
     local_path = PROJECT_ROOT / "output" / f"email_{today}.html"
     local_path.parent.mkdir(parents=True, exist_ok=True)
@@ -497,7 +523,8 @@ def send_email(dry_run=False):
         raise RuntimeError("email send failed: GMAIL_USER / GMAIL_APP_PASSWORD not set")
 
     msg = MIMEMultipart("alternative")
-    msg["Subject"] = f"Alpha Signal · {date.today().strftime('%a %d %b')} · Daily Brief"
+    msg["Subject"] = (("⚠ " if warnings else "")
+                      + f"Alpha Signal · {date.today().strftime('%a %d %b')} · Daily Brief")
     msg["From"] = f"Alpha Signal <{gmail_user}>"
     msg["To"] = recipient
     msg.attach(MIMEText(html, "html"))

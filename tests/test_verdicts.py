@@ -66,14 +66,14 @@ def test_two_gates_on_same_key_both_survive(temp_db):
 def test_overall_is_worst_gate_and_recomputes_on_rewrite(temp_db):
     write_verdict("gate_1_identity", "ABC", "src_fin", "revenue", 1, {}, row=ROW,
                   snapshot_date="2026-09-26")
-    write_verdict("gate_3_temporal", "ABC", "src_fin", "revenue", 0, {}, row=ROW,
+    write_verdict("gate_2_plausibility", "ABC", "src_fin", "revenue", 0, {}, row=ROW,
                   snapshot_date="2026-09-26")
     assert _rows(temp_db)[0]["verdict_overall"] == "QUARANTINED"
-    # Gate 3 re-evaluated to PASS → overall recovers; gate 1 untouched.
-    write_verdict("gate_3_temporal", "ABC", "src_fin", "revenue", 1, {}, row=ROW,
+    # Gate 2 re-evaluated to PASS → overall recovers; gate 1 untouched.
+    write_verdict("gate_2_plausibility", "ABC", "src_fin", "revenue", 1, {}, row=ROW,
                   snapshot_date="2026-09-26")
     r = _rows(temp_db)[0]
-    assert (r["gate_1_identity"], r["gate_3_temporal"], r["verdict_overall"]) == (1, 1, "TRUSTED")
+    assert (r["gate_1_identity"], r["gate_2_plausibility"], r["verdict_overall"]) == (1, 1, "TRUSTED")
 
 
 def test_source_key_uses_real_pk(temp_db):

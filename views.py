@@ -28,6 +28,7 @@ from pathlib import Path
 
 import pandas as pd
 
+import config
 import db
 from db import get_db, read_sql
 
@@ -104,16 +105,53 @@ def latest_per_sid(table, cols):
 
 # ═══════════════════════════ picks ═══════════════════════════
 
-# The ONE pick gate (plan 0005 Phase B + plan 0007 Phase 5): integrity FAIL and the
-# UHS AVOID band (< 60) never reach a reader. NULL uhs_score = rows pre-dating UHS.
-PICK_GATE_SQL = ("(dp.integrity_status IS NULL OR dp.integrity_status != 'FAIL') "
-                 "AND (dp.uhs_score IS NULL OR dp.uhs_score >= 60)")
+# The ONE reader-side pick gate (plan 0005 Phase B): a pick that contradicts itself
+# across fields (integrity FAIL) never reaches a reader. The data gate itself —
+# enough factor coverage, prices and fundamentals (config.PICK_GATE) — is applied
+# by the screener before a row is written. The per-pick trust score (UHS) that used
+# to sit here was retired in ADR 0061; its columns stay on daily_picks as history.
+PICK_GATE_SQL = "(dp.integrity_status IS NULL OR dp.integrity_status != 'FAIL')"
 
 _PICK_COLS = """
       dp.sid, dp.final_score, dp.rank, dp.cap_tier, dp.sector,
       dp.base_score, dp.forensic_adj, dp.integrity_status,
-      dp.uhs_score, dp.uhs_label, dp.uhs_worst_dim,
+      dp.eligible_coverage, dp.weight_coverage, dp.price_rows, dp.fundamental_coverage,
       s.ticker, s.name, s.pe_ratio, s.pb_ratio, s.roe, s.market_cap_cr"""
+
+
+def pick_data(row, sid=None, pick_date=None):
+    """The data behind one pick, in words (ADR 0061). The score is the share of the
+    factor weight that applies to this stock which was backed by a real value —
+    the quantity the pick gate uses — so it varies stock by stock and means one
+    thing: {score (0-100), word, meaning, colour, factors_used, factors_applicable,
+    missing: [factor keys], price_days, quarters}. With `sid` and `pick_date` the
+    missing factors are named from the inputs the screener froze that day."""
+    cov = row.get("eligible_coverage")
+    if cov is None or pd.isna(cov):
+        return None
+    # a factor the registry marks ineligible for the stock can still produce a value,
+    # which puts the ratio a touch over 1: it means complete, so cap it
+    cov = min(float(cov), 1.0)
+    complete = cov >= config.PICK_GATE["complete_from"]
+    out = {"score": int(round(100 * cov)),
+           "word": "Complete" if complete else "Partial",
+           "meaning": ("every factor that applies to this stock had a value" if complete else
+                       "ranked on the factors that had values; the rest were left out, not counted as zero"),
+           "colour": "green" if complete else "amber",
+           "price_days": None if row.get("price_rows") is None else int(row["price_rows"]),
+           "quarters": None if row.get("fundamental_coverage") is None else int(round(8 * float(row["fundamental_coverage"]))),
+           "factors_used": None, "factors_applicable": None, "missing": []}
+    tier = row.get("cap_tier")
+    if sid and pick_date and tier:
+        import factors
+        frozen = db.one("SELECT inputs_json FROM pit_replay_snapshots WHERE sid = ? AND snapshot_date = ?", [sid, pick_date])
+        inputs = json.loads(frozen["inputs_json"]) if frozen.get("inputs_json") else None
+        weights = factors.SIGNAL_WEIGHTS.get(tier, {})
+        if inputs is not None and weights:
+            cols = {k: factors.SCREENER_TIER_COLS.get((k, tier)) or factors.SCREENER_COLS[k] for k in weights}
+            missing = [k for k, c in cols.items() if inputs.get(c) is None]
+            out.update(factors_applicable=len(weights), factors_used=len(weights) - len(missing), missing=missing)
+    return out
 
 _SNAPSHOT_COLS = """,
       ds.close_price, ds.piotroski_f, ds.cf_accruals, ds.bs_accruals,
@@ -229,18 +267,19 @@ def signals(sid):
 
 
 def stock(sid):
-    """One stock now: its `stocks` row, its newest pick (score, rank, UHS), its
-    newest signal values and its latest close. None for an unknown sid.
+    """One stock now: its `stocks` row, its newest pick (score, rank, the data
+    behind it), its newest signal values and its latest close. None for an unknown sid.
 
     `stocks.cap_tier` is the tier of record — the pick row's tier is not merged
     (a stale pick row would resurrect yesterday's tier after a MICRO toggle)."""
     s = db.one("SELECT * FROM stocks WHERE sid = ?", [sid])
     if not s:
         return None
-    s.update(db.one(
-        "SELECT final_score, rank, pick_date, uhs_score, uhs_label, uhs_worst_dim, "
-        "uhs_breakdown_json FROM daily_picks WHERE sid = ? ORDER BY pick_date DESC LIMIT 1",
-        [sid]))
+    pick = db.one(
+        "SELECT final_score, rank, pick_date, cap_tier, eligible_coverage, weight_coverage, price_rows, "
+        "fundamental_coverage FROM daily_picks WHERE sid = ? ORDER BY pick_date DESC LIMIT 1", [sid])
+    s.update({k: v for k, v in pick.items() if k != "cap_tier"})      # stocks.cap_tier is the tier of record
+    s["data"] = pick_data(pick, sid, pick.get("pick_date")) if pick else None
     s.update(signals(sid))
     close, price_date = latest_close([sid]).get(sid, (None, None))
     if close is not None:

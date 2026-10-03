@@ -12,7 +12,7 @@ Console) split out of the main trading cockpit so:
 | Path | Page | Source API function |
 |---|---|---|
 | `/` | redirects to `/system` | — |
-| `/system` | Health Center (Live Issues Inbox, Data, Factors, Pipeline tabs) | `get_health_overview` + 4 others |
+| `/system` | Health Center: five questions + issues (Overview), every check (What we check), then Data, Factors, Pipeline, Inventory. A view over `tools.health_report.gather()`, ADR 0059 | `get_health_overview` + 4 others |
 | `/flow` | Pipeline producer/consumer DAG | `get_flow_overview` |
 | `/feeds` | Data Supply — feeds by family, canaries, T1 resilience, discovery funnel, known issues (plan 0018) | `get_feed_overview` |
 | `/command` | Command Centre — plans, factor library, data layer | `get_command_centre` |

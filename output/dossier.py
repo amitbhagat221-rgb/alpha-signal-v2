@@ -235,7 +235,7 @@ def is_publishable(dossier):
 
 def _build_stock_context(sid):
     """Context dict for one stock: views.stock(sid) — the stocks row, its newest
-    pick (score, rank, UHS), every registry signal table's newest row and its
+    pick (score, rank, the data behind it), every registry signal table's newest row and its
     latest close (as `current_price`, the key the prompt and validator read)."""
     s = views.stock(sid)
     if s is None:
@@ -318,48 +318,20 @@ def _build_signals_section(context):
     return "\n".join(lines)
 
 
-def _build_uhs_block(context):
-    """Plan 0007 Phase 8 — UHS context block in the LLM prompt.
-
-    Surfaces uhs_score + uhs_label + uhs_worst_dim so the narrative
-    must acknowledge data-confidence weakness. Adds a hard hygiene rule
-    that BANS strength claims about dims that scored <12: cannot claim
-    "strong fundamentals" if dim_provenance < 12 or dim_consistency < 12.
-    """
-    score = context.get("uhs_score")
-    label = context.get("uhs_label")
-    worst = context.get("uhs_worst_dim")
-    breakdown = context.get("uhs_breakdown_json")
-    if score is None:
-        return "DATA-CONFIDENCE: (not yet computed)\n"
-
-    constraints = []
-    if breakdown:
-        try:
-            import json as _json
-            dims = (_json.loads(breakdown).get("dims") or {})
-            if (dims.get("provenance") or 99) < 12:
-                constraints.append(
-                    "  - dim_provenance < 12 — DO NOT claim 'strong fundamentals' or 'verified data'"
-                )
-            if (dims.get("consistency") or 99) < 12:
-                constraints.append(
-                    "  - dim_consistency < 12 — DO NOT claim 'consistent signal' or 'reliable trajectory'"
-                )
-            if (dims.get("freshness") or 99) < 12:
-                constraints.append(
-                    "  - dim_freshness < 12 — bull/bear must acknowledge data is stale"
-                )
-        except Exception:
-            pass
-    constraints_text = "\n".join(constraints) if constraints else ""
-
-    return (
-        f"\nDATA-CONFIDENCE (Plan 0007 UHS):\n"
-        f"- score = {score}/100 · {label} · weakest dim = {worst or 'n/a'}\n"
-        f"- HYGIENE CONSTRAINTS (override defaults):\n"
-        f"{constraints_text or '  - none active for this pick'}\n"
-    )
+def _build_data_block(context):
+    """What the ranking had to work with for this stock (views.pick_data, ADR 0061):
+    a pick ranked on part of its factors must not be narrated as if every factor
+    spoke, and the factors that were missing may not be named as strengths."""
+    data = context.get("data")
+    if not data:
+        return "DATA BEHIND THIS PICK: (not available)\n"
+    lines = [f"- {data['word']}: {data['meaning']}"]
+    if data.get("factors_applicable"):
+        lines.append(f"- ranked on {data['factors_used']} of {data['factors_applicable']} applicable factors")
+    if data.get("missing"):
+        lines.append(f"- HYGIENE CONSTRAINT: these factors had NO value for this stock and must not be mentioned "
+                     f"as strengths or weaknesses: {', '.join(data['missing'])}")
+    return "\nDATA BEHIND THIS PICK:\n" + "\n".join(lines) + "\n"
 
 
 def _build_prompt(context):
@@ -380,13 +352,13 @@ def _build_prompt(context):
         in narrative either — the validator now enforces that.
     """
     signals_block = _build_signals_section(context)
-    uhs_block = _build_uhs_block(context)
+    data_block = _build_data_block(context)
     return f"""You are an expert Indian equity analyst. Generate a concise investment dossier for this stock.
 
 STOCK: {context.get('name', 'Unknown')} ({context.get('ticker', '?')})
 SECTOR: {context.get('sector', '?')} | TIER: {context.get('cap_tier', '?')}
 PRICE: ₹{context.get('current_price', '?')} ({context.get('price_date', '?')})
-{uhs_block}
+{data_block}
 
 SIGNALS (only signals listed here are valid to reference — do not invent absent ones):
 {signals_block}
@@ -456,7 +428,7 @@ def generate(top=None, dry_run=False):
     # cockpit but doesn't get LLM-narrated. WARN-status picks still get
     # dossiers (the WARN is surfaced in cockpit, not blocking).
     # Plan 0015 Phase 0: the SAME published set the email shows (views.published_picks,
-    # incl. the UHS ≥ 60 gate), top N per tier. The old `ORDER BY cap_tier … head(5)`
+    # incl. the integrity gate), top N per tier. The old `ORDER BY cap_tier … head(5)`
     # sorted tiers alphabetically, so only the LARGE top 5 ever got a dossier.
     picks = views.published_picks("book" if top is None else top)
     print(f"Generating dossiers for {len(picks)} stocks...\n")

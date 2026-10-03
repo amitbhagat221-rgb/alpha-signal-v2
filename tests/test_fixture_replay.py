@@ -132,7 +132,7 @@ def _row(tier="T1", volume=None, reconcile=None):
 
 def _sev(row, code):
     from checks.feeds import feed_verdicts
-    return [v["severity"] for v in feed_verdicts([row], drift=[]) if v["code"] == code]
+    return [v["severity"] for v in feed_verdicts([row]) if v["code"] == code]
 
 
 def test_volume_and_reconcile_verdicts():

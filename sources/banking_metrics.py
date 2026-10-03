@@ -278,7 +278,12 @@ def parse_bank_page(html: str, sid: str) -> pd.DataFrame:
         funds = (dep or 0) + (bor or 0)
         if funds <= 0:
             return None
-        return round(100.0 * float(ie) / funds, 3)
+        cof = round(100.0 * float(ie) / funds, 3)
+        # An NBFC with almost no borrowings on the balance sheet gives 800% or 7,700%
+        # here: the ratio is meaningless, not a cost of funds. The column's legal range
+        # (checks/ranges.py) decides, so the producer and the daily check agree.
+        from checks import ranges
+        return cof if ranges.in_range("banking_metrics", "cost_of_funds_pct", cof) else None
     df["cost_of_funds_pct"] = df.apply(_cof, axis=1)
 
     # Stamp source + fetched_at

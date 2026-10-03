@@ -26,15 +26,21 @@ import sys
 from datetime import datetime
 
 
-GATE_COLS = (
-    "gate_1_identity",
-    "gate_2_plausibility",
-    "gate_3_temporal",
-    "gate_4_cross_source",
-    "gate_5_unit",
-    "gate_6_lineage",
-    "gate_7_anchor",
-)
+# The write-time gates: column → (name, what a PASS means). The ONE list — the
+# producers, the health report and the ops page all read it. A gate fails a row
+# before it is written and moves it to <table>_quarantine.
+#
+# Gates 3 (continuity), 4 (cross-source), 5 (units), 6 (lineage) and 7 (anchor)
+# were retired as verdict writers in ADR 0061: 3/4/5 ran once by hand (2026-05-31)
+# and were never scheduled, 7 never wrote a verdict, 4 and 7 are the daily feed
+# reconcile (tools/reconcile.py) by another name. The unit registry itself
+# (validators/unit_contract.py) still guards every db.insert_df. Their
+# trust_verdicts columns stay as history.
+GATES = {
+    "gate_1_identity":     ("Identity", "the row really belongs to the stock it is filed under"),
+    "gate_2_plausibility": ("Plausibility", "the value is inside a believable range"),
+}
+GATE_COLS = tuple(GATES)
 
 _OVERALL_FOR_VALUE = {0: "QUARANTINED", 1: "TRUSTED", 2: "PENDING_REVIEW"}
 

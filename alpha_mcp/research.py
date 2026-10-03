@@ -31,7 +31,8 @@ Score: final_score = base_score (0-1) minus any forensic penalty. base_score is 
 within-tier percentile on each WIRED factor (a negative weight inverts the percentile). pick_breakdown shows the exact
 per-factor contributions.
 
-Pick gate: a published pick has integrity_status != FAIL and UHS (data-trust score, 0-100) >= 60. picks(gated=true) is
+Pick gate: a published pick has integrity_status != FAIL (the screener already required enough factor coverage,
+price history and fundamentals before writing it). picks(gated=true) is
 the published set; gated=false is every ranked stock.
 
 Factors: WIRED = nonzero production weight in some tier (it moves ranks). LIBRARY/PROPOSED/BLOCKED/SUPERSEDED/CONTROL =
@@ -50,7 +51,7 @@ mcp = FastMCP("alpha-research", instructions=INSTRUCTIONS)
 tool = lambda **kw: _core.tool(mcp, "research", **kw)    # noqa: E731
 
 _PICK_FIELDS = ["sid", "ticker", "name", "cap_tier", "sector", "rank", "final_score", "base_score",
-                "forensic_adj", "uhs_score", "uhs_label", "uhs_worst_dim", "integrity_status",
+                "forensic_adj", "eligible_coverage", "integrity_status",
                 "market_cap_cr", "pe_ratio", "pb_ratio", "roe"]
 
 
@@ -73,10 +74,11 @@ def picks(date: str | None = None, tier: str | None = None, gated: bool = True, 
     """Ranked picks for one date (default: the latest), best first within each tier.
 
     date: YYYY-MM-DD pick date (see pick_dates). tier: LARGE | MID | SMALL (default: all pickable tiers).
-    gated: true = the published set (integrity not FAIL, UHS >= 60); false = every ranked stock.
+    gated: true = the published set (integrity not FAIL); false = every ranked stock.
     top: stocks per tier (max 100).
     Fields: rank (1 = best in tier), final_score / base_score (0-1), forensic_adj (penalty subtracted),
-    uhs_score (0-100 data trust) + uhs_label, market_cap_cr (Rs crore), pe_ratio, pb_ratio, roe (%)."""
+    eligible_coverage (0-1: share of the factor weight that applies to the stock which had a value — the data
+    behind the pick), market_cap_cr (Rs crore), pe_ratio, pb_ratio, roe (%)."""
     top = max(1, min(int(top), 100))
     if tier:
         tier = tier.upper()
@@ -172,16 +174,12 @@ def pick_breakdown(stock: str, date: str | None = None) -> dict:
 def stock(stock: str) -> dict:
     """One stock now: identity (sid, ticker, name, sector, industry, cap_tier), fundamentals snapshot
     (market_cap_cr in Rs crore, pe_ratio, pb_ratio, roe %, debt_to_equity), its newest pick row (final_score,
-    rank within tier, pick_date, UHS), newest display-signal values, latest close (Rs) and price metrics
+    rank within tier, pick_date, `data` = the data behind the pick: score 0-100 = share of applicable factor
+    weight that had a value, factors_used / factors_applicable, missing factors), newest display-signal values,
+    latest close (Rs) and price metrics
     (return_1m/3m/6m/1y in %, 52-week range, rsi_14), plus whether a current dossier exists. stock: sid or ticker."""
     sid = resolve_sid(stock)
     s = views.stock(sid)
-    uhs = s.pop("uhs_breakdown_json", None)
-    if uhs:
-        try:
-            s["uhs_breakdown"] = json.loads(uhs)
-        except (TypeError, json.JSONDecodeError):
-            pass
     s.update(views.price_metrics([sid]).get(sid, {}))
     for k in ("created_at", "updated_at", "mc_slug", "mc_checked_at", "slug"):
         s.pop(k, None)

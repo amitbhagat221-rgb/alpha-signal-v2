@@ -189,24 +189,24 @@ def _fetch_one(ticker, sid_for_gate=None):
 
 def sweep_pt_plausibility(snapshot_date=None):
     """Backstop over STORED analyst_consensus PTs: null any target implausible
-    vs the latest close (>3× / <0.33×, the SMALL hard cap) AND record a per-sid
-    gate_2_plausibility=0 verdict so the stock's UHS reflects the rejected datum.
+    vs the latest close (validators.plausibility.PT_CLOSE_RATIO) AND record a
+    per-sid gate_2_plausibility=0 verdict.
 
     The per-fetch gate in compute() only sees freshly-fetched values; this
     catches stale/pre-gate garbage (e.g. SPRE ₹3960 written before the gate
     existed, then Yahoo went quiet). Runs daily after the fetch."""
     from datetime import datetime
     from db import read_sql, get_db
-    from validators.plausibility import record_pt_plausibility_fail
+    from validators.plausibility import pt_implausible_sql, record_pt_plausibility_fail
     snapshot_date = snapshot_date or datetime.now().date().isoformat()
     df = read_sql(
-        """
+        f"""
         WITH px AS (SELECT sid, close FROM stock_prices sp
                     WHERE date=(SELECT MAX(date) FROM stock_prices WHERE sid=sp.sid))
         SELECT ac.sid, ac.price_target, px.close
         FROM analyst_consensus ac JOIN px ON px.sid = ac.sid
         WHERE ac.price_target IS NOT NULL AND px.close > 0
-          AND (ac.price_target > 3.0 * px.close OR ac.price_target < 0.33 * px.close)
+          AND {pt_implausible_sql("ac.price_target", "px.close")}
         """
     )
     n = 0

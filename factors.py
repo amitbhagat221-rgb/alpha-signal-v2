@@ -46,8 +46,6 @@ Entry fields (keyed by the registry signal id — the old BACKTEST_SIGNALS "sign
   replay_col       daily_snapshots_pit column the screener column is fed from
                    [the PIT column; None = display-only, no PIT twin]
   family           orthogonal family for tools/factor_marginal --within-group
-  uhs_tables       trust_verdicts tables behind the factor (scoring/health_score)
-  freshness_table  primary upstream table for the UHS freshness dim
   eligibility      {description, eligible_sql} — who SHOULD have a score (plan 0005)
 
 Cadence taxonomy (2026-05-24, ADR 0022):
@@ -89,8 +87,6 @@ FACTORS = {
         "pit_range": (-10, 10),
         "weight_key": "earnings_yield",
         "family": "Value",
-        "uhs_tables": ["stock_prices", "piotroski_scores"],
-        "freshness_table": "stock_prices",
         "eligibility": {
             "description": "Stocks with ≥4 quarters of EPS in quarterly_income AND a close price",
             "eligible_sql": """
@@ -113,8 +109,6 @@ FACTORS = {
         "pit_range": (-100, 1000),
         "weights": {"LARGE": 0.15, "MID": 0.20, "SMALL": 0.12},  # clean t: L 0.86 (value ballast) · M 2.37 · S 1.88 — the Value representative
         "family": "Value",
-        "uhs_tables": ["stock_prices", "piotroski_scores"],
-        "freshness_table": "annual_balance_sheet",
         "eligibility": {
             "description": "Stocks with annual_balance_sheet.total_equity + shares_outstanding>0 + a close price",
             "eligible_sql": """
@@ -156,8 +150,6 @@ FACTORS = {
         "weight_key": "piotroski",
         "screener_col": "f_score",
         "family": "Quality",
-        "uhs_tables": ["piotroski_scores"],
-        "freshness_table": "piotroski_scores",
         "eligibility": {
             "description": "Stocks with ≥2 annual periods (YoY F-score baseline), EX-Financials (F-score components are non-financial-firm constructs — mirrors lineage.py sector_exclusions)",
             "eligible_sql": """
@@ -182,8 +174,6 @@ FACTORS = {
         "weight_key": "accruals",
         "replay_col": "accruals_signal",
         "family": "Quality",
-        "uhs_tables": ["piotroski_scores"],
-        "freshness_table": "annual_cash_flow",
         "eligibility": {
             "description": "Stocks with annual_balance_sheet + annual_cash_flow, EX-Financials (banks have no operating accruals — mirrors lineage.py sector_exclusions / config.financial_sectors)",
             "eligible_sql": """
@@ -307,8 +297,6 @@ FACTORS = {
         "pit_range": (-1000, 1000),
         "weight_key": "eps_growth",
         "replay_col": None,  # display-only screener column, no PIT twin
-        "uhs_tables": ["consensus_signals"],
-        "freshness_table": "consensus_signals",
     },
 
     # ═══════════════════════════════════════════════════════════════════
@@ -331,8 +319,6 @@ FACTORS = {
         "weight_key": "momentum",
         "screener_col": "mom_6m",
         "family": "Momentum",
-        "uhs_tables": ["stock_prices"],
-        "freshness_table": "stock_prices",
         "eligibility": {
             "description": "Stocks with ≥126 trading days of price history (~6mo for mom_6m / mom_12m)",
             "eligible_sql": """
@@ -389,8 +375,6 @@ FACTORS = {
         "weight_key": "promoter",
         "replay_col": "promoter_signal",
         "family": "Ownership",
-        "uhs_tables": [],
-        "freshness_table": "shareholding",
         "eligibility": {
             "description": "Stocks with ≥2 quarterly shareholding snapshots (promoter QoQ delta needs prior quarter)",
             "eligible_sql": """
@@ -423,8 +407,6 @@ FACTORS = {
         "pit_range": (0, 1),
         "weights": {"SMALL": 0.10},  # clean t=1.76 — correct sign + orthogonal ownership/stress dim
         "family": "Ownership",
-        "uhs_tables": [],
-        "freshness_table": "shareholding",
     },
     "insider_signal": {
         "label": "Insider Trading Signal",
@@ -502,8 +484,6 @@ FACTORS = {
         "pit_range": (0, 100),
         "weight_key": "smart_money",
         "family": "Microstructure",
-        "uhs_tables": ["stock_prices"],
-        "freshness_table": "stock_prices",
         "eligibility": {
             "description": "Stocks with bulk_deals or delivery activity in last 90d (smart-money signal aggregates both)",
             "eligible_sql": """
@@ -527,8 +507,6 @@ FACTORS = {
         "pit_range": (-5, 5),
         "weights": {"SMALL": 0.26},  # clean t=7.78 (n=107) — the SOLE BY-FDR haircut survivor; the real core
         "family": "Microstructure",
-        "uhs_tables": ["stock_prices"],
-        "freshness_table": "stock_prices",
     },
     "sector_momentum": {
         "label": "Sector Momentum (relative strength vs NIFTY)",
@@ -573,8 +551,6 @@ FACTORS = {
         "pit_range": (-3, 3),
         "weights": {"LARGE": 0.22, "SMALL": 0.16},  # clean t: L 1.58 · S 3.69 (n=41) — orthogonal sector/macro (ADR 0041)
         "family": "Macro",
-        "uhs_tables": ["stock_prices"],
-        "freshness_table": "stock_prices",
     },
     "pcr_oi": {
         "label": "Put-Call Ratio (Open Interest)",
@@ -671,8 +647,6 @@ FACTORS = {
         "pit_range": (-0.5, 0.5),
         "weights": {"MID": 0.26},  # clean t=2.87 — strongest MID, options-implied (ADR 0035)
         "family": "Options",
-        "uhs_tables": [],
-        "freshness_table": "fno_iv_history",
     },
     "iv_term_structure": {
         "label": "IV Term Structure (near − far)",
@@ -895,8 +869,6 @@ FACTORS = {
         "pit_range": (-1, 1),
         "weights": {"LARGE": 0.35, "SMALL": 0.14},  # clean t: L +2.23 (strongest LARGE factor) · S +3.74 — PEAD-via-CAR, orthogonal (ADR 0050)
         "family": "Event",
-        "uhs_tables": ["stock_prices"],
-        "freshness_table": "stock_prices",
         "eligibility": {
             "description": "Stocks with a BSE Result announcement in the trailing ~95d (the CAR staleness gate is 90d + window-close; names without a fresh print have no reading and must not be coverage-penalised for it)",
             "eligible_sql": """
@@ -927,8 +899,6 @@ FACTORS = {
         "pit_range": (0, 12),
         "weights": {"MID": -0.14},  # clean t=−1.55 — event penalty, correct negative sign (ADR 0042)
         "family": "Governance",
-        "uhs_tables": [],
-        "freshness_table": "bse_announcements",
     },
     "earnings_call_tone_qoq": {
         "label": "Earnings-Call Tone QoQ",
@@ -1048,8 +1018,6 @@ FACTORS = {
         "weight_key": "pt_upside",
         "replay_col": None,  # display-only screener column, no PIT twin
         "family": "Analyst",
-        "uhs_tables": ["consensus_signals"],
-        "freshness_table": "consensus_signals",
     },
     "pt_revision_yoy": {
         "label": "PT Revision YoY",
@@ -1096,8 +1064,6 @@ FACTORS = {
         # growth tier blend) that no backtest had validated.
         "screener_col": "eps_revision_yoy",
         "family": "Analyst",
-        "uhs_tables": ["forecast_history"],
-        "freshness_table": "forecast_history",
         "eligibility": {
             "description": "Stocks with Tickertape forward-EPS history (forecast_history metric='eps')",
             "eligible_sql": """

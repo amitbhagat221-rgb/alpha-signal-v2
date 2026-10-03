@@ -19,8 +19,8 @@ def tmpdb(tmp_path, monkeypatch):
             cap_tier TEXT, pe_ratio REAL, pb_ratio REAL, roe REAL, market_cap_cr REAL);
         CREATE TABLE daily_picks (sid TEXT, pick_date TEXT, final_score REAL, rank INTEGER,
             cap_tier TEXT, sector TEXT, base_score REAL, forensic_adj REAL,
-            integrity_status TEXT, uhs_score REAL, uhs_label TEXT, uhs_worst_dim TEXT,
-            uhs_breakdown_json TEXT, PRIMARY KEY (sid, pick_date));
+            integrity_status TEXT, eligible_coverage REAL, weight_coverage REAL, price_rows INTEGER,
+            fundamental_coverage REAL, PRIMARY KEY (sid, pick_date));
         CREATE TABLE daily_snapshots (sid TEXT, snapshot_date TEXT, cap_tier TEXT, close_price REAL,
             piotroski_f INTEGER, cf_accruals REAL, bs_accruals REAL, earnings_yield REAL,
             book_to_price REAL, consensus_signal REAL, promoter_qoq REAL, delivery_pct REAL,
@@ -47,15 +47,15 @@ def test_picks_one_gate(tmpdb):
     _exec(tmpdb, "INSERT INTO stocks (sid, ticker, cap_tier) VALUES (?,?,?)",
           [(s, s, "LARGE") for s in ("OK", "FAIL", "AVOID", "LEGACY", "WARN")])
     _exec(tmpdb, "INSERT INTO daily_picks (sid, pick_date, final_score, rank, cap_tier, "
-                 "integrity_status, uhs_score) VALUES (?,?,?,?,?,?,?)", [
-        ("OK", "2026-09-27", 0.9, 1, "LARGE", "PASS", 80),
-        ("FAIL", "2026-09-27", 0.8, 2, "LARGE", "FAIL", 90),     # integrity FAIL → hidden
-        ("AVOID", "2026-09-27", 0.7, 3, "LARGE", "PASS", 59),    # UHS AVOID band → hidden
-        ("LEGACY", "2026-09-27", 0.6, 4, "LARGE", None, None),   # pre-UHS row → shown
-        ("WARN", "2026-09-27", 0.5, 5, "LARGE", "WARN", 60),     # WARN is surfaced, not gated
-        ("OK", "2026-09-26", 0.9, 1, "LARGE", "PASS", 80),
+                 "integrity_status, eligible_coverage) VALUES (?,?,?,?,?,?,?)", [
+        ("OK", "2026-09-27", 0.9, 1, "LARGE", "PASS", 1.0),
+        ("FAIL", "2026-09-27", 0.8, 2, "LARGE", "FAIL", 1.0),    # integrity FAIL → hidden
+        ("AVOID", "2026-09-27", 0.7, 3, "LARGE", "PASS", 0.62),  # partial data → shown (the screener gated it)
+        ("LEGACY", "2026-09-27", 0.6, 4, "LARGE", None, None),   # pre-integrity row → shown
+        ("WARN", "2026-09-27", 0.5, 5, "LARGE", "WARN", 0.8),    # WARN is surfaced, not gated
+        ("OK", "2026-09-26", 0.9, 1, "LARGE", "PASS", 1.0),
     ])
-    assert views.picks()["sid"].tolist() == ["OK", "LEGACY", "WARN"]
+    assert views.picks()["sid"].tolist() == ["OK", "AVOID", "LEGACY", "WARN"]
     assert views.picks(gated=False)["sid"].tolist() == ["OK", "FAIL", "AVOID", "LEGACY", "WARN"]
     assert views.picks("2026-09-26")["sid"].tolist() == ["OK"]
     assert views.pick_dates(2) == ["2026-09-27", "2026-09-26"]

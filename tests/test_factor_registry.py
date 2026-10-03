@@ -10,7 +10,6 @@ import factors
 from eligibility import registry as eligibility
 import pit
 from tools import backtest_pit, pit_replay
-from scoring import health_score
 
 
 def test_consumers_use_the_registry():
@@ -47,11 +46,10 @@ def test_partition_holds():
 
 def test_wired_factors_follow_weights():
     wired = {k for tw in factors.SIGNAL_WEIGHTS.values() for k, w in tw.items() if w}
-    assert set(health_score.WIRED_FACTORS) == wired
-    for key in wired:   # every wired factor is scored, frozen and trust-rolled-up
+    assert set(factors.wired_weight_keys()) == wired
+    for key in wired:   # every wired factor is scored and frozen (checks/model.py reads the freeze)
         assert key in factors.SCREENER_COLS
         assert factors.SCREENER_COLS[key] in pit_replay.INPUT_COLS
-        assert key in health_score.FACTOR_UPSTREAM_TABLES
         assert factors.status(factors.signal_for(key)) == "WIRED"
 
 

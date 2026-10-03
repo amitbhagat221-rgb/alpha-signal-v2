@@ -41,13 +41,11 @@
             {% if dos.get("conviction") %}
             <span class="stock-badge">{{ dos.conviction }} CONVICTION</span>
             {% endif %}
-            {% if s.uhs and s.uhs.score_pct is not none %}
-                {% set uhs_color = "score-green" if s.uhs.score_pct >= 80 else ("score-amber" if s.uhs.score_pct >= 60 else "score-red") %}
-            <span class="stock-badge {{ uhs_color }}"
-                  title="Unified Health Score (Plan 0007 Phase 1) — Provenance {{ s.uhs.dim_provenance or '-' }} · Freshness {{ s.uhs.dim_freshness or '-' }} · Plausibility {{ s.uhs.dim_plausibility or '-' }} · Consistency {{ s.uhs.dim_consistency or '-' }} · Coverage {{ s.uhs.dim_coverage or '-' }} (each 0-20)"
+            {% if s.data %}
+            <span class="stock-badge score-{{ s.data.colour }}"
+                  title="What the ranking had to work with for this stock: {{ s.data.meaning }}. Details in the Data tab."
                   style="display:inline-flex; align-items:center; gap:4px;">
-                {% if s.uhs.score_pct >= 80 %}🟢{% elif s.uhs.score_pct >= 60 %}🟡{% else %}🔴{% endif %}
-                UHS {{ s.uhs.score_pct }} · {{ s.uhs.label }}
+                Data {{ s.data.score }}% · {{ s.data.word }}
             </span>
             {% endif %}
         </div>
@@ -119,8 +117,8 @@
     <button class="tab-button" :class="{ active: tab === 'consensus' }" @click="tab = 'consensus'; loaded.consensus = true; $nextTick(() => initConsensusCharts())">Consensus</button>
     <button class="tab-button" :class="{ active: tab === 'forensic' }" @click="tab = 'forensic'">Forensic</button>
     <button class="tab-button" :class="{ active: tab === 'price' }" @click="tab = 'price'; loaded.price = true; $nextTick(() => initPriceChart('1y'))">Price &amp; Technicals</button>
-    {% if s.uhs and s.uhs.score_pct is not none %}
-    <button class="tab-button" :class="{ active: tab === 'trust' }" @click="tab = 'trust'">Trust</button>
+    {% if s.data %}
+    <button class="tab-button" :class="{ active: tab === 'data' }" @click="tab = 'data'">Data</button>
     {% endif %}
     {% if s.industry or s.sector %}
     <button class="tab-button" :class="{ active: tab === 'sector' }" @click="tab = 'sector'; loadSector()">{% if s.industry %}Industry{% else %}Sector{% endif %}</button>
@@ -1382,52 +1380,49 @@
 {# ════════════════════════════════════════════ #}
 {# ─────────────── TRUST TAB ───────────────────  #}
 {# ════════════════════════════════════════════ #}
-{% if s.uhs and s.uhs.score_pct is not none %}
-<div x-show="tab === 'trust'" x-cloak>
+{% if s.data %}
+<div x-show="tab === 'data'" x-cloak>
 
+{# One wording everywhere: views.pick_data (ADR 0061). The score is the share of the factor
+   weight that applies to this stock which had a real value — what the pick gate uses. #}
+{% set d = s.data %}
 <div class="card u-mb16">
-    <div class="section-title">Unified Health Score · Plan 0007</div>
-    <div class="section-desc">One number per pick (0-100). Five dimensions sum to the score. Below 60 → AVOID; 60-79 → REVIEW; ≥80 → TRUSTED. Today's pick is read-only — gates run at fetch time and at the nightly UHS rollup.</div>
-
-    {% set u = s.uhs %}
-    {% set uhs_color = "score-green" if u.score_pct >= 80 else ("score-amber" if u.score_pct >= 60 else "score-red") %}
+    <div class="section-title">The data behind this pick</div>
+    <div class="section-desc">Each tier ranks on a fixed set of factors. A factor with no value for a stock is left out of its score, not counted as zero. This number is how much of that factor weight was backed by a real value for {{ s.ticker }}. It says nothing about whether the stock is a good buy.</div>
 
     <div style="display: flex; align-items: center; gap: 24px; margin-top: 18px; margin-bottom: 18px;">
-        <div style="font-size: 56px; font-weight: 800;" class="{{ uhs_color }}">
-            {% if u.score_pct >= 80 %}🟢{% elif u.score_pct >= 60 %}🟡{% else %}🔴{% endif %} {{ u.score_pct }}
-        </div>
+        <div style="font-size: 56px; font-weight: 800;" class="score-{{ d.colour }}">{{ d.score }}%</div>
         <div>
-            <div style="font-size: 22px; font-weight: 700;" class="{{ uhs_color }}">{{ u.label }}</div>
-            <div style="font-size: 12px; color: var(--text-muted); margin-top: 4px;">Pick UHS for {{ s.ticker }} on the latest pick date.</div>
+            <div style="font-size: 22px; font-weight: 700;" class="score-{{ d.colour }}">{{ d.word }}</div>
+            <div style="font-size: 12px; color: var(--text-muted); margin-top: 4px;">{{ d.meaning | capitalize }}.</div>
         </div>
     </div>
 
-    <div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px;">
-        {% for label, key in [
-            ("Provenance",   "dim_provenance"),
-            ("Freshness",    "dim_freshness"),
-            ("Plausibility", "dim_plausibility"),
-            ("Consistency",  "dim_consistency"),
-            ("Coverage",     "dim_coverage"),
-        ] %}
-            {% set v = u[key] %}
-            {% set dim_color = "score-green" if v is not none and v >= 16 else ("score-amber" if v is not none and v >= 12 else ("score-red" if v is not none else "")) %}
-            <div style="background: var(--bg-card-hover); border-radius: 8px; padding: 12px; text-align: center;">
-                <div style="font-size: 10px; color: var(--text-muted); letter-spacing: 0.5px; text-transform: uppercase;">{{ label }}</div>
-                <div style="font-size: 24px; font-weight: 800; margin: 6px 0;" class="{{ dim_color }}">
-                    {% if v is not none %}{{ v }}{% else %}—{% endif %}
-                </div>
-                <div style="font-size: 9.5px; color: var(--text-muted);">/ 20</div>
-            </div>
-        {% endfor %}
-    </div>
-
-    <div style="margin-top: 16px; padding: 12px; background: var(--bg-card-hover); border-radius: 8px; font-size: 11.5px; color: var(--text-secondary); line-height: 1.6;">
-        <b>Score rule</b>: each dim is 0-20. Score = sum of non-NULL dims, normalized to 100. PRELIMINARY = score ≥80 but some dims are NULL (gate from a later phase isn't producing data yet). TRUSTED = score ≥80 with all 5 dims populated.<br>
-        <b>This pick's worst dim</b>: <code style="color: var(--text-primary);">{{ u.reasons or "—" }}</code>
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px;">
+        {% if d.factors_applicable %}
+        <div style="background: var(--bg-card-hover); border-radius: 8px; padding: 12px;">
+            <div style="font-size: 12px; font-weight: 700; color: var(--text-primary);">Factors with a value</div>
+            <div style="font-size: 22px; font-weight: 800; margin: 6px 0 2px;" class="score-{{ d.colour }}">{{ d.factors_used }}<span style="font-size: 11px; font-weight: 500; color: var(--text-muted);"> of {{ d.factors_applicable }}</span></div>
+            <div style="font-size: 10.5px; color: var(--text-muted); line-height: 1.4;">{% if d.missing %}Missing: {{ d.missing | join(', ') }}{% else %}Every factor this tier ranks on had a value.{% endif %}</div>
+        </div>
+        {% endif %}
+        {% if d.price_days is not none %}
+        <div style="background: var(--bg-card-hover); border-radius: 8px; padding: 12px;">
+            <div style="font-size: 12px; font-weight: 700; color: var(--text-primary);">Price history</div>
+            <div style="font-size: 22px; font-weight: 800; margin: 6px 0 2px; color: var(--text-primary);">{{ "{:,}".format(d.price_days) }}<span style="font-size: 11px; font-weight: 500; color: var(--text-muted);"> trading days</span></div>
+            <div style="font-size: 10.5px; color: var(--text-muted); line-height: 1.4;">The gate needs about three months.</div>
+        </div>
+        {% endif %}
+        {% if d.quarters is not none %}
+        <div style="background: var(--bg-card-hover); border-radius: 8px; padding: 12px;">
+            <div style="font-size: 12px; font-weight: 700; color: var(--text-primary);">Fundamentals</div>
+            <div style="font-size: 22px; font-weight: 800; margin: 6px 0 2px; color: var(--text-primary);">{{ d.quarters }}<span style="font-size: 11px; font-weight: 500; color: var(--text-muted);"> of 8 quarters</span></div>
+            <div style="font-size: 10.5px; color: var(--text-muted); line-height: 1.4;">The gate needs four.</div>
+        </div>
+        {% endif %}
     </div>
 </div>
-</div> {# end trust tab #}
+</div> {# end data tab #}
 {% endif %}
 
 </div> {# end alpine wrapper #}

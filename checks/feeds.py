@@ -12,10 +12,6 @@ feed_verdicts()  checks/ verdict rows. Severity follows the tier (plan 0018 §2.
   FEED_CANARY_ERROR     WARN — the canary itself crashed (our bug, not the upstream)
   FEED_CANARY_MISSING   WARN — a T1 feed with no canary verdict in 36 h (T2: 8 days):
                         the canary cron is dead or skipped it
-  FEED_ORPHAN           WARN — a live feed nothing schedules (class H)
-  FEED_NO_FALLBACK      WARN — a T1 feed with neither a live fallback nor a serve-stale limit
-  FEED_SINGLE_SOURCE    INFO — a T1 feed that can only serve stale (page, not email)
-  FEED_REGISTRY_DRIFT   WARN — a source module / source step / RAW table no feed covers
   FEED_VOLUME_DROP      a stable step wrote < 0.6× its trailing-20 median rows (T1 < 0.25× →
                         CRITICAL, else WARN). "Stable" is self-calibrated: only steps whose own
                         history falls below 0.6× in ≤ 5% of runs are judged (news, corporate
@@ -23,10 +19,15 @@ feed_verdicts()  checks/ verdict rows. Severity follows the tier (plan 0018 §2.
   FEED_VOLUME_SPIKE     WARN — > 3× the median (duplicate writes, a changed unit of work)
   FEED_RECONCILE_FAIL   Gate 3 (tools/reconcile.py): this feed disagrees with an independent
                         source — T1 CRITICAL on FAIL, WARN on WARN
+
+Not verdicts (ADR 0060): an unscheduled feed, a T1 feed without a fallback and an
+unregistered module / step / table are facts of the registry. They can only change
+when feeds.py changes, so tests/test_feeds.py holds them; registry_drift() below is
+the same rule for the Data Supply page.
 """
 
 import json
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from checks import CRITICAL, FAIL, INFO, WARN, verdict
 
@@ -200,7 +201,18 @@ def _age_hours(ts):
         return None
 
 
-def feed_verdicts(rows, drift=None, now=None):
+def _reconcile_detail(detail):
+    """tools/reconcile's JSON detail in words: how many agree, and the worst few."""
+    try:
+        d = json.loads(detail or "")
+        worst = ", ".join(f"{w[0]} ({w[1]:g} vs {w[2]:g})" for w in (d.get("worst") or [])[:3])
+        return (f"{d['agree_share']:.0%} of {d['compared']} stocks agree with {d['against']} "
+                f"(within {d['tolerance']:.1%})" + (f"; worst: {worst}" if worst else ""))
+    except (ValueError, KeyError, TypeError, IndexError):
+        return (detail or "")[:240]
+
+
+def feed_verdicts(rows):
     """Verdict rows from feed_state() rows (plan 0018 §2.2 severities)."""
     import feeds
     out = []
@@ -217,21 +229,21 @@ def feed_verdicts(rows, drift=None, now=None):
                 repeat = prev is not None and prev["status"] == "FAIL"
                 sev = CRITICAL if t1 and (sym in ("C", "D") or repeat) else WARN
                 out.append(verdict(f"FEED_CANARY_FAIL:{name}", name, sev, FAIL, bad, code="FEED_CANARY_FAIL",
-                                   message=f"{name} ({tier}) canary FAILED — class {sym} {label}"
+                                   message=f"{name} ({tier}) probe failed: {label or 'unclassified'}"
                                            + (" (2nd in a row)" if repeat else "")))
             elif st == "WARN":
                 out.append(verdict(f"FEED_CANARY_WARN:{name}", name, WARN if t1 else INFO, FAIL, bad,
-                                   code="FEED_CANARY_WARN", message=f"{name} ({tier}) canary WARN — class {sym} {label}"))
+                                   code="FEED_CANARY_WARN", message=f"{name} ({tier}) probe passed with a warning: {label or 'unclassified'}"))
             elif st == "ERROR":
                 out.append(verdict(f"FEED_CANARY_ERROR:{name}", name, WARN, FAIL, bad, code="FEED_CANARY_ERROR",
-                                   message=f"{name} canary crashed (canary code, not the upstream)"))
+                                   message=f"{name}: the probe itself crashed (our code, not the upstream)"))
         if r["canary"]:
             age = _age_hours(last["checked_at"]) if last is not None else None
             if age is None or age > MISSING_HOURS[tier]:
                 out.append(verdict(f"FEED_CANARY_MISSING:{name}", name, WARN, FAIL,
                                    "never probed" if age is None else f"last canary {age:.0f} h ago",
                                    code="FEED_CANARY_MISSING",
-                                   message=f"{name} ({tier}) has no recent canary verdict — is `run.sh canary` running?"))
+                                   message=f"{name} ({tier}) has no recent probe result"))
         for step, b in (r.get("volume") or {}).items():
             if not b["stable"]:
                 continue
@@ -249,21 +261,7 @@ def feed_verdicts(rows, drift=None, now=None):
         rec = r.get("reconcile")
         if rec and rec.get("status") in ("FAIL", "WARN"):
             sev = CRITICAL if (t1 and rec["status"] == "FAIL") else WARN
-            out.append(verdict(f"FEED_RECONCILE_FAIL:{name}", name, sev, FAIL, (rec.get("detail") or "")[:240],
+            out.append(verdict(f"FEED_RECONCILE_FAIL:{name}", name, sev, FAIL, _reconcile_detail(rec.get("detail")),
                                code="FEED_RECONCILE_FAIL",
-                               message=f"{name} ({tier}) disagrees with an independent source — "
-                                       f"cross-source check {rec['status']}"))
-        if not r["schedule"]:
-            out.append(verdict(f"FEED_ORPHAN:{name}", name, WARN, FAIL, r.get("notes") or "",
-                               code="FEED_ORPHAN", message=f"{name} is live but nothing schedules it (class H)"))
-        if t1 and r["resilience"] == "none":
-            out.append(verdict(f"FEED_NO_FALLBACK:{name}", name, WARN, FAIL, r.get("fallback_plan") or "",
-                               code="FEED_NO_FALLBACK", message=f"{name} (T1) has no fallback and no serve-stale limit"))
-        elif t1 and r["resilience"] == "serve-stale":
-            out.append(verdict(f"FEED_SINGLE_SOURCE:{name}", name, INFO, FAIL, r.get("fallback_plan") or "",
-                               code="FEED_SINGLE_SOURCE",
-                               message=f"{name} (T1) is single-source — serves stale ≤{r['serve_stale_days']}d if it dies"))
-    for what, name in (drift if drift is not None else registry_drift()):
-        out.append(verdict(f"FEED_REGISTRY_DRIFT:{what}:{name}", name, WARN, FAIL, what,
-                           code="FEED_REGISTRY_DRIFT", message=f"{what} {name} is not covered by any feed (feeds.py)"))
+                               message=f"{name} ({tier}) disagrees with an independent source"))
     return out

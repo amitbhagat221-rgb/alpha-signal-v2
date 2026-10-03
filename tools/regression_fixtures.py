@@ -198,63 +198,6 @@ def bug_2026_05_29_watchdog_check_constraint_crash() -> bool:
     return True
 
 
-def bug_2026_05_30_external_anchor_drift_synthetic() -> bool:
-    """Phase 6 Gate 7 regression fixture. Deliberately corrupt a yfinance close
-    by 5% off the NSE bhavcopy anchor; audit_drift() must catch it (write
-    gate_7_anchor=0 verdict) and the live row must NOT pass.
-
-    Synthetic rows only — runs in the scratch DB (_use_scratch_db).
-    """
-    from db import get_db, read_sql
-    from tools.anchor_audit import audit_drift
-
-    # Use a real SID (FK constraint to stocks) — and a far-past date to avoid
-    # collision with real stock_prices history.
-    test_sid = "RELI"
-    test_date = "1999-01-15"
-
-    # Cleanup from any prior run
-    with get_db() as conn:
-        conn.execute("DELETE FROM external_anchors WHERE sid_or_segment=?", (test_sid,))
-        conn.execute("DELETE FROM trust_verdicts WHERE sid=?", (test_sid,))
-        conn.execute("DELETE FROM stock_prices WHERE sid=? AND date=?", (test_sid, test_date))
-
-    # Seed anchor + corrupted yfinance row
-    with get_db() as conn:
-        conn.execute(
-            """INSERT INTO external_anchors
-               (datum_class, sid_or_segment, anchor_value, anchor_source, anchor_date)
-               VALUES ('close', ?, 1000.0, 'nse_bhavcopy', ?)""",
-            (test_sid, test_date),
-        )
-        # yfinance row 5% off (>0.5% tolerance → DRIFT)
-        conn.execute(
-            """INSERT INTO stock_prices (sid, date, open, high, low, close, volume, source)
-               VALUES (?, ?, 1050.0, 1060.0, 1040.0, 1050.0, 100000, 'yfinance.NS')""",
-            (test_sid, test_date),
-        )
-
-    counts = audit_drift(test_date)
-    assert counts["drifted"] >= 1, (
-        f"anchor-drift regression: expected ≥1 drift, got {counts['drifted']}"
-    )
-
-    with get_db() as conn:
-        v = conn.execute(
-            "SELECT gate_7_anchor, verdict_overall FROM trust_verdicts WHERE sid=?",
-            (test_sid,),
-        ).fetchone()
-        assert v is not None, "no trust_verdicts row for poisoned SID"
-        assert v[0] == 0, f"gate_7_anchor should be 0 (FAIL), got {v[0]}"
-        assert v[1] == "QUARANTINED", f"verdict_overall should be QUARANTINED, got {v[1]}"
-
-        # Cleanup
-        conn.execute("DELETE FROM external_anchors WHERE sid_or_segment=?", (test_sid,))
-        conn.execute("DELETE FROM trust_verdicts WHERE sid=?", (test_sid,))
-        conn.execute("DELETE FROM stock_prices WHERE sid=? AND date=?", (test_sid, test_date))
-    return True
-
-
 def bug_2026_05_29_dossier_mm_regex_false_positive() -> bool:
     """The dossier-hygiene regex misfired on 'M&M' (Mahindra & Mahindra)
     flagging it as a CRITICAL hallucination. Fix tightened the rupee-symbol
@@ -274,47 +217,25 @@ def bug_2026_05_29_dossier_mm_regex_false_positive() -> bool:
 
 
 def bug_2026_05_23_forecast_history_contamination() -> bool:
-    """Tickertape returned today's close as 'historic PT' in forecastsHistory.price.
-    Phase 4 Gate 4 (Cross-Source) catches: a 'tickertape_forecast_history' PT
-    value that matches stock_prices.close within 5% gets DIVERGENT_SILENT,
-    quarantined.
-
-    Fixture feeds the gate a poisoned row (PT==close==1000) and asserts
-    DIVERGENT_SILENT verdict. Backstop: also asserts the existing
-    FORECAST_HISTORY_IS_PRICE_HISTORY data_sanity check still exists.
+    """Tickertape returned today's close as 'historic PT' in forecastsHistory.price,
+    and the year-end entries turned out to be the realised year-ahead close
+    (ADR 0045). The fix: the extractor never emits the price metric at all. The
+    cross-source gate that used to catch the symptom was retired (ADR 0061); this
+    fixture guards the cause.
     """
-    from validators.cross_source import verify_cross_source
+    from sources.tickertape_analyst import _extract_forecast_rows
 
-    # Test SID — use a real SID so the latest-close lookup succeeds.
-    # Pick a known-active LARGE: RELI (Reliance).
-    from db import read_sql
-    df = read_sql("SELECT close FROM stock_prices WHERE sid='RELI' ORDER BY date DESC LIMIT 1")
-    if df.empty:
-        # Can't test without a live close; pass with a warning.
-        return True
-    close = float(df.iloc[0]["close"])
-
-    # Poison: PT equals close (the bug pattern)
-    v = verify_cross_source(
-        sid="RELI", datum_class="pt_target_price",
-        new_value=close * 1.02,  # within 5% of close
-        new_source="tickertape_forecast_history",
-        peer_values=[close * 1.20, close * 1.15],  # legitimate analyst peers say +20%
+    data = {"props": {"pageProps": {"forecastsHistory": {
+        "price": [{"date": "2025-12-27T00:00:00", "value": 1000.0}, {"date": "2026-05-23T00:00:00", "value": 1012.5}],
+        "eps": [{"date": "2025-12-27T00:00:00", "value": 61.2, "change": 4.1}],
+        "revenue": [{"date": "2025-12-27T00:00:00", "value": 9100.0, "change": 7.0}],
+    }}}}
+    rows = _extract_forecast_rows("RELI", data, "2026-05-23 03:30:00")
+    metrics = sorted({r["metric"] for r in rows})
+    assert metrics == ["eps", "revenue"], (
+        f"forecast_history-class regression: extractor emitted metrics {metrics}; "
+        "the 'price' series must never be ingested (ADR 0045)"
     )
-    assert v.status == "DIVERGENT_SILENT", (
-        f"forecast_history-class regression: PT={close*1.02:.0f} vs close={close:.0f} "
-        f"(2% diff) should be DIVERGENT_SILENT (PT_EQUALS_PRICE pattern); "
-        f"got {v.status} — {v.reason}"
-    )
-    # Backstop — the existing data_sanity check stays as offline auditor
-    try:
-        from tools.data_sanity import CHECKS
-        check_codes = {c.get("code") for c in CHECKS}
-        assert "FORECAST_HISTORY_IS_PRICE_HISTORY" in check_codes, (
-            "data_sanity check FORECAST_HISTORY_IS_PRICE_HISTORY missing — should be retained as offline auditor"
-        )
-    except Exception:
-        pass  # Sanity check missing isn't a regression by itself
     return True
 
 
@@ -329,7 +250,6 @@ FIXTURES: dict[str, Callable[[], bool]] = {
     "bug_2026_05_29_financial_signal_tier_direction_flip": bug_2026_05_29_financial_signal_tier_direction_flip,
     "bug_2026_05_29_watchdog_check_constraint_crash":    bug_2026_05_29_watchdog_check_constraint_crash,
     "bug_2026_05_29_dossier_mm_regex_false_positive":    bug_2026_05_29_dossier_mm_regex_false_positive,
-    "bug_2026_05_30_external_anchor_drift_synthetic":    bug_2026_05_30_external_anchor_drift_synthetic,
 }
 
 

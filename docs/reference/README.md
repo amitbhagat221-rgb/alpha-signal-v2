@@ -9,6 +9,7 @@ How specific things work. Update a file when the underlying thing changes. Don't
 | [signal-weights.md](signal-weights.md) | Validated signal map (t-stats per tier), wired weights, promotion rules |
 | [cockpit.md](cockpit.md) | Cockpit pages, routes, components, colour tokens |
 | [commands.md](commands.md) | Most-used CLI commands |
+| [health-checks.md](health-checks.md) | The five health questions, the three severities, where a check lives, how to add one, the data-trust score in plain words |
 | [kite-setup.md](kite-setup.md) | Zerodha Kite Connect setup |
 | [oss-quant-toolbox.md](oss-quant-toolbox.md) | Open-source libraries mapped to our gaps (step 0 of plan 0014) |
 

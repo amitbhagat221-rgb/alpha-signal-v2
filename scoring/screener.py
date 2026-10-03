@@ -272,11 +272,13 @@ def score_universe(df, weights: dict = None, as_of=None):
     return df
 
 
-MIN_ELIGIBLE_COVERAGE = 0.60  # ≥60% of the SID's ELIGIBLE signal weight produced output
-MIN_WEIGHT_COVERAGE = 0.50    # ≥50% of TIER TOTAL weight (legacy floor — defence in depth)
-MIN_PRICE_ROWS = 60           # ≈3 months of trading days
-MIN_FUNDAMENTAL_COVERAGE = 0.50  # ≥4 of 8 quarterly_income rows (INPUT-side, added 2026-05-24)
-# Thresholds + rationale: docs/decisions/0021-pick-eligibility-gate.md
+# The gate's thresholds live once in config.PICK_GATE (ADR 0021 for the rationale);
+# views.pick_data describes a pick's data against the same numbers.
+from config import PICK_GATE
+MIN_ELIGIBLE_COVERAGE = PICK_GATE["min_eligible_coverage"]      # share of the SID's ELIGIBLE signal weight that produced output
+MIN_WEIGHT_COVERAGE = PICK_GATE["min_weight_coverage"]          # share of TIER TOTAL weight (legacy floor — defence in depth)
+MIN_PRICE_ROWS = PICK_GATE["min_price_rows"]                    # ≈3 months of trading days
+MIN_FUNDAMENTAL_COVERAGE = PICK_GATE["min_fundamental_coverage"]  # 4 of 8 quarterly_income rows (INPUT-side, added 2026-05-24)
 # Plan 0005 Phase A.5 (2026-05-24): primary gate switched to eligible_coverage.
 # A SMALL cap with no analyst attribution that scores well on its 6 ELIGIBLE
 # signals is no longer punished for missing consensus (which was never going
@@ -474,18 +476,6 @@ def compute(dry_run=False, top=None, variant: str = "production"):
 
     rows = upsert_df(picks_out, "daily_picks")
     print(f"\nSaved {rows} rows to daily_picks (date={pick_date})")
-
-    # Plan 0007 Phase 5 — write per-pick UHS (uhs_score / uhs_label /
-    # uhs_breakdown_json / uhs_worst_dim) for every row just landed.
-    # Reads health_score for input factors + signal_lineage for Gate 6
-    # coverage. Non-critical: a UHS write failure must NOT block the
-    # primary pick write that just succeeded.
-    try:
-        from scoring.confidence import batch_write_pick_uhs
-        batch_write_pick_uhs(pick_date)
-    except Exception as e:
-        import sys
-        print(f"  ⚠ pick UHS write failed (non-critical): {e}", file=sys.stderr)
 
     return rows
 

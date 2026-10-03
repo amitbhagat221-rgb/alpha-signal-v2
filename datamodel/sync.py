@@ -1100,6 +1100,14 @@ def sync_ops(c, full):
                             r["started_at"] or r["finished_at"] or NOW, r["finished_at"], _clean(r["rows_affected"]), r["error_message"],
                             json.dumps({"from": "pipeline_log", "log_id": int(r["id"]), "duration_sec": _clean(r["duration_sec"])})))
             n_sr = c.executemany("INSERT OR IGNORE INTO step_runs VALUES (?,?,?,?,?,?,?,?,?)", out).rowcount
+        # A step that was still RUNNING when an earlier sync read the log was mirrored as an
+        # orphan. Once its terminal row exists it is not one: drop the stale orphan (the
+        # terminal row is mirrored as its own attempt). Without this, every step caught
+        # mid-run left one extra step_runs row and pipeline_log parity failed for good.
+        c.execute("""DELETE FROM step_runs WHERE status = 'RUNNING(orphan)' AND json_extract(attrs, '$.from') = 'pipeline_log'
+                     AND EXISTS (SELECT 1 FROM pipeline_log p JOIN pipeline_log t
+                                   ON t.step_name = p.step_name AND t.started_at IS p.started_at AND t.status <> 'RUNNING'
+                                 WHERE p.id = CAST(json_extract(step_runs.attrs, '$.log_id') AS INTEGER))""")
         # PIT reconstructions and LLM batch logs → their own runs
         ensure_runs(c, "reconstruct", "SELECT DISTINCT substr(started_at, 1, 10) FROM pit_reconstruction_log", official=0)
         n_rc = c.execute(f"""INSERT OR IGNORE INTO step_runs(run_id, step, attempt, status, started_at, finished_at, rows, error, attrs)

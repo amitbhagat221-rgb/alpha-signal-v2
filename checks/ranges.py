@@ -16,6 +16,10 @@ A spec is a dict with exactly one of:
 and optionally
     typical: (lo, hi)      plausibility's review band: inside `range` but outside
                            `typical` = unusual but possibly real (PENDING_REVIEW)
+    may_be_empty: <why>    the column is declared but nothing fills it yet: its rule
+                           is ready for the write-time gate, and the daily check
+                           finding zero values is expected, not a silent check.
+                           Remove it the day a source fills the column.
 
 NULL always passes (missing data is the null-rate check's business). Numeric
 bounds carry a 1e-9 tolerance so float round-off (a weighted average of ranks
@@ -52,11 +56,11 @@ COLUMNS = {
     # all-time worst GNPA was ~24%; RBI mandates CAR >= 9%.
     ("banking_metrics", "gross_npa_pct"): {"range": (0, 35), "typical": (0, 20)},
     ("banking_metrics", "net_npa_pct"): {"range": (0, 15), "typical": (0, 8)},
-    ("banking_metrics", "nim_pct"): {"range": (-2, 20), "typical": (0, 10)},
+    ("banking_metrics", "nim_pct"): {"range": (-2, 20), "typical": (0, 10), "may_be_empty": "no source fills it yet (banking plan 2.2c: RBI disclosures)"},
     ("banking_metrics", "cost_of_funds_pct"): {"range": (0, 25), "typical": (3, 15)},
-    ("banking_metrics", "roa_pct"): {"range": (-10, 8), "typical": (-3, 3)},
-    ("banking_metrics", "car_pct"): {"range": (5, 35), "typical": (8, 25)},
-    ("banking_metrics", "casa_pct"): {"range": PCT, "typical": (10, 80)},
+    ("banking_metrics", "roa_pct"): {"range": (-10, 8), "typical": (-3, 3), "may_be_empty": "no source fills it yet (banking plan 2.2c: RBI disclosures)"},
+    ("banking_metrics", "car_pct"): {"range": (5, 35), "typical": (8, 25), "may_be_empty": "no source fills it yet (banking plan 2.2c: RBI disclosures)"},
+    ("banking_metrics", "casa_pct"): {"range": PCT, "typical": (10, 80), "may_be_empty": "no source fills it yet (banking plan 2.2c: RBI disclosures)"},
 
     # ── Trades ──
     ("insider_trades", "value_lakhs"): {"min": 0},

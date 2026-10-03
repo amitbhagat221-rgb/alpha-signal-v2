@@ -189,12 +189,37 @@ def route_on_plausibility(
     return "PASS_THROUGH"
 
 
+# A STORED analyst target is unusable when it sits outside this multiple of the
+# latest close (the SMALL hard cap of pt_upside_pct, as a ratio). The ONE rule for
+# what may sit in analyst_consensus.price_target: both writers (the Yahoo sweep,
+# the Moneycontrol broker aggregate) and the health check ANALYST_TARGET_IMPLAUSIBLE.
+PT_CLOSE_RATIO = (0.33, 3.0)
+
+
+def pt_implausible(price_target, close) -> bool:
+    """True when a stored target cannot be real against `close` (None / NaN / no close: False)."""
+    try:
+        pt, px = float(price_target), float(close)
+    except (TypeError, ValueError):
+        return False
+    if pt != pt or px != px or px <= 0:
+        return False
+    lo, hi = PT_CLOSE_RATIO
+    return pt > hi * px or pt < lo * px
+
+
+def pt_implausible_sql(pt_col, close_col) -> str:
+    """The same rule as a SQL predicate over two column expressions."""
+    lo, hi = PT_CLOSE_RATIO
+    return f"({pt_col} > {hi} * {close_col} OR {pt_col} < {lo} * {close_col})"
+
+
 def record_pt_plausibility_fail(sid, snapshot_date, reason, source_table="consensus_signals"):
     """Record a per-sid gate_2_plausibility=0 verdict for an implausible PT.
 
     Lightweight verdict-only write (no quarantine-table row) used by the stored-
-    PT sweep — so the stock's per-sid UHS Plausibility dim drops to reflect the
-    rejected target. Idempotent per (sid, source_table, datum_class, snapshot)."""
+    PT sweep and the broker aggregate, so a rejected target leaves a trace in
+    trust_verdicts. Idempotent per (sid, source_table, datum_class, snapshot)."""
     import json
     from validators._verdicts import write_verdict
     write_verdict("gate_2_plausibility", sid, source_table, "pt_upside_pct", 0,

@@ -235,8 +235,15 @@ def checks(c):
            _one(c, "SELECT COUNT(*) FROM pit_ic_by_tier_v2")[0] + _one(c, "SELECT COUNT(*) FROM factor_horizon_gate")[0],
            *_one(c, "SELECT COUNT(*) FROM factor_tests"), None, None, "")
     # ops
-    yield ("pipeline_log", *_one(c, """SELECT COUNT(*) FROM pipeline_log p WHERE status <> 'RUNNING' OR NOT EXISTS
-               (SELECT 1 FROM pipeline_log t WHERE t.step_name=p.step_name AND t.started_at IS p.started_at AND t.status <> 'RUNNING')"""),
+    # Only the rows the sync has seen: its own SUCCESS row (and every cron job after it) is
+    # logged after the sync read the table, so an unbounded count is always one ahead and this
+    # parity could never pass (off by exactly 1 on 2026-10-02 and -03). The same bound applies
+    # to the "has a terminal twin" test: the sync saw its own RUNNING row as an orphan.
+    seen = _one(c, """SELECT COALESCE(MAX(CAST(json_extract(attrs, '$.log_id') AS INTEGER)), 0) FROM step_runs
+                      WHERE json_extract(attrs, '$.from')='pipeline_log'""")[0]
+    yield ("pipeline_log", *_one(c, f"""SELECT COUNT(*) FROM pipeline_log p WHERE p.id <= {seen} AND (status <> 'RUNNING' OR NOT EXISTS
+               (SELECT 1 FROM pipeline_log t WHERE t.id <= {seen} AND t.step_name=p.step_name AND t.started_at IS p.started_at
+                  AND t.status <> 'RUNNING'))"""),
            *_one(c, "SELECT COUNT(*) FROM step_runs WHERE json_extract(attrs, '$.from')='pipeline_log'"), None, None, "terminal rows + orphans")
     yield ("pit_reconstruction_log", *_one(c, "SELECT COUNT(*) FROM pit_reconstruction_log"),
            *_one(c, "SELECT COUNT(*) FROM step_runs WHERE json_extract(attrs, '$.from')='pit_reconstruction_log'"), None, None, "")

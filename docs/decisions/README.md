@@ -19,7 +19,7 @@ Read part (a) to know what is true **now**; use part (b) to find any ADR by numb
 | Financials | [0048](0048-financials-rank-generic-not-submodel.md) | Generic screener; `accruals` + `piotroski` INELIGIBLE for Financials; `financial_signal_scores` display-only ([0030](../_archive/decisions/0030-banking-metrics-screener-first.md), [0032](../_archive/decisions/0032-tier-direction-flip-split-signal.md) archived) |
 | Factor promotion gate | [0017](0017-factor-library-two-tier-registry.md) · [0022](0022-per-factor-backtest-cadence-newey-west.md) · [0036](0036-horizon-resolved-factor-evaluation.md) → [0038](0038-horizon-resolved-promotion-gate.md) · [0043](0043-multiple-testing-aware-factor-significance.md) | Every factor registered and backtested at its own cadence with Newey-West errors; net-of-cost horizon gate; multiple-testing haircut (\|t\|≥2.5 is necessary, not sufficient); weights stay a human decision |
 | Production weights | [0049](0049-honest-weight-rederivation.md) · [0050](0050-wire-announcement-car.md) · [0041](0041-sector-tilt-backtest-gated-small-only.md) | Weights re-derived on clean data under five rules; `announcement_car` wired LARGE+SMALL; sector tilt backtest-gated ([0028](../_archive/decisions/0028-two-variant-factor-model.md) variants archived) |
-| Trust & observability | [0019](0019-observability-sensor-surface-alert.md) · [0023](0023-health-center-cockpit-as-single-window.md) · [0024](0024-per-signal-eligibility-and-per-stock-integrity.md) · [0025](0025-pit-replay-validator.md) · [0027](0027-per-stock-data-lineage.md) · [0033](0033-trust-pipeline-uhs.md) · [0037](0037-per-stock-uhs-and-pt-plausibility.md) | Sensor → sanity → surface → alert; cockpit Health Center is the single window; 7-gate trust pipeline + per-stock UHS; lineage registry; PIT-replay pre-push gate |
+| Trust & observability | [0019](0019-observability-sensor-surface-alert.md) · [0023](0023-health-center-cockpit-as-single-window.md) · [0024](0024-per-signal-eligibility-and-per-stock-integrity.md) · [0025](0025-pit-replay-validator.md) · [0027](0027-per-stock-data-lineage.md) · [0033](0033-trust-pipeline-uhs.md) · [0037](0037-per-stock-uhs-and-pt-plausibility.md) · [0059](0059-health-five-questions-one-issue-list.md) · [0060](0060-a-check-must-be-able-to-fail.md) · [0061](0061-retire-uhs-and-dead-gates.md) | Sensor → sanity → surface → alert; every check answers one of five questions and all surfaces render one issue list; cockpit Health Center is the single window; every check proves it can fire; two write-time gates (identity, plausibility), the per-pick number is factor coverage (UHS retired); lineage registry; PIT-replay pre-push gate |
 | Portfolio construction | [0044](0044-hrp-over-mean-variance-portfolio.md) · [0046](0046-banded-rebalancing.md) | HRP, no µ input; banded rebalancing (enter top-5, exit below rank 8) |
 | Multibagger | [0039](0039-multibagger-funnel-regime-dominated.md) → [0040](0040-multibagger-holding-not-selection.md) | Separate screen, out of `daily_picks`; selection is closed, the product is a holding/conviction monitor on a gated pool |
 | Cockpit & UX | [0008](0008-cockpit-write-surface.md) · [0013](0013-industry-not-sector-as-drill-unit.md) · [0014](0014-llm-sourced-competitive-landscape.md) · [0029](0029-mf-investable-only-default.md) | Guarded write surface (step rerun); industry is the drill unit; LLM competitive landscape; MF view defaults to investable-only |
@@ -64,11 +64,11 @@ Status key: **A** accepted · **P→N** partly superseded by N · **S→N** supe
 | 0030 | [Banking metrics: Screener.in first (archived)](../_archive/decisions/0030-banking-metrics-screener-first.md) | M→0048 |
 | 0031 | [DuckDB read replica](0031-duckdb-read-replica.md) | A |
 | 0032 | [Tier direction-flip split signal (archived)](../_archive/decisions/0032-tier-direction-flip-split-signal.md) | M→0048 |
-| 0033 | [Trust Pipeline + UHS](0033-trust-pipeline-uhs.md) | A |
+| 0033 | [Trust Pipeline + UHS](0033-trust-pipeline-uhs.md) | S→0061 (gates 1–2 remain) |
 | 0034 | [F&O OI data model](0034-fno-oi-data-model.md) | A |
 | 0035 | [F&O IV derived from bhavcopy](0035-fno-iv-derived-from-bhav.md) | A |
 | 0036 | [Horizon-resolved factor evaluation](0036-horizon-resolved-factor-evaluation.md) | A (gate part realized by 0038) |
-| 0037 | [Per-stock UHS + PT plausibility](0037-per-stock-uhs-and-pt-plausibility.md) | A |
+| 0037 | [Per-stock UHS + PT plausibility](0037-per-stock-uhs-and-pt-plausibility.md) | S→0061 (PT plausibility sweep remains) |
 | 0038 | [Horizon-resolved promotion gate](0038-horizon-resolved-promotion-gate.md) | A |
 | 0039 | [Multibagger funnel, regime-dominated](0039-multibagger-funnel-regime-dominated.md) | A (extended by 0040) |
 | 0040 | [Multibagger: holding, not selection](0040-multibagger-holding-not-selection.md) | A |
@@ -88,3 +88,6 @@ Status key: **A** accepted · **P→N** partly superseded by N · **S→N** supe
 | 0054 | [Tables grow with concepts, not things](0054-tables-grow-with-concepts.md) | A (plan 0017) |
 | 0055 | [Data supply: feeds, canaries, run log](0055-data-supply-feeds-canaries-runlog.md) | A (plan 0018) |
 | 0056 | [LLM work runs on a local subscription worker through a validated queue](0056-llm-work-local-worker-queue.md) | A (plan 0016) |
+| 0059 | [Health is five questions and one issue list](0059-health-five-questions-one-issue-list.md) | A |
+| 0060 | [A daily check must be able to fail, and prove it](0060-a-check-must-be-able-to-fail.md) | A |
+| 0061 | [Retire the UHS trust score and the dead gates; the data behind a pick is its factor coverage](0061-retire-uhs-and-dead-gates.md) | A (supersedes 0033, 0037) |

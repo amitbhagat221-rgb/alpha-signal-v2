@@ -268,7 +268,12 @@ def _chk(status, sym=None, hours=1):
 
 def _sev(rows, code):
     from checks.feeds import feed_verdicts
-    return [v["severity"] for v in feed_verdicts(rows, drift=[]) if v["code"] == code]
+    return [v["severity"] for v in feed_verdicts(rows) if v["code"] == code]
+
+
+def feed_verdicts_codes(rows):
+    from checks.feeds import feed_verdicts
+    return [v["code"] for v in feed_verdicts(rows)]
 
 
 def test_verdict_severities():
@@ -280,9 +285,8 @@ def test_verdict_severities():
     assert _sev([_row(tier="T2", last=_chk("WARN", "B"))], "FEED_CANARY_WARN") == [INFO]
     assert _sev([_row(last=_chk("PASS", hours=48))], "FEED_CANARY_MISSING") == [WARN]
     assert _sev([_row(tier="T2", last=_chk("PASS", hours=48))], "FEED_CANARY_MISSING") == []
-    assert _sev([_row(last=_chk("PASS"), schedule=())], "FEED_ORPHAN") == [WARN]
-    assert _sev([_row(last=_chk("PASS"), resilience="none")], "FEED_NO_FALLBACK") == [WARN]
-    assert _sev([_row(last=_chk("PASS"), resilience="serve-stale")], "FEED_SINGLE_SOURCE") == [INFO]
+    # registry facts (unscheduled, no fallback) are tests above, never daily verdicts (ADR 0060)
+    assert feed_verdicts_codes([_row(last=_chk("PASS"), schedule=(), resilience="none")]) == []
     assert _sev([_row(last=_chk("ERROR"))], "FEED_CANARY_ERROR") == [WARN]
 
 

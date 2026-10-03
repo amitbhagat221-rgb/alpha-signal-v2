@@ -8,7 +8,11 @@ IC comparison: the last 12 anchors vs the factor's full history. Flags
 DECAYED when the recent window's sign no longer matches the wired weight's
 sign, or its magnitude has fallen below a quarter of the all-time mean —
 the pattern the audit found in governance_resignation (yearly IC swung
-−0.081 → −0.002, sign-adjacent to zero, while the wired weight is negative).
+−0.081 → −0.002, sign-adjacent to zero, while the wired weight is negative) —
+AND the recent mean sits at least DECAY_MIN_SE standard errors below the
+all-time mean. Twelve anchors of a weak factor flip sign by chance about one
+time in three: without the second condition 8 of 16 weights were flagged every
+day for 89 days (2026-10-02), 5 of them inside sampling noise.
 
 Per-anchor IC uses the SAME helper as tools/backtest_pit.py (Spearman IC of
 the factor's v2 PIT column vs fwd_return_20d, min 20 stocks/anchor) — no
@@ -35,6 +39,7 @@ WEIGHT_KEY_TO_SIGNAL = factors.WEIGHT_KEY_TO_SIGNAL
 
 RECENT_WINDOW = 12
 DECAY_MAGNITUDE_FLOOR = 0.25   # last-12 |mean IC| < 25% of all-time |mean IC| → decayed
+DECAY_MIN_SE = 2.0             # …and the drop is at least this many standard errors of the recent mean
 
 
 def _factor_ic_series(v2_col, cap_tier):
@@ -93,12 +98,17 @@ def analyze():
             sign_recent = 1 if ic_recent > 0 else (-1 if ic_recent < 0 else 0)
             sign_mismatch = sign_recent != 0 and sign_recent != sign_wired
             magnitude_collapsed = abs(ic_all) > 1e-9 and abs(ic_recent) < DECAY_MAGNITUDE_FLOOR * abs(ic_all)
-            decayed = bool(sign_mismatch or magnitude_collapsed)
+            # how far the recent mean is below the all-time mean, in the wired direction,
+            # in standard errors of the recent mean (None: too few anchors to say)
+            se = float(ics_recent.std(ddof=1) / np.sqrt(n_recent)) if n_recent >= 3 else 0.0
+            gap_se = sign_wired * (ic_all - ic_recent) / se if se > 0 else None
+            decayed = bool((sign_mismatch or magnitude_collapsed) and gap_se is not None and gap_se >= DECAY_MIN_SE)
 
             rows.append({
                 "tier": tier, "weight_key": weight_key, "signal_id": signal_id,
                 "weight": weight, "n_all": n_all, "n_recent": n_recent,
                 "ic_all": round(ic_all, 4), "ic_recent": round(ic_recent, 4),
+                "gap_se": None if gap_se is None else round(gap_se, 1),
                 "decayed": decayed,
                 "note": ("thin panel (<12 anchors) — decay read is provisional"
                          if n_all < RECENT_WINDOW else ""),

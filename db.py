@@ -1066,7 +1066,7 @@ def data_health(cache_ttl=0):
     was within `cache_ttl` seconds — shared across callers, lock-guarded so
     concurrent callers compute it exactly once. Default 0 = always recompute.
     The /system page sets cache_ttl so the freshness scan (~7s) isn't run twice
-    per cold load (get_data_freshness + health_report._gather_tables). Keep it 0
+    per cold load (get_data_freshness + checks.system.table_facts). Keep it 0
     for freshness_watchdog's compute→heal→re-verify loop, which needs live counts.
     """
     if cache_ttl and cache_ttl > 0:

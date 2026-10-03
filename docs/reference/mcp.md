@@ -28,10 +28,10 @@ Plan: [0016](../plans/0016-alpha-signal-mcp.md). Code: [alpha_mcp/](../../alpha_
 
 | Tool | Args | Returns |
 |---|---|---|
-| `picks` | date?, tier?, gated=true, top=10 | ranked picks per tier (rank, final/base score, forensic adj, UHS, mcap Cr, P/E, P/B, ROE) |
+| `picks` | date?, tier?, gated=true, top=10 | ranked picks per tier (rank, final/base score, forensic adj, eligible_coverage = the data behind the pick, mcap Cr, P/E, P/B, ROE) |
 | `pick_dates` | n | newest pick dates + ranked count |
 | `pick_breakdown` | stock, date? | exact per-factor decomposition of the score (value, tier percentile, weight, contribution, share), rebuilt from `pit_replay_snapshots`; `reproduces_stored_score` |
-| `stock` | stock | identity, fundamentals, newest pick row + UHS, display signals, close + returns/52w/RSI, has_dossier |
+| `stock` | stock | identity, fundamentals, newest pick row + `data` (what the ranking had to work with), display signals, close + returns/52w/RSI, has_dossier |
 | `search_stocks` | q | ≤20 matches (sid, ticker, name, sector, tier) |
 | `stock_financials` | stock, kind=quarterly\|annual | 10 quarters + TTM/YoY, or 5 years BS/CF + ratios |
 | `stock_ownership` | stock | 6 quarters shareholding (+QoQ), 24 months insider by month, 10 bulk deals |

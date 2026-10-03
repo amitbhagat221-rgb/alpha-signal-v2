@@ -89,7 +89,7 @@ tools/        research only: nothing in the graph imports tools/
  SOURCES  ────────→  SIGNALS  ────────→  SCORING  ────────→  OUTPUT
  sources/*           signals/*           scoring/*           output/*
  external → DB       DB → *_scores       regime,             snapshot → dossier
-                     (display + UHS)     screener            (Claude API) → email
+                     (display)           screener            (Claude API) → email
                                          → daily_picks
  pit.py: RAW_SQL as-of datasets → the SAME factor functions at any t
       screener = pit.features_at(today) · tools/reconstruct_pit.py → daily_snapshots_pit
