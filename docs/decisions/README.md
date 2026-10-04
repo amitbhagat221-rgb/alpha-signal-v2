@@ -88,6 +88,11 @@ Status key: **A** accepted · **P→N** partly superseded by N · **S→N** supe
 | 0054 | [Tables grow with concepts, not things](0054-tables-grow-with-concepts.md) | A (plan 0017) |
 | 0055 | [Data supply: feeds, canaries, run log](0055-data-supply-feeds-canaries-runlog.md) | A (plan 0018) |
 | 0056 | [LLM work runs on a local subscription worker through a validated queue](0056-llm-work-local-worker-queue.md) | A (plan 0016) |
+| 0057 | [The agent org: roles are a registry, desk work is a task kind, memos are documents](0057-agent-org-roles-on-the-queue.md) | A (plan 0019) |
+| 0058 | [The CEO's interface to the org: tune behaviour, never permissions](0058-ceo-interface-tune-behaviour-not-permissions.md) | A (plan 0019) |
 | 0059 | [Health is five questions and one issue list](0059-health-five-questions-one-issue-list.md) | A |
 | 0060 | [A daily check must be able to fail, and prove it](0060-a-check-must-be-able-to-fail.md) | A |
 | 0061 | [Retire the UHS trust score and the dead gates; the data behind a pick is its factor coverage](0061-retire-uhs-and-dead-gates.md) | A (supersedes 0033, 0037) |
+| 0062 | [Factor audit: the inputs are corrected as one model change](0062-factor-audit-fixes-one-model-change.md) | A (plan 0020) |
+| 0063 | [Production weights re-set on the corrected evidence](0063-weights-on-corrected-evidence.md) | A (supersedes the weight table of 0049 / 0050) |
+| 0064 | [A factor with no value counts as neutral; a result print is found wherever it is filed](0064-missing-factor-is-neutral.md) | A (amends the scoring rule of 0024 / 0048) |

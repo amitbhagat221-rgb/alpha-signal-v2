@@ -12,6 +12,7 @@ How specific things work. Update a file when the underlying thing changes. Don't
 | [health-checks.md](health-checks.md) | The five health questions, the three severities, where a check lives, how to add one, the data-trust score in plain words |
 | [kite-setup.md](kite-setup.md) | Zerodha Kite Connect setup |
 | [oss-quant-toolbox.md](oss-quant-toolbox.md) | Open-source libraries mapped to our gaps (step 0 of plan 0014) |
+| [org.md](org.md) | The agent org: seats, daily flow, commands, adding a seat, what to do when a seat misbehaves (plan 0019) |
 
 ## Live sources of truth in code (not copied here)
 
@@ -19,6 +20,7 @@ How specific things work. Update a file when the underlying thing changes. Don't
 - **Schema:** `schema.sql` + `db.TABLE_META`; live table list: `sqlite3 data/alpha_signal.db .tables`
 - **Signals registry:** `db.BACKTEST_SIGNALS` + `db.FACTOR_LIBRARY`
 - **Weights:** `config.SIGNAL_WEIGHTS` (rationale in signal-weights.md)
+- **Org seats:** `org.ROLES` (one entry per seat; charters in `.claude/routines/roles/`, builders in `.claude/agents/`)
 - **Cron:** `crontab -l` (not in git; the table is in [OPERATOR.md](../../OPERATOR.md), §2)
 
 Archived research dumps (multibagger ×4, sector deep-research, PIT-sources research, paid sources, crypto sources, pre-merge api-endpoints) are in [`../_archive/reference/`](../_archive/reference/).

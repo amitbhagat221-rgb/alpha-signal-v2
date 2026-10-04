@@ -109,3 +109,6 @@ ALPHA_DB=/path/to/copy.db ops/llm_worker_local.sh 5    # against a DB copy (cali
   - **Catch-up:** `run.sh llm_local` (cron 05:07 and 14:37 UTC) drains anything left over.
   - **Fallback:** `config.LLM_WORK["executor"] = "api"` switches the steps back to the paid API paths.
 - **Measured throughput** (calibration, 2026-09-30): 120 items in 129 s over 16 turns; 300 items in about 5 min (Sonnet, 0 invalid results).
+
+## Desk roles on the queue (plan 0019)
+The agent org's desk seats are task kinds too (`org_*`, in `alpha_mcp/org_kinds.py`), each owned by one role: `alpha-work` shows and leases a kind with `"role"` only to a worker whose `ALPHA_MCP_ROLE` matches (`tasks.kinds_for`). `alpha-ops.org` reads the roster, inbox and memos. See [org.md](org.md).

@@ -11,11 +11,13 @@
 > as whole-scheme tables. `config.SIGNAL_WEIGHTS*` survive only as lazy read-only aliases for
 > cockpit/ + cockpit_ops/. References below to "`SIGNAL_WEIGHTS`" mean that derived view.
 
-| Tier | Production weights (2026-07-05, ADR 0049 / 0050) |
+| Tier | Production weights (2026-10-03, [ADR 0063](../decisions/0063-weights-on-corrected-evidence.md)) |
 |------|--------------------------------------------------|
-| LARGE | announcement_car 0.35 · consensus 0.28 · sector_tilt 0.22 · book_to_price 0.15 |
-| MID | iv_skew_25d 0.26 · accruals 0.22 · book_to_price 0.20 · piotroski 0.18 · governance_resignation −0.14 |
-| SMALL | delivery_anomaly_z 0.26 · consensus 0.16 · sector_tilt 0.16 · announcement_car 0.14 · book_to_price 0.12 · pledge_quality 0.10 · piotroski 0.06 |
+| LARGE | announcement_car 0.35 · iv_skew_25d 0.25 · asset_growth_yoy −0.20 · forward_looking_intensity 0.20 |
+| MID | iv_skew_25d 0.24 · residual_momentum_12_1 0.20 · piotroski 0.18 · consensus 0.16 · accruals −0.12 · announcement_car 0.10 |
+| SMALL | delivery_anomaly_z 0.24 · announcement_car 0.22 · sector_tilt 0.14 · piotroski 0.14 · residual_momentum_12_1 0.14 · avg_delivery_pct_30d 0.12 |
+
+> **Everything below this line predates the October 2026 factor audit.** The t-stats in the older sections were measured with today's tiers at every past date, an unadjusted return label and, for consensus, results known before publication (ADR 0062). The current evidence is `python -m tools.factor_audit --wired` and [promotion-review-2026-10.md](../studies/promotion-review-2026-10.md).
 
 From v1 C13b — 36 monthly periods, reproduced by `tools/backtest_pit.py` in v2.
 
