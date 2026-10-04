@@ -99,11 +99,22 @@ def test_weight_sign_and_tier_sanity():
         # sign: negative only for event penalties (ADR 0042) — a new negative weight
         # must be added here deliberately, with its evidence.
         if any(v < 0 for v in w.values()):
-            assert sid in {"governance_resignation"}, sid
+            # cf_accruals_ratio: low accruals = cash-backed earnings (MID t=−2.90, audit 2026-10)
+            # asset_growth_yoy: low asset growth does better (LARGE t=−2.37, review 2026-10)
+            assert sid in {"governance_resignation", "cf_accruals_ratio", "asset_growth_yoy"}, sid
     # the derived view keys each weight by the screener's name, tier-aware
     for tier, tw in factors.SIGNAL_WEIGHTS.items():
         for key, w in tw.items():
             assert factors.FACTORS[factors.signal_for(key, tier)]["weights"][tier] == w
+
+
+def test_every_wired_factor_says_who_should_have_a_value():
+    """Without an eligibility rule every stock counts as eligible, and a stock the factor
+    can never cover (no listed options) is gated out as "missing data" (audit 2026-10:
+    10 of 31 MID Financials)."""
+    for tier, tw in factors.SIGNAL_WEIGHTS.items():
+        for key in tw:
+            assert key in factors.SIGNAL_ELIGIBILITY, (tier, key)
 
 
 def test_signal_weights_order_is_canonical():

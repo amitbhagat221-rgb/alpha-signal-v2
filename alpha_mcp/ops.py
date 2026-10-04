@@ -23,7 +23,8 @@ Alpha Signal v2 operations view (read-only). health = the same verdicts as the d
 (five questions, each OK / WATCH / BROKEN, and the CRITICAL / WARN issues behind them with what to do first). pipeline_status = each pipeline step's final state per run date.
 freshness = every table's age vs its threshold. llm_usage = the LLM ledger (mode api = paid API, session / local /
 routine = Claude subscription). queue_status = the llm_tasks work queue. feed_incident = everything needed to
-diagnose one data feed. Nothing here can rerun, fix or send anything: report what you find and propose the fix.
+diagnose one data feed. org = the agent org: roster and scorecards, the CEO inbox, the board pack and desk memos.
+Nothing here can rerun, fix or send anything: report what you find and propose the fix.
 """
 
 mcp = FastMCP("alpha-ops", instructions=INSTRUCTIONS)
@@ -125,6 +126,47 @@ def feed_incident(feed: str) -> dict:
         raise ValueError(f"unknown feed {feed!r}; one of {sorted(feeds.FEEDS)}")
     b = runlog.bundle(feed)
     return {"as_of": b.get("generated_at"), **b}
+
+
+@tool(name="org")
+def org_overview(role: str | None = None, days: int = 7, work_order: int | None = None) -> dict:
+    """The agent org (plan 0019): CEO = the human, every other seat an agent. Without `role`: the roster (seat,
+    type desk/builder, reports_to, cadence, 30-day scorecard: tasks done, first-pass rate, compliance grade 0-8,
+    tokens), the CEO inbox (asks and hypothesis cards awaiting approve / reject / park), the latest board pack and
+    memo headlines from the last `days` days. With `role` (e.g. cio, risk-officer, data-engineer): that seat's
+    mission, gate and measures plus its memos in full. Decisions are taken with `python -m org decide` or on the
+    ops cockpit /org page; nothing here writes. With `work_order` (a number): that work order in full (items, owner
+    seats, done_when, status) plus the chat conversation it was written from: what a session needs to run it."""
+    import org as _org
+    if work_order is not None:
+        import org_chat
+        w = _org.work_order(work_order)
+        if not w:
+            raise ValueError(f"no work order {work_order}; existing: {[x['number'] for x in _org.work_orders()]}")
+        return {"as_of": today_iso(), "work_order": w, "chat_it_came_from": org_chat.transcript(w["role"], w["conv"]),
+                "how_to_run": "In a Claude Code session in the repo: /work-order <number>. It must be approved first."}
+    ov = _org.overview(days=max(1, min(int(days), 60)))
+    if role:
+        if role not in _org.ROLES:
+            raise ValueError(f"unknown role {role!r}; one of {sorted(_org.ROLES)}")
+        seat = next(r for r in ov["roles"] if r["id"] == role)
+        return {"as_of": ov["as_of"], "role": seat,
+                "memos": [m for m in ov["memos"] + ([ov["board_pack"]] if ov["board_pack"] else [])
+                          if m["fields"].get("role") == role][:12],
+                "inbox": [i for i in ov["inbox"] if i["fields"].get("role") == role]}
+    return {"as_of": ov["as_of"],
+            "roles": [{k: r.get(k) for k in ("id", "title", "type", "reports_to", "cadence", "score", "latest")}
+                      for r in ov["roles"]],
+            "inbox": [{"item_id": i["doc_id"], "type": i["type"], "from": i["fields"].get("role"),
+                       "title": i["title"], "age_days": i["age_days"],
+                       "recommendation": i["fields"].get("recommendation") or i["fields"].get("test")}
+                      for i in ov["inbox"]],
+            "work_orders": [{k: w[k] for k in ("number", "title", "role", "status", "date")} | {"items": len(w["items"])}
+                            for w in ov["work_orders"]],
+            "board_pack": ov["board_pack"] and {"week": ov["board_pack"]["key"], **ov["board_pack"]["fields"]},
+            "memos": [{"doc_id": m["doc_id"], "date": m["doc_date"], "role": m["fields"].get("role"),
+                       "type": m["type"], "headline": m["title"], "grade": (m.get("grade") or {}).get("total")}
+                      for m in ov["memos"]]}
 
 
 def main():

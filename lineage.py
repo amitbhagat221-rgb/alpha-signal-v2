@@ -235,7 +235,7 @@ LINEAGE_DETAIL = {
     # ════════════════════════════ Value family ════════════════════════════
     "earnings_yield": {
         "reads": [
-            _qi(["revenue", "net_income", "pbt", "interest"], n=4),
+            _qi(["eps"], n=4),
             _prices_latest(),
         ],
     },
@@ -254,7 +254,7 @@ LINEAGE_DETAIL = {
     # ════════════════════════════ Quality / Forensic / Accruals ════════════════════════════
     "piotroski_f_score": {
         "reads": [
-            _qi(["revenue", "net_income", "pbt", "interest"], n=8),
+            _qi(["revenue", "net_income", "operating_expenses"], n=8),
             _bs(["total_assets", "current_assets", "current_liabilities",
                  "long_term_debt", "shares_outstanding"], n=2),
             _cf(["operating_cash_flow"], n=1),
@@ -282,7 +282,7 @@ LINEAGE_DETAIL = {
     "bs_accruals_ratio": {
         "reads": [
             _bs(["current_assets", "current_liabilities", "cash_and_equivalents"], n=2),
-            _cf(["capex", "depreciation"], n=1),
+            _cf(["capex"], n=1),
         ],
         "sector_exclusions": ["Financials"],
     },
@@ -613,9 +613,12 @@ LINEAGE_DETAIL = {
             {"table": "stock_prices", "cols": ["close"],
              "key": ["sid", "date"], "select": "window",
              "filter": "last 126d", "contribution": "sector_basket_6m_momentum"},
-            {"table": "macro_sector_signals_pit", "cols": ["macro_score", "snapshot_date"],
-             "key": ["sector", "snapshot_date"], "select": "row",
-             "filter": "latest per sector <= eval_date", "contribution": "macro_score_leg"},
+            {"table": "macro_history", "cols": ["value", "date"],
+             "key": ["indicator_id", "date"], "select": "window",
+             "filter": "latest vs 60-120d before, <= eval_date", "contribution": "macro_score_leg"},
+            {"table": "macro_sector_map", "cols": ["direction", "weight"],
+             "key": ["indicator_id", "sector"], "select": "row",
+             "filter": "indicator -> sector", "contribution": "macro_score_leg"},
             _stocks(("sid", "sector")),
         ],
     },

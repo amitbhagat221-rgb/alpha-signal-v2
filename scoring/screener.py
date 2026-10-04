@@ -22,6 +22,7 @@ import pandas as pd
 
 import factors
 from config import PICKABLE_TIERS, PORTFOLIO, SCREEN
+from config import MISSING_FACTOR_SCORE
 from db import read_sql, get_db, upsert_df
 
 # The last production run's frames in this process ({date, inputs, scored, prices}) —
@@ -240,7 +241,13 @@ def score_universe(df, weights: dict = None, as_of=None):
                 eligible_weight.loc[tier_mask] += abs(weight)
 
     # Normalize by actual weights used (handles NaN signals gracefully)
-    df["base_score"] = np.where(weight_sums > 0, scores / weight_sums, np.nan)
+    # A factor with no value for a stock counts as NEUTRAL (the middle of the tier), it is not
+    # dropped from the average. Spreading its weight over the factors that do have a value gave a
+    # stock scored on fewer factors a louder score: MID Financials (no accruals, no Piotroski)
+    # were 31% of the MID top 20 against 14% of the tier. On the history the neutral rule is as
+    # good or better in every tier (ADR 0064).
+    df["base_score"] = np.where(
+        weight_sums > 0, (scores + (tier_total_weight - weight_sums) * MISSING_FACTOR_SCORE) / tier_total_weight, np.nan)
 
     # weight_coverage = covered / TIER TOTAL (legacy semantics, unchanged).
     # A LARGE cap missing consensus drops to 0.6 regardless of why.
@@ -253,8 +260,8 @@ def score_universe(df, weights: dict = None, as_of=None):
     # consensus (no analyst attribution) → eligible_coverage = 1.0 (perfect).
     # Surfaced for now; gate change is a follow-up commit once we've validated.
     df["eligible_coverage"] = np.where(
-        eligible_weight > 0, weight_sums / eligible_weight, np.nan
-    )
+        eligible_weight > 0, (weight_sums / eligible_weight).clip(upper=1.0), np.nan
+    )   # ≤ 1: a stock with a value for a factor it is not eligible for is not "over-covered"
 
     # Apply forensic penalty
     df["penalty"] = df["penalty"].fillna(0)

@@ -60,11 +60,15 @@ _GAP_TRADING_DAYS = {"weekly": 5, "monthly": 21}
 
 
 def _price_series():
-    """sid -> date-indexed close Series (sorted, NaN-free). Built once so each
-    (sid, eval_date, horizon) forward return is a positional lookup."""
-    df = read_sql("SELECT sid, date, close FROM stock_prices WHERE close IS NOT NULL")
+    """sid -> date-indexed close Series (sorted, NaN-free), adjusted for every split,
+    bonus and dividend so a forward return never spans two share bases (same rule as
+    pit.pit_fwd_return_20d). Built once so each (sid, eval_date, horizon) forward
+    return is a positional lookup."""
+    from signals._prices import load_prices
+    df = load_prices()
     if df.empty:
         raise RuntimeError("stock_prices empty — cannot compute forward returns")
+    df = df[["sid", "date"]].assign(close=df["adj_close"])
     df["date"] = pd.to_datetime(df["date"])
     df = df.sort_values(["sid", "date"])
     return {sid: g.set_index("date")["close"] for sid, g in df.groupby("sid")}
@@ -90,13 +94,13 @@ def _fwd_panel(panel, price_series):
         if s is None or s.empty:
             continue
         t0 = pd.Timestamp(snapshot_date)
-        pos = int(s.index.searchsorted(t0, side="left"))
+        pos = int(s.index.searchsorted(t0, side="right"))        # first session AFTER the anchor (as the panel label)
         if pos >= len(s) or abs(s.index[pos] - t0) > gap:    # (a) entry guard
             continue
         p0 = float(s.iloc[pos])
         if not (p0 > 0):
             continue
-        m_anchor = int(cal.searchsorted(t0, side="left"))
+        m_anchor = int(cal.searchsorted(t0, side="right"))
         rec = {"snapshot_date": snapshot_date, "sid": sid}
         for h in HORIZONS:
             tgt = pos + h

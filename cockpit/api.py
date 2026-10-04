@@ -886,7 +886,7 @@ def get_quarterly_financials(sid):
     """10 quarters of income statement + TTM aggregates + YoY growth."""
     df = read_sql(
         "SELECT period, end_date, revenue, net_income, eps, ebitda, "
-        "operating_profit, pbt, interest "
+        "operating_profit, pbt, operating_expenses "
         "FROM quarterly_income WHERE sid = ? AND reporting = 'consolidated' "
         "ORDER BY end_date DESC LIMIT 10",
         params=[sid],
@@ -894,7 +894,7 @@ def get_quarterly_financials(sid):
     if df.empty:
         df = read_sql(
             "SELECT period, end_date, revenue, net_income, eps, ebitda, "
-            "operating_profit, pbt, interest "
+            "operating_profit, pbt, operating_expenses "
             "FROM quarterly_income WHERE sid = ? AND reporting = 'standalone' "
             "ORDER BY end_date DESC LIMIT 10",
             params=[sid],
@@ -902,10 +902,8 @@ def get_quarterly_financials(sid):
     if df.empty:
         return {"quarters": [], "ttm": {}, "yoy": {}}
 
-    # The Tickertape `qIncOpe` field maps to operating expenses, not interest expense
-    # (loader at sources/tickertape.py:72 mislabels it). The stored `ebitda` column is
-    # therefore unreliable. Approximate EBITDA as revenue − opex for display.
-    df["ebitda"] = (df["revenue"] - df["interest"].fillna(0)).where(df["interest"].notna())
+    # EBITDA = revenue − operating expenses (the stored column holds the same).
+    df["ebitda"] = df["revenue"] - df["operating_expenses"]
     df["ebitda_margin"] = (df["ebitda"] / df["revenue"] * 100).round(1)
     df["pat_margin"] = (df["net_income"] / df["revenue"] * 100).round(1)
 
@@ -960,7 +958,7 @@ def get_annual_financials(sid):
     )
     cf = read_sql(
         "SELECT period, end_date, operating_cash_flow, capex, free_cash_flow, "
-        "depreciation, financing_cash_flow, investing_cash_flow "
+        "dividends_paid, financing_cash_flow, investing_cash_flow "
         "FROM annual_cash_flow WHERE sid = ? ORDER BY end_date DESC LIMIT 5",
         params=[sid],
     )

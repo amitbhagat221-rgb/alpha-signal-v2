@@ -224,8 +224,9 @@ def send_email(html, subject, urgent=False):
         return False
 
 
-def send_ntfy(text, urgent=False):
-    """Push to ntfy.sh if NTFY_TOPIC is configured. No-op otherwise."""
+def send_ntfy(text, urgent=False, click=None):
+    """Push to ntfy.sh if NTFY_TOPIC is configured. No-op otherwise.
+    click: a URL the notification opens when tapped."""
     topic = os.environ.get("NTFY_TOPIC")
     if not topic:
         print("  NTFY_TOPIC not set — skipping ntfy push.")
@@ -236,6 +237,8 @@ def send_ntfy(text, urgent=False):
         "Priority": "urgent" if urgent else "default",
         "Tags": "warning" if urgent else "information_source",
     }
+    if click:
+        headers["Click"] = click
     req = urllib.request.Request(url, data=text.encode("utf-8"), headers=headers, method="POST")
     try:
         with urllib.request.urlopen(req, timeout=10) as resp:
@@ -259,13 +262,13 @@ def main():
     # Always print terminal version
     print(format_catalog(state) if args.catalog else format_terminal(state))
     print()
-
-    if args.email:
-        subject = f"Alpha Signal Health · {date.today().strftime('%a %d %b')} · {state['summary']['verdict']}"
     try:
         history.record(report.records(state))
     except Exception as e:                          # noqa: BLE001 — history must never break the report
         print(f"  health history not recorded: {type(e).__name__}: {e}")
+
+    if args.email:
+        subject = f"Alpha Signal Health · {date.today().strftime('%a %d %b')} · {state['summary']['verdict']}"
         send_email(format_email_html(state), subject, urgent=False)
 
     if args.push and state["summary"]["critical"] > 0:

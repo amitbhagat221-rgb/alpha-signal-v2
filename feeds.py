@@ -91,7 +91,7 @@ FEEDS = {
         "family": "prices", "status": "production",
         "what": "Daily prices, volume and delivery % for every NSE stock — the main price source",
         "modules": ["sources.nse"], "schedule": ["step:fetch_bhavcopy"],
-        "writes": ["stock_prices"], "hosts": ["nse_archives"], "cadence": "trading_day",
+        "writes": ["stock_prices", "stock_prices_unlisted", "symbol_changes"], "hosts": ["nse_archives"], "cadence": "trading_day",
         "routes": [_r("nse_sec_bhavdata", "primary", "nse_archives", "archives sec_bhavdata_full_{DDMMYYYY}.csv"),
                    _r("yfinance_gapfill", "gap-fill", "yahoo", "fetch_prices_fallback: only sids NSE lacks")],
         "serve_stale_days": 1, "canary": "nse_bhavcopy",

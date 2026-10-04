@@ -128,3 +128,6 @@ cockpit/static/news_img/
 !ops/llm_worker_local.sh
 # alpha_mcp.tasks file lock for the day's dossier JSON
 output/*.json.lock
+
+# the Boardroom app icons are source, not output (plan 0019)
+!cockpit/static/boardroom/*.png

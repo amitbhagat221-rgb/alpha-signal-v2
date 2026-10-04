@@ -119,20 +119,26 @@ def test_clip_to_validation_range():
 # ─────────── live ↔ PIT parity (one core, two paths) ───────────
 
 def test_live_pit_parity():
-    """pit_sector_tilt slices macro to the latest snapshot ≤ eval_date then calls
-    the SAME core → must equal a direct live call on the equivalent frame."""
-    px = _prices(RETURNS)
+    """pit_sector_tilt computes the macro leg from macro history AS OF eval_date (never
+    from a stored table: a rebuild read it before writing it, so every 2026-06 → 09
+    anchor carried the May macro snapshot) and calls the SAME core as live."""
+    from datetime import date
+    from pit import pit_macro_sector
+    px = _prices(RETURNS).assign(adj_close=lambda d: d["close"])
     stk = _stocks(SECTORS)
-    # macro history with two snapshots; the later one (≤ eval) is the live-equivalent.
     macro_hist = pd.DataFrame([
-        {"sector": "Alpha", "snapshot_date": "2024-12-01", "macro_score": -99.0},  # stale, ignored
-        {"sector": "Beta", "snapshot_date": "2024-12-01", "macro_score": 99.0},
-        {"sector": "Alpha", "snapshot_date": "2025-05-01", "macro_score": 10.0},   # latest ≤ eval
-        {"sector": "Beta", "snapshot_date": "2025-05-01", "macro_score": 0.0},
+        {"indicator_id": "x", "date": "2025-03-01", "value": 100.0},   # ~90 days before eval
+        {"indicator_id": "x", "date": "2025-05-30", "value": 120.0},   # latest ≤ eval
+        {"indicator_id": "x", "date": "2025-06-15", "value": 10.0},    # AFTER eval: must not be read
     ])
-    pit = pit_sector_tilt(stk, px, macro_hist, "2025-06-01").set_index("sid")["sector_tilt"]
-    live = compute_sector_tilt(prices=px, macro_sector=MACRO, stocks=stk
-                               ).set_index("sid")["sector_tilt"]
+    macro_map = pd.DataFrame([{"indicator_id": "x", "sector": "Alpha", "direction": 1, "weight": 1.0},
+                              {"indicator_id": "x", "sector": "Beta", "direction": -1, "weight": 1.0}])
+    eval_date = date(2025, 6, 1)
+    pit = pit_sector_tilt(stk, px, macro_hist, macro_map, eval_date).set_index("sid")["sector_tilt"]
+    as_of = pd.DataFrame(pit_macro_sector(macro_hist[macro_hist["date"] <= "2025-06-01"], macro_map,
+                                          ["Alpha", "Beta"], eval_date))[["sector", "macro_score"]]
+    assert as_of.set_index("sector")["macro_score"]["Alpha"] == 2.0     # +20% / 10, not the later −90%
+    live = compute_sector_tilt(prices=px, macro_sector=as_of, stocks=stk).set_index("sid")["sector_tilt"]
     for sid in ["A0", "A3", "B0", "B4"]:
         assert abs(pit[sid] - live[sid]) < 1e-9, f"parity broke at {sid}"
 

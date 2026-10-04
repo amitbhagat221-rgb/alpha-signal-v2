@@ -34,6 +34,9 @@ RETIRED = {
     "signal_lineage": "2 of ~105 factors emit it (D3)",
     "vix_history": "copy of macro_history india_vix → series_values",
     "daily_changes": "derivable: picks of a run vs the previous run (a view)",
+    "symbol_changes": "kept as-is: plan 0020 NSE symbol renames (old → new), an identifier history for entities",
+    "stock_prices_unlisted": "kept as-is: plan 0020 prices of symbols with no entity (delisted / outside the universe); "
+                             "joins bars_daily once entities carry them",
     "llm_usage": "kept as-is: it is already the v3 table",
     "run_events": "kept as-is: plan 0018 run log (Ops)",
     "llm_tasks": "kept as-is: plan 0016 LLM work queue (Ops, already v3-shaped)",

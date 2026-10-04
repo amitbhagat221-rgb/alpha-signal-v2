@@ -102,9 +102,9 @@ INCOME_MAP = {
     "qIncPfc": "operating_profit",
     "qIncNinc": "net_income",
     "qIncEps": "eps",
-    "qIncOpe": "interest",
+    "qIncOpe": "operating_expenses",   # total operating expenses (was stored as "interest" until 2026-10-03)
     "qIncPbt": "pbt",
-    "qIncToi": "total_other_income",
+    "qIncToi": "tax_and_minority",   # = profit before tax − net profit in every row (was stored as "total_other_income" until 2026-10-04)
 }
 
 
@@ -141,8 +141,8 @@ def _income_frame(raw, sid):
         df[our_col] = pd.to_numeric(raw.get(tt_col), errors="coerce")
 
     # Derive EBITDA
-    if "pbt" in df.columns and "interest" in df.columns:
-        df["ebitda"] = df["pbt"] + df["interest"].fillna(0)
+    if "revenue" in df.columns and "operating_expenses" in df.columns:
+        df["ebitda"] = df["revenue"] - df["operating_expenses"]
 
     df, _ = _validate_income(df, sid)
     return df
@@ -221,7 +221,7 @@ CF_MAP = {
     "cafCfia": "investing_cash_flow",
     "cafCffa": "financing_cash_flow",
     "cafCiwc": "working_capital_change",
-    "cafTcdp": "depreciation",
+    "cafTcdp": "dividends_paid",   # total cash dividends paid (was stored as "depreciation" until 2026-10-03)
     "cafNcic": "net_change_in_cash",
 }
 

@@ -82,6 +82,14 @@ TABLES = {
     # Per-stock coverage gate (`coverage`): pre-2026-05-23 the entire 22%
     # gap on stock_prices was invisible because MAX(date) stayed FRESH for the 78%
     # that did exist.
+    "symbol_changes": {
+        "kind": "RAW", "domain": "Universe & Prices", "date_col": "change_date",
+        "description": "NSE's list of symbol changes (old symbol, new symbol, date). Links a renamed stock's earlier price rows, stored under the old symbol, to its sid.",
+    },
+    "stock_prices_unlisted": {
+        "kind": "RAW", "domain": "Universe & Prices", "date_col": "date",
+        "description": "Daily OHLCV + delivery for every NSE symbol that is NOT in `stocks` (delisted, merged, or outside our universe), from the same bhavcopy file as stock_prices. Keyed by exchange symbol. The survivorship-free half of the price history (plan 0020).",
+    },
     "stock_prices": {
         "contract": {"max_null": {"close": 0.02}, "not_all_zero": ["close", "volume"]},
         "kind": "RAW", "domain": "Universe & Prices", "date_col": "date", "coverage": (95.0, 80.0),
@@ -144,7 +152,7 @@ TABLES = {
         "kind": "RAW", "domain": "Fundamentals", "freq": "monthly", "data_freq": "annual",
         "source": "Tickertape API", "date_col": "end_date", "stale_days": 220, "quarantine": True,
         "depth": "10 years per stock",
-        "description": "Annual cash flow statement from Tickertape — operating CF, capex, free cash flow, financing CF, depreciation. Powers FCF yield, Piotroski CFO/accruals quality, capex ratio.",
+        "description": "Annual cash flow statement from Tickertape — operating CF, capex, free cash flow, financing CF, dividends paid. Powers FCF yield, Piotroski CFO/accruals quality, capex ratio.",
     },
     "banking_metrics": {
         "kind": "RAW", "domain": "Fundamentals", "date_col": "fetched_at", "quarantine": True,
@@ -179,7 +187,7 @@ TABLES = {
         "source": "Tickertape API", "date_col": "end_date", "stale_days": 120,
         "coverage": (85.0, 70.0), "quarantine": True,
         "depth": "10 quarters per stock",
-        "description": "Quarterly income statement from Tickertape — revenue, EBITDA, operating profit, PBT, net income, EPS, interest. Powers TTM ratios, YoY growth, Piotroski profitability factors, accruals, forensic Beneish.",
+        "description": "Quarterly income statement from Tickertape — revenue, operating expenses, EBITDA (revenue − operating expenses), operating profit, PBT, net income, EPS. Powers TTM ratios, YoY growth, Piotroski profitability factors, accruals, forensic Beneish.",
     },
     "shareholding": {
         "contract": {"max_null": {"promoter_pct": 0.5}},

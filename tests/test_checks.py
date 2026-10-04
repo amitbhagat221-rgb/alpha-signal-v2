@@ -356,6 +356,6 @@ def test_decay_needs_more_than_noise(monkeypatch):
     noisy = [0.05] * 40 + [0.30, -0.32, 0.25, -0.28, 0.31, -0.30, 0.27, -0.29, 0.26, -0.31, 0.28, -0.30]   # mean ≈ -0.01, huge spread
     gone = [0.05] * 40 + [-0.02, -0.03, -0.01, -0.02, -0.03, -0.02, -0.01, -0.02, -0.03, -0.02, -0.01, -0.02]  # tight and negative
     for series, expected in ((noisy, False), (gone, True)):
-        monkeypatch.setattr(fd, "_factor_ic_series", lambda col, t, s=series: [(f"d{i}", x, 50) for i, x in enumerate(s)])
+        monkeypatch.setattr(fd, "_factor_ic_series", lambda col, t, sig, s=series: [(f"d{i}", x, 50) for i, x in enumerate(s)])
         (row,) = fd.analyze()
         assert row["decayed"] is expected, (series[-3:], row)

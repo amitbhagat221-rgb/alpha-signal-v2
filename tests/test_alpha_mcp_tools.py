@@ -52,6 +52,7 @@ CALLS = {  # tool: (python call, top-level keys that must be present)
     "pipeline_status": ("O.pipeline_status()", {"as_of", "items"}),
     "llm_usage": ("O.llm_usage()", {"as_of", "items"}),
     "queue_status": ("O.queue_status()", {"as_of", "kinds"}),
+    "org": ("O.org_overview()", {"as_of", "roles", "inbox", "memos"}),
 }
 
 

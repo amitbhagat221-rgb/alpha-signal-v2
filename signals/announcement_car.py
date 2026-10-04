@@ -64,6 +64,7 @@ from datetime import date, timedelta
 import numpy as np
 import pandas as pd
 
+from factors import RESULT_FILING_SQL
 from db import read_sql
 from signals._prices import load_prices
 from signals.pead import _announce_dates_by_sid
@@ -72,6 +73,10 @@ NIFTY_ID = "nifty50"
 CAR_PRE = 1          # trading days BEFORE day0 → window opens at close of day0−1 (last pre-print close)
 CAR_POST = 1         # trading days AFTER day0  → window closes at close of day0+1  ⇒ [−1,+1] 3-day event window
 STALE_DAYS = 90      # announcement must be within this many CALENDAR days of eval (one reporting quarter)
+CLUSTER_DAYS = 30    # "Result" filings closer than this to the previous one are the same result
+                     # (a corrigendum / re-submission): the reaction is to the FIRST
+WINDOW_SLACK_DAYS = 3  # calendar days a window may run beyond twice its trading-day span (weekend +
+                       # holiday); the [−1,+1] window: ≤ 7. A suspended stock's day −1 can be weeks before day 0
 CAR_CLIP = (-0.5, 0.5)   # a 3-day abnormal return beyond ±50% is almost always a data error
 
 
@@ -98,6 +103,8 @@ def _car_one(pdates, pcloses, n_dates, n_vals, ann_iso, eval_iso, pre=CAR_PRE, p
     if start < 0 or end >= len(pdates):
         return np.nan
     d_start, d_end = pdates[start], pdates[end]
+    if (date.fromisoformat(d_end[:10]) - date.fromisoformat(d_start[:10])).days > 2 * (pre + post) + WINDOW_SLACK_DAYS:
+        return np.nan
     if d_end > eval_iso:                      # window not fully closed by eval → look-ahead guard
         return np.nan
     p0, p1 = pcloses[start], pcloses[end]
@@ -110,13 +117,23 @@ def _car_one(pdates, pcloses, n_dates, n_vals, ann_iso, eval_iso, pre=CAR_PRE, p
     return float((p1 / p0 - 1.0) - (n1 / n0 - 1.0))
 
 
+def _first_of_cluster(ann_dates_sorted):
+    """The first date of each run of filings less than CLUSTER_DAYS apart."""
+    first, prev = [], None
+    for ann in ann_dates_sorted:
+        if prev is None or (date.fromisoformat(ann[:10]) - date.fromisoformat(prev[:10])).days >= CLUSTER_DAYS:
+            first.append(ann)
+        prev = ann
+    return first
+
+
 def _car_latest(pdates, pcloses, n_dates, n_vals, ann_dates_sorted, eval_iso, lo_iso):
     """CAR of the most recent qualifying announcement (window closed, within staleness).
 
     ann_dates_sorted ascending → scan newest first; stop once older than lo_iso.
     Falls through to the prior print if the newest window hasn't closed by eval.
     """
-    for ann in reversed(ann_dates_sorted):
+    for ann in reversed(_first_of_cluster(ann_dates_sorted)):
         if ann < lo_iso:
             break
         if ann > eval_iso:
@@ -148,7 +165,7 @@ def compute_announcement_car(
         dc = f"AND date(dt_tm) <= '{as_of_date}'" if as_of_date else ""
         announcements = read_sql(
             f"SELECT sid, date(dt_tm) AS ann_date FROM bse_announcements "
-            f"WHERE category='Result' AND sid IS NOT NULL AND dt_tm IS NOT NULL {dc} "
+            f"WHERE {RESULT_FILING_SQL} AND sid IS NOT NULL AND dt_tm IS NOT NULL {dc} "
             f"ORDER BY sid, dt_tm")
     if prices is None:
         prices = load_prices(as_of_date)   # split/bonus-adjusted, as the PIT path passes

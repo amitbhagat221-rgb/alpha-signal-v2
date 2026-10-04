@@ -20,6 +20,7 @@ import numpy as np
 import pandas as pd
 
 import factors
+import config
 from config import SCREEN
 from db import read_sql
 from signals import _annual
@@ -29,6 +30,8 @@ from signals._prices import apply_adjustments
 ANNUAL_LAG = 75
 QUARTERLY_LAG = 60
 SHAREHOLDING_LAG = 21
+DERIVATIVE_MAX_AGE_DAYS = 7   # an option reading older than this (5 trading days) is not today's: SAIL was
+                              # ranked on 2026-10-03 with a skew from 09-11, on a contract expired 09-29
 
 FINANCIAL_SECTORS = set(SCREEN["financial_sectors"])
 
@@ -96,6 +99,12 @@ def apply_pit_adjustments(prices_pit, adjustments, eval_date):
 
 # ─────────────────────── Per-signal PIT calc ───────────────────────
 
+def _adjusted(px_pit):
+    """[sid, date, close] with close = adj_close: for cores that read `close` and must
+    not see a split or bonus as a price move."""
+    return px_pit[["sid", "date"]].assign(close=px_pit["adj_close"])
+
+
 def pit_close_price(prices_pit):
     """Most recent close per sid as of eval_date."""
     last = (prices_pit.sort_values(["sid", "date"])
@@ -113,11 +122,11 @@ def pit_piotroski(stocks, qi_pit, bs_pit, cf_pit):
     return out
 
 
-def pit_accruals(stocks, qi_pit, bs_pit, cf_pit):
+def pit_accruals(stocks, qi_pit, bs_pit, cf_pit, fund_pit=None):
     """Reuse signals.accruals._compute_scores. Keeps the composite `accruals_signal`
     alongside raw cf_/bs_ ratios so PIT replay can validate the full screener input."""
     from signals.accruals import _compute_scores
-    df = _compute_scores(stocks, qi_pit, bs_pit, cf_pit)
+    df = _compute_scores(stocks, qi_pit, bs_pit, cf_pit, fund_pit)
     out = df[["sid", "cf_accruals_ratio", "bs_accruals_ratio", "earnings_persistence", "accruals_signal"]].copy()
     out = out.rename(columns={
         "cf_accruals_ratio": "cf_accruals",
@@ -136,11 +145,11 @@ def pit_promoter(stocks, sh_pit):
     return df[cols].copy()
 
 
-def pit_forensic(stocks, qi_pit, bs_pit, cf_pit):
+def pit_forensic(stocks, qi_pit, bs_pit, cf_pit, fund_pit=None):
     """Reuse signals.forensic._compute_scores. Keeps the composite `forensic_penalty`."""
     from signals.forensic import _compute_scores
     financial_sids = set(stocks[stocks["sector"].isin(FINANCIAL_SECTORS)]["sid"])
-    df = _compute_scores(stocks, financial_sids, qi_pit, bs_pit, cf_pit)
+    df = _compute_scores(stocks, financial_sids, qi_pit, bs_pit, cf_pit, fund_pit)
     keep_cols = ["sid"]
     for c in ("m_score", "z_score"):
         if c in df.columns:
@@ -183,10 +192,12 @@ def pit_earnings_yield(qi_pit, close_df):
     return earnings_yield(qi_pit, close_df)
 
 
-def pit_book_to_price(bs_pit, close_df):
-    """Latest known book equity per share / close as of eval_date (signals.book_to_price)."""
+def pit_book_to_price(bs_pit, close_df, fund_pit, adjustments, eval_date):
+    """Owners' equity / (shares × close) as of eval_date, on one share basis
+    (signals.book_to_price over signals._fundamentals.shares_and_book)."""
+    from signals._fundamentals import shares_and_book
     from signals.book_to_price import book_to_price
-    return book_to_price(bs_pit, close_df)
+    return book_to_price(shares_and_book(bs_pit, fund_pit, adjustments, eval_date.isoformat()), close_df)
 
 
 def pit_position_52w(prices_pit, eval_date):
@@ -284,15 +295,37 @@ def pit_macd_bullish(prices_pit):
 _FWD_MAX_GAP_DAYS = 7  # ≤5 trading days ≈ ≤7 calendar days (weekend/holiday slack)
 
 
-def pit_fwd_return_20d(eval_date, raw_prices_full):
-    """20-trading-day forward return per sid, with anchor-proximity guards.
+_ADJ_FULL = {}   # id(raw prices frame) → the same frame with every corporate action applied
+
+
+def _fully_adjusted(raw_prices_full, adjustments):
+    key = id(raw_prices_full)
+    if key not in _ADJ_FULL:
+        _ADJ_FULL.clear()
+        _ADJ_FULL[key] = apply_adjustments(raw_prices_full, adjustments, date.max)
+    return _ADJ_FULL[key]
+
+
+def pit_fwd_return_20d(eval_date, raw_prices_full, adjustments=None):
+    """20-trading-day forward TOTAL return per sid, with anchor-proximity guards.
+
+    Entry is the close of the first session AFTER eval_date, exit 20 sessions later:
+    the factors of eval_date are computed after its close (delivery data, and most
+    filings, arrive after 15:30), so the earliest trade is the next session. Entering
+    at the eval-date close credited factors with a move nobody could trade
+    (delivery_anomaly_z SMALL: about 12% of its IC).
+
+    Entry and exit are on one share basis: closes adjusted for every split, bonus
+    and dividend (an action after the exit scales both prices and cancels; one
+    inside the window scales only the entry). On raw closes a 5:1 split inside the
+    window read as −80% — 54% of all labels below −40% were corporate actions.
 
     Uses the FULL price history (not the PIT-filtered slice) since we need
     prices AFTER eval_date. NULL if 20 trading days haven't elapsed yet.
 
     ANCHOR-PROXIMITY GUARD (2026-07-05, panel-integrity fix). A sid's forward
     return is valid ONLY IF:
-      (a) its ENTRY price row (first row on/after eval_date) is within
+      (a) its ENTRY price row (first row after eval_date) is within
           _FWD_MAX_GAP_DAYS calendar days of eval_date, AND
       (b) its EXIT price row (entry + 20 rows in the sid's own series) is
           within _FWD_MAX_GAP_DAYS calendar days of the target exit date —
@@ -318,8 +351,11 @@ def pit_fwd_return_20d(eval_date, raw_prices_full):
     # define what "20 trading days after eval_date" means independent of any
     # single sid's (possibly gappy) coverage.
     cal = np.sort(raw_prices_full["date"].unique())
-    m_anchor = int(np.searchsorted(cal, eval_str))
+    m_anchor = int(np.searchsorted(cal, eval_str, side="right"))   # first market session after eval_date
     all_sids = raw_prices_full["sid"].unique()
+    price_col = "close"
+    if adjustments is not None and not adjustments.empty:
+        raw_prices_full, price_col = _fully_adjusted(raw_prices_full, adjustments), "adj_close"
     # eval_date beyond history, or fewer than 20 market days of forward window
     # remaining → nothing is measurable this anchor.
     if m_anchor >= len(cal) or m_anchor + 20 >= len(cal):
@@ -327,13 +363,13 @@ def pit_fwd_return_20d(eval_date, raw_prices_full):
     target_exit_str = str(cal[m_anchor + 20])[:10]
     target_exit_d = datetime.strptime(target_exit_str, "%Y-%m-%d").date()
 
-    # For each sid, find the close at the trading day on/after eval_date
+    # For each sid, find the close at the first trading day after eval_date
     # and the close 20 trading days later.
     for sid, group in raw_prices_full.groupby("sid"):
         g = group.sort_values("date")
         dates = g["date"].values
-        # First trading day >= eval_date
-        anchor_idx = int(np.searchsorted(dates, eval_str))
+        # First trading day > eval_date
+        anchor_idx = int(np.searchsorted(dates, eval_str, side="right"))
         if anchor_idx >= len(g):
             rows.append({"sid": sid})
             continue
@@ -351,8 +387,8 @@ def pit_fwd_return_20d(eval_date, raw_prices_full):
         if abs((exit_d - target_exit_d).days) > _FWD_MAX_GAP_DAYS:
             rows.append({"sid": sid})
             continue
-        p0 = g.iloc[anchor_idx]["close"]
-        p1 = g.iloc[target_idx]["close"]
+        p0 = g.iloc[anchor_idx][price_col]
+        p1 = g.iloc[target_idx][price_col]
         if p0 > 0 and p1 > 0:
             rows.append({"sid": sid, "fwd_return_20d": round(float(p1 / p0 - 1), 4)})
         else:
@@ -485,7 +521,7 @@ def pit_growth_fundamentals(stocks, qi_pit):
         ttm_eps = _ttm_qi_value(qi_g, "eps")
         prior_eps = _prior_ttm_qi_value(qi_g, "eps")
         if ttm_eps is not None and prior_eps is not None and abs(prior_eps) > 0.01:
-            row["eps_growth_yoy"] = round((ttm_eps / abs(prior_eps) - 1) * 100, 2)
+            row["eps_growth_yoy"] = round((ttm_eps - prior_eps) / abs(prior_eps) * 100, 2)
 
         rows.append(row)
     return pd.DataFrame(rows)
@@ -506,6 +542,9 @@ def pit_consensus(stocks, fh_pit):
     from signals.eps_revision import eps_revision_yoy
     eps = eps_revision_yoy(fh_pit[fh_pit["metric"] == "eps"])
     out = stocks[["sid"]].merge(eps, on="sid", how="left")
+    # winsorised, not discarded: the range rule dropped 12% of values, among them every
+    # profit that turned into a loss (the worst outcomes had no reading instead of the bottom rank)
+    out["eps_revision_yoy"] = out["eps_revision_yoy"].clip(*factors.FACTORS["eps_revision_yoy"]["pit_range"])
     out["pt_revision_yoy"] = None  # always NULL; data source contaminated
     out["consensus_signal_combined"] = out["eps_revision_yoy"]
     return out[["sid", "pt_revision_yoy", "eps_revision_yoy", "consensus_signal_combined"]]
@@ -637,7 +676,7 @@ def pit_bulk_deal_signal(stocks, bulk_pit, prices_pit, eval_date, window_days=30
 
     # Net buy value per sid: BUY = +qty*price, SELL = -qty*price
     recent["signed_value"] = recent["quantity"] * recent["price"] * np.where(
-        recent["buy_sell"].str.upper() == "B", 1.0, -1.0
+        recent["buy_sell"].str.upper().str.startswith("B"), 1.0, -1.0   # the table holds BUY / SELL
     )
     net_value = recent.groupby("sid")["signed_value"].sum().reset_index()
     net_value = net_value.rename(columns={"signed_value": "net_buy_value"})
@@ -733,16 +772,17 @@ def pit_sector_momentum(stocks, px_pit, macro_hist, eval_date):
     return sector_momentum_for_stocks(sector_mom=sm, stocks=stocks[["sid", "sector"]])
 
 
-def pit_sector_tilt(stocks, px_pit, macro_sector_full, eval_date):
+def pit_sector_tilt(stocks, px_pit, macro_hist, macro_map, eval_date):
     """Per-stock sector-tilt factor, PIT — the validated 6m-mom + macro ensemble (ADR 0041).
 
-    Reuses signals.sector_tilt's core verbatim ("ship factor + PIT as one unit"):
-      • px_pit is already filtered ≤ eval_date and corp-action-adjusted → the 6m
+    Reuses signals.sector_tilt's core ("ship factor + PIT as one unit"):
+      • px_pit is filtered ≤ eval_date and corp-action-adjusted (adj_close) → the 6m
         basket-momentum leg.
-      • macro_sector_full (the reconstructed macro_sector_signals_pit) is sliced to
-        snapshot_date ≤ eval_date and reduced to the latest row per sector → the
-        macro_score leg. Empty (before the first macro anchor, 2022-08) → the core
-        falls back to the momentum z alone, matching the validation.
+      • the macro leg is pit_macro_sector on macro history ≤ eval_date, computed HERE.
+        It used to be read from macro_sector_signals_pit, which a rebuild loads once
+        before it writes the rows of the dates it is rebuilding: every anchor from
+        2026-06 to 2026-09 carried the 2026-05-01 macro snapshot, and live ranked on
+        the last refresh's. No macro history (or no map) → the momentum z alone.
 
     Returns DataFrame[sid, sector_tilt].
     """
@@ -751,14 +791,12 @@ def pit_sector_tilt(stocks, px_pit, macro_sector_full, eval_date):
     if px_pit is None or px_pit.empty:
         return pd.DataFrame(columns=cols)
     eval_str = eval_date.isoformat() if hasattr(eval_date, "isoformat") else str(eval_date)
-    if macro_sector_full is not None and not macro_sector_full.empty:
-        ms = macro_sector_full[macro_sector_full["snapshot_date"] <= eval_str]
-        ms = (ms.sort_values("snapshot_date").groupby("sector", as_index=False).last()
-              [["sector", "macro_score"]]) if not ms.empty else pd.DataFrame(
-                  columns=["sector", "macro_score"])
-    else:
-        ms = pd.DataFrame(columns=["sector", "macro_score"])
-    prices = px_pit[["sid", "date", "close"]].sort_values(["sid", "date"])
+    ms = pd.DataFrame(columns=["sector", "macro_score"])
+    if macro_hist is not None and not macro_hist.empty and macro_map is not None and not macro_map.empty:
+        sectors = sorted(stocks["sector"].dropna().unique().tolist())
+        ms = pd.DataFrame(pit_macro_sector(macro_hist[macro_hist["date"] <= eval_str], macro_map,
+                                           sectors, eval_date))[["sector", "macro_score"]].dropna()
+    prices = _adjusted(px_pit).sort_values(["sid", "date"])
     return compute_sector_tilt(prices=prices, macro_sector=ms,
                                stocks=stocks[["sid", "sector"]])
 
@@ -779,7 +817,12 @@ def pit_fno_oi(fno_pcr_full, eval_date):
         return pd.DataFrame(columns=cols)
     from signals.fno_oi_factors import compute_oi_factors
     eval_str = eval_date.isoformat() if hasattr(eval_date, "isoformat") else str(eval_date)
+    # a stock whose latest row is older than a week is scored on an expired contract
+    cutoff = (pd.Timestamp(eval_str) - pd.Timedelta(days=DERIVATIVE_MAX_AGE_DAYS)).strftime("%Y-%m-%d")
     pit = fno_pcr_full[fno_pcr_full["trade_date"] <= eval_str]
+    pit = pit[pit.groupby("sid")["trade_date"].transform("max") >= cutoff]
+    if pit.empty:
+        return pd.DataFrame(columns=cols)
     return compute_oi_factors(pcr_hist=pit)
 
 
@@ -799,10 +842,9 @@ def pit_fno_iv(fno_iv_full, px_pit, eval_date):
     from signals.fno_iv_factors import compute_iv_factors
     eval_str = eval_date.isoformat() if hasattr(eval_date, "isoformat") else str(eval_date)
     iv_pit = fno_iv_full[fno_iv_full["trade_date"] <= eval_str]
-    prices = px_pit[["sid", "date", "close"]] if px_pit is not None and not px_pit.empty else None
-    from config import SCREEN
+    prices = _adjusted(px_pit) if px_pit is not None and not px_pit.empty else None
     return compute_iv_factors(iv_hist=iv_pit, prices=prices, as_of_date=eval_str,
-                              max_age_days=SCREEN.get("max_signal_age_days", 45))
+                              max_age_days=DERIVATIVE_MAX_AGE_DAYS)
 
 
 def pit_microstructure(ohlc_full, eval_date):
@@ -1363,7 +1405,12 @@ def _pit_input(ctx, raw, key, eval_date):
     elif key == "sh":
         v = knowable_shareholding(raw["sh"], eval_date)
     elif key == "fh":
-        v = raw["fh"][raw["fh"]["date"] <= d] if "fh" in raw else pd.DataFrame()
+        # forecast_history eps rows are dated at fiscal year-end and hold the REPORTED
+        # figure, so they are knowable only after the annual filing lag (with `date <= D`
+        # a March year-end "arrived" on 1 April, weeks before results: the LARGE consensus
+        # evidence was that window)
+        cutoff = (eval_date - timedelta(days=ANNUAL_LAG)).isoformat()
+        v = raw["fh"][raw["fh"]["date"] <= cutoff] if "fh" in raw else pd.DataFrame()
     elif key == "acs":
         v = (raw["acs"][raw["acs"]["snapshot_date"] <= d]
              if "acs" in raw and not raw["acs"].empty else pd.DataFrame())
@@ -1385,8 +1432,53 @@ def _pit_input(ctx, raw, key, eval_date):
     return v
 
 
-def reconstruct_one_date(eval_date, raw, signals_to_run):
+TIER_PRICE_MAX_AGE_DAYS = 30   # = scoring.segment.PRICE_MAX_AGE_DAYS: no close in this window = not ranked
+MICRO_ADTV_CR, MICRO_MCAP_CR, MICRO_MIN_QUARTERS = 1.0, 500.0, 4   # = tools/classify_micro_tier's liquidity + size / data legs
+TIER_INPUTS = ("bs", "fund_screener", "qi")
+
+
+def tiers_at(eval_date, raw, px_pit):
+    """{sid: tier} as it would have been assigned ON eval_date: config.TIERS' rank rule
+    (scoring.segment.assign, no hysteresis) on market cap = that day's close × the
+    share count on that day's basis (signals._fundamentals.shares_and_book, statements
+    knowable then), with the MICRO carve-out on that day's liquidity (90-day average
+    traded value under ₹1 Cr and either a market cap under ₹500 Cr or fewer than 4
+    knowable quarters). A stock with no market cap that day has no tier.
+
+    The panel used to carry TODAY's tier at every anchor: "LARGE in 2021" meant "grew
+    into LARGE by 2026" — of the true top 100 by market cap in June 2021, 39 are not
+    LARGE today (audit 2026-10, the largest look-ahead in the backtest)."""
+    from scoring import segment
+    from signals._fundamentals import shares_and_book
+    d = eval_date.isoformat()
+    if px_pit.empty:            # an anchor before the price history starts: nobody has a market cap
+        return {}
+    recent = px_pit[px_pit["date"] >= (eval_date - timedelta(days=90)).isoformat()]
+    close = pit_close_price(recent[recent["date"] >= (eval_date - timedelta(days=TIER_PRICE_MAX_AGE_DAYS)).isoformat()])
+    sb = shares_and_book(knowable_annual(raw["bs"], eval_date), knowable_screener(raw["fund_screener"], eval_date),
+                         raw["adjustments"], d)
+    mc = sb.merge(close, on="sid")
+    mc["mcap_cr"] = mc["shares"] * mc["close_price"] / 1e7
+    mc = mc[mc["mcap_cr"] > 0]
+    if mc.empty:
+        return {}
+    tiers = segment.assign(mc[["sid", "mcap_cr"]], {s: None for s in mc["sid"]}, h=0.0)
+    micro, carve_from = next((t, spec["carve_from"]) for t, spec in config.TIERS.items() if spec.get("carve_from"))
+    adtv = (recent["close"] * recent["volume"]).groupby(recent["sid"]).mean() / 1e7
+    quarters = knowable_quarterly(raw["qi"], eval_date).groupby("sid").size()
+    mcap = mc.set_index("sid")["mcap_cr"]
+    thin = (adtv.reindex(tiers.index).fillna(0) < MICRO_ADTV_CR) & (
+        (mcap.reindex(tiers.index) < MICRO_MCAP_CR) | (quarters.reindex(tiers.index).fillna(0) < MICRO_MIN_QUARTERS))
+    tiers[(tiers == carve_from) & thin] = micro
+    return tiers.to_dict()
+
+
+def reconstruct_one_date(eval_date, raw, signals_to_run, pit_tiers=False):
     """Reconstruct all enabled signals for a single eval_date. No DB writes.
+
+    pit_tiers=True (the backtest panel): every stock carries the tier of THAT date
+    (tiers_at), and the within-tier composites rank inside it. False (live,
+    features_at): the production tier in `stocks`, which the segment node maintains.
 
     `raw` is a dict of full-history DataFrames (loaded once, reused across dates).
     Every producer in factors.PIT_PRODUCERS whose name (or alias) is in
@@ -1398,15 +1490,18 @@ def reconstruct_one_date(eval_date, raw, signals_to_run):
     close_df = pit_close_price(px_pit)
     # Statement slices (qi/bs/cf/sh) are built lazily in _pit_input, so a caller
     # that loaded only some raw frames (load_raw(raw_keys_for(...))) still works.
+    stocks = raw["stocks"]
+    if pit_tiers:
+        stocks = stocks.assign(cap_tier=stocks["sid"].map(tiers_at(eval_date, raw, px_pit)))
     ctx = {
-        "stocks": raw["stocks"],
+        "stocks": stocks,
         "px": px_pit,
         "close": close_df,
         "eval_date": eval_date,
     }
 
     # Start with the universe + close + tier
-    base = raw["stocks"][["sid", "cap_tier"]].merge(close_df, on="sid", how="left")
+    base = stocks[["sid", "cap_tier"]].merge(close_df, on="sid", how="left")
     base["snapshot_date"] = eval_date.isoformat()
 
     for name, spec in factors.PIT_PRODUCERS.items():
@@ -1476,12 +1571,12 @@ def pit_financial_signal(banking_metrics_full, eval_date):
 # producers need (raw_keys_for), so the live screener can use this path too.
 RAW_SQL = {
     "stocks": 'SELECT sid, cap_tier, sector, industry, market_cap_cr FROM stocks',
-    "qi": 'SELECT sid, period, end_date, reporting, revenue, operating_profit, net_income, eps, interest, pbt, ebitda FROM quarterly_income WHERE end_date IS NOT NULL ORDER BY sid, end_date',
+    "qi": 'SELECT sid, period, end_date, reporting, revenue, operating_profit, net_income, eps, operating_expenses, pbt, ebitda FROM quarterly_income WHERE end_date IS NOT NULL ORDER BY sid, end_date',
     "bs": 'SELECT sid, period, end_date, total_assets, total_equity, total_debt, current_assets, current_liabilities, cash_and_equivalents, receivables, retained_earnings, net_ppe, total_liabilities, shares_outstanding, long_term_debt FROM annual_balance_sheet WHERE end_date IS NOT NULL ORDER BY sid, end_date',
-    "cf": 'SELECT sid, period, end_date, operating_cash_flow, capex, free_cash_flow, investing_cash_flow, financing_cash_flow, working_capital_change, depreciation, net_change_in_cash FROM annual_cash_flow WHERE end_date IS NOT NULL ORDER BY sid, end_date',
+    "cf": 'SELECT sid, period, end_date, operating_cash_flow, capex, free_cash_flow, investing_cash_flow, financing_cash_flow, working_capital_change, dividends_paid, net_change_in_cash FROM annual_cash_flow WHERE end_date IS NOT NULL ORDER BY sid, end_date',
     "sh": 'SELECT sid, end_date, promoter_pct, pledge_pct, fii_pct, mf_pct, dii_pct, public_pct, insurance_pct, retail_hni_pct, other_pct FROM shareholding ORDER BY sid, end_date',
-    "prices": 'SELECT sid, date, close, delivery_pct FROM stock_prices WHERE close > 0 ORDER BY sid, date',
-    "adjustments": 'SELECT sid, ex_date, factor FROM corporate_adjustments ORDER BY sid, ex_date',
+    "prices": 'SELECT sid, date, close, delivery_pct, volume FROM stock_prices WHERE close > 0 ORDER BY sid, date',
+    "adjustments": 'SELECT sid, ex_date, factor, inds FROM corporate_adjustments ORDER BY sid, ex_date',
     "fh": "SELECT sid, metric, date, value, change FROM forecast_history WHERE metric = 'eps' AND value IS NOT NULL ORDER BY sid, metric, date",
     "acs": 'SELECT sid, snapshot_date, source, target_mean, target_median, n_analysts, recommendation_mean FROM analyst_consensus_snapshots WHERE target_mean IS NOT NULL ORDER BY sid, snapshot_date',
     "bulk": 'SELECT sid, deal_date, quantity, price, buy_sell, client_name, symbol FROM bulk_deals ORDER BY sid, deal_date',
@@ -1493,18 +1588,17 @@ RAW_SQL = {
     "reg_signals": 'SELECT event_id, sector, direction, magnitude, confidence FROM regulatory_signals WHERE is_regulatory = 1 AND direction IS NOT NULL',
     "macro_hist": 'SELECT indicator_id, date, value FROM macro_history WHERE value IS NOT NULL ORDER BY indicator_id, date',
     "macro_map": 'SELECT indicator_id, sector, direction, weight FROM macro_sector_map',
-    "macro_sector": 'SELECT sector, snapshot_date, macro_score FROM macro_sector_signals_pit WHERE macro_score IS NOT NULL ORDER BY sector, snapshot_date',
     "fund_screener": "SELECT sid, period_end, line_item, value FROM fundamentals_screener WHERE period_type = 'annual'",
     "banking_metrics": 'SELECT sid, period_end, period_type, gross_npa_pct, net_npa_pct,        interest_earned, net_interest_income, net_profit, cost_of_funds_pct FROM banking_metrics',
     "fno_pcr": 'SELECT sid, trade_date, expiry_date, underlying_price, total_call_oi, total_put_oi, pcr_oi, pcr_volume, max_pain_distance FROM fno_pcr_history WHERE sid IS NOT NULL ORDER BY sid, trade_date',
     "fno_iv": 'SELECT sid, trade_date, atm_iv, iv_skew_25d, iv_term_structure FROM fno_iv_history WHERE sid IS NOT NULL ORDER BY sid, trade_date',
     "prices_ohlc": 'SELECT sid, date, open, high, low, close, volume FROM stock_prices WHERE close > 0 ORDER BY sid, date',
     "corp_actions": 'SELECT sid, ex_date, subject FROM corporate_actions WHERE ex_date IS NOT NULL AND sid IS NOT NULL ORDER BY sid, ex_date',
-    "bse_results": "SELECT sid, date(dt_tm) AS ann_date FROM bse_announcements WHERE category='Result' AND sid IS NOT NULL AND dt_tm IS NOT NULL ORDER BY sid, dt_tm",
+    "bse_results": f"SELECT sid, date(dt_tm) AS ann_date FROM bse_announcements WHERE {factors.RESULT_FILING_SQL} AND sid IS NOT NULL AND dt_tm IS NOT NULL ORDER BY sid, dt_tm",
     "bse_gov": lambda: _bse_gov_sql(),
     "nlp": "SELECT sid, doc_date, available_date, net_tone, uncertainty_density, forward_looking_intensity FROM nlp_scores WHERE doc_type = 'transcript'",
 }
-RAW_OPTIONAL = ['acs', 'banking_metrics', 'bse_gov', 'bse_results', 'corp_actions', 'fno_iv', 'fno_pcr', 'macro_sector', 'nlp']   # empty frame when the table is absent/unreadable
+RAW_OPTIONAL = ['acs', 'banking_metrics', 'bse_gov', 'bse_results', 'corp_actions', 'fno_iv', 'fno_pcr', 'nlp']   # empty frame when the table is absent/unreadable
 
 
 

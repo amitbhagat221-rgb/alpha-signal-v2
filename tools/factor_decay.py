@@ -4,7 +4,7 @@ Alpha Signal v2 — Factor decay monitor (audit Factor-F4).
 Read-only. A factor's t-stat at wiring time is a POINT-IN-TIME measurement —
 nothing re-checks whether the edge that justified its weight is still there.
 This computes, for every currently-wired factor per tier, a rolling-window
-IC comparison: the last 12 anchors vs the factor's full history. Flags
+IC comparison: the the last year of the factor's own anchors (12 monthly / 52 weekly) vs its full history. Flags
 DECAYED when the recent window's sign no longer matches the wired weight's
 sign, or its magnitude has fallen below a quarter of the all-time mean —
 the pattern the audit found in governance_resignation (yearly IC swung
@@ -32,28 +32,38 @@ import numpy as np
 
 import factors
 from db import read_sql
-from tools.backtest_pit import SIGNAL_COLUMN_MAP, _compute_ic
+from tools.backtest_pit import _compute_ic, _newey_west_se, _nw_lag_for, iter_panels
 
 # weight key → registry id (tier-default); re-exported for tools/expected_return.
 WEIGHT_KEY_TO_SIGNAL = factors.WEIGHT_KEY_TO_SIGNAL
 
-RECENT_WINDOW = 12
-DECAY_MAGNITUDE_FLOOR = 0.25   # last-12 |mean IC| < 25% of all-time |mean IC| → decayed
+RECENT_WINDOW = {"monthly": 12, "weekly": 52}   # one year of the factor's own anchors
+DECAY_MAGNITUDE_FLOOR = 0.25   # recent |mean IC| < 25% of all-time |mean IC| → decayed
 DECAY_MIN_SE = 2.0             # …and the drop is at least this many standard errors of the recent mean
 
+_PANEL = None
 
-def _factor_ic_series(v2_col, cap_tier):
-    """Per-anchor Spearman IC for one (column, tier), oldest→newest."""
-    df = read_sql(
-        f"SELECT snapshot_date, [{v2_col}], fwd_return_20d FROM daily_snapshots_pit "
-        f"WHERE cap_tier = ? AND [{v2_col}] IS NOT NULL AND fwd_return_20d IS NOT NULL",
-        params=[cap_tier],
-    )
-    if df.empty:
-        return []
-    ic_rows = _compute_ic(df, v2_col, "fwd_return_20d")
-    ic_rows.sort(key=lambda r: r[0])  # (eval_date, ic, n_stocks), oldest first
-    return ic_rows
+
+def _panel():
+    global _PANEL
+    if _PANEL is None:
+        cols = sorted({factors.FACTORS[s].get("replay_col") or factors.pit_column(s) for s in factors.wired_signal_ids()})
+        _PANEL = read_sql("SELECT snapshot_date, cap_tier, fwd_return_20d, "
+                          + ", ".join(f"[{c}]" for c in cols) + " FROM daily_snapshots_pit")
+    return _PANEL
+
+
+def _factor_ic_series(col, cap_tier, signal_id):
+    """Per-anchor Spearman IC for one (column, tier), oldest→newest, on the SAME
+    anchors the backtest scores (iter_panels: a weekly factor on Fridays, a monthly
+    one on month-start anchors). Taking every anchor with a value mixed the two
+    grids: "the last 12 anchors" was nine weeks of 4×-overlapping windows for every
+    factor, and the all-time IC disagreed with the evidence table."""
+    panel = _panel()
+    for *_, tier, tier_df in iter_panels(panel.iloc[:0], panel, [(signal_id, (None, col))]):
+        if tier == cap_tier:
+            return sorted(_compute_ic(tier_df, col, "fwd_return_20d"), key=lambda r: r[0])
+    return []
 
 
 def analyze():
@@ -65,8 +75,10 @@ def analyze():
             if weight == 0:
                 continue
             signal_id = factors.signal_for(weight_key, tier)
-            col_map = SIGNAL_COLUMN_MAP.get(signal_id)
-            v2_col = col_map[1] if col_map else None
+            # the column the screener SCORES (accruals: the composite, not its cf component)
+            v2_col = factors.FACTORS[signal_id].get("replay_col") or factors.pit_column(signal_id)
+            cadence = factors.get_backtest_cadence(signal_id)
+            window = RECENT_WINDOW.get(cadence, 12)
             if not v2_col:
                 rows.append({
                     "tier": tier, "weight_key": weight_key, "signal_id": signal_id,
@@ -76,7 +88,7 @@ def analyze():
                 })
                 continue
 
-            ic_rows = _factor_ic_series(v2_col, tier)
+            ic_rows = _factor_ic_series(v2_col, tier, signal_id)
             n_all = len(ic_rows)
             if n_all == 0:
                 rows.append({
@@ -89,7 +101,7 @@ def analyze():
 
             ics_all = np.array([r[1] for r in ic_rows])
             ic_all = float(ics_all.mean())
-            recent = ic_rows[-RECENT_WINDOW:]
+            recent = ic_rows[-window:]
             ics_recent = np.array([r[1] for r in recent])
             n_recent = len(recent)
             ic_recent = float(ics_recent.mean())
@@ -100,7 +112,7 @@ def analyze():
             magnitude_collapsed = abs(ic_all) > 1e-9 and abs(ic_recent) < DECAY_MAGNITUDE_FLOOR * abs(ic_all)
             # how far the recent mean is below the all-time mean, in the wired direction,
             # in standard errors of the recent mean (None: too few anchors to say)
-            se = float(ics_recent.std(ddof=1) / np.sqrt(n_recent)) if n_recent >= 3 else 0.0
+            se = (_newey_west_se(ics_recent, _nw_lag_for(signal_id, cadence)) or 0.0) if n_recent >= 3 else 0.0
             gap_se = sign_wired * (ic_all - ic_recent) / se if se > 0 else None
             decayed = bool((sign_mismatch or magnitude_collapsed) and gap_se is not None and gap_se >= DECAY_MIN_SE)
 
@@ -110,15 +122,15 @@ def analyze():
                 "ic_all": round(ic_all, 4), "ic_recent": round(ic_recent, 4),
                 "gap_se": None if gap_se is None else round(gap_se, 1),
                 "decayed": decayed,
-                "note": ("thin panel (<12 anchors) — decay read is provisional"
-                         if n_all < RECENT_WINDOW else ""),
+                "note": ("thin panel — under two years of anchors, the recent window is most of the history"
+                         if n_all < 2 * window else ""),
             })
     return rows
 
 
 def main():
     rows = analyze()
-    print(f"\n══ Factor decay monitor — last {RECENT_WINDOW} anchors vs all-time IC ══\n")
+    print(f"\n══ Factor decay monitor — last year of anchors vs all-time IC ══\n")
     print(f"  {'TIER':6s} {'FACTOR':22s} {'WEIGHT':>8s} {'N(all)':>7s} {'N(recent)':>9s} "
           f"{'IC(all)':>8s} {'IC(recent)':>10s}  FLAG")
     n_decayed = 0

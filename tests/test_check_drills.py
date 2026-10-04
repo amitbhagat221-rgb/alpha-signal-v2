@@ -164,10 +164,19 @@ def _reshuffled(conn):
 
 @drill("DAILY_PICKS_COVERAGE_LOW")
 def _thin(conn):
-    conn.executemany("INSERT INTO daily_picks (sid, pick_date, cap_tier, final_score) VALUES (?, ?, ?, 0.5)",
-                     [(f"S{i}", TODAY, PICKABLE_TIERS[0]) for i in range(5)])
+    for tier in PICKABLE_TIERS:                           # 40 stocks a tier
+        conn.executemany("INSERT INTO stocks (sid, ticker, name, sector, cap_tier) VALUES (?, ?, ?, 'Energy', ?)",
+                         [(f"{tier}{i}", f"{tier}{i}", "x", tier) for i in range(40)])
+    rank = lambda tier, n: conn.executemany(
+        "INSERT INTO daily_picks (sid, pick_date, cap_tier, final_score) VALUES (?, ?, ?, 0.5)",
+        [(f"{tier}{i}", TODAY, tier) for i in range(n)])
+    rank(PICKABLE_TIERS[0], 5)                            # 5 of 40 in one tier, nothing in the others
     v = _fires("DAILY_PICKS_COVERAGE_LOW", conn)
     assert (v["status"], v["severity"], v["n_bad"]) == (FAIL, CRITICAL, len(PICKABLE_TIERS))
+    conn.execute("DELETE FROM daily_picks")
+    for tier in PICKABLE_TIERS:
+        rank(tier, 37)                                    # 37 of 40 ranked is not thin (a flat 100 was the old bar)
+    assert _fires("DAILY_PICKS_COVERAGE_LOW", conn)["status"] == PASS
 
 
 def _targets(conn, targets):
@@ -175,6 +184,36 @@ def _targets(conn, targets):
         conn.execute("INSERT INTO stock_prices (sid, date, close) VALUES (?, ?, 100)", (sid, TODAY))
         conn.execute("INSERT INTO analyst_consensus (sid, price_target, has_analyst_data, fetched_at) VALUES (?, ?, 1, ?)",
                      (sid, pt, TODAY))
+
+
+def _price_days(conn, days):
+    """days: {date: {sid: (close, volume)}}"""
+    _stocks(conn, n=0)
+    for d, rows in days.items():
+        conn.executemany("INSERT INTO stock_prices (sid, date, close, volume, source) VALUES (?, ?, ?, ?, 'bhavcopy')",
+                         [(sid, d, c, v) for sid, (c, v) in rows.items()])
+
+
+@drill("PRICE_DAY_COPIED")
+def _holiday_file_stored_as_a_trading_day(conn):
+    conn.executemany("INSERT INTO stocks (sid, ticker, name, sector, cap_tier) VALUES (?, ?, ?, 'Energy', 'LARGE')",
+                     [(s, s, s) for s in "ABCD"])
+    session = {s: (100.0 + i, 5000 + i) for i, s in enumerate("ABCD")}
+    _price_days(conn, {"2026-09-30": {s: (c - 1, v + 7) for s, (c, v) in session.items()},
+                       "2026-10-01": session, "2026-10-02": session})          # the holiday repeats 10-01
+    v = _fires("PRICE_DAY_COPIED", conn)
+    assert (v["status"], v["n_bad"], v["n_total"], v["severity"]) == (FAIL, 4, 4, CRITICAL)
+
+
+@drill("PRICE_JUMP_UNEXPLAINED")
+def _a_split_nobody_recorded(conn):
+    conn.executemany("INSERT INTO stocks (sid, ticker, name, sector, cap_tier) VALUES (?, ?, ?, 'Energy', 'SMALL')",
+                     [(s, s, s) for s in ("SPLIT", "KNOWN", "CALM")])
+    _price_days(conn, {"2026-09-30": {"SPLIT": (500.0, 10), "KNOWN": (500.0, 10), "CALM": (50.0, 10)},
+                       "2026-10-01": {"SPLIT": (100.0, 50), "KNOWN": (100.0, 50), "CALM": (51.0, 12)}})
+    conn.execute("INSERT INTO corporate_adjustments (sid, ex_date, factor, n_events, inds) VALUES ('KNOWN', '2026-10-01', 0.2, 1, 'SPLIT')")
+    v = _fires("PRICE_JUMP_UNEXPLAINED", conn)
+    assert (v["status"], v["n_bad"], v["n_total"]) == (FAIL, 1, 3) and "SPLIT" in v["sample"]
 
 
 @drill("ANALYST_TARGET_IMPLAUSIBLE")

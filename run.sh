@@ -96,6 +96,15 @@ case "$JOB" in
                         # morning LLM steps run the worker inline with deadlines; this picks up leftovers
                         # (expired leases, items past a deadline). No harvest lock: no external fetch.
         logged cron_llm_local run "$ROOT/ops/llm_worker_local.sh" 40 ;;
+    org)                # 06:30 UTC — the agent org (plan 0019): every desk role due today runs as its own
+                        # `claude -p` worker on the subscription, in org.RUN_ORDER (daily: data triage, risk
+                        # note, compliance grades; Sunday: sector desk, CIO, CTO, scout, board pack + email).
+                        # No harvest lock: it fetches no market data. Its own lock: org runs never overlap.
+        if [ -z "${DRY:-}" ]; then
+            exec 201>/tmp/alpha_signal_org.lock
+            flock -n 201 || { echo "another org run holds the lock, exiting $(date -u)"; exit 0; }
+        fi
+        logged cron_org run python -m org run ;;
     watchdog)           # 15:00 UTC — re-run producers of stale tables (takes the lock itself)
         run python -m tools.freshness_watchdog ;;
     health)             # 04:00 UTC — health email + push
@@ -129,6 +138,6 @@ case "$JOB" in
         echo "Tickertape finished rc=$RC at $(date -u)"
         exit $RC ;;
     *)
-        echo "unknown job '$JOB' (morning forward canary estimates transcripts screener_schedules llm_local watchdog health pt_snapshot backtest expected_return screener_cookie secrets_backup screener_universe tickertape)"
+        echo "unknown job '$JOB' (morning forward canary estimates transcripts screener_schedules llm_local org watchdog health pt_snapshot backtest expected_return screener_cookie secrets_backup screener_universe tickertape)"
         exit 2 ;;
 esac

@@ -36,6 +36,7 @@ full per-snapshot breakdown. Not fixed here — rebuilding the panel against
 """
 
 import argparse
+from datetime import datetime, timezone
 
 import numpy as np
 import pandas as pd
@@ -43,7 +44,7 @@ from scipy.stats import spearmanr
 
 import factors
 from config import PICKABLE_TIERS
-from db import get_backtest_cadence, read_sql, upsert_df
+from db import get_backtest_cadence, get_db, read_sql, upsert_df
 
 
 # Mapping: signal_id (registry) → (v1_column, v2_column) for every IC-rankable
@@ -53,9 +54,12 @@ from db import get_backtest_cadence, read_sql, upsert_df
 SIGNAL_COLUMN_MAP = factors.SIGNAL_COLUMN_MAP
 
 
-def _verdict(t):
-    """C13b verdict from t-stat absolute value."""
-    if t is None or pd.isna(t):
+IC_MIN_PERIODS = 12  # fewer anchors than this carry no verdict and no CI (a t of 19 on 2 anchors is not evidence)
+
+
+def _verdict(t, n_periods=IC_MIN_PERIODS):
+    """C13b verdict from t-stat absolute value; INSUFFICIENT below IC_MIN_PERIODS anchors."""
+    if t is None or pd.isna(t) or n_periods < IC_MIN_PERIODS:
         return "INSUFFICIENT"
     t_abs = abs(t)
     if t_abs >= 2.5:
@@ -63,6 +67,18 @@ def _verdict(t):
     if t_abs >= 1.5:
         return "WEAK"
     return "DROP"
+
+
+def evidence():
+    """THE evidence row per (signal, cap_tier) — every reader of pit_ic_by_tier_v2
+    takes its row from here (the cockpit, MCP, multiple_testing, optimize_weights,
+    expected_return and factor_audit each used to pick their own and disagreed):
+    the v2 panel before the frozen v1 archive, then the row with the most anchors."""
+    df = read_sql("SELECT * FROM pit_ic_by_tier_v2")
+    df["_v1"] = ~df["source"].fillna("").str.startswith("v2_recompute")
+    return (df.sort_values(["_v1", "n_periods"], ascending=[True, False])
+              .drop_duplicates(["signal", "cap_tier"], keep="first")
+              .drop(columns="_v1").reset_index(drop=True))
 
 
 def _compute_ic(df, signal_col, fwd_col):
@@ -111,33 +127,26 @@ def _newey_west_se(ics, lag):
 
 
 def _bootstrap_t_ci(ics, n_bootstrap=1000, nw_lag=0, seed=42):
-    """95% bootstrap CI on the t-stat (resample IC series with replacement).
-
-    Plan 0005 Phase D.5: point-estimate t-stats hide their own uncertainty.
-    A t=3.0 with [CI 1.2, 4.8] is much weaker evidence than t=3.0 with
-    [CI 2.8, 3.2]. Bootstrap is non-parametric — works whether IC is normal
-    or fat-tailed.
+    """95% bootstrap CI on the t-stat: resample the mean IC, scale by the series' own
+    standard error (Newey-West when nw_lag > 0), so the interval is centred on the
+    reported t. Overlapping series (nw_lag > 0) are resampled in moving blocks of
+    nw_lag + 1 anchors — iid resampling would destroy the autocorrelation the
+    standard error corrects for. No CI below IC_MIN_PERIODS anchors.
     """
+    ics = np.asarray(ics, dtype=float)
     n = len(ics)
-    if n < 4:  # below 4, bootstrap is meaningless
+    if n < IC_MIN_PERIODS:
+        return None, None
+    se = _newey_west_se(ics, nw_lag)
+    if not se or se <= 0:
         return None, None
     rng = np.random.default_rng(seed)
-    ts = np.empty(n_bootstrap)
-    for i in range(n_bootstrap):
-        sample = rng.choice(ics, size=n, replace=True)
-        mu = sample.mean()
-        sd = sample.std(ddof=1)
-        if sd <= 0:
-            ts[i] = 0.0
-            continue
-        if nw_lag > 0:
-            se = _newey_west_se(sample, nw_lag) or (sd / np.sqrt(n))
-        else:
-            se = sd / np.sqrt(n)
-        ts[i] = mu / se if se > 0 else 0.0
-    lo = float(np.percentile(ts, 2.5))
-    hi = float(np.percentile(ts, 97.5))
-    return round(lo, 2), round(hi, 2)
+    block = min(nw_lag + 1, n)
+    n_blocks = -(-n // block)
+    starts = rng.integers(0, n - block + 1, size=(n_bootstrap, n_blocks))
+    idx = (starts[:, :, None] + np.arange(block)).reshape(n_bootstrap, -1)[:, :n]
+    ts = ics[idx].mean(axis=1) / se
+    return round(float(np.percentile(ts, 2.5)), 2), round(float(np.percentile(ts, 97.5)), 2)
 
 
 def _aggregate(ic_rows, signal, cap_tier, source, cadence="monthly", nw_lag=0):
@@ -176,7 +185,7 @@ def _aggregate(ic_rows, signal, cap_tier, source, cadence="monthly", nw_lag=0):
         "t_stat": round(float(t_stat), 2) if t_stat is not None else None,
         "t_stat_ci_lo": t_ci_lo,
         "t_stat_ci_hi": t_ci_hi,
-        "verdict": _verdict(t_stat),
+        "verdict": _verdict(t_stat, n_periods),
         "source": source + (f":{cadence}+NW{nw_lag}" if nw_lag > 0 else (f":{cadence}" if cadence != "monthly" else "")),
     }
 
@@ -327,9 +336,21 @@ def main():
         print(f"\n[dry-run] not writing")
         return
 
+    # computed_at is written explicitly (the column default only fires on INSERT, so an
+    # upserted row kept its first date forever), and rows this run no longer produces
+    # for the signals it scored are deleted (the source string is part of the key and
+    # changes with cadence / NW lag, which left orphan rows behind).
+    df["computed_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     df_to_write = df.astype(object).where(df.notna(), None)
     n = upsert_df(df_to_write, "pit_ic_by_tier_v2")
-    print(f"\n→ wrote {n} rows to pit_ic_by_tier_v2")
+    produced = set(zip(df["signal"], df["cap_tier"], df["source"]))
+    with get_db() as conn:
+        stored = conn.execute(
+            f"SELECT signal, cap_tier, source FROM pit_ic_by_tier_v2 WHERE signal IN ({','.join('?' * len(targets))})",
+            [sig for sig, _ in targets]).fetchall()
+        orphans = [tuple(r) for r in stored if tuple(r) not in produced]
+        conn.executemany("DELETE FROM pit_ic_by_tier_v2 WHERE signal = ? AND cap_tier = ? AND source = ?", orphans)
+    print(f"\n→ wrote {n} rows to pit_ic_by_tier_v2, removed {len(orphans)} rows no run produces any more")
 
 
 if __name__ == "__main__":

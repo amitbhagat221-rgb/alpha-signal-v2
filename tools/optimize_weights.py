@@ -68,22 +68,11 @@ WIRED_KEYS = {
 
 
 def _load_canonical_ics():
-    """Read pit_ic_by_tier_v2, dedupe (signal, cap_tier) by max n_periods.
-
-    Multiple backtest runs across v1/v2 PIT sources leave duplicate rows.
-    The row with the most observations is the most reliable estimate.
-    """
-    df = read_sql(f"""
-        SELECT signal, cap_tier, n_periods, mean_ic, icir, t_stat, verdict
-        FROM pit_ic_by_tier_v2
-        WHERE cap_tier IN ({",".join("?" * len(PICKABLE_TIERS))})
-          AND t_stat IS NOT NULL
-    """, params=list(PICKABLE_TIERS))
-    # Keep row with most periods per (signal, cap_tier)
-    df = df.sort_values("n_periods", ascending=False).drop_duplicates(
-        subset=["signal", "cap_tier"], keep="first"
-    )
-    return df
+    """The evidence row per (signal, cap_tier) — tools.backtest_pit.evidence()."""
+    from tools.backtest_pit import evidence
+    df = evidence()
+    df = df[df["cap_tier"].isin(PICKABLE_TIERS) & df["t_stat"].notna()]
+    return df[["signal", "cap_tier", "n_periods", "mean_ic", "icir", "t_stat", "verdict"]]
 
 
 def _filter_wired(weights_by_tier: dict) -> dict:

@@ -80,19 +80,79 @@ CHECKS = [
         "table": "daily_picks",
         "column": "—",
         "theme": "picks",
-        "message": "A tier has fewer than 100 ranked stocks today",
+        "message": "A tier has far fewer ranked stocks than it has stocks",
         "why": "The screener dropped most of a tier (a mis-wired eligibility rule once removed every MID Financial).",
-        "fix": "Compare today's daily_picks count per tier with yesterday's; check eligibility/registry.py for the factor that excludes them.",
+        "fix": "Compare today's daily_picks count per tier with yesterday's; the factors' eligibility rules (factors.FACTORS) "
+               "and the pick gate (config.PICK_GATE) decide who is left out: find the factor that stopped covering the tier.",
         "severity": CRITICAL,
-        # Tiers come from config (pickable ones); a tier with NO rows counts as thin.
+        # Tiers come from config (pickable ones); thin = under 80% of the tier's stocks ranked (a tier
+        # with NO rows counts as thin). The bar used to be a flat 100, which a LARGE tier of ~103
+        # stocks crosses the day seven of them miss the coverage gate.
         "sql": f"""
-            SELECT {len(PICKABLE_TIERS)} - COALESCE(SUM(CASE WHEN c >= 100 THEN 1 ELSE 0 END), 0) AS n_bad,
-                   {len(PICKABLE_TIERS)} AS n_total
-            FROM (
-                SELECT cap_tier, COUNT(*) AS c
-                FROM daily_picks WHERE pick_date = (SELECT MAX(pick_date) FROM daily_picks)
-                GROUP BY cap_tier
+            SELECT {len(PICKABLE_TIERS)} - COALESCE(SUM(CASE WHEN p.c >= 0.8 * t.n THEN 1 ELSE 0 END), 0) AS n_bad,
+                   {len(PICKABLE_TIERS)} AS n_total,
+                   (SELECT GROUP_CONCAT(x.cap_tier || ' ' || x.c || ' of ' || y.n, '; ')
+                    FROM (SELECT cap_tier, COUNT(*) AS c FROM daily_picks
+                          WHERE pick_date = (SELECT MAX(pick_date) FROM daily_picks) GROUP BY cap_tier) x
+                    JOIN (SELECT cap_tier, COUNT(*) AS n FROM stocks GROUP BY cap_tier) y USING (cap_tier)
+                    WHERE x.c < 0.8 * y.n) AS sample
+            FROM (SELECT cap_tier, COUNT(*) AS n FROM stocks GROUP BY cap_tier) t
+            JOIN (SELECT cap_tier, COUNT(*) AS c FROM daily_picks
+                  WHERE pick_date = (SELECT MAX(pick_date) FROM daily_picks) GROUP BY cap_tier) p USING (cap_tier)
+            WHERE t.cap_tier IN ({", ".join("'" + x + "'" for x in PICKABLE_TIERS)})
+        """,
+    },
+
+    # ═══════════════════════════════════════════════════════════════════
+    # Prices — every price factor and the day's ranking read these rows
+    # ═══════════════════════════════════════════════════════════════════
+    {
+        "code": "PRICE_DAY_COPIED",
+        "table": "stock_prices",
+        "column": "close",
+        "theme": "correct",
+        "message": "The newest price day is a copy of the session before it",
+        "why": "On a market holiday NSE serves the previous session's file. Stored as a trading day, every price "
+               "window counts it and the day's picks rank on it (44 such days were stored, 2020 to 2026).",
+        "fix": "Delete that date from stock_prices and check the file-date guard in sources/nse.py "
+               "(_fetch_date must refuse a file whose DATE1 is not the day asked for).",
+        "critical_pct": 50,
+        "warn_pct": 15,
+        "sql": """
+            WITH days AS (SELECT DISTINCT date FROM stock_prices ORDER BY date DESC LIMIT 2)
+            SELECT COALESCE(SUM(a.close = b.close AND a.volume = b.volume), 0) AS n_bad, COUNT(*) AS n_total,
+                   (SELECT MAX(date) FROM days) || ' repeats ' || (SELECT MIN(date) FROM days) AS sample
+            FROM stock_prices a JOIN stock_prices b ON a.sid = b.sid
+            WHERE a.date = (SELECT MAX(date) FROM days) AND b.date = (SELECT MIN(date) FROM days)
+              AND (SELECT COUNT(*) FROM days) = 2
+        """,
+    },
+    {
+        "code": "PRICE_JUMP_UNEXPLAINED",
+        "table": "stock_prices",
+        "column": "close",
+        "theme": "correct",
+        "message": "A share price moved more than 40% in a day with no split, bonus or dividend on record",
+        "why": "Circuit limits make such a move impossible in normal trading: it is a split, bonus or demerger the "
+               "corporate-actions table missed. Momentum, volatility and the return label then read it as a crash or a spike.",
+        "fix": "Look the stock up on the exchange's corporate-actions page; add the event to corporate_actions "
+               "(or teach tools/compute_corporate_adjustments.py the wording it missed) and rerun that step.",
+        "severity": WARN,
+        "sql": """
+            WITH recent AS (
+                SELECT sid, date, close, LAG(close) OVER (PARTITION BY sid ORDER BY date) AS prev
+                FROM stock_prices WHERE date >= (SELECT date(MAX(date), '-12 day') FROM stock_prices) AND close > 0
+            ),
+            judged AS (
+                SELECT r.sid, r.date, r.close / r.prev AS move,
+                       (r.close / r.prev < 0.6 OR r.close / r.prev > 1.67) AND NOT EXISTS (
+                           SELECT 1 FROM corporate_adjustments ca WHERE ca.sid = r.sid
+                             AND ca.ex_date BETWEEN date(r.date, '-10 day') AND date(r.date, '+10 day')) AS bad
+                FROM recent r WHERE r.prev > 0
             )
+            SELECT COALESCE(SUM(bad), 0) AS n_bad, COUNT(DISTINCT sid) AS n_total,
+                   (SELECT sid || ' on ' || date || ': ×' || ROUND(move, 2) FROM judged WHERE bad LIMIT 1) AS sample
+            FROM judged
         """,
     },
 

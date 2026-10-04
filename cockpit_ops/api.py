@@ -169,7 +169,7 @@ def get_model_overview():
     }
 
 
-IC_MIN_PERIODS = 12  # below this a t-stat is preliminary (plan 0005 Phase D.4)
+from tools.backtest_pit import IC_MIN_PERIODS  # noqa: E402  below this a t-stat carries no verdict
 
 
 def best_ic_by_signal(per_tier=False):
@@ -178,32 +178,25 @@ def best_ic_by_signal(per_tier=False):
     (backtest roster). Pre-2026-09-26 each surface ranked sources its own way, so
     /system and /command disagreed on which factors were promoted.
 
-    Rule (plan 0005 Phase D):
-      1. rows with n_periods >= IC_MIN_PERIODS first (statistically meaningful)
-      2. within those, v2_recompute (incl. "v2_recompute:<variant>") before v1_archive
-      3. then highest |t|
-    Falls back to whatever exists when nothing clears the n bar.
+    Rule: per (signal, cap_tier) the ONE evidence row of tools.backtest_pit.evidence()
+    (v2 panel before v1 archive, then most anchors). per_tier=False picks, across a
+    signal's tiers, rows with n_periods >= IC_MIN_PERIODS first, then highest |t|.
 
     per_tier=False → {signal: row};  per_tier=True → {signal: {cap_tier: row}}.
     Rows carry signal, cap_tier, source, t_stat, n_periods, mean_ic, verdict,
     t_stat_ci_lo, t_stat_ci_hi."""
     try:
-        ic = read_sql(
-            "SELECT signal, cap_tier, source, t_stat, n_periods, mean_ic, verdict, "
-            "t_stat_ci_lo, t_stat_ci_hi FROM pit_ic_by_tier_v2"
-        )
+        from tools.backtest_pit import evidence
+        ic = evidence()[["signal", "cap_tier", "source", "t_stat", "n_periods", "mean_ic", "verdict",
+                         "t_stat_ci_lo", "t_stat_ci_hi"]]
     except Exception:
         return {}
     if ic.empty:
         return {}
     ranked = (
-        ic.assign(
-            _abst=ic["t_stat"].abs(),
-            _adequate_n=(ic["n_periods"] >= IC_MIN_PERIODS).astype(int),
-            _src=(~ic["source"].fillna("").str.startswith("v2_recompute")).astype(int),
-        )
-        .sort_values(["_adequate_n", "_src", "_abst"], ascending=[False, True, False])
-        .drop(columns=["_abst", "_adequate_n", "_src"])
+        ic.assign(_abst=ic["t_stat"].abs(), _adequate_n=(ic["n_periods"] >= IC_MIN_PERIODS).astype(int))
+        .sort_values(["_adequate_n", "_abst"], ascending=[False, False])
+        .drop(columns=["_abst", "_adequate_n"])
     )
     if not per_tier:
         return ranked.drop_duplicates("signal", keep="first").set_index("signal", drop=False).to_dict("index")
@@ -2078,3 +2071,94 @@ def get_feed_overview():
         "new_sources": [r for r in rows if r["status"] in ("wanted", "candidate", "probation")],
         "drift": [{"what": w, "name": n} for w, n in drift],
     }
+
+
+# ─────────────────────────── Boardroom (plan 0019) ───────────────────────────
+
+def get_org_overview(mfrom=None, mto=None, mrole=None):
+    """Everything the /org Boardroom page shows: the role tree with each seat's
+    scorecard, the CEO inbox, the latest board pack, recent memos with their grades
+    and recent decisions. org.overview() is the one source — the alpha-ops `org`
+    MCP tool returns the same data."""
+    import datetime as _dt
+    import org
+    ov = _clean(org.overview())
+    # The Memos tab's filter: a date range and/or one employee. No filter = the newest of the last 14 days.
+    def _date(v):
+        try:
+            return _dt.date.fromisoformat(str(v)[:10]).isoformat() if v else None
+        except ValueError:
+            return None
+    recent = len(ov["memos"])                 # the tile counts the last 14 days whatever the filter shows
+    mfrom, mto = _date(mfrom), _date(mto)
+    mrole = mrole if mrole in org.ROLES else None
+    filtered = bool(mfrom or mto or mrole)
+    if filtered:
+        ov["memos"] = _clean([m for m in org.memos(mfrom, mto, mrole, limit=151) if m["type"] != "board_pack"])
+    today = _dt.date.today()
+    ov["memo_filter"] = {
+        "mfrom": mfrom or "", "mto": mto or "", "mrole": mrole or "", "active": filtered,
+        "capped": filtered and len(ov["memos"]) > 150,
+        "quick": [("Today", today.isoformat()), ("7 days", (today - _dt.timedelta(days=7)).isoformat()),
+                  ("30 days", (today - _dt.timedelta(days=30)).isoformat()), ("All time", "2000-01-01")],
+        "first": org.docs(org.MEMO_TYPES, days=None, limit=1) and db.scalar(
+            "SELECT MIN(substr(doc_date, 1, 10)) FROM documents WHERE source = 'org' AND status = 'valid'"),
+    }
+    by_id = {r["id"]: r for r in ov["roles"]}
+    tree = []
+
+    def walk(boss, depth):
+        for r in ov["roles"]:
+            if r["reports_to"] == boss:
+                tree.append({**r, "depth": depth})
+                walk(r["id"], depth + 1)
+    walk(None, 0)
+    for m in ov["memos"] + ov["inbox"] + ov["decisions"]:
+        m["role_title"] = (by_id.get(m["fields"].get("role")) or {}).get("title") or m["fields"].get("role")
+    graded = [r["score"]["grade"] for r in ov["roles"] if (r.get("score") or {}).get("grade") is not None]
+    ov["tree"] = tree
+    ov["memos"] = ov["memos"][:150 if filtered else 40]   # unfiltered: the newest; the date filter reaches the rest
+    ov["running"] = org_running()
+    ov["summary"] = {
+        "agents": sum(1 for r in ov["roles"] if r["type"] != "human"),
+        "desk": sum(1 for r in ov["roles"] if r["type"] == "desk"),
+        "inbox": len(ov["inbox"]),
+        "memos": recent,
+        "avg_grade": round(sum(graded) / len(graded), 1) if graded else None,
+    }
+    return ov
+
+
+ORG_LOCK = "/tmp/alpha_signal_org.lock"      # the same lock run.sh `org` takes: org runs never overlap
+
+
+def org_running():
+    """True while an org run (cron or a Run-now click) holds the org lock."""
+    import fcntl
+    with open(ORG_LOCK, "a") as lf:
+        try:
+            fcntl.flock(lf, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            fcntl.flock(lf, fcntl.LOCK_UN)
+            return False
+        except BlockingIOError:
+            return True
+
+
+def org_run(role):
+    """Start a seat (or "all" enabled desk seats) now, detached: an ad hoc run that leaves
+    the scheduled period free and sends no email. Memos appear on the page as each seat
+    finishes. Refuses while another org run holds the lock."""
+    import subprocess
+    import sys
+    from pathlib import Path
+    import org
+    if role != "all" and (role not in org.ROLES or org.ROLES[role]["type"] != "desk"):
+        return {"ok": False, "error": f"{role!r} is not a desk seat (builders are started from a Claude Code session)"}
+    if org_running():
+        return {"ok": False, "error": "an org run is already in progress; try again when it finishes"}
+    root = Path(__file__).resolve().parent.parent
+    log_fp = open(root / "output" / "org.log", "ab")
+    args = ["--all"] if role == "all" else ["--role", role]
+    subprocess.Popen(["flock", "-n", ORG_LOCK, sys.executable, "-m", "org", "run", *args, "--adhoc", "--no-deliver"],
+                     cwd=root, stdout=log_fp, stderr=subprocess.STDOUT, start_new_session=True)
+    return {"ok": True, "role": role, "log": "output/org.log"}

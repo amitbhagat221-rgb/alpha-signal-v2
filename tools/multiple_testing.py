@@ -33,27 +33,19 @@ import pandas as pd
 from scipy import stats
 
 import factors
-from db import read_sql
+from db import read_sql  # noqa: F401
+from tools.backtest_pit import IC_MIN_PERIODS, evidence
 
 def _wired_pairs() -> set:
     """(backtest signal id, tier) for every nonzero production weight (factors.signal_for)."""
     return factors.wired_pairs()
 
 
-def load_tests(min_n: int = 4) -> pd.DataFrame:
+def load_tests(min_n: int = IC_MIN_PERIODS) -> pd.DataFrame:
     """One row per (signal, tier) — the deduped hypothesis set with two-sided p-values."""
-    df = read_sql(
-        "SELECT signal, cap_tier, n_periods, mean_ic, t_stat, verdict, source "
-        "FROM pit_ic_by_tier_v2 WHERE t_stat IS NOT NULL AND n_periods >= ?",
-        params=[min_n])
-    # Dedup sources to one test per (signal,tier): the cadence/NW variants + v1 archive
-    # are the SAME hypothesis. Represent each by its MOST-POWERED test — prefer non-v1,
-    # then max n_periods (so e.g. delivery_anomaly_z is its n=103 weekly test, not a
-    # thin monthly recompute; iv_skew its 48-week panel).
-    df["is_v1"] = (df["source"] == "v1_archive").astype(int)
-    df = (df.sort_values(["is_v1", "n_periods"], ascending=[True, False])
-            .drop_duplicates(["signal", "cap_tier"], keep="first")
-            .drop(columns="is_v1").reset_index(drop=True))
+    df = evidence()   # one test per (signal, tier): cadence / NW variants + v1 archive are the SAME hypothesis
+    df = df[df["t_stat"].notna() & (df["n_periods"] >= min_n)][
+        ["signal", "cap_tier", "n_periods", "mean_ic", "t_stat", "verdict", "source"]].reset_index(drop=True)
     df["p"] = 2.0 * stats.t.sf(df["t_stat"].abs(), df["n_periods"] - 1)
     df["abs_t"] = df["t_stat"].abs()
     return df

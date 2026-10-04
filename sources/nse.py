@@ -50,6 +50,25 @@ def _is_trading_day(d):
     return d.weekday() < 5
 
 
+# The rows of the day's file for symbols that are NOT in `stocks` — delisted and
+# merged names, and listed ones outside our universe — parked by _fetch_date for
+# fetch_bhavcopy to store in stock_prices_unlisted. The file is the same download:
+# until 2026-10-03 these rows were dropped, which made every backtest date a
+# survivors-only cross-section (plan 0020; ~670 of ~1,750 tradeable symbols in 2020).
+_UNLISTED = {}
+
+
+def _file_date(df):
+    """The trade date a bhavcopy file states for itself (DATE1, e.g. '01-Oct-2026'),
+    or None when the column is absent or unreadable."""
+    if "DATE1" not in df.columns or df.empty:
+        return None
+    try:
+        return datetime.strptime(str(df["DATE1"].iloc[0]).strip(), "%d-%b-%Y").date()
+    except ValueError:
+        return None
+
+
 def _fetch_date(target_date):
     """Fetch and parse bhavcopy for a single date. Returns (df, errors)."""
     date_str = target_date.strftime("%d%m%Y")
@@ -77,6 +96,14 @@ def _fetch_date(target_date):
     if missing:
         return None, [f"Missing columns: {missing}"]
 
+    # ── GUARDRAIL 1b: the file must be FOR the day asked ──
+    # On a market holiday NSE answers the holiday's URL with the previous session's
+    # file. Stamping it with the requested date stored 44 copied "trading days"
+    # (2020-2026): every price window counted them and the day's picks ranked on them.
+    file_date = _file_date(df)
+    if file_date is not None and file_date != target_date:
+        return None, [f"404 — holiday: the file served for {target_date} is the {file_date} session"]
+
     # Filter to tradeable equity-adjacent series (EQ + SM + BE + ST + IV + RR + BZ).
     if "SERIES" in df.columns:
         df["SERIES"] = df["SERIES"].str.strip()
@@ -96,7 +123,7 @@ def _fetch_date(target_date):
         "HIGH_PRICE": "high",
         "LOW_PRICE": "low",
         "CLOSE_PRICE": "close",
-        "PREVCLOSE": "prev_close",
+        "PREV_CLOSE": "prev_close",
         "TTL_TRD_QNTY": "volume",
         "TTL_TRD_VAL": "traded_value",
         "NO_OF_TRADES": "num_trades",
@@ -121,9 +148,7 @@ def _fetch_date(target_date):
     df["date"] = target_date.isoformat()
     df["source"] = "bhavcopy"
 
-    # Drop unmapped symbols
-    unmapped = df["sid"].isna().sum()
-    df = df.dropna(subset=["sid"])
+    # Symbols outside our universe are kept, in their own table (see _UNLISTED below)
 
     # ── GUARDRAIL 3: Numeric conversion + validation ──
     for col in ["open", "high", "low", "close", "prev_close", "volume",
@@ -169,7 +194,10 @@ def _fetch_date(target_date):
         if col not in df.columns:
             df[col] = None
 
-    return df[out_cols], errors
+    listed = df["sid"].notna()
+    _UNLISTED[target_date] = (df.loc[~listed, ["symbol", "SERIES", *out_cols[1:]]]
+                              .rename(columns={"SERIES": "series"}))
+    return df.loc[listed, out_cols], errors
 
 
 def fetch_bhavcopy(target_date=None, dry_run=False, failures=None):
@@ -205,7 +233,9 @@ def fetch_bhavcopy(target_date=None, dry_run=False, failures=None):
         print(f"\n    ⚠ {e}", end="", flush=True)
 
     n = insert_df(df, "stock_prices")
-    print(f"{len(df)} rows ({n} new)")
+    unlisted = _UNLISTED.pop(target_date, None)
+    n_unlisted = insert_df(unlisted, "stock_prices_unlisted") if unlisted is not None and len(unlisted) else 0
+    print(f"{len(df)} rows ({n} new), {n_unlisted} new rows outside the universe")
     return n
 
 
@@ -244,6 +274,58 @@ def backfill_range(start, end, dry_run=False):
     return total
 
 
+SYMBOL_CHANGE_URL = "https://nsearchives.nseindia.com/content/equities/symbolchange.csv"
+
+
+def link_renames(dry_run=False):
+    """Give a renamed stock its earlier history. NSE's symbol-change list is stored in
+    symbol_changes; every stock_prices_unlisted row whose symbol later became (through
+    any chain of renames) the ticker of a stock in our universe is copied into
+    stock_prices under that sid (INSERT OR IGNORE). Without this a renamed stock starts
+    its price history on the day of the rename: ADANIENSOL had none before 2023-08,
+    VGL none before 2025-10 (127 stocks, 93k rows at the 2026-10-03 backfill).
+    Returns the number of price rows added."""
+    resp = _http.polite_get(SYMBOL_CHANGE_URL, timeout=30)
+    if resp is None:
+        raise RuntimeError("NSE symbol-change list not found (404)")
+    sc = pd.read_csv(StringIO(resp.text), header=None, names=["name", "old_symbol", "new_symbol", "change_date"],
+                     encoding="latin-1")
+    for c in ("name", "old_symbol", "new_symbol"):
+        sc[c] = sc[c].astype(str).str.strip()
+    sc["change_date"] = pd.to_datetime(sc["change_date"].astype(str).str.strip(), format="%d-%b-%Y", errors="coerce")
+    sc = sc.dropna(subset=["change_date"]).sort_values("change_date")
+    if len(sc) < 500:                       # the list has held 1,000+ rows since 2025
+        raise RuntimeError(f"NSE symbol-change list has only {len(sc)} rows — refusing to use a partial file")
+    sc["change_date"] = sc["change_date"].dt.strftime("%Y-%m-%d")
+
+    later = dict(zip(sc["old_symbol"], sc["new_symbol"]))        # in date order: the latest change wins
+
+    def final(symbol):
+        seen = set()
+        while symbol in later and symbol not in seen:
+            seen.add(symbol)
+            symbol = later[symbol]
+        return symbol
+
+    sid_of = _http.sid_map()
+    unlisted = read_sql("SELECT DISTINCT symbol FROM stock_prices_unlisted")["symbol"]
+    moves = {s: sid_of[final(s)] for s in unlisted if final(s) != s and final(s) in sid_of}
+    if dry_run:
+        print(f"symbol changes: {len(sc)} listed, {len(moves)} unlisted symbols are earlier names of universe stocks")
+        return 0
+    insert_df(sc[["old_symbol", "new_symbol", "change_date", "name"]], "symbol_changes")
+    added = 0
+    for symbol, sid in moves.items():
+        rows = read_sql("SELECT date, open, high, low, close, prev_close, volume, traded_value, num_trades, "
+                        "delivered_qty, delivery_pct, source FROM stock_prices_unlisted WHERE symbol = ? "
+                        f"AND series IN ({','.join('?' * len(TRADEABLE_SERIES))})", params=[symbol, *sorted(TRADEABLE_SERIES)])
+        rows = rows.sort_values("date").drop_duplicates("date")
+        rows.insert(0, "sid", sid)
+        added += insert_df(rows, "stock_prices")
+    print(f"symbol changes: {len(sc)} listed; {added} earlier-name price rows added for {len(moves)} universe stocks")
+    return added
+
+
 def _loaded_dates(since_iso):
     df = read_sql("SELECT DISTINCT date FROM stock_prices WHERE source = 'bhavcopy' AND date >= ?",
                   params=[since_iso])
@@ -271,6 +353,11 @@ def compute(dry_run=False):
     n = sum(fetch_bhavcopy(d, dry_run=dry_run, failures=failures) for d in todo)
     if not dry_run:
         _assert_fresh(today, failures)
+        try:
+            link_renames()
+        except Exception as e:                  # noqa: BLE001 — the day's prices are in; a rename waits a day, visibly
+            import runlog
+            runlog.item_error("nse_bhavcopy", "symbol_changes", e)
     return n
 
 

@@ -1,0 +1,954 @@
+{% extends "ops_base.html" %}
+{% from "_components.html" import tab_bar %}
+
+{# Boardroom (plan 0019): the agent org. Data: cockpit_ops.api.get_org_overview()
+   = org.overview(). Memo text is model output over scraped facts: rendered escaped. #}
+
+{% macro val(v) -%}
+  {%- if v is string -%}{{ v }}
+  {%- elif v is mapping -%}
+    {%- for k, x in v.items() if x is not none and x != '' and x != [] -%}
+      <span class="og-k">{{ k|replace('_', ' ') }}</span> {{ val(x) }}{% if not loop.last %} <span class="og-dot">·</span> {% endif %}
+    {%- endfor -%}
+  {%- elif v is iterable -%}
+    <ul class="og-ul">{% for x in v %}<li>{{ val(x) }}</li>{% endfor %}</ul>
+  {%- else -%}{{ v }}{%- endif -%}
+{%- endmacro %}
+
+{# The plain-words block every memo opens with (house style): four questions, short answers. #}
+{% macro plain(e) -%}
+  {%- if e -%}
+  <div class="og-plain">
+    {% for k, q in [('what', 'What is happening?'), ('why', 'Why does it matter?'), ('do', 'What should you do?'), ('remember', 'What to remember')] if e[k] %}
+    <div class="og-plain-q">{{ q }}</div><div class="og-plain-a">{{ e[k] }}</div>
+    {% endfor %}
+    {% if e.like %}<div class="og-plain-like">{{ e.like }}</div>{% endif %}
+  </div>
+  {%- endif -%}
+{%- endmacro %}
+
+{% macro grade_tag(g) -%}
+  {%- if g and g.total is not none -%}
+    <span class="og-tag {% if g.total >= 7 %}og-good{% elif g.total >= 4 %}og-mid{% else %}og-bad{% endif %}"
+          title="compliance grade: grounded + actionable + in charter + calibrated">{{ g.total }}/8</span>
+  {%- else -%}<span class="og-tag og-none" title="not graded yet">ungraded</span>{%- endif -%}
+{%- endmacro %}
+
+{% block content %}
+<style>
+  .og-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 12px; margin: 12px 0 20px; }
+  .og-tile { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: 12px 16px; }
+  .og-tile .n { font-size: 26px; font-weight: 800; font-family: 'JetBrains Mono', monospace; line-height: 1.1; }
+  .og-tile .l { font-size: 12px; color: var(--text-secondary); margin-top: 4px; }
+  .og-wrap { container-type: inline-size; }
+  .og-list { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+  .og-row { padding: 12px 16px; border-top: 1px solid var(--border); }
+  .og-row:first-child { border-top: none; }
+  .og-click { cursor: pointer; }
+  .og-click:hover { background: var(--bg-card-hover); }
+  .og-click:focus-visible { background: var(--bg-card-hover); outline: none; box-shadow: inset 3px 0 0 var(--accent); }
+  .og-head { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+  .og-title { font-weight: 700; color: var(--text-primary); font-size: 14px; }
+  .og-meta { font-size: 11px; color: var(--text-muted); font-family: 'JetBrains Mono', monospace; white-space: nowrap; }
+  .og-sub { font-size: 12px; color: var(--text-secondary); margin-top: 4px; line-height: 1.45; }
+  .og-tag { font-size: 10px; font-weight: 700; border-radius: 4px; padding: 1px 6px; border: 1px solid currentColor; white-space: nowrap; }
+  .og-good { color: var(--green); } .og-mid { color: var(--amber); } .og-bad { color: var(--red); }
+  .og-none { color: var(--text-muted); } .og-human { color: var(--accent); } .og-desk { color: var(--green); } .og-builder { color: var(--text-secondary); }
+  .og-more { padding: 12px 16px 16px; background: var(--bg-primary); border-top: 1px solid var(--border); font-size: 12px; color: var(--text-secondary); line-height: 1.6; }
+  .og-more > div { margin-top: 6px; }
+  .og-more b { color: var(--text-muted); font-weight: 600; display: inline-block; min-width: 120px; vertical-align: top; }
+  .og-k { color: var(--text-muted); }
+  .og-dot { color: var(--text-muted); }
+  .og-ul { margin: 2px 0 2px 16px; padding: 0; list-style: disc; }
+  .og-ul li { margin: 2px 0; }
+  .og-btns { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+  .og-btn { font-size: 12px; font-weight: 700; border-radius: 6px; padding: 4px 12px; border: 1px solid var(--border); background: var(--bg-card-hover); color: var(--text-primary); cursor: pointer; }
+  .og-btn:hover { border-color: currentColor; }
+  .og-btn.ok { color: var(--green); } .og-btn.no { color: var(--red); } .og-btn.park { color: var(--amber); }
+  .og-empty { padding: 20px 16px; color: var(--text-muted); font-size: 13px; }
+  .og-score { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 4px; font-size: 11px; color: var(--text-muted); font-family: 'JetBrains Mono', monospace; }
+  .og-pack { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: 16px; font-size: 13px; color: var(--text-secondary); line-height: 1.6; }
+  .og-runbar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin: 0 0 16px; }
+  .og-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+  .og-edit { background: var(--bg-card); border: 1px solid var(--accent); border-radius: 12px; padding: 16px; margin-bottom: 16px; scroll-margin-top: 12px; }
+  .og-vars { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin: 12px 0; }
+  .og-field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-secondary); }
+  .og-field > span { font-weight: 600; color: var(--text-muted); }
+  .og-field em { font-style: normal; font-weight: 400; color: var(--text-muted); opacity: 0.8; margin-left: 6px; }
+  .og-field select, .og-field input, .og-field textarea { background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; font-size: 13px; font-family: inherit; width: 100%; }
+  .og-field select:focus, .og-field input:focus, .og-field textarea:focus { outline: none; border-color: var(--accent); }
+  .og-field textarea { resize: vertical; line-height: 1.5; }
+  .og-field textarea.og-prompt { font-family: 'JetBrains Mono', monospace; font-size: 12px; }
+  .og-wide { margin-top: 12px; }
+  .og-fixed { margin-top: 12px; padding: 8px 12px; border: 1px dashed var(--border); border-radius: 8px; font-size: 12px; color: var(--text-secondary); line-height: 1.6; }
+  .og-fixed b { color: var(--text-muted); font-weight: 600; display: inline-block; min-width: 150px; vertical-align: top; }
+  .og-fixed span { display: inline-block; max-width: calc(100% - 160px); }
+  .og-hist { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; font-size: 12px; color: var(--text-secondary); padding: 4px 0; border-top: 1px solid var(--border); }
+  @container (max-width: 700px) { .og-fixed b, .og-fixed span { display: block; max-width: none; } }
+  .og-btn.og-on { border-color: var(--accent); color: var(--accent); }
+  .og-chatwrap { display: grid; grid-template-columns: 250px minmax(0, 1fr); gap: 12px; margin-top: 12px; height: min(74vh, 860px); }
+  .og-seatlist { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; overflow-y: auto; padding: 6px; display: flex; flex-direction: column; gap: 2px; }
+  .og-seat { display: flex; gap: 10px; align-items: center; padding: 8px; border-radius: 8px; border: 1px solid transparent; background: transparent; cursor: pointer; text-align: left; color: inherit; }
+  .og-seat:hover { background: var(--bg-card-hover); }
+  .og-seat.og-on { background: var(--bg-card-hover); border-color: var(--accent); }
+  .og-seat-txt { min-width: 0; display: flex; flex-direction: column; }
+  .og-seat-name { font-size: 13px; font-weight: 600; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .og-seat-sub { font-size: 11px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .og-av { flex: none; width: 34px; height: 34px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; color: #fff; letter-spacing: 0.3px; }
+  .og-av-sm { width: 26px; height: 26px; font-size: 10px; margin-top: 2px; }
+  .og-av-desk { background: linear-gradient(135deg, #10b981, #047857); }
+  .og-av-builder { background: linear-gradient(135deg, #64748b, #334155); }
+  .og-chat { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+  .og-pane { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+  .og-chathead { display: flex; gap: 10px; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--border); }
+  .og-msgs { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; padding: 16px; scroll-behavior: smooth; }
+  .og-line { display: flex; gap: 8px; align-items: flex-start; max-width: 100%; }
+  .og-line.og-me { justify-content: flex-end; }
+  .og-bubble { max-width: min(88%, 760px); border-radius: 14px; padding: 10px 14px; font-size: 13.5px; line-height: 1.6; min-width: 0; }
+  .og-me .og-bubble { background: var(--accent); color: #fff; border-bottom-right-radius: 4px; }
+  .og-them .og-bubble { background: var(--bg-primary); border: 1px solid var(--border); color: var(--text-primary); border-bottom-left-radius: 4px; }
+  .og-time { font-size: 10px; opacity: 0.55; margin-top: 4px; }
+  .og-md { overflow-wrap: anywhere; }
+  .og-md p { margin: 0 0 8px; } .og-md p:last-child { margin-bottom: 0; }
+  .og-md ul, .og-md ol { margin: 4px 0 8px 18px; padding: 0; } .og-md ul { list-style: disc; } .og-md ol { list-style: decimal; }
+  .og-md li { margin: 2px 0; }
+  .og-md h1, .og-md h2, .og-md h3, .og-md h4 { font-size: 13.5px; font-weight: 700; margin: 10px 0 4px; }
+  .og-md strong { font-weight: 700; }
+  .og-md code { font-family: 'JetBrains Mono', monospace; font-size: 12px; background: rgba(127, 127, 127, 0.18); border-radius: 4px; padding: 1px 4px; }
+  .og-md pre { background: rgba(0, 0, 0, 0.35); border-radius: 8px; padding: 10px; overflow-x: auto; margin: 6px 0; }
+  .og-md pre code { background: none; padding: 0; }
+  .og-md table { border-collapse: collapse; margin: 6px 0; font-size: 12.5px; display: block; overflow-x: auto; }
+  .og-md th, .og-md td { border: 1px solid var(--border); padding: 4px 8px; text-align: left; }
+  .og-md th { color: var(--text-muted); font-weight: 600; }
+  .og-md a { color: var(--accent); text-decoration: underline; }
+  .og-md blockquote { border-left: 3px solid var(--border); padding-left: 10px; color: var(--text-secondary); margin: 6px 0; }
+  .og-fig { margin: 10px 0; background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px; padding: 12px; min-width: min(560px, 70vw); }
+  .og-fig canvas { max-height: 340px; }
+  .og-fig svg { max-width: 100%; height: auto; }
+  .og-fig-src { font-size: 10.5px; color: var(--text-muted); margin-top: 6px; }
+  .og-fig-wait { font-size: 12px; color: var(--text-muted); }
+  .og-tools { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+  .og-toolchip { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--text-muted); border: 1px solid var(--border); border-radius: 999px; padding: 1px 8px; }
+  .og-toolchip::before { content: "↳ "; }
+  .og-wo { margin-top: 8px; font-size: 12px; font-weight: 700; }
+  .og-wo a { color: var(--accent); }
+  .og-typing { color: var(--text-muted); font-size: 12px; display: flex; gap: 8px; align-items: center; }
+  .og-dots { display: inline-flex; gap: 3px; }
+  .og-dots i { width: 6px; height: 6px; border-radius: 50%; background: var(--text-muted); animation: og-blink 1.2s infinite ease-in-out; }
+  .og-dots i:nth-child(2) { animation-delay: 0.2s; } .og-dots i:nth-child(3) { animation-delay: 0.4s; }
+  @keyframes og-blink { 0%, 80%, 100% { opacity: 0.25; transform: translateY(0); } 40% { opacity: 1; transform: translateY(-2px); } }
+  .og-starter { margin: auto; display: flex; flex-direction: column; gap: 8px; align-items: center; }
+  .og-chip { font-size: 12.5px; border: 1px solid var(--border); background: var(--bg-primary); color: var(--text-secondary); border-radius: 999px; padding: 6px 14px; cursor: pointer; }
+  .og-chip:hover { border-color: var(--accent); color: var(--text-primary); }
+  .og-send { display: flex; gap: 8px; align-items: flex-end; border-top: 1px solid var(--border); padding: 12px 16px; }
+  .og-send textarea { flex: 1; background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border); border-radius: 12px; padding: 9px 12px; font-size: 13.5px; font-family: inherit; resize: none; line-height: 1.5; }
+  .og-send textarea:focus { outline: none; border-color: var(--accent); }
+  @container (max-width: 760px) {
+    .og-chatwrap { grid-template-columns: 1fr; height: auto; }
+    .og-seatlist { flex-direction: row; overflow-x: auto; overflow-y: hidden; }
+    .og-seat { flex: none; max-width: 190px; }
+    .og-chat { height: 72vh; }
+    .og-fig { min-width: 0; }
+    .og-chathead .og-seat-sub { display: none; }
+  }
+  /* phones (and the installed app): bigger targets, and the chat takes the whole screen */
+  @media (max-width: 768px) {
+    .og-tiles { grid-template-columns: 1fr 1fr; gap: 8px; margin: 8px 0 12px; }
+    .og-tile { padding: 10px 12px; } .og-tile .n { font-size: 22px; }
+    .og-btn { min-height: 38px; padding: 6px 14px; }
+    .og-btns .og-btn { flex: 1; text-align: center; min-height: 42px; }
+    .og-more b { display: block; min-width: 0; }
+    .og-more span[style*="calc(100% - 130px)"] { max-width: 100% !important; }
+    .og-runbar .og-meta { white-space: normal; margin-left: 0 !important; }
+    body.og-chatmode .og-intro, body.og-chatmode .og-tiles, body.og-chatmode .og-runbar,
+    body.og-chatmode .og-foot { display: none; }
+    body.og-chatmode .tab-bar { margin-bottom: 8px; }
+    .og-chatwrap { grid-template-columns: 1fr; height: auto; gap: 8px; margin-top: 0; }
+    .og-seatlist { flex-direction: row; overflow-x: auto; overflow-y: hidden; padding: 4px; }
+    .og-seat { flex: none; max-width: 200px; padding: 6px 8px; }
+    .og-seat .og-av { width: 28px; height: 28px; font-size: 10px; }
+    .og-chat { height: calc(100dvh - 232px); min-height: 320px; }
+    .og-chathead { padding: 8px 12px; } .og-chathead .og-seat-sub { display: none; }
+    .og-msgs { padding: 12px; }
+    .og-bubble { max-width: 92%; }
+    .og-fig { min-width: 0; padding: 8px; }
+    .og-send { padding: 8px 12px; }
+    .og-send textarea { font-size: 16px; }      /* 16px stops the browser zooming in on focus */
+  }
+  .og-filter { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; margin: 4px 0; font-size: 12px; color: var(--text-muted); }
+  .og-filter label { display: flex; flex-direction: column; gap: 3px; font-weight: 600; }
+  .og-filter input, .og-filter select { background: var(--bg-card); color: var(--text-primary); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; font-size: 13px; font-family: inherit; color-scheme: dark; }
+  .og-quick { display: flex; gap: 12px; flex-wrap: wrap; padding-bottom: 8px; }
+  .og-quick a { color: var(--accent); font-weight: 600; }
+  .og-day { padding: 6px 16px; font-size: 11px; font-weight: 700; letter-spacing: 0.6px; color: var(--text-muted); background: var(--bg-primary); border-top: 1px solid var(--border); font-family: 'JetBrains Mono', monospace; }
+  .og-day:first-child { border-top: none; }
+  .og-av-hist { background: var(--bg-card-hover); color: var(--text-secondary); border: 1px solid var(--border); font-size: 16px; }
+  .og-histbtn { border-bottom: 1px solid var(--border); border-radius: 8px 8px 0 0; margin-bottom: 4px; }
+  .og-conv { width: 100%; }
+  .og-conv .og-seat-name { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .og-note { font-size: 11.5px; color: var(--text-muted); background: var(--bg-primary); border-bottom: 1px solid var(--border); padding: 6px 16px; }
+  .og-plain { border-left: 3px solid var(--accent); background: var(--bg-primary); border-radius: 0 10px 10px 0; padding: 10px 14px; margin: 12px 0; }
+  .og-plain-q { font-size: 11px; font-weight: 700; color: var(--accent); margin-top: 8px; }
+  .og-plain-q:first-child { margin-top: 0; }
+  .og-plain-a { font-size: 14px; line-height: 1.55; color: var(--text-primary); }
+  .og-plain-like { font-size: 13px; font-style: italic; color: var(--text-secondary); margin-top: 8px; }
+  .og-pack p { margin: 4px 0; }
+  .og-pack h4 { font-size: 11px; font-weight: 700; letter-spacing: 0.6px; text-transform: uppercase; color: var(--text-muted); margin: 16px 0 4px; }
+</style>
+
+{% set S = summary %}
+<div class="section-title og-intro">Boardroom</div>
+<div class="section-desc og-intro">The fund as an org: you are the CEO, every other seat is an agent. Desk seats write memos on a schedule; builder seats change code when you start them. Nothing here moves a weight or a trade without your decision.</div>
+
+<div x-data="boardroom()" x-cloak x-effect="document.body.classList.toggle('og-chatmode', tab === 'chat')">
+
+<div class="og-tiles">
+  <div class="og-tile"><div class="n {% if S.inbox %}og-mid{% else %}og-good{% endif %}">{{ S.inbox }}</div><div class="l">waiting for you</div></div>
+  <div class="og-tile"><div class="n">{{ S.agents }}</div><div class="l">agent seats ({{ S.desk }} on a schedule)</div></div>
+  <div class="og-tile"><div class="n">{{ S.memos }}</div><div class="l">memos, last 14 days</div></div>
+  <div class="og-tile"><div class="n {% if S.avg_grade is none %}og-none{% elif S.avg_grade >= 7 %}og-good{% elif S.avg_grade >= 4 %}og-mid{% else %}og-bad{% endif %}">{{ S.avg_grade if S.avg_grade is not none else '—' }}</div><div class="l">average grade out of 8, last 30 days</div></div>
+</div>
+
+<div class="og-runbar">
+  <button class="og-btn ok" :disabled="running" @click="run('all')">Run all seats now</button>
+  <span class="og-meta" x-show="running">a run is in progress: memos appear as each seat finishes; reload to see them</span>
+  <span class="og-meta" x-show="!running">daily seats run at 06:30 UTC; weekly seats on their day. A manual run sends no email.</span>
+  {% if subscription %}<span class="og-meta" style="margin-left: auto;" title="The org runs on your Claude subscription: no per-token bill, only these two usage windows, shared with everything else you use Claude for. Last reported {{ subscription.at }} UTC.">subscription used: {% if subscription.five_hour %}<span class="{% if subscription.five_hour.used_pct >= 80 %}og-bad{% elif subscription.five_hour.used_pct >= 50 %}og-mid{% else %}og-good{% endif %}">{{ subscription.five_hour.used_pct }}%</span> of the 5-hour window{% endif %}{% if subscription.seven_day %} · <span class="{% if subscription.seven_day.used_pct >= 80 %}og-bad{% elif subscription.seven_day.used_pct >= 50 %}og-mid{% else %}og-good{% endif %}">{{ subscription.seven_day.used_pct }}%</span> of the week{% endif %}</span>{% endif %}
+</div>
+
+{{ tab_bar([('inbox', 'Inbox'), ('outlook', 'Outlook & ideas'), ('chat', 'Chat'), ('work', 'Work'), ('pack', 'Board pack'), ('memos', 'Memos'), ('org', 'Employees & settings')]) }}
+
+{# ═══════════════════════════ INBOX ═══════════════════════════ #}
+<div x-show="tab === 'inbox'" x-cloak class="og-wrap">
+  <div class="section-desc" style="margin-top: 12px;">Asks and hypothesis cards raised by the seats. Approve, park or reject; the seats see your decision in their next brief.</div>
+  <div class="og-list">
+  {% for i in inbox %}
+    <div class="og-row">
+      <div class="og-head">
+        <span class="og-meta">#{{ i.doc_id }}</span>
+        <span class="og-tag {% if i.type == 'ask' %}og-mid{% elif i.type == 'work_order' %}og-human{% else %}og-builder{% endif %}">{{ {'ask': 'ask', 'work_order': 'work order #' ~ i.fields.number}.get(i.type, 'hypothesis') }}</span>
+        {% if i.fields.urgency == 'now' %}<span class="og-tag og-bad">now</span>{% endif %}
+        <span class="og-title">{{ i.title }}</span>
+      </div>
+      <div class="og-sub">
+        <span class="og-k">from</span> {{ i.role_title }} <span class="og-dot">·</span> {{ i.doc_date }} <span class="og-dot">·</span> {{ i.age_days }}d old
+        {% if i.type == 'work_order' %}
+          <div>{{ i.fields.summary }}</div>
+          <ol class="og-ul" style="list-style: decimal;">{% for it in i.fields['items'] %}<li><b style="color: var(--text-primary);">{{ it.title }}</b> <span class="og-meta">{{ it.owner }} · {{ it.size }}</span><div>{{ it.what }}</div><div><span class="og-k">done when</span> {{ it.done_when }}</div></li>{% endfor %}</ol>
+          <div class="og-k">Approving does not start anything. It lets a Claude Code session run it: /work-order {{ i.fields.number }}</div>
+        {% endif %}
+        {% if i.fields.recommendation %}<div><span class="og-k">recommends</span> {{ i.fields.recommendation }}</div>{% endif %}
+        {% if i.fields.options %}<div><span class="og-k">options</span> {{ i.fields.options|join(' / ') }}</div>{% endif %}
+        {% if i.fields.rationale %}<div><span class="og-k">why</span> {{ i.fields.rationale }}</div>{% endif %}
+        {% if i.fields.test %}<div><span class="og-k">test</span> {{ i.fields.test }}</div>{% endif %}
+        {% if i.fields.data_needed %}<div><span class="og-k">data</span> {{ i.fields.data_needed }}</div>{% endif %}
+        {% if i.fields.expected_sign %}<div><span class="og-k">expected sign</span> {{ i.fields.expected_sign }}</div>{% endif %}
+      </div>
+      <div class="og-btns">
+        <button class="og-btn ok" @click="decide({{ i.doc_id }}, 'approve')">Approve</button>
+        <button class="og-btn park" @click="decide({{ i.doc_id }}, 'park')">Park</button>
+        <button class="og-btn no" @click="decide({{ i.doc_id }}, 'reject')">Reject</button>
+      </div>
+    </div>
+  {% else %}
+    <div class="og-empty">Nothing is waiting for you.</div>
+  {% endfor %}
+  </div>
+  {% if cio_queue %}<div class="u-muted-11" style="margin-top: 8px;">{{ cio_queue|length }} hypothesis card{{ 's' if cio_queue|length != 1 }} from the desks are with the CIO, who forwards the ones worth your time in the weekly review.</div>{% endif %}
+
+  {% if decisions %}
+  <div class="section-desc" style="margin-top: 20px;">Your recent decisions</div>
+  <div class="og-list">
+  {% for d in decisions[:12] %}
+    <div class="og-row">
+      <div class="og-head">
+        <span class="og-tag {% if d.fields.verdict == 'approve' %}og-good{% elif d.fields.verdict == 'reject' %}og-bad{% else %}og-mid{% endif %}">{{ d.fields.verdict }}</span>
+        <span class="og-title">{{ d.fields.item_title }}</span>
+        <span class="og-meta">{{ d.doc_date }}</span>
+      </div>
+      {% if d.fields.note %}<div class="og-sub">{{ d.fields.note }}</div>{% endif %}
+    </div>
+  {% endfor %}
+  </div>
+  {% endif %}
+</div>
+
+{# ═══════════════════════════ OUTLOOK & IDEAS ═══════════════════════════ #}
+<div x-show="tab === 'outlook'" x-cloak class="og-wrap">
+  {% if outlook %}
+  {% set O = outlook.fields %}
+  <div class="section-desc" style="margin-top: 12px;">The CIO's house view, written {{ outlook.doc_date }}. It is judgment on top of the data, not a forecast the model has validated. {{ grade_tag(outlook.grade) }}</div>
+  <div class="og-pack">
+    <div class="og-title" style="font-size: 16px;">{{ O.headline }}</div>
+    {{ plain(O.eli5) }}
+    <h4>The economy</h4><p>{{ O.macro }}</p>
+    <h4>The Indian market · <span class="og-tag {% if O.market.stance == 'constructive' %}og-good{% elif O.market.stance in ('cautious', 'defensive') %}og-bad{% else %}og-mid{% endif %}">{{ O.market.stance }}</span> <span class="og-meta">{{ O.market.horizon }}</span></h4>
+    <p>{{ O.market.view }}</p>
+    <h4>Be careful about</h4>{{ val(O.be_careful) }}
+    <h4>Sectors</h4>
+    {% for call, cls in [('pursue', 'og-good'), ('hold', 'og-mid'), ('avoid', 'og-bad')] %}
+      {% for x in O.sectors if x.call == call %}
+      <div style="margin: 6px 0;"><span class="og-tag {{ cls }}">{{ x.call }}</span> <b style="color: var(--text-primary);">{{ x.sector }}</b> {{ x.reason }}{% if x.change_my_mind %} <span class="og-k">Would change my mind:</span> {{ x.change_my_mind }}{% endif %}</div>
+      {% endfor %}
+    {% endfor %}
+    {% if O.evidence %}<h4>Sources</h4><ul class="og-ul">{% for e in O.evidence %}<li><span class="og-k">{{ e.tool }}</span> {{ e.quote }}{% if e.url %} <span class="og-meta">{{ e.url }}</span>{% endif %}</li>{% endfor %}</ul>{% endif %}
+  </div>
+  {% else %}
+  <div class="og-list" style="margin-top: 12px;"><div class="og-empty">No outlook yet. The CIO writes one every week; "Run this seat now" on the CIO writes one today.</div></div>
+  {% endif %}
+
+  {% macro idea_rows(items) %}
+    {% for i in items %}
+    <div class="og-row">
+      <div class="og-head">
+        <span class="og-tag {% if i.stance == 'buy' %}og-good{% else %}og-bad{% endif %}">{{ i.stance }}</span>
+        <span class="og-title">{{ i.ticker }}</span><span class="og-sub" style="margin: 0;">{{ i.model.name }}</span>
+        <span class="og-tag og-desk">{{ i.sector }}</span>
+        {% if i.model and i.model.rank %}<span class="og-meta" title="from the model's ranking, not from the agents">model: {{ i.model.tier }} rank {{ i.model.rank }} · score {{ i.model.score }}{% if i.model.published %} · published pick{% else %} · not a published pick{% endif %}</span>{% endif %}
+        <span class="og-meta">{{ i.horizon }}</span>
+      </div>
+      <div class="og-sub">
+        {% if i.cio_why %}<div><span class="og-k">CIO</span> {{ i.cio_why }}</div>{% endif %}
+        <div><span class="og-k">sector desk</span> {{ i.reason }}</div>
+        {% if i.catalyst %}<div><span class="og-k">catalyst</span> {{ i.catalyst }}</div>{% endif %}
+        {% if i.risk %}<div><span class="og-k">risk</span> {{ i.risk }}</div>{% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  {% endmacro %}
+
+  <div class="section-desc" style="margin-top: 20px;"><b>Conviction ideas.</b> Raised by the sector desk, then passed by the CIO on a second review. Advice to you: they do not change a rank or the book.</div>
+  <div class="og-list">
+    {{ idea_rows(ideas.conviction) }}
+    {% if not ideas.conviction %}<div class="og-empty">No conviction ideas yet.{% if ideas.pending %} {{ ideas.pending|length }} idea{{ 's' if ideas.pending|length != 1 }} from the sector desk are waiting for the CIO's review.{% endif %}</div>{% endif %}
+  </div>
+  {% if ideas.watchlist %}
+  <div class="section-desc" style="margin-top: 20px;"><b>Watchlist.</b> A sound reason, but the CIO is not yet convinced.</div>
+  <div class="og-list">{{ idea_rows(ideas.watchlist) }}</div>
+  {% endif %}
+  {% if ideas.rejected or ideas.pending %}
+  <div class="u-muted-11" style="margin-top: 8px;">{{ ideas.rejected|length }} idea{{ 's' if ideas.rejected|length != 1 }} rejected by the CIO{% if ideas.pending %} · {{ ideas.pending|length }} waiting for review{% endif %}. All of them are in the sector memos.</div>
+  {% endif %}
+</div>
+
+{# ═══════════════════════════ CHAT ═══════════════════════════ #}
+<div x-show="tab === 'chat'" x-cloak class="og-wrap" x-init="$watch('tab', t => { if (t === 'chat') loadChats(); }); if (tab === 'chat') loadChats();">
+  <div class="og-chatwrap">
+    {# seats #}
+    <div class="og-seatlist">
+      <button class="og-seat og-histbtn" :class="{ 'og-on': chat.showHistory && chat.histAll }" @click="loadHistory(true)">
+        <span class="og-av og-av-hist">↺</span>
+        <span class="og-seat-txt"><span class="og-seat-name">Chat history</span><span class="og-seat-sub">every past conversation</span></span>
+      </button>
+      {% for r in tree if r.type != 'human' %}
+      <button class="og-seat" :class="{ 'og-on': chat.role === '{{ r.id }}' }" @click="openChat('{{ r.id }}')">
+        <span class="og-av og-av-{{ r.type }}">{{ (r.title.split()|map('first')|join)[:2] }}</span>
+        <span class="og-seat-txt">
+          <span class="og-seat-name">{{ r.title }}</span>
+          <span class="og-seat-sub" x-text="(chats['{{ r.id }}'] || {}).preview || '{{ 'builder · read-only in chat' if r.type == 'builder' else (r.cadence or '')|replace('weekly:', 'weekly ') }}'"></span>
+        </span>
+      </button>
+      {% endfor %}
+    </div>
+
+    {# conversation #}
+    <div class="og-chat">
+      <template x-if="chat.showHistory">
+      <div class="og-pane">
+        <div class="og-chathead">
+          <div style="min-width: 0; flex: 1;">
+            <div class="og-title">Chat history</div>
+            <div class="og-seat-sub" x-text="chat.convs.length + ' conversation' + (chat.convs.length === 1 ? '' : 's') + (chat.histAll ? ' with everyone' : ' with ' + chat.title)"></div>
+          </div>
+          <button class="og-btn" x-show="chat.role" :class="{ 'og-on': !chat.histAll }" @click="loadHistory(false)" x-text="chat.title"></button>
+          <button class="og-btn" :class="{ 'og-on': chat.histAll }" @click="loadHistory(true)">Everyone</button>
+          <button class="og-btn" @click="chat.showHistory = false">Close</button>
+        </div>
+        <div class="og-msgs" style="gap: 2px; padding: 8px;">
+          <div class="og-empty" x-show="!chat.convs.length">No conversations yet.</div>
+          <template x-for="c in chat.convs" :key="c.role + ':' + c.conv">
+            <button class="og-seat og-conv" @click="openChat(c.role, c.conv)">
+              <span class="og-av og-av-sm" :class="'og-av-' + c.type" x-text="initials(c.title)"></span>
+              <span class="og-seat-txt">
+                <span class="og-seat-name" x-text="c.first || '(no message)'"></span>
+                <span class="og-seat-sub" x-text="c.title + ' · ' + when(c.last_at) + ' · ' + c.n + ' messages' + (c.work_orders.length ? ' · work order #' + c.work_orders.join(', #') : '')"></span>
+              </span>
+            </button>
+          </template>
+        </div>
+      </div>
+      </template>
+      <template x-if="!chat.showHistory && !chat.role">
+        <div class="og-empty" style="padding: 40px 16px; text-align: center;">Pick an employee to talk to.<br><span class="og-k">They answer from their charter, their memos and what they look up. A chat changes nothing by itself: agree the fixes, then press "Make work order".</span></div>
+      </template>
+      <template x-if="!chat.showHistory && chat.role">
+      <div class="og-pane">
+        <div class="og-chathead">
+          <span class="og-av" :class="'og-av-' + chat.type" x-text="initials(chat.title)"></span>
+          <div style="min-width: 0; flex: 1;">
+            <div class="og-title" x-text="chat.title"></div>
+            <div class="og-seat-sub" x-text="chat.model + (chat.web ? ' · web search' : '') + ' · ' + (chat.mission || '')"></div>
+          </div>
+          <button class="og-btn" :disabled="chat.busy || chat.messages.length < 2" @click="makeWorkOrder()" title="The employee writes down what you agreed as a numbered work order for your inbox">Make work order</button>
+          <button class="og-btn" :disabled="chat.busy" @click="loadHistory(false)" title="Earlier conversations with this employee">History</button>
+          <button class="og-btn" :disabled="chat.busy" @click="newChat()">New</button>
+        </div>
+
+        <div class="og-note" x-show="chat.fromHistory">An earlier conversation. Send a message to continue it, or press New to start fresh.</div>
+        <div class="og-msgs" id="og-msgs">
+          <div x-show="!chat.messages.length" class="og-starter">
+            <div class="og-k">Start with</div>
+            <template x-for="q in starters()" :key="q"><button class="og-chip" @click="chat.input = q; sendChat()" x-text="q"></button></template>
+          </div>
+          <template x-for="(m, i) in chat.messages" :key="i">
+            <div class="og-line" :class="m.who === 'ceo' ? 'og-me' : 'og-them'" :data-mi="i">
+              <span class="og-av og-av-sm" x-show="m.who !== 'ceo'" :class="'og-av-' + chat.type" x-text="initials(chat.title)"></span>
+              <div class="og-bubble">
+                <div class="og-md" x-html="m.html"></div>
+                <div class="og-tools" x-show="m.tools && m.tools.length">
+                  <template x-for="t in [...new Set(m.tools || [])]" :key="t"><span class="og-toolchip" x-text="t"></span></template>
+                </div>
+                <div class="og-wo" x-show="m.work_order">
+                  <a href="#work" @click.prevent="tab = 'work'; loaded.work = true; history.replaceState(null, '', '#work')">Open work order #<span x-text="m.work_order"></span></a>
+                </div>
+                <div class="og-time" x-text="when(m.at)"></div>
+              </div>
+            </div>
+          </template>
+          <div class="og-line og-them" x-show="chat.busy">
+            <span class="og-av og-av-sm" :class="'og-av-' + chat.type" x-text="initials(chat.title)"></span>
+            <div class="og-bubble og-typing"><span class="og-dots"><i></i><i></i><i></i></span> <span x-text="chat.status"></span></div>
+          </div>
+        </div>
+
+        <div class="og-send">
+          <textarea rows="1" x-model="chat.input" :disabled="chat.busy" x-ref="box" placeholder="Message…" title="Enter to send, Shift+Enter for a new line"
+                    @input="$el.style.height = 'auto'; $el.style.height = Math.min($el.scrollHeight, 180) + 'px'"
+                    @keydown.enter="if (!$event.shiftKey) { $event.preventDefault(); sendChat(); }"></textarea>
+          <button class="og-btn ok" :disabled="chat.busy || !chat.input.trim()" @click="sendChat()">Send</button>
+        </div>
+      </div>
+      </template>
+    </div>
+  </div>
+</div>
+
+{# ═══════════════════════════ WORK ═══════════════════════════ #}
+<div x-show="tab === 'work'" x-cloak class="og-wrap">
+  <div class="section-desc" style="margin-top: 12px;">Work orders: fixes you agreed with an employee in chat, written down by them. You approve one in the inbox, then a Claude Code session runs it with <span class="mono">/work-order N</span>: builders work on a branch, the tests run, and the result is reported back here. Nothing starts on its own.</div>
+  <div class="og-list">
+  {% for w in work_orders %}
+    <div class="og-row og-click" tabindex="0" role="button" :aria-expanded="!!open['w{{ w.number }}']"
+         @click="open['w{{ w.number }}'] = !open['w{{ w.number }}']" @keydown.enter.prevent="open['w{{ w.number }}'] = !open['w{{ w.number }}']">
+      <div class="og-head">
+        <span class="og-meta">#{{ w.number }}</span>
+        <span class="og-tag {% if w.status == 'done' %}og-good{% elif w.status in ('rejected', 'cancelled', 'blocked') %}og-bad{% elif w.status == 'awaiting approval' %}og-mid{% else %}og-human{% endif %}">{{ w.status }}</span>
+        <span class="og-title">{{ w.title }}</span>
+        <span class="og-meta">{{ w.role }} · {{ w.date }} · {{ w['items']|length }} item{{ 's' if w['items']|length != 1 }}</span>
+      </div>
+      <div class="og-sub">{{ w.summary }}</div>
+      {% if w.note %}<div class="og-sub"><span class="og-k">result</span> {{ w.note }}</div>{% endif %}
+    </div>
+    <div class="og-more" x-show="open['w{{ w.number }}']" x-cloak>
+      <ol class="og-ul" style="list-style: decimal;">
+      {% for it in w['items'] %}
+        <li style="margin: 6px 0;"><b style="color: var(--text-primary); min-width: 0;">{{ it.title }}</b> <span class="og-meta">{{ it.owner }} · {{ it.size }}</span>
+          <div>{{ it.what }}</div>
+          {% if it.where %}<div><span class="og-k">where</span> {{ it.where }}</div>{% endif %}
+          <div><span class="og-k">done when</span> {{ it.done_when }}</div></li>
+      {% endfor %}
+      </ol>
+      {% if w.open_questions %}<div><b>Open questions</b><span style="display: inline-block; max-width: calc(100% - 130px);">{{ val(w.open_questions) }}</span></div>{% endif %}
+      {% if w.status == 'awaiting approval' %}
+      <div class="og-btns">
+        <button class="og-btn ok" @click.stop="decide({{ w.doc_id }}, 'approve')">Approve</button>
+        <button class="og-btn park" @click.stop="decide({{ w.doc_id }}, 'park')">Park</button>
+        <button class="og-btn no" @click.stop="decide({{ w.doc_id }}, 'reject')">Reject</button>
+      </div>
+      {% elif w.status in ('approved', 'blocked') %}
+      <div><b>To run it</b>open a Claude Code session in the repo and type <span class="mono">/work-order {{ w.number }}</span></div>
+      {% endif %}
+    </div>
+  {% else %}
+    <div class="og-empty">No work orders yet. Chat with an employee, agree what to fix, then press "Make work order" in the chat.</div>
+  {% endfor %}
+  </div>
+</div>
+
+{# ═══════════════════════════ BOARD PACK ═══════════════════════════ #}
+<div x-show="tab === 'pack'" x-cloak>
+  {% if board_pack %}
+  {% set P = board_pack.fields %}
+  <div class="section-desc" style="margin-top: 12px;">Written by the Chief of Staff on {{ board_pack.doc_date }}. The Sunday pack is also emailed.</div>
+  <div class="og-pack">
+    <div class="og-title" style="font-size: 16px;">{{ P.headline }}</div>
+    {{ plain(P.eli5) }}
+    <p style="margin-top: 8px;">{{ P.state_of_fund }}</p>
+    <h4>Decisions for you</h4>
+    {% for d in P.decisions %}
+      <div style="margin: 4px 0;"><span class="og-meta">#{{ d.item_id }}</span> <span class="og-tag og-mid">{{ d.recommendation }}</span> {{ d.why_now }}</div>
+    {% else %}<div class="og-none">None this week.</div>{% endfor %}
+    {% for label, key in [('Wins', 'wins'), ('Worries', 'worries'), ('Next week', 'next_week')] %}
+      {% if P[key] %}<h4>{{ label }}</h4>{{ val(P[key]) }}{% endif %}
+    {% endfor %}
+    {% if P.role_notes %}<h4>Seat notes</h4><ul class="og-ul">{% for n in P.role_notes %}<li><span class="og-k">{{ n.role }}</span> {{ n.note }}</li>{% endfor %}</ul>{% endif %}
+  </div>
+  {% else %}
+  <div class="og-list" style="margin-top: 12px;"><div class="og-empty">No board pack yet. The Chief of Staff writes one every Sunday.</div></div>
+  {% endif %}
+</div>
+
+{# ═══════════════════════════ MEMOS ═══════════════════════════ #}
+<div x-show="tab === 'memos'" x-cloak class="og-wrap">
+  <div class="section-desc" style="margin-top: 12px;">What the desks wrote, newest first. The grade is from Compliance, a separate seat. Click a memo to read it.</div>
+  {% set F = memo_filter %}
+  <form class="og-filter" method="get" action="/org#memos">
+    <label>From <input type="date" name="mfrom" value="{{ F.mfrom }}"{% if F.first %} min="{{ F.first }}"{% endif %}></label>
+    <label>To <input type="date" name="mto" value="{{ F.mto }}"></label>
+    <label>Employee
+      <select name="mrole"><option value="">Everyone</option>
+        {% for r in tree if r.type == 'desk' and r.id != 'compliance' %}<option value="{{ r.id }}"{% if F.mrole == r.id %} selected{% endif %}>{{ r.title }}</option>{% endfor %}
+      </select></label>
+    <button class="og-btn ok" type="submit">Show</button>
+    <span class="og-quick">
+      {% for label, d in F.quick %}<a href="/org?mfrom={{ d }}{% if F.mrole %}&mrole={{ F.mrole }}{% endif %}#memos">{{ label }}</a>{% endfor %}
+      {% if F.active %}<a href="/org#memos">Clear</a>{% endif %}
+    </span>
+  </form>
+  <div class="u-muted-11" style="margin: 4px 0 8px;">
+    {% if F.active %}Showing {{ memos|length }} memo{{ 's' if memos|length != 1 }}{% if F.mfrom %} from {{ F.mfrom }}{% endif %}{% if F.mto %} to {{ F.mto }}{% endif %}{% if F.mrole %} · {{ F.mrole }}{% endif %}.{% if F.capped %} That is the limit for one page: narrow the dates to see the rest.{% endif %}
+    {% else %}Showing the newest {{ memos|length }} from the last 14 days.{% if F.first %} The first memo is from {{ F.first }}: pick dates to go back.{% endif %}{% endif %}
+  </div>
+  <div class="og-list">
+  {% for m in memos %}
+    {% if loop.changed(m.doc_date[:10]) %}<div class="og-day">{{ m.doc_date[:10] }}</div>{% endif %}
+    <div class="og-row og-click" tabindex="0" role="button" :aria-expanded="!!open['m{{ m.doc_id }}']"
+         @click="open['m{{ m.doc_id }}'] = !open['m{{ m.doc_id }}']"
+         @keydown.enter.prevent="open['m{{ m.doc_id }}'] = !open['m{{ m.doc_id }}']">
+      <div class="og-head">
+        <span class="og-meta">{{ m.doc_date }}</span>
+        <span class="og-tag og-desk">{{ m.role_title }}{% if m.fields.sector %} · {{ m.fields.sector }}{% endif %}</span>
+        {% set v = m.fields.verdict or m.fields.platform_state or m.fields.view %}
+        {% if v %}<span class="og-tag {% if v in ('green', 'within-limits', 'positive') %}og-good{% elif v in ('red', 'breach', 'negative') %}og-bad{% else %}og-mid{% endif %}">{{ v }}</span>{% endif %}
+        {{ grade_tag(m.grade) }}
+        <span class="og-title">{{ m.title }}</span>
+      </div>
+      {% if m.fields.eli5 %}<div class="og-sub">{{ m.fields.eli5.what }} <b style="color: var(--text-primary); font-weight: 600;">{{ m.fields.eli5.do }}</b></div>{% endif %}
+    </div>
+    <div class="og-more" x-show="open['m{{ m.doc_id }}']" x-cloak>
+      {{ plain(m.fields.eli5) }}
+      {% if m.fields.eli5 %}<div class="og-k" style="margin-top: 10px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.6px;">The detail</div>{% endif %}
+      {% for k, x in m.fields.items() if k not in ('role', 'period', 'as_of', 'headline', 'sector', 'verdict', 'platform_state', 'view', 'eli5', 'prompt_version') and x is not none and x != [] and x != '' %}
+        <div><b>{{ k|replace('_', ' ') }}</b><span style="display: inline-block; max-width: calc(100% - 130px);">{{ val(x) }}</span></div>
+      {% endfor %}
+      {% if m.grade and m.grade.issues %}<div><b>compliance notes</b><span style="display: inline-block; max-width: calc(100% - 130px);">{{ val(m.grade.issues) }}</span></div>{% endif %}
+    </div>
+  {% else %}
+    <div class="og-empty">{% if memo_filter.active %}No memos in that range. <a href="/org#memos" style="color: var(--accent);">Clear the filter</a>.{% else %}No memos yet. Desk seats run every day at 06:30 UTC.{% endif %}</div>
+  {% endfor %}
+  </div>
+</div>
+
+{# ═══════════════════════════ EMPLOYEES & SETTINGS ═══════════════════════════ #}
+<div x-show="tab === 'org'" x-cloak class="og-wrap">
+  <div class="section-desc" style="margin-top: 12px;">Every seat: who it reports to, what it delivers, how it is measured and what it cannot do. <b>Settings</b> changes how a seat behaves: its schedule, model, a standing directive and its full prompt. Scores are the last 30 days.</div>
+
+  {# ── house style: one writing style for every employee ── #}
+  <div class="og-runbar" style="margin-bottom: 12px;">
+    <button class="og-btn" @click="openHouse()">House style (all employees)</button>
+    <span class="og-meta">how every employee writes to you: plain words, short sentences, a four-question summary first</span>
+  </div>
+  <template x-if="house">
+  <div class="og-edit">
+    <div class="og-head" style="justify-content: space-between;">
+      <span><span class="og-title" style="font-size: 16px;">House style</span> <span class="og-tag og-mid" x-show="house.edited">edited</span></span>
+      <button class="og-btn" @click="house = null">Close</button>
+    </div>
+    <label class="og-field og-wide"><span>How everyone writes <em>added to every employee's prompt, for memos and for chat</em></span>
+      <textarea rows="18" class="og-prompt" x-model="house.text" maxlength="8000"></textarea></label>
+    <div class="og-btns">
+      <button class="og-btn ok" :disabled="busy" @click="saveHouse()">Save</button>
+      <button class="og-btn no" :disabled="busy || !house.edited" @click="house.text = house.default; saveHouse()">Reset to default</button>
+      <span class="og-meta" x-text="msg"></span>
+    </div>
+    <div class="og-fixed"><div><b>Always enforced</b><span x-text="house.fixed"></span></div></div>
+  </div>
+  </template>
+
+  {# ── the editor: one seat at a time ── #}
+  <template x-if="seat">
+  <div class="og-edit" id="og-editor">
+    <div class="og-head" style="justify-content: space-between;">
+      <span><span class="og-title" style="font-size: 16px;" x-text="seat.title"></span>
+        <span class="og-tag" :class="'og-' + seat.type" x-text="seat.type"></span>
+        <span class="og-meta" x-text="'prompt version ' + seat.version"></span>
+        <span class="og-tag og-mid" x-show="seat.edited.length" x-text="'changed: ' + seat.edited.join(', ')"></span></span>
+      <button class="og-btn" @click="seat = null">Close</button>
+    </div>
+
+    <div class="og-vars">
+      <template x-if="'enabled' in form">
+        <label class="og-field"><span>Active</span>
+          <select x-model="form.enabled"><option :value="true">on: runs on schedule</option><option :value="false">off: never runs on its own</option></select></label>
+      </template>
+      <template x-if="'cadence' in form">
+        <label class="og-field"><span>Schedule</span>
+          <select x-model="form.cadence"><template x-for="c in seat.choices.cadence" :key="c"><option :value="c" x-text="c.replace('weekly:', 'weekly, ')" :selected="c === form.cadence"></option></template></select></label>
+      </template>
+      <template x-if="'model' in form">
+        <label class="og-field"><span>Model</span>
+          <select x-model="form.model"><template x-for="m in seat.choices.model" :key="m"><option :value="m" x-text="m" :selected="m === form.model"></option></template></select></label>
+      </template>
+      <template x-if="'effort' in form">
+        <label class="og-field"><span>Thinking effort</span>
+          <select x-model="form.effort"><template x-for="e in seat.choices.effort" :key="e"><option :value="e" x-text="e || 'default'" :selected="e === form.effort"></option></template></select></label>
+      </template>
+      <template x-if="'web' in form">
+        <label class="og-field"><span>Web search</span>
+          <select x-model="form.web"><option :value="false">off</option><option :value="true">on: may search and read the web</option></select></label>
+      </template>
+      <template x-if="'max_submits' in form">
+        <label class="og-field"><span>Max memos per run <em>a safety stop, not money</em></span>
+          <input type="number" min="1" max="60" x-model.number="form.max_submits"></label>
+      </template>
+    </div>
+
+    <template x-if="'directive' in form">
+      <label class="og-field og-wide"><span>Standing directive <em>a short instruction added to every brief, for example "this month, look hardest at the LARGE tier"</em></span>
+        <textarea rows="3" x-model="form.directive" :maxlength="seat.limits.directive" placeholder="none"></textarea></label>
+    </template>
+    <template x-if="'prompt' in form">
+      <label class="og-field og-wide"><span>Prompt <em>the seat's charter: who it is, how it works, what each memo field means</em></span>
+        <textarea rows="22" class="og-prompt" x-model="form.prompt" :maxlength="seat.limits.prompt"></textarea></label>
+    </template>
+    <template x-if="'agent_prompt' in form">
+      <label class="og-field og-wide"><span><span x-text="seat.type === 'builder' ? 'Prompt' : 'Fix-mode prompt'"></span> <em>used when you start this seat as a builder from a Claude Code session</em></span>
+        <textarea rows="18" class="og-prompt" x-model="form.agent_prompt" :maxlength="seat.limits.prompt"></textarea></label>
+    </template>
+    <label class="og-field og-wide"><span>Note <em>why you changed it (kept in the history)</em></span>
+      <input type="text" x-model="note" maxlength="300" placeholder="optional"></label>
+
+    <div class="og-btns">
+      <button class="og-btn ok" :disabled="busy" @click="save()">Save</button>
+      <button class="og-btn park" x-show="seat.type === 'desk'" :disabled="busy || running" @click="run(seat.role)">Run this seat now</button>
+      <button class="og-btn no" :disabled="busy || !seat.edited.length" @click="reset()">Reset to default</button>
+      <span class="og-meta" x-text="msg"></span>
+    </div>
+
+    <div class="og-fixed">
+      <div><b>Cannot be changed here</b><span x-text="seat.fixed.note"></span></div>
+      <div x-show="seat.fixed.gate"><b>Gate</b><span x-text="seat.fixed.gate"></span></div>
+      <div x-show="seat.fixed.graded_by"><b>Graded by</b><span x-text="seat.fixed.graded_by"></span></div>
+    </div>
+
+    <div x-show="seat.history.length" style="margin-top: 12px;">
+      <div class="og-k" style="font-size: 11px; text-transform: uppercase; letter-spacing: 0.6px;">History</div>
+      <template x-for="h in seat.history" :key="h.doc_id">
+        <div class="og-hist">
+          <span class="og-meta" x-text="(h.saved_at || '').replace('T', ' ')"></span>
+          <span x-text="(h.changed || []).join(', ')"></span>
+          <span class="og-k" x-text="h.note"></span>
+          <span class="og-tag og-good" x-show="h.current">current</span>
+          <button class="og-btn" x-show="!h.current" :disabled="busy" @click="restore(h.doc_id)">Restore</button>
+        </div>
+      </template>
+    </div>
+  </div>
+  </template>
+
+  <div class="og-list">
+  {% for r in tree %}
+    <div class="og-row og-click" style="padding-left: {{ 16 + r.depth * 24 }}px;" tabindex="0" role="button"
+         :aria-expanded="!!open['r{{ r.id }}']" @click="open['r{{ r.id }}'] = !open['r{{ r.id }}']"
+         @keydown.enter.prevent="open['r{{ r.id }}'] = !open['r{{ r.id }}']">
+      <div class="og-head">
+        <span class="og-title">{{ r.title }}{% if r.who %} — {{ r.who }}{% endif %}</span>
+        <span class="og-tag og-{{ r.type }}">{{ r.type }}</span>
+        {% if r.enabled is sameas false %}<span class="og-tag og-bad">off</span>{% endif %}
+        {% if r.cadence %}<span class="og-meta">{{ r.cadence|replace('weekly:', 'weekly ') }} · {{ r.model }}{% if r.effort %} · {{ r.effort }}{% endif %}{% if r.web %} · web{% endif %}</span>{% endif %}
+        {% if r.edited %}<span class="og-tag og-mid" title="{{ r.edited|join(', ') }}">edited</span>{% endif %}
+        {% if r.type != 'human' %}<span style="margin-left: auto; display: flex; gap: 8px;"><button class="og-btn" @click.stop="tab = 'chat'; loaded.chat = true; history.replaceState(null, '', '#chat'); openChat('{{ r.id }}')">Chat</button><button class="og-btn" @click.stop="edit('{{ r.id }}')">Settings</button></span>{% endif %}
+      </div>
+      <div class="og-sub">{{ r.mission }}</div>
+      {% if r.directive %}<div class="og-sub"><span class="og-k">standing directive</span> {{ r.directive }}</div>{% endif %}
+      {% if r.score %}
+      <div class="og-score">
+        <span>{{ r.score.done }} done{% if r.score.failed %} · <span class="og-bad">{{ r.score.failed }} failed</span>{% endif %}</span>
+        {% if r.score.first_pass is not none %}<span>first pass {{ (r.score.first_pass * 100)|round|int }}%</span>{% endif %}
+        {% if r.score.grade is not none %}<span>grade {{ r.score.grade }}/8 ({{ r.score.n_graded }})</span>{% endif %}
+        {% if r.score.audit %}<span title="its calls against a re-run of each finding's query">calls right {{ r.score.audit.right }}/{{ r.score.audit.checked }}{% if r.score.audit.claimed_real_but_not %} · <span class="og-bad">{{ r.score.audit.claimed_real_but_not }} reported as real, not there</span>{% endif %}{% if r.score.audit.dismissed_but_real %} · <span class="og-bad">{{ r.score.audit.dismissed_but_real }} dismissed, real</span>{% endif %} · {{ r.score.audit.new_real }} new</span>{% endif %}
+        {% if r.score.tokens_out %}<span>{{ '{:,}'.format(r.score.tokens_out) }} tokens out</span>{% endif %}
+        {% if r.latest %}<span>last memo {{ r.latest.date }}</span>{% endif %}
+      </div>
+      {% endif %}
+    </div>
+    <div class="og-more" x-show="open['r{{ r.id }}']" x-cloak style="padding-left: {{ 16 + r.depth * 24 }}px;">
+      <div><b>Delivers</b>{{ r.deliverable }}</div>
+      {% if r.measures %}<div><b>Measured by</b>{{ r.measures|join(' · ') }}</div>{% endif %}
+      <div><b>Gate</b>{{ r.gate }}</div>
+      {% if r.graded_by %}<div><b>Graded by</b>{{ r.graded_by }}</div>{% endif %}
+      {% if r.latest %}<div><b>Latest memo</b>{{ r.latest.headline }}</div>{% endif %}
+      {% if r.type == 'builder' %}<div><b>How to start</b>In a Claude Code session: spawn the <span class="mono">{{ r.id }}</span> agent with the approved item.</div>{% endif %}
+    </div>
+  {% endfor %}
+  </div>
+</div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
+<script>
+  function boardroom() {
+    const post = (url, body) => fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                             body: JSON.stringify(body || {}) });
+    return {
+      tab: 'inbox', loaded: { inbox: true }, open: {},
+      running: {{ 'true' if running else 'false' }},
+      seat: null, form: {}, note: '', msg: '', busy: false, house: null,
+      chat: { role: null, title: '', type: 'desk', mission: '', model: '', web: false, messages: [], input: '', busy: false, status: '', fresh: false,
+              conv: null, fromHistory: false, showHistory: false, histAll: false, convs: [] },
+      chats: {},
+
+      async decide(id, verdict) {
+        const note = verdict === 'approve' ? '' : (prompt('Note for the record (optional)') || '');
+        const r = await post('/api/org/decide', { item_id: id, verdict: verdict, note: note });
+        if (r.ok) { location.reload(); } else { alert(((await r.json()).error) || 'Could not record the decision'); }
+      },
+
+      load(data) {                       // a seat's settings → the form
+        this.seat = data;
+        this.form = Object.assign({}, data.vars, data.prompts);
+        this.note = '';
+      },
+      async openHouse() {
+        this.msg = '';
+        const r = await fetch('/api/org/house-style');
+        if (!r.ok) { alert('Could not load the house style'); return; }
+        this.house = await r.json();
+      },
+      async saveHouse() {
+        this.busy = true; this.msg = 'saving…';
+        const r = await post('/api/org/house-style', { text: this.house.text }), j = await r.json();
+        this.busy = false;
+        if (!r.ok) { this.msg = ''; alert(j.error || 'Could not save'); return; }
+        this.house = j; this.msg = 'saved: applies from each employee\'s next memo or chat message';
+      },
+      async edit(role) {
+        this.msg = '';
+        const r = await fetch('/api/org/seat/' + role);
+        if (!r.ok) { alert('Could not load ' + role); return; }
+        this.load(await r.json());
+        this.$nextTick(() => { const el = document.getElementById('og-editor'); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); });
+      },
+      changes() {                        // only what differs from what is saved
+        const was = Object.assign({}, this.seat.vars, this.seat.prompts), out = {};
+        for (const k in this.form) {
+          let v = this.form[k];
+          if (v === 'true') v = true; else if (v === 'false') v = false;
+          if (v !== was[k]) out[k] = v;
+        }
+        return out;
+      },
+      async send(url, body, done) {
+        this.busy = true; this.msg = 'saving…';
+        const r = await post(url, body), j = await r.json();
+        this.busy = false;
+        if (!r.ok) { this.msg = ''; alert(j.error || 'Could not save'); return; }
+        this.load(j); this.msg = done;
+      },
+      save() {
+        const c = this.changes();
+        if (!Object.keys(c).length) { this.msg = 'nothing changed'; return; }
+        return this.send('/api/org/seat/' + this.seat.role, { changes: c, note: this.note },
+                         'saved: applies from the seat\'s next run');
+      },
+      reset() {
+        if (!confirm('Reset ' + this.seat.title + ' to its default prompt and variables?')) return;
+        return this.send('/api/org/seat/' + this.seat.role + '/reset', {}, 'reset to default');
+      },
+      restore(docId) {
+        return this.send('/api/org/seat/' + this.seat.role + '/restore', { doc_id: docId }, 'restored');
+      },
+      scrollChat() {
+        this.$nextTick(() => { const el = document.getElementById('og-msgs'); if (el) el.scrollTop = el.scrollHeight; });
+      },
+      initials(t) { return (t || '').split(/\s+/).map(w => w[0] || '').join('').slice(0, 2).toUpperCase(); },
+      when(at) {
+        if (!at) return '';
+        const d = new Date(at.endsWith('Z') ? at : at + 'Z');
+        return isNaN(d) ? '' : d.toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+      },
+      starters() {
+        return this.chat.type === 'builder'
+          ? ['What would you fix first, and why?', 'Draw me how your part of the system works.', 'What is the riskiest thing in your area right now?']
+          : ['What changed since your last memo?', 'What worries you most right now? Show me a chart if it helps.', 'What would you do first if I gave you one day?'];
+      },
+      async loadChats() { try { const r = await fetch('/api/org/chats'); if (r.ok) this.chats = await r.json(); } catch (e) {} },
+
+      // text → safe HTML. ```chart and ```mermaid blocks become figure slots, drawn once the reply is complete.
+      render(m, final) {
+        m.figs = [];
+        let text = (m.text || '').replace(/```(chart|mermaid)[^\n]*\n([\s\S]*?)```/g, (all, kind, body) => {
+          m.figs.push({ kind: kind, body: body });
+          return '\n\n<div class="og-fig" data-i="' + (m.figs.length - 1) + '"><span class="og-fig-wait">' +
+                 (kind === 'chart' ? 'chart' : 'diagram') + '…</span></div>\n\n';
+        });
+        if (!final) text = text.replace(/```(chart|mermaid)[\s\S]*$/, '\n\n*drawing…*');
+        let html;
+        if (window.marked && window.DOMPurify) {
+          html = DOMPurify.sanitize(marked.parse(text, { breaks: true, gfm: true }), { ADD_ATTR: ['target'] });
+        } else {                           // libraries not loaded: plain, escaped text
+          const esc = text.replace(/&/g, '&amp;').replace(/</g, '&lt;');
+          html = '<p style="white-space: pre-wrap;">' + esc + '</p>';
+        }
+        m.html = html; m.final = !!final;
+      },
+      loadScript(url) {
+        window._ogScripts = window._ogScripts || {};
+        if (!window._ogScripts[url]) {
+          window._ogScripts[url] = new Promise((ok, bad) => {
+            const el = document.createElement('script'); el.src = url; el.onload = ok; el.onerror = bad; document.head.appendChild(el);
+          });
+        }
+        return window._ogScripts[url];
+      },
+      css(v) { return getComputedStyle(document.documentElement).getPropertyValue(v).trim(); },
+      async drawChart(node, body) {
+        const spec = JSON.parse(body);
+        const types = ['bar', 'line', 'pie', 'doughnut', 'scatter'];
+        const type = types.includes(spec.type) ? spec.type : 'bar';
+        await this.loadScript('https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js');
+        const pal = ['#8b5cf6', '#22c55e', '#f59e0b', '#38bdf8', '#ef4444', '#e879f9'];
+        const round = type === 'pie' || type === 'doughnut';
+        const sets = (spec.datasets || []).slice(0, 6).map((d, i) => ({
+          label: String(d.label || ''), data: (d.data || []).slice(0, 400),
+          backgroundColor: round ? pal : pal[i % pal.length] + (type === 'line' ? '33' : 'cc'),
+          borderColor: round ? this.css('--bg-card') : pal[i % pal.length], borderWidth: type === 'line' ? 2 : 1,
+          tension: 0.25, pointRadius: type === 'scatter' ? 4 : 2, fill: false,
+        }));
+        const muted = this.css('--text-muted') || '#888', grid = this.css('--border') || '#333';
+        const axis = t => ({ title: { display: !!t, text: t || '', color: muted }, ticks: { color: muted }, grid: { color: grid } });
+        node.innerHTML = '<canvas></canvas>' + (spec.source ? '<div class="og-fig-src"></div>' : '');
+        if (spec.source) node.querySelector('.og-fig-src').textContent = 'Source: ' + spec.source;
+        new Chart(node.querySelector('canvas'), {
+          type: type, data: { labels: (spec.labels || []).slice(0, 400).map(String), datasets: sets },
+          options: {
+            responsive: true, maintainAspectRatio: true, aspectRatio: round ? 1.8 : 2, indexAxis: spec.horizontal ? 'y' : 'x',
+            plugins: { title: { display: !!spec.title, text: String(spec.title || ''), color: this.css('--text-primary') || '#eee' },
+                       legend: { display: round || sets.length > 1, labels: { color: muted } } },
+            scales: round ? {} : { x: { ...axis(spec.x_label), stacked: !!spec.stacked }, y: { ...axis(spec.y_label), stacked: !!spec.stacked } },
+          },
+        });
+      },
+      async drawDiagram(node, body) {
+        await this.loadScript('https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js');
+        if (!window._ogMermaid) { mermaid.initialize({ startOnLoad: false, theme: 'dark', securityLevel: 'strict' }); window._ogMermaid = 1; }
+        const out = await mermaid.render('ogm' + Math.random().toString(36).slice(2), body);
+        node.innerHTML = out.svg;
+      },
+      draw() {                           // fill the figure slots of finished messages
+        this.$nextTick(() => {
+          document.querySelectorAll('#og-msgs .og-fig:not([data-done])').forEach(node => {
+            const line = node.closest('[data-mi]'); if (!line) return;
+            const m = this.chat.messages[+line.dataset.mi]; if (!m || !m.final) return;
+            const fig = (m.figs || [])[+node.dataset.i]; if (!fig) return;
+            node.dataset.done = '1';
+            (fig.kind === 'chart' ? this.drawChart(node, fig.body) : this.drawDiagram(node, fig.body)).catch(() => {
+              const pre = document.createElement('pre'); pre.textContent = fig.body;       // could not draw: show the source
+              node.innerHTML = ''; node.appendChild(pre);
+            });
+          });
+          this.scrollChat();
+        });
+      },
+      async loadHistory(everyone) {       // past conversations: with this employee, or with all of them
+        const c = this.chat;
+        c.histAll = everyone || !c.role;
+        const r = await fetch('/api/org/conversations' + (c.histAll ? '' : '?role=' + c.role));
+        c.convs = r.ok ? await r.json() : [];
+        c.showHistory = true;
+      },
+      async openChat(role, conv) {        // the current conversation, or an earlier one picked from the history
+        const r = await fetch('/api/org/chat/' + role + (conv ? '?conv=' + encodeURIComponent(conv) : ''));
+        if (!r.ok) { alert('Could not open the chat'); return; }
+        const j = await r.json();
+        j.messages.forEach(m => this.render(m, true));
+        Object.assign(this.chat, { role: role, title: j.title, type: j.type || 'desk', mission: j.mission || '', model: j.model || '',
+                                   web: j.web, messages: j.messages, input: '', busy: false, status: '', fresh: false,
+                                   conv: j.conv, fromHistory: !!conv, showHistory: false });
+        this.draw();
+      },
+      newChat() { Object.assign(this.chat, { messages: [], fresh: true, conv: null, fromHistory: false }); },
+      async makeWorkOrder() {
+        const c = this.chat;
+        if (c.busy) return;
+        c.busy = true; c.status = c.title + ' is writing the work order…'; this.scrollChat();
+        try {
+          const r = await post('/api/org/chat/' + c.role + '/work-order' + (c.conv ? '?conv=' + encodeURIComponent(c.conv) : '')), j = await r.json();
+          if (!r.ok) throw new Error(j.error || 'could not write the work order');
+          if (!j.ok) { alert('No work order yet: ' + j.reason); }
+          else { await this.openChat(c.role, c.conv); c.fromHistory = false; }
+        } catch (e) { alert(e.message); }
+        c.busy = false; c.status = '';
+      },
+      async sendChat() {
+        const text = this.chat.input.trim();
+        if (!text || this.chat.busy) return;
+        const c = this.chat;
+        const mine = { who: 'ceo', text: text, at: new Date().toISOString() };
+        this.render(mine, true);
+        c.messages.push(mine);
+        c.input = ''; c.busy = true; c.status = c.title + ' is thinking…';
+        if (this.$refs.box) this.$refs.box.style.height = 'auto';
+        this.scrollChat();
+        let reply = null, last = 0;
+        const ensure = () => {             // the reply bubble appears with its first words
+          if (!reply) { c.messages.push({ who: 'seat', text: '', tools: [], html: '', figs: [] }); reply = c.messages[c.messages.length - 1]; }
+          return reply;
+        };
+        try {
+          const r = await post('/api/org/chat/' + c.role, { message: text, new: c.fresh, conv: c.fresh ? null : c.conv });
+          c.fresh = false; c.fromHistory = false;
+          if (!r.ok || !r.body) { throw new Error(((await r.json()).error) || 'the chat could not start'); }
+          const reader = r.body.getReader(), dec = new TextDecoder();
+          let buf = '';
+          for (;;) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buf += dec.decode(value, { stream: true });
+            let cut;
+            while ((cut = buf.indexOf('\n\n')) >= 0) {
+              const line = buf.slice(0, cut); buf = buf.slice(cut + 2);
+              if (!line.startsWith('data: ')) continue;
+              const ev = JSON.parse(line.slice(6));
+              if (ev.t === 'start') { c.conv = ev.conv; }
+              else if (ev.t === 'delta') {
+                const m = ensure(); m.text += ev.text; c.status = '';
+                if (Date.now() - last > 120) { this.render(m, false); last = Date.now(); this.scrollChat(); }
+              } else if (ev.t === 'tool') { ensure().tools.push(ev.name); c.status = 'looking up ' + ev.name + '…'; this.scrollChat(); }
+              else if (ev.t === 'error') { const m = ensure(); m.text = m.text || ('*(no reply: ' + ev.error + ')*'); }
+            }
+          }
+        } catch (e) {
+          const m = ensure(); m.text = m.text || ('*(no reply: ' + e.message + ')*');
+        }
+        if (reply) { reply.at = new Date().toISOString(); this.render(reply, true); }
+        c.busy = false; c.status = '';
+        this.draw(); this.loadChats();
+      },
+      async run(role) {
+        if (this.seat && role !== 'all' && Object.keys(this.changes()).length &&
+            !confirm('You have unsaved changes. Run with the saved settings?')) return;
+        const r = await post('/api/org/run', { role: role }), j = await r.json();
+        if (!r.ok) { alert(j.error || 'Could not start the run'); return; }
+        this.running = true;
+        this.msg = 'started: a seat takes one to three minutes; reload to see its memo';
+      },
+    };
+  }
+</script>
+
+<div class="u-muted-11 og-foot" style="margin-top: 20px;">
+  How it works: <span class="mono">docs/reference/org.md</span> · registry: <span class="mono">org.py</span> · raw data: <a href="/api/org" style="color: var(--text-secondary);">/api/org</a> · updated {{ as_of }} UTC
+</div>
+{% endblock %}

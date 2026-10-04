@@ -46,6 +46,7 @@ from datetime import date, timedelta
 import numpy as np
 import pandas as pd
 
+from factors import RESULT_FILING_SQL
 from db import read_sql
 
 ANNOUNCE_LAG_DAYS = 45        # period_end → announcement-date PROXY (fallback when no BSE match)
@@ -137,7 +138,7 @@ def compute_pead(
         dc = f"AND date(dt_tm) <= '{as_of_date}'" if as_of_date else ""
         announcements = read_sql(
             f"SELECT sid, date(dt_tm) AS ann_date FROM bse_announcements "
-            f"WHERE category='Result' AND sid IS NOT NULL AND dt_tm IS NOT NULL {dc} "
+            f"WHERE {RESULT_FILING_SQL} AND sid IS NOT NULL AND dt_tm IS NOT NULL {dc} "
             f"ORDER BY sid, dt_tm")
 
     if qi is None or qi.empty:

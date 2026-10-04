@@ -27,6 +27,7 @@ FINANCIAL_SECTORS = set(SCREEN["financial_sectors"])
 DILUTION_TOLERANCE = 0.02  # 2% max share increase allowed
 MIN_QUARTERS = 4           # for LTM computation
 MIN_QUARTERS_YOY = 8       # for LTM Y0 vs Y-1
+MIN_COMPONENTS = 6         # of 9; fewer = no score
 
 
 def _load_data():
@@ -41,7 +42,7 @@ def _load_data():
 
     # Quarterly income — prefer consolidated, LTM needs last 8 quarters
     qi = read_sql(
-        "SELECT sid, period, end_date, reporting, revenue, net_income, pbt, interest "
+        "SELECT sid, period, end_date, reporting, revenue, net_income, pbt, operating_expenses "
         "FROM quarterly_income ORDER BY sid, end_date"
     )
     qi = qi[qi["sid"].isin(sids)].copy()
@@ -83,17 +84,13 @@ def _compute_ltm(qi_group):
         last4 = g.tail(4)
         result["revenue_y0"] = last4["revenue"].sum()
         result["ni_y0"] = last4["net_income"].sum()
-        pbt_sum = last4["pbt"].sum()
-        interest_sum = last4["interest"].fillna(0).sum()
-        result["ebit_y0"] = pbt_sum + interest_sum
+        result["op_y0"] = (last4["revenue"] - last4["operating_expenses"]).sum(min_count=4)
 
     if n >= MIN_QUARTERS_YOY:
         prev4 = g.iloc[-8:-4]
         result["revenue_y1"] = prev4["revenue"].sum()
         result["ni_y1"] = prev4["net_income"].sum()
-        pbt_sum = prev4["pbt"].sum()
-        interest_sum = prev4["interest"].fillna(0).sum()
-        result["ebit_y1"] = pbt_sum + interest_sum
+        result["op_y1"] = (prev4["revenue"] - prev4["operating_expenses"]).sum(min_count=4)
 
     return result
 
@@ -186,11 +183,11 @@ def _compute_scores(stocks, qi, bs, cf):
                 bs_y0["shares_outstanding"] <= bs_y1["shares_outstanding"] * (1 + DILUTION_TOLERANCE)
             )
 
-        # ── F8: EBIT margin up ──
-        if ("ebit_y0" in ltm and "ebit_y1" in ltm
+        # ── F8: operating margin up — (revenue − operating expenses) / revenue ──
+        if (pd.notna(ltm.get("op_y0")) and pd.notna(ltm.get("op_y1"))
                 and _nonzero(ltm.get("revenue_y0")) and _nonzero(ltm.get("revenue_y1"))):
-            margin_y0 = ltm["ebit_y0"] / ltm["revenue_y0"]
-            margin_y1 = ltm["ebit_y1"] / ltm["revenue_y1"]
+            margin_y0 = ltm["op_y0"] / ltm["revenue_y0"]
+            margin_y1 = ltm["op_y1"] / ltm["revenue_y1"]
             score["gross_margin_up"] = int(margin_y0 > margin_y1)
 
         # ── F9: Asset turnover up ──
@@ -207,9 +204,11 @@ def _compute_scores(stocks, qi, bs, cf):
             "leverage_down", "liquidity_up", "no_dilution", "gross_margin_up",
             "asset_turnover_up",
         ]
+        # On the 9-point scale whatever the number of components available: a stock
+        # with 6 of 9 scored out of 6 against peers scored out of 9 (mean 3.6 vs 5.6).
         factor_vals = [score.get(c) for c in factor_cols if score.get(c) is not None]
-        if factor_vals:
-            score["f_score"] = sum(factor_vals)
+        if len(factor_vals) >= MIN_COMPONENTS:
+            score["f_score"] = int(round(9 * sum(factor_vals) / len(factor_vals)))
 
         rows.append(score)
 
@@ -270,7 +269,7 @@ def _build_lineage(stocks, qi, bs, cf, df):
                     "source_key": {"sid": sid,
                                    "end_date": str(qrow.end_date),
                                    "reporting": qrow.reporting},
-                    "source_cols": ["revenue", "net_income", "pbt", "interest"],
+                    "source_cols": ["revenue", "net_income", "operating_expenses"],
                     "contribution": role,
                 })
 

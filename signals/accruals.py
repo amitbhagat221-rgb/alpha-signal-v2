@@ -45,7 +45,7 @@ def _load_data():
     stocks = read_sql("SELECT sid, sector, cap_tier FROM stocks")
 
     qi = read_sql(
-        "SELECT sid, period, end_date, reporting, net_income, eps, pbt, interest "
+        "SELECT sid, period, end_date, reporting, net_income, eps, pbt "
         "FROM quarterly_income ORDER BY sid, end_date"
     )
     # Prefer consolidated
@@ -62,11 +62,14 @@ def _load_data():
     )
 
     cf = read_sql(
-        "SELECT sid, period, operating_cash_flow, depreciation "
+        "SELECT sid, period, operating_cash_flow "
         "FROM annual_cash_flow ORDER BY sid, period"
     )
 
-    return stocks, qi, bs, cf
+    fund = read_sql("SELECT sid, period_end, line_item, value FROM fundamentals_screener "
+                    "WHERE period_type = 'annual' AND line_item = 'Depreciation'")
+
+    return stocks, qi, bs, cf, fund
 
 
 def _cf_accruals(qi_group, cf_group, bs_group):
@@ -101,7 +104,7 @@ def _cf_accruals(qi_group, cf_group, bs_group):
     return (ltm_ni - ocf_y0) / avg_assets
 
 
-def _bs_accruals(bs_group, cf_group):
+def _bs_accruals(bs_group, dep):
     """BS accruals ratio (Sloan 1996) = [(ΔCA-ΔCash) - (ΔCL-ΔSTD) - Dep] / avg_assets."""
     bs_sorted = bs_group.sort_values("period")
     if len(bs_sorted) < 2:
@@ -124,9 +127,10 @@ def _bs_accruals(bs_group, cf_group):
     std_y1 = (y1.get("total_debt") or 0) - (y1.get("long_term_debt") or 0)
     delta_std = std_y0 - std_y1
 
-    # Depreciation from cash flow
-    cf_sorted = cf_group.sort_values("period")
-    dep = cf_sorted.iloc[-1].get("depreciation") or 0 if len(cf_sorted) > 0 else 0
+    # `dep` = the latest annual depreciation (Screener). No depreciation = no ratio:
+    # until 2026-10-03 this read a Tickertape field that held dividends paid.
+    if dep is None or pd.isna(dep):
+        return None
 
     avg_assets = (y0["total_assets"] + y1["total_assets"]) / 2
     if avg_assets == 0:
@@ -236,10 +240,12 @@ def _compute_composite(df):
     return df
 
 
-def _compute_scores(stocks, qi, bs, cf):
-    """Compute accruals signal for all stocks (live AND PIT call this)."""
-    from signals._fundamentals import prefer_consolidated
+def _compute_scores(stocks, qi, bs, cf, fund=None):
+    """Compute accruals signal for all stocks (live AND PIT call this). `fund` =
+    annual Screener rows carrying 'Depreciation' (as-of filtered by the caller)."""
+    from signals._fundamentals import annual_items, prefer_consolidated
     qi = prefer_consolidated(qi)
+    dep_by_sid = annual_items(fund, ["Depreciation"])
     qi_by_sid = dict(list(qi.groupby("sid")))
     bs_by_sid = dict(list(bs.groupby("sid")))
     cf_by_sid = dict(list(cf.groupby("sid")))
@@ -262,8 +268,8 @@ def _compute_scores(stocks, qi, bs, cf):
             row["cf_accruals_ratio"] = _cf_accruals(qi_g, cf_g, bs_g)
 
         # BS accruals (skip financials)
-        if not is_financial and bs_g is not None and cf_g is not None:
-            row["bs_accruals_ratio"] = _bs_accruals(bs_g, cf_g)
+        if not is_financial and bs_g is not None and sid in dep_by_sid:
+            row["bs_accruals_ratio"] = _bs_accruals(bs_g, dep_by_sid[sid]["Depreciation"].iloc[-1])
 
         # EPS CV (all stocks)
         if qi_g is not None:
@@ -294,8 +300,8 @@ def _compute_scores(stocks, qi, bs, cf):
 
 def compute(dry_run=False):
     """Main entry point. Returns row count."""
-    stocks, qi, bs, cf = _load_data()
-    df = _compute_scores(stocks, qi, bs, cf)
+    stocks, qi, bs, cf, fund = _load_data()
+    df = _compute_scores(stocks, qi, bs, cf, fund)
 
     snapshot = date.today().isoformat()
     df["snapshot_date"] = snapshot

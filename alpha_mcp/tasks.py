@@ -615,6 +615,18 @@ TASK_KINDS = {
 DRAIN_ORDER = [k for k in ("dossier", "news_brief", "sector_dossier", "news_enrich", "regulatory")
                if k in TASK_KINDS]
 
+# Desk-role kinds (plan 0019): each carries "role" and is visible only to a worker
+# running as that role. The pipeline's llm-worker never sees them (kinds_for).
+from alpha_mcp import org_kinds  # noqa: E402
+TASK_KINDS.update(org_kinds.KINDS)
+
+
+def kinds_for(worker):
+    """The kinds `worker` may see and claim: its own role's kinds if it holds a desk
+    role, otherwise the pipeline kinds (those with no role)."""
+    own = [k for k, s in TASK_KINDS.items() if s.get("role") == worker]
+    return own or [k for k, s in TASK_KINDS.items() if not s.get("role")]
+
 
 def _kind(kind):
     if kind not in TASK_KINDS:
@@ -628,12 +640,14 @@ def _public(payload):
 
 # ═══════════════════════════ lifecycle ═══════════════════════════
 
-def enqueue(kind, days=None):
+def enqueue(kind, days=None, items=None):
     """Queue every exportable item of `kind` not queued before (same input = same task_id).
+    `items`: pre-built [(item_key, payload, priority)] instead of the kind's export.
     Returns {"exported": n, "queued": n_new}."""
     spec = _kind(kind)
     days = days if days is not None else spec["default_days"]
-    items = spec["export"](days)
+    if items is None:
+        items = spec["export"](days)
     deadline = None
     if spec["deadline_hours"]:
         deadline = (dt.datetime.utcnow() + dt.timedelta(hours=spec["deadline_hours"])).isoformat(timespec="seconds")
@@ -656,6 +670,9 @@ def claim(kind, n=None, worker="worker"):
     for LEASE_MINUTES. Returns [{task_id, attempts, payload}] — payload without
     server-side keys. Atomic: BEGIN IMMEDIATE, so two workers never share a task."""
     spec = _kind(kind)
+    if kind not in kinds_for(worker):
+        raise ValueError(f"kind {kind!r} is not claimable by {worker!r} (it belongs to role "
+                         f"{spec.get('role') or 'llm-worker'!r})")
     n = max(1, min(int(n or spec["batch"]), spec["batch"] * 2))
     now = _now()
     lease = (dt.datetime.fromisoformat(now) + dt.timedelta(minutes=LEASE_MINUTES)).isoformat(timespec="seconds")
@@ -707,21 +724,32 @@ def submit_one(task_id, result, worker=None, mode="local"):
         return {"task_id": task_id, "status": "rejected", "reasons": ["unknown task_id"]}
     if t["status"] == "done":
         return {"task_id": task_id, "status": "noop"}
-    if t["status"] != "claimed":
+    spec = TASK_KINDS[t["kind"]]
+    # Desk-role kinds (plan 0019): a rejected memo keeps its lease, so the seat can fix it and
+    # resubmit the same task_id; each rejected resubmit counts as an attempt. Pipeline kinds are
+    # unchanged: an invalid item is released and must be claimed again.
+    keeps = bool(spec.get("role"))
+    if t["status"] != "claimed" and not (keeps and t["status"] == "invalid" and t["claimed_by"]):
         return {"task_id": task_id, "status": "rejected", "reasons": [f"task is {t['status']}, not claimed"]}
     if (t["lease_until"] or "") < _now():
         return {"task_id": task_id, "status": "rejected", "reasons": ["lease expired — claim again"]}
     if worker and t["claimed_by"] and t["claimed_by"] != worker:
         return {"task_id": task_id, "status": "rejected", "reasons": [f"claimed by {t['claimed_by']}"]}
-    spec = TASK_KINDS[t["kind"]]
     payload = json.loads(t["payload_json"])
     try:
         clean = spec["validate"](result, payload)
     except (ValueError, TypeError, KeyError, AttributeError) as e:
-        final = t["attempts"] >= MAX_ATTEMPTS
-        _set(task_id, status="failed" if final else "invalid", error=f"invalid: {e}"[:500],
-             result_json=json.dumps(result, default=str)[:4000], claimed_by=None, lease_until=None)
-        return {"task_id": task_id, "status": "failed" if final else "invalid", "reasons": [str(e)]}
+        attempts = t["attempts"] + (1 if t["status"] == "invalid" else 0)
+        final = attempts >= spec.get("max_attempts", MAX_ATTEMPTS)
+        cols = {"status": "failed" if final else "invalid", "error": f"invalid: {e}"[:500],
+                "result_json": json.dumps(result, default=str)[:4000], "attempts": attempts}
+        if final or not keeps:
+            cols.update(claimed_by=None, lease_until=None)
+        _set(task_id, **cols)
+        left = spec.get("max_attempts", MAX_ATTEMPTS) - attempts
+        return {"task_id": task_id, "status": "failed" if final else "invalid", "reasons": [str(e)],
+                **({"resubmit": f"fix it and submit this task_id again ({left} attempt(s) left)"}
+                   if keeps and not final else {})}
     try:
         undo = spec["ingest"](clean, payload)
     except Exception as e:
@@ -822,22 +850,26 @@ def retry(kind):
 
 def claimable_count(kinds=None):
     """Tasks a worker could claim now (queued + invalid + expired leases), over `kinds`
-    (default all). 0 when llm_tasks doesn't exist yet."""
+    (default: the pipeline kinds, i.e. what the llm-worker drains). 0 when llm_tasks
+    doesn't exist yet."""
+    kinds = kinds or kinds_for(None)
     ks = queue_status()["kinds"]
     return sum(v.get("counts", {}).get(s, 0) for k, v in ks.items() if not kinds or k in kinds
                for s in ("queued", "invalid")) + \
         sum(v.get("expired_leases", 0) for k, v in ks.items() if not kinds or k in kinds)
 
 
-def kinds_spec():
-    """What a worker needs per kind: instructions, the result JSON schema, batch size
-    and the current queue depth. Drain in ascending priority."""
+def kinds_spec(worker=None):
+    """What `worker` needs per kind it may claim: instructions, the result JSON schema,
+    batch size and the current queue depth. Drain in ascending priority."""
     status = queue_status()["kinds"]
+    visible = kinds_for(worker)
     kinds = {k: {"instructions": s["instructions"](), "result_schema": s["schema"], "batch": s["batch"],
                  "claimable": sum(status.get(k, {}).get("counts", {}).get(x, 0) for x in ("queued", "invalid"))
                               + status.get(k, {}).get("expired_leases", 0)}
-             for k, s in TASK_KINDS.items()}
-    return {"drain_order": DRAIN_ORDER, "kinds": kinds}
+             for k, s in TASK_KINDS.items() if k in visible}
+    order = [k for k in DRAIN_ORDER if k in visible] + [k for k in visible if k not in DRAIN_ORDER]
+    return {"drain_order": order, "kinds": kinds}
 
 
 def main(argv=None):

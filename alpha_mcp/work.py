@@ -39,7 +39,7 @@ def task_kinds() -> dict:
     """Every task kind: its instructions (the decision rules), the JSON schema of one result, the batch size to
     claim, and how many items are claimable now. Read this before claiming."""
     import db
-    return {"as_of": _core.today_iso(), "role": ROLE, "db": str(db.DB_PATH), **tasks.kinds_spec()}
+    return {"as_of": _core.today_iso(), "role": ROLE, "db": str(db.DB_PATH), **tasks.kinds_spec(ROLE)}
 
 
 @tool(readonly=False)

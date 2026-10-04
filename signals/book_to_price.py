@@ -1,9 +1,10 @@
 """
 Alpha Signal v2 — Book-to-Price.
 
-  book_to_price = (total_equity / shares_outstanding) / close
+  book_to_price = owners' equity / (shares × close), on one share basis
+  (signals._fundamentals.shares_and_book)
 
-off the latest annual balance sheet. One implementation for the live screener,
+off the latest annual statement. One implementation for the live screener,
 output/snapshot and pit.py:pit_book_to_price (which passes the
 filing-lagged balance sheet and the as-of close).
 
@@ -16,47 +17,33 @@ import pandas as pd
 from db import read_sql
 
 
-def book_to_price(bs, close):
-    """Latest balance sheet's book equity per share / close, per sid.
+def book_to_price(shares, close):
+    """Owners' equity / (shares × close) per sid, on one share basis.
 
-    `bs` = [sid, end_date, total_equity, shares_outstanding] (as-of filtered by the
-    caller); `close` = [sid, close_price]. NaN where shares ≤ 0 / equity or close
-    missing / close ≤ 0. Returns DataFrame[sid, book_to_price].
+    `shares` = signals._fundamentals.shares_and_book() [sid, shares, book_equity_cr];
+    `close` = [sid, close_price]. NaN where shares ≤ 0 / equity or close missing /
+    close ≤ 0. Returns DataFrame[sid, book_to_price].
     """
-    if bs.empty:
+    if shares is None or shares.empty:
         return pd.DataFrame(columns=["sid", "book_to_price"])
-
-    latest_bs = (bs.sort_values(["sid", "end_date"])
-                 .groupby("sid")
-                 .tail(1)[["sid", "total_equity", "shares_outstanding"]])
-
-    latest_bs["book_per_share"] = np.where(
-        (latest_bs["shares_outstanding"].notna()) & (latest_bs["shares_outstanding"] > 0),
-        latest_bs["total_equity"] / latest_bs["shares_outstanding"],
-        np.nan,
-    )
-
-    merged = latest_bs.merge(close, on="sid", how="left")
-    merged["book_to_price"] = np.where(
-        (merged["close_price"].notna()) & (merged["close_price"] > 0)
-        & (merged["book_per_share"].notna()),
-        (merged["book_per_share"] / merged["close_price"]).round(6),
-        np.nan,
-    )
+    merged = shares.merge(close, on="sid", how="left")
+    ok = (merged["shares"] > 0) & (merged["close_price"] > 0) & merged["book_equity_cr"].notna()
+    merged["book_to_price"] = (merged["book_equity_cr"] * 1e7 / (merged["shares"] * merged["close_price"])).where(ok).round(6)
     return merged[["sid", "book_to_price"]]
 
 
 def compute_book_to_price():
-    """Live B/P: latest annual balance sheet × latest close."""
-    bs = read_sql(
-        "SELECT sid, end_date, total_equity, shares_outstanding FROM annual_balance_sheet "
-        "WHERE (sid, period) IN (SELECT sid, MAX(period) FROM annual_balance_sheet GROUP BY sid)"
-    )
+    """Live B/P: every annual balance sheet and Screener statement × latest close."""
+    from signals._fundamentals import SHARE_ITEMS, shares_and_book
+    bs = read_sql("SELECT sid, end_date, total_equity, shares_outstanding FROM annual_balance_sheet")
+    fund = read_sql("SELECT sid, period_end, line_item, value FROM fundamentals_screener WHERE period_type = 'annual' "
+                    f"AND line_item IN ({','.join('?' * len(SHARE_ITEMS))})", params=list(SHARE_ITEMS))
+    adjustments = read_sql("SELECT sid, ex_date, factor, inds FROM corporate_adjustments")
     close = read_sql(
         "SELECT sid, close AS close_price FROM stock_prices "
         "WHERE (sid, date) IN (SELECT sid, MAX(date) FROM stock_prices GROUP BY sid)"
     )
-    return book_to_price(bs, close)
+    return book_to_price(shares_and_book(bs, fund, adjustments, pd.Timestamp.today().date().isoformat()), close)
 
 
 if __name__ == "__main__":

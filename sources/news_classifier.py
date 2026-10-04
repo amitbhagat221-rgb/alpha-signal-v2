@@ -37,6 +37,8 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from db import read_sql, get_db, log_llm_usage
 
 HAIKU_MODEL = "claude-haiku-4-5-20251001"
+# compute() gives up after this many failures with zero successes (credits/key/model).
+ABORT_AFTER_FAILS = 10
 
 # ─────────────────────── Topic taxonomy ───────────────────────
 # Top-level "sections" (Inshorts-style top-tabs). Each is broad on purpose
@@ -157,8 +159,13 @@ def _classify_one(client, title, summary, source):
         data = json.loads(raw)
     except Exception as e:
         return {"_error": f"{type(e).__name__}: {str(e)[:120]}"}
+    return normalize(data, title, summary)
 
-    # Normalize + validate
+
+def normalize(data, title, summary):
+    """Model JSON → news_enriched row dict, with every guardrail applied
+    (topic whitelist, invented-number filter, keyword cleanup, length caps).
+    Shared by the API path and tools/session_classify ingest."""
     topics = data.get("topics") or []
     topics = [t for t in topics if t in TOPIC_TAXONOMY][:3]
     if not topics:
@@ -295,12 +302,21 @@ def compute(limit=None, dry_run=False, days=7):
 
     client = _get_client()
     n_done = n_failed = 0
+    first_err = None
     t0 = time.time()
     for i, (article_id, title, summary, source) in enumerate(pending.itertuples(index=False), 1):
         out = _classify_one(client, title, summary, source)
         if out is None or out.get("_error"):
             n_failed += 1
             err = out.get("_error", "unknown") if out else "no response"
+            first_err = first_err or err
+            # Systemic failure (credits/key/model) shows up on the first calls.
+            # Stop before stamping the whole backlog 'failed' with a fresh
+            # classified_at — that made the table look current to the watchdog
+            # while nothing classified from 2026-08-23 on.
+            if n_done == 0 and n_failed >= ABORT_AFTER_FAILS:
+                raise RuntimeError(f"classify_news: first {n_failed} calls all failed "
+                                   f"({total} pending) — {first_err}")
             with get_db() as conn:
                 conn.execute(
                     "INSERT OR REPLACE INTO news_enriched "
@@ -328,6 +344,8 @@ def compute(limit=None, dry_run=False, days=7):
 
     elapsed = time.time() - t0
     print(f"Done in {elapsed:.0f}s. {n_done} classified, {n_failed} failed.")
+    if total and n_done == 0:
+        raise RuntimeError(f"classify_news: 0 of {total} classified — {first_err}")
     return n_done
 
 

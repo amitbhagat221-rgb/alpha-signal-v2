@@ -71,6 +71,10 @@ TIER_HYSTERESIS = 0.10
 # value, enough of the tier's total weight did (backstop), it has ~3 months of prices
 # and 4 of 8 quarters of fundamentals. `complete_from`: at or above this share of
 # eligible weight the pick's data is described as complete (views.pick_data).
+# What a wired factor with no value for a stock contributes to its score: the middle of the
+# tier. Not dropped and re-spread over the other factors (ADR 0064).
+MISSING_FACTOR_SCORE = 0.5
+
 PICK_GATE = {"min_eligible_coverage": 0.60, "min_weight_coverage": 0.50,
              "min_price_rows": 60, "min_fundamental_coverage": 0.50, "complete_from": 0.99}
 
@@ -437,7 +441,7 @@ PIPELINE_STEPS = [
     {"name": "signal_forensic",    "module": "signals.forensic",    "function": "compute",  "critical": False,
      "table": "forensic_scores",   "source": "quarterly_income + annual_balance_sheet + annual_cash_flow",
      "data_freq": "quarterly",     "frequency": "weekly",
-     "reads": ["annual_balance_sheet", "annual_cash_flow", "forensic_scores", "quarterly_income", "stocks"],
+     "reads": ["annual_balance_sheet", "annual_cash_flow", "forensic_scores", "fundamentals_screener", "quarterly_income", "stocks"],
      "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
 
     {"name": "signal_piotroski",   "module": "signals.piotroski",   "function": "compute",  "critical": False,
@@ -591,7 +595,7 @@ PIPELINE_STEPS = [
     {"name": "signal_accruals",    "module": "signals.accruals",    "function": "compute",  "critical": False,
      "table": "accruals_scores",   "source": "quarterly_income + annual_balance_sheet + annual_cash_flow",
      "data_freq": "quarterly",     "frequency": "weekly",
-     "reads": ["accruals_scores", "annual_balance_sheet", "annual_cash_flow", "quarterly_income", "stocks"],
+     "reads": ["accruals_scores", "annual_balance_sheet", "annual_cash_flow", "fundamentals_screener", "quarterly_income", "stocks"],
      "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
 
     {"name": "signal_consensus",   "module": "signals.consensus",   "function": "compute",  "critical": False,
@@ -661,7 +665,7 @@ PIPELINE_STEPS = [
 
     {"name": "screener",           "module": "scoring.screener",    "function": "compute",  "critical": True,
      "table": "daily_picks",       "source": "all signals",         "data_freq": "daily",   "frequency": "daily",
-     "reads": ["analyst_consensus", "annual_balance_sheet", "annual_cash_flow", "bse_announcements", "bulk_deals", "consensus_signals", "corporate_adjustments", "daily_picks", "fno_iv_history", "forecast_history", "forensic_scores", "macro_history", "macro_sector_signals_pit", "piotroski_scores", "quarterly_income", "shareholding", "stock_prices", "stocks", "universe_eligibility"],
+     "reads": ["analyst_consensus", "annual_balance_sheet", "annual_cash_flow", "bse_announcements", "bulk_deals", "consensus_signals", "corporate_adjustments", "daily_picks", "fno_iv_history", "forecast_history", "forensic_scores", "fundamentals_screener", "macro_history", "macro_sector_map", "macro_sector_signals_pit", "nlp_scores", "piotroski_scores", "quarterly_income", "shareholding", "stock_prices", "stocks", "universe_eligibility"],
      "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
 
     # Track 3.3c — HRP position sizing. Turns the within-tier ranked daily_picks
@@ -752,7 +756,7 @@ PIPELINE_STEPS = [
     {"name": "snapshot",           "module": "output.snapshot",     "function": "compute",  "critical": False,
      "table": "daily_snapshots",   "source": "all signals + stock_prices",
      "data_freq": "daily",         "frequency": "daily",
-     "reads": ["accruals_scores", "annual_balance_sheet", "consensus_signals", "daily_picks", "daily_snapshots", "piotroski_scores", "promoter_signals", "quarterly_income", "sentiment_scores", "smart_money_scores", "stock_prices", "stocks"],
+     "reads": ["accruals_scores", "annual_balance_sheet", "consensus_signals", "corporate_adjustments", "daily_picks", "daily_snapshots", "fundamentals_screener", "piotroski_scores", "promoter_signals", "quarterly_income", "sentiment_scores", "smart_money_scores", "stock_prices", "stocks"],
      "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
 
     {"name": "diff_engine",        "module": "output.diff_engine",  "function": "compute",  "critical": False,

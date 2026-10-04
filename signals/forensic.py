@@ -71,13 +71,16 @@ ALTMAN_COEFFICIENTS = {
 }
 
 
+SCREENER_ITEMS = ("Depreciation", "Interest", "Profit before tax")
+
+
 def _load_data():
     """Load all inputs."""
     stocks = read_sql("SELECT sid, sector FROM stocks")
     financial_sids = set(stocks[stocks["sector"].isin(FINANCIAL_SECTORS)]["sid"])
 
     qi = read_sql(
-        "SELECT sid, period, end_date, reporting, revenue, net_income, pbt, interest "
+        "SELECT sid, period, end_date, reporting, revenue, net_income, pbt "
         "FROM quarterly_income ORDER BY sid, end_date"
     )
     # Prefer consolidated
@@ -95,11 +98,14 @@ def _load_data():
     )
 
     cf = read_sql(
-        "SELECT sid, period, operating_cash_flow, depreciation "
+        "SELECT sid, period, operating_cash_flow "
         "FROM annual_cash_flow ORDER BY sid, period"
     )
 
-    return stocks, financial_sids, qi, bs, cf
+    fund = read_sql("SELECT sid, period_end, line_item, value FROM fundamentals_screener WHERE period_type = 'annual' "
+                    f"AND line_item IN ({','.join('?' * len(SCREENER_ITEMS))})", params=list(SCREENER_ITEMS))
+
+    return stocks, financial_sids, qi, bs, cf, fund
 
 
 def _safe_div(a, b):
@@ -111,7 +117,7 @@ def _safe_div(a, b):
     return a / b
 
 
-def _compute_beneish(qi_group, bs_y0, bs_y1, cf_y0):
+def _compute_beneish(qi_group, bs_y0, bs_y1, cf_y0, annual=None):
     """Compute reduced 6-factor Beneish M-Score."""
     if bs_y0 is None or bs_y1 is None:
         return None
@@ -146,13 +152,13 @@ def _compute_beneish(qi_group, bs_y0, bs_y1, cf_y0):
     components["SGI"] = _safe_div(rev_y0, rev_y1)
 
     # DEPI: (Dep_prev / (Dep_prev + PPE_prev)) / (Dep_curr / (Dep_curr + PPE_curr))
-    if cf_y0 is not None:
-        dep_y0 = cf_y0.get("depreciation") or 0
+    # (depreciation from the Screener annual statement; the Tickertape cash-flow field
+    # read here until 2026-10-03 held dividends paid)
+    if annual is not None and len(annual) >= 2:
+        dep_y0, dep_y1 = annual["Depreciation"].iloc[-1], annual["Depreciation"].iloc[-2]
         ppe_y0 = bs_y0.get("net_ppe") or 0
         ppe_y1 = bs_y1.get("net_ppe") or 0
-        # We only have Y0 depreciation from cash flow; use same for both (conservative)
-        # This slightly biases DEPI toward 1.0 (neutral)
-        depi_num = _safe_div(dep_y0, dep_y0 + ppe_y1) if (dep_y0 + ppe_y1) != 0 else None
+        depi_num = _safe_div(dep_y1, dep_y1 + ppe_y1) if (dep_y1 + ppe_y1) != 0 else None
         depi_den = _safe_div(dep_y0, dep_y0 + ppe_y0) if (dep_y0 + ppe_y0) != 0 else None
         components["DEPI"] = _safe_div(depi_num, depi_den)
 
@@ -197,7 +203,7 @@ def _compute_beneish(qi_group, bs_y0, bs_y1, cf_y0):
     return round(m, 4)
 
 
-def _compute_altman(bs_y0, qi_group, cf_y0):
+def _compute_altman(bs_y0, qi_group, cf_y0, annual=None):
     """Compute Altman Z'' (emerging market variant)."""
     if bs_y0 is None:
         return None
@@ -227,13 +233,14 @@ def _compute_altman(bs_y0, qi_group, cf_y0):
             return None
 
     # X3: EBIT / Total Assets
-    # Use LTM (pbt + interest) as EBIT proxy since operating_profit is 100% NULL
+    # EBIT = profit before tax + interest of the latest annual statement (Screener);
+    # without one, LTM profit before tax (EBIT's lower bound). Until 2026-10-03 the
+    # "interest" added here was operating expenses: X3 sat at a median of 0.81.
     qi_sorted = qi_group.sort_values("end_date") if qi_group is not None else pd.DataFrame()
-    if len(qi_sorted) >= 4:
-        pbt_ltm = qi_sorted.tail(4)["pbt"].sum()
-        interest_ltm = qi_sorted.tail(4)["interest"].fillna(0).sum()
-        ebit = pbt_ltm + interest_ltm
-        x3 = ebit / ta
+    if annual is not None and len(annual):
+        x3 = (annual["Profit before tax"].iloc[-1] + annual["Interest"].iloc[-1]) / ta
+    elif len(qi_sorted) >= 4:
+        x3 = qi_sorted.tail(4)["pbt"].sum() / ta
     else:
         return None
 
@@ -296,10 +303,12 @@ def _compute_penalty(m_flag, z_flag):
     return penalty
 
 
-def _compute_scores(stocks, financial_sids, qi, bs, cf):
-    """Compute forensic scores for all non-financial stocks (live AND PIT call this)."""
-    from signals._fundamentals import prefer_consolidated
+def _compute_scores(stocks, financial_sids, qi, bs, cf, fund=None):
+    """Compute forensic scores for all non-financial stocks (live AND PIT call this).
+    `fund` = annual Screener rows for SCREENER_ITEMS (as-of filtered by the caller)."""
+    from signals._fundamentals import annual_items, prefer_consolidated
     qi = prefer_consolidated(qi)
+    annual_by_sid = annual_items(fund, SCREENER_ITEMS)
     qi_by_sid = dict(list(qi.groupby("sid")))
     bs_by_sid = dict(list(bs.groupby("sid")))
     cf_by_sid = dict(list(cf.groupby("sid")))
@@ -331,13 +340,13 @@ def _compute_scores(stocks, financial_sids, qi, bs, cf):
 
         # Beneish M-Score (reduced 6-factor)
         if qi_g is not None:
-            m = _compute_beneish(qi_g, bs_y0, bs_y1, cf_y0)
+            m = _compute_beneish(qi_g, bs_y0, bs_y1, cf_y0, annual_by_sid.get(sid))
             if m is not None:
                 row["m_score"] = m
                 row["m_score_flag"] = _flag_m_score(m)
 
         # Altman Z-Score
-        z = _compute_altman(bs_y0, qi_g, cf_y0)
+        z = _compute_altman(bs_y0, qi_g, cf_y0, annual_by_sid.get(sid))
         if z is not None:
             row["z_score"] = z
             row["z_score_flag"] = _flag_z_score(z)
@@ -359,8 +368,8 @@ def _compute_scores(stocks, financial_sids, qi, bs, cf):
 
 def compute(dry_run=False):
     """Main entry point. Returns row count."""
-    stocks, financial_sids, qi, bs, cf = _load_data()
-    df = _compute_scores(stocks, financial_sids, qi, bs, cf)
+    stocks, financial_sids, qi, bs, cf, fund = _load_data()
+    df = _compute_scores(stocks, financial_sids, qi, bs, cf, fund)
 
     snapshot = date.today().isoformat()
     df["snapshot_date"] = snapshot

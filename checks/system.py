@@ -487,7 +487,7 @@ def decay_verdicts(f):
     decayed = [r for r in decay if r.get("decayed")]
     if not decayed:
         return []
-    detail = "; ".join(f"{r['weight_key']} {r['tier']} (long-run IC {r['ic_all']:+.3f}, last 12 {r['ic_recent']:+.3f}"
+    detail = "; ".join(f"{r['weight_key']} {r['tier']} (long-run IC {r['ic_all']:+.3f}, last year {r['ic_recent']:+.3f}"
                        + (f", {r['gap_se']:.1f} standard errors below" if r.get("gap_se") is not None else "") + ")"
                        for r in decayed)
     return [verdict("FACTOR_DECAY", "wired factors", WARN, FAIL, detail, code="FACTOR_DECAY",

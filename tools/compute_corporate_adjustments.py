@@ -61,8 +61,11 @@ def parse_split_factor(subject):
 
 
 def parse_bonus_factor(subject):
-    """Bonus N:M → N free per M held → factor = M/(M+N)."""
-    if not subject:
+    """Bonus N:M → N free per M held → factor = M/(M+N). None for a bonus of anything
+    but equity shares: preference shares (NCRPS) or debentures leave the share count,
+    and so the price basis, unchanged (TVSM "Bonus Ncrps 4:1" was cutting its whole
+    price history to a fifth)."""
+    if not subject or re.search(r"ncrps|preference|debenture|\bncd", subject.lower()):
         return None
     m = re.search(r"(\d+)\s*:\s*(\d+)", subject.lower())
     if not m:
@@ -71,6 +74,9 @@ def parse_bonus_factor(subject):
     if held <= 0:
         return None
     return held / (held + free)
+
+
+DEMERGER_MIN_DROP = 0.8     # an ex-day close below this share of the previous close is the demerger, not the market
 
 
 def parse_dividend_amount(subject):
@@ -120,20 +126,22 @@ def compute(dry_run=False):
     _ensure_table()
 
     actions = read_sql(
-        "SELECT sid, ex_date, ind, subject FROM corporate_actions "
-        "WHERE ind IN ('SPLIT','BONUS','DIVIDEND') AND sid IS NOT NULL "
-        "ORDER BY sid, ex_date, ind"
+        "SELECT sid, ex_date, CASE WHEN ind = 'OTHER' THEN 'DEMERGER' ELSE ind END AS ind, subject "
+        "FROM corporate_actions "
+        "WHERE (ind IN ('SPLIT','BONUS','DIVIDEND') OR (ind = 'OTHER' AND lower(subject) LIKE '%demerger%')) "
+        "AND sid IS NOT NULL ORDER BY sid, ex_date, ind"
     )
     prices = read_sql("SELECT sid, date, close FROM stock_prices WHERE close > 0")
     # Close on the last trading day BEFORE each dividend's ex_date, in one as-of join.
     # (Was a full-table boolean scan per dividend: O(dividends × price rows), which
     # ran for hours once stock_prices grew — corporate_adjustments froze at 2026-04-30.)
-    divs = actions.loc[actions["ind"] == "DIVIDEND", ["sid", "ex_date"]].drop_duplicates()
+    divs = actions.loc[actions["ind"].isin(["DIVIDEND", "DEMERGER"]), ["sid", "ex_date"]].drop_duplicates()
     divs = divs.assign(_t=pd.to_datetime(divs["ex_date"], errors="coerce")).dropna(subset=["_t"])
     px = prices.assign(_t=pd.to_datetime(prices["date"])).sort_values("_t")
     pre = pd.merge_asof(divs.sort_values("_t"), px[["sid", "_t", "close"]], on="_t", by="sid",
                         direction="backward", allow_exact_matches=False)
     close_before = {(r.sid, r.ex_date): r.close for r in pre.itertuples() if pd.notna(r.close)}
+    close_on = {(r.sid, r.date): r.close for r in prices.itertuples()}
 
     parsed = []  # (sid, ex_date, ind, factor, subject)
     skipped = {"SPLIT": 0, "BONUS": 0, "DIVIDEND_NO_AMOUNT": 0, "DIVIDEND_NO_PRE_CLOSE": 0,
@@ -168,6 +176,16 @@ def compute(dry_run=False):
                 skipped["INVALID_FACTOR"] += 1
                 continue
             factor = (close_pre - amount) / close_pre
+
+        elif ind == "DEMERGER":
+            # The parent trades ex the demerged business from ex_date: the share of value that
+            # stays is that day's close over the close before (HEG 2026-09-07: 0.37). Smaller
+            # moves are left alone (a demerger of a minor unit is within a normal day's range).
+            before, on = close_before.get((sid, ex_date)), close_on.get((sid, ex_date))
+            if before and on and on / float(before) < DEMERGER_MIN_DROP:
+                factor = on / float(before)
+            else:
+                continue
 
         if factor is None or factor <= 0 or factor >= 1.0:
             skipped["INVALID_FACTOR"] += 1

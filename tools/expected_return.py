@@ -95,11 +95,10 @@ def _book_tier_weights():
 
 
 def _clean_ic(signal, tier):
-    """Mean IC from the clean re-baselined panel; most-powered row wins."""
-    df = read_sql(
-        "SELECT mean_ic, n_periods, t_stat FROM pit_ic_by_tier_v2 "
-        "WHERE source LIKE 'v2_recompute%' AND signal = ? AND cap_tier = ? "
-        "ORDER BY n_periods DESC LIMIT 1", params=[signal, tier])
+    """Mean IC of the (signal, tier) evidence row (v2 panel only)."""
+    from tools.backtest_pit import evidence
+    df = evidence()
+    df = df[(df["signal"] == signal) & (df["cap_tier"] == tier) & df["source"].str.startswith("v2_recompute")]
     if df.empty:
         return None
     return {"ic": float(df.iloc[0]["mean_ic"]), "n": int(df.iloc[0]["n_periods"]),

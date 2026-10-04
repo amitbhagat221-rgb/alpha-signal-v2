@@ -135,7 +135,12 @@ def _resolve_and_score(by_h, tier, c_side, turnover):
         cost_ic = turnover * c_side / sig
         net_ic = max(0.0, abs(r["mean_ic"]) - cost_ic) * np.sign(r["mean_ic"])
         net_icir = net_ic / r["std_ic"] if r["std_ic"] else 0.0
-        net_t = net_icir * np.sqrt(r["n_periods"])
+        # net t = the gross (Newey-West) t scaled by the share of IC left after cost; the
+        # classical net_icir·√n ignored the overlap correction and came out ABOVE gross
+        # at 63-252d (book_to_price SMALL 252d: gross 6.72, "net" 13.58)
+        gross_t = r.get("t_stat")
+        net_t = (gross_t * net_ic / r["mean_ic"] if gross_t is not None and r["mean_ic"]
+                 else net_icir * np.sqrt(r["n_periods"]))
         net_ir_yr = net_icir * np.sqrt(252.0 / h)
         # survivorship guard: a thin 252d horizon cannot be the natural horizon
         eligible_h = not (h >= 252 and r["n_periods"] < THIN_252_PERIODS)

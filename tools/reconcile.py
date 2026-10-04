@@ -8,9 +8,11 @@ meaning — the forecast_history.price "PT" that was really the year-ahead close
   prices        NSE bhavcopy close (stock_prices, source='bhavcopy') vs Yahoo's
                 UNADJUSTED close on the same date, for 20 random LARGE/MID stocks.
                 Agree = within 0.5 %. PASS ≥ 90 % agree · WARN ≥ 70 % · else FAIL.
-  fundamentals  Tickertape quarterly revenue (quarterly_income) vs Screener
-                'Sales' (fundamentals_screener) on the latest quarter both hold,
-                for up to 200 stocks. The two define revenue slightly differently
+  fundamentals  every Tickertape statement column a factor reads (FUND_FIELDS: revenue,
+                operating expenses, profit, cash flows, dividends, equity, share count)
+                vs the Screener line item that must hold the same quantity
+                (fundamentals_screener), on the latest period both hold, for up to
+                200 stocks per field; the feed's status is its weakest field's. The two define revenue slightly differently
                 (RELIANCE Jun-26: 3,16,018 vs 3,09,468 Cr, 2.1 %), so agree = within
                 5 % — built to catch unit / period / company errors, not accounting
                 nuance. PASS ≥ 80 % · WARN ≥ 60 % · else FAIL. DB-only.
@@ -82,22 +84,61 @@ def reconcile_prices(sample=PRICE_SAMPLE, seed=None):
                                         "worst": [(k, o, t, round(x, 4)) for k, o, t, x in worst]}}
 
 
-def reconcile_fundamentals(sample=FUND_SAMPLE):
-    tt = read_sql("SELECT sid, end_date AS period_end, revenue FROM quarterly_income WHERE revenue > 0")
-    sc = read_sql("""SELECT sid, period_end, value FROM fundamentals_screener
-                     WHERE line_item = 'Sales' AND period_type = 'quarterly' AND value > 0""")
+# Tickertape column ↔ the Screener line item that must hold the same quantity:
+# (table, column, Screener period_type, line item or items summed, scale). Every
+# statement column a factor reads is here, because a column can be full, fresh and
+# in range and still hold the wrong thing — `interest` was operating expenses and
+# `depreciation` was dividends paid for months while only revenue was compared.
+FUND_FIELDS = [
+    ("quarterly_income", "revenue", "quarterly", ("Sales",), 1.0),
+    ("quarterly_income", "operating_expenses", "quarterly", ("Expenses",), 1.0),
+    ("quarterly_income", "pbt", "quarterly", ("Profit before tax",), 1.0),
+    ("quarterly_income", "net_income", "quarterly", ("Net profit",), 1.0),
+    ("annual_cash_flow", "operating_cash_flow", "annual", ("Cash from Operating Activity",), 1.0),
+    ("annual_cash_flow", "investing_cash_flow", "annual", ("Cash from Investing Activity",), 1.0),
+    ("annual_cash_flow", "financing_cash_flow", "annual", ("Cash from Financing Activity",), 1.0),
+    # not dividends_paid: Tickertape holds cash paid in the year, Screener the dividend declared
+    # for it (39% agree within 5%) — a timing difference, not a mapping; no factor reads the column
+    ("annual_balance_sheet", "total_equity", "annual", ("Equity Share Capital", "Reserves", "Non controlling int"), 1.0),
+    ("annual_balance_sheet", "shares_outstanding", "annual", ("No. of Equity Shares",), 1e-7),
+]
+
+
+def reconcile_field(table, column, period_type, items, scale, sample=FUND_SAMPLE):
+    """One Tickertape column against its Screener line item(s) on the latest period both
+    hold, for up to `sample` stocks → (n, share agreeing within FUND_TOL, worst)."""
+    from signals._fundamentals import prefer_consolidated
+    basis = ", reporting" if table == "quarterly_income" else ""
+    tt = prefer_consolidated(read_sql(f"SELECT sid, end_date AS period_end, {column} AS ours{basis} FROM {table} "
+                                      f"WHERE {column} IS NOT NULL AND {column} != 0"))
+    sc = read_sql(f"""SELECT sid, period_end, SUM(value) AS theirs, COUNT(*) AS k FROM fundamentals_screener
+                      WHERE period_type = ? AND line_item IN ({','.join('?' * len(items))}) AND value IS NOT NULL
+                      GROUP BY sid, period_end""", params=[period_type, *items])
+    sc = sc[sc["k"] >= min(2, len(items))]            # a sum needs its main parts (minority interest is optional)
     m = tt.merge(sc, on=["sid", "period_end"])
-    if m.empty:
-        latest = m
-    else:
-        latest = m.sort_values("period_end").groupby("sid").tail(1)
-        latest = latest.sample(min(sample, len(latest)), random_state=int(date.today().strftime("%Y%m%d")))
-    pairs = [(r.sid, float(r.revenue), float(r.value)) for r in latest.itertuples(index=False)]
-    n, share, worst = agreement(pairs, FUND_TOL)
-    return {"feed": "tickertape_fundamentals", "status": verdict_of(share, n, FUND_PASS, FUND_WARN), "n": n,
-            "share": share, "detail": {"check": "fundamentals", "against": "screener quarterly Sales",
-                                        "tolerance": FUND_TOL, "compared": n, "agree_share": round(share, 3),
-                                        "worst": [(k, o, t, round(x, 4)) for k, o, t, x in worst]}}
+    if not m.empty:
+        m = m.sort_values("period_end").groupby("sid").tail(1)
+        m = m.sample(min(sample, len(m)), random_state=int(date.today().strftime("%Y%m%d")))
+    return agreement([(r.sid, abs(float(r.ours)), abs(float(r.theirs)) * scale) for r in m.itertuples(index=False)], FUND_TOL)
+
+
+def reconcile_fundamentals(sample=FUND_SAMPLE):
+    """Every FUND_FIELDS column against Screener. The feed's status is its WORST field's."""
+    fields, worst_field = {}, None
+    for table, column, period_type, items, scale in FUND_FIELDS:
+        n, share, worst = reconcile_field(table, column, period_type, items, scale, sample)
+        status = verdict_of(share, n, FUND_PASS, FUND_WARN)
+        fields[f"{table}.{column}"] = {"status": status, "compared": n, "agree_share": round(share, 3),
+                                       "against": "screener " + " + ".join(items),
+                                       "worst": [(k, o, t, round(x, 4)) for k, o, t, x in worst]}
+        rank = ("PASS", "WARN", "FAIL").index(status)
+        if worst_field is None or (rank, -share) > worst_field[0]:
+            worst_field = ((rank, -share), f"{table}.{column}")
+    w = fields[worst_field[1]]
+    return {"feed": "tickertape_fundamentals", "status": w["status"], "n": w["compared"], "share": w["agree_share"],
+            "detail": {"check": "fundamentals", "against": f"{w['against']} ({worst_field[1]}, the weakest of {len(fields)} fields)",
+                       "tolerance": FUND_TOL, "compared": w["compared"], "agree_share": w["agree_share"],
+                       "worst": w["worst"], "fields": {k: (v["status"], v["agree_share"], v["compared"]) for k, v in fields.items()}}}
 
 
 def record(results, dry_run=False):

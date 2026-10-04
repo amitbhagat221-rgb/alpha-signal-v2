@@ -162,6 +162,151 @@ def api_run_events(run: str = None, feed: str = None, step: str = None, level: s
     return json.loads(json.dumps(runlog.events(run, feed, step, level, since, min(limit, 500)), default=str))
 
 
+@app.get("/sw.js")
+def service_worker():
+    """The Boardroom app's service worker, served from the root so it can control every page."""
+    from fastapi.responses import FileResponse
+    return FileResponse(COCKPIT_STATIC / "boardroom" / "sw.js", media_type="application/javascript",
+                        headers={"Cache-Control": "no-cache"})
+
+
+@app.get("/org", response_class=HTMLResponse)
+def org_page(request: Request, mfrom: str = None, mto: str = None, mrole: str = None):
+    """Boardroom — the agent org (plan 0019): what is waiting for the CEO, the role
+    tree with each seat's scorecard, the latest board pack and the desk memos.
+    mfrom / mto / mrole: the Memos tab's date range and employee filter."""
+    return templates.TemplateResponse(request, "org.html",
+                                      {"page": "org", **api.get_org_overview(mfrom, mto, mrole)})
+
+
+@app.get("/api/org")
+def api_org():
+    return api.get_org_overview()
+
+
+@app.post("/api/org/decide")
+async def api_org_decide(request: Request):
+    """The CEO's decision on an inbox item (an ask or a hypothesis card):
+    {"item_id": 123, "verdict": "approve" | "reject" | "park", "note": "..."}.
+    Recorded as a child org.decision document; it changes nothing else."""
+    import org
+    body = await request.json()
+    try:
+        return org.decide(int(body["item_id"]), body.get("verdict"), body.get("note"))
+    except (ValueError, KeyError, TypeError) as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+
+
+def _org_call(fn, *args):
+    try:
+        return api._clean(fn(*args))
+    except (ValueError, KeyError, TypeError) as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+
+
+@app.get("/api/org/house-style")
+def api_org_house_style():
+    """The writing style every seat follows: the text, and what the server enforces regardless."""
+    import org
+    return _org_call(org.house_style_view)
+
+
+@app.post("/api/org/house-style")
+async def api_org_house_style_save(request: Request):
+    import org
+    body = await request.json()
+    return _org_call(org.save_house_style, body.get("text"), body.get("note"))
+
+
+@app.get("/api/org/seat/{role}")
+def api_org_seat(role: str):
+    """One seat's settings for the editor: variables, prompts, history, and what is fixed in code."""
+    import org
+    if role not in org.ROLES:
+        return JSONResponse({"error": f"unknown seat {role}"}, status_code=404)
+    return _org_call(org.seat_settings, role)
+
+
+@app.post("/api/org/seat/{role}")
+async def api_org_seat_save(role: str, request: Request):
+    """Save the CEO's changes to a seat: {"changes": {"model": "opus", "directive": "...", "prompt": "..."},
+    "note": "why"}. Variables are checked against closed lists; prompts are written to the seat's file."""
+    import org
+    body = await request.json()
+    return _org_call(org.save_settings, role, body.get("changes") or {}, body.get("note"))
+
+
+@app.post("/api/org/seat/{role}/reset")
+def api_org_seat_reset(role: str):
+    import org
+    return _org_call(org.reset_settings, role)
+
+
+@app.post("/api/org/seat/{role}/restore")
+async def api_org_seat_restore(role: str, request: Request):
+    import org
+    body = await request.json()
+    return _org_call(org.restore_settings, role, int(body.get("doc_id") or 0))
+
+
+@app.get("/api/org/conversations")
+def api_org_conversations(role: str = None):
+    """Chat history: every stored conversation, with one seat (?role=) or with everyone."""
+    import org_chat
+    return _org_call(org_chat.conversations, role or None)
+
+
+@app.get("/api/org/chat/{role}")
+def api_org_chat_history(role: str, conv: str = None):
+    """One conversation with a seat: the current one, or an earlier one (?conv=)."""
+    import org_chat
+    return _org_call(org_chat.history, role, conv or None)
+
+
+@app.get("/api/org/chats")
+def api_org_chats():
+    """Per seat: messages in the current conversation, last message time and a preview."""
+    import org_chat
+    return _org_call(org_chat.chats)
+
+
+@app.post("/api/org/chat/{role}/work-order")
+def api_org_chat_work_order(role: str, conv: str = None):
+    """Have the seat write down what was agreed in the current chat as a work order. It lands in
+    the inbox; nothing runs until the CEO approves it and a Claude Code session runs `/work-order N`."""
+    import org_chat
+    return _org_call(org_chat.make_work_order, role, conv or None)
+
+
+@app.post("/api/org/chat/{role}")
+async def api_org_chat(role: str, request: Request):
+    """One live chat turn with a seat: {"message": "...", "new": false}. The reply streams as
+    server-sent events (delta / tool / done / error). A chat reads; it cannot change anything."""
+    import org_chat
+    from fastapi.responses import StreamingResponse
+    body = await request.json()
+    try:
+        gen = org_chat.stream(role, body.get("message"), bool(body.get("new")), body.get("conv") or None)
+    except ValueError as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+    # text/event-stream is exempt from the gzip middleware, so chunks reach the browser as they are written
+    return StreamingResponse(gen, media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+@app.post("/api/org/run")
+async def api_org_run(request: Request):
+    """Start a desk seat now ({"role": "cio"}) or every enabled desk seat ({"role": "all"})."""
+    body = await request.json()
+    result = api.org_run(str(body.get("role") or ""))
+    return JSONResponse(result, status_code=200 if result.get("ok") else 409)
+
+
+@app.get("/api/org/running")
+def api_org_running():
+    return {"running": api.org_running()}
+
+
 @app.get("/command", response_class=HTMLResponse)
 def command_centre(request: Request):
     """Command centre — collapsible view of plans, factor library, data layer,

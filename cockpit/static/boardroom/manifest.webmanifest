@@ -1,0 +1,23 @@
+{
+  "name": "Alpha Signal Boardroom",
+  "short_name": "Boardroom",
+  "description": "Your fund's org: inbox, outlook and ideas, chat with each employee, work orders.",
+  "id": "/org",
+  "start_url": "/org",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0a0a0f",
+  "theme_color": "#0a0a0f",
+  "icons": [
+    {"src": "/static/boardroom/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any"},
+    {"src": "/static/boardroom/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any"},
+    {"src": "/static/boardroom/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"}
+  ],
+  "shortcuts": [
+    {"name": "Inbox", "url": "/org#inbox", "icons": [{"src": "/static/boardroom/icon-192.png", "sizes": "192x192"}]},
+    {"name": "Chat", "url": "/org#chat", "icons": [{"src": "/static/boardroom/icon-192.png", "sizes": "192x192"}]},
+    {"name": "Outlook & ideas", "url": "/org#outlook", "icons": [{"src": "/static/boardroom/icon-192.png", "sizes": "192x192"}]},
+    {"name": "Work orders", "url": "/org#work", "icons": [{"src": "/static/boardroom/icon-192.png", "sizes": "192x192"}]}
+  ]
+}

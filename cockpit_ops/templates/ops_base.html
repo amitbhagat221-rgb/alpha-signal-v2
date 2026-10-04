@@ -7,4 +7,18 @@
 {% block head_identity %}
     <title>Alpha Signal — Ops</title>
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23ef4444'/%3E%3Ctext x='16' y='22' font-size='20' text-anchor='middle' fill='white' font-family='sans-serif' font-weight='700'%3E%E2%9A%99%3C/text%3E%3C/svg%3E">
+    {# Installable app (plan 0019): manifest + icons + a service worker; the worker registers only over HTTPS. #}
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content">
+    <link rel="manifest" href="/static/boardroom/manifest.webmanifest">
+    <meta name="theme-color" content="#0a0a0f">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Boardroom">
+    <link rel="apple-touch-icon" href="/static/boardroom/apple-touch-icon.png">
+    <script>
+        if ('serviceWorker' in navigator && window.isSecureContext) {
+            window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));
+        }
+    </script>
 {% endblock %}

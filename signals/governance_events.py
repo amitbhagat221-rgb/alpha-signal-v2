@@ -88,7 +88,7 @@ def compute_governance_resignation(
         a = announcements[["sid", "subcategory"]].copy()
         dcol = "ev_date" if "ev_date" in announcements.columns else "dt_tm"
         a["ev_date"] = announcements[dcol].astype(str).str.slice(0, 10)
-        a = a[(a["ev_date"] > lo) & (a["ev_date"] <= eval_iso)]
+        a = a[(a["ev_date"] > lo) & (a["ev_date"] <= eval_iso)].drop_duplicates()   # a re-filed notice is one event
         a["w"] = a["subcategory"].map(RESIGNATION_WEIGHTS).fillna(0.0)
         out = (a.groupby("sid")["w"].sum()
                .rename("governance_resignation").reset_index())

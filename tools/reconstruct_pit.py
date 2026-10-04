@@ -198,7 +198,7 @@ def main(argv=None, stats=None):
         except Exception as e:
             print(f"  (skip-existing check failed: {e})")
 
-    raw = load_raw()
+    raw = load_raw()   # every dataset, incl. pit.TIER_INPUTS: each anchor carries the tier of ITS date
 
     total_rows = 0
     started_overall = datetime.now()
@@ -227,7 +227,7 @@ def main(argv=None, stats=None):
 
         print(f"[{eval_str}] reconstructing...", end=" ", flush=True)
         try:
-            df, validation = reconstruct_one_date(eval_date, raw, signals_to_run)
+            df, validation = reconstruct_one_date(eval_date, raw, signals_to_run, pit_tiers=True)
         except Exception as e:
             # Mark the checkpoint FAILED so a future --skip-existing run doesn't skip
             if log_id is not None:

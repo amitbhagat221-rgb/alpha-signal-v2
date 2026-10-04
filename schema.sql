@@ -128,7 +128,7 @@ CREATE TABLE IF NOT EXISTS annual_cash_flow (
     investing_cash_flow REAL,
     financing_cash_flow REAL,
     working_capital_change REAL,
-    depreciation    REAL,
+    dividends_paid  REAL,
     net_change_in_cash REAL,
     fetched_at      TEXT DEFAULT (datetime('now')),
     PRIMARY KEY (sid, period)
@@ -144,7 +144,7 @@ CREATE TABLE IF NOT EXISTS annual_cash_flow_quarantine (
     investing_cash_flow REAL,
     financing_cash_flow REAL,
     working_capital_change REAL,
-    depreciation    REAL,
+    dividends_paid  REAL,
     net_change_in_cash REAL,
     fetched_at      TEXT DEFAULT (datetime('now'))
 , _q_failed_gate TEXT, _q_reason TEXT, _q_quarantined_at TEXT DEFAULT (datetime('now')));
@@ -1471,9 +1471,9 @@ CREATE TABLE IF NOT EXISTS quarterly_income (
     operating_profit REAL,
     net_income      REAL,
     eps             REAL,
-    interest        REAL,
+    operating_expenses REAL,
     pbt             REAL,
-    total_other_income REAL,
+    tax_and_minority REAL,
     ebitda          REAL,
     fetched_at      TEXT DEFAULT (datetime('now')),
     PRIMARY KEY (sid, period, reporting)
@@ -1488,9 +1488,9 @@ CREATE TABLE IF NOT EXISTS quarterly_income_quarantine (
     operating_profit REAL,
     net_income      REAL,
     eps             REAL,
-    interest        REAL,
+    operating_expenses REAL,
     pbt             REAL,
-    total_other_income REAL,
+    tax_and_minority REAL,
     ebitda          REAL,
     fetched_at      TEXT DEFAULT (datetime('now'))
 , _q_failed_gate TEXT, _q_reason TEXT, _q_quarantined_at TEXT DEFAULT (datetime('now')));
@@ -1830,6 +1830,39 @@ CREATE TABLE IF NOT EXISTS stock_prices (
     PRIMARY KEY (sid, date)
 );
 CREATE INDEX IF NOT EXISTS idx_prices_date ON stock_prices(date);
+
+-- The same daily NSE file's rows for symbols that are NOT in `stocks`: delisted and
+-- merged names, and listed ones outside our universe. Keyed by the exchange symbol
+-- of the day (no sid exists). Lets a backtest date hold the stocks that traded THEN.
+CREATE TABLE IF NOT EXISTS stock_prices_unlisted (
+    symbol          TEXT NOT NULL,
+    series          TEXT NOT NULL,
+    date            TEXT NOT NULL,
+    open            REAL,
+    high            REAL,
+    low             REAL,
+    close           REAL NOT NULL,
+    prev_close      REAL,
+    volume          INTEGER,
+    traded_value    REAL,
+    num_trades      INTEGER,
+    delivered_qty   INTEGER,
+    delivery_pct    REAL,
+    source          TEXT DEFAULT 'bhavcopy',
+    PRIMARY KEY (symbol, date, series)
+);
+CREATE INDEX IF NOT EXISTS idx_prices_unlisted_date ON stock_prices_unlisted(date);
+
+-- NSE's own list of symbol changes (content/equities/symbolchange.csv): a renamed
+-- stock's earlier history sits under its old symbol.
+CREATE TABLE IF NOT EXISTS symbol_changes (
+    old_symbol      TEXT NOT NULL,
+    new_symbol      TEXT NOT NULL,
+    change_date     TEXT NOT NULL,
+    name            TEXT,
+    fetched_at      TEXT DEFAULT (datetime('now')),
+    PRIMARY KEY (old_symbol, new_symbol, change_date)
+);
 
 CREATE TABLE IF NOT EXISTS "stocks" (
     sid             TEXT PRIMARY KEY,

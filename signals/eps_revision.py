@@ -52,7 +52,8 @@ def _yoy(g):
     latest_v, prior_v = latest["value"], prior["value"]
     if pd.isna(latest_v) or pd.isna(prior_v) or abs(prior_v) < 1e-9:
         return None
-    return round((float(latest_v) / abs(float(prior_v)) - 1) * 100, 2)
+    # change over |base|: latest/|prior| − 1 scored a loss that became a profit as −85%
+    return round((float(latest_v) - float(prior_v)) / abs(float(prior_v)) * 100, 2)
 
 
 def eps_revision_yoy(fh):

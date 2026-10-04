@@ -4,14 +4,16 @@ Alpha Signal Ops (:3001) — the page list; the rail and mobile bar render from 
 """
 
 PAGES = [
+    {"path": "/org", "id": "org", "title": "Boardroom", "subtitle": "Agent org · inbox · memos",
+     "icon": "briefcase", "section": "Fund", "mobile": 1, "short": "Board"},
     {"path": "/system", "id": "system", "title": "Health Center", "subtitle": "Issues · data · factors · pipeline",
-     "icon": "zap", "section": "Ops", "mobile": 1, "short": "Health"},
+     "icon": "zap", "section": "Ops", "mobile": 2, "short": "Health"},
     {"path": "/flow", "id": "flow", "title": "Pipeline Flow", "subtitle": "Producer/consumer DAG",
-     "icon": "git-branch", "section": "Ops", "mobile": 2, "short": "Pipeline"},
+     "icon": "git-branch", "section": "Ops", "mobile": 3, "short": "Pipeline"},
     {"path": "/feeds", "id": "feeds", "title": "Data Supply", "subtitle": "Feeds · canaries · discovery",
-     "icon": "database", "section": "Ops", "mobile": 3, "short": "Feeds"},
+     "icon": "database", "section": "Ops", "mobile": 4, "short": "Feeds"},
     {"path": "/command", "id": "command", "title": "Command Centre", "subtitle": "Scripts & rebuilds",
-     "icon": "compass", "section": "Ops", "mobile": 4, "short": "Command"},
+     "icon": "compass", "section": "Ops", "short": "Command"},
     {"path": "/sql", "id": "sql", "title": "SQL Console", "subtitle": "Ad-hoc queries",
      "icon": "terminal", "section": "Ops", "short": "SQL"},
 ]
