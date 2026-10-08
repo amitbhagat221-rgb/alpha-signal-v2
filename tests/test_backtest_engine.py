@@ -122,3 +122,18 @@ def test_one_label_function_for_every_horizon():
     entry = px.loc[px["date"] > "2026-01-01", "close"].iloc[0]
     assert fr["fwd_return_5d"].iloc[0] == round(px["close"].iloc[px.index[px["close"] == entry][0] + 5] / entry - 1, 4)
     assert "fwd_return_60d" not in fr
+
+
+def test_dead_names_get_a_tier_from_traded_value():
+    """A dead name has no share count: MICRO when illiquid, else the tier of its nearest
+    listed neighbours by traded value (tools/unlisted_panel)."""
+    from tools import unlisted_panel as up
+    listed = pd.DataFrame({"cap_tier": ["LARGE"] * 30 + ["MID"] * 30 + ["SMALL"] * 30,
+                           "adtv_cr": [500.0 + i for i in range(30)] + [50.0 + i for i in range(30)] + [5.0 + i / 10 for i in range(30)]})
+    t = up.estimate_tiers(pd.Series({"big": 520.0, "mid": 60.0, "small": 6.0, "thin": 0.4}), listed)
+    assert t.to_dict() == {"big": "LARGE", "mid": "MID", "small": "SMALL", "thin": "MICRO"}
+    assert set(up.PRODUCERS) >= {"momentum", "delivery", "residual_momentum_12_1"}   # derived from the registry
+
+
+def test_full_market_rows_are_never_the_evidence_row():
+    assert bt.FULL_MARKET.startswith("v2_full_market")

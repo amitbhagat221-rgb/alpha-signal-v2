@@ -54,6 +54,7 @@ from db import get_backtest_cadence, get_db, read_sql, upsert_df
 SIGNAL_COLUMN_MAP = factors.SIGNAL_COLUMN_MAP
 
 
+FULL_MARKET = "v2_full_market"   # universe + dead / never-listed names (daily_snapshots_pit_unlisted, plan 0020 §7)
 IC_MIN_PERIODS = 12  # fewer anchors than this carry no verdict and no CI (a t of 19 on 2 anchors is not evidence)
 
 
@@ -75,6 +76,7 @@ def evidence():
     expected_return and factor_audit each used to pick their own and disagreed):
     the v2 panel before the frozen v1 archive, then the row with the most anchors."""
     df = read_sql("SELECT * FROM pit_ic_by_tier_v2")
+    df = df[~df["source"].fillna("").str.startswith(FULL_MARKET)]     # a second reading, never THE row
     df["_v1"] = ~df["source"].fillna("").str.startswith("v2_recompute")
     return (df.sort_values(["_v1", "n_periods"], ascending=[True, False])
               .drop_duplicates(["signal", "cap_tier"], keep="first")
@@ -288,6 +290,32 @@ def iter_panels(v1_df, v2_df, targets):
                     yield signal, cadence, src_name, signal_col, tier, tier_df
 
 
+def full_market_rows(v2_df, targets):
+    """For every factor the unlisted panel carries (the price-only ones): the same IC on
+    the universe PLUS the names that delisted, merged or were never in it, each anchor's
+    cross-section within the (estimated) tier. Source FULL_MARKET. A weight on a price
+    factor needs both readings (plan 0020 §7)."""
+    try:
+        unl = read_sql("SELECT * FROM daily_snapshots_pit_unlisted")
+    except Exception:
+        return []
+    if unl.empty:
+        return []
+    unl = unl.rename(columns={"symbol": "sid"}).assign(sid=lambda d: "~" + d["sid"])
+    rows = []
+    for signal, (_, col) in targets:
+        if signal == "_response" or col not in unl.columns or col not in v2_df.columns:
+            continue
+        keep = ["sid", "snapshot_date", "cap_tier", col, "fwd_return_20d"]
+        both = pd.concat([v2_df[keep], unl[keep]], ignore_index=True)
+        for sig, cadence, _, signal_col, tier, tier_df in iter_panels(both.iloc[:0], both, [(signal, (None, col))]):
+            r = _aggregate(_compute_ic(tier_df, signal_col, "fwd_return_20d"), sig, tier, FULL_MARKET,
+                           cadence=cadence, nw_lag=_nw_lag_for(sig, cadence))
+            if r:
+                rows.append(r)
+    return rows
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--signal", help="single signal to compute (default: all)")
@@ -315,6 +343,7 @@ def main():
         if result:
             out_rows.append(result)
 
+    out_rows += full_market_rows(v2_df, targets)
     if not out_rows:
         print("No IC computed.")
         return

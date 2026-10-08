@@ -1940,6 +1940,42 @@ CREATE TABLE IF NOT EXISTS stock_prices_unlisted (
 );
 CREATE INDEX IF NOT EXISTS idx_prices_unlisted_date ON stock_prices_unlisted(date);
 
+-- Price-only factors of every NSE symbol outside `stocks` (delisted, merged, never in the
+-- universe) at each panel anchor: the survivorship-free half of the backtest (plan 0020 §7).
+-- Written by tools/unlisted_panel.py with pit.reconstruct_one_date; the tier is estimated
+-- from traded value (no share count exists for a dead name). No sid, no foreign key.
+CREATE TABLE IF NOT EXISTS daily_snapshots_pit_unlisted (
+    symbol                       TEXT NOT NULL,
+    snapshot_date                TEXT NOT NULL,
+    cap_tier                     TEXT,
+    tier_estimated               INTEGER,
+    adtv_90d_cr                  REAL,
+    mom_6m                       REAL,
+    mom_12m                      REAL,
+    position_52w                 REAL,
+    avg_delivery_pct_30d         REAL,
+    delivery_anomaly_z           REAL,
+    intraday_range_compression   REAL,
+    closing_strength_1m          REAL,
+    opening_gap_freq_1m          REAL,
+    vwap_deviation_5d            REAL,
+    bidask_spread_proxy          REAL,
+    kyle_lambda                  REAL,
+    oil_beta                     REAL,
+    metals_beta                  REAL,
+    inr_beta                     REAL,
+    gold_beta                    REAL,
+    rate_beta                    REAL,
+    credit_beta                  REAL,
+    low_vol_252d                 REAL,
+    st_reversal_21d              REAL,
+    residual_momentum_12_1       REAL,
+    max_lottery_21d              REAL,
+    macd_bullish                 INTEGER,
+    fwd_return_20d               REAL,
+    PRIMARY KEY (symbol, snapshot_date)
+);
+
 -- NSE's own list of symbol changes (content/equities/symbolchange.csv): a renamed
 -- stock's earlier history sits under its old symbol.
 CREATE TABLE IF NOT EXISTS symbol_changes (

@@ -34,6 +34,8 @@ RETIRED = {
     "signal_lineage": "2 of ~105 factors emit it (D3)",
     "vix_history": "copy of macro_history india_vix → series_values",
     "daily_changes": "derivable: picks of a run vs the previous run (a view)",
+    "daily_snapshots_pit_unlisted": "kept as-is: plan 0020 §7 price-factor panel of symbols with no sid "
+                                    "(delisted / never in the universe), keyed by NSE symbol",
     "symbol_changes": "kept as-is: plan 0020 NSE symbol renames (old → new), an identifier history for entities",
     "stock_prices_unlisted": "kept as-is: plan 0020 prices of symbols with no entity (delisted / outside the universe); "
                              "joins bars_daily once entities carry them",

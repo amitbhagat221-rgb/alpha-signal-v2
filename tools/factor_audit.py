@@ -80,6 +80,13 @@ def _evidence():
     return {(r.signal, r.cap_tier): r for r in evidence().itertuples()}
 
 
+def _full_market():
+    """{(signal, tier): t} on universe + dead names (tools.backtest_pit.FULL_MARKET rows)."""
+    from tools.backtest_pit import FULL_MARKET
+    df = read_sql("SELECT signal, cap_tier, t_stat FROM pit_ic_by_tier_v2 WHERE source LIKE ?", params=[FULL_MARKET + "%"])
+    return {(r.signal, r.cap_tier): r.t_stat for r in df.itertuples()}
+
+
 def _eligible(spec):
     try:
         return set(read_sql(spec["eligible_sql"])["sid"])
@@ -91,7 +98,7 @@ def audit():
     latest, now, then = _panel()
     prior = f"{then['snapshot_date'].min()}..{then['snapshot_date'].max()}"
     today = pd.Timestamp.now().normalize()
-    ages, evidence = _input_ages(today), _evidence()
+    ages, evidence, full = _input_ages(today), _evidence(), _full_market()
     weights = factors.SIGNAL_WEIGHTS
     rows = []
     for sid, f in factors.FACTORS.items():
@@ -151,7 +158,7 @@ def audit():
                 else:
                     age = (today - pd.Timestamp(ev.computed_at[:10])).days
                     row.update(t_stat=ev.t_stat, mean_ic=ev.mean_ic, anchors=ev.n_periods,
-                               evidence_source=ev.source, evidence_age_days=age)
+                               evidence_source=ev.source, evidence_age_days=age, t_full_market=full.get((sid, tier)))
                     if (ev.n_periods or 0) < MIN_ANCHORS:
                         flags.append("THIN_EVIDENCE")
                     if age > EVIDENCE_MAX_AGE_DAYS:
@@ -166,7 +173,7 @@ def audit():
 
 
 _COLS = ["factor", "tier", "status", "weight", "coverage", "coverage_1y", "eligible", "eligible_covered",
-         "distinct", "t_stat", "anchors", "evidence_age_days", "flags"]
+         "distinct", "t_stat", "t_full_market", "anchors", "evidence_age_days", "flags"]
 
 
 def _table(rows):

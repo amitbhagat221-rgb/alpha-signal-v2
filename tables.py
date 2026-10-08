@@ -90,6 +90,10 @@ TABLES = {
         "kind": "RAW", "domain": "Universe & Prices", "date_col": "date",
         "description": "Daily OHLCV + delivery for every NSE symbol that is NOT in `stocks` (delisted, merged, or outside our universe), from the same bhavcopy file as stock_prices. Keyed by exchange symbol. The survivorship-free half of the price history (plan 0020).",
     },
+    "daily_snapshots_pit_unlisted": {
+        "kind": "COMPUTED", "domain": "Backtest (PIT)", "date_col": "snapshot_date",
+        "description": "Price-only factors + 20-day label for every NSE symbol outside `stocks` (delisted, merged, never in the universe) at each panel anchor, keyed by symbol; tier estimated from traded value. tools/unlisted_panel.py; tools/backtest_pit's full-market evidence (plan 0020 §7).",
+    },
     "stock_prices": {
         "contract": {"max_null": {"close": 0.02}, "not_all_zero": ["close", "volume"]},
         "kind": "RAW", "domain": "Universe & Prices", "date_col": "date", "coverage": (95.0, 80.0),
