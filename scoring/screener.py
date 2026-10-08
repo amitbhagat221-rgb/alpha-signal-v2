@@ -8,10 +8,6 @@ Applies tier-specific weights from factors.SIGNAL_WEIGHTS (hand-set on each fact
 Ranks within each cap_tier. Applies forensic penalty.
 Outputs scored universe to daily_picks table.
 
-Usage:
-    python -m scoring.screener            # score and save
-    python -m scoring.screener --dry-run  # score but don't save
-    python -m scoring.screener --top 20   # show top N per tier
 """
 
 import argparse
@@ -152,12 +148,6 @@ def _load_signals(return_prices=False, as_of=None):
     df["revenue_implausible"] = df["revenue_implausible"].fillna(False).astype(bool)
 
     return (df, prices) if return_prices else df
-
-
-def _compute_book_to_price():
-    """Compute B/P = book value per share / price (signals/book_to_price.py)."""
-    from signals.book_to_price import compute_book_to_price
-    return compute_book_to_price()
 
 
 def _percentile_rank_within_tier(df, col):

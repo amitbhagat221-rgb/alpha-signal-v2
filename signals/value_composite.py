@@ -24,15 +24,11 @@ Reads:  stock_prices + corporate_adjustments (position_52w only — earnings_yie
         passed in by the caller to avoid recomputation, see `_load_signals`)
 Returns: DataFrame[sid, value_composite]
 
-Usage:
-    python -m signals.value_composite     # live compute + print stats (recomputes EY/BP itself)
 """
 
 import numpy as np
 import pandas as pd
 
-from db import read_sql
-from signals._prices import load_prices
 
 COMPONENTS = [("earnings_yield", 0.40), ("book_to_price", 0.35), ("position_52w", 0.25)]
 POSITION_52W_LOOKBACK = 252
@@ -59,11 +55,6 @@ def position_52w(prices):
     return pd.DataFrame(rows, columns=["sid", "position_52w"])
 
 
-def compute_position_52w(prices=None):
-    """Live position_52w on split/bonus-adjusted closes (a signals._prices frame)."""
-    return position_52w(load_prices() if prices is None else prices)
-
-
 def within_tier_rank_composite(df, components, name):
     """NaN-tolerant within-cap_tier rank composite.
 
@@ -87,31 +78,3 @@ def within_tier_rank_composite(df, components, name):
 
     out[name] = (weighted_score / weight_sum.replace(0, np.nan)).round(4)
     return out[["sid", name]]
-
-
-def compute_value_composite(earnings_yield, book_to_price, cap_tier_df, position_52w=None):
-    """`cap_tier_df` = DataFrame[sid, cap_tier] (the ranking universe). `earnings_yield`/
-    `book_to_price` are the caller's already-computed live frames (avoid recomputation).
-    `position_52w` computed inline unless passed (the screener passes its own)."""
-    if position_52w is None:
-        position_52w = compute_position_52w()
-
-    df = cap_tier_df[["sid", "cap_tier"]].merge(earnings_yield, on="sid", how="left")
-    df = df.merge(book_to_price, on="sid", how="left")
-    df = df.merge(position_52w, on="sid", how="left")
-    return within_tier_rank_composite(df, COMPONENTS, "value_composite")
-
-
-if __name__ == "__main__":
-    from signals.earnings_yield import compute_earnings_yield
-
-    stocks = read_sql("SELECT sid, cap_tier FROM stocks")
-    ey = compute_earnings_yield()
-    from scoring.screener import _compute_book_to_price
-    bp = _compute_book_to_price()
-    res = compute_value_composite(ey, bp, stocks)
-    s = res["value_composite"].dropna()
-    print(f"value_composite — {len(s):,} stocks with a usable composite")
-    if len(s):
-        print(f"  mean={s.mean():.4f}  median={s.median():.4f}  "
-              f"p25={s.quantile(0.25):.4f}  p75={s.quantile(0.75):.4f}")

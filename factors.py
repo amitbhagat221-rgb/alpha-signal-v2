@@ -2135,7 +2135,7 @@ def discard_out_of_range(df, cols):
     """The range rule the validated backtest saw: ±inf and values outside a column's
     VALIDATION_RANGES become NaN — DISCARDED, never clipped. In place; returns
     {col: n_out_of_range}. Used by pit._validate_and_clean and, for the
-    same quantities (LIVE_PIT_COLS), by the live screener."""
+    same quantities, by the live screener."""
     n_out = {}
     for col in cols:
         rule = VALIDATION_RANGES.get(col)
@@ -2180,10 +2180,6 @@ SCREENER_INPUT_COLS = (
     + list(dict.fromkeys([*SCREENER_COLS.values(), *SCREENER_TIER_COLS.values(), "penalty"]))
     + ["price_rows", "quarters_present", "fundamental_coverage"]
 )
-# Screener columns that ARE their factor's PIT quantity (same name in both, same
-# function computes both) — the live screener applies the PIT range rule to them.
-LIVE_PIT_COLS = [f["screener_col"] for sid, f in FACTORS.items()
-                 if f.get("screener_col") and f["screener_col"] == f.get("replay_col") == pit_column(sid)]
 # Plan 0005 eligibility: weight_key → {description, eligible_sql}.
 SIGNAL_ELIGIBILITY = {f["weight_key"]: f["eligibility"] for f in FACTORS.values() if "eligibility" in f}
 

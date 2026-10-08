@@ -31,8 +31,7 @@ def _check(found, allowed, rule):
 # ── Invariant 1: a Feature sees data only through as-of frames — signals/ must not import db ──
 SIGNALS_IMPORTING_DB = {
     "signals/_annual.py", "signals/_prices.py", "signals/accruals.py", "signals/announcement_car.py",
-    "signals/asset_growth.py", "signals/book_to_price.py", "signals/consensus.py",
-    "signals/earnings_yield.py", "signals/eps_revision.py",
+    "signals/asset_growth.py", "signals/consensus.py",
     "signals/financial_signal.py", "signals/fno_iv_factors.py", "signals/fno_oi_factors.py",
     "signals/forensic.py", "signals/governance_events.py", "signals/industry_id.py",
     "signals/insider_signal.py", "signals/macro.py", "signals/macro_betas.py",
@@ -43,7 +42,6 @@ SIGNALS_IMPORTING_DB = {
     "signals/sector_breadth.py", "signals/sector_briefs.py", "signals/sector_forces.py",
     "signals/sector_momentum.py", "signals/sector_policy.py", "signals/sector_tilt.py",
     "signals/sentiment.py", "signals/smart_money.py",
-    "signals/value_composite.py",
 }
 
 

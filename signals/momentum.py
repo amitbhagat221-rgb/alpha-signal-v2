@@ -11,18 +11,13 @@ Returns: DataFrame with sid, mom_6m, mom_12m
 
 No separate DB table — values stored in daily_snapshots during scoring phase.
 
-Usage:
-    python -m signals.momentum            # compute and print stats
-    python -m signals.momentum --dry-run  # same (no DB writes)
 """
 
-import argparse
 
 import numpy as np
 import pandas as pd
 
 from config import BACKTEST
-from signals._prices import load_prices
 
 SKIP_DAYS = BACKTEST["momentum_skip_days"]     # 22
 WINDOW_6M = BACKTEST["momentum_6m_days"]       # 154
@@ -75,37 +70,3 @@ def momentum(prices):
         rows.append(row)
 
     return pd.DataFrame(rows)
-
-
-def compute_momentum(prices=None):
-    """
-    Compute risk-adjusted 6M and 12M momentum for all stocks, on split/bonus-
-    adjusted closes (the backtest's basis). `prices` = a signals._prices frame
-    (the screener loads it once); loaded when omitted.
-    Returns DataFrame: sid, mom_6m, mom_12m
-    """
-    if prices is None:
-        prices = load_prices()
-    return momentum(prices)
-
-
-def compute(dry_run=False):
-    """Main entry point for pipeline compatibility."""
-    df = compute_momentum()
-
-    has_6m = df["mom_6m"].notna().sum()
-    has_12m = df["mom_12m"].notna().sum()
-
-    print(f"Momentum: {len(df)} stocks")
-    print(f"  6M: {has_6m} stocks, mean={df['mom_6m'].dropna().mean():.3f}")
-    print(f"  12M: {has_12m} stocks, mean={df['mom_12m'].dropna().mean():.3f}")
-    print("  (No separate DB table — stored in daily_snapshots during scoring)")
-
-    return len(df)
-
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--dry-run", action="store_true")
-    args = parser.parse_args()
-    compute(dry_run=args.dry_run)

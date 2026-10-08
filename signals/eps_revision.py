@@ -21,13 +21,10 @@ applied by the screener; the live producer used to clip to ±500 instead.
 Reads:  forecast_history (metric='eps')
 Returns: DataFrame[sid, eps_revision_yoy]
 
-Usage:
-    python -m signals.eps_revision     # live compute + print stats
 """
 
 import pandas as pd
 
-from db import read_sql
 
 
 def _yoy(g):
@@ -68,21 +65,3 @@ def eps_revision_yoy(fh):
         if yoy is not None:
             rows.append({"sid": sid, "eps_revision_yoy": yoy})
     return pd.DataFrame(rows, columns=cols)
-
-
-def compute_eps_revision_yoy():
-    fh = read_sql(
-        "SELECT sid, date, value FROM forecast_history "
-        "WHERE metric='eps' AND value IS NOT NULL ORDER BY sid, date"
-    )
-    return eps_revision_yoy(fh)
-
-
-if __name__ == "__main__":
-    res = compute_eps_revision_yoy()
-    s = res["eps_revision_yoy"].dropna()
-    print(f"eps_revision_yoy — {len(s):,} stocks with a usable YoY EPS revision reading")
-    if len(s):
-        print(f"  mean={s.mean():+.2f}  median={s.median():+.2f}  "
-              f"p25={s.quantile(0.25):+.2f}  p75={s.quantile(0.75):+.2f}  "
-              f"min={s.min():+.2f}  max={s.max():+.2f}")

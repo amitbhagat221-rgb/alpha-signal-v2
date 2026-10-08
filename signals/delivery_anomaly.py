@@ -11,12 +11,9 @@ Returns: DataFrame with sid, delivery_anomaly_z
 No separate DB table — values are computed live by the screener and persisted
 inside daily_snapshots via the scoring phase. Mirrors signals/momentum.py.
 
-Usage:
-    python -m signals.delivery_anomaly            # compute and print stats
 """
 
 import pandas as pd
-
 
 
 WINDOW_DAYS = 90
@@ -49,20 +46,3 @@ def delivery_anomaly_z(prices: pd.DataFrame, window: int = WINDOW_DAYS) -> pd.Da
         if abs(z) <= Z_LIMIT:
             rows.append({"sid": sid, "delivery_anomaly_z": round(float(z), 3)})
     return pd.DataFrame(rows, columns=["sid", "delivery_anomaly_z"])
-
-
-def compute_delivery_anomaly_z(prices: pd.DataFrame | None = None) -> pd.DataFrame:
-    """Live: today's value per sid over the SAME rows the PIT backtest uses — full
-    close > 0 history (signals._prices.load_prices). A 180-calendar-day window used to
-    drop thin traders whose last 90 valid rows reach further back (plan 0015 Phase 3)."""
-    if prices is None:
-        from signals._prices import load_prices
-        prices = load_prices()
-    return delivery_anomaly_z(prices[["sid", "date", "delivery_pct"]])
-
-
-if __name__ == "__main__":
-    df = compute_delivery_anomaly_z()
-    print(f"Computed delivery_anomaly_z for {len(df):,} stocks")
-    if not df.empty:
-        print(df["delivery_anomaly_z"].describe())

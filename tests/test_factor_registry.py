@@ -63,10 +63,6 @@ def test_pit_columns_ranged_and_produced():
         assert v2 is None or v2 in factors.PIT_COLUMNS, sid
 
 
-def test_live_pit_cols_are_screener_columns():
-    assert set(factors.LIVE_PIT_COLS) <= set(factors.SCREENER_INPUT_COLS)
-
-
 def test_one_range_per_column():
     """A PIT column registered under two factor ids must carry ONE validation range
     (plan 0015: eps_revision_yoy vs consensus_signal_combined disagreed)."""

@@ -409,28 +409,11 @@ def pit_fwd_return_20d(eval_date, raw_prices_full, adjustments=None):
 
 
 def pit_mom_composite(df_with_mom):
-    """Equal-weight composite of mom_6m + mom_12m, ranked within cap_tier.
-
-    Operates on a DataFrame that already has mom_6m, mom_12m, cap_tier columns
-    (i.e. the assembled per-eval-date frame). Within-tier rank → [0, 1].
-    """
-    out = df_with_mom[["sid", "cap_tier", "mom_6m", "mom_12m"]].copy()
-    # Within-tier percentile rank for each component
-    out["_r6"] = out.groupby("cap_tier")["mom_6m"].rank(pct=True)
-    out["_r12"] = out.groupby("cap_tier")["mom_12m"].rank(pct=True)
-    # Equal-weight composite: 0.5/0.5 with NaN tolerance
-    has6 = out["_r6"].notna()
-    has12 = out["_r12"].notna()
-    both = has6 & has12
-    only6 = has6 & ~has12
-    only12 = ~has6 & has12
-
-    out["mom_composite"] = np.nan
-    out.loc[both, "mom_composite"] = 0.5 * out.loc[both, "_r6"] + 0.5 * out.loc[both, "_r12"]
-    out.loc[only6, "mom_composite"] = out.loc[only6, "_r6"]
-    out.loc[only12, "mom_composite"] = out.loc[only12, "_r12"]
-    out["mom_composite"] = out["mom_composite"].round(4)
-    return out[["sid", "mom_composite"]]
+    """Equal-weight within-tier rank composite of mom_6m + mom_12m (the shared
+    signals.value_composite.within_tier_rank_composite; one component alone when the other
+    is missing)."""
+    from signals.value_composite import within_tier_rank_composite
+    return within_tier_rank_composite(df_with_mom, [("mom_6m", 0.5), ("mom_12m", 0.5)], "mom_composite")
 
 
 def pit_quality_fundamentals(stocks, qi_pit, bs_pit, financial_sids):
