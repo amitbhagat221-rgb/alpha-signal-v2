@@ -33,12 +33,14 @@ Everything else (memory, `_archive/`, slash commands, settings) — Claude handl
 - Never rank across tiers — always within-segment
 - A wired factor with no value for a stock scores as the middle of its tier (`config.MISSING_FACTOR_SCORE`); never re-spread its weight over the other factors (ADR 0064). A result print is `factors.RESULT_FILING_SQL`, not `category='Result'` alone
 - A source column is named for what it holds, and its meaning is checked against a second source: a statement column a factor reads goes in `tools/reconcile.FUND_FIELDS` (Tickertape's "interest" was operating expenses and "depreciation" was dividends for months; ADR 0062). A weight sits on the column its evidence was measured on
-- Price and share count on one basis: market cap / per-share values come from `signals._fundamentals.shares_and_book`, returns from adjusted prices (`adj_close`); never divide a vendor share count by a raw close
+- Price and share count on one basis: market cap is `signals._fundamentals.market_caps` (live tiers, backtest tiers, MICRO carve-out, `stocks.market_cap_cr` in ₹ crore), per-share values come from `shares_and_book`, returns from adjusted prices (`pit.forward_returns` is the one label); never divide a vendor share count by a raw close. Live tiering uses `pit.tier_inputs`, the backtest's own inputs (ADR 0065)
 - Financial sector stocks rank through the MAIN screener (generic weights), NOT a separate sub-model — with `accruals`+`piotroski` marked INELIGIBLE for Financials in `eligibility/registry.py` (structurally N/A for banks) so `eligible_coverage` renormalizes over the signals that DO apply. `financial_signal_scores` is dossier/display-only, evidence-benched from ranking (within-financials IC t=0.73, fails the bar). See [ADR 0048](docs/decisions/0048-financials-rank-generic-not-submodel.md). (Was mis-documented as "route through the sub-model"; the mis-wired eligibility silently dropped all MID Financials from `daily_picks` post-ADR-0045 until fixed 2026-07-05.)
 - Tickertape SIDs ≠ NSE tickers (e.g. `REDY` not `DRRD`). Always use universe SIDs
 
 **Data Operations**
 - Never run two harvester scripts simultaneously — doubles request rate, risks IP block
+- Never run two multi-hour DB writers at once (panel rebuild, `datamodel.sync`, backfills): on 2026-10-08 the WAL reached 32.5 GB and filled the disk. Message the other session first
+- In a git worktree `config.DB_PATH` points inside the worktree: set `ALPHA_DB=/home/ubuntu/alpha-signal-v2/data/alpha_signal.db`, or sqlite silently creates an empty DB there
 - Every external call goes through the host door (`sources/_http` + `hosts.HOSTS`: gap ≥2 s, headers, retries, budgets). Never `requests.get`/`sleep` for pacing in a module — declare the host
 - Smoke test with 3 stocks before any full run
 - `INSERT OR IGNORE` for append-only tables (insider_trades, bulk_deals, news_articles); column-level `db.upsert_df` for snapshot/state tables — never `INSERT OR REPLACE` there (it NULLs columns another producer owns, e.g. analyst_consensus)

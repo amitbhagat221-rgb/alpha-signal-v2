@@ -1103,10 +1103,10 @@ FACTORS = {
         "source_columns": ["forecast_history.{value, change} WHERE metric='eps'"],
         "filing_lag": "75d annual",
         "v1_verdict_summary": "(component of v1 consensus signal)",
-        "status_reason": "Pattern 6. Small-base-EPS stocks produce noise; combined signal mitigates.",
+        "status_reason": "SUPERSEDED 2026-10-08: the same quantity as consensus_signal_combined (rank correlation 1.00), which carries the MID weight.",
         "producer": "consensus",
         "pit_range": (-300, 500),   # plan 0015: same quantity as consensus_signal_combined → ONE range
-        "bench": "PROPOSED",
+        "bench": "SUPERSEDED",
         "weight_key": "eps_revision_yoy",
     },
     "consensus_signal_combined": {
@@ -1296,10 +1296,10 @@ FACTORS = {
         "source_columns": ["{Sales, Receivables, Inventory, Trade Payables}"],
         "filing_lag": "75d annual",
         "v1_verdict_summary": "v2-only — DROP all tiers (best |t|=1.48 LARGE)",
-        "status_reason": "Library tier — borderline (t=1.48 just under bar); same regime pattern as CCC. Kept computed.",
+        "status_reason": "SUPERSEDED 2026-10-08: the same quantity as ccc (rank correlation 1.00 on the panel; CCC = 365 x intensity). Kept computed for lineage.",
         "producer": "working_capital_intensity",
         "pit_range": (-2, 5),
-        "bench": "LIBRARY",
+        "bench": "SUPERSEDED",
     },
     "dso_change_yoy": {
         "label": "DSO YoY Change",
@@ -1565,7 +1565,7 @@ FACTORS = {
         "status_reason": "Single-direction composite invalid by backtest. Use financial_quality (SMALL) + financial_recovery (LARGE/MID) instead.",
         "producer": "financial_signal",
         "pit_range": (-3, 3),
-        "bench": "PROPOSED",  # TODO amit: classify
+        "bench": "SUPERSEDED",   # = financial_quality (rank correlation 1.00)
     },
     "financial_quality": {
         "label": "Financial Quality — SMALL banks/NBFCs (low NPA = strong franchise)",
