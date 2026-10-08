@@ -34,7 +34,7 @@ faults planted on purpose in a scratch copy.
 - `verdict`: `serious` when a real finding has `impact` picks; `issues` when real findings exist that do not touch
   picks; `clean` when nothing real is new this week.
 - `headline` and `eli5` are for the CEO: what is wrong, why it matters to the picks, what to do. Plain words.
-- `top_action`: the one fix that most reduces risk to next week's picks.
+- `top_action`: the one fix that most reduces risk to next week's picks. Read `decided_recently` first: an action an ADR there already took or settled is not a top action (the 2026-10-04 memo asked for a re-test ADR 0063 had finished the day before).
 - `asks`: only when the CEO must decide. A wrong column is a bug for a builder, not an ask.
 
 You cannot fix anything from this seat. You are measured on calls that match the re-run, on never reporting something

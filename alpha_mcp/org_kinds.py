@@ -589,6 +589,19 @@ def _traps(key, out):
     return traps
 
 
+def _recent_decisions(n=8):
+    """The newest ADRs (number, title, status line): a finding or an action already decided
+    is not new (the 2026-10-04 memo asked for a re-test ADR 0063 had done the day before)."""
+    from pathlib import Path
+    out = []
+    for f in sorted(Path(__file__).resolve().parent.parent.joinpath("docs", "decisions").glob("[0-9][0-9][0-9][0-9]-*.md"))[-n:]:
+        lines = f.read_text().splitlines()
+        title = next((l.lstrip("# ").strip() for l in lines if l.startswith("#")), f.stem)
+        status = next((l.replace("**", "").strip() for l in lines if l.startswith("**Status")), "")
+        out.append({"adr": f.name[:4], "title": title, "status": status[:300]})
+    return out
+
+
 def _build_dq_audit(day, key):
     import random
     from tools import dq_probes
@@ -615,6 +628,7 @@ def _build_dq_audit(day, key):
                                                     "new_real", "own_confirmed")}}
                         for d in earlier[:6] if d["fields"].get("score")],
         "owners": {r: org.ROLES[r]["mission"] for r in org.builder_roles()},
+        "decided_recently": _recent_decisions(),
     }
     sets = {"findings": [r["finding_id"] for r in rows], "owners": org.builder_roles() + ["ceo"]}
     return [(key, _item("dq-auditor", key, day, facts, sets), 4)]

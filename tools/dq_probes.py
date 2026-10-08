@@ -173,6 +173,19 @@ SELECT COALESCE(SUM(bad), 0) AS n_bad, COUNT(DISTINCT sid) AS n_total, (SELECT G
     ("dates", "stock_prices.delivery_pct", "the newest price day has no delivery figure for many stocks",
      """SELECT COALESCE(SUM(delivery_pct IS NULL), 0) AS n_bad, COUNT(*) AS n_total FROM stock_prices
 WHERE date = (SELECT MAX(date) FROM stock_prices) AND source = 'bhavcopy'""", 0.30, ["delivery_anomaly_z"]),
+    # found by the dq-auditor, 2026-10-04: a crore column holding rupees, valuation columns never filled
+    ("impossible", "stocks.market_cap_cr", "a market cap above ₹30 lakh crore (rupees stored in a crore column)",
+     "SELECT COALESCE(SUM(market_cap_cr > 3000000), 0) AS n_bad, COUNT(market_cap_cr) AS n_total FROM stocks", 0.0,
+     ["the tiers", "every market-cap display"]),
+    ("impossible", "stocks.pe_ratio", "P/E, P/B and ROE are all empty for the stock",
+     "SELECT COALESCE(SUM(pe_ratio IS NULL AND pb_ratio IS NULL AND roe IS NULL), 0) AS n_bad, COUNT(*) AS n_total FROM stocks",
+     0.25, ["the pick email", "the stock page", "the MCP stock tool"]),
+    # 2026-10-08: 721 calls fetched since June sat unscored; forward_looking_intensity read last quarter's call
+    ("dates", "nlp_scores.doc_date", "a fetched earnings call older than 14 days has no language score",
+     """SELECT COALESCE(SUM(n.sid IS NULL), 0) AS n_bad, COUNT(*) AS n_total FROM transcripts t
+LEFT JOIN nlp_scores n ON n.sid = t.sid AND n.doc_type = t.doc_type AND n.doc_date = t.doc_date
+WHERE t.raw_text IS NOT NULL AND LENGTH(t.raw_text) > 2000 AND t.fetched_at < date('now', '-14 day')""", 0.02,
+     ["forward_looking_intensity"]),
 ]
 
 
