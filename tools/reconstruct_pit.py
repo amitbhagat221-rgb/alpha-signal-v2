@@ -255,7 +255,7 @@ def main(argv=None, stats=None):
         if not args.dry_run:
             # SQLite can't bind pandas NA — replace with Python None
             df_to_write = df.astype(object).where(df.notna(), None)
-            n_written = upsert_df(df_to_write, "daily_snapshots_pit")
+            n_written = upsert_df(df_to_write, "daily_snapshots_pit", lock_retries=10)
             total_rows += n_written
 
             # Close the checkpoint row as SUCCESS — guaranteed before next iteration
@@ -308,7 +308,7 @@ def main(argv=None, stats=None):
                 if not args.dry_run:
                     sec_df = pd.DataFrame(sector_records)
                     sec_to_write = sec_df.astype(object).where(sec_df.notna(), None)
-                    n_sectors_written = upsert_df(sec_to_write, "macro_sector_signals_pit")
+                    n_sectors_written = upsert_df(sec_to_write, "macro_sector_signals_pit", lock_retries=10)
             except Exception as e:
                 print(f"(sector overlay failed: {e})", end=" ")
 

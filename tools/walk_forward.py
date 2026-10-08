@@ -1,191 +1,185 @@
-"""Walk-forward out-of-sample test of the factor-weighting method.
+"""Walk-forward: does the way we choose factors work on months it has not seen?  (READ-ONLY)
 
-The problem this solves: our t-stats are computed on the SAME 36-month panel we
-used to pick the factors and their weights. That's circular — it measures fit,
-not skill. Waiting for live data gives only ~2 independent periods by autumn.
+Every t-stat in the evidence table is measured on the same history the factors and
+their signs were picked from. This replays the choice month by month on the panel
+(`daily_snapshots_pit`: point-in-time tiers, adjusted next-session label, the
+corrected inputs of ADR 0062):
 
-The fix (no waiting required): walk-forward on the existing PIT history.
-  - The v1 PIT panel has 35 *monthly* snapshots (2023-04 → 2026-02), each with a
-    20-day forward return. Monthly spacing ≈ the return horizon, so consecutive
-    test periods barely overlap — this also sidesteps the overlapping-window
-    artifact that inflated the live-IC read.
-  - For each test month k: FIT factor weights using ONLY months < k (the weights,
-    including each factor's sign, are derived from the training window's mean IC),
-    then SCORE month k with those frozen weights and record the composite's IC on
-    that unseen month. Roll forward. With min_train=12 that's ~23 genuinely
-    out-of-sample monthly periods per tier.
+  for each monthly anchor k (the first business day of a month):
+    train  = the monthly anchors whose 20-session label had matured by k
+             (anchor k-1's label ends around k, so it is embargoed: train ends at k-2)
+    choose = factors from the training window only, each with its training sign
+    score  = month k with the frozen choice, the production composite
+             (within-tier percentile, a negative weight inverts it, a missing factor
+             counts as 0.5 — config.MISSING_FACTOR_SCORE, ADR 0064)
+    record = the composite's rank IC on month k, and the top tenth's 20-day return
+             over the tier average
 
-Three weighting strategies are compared, all fit the same way OOS:
-  - ic_weighted : w_i = mean training IC of factor i (signed). The honest OOS
-                  version of what tools/optimize_weights.py does in-sample.
-  - equal       : w_i = sign(training IC) / n_factors. Does fitting magnitudes help?
-  - best_single : the single highest-|IC| training factor, used alone. Does
-                  combining beat just using the best factor?
-
-CAVEAT surfaced by the data: pt_upside and eps_growth (the factors that dominate
-the in-sample SIGNAL_WEIGHTS_RETURN/SHARPE variants) are NOT in the v1 panel —
-analyst price targets are episodic and only snapshotted since 2026. They cannot
-be validated over this history; this harness tests the production factor set.
+Methods:
+  select   factors with |training t| >= 2.5 on >= 12 training anchors, the 6 strongest,
+           equal weight, training sign — the promotion bar applied without hindsight
+  ic_wtd   every factor with >= 12 training anchors, weight = training mean IC
+  live     today's production weights (factors.SIGNAL_WEIGHTS), fixed. NOT out of sample:
+           they were chosen on this history. The gap between `live` and `select` is
+           roughly what hindsight adds.
 
 Usage:
-    python -m tools.walk_forward
-    python -m tools.walk_forward --min-train 12 --window expanding
-    python -m tools.walk_forward --rolling 18      # rolling 18-month train window
+    python -m tools.walk_forward                     # expanding window
+    python -m tools.walk_forward --rolling 36        # last 36 monthly anchors only
+    python -m tools.walk_forward --md docs/studies/walk-forward-2026-10.md
 """
 import argparse
+from datetime import date
 
 import numpy as np
 import pandas as pd
-from scipy.stats import spearmanr
 
-from config import PICKABLE_TIERS
+import factors
+from config import MISSING_FACTOR_SCORE, PICKABLE_TIERS
 from db import read_sql
+from tools.backtest_pit import IC_MIN_PERIODS, _compute_ic, _is_month_start_anchor
 
 RESPONSE = "fwd_return_20d"
-# Factor columns present in daily_snapshots_pit_v1 with usable coverage.
-# Signs are NOT hardcoded — each is learned from the training window's IC.
-FACTORS = [
-    "book_to_price", "bs_accruals", "cf_accruals", "mom_6m", "mom_12m",
-    "earnings_yield", "piotroski_f", "pledge_quality", "promoter_qoq",
-    "avg_delivery_pct_30d", "eps_cv", "earnings_beat_rate",
-]
-MIN_STOCKS = 20          # min stocks on a date to compute a stable IC
-MIN_TRAIN_OBS = 4        # min training dates a factor must appear on to be used
+EMBARGO = 1          # anchors between the last training label and the test anchor
+SELECT_T = 2.5       # the promotion bar
+SELECT_MAX = 6       # at most this many factors per tier (production carries 4-6)
+MIN_STOCKS = 20
 
 
-def _zscore(s):
-    """Cross-sectional z-score, clipped to ±3, NaN preserved."""
-    mu, sd = s.mean(), s.std(ddof=0)
-    if not sd or np.isnan(sd):
-        return pd.Series(np.nan, index=s.index)
-    return ((s - mu) / sd).clip(-3, 3)
-
-
-def _factor_ic(panel_by_date, factor):
-    """{date: IC} of one factor vs forward return, per date."""
+def _columns():
+    """{panel column: signal id} for every IC-rankable registry factor (no hand list)."""
     out = {}
-    for d, g in panel_by_date:
-        sub = g[[factor, RESPONSE]].dropna()
-        if len(sub) < MIN_STOCKS:
-            continue
-        ic, _ = spearmanr(sub[factor], sub[RESPONSE])
-        if not np.isnan(ic):
-            out[d] = float(ic)
+    for sig, (_, v2) in factors.SIGNAL_COLUMN_MAP.items():
+        if sig != "_response" and v2:
+            out.setdefault(v2, sig)
     return out
 
 
-def _composite_ic_on_date(g, weights):
-    """Weighted-sum composite for one date's stocks, then IC vs forward return."""
+def _ranked_col(weight_key, tier):
+    """The panel column the screener ranks for a weight key in a tier (its replay column)."""
+    f = factors.FACTORS[factors.signal_for(weight_key, tier)]
+    return f.get("replay_col") or factors.pit_column(factors.signal_for(weight_key, tier))
+
+
+def load_panel(cols):
+    have = set(read_sql("SELECT * FROM daily_snapshots_pit LIMIT 1").columns)
+    use = [c for c in cols if c in have]
+    sel = ", ".join(f'"{c}"' for c in ["sid", "snapshot_date", "cap_tier", RESPONSE, *use])
+    df = read_sql(f"SELECT {sel} FROM daily_snapshots_pit WHERE {RESPONSE} IS NOT NULL")
+    df = df[[_is_month_start_anchor(date.fromisoformat(d)) for d in df["snapshot_date"]]]
+    return df, use
+
+
+def _ic_table(tdf, cols):
+    """{column: Series(anchor -> IC)} once per tier; training stats are slices of it."""
+    out = {}
+    for c in cols:
+        rows = _compute_ic(tdf, c, RESPONSE)
+        if rows:
+            out[c] = pd.Series({d: ic for d, ic, _ in rows}).sort_index()
+    return out
+
+
+def composite(g, weights):
+    """The screener's base score on one tier-anchor: Σ|w|·pct (0.5 if missing) / Σ|w|."""
+    total = sum(abs(w) for w in weights.values())
     score = pd.Series(0.0, index=g.index)
-    used = False
-    for f, w in weights.items():
-        if w == 0 or f not in g.columns:
-            continue
-        z = _zscore(g[f]).fillna(0.0)   # missing factor → neutral exposure
-        score = score + w * z
-        used = True
-    if not used:
+    for col, w in weights.items():
+        pct = g[col].rank(pct=True) if col in g else pd.Series(np.nan, index=g.index)
+        pct = (1 - pct) if w < 0 else pct
+        score += abs(w) * pct.fillna(MISSING_FACTOR_SCORE)
+    return score / total
+
+
+def _oos_record(g, weights):
+    if not weights:
         return None
-    sub = pd.DataFrame({"score": score, "ret": g[RESPONSE]}).dropna()
+    s = composite(g, weights)
+    sub = pd.DataFrame({"s": s, "r": g[RESPONSE]}).dropna()
     if len(sub) < MIN_STOCKS:
         return None
-    ic, _ = spearmanr(sub["score"], sub["ret"])
-    return None if np.isnan(ic) else float(ic)
+    ic = sub["s"].rank().corr(sub["r"].rank())
+    top = sub[sub["s"] >= sub["s"].quantile(0.9)]["r"].mean() - sub["r"].mean()
+    return ic, top
 
 
-def _summary(ics):
-    n = len(ics)
-    if n < 2:
-        return dict(n=n, mean_ic=np.nan, icir=np.nan, t=np.nan, ci=(np.nan, np.nan), pos=np.nan)
-    a = np.array(ics)
-    mean = a.mean()
-    sd = a.std(ddof=1)
-    icir = mean / sd if sd else np.nan
-    t = mean / (sd / np.sqrt(n)) if sd else np.nan
-    # bootstrap 95% CI on mean IC
-    rng = np.random.default_rng(42)
-    boot = [rng.choice(a, n, replace=True).mean() for _ in range(2000)]
-    ci = (float(np.percentile(boot, 2.5)), float(np.percentile(boot, 97.5)))
-    return dict(n=n, mean_ic=mean, icir=icir, t=t, ci=ci, pos=float((a > 0).mean()))
+def _choose(ic_tab, train_dates):
+    stats = {}
+    for c, s in ic_tab.items():
+        x = s[s.index.isin(train_dates)]
+        if len(x) >= IC_MIN_PERIODS and x.std(ddof=1) > 0:
+            stats[c] = (x.mean(), x.mean() / (x.std(ddof=1) / np.sqrt(len(x))))
+    strong = sorted((c for c, (_, t) in stats.items() if abs(t) >= SELECT_T),
+                    key=lambda c: -abs(stats[c][1]))[:SELECT_MAX]
+    select = {c: float(np.sign(stats[c][0])) for c in strong}
+    ic_wtd = {c: m for c, (m, _) in stats.items() if m != 0}
+    return {"select": select, "ic_wtd": ic_wtd}, strong
 
 
-def run(min_train=12, rolling=None):
-    df = read_sql("SELECT * FROM daily_snapshots_pit_v1")
-    if "cap_tier" not in df.columns:
-        st = read_sql("SELECT sid, cap_tier FROM stocks")
-        df = df.merge(st, on="sid", how="left")
-    dates = sorted(df["snapshot_date"].unique())
-    print(f"PIT panel: {len(df):,} rows · {len(dates)} monthly dates "
-          f"({dates[0]} → {dates[-1]})")
-    win = f"rolling {rolling}m" if rolling else "expanding"
-    print(f"Train window: {win} · min_train={min_train} · "
-          f"OOS test periods per tier ≈ {len(dates) - min_train}\n")
-
-    strategies = ["ic_weighted", "equal", "best_single"]
-    results = {tier: {s: [] for s in strategies} for tier in PICKABLE_TIERS}
-
+def run(rolling=None, start="2020-06-01"):
+    col_of = _columns()
+    live = {_ranked_col(k, t) for t, ws in factors.SIGNAL_WEIGHTS.items() for k in ws}
+    panel, cols = load_panel(list(col_of) + sorted(live - set(col_of)))
+    live_w = {t: {_ranked_col(k, t): w for k, w in ws.items()} for t, ws in factors.SIGNAL_WEIGHTS.items()}
+    anchors = sorted(panel["snapshot_date"].unique())
+    rec, picks = [], []
     for tier in PICKABLE_TIERS:
-        tdf = df[df["cap_tier"] == tier]
-        by_date = {d: g for d, g in tdf.groupby("snapshot_date")}
-
-        for k in range(min_train, len(dates)):
-            test_date = dates[k]
-            train_dates = dates[k - rolling:k] if rolling else dates[:k]
-            train = tdf[tdf["snapshot_date"].isin(train_dates)]
-            test_g = by_date.get(test_date)
-            if test_g is None or len(test_g) < MIN_STOCKS:
+        tdf = panel[panel["cap_tier"] == tier]
+        ic_tab = _ic_table(tdf, cols)
+        by_date = dict(tuple(tdf.groupby("snapshot_date")))
+        for k, test in enumerate(anchors):
+            if test < start or test not in by_date or k - EMBARGO < 1:
                 continue
+            train = anchors[:k - EMBARGO]
+            if rolling:
+                train = train[-rolling:]
+            methods, strong = _choose(ic_tab, set(train))
+            methods["live"] = {c: w for c, w in live_w.get(tier, {}).items() if c in tdf}
+            picks.append({"tier": tier, "anchor": test, "chosen": ", ".join(strong)})
+            for m, w in methods.items():
+                r = _oos_record(by_date[test], w)
+                if r:
+                    rec.append({"tier": tier, "anchor": test, "method": m, "ic": r[0], "top": r[1]})
+    return pd.DataFrame(rec), pd.DataFrame(picks)
 
-            # FIT: mean training IC per factor (this fixes both sign and magnitude)
-            tr_by_date = list(train.groupby("snapshot_date"))
-            train_ic = {}
-            for f in FACTORS:
-                ics = _factor_ic(tr_by_date, f)
-                if len(ics) >= MIN_TRAIN_OBS:
-                    train_ic[f] = float(np.mean(list(ics.values())))
-            if not train_ic:
-                continue
 
-            # Build the three weight vectors (all from training only)
-            ic_w = {f: v for f, v in train_ic.items()}
-            tot = sum(abs(v) for v in ic_w.values()) or 1.0
-            ic_w = {f: v / tot for f, v in ic_w.items()}
+def summarise(rec):
+    rows = []
+    for (tier, m), g in rec.groupby(["tier", "method"]):
+        ic = g["ic"].to_numpy()
+        n = len(ic)
+        t = ic.mean() / (ic.std(ddof=1) / np.sqrt(n)) if n > 1 and ic.std(ddof=1) > 0 else np.nan
+        rows.append({"tier": tier, "method": m, "months": n, "mean_ic": round(ic.mean(), 4),
+                     "t": round(t, 2), "pct_pos": round((ic > 0).mean() * 100),
+                     "top10_vs_tier_pct": round(g["top"].mean() * 100, 2)})
+    order = {t: i for i, t in enumerate(PICKABLE_TIERS)}
+    return pd.DataFrame(rows).sort_values(["tier", "method"], key=lambda s: s.map(order) if s.name == "tier" else s)
 
-            eq_w = {f: np.sign(v) / len(train_ic) for f, v in train_ic.items()}
 
-            best_f = max(train_ic, key=lambda f: abs(train_ic[f]))
-            best_w = {best_f: np.sign(train_ic[best_f])}
+def by_year(rec):
+    r = rec.assign(year=rec["anchor"].str[:4])
+    return r.pivot_table(index=["tier", "method"], columns="year", values="ic", aggfunc="mean").round(3)
 
-            for name, w in [("ic_weighted", ic_w), ("equal", eq_w), ("best_single", best_w)]:
-                ic = _composite_ic_on_date(test_g, w)
-                if ic is not None:
-                    results[tier][name].append(ic)
 
-    # ── Report ──
-    print(f"{'tier':6} {'strategy':12} {'n':>3} {'meanIC':>8} {'ICIR':>6} "
-          f"{'t':>6} {'95% CI (mean IC)':>20} {'%+':>5}")
-    print("-" * 74)
-    for tier in PICKABLE_TIERS:
-        for s in strategies:
-            r = _summary(results[tier][s])
-            ci = f"[{r['ci'][0]:+.3f},{r['ci'][1]:+.3f}]" if not np.isnan(r['ci'][0]) else "—"
-            verdict = ""
-            if not np.isnan(r['ci'][0]) and r['ci'][0] > 0:
-                verdict = "  ← OOS-positive (CI>0)"
-            print(f"{tier:6} {s:12} {r['n']:>3} {r['mean_ic']:>+8.4f} {r['icir']:>+6.2f} "
-                  f"{r['t']:>+6.2f} {ci:>20} {r['pos']*100:>4.0f}%{verdict}")
-        print()
-
-    print("Read: an OOS mean IC whose 95% CI is entirely > 0 is genuine, "
-          "non-circular evidence the\nweighting works on unseen months. "
-          "Compare ic_weighted vs equal vs best_single to see if\nfitting "
-          "weights actually adds anything over equal-weighting or the single best factor.")
+def _md(df):
+    cols = [str(c) for c in df.columns]
+    lines = ["| " + " | ".join(cols) + " |", "|" + "---|" * len(cols)]
+    lines += ["| " + " | ".join("" if pd.isna(v) else str(v) for v in row) + " |" for row in df.itertuples(index=False)]
+    return "\n".join(lines)
 
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("--min-train", type=int, default=12)
-    ap.add_argument("--rolling", type=int, default=None,
-                    help="rolling train window length (months); default expanding")
+    ap.add_argument("--rolling", type=int, default=None, help="train on the last N monthly anchors only")
+    ap.add_argument("--md", help="also write the tables to this markdown file")
     a = ap.parse_args()
-    run(min_train=a.min_train, rolling=a.rolling)
+    rec, picks = run(rolling=a.rolling)
+    s, y = summarise(rec), by_year(rec).reset_index()
+    print(s.to_string(index=False)); print(); print(y.to_string(index=False))
+    last = picks.sort_values("anchor").groupby("tier").tail(1)
+    print(); print(last.to_string(index=False))
+    if a.md:
+        open(a.md, "w").write(
+            f"Walk-forward, {'rolling ' + str(a.rolling) if a.rolling else 'expanding'} window "
+            f"(`python -m tools.walk_forward`)\n\n{_md(s)}\n\nMean OOS IC by year\n\n{_md(y)}\n\n"
+            f"Factors `select` chose at the latest anchor\n\n{_md(last)}\n")

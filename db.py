@@ -655,9 +655,12 @@ def _check_frame_units(df, table_name: str, declared_units: dict) -> None:
         # rely on consumer-side assert_unit at read_typed boundaries.
 
 
-def upsert_df(df, table_name, conn=None):
+def upsert_df(df, table_name, conn=None, lock_retries=0):
     """
     Upsert DataFrame rows: INSERT, or UPDATE only the provided columns on PK conflict.
+
+    lock_retries > 0 retries `database is locked` with a linear backoff, as in insert_df
+    (multi-hour panel rebuilds pass it: a 06:21 rebuild once died on its first write).
 
     Uses SQLite's INSERT ... ON CONFLICT(pk) DO UPDATE SET col=excluded.col ...
     so columns NOT in `df` are preserved (unlike INSERT OR REPLACE which nulls them).
@@ -720,9 +723,15 @@ def upsert_df(df, table_name, conn=None):
 
     if conn is not None:
         return _execute(conn)
-    else:
-        with get_db() as connection:
-            return _execute(connection)
+    for attempt in range(lock_retries + 1):
+        try:
+            with get_db() as connection:
+                return _execute(connection)
+        except sqlite3.OperationalError as e:
+            if "locked" not in str(e).lower() or attempt == lock_retries:
+                raise
+            _time_module.sleep(2.0 * (attempt + 1))
+    return 0
 
 
 # ── Data Health ──

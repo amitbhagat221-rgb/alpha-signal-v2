@@ -89,7 +89,7 @@ def _compute_ic(df, signal_col, fwd_col):
     out = []
     for eval_date, group in df.groupby("snapshot_date"):
         sub = group[[signal_col, fwd_col]].dropna()
-        if len(sub) < 20:  # need at least 20 stocks for stable IC
+        if len(sub) < 20 or sub[signal_col].nunique() < 2:  # 20 stocks for a stable IC; a constant has none
             continue
         try:
             ic, _ = spearmanr(sub[signal_col], sub[fwd_col])
@@ -342,7 +342,7 @@ def main():
     # changes with cadence / NW lag, which left orphan rows behind).
     df["computed_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     df_to_write = df.astype(object).where(df.notna(), None)
-    n = upsert_df(df_to_write, "pit_ic_by_tier_v2")
+    n = upsert_df(df_to_write, "pit_ic_by_tier_v2", lock_retries=10)
     produced = set(zip(df["signal"], df["cap_tier"], df["source"]))
     with get_db() as conn:
         stored = conn.execute(
