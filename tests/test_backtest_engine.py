@@ -111,3 +111,14 @@ def test_a_wired_factors_input_is_never_silently_optional(monkeypatch):
         pit.load_raw({"bse_results"})
     optional_unwired = next(k for k in pit.RAW_OPTIONAL if k not in pit._wired_raw_keys())
     assert pit.load_raw({optional_unwired})[optional_unwired].empty    # benched input: still optional
+
+
+def test_one_label_function_for_every_horizon():
+    """forward_returns is the panel label and the horizon label: 20 sessions equals
+    pit_fwd_return_20d, a horizon that has not elapsed has no column."""
+    px = _prices([100.0 + i for i in range(30)])
+    fr = pit.forward_returns(date(2026, 1, 1), px, None, (5, 20, 60))
+    assert fr["fwd_return_20d"].iloc[0] == pit.pit_fwd_return_20d(date(2026, 1, 1), px)["fwd_return_20d"].iloc[0]
+    entry = px.loc[px["date"] > "2026-01-01", "close"].iloc[0]
+    assert fr["fwd_return_5d"].iloc[0] == round(px["close"].iloc[px.index[px["close"] == entry][0] + 5] / entry - 1, 4)
+    assert "fwd_return_60d" not in fr

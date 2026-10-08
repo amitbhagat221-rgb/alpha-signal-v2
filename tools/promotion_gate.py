@@ -182,7 +182,7 @@ def run(only_signal=None, turnover=DEFAULT_TURNOVER, reeval_live=False):
     v1_df = read_sql("SELECT * FROM daily_snapshots_pit_v1")
     v2_df = read_sql("SELECT * FROM daily_snapshots_pit")
     price_series = _price_series()
-    print(f"  v1 {len(v1_df):,} / v2 {len(v2_df):,} rows · {len(price_series):,} sids")
+    print(f"  v1 {len(v1_df):,} / v2 {len(v2_df):,} rows · {price_series[0]['sid'].nunique():,} sids")
 
     # attach multi-horizon forward returns once
     for name in ("v1", "v2"):

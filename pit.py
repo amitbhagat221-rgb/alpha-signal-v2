@@ -295,21 +295,24 @@ def pit_macd_bullish(prices_pit):
 _FWD_MAX_GAP_DAYS = 7  # ≤5 trading days ≈ ≤7 calendar days (weekend/holiday slack)
 
 
-_ADJ_FULL = {}   # id(raw prices frame) → the same frame with every corporate action applied
+_ADJ_FULL = {}   # (id(raw prices), id(adjustments)) → the prices with every corporate action applied
 
 
 def _fully_adjusted(raw_prices_full, adjustments):
-    key = id(raw_prices_full)
+    key = (id(raw_prices_full), id(adjustments))
     if key not in _ADJ_FULL:
         _ADJ_FULL.clear()
         _ADJ_FULL[key] = apply_adjustments(raw_prices_full, adjustments, date.max)
     return _ADJ_FULL[key]
 
 
-def pit_fwd_return_20d(eval_date, raw_prices_full, adjustments=None):
-    """20-trading-day forward TOTAL return per sid, with anchor-proximity guards.
+def forward_returns(eval_date, raw_prices_full, adjustments=None, horizons=(20,)):
+    """Forward TOTAL return per sid over each of `horizons` trading days, with
+    anchor-proximity guards — THE label: the panel's fwd_return_20d and every horizon
+    tools/ic_decay, promotion_gate and factor_marginal test come from here.
+    Returns [sid, fwd_return_{h}d …]; a horizon not yet elapsed has no column.
 
-    Entry is the close of the first session AFTER eval_date, exit 20 sessions later:
+    Entry is the close of the first session AFTER eval_date, exit h sessions later:
     the factors of eval_date are computed after its close (delivery data, and most
     filings, arrive after 15:30), so the earliest trade is the next session. Entering
     at the eval-date close credited factors with a move nobody could trade
@@ -321,7 +324,7 @@ def pit_fwd_return_20d(eval_date, raw_prices_full, adjustments=None):
     window read as −80% — 54% of all labels below −40% were corporate actions.
 
     Uses the FULL price history (not the PIT-filtered slice) since we need
-    prices AFTER eval_date. NULL if 20 trading days haven't elapsed yet.
+    prices AFTER eval_date. NULL if h trading days haven't elapsed yet.
 
     ANCHOR-PROXIMITY GUARD (2026-07-05, panel-integrity fix). A sid's forward
     return is valid ONLY IF:
@@ -342,58 +345,44 @@ def pit_fwd_return_20d(eval_date, raw_prices_full, adjustments=None):
     symmetric case: a sid with a data gap between entry and exit whose
     "+20 rows" spans far more than 20 real trading days.
     """
-    rows = []
     eval_str = eval_date.isoformat()
-    eval_d = eval_date if isinstance(eval_date, date) else \
-        datetime.strptime(eval_str[:10], "%Y-%m-%d").date()
-
-    # Market trading calendar = sorted unique dates across ALL sids. Used to
-    # define what "20 trading days after eval_date" means independent of any
-    # single sid's (possibly gappy) coverage.
-    cal = np.sort(raw_prices_full["date"].unique())
+    eval_d = pd.Timestamp(eval_str[:10])
+    p, by_pos, cal = _label_rows(raw_prices_full, adjustments)
+    out = pd.DataFrame({"sid": raw_prices_full["sid"].unique()})
     m_anchor = int(np.searchsorted(cal, eval_str, side="right"))   # first market session after eval_date
-    all_sids = raw_prices_full["sid"].unique()
-    price_col = "close"
-    if adjustments is not None and not adjustments.empty:
-        raw_prices_full, price_col = _fully_adjusted(raw_prices_full, adjustments), "adj_close"
-    # eval_date beyond history, or fewer than 20 market days of forward window
-    # remaining → nothing is measurable this anchor.
-    if m_anchor >= len(cal) or m_anchor + 20 >= len(cal):
-        return pd.DataFrame({"sid": all_sids})
-    target_exit_str = str(cal[m_anchor + 20])[:10]
-    target_exit_d = datetime.strptime(target_exit_str, "%Y-%m-%d").date()
+    entry = p[p["date"] > eval_str].groupby("sid", sort=False).head(1).set_index("sid")
+    entry = entry[(pd.to_datetime(entry["date"]) - eval_d).abs().dt.days <= _FWD_MAX_GAP_DAYS]   # (a) entry guard
+    for h in horizons:
+        if m_anchor >= len(cal) or m_anchor + h >= len(cal):
+            continue                    # fewer than h market sessions of forward window: not measurable
+        target_exit = pd.Timestamp(str(cal[m_anchor + h])[:10])
+        ex = by_pos.reindex(pd.MultiIndex.from_arrays([entry.index, entry["k"] + h]))
+        ex.index = entry.index
+        ok = ((pd.to_datetime(ex["date"]) - target_exit).abs().dt.days <= _FWD_MAX_GAP_DAYS)   # (b) exit guard
+        p0, p1 = entry["adj_close"], ex["adj_close"]
+        ok &= (p0 > 0) & (p1 > 0)
+        out[f"fwd_return_{h}d"] = out["sid"].map((p1[ok] / p0[ok] - 1).map(lambda r: round(float(r), 4)))
+    return out
 
-    # For each sid, find the close at the first trading day after eval_date
-    # and the close 20 trading days later.
-    for sid, group in raw_prices_full.groupby("sid"):
-        g = group.sort_values("date")
-        dates = g["date"].values
-        # First trading day > eval_date
-        anchor_idx = int(np.searchsorted(dates, eval_str, side="right"))
-        if anchor_idx >= len(g):
-            rows.append({"sid": sid})
-            continue
-        # (a) ENTRY proximity guard
-        entry_d = datetime.strptime(str(dates[anchor_idx])[:10], "%Y-%m-%d").date()
-        if abs((entry_d - eval_d).days) > _FWD_MAX_GAP_DAYS:
-            rows.append({"sid": sid})
-            continue
-        target_idx = anchor_idx + 20
-        if target_idx >= len(g):
-            rows.append({"sid": sid})
-            continue
-        # (b) EXIT proximity guard
-        exit_d = datetime.strptime(str(dates[target_idx])[:10], "%Y-%m-%d").date()
-        if abs((exit_d - target_exit_d).days) > _FWD_MAX_GAP_DAYS:
-            rows.append({"sid": sid})
-            continue
-        p0 = g.iloc[anchor_idx][price_col]
-        p1 = g.iloc[target_idx][price_col]
-        if p0 > 0 and p1 > 0:
-            rows.append({"sid": sid, "fwd_return_20d": round(float(p1 / p0 - 1), 4)})
-        else:
-            rows.append({"sid": sid})
-    return pd.DataFrame(rows)
+
+_LABEL = {}   # (id(raw prices), id(adjustments)) → (rows sorted by sid, date with a per-sid position k, the same indexed by (sid, k), market calendar)
+
+
+def _label_rows(raw_prices_full, adjustments):
+    key = (id(raw_prices_full), id(adjustments))
+    if key not in _LABEL:
+        _LABEL.clear()
+        px = (_fully_adjusted(raw_prices_full, adjustments) if adjustments is not None and not adjustments.empty
+              else raw_prices_full.assign(adj_close=raw_prices_full["close"]))
+        p = px[["sid", "date", "adj_close"]].sort_values(["sid", "date"], kind="mergesort").reset_index(drop=True)
+        p["k"] = p.groupby("sid").cumcount()
+        _LABEL[key] = (p, p.set_index(["sid", "k"])[["date", "adj_close"]], np.sort(raw_prices_full["date"].unique()))
+    return _LABEL[key]
+
+
+def pit_fwd_return_20d(eval_date, raw_prices_full, adjustments=None):
+    """The panel label: forward_returns over 20 sessions."""
+    return forward_returns(eval_date, raw_prices_full, adjustments, (20,))
 
 
 def pit_mom_composite(df_with_mom):

@@ -60,58 +60,25 @@ _GAP_TRADING_DAYS = {"weekly": 5, "monthly": 21}
 
 
 def _price_series():
-    """sid -> date-indexed close Series (sorted, NaN-free), adjusted for every split,
-    bonus and dividend so a forward return never spans two share bases (same rule as
-    pit.pit_fwd_return_20d). Built once so each (sid, eval_date, horizon) forward
-    return is a positional lookup."""
-    from signals._prices import load_prices
-    df = load_prices()
-    if df.empty:
-        raise RuntimeError("stock_prices empty — cannot compute forward returns")
-    df = df[["sid", "date"]].assign(close=df["adj_close"])
-    df["date"] = pd.to_datetime(df["date"])
-    df = df.sort_values(["sid", "date"])
-    return {sid: g.set_index("date")["close"] for sid, g in df.groupby("sid")}
+    """(raw prices, corporate adjustments) — the inputs of pit.forward_returns, loaded once."""
+    import pit
+    raw = pit.load_raw({"prices", "adjustments"})
+    return raw["prices"], raw["adjustments"]
 
 
 def _fwd_panel(panel, price_series):
-    """Long frame [snapshot_date, sid, fwd_5 … fwd_252] for the (date, sid)
-    pairs present in `panel`. fwd_H = close H trading days after the first
-    trading day on/after snapshot_date (matches pit_fwd_return_20d's
-    anchor_idx + H), NaN where the horizon hasn't matured.
-
-    Same ANCHOR-PROXIMITY GUARD as pit.pit_fwd_return_20d (ADR 0047;
-    plan 0015 Phase 0 — this copy lacked it): the entry row must lie within
-    _FWD_MAX_GAP_DAYS of snapshot_date, and the exit row within _FWD_MAX_GAP_DAYS
-    of the date H MARKET trading days later. Otherwise that horizon is NaN."""
-    from pit import _FWD_MAX_GAP_DAYS
-    gap = pd.Timedelta(days=_FWD_MAX_GAP_DAYS)
-    cal = pd.DatetimeIndex(sorted(set().union(*(s.index for s in price_series.values()))))
-    pairs = panel[["snapshot_date", "sid"]].drop_duplicates()
-    rows = []
-    for snapshot_date, sid in pairs.itertuples(index=False):
-        s = price_series.get(sid)
-        if s is None or s.empty:
-            continue
-        t0 = pd.Timestamp(snapshot_date)
-        pos = int(s.index.searchsorted(t0, side="right"))        # first session AFTER the anchor (as the panel label)
-        if pos >= len(s) or abs(s.index[pos] - t0) > gap:    # (a) entry guard
-            continue
-        p0 = float(s.iloc[pos])
-        if not (p0 > 0):
-            continue
-        m_anchor = int(cal.searchsorted(t0, side="right"))
-        rec = {"snapshot_date": snapshot_date, "sid": sid}
-        for h in HORIZONS:
-            tgt = pos + h
-            if tgt < len(s) and m_anchor + h < len(cal):
-                if abs(s.index[tgt] - cal[m_anchor + h]) > gap:   # (b) exit guard
-                    continue
-                p1 = float(s.iloc[tgt])
-                if p1 > 0:
-                    rec[f"fwd_{h}"] = p1 / p0 - 1.0
-        rows.append(rec)
-    return pd.DataFrame(rows)
+    """Long frame [snapshot_date, sid, fwd_5 … fwd_252] for the (date, sid) pairs in
+    `panel`: pit.forward_returns, THE label (entry the session after the anchor, adjusted
+    total return, entry and exit proximity guards), at every horizon. NaN where the
+    horizon has not matured or a guard fails."""
+    import pit
+    prices, adjustments = price_series
+    out = []
+    for d, g in panel[["snapshot_date", "sid"]].drop_duplicates().groupby("snapshot_date"):
+        fr = pit.forward_returns(pd.Timestamp(d).date(), prices, adjustments, HORIZONS)
+        fr = fr.rename(columns={f"fwd_return_{h}d": f"fwd_{h}" for h in HORIZONS})
+        out.append(g.merge(fr, on="sid", how="left"))
+    return pd.concat(out, ignore_index=True) if out else pd.DataFrame(columns=["snapshot_date", "sid"])
 
 
 def _horizon_lag(signal, cadence, horizon):
@@ -142,9 +109,8 @@ def compute(only_signal=None, min_periods=5):
     print(f"  v1: {len(v1_df):,} rows / {v1_df['snapshot_date'].nunique()} dates · "
           f"v2: {len(v2_df):,} rows / {v2_df['snapshot_date'].nunique()} dates")
     price_series = _price_series()
-    px_dates = pd.concat([s.index.to_series() for s in price_series.values()])
-    print(f"  stock_prices spans {px_dates.min().date()} → {px_dates.max().date()} "
-          f"across {len(price_series):,} sids")
+    px = price_series[0]
+    print(f"  stock_prices spans {px['date'].min()} → {px['date'].max()} across {px['sid'].nunique():,} sids")
 
     # Attach the multi-horizon forward returns to each panel.
     for name, df in (("v1", v1_df), ("v2", v2_df)):
