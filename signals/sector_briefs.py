@@ -118,7 +118,7 @@ def build_sector_briefs(snapshot_date: str | None = None) -> int:
     base = read_sql("""
         SELECT s.sector,
                COUNT(*) AS n_stocks,
-               ROUND(SUM(s.market_cap_cr) / 1e7, 0) AS mcap_total_cr
+               ROUND(SUM(s.market_cap_cr), 0) AS mcap_total_cr
         FROM stocks s
         WHERE s.sector IS NOT NULL AND s.ticker IS NOT NULL
         GROUP BY s.sector

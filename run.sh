@@ -85,6 +85,9 @@ case "$JOB" in
         harvest_lock
         logged cron_transcripts run python -m sources.transcripts_pull --reported-days 45 --min-analysts 1 --max-docs 2
         logged cron_transcripts_dates run python -m sources.transcripts_pull --backfill-filing-dates
+        # score the new calls: forward_looking_intensity (wired, LARGE) reads nlp_scores, and nothing
+        # scheduled this — 721 calls fetched 2026-06 → 10 sat unscored (plan 0020, 2026-10-08)
+        logged cron_nlp_scores run python -m signals.nlp_scores
         # named >1% holders for stocks missing the latest quarter (filings land within ~21 days
         # of quarter end); budgeted and resumable, stalest first
         logged cron_bse_shp run python -m sources.bse_shp --due --budget-min 180 ;;

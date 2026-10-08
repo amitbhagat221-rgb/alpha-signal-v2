@@ -36,7 +36,6 @@ from signals import _annual
 
 FINANCIAL_SECTORS = set(SCREEN["financial_sectors"])
 WINDOW_DAYS = 90
-RUPEES_PER_CRORE = 1e7
 MIN_MARKET_CAP_CR = SCREEN["min_market_cap_cr"]
 
 
@@ -46,7 +45,7 @@ def _load_data():
         f"SELECT sid, sector, market_cap_cr FROM stocks "
         f"WHERE sector NOT IN ({placeholders}) AND ticker IS NOT NULL "
         f"AND market_cap_cr >= ?",
-        params=list(FINANCIAL_SECTORS) + [MIN_MARKET_CAP_CR * RUPEES_PER_CRORE],
+        params=list(FINANCIAL_SECTORS) + [MIN_MARKET_CAP_CR],
     )
     sids = set(stocks["sid"])
 

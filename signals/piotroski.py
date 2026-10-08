@@ -47,13 +47,6 @@ def _load_data():
     )
     qi = qi[qi["sid"].isin(sids)].copy()
 
-    # Keep consolidated where available, standalone otherwise
-    has_consol = set(qi[qi["reporting"] == "consolidated"]["sid"])
-    qi = qi[
-        ((qi["sid"].isin(has_consol)) & (qi["reporting"] == "consolidated"))
-        | (~qi["sid"].isin(has_consol))
-    ]
-
     # Balance sheet — need last 2 years
     bs = read_sql(
         "SELECT sid, period, total_assets, current_assets, current_liabilities, "
@@ -74,24 +67,15 @@ def _load_data():
 
 def _compute_ltm(qi_group):
     """Compute LTM (last twelve months) sums for Y0 and Y-1."""
-    # Sort by end_date, take most recent quarters
-    g = qi_group.sort_values("end_date")
-    n = len(g)
-
+    from signals._fundamentals import quarters
     result = {}
-
-    if n >= MIN_QUARTERS:
-        last4 = g.tail(4)
-        result["revenue_y0"] = last4["revenue"].sum()
-        result["ni_y0"] = last4["net_income"].sum()
-        result["op_y0"] = (last4["revenue"] - last4["operating_expenses"]).sum(min_count=4)
-
-    if n >= MIN_QUARTERS_YOY:
-        prev4 = g.iloc[-8:-4]
-        result["revenue_y1"] = prev4["revenue"].sum()
-        result["ni_y1"] = prev4["net_income"].sum()
-        result["op_y1"] = (prev4["revenue"] - prev4["operating_expenses"]).sum(min_count=4)
-
+    for year, skip in (("y0", 0), ("y1", 4)):
+        q = quarters(qi_group, skip)
+        if q is not None:
+            result[f"revenue_{year}"] = q["revenue"].sum()
+            result[f"ni_{year}"] = q["net_income"].sum()
+            # operating profit needs all four quarters (a missing quarter is not a zero margin)
+            result[f"op_{year}"] = (q["revenue"] - q["operating_expenses"]).sum(min_count=4)
     return result
 
 

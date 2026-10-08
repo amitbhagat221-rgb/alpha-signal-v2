@@ -1646,12 +1646,6 @@ def get_command_centre():
         "status": "later",
     })
 
-    # market_cap_cr rename
-    todos.append({
-        "title": "stocks.market_cap_cr is misnamed (actually rupees, not crores)",
-        "detail": "RELI shows 1.83e13 in the column (= ₹18.3L cr in rupees). Fixed locally in signals/fcf_yield.py with /1e7 divisor. Other consumers (cockpit/api.py, output/email_sender.py) treat the value as-is and could be displaying wrong units. Defer until a slow session.",
-        "status": "later",
-    })
 
     # ── Pending actions + open questions from HANDOFF ────────
     handoff = project_root / "HANDOFF.md"

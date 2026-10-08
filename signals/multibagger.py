@@ -48,7 +48,6 @@ from db import read_sql, upsert_df
 from scoring.regime_smallcap import classify as classify_smallcap_regime
 
 FINANCIAL_SECTORS = set(SCREEN["financial_sectors"])
-RUPEES_PER_CRORE = 1e7
 
 # ── Thresholds (calibrated on the live survivor distribution, 2026-06-04) ──
 # Tightened ROIC 0.15→0.18 + PAT CAGR 0.15→0.20 to cut the watchlist from 35 to
@@ -124,7 +123,7 @@ def _load_universe():
         f"FROM stocks WHERE sector NOT IN ({placeholders}) AND cap_tier NOT IN ({excluded})",
         params=[*FINANCIAL_SECTORS, *EXCLUDED_FROM_PICKS],
     )
-    stocks["mcap_cr"] = stocks["market_cap_cr"] / RUPEES_PER_CRORE
+    stocks["mcap_cr"] = stocks["market_cap_cr"]
     return stocks
 
 

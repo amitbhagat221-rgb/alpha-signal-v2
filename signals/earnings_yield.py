@@ -27,19 +27,9 @@ from db import read_sql
 def ttm_eps(qi):
     """{sid: sum of the last 4 quarters' EPS}, consolidated preferred per sid;
     sids with <4 quarters are absent. `qi` = [sid, end_date, reporting, eps]."""
-    has_consol = set(qi[qi["reporting"] == "consolidated"]["sid"])
-    qi = qi[
-        ((qi["sid"].isin(has_consol)) & (qi["reporting"] == "consolidated"))
-        | (~qi["sid"].isin(has_consol))
-    ]
-    out = {}
-    for sid, group in qi.groupby("sid"):
-        g = group.sort_values("end_date")
-        if len(g) >= 4:
-            eps_sum = g.tail(4)["eps"].sum()
-            if pd.notna(eps_sum):
-                out[sid] = eps_sum
-    return out
+    from signals._fundamentals import prefer_consolidated, ttm
+    out = {sid: ttm(g, "eps") for sid, g in prefer_consolidated(qi).groupby("sid")}
+    return {sid: v for sid, v in out.items() if v is not None}
 
 
 def earnings_yield(qi, close):

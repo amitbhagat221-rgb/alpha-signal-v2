@@ -25,6 +25,7 @@ from config import SCREEN
 from db import read_sql
 from signals import _annual
 from signals._prices import apply_adjustments
+from signals._fundamentals import prefer_consolidated, ttm
 
 # ── Filing lags ──
 ANNUAL_LAG = 75
@@ -421,41 +422,13 @@ def pit_mom_composite(df_with_mom):
     return out[["sid", "mom_composite"]]
 
 
-def _ttm_qi_value(qi_g, column):
-    """Sum of last 4 quarterly values for `column` in pre-sorted qi_g.
-    Returns None if <4 quarters."""
-    if qi_g is None or len(qi_g) < 4:
-        return None
-    last4 = qi_g.sort_values("end_date").tail(4)
-    val = last4[column].sum()
-    if pd.isna(val):
-        return None
-    return float(val)
-
-
-def _prior_ttm_qi_value(qi_g, column):
-    """Sum of quarters [-8:-4] (prior year TTM). Needs >=8 quarters."""
-    if qi_g is None or len(qi_g) < 8:
-        return None
-    prior4 = qi_g.sort_values("end_date").iloc[-8:-4]
-    val = prior4[column].sum()
-    if pd.isna(val):
-        return None
-    return float(val)
-
-
 def pit_quality_fundamentals(stocks, qi_pit, bs_pit, financial_sids):
     """ROE, ROA, debt_to_equity, profit_margin per stock as of eval_date.
 
     All TTM-based. Uses _consolidated_ qi if present.
     debt_to_equity is NaN for financial-sector stocks (D/E meaningless for banks).
     """
-    # Filter qi to consolidated when available per stock
-    has_consol = set(qi_pit[qi_pit["reporting"] == "consolidated"]["sid"])
-    qi = qi_pit[
-        ((qi_pit["sid"].isin(has_consol)) & (qi_pit["reporting"] == "consolidated"))
-        | (~qi_pit["sid"].isin(has_consol))
-    ]
+    qi = prefer_consolidated(qi_pit)
     qi_by_sid = dict(list(qi.groupby("sid")))
     bs_by_sid = dict(list(bs_pit.groupby("sid")))
 
@@ -465,8 +438,8 @@ def pit_quality_fundamentals(stocks, qi_pit, bs_pit, financial_sids):
         qi_g = qi_by_sid.get(sid)
         bs_g = bs_by_sid.get(sid)
 
-        ttm_ni = _ttm_qi_value(qi_g, "net_income")
-        ttm_rev = _ttm_qi_value(qi_g, "revenue")
+        ttm_ni = ttm(qi_g, "net_income")
+        ttm_rev = ttm(qi_g, "revenue")
 
         # Latest BS row (already PIT-filtered)
         bs_latest = None
@@ -498,11 +471,7 @@ def pit_growth_fundamentals(stocks, qi_pit):
 
     Uses TTM (latest 4Q) vs prior TTM (quarters -8 to -4).
     """
-    has_consol = set(qi_pit[qi_pit["reporting"] == "consolidated"]["sid"])
-    qi = qi_pit[
-        ((qi_pit["sid"].isin(has_consol)) & (qi_pit["reporting"] == "consolidated"))
-        | (~qi_pit["sid"].isin(has_consol))
-    ]
+    qi = prefer_consolidated(qi_pit)
     qi_by_sid = dict(list(qi.groupby("sid")))
 
     rows = []
@@ -513,13 +482,13 @@ def pit_growth_fundamentals(stocks, qi_pit):
             rows.append(row)
             continue
 
-        ttm_rev = _ttm_qi_value(qi_g, "revenue")
-        prior_rev = _prior_ttm_qi_value(qi_g, "revenue")
+        ttm_rev = ttm(qi_g, "revenue")
+        prior_rev = ttm(qi_g, skip=4, column="revenue")
         if ttm_rev is not None and prior_rev is not None and prior_rev != 0:
             row["revenue_growth_yoy"] = round((ttm_rev / abs(prior_rev) - 1) * 100, 2)
 
-        ttm_eps = _ttm_qi_value(qi_g, "eps")
-        prior_eps = _prior_ttm_qi_value(qi_g, "eps")
+        ttm_eps = ttm(qi_g, "eps")
+        prior_eps = ttm(qi_g, skip=4, column="eps")
         if ttm_eps is not None and prior_eps is not None and abs(prior_eps) > 0.01:
             row["eps_growth_yoy"] = round((ttm_eps - prior_eps) / abs(prior_eps) * 100, 2)
 
@@ -1359,34 +1328,20 @@ def pit_asset_tangibility(stocks, fund_pit):
     return _fund_factor("asset_tangibility", "asset_tangibility", stocks, fund_pit)
 
 
-def pit_fcf_yield(stocks, fund_pit, close_df):
-    """3y median FCF (signals/fcf_yield.fcf_median) / PIT market_cap_cr per sid.
-
-    Market cap is reconstructed PIT as (close × No. of Equity Shares) / 1e7
-    (rupees → ₹cr) so the yield is dimensionless — the live signal divides by
-    the stocks table current market cap instead.
-    """
-    from signals.fcf_yield import MIN_MARKET_CAP_CR, REQUIRED_ITEMS, RUPEES_PER_CRORE, fcf_median
+def pit_fcf_yield(stocks, bs_pit, fund_pit, adjustments, close_df, eval_date):
+    """3y median FCF (signals/fcf_yield.fcf_median, ₹ crore) / market cap (₹ crore,
+    signals._fundamentals.market_caps — shares on the close's basis; this used the
+    as-reported Screener count, so a split after the statement understated the cap)."""
+    from signals._fundamentals import market_caps
+    from signals.fcf_yield import MIN_MARKET_CAP_CR, REQUIRED_ITEMS, fcf_median
     _, fund_u = _annual.scope(stocks, fund_pit, REQUIRED_ITEMS)
     agg = fcf_median(fund_u)
     if agg.empty:
         return pd.DataFrame(columns=["sid", "fcf_yield"])
-
-    # PIT market cap from close × latest-known shares (annual filing)
-    shares = fund_pit[fund_pit["line_item"] == "No. of Equity Shares"]
-    if shares.empty:
-        return pd.DataFrame(columns=["sid", "fcf_yield"])
-    shares = (shares.sort_values(["sid", "period_end"])
-                    .groupby("sid", as_index=False).tail(1)
-                    [["sid", "value"]].rename(columns={"value": "shares"}))
-    shares = shares[shares["shares"] > 0]
-
-    mc = (close_df.merge(shares, on="sid", how="inner"))
-    mc["market_cap_cr"] = (mc["close_price"] * mc["shares"]) / RUPEES_PER_CRORE
-    mc = mc[mc["market_cap_cr"] >= MIN_MARKET_CAP_CR]
-
-    out = agg.merge(mc[["sid", "market_cap_cr"]], on="sid", how="inner")
-    out["fcf_yield"] = out["fcf"] / out["market_cap_cr"]
+    mc = market_caps(bs_pit, fund_pit, adjustments, close_df, eval_date.isoformat())
+    mc = mc[mc["mcap_cr"] >= MIN_MARKET_CAP_CR]
+    out = agg.merge(mc, on="sid", how="inner")
+    out["fcf_yield"] = out["fcf"] / out["mcap_cr"]
     return out[["sid", "fcf_yield"]].reset_index(drop=True)
 
 
@@ -1432,46 +1387,45 @@ def _pit_input(ctx, raw, key, eval_date):
     return v
 
 
-TIER_PRICE_MAX_AGE_DAYS = 30   # = scoring.segment.PRICE_MAX_AGE_DAYS: no close in this window = not ranked
-MICRO_ADTV_CR, MICRO_MCAP_CR, MICRO_MIN_QUARTERS = 1.0, 500.0, 4   # = tools/classify_micro_tier's liquidity + size / data legs
+TIER_PRICE_MAX_AGE_DAYS = 30   # no close in this window = no market cap = not ranked
 TIER_INPUTS = ("bs", "fund_screener", "qi")
+
+
+def tier_inputs(eval_date, raw, px_pit):
+    """DataFrame[sid, mcap_cr, adtv_cr, quarters] as of eval_date — everything the tier
+    rule needs, for the backtest (tiers_at) and live (scoring.segment, the MICRO carve-out)
+    alike: market cap = signals._fundamentals.market_caps on the last close within
+    TIER_PRICE_MAX_AGE_DAYS, 90-day average traded value (₹ crore), knowable quarters
+    (one reporting basis per stock). `px_pit` = prices through eval_date with adj_close."""
+    from signals._fundamentals import market_caps
+    cols = ["sid", "mcap_cr", "adtv_cr", "quarters"]
+    if px_pit.empty:            # an anchor before the price history starts: nobody has a market cap
+        return pd.DataFrame(columns=cols)
+    recent = px_pit[px_pit["date"] >= (eval_date - timedelta(days=90)).isoformat()]
+    close = pit_close_price(recent[recent["date"] >= (eval_date - timedelta(days=TIER_PRICE_MAX_AGE_DAYS)).isoformat()])
+    mc = market_caps(knowable_annual(raw["bs"], eval_date), knowable_screener(raw["fund_screener"], eval_date),
+                     raw["adjustments"], close, eval_date.isoformat())
+    adtv = ((recent["close"] * recent["volume"]).groupby(recent["sid"]).mean() / 1e7).rename("adtv_cr")
+    quarters = prefer_consolidated(knowable_quarterly(raw["qi"], eval_date)).groupby("sid").size().rename("quarters")
+    out = mc.set_index("sid").join(adtv).join(quarters)
+    return out.fillna({"adtv_cr": 0.0, "quarters": 0}).reset_index()[cols]
 
 
 def tiers_at(eval_date, raw, px_pit):
     """{sid: tier} as it would have been assigned ON eval_date: config.TIERS' rank rule
-    (scoring.segment.assign, no hysteresis) on market cap = that day's close × the
-    share count on that day's basis (signals._fundamentals.shares_and_book, statements
-    knowable then), with the MICRO carve-out on that day's liquidity (90-day average
-    traded value under ₹1 Cr and either a market cap under ₹500 Cr or fewer than 4
-    knowable quarters). A stock with no market cap that day has no tier.
+    (scoring.segment.assign, no hysteresis) on that day's market cap, then the MICRO
+    carve-out (scoring.segment.carve) on that day's liquidity — tier_inputs, the same
+    inputs the live steps use. A stock with no market cap that day has no tier.
 
     The panel used to carry TODAY's tier at every anchor: "LARGE in 2021" meant "grew
     into LARGE by 2026" — of the true top 100 by market cap in June 2021, 39 are not
     LARGE today (audit 2026-10, the largest look-ahead in the backtest)."""
     from scoring import segment
-    from signals._fundamentals import shares_and_book
-    d = eval_date.isoformat()
-    if px_pit.empty:            # an anchor before the price history starts: nobody has a market cap
+    ti = tier_inputs(eval_date, raw, px_pit)
+    if ti.empty:
         return {}
-    recent = px_pit[px_pit["date"] >= (eval_date - timedelta(days=90)).isoformat()]
-    close = pit_close_price(recent[recent["date"] >= (eval_date - timedelta(days=TIER_PRICE_MAX_AGE_DAYS)).isoformat()])
-    sb = shares_and_book(knowable_annual(raw["bs"], eval_date), knowable_screener(raw["fund_screener"], eval_date),
-                         raw["adjustments"], d)
-    mc = sb.merge(close, on="sid")
-    mc["mcap_cr"] = mc["shares"] * mc["close_price"] / 1e7
-    mc = mc[mc["mcap_cr"] > 0]
-    if mc.empty:
-        return {}
-    tiers = segment.assign(mc[["sid", "mcap_cr"]], {s: None for s in mc["sid"]}, h=0.0)
-    micro, carve_from = next((t, spec["carve_from"]) for t, spec in config.TIERS.items() if spec.get("carve_from"))
-    adtv = (recent["close"] * recent["volume"]).groupby(recent["sid"]).mean() / 1e7
-    quarters = knowable_quarterly(raw["qi"], eval_date).groupby("sid").size()
-    mcap = mc.set_index("sid")["mcap_cr"]
-    thin = (adtv.reindex(tiers.index).fillna(0) < MICRO_ADTV_CR) & (
-        (mcap.reindex(tiers.index) < MICRO_MCAP_CR) | (quarters.reindex(tiers.index).fillna(0) < MICRO_MIN_QUARTERS))
-    tiers[(tiers == carve_from) & thin] = micro
-    return tiers.to_dict()
-
+    tiers = segment.assign(ti[["sid", "mcap_cr"]], {s: None for s in ti["sid"]}, h=0.0)
+    return segment.carve(tiers, ti).to_dict()
 
 def reconstruct_one_date(eval_date, raw, signals_to_run, pit_tiers=False):
     """Reconstruct all enabled signals for a single eval_date. No DB writes.

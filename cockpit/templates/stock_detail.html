@@ -710,7 +710,7 @@
         {% if s.get("market_cap_cr") %}
         <div class="metric-card">
             <div class="metric-label">Market Cap{{ tooltip(m_tt.market_cap) }}</div>
-            <div class="metric-value">&#8377;{{ "{:,.0f}".format(s.market_cap_cr / 1e7) }} <span class="unit">Cr</span></div>
+            <div class="metric-value">&#8377;{{ "{:,.0f}".format(s.market_cap_cr) }} <span class="unit">Cr</span></div>
             <div class="metric-context">{{ s.cap_tier }} cap segment</div>
         </div>
         {% endif %}

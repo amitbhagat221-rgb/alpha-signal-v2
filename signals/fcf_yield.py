@@ -37,11 +37,6 @@ REQUIRED_ITEMS = [
 ]
 
 SMOOTH_YEARS = 3
-# stocks.market_cap_cr is misnamed — values are stored in raw rupees, not
-# crores (RELI shows 1.83e13 = ₹18.3L cr, matches reality). Convert to
-# crores so it lines up with fundamentals_screener line items, which are in
-# ₹cr.
-RUPEES_PER_CRORE = 1e7
 MIN_MARKET_CAP_CR = SCREEN["min_market_cap_cr"]  # 200
 
 
@@ -51,10 +46,9 @@ def _load_data():
         f"SELECT sid, sector, market_cap_cr FROM stocks "
         f"WHERE sector NOT IN ({placeholders}) "
         f"AND market_cap_cr >= ?",
-        params=list(FINANCIAL_SECTORS) + [MIN_MARKET_CAP_CR * RUPEES_PER_CRORE],
+        params=list(FINANCIAL_SECTORS) + [MIN_MARKET_CAP_CR],
     )
     stocks = stocks.copy()
-    stocks["market_cap_cr"] = stocks["market_cap_cr"] / RUPEES_PER_CRORE
 
     fund = read_sql(
         "SELECT sid, period_end, line_item, value "

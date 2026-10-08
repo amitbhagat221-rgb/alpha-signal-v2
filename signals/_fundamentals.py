@@ -24,6 +24,23 @@ def prefer_consolidated(qi):
     return qi[keep]
 
 
+def quarters(qi_g, skip=0, n=4):
+    """The `n` quarterly rows ending `skip` rows before the latest (by end_date):
+    skip=0 is the trailing year, skip=4 the year before. None when there are fewer
+    than n + skip rows. Rows with a missing value still count as quarters."""
+    if qi_g is None or len(qi_g) < n + skip:
+        return None
+    g = qi_g.sort_values("end_date")
+    return g.iloc[len(g) - n - skip:len(g) - skip]
+
+
+def ttm(qi_g, column, skip=0):
+    """Trailing-twelve-month sum of `column` (see quarters); a missing quarter adds 0,
+    as every factor has always summed it. None when there are too few quarters."""
+    q = quarters(qi_g, skip)
+    return None if q is None else float(q[column].sum())
+
+
 def annual_items(fund, items):
     """{sid: frame indexed by period_end, one column per item} from annual Screener
     rows [sid, period_end, line_item, value] (as-of filtered by the caller), oldest →
@@ -49,6 +66,15 @@ def _factor(events, lo, hi):
     if events is None or lo >= hi:
         return 1.0
     return float(events.loc[(events["ex_date"] > lo) & (events["ex_date"] <= hi), "factor"].prod())
+
+
+def market_caps(bs, fund, adjustments, close, as_of):
+    """[sid, mcap_cr] as of `as_of`: the close × the share count on that close's basis
+    (shares_and_book). THE market cap — live tiers, backtest tiers, the MICRO carve-out,
+    fcf_yield and stocks.market_cap_cr (₹ crore) all read this. `close` = [sid, close_price]."""
+    mc = shares_and_book(bs, fund, adjustments, as_of).merge(close, on="sid")
+    mc["mcap_cr"] = mc["shares"] * mc["close_price"] / RUPEES_PER_CRORE
+    return mc.loc[mc["mcap_cr"] > 0, ["sid", "mcap_cr"]].reset_index(drop=True)
 
 
 def shares_and_book(bs, fund, adjustments, as_of):

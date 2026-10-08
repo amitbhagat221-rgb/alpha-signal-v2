@@ -1663,10 +1663,9 @@ def get_group_top_players(by, name, n=10):
     )
     if df.empty:
         return []
-    # stocks.market_cap_cr is misnamed: it holds rupees → ₹ Cr here
-    df["market_cap_cr"] = (df["market_cap_cr"] / 1e7).round(0)
+    df["market_cap_cr"] = df["market_cap_cr"].round(0)
     total_listed = db.scalar(
-        f"SELECT COALESCE(SUM(market_cap_cr), 0) / 1e7 "
+        f"SELECT COALESCE(SUM(market_cap_cr), 0) "
         f"FROM stocks WHERE {col} = ? AND market_cap_cr IS NOT NULL",
         [name],
     )
@@ -1970,7 +1969,7 @@ def get_industry_competitive_landscape(industry):
             out["sid"] = match["sid"]
             out["final_score"] = float(match["final_score"]) if match["final_score"] is not None else None
             mcap = match["market_cap_cr"]
-            out["market_cap_cr"] = round(mcap / 1e7, 0) if mcap is not None and mcap == mcap else None
+            out["market_cap_cr"] = round(mcap, 0) if mcap is not None and mcap == mcap else None
             out["listed"] = True  # if we found a row, it's listed in our DB
         elif pl.get("ticker"):
             # Claude claimed a ticker but it's not in our universe — could be

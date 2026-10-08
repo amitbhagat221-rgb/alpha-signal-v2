@@ -189,7 +189,7 @@ def _top_stocks_for_key(key: str, by: str = "industry", n: int = 8) -> str:
         return f"(no stocks in our universe for this {by})"
     lines = []
     for _, r in df.iterrows():
-        mcap_cr = r["market_cap_cr"] / 1e7
+        mcap_cr = r["market_cap_cr"]
         lines.append(f"- {r['ticker']} ({r['name']}) — ₹{mcap_cr:,.0f} cr")
     return "\n".join(lines)
 

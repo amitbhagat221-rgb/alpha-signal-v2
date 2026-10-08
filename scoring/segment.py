@@ -7,10 +7,10 @@ the universe by a FRESH market cap and applies config.TIERS' `rank_max` rules
 (SEBI/AMFI: top 100 = LARGE, 101-250 = MID, the rest = SMALL). The MICRO carve-out
 stays with tools/classify_micro_tier.py, which must run AFTER this node.
 
-Market cap (Rs crore) = latest close (<= t, within PRICE_MAX_AGE_DAYS) x the latest
-annual share count knowable at t (see market_caps: two sources, cross-checked; an
-uncorroborated stock is not ranked and keeps its tier). stocks.market_cap_cr is NOT used:
-it is a frozen April-2026 snapshot, in RUPEES despite its name, NULL for 726 stocks.
+Market cap (Rs crore) and the MICRO carve-out inputs come from pit.tier_inputs — the
+function the backtest's point-in-time tiers (pit.tiers_at) use — so a stock is tiered
+live exactly as the evidence assumed. stocks.market_cap_cr is written from it, in crore,
+by the daily MICRO step (tools/classify_micro_tier.py).
 
 Hysteresis (config.TIER_HYSTERESIS = h): an incumbent keeps its tier while its rank stays
 inside the tier's band widened by h x boundary on each side (LARGE <= 110, MID 91-275,
@@ -20,8 +20,8 @@ month (churn measured with measure(); see plan 0015 Phase 6 notes).
 
 A MICRO stock is treated as a SMALL incumbent: it keeps MICRO unless its rank lifts it
 into MID/LARGE (classify_micro_tier only looks at SMALL/MICRO, so it then stays there).
-A stock with no market cap (no recent close or share count), or an uncorroborated one,
-keeps its tier; a stock with no tier yet (None) gets the strict rank tier.
+A stock with no market cap (no recent close or share count) keeps its tier; a stock with
+no tier yet (None) gets the strict rank tier.
 
 Usage:
     python -m scoring.segment --dry-run          # transition matrix, no write
@@ -38,9 +38,10 @@ import pandas as pd
 import config
 from db import get_db, read_sql
 
-PRICE_MAX_AGE_DAYS = 30     # a stock without a close in this window is not ranked
-ANNUAL_LAG_DAYS = 75        # = pit.ANNUAL_LAG (annual filing lag)
-CORROBORATE_X = 1.5         # the two share-count sources must agree within this factor
+# MICRO carve-out (ADR 0026): illiquid AND (small OR too little history to trust)
+MICRO_ADTV_CR = 1.0         # 90-day average traded value below this (₹ crore / day)
+MICRO_MCAP_CR = 500.0       # market cap below this (₹ crore)
+MICRO_MIN_QUARTERS = 4      # fewer knowable quarterly statements than this
 
 
 def _rank_tiers(tiers=None):
@@ -56,57 +57,37 @@ def _rank_tiers(tiers=None):
     return out
 
 
-def _latest_knowable(sql, t_s):
-    return read_sql(sql, params=[f"+{ANNUAL_LAG_DAYS} day", t_s]).drop_duplicates("sid")
+def inputs(t=None):
+    """pit.tier_inputs as of t (default today) from the DB: [sid, mcap_cr, adtv_cr, quarters].
+    Market cap = signals._fundamentals.market_caps (KDDL: both vendors carried 1,744 Cr
+    shares for FY26, 1,400x the real count; the old two-source check passed it as
+    "corroborated" and ranked a ₹5,000 Cr company in LARGE)."""
+    import pit
+    t = pd.Timestamp(t or date.today()).date()
+    raw = pit.load_raw(set(pit.TIER_INPUTS) | {"adjustments"})
+    px = read_sql("SELECT sid, date, close, volume FROM stock_prices WHERE close > 0 AND date <= ? AND date >= ?",
+                  params=[t.isoformat(), (t - timedelta(days=100)).isoformat()])
+    px = pit.apply_pit_adjustments(px.sort_values(["sid", "date"]), raw["adjustments"], t)
+    return pit.tier_inputs(t, raw, px)
 
 
 def market_caps(t=None):
-    """DataFrame[sid, mcap_cr, corroborated] as of t.
+    """DataFrame[sid, mcap_cr] as of t (see inputs)."""
+    return inputs(t)[["sid", "mcap_cr"]]
 
-    mcap_cr = close x as-reported shares (fundamentals_screener "No. of Equity Shares",
-    latest annual knowable at t) x every SPLIT/BONUS since that period end — or, for a
-    stock with no screener share count, close x annual_balance_sheet.shares_outstanding
-    (Tickertape, already restated to the CURRENT share basis). `corroborated` = both
-    sources exist and agree within CORROBORATE_X. They disagree for ~8% of stocks
-    (unit slips: KDDL 1,744 vs 1.25 cr shares; FISCHER 10x; a bonus missing from
-    corporate_adjustments: LICI 2x), so an uncorroborated stock is neither ranked nor
-    moved (assign keeps its tier)."""
-    t = pd.Timestamp(t or date.today())
-    t_s = t.date().isoformat()
-    px = read_sql(
-        "SELECT p.sid, p.date AS px_date, p.close FROM stock_prices p "
-        "JOIN (SELECT sid, MAX(date) AS d FROM stock_prices "
-        "      WHERE close > 0 AND date <= ? AND date >= ? GROUP BY sid) m "
-        "  ON p.sid = m.sid AND p.date = m.d",
-        params=[t_s, (t - timedelta(days=PRICE_MAX_AGE_DAYS)).date().isoformat()],
-    ).drop_duplicates("sid")
-    fs = _latest_knowable(
-        "SELECT f.sid, f.period_end, f.value / 1e7 AS shares_fs FROM fundamentals_screener f "
-        "JOIN (SELECT sid, MAX(period_end) AS e FROM fundamentals_screener "
-        "      WHERE line_item = 'No. of Equity Shares' AND period_type = 'annual' AND value > 0 "
-        "        AND date(period_end, ?) <= ? GROUP BY sid) m "
-        "  ON f.sid = m.sid AND f.period_end = m.e "
-        "WHERE f.line_item = 'No. of Equity Shares' AND f.period_type = 'annual'", t_s)
-    bs = _latest_knowable(
-        "SELECT b.sid, b.shares_outstanding AS shares_bs FROM annual_balance_sheet b "
-        "JOIN (SELECT sid, MAX(end_date) AS e FROM annual_balance_sheet "
-        "      WHERE shares_outstanding > 0 AND date(end_date, ?) <= ? GROUP BY sid) m "
-        "  ON b.sid = m.sid AND b.end_date = m.e", t_s)
-    ev = read_sql(
-        "SELECT sid, ex_date, factor FROM corporate_adjustments "
-        "WHERE (inds LIKE '%SPLIT%' OR inds LIKE '%BONUS%') AND factor > 0 AND ex_date <= ?",
-        params=[t_s],
-    )
-    df = px.merge(fs, on="sid", how="left").merge(bs, on="sid", how="left")
-    ev = ev.merge(df[["sid", "period_end", "px_date"]], on="sid")
-    ev = ev[(ev["ex_date"] > ev["period_end"]) & (ev["ex_date"] <= ev["px_date"])]
-    df["share_mult"] = df["sid"].map(1.0 / ev.groupby("sid")["factor"].prod()).fillna(1.0)
-    mc_fs = df["close"] * df["shares_fs"] * df["share_mult"]
-    mc_bs = df["close"] * df["shares_bs"]
-    df["mcap_cr"] = mc_fs.fillna(mc_bs)
-    ratio = mc_fs / mc_bs
-    df["corroborated"] = ratio.between(1 / CORROBORATE_X, CORROBORATE_X)
-    return df.loc[df["mcap_cr"] > 0, ["sid", "mcap_cr", "corroborated"]].reset_index(drop=True)
+
+def carve(tiers, ti):
+    """Tiers with the MICRO carve-out applied: a stock of the carve-from tier (SMALL)
+    whose 90-day traded value is under MICRO_ADTV_CR and whose market cap is under
+    MICRO_MCAP_CR or whose knowable quarters are under MICRO_MIN_QUARTERS becomes MICRO.
+    `tiers` = Series {sid: tier}; `ti` = tier inputs [sid, mcap_cr, adtv_cr, quarters]."""
+    micro, carve_from = next((t, spec["carve_from"]) for t, spec in config.TIERS.items() if spec.get("carve_from"))
+    x = ti.set_index("sid").reindex(tiers.index)
+    thin = (x["adtv_cr"].fillna(0) < MICRO_ADTV_CR) & (
+        (x["mcap_cr"] < MICRO_MCAP_CR) | (x["quarters"].fillna(0) < MICRO_MIN_QUARTERS))
+    out = tiers.copy()
+    out[(tiers == carve_from) & thin] = micro
+    return out
 
 
 def assign(caps, current, h=None, tiers=None):
@@ -117,15 +98,13 @@ def assign(caps, current, h=None, tiers=None):
     bands = _rank_tiers(tiers)
     carve = {name: spec["carve_from"] for name, spec in tiers.items() if spec.get("carve_from")}
     caps = caps.set_index("sid")
-    if "corroborated" in caps:          # an unconfirmed market cap neither ranks nor moves
-        caps = caps[caps["corroborated"].astype(bool)]
     rank = caps["mcap_cr"].rank(ascending=False, method="first")
 
     out = {}
     for sid, cur in current.items():
         r = rank.get(sid)
         if r is None or pd.isna(r):
-            out[sid] = cur                  # no (corroborated) market cap: keep
+            out[sid] = cur                  # no market cap: keep
             continue
         base = carve.get(cur, cur)                          # MICRO behaves as SMALL
         band = next(((lo, hi) for name, lo, hi in bands if name == base), None)
@@ -158,8 +137,7 @@ def compute(dry_run=False, as_of=None):
     new = assign(caps, current)
     moves = transitions(current, new)
     sizes = new.value_counts().to_dict()
-    print(f"Segment (h={config.TIER_HYSTERESIS}): {int(caps['corroborated'].sum())} of {len(stocks)} "
-          f"ranked ({len(caps)} with a market cap); "
+    print(f"Segment (h={config.TIER_HYSTERESIS}): {len(caps)} of {len(stocks)} ranked (with a market cap); "
           f"tier sizes {dict(sorted(sizes.items()))}")
     for (a, b), n in sorted(moves.items(), key=lambda kv: -kv[1]):
         print(f"  {a} -> {b}: {n}")

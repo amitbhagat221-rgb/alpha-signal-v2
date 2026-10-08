@@ -155,10 +155,9 @@ UNIT_CONTRACTS = {
     # unit registry; consumers know it's the canonical Piotroski 0-9 score.
     # ─── stocks ───
     ("stocks", "adtv_6m_cr"):               "inr_crore",
-    # MISNAMED: the values are RUPEES (frozen v1 universe.csv snapshot, April 2026,
-    # NULL for 726 stocks) — verified 2026-09-27 (RELIANCE 1.83e13). scoring/segment.py
-    # computes a fresh ₹-crore market cap instead of reading this column.
-    ("stocks", "market_cap_cr"):            "inr_raw",
+    # ₹ crore, written daily by tools/classify_micro_tier from signals._fundamentals.market_caps
+    # (until 2026-10 a frozen April snapshot in rupees; work order 1).
+    ("stocks", "market_cap_cr"):            "inr_crore",
     ("stocks", "shares_outstanding"):       "ratio_1",   # raw count
     # ─── mf_metrics ───
     ("mf_metrics", "composite_score"):      "pct_100",   # 0-100 absolute quality score

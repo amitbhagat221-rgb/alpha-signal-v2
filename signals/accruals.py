@@ -48,12 +48,6 @@ def _load_data():
         "SELECT sid, period, end_date, reporting, net_income, eps, pbt "
         "FROM quarterly_income ORDER BY sid, end_date"
     )
-    # Prefer consolidated
-    has_consol = set(qi[qi["reporting"] == "consolidated"]["sid"])
-    qi = qi[
-        ((qi["sid"].isin(has_consol)) & (qi["reporting"] == "consolidated"))
-        | (~qi["sid"].isin(has_consol))
-    ]
 
     bs = read_sql(
         "SELECT sid, period, total_assets, current_assets, current_liabilities, "
@@ -74,12 +68,9 @@ def _load_data():
 
 def _cf_accruals(qi_group, cf_group, bs_group):
     """CF accruals ratio = (LTM_NI - OCF_Y0) / avg_assets."""
-    qi_sorted = qi_group.sort_values("end_date")
-    if len(qi_sorted) < 4:
-        return None
-
-    ltm_ni = qi_sorted.tail(4)["net_income"].sum()
-    if pd.isna(ltm_ni):
+    from signals._fundamentals import ttm
+    ltm_ni = ttm(qi_group, "net_income")
+    if ltm_ni is None:
         return None
 
     cf_sorted = cf_group.sort_values("period")

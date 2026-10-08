@@ -83,12 +83,6 @@ def _load_data():
         "SELECT sid, period, end_date, reporting, revenue, net_income, pbt "
         "FROM quarterly_income ORDER BY sid, end_date"
     )
-    # Prefer consolidated
-    has_consol = set(qi[qi["reporting"] == "consolidated"]["sid"])
-    qi = qi[
-        ((qi["sid"].isin(has_consol)) & (qi["reporting"] == "consolidated"))
-        | (~qi["sid"].isin(has_consol))
-    ]
 
     bs = read_sql(
         "SELECT sid, period, total_assets, total_equity, current_assets, "
@@ -122,14 +116,11 @@ def _compute_beneish(qi_group, bs_y0, bs_y1, cf_y0, annual=None):
     if bs_y0 is None or bs_y1 is None:
         return None
 
-    qi_sorted = qi_group.sort_values("end_date")
-    if len(qi_sorted) < 8:
+    from signals._fundamentals import quarters, ttm
+    if quarters(qi_group, skip=4) is None:
         return None
-
-    # LTM revenue Y0 and Y-1
-    rev_y0 = qi_sorted.tail(4)["revenue"].sum()
-    rev_y1 = qi_sorted.iloc[-8:-4]["revenue"].sum()
-    ni_y0 = qi_sorted.tail(4)["net_income"].sum()
+    rev_y0, rev_y1 = ttm(qi_group, "revenue"), ttm(qi_group, "revenue", skip=4)
+    ni_y0 = ttm(qi_group, "net_income")
 
     components = {}
 
@@ -236,11 +227,11 @@ def _compute_altman(bs_y0, qi_group, cf_y0, annual=None):
     # EBIT = profit before tax + interest of the latest annual statement (Screener);
     # without one, LTM profit before tax (EBIT's lower bound). Until 2026-10-03 the
     # "interest" added here was operating expenses: X3 sat at a median of 0.81.
-    qi_sorted = qi_group.sort_values("end_date") if qi_group is not None else pd.DataFrame()
+    from signals._fundamentals import ttm
     if annual is not None and len(annual):
         x3 = (annual["Profit before tax"].iloc[-1] + annual["Interest"].iloc[-1]) / ta
-    elif len(qi_sorted) >= 4:
-        x3 = qi_sorted.tail(4)["pbt"].sum() / ta
+    elif ttm(qi_group, "pbt") is not None:
+        x3 = ttm(qi_group, "pbt") / ta
     else:
         return None
 

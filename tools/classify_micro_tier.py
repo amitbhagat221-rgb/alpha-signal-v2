@@ -1,15 +1,22 @@
 """
-MICRO-tier reclassifier.
+MICRO-tier reclassifier (the daily tier step after scoring/segment.py).
 
-Reclassifies a subset of SMALL-cap stocks to MICRO based on the manipulation-risk
-composite: ADTV < ₹1Cr/day AND (mcap < ₹500Cr OR Piotroski ≤ 3 OR <4q fundamentals).
+A SMALL stock becomes MICRO when it is illiquid (90-day average traded value under
+₹1 Cr/day) AND either small (market cap under ₹500 Cr) or has too little history to
+trust (fewer than 4 knowable quarterly statements) — scoring.segment.carve on
+pit.tier_inputs, the rule and inputs the backtest's point-in-time tiers use (ADR 0026).
+MICRO stocks are EXCLUDED from daily_picks (scoring/screener.py); they remain visible in
+the cockpit Explorer with a MICRO tag.
 
-These are the SMALL stocks where one large operator's buy/sell can move the price,
-the business is too small to absorb a real position, the data is too thin to trust,
-or quality is too poor to recommend. MICRO stocks are EXCLUDED from daily_picks (see
-scoring/screener.py) — they remain visible in the cockpit Explorer with a MICRO tag.
+It also writes stocks.market_cap_cr (₹ crore) from the same market cap every day: the
+column was a frozen April-2026 snapshot in rupees (work order 1), and the old MICRO
+"mcap < 500" leg compared those rupees with crore, so it fired only for missing values.
 
-Idempotent. Run nightly or after a fresh fundamentals refresh.
+Until 2026-10 the live rule also carved stocks with a Piotroski score ≤ 3 (read from the
+unlagged piotroski_scores table) and counted standalone and consolidated quarters twice;
+neither was in the tier definition the evidence was measured on.
+
+Idempotent. Run nightly.
 
 Usage:
     python -m tools.classify_micro_tier            # apply
@@ -20,9 +27,12 @@ import argparse
 import sys
 from pathlib import Path
 
+import pandas as pd
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from config import TIERS
 from db import get_db, read_sql
+from scoring import segment
 
 # The carve-out tier and the tier it is carved from (config.TIERS, ADR 0026). Runs
 # AFTER the segment node (scoring/segment.py), which assigns LARGE/MID/SMALL and
@@ -31,93 +41,42 @@ MICRO = next(t for t, spec in TIERS.items() if spec.get("carve_from"))
 CARVE_FROM = TIERS[MICRO]["carve_from"]
 
 
-# Spec (locked 2026-05-25): liquidity-gate ALL of, quality OR data fail.
-# Liquidity gate is the manipulation pre-requisite; one OR-leg is enough to MICRO it.
-ADTV_GATE_CR = 1.0
-MCAP_LIMIT_CR = 500.0
-PIOTROSKI_LIMIT = 3
-MIN_QUARTERS = 4
+def reclassify(dry_run: bool = False, as_of=None) -> int:
+    """Apply the MICRO carve-out to today's SMALL/MICRO stocks and refresh
+    stocks.market_cap_cr. Returns the number of MICRO stocks."""
+    ti = segment.inputs(as_of)
+    if len(ti) < 0.5 * len(read_sql("SELECT sid FROM stocks")):
+        raise RuntimeError(f"classify_micro_tier: tier inputs for only {len(ti)} stocks — refusing to re-carve")
+    stocks = read_sql("SELECT sid, cap_tier FROM stocks").set_index("sid")["cap_tier"]
+    pool = stocks[stocks.isin([CARVE_FROM, MICRO])]
+    # a stock with no tier inputs today (no recent close / statements) keeps its tier
+    known = pool[pool.index.isin(ti["sid"])]
+    new = segment.carve(pd.Series(CARVE_FROM, index=known.index), ti)
+    to_micro = new[(new == MICRO) & (known != MICRO)].index.tolist()
+    to_small = new[(new == CARVE_FROM) & (known == MICRO)].index.tolist()
+    n_micro = int((new == MICRO).sum() + (pool[~pool.index.isin(ti["sid"])] == MICRO).sum())
 
+    x = ti.set_index("sid").reindex(known.index)
+    thin = x["adtv_cr"] < segment.MICRO_ADTV_CR
+    print(f"MICRO rule: ADTV < ₹{segment.MICRO_ADTV_CR} Cr/day AND (mcap < ₹{segment.MICRO_MCAP_CR:.0f} Cr "
+          f"OR < {segment.MICRO_MIN_QUARTERS} quarters)")
+    print(f"  {n_micro} MICRO · {len(to_micro)} {CARVE_FROM} → {MICRO} · {len(to_small)} {MICRO} → {CARVE_FROM}")
+    print(f"  legs among the illiquid: mcap < {segment.MICRO_MCAP_CR:.0f} Cr = {int((thin & (x['mcap_cr'] < segment.MICRO_MCAP_CR)).sum())}, "
+          f"< {segment.MICRO_MIN_QUARTERS} quarters = {int((thin & (x['quarters'] < segment.MICRO_MIN_QUARTERS)).sum())}")
+    if dry_run:
+        print("DRY RUN — no DB changes")
+        return n_micro
 
-def candidates() -> "pandas.DataFrame":
-    """Return SMALL or already-MICRO stocks meeting the composite criteria."""
-    return read_sql(
-        """
-        WITH small AS (
-            SELECT sid, cap_tier FROM stocks WHERE cap_tier IN (?, ?)
-        ),
-        prices AS (
-            SELECT sid, AVG(close * volume) / 1e7 AS adtv_cr_90d
-            FROM stock_prices WHERE date >= date('now', '-90 days')
-            GROUP BY sid
-        ),
-        quality AS (
-            SELECT sid, MAX(f_score) AS f_score FROM piotroski_scores GROUP BY sid
-        ),
-        fund AS (
-            SELECT sid, COUNT(*) AS n_quarters FROM quarterly_income GROUP BY sid
-        )
-        SELECT s.sid, s.cap_tier AS current_tier,
-               st.market_cap_cr,
-               COALESCE(st.adtv_6m_cr, p.adtv_cr_90d, 0) AS adtv_cr,
-               COALESCE(q.f_score, 0) AS f_score,
-               COALESCE(f.n_quarters, 0) AS n_quarters
-        FROM small s
-        JOIN stocks st USING(sid)
-        LEFT JOIN prices p USING(sid)
-        LEFT JOIN quality q USING(sid)
-        LEFT JOIN fund f USING(sid)
-        WHERE COALESCE(st.adtv_6m_cr, p.adtv_cr_90d, 0) < ?
-          AND (
-              COALESCE(st.market_cap_cr, 0) < ?
-              OR COALESCE(q.f_score, 0) <= ?
-              OR COALESCE(f.n_quarters, 0) < ?
-          )
-        """,
-        params=[CARVE_FROM, MICRO, ADTV_GATE_CR, MCAP_LIMIT_CR, PIOTROSKI_LIMIT, MIN_QUARTERS],
-    )
-
-
-def reclassify(dry_run: bool = False) -> int:
-    """Apply MICRO classification. Returns count of (sid → MICRO) updates."""
-    df = candidates()
-    if df.empty:
-        print("No MICRO candidates found.")
-        return 0
-
-    micro_sids = df["sid"].tolist()
-    # Reset MICRO → SMALL for any sid that no longer meets the gate (handles
-    # stocks that improved liquidity/quality and should rejoin SMALL).
-    if not dry_run:
-        with get_db() as conn:
-            still_micro = set(micro_sids)
-            currently_micro = {
-                r[0] for r in conn.execute("SELECT sid FROM stocks WHERE cap_tier=?", (MICRO,)).fetchall()
-            }
-            to_promote = currently_micro - still_micro
-            if to_promote:
-                placeholders = ",".join("?" * len(to_promote))
-                conn.execute(
-                    f"UPDATE stocks SET cap_tier = ? WHERE sid IN ({placeholders})",
-                    [CARVE_FROM, *to_promote],
-                )
-                print(f"  Promoted {len(to_promote)} stocks MICRO → SMALL (no longer meeting MICRO criteria)")
-            placeholders = ",".join("?" * len(micro_sids))
-            conn.execute(
-                f"UPDATE stocks SET cap_tier = ? WHERE sid IN ({placeholders}) AND cap_tier != ?",
-                [MICRO, *micro_sids, MICRO],
-            )
-
-    print(f"\nMICRO criteria:")
-    print(f"  ADTV < ₹{ADTV_GATE_CR}Cr/day  AND  (mcap < ₹{MCAP_LIMIT_CR}Cr  OR  Piotroski ≤ {PIOTROSKI_LIMIT}  OR  <{MIN_QUARTERS}q fundamentals)")
-    print(f"\n{'DRY RUN — no DB changes' if dry_run else 'Applied'}: {len(micro_sids)} stocks classified as MICRO")
-
-    # Reason breakdown for transparency
-    n_mcap = (df["market_cap_cr"].fillna(0) < MCAP_LIMIT_CR).sum()
-    n_piot = (df["f_score"] <= PIOTROSKI_LIMIT).sum()
-    n_data = (df["n_quarters"] < MIN_QUARTERS).sum()
-    print(f"  Trigger overlap: mcap<{MCAP_LIMIT_CR}Cr={n_mcap}, Piot≤{PIOTROSKI_LIMIT}={n_piot}, <{MIN_QUARTERS}q={n_data}")
-    return len(micro_sids)
+    with get_db() as conn:
+        if to_small:
+            conn.executemany("UPDATE stocks SET cap_tier = ? WHERE sid = ?", [(CARVE_FROM, s) for s in to_small])
+        if to_micro:
+            conn.executemany("UPDATE stocks SET cap_tier = ? WHERE sid = ?", [(MICRO, s) for s in to_micro])
+        # ₹ crore, from the one market cap; a stock with none today gets NULL, not a stale value
+        conn.execute("UPDATE stocks SET market_cap_cr = NULL")
+        conn.executemany("UPDATE stocks SET market_cap_cr = ? WHERE sid = ?",
+                         [(round(float(m), 2), s) for s, m in zip(ti["sid"], ti["mcap_cr"])])
+    return n_micro
 
 
 def main():
