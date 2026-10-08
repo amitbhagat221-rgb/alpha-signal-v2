@@ -2,7 +2,7 @@
 Alpha Signal v2 — Intangibles / Total Assets (Goodwill proxy)
 
 Reads:  fundamentals_screener (annual rows), stocks
-Writes: goodwill_to_assets_scores
+Computed point in time only (pit.py); the live step that wrote its *_scores table had no reader and was removed (plan 0020, 2026-10).
 
   Ratio = Intangible Assets_t / Total_t, latest annual period
 
@@ -14,21 +14,14 @@ underperform on average post-acquisition.
 Stocks without an Intangible Assets line item are NaN (not 0) — absence may
 mean the line wasn't reported, not that the firm has none.
 
-Usage:
-    python -m signals.goodwill_to_assets
 """
 
 import numpy as np
 import pandas as pd
 
-from signals import _annual
 
 REQUIRED_ITEMS = ["Intangible Assets", "Total"]
 MIN_ASSETS_CR = 50.0
-
-
-def _load_data():
-    return _annual.load(REQUIRED_ITEMS)
 
 
 def _compute(stocks, fund):
@@ -46,12 +39,3 @@ def _compute(stocks, fund):
     wide = wide.sort_values(["sid", "period_end"])
     latest = wide.groupby("sid", as_index=False).tail(1)
     return latest[["sid", "period_end", "goodwill_to_assets"]].reset_index(drop=True)
-
-
-def compute(dry_run=False):
-    return _annual.save(_compute(*_load_data()), "goodwill_to_assets_scores", "Intangibles/Assets", "goodwill_to_assets",
-                        dry_run, fmt=".3f")
-
-
-if __name__ == "__main__":
-    _annual.cli(compute)

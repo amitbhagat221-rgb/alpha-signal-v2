@@ -2,7 +2,7 @@
 Alpha Signal v2 — Working Capital Intensity
 
 Reads:  fundamentals_screener (annual rows), stocks
-Writes: working_capital_intensity_scores
+Computed point in time only (pit.py); the live step that wrote its *_scores table had no reader and was removed (plan 0020, 2026-10).
 
   WCI = (Receivables + Inventory − Trade Payables) / Sales
   Reported as the 3-year median per stock.
@@ -13,23 +13,15 @@ capital is tied up per ₹ of sales — a structural quality marker.
 
 Financial Services excluded.
 
-Usage:
-    python -m signals.working_capital_intensity
-    python -m signals.working_capital_intensity --dry-run
 """
 
 import numpy as np
 import pandas as pd
 
-from signals import _annual
 
 REQUIRED_ITEMS = ["Sales", "Receivables", "Inventory", "Trade Payables"]
 SMOOTH_YEARS = 3
 MIN_SALES_CR = 50.0
-
-
-def _load_data():
-    return _annual.load(REQUIRED_ITEMS)
 
 
 def _compute(stocks, fund):
@@ -58,12 +50,3 @@ def _compute(stocks, fund):
     )
     agg = agg[agg["years_used"] >= SMOOTH_YEARS]
     return agg[["sid", "period_end", "wc_intensity"]].reset_index(drop=True)
-
-
-def compute(dry_run=False):
-    return _annual.save(_compute(*_load_data()), "working_capital_intensity_scores", "WC intensity", "wc_intensity",
-                        dry_run, fmt=".3f")
-
-
-if __name__ == "__main__":
-    _annual.cli(compute)

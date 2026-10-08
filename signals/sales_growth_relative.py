@@ -2,7 +2,7 @@
 Alpha Signal v2 — Sector-Relative Sales Growth
 
 Reads:  fundamentals_screener (annual Sales), stocks
-Writes: sales_growth_relative_scores
+Computed point in time only (pit.py); the live step that wrote its *_scores table had no reader and was removed (plan 0020, 2026-10).
 
   sales_growth_yoy[t]   = sales[t] / sales[t-1] − 1                (3-yr median)
   sector_median_growth  = median(sales_growth_yoy) within sector
@@ -18,20 +18,12 @@ the comparison.
 
 Smoothing: 3-yr median per the Track 3 convention.
 
-Usage:
-    python -m signals.sales_growth_relative
-    python -m signals.sales_growth_relative --dry-run
 """
 
 import pandas as pd
 
-from signals import _annual
 
 SMOOTH_YEARS = 3
-
-
-def _load_data():
-    return _annual.load(["Sales"])
 
 
 def _compute(stocks, fund):
@@ -60,12 +52,3 @@ def _compute(stocks, fund):
     agg["relative_growth"] = agg["sales_growth"] - agg["sector_median"]
 
     return agg[["sid", "period_end", "sales_growth", "sector_median", "relative_growth"]].reset_index(drop=True)
-
-
-def compute(dry_run=False):
-    return _annual.save(_compute(*_load_data()), "sales_growth_relative_scores", "Sales growth (sector-relative)", "relative_growth",
-                        dry_run, fmt=".3f")
-
-
-if __name__ == "__main__":
-    _annual.cli(compute)

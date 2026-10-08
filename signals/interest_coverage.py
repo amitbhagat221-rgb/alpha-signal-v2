@@ -2,7 +2,7 @@
 Alpha Signal v2 — Interest Coverage
 
 Reads:  fundamentals_screener (annual rows), stocks
-Writes: interest_coverage_scores
+Computed point in time only (pit.py); the live step that wrote its *_scores table had no reader and was removed (plan 0020, 2026-10).
 
   EBIT_t            = PBT_t + Interest_t
   coverage_t        = EBIT_t / Interest_t
@@ -18,15 +18,11 @@ correctly signal distress.
 Financial Services excluded — Interest is the COGS of banking, not a
 financing cost.
 
-Usage:
-    python -m signals.interest_coverage
-    python -m signals.interest_coverage --dry-run
 """
 
 import numpy as np
 import pandas as pd
 
-from signals import _annual
 
 REQUIRED_ITEMS = ["Profit before tax", "Interest"]
 SMOOTH_YEARS = 3
@@ -37,10 +33,6 @@ MIN_INTEREST_CR = 1.0
 # on a ₹10K cr EBIT business). Real-world bands: <1 distressed, 1-3 weak,
 # 3-10 normal, 10-30 strong, >30 exceptional.
 COVERAGE_CAP = 200.0
-
-
-def _load_data():
-    return _annual.load(REQUIRED_ITEMS)
 
 
 def _compute(stocks, fund):
@@ -68,12 +60,3 @@ def _compute(stocks, fund):
     )
     agg = agg[agg["years_used"] >= SMOOTH_YEARS]
     return agg[["sid", "period_end", "interest_coverage"]].reset_index(drop=True)
-
-
-def compute(dry_run=False):
-    return _annual.save(_compute(*_load_data()), "interest_coverage_scores", "Interest coverage", "interest_coverage",
-                        dry_run, fmt=".2f", unit="x")
-
-
-if __name__ == "__main__":
-    _annual.cli(compute)

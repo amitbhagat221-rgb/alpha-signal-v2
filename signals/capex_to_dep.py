@@ -2,7 +2,7 @@
 Alpha Signal v2 — CapEx / Depreciation ratio
 
 Reads:  fundamentals_screener (annual rows), stocks
-Writes: capex_to_dep_scores
+Computed point in time only (pit.py); the live step that wrote its *_scores table had no reader and was removed (plan 0020, 2026-10).
 
   Capex_t   = max(Δ(Net Block + CWIP), 0) + Depreciation_t
   Ratio_t   = Capex_t / Depreciation_t
@@ -16,23 +16,16 @@ to drop asset-light services (where the ratio is meaningless).
 
 Capped to ±20 to keep distressed names from dominating the rank.
 
-Usage:
-    python -m signals.capex_to_dep
 """
 
 import numpy as np
 import pandas as pd
 
-from signals import _annual
 
 REQUIRED_ITEMS = ["Net Block", "Capital Work in Progress", "Depreciation"]
 SMOOTH_YEARS = 3
 MIN_DEPRECIATION_CR = 1.0
 RATIO_CAP = 20.0
-
-
-def _load_data():
-    return _annual.load(REQUIRED_ITEMS)
 
 
 def _compute(stocks, fund):
@@ -61,12 +54,3 @@ def _compute(stocks, fund):
     )
     agg = agg[agg["years_used"] >= SMOOTH_YEARS]
     return agg[["sid", "period_end", "capex_to_dep"]].reset_index(drop=True)
-
-
-def compute(dry_run=False):
-    return _annual.save(_compute(*_load_data()), "capex_to_dep_scores", "Capex/Dep", "capex_to_dep",
-                        dry_run, fmt=".2f", unit="x")
-
-
-if __name__ == "__main__":
-    _annual.cli(compute)

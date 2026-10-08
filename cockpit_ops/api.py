@@ -1237,15 +1237,6 @@ def _cc_factor_library():
             "track": "f-track",
             "score_table": "roic_scores",
         },
-        {
-            "signal": "fcf_yield",
-            "label": "FCF Yield (Track 3)",
-            "group": "Track 3 / Cash",
-            "status": "READY",
-            "status_reason": "",
-            "track": "f-track",
-            "score_table": "fcf_yield_scores",
-        },
     ]
 
     # Promotion criterion: if the best pit_ic_by_tier_v2 row (best_ic_by_signal —
@@ -1478,7 +1469,6 @@ def get_command_centre():
             ("insider_signals",        "Insider trades signal — 29 monthly snapshots"),
             ("sentiment_scores",       "News-based sentiment proxy — 7d volume + (FinBERT pending plan-0002)"),
             ("roic_scores",            "Track 3 ROIC — 1,501 stocks (NOPAT/IC, 3yr median, IC≥₹50cr)"),
-            ("fcf_yield_scores",       "Track 3 FCF Yield — 1,195 stocks"),
         ]),
         ("Daily Output", [
             ("daily_picks",            "Top picks per cap-tier per snapshot_date — what the screener emits"),

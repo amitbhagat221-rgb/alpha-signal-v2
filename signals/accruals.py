@@ -21,11 +21,10 @@ Usage:
 import argparse
 from datetime import date
 
-import numpy as np
 import pandas as pd
 
 from config import SCREEN
-from db import get_db, read_sql, upsert_df
+from db import read_sql, upsert_df
 
 FINANCIAL_SECTORS = set(SCREEN["financial_sectors"])
 

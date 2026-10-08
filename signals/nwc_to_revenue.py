@@ -2,7 +2,7 @@
 Alpha Signal v2 — Net Working Capital to Revenue (latest annual)
 
 Reads:  fundamentals_screener (annual rows), stocks
-Writes: nwc_to_revenue_scores
+Computed point in time only (pit.py); the live step that wrote its *_scores table had no reader and was removed (plan 0020, 2026-10).
 
   NWC = Receivables + Inventory − Trade Payables
   Ratio = NWC / Sales, latest annual period
@@ -11,21 +11,14 @@ Spot (not smoothed) sibling of `wc_intensity`. The 3y-median version captures
 the steady-state cycle; this latest-year version catches recent shifts.
 Higher = more cash tied up in operating cycle.
 
-Usage:
-    python -m signals.nwc_to_revenue
 """
 
 import numpy as np
 import pandas as pd
 
-from signals import _annual
 
 REQUIRED_ITEMS = ["Sales", "Receivables", "Inventory", "Trade Payables"]
 MIN_SALES_CR = 50.0
-
-
-def _load_data():
-    return _annual.load(REQUIRED_ITEMS)
 
 
 def _compute(stocks, fund):
@@ -45,12 +38,3 @@ def _compute(stocks, fund):
     wide = wide.sort_values(["sid", "period_end"])
     latest = wide.groupby("sid", as_index=False).tail(1)
     return latest[["sid", "period_end", "nwc_to_revenue"]].reset_index(drop=True)
-
-
-def compute(dry_run=False):
-    return _annual.save(_compute(*_load_data()), "nwc_to_revenue_scores", "NWC/Revenue", "nwc_to_revenue",
-                        dry_run, fmt=".3f")
-
-
-if __name__ == "__main__":
-    _annual.cli(compute)

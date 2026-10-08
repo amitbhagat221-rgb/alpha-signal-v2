@@ -2,7 +2,7 @@
 Alpha Signal v2 — SG&A Intensity, YoY change
 
 Reads:  fundamentals_screener (annual rows), stocks
-Writes: sga_to_revenue_change_scores
+Computed point in time only (pit.py); the live step that wrote its *_scores table had no reader and was removed (plan 0020, 2026-10).
 
   SGA_int_t = "Selling and admin"_t / Sales_t
   Δ         = SGA_int_t − SGA_int_{t-1}
@@ -14,21 +14,14 @@ than overheads can be cut. Higher Δ = worse.
 include R&D or other overheads broken out separately, but it captures the
 sales/marketing engine specifically.
 
-Usage:
-    python -m signals.sga_to_revenue_change
 """
 
 import numpy as np
 import pandas as pd
 
-from signals import _annual
 
 REQUIRED_ITEMS = ["Sales", "Selling and admin"]
 MIN_SALES_CR = 50.0
-
-
-def _load_data():
-    return _annual.load(REQUIRED_ITEMS)
 
 
 def _compute(stocks, fund):
@@ -58,12 +51,3 @@ def _compute(stocks, fund):
     if not rows:
         return pd.DataFrame(columns=["sid", "period_end", "sga_to_revenue_change"])
     return pd.DataFrame(rows).reset_index(drop=True)
-
-
-def compute(dry_run=False):
-    return _annual.save(_compute(*_load_data()), "sga_to_revenue_change_scores", "Δ SGA/Revenue", "sga_to_revenue_change",
-                        dry_run, fmt=".4f")
-
-
-if __name__ == "__main__":
-    _annual.cli(compute)

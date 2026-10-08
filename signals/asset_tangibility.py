@@ -2,7 +2,7 @@
 Alpha Signal v2 — Asset Tangibility (Net Block / Total Assets)
 
 Reads:  fundamentals_screener (annual rows), stocks
-Writes: asset_tangibility_scores
+Computed point in time only (pit.py); the live step that wrote its *_scores table had no reader and was removed (plan 0020, 2026-10).
 
   Ratio = Net Block_t / Total_t, latest annual period
 
@@ -14,21 +14,14 @@ rate cycles.
 This is descriptive more than predictive; whether it's predictive on the
 return cross-section depends on the regime. We'll learn from the backtest.
 
-Usage:
-    python -m signals.asset_tangibility
 """
 
 import numpy as np
 import pandas as pd
 
-from signals import _annual
 
 REQUIRED_ITEMS = ["Net Block", "Total"]
 MIN_ASSETS_CR = 50.0
-
-
-def _load_data():
-    return _annual.load(REQUIRED_ITEMS)
 
 
 def _compute(stocks, fund):
@@ -46,12 +39,3 @@ def _compute(stocks, fund):
     wide = wide.sort_values(["sid", "period_end"])
     latest = wide.groupby("sid", as_index=False).tail(1)
     return latest[["sid", "period_end", "asset_tangibility"]].reset_index(drop=True)
-
-
-def compute(dry_run=False):
-    return _annual.save(_compute(*_load_data()), "asset_tangibility_scores", "Asset tangibility", "asset_tangibility",
-                        dry_run, fmt=".3f")
-
-
-if __name__ == "__main__":
-    _annual.cli(compute)

@@ -72,16 +72,19 @@ def _fmt_signed(v):   return signed(v)
 def _fmt_yield(v):    return f"{float(v)*100:.1f}%" if abs(float(v)) < 1 else f"{float(v):.1f}%"
 def _fmt_pct_v(v):    return pct(v, 0)
 
+# (column, label, format, sign, lo, hi): strength 0 at sign*value = lo, 1 at hi — in each
+# column's own unit (daily_snapshots holds the ranked values, output/snapshot.py: momentum and
+# EPS growth in percent, smart money 0-100; lower accruals are better)
 SNAPSHOT_SIGNALS = [
-    ("piotroski_f",      "F-Score",   _fmt_f_score, +1, 5.0,   9.0),
-    ("earnings_yield",   "E/P",       _fmt_yield,   +1, 0.06,  0.20),
-    ("consensus_signal", "Consensus", _fmt_signed,  +1, 0.10,  1.00),
-    ("promoter_qoq",     "Promoter",  _fmt_signed,  +1, 0.10,  1.00),
-    ("cf_accruals",      "Accruals",  _fmt_signed,  +1, 0.20,  1.00),
-    ("smart_money",      "Smart$",    _fmt_signed,  +1, 0.20,  1.00),
-    ("delivery_pct",     "Delivery",  _fmt_pct_v,   +1, 50.0,  90.0),
-    ("mom_12m",          "Mom 12M",   _fmt_signed,  +1, 0.10,  1.00),
-    ("sentiment_7d",     "News",      _fmt_signed,  +1, 0.20,  1.00),
+    ("piotroski_f",      "F-Score",    _fmt_f_score, +1, 5.0,   9.0),
+    ("earnings_yield",   "E/P",        _fmt_yield,   +1, 0.06,  0.20),
+    ("consensus_signal", "EPS growth", _fmt_pct_v,   +1, 10.0,  100.0),
+    ("promoter_qoq",     "Promoter",   _fmt_signed,  +1, 0.10,  1.00),
+    ("cf_accruals",      "Accruals",   _fmt_signed,  -1, 0.05,  0.30),
+    ("smart_money",      "Smart$",     _fmt_pct_v,   +1, 50.0,  90.0),
+    ("delivery_pct",     "Delivery",   _fmt_pct_v,   +1, 50.0,  90.0),
+    ("mom_12m",          "Mom 12M",    _fmt_pct_v,   +1, 10.0,  100.0),
+    ("sentiment_7d",     "News",       _fmt_signed,  +1, 0.20,  1.00),
 ]
 
 

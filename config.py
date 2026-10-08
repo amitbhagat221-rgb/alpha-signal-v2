@@ -492,19 +492,9 @@ PIPELINE_STEPS = [
 
     # FCF Yield — second Track 3 factor. Same data source, same gating —
     # not in scoring weights yet.
-    {"name": "signal_fcf_yield",   "module": "signals.fcf_yield",   "function": "compute",  "critical": False,
-     "table": "fcf_yield_scores",  "source": "fundamentals_screener (Screener Premium) + stocks.market_cap_cr",
-     "data_freq": "annual",        "frequency": "weekly",
-     "reads": ["fcf_yield_scores", "fundamentals_screener", "stocks"],
-     "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
 
     # Cash Conversion Cycle — third Track 3 factor. DSO + DIO − DPO, 3-yr median.
     # Same gating — not in scoring weights yet.
-    {"name": "signal_cash_conversion_cycle", "module": "signals.cash_conversion_cycle", "function": "compute", "critical": False,
-     "table": "cash_conversion_cycle_scores", "source": "fundamentals_screener — Sales + Receivables + Inventory + Trade Payables",
-     "data_freq": "annual",        "frequency": "weekly",
-     "reads": ["cash_conversion_cycle_scores", "fundamentals_screener", "stocks"],
-     "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
 
     # Operating Margin Trend — 5y OLS slope of EBIT/Sales (pp/year). Same gating.
     {"name": "signal_operating_margin_trend", "module": "signals.operating_margin_trend", "function": "compute", "critical": False,
@@ -514,18 +504,8 @@ PIPELINE_STEPS = [
      "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
 
     # Working Capital Intensity — (Recv + Inv − Pay) / Sales, 3y median. Same gating.
-    {"name": "signal_working_capital_intensity", "module": "signals.working_capital_intensity", "function": "compute", "critical": False,
-     "table": "working_capital_intensity_scores", "source": "fundamentals_screener — Sales + Receivables + Inventory + Trade Payables",
-     "data_freq": "annual",        "frequency": "weekly",
-     "reads": ["fundamentals_screener", "stocks", "working_capital_intensity_scores"],
-     "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
 
     # Interest Coverage — (PBT + Interest) / Interest, 3y median. Same gating.
-    {"name": "signal_interest_coverage", "module": "signals.interest_coverage", "function": "compute", "critical": False,
-     "table": "interest_coverage_scores", "source": "fundamentals_screener — PBT + Interest",
-     "data_freq": "annual",        "frequency": "weekly",
-     "reads": ["fundamentals_screener", "interest_coverage_scores", "stocks"],
-     "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
 
     # ROIIC — marginal NOPAT/IC over trailing 5y. Sister of ROIC; measures
     # how productive newly-deployed capital has been.
@@ -543,84 +523,14 @@ PIPELINE_STEPS = [
      "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
 
     # ── Forensic / capital-allocation batch (plan 0002 §3.2.1) ──
-    {"name": "signal_dso_change_yoy", "module": "signals.dso_change_yoy", "function": "compute", "critical": False,
-     "table": "dso_change_yoy_scores", "source": "fundamentals_screener — Sales + Receivables",
-     "data_freq": "annual", "frequency": "weekly",
-     "reads": ["dso_change_yoy_scores", "fundamentals_screener", "stocks"],
-     "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
-    {"name": "signal_dio_change_yoy", "module": "signals.dio_change_yoy", "function": "compute", "critical": False,
-     "table": "dio_change_yoy_scores", "source": "fundamentals_screener — Sales + Inventory",
-     "data_freq": "annual", "frequency": "weekly",
-     "reads": ["dio_change_yoy_scores", "fundamentals_screener", "stocks"],
-     "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
-    {"name": "signal_nwc_to_revenue", "module": "signals.nwc_to_revenue", "function": "compute", "critical": False,
-     "table": "nwc_to_revenue_scores", "source": "fundamentals_screener — Sales + Receivables + Inventory + Trade Payables",
-     "data_freq": "annual", "frequency": "weekly",
-     "reads": ["fundamentals_screener", "nwc_to_revenue_scores", "stocks"],
-     "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
-    {"name": "signal_sloan_accruals_full", "module": "signals.sloan_accruals_full", "function": "compute", "critical": False,
-     "table": "sloan_accruals_full_scores", "source": "fundamentals_screener — Receivables + Inventory + Trade Payables + Depreciation + Total",
-     "data_freq": "annual", "frequency": "weekly",
-     "reads": ["fundamentals_screener", "sloan_accruals_full_scores", "stocks"],
-     "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
-    {"name": "signal_sga_to_revenue_change", "module": "signals.sga_to_revenue_change", "function": "compute", "critical": False,
-     "table": "sga_to_revenue_change_scores", "source": "fundamentals_screener — Sales + Selling and admin",
-     "data_freq": "annual", "frequency": "weekly",
-     "reads": ["fundamentals_screener", "sga_to_revenue_change_scores", "stocks"],
-     "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
-    {"name": "signal_fcf_margin", "module": "signals.fcf_margin", "function": "compute", "critical": False,
-     "table": "fcf_margin_scores", "source": "fundamentals_screener — Sales + OCF + Net Block + CWIP + Depreciation",
-     "data_freq": "annual", "frequency": "weekly",
-     "reads": ["fcf_margin_scores", "fundamentals_screener", "stocks"],
-     "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
-    {"name": "signal_capex_to_dep", "module": "signals.capex_to_dep", "function": "compute", "critical": False,
-     "table": "capex_to_dep_scores", "source": "fundamentals_screener — Net Block + CWIP + Depreciation",
-     "data_freq": "annual", "frequency": "weekly",
-     "reads": ["capex_to_dep_scores", "fundamentals_screener", "stocks"],
-     "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
-    {"name": "signal_goodwill_to_assets", "module": "signals.goodwill_to_assets", "function": "compute", "critical": False,
-     "table": "goodwill_to_assets_scores", "source": "fundamentals_screener — Intangible Assets + Total",
-     "data_freq": "annual", "frequency": "weekly",
-     "reads": ["fundamentals_screener", "goodwill_to_assets_scores", "stocks"],
-     "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
-    {"name": "signal_debt_structure", "module": "signals.debt_structure", "function": "compute", "critical": False,
-     "table": "debt_structure_scores", "source": "fundamentals_screener — Long term Borrowings + Borrowings",
-     "data_freq": "annual", "frequency": "weekly",
-     "reads": ["debt_structure_scores", "fundamentals_screener", "stocks"],
-     "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
-    {"name": "signal_asset_tangibility", "module": "signals.asset_tangibility", "function": "compute", "critical": False,
-     "table": "asset_tangibility_scores", "source": "fundamentals_screener — Net Block + Total",
-     "data_freq": "annual", "frequency": "weekly",
-     "reads": ["asset_tangibility_scores", "fundamentals_screener", "stocks"],
-     "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
 
     # Sector-narrative-derived cluster (plan 0003) — 4 factors inspired by
     # IIM Ahmedabad sector-narrative pages. None in scoring weights yet;
     # promotion gated on backtest |t| ≥ 1.5 in any tier.
 
-    {"name": "signal_revenue_cv",  "module": "signals.revenue_cv",  "function": "compute",  "critical": False,
-     "table": "revenue_cv_scores", "source": "fundamentals_screener — Sales (annual, 6 yrs)",
-     "data_freq": "annual",        "frequency": "weekly",
-     "reads": ["fundamentals_screener", "revenue_cv_scores", "stocks"],
-     "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
 
-    {"name": "signal_inventory_turnover", "module": "signals.inventory_turnover", "function": "compute", "critical": False,
-     "table": "inventory_turnover_scores", "source": "fundamentals_screener — Sales + Inventory",
-     "data_freq": "annual",                "frequency": "weekly",
-     "reads": ["fundamentals_screener", "inventory_turnover_scores", "stocks"],
-     "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
 
-    {"name": "signal_sales_growth_relative", "module": "signals.sales_growth_relative", "function": "compute", "critical": False,
-     "table": "sales_growth_relative_scores", "source": "fundamentals_screener — Sales + sector peers",
-     "data_freq": "annual",                   "frequency": "weekly",
-     "reads": ["fundamentals_screener", "sales_growth_relative_scores", "stocks"],
-     "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
 
-    {"name": "signal_share_momentum", "module": "signals.share_momentum", "function": "compute", "critical": False,
-     "table": "share_momentum_scores", "source": "stock_prices + fundamentals_screener — No. of Equity Shares",
-     "data_freq": "daily",             "frequency": "daily",
-     "reads": ["fundamentals_screener", "share_momentum_scores", "stock_prices", "stocks"],
-     "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
 
     {"name": "signal_accruals",    "module": "signals.accruals",    "function": "compute",  "critical": False,
      "table": "accruals_scores",   "source": "quarterly_income + annual_balance_sheet + annual_cash_flow",
@@ -784,9 +694,9 @@ PIPELINE_STEPS = [
 
     # ── Output ──
     {"name": "snapshot",           "module": "output.snapshot",     "function": "compute",  "critical": False,
-     "table": "daily_snapshots",   "source": "all signals + stock_prices",
+     "table": "daily_snapshots",   "source": "pit.features_at(today) — the ranked values",
      "data_freq": "daily",         "frequency": "daily",
-     "reads": ["accruals_scores", "annual_balance_sheet", "consensus_signals", "corporate_adjustments", "daily_picks", "daily_snapshots", "fundamentals_screener", "piotroski_scores", "promoter_signals", "quarterly_income", "sentiment_scores", "smart_money_scores", "stock_prices", "stocks"],
+     "reads": ["annual_balance_sheet", "annual_cash_flow", "bulk_deals", "corporate_adjustments", "daily_snapshots", "forecast_history", "fundamentals_screener", "news_article_stocks", "news_articles", "quarterly_income", "shareholding", "stock_prices", "stocks"],
      "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
 
     {"name": "diff_engine",        "module": "output.diff_engine",  "function": "compute",  "critical": False,
@@ -835,9 +745,9 @@ PIPELINE_STEPS = [
     # quality scores, and fundamental depth change. Idempotent. Demotes any
     # MICRO that re-qualifies for SMALL. See tools/classify_micro_tier.py.
     {"name": "classify_micro_tier","module": "tools.classify_micro_tier", "function": "reclassify", "critical": False,
-     "table": "stocks",            "source": "stocks + stock_prices + piotroski_scores + quarterly_income",
+     "table": "stocks",            "source": "pit.tier_inputs: stock_prices + statements + corporate_adjustments",
      "data_freq": "daily",         "frequency": "daily",
-     "reads": ["piotroski_scores", "quarterly_income", "stock_prices", "stocks"],
+     "reads": ["annual_balance_sheet", "corporate_adjustments", "fundamentals_screener", "quarterly_income", "stock_prices", "stocks"],
      "lagged_reads": ["stocks@fetch_broker_recos"]},
 
     # ── Background / non-blocking section ──

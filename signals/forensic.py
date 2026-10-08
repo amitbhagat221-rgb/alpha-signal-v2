@@ -23,7 +23,6 @@ Usage:
 import argparse
 from datetime import date
 
-import numpy as np
 import pandas as pd
 
 from config import SCREEN, FORENSIC

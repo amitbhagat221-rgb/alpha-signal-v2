@@ -2,7 +2,7 @@
 Alpha Signal v2 — Sloan Accruals (full balance-sheet formula)
 
 Reads:  fundamentals_screener (annual rows), stocks
-Writes: sloan_accruals_full_scores
+Computed point in time only (pit.py); the live step that wrote its *_scores table had no reader and was removed (plan 0020, 2026-10).
 
   NWC_t   = Receivables_t + Inventory_t − Trade Payables_t
   ΔNWC    = NWC_t − NWC_{t-1}
@@ -19,21 +19,14 @@ Note: this complements `cf_accruals` (already in production) which uses CF
 statement directly. This uses the BS-construction formula — the gap between
 the two is itself a forensic signal but we're not encoding that here.
 
-Usage:
-    python -m signals.sloan_accruals_full
 """
 
 import numpy as np
 import pandas as pd
 
-from signals import _annual
 
 REQUIRED_ITEMS = ["Receivables", "Inventory", "Trade Payables", "Depreciation", "Total"]
 MIN_ASSETS_CR = 50.0
-
-
-def _load_data():
-    return _annual.load(REQUIRED_ITEMS)
 
 
 def _compute(stocks, fund):
@@ -67,12 +60,3 @@ def _compute(stocks, fund):
     if not rows:
         return pd.DataFrame(columns=["sid", "period_end", "sloan_accruals_full"])
     return pd.DataFrame(rows).reset_index(drop=True)
-
-
-def compute(dry_run=False):
-    return _annual.save(_compute(*_load_data()), "sloan_accruals_full_scores", "Sloan accruals (full)", "sloan_accruals_full",
-                        dry_run, fmt=".4f")
-
-
-if __name__ == "__main__":
-    _annual.cli(compute)

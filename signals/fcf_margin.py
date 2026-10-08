@@ -2,7 +2,7 @@
 Alpha Signal v2 — Free Cash Flow Margin
 
 Reads:  fundamentals_screener (annual rows), stocks
-Writes: fcf_margin_scores
+Computed point in time only (pit.py); the live step that wrote its *_scores table had no reader and was removed (plan 0020, 2026-10).
 
   Capex_t = max(Δ(Net Block + CWIP), 0) + Depreciation_t
   FCF_t   = OCF_t − Capex_t
@@ -15,14 +15,11 @@ input.
 
 Financials excluded.
 
-Usage:
-    python -m signals.fcf_margin
 """
 
 import numpy as np
 import pandas as pd
 
-from signals import _annual
 
 REQUIRED_ITEMS = [
     "Sales",
@@ -33,10 +30,6 @@ REQUIRED_ITEMS = [
 ]
 SMOOTH_YEARS = 3
 MIN_SALES_CR = 50.0
-
-
-def _load_data():
-    return _annual.load(REQUIRED_ITEMS)
 
 
 def _compute(stocks, fund):
@@ -65,12 +58,3 @@ def _compute(stocks, fund):
     )
     agg = agg[agg["years_used"] >= SMOOTH_YEARS]
     return agg[["sid", "period_end", "fcf_margin"]].reset_index(drop=True)
-
-
-def compute(dry_run=False):
-    return _annual.save(_compute(*_load_data()), "fcf_margin_scores", "FCF Margin", "fcf_margin",
-                        dry_run, fmt=".3f")
-
-
-if __name__ == "__main__":
-    _annual.cli(compute)

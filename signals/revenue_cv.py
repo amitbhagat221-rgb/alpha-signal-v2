@@ -2,7 +2,7 @@
 Alpha Signal v2 — Revenue Volatility (5-year CV)
 
 Reads:  fundamentals_screener (annual Sales rows), stocks
-Writes: revenue_cv_scores
+Computed point in time only (pit.py); the live step that wrote its *_scores table had no reader and was removed (plan 0020, 2026-10).
 
   yoy_growth[t]  = sales[t] / sales[t-1] − 1
   revenue_cv_5y  = stdev(yoy_growth over last 5 yrs) / |mean(yoy_growth)|
@@ -16,22 +16,14 @@ Stocks with mean YoY growth near zero have unstable CV; we require
 |mean growth| ≥ 2% to qualify. Also require ≥ 5 growth observations
 (i.e. ≥ 6 years of Sales history).
 
-Usage:
-    python -m signals.revenue_cv
-    python -m signals.revenue_cv --dry-run
 """
 
 import numpy as np
 import pandas as pd
 
-from signals import _annual
 
 MIN_YEARS = 6                  # need 6 years to get 5 YoY growth values
 MIN_ABS_MEAN_GROWTH = 0.02     # filter near-zero mean growers (unstable CV)
-
-
-def _load_data():
-    return _annual.load(["Sales"], set())
 
 
 def _compute(stocks, fund):
@@ -72,12 +64,3 @@ def _compute(stocks, fund):
         })
 
     return pd.DataFrame(rows, columns=["sid", "revenue_cv_5y", "mean_growth", "years_used"])
-
-
-def compute(dry_run=False):
-    return _annual.save(_compute(*_load_data()), "revenue_cv_scores", "Revenue CV", "revenue_cv_5y",
-                        dry_run, fmt=".3f")
-
-
-if __name__ == "__main__":
-    _annual.cli(compute)

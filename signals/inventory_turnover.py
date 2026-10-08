@@ -2,7 +2,7 @@
 Alpha Signal v2 — Inventory Turnover (sector-relative)
 
 Reads:  fundamentals_screener (annual Sales + Inventory), stocks
-Writes: inventory_turnover_scores
+Computed point in time only (pit.py); the live step that wrote its *_scores table had no reader and was removed (plan 0020, 2026-10).
 
   inventory_turnover  = Sales / avg(Inventory)         (annual)
   sector_p50          = median(turnover) for stocks in same sector
@@ -20,16 +20,12 @@ Excluded:
 
 Smoothing: 3-year median of yearly turnover, same convention as ROIC / FCFY.
 
-Usage:
-    python -m signals.inventory_turnover
-    python -m signals.inventory_turnover --dry-run
 """
 
 import numpy as np
 import pandas as pd
 
 from config import SCREEN
-from signals import _annual
 
 # Sectors where inventory is structurally absent or meaningless
 EXCLUDED_SECTORS = set(SCREEN["financial_sectors"]) | {
@@ -40,10 +36,6 @@ EXCLUDED_SECTORS = set(SCREEN["financial_sectors"]) | {
 
 SMOOTH_YEARS = 3
 MIN_AVG_INVENTORY_CR = 1.0
-
-
-def _load_data():
-    return _annual.load(["Sales", "Inventory"], EXCLUDED_SECTORS)
 
 
 def _compute(stocks, fund):
@@ -80,12 +72,3 @@ def _compute(stocks, fund):
     agg["relative_turnover"] = agg["inventory_turnover"] / agg["sector_p50"]
 
     return agg[["sid", "period_end", "inventory_turnover", "sector_p50", "relative_turnover"]].reset_index(drop=True)
-
-
-def compute(dry_run=False):
-    return _annual.save(_compute(*_load_data()), "inventory_turnover_scores", "Inventory turnover", "relative_turnover",
-                        dry_run, fmt=".3f")
-
-
-if __name__ == "__main__":
-    _annual.cli(compute)

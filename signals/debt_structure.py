@@ -2,7 +2,7 @@
 Alpha Signal v2 — Debt Structure (LT debt share)
 
 Reads:  fundamentals_screener (annual rows), stocks
-Writes: debt_structure_scores
+Computed point in time only (pit.py); the live step that wrote its *_scores table had no reader and was removed (plan 0020, 2026-10).
 
   Ratio = Long term Borrowings_t / Borrowings_t, latest annual period
 
@@ -15,21 +15,14 @@ Stocks that don't separate LT vs ST in their filings → NaN.
 
 Higher is safer; lower flags balance-sheet fragility.
 
-Usage:
-    python -m signals.debt_structure
 """
 
 import numpy as np
 import pandas as pd
 
-from signals import _annual
 
 REQUIRED_ITEMS = ["Long term Borrowings", "Borrowings"]
 MIN_BORROWINGS_CR = 50.0
-
-
-def _load_data():
-    return _annual.load(REQUIRED_ITEMS)
 
 
 def _compute(stocks, fund):
@@ -49,12 +42,3 @@ def _compute(stocks, fund):
     wide = wide.sort_values(["sid", "period_end"])
     latest = wide.groupby("sid", as_index=False).tail(1)
     return latest[["sid", "period_end", "debt_structure"]].reset_index(drop=True)
-
-
-def compute(dry_run=False):
-    return _annual.save(_compute(*_load_data()), "debt_structure_scores", "Debt structure (LT/total)", "debt_structure",
-                        dry_run, fmt=".3f")
-
-
-if __name__ == "__main__":
-    _annual.cli(compute)

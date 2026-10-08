@@ -2,7 +2,7 @@
 Alpha Signal v2 — Days Sales Outstanding, YoY change
 
 Reads:  fundamentals_screener (annual rows), stocks
-Writes: dso_change_yoy_scores
+Computed point in time only (pit.py); the live step that wrote its *_scores table had no reader and was removed (plan 0020, 2026-10).
 
   DSO_t = Receivables_t / (Sales_t / 365)
   Δ DSO = DSO_t − DSO_{t-1}   (days)
@@ -18,9 +18,6 @@ Filters:
 
 Sign convention: signal is the *change*; lower (= shrinking DSO) is better.
 
-Usage:
-    python -m signals.dso_change_yoy
-    python -m signals.dso_change_yoy --dry-run
 """
 
 from signals import _annual
@@ -29,18 +26,5 @@ REQUIRED_ITEMS = ["Sales", "Receivables"]
 MIN_SALES_CR = 50.0
 
 
-def _load_data():
-    return _annual.load(REQUIRED_ITEMS)
-
-
 def _compute(stocks, fund):
     return _annual.days_of_sales_change(fund, "Receivables", "dso_change_yoy", MIN_SALES_CR)
-
-
-def compute(dry_run=False):
-    return _annual.save(_compute(*_load_data()), "dso_change_yoy_scores", "DSO change YoY", "dso_change_yoy",
-                        dry_run, fmt=".1f", unit="d")
-
-
-if __name__ == "__main__":
-    _annual.cli(compute)

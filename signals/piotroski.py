@@ -21,7 +21,7 @@ import numpy as np
 import pandas as pd
 
 from config import SCREEN
-from db import get_db, read_sql, upsert_df, emit_lineage
+from db import read_sql, upsert_df, emit_lineage
 
 FINANCIAL_SECTORS = set(SCREEN["financial_sectors"])
 DILUTION_TOLERANCE = 0.02  # 2% max share increase allowed

@@ -20,7 +20,6 @@ import numpy as np
 import pandas as pd
 
 import factors
-import config
 from config import SCREEN
 from db import read_sql
 from signals import _annual
