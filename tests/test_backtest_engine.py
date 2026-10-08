@@ -99,3 +99,15 @@ def test_a_factor_with_no_value_counts_as_the_middle_of_the_tier():
     k0 = next(iter(w))
     full_rank = 59 / 60                                                                     # S58's percentile on the factors it has
     assert gap == pytest.approx((1 - abs(w[k0])) * full_rank + abs(w[k0]) * MISSING_FACTOR_SCORE, abs=0.02)
+
+
+def test_a_wired_factors_input_is_never_silently_optional(monkeypatch):
+    """bse_results feeds the wired announcement_car: an empty or unreadable frame must stop
+    the run, not turn into an empty input that scores every stock as neutral (ADR 0064)."""
+    import pandas as pd
+    assert "bse_results" in pit._wired_raw_keys() and "bse_results" in pit.RAW_OPTIONAL
+    monkeypatch.setattr(pit, "read_sql", lambda sql, **kw: pd.DataFrame())
+    with pytest.raises(RuntimeError, match="bse_results"):
+        pit.load_raw({"bse_results"})
+    optional_unwired = next(k for k in pit.RAW_OPTIONAL if k not in pit._wired_raw_keys())
+    assert pit.load_raw({optional_unwired})[optional_unwired].empty    # benched input: still optional

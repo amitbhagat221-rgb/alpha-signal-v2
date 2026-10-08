@@ -1580,20 +1580,32 @@ def raw_keys_for(signals):
     return {k for k in keys if k in RAW_SQL}
 
 
+def _wired_raw_keys():
+    """Raw frames a wired factor's producer reads: never optional. An unreadable or empty
+    optional frame used to become an empty input, the factor went missing for every stock
+    and the neutral rule (ADR 0064) scored it silently (audit 2026-10 §4)."""
+    cols = [factors.pit_column(s) for s in factors.wired_signal_ids()]
+    return raw_keys_for(producers_for([c for c in cols if c]))
+
+
 def load_raw(keys=None):
     """Load raw history once (all frames, or only `keys`). Avoids re-querying per eval_date."""
     keys = list(RAW_SQL) if keys is None else [k for k in RAW_SQL if k in set(keys)]
     print("Loading raw data...")
     raw = {}
+    wired = _wired_raw_keys()
     for k in keys:
         sql = RAW_SQL[k]() if callable(RAW_SQL[k]) else RAW_SQL[k]
-        if k in RAW_OPTIONAL:
+        if k in RAW_OPTIONAL and k not in wired:
             try:
                 raw[k] = read_sql(sql)
             except Exception:
                 raw[k] = pd.DataFrame()
         else:
             raw[k] = read_sql(sql)
+            if k in wired and raw[k].empty:
+                raise RuntimeError(f"pit.load_raw: '{k}' is empty but a wired factor reads it — a "
+                                   "missing input would score every stock as neutral without a word")
     print("  " + " ".join(f"{k}={len(v)}" for k, v in raw.items()))
     return raw
 
