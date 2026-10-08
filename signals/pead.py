@@ -121,8 +121,12 @@ def compute_pead(
 
     if qi is None:
         dc = f"AND end_date <= '{as_of_date}'" if as_of_date else ""
-        qi = read_sql(f"SELECT sid, end_date, eps FROM quarterly_income "
+        qi = read_sql(f"SELECT sid, end_date, reporting, eps FROM quarterly_income "
                       f"WHERE end_date IS NOT NULL AND eps IS NOT NULL {dc} ORDER BY sid, end_date")
+    # one reporting basis per stock: interleaved consolidated + standalone rows made the
+    # year-on-year surprise compare a quarter with the other basis (audit 2026-10 §4)
+    from signals._fundamentals import prefer_consolidated
+    qi = prefer_consolidated(qi)
     if prices is None:
         dc = f"AND date <= '{as_of_date}'" if as_of_date else ""
         prices = read_sql(f"SELECT sid, date, close FROM stock_prices WHERE close>0 {dc} ORDER BY sid, date")

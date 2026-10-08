@@ -886,13 +886,14 @@ def pit_pead(qi_pit, px_pit, macro_hist, corp_full, bse_results, eval_date):
     cols = ["sid", "earnings_surprise_std", "pead_drift_60d",
             "corporate_action_density", "buyback_announcement_30d"]
     eval_str = eval_date.isoformat() if hasattr(eval_date, "isoformat") else str(eval_date)
-    qi = qi_pit[["sid", "end_date", "eps"]].dropna(subset=["eps"]) if qi_pit is not None and not qi_pit.empty else pd.DataFrame()
+    qi = qi_pit[["sid", "end_date", "reporting", "eps"]].dropna(subset=["eps"]) if qi_pit is not None and not qi_pit.empty else pd.DataFrame()
     if qi.empty:
         return pd.DataFrame(columns=cols)
     nifty = (macro_hist[(macro_hist["indicator_id"] == "nifty50")
                         & (macro_hist["date"] <= eval_str)][["date", "value"]]
              if macro_hist is not None and not macro_hist.empty else pd.DataFrame(columns=["date", "value"]))
-    prices = px_pit[["sid", "date", "close"]] if px_pit is not None and not px_pit.empty else pd.DataFrame()
+    # adjusted closes: a split inside the drift window read as drift
+    prices = _adjusted(px_pit) if px_pit is not None and not px_pit.empty else pd.DataFrame()
     corp = (corp_full[corp_full["ex_date"] <= eval_str]
             if corp_full is not None and not corp_full.empty else pd.DataFrame(columns=["sid", "ex_date", "subject"]))
     ann = (bse_results[["sid", "ann_date"]]
@@ -1094,7 +1095,8 @@ def pit_earnings_beat_rate(stocks, qi_pit, n_quarters=8):
     """
     rows = []
     sids = stocks["sid"].unique()
-    qi_g = qi_pit[qi_pit["eps"].notna()].sort_values(["sid", "end_date"])
+    qi_g = prefer_consolidated(qi_pit)        # one reporting basis: QoQ across bases is noise
+    qi_g = qi_g[qi_g["eps"].notna()].sort_values(["sid", "end_date"])
     for sid in sids:
         sub = qi_g[qi_g["sid"] == sid]
         if len(sub) < 4:
