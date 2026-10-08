@@ -195,6 +195,15 @@ TABLES = {
         "depth": "~6 quarters per stock (window varies by fetch date)",
         "description": "Quarterly shareholding pattern from Tickertape — promoter %, FII %, MF %, DII %, public %, pledge %, insurance %. Each stock has ~6 trailing quarters at the time it was last fetched, so the calendar span across the table looks much wider than the per-stock depth. Powers promoter signal (QoQ change).",
     },
+    "shareholding_holders": {
+        "contract": {"max_null": {"shares": 0.0, "pct": 0.2}, "not_all_zero": ["shares"]},
+        # The newest end_date is the last quarter end until the next quarter's filings land
+        # (~21 days after it ends) and the Sunday run picks them up: up to ~125 days old.
+        "kind": "RAW", "domain": "Fundamentals", "date_col": "end_date", "freq": "quarterly",
+        "source": "BSE shareholding-pattern XBRL (run.sh transcripts, Sunday)", "stale_days": 130,
+        "depth": "XBRL filings from Jun-2016; latest quarter first, history backfilled on demand",
+        "description": "Named holders above 1% per stock per quarter, as filed on BSE: promoters, mutual-fund schemes, FPIs, individuals. `filed_at` is the broadcast time (point-in-time); a revised filing adds rows with a later `filed_at`. Stocks with a BSE code only (2,199 of 2,448). Holder names are as filed — the same investor can appear under several spellings.",
+    },
 
     # ── Trades & Corporate ──
     # BSE corporate-announcement event stream (--days 7 keep-current), refreshed by
@@ -293,10 +302,30 @@ TABLES = {
         "contract": {"max_null": {"title": 0.01}},
         "kind": "RAW", "domain": "News & Sentiment", "date_col": "published_at",
         "depth": "Growing daily from RSS",
-        "description": "RSS news articles from 8-11 financial publications (ET, Mint, BS, Moneycontrol, etc.). Title, summary, URL, publication date.",
+        "description": "RSS news articles from Economic Times and Livemint section feeds plus three Google News theme searches. Title, summary, URL, publication date.",
     },
     "news_briefs": {"kind": "COMPUTED", "domain": "News & Sentiment", "date_col": "brief_date"},
     "news_enriched": {"kind": "COMPUTED", "domain": "News & Sentiment", "date_col": "classified_at"},
+    "news_themes": {
+        "kind": "COMPUTED", "domain": "News & Sentiment", "date_col": "updated_at",
+        "description": "The standing themes of the News page (plan 0021): one row per theme in config.NEWS_THEMES with its current note. Rewritten about weekly by the news_theme task.",
+    },
+    "news_theme_articles": {
+        "kind": "COMPUTED", "domain": "News & Sentiment", "date_col": "assigned_on",
+        "description": "Which theme each headline was filed under by the daily edition (NULL = read, fits no theme).",
+    },
+    "news_theme_history": {
+        "kind": "COMPUTED", "domain": "News & Sentiment", "date_col": "as_of",
+        "description": "One row per theme-note rewrite: the timeline shown on the theme page.",
+    },
+    "news_today": {
+        "kind": "COMPUTED", "domain": "News & Sentiment", "date_col": "day",
+        "description": "The daily edition of the News page: the three things that matter today, written in one pass over the day's raw headlines.",
+    },
+    "news_week": {
+        "kind": "COMPUTED", "domain": "News & Sentiment", "date_col": "as_of",
+        "description": "The weekly edition of the News page: what is new and fits no theme yet, and three sectors to favour / be careful with.",
+    },
     "transcripts": {"kind": "RAW", "domain": "News & Sentiment", "date_col": "fetched_at"},
 
     # ── Macro ──
@@ -417,6 +446,12 @@ TABLES = {
         "kind": "COMPUTED", "domain": "Computed Signals", "date_col": "snapshot_date",
     },
     "management_scores": {"kind": "COMPUTED", "domain": "Computed Signals", "date_col": "snapshot_date"},
+    "playbook_members": {
+        "kind": "COMPUTED", "domain": "Computed Signals", "date_col": "snapshot_date", "freq": "daily",
+        "source": "sleeves.py rules (run.sh morning → tools/playbook_backtest --record)",
+        "depth": "From 2026-10-04 (forward record)",
+        "description": "Which stocks each investor-playbook sleeve held each day (breakouts, insiders, quality, deep_value) and the red-flag set. Append-only forward record for judging the sleeves without hindsight.",
+    },
     "managerial_ability_scores": {
         "kind": "COMPUTED", "domain": "Computed Signals", "date_col": "snapshot_date",
     },

@@ -1111,6 +1111,61 @@ CREATE TABLE IF NOT EXISTS news_briefs (
     generated_at     TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- The news editor (plan 0021, sources/news_editor.py). Themes are a fixed list in
+-- config.NEWS_THEMES; this state table holds each theme's note, rewritten in place.
+CREATE TABLE IF NOT EXISTS news_themes (
+    theme_id        TEXT PRIMARY KEY,
+    title           TEXT NOT NULL,
+    scope           TEXT NOT NULL,    -- what belongs under the theme
+    status          TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'retired')),
+    updated_at      TEXT,             -- as-of day of the note below
+    stands_now      TEXT,             -- 30w
+    what_changed    TEXT,             -- 40w
+    why_it_matters  TEXT,             -- 50w
+    gains           TEXT,             -- JSON array of sector names
+    loses           TEXT,             -- JSON array of sector names
+    portfolio_line  TEXT,             -- 35w: what kind of company gains / loses
+    what_to_watch   TEXT,             -- 30w
+    next_if         TEXT,             -- JSON array of 2 "If ..., then ..." branches
+    story_so_far    TEXT              -- 200w
+);
+
+-- Headline → theme, written by the daily edition. theme_id NULL = read, fits no theme.
+CREATE TABLE IF NOT EXISTS news_theme_articles (
+    article_id      TEXT PRIMARY KEY REFERENCES news_articles(article_id),
+    theme_id        TEXT REFERENCES news_themes(theme_id),
+    assigned_on     TEXT NOT NULL,
+    used_in_update  TEXT              -- as-of day of the note rewrite that read this headline
+);
+CREATE INDEX IF NOT EXISTS idx_news_theme_articles_theme ON news_theme_articles(theme_id);
+
+-- One row per theme-note rewrite: the theme's timeline.
+CREATE TABLE IF NOT EXISTS news_theme_history (
+    theme_id        TEXT NOT NULL REFERENCES news_themes(theme_id),
+    as_of           TEXT NOT NULL,
+    stands_now      TEXT,
+    what_changed    TEXT,
+    n_articles      INTEGER,
+    PRIMARY KEY (theme_id, as_of)
+);
+
+-- The daily edition: the three things that matter today.
+CREATE TABLE IF NOT EXISTS news_today (
+    day             TEXT PRIMARY KEY,
+    items           TEXT NOT NULL,    -- JSON array of {headline, what, so_what, theme, article_ids}
+    n_headlines     INTEGER,          -- headlines the edition read
+    generated_at    TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- The weekly edition: on the radar + sectors to favour / be careful with.
+CREATE TABLE IF NOT EXISTS news_week (
+    as_of           TEXT PRIMARY KEY,
+    radar           TEXT NOT NULL,    -- JSON array of {title, what, why_early, article_ids}
+    favour          TEXT NOT NULL,    -- JSON array of {sector, reason}
+    careful         TEXT NOT NULL,    -- JSON array of {sector, reason}
+    generated_at    TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS news_enriched (
     article_id       TEXT PRIMARY KEY REFERENCES news_articles(article_id),
     topics           TEXT,            -- JSON array of topic_ids (e.g. ["ai", "indian_markets"])
@@ -1768,6 +1823,38 @@ CREATE TABLE IF NOT EXISTS shareholding (
     fetched_at      TEXT DEFAULT (datetime('now')),
     PRIMARY KEY (sid, end_date)
 );
+
+-- Named holders above 1% from the BSE shareholding-pattern XBRL (sources/bse_shp.py).
+-- Append-only: a revised filing for a quarter is a new set of rows with a later
+-- filed_at (BSE broadcast time = when the market could read it).
+CREATE TABLE IF NOT EXISTS shareholding_holders (
+    sid             TEXT NOT NULL REFERENCES stocks(sid),
+    scrip_cd        INTEGER NOT NULL,          -- BSE scrip code the filing was read under
+    end_date        TEXT NOT NULL,             -- quarter end the filing describes
+    filed_at        TEXT NOT NULL,             -- BSE broadcast time of the filing
+    holder_category TEXT NOT NULL,             -- filing section: MutualFundsOrUTI, IndividualsOrHUF, ...
+    holder_seq      INTEGER NOT NULL,          -- row number within the section
+    holder_name     TEXT NOT NULL,             -- as filed (spelling varies between companies)
+    promoter_type   TEXT,                      -- 'Promoter' / 'Promoter Group'; NULL for public holders and pre-2019 filings
+    shares          REAL,
+    pct             REAL CHECK(pct BETWEEN 0 AND 100),   -- % of total shares, as filed
+    source_url      TEXT,
+    fetched_at      TEXT NOT NULL,
+    PRIMARY KEY (sid, end_date, filed_at, holder_category, holder_seq)
+);
+CREATE INDEX IF NOT EXISTS idx_shp_holders_name ON shareholding_holders(holder_name, end_date);
+
+-- Forward record of the investor-playbook sleeves (sleeves.py): which stocks each sleeve
+-- held on each day, written after the morning run by tools/playbook_backtest --record.
+-- Append-only; the only evidence on the sleeves that is free of hindsight and survivorship.
+CREATE TABLE IF NOT EXISTS playbook_members (
+    sid           TEXT NOT NULL REFERENCES stocks(sid),
+    snapshot_date TEXT NOT NULL,
+    sleeve        TEXT NOT NULL,             -- sleeves.SLEEVES key, or 'flagged' (the red-flag veto set)
+    in_sleeve     INTEGER NOT NULL DEFAULT 1,
+    PRIMARY KEY (sid, snapshot_date, sleeve)
+);
+CREATE INDEX IF NOT EXISTS idx_playbook_members_date ON playbook_members(snapshot_date, sleeve);
 
 CREATE TABLE IF NOT EXISTS short_selling_data (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

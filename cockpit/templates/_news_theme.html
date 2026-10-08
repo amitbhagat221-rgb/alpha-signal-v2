@@ -1,0 +1,46 @@
+{# Shared bits of the theme pages (/news and /news/theme/{id}). All text is escaped. #}
+{% macro heat_chip(heat) -%}
+{% set label = {'Heating': 'Heating up', 'Steady': 'Steady', 'Cooling': 'Quieting down', 'Quiet': 'Quiet'}.get(heat, heat) %}
+{% set colour = {'Heating': 'var(--amber)'}.get(heat, 'var(--text-muted)') %}
+<span class="mono ns-chip" style="color:{{ colour }}; border-color:{{ colour }}; background:transparent;">{{ label }}</span>
+{%- endmacro %}
+
+{% macro sector_chips(gains, loses) -%}
+{% for n in gains %}<a href="/sectors?sector={{ n|urlencode }}" class="ns-sec ns-up" title="{{ n }} may gain">&#9650; {{ n }}</a>{% endfor %}
+{% for n in loses %}<a href="/sectors?sector={{ n|urlencode }}" class="ns-sec ns-down" title="{{ n }} may lose">&#9660; {{ n }}</a>{% endfor %}
+{%- endmacro %}
+
+{% macro stock_links(stocks) -%}
+{% for t in stocks %}<a href="/explorer/{{ t.sid }}" class="ns-stock" title="{{ t.name }}: {{ t.n }} article{{ '' if t.n == 1 else 's' }}">{{ t.ticker or t.name }}{% if t.is_pick %}<span class="ns-pick" title="In the latest published picks"> &#9733;</span>{% endif %}</a>{% endfor %}
+{%- endmacro %}
+
+{% macro styles() %}
+<style>
+.ns-wrap { max-width: 1100px; }
+.ns-chip { display: inline-block; padding: 2px 7px; border-radius: 4px; font-size: 10px; font-weight: 700; border: 1px solid; white-space: nowrap; }
+.ns-sec { display: inline-block; padding: 2px 8px; margin: 0 6px 6px 0; border-radius: 4px; font-size: 11px; font-weight: 600; text-decoration: none; border: 1px solid; position: relative; z-index: 2; }
+.ns-up { color: var(--green); background: var(--green-bg); border-color: var(--green); }
+.ns-down { color: var(--red); background: var(--red-bg); border-color: var(--red); }
+.ns-stock { color: var(--text-primary); font-weight: 600; font-size: 12px; text-decoration: none; margin-right: 12px; position: relative; z-index: 2; white-space: nowrap; }
+.ns-pick { color: var(--amber); }
+.ns-lab { font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.6px; font-weight: 700; margin: 12px 0 3px; }
+.ns-text { overflow-wrap: anywhere; font-size: 13px; color: var(--text-secondary); line-height: 1.55; }
+.ns-head { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 8px; }
+.ns-h1 { font-size: 22px; font-weight: 800; color: var(--text-primary); }
+.ns-back { font-size: 12px; color: var(--accent); text-decoration: none; font-weight: 600; }
+.ns-sec-head { margin: 26px 0 10px; }
+.ns-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.ns-table th { padding: 8px 6px; text-align: right; color: var(--text-muted); font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.4px; font-weight: 600; }
+.ns-table td { padding: 8px 6px; text-align: right; border-top: 1px solid var(--border); vertical-align: top; }
+.ns-table .l { text-align: left; }
+.ns-table a { color: var(--text-primary); text-decoration: none; }
+@media (max-width: 640px) { .ns-h1 { font-size: 18px; } .ns-hide-m { display: none; } }
+.ns-src { margin-top: 8px; font-size: 11px; color: var(--text-muted); }
+.ns-src a { color: var(--text-secondary); text-decoration: none; position: relative; z-index: 2; }
+.ns-moved { color: var(--blue); border-color: var(--blue); }
+</style>
+{% endmacro %}
+
+{% macro source_links(items) -%}
+{% if items %}<div class="ns-src">Sources:<br>{% for a in items %}<a href="{{ a.url }}" target="_blank" rel="noopener noreferrer" title="{{ a.title }}">{{ (a.title[:46] ~ "…") if a.title|length > 46 else a.title }}</a> <span class="mono">({{ a.source }})</span>{% if not loop.last %}<br>{% endif %}{% endfor %}</div>{% endif %}
+{%- endmacro %}

@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% from "_news_theme.html" import styles, heat_chip, sector_chips, stock_links %}
+
+{% block content %}
+{{ styles() }}
+<div class="ns-wrap">
+<a href="/news" class="ns-back">&larr; Back to News</a>
+
+<div class="ns-head" style="margin-top: 12px;">
+    <div class="ns-h1">{{ t.title }}</div>
+    <div>{% if t.status == 'retired' %}<span class="mono ns-chip" style="color: var(--text-muted); border-color: var(--text-muted);">Over for now</span> {% endif %}{{ heat_chip(t.heat) }}</div>
+</div>
+<div class="mono u-muted-11">{{ t.n7 }} headline{{ '' if t.n7 == 1 else 's' }} this week · {{ t.n_total }} filed in all{% if t.updated_at %} · note written {{ t.updated_at[:10] }}{% endif %}</div>
+
+{% if not t.stands_now %}
+<div class="card" style="margin-top: 14px;"><div class="ns-text">{{ t.scope }}</div><div class="ns-lab">No note yet</div></div>
+{% else %}
+<div class="card" style="margin-top: 14px;">
+    <div class="ns-text" style="color: var(--text-primary); font-size: 15px;">{{ t.stands_now }}</div>
+    {% if t.story_so_far %}<div class="ns-lab">The story so far</div><div class="ns-text">{{ t.story_so_far }}</div>{% endif %}
+    {% if t.next_if %}
+    <div class="ns-lab">What could happen next</div>
+    <ul class="ns-text" style="margin: 0; padding-left: 20px;">{% for b in t.next_if %}<li>{{ b }}</li>{% endfor %}</ul>
+    {% endif %}
+    {% if t.why_it_matters %}<div class="ns-lab">Why it matters</div><div class="ns-text">{{ t.why_it_matters }}</div>{% endif %}
+    {% if t.gains or t.loses %}<div class="ns-lab">Who gains, who loses</div><div>{{ sector_chips(t.gains, t.loses) }}</div>{% endif %}
+    {% if t.portfolio_line %}<div class="ns-text">{{ t.portfolio_line }}</div>{% endif %}
+    {% if t.what_to_watch %}<div class="ns-lab">Keep an eye on</div><div class="ns-text">{{ t.what_to_watch }}</div>{% endif %}
+    {# "Stocks in the news" is hidden until the article-to-stock matching stops linking on common
+       words (OIL, GLOBAL, ROUTE under the oil theme); get_news_theme() still returns t.stocks. #}
+    </div>
+{% endif %}
+
+<div class="ns-sec-head"><div class="section-title">Timeline</div></div>
+<div class="card">
+{% for h in t.timeline %}
+    <div style="display: flex; gap: 12px; padding: 7px 0; {% if not loop.first %}border-top: 1px solid var(--border);{% endif %}">
+        <div class="mono u-muted-11" style="min-width: 78px;">{{ h.as_of }}</div>
+        <div class="ns-text">{{ h.what_changed }}</div>
+    </div>
+{% else %}
+    <div class="ns-text">No updates recorded yet.</div>
+{% endfor %}
+</div>
+
+<div class="ns-sec-head"><div class="section-title">Sources</div></div>
+<div class="section-desc">Newest {{ t.articles|length }} of {{ t.n_total }} headlines.</div>
+<div class="card">
+{% for a in t.articles %}
+    <div style="padding: 7px 0; {% if not loop.first %}border-top: 1px solid var(--border);{% endif %}">
+        <a href="{{ a.url }}" target="_blank" rel="noopener noreferrer" class="ns-text" style="color: var(--text-primary); text-decoration: none;">{{ a.title }}</a>
+        <div class="mono u-muted-11">{{ a.source }} · {{ a.day }}</div>
+        {% if a.one_liner %}<div class="u-muted-11">{{ a.one_liner }}</div>{% endif %}
+    </div>
+{% else %}
+    <div class="ns-text">No articles.</div>
+{% endfor %}
+</div>
+<div style="margin: 22px 0;"><a href="/news" class="ns-back">&larr; Back to News</a></div>
+</div>
+{% endblock %}

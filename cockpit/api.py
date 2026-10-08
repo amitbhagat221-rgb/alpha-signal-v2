@@ -2497,3 +2497,126 @@ def get_pick_outcomes_summary(top_n=10):
         "time_series": time_series,
     }
 
+
+
+# ───────────── News editor (plan 0021 P2) ─────────────
+# Read side of sources/news_editor.py: today's three items, the 7 fixed themes, the
+# weekly outlook. Stocks are counted from the theme's headlines; the LLM names none.
+
+def _articles_by_id(ids):
+    ids = [str(i) for i in dict.fromkeys(ids)]
+    if not ids:
+        return {}
+    qs = ",".join("?" * len(ids))
+    return {str(r["article_id"]): r for r in db.rows(
+        f"SELECT article_id, title, url, source FROM news_articles WHERE article_id IN ({qs})", ids)}
+
+
+def _with_sources(items):
+    """Each item's `article_ids` resolved to `sources` [{title, url, source}]."""
+    lookup = _articles_by_id([a for it in items for a in it.get("article_ids", [])])
+    return [{**it, "sources": [lookup[str(a)] for a in it.get("article_ids", []) if str(a) in lookup]}
+            for it in items]
+
+
+def _theme_stocks(theme_id, pick_sids):
+    from sources import news_editor as ne
+    recs = db.rows(
+        f"SELECT st.sid, st.ticker, st.name, COUNT(DISTINCT ta.article_id) AS n "
+        f"FROM news_theme_articles ta JOIN news_articles na ON na.article_id = ta.article_id "
+        f"JOIN news_article_stocks nas ON nas.article_id = ta.article_id "
+        f"JOIN stocks st ON st.sid = nas.sid WHERE ta.theme_id = ? AND {ne._ISO_DAY} AND {ne._DAY} > ? "
+        f"GROUP BY st.sid ORDER BY n DESC, st.name LIMIT 5", [theme_id, ne._shift(ne._today(), -30)])
+    for r in recs:
+        r["is_pick"] = r["sid"] in pick_sids
+    return recs
+
+
+def _current_pick_sids():
+    try:
+        df = views.picks(latest_pick_date(), per_tier="book")
+        return set(df["sid"]) if len(df) else set()
+    except Exception:
+        return set()
+
+
+@_ttl_cache(120)
+def get_news_today():
+    """The newest daily edition ({day, n_headlines, items[3]}, each item with its
+    source links) or {}."""
+    from sources import news_editor
+    t = news_editor.today()
+    return {**t, "items": _with_sources(t["items"])} if t else {}
+
+
+@_ttl_cache(120)
+def get_news_themes():
+    """The 7 themes in fixed order; each with its top 5 stocks (is_pick = in the latest picks)."""
+    from sources import news_editor
+    picks = _current_pick_sids()
+    rows = news_editor.themes()
+    for r in rows:
+        r["stocks"] = _theme_stocks(r["theme_id"], picks)
+    return rows
+
+
+def get_news_theme(theme_id):
+    """One theme (retired ones too): its note, timeline (newest first) and the newest
+    30 headlines filed under it; None when the id is unknown."""
+    from sources import news_editor as ne
+    row = db.one("SELECT theme_id FROM news_themes WHERE theme_id = ?", [theme_id])
+    if not row:
+        return None
+    t = next((x for x in get_news_themes() if x["theme_id"] == theme_id), None)
+    if t is None:   # retired: note from the table, counts left empty
+        t = db.one("SELECT * FROM news_themes WHERE theme_id = ?", [theme_id])
+        for f in ("gains", "loses", "next_if"):
+            try:
+                t[f] = json.loads(t.get(f) or "[]")
+            except ValueError:
+                t[f] = []
+        t.update({"n7": 0, "n_total": 0, "heat": "Quiet", "moved": False,
+                  "stocks": _theme_stocks(theme_id, _current_pick_sids())})
+    t = dict(t)
+    t["timeline"] = db.rows("SELECT as_of, what_changed FROM news_theme_history WHERE theme_id = ? "
+                            "ORDER BY as_of DESC", [theme_id])
+    t["articles"] = db.rows(
+        f"SELECT na.title, na.url, na.source, substr(na.published_at, 1, 10) AS day "
+        f"FROM news_theme_articles ta JOIN news_articles na ON na.article_id = ta.article_id "
+        f"WHERE ta.theme_id = ? ORDER BY na.published_at DESC LIMIT 30", [theme_id])
+    return t
+
+
+@_ttl_cache(120)
+def get_news_week():
+    """The newest weekly edition ({as_of, radar (with source links), favour, careful}) or {}."""
+    from sources import news_editor
+    w = news_editor.week()
+    return {**w, "radar": _with_sources(w["radar"])} if w else {}
+
+
+@_ttl_cache(120)
+def get_sector_radar():
+    """One row per sector, busiest against its usual first: n7 = distinct articles
+    about the sector's stocks in the last 7 days, weekly_avg = the 28 days before / 4,
+    flow wording from the ratio, driver = the theme with most headlines this week that
+    lists the sector in gains or loses."""
+    from sources import news_editor
+    flow = news_editor.sector_flow()
+    drivers = {}
+    for t in sorted(get_news_themes(), key=lambda t: t["n7"]):   # highest n7 written last
+        for side, names in (("gains", t["gains"]), ("loses", t["loses"])):
+            for name in names:
+                drivers[name] = {"theme_id": t["theme_id"], "title": t["title"], "side": side}
+    out = []
+    for sector in news_editor.sectors():
+        f = flow.get(sector, {})
+        n7, avg = int(f.get("this_week") or 0), float(f.get("usual_week") or 0)
+        ratio = n7 / avg if avg else (float("inf") if n7 else 0.0)
+        out.append({"sector": sector, "n7": n7, "weekly_avg": round(avg, 1),
+                    "flow": "More than usual" if ratio >= 1.5 else ("Quieter" if ratio <= 0.5 else "Usual"),
+                    "driver": drivers.get(sector), "_ratio": ratio})
+    out.sort(key=lambda r: (r["_ratio"], r["n7"]), reverse=True)
+    for r in out:
+        r.pop("_ratio")
+    return out

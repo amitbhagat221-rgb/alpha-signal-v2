@@ -567,9 +567,59 @@ def _undo_news_brief(record):
                          list(prior.values()))
 
 
+# ── say_do (output/say_do.py): one task per stock per latest earnings call ──
+
+def _export_say_do(days=None):
+    from output import say_do as sd
+    out = []
+    for pair in sd.call_pairs(sd.scope_sids()):
+        built = sd.build_brief(pair)
+        if built is None:
+            continue
+        out.append((f"{pair['sid']}:{pair['latest'][0]}",
+                    {"sid": pair["sid"], "ticker": pair["ticker"], "brief": built[0],
+                     "latest_call": pair["latest"][0], "earlier_call": pair["earlier"][0]}, 8))
+    return out
+
+
+def _validate_say_do_result(result, payload):
+    from output import say_do as sd
+    return sd.validate(result)
+
+
+def _ingest_say_do(clean, payload):
+    from output import say_do as sd
+    sid = payload["sid"]
+    entry = {**clean, "sid": sid, "ticker": payload["ticker"], "latest_call": payload["latest_call"],
+             "earlier_call": payload["earlier_call"],
+             "generated_at": dt.datetime.now().isoformat(timespec="seconds")}
+
+    def put(data):
+        prior = next((d for d in data if d.get("sid") == sid), None)
+        return [d for d in data if d.get("sid") != sid] + [entry], {"sid": sid, "prior": prior}
+    return _locked_json_update(sd.OUTPUT_PATH, put)
+
+
+def _undo_say_do(record):
+    from output import say_do as sd
+    sid, prior = record.get("sid"), record.get("prior")
+
+    def back(data):
+        data = [d for d in data if d.get("sid") != sid]
+        return (data + [prior] if prior else data), None
+    if sid:
+        _locked_json_update(sd.OUTPUT_PATH, back)
+
+
 # ═══════════════════════════ registry ═══════════════════════════
 
 _BRIEF_SCHEMA = {"type": "object", "description": "the JSON object the brief asks for"}
+
+
+def _ne():
+    from sources import news_editor
+    return news_editor
+
 
 TASK_KINDS = {
     "dossier": {
@@ -595,12 +645,40 @@ TASK_KINDS = {
         "instructions": lambda: _BRIEF_INSTRUCTIONS,
         "batch": 4, "deadline_hours": 6, "default_days": None, "ledger_step": "compute_sector_dossiers",
     },
+    # Lowest priority, no deadline: a research backlog that drains after the daily kinds.
+    "say_do": {
+        "export": _export_say_do, "validate": _validate_say_do_result,
+        "ingest": _ingest_say_do, "undo": _undo_say_do,
+        "schema": {**_BRIEF_SCHEMA, "required": ["promises", "verdict", "summary"]},
+        "instructions": lambda: _BRIEF_INSTRUCTIONS,
+        "batch": 3, "deadline_hours": None, "default_days": None, "ledger_step": "say_do",
+    },
     "regulatory": {
         "export": _export_regulatory, "validate": _validate_regulatory,
         "ingest": _ingest_regulatory, "undo": _undo_regulatory,
         "schema": _REG_SCHEMA, "instructions": lambda: _REG_INSTRUCTIONS,
         "batch": 25, "deadline_hours": None, "default_days": None,     # D6: full backlog
         "ledger_step": "classify_regulatory_deep",
+    },
+    # The news editor (plan 0021, sources/news_editor.py): today → theme notes → weekly edition.
+    "news_today": {
+        "export": lambda days=None: _ne().export_today(days), "validate": lambda r, p: _ne().validate_today(r, p),
+        "ingest": lambda c, p: _ne().ingest_today(c, p), "undo": lambda rec: _ne().undo_today(rec),
+        "schema": _ne().TODAY_SCHEMA, "instructions": lambda: _ne().TODAY_INSTRUCTIONS,
+        "batch": 1, "deadline_hours": 12, "default_days": None, "ledger_step": "news_desk",
+    },
+    "news_theme": {
+        "export": lambda days=None: _ne().export_theme(days), "validate": lambda r, p: _ne().validate_theme(r, p),
+        "ingest": lambda c, p: _ne().ingest_theme(c, p), "undo": lambda rec: _ne().undo_theme(rec),
+        "schema": _ne().THEME_SCHEMA, "instructions": lambda: _ne().THEME_INSTRUCTIONS,
+        # one theme's headlines per claim: a claim above ~50 KB cannot be read by the worker
+        "batch": 1, "deadline_hours": 12, "default_days": None, "ledger_step": "news_desk",
+    },
+    "news_week": {
+        "export": lambda days=None: _ne().export_week(days), "validate": lambda r, p: _ne().validate_week(r, p),
+        "ingest": lambda c, p: _ne().ingest_week(c, p), "undo": lambda rec: _ne().undo_week(rec),
+        "schema": _ne().WEEK_SCHEMA, "instructions": lambda: _ne().WEEK_INSTRUCTIONS,
+        "batch": 1, "deadline_hours": 12, "default_days": None, "ledger_step": "news_desk",
     },
     "news_enrich": {
         "export": _export_news, "validate": _validate_news,
@@ -612,7 +690,8 @@ TASK_KINDS = {
 }
 # Worker drain order (plan §6): dossier → news_brief → sector_dossier → news_enrich → regulatory.
 # Phase 3 adds the first three kinds; within a kind, claim follows each task's priority.
-DRAIN_ORDER = [k for k in ("dossier", "news_brief", "sector_dossier", "news_enrich", "regulatory")
+DRAIN_ORDER = [k for k in ("dossier", "news_brief", "sector_dossier", "news_today", "news_theme", "news_week",
+                                    "news_enrich", "regulatory", "say_do")
                if k in TASK_KINDS]
 
 # Desk-role kinds (plan 0019): each carries "role" and is visible only to a worker

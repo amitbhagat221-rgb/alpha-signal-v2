@@ -18,7 +18,7 @@ PAGES = [
      "icon": "target", "section": "Daily", "mobile": 3, "short": "Actions"},
     {"path": "/explorer", "id": "explorer", "title": "Explorer", "subtitle": "Browse 2,448 stocks",
      "icon": "search", "section": "Daily", "mobile": 4, "short": "Explore"},
-    {"path": "/news", "id": "news", "title": "News", "subtitle": "Inshorts-style daily feed",
+    {"path": "/news", "id": "news", "title": "News", "subtitle": "Today, 7 themes, sectors",
      "icon": "activity", "section": "Daily", "mobile": 2, "short": "News"},
     {"path": "/portfolio", "id": "portfolio", "title": "Portfolio", "subtitle": "Holdings & tier mix",
      "icon": "briefcase", "section": "Analysis", "short": "Portfolio"},
@@ -28,6 +28,8 @@ PAGES = [
      "icon": "sliders", "section": "Analysis", "short": "Model", "also": ["model-variants", "model-outcomes"]},
     {"path": "/multibagger", "id": "multibagger", "title": "Multibagger", "subtitle": "Quality-gated watchlist",
      "icon": "trending-up", "section": "Analysis", "short": "Multibagger"},
+    {"path": "/playbooks", "id": "playbooks", "title": "Investor Playbooks", "subtitle": "Avoid · insiders · compounders · cloning",
+     "icon": "compass", "section": "Analysis", "short": "Playbooks"},
     {"path": "/mutual-funds", "id": "mutual-funds", "title": "Mutual Funds",
      "subtitle": "~14k schemes · scored + ranked", "icon": "pie-chart", "section": "Funds", "short": "Funds"},
 ]

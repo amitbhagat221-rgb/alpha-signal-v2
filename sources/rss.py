@@ -23,11 +23,18 @@ import hashlib
 import re
 from datetime import datetime, timedelta
 
+from urllib.parse import quote
+
 import feedparser
 import pandas as pd
 
+import runlog
 from db import read_sql, insert_df
 from sources import _http
+
+def _gnews(query):
+    return "https://news.google.com/rss/search?q=" + quote(query) + "&hl=en-IN&gl=IN&ceid=IN:en"
+
 
 # RSS feed URLs
 FEEDS = {
@@ -36,10 +43,20 @@ FEEDS = {
     "et_economy": "https://economictimes.indiatimes.com/news/economy/rssfeeds/1373380680.cms",
     "livemint_markets": "https://www.livemint.com/rss/markets",
     "livemint_companies": "https://www.livemint.com/rss/companies",
-    "moneycontrol_latest": "https://www.moneycontrol.com/rss/latestnews.xml",
-    "moneycontrol_business": "https://www.moneycontrol.com/rss/business.xml",
-    "moneycontrol_markets": "https://www.moneycontrol.com/rss/marketreports.xml",
+    # World and technology coverage for the news editor's themes (plan 0021 E3). The Google
+    # News entries are searches aimed at one theme each; they return up to 100 results by
+    # relevance, so MAX_ENTRIES keeps the top of each.
+    "et_tech": "https://economictimes.indiatimes.com/tech/rssfeeds/13357270.cms",
+    "livemint_ai": "https://www.livemint.com/rss/AI",
+    "gnews_trade": _gnews('(tariffs OR sanctions OR "export controls" OR "trade deal" OR "supply chain") '
+                          '(China OR US OR India) when:2d'),
+    "gnews_chips": _gnews('(semiconductor OR "AI chips" OR "data centres" OR "artificial intelligence" investment) when:2d'),
+    "gnews_transition": _gnews('("critical minerals" OR lithium OR "rare earths" OR "battery storage" OR '
+                               '"solar capacity" OR "nuclear power") when:2d'),
 }
+MAX_ENTRIES = {"gnews_trade": 30, "gnews_chips": 30, "gnews_transition": 30}
+# Moneycontrol RSS (latestnews / business / marketreports) retired 2026-10-05: no entry
+# since 2026-03-15 from this VM (plan 0021 P0).
 
 # Exact match symbols (too short / ambiguous for substring match)
 EXACT_MATCH_ONLY = {
@@ -148,10 +165,11 @@ def fetch_news(dry_run=False):
         try:
             with _http.pace(url):   # feedparser does its own HTTP; the door paces it
                 feed = feedparser.parse(url)
-            entries = feed.entries
+            entries = feed.entries[:MAX_ENTRIES.get(source_name)]
 
             if not entries:
                 print("0 entries")
+                runlog.item_failed("rss feed", source_name, "feed returned 0 entries")
                 continue
 
             articles = []
@@ -209,6 +227,7 @@ def fetch_news(dry_run=False):
 
         except Exception as e:
             print(f"ERROR: {e}")
+            runlog.item_error("rss feed", source_name, e)
 
     print(f"\nTotal: {total_articles} new articles, {total_links} stock links")
     return total_articles

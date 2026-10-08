@@ -28,7 +28,37 @@ LOG_PATH = PROJECT_ROOT / "output" / "pipeline.log"
 LLM_WORK = {
     "executor": "queue",
     "deadline_min": {"dossier": 20, "compute_sector_dossiers": 20, "news_brief": 10,
-                     "classify_news": 30, "classify_regulatory": 45},
+                     "classify_news": 30, "classify_regulatory": 45, "news_desk": 20},
+}
+
+# The news editor (plan 0021). The page's map of the world: (id, title, what belongs under it).
+# Change the list here; a theme removed is retired, its note and history stay.
+NEWS_THEMES = [
+    ("rates_dollar", "Interest rates, the dollar and the rupee",
+     "Central bank decisions in India and abroad, inflation, bond yields, the rupee, foreign money moving in or out"),
+    ("oil_energy", "Oil, energy and the Middle East",
+     "Crude oil and gas prices, producer decisions, Middle East conflict and shipping, India's fuel and import bill"),
+    ("us_china_trade", "US-China rivalry, tariffs and supply chains",
+     "Tariffs and sanctions, trade deals, export controls, wars and alliances that move trade, factories shifting between countries"),
+    ("ai_chips", "AI and the chip build-out",
+     "Artificial intelligence, data centres, semiconductors, what AI does to software and IT services, technology regulation"),
+    ("india_policy", "India policy, capex and reforms",
+     "Government spending and budgets, taxes, regulation and reforms, infrastructure, defence and manufacturing incentives"),
+    ("energy_transition", "Energy transition and critical minerals",
+     "Solar, wind, nuclear, batteries and electric vehicles, power demand and the grid, lithium, copper and rare earths"),
+    ("consumer_credit", "Consumer and credit health in India",
+     "Household spending and demand, loans and defaults, bank and lender health, jobs and wages, rural and urban demand"),
+]
+NEWS_EDITOR = {
+    "today_days": 2,             # the daily edition reads unread headlines this many days back
+    "today_max_headlines": 400,  # per daily task
+    "today_max_chars": 38000,    # headline text one task carries: the worker cannot read a tool result above ~50 KB
+    "theme_refresh_days": 7,     # a theme note is rewritten at most this often
+    "theme_min_headlines": 3,    # a theme gets its first note once this many headlines are filed
+    "theme_max_headlines": 60,   # newest headlines a note rewrite reads
+    "week_refresh_days": 7,
+    "week_max_headlines": 250,   # unfiled headlines the weekly edition reads
+    "max_sentence_words": 20,    # average sentence length the validator accepts
 }
 
 # ── Universe ──
@@ -348,7 +378,7 @@ PIPELINE_STEPS = [
      "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
 
     {"name": "fetch_news",         "module": "sources.rss",          "function": "compute", "critical": False,
-     "table": "news_articles",     "source": "RSS feeds (8 sources)", "data_freq": "daily", "frequency": "daily",
+     "table": "news_articles",     "source": "RSS feeds (10 feeds)", "data_freq": "daily", "frequency": "daily",
      "reads": ["news_articles"]},
 
     # Regulatory harvester is daily (cheap incremental, ~5 min).
@@ -827,6 +857,12 @@ PIPELINE_STEPS = [
     {"name": "news_brief",          "module": "alpha_mcp.steps",   "function": "news_brief", "critical": False,
      "table": "news_briefs",       "source": "news_enriched (Claude Sonnet synthesis)", "data_freq": "daily", "frequency": "daily",
      "reads": ["news_articles", "news_enriched"]},
+
+    # The news editor (plan 0021): daily edition from raw headlines, theme notes and the
+    # weekly edition when due. Does not need classify_news.
+    {"name": "news_desk",           "module": "alpha_mcp.steps",   "function": "news_desk", "critical": False,
+     "table": "news_today",        "source": "news_articles (llm_tasks: news_today, news_theme, news_week)", "data_freq": "daily", "frequency": "daily",
+     "reads": ["news_articles", "news_article_stocks", "news_themes", "news_theme_articles", "news_week"]},
 
     # Regulatory classifier — async two-phase via the Anthropic Message Batches
     # API (audit Eff-F2, migrated 2026-07-05). Each run INGESTs any completed

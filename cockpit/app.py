@@ -7,7 +7,8 @@ Reads from v2 SQLite database via api.py.
 Run: uvicorn cockpit.app:app --host 0.0.0.0 --port 3000 --reload
 """
 
-from fastapi import FastAPI, Request
+import datetime as dt
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.gzip import GZipMiddleware
@@ -393,6 +394,15 @@ def multibagger_page(request: Request):
     })
 
 
+@app.get("/playbooks", response_class=HTMLResponse)
+def playbooks_page(request: Request):
+    """Investor Playbooks — filters, events and watchlists in the style of well-known
+    investors (avoid list, insider buying, compounders, superinvestor holdings).
+    Separate from daily_picks; each tab states its own rule."""
+    from cockpit import playbooks
+    return templates.TemplateResponse(request, "playbooks.html", {"page": "playbooks", "o": playbooks.overview()})
+
+
 # NOTE: /flow, /command, /system, /sql moved to cockpit_ops (port 3001)
 # during Stage 2 split (2026-05-26). Their routes here are removed.
 
@@ -465,6 +475,27 @@ def api_mf_search(q: str = "", limit: int = 10):
 
 
 @app.get("/news", response_class=HTMLResponse)
+def news_editor_page(request: Request):
+    """Plan 0021: today's three items, the 7 themes, the week's radar and sectors."""
+    return templates.TemplateResponse(request, "news.html", {
+        "page": "news",
+        "today_ed": api.get_news_today(),
+        "themes": api.get_news_themes(),
+        "week": api.get_news_week(),
+        "radar": api.get_sector_radar(),
+        "today": dt.date.today().isoformat(),
+    })
+
+
+@app.get("/news/theme/{theme_id}", response_class=HTMLResponse)
+def news_theme_page(request: Request, theme_id: str):
+    theme = api.get_news_theme(theme_id)
+    if theme is None:
+        raise HTTPException(status_code=404, detail="No such theme")
+    return templates.TemplateResponse(request, "news_theme.html", {"page": "news", "t": theme})
+
+
+@app.get("/news/all", response_class=HTMLResponse)
 def news_page(
     request: Request,
     topic: str = "",
@@ -490,7 +521,7 @@ def news_page(
         page_size=24,
     )
     brief = api.get_news_brief()
-    return templates.TemplateResponse(request, "news.html", {
+    return templates.TemplateResponse(request, "news_all.html", {
         "page": "news",
         "feed": feed,
         "brief": brief,

@@ -36,9 +36,14 @@ Green/red = financial direction only. Cards with actions get 4px left-border acc
 | `/explorer` | Heat map + table of all stocks |
 | `/explorer/{sid}` | **Stock Detail — 6 tabs (the main screen)** |
 | `/portfolio` | Model portfolio + analytics |
+| `/playbooks` | Investor Playbooks — ten tabs (avoid list, insider buying, compounders, superinvestors, breakouts, deep value, Lynch categories, say vs do, market cycle, all approaches); separate from daily picks, each tab states its rule; rules are constants in `cockpit/playbooks.py`, say-vs-do verdicts come from the `say_do` LLM kind (`output/say_do.py`) |
 | `/sectors?industry=X` | Industry deep-dive (drill from 38 industries; sectors are visual grouping only — [ADR 0013](../decisions/0013-industry-not-sector-as-drill-unit.md)) |
 | `/system` | Pipeline health, freshness, rerun buttons |
 | `/flow` | Pipeline DAG view with rerun ([ADR 0008](../decisions/0008-cockpit-write-surface.md)) |
+
+## News (plan 0021)
+
+`/news` is written top-down by an editor (`sources/news_editor.py`), not a feed: Today (the newest daily edition, 3 items with source links), the world in 7 fixed themes (compact cards), On the radar and Sectors to watch (the weekly edition: early signs, sectors the news helps / to be careful with), and a collapsed sector-flow table. `/news/theme/{theme_id}` is the theme page (note, what could happen next, stocks, timeline, sources; retired themes render, unknown id is 404). `/news/all` is the old searchable feed. Data: `api.get_news_today()`, `get_news_themes()`, `get_news_theme(id)`, `get_news_week()`, `get_sector_radar()`. Stocks on a theme are counted from its headlines; the LLM names none. Shared bits in `_news_theme.html`. Each block has an empty state.
 
 ## Stock Detail (6 tabs)
 

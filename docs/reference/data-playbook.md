@@ -334,6 +334,20 @@ For each source: **what it gives**, **endpoint**, **PIT/live access**, **histori
 
 ---
 
+### BSE shareholding-pattern XBRL — the NAMED holders (onboarded 2026-10-04)
+
+| Field | Value |
+|---|---|
+| **What** | The quarterly shareholding-pattern filing itself. Names every holder above 1%: promoters, mutual-fund schemes, FPIs, insurers, individuals. `shareholding` (Tickertape) has category percentages only. |
+| **Endpoint** | Index: `https://api.bseindia.com/BseIndiaAPI/api/Corp_Shareholding_ng/w?scripcode={code}&flag=0&indtype=` → `Table[]` newest first with `D` (broadcast time), `EndDate`, `IsXBRL`, `XBRLAttachment`. Filing: `https://www.bseindia.com` + `XBRLAttachment`. |
+| **Depth** | Index to 2001; XBRL `.xml` from Jun-2016; inline XBRL `.html` from mid-2025. Covers delisted names. |
+| **PIT** | `filed_at` = broadcast time. A revised filing for a quarter is a second index row; both are stored, read the latest `filed_at` ≤ as-of. |
+| **v2 depth** | `shareholding_holders` — latest quarter for every stock with a BSE code (2,199 of 2,448); history via `python -m sources.bse_shp --universe --quarters N` (resumable; ~3 s per filing, so 40 quarters ≈ 3 days of runtime). |
+| **Gotchas** | (1) **Never send `Origin`** on the index — it returns an 1814-byte error shell. (2) `scrip_master` holds a second code per stock below 400000; the real BSE code is ≥ 400000. (3) A member flagged `Category` is a category sub-total (Clearing Members, HUF…), not a holder. (4) Pre-2019 filings carry no `TypeOfPromoterShareholding`; use the section (`holder_category`) to tell promoters there. (5) Names are as filed — one investor appears under several spellings across companies. (6) The printed percentage is percent in both formats; the inline `scale='-2'` is the XBRL fraction. |
+| **Rate limit** | The door (`bse_api`, `bse`): 2–3 s per call, one warmed Chrome-TLS session. Never parallel with the announcements or transcript harvesters. |
+| **Module** | `sources/bse_shp.py` · canary `bse_shp_xbrl` · weekly in `run.sh transcripts` (`--due --budget-min 180`). |
+| **Not built** | Retail (≤₹2L) holder counts from the same file; NSE route for the 249 NSE-only stocks. |
+
 ## Cross-Cutting Principles
 
 ### Filing-lag rules (PIT discipline)

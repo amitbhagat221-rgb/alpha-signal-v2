@@ -33,12 +33,12 @@ def _deadline(step):
     return config.LLM_WORK["deadline_min"][step]
 
 
-def run_kind(kinds, deadline_min, max_batches=40):
+def run_kind(kinds, deadline_min, max_batches=40, enqueue=True):
     """Enqueue `kinds`, then run the local worker on them until nothing is claimable,
     the deadline passes, or two worker runs in a row make no progress.
     Returns {"queued", "claimable_before", "claimable_after", "runs"}."""
     from alpha_mcp import tasks
-    queued = sum(tasks.enqueue(k)["queued"] for k in kinds)
+    queued = sum(tasks.enqueue(k)["queued"] for k in kinds) if enqueue else 0
     before = left = tasks.claimable_count(kinds)
     end = time.monotonic() + deadline_min * 60
     runs = stalls = 0
@@ -98,6 +98,25 @@ def news_brief():
     if not have:
         raise RuntimeError(f"news_brief: no brief written for {day} — see output/llm_worker.log")
     return 1
+
+
+def news_desk():
+    """The news editor (plan 0021): today's edition from the raw headlines, then the
+    theme notes and the weekly edition that are due. The daily edition must exist
+    afterwards whenever there were headlines to read."""
+    import db
+    third = max(_deadline("news_desk") // 3, 5)
+    t = run_kind(["news_today"], third)
+    _require_progress("news_today", t)
+    n = t["claimable_before"] - t["claimable_after"]
+    for kind in ("news_theme", "news_week"):     # theme notes first: the weekly edition reads them
+        r = run_kind([kind], third)
+        _require_progress(kind, r)
+        n += r["claimable_before"] - r["claimable_after"]
+    day = dt.date.today().isoformat()
+    if t["queued"] + t["claimable_before"] and not db.scalar("SELECT 1 FROM news_today WHERE day = ?", [day]):
+        raise RuntimeError(f"news_desk: no daily edition written for {day} — see output/llm_worker.log")
+    return n
 
 
 def compute_sector_dossiers():

@@ -19,6 +19,7 @@ Usage:
     python -m sources.nse                     # fetch today
     python -m sources.nse --date 2026-04-07   # fetch specific date
     python -m sources.nse --backfill 30       # backfill last 30 days
+    python -m sources.nse --legacy --start 2015-01-01 --end 2019-12-31   # pre-2020 archive, resumable
     python -m sources.nse --dry-run
 """
 
@@ -86,7 +87,13 @@ def _fetch_date(target_date):
         df = pd.read_csv(StringIO(resp.text))
     except Exception as e:
         return None, [f"CSV parse error: {e}"]
+    return _clean(df, target_date)
 
+
+def _clean(df, target_date, source="bhavcopy"):
+    """Guardrails + mapping to our schema for one day's bhavcopy frame (current
+    sec_bhavdata_full columns). Returns (universe rows, errors); rows for symbols
+    outside the universe are parked in _UNLISTED[target_date]."""
     # Strip column names (NSE has leading spaces)
     df.columns = df.columns.str.strip()
 
@@ -146,7 +153,7 @@ def _fetch_date(target_date):
     df["symbol"] = df["symbol"].str.strip() if "symbol" in df.columns else df.iloc[:, 0].str.strip()
     df["sid"] = df["symbol"].map(sid_map)
     df["date"] = target_date.isoformat()
-    df["source"] = "bhavcopy"
+    df["source"] = source
 
     # Symbols outside our universe are kept, in their own table (see _UNLISTED below)
 
@@ -274,6 +281,87 @@ def backfill_range(start, end, dry_run=False):
     return total
 
 
+# ── Legacy archive (before the sec_bhavdata_full files begin, ~2020-01) ──
+# One zip per trading day, every symbol that traded (delisted names included), no
+# delivery columns. Prices are as traded: adjustment comes from corporate_adjustments,
+# which needs corporate_actions to reach as far back as the prices do.
+LEGACY_URL = "https://nsearchives.nseindia.com/content/historical/EQUITIES/{y}/{mmm}/cm{d:02d}{mmm}{y}bhav.csv.zip"
+LEGACY_SOURCE = "legacy_bhavcopy"
+_LEGACY_COLS = {"OPEN": "OPEN_PRICE", "HIGH": "HIGH_PRICE", "LOW": "LOW_PRICE", "CLOSE": "CLOSE_PRICE",
+                "PREVCLOSE": "PREV_CLOSE", "TOTTRDQTY": "TTL_TRD_QNTY", "TOTALTRADES": "NO_OF_TRADES",
+                "TIMESTAMP": "DATE1"}
+
+
+def parse_legacy(content):
+    """A legacy bhavcopy zip → a frame with the current file's column names
+    (traded value is left out: stock_prices.traded_value is empty for the current
+    files too, and the legacy unit is rupees, not lakhs)."""
+    import io
+    import zipfile
+    z = zipfile.ZipFile(io.BytesIO(content))
+    df = pd.read_csv(z.open(z.namelist()[0]))
+    df.columns = df.columns.str.strip()
+    df = df.loc[:, [c for c in df.columns if not c.startswith("Unnamed")]].rename(columns=_LEGACY_COLS)
+    for c in ("SYMBOL", "SERIES"):
+        df[c] = df[c].astype(str).str.strip()
+    if "DATE1" in df.columns:                      # '05-JAN-2015' → '05-Jan-2015' for _file_date
+        df["DATE1"] = df["DATE1"].astype(str).str.strip().str.title()
+    return df
+
+
+def backfill_legacy(start, end, budget_min=None, dry_run=False):
+    """Load the legacy archive for [start, end] into stock_prices / stock_prices_unlisted
+    (source='legacy_bhavcopy'). Resumable: days already loaded are skipped; stops at
+    `budget_min`. Then links renamed stocks to their earlier symbols. Returns new rows."""
+    import runlog
+    s = datetime.strptime(start, "%Y-%m-%d").date()
+    e = datetime.strptime(end, "%Y-%m-%d").date()
+    have = set(read_sql("SELECT DISTINCT date FROM stock_prices WHERE source = ? AND date BETWEEN ? AND ?",
+                        params=[LEGACY_SOURCE, start, end])["date"])
+    days = [s + timedelta(days=i) for i in range((e - s).days + 1)]
+    todo = [d for d in days if _is_trading_day(d) and d.isoformat() not in have]
+    print(f"NSE legacy bhavcopy {s} → {e}: {len(todo)} weekdays not yet loaded ({len(have)} loaded)")
+    out_of_time = _http.time_budget("nse_archives", budget_min) if budget_min else (lambda: False)
+    total = n_days = n_bad = 0
+    for d in todo:
+        if out_of_time():
+            print(f"  stopped at the {budget_min:.0f}-min budget — rerun to resume")
+            break
+        url = LEGACY_URL.format(y=d.year, mmm=d.strftime("%b").upper(), d=d.day)
+        try:
+            resp = _http.polite_get(url, timeout=40)
+            if resp is None:                       # 404 = market holiday
+                continue
+            df, errors = _clean(parse_legacy(resp.content), d, source=LEGACY_SOURCE)
+        except Exception as ex:                    # noqa: BLE001 — one bad day must not stop the range
+            n_bad += 1
+            runlog.item_error("nse_legacy_bhavcopy", d.isoformat(), ex)
+            continue
+        if df is None:
+            n_bad += 1
+            runlog.item_failed("nse_legacy_bhavcopy", d.isoformat(), errors[0])
+            print(f"  {d}: SKIP — {errors[0]}")
+            continue
+        unlisted = _UNLISTED.pop(d, None)
+        if dry_run:
+            print(f"  {d}: {len(df)} universe rows, {0 if unlisted is None else len(unlisted)} outside (dry run)")
+            continue
+        n = insert_df(df, "stock_prices", lock_retries=5)
+        if unlisted is not None and len(unlisted):
+            insert_df(unlisted, "stock_prices_unlisted", lock_retries=5)
+        runlog.item_ok()
+        total += n
+        n_days += 1
+        if n_days % 50 == 0:
+            print(f"  {d}: {n_days} days loaded, {total} universe rows", flush=True)
+    print(f"NSE legacy bhavcopy: {n_days} days loaded, {total} new universe rows, {n_bad} bad days")
+    if todo and not dry_run and n_days == 0 and n_bad:
+        raise RuntimeError(f"legacy bhavcopy: 0 of {len(todo)} days loaded ({n_bad} bad) — archive moved or blocked?")
+    if n_days and not dry_run:
+        link_renames()
+    return total
+
+
 SYMBOL_CHANGE_URL = "https://nsearchives.nseindia.com/content/equities/symbolchange.csv"
 
 
@@ -387,10 +475,15 @@ if __name__ == "__main__":
     parser.add_argument("--backfill", type=int, help="Backfill last N days")
     parser.add_argument("--start", help="Range backfill start (YYYY-MM-DD), with --end")
     parser.add_argument("--end", help="Range backfill end (YYYY-MM-DD), with --start")
+    parser.add_argument("--legacy", action="store_true",
+                        help="with --start/--end: load the pre-2020 legacy archive (resumable)")
+    parser.add_argument("--budget-min", type=float, help="with --legacy: stop after this many minutes")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
-    if args.start and args.end:
+    if args.legacy and args.start and args.end:
+        backfill_legacy(args.start, args.end, budget_min=args.budget_min, dry_run=args.dry_run)
+    elif args.start and args.end:
         backfill_range(args.start, args.end, dry_run=args.dry_run)
     elif args.backfill:
         backfill(days=args.backfill, dry_run=args.dry_run)

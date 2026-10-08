@@ -40,6 +40,11 @@ RETIRED = {
     "llm_usage": "kept as-is: it is already the v3 table",
     "run_events": "kept as-is: plan 0018 run log (Ops)",
     "llm_tasks": "kept as-is: plan 0016 LLM work queue (Ops, already v3-shaped)",
+    "news_themes": "kept as-is: plan 0021 theme notes (D3: text moves to documents with the rest of news)",
+    "news_theme_articles": "kept as-is: plan 0021 headline-to-theme links",
+    "news_theme_history": "kept as-is: plan 0021 theme timeline",
+    "news_today": "kept as-is: plan 0021 daily edition",
+    "news_week": "kept as-is: plan 0021 weekly edition",
     "mcp_calls": "kept as-is: plan 0016 MCP audit log (Ops)",
     "sqlite_sequence": "SQLite internal",
 }

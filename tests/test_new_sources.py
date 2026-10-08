@@ -92,3 +92,79 @@ def test_parse_shareholders():
     assert parse_shareholders(wrapped) == [("2026-03-31", 1234)], "real pages put the id on a wrapper"
     assert parse_shareholders("<html>no table</html>") == []
     assert parse_shareholders(None) == []
+
+
+# ─────────────────────────────── BSE shareholding XBRL: named holders ───────────────────────────────
+
+def _shp_ctx(key, when, q='"'):
+    typed = f"<xbrldi:typedMember dimension={q}in-bse-shp:XAxis{q}><in-bse-shp:XDomain>{key}</in-bse-shp:XDomain></xbrldi:typedMember>"
+    return (f"<xbrli:context id={q}D_{key}{q}><xbrli:period><xbrli:startDate>2026-04-01</xbrli:startDate>"
+            f"<xbrli:endDate>{when}</xbrli:endDate></xbrli:period><xbrli:scenario>{typed}</xbrli:scenario></xbrli:context>"
+            f"<xbrli:context id={q}{key}{q}><xbrli:period><xbrli:instant>{when}</xbrli:instant></xbrli:period>"
+            f"<xbrli:scenario>{typed}</xbrli:scenario></xbrli:context>")
+
+
+def test_bse_shp_parses_named_holders_from_xml_and_inline_xbrl():
+    from sources.bse_shp import parse_holders
+    # XBRL .xml, 2016 taxonomy: keys without "_Context"; a "Category" member is a sub-total, not a holder
+    xml = (_shp_ctx("IndividualsOrHUF15", "2016-06-30") + _shp_ctx("OtherNonInstitutions16", "2016-06-30")
+           + '<in-bse-shp:NameOfTheShareholder contextRef="D_IndividualsOrHUF15">Rajat  Agrawal</in-bse-shp:NameOfTheShareholder>'
+           '<in-bse-shp:NumberOfShares contextRef="IndividualsOrHUF15" unitRef="shares" decimals="INF">32677725</in-bse-shp:NumberOfShares>'
+           '<in-bse-shp:ShareholdingAsAPercentageOfTotalNumberOfShares contextRef="IndividualsOrHUF15" unitRef="pure">47.76</in-bse-shp:ShareholdingAsAPercentageOfTotalNumberOfShares>'
+           '<in-bse-shp:NameOfTheShareholder contextRef="D_OtherNonInstitutions16">Clearing Members</in-bse-shp:NameOfTheShareholder>'
+           '<in-bse-shp:WhetherACategoryOrMoreThan1PercentageOfShareHolding contextRef="D_OtherNonInstitutions16">Category</in-bse-shp:WhetherACategoryOrMoreThan1PercentageOfShareHolding>'
+           '<in-bse-shp:NumberOfShares contextRef="OtherNonInstitutions16" unitRef="shares">500</in-bse-shp:NumberOfShares>')
+    assert parse_holders(xml) == [{"end_date": "2016-06-30", "holder_category": "IndividualsOrHUF", "holder_seq": 15,
+                                   "holder_name": "Rajat Agrawal", "promoter_type": None,
+                                   "shares": 32677725.0, "pct": 47.76}]
+    # inline XBRL .html, 2025 taxonomy: single quotes, scale='-2' on the percentage (printed text stays percent)
+    key = "DetailsOfSharesHeldByInstitutionsForeignPortfolioInvestorOne_Context17"
+    ix = (_shp_ctx(key, "2026-06-30", q="'") + _shp_ctx("IndividualsOrHUF_Context15", "2026-06-30", q="'")
+          + f"<ix:nonNumeric name='in-bse-shp:NameOfTheShareholder' contextRef='D_{key}'>GOLDMAN SACHS &amp; CO</ix:nonNumeric>"
+          f"<ix:nonFraction name='in-bse-shp:NumberOfShares' contextRef='{key}' decimals='INF' unitRef='shares'>9,07,886</ix:nonFraction>"
+          f"<ix:nonFraction name='in-bse-shp:ShareholdingAsAPercentageOfTotalNumberOfShares' contextRef='{key}' unitRef='pure' scale='-2'>1.23</ix:nonFraction>"
+          "<ix:nonNumeric name='in-bse-shp:NameOfTheShareholder' contextRef='D_IndividualsOrHUF_Context15'>RAJAT AGRAWAL</ix:nonNumeric>"
+          "<ix:nonNumeric name='in-bse-shp:TypeOfPromoterShareholding' contextRef='D_IndividualsOrHUF_Context15'>Promoter</ix:nonNumeric>"
+          "<ix:nonFraction name='in-bse-shp:NumberOfShares' contextRef='IndividualsOrHUF_Context15' unitRef='shares'>23899789</ix:nonFraction>")
+    got = {h["holder_name"]: h for h in parse_holders(ix)}
+    fpi, promoter = got["GOLDMAN SACHS & CO"], got["RAJAT AGRAWAL"]
+    assert (fpi["holder_category"], fpi["holder_seq"], fpi["shares"], fpi["pct"]) == \
+        ("InstitutionsForeignPortfolioInvestorOne", 17, 907886.0, 1.23)
+    assert promoter["promoter_type"] == "Promoter" and promoter["pct"] is None and promoter["end_date"] == "2026-06-30"
+    assert parse_holders("<html>blocked</html>") == []
+
+
+def test_bse_shp_latest_quarter_end():
+    from datetime import date
+    from sources.bse_shp import latest_quarter_end
+    assert latest_quarter_end(date(2026, 10, 4)) == "2026-09-30"
+    assert latest_quarter_end(date(2026, 9, 30)) == "2026-06-30"
+    assert latest_quarter_end(date(2026, 2, 1)) == "2025-12-31"
+
+
+# ─────────────────────────────── NSE legacy bhavcopy (pre-2020) ───────────────────────────────
+
+def test_legacy_bhavcopy_maps_to_the_current_shape(monkeypatch):
+    import io
+    import zipfile
+    from datetime import date
+    from sources import nse
+    lines = ["SYMBOL,SERIES,OPEN,HIGH,LOW,CLOSE,LAST,PREVCLOSE,TOTTRDQTY,TOTTRDVAL,TIMESTAMP,TOTALTRADES,ISIN,"]
+    lines += [f"SYM{i},EQ,10,12,9,11,11,10,1000,11000,05-JAN-2015,50,INE{i:09d}," for i in range(1100)]
+    lines += ["GSEC1,GS,100,100,100,100,100,100,5,500,05-JAN-2015,1,IN0000000001,"]
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr("cm05JAN2015bhav.csv", "\n".join(lines))
+    monkeypatch.setattr(nse._http, "sid_map", lambda col="ticker": {"SYM0": "S0", "SYM1": "S1"})
+
+    df, errs = nse._clean(nse.parse_legacy(buf.getvalue()), date(2015, 1, 5), source=nse.LEGACY_SOURCE)
+    assert errs == [] and sorted(df["sid"]) == ["S0", "S1"]
+    row = df.iloc[0]
+    assert (row["date"], row["close"], row["prev_close"], row["volume"], row["num_trades"], row["source"]) == \
+        ("2015-01-05", 11, 10, 1000, 50, "legacy_bhavcopy")
+    assert pd.isna(row["delivery_pct"]) and pd.isna(row["traded_value"]), "the legacy file has no delivery; value is not carried"
+    outside = nse._UNLISTED.pop(date(2015, 1, 5))
+    assert len(outside) == 1098 and "GSEC1" not in set(outside["symbol"]), "non-equity series are dropped"
+    # a file served for another day (holiday → previous session) is refused
+    df2, errs2 = nse._clean(nse.parse_legacy(buf.getvalue()), date(2015, 1, 6), source=nse.LEGACY_SOURCE)
+    assert df2 is None and "holiday" in errs2[0]

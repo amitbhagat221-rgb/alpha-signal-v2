@@ -60,6 +60,9 @@ case "$JOB" in
         run python -m tools.duckdb_refresh || echo "[warn] duckdb_refresh failed; cockpit falls back to SQLite reads"
         # Data model v3 shadow (ADR 0054): mirror into the new tables, then record old-vs-new parity.
         # After the email, so a failure here never touches picks; `logged` puts it in pipeline_log.
+        # Forward record of the investor-playbook sleeves (sleeves.py): today's members, after the
+        # pipeline so it reads today's factor values; a failure here never touches picks.
+        logged playbook_members run python -m tools.playbook_backtest --record || echo "[warn] playbook_members record failed"
         logged datamodel_sync run python -m datamodel.sync || echo "[warn] datamodel sync failed (v3 shadow only)"
         logged datamodel_reconcile run python -m datamodel.reconcile || echo "[warn] datamodel parity FAIL: python -m datamodel.reconcile --show"
         echo "Done $(date -u) (pipeline rc=$RC)"
@@ -81,7 +84,22 @@ case "$JOB" in
                         # (the look-ahead-safe availability) — plan 0018; orphaned since 2026-06-07
         harvest_lock
         logged cron_transcripts run python -m sources.transcripts_pull --reported-days 45 --min-analysts 1 --max-docs 2
-        logged cron_transcripts_dates run python -m sources.transcripts_pull --backfill-filing-dates ;;
+        logged cron_transcripts_dates run python -m sources.transcripts_pull --backfill-filing-dates
+        # named >1% holders for stocks missing the latest quarter (filings land within ~21 days
+        # of quarter end); budgeted and resumable, stalest first
+        logged cron_bse_shp run python -m sources.bse_shp --due --budget-min 180 ;;
+    backfill)           # TEMPORARY (2026-10-04) — one-off history backfills in the windows no other
+                        # job uses: 08:00 Sun-Fri, 16:00 (not the 1st), 21:00 UTC; `run.sh backfill <minutes>`.
+                        # Each part is resumable and returns at once when it has nothing left; remove the
+                        # cron lines when both report nothing to fetch.
+        harvest_lock
+        END=$((SECONDS + ${2:-240} * 60))
+        left() { echo $(( (END - SECONDS) / 60 )); }
+        # pre-2020 prices (legacy NSE archive). Starts where corporate_actions start (2018-03):
+        # older prices cannot be adjusted for splits and bonuses until earlier actions are loaded.
+        [ "$(left)" -gt 5 ] && logged cron_nse_legacy run python -m sources.nse --legacy --start 2018-03-01 --end 2019-12-31 --budget-min "$(left)"
+        # named >1% holders: every XBRL filing since 2016, largest stocks first
+        [ "$(left)" -gt 5 ] && logged cron_bse_shp_backfill run python -m sources.bse_shp --universe --quarters 0 --budget-min "$(left)" ;;
     screener_schedules) # 3rd + 4th of Jan/Apr/Jul/Oct 20:30 UTC — Screener '+'-row breakdowns
                         # (Intangible Assets etc., annual items): ~9 h for the universe, so two
                         # resumable 5-hour night windows per quarter, clear of every other job

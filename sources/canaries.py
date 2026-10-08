@@ -310,6 +310,23 @@ def nse_credit_ratings():
                  required=["CreditRating", "CreditRatingEarlier", "RatingAction", "DateofCR", "ISIN", "BroadcastDateTime"])
 
 
+def bse_shp_xbrl():
+    from sources import bse_shp
+    api = _http.warm_session(bse_shp.WARM_URL, bse_shp.INDEX_HEADERS)
+    filings = bse_shp.fetch_index(api, 500325)                  # RELIANCE
+    if not filings:
+        return {"expect": "html", "records": None, "raw": b"", "http": None,
+                "url": f"{bse_shp.INDEX_API}?scripcode=500325"}
+    files = _http.session(bse_shp.FILE_BASE)
+    files.cookies.update(api.cookies)
+    r = _http.polite_request("GET", filings[0]["url"], session=files, check=False, retries=0, timeout=60)
+    holders = bse_shp.parse_holders(r.content.decode("utf-8-sig", "replace")) if r.status_code == 200 else []
+    # "html": filings since mid-2025 are inline XBRL, so an HTML body is the data; a block page parses to 0 rows
+    return _resp(r, "html", holders or None, required=["holder_name", "holder_category", "shares", "pct", "end_date"],
+                 checks=[("index_depth", len(filings) >= 20, f"{len(filings)} XBRL filings in the index"),
+                         ("has_promoter", any(h["promoter_type"] for h in holders), "a named promoter row")])
+
+
 def yahoo_estimates():
     import yfinance as yf
     with _http.pace("yahoo"):
@@ -330,4 +347,5 @@ CANARIES = {
     "macro_official": macro_official, "rss_news": rss_news, "regulatory_news": regulatory_news,
     "scrip_master": scrip_master, "amfi_nav": amfi_nav, "mf_holdings": mf_holdings,
     "nse_credit_ratings": nse_credit_ratings, "yahoo_estimates": yahoo_estimates,
+    "bse_shp_xbrl": bse_shp_xbrl,
 }

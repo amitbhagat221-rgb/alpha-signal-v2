@@ -1,0 +1,534 @@
+{% extends "base.html" %}
+{% from "_components.html" import tab_bar %}
+
+{% macro stock_cell(s) %}
+<a href="/explorer/{{ s.sid }}" class="pb-stock">{{ s.ticker }}</a>
+<div class="pb-name">{{ s.name }}</div>
+{% endmacro %}
+
+{% macro num(x, d=1, suffix='') %}{% if x is not none %}{{ ("%." ~ d ~ "f")|format(x) }}{{ suffix }}{% else %}–{% endif %}{% endmacro %}
+
+{% macro chip(text, colour) %}<span class="mono pb-chip" style="color:{{ colour }}; border-color:{{ colour }}33; background:{{ colour }}1a;">{{ text }}</span>{% endmacro %}
+
+{# red-flag count from the avoid list, shown beside every other screen #}
+{% macro flag_cell(n) %}{% if n %}{{ chip(n ~ (' flag' if n == 1 else ' flags'), 'var(--red)' if n >= 2 else 'var(--amber)') }}{% else %}<span class="u-muted-11">none</span>{% endif %}{% endmacro %}
+
+{% macro change_cell(h) %}
+{% if h.change == 'new' %}{{ chip('NEW', 'var(--blue)') }}
+{% elif h.change == 'up' %}{{ chip('+' ~ num(h.delta, 2) ~ ' pts', 'var(--accent)') }}
+{% elif h.change == 'down' %}{{ chip(num(h.delta, 2) ~ ' pts', 'var(--amber)') }}
+{% elif h.change == 'same' %}<span class="u-muted-11">no change</span>
+{% else %}<span class="u-muted-11">–</span>{% endif %}
+{% endmacro %}
+
+{% macro investor(inv, index) %}
+<details class="pb-inv">
+    <summary>
+        <span class="mono pb-idx">{{ index }}</span>
+        <span class="pb-inv-name">{{ inv.name }}</span>
+        <span class="mono pb-sub">{{ inv.n }} stocks</span>
+        {% if inv.n_new %}{{ chip(inv.n_new ~ ' new', 'var(--blue)') }}{% endif %}
+        {% if inv.n_up %}{{ chip(inv.n_up ~ ' added', 'var(--accent)') }}{% endif %}
+        {% if inv.n_down %}{{ chip(inv.n_down ~ ' trimmed', 'var(--amber)') }}{% endif %}
+        {% if inv.below_1pct %}{{ chip(inv.below_1pct|length ~ ' below 1%', 'var(--text-muted)') }}{% endif %}
+    </summary>
+    <div class="pb-scroll pb-inv-body">
+    {% if inv.filed_as %}<div class="pb-foot" style="margin: 0 0 6px;">Filed as: {{ inv.filed_as|join(' · ') }}</div>{% endif %}
+    <table class="pb-table">
+        <thead><tr><th class="l">Stock</th><th class="l">Tier</th><th>Holding</th><th class="c">Since last filing</th><th>Quarter</th></tr></thead>
+        <tbody>
+        {% for h in inv.holdings %}
+        <tr><td class="l">{{ stock_cell(h) }}</td><td class="l mono u-muted-11">{{ h.tier or '–' }}</td>
+            <td class="mono">{{ num(h.pct, 2, '%') }}</td><td class="c">{{ change_cell(h) }}</td>
+            <td class="mono u-muted-11">{{ h.quarter }}</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% if inv.below_1pct %}
+    <div class="pb-foot">No longer named above 1% (sold, or fell under the line):
+        {% for g in inv.below_1pct %}<a href="/explorer/{{ g.sid }}" class="mono" style="color: var(--text-secondary); text-decoration: none;">{{ g.ticker }}</a> <span class="mono">({{ num(g.pct, 2, '%') }} before)</span>{% if not loop.last %} · {% endif %}{% endfor %}
+    </div>
+    {% endif %}
+    </div>
+</details>
+{% endmacro %}
+
+{% set r = o.rules %}
+
+{% block content %}
+<style>
+.pb-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.pb-table th { padding: 8px 6px; text-align: right; color: var(--text-muted); font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.4px; font-weight: 600; }
+.pb-table td { padding: 9px 6px; text-align: right; border-top: 1px solid var(--border); vertical-align: top; }
+.pb-table .l { text-align: left; } .pb-table .c { text-align: center; }
+.pb-table td.strong { font-weight: 700; color: var(--text-primary); }
+.pb-table td.soft { font-size: 11.5px; color: var(--text-secondary); }
+.pb-stock { color: var(--text-primary); text-decoration: none; font-weight: 600; }
+.pb-name { font-size: 10.5px; color: var(--text-muted); max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pb-chip { display: inline-block; padding: 2px 7px; border-radius: 4px; font-size: 9.5px; font-weight: 700; border: 1px solid; white-space: nowrap; }
+.pb-head { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 8px; }
+.pb-scroll { overflow-x: auto; margin-top: 10px; }
+.pb-foot { margin-top: 12px; font-size: 10.5px; color: var(--text-muted); line-height: 1.5; }
+.pb-note { margin-top: 10px; padding: 9px 12px; border-left: 4px solid var(--amber); background: var(--bg-card-hover); border-radius: 4px; font-size: 12px; color: var(--text-secondary); }
+.pb-note strong { color: var(--text-primary); }
+.pb-tiles { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
+.pb-tile { flex: 1; min-width: 130px; border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; }
+.pb-tile .v { font-size: 20px; font-weight: 800; color: var(--text-primary); }
+.pb-tile .k { font-size: 11px; color: var(--text-secondary); }
+.pb-inv { border-top: 1px solid var(--border); }
+.pb-inv summary { cursor: pointer; padding: 10px 6px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; user-select: none; }
+.pb-inv-name { font-weight: 700; color: var(--text-primary); min-width: 220px; }
+.pb-inv-body { padding: 0 6px 12px 34px; margin-top: 0; }
+.pb-idx { color: var(--text-muted); width: 22px; } .pb-sub { font-size: 12px; color: var(--text-secondary); }
+.pb-group { margin: 18px 0 2px; font-size: 11px; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; color: var(--text-muted); }
+.pb-reading { display: flex; gap: 16px; flex-wrap: wrap; align-items: baseline; padding: 12px 6px; border-top: 1px solid var(--border); }
+.pb-reading .k { flex: 0 0 260px; font-weight: 600; color: var(--text-primary); font-size: 13px; }
+.pb-reading .v { flex: 0 0 150px; font-size: 18px; font-weight: 800; color: var(--text-primary); }
+.pb-reading .d { flex: 1; min-width: 240px; font-size: 12px; color: var(--text-secondary); line-height: 1.5; }
+</style>
+
+<div class="section-title">Investor Playbooks</div>
+<div class="section-desc">
+    Other ways to read the same data than the factor ranking: a filter, an event or a watchlist in the style of a
+    well-known investor. These are <strong>separate from your daily picks</strong> and none is a ranked forecast —
+    each tab states its rule. Tiers are shown, never mixed into one ranking.
+</div>
+
+<div x-data="{ tab: 'avoid', loaded: { avoid: true } }" style="margin-top: 14px;">
+{{ tab_bar([('avoid', 'Avoid list'), ('insiders', 'Insider buying'), ('compounders', 'Compounders'), ('investors', 'Superinvestors'),
+            ('breakouts', 'Breakouts'), ('deep', 'Deep value'), ('categories', 'Categories'), ('saydo', 'Say vs do'), ('cycle', 'Market cycle'), ('portfolios', 'Portfolios'), ('roadmap', 'All approaches')]) }}
+
+{# ═══════════ Avoid list ═══════════ #}
+<div x-show="tab === 'avoid'" x-cloak>
+<div class="card" style="margin-top: 14px;">
+    <div class="pb-head">
+        <div class="section-title">{{ o.avoid.rows|length }} stocks with {{ r.AVOID_MIN_FLAGS }} or more red flags</div>
+        <div class="mono u-muted-11">as of {{ o.avoid.as_of }} · {{ o.avoid.n_any }} stocks carry at least one</div>
+    </div>
+    <div class="section-desc">
+        Munger's inversion: decide what not to own first. A stock is listed when it trips at least {{ r.AVOID_MIN_FLAGS }}
+        of the five checks below. One flag alone is common and often harmless; several together rarely are.
+    </div>
+    <div class="pb-tiles">
+        {% for c in o.avoid.counts %}<div class="pb-tile"><div class="mono v">{{ c.n }}</div><div class="k">{{ c.label }}</div></div>{% endfor %}
+    </div>
+    <div class="pb-scroll">
+    <table class="pb-table">
+        <thead><tr><th class="l">Stock</th><th class="l">Tier</th><th class="l">Sector</th><th class="c">Flags</th><th class="l">What tripped</th></tr></thead>
+        <tbody>
+        {% for s in o.avoid.rows %}
+        <tr><td class="l">{{ stock_cell(s) }}</td><td class="l mono u-muted-11">{{ s.tier or '–' }}</td><td class="l soft">{{ s.sector or '–' }}</td>
+            <td class="c">{{ chip(s.n_flags, 'var(--red)' if s.n_flags >= 3 else 'var(--amber)') }}</td>
+            <td class="l soft" style="line-height: 1.55;">{% for f in s.flags %}<div><strong style="color: var(--text-primary);">{{ f.label }}</strong> — {{ f.detail }}</div>{% endfor %}</td></tr>
+        {% else %}<tr><td colspan="5" class="l u-muted-11">No stock trips {{ r.AVOID_MIN_FLAGS }} checks today.</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    <div class="pb-foot">
+        Checks: promoter pledge ≥ {{ r.PLEDGE_PCT }}% in the latest shareholding · accounts flagged as likely manipulated (Beneish M-score) ·
+        balance sheet in the distress zone (Altman Z-score, non-financials) · on the exchange's long-term or graded surveillance list ·
+        auditor, CFO, CEO or MD resigned in the last {{ r.RESIGNATION_DAYS }} days (BSE filings).
+    </div>
+</div>
+</div>
+
+{# ═══════════ Insider buying ═══════════ #}
+<div x-show="tab === 'insiders'" x-cloak>
+<div class="card" style="margin-top: 14px;">
+    <div class="pb-head">
+        <div class="section-title">{{ o.insiders.rows|length }} stocks where insiders were net buyers</div>
+        <div class="mono u-muted-11">last {{ r.INSIDER_DAYS }} days to {{ o.insiders.as_of or '–' }} · {{ o.insiders.n_clusters or 0 }} with several buyers</div>
+    </div>
+    <div class="section-desc">
+        Promoters, directors and key managers buying their own stock with their own money. Listed when net purchases are at least
+        ₹{{ r.INSIDER_MIN_CR|int }} crore, or {{ r.INSIDER_MIN_BUYERS }} or more different insiders bought. A <strong>cluster</strong>
+        (several buyers) is the stronger sign; a single large buyer is often a holding company reshuffling its stake.
+    </div>
+    <div class="pb-scroll">
+    <table class="pb-table">
+        <thead><tr><th class="l">Stock</th><th class="l">Tier</th><th class="c">Buyers</th><th>Bought (₹ cr)</th><th>Sold (₹ cr)</th>
+            <th>Net (₹ cr)</th><th>Last buy</th><th class="l">Largest buyer</th></tr></thead>
+        <tbody>
+        {% for s in o.insiders.rows %}
+        <tr><td class="l">{{ stock_cell(s) }}</td><td class="l mono u-muted-11">{{ s.tier or '–' }}</td>
+            <td class="c">{% if s.cluster %}{{ chip(s.buyers ~ ' buyers', 'var(--blue)') }}{% else %}<span class="mono u-muted-11">1</span>{% endif %}</td>
+            <td class="mono">{{ num(s.bought_cr, 1) }}</td><td class="mono u-muted-11">{{ num(s.sold_cr, 1) }}</td>
+            <td class="mono strong">{{ num(s.net_cr, 1) }}</td><td class="mono u-muted-11">{{ s.last_buy }}</td>
+            <td class="l soft" style="max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="{{ s.top_buyer }}">{{ s.top_buyer }}</td></tr>
+        {% else %}<tr><td colspan="8" class="l u-muted-11">No net insider buying in the window.</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    <div class="pb-foot">Source: NSE insider-trading disclosures (promoters, promoter group, directors, key managerial personnel). Employee trades are left out.</div>
+</div>
+</div>
+
+{# ═══════════ Compounders ═══════════ #}
+<div x-show="tab === 'compounders'" x-cloak>
+<div class="card" style="margin-top: 14px;">
+    <div class="pb-head">
+        <div class="section-title">{{ o.compounders.n }} businesses pass the quality rule · {{ o.compounders.n_cheap }} are cheap against their own history</div>
+        <div class="mono u-muted-11">{% for t, c in o.compounders.tier_counts.items() %}{{ t }} {{ c }}{% if not loop.last %} · {% endif %}{% endfor %}</div>
+    </div>
+    <div class="section-desc">
+        Buffett's two steps: find a wonderful business, then wait for a fair price. <strong>Quality:</strong> return on capital of
+        {{ r.ROCE_BAR }}% or more in at least {{ r.ROCE_MIN_HITS }} of the last {{ r.ROCE_YEARS }} years, no loss year, and sales growing
+        {{ r.SALES_CAGR_BAR }}% a year or faster. <strong>Price:</strong> the list is ordered by how today's price-to-earnings compares
+        with the stock's own month-end history — “cheaper than 90%” means it was more expensive in nine months out of ten{% if o.compounders.n > o.compounders.rows|length %}
+        (showing the first {{ o.compounders.rows|length }}){% endif %}.
+    </div>
+    <div class="pb-note">
+        <strong>History is short.</strong> Each stock is compared with itself since {{ o.compounders.history_from or '2020' }} only — one market cycle.
+        It lengthens by itself as the older prices finish loading. Cheap against its own history is a reason to look, not a reason to buy.
+    </div>
+    <div class="pb-scroll">
+    <table class="pb-table">
+        <thead><tr><th class="l">Stock</th><th class="l">Tier</th><th class="l">Sector</th><th>Cheaper than (% of months)</th><th>Against its median</th><th>P/E today</th>
+            <th>Below 52w high</th><th>Years ≥ {{ r.ROCE_BAR }}%</th><th>Median return on capital</th><th>Sales growth / yr</th><th>Debt / equity</th><th class="c">Red flags</th></tr></thead>
+        <tbody>
+        {% for s in o.compounders.rows %}
+        <tr><td class="l">{{ stock_cell(s) }}</td><td class="l mono u-muted-11">{{ s.tier or '–' }}</td><td class="l soft">{{ s.sector or '–' }}</td>
+            <td class="mono strong">{% if s.cheaper_than is not none %}{{ s.cheaper_than }}%{% else %}–{% endif %}</td>
+            <td class="mono">{% if s.vs_median is not none %}{{ '%+d'|format(s.vs_median) }}%{% else %}–{% endif %}</td>
+            <td class="mono">{{ num(s.pe, 0, '×') }}</td><td class="mono">{{ num(s.from_high, 0, '%') }}</td>
+            <td class="mono">{{ s.hits }} / {{ r.ROCE_YEARS }}</td><td class="mono">{{ num(s.roce_median, 0, '%') }}</td>
+            <td class="mono">{{ num(s.sales_cagr, 0, '%') }}</td><td class="mono">{{ num(s.debt_to_equity, 2) }}</td><td class="c">{{ flag_cell(s.flags) }}</td></tr>
+        {% else %}<tr><td colspan="12" class="l u-muted-11">No business passes the rule.</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    <div class="pb-foot">
+        Return on capital = (profit before tax + interest) ÷ (equity + reserves + borrowings), from annual statements; financial companies are
+        left out because the ratio does not describe a lender. The price-to-earnings history uses split- and bonus-adjusted month-end prices
+        over the latest annual profit that was public at the time; “against its median” is today's multiple relative to the middle of that history.
+    </div>
+</div>
+</div>
+
+{# ═══════════ Superinvestors ═══════════ #}
+<div x-show="tab === 'investors'" x-cloak>
+<div class="card" style="margin-top: 14px;">
+    <div class="pb-head">
+        <div class="section-title">{{ o.investors.followed|length }} followed investors · {{ o.investors.investors|length }} more individuals above 1% in {{ r.INVESTOR_MIN_STOCKS }}+ companies</div>
+        <div class="mono u-muted-11">filings to {{ o.investors.as_of or '–' }} · {{ o.investors.n_stocks }} stocks</div>
+    </div>
+    <div class="section-desc">
+        Pabrai's cloning: start from what proven investors already own. Every company must name its holders above 1% each quarter.
+        Open a name to see the holdings and what changed since the filing before.
+    </div>
+    {% if o.investors.n_stocks and o.investors.n_with_prior < o.investors.n_stocks %}
+    <div class="pb-note">
+        <strong>Changes are still loading.</strong> The previous quarter is stored for {{ o.investors.n_with_prior }} of
+        {{ o.investors.n_stocks }} stocks, so “new / added / trimmed” shows only for those.
+    </div>
+    {% endif %}
+    <div class="pb-group">Followed investors — every filed spelling and vehicle combined</div>
+    {% for inv in o.investors.followed %}{{ investor(inv, loop.index) }}{% else %}<div class="u-muted-11" style="padding: 10px 6px;">None of the followed names appear in the filings loaded so far.</div>{% endfor %}
+    <div class="pb-group">Other individuals — matched on exact spelling</div>
+    {% for inv in o.investors.investors %}{{ investor(inv, loop.index) }}{% else %}<div class="u-muted-11" style="padding: 10px 6px;">No holder filings loaded yet.</div>{% endfor %}
+    <div class="pb-foot">
+        Source: BSE shareholding-pattern filings (holders above 1%). A holder who drops under 1% disappears from the filing, so
+        “below 1%” can mean a full exit or a small trim. Stocks listed only on NSE are not covered. A followed investor is matched by the
+        words in the filed name, so an unrelated holder with the same names would be included — the “Filed as” line shows what was combined.
+    </div>
+</div>
+</div>
+
+{# ═══════════ Breakouts ═══════════ #}
+<div x-show="tab === 'breakouts'" x-cloak>
+<div class="card" style="margin-top: 14px;">
+    <div class="pb-head">
+        <div class="section-title">{{ o.breakouts.rows|length }} stocks breaking out on good results</div>
+        <div class="mono u-muted-11">as of {{ o.breakouts.as_of }}</div>
+    </div>
+    <div class="section-desc">
+        O'Neil and Minervini buy strength, not weakness: a business whose last results the market liked, now trading in the top of its
+        52-week range, with far more shares taken for delivery than is normal for it. All four conditions must hold. In a weak market
+        the list is short — that is the screen working.
+    </div>
+    <div class="pb-scroll">
+    <table class="pb-table">
+        <thead><tr><th class="l">Stock</th><th class="l">Tier</th><th class="l">Sector</th><th>Reaction to results</th><th>Delivery vs own norm</th>
+            <th>Place in 52w range</th><th>6-month move</th><th class="c">Red flags</th></tr></thead>
+        <tbody>
+        {% for s in o.breakouts.rows %}
+        <tr><td class="l">{{ stock_cell(s) }}</td><td class="l mono u-muted-11">{{ s.tier }}</td><td class="l soft">{{ s.sector or '–' }}</td>
+            <td class="mono">{{ '%+.1f'|format(s.reaction) }}%</td><td class="mono strong">{{ '%+.1f'|format(s.delivery_z) }} σ</td>
+            <td class="mono">{{ s.position }}%</td><td class="mono">{{ '%+d'|format(s.mom_6m) }}%</td><td class="c">{{ flag_cell(s.flags) }}</td></tr>
+        {% else %}<tr><td colspan="8" class="l u-muted-11">Nothing meets all four conditions today.</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    <div class="pb-foot">
+        Conditions: positive price reaction to the last results announcement · delivery at least {{ r.BREAKOUT_DELIVERY_Z }} standard deviations above the
+        stock's own norm · price in the top {{ (100 - r.BREAKOUT_POSITION * 100)|int }}% of its 52-week range · positive 6-month move. Pickable tiers only.
+        Delivery anomaly and the results reaction are the two factors with the strongest evidence in the model (small caps).
+    </div>
+</div>
+</div>
+
+{# ═══════════ Deep value ═══════════ #}
+<div x-show="tab === 'deep'" x-cloak>
+<div class="card" style="margin-top: 14px;">
+    <div class="pb-head">
+        <div class="section-title">{{ o.deep.rows|length }} stocks at or below book value · {{ o.deep.n_clean }} with no red flag</div>
+        <div class="mono u-muted-11">as of {{ o.deep.as_of }}</div>
+    </div>
+    <div class="section-desc">
+        Graham's margin of safety: pay less than the business is worth on paper. Listed when the price is at or below book value, earnings are
+        at least {{ (r.DEEP_EARNINGS_YIELD * 100)|int }}% of the price, and debt is no more than {{ r.DEEP_MAX_DEBT_TO_EQUITY }}× equity. Names with no red flag come first.
+    </div>
+    <div class="pb-note">
+        <strong>Cheap is usually cheap for a reason.</strong> In India these are mostly holding companies, businesses in decline and
+        governance discounts. Read the red flags and the last annual report before anything else.
+        {% if o.deep.n_suspect %}{{ o.deep.n_suspect }} more matched but were left out because the ratios are implausible
+        (price under {{ r.DEEP_MIN_PRICE_TO_BOOK }}× book or under {{ r.DEEP_MIN_PE }}× earnings) — more likely a data error than a bargain.{% endif %}
+    </div>
+    <div class="pb-scroll">
+    <table class="pb-table">
+        <thead><tr><th class="l">Stock</th><th class="l">Tier</th><th class="l">Sector</th><th>Price / book</th><th>P/E</th><th>Debt / equity</th>
+            <th class="c">More cash than debt</th><th class="c">Red flags</th></tr></thead>
+        <tbody>
+        {% for s in o.deep.rows %}
+        <tr><td class="l">{{ stock_cell(s) }}</td><td class="l mono u-muted-11">{{ s.tier or '–' }}</td><td class="l soft">{{ s.sector or '–' }}</td>
+            <td class="mono strong">{{ num(s.price_to_book, 2, '×') }}</td><td class="mono">{{ num(s.pe, 1, '×') }}</td><td class="mono">{{ num(s.debt_to_equity, 2) }}</td>
+            <td class="c">{% if s.net_cash %}{{ chip('YES', 'var(--blue)') }}{% else %}<span class="u-muted-11">no</span>{% endif %}</td><td class="c">{{ flag_cell(s.flags) }}</td></tr>
+        {% else %}<tr><td colspan="8" class="l u-muted-11">Nothing meets the rule today.</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    <div class="pb-foot">Price-to-book and P/E are the ranking's own factor values. Financial companies are left out (banks often trade below book for ordinary reasons).</div>
+</div>
+</div>
+
+{# ═══════════ Lynch categories ═══════════ #}
+<div x-show="tab === 'categories'" x-cloak>
+<div class="card" style="margin-top: 14px;">
+    <div class="section-title">{{ o.categories.n }} businesses in Lynch's six kinds</div>
+    <div class="section-desc">
+        Lynch's first question was “what kind of company is this?”, because each kind is judged by a different rule — a low
+        price-to-earnings is good news in a stalwart and a warning in a cyclical. Each business is placed in the first kind whose rule it meets, in the order below.
+    </div>
+    {% for c in o.categories.categories %}
+    <details class="pb-inv" {% if loop.first %}open{% endif %}>
+        <summary>
+            <span class="pb-inv-name" style="min-width: 150px;">{{ c.label }}</span>
+            <span class="mono pb-sub">{{ c.n }}</span>
+            <span class="mono u-muted-11">{% for t, n in c.tier_counts.items() %}{{ t }} {{ n }}{% if not loop.last %} · {% endif %}{% endfor %}</span>
+        </summary>
+        <div class="pb-inv-body" style="padding-left: 6px;">
+            <div style="font-size: 12px; color: var(--text-secondary); line-height: 1.55;">
+                <strong style="color: var(--text-primary);">Rule:</strong> {{ c.rule }}.<br>
+                <strong style="color: var(--text-primary);">How to read it:</strong> {{ c.reading }}
+            </div>
+            <div class="pb-scroll">
+            <table class="pb-table">
+                <thead><tr><th class="l">Stock</th><th class="l">Tier</th><th class="l">Sector</th><th>Sales growth / yr (3y)</th><th>P/E</th></tr></thead>
+                <tbody>
+                {% for s in c.examples %}
+                <tr><td class="l">{{ stock_cell(s) }}</td><td class="l mono u-muted-11">{{ s.tier or '–' }}</td><td class="l soft">{{ s.sector or '–' }}</td>
+                    <td class="mono">{{ '%+d'|format(s.growth) }}%</td><td class="mono">{{ num(s.pe, 0, '×') }}</td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+            </div>
+            {% if c.n > c.examples|length %}<div class="pb-foot">Showing the {{ c.examples|length }} largest by tier, then fastest growing; {{ c.n - c.examples|length }} more.</div>{% endif %}
+        </div>
+    </details>
+    {% endfor %}
+    <div class="pb-foot">Non-financial companies with four years of annual statements. Growth is three-year sales growth a year.</div>
+</div>
+</div>
+
+{# ═══════════ Say vs do ═══════════ #}
+<div x-show="tab === 'saydo'" x-cloak>
+<div class="card" style="margin-top: 14px;">
+    <div class="pb-head">
+        <div class="section-title">{{ o.say_do.rows|length }} managements checked against their own words</div>
+        <div class="mono u-muted-11">{% if o.say_do.total %}{{ o.say_do.total - o.say_do.queued }} of {{ o.say_do.total }} read{% else %}not started{% endif %}</div>
+    </div>
+    <div class="section-desc">
+        Fisher judged management by whether it does what it says. For each company, what management told investors it would do on an
+        earnings call two to four quarters ago is set against what it reported on the latest call. Open a name to see each promise.
+    </div>
+    {% if o.say_do.queued or not o.say_do.rows %}
+    <div class="pb-note">
+        <strong>{% if o.say_do.queued %}{{ o.say_do.queued }} companies are still to be read.{% else %}Nothing has been read yet.{% endif %}</strong>
+        The reading is done by the LLM worker (05:07 and 14:37 UTC), after the daily jobs. Compounders, LARGE and MID companies with two recent call transcripts are covered.
+    </div>
+    {% endif %}
+    {% if o.say_do.rows %}
+    <div class="pb-tiles">
+        {% for c in o.say_do.counts %}<div class="pb-tile"><div class="mono v">{{ c.n }}</div><div class="k">{{ c.label }}</div></div>{% endfor %}
+    </div>
+    <div style="margin-top: 12px;">
+    {% for s in o.say_do.rows %}
+    {% set col = 'var(--blue)' if s.verdict == 'keeps_word' else ('var(--amber)' if s.verdict == 'mixed' else ('var(--red)' if s.verdict == 'overpromises' else 'var(--text-muted)')) %}
+    <details class="pb-inv">
+        <summary>
+            <a href="/explorer/{{ s.sid }}" class="pb-stock" style="min-width: 120px;">{{ s.ticker }}</a>
+            <span class="mono u-muted-11" style="width: 48px;">{{ s.tier or '–' }}</span>
+            {{ chip(s.label|upper, col) }}
+            <span style="flex: 1; min-width: 260px; font-size: 12px; color: var(--text-secondary);">{{ s.summary }}</span>
+        </summary>
+        <div class="pb-inv-body" style="padding-left: 6px;">
+        {% if s.promises %}
+        <table class="pb-table">
+            <thead><tr><th class="l">What management said ({{ s.earlier_call }})</th><th class="l">Outcome</th><th class="l">What the latest call says ({{ s.latest_call }})</th></tr></thead>
+            <tbody>
+            {% for p in s.promises %}
+            <tr><td class="l soft" style="width: 40%;">{{ p.said }}</td>
+                <td class="l">{{ chip(p.label|upper, 'var(--blue)' if p.outcome == 'delivered' else ('var(--amber)' if p.outcome == 'partly' else ('var(--red)' if p.outcome == 'missed' else 'var(--text-muted)'))) }}</td>
+                <td class="l soft">{{ p.evidence or '–' }}</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        {% else %}<div class="u-muted-11">No checkable commitment was found on the earlier call.</div>{% endif %}
+        </div>
+    </details>
+    {% endfor %}
+    </div>
+    {% endif %}
+    <div class="pb-foot">
+        Written by an LLM from sentences extracted from the two transcripts; it can misread a call. The text carries no figures by rule —
+        open the transcripts on the stock's page for the numbers. A verdict covers one pair of calls, not a track record.
+    </div>
+</div>
+</div>
+
+{# ═══════════ Market cycle ═══════════ #}
+<div x-show="tab === 'cycle'" x-cloak>
+<div class="card" style="margin-top: 14px;">
+    <div class="pb-head">
+        <div class="section-title">Where the market stands</div>
+        {% if o.cycle.regime %}<div class="mono u-muted-11">volatility regime: {{ o.cycle.regime }}</div>{% endif %}
+    </div>
+    <div class="section-desc">
+        Marks: you cannot predict, but you can know roughly where you are. Each reading is set against its own history.
+        There is deliberately no combined score — when most readings lean the same way, be more careful or more willing, not certain.
+    </div>
+    <div style="margin-top: 10px;">
+    {% for x in o.cycle.readings %}
+    <div class="pb-reading">
+        <div class="k">{{ x.label }}<div class="mono u-muted-11" style="font-weight: 400;">{{ x.as_of }}</div></div>
+        <div class="mono v">{{ x.value }}</div>
+        <div class="d"><strong style="color: var(--text-primary);">{{ x.reading }}.</strong> {{ x.context|capitalize }}.</div>
+    </div>
+    {% else %}<div class="u-muted-11" style="padding: 10px 6px;">No readings available.</div>
+    {% endfor %}
+    </div>
+    <div class="pb-foot">
+        History is short: breadth and valuation go back to 2020, the small-cap index to 2016, volatility to 2015 — about one full cycle.
+        Treat this as context for how much to hold, never as a timing signal.
+    </div>
+</div>
+</div>
+
+{# ═══════════ Portfolios ═══════════ #}
+{% macro bt_row(label, sub, st, cost=True) %}
+<tr><td class="l"><span class="pb-stock">{{ label }}</span>{% if sub %}<div class="pb-name" style="max-width: 420px; white-space: normal;">{{ sub }}</div>{% endif %}</td>
+{% if st %}
+    <td class="mono u-muted-11">{{ st.first }} → {{ st.last }}<br>{{ st.months }} months</td>
+    <td class="mono">{{ num(st.avg_names, 0) }}</td>
+    <td class="mono">{% if cost %}{{ '%+.1f'|format(st.gross_ann) }}%{% else %}–{% endif %}</td>
+    <td class="mono u-muted-11">{% if cost %}{{ '%.1f'|format(st.cost_ann) }}%{% else %}–{% endif %}</td>
+    <td class="mono strong">{{ '%+.1f'|format(st.net_ann) }}%</td>
+    <td class="mono">{{ '%+.1f'|format(st.bench_ann) }}%</td>
+    <td class="mono">{% if st.index_ann is not none %}{{ '%+.1f'|format(st.index_ann) }}%{% else %}–{% endif %}</td>
+    <td class="mono strong" style="color: {{ 'var(--green)' if st.excess_ann > 0 else 'var(--red)' }};">{{ '%+.1f'|format(st.excess_ann) }}%</td>
+    <td class="mono">{% if st.t_stat is not none %}{{ '%+.2f'|format(st.t_stat) }}{% else %}–{% endif %}</td>
+    <td class="mono">{{ st.hit_rate }}%</td>
+    <td class="mono">{{ '%.0f'|format(st.max_drawdown) }}%</td>
+{% else %}
+    <td colspan="11" class="l u-muted-11">No month had enough names to hold.</td>
+{% endif %}</tr>
+{% endmacro %}
+
+<div x-show="tab === 'portfolios'" x-cloak>
+{% set bt = o.portfolios.backtest %}
+<div class="card" style="margin-top: 14px;">
+    <div class="pb-head">
+        <div class="section-title">Each playbook as a portfolio</div>
+        {% if bt %}<div class="mono u-muted-11">{{ bt.first_month }} → {{ bt.last_month }} · run {{ bt.generated_at[:10] }}</div>{% endif %}
+    </div>
+    <div class="section-desc">
+        Every month, each playbook's rule picks its stocks using only what was known that day; they are held at equal weight for a
+        month, after trading costs. “Tier average” is the average stock of the same size tier that month; “Index” is the Nifty Smallcap 250.
+    </div>
+    {% if not bt %}
+    <div class="pb-note"><strong>No backtest has been run yet.</strong> Run <span class="mono">python -m tools.playbook_backtest</span>.</div>
+    {% else %}
+    <div class="pb-note">
+        <strong>Read this before the numbers.</strong> The test covers at most one market cycle, uses only companies still listed today,
+        and the tier average is flattered by small companies that became big. It can show that a rule did not work in this period;
+        it cannot prove that one does. The rules were fixed before any return was looked at and have not been tuned.
+    </div>
+    <div class="pb-scroll">
+    <table class="pb-table">
+        <thead><tr><th class="l">Portfolio</th><th>Period</th><th>Stocks held</th><th>Before costs / yr</th><th>Costs / yr</th><th>After costs / yr</th>
+            <th>Tier average / yr</th><th>Index / yr</th><th>Against tier average</th><th>t-stat</th><th>Months ahead</th><th>Worst fall</th></tr></thead>
+        <tbody>
+        {% for s in bt.sleeves %}{{ bt_row(s.label, s.rule, s.stats) }}{% endfor %}
+        {{ bt_row(bt.combined.label, 'every sleeve with enough names that month, equal sleeve weights; not a pick of the sleeves that did well', bt.combined.stats) }}
+        {{ bt_row('Red-flagged stocks', bt.flagged.rule ~ ' — a veto is worth having only if these lag their tier', bt.flagged.stats, cost=False) }}
+        </tbody>
+    </table>
+    </div>
+    <div class="pb-foot">
+        {% for s in bt.sleeves %}<div><strong style="color: var(--text-secondary);">{{ s.label }}:</strong> {{ s.caveat }}</div>{% endfor %}
+        <div style="margin-top: 6px;">Costs per trade: {% for t, b in bt.costs_bps.items() %}{{ t }} {{ b }} bps{% if not loop.last %} · {% endif %}{% endfor %}.
+        A sleeve is held only in months with at least {{ bt.min_names }} names. The index is a price index (no dividends); portfolio returns include dividends.
+        A t-stat beyond ±2 is unlikely to be chance on its own, but these are several tests on one short period.
+        Superinvestors and say-vs-do have no history to test and appear only in the forward record below.</div>
+    </div>
+    {% endif %}
+</div>
+
+<div class="card" style="margin-top: 14px;">
+    <div class="section-title">Forward record</div>
+    <div class="section-desc">
+        From today, each morning's members of every sleeve are stored as they were, before anyone knows what happens next.
+        This is the only evidence here that is free of hindsight and of the survivors-only problem; it needs time.
+    </div>
+    <div class="pb-scroll">
+    <table class="pb-table">
+        <thead><tr><th class="l">Sleeve</th><th>Days recorded</th><th>First day</th><th>Latest day</th><th>Stocks on the latest day</th></tr></thead>
+        <tbody>
+        {% for x in o.portfolios.record %}
+        <tr><td class="l strong">{{ x.sleeve }}</td><td class="mono">{{ x.days }}</td><td class="mono u-muted-11">{{ x.first }}</td>
+            <td class="mono u-muted-11">{{ x.last }}</td><td class="mono">{{ x.names }}</td></tr>
+        {% else %}<tr><td colspan="5" class="l u-muted-11">Nothing recorded yet — the first record is written after tomorrow's morning run.</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+</div>
+</div>
+
+{# ═══════════ All approaches ═══════════ #}
+<div x-show="tab === 'roadmap'" x-cloak>
+<div class="card" style="margin-top: 14px;">
+    <div class="section-title">Every approach considered, and where it stands</div>
+    <div class="section-desc">What is on this page, what is half-built and what is not built — so nothing here is mistaken for complete.</div>
+    <div class="pb-scroll">
+    <table class="pb-table">
+        <thead><tr><th class="l">Approach</th><th class="l">In the style of</th><th class="l">Status</th><th class="l">Note</th></tr></thead>
+        <tbody>
+        {% for a in o.roadmap %}
+        <tr><td class="l strong">{{ a.approach }}</td><td class="l soft">{{ a.who }}</td>
+            <td class="l">{{ chip(a.status|upper, 'var(--blue)' if a.status == 'live' else ('var(--amber)' if a.status == 'partial' else 'var(--text-muted)')) }}</td>
+            <td class="l soft">{{ a.note }}</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+</div>
+</div>
+
+</div>
+{% endblock %}

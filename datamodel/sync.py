@@ -553,6 +553,9 @@ EVENT_SPECS = {
                       "t.source", {"article_id", "fetched_at"}),
     "broker_recommendations": ("broker_reco", "t.sid || '|' || t.broker || '|' || t.reco_date || '|' || COALESCE(t.target_price, '')", "t.sid",
                                "t.reco_date", "COALESCE(t.fetched_at, t.reco_date)", "t.reco_type", {"sid", "fetched_at"}),
+    "shareholding_holders": ("shareholding_holder",
+                             "t.sid || '|' || t.end_date || '|' || t.filed_at || '|' || t.holder_category || '|' || t.holder_seq", "t.sid",
+                             "t.end_date", "t.filed_at", "t.holder_category", {"sid", "fetched_at"}),
 }
 
 
@@ -713,6 +716,7 @@ FEATURE_TABLES = {
         "daily_snapshots")},
     "nlp_scores": ("sid", "security", "doc_date", "doc_type", "prefix"),      # available_date is a value (date kind)
     "insider_signals": ("sid", "security", "snapshot_date", "signal_type", "prefix"),
+    "playbook_members": ("sid", "security", "snapshot_date", "sleeve", "prefix"),
     "fno_iv_history": ("sid|symbol", "security|index", "trade_date", None, "prefix"),
     "fno_pcr_history": ("sid|symbol", "security|index", "trade_date", None, "prefix"),
     "universe_eligibility": ("sid", "security", "snapshot_date", "signal", "prefix"),

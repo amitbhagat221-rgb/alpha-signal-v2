@@ -635,7 +635,7 @@ def test_rss_fetch_news(net, monkeypatch):
     rss.fetch_news()
     check("rss.written", written)
     check("rss.calls", [c["args"] for c in net.lib])
-    for host in ("economictimes.indiatimes.com", "www.livemint.com", "www.moneycontrol.com"):
+    for host in ("economictimes.indiatimes.com", "www.livemint.com", "news.google.com"):
         gap_note(net, host)
 
 
@@ -2731,13 +2731,19 @@ SNAP = json.loads(r"""
    "https://www.livemint.com/rss/companies"
   ],
   [
-   "https://www.moneycontrol.com/rss/latestnews.xml"
+   "https://economictimes.indiatimes.com/tech/rssfeeds/13357270.cms"
   ],
   [
-   "https://www.moneycontrol.com/rss/business.xml"
+   "https://www.livemint.com/rss/AI"
   ],
   [
-   "https://www.moneycontrol.com/rss/marketreports.xml"
+   "https://news.google.com/rss/search?q=%28tariffs%20OR%20sanctions%20OR%20%22export%20controls%22%20OR%20%22trade%20deal%22%20OR%20%22supply%20chain%22%29%20%28China%20OR%20US%20OR%20India%29%20when%3A2d&hl=en-IN&gl=IN&ceid=IN:en"
+  ],
+  [
+   "https://news.google.com/rss/search?q=%28semiconductor%20OR%20%22AI%20chips%22%20OR%20%22data%20centres%22%20OR%20%22artificial%20intelligence%22%20investment%29%20when%3A2d&hl=en-IN&gl=IN&ceid=IN:en"
+  ],
+  [
+   "https://news.google.com/rss/search?q=%28%22critical%20minerals%22%20OR%20lithium%20OR%20%22rare%20earths%22%20OR%20%22battery%20storage%22%20OR%20%22solar%20capacity%22%20OR%20%22nuclear%20power%22%29%20when%3A2d&hl=en-IN&gl=IN&ceid=IN:en"
   ]
  ],
  "rss.written": [
@@ -2889,17 +2895,17 @@ SNAP = json.loads(r"""
    "news_articles",
    [
     {
-     "article_id": "85cc91785d2a",
+     "article_id": "3015af1b3653",
      "published_at": "2099-01-02T03:04:05",
-     "source": "moneycontrol_latest",
+     "source": "et_tech",
      "summary": "Analysts cheer TCS too",
-     "title": "Reliance Industries posts record profit (testnews.xml)",
+     "title": "Reliance Industries posts record profit (13357270.cms)",
      "url": "https://n.test/a"
     },
     {
-     "article_id": "8c232d2ba3fb",
+     "article_id": "c703644c1e71",
      "published_at": "Fri, 25 Sep 2099",
-     "source": "moneycontrol_latest",
+     "source": "et_tech",
      "summary": "",
      "title": "Macro wrap: markets end flat on the week",
      "url": ""
@@ -2910,12 +2916,12 @@ SNAP = json.loads(r"""
    "news_article_stocks",
    [
     {
-     "article_id": "85cc91785d2a",
+     "article_id": "3015af1b3653",
      "match_location": "summary",
      "sid": "TCS"
     },
     {
-     "article_id": "85cc91785d2a",
+     "article_id": "3015af1b3653",
      "match_location": "title",
      "sid": "RELI"
     }
@@ -2925,20 +2931,20 @@ SNAP = json.loads(r"""
    "news_articles",
    [
     {
-     "article_id": "49a3dc021c4e",
+     "article_id": "ab3fd0438412",
+     "published_at": "2099-01-02T03:04:05",
+     "source": "livemint_ai",
+     "summary": "Analysts cheer TCS too",
+     "title": "Reliance Industries posts record profit (t.com/rss/AI)",
+     "url": "https://n.test/a"
+    },
+    {
+     "article_id": "b7f0455a135d",
      "published_at": "Fri, 25 Sep 2099",
-     "source": "moneycontrol_business",
+     "source": "livemint_ai",
      "summary": "",
      "title": "Macro wrap: markets end flat on the week",
      "url": ""
-    },
-    {
-     "article_id": "6192b3d8e6bc",
-     "published_at": "2099-01-02T03:04:05",
-     "source": "moneycontrol_business",
-     "summary": "Analysts cheer TCS too",
-     "title": "Reliance Industries posts record profit (business.xml)",
-     "url": "https://n.test/a"
     }
    ]
   ],
@@ -2946,12 +2952,12 @@ SNAP = json.loads(r"""
    "news_article_stocks",
    [
     {
-     "article_id": "6192b3d8e6bc",
+     "article_id": "ab3fd0438412",
      "match_location": "summary",
      "sid": "TCS"
     },
     {
-     "article_id": "6192b3d8e6bc",
+     "article_id": "ab3fd0438412",
      "match_location": "title",
      "sid": "RELI"
     }
@@ -2961,17 +2967,17 @@ SNAP = json.loads(r"""
    "news_articles",
    [
     {
-     "article_id": "24ec33983d9b",
+     "article_id": "0427f8b68240",
      "published_at": "2099-01-02T03:04:05",
-     "source": "moneycontrol_markets",
+     "source": "gnews_trade",
      "summary": "Analysts cheer TCS too",
-     "title": "Reliance Industries posts record profit (treports.xml)",
+     "title": "Reliance Industries posts record profit (N&ceid=IN:en)",
      "url": "https://n.test/a"
     },
     {
-     "article_id": "51ffaa8534e5",
+     "article_id": "649350baf5d8",
      "published_at": "Fri, 25 Sep 2099",
-     "source": "moneycontrol_markets",
+     "source": "gnews_trade",
      "summary": "",
      "title": "Macro wrap: markets end flat on the week",
      "url": ""
@@ -2982,12 +2988,84 @@ SNAP = json.loads(r"""
    "news_article_stocks",
    [
     {
-     "article_id": "24ec33983d9b",
+     "article_id": "0427f8b68240",
      "match_location": "summary",
      "sid": "TCS"
     },
     {
-     "article_id": "24ec33983d9b",
+     "article_id": "0427f8b68240",
+     "match_location": "title",
+     "sid": "RELI"
+    }
+   ]
+  ],
+  [
+   "news_articles",
+   [
+    {
+     "article_id": "89d6e17db952",
+     "published_at": "Fri, 25 Sep 2099",
+     "source": "gnews_chips",
+     "summary": "",
+     "title": "Macro wrap: markets end flat on the week",
+     "url": ""
+    },
+    {
+     "article_id": "c4f9347bd68b",
+     "published_at": "2099-01-02T03:04:05",
+     "source": "gnews_chips",
+     "summary": "Analysts cheer TCS too",
+     "title": "Reliance Industries posts record profit (N&ceid=IN:en)",
+     "url": "https://n.test/a"
+    }
+   ]
+  ],
+  [
+   "news_article_stocks",
+   [
+    {
+     "article_id": "c4f9347bd68b",
+     "match_location": "summary",
+     "sid": "TCS"
+    },
+    {
+     "article_id": "c4f9347bd68b",
+     "match_location": "title",
+     "sid": "RELI"
+    }
+   ]
+  ],
+  [
+   "news_articles",
+   [
+    {
+     "article_id": "0954f9d33308",
+     "published_at": "2099-01-02T03:04:05",
+     "source": "gnews_transition",
+     "summary": "Analysts cheer TCS too",
+     "title": "Reliance Industries posts record profit (N&ceid=IN:en)",
+     "url": "https://n.test/a"
+    },
+    {
+     "article_id": "ff102ca1c9e0",
+     "published_at": "Fri, 25 Sep 2099",
+     "source": "gnews_transition",
+     "summary": "",
+     "title": "Macro wrap: markets end flat on the week",
+     "url": ""
+    }
+   ]
+  ],
+  [
+   "news_article_stocks",
+   [
+    {
+     "article_id": "0954f9d33308",
+     "match_location": "summary",
+     "sid": "TCS"
+    },
+    {
+     "article_id": "0954f9d33308",
      "match_location": "title",
      "sid": "RELI"
     }
