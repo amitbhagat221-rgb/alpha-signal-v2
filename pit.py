@@ -30,6 +30,15 @@ from signals._fundamentals import prefer_consolidated, ttm
 ANNUAL_LAG = 75
 QUARTERLY_LAG = 60
 SHAREHOLDING_LAG = 21
+# When a vendor statement could be known (audit R11). The filing lag is when the market
+# knew it; our copy arrives when the vendor publishes it and the monthly harvest fetches
+# it. Tickertape's annual statements arrived 37 of 2,221 by day 62 after year end, 38% by
+# day 123, 62% by day 154 and all by day 184 (FY26, first-seen dates), so a backtest at
+# 75 days used statements live did not have (MID cf accruals t −1.94 at 75 days, −1.01 at
+# 150). Rows captured live (first fetched from CAPTURE_START) are known from their fetch
+# date; earlier rows, bulk-loaded, from the modelled vendor lag.
+VENDOR_ANNUAL_LAG = 150
+CAPTURE_START = "2026-06-01"   # first monthly Tickertape harvest after the initial bulk load
 DERIVATIVE_MAX_AGE_DAYS = 7   # an option reading older than this (5 trading days) is not today's: SAIL was
                               # ranked on 2026-10-03 with a skew from 09-11, on a contract expired 09-29
 
@@ -64,15 +73,29 @@ def _validate_and_clean(df, columns):
 
 # ─────────────────── Knowable-data slicers ───────────────────
 
+def _arrived(df, eval_date, modelled_lag):
+    """Rows our copy actually held on eval_date: a live-captured row (first fetched on or
+    after CAPTURE_START) once its fetch date has passed, a bulk-loaded row once the
+    modelled vendor lag has. Frames without fetched_at pass through."""
+    if "fetched_at" not in df.columns or df.empty:
+        return df
+    fetched = df["fetched_at"].astype(str).str[:10]
+    live = fetched >= CAPTURE_START
+    modelled = df["end_date"] <= (eval_date - timedelta(days=modelled_lag)).isoformat()
+    return df[(live & (fetched <= eval_date.isoformat())) | (~live & modelled)]
+
+
 def knowable_quarterly(qi, eval_date, lag=QUARTERLY_LAG):
-    """Return rows where end_date + lag <= eval_date."""
+    """Rows the market knew (end_date + lag <= eval_date) and our copy held (_arrived)."""
     cutoff = (eval_date - timedelta(days=lag)).isoformat()
-    return qi[qi["end_date"] <= cutoff].copy()
+    return _arrived(qi[qi["end_date"] <= cutoff], eval_date, lag).copy()
 
 
 def knowable_annual(df, eval_date, lag=ANNUAL_LAG):
+    """Annual vendor statements the market knew and our copy held (VENDOR_ANNUAL_LAG for
+    rows loaded before live capture began)."""
     cutoff = (eval_date - timedelta(days=lag)).isoformat()
-    return df[df["end_date"] <= cutoff].copy()
+    return _arrived(df[df["end_date"] <= cutoff], eval_date, max(lag, VENDOR_ANNUAL_LAG)).copy()
 
 
 def knowable_shareholding(sh, eval_date, lag=SHAREHOLDING_LAG):
@@ -1515,9 +1538,9 @@ def pit_financial_signal(banking_metrics_full, eval_date):
 # producers need (raw_keys_for), so the live screener can use this path too.
 RAW_SQL = {
     "stocks": 'SELECT sid, cap_tier, sector, industry, market_cap_cr FROM stocks',
-    "qi": 'SELECT sid, period, end_date, reporting, revenue, operating_profit, net_income, eps, operating_expenses, pbt, ebitda FROM quarterly_income WHERE end_date IS NOT NULL ORDER BY sid, end_date',
-    "bs": 'SELECT sid, period, end_date, total_assets, total_equity, total_debt, current_assets, current_liabilities, cash_and_equivalents, receivables, retained_earnings, net_ppe, total_liabilities, shares_outstanding, long_term_debt FROM annual_balance_sheet WHERE end_date IS NOT NULL ORDER BY sid, end_date',
-    "cf": 'SELECT sid, period, end_date, operating_cash_flow, capex, free_cash_flow, investing_cash_flow, financing_cash_flow, working_capital_change, dividends_paid, net_change_in_cash FROM annual_cash_flow WHERE end_date IS NOT NULL ORDER BY sid, end_date',
+    "qi": 'SELECT sid, period, end_date, reporting, revenue, operating_profit, net_income, eps, operating_expenses, pbt, ebitda, fetched_at FROM quarterly_income WHERE end_date IS NOT NULL ORDER BY sid, end_date',
+    "bs": 'SELECT sid, period, end_date, total_assets, total_equity, total_debt, current_assets, current_liabilities, cash_and_equivalents, receivables, retained_earnings, net_ppe, total_liabilities, shares_outstanding, long_term_debt, fetched_at FROM annual_balance_sheet WHERE end_date IS NOT NULL ORDER BY sid, end_date',
+    "cf": 'SELECT sid, period, end_date, operating_cash_flow, capex, free_cash_flow, investing_cash_flow, financing_cash_flow, working_capital_change, dividends_paid, net_change_in_cash, fetched_at FROM annual_cash_flow WHERE end_date IS NOT NULL ORDER BY sid, end_date',
     "sh": 'SELECT sid, end_date, promoter_pct, pledge_pct, fii_pct, mf_pct, dii_pct, public_pct, insurance_pct, retail_hni_pct, other_pct FROM shareholding ORDER BY sid, end_date',
     "prices": 'SELECT sid, date, close, delivery_pct, volume FROM stock_prices WHERE close > 0 ORDER BY sid, date',
     "adjustments": 'SELECT sid, ex_date, factor, inds FROM corporate_adjustments ORDER BY sid, ex_date',

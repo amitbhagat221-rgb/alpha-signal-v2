@@ -137,3 +137,16 @@ def test_dead_names_get_a_tier_from_traded_value():
 
 def test_full_market_rows_are_never_the_evidence_row():
     assert bt.FULL_MARKET.startswith("v2_full_market")
+
+
+def test_a_statement_is_known_when_our_copy_had_it():
+    """R11: a live-captured annual row counts from its fetch date (Tickertape publishes
+    months after results); a bulk-loaded row from the modelled vendor lag."""
+    bs = pd.DataFrame({"sid": ["A", "B"], "end_date": ["2026-03-31", "2024-03-31"],
+                       "fetched_at": ["2026-09-01 19:10:00", "2026-05-02 10:00:00"]})
+    known = lambda d: set(pit.knowable_annual(bs, date.fromisoformat(d))["sid"])
+    assert known("2026-07-01") == {"B"}            # A passed the 75-day filing lag but had not arrived
+    assert known("2026-09-02") == {"A", "B"}
+    assert set(pit.knowable_annual(bs, date(2024, 7, 1))["sid"]) == set()    # B: 150 days after 2024-03-31 is 2024-08-28
+    assert set(pit.knowable_annual(bs, date(2024, 9, 1))["sid"]) == {"B"}
+    assert len(pit.knowable_annual(bs.drop(columns="fetched_at"), date(2026, 7, 1))) == 2   # no fetch date: filing lag only
