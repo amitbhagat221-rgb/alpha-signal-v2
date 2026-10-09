@@ -1,10 +1,19 @@
 {% extends "base.html" %}
 
-{% macro pc(x) %}{% if x is not none %}{{ "%.0f"|format(x*100) }}{% else %}–{% endif %}{% endmacro %}
+{% macro pc(x) %}{% if x is not none %}{{ (x*100)|round|int }}{% else %}–{% endif %}{% endmacro %}
+
+{% block title %}{{ page_title("Multibagger") }}{% endblock %}
 
 {% block content %}
 
-<div class="section-title">Multibagger Watchlist</div>
+<style>
+    .mb-cv { position: relative; display: inline-block; }
+    .mb-cv-btn { border: 0; cursor: pointer; font-family: inherit; }
+    .mb-dd { font-size: 10px; color: var(--text-muted); margin-top: 2px; }
+    .mb-cv .tooltip-popover { width: 220px; text-align: left; z-index: 20; }
+</style>
+
+<h1 class="section-title">Multibagger Watchlist</h1>
 <div class="section-desc">
     A <strong>separate</strong> quality-gated screen for 3–10× / 2–4yr candidates in small/mid-caps —
     deliberately kept <strong>out of your daily picks</strong> (different objective and horizon).
@@ -66,7 +75,7 @@
         <div style="flex: 1; min-width: 150px; text-align: center; padding: 6px 10px;">
             <div class="mono" style="font-size: 28px; font-weight: 800; color: {{ 'var(--green)' if loop.last else 'var(--text-primary)' }};">{{ "{:,}".format(n) }}</div>
             <div style="font-size: 12px; font-weight: 700; color: var(--text-primary);">{{ label }}</div>
-            <div style="font-size: 10.5px; color: var(--text-muted);">{{ sub }}</div>
+            <div style="font-size: 11px; color: var(--text-muted);">{{ sub }}</div>
         </div>
         {% if not loop.last %}<div style="display: flex; align-items: center; color: var(--text-muted); font-size: 22px;">→</div>{% endif %}
         {% endfor %}
@@ -91,15 +100,14 @@
         81% of eventual 3×+ winners draw down ≥30% en route, so a stop ejects you from winners.
         {% if o.conviction_counts %}
         <span class="mono" style="margin-left:6px;">
-            <span style="color:var(--green);">HOLD {{ o.conviction_counts.get('HOLD', 0) }}</span> ·
-            <span style="color:var(--amber);">WATCH {{ o.conviction_counts.get('WATCH', 0) }}</span> ·
-            <span style="color:var(--red);">REVIEW {{ o.conviction_counts.get('REVIEW', 0) }}</span>
+            <span class="score-green">HOLD {{ o.conviction_counts.get('HOLD', 0) }}</span> ·
+            <span class="score-amber">WATCH {{ o.conviction_counts.get('WATCH', 0) }}</span> ·
+            <span class="score-red">REVIEW {{ o.conviction_counts.get('REVIEW', 0) }}</span>
         </span>{% endif %}
     </div>
 
     {# ───────── How to use (detailed in-app guide) ───────── #}
-    {% set chip = 'display:inline-block; padding:2px 7px; border-radius:4px; font-size:9.5px; font-weight:700; vertical-align:middle;' %}
-    <details style="margin-top: 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-elevated, transparent);">
+        <details style="margin-top: 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-elevated, transparent);">
         <summary style="cursor: pointer; padding: 11px 14px; font-size: 12px; font-weight: 700; color: var(--text-primary); user-select: none;">
             How to use the Conviction column &nbsp;<span style="color: var(--text-muted); font-weight: 500;">— it's a holding monitor, not a stop-loss</span>
         </summary>
@@ -113,17 +121,17 @@
 
             <div style="display:flex; flex-direction:column; gap:9px; margin:12px 0;">
                 <div>
-                    <span style="{{ chip }} color:var(--green); border:1px solid var(--green)33; background:var(--green)1a;">HOLD</span>
+                    <span class="pill pill-green">HOLD</span>
                     &nbsp;Near its high, or sector momentum <em>and</em> relative strength still intact.
                     <strong>Action: do nothing</strong> — let the winner run.
                 </div>
                 <div>
-                    <span style="{{ chip }} color:var(--amber); border:1px solid var(--amber)33; background:var(--amber)1a;">WATCH</span>
+                    <span class="pill pill-amber">WATCH</span>
                     &nbsp;In a drawdown (roughly −25% to −50%) with mixed signals.
                     <strong>Action: hold, but monitor</strong> — re-read the thesis; add only on strength, don't cut on the dip alone.
                 </div>
                 <div>
-                    <span style="{{ chip }} color:var(--red); border:1px solid var(--red)33; background:var(--red)1a;">REVIEW</span>
+                    <span class="pill pill-red">REVIEW</span>
                     &nbsp;The full loser signature: <strong>deep (≤−50%) + ≥6 months underwater + sector momentum rolled
                     over + underperforming the market</strong>, <em>and</em> the broad small-cap market isn't itself in a bear
                     (so the weakness is idiosyncratic). <strong>Action: reassess the thesis — this is a flag to dig in,
@@ -145,7 +153,7 @@
                 <strong style="color: {{ 'var(--amber)' if o.market_guard_active else 'var(--green)' }};">
                 {{ 'ACTIVE — REVIEW suppressed (small-cap market in a bear)' if o.market_guard_active else 'dormant — market not in a bear' }}</strong>{% if o.market_dd is defined and o.market_dd is not none %}
                 <span class="mono">(NIFTY SMALLCAP 250 {{ (o.market_dd*100)|pct(0, signed=True) }} off its trailing peak)</span>{% endif %}.
-                Hover any chip to see that name's <span class="mono">drawdown · sector momentum · relative strength</span>.
+                Tap any chip to see that name's <span class="mono">drawdown · sector momentum · relative strength</span>.
             </p>
 
             <p style="margin: 10px 0 4px;">
@@ -156,21 +164,21 @@
         </div>
     </details>
 
-    <div style="overflow-x: auto; margin-top: 10px;">
+    <div class="table-wrap" style="margin-top: 10px;">
     <table style="width: 100%; border-collapse: collapse; font-size: 12.5px;">
         <thead>
-            <tr style="text-align: right; color: var(--text-muted); font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.4px;">
+            <tr style="text-align: right; color: var(--text-muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px;">
                 <th style="text-align: left; padding: 8px 6px;">#</th>
                 <th style="text-align: left; padding: 8px 6px;">Stock</th>
                 <th style="text-align: center; padding: 8px 6px;">Conviction</th>
-                <th class="u-cell">M-cap (₹cr)</th>
+                <th class="u-cell">M-cap</th>
                 <th class="u-cell">Score</th>
                 <th class="u-cell">Q / G / I / C</th>
                 <th class="u-cell">ROIC</th>
                 <th class="u-cell">PAT CAGR</th>
                 <th class="u-cell">F</th>
-                <th class="u-cell">Prom%</th>
-                <th class="u-cell">Pledge%</th>
+                <th class="u-cell">Promoter</th>
+                <th class="u-cell">Pledged</th>
                 <th class="u-cell">D/E</th>
             </tr>
         </thead>
@@ -179,34 +187,35 @@
             <tr style="border-top: 1px solid var(--border); text-align: right;">
                 <td style="text-align: left; padding: 9px 6px; color: var(--text-muted);" class="mono">{{ loop.index }}</td>
                 <td style="text-align: left; padding: 9px 6px;">
-                    <a href="/explorer/{{ s.sid }}" style="color: var(--text-primary); text-decoration: none; font-weight: 600;">{{ s.sid }}</a>
-                    <div style="font-size: 10.5px; color: var(--text-muted); max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ s.name }}</div>
+                    <a href="/explorer/{{ s.sid }}" style="color: var(--text-primary); text-decoration: none; font-weight: 600;">{{ s.ticker or s.sid }}</a>
+                    <div style="font-size: 11px; color: var(--text-muted); max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ s.name }}</div>
                 </td>
                 <td style="padding: 9px 6px; text-align: center;">
                     {% if s.conviction %}
                     {% set cv = s.conviction %}
-                    {% set cvcol = 'var(--green)' if cv=='HOLD' else ('var(--amber)' if cv=='WATCH' else 'var(--red)') %}
-                    <span class="mono" style="display:inline-block; padding:2px 7px; border-radius:4px; font-size:9.5px; font-weight:700;
-                          color:{{ cvcol }}; border:1px solid {{ cvcol }}33; background:{{ cvcol }}1a;"
-                          title="drawdown {{ (s.dd_pct*100)|pct(0) if s.dd_pct is not none else '–' }} · sector mom {{ (s.sector_mom*100)|pct(0, signed=True) if s.sector_mom is not none else '–' }} · rel-str {{ (s.rel_strength*100)|pct(0, signed=True) if s.rel_strength is not none else '–' }}">{{ cv }}</span>
-                    <div style="font-size:9px; color:var(--text-muted); margin-top:2px;">{{ (s.dd_pct*100)|pct(0) if s.dd_pct is not none else '' }}</div>
+                    <span class="mb-cv" x-data="{ open: false }">
+                        <button type="button" class="pill pill-{{ 'green' if cv=='HOLD' else ('amber' if cv=='WATCH' else 'red') }} mb-cv-btn"
+                                @click="open = !open" @click.away="open = false" :aria-expanded="open">{{ cv }}</button>
+                        <span x-show="open" x-cloak class="tooltip-popover">Drawdown {{ s.dd_pct | pct(0, scale=100) }} · sector momentum {{ s.sector_mom | pct(0, signed=True, scale=100) }} · relative strength {{ s.rel_strength | pct(0, signed=True, scale=100) }}</span>
+                    </span>
+                    <div class="mb-dd mono">{{ s.dd_pct | pct(0, scale=100) }}</div>
                     {% else %}<span style="color:var(--text-muted);">–</span>{% endif %}
                 </td>
-                <td class="mono" style="padding: 9px 6px;">{{ "{:,.0f}".format(s.mcap_cr) if s.mcap_cr is not none else '–' }}</td>
-                <td class="mono" style="padding: 9px 6px; font-weight: 700; color: var(--text-primary);">{{ "%.2f"|format(s.multibagger_score) if s.multibagger_score is not none else '–' }}</td>
-                <td class="mono" style="padding: 9px 6px; color: var(--text-secondary); font-size: 11px;">{{ pc(s.p_quality) }}/{{ pc(s.p_growth) }}/{{ pc(s.interaction) }}/{{ pc(s.p_conviction) }}</td>
-                <td class="mono" style="padding: 9px 6px;">{{ (s.roic*100)|pct(0) if s.roic is not none else '–' }}</td>
-                <td class="mono" style="padding: 9px 6px;">{{ (s.pat_cagr_3y*100)|pct(0) if s.pat_cagr_3y is not none else '–' }}</td>
-                <td class="mono" style="padding: 9px 6px;">{{ "%.0f"|format(s.f_score) if s.f_score is not none else '–' }}</td>
-                <td class="mono" style="padding: 9px 6px;">{{ "%.0f"|format(s.promoter_pct) if s.promoter_pct is not none else '–' }}</td>
-                <td class="mono" style="padding: 9px 6px; color: {{ 'var(--amber)' if (s.pledge_pct is not none and s.pledge_pct > 0) else 'var(--text-muted)' }};">{{ "%.0f"|format(s.pledge_pct) if s.pledge_pct is not none else '0' }}</td>
-                <td class="mono" style="padding: 9px 6px;">{{ "%.2f"|format(s.de_ratio) if s.de_ratio is not none else '–' }}</td>
+                <td class="num" style="padding: 9px 6px;">{{ s.mcap_cr | crore }}</td>
+                <td class="num" style="padding: 9px 6px; font-weight: 700; color: var(--text-primary);">{{ s.multibagger_score | signed(2) | replace('+','') }}</td>
+                <td class="num" style="padding: 9px 6px; color: var(--text-secondary); font-size: 11px;">{{ pc(s.p_quality) }}/{{ pc(s.p_growth) }}/{{ pc(s.interaction) }}/{{ pc(s.p_conviction) }}</td>
+                <td class="num" style="padding: 9px 6px;">{{ s.roic | pct(0, scale=100) }}</td>
+                <td class="num" style="padding: 9px 6px;">{{ s.pat_cagr_3y | pct(0, scale=100) }}</td>
+                <td class="num" style="padding: 9px 6px;">{{ s.f_score | signed(0) | replace('+','') }}</td>
+                <td class="num" style="padding: 9px 6px;">{{ s.promoter_pct | pct(0) }}</td>
+                <td class="num" style="padding: 9px 6px; color: {{ 'var(--amber)' if (s.pledge_pct is not none and s.pledge_pct >= 1) else 'var(--text-muted)' }};">{{ s.pledge_pct | pct(1) if s.pledge_pct is not none else '–' }}</td>
+                <td class="num" style="padding: 9px 6px;">{{ s.de_ratio | signed(2) | replace('+','') }}</td>
             </tr>
         {% endfor %}
         </tbody>
     </table>
     </div>
-    <div style="margin-top: 12px; font-size: 10.5px; color: var(--text-muted); line-height: 1.5;">
+    <div style="margin-top: 12px; font-size: 11px; color: var(--text-muted); line-height: 1.5;">
         Q/G/I/C = within-tier percentile of the Quality / Growth / growth×cheapness Interaction / Conviction pillars (0–100).
         Gates: Beneish M-score clean · pledge ≤10% · D/E ≤0.5 · ROIC ≥18% · Piotroski F ≥6 · 3y PAT CAGR ≥20% · promoter ≥35% · M-cap ₹1–20k cr.
         Survivorship-validated as a watchlist, not a return forecast (plan 0008 · ADR 0039).

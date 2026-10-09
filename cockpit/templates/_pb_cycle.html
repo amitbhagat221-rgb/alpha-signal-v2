@@ -1,0 +1,25 @@
+{% from "_pb_macros.html" import stock_cell, num, chip, flag_cell, change_cell, investor, bt_row, th, list_tools with context %}
+<div class="card" style="margin-top: 14px;">
+    <div class="pb-head">
+        <h2 class="section-title">Where the market stands</h2>
+        {% if d.regime %}<div class="mono u-muted-11">volatility regime: {{ d.regime }}</div>{% endif %}
+    </div>
+    <div class="section-desc">
+        Marks: you cannot predict, but you can know roughly where you are. Each reading is set against its own history.
+        There is deliberately no combined score — when most readings lean the same way, be more careful or more willing, not certain.
+    </div>
+    <div style="margin-top: 10px;">
+    {% for x in d.readings %}
+    <div class="pb-reading">
+        <div class="k">{{ x.label }}<div class="mono u-muted-11" style="font-weight: 400;">{{ x.as_of }}</div></div>
+        <div class="mono v">{{ x.value }}</div>
+        <div class="d"><strong style="color: var(--text-primary);">{{ x.reading }}.</strong> {{ x.context|capitalize }}.</div>
+    </div>
+    {% else %}<div class="u-muted-11" style="padding: 10px 6px;">No readings available.</div>
+    {% endfor %}
+    </div>
+    <div class="pb-foot">
+        History is short: breadth and valuation go back to 2020, the small-cap index to 2016, volatility to 2015 — about one full cycle.
+        Treat this as context for how much to hold, never as a timing signal.
+    </div>
+</div>

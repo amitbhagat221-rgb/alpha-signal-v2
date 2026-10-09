@@ -48,6 +48,7 @@ def _prewarm_cache():
         ("news_pool_168",      lambda: api._get_news_pool(hours=168)),
         ("news_pool_720",      lambda: api._get_news_pool(hours=720)),
         ("portfolio_bundle",   lambda: api.get_portfolio_bundle()),
+        ("multibagger",        lambda: api.get_multibagger_overview()),
     ])
 
 
@@ -388,7 +389,17 @@ def playbooks_page(request: Request):
     investors (avoid list, insider buying, compounders, superinvestor holdings).
     Separate from daily_picks; each tab states its own rule."""
     from cockpit import playbooks
-    return templates.TemplateResponse(request, "playbooks.html", {"page": "playbooks", "o": playbooks.overview()})
+    return templates.TemplateResponse(request, "playbooks.html", {
+        "page": "playbooks", "d": playbooks.tab_data("avoid"), "r": playbooks.rules()})
+
+
+@app.get("/partial/playbooks/{tab}", response_class=HTMLResponse)
+def playbooks_tab(request: Request, tab: str):
+    """One playbook tab's body, fetched the first time the tab is opened."""
+    from cockpit import playbooks
+    if tab not in playbooks.TABS:
+        raise HTTPException(404, "unknown playbook tab")
+    return templates.TemplateResponse(request, f"_pb_{tab}.html", {"d": playbooks.tab_data(tab), "r": playbooks.rules()})
 
 
 # NOTE: /flow, /command, /system, /sql moved to cockpit_ops (port 3001)

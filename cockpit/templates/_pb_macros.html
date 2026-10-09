@@ -1,0 +1,81 @@
+{% macro stock_cell(s) %}
+<a href="/explorer/{{ s.sid }}" class="pb-stock">{{ s.ticker }}</a>
+<div class="pb-name">{{ s.name }}</div>
+{% endmacro %}
+
+{% macro num(x, d=1, suffix='', signed=False) %}{% if x is not none %}{{ ("{:" ~ ("+" if signed else "") ~ ",." ~ d ~ "f}").format(x) }}{{ suffix }}{% else %}—{% endif %}{% endmacro %}
+
+{# colour is one of the --tokens; it picks the shared .pill tone (accent has a local one) #}
+{% macro chip(text, colour) %}{% set tone = {'var(--red)': 'red', 'var(--amber)': 'amber', 'var(--blue)': 'blue', 'var(--green)': 'green', 'var(--accent)': 'accent'}.get(colour, 'muted') %}<span class="pill pill-{{ tone }}">{{ text }}</span>{% endmacro %}
+
+{# sortable column header: a button, aria-sort kept by pbList().sort() #}
+{% macro th(label, cls='') %}<th class="{{ cls }}" aria-sort="none"><button type="button" class="pb-sort" @click="sort($el.closest('th'))">{{ label }}</button></th>{% endmacro %}
+
+{# filter box + shown count for a list wrapped in x-data="pbList()" #}
+{% macro list_tools(total, noun='rows') %}<div class="pb-tools">
+    <input type="search" class="pb-q" x-model="q" @input="apply()" placeholder="Filter {{ noun }}…" aria-label="Filter {{ noun }}">
+    <span class="mono u-muted-11" x-show="q || f" x-cloak><span x-text="shown"></span> of {{ total }} shown</span>
+    <button type="button" class="pb-clear" x-show="q || f" x-cloak @click="q = ''; f = ''; apply()">Clear</button>
+</div>{% endmacro %}
+
+{# red-flag count from the avoid list, shown beside every other screen #}
+{% macro flag_cell(n) %}{% if n %}{{ chip(n ~ (' flag' if n == 1 else ' flags'), 'var(--red)' if n >= 2 else 'var(--amber)') }}{% else %}<span class="u-muted-11">none</span>{% endif %}{% endmacro %}
+
+{% macro change_cell(h) %}
+{% if h.change == 'new' %}{{ chip('NEW', 'var(--blue)') }}
+{% elif h.change == 'up' %}{{ chip('+' ~ num(h.delta, 2) ~ ' pts', 'var(--accent)') }}
+{% elif h.change == 'down' %}{{ chip(num(h.delta, 2) ~ ' pts', 'var(--amber)') }}
+{% elif h.change == 'same' %}<span class="u-muted-11">no change</span>
+{% else %}<span class="u-muted-11">–</span>{% endif %}
+{% endmacro %}
+
+{% macro investor(inv, index) %}
+<details class="pb-inv">
+    <summary>
+        <span class="mono pb-idx">{{ index }}</span>
+        <span class="pb-inv-name">{{ inv.name }}</span>
+        <span class="mono pb-sub">{{ inv.n }} stocks</span>
+        {% if inv.n_new %}{{ chip(inv.n_new ~ ' new', 'var(--blue)') }}{% endif %}
+        {% if inv.n_up %}{{ chip(inv.n_up ~ ' added', 'var(--accent)') }}{% endif %}
+        {% if inv.n_down %}{{ chip(inv.n_down ~ ' trimmed', 'var(--amber)') }}{% endif %}
+        {% if inv.below_1pct %}{{ chip(inv.below_1pct|length ~ ' below 1%', 'var(--text-muted)') }}{% endif %}
+    </summary>
+    <div class="table-wrap pb-scroll pb-inv-body">
+    {% if inv.filed_as %}<div class="pb-foot" style="margin: 0 0 6px;">Filed as: {{ inv.filed_as|join(' · ') }}</div>{% endif %}
+    <table class="pb-table">
+        <thead><tr><th class="l">Stock</th><th class="l">Tier</th><th>Holding</th><th class="c">Since last filing</th><th>Quarter</th></tr></thead>
+        <tbody>
+        {% for h in inv.holdings %}
+        <tr><td class="l">{{ stock_cell(h) }}</td><td class="l mono u-muted-11">{{ h.tier or '–' }}</td>
+            <td class="mono">{{ num(h.pct, 2, '%') }}</td><td class="c">{{ change_cell(h) }}</td>
+            <td class="mono u-muted-11">{{ h.quarter }}</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% if inv.below_1pct %}
+    <div class="pb-foot">No longer named above 1% (sold, or fell under the line):
+        {% for g in inv.below_1pct %}<a href="/explorer/{{ g.sid }}" class="mono" style="color: var(--text-secondary); text-decoration: none;">{{ g.ticker }}</a> <span class="mono">({{ num(g.pct, 2, '%') }} before)</span>{% if not loop.last %} · {% endif %}{% endfor %}
+    </div>
+    {% endif %}
+    </div>
+</details>
+{% endmacro %}
+{% macro bt_row(label, sub, st, cost=True) %}
+{% set short = st and st.months < 12 %}
+<tr{% if short %} class="pb-short"{% endif %}><td class="l"><span class="pb-stock">{{ label }}</span>{% if short %} <span class="pill pill-muted">{{ st.months }} months only</span>{% endif %}{% if sub %}<div class="pb-name" style="max-width: 420px; white-space: normal;">{{ sub }}</div>{% endif %}</td>
+{% if st %}
+    <td class="mono u-muted-11">{{ st.first }} → {{ st.last }}<br>{{ st.months }} months</td>
+    <td class="mono">{{ num(st.avg_names, 0) }}</td>
+    <td class="mono">{% if cost %}{{ st.gross_ann|pct(1, signed=True) }}{% else %}—{% endif %}</td>
+    <td class="mono u-muted-11">{% if cost %}{{ st.cost_ann|pct(1) }}{% else %}—{% endif %}</td>
+    <td class="mono strong">{{ st.net_ann|pct(1, signed=True) }}</td>
+    <td class="mono">{{ st.bench_ann|pct(1, signed=True) }}</td>
+    <td class="mono">{{ st.index_ann|pct(1, signed=True) }}</td>
+    <td class="mono strong" style="color: {{ 'var(--green)' if st.excess_ann > 0 else 'var(--red)' }};">{{ st.excess_ann|pct(1, signed=True) }}</td>
+    <td class="mono">{% if st.t_stat is not none %}{{ '%+.2f'|format(st.t_stat) }}{% else %}—{% endif %}</td>
+    <td class="mono">{{ st.hit_rate|pct(0) }}</td>
+    <td class="mono">{{ st.max_drawdown|pct(0) }}</td>
+{% else %}
+    <td colspan="11" class="l u-muted-11">No month had enough names to hold.</td>
+{% endif %}</tr>
+{% endmacro %}

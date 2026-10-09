@@ -21,6 +21,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 import db
 import views
 from db import read_sql
+from formatting import macro_label
 
 
 # Cache decorators + JSON coercion live in cockpit/_shared.py so cockpit_ops
@@ -1291,51 +1292,66 @@ def _conviction_verdicts(surv):
     sids = surv["sid"].dropna().tolist()
     if not sids:
         return {}
-    # month-end closes for ALL sids over ~13 months (one row per sid-month)
-    me = read_sql(
-        "WITH r AS (SELECT sid, date, close, ROW_NUMBER() OVER "
-        "(PARTITION BY sid, strftime('%Y-%m', date) ORDER BY date DESC) rn "
-        "FROM stock_prices WHERE date >= date('now','-400 day') AND close > 0) "
-        "SELECT sid, date, close FROM r WHERE rn = 1")
+    # Month-end closes. Only the survivors need the full ~13-month series (drawdown,
+    # months underwater); the universe medians (market / sector momentum) need just
+    # two month-ends, so rank those two months for everyone, not 400 days.
+    # calendar months in the ~400-day window (index lookups only, no table scan)
+    last_day = db.scalar("SELECT MAX(date) FROM stock_prices")
+    first_day = db.scalar("SELECT date(MAX(date), '-400 day') FROM stock_prices")
+    if not last_day:
+        return {}
+    months = pd.period_range(first_day[:7], last_day[:7], freq="M")
+    if len(months) < 7:
+        return {}
+    k = min(6, len(months) - 1)                       # ~6-month lookback for momentum
+    ends = (months[-1 - k], months[-1])
+    ph = ",".join("?" * len(sids))
+    me_sql = ("WITH r AS (SELECT sid, date, close, ROW_NUMBER() OVER "
+              "(PARTITION BY sid, strftime('%Y-%m', date) ORDER BY date DESC) rn "
+              "FROM stock_prices WHERE {where} AND close > 0) "
+              "SELECT sid, date, close FROM r WHERE rn = 1")
+    end_where = " OR ".join(
+        f"(date >= '{m.start_time:%Y-%m-%d}' AND date <= '{m.end_time:%Y-%m-%d}')" for m in ends)
+    me = read_sql(me_sql.format(where=f"sid IN ({ph}) AND date >= '{first_day}'"), params=sids)
+    ends_df = read_sql(me_sql.format(where=end_where))
     if me.empty:
         return {}
     me["ym"] = pd.to_datetime(me["date"]).dt.to_period("M")
     mat = me.pivot_table(index="ym", columns="sid", values="close", aggfunc="last").sort_index()
-    if len(mat) < 7:
-        return {}
+    ends_df["ym"] = pd.to_datetime(ends_df["date"]).dt.to_period("M")
+    ends_mat = ends_df.pivot_table(index="ym", columns="sid", values="close", aggfunc="last").sort_index()
     sector = read_sql("SELECT sid, sector FROM stocks").set_index("sid")["sector"]
 
-    # split/bonus-adjust the survivor columns (medians wash out for baskets)
+    # split/bonus back-adjust (raw closes: a bonus is a fake -50% drop)
     ca = read_sql(
         "SELECT sid, ex_date, ind, subject FROM corporate_actions "
         "WHERE ind IN ('SPLIT','BONUS') AND ex_date >= date('now','-400 day') AND sid IS NOT NULL")
-    month_ts = mat.index.to_timestamp("M")
-    for _, r in ca.iterrows():
-        sid = r["sid"]
-        if sid not in mat.columns:
-            continue
-        s = str(r["subject"]).lower()
-        f = 1.0
-        if r["ind"] == "SPLIT" or "split" in s:
-            m = re.search(r"from\s*rs[.]?\s*([\d.]+).*?to\s*rs[.]?\s*([\d.]+)", s)
-            if m and float(m.group(2)) > 0:
-                f = float(m.group(1)) / float(m.group(2))
-        elif r["ind"] == "BONUS" or "bonus" in s:
-            m = re.search(r"(\d+)\s*:\s*(\d+)", s)
-            if m and int(m.group(2)) > 0:
-                f = (int(m.group(1)) + int(m.group(2))) / int(m.group(2))
-        if f > 1.0:
-            mask = month_ts < pd.Timestamp(r["ex_date"])
-            mat.loc[mask, sid] = mat.loc[mask, sid] / f
+    for m in (mat, ends_mat):                           # the medians use adjusted closes too
+        month_ts = m.index.to_timestamp("M")
+        for _, r in ca.iterrows():
+            sid = r["sid"]
+            if sid not in m.columns:
+                continue
+            s = str(r["subject"]).lower()
+            f = 1.0
+            if r["ind"] == "SPLIT" or "split" in s:
+                mm = re.search(r"from\s*rs[.]?\s*([\d.]+).*?to\s*rs[.]?\s*([\d.]+)", s)
+                if mm and float(mm.group(2)) > 0:
+                    f = float(mm.group(1)) / float(mm.group(2))
+            elif r["ind"] == "BONUS" or "bonus" in s:
+                mm = re.search(r"(\d+)\s*:\s*(\d+)", s)
+                if mm and int(mm.group(2)) > 0:
+                    f = (int(mm.group(1)) + int(mm.group(2))) / int(mm.group(2))
+            if f > 1.0:
+                mask = month_ts < pd.Timestamp(r["ex_date"])
+                m.loc[mask, sid] = m.loc[mask, sid] / f
 
-    n = len(mat)
-    k = min(6, n - 1)                       # ~6-month lookback for momentum
-    ret6 = mat.iloc[-1] / mat.iloc[-1 - k] - 1.0
+    ret6 = ends_mat.iloc[-1] / ends_mat.iloc[0] - 1.0
     mkt6 = ret6.median(skipna=True)
     # sector-relative 6m momentum (median of sector's 6m returns − market)
     sec_mom = {}
     for sec, grp in sector.groupby(sector):
-        cols = [c for c in mat.columns if c in grp.index]
+        cols = [c for c in ret6.index if c in grp.index]
         if len(cols) >= 4:
             sec_mom[sec] = float(ret6[cols].median(skipna=True) - mkt6)
 
@@ -1381,8 +1397,14 @@ def _conviction_verdicts(surv):
     return out
 
 
-@_ttl_cache(60)
 def get_multibagger_overview(limit=60):
+    """The multibagger payload, cached on disk per snapshot date (the screen runs
+    weekly; prices move the conviction column, so it also refreshes hourly)."""
+    return _multibagger_payload(db.scalar("SELECT MAX(snapshot_date) FROM multibagger_scores"), limit)
+
+
+@_persisted_cache(3600, name="multibagger_overview")
+def _multibagger_payload(snap, limit=60):
     """Multibagger watchlist — the SEPARATE 3-stage funnel (plan 0008), kept OUT
     of daily_picks. Returns the small-cap regime banner, the gate funnel, and the
     survivor watchlist.
@@ -1391,12 +1413,11 @@ def get_multibagger_overview(limit=60):
     watchlist), NOT the ranking — the ranking edge is validated zero-to-negative
     across regimes (worst in uptrends), see ADR 0039. `regime_favorable=0` flags
     the validated-unfavourable case so the page can disclose it."""
-    snap = db.scalar("SELECT MAX(snapshot_date) FROM multibagger_scores")
     if snap is None:
         return {"available": False}
 
     rows = read_sql(
-        "SELECT m.*, s.name, s.sector FROM multibagger_scores m "
+        "SELECT m.*, s.name, s.ticker, s.sector FROM multibagger_scores m "
         "JOIN stocks s ON m.sid = s.sid WHERE m.snapshot_date = ?",
         params=[snap],
     )
@@ -1746,11 +1767,11 @@ def get_sector_digest():
         scored = [d for d in drivers if isinstance(d.get("value"), (int, float))][:3]
         if scored:
             driver_preview = " · ".join(
-                f"{d.get('driver','')} {d.get('raw') or (str(d.get('value','')) + (d.get('unit') or ''))}"
+                f"{macro_label(d.get('driver',''))} {d.get('raw') or (str(d.get('value','')) + (d.get('unit') or ''))}"
                 for d in scored
             )
         else:
-            driver_preview = " · ".join(d.get("raw", "") or d.get("driver", "") for d in drivers[:3])
+            driver_preview = " · ".join(d.get("raw", "") or macro_label(d.get("driver", "")) for d in drivers[:3])
         hint = None
         if r["bucket"] == "HEADWIND" and (r["n_picks_top30"] or 0) > 0 and picks:
             hint = "Model still picking here — " + ", ".join(p["ticker"] for p in picks[:3])
