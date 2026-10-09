@@ -205,3 +205,30 @@ def test_quarterly_yoy_is_none_without_a_prior_year_quarter(tmpdb):
     qs = list(reversed(api.get_quarterly_financials("X")["quarters"]))      # oldest first
     assert [q["revenue_yoy"] for q in qs[:4]] == [None] * 4 and [q["pat_yoy"] for q in qs[:4]] == [None] * 4
     assert qs[4]["revenue_yoy"] == 40.0 and qs[5]["pat_yoy"] == pytest.approx(36.4)
+
+
+def test_mcp_pick_breakdown_is_the_views_function(tmpdb, monkeypatch):
+    """One breakdown: the MCP tool returns views.pick_breakdown (less the page's `eligible`
+    flag, plus its note) and holds no second copy of the percentile arithmetic."""
+    import json
+    import factors
+    from pathlib import Path
+    monkeypatch.setattr(factors, "SIGNAL_WEIGHTS", {"LARGE": {"momentum": 0.6, "accruals": -0.4}})
+    monkeypatch.setattr(factors, "weights", lambda scheme="SIGNAL_WEIGHTS": factors.SIGNAL_WEIGHTS)
+    monkeypatch.setattr(factors, "SCREENER_COLS", {"momentum": "mom", "accruals": "acc"})
+    monkeypatch.setattr(factors, "SCREENER_TIER_COLS", {})
+    _exec(tmpdb, "INSERT INTO pit_replay_snapshots VALUES (?,?,?,?,?,?,?)", [
+        ("A", "2026-10-01", "LARGE", 1, 0.7, json.dumps({"ticker": "A", "mom": 3.0, "acc": 0.1}), json.dumps({"base_score": 0.8})),
+        ("B", "2026-10-01", "LARGE", 2, 0.4, json.dumps({"ticker": "B", "mom": 1.0, "acc": 0.5}), "{}")])
+    from alpha_mcp import research as R
+    monkeypatch.setattr(R, "resolve_sid", lambda s: s)
+    mine = R.pick_breakdown("A", "2026-10-01")
+    page = views.pick_breakdown("A", "2026-10-01")
+    for c in page["contributions"]:
+        c.pop("eligible")
+    assert {k: v for k, v in mine.items() if k not in ("note", "contributions")} == \
+        {k: v for k, v in page.items() if k != "contributions"}
+    assert [c["factor"] for c in mine["contributions"]] == ["momentum", "accruals"]
+    assert mine["tier_top3"][0]["sid"] == "A" and "rank(pct" not in Path(R.__file__).read_text()
+    with pytest.raises(ValueError):
+        R.pick_breakdown("ZZ", "2026-10-01")

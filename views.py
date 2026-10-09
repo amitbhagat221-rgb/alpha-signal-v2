@@ -180,9 +180,12 @@ def pick_breakdown(sid, pick_date=None):
     if not me:
         return None
     tier = me["cap_tier"]
-    rows = native_rows("SELECT sid, inputs_json, output_json FROM pit_replay_snapshots "
+    rows = native_rows("SELECT sid, rank, final_score, inputs_json, output_json FROM pit_replay_snapshots "
                        "WHERE snapshot_date = ? AND cap_tier = ?", [pick_date, tier])
-    d = pd.DataFrame([{"sid": r["sid"], **json.loads(r["inputs_json"] or "{}")} for r in rows])
+    d = pd.DataFrame([{**json.loads(r["inputs_json"] or "{}"), "sid": r["sid"], "_rank": r["rank"],
+                       "_final": r["final_score"],
+                       **{f"_{k}": v for k, v in json.loads(r["output_json"] or "{}").items()}}
+                      for r in rows])
     no = ineligible_signals(sid)
     comps, num, den = [], 0.0, 0.0
     for key, w in sorted(factors.weights().get(tier, {}).items(), key=lambda kv: -abs(kv[1])):
@@ -196,12 +199,22 @@ def pick_breakdown(sid, pick_date=None):
         c = abs(w) * (config.MISSING_FACTOR_SCORE if p is None else (1 - p if w < 0 else p))
         num += c
         den += abs(w)
-        comps.append({"factor": key, "value": None if raw != raw else raw, "tier_percentile": p, "weight": w,
+        comps.append({"factor": key, "signal_id": factors.signal_for(key, tier), "input_column": col,
+                      "value": None if raw != raw else raw, "tier_percentile": p, "weight": w,
                       "contribution": c, "eligible": key not in no})
     for c in comps:
         c["share_of_score"] = c["contribution"] / num if num else None
-    return {"as_of": pick_date, "tier": tier, "tier_size": len(d), "base_score": num / den if den else None,
-            "contributions": comps}
+    base = num / den if den else None
+    row = d[d["sid"] == sid].iloc[0]
+    stored = row.get("_base_score")
+    top3 = d.sort_values("_rank").head(3).reindex(columns=["sid", "ticker", "_rank", "_final"]).rename(
+        columns={"_rank": "rank", "_final": "final_score"}).to_dict("records")
+    return {"as_of": pick_date, "sid": sid, "ticker": row.get("ticker"), "name": row.get("name"), "tier": tier,
+            "rank": row["_rank"], "tier_size": len(d), "final_score": row["_final"],
+            "base_score": base, "penalty": row.get("_penalty"), "weight_coverage": row.get("_weight_coverage"),
+            "reproduces_stored_score": (stored is not None and stored == stored and base is not None
+                                        and abs(base - stored) < 1e-9),
+            "contributions": comps, "tier_top3": top3}
 
 _SNAPSHOT_COLS = """,
       ds.close_price, ds.piotroski_f, ds.cf_accruals, ds.bs_accruals,

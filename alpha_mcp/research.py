@@ -127,50 +127,16 @@ def pick_breakdown(stock: str, date: str | None = None) -> dict:
     Also lists the tier's top 3 for comparison. stock: sid or NSE ticker."""
     sid = resolve_sid(stock)
     date = date or _latest_pick_date()
-    df = _replay_frame(date)
-    if df is None:
-        raise ValueError(f"no frozen screener inputs for {date} (pit_replay_snapshots) — try pick_dates")
-    me = df[df["sid"] == sid]
-    if me.empty:
+    out = views.pick_breakdown(sid, date)   # the ONE breakdown, shared with the stock page
+    if out is None:
+        if _replay_frame(date) is None:
+            raise ValueError(f"no frozen screener inputs for {date} (pit_replay_snapshots) — try pick_dates")
         raise ValueError(f"{sid} was not ranked on {date}")
-    tier = me.iloc[0]["cap_tier"]
-    d = df[df["cap_tier"] == tier].copy()
-    tw = factors.weights().get(tier, {})
-    comps, num, den = [], 0.0, 0.0
-    for key, w in sorted(tw.items(), key=lambda kv: -abs(kv[1])):
-        col = factors.SCREENER_TIER_COLS.get((key, tier)) or factors.SCREENER_COLS.get(key)
-        if col not in d.columns:
-            continue
-        pct = d[col].rank(pct=True)
-        d[f"_p_{key}"] = pct
-        p = pct[d["sid"] == sid].iloc[0]
-        raw = d.loc[d["sid"] == sid, col].iloc[0]
-        if p == p:  # not NaN
-            c = abs(w) * (1 - p) if w < 0 else w * p
-        else:       # no value: the factor counts as the tier's middle (scoring.screener.MISSING_FACTOR_SCORE)
-            c = abs(w) * MISSING_FACTOR_SCORE
-        num += c
-        den += abs(w)
-        comps.append({"factor": key, "signal_id": factors.signal_for(key, tier), "input_column": col,
-                      "value": raw, "tier_percentile": p, "weight": w, "contribution": c,
-                      "share_of_score": None})
-    base = num / den if den else None
-    for c in comps:
-        if c["contribution"] is not None and num:
-            c["share_of_score"] = c["contribution"] / num
-    row = me.iloc[0]
-    stored = row.get("_base_score")
-    top3 = d.sort_values("_rank").head(3)[["sid", "ticker", "_rank", "_final"]].rename(
-        columns={"_rank": "rank", "_final": "final_score"}).to_dict("records")
-    return {"as_of": date, "sid": sid, "ticker": row.get("ticker"), "name": row.get("name"), "tier": tier,
-            "rank": row["_rank"], "tier_size": len(d), "final_score": row["_final"],
-            "base_score": base, "penalty": row.get("_penalty"),
-            "weight_coverage": row.get("_weight_coverage"),
-            "reproduces_stored_score": (stored is not None and base is not None
-                                        and abs(base - stored) < 1e-9),
-            "contributions": comps, "tier_top3": top3,
-            "note": "contributions sum to base_score x (sum of |weights|); a factor with no value counts as "
-                    "the middle of the tier (0.5), so missing data pulls a score towards the middle"}
+    for c in out["contributions"]:
+        c.pop("eligible", None)   # the page's flag; not part of this tool's contract
+    out["note"] = ("contributions sum to base_score x (sum of |weights|); a factor with no value counts as "
+                   "the middle of the tier (0.5), so missing data pulls a score towards the middle")
+    return out
 
 
 @tool()
