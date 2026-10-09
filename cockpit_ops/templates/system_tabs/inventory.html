@@ -59,13 +59,13 @@
                         {% if row.age_days is not none %}<span class="{{ 'c-red' if over else ('c-amber' if near else '') }}">{{ row.age_days }} d</span><span class="inv-faint"> / {{ row.threshold_days }} d</span>{% else %}<span class="inv-faint">—</span>{% endif %}
                     </td>
                     <td data-key="frequency">{{ row.frequency or '—' }}</td>
-                    <td data-key="source" class="inv-wrap">{{ row.source or '—' }}</td>
-                    <td data-key="produced_by" class="mono inv-faint inv-wrap">{{ row.produced_by or '—' }}</td>
+                    <td data-key="source">{{ row.source or '—' }}</td>
+                    <td data-key="produced_by" class="mono inv-faint">{{ row.produced_by or '—' }}</td>
                     <td data-key="consumed_count" class="num">
                         {{ row.consumed_count if row.consumed_count is defined else '—' }}
                         {% if row.consumed_by %}<span class="tooltip-wrap" x-data="{ open: false }"><button type="button" class="tooltip-trigger" @click="open = !open" @click.outside="open = false" @mouseenter="open = true" @mouseleave="open = false" aria-label="Used by {{ row.table }}">i</button><span x-show="open" x-cloak class="tooltip-popover">{{ row.consumed_by }}</span></span>{% endif %}
                     </td>
-                    <td data-key="description" class="inv-wrap">{{ row.description }}</td>
+                    <td data-key="description" class="inv-wrap">{% if (row.description or '')|length > 120 %}<button type="button" class="inv-clamp" x-data="{ o: false }" :class="{ open: o }" :aria-expanded="o" @click="o = !o">{{ row.description }}</button>{% else %}{{ row.description }}{% endif %}</td>
                 </tr>
                 {% endfor %}
             </tbody>
