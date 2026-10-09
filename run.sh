@@ -46,7 +46,15 @@ runlog.exit_code(sys.argv[5], sys.argv[1], sys.argv[2], started=sys.argv[3])' \
 harvest_lock() {   # shared with the watchdog heal runner and the cockpit rerun endpoint
     [ -n "${DRY:-}" ] && { echo "+ flock -n /tmp/alpha_signal_harvest.lock"; return 0; }
     exec 200>/tmp/alpha_signal_harvest.lock
-    flock -n 200 || { echo "another harvester holds the lock, exiting $(date -u)"; exit 0; }
+    # Wait for the job holding it (the morning run can still be going at 06:00 on the 1st),
+    # and if it never frees, record the skip: `exit 0` here made the 2026-10-01 Screener
+    # harvest vanish with no pipeline_log row.
+    flock -w "${LOCK_WAIT_S:-7200}" 200 || {
+        echo "another harvester held the lock for ${LOCK_WAIT_S:-7200}s — $JOB skipped $(date -u)"
+        python -c 'import sys; from pipeline import log_step
+log_step(sys.argv[1], "FAILED", error="skipped: harvest lock held by another job")' "cron_$JOB" \
+            || echo "[warn] could not log the skip to pipeline_log"
+        exit 1; }
 }
 
 JOB="${1:?usage: run.sh <job>}"
