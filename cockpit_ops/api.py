@@ -101,7 +101,36 @@ def get_db_summary():
 
 # v1 holds the C13b 18-period reconstructed validation. v2 doesn't have its
 # own backtest yet — we surface the v1 file as the canonical signal map.
-V1_BACKTEST_DIR = Path("/home/ubuntu/alpha-signal/data/backtest")
+
+
+def get_validation_evidence():
+    """The IC evidence behind the weights: one row per (signal, cap_tier) from
+    tools.backtest_pit.evidence() — the SAME source as the Backtests roster, /system
+    and /command. Wired (signal, tier) pairs first with their weight, then the rest by
+    |t|. Returns {rows, meta} with meta.n_wired / n_rows / as_of."""
+    from factors import SIGNAL_WEIGHTS
+    try:
+        from tools.backtest_pit import evidence
+        ev = evidence()
+    except Exception:
+        return {"rows": [], "meta": {}}
+    rows = []
+    for r in ev.to_dict("records"):
+        w = SIGNAL_WEIGHTS.get(r["cap_tier"], {}).get(r["signal"])
+        rows.append({
+            "signal": r["signal"], "cap_tier": r["cap_tier"],
+            "weight": w, "wired": bool(w),
+            "t_stat": _safe_float(r["t_stat"], 2), "mean_ic": _safe_float(r["mean_ic"], 4),
+            "icir": _safe_float(r["icir"], 3), "n_periods": _safe_int(r["n_periods"]),
+            "n_stocks_avg": _safe_int(r["n_stocks_avg"]), "verdict": r["verdict"],
+            "thin": (_safe_int(r["n_periods"]) or 0) < IC_MIN_PERIODS,
+        })
+    rows.sort(key=lambda x: (not x["wired"], -abs(x["t_stat"] or 0)))
+    computed = ev["computed_at"].max() if "computed_at" in ev and len(ev) else None
+    return {"rows": rows, "meta": {
+        "n_wired": sum(r["wired"] for r in rows), "n_rows": len(rows),
+        "as_of": str(computed)[:10] if computed is not None else None,
+        "min_periods": IC_MIN_PERIODS}}
 
 
 @_persisted_cache(300, name="get_model_overview")
@@ -110,13 +139,14 @@ def get_model_overview():
     from config import REGIMES, PORTFOLIO, TRANSACTION_COSTS_BPS
     from factors import SIGNAL_WEIGHTS
 
-    # Per-tier signal weights — convert dict to ordered list of (signal, weight, pct).
+    # Per-tier signal weights. The bar is |w| / sum|w|: a negative weight (an inverted
+    # factor) is a bar of its own size, flagged `inverted`, never a negative CSS width.
     tiers = {}
     for tier, weights in SIGNAL_WEIGHTS.items():
-        total = sum(weights.values()) or 1
-        rows = sorted(weights.items(), key=lambda kv: -kv[1])
+        total = sum(abs(w) for w in weights.values()) or 1
+        rows = sorted(weights.items(), key=lambda kv: -abs(kv[1]))
         tiers[tier] = [
-            {"signal": s, "weight": w, "pct": round(100 * w / total, 1)}
+            {"signal": s, "weight": w, "pct": round(100 * abs(w) / total, 1), "inverted": w < 0}
             for s, w in rows
         ]
 
@@ -133,36 +163,13 @@ def get_model_overview():
     # Current regime so the page can highlight the active row.
     current_regime = views.regime() or {}
 
-    # Validation t-stats from v1 backtest (PIT reconstruction, 18 periods).
-    validation_csv = V1_BACKTEST_DIR / "reconstructed_ic_by_tier.csv"
-    validation_rows = []
-    validation_meta = {}
-    if validation_csv.exists():
-        try:
-            v = pd.read_csv(validation_csv)
-            validation_meta = {
-                "periods": int(v["n_periods"].max()) if "n_periods" in v.columns else None,
-                "source": "v1 reconstructed_ic_by_tier.csv",
-            }
-            for _, row in v.iterrows():
-                validation_rows.append({
-                    "signal": row.get("signal"),
-                    "description": row.get("description"),
-                    "cap_tier": row.get("cap_tier"),
-                    "n_stocks_avg": _safe_int(row.get("n_stocks_avg")),
-                    "mean_ic": _safe_float(row.get("mean_ic"), 4),
-                    "icir": _safe_float(row.get("icir"), 3),
-                    "t_stat": _safe_float(row.get("t_stat"), 2),
-                    "verdict": row.get("verdict"),
-                })
-        except Exception:
-            pass
+    validation = get_validation_evidence()
 
     return {
         "tiers": tiers,
         "regimes": regimes,
         "current_regime": current_regime,
-        "validation": {"rows": validation_rows, "meta": validation_meta},
+        "validation": validation,
         "portfolio": PORTFOLIO,
         "transaction_costs_bps": TRANSACTION_COSTS_BPS,
         "backtest_roster": get_backtest_roster(),
