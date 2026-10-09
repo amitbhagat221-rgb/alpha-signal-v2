@@ -1580,3 +1580,11 @@ select, input, textarea { max-width: 100%; }
     .mobile-search .rail-search { margin: 0; }
     .mobile-search kbd { display: none; }
 }
+
+/* .hover-tip — a CSS-only popover for read-only context (no click needed).
+   <span class="hover-tip" tabindex="0">label<span class="tooltip-popover" role="tooltip">full text</span></span>
+   Shown on hover and keyboard focus; left-aligned so it stays on a 375px screen. */
+.hover-tip { position: relative; }
+.hover-tip > .tooltip-popover { display: none; left: 0; transform: none; width: min(280px, 80vw); text-align: left; white-space: normal; }
+.hover-tip > .tooltip-popover::after { display: none; }
+.hover-tip:hover > .tooltip-popover, .hover-tip:focus > .tooltip-popover, .hover-tip:focus-within > .tooltip-popover { display: block; }

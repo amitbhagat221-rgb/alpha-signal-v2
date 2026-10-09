@@ -137,7 +137,12 @@ def morning_brief(request: Request):
     picks = api.get_top_picks(top=5)
     pick_date = api.latest_pick_date()
     stock_count = views.pick_count(pick_date)
+    # Only the stocks that entered or left the published picks; rank movers
+    # (UPGRADE/DOWNGRADE, thousands a day) are not news on the brief.
     changes = api.get_changes()
+    entries = [c for c in changes if c.get("change_type") == "ENTRY" and c.get("sid")]
+    exits = [c for c in changes if c.get("change_type") == "EXIT" and c.get("sid")]
+    change_date = max((c.get("change_date") or "" for c in changes), default="")
     earnings = api.get_earnings_upcoming()
 
     # Enrich each pick with price metrics + analyst consensus + dossier —
@@ -161,7 +166,8 @@ def morning_brief(request: Request):
 
     return templates.TemplateResponse(request, "morning_brief.html", {
         "regime": regime, "picks": picks, "pick_date": pick_date,
-        "stock_count": stock_count, "changes": changes, "earnings": earnings,
+        "stock_count": stock_count, "entries": entries, "exits": exits,
+        "change_date": change_date, "earnings": earnings,
         "tailwinds": tailwinds, "headwinds": headwinds,
         "page": "brief",
     })
@@ -173,19 +179,15 @@ def actions(request: Request):
     # and handlers now run concurrently in the threadpool.
     action_data = {k: [dict(s) for s in v] if isinstance(v, list) else v
                    for k, v in api.get_action_candidates().items()}
-    # Enrich each candidate — one batched query per source, not 4 per stock.
+    # Price and target per candidate: two batched queries (the dossier and
+    # insider per-stock loads were never rendered).
     sids = [s.get("sid") for sec in ("buy", "watch", "exit") for s in action_data.get(sec, [])]
     pm = api.get_stock_price_metrics_batch(sids)
     ac = api.get_analyst_consensus_batch(sids)
-    insider = api.get_insider_signal_batch(sids)
     for section in ["buy", "watch", "exit"]:
         for stock in action_data.get(section, []):
-            sid = stock.get("sid")
-            if sid:
-                stock["pm"] = pm.get(sid, {})
-                stock["ac"] = ac.get(sid, {})
-                stock["dossier"] = api.get_dossier(sid)
-                stock["insider_desc"] = insider.get(sid, {}).get("description", "")
+            stock["pm"] = pm.get(stock.get("sid"), {})
+            stock["ac"] = ac.get(stock.get("sid"), {})
     return templates.TemplateResponse(request, "action_queue.html", {
         "page": "actions", "actions": action_data,
     })
@@ -250,7 +252,7 @@ def stock_detail(request: Request, sid: str):
 def portfolio(request: Request):
     bundle = api.get_portfolio_bundle()
     return templates.TemplateResponse(request, "portfolio.html", {
-        "page": "portfolio",
+        "page": "portfolio", "pick_date": api.latest_pick_date(),
         "regime": bundle["regime"],
         "portfolio": bundle["portfolio"],
         "analytics": bundle["analytics"],
