@@ -1090,6 +1090,19 @@ def get_sector_comparison(sid, sector):
     return base
 
 
+ACTION_CAP = 10
+
+
+def _one_per_sid(events):
+    """Keep the first (newest) event per stock: a name that re-entered twice is one card."""
+    seen, out = set(), []
+    for e in events:
+        if e.get("sid") not in seen:
+            seen.add(e.get("sid"))
+            out.append(e)
+    return out
+
+
 @_persisted_cache(60, name="get_action_candidates")
 def get_action_candidates():
     """Stocks categorized into Buy/Watch/Exit based on signals + changes."""
@@ -1098,8 +1111,8 @@ def get_action_candidates():
     buy, watch, exit_list = [], [], []
 
     # Consider Buying: entered top picks recently + strong signals
-    entries = [c for c in changes if c.get("change_type") == "ENTRY" and c.get("color") == "green"]
-    for e in entries[:10]:
+    entries = _one_per_sid([c for c in changes if c.get("change_type") == "ENTRY" and c.get("color") == "green"])
+    for e in entries[:ACTION_CAP]:
         sid = e.get("sid")
         if not sid:
             continue
@@ -1111,11 +1124,12 @@ def get_action_candidates():
                 "score": detail.get("final_score", 0), "rank": detail.get("rank"),
                 "reason": e.get("headline", ""),
                 "detail": e.get("detail", ""),
+                "change_date": e.get("change_date", ""),
             })
 
     # Consider Exiting: dropped from top picks
-    exits = [c for c in changes if c.get("change_type") == "EXIT" and c.get("color") == "red"]
-    for e in exits[:10]:
+    exits = _one_per_sid([c for c in changes if c.get("change_type") == "EXIT" and c.get("color") == "red"])
+    for e in exits[:ACTION_CAP]:
         sid = e.get("sid")
         if not sid:
             continue
@@ -1127,6 +1141,7 @@ def get_action_candidates():
                 "score": detail.get("final_score", 0),
                 "reason": e.get("headline", ""),
                 "detail": e.get("detail", ""),
+                "change_date": e.get("change_date", ""),
             })
 
     # Watch: forensic alerts on top picks
@@ -1153,7 +1168,8 @@ def get_action_candidates():
             "detail": "; ".join(flags),
         })
 
-    return {"buy": buy, "watch": watch, "exit": exit_list}
+    return {"buy": buy, "watch": watch, "exit": exit_list,
+            "buy_total": len(entries), "exit_total": len(exits), "days": 7, "cap": ACTION_CAP}
 
 
 @_persisted_cache(60, name="get_sized_book")

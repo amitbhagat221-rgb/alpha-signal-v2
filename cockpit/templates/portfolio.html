@@ -1,48 +1,94 @@
 {% extends "base.html" %}
 
 {% block content %}
+<style>
+    .pf-card { margin-bottom: 16px; padding: 16px 20px; border-left: 4px solid var(--accent); }
+    .pf-card.blue { border-left-color: var(--blue); }
+    .pf-card.green { border-left-color: var(--green); }
+    .pf-stats { display: flex; gap: 18px; align-items: center; flex-wrap: wrap; }
+    .pf-lbl { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
+    .pf-big { font-size: 22px; font-weight: 700; }
+    .pf-mid { font-size: 18px; font-weight: 700; }
+    .pf-sub { font-size: 12px; color: var(--text-muted); }
+    .pf-note { font-size: 12px; color: var(--text-muted); margin-top: 10px; }
+    .pf-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 12px; flex-wrap: wrap; gap: 12px; }
+    .pf-title { font-size: 13px; font-weight: 700; color: var(--text-primary); margin: 0; }
+    .pf-bar { flex: 1; min-width: 0; height: 6px; border-radius: 3px; background: var(--border); }
+    .pf-bar > div { height: 100%; border-radius: 3px; }
+    .pf-row { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+    .pf-row .name { width: 140px; flex-shrink: 0; font-size: 12px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .pf-row .val { width: 40px; flex-shrink: 0; font-size: 12px; }
+    .pf-tilt { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; font-size: 12px; }
+    .pf-tilt .grp { width: 95px; flex-shrink: 0; color: var(--text-secondary); }
+    .pf-tilt .z { width: 44px; flex-shrink: 0; text-align: right; font-weight: 700; }
+    .pf-tilt .mag { width: 70px; flex-shrink: 0; font-size: 12px; color: var(--text-muted); }
+    .pf-tilt .track { flex: 1; min-width: 0; height: 5px; border-radius: 3px; background: var(--border); position: relative; }
+    .pf-tilt .mid { position: absolute; left: 50%; top: -1px; bottom: -1px; width: 1px; background: var(--text-muted); opacity: 0.4; }
+    .pf-tilt .fill { position: absolute; top: 0; bottom: 0; border-radius: 3px; }
+    .pf-tilt .fill.pos { left: 50%; } .pf-tilt .fill.neg { right: 50%; }
+    .c-strong { color: var(--green); } .c-moderate { color: var(--blue); } .c-neutral { color: var(--text-muted); }
+    .bg-strong { background: var(--green); } .bg-moderate { background: var(--blue); } .bg-neutral { background: var(--text-muted); }
+    .pf-tbl { width: 100%; border-collapse: collapse; font-size: 12px; }
+    .pf-tbl th { font-size: 11px; color: var(--text-muted); text-align: left; padding: 6px; white-space: nowrap; }
+    .pf-tbl th.num { text-align: right; }
+    .pf-tbl td { padding: 6px; border-top: 1px solid var(--border); }
+    .pf-tbl td.muted { color: var(--text-muted); }
+    .pf-tbl a { color: var(--text-primary); text-decoration: none; font-weight: 600; }
+    .pf-tbl .num { text-align: right; }
+    .pf-tbl.wide { min-width: 640px; }
+    .advisory { font-size: 11px; font-weight: 700; margin-left: 6px; letter-spacing: 0.5px; vertical-align: middle; }
+</style>
 
-<div class="section-title">Model Portfolio</div>
+<h1 class="section-title">Model Portfolio</h1>
+<p class="section-desc">Two books, neither deployed: the <b>Model portfolio</b> (the top picks of every tier, equal-weighted within the regime's tier split) and the <b>Sized book</b> (HRP risk-parity weights, advisory). Each states its own expected return below. Picks as of <span class="mono">{{ pick_date }}</span>.</p>
 
 <!-- Analytics Summary -->
 {% if analytics %}
-<div class="card" style="margin-bottom: 16px; padding: 16px 20px; border-left: 4px solid var(--accent);">
-    <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 16px;">
+<div class="card pf-card">
+    <div class="grid-4" style="margin-bottom: 16px;">
         {% if analytics.get("expected_return") is not none %}
         <div>
-            <div class="u-muted-10">Expected Return</div>
-            <div class="mono {{ analytics.expected_return|tone(zero='score-red') }}" style="font-size: 22px; font-weight: 700;">
-                {{ analytics.expected_return|pct(1, signed=True) }}
-            </div>
-            <div class="u-muted-10">weighted avg analyst upside ({{ analytics.stocks_with_targets }} stocks)</div>
+            <div class="pf-lbl">Model portfolio expected return</div>
+            <div class="mono pf-big {{ analytics.expected_return|tone(zero='score-red') }}">{{ analytics.expected_return|pct(1, signed=True) }}</div>
+            <div class="pf-sub">equal-weight, {{ analytics.total_stocks }} names &middot; analyst upside, {{ analytics.stocks_with_targets }} with targets</div>
         </div>
         {% endif %}
         <div>
-            <div class="u-muted-10">Portfolio Avg Score</div>
-            <div class="mono" style="font-size: 22px; font-weight: 700; color: var(--green);">{{ "%.0f"|format(analytics.avg_score) }}</div>
-            <div class="u-muted-10">vs universe {{ "%.0f"|format(analytics.universe_avg_score) }} (+{{ "%.0f"|format(analytics.score_premium) }} premium)</div>
+            <div class="pf-lbl">Portfolio avg score</div>
+            <div class="mono pf-big score-green">{{ analytics.avg_score|round|int }}</div>
+            <div class="pf-sub">vs universe <span class="mono">{{ analytics.universe_avg_score|round|int }}</span> (<span class="mono">{{ analytics.score_premium|signed(0) }}</span> premium), score 0-100</div>
         </div>
         <div>
-            <div class="u-muted-10">Stocks</div>
-            <div class="mono" style="font-size: 22px; font-weight: 700;">{{ analytics.total_stocks }}</div>
-            <div class="u-muted-10">Top 3 weight: {{ analytics.top3_weight|pct(1) }}</div>
+            <div class="pf-lbl">Stocks</div>
+            <div class="mono pf-big">{{ analytics.total_stocks }}</div>
+            <div class="pf-sub">Top 3 weight: <span class="mono">{{ analytics.top3_weight|pct(1) }}</span></div>
         </div>
         <div>
-            <div class="u-muted-10">Regime</div>
+            <div class="pf-lbl">Regime</div>
             <div class="regime-badge {{ regime.color }}" style="font-size: 14px; display: inline-block;">{{ regime.regime }}</div>
+            <div class="pf-sub">VIX <span class="mono">{{ regime.vix_latest|round(1) }}</span></div>
         </div>
     </div>
 
+    <!-- Cap split (once: the regime allocation and the picks held per tier) -->
+    <div class="pf-lbl" style="margin-bottom: 8px;">Cap allocation (regime) &middot; stocks held</div>
+    {% for tier_name in pickable_tiers() %}
+    {% set alloc = regime['alloc_' ~ tier_name|lower] or 0 %}
+    <div class="pf-row">
+        <span class="name">{{ tier_name }}</span>
+        <div class="pf-bar"><div style="width: {{ alloc * 100 }}%; background: {{ tier_name|tier_color }};"></div></div>
+        <span class="mono val num" style="width: auto; min-width: 110px;">{{ (alloc * 100)|pct(0) }} &middot; {{ portfolio[tier_name|lower]|length }} stocks</span>
+    </div>
+    {% endfor %}
+
     <!-- Sector Allocation -->
     {% if analytics.get("sector_allocation") %}
-    <div style="font-size: 11px; color: var(--text-muted); font-weight: 600; margin-bottom: 8px;">SECTOR ALLOCATION</div>
+    <div class="pf-lbl" style="margin: 14px 0 8px;">Sector allocation (% of portfolio weight)</div>
     {% for sector, weight in analytics.sector_allocation[:8] %}
-    <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
-        <span style="width: 140px; font-size: 11px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ sector }}</span>
-        <div style="flex: 1; height: 6px; border-radius: 3px; background: var(--border);">
-            <div style="height: 100%; border-radius: 3px; width: {{ weight }}%; background: var(--accent);"></div>
-        </div>
-        <span class="mono" style="font-size: 11px; width: 35px; text-align: right;">{{ weight|pct(0) }}</span>
+    <div class="pf-row">
+        <span class="name">{{ sector }}</span>
+        <div class="pf-bar"><div style="width: {{ weight }}%; background: var(--accent);"></div></div>
+        <span class="mono val num">{{ weight|pct(0) }}</span>
     </div>
     {% endfor %}
     {% endif %}
@@ -52,216 +98,142 @@
 {# ────────── Plan 0005 Phase F: Barra-style Risk Decomp ────────── #}
 {% if analytics and analytics.get("risk_decomp") and analytics.risk_decomp.get("tilts") %}
 {% set rd = analytics.risk_decomp %}
-<div class="card" style="margin-bottom: 16px; padding: 16px 20px; border-left: 4px solid #9b59b6;">
-    <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 12px; flex-wrap: wrap; gap: 12px;">
+<div class="card pf-card">
+    <div class="pf-head">
         <div>
-            <div style="font-size: 13px; font-weight: 700; color: var(--text-primary);">Style & Concentration — risk decomposition</div>
-            <div style="font-size: 11px; color: var(--text-muted); margin-top: 2px;">Across {{ rd.n_picks }} picks · Barra-style z-tilts vs universe + sector HHI + cap-tier mix</div>
+            <h2 class="pf-title">Style &amp; Concentration — risk decomposition</h2>
+            <div class="pf-sub">Across <span class="mono">{{ rd.n_picks }}</span> picks &middot; Barra-style z-tilts vs universe + sector HHI</div>
         </div>
-        <div style="display: flex; gap: 18px; align-items: center;">
+        <div class="pf-stats">
             <div class="u-right">
-                <div style="font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Sector HHI</div>
-                <div class="mono" style="font-size: 18px; font-weight: 700;
-                    {% if rd.sector_hhi > 2500 %}color: var(--red);
-                    {% elif rd.sector_hhi > 1500 %}color: var(--amber);
-                    {% else %}color: var(--green);{% endif %}">{{ rd.sector_hhi }}</div>
-                <div class="u-muted-10">{{ rd.sector_hhi_label }}</div>
+                <div class="pf-lbl">Sector HHI</div>
+                <div class="mono pf-mid {{ 'score-red' if rd.sector_hhi > 2500 else ('score-amber' if rd.sector_hhi > 1500 else 'score-green') }}">{{ rd.sector_hhi }}</div>
+                <div class="pf-sub">{{ rd.sector_hhi_label }}</div>
             </div>
             <div class="u-right">
-                <div style="font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Top sector</div>
+                <div class="pf-lbl">Top sector</div>
                 <div class="mono" style="font-size: 12px; font-weight: 700;">{{ rd.top_sector }}</div>
-                <div class="u-muted-10">{{ rd.top_sector_pct|pct(0) }} · top-3 {{ rd.sector_top3_pct|pct(0) }}</div>
-            </div>
-            <div class="u-right">
-                <div style="font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Cap mix</div>
-                <div class="mono" style="font-size: 11px;">
-                    {% for t, n in rd.cap_mix.items() %}{% if not loop.first %}
-                    · {% endif %}<span style="color: {{ t|tier_color }};">{{ n }}{{ t[0] }}</span>{% endfor %}
-                </div>
+                <div class="pf-sub mono">{{ rd.top_sector_pct|pct(0) }} &middot; top-3 {{ rd.sector_top3_pct|pct(0) }}</div>
             </div>
         </div>
     </div>
 
-    <div style="font-size: 11px; color: var(--text-muted); font-weight: 600; margin-bottom: 8px; letter-spacing: 0.5px;">STYLE TILTS (z vs universe)</div>
+    <div class="pf-lbl" style="margin-bottom: 8px;">Style tilts (z vs universe)</div>
     {% for t in rd.tilts %}
     {% set z = t.z %}
-    {% set bar_color = '#2ecc71' if t.magnitude == 'strong' else ('#4d8eff' if t.magnitude == 'moderate' else 'var(--text-muted)') %}
-    {% set bar_pct = ((z if z >= 0 else -z) * 33)|round(0, 'floor') %}
-    {% if bar_pct > 100 %}{% set bar_pct = 100 %}{% endif %}
-    <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 5px; font-size: 11px;">
-        <span style="width: 95px; color: var(--text-secondary);">{{ t.group }}</span>
-        <span style="width: 38px; text-align: right; font-weight: 700; color: {{ bar_color }};" class="mono" title="{{ t.magnitude }} {{ t.direction }} {{ t.group }}">{{ z|signed(2) }}</span>
-        <div style="flex: 1; height: 5px; border-radius: 3px; background: var(--border); display: flex; justify-content: center; position: relative;">
-            <div style="position: absolute; left: 50%; top: -1px; bottom: -1px; width: 1px; background: var(--text-muted); opacity: 0.4;"></div>
-            <div style="position: absolute; top: 0; bottom: 0;
-                {% if z >= 0 %}left: 50%; width: {{ bar_pct / 2 }}%;{% else %}right: 50%; width: {{ bar_pct / 2 }}%;{% endif %}
-                background: {{ bar_color }}; border-radius: 3px;"></div>
+    {% set bar_pct = [(z|abs) * 33, 100]|min %}
+    <div class="pf-tilt">
+        <span class="grp">{{ t.group }}</span>
+        <span class="z mono c-{{ t.magnitude }}">{{ z|signed(2) }}</span>
+        <div class="track">
+            <div class="mid"></div>
+            <div class="fill {{ 'pos' if z >= 0 else 'neg' }} bg-{{ t.magnitude }}" style="width: {{ bar_pct / 2 }}%;"></div>
         </div>
-        <span style="width: 75px; font-size: 10px; color: var(--text-muted);">{{ t.magnitude }}</span>
+        <span class="mag">{{ t.magnitude }} {{ t.direction }}</span>
     </div>
     {% endfor %}
-    <div style="font-size: 10px; color: var(--text-muted); margin-top: 10px; font-style: italic;">
-        Reading: |z| ≥ 0.5 strong · 0.25-0.5 moderate · &lt; 0.25 neutral. Catches "your model is just a Value/Quality/Momentum bet" before you notice.
-    </div>
+    <div class="pf-note"><i>Reading: |z| &ge; 0.5 strong &middot; 0.25-0.5 moderate &middot; &lt; 0.25 neutral. Catches "your model is just a Value/Quality/Momentum bet" before you notice.</i></div>
 </div>
 {% endif %}
 
 {# ────────── Track 3.3c: HRP sized book (advisory) ────────── #}
 {% if sized_book %}
 {% set sb = sized_book %}
-<div class="card" style="margin-bottom: 16px; padding: 16px 20px; border-left: 4px solid #14b8a6;">
-    <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 12px; flex-wrap: wrap; gap: 12px;">
+<div class="card pf-card green">
+    <div class="pf-head">
         <div>
-            <div style="font-size: 13px; font-weight: 700; color: var(--text-primary);">
-                Sized Book — HRP
-                <span style="font-size: 9px; font-weight: 700; color: #14b8a6; border: 1px solid #14b8a6; border-radius: 3px; padding: 1px 5px; margin-left: 6px; letter-spacing: 0.5px;">ADVISORY</span>
-            </div>
-            <div style="font-size: 11px; color: var(--text-muted); margin-top: 2px;">
-                Risk-parity weights × alpha tilt over {{ sb.n_names }} names · book as of {{ sb.asof_date }} · no capital deployed
-            </div>
+            <h2 class="pf-title">Sized Book — HRP <span class="pill pill-green advisory">ADVISORY</span></h2>
+            <div class="pf-sub">Risk-parity weights &times; alpha tilt over <span class="mono">{{ sb.n_names }}</span> names &middot; book as of <span class="mono">{{ sb.asof_date }}</span> &middot; no capital deployed</div>
         </div>
-        <div style="display: flex; gap: 18px; align-items: center;">
+        <div class="pf-stats">
             {% if sb.expected_return_1y is not none %}
             <div class="u-right">
-                <div style="font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Expected 1Y</div>
-                <div class="mono {{ sb.expected_return_1y|tone(zero='score-red') }}" style="font-size: 18px; font-weight: 700;">{{ sb.expected_return_1y|pct(1, signed=True) }}</div>
-                <div style="font-size: 10px; color: var(--text-muted);" title="Book-weighted analyst price-target upside, over the {{ sb.er_coverage_n }} covered names ({{ sb.er_coverage_weight_pct|pct(0) }} of book weight)">analyst PT · {{ sb.er_coverage_n }}/{{ sb.n_names }} covered</div>
+                <div class="pf-lbl">Sized book expected 1Y</div>
+                <div class="mono pf-mid {{ sb.expected_return_1y|tone(zero='score-red') }}">{{ sb.expected_return_1y|pct(1, signed=True) }}</div>
+                <div class="pf-sub hover-tip" tabindex="0">HRP-weighted, analyst PT &middot; <span class="mono">{{ sb.er_coverage_n }}/{{ sb.n_names }}</span> covered
+                    <span class="tooltip-popover" role="tooltip">Book-weighted analyst price-target upside over the {{ sb.er_coverage_n }} covered names ({{ sb.er_coverage_weight_pct|pct(0) }} of book weight).</span></div>
             </div>
             {% endif %}
             <div class="u-right">
-                <div style="font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Effective N</div>
-                <div class="mono" style="font-size: 18px; font-weight: 700; color: var(--green);">{{ sb.effective_n }}</div>
-                <div class="u-muted-10">of {{ sb.n_names }} (1/Σw²)</div>
+                <div class="pf-lbl">Effective N</div>
+                <div class="mono pf-mid score-green">{{ sb.effective_n }}</div>
+                <div class="pf-sub">of <span class="mono">{{ sb.n_names }}</span> (1/&Sigma;w&sup2;)</div>
             </div>
             <div class="u-right">
-                <div style="font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Max stock</div>
+                <div class="pf-lbl">Max stock</div>
                 <div class="mono" style="font-size: 14px; font-weight: 700;">{{ sb.max_stock_pct|pct(1) }}</div>
-                <div class="u-muted-10">cap {{ sb.cap_stock_pct|pct(0) }}</div>
+                <div class="pf-sub">cap <span class="mono">{{ sb.cap_stock_pct|pct(0) }}</span></div>
             </div>
             <div class="u-right">
-                <div style="font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Max sector</div>
+                <div class="pf-lbl">Max sector</div>
                 <div class="mono" style="font-size: 14px; font-weight: 700;">{{ sb.max_sector_pct|pct(0) }}</div>
-                <div class="u-muted-10">cap {{ sb.cap_sector_pct|pct(0) }}</div>
+                <div class="pf-sub">cap <span class="mono">{{ sb.cap_sector_pct|pct(0) }}</span></div>
             </div>
         </div>
     </div>
 
-    <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
+    <div class="table-wrap">
+    <table class="pf-tbl wide">
         <thead>
-            <tr style="font-size: 10px; color: var(--text-muted); text-align: left;">
-                <th style="padding: 6px 8px;">Ticker</th>
-                <th style="padding: 6px;">Tier</th>
-                <th style="padding: 6px;">Sector</th>
-                <th class="u-cell-r">Score</th>
-                <th class="u-cell-r">Weight</th>
-                <th class="u-cell-r" title="Percent of portfolio variance this name carries (Σ=100%)">% Risk</th>
+            <tr>
+                <th>Ticker</th><th>Tier</th><th>Sector</th>
+                <th class="num">Score</th><th class="num">Weight</th>
+                <th class="num hover-tip" tabindex="0">% Risk<span class="tooltip-popover" role="tooltip">Percent of portfolio variance this name carries (sums to 100%).</span></th>
             </tr>
         </thead>
         <tbody>
             {% for r in sb.rows %}
-            <tr style="border-top: 1px solid var(--border);">
-                <td style="padding: 6px 8px;"><a href="/explorer/{{ r.sid }}" style="color: var(--text-primary); text-decoration: none; font-weight: 600;" title="{{ r.name }}">{{ r.ticker or r.sid }}</a></td>
-                <td style="padding: 6px; color: var(--text-muted);">{{ r.cap_tier }}</td>
-                <td style="padding: 6px; color: var(--text-muted);">{{ r.sector }}</td>
-                <td style="padding: 6px; text-align: right;" class="mono
-                    {% if r.factor_score >= 0.7 %} score-green{% elif r.factor_score >= 0.5 %} score-amber{% else %} score-red{% endif %}">
-                    {{ "%.0f"|format(r.factor_score * 100) }}</td>
-                <td style="padding: 6px; text-align: right;" class="mono" style="font-weight: 600;">{{ (r.weight * 100)|pct(1) }}</td>
-                <td style="padding: 6px; text-align: right; color: var(--text-secondary);" class="mono">{{ (r.marginal_risk_contrib * 100)|pct(0) }}</td>
+            <tr>
+                <td><a href="/explorer/{{ r.sid }}">{{ r.ticker or r.sid }}</a> <span class="pf-sub">{{ r.name }}</span></td>
+                <td class="muted">{{ r.cap_tier }}</td>
+                <td class="muted">{{ r.sector }}</td>
+                <td class="num {{ 'score-green' if r.factor_score >= 0.7 else ('score-amber' if r.factor_score >= 0.5 else 'score-red') }}">{{ (r.factor_score * 100)|round|int }}</td>
+                <td class="num">{{ (r.weight * 100)|pct(1) }}</td>
+                <td class="num" style="color: var(--text-secondary);">{{ (r.marginal_risk_contrib * 100)|pct(0) }}</td>
             </tr>
             {% endfor %}
         </tbody>
     </table>
-    <div style="font-size: 10px; color: var(--text-muted); margin-top: 10px; font-style: italic;">
-        HRP (López de Prado) allocates risk via correlation clusters — no expected-return input — then a bounded tilt toward higher scores, under per-stock / per-sector / liquidity caps. % Risk = each name's share of portfolio variance. Expected 1Y = book-weighted analyst price-target upside (~12-month, price only, excl. dividends; covered names only). ADR 0044.
     </div>
+    <div class="pf-note"><i>HRP (L&oacute;pez de Prado) allocates risk via correlation clusters — no expected-return input — then a bounded tilt toward higher scores, under per-stock / per-sector / liquidity caps. % Risk = each name's share of portfolio variance. Expected 1Y = book-weighted analyst price-target upside (~12-month, price only, excl. dividends; covered names only). ADR 0044.</i></div>
 </div>
 {% endif %}
 
-<!-- Allocation Donut + Tier Weights -->
-<div style="display: grid; grid-template-columns: 250px 1fr; gap: 16px; margin-bottom: 20px;">
-    <div class="card" style="display: flex; flex-direction: column; align-items: center; padding: 20px;">
-        <div style="position: relative; width: 180px; height: 180px;">
-            <canvas id="allocChart"></canvas>
-            <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center;">
-                <div class="mono" style="font-size: 22px; font-weight: 700;">{{ "%.1f"|format(regime.vix_latest) }}</div>
-                <div class="u-muted-10">VIX</div>
-            </div>
-        </div>
-    </div>
-    <div class="card">
-        {% for tier_name in pickable_tiers() %}
-        {% set alloc = regime['alloc_' ~ tier_name|lower] or 0 %}
-        {% set count = portfolio[tier_name|lower]|length %}
-        <div style="margin-bottom: 10px;">
-            <div style="display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 4px;">
-                <span style="color: var(--text-secondary);">{{ tier_name }}</span>
-                <span class="mono">{{ (alloc * 100)|pct(0) }} &middot; {{ count }} stocks</span>
-            </div>
-            <div style="height: 6px; border-radius: 3px; background: var(--border);">
-                <div style="height: 100%; border-radius: 3px; width: {{ alloc * 100 }}%; background: {{ tier_name|tier_color }};"></div>
-            </div>
-        </div>
-        {% endfor %}
-    </div>
-</div>
-
 <!-- Model Portfolio Tables -->
 {% for tier_name in pickable_tiers() %}{% set stocks = portfolio[tier_name|lower] %}
-{% if stocks %}
 <div class="card" style="margin-bottom: 12px; padding: 0; overflow: hidden;">
-    <div class="tier-header" style="padding: 10px 14px; margin-bottom: 0;">{{ tier_name }} CAP</div>
-    <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
+    <h2 class="tier-header" style="padding: 10px 14px; margin-bottom: 0; border-left: 3px solid {{ tier_name|tier_color }};">{{ tier_name }} CAP</h2>
+    {% if stocks %}
+    <div class="table-wrap">
+    <table class="pf-tbl wide">
         <thead>
-            <tr style="font-size: 10px; color: var(--text-muted); text-align: left;">
-                <th style="padding: 6px 14px;">#</th>
-                <th style="padding: 6px;">Ticker</th>
-                <th style="padding: 6px;">Sector</th>
-                <th class="u-cell-r">Score</th>
-                <th class="u-cell-r">Weight</th>
-                <th class="u-cell-r">Price</th>
-                <th class="u-cell-r">Target</th>
-                <th class="u-cell-r">Upside</th>
-                <th class="u-cell-r">1M</th>
+            <tr>
+                <th>#</th><th>Ticker</th><th>Sector</th>
+                <th class="num">Score</th><th class="num">Weight</th><th class="num">Price</th>
+                <th class="num">Target</th><th class="num">Upside</th><th class="num">1M</th>
             </tr>
         </thead>
         <tbody>
             {% for stock in stocks %}
-            <tr style="border-top: 1px solid var(--border);">
-                <td style="padding: 6px 14px;" class="mono">{{ stock.rank|int }}</td>
-                <td style="padding: 6px;"><a href="/explorer/{{ stock.sid }}" style="color: var(--text-primary); text-decoration: none; font-weight: 600;">{{ stock.ticker }}</a></td>
-                <td style="padding: 6px; color: var(--text-muted);">{{ stock.sector }}</td>
-                <td style="padding: 6px; text-align: right;" class="mono
-                    {% if stock.final_score >= 0.7 %} score-green{% elif stock.final_score >= 0.5 %} score-amber{% else %} score-red{% endif %}">
-                    {{ "%.0f"|format(stock.final_score * 100) }}</td>
-                <td class="mono u-cell-r">{{ stock.weight|pct(1) }}</td>
-                <td class="mono u-cell-r">{% if stock.get("price") %}{{ stock.price|inr(0) }}{% endif %}</td>
-                <td class="mono u-cell-r">{% if stock.get("price_target") %}{{ stock.price_target|inr(0) }}{% endif %}</td>
-                <td style="padding: 6px; text-align: right;" class="mono
-                    {% if stock.get('pt_upside') and stock.pt_upside > 0 %} score-green{% elif stock.get('pt_upside') %} score-red{% endif %}">
-                    {% if stock.get("pt_upside") is not none %}{{ stock.pt_upside|pct(0, signed=True) }}{% endif %}</td>
-                <td style="padding: 6px; text-align: right;" class="mono
-                    {% if stock.get('return_1m') and stock.return_1m > 0 %} score-green{% elif stock.get('return_1m') %} score-red{% endif %}">
-                    {% if stock.get("return_1m") is not none %}{{ stock.return_1m|pct(0, signed=True) }}{% endif %}</td>
+            <tr>
+                <td class="mono">{{ stock.rank|int }}</td>
+                <td><a href="/explorer/{{ stock.sid }}">{{ stock.ticker }}</a></td>
+                <td class="muted">{{ stock.sector }}</td>
+                <td class="num {{ 'score-green' if stock.final_score >= 0.7 else ('score-amber' if stock.final_score >= 0.5 else 'score-red') }}">{{ (stock.final_score * 100)|round|int }}</td>
+                <td class="num">{{ stock.weight|pct(1) }}</td>
+                <td class="num">{{ stock.price|inr(0) }}</td>
+                <td class="num">{{ stock.price_target|inr(0) }}</td>
+                <td class="num {{ stock.pt_upside|tone(zero='score-red') }}">{{ stock.pt_upside|pct(0, signed=True) }}</td>
+                <td class="num {{ stock.return_1m|tone(zero='score-red') }}">{{ stock.return_1m|pct(0, signed=True) }}</td>
             </tr>
             {% endfor %}
         </tbody>
     </table>
+    </div>
+    {% else %}
+    <div class="u-muted" style="padding: 14px;">No picks in this tier on {{ pick_date }}.</div>
+    {% endif %}
 </div>
-{% endif %}
 {% endfor %}
-
-<script src="{{ vendor('chart') }}"></script>
-<script>
-new Chart(document.getElementById('allocChart'), {
-    type: 'doughnut',
-    data: {
-        labels: ['Large', 'Mid', 'Small'],
-        datasets: [{ data: [{{ regime.alloc_large * 100 }}, {{ regime.alloc_mid * 100 }}, {{ regime.alloc_small * 100 }}],
-            backgroundColor: ['#3b82f6', '#8b5cf6', '#22c55e'], borderWidth: 0 }]
-    },
-    options: { cutout: '65%', plugins: { legend: { display: false } }, responsive: true, maintainAspectRatio: true }
-});
-</script>
 
 {% endblock %}
