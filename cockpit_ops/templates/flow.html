@@ -2,126 +2,185 @@
 
 {% block content %}
 
-{# ── Layer = the steps' module package (derived in cockpit_ops.api.get_flow_overview);
-      colours for the known packages, muted for the rest ── #}
+<style>
+.fl-head { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; flex-wrap:wrap; margin-bottom:8px; }
+.fl-head-r { display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+.fl-toast { font-size:11px; color:var(--green); opacity:0; transition:opacity .25s; }
+.fl-link { padding:8px 16px; background:var(--bg-card-hover); color:var(--text-secondary); border-radius:8px; text-decoration:none; font-size:12px; font-weight:600; }
+.fl-banner { margin-bottom:16px; border-left:4px solid var(--red); background:var(--red-bg); }
+.fl-banner-h { display:flex; justify-content:space-between; align-items:baseline; gap:8px; flex-wrap:wrap; margin-bottom:8px; }
+.fl-banner-t { font-size:13px; font-weight:800; color:var(--red); letter-spacing:.5px; }
+.fl-chips { display:flex; flex-wrap:wrap; gap:6px; }
+.fl-chip { display:inline-flex; align-items:center; gap:6px; padding:4px 10px; background:var(--bg-card); border:1px solid var(--red); border-radius:4px; text-decoration:none; font-size:11px; }
+.fl-chip b { color:var(--red); font-weight:700; }
+.fl-chip span { color:var(--text-primary); }
+.fl-chip small { color:var(--text-muted); font-size:10px; }
+.fl-banner-sub { margin:10px 0 6px; font-size:11px; color:var(--text-secondary); }
+.fl-dag-card { margin-bottom:16px; padding:18px; overflow-x:auto; }
+.fl-dag-h { display:flex; justify-content:space-between; align-items:baseline; gap:12px; flex-wrap:wrap; margin-bottom:14px; }
+.fl-dag-t { font-size:12px; font-weight:700; letter-spacing:.6px; text-transform:uppercase; color:var(--text-secondary); }
+.fl-legend { font-size:10px; color:var(--text-muted); display:flex; gap:14px; flex-wrap:wrap; }
+.fl-sw { display:inline-block; width:9px; height:9px; border-radius:2px; vertical-align:middle; margin-right:4px; border:1px solid transparent; }
+.fl-sw-ok { background:var(--green-bg); border-color:var(--green); }
+.fl-sw-fail { background:var(--red-bg); border-color:var(--red); }
+.fl-sw-crit { background:var(--red); border-color:var(--red); }
+.fl-sw-run { background:var(--amber-bg); border-color:var(--amber); }
+.fl-sw-none { background:var(--bg-card-hover); border-color:var(--border); }
+.fl-ln { display:inline-block; width:16px; vertical-align:middle; margin-right:4px; }
+.fl-ln-feed { border-top:2px solid var(--accent); }
+.fl-ln-lag { border-top:2px dashed var(--text-muted); }
+#flow-dag { position:relative; display:flex; align-items:stretch; gap:36px; min-width:max-content; }
+#flow-edges { position:absolute; inset:0; width:100%; height:100%; pointer-events:none; overflow:visible; }
+.fl-col { flex:1 1 0; min-width:200px; display:flex; flex-direction:column; }
+.fl-col-h { display:flex; justify-content:space-between; align-items:baseline; padding:6px 10px 8px; border-bottom:2px solid var(--layer); margin-bottom:8px; }
+.fl-col-n { font-size:11px; font-weight:800; letter-spacing:.7px; color:var(--layer); text-transform:uppercase; }
+.fl-col-list { display:flex; flex-direction:column; gap:4px; flex:1; }
+.dag-pill { position:relative; display:flex; align-items:center; justify-content:space-between; gap:6px; padding:5px 8px; border-radius:4px;
+            font-size:11px; line-height:1.2; border:1px solid var(--border); background:var(--bg-card-hover); color:var(--text-muted); }
+.dag-pill a { color:inherit; text-decoration:none; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; }
+.dag-ok { background:var(--green-bg); border-color:var(--green); color:var(--green); }
+.dag-fail { background:var(--red-bg); border-color:var(--red); color:var(--red); }
+.dag-crit { background:var(--red); border-color:var(--red); color:var(--bg-primary); }
+.dag-run { background:var(--amber-bg); border-color:var(--amber); color:var(--amber); }
+.rerun-btn { background:var(--bg-card-hover); color:inherit; border:1px solid var(--border); cursor:pointer; border-radius:3px; padding:0;
+             font-size:12px; line-height:1; display:inline-flex; align-items:center; justify-content:center; flex-shrink:0; width:22px; height:22px; }
+.fl-layer { margin-bottom:16px; border-left:4px solid var(--layer); }
+.fl-layer-h { display:flex; justify-content:space-between; align-items:baseline; gap:8px; margin-bottom:12px; }
+.fl-layer-t { font-size:14px; font-weight:800; letter-spacing:.8px; text-transform:uppercase; color:var(--text-primary); }
+.fl-layer-d { font-size:11px; color:var(--text-muted); margin-top:2px; }
+.fl-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(min(260px,100%), 1fr)); gap:10px; }
+.fl-step { position:relative; background:var(--bg-card); border:1px solid var(--border); border-left:3px solid var(--st); border-radius:6px; padding:10px 12px; min-width:0; }
+.fl-step .rerun-btn { position:absolute; top:8px; right:8px; width:auto; height:auto; padding:3px 8px; font-size:11px; color:var(--text-secondary); }
+.fl-step-link { display:block; text-decoration:none; padding-right:70px; }
+.fl-step-n { display:flex; gap:6px; align-items:baseline; margin-bottom:4px; flex-wrap:wrap; }
+.fl-step-n b { font-size:12px; color:var(--text-primary); overflow-wrap:anywhere; }
+.fl-crit { font-size:10px; padding:1px 5px; background:var(--amber-bg); color:var(--amber); border-radius:3px; font-weight:700; letter-spacing:.4px; }
+.fl-mod { font-size:10px; color:var(--text-muted); margin-bottom:6px; }
+.fl-mod em { font-style:normal; color:var(--amber); }
+.fl-writes { font-size:10px; color:var(--text-secondary); margin-bottom:4px; overflow-wrap:anywhere; }
+.fl-writes span { color:var(--accent); }
+.fl-src { font-size:10px; color:var(--text-muted); line-height:1.4; margin-bottom:6px; }
+.fl-foot { display:flex; justify-content:space-between; align-items:center; margin-top:8px; padding-top:8px; border-top:1px solid var(--border); }
+.fl-st { font-size:10px; padding:2px 6px; color:var(--st); border:1px solid var(--st); border-radius:3px; font-weight:700; letter-spacing:.4px; }
+.fl-err { margin-top:6px; font-size:10px; color:var(--red); word-break:break-word; }
+.fl-nb { margin-top:6px; font-size:10px; line-height:1.5; color:var(--text-muted); }
+.fl-nb a { color:var(--text-secondary); }
+.fl-arrow { text-align:center; color:var(--text-muted); font-size:18px; margin:-8px 0; }
+@media (max-width: 767px) { .fl-dag-card { padding:12px; } }
+</style>
+
+{# Layer = the steps' module package (derived in cockpit_ops.api.get_flow_overview). Colours for the
+   known packages, muted for the rest. #}
 {% set phase_color = {
     'Sources': 'var(--accent)',
     'Signals': 'var(--green)',
     'Scoring': 'var(--amber)',
-    'Output':  '#3b82f6',
+    'Output':  'var(--blue)',
 } %}
+{% macro st_class(s) %}{% if s.last_status == 'SUCCESS' %}dag-ok{% elif s.last_status == 'FAILED' and s.critical %}dag-crit{% elif s.last_status in ('FAILED', 'ABORTED') %}dag-fail{% elif s.last_status == 'RUNNING' %}dag-run{% endif %}{% endmacro %}
 
-{# ── Status helper: maps last_status (with critical override) to color + label ── #}
-{% macro status_bg(s) %}{% if s.last_status == 'SUCCESS' %}var(--green){% elif s.last_status == 'FAILED' and s.critical %}#7f1d1d{% elif s.last_status in ('FAILED', 'ABORTED') %}var(--red){% elif s.last_status == 'RUNNING' %}var(--amber){% else %}var(--bg-card-hover){% endif %}{% endmacro %}
-{% macro status_fg(s) %}{% if s.last_status in ('SUCCESS', 'RUNNING') %}#0b0b14{% elif s.last_status in ('FAILED', 'ABORTED') %}#ffffff{% else %}var(--text-muted){% endif %}{% endmacro %}
-
-<div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">
-    <div class="section-title">Pipeline Flow</div>
-    <div style="display: flex; gap: 12px; align-items: center;">
-        <span id="flow-toast" class="mono" style="font-size: 11px; color: var(--green); opacity: 0; transition: opacity 0.25s;"></span>
+<div class="fl-head">
+    <h1 class="section-title">Pipeline Flow</h1>
+    <div class="fl-head-r">
+        <span id="flow-toast" class="mono fl-toast" role="status"></span>
         <span id="flow-refresh-tick" class="mono u-muted-11">refreshing in 60s</span>
-        <a href="/system" style="padding: 8px 16px; background: var(--bg-card-hover); color: var(--text-secondary); border-radius: 8px; text-decoration: none; font-size: 12px; font-weight: 600; letter-spacing: 0.3px;">System &rarr;</a>
+        <a href="/system" class="fl-link">Health &rarr;</a>
     </div>
 </div>
 <div class="section-desc">
     {{ step_count }} steps that run daily at 03:30 UTC (09:00 IST), grouped by module package. Lines are the declared dataflow
     ({{ n_blocking }} blocking step→step edges, {{ n_lagged }} lagged — the reader sees the previous run); hover a step to trace it.
-    Click <span class="mono" style="color: var(--text-secondary);">↻</span> on any step to rerun it; status colors update on the next auto-refresh.
+    Press <span class="mono">↻</span> on a step to rerun it; status colours update on the next auto-refresh.
 </div>
 
-{# ── Failure banner ── #}
-{% if failures %}
-<div class="card" style="margin-bottom: 16px; border-left: 4px solid var(--red); background: var(--red-bg);">
-    <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px;">
-        <div style="font-size: 13px; font-weight: 800; color: var(--red); letter-spacing: 0.5px;">
-            {{ failures|length }} STEP{{ '' if failures|length == 1 else 'S' }} NEEDS ATTENTION
-        </div>
-        <div class="mono u-muted-11">click a chip to jump to its card</div>
+{# Failure banner: DAG steps, plus cron / datamodel jobs that log runs but are not DAG steps #}
+{% if failures or outside_failures %}
+<div class="card fl-banner" role="alert">
+    <div class="fl-banner-h">
+        <div class="fl-banner-t">{{ (failures|length) + (outside_failures|length) }} RUN{{ '' if (failures|length) + (outside_failures|length) == 1 else 'S' }} NEED ATTENTION</div>
+        <div class="mono u-muted-11">tap a chip to jump to its card</div>
     </div>
-    <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+    {% if failures %}
+    <div class="fl-chips">
         {% for f in failures %}
-        <a href="#step-{{ f.name }}" style="display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; background: var(--bg-card); border: 1px solid var(--red); border-radius: 4px; text-decoration: none; font-size: 11px;">
-            <span class="mono" style="color: var(--red); font-weight: 700;">{{ f.last_status }}</span>
-            <span class="mono" style="color: var(--text-primary);">{{ f.name }}</span>
-            {% if f.last_error %}<span style="color: var(--text-muted); font-size: 10px;">— {{ f.last_error[:60] }}{% if f.last_error|length > 60 %}…{% endif %}</span>{% endif %}
+        <a href="#step-{{ f.name }}" class="fl-chip">
+            <b class="mono">{{ f.last_status }}</b>
+            <span class="mono">{{ f.name }}</span>
+            {% if f.last_error %}<small>— {{ f.last_error[:60] }}{% if f.last_error|length > 60 %}…{% endif %}</small>{% endif %}
         </a>
         {% endfor %}
     </div>
+    {% endif %}
+    {% if outside_failures %}
+    <div class="fl-banner-sub">Outside the daily DAG (cron and datamodel jobs; <a href="/system">see Health</a>)</div>
+    <div class="fl-chips">
+        {% for f in outside_failures %}
+        <a href="/system" class="fl-chip">
+            <b class="mono">{{ f.last_status }}</b>
+            <span class="mono">{{ f.name }}</span>
+            <small>{{ f.run_date or '' }}{% if f.last_error %} — {{ f.last_error[:60] }}{% if f.last_error|length > 60 %}…{% endif %}{% endif %}</small>
+        </a>
+        {% endfor %}
+    </div>
+    {% endif %}
 </div>
 {% endif %}
 
-{# Tab bar — Failure banner stays above as always-relevant signal #}
 {% from "_components.html" import tab_bar %}
 
-<div x-data="{ tab: 'dag', loaded: { dag: true } }" x-cloak>
+{# Phones open on Detail (cards that stack); the DAG is a wide diagram. #}
+<div x-data="{ tab: (window.matchMedia('(max-width: 767px)').matches && !location.hash) ? 'detail' : 'dag', loaded: { dag: true, detail: true } }" x-cloak
+     @hashchange.window="if (location.hash.startsWith('#step-')) { tab = 'detail'; $nextTick(() => document.getElementById(location.hash.slice(1))?.scrollIntoView()); }">
 
 {{ tab_bar([
     ('dag',    'DAG'),
     ('detail', 'Detail'),
 ]) }}
 
-{# ────────── DAG TAB ────────── #}
 <div x-show="tab === 'dag'" x-cloak>
-
-{# ── Mini-DAG: 4 phase columns with arrows between them ── #}
-<div class="card" style="margin-bottom: 16px; padding: 18px; overflow-x: auto;">
-    <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 14px;">
-        <div style="font-size: 12px; font-weight: 700; letter-spacing: 0.6px; text-transform: uppercase; color: var(--text-secondary);">Live DAG</div>
-        <div class="mono" style="font-size: 10px; color: var(--text-muted); display: flex; gap: 14px;">
-            <span><span style="display:inline-block;width:9px;height:9px;background:var(--green);border-radius:2px;vertical-align:middle;margin-right:4px;"></span>SUCCESS</span>
-            <span><span style="display:inline-block;width:9px;height:9px;background:var(--red);border-radius:2px;vertical-align:middle;margin-right:4px;"></span>FAILED</span>
-            <span><span style="display:inline-block;width:9px;height:9px;background:#7f1d1d;border-radius:2px;vertical-align:middle;margin-right:4px;"></span>CRITICAL FAIL</span>
-            <span><span style="display:inline-block;width:9px;height:9px;background:var(--amber);border-radius:2px;vertical-align:middle;margin-right:4px;"></span>RUNNING</span>
-            <span><span style="display:inline-block;width:9px;height:9px;background:var(--bg-card-hover);border:1px solid var(--border);border-radius:2px;vertical-align:middle;margin-right:4px;"></span>NEVER RUN</span>
-            <span><span style="display:inline-block;width:16px;border-top:2px solid var(--accent);vertical-align:middle;margin-right:4px;"></span>FEEDS</span>
-            <span><span style="display:inline-block;width:16px;border-top:2px dashed var(--text-muted);vertical-align:middle;margin-right:4px;"></span>LAGGED</span>
+<div class="card fl-dag-card">
+    <div class="fl-dag-h">
+        <h2 class="fl-dag-t">Live DAG</h2>
+        <div class="mono fl-legend">
+            <span><span class="fl-sw fl-sw-ok"></span>SUCCESS</span>
+            <span><span class="fl-sw fl-sw-fail"></span>FAILED</span>
+            <span><span class="fl-sw fl-sw-crit"></span>CRITICAL FAIL</span>
+            <span><span class="fl-sw fl-sw-run"></span>RUNNING</span>
+            <span><span class="fl-sw fl-sw-none"></span>NEVER RUN</span>
+            <span><span class="fl-ln fl-ln-feed"></span>FEEDS</span>
+            <span><span class="fl-ln fl-ln-lag"></span>LAGGED</span>
         </div>
     </div>
 
-    <div id="flow-dag" style="position: relative; display: flex; align-items: stretch; gap: 36px; min-width: max-content;">
-        <svg id="flow-edges" style="position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible;"></svg>
+    <div id="flow-dag">
+        <svg id="flow-edges" aria-hidden="true"></svg>
         {% for layer in layers %}
-        {% set lc = phase_color.get(layer.name, 'var(--text-muted)') %}
-        <div style="flex: 1 1 0; min-width: 200px; display: flex; flex-direction: column;">
-            <div style="display: flex; justify-content: space-between; align-items: baseline; padding: 6px 10px 8px; border-bottom: 2px solid {{ lc }}; margin-bottom: 8px;">
-                <span style="font-size: 11px; font-weight: 800; letter-spacing: 0.7px; color: {{ lc }}; text-transform: uppercase;">{{ layer.name }}</span>
+        <div class="fl-col" style="--layer: {{ phase_color.get(layer.name, 'var(--text-muted)') }};">
+            <div class="fl-col-h">
+                <h3 class="fl-col-n">{{ layer.name }}</h3>
                 <span class="mono u-muted-10">{{ layer.steps|length }}</span>
             </div>
-            <div style="display: flex; flex-direction: column; gap: 4px; flex: 1;">
+            <div class="fl-col-list">
                 {% for s in layer.steps %}
-                <a href="#step-{{ s.name }}" class="dag-pill" data-step="{{ s.name }}"
-                   style="position: relative; display: flex; align-items: center; justify-content: space-between; gap: 6px;
-                          padding: 5px 8px; border-radius: 4px; text-decoration: none;
-                          background: {{ status_bg(s) }}; color: {{ status_fg(s) }};
-                          {% if s.last_status == 'FAILED' and s.critical %}border: 2px solid var(--red);{% else %}border: 1px solid transparent;{% endif %}
-                          font-size: 11px; line-height: 1.2;">
-                    <span class="mono" style="font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ s.name }}</span>
-                    <button type="button" class="rerun-btn" data-step="{{ s.name }}" title="Rerun {{ s.name }}"
-                        style="background: rgba(0,0,0,0.18); color: inherit; border: none; cursor: pointer;
-                               width: 18px; height: 18px; border-radius: 3px; padding: 0;
-                               font-size: 12px; line-height: 1; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;">↻</button>
-                </a>
+                <div class="dag-pill {{ st_class(s) }}" data-step="{{ s.name }}">
+                    <a href="#step-{{ s.name }}" class="mono">{{ s.name }}</a>
+                    <button type="button" class="rerun-btn" data-step="{{ s.name }}" aria-label="Rerun {{ s.name }}">↻</button>
+                </div>
                 {% endfor %}
             </div>
         </div>
         {% endfor %}
     </div>
 </div>
-
-
 </div>{# / dag panel #}
 
-{# ────────── DETAIL TAB ────────── #}
 <div x-show="tab === 'detail'" x-cloak>
-
-{# ── Layered card detail ── #}
 {% for layer in layers %}
-{% set layer_color = phase_color.get(layer.name, 'var(--text-muted)') %}
-<div class="card" style="margin-bottom: 16px; border-left: 4px solid {{ layer_color }};">
-    <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 12px;">
+<div class="card fl-layer" style="--layer: {{ phase_color.get(layer.name, 'var(--text-muted)') }};">
+    <div class="fl-layer-h">
         <div>
-            <div style="font-size: 14px; font-weight: 800; letter-spacing: 0.8px; text-transform: uppercase; color: var(--text-primary);">{{ layer.name }}</div>
-            <div class="mono" style="font-size: 11px; color: var(--text-muted); margin-top: 2px;">
+            <h2 class="fl-layer-t">{{ layer.name }}</h2>
+            <div class="mono fl-layer-d">
                 {% if layer.name == 'Sources' %}fetch external data &rarr; raw tables
                 {% elif layer.name == 'Signals' %}raw tables &rarr; per-stock signals
                 {% elif layer.name == 'Scoring' %}signals + regime &rarr; daily picks
@@ -133,61 +192,38 @@
         <div class="mono u-muted-11">{{ layer.steps|length }} step{{ '' if layer.steps|length == 1 else 's' }}</div>
     </div>
 
-    <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px;">
+    <div class="fl-grid">
         {% for s in layer.steps %}
         {% set status = s.last_status %}
         {% set status_color = 'var(--green)' if status == 'SUCCESS' else ('var(--red)' if status in ['FAILED', 'ABORTED'] else ('var(--amber)' if status == 'RUNNING' else 'var(--text-muted)')) %}
-        {% set step_link = '/sql?table=' ~ s.writes[0] if s.writes else '#' %}
-        <div id="step-{{ s.name }}" style="position: relative; background: var(--bg-card); border: 1px solid var(--border); border-left: 3px solid {{ status_color }}; border-radius: 6px; padding: 10px 12px;">
-            <button type="button" class="rerun-btn" data-step="{{ s.name }}" title="Rerun {{ s.name }}"
-                style="position: absolute; top: 8px; right: 8px; background: var(--bg-card-hover); color: var(--text-secondary); border: 1px solid var(--border); cursor: pointer; padding: 3px 8px; border-radius: 4px; font-size: 11px; font-family: 'JetBrains Mono', monospace;">↻ Rerun</button>
-            <a href="{{ step_link }}" style="display: block; text-decoration: none; padding-right: 64px;">
-                <div style="display: flex; gap: 6px; align-items: baseline; margin-bottom: 4px;">
-                    <span class="mono" style="font-size: 12px; font-weight: 700; color: var(--text-primary);">{{ s.name }}</span>
-                    {% if s.critical %}<span title="Critical step — pipeline aborts on failure" style="font-size: 8px; padding: 1px 5px; background: rgba(245,158,11,0.15); color: var(--amber); border-radius: 3px; font-weight: 700; letter-spacing: 0.4px;">CRITICAL</span>{% endif %}
+        <div id="step-{{ s.name }}" class="fl-step" style="--st: {{ status_color }};">
+            <button type="button" class="rerun-btn mono" data-step="{{ s.name }}" aria-label="Rerun {{ s.name }}">↻ Rerun</button>
+            <a href="{{ '/sql?table=' ~ s.writes[0] if s.writes else '#step-' ~ s.name }}" class="fl-step-link">
+                <div class="fl-step-n">
+                    <b class="mono">{{ s.name }}</b>
+                    {% if s.critical %}<span class="fl-crit">CRITICAL · aborts the run on failure</span>{% endif %}
                 </div>
-                <div style="font-size: 10px; color: var(--text-muted); margin-bottom: 6px;">
-                    {{ s.module }}{% if s.frequency and s.frequency != 'daily' %} · <span style="color: var(--amber);">{{ s.frequency }}</span>{% endif %}
+                <div class="fl-mod">{{ s.module }}{% if s.frequency and s.frequency != 'daily' %} · <em>{{ s.frequency }}</em>{% endif %}</div>
+                {% if s.writes %}<div class="mono fl-writes">&rarr; <span>{{ s.writes|join(', ') }}</span></div>{% endif %}
+                {% if s.source %}<div class="fl-src">{{ s.source }}</div>{% endif %}
+                <div class="fl-foot">
+                    <span class="fl-st">{{ status or 'NEVER RUN' }}</span>
+                    {% if s.last_rows is not none %}<span class="mono u-muted-10">{{ "{:,}".format(s.last_rows) }} rows{% if s.last_finished_at %} · {{ s.last_finished_at[:10] }}{% endif %}</span>{% endif %}
                 </div>
-
-                {% if s.writes %}
-                <div class="mono" style="font-size: 10px; color: var(--text-secondary); margin-bottom: 4px;">
-                    &rarr; <span style="color: var(--accent);">{{ s.writes|join(', ') }}</span>
-                </div>
-                {% endif %}
-
-                {% if s.source %}
-                <div style="font-size: 10px; color: var(--text-muted); line-height: 1.4; margin-bottom: 6px;">{{ s.source }}</div>
-                {% endif %}
-
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border);">
-                    <span style="font-size: 9px; padding: 2px 6px; color: {{ status_color }}; border: 1px solid {{ status_color }}; border-radius: 3px; font-weight: 700; letter-spacing: 0.4px;">
-                        {{ status or 'NEVER RUN' }}
-                    </span>
-                    {% if s.last_rows is not none %}
-                    <span class="mono u-muted-10">{{ "{:,}".format(s.last_rows) }} rows</span>
-                    {% endif %}
-                </div>
-                {% if s.last_error %}
-                <div style="margin-top: 6px; font-size: 10px; color: var(--red); font-family: 'JetBrains Mono', monospace; word-break: break-word;">{{ s.last_error[:100] }}{% if s.last_error|length > 100 %}…{% endif %}</div>
-                {% endif %}
+                {% if s.last_error %}<div class="mono fl-err">{{ s.last_error[:100] }}{% if s.last_error|length > 100 %}…{% endif %}</div>{% endif %}
             </a>
             {% if s.upstream or s.downstream %}
-            <div class="mono" style="margin-top: 6px; font-size: 10px; line-height: 1.5; color: var(--text-muted);">
-                {% if s.upstream %}<div>&larr; {% for u in s.upstream %}<a href="#step-{{ u }}" style="color: var(--text-secondary);">{{ u }}</a>{% if not loop.last %}, {% endif %}{% endfor %}</div>{% endif %}
-                {% if s.downstream %}<div>&rarr; {% for d in s.downstream %}<a href="#step-{{ d }}" style="color: var(--text-secondary);">{{ d }}</a>{% if not loop.last %}, {% endif %}{% endfor %}</div>{% endif %}
+            <div class="mono fl-nb">
+                {% if s.upstream %}<div>&larr; {% for u in s.upstream %}<a href="#step-{{ u }}">{{ u }}</a>{% if not loop.last %}, {% endif %}{% endfor %}</div>{% endif %}
+                {% if s.downstream %}<div>&rarr; {% for d in s.downstream %}<a href="#step-{{ d }}">{{ d }}</a>{% if not loop.last %}, {% endif %}{% endfor %}</div>{% endif %}
             </div>
             {% endif %}
         </div>
         {% endfor %}
     </div>
 </div>
-
-{% if not loop.last %}
-<div style="text-align: center; color: var(--text-muted); font-size: 18px; margin: -8px 0;">▾</div>
-{% endif %}
+{% if not loop.last %}<div class="fl-arrow" aria-hidden="true">▾</div>{% endif %}
 {% endfor %}
-
 </div>{# / detail panel #}
 
 </div>{# / tabs root #}
@@ -214,14 +250,11 @@
             const path = document.createElementNS(NS, "path");
             path.setAttribute("d", `M${x1},${y1} C${x1 + bend},${y1} ${x2 - bend},${y2} ${x2},${y2}`);
             path.setAttribute("fill", "none");
-            path.setAttribute("stroke", e.kind === "lagged" ? "var(--text-muted)" : "var(--accent)");
+            path.style.stroke = e.kind === "lagged" ? "var(--text-muted)" : "var(--accent)";
             path.setAttribute("stroke-width", "1");
             if (e.kind === "lagged") path.setAttribute("stroke-dasharray", "3 3");
             path.setAttribute("opacity", e.kind === "lagged" ? "0.10" : "0.18");
             path.dataset.from = e.from; path.dataset.to = e.to;
-            const title = document.createElementNS(NS, "title");
-            title.textContent = `${e.from} → ${e.to}: ${e.datasets.join(", ")}${e.kind === "lagged" ? " (lagged)" : ""}`;
-            path.appendChild(title);
             svg.appendChild(path);
         });
     }
@@ -231,8 +264,8 @@
             const lagged = p.getAttribute("stroke-dasharray");
             p.setAttribute("opacity", step ? (on ? "0.95" : "0.04") : (lagged ? "0.10" : "0.18"));
             p.setAttribute("stroke-width", on ? "2" : "1");
-            if (on) p.setAttribute("stroke", p.dataset.to === step ? "var(--amber)" : "var(--accent)");
-            else if (!lagged) p.setAttribute("stroke", "var(--accent)");
+            if (on) p.style.stroke = p.dataset.to === step ? "var(--amber)" : "var(--accent)";
+            else if (!lagged) p.style.stroke = "var(--accent)";
         });
     }
     document.querySelectorAll(".dag-pill").forEach((el) => {
