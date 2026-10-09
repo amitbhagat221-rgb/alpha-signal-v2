@@ -33,3 +33,8 @@ def test_tone():
     assert tone(0, zero="score-red") == "score-red"
     assert tone(None) == "" and tone(math.nan) == ""
     assert tone(-5, "#0f0", "#f00", "#888") == "#f00"
+
+
+def test_count_groups_and_drops_the_decimal():
+    from formatting import count
+    assert count(3254.0) == "3,254" and count(0) == "0" and count(None) == "—"

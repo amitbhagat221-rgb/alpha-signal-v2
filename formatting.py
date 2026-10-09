@@ -75,7 +75,14 @@ def short_date(x):
     return f"{d.day} {d:%b}"
 
 
-FILTERS = {"signed": signed, "pct": pct, "inr": inr, "crore": crore, "tone": tone, "short_date": short_date}
+def count(x):
+    """A whole-number count with thousands grouped ("3,254"); a float count (rows_affected
+    arrives as 3254.0) is rounded, never printed with a decimal. Missing -> "—"."""
+    v = _num(x)
+    return DASH if v is None else f"{round(v):,}"
+
+
+FILTERS = {"count": count, "signed": signed, "pct": pct, "inr": inr, "crore": crore, "tone": tone, "short_date": short_date}
 
 
 # VIX regime → colour name. One map for cockpit, change feed and email; the

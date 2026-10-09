@@ -112,13 +112,16 @@ def test_cold_data_tab_returns_at_once_while_the_scan_runs_in_the_background(mon
     monkeypatch.setattr(shared, "_PERSISTED_CACHE_DIR", tmp_path)
     api._data_health_scores.cache_clear()
     api.get_db_summary.cache_clear()
-    monkeypatch.setattr(health, "compute_db_health", lambda *a, **k: gate.wait(10) or {"tables": []})
-    monkeypatch.setattr(db, "db_summary", lambda: gate.wait(10) or {})
+    monkeypatch.setattr(health, "compute_db_health", lambda *a, **k: (gate.wait(10), {"tables": []})[1])
+    monkeypatch.setattr(db, "db_summary", lambda: (gate.wait(10), {})[1])
     monkeypatch.setattr(api, "get_health_overview", lambda: None)
     t0 = time.time()
     ctx = ops_app._system_tab_context("health")
     assert time.time() - t0 < 2
     assert ctx["scan_running"] and ctx["health_scores"] is None and ctx["summary"] is None
     gate.set()
+    for t in threading.enumerate():       # let the background scans finish while the cache dir is still patched
+        if t.name.startswith("swr:"):
+            t.join(10)
     api._data_health_scores.cache_clear()
     api.get_db_summary.cache_clear()

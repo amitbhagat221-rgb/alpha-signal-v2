@@ -35,9 +35,8 @@
 
 {% macro grade_tag(g) -%}
   {%- if g and g.total is not none -%}
-    <span class="og-tag {% if g.total >= 7 %}og-good{% elif g.total >= 4 %}og-mid{% else %}og-bad{% endif %}"
-          title="compliance grade: grounded + actionable + in charter + calibrated">{{ g.total }}/8</span>
-  {%- else -%}<span class="og-tag og-none" title="not graded yet">ungraded</span>{%- endif -%}
+    <span class="og-tag {% if g.total >= 7 %}og-good{% elif g.total >= 4 %}og-mid{% else %}og-bad{% endif %}">{{ g.total }}/8</span>{{ tip("Compliance grade, out of 8: grounded + actionable + in charter + calibrated.") }}
+  {%- else -%}<span class="og-tag og-none">ungraded</span>{{ tip("Not graded yet.") }}{%- endif -%}
 {%- endmacro %}
 
 {% block content %}
@@ -56,12 +55,13 @@
   .og-toggle { background: none; border: 0; padding: 0; font: inherit; color: inherit; text-align: left; cursor: pointer; }
   .og-toggle:focus-visible { outline: none; }
   .og-toggle::after { content: ''; position: absolute; inset: 0; }   /* the whole row is the button */
-  .og-click .og-btn { position: relative; z-index: 1; }
+  .og-click .og-btn, .og-click .tooltip-wrap { position: relative; z-index: 1; }
   .og-flash { font-size: 12px; color: var(--green); margin: -8px 0 12px; }
   .og-gone { opacity: .45; }
   .og-head { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
   .og-title { font-weight: 700; color: var(--text-primary); font-size: 14px; }
   .og-meta { font-size: 11px; color: var(--text-muted); font-family: 'JetBrains Mono', monospace; white-space: nowrap; }
+  .og-ul .og-meta { white-space: normal; overflow-wrap: anywhere; }
   .og-sub { font-size: 12px; color: var(--text-secondary); margin-top: 4px; line-height: 1.45; }
   .og-tag { font-size: 10px; font-weight: 700; border-radius: 4px; padding: 1px 6px; border: 1px solid currentColor; white-space: nowrap; }
   .og-good { color: var(--green); } .og-mid { color: var(--amber); } .og-bad { color: var(--red); }
@@ -107,10 +107,10 @@
   .og-seat-txt { min-width: 0; display: flex; flex-direction: column; }
   .og-seat-name { font-size: 13px; font-weight: 600; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .og-seat-sub { font-size: 11px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .og-av { flex: none; width: 34px; height: 34px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; color: #fff; letter-spacing: 0.3px; }
+  .og-av { flex: none; width: 34px; height: 34px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; color: var(--text-primary); letter-spacing: 0.3px; }
   .og-av-sm { width: 26px; height: 26px; font-size: 10px; margin-top: 2px; }
-  .og-av-desk { background: linear-gradient(135deg, #10b981, #047857); }
-  .og-av-builder { background: linear-gradient(135deg, #64748b, #334155); }
+  .og-av-desk { background: linear-gradient(135deg, var(--green), color-mix(in srgb, var(--green) 45%, var(--bg-primary))); }
+  .og-av-builder { background: linear-gradient(135deg, var(--text-muted), var(--border-accent)); }
   .og-chat { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
   .og-pane { display: flex; flex-direction: column; height: 100%; min-height: 0; }
   .og-chathead { display: flex; gap: 10px; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--border); }
@@ -118,7 +118,7 @@
   .og-line { display: flex; gap: 8px; align-items: flex-start; max-width: 100%; }
   .og-line.og-me { justify-content: flex-end; }
   .og-bubble { max-width: min(88%, 760px); border-radius: 14px; padding: 10px 14px; font-size: 13.5px; line-height: 1.6; min-width: 0; }
-  .og-me .og-bubble { background: var(--accent); color: #fff; border-bottom-right-radius: 4px; }
+  .og-me .og-bubble { background: var(--accent); color: var(--text-primary); border-bottom-right-radius: 4px; }
   .og-them .og-bubble { background: var(--bg-primary); border: 1px solid var(--border); color: var(--text-primary); border-bottom-left-radius: 4px; }
   .og-time { font-size: 10px; opacity: 0.55; margin-top: 4px; }
   .og-md { overflow-wrap: anywhere; }
@@ -209,6 +209,7 @@
   .og-plain-like { font-size: 13px; font-style: italic; color: var(--text-secondary); margin-top: 8px; }
   .og-pack p { margin: 4px 0; }
   .og-pack h4 { font-size: 11px; font-weight: 700; letter-spacing: 0.6px; text-transform: uppercase; color: var(--text-muted); margin: 16px 0 4px; }
+  .og-mt8 { margin-top: 8px; } .og-mt12 { margin-top: 12px; } .og-mt20 { margin-top: 20px; } .og-fs16 { font-size: 16px; }
 </style>
 
 {% set S = summary %}
@@ -231,7 +232,7 @@
 
 {# ═══════════════════════════ INBOX ═══════════════════════════ #}
 <div x-show="tab === 'inbox'" x-cloak class="og-wrap">
-  <div class="section-desc" style="margin-top: 12px;">Asks and hypothesis cards raised by the seats. Approve, park or reject; the seats see your decision in their next brief.</div>
+  <div class="og-mt12 section-desc">Asks and hypothesis cards raised by the seats. Approve, park or reject; the seats see your decision in their next brief.</div>
   <div class="og-list">
   {% for i in inbox %}
     <div class="og-row" id="item-{{ i.doc_id }}" data-item="{{ i.doc_id }}">
@@ -265,10 +266,10 @@
     <div class="og-empty">Nothing is waiting for you.</div>
   {% endfor %}
   </div>
-  {% if cio_queue %}<div class="u-muted-11" style="margin-top: 8px;">{{ cio_queue|length }} hypothesis card{{ 's' if cio_queue|length != 1 }} from the desks are with the CIO, who forwards the ones worth your time in the weekly review.</div>{% endif %}
+  {% if cio_queue %}<div class="og-mt8 u-muted-11">{{ cio_queue|length }} hypothesis card{{ 's' if cio_queue|length != 1 }} from the desks are with the CIO, who forwards the ones worth your time in the weekly review.</div>{% endif %}
 
   {% if decisions %}
-  <div class="section-desc" style="margin-top: 20px;">Your recent decisions</div>
+  <div class="og-mt20 section-desc">Your recent decisions</div>
   <div class="og-list">
   {% for d in decisions[:12] %}
     <div class="og-row">
@@ -288,9 +289,9 @@
 <div x-show="tab === 'outlook'" x-cloak class="og-wrap">
   {% if outlook %}
   {% set O = outlook.fields %}
-  <div class="section-desc" style="margin-top: 12px;">The CIO's house view, written {{ outlook.doc_date }}. It is judgment on top of the data, not a forecast the model has validated. {{ grade_tag(outlook.grade) }}</div>
+  <div class="og-mt12 section-desc">The CIO's house view, written {{ outlook.doc_date }}. It is judgment on top of the data, not a forecast the model has validated. {{ grade_tag(outlook.grade) }}</div>
   <div class="og-pack">
-    <div class="og-title" style="font-size: 16px;">{{ O.headline }}</div>
+    <div class="og-fs16 og-title">{{ O.headline }}</div>
     {{ plain(O.eli5) }}
     <h4>The economy</h4><p>{{ O.macro }}</p>
     <h4>The Indian market · <span class="og-tag {% if O.market.stance == 'constructive' %}og-good{% elif O.market.stance in ('cautious', 'defensive') %}og-bad{% else %}og-mid{% endif %}">{{ O.market.stance }}</span> <span class="og-meta">{{ O.market.horizon }}</span></h4>
@@ -305,7 +306,7 @@
     {% if O.evidence %}<h4>Sources</h4><ul class="og-ul">{% for e in O.evidence %}<li><span class="og-k">{{ e.tool }}</span> {{ e.quote }}{% if e.url %} <span class="og-meta">{{ e.url }}</span>{% endif %}</li>{% endfor %}</ul>{% endif %}
   </div>
   {% else %}
-  <div class="og-list" style="margin-top: 12px;"><div class="og-empty">No outlook yet. The CIO writes one every week; "Run this seat now" on the CIO writes one today.</div></div>
+  <div class="og-mt12 og-list"><div class="og-empty">No outlook yet. The CIO writes one every week; "Run this seat now" on the CIO writes one today.</div></div>
   {% endif %}
 
   {% macro idea_rows(items) %}
@@ -315,7 +316,7 @@
         <span class="og-tag {% if i.stance == 'buy' %}og-good{% else %}og-bad{% endif %}">{{ i.stance }}</span>
         <span class="og-title">{{ i.ticker }}</span><span class="og-sub" style="margin: 0;">{{ i.model.name }}</span>
         <span class="og-tag og-desk">{{ i.sector }}</span>
-        {% if i.model and i.model.rank %}<span class="og-meta" title="from the model's ranking, not from the agents">model: {{ i.model.tier }} rank {{ i.model.rank }} · score {{ i.model.score }}{% if i.model.published %} · published pick{% else %} · not a published pick{% endif %}</span>{% endif %}
+        {% if i.model and i.model.rank %}<span class="og-meta">model: {{ i.model.tier }} rank {{ i.model.rank }} · score {{ i.model.score }}{% if i.model.published %} · published pick{% else %} · not a published pick{% endif %}</span>{{ tip("From the model's ranking, not from the agents.") }}{% endif %}
         <span class="og-meta">{{ i.horizon }}</span>
       </div>
       <div class="og-sub">
@@ -328,17 +329,17 @@
     {% endfor %}
   {% endmacro %}
 
-  <div class="section-desc" style="margin-top: 20px;"><b>Conviction ideas.</b> Raised by the sector desk, then passed by the CIO on a second review. Advice to you: they do not change a rank or the book.</div>
+  <div class="og-mt20 section-desc"><b>Conviction ideas.</b> Raised by the sector desk, then passed by the CIO on a second review. Advice to you: they do not change a rank or the book.</div>
   <div class="og-list">
     {{ idea_rows(ideas.conviction) }}
     {% if not ideas.conviction %}<div class="og-empty">No conviction ideas yet.{% if ideas.pending %} {{ ideas.pending|length }} idea{{ 's' if ideas.pending|length != 1 }} from the sector desk are waiting for the CIO's review.{% endif %}</div>{% endif %}
   </div>
   {% if ideas.watchlist %}
-  <div class="section-desc" style="margin-top: 20px;"><b>Watchlist.</b> A sound reason, but the CIO is not yet convinced.</div>
+  <div class="og-mt20 section-desc"><b>Watchlist.</b> A sound reason, but the CIO is not yet convinced.</div>
   <div class="og-list">{{ idea_rows(ideas.watchlist) }}</div>
   {% endif %}
   {% if ideas.rejected or ideas.pending %}
-  <div class="u-muted-11" style="margin-top: 8px;">{{ ideas.rejected|length }} idea{{ 's' if ideas.rejected|length != 1 }} rejected by the CIO{% if ideas.pending %} · {{ ideas.pending|length }} waiting for review{% endif %}. All of them are in the sector memos.</div>
+  <div class="og-mt8 u-muted-11">{{ ideas.rejected|length }} idea{{ 's' if ideas.rejected|length != 1 }} rejected by the CIO{% if ideas.pending %} · {{ ideas.pending|length }} waiting for review{% endif %}. All of them are in the sector memos.</div>
   {% endif %}
 </div>
 
@@ -446,7 +447,7 @@
 
 {# ═══════════════════════════ WORK ═══════════════════════════ #}
 <div x-show="tab === 'work'" x-cloak class="og-wrap">
-  <div class="section-desc" style="margin-top: 12px;">Work orders: fixes you agreed with an employee in chat, written down by them. You approve one in the inbox, then a Claude Code session runs it with <span class="mono">/work-order N</span>: builders work on a branch, the tests run, and the result is reported back here. Nothing starts on its own.</div>
+  <div class="og-mt12 section-desc">Work orders: fixes you agreed with an employee in chat, written down by them. You approve one in the inbox, then a Claude Code session runs it with <span class="mono">/work-order N</span>: builders work on a branch, the tests run, and the result is reported back here. Nothing starts on its own.</div>
   <div class="og-list">
   {% for w in work_orders %}
     <div class="og-row og-click">
@@ -489,11 +490,11 @@
 <div x-show="tab === 'pack'" x-cloak>
   {% if board_pack %}
   {% set P = board_pack.fields %}
-  <div class="section-desc" style="margin-top: 12px;">Written by the Chief of Staff on {{ board_pack.doc_date }}. The Sunday pack is also emailed.</div>
+  <div class="og-mt12 section-desc">Written by the Chief of Staff on {{ board_pack.doc_date }}. The Sunday pack is also emailed.</div>
   <div class="og-pack">
-    <div class="og-title" style="font-size: 16px;">{{ P.headline }}</div>
+    <div class="og-fs16 og-title">{{ P.headline }}</div>
     {{ plain(P.eli5) }}
-    <p style="margin-top: 8px;">{{ P.state_of_fund }}</p>
+    <p class="og-mt8">{{ P.state_of_fund }}</p>
     <h4>Decisions for you</h4>
     {% for d in P.decisions %}
       {% set verdict = decided.get(d.item_id|int) %}
@@ -511,13 +512,13 @@
     {% if P.role_notes %}<h4>Seat notes</h4><ul class="og-ul">{% for n in P.role_notes %}<li><span class="og-k">{{ n.role }}</span> {{ n.note }}</li>{% endfor %}</ul>{% endif %}
   </div>
   {% else %}
-  <div class="og-list" style="margin-top: 12px;"><div class="og-empty">No board pack yet. The Chief of Staff writes one every Sunday.</div></div>
+  <div class="og-mt12 og-list"><div class="og-empty">No board pack yet. The Chief of Staff writes one every Sunday.</div></div>
   {% endif %}
 </div>
 
 {# ═══════════════════════════ MEMOS ═══════════════════════════ #}
 <div x-show="tab === 'memos'" x-cloak class="og-wrap">
-  <div class="section-desc" style="margin-top: 12px;">What the desks wrote, newest first. The grade is from Compliance, a separate seat. Click a memo to read it.</div>
+  <div class="og-mt12 section-desc">What the desks wrote, newest first. The grade is from Compliance, a separate seat. Click a memo to read it.</div>
   {% set F = memo_filter %}
   <form class="og-filter" method="get" action="/org#memos">
     <label>From <input type="date" name="mfrom" value="{{ F.mfrom }}"{% if F.first %} min="{{ F.first }}"{% endif %}></label>
@@ -566,7 +567,7 @@
 
 {# ═══════════════════════════ EMPLOYEES & SETTINGS ═══════════════════════════ #}
 <div x-show="tab === 'org'" x-cloak class="og-wrap">
-  <div class="section-desc" style="margin-top: 12px;">Every seat: who it reports to, what it delivers, how it is measured and what it cannot do. <b>Settings</b> changes how a seat behaves: its schedule, model, a standing directive and its full prompt. Scores are the last 30 days.</div>
+  <div class="og-mt12 section-desc">Every seat: who it reports to, what it delivers, how it is measured and what it cannot do. <b>Settings</b> changes how a seat behaves: its schedule, model, a standing directive and its full prompt. Scores are the last 30 days.</div>
 
 <div class="og-runbar">
   <button class="og-btn ok" :disabled="running" @click="run('all')">Run all seats now</button>
@@ -583,7 +584,7 @@
   <template x-if="house">
   <div class="og-edit">
     <div class="og-head" style="justify-content: space-between;">
-      <span><span class="og-title" style="font-size: 16px;">House style</span> <span class="og-tag og-mid" x-show="house.edited">edited</span></span>
+      <span><span class="og-fs16 og-title">House style</span> <span class="og-tag og-mid" x-show="house.edited">edited</span></span>
       <button class="og-btn" @click="house = null">Close</button>
     </div>
     <label class="og-field og-wide"><span>How everyone writes <em>added to every employee's prompt, for memos and for chat</em></span>
@@ -601,7 +602,7 @@
   <template x-if="seat">
   <div class="og-edit" id="og-editor">
     <div class="og-head" style="justify-content: space-between;">
-      <span><span class="og-title" style="font-size: 16px;" x-text="seat.title"></span>
+      <span><span class="og-fs16 og-title" x-text="seat.title"></span>
         <span class="og-tag" :class="'og-' + seat.type" x-text="seat.type"></span>
         <span class="og-meta" x-text="'prompt version ' + seat.version"></span>
         <span class="og-tag og-mid" x-show="seat.edited.length" x-text="'changed: ' + seat.edited.join(', ')"></span></span>
@@ -663,7 +664,7 @@
       <div x-show="seat.fixed.graded_by"><b>Graded by</b><span x-text="seat.fixed.graded_by"></span></div>
     </div>
 
-    <div x-show="seat.history.length" style="margin-top: 12px;">
+    <div class="og-mt12" x-show="seat.history.length">
       <div class="og-k" style="font-size: 11px; text-transform: uppercase; letter-spacing: 0.6px;">History</div>
       <template x-for="h in seat.history" :key="h.doc_id">
         <div class="og-hist">
@@ -848,15 +849,15 @@
         const types = ['bar', 'line', 'pie', 'doughnut', 'scatter'];
         const type = types.includes(spec.type) ? spec.type : 'bar';
         await loadChart();
-        const pal = ['#8b5cf6', '#22c55e', '#f59e0b', '#38bdf8', '#ef4444', '#e879f9'];
+        const pal = chartPalette();
         const round = type === 'pie' || type === 'doughnut';
-        const sets = (spec.datasets || []).slice(0, 6).map((d, i) => ({
+        const sets = (spec.datasets || []).slice(0, pal.length).map((d, i) => ({
           label: String(d.label || ''), data: (d.data || []).slice(0, 400),
           backgroundColor: round ? pal : pal[i % pal.length] + (type === 'line' ? '33' : 'cc'),
           borderColor: round ? this.css('--bg-card') : pal[i % pal.length], borderWidth: type === 'line' ? 2 : 1,
           tension: 0.25, pointRadius: type === 'scatter' ? 4 : 2, fill: false,
         }));
-        const muted = this.css('--text-muted') || '#888', grid = this.css('--border') || '#333';
+        const muted = this.css('--text-muted'), grid = this.css('--border');
         const axis = t => ({ title: { display: !!t, text: t || '', color: muted }, ticks: { color: muted }, grid: { color: grid } });
         node.innerHTML = '<canvas></canvas>' + (spec.source ? '<div class="og-fig-src"></div>' : '');
         if (spec.source) node.querySelector('.og-fig-src').textContent = 'Source: ' + spec.source;
@@ -864,7 +865,7 @@
           type: type, data: { labels: (spec.labels || []).slice(0, 400).map(String), datasets: sets },
           options: {
             responsive: true, maintainAspectRatio: true, aspectRatio: round ? 1.8 : 2, indexAxis: spec.horizontal ? 'y' : 'x',
-            plugins: { title: { display: !!spec.title, text: String(spec.title || ''), color: this.css('--text-primary') || '#eee' },
+            plugins: { title: { display: !!spec.title, text: String(spec.title || ''), color: this.css('--text-primary') },
                        legend: { display: round || sets.length > 1, labels: { color: muted } } },
             scales: round ? {} : { x: { ...axis(spec.x_label), stacked: !!spec.stacked }, y: { ...axis(spec.y_label), stacked: !!spec.stacked } },
           },
@@ -979,7 +980,7 @@
   }
 </script>
 
-<div class="u-muted-11 og-foot" style="margin-top: 20px;">
+<div class="og-mt20 u-muted-11 og-foot">
   How it works: <span class="mono">docs/reference/org.md</span> · registry: <span class="mono">org.py</span> · raw data: <a href="/api/org" style="color: var(--text-secondary);">/api/org</a> · updated {{ as_of }} UTC
 </div>
 {% endblock %}

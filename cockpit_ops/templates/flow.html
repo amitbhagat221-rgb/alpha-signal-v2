@@ -208,7 +208,7 @@
                 {% if s.source %}<div class="fl-src">{{ s.source }}</div>{% endif %}
                 <div class="fl-foot">
                     <span class="fl-st">{{ status or 'NEVER RUN' }}</span>
-                    {% if s.last_rows is not none %}<span class="mono u-muted-10">{{ "{:,}".format(s.last_rows) }} rows{% if s.last_finished_at %} · {{ s.last_finished_at[:10] }}{% endif %}</span>{% endif %}
+                    {% if s.last_rows is not none %}<span class="mono u-muted-10">{{ s.last_rows|count }} rows{% if s.last_finished_at %} · {{ s.last_finished_at[:10] }}{% endif %}</span>{% endif %}
                 </div>
                 {% if s.last_error %}<div class="mono fl-err">{{ s.last_error[:100] }}{% if s.last_error|length > 100 %}…{% endif %}</div>{% endif %}
             </a>

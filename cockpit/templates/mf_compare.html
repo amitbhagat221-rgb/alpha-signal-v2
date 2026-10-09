@@ -115,7 +115,7 @@
             <td class="row-label">{{ label }}</td>
             {% for v in values %}
             <td class="num {% if v is number and best_val is not none and v == best_val %}best{% endif %}">
-                {% if v is none or (v is string and v == '') %}<span class="no-data">—</span>
+                {% if v is none or v is undefined or (v is string and v == '') %}<span class="no-data">—</span>
                 {% elif v is string %}{{ v }}
                 {% else %}{{ fmt.format(v) }}{% endif %}
             </td>
