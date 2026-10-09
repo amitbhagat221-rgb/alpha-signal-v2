@@ -194,10 +194,8 @@ def actions(request: Request):
 @app.get("/explorer", response_class=HTMLResponse)
 def explorer(request: Request):
     tiers = api.get_heatmap_data()
-    # Table view data
-    table = api.get_explorer_table()
     return templates.TemplateResponse(request, "explorer.html", {
-        "page": "explorer", "tiers": tiers, "table": table,
+        "page": "explorer", "tiers": tiers, "pick_date": api.latest_pick_date(),
     })
 
 

@@ -720,8 +720,8 @@ def get_dominant_signal_batch(sids):
 
 def get_heatmap_data():
     """Every ranked stock by tier (best score first), then the non-pickable tiers
-    (MICRO) from `stocks` at a 0.0 placeholder score: they are classified and their
-    signals computed, but never ranked into daily_picks."""
+    (MICRO) from `stocks` with score None: they are classified and their signals
+    computed, but never ranked into daily_picks."""
     unpickable = views.unpickable_tiers()
     ph = ",".join("?" * len(unpickable)) or "NULL"
     df = read_sql(f"""
@@ -736,41 +736,11 @@ def get_heatmap_data():
         tier_df = df[df["cap_tier"] == tier]
         result[tier] = tier_df[["sid", "ticker", "name", "score"]].to_dict("records")
     for tier in unpickable:
-        rows = read_sql("SELECT sid, ticker, name, 0.0 AS score FROM stocks "
+        rows = read_sql("SELECT sid, ticker, name, NULL AS score FROM stocks "
                         "WHERE cap_tier = ? ORDER BY ticker", params=[tier])
         if not rows.empty:
             result[tier] = rows.to_dict("records")
     return result
-
-
-def get_explorer_table():
-    """Ranked table view for explorer: every ranked stock with its snapshot
-    signals, then the non-pickable tiers (MICRO) unranked (rank/score NULL) —
-    their signal data IS computed, they are just never picked."""
-    unpickable = views.unpickable_tiers()
-    ph = ",".join("?" * len(unpickable)) or "NULL"
-    return db.rows(f"""
-        SELECT * FROM (
-          SELECT dp.sid, s.ticker, s.name, dp.sector, dp.cap_tier,
-                 dp.rank AS rank, dp.final_score AS score,
-                 ds.consensus_signal, ds.piotroski_f, ds.earnings_yield
-          FROM daily_picks dp
-          JOIN stocks s ON dp.sid = s.sid
-          LEFT JOIN daily_snapshots ds ON dp.sid = ds.sid
-              AND ds.snapshot_date = (SELECT MAX(snapshot_date) FROM daily_snapshots)
-          WHERE dp.pick_date = ?
-            AND s.cap_tier NOT IN ({ph})
-          UNION ALL
-          SELECT s.sid, s.ticker, s.name, s.sector, s.cap_tier,
-                 NULL AS rank, NULL AS score,
-                 ds.consensus_signal, ds.piotroski_f, ds.earnings_yield
-          FROM stocks s
-          LEFT JOIN daily_snapshots ds ON s.sid = ds.sid
-              AND ds.snapshot_date = (SELECT MAX(snapshot_date) FROM daily_snapshots)
-          WHERE s.cap_tier IN ({ph})
-        )
-        ORDER BY cap_tier, rank
-    """, [latest_pick_date(), *unpickable, *unpickable])
 
 
 def search_stocks(query):
