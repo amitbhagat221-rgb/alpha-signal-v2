@@ -1,0 +1,30 @@
+{% from "_pb_macros.html" import stock_cell, num, chip, flag_cell, change_cell, investor, bt_row, th, list_tools with context %}
+<div class="card" style="margin-top: 14px;" x-data="pbList()">
+    <div class="pb-head">
+        <h2 class="section-title">{{ d.rows|length }} stocks where insiders were net buyers</h2>
+        <div class="mono u-muted-11">last {{ r.INSIDER_DAYS }} days to {{ d.as_of or '—' }} · {{ d.n_clusters or 0 }} with several buyers</div>
+    </div>
+    <div class="section-desc">
+        Promoters, directors and key managers buying their own stock with their own money. Listed when net purchases are at least
+        ₹{{ r.INSIDER_MIN_CR|int }} crore, or {{ r.INSIDER_MIN_BUYERS }} or more different insiders bought. A <strong>cluster</strong>
+        (several buyers) is the stronger sign; a single large buyer is often a holding company reshuffling its stake.
+    </div>
+    {{ list_tools(d.rows|length, 'stocks') }}
+    <div class="table-wrap pb-scroll">
+    <table class="pb-table">
+        <thead><tr>{{ th('Stock','l') }}{{ th('Tier','l') }}{{ th('Buyers','c') }}{{ th('Bought (₹ cr)','') }}{{ th('Sold (₹ cr)','') }}{{ th('Net (₹ cr)','') }}{{ th('Last buy','') }}{{ th('Largest buyer','l') }}</tr></thead>
+        <tbody>
+        {% for s in d.rows %}
+        <tr data-row><td class="l">{{ stock_cell(s) }}</td><td class="l mono u-muted-11">{{ s.tier or '—' }}</td>
+            <td class="c">{% if s.cluster %}{{ chip(s.buyers ~ ' buyers', 'var(--blue)') }}{% else %}<span class="mono u-muted-11">1</span>{% endif %}</td>
+            <td class="mono">{{ num(s.bought_cr, 1) }}</td><td class="mono u-muted-11">{{ num(s.sold_cr, 1) }}</td>
+            <td class="mono strong">{{ num(s.net_cr, 1) }}</td><td class="mono u-muted-11">{{ s.last_buy }}</td>
+            <td class="l soft" style="max-width: 260px; min-width: 140px;" >{{ s.top_buyer }}</td></tr>
+        {% else %}<tr><td colspan="8" class="l u-muted-11">No net insider buying in the window.</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    <div class="pb-empty" x-show="shown === 0" x-cloak>Nothing matches that filter.</div>
+    <div class="pb-foot">Source: NSE insider-trading disclosures (promoters, promoter group, directors, key managerial personnel). Employee trades are left out.</div>
+</div>

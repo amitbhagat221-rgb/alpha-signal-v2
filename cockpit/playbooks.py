@@ -94,7 +94,7 @@ def _base(sid, stocks):
 
 # ═══════════════════════════ 1. Avoid list ═══════════════════════════
 
-@_persisted_cache(900, name="playbook_avoid_v2")
+@_persisted_cache(900, name="playbook_avoid_v3")
 def avoid_list():
     """Stocks carrying AVOID_MIN_FLAGS or more red flags, most flags first."""
     stocks = _stocks()
@@ -145,11 +145,13 @@ def avoid_list():
         if len(kinds) >= AVOID_MIN_FLAGS:
             s = stocks.loc[sid]
             rows.append({"sid": sid, "ticker": s["ticker"], "name": s["name"], "sector": s["sector"],
-                         "tier": s["cap_tier"], "n_flags": len(kinds),
+                         "tier": s["cap_tier"], "n_flags": len(kinds), "kinds": kinds,
                          "flags": [{"label": labels[k], "detail": d} for k, d in sorted(fl)]})
     tier_order = {t: i for i, t in enumerate(views.tiers())}
     rows.sort(key=lambda r: (-r["n_flags"], tier_order.get(r["tier"], 99), r["ticker"]))
-    return {"rows": rows, "counts": [{"label": labels[k], "n": counts[k]} for k in labels],
+    listed = {k: sum(k in r["kinds"] for r in rows) for k in labels}
+    return {"rows": rows,
+            "counts": [{"key": k, "label": labels[k], "n": counts[k], "n_listed": listed[k]} for k in labels],
             "n_any": len(flags), "as_of": snap,
             "flag_counts": {sid: len({k for k, _ in fl}) for sid, fl in flags.items()}}
 
@@ -538,7 +540,7 @@ def market_cycle():
                      "WHERE flow_date >= ? GROUP BY category", params=[_since(30)])
     for r in flows.itertuples():
         who = "Foreign investors" if r.category.startswith("FII") else "Domestic institutions"
-        readings.append({"label": f"{who}, last 30 days", "value": f"₹{r.net:+,.0f} cr", "as_of": r.d1,
+        readings.append({"label": f"{who}, last 30 days", "value": f"{'+' if r.net >= 0 else '−'}₹{abs(r.net):,.0f} cr", "as_of": r.d1,
                          "context": "net bought" if r.net > 0 else "net sold",
                          "reading": "No history to compare against yet (flows stored since April 2026)"})
 
@@ -570,7 +572,7 @@ def say_do():
     rows.sort(key=lambda r: (order.get(r["verdict"], 9), tier_order.get(r["tier"], 99), r["ticker"]))
     q = read_sql("SELECT status, COUNT(*) AS n FROM llm_tasks WHERE kind = 'say_do' GROUP BY status")
     queue = dict(zip(q["status"], q["n"]))
-    return {"rows": rows, "counts": [{"label": VERDICT_LABELS[v], "n": sum(r["verdict"] == v for r in rows)} for v in VERDICT_LABELS],
+    return {"rows": rows, "counts": [{"key": v, "label": VERDICT_LABELS[v], "n": sum(r["verdict"] == v for r in rows)} for v in VERDICT_LABELS],
             "queued": int(queue.get("queued", 0) + queue.get("claimed", 0)), "total": int(sum(queue.values()))}
 
 
@@ -613,9 +615,20 @@ ROADMAP = [
 ]
 
 
-def overview():
-    return {"avoid": avoid_list(), "insiders": insider_buying(), "compounders": compounders(),
-            "investors": superinvestors(), "breakouts": breakouts(), "deep": deep_value(),
-            "categories": categories(), "cycle": market_cycle(), "say_do": say_do(), "portfolios": portfolios(),
-            "roadmap": [{"approach": a, "who": w, "status": s, "note": n} for a, w, s, n in ROADMAP],
-            "rules": {k: v for k, v in globals().items() if k.isupper() and isinstance(v, (int, float))}}
+# tab key -> producer. A tab's data is computed only when that tab is opened.
+TABS = {
+    "avoid": avoid_list, "insiders": insider_buying, "compounders": compounders, "investors": superinvestors,
+    "breakouts": breakouts, "deep": deep_value, "categories": categories, "saydo": say_do, "cycle": market_cycle,
+    "portfolios": portfolios,
+    "roadmap": lambda: [{"approach": a, "who": w, "status": s, "note": n} for a, w, s, n in ROADMAP],
+}
+
+
+def rules():
+    """The numeric rule constants, shown in each tab's prose."""
+    return {k: v for k, v in globals().items() if k.isupper() and isinstance(v, (int, float))}
+
+
+def tab_data(key):
+    """The data behind one /playbooks tab (KeyError for an unknown tab)."""
+    return TABS[key]()
