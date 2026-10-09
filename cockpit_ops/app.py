@@ -65,6 +65,7 @@ def _prewarm_cache():
         ("health_overview",    lambda: api.get_health_overview()),
         ("pipeline_status",    lambda: api.get_pipeline_status()),
         ("feed_overview",      lambda: api.get_feed_overview()),
+        ("org_overview",       lambda: api.get_org_overview()),
     ], label="ops cache-warm")
 
 
@@ -78,46 +79,65 @@ async def index(request: Request):
 
 @app.get("/system", response_class=HTMLResponse)
 async def system(request: Request, refresh: int = 0):
-    """Health Center page. Pass ?refresh=1 to force a recompute."""
-    # These calls are independent and each is individually cached, but on a cold
-    # (cache-expired) load the slow ones — get_health_overview ~14s, freshness
-    # ~7s, db_summary ~3s — ran serially (~24s). Fire them concurrently; the
-    # data_health(cache_ttl) memo dedupes the freshness scan shared with
-    # get_health_overview. Wall-clock collapses to the slowest single call.
+    """Health Center page. Only the Overview ships with the page; every other tab is a partial
+    (/system/tab/<name>) fetched the first time it opens. ?refresh=1 recomputes the table scores."""
     import asyncio
 
-    async def _overview():
-        try:
-            return await asyncio.to_thread(api.get_health_overview)
-        except Exception:
-            import traceback; traceback.print_exc()
-            return None
+    if refresh:
+        await asyncio.to_thread(api.get_data_health_scores, True)
+    try:
+        overview = await asyncio.to_thread(api.get_health_overview)
+    except Exception:
+        import traceback; traceback.print_exc()
+        overview = None
+    return templates.TemplateResponse(request, "system.html", {"page": "system", "overview": overview})
 
-    pipeline, health, summary, health_scores, factor_health, overview = await asyncio.gather(
-        asyncio.to_thread(api.get_pipeline_status),
-        asyncio.to_thread(api.get_data_freshness),
-        asyncio.to_thread(api.get_db_summary),
-        asyncio.to_thread(api.get_data_health_scores, bool(refresh)),
-        asyncio.to_thread(api.get_factor_health),
-        _overview(),
-    )
 
-    from db import DOMAIN_ORDER
-    by_domain: dict[str, list[dict]] = {}
-    for row in health:
-        by_domain.setdefault(row.get("domain") or "Other", []).append(row)
-    inventory_groups = [
-        {"domain": d, "rows": by_domain[d]}
-        for d in DOMAIN_ORDER if d in by_domain
-    ]
+@app.get("/system/tab/{name}", response_class=HTMLResponse)
+async def system_tab(request: Request, name: str):
+    """One Health Center tab as an HTML fragment. Each reads the same cached views the full page used to."""
+    import asyncio
+    if name not in SYSTEM_TABS:
+        return HTMLResponse("unknown tab", status_code=404)
+    ctx = await asyncio.to_thread(_system_tab_context, name)
+    return templates.TemplateResponse(request, f"system_tabs/{name}.html", ctx)
 
-    return templates.TemplateResponse(request, "system.html", {
-        "page": "system", "pipeline": pipeline, "health": health,
-        "summary": summary, "health_scores": health_scores,
-        "inventory_groups": inventory_groups,
-        "factor_health": factor_health,
-        "overview": overview,
-    })
+
+@app.get("/system/health/{table}", response_class=HTMLResponse)
+async def system_health_table(request: Request, table: str):
+    """One table's per-factor health diagnostic, fetched when its row is expanded."""
+    import asyncio
+    scores = await asyncio.to_thread(api.get_data_health_scores, False)
+    t = next((x for x in (scores or {}).get("tables", []) if x["table"] == table), None)
+    if t is None:
+        return HTMLResponse("unknown table", status_code=404)
+    return templates.TemplateResponse(request, "system_tabs/health_table.html", {"t": t})
+
+
+SYSTEM_TABS = ("checks", "health", "factors", "pipeline", "inventory")
+
+
+def _system_tab_context(name):
+    """What each tab's fragment renders (all cached views; see api)."""
+    ctx = {}
+    if name in ("checks", "health", "pipeline"):
+        ctx["overview"] = api.get_health_overview()
+    if name == "health":
+        ctx["summary"] = api.get_db_summary()
+        ctx["health_scores"] = api.get_data_health_scores(False)
+    elif name == "factors":
+        ctx["factor_health"] = api.get_factor_health()
+    elif name == "pipeline":
+        ctx["pipeline"] = api.get_pipeline_status()
+    elif name == "inventory":
+        from db import DOMAIN_ORDER
+        health = api.get_data_freshness()
+        by_domain = {}
+        for row in health:
+            by_domain.setdefault(row.get("domain") or "Other", []).append(row)
+        ctx["health"] = health
+        ctx["inventory_groups"] = [{"domain": d, "rows": by_domain[d]} for d in DOMAIN_ORDER if d in by_domain]
+    return ctx
 
 
 @app.get("/flow", response_class=HTMLResponse)
@@ -182,8 +202,9 @@ def org_page(request: Request, mfrom: str = None, mto: str = None, mrole: str = 
     """Boardroom — the agent org (plan 0019): what is waiting for the CEO, the role
     tree with each seat's scorecard, the latest board pack and the desk memos.
     mfrom / mto / mrole: the Memos tab's date range and employee filter."""
+    ov = api.get_org_overview(mfrom, mto, mrole)       # cached; the run flag is the one live bit
     return templates.TemplateResponse(request, "org.html",
-                                      {"page": "org", **api.get_org_overview(mfrom, mto, mrole)})
+                                      {"page": "org", **ov, "running": api.org_running()})
 
 
 @app.get("/api/org")
@@ -199,7 +220,9 @@ async def api_org_decide(request: Request):
     import org
     body = await request.json()
     try:
-        return org.decide(int(body["item_id"]), body.get("verdict"), body.get("note"))
+        result = org.decide(int(body["item_id"]), body.get("verdict"), body.get("note"))
+        api.invalidate_org_overview()
+        return result
     except (ValueError, KeyError, TypeError) as e:
         return JSONResponse({"error": str(e)}, status_code=400)
 
@@ -324,6 +347,12 @@ def command_centre(request: Request):
     })
 
 
+@app.get("/command/tab/data", response_class=HTMLResponse)
+def command_tab_data(request: Request):
+    """The Command Centre's Data Model tab as a partial, fetched on first open."""
+    return templates.TemplateResponse(request, "command_data.html", api.get_command_centre())
+
+
 @app.get("/sql", response_class=HTMLResponse)
 def sql_console(request: Request, table: str = None, q: str = None):
     """Read-only SQL query interface.
@@ -366,6 +395,13 @@ def api_pipeline_rerun(step_name: str):
     from cockpit_ops.api import rerun_step
     result = rerun_step(step_name)
     return JSONResponse(result, status_code=200 if result.get("ok") else 409)
+
+
+@app.get("/api/sql/schema")
+async def api_sql_schema():
+    """Tables, columns and row counts for the console's Schema tab (one call)."""
+    import asyncio
+    return await asyncio.to_thread(api.get_sql_schema)
 
 
 @app.post("/api/sql")

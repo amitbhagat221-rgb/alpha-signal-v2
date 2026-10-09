@@ -1,0 +1,16 @@
+{# One table's per-factor diagnostic, fetched when its row is expanded (/system/health/<table>). #}
+<div class="sy-factors">
+    {% for f in t.factors %}
+    <div class="sy-factor {{ 'st-ok' if f.severity == 'ok' else ('st-warn' if f.severity == 'warn' else 'st-broken') }}">
+        <div class="sy-factor-h">
+            <div class="sy-factor-n"><span class="sy-factor-s">{{ '✓' if f.severity == 'ok' else ('⚠' if f.severity == 'warn' else '✗') }}</span> {{ f.name|replace('_', ' ') }}</div>
+            <div class="mono sy-factor-s">{{ f.score }}/100</div>
+        </div>
+        <div class="sy-factor-m">{{ f.message }}</div>
+        {% if f.fix %}<div class="sy-factor-x"><b>Fix:</b> {{ f.fix }}</div>{% endif %}
+        {% if f.drill_sql %}<a href="/sql?q={{ f.drill_sql|urlencode }}" class="sy-drill">Drill &rarr; SQL Console</a>{% endif %}
+    </div>
+    {% else %}
+    <div class="u-muted-11">No per-factor detail for this table.</div>
+    {% endfor %}
+</div>

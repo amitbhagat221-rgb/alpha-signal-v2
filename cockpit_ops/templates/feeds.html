@@ -75,7 +75,7 @@
         {% for p in r.problem_labels[:2] %}<div class="ds-prob">• {{ p }}</div>{% endfor %}
       </div>
       <div class="ds-cell {% if r.check in ('failed', 'crashed') %}ds-bad{% endif %}" data-l="Health check">{{ r.check }}<small>{{ r.check_when }}</small></div>
-      <div class="ds-cell {% if r.age_bad %}ds-bad{% endif %}" data-l="Latest data">{{ r.age or '—' }}{% if r.age %}<small>{{ 'overdue' if r.age_bad else 'on schedule' }}</small>{% endif %}</div>
+      <div class="ds-cell {% if r.age_bad %}ds-bad{% endif %}" data-l="Latest data">{{ r.age or '—' }}{% if r.age and r.cadence %} · {{ r.cadence|replace('_', ' ') }}{% endif %}{% if r.age %}<small>{{ 'overdue' if r.age_bad else 'on schedule' }}</small>{% endif %}</div>
     </div>
     <div class="ds-more" x-show="open['{{ r.feed }}']" x-cloak>
       {% if r.problems %}<div><b>What's wrong</b>{% for p in r.problems %}{{ p }}{% if not loop.last %}<br><b></b>{% endif %}{% endfor %}</div>{% endif %}

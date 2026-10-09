@@ -1,0 +1,75 @@
+{# Pipeline tab: currently-broken streaks + the 7-day log, fetched on first open. #}
+{% if overview and overview.pipeline_summary and overview.pipeline_summary.failed_streaks %}
+<div class="card sy-card st-critical">
+    <h2 class="section-title sy-title sy-title-c">Currently broken steps</h2>
+    <div class="section-desc">
+        Steps whose most-recent run failed AND have been failing for ≥2 days in a row.
+        Historical streaks that have since recovered are filtered out (see health_report streak query).
+    </div>
+    <div class="table-wrap"><table class="sy-table">
+        <thead><tr><th>Step</th><th class="num">Days</th><th>Sample error</th></tr></thead>
+        <tbody>
+        {% for s in overview.pipeline_summary.failed_streaks %}
+        <tr><td class="mono"><b class="c-accent">{{ s.step }}</b></td><td class="num c-red"><b>{{ s.days }} d</b></td><td class="small">{{ s.sample_error }}</td></tr>
+        {% endfor %}
+        </tbody>
+    </table></div>
+</div>
+{% endif %}
+
+<div class="card u-mb20" x-data="{ statusFilter: 'all', stepFilter: '' }">
+    <h2 class="section-title">Pipeline Log (Last 7 Days)</h2>
+    <div class="section-desc">
+        One row per (date, step) showing the final state. Stale RUNNING rows from crashed
+        runs are shown as ABORTED. Each pipeline step writes a RUNNING row on start and a
+        SUCCESS/FAILED row on completion; only the final state is displayed here.
+        Showing the latest {{ [pipeline|length, 30]|min }} of {{ pipeline|length }} (date, step) rows.
+    </div>
+    <div class="sy-filter">
+        <div>
+            <div class="u-label">Status</div>
+            <div class="radio-group" role="radiogroup">
+                {% for key, label in [('all', 'All'), ('FAILED', 'Failed'), ('SUCCESS', 'Success'), ('RUNNING', 'Running'), ('ABORTED', 'Aborted')] %}
+                <button type="button" class="radio-btn" :class="{ active: statusFilter === '{{ key }}' }" @click="statusFilter='{{ key }}'">{{ label }}</button>
+                {% endfor %}
+            </div>
+        </div>
+        <div class="grow-in">
+            <label class="u-label" for="pipe-step">Search step</label>
+            <input id="pipe-step" type="text" x-model="stepFilter" placeholder="e.g. fetch_shareholding, classify_…" class="sy-input">
+        </div>
+    </div>
+
+    {% if pipeline %}
+    <div class="table-wrap">
+    <table class="sy-table">
+        <thead>
+            <tr><th>Date</th><th>Step</th><th>Status</th><th class="num">Rows</th><th class="num">Time</th><th>Started</th><th>Error</th></tr>
+        </thead>
+        <tbody>
+            {% for row in pipeline[:30] %}
+            <tr data-status="{{ row.status }}" data-step="{{ row.step_name|lower }}"
+                x-show="(statusFilter === 'all' || statusFilter === $el.dataset.status) && (stepFilter === '' || $el.dataset.step.includes(stepFilter.toLowerCase()))">
+                <td class="mono">{{ row.run_date }}</td>
+                <td class="mono"><b>{{ row.step_name }}</b></td>
+                <td>
+                    {% if row.status == 'SUCCESS' %}<span class="pipe-ok">&#10003; {{ row.status }}</span>
+                    {% elif row.status == 'FAILED' %}<span class="pipe-fail">&#10007; {{ row.status }}</span>
+                    {% elif row.status == 'RUNNING' %}<span class="pipe-run">&#9679; {{ row.status }}</span>
+                    {% elif row.status == 'ABORTED' %}<span class="c-muted">&#9888; ABORTED</span>
+                    {% else %}<span class="u-muted">{{ row.status }}</span>{% endif %}
+                </td>
+                <td class="num">{% if row.rows_affected is not none and row.rows_affected == row.rows_affected %}{{ "{:,.0f}".format(row.rows_affected) }}{% else %}<span class="u-muted">—</span>{% endif %}</td>
+                <td class="num">{% if row.duration_sec %}{{ "%.1f"|format(row.duration_sec) }} s{% else %}<span class="u-muted">—</span>{% endif %}</td>
+                <td class="mono c-muted">{% if row.started_at %}{{ row.started_at[11:19] }}{% endif %}</td>
+                {# red only for a run that did not finish: a SUCCESS row keeps a muted note #}
+                <td class="small sy-wrap {{ 'c-red' if row.status in ('FAILED', 'ABORTED') else 'c-muted' }}">{{ (row.error_message or '')[:200] }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% else %}
+    <div class="u-muted">No pipeline runs in the last 7 days.</div>
+    {% endif %}
+</div>

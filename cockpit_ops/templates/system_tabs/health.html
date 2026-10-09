@@ -1,0 +1,161 @@
+{# Data tab: universe coverage, the database-health card, per-table scores. Fetched on first open. #}
+{% set q_data = (overview.scorecard | selectattr('theme', 'equalto', 'arrived') | list | first) if overview else none %}
+
+{% if overview and overview.eligibility %}
+<div class="card u-mb20">
+    <h2 class="section-title sy-title">Universe coverage per signal</h2>
+    <div class="section-desc">
+        Per-signal "who SHOULD have a score" (eligible) vs "who currently lacks it" (ineligible), as a share of the
+        eligible-plus-ineligible stocks. INELIGIBLE is NOT a defect: it means the source data the signal needs isn't present for that SID
+        (e.g. SMALL caps with no analyst attribution can never have <span class="mono">consensus_signal</span>).
+        Watch for sudden jumps in the ineligible count; those signal a source-side regression.
+    </div>
+    <div class="sy-tiles">
+        {% for e in overview.eligibility %}
+        {% set total = e.n_eligible + e.n_ineligible %}
+        {% set elig_pct = (100 * e.n_eligible / total) if total else 0 %}
+        {% set tone = 'st-ok' if elig_pct >= 90 else ('st-info-blue' if elig_pct >= 70 else ('st-warn' if elig_pct >= 40 else 'st-broken')) %}
+        <div class="sy-tile {{ tone }}">
+            <div class="sy-tile-h"><span class="mono sy-tile-n">{{ e.signal }}</span><span class="mono sy-tile-p">{{ elig_pct|pct(0) }}</span></div>
+            <div class="sy-bar"><div style="width: {{ elig_pct }}%;"></div></div>
+            <div class="u-muted-10"><b class="c-primary">{{ "{:,}".format(e.n_eligible) }}</b> eligible · {{ "{:,}".format(e.n_ineligible) }} ineligible</div>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+
+{% if summary %}
+{# The card's colour is the report's verdict for "Did the data arrive?" (checks.report.gather via
+   scorecard), never a string match on the freshness scan's sentence. #}
+<div class="card sy-card st-{{ (q_data.status|lower) if q_data else 'none' }}" data-data-card>
+    <div class="sy-row">
+        <div class="grow">
+            <div class="sy-eyebrow">Database Health</div>
+            <div class="sy-verdict">{% if q_data %}{{ q_data.question }} · {{ q_data.status }}{% else %}Data{% endif %}</div>
+            {% if q_data %}<div class="sy-q-f">{{ q_data.facts }}</div>{% endif %}
+            <div class="sy-sum sy-mt8">
+                {{ "{:,}".format(summary.total_rows) }} rows across {{ summary.total_tables }} tables · {{ "{:,.0f}".format(summary.db_size_mb) }} MB on disk{% if health_scores %} · as of {{ health_scores.computed_at[:16].replace('T', ' ') }}{% endif %}
+                {% if summary.last_run.started_at %}
+                · last pipeline activity: <span class="mono">{{ summary.last_run.started_at[:16].replace('T', ' ') }}</span>
+                ({{ summary.last_run.step_name }}, {{ summary.last_run.status }})
+                {% endif %}
+            </div>
+            <div class="sy-sm sy-mt8">Freshness scan: {{ summary.verdict }}</div>
+        </div>
+        <div class="sy-k">
+            <div>
+                <div class="sy-k-h">Kinds</div>
+                <div class="sy-k-b">
+                    <b class="c-accent">{{ summary.kind_counts.get('RAW', 0) }}</b> raw &nbsp;
+                    <b class="c-green">{{ summary.kind_counts.get('COMPUTED', 0) }}</b> computed &nbsp;
+                    <b class="c-amber">{{ summary.kind_counts.get('LOG', 0) }}</b> log &nbsp;
+                    <b class="c-muted">{{ summary.kind_counts.get('STATE', 0) }}</b> state
+                </div>
+            </div>
+            <div>
+                <div class="sy-k-h">Freshness (tables)</div>
+                <div class="sy-k-b">
+                    <b class="c-green">{{ summary.fresh_counts.FRESH }}</b> fresh &nbsp;
+                    <b class="c-amber">{{ summary.fresh_counts.STALE }}</b> stale &nbsp;
+                    <b class="c-red">{{ summary.fresh_counts.OUTDATED }}</b> outdated &nbsp;
+                    <b class="c-muted">{{ summary.fresh_counts['N/A'] }}</b> n/a
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+{% if health_scores %}
+{% macro tone(score) %}{{ 'st-ok' if score >= 80 else ('st-warn' if score >= 60 else 'st-broken') }}{% endmacro %}
+<div class="card u-mb20" x-data="{ filter: 'all', search: '',
+    shows(el) {
+        const score = +el.dataset.score, issues = +el.dataset.issues;
+        const ok = this.filter === 'all' || (this.filter === 'failing' && score < 60) || (this.filter === 'warning' && score >= 60 && score < 80)
+                   || (this.filter === 'passing' && score >= 80) || (this.filter === 'issues' && issues > 0);
+        return ok && (this.search === '' || el.dataset.name.includes(this.search.toLowerCase()));
+    } }">
+    <div class="sy-row u-mb16">
+        <div>
+            <h2 class="section-title sy-title">Data Health Scores</h2>
+            <div class="section-desc sy-nomb">
+                Each table is scored 0-100 across 8 factors:
+                freshness (smart: annual data is fresh for ~1 year),
+                completeness, coverage, NULL rate, validity, outliers, backtest sufficiency, duplicates.
+                Sorted worst-first. Tap a row to see the per-factor diagnostic and a drill-down query.
+            </div>
+        </div>
+        <div class="sy-score {{ tone(health_scores.overall_score) }}">
+            <div class="u-right">
+                <div class="sy-eyebrow">Overall</div>
+                <div class="sy-score-n">{{ health_scores.overall_score }}</div>
+                <div class="sy-sm">/ 100</div>
+            </div>
+            <div class="sy-score-g">{{ health_scores.overall_grade }}</div>
+        </div>
+    </div>
+
+    <div class="sy-bykind">
+        <span class="sy-cap">By kind:</span>
+        {% for kind, avg in health_scores.kind_summary.items() %}
+        <span class="{{ tone(avg) }}"><b class="sy-cc">{{ kind }}</b> {{ avg }}</span>{% if not loop.last %}<span>|</span>{% endif %}
+        {% endfor %}
+        <span class="end">{{ health_scores.total_issues }} issues across {{ health_scores.tables|length }} tables · computed {{ health_scores.computed_at[:16].replace('T', ' ') }}</span>
+    </div>
+
+    <div class="sy-filter">
+        <div>
+            <div class="u-label">Filter</div>
+            <div class="radio-group" role="radiogroup">
+                <button type="button" class="radio-btn" :class="{ active: filter === 'all' }" @click="filter='all'">All ({{ health_scores.tables|length }})</button>
+                <button type="button" class="radio-btn" :class="{ active: filter === 'failing' }" @click="filter='failing'">Failing (&lt;60)</button>
+                <button type="button" class="radio-btn" :class="{ active: filter === 'warning' }" @click="filter='warning'">Warning (60-79)</button>
+                <button type="button" class="radio-btn" :class="{ active: filter === 'passing' }" @click="filter='passing'">Passing (≥80)</button>
+                <button type="button" class="radio-btn" :class="{ active: filter === 'issues' }" @click="filter='issues'">Has issues</button>
+            </div>
+        </div>
+        <div class="grow-in">
+            <label class="u-label" for="hs-search">Search table</label>
+            <input id="hs-search" type="text" x-model="search" placeholder="e.g. analyst_consensus" class="sy-input">
+        </div>
+    </div>
+
+    <div class="table-wrap">
+    <table class="sy-table">
+        <thead>
+            <tr>
+                <th><span class="sr-only">Expand</span></th><th>Table</th><th>Score</th><th class="ctr">Grade</th><th class="ctr">Issues</th><th>Top issue / Status</th>
+            </tr>
+        </thead>
+        {# One <tbody> per table: the expand row shares the Alpine scope of its trigger row. #}
+        {% for t in health_scores.tables %}
+        <tbody x-data="{open: false}" data-name="{{ t.table|lower }}" data-score="{{ t.score }}" data-issues="{{ t.issue_count }}" x-show="shows($el)">
+            <tr class="{{ 'sy-tb-bad' if t.score < 60 else ('sy-tb-warn' if t.score < 80 else '') }} {{ tone(t.score) }}">
+                <td class="ctr"><button type="button" class="sy-chev" @click="open = !open" :aria-expanded="open" aria-label="Details for {{ t.table }}" x-text="open ? '▼' : '▶'">▶</button></td>
+                <td><button type="button" class="sy-fold sy-tname mono" @click="open = !open">{{ t.table }}</button>{% if t.kind and t.kind != '—' %}<span class="sy-kind mono">{{ t.kind }}</span>{% endif %}</td>
+                <td>
+                    <div class="sy-score">
+                        <div class="sy-bar sy-bar-lg"><div style="width: {{ t.score }}%;"></div></div>
+                        <b class="mono sy-tile-p">{{ t.score }}</b>
+                    </div>
+                </td>
+                <td class="ctr"><b class="sy-tile-p">{{ t.grade }}</b></td>
+                <td class="ctr">{% if t.issue_count > 0 %}<b class="mono {{ 'c-red' if t.score < 60 else 'c-amber' }}">{{ t.issue_count }}</b>{% else %}<span class="c-green">&#10003;</span>{% endif %}</td>
+                <td class="small">{% if t.issues %}{{ t.issues[0].msg }}{% else %}<span class="c-green">All checks pass ({{ t.factors|length }} factors)</span>{% endif %}</td>
+            </tr>
+            <tr x-show="open" x-cloak class="sy-exp">
+                <td colspan="6" x-data="lazyTab('/system/health/{{ t.table|urlencode }}')" x-effect="if (open) load()">
+                    <div class="u-muted-11" x-show="busy" role="status">Loading…</div>
+                    <div class="lazy-err" x-show="err" x-cloak><span x-text="err"></span> <button type="button" class="btn-secondary" @click="load()">Retry</button></div>
+                    <div x-html="html"></div>
+                </td>
+            </tr>
+        </tbody>
+        {% endfor %}
+    </table>
+    </div>
+</div>
+{% else %}
+<div class="card u-muted-11">Table health scores are unavailable.</div>
+{% endif %}

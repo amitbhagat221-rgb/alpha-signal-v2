@@ -77,6 +77,23 @@ def run_sql_query(query, max_rows=500):
     }
 
 
+@_persisted_cache(300, name="get_sql_schema")
+def get_sql_schema():
+    """The SQL console's Schema tab in ONE call: every table with its columns
+    (sqlite_master + PRAGMA table_info) and its row count (from the cached
+    data_health scan, so no COUNT(*) per table). `as_of` is when the counts were taken."""
+    import datetime as _dt
+    counts = {r["table"]: r.get("rows") for r in get_data_freshness()}
+    out = []
+    with get_db() as conn:
+        for (name,) in conn.execute("SELECT name FROM sqlite_master WHERE type='table' "
+                                    "AND name != 'sqlite_sequence' ORDER BY name").fetchall():
+            cols = [r[1] for r in conn.execute(f"PRAGMA table_info([{name}])").fetchall()]
+            n = counts.get(name)
+            out.append({"name": name, "columns": cols, "rows": int(n) if n is not None else None})
+    return {"tables": out, "as_of": _dt.date.today().isoformat()}
+
+
 @_persisted_cache(300, name="get_data_freshness")
 def get_data_freshness():
     """Data health from db.data_health(). NaN floats are coerced to None so the
@@ -474,8 +491,19 @@ def get_flow_overview():
     for e in edges.values():
         e["cross_layer"] = layer_of.get(e["from"]) != layer_of.get(e["to"])
 
+    in_dag = {s["name"] for s in PIPELINE_STEPS}
+    import datetime as _dt
+    cutoff = (_dt.date.today() - _dt.timedelta(days=7)).isoformat()   # an old failure is history, not a banner
+    # Cron jobs and datamodel steps log to pipeline_log but are not DAG steps: a failure there is
+    # invisible in the DAG, so the banner lists them too (Health reports them as run failures).
+    outside = [{"name": n, "last_status": r.get("status"), "last_error": r.get("error_message"),
+                "run_date": r.get("run_date")}
+               for n, r in sorted(status_by_step.items())
+               if n not in in_dag and r.get("status") in ("FAILED", "ABORTED")
+               and str(r.get("run_date") or "") >= cutoff]
     return {
         "layers": layered,
+        "outside_failures": outside,
         "step_count": sum(len(layer["steps"]) for layer in layered),
         "edges": sorted(edges.values(), key=lambda e: (position[e["from"]], position[e["to"]])),
         "n_blocking": sum(1 for e in edges.values() if e["kind"] == "blocking"),
@@ -681,15 +709,15 @@ def get_factor_health():
 
     def _grade(score):
         for thr, letter, color in [
-            (90, "A+", "#2ecc71"),
-            (80, "A",  "#27ae60"),
-            (70, "B",  "#4d8eff"),
-            (60, "C",  "#f1c40f"),
-            (40, "D",  "#e67e22"),
+            (90, "A+", "var(--green)"),
+            (80, "A",  "var(--green)"),
+            (70, "B",  "var(--blue)"),
+            (60, "C",  "var(--amber)"),
+            (40, "D",  "var(--amber)"),
         ]:
             if score >= thr:
                 return letter, color
-        return "F", "#e74c3c"
+        return "F", "var(--red)"
 
     # Per-signal nature classifications — drive both grading and the visible
     # "nature badge" so the grade is self-explanatory at a glance.
@@ -822,15 +850,15 @@ def get_factor_health():
             validation_verdict, validation_color = "NONE", "var(--text-muted)"
         elif n_int < MIN_N_FOR_VERDICT:
             # Real t-stat but too few periods — show value but flag insufficiency
-            validation_verdict, validation_color = "INSUFFICIENT", "#9b59b6"
+            validation_verdict, validation_color = "INSUFFICIENT", "var(--accent)"
         else:
             abs_t = abs(float(t_stat))
             if abs_t >= 2.5:
-                validation_verdict, validation_color = "KEEP", "#2ecc71"
+                validation_verdict, validation_color = "KEEP", "var(--green)"
             elif abs_t >= 1.5:
-                validation_verdict, validation_color = "WEAK", "#4d8eff"
+                validation_verdict, validation_color = "WEAK", "var(--blue)"
             else:
-                validation_verdict, validation_color = "DROP", "#e74c3c"
+                validation_verdict, validation_color = "DROP", "var(--red)"
 
         # Back-compat: keep `overall` field but redirect callers to data_health
         overall = data_health
@@ -1127,8 +1155,9 @@ def get_factor_health():
 
     summary = {
         "total": n,
-        "in_model": sum(1 for r in out if r["in_model"]),
-        "in_library": sum(1 for r in out if not r["in_model"] and r["coverage_n"] > 0),
+        "validated": sum(1 for r in out if r["in_model"]),       # READY and |t| >= 1.5
+        "wired": sum(1 for r in out if r.get("in_production")),   # a nonzero weight in factors.SIGNAL_WEIGHTS
+        "in_library": sum(1 for r in out if not r.get("in_production") and r["coverage_n"] > 0),
         "not_built": sum(1 for r in out if r["coverage_n"] == 0),
         "with_t_stat": sum(1 for r in out if r["t_stat"] is not None),
         "pit_ready": sum(1 for r in out if r["pit_ready"]),
@@ -1247,9 +1276,11 @@ def _cc_factor_library():
     ]
 
     # Promotion criterion: if the best pit_ic_by_tier_v2 row (best_ic_by_signal —
-    # the same rule /system uses) has |t| >= 1.5, the factor is "in model";
-    # otherwise "library".
+    # the same rule /system uses) has |t| >= 1.5, the factor is "validated". Whether it VOTES
+    # is a different fact: `wired`, from factors.SIGNAL_WEIGHTS.
     PROMOTION_T_THRESHOLD = 1.5
+    import factors as _factors
+    wired = _factors.wired_signal_ids()
 
     factors = []
     best = best_ic_by_signal()
@@ -1294,7 +1325,7 @@ def _cc_factor_library():
                 except Exception:
                     stocks = 0
 
-            in_production = (
+            validated = (
                 spec["status"] == "READY"
                 and t_stat is not None
                 and abs(t_stat) >= PROMOTION_T_THRESHOLD
@@ -1310,7 +1341,8 @@ def _cc_factor_library():
                 "t_stat": float(t_stat) if t_stat is not None else None,
                 "n_periods": int(n_periods) if n_periods is not None else None,
                 "ic_source": ic_source or "—",
-                "in_production": in_production,
+                "validated": validated,
+                "in_production": signal in wired,
                 "track": "legacy",
                 "table": v2_col or "—",
             })
@@ -1321,9 +1353,7 @@ def _cc_factor_library():
             ic_row = best.get(signal, {})
             t_stat = ic_row.get("t_stat")
             stocks = _stocks_in(spec.get("score_table"))
-            in_production = (
-                t_stat is not None and abs(t_stat) >= PROMOTION_T_THRESHOLD
-            )
+            validated = t_stat is not None and abs(t_stat) >= PROMOTION_T_THRESHOLD
             factors.append({
                 "name": spec["label"],
                 "signal": signal,
@@ -1334,12 +1364,14 @@ def _cc_factor_library():
                 "t_stat": float(t_stat) if t_stat is not None else None,
                 "n_periods": int(ic_row["n_periods"]) if ic_row.get("n_periods") is not None else None,
                 "ic_source": ic_row.get("source") or "—",
-                "in_production": in_production,
+                "validated": validated,
+                "in_production": signal in wired,
                 "track": "f-track",
                 "table": spec.get("score_table"),
             })
 
-    # "Built" = has scores OR has a t-stat. "In model" = passes promotion.
+    # "Built" = has scores OR has a t-stat. "Validated" = |t| clears the promotion threshold;
+    # "in_production" = WIRED, a nonzero weight in factors.SIGNAL_WEIGHTS (the two are not the same).
     n_built = len([f for f in factors if f["stocks"] > 0 or f["t_stat"] is not None])
     n_in_prod = len([f for f in factors if f["in_production"]])
     n_in_library = n_built - n_in_prod
@@ -1379,6 +1411,7 @@ def get_command_centre():
 
     # ── Factor library (BACKTEST_SIGNALS × pit_ic_by_tier_v2) ──
     factors, n_built, n_in_prod, n_in_library = _cc_factor_library()
+    n_validated = sum(1 for f in factors if f.get("validated"))
 
     # ── Data layer (lightweight, for the architecture flow header stats) ──
     data_layer = {}
@@ -1743,7 +1776,7 @@ def get_command_centre():
                 "n_model": in_model,
                 "items": [
                     (f["name"], f"{f['t_stat']:.2f}" if f["t_stat"] is not None else "—",
-                     "model" if f["in_production"] else "library")
+                     "wired" if f["in_production"] else "library")
                     for f in in_group
                 ],
             })
@@ -1751,10 +1784,9 @@ def get_command_centre():
     arch_model = [
         {
             "name": "Cap-tier composite",
-            "summary": "Within-tier weighted sum of validated signals (cf C13b rubric)",
+            "summary": "Within-tier weighted sum of the wired signals (factors.SIGNAL_WEIGHTS)",
             "items": [
                 *_tier_weight_items(),
-                ("Weight tiers", "|t|≥2.5 → 1.0× / 1.5-2.5 → 0.5× / 0.5-1.5 → 0.2× / <0.5 → 0×"),
             ],
         },
         {
@@ -1767,7 +1799,7 @@ def get_command_centre():
         },
         {
             "name": "Personal factor library",
-            "summary": f"{n_built - n_in_prod} factors built but not voting (yet)",
+            "summary": f"{n_built - n_in_prod} factors built but not wired into the ranking",
             "items": [
                 ("Promotion criterion", "|t|≥1.5 in any tier (preferring v2_recompute)"),
                 ("ADR 0012", "v2 archive refreshes after every signal-side fix"),
@@ -1812,7 +1844,8 @@ def get_command_centre():
         "summary": {
             "tables": len(data_layer),
             "factors_total": len(factors),
-            "factors_in_model": n_in_prod,
+            "factors_validated": n_validated,
+            "factors_wired": n_in_prod,
             "factors_in_library": n_in_library,
         },
     }
@@ -1823,8 +1856,9 @@ def get_command_centre():
             "built": n_built,
             "target": FACTOR_COUNT_TARGET,
             "pct": round(100 * n_built / FACTOR_COUNT_TARGET, 1),
-            "in_production": n_in_prod,
-            "in_library": n_in_library,
+            "validated": n_validated,
+            "wired": n_in_prod,
+            "not_wired": n_built - n_in_prod,
         },
         "data_layer": data_layer,
         "data_model": data_model,
@@ -1932,9 +1966,9 @@ def _age_label(days):
     if days is None:
         return None
     d = int(round(float(days)))
-    # age of the newest data point (e.g. a quarter-end), not of the fetch — "on
-    # schedule" / "overdue" beside it comes from the freshness rule, which knows the lag
-    return "today" if d <= 0 else ("1 day ago" if d == 1 else f"{d} days ago")
+    # age of the newest data point (e.g. a quarter-end), not of the fetch; the page
+    # shows it with the feed's cadence ("101 d · quarterly"); "on schedule" / "overdue" comes from the freshness rule, which knows the lag
+    return "today" if d <= 0 else f"{d} d"
 
 
 def _plain(r):
@@ -1973,7 +2007,7 @@ def _plain(r):
     return r
 
 
-@_ttl_cache(60)
+@_persisted_cache(300, name="get_feed_overview")
 def get_feed_overview():
     """Everything the /feeds page shows, from feeds.FEEDS + checks.feeds (one source
     of truth with the health report — the page and the email cannot disagree)."""
@@ -2066,6 +2100,7 @@ def get_feed_overview():
 
 # ─────────────────────────── Boardroom (plan 0019) ───────────────────────────
 
+@_persisted_cache(300, name="get_org_overview")      # 0.5-9 s uncached; a decision invalidates it
 def get_org_overview(mfrom=None, mto=None, mrole=None):
     """Everything the /org Boardroom page shows: the role tree with each seat's
     scorecard, the CEO inbox, the latest board pack, recent memos with their grades
@@ -2108,6 +2143,9 @@ def get_org_overview(mfrom=None, mto=None, mrole=None):
         m["role_title"] = (by_id.get(m["fields"].get("role")) or {}).get("title") or m["fields"].get("role")
     graded = [r["score"]["grade"] for r in ov["roles"] if (r.get("score") or {}).get("grade") is not None]
     ov["tree"] = tree
+    # item id -> the CEO's verdict, so the board pack can say what became of a decision it lists
+    ov["decided"] = {d["parent_doc_id"]: d["fields"].get("verdict") for d in reversed(ov["decisions"])
+                     if d.get("parent_doc_id")}
     ov["memos"] = ov["memos"][:150 if filtered else 40]   # unfiltered: the newest; the date filter reaches the rest
     ov["running"] = org_running()
     ov["summary"] = {
@@ -2118,6 +2156,15 @@ def get_org_overview(mfrom=None, mto=None, mrole=None):
         "avg_grade": round(sum(graded) / len(graded), 1) if graded else None,
     }
     return ov
+
+
+def invalidate_org_overview():
+    """Drop every cached Boardroom view (memo + pickles): the next read recomputes, so a
+    decision shows on the next page load instead of up to 5 minutes later."""
+    from cockpit._shared import _PERSISTED_CACHE_DIR
+    get_org_overview.cache_clear()
+    for f in _PERSISTED_CACHE_DIR.glob("get_org_overview*.pkl"):
+        f.unlink(missing_ok=True)
 
 
 ORG_LOCK = "/tmp/alpha_signal_org.lock"      # the same lock run.sh `org` takes: org runs never overlap

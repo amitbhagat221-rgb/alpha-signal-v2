@@ -1,0 +1,78 @@
+{# Inventory tab: every table grouped by domain, each a sortable grid. Fetched on first open. #}
+<div class="card">
+    <h2 class="section-title">Data Inventory</h2>
+    <div class="section-desc">
+        {{ health|length }} tables across {{ inventory_groups|length }} domains. Each grid is sortable
+        (press a column header), columns are draggable to reorder, and your layout per domain
+        is saved in this browser. Rows, ages and spans are as of the last data-health scan (cached).
+        <b>Kind</b>: RAW = fetched · COMPUTED = derived · LOG = audit · STATE = config.
+    </div>
+
+    {% for group in inventory_groups %}
+    <details open class="inv-domain" data-domain="{{ group.domain }}">
+        <summary>
+            <span class="inv-arrow"></span>
+            <h3 class="inv-domain-title">{{ group.domain }}</h3>
+            <span class="inv-domain-count mono">{{ group.rows|length }} table{{ '' if group.rows|length == 1 else 's' }}</span>
+        </summary>
+        <div class="inv-table-wrap">
+        <table class="inv-table" data-domain-key="{{ group.domain | replace(' & ', '-') | replace(' ', '-') | lower }}">
+            <thead>
+                <tr>
+                    <th data-key="table"              data-sort="string">Table</th>
+                    <th data-key="kind"               data-sort="string">Kind</th>
+                    <th data-key="rows"               data-sort="number" class="num">Rows</th>
+                    <th data-key="stock_coverage_pct" data-sort="number" class="num">Stock Coverage</th>
+                    <th data-key="date_span"          data-sort="string">Span</th>
+                    <th data-key="latest_date"        data-sort="string">Latest</th>
+                    <th data-key="freshness"          data-sort="string">Freshness</th>
+                    <th data-key="age_days"           data-sort="number" class="num">Age</th>
+                    <th data-key="frequency"          data-sort="string">Refresh</th>
+                    <th data-key="source"             data-sort="string">Source</th>
+                    <th data-key="produced_by"        data-sort="string">Producer</th>
+                    <th data-key="consumed_count"     data-sort="number" class="num">Used by</th>
+                    <th data-key="description"        data-sort="string">Description</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in group.rows %}
+                {% set kind_cls = {'RAW': 'pill-accent', 'COMPUTED': 'pill-green', 'LOG': 'pill-amber'}.get(row.kind, 'pill-muted') %}
+                {% set fresh_cls = {'FRESH': 'pill-green', 'STALE': 'pill-amber', 'OUTDATED': 'pill-red'}.get(row.freshness, 'pill-muted') %}
+                {% set cov_pct = row.stock_coverage_pct %}
+                {% set cov_cls = 'c-muted' if cov_pct is none else ('c-green' if cov_pct >= 80 else ('c-amber' if cov_pct >= 30 else 'c-red')) %}
+                {% set over = row.age_days is not none and row.threshold_days and row.age_days > row.threshold_days %}
+                {% set near = row.age_days is not none and row.threshold_days and row.age_days > row.threshold_days * 0.7 %}
+                <tr>
+                    <td data-key="table">
+                        <a href="/sql?table={{ row.table }}" class="mono inv-table-name">{{ row.table }}</a>
+                        {% if row.status == 'EMPTY' %}<span class="pill pill-red">EMPTY</span>{% endif %}
+                    </td>
+                    <td data-key="kind"><span class="pill {{ kind_cls }}">{{ row.kind }}</span></td>
+                    <td data-key="rows" class="num inv-strong">{{ "{:,}".format(row.rows) }}</td>
+                    <td data-key="stock_coverage_pct" class="num">
+                        {% if cov_pct is not none %}<b class="{{ cov_cls }}">{{ "{:,}".format(row.stock_count) }}</b> <span class="inv-faint">{{ cov_pct }}%</span>{% else %}<span class="inv-faint">—</span>{% endif %}
+                    </td>
+                    <td data-key="date_span" class="mono">{{ row.date_span if row.date_span and row.date_span != '—' else (row.depth or '—') }}</td>
+                    <td data-key="latest_date" class="mono">{{ row.latest_date or '—' }}</td>
+                    <td data-key="freshness">{% if row.freshness != 'N/A' %}<span class="pill {{ fresh_cls }}">{{ row.freshness }}</span>{% else %}<span class="inv-faint">—</span>{% endif %}</td>
+                    <td data-key="age_days" class="num">
+                        {% if row.age_days is not none %}<span class="{{ 'c-red' if over else ('c-amber' if near else '') }}">{{ row.age_days }} d</span><span class="inv-faint"> / {{ row.threshold_days }} d</span>{% else %}<span class="inv-faint">—</span>{% endif %}
+                    </td>
+                    <td data-key="frequency">{{ row.frequency or '—' }}</td>
+                    <td data-key="source" class="inv-wrap">{{ row.source or '—' }}</td>
+                    <td data-key="produced_by" class="mono inv-faint inv-wrap">{{ row.produced_by or '—' }}</td>
+                    <td data-key="consumed_count" class="num">
+                        {{ row.consumed_count if row.consumed_count is defined else '—' }}
+                        {% if row.consumed_by %}<span class="tooltip-wrap" x-data="{ open: false }"><button type="button" class="tooltip-trigger" @click="open = !open" @click.outside="open = false" @mouseenter="open = true" @mouseleave="open = false" aria-label="Used by {{ row.table }}">i</button><span x-show="open" x-cloak class="tooltip-popover">{{ row.consumed_by }}</span></span>{% endif %}
+                    </td>
+                    <td data-key="description" class="inv-wrap">{{ row.description }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        </div>
+    </details>
+    {% else %}
+    <div class="u-muted-11">No tables found.</div>
+    {% endfor %}
+</div>
