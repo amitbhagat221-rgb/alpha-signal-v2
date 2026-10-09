@@ -135,9 +135,9 @@
         display: flex; align-items: center; justify-content: center;
         font-size: 13px;
     }
-    .drv-card.rev .icon  { background: rgba(46,204,113,0.15); color: #2ecc71; }
-    .drv-card.cost .icon { background: rgba(231,76,60,0.15);  color: #e74c3c; }
-    .drv-card.grow .icon { background: rgba(77,142,255,0.15); color: #4d8eff; }
+    .drv-card.rev .icon  { background: var(--green-bg); color: var(--green); }
+    .drv-card.cost .icon { background: var(--red-bg); color: var(--red); }
+    .drv-card.grow .icon { background: var(--blue-bg); color: var(--blue); }
     .drv-card h5 { font-size: 11px; font-weight: 700; letter-spacing: 0.4px;
                    text-transform: uppercase; color: var(--text-primary); margin: 0; }
     .drv-pill {
@@ -200,8 +200,8 @@
         font-size: 10.5px; padding: 1px 0; color: var(--text-secondary);
     }
     .seg-chip .kpi-li .arrow { font-weight: 700; margin-right: 4px; }
-    .seg-chip .kpi-li .arrow.up { color: #2ecc71; }
-    .seg-chip .kpi-li .arrow.down { color: #e74c3c; }
+    .seg-chip .kpi-li .arrow.up { color: var(--green); }
+    .seg-chip .kpi-li .arrow.down { color: var(--red); }
 
     .trend-box {
         background: var(--bg-card-hover); border: 1px solid var(--border);
@@ -224,7 +224,7 @@
         white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .pick-row .score { font-family: var(--mono, monospace); text-align: right; font-weight: 700; }
     .pdot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; vertical-align: middle; margin-right: 5px; }
-    .pdot.up { background: #2ecc71; } .pdot.down { background: #e74c3c; } .pdot.flat { background: var(--text-muted); }
+    .pdot.up { background: var(--green); } .pdot.down { background: var(--red); } .pdot.flat { background: var(--text-muted); }
 
     /* ── Sector Digest (Plan 0006 Phase C — replaces 47-card industry heatmap) ── */
     .sd-bucket { margin-bottom: 18px; }
@@ -271,7 +271,7 @@
     .sd-arrow { font-weight: 700; min-width: 12px; }
     .sd-driver-text { font-family: var(--mono, monospace); color: var(--text-secondary); }
     .sd-hint {
-        font-size: 11px; color: #f5a623; font-weight: 600;
+        font-size: 11px; color: var(--amber); font-weight: 600;
         margin: 4px 0 2px 0;
     }
     .sd-tickers {
@@ -317,9 +317,9 @@
         flex: 0 0 auto; font-family: var(--mono, monospace); font-size: 10px; font-weight: 700;
         width: 15px; text-align: center; border-radius: 4px; padding: 1px 0; color: #fff;
     }
-    .sd-hbadge.h-s { background: #4d8eff; }
-    .sd-hbadge.h-m { background: #7cb305; }
-    .sd-hbadge.h-l { background: #9254de; }
+    .sd-hbadge.h-s { background: var(--blue); }
+    .sd-hbadge.h-m { background: var(--green); }
+    .sd-hbadge.h-l { background: var(--accent); }
     .sd-dmore { margin-top: 9px; }
     .sd-dmore > summary {
         list-style: none; cursor: pointer; font-size: 11px; font-weight: 600; color: var(--text-muted);
