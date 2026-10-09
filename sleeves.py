@@ -25,6 +25,7 @@ from datetime import date, timedelta
 import pandas as pd
 
 from config import PICKABLE_TIERS
+from pit import INSIDER_DISCLOSURE_DAYS
 from db import read_sql
 
 # ── breakouts (O'Neil / Minervini) ──
@@ -43,7 +44,7 @@ INSIDER_DAYS = 90
 INSIDER_CATEGORIES = ("Promoters", "Promoter Group", "Director", "Key Managerial Personnel")
 INSIDER_MIN_CR = 1.0            # net purchases, Rs crore
 INSIDER_MIN_BUYERS = 2
-INSIDER_LAG_DAYS = 3            # a trade is public about two trading days after it happens
+INSIDER_LAG_DAYS = INSIDER_DISCLOSURE_DAYS   # trade → public (pit; was 3 = the median, half not yet public)
 
 # ── quality (the compounder rule on the years of statements we hold) ──
 ROCE_BAR = 15                   # %

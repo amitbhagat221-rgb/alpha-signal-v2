@@ -30,6 +30,8 @@ from signals._fundamentals import prefer_consolidated, ttm
 ANNUAL_LAG = 75
 QUARTERLY_LAG = 60
 SHAREHOLDING_LAG = 21
+INSIDER_DISCLOSURE_DAYS = 7    # trade date → public: measured 2026-10 on daily-fetched NSE filings,
+                               # median 3 days, 90% within 7 (SEBI allows 2 + 2 trading days)
 # When a vendor statement could be known (audit R11). The filing lag is when the market
 # knew it; our copy arrives when the vendor publishes it and the monthly harvest fetches
 # it. Tickertape's annual statements arrived 37 of 2,221 by day 62 after year end, 38% by
@@ -1372,7 +1374,10 @@ def _pit_input(ctx, raw, key, eval_date):
     elif key in ("news", "news_text"):
         v = raw[key][raw[key]["published_date"] <= d]
     elif key == "insider_trades":
-        v = raw["insider_trades"][raw["insider_trades"]["trade_date"] <= d]
+        # known when disclosed, not when traded (the table holds no disclosure date yet;
+        # plan 0017 D7 ③): INSIDER_DISCLOSURE_DAYS after the trade
+        lag = (eval_date - timedelta(days=INSIDER_DISCLOSURE_DAYS)).isoformat()
+        v = raw["insider_trades"][raw["insider_trades"]["trade_date"] <= lag]
     elif key == "fund":
         v = knowable_screener(raw["fund_screener"], eval_date) if "fund_screener" in raw else pd.DataFrame()
     elif key == "financial_sids":
