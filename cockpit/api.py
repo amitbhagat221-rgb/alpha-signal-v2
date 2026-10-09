@@ -849,7 +849,26 @@ def get_price_series_extended(sid, days=365):
         "ORDER BY date DESC LIMIT ?",
         [sid, days],
     )
-    return newest_first[::-1]  # chronological for the chart
+    series = newest_first[::-1]  # chronological for the chart
+    # split/bonus-adjusted like every return on the page: a 1:2 split is not a crash on the chart
+    adj = pd.DataFrame(db.rows("SELECT sid, ex_date, factor FROM corporate_adjustments WHERE sid = ?", [sid]),
+                       columns=["sid", "ex_date", "factor"])
+    if series and not adj.empty:
+        df = pd.DataFrame(series)
+        for col in ("open", "high", "low", "close"):
+            df[col] = views.adjusted_closes(df[["date", col]].rename(columns={col: "close"}), adj)["close"].values
+        df = df.astype(object).where(df.notna(), None)
+        series = df.to_dict("records")
+    return series
+
+
+def get_factor_labels():
+    """{weight key: short label} for every wired factor (the registry's label, parenthetical dropped)."""
+    import factors
+    out = {}
+    for name, f in factors.FACTORS.items():
+        out[f.get("weight_key") or name] = (f.get("label") or name).split(" (")[0]
+    return out
 
 
 def get_quarterly_financials(sid):

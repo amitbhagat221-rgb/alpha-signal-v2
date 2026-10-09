@@ -15,6 +15,7 @@ from starlette.middleware.gzip import GZipMiddleware
 
 from webauth import LoginRequired
 
+import config
 import views
 from cockpit import api, pages
 from cockpit._shared import COCKPIT_STATIC, COCKPIT_TEMPLATES, make_templates, nav_model, prewarm
@@ -207,6 +208,9 @@ def stock_detail(request: Request, sid: str):
 
     # Enrich with all new data
     detail["pm"] = api.get_stock_price_metrics(sid)
+    detail["breakdown"] = views.pick_breakdown(sid, detail.get("pick_date")) if detail.get("final_score") is not None else None
+    detail["factor_labels"] = api.get_factor_labels()
+    detail["is_financial"] = detail.get("sector") in config.SCREEN["financial_sectors"]
     detail["ac"] = api.get_analyst_consensus(sid)
     detail["shareholding"] = api.get_shareholding_history(sid)
     detail["insider"] = api.get_insider_activity(sid)
@@ -239,7 +243,7 @@ def stock_detail(request: Request, sid: str):
 
     from datetime import date as _date
     return templates.TemplateResponse(request, "stock_detail.html", {
-        "stock": detail, "page": "explorer",
+        "stock": detail, "page": "explorer", "latest_pick": api.latest_pick_date(),
         "today_iso": _date.today().isoformat(),
     })
 
