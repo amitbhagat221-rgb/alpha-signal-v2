@@ -1,10 +1,14 @@
 """
-Alpha Signal v2 — BSE shareholding-pattern XBRL: the NAMED holders of each stock.
+Alpha Signal v2 — BSE shareholding-pattern XBRL: who owns each stock, as filed.
 
-`shareholding` (Tickertape) holds category percentages only. The exchange filing also
-names every holder above 1% — promoters, mutual-fund schemes, FPIs, individuals — and
-that is what a "who owns this, and who just bought" view needs. This module writes
-those names into `shareholding_holders`, one row per holder per filing.
+`shareholding` (Tickertape) holds category percentages only, about two years deep. The
+exchange filing also names every holder above 1% — promoters, mutual-fund schemes,
+FPIs, individuals — and that is what a "who owns this, and who just bought" view needs.
+This module writes two tables from each filing:
+    shareholding_holders     one row per named holder
+    shareholding_categories  one row per filing: the category totals (promoter, foreign
+                             and domestic institutions, mutual funds, insurance, small
+                             and large individuals) and the shareholder counts, from 2016
 
 SOURCE (unofficial — the public bseindia.com site's own backend; research 0005 A2):
     index   GET https://api.bseindia.com/BseIndiaAPI/api/Corp_Shareholding_ng/w
@@ -21,7 +25,11 @@ typed-dimension member `<key>` (e.g. `MutualFundsOrUTI_Context15`). The context
 `D_<key>` carries the text facts (NameOfTheShareholder, TypeOfPromoterShareholding);
 the context `<key>` carries the numbers (NumberOfShares, the percentage). A member
 flagged "Category" is a sub-total of a category (Clearing Members, HUF…), not a holder,
-and is skipped.
+and is skipped. A category TOTAL is the instant context `<Category>_ContextI` (2016-17
+filings also write `<Category>I`); the 2016 taxonomy has one `Institutions` total
+(foreign portfolio investors inside it), the 2022 one splits `InstitutionsForeign` and
+`InstitutionsDomestic`. A holder or category with shares but no percentage (the
+persons-acting-in-concert section) gets shares / total shares.
 
 PIT: `filed_at` is the BSE broadcast time. A revised filing for the same quarter is a
 new set of rows with a later `filed_at`; read the latest `filed_at` at or before the
@@ -36,6 +44,8 @@ Usage:
     python -m sources.bse_shp --universe --quarters 2       # stocks holding fewer than 2 quarters
     python -m sources.bse_shp --universe --quarters 0 --budget-min 300   # full history, largest first,
                                                             # resumable (output/bse_shp_backfill_done.txt)
+    python -m sources.bse_shp --reparse                     # category totals from the archived filings
+                                                            # (no network; filings already in shareholding_holders)
 """
 
 import argparse
@@ -63,6 +73,28 @@ LABEL = "bse_shp"
 
 COLS = ["sid", "scrip_cd", "end_date", "filed_at", "holder_category", "holder_seq",
         "holder_name", "promoter_type", "shares", "pct", "source_url", "fetched_at"]
+CAT_COLS = ["sid", "scrip_cd", "end_date", "filed_at", "promoter_pct", "public_pct", "foreign_inst_pct",
+            "domestic_inst_pct", "mf_pct", "insurance_pct", "retail_pct", "hni_pct", "n_shareholders",
+            "n_retail", "total_shares", "source_url", "fetched_at"]
+
+# Category totals, by lower-cased context name (both taxonomies' spellings).
+_TOTAL = "shareholdingpattern"
+_PROMOTER = "shareholdingofpromoterandpromotergroup"
+_PUBLIC = "publicshareholding"
+_CATS = {
+    "mf_pct": ("mutualfundsoruti",),
+    "insurance_pct": ("insurancecompanies",),
+    "retail_pct": ("residentindividualshareholdersholdingnominalsharecapitaluptorstwolakh",
+                   "individualshareholdersholdingnominalsharecapitaluptorstwolakh"),
+    "hni_pct": ("residentindividualshareholdersholdingnominalsharecapitalinexcessofrstwolakh",
+                "individualshareholdersholdingnominalsharecapitalinexcessofrstwolakh"),
+}
+_FOREIGN_2022 = "institutionsforeign"
+_DOMESTIC_2022 = "institutionsdomestic"
+_INSTITUTIONS_2016 = "institutions"
+_FOREIGN_2016 = ("institutionsforeignportfolioinvestor", "foreignportfolioinvestor", "foreigninstitutions",
+                 "foreignventurecapitalinvestors")
+_CAT_KEY = re.compile(r"^(.+?)(?:_Context)?I$")
 
 _CONTEXT = re.compile(r"<xbrli:context\s+id=['\"]([^'\"]+)['\"].*?</xbrli:context>", re.S)
 _INSTANT = re.compile(r"<xbrli:instant>\s*([\d-]{10})")
@@ -93,9 +125,8 @@ def _number(value):
         return None
 
 
-def parse_holders(text):
-    """A shareholding-pattern filing → [{end_date, holder_category, holder_seq,
-    holder_name, promoter_type, shares, pct}], named holders only."""
+def _contexts(text):
+    """(instant date by context, {context: {fact: value}}) of one filing."""
     instants = {}
     for m in _CONTEXT.finditer(text):
         inst = _INSTANT.search(m.group(0))
@@ -105,6 +136,37 @@ def parse_holders(text):
     for name, ctx, value in _facts(text):
         if ctx:
             by_ctx.setdefault(ctx, {}).setdefault(name, value)
+    return instants, by_ctx
+
+
+def _shares(facts):
+    return _number(facts.get("NumberOfShares") or facts.get("NumberOfFullyPaidUpEquityShares"))
+
+
+def _totals(instants, by_ctx):
+    """{lower-cased category: (shares, pct, holders)} and the filing's end date."""
+    out, end_date = {}, None
+    for ctx, facts in by_ctx.items():
+        m = _CAT_KEY.match(ctx)
+        if not m or ctx.startswith("D_") or m.group(1)[-1].isdigit():
+            continue
+        out.setdefault(m.group(1).lower(), (
+            _shares(facts), _number(facts.get("ShareholdingAsAPercentageOfTotalNumberOfShares")),
+            _number(facts.get("NumberOfShareholders"))))
+        if m.group(1).lower() == _TOTAL:
+            end_date = instants.get(ctx)
+    total = (out.get(_TOTAL) or (None,))[0]
+    if total:                                          # shares but no percentage → shares / total
+        out = {k: (sh, pct if pct is not None or sh is None else round(100 * sh / total, 4), n)
+               for k, (sh, pct, n) in out.items()}
+    return out, end_date
+
+
+def parse_holders(text):
+    """A shareholding-pattern filing → [{end_date, holder_category, holder_seq,
+    holder_name, promoter_type, shares, pct}], named holders only."""
+    instants, by_ctx = _contexts(text)
+    total = (_totals(instants, by_ctx)[0].get(_TOTAL) or (None,))[0]
 
     holders = []
     for ctx, facts in by_ctx.items():
@@ -119,6 +181,8 @@ def parse_holders(text):
         nums = by_ctx.get(key, {})
         shares = _number(nums.get("NumberOfShares"))
         pct = _number(nums.get("ShareholdingAsAPercentageOfTotalNumberOfShares"))
+        if pct is None and shares is not None and total:
+            pct = round(100 * shares / total, 4)
         end_date = instants.get(key)
         if shares is None or end_date is None:
             continue
@@ -129,6 +193,37 @@ def parse_holders(text):
             "shares": shares, "pct": pct,
         })
     return holders
+
+
+def parse_categories(text):
+    """A shareholding-pattern filing → one row of category totals, or None when the
+    filing carries no total. An institution category the filing leaves out is 0 (a
+    filing lists only the categories that hold shares); the individual categories
+    and the counts stay NULL when absent."""
+    t, end_date = _totals(*_contexts(text))
+    if _TOTAL not in t or _PUBLIC not in t or end_date is None:
+        return None
+
+    def pct(*keys, absent=None):
+        vals = [t[k][1] for k in keys if k in t and t[k][1] is not None]
+        return round(sum(vals), 4) if vals else absent
+
+    if _FOREIGN_2022 in t or _DOMESTIC_2022 in t:
+        foreign, domestic = pct(_FOREIGN_2022, absent=0.0), pct(_DOMESTIC_2022, absent=0.0)
+    else:
+        foreign = pct(*_FOREIGN_2016, absent=0.0)
+        inst = pct(_INSTITUTIONS_2016, absent=0.0)
+        domestic = round(max(inst - foreign, 0.0), 4)
+    retail_key = next((k for k in _CATS["retail_pct"] if k in t), None)
+    return {
+        "end_date": end_date,
+        "promoter_pct": pct(_PROMOTER, absent=0.0), "public_pct": pct(_PUBLIC),
+        "foreign_inst_pct": foreign, "domestic_inst_pct": domestic,
+        "mf_pct": pct(*_CATS["mf_pct"], absent=0.0), "insurance_pct": pct(*_CATS["insurance_pct"], absent=0.0),
+        "retail_pct": pct(*_CATS["retail_pct"]), "hni_pct": pct(*_CATS["hni_pct"]),
+        "n_shareholders": t[_TOTAL][2], "n_retail": t[retail_key][2] if retail_key else None,
+        "total_shares": t[_TOTAL][0],
+    }
 
 
 def scrip_codes(sids=None):
@@ -188,12 +283,27 @@ def fetch_filing(session, url, scrip_cd=None):
 
 
 def _stored(sid):
-    df = read_sql("SELECT DISTINCT filed_at FROM shareholding_holders WHERE sid = ?", params=(sid,))
-    return set(df["filed_at"])
+    """Filings of `sid` that need no fetch: category totals stored, or the file archived
+    (the 2026-10-04 latest-quarter harvest stored holders before files were archived —
+    those filings are fetched once more for their totals)."""
+    cats = read_sql("SELECT DISTINCT filed_at FROM shareholding_categories WHERE sid = ?", params=(sid,))
+    held = read_sql("SELECT DISTINCT scrip_cd, filed_at, source_url FROM shareholding_holders WHERE sid = ?",
+                    params=(sid,))
+    archived = {r.filed_at for r in held.itertuples() if archive_path(r.scrip_cd, r.source_url).exists()}
+    return set(cats["filed_at"]) | archived
+
+
+def _unarchived_sids():
+    """Stocks with a stored filing that has neither category totals nor an archived file."""
+    held = read_sql("""SELECT DISTINCT h.sid, h.scrip_cd, h.source_url FROM shareholding_holders h
+                       WHERE NOT EXISTS (SELECT 1 FROM shareholding_categories c
+                                         WHERE c.sid = h.sid AND c.filed_at = h.filed_at)""")
+    return {r.sid for r in held.itertuples() if not archive_path(r.scrip_cd, r.source_url).exists()}
 
 
 def harvest_stock(api, files, sid, scrip_cd, quarters, skip_stored=True, errors=None):
-    """Rows for the latest `quarters` XBRL filings of one stock that are not stored yet.
+    """Rows for the latest `quarters` XBRL filings of one stock that are not stored yet:
+    named holders, and one category-totals row per filing (tagged `_table`).
     A filing that could not be fetched is appended to `errors` (when given)."""
     filings = fetch_index(api, scrip_cd)[:quarters]
     have = _stored(sid) if skip_stored else set()
@@ -203,7 +313,8 @@ def harvest_stock(api, files, sid, scrip_cd, quarters, skip_stored=True, errors=
         if f["filed_at"] in have:
             continue
         try:
-            holders = parse_holders(fetch_filing(files, f["url"], scrip_cd))
+            text = fetch_filing(files, f["url"], scrip_cd)
+            holders, cats = parse_holders(text), parse_categories(text)
         except Exception as e:                       # one bad filing must not lose the others
             runlog.item_error(LABEL, f"{sid} {f['url']}", e)
             if errors is not None:
@@ -212,14 +323,53 @@ def harvest_stock(api, files, sid, scrip_cd, quarters, skip_stored=True, errors=
         if not holders:
             runlog.item_failed(LABEL, f"{sid} {f['url']}", "filing parsed to 0 named holders")
             continue
-        for h in holders:
-            rows.append({**h, "sid": sid, "scrip_cd": scrip_cd, "filed_at": f["filed_at"],
-                         "source_url": f["url"], "fetched_at": fetched_at})
+        meta = {"sid": sid, "scrip_cd": scrip_cd, "filed_at": f["filed_at"],
+                "source_url": f["url"], "fetched_at": fetched_at}
+        rows += [{**h, **meta, "_table": "shareholding_holders"} for h in holders]
+        if cats:
+            rows.append({**cats, **meta, "_table": "shareholding_categories"})
     return rows
 
 
 def _write(rows):
-    return insert_df(pd.DataFrame(rows)[COLS], "shareholding_holders", lock_retries=5)
+    df = pd.DataFrame(rows)
+    n = insert_df(df.loc[df["_table"] == "shareholding_holders", COLS], "shareholding_holders", lock_retries=5)
+    cats = df.loc[df["_table"] == "shareholding_categories", CAT_COLS]
+    if len(cats):
+        insert_df(cats, "shareholding_categories", lock_retries=5)
+    return n
+
+
+def reparse(chunk=2000):
+    """Category totals for every archived filing already in shareholding_holders whose
+    totals are not stored yet. Reads data/filings/bse_shp only — no network."""
+    filings = read_sql("""
+        SELECT DISTINCT h.sid, h.scrip_cd, h.filed_at, h.source_url FROM shareholding_holders h
+        WHERE NOT EXISTS (SELECT 1 FROM shareholding_categories c
+                          WHERE c.sid = h.sid AND c.filed_at = h.filed_at)""")
+    fetched_at = datetime.now().isoformat(timespec="seconds")
+    rows, n_missing, n_empty, n_written = [], 0, 0, 0
+    print(f"bse_shp reparse: {len(filings)} filings without category totals")
+    for i, f in enumerate(filings.itertuples(index=False), 1):
+        path = archive_path(f.scrip_cd, f.source_url)
+        if not path.exists():
+            n_missing += 1
+            continue
+        cats = parse_categories(gzip.decompress(path.read_bytes()).decode("utf-8-sig", "replace"))
+        if cats is None:
+            n_empty += 1
+            runlog.item_failed(LABEL, f"{f.sid} {f.source_url}", "filing has no category totals")
+        else:
+            rows.append({**cats, "sid": f.sid, "scrip_cd": f.scrip_cd, "filed_at": f.filed_at,
+                         "source_url": f.source_url, "fetched_at": fetched_at})
+        if rows and (len(rows) >= chunk or i == len(filings)):
+            n_written += insert_df(pd.DataFrame(rows)[CAT_COLS], "shareholding_categories", lock_retries=5) or 0
+            rows = []
+    if rows:
+        n_written += insert_df(pd.DataFrame(rows)[CAT_COLS], "shareholding_categories", lock_retries=5) or 0
+    print(f"bse_shp reparse: {n_written} written · {n_empty} without totals · {n_missing} not archived")
+    if len(filings) and not n_written:
+        raise RuntimeError("bse_shp reparse: filings to parse but none produced category totals")
 
 
 def latest_quarter_end(today=None):
@@ -248,10 +398,11 @@ def _done():
 def pending_sids(codes, quarters, full):
     """Stocks a history run still has to visit, largest first. A `--quarters N` run
     skips stocks that already hold N quarters; a full-history run (`--quarters 0`)
-    skips stocks listed in DONE_FILE (every XBRL filing fetched without error)."""
+    skips stocks listed in DONE_FILE (every XBRL filing fetched without error) unless a
+    stored filing still lacks its category totals and its archived file."""
     order = read_sql("SELECT sid FROM stocks ORDER BY market_cap_cr DESC NULLS LAST")["sid"]
     if full:
-        skip = _done()
+        skip = _done() - _unarchived_sids()
     else:
         have = read_sql("SELECT sid, COUNT(DISTINCT end_date) AS n FROM shareholding_holders GROUP BY sid")
         skip = set(have.loc[have["n"] >= quarters, "sid"])
@@ -267,7 +418,13 @@ def main():
     p.add_argument("--quarters", type=int, default=1,
                    help="latest N XBRL filings per stock; 0 = every filing (full history, checkpointed)")
     p.add_argument("--budget-min", type=float, help="stop after this many minutes (rerun resumes)")
+    p.add_argument("--reparse", action="store_true",
+                   help="category totals from the archived filings (no network)")
     args = p.parse_args()
+
+    if args.reparse:
+        reparse()
+        return
 
     if args.smoke:
         codes = scrip_codes(SMOKE_SIDS)
@@ -276,7 +433,7 @@ def main():
     elif args.universe or args.due:
         codes = scrip_codes()
     else:
-        p.error("one of --smoke / --sids / --universe / --due")
+        p.error("one of --smoke / --sids / --universe / --due / --reparse")
     if not codes:
         raise RuntimeError("bse_shp: no requested stock has a BSE scrip code in scrip_master")
     full = args.quarters == 0
@@ -299,7 +456,8 @@ def main():
     if args.smoke:
         empty = []
         for sid in items:
-            rows = harvest_stock(api, files, sid, codes[sid], 1, skip_stored=False)
+            rows = [r for r in harvest_stock(api, files, sid, codes[sid], 1, skip_stored=False)
+                    if r["_table"] == "shareholding_holders"]
             if not rows:
                 empty.append(sid)
             print(f"\n{sid} (scrip {codes[sid]}): {len(rows)} named holders, quarter "

@@ -443,3 +443,5 @@ the high 80s likely requires EITHER the engines working (unproven) OR paid data 
 free-data alpha ceiling — a genuine strategic fork for Amit, not a sequencing detail.
 
 _(append as work proceeds)_
+
+- **2026-10-09 — WS2.3 + WS2.4 tested ([study](../studies/ownership-flows-2026-10.md)).** The BSE shareholding XBRL archive gives category totals back to 2016 (`shareholding_categories`). Institutional flows (FII / MF / DII QoQ, breadth) DROP in every tier on 82 anchors; retail shareholder-count growth is the one survivor: SMALL t −3.48, contrarian as pre-registered → promotion candidate. WS2.3's `mf_holdings` has no history; the filings' MF category answers the same question (DROP).
