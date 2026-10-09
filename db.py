@@ -1145,10 +1145,11 @@ def table_step_meta():
     return meta
 
 
-# A table whose count / date-range / sid-coverage scan takes more than _SLOW_SCAN_S seconds
-# (feature_values 48M rows, derivative_bars, bse_announcements: ~100 of the ~120 s a full scan
-# took) is rescanned at most every _SLOW_SCAN_TTL seconds by the cockpit callers (cache_ttl > 0).
-# The watchdog (cache_ttl=0) always rescans: it needs live counts.
+# A table whose row / sid-coverage count takes more than _SLOW_SCAN_S seconds (feature_values
+# 48M rows, fno_bhav, bse_announcements, derivative_bars: ~140 of the ~158 s a full scan took)
+# is recounted at most every _SLOW_SCAN_TTL seconds by the cockpit callers (cache_ttl > 0).
+# Its date range — what freshness is judged on — is still read on every scan, so a health
+# verdict is never stale. The watchdog (cache_ttl=0) always recounts everything.
 _SLOW_SCAN_S = 2.0
 _SLOW_SCAN_TTL = 6 * 3600
 _slow_scans: dict = {}
@@ -1175,13 +1176,16 @@ def _data_health_impl(slow_ttl=0):
             universe_size = 0
         scanned = {}
         for tbl in tables:
+            # The date range is always read live (freshness verdicts depend on it, ~1-3 s
+            # even on the big tables); only the row / sid counts are remembered.
+            earliest, latest, date_span = _table_date_range(conn, tbl)
             hit = _slow_scans.get(tbl)
             if slow_ttl and hit and (_time_module.time() - hit[0]) < slow_ttl:
-                scanned[tbl] = hit[1]
+                count, stock_count = hit[1]
+                scanned[tbl] = (count, earliest, latest, date_span, stock_count)
                 continue
             t_scan = _time_module.time()
             count = conn.execute(f"SELECT COUNT(*) FROM [{tbl}]").fetchone()[0]
-            earliest, latest, date_span = _table_date_range(conn, tbl)
             # Stock coverage: only meaningful for tables with a sid column.
             cols = [r[1] for r in conn.execute(f"PRAGMA table_info([{tbl}])").fetchall()]
             stock_count = None
@@ -1191,7 +1195,7 @@ def _data_health_impl(slow_ttl=0):
                 ).fetchone()[0] or 0
             scanned[tbl] = (count, earliest, latest, date_span, stock_count)
             if _time_module.time() - t_scan > _SLOW_SCAN_S:
-                _slow_scans[tbl] = (_time_module.time(), scanned[tbl])
+                _slow_scans[tbl] = (_time_module.time(), (count, stock_count))
 
     for tbl in tables:
         count, earliest, latest, date_span, stock_count = scanned[tbl]
