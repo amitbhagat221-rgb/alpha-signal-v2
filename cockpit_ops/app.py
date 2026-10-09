@@ -65,6 +65,7 @@ def _prewarm_cache():
         ("health_overview",    lambda: api.get_health_overview()),
         ("pipeline_status",    lambda: api.get_pipeline_status()),
         ("feed_overview",      lambda: api.get_feed_overview()),
+        ("org_overview",       lambda: api.get_org_overview()),
     ], label="ops cache-warm")
 
 
@@ -182,8 +183,9 @@ def org_page(request: Request, mfrom: str = None, mto: str = None, mrole: str = 
     """Boardroom — the agent org (plan 0019): what is waiting for the CEO, the role
     tree with each seat's scorecard, the latest board pack and the desk memos.
     mfrom / mto / mrole: the Memos tab's date range and employee filter."""
+    ov = api.get_org_overview(mfrom, mto, mrole)       # cached; the run flag is the one live bit
     return templates.TemplateResponse(request, "org.html",
-                                      {"page": "org", **api.get_org_overview(mfrom, mto, mrole)})
+                                      {"page": "org", **ov, "running": api.org_running()})
 
 
 @app.get("/api/org")
@@ -199,7 +201,9 @@ async def api_org_decide(request: Request):
     import org
     body = await request.json()
     try:
-        return org.decide(int(body["item_id"]), body.get("verdict"), body.get("note"))
+        result = org.decide(int(body["item_id"]), body.get("verdict"), body.get("note"))
+        api.invalidate_org_overview()
+        return result
     except (ValueError, KeyError, TypeError) as e:
         return JSONResponse({"error": str(e)}, status_code=400)
 
@@ -322,6 +326,12 @@ def command_centre(request: Request):
     return templates.TemplateResponse(request, "command.html", {
         "page": "command", **payload,
     })
+
+
+@app.get("/command/tab/data", response_class=HTMLResponse)
+def command_tab_data(request: Request):
+    """The Command Centre's Data Model tab as a partial, fetched on first open."""
+    return templates.TemplateResponse(request, "command_data.html", api.get_command_centre())
 
 
 @app.get("/sql", response_class=HTMLResponse)
