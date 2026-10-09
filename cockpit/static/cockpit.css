@@ -1,5 +1,50 @@
 /* Alpha Signal Cockpit — Custom Styles */
 
+/* ── Reset ────────────────────────────────────────────────────────────
+   Browser-default reset (formerly the Tailwind CDN's preflight, v3.4.17, which
+   was the only thing the CDN contributed). Zero margins on headings/lists/
+   figures, borderless boxes, buttons/inputs inheriting the font, block media.
+   Keep it first: every rule below overrides it. No utility classes are left. */
+*,::after,::before{box-sizing:border-box;border-width:0;border-style:solid;border-color:#e5e7eb}
+:host,html{line-height:1.5;-webkit-text-size-adjust:100%;-moz-tab-size:4;tab-size:4;font-family:ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";font-feature-settings:normal;font-variation-settings:normal;-webkit-tap-highlight-color:transparent}
+body{margin:0;line-height:inherit}
+hr{height:0;color:inherit;border-top-width:1px}
+abbr:where([title]){-webkit-text-decoration:underline dotted;text-decoration:underline dotted}
+h1,h2,h3,h4,h5,h6{font-size:inherit;font-weight:inherit}
+a{color:inherit;text-decoration:inherit}
+b,strong{font-weight:bolder}
+code,kbd,pre,samp{font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;font-feature-settings:normal;font-variation-settings:normal;font-size:1em}
+small{font-size:80%}
+sub,sup{font-size:75%;line-height:0;position:relative;vertical-align:baseline}
+sub{bottom:-.25em}
+sup{top:-.5em}
+table{text-indent:0;border-color:inherit;border-collapse:collapse}
+button,input,optgroup,select,textarea{font-family:inherit;font-feature-settings:inherit;font-variation-settings:inherit;font-size:100%;font-weight:inherit;line-height:inherit;letter-spacing:inherit;color:inherit;margin:0;padding:0}
+button,select{text-transform:none}
+button,input:where([type=button]),input:where([type=reset]),input:where([type=submit]){-webkit-appearance:button;background-color:transparent;background-image:none}
+:-moz-focusring{outline:auto}
+:-moz-ui-invalid{box-shadow:none}
+progress{vertical-align:baseline}
+::-webkit-inner-spin-button,::-webkit-outer-spin-button{height:auto}
+[type=search]{-webkit-appearance:textfield;outline-offset:-2px}
+::-webkit-search-decoration{-webkit-appearance:none}
+::-webkit-file-upload-button{-webkit-appearance:button;font:inherit}
+summary{display:list-item}
+blockquote,dd,dl,figure,h1,h2,h3,h4,h5,h6,hr,p,pre{margin:0}
+fieldset{margin:0;padding:0}
+legend{padding:0}
+menu,ol,ul{list-style:none;margin:0;padding:0}
+dialog{padding:0}
+textarea{resize:vertical}
+input::placeholder,textarea::placeholder{opacity:1;color:#9ca3af}
+[role=button],button{cursor:pointer}
+:disabled{cursor:default}
+audio,canvas,embed,iframe,img,object,svg,video{display:block;vertical-align:middle}
+img,video{max-width:100%;height:auto}
+[hidden]:where(:not([hidden=until-found])){display:none}
+.grow { flex-grow: 1; }
+
+
 :root {
     --bg-primary: #0a0a0f;
     --bg-card: #12121a;
@@ -45,7 +90,6 @@ body {
         var(--bg-primary);
     color: var(--text-primary);
     font-family: 'Inter', sans-serif;
-    line-height: 1.55;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     /* Inter v3 has wider apertures; tighten slightly to keep dense data tables compact */
@@ -1442,3 +1486,97 @@ table tbody tr:hover {
 .u-cell     { padding: 8px 6px !important; }
 .u-cell-r   { padding: 6px !important; text-align: right !important; }
 .u-rule     { border-bottom: 1px solid var(--border) !important; }
+
+
+/* ═══════════════ Shared components (phase-1 foundation) ═══════════════
+   Use these instead of a per-page copy. Colours come only from the tokens above. */
+
+/* .num — a numeric table cell or value: mono, tabular, right-aligned.
+   <td class="num">₹43,155</td>. A local `td.num` rule may still add to it. */
+.num {
+    font-family: 'JetBrains Mono', monospace;
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+}
+th.num { font-family: inherit; }   /* column headings stay in the body font */
+
+/* .pill — one chip: 8% tint background + token text colour.
+   <span class="pill pill-green">BUY</span>   (-green -amber -red -blue -muted; bare .pill = muted) */
+.pill {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1.5;
+    white-space: nowrap;
+    background: var(--border);
+    color: var(--text-muted);
+}
+.pill-green { background: var(--green-bg); color: var(--green); }
+.pill-amber { background: var(--amber-bg); color: var(--amber); }
+.pill-red   { background: var(--red-bg);   color: var(--red); }
+.pill-blue  { background: var(--blue-bg);  color: var(--blue); }
+.pill-muted { background: var(--border);   color: var(--text-muted); }
+
+/* .table-wrap — wrap any wide <table> so it scrolls sideways instead of
+   widening the page (phone). <div class="table-wrap"><table>…</table></div> */
+.table-wrap { overflow-x: auto; max-width: 100%; -webkit-overflow-scrolling: touch; }
+
+/* Form controls never push past their container. */
+select, input, textarea { max-width: 100%; }
+
+/* .grid-2 / .grid-3 / .grid-4 — N equal columns that stack to one below 768px.
+   Replaces inline `display:grid; grid-template-columns: 1fr 1fr`. */
+.grid-2, .grid-3, .grid-4 { display: grid; gap: 16px; }
+.grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.grid-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+@media (max-width: 768px) {
+    .grid-2, .grid-3, .grid-4 { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* Skip link: first focusable element, visible only on keyboard focus. */
+.skip-link {
+    position: fixed; top: 8px; left: 8px; z-index: 100;
+    padding: 8px 14px; border-radius: 8px;
+    background: var(--bg-card); color: var(--text-primary);
+    border: 1px solid var(--accent);
+    transform: translateY(-200%);
+}
+.skip-link:focus { transform: none; }
+
+/* Rail stock search (cockpit/templates/_nav.html, searchApp() in cockpit.js). */
+.rail-search { position: relative; margin: 4px 0 8px; }
+.rail-search input {
+    width: 100%; padding: 8px 30px 8px 10px; border-radius: 8px;
+    background: var(--bg-card); border: 1px solid var(--border);
+    color: var(--text-primary); font-size: 13px; outline: none;
+    transition: border-color var(--t-fast) var(--ease-out);
+}
+.rail-search input:focus { border-color: var(--accent); }
+.rail-search kbd {
+    position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+    font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--text-muted);
+    background: var(--bg-primary); border: 1px solid var(--border-accent);
+    border-radius: 4px; padding: 1px 5px; pointer-events: none;
+}
+.search-results {
+    position: absolute; top: 100%; left: 0; right: 0; z-index: 60; margin-top: 6px;
+    background: var(--bg-card); border: 1px solid var(--border-accent);
+    border-radius: 10px; max-height: 360px; overflow-y: auto; box-shadow: var(--shadow-lg);
+}
+.search-results a {
+    display: flex; align-items: center; gap: 8px; padding: 8px 12px;
+    color: var(--text-primary); text-decoration: none; border-bottom: 1px solid var(--border);
+}
+.search-results a:hover, .search-results a.active { background: var(--bg-card-hover); }
+.search-results .sr-name { flex: 1; min-width: 0; font-size: 12px; color: var(--text-secondary);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.search-empty { padding: 10px 12px; font-size: 12px; color: var(--text-muted); }
+.mobile-search { display: none; }
+@media (max-width: 768px) {
+    .mobile-search { display: block; margin-bottom: 12px; }
+    .mobile-search .rail-search { margin: 0; }
+    .mobile-search kbd { display: none; }
+}

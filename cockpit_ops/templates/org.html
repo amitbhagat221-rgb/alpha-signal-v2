@@ -695,8 +695,8 @@
 </div>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
+<script src="{{ vendor('marked') }}"></script>
+<script src="{{ vendor('purify') }}"></script>
 <script>
   function boardroom() {
     const post = (url, body) => fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -803,21 +803,12 @@
         }
         m.html = html; m.final = !!final;
       },
-      loadScript(url) {
-        window._ogScripts = window._ogScripts || {};
-        if (!window._ogScripts[url]) {
-          window._ogScripts[url] = new Promise((ok, bad) => {
-            const el = document.createElement('script'); el.src = url; el.onload = ok; el.onerror = bad; document.head.appendChild(el);
-          });
-        }
-        return window._ogScripts[url];
-      },
       css(v) { return getComputedStyle(document.documentElement).getPropertyValue(v).trim(); },
       async drawChart(node, body) {
         const spec = JSON.parse(body);
         const types = ['bar', 'line', 'pie', 'doughnut', 'scatter'];
         const type = types.includes(spec.type) ? spec.type : 'bar';
-        await this.loadScript('https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js');
+        await loadChart();
         const pal = ['#8b5cf6', '#22c55e', '#f59e0b', '#38bdf8', '#ef4444', '#e879f9'];
         const round = type === 'pie' || type === 'doughnut';
         const sets = (spec.datasets || []).slice(0, 6).map((d, i) => ({
@@ -830,7 +821,7 @@
         const axis = t => ({ title: { display: !!t, text: t || '', color: muted }, ticks: { color: muted }, grid: { color: grid } });
         node.innerHTML = '<canvas></canvas>' + (spec.source ? '<div class="og-fig-src"></div>' : '');
         if (spec.source) node.querySelector('.og-fig-src').textContent = 'Source: ' + spec.source;
-        new Chart(node.querySelector('canvas'), {
+        makeChart(node.querySelector('canvas'), {
           type: type, data: { labels: (spec.labels || []).slice(0, 400).map(String), datasets: sets },
           options: {
             responsive: true, maintainAspectRatio: true, aspectRatio: round ? 1.8 : 2, indexAxis: spec.horizontal ? 'y' : 'x',
@@ -841,7 +832,7 @@
         });
       },
       async drawDiagram(node, body) {
-        await this.loadScript('https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js');
+        await loadScript(window.VENDOR.mermaid);   // 3.3 MB: only when a diagram is drawn
         if (!window._ogMermaid) { mermaid.initialize({ startOnLoad: false, theme: 'dark', securityLevel: 'strict' }); window._ogMermaid = 1; }
         const out = await mermaid.render('ogm' + Math.random().toString(36).slice(2), body);
         node.innerHTML = out.svg;

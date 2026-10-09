@@ -230,7 +230,7 @@ COCKPIT_DIR = Path(__file__).resolve().parent
 COCKPIT_TEMPLATES = COCKPIT_DIR / "templates"
 COCKPIT_STATIC = COCKPIT_DIR / "static"  # both apps mount this as /static
 
-from jinja2 import Undefined
+from jinja2 import Undefined, pass_context
 
 
 class SilentUndefined(Undefined):
@@ -258,6 +258,22 @@ def asset_version(filename: str) -> str:
         return "0"
 
 
+# Vendored browser libraries (cockpit/static/vendor/, versions in its README).
+VENDOR = {
+    "alpine": "vendor/alpine-3.17.4.min.js",
+    "chart": "vendor/chart-4.5.1.umd.min.js",
+    "marked": "vendor/marked-12.0.2.min.js",
+    "purify": "vendor/purify-3.4.16.min.js",
+    "mermaid": "vendor/mermaid-10.9.8.min.js",   # 3.3 MB: load on demand (loadScript), never in a <script src>
+}
+
+
+def vendor(name: str) -> str:
+    """URL of a vendored library, cache-busted like the CSS: {{ vendor('chart') }}."""
+    f = VENDOR[name]
+    return f"/static/{f}?v={asset_version(f)}"
+
+
 def nav_model(pages, other_app, brand):
     """The nav a PAGES list renders as (cockpit/templates/_nav.html): rail sections
     in list order, the mobile bar's tabs (entries with a `mobile` position) and its
@@ -275,15 +291,42 @@ def nav_model(pages, other_app, brand):
         "more_ids": [i for p in more for i in (p["id"], *p.get("also", ()))],
         "other": other_app,
         "brand": brand,
+        "titles": {i: p["title"] for p in pages for i in (p["id"], *p.get("also", ()))},
     }
 
 
-def make_templates(dirs, nav=None):
+@pass_context
+def _page_title(ctx, name=None):
+    """The <title>: "<Page> · Alpha Signal" / "<Page> · Ops", the page name coming
+    from the PAGES entry of the route's `page` id. Pass `name` for a page with its
+    own heading (a stock: {% block title %}{{ page_title(stock.ticker) }}{% endblock %})."""
+    nav = ctx.get("nav") or {}
+    brand = nav.get("brand") or {}
+    name = name or nav.get("titles", {}).get(ctx.get("page")) or brand.get("label", "")
+    return f"{name} · {brand.get('title_suffix', brand.get('label', ''))}"
+
+
+def _app_url(target, role, nav):
+    """main_url(path) / ops_url(path): a link into the main or ops cockpit that never
+    hard-codes a port: relative when it is this app, else this host + nav.other.port.
+    other_url(path) is always the other app (the rail's cross-cockpit link)."""
+    @pass_context
+    def url(ctx, path="/"):
+        if target == role:
+            return path
+        req = ctx.get("request")
+        host = req.url.hostname if req else "localhost"
+        scheme = req.url.scheme if req else "http"
+        return f"{scheme}://{host}:{nav['other']['port']}{path}"
+    return url
+
+
+def make_templates(dirs, nav=None, role="main"):
     """Jinja2Templates searching `dirs` in order, then cockpit/templates — so
     base.html, _components.html, _icons.html and _nav.html exist once and the ops
     app (which passes its own templates dir first) shares them. Registers
-    SilentUndefined, the asset_version global, the app's `nav` (nav_model of its
-    PAGES), the tier lists (all_tiers / pickable_tiers from views) and the formatting.py
+    SilentUndefined, the asset_version / vendor globals, the app's `nav` (nav_model of its
+    PAGES), page_title(), main_url() / ops_url() (`role` = which app this is), the tier lists (all_tiers / pickable_tiers from views) and the formatting.py
     filters (signed / pct / inr / crore / tone / tier_label / tier_color)."""
     from formatting import FILTERS
     from fastapi.templating import Jinja2Templates
@@ -297,6 +340,11 @@ def make_templates(dirs, nav=None):
     templates.env.undefined = SilentUndefined
     templates.env.globals["asset_version"] = asset_version
     templates.env.globals["nav"] = nav
+    templates.env.globals["vendor"] = vendor
+    templates.env.globals["page_title"] = _page_title
+    templates.env.globals["main_url"] = _app_url("main", role, nav)
+    templates.env.globals["ops_url"] = _app_url("ops", role, nav)
+    templates.env.globals["other_url"] = _app_url(None, role, nav)
     import views
     templates.env.globals["all_tiers"] = views.tiers
     templates.env.globals["pickable_tiers"] = views.pickable_tiers

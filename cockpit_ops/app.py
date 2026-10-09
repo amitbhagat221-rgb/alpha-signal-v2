@@ -39,7 +39,14 @@ app.mount("/static", StaticFiles(directory=COCKPIT_STATIC), name="static")
 # Ops pages first, then cockpit/templates for the shared base.html /
 # _components.html / _icons.html (single copies — the ops forks went stale).
 templates = make_templates([OPS_DIR / "templates"],
-                           nav=nav_model(pages.PAGES, pages.OTHER_APP, pages.BRAND))
+                           nav=nav_model(pages.PAGES, pages.OTHER_APP, pages.BRAND), role="ops")
+
+
+@app.get("/api/search")
+def api_search(q: str = ""):
+    """The rail stock search; same lookup as the main cockpit (its results open there)."""
+    from cockpit import api as cockpit_api
+    return cockpit_api.search_stocks(q) if len(q) >= 2 else []
 
 
 # ────────────── Startup cache warmer ──────────────

@@ -363,7 +363,7 @@ table.mini .num { text-align:right; font-variant-numeric:tabular-nums; }
     </div>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+<script src="{{ vendor('chart') }}"></script>
 <script>
 function mfDetail(schemeCode) {
     return {
@@ -397,7 +397,7 @@ function mfDetail(schemeCode) {
 
             const ctx = document.getElementById('navChart');
             if (!ctx) return;
-            this.navChart = new Chart(ctx, {
+            this.navChart = makeChart(ctx, {
                 type: 'line',
                 data: {
                     labels: dates,
@@ -433,7 +433,7 @@ function mfDetail(schemeCode) {
             const mk = (id, label, points, color) => {
                 const ctx = document.getElementById(id);
                 if (!ctx) return null;
-                return new Chart(ctx, {
+                return makeChart(ctx, {
                     type: 'line',
                     data: { labels, datasets: [{
                         label, data: points, borderColor: color, backgroundColor: color + '22',

@@ -10,7 +10,7 @@
 
 <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">
     <div class="section-title">Model</div>
-    <a href="{{ request.url.scheme }}://{{ request.url.hostname }}:3001/system" target="_blank" rel="noopener" style="padding: 8px 16px; background: var(--bg-card-hover); color: var(--text-secondary); border-radius: 8px; text-decoration: none; font-size: 12px; font-weight: 600; letter-spacing: 0.3px;">System &rarr;</a>
+    <a href="{{ ops_url('/system') }}" style="padding: 8px 16px; background: var(--bg-card-hover); color: var(--text-secondary); border-radius: 8px; text-decoration: none; font-size: 12px; font-weight: 600; letter-spacing: 0.3px;">System &rarr;</a>
 </div>
 <div class="section-desc">
     The within-tier scoring model: signal weights per cap tier, the C13b validation that picked them, the

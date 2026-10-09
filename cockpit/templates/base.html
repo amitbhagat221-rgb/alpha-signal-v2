@@ -3,33 +3,23 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    {# Tab title: "<Page> · Alpha Signal" from the PAGES registry; override with
+       {% block title %}{{ page_title("Name") }}{% endblock %} on a page with its own heading. #}
+    <title>{% block title %}{{ page_title() }}{% endblock %}</title>
     {% block head_identity %}
-    <title>Alpha Signal Cockpit</title>
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%237c3aed'/%3E%3Ctext x='16' y='22' font-size='20' text-anchor='middle' fill='white' font-family='sans-serif' font-weight='700'%3E%E2%97%86%3C/text%3E%3C/svg%3E">
     {% endblock %}
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <script defer src="{{ vendor('alpine') }}"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/cockpit.css?v={{ asset_version('cockpit.css') }}">
-    <script>
-        tailwind.config = {
-            darkMode: 'class',
-            theme: {
-                extend: {
-                    fontFamily: {
-                        'display': ['JetBrains Mono', 'monospace'],
-                        'heading': ['Inter', 'sans-serif'],
-                        'body': ['Inter', 'sans-serif'],
-                    }
-                }
-            }
-        }
-    </script>
+    {# Vendored libraries (cockpit/static/vendor/README); chart/mermaid/marked load on demand via loadScript(VENDOR.x). #}
+    <script>window.VENDOR = { chart: "{{ vendor('chart') }}", mermaid: "{{ vendor('mermaid') }}", marked: "{{ vendor('marked') }}", purify: "{{ vendor('purify') }}" };</script>
 </head>
-<body class="font-body antialiased">
+<body>
     {% from "_icons.html" import icon %}
+    <a href="#main" class="skip-link">Skip to content</a>
 
     {# Shared shell for both apps: the rail + mobile bar render from the app's PAGES
        list (cockpit/pages.py, cockpit_ops/pages.py → `nav`); ops_base.html only
@@ -44,7 +34,10 @@
     {% endblock %}
 
     <!-- Main Content -->
-    <main class="main-content">
+    <main class="main-content" id="main" tabindex="-1">
+        {# Phones have no rail: the same stock search sits at the top of the page. #}
+        {% from "_nav.html" import search_box with context %}
+        <div class="mobile-search">{{ search_box() }}</div>
         {% block content %}{% endblock %}
     </main>
 

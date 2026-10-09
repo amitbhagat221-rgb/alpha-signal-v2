@@ -32,8 +32,9 @@
 #}
 {% macro tab_bar(tabs) -%}
 {# URL-hash sync: on init, read #hash and adopt as active tab if it matches a
-   known key. On click, push the hash so the browser's back/forward + sharing
-   work. Falls back gracefully if hash is empty or unknown. #}
+   known key. A click pushes the hash (history.pushState) and popstate re-reads
+   it, so Back returns to the previous tab and links share a tab. Falls back to
+   the first tab if the hash is empty or unknown. #}
 {% set valid_keys = tabs | map(attribute=0) | list %}
 {# Stash the valid keys as a CSV in a data-* attribute so the x-init
    expression doesn't need to embed JSON (whose " would terminate the
@@ -47,10 +48,15 @@
              tab = h;
              loaded[h] = true;
          }
+         window.addEventListener('popstate', () => {
+             const k = (location.hash || '').replace(/^#/, '');
+             tab = keys.includes(k) ? k : keys[0];
+             loaded[tab] = true;
+         });
      })()">
     {% for key, label in tabs %}
     <button class="tab-button" :class="{ active: tab === '{{ key }}' }"
-            @click="tab = '{{ key }}'; loaded['{{ key }}'] = true; history.replaceState(null, '', '#{{ key }}')">{{ label }}</button>
+            @click="tab = '{{ key }}'; loaded['{{ key }}'] = true; if (location.hash !== '#{{ key }}') history.pushState(null, '', '#{{ key }}')">{{ label }}</button>
     {% endfor %}
 </div>
 {%- endmacro %}

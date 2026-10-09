@@ -24,7 +24,7 @@ PAGES = [
      "icon": "briefcase", "section": "Analysis", "short": "Portfolio"},
     {"path": "/sectors", "id": "sectors", "title": "Sectors", "subtitle": "Industry rotation",
      "icon": "layers", "section": "Analysis", "short": "Sectors"},
-    {"path": "/model", "id": "model", "title": "Model & Backtest", "subtitle": "Weights · variants · outcomes",
+    {"path": "/model", "id": "model", "title": "Model & Backtest", "subtitle": "Weights · backtest · outcomes",
      "icon": "sliders", "section": "Analysis", "short": "Model", "also": ["model-outcomes"]},
     {"path": "/multibagger", "id": "multibagger", "title": "Multibagger", "subtitle": "Quality-gated watchlist",
      "icon": "trending-up", "section": "Analysis", "short": "Multibagger"},
@@ -39,4 +39,5 @@ OTHER_APP = {"port": 3001, "path": "/system", "section": "Ops console", "title":
              "subtitle": "port 3001 (separate service)", "icon": "zap", "short": "Ops →",
              "tooltip": "Health Center, Pipeline, Command, SQL — runs on port 3001"}
 
-BRAND = {"href": "/", "label": "Alpha Signal", "aria": "Alpha Signal", "subtitle": "v2 cockpit", "icon": "diamond", "style": ""}
+BRAND = {"href": "/", "label": "Alpha Signal", "aria": "Alpha Signal", "subtitle": "v2 cockpit", "icon": "diamond", "style": "",
+         "title_suffix": "Alpha Signal"}

@@ -22,4 +22,4 @@ OTHER_APP = {"port": 3000, "path": "/", "section": "Trading cockpit", "title": "
              "subtitle": "port 3000 (separate)", "icon": "compass", "short": "Trading", "tooltip": ""}
 
 BRAND = {"href": "/system", "label": "Alpha Signal", "aria": "Alpha Signal Ops", "subtitle": "ops · port 3001", "icon": "zap",
-         "style": "background: linear-gradient(135deg, #ef4444 0%, #b91c1c 100%);"}
+         "title_suffix": "Ops", "style": "background: linear-gradient(135deg, #ef4444 0%, #b91c1c 100%);"}

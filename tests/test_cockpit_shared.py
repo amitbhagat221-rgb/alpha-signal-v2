@@ -109,3 +109,40 @@ def test_db_rows_one_scalar(tmp_path, monkeypatch):
     assert db.scalar("SELECT MAX(n) FROM t") == 2
     assert db.scalar("SELECT n FROM t WHERE sid = 'C'", default=0) == 0
     assert db.scalar("SELECT n FROM t WHERE sid = 'Z'", default="x") == "x"
+
+
+# ── shell guards (frontend phase 1) ──────────────────────────────────────────
+import re
+from pathlib import Path
+
+_ROOT = Path(__file__).resolve().parent.parent
+_TEMPLATES = [*(_ROOT / "cockpit" / "templates").glob("*.html"), *(_ROOT / "cockpit_ops" / "templates").glob("*.html")]
+
+
+def test_no_template_loads_tailwind_cdn():
+    bad = [t.name for t in _TEMPLATES if "tailwindcss" in t.read_text()]
+    assert not bad, f"Tailwind CDN back in {bad}: the reset lives in cockpit.css"
+
+
+def test_every_script_src_is_local():
+    """All <script src> point at /static or a vendor() call: nothing loads from a CDN."""
+    bad = []
+    for t in _TEMPLATES:
+        for src in re.findall(r"<script[^>]*\ssrc=[\"']([^\"']+)", t.read_text()):
+            if not (src.startswith("/static/") or src.startswith("{{ vendor(")):
+                bad.append((t.name, src))
+    assert not bad, bad
+    # and no script URL is assembled from a CDN host in JS either
+    assert not [t.name for t in _TEMPLATES if re.search(r"cdn\.jsdelivr|unpkg\.com|cdnjs", t.read_text())]
+
+
+def test_vendored_files_exist():
+    for name, f in shared.VENDOR.items():
+        assert (shared.COCKPIT_STATIC / f).is_file(), name
+        assert shared.vendor(name).startswith("/static/vendor/")
+
+
+def test_inr_groups_thousands_by_default():
+    from formatting import inr
+    assert inr(43155) == "₹43,155"
+    assert inr(43155, group=False) == "₹43155"
