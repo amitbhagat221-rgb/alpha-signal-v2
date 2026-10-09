@@ -75,7 +75,8 @@ def compute(dry_run=False):
         print("\nDry run — not saving.")
         return len(out)
 
-    rows = upsert_df(out, "daily_snapshots")
+    # nullable integer columns (piotroski_f) carry pd.NA, which sqlite cannot bind
+    rows = upsert_df(out.astype(object).where(out.notna(), None), "daily_snapshots")
     with get_db() as conn:
         conn.executemany(
             "UPDATE stocks SET pe_ratio = ?, pb_ratio = ?, roe = ?, debt_to_equity = ? WHERE sid = ?",

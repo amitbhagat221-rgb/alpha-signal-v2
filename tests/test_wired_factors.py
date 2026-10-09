@@ -134,3 +134,15 @@ def test_iv_skew_is_today_reading_and_a_stale_one_is_dropped():
                              max_age_days=pit.DERIVATIVE_MAX_AGE_DAYS).set_index("sid")
     assert out.loc["A", "iv_skew_25d"] == pytest.approx(0.05)
     assert "B" not in out.index or pd.isna(out.loc["B", "iv_skew_25d"])
+
+
+def test_snapshot_rows_bind_in_sqlite():
+    """output.snapshot writes pd.NA-bearing nullable integers (piotroski_f): every value
+    must reach sqlite as a plain value or None (failed the first live write, 2026-10-09)."""
+    import sqlite3
+    out = pd.DataFrame({"sid": ["A", "B"], "piotroski_f": pd.array([7, pd.NA], dtype="Int64"), "x": [1.0, np.nan]})
+    clean = out.astype(object).where(out.notna(), None)
+    con = sqlite3.connect(":memory:")
+    con.execute("CREATE TABLE t (sid, piotroski_f, x)")
+    con.executemany("INSERT INTO t VALUES (?, ?, ?)", clean.itertuples(index=False))
+    assert con.execute("SELECT COUNT(*) FROM t WHERE piotroski_f IS NULL AND x IS NULL").fetchone()[0] == 1
