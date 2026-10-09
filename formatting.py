@@ -38,8 +38,8 @@ def pct(x, decimals=1, signed=False, scale=1):
     return f"{v * scale:{'+' if signed else ''}.{decimals}f}%"
 
 
-def inr(x, decimals=0, group=False):
-    """₹1234 (group=True → ₹1,234)."""
+def inr(x, decimals=0, group=True):
+    """₹43,155 (thousands grouped by default; group=False → ₹43155 for JSON/CSV)."""
     v = _num(x)
     if v is None:
         return DASH
