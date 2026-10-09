@@ -368,6 +368,13 @@ def api_pipeline_rerun(step_name: str):
     return JSONResponse(result, status_code=200 if result.get("ok") else 409)
 
 
+@app.get("/api/sql/schema")
+async def api_sql_schema():
+    """Tables, columns and row counts for the console's Schema tab (one call)."""
+    import asyncio
+    return await asyncio.to_thread(api.get_sql_schema)
+
+
 @app.post("/api/sql")
 async def api_sql(request: Request):
     """Execute a read-only SQL query and return JSON results."""

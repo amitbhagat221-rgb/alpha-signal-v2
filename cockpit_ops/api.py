@@ -77,6 +77,23 @@ def run_sql_query(query, max_rows=500):
     }
 
 
+@_persisted_cache(300, name="get_sql_schema")
+def get_sql_schema():
+    """The SQL console's Schema tab in ONE call: every table with its columns
+    (sqlite_master + PRAGMA table_info) and its row count (from the cached
+    data_health scan, so no COUNT(*) per table). `as_of` is when the counts were taken."""
+    import datetime as _dt
+    counts = {r["table"]: r.get("rows") for r in get_data_freshness()}
+    out = []
+    with get_db() as conn:
+        for (name,) in conn.execute("SELECT name FROM sqlite_master WHERE type='table' "
+                                    "AND name != 'sqlite_sequence' ORDER BY name").fetchall():
+            cols = [r[1] for r in conn.execute(f"PRAGMA table_info([{name}])").fetchall()]
+            n = counts.get(name)
+            out.append({"name": name, "columns": cols, "rows": int(n) if n is not None else None})
+    return {"tables": out, "as_of": _dt.date.today().isoformat()}
+
+
 @_persisted_cache(300, name="get_data_freshness")
 def get_data_freshness():
     """Data health from db.data_health(). NaN floats are coerced to None so the
@@ -1925,9 +1942,9 @@ def _age_label(days):
     if days is None:
         return None
     d = int(round(float(days)))
-    # age of the newest data point (e.g. a quarter-end), not of the fetch — "on
-    # schedule" / "overdue" beside it comes from the freshness rule, which knows the lag
-    return "today" if d <= 0 else ("1 day ago" if d == 1 else f"{d} days ago")
+    # age of the newest data point (e.g. a quarter-end), not of the fetch; the page
+    # shows it with the feed's cadence ("101 d · quarterly"); "on schedule" / "overdue" comes from the freshness rule, which knows the lag
+    return "today" if d <= 0 else f"{d} d"
 
 
 def _plain(r):
@@ -1966,7 +1983,7 @@ def _plain(r):
     return r
 
 
-@_ttl_cache(60)
+@_persisted_cache(300, name="get_feed_overview")
 def get_feed_overview():
     """Everything the /feeds page shows, from feeds.FEEDS + checks.feeds (one source
     of truth with the health report — the page and the email cannot disagree)."""

@@ -3,7 +3,41 @@
 
 {% block content %}
 
-<div class="section-title">SQL Console</div>
+<style>
+.sql-box { width:100%; min-height:120px; padding:14px 16px; background:var(--bg-primary); color:var(--text-primary);
+           border:1px solid var(--border); border-radius:8px; font-family:'JetBrains Mono',monospace; font-size:13px; resize:vertical; }
+.sql-box:focus-visible { outline:2px solid var(--accent); outline-offset:1px; border-color:var(--accent); }
+.sql-bar { display:flex; justify-content:space-between; align-items:center; margin-top:12px; gap:12px; flex-wrap:wrap; }
+.sql-btns { display:flex; gap:8px; flex-wrap:wrap; }
+.sql-run-busy { display:inline-flex; align-items:center; gap:8px; }
+.sql-run-busy .spinner { border-color:transparent; border-top-color:var(--text-primary); }
+.sql-ex { margin-top:16px; padding-top:14px; border-top:1px solid var(--border); }
+.sql-ex-h { font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:1px; margin-bottom:8px; }
+.sql-ex-list { display:flex; flex-wrap:wrap; gap:6px; }
+.sql-ex-btn { padding:4px 10px; font-size:11px; background:var(--bg-card-hover); color:var(--text-secondary);
+              border:1px solid var(--border); border-radius:6px; cursor:pointer; font-family:'JetBrains Mono',monospace; }
+.sql-res-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; }
+.sql-res-head .section-title { margin-bottom:0; }
+.sql-count { font-size:12px; color:var(--text-muted); }
+.sql-err { padding:12px 16px; background:var(--red-bg); border-left:3px solid var(--red); border-radius:6px; }
+.sql-err-h { font-size:12px; color:var(--red); font-weight:600; margin-bottom:4px; }
+.sql-err-m { font-size:12px; color:var(--text-primary); font-family:'JetBrains Mono',monospace; }
+.sql-table { width:100%; border-collapse:collapse; font-size:12px; }
+.sql-table th { padding:8px 12px; text-align:left; font-size:11px; text-transform:uppercase; letter-spacing:.5px;
+                color:var(--text-muted); border-bottom:2px solid var(--border-accent); font-weight:600; white-space:nowrap; }
+.sql-table td { padding:8px 12px; font-family:'JetBrains Mono',monospace; max-width:400px; overflow:hidden;
+                text-overflow:ellipsis; white-space:nowrap; border-bottom:1px solid var(--border); }
+.sql-table td.is-null { color:var(--text-muted); font-style:italic; }
+.sql-schema { display:grid; grid-template-columns:repeat(auto-fill,minmax(min(320px,100%),1fr)); gap:10px; }
+.sql-tbl { padding:10px 12px; background:var(--bg-primary); border:1px solid var(--border); border-radius:8px; min-width:0; }
+.sql-tbl-h { display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; gap:8px; }
+.sql-tbl-name { background:none; border:none; color:var(--accent); font-family:'JetBrains Mono',monospace;
+                font-size:12px; font-weight:700; cursor:pointer; padding:0; text-align:left; overflow-wrap:anywhere; }
+.sql-tbl-n { font-size:10px; color:var(--text-muted); font-family:'JetBrains Mono',monospace; white-space:nowrap; }
+.sql-tbl-cols { font-size:10px; color:var(--text-secondary); font-family:'JetBrains Mono',monospace; line-height:1.4; overflow-wrap:anywhere; }
+</style>
+
+<h1 class="section-title">SQL Console</h1>
 <div class="section-desc">
     Read-only SQLite console. SELECT and WITH statements only — no INSERT/UPDATE/DELETE/DROP/etc.
     Results capped to 500 rows. Query the live database directly.
@@ -25,8 +59,10 @@
     rows: [],
     rowCount: 0,
     hasResults: false,
-    schemaLoading: true,
+    schemaLoading: false,
+    schemaError: null,
     schemaTables: [],
+    schemaAsOf: '',
     examples: [
         { label: 'Top 10 LARGE picks', sql: 'SELECT s.ticker, s.name, dp.final_score, dp.rank FROM daily_picks dp JOIN stocks s ON dp.sid = s.sid WHERE dp.cap_tier = \'LARGE\' AND dp.pick_date = (SELECT MAX(pick_date) FROM daily_picks) ORDER BY dp.rank LIMIT 10' },
         { label: 'Classifier status', sql: 'SELECT classifier_status, COUNT(*) as n FROM regulatory_events GROUP BY classifier_status ORDER BY n DESC' },
@@ -64,39 +100,17 @@
     },
 
     async loadSchema() {
+        if (this.schemaTables.length || this.schemaLoading) return;
+        this.schemaLoading = true;
+        this.schemaError = null;
         try {
-            const resp = await fetch('/api/sql', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    query: 'SELECT name FROM sqlite_master WHERE type=\'table\' AND name != \'sqlite_sequence\' ORDER BY name'
-                })
-            });
-            const data = await resp.json();
-            if (!data.rows) { this.schemaLoading = false; return; }
-            const promises = data.rows.map(async (r) => {
-                const name = r.name;
-                const [colData, countData] = await Promise.all([
-                    fetch('/api/sql', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ query: 'SELECT * FROM ' + name + ' LIMIT 1' })
-                    }).then(r => r.json()),
-                    fetch('/api/sql', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ query: 'SELECT COUNT(*) as n FROM ' + name })
-                    }).then(r => r.json())
-                ]);
-                return {
-                    name: name,
-                    columns: colData.columns || [],
-                    row_count: (countData.rows && countData.rows[0]) ? countData.rows[0].n : 0
-                };
-            });
-            this.schemaTables = await Promise.all(promises);
+            const resp = await fetch('/api/sql/schema');
+            if (!resp.ok) throw new Error('HTTP ' + resp.status);
+            const d = await resp.json();
+            this.schemaTables = d.tables || [];
+            this.schemaAsOf = d.as_of || '';
         } catch (e) {
-            console.error('Schema load error:', e);
+            this.schemaError = 'Could not load the schema: ' + e.message;
         } finally {
             this.schemaLoading = false;
         }
@@ -105,7 +119,6 @@
     const _initEl = document.getElementById('sql-initial-query');
     const _initial = _initEl ? JSON.parse(_initEl.textContent) : null;
     if (_initial) { query = _initial; }
-    loadSchema();
     if (_initial) { runQuery(); }
 ">
 
@@ -119,23 +132,18 @@
 
     <!-- Query box -->
     <div class="card u-mb20">
-        <textarea x-model="query"
+        <textarea x-model="query" class="sql-box" aria-label="SQL query"
                   @keydown.ctrl.enter.prevent="runQuery"
                   @keydown.meta.enter.prevent="runQuery"
                   placeholder="SELECT * FROM stocks WHERE cap_tier = 'LARGE' LIMIT 10"
-                  style="width: 100%; min-height: 120px; padding: 14px 16px;
-                         background: var(--bg-primary); color: var(--text-primary);
-                         border: 1px solid var(--border); border-radius: 8px;
-                         font-family: 'JetBrains Mono', monospace; font-size: 13px;
-                         resize: vertical; outline: none;"
                   spellcheck="false"></textarea>
 
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 12px; gap: 12px; flex-wrap: wrap;">
-            <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+        <div class="sql-bar">
+            <div class="sql-btns">
                 <button @click="runQuery" :disabled="loading" :class="{ 'is-loading': loading }" class="btn-primary">
                     <span x-show="!loading">Run (Ctrl+Enter)</span>
-                    <span x-show="loading" x-cloak style="display: inline-flex; align-items: center; gap: 8px;">
-                        <span class="spinner" style="border-color: rgba(255,255,255,0.3); border-top-color: white;"></span>
+                    <span x-show="loading" x-cloak class="sql-run-busy">
+                        <span class="spinner"></span>
                         Running…
                     </span>
                 </button>
@@ -146,25 +154,19 @@
             </div>
         </div>
 
-        <!-- Examples -->
-        <div style="margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border);">
-            <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px;">Examples</div>
-            <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+        <div class="sql-ex">
+            <div class="sql-ex-h">Examples</div>
+            <div class="sql-ex-list">
                 <template x-for="ex in examples" :key="ex.label">
-                    <button @click="query = ex.sql"
-                            x-text="ex.label"
-                            style="padding: 4px 10px; font-size: 11px; background: var(--bg-card-hover);
-                                   color: var(--text-secondary); border: 1px solid var(--border);
-                                   border-radius: 6px; cursor: pointer;
-                                   font-family: 'JetBrains Mono', monospace;"></button>
+                    <button @click="query = ex.sql" x-text="ex.label" class="sql-ex-btn"></button>
                 </template>
             </div>
         </div>
     </div>
 
     <!-- Loading skeleton -->
-    <div x-show="loading && !hasResults" x-cloak class="card u-mb20">
-        <div class="section-title" style="margin-bottom: 12px;">Running query…</div>
+    <div x-show="loading && !hasResults" x-cloak class="card u-mb20" role="status">
+        <div class="section-title">Running query…</div>
         <div class="skeleton" style="height: 16px; width: 40%; margin-bottom: 10px;"></div>
         <div class="skeleton" style="height: 16px; width: 75%; margin-bottom: 10px;"></div>
         <div class="skeleton" style="height: 16px; width: 60%;"></div>
@@ -172,44 +174,32 @@
 
     <!-- Results -->
     <div x-show="hasResults" x-cloak class="card u-mb20">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-            <div class="section-title" style="margin-bottom: 0;">Results</div>
-            <div x-show="!error" x-cloak x-text="rowCount.toLocaleString() + ' rows'" style="font-size: 12px; color: var(--text-muted);"></div>
+        <div class="sql-res-head">
+            <h2 class="section-title">Results</h2>
+            <div x-show="!error" x-cloak x-text="rowCount.toLocaleString() + (rowCount === 1 ? ' row' : ' rows')" class="sql-count"></div>
         </div>
 
-        <div x-show="error" x-cloak
-             style="padding: 12px 16px; background: var(--red-bg); border-left: 3px solid var(--red); border-radius: 6px;">
-            <div style="font-size: 12px; color: var(--red); font-weight: 600; margin-bottom: 4px;">Query Error</div>
-            <div style="font-size: 12px; color: var(--text-primary); font-family: 'JetBrains Mono', monospace;" x-text="error"></div>
+        <div x-show="error" x-cloak class="sql-err">
+            <div class="sql-err-h">Query Error</div>
+            <div class="sql-err-m" x-text="error"></div>
         </div>
 
-        <div x-show="!error && rowCount === 0" x-cloak style="color: var(--text-muted); font-size: 13px;">
-            Query returned 0 rows.
-        </div>
+        <div x-show="!error && rowCount === 0" x-cloak class="u-muted-11">Query returned 0 rows.</div>
 
-        <div x-show="!error && rowCount > 0" x-cloak style="overflow-x: auto;">
-            <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
+        <div x-show="!error && rowCount > 0" x-cloak class="table-wrap">
+            <table class="sql-table">
                 <thead>
                     <tr>
                         <template x-for="col in columns" :key="col">
-                            <th x-text="col"
-                                style="padding: 8px 12px; text-align: left;
-                                       font-size: 11px; text-transform: uppercase;
-                                       letter-spacing: 0.5px; color: var(--text-muted);
-                                       border-bottom: 2px solid var(--border-accent);
-                                       font-weight: 600; white-space: nowrap;"></th>
+                            <th x-text="col"></th>
                         </template>
                     </tr>
                 </thead>
                 <tbody>
                     <template x-for="(row, idx) in rows" :key="idx">
-                        <tr class="u-rule">
+                        <tr>
                             <template x-for="col in columns" :key="col">
-                                <td x-text="row[col] === null ? 'NULL' : row[col]"
-                                    :style="row[col] === null ? 'color: var(--text-muted); font-style: italic;' : ''"
-                                    style="padding: 8px 12px; font-family: 'JetBrains Mono', monospace;
-                                           max-width: 400px; overflow: hidden; text-overflow: ellipsis;
-                                           white-space: nowrap;"></td>
+                                <td x-text="row[col] === null ? 'NULL' : row[col]" :class="{ 'is-null': row[col] === null }"></td>
                             </template>
                         </tr>
                     </template>
@@ -223,30 +213,28 @@
     {# ────────── SCHEMA TAB ────────── #}
     <div x-show="tab === 'schema'" x-cloak>
 
-    <!-- Schema browser -->
-    <div class="card">
-        <div class="section-title">Schema</div>
-        <div class="section-desc">Click any table to load "SELECT * FROM &lt;table&gt; LIMIT 20" into the query box.</div>
-        <div x-show="schemaLoading" style="color: var(--text-muted); font-size: 12px;">Loading schema...</div>
-        <div x-show="!schemaLoading" x-cloak style="display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 10px;">
+    <!-- Schema browser: fetched once, the first time this tab opens -->
+    <template x-if="loaded.schema">
+    <div class="card" x-init="loadSchema()">
+        <h2 class="section-title">Schema</h2>
+        <div class="section-desc">Click a table to load "SELECT * FROM &lt;table&gt; LIMIT 20" into the query box. Row counts: rows, as of <span x-text="schemaAsOf || 'the last data-health scan'"></span> (cached).</div>
+        <div x-show="schemaLoading" class="u-muted-11" role="status">Loading schema…</div>
+        <div x-show="schemaError" x-cloak class="sql-err"><div class="sql-err-m" x-text="schemaError"></div></div>
+        <div x-show="!schemaLoading && !schemaError && schemaTables.length === 0" x-cloak class="u-muted-11">No tables found.</div>
+        <div x-show="schemaTables.length" x-cloak class="sql-schema">
             <template x-for="t in schemaTables" :key="t.name">
-                <div style="padding: 10px 12px; background: var(--bg-primary); border: 1px solid var(--border); border-radius: 8px;">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-                        <button @click="query = 'SELECT * FROM ' + t.name + ' LIMIT 20'"
-                                x-text="t.name"
-                                style="background: none; border: none; color: var(--accent);
-                                       font-family: 'JetBrains Mono', monospace; font-size: 12px;
-                                       font-weight: 700; cursor: pointer; padding: 0;"></button>
-                        <span x-text="t.row_count.toLocaleString() + ' rows'"
-                              style="font-size: 10px; color: var(--text-muted); font-family: 'JetBrains Mono', monospace;"></span>
+                <div class="sql-tbl">
+                    <div class="sql-tbl-h">
+                        <button @click="query = 'SELECT * FROM ' + t.name + ' LIMIT 20'; tab = 'console'; history.pushState(null, '', '#console')"
+                                x-text="t.name" class="sql-tbl-name"></button>
+                        <span x-text="t.rows === null ? '—' : t.rows.toLocaleString() + ' rows'" class="sql-tbl-n"></span>
                     </div>
-                    <div x-text="t.columns.join(', ')"
-                         style="font-size: 10px; color: var(--text-secondary);
-                                font-family: 'JetBrains Mono', monospace; line-height: 1.4;"></div>
+                    <div x-text="t.columns.join(', ')" class="sql-tbl-cols"></div>
                 </div>
             </template>
         </div>
     </div>
+    </template>
 
     </div>{# / schema panel #}
 
