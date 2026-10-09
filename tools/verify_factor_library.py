@@ -9,7 +9,7 @@ factors.FACTOR_STATUS — invisible to any promotion review. This checker makes
 that gap a hard, visible failure instead of a silent one.
 
 Partition rule: every factor in factors.FACTORS must be in EXACTLY ONE of:
-  - a nonzero factors.SIGNAL_WEIGHTS / SIGNAL_WEIGHTS_RETURN / SIGNAL_WEIGHTS_SHARPE
+  - a nonzero factors.SIGNAL_WEIGHTS
     weight (weight key resolved to its registry id by factors.signal_for)
   - a bench: LIBRARY (factors.FACTOR_LIBRARY) or PROPOSED / BLOCKED /
     SUPERSEDED / CONTROL (factors.FACTOR_STATUS)

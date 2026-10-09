@@ -1017,7 +1017,7 @@ import factors  # noqa: E402  (after the detail literal; factors never imports l
 # Lifecycle status is COMPUTED, never stored: factors.status() from the factor's
 # weights / bench (a hand-kept copy here went stale — it still called pulled
 # pt_upside model_active and missed most wired factors).
-_LINEAGE_STATUS = {"WIRED": "model_active", "VARIANT": "candidate",
+_LINEAGE_STATUS = {"WIRED": "model_active",
                    "LIBRARY": "library", "PROPOSED": "candidate"}
 
 

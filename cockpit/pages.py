@@ -25,7 +25,7 @@ PAGES = [
     {"path": "/sectors", "id": "sectors", "title": "Sectors", "subtitle": "Industry rotation",
      "icon": "layers", "section": "Analysis", "short": "Sectors"},
     {"path": "/model", "id": "model", "title": "Model & Backtest", "subtitle": "Weights · variants · outcomes",
-     "icon": "sliders", "section": "Analysis", "short": "Model", "also": ["model-variants", "model-outcomes"]},
+     "icon": "sliders", "section": "Analysis", "short": "Model", "also": ["model-outcomes"]},
     {"path": "/multibagger", "id": "multibagger", "title": "Multibagger", "subtitle": "Quality-gated watchlist",
      "icon": "trending-up", "section": "Analysis", "short": "Multibagger"},
     {"path": "/playbooks", "id": "playbooks", "title": "Investor Playbooks", "subtitle": "Avoid · insiders · compounders · cloning",

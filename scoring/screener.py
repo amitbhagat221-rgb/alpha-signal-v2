@@ -160,9 +160,7 @@ def score_universe(df, weights: dict = None, as_of=None):
     Apply tier-specific weights, rank within segment, apply forensic penalty.
     Returns scored DataFrame with final_score and rank columns.
 
-    `weights` — optional override. Defaults to factors.SIGNAL_WEIGHTS. Pass
-    factors.SIGNAL_WEIGHTS_RETURN or SIGNAL_WEIGHTS_SHARPE to score with an alternate
-    scheme. Negative weights are honoured — inverse signals get a sign-flip
+    `weights` — optional override. Defaults to factors.SIGNAL_WEIGHTS. Negative weights are honoured — inverse signals get a sign-flip
     on the percentile (1 - pctile) so the weighted sum stays directional.
     """
     if weights is None:
@@ -292,10 +290,7 @@ def _pick_eligible(df, min_eligible: float = None):
       • price_rows        ≥ 60  — ≥3 months of trading prices
       • fundamental_coverage ≥ 0.50 — ≥4 of 8 quarterly_income rows
 
-    `min_eligible` override: variant runs ('return', 'sharpe') concentrate weight on
-    analyst-dependent signals (pt_upside, eps_growth). Many SMALL caps have no
-    analyst coverage so the 60% bar excludes them even though their non-analyst
-    signals are sound. Variants pass 0.40 so those stocks remain rankable.
+    `min_eligible` override: a lower eligible-coverage bar for an experimental weight set.
     """
     if min_eligible is None:
         min_eligible = MIN_ELIGIBLE_COVERAGE
@@ -353,40 +348,18 @@ def select_picks(df, picks_per_tier=None, min_eligible: float = None):
     return pd.concat(picks).sort_values(["cap_tier", "rank"])
 
 
-def compute(dry_run=False, top=None, variant: str = "production"):
-    """Main entry point. Returns row count.
-
-    variant:
-      'production'  → factors.SIGNAL_WEIGHTS (the live weights, hand-set on each factor)
-      'return'      → factors.SIGNAL_WEIGHTS_RETURN (MaxReturn, t-weighted)
-      'sharpe'      → factors.SIGNAL_WEIGHTS_SHARPE (MaxSharpe, ICIR-weighted)
-
-    Non-production variants are dry-run only — they print top picks but
-    don't write to daily_picks (no schema change needed yet). Compare with
-    production by running:
-        python -m scoring.screener --variant production --top 10
-        python -m scoring.screener --variant return --top 10
-        python -m scoring.screener --variant sharpe --top 10
-    """
-    weights = {
-        "production": factors.SIGNAL_WEIGHTS,
-        "return":     factors.SIGNAL_WEIGHTS_RETURN,
-        "sharpe":     factors.SIGNAL_WEIGHTS_SHARPE,
-    }[variant]
-    print(f"Variant: {variant}")
+def compute(dry_run=False, top=None):
+    """Main entry point: score the universe on factors.SIGNAL_WEIGHTS and write
+    daily_picks. Returns row count."""
+    weights = factors.SIGNAL_WEIGHTS
     print("Loading signals...")
     df, prices = _load_signals(return_prices=True)
     inputs = df.copy()
 
     print("Scoring universe...")
     df = score_universe(df, weights=weights)
-    if variant == "production":
-        LAST_SCORED.update(date=date.today().isoformat(), inputs=inputs, scored=df.copy(),
-                           prices=prices)
-    # Variants concentrate weight on pt_upside/eps_growth which have ~43%
-    # coverage in SMALL — relax the eligibility floor for variants only.
-    variant_gate = 0.40 if variant in ("return", "sharpe") else None
-
+    LAST_SCORED.update(date=date.today().isoformat(), inputs=inputs, scored=df.copy(),
+                       prices=prices)
     today = date.today().isoformat()
 
     # Summary
@@ -397,19 +370,13 @@ def compute(dry_run=False, top=None, variant: str = "production"):
 
     # Show top picks
     show_n = top or 5
-    picks = select_picks(df, {t: show_n for t in PICKABLE_TIERS},
-                          min_eligible=variant_gate)
+    picks = select_picks(df, {t: show_n for t in PICKABLE_TIERS})
     print(f"\nTop {show_n} per tier:")
     display_cols = ["rank", "cap_tier", "sid", "ticker", "sector", "final_score", "base_score", "penalty"]
     print(picks[display_cols].to_string(index=False))
 
-    if dry_run or variant != "production":
-        # Non-production variants always dry-run — daily_picks schema only
-        # supports one row per (sid, pick_date), so variant runs only print.
-        if variant != "production" and not dry_run:
-            print(f"\nVariant '{variant}' is print-only (no daily_picks write).")
-        else:
-            print("\nDry run — not saving.")
+    if dry_run:
+        print("\nDry run — not saving.")
         return len(df)
 
     # Save to daily_picks. Apply pick gate before saving — data-sparse and
@@ -481,9 +448,5 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--top", type=int, default=5, help="Show top N per tier")
-    parser.add_argument("--variant", choices=["production", "return", "sharpe"],
-                        default="production",
-                        help="Weight scheme to use (default: production). "
-                             "Non-production is dry-run only.")
     args = parser.parse_args()
-    compute(dry_run=args.dry_run, top=args.top, variant=args.variant)
+    compute(dry_run=args.dry_run, top=args.top)

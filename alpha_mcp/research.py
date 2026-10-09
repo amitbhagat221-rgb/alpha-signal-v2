@@ -37,7 +37,7 @@ price history and fundamentals before writing it). picks(gated=true) is
 the published set; gated=false is every ranked stock.
 
 Factors: WIRED = nonzero production weight in some tier (it moves ranks). LIBRARY/PROPOSED/BLOCKED/SUPERSEDED/CONTROL =
-benched (computed and backtested, NOT used to rank). VARIANT = weighted only in a dry-run scheme. Evidence = t-stat of
+benched (computed and backtested, NOT used to rank). Evidence = t-stat of
 the monthly rank IC per tier (ic_evidence); the promotion bar is |t| >= 2.5 plus a multiple-testing haircut.
 
 Units: market_cap_cr and *_cr fields are Rs crore (1 Cr = 10 million rupees). Prices are rupees. *_pct and return_* are
@@ -325,7 +325,7 @@ def _best_ic():
 @tool(name="factors")
 def factors_list(status: str | None = None, family: str | None = None) -> dict:
     """The factor registry: every factor's id, label, family, lifecycle status (WIRED moves ranks; LIBRARY /
-    PROPOSED / BLOCKED / SUPERSEDED / CONTROL are benched; VARIANT is dry-run only), production weight per tier,
+    PROPOSED / BLOCKED / SUPERSEDED / CONTROL are benched), production weight per tier,
     and best backtest t-stat per tier. Filter by status and/or family (case-insensitive)."""
     ic = _best_ic()
     w = factors.weights()
@@ -372,8 +372,8 @@ def factor(id: str) -> dict:
 
 @tool()
 def model_weights(scheme: str = "SIGNAL_WEIGHTS") -> dict:
-    """Factor weights per tier for a scheme: SIGNAL_WEIGHTS (production), SIGNAL_WEIGHTS_RETURN or
-    SIGNAL_WEIGHTS_SHARPE (dry-run variants). Keys are weight keys; negative = inverse factor."""
+    """Production factor weights per tier (SIGNAL_WEIGHTS, the only scheme). Keys are weight
+    keys; negative = inverse factor."""
     if scheme not in factors.WEIGHT_SCHEMES:
         raise ValueError(f"scheme must be one of {factors.WEIGHT_SCHEMES}")
     w = factors.weights(scheme)

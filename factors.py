@@ -104,6 +104,7 @@ FACTORS = {
                 GROUP BY qi.sid HAVING COUNT(*) >= 4
             """,
         },
+        "bench": "LIBRARY",   # weighted only in the dry-run schemes removed 2026-10-09
     },
     "book_to_price": {
         "label": "Book-to-Price",
@@ -308,6 +309,7 @@ FACTORS = {
         "pit_range": (-1000, 1000),
         "weight_key": "eps_growth",
         "replay_col": None,  # display-only screener column, no PIT twin
+        "bench": "LIBRARY",   # weighted only in the dry-run schemes removed 2026-10-09
     },
 
     # ═══════════════════════════════════════════════════════════════════
@@ -393,6 +395,7 @@ FACTORS = {
                 GROUP BY sid HAVING COUNT(*) >= 2
             """,
         },
+        "bench": "LIBRARY",   # weighted only in the dry-run schemes removed 2026-10-09
     },
     "promoter_trend_4q": {
         "label": "Promoter 1-Year Trend",
@@ -425,6 +428,7 @@ FACTORS = {
                 SELECT DISTINCT sid FROM shareholding WHERE pledge_pct IS NOT NULL
             """,
         },
+        "bench": "LIBRARY",   # weighted only in the dry-run schemes removed 2026-10-09
     },
     "insider_signal": {
         "label": "Insider Trading Signal",
@@ -519,6 +523,7 @@ FACTORS = {
                 )
             """,
         },
+        "bench": "LIBRARY",   # weighted only in the dry-run schemes removed 2026-10-09
     },
     "delivery_anomaly_z": {
         "label": "Delivery % Anomaly (z-score)",
@@ -1958,77 +1963,11 @@ def producer_tables(producer):
     return sorted({t for k in keys for t in INPUT_TABLES[k]})
 
 
-# ── Dry-run weight variants (ADR 0028 → superseded by ADR 0049; non-production) ──
-# ONE owner: here, as whole-scheme tables — they are tools/optimize_weights.py output
-# (pasted wholesale, never tuned per factor) and only feed `scoring.screener
-# --variant {return,sharpe}` (print-only), the cockpit variants page and status()
-# "VARIANT". Production weights are NOT here — they sit on each FACTORS entry.
-# Two optimized weight schemes from the PIT IC backtest (2026-05-28).
-# Source: tools/optimize_weights.py reads pit_ic_by_tier_v2 and normalises by tier.
-# Each scheme is "aggressive" — no caps, no diversification floor. pt_upside +
-# eps_growth dominate because their t-stats earn it (t=7-9 and t=5 respectively).
-# Choose by passing --variant {return,sharpe} to scoring/screener.
-
-# MaxReturn: w_i ∝ |t_stat_i| × sign(IC_i). Favours absolute IC magnitude.
-# Refresh: python -m tools.optimize_weights --filter-wired
-# 2026-05-29: pledge_quality + delivery_anomaly_z now wired (Next-3 #3), so SMALL
-# includes both; MID stays at 2 factors until interest_coverage/ccc/etc are wired.
-#   2026-07-05 (ADR 0045): pt_upside → 0 in both variants below — look-ahead
-#   artifact (audit Factor-F1, CRITICAL). Non-production (dry-run only via
-#   --variant), so left un-renormalized per ADR 0045.
-SIGNAL_WEIGHTS_RETURN = {
-    "LARGE": {
-        "pt_upside":         0,       # PULLED — look-ahead artifact (was t=7.15)
-        "eps_growth":        0.3475,  # t=5.31
-        "consensus":         0.1846,  # t=2.82
-    },
-    "MID": {
-        "pt_upside":         0,       # PULLED — look-ahead artifact (was t=8.40)
-        "accruals":         -0.2759,  # t=-3.20 (inverse)
-    },
-    "SMALL": {
-        "pt_upside":         0,       # PULLED — look-ahead artifact (was t=9.14)
-        "pledge_quality":    0.1526,  # t=5.90
-        "delivery_anomaly_z":0.1232,  # t=4.76
-        "smart_money":       0.1131,  # t=4.37 (avg_delivery_pct_30d)
-        "eps_growth":        0.0836,  # t=3.23
-        "earnings_yield":    0.0809,  # t=3.13
-        "consensus":         0.0776,  # t=3.00
-        "promoter":          0.0678,  # t=2.62
-        "piotroski":         0.0649,  # t=2.51
-    },
-}
-
-# MaxSharpe: w_i ∝ |ICIR_i| × sign(IC_i). Favours information ratio (mean/vol of IC).
-SIGNAL_WEIGHTS_SHARPE = {
-    "LARGE": {
-        "eps_growth":        0.5239,  # ICIR=1.88
-        "pt_upside":         0,       # PULLED — look-ahead artifact (was ICIR=1.21)
-        "consensus":         0.1390,  # ICIR=0.50
-    },
-    "MID": {
-        "pt_upside":         0,       # PULLED — look-ahead artifact (was ICIR=1.42)
-        "accruals":         -0.3467,  # ICIR=-0.75 (inverse)
-    },
-    "SMALL": {
-        "pt_upside":         0,       # PULLED — look-ahead artifact (was ICIR=1.54)
-        "pledge_quality":    0.1488,  # ICIR=1.06
-        "eps_growth":        0.1435,  # ICIR=1.02
-        "earnings_yield":    0.0983,  # ICIR=0.70
-        "smart_money":       0.0914,  # ICIR=0.65
-        "delivery_anomaly_z":0.0775,  # ICIR=0.55
-        "piotroski":         0.0768,  # ICIR=0.55
-        "consensus":         0.0745,  # ICIR=0.53
-        "promoter":          0.0722,  # ICIR=0.51
-    },
-}
-
-
 # ═══════════════════════ Derived views — never hand-edit a copy ═══════════════════════
 
 # The rankable segments, from config.TIERS (pickable tiers, in config order).
 TIERS = tuple(config.PICKABLE_TIERS)
-WEIGHT_SCHEMES = ("SIGNAL_WEIGHTS", "SIGNAL_WEIGHTS_RETURN", "SIGNAL_WEIGHTS_SHARPE")
+WEIGHT_SCHEMES = ("SIGNAL_WEIGHTS",)   # the dry-run RETURN / SHARPE schemes were removed 2026-10-09 (void evidence)
 BENCHES = ("LIBRARY", "PROPOSED", "BLOCKED", "SUPERSEDED", "CONTROL")
 
 _META_KEYS = ("label", "group", "description", "source_tables", "source_columns", "filing_lag",
@@ -2214,13 +2153,10 @@ def wired_signal_ids(schemes=("SIGNAL_WEIGHTS",)):
 
 
 def status(signal_id):
-    """COMPUTED lifecycle status: WIRED (nonzero production weight) · VARIANT (weighted
-    only in a dry-run SIGNAL_WEIGHTS_RETURN/_SHARPE scheme) · else the factor's bench
-    (LIBRARY / PROPOSED / BLOCKED / SUPERSEDED / CONTROL) · UNCLASSIFIED."""
+    """COMPUTED lifecycle status: WIRED (nonzero production weight) · else the factor's
+    bench (LIBRARY / PROPOSED / BLOCKED / SUPERSEDED / CONTROL) · UNCLASSIFIED."""
     if signal_id in wired_signal_ids():
         return "WIRED"
-    if signal_id in wired_signal_ids(WEIGHT_SCHEMES[1:]):
-        return "VARIANT"
     return (FACTORS.get(signal_id) or PIT_EXTRA.get(signal_id) or {}).get("bench") or "UNCLASSIFIED"
 
 

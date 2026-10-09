@@ -120,14 +120,6 @@ def test_signal_weights_order_is_canonical():
         assert items == sorted(items, key=lambda kw: (-abs(kw[1]), kw[0]))
 
 
-def test_variants_are_weight_keys():
-    for scheme in factors.WEIGHT_SCHEMES[1:]:
-        for tier, tw in getattr(factors, scheme).items():
-            assert tier in factors.TIERS
-            for key in tw:
-                assert factors.signal_for(key, tier) in factors.FACTORS, (scheme, key)
-
-
 def test_inferred_fields_are_not_restated():
     """An explicit field equal to its inferred default is noise (plan 0015 Phase 6)."""
     import ast, re

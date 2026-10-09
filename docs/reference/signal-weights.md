@@ -7,8 +7,8 @@
 > by key — the screener's summation order). `tests/test_factor_registry.py` enforces
 > Σ|w| = 1.0 per rankable tier (`config.TIERS` with `pickable=True`), no weight on a benched
 > factor, and negative weights only where listed. The dry-run variants
-> `SIGNAL_WEIGHTS_RETURN` / `_SHARPE` (tools/optimize_weights.py output) live in `factors.py`
-> as whole-scheme tables. `config.SIGNAL_WEIGHTS*` survive only as lazy read-only aliases for
+> `SIGNAL_WEIGHTS_RETURN` / `_SHARPE` were removed 2026-10-09 (their evidence was void: pt_upside
+> look-ahead, pre-audit t-stats); production is the only scheme. `config.SIGNAL_WEIGHTS*` survive only as lazy read-only aliases for
 > cockpit/ + cockpit_ops/. References below to "`SIGNAL_WEIGHTS`" mean that derived view.
 
 | Tier | Production weights (2026-10-03, [ADR 0063](../decisions/0063-weights-on-corrected-evidence.md)) |
@@ -66,7 +66,7 @@ proportionally (Σ|w|=1.0, signs preserved). New weights:
 | SMALL | promoter 0.14→**0.19**, earnings_yield 0.11→**0.14**, book_to_price 0.11→**0.14**, delivery_anomaly_z 0.10→**0.12**, sector_tilt 0.10→**0.12**, pledge_quality 0.09→**0.11**, piotroski 0.08→**0.10**, accruals 0.05→**0.06**, momentum 0.02 unchanged (pt_upside 0.15 + smart_money 0.05 removed) |
 
 `SIGNAL_WEIGHTS_RETURN` / `SIGNAL_WEIGHTS_SHARPE` (non-production, `--variant` dry-run
-diagnostics only): `pt_upside` set to 0 in place, not renormalized.
+diagnostics only): `pt_upside` set to 0 in place, not renormalized. (Both schemes removed 2026-10-09.)
 
 **Re-entry condition:** ≥12 clean monthly `analyst_consensus_snapshots`-only anchors
 AND |t|≥1.5 in a tier → revisit (calendar: ~2027-05). Until then `pt_upside` stays

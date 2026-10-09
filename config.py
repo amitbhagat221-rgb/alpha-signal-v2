@@ -112,8 +112,7 @@ PICK_GATE = {"min_eligible_coverage": 0.60, "min_weight_coverage": 0.50,
 # Hand-set, never derived (CLAUDE.md "Backtest hygiene", docs/reference/signal-weights.md)
 # — but they live ON the factor: each wired factors.FACTORS entry carries
 # `weights: {tier: w}` (ADR 0052 D4, amends ADR 0017). factors.SIGNAL_WEIGHTS is the
-# derived {tier: {weight_key: w}} view every consumer imports; the two dry-run
-# variant schemes (SIGNAL_WEIGHTS_RETURN / _SHARPE) also live in factors.py.
+# derived {tier: {weight_key: w}} view every consumer imports.
 
 
 # ── VIX Regime ──

@@ -1259,83 +1259,6 @@ def get_model_portfolio():
     return result
 
 
-# ── Factor-model variants (production / max-return / max-sharpe) ──
-# Runs scoring.screener three ways and returns picks side-by-side. Production
-# is the same data already in daily_picks; variants are computed live.
-# Cached 30 min — once per ~half-hour the screener runs end-to-end (~5-8s).
-
-@_persisted_cache(1800, name="model_variants")
-def get_model_variants(top_per_tier: int = 10) -> dict:
-    """Run all 3 weight schemes and return their top picks for comparison.
-
-    Returns a dict with structure:
-        {
-          'variants': {
-            'production': {
-              'label': 'Production', 'description': '...',
-              'weights': {tier: {...}},
-              'picks':   {tier: [...]},
-              'gate_excluded': int,
-            },
-            'return':  {...},
-            'sharpe':  {...},
-          },
-          'as_of': '2026-05-28',
-        }
-    Pick records carry: rank, sid, ticker, name, sector, final_score,
-    base_score, eligible_coverage.
-    """
-    from datetime import date
-    from factors import SIGNAL_WEIGHTS, SIGNAL_WEIGHTS_RETURN, SIGNAL_WEIGHTS_SHARPE
-    from scoring.screener import _load_signals, score_universe, select_picks
-
-    variant_specs = [
-        ("production", SIGNAL_WEIGHTS,        None, "Production",
-         "Hand-tuned weights from the C13b validation. Currently writes to daily_picks."),
-        ("return",     SIGNAL_WEIGHTS_RETURN, 0.40, "Max Return",
-         "Weights ∝ |t-stat| from PIT IC backtest. Concentrates on factors with biggest absolute IC."),
-        ("sharpe",     SIGNAL_WEIGHTS_SHARPE, 0.40, "Max Sharpe",
-         "Weights ∝ ICIR (IC info-ratio). Favors consistency over magnitude — lower variance per trade."),
-    ]
-
-    df = _load_signals()
-
-    out = {}
-    for key, weights, gate, label, descr in variant_specs:
-        scored = score_universe(df.copy(), weights=weights)
-        # Note: select_picks already prints to stdout; ok in this cached path.
-        picks_df = select_picks(scored,
-                                 {t: top_per_tier for t in views.pickable_tiers()},
-                                 min_eligible=gate)
-        picks_by_tier = {}
-        for tier in views.pickable_tiers():
-            tier_df = picks_df[picks_df["cap_tier"] == tier]
-            picks_by_tier[tier] = [
-                {
-                    "rank":              int(r["rank"]) if pd.notna(r["rank"]) else None,
-                    "sid":               r["sid"],
-                    "ticker":            r["ticker"],
-                    "name":              r["name"],
-                    "sector":            r["sector"],
-                    "final_score":       round(float(r["final_score"]), 4) if pd.notna(r["final_score"]) else None,
-                    "base_score":        round(float(r["base_score"]), 4) if pd.notna(r["base_score"]) else None,
-                    "eligible_coverage": round(float(r.get("eligible_coverage", 0)), 3) if pd.notna(r.get("eligible_coverage", 0)) else None,
-                }
-                for _, r in tier_df.iterrows()
-            ]
-        out[key] = {
-            "label":       label,
-            "description": descr,
-            "weights":     weights,
-            "picks":       picks_by_tier,
-        }
-
-    return {
-        "variants": out,
-        "as_of":    date.today().isoformat(),
-    }
-
-
 def _conviction_verdicts(surv):
     """Per-name conviction verdict for the holding monitor (reframe 2026-06).
 
@@ -2329,8 +2252,7 @@ def get_news_feed(
 
 # ── Pick outcomes (live equity curve) ──
 # Built 2026-05-29. The factor model is hypothesis; pick_outcomes is the
-# realization. ADR 0028 ships SIGNAL_WEIGHTS_RETURN/SHARPE on backtest t-stats;
-# this surface shows what live picks actually did, per tier × window.
+# realization: what live picks actually did, per tier × window.
 
 @_persisted_cache(300, name="get_pick_outcomes_summary")
 def get_pick_outcomes_summary(top_n=10):

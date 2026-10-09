@@ -366,22 +366,6 @@ def api_model_outcomes(n: int = 10):
     return api.get_pick_outcomes_summary(top_n=n)
 
 
-@app.get("/model/variants", response_class=HTMLResponse)
-def model_variants_page(request: Request, n: int = 10):
-    """Side-by-side comparison of production / max-return / max-sharpe weight schemes.
-
-    n: picks per tier per variant (default 10). All three variants run on the
-    same universe; production is the live model writing to daily_picks, return
-    and sharpe are computed live (cached 30 min).
-    """
-    bundle = api.get_model_variants(top_per_tier=n)
-    return templates.TemplateResponse(request, "model_variants.html", {
-        "page": "model-variants",
-        "bundle": bundle,
-        "n_per_tier": n,
-    })
-
-
 @app.get("/multibagger", response_class=HTMLResponse)
 def multibagger_page(request: Request):
     """Multibagger watchlist — the SEPARATE quality-gated funnel (plan 0008),

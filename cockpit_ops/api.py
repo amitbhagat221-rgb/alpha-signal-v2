@@ -984,7 +984,7 @@ def get_factor_health():
     import factors as _factors
     from factors import WEIGHT_KEY_TO_SIGNAL as _WEIGHT_KEY_TO_SIGNAL
     wired = set()
-    for _sch in ("SIGNAL_WEIGHTS", "SIGNAL_WEIGHTS_RETURN", "SIGNAL_WEIGHTS_SHARPE"):
+    for _sch in _factors.WEIGHT_SCHEMES:
         for _tier_w in (getattr(_factors, _sch, {}) or {}).values():
             for _k in _tier_w:
                 wired.add(_WEIGHT_KEY_TO_SIGNAL.get(_k, _k))
