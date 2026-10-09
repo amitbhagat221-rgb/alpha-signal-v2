@@ -1,20 +1,27 @@
-// Data Inventory — vanilla JS click-to-sort + drag-to-reorder + persistence.
-// Each table.inv-table is independent; layout state is keyed by data-domain-key
-// in localStorage so the user's per-domain layout survives reloads.
+// Sortable tables — vanilla JS click-to-sort (header buttons with aria-sort).
+//   table.inv-table      Data Inventory: also drag-to-reorder columns + layout kept in localStorage
+//                        (state is keyed by data-domain-key so it survives reloads)
+//   table[data-sortable] sort only (th[data-sort] + td[data-key] pairs)
+// window.initSortableTables(root) wires every table under `root` once; the lazy tabs call it
+// after they insert their HTML.
 
 (function () {
-  const tables = document.querySelectorAll("table.inv-table");
-  if (!tables.length) return;
-
-  tables.forEach((table) => initTable(table));
+  window.initSortableTables = function (root) {
+    (root || document).querySelectorAll("table.inv-table, table[data-sortable]").forEach(initTable);
+  };
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", () => window.initSortableTables());
+  else window.initSortableTables();
 
   function initTable(table) {
+    if (table.dataset.ready) return;
+    table.dataset.ready = "1";
+    const full = table.classList.contains("inv-table");
     const key = table.dataset.domainKey || "default";
     const lsKey = `inv-layout-${key}`;
-    const saved = loadState(lsKey);
+    const saved = full ? loadState(lsKey) : null;
 
     // Restore column order if any was saved.
-    if (saved && Array.isArray(saved.columnOrder)) {
+    if (full && saved && Array.isArray(saved.columnOrder)) {
       reorderColumns(table, saved.columnOrder);
     }
 
@@ -25,24 +32,33 @@
     }
 
     wireSorting(table, lsKey);
-    wireDragReorder(table, lsKey);
+    if (full) wireDragReorder(table, lsKey);
   }
 
   // ── Sort ────────────────────────────────────────────────────────────────
   function wireSorting(table, lsKey) {
     table.querySelectorAll("thead th").forEach((th) => {
-      th.addEventListener("click", (e) => {
+      const k = th.dataset.key;
+      if (!k) return;
+      // The header text becomes a real button: keyboard-reachable, announced via aria-sort.
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "th-sort";
+      while (th.firstChild) btn.appendChild(th.firstChild);
+      th.appendChild(btn);
+      th.setAttribute("aria-sort", "none");
+      btn.addEventListener("click", (e) => {
         // Don't sort if the click came from a drag-end.
         if (th._suppressClick) { th._suppressClick = false; return; }
-        const k = th.dataset.key;
-        if (!k) return;
         const current = table.dataset.sortKey === k ? table.dataset.sortDir : null;
         const dir = current === "asc" ? "desc" : "asc";
         sortTable(table, k, dir);
         markSortedHeader(table, k, dir);
-        const state = loadState(lsKey) || {};
-        state.sort = { key: k, dir };
-        saveState(lsKey, state);
+        if (table.classList.contains("inv-table")) {
+          const state = loadState(lsKey) || {};
+          state.sort = { key: k, dir };
+          saveState(lsKey, state);
+        }
       });
     });
   }
@@ -50,7 +66,11 @@
   function markSortedHeader(table, key, dir) {
     table.querySelectorAll("thead th").forEach((th) => {
       th.classList.remove("sort-asc", "sort-desc");
-      if (th.dataset.key === key) th.classList.add(dir === "asc" ? "sort-asc" : "sort-desc");
+      th.setAttribute("aria-sort", "none");
+      if (th.dataset.key === key) {
+        th.classList.add(dir === "asc" ? "sort-asc" : "sort-desc");
+        th.setAttribute("aria-sort", dir === "asc" ? "ascending" : "descending");
+      }
     });
     table.dataset.sortKey = key;
     table.dataset.sortDir = dir;

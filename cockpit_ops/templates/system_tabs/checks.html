@@ -1,0 +1,41 @@
+{# What we check: the catalog (checks.report.catalog), fetched on first open. #}
+{% if overview %}
+{% set cat_mark = {'CRITICAL': '✕', 'WARN': '!', 'INFO': '·', 'OK': '✓'} %}
+<div class="card u-mb20">
+    <h2 class="section-title sy-title">What we check — {{ overview.catalog | length }} checks</h2>
+    <div class="section-desc sy-nomb">
+        Every check the system runs, under the question it answers, with its status right now and when it last fired.
+        Each one has a fire drill in <span class="mono">tests/test_check_drills.py</span> that breaks what it guards and proves it notices.
+        <span class="c-green">✓</span> passing ·
+        <span class="c-red">✕</span> {{ overview.severity_meaning.CRITICAL }} ·
+        <span class="c-amber">!</span> {{ overview.severity_meaning.WARN }} ·
+        <span>·</span> {{ overview.severity_meaning.INFO }}.
+        Same list in a terminal: <span class="mono">python -m tools.health_report --catalog</span>
+    </div>
+</div>
+{% for q in overview.scorecard %}
+{% set mine = overview.catalog | selectattr('theme', 'equalto', q.theme) | list %}
+<div class="card u-mb20">
+    <h2 class="section-title sy-title">{{ q.question }}</h2>
+    <div class="section-desc">Covers {{ q.covers }} · {{ mine | length }} checks</div>
+    {% for c in mine %}
+    <div class="sy-cat st-{{ c.status|lower }}">
+        <div class="sy-cat-m">{{ cat_mark[c.status] }}</div>
+        <div class="sy-cat-b">
+            <div class="sy-cat-w"><b>Alerts when:</b> {{ c.when }}{% if c.n_checks %} <span class="u-muted">({{ c.n_checks }} checks)</span>{% endif %}</div>
+            <div class="sy-cat-y"><b>Why:</b> {{ c.why }}</div>
+            <div class="sy-cat-c">
+                <span class="mono">{{ c.code }}</span> · severity: {{ c.severity }}
+                {% if c.failing %}<br><span class="sy-cat-now">now: {{ c.failing[:6] | join('; ') | truncate(220) }}</span>
+                {% elif c.tracked_since %}<br>last fired: {{ c.last_fired or ('not since tracking began on ' ~ c.tracked_since) }}{% endif %}
+            </div>
+        </div>
+    </div>
+    {% else %}
+    <div class="u-muted-11">No checks under this question.</div>
+    {% endfor %}
+</div>
+{% endfor %}
+{% else %}
+<div class="card u-muted-11">The check catalog is unavailable.</div>
+{% endif %}
