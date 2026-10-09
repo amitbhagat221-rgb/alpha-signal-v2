@@ -1084,7 +1084,7 @@ def data_health(cache_ttl=0):
             m = _data_health_memo
             if m["value"] is not None and (now - m["ts"]) < cache_ttl:
                 return m["value"]
-            df = _data_health_impl()
+            df = _data_health_impl(slow_ttl=_SLOW_SCAN_TTL)
             m["value"], m["ts"] = df, now
             return df
     return _data_health_impl()
@@ -1145,7 +1145,16 @@ def table_step_meta():
     return meta
 
 
-def _data_health_impl():
+# A table whose count / date-range / sid-coverage scan takes more than _SLOW_SCAN_S seconds
+# (feature_values 48M rows, derivative_bars, bse_announcements: ~100 of the ~120 s a full scan
+# took) is rescanned at most every _SLOW_SCAN_TTL seconds by the cockpit callers (cache_ttl > 0).
+# The watchdog (cache_ttl=0) always rescans: it needs live counts.
+_SLOW_SCAN_S = 2.0
+_SLOW_SCAN_TTL = 6 * 3600
+_slow_scans: dict = {}
+
+
+def _data_health_impl(slow_ttl=0):
     meta = table_step_meta()
 
     # Dynamic codebase lineage scan
@@ -1166,6 +1175,11 @@ def _data_health_impl():
             universe_size = 0
         scanned = {}
         for tbl in tables:
+            hit = _slow_scans.get(tbl)
+            if slow_ttl and hit and (_time_module.time() - hit[0]) < slow_ttl:
+                scanned[tbl] = hit[1]
+                continue
+            t_scan = _time_module.time()
             count = conn.execute(f"SELECT COUNT(*) FROM [{tbl}]").fetchone()[0]
             earliest, latest, date_span = _table_date_range(conn, tbl)
             # Stock coverage: only meaningful for tables with a sid column.
@@ -1176,6 +1190,8 @@ def _data_health_impl():
                     f"SELECT COUNT(DISTINCT sid) FROM [{tbl}]"
                 ).fetchone()[0] or 0
             scanned[tbl] = (count, earliest, latest, date_span, stock_count)
+            if _time_module.time() - t_scan > _SLOW_SCAN_S:
+                _slow_scans[tbl] = (_time_module.time(), scanned[tbl])
 
     for tbl in tables:
         count, earliest, latest, date_span, stock_count = scanned[tbl]
@@ -1342,7 +1358,7 @@ def db_summary():
     Returns a dict with totals, kind breakdown, freshness counts, last
     pipeline run, and a one-line written verdict.
     """
-    df = data_health()
+    df = data_health(cache_ttl=60)
     db_size_mb = DB_PATH.stat().st_size / 1024 / 1024
 
     # Last successful pipeline run
