@@ -1232,8 +1232,8 @@
 
 {# Piotroski 9-factor breakdown #}
 <div class="card u-mb16">
-    <div class="section-title">Piotroski F-Score Breakdown ({% if s.f_score is not none %}{{ s.f_score|int }}/9{% endif %})</div>
-    <div class="section-desc">9-point checklist created by Prof. Joseph Piotroski (Stanford). Each factor scores 1 (pass) or 0 (fail).</div>
+    <div class="section-title">Piotroski F-Score Breakdown ({% if s.f_score_filing is not none %}{{ s.f_score_filing|int }}/9{% endif %})</div>
+    <div class="section-desc">9-point checklist created by Prof. Joseph Piotroski (Stanford). Each factor scores 1 (pass) or 0 (fail). On the latest filing; the score the ranking used{% if s.ranked_as_of %} ({{ s.ranked_as_of }}){% endif %} counts a filing only once the market could know it.</div>
 
     {% set categories = {'Profitability': [], 'Leverage': [], 'Efficiency': []} %}
     {% for field, label, cat, desc in s.get('piotroski_factors', []) %}

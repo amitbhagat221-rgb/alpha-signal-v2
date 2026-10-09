@@ -266,9 +266,31 @@ def signals(sid):
     return out
 
 
+# daily_snapshots column (the value the ranking used, output/snapshot.py) → the
+# signal-table key the stock page and the MCP stock tool show it under. Same quantity
+# on both sides; consensus is left out (the snapshot holds reported EPS growth, the
+# table's consensus_signal is a 0-1 composite).
+RANKED_AS = {"piotroski_f": "f_score", "cf_accruals": "cf_accruals_ratio", "bs_accruals": "bs_accruals_ratio",
+             "promoter_qoq": "promoter_qoq", "smart_money": "smart_money_score", "sentiment_7d": "sentiment_7d"}
+
+
+def ranked(sid):
+    """{signal key: value} the ranking used for `sid` on the newest snapshot day (RANKED_AS),
+    plus `ranked_as_of`; {} when the stock has no snapshot row."""
+    r = db.one(f"SELECT snapshot_date, {', '.join(RANKED_AS)} FROM daily_snapshots WHERE sid = ? "
+               "ORDER BY snapshot_date DESC LIMIT 1", [sid])
+    if not r:
+        return {}
+    return {"ranked_as_of": r["snapshot_date"], **{RANKED_AS[c]: r[c] for c in RANKED_AS}}
+
+
 def stock(sid):
     """One stock now: its `stocks` row, its newest pick (score, rank, the data
-    behind it), its newest signal values and its latest close. None for an unknown sid.
+    behind it), its signal values and its latest close. None for an unknown sid.
+
+    Headline signal values are the ones the ranking used (`ranked`, point in time with
+    filing lags); the *_scores tables, computed without lags, supply component detail
+    only. `f_score_filing` keeps the table's score for its nine-test breakdown.
 
     `stocks.cap_tier` is the tier of record — the pick row's tier is not merged
     (a stale pick row would resurrect yesterday's tier after a MICRO toggle)."""
@@ -280,7 +302,11 @@ def stock(sid):
         "fundamental_coverage FROM daily_picks WHERE sid = ? ORDER BY pick_date DESC LIMIT 1", [sid])
     s.update({k: v for k, v in pick.items() if k != "cap_tier"})      # stocks.cap_tier is the tier of record
     s["data"] = pick_data(pick, sid, pick.get("pick_date")) if pick else None
-    s.update(signals(sid))
+    sig = signals(sid)
+    if "f_score" in sig:
+        sig["f_score_filing"] = sig["f_score"]
+    s.update(sig)
+    s.update({k: v for k, v in ranked(sid).items() if v is not None or k not in s})
     close, price_date = latest_close([sid]).get(sid, (None, None))
     if close is not None:
         s["close_price"], s["price_date"] = close, price_date
