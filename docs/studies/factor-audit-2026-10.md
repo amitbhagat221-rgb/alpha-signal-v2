@@ -208,3 +208,30 @@ After the multiple-testing haircut, `delivery_anomaly_z` SMALL and `announcement
 ## 11. Close-out, 2026-10-04
 
 First run on the new weights and what it showed: [ADR 0064](../decisions/0064-missing-factor-is-neutral.md). Closed: R9 (a missing factor is neutral), P3 (demergers), the third mislabelled column, the two unrecorded splits, the thin-tier check. Open: R11, dead names in the panel ([plan 0020 §7](../plans/0020-factor-audit.md)), the code refactor and the remaining backtest redesign (§5), LARGE (unproven).
+
+## 12. Close-out, 2026-10-08 (branch `factor-closeout`, ADR 0065 proposed)
+
+**Found on the way, and fixed.**
+
+| What | Evidence | Fix |
+|---|---|---|
+| A ₹5,000 Cr company ranked in LARGE | KDDL: both vendors carried 1,744 Cr shares for FY26 (1.25 Cr the year before); the live tier code accepted it as "corroborated" and ranked it 31st in LARGE on 10-08 | live tiers on the backtest's market cap (`signals._fundamentals.market_caps`, `pit.tier_inputs`) |
+| The live MICRO rule was not the tested one | size leg compared rupees with crore (fired only for missing values); a Piotroski leg from the unlagged table; quarters counted on both reporting bases | `scoring.segment.carve` for live and backtest: 146 MICRO → SMALL, 86 SMALL → MICRO |
+| A wired LARGE factor on old data | no transcript scored since 2026-06-14 (the scoring step was never scheduled); 85 of 103 LARGE values changed when 681 calls were scored, rank correlation 0.80 | scored; `run.sh transcripts` scores new calls; probe rule |
+| Display not what was ranked | daily_snapshots recomputed by an unlagged path; P/E, P/B, ROE, D/E empty for every stock; `market_cap_cr` in rupees | snapshot from `pit.features_at`; `stocks` valuation filled; crore (work order 1) |
+| A wired input could vanish silently | an unreadable `bse_results` / `fno_iv` / `nlp` became an empty frame → every stock neutral | `pit.load_raw` raises |
+
+**R11: statements arrive later than the backtest assumed.** Tickertape's FY26 annual statements reached our copy 37 of 2,221 by day 62 after year end, 38% by day 123, 62% by day 154, all by day 184. The backtest now treats a statement as known when our copy had it (live-captured rows: their fetch date; bulk-loaded rows: 150 days). On 82 monthly anchors:
+
+| Factor | Tier | t at 75 days | t on arrival (new rule) | t, Screener's statement at 110 days |
+|---|---|---|---|---|
+| asset_growth_yoy (wired −0.20) | LARGE | −2.42 | −1.79 | −2.00 |
+| cf_accruals (wired −0.12) | MID | −1.94 | −1.19 | −1.24 |
+| piotroski (wired 0.18 / 0.14) | MID / SMALL | 3.57 / 3.97 | 3.47 / 3.67 | — |
+| book_to_price (benched) | LARGE / MID / SMALL | 1.52 / 1.51 / 1.33 | 1.47 / 1.46 / 1.18 | — |
+
+MID accruals is below the 1.5 bar at any arrival the live system can have; LARGE asset growth holds on Screener's statement, which is published with results (if the Screener harvest runs: its last two scheduled runs failed for every stock).
+
+**LARGE.** 21 new candidates, none passes ([large-factors-2026-10.md](large-factors-2026-10.md); best `fip_id` −1.93). Walk-forward with a one-month embargo, factors and signs chosen from the past only: out-of-sample t LARGE 0.73, MID 1.92, SMALL 5.13 (today's weights read 4.62 / 4.68 / 10.78 in sample).
+
+**Code.** One TTM, one consolidated filter, one market cap, one label (`pit.forward_returns`), one composite helper; 18 steps whose `*_scores` tables nobody read removed with their loaders; ~25 dead entry points; three duplicate factors benched (rank correlation 1.00); golden test for every wired factor. Every refactor step gated on identical values from old and new code on the same inputs (4 anchors, every producer): identical except the intended fixes (`fcf_yield` on the shared market cap, PEAD and the beat rate on one reporting basis).

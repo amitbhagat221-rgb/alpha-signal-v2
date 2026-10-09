@@ -1,6 +1,6 @@
 # ADR 0065 — Live tiers, display and inputs use the backtest's own computations; price factors carry a full-market reading
 
-**Status:** proposed 2026-10-08 (plan 0020 close-out; Amit: "complete … anything pending from plan 0020"). Takes effect on approval: it moves 232 stocks between SMALL and MICRO. Builds on ADR 0026 (MICRO carve-out), 0052 (one compute per factor), 0064.
+**Status:** accepted 2026-10-09 (Amit: "ok approved"; plan 0020 close-out). Builds on ADR 0026 (MICRO carve-out), 0052 (one compute per factor), 0064.
 
 ## Decision
 
