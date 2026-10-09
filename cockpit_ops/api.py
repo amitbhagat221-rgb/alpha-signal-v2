@@ -601,6 +601,15 @@ def _data_health_scores():
 # Factor Health — sister to data-health, but per-factor
 # ═══════════════════════════════════════════════════
 
+def factor_counts():
+    """THE factor counts every page quotes (/system Factors header and funnel, /command):
+    total registered, validated (backtest verdict KEEP or WEAK, |t| >= 1.5), wired (a nonzero
+    weight in factors.SIGNAL_WEIGHTS) and the rest. One definition, read from get_factor_health()."""
+    s = get_factor_health()["summary"]
+    return {"total": s["total"], "validated": s["funnel"]["validated"], "wired": s["wired"],
+            "not_wired": s["total"] - s["wired"]}
+
+
 @_persisted_cache(300, name="get_factor_health")
 def get_factor_health():
     """Return one row per registered factor with health metrics + grade.
@@ -1157,7 +1166,7 @@ def get_factor_health():
 
     summary = {
         "total": n,
-        "validated": sum(1 for r in out if r["in_model"]),       # READY and |t| >= 1.5
+        "validated": funnel["validated"],       # KEEP + WEAK: the ONE definition (see factor_counts)
         "wired": sum(1 for r in out if r.get("in_production")),   # a nonzero weight in factors.SIGNAL_WEIGHTS
         "in_library": sum(1 for r in out if not r.get("in_production") and r["coverage_n"] > 0),
         "not_built": sum(1 for r in out if r["coverage_n"] == 0),
@@ -1352,6 +1361,8 @@ def _cc_factor_library():
         # ── Track 3 extras (ROIC, FCF Yield, …) ──
         for spec in TRACK3_EXTRAS:
             signal = spec["signal"]
+            if any(f["signal"] == signal for f in factors):   # already in the registry: one row per factor
+                continue
             ic_row = best.get(signal, {})
             t_stat = ic_row.get("t_stat")
             stocks = _stocks_in(spec.get("score_table"))
@@ -1413,7 +1424,8 @@ def get_command_centre():
 
     # ── Factor library (BACKTEST_SIGNALS × pit_ic_by_tier_v2) ──
     factors, n_built, n_in_prod, n_in_library = _cc_factor_library()
-    n_validated = sum(1 for f in factors if f.get("validated"))
+    counts = factor_counts()
+    n_validated, n_in_prod = counts["validated"], counts["wired"]
 
     # ── Data layer (lightweight, for the architecture flow header stats) ──
     data_layer = {}
@@ -1845,7 +1857,7 @@ def get_command_centre():
         "picks": arch_picks,
         "summary": {
             "tables": len(data_layer),
-            "factors_total": len(factors),
+            "factors_total": counts["total"],
             "factors_validated": n_validated,
             "factors_wired": n_in_prod,
             "factors_in_library": n_in_library,
@@ -1860,7 +1872,7 @@ def get_command_centre():
             "pct": round(100 * n_built / FACTOR_COUNT_TARGET, 1),
             "validated": n_validated,
             "wired": n_in_prod,
-            "not_wired": n_built - n_in_prod,
+            "not_wired": counts["not_wired"],
         },
         "data_layer": data_layer,
         "data_model": data_model,

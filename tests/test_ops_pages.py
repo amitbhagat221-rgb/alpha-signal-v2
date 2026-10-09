@@ -88,3 +88,14 @@ def test_model_validation_wired_rows_cover_every_weighted_pair(monkeypatch):
     out = api.get_validation_evidence()
     total = sum(1 for tw in factors.SIGNAL_WEIGHTS.values() for w in tw.values() if w)
     assert out["meta"]["n_wired"] == total
+
+
+def test_factor_counts_are_one_definition(monkeypatch):
+    """/system Factors header, its funnel and /command all quote factor_counts(): the
+    header's validated is the funnel's (KEEP + WEAK), never a second rule."""
+    from cockpit_ops import api
+    summary = {"total": 105, "wired": 11, "funnel": {"validated": 64}}
+    monkeypatch.setattr(api, "get_factor_health", lambda: {"summary": summary, "factors": []})
+    assert api.factor_counts() == {"total": 105, "validated": 64, "wired": 11, "not_wired": 94}
+    src = Path(api.__file__).read_text()
+    assert '"validated": funnel["validated"]' in src and 'if r["in_model"]' not in src
