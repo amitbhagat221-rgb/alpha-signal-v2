@@ -359,15 +359,38 @@ def _price_metrics(df):
     return result
 
 
+def adjusted_closes(df, sid_adjustments):
+    """`df` [date, close] of ONE sid with `close` replaced by the corporate-action
+    adjusted close (splits, bonuses, dividends: the same `signals._prices.apply_adjustments`
+    the screener and the backtest use), so a 1:2 split is not a -50% move.
+    `sid_adjustments` is that sid's corporate_adjustments rows [sid, ex_date, factor]."""
+    if df.empty or sid_adjustments is None or len(sid_adjustments) == 0:
+        return df
+    from signals._prices import apply_adjustments
+    px = apply_adjustments(df.assign(sid="_"), sid_adjustments.assign(sid="_"), "9999-12-31")
+    return df.assign(close=px["adj_close"].values)
+
+
 def price_metrics(sids):
     """{sid: {close_price, price_date, return_1m/3m/6m/1y (%), high_52w, low_52w,
-    pct_from_52w_high, rsi_14}} — {} for a sid with fewer than 5 prices."""
+    pct_from_52w_high, rsi_14}} — {} for a sid with fewer than 5 prices.
+    close_price is the raw last close (what the stock trades at); returns, the 52w range
+    and RSI are computed on adjusted closes, so a split or bonus is not a crash."""
     recs = latest_rows("stock_prices", "date, close", sids,
                        order_col="date", n=RETURN_WINDOWS[-1][1] + 8, where="close > 0")
     out = {sid: {} for sid in sid_params(sids)[0]}
     if recs:
+        found = list(dict.fromkeys(r["sid"] for r in recs))
+        ph = ",".join("?" * len(found))
+        adj = pd.DataFrame(native_rows(
+            f"SELECT sid, ex_date, factor FROM corporate_adjustments WHERE sid IN ({ph})", found),
+            columns=["sid", "ex_date", "factor"])
         for sid, g in pd.DataFrame(recs).groupby("sid", sort=False):
-            out[sid] = _price_metrics(g.reset_index(drop=True))
+            g = g.sort_values("date").reset_index(drop=True)
+            m = _price_metrics(adjusted_closes(g, adj[adj["sid"] == sid]))
+            if m:
+                m["close_price"] = round(float(g["close"].iloc[-1]), 2)      # raw: the traded price
+            out[sid] = m
     return out
 
 

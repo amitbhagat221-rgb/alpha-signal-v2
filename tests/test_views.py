@@ -26,6 +26,7 @@ def tmpdb(tmp_path, monkeypatch):
             book_to_price REAL, consensus_signal REAL, promoter_qoq REAL, delivery_pct REAL,
             mom_6m REAL, mom_12m REAL, smart_money REAL, sentiment_7d REAL);
         CREATE TABLE stock_prices (sid TEXT, date TEXT, close REAL);
+        CREATE TABLE corporate_adjustments (sid TEXT, ex_date TEXT, factor REAL, n_events INTEGER, inds TEXT);
         CREATE TABLE pipeline_log (id INTEGER PRIMARY KEY, run_date TEXT, step_name TEXT,
             status TEXT, rows_affected INTEGER, duration_sec REAL, error_message TEXT,
             started_at TEXT, finished_at TEXT);
@@ -87,6 +88,24 @@ def test_price_metrics_are_trading_day_returns(tmpdb):
     assert m["close_price"] == last and m["price_date"] == days[-1].strftime("%Y-%m-%d")
     assert views.latest_close(["X"]) == {"X": (last, days[-1].strftime("%Y-%m-%d"))}
     assert views.price_metrics(["NOPE"]) == {"NOPE": {}}
+
+
+def test_price_metrics_see_a_split_as_no_move(tmpdb):
+    """BLSE 2026-10: a 1:2 split halves the raw close; the return, the distance from the
+    high and RSI must read the adjusted series (flat), the shown price stays the raw one."""
+    days = pd.bdate_range("2025-10-01", periods=270)
+    ex = days[-5].strftime("%Y-%m-%d")
+    closes = [(200.0 if d < days[-5] else 100.0) * (1.0 + 0.001 * (i % 2)) for i, d in enumerate(days)]
+    rows = [(sid, d.strftime("%Y-%m-%d"), c) for sid in ("S", "N") for d, c in zip(days, closes)]
+    _exec(tmpdb, "INSERT INTO stock_prices VALUES (?,?,?)", rows)
+    _exec(tmpdb, "INSERT INTO corporate_adjustments VALUES (?,?,?,?,?)", [("S", ex, 0.5, 1, "SPLIT")])
+    pm = views.price_metrics(["S", "N"])
+    s, n = pm["S"], pm["N"]
+    assert abs(s["return_1m"]) < 0.5 and abs(s["return_1y"]) < 0.5
+    assert abs(s["pct_from_52w_high"]) < 0.5 and 99.5 < s["high_52w"] < 101
+    assert s["close_price"] == 100.1                      # the traded price, not adjusted
+    assert n["return_1m"] < -49 and n["pct_from_52w_high"] < -49      # no adjustment row: raw
+    assert n["rsi_14"] < 20 and s["rsi_14"] > 40          # a crash reads oversold, a split does not
 
 
 def test_pipeline_status_marks_aborted_and_prefers_completion(tmpdb):
