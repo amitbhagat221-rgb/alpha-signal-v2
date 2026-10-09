@@ -125,7 +125,9 @@ def get_validation_evidence():
     tools.backtest_pit.evidence() — the SAME source as the Backtests roster, /system
     and /command. Wired (signal, tier) pairs first with their weight, then the rest by
     |t|. Returns {rows, meta} with meta.n_wired / n_rows / as_of."""
-    from factors import SIGNAL_WEIGHTS
+    from factors import SIGNAL_WEIGHTS, signal_for
+    # weight keys (piotroski) are not evidence ids (piotroski_f_score): key both by registry id
+    by_id = {(signal_for(k, t), t): w for t, tw in SIGNAL_WEIGHTS.items() for k, w in tw.items()}
     try:
         from tools.backtest_pit import evidence
         ev = evidence()
@@ -133,7 +135,7 @@ def get_validation_evidence():
         return {"rows": [], "meta": {}}
     rows = []
     for r in ev.to_dict("records"):
-        w = SIGNAL_WEIGHTS.get(r["cap_tier"], {}).get(r["signal"])
+        w = by_id.get((r["signal"], r["cap_tier"]))
         rows.append({
             "signal": r["signal"], "cap_tier": r["cap_tier"],
             "weight": w, "wired": bool(w),

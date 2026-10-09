@@ -71,3 +71,20 @@ def test_system_data_card_colour_comes_from_the_gathered_verdict():
     assert card and card.group(1) == "st-ok"
     html = _health_html("BROKEN", "HEALTHY — all refreshable tables are fresh.")
     assert 'sy-card st-broken" data-data-card' in html
+
+
+def test_model_validation_wired_rows_cover_every_weighted_pair(monkeypatch):
+    """Weight keys (piotroski) differ from evidence ids (piotroski_f_score): every
+    nonzero SIGNAL_WEIGHTS entry must come out as one wired evidence row."""
+    import pandas as pd
+    import factors
+    import tools.backtest_pit as bp
+    from cockpit_ops import api
+    recs = [{"signal": factors.signal_for(k, t), "cap_tier": t, "t_stat": 2.0, "mean_ic": .02,
+             "icir": .3, "n_periods": 40, "n_stocks_avg": 100, "verdict": "KEEP",
+             "computed_at": "2026-10-01"}
+            for t, tw in factors.SIGNAL_WEIGHTS.items() for k in tw]
+    monkeypatch.setattr(bp, "evidence", lambda: pd.DataFrame(recs))
+    out = api.get_validation_evidence()
+    total = sum(1 for tw in factors.SIGNAL_WEIGHTS.values() for w in tw.values() if w)
+    assert out["meta"]["n_wired"] == total
