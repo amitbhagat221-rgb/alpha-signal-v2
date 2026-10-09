@@ -93,3 +93,25 @@ def tier_color(tier):
 
 
 FILTERS.update({"tier_label": tier_label, "tier_color": tier_color})
+
+
+_MACRO_WORDS = {"iip": "IIP", "nondurables": "non-durables", "usdinr": "USD/INR", "vix": "VIX",
+                "us": "US", "10y": "10Y", "nifty": "Nifty", "psubank": "PSU bank", "fmcg": "FMCG",
+                "it": "IT", "gdp": "GDP", "cpi": "CPI", "wpi": "WPI"}
+
+
+def macro_label(ident):
+    """A macro series id in plain words: iip_consumer_nondurables -> "IIP consumer
+    non-durables", core_cement -> "Cement", usdinr -> "USD/INR". Text that is
+    already words (has a space or capital) is returned unchanged."""
+    s = "" if ident is None else str(ident)
+    if not s or " " in s or s != s.lower():
+        return s
+    parts = s.split("_")
+    if parts[0] == "core" and len(parts) > 1:
+        parts = parts[1:]
+    out = " ".join(_MACRO_WORDS.get(p, p) for p in parts)
+    return out if out[:1].isupper() else out[:1].upper() + out[1:]
+
+
+FILTERS["macro_label"] = macro_label

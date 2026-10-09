@@ -8,7 +8,7 @@
 
 <div style="display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 12px;">
     <div>
-        <div class="section-title">Sector Intelligence</div>
+        <h1 class="section-title">Sector Intelligence</h1>
         <div class="section-desc">
             {{ sector_list | length }} sectors · what's booming today, what's about to.
             Click any sector to drill into <strong>industry detail</strong>.
@@ -16,7 +16,8 @@
     </div>
 </div>
 
-<div x-data="{ tab: 'heatmap', loaded: { heatmap: true } }" x-cloak>
+{% set start_tab = 'per-sector' if detail else 'heatmap' %}
+<div x-data="{ tab: '{{ start_tab }}', loaded: { '{{ start_tab }}': true } }" x-cloak>
 
 {{ tab_bar([
     ('heatmap',     'Today'),
@@ -42,15 +43,14 @@
 {% else %}
 
 {# ───────────── BUCKETS ───────────── #}
+<div class="sd-legend">Chips show each sector's momentum vs NIFTY over 1, 3 and 12 months: ▲ strong · ■ neutral · ▼ weak · – no data. Scores are out of 100.</div>
 
 {% macro sector_row(s, accent, hint_label) %}
 <div class="sd-row" style="border-left: 3px solid {{ accent }};">
     <a class="sd-row-link" href="/sectors?sector={{ s.sector | urlencode }}#per-sector">
         <div class="sd-row-head">
-            <span class="sd-sector">{{ s.sector }}{% if s.horizons %}{% set hz = s.horizons %}<span class="sd-horizons" title="Momentum vs NIFTY — Short ≈1m · Medium ≈3m · Long ≈12m">
-                <span class="sd-hz {{ hz.short or 'na' }}">S</span>
-                <span class="sd-hz {{ hz.medium or 'na' }}">M</span>
-                <span class="sd-hz {{ hz.long or 'na' }}">L</span>
+            <span class="sd-sector">{{ s.sector }}{% if s.horizons %}{% set hz = s.horizons %}<span class="sd-horizons">
+                {% for lbl, v in (('1m', hz.short), ('3m', hz.medium), ('12m', hz.long)) %}<span class="sd-hz {{ v or 'na' }}">{{ lbl }} {{ {'strong': '▲', 'weak': '▼', 'neutral': '■'}.get(v, '–') }}<span class="sr-only"> {{ v or 'no data' }}</span></span>{% endfor %}
             </span>{% endif %}</span>
             <span class="sd-picks">
                 <span class="sd-picks-n">{{ s.n_picks_top30 }}</span>
@@ -139,7 +139,7 @@
         <span class="sd-bucket-title">Likely to boom</span>
         <span class="sd-bucket-sub">{{ likely | length }} {{ 'sector' if likely | length == 1 else 'sectors' }} — tailwind, model not fully in yet</span>
     </div>
-    {% for s in likely %}{{ sector_row(s, '#7cb305', '↑') }}{% endfor %}
+    {% for s in likely %}{{ sector_row(s, 'var(--blue)', '↑') }}{% endfor %}
 </div>
 {% endif %}
 
@@ -252,9 +252,10 @@
 <div class="card">
     <div class="section-title">Industry rotation · today's ranking</div>
     <div class="section-desc">
-        25 industries ranked by today's avg composite. Macro signal inherited from parent sector. Click a row to drill.
+        {{ industries | length }} industries ranked by today's avg composite (/100). Macro signal inherited from parent sector. Open an industry for its detail.
     </div>
-    <table class="rot-table" style="margin-top: 14px;">
+    <div class="table-wrap" style="margin-top: 14px;">
+    <table class="rot-table">
         <thead>
         <tr>
             <th style="width: 50px;">Rank</th>
@@ -268,36 +269,27 @@
         </thead>
         <tbody>
         {% for ind in industries %}
-        {% set is_tail = ind.macro_signal in ['TAILWIND', 'FAVORABLE'] %}
-        {% set is_head = ind.macro_signal in ['HEADWIND', 'ADVERSE'] %}
-        <tr onclick="window.location.href = '/sectors?industry={{ ind.industry | urlencode }}#per-sector'"
-            style="cursor: pointer;">
+        {% set sig = ind.macro_signal %}
+        <tr>
             <td><span class="rot-rank-pill">{{ loop.index }}</span></td>
-            <td style="font-weight: 600; color: var(--text-primary);">{{ ind.industry }}</td>
-            <td style="color: var(--text-muted); font-size: 11px;">{{ ind.sector }}</td>
-            <td class="num
-                {% if ind.avg_score >= 0.6 %}score-green
-                {% elif ind.avg_score >= 0.45 %}score-amber
-                {% else %}score-red{% endif %}">
-                {{ "%.0f"|format(ind.avg_score * 100) if ind.avg_score else '—' }}
+            <td><a class="rot-link" href="/sectors?industry={{ ind.industry | urlencode }}#per-sector">{{ ind.industry }}</a></td>
+            <td class="rot-sector">{{ ind.sector }}</td>
+            <td class="num {% if ind.avg_score is none %}{% elif ind.avg_score >= 0.6 %}score-green{% elif ind.avg_score >= 0.45 %}score-amber{% else %}score-red{% endif %}">
+                {{ (ind.avg_score * 100) | round | int if ind.avg_score else '—' }}
             </td>
-            <td class="num">{{ "%.0f"|format(ind.breadth_pct) if ind.breadth_pct is not none else 0 }}%</td>
+            <td class="num">{{ ind.breadth_pct | pct(0) }}</td>
             <td>
-                {% if ind.macro_signal %}
-                <span class="macro-pill {{ 'tail' if is_tail else ('head' if is_head else 'neutral') }}"
-                      style="font-size: 9px; padding: 2px 7px; border-radius: 10px; font-weight: 700; letter-spacing: 0.5px;
-                      {% if is_tail %}background: var(--green-bg); color: var(--green);
-                      {% elif is_head %}background: var(--red-bg); color: var(--red);
-                      {% else %}background: var(--bg-card-hover); color: var(--text-muted);{% endif %}">
-                    {{ ind.macro_signal }}
-                </span>
-                {% endif %}
+                {% if sig in ['TAILWIND', 'FAVORABLE'] %}<span class="pill pill-green">{{ sig }}</span>
+                {% elif sig in ['HEADWIND', 'ADVERSE'] %}<span class="pill pill-red">{{ sig }}</span>
+                {% elif sig and sig != 'UNKNOWN' %}<span class="pill pill-muted">{{ sig }}</span>
+                {% else %}—{% endif %}
             </td>
             <td class="num">{{ ind.stocks }}</td>
         </tr>
         {% endfor %}
         </tbody>
     </table>
+    </div>
 </div>
 
 </div>{# / rotation tab #}

@@ -21,6 +21,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 import db
 import views
 from db import read_sql
+from formatting import macro_label
 
 
 # Cache decorators + JSON coercion live in cockpit/_shared.py so cockpit_ops
@@ -1738,11 +1739,11 @@ def get_sector_digest():
         scored = [d for d in drivers if isinstance(d.get("value"), (int, float))][:3]
         if scored:
             driver_preview = " · ".join(
-                f"{d.get('driver','')} {d.get('raw') or (str(d.get('value','')) + (d.get('unit') or ''))}"
+                f"{macro_label(d.get('driver',''))} {d.get('raw') or (str(d.get('value','')) + (d.get('unit') or ''))}"
                 for d in scored
             )
         else:
-            driver_preview = " · ".join(d.get("raw", "") or d.get("driver", "") for d in drivers[:3])
+            driver_preview = " · ".join(d.get("raw", "") or macro_label(d.get("driver", "")) for d in drivers[:3])
         hint = None
         if r["bucket"] == "HEADWIND" and (r["n_picks_top30"] or 0) > 0 and picks:
             hint = "Model still picking here — " + ", ".join(p["ticker"] for p in picks[:3])

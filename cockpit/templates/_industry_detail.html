@@ -5,7 +5,7 @@
 {% if embed %}{% include "_sector_styles.html" %}{% endif %}
 {% if not detail %}
 <div class="card" style="padding: 18px; color: var(--text-muted); text-align: center;">
-    Click an industry card on the Heatmap tab, or pick one below.
+    Pick an industry below, or open one from the Rotation tab.
 </div>
 
 <div class="ps-selector" style="margin-top: 12px;">
@@ -38,7 +38,7 @@
         </span>
         {% endif %}
         {% if embed %}
-        <a href="/sectors?industry={{ detail.name|urlencode }}" style="margin-left:auto; font-size:12px; color:var(--accent); text-decoration:none; font-weight:600;">Open in Sectors →</a>
+        <a href="/sectors?industry={{ detail.name|urlencode }}#per-sector" style="margin-left:auto; font-size:12px; color:var(--accent); text-decoration:none; font-weight:600;">Open in Sectors →</a>
         {% else %}
         <div style="margin-left: auto;" class="ps-selector">
             <select onchange="window.location.href = '/sectors?industry=' + encodeURIComponent(this.value) + '#per-sector'">
@@ -74,14 +74,14 @@
             {% if ind_match.avg_score >= 0.6 %}score-green
             {% elif ind_match.avg_score >= 0.45 %}score-amber
             {% else %}score-red{% endif %}" style="font-size: 16px; font-weight: 700;">
-            {{ "%.0f"|format(ind_match.avg_score * 100) }}/100
+            {{ ind_match.avg_score | pct(0, scale=100) | replace('%','') }}/100
         </span>
     </div>
     <div>
         <span class="sec-meta">Stocks · Breadth</span><br>
         <span class="mono" style="font-size: 16px; font-weight: 700;">
             {{ ind_match.stocks }}<span style="font-size: 11px; color: var(--text-muted); margin-left: 4px;">stks ·</span>
-            {{ "%.0f"|format(ind_match.breadth_pct) if ind_match.breadth_pct is not none else 0 }}%
+            {{ ind_match.breadth_pct | pct(0) }}
         </span>
     </div>
     {% endif %}
@@ -227,7 +227,7 @@
         Click ▸ to open the listed ones. Source: AI-curated narrative.
     </div>
     <div style="margin-top: 12px;">
-        <div class="pb-row" style="font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid var(--border-accent);">
+        <div class="pb-row" style="font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid var(--border-accent);">
             <span>Player</span><span>Share bar</span><span class="u-right">Share %</span><span class="u-right">Listed?</span><span class="u-right">Our score</span>
         </div>
         {% for p in cl.players %}
@@ -265,7 +265,7 @@
     <div class="section-title">Listed players — market-cap share</div>
     <div class="section-desc">Share of LISTED universe only (denominator = full listed industry mcap). For true share that includes private players, see the card above.</div>
     <div style="margin-top: 12px;">
-        <div class="pb-row" style="font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid var(--border-accent);">
+        <div class="pb-row" style="font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid var(--border-accent);">
             <span>Ticker</span><span>Share bar</span><span class="u-right">Listed share %</span><span class="u-right">Mcap ₹cr</span><span class="u-right">Score</span>
         </div>
         {% for p in detail.top_players[:10] %}
@@ -273,7 +273,7 @@
             <a href="/explorer/{{ p.sid }}" class="ticker" style="text-decoration: none;">{{ p.ticker }}</a>
             <div class="pb-track"><div class="pb-fill" style="width: {{ p.share_pct }}%;"></div></div>
             <span class="num" style="font-weight: 700;">{{ p.share_pct|pct(1) }}</span>
-            <span class="num">{{ "{:,.0f}".format(p.market_cap_cr) }}</span>
+            <span class="num">{{ "{:,.0f}".format(p.market_cap_cr) if p.market_cap_cr is not none else '—' }}</span>
             <span class="num
                 {% if p.final_score >= 0.7 %}score-green
                 {% elif p.final_score >= 0.5 %}score-amber
@@ -349,8 +349,9 @@
         <div class="pick-row">
             <a href="/explorer/{{ p.sid }}" class="ticker">{{ p.ticker }}</a>
             <span class="name">{{ p.name[:22] }}</span>
-            <span class="score score-green">{{ "%.0f"|format(p.final_score * 100) }}</span>
+            <span class="score score-green">{{ p.final_score | pct(0, scale=100) | replace('%','') }}</span>
         </div>
+        {% else %}<div class="u-muted-11">No scored names in this industry.</div>
         {% endfor %}
         </div>
     </div>
@@ -362,8 +363,9 @@
         <div class="pick-row">
             <a href="/explorer/{{ p.sid }}" class="ticker">{{ p.ticker }}</a>
             <span class="name">{{ p.name[:22] }}</span>
-            <span class="score score-red">{{ "%.0f"|format(p.final_score * 100) }}</span>
+            <span class="score score-red">{{ p.final_score | pct(0, scale=100) | replace('%','') }}</span>
         </div>
+        {% else %}<div class="u-muted-11">No scored names in this industry.</div>
         {% endfor %}
         </div>
     </div>
@@ -374,9 +376,9 @@
         {% if detail.macro_contributors %}
             {% for m in detail.macro_contributors[:5] %}
             <div class="pick-row" style="grid-template-columns: 1fr 50px 36px;">
-                <span style="color: var(--text-secondary); font-size: 11px;">{{ m.indicator_id[:26] }}</span>
+                <span style="color: var(--text-secondary); font-size: 11px;">{{ m.indicator_id | macro_label }}</span>
                 <span class="u-muted-10">{{ m.direction or '—' }}</span>
-                <span class="score">{{ "%.2f"|format(m.weight) if m.weight is not none else '' }}</span>
+                <span class="score">{{ m.weight | signed(2) }}</span>
             </div>
             {% endfor %}
         {% else %}<div class="u-muted-11">No mappings.</div>{% endif %}
@@ -390,7 +392,7 @@
             {% for r in detail.regulatory[:5] %}
             <div style="font-size: 11px; line-height: 1.5; padding: 5px 0; border-bottom: 1px solid var(--border);">
                 <span class="pdot {{ 'up' if r.direction == 'POSITIVE' else ('down' if r.direction == 'NEGATIVE' else 'flat') }}"></span>
-                <span class="mono" style="font-size: 9px; color: var(--text-muted);">{{ r.published_at[:10] }}</span>
+                <span class="mono" style="font-size: 10px; color: var(--text-muted);">{{ r.published_at[:10] }}</span>
                 <span style="margin-left: 4px;">{{ r.title[:65] }}</span>
             </div>
             {% endfor %}
