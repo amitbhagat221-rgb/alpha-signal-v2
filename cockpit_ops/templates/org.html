@@ -27,6 +27,12 @@
   {%- endif -%}
 {%- endmacro %}
 
+{# Real data behind a tap/hover: the shared tooltip popover, not a native title="" #}
+{% macro tip(text) -%}
+<span class="tooltip-wrap" x-data="{ open: false }"><button type="button" class="tooltip-trigger" @mouseenter="open = true" @mouseleave="open = false"
+  @click="open = !open" @click.outside="open = false" aria-label="More info">i</button><span x-show="open" x-cloak class="tooltip-popover">{{ text }}</span></span>
+{%- endmacro %}
+
 {% macro grade_tag(g) -%}
   {%- if g and g.total is not none -%}
     <span class="og-tag {% if g.total >= 7 %}og-good{% elif g.total >= 4 %}og-mid{% else %}og-bad{% endif %}"
@@ -44,9 +50,15 @@
   .og-list { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
   .og-row { padding: 12px 16px; border-top: 1px solid var(--border); }
   .og-row:first-child { border-top: none; }
-  .og-click { cursor: pointer; }
+  .og-click { cursor: pointer; position: relative; }
   .og-click:hover { background: var(--bg-card-hover); }
-  .og-click:focus-visible { background: var(--bg-card-hover); outline: none; box-shadow: inset 3px 0 0 var(--accent); }
+  .og-click:has(.og-toggle:focus-visible) { background: var(--bg-card-hover); box-shadow: inset 3px 0 0 var(--accent); }
+  .og-toggle { background: none; border: 0; padding: 0; font: inherit; color: inherit; text-align: left; cursor: pointer; }
+  .og-toggle:focus-visible { outline: none; }
+  .og-toggle::after { content: ''; position: absolute; inset: 0; }   /* the whole row is the button */
+  .og-click .og-btn { position: relative; z-index: 1; }
+  .og-flash { font-size: 12px; color: var(--green); margin: -8px 0 12px; }
+  .og-gone { opacity: .45; }
   .og-head { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
   .og-title { font-weight: 700; color: var(--text-primary); font-size: 14px; }
   .og-meta { font-size: 11px; color: var(--text-muted); font-family: 'JetBrains Mono', monospace; white-space: nowrap; }
@@ -62,6 +74,7 @@
   .og-ul { margin: 2px 0 2px 16px; padding: 0; list-style: disc; }
   .og-ul li { margin: 2px 0; }
   .og-btns { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+  .og-btns .og-btn.ok { margin-right: 12px; }   /* Approve sits apart from Park / Reject */
   .og-btn { font-size: 12px; font-weight: 700; border-radius: 6px; padding: 4px 12px; border: 1px solid var(--border); background: var(--bg-card-hover); color: var(--text-primary); cursor: pointer; }
   .og-btn:hover { border-color: currentColor; }
   .og-btn.ok { color: var(--green); } .og-btn.no { color: var(--red); } .og-btn.park { color: var(--amber); }
@@ -156,7 +169,9 @@
     .og-tiles { grid-template-columns: 1fr 1fr; gap: 8px; margin: 8px 0 12px; }
     .og-tile { padding: 10px 12px; } .og-tile .n { font-size: 22px; }
     .og-btn { min-height: 38px; padding: 6px 14px; }
-    .og-btns .og-btn { flex: 1; text-align: center; min-height: 42px; }
+    .og-btns { gap: 14px; }
+    .og-btns .og-btn { flex: 1; text-align: center; min-height: 44px; }
+    .og-btns .og-btn.ok { margin-right: 10px; }
     .og-more b { display: block; min-width: 0; }
     .og-more span[style*="calc(100% - 130px)"] { max-width: 100% !important; }
     .og-runbar .og-meta { white-space: normal; margin-left: 0 !important; }
@@ -197,24 +212,20 @@
 </style>
 
 {% set S = summary %}
-<div class="section-title og-intro">Boardroom</div>
+{% set pending_ids = (inbox|map(attribute='doc_id')|list) + (work_orders|selectattr('status', 'equalto', 'awaiting approval')|map(attribute='doc_id')|list) %}
+<h1 class="section-title og-intro">Boardroom</h1>
 <div class="section-desc og-intro">The fund as an org: you are the CEO, every other seat is an agent. Desk seats write memos on a schedule; builder seats change code when you start them. Nothing here moves a weight or a trade without your decision.</div>
 
 <div x-data="boardroom()" x-cloak x-effect="document.body.classList.toggle('og-chatmode', tab === 'chat')">
 
 <div class="og-tiles">
-  <div class="og-tile"><div class="n {% if S.inbox %}og-mid{% else %}og-good{% endif %}">{{ S.inbox }}</div><div class="l">waiting for you</div></div>
+  <div class="og-tile"><div id="og-inbox-n" class="n {% if S.inbox %}og-mid{% else %}og-good{% endif %}">{{ S.inbox }}</div><div class="l">waiting for you</div></div>
   <div class="og-tile"><div class="n">{{ S.agents }}</div><div class="l">agent seats ({{ S.desk }} on a schedule)</div></div>
   <div class="og-tile"><div class="n">{{ S.memos }}</div><div class="l">memos, last 14 days</div></div>
   <div class="og-tile"><div class="n {% if S.avg_grade is none %}og-none{% elif S.avg_grade >= 7 %}og-good{% elif S.avg_grade >= 4 %}og-mid{% else %}og-bad{% endif %}">{{ S.avg_grade if S.avg_grade is not none else '—' }}</div><div class="l">average grade out of 8, last 30 days</div></div>
 </div>
 
-<div class="og-runbar">
-  <button class="og-btn ok" :disabled="running" @click="run('all')">Run all seats now</button>
-  <span class="og-meta" x-show="running">a run is in progress: memos appear as each seat finishes; reload to see them</span>
-  <span class="og-meta" x-show="!running">daily seats run at 06:30 UTC; weekly seats on their day. A manual run sends no email.</span>
-  {% if subscription %}<span class="og-meta" style="margin-left: auto;" title="The org runs on your Claude subscription: no per-token bill, only these two usage windows, shared with everything else you use Claude for. Last reported {{ subscription.at }} UTC.">subscription used: {% if subscription.five_hour %}<span class="{% if subscription.five_hour.used_pct >= 80 %}og-bad{% elif subscription.five_hour.used_pct >= 50 %}og-mid{% else %}og-good{% endif %}">{{ subscription.five_hour.used_pct }}%</span> of the 5-hour window{% endif %}{% if subscription.seven_day %} · <span class="{% if subscription.seven_day.used_pct >= 80 %}og-bad{% elif subscription.seven_day.used_pct >= 50 %}og-mid{% else %}og-good{% endif %}">{{ subscription.seven_day.used_pct }}%</span> of the week{% endif %}</span>{% endif %}
-</div>
+<div class="og-flash" role="status" x-show="flash" x-cloak x-text="flash"></div>
 
 {{ tab_bar([('inbox', 'Inbox'), ('outlook', 'Outlook & ideas'), ('chat', 'Chat'), ('work', 'Work'), ('pack', 'Board pack'), ('memos', 'Memos'), ('org', 'Employees & settings')]) }}
 
@@ -223,7 +234,7 @@
   <div class="section-desc" style="margin-top: 12px;">Asks and hypothesis cards raised by the seats. Approve, park or reject; the seats see your decision in their next brief.</div>
   <div class="og-list">
   {% for i in inbox %}
-    <div class="og-row">
+    <div class="og-row" id="item-{{ i.doc_id }}" data-item="{{ i.doc_id }}">
       <div class="og-head">
         <span class="og-meta">#{{ i.doc_id }}</span>
         <span class="og-tag {% if i.type == 'ask' %}og-mid{% elif i.type == 'work_order' %}og-human{% else %}og-builder{% endif %}">{{ {'ask': 'ask', 'work_order': 'work order #' ~ i.fields.number}.get(i.type, 'hypothesis') }}</span>
@@ -438,12 +449,11 @@
   <div class="section-desc" style="margin-top: 12px;">Work orders: fixes you agreed with an employee in chat, written down by them. You approve one in the inbox, then a Claude Code session runs it with <span class="mono">/work-order N</span>: builders work on a branch, the tests run, and the result is reported back here. Nothing starts on its own.</div>
   <div class="og-list">
   {% for w in work_orders %}
-    <div class="og-row og-click" tabindex="0" role="button" :aria-expanded="!!open['w{{ w.number }}']"
-         @click="open['w{{ w.number }}'] = !open['w{{ w.number }}']" @keydown.enter.prevent="open['w{{ w.number }}'] = !open['w{{ w.number }}']">
+    <div class="og-row og-click">
       <div class="og-head">
         <span class="og-meta">#{{ w.number }}</span>
         <span class="og-tag {% if w.status == 'done' %}og-good{% elif w.status in ('rejected', 'cancelled', 'blocked') %}og-bad{% elif w.status == 'awaiting approval' %}og-mid{% else %}og-human{% endif %}">{{ w.status }}</span>
-        <span class="og-title">{{ w.title }}</span>
+        <button type="button" class="og-title og-toggle" :aria-expanded="!!open['w{{ w.number }}']" @click="open['w{{ w.number }}'] = !open['w{{ w.number }}']">{{ w.title }}</button>
         <span class="og-meta">{{ w.role }} · {{ w.date }} · {{ w['items']|length }} item{{ 's' if w['items']|length != 1 }}</span>
       </div>
       <div class="og-sub">{{ w.summary }}</div>
@@ -460,7 +470,7 @@
       </ol>
       {% if w.open_questions %}<div><b>Open questions</b><span style="display: inline-block; max-width: calc(100% - 130px);">{{ val(w.open_questions) }}</span></div>{% endif %}
       {% if w.status == 'awaiting approval' %}
-      <div class="og-btns">
+      <div class="og-btns" data-btns="{{ w.doc_id }}">
         <button class="og-btn ok" @click.stop="decide({{ w.doc_id }}, 'approve')">Approve</button>
         <button class="og-btn park" @click.stop="decide({{ w.doc_id }}, 'park')">Park</button>
         <button class="og-btn no" @click.stop="decide({{ w.doc_id }}, 'reject')">Reject</button>
@@ -486,7 +496,14 @@
     <p style="margin-top: 8px;">{{ P.state_of_fund }}</p>
     <h4>Decisions for you</h4>
     {% for d in P.decisions %}
-      <div style="margin: 4px 0;"><span class="og-meta">#{{ d.item_id }}</span> <span class="og-tag og-mid">{{ d.recommendation }}</span> {{ d.why_now }}</div>
+      {% set verdict = decided.get(d.item_id|int) %}
+      <div style="margin: 4px 0;">
+        {% if d.item_id|int in pending_ids %}<a class="og-meta" href="#item-{{ d.item_id }}" @click.prevent="goItem({{ d.item_id|int }})">#{{ d.item_id }}</a>{% else %}<span class="og-meta">#{{ d.item_id }}</span>{% endif %}
+        <span class="og-tag og-mid">{{ d.recommendation }}</span>
+        {% if verdict %}<span class="og-tag {% if verdict == 'approve' %}og-good{% elif verdict == 'reject' %}og-bad{% else %}og-mid{% endif %}">you: {{ verdict }}d</span>
+        {% elif d.item_id|int in pending_ids %}<span class="og-tag og-human">waiting in your inbox</span>
+        {% else %}<span class="og-tag og-none">no longer open</span>{% endif %}
+        {{ d.why_now }}</div>
     {% else %}<div class="og-none">None this week.</div>{% endfor %}
     {% for label, key in [('Wins', 'wins'), ('Worries', 'worries'), ('Next week', 'next_week')] %}
       {% if P[key] %}<h4>{{ label }}</h4>{{ val(P[key]) }}{% endif %}
@@ -522,16 +539,14 @@
   <div class="og-list">
   {% for m in memos %}
     {% if loop.changed(m.doc_date[:10]) %}<div class="og-day">{{ m.doc_date[:10] }}</div>{% endif %}
-    <div class="og-row og-click" tabindex="0" role="button" :aria-expanded="!!open['m{{ m.doc_id }}']"
-         @click="open['m{{ m.doc_id }}'] = !open['m{{ m.doc_id }}']"
-         @keydown.enter.prevent="open['m{{ m.doc_id }}'] = !open['m{{ m.doc_id }}']">
+    <div class="og-row og-click">
       <div class="og-head">
         <span class="og-meta">{{ m.doc_date }}</span>
         <span class="og-tag og-desk">{{ m.role_title }}{% if m.fields.sector %} · {{ m.fields.sector }}{% endif %}</span>
         {% set v = m.fields.verdict or m.fields.platform_state or m.fields.view %}
         {% if v %}<span class="og-tag {% if v in ('green', 'within-limits', 'positive') %}og-good{% elif v in ('red', 'breach', 'negative') %}og-bad{% else %}og-mid{% endif %}">{{ v }}</span>{% endif %}
         {{ grade_tag(m.grade) }}
-        <span class="og-title">{{ m.title }}</span>
+        <button type="button" class="og-title og-toggle" :aria-expanded="!!open['m{{ m.doc_id }}']" @click="open['m{{ m.doc_id }}'] = !open['m{{ m.doc_id }}']">{{ m.title }}</button>
       </div>
       {% if m.fields.eli5 %}<div class="og-sub">{{ m.fields.eli5.what }} <b style="color: var(--text-primary); font-weight: 600;">{{ m.fields.eli5.do }}</b></div>{% endif %}
     </div>
@@ -552,6 +567,13 @@
 {# ═══════════════════════════ EMPLOYEES & SETTINGS ═══════════════════════════ #}
 <div x-show="tab === 'org'" x-cloak class="og-wrap">
   <div class="section-desc" style="margin-top: 12px;">Every seat: who it reports to, what it delivers, how it is measured and what it cannot do. <b>Settings</b> changes how a seat behaves: its schedule, model, a standing directive and its full prompt. Scores are the last 30 days.</div>
+
+<div class="og-runbar">
+  <button class="og-btn ok" :disabled="running" @click="run('all')">Run all seats now</button>
+  <span class="og-meta" x-show="running">a run is in progress: memos appear as each seat finishes; reload to see them</span>
+  <span class="og-meta" x-show="!running">daily seats run at 06:30 UTC; weekly seats on their day. A manual run sends no email.</span>
+  {% if subscription %}<span class="og-meta" style="margin-left: auto;">subscription used: {% if subscription.five_hour %}<span class="{% if subscription.five_hour.used_pct >= 80 %}og-bad{% elif subscription.five_hour.used_pct >= 50 %}og-mid{% else %}og-good{% endif %}">{{ subscription.five_hour.used_pct }}%</span> of the 5-hour window{% endif %}{% if subscription.seven_day %} · <span class="{% if subscription.seven_day.used_pct >= 80 %}og-bad{% elif subscription.seven_day.used_pct >= 50 %}og-mid{% else %}og-good{% endif %}">{{ subscription.seven_day.used_pct }}%</span> of the week{% endif %}{{ tip("The org runs on your Claude subscription: no per-token bill, only these two usage windows, shared with everything else you use Claude for. Last reported " ~ subscription.at ~ " UTC.") }}</span>{% endif %}
+</div>
 
   {# ── house style: one writing style for every employee ── #}
   <div class="og-runbar" style="margin-bottom: 12px;">
@@ -658,15 +680,13 @@
 
   <div class="og-list">
   {% for r in tree %}
-    <div class="og-row og-click" style="padding-left: {{ 16 + r.depth * 24 }}px;" tabindex="0" role="button"
-         :aria-expanded="!!open['r{{ r.id }}']" @click="open['r{{ r.id }}'] = !open['r{{ r.id }}']"
-         @keydown.enter.prevent="open['r{{ r.id }}'] = !open['r{{ r.id }}']">
+    <div class="og-row og-click" style="padding-left: {{ 16 + r.depth * 24 }}px;">
       <div class="og-head">
-        <span class="og-title">{{ r.title }}{% if r.who %} — {{ r.who }}{% endif %}</span>
+        <button type="button" class="og-title og-toggle" :aria-expanded="!!open['r{{ r.id }}']" @click="open['r{{ r.id }}'] = !open['r{{ r.id }}']">{{ r.title }}{% if r.who %} — {{ r.who }}{% endif %}</button>
         <span class="og-tag og-{{ r.type }}">{{ r.type }}</span>
         {% if r.enabled is sameas false %}<span class="og-tag og-bad">off</span>{% endif %}
         {% if r.cadence %}<span class="og-meta">{{ r.cadence|replace('weekly:', 'weekly ') }} · {{ r.model }}{% if r.effort %} · {{ r.effort }}{% endif %}{% if r.web %} · web{% endif %}</span>{% endif %}
-        {% if r.edited %}<span class="og-tag og-mid" title="{{ r.edited|join(', ') }}">edited</span>{% endif %}
+        {% if r.edited %}<span class="og-tag og-mid">edited</span>{{ tip("Changed from the default: " ~ r.edited|join(', ')) }}{% endif %}
         {% if r.type != 'human' %}<span style="margin-left: auto; display: flex; gap: 8px;"><button class="og-btn" @click.stop="tab = 'chat'; loaded.chat = true; history.replaceState(null, '', '#chat'); openChat('{{ r.id }}')">Chat</button><button class="og-btn" @click.stop="edit('{{ r.id }}')">Settings</button></span>{% endif %}
       </div>
       <div class="og-sub">{{ r.mission }}</div>
@@ -676,7 +696,7 @@
         <span>{{ r.score.done }} done{% if r.score.failed %} · <span class="og-bad">{{ r.score.failed }} failed</span>{% endif %}</span>
         {% if r.score.first_pass is not none %}<span>first pass {{ (r.score.first_pass * 100)|round|int }}%</span>{% endif %}
         {% if r.score.grade is not none %}<span>grade {{ r.score.grade }}/8 ({{ r.score.n_graded }})</span>{% endif %}
-        {% if r.score.audit %}<span title="its calls against a re-run of each finding's query">calls right {{ r.score.audit.right }}/{{ r.score.audit.checked }}{% if r.score.audit.claimed_real_but_not %} · <span class="og-bad">{{ r.score.audit.claimed_real_but_not }} reported as real, not there</span>{% endif %}{% if r.score.audit.dismissed_but_real %} · <span class="og-bad">{{ r.score.audit.dismissed_but_real }} dismissed, real</span>{% endif %} · {{ r.score.audit.new_real }} new</span>{% endif %}
+        {% if r.score.audit %}<span>calls right {{ r.score.audit.right }}/{{ r.score.audit.checked }}{{ tip("Its calls, checked against a re-run of each finding's query.") }}{% if r.score.audit.claimed_real_but_not %} · <span class="og-bad">{{ r.score.audit.claimed_real_but_not }} reported as real, not there</span>{% endif %}{% if r.score.audit.dismissed_but_real %} · <span class="og-bad">{{ r.score.audit.dismissed_but_real }} dismissed, real</span>{% endif %} · {{ r.score.audit.new_real }} new</span>{% endif %}
         {% if r.score.tokens_out %}<span>{{ '{:,}'.format(r.score.tokens_out) }} tokens out</span>{% endif %}
         {% if r.latest %}<span>last memo {{ r.latest.date }}</span>{% endif %}
       </div>
@@ -709,10 +729,29 @@
               conv: null, fromHistory: false, showHistory: false, histAll: false, convs: [] },
       chats: {},
 
+      flash: '',
+      goItem(id) {                       // a board-pack decision id -> its card in the inbox
+        this.tab = 'inbox'; this.loaded.inbox = true;
+        history.replaceState(null, '', '#inbox');
+        this.$nextTick(() => { const el = document.getElementById('item-' + id); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' }); });
+      },
       async decide(id, verdict) {
-        const note = verdict === 'approve' ? '' : (prompt('Note for the record (optional)') || '');
+        let note = '';
+        if (verdict === 'approve') {
+          if (!confirm('Approve #' + id + '? The seats see it in their next brief.')) return;
+        } else {
+          const n = prompt((verdict === 'park' ? 'Park' : 'Reject') + ' #' + id + '. Note for the record (optional); Cancel keeps it open');
+          if (n === null) return;          // Cancel = no decision
+          note = n;
+        }
         const r = await post('/api/org/decide', { item_id: id, verdict: verdict, note: note });
-        if (r.ok) { location.reload(); } else { alert(((await r.json()).error) || 'Could not record the decision'); }
+        if (!r.ok) { alert(((await r.json()).error) || 'Could not record the decision'); return; }
+        // take the card out in place: no reload, so the scroll position and the tab stay
+        document.querySelectorAll('[data-item="' + id + '"]').forEach((el) => el.remove());
+        document.querySelectorAll('[data-btns="' + id + '"]').forEach((el) => el.remove());
+        const n = document.getElementById('og-inbox-n');
+        if (n) { const left = Math.max(0, (parseInt(n.textContent, 10) || 0) - 1); n.textContent = left; n.className = 'n ' + (left ? 'og-mid' : 'og-good'); }
+        this.flash = '#' + id + ' ' + verdict + (verdict === 'approve' ? 'd' : 'ed') + '. Recorded.';
       },
 
       load(data) {                       // a seat's settings → the form
@@ -928,6 +967,7 @@
         this.draw(); this.loadChats();
       },
       async run(role) {
+        if (role === 'all' && !confirm('Run every enabled desk seat now? Each uses your Claude subscription for one to three minutes.')) return;
         if (this.seat && role !== 'all' && Object.keys(this.changes()).length &&
             !confirm('You have unsaved changes. Run with the saved settings?')) return;
         const r = await post('/api/org/run', { role: role }), j = await r.json();
