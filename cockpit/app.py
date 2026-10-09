@@ -47,6 +47,7 @@ def _prewarm_cache():
         ("news_pool_168",      lambda: api._get_news_pool(hours=168)),
         ("news_pool_720",      lambda: api._get_news_pool(hours=720)),
         ("portfolio_bundle",   lambda: api.get_portfolio_bundle()),
+        ("multibagger",        lambda: api.get_multibagger_overview()),
     ])
 
 
