@@ -25,6 +25,13 @@
 </div>
 {% endif %}
 
+{% if scan_running %}
+<div class="card u-mb20" role="status">
+    <h2 class="section-title sy-title">First scan running</h2>
+    <div class="section-desc">The database health scan has no stored result yet and takes a few minutes. It is running in the background: refresh in a few minutes.</div>
+</div>
+{% endif %}
+
 {% if summary %}
 {# The card's colour is the report's verdict for "Did the data arrive?" (checks.report.gather via
    scorecard), never a string match on the freshness scan's sentence. #}

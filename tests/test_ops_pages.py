@@ -99,3 +99,26 @@ def test_factor_counts_are_one_definition(monkeypatch):
     assert api.factor_counts() == {"total": 105, "validated": 64, "wired": 11, "not_wired": 94}
     src = Path(api.__file__).read_text()
     assert '"validated": funnel["validated"]' in src and 'if r["in_model"]' not in src
+
+
+def test_cold_data_tab_returns_at_once_while_the_scan_runs_in_the_background(monkeypatch, tmp_path):
+    import threading
+    import time
+    import cockpit._shared as shared
+    import db
+    import health
+    from cockpit_ops import api, app as ops_app
+    gate = threading.Event()
+    monkeypatch.setattr(shared, "_PERSISTED_CACHE_DIR", tmp_path)
+    api._data_health_scores.cache_clear()
+    api.get_db_summary.cache_clear()
+    monkeypatch.setattr(health, "compute_db_health", lambda *a, **k: gate.wait(10) or {"tables": []})
+    monkeypatch.setattr(db, "db_summary", lambda: gate.wait(10) or {})
+    monkeypatch.setattr(api, "get_health_overview", lambda: None)
+    t0 = time.time()
+    ctx = ops_app._system_tab_context("health")
+    assert time.time() - t0 < 2
+    assert ctx["scan_running"] and ctx["health_scores"] is None and ctx["summary"] is None
+    gate.set()
+    api._data_health_scores.cache_clear()
+    api.get_db_summary.cache_clear()

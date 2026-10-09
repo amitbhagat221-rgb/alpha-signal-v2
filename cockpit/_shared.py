@@ -177,7 +177,24 @@ def _persisted_cache(ttl_seconds, name=None, max_entries=128):
                     return entry[0]  # a concurrent caller just computed it
                 return _compute(slot, args, kwargs)
 
+        def peek(*args, **kwargs):
+            """The cached value (memory or disk, however old) or None; never computes."""
+            slot = _key_to_slot(slot_base, args, kwargs)
+            entry = memo.get(slot)
+            if entry is None:
+                payload, mtime = _load(slot)
+                if payload is None:
+                    return None
+                entry = memo[slot] = (payload, mtime)
+            return entry[0]
+
+        def warm(*args, **kwargs):
+            """Start computing in the background (one thread per key); returns at once."""
+            _refresh_in_background(_key_to_slot(slot_base, args, kwargs), args, kwargs)
+
         wrapper.cache_clear = lambda: memo.clear()
+        wrapper.peek = peek
+        wrapper.warm = warm
         return wrapper
 
     return decorator

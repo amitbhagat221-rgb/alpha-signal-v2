@@ -123,8 +123,14 @@ def _system_tab_context(name):
     if name in ("checks", "health", "pipeline"):
         ctx["overview"] = api.get_health_overview()
     if name == "health":
-        ctx["summary"] = api.get_db_summary()
-        ctx["health_scores"] = api.get_data_health_scores(False)
+        # Cold cache: the scan takes minutes. Answer at once with what exists and let the scan finish in the background.
+        scores, summary = api._data_health_scores.peek(), api.get_db_summary.peek()
+        if scores is None or summary is None:
+            for fn in (api._data_health_scores, api.get_db_summary):
+                if fn.peek() is None:
+                    fn.warm()
+            ctx["scan_running"] = True
+        ctx["summary"], ctx["health_scores"] = summary, scores
     elif name == "factors":
         ctx["factor_health"] = api.get_factor_health()
     elif name == "pipeline":
