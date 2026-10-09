@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_components.html" import tab_bar %}
 {% block title %}{{ page_title(stock.ticker) }}{% endblock %}
 
 {% block content %}
@@ -14,6 +15,14 @@
 {% set sig_desc = s.get("signal_descriptions", {}) %}
 {% set m_tt = s.get("metric_tooltips", {}) %}
 {% set s_tt = s.get("tooltips", {}) %}
+{# ONE price target for the whole page: the median when the source gives one, else the mean,
+   upside against the same latest close, basis and analyst count labelled wherever it shows. #}
+{% set pt_median = ac.get("price_target_median") %}
+{% set pt = pt_median or ac.get("price_target") %}
+{% set pt_up = (ac.get("pt_upside_median_pct") if pt_median else ac.get("pt_upside_pct")) if pt else none %}
+{% set pt_basis = "median" if pt_median else "mean" %}
+{% set pt_n = ac.get("total_analysts")|int if ac.get("total_analysts") else none %}
+{% set pt_asof = (ac.get("fetched_at") or "")[:10] %}
 
 {# ── Reusable tooltip macro ── #}
 {% macro tooltip(text) -%}
@@ -33,7 +42,7 @@
     <div style="flex: 1; min-width: 280px;">
         <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
             <h1 class="stock-ticker">{{ s.ticker }}</h1>
-            <span class="stock-badge tier-{{ s.cap_tier|lower }}" {% if s.cap_tier == 'MICRO' %}title="MICRO — illiquid + data-sparse + manipulation-prone. Excluded from daily_picks."{% endif %}>{{ s.cap_tier }}{% if s.cap_tier == 'MICRO' %} <span style="font-size:9px;opacity:0.8;">· no picks</span>{% endif %}</span>
+            <span class="stock-badge tier-{{ s.cap_tier|lower }}" {% if s.cap_tier == 'MICRO' %}title="MICRO — illiquid + data-sparse + manipulation-prone. Excluded from daily_picks."{% endif %}>{{ s.cap_tier }}{% if s.cap_tier == 'MICRO' %} <span class="u-muted-10">· no picks</span>{% endif %}</span>
             {% if dos.get("action") %}
             <span class="stock-badge {% if dos.action == 'BUY' %}buy{% elif dos.action == 'AVOID' %}avoid{% else %}hold{% endif %}">
                 {{ dos.action }}
@@ -54,14 +63,12 @@
     </div>
     <div class="u-right">
         {% if pm.get("close_price") %}
-        <div class="stock-price"><span class="unit">&#8377;</span>{{ "%.2f"|format(pm.close_price) }}</div>
-        <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">
+        <div class="stock-price">{{ pm.close_price|inr(2) }}</div>
+        <div class="u-muted-11" style="margin-top: 4px;">
             {% if pm.get("return_1m") is not none %}
-            <span class="mono {{ pm.return_1m|tone }}">
-                {{ pm.return_1m|pct(1, signed=True) }}
-            </span> 1M &middot;
+            <span class="num {{ pm.return_1m|tone }}">{{ pm.return_1m|pct(1, signed=True) }}</span> 1M (adjusted) &middot;
             {% endif %}
-            {{ pm.get("price_date", "") }}
+            close {{ pm.get("price_date", "—") }}
         </div>
         {% endif %}
     </div>
@@ -92,7 +99,7 @@
     <div style="font-size: 12px;">
         <span class="u-muted">RSI:</span>
         <span class="mono {% if pm.rsi_14 < 30 %}score-green{% elif pm.rsi_14 > 70 %}score-red{% endif %}" style="font-weight: 600;">
-            {{ "%.0f"|format(pm.rsi_14) }}{% if pm.rsi_14 < 30 %} oversold{% elif pm.rsi_14 > 70 %} overbought{% endif %}
+            {{ pm.rsi_14|pct(0)|replace("%","") }}{% if pm.rsi_14 < 30 %} oversold{% elif pm.rsi_14 > 70 %} overbought{% endif %}
         </span>
         {{ tooltip("Relative Strength Index (14-day). Above 70 = overbought, below 30 = oversold. Wilder smoothing.") }}
     </div>
@@ -102,39 +109,35 @@
 
 {# ─────────── TAB BAR ─────────── #}
 <div x-data="{ tab: 'overview', loaded: { overview: true }, sectorLoaded: false,
+    init() { this.$watch('tab', t => this.onTab(t)); this.$nextTick(() => this.onTab(this.tab)); },
+    onTab(t) {
+        if (t === 'financials') initFinancialsCharts();
+        else if (t === 'ownership') initOwnershipCharts();
+        else if (t === 'consensus') initConsensusCharts();
+        else if (t === 'price') initPriceChart('1y');
+        else if (t === 'sector') this.loadSector();
+    },
     loadSector() {
         if (this.sectorLoaded) return;
         this.sectorLoaded = true;
         fetch('{% if s.industry %}/partial/industry-card/{{ s.industry|urlencode }}{% else %}/partial/sector-card/{{ s.sector|urlencode }}{% endif %}?sid={{ s.sid }}')
             .then(r => r.text())
             .then(h => { this.$refs.sectorBox.innerHTML = h; this.$nextTick(() => window.Alpine.initTree(this.$refs.sectorBox)); })
-            .catch(() => { this.$refs.sectorBox.innerHTML = '<div class=\'card\' style=\'color:var(--text-muted)\'>Could not load industry detail.</div>'; });
+            .catch(() => { this.$refs.sectorBox.innerHTML = '<div class=\'card u-muted\'>Could not load industry detail.</div>'; });
     } }">
 
-<div class="tab-bar">
-    <button class="tab-button" :class="{ active: tab === 'overview' }" @click="tab = 'overview'; loaded.overview = true">Overview</button>
-    <button class="tab-button" :class="{ active: tab === 'financials' }" @click="tab = 'financials'; loaded.financials = true; $nextTick(() => initFinancialsCharts())">Financials</button>
-    <button class="tab-button" :class="{ active: tab === 'ownership' }" @click="tab = 'ownership'; loaded.ownership = true; $nextTick(() => initOwnershipCharts())">Ownership</button>
-    <button class="tab-button" :class="{ active: tab === 'consensus' }" @click="tab = 'consensus'; loaded.consensus = true; $nextTick(() => initConsensusCharts())">Consensus</button>
-    <button class="tab-button" :class="{ active: tab === 'forensic' }" @click="tab = 'forensic'">Forensic</button>
-    <button class="tab-button" :class="{ active: tab === 'price' }" @click="tab = 'price'; loaded.price = true; $nextTick(() => initPriceChart('1y'))">Price &amp; Technicals</button>
-    {% if s.data %}
-    <button class="tab-button" :class="{ active: tab === 'data' }" @click="tab = 'data'">Data</button>
-    {% endif %}
-    {% if s.industry or s.sector %}
-    <button class="tab-button" :class="{ active: tab === 'sector' }" @click="tab = 'sector'; loadSector()">{% if s.industry %}Industry{% else %}Sector{% endif %}</button>
-    {% endif %}
-    {% if s.management or s.managerial_ability or s.financial_management %}
-    <button class="tab-button" :class="{ active: tab === 'management' }" @click="tab = 'management'">Management</button>
-    {% endif %}
-</div>
+{% set tabs = [("overview", "Overview"), ("financials", "Financials"), ("ownership", "Ownership"), ("consensus", "Consensus"), ("forensic", "Forensic"), ("price", "Price & Technicals")] %}
+{% if s.data %}{% set _ = tabs.append(("data", "Data")) %}{% endif %}
+{% if s.industry or s.sector %}{% set _ = tabs.append(("sector", "Industry" if s.industry else "Sector")) %}{% endif %}
+{% if s.management or s.managerial_ability or s.financial_management %}{% set _ = tabs.append(("management", "Management")) %}{% endif %}
+{{ tab_bar(tabs) }}
 
 {# ════════════════════════════════════════════ #}
 {# ───────────── SECTOR TAB ─────────────────── #}
 {# ════════════════════════════════════════════ #}
 {% if s.industry or s.sector %}
 <div x-show="tab === 'sector'" x-cloak>
-    <div x-ref="sectorBox"><div class="card" style="color:var(--text-muted);">Loading industry detail…</div></div>
+    <div x-ref="sectorBox"><div class="card u-muted">Loading industry detail…</div></div>
 </div>
 {% endif %}
 
@@ -171,12 +174,12 @@
                      <span style="color:var(--text-muted); font-size:11px;"> · {{ p.weight }}% · {{ p.blurb }}</span></div>
                 <span class="mono {% if p.z is not none and p.z > 0 %}score-green{% elif p.z is not none and p.z < 0 %}score-red{% endif %}">{% if p.z is not none %}{{ p.z|signed(2) }}σ{% else %}—{% endif %}</span>
             </div>
-            <div style="position:relative; height:8px; background:rgba(128,128,128,.15); border-radius:4px; margin:6px 0;">
-                <div style="position:absolute; left:50%; top:-2px; bottom:-2px; width:1px; background:rgba(128,128,128,.45);"></div>
+            <div style="position:relative; height:8px; background:var(--border); border-radius:4px; margin:6px 0;">
+                <div style="position:absolute; left:50%; top:-2px; bottom:-2px; width:1px; background:var(--border-accent);"></div>
                 {% if p.z is not none %}
                 {% set raw = (p.z + 3) / 6 * 100 %}
                 {% set pos = [raw, 2]|max %}{% set pos = [pos, 98]|min %}
-                <div style="position:absolute; left:{{ pos }}%; top:-3px; width:10px; height:14px; margin-left:-5px; border-radius:3px; background:{% if p.z > 0 %}#22c55e{% else %}#ef4444{% endif %};"></div>
+                <div style="position:absolute; left:{{ pos }}%; top:-3px; width:10px; height:14px; margin-left:-5px; border-radius:3px; background:{% if p.z > 0 %}var(--green){% else %}var(--red){% endif %};"></div>
                 {% endif %}
             </div>
             <div style="display:flex; gap:18px; font-size:11px; color:var(--text-muted); flex-wrap:wrap;">
@@ -210,7 +213,7 @@
                 </div>
             </div>
         </div>
-        <div style="font-size:11px; color:var(--text-muted); line-height:1.6; margin-top:12px; border-top:1px solid rgba(128,128,128,.15); padding-top:10px;">
+        <div style="font-size:11px; color:var(--text-muted); line-height:1.6; margin-top:12px; border-top:1px solid var(--border); padding-top:10px;">
             <strong style="color:var(--text);">A second, independent lens.</strong> The peer-reviewed DLM measure: a Data-Envelopment-Analysis frontier of how much <em>operating profit</em> a firm wrings from its costs + capital vs <em>industry</em> peers (or sector where an industry is too thin), then a Tobit regression removes size and cash-flow — what's left is efficiency attributable to <em>management</em>, not the firm's built-in scale.
             <strong style="color:var(--text);">Read it as a <em>current</em> operating-efficiency rank, not a moat/returns verdict.</strong> Two caveats: scale-advantaged blue-chips often land mid-pack (their efficiency is roughly what their size predicts), and firms <strong>mid–capacity-expansion</strong> (a large asset base ahead of current output — e.g. cement makers building plants) score low even against industry peers — a reinvestment-phase signal, not weak management. Output is profit, not revenue, so fabricated / zero-margin sales can't score high. Diagnostic only, not a model weight; financials use the separate sub-model.
         </div>
@@ -244,12 +247,12 @@
                      <span style="color:var(--text-muted); font-size:11px;"> · {{ p.blurb }}</span></div>
                 <span class="mono {% if p.z is not none and p.z > 0 %}score-green{% elif p.z is not none and p.z < 0 %}score-red{% endif %}">{% if p.z is not none %}{{ p.z|signed(2) }}σ{% else %}—{% endif %}</span>
             </div>
-            <div style="position:relative; height:8px; background:rgba(128,128,128,.15); border-radius:4px; margin:6px 0;">
-                <div style="position:absolute; left:50%; top:-2px; bottom:-2px; width:1px; background:rgba(128,128,128,.45);"></div>
+            <div style="position:relative; height:8px; background:var(--border); border-radius:4px; margin:6px 0;">
+                <div style="position:absolute; left:50%; top:-2px; bottom:-2px; width:1px; background:var(--border-accent);"></div>
                 {% if p.z is not none %}
                 {% set raw = (p.z + 3) / 6 * 100 %}
                 {% set pos = [raw, 2]|max %}{% set pos = [pos, 98]|min %}
-                <div style="position:absolute; left:{{ pos }}%; top:-3px; width:10px; height:14px; margin-left:-5px; border-radius:3px; background:{% if p.z > 0 %}#22c55e{% else %}#ef4444{% endif %};"></div>
+                <div style="position:absolute; left:{{ pos }}%; top:-3px; width:10px; height:14px; margin-left:-5px; border-radius:3px; background:{% if p.z > 0 %}var(--green){% else %}var(--red){% endif %};"></div>
                 {% endif %}
             </div>
             {% if p.components %}
@@ -299,7 +302,7 @@
         <strong>Entry:</strong> {{ dos.entry_strategy }}
     </div>
     {% endif %}
-    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+    <div class="grid-2">
         {% if dos.get("bull_case") %}
         <div>
             <div style="font-size: 11px; color: var(--green); font-weight: 700; margin-bottom: 6px; letter-spacing: 0.5px;">BULL CASE</div>
@@ -328,84 +331,57 @@
 </div>
 {% endif %}
 
-<div style="display: grid; grid-template-columns: 1.4fr 1fr; gap: 16px;">
+<div class="stock-cols">
 
 {# LEFT: Conviction + Signals #}
 <div>
-    {% if s.get("final_score") is not none %}
+    {# only a score from the latest ranking: a stock that dropped out (e.g. MICRO) keeps an old row #}
+    {% if s.get("final_score") is not none and s.get("pick_date") == latest_pick %}
+    {% set bd = s.get("breakdown") %}
     <div class="card u-mb16">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-            <span class="section-title" style="margin-bottom: 0;">Conviction Score</span>
-            <span class="mono" style="font-size: 28px; font-weight: 800;
-                {% if s.final_score >= 0.7 %}color: var(--green);
-                {% elif s.final_score >= 0.5 %}color: var(--amber);
-                {% else %}color: var(--red);{% endif %}">
-                {{ "%.0f"|format(s.final_score * 100) }}<span class="unit">/100</span>
-            </span>
+        <div class="conv-head">
+            <h2 class="section-title">Conviction Score</h2>
+            <span class="num conv-score {% if s.final_score >= 0.7 %}score-green{% elif s.final_score >= 0.5 %}score-amber{% else %}score-red{% endif %}">{{ (s.final_score * 100)|pct(0)|replace("%", "") }}<span class="unit">/100</span></span>
         </div>
-        <div class="section-desc">Composite of all validated signals, weighted for {{ s.cap_tier|lower }} cap. Higher = stronger overall conviction.</div>
-        <div class="conviction-bar" style="height: 10px; margin-bottom: 20px;">
+        <div class="section-desc">The {{ s.cap_tier }}-cap ranking score{% if s.get("rank") %}, rank {{ s.rank }} in tier{% endif %}{% if s.get("pick_date") %}, as of {{ s.pick_date }}{% endif %}. Each factor below is the stock's percentile within its own tier; the points are what it added to the score. Compared within {{ s.cap_tier }} only.</div>
+        <div class="conviction-bar conv-bar">
             <div class="conviction-marker" style="left: {{ s.final_score * 100 }}%;"></div>
         </div>
-
-        {# Signal cards with descriptions and sub-components #}
-        {% set sigs = [
-            ("Consensus", s.get("consensus_signal"), "consensus_signal", "Consensus"),
-            ("Promoter", s.get("promoter_signal"), "promoter_signal", "Promoter"),
-            ("Piotroski F", s.get("f_score"), "piotroski", "Piotroski F"),
-            ("Accruals", s.get("accruals_signal"), "accruals_signal", "Accruals"),
-            ("Smart Money", s.get("smart_money_score"), "smart_money", "Smart Money"),
-            ("Earnings Yield", s.get("earnings_yield"), "ey", "Earnings Yield"),
-        ] %}
-        {% for name, value, key, tt_key in sigs %}
-        {% if value is not none %}
-        {% set normalized = (value / 9 * 100) if key == 'piotroski' else (value * 100 if key not in ['smart_money', 'ey'] else (value if key == 'smart_money' else value * 1000)) %}
-        <div class="signal-card">
-            <div class="signal-card-header">
-                <span class="signal-name">
-                    {{ name }}{{ tooltip(s_tt.get(tt_key, '')) }}
-                </span>
-                <span class="mono" style="font-weight: 700; font-size: 14px;
-                    {% if normalized >= 65 %}color: var(--green);
-                    {% elif normalized >= 40 %}color: var(--amber);
-                    {% else %}color: var(--red);{% endif %}">
-                    {% if key == 'piotroski' %}{{ value|int }}/9
-                    {% elif key == 'smart_money' %}{{ "%.0f"|format(value) }}/100
-                    {% elif key == 'ey' %}{{ (value * 100)|pct(1) }}
-                    {% else %}{{ "%.2f"|format(value) }}{% endif %}
-                </span>
-            </div>
-            <div class="signal-desc">{{ sig_desc.get(name, '') }}</div>
-            <div class="signal-bar-track">
-                <div class="signal-bar-fill" style="width: {{ [normalized, 100]|min if normalized > 0 else 0 }}%;
-                    {% if normalized >= 65 %}background: var(--green);
-                    {% elif normalized >= 40 %}background: var(--amber);
-                    {% else %}background: var(--red);{% endif %}"></div>
-            </div>
-            {# Sub-components per signal #}
-            {% if key == 'consensus_signal' %}
-            <div class="signal-subcomp">
-                {# pt_revision_1yr removed 2026-05-23 — was contaminated 1yr return, not PT revision. See ADR 0020. #}
-                {% if s.get('pt_upside') is not none %}<div><span class="label">PT Upside:</span> <span class="val">{{ s.pt_upside|pct(1, signed=True) }}</span></div>{% endif %}
-                {% if s.get('eps_growth') is not none %}<div><span class="label">EPS Growth:</span> <span class="val">{{ s.eps_growth|pct(1, signed=True) }}</span></div>{% endif %}
-                {% if s.get('revenue_growth') is not none %}<div><span class="label">Rev Growth:</span> <span class="val">{{ s.revenue_growth|pct(1, signed=True) }}</span></div>{% endif %}
-            </div>
-            {% elif key == 'promoter_signal' %}
-            <div class="signal-subcomp">
-                {% if s.get('promoter_qoq') is not none %}<div><span class="label">QoQ Change:</span> <span class="val">{{ s.promoter_qoq|pct(2, signed=True) }}</span></div>{% endif %}
-                {% if s.get('promoter_trend') %}<div><span class="label">Trend:</span> <span class="val">{{ s.promoter_trend|lower }}</span></div>{% endif %}
-                {% if s.get('pledge_quality') is not none %}<div><span class="label">Pledge Quality:</span> <span class="val">{{ "%.2f"|format(s.pledge_quality) }}</span></div>{% endif %}
-            </div>
-            {% elif key == 'accruals_signal' %}
-            <div class="signal-subcomp">
-                {% if s.get('cf_accruals_ratio') is not none %}<div><span class="label">CF Accruals:</span> <span class="val">{{ "%.2f"|format(s.cf_accruals_ratio) }}</span></div>{% endif %}
-                {% if s.get('bs_accruals_ratio') is not none %}<div><span class="label">BS Accruals:</span> <span class="val">{{ "%.2f"|format(s.bs_accruals_ratio) }}</span></div>{% endif %}
-                {% if s.get('earnings_persistence') is not none %}<div><span class="label">Persistence:</span> <span class="val">{{ "%.2f"|format(s.earnings_persistence) }}</span></div>{% endif %}
-            </div>
-            {% endif %}
+        {% if bd and bd.contributions %}
+        {% set wsum = bd.contributions|sum(attribute="weight")|abs if false else (bd.contributions|map(attribute="weight")|map("abs")|sum) %}
+        <div class="table-wrap">
+        <table class="conv-table">
+            <thead><tr><th>Factor</th><th class="num">Value</th><th>Percentile in tier</th><th class="num">Weight</th><th class="num">Points</th></tr></thead>
+            <tbody>
+            {% for c in bd.contributions %}
+            {% set neutral = c.tier_percentile is none or not c.eligible %}
+            <tr class="{{ 'conv-neutral' if neutral }}">
+                <td>{{ s.factor_labels.get(c.factor, c.factor) }}</td>
+                <td class="num">{{ c.value|signed(2) if c.value is not none and c.eligible else "—" }}</td>
+                <td>
+                    {% if neutral %}
+                    <span class="pill pill-muted">{{ "n/a for this stock" if not c.eligible else "no value" }} · counts as 50</span>
+                    {% else %}
+                    {% set pc = c.tier_percentile * 100 %}
+                    <span class="conv-pct"><span class="conv-pct-fill {{ 'conv-hi' if pc >= 65 else 'conv-mid' if pc >= 40 else 'conv-lo' }}" style="width: {{ pc|round|int }}%;"></span></span>
+                    <span class="num conv-pct-n">{{ pc|pct(0)|replace("%", "") }}</span>
+                    {% endif %}
+                </td>
+                <td class="num">{{ c.weight|signed(2) }}</td>
+                <td class="num">{{ (c.contribution / wsum * 100)|pct(1)|replace("%", "") }}</td>
+            </tr>
+            {% endfor %}
+            </tbody>
+        </table>
         </div>
+        <div class="u-muted-11 conv-foot">
+            Points add to the base score of {{ (bd.base_score * 100)|pct(1)|replace("%", "") }} / 100{% if bd.base_score is not none and (s.final_score - bd.base_score)|abs > 0.0005 %}; forensic adjustment {{ ((s.final_score - bd.base_score) * 100)|signed(1) }} gives {{ (s.final_score * 100)|pct(1)|replace("%", "") }}{% endif %}.
+            A negative weight inverts the percentile. A factor with no value, or one that does not apply to this stock, counts as the middle of the tier (50), so missing data pulls a score toward the middle.
+            Percentiles as of {{ bd.as_of }}.
+        </div>
+        {% else %}
+        <div class="u-muted conv-foot">{% if s.cap_tier == 'MICRO' %}MICRO stocks are not ranked: no factor breakdown.{% else %}No factor breakdown was stored for this stock on its latest pick date.{% endif %}</div>
         {% endif %}
-        {% endfor %}
     </div>
     {% endif %}
 
@@ -447,26 +423,23 @@
     <div class="card u-mb16">
         <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 4px;">
             <span class="section-title" style="margin-bottom: 0;">Sell-side Price Target</span>
-            <span style="font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;"
-                  title="Date is when WE last refreshed the aggregate from yfinance — NOT when analysts last revised. yfinance doesn't expose per-analyst revision dates for Indian equities. Individual broker PTs may be days to months old.">
-                {{ ac.get("pt_source") or "yfinance" }} · refreshed {{ "today" if fetched_today else fetched_short }} ⓘ
+            <span class="u-muted-10 pt-src">
+                {{ ac.get("pt_source") or "yfinance" }} · refreshed {{ "today" if fetched_today else fetched_short }}
+                {{ tooltip("The date is when we last refreshed the aggregate, not when analysts last revised. The source does not expose per-analyst revision dates for Indian equities, so individual broker targets may be days to months old.") }}
             </span>
         </div>
         <div class="section-desc">Aggregate of analyst 12-mo targets covering this stock. Individual analyst revision dates not exposed by source.</div>
 
-        {# Headline PT (median preferred, mean fallback) + upside #}
-        {% set headline_pt = ac.get("price_target_median") or ac.get("price_target") %}
-        {% set headline_upside = ac.get("pt_upside_median_pct") if ac.get("price_target_median") else ac.get("pt_upside_pct") %}
-        {% set headline_label = "Median" if ac.get("price_target_median") else "Mean" %}
+        {% set headline_pt = pt %}{% set headline_upside = pt_up %}
         <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px;">
             <div>
                 <span class="mono" style="font-size: 24px; font-weight: 700;">{{ headline_pt|inr(0) }}</span>
                 {% if headline_upside is not none %}
-                <span class="mono {{ headline_upside|tone(zero='score-red') }}" style="font-size: 15px; margin-left: 6px; font-weight: 600;">
+                <span class="mono {{ headline_upside|tone }}" style="font-size: 15px; margin-left: 6px; font-weight: 600;">
                     ({{ headline_upside|pct(1, signed=True) }})
                 </span>
                 {% endif %}
-                <span style="font-size: 10px; color: var(--text-muted); margin-left: 6px;">{{ headline_label }} of {{ ac.get("total_analysts")|int if ac.get("total_analysts") else "?" }}</span>
+                <span class="u-muted-10" style="margin-left: 6px;">{{ pt_basis }} of {{ pt_n if pt_n else "?" }} analysts, vs close {{ ac.get("current_price")|inr(2) }}</span>
             </div>
         </div>
 
@@ -477,22 +450,23 @@
         {% if d2e is not none or dpt is not none %}
         <div style="display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; font-size: 11px;">
             {% if d2e is not none %}
-            <span class="u-muted" title="Analysts typically revise PTs within 10 days of earnings. Proximity = freshness hint.">
-                Next earnings:
-                {% if d2e > 0 %}
+<span class="u-muted">
+                {% if d2e > 0 %}Next earnings:
                     <span style="color: var(--text-secondary); font-weight: 600;">in {{ d2e }}d</span> ({{ ac.next_earnings_date }})
-                {% elif d2e == 0 %}
+                {% elif d2e == 0 %}Next earnings:
                     <span style="color: var(--green); font-weight: 600;">today</span>
-                {% else %}
+                {% else %}Last results:
                     <span style="color: var(--text-secondary); font-weight: 600;">{{ -d2e }}d ago</span> ({{ ac.next_earnings_date }})
                 {% endif %}
+                {{ tooltip("Analysts typically revise targets within 10 days of results, so proximity is a freshness hint.") }}
             </span>
             {% endif %}
             {% if dpt is not none and dpt <= 30 and ac.get("pt_change_pct") is not none %}
-            <span class="u-muted" title="Our own change-detection: when the yfinance aggregate moves >0.5% between fetches, we record the prior value and timestamp.">
+            <span class="u-muted">
                 PT moved
-                <span class="mono {{ ac.pt_change_pct|tone(zero='score-red') }}" style="font-weight: 600;">{{ ac.pt_change_pct|pct(1, signed=True) }}</span>
+                <span class="mono {{ ac.pt_change_pct|tone }}" style="font-weight: 600;">{{ ac.pt_change_pct|pct(1, signed=True) }}</span>
                 {% if dpt == 0 %}today{% elif dpt == 1 %}yesterday{% else %}{{ dpt }}d ago{% endif %}
+                {{ tooltip("Our own change detection: when the aggregate moves more than 0.5% between fetches we record the prior value and its timestamp.") }}
             </span>
             {% endif %}
         </div>
@@ -505,7 +479,7 @@
         {% set lo = ac.price_target_low %}
         {% set hi = ac.price_target_high %}
         {% set cp = ac.current_price %}
-        {% set md = ac.get("price_target_median") or ac.get("price_target") %}
+        {% set md = pt %}
         {% set range_min = [lo, cp]|min %}
         {% set range_max = [hi, cp]|max %}
         {% set span = (range_max - range_min) if (range_max - range_min) > 0 else 1 %}
@@ -518,13 +492,13 @@
             </div>
             <div style="position: relative; height: 8px; border-radius: 4px; background: linear-gradient(to right, var(--red), var(--amber), var(--green)); overflow: visible;">
                 {# Current price marker (white) #}
-                <div style="position: absolute; left: {{ cp_pos }}%; top: -4px; transform: translateX(-50%); width: 3px; height: 16px; background: var(--text-primary); border-radius: 1px;" title="Current {{ cp|inr(0) }}"></div>
+                <div style="position: absolute; left: {{ cp_pos }}%; top: -4px; transform: translateX(-50%); width: 3px; height: 16px; background: var(--text-primary); border-radius: 1px;"></div>
                 {# Median target marker (dark dot) #}
-                <div style="position: absolute; left: {{ md_pos }}%; top: -3px; transform: translateX(-50%); width: 14px; height: 14px; border-radius: 50%; background: white; border: 2px solid var(--accent);" title="Median target {{ md|inr(0) }}"></div>
+                <div style="position: absolute; left: {{ md_pos }}%; top: -3px; transform: translateX(-50%); width: 14px; height: 14px; border-radius: 50%; background: white; border: 2px solid var(--accent);"></div>
             </div>
             <div style="display: flex; justify-content: space-between; font-size: 10px; color: var(--text-muted); margin-top: 5px;">
                 <span>Now {{ cp|inr(0) }}</span>
-                <span>Target {{ md|inr(0) }}</span>
+                <span>Target ({{ pt_basis }}) {{ md|inr(0) }}</span>
             </div>
         </div>
         {% endif %}
@@ -541,6 +515,7 @@
             <div style="display: flex; justify-content: space-between; align-items: baseline; font-size: 11px; color: var(--text-secondary); margin-bottom: 5px;">
                 <span>Rating mix</span>
                 {% if ac.get("recommendation_key") %}
+                {% if ac.recommendation_key != 'none' %}
                 <span style="text-transform: capitalize; font-weight: 600;
                     {% if 'buy' in ac.recommendation_key %}color: var(--green);
                     {% elif 'sell' in ac.recommendation_key %}color: var(--red);
@@ -548,24 +523,25 @@
                     {{ ac.recommendation_key|replace('_', ' ') }}
                 </span>
                 {% endif %}
+                {% endif %}
             </div>
             <div style="display: flex; height: 8px; border-radius: 4px; overflow: hidden;">
-                {% if sb %}<div style="width: {{ sb / tot * 100 }}%; background: var(--green); box-shadow: inset 0 0 0 1px rgba(0,0,0,0.2);" title="Strong Buy: {{ sb }}"></div>{% endif %}
-                {% if bb %}<div style="width: {{ bb / tot * 100 }}%; background: rgba(34, 197, 94, 0.65);" title="Buy: {{ bb }}"></div>{% endif %}
-                {% if hh %}<div style="width: {{ hh / tot * 100 }}%; background: var(--amber);" title="Hold: {{ hh }}"></div>{% endif %}
-                {% if ss %}<div style="width: {{ ss / tot * 100 }}%; background: rgba(239, 68, 68, 0.65);" title="Sell: {{ ss }}"></div>{% endif %}
-                {% if sss %}<div style="width: {{ sss / tot * 100 }}%; background: var(--red); box-shadow: inset 0 0 0 1px rgba(0,0,0,0.2);" title="Strong Sell: {{ sss }}"></div>{% endif %}
+                {% if sb %}<div style="width: {{ sb / tot * 100 }}%; background: var(--green); box-shadow: inset 0 0 0 1px var(--bg-primary);"></div>{% endif %}
+                {% if bb %}<div style="width: {{ bb / tot * 100 }}%; background: color-mix(in srgb, var(--green) 65%, transparent);"></div>{% endif %}
+                {% if hh %}<div style="width: {{ hh / tot * 100 }}%; background: var(--amber);"></div>{% endif %}
+                {% if ss %}<div style="width: {{ ss / tot * 100 }}%; background: color-mix(in srgb, var(--red) 65%, transparent);"></div>{% endif %}
+                {% if sss %}<div style="width: {{ sss / tot * 100 }}%; background: var(--red); box-shadow: inset 0 0 0 1px var(--bg-primary);"></div>{% endif %}
             </div>
             <div style="display: flex; justify-content: space-between; font-size: 10px; color: var(--text-muted); margin-top: 4px;">
-                <span>{{ sb }} SB · {{ bb }} B · {{ hh }} H · {{ ss }} S · {{ sss }} SS</span>
-                <span>{{ tot }} total</span>
+                <span>{{ sb }} strong buy · {{ bb }} buy · {{ hh }} hold · {{ ss }} sell · {{ sss }} strong sell</span>
+                <span>{{ tot }} ratings</span>
             </div>
 
             {# 4-period rating-mix trend — shows how mix has shifted vs ~3mo ago #}
             {% if ac.get("rating_mix_periods") and ac.rating_mix_periods|length >= 2 %}
             <div style="margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--border);">
                 <div style="display: flex; justify-content: space-between; align-items: center; font-size: 10px; color: var(--text-muted); margin-bottom: 6px;">
-                    <span>4-month trend</span>
+                    <span>Share rating buy, by month</span>
                     {% if ac.get("bullish_pct_now") is not none and ac.get("bullish_pct_old") is not none %}
                     <span>
                         Bullish:
@@ -591,19 +567,19 @@
                     {% set p_ss = period_row[5] %}
                     {% set p_tot = p_sb + p_b + p_h + p_s + p_ss %}
                     {% set label_friendly = "now" if p_label == "0m" else (p_label|replace("-", "") ~ " ago") %}
-                    <div style="flex: 1; display: flex; flex-direction: column; align-items: stretch; gap: 2px;" title="{{ label_friendly }}: {{ p_sb }} SB · {{ p_b }} B · {{ p_h }} H · {{ p_s }} S · {{ p_ss }} SS ({{ p_tot }} total)">
+                    <div style="flex: 1; display: flex; flex-direction: column; align-items: stretch; gap: 2px;">
                         {% if p_tot > 0 %}
                         <div style="display: flex; height: 24px; border-radius: 3px; overflow: hidden;">
-                            {% if p_sb %}<div style="width: {{ p_sb / p_tot * 100 }}%; background: var(--green); box-shadow: inset 0 0 0 1px rgba(0,0,0,0.2);"></div>{% endif %}
-                            {% if p_b %}<div style="width: {{ p_b / p_tot * 100 }}%; background: rgba(34, 197, 94, 0.65);"></div>{% endif %}
+                            {% if p_sb %}<div style="width: {{ p_sb / p_tot * 100 }}%; background: var(--green); box-shadow: inset 0 0 0 1px var(--bg-primary);"></div>{% endif %}
+                            {% if p_b %}<div style="width: {{ p_b / p_tot * 100 }}%; background: color-mix(in srgb, var(--green) 65%, transparent);"></div>{% endif %}
                             {% if p_h %}<div style="width: {{ p_h / p_tot * 100 }}%; background: var(--amber);"></div>{% endif %}
-                            {% if p_s %}<div style="width: {{ p_s / p_tot * 100 }}%; background: rgba(239, 68, 68, 0.65);"></div>{% endif %}
-                            {% if p_ss %}<div style="width: {{ p_ss / p_tot * 100 }}%; background: var(--red); box-shadow: inset 0 0 0 1px rgba(0,0,0,0.2);"></div>{% endif %}
+                            {% if p_s %}<div style="width: {{ p_s / p_tot * 100 }}%; background: color-mix(in srgb, var(--red) 65%, transparent);"></div>{% endif %}
+                            {% if p_ss %}<div style="width: {{ p_ss / p_tot * 100 }}%; background: var(--red); box-shadow: inset 0 0 0 1px var(--bg-primary);"></div>{% endif %}
                         </div>
                         {% else %}
                         <div style="height: 24px; border-radius: 3px; background: var(--border);"></div>
                         {% endif %}
-                        <div style="font-size: 9px; color: var(--text-muted); text-align: center;">{{ label_friendly }}</div>
+                        <div class="u-muted-10" style="text-align: center;">{{ label_friendly }}{% if p_tot > 0 %} <span class="num">{{ ((p_sb + p_b) / p_tot * 100)|pct(0) }}</span>{% endif %}</div>
                     </div>
                     {% endfor %}
                 </div>
@@ -612,13 +588,13 @@
         </div>
         {% endif %}
 
-        <div style="margin-top: 10px; font-size: 11px; color: var(--text-muted); text-align: center;">See <span style="color: var(--accent); cursor: pointer;" @click="tab = 'consensus'; loaded.consensus = true; $nextTick(() => initConsensusCharts())">Consensus tab</span> for full breakdown</div>
+        <div style="margin-top: 10px; font-size: 11px; color: var(--text-muted); text-align: center;">See the <button type="button" class="link-btn" @click="tab = 'consensus'; loaded.consensus = true; history.pushState(null, '', '#consensus')">Consensus tab</button> for the full breakdown</div>
     </div>
     {% elif ac %}
     {# Stock has an analyst_consensus row but no price_target — partial coverage #}
     <div class="card u-mb16">
         <div class="section-title">Sell-side Price Target</div>
-        <div style="padding: 10px 12px; border-radius: 8px; background: rgba(245, 158, 11, 0.08); border-left: 3px solid var(--amber); font-size: 12px; color: var(--text-secondary);">
+        <div style="padding: 10px 12px; border-radius: 8px; background: var(--amber-bg); border-left: 3px solid var(--amber); font-size: 12px; color: var(--text-secondary);">
             No analyst price target available from yfinance for this stock. This is common for SMALL caps where no sell-side broker publishes targets.
         </div>
     </div>
@@ -626,7 +602,7 @@
     {# Stock has no analyst_consensus row at all #}
     <div class="card u-mb16">
         <div class="section-title">Sell-side Price Target</div>
-        <div style="padding: 10px 12px; border-radius: 8px; background: rgba(107, 114, 128, 0.1); border-left: 3px solid var(--text-muted); font-size: 12px; color: var(--text-secondary);">
+        <div style="padding: 10px 12px; border-radius: 8px; background: var(--border); border-left: 3px solid var(--text-muted); font-size: 12px; color: var(--text-secondary);">
             No analyst coverage for this stock.
         </div>
     </div>
@@ -711,7 +687,7 @@
         {% if s.get("market_cap_cr") %}
         <div class="metric-card">
             <div class="metric-label">Market Cap{{ tooltip(m_tt.market_cap) }}</div>
-            <div class="metric-value">&#8377;{{ "{:,.0f}".format(s.market_cap_cr) }} <span class="unit">Cr</span></div>
+            <div class="metric-value">{{ s.market_cap_cr|crore }}</div>
             <div class="metric-context">{{ s.cap_tier }} cap segment</div>
         </div>
         {% endif %}
@@ -740,7 +716,13 @@
         {% endif %}
 
         {# D/E Ratio #}
-        {% if ratios.get("de_ratio") is not none %}
+        {% if s.is_financial and ratios.get("de_ratio") is not none %}
+        <div class="metric-card">
+            <div class="metric-label">Debt/Equity{{ tooltip(m_tt.de_ratio) }}</div>
+            <div class="metric-value u-muted">n/a</div>
+            <div class="metric-context">Not meaningful for a bank or lender</div>
+        </div>
+        {% elif ratios.get("de_ratio") is not none %}
         <div class="metric-card">
             <div class="metric-label">Debt/Equity{{ tooltip(m_tt.de_ratio) }}</div>
             <div class="metric-value
@@ -764,7 +746,13 @@
         {% endif %}
 
         {# ROA #}
-        {% if ratios.get("roa") is not none %}
+        {% if s.is_financial and ratios.get("roa") is not none %}
+        <div class="metric-card">
+            <div class="metric-label">ROA (TTM){{ tooltip(m_tt.roa) }}</div>
+            <div class="metric-value u-muted">n/a</div>
+            <div class="metric-context">Not meaningful for a bank or lender</div>
+        </div>
+        {% elif ratios.get("roa") is not none %}
         <div class="metric-card">
             <div class="metric-label">ROA (TTM){{ tooltip(m_tt.roa) }}</div>
             <div class="metric-value
@@ -811,7 +799,13 @@
         {% endif %}
 
         {# Current Ratio #}
-        {% if ratios.get("current_ratio") is not none %}
+        {% if s.is_financial and ratios.get("current_ratio") is not none %}
+        <div class="metric-card">
+            <div class="metric-label">Current Ratio{{ tooltip(m_tt.current_ratio) }}</div>
+            <div class="metric-value u-muted">n/a</div>
+            <div class="metric-context">Not meaningful for a bank or lender</div>
+        </div>
+        {% elif ratios.get("current_ratio") is not none %}
         <div class="metric-card">
             <div class="metric-label">Current Ratio{{ tooltip(m_tt.current_ratio) }}</div>
             <div class="metric-value
@@ -852,47 +846,47 @@
 {% if qf.get('quarters') %}
 <div class="card u-mb16">
     <div class="section-title">Quarterly Results</div>
-    <div class="section-desc">Last {{ qf.quarters|length }} quarters of consolidated income statement. Most recent first.</div>
-    <div class="table-scroll">
+    <div class="section-desc">Last {{ qf.quarters|length }} quarters of consolidated income statement, oldest first (the chart below reads the same way). YoY needs the same quarter a year earlier, so the first four show a dash.</div>
+    <div class="table-wrap">
     <table class="quarterly-table">
         <thead>
             <tr>
                 <th>Metric</th>
-                {% for q in qf.quarters %}<th>{{ q.period }}</th>{% endfor %}
+                {% for q in qf.quarters|reverse %}<th>{{ q.period }}</th>{% endfor %}
             </tr>
         </thead>
         <tbody>
             <tr>
-                <td>Revenue (Cr)</td>
-                {% for q in qf.quarters %}<td>{% if q.revenue %}{{ "{:,.0f}".format(q.revenue) }}{% else %}—{% endif %}</td>{% endfor %}
+                <td>Revenue (₹ Cr)</td>
+                {% for q in qf.quarters|reverse %}<td>{% if q.revenue %}{{ "{:,.0f}".format(q.revenue) }}{% else %}—{% endif %}</td>{% endfor %}
             </tr>
             <tr>
                 <td>Rev YoY %</td>
-                {% for q in qf.quarters %}<td class="{% if q.revenue_yoy is not none %}{{ q.revenue_yoy|tone }}{% endif %}">
+                {% for q in qf.quarters|reverse %}<td class="{% if q.revenue_yoy is not none %}{{ q.revenue_yoy|tone }}{% endif %}">
                     {% if q.revenue_yoy is not none %}{{ q.revenue_yoy|pct(1, signed=True) }}{% else %}—{% endif %}
                 </td>{% endfor %}
             </tr>
             <tr>
-                <td>EBITDA (Cr)</td>
-                {% for q in qf.quarters %}<td>{% if q.ebitda %}{{ "{:,.0f}".format(q.ebitda) }}{% else %}—{% endif %}</td>{% endfor %}
+                <td>EBITDA (₹ Cr)</td>
+                {% for q in qf.quarters|reverse %}<td>{% if q.ebitda %}{{ "{:,.0f}".format(q.ebitda) }}{% else %}—{% endif %}</td>{% endfor %}
             </tr>
             <tr>
                 <td>EBITDA Margin</td>
-                {% for q in qf.quarters %}<td>{% if q.ebitda_margin is not none %}{{ q.ebitda_margin|pct(1) }}{% else %}—{% endif %}</td>{% endfor %}
+                {% for q in qf.quarters|reverse %}<td>{% if q.ebitda_margin is not none %}{{ q.ebitda_margin|pct(1) }}{% else %}—{% endif %}</td>{% endfor %}
             </tr>
             <tr>
-                <td>Net Profit (Cr)</td>
-                {% for q in qf.quarters %}<td>{% if q.net_income %}{{ "{:,.0f}".format(q.net_income) }}{% else %}—{% endif %}</td>{% endfor %}
+                <td>Net Profit (₹ Cr)</td>
+                {% for q in qf.quarters|reverse %}<td>{% if q.net_income %}{{ "{:,.0f}".format(q.net_income) }}{% else %}—{% endif %}</td>{% endfor %}
             </tr>
             <tr>
                 <td>PAT YoY %</td>
-                {% for q in qf.quarters %}<td class="{% if q.pat_yoy is not none %}{{ q.pat_yoy|tone }}{% endif %}">
+                {% for q in qf.quarters|reverse %}<td class="{% if q.pat_yoy is not none %}{{ q.pat_yoy|tone }}{% endif %}">
                     {% if q.pat_yoy is not none %}{{ q.pat_yoy|pct(1, signed=True) }}{% else %}—{% endif %}
                 </td>{% endfor %}
             </tr>
             <tr>
                 <td>EPS</td>
-                {% for q in qf.quarters %}<td>{% if q.eps %}{{ "%.2f"|format(q.eps) }}{% else %}—{% endif %}</td>{% endfor %}
+                {% for q in qf.quarters|reverse %}<td>{% if q.eps %}{{ "%.2f"|format(q.eps) }}{% else %}—{% endif %}</td>{% endfor %}
             </tr>
         </tbody>
     </table>
@@ -913,27 +907,27 @@
 {% if af.get('balance_sheet') %}
 <div class="card">
     <div class="section-title">Balance Sheet (Annual)</div>
-    <div class="section-desc">Last {{ af.balance_sheet|length }} years of key balance sheet items.</div>
-    <div class="table-scroll">
+    <div class="section-desc">Last {{ af.balance_sheet|length }} years of key balance sheet items, oldest first.</div>
+    <div class="table-wrap">
     <table class="quarterly-table">
         <thead>
             <tr>
                 <th>Metric</th>
-                {% for r in af.balance_sheet %}<th>{{ r.period }}</th>{% endfor %}
+                {% for r in af.balance_sheet|reverse %}<th>{{ r.period }}</th>{% endfor %}
             </tr>
         </thead>
         <tbody>
-            <tr><td>Total Assets (Cr)</td>
-                {% for r in af.balance_sheet %}<td>{% if r.total_assets %}{{ "{:,.0f}".format(r.total_assets) }}{% else %}—{% endif %}</td>{% endfor %}
+            <tr><td>Total Assets (₹ Cr)</td>
+                {% for r in af.balance_sheet|reverse %}<td>{% if r.total_assets %}{{ "{:,.0f}".format(r.total_assets) }}{% else %}—{% endif %}</td>{% endfor %}
             </tr>
-            <tr><td>Total Equity (Cr)</td>
-                {% for r in af.balance_sheet %}<td>{% if r.total_equity %}{{ "{:,.0f}".format(r.total_equity) }}{% else %}—{% endif %}</td>{% endfor %}
+            <tr><td>Total Equity (₹ Cr)</td>
+                {% for r in af.balance_sheet|reverse %}<td>{% if r.total_equity %}{{ "{:,.0f}".format(r.total_equity) }}{% else %}—{% endif %}</td>{% endfor %}
             </tr>
-            <tr><td>Total Debt (Cr)</td>
-                {% for r in af.balance_sheet %}<td>{% if r.total_debt %}{{ "{:,.0f}".format(r.total_debt) }}{% else %}—{% endif %}</td>{% endfor %}
+            <tr><td>Total Debt (₹ Cr)</td>
+                {% for r in af.balance_sheet|reverse %}<td>{% if r.total_debt %}{{ "{:,.0f}".format(r.total_debt) }}{% else %}—{% endif %}</td>{% endfor %}
             </tr>
-            <tr><td>Cash &amp; Equiv (Cr)</td>
-                {% for r in af.balance_sheet %}<td>{% if r.cash_and_equivalents %}{{ "{:,.0f}".format(r.cash_and_equivalents) }}{% else %}—{% endif %}</td>{% endfor %}
+            <tr><td>Cash &amp; Equiv (₹ Cr)</td>
+                {% for r in af.balance_sheet|reverse %}<td>{% if r.cash_and_equivalents %}{{ "{:,.0f}".format(r.cash_and_equivalents) }}{% else %}—{% endif %}</td>{% endfor %}
             </tr>
         </tbody>
     </table>
@@ -1087,23 +1081,24 @@
 {% if ac %}
 <div class="card u-mb16">
     <div class="section-title">Analyst Consensus</div>
-    <div class="section-desc">Aggregated forecasts from {{ ac.get('total_analysts', 0)|int }} sell-side analysts covering this stock.</div>
+    <div class="section-desc">Aggregated forecasts from {{ pt_n if pt_n else "?" }} sell-side analysts covering this stock{% if pt_asof %}, refreshed {{ pt_asof }}{% endif %}.</div>
 
-    {% if ac.get("price_target") and pm.get("close_price") %}
-    {# Price target range visualization #}
+    {% if pt and pm.get("close_price") %}
+    {# Price target range visualization: the same headline target as the Overview card #}
     {% set low = pm.close_price * 0.8 %}
-    {% set high = ac.price_target * 1.1 %}
-    {% if ac.price_target < pm.close_price %}{% set high = pm.close_price * 1.1 %}{% endif %}
+    {% set high = pt * 1.1 %}
+    {% if pt < pm.close_price %}{% set high = pm.close_price * 1.1 %}{% endif %}
     {% set price_pos = ((pm.close_price - low) / (high - low) * 100) %}
-    {% set target_pos = ((ac.price_target - low) / (high - low) * 100) %}
+    {% set target_pos = ((pt - low) / (high - low) * 100) %}
     <div style="margin: 32px 0;">
         <div class="range-bar">
-            <span class="range-label" style="left: {{ price_pos }}%;">Price {{ pm.close_price|inr(0) }}</span>
+            <span class="range-label" style="left: {{ price_pos }}%;">Close {{ pm.close_price|inr(2) }}</span>
             <div class="range-marker" style="left: {{ price_pos }}%;"></div>
-            <span class="range-label" style="left: {{ target_pos }}%; top: 16px; bottom: auto; color: var(--green);">Target {{ ac.price_target|inr(0) }} ({{ ac.pt_upside_pct|pct(1, signed=True) }})</span>
+            <span class="range-label" style="left: {{ target_pos }}%; top: 16px; bottom: auto; color: var(--green);">Target ({{ pt_basis }}) {{ pt|inr(0) }}{% if pt_up is not none %} ({{ pt_up|pct(1, signed=True) }}){% endif %}</span>
             <div class="range-marker" style="left: {{ target_pos }}%; background: var(--green);"></div>
         </div>
     </div>
+    <div class="u-muted-11">Target is the {{ pt_basis }} of {{ pt_n if pt_n else "?" }} analysts, refreshed {{ pt_asof or "—" }}; upside is against the latest close.</div>
     {% endif %}
 
     <div class="metric-grid">
@@ -1114,24 +1109,31 @@
             <div class="metric-context">Total analysts</div>
         </div>
         {% endif %}
-        {% if ac.get("buy_pct") is not none %}
+        {% set _mix = (ac.get("n_strong_buy") or 0) + (ac.get("n_buy") or 0) + (ac.get("n_hold") or 0) + (ac.get("n_sell") or 0) + (ac.get("n_strong_sell") or 0) %}
+        {% if _mix > 0 %}
         <div class="metric-card">
-            <div class="metric-label">Buy Recommendation</div>
-            <div class="metric-value score-green">{{ "%.0f"|format(ac.buy_pct) }}<span class="unit">%</span></div>
+            <div class="metric-label">Rate it a buy</div>
+            <div class="metric-value score-green">{{ (((ac.get("n_strong_buy") or 0) + (ac.get("n_buy") or 0)) / _mix * 100)|pct(0)|replace("%", "") }}<span class="unit">%</span></div>
+            <div class="metric-context">Strong buy + buy, of {{ _mix }} ratings (same mix as the Overview card)</div>
+        </div>
+        {% elif ac.get("buy_pct") is not none %}
+        <div class="metric-card">
+            <div class="metric-label">Rate it a buy</div>
+            <div class="metric-value score-green">{{ ac.buy_pct|pct(0)|replace("%", "") }}<span class="unit">%</span></div>
             <div class="metric-context">Of all analysts</div>
         </div>
         {% endif %}
         {% if ac.get("eps_growth_pct") is not none %}
         <div class="metric-card">
             <div class="metric-label">EPS Growth Forecast</div>
-            <div class="metric-value {{ ac.eps_growth_pct|tone(zero='score-red') }}">{{ ac.eps_growth_pct|signed(1) }}<span class="unit">%</span></div>
+            <div class="metric-value {{ ac.eps_growth_pct|tone }}">{{ ac.eps_growth_pct|signed(1) }}<span class="unit">%</span></div>
             <div class="metric-context">FY forward consensus</div>
         </div>
         {% endif %}
         {% if ac.get("revenue_growth_pct") is not none %}
         <div class="metric-card">
             <div class="metric-label">Revenue Growth Forecast</div>
-            <div class="metric-value {{ ac.revenue_growth_pct|tone(zero='score-red') }}">{{ ac.revenue_growth_pct|signed(1) }}<span class="unit">%</span></div>
+            <div class="metric-value {{ ac.revenue_growth_pct|tone }}">{{ ac.revenue_growth_pct|signed(1) }}<span class="unit">%</span></div>
             <div class="metric-context">FY forward consensus</div>
         </div>
         {% endif %}
@@ -1147,7 +1149,7 @@
         {% if s.get("pt_revision_1yr") is not none %}
         <div class="metric-card">
             <div class="metric-label">PT Revision (1yr)</div>
-            <div class="metric-value {{ s.pt_revision_1yr|tone(zero='score-red') }}">{{ s.pt_revision_1yr|signed(1) }}<span class="unit">%</span></div>
+            <div class="metric-value {{ s.pt_revision_1yr|tone }}">{{ s.pt_revision_1yr|signed(1) }}<span class="unit">%</span></div>
             <div class="metric-context">Target change YoY</div>
         </div>
         {% endif %}
@@ -1173,7 +1175,7 @@
 <div x-show="tab === 'forensic'" x-cloak>
 
 {# Beneish + Altman summary cards #}
-<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px;">
+<div class="grid-2 u-mb16">
     <div class="card">
         <div class="section-title">Beneish M-Score</div>
         <div class="section-desc">Earnings manipulation detector using 6 financial ratios. Score above -1.78 flags likely manipulation.</div>
@@ -1296,13 +1298,13 @@
 {# ════════════════════════════════════════════ #}
 {# ────────── PRICE & TECHNICALS TAB ─────────── #}
 {# ════════════════════════════════════════════ #}
-<div x-show="tab === 'price'" x-cloak x-data="{ tf: '1y' }">
+<div x-show="tab === 'price'" x-cloak x-data="{ tf: '1y' }" x-ref="pricePane">
 
 <div class="card u-mb16">
     <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
         <div>
             <div class="section-title" style="margin-bottom: 4px;">Price Chart</div>
-            <div class="section-desc">Daily closing prices with volume overlay. 52W high/low marked as dashed lines.</div>
+            <div class="section-desc">Daily closing prices adjusted for splits, bonuses and dividends, with volume. The dashed lines are the 52-week high and low{% if pm.get("price_date") %} as of {{ pm.price_date }}{% endif %}.</div>
         </div>
         <div class="tf-selector">
             <button class="tf-button" :class="{ active: tf === '1m' }" @click="tf = '1m'; initPriceChart('1m')">1M</button>
@@ -1346,14 +1348,14 @@
         {% if pm.get("return_6m") is not none %}
         <div class="metric-card">
             <div class="metric-label">6-Month Return</div>
-            <div class="metric-value {{ pm.return_6m|tone(zero='score-red') }}">{{ pm.return_6m|signed(1) }}<span class="unit">%</span></div>
+            <div class="metric-value {{ pm.return_6m|tone }}">{{ pm.return_6m|signed(1) }}<span class="unit">%</span></div>
             <div class="metric-context">Last 130 trading days</div>
         </div>
         {% endif %}
         {% if pm.get("return_1y") is not none %}
         <div class="metric-card">
             <div class="metric-label">1-Year Return</div>
-            <div class="metric-value {{ pm.return_1y|tone(zero='score-red') }}">{{ pm.return_1y|signed(1) }}<span class="unit">%</span></div>
+            <div class="metric-value {{ pm.return_1y|tone }}">{{ pm.return_1y|signed(1) }}<span class="unit">%</span></div>
             <div class="metric-context">Last 252 trading days</div>
         </div>
         {% endif %}
@@ -1404,21 +1406,21 @@
         <div style="background: var(--bg-card-hover); border-radius: 8px; padding: 12px;">
             <div style="font-size: 12px; font-weight: 700; color: var(--text-primary);">Factors with a value</div>
             <div style="font-size: 22px; font-weight: 800; margin: 6px 0 2px;" class="score-{{ d.colour }}">{{ d.factors_used }}<span style="font-size: 11px; font-weight: 500; color: var(--text-muted);"> of {{ d.factors_applicable }}</span></div>
-            <div style="font-size: 10.5px; color: var(--text-muted); line-height: 1.4;">{% if d.missing %}Missing: {{ d.missing | join(', ') }}{% else %}Every factor this tier ranks on had a value.{% endif %}</div>
+            <div style="font-size: 11px; color: var(--text-muted); line-height: 1.4;">{% if d.missing %}Missing: {{ d.missing | join(', ') }}{% else %}Every factor this tier ranks on had a value.{% endif %}</div>
         </div>
         {% endif %}
         {% if d.price_days is not none %}
         <div style="background: var(--bg-card-hover); border-radius: 8px; padding: 12px;">
             <div style="font-size: 12px; font-weight: 700; color: var(--text-primary);">Price history</div>
             <div style="font-size: 22px; font-weight: 800; margin: 6px 0 2px; color: var(--text-primary);">{{ "{:,}".format(d.price_days) }}<span style="font-size: 11px; font-weight: 500; color: var(--text-muted);"> trading days</span></div>
-            <div style="font-size: 10.5px; color: var(--text-muted); line-height: 1.4;">The gate needs about three months.</div>
+            <div style="font-size: 11px; color: var(--text-muted); line-height: 1.4;">The gate needs about three months.</div>
         </div>
         {% endif %}
         {% if d.quarters is not none %}
         <div style="background: var(--bg-card-hover); border-radius: 8px; padding: 12px;">
             <div style="font-size: 12px; font-weight: 700; color: var(--text-primary);">Fundamentals</div>
             <div style="font-size: 22px; font-weight: 800; margin: 6px 0 2px; color: var(--text-primary);">{{ d.quarters }}<span style="font-size: 11px; font-weight: 500; color: var(--text-muted);"> of 8 quarters</span></div>
-            <div style="font-size: 10.5px; color: var(--text-muted); line-height: 1.4;">The gate needs four.</div>
+            <div style="font-size: 11px; color: var(--text-muted); line-height: 1.4;">The gate needs four.</div>
         </div>
         {% endif %}
     </div>
@@ -1431,13 +1433,13 @@
 {# ── Data lineage panel — Phase F, ADR 0027 ── #}
 <div class="card" style="margin-bottom: 16px;" x-data="{open: false, payload: null}"
      x-init="$watch('open', val => { if (val && !payload) { fetch('/api/lineage/{{ s.sid }}').then(r=>r.json()).then(d=>payload=d) }})">
-    <div style="display: flex; justify-content: space-between; align-items: center; cursor: pointer;" @click="open = !open">
+    <button type="button" class="lineage-toggle" @click="open = !open" :aria-expanded="open">
         <div>
             <div class="section-title" style="margin-bottom: 4px;">Data Lineage</div>
             <div class="section-desc" style="margin: 0;">For each factor, the exact source rows that contributed. Top-300 picks have row-level emission; others show the static read spec.</div>
         </div>
         <div style="font-size: 18px; color: var(--text-muted);" x-text="open ? '−' : '+'"></div>
-    </div>
+    </button>
 
     <div x-show="open" x-cloak style="margin-top: 16px;">
         <template x-if="!payload"><div style="color: var(--text-muted); font-size: 12px;">Loading…</div></template>
@@ -1493,199 +1495,132 @@
     <a href="/explorer" style="font-size: 13px; color: var(--blue); text-decoration: none;">&larr; Back to Explorer</a>
 </div>
 
-<script src="{{ vendor('chart') }}"></script>
 <script>
-// ───── Chart instances (so we can destroy/recreate) ─────
-const charts = {};
+// ───── Charts: shared theme + destroy-before-create (cockpit.js makeChart); Chart.js loads on the first tab that draws ─────
 const SID = '{{ s.sid }}';
-// The route already computed these for the tables above — embed them rather
-// than re-fetching the same four payloads from /api/* after load.
+const PM = {{ {"high": pm.get("high_52w"), "low": pm.get("low_52w")}|tojson }};
+// The route already computed these for the tables above: embed them rather than re-fetching.
 const EMBEDDED = {
     quarterly: {{ s.quarterly|tojson }},
     shareholding: {{ s.shareholding|tojson }},
     insider_timeline: {{ s.insider_timeline|tojson }},
     forecasts: {{ s.forecasts|tojson }},
 };
+const drawn = {};
+const tint = (v, a) => `color-mix(in srgb, ${cssVar(v)} ${a}%, transparent)`;
+const baseScales = () => ({
+    x: { ticks: { font: { size: 10 } }, grid: { color: cssVar('--border') } },
+    y: { ticks: { font: { family: 'JetBrains Mono', size: 10 } }, grid: { color: cssVar('--border') } },
+});
+const baseOpts = () => ({ responsive: true, maintainAspectRatio: false, scales: baseScales() });
+const axisTitle = (text) => ({ display: true, text, font: { size: 10 } });
 
-const COLORS = {
-    green: '#22c55e', red: '#ef4444', amber: '#f59e0b',
-    blue: '#3b82f6', accent: '#8b5cf6', muted: '#555570',
-    border: '#1e1e2e', cardBg: '#12121a',
-};
-
-const CHART_DEFAULTS = {
-    responsive: true, maintainAspectRatio: false,
-    plugins: { legend: { labels: { color: '#8888a0', font: { size: 11 } } } },
-    scales: {
-        x: { ticks: { color: COLORS.muted, font: { size: 10 } }, grid: { color: COLORS.border, drawBorder: false } },
-        y: { ticks: { color: COLORS.muted, font: { family: 'JetBrains Mono', size: 10 } }, grid: { color: COLORS.border, drawBorder: false } }
-    }
-};
-
-// ───── Price chart with timeframe + volume ─────
 async function initPriceChart(tf) {
     const dayMap = { '1m': 22, '3m': 65, '6m': 130, '1y': 365, '3y': 780 };
-    const days = dayMap[tf] || 365;
-    const resp = await fetch(`/api/prices-extended/${SID}?days=${days}`);
+    const resp = await fetch(`/api/prices-extended/${SID}?days=${dayMap[tf] || 365}`);
     const data = await resp.json();
     if (!data.length) return;
-    if (charts.price) charts.price.destroy();
-    const ctx = document.getElementById('priceChart').getContext('2d');
-    charts.price = new Chart(ctx, {
-        type: 'line',
-        data: {
-            labels: data.map(d => d.date),
-            datasets: [
-                {
-                    label: 'Close', data: data.map(d => d.close),
-                    borderColor: COLORS.blue, backgroundColor: 'rgba(59, 130, 246, 0.08)',
-                    fill: true, borderWidth: 1.5, pointRadius: 0, tension: 0.1, yAxisID: 'y',
-                },
-                {
-                    label: 'Volume', data: data.map(d => d.volume / 1e6),
-                    backgroundColor: 'rgba(139, 92, 246, 0.3)',
-                    borderColor: 'rgba(139, 92, 246, 0)', type: 'bar', yAxisID: 'y1',
-                }
-            ]
-        },
-        options: {
-            ...CHART_DEFAULTS,
-            scales: {
-                x: CHART_DEFAULTS.scales.x,
-                y: { ...CHART_DEFAULTS.scales.y, position: 'left', title: { display: true, text: 'Price (₹)', color: COLORS.muted, font: { size: 10 } } },
-                y1: { position: 'right', ticks: { color: COLORS.muted, font: { size: 9 } }, grid: { display: false }, title: { display: true, text: 'Vol (M)', color: COLORS.muted, font: { size: 10 } } }
-            }
-        }
-    });
+    await loadChart();
+    const line = (label, v, color) => ({ label, data: data.map(() => v), borderColor: color, borderDash: [4, 4], borderWidth: 1, pointRadius: 0, fill: false, yAxisID: 'y' });
+    const ds = [
+        { label: 'Close (adjusted, ₹)', data: data.map(d => d.close), borderColor: cssVar('--blue'), backgroundColor: tint('--blue', 8),
+          fill: true, borderWidth: 1.5, pointRadius: 0, tension: 0.1, yAxisID: 'y' },
+        { label: 'Volume (M)', data: data.map(d => d.volume / 1e6), backgroundColor: tint('--accent', 30), type: 'bar', yAxisID: 'y1' },
+    ];
+    if (PM.high) ds.push(line('52W high', PM.high, cssVar('--green')));
+    if (PM.low) ds.push(line('52W low', PM.low, cssVar('--red')));
+    const o = baseOpts();
+    o.scales.y.position = 'left'; o.scales.y.title = axisTitle('Price (₹)');
+    o.scales.y1 = { position: 'right', ticks: { font: { size: 10 } }, grid: { display: false }, title: axisTitle('Volume (M)') };
+    makeChart('priceChart', { type: 'line', data: { labels: data.map(d => d.date), datasets: ds }, options: o });
+    if (!drawn.delivery) initDeliveryChart();
 }
 
-// ───── Delivery % chart ─────
 async function initDeliveryChart() {
+    drawn.delivery = true;
     const resp = await fetch(`/api/prices-extended/${SID}?days=90`);
     const data = await resp.json();
     if (!data.length) return;
-    if (charts.delivery) charts.delivery.destroy();
-    const ctx = document.getElementById('deliveryChart').getContext('2d');
-    charts.delivery = new Chart(ctx, {
-        type: 'line',
-        data: {
-            labels: data.map(d => d.date),
-            datasets: [{
-                label: 'Delivery %', data: data.map(d => d.delivery_pct),
-                borderColor: COLORS.amber, backgroundColor: 'rgba(245, 158, 11, 0.08)',
-                fill: true, borderWidth: 1.5, pointRadius: 0, tension: 0.2,
-            }]
-        },
-        options: { ...CHART_DEFAULTS, plugins: { legend: { display: false } } }
-    });
+    await loadChart();
+    const o = baseOpts(); o.plugins = { legend: { display: false } }; o.scales.y.title = axisTitle('Delivery (% of volume)');
+    makeChart('deliveryChart', { type: 'line', data: { labels: data.map(d => d.date), datasets: [{
+        label: 'Delivery %', data: data.map(d => d.delivery_pct), borderColor: cssVar('--amber'), backgroundColor: tint('--amber', 8),
+        fill: true, borderWidth: 1.5, pointRadius: 0, tension: 0.2 }] }, options: o });
 }
 
-// ───── Quarterly revenue + PAT chart ─────
 async function initQuarterlyChart() {
     const data = EMBEDDED.quarterly;
     if (!data.quarters || !data.quarters.length) return;
-    if (charts.quarterly) charts.quarterly.destroy();
-    const quarters = [...data.quarters].reverse();  // chronological
-    const ctx = document.getElementById('quarterlyChart').getContext('2d');
-    charts.quarterly = new Chart(ctx, {
-        type: 'bar',
-        data: {
-            labels: quarters.map(q => q.period),
-            datasets: [
-                { label: 'Revenue (Cr)', data: quarters.map(q => q.revenue), backgroundColor: 'rgba(59, 130, 246, 0.6)', borderColor: COLORS.blue, borderWidth: 1 },
-                { label: 'Net Profit (Cr)', data: quarters.map(q => q.net_income), backgroundColor: 'rgba(34, 197, 94, 0.6)', borderColor: COLORS.green, borderWidth: 1 }
-            ]
-        },
-        options: CHART_DEFAULTS
-    });
+    await loadChart();
+    const quarters = [...data.quarters].reverse();   // oldest first, as in the table
+    const o = baseOpts(); o.scales.y.title = axisTitle('₹ crore');
+    makeChart('quarterlyChart', { type: 'bar', data: { labels: quarters.map(q => q.period), datasets: [
+        { label: 'Revenue (₹ Cr)', data: quarters.map(q => q.revenue), backgroundColor: tint('--blue', 60), borderColor: cssVar('--blue'), borderWidth: 1 },
+        { label: 'Net profit (₹ Cr)', data: quarters.map(q => q.net_income), backgroundColor: tint('--green', 60), borderColor: cssVar('--green'), borderWidth: 1 }] }, options: o });
 }
 
-// ───── Shareholding stacked area chart ─────
 async function initShareholdingChart() {
     const data = EMBEDDED.shareholding;
     if (!data.length) return;
-    if (charts.shareholding) charts.shareholding.destroy();
-    const quarters = [...data].reverse();  // chronological
-    const ctx = document.getElementById('shareholdingChart').getContext('2d');
-    charts.shareholding = new Chart(ctx, {
-        type: 'line',
-        data: {
-            labels: quarters.map(q => q.end_date.slice(0, 10)),
-            datasets: [
-                { label: 'Promoter', data: quarters.map(q => q.promoter_pct), borderColor: COLORS.accent, backgroundColor: 'rgba(139, 92, 246, 0.4)', fill: true, tension: 0.2 },
-                { label: 'FII', data: quarters.map(q => q.fii_pct), borderColor: COLORS.blue, backgroundColor: 'rgba(59, 130, 246, 0.4)', fill: true, tension: 0.2 },
-                { label: 'Mutual Funds', data: quarters.map(q => q.mf_pct), borderColor: COLORS.green, backgroundColor: 'rgba(34, 197, 94, 0.4)', fill: true, tension: 0.2 },
-                { label: 'DII', data: quarters.map(q => q.dii_pct), borderColor: COLORS.amber, backgroundColor: 'rgba(245, 158, 11, 0.4)', fill: true, tension: 0.2 }
-            ]
-        },
-        options: { ...CHART_DEFAULTS, scales: { ...CHART_DEFAULTS.scales, y: { ...CHART_DEFAULTS.scales.y, beginAtZero: true } } }
-    });
+    await loadChart();
+    const q = [...data].reverse();
+    const mk = (label, key, c) => ({ label, data: q.map(r => r[key]), borderColor: cssVar(c), backgroundColor: tint(c, 40), fill: true, tension: 0.2 });
+    const o = baseOpts(); o.scales.y.beginAtZero = true; o.scales.y.title = axisTitle('% of shares');
+    makeChart('shareholdingChart', { type: 'line', data: { labels: q.map(r => r.end_date.slice(0, 10)), datasets: [
+        mk('Promoter', 'promoter_pct', '--accent'), mk('FII', 'fii_pct', '--blue'), mk('Mutual funds', 'mf_pct', '--green'), mk('DII', 'dii_pct', '--amber')] }, options: o });
 }
 
-// ───── Insider buy/sell timeline chart ─────
 async function initInsiderChart() {
     const data = EMBEDDED.insider_timeline;
     if (!data.length) return;
-    if (charts.insider) charts.insider.destroy();
-    const ctx = document.getElementById('insiderChart').getContext('2d');
-    charts.insider = new Chart(ctx, {
-        type: 'bar',
-        data: {
-            labels: data.map(d => d.month),
-            datasets: [
-                { label: 'Buy (Lakh)', data: data.map(d => d.buy_value), backgroundColor: 'rgba(34, 197, 94, 0.7)' },
-                { label: 'Sell (Lakh)', data: data.map(d => -d.sell_value), backgroundColor: 'rgba(239, 68, 68, 0.7)' }
-            ]
-        },
-        options: { ...CHART_DEFAULTS, scales: { x: { ...CHART_DEFAULTS.scales.x, stacked: true }, y: { ...CHART_DEFAULTS.scales.y, stacked: true } } }
-    });
+    await loadChart();
+    const o = baseOpts(); o.scales.x.stacked = true; o.scales.y.stacked = true; o.scales.y.title = axisTitle('₹ lakh');
+    makeChart('insiderChart', { type: 'bar', data: { labels: data.map(d => d.month), datasets: [
+        { label: 'Buy (₹ lakh)', data: data.map(d => d.buy_value), backgroundColor: tint('--green', 70) },
+        { label: 'Sell (₹ lakh)', data: data.map(d => -d.sell_value), backgroundColor: tint('--red', 70) }] }, options: o });
 }
 
-// ───── Forecast revisions chart ─────
 async function initForecastChart() {
     const data = EMBEDDED.forecasts;
-    if (charts.forecast) charts.forecast.destroy();
-    const datasets = [];
-    if (data.price_target && data.price_target.length) {
-        datasets.push({ label: 'Price Target (₹)', data: data.price_target.map(d => ({ x: d.date, y: d.value })), borderColor: COLORS.blue, backgroundColor: 'rgba(59, 130, 246, 0.1)', tension: 0.2, yAxisID: 'y' });
-    }
-    if (data.eps && data.eps.length) {
-        datasets.push({ label: 'EPS (₹)', data: data.eps.map(d => ({ x: d.date, y: d.value })), borderColor: COLORS.green, backgroundColor: 'rgba(34, 197, 94, 0.1)', tension: 0.2, yAxisID: 'y1' });
-    }
-    if (!datasets.length) return;
-    const ctx = document.getElementById('forecastChart').getContext('2d');
-    charts.forecast = new Chart(ctx, {
-        type: 'line',
-        data: { datasets: datasets },
-        options: {
-            ...CHART_DEFAULTS,
-            scales: {
-                x: { type: 'category', ticks: { color: COLORS.muted, font: { size: 10 } }, grid: { color: COLORS.border } },
-                y: { ...CHART_DEFAULTS.scales.y, position: 'left', title: { display: true, text: 'Price Target', color: COLORS.muted } },
-                y1: { ...CHART_DEFAULTS.scales.y, position: 'right', grid: { display: false }, title: { display: true, text: 'EPS', color: COLORS.muted } }
-            }
-        }
-    });
+    const ds = [];
+    if (data.price_target && data.price_target.length)
+        ds.push({ label: 'Price target (₹)', data: data.price_target.map(d => ({ x: d.date, y: d.value })), borderColor: cssVar('--blue'), backgroundColor: tint('--blue', 10), tension: 0.2, yAxisID: 'y' });
+    if (data.eps && data.eps.length)
+        ds.push({ label: 'EPS (₹)', data: data.eps.map(d => ({ x: d.date, y: d.value })), borderColor: cssVar('--green'), backgroundColor: tint('--green', 10), tension: 0.2, yAxisID: 'y1' });
+    if (!ds.length) return;
+    await loadChart();
+    const o = baseOpts(); o.scales.x.type = 'category';
+    o.scales.y.position = 'left'; o.scales.y.title = axisTitle('Price target (₹)');
+    o.scales.y1 = { ...baseScales().y, position: 'right', grid: { display: false }, title: axisTitle('EPS (₹)') };
+    makeChart('forecastChart', { type: 'line', data: { datasets: ds }, options: o });
 }
 
-// ───── Lazy init helpers (called from tab switches) ─────
-function initFinancialsCharts() {
-    if (!charts.quarterly && document.getElementById('quarterlyChart')) initQuarterlyChart();
-}
-function initOwnershipCharts() {
-    if (!charts.shareholding && document.getElementById('shareholdingChart')) initShareholdingChart();
-    if (!charts.insider && document.getElementById('insiderChart')) initInsiderChart();
-}
-function initConsensusCharts() {
-    if (!charts.forecast && document.getElementById('forecastChart')) initForecastChart();
-}
-
-// Init delivery chart on price tab too
-const _origInitPrice = initPriceChart;
-initPriceChart = async function(tf) {
-    await _origInitPrice(tf);
-    if (!charts.delivery && document.getElementById('deliveryChart')) initDeliveryChart();
-};
+// Lazy init, once per chart, called when its tab opens (tab click, URL hash or Back).
+function once(key, fn) { if (!drawn[key]) { drawn[key] = true; fn(); } }
+function initFinancialsCharts() { once('quarterly', initQuarterlyChart); }
+function initOwnershipCharts() { once('shareholding', initShareholdingChart); once('insider', initInsiderChart); }
+function initConsensusCharts() { once('forecast', initForecastChart); }
 </script>
 
+<style>
+.stock-cols { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 16px; }
+@media (max-width: 768px) { .stock-cols { grid-template-columns: minmax(0, 1fr); } }
+.conv-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+.conv-head .section-title { margin-bottom: 0; }
+.conv-score { font-size: 28px; font-weight: 800; }
+.conv-bar { height: 10px; margin-bottom: 16px; }
+.conv-table { width: 100%; font-size: 12px; border-collapse: collapse; }
+.conv-table th { text-align: left; color: var(--text-muted); font-size: 10px; text-transform: uppercase; letter-spacing: .5px; padding: 6px 8px 6px 0; }
+.conv-table th.num { text-align: right; }
+.conv-table td { padding: 8px 8px 8px 0; border-top: 1px solid var(--border); vertical-align: middle; }
+.conv-neutral td:first-child { color: var(--text-secondary); }
+.conv-pct { display: inline-block; vertical-align: middle; width: 80px; height: 6px; border-radius: 3px; background: var(--border); overflow: hidden; }
+.conv-pct-fill { display: block; height: 100%; }
+.conv-hi { background: var(--green); } .conv-mid { background: var(--amber); } .conv-lo { background: var(--red); }
+.conv-pct-n { display: inline-block; width: 28px; margin-left: 6px; }
+.conv-foot { margin-top: 10px; line-height: 1.5; }
+.link-btn { background: none; border: 0; padding: 0; font: inherit; color: var(--accent); cursor: pointer; }
+.lineage-toggle { display: flex; justify-content: space-between; align-items: center; width: 100%; background: none; border: 0; padding: 0; text-align: left; color: inherit; font: inherit; cursor: pointer; }
+.pt-src { text-transform: uppercase; letter-spacing: .5px; }
+</style>
 {% endblock %}
