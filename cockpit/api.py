@@ -720,8 +720,8 @@ def get_dominant_signal_batch(sids):
 
 def get_heatmap_data():
     """Every ranked stock by tier (best score first), then the non-pickable tiers
-    (MICRO) from `stocks` at a 0.0 placeholder score: they are classified and their
-    signals computed, but never ranked into daily_picks."""
+    (MICRO) from `stocks` with score None: they are classified and their signals
+    computed, but never ranked into daily_picks."""
     unpickable = views.unpickable_tiers()
     ph = ",".join("?" * len(unpickable)) or "NULL"
     df = read_sql(f"""
@@ -736,41 +736,11 @@ def get_heatmap_data():
         tier_df = df[df["cap_tier"] == tier]
         result[tier] = tier_df[["sid", "ticker", "name", "score"]].to_dict("records")
     for tier in unpickable:
-        rows = read_sql("SELECT sid, ticker, name, 0.0 AS score FROM stocks "
+        rows = read_sql("SELECT sid, ticker, name, NULL AS score FROM stocks "
                         "WHERE cap_tier = ? ORDER BY ticker", params=[tier])
         if not rows.empty:
             result[tier] = rows.to_dict("records")
     return result
-
-
-def get_explorer_table():
-    """Ranked table view for explorer: every ranked stock with its snapshot
-    signals, then the non-pickable tiers (MICRO) unranked (rank/score NULL) —
-    their signal data IS computed, they are just never picked."""
-    unpickable = views.unpickable_tiers()
-    ph = ",".join("?" * len(unpickable)) or "NULL"
-    return db.rows(f"""
-        SELECT * FROM (
-          SELECT dp.sid, s.ticker, s.name, dp.sector, dp.cap_tier,
-                 dp.rank AS rank, dp.final_score AS score,
-                 ds.consensus_signal, ds.piotroski_f, ds.earnings_yield
-          FROM daily_picks dp
-          JOIN stocks s ON dp.sid = s.sid
-          LEFT JOIN daily_snapshots ds ON dp.sid = ds.sid
-              AND ds.snapshot_date = (SELECT MAX(snapshot_date) FROM daily_snapshots)
-          WHERE dp.pick_date = ?
-            AND s.cap_tier NOT IN ({ph})
-          UNION ALL
-          SELECT s.sid, s.ticker, s.name, s.sector, s.cap_tier,
-                 NULL AS rank, NULL AS score,
-                 ds.consensus_signal, ds.piotroski_f, ds.earnings_yield
-          FROM stocks s
-          LEFT JOIN daily_snapshots ds ON s.sid = ds.sid
-              AND ds.snapshot_date = (SELECT MAX(snapshot_date) FROM daily_snapshots)
-          WHERE s.cap_tier IN ({ph})
-        )
-        ORDER BY cap_tier, rank
-    """, [latest_pick_date(), *unpickable, *unpickable])
 
 
 def search_stocks(query):
@@ -879,7 +849,26 @@ def get_price_series_extended(sid, days=365):
         "ORDER BY date DESC LIMIT ?",
         [sid, days],
     )
-    return newest_first[::-1]  # chronological for the chart
+    series = newest_first[::-1]  # chronological for the chart
+    # split/bonus-adjusted like every return on the page: a 1:2 split is not a crash on the chart
+    adj = pd.DataFrame(db.rows("SELECT sid, ex_date, factor FROM corporate_adjustments WHERE sid = ?", [sid]),
+                       columns=["sid", "ex_date", "factor"])
+    if series and not adj.empty:
+        df = pd.DataFrame(series)
+        for col in ("open", "high", "low", "close"):
+            df[col] = views.adjusted_closes(df[["date", col]].rename(columns={col: "close"}), adj)["close"].values
+        df = df.astype(object).where(df.notna(), None)
+        series = df.to_dict("records")
+    return series
+
+
+def get_factor_labels():
+    """{weight key: short label} for every wired factor (the registry's label, parenthetical dropped)."""
+    import factors
+    out = {}
+    for name, f in factors.FACTORS.items():
+        out[f.get("weight_key") or name] = (f.get("label") or name).split(" (")[0]
+    return out
 
 
 def get_quarterly_financials(sid):
@@ -914,11 +903,14 @@ def get_quarterly_financials(sid):
                     .astype(object).where(lambda x: x.notna(), None))
     quarters = df_records.to_dict("records")
     for i, q in enumerate(quarters):
+        # None (shown "—") without a prior-year quarter: never a missing key, which a
+        # template reads as a value and prints as "+0.0%"
+        q["revenue_yoy"] = q["pat_yoy"] = None
         if i >= 4:
             prior = quarters[i - 4]
-            if prior.get("revenue") and prior["revenue"] > 0:
+            if prior.get("revenue") and prior["revenue"] > 0 and q.get("revenue") is not None:
                 q["revenue_yoy"] = round((q["revenue"] / prior["revenue"] - 1) * 100, 1)
-            if prior.get("net_income") and prior["net_income"] != 0:
+            if prior.get("net_income") and prior["net_income"] != 0 and q.get("net_income") is not None:
                 q["pat_yoy"] = round((q["net_income"] / prior["net_income"] - 1) * 100, 1)
 
     # TTM (last 4 quarters, latest first)

@@ -146,12 +146,62 @@ def pick_data(row, sid=None, pick_date=None):
         import factors
         frozen = db.one("SELECT inputs_json FROM pit_replay_snapshots WHERE sid = ? AND snapshot_date = ?", [sid, pick_date])
         inputs = json.loads(frozen["inputs_json"]) if frozen.get("inputs_json") else None
-        weights = factors.SIGNAL_WEIGHTS.get(tier, {})
+        # only factors the registry makes this stock eligible for: a bank has no accruals or
+        # Piotroski by design, so they are neither "used" nor "missing" (same rule as eligible_coverage)
+        no = ineligible_signals(sid)
+        weights = {k: w for k, w in factors.SIGNAL_WEIGHTS.get(tier, {}).items() if k not in no}
         if inputs is not None and weights:
             cols = {k: factors.SCREENER_TIER_COLS.get((k, tier)) or factors.SCREENER_COLS[k] for k in weights}
             missing = [k for k, c in cols.items() if inputs.get(c) is None]
             out.update(factors_applicable=len(weights), factors_used=len(weights) - len(missing), missing=missing)
     return out
+
+
+def ineligible_signals(sid):
+    """{signal keys} the registry (universe_eligibility, newest snapshot) marks ineligible for
+    `sid`: a deliberate exclusion from its ranking, not a data gap. A signal with no row is eligible."""
+    return {r["signal"] for r in native_rows(
+        "SELECT signal FROM universe_eligibility WHERE sid = ? AND eligible = 0 AND snapshot_date = "
+        "(SELECT MAX(snapshot_date) FROM universe_eligibility)", [sid])}
+
+
+def pick_breakdown(sid, pick_date=None):
+    """How the ranking scored `sid` on `pick_date` (default: its newest pick): one row per WIRED
+    factor of its tier with the raw value, within-tier percentile (0-1, None = no value), tier weight,
+    contribution = |w| x percentile (|w| x (1 - percentile) for a negative weight; a factor with no
+    value counts as the tier's middle, config.MISSING_FACTOR_SCORE, ADR 0064) and `eligible`
+    (False = the registry excludes the factor for this stock; it is shown but does not count).
+    Rebuilt from the screener's frozen inputs (pit_replay_snapshots), so it matches the stored score.
+    Returns None when nothing was frozen for that stock and date."""
+    import factors
+    if pick_date is None:
+        pick_date = db.scalar("SELECT MAX(pick_date) FROM daily_picks WHERE sid = ?", [sid])
+    me = db.one("SELECT cap_tier FROM pit_replay_snapshots WHERE sid = ? AND snapshot_date = ?", [sid, pick_date])
+    if not me:
+        return None
+    tier = me["cap_tier"]
+    rows = native_rows("SELECT sid, inputs_json, output_json FROM pit_replay_snapshots "
+                       "WHERE snapshot_date = ? AND cap_tier = ?", [pick_date, tier])
+    d = pd.DataFrame([{"sid": r["sid"], **json.loads(r["inputs_json"] or "{}")} for r in rows])
+    no = ineligible_signals(sid)
+    comps, num, den = [], 0.0, 0.0
+    for key, w in sorted(factors.weights().get(tier, {}).items(), key=lambda kv: -abs(kv[1])):
+        col = factors.SCREENER_TIER_COLS.get((key, tier)) or factors.SCREENER_COLS.get(key)
+        if col not in d.columns:
+            continue
+        pct = d[col].rank(pct=True)
+        p = pct[d["sid"] == sid].iloc[0]
+        p = None if p != p else float(p)
+        raw = d.loc[d["sid"] == sid, col].iloc[0]
+        c = abs(w) * (config.MISSING_FACTOR_SCORE if p is None else (1 - p if w < 0 else p))
+        num += c
+        den += abs(w)
+        comps.append({"factor": key, "value": None if raw != raw else raw, "tier_percentile": p, "weight": w,
+                      "contribution": c, "eligible": key not in no})
+    for c in comps:
+        c["share_of_score"] = c["contribution"] / num if num else None
+    return {"as_of": pick_date, "tier": tier, "tier_size": len(d), "base_score": num / den if den else None,
+            "contributions": comps}
 
 _SNAPSHOT_COLS = """,
       ds.close_price, ds.piotroski_f, ds.cf_accruals, ds.bs_accruals,
@@ -359,15 +409,38 @@ def _price_metrics(df):
     return result
 
 
+def adjusted_closes(df, sid_adjustments):
+    """`df` [date, close] of ONE sid with `close` replaced by the corporate-action
+    adjusted close (splits, bonuses, dividends: the same `signals._prices.apply_adjustments`
+    the screener and the backtest use), so a 1:2 split is not a -50% move.
+    `sid_adjustments` is that sid's corporate_adjustments rows [sid, ex_date, factor]."""
+    if df.empty or sid_adjustments is None or len(sid_adjustments) == 0:
+        return df
+    from signals._prices import apply_adjustments
+    px = apply_adjustments(df.assign(sid="_"), sid_adjustments.assign(sid="_"), "9999-12-31")
+    return df.assign(close=px["adj_close"].values)
+
+
 def price_metrics(sids):
     """{sid: {close_price, price_date, return_1m/3m/6m/1y (%), high_52w, low_52w,
-    pct_from_52w_high, rsi_14}} — {} for a sid with fewer than 5 prices."""
+    pct_from_52w_high, rsi_14}} — {} for a sid with fewer than 5 prices.
+    close_price is the raw last close (what the stock trades at); returns, the 52w range
+    and RSI are computed on adjusted closes, so a split or bonus is not a crash."""
     recs = latest_rows("stock_prices", "date, close", sids,
                        order_col="date", n=RETURN_WINDOWS[-1][1] + 8, where="close > 0")
     out = {sid: {} for sid in sid_params(sids)[0]}
     if recs:
+        found = list(dict.fromkeys(r["sid"] for r in recs))
+        ph = ",".join("?" * len(found))
+        adj = pd.DataFrame(native_rows(
+            f"SELECT sid, ex_date, factor FROM corporate_adjustments WHERE sid IN ({ph})", found),
+            columns=["sid", "ex_date", "factor"])
         for sid, g in pd.DataFrame(recs).groupby("sid", sort=False):
-            out[sid] = _price_metrics(g.reset_index(drop=True))
+            g = g.sort_values("date").reset_index(drop=True)
+            m = _price_metrics(adjusted_closes(g, adj[adj["sid"] == sid]))
+            if m:
+                m["close_price"] = round(float(g["close"].iloc[-1]), 2)      # raw: the traded price
+            out[sid] = m
     return out
 
 

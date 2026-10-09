@@ -26,6 +26,10 @@ def tmpdb(tmp_path, monkeypatch):
             book_to_price REAL, consensus_signal REAL, promoter_qoq REAL, delivery_pct REAL,
             mom_6m REAL, mom_12m REAL, smart_money REAL, sentiment_7d REAL);
         CREATE TABLE stock_prices (sid TEXT, date TEXT, close REAL);
+        CREATE TABLE corporate_adjustments (sid TEXT, ex_date TEXT, factor REAL, n_events INTEGER, inds TEXT);
+        CREATE TABLE pit_replay_snapshots (sid TEXT, snapshot_date TEXT, cap_tier TEXT, rank INTEGER,
+            final_score REAL, inputs_json TEXT, output_json TEXT);
+        CREATE TABLE universe_eligibility (sid TEXT, signal TEXT, snapshot_date TEXT, eligible INTEGER);
         CREATE TABLE pipeline_log (id INTEGER PRIMARY KEY, run_date TEXT, step_name TEXT,
             status TEXT, rows_affected INTEGER, duration_sec REAL, error_message TEXT,
             started_at TEXT, finished_at TEXT);
@@ -89,6 +93,24 @@ def test_price_metrics_are_trading_day_returns(tmpdb):
     assert views.price_metrics(["NOPE"]) == {"NOPE": {}}
 
 
+def test_price_metrics_see_a_split_as_no_move(tmpdb):
+    """BLSE 2026-10: a 1:2 split halves the raw close; the return, the distance from the
+    high and RSI must read the adjusted series (flat), the shown price stays the raw one."""
+    days = pd.bdate_range("2025-10-01", periods=270)
+    ex = days[-5].strftime("%Y-%m-%d")
+    closes = [(200.0 if d < days[-5] else 100.0) * (1.0 + 0.001 * (i % 2)) for i, d in enumerate(days)]
+    rows = [(sid, d.strftime("%Y-%m-%d"), c) for sid in ("S", "N") for d, c in zip(days, closes)]
+    _exec(tmpdb, "INSERT INTO stock_prices VALUES (?,?,?)", rows)
+    _exec(tmpdb, "INSERT INTO corporate_adjustments VALUES (?,?,?,?,?)", [("S", ex, 0.5, 1, "SPLIT")])
+    pm = views.price_metrics(["S", "N"])
+    s, n = pm["S"], pm["N"]
+    assert abs(s["return_1m"]) < 0.5 and abs(s["return_1y"]) < 0.5
+    assert abs(s["pct_from_52w_high"]) < 0.5 and 99.5 < s["high_52w"] < 101
+    assert s["close_price"] == 100.1                      # the traded price, not adjusted
+    assert n["return_1m"] < -49 and n["pct_from_52w_high"] < -49      # no adjustment row: raw
+    assert n["rsi_14"] < 20 and s["rsi_14"] > 40          # a crash reads oversold, a split does not
+
+
 def test_pipeline_status_marks_aborted_and_prefers_completion(tmpdb):
     now = datetime.now()
     old = (now - timedelta(hours=2)).isoformat()
@@ -142,3 +164,44 @@ def test_flow_edges_are_the_graph(monkeypatch):
     assert {(e["from"], e["to"]) for e in ov["edges"]} == pairs
     names = [s["name"] for layer in ov["layers"] for s in layer["steps"]]
     assert sorted(names) == sorted(s["name"] for s in config.PIPELINE_STEPS)
+
+
+def test_pick_data_and_breakdown_skip_factors_the_registry_excludes(tmpdb, monkeypatch):
+    """A bank has no accruals/Piotroski by design: they are not 'used', not 'missing', and the
+    breakdown flags them ineligible; a factor with no value counts as the tier's middle."""
+    import json
+    import factors
+    monkeypatch.setattr(factors, "SIGNAL_WEIGHTS", {"LARGE": {"momentum": 0.5, "piotroski": 0.3, "accruals": 0.2}})
+    monkeypatch.setattr(factors, "weights", lambda scheme="SIGNAL_WEIGHTS": factors.SIGNAL_WEIGHTS)
+    cols = {"momentum": "mom", "piotroski": "piot", "accruals": "acc"}
+    monkeypatch.setattr(factors, "SCREENER_COLS", cols)
+    monkeypatch.setattr(factors, "SCREENER_TIER_COLS", {})
+    _exec(tmpdb, "INSERT INTO pit_replay_snapshots VALUES (?,?,?,?,?,?,?)", [
+        ("BANK", "2026-10-01", "LARGE", 1, 0.5, json.dumps({"mom": 3.0, "piot": None, "acc": None}), "{}"),
+        ("B", "2026-10-01", "LARGE", 2, 0.4, json.dumps({"mom": 1.0, "piot": 5, "acc": 1.0}), "{}")])
+    _exec(tmpdb, "INSERT INTO universe_eligibility VALUES (?,?,?,?)",
+          [("BANK", "piotroski", "2026-10-01", 0), ("BANK", "accruals", "2026-10-01", 0)])
+    d = views.pick_data({"eligible_coverage": 1.0, "cap_tier": "LARGE"}, "BANK", "2026-10-01")
+    assert (d["factors_applicable"], d["factors_used"], d["missing"]) == (1, 1, [])
+    b = views.pick_breakdown("BANK", "2026-10-01")
+    by = {c["factor"]: c for c in b["contributions"]}
+    assert [by[k]["eligible"] for k in ("momentum", "piotroski", "accruals")] == [True, False, False]
+    assert by["momentum"]["tier_percentile"] == 1.0
+    assert by["piotroski"]["tier_percentile"] is None and by["piotroski"]["contribution"] == pytest.approx(0.15)
+    assert views.pick_breakdown("NOPE", "2026-10-01") is None
+
+
+def test_quarterly_yoy_is_none_without_a_prior_year_quarter(tmpdb):
+    """The oldest four quarters have no same quarter a year earlier: YoY is None ('—'), never a
+    missing key (a template reads that as a value and printed '+0.0%')."""
+    from cockpit import api
+    c = sqlite3.connect(tmpdb)
+    c.execute("CREATE TABLE quarterly_income (sid TEXT, period TEXT, end_date TEXT, reporting TEXT, revenue REAL, "
+              "net_income REAL, eps REAL, ebitda REAL, operating_profit REAL, pbt REAL, operating_expenses REAL)")
+    c.executemany("INSERT INTO quarterly_income VALUES ('X',?,?,?,?,?,1,0,0,0,50)",
+                  [(f"Q{i}", f"2025-{i + 1:02d}-28", "consolidated", 100.0 + i * 10, 10.0 + i) for i in range(6)])
+    c.commit()
+    c.close()
+    qs = list(reversed(api.get_quarterly_financials("X")["quarters"]))      # oldest first
+    assert [q["revenue_yoy"] for q in qs[:4]] == [None] * 4 and [q["pat_yoy"] for q in qs[:4]] == [None] * 4
+    assert qs[4]["revenue_yoy"] == 40.0 and qs[5]["pat_yoy"] == pytest.approx(36.4)

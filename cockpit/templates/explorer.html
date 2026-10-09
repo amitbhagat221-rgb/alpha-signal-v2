@@ -1,10 +1,21 @@
 {% extends "base.html" %}
 {% from "_components.html" import tab_bar %}
+{% block title %}{{ page_title("Stock Explorer") }}{% endblock %}
 
 {% block content %}
 
-<div class="section-title">Stock Explorer</div>
-<div class="u-muted" style="margin: -8px 0 16px; font-size: 13px;">Find any stock with the search box (press / on a keyboard).</div>
+<h1 class="section-title">Stock Explorer</h1>
+<div class="u-muted explorer-sub">Find any stock with the search box (press / on a keyboard). Tile colour is the within-tier score{% if pick_date %} as of {{ pick_date }}{% endif %}; tiers are never compared with each other.</div>
+
+<div class="hm-legend" aria-label="Heat map legend">
+    <span><i class="hm-key hm-s5"></i>65+ top</span>
+    <span><i class="hm-key hm-s4"></i>50-64</span>
+    <span><i class="hm-key hm-s3"></i>40-49</span>
+    <span><i class="hm-key hm-s2"></i>30-39</span>
+    <span><i class="hm-key hm-s1"></i>below 30</span>
+    <span><i class="hm-key hm-na"></i>not ranked</span>
+    <span class="u-muted">score out of 100</span>
+</div>
 
 <div x-data="{ tab: 'all', loaded: { all: true } }" x-cloak>
 
@@ -12,38 +23,58 @@
 {% for t in all_tiers() %}{% set _ = tier_tabs.append((t, t|tier_label ~ ('' if t in pickable_tiers() else ' · excluded from picks'))) %}{% endfor %}
 {{ tab_bar(tier_tabs) }}
 
-<!-- Tier Heat Maps -->
-<div style="display: flex; flex-direction: column; gap: 20px;">
+<div class="hm-stack">
     {% for tier_name, tier_stocks in tiers.items() %}
-    <div class="card" x-show="tab === 'all' || tab === '{{ tier_name }}'" style="padding: 16px;">
-        <div class="tier-header" style="margin-bottom: 12px;
-            border-left: 3px solid {{ tier_name|tier_color }}; padding-left: 12px;">
+    <section class="card hm-card" x-show="tab === 'all' || tab === '{{ tier_name }}'" style="--tier: {{ tier_name|tier_color }};">
+        <h2 class="tier-header hm-head">
             {{ tier_name }} CAP
-            <span style="color: var(--text-muted); font-weight: 400; letter-spacing: 0;">
+            <span class="hm-count">
                 ({{ tier_stocks|length }} stocks)
                 {% if tier_name not in pickable_tiers() %}{% if tier_name == 'MICRO' %} · ADTV&lt;₹1Cr + (mcap&lt;₹500Cr OR Piot≤3 OR &lt;4q){% endif %} · excluded from daily_picks{% endif %}
             </span>
-        </div>
-        <div style="display: flex; flex-wrap: wrap; gap: 4px;">
+        </h2>
+        {% if tier_stocks %}
+        <div class="hm-grid">
             {% for stock in tier_stocks %}
-            <a href="/explorer/{{ stock.sid }}" title="{{ stock.ticker }} · {{ stock.name }} — Score: {{ '%.0f'|format(stock.score * 100) }}"
-               style="width: 48px; height: 32px; border-radius: 4px; display: flex;
-                      align-items: center; justify-content: center; font-size: 8px;
-                      font-weight: 600; text-decoration: none; color: white;
-                      font-family: 'JetBrains Mono', monospace;
-                      {% if stock.score >= 0.65 %}background: var(--green);
-                      {% elif stock.score >= 0.5 %}background: rgba(34, 197, 94, 0.4);
-                      {% elif stock.score >= 0.4 %}background: var(--border-accent); color: var(--text-secondary);
-                      {% elif stock.score >= 0.3 %}background: rgba(245, 158, 11, 0.4);
-                      {% else %}background: rgba(239, 68, 68, 0.4);{% endif %}">
-                {{ stock.ticker[:5] }}
-            </a>
+            {%- set sc = stock.score -%}
+            <a href="/explorer/{{ stock.sid }}" class="hm-tile {{ 'hm-na' if sc is none else 'hm-s5' if sc >= 0.65 else 'hm-s4' if sc >= 0.5 else 'hm-s3' if sc >= 0.4 else 'hm-s2' if sc >= 0.3 else 'hm-s1' }}"
+               data-tip="{{ stock.ticker }} · {{ stock.name }} · {{ 'not ranked' if sc is none else 'score ' ~ (sc * 100)|round|int ~ ' / 100' }}"
+               aria-label="{{ stock.name }}, {{ 'not ranked' if sc is none else 'score ' ~ (sc * 100)|round|int ~ ' out of 100' }}">{{ stock.ticker }}</a>
             {% endfor %}
         </div>
-    </div>
+        {% else %}
+        <div class="u-muted">No stocks in this tier.</div>
+        {% endif %}
+    </section>
     {% endfor %}
+    {% if not tiers %}<div class="card u-muted">No ranked stocks yet.</div>{% endif %}
 </div>
 
 </div>{# / tabs root #}
 
+<style>
+.explorer-sub { margin: -8px 0 12px; font-size: 13px; }
+.hm-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-bottom: 14px; font-size: 11px; color: var(--text-secondary); }
+.hm-legend span { display: inline-flex; align-items: center; gap: 5px; }
+.hm-key { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
+.hm-stack { display: flex; flex-direction: column; gap: 20px; }
+.hm-card { padding: 16px; }
+.hm-head { margin-bottom: 12px; border-left: 3px solid var(--tier); padding-left: 12px; }
+.hm-count { color: var(--text-muted); font-weight: 400; letter-spacing: 0; text-transform: none; }
+.hm-grid { display: flex; flex-wrap: wrap; gap: 4px; }
+.hm-tile { position: relative; width: 68px; height: 32px; padding: 0 3px; border-radius: 4px; font-size: 10px; font-weight: 600; text-decoration: none;
+           color: var(--text-primary); font-family: 'JetBrains Mono', monospace;
+           white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; line-height: 32px; text-align: center; }
+.hm-tile:hover, .hm-tile:focus-visible { outline: 1px solid var(--text-secondary); }
+/* the hover/focus popover: one data-tip per tile, drawn only when shown (no per-tile markup) */
+.hm-tile:hover::after, .hm-tile:focus-visible::after { content: attr(data-tip); position: fixed; z-index: 100; transform: translate(-50%, -140%);
+           padding: 6px 10px; background: var(--bg-card); border: 1px solid var(--border-accent); border-radius: 8px; font-size: 12px;
+           font-weight: 400; line-height: 1.4; white-space: normal; max-width: 260px; pointer-events: none; box-shadow: 0 8px 24px rgba(0,0,0,.5); }
+.hm-s5, .hm-key.hm-s5 { background: color-mix(in srgb, var(--green) 55%, transparent); }
+.hm-s4, .hm-key.hm-s4 { background: color-mix(in srgb, var(--green) 25%, transparent); }
+.hm-s3, .hm-key.hm-s3 { background: var(--border-accent); }
+.hm-s2, .hm-key.hm-s2 { background: color-mix(in srgb, var(--amber) 28%, transparent); }
+.hm-s1, .hm-key.hm-s1 { background: color-mix(in srgb, var(--red) 28%, transparent); }
+.hm-na,  .hm-key.hm-na  { background: var(--bg-card-hover); color: var(--text-secondary); }
+</style>
 {% endblock %}
