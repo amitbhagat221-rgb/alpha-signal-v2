@@ -1,5 +1,6 @@
 {% extends "base.html" %}
-{% from "_news_theme.html" import styles, heat_chip, sector_chips, stock_links %}
+{% from "_news_theme.html" import styles, heat_chip, sector_chips %}
+{% block title %}{{ page_title("News") }}{% endblock %}
 
 {% block content %}
 {{ styles() }}
@@ -7,10 +8,10 @@
 <a href="/news" class="ns-back">&larr; Back to News</a>
 
 <div class="ns-head" style="margin-top: 12px;">
-    <div class="ns-h1">{{ t.title }}</div>
+    <h1 class="ns-h1">{{ t.title }}</h1>
     <div>{% if t.status == 'retired' %}<span class="mono ns-chip" style="color: var(--text-muted); border-color: var(--text-muted);">Over for now</span> {% endif %}{{ heat_chip(t.heat) }}</div>
 </div>
-<div class="mono u-muted-11">{{ t.n7 }} headline{{ '' if t.n7 == 1 else 's' }} this week · {{ t.n_total }} filed in all{% if t.updated_at %} · note written {{ t.updated_at[:10] }}{% endif %}</div>
+<div class="mono u-muted-11">{{ t.n7 }} headline{{ '' if t.n7 == 1 else 's' }} this week · {{ t.n_total }} filed in all{% if t.updated_at %} · note of {{ t.updated_at|short_date }}{% endif %}</div>
 
 {% if not t.stands_now %}
 <div class="card" style="margin-top: 14px;"><div class="ns-text">{{ t.scope }}</div><div class="ns-lab">No note yet</div></div>
@@ -26,12 +27,10 @@
     {% if t.gains or t.loses %}<div class="ns-lab">Who gains, who loses</div><div>{{ sector_chips(t.gains, t.loses) }}</div>{% endif %}
     {% if t.portfolio_line %}<div class="ns-text">{{ t.portfolio_line }}</div>{% endif %}
     {% if t.what_to_watch %}<div class="ns-lab">Keep an eye on</div><div class="ns-text">{{ t.what_to_watch }}</div>{% endif %}
-    {# "Stocks in the news" is hidden until the article-to-stock matching stops linking on common
-       words (OIL, GLOBAL, ROUTE under the oil theme); get_news_theme() still returns t.stocks. #}
     </div>
 {% endif %}
 
-<div class="ns-sec-head"><div class="section-title">Timeline</div></div>
+<div class="ns-sec-head"><h2 class="section-title">Timeline</h2></div>
 <div class="card">
 {% for h in t.timeline %}
     <div style="display: flex; gap: 12px; padding: 7px 0; {% if not loop.first %}border-top: 1px solid var(--border);{% endif %}">
@@ -43,8 +42,8 @@
 {% endfor %}
 </div>
 
-<div class="ns-sec-head"><div class="section-title">Sources</div></div>
-<div class="section-desc">Newest {{ t.articles|length }} of {{ t.n_total }} headlines.</div>
+<div class="ns-sec-head"><h2 class="section-title">Headlines</h2></div>
+<div class="section-desc">Newest {{ t.articles|length }} of {{ t.n_total }} headlines (each story once), to {{ t.articles[0].day if t.articles else "—" }}.</div>
 <div class="card">
 {% for a in t.articles %}
     <div style="padding: 7px 0; {% if not loop.first %}border-top: 1px solid var(--border);{% endif %}">

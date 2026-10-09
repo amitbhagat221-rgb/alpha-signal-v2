@@ -23,7 +23,7 @@ from cockpit._shared import _persisted_cache
 #   - mf_category_stats  category medians/deciles
 
 
-@_persisted_cache(600, name="mf_universe_pool")
+@_persisted_cache(600, name="mf_universe_pool_v2")
 def _mf_universe_pool():
     """Every active scheme joined to its LATEST mf_metrics row, plus an
     `investable` flag — the unfiltered pool that get_mf_universe_overview
@@ -37,7 +37,7 @@ def _mf_universe_pool():
     below breaks ties the way SQLite's scan did."""
     # Join to LATEST mf_metrics row per scheme (defensive — table should be clean
     # after the monthly compute, but stale rows from earlier runs can stick around).
-    return read_sql(
+    df = read_sql(
         """SELECT sm.scheme_code, sm.scheme_name, sm.amc, sm.category_norm,
                   sm.plan_type, sm.option_type,
                   m.nav, m.nav_date,
@@ -56,6 +56,29 @@ def _mf_universe_pool():
            WHERE sm.active = 1
            ORDER BY sm.rowid"""
     )
+    # "#k of N" inside the category, by the absolute composite_score (the same
+    # ordering score_percentile is computed from in signals.mf_metrics).
+    scored = df["composite_score"].notna()
+    grp = df[scored].groupby("category_norm")["composite_score"]
+    df.loc[scored, "cat_rank"] = grp.rank(ascending=False, method="min")
+    df.loc[scored, "cat_n"] = grp.transform("count")
+    return df
+
+
+def is_debt_category(category: str | None) -> bool:
+    """True for every debt-type category spelling ('Debt / Liquid',
+    'Income/Debt Oriented Schemes - ...'): the equity large-cap proxy is not a
+    benchmark for these."""
+    return "debt" in (category or "").lower()
+
+
+def mf_category_rank(scheme_code: str) -> tuple[int, int] | None:
+    """(rank, funds ranked) of a scheme inside its category by composite_score."""
+    df = _mf_universe_pool()
+    row = df[df["scheme_code"] == scheme_code]
+    if row.empty or row["cat_rank"].isna().iloc[0]:
+        return None
+    return int(row["cat_rank"].iloc[0]), int(row["cat_n"].iloc[0])
 
 
 def get_mf_universe_overview(category: str = None, amc: str = None,
@@ -113,11 +136,13 @@ def get_mf_universe_overview(category: str = None, amc: str = None,
         "ret_5y":    ("ret_5y_cagr", False),
         "sharpe_1y": ("sharpe_1y", False),
         "max_dd":    ("max_drawdown", False),
+        "nav":       ("nav", False),
         "name":      ("scheme_name", True),
     }
     col, ascending = sort_map.get(sort, sort_map["percentile"])
-    hits = df[keep].sort_values(col, ascending=ascending, kind="mergesort",
-                                na_position="first" if ascending else "last")
+    # Ties (the first page is all percentile 100) break by absolute score.
+    by, asc = ([col, "composite_score"], [ascending, False]) if col != "composite_score" else ([col], [False])
+    hits = df[keep].sort_values(by, ascending=asc, kind="mergesort", na_position="last")
     total = len(hits)
 
     # Page rows
@@ -131,6 +156,7 @@ def get_mf_universe_overview(category: str = None, amc: str = None,
         "page_size": page_size,
         "n_pages":   (int(total) + page_size - 1) // page_size,
         "sort":      sort,
+        "as_of":     (str(hits["nav_date"].dropna().max()) if hits["nav_date"].notna().any() else None),
         "filters":   {"category": category, "amc": amc, "plan": plan, "option": option, "q": q},
     }
 
@@ -207,10 +233,12 @@ def get_mf_detail(scheme_code: str) -> dict | None:
     )
     calendar_list = calendar.replace({float("nan"): None}).to_dict("records")
 
+    info_dict["is_debt"] = is_debt_category(info_dict.get("category_norm"))
     return {
         "info":     info_dict,
         "metrics":  metrics_dict,
         "calendar": calendar_list,
+        "cat_rank": mf_category_rank(scheme_code),
     }
 
 
@@ -346,7 +374,7 @@ def get_mf_compare(scheme_codes: list[str]) -> dict:
         i = info_by_code[code].replace({float("nan"): None}).to_dict()
         m = metrics_by_code.get(code)
         m = m.replace({float("nan"): None}).to_dict() if m is not None else {}
-        schemes.append({"info": i, "metrics": m})
+        schemes.append({"info": i, "metrics": m, "cat_rank": mf_category_rank(code)})
 
     cats = sorted({s["info"].get("category_norm") for s in schemes if s["info"].get("category_norm")})
     return {"schemes": schemes, "categories_seen": cats}

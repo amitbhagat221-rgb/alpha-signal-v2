@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% from "_news_theme.html" import styles, heat_chip, sector_chips, source_links %}
+{% block title %}{{ page_title("News") }}{% endblock %}
 
 {% block content %}
 {{ styles() }}
@@ -19,15 +20,15 @@
 </style>
 
 <div class="ns-wrap">
-<div class="ns-head"><div class="ns-h1">News</div></div>
+<div class="ns-head"><h1 class="ns-h1">News</h1></div>
 
 {# ── 1. Today ── #}
 <div class="ns-sec-head ns-head">
-    <div class="section-title">Today</div>
+    <h2 class="section-title">Today</h2>
     {% if today_ed %}<div class="mono u-muted-11">{{ today_ed.day }} · {{ today_ed.n_headlines }} headlines read</div>{% endif %}
 </div>
 {% for it in (today_ed.get('items') or []) %}
-<div class="card ns-item">
+<div class="card ns-item" id="today-{{ loop.index }}">
     <h3>{{ it.headline }}</h3>
     <div class="ns-text">{{ it.what }}</div>
     <div class="ns-lab">So what</div>
@@ -40,16 +41,22 @@
 {% endfor %}
 
 {# ── 2. The world in 7 themes ── #}
-<div class="ns-sec-head"><div class="section-title">The world in 7 themes</div></div>
+<div class="ns-sec-head"><h2 class="section-title">The world in 7 themes</h2></div>
 <div class="section-desc">The same seven themes every day. Counts are headlines filed under each theme in the last 7 days.</div>
+{% set moved_all = themes and (themes|selectattr('moved')|list|length == themes|length) %}
+{% set today_items = today_ed.get('items') or [] %}
 <div class="ns-grid">
 {% for t in themes %}
 <div class="card ns-card">
     <div class="ns-head">
         <h3><a href="/news/theme/{{ t.theme_id }}">{{ t.title }}</a></h3>
-        <div>{% if t.moved %}<span class="mono ns-chip ns-moved">Moved this week</span> {% endif %}{{ heat_chip(t.heat) }}</div>
+        <div>{% if t.moved and not moved_all %}<span class="mono ns-chip ns-moved">Moved this week</span> {% endif %}{{ heat_chip(t.heat) }}</div>
     </div>
     {% if t.stands_now %}
+    {# The note is weekly; a newer daily item on the same theme is shown first. #}
+    {% if t.updated_at and today_ed.day and today_ed.day > t.updated_at[:10] %}
+    {% for it in today_items %}{% if it.theme == t.theme_id %}<div class="ns-since">Since the note: <a href="#today-{{ loop.index }}">{{ it.headline }}</a></div>{% endif %}{% endfor %}
+    {% endif %}
     <div class="ns-text" style="color: var(--text-primary);">{{ t.stands_now }}</div>
     <div class="ns-lab">What is new</div>
     <div class="ns-text">{{ t.what_changed }}</div>
@@ -59,7 +66,7 @@
     <div class="ns-text">{{ t.scope }}</div>
     <div class="ns-lab">No note yet</div>
     {% endif %}
-    <div class="ns-meta mono">{{ t.n7 }} headline{{ '' if t.n7 == 1 else 's' }} this week</div>
+    <div class="ns-meta mono">{% if t.stands_now and t.updated_at %}Note of {{ t.updated_at|short_date }} · {% endif %}{{ t.n7 }} headline{{ '' if t.n7 == 1 else 's' }} in the 7 days to {{ today|short_date }}</div>
 </div>
 {% else %}
 <div class="card"><div class="ns-text">No themes are set up.</div></div>
@@ -68,7 +75,7 @@
 
 {# ── 3. On the radar ── #}
 <div class="ns-sec-head ns-head">
-    <div class="section-title">On the radar</div>
+    <h2 class="section-title">On the radar</h2>
     {% if week %}<div class="mono u-muted-11">week to {{ week.as_of }}</div>{% endif %}
 </div>
 <div class="section-desc">Early signs that do not fit a theme yet.</div>
@@ -85,7 +92,7 @@
 {% endfor %}
 
 {# ── 4. Sectors to watch ── #}
-<div class="ns-sec-head"><div class="section-title">Sectors to watch</div></div>
+<div class="ns-sec-head"><h2 class="section-title">Sectors to watch</h2></div>
 <div class="section-desc">A reading of this week's news, not a recommendation.</div>
 {% if week and (week.favour or week.careful) %}
 <div class="ns-two">
@@ -104,7 +111,7 @@
     <summary style="cursor: pointer; font-weight: 600; color: var(--text-secondary);">News flow by sector</summary>
     {% if radar %}
     <div class="section-desc" style="margin-top: 8px;">Articles about each sector's stocks this week, against its usual week (average of the 4 weeks before). Units: articles per week. As of {{ today }}.</div>
-    <div style="overflow-x: auto;">
+    <div class="table-wrap">
     <table class="ns-table">
         <thead><tr><th class="l">Sector</th><th class="l">Coverage</th><th>This week</th><th class="ns-hide-m">Usual week</th><th class="l">Driving theme</th></tr></thead>
         <tbody>
