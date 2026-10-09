@@ -651,7 +651,9 @@ TASK_KINDS = {
         "ingest": _ingest_say_do, "undo": _undo_say_do,
         "schema": {**_BRIEF_SCHEMA, "required": ["promises", "verdict", "summary"]},
         "instructions": lambda: _BRIEF_INSTRUCTIONS,
-        "batch": 3, "deadline_hours": None, "default_days": None, "ledger_step": "say_do",
+        # one per claim: a brief is ~16-18 KB, and a 3-task claim (~53 KB) was too large for
+        # the worker, which stopped and left its leases to expire (9 failed, 2026-10-04)
+        "batch": 1, "deadline_hours": None, "default_days": None, "ledger_step": "say_do",
     },
     "regulatory": {
         "export": _export_regulatory, "validate": _validate_regulatory,
