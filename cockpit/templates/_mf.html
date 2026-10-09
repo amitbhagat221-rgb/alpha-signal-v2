@@ -1,0 +1,27 @@
+{# Mutual-fund scoring vocabulary: ONE explanation and ONE band set for the list,
+   the fund page and compare. mf_scores.composite_score is ABSOLUTE (signals/mf_metrics.py
+   _absolute_quality_score); the within-category rank is that same score ordered inside
+   the category, shown as plain text "#k of N" and never as a coloured score. #}
+
+{% macro band_class(s) -%}
+{% if s >= 70 %}green{% elif s >= 55 %}blue{% elif s >= 35 %}amber{% else %}red{% endif %}
+{%- endmacro %}
+
+{% macro score_pill(s) -%}
+{% if s is not none %}<span class="pill pill-{{ band_class(s)|trim }} num">{{ '%.0f' % s }}</span>{% else %}<span class="mf-na">—</span>{% endif %}
+{%- endmacro %}
+
+{% macro rank_text(rank, n=None) -%}
+{% if n is none and rank %}{% set n = rank[1] %}{% set rank = rank[0] %}{% endif %}
+{%- if rank %}#{{ '%d' % rank }} of {{ '%d' % n }}{% else %}—{% endif %}
+{%- endmacro %}
+
+{% macro score_note() -%}
+<strong>Composite score</strong>, 0-100, absolute (not category-relative):
+(3Y return base 0-50 × Sharpe multiplier 0.5-1.4×) + drawdown adj ±15 + consistency adj 0-15.
+Bands: <span class="pill pill-green">70+</span> strong
+<span class="pill pill-blue">55-70</span> good
+<span class="pill pill-amber">35-55</span> average
+<span class="pill pill-red">&lt;35</span> weak.
+The <strong>rank</strong> (#k of N) orders funds by that same score inside their category.
+{%- endmacro %}
