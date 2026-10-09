@@ -884,11 +884,14 @@ def get_quarterly_financials(sid):
                     .astype(object).where(lambda x: x.notna(), None))
     quarters = df_records.to_dict("records")
     for i, q in enumerate(quarters):
+        # None (shown "—") without a prior-year quarter: never a missing key, which a
+        # template reads as a value and prints as "+0.0%"
+        q["revenue_yoy"] = q["pat_yoy"] = None
         if i >= 4:
             prior = quarters[i - 4]
-            if prior.get("revenue") and prior["revenue"] > 0:
+            if prior.get("revenue") and prior["revenue"] > 0 and q.get("revenue") is not None:
                 q["revenue_yoy"] = round((q["revenue"] / prior["revenue"] - 1) * 100, 1)
-            if prior.get("net_income") and prior["net_income"] != 0:
+            if prior.get("net_income") and prior["net_income"] != 0 and q.get("net_income") is not None:
                 q["pat_yoy"] = round((q["net_income"] / prior["net_income"] - 1) * 100, 1)
 
     # TTM (last 4 quarters, latest first)
