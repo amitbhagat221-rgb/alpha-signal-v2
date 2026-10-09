@@ -351,7 +351,7 @@
         {% set wsum = bd.contributions|sum(attribute="weight")|abs if false else (bd.contributions|map(attribute="weight")|map("abs")|sum) %}
         <div class="table-wrap">
         <table class="conv-table">
-            <thead><tr><th>Factor</th><th class="num">Value</th><th>Percentile in tier</th><th class="num">Weight</th><th class="num">Points</th></tr></thead>
+            <thead><tr><th>Factor</th><th class="num">Value</th><th>Percentile in tier</th><th class="num conv-w">Weight</th><th class="num">Points</th></tr></thead>
             <tbody>
             {% for c in bd.contributions %}
             {% set neutral = c.tier_percentile is none or not c.eligible %}
@@ -367,7 +367,7 @@
                     <span class="num conv-pct-n">{{ pc|pct(0)|replace("%", "") }}</span>
                     {% endif %}
                 </td>
-                <td class="num">{{ c.weight|signed(2) }}</td>
+                <td class="num conv-w">{{ c.weight|signed(2) }}</td>
                 <td class="num">{{ (c.contribution / wsum * 100)|pct(1)|replace("%", "") }}</td>
             </tr>
             {% endfor %}
@@ -1612,6 +1612,7 @@ function initConsensusCharts() { once('forecast', initForecastChart); }
 .conv-table { width: 100%; font-size: 12px; border-collapse: collapse; }
 .conv-table th { text-align: left; color: var(--text-muted); font-size: 10px; text-transform: uppercase; letter-spacing: .5px; padding: 6px 8px 6px 0; }
 .conv-table th.num { text-align: right; }
+@media (max-width: 600px) { .conv-table .conv-w { display: none; } }
 .conv-table td { padding: 8px 8px 8px 0; border-top: 1px solid var(--border); vertical-align: middle; }
 .conv-neutral td:first-child { color: var(--text-secondary); }
 .conv-pct { display: inline-block; vertical-align: middle; width: 80px; height: 6px; border-radius: 3px; background: var(--border); overflow: hidden; }

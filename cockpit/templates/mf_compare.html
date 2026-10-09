@@ -106,7 +106,8 @@
             ('vs large-cap proxy, 1Y (pts)', 'bench_spread_1y', '{:+.1f}%', True),
             ('vs large-cap proxy, 3Y (pts)', 'bench_spread_3y', '{:+.1f}%', True),
         ] %}
-        {% for label, key, fmt, higher_better in rows %}
+        {% set any_debt = bundle.schemes|selectattr('info.is_debt')|list|length > 0 %}
+        {% for label, key, fmt, higher_better in rows if not (any_debt and key.startswith('bench_')) %}
         {% set values = bundle.schemes|map(attribute='metrics.' ~ key)|list %}
         {% set numeric_vals = values|select('number')|list %}
         {% set best_val = (numeric_vals|max if higher_better else numeric_vals|min) if numeric_vals and higher_better is not none and numeric_vals|length > 1 else None %}

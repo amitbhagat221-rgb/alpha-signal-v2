@@ -124,4 +124,16 @@ def macro_label(ident):
     return out if out[:1].isupper() else out[:1].upper() + out[1:]
 
 
+def macro_text(text):
+    """A stored driver summary ("iip_consumer_durables +11.1% · usdinr 88.2") with each
+    leading series id put in words; sentences are returned unchanged."""
+    def one(part):
+        head, _, rest = part.partition(" ")
+        if head and head == head.lower() and ("_" in head or head in ("usdinr", "vix")):
+            return (macro_label(head) + " " + rest).strip()
+        return part
+    return " · ".join(one(p) for p in str(text or "").split(" · "))
+
+
 FILTERS["macro_label"] = macro_label
+FILTERS["macro_text"] = macro_text

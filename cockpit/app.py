@@ -176,13 +176,17 @@ def morning_brief(request: Request):
 
 
 @app.get("/actions", response_class=HTMLResponse)
-def actions(request: Request):
+def actions(request: Request, all: int = 0):
     # Copy, don't mutate: get_action_candidates() hands back its cached dicts
     # and handlers now run concurrently in the threadpool.
     action_data = {k: [dict(s) for s in v] if isinstance(v, list) else v
                    for k, v in api.get_action_candidates().items()}
     # Price and target per candidate: two batched queries (the dossier and
     # insider per-stock loads were never rendered).
+    show_all = bool(all)
+    for sec in ("buy", "exit"):
+        action_data[sec + "_shown"] = len(action_data[sec]) if show_all else min(len(action_data[sec]), api.ACTION_CAP)
+        action_data[sec] = action_data[sec][:action_data[sec + "_shown"]]
     sids = [s.get("sid") for sec in ("buy", "watch", "exit") for s in action_data.get(sec, [])]
     pm = api.get_stock_price_metrics_batch(sids)
     ac = api.get_analyst_consensus_batch(sids)
@@ -191,7 +195,7 @@ def actions(request: Request):
             stock["pm"] = pm.get(stock.get("sid"), {})
             stock["ac"] = ac.get(stock.get("sid"), {})
     return templates.TemplateResponse(request, "action_queue.html", {
-        "page": "actions", "actions": action_data,
+        "page": "actions", "actions": action_data, "show_all": show_all,
     })
 
 

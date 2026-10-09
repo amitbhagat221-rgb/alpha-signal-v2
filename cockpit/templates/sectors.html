@@ -193,7 +193,7 @@
                 {% for s in pos[:5] %}<a class="sd-fs" href="/sectors?sector={{ s.sector | urlencode }}#per-sector">{{ s.sector }}</a>{% if not loop.last %}, {% endif %}{% endfor %}{% if pos | length > 5 %} +{{ pos | length - 5 }}{% endif %}
             </div>
             {% if pos[0].summary %}
-            <div class="sd-force-quote">"{{ pos[0].summary }}"</div>
+            <div class="sd-force-quote">"{{ pos[0].summary|macro_text }}"</div>
             {% endif %}
         </div>
         {% endif %}
@@ -204,7 +204,7 @@
                 {% for s in neg[:5] %}<a class="sd-fs" href="/sectors?sector={{ s.sector | urlencode }}#per-sector">{{ s.sector }}</a>{% if not loop.last %}, {% endif %}{% endfor %}{% if neg | length > 5 %} +{{ neg | length - 5 }}{% endif %}
             </div>
             {% if neg[0].summary %}
-            <div class="sd-force-quote">"{{ neg[0].summary }}"</div>
+            <div class="sd-force-quote">"{{ neg[0].summary|macro_text }}"</div>
             {% endif %}
         </div>
         {% endif %}

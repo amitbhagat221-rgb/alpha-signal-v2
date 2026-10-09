@@ -1,8 +1,8 @@
 {% from "_pb_macros.html" import stock_cell, num, chip, flag_cell, change_cell, investor, bt_row, th, list_tools with context %}
 <div class="card" style="margin-top: 14px;" x-data="pbList()">
     <div class="pb-head">
-        <h2 class="section-title">{{ d.rows|length }} managements checked against their own words</h2>
-        <div class="mono u-muted-11">{% if d.total %}{{ d.total - d.queued }} of {{ d.total }} read{% else %}not started{% endif %}</div>
+        <h2 class="section-title">{% if d.rows %}{{ d.rows|length }} managements checked against their own words{% else %}Managements checked against their own words{% endif %}</h2>
+        <div class="mono u-muted-11">{% if not d.rows %}no verdicts yet{% elif d.total %}{{ d.total - d.queued }} of {{ d.total }} read{% else %}not started{% endif %}</div>
     </div>
     <div class="section-desc">
         Fisher judged management by whether it does what it says. For each company, what management told investors it would do on an
@@ -10,7 +10,7 @@
     </div>
     {% if d.queued or not d.rows %}
     <div class="pb-note">
-        <strong>{% if d.queued %}{{ d.queued }} companies are still to be read.{% else %}Nothing has been read yet.{% endif %}</strong>
+        <strong>{% if d.queued %}{{ d.queued }} companies are still to be read.{% else %}No verdict file has been produced yet, so no management is shown.{% endif %}</strong>
         The reading is done by the LLM worker (05:07 and 14:37 UTC), after the daily jobs. Compounders, LARGE and MID companies with two recent call transcripts are covered.
     </div>
     {% endif %}

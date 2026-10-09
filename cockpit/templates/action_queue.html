@@ -25,6 +25,7 @@
 
 {% set buy_n   = actions.buy_total or 0 %}
 {% set exit_n  = actions.exit_total or 0 %}
+{% set cap = actions.cap or 10 %}
 {% set watch_n = (actions.watch or []) | length %}
 {% set days = actions.days or 7 %}
 
@@ -52,7 +53,7 @@
 {# ────────── BUY ────────── #}
 <div x-show="tab === 'buy'" x-cloak class="aq-sec">
     <h2 class="aq-head" style="color: var(--green);"><span class="aq-dot" style="background: var(--green);"></span>Consider Buying</h2>
-    <div class="aq-note">Stocks that entered the published picks in the last {{ days }} days, newest first{% if buy_n > (actions.buy or [])|length %} &middot; showing {{ actions.buy|length }} of {{ buy_n }}{% endif %}.</div>
+    <div class="aq-note">Stocks that entered the published picks in the last {{ days }} days, newest first{% if buy_n > (actions.buy or [])|length %} &middot; showing {{ actions.buy|length }} of {{ buy_n }} &middot; <a href="/actions?all=1">show all {{ buy_n }}</a>{% elif show_all and buy_n > cap %} &middot; all {{ buy_n }} &middot; <a href="/actions">show fewer</a>{% endif %}.</div>
     {% if actions.buy %}
     <div class="aq-list">
         {% for stock in actions.buy %}
@@ -106,7 +107,7 @@
 {# ────────── EXIT ────────── #}
 <div x-show="tab === 'exit'" x-cloak class="aq-sec">
     <h2 class="aq-head" style="color: var(--red);"><span class="aq-dot" style="background: var(--red);"></span>Consider Exiting</h2>
-    <div class="aq-note">Stocks that dropped out of the published picks in the last {{ days }} days, newest first{% if exit_n > (actions.exit or [])|length %} &middot; showing {{ actions.exit|length }} of {{ exit_n }}{% endif %}.</div>
+    <div class="aq-note">Stocks that dropped out of the published picks in the last {{ days }} days, newest first{% if exit_n > (actions.exit or [])|length %} &middot; showing {{ actions.exit|length }} of {{ exit_n }} &middot; <a href="/actions?all=1#exit">show all {{ exit_n }}</a>{% elif show_all and exit_n > cap %} &middot; all {{ exit_n }} &middot; <a href="/actions">show fewer</a>{% endif %}.</div>
     {% if actions.exit %}
     <div class="aq-list">
         {% for stock in actions.exit %}

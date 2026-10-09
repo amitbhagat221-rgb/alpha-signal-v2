@@ -200,13 +200,14 @@ def get_insider_signal_batch(sids):
 
 def get_stock_news(sid):
     """A5: Latest 5 news articles for a stock."""
-    return db.rows(
+    rows = db.rows(
         "SELECT na.title, na.source, na.published_at, na.url "
         "FROM news_articles na "
         "JOIN news_article_stocks nas ON na.article_id = nas.article_id "
         "WHERE nas.sid = ? ORDER BY na.published_at DESC LIMIT 5",
         [sid],
     )
+    return [{**r, "source": news_source_name(r["source"])} for r in rows]
 
 
 def get_bulk_deals(sid):
@@ -1083,7 +1084,7 @@ def get_sector_comparison(sid, sector):
     return base
 
 
-ACTION_CAP = 10
+ACTION_CAP = 10   # cards shown before "show all" (the route slices; the candidates are complete)
 
 
 def _one_per_sid(events):
@@ -1105,7 +1106,7 @@ def get_action_candidates():
 
     # Consider Buying: entered top picks recently + strong signals
     entries = _one_per_sid([c for c in changes if c.get("change_type") == "ENTRY" and c.get("color") == "green"])
-    for e in entries[:ACTION_CAP]:
+    for e in entries:
         sid = e.get("sid")
         if not sid:
             continue
@@ -1122,7 +1123,7 @@ def get_action_candidates():
 
     # Consider Exiting: dropped from top picks
     exits = _one_per_sid([c for c in changes if c.get("change_type") == "EXIT" and c.get("color") == "red"])
-    for e in exits[:ACTION_CAP]:
+    for e in exits:
         sid = e.get("sid")
         if not sid:
             continue

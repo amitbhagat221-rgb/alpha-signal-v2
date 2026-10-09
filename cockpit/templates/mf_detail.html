@@ -26,7 +26,8 @@
 .mf-score-label { font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px; margin-top:6px; }
 .mf-score-meta  { font-size:11px; color:var(--text-muted); margin-top:4px; }
 
-.mf-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); gap:12px; margin-bottom:16px; }
+.mf-grid { display:grid; grid-template-columns:repeat(4, 1fr); gap:12px; margin-bottom:16px; }
+@media (max-width:600px) { .mf-grid { grid-template-columns:repeat(2, 1fr); } }
 .mf-stat { padding:12px 14px; background:var(--bg-card); border-radius:6px; border:1px solid var(--border); min-width:0; }
 .mf-stat-label { font-size:10px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px; }
 .mf-stat-value { font-size:18px; font-weight:600; margin-top:4px; text-align:left; }
@@ -178,14 +179,16 @@ table.mini a.link { color:var(--accent); }
             {% if cal %}
             <div class="table-wrap">
             <table class="mini">
-                <thead><tr><th>Year</th><th class="num">Fund</th><th class="num">Large-cap proxy</th><th class="num">Spread (pts)</th></tr></thead>
+                <thead><tr><th>Year</th><th class="num">Fund</th>{% if not i.is_debt %}<th class="num">Large-cap proxy</th><th class="num">Spread (pts)</th>{% endif %}</tr></thead>
                 <tbody>
                 {% for c in cal %}
                 <tr>
                     <td>{{ c.year }}</td>
                     <td class="num {{ c.ret_pct|tone }}">{{ c.ret_pct|pct(1, signed=True) }}</td>
+                    {% if not i.is_debt %}
                     <td class="num">{{ c.bench_ret_pct|pct(1, signed=True) }}</td>
                     <td class="num">{% if c.ret_pct is not none and c.bench_ret_pct is not none %}{{ (c.ret_pct - c.bench_ret_pct)|signed(1) }}{% else %}—{% endif %}</td>
+                    {% endif %}
                 </tr>
                 {% endfor %}
                 </tbody>
@@ -403,10 +406,14 @@ function mfDetail(schemeCode) {
 
         drawRolling(data) {
             if (!data || !data.length) return;
-            const labels = data.map(d => d.anchor_date);
             const pct = v => v + '%';
-            this.line('rolling3yChart', 'Rolling 3Y CAGR', labels, data.map(d => d.rolling_3y_cagr), cssVar('--green'), cssVar('--green-bg'), pct);
-            this.line('rolling5yChart', 'Rolling 5Y CAGR', labels, data.map(d => d.rolling_5y_cagr), cssVar('--blue'), cssVar('--blue-bg'), pct);
+            // each window has its own anchors: 5Y starts years after 3Y, so no shared labels
+            const draw = (id, label, key, color, fill) => {
+                const pts = data.filter(d => d[key] != null);
+                this.line(id, label, pts.map(d => d.anchor_date), pts.map(d => d[key]), cssVar(color), cssVar(fill), pct);
+            };
+            draw('rolling3yChart', 'Rolling 3Y CAGR', 'rolling_3y_cagr', '--green', '--green-bg');
+            draw('rolling5yChart', 'Rolling 5Y CAGR', 'rolling_5y_cagr', '--blue', '--blue-bg');
         },
     };
 }
