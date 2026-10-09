@@ -1463,7 +1463,7 @@ def get_multibagger_overview(limit=60):
 from cockpit.mf import (
     get_mf_universe_overview, get_mf_category_heatmap, get_mf_detail,
     get_mf_nav_series, get_mf_rolling_returns, get_mf_peer_rank,
-    get_mf_holdings, get_mf_compare, get_mf_search,
+    get_mf_holdings, get_mf_compare, get_mf_search, is_debt_category,
 )
 
 
@@ -1935,6 +1935,53 @@ def _news_tier(source):
     return _NEWS_SOURCE_TIERS.get(source, (source, 4, 0.30))
 
 
+# Feed ids the tier table does not rank (topic-search and tech feeds), named for people.
+_NEWS_EXTRA_SOURCE_NAMES = {
+    "et_tech":          "Economic Times Tech",
+    "livemint_ai":      "Mint AI",
+    "gnews_trade":      "Google News: Trade",
+    "gnews_chips":      "Google News: Chips",
+    "gnews_transition": "Google News: Energy transition",
+}
+
+
+def news_source_name(source):
+    """A feed id as a publication name ('et_markets' -> 'Economic Times Markets'): the
+    ONE mapping every news page uses. An unknown id is shown as-is, never blank."""
+    return _NEWS_EXTRA_SOURCE_NAMES.get(source) or _NEWS_SOURCE_TIERS.get(source, (source,))[0] or ""
+
+
+def clean_news_text(text):
+    """A stored headline/summary as plain text: the feeds store HTML entities
+    ('S&amp;P'), and the template escapes again, so unescape here at read time. Run to a
+    fixed point (some rows are escaped twice); the stored rows are never rewritten."""
+    import html
+    text = text or ""
+    for _ in range(3):
+        un = html.unescape(text)
+        if un == text:
+            break
+        text = un
+    return text.strip()
+
+
+def _title_key(title):
+    """Normalised headline for de-duplicating the same story from two feeds."""
+    return re.sub(r"[^a-z0-9]+", " ", clean_news_text(title).lower()).strip()
+
+
+def dedupe_headlines(rows, key="title"):
+    """Keep the first row of each distinct (normalised) headline, order preserved."""
+    seen, out = set(), []
+    for r in rows:
+        k = _title_key(r.get(key))
+        if k and k in seen:
+            continue
+        seen.add(k)
+        out.append(r)
+    return out
+
+
 def _humanize_age(published_at):
     """Return '3h ago' / '2d ago' / '5m ago' style relative time."""
     if not published_at:
@@ -2032,7 +2079,7 @@ def _pick_news_bg(primary_topic, article_id, pool):
     return cands[zlib.crc32(str(article_id).encode()) % len(cands)]
 
 
-@_persisted_cache(300, name="_get_news_pool")
+@_persisted_cache(300, name="_get_news_pool_v2")
 def _get_news_pool(hours=720):
     """Cached pool: full ranked+deduped feed for the requested window.
 
@@ -2062,7 +2109,7 @@ def _get_news_pool(hours=720):
     img_pool = _news_image_pool()
     cards = []
     for _, r in df.iterrows():
-        label, tier_num, tier_score = _news_tier(r["source"])
+        _, tier_num, tier_score = _news_tier(r["source"])
         try:
             ts = pd.to_datetime(r["published_at"], errors="coerce", utc=True)
             hours_old = (now - ts).total_seconds() / 3600 if not pd.isna(ts) else 999
@@ -2096,10 +2143,10 @@ def _get_news_pool(hours=720):
 
         cards.append({
             "id": r["id"],
-            "headline": (r["headline"] or "").strip(),
-            "summary": summary,
+            "headline": clean_news_text(r["headline"]),
+            "summary": clean_news_text(summary),
             "source": r["source"],
-            "source_label": label,
+            "source_label": news_source_name(r["source"]),
             "source_tier": tier_num,
             "source_tier_score": tier_score,
             "source_url": r["source_url"],
@@ -2146,15 +2193,23 @@ def _get_news_pool(hours=720):
     return kept
 
 
+@_ttl_cache(300)
+def _theme_members():
+    """{article_id: theme_id} for every headline the news editor filed under a theme."""
+    return {str(r["article_id"]): r["theme_id"] for r in db.rows(
+        "SELECT article_id, theme_id FROM news_theme_articles WHERE theme_id IS NOT NULL")}
+
+
 _CONFIDENCE_RANK = {"high": 3, "medium": 2, "low": 1, None: 0}
 
 
 def get_news_feed(
     topic=None, tier=None, limit=80,
     q=None, sentiment=None, confidence=None,
-    hours=168, sort="smart", page=1, page_size=24,
+    hours=168, sort="smart", page=1, page_size=24, theme=None,
 ):
-    """Filter + sort + paginate over the cached news pool.
+    """Filter + sort + paginate over the cached news pool. `theme` = a plan-0021
+    theme id: only the headlines the editor filed under it.
 
     All inputs are user-facing query params from /news. The heavy work
     (DB + scoring + dedupe) is cached upstream in _get_news_pool — this
@@ -2174,7 +2229,16 @@ def get_news_feed(
             topic_counts.get(c.get("primary_topic") or "other", 0) + 1
         )
 
+    members = _theme_members()
+    theme_counts = {}
+    for c in pool_in_window:
+        th = members.get(c["id"])
+        if th:
+            theme_counts[th] = theme_counts.get(th, 0) + 1
+
     filtered = pool_in_window
+    if theme:
+        filtered = [c for c in filtered if members.get(c["id"]) == theme]
 
     if topic:
         def _topic_match(c):
@@ -2244,6 +2308,7 @@ def get_news_feed(
             "neutral": sum(1 for c in pool_in_window if c.get("sentiment") == "neutral"),
         },
         "topic_counts": topic_counts,
+        "theme_counts": theme_counts,
         "topics": _NEWS_TOPICS,
         "n_enriched": sum(1 for c in pool_in_window if c["enriched"]),
         "n_with_image": sum(1 for c in pool_in_window if c.get("image_url")),
@@ -2422,43 +2487,27 @@ def get_pick_outcomes_summary(top_n=10):
 
 # ───────────── News editor (plan 0021 P2) ─────────────
 # Read side of sources/news_editor.py: today's three items, the 7 fixed themes, the
-# weekly outlook. Stocks are counted from the theme's headlines; the LLM names none.
+# weekly outlook. Text is unescaped and sources named at read time (clean_news_text,
+# news_source_name); stored rows are never rewritten.
 
 def _articles_by_id(ids):
     ids = [str(i) for i in dict.fromkeys(ids)]
     if not ids:
         return {}
     qs = ",".join("?" * len(ids))
-    return {str(r["article_id"]): r for r in db.rows(
-        f"SELECT article_id, title, url, source FROM news_articles WHERE article_id IN ({qs})", ids)}
+    return {str(r["article_id"]): {**r, "title": clean_news_text(r["title"]),
+                                   "source": news_source_name(r["source"])}
+            for r in db.rows(f"SELECT article_id, title, url, source FROM news_articles "
+                             f"WHERE article_id IN ({qs})", ids)}
 
 
 def _with_sources(items):
-    """Each item's `article_ids` resolved to `sources` [{title, url, source}]."""
+    """Each item's `article_ids` resolved to `sources` [{title, url, source}]: source
+    named for people, the same headline from two feeds listed once."""
     lookup = _articles_by_id([a for it in items for a in it.get("article_ids", [])])
-    return [{**it, "sources": [lookup[str(a)] for a in it.get("article_ids", []) if str(a) in lookup]}
+    return [{**it, "sources": dedupe_headlines(
+                [lookup[str(a)] for a in it.get("article_ids", []) if str(a) in lookup])}
             for it in items]
-
-
-def _theme_stocks(theme_id, pick_sids):
-    from sources import news_editor as ne
-    recs = db.rows(
-        f"SELECT st.sid, st.ticker, st.name, COUNT(DISTINCT ta.article_id) AS n "
-        f"FROM news_theme_articles ta JOIN news_articles na ON na.article_id = ta.article_id "
-        f"JOIN news_article_stocks nas ON nas.article_id = ta.article_id "
-        f"JOIN stocks st ON st.sid = nas.sid WHERE ta.theme_id = ? AND {ne._ISO_DAY} AND {ne._DAY} > ? "
-        f"GROUP BY st.sid ORDER BY n DESC, st.name LIMIT 5", [theme_id, ne._shift(ne._today(), -30)])
-    for r in recs:
-        r["is_pick"] = r["sid"] in pick_sids
-    return recs
-
-
-def _current_pick_sids():
-    try:
-        df = views.picks(latest_pick_date(), per_tier="book")
-        return set(df["sid"]) if len(df) else set()
-    except Exception:
-        return set()
 
 
 @_ttl_cache(120)
@@ -2472,19 +2521,14 @@ def get_news_today():
 
 @_ttl_cache(120)
 def get_news_themes():
-    """The 7 themes in fixed order; each with its top 5 stocks (is_pick = in the latest picks)."""
+    """The 7 themes in fixed order, each with its note, headline counts and heat."""
     from sources import news_editor
-    picks = _current_pick_sids()
-    rows = news_editor.themes()
-    for r in rows:
-        r["stocks"] = _theme_stocks(r["theme_id"], picks)
-    return rows
+    return news_editor.themes()
 
 
 def get_news_theme(theme_id):
     """One theme (retired ones too): its note, timeline (newest first) and the newest
     30 headlines filed under it; None when the id is unknown."""
-    from sources import news_editor as ne
     row = db.one("SELECT theme_id FROM news_themes WHERE theme_id = ?", [theme_id])
     if not row:
         return None
@@ -2496,15 +2540,18 @@ def get_news_theme(theme_id):
                 t[f] = json.loads(t.get(f) or "[]")
             except ValueError:
                 t[f] = []
-        t.update({"n7": 0, "n_total": 0, "heat": "Quiet", "moved": False,
-                  "stocks": _theme_stocks(theme_id, _current_pick_sids())})
+        t.update({"n7": 0, "n_total": 0, "heat": "Quiet", "moved": False})
     t = dict(t)
     t["timeline"] = db.rows("SELECT as_of, what_changed FROM news_theme_history WHERE theme_id = ? "
                             "ORDER BY as_of DESC", [theme_id])
-    t["articles"] = db.rows(
+    # Over-fetch, then list each story once (two feeds carry the same headline).
+    arts = db.rows(
         f"SELECT na.title, na.url, na.source, substr(na.published_at, 1, 10) AS day "
         f"FROM news_theme_articles ta JOIN news_articles na ON na.article_id = ta.article_id "
-        f"WHERE ta.theme_id = ? ORDER BY na.published_at DESC LIMIT 30", [theme_id])
+        f"WHERE ta.theme_id = ? ORDER BY na.published_at DESC LIMIT 80", [theme_id])
+    for a in arts:
+        a["title"], a["source"] = clean_news_text(a["title"]), news_source_name(a["source"])
+    t["articles"] = dedupe_headlines(arts)[:30]
     return t
 
 
@@ -2541,3 +2588,23 @@ def get_sector_radar():
     for r in out:
         r.pop("_ratio")
     return out
+
+
+def _news_front_key():
+    """What the /news front page is built from: today's date and the newest daily
+    edition, weekly edition and theme note. A new edition changes the key."""
+    r = db.one("SELECT (SELECT MAX(day) FROM news_today) AS d, (SELECT MAX(as_of) FROM news_week) AS w, "
+               "(SELECT MAX(updated_at) FROM news_themes) AS t") or {}
+    return re.sub(r"[^0-9A-Za-z]+", "_", f"{pd.Timestamp.now():%Y-%m-%d}|{r.get('d')}|{r.get('w')}|{r.get('t')}")
+
+
+@_persisted_cache(3600, name="news_front")
+def _news_front(key):
+    return {"today_ed": get_news_today(), "themes": get_news_themes(),
+            "week": get_news_week(), "radar": get_sector_radar()}
+
+
+def get_news_front():
+    """Everything /news shows, in one cached bundle keyed on the edition (the page is
+    editorial: it only changes when an edition is written; 1 h TTL for headline counts)."""
+    return _news_front(_news_front_key())

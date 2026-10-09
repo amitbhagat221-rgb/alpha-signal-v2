@@ -65,7 +65,17 @@ def tone(x, pos="score-green", neg="score-red", zero=""):
     return pos if v > 0 else neg if v < 0 else zero
 
 
-FILTERS = {"signed": signed, "pct": pct, "inr": inr, "crore": crore, "tone": tone}
+def short_date(x):
+    """'2026-10-05' (or an ISO timestamp) -> '5 Oct'; missing / not a date -> DASH."""
+    import datetime as _dt
+    try:
+        d = _dt.date.fromisoformat(str(x)[:10])
+    except ValueError:
+        return DASH
+    return f"{d.day} {d:%b}"
+
+
+FILTERS = {"signed": signed, "pct": pct, "inr": inr, "crore": crore, "tone": tone, "short_date": short_date}
 
 
 # VIX regime → colour name. One map for cockpit, change feed and email; the

@@ -462,11 +462,7 @@ def api_mf_search(q: str = "", limit: int = 10):
 def news_editor_page(request: Request):
     """Plan 0021: today's three items, the 7 themes, the week's radar and sectors."""
     return templates.TemplateResponse(request, "news.html", {
-        "page": "news",
-        "today_ed": api.get_news_today(),
-        "themes": api.get_news_themes(),
-        "week": api.get_news_week(),
-        "radar": api.get_sector_radar(),
+        "page": "news", **api.get_news_front(),
         "today": dt.date.today().isoformat(),
     })
 
@@ -490,6 +486,7 @@ def news_page(
     hours: int = 168,
     sort: str = "smart",
     page: int = 1,
+    theme: str = "",
 ):
     """Flagship news feed: topic tabs, search, sentiment/confidence/tier filters,
     sort modes, server-side pagination. Single-page render, no SPA."""
@@ -503,12 +500,13 @@ def news_page(
         sort=sort,
         page=page,
         page_size=24,
+        theme=(theme or None),
     )
-    brief = api.get_news_brief()
     return templates.TemplateResponse(request, "news_all.html", {
         "page": "news",
         "feed": feed,
-        "brief": brief,
+        "themes": api.get_news_themes(),
+        "theme": theme,
         "topic": topic,
         "active_tier": tier,
         "q": q,
