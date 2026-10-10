@@ -1,0 +1,55 @@
+{% from "_pb_macros.html" import stock_cell, num, chip, th, list_tools with context %}
+<div class="card" style="margin-top: 14px;" x-data="pbList()">
+    <div class="pb-head">
+        <h2 class="section-title">{% if d.rows %}{{ d.rows|length }} managements checked against their own words{% else %}Managements checked against their own words{% endif %}</h2>
+        <div class="mono u-muted-11">{% if not d.rows %}no verdicts yet{% elif d.total %}{{ d.total - d.queued }} of {{ d.total }} read{% else %}not started{% endif %}</div>
+    </div>
+    <div class="section-desc">
+        Fisher judged management by whether it does what it says. For each company, what management told investors it would do on an
+        earnings call two to four quarters ago is set against what it reported on the latest call. Open a name to see each promise.
+    </div>
+    {% if d.queued or not d.rows %}
+    <div class="pb-note">
+        <strong>{% if d.queued %}{{ d.queued }} companies are still to be read.{% else %}No verdict file has been produced yet, so no management is shown.{% endif %}</strong>
+        The reading is done by the LLM worker (05:07 and 14:37 UTC), after the daily jobs. Compounders, LARGE and MID companies with two recent call transcripts are covered.
+    </div>
+    {% endif %}
+    {% if d.rows %}
+    <div class="pb-tiles">
+        {% for c in d.counts %}<button type="button" class="pb-tile" :class="{ on: f === '{{ c.key }}' }" :aria-pressed="f === '{{ c.key }}'" @click="toggle('{{ c.key }}')"><span class="mono v">{{ c.n }}</span><span class="k">{{ c.label }}</span></button>{% endfor %}
+    </div>
+    {{ list_tools(d.rows|length, 'companies') }}
+    <div style="margin-top: 12px;">
+    {% for s in d.rows %}
+    {% set col = 'var(--blue)' if s.verdict == 'keeps_word' else ('var(--amber)' if s.verdict == 'mixed' else ('var(--red)' if s.verdict == 'overpromises' else 'var(--text-muted)')) %}
+    <details class="pb-inv" data-row data-k="{{ s.verdict }}">
+        <summary>
+            <a href="/stocks/{{ s.sid }}" class="pb-stock" style="min-width: 120px;">{{ s.ticker }}</a>
+            <span class="mono u-muted-11" style="width: 48px;">{{ s.tier|tier_word if s.tier else '—' }}</span>
+            {{ chip(s.label|upper, col) }}
+            <span style="flex: 1; min-width: 260px; font-size: 12px; color: var(--text-secondary);">{{ s.summary }}</span>
+        </summary>
+        <div class="pb-inv-body" style="padding-left: 6px;">
+        {% if s.promises %}
+        <table class="pb-table">
+            <thead><tr><th class="l">What management said ({{ s.earlier_call }})</th><th class="l">Outcome</th><th class="l">What the latest call says ({{ s.latest_call }})</th></tr></thead>
+            <tbody>
+            {% for p in s.promises %}
+            <tr><td class="l soft" style="width: 40%;">{{ p.said }}</td>
+                <td class="l">{{ chip(p.label|upper, 'var(--blue)' if p.outcome == 'delivered' else ('var(--amber)' if p.outcome == 'partly' else ('var(--red)' if p.outcome == 'missed' else 'var(--text-muted)'))) }}</td>
+                <td class="l soft">{{ p.evidence or '—' }}</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        {% else %}<div class="u-muted-11">No checkable commitment was found on the earlier call.</div>{% endif %}
+        </div>
+    </details>
+    {% endfor %}
+    </div>
+    <div class="pb-empty" x-show="shown === 0" x-cloak>No company matches that filter.</div>
+    {% endif %}
+    <div class="pb-foot">
+        Written by an LLM from sentences extracted from the two transcripts; it can misread a call. The text carries no figures by rule —
+        open the transcripts on the stock's page for the numbers. A verdict covers one pair of calls, not a track record.
+    </div>
+</div>

@@ -1,4 +1,4 @@
-{% from "_ideas_macros.html" import stock_cell, num, chip, flag_cell, rank_cell, result_line, th, list_tools with context %}
+{% from "_pb_macros.html" import stock_cell, num, chip, flag_cell, rank_cell, result_line, th, list_tools with context %}
 <div class="card" style="margin-top: 14px;" x-data="pbList()">
     <div class="pb-note"><strong>{{ 'Veto has shown an edge' if d.veto and d.veto.edge else 'Veto unproven' }}.</strong>
         {% if d.line %}In the backtest, red-flagged stocks returned {{ d.line.net|pct(1) }}/yr against {{ d.line.tier|pct(1) }}/yr for their tier (t {{ '%+.2f'|format(d.line.t) if d.line.t is not none else '—' }}, {{ d.line.months }} months to {{ d.line.last|month_text }}).

@@ -29,7 +29,7 @@
 {% macro result_line(l, tab_link=True) %}
 {% if l %}<div class="pb-note"><strong>{{ l.label }}: {{ l.net|pct(1) }}/yr after costs vs tier {{ l.tier|pct(1) }}/yr</strong>
     (t {{ '%+.2f'|format(l.t) if l.t is not none else '—' }}, {{ l.months }} months to {{ l.last|month_text }}) — {{ l.verdict }}.
-    {% if tab_link %}<a href="#track-record" class="pb-clear" @click.prevent="tab = 'track-record'; loaded['track-record'] = true; history.pushState(null, '', '#track-record')">Track record</a>{% endif %}</div>
+    {% if tab_link %}<a href="#portfolios" class="pb-clear" @click.prevent="tab = 'portfolios'; loaded['portfolios'] = true; history.pushState(null, '', '#portfolios')">Portfolios</a>{% endif %}</div>
 {% else %}<div class="pb-note">No backtest result for this screen yet.</div>{% endif %}
 {% endmacro %}
 
@@ -41,6 +41,37 @@
 {% else %}<span class="u-muted-11">–</span>{% endif %}
 {% endmacro %}
 
+{% macro investor(inv, index) %}
+<details class="pb-inv">
+    <summary>
+        <span class="mono pb-idx">{{ index }}</span>
+        <span class="pb-inv-name">{{ inv.name }}</span>
+        <span class="mono pb-sub">{{ inv.n }} stocks</span>
+        {% if inv.n_new %}{{ chip(inv.n_new ~ ' new', 'var(--blue)') }}{% endif %}
+        {% if inv.n_up %}{{ chip(inv.n_up ~ ' added', 'var(--accent)') }}{% endif %}
+        {% if inv.n_down %}{{ chip(inv.n_down ~ ' trimmed', 'var(--amber)') }}{% endif %}
+        {% if inv.below_1pct %}{{ chip(inv.below_1pct|length ~ ' below 1%', 'var(--text-muted)') }}{% endif %}
+    </summary>
+    <div class="table-wrap pb-scroll pb-inv-body">
+    {% if inv.filed_as %}<div class="pb-foot pb-filed">Filed as: {{ inv.filed_as|join(' · ') }}</div>{% endif %}
+    <table class="pb-table">
+        <thead><tr><th class="l">Stock</th><th>Model rank</th><th>Holding (%)</th><th class="c">Since last filing</th><th>Quarter</th></tr></thead>
+        <tbody>
+        {% for h in inv.holdings %}
+        <tr><td class="l">{{ stock_cell(h) }}</td>{{ rank_cell(h) }}
+            <td class="mono">{{ num(h.pct, 2, '%') }}</td><td class="c">{{ change_cell(h) }}</td>
+            <td class="mono u-muted-11">{{ h.quarter }}</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% if inv.below_1pct %}
+    <div class="pb-foot">No longer named above 1% (sold, or fell under the line):
+        {% for g in inv.below_1pct %}<a href="/stocks/{{ g.sid }}" class="mono pb-soft-link">{{ g.ticker }}</a> <span class="mono">({{ num(g.pct, 2, '%') }} before)</span>{% if not loop.last %} · {% endif %}{% endfor %}
+    </div>
+    {% endif %}
+    </div>
+</details>
+{% endmacro %}
 {% macro bt_row(label, sub, st, cost=True) %}
 {% set short = st and st.months < 12 %}
 <tr{% if short %} class="pb-short"{% endif %}><td class="l"><span class="pb-stock">{{ label }}</span>{% if short %} <span class="pill pill-muted">{{ st.months }} months only</span>{% endif %}{% if sub %}<div class="pb-name" style="max-width: 420px; white-space: normal;">{{ sub }}</div>{% endif %}</td>

@@ -1,4 +1,4 @@
-{% from "_ideas_macros.html" import stock_cell, num, chip, flag_cell, rank_cell, change_cell, result_line, th, list_tools with context %}
+{% from "_pb_macros.html" import stock_cell, num, chip, flag_cell, rank_cell, change_cell, result_line, th, list_tools with context %}
 {% set k = d.key %}
 <div class="card" style="margin-top: 14px;" x-data="pbList()">
     {{ result_line(d.line) if k != 'strict' }}
@@ -30,7 +30,7 @@
     {% else %}
     <div class="pb-head"><h2 class="section-title">{{ d.rows|length }} strict compounders (multibagger gates)</h2>
         <div class="mono u-muted-11">as of {{ s.as_of|short_date }}</div></div>
-    <div class="section-desc">{{ "{:,}".format(s.funnel.universe) }} stocks → {{ "{:,}".format(s.funnel.passed_gates) }} pass the safety gates → <strong>{{ s.funnel.survived }}</strong> pass the quality hurdles. This is a junk-stripped watchlist for 2–4 years, not a ranked forecast: the gates do the work and the order has no reliable edge, least of all in small-cap uptrends (<a href="/" class="pb-clear">regime on Today</a>). Not in the backtest below.</div>
+    <div class="section-desc">{{ "{:,}".format(s.funnel.universe) }} stocks → {{ "{:,}".format(s.funnel.passed_gates) }} pass the safety gates → <strong>{{ s.funnel.survived }}</strong> pass the quality hurdles. This is a junk-stripped watchlist for 2–4 years, not a ranked forecast: the gates do the work and the order has no reliable edge, least of all in small-cap uptrends (<a href="/" class="pb-clear">regime on Today</a>). Not in the Portfolios backtest.</div>
     {% endif %}
     {% endif %}
 
@@ -101,6 +101,6 @@
         <div><strong style="color: var(--text-secondary);">Conviction</strong> is a holding monitor, reviewed every 3–6 months, not a stop-loss: most eventual 3× winners fall 30%+ on the way. HOLD ({{ d.strict.conviction.get('HOLD', 0) }}): near its high or momentum intact, do nothing. WATCH ({{ d.strict.conviction.get('WATCH', 0) }}): in a 25–50% drawdown with mixed signals, monitor. REVIEW ({{ d.strict.conviction.get('REVIEW', 0) }}): deep, long underwater and sector turned down, so re-read the thesis; not an automatic sell{% if d.strict.guard_active %} (suppressed while small caps are in a bear market){% endif %}.</div>
         <div>Gates: Beneish M-score clean · pledge ≤10% · debt/equity ≤0.5 · ROIC ≥18% · Piotroski F ≥6 · 3-year profit growth ≥20% · promoter ≥35% · market cap ₹1–20k cr. Buy a basket of 20–30 equal weights across sectors.</div>
         {% endif %}
-        <div>Model rank = place in the stock's tier in the latest ranking{% if d.ranks_as_of %} ({{ d.ranks_as_of|short_date }}){% endif %}, #1 = best. Top fifth of the tier: the model agrees. Bottom fifth: the model disagrees. {% for t in unproven_tiers() %}{{ t|tier_word }} has no factor with out-of-sample skill, so a {{ t|tier_word }} rank is context only. {% endfor %}Flags = red flags on the Avoid tab.</div>
+        <div>Model rank = place in the stock's tier in the latest ranking{% if d.ranks_as_of %} ({{ d.ranks_as_of|short_date }}){% endif %}, #1 = best. Top fifth of the tier: the model agrees. Bottom fifth: the model disagrees. {% for t in unproven_tiers() %}{{ t|tier_word }} has no factor with out-of-sample skill, so a {{ t|tier_word }} rank is context only. {% endfor %}Flags = red flags on the Avoid list tab.</div>
     </div>
 </div>

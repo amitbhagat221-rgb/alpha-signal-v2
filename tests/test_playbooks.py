@@ -1,4 +1,4 @@
-"""Investor playbook rules (cockpit/playbooks.py, shown on /ideas) — the pure rules. Offline: no DB."""
+"""Investor playbook rules (cockpit/playbooks.py, shown on /playbooks) — the pure rules. Offline: no DB."""
 import pandas as pd
 
 from cockpit import playbooks as pb
