@@ -45,8 +45,9 @@ _S = {
         "A failed step leaves its tables as they were yesterday; everything downstream reads old data. "
         f"The same step failing {FAILURE_STREAK_DAYS}+ days running is a broken source or a bug that will not heal itself.",
         "Read the error, fix it, rerun the step (Rerun on the ops Flow page, or `python pipeline.py --step <name>`). "
-        "For a streak: `python -m runlog bundle <feed>` shows the evidence.",
-        f"CRITICAL when the morning email needs the step's output or it has failed {FAILURE_STREAK_DAYS}+ days running, else WARN"),
+        "For a streak: `python -m runlog bundle <feed>` shows the evidence. A shadow job or gap-fill (WARN) can wait for the week.",
+        f"CRITICAL when the morning email needs the step's output or it has failed {FAILURE_STREAK_DAYS}+ days running, else WARN. "
+        "Always WARN for a step in config.NON_PAGING_STEPS (a v3 shadow job or a gap-fill the picks do not depend on)"),
     "WATCHDOG": ("ran",
         f"The self-healing watchdog has not run in the last {WATCHDOG_MAX_AGE_H} hours",
         "The watchdog re-runs the producers of stale tables every day; without it silent failures pile up.",
@@ -68,8 +69,10 @@ _S = {
     "TABLE_EMPTY": ("arrived",
         "A table that should have rows is empty",
         "A producer wrote nothing where rows are expected.",
-        "Rerun the producer and read its log. A table that may legitimately be empty is marked `may_be_empty` in tables.TABLES.",
-        "CRITICAL (INFO for a feature not live yet; an empty quarantine table is clean)"),
+        "Rerun the producer and read its log. A table that may legitimately be empty is marked `may_be_empty` in tables.TABLES. "
+        "A WARN is a new or optional feed (probation) or a file the cockpit can do without: it cannot change today's picks.",
+        "CRITICAL. INFO for a table only a candidate feed writes or one marked `may_be_empty`; WARN for a table only a probation "
+        "feed writes or an optional file (config.FILE_OUTPUTS `optional`); an empty quarantine table is clean"),
     "FEED_PROBE": ("arrived",
         "The 02:45 UTC one-item probe of a data feed failed, warned, crashed, or did not run",
         "The probe runs before the morning harvest: a failure means that feed's data will not arrive, or will arrive in a changed shape.",
@@ -79,8 +82,10 @@ _S = {
     "FEED_VOLUME": ("arrived",
         "A normally steady step wrote far fewer (under 60%) or far more (over 3x) rows than its usual",
         "The step 'succeeded' but most of the data did not arrive, or arrived twice.",
-        "Compare with the source: a holiday, a changed endpoint returning a short page, or duplicate writes?",
-        "CRITICAL for a must-have (T1) feed under 25% of normal, else WARN"),
+        "Compare with the source: a holiday, a changed endpoint returning a short page, or duplicate writes? "
+        "Over 3x while `run.sh backfill` is running (INFO) is the backfill's history being recomputed: no action.",
+        "CRITICAL for a must-have (T1) feed under 25% of normal, else WARN. INFO for an over-3x jump while a declared "
+        "backfill runs (output/backfill_active, written by `run.sh backfill`, is under 26 hours old)"),
     # ── Is the data right? ──
     "FEED_RECONCILE_FAIL": ("correct",
         "A feed disagrees with an independent second source on the same numbers",
@@ -211,15 +216,18 @@ def pipeline_facts(since_days=1):
 
 def pipeline_verdicts(p):
     """A step whose FINAL state is failed pages when it is critical
-    (checks.critical_steps); a streak always pages."""
+    (checks.critical_steps); a streak always pages. Except a step in
+    config.NON_PAGING_STEPS (a shadow job, a gap-fill): WARN however long it fails."""
     from checks import critical_steps
+    from config import NON_PAGING_STEPS
     crit = critical_steps()
     streak = {s["step"]: s for s in p["failed_streaks"]}
     today = {f["step"]: f for f in p["failed_steps_today"]}
     out = []
     for step in dict.fromkeys([*streak, *today]):
         s = streak.get(step)
-        out.append(verdict(f"PIPELINE_STEP:{step}", step, CRITICAL if s or step in crit else WARN, FAIL,
+        pages = (s or step in crit) and step not in NON_PAGING_STEPS
+        out.append(verdict(f"PIPELINE_STEP:{step}", step, CRITICAL if pages else WARN, FAIL,
                            s["sample_error"] if s else today[step]["error"], code="PIPELINE_STEP",
                            message=(f"{step} is failing and has not recovered" if s
                                     else f"{step} failed in the latest run")))
@@ -293,7 +301,7 @@ def freshness_verdicts(t):
         sev = empty_table_severity(tbl)
         if sev != OK:
             out.append(verdict(f"TABLE_EMPTY:{tbl}", tbl, sev, FAIL,
-                               "feature not live yet" if sev == INFO else "",
+                               {INFO: "feature not live yet", WARN: "new or optional: not on the picks path"}.get(sev, ""),
                                code="TABLE_EMPTY", message=f"{tbl} is empty"))
     return out
 
