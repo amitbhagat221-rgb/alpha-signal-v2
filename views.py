@@ -165,7 +165,7 @@ def ineligible_signals(sid):
         "(SELECT MAX(snapshot_date) FROM universe_eligibility)", [sid])}
 
 
-def pick_breakdown(sid, pick_date=None):
+def pick_breakdown(sid, pick_date=None, _frames=None):
     """How the ranking scored `sid` on `pick_date` (default: its newest pick): one row per WIRED
     factor of its tier with the raw value, within-tier percentile (0-1, None = no value), tier weight,
     contribution = |w| x percentile (|w| x (1 - percentile) for a negative weight; a factor with no
@@ -180,12 +180,18 @@ def pick_breakdown(sid, pick_date=None):
     if not me:
         return None
     tier = me["cap_tier"]
-    rows = native_rows("SELECT sid, rank, final_score, inputs_json, output_json FROM pit_replay_snapshots "
-                       "WHERE snapshot_date = ? AND cap_tier = ?", [pick_date, tier])
-    d = pd.DataFrame([{**json.loads(r["inputs_json"] or "{}"), "sid": r["sid"], "_rank": r["rank"],
-                       "_final": r["final_score"],
-                       **{f"_{k}": v for k, v in json.loads(r["output_json"] or "{}").items()}}
-                      for r in rows])
+    # `_frames` (a dict the caller owns) keeps the parsed tier frame between calls, so a page
+    # that explains 20 names parses each tier's snapshot once, not 20 times.
+    d = _frames.get((pick_date, tier)) if _frames is not None else None
+    if d is None:
+        rows = native_rows("SELECT sid, rank, final_score, inputs_json, output_json FROM pit_replay_snapshots "
+                           "WHERE snapshot_date = ? AND cap_tier = ?", [pick_date, tier])
+        d = pd.DataFrame([{**json.loads(r["inputs_json"] or "{}"), "sid": r["sid"], "_rank": r["rank"],
+                           "_final": r["final_score"],
+                           **{f"_{k}": v for k, v in json.loads(r["output_json"] or "{}").items()}}
+                          for r in rows])
+        if _frames is not None:
+            _frames[(pick_date, tier)] = d
     no = ineligible_signals(sid)
     comps, num, den = [], 0.0, 0.0
     for key, w in sorted(factors.weights().get(tier, {}).items(), key=lambda kv: -abs(kv[1])):
@@ -215,6 +221,25 @@ def pick_breakdown(sid, pick_date=None):
             "reproduces_stored_score": (stored is not None and stored == stored and base is not None
                                         and abs(base - stored) < 1e-9),
             "contributions": comps, "tier_top3": top3}
+
+def pick_drivers(sids, pick_date=None, n=2):
+    """{sid: [{factor, percentile}]}: the `n` factors that lift each stock's score most above a
+    neutral 50th-percentile result (contribution minus |w| x 0.5, from pick_breakdown, so it matches
+    the stock page). `percentile` (0-1) is the standing within the tier in the direction that helps:
+    a negative-weight factor at the 10th raw percentile reads 0.9. Factors the registry excludes for
+    the stock, or with no value, never drive."""
+    frames, out = {}, {}
+    for sid in sids:
+        bd = pick_breakdown(sid, pick_date, _frames=frames)
+        comps = [c for c in (bd or {}).get("contributions", [])
+                 if c["eligible"] and c["tier_percentile"] is not None]
+        comps.sort(key=lambda c: c["contribution"] - abs(c["weight"]) * config.MISSING_FACTOR_SCORE, reverse=True)
+        out[sid] = [{"factor": c["factor"],
+                     "percentile": 1 - c["tier_percentile"] if c["weight"] < 0 else c["tier_percentile"]}
+                    for c in comps[:n]
+                    if c["contribution"] > abs(c["weight"]) * config.MISSING_FACTOR_SCORE]
+    return out
+
 
 _SNAPSHOT_COLS = """,
       ds.close_price, ds.piotroski_f, ds.cf_accruals, ds.bs_accruals,
@@ -598,4 +623,52 @@ def step_status():
     out = {}
     for r in sorted(pipeline_status(days=None), key=lambda r: r["run_date"] or "", reverse=True):
         out.setdefault(r["step_name"], r)
+    return out
+
+
+# ═══════════════════════════ today (the sized book, checks) ═══════════════════════════
+
+def book_history(n=2):
+    """The newest `n` sized books (portfolio_weights), newest first:
+    [{asof, rows: [{sid, ticker, name, cap_tier, sector, rank, weight}]}]."""
+    out = []
+    for asof in [r["asof_date"] for r in native_rows(
+            "SELECT DISTINCT asof_date FROM portfolio_weights ORDER BY asof_date DESC LIMIT ?", [n])]:
+        rows = native_rows(
+            "SELECT pw.sid, s.ticker, COALESCE(pw.name, s.name) AS name, pw.cap_tier, pw.sector, pw.rank, pw.weight "
+            "FROM portfolio_weights pw LEFT JOIN stocks s ON pw.sid = s.sid "
+            "WHERE pw.asof_date = ? ORDER BY pw.weight DESC", [asof])
+        out.append({"asof": asof, "rows": rows})
+    return out
+
+
+def forensic_flags(sids):
+    """{sid: {as_of, m_flag, z_flag}} from each stock's NEWEST forensic_scores row (the table keeps
+    every snapshot, so an old flag must not outlive the latest clean row). Only stocks whose newest
+    row carries a flag appear: Beneish LIKELY_MANIPULATOR or Altman DISTRESS. Whether Altman Z
+    applies (not to Financials) is the caller's rule."""
+    out = {}
+    for r in latest_rows("forensic_scores", "snapshot_date, m_score_flag, z_score_flag", sids):
+        m = r["m_score_flag"] if r["m_score_flag"] == "LIKELY_MANIPULATOR" else None
+        z = r["z_score_flag"] if r["z_score_flag"] == "DISTRESS" else None
+        if m or z:
+            out[r["sid"]] = {"as_of": r["snapshot_date"], "m_flag": m, "z_flag": z}
+    return out
+
+
+def results_due(sids, days=7, today=None):
+    """{sid: {date, days, purpose}}: the next board meeting on financial results within `days`
+    (earnings_calendar), one per stock."""
+    sids, ph = sid_params(sids)
+    if not sids:
+        return {}
+    today = today or date.today().isoformat()
+    out = {}
+    for r in native_rows(
+            f"SELECT sid, date, purpose FROM earnings_calendar WHERE sid IN ({ph}) "
+            f"AND date >= ? AND date <= date(?, ?) AND purpose LIKE '%Result%' ORDER BY date",
+            list(sids) + [today, today, f"+{int(days)} days"]):
+        if r["sid"] not in out:
+            out[r["sid"]] = {"date": r["date"], "purpose": r["purpose"],
+                             "days": (date.fromisoformat(r["date"]) - date.fromisoformat(today)).days}
     return out
