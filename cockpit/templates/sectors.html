@@ -1,0 +1,193 @@
+{% extends "base.html" %}
+{% from "_components.html" import tab_bar, radio_group, slide_row, tip %}
+{% block title %}{{ page_title("Sectors") }}{% endblock %}
+
+{% block content %}
+
+{% include "_sector_styles.html" %}
+
+<h1 class="section-title">Sectors</h1>
+<p class="section-desc">{{ sector_list | length }} sectors: the model's call on each, the news view beside it, and the industries inside.
+    Open a sector to see its industries.</p>
+
+{% set start_tab = 'per-sector' if detail else 'heatmap' %}
+<div x-data="{ tab: '{{ start_tab }}', loaded: { '{{ start_tab }}': true } }" x-cloak>
+
+{{ tab_bar(entry.tabs) }}
+
+
+{# ═══ TAB 1: TODAY. One row per sector from the same call Markets shows; the brief rides along with its date. ═══ #}
+<div x-show="tab === 'heatmap'" x-cloak>
+
+{% set call = front.call %}
+<div class="sd-legend">
+    Verdict = the model's sector tilt (6-month sector momentum plus macro, a z-score across the 11 sectors; prices to {{ call.price_date|short_date }}, macro {{ call.macro_date|short_date }}).
+    It is the only sector number tested on past data
+    {%- if call.weights %}: it carries {% for tier, w in call.weights.items() %}{{ (w * 100)|round|int }}% of the score for {{ tier|tier_word|lower }} caps{% endfor %} and nothing in the other tiers, where it showed no skill{% endif %}.
+    The news view is the editor's reading of the week to {{ call.week_as_of|short_date }}.
+    Momentum chips compare each sector with NIFTY over 1, 3 and 12 months (&#9650; strong, &#9632; neutral, &#9660; weak).
+    Picks = the {{ front.picks_total }} published picks ({{ front.pick_date|short_date }}) that sit in the sector.
+</div>
+
+{% macro sector_row(r, accent) %}
+<div class="sd-row" style="border-left: 3px solid {{ accent }};">
+    <a class="sd-row-link" href="/sectors?sector={{ r.sector | urlencode }}#per-sector">
+        <div class="sd-row-head">
+            <span class="sd-sector">{{ r.sector }}{% if r.horizons %}{% set hz = r.horizons %}<span class="sd-horizons">
+                {% for lbl, v in (('1m', hz.short), ('3m', hz.medium), ('12m', hz.long)) %}<span class="sd-hz {{ v or 'na' }}">{{ lbl }} {{ {'strong': '&#9650;', 'weak': '&#9660;', 'neutral': '&#9632;'}.get(v, '-')|safe }}<span class="sr-only"> {{ v or 'no data' }}</span></span>{% endfor %}
+            </span>{% endif %}</span>
+            <span class="sd-picks">
+                <span class="sd-picks-n">{{ r.picks|length }}</span>
+                <span class="sd-picks-label">{{ 'pick' if r.picks|length == 1 else 'picks' }}</span>
+            </span>
+        </div>
+        <div class="sd-driver" style="color: {{ accent }};">
+            <span class="sd-driver-text mono">{% if r.tilt is not none %}tilt {{ r.tilt|signed(2) }}{% if r.mom is not none and r.macro is not none %} (momentum {{ r.mom|signed(2) }}, macro {{ r.macro|signed(2) }}){% endif %}{% else %}no tilt{% endif %}</span>
+        </div>
+        {% if r.news %}
+        <div class="sd-news">
+            <span class="pill {{ 'pill-green' if r.news == 'helps' else 'pill-red' }}">news: {{ 'helps' if r.news == 'helps' else 'careful' }}</span>
+            {% if r.agree == false %}<span class="pill pill-amber">model and news disagree</span>{% endif %}
+            {% if r.news_reason %}<span class="sd-news-text">{{ r.news_reason }}</span>{% endif %}
+        </div>
+        {% endif %}
+        {% if r.drivers %}<div class="sd-hint-line">Macro: {{ r.macro_signal|lower|capitalize if r.macro_signal and r.macro_signal != 'UNKNOWN' else 'no read' }}{% if r.drivers %} &middot; {{ r.drivers }}{% endif %}</div>{% endif %}
+        {% if r.picks %}
+        <div class="sd-tickers">
+            {% for p in r.picks %}{{ p.ticker }}{% if not loop.last %}<span class="sd-tk-sep">&middot;</span>{% endif %}{% endfor %}
+        </div>
+        {% endif %}
+    </a>
+    {% if r.watch or r.bull or r.bear or r.tech %}
+    <div class="sd-dossier">
+        {% if r.watch %}
+        <div class="sd-watch">
+            {% for w in r.watch %}
+            <div class="sd-watch-item">
+                <span class="sd-hbadge h-{{ (w.horizon or '')|lower }}">{{ w.horizon }}</span>
+                <span>{{ w.item }}</span>
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+        {% if r.bull or r.bear or r.tech %}
+        <details class="sd-dmore">
+            <summary>Bull &middot; bear &middot; tech</summary>
+            {% if r.bull %}<div class="sd-case"><div class="sd-case-h" style="color: var(--green);">Bull case</div><ul>{% for b in r.bull %}<li>{{ b }}</li>{% endfor %}</ul></div>{% endif %}
+            {% if r.bear %}<div class="sd-case"><div class="sd-case-h" style="color: var(--red);">Bear case</div><ul>{% for b in r.bear %}<li>{{ b }}</li>{% endfor %}</ul></div>{% endif %}
+            {% if r.tech %}<div class="sd-case"><div class="sd-case-h" style="color: var(--accent);">Tech / innovation</div><ul>{% for t in r.tech %}<li>{{ t }}</li>{% endfor %}</ul></div>{% endif %}
+        </details>
+        {% endif %}
+    </div>
+    {% endif %}
+</div>
+{% endmacro %}
+
+{% if front.digest_stale %}
+<div class="card sd-stale">
+    {% if front.digest_as_of %}The sector briefs (momentum chips, macro drivers, what to watch) were last written on {{ front.digest_as_of|short_date }}, {{ front.digest_age }} days ago, so they are left out until the nightly run writes them again.{% else %}No sector briefs have been written yet; the verdicts below do not need them.{% endif %}
+</div>
+{% else %}
+<div class="mono u-muted-11 sd-asof">Briefs written {{ front.digest_as_of|short_date }} &middot; verdicts: prices to {{ call.price_date|short_date }}</div>
+{% endif %}
+
+{% for g in front.groups %}
+{% set accent = {'in': 'var(--green)', 'away': 'var(--red)'}.get(g.key, 'var(--text-muted)') %}
+{% if g.rows or g.key != 'none' %}
+<div class="sd-bucket">
+    <div class="sd-bucket-head">
+        <span class="sd-bucket-title">{{ g.title }}</span>
+        <span class="sd-bucket-sub">{{ g.rows|length }} {{ 'sector' if g.rows|length == 1 else 'sectors' }} &middot; {{ g.sub }}</span>
+    </div>
+    {% for r in g.rows %}{{ sector_row(r, accent) }}
+    {% else %}
+    <div class="sd-empty">No sector is far enough from the middle to call {{ g.title|lower }} today.</div>
+    {% endfor %}
+</div>
+{% endif %}
+{% endfor %}
+
+{% if front.forces %}
+<div class="sd-section-head">By force: what is pushing which sector <span class="u-muted-11">(briefs of {{ front.digest_as_of|short_date }})</span></div>
+
+{% macro force_card(f) %}
+<div class="sd-force">
+    <div class="sd-force-head"><span class="sd-force-title">{{ f.label }}</span></div>
+    {% for side, cls, arrow, word, col in (('positive', 'pos', '&#8593;', 'favoured', 'var(--green)'), ('negative', 'neg', '&#8595;', 'hurt', 'var(--red)')) %}
+    {% set lst = f[side] %}
+    {% if lst %}
+    <div class="sd-force-side" style="color: {{ col }};">
+        <div class="sd-force-arrow">{{ arrow|safe }} {{ lst | length }} {{ 'sector' if lst | length == 1 else 'sectors' }} {{ word }}</div>
+        <div class="sd-force-sectors">
+            {% for s in lst[:5] %}<a class="sd-fs" href="/sectors?sector={{ s.sector | urlencode }}#per-sector">{{ s.sector }}</a>{% if not loop.last %}, {% endif %}{% endfor %}{% if lst | length > 5 %} +{{ lst | length - 5 }}{% endif %}
+        </div>
+        {% if lst[0].summary %}<div class="sd-force-quote">"{{ lst[0].summary|macro_text }}"</div>{% endif %}
+    </div>
+    {% endif %}
+    {% endfor %}
+    {% if not f.positive and not f.negative %}<div class="sd-force-empty">No directional signal in the last 30 days.</div>{% endif %}
+</div>
+{% endmacro %}
+
+<div class="sd-force-grid">
+    {% for f in front.forces %}{{ force_card(f) }}{% endfor %}
+</div>
+{% endif %}
+
+<div class="sd-horizon">
+    <span>Sectors lead the broader cycle by 1 to 2 quarters. Review weekly; do not react daily.</span>
+</div>
+
+</div>{# / heatmap tab #}
+
+
+{# ════════════════════════════════════════════ #}
+{# TAB 2 — INDUSTRY DETAIL                      #}
+{# ════════════════════════════════════════════ #}
+<div x-show="tab === 'per-sector'" x-cloak>
+
+{% include "_industry_detail.html" %}
+
+</div>{# / per-sector tab #}
+
+
+{# ════════════════════════════════════════════ #}
+{# TAB 3 — ROTATION (industries ranked)         #}
+{# ════════════════════════════════════════════ #}
+<div x-show="tab === 'rotation'" x-cloak>
+
+<div class="card">
+    <div class="section-title">Industry rotation: all {{ industries|length }} industries</div>
+    <div class="section-desc">Strongest sector tilt first, then the industry's own score. Score = average model score of its stocks, weighted by market cap, out of 100, as of {{ pick_date|short_date }}. Breadth = share of stocks scoring 55 or more. Open one for its detail.</div>
+    <div class="table-wrap" style="margin-top: 10px;">
+    <table class="rot-table">
+        <thead><tr>
+            <th>Industry</th><th class="ns-hide-m">Sector</th>
+            <th class="num">Sector tilt</th><th class="num">Score /100</th><th class="num ns-hide-m">Breadth</th>
+            <th class="ns-hide-m">Macro</th><th class="num ns-hide-m">Stocks</th>
+        </tr></thead>
+        <tbody>
+        {% for ind in industries %}
+        {% set sig = ind.macro_signal %}
+        <tr>
+            <td><a class="rot-link" href="/sectors?industry={{ ind.industry|urlencode }}#per-sector">{{ ind.industry }}</a></td>
+            <td class="rot-sector ns-hide-m">{{ ind.sector }}</td>
+            <td class="num {{ ind.sector_tilt|tone }}">{{ ind.sector_tilt|signed(2) }}</td>
+            <td class="num {% if ind.avg_score is none %}{% elif ind.avg_score >= 0.6 %}score-green{% elif ind.avg_score >= 0.45 %}score-amber{% else %}score-red{% endif %}">{{ (ind.avg_score * 100)|round|int if ind.avg_score else '—' }}</td>
+            <td class="num ns-hide-m">{{ ind.breadth_pct|pct(0) }}</td>
+            <td class="ns-hide-m">{% if sig in ['TAILWIND', 'FAVORABLE'] %}<span class="pill pill-green">Tailwind</span>{% elif sig in ['HEADWIND', 'ADVERSE'] %}<span class="pill pill-red">Headwind</span>{% elif sig and sig != 'UNKNOWN' %}<span class="pill pill-muted">{{ sig|lower|capitalize }}</span>{% else %}—{% endif %}</td>
+            <td class="num ns-hide-m">{{ ind.stocks }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="7" class="u-muted-11">No industries ranked yet.</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+</div>
+
+</div>{# / rotation tab #}
+
+</div>{# / main x-data #}
+
+{% endblock %}

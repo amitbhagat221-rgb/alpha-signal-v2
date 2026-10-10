@@ -1,4 +1,4 @@
-"""Ideas (/ideas): the screens table joins the model rank, strict compounders are the multibagger
+"""Investor Playbooks (/playbooks): the screens table joins the model rank, strict compounders are the multibagger
 gates, every screen has its backtest line. Offline: the data functions are stubbed."""
 import pandas as pd
 import pytest
@@ -75,24 +75,42 @@ def test_each_screen_carries_its_backtest_line(monkeypatch):
     payload = {"rows": [row], "as_of": "2026-10-09"}
     for fn in ("insider_buying", "compounders", "breakouts", "deep_value"):
         monkeypatch.setattr(pb, fn, lambda payload=payload: payload)
-    holder = {"who": "X", "pct": 1.5, "change": "new", "delta": None}
-    monkeypatch.setattr(pb, "_investor_stock_rows", lambda: ([{**row, "holders": [holder], "n_buying": 1, "followed": True}],
-                                                             {"as_of": "x", "followed": [1], "investors": [], "n_with_prior": 1, "n_stocks": 1}))
     for key, label in pb.SCREENS:
+        if key == "investors":
+            continue
         d = pb.screen(key)
         assert d["line"]["label"] == label and d["line"]["verdict"] == "did not beat its tier" and len(d["rows"]) == 1, key
+    monkeypatch.setattr(pb, "superinvestors", lambda: {"followed": [{"name": "F", "holdings": [row]}], "investors": [],
+                                                       "as_of": "x", "n_stocks": 1, "n_with_prior": 1})
+    d = pb.investors()
+    assert d["line"]["label"] == "Superinvestors" and d["followed"][0]["holdings"][0]["rank"] is None
     monkeypatch.setattr(pb, "avoid_list", lambda: {"rows": [], "counts": [], "n_any": 0, "as_of": None})
     assert pb.avoid()["line"]["t"] == 0.45
 
 
-def test_investor_screen_lists_only_new_or_added(monkeypatch):
-    base = {"ticker": "T", "name": "N", "tier": "MID", "sector": None}
-    monkeypatch.setattr(pb, "superinvestors", lambda: {
-        "followed": [{"name": "F", "holdings": [{**base, "sid": "A", "pct": 2.0, "change": "up", "delta": 0.4},
-                                                {**base, "sid": "B", "pct": 1.1, "change": "same", "delta": 0.0}]}],
-        "investors": [], "as_of": "x", "n_stocks": 2, "n_with_prior": 2})
-    rows, _ = pb._investor_stock_rows()
-    assert [(r["sid"], r["n_buying"]) for r in rows] == [("A", 1), ("B", 0)]
+def test_market_cycle_reads_the_one_regime_source(monkeypatch):
+    """The VIX on the Market cycle tab is Today's (views.regime), never a second read of vix_history."""
+    monkeypatch.setattr(pb.views, "regime", lambda: {"regime": "NORMAL", "vix_latest": 14.38, "vix_20d_avg": 12.9,
+                                                      "updated_at": "2026-10-10 03:39:05"})
+    monkeypatch.setattr(pb, "read_sql", lambda q, params=None: pd.DataFrame({"date": ["2026-10-08", "2026-10-09"], "vix": [30.0, 14.38]}))
+    monkeypatch.setattr(pb, "_market_readings", lambda: [])
+    d = pb.market_cycle()
+    r = d["readings"][0]
+    assert r["value"] == "14.4 pts" and r["as_of"] == "2026-10-09" and d["regime"] == "NORMAL"
+    monkeypatch.setattr(pb.views, "regime", lambda: {"regime": "NORMAL", "vix_latest": 15.0, "vix_20d_avg": 13.0, "updated_at": "2026-10-10 03:39:05"})
+    assert pb.market_cycle()["readings"][0]["as_of"] == "2026-10-10"      # the stored series is behind the regime: its date, not the series'
+
+
+def test_roadmap_statuses_follow_the_data(monkeypatch):
+    monkeypatch.setattr(pb, "evidence", lambda: {"veto_sentence": "the veto has not shown an edge"})
+    monkeypatch.setattr(pb, "superinvestors", lambda: {"n_stocks": 10, "n_with_prior": 7})
+    monkeypatch.setattr(pb, "say_do", lambda: {"rows": [1], "queued": 3, "total": 4})
+    st = {r["approach"]: r["status"] for r in pb.roadmap()}
+    assert st["Cloning superinvestors"] == "partial" and st["Management says vs does"] == "partial"
+    monkeypatch.setattr(pb, "superinvestors", lambda: {"n_stocks": 10, "n_with_prior": 10})
+    monkeypatch.setattr(pb, "say_do", lambda: {"rows": [1], "queued": 0, "total": 4})
+    st = {r["approach"]: r["status"] for r in pb.roadmap()}
+    assert st["Cloning superinvestors"] == "live" and st["Management says vs does"] == "live"
 
 
 def test_stock_chips_shape(monkeypatch):
@@ -110,9 +128,9 @@ def test_pages_render_and_old_urls_redirect(tmp_path, monkeypatch):
     import webauth
     from cockpit.app import app
     monkeypatch.setattr(webauth, "AUTH_FILE", tmp_path / "auth.json")
-    webauth.set_password("correct horse battery")
+    webauth.set_password("correct horse banana")
     c = TestClient(app, cookies={webauth.COOKIE: webauth.make_token()}, follow_redirects=False)
-    assert c.get("/ideas").status_code == 200
-    assert c.get("/partial/ideas/screen/nope").status_code == 404
-    assert c.get("/playbooks").headers["location"] == "/ideas"
-    assert c.get("/multibagger").headers["location"] == "/ideas"
+    assert c.get("/playbooks").status_code == 200
+    assert c.get("/partial/playbooks/nope").status_code == 404
+    assert c.get("/ideas").headers["location"] == "/playbooks"
+    assert c.get("/multibagger").headers["location"] == "/playbooks#strict"

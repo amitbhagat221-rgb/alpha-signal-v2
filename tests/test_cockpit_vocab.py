@@ -85,5 +85,5 @@ def test_stocks_default_lists_exactly_the_ranked(monkeypatch):
 def test_compare_links_for_model_tabs_and_strict():
     tabs = preview.compare_target("main", "/model")[1]
     assert tabs["#evidence"] == "/model#backtests" and tabs["#rules"] == "/model#gate"
-    assert preview.compare_links("main", "/ideas", "strict=1")["url"].endswith("/multibagger")
-    assert preview.compare_links("main", "/ideas")["url"].endswith("/playbooks")
+    assert preview.compare_target("main", "/playbooks")[1]["#strict"] == "/multibagger"
+    assert preview.compare_links("main", "/playbooks")["url"].endswith("/playbooks")

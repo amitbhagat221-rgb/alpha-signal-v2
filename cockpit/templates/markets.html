@@ -5,7 +5,6 @@
 
 {% block content %}
 {{ styles() }}
-{% include "_sector_styles.html" %}
 <style>
 .ns-item { margin-top: 12px; }
 .ns-item h3, .ns-card h3 { margin: 0 0 6px; font-size: 16px; font-weight: 700; color: var(--text-primary); }
@@ -23,7 +22,6 @@
 .mk-tilt { font-size: 12px; color: var(--text-muted); }
 .mk-line { margin-top: 4px; font-size: 12.5px; color: var(--text-secondary); line-height: 1.5; overflow-wrap: anywhere; }
 .mk-dim .mk-name { font-weight: 600; color: var(--text-secondary); }
-.mk-ref { font-size: 10px; letter-spacing: .6px; text-transform: uppercase; font-weight: 700; color: var(--text-muted); }
 .mk-form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .mk-form input[type=search] { flex: 1 1 220px; min-width: 0; }
 .mk-form input, .mk-form select { background: var(--bg-card); color: var(--text-primary); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; font-size: 13px; }
@@ -38,10 +36,10 @@
 
 <div class="ns-wrap">
 <h1 class="section-title">{{ entry.title }}</h1>
-<p class="section-desc">What is moving the market, and which sectors to lean into or away from.</p>
+<p class="section-desc">What is moving the market, and which sectors to lean into or away from. The industries are on Sectors.</p>
 
 <div x-data="{ tab: '{{ start_tab }}', loaded: { '{{ start_tab }}': true } }" x-cloak>
-{{ tab_bar(entry.tabs) }}
+{{ tab_bar(entry.tabs, [('/sectors', 'Industries')]) }}
 
 {# ════ TODAY ════ #}
 <div x-show="tab === 'today'" x-cloak>
@@ -50,8 +48,8 @@
 {% if lean_in or lean_away %}
 <div class="mk-strip">
     Sector call (model tilt, prices to {{ call.price_date|short_date }}):
-    {% if lean_in %}lean in <strong>{% for r in lean_in %}<a href="/markets?sector={{ r.sector|urlencode }}#industries">{{ r.sector }}</a>{% if not loop.last %}, {% endif %}{% endfor %}</strong>{% endif %}{% if lean_in and lean_away %};{% endif %}
-    {% if lean_away %}lean away <strong>{% for r in lean_away %}<a href="/markets?sector={{ r.sector|urlencode }}#industries">{{ r.sector }}</a>{% if not loop.last %}, {% endif %}{% endfor %}</strong>{% endif %}.
+    {% if lean_in %}lean in <strong>{% for r in lean_in %}<a href="/sectors?sector={{ r.sector|urlencode }}#per-sector">{{ r.sector }}</a>{% if not loop.last %}, {% endif %}{% endfor %}</strong>{% endif %}{% if lean_in and lean_away %};{% endif %}
+    {% if lean_away %}lean away <strong>{% for r in lean_away %}<a href="/sectors?sector={{ r.sector|urlencode }}#per-sector">{{ r.sector }}</a>{% if not loop.last %}, {% endif %}{% endfor %}</strong>{% endif %}.
     <a href="#sector-call">Detail below</a>
 </div>
 {% endif %}
@@ -84,7 +82,7 @@
 {% for r in call.rows %}
 <div class="mk-row {{ 'mk-dim' if r.lean == 'none' else '' }}">
     <div class="mk-head">
-        <a class="mk-name" href="/markets?sector={{ r.sector|urlencode }}#industries">{{ r.sector }}</a>
+        <a class="mk-name" href="/sectors?sector={{ r.sector|urlencode }}#per-sector">{{ r.sector }}</a>
         <span class="pill {{ {'in': 'pill-green', 'away': 'pill-red'}.get(r.lean, 'pill-muted') }}">{{ r.verdict }}</span>
         <span class="mono mk-tilt">{% if r.tilt is not none %}tilt {{ r.tilt|signed(2) }}{% if r.mom is not none and r.macro is not none %} (momentum {{ r.mom|signed(2) }}, macro {{ r.macro|signed(2) }}){% endif %}{% else %}no tilt{% endif %}</span>
         {% if r.news %}<span class="pill {{ 'pill-green' if r.news == 'helps' else 'pill-red' }}">news: {{ 'helps' if r.news == 'helps' else 'careful' }}</span>{% endif %}
@@ -144,44 +142,6 @@
 {% else %}
 <div class="card"><div class="ns-text">No weekly outlook has been written yet.</div></div>
 {% endfor %}
-</div>
-
-{# ════ INDUSTRIES ════ #}
-<div x-show="tab === 'industries'" x-cloak>
-<div style="margin-top: 14px;">
-{% include "_industry_detail.html" %}
-</div>
-
-<div class="card" style="margin-top: 16px;">
-    <div class="mk-ref">Reference</div>
-    <div class="section-title">All {{ industries|length }} industries</div>
-    <div class="section-desc">Strongest sector tilt first, then the industry's own score. Score = average model score of its stocks, weighted by market cap, out of 100, as of {{ pick_date|short_date }}. Breadth = share of stocks scoring 55 or more. Open one for its detail.</div>
-    <div class="table-wrap" style="margin-top: 10px;">
-    <table class="rot-table">
-        <thead><tr>
-            <th>Industry</th><th class="ns-hide-m">Sector</th>
-            <th class="num">Sector tilt</th><th class="num">Score /100</th><th class="num ns-hide-m">Breadth</th>
-            <th class="ns-hide-m">Macro</th><th class="num ns-hide-m">Stocks</th>
-        </tr></thead>
-        <tbody>
-        {% for ind in industries %}
-        {% set sig = ind.macro_signal %}
-        <tr>
-            <td><a class="rot-link" href="/markets?industry={{ ind.industry|urlencode }}#industries">{{ ind.industry }}</a></td>
-            <td class="rot-sector ns-hide-m">{{ ind.sector }}</td>
-            <td class="num {{ ind.sector_tilt|tone }}">{{ ind.sector_tilt|signed(2) }}</td>
-            <td class="num {% if ind.avg_score is none %}{% elif ind.avg_score >= 0.6 %}score-green{% elif ind.avg_score >= 0.45 %}score-amber{% else %}score-red{% endif %}">{{ (ind.avg_score * 100)|round|int if ind.avg_score else '—' }}</td>
-            <td class="num ns-hide-m">{{ ind.breadth_pct|pct(0) }}</td>
-            <td class="ns-hide-m">{% if sig in ['TAILWIND', 'FAVORABLE'] %}<span class="pill pill-green">Tailwind</span>{% elif sig in ['HEADWIND', 'ADVERSE'] %}<span class="pill pill-red">Headwind</span>{% elif sig and sig != 'UNKNOWN' %}<span class="pill pill-muted">{{ sig|lower|capitalize }}</span>{% else %}—{% endif %}</td>
-            <td class="num ns-hide-m">{{ ind.stocks }}</td>
-        </tr>
-        {% else %}
-        <tr><td colspan="7" class="u-muted-11">No industries ranked yet.</td></tr>
-        {% endfor %}
-        </tbody>
-    </table>
-    </div>
-</div>
 </div>
 
 {# ════ SEARCH ════ #}

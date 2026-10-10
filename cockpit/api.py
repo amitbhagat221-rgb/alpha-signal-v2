@@ -651,6 +651,31 @@ def latest_pick_date():
     return views.latest_pick_date()
 
 
+def get_heatmap_data():
+    """Every ranked stock by tier (best score first; tiers in the order every page lists
+    them, views.display_tiers), then the non-pickable tiers (MICRO) from `stocks` with score
+    None: they are classified and their signals computed, but never ranked into daily_picks."""
+    unpickable = views.unpickable_tiers()
+    ph = ",".join("?" * len(unpickable)) or "NULL"
+    df = read_sql(f"""
+        SELECT dp.sid, s.ticker, s.name, dp.final_score as score, dp.cap_tier
+        FROM daily_picks dp JOIN stocks s ON dp.sid = s.sid
+        WHERE dp.pick_date = ?
+          AND s.cap_tier NOT IN ({ph})
+        ORDER BY dp.cap_tier, dp.final_score DESC
+    """, params=[latest_pick_date(), *unpickable])
+    result = {}
+    for tier in views.display_tiers():
+        tier_df = df[df["cap_tier"] == tier]
+        result[tier] = tier_df[["sid", "ticker", "name", "score"]].to_dict("records")
+    for tier in unpickable:
+        rows = read_sql("SELECT sid, ticker, name, NULL AS score FROM stocks "
+                        "WHERE cap_tier = ? ORDER BY ticker", params=[tier])
+        if not rows.empty:
+            result[tier] = rows.to_dict("records")
+    return result
+
+
 def search_stocks(query):
     """Search stocks by ticker or name."""
     q = f"%{query}%"
@@ -1469,8 +1494,11 @@ def get_group_factor_means(by, name):
     return rows
 
 
+SECTOR_BRIEF_MAX_AGE_DAYS = 4   # sector_briefs are written nightly (config.PIPELINE compute_sector_briefs): 4 days covers a weekend + a missed night
+
+
 def get_sector_digest():
-    """Front-door payload for /sectors — Plan 0006 Phase C.
+    """Per-sector briefs for Sectors > Today — Plan 0006 Phase C. Read it through get_sector_front.
 
     Reads sector_briefs + sector_force_breakdown for the latest snapshot.
     Returns:
@@ -1491,9 +1519,14 @@ def get_sector_digest():
         WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM sector_briefs)
     """)
     if briefs.empty:
-        return {"snapshot_date": None, "buckets": {}, "forces": {}}
+        return {"snapshot_date": None, "stale": True, "age_days": None, "buckets": {}, "forces": {}}
 
     snapshot_date = briefs.iloc[0]["snapshot_date"]
+    age = (pd.Timestamp.now().normalize() - pd.Timestamp(snapshot_date)).days
+    if age > SECTOR_BRIEF_MAX_AGE_DAYS:
+        # The briefs are written nightly: older than the cadence allows, they describe a market that
+        # has moved on, so nothing from them is shown (the page says when they were last written).
+        return {"snapshot_date": snapshot_date, "stale": True, "age_days": age, "buckets": {}, "forces": {}}
 
     # Plan 0006 Phase D — attach the LLM-narrated dossier per sector. Only
     # valid=1 rows are surfaced (mirror of get_dossier() returning {} for
@@ -1614,6 +1647,8 @@ def get_sector_digest():
 
     return {
         "snapshot_date": snapshot_date,
+        "stale": False,
+        "age_days": age,
         "buckets": buckets,
         "forces": forces,
     }
@@ -2524,6 +2559,57 @@ def get_industry_rotation():
         r["sector_tilt"] = tilt.get(r.get("sector"))
     rows.sort(key=lambda r: (r["sector_tilt"] is None, -(r["sector_tilt"] or 0), -(r.get("avg_score") or 0)))
     return rows
+
+
+SECTOR_FORCES = (("regulation", "Regulation"), ("tech", "Tech and innovation"), ("macro", "Macro"))
+
+
+def _sector_picks():
+    """{sector: [{ticker, sid, tier, rank}]}: the published picks (the top config.TIERS[t]['picks']
+    of each pickable tier, the same set Today lists) and the total, so every pick count on the
+    sector pages means the same thing."""
+    import config
+    by, total = {}, 0
+    for t in views.display_tiers():
+        for r in get_top_picks(tier=t, top=config.TIERS[t]["picks"]):
+            total += 1
+            by.setdefault(r.get("sector"), []).append(
+                {"ticker": r["ticker"], "sid": r["sid"], "tier": t, "rank": r.get("rank")})
+    return by, total
+
+
+def get_sector_front():
+    """Sectors > Today. ONE row per sector from the same call Markets shows (get_sector_call: the
+    model's tilt, the editor's news view, where they disagree), grouped Lean in / Lean away / No call.
+    The nightly sector brief rides along per row (momentum vs NIFTY, macro drivers, what to watch,
+    bull / bear) with its own date; it is left out when older than SECTOR_BRIEF_MAX_AGE_DAYS. The
+    brief's own bucket and the LLM thesis / conviction are not shown: they restate a stance the
+    model's tilt does not carry (a thesis called Industrials the model's strongest tilt while the
+    tilt gave no call). Forces by sector come from the same brief."""
+    call = get_sector_call()
+    digest = get_sector_digest()
+    briefs = {s["sector"]: s for b in digest["buckets"].values() for s in b}
+    picks, picks_total = _sector_picks()
+    rows = []
+    for r in call["rows"]:
+        b = briefs.get(r["sector"]) or {}
+        d = b.get("dossier") or {}
+        rows.append({**r, "brief": bool(b), "horizons": b.get("horizons"), "macro_signal": b.get("macro_signal"),
+                     "drivers": b.get("driver_preview"), "n_regulatory_30d": b.get("n_regulatory_30d"),
+                     "picks": picks.get(r["sector"], []),
+                     "watch": d.get("what_to_watch") or [], "bull": d.get("bull_case") or [],
+                     "bear": d.get("bear_case") or [], "tech": d.get("tech_innovation_drivers") or []})
+    groups = [{"key": k, "title": t, "sub": sub, "rows": [r for r in rows if r["lean"] == k]}
+              for k, t, sub in (("in", "Lean in", "tilt of {0} or more"), ("away", "Lean away", "tilt of -{0} or less"),
+                                ("none", "No call", "tilt too close to zero to call"))]
+    for g in groups:
+        g["sub"] = g["sub"].format(call["lean_min"])
+    forces = [{"key": k, "label": lab, **(digest["forces"].get(k) or {"positive": [], "negative": []})}
+              for k, lab in SECTOR_FORCES] if not digest["stale"] else []
+    return {"call": call, "groups": groups, "forces": forces, "digest_as_of": digest["snapshot_date"],
+            "digest_stale": digest["stale"], "digest_age": digest["age_days"],
+            "max_age": SECTOR_BRIEF_MAX_AGE_DAYS,
+            "picks_total": picks_total, "pick_date": latest_pick_date()}
 
 
 def _article_tickers(article_ids):

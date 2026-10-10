@@ -1,13 +1,13 @@
 {# Compact sector-context dossier, lazy-loaded into the stock page's "Sector" tab. #}
 {# Server-rendered via /partial/sector-card/{sector}?sid=XXX. Reuses the same #}
-{# sector data behind Markets, with the current stock highlighted among peers. #}
+{# sector data behind /sectors, with the current stock highlighted among peers. #}
 
 <div class="card" style="margin-bottom:16px; border-left:4px solid var(--accent); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
     <div>
         <div style="font-size:11px; text-transform:uppercase; letter-spacing:.5px; color:var(--text-muted);">Sector context</div>
         <div style="font-size:18px; font-weight:700;">{{ sector }}</div>
     </div>
-    <a href="/markets?sector={{ sector|urlencode }}#industries" style="font-size:12px; color:var(--accent); text-decoration:none; font-weight:600;">Open full sector dossier →</a>
+    <a href="/sectors?sector={{ sector|urlencode }}#per-sector" style="font-size:12px; color:var(--accent); text-decoration:none; font-weight:600;">Open full sector dossier →</a>
 </div>
 
 {# Peers — where this stock sits among sector names by market cap, with our model rank #}
@@ -26,7 +26,7 @@
         {% for p in top_players %}
             <tr style="border-top:1px solid var(--border);{% if p.sid == sid %} background:var(--accent-soft); font-weight:700;{% endif %}">
                 <td style="padding:5px 6px;">
-                    <a href="/explorer/{{ p.sid }}" style="color:inherit; text-decoration:none;"><span class="mono">{{ p.ticker }}</span></a>
+                    <a href="/stocks/{{ p.sid }}" style="color:inherit; text-decoration:none;"><span class="mono">{{ p.ticker }}</span></a>
                     {% if p.sid == sid %}<span style="color:var(--accent); font-size:10px;"> ◀ this stock</span>{% endif %}
                 </td>
                 <td style="padding:5px 6px; text-align:right;" class="mono">{{ p.market_cap_cr | crore }}</td>
@@ -48,7 +48,7 @@
             <div style="font-size:10px; text-transform:uppercase; letter-spacing:.5px; color:var(--text-muted); margin-bottom:4px;">Top picks</div>
             {% for p in picks.top[:6] %}
             <div style="display:flex; justify-content:space-between; font-size:12px; padding:3px 0; border-top:1px solid var(--border);">
-                <a href="/explorer/{{ p.sid }}" style="text-decoration:none; {% if p.sid == sid %}font-weight:700; color:var(--accent);{% else %}color:inherit;{% endif %}"><span class="mono">{{ p.ticker }}</span>{% if p.sid == sid %} ◀{% endif %}</a>
+                <a href="/stocks/{{ p.sid }}" style="text-decoration:none; {% if p.sid == sid %}font-weight:700; color:var(--accent);{% else %}color:inherit;{% endif %}"><span class="mono">{{ p.ticker }}</span>{% if p.sid == sid %} ◀{% endif %}</a>
                 <span class="mono">{{ p.final_score | pct(0, scale=100) | replace('%','') }}/100</span>
             </div>
             {% else %}<div style="color:var(--text-muted); font-size:12px;">—</div>{% endfor %}
@@ -57,7 +57,7 @@
             <div style="font-size:10px; text-transform:uppercase; letter-spacing:.5px; color:var(--text-muted); margin-bottom:4px;">Lowest-ranked</div>
             {% for p in picks.bottom[:5] %}
             <div style="display:flex; justify-content:space-between; font-size:12px; padding:3px 0; border-top:1px solid var(--border);">
-                <a href="/explorer/{{ p.sid }}" style="text-decoration:none; {% if p.sid == sid %}font-weight:700; color:var(--accent);{% else %}color:inherit;{% endif %}"><span class="mono">{{ p.ticker }}</span>{% if p.sid == sid %} ◀{% endif %}</a>
+                <a href="/stocks/{{ p.sid }}" style="text-decoration:none; {% if p.sid == sid %}font-weight:700; color:var(--accent);{% else %}color:inherit;{% endif %}"><span class="mono">{{ p.ticker }}</span>{% if p.sid == sid %} ◀{% endif %}</a>
                 <span class="mono">{{ p.final_score | pct(0, scale=100) | replace('%','') }}/100</span>
             </div>
             {% else %}<div style="color:var(--text-muted); font-size:12px;">—</div>{% endfor %}

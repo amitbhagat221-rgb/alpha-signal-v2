@@ -222,7 +222,7 @@ def test_news_pages_render(ne, tmp_path, monkeypatch):
     clear()
     page = legacy.get("/markets")
     assert page.status_code == 200
-    for needle in ("Oil keeps climbing", "Humanoid robots leave the lab", "/markets?sector=Energy",
+    for needle in ("Oil keeps climbing", "Humanoid robots leave the lab", "/sectors?sector=Energy",
                    "not a recommendation", "/markets/theme/oil_energy", "/partial/news-search"):
         assert needle in page.text, needle
     assert legacy.get("/partial/news-search?q=oil").status_code == 200

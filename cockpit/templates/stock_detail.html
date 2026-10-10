@@ -106,7 +106,7 @@
     onTab(t) {
         if (t === 'financials') initFinancialsCharts();
         else if (t === 'ownership') initOwnershipCharts();
-        else if (t === 'analysts') initConsensusCharts();
+        else if (t === 'consensus') initConsensusCharts();
         else if (t === 'price') initPriceChart('1y');
         else if (t === 'sector') this.loadSector();
     },
@@ -119,7 +119,8 @@
             .catch(() => { this.$refs.sectorBox.innerHTML = '<div class=\'card u-muted\'>Could not load industry detail.</div>'; });
     } }">
 
-{% set tabs = [("overview", "Overview"), ("financials", "Financials"), ("ownership", "Ownership"), ("analysts", "Analysts"), ("forensic", "Forensic"), ("price", "Price & technicals")] %}
+{% set tabs = [("overview", "Overview"), ("financials", "Financials"), ("ownership", "Ownership"), ("consensus", "Consensus"), ("forensic", "Forensic"), ("price", "Price & Technicals")] %}
+{% if s.data %}{% set _ = tabs.append(("data", "Data")) %}{% endif %}
 {% if s.industry or s.sector %}{% set _ = tabs.append(("sector", "Industry" if s.industry else "Sector")) %}{% endif %}
 {% if s.management or s.managerial_ability or s.financial_management or sd %}{% set _ = tabs.append(("management", "Management")) %}{% endif %}
 {{ tab_bar(tabs) }}
@@ -143,7 +144,7 @@
         <strong>{{ s.ticker }} ranks {{ s.rank|rank_text(bd.tier_size if bd else none, s.cap_tier) }}</strong>, score
         <span class="num">{{ (s.final_score * 100)|pct(0)|replace("%", "") }}</span>/100 as of {{ s.pick_date|short_date }}{% if rank_move is not none and rank_move != 0 %},
         <span class="{{ 'score-green' if rank_move > 0 else 'score-red' }}">{{ 'up' if rank_move > 0 else 'down' }} {{ rank_move|abs }} place{{ '' if rank_move|abs == 1 else 's' }}</span> since the previous ranking{% endif %}.
-        {% if s.data %}Data <span class="num">{{ s.data.score }}%</span> ({{ s.data.word|lower }}).{% endif %}
+        {% if s.data %}Data <span class="num">{{ s.data.score }}%</span> ({{ s.data.word|lower }}), <button type="button" class="link-btn" @click="tab = 'data'; loaded.data = true; history.pushState(null, '', '#data')">the data behind it</button>.{% endif %}
         {% if s.cap_tier in unproven_tiers() %}<span class="u-muted">{{ s.cap_tier|tier_word }} ranks have shown no out-of-sample skill.</span>{% endif %}
     </div>
     {% elif s.cap_tier == 'MICRO' %}
@@ -155,7 +156,7 @@
     <div class="verdict-line">
         Analyst {{ pt_basis }} target <span class="num">{{ pt|inr(0) }}</span>{% if pt_up is not none %}
         (<span class="num {{ pt_up|tone }}">{{ pt_up|pct(0, signed=True) }}</span> vs the latest close){% endif %}{% if pt_n %}, {{ pt_n }} analyst{{ '' if pt_n == 1 else 's' }}{% endif %}{% if pt_asof %}, refreshed {{ pt_asof|short_date }}{% endif %}.
-        <button type="button" class="link-btn" @click="tab = 'analysts'; loaded.analysts = true; history.pushState(null, '', '#analysts')">Analysts tab</button>
+        <button type="button" class="link-btn" @click="tab = 'consensus'; loaded.consensus = true; history.pushState(null, '', '#consensus')">Consensus tab</button>
     </div>
     {% endif %}
     {% set ch = s.get("chips") or {} %}
@@ -221,77 +222,6 @@
         {% endif %}
     </div>
     {% endif %}
-
-    {% if s.data and in_ranking %}
-    {% set d = s.data %}
-    <div class="card u-mb16">
-        <div class="section-title">The data behind this score</div>
-        <div class="section-desc">Each tier ranks on a fixed set of factors. A factor with no value for a stock counts as the middle of its tier (50), so thin data pulls the score toward the middle. The share below is how much of the factor weight was backed by a real value for {{ s.ticker }} on {{ s.pick_date|short_date }}. It says nothing about whether the stock is a good buy.</div>
-        <div class="data-head">
-            <div class="data-big mono score-{{ d.colour }}">{{ d.score }}%</div>
-            <div><div class="data-word score-{{ d.colour }}">{{ d.word }}</div><div class="u-muted-11">{{ d.meaning | capitalize }}.</div></div>
-        </div>
-        <div class="data-grid">
-            {% if d.factors_applicable %}
-            <div class="data-cell"><div class="data-k">Factors with a value</div>
-                <div class="data-v mono score-{{ d.colour }}">{{ d.factors_used }}<span class="u-muted-11"> of {{ d.factors_applicable }}</span></div>
-                <div class="u-muted-11">{% if d.missing %}Missing: {{ d.missing | join(', ') }}{% else %}Every factor this tier ranks on had a value.{% endif %}</div></div>
-            {% endif %}
-            {% if d.price_days is not none %}
-            <div class="data-cell"><div class="data-k">Price history</div>
-                <div class="data-v mono">{{ "{:,}".format(d.price_days) }}<span class="u-muted-11"> trading days</span></div>
-                <div class="u-muted-11">The gate needs about three months.</div></div>
-            {% endif %}
-            {% if d.quarters is not none %}
-            <div class="data-cell"><div class="data-k">Fundamentals</div>
-                <div class="data-v mono">{{ d.quarters }}<span class="u-muted-11"> of 8 quarters</span></div>
-                <div class="u-muted-11">The gate needs four.</div></div>
-            {% endif %}
-        </div>
-    </div>
-    {% endif %}
-
-    {# Data lineage: reference, folded #}
-    <div class="card u-mb16" x-data="{open: false, payload: null}"
-         x-init="$watch('open', val => { if (val && !payload) { fetch('/api/lineage/{{ s.sid }}').then(r=>r.json()).then(d=>payload=d) }})">
-        <button type="button" class="lineage-toggle" @click="open = !open" :aria-expanded="open">
-            <div>
-                <div class="section-title" style="margin-bottom: 4px;">Data lineage <span class="u-muted-10">(reference)</span></div>
-                <div class="section-desc" style="margin: 0;">For each factor, the source rows that fed it.</div>
-            </div>
-            <div class="lineage-sign" x-text="open ? '−' : '+'"></div>
-        </button>
-        <div x-show="open" x-cloak class="lineage-body">
-            <template x-if="!payload"><div class="u-muted-11">Loading…</div></template>
-            <template x-if="payload && payload.in_active_universe">
-                <div>
-                    <div class="u-muted-11 lineage-h">Row-level lineage was emitted for this stock</div>
-                    <template x-for="(rows, factor) in payload.dynamic_lineage" :key="factor">
-                        <div class="lineage-f">
-                            <div class="lineage-name" x-text="factor"></div>
-                            <div class="table-wrap"><table class="lineage-t">
-                                <thead><tr class="u-muted"><th>Source table</th><th>Role</th><th>Source key</th><th>Columns</th><th>Provenance</th></tr></thead>
-                                <tbody>
-                                    <template x-for="(r, i) in rows" :key="i">
-                                        <tr>
-                                            <td class="mono" x-text="r.table"></td>
-                                            <td class="u-muted" x-text="r.contribution || '-'"></td>
-                                            <td class="mono" x-text="JSON.stringify(r.key)"></td>
-                                            <td class="mono" x-text="(r.cols || []).join(', ')"></td>
-                                            <td class="mono u-muted-10" x-text="r.column_sources ? Object.entries(r.column_sources).map(([c,v])=>c+': '+ (v||['?']).join('|')).join('; ') : '—'"></td>
-                                        </tr>
-                                    </template>
-                                </tbody>
-                            </table></div>
-                        </div>
-                    </template>
-                </div>
-            </template>
-            <template x-if="payload && !payload.in_active_universe">
-                <div class="u-muted-11">No row-level lineage was stored for this stock; only the declared source spec exists (<span class="mono">/api/lineage/{{ s.sid }}</span>).</div>
-            </template>
-        </div>
-    </div>
 </div>
 
 {# RIGHT: news, earnings, the write-up #}
@@ -742,9 +672,9 @@
 </div> {# end ownership #}
 
 {# ════════════════════════════════════════════ #}
-{# ──────────── ANALYSTS TAB ───────────────── #}
+{# ──────────── CONSENSUS TAB ───────────────── #}
 {# ════════════════════════════════════════════ #}
-<div x-show="tab === 'analysts'" x-cloak>
+<div x-show="tab === 'consensus'" x-cloak>
 
     {% if ac and ac.get("price_target") %}
     {% set fetched_short = (ac.get("fetched_at") or "")[:10] %}
@@ -1220,6 +1150,87 @@
 
 </div> {# end price tab #}
 
+
+{# ════════════════════════════════════════════ #}
+{# ───────────── DATA TAB ───────────────────── #}
+{# The data behind the score (views.pick_data, ADR 0061) and where each factor's rows came from. #}
+{# ════════════════════════════════════════════ #}
+{% if s.data %}
+<div x-show="tab === 'data'" x-cloak>
+{% if in_ranking %}
+{% set d = s.data %}
+<div class="card u-mb16">
+    <div class="section-title">The data behind this score</div>
+    <div class="section-desc">Each tier ranks on a fixed set of factors. A factor with no value for a stock counts as the middle of its tier (50), so thin data pulls the score toward the middle. The share below is how much of the factor weight was backed by a real value for {{ s.ticker }} on {{ s.pick_date|short_date }}. It says nothing about whether the stock is a good buy.</div>
+    <div class="data-head">
+        <div class="data-big mono score-{{ d.colour }}">{{ d.score }}%</div>
+        <div><div class="data-word score-{{ d.colour }}">{{ d.word }}</div><div class="u-muted-11">{{ d.meaning | capitalize }}.</div></div>
+    </div>
+    <div class="data-grid">
+        {% if d.factors_applicable %}
+        <div class="data-cell"><div class="data-k">Factors with a value</div>
+            <div class="data-v mono score-{{ d.colour }}">{{ d.factors_used }}<span class="u-muted-11"> of {{ d.factors_applicable }}</span></div>
+            <div class="u-muted-11">{% if d.missing %}Missing: {{ d.missing | join(', ') }}{% else %}Every factor this tier ranks on had a value.{% endif %}</div></div>
+        {% endif %}
+        {% if d.price_days is not none %}
+        <div class="data-cell"><div class="data-k">Price history</div>
+            <div class="data-v mono">{{ "{:,}".format(d.price_days) }}<span class="u-muted-11"> trading days</span></div>
+            <div class="u-muted-11">The gate needs about three months.</div></div>
+        {% endif %}
+        {% if d.quarters is not none %}
+        <div class="data-cell"><div class="data-k">Fundamentals</div>
+            <div class="data-v mono">{{ d.quarters }}<span class="u-muted-11"> of 8 quarters</span></div>
+            <div class="u-muted-11">The gate needs four.</div></div>
+        {% endif %}
+    </div>
+</div>
+{% else %}
+<div class="card u-mb16 u-muted">{{ s.ticker }} has no score on the latest ranking date ({{ latest_pick|short_date }}), so there is no pick data to show; the lineage below is still the stock's declared source spec.</div>
+{% endif %}
+
+{# Data lineage: reference, folded #}
+<div class="card u-mb16" x-data="{open: false, payload: null}"
+     x-init="$watch('open', val => { if (val && !payload) { fetch('/api/lineage/{{ s.sid }}').then(r=>r.json()).then(d=>payload=d) }})">
+    <button type="button" class="lineage-toggle" @click="open = !open" :aria-expanded="open">
+        <div>
+            <div class="section-title" style="margin-bottom: 4px;">Data lineage</div>
+            <div class="section-desc" style="margin: 0;">For each factor, the source rows that fed it.</div>
+        </div>
+        <div class="lineage-sign" x-text="open ? '−' : '+'"></div>
+    </button>
+    <div x-show="open" x-cloak class="lineage-body">
+        <template x-if="!payload"><div class="u-muted-11">Loading…</div></template>
+        <template x-if="payload && payload.in_active_universe">
+            <div>
+                <div class="u-muted-11 lineage-h">Row-level lineage was emitted for this stock</div>
+                <template x-for="(rows, factor) in payload.dynamic_lineage" :key="factor">
+                    <div class="lineage-f">
+                        <div class="lineage-name" x-text="factor"></div>
+                        <div class="table-wrap"><table class="lineage-t">
+                            <thead><tr class="u-muted"><th>Source table</th><th>Role</th><th>Source key</th><th>Columns</th><th>Provenance</th></tr></thead>
+                            <tbody>
+                                <template x-for="(r, i) in rows" :key="i">
+                                    <tr>
+                                        <td class="mono" x-text="r.table"></td>
+                                        <td class="u-muted" x-text="r.contribution || '-'"></td>
+                                        <td class="mono" x-text="JSON.stringify(r.key)"></td>
+                                        <td class="mono" x-text="(r.cols || []).join(', ')"></td>
+                                        <td class="mono u-muted-10" x-text="r.column_sources ? Object.entries(r.column_sources).map(([c,v])=>c+': '+ (v||['?']).join('|')).join('; ') : '—'"></td>
+                                    </tr>
+                                </template>
+                            </tbody>
+                        </table></div>
+                    </div>
+                </template>
+            </div>
+        </template>
+        <template x-if="payload && !payload.in_active_universe">
+            <div class="u-muted-11">No row-level lineage was stored for this stock; only the declared source spec exists (<span class="mono">/api/lineage/{{ s.sid }}</span>).</div>
+        </template>
+    </div>
+</div>
+</div> {# end data tab #}
+{% endif %}
 
 {# ════════════════════════════════════════════ #}
 {# ───────────── MANAGEMENT TAB ─────────────── #}

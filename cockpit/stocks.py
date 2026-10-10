@@ -24,7 +24,7 @@ from validators.plausibility import PT_CLOSE_RATIO
 
 PAGE_SIZE = 100
 
-# Pill text for the screens: the Ideas chip names (playbooks.SLEEVE_NAMES), broad cloning under the same name.
+# Pill text for the screens: the Investor Playbooks tab names (playbooks.SLEEVE_NAMES), broad cloning under the same name.
 PLAY_SHORT = {k: playbooks.SLEEVE_NAMES[k] for k in ("quality", "deep_value", "breakouts", "insiders", "cloning")} | {
     "cloning_broad": playbooks.SLEEVE_NAMES["cloning"]}
 # screens a stock shows as a pill (the Avoid screen is a flag, not a screen to buy from)

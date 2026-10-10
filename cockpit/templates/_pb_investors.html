@@ -1,0 +1,28 @@
+{% from "_pb_macros.html" import stock_cell, num, chip, flag_cell, rank_cell, change_cell, investor, result_line, th, list_tools with context %}
+<div class="card pb-card">
+    {{ result_line(d.line) }}
+    <div class="pb-head">
+        <h2 class="section-title">{{ d.followed|length }} followed investors · {{ d.investors|length }} more individuals above 1% in {{ r.INVESTOR_MIN_STOCKS }}+ companies</h2>
+        <div class="mono u-muted-11">filings to {{ d.as_of|short_date if d.as_of else '—' }} · {{ d.n_stocks }} stocks</div>
+    </div>
+    <div class="section-desc">
+        Pabrai's cloning: start from what proven investors already own. Every company must name its holders above 1% each quarter.
+        Open a name to see the holdings and what changed since the filing before.
+    </div>
+    {% if d.n_stocks and d.n_with_prior < d.n_stocks %}
+    <div class="pb-note">
+        <strong>Changes are still loading.</strong> The previous quarter is stored for {{ d.n_with_prior }} of
+        {{ d.n_stocks }} stocks, so “new / added / trimmed” shows only for those.
+    </div>
+    {% endif %}
+    <div class="pb-group">Followed investors — every filed spelling and vehicle combined</div>
+    {% for inv in d.followed %}{{ investor(inv, loop.index) }}{% else %}<div class="u-muted-11" style="padding: 10px 6px;">None of the followed names appear in the filings loaded so far.</div>{% endfor %}
+    <div class="pb-group">Other individuals — matched on exact spelling</div>
+    {% for inv in d.investors %}{{ investor(inv, loop.index) }}{% else %}<div class="u-muted-11" style="padding: 10px 6px;">No holder filings loaded yet.</div>{% endfor %}
+    <div class="pb-foot">
+        Model rank = place in the stock's tier in the latest ranking{% if d.ranks_as_of %} ({{ d.ranks_as_of|short_date }}){% endif %}, #1 = best.{% for t in unproven_tiers() %} {{ t|tier_word }} has no factor with out-of-sample skill, so a {{ t|tier_word }} rank is context only.{% endfor %}
+        Source: BSE shareholding-pattern filings (holders above 1%). A holder who drops under 1% disappears from the filing, so
+        “below 1%” can mean a full exit or a small trim. Stocks listed only on NSE are not covered. A followed investor is matched by the
+        words in the filed name, so an unrelated holder with the same names would be included — the “Filed as” line shows what was combined.
+    </div>
+</div>

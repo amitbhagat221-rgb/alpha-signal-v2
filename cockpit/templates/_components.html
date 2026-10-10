@@ -30,7 +30,7 @@
    Use inside a parent `x-data="{ tab: '<first key>', loaded: { '<first key>': true } }"`.
    Each panel below the tab-bar should be `<div x-show="tab === '<key>'" x-cloak>...</div>`.
 #}
-{% macro tab_bar(tabs) -%}
+{% macro tab_bar(tabs, links=[]) -%}
 {# URL-hash sync: on init, read #hash and adopt as active tab if it matches a
    known key. A click pushes the hash (history.pushState) and popstate re-reads
    it, so Back returns to the previous tab and links share a tab. Falls back to
@@ -58,6 +58,7 @@
     <button class="tab-button" :class="{ active: tab === '{{ key }}' }"
             @click="tab = '{{ key }}'; loaded['{{ key }}'] = true; if (location.hash !== '#{{ key }}') history.pushState(null, '', '#{{ key }}')">{{ label }}</button>
     {% endfor %}
+    {% for href, label in links %}<a class="tab-button tab-link" href="{{ href }}">{{ label }} &rarr;</a>{% endfor %}
 </div>
 {%- endmacro %}
 
