@@ -23,7 +23,7 @@ from cockpit._shared import _persisted_cache
 #   - mf_category_stats  category medians/deciles
 
 
-@_persisted_cache(600, name="mf_universe_pool_v3")
+@_persisted_cache(600, name="mf_universe_pool_v4")
 def _mf_universe_pool():
     """Every active scheme joined to its LATEST mf_metrics row, plus an
     `investable` flag — the unfiltered pool that get_mf_universe_overview
@@ -39,12 +39,13 @@ def _mf_universe_pool():
     # after the monthly compute, but stale rows from earlier runs can stick around).
     df = read_sql(
         """SELECT sm.scheme_code, sm.scheme_name, sm.amc, sm.category_norm,
-                  sm.plan_type, sm.option_type,
+                  NULLIF(sm.plan_type, 'UNKNOWN') AS plan_type, NULLIF(sm.option_type, 'UNKNOWN') AS option_type,
                   m.nav, m.nav_date,
                   m.ret_1y, m.ret_3y_cagr, m.ret_5y_cagr,
                   m.sharpe_1y, m.sharpe_3y, m.max_drawdown,
                   m.composite_score, m.score_percentile, m.peer_rank_3y,
                   CASE WHEN (sm.data_quality IS NULL OR sm.data_quality = 'TRUSTED')
+                        AND COALESCE(sm.category_norm, '') NOT LIKE 'ETF /%'
                         AND EXISTS (SELECT 1 FROM mf_nav_history n
                                     WHERE n.scheme_code = sm.scheme_code
                                       AND n.nav_date >= date('now','-30 days'))
@@ -165,10 +166,13 @@ def get_mf_universe_overview(category: str = None, amc: str = None,
         ascending = direction == "asc"
     # Ties (the first page is all percentile 100) break by absolute score.
     by, asc = ([col, "composite_score"], [ascending, False]) if col != "composite_score" else ([col], [ascending])
-    hits = df[keep].sort_values(by, ascending=asc, kind="mergesort", na_position="last")
+    # Names sort case-insensitively ("quant ..." next to "Quant ...", not after "UTI ...").
+    hits = df[keep].sort_values(by, ascending=asc, kind="mergesort", na_position="last",
+                                key=lambda c: c.str.lower() if c.dtype == object else c)
     total = len(hits)
 
-    # Page rows
+    # Page rows (a stale ?page=178 lands on the last page, not a blank one)
+    page = max(1, min(page, (int(total) + page_size - 1) // page_size or 1))
     offset = max(0, (page - 1) * page_size)
     rows = hits.iloc[offset:offset + page_size].drop(columns=["investable"])
 
@@ -185,7 +189,7 @@ def get_mf_universe_overview(category: str = None, amc: str = None,
     }
 
 
-@_persisted_cache(3600, name="mf_category_heatmap")
+@_persisted_cache(3600, name="mf_category_heatmap_v2")
 def get_mf_category_heatmap(include_non_investable: bool = False) -> list[dict]:
     """Category-level medians for the heatmap on /mutual-funds.
 
@@ -218,6 +222,7 @@ def get_mf_category_heatmap(include_non_investable: bool = False) -> list[dict]:
         FROM mf_scheme_master sm
         WHERE sm.active = 1
           AND (sm.data_quality IS NULL OR sm.data_quality = 'TRUSTED')
+          AND COALESCE(sm.category_norm, '') NOT LIKE 'ETF /%'
           AND EXISTS (SELECT 1 FROM mf_nav_history n
                       WHERE n.scheme_code = sm.scheme_code
                         AND n.nav_date >= date('now','-30 days'))
@@ -229,11 +234,25 @@ def get_mf_category_heatmap(include_non_investable: bool = False) -> list[dict]:
     return df.replace({float("nan"): None}).to_dict("records")
 
 
+def _calendar_partial(year: int, first: str | None, last: str | None) -> str | None:
+    """'from launch 12 Feb' / 'YTD to 9 Oct' / both, for a year the fund did not run end to end."""
+    from datetime import date
+    def short(d):
+        x = date.fromisoformat(str(d)[:10])
+        return f"{x.day} {x.strftime('%b')}"
+    parts = []
+    if first and int(str(first)[:4]) == year and str(first)[5:10] > "01-07":
+        parts.append(f"from launch {short(first)}")
+    if last and int(str(last)[:4]) == year and str(last)[5:10] < "12-24":
+        parts.append(f"YTD to {short(last)}")
+    return ", ".join(parts) or None
+
+
 def get_mf_detail(scheme_code: str) -> dict | None:
     """Per-scheme deep-dive payload — identity, snapshot, returns, risk, scorer breakdown."""
     info_dict = db.one(
         """SELECT sm.scheme_code, sm.scheme_name, sm.amc, sm.category_norm, sm.category_raw,
-                  sm.plan_type, sm.option_type, sm.isin_growth, sm.isin_div,
+                  NULLIF(sm.plan_type, 'UNKNOWN') AS plan_type, NULLIF(sm.option_type, 'UNKNOWN') AS option_type, sm.isin_growth, sm.isin_div,
                   sm.aum_cr, sm.expense_ratio, sm.benchmark,
                   sm.data_quality, sm.quality_reason,
                   ms.inception_date, ms.has_full_history, sm.last_seen
@@ -256,6 +275,12 @@ def get_mf_detail(scheme_code: str) -> dict | None:
         params=[scheme_code],
     )
     calendar_list = calendar.replace({float("nan"): None}).to_dict("records")
+    # Launch year and the current year are partial: say so with the dates the Nifty column
+    # was measured over (signals.mf_metrics._calendar_returns uses the same window).
+    span = db.one("SELECT MIN(nav_date) AS first, MAX(nav_date) AS last FROM mf_nav_history WHERE scheme_code = ?",
+                  [scheme_code]) or {}
+    for c in calendar_list:
+        c["partial"] = _calendar_partial(c["year"], span.get("first"), span.get("last"))
 
     info_dict["is_debt"] = is_debt_category(info_dict.get("category_norm"))
     info_dict["has_bench"] = has_equity_benchmark(info_dict.get("category_norm"))
@@ -373,13 +398,13 @@ def get_mf_compare(scheme_codes: list[str]) -> dict:
     UI can warn when comparing across categories).
     """
     if not scheme_codes:
-        return {"schemes": [], "categories_seen": []}
+        return {"schemes": [], "categories_seen": [], "unknown_codes": []}
     scheme_codes = scheme_codes[:5]
     ph = ",".join("?" * len(scheme_codes))
 
     info = read_sql(
         f"""SELECT sm.scheme_code, sm.scheme_name, sm.amc, sm.category_norm,
-                   sm.plan_type, sm.option_type,
+                   NULLIF(sm.plan_type, 'UNKNOWN') AS plan_type, NULLIF(sm.option_type, 'UNKNOWN') AS option_type,
                    ms.inception_date, ms.has_full_history
             FROM mf_scheme_master sm
             LEFT JOIN mf_schemes ms ON sm.scheme_code = ms.scheme_code
@@ -409,7 +434,8 @@ def get_mf_compare(scheme_codes: list[str]) -> dict:
         schemes.append({"info": i, "metrics": m, "cat_rank": mf_category_rank(code)})
 
     cats = sorted({s["info"].get("category_norm") for s in schemes if s["info"].get("category_norm")})
-    return {"schemes": schemes, "categories_seen": cats}
+    return {"schemes": schemes, "categories_seen": cats,
+            "unknown_codes": [c for c in scheme_codes if c not in info_by_code]}
 
 
 def get_mf_search(q: str, limit: int = 10) -> list[dict]:

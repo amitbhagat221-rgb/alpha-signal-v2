@@ -94,8 +94,8 @@ table.mini a.link { color:var(--accent); }
         <h1 class="mf-title">{{ i.scheme_name }}</h1>
         <div class="mf-amc">{{ i.amc }} · {{ i.category_norm or i.category_raw or 'Uncategorised' }}</div>
         <div class="mf-tags">
-            <span class="mf-tag">{{ i.plan_type or 'N/A' }}</span>
-            <span class="mf-tag">{{ i.option_type or 'N/A' }}</span>
+            {% if i.plan_type %}<span class="mf-tag">{{ i.plan_type }}</span>{% endif %}
+            {% if i.option_type %}<span class="mf-tag">{{ i.option_type }}</span>{% endif %}
             {% if i.inception_date %}<span class="mf-tag muted">Inception {{ i.inception_date }}</span>{% endif %}
             {% if i.aum_cr %}<span class="mf-tag muted">AUM {{ i.aum_cr|crore }}</span>{% endif %}
             {% if i.expense_ratio %}<span class="mf-tag muted">Expense {{ i.expense_ratio|pct(2) }}</span>{% endif %}
@@ -167,11 +167,13 @@ table.mini a.link { color:var(--accent); }
         </div>
         <div class="chart-wrap">
             <div class="chart-title">Rolling 3-year CAGR (% per monthly anchor)</div>
-            <div class="chart-canvas"><canvas id="rolling3yChart" role="img" aria-label="Rolling 3-year CAGR"></canvas></div>
+            <div class="chart-canvas" x-show="!noRoll.r3"><canvas id="rolling3yChart" role="img" aria-label="Rolling 3-year CAGR"></canvas></div>
+            <p class="mf-note" x-show="noRoll.r3" x-cloak x-text="rollMsg(3)"></p>
         </div>
         <div class="chart-wrap">
             <div class="chart-title">Rolling 5-year CAGR (% per monthly anchor)</div>
-            <div class="chart-canvas"><canvas id="rolling5yChart" role="img" aria-label="Rolling 5-year CAGR"></canvas></div>
+            <div class="chart-canvas" x-show="!noRoll.r5"><canvas id="rolling5yChart" role="img" aria-label="Rolling 5-year CAGR"></canvas></div>
+            <p class="mf-note" x-show="noRoll.r5" x-cloak x-text="rollMsg(5)"></p>
         </div>
 
         <div class="card mf-card">
@@ -179,11 +181,11 @@ table.mini a.link { color:var(--accent); }
             {% if cal %}
             <div class="table-wrap">
             <table class="mini">
-                <thead><tr><th>Year</th><th class="num">Fund</th>{% if i.has_bench %}<th class="num">Nifty 50 (price)</th><th class="num">Spread (pts)</th>{% endif %}</tr></thead>
+                <thead><tr><th>Year</th><th class="num">Fund</th>{% if i.has_bench %}<th class="num">Nifty 50 (price, same dates)</th><th class="num">Spread (pts)</th>{% endif %}</tr></thead>
                 <tbody>
                 {% for c in cal %}
                 <tr>
-                    <td>{{ c.year }}</td>
+                    <td>{{ c.year }}{% if c.partial %}<div class="mf-stat-sub">{{ c.partial }}</div>{% endif %}</td>
                     <td class="num {{ c.ret_pct|tone }}">{{ c.ret_pct|pct(1, signed=True) }}</td>
                     {% if i.has_bench %}
                     <td class="num">{{ c.bench_ret_pct|pct(1, signed=True) }}</td>
@@ -261,7 +263,7 @@ table.mini a.link { color:var(--accent); }
                 {% for p in peers.peers %}
                 <tr {% if p.scheme_code == i.scheme_code %}class="me"{% endif %}>
                     <td>{{ loop.index }}</td>
-                    <td><a href="/mutual-funds/{{ p.scheme_code }}">{{ p.scheme_name[:65] }}</a><div class="mf-stat-sub">{{ p.amc }}</div></td>
+                    <td><a href="/mutual-funds/{{ p.scheme_code }}">{{ p.scheme_name[:65] }}</a><div class="mf-stat-sub">{{ p.amc }}{% if p.plan_type or p.option_type %} · {{ [p.plan_type, p.option_type]|select|join(' / ') }}{% endif %} · #{{ p.scheme_code }}</div></td>
                     <td class="num">{{ p.ret_3y_cagr|pct(1, signed=True) }}</td>
                     <td class="num">{{ '%.2f' % p.sharpe_3y if p.sharpe_3y is not none else '—' }}</td>
                     <td class="num"><strong>{{ '%.0f' % p.composite_score if p.composite_score is not none else '—' }}</strong></td>
@@ -360,6 +362,8 @@ table.mini a.link { color:var(--accent); }
 function mfDetail(schemeCode) {
     return {
         tab: 'performance',
+        noRoll: { r3: false, r5: false },
+        launched: {{ (i.inception_date or '')|tojson }},
         loaded: { performance: true },
 
         // Alpine calls init() itself; no x-init on the element (that ran it twice).
@@ -371,8 +375,14 @@ function mfDetail(schemeCode) {
                 fetch(`/api/mf-rolling/${schemeCode}`).then(r => r.json()),
                 loadChart(),
             ]);
+            if (!this.launched && nav && nav.length) this.launched = nav[0].date;
             this.drawNav(nav);
             this.drawRolling(rolling);
+        },
+
+        rollMsg(years) {
+            return `Not enough history for a ${years}-year rolling return` +
+                   (this.launched ? ` (fund launched ${this.launched})` : '') + '.';
         },
 
         axes(yFmt) {
@@ -404,11 +414,13 @@ function mfDetail(schemeCode) {
         },
 
         drawRolling(data) {
-            if (!data || !data.length) return;
+            data = data || [];
             const pct = v => v + '%';
             // each window has its own anchors: 5Y starts years after 3Y, so no shared labels
             const draw = (id, label, key, color, fill) => {
                 const pts = data.filter(d => d[key] != null);
+                this.noRoll[id === 'rolling3yChart' ? 'r3' : 'r5'] = !pts.length;
+                if (!pts.length) return;      // never draw an empty chart
                 this.line(id, label, pts.map(d => d.anchor_date), pts.map(d => d[key]), cssVar(color), cssVar(fill), pct);
             };
             draw('rolling3yChart', 'Rolling 3Y CAGR', 'rolling_3y_cagr', '--green', '--green-bg');

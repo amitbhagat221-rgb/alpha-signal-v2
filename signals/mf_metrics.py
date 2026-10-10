@@ -83,7 +83,7 @@ BENCH_INDEX = "NIFTY 50"
 BENCH_LABEL = "Nifty 50 (price index)"
 
 _EQUITY_BENCH_PREFIXES = ("equity /", "equity schemes", "index / equity", "index funds - equity",
-                          "exchange traded funds (etfs) - equity")
+                          "exchange traded funds (etfs) - equity", "etf / equity")
 
 
 def has_equity_benchmark(category: str | None) -> bool:
@@ -258,15 +258,15 @@ def _safe(v):
 # ─── Calendar-year returns ───────────────────────────────────────────────────
 
 
-def _year_return(prior: pd.Series, this_year: pd.Series) -> float:
-    """Calendar-year return in %: prior year-end close -> this year-end close.
-    A first (partial) year has no prior close, so it runs from its first close."""
-    base = prior.iloc[-1] if len(prior) else this_year.iloc[0]
-    return (this_year.iloc[-1] / base - 1) * 100
-
-
 def _calendar_returns(nav: pd.DataFrame, bench: pd.DataFrame | None) -> list[dict]:
-    """One row per calendar year per scheme — ret_pct + benchmark counterpart."""
+    """One row per calendar year per scheme: ret_pct + the benchmark over the SAME dates.
+
+    A year runs from the prior year's last close to this year's last close. A first (launch)
+    year and the current year are partial: the fund's window is its first close -> last close,
+    and the Nifty 50 is measured between exactly those two dates, never over a full year
+    (2024 launch +34% vs a full-year +9% was a spread of two different periods). No benchmark
+    when the index series does not reach back to the window's start (it begins 2019-01-01) or
+    ends before the window's end."""
     if len(nav) < 30:
         return []
     nav = nav.copy()
@@ -274,25 +274,29 @@ def _calendar_returns(nav: pd.DataFrame, bench: pd.DataFrame | None) -> list[dic
     nav = nav.sort_values("nav_date").reset_index(drop=True)
     nav["year"] = nav["nav_date"].dt.year
 
-    bench_by_year = {}
+    b = None
     if bench is not None and not bench.empty:
         b = bench.copy()
         b["date"] = pd.to_datetime(b["date"])
-        b["year"] = b["date"].dt.year
-        b = b.sort_values("date")
-        for y, sub in b.groupby("year"):
-            if len(sub) > 30:
-                bench_by_year[y] = _year_return(b["bench_nav"][b["year"] < y], sub["bench_nav"])
+        b = b.sort_values("date").set_index("date")["bench_nav"]
+
+    def bench_ret(d0, d1):
+        if b is None or d0 < b.index[0] or d1 > b.index[-1] + pd.Timedelta(days=5):
+            return None
+        return (b[:d1].iloc[-1] / b[:d0].iloc[-1] - 1) * 100
 
     out = []
     for year, sub in nav.groupby("year"):
         if len(sub) < 30:
             continue
-        ret = _year_return(nav["nav"][nav["year"] < year], sub["nav"])
+        prior = nav[nav["year"] < year]
+        d0 = prior["nav_date"].iloc[-1] if len(prior) else sub["nav_date"].iloc[0]
+        base = prior["nav"].iloc[-1] if len(prior) else sub["nav"].iloc[0]
+        d1 = sub["nav_date"].iloc[-1]
         out.append({
             "year": int(year),
-            "ret_pct": _safe(ret),
-            "bench_ret_pct": _safe(bench_by_year.get(int(year))),
+            "ret_pct": _safe((sub["nav"].iloc[-1] / base - 1) * 100),
+            "bench_ret_pct": _safe(bench_ret(d0, d1)),
         })
     return out
 
@@ -501,6 +505,15 @@ def _compute_composite_score(metrics_df: pd.DataFrame, rolling_df: pd.DataFrame,
     def _by_cat(col, asc=True):
         return metrics_df.groupby("category_norm")[col].transform(lambda s: _percentile_rank(s, ascending=asc))
     metrics_df["score_percentile"] = _by_cat("composite_score", asc=True)
+
+    # Peer rank by 3Y CAGR: 1 = best, among the same normalised category AND plan (a Direct fund
+    # is not out-ranked by its own Regular twin). peer_count = funds with a 3Y return there.
+    plan_map = master_df.set_index("scheme_code")["plan_type"].to_dict()
+    grp = [metrics_df["category_norm"], metrics_df["scheme_code"].map(plan_map).fillna("")]
+    r3 = metrics_df["ret_3y_cagr"]
+    metrics_df["peer_rank_3y"] = r3.groupby(grp).rank(ascending=False, method="min")
+    metrics_df["peer_count"] = r3.groupby(grp).transform("count").where(r3.notna())
+    metrics_df.loc[r3.isna() | metrics_df["category_norm"].isna(), ["peer_rank_3y", "peer_count"]] = np.nan
     return metrics_df
 
 
@@ -642,7 +655,7 @@ def compute(dry_run: bool = False, scheme: str | None = None) -> int:
                    "bench_spread_1y", "bench_spread_3y",
                    "composite_score", "score_percentile",
                    "score_3y_cagr_pct", "score_sharpe_3y_pct",
-                   "score_max_dd_pct", "score_consistency_pct"]
+                   "score_max_dd_pct", "score_consistency_pct", "peer_rank_3y", "peer_count"]
     write_metrics = metrics_df[[c for c in metric_cols if c in metrics_df.columns]]
     # Replace NaN/Inf with None for SQLite
     write_metrics = write_metrics.replace([np.inf, -np.inf], np.nan).astype(object).where(write_metrics.notna(), None)
@@ -671,6 +684,11 @@ def compute(dry_run: bool = False, scheme: str | None = None) -> int:
 
     if not cat_df.empty:
         write_cat = cat_df.replace([np.inf, -np.inf], np.nan).astype(object).where(cat_df.notna(), None)
+        # A re-run on the same day (after categories were merged or renamed) must not leave the old
+        # category names beside the new ones: this day's stats are replaced as a set.
+        with get_db() as _c:
+            _c.execute("DELETE FROM mf_category_stats WHERE as_of_date = ?", (as_of_date,))
+            _c.commit()
         n_cat = upsert_df(write_cat, "mf_category_stats")
         print(f"Wrote {n_cat} rows to mf_category_stats")
 

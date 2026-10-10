@@ -25,6 +25,14 @@
 .best::after { content:"★"; position:absolute; top:4px; right:4px; color:var(--green); font-size:11px; }
 .cmp-note { font-size:11px; color:var(--text-muted); margin-top:16px; }
 .cmp-help { color:var(--text-muted); font-size:13px; }
+/* label column stays put while the fund columns scroll inside .table-wrap */
+.cmp-table .row-label, .cmp-table thead th:first-child { position:sticky; left:0; z-index:1; background:var(--bg-card); }
+.cmp-table tr.group td:first-child { position:sticky; left:0; background:var(--bg-primary); }
+@media (max-width: 600px) {
+    .cmp-table th, .cmp-table td { padding:8px; }
+    .cmp-table thead th { min-width:160px; }
+    .cmp-table .row-label { min-width:0; width:88px; max-width:88px; font-size:10px; }
+}
 </style>
 
 <h1 style="font-size:22px; font-weight:700; margin:0 0 12px;">Compare Mutual Funds</h1>
@@ -34,6 +42,10 @@
     <button type="submit">Compare</button>
     <a href="/mutual-funds">← Back to universe</a>
 </form>
+
+{% if bundle.unknown_codes %}
+<div class="cat-warn" role="alert">No fund with scheme code {{ bundle.unknown_codes|join(', ') }}: left out of the comparison. Codes are on each fund's page.</div>
+{% endif %}
 
 {% if not bundle.schemes %}
 <p class="cmp-help">
@@ -64,8 +76,8 @@
                 <div class="scheme-name"><a href="/mutual-funds/{{ s.info.scheme_code }}">{{ s.info.scheme_name[:60] }}</a></div>
                 <div class="scheme-amc">{{ s.info.amc }} · {{ s.info.category_norm or '—' }}</div>
                 <div>
-                    <span class="pill">{{ s.info.plan_type or '—' }}</span>
-                    <span class="pill">{{ s.info.option_type or '—' }}</span>
+                    {% if s.info.plan_type %}<span class="pill">{{ s.info.plan_type }}</span>{% endif %}
+                    {% if s.info.option_type %}<span class="pill">{{ s.info.option_type }}</span>{% endif %}
                     <span class="pill pill-muted">#{{ s.info.scheme_code }}</span>
                 </div>
             </th>
@@ -103,8 +115,8 @@
             ('Std dev 3Y (annualised)', 'std_3y', '{:.1f}%', False),
             ('Max drawdown', 'max_drawdown', '{:.1f}%', True),
             ('Recovery (days)', 'recovery_days', '{:,.0f}', False),
-            ('vs Nifty 50, 1Y (pts)', 'bench_spread_1y', '{:+.1f}%', True),
-            ('vs Nifty 50, 3Y (pts)', 'bench_spread_3y', '{:+.1f}%', True),
+            ('vs Nifty 50, 1Y (pts)', 'bench_spread_1y', '{:+.1f} pts', True),
+            ('vs Nifty 50, 3Y (pts)', 'bench_spread_3y', '{:+.1f} pts', True),
         ] %}
         {% set any_debt = bundle.schemes|rejectattr('info.has_bench')|list|length > 0 %}
         {% for label, key, fmt, higher_better in rows if not (any_debt and key.startswith('bench_')) %}
