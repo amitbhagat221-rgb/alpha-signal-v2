@@ -124,7 +124,7 @@ function searchApp(base) {
             } catch (e) { this.results = []; }
             this.searched = true; this.showResults = true;
         },
-        href(stock) { return this.base + '/explorer/' + stock.sid; },
+        href(stock) { return this.base + '/stocks/' + stock.sid; },
         move(step) {
             if (!this.results.length) return;
             this.cur = (this.cur + step + this.results.length) % this.results.length;
@@ -135,3 +135,33 @@ function searchApp(base) {
         },
     };
 }
+
+/* Preview mode (preview.py): the server refuses writes with a 403 {"error": "preview is read-only ..."}.
+   Wrap fetch once so a button that POSTs shows that message instead of failing silently. */
+(function () {
+    const nativeFetch = window.fetch;
+    let toastTimer = null;
+    function toast(text) {
+        let el = document.getElementById('toast');
+        if (!el) { el = document.createElement('div'); el.id = 'toast'; el.className = 'toast'; el.setAttribute('role', 'status'); document.body.appendChild(el); }
+        el.textContent = text; el.classList.add('show');
+        clearTimeout(toastTimer); toastTimer = setTimeout(() => el.classList.remove('show'), 5000);
+    }
+    window.toast = toast;
+    window.fetch = async function () {
+        const resp = await nativeFetch.apply(this, arguments);
+        if (resp.status === 403 && document.body && document.body.classList.contains('is-preview')) {
+            resp.clone().json().then(j => { if (j && /read-only/.test(j.error || '')) toast(j.error); }).catch(() => {});
+        }
+        return resp;
+    };
+    /* The banner's live link follows the open tab (#hash), since the server never sees the hash. */
+    function syncLiveLink() {
+        const b = document.querySelector('.preview-banner'), a = document.getElementById('preview-live-link');
+        if (!b || !a) return;
+        let tabs = {}; try { tabs = JSON.parse(b.dataset.tabs || '{}'); } catch (e) {}
+        a.href = tabs[location.hash] || a.dataset.default;
+    }
+    /* tab_bar changes the hash with history.pushState, which fires no event: a light poll catches it. */
+    document.addEventListener('DOMContentLoaded', () => { if (document.querySelector('.preview-banner')) { syncLiveLink(); setInterval(syncLiveLink, 500); } });
+})();

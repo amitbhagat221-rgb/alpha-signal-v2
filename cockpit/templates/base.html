@@ -17,8 +17,17 @@
     {# Vendored libraries (cockpit/static/vendor/README); chart/mermaid/marked load on demand via loadScript(VENDOR.x). #}
     <script>window.VENDOR = { chart: "{{ vendor('chart') }}", mermaid: "{{ vendor('mermaid') }}", marked: "{{ vendor('marked') }}", purify: "{{ vendor('purify') }}" };</script>
 </head>
-<body>
+{% set pv = preview_banner() %}
+<body{% if pv %} class="is-preview"{% endif %}>
     {% from "_icons.html" import icon %}
+    {# Preview of the new layout (COCKPIT_PREVIEW=1, preview.py): the link goes to this page on the live cockpit;
+       the script swaps it when the URL's #tab has its own live page (the server never sees the hash). #}
+    {% if pv %}
+    <div class="preview-banner" role="note" data-tabs="{{ pv.tabs_json }}">
+        <span><strong>Preview</strong><span class="pv-long"> of the new layout</span> &middot; read-only</span>
+        <a href="{{ pv.url }}" id="preview-live-link" data-default="{{ pv.url }}">Open this page on the live cockpit &rarr;</a>
+    </div>
+    {% endif %}
     <a href="#main" class="skip-link">Skip to content</a>
 
     {# Shared shell for both apps: the rail + mobile bar render from the app's PAGES

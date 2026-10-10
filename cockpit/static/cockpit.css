@@ -1588,3 +1588,30 @@ select, input, textarea { max-width: 100%; }
 .hover-tip > .tooltip-popover { display: none; left: 0; transform: none; width: min(280px, 80vw); text-align: left; white-space: normal; }
 .hover-tip > .tooltip-popover::after { display: none; }
 .hover-tip:hover > .tooltip-popover, .hover-tip:focus > .tooltip-popover, .hover-tip:focus-within > .tooltip-popover { display: block; }
+
+/* ── Preview of the new layout (COCKPIT_PREVIEW=1, preview.py) ── */
+.preview-banner {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 60; height: 28px;
+    display: flex; align-items: center; justify-content: center; gap: 12px;
+    padding: 0 12px; font-size: 12px; white-space: nowrap; overflow: hidden;
+    background: var(--amber-bg); color: var(--amber); border-bottom: 1px solid var(--amber);
+    backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+}
+.preview-banner a { color: var(--amber); font-weight: 600; text-decoration: underline; overflow: hidden; text-overflow: ellipsis; }
+body.is-preview .left-rail { top: 28px; min-height: 0; height: calc(100vh - 28px); }
+body.is-preview .main-content { padding-top: 52px; }
+@media (max-width: 768px) {
+    .preview-banner .pv-long { display: none; }
+    .preview-banner { gap: 8px; font-size: 11px; }
+    body.is-preview .main-content { padding-top: 40px; }
+}
+
+/* Short message at the bottom of the screen (window.toast(text) in cockpit.js). */
+.toast {
+    position: fixed; left: 50%; bottom: 84px; transform: translateX(-50%); z-index: 70;
+    max-width: 90vw; padding: 10px 16px; border-radius: 8px; font-size: 13px;
+    background: var(--bg-card); color: var(--text-primary); border: 1px solid var(--amber);
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5); opacity: 0; pointer-events: none;
+    transition: opacity var(--t-fast) var(--ease-out);
+}
+.toast.show { opacity: 1; }

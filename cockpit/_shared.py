@@ -326,11 +326,17 @@ def _page_title(ctx, name=None):
 def _app_url(target, role, nav):
     """main_url(path) / ops_url(path): a link into the main or ops cockpit that never
     hard-codes a port: relative when it is this app, else this host + nav.other.port.
-    other_url(path) is always the other app (the rail's cross-cockpit link)."""
+    other_url(path) is always the other app (the rail's cross-cockpit link).
+    COCKPIT_MAIN_URL / COCKPIT_OPS_URL override the host+port form with a full base URL
+    (the preview, where each app sits behind its own host name)."""
     @pass_context
     def url(ctx, path="/"):
         if target == role:
             return path
+        other = target or ("ops" if role == "main" else "main")
+        base = _os.environ.get(f"COCKPIT_{other.upper()}_URL", "").rstrip("/")
+        if base:
+            return f"{base}{path}"
         req = ctx.get("request")
         host = req.url.hostname if req else "localhost"
         scheme = req.url.scheme if req else "http"
@@ -362,6 +368,9 @@ def make_templates(dirs, nav=None, role="main"):
     templates.env.globals["main_url"] = _app_url("main", role, nav)
     templates.env.globals["ops_url"] = _app_url("ops", role, nav)
     templates.env.globals["other_url"] = _app_url(None, role, nav)
+    # Preview mode (preview.py): preview_banner() is None on the live cockpit.
+    import preview
+    templates.env.globals["preview_banner"] = pass_context(lambda ctx: preview.banner(role, ctx.get("request")))
     import views
     templates.env.globals["all_tiers"] = views.tiers
     templates.env.globals["pickable_tiers"] = views.pickable_tiers
@@ -375,7 +384,11 @@ def prewarm(warmers, label="cache-warm", max_workers=4):
     Returns immediately; results are printed as each warmer finishes.
     2026-05-25: parallel after /system's sequential cold path was 39s.
     SQLite is single-writer so unbounded parallelism doesn't help and can
-    starve user requests; 4 workers is the sweet spot for our mix."""
+    starve user requests; 4 workers is the sweet spot for our mix.
+    COCKPIT_NO_PREWARM=1 skips it (the preview units: a second copy of the same warm-up
+    would double the DB load; their cache dir is seeded from the live one instead)."""
+    if _os.environ.get("COCKPIT_NO_PREWARM", "").strip() in ("1", "true", "yes"):
+        return
     import threading
     import concurrent.futures as cf
 
