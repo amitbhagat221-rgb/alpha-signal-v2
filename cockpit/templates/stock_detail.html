@@ -113,9 +113,9 @@
 <div x-data="{ tab: 'overview', loaded: { overview: true }, sectorLoaded: false,
     init() { this.$watch('tab', t => this.onTab(t)); this.$nextTick(() => this.onTab(this.tab)); },
     onTab(t) {
-        if (t === 'financials') initFinancialsCharts();
+        if (t === 'overview') initConsensusCharts();
+        else if (t === 'financials') initFinancialsCharts();
         else if (t === 'ownership') initOwnershipCharts();
-        else if (t === 'consensus') initConsensusCharts();
         else if (t === 'price') initPriceChart('1y');
         else if (t === 'sector') this.loadSector();
     },
@@ -128,8 +128,7 @@
             .catch(() => { this.$refs.sectorBox.innerHTML = '<div class=\'card u-muted\'>Could not load industry detail.</div>'; });
     } }">
 
-{% set tabs = [("overview", "Overview"), ("financials", "Financials"), ("ownership", "Ownership"), ("consensus", "Consensus"), ("forensic", "Forensic"), ("price", "Price & Technicals")] %}
-{% if s.data %}{% set _ = tabs.append(("data", "Data")) %}{% endif %}
+{% set tabs = [("overview", "Overview"), ("financials", "Financials"), ("ownership", "Ownership"), ("forensic", "Forensic"), ("price", "Price & Technicals")] %}
 {% if s.industry or s.sector %}{% set _ = tabs.append(("sector", "Industry" if s.industry else "Sector")) %}{% endif %}
 {% if s.management or s.managerial_ability or s.financial_management or sd %}{% set _ = tabs.append(("management", "Management")) %}{% endif %}
 {{ tab_bar(tabs) }}
@@ -153,7 +152,7 @@
         <strong>{{ s.ticker }} ranks {{ s.rank|rank_text(bd.tier_size if bd else none, s.cap_tier) }}</strong>, score
         <span class="num">{{ (s.final_score * 100)|pct(0)|replace("%", "") }}</span>/100 as of {{ s.pick_date|short_date }}{% if rank_move is not none and rank_move != 0 %},
         <span class="{{ 'score-green' if rank_move > 0 else 'score-red' }}">{{ 'up' if rank_move > 0 else 'down' }} {{ rank_move|abs }} place{{ '' if rank_move|abs == 1 else 's' }}</span> since the previous ranking{% endif %}.
-        {% if s.data %}Data <span class="num">{{ s.data.score }}%</span> ({{ s.data.word|lower }}), <button type="button" class="link-btn" @click="tab = 'data'; loaded.data = true; history.pushState(null, '', '#data')">the data behind it</button>.{% endif %}
+        {% if s.data %}Data <span class="num">{{ s.data.score }}%</span> ({{ s.data.word|lower }}).{% endif %}
         {% if s.cap_tier in unproven_tiers() %}<span class="u-muted">{{ s.cap_tier|tier_word }} ranks have shown no out-of-sample skill.</span>{% endif %}
     </div>
     {% elif s.cap_tier == 'MICRO' %}
@@ -165,7 +164,7 @@
     <div class="verdict-line">
         Analyst {{ pt_basis }} target <span class="num">{{ pt|inr(0) }}</span>{% if pt_up is not none %}
         (<span class="num {{ pt_up|tone }}">{{ pt_up|pct(0, signed=True) }}</span> vs the latest close){% endif %}{% if pt_n %}, {{ pt_n }} analyst{{ '' if pt_n == 1 else 's' }}{% endif %}{% if pt_asof %}, refreshed {{ pt_asof|short_date }}{% endif %}.
-        <button type="button" class="link-btn" @click="tab = 'consensus'; loaded.consensus = true; history.pushState(null, '', '#consensus')">Consensus tab</button>
+        <button type="button" class="link-btn" @click="document.getElementById('consensus').scrollIntoView({behavior: 'smooth'})">Analyst consensus below</button>
     </div>
     {% endif %}
     {% set ch = s.get("chips") or {} %}
@@ -278,6 +277,274 @@
 </div>
 </div>
 </div> {# end overview #}
+
+{# ════════════════════════════════════════════ #}
+{# ── ANALYST CONSENSUS — shown on the Overview tab (was its own tab) ── #}
+{# ════════════════════════════════════════════ #}
+<div x-show="tab === 'overview'" x-cloak id="consensus">
+
+    {% if ac and pt %}
+    {% set fetched_short = (ac.get("fetched_at") or "")[:10] %}
+    {% set fetched_today = fetched_short == today_iso %}
+    <div class="card u-mb16">
+        <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 4px;">
+            <span class="section-title" style="margin-bottom: 0;">Sell-side Price Target</span>
+            <span class="u-muted-10 pt-src">
+                {{ ac.get("pt_source") or "yfinance" }} · refreshed {{ "today" if fetched_today else fetched_short }}
+                {{ tooltip("The date is when we last refreshed the aggregate, not when analysts last revised. The source does not expose per-analyst revision dates for Indian equities, so individual broker targets may be days to months old.") }}
+            </span>
+        </div>
+        <div class="section-desc">Aggregate of analyst 12-mo targets covering this stock. Individual analyst revision dates not exposed by source.</div>
+
+        {% set headline_pt = pt %}{% set headline_upside = pt_up %}
+        <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px;">
+            <div>
+                <span class="mono" style="font-size: 24px; font-weight: 700;">{{ headline_pt|inr(0) }}</span>
+                {% if headline_upside is not none %}
+                <span class="mono {{ headline_upside|tone }}" style="font-size: 15px; margin-left: 6px; font-weight: 600;">
+                    ({{ headline_upside|pct(1, signed=True) }})
+                </span>
+                {% endif %}
+                <span class="u-muted-10" style="margin-left: 6px;">{{ pt_basis }}{% if pt_n %} of {{ pt_n }} analyst{{ "" if pt_n == 1 else "s" }}{% endif %}, vs close {{ ac.get("current_price")|inr(2) }}</span>
+            </div>
+        </div>
+
+        {# Freshness strip — next earnings + PT change recency. Both are proxies
+           because yfinance doesn't expose per-analyst revision timestamps. #}
+        {% set d2e = ac.get("days_to_earnings") %}
+        {% set dpt = ac.get("days_since_pt_change") %}
+        {% if d2e is not none or dpt is not none %}
+        <div style="display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; font-size: 11px;">
+            {% if d2e is not none %}
+<span class="u-muted">
+                {% if d2e > 0 %}Next earnings:
+                    <span style="color: var(--text-secondary); font-weight: 600;">in {{ d2e }}d</span> ({{ ac.next_earnings_date }})
+                {% elif d2e == 0 %}Next earnings:
+                    <span style="color: var(--green); font-weight: 600;">today</span>
+                {% else %}Last results:
+                    <span style="color: var(--text-secondary); font-weight: 600;">{{ -d2e }}d ago</span> ({{ ac.next_earnings_date }})
+                {% endif %}
+                {{ tooltip("Analysts typically revise targets within 10 days of results, so proximity is a freshness hint.") }}
+            </span>
+            {% endif %}
+            {% if dpt is not none and dpt <= 30 and ac.get("pt_change_pct") is not none and pt_mean_ok %}
+            <span class="u-muted">
+                PT moved
+                <span class="mono {{ ac.pt_change_pct|tone }}" style="font-weight: 600;">{{ ac.pt_change_pct|pct(1, signed=True) }}</span>
+                {% if dpt == 0 %}today{% elif dpt == 1 %}yesterday{% else %}{{ dpt }}d ago{% endif %}
+                {{ tooltip("Our own change detection: when the aggregate moves more than 0.5% between fetches we record the prior value and its timestamp.") }}
+            </span>
+            {% endif %}
+        </div>
+        {% else %}
+        <div style="margin-bottom: 14px;"></div>
+        {% endif %}
+
+        {# Range bar — low / median / high (only when high & low present) #}
+        {% if ac.get("price_target_high") and ac.get("price_target_low") and ac.get("current_price") %}
+        {% set lo = ac.price_target_low %}
+        {% set hi = ac.price_target_high %}
+        {% set cp = ac.current_price %}
+        {% set md = pt %}
+        {% set range_min = [lo, cp]|min %}
+        {% set range_max = [hi, cp]|max %}
+        {% set span = (range_max - range_min) if (range_max - range_min) > 0 else 1 %}
+        {% set md_pos = ((md - range_min) / span * 100) %}
+        {% set cp_pos = ((cp - range_min) / span * 100) %}
+        <div style="margin-bottom: 14px;">
+            <div style="display: flex; justify-content: space-between; font-size: 10px; color: var(--text-muted); margin-bottom: 4px;">
+                <span>Low {{ lo|inr(0) }}</span>
+                <span>High {{ hi|inr(0) }}</span>
+            </div>
+            <div style="position: relative; height: 8px; border-radius: 4px; background: linear-gradient(to right, var(--red), var(--amber), var(--green)); overflow: visible;">
+                {# Current price marker (white) #}
+                <div style="position: absolute; left: {{ cp_pos }}%; top: -4px; transform: translateX(-50%); width: 3px; height: 16px; background: var(--text-primary); border-radius: 1px;"></div>
+                {# Median target marker (dark dot) #}
+                <div style="position: absolute; left: {{ md_pos }}%; top: -3px; transform: translateX(-50%); width: 14px; height: 14px; border-radius: 50%; background: white; border: 2px solid var(--accent);"></div>
+            </div>
+            <div style="display: flex; justify-content: space-between; font-size: 10px; color: var(--text-muted); margin-top: 5px;">
+                <span>Now {{ cp|inr(0) }}</span>
+                <span>Target ({{ pt_basis }}) {{ md|inr(0) }}</span>
+            </div>
+        </div>
+        {% endif %}
+
+        {# Rating mix bar (yfinance .recommendations latest period) #}
+        {% set sb = ac.get("n_strong_buy") or 0 %}
+        {% set bb = ac.get("n_buy") or 0 %}
+        {% set hh = ac.get("n_hold") or 0 %}
+        {% set ss = ac.get("n_sell") or 0 %}
+        {% set sss = ac.get("n_strong_sell") or 0 %}
+        {% set tot = sb + bb + hh + ss + sss %}
+        {% if tot > 0 %}
+        <div style="margin-bottom: 12px;">
+            <div style="display: flex; justify-content: space-between; align-items: baseline; font-size: 11px; color: var(--text-secondary); margin-bottom: 5px;">
+                <span>Rating mix</span>
+                {% if ac.get("recommendation_key") %}
+                {% if ac.recommendation_key != 'none' %}
+                <span style="text-transform: capitalize; font-weight: 600;
+                    {% if 'buy' in ac.recommendation_key %}color: var(--green);
+                    {% elif 'sell' in ac.recommendation_key %}color: var(--red);
+                    {% else %}color: var(--amber);{% endif %}">
+                    {{ ac.recommendation_key|replace('_', ' ') }}
+                </span>
+                {% endif %}
+                {% endif %}
+            </div>
+            <div style="display: flex; height: 8px; border-radius: 4px; overflow: hidden;">
+                {% if sb %}<div style="width: {{ sb / tot * 100 }}%; background: var(--green); box-shadow: inset 0 0 0 1px var(--bg-primary);"></div>{% endif %}
+                {% if bb %}<div style="width: {{ bb / tot * 100 }}%; background: color-mix(in srgb, var(--green) 65%, transparent);"></div>{% endif %}
+                {% if hh %}<div style="width: {{ hh / tot * 100 }}%; background: var(--amber);"></div>{% endif %}
+                {% if ss %}<div style="width: {{ ss / tot * 100 }}%; background: color-mix(in srgb, var(--red) 65%, transparent);"></div>{% endif %}
+                {% if sss %}<div style="width: {{ sss / tot * 100 }}%; background: var(--red); box-shadow: inset 0 0 0 1px var(--bg-primary);"></div>{% endif %}
+            </div>
+            <div style="display: flex; justify-content: space-between; font-size: 10px; color: var(--text-muted); margin-top: 4px;">
+                <span>{{ sb }} strong buy · {{ bb }} buy · {{ hh }} hold · {{ ss }} sell · {{ sss }} strong sell</span>
+                <span>{{ tot }} ratings</span>
+            </div>
+
+            {# 4-period rating-mix trend — shows how mix has shifted vs ~3mo ago #}
+            {% if ac.get("rating_mix_periods") and ac.rating_mix_periods|length >= 2 %}
+            <div style="margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--border);">
+                <div style="display: flex; justify-content: space-between; align-items: center; font-size: 10px; color: var(--text-muted); margin-bottom: 6px;">
+                    <span>Share rating buy, by month</span>
+                    {% if ac.get("bullish_pct_now") is not none and ac.get("bullish_pct_old") is not none %}
+                    <span>
+                        Bullish:
+                        <span style="color: var(--text-secondary); font-weight: 600;">{{ ac.bullish_pct_now|int }}%</span>
+                        vs <span>{{ ac.bullish_pct_old|int }}%</span> ({{ ac.bullish_old_period }})
+                        {% if ac.bullish_pct_delta and ac.bullish_pct_delta > 0 %}
+                            <span style="color: var(--green); font-weight: 600;">↑{{ ac.bullish_pct_delta|int }}</span>
+                        {% elif ac.bullish_pct_delta and ac.bullish_pct_delta < 0 %}
+                            <span style="color: var(--red); font-weight: 600;">↓{{ (-ac.bullish_pct_delta)|int }}</span>
+                        {% else %}
+                            <span class="u-muted">→</span>
+                        {% endif %}
+                    </span>
+                    {% endif %}
+                </div>
+                <div style="display: flex; gap: 4px; align-items: end; height: 32px;">
+                    {% for period_row in ac.rating_mix_periods %}
+                    {% set p_label = period_row[0] %}
+                    {% set p_sb = period_row[1] %}
+                    {% set p_b  = period_row[2] %}
+                    {% set p_h  = period_row[3] %}
+                    {% set p_s  = period_row[4] %}
+                    {% set p_ss = period_row[5] %}
+                    {% set p_tot = p_sb + p_b + p_h + p_s + p_ss %}
+                    {% set label_friendly = "now" if p_label == "0m" else (p_label|replace("-", "") ~ " ago") %}
+                    <div style="flex: 1; display: flex; flex-direction: column; align-items: stretch; gap: 2px;">
+                        {% if p_tot > 0 %}
+                        <div style="display: flex; height: 24px; border-radius: 3px; overflow: hidden;">
+                            {% if p_sb %}<div style="width: {{ p_sb / p_tot * 100 }}%; background: var(--green); box-shadow: inset 0 0 0 1px var(--bg-primary);"></div>{% endif %}
+                            {% if p_b %}<div style="width: {{ p_b / p_tot * 100 }}%; background: color-mix(in srgb, var(--green) 65%, transparent);"></div>{% endif %}
+                            {% if p_h %}<div style="width: {{ p_h / p_tot * 100 }}%; background: var(--amber);"></div>{% endif %}
+                            {% if p_s %}<div style="width: {{ p_s / p_tot * 100 }}%; background: color-mix(in srgb, var(--red) 65%, transparent);"></div>{% endif %}
+                            {% if p_ss %}<div style="width: {{ p_ss / p_tot * 100 }}%; background: var(--red); box-shadow: inset 0 0 0 1px var(--bg-primary);"></div>{% endif %}
+                        </div>
+                        {% else %}
+                        <div style="height: 24px; border-radius: 3px; background: var(--border);"></div>
+                        {% endif %}
+                        <div class="u-muted-10" style="text-align: center;">{{ label_friendly }}{% if p_tot > 0 %} <span class="num">{{ ((p_sb + p_b) / p_tot * 100)|pct(0) }}</span>{% endif %}</div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endif %}
+        </div>
+        {% endif %}
+
+    </div>
+    {% elif ac %}
+    {# Stock has an analyst_consensus row but no price_target — partial coverage #}
+    <div class="card u-mb16">
+        <div class="section-title">Sell-side Price Target</div>
+        <div style="padding: 10px 12px; border-radius: 8px; background: var(--amber-bg); border-left: 3px solid var(--amber); font-size: 12px; color: var(--text-secondary);">
+            No analyst price target available from yfinance for this stock. This is common for SMALL caps where no sell-side broker publishes targets.
+        </div>
+    </div>
+    {% else %}
+    {# Stock has no analyst_consensus row at all #}
+    <div class="card u-mb16">
+        <div class="section-title">Sell-side Price Target</div>
+        <div style="padding: 10px 12px; border-radius: 8px; background: var(--border); border-left: 3px solid var(--text-muted); font-size: 12px; color: var(--text-secondary);">
+            No analyst coverage for this stock.
+        </div>
+    </div>
+    {% endif %}
+{% if ac %}
+<div class="card u-mb16">
+    <div class="section-title">Analyst Consensus</div>
+    <div class="section-desc">Aggregated forecasts from {% if pt_n %}{{ pt_n }} sell-side analyst{{ "" if pt_n == 1 else "s" }}{% else %}the sell-side analysts{% endif %} covering this stock{% if pt_asof %}, refreshed {{ pt_asof }}{% endif %}.</div>
+
+
+    <div class="metric-grid">
+        {% if ac.get("total_analysts") is not none %}
+        <div class="metric-card">
+            <div class="metric-label">Analyst Coverage</div>
+            <div class="metric-value">{{ ac.total_analysts|int }}</div>
+            <div class="metric-context">Total analysts</div>
+        </div>
+        {% endif %}
+        {% set _mix = (ac.get("n_strong_buy") or 0) + (ac.get("n_buy") or 0) + (ac.get("n_hold") or 0) + (ac.get("n_sell") or 0) + (ac.get("n_strong_sell") or 0) %}
+        {% if _mix > 0 %}
+        <div class="metric-card">
+            <div class="metric-label">Rate it a buy</div>
+            <div class="metric-value score-green">{{ (((ac.get("n_strong_buy") or 0) + (ac.get("n_buy") or 0)) / _mix * 100)|pct(0)|replace("%", "") }}<span class="unit">%</span></div>
+            <div class="metric-context">Strong buy + buy, of {{ _mix }} ratings (same mix as the Overview card)</div>
+        </div>
+        {% elif ac.get("buy_pct") is not none %}
+        <div class="metric-card">
+            <div class="metric-label">Rate it a buy</div>
+            <div class="metric-value score-green">{{ ac.buy_pct|pct(0)|replace("%", "") }}<span class="unit">%</span></div>
+            <div class="metric-context">Of all analysts</div>
+        </div>
+        {% endif %}
+        {% if ac.get("eps_growth_pct") is not none %}
+        <div class="metric-card">
+            <div class="metric-label">EPS Growth Forecast</div>
+            <div class="metric-value {{ ac.eps_growth_pct|tone }}">{{ ac.eps_growth_pct|signed(1) }}<span class="unit">%</span></div>
+            <div class="metric-context">FY forward consensus</div>
+        </div>
+        {% endif %}
+        {% if ac.get("revenue_growth_pct") is not none %}
+        <div class="metric-card">
+            <div class="metric-label">Revenue Growth Forecast</div>
+            <div class="metric-value {{ ac.revenue_growth_pct|tone }}">{{ ac.revenue_growth_pct|signed(1) }}<span class="unit">%</span></div>
+            <div class="metric-context">FY forward consensus</div>
+        </div>
+        {% endif %}
+        {% if ac.get("forward_eps") %}
+        <div class="metric-card">
+            <div class="metric-label">Forward EPS</div>
+            <div class="metric-value">{{ ac.forward_eps|inr(2) }}</div>
+            {% if pm.get("close_price") %}
+            <div class="metric-context">Forward P/E: {{ "%.1f"|format(pm.close_price / ac.forward_eps) }}x</div>
+            {% endif %}
+        </div>
+        {% endif %}
+        {% if s.get("pt_revision_1yr") is not none %}
+        <div class="metric-card">
+            <div class="metric-label">PT Revision (1yr)</div>
+            <div class="metric-value {{ s.pt_revision_1yr|tone }}">{{ s.pt_revision_1yr|signed(1) }}<span class="unit">%</span></div>
+            <div class="metric-context">Target change YoY</div>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endif %}
+
+{% if fc.get('price_target') or fc.get('eps') or fc.get('revenue') %}
+<div class="card">
+    <div class="section-title">Forecast Revisions</div>
+    <div class="section-desc">How analyst price target, EPS, and revenue estimates have evolved over time.</div>
+    <div style="position: relative; height: 280px;">
+        <canvas id="forecastChart"></canvas>
+    </div>
+</div>
+{% endif %}
+
+</div> {# end analyst consensus (part of Overview) #}
 
 {# ════════════════════════════════════════════ #}
 {# ──────────── FINANCIALS TAB ──────────────── #}
@@ -681,273 +948,6 @@
 
 </div> {# end ownership #}
 
-{# ════════════════════════════════════════════ #}
-{# ──────────── CONSENSUS TAB ───────────────── #}
-{# ════════════════════════════════════════════ #}
-<div x-show="tab === 'consensus'" x-cloak>
-
-    {% if ac and pt %}
-    {% set fetched_short = (ac.get("fetched_at") or "")[:10] %}
-    {% set fetched_today = fetched_short == today_iso %}
-    <div class="card u-mb16">
-        <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 4px;">
-            <span class="section-title" style="margin-bottom: 0;">Sell-side Price Target</span>
-            <span class="u-muted-10 pt-src">
-                {{ ac.get("pt_source") or "yfinance" }} · refreshed {{ "today" if fetched_today else fetched_short }}
-                {{ tooltip("The date is when we last refreshed the aggregate, not when analysts last revised. The source does not expose per-analyst revision dates for Indian equities, so individual broker targets may be days to months old.") }}
-            </span>
-        </div>
-        <div class="section-desc">Aggregate of analyst 12-mo targets covering this stock. Individual analyst revision dates not exposed by source.</div>
-
-        {% set headline_pt = pt %}{% set headline_upside = pt_up %}
-        <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px;">
-            <div>
-                <span class="mono" style="font-size: 24px; font-weight: 700;">{{ headline_pt|inr(0) }}</span>
-                {% if headline_upside is not none %}
-                <span class="mono {{ headline_upside|tone }}" style="font-size: 15px; margin-left: 6px; font-weight: 600;">
-                    ({{ headline_upside|pct(1, signed=True) }})
-                </span>
-                {% endif %}
-                <span class="u-muted-10" style="margin-left: 6px;">{{ pt_basis }}{% if pt_n %} of {{ pt_n }} analyst{{ "" if pt_n == 1 else "s" }}{% endif %}, vs close {{ ac.get("current_price")|inr(2) }}</span>
-            </div>
-        </div>
-
-        {# Freshness strip — next earnings + PT change recency. Both are proxies
-           because yfinance doesn't expose per-analyst revision timestamps. #}
-        {% set d2e = ac.get("days_to_earnings") %}
-        {% set dpt = ac.get("days_since_pt_change") %}
-        {% if d2e is not none or dpt is not none %}
-        <div style="display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; font-size: 11px;">
-            {% if d2e is not none %}
-<span class="u-muted">
-                {% if d2e > 0 %}Next earnings:
-                    <span style="color: var(--text-secondary); font-weight: 600;">in {{ d2e }}d</span> ({{ ac.next_earnings_date }})
-                {% elif d2e == 0 %}Next earnings:
-                    <span style="color: var(--green); font-weight: 600;">today</span>
-                {% else %}Last results:
-                    <span style="color: var(--text-secondary); font-weight: 600;">{{ -d2e }}d ago</span> ({{ ac.next_earnings_date }})
-                {% endif %}
-                {{ tooltip("Analysts typically revise targets within 10 days of results, so proximity is a freshness hint.") }}
-            </span>
-            {% endif %}
-            {% if dpt is not none and dpt <= 30 and ac.get("pt_change_pct") is not none and pt_mean_ok %}
-            <span class="u-muted">
-                PT moved
-                <span class="mono {{ ac.pt_change_pct|tone }}" style="font-weight: 600;">{{ ac.pt_change_pct|pct(1, signed=True) }}</span>
-                {% if dpt == 0 %}today{% elif dpt == 1 %}yesterday{% else %}{{ dpt }}d ago{% endif %}
-                {{ tooltip("Our own change detection: when the aggregate moves more than 0.5% between fetches we record the prior value and its timestamp.") }}
-            </span>
-            {% endif %}
-        </div>
-        {% else %}
-        <div style="margin-bottom: 14px;"></div>
-        {% endif %}
-
-        {# Range bar — low / median / high (only when high & low present) #}
-        {% if ac.get("price_target_high") and ac.get("price_target_low") and ac.get("current_price") %}
-        {% set lo = ac.price_target_low %}
-        {% set hi = ac.price_target_high %}
-        {% set cp = ac.current_price %}
-        {% set md = pt %}
-        {% set range_min = [lo, cp]|min %}
-        {% set range_max = [hi, cp]|max %}
-        {% set span = (range_max - range_min) if (range_max - range_min) > 0 else 1 %}
-        {% set md_pos = ((md - range_min) / span * 100) %}
-        {% set cp_pos = ((cp - range_min) / span * 100) %}
-        <div style="margin-bottom: 14px;">
-            <div style="display: flex; justify-content: space-between; font-size: 10px; color: var(--text-muted); margin-bottom: 4px;">
-                <span>Low {{ lo|inr(0) }}</span>
-                <span>High {{ hi|inr(0) }}</span>
-            </div>
-            <div style="position: relative; height: 8px; border-radius: 4px; background: linear-gradient(to right, var(--red), var(--amber), var(--green)); overflow: visible;">
-                {# Current price marker (white) #}
-                <div style="position: absolute; left: {{ cp_pos }}%; top: -4px; transform: translateX(-50%); width: 3px; height: 16px; background: var(--text-primary); border-radius: 1px;"></div>
-                {# Median target marker (dark dot) #}
-                <div style="position: absolute; left: {{ md_pos }}%; top: -3px; transform: translateX(-50%); width: 14px; height: 14px; border-radius: 50%; background: white; border: 2px solid var(--accent);"></div>
-            </div>
-            <div style="display: flex; justify-content: space-between; font-size: 10px; color: var(--text-muted); margin-top: 5px;">
-                <span>Now {{ cp|inr(0) }}</span>
-                <span>Target ({{ pt_basis }}) {{ md|inr(0) }}</span>
-            </div>
-        </div>
-        {% endif %}
-
-        {# Rating mix bar (yfinance .recommendations latest period) #}
-        {% set sb = ac.get("n_strong_buy") or 0 %}
-        {% set bb = ac.get("n_buy") or 0 %}
-        {% set hh = ac.get("n_hold") or 0 %}
-        {% set ss = ac.get("n_sell") or 0 %}
-        {% set sss = ac.get("n_strong_sell") or 0 %}
-        {% set tot = sb + bb + hh + ss + sss %}
-        {% if tot > 0 %}
-        <div style="margin-bottom: 12px;">
-            <div style="display: flex; justify-content: space-between; align-items: baseline; font-size: 11px; color: var(--text-secondary); margin-bottom: 5px;">
-                <span>Rating mix</span>
-                {% if ac.get("recommendation_key") %}
-                {% if ac.recommendation_key != 'none' %}
-                <span style="text-transform: capitalize; font-weight: 600;
-                    {% if 'buy' in ac.recommendation_key %}color: var(--green);
-                    {% elif 'sell' in ac.recommendation_key %}color: var(--red);
-                    {% else %}color: var(--amber);{% endif %}">
-                    {{ ac.recommendation_key|replace('_', ' ') }}
-                </span>
-                {% endif %}
-                {% endif %}
-            </div>
-            <div style="display: flex; height: 8px; border-radius: 4px; overflow: hidden;">
-                {% if sb %}<div style="width: {{ sb / tot * 100 }}%; background: var(--green); box-shadow: inset 0 0 0 1px var(--bg-primary);"></div>{% endif %}
-                {% if bb %}<div style="width: {{ bb / tot * 100 }}%; background: color-mix(in srgb, var(--green) 65%, transparent);"></div>{% endif %}
-                {% if hh %}<div style="width: {{ hh / tot * 100 }}%; background: var(--amber);"></div>{% endif %}
-                {% if ss %}<div style="width: {{ ss / tot * 100 }}%; background: color-mix(in srgb, var(--red) 65%, transparent);"></div>{% endif %}
-                {% if sss %}<div style="width: {{ sss / tot * 100 }}%; background: var(--red); box-shadow: inset 0 0 0 1px var(--bg-primary);"></div>{% endif %}
-            </div>
-            <div style="display: flex; justify-content: space-between; font-size: 10px; color: var(--text-muted); margin-top: 4px;">
-                <span>{{ sb }} strong buy · {{ bb }} buy · {{ hh }} hold · {{ ss }} sell · {{ sss }} strong sell</span>
-                <span>{{ tot }} ratings</span>
-            </div>
-
-            {# 4-period rating-mix trend — shows how mix has shifted vs ~3mo ago #}
-            {% if ac.get("rating_mix_periods") and ac.rating_mix_periods|length >= 2 %}
-            <div style="margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--border);">
-                <div style="display: flex; justify-content: space-between; align-items: center; font-size: 10px; color: var(--text-muted); margin-bottom: 6px;">
-                    <span>Share rating buy, by month</span>
-                    {% if ac.get("bullish_pct_now") is not none and ac.get("bullish_pct_old") is not none %}
-                    <span>
-                        Bullish:
-                        <span style="color: var(--text-secondary); font-weight: 600;">{{ ac.bullish_pct_now|int }}%</span>
-                        vs <span>{{ ac.bullish_pct_old|int }}%</span> ({{ ac.bullish_old_period }})
-                        {% if ac.bullish_pct_delta and ac.bullish_pct_delta > 0 %}
-                            <span style="color: var(--green); font-weight: 600;">↑{{ ac.bullish_pct_delta|int }}</span>
-                        {% elif ac.bullish_pct_delta and ac.bullish_pct_delta < 0 %}
-                            <span style="color: var(--red); font-weight: 600;">↓{{ (-ac.bullish_pct_delta)|int }}</span>
-                        {% else %}
-                            <span class="u-muted">→</span>
-                        {% endif %}
-                    </span>
-                    {% endif %}
-                </div>
-                <div style="display: flex; gap: 4px; align-items: end; height: 32px;">
-                    {% for period_row in ac.rating_mix_periods %}
-                    {% set p_label = period_row[0] %}
-                    {% set p_sb = period_row[1] %}
-                    {% set p_b  = period_row[2] %}
-                    {% set p_h  = period_row[3] %}
-                    {% set p_s  = period_row[4] %}
-                    {% set p_ss = period_row[5] %}
-                    {% set p_tot = p_sb + p_b + p_h + p_s + p_ss %}
-                    {% set label_friendly = "now" if p_label == "0m" else (p_label|replace("-", "") ~ " ago") %}
-                    <div style="flex: 1; display: flex; flex-direction: column; align-items: stretch; gap: 2px;">
-                        {% if p_tot > 0 %}
-                        <div style="display: flex; height: 24px; border-radius: 3px; overflow: hidden;">
-                            {% if p_sb %}<div style="width: {{ p_sb / p_tot * 100 }}%; background: var(--green); box-shadow: inset 0 0 0 1px var(--bg-primary);"></div>{% endif %}
-                            {% if p_b %}<div style="width: {{ p_b / p_tot * 100 }}%; background: color-mix(in srgb, var(--green) 65%, transparent);"></div>{% endif %}
-                            {% if p_h %}<div style="width: {{ p_h / p_tot * 100 }}%; background: var(--amber);"></div>{% endif %}
-                            {% if p_s %}<div style="width: {{ p_s / p_tot * 100 }}%; background: color-mix(in srgb, var(--red) 65%, transparent);"></div>{% endif %}
-                            {% if p_ss %}<div style="width: {{ p_ss / p_tot * 100 }}%; background: var(--red); box-shadow: inset 0 0 0 1px var(--bg-primary);"></div>{% endif %}
-                        </div>
-                        {% else %}
-                        <div style="height: 24px; border-radius: 3px; background: var(--border);"></div>
-                        {% endif %}
-                        <div class="u-muted-10" style="text-align: center;">{{ label_friendly }}{% if p_tot > 0 %} <span class="num">{{ ((p_sb + p_b) / p_tot * 100)|pct(0) }}</span>{% endif %}</div>
-                    </div>
-                    {% endfor %}
-                </div>
-            </div>
-            {% endif %}
-        </div>
-        {% endif %}
-
-    </div>
-    {% elif ac %}
-    {# Stock has an analyst_consensus row but no price_target — partial coverage #}
-    <div class="card u-mb16">
-        <div class="section-title">Sell-side Price Target</div>
-        <div style="padding: 10px 12px; border-radius: 8px; background: var(--amber-bg); border-left: 3px solid var(--amber); font-size: 12px; color: var(--text-secondary);">
-            No analyst price target available from yfinance for this stock. This is common for SMALL caps where no sell-side broker publishes targets.
-        </div>
-    </div>
-    {% else %}
-    {# Stock has no analyst_consensus row at all #}
-    <div class="card u-mb16">
-        <div class="section-title">Sell-side Price Target</div>
-        <div style="padding: 10px 12px; border-radius: 8px; background: var(--border); border-left: 3px solid var(--text-muted); font-size: 12px; color: var(--text-secondary);">
-            No analyst coverage for this stock.
-        </div>
-    </div>
-    {% endif %}
-{% if ac %}
-<div class="card u-mb16">
-    <div class="section-title">Analyst Consensus</div>
-    <div class="section-desc">Aggregated forecasts from {% if pt_n %}{{ pt_n }} sell-side analyst{{ "" if pt_n == 1 else "s" }}{% else %}the sell-side analysts{% endif %} covering this stock{% if pt_asof %}, refreshed {{ pt_asof }}{% endif %}.</div>
-
-
-    <div class="metric-grid">
-        {% if ac.get("total_analysts") is not none %}
-        <div class="metric-card">
-            <div class="metric-label">Analyst Coverage</div>
-            <div class="metric-value">{{ ac.total_analysts|int }}</div>
-            <div class="metric-context">Total analysts</div>
-        </div>
-        {% endif %}
-        {% set _mix = (ac.get("n_strong_buy") or 0) + (ac.get("n_buy") or 0) + (ac.get("n_hold") or 0) + (ac.get("n_sell") or 0) + (ac.get("n_strong_sell") or 0) %}
-        {% if _mix > 0 %}
-        <div class="metric-card">
-            <div class="metric-label">Rate it a buy</div>
-            <div class="metric-value score-green">{{ (((ac.get("n_strong_buy") or 0) + (ac.get("n_buy") or 0)) / _mix * 100)|pct(0)|replace("%", "") }}<span class="unit">%</span></div>
-            <div class="metric-context">Strong buy + buy, of {{ _mix }} ratings (same mix as the Overview card)</div>
-        </div>
-        {% elif ac.get("buy_pct") is not none %}
-        <div class="metric-card">
-            <div class="metric-label">Rate it a buy</div>
-            <div class="metric-value score-green">{{ ac.buy_pct|pct(0)|replace("%", "") }}<span class="unit">%</span></div>
-            <div class="metric-context">Of all analysts</div>
-        </div>
-        {% endif %}
-        {% if ac.get("eps_growth_pct") is not none %}
-        <div class="metric-card">
-            <div class="metric-label">EPS Growth Forecast</div>
-            <div class="metric-value {{ ac.eps_growth_pct|tone }}">{{ ac.eps_growth_pct|signed(1) }}<span class="unit">%</span></div>
-            <div class="metric-context">FY forward consensus</div>
-        </div>
-        {% endif %}
-        {% if ac.get("revenue_growth_pct") is not none %}
-        <div class="metric-card">
-            <div class="metric-label">Revenue Growth Forecast</div>
-            <div class="metric-value {{ ac.revenue_growth_pct|tone }}">{{ ac.revenue_growth_pct|signed(1) }}<span class="unit">%</span></div>
-            <div class="metric-context">FY forward consensus</div>
-        </div>
-        {% endif %}
-        {% if ac.get("forward_eps") %}
-        <div class="metric-card">
-            <div class="metric-label">Forward EPS</div>
-            <div class="metric-value">{{ ac.forward_eps|inr(2) }}</div>
-            {% if pm.get("close_price") %}
-            <div class="metric-context">Forward P/E: {{ "%.1f"|format(pm.close_price / ac.forward_eps) }}x</div>
-            {% endif %}
-        </div>
-        {% endif %}
-        {% if s.get("pt_revision_1yr") is not none %}
-        <div class="metric-card">
-            <div class="metric-label">PT Revision (1yr)</div>
-            <div class="metric-value {{ s.pt_revision_1yr|tone }}">{{ s.pt_revision_1yr|signed(1) }}<span class="unit">%</span></div>
-            <div class="metric-context">Target change YoY</div>
-        </div>
-        {% endif %}
-    </div>
-</div>
-{% endif %}
-
-{% if fc.get('price_target') or fc.get('eps') or fc.get('revenue') %}
-<div class="card">
-    <div class="section-title">Forecast Revisions</div>
-    <div class="section-desc">How analyst price target, EPS, and revenue estimates have evolved over time.</div>
-    <div style="position: relative; height: 280px;">
-        <canvas id="forecastChart"></canvas>
-    </div>
-</div>
-{% endif %}
-
-</div> {# end consensus #}
 
 {# ════════════════════════════════════════════ #}
 {# ──────────── FORENSIC TAB ────────────────── #}
@@ -1160,87 +1160,6 @@
 
 </div> {# end price tab #}
 
-
-{# ════════════════════════════════════════════ #}
-{# ───────────── DATA TAB ───────────────────── #}
-{# The data behind the score (views.pick_data, ADR 0061) and where each factor's rows came from. #}
-{# ════════════════════════════════════════════ #}
-{% if s.data %}
-<div x-show="tab === 'data'" x-cloak>
-{% if in_ranking %}
-{% set d = s.data %}
-<div class="card u-mb16">
-    <div class="section-title">The data behind this score</div>
-    <div class="section-desc">Each tier ranks on a fixed set of factors. A factor with no value for a stock counts as the middle of its tier (50), so thin data pulls the score toward the middle. The share below is how much of the factor weight was backed by a real value for {{ s.ticker }} on {{ s.pick_date|short_date }}. It says nothing about whether the stock is a good buy.</div>
-    <div class="data-head">
-        <div class="data-big mono score-{{ d.colour }}">{{ d.score }}%</div>
-        <div><div class="data-word score-{{ d.colour }}">{{ d.word }}</div><div class="u-muted-11">{{ d.meaning | capitalize }}.</div></div>
-    </div>
-    <div class="data-grid">
-        {% if d.factors_applicable %}
-        <div class="data-cell"><div class="data-k">Factors with a value</div>
-            <div class="data-v mono score-{{ d.colour }}">{{ d.factors_used }}<span class="u-muted-11"> of {{ d.factors_applicable }}</span></div>
-            <div class="u-muted-11">{% if d.missing %}Missing: {{ d.missing | join(', ') }}{% else %}Every factor this tier ranks on had a value.{% endif %}</div></div>
-        {% endif %}
-        {% if d.price_days is not none %}
-        <div class="data-cell"><div class="data-k">Price history</div>
-            <div class="data-v mono">{{ "{:,}".format(d.price_days) }}<span class="u-muted-11"> trading days</span></div>
-            <div class="u-muted-11">The gate needs about three months.</div></div>
-        {% endif %}
-        {% if d.quarters is not none %}
-        <div class="data-cell"><div class="data-k">Fundamentals</div>
-            <div class="data-v mono">{{ d.quarters }}<span class="u-muted-11"> of 8 quarters</span></div>
-            <div class="u-muted-11">The gate needs four.</div></div>
-        {% endif %}
-    </div>
-</div>
-{% else %}
-<div class="card u-mb16 u-muted">{{ s.ticker }} has no score on the latest ranking date ({{ latest_pick|short_date }}), so there is no pick data to show; the lineage below is still the stock's declared source spec.</div>
-{% endif %}
-
-{# Data lineage: reference, folded #}
-<div class="card u-mb16" x-data="{open: false, payload: null}"
-     x-init="$watch('open', val => { if (val && !payload) { fetch('/api/lineage/{{ s.sid }}').then(r=>r.json()).then(d=>payload=d) }})">
-    <button type="button" class="lineage-toggle" @click="open = !open" :aria-expanded="open">
-        <div>
-            <div class="section-title" style="margin-bottom: 4px;">Data lineage</div>
-            <div class="section-desc" style="margin: 0;">For each factor, the source rows that fed it.</div>
-        </div>
-        <div class="lineage-sign" x-text="open ? '−' : '+'"></div>
-    </button>
-    <div x-show="open" x-cloak class="lineage-body">
-        <template x-if="!payload"><div class="u-muted-11">Loading…</div></template>
-        <template x-if="payload && payload.in_active_universe">
-            <div>
-                <div class="u-muted-11 lineage-h">Row-level lineage was emitted for this stock</div>
-                <template x-for="(rows, factor) in payload.dynamic_lineage" :key="factor">
-                    <div class="lineage-f">
-                        <div class="lineage-name" x-text="factor"></div>
-                        <div class="table-wrap"><table class="lineage-t">
-                            <thead><tr class="u-muted"><th>Source table</th><th>Role</th><th>Source key</th><th>Columns</th><th>Provenance</th></tr></thead>
-                            <tbody>
-                                <template x-for="(r, i) in rows" :key="i">
-                                    <tr>
-                                        <td class="mono" x-text="r.table"></td>
-                                        <td class="u-muted" x-text="r.contribution || '-'"></td>
-                                        <td class="mono" x-text="JSON.stringify(r.key)"></td>
-                                        <td class="mono" x-text="(r.cols || []).join(', ')"></td>
-                                        <td class="mono u-muted-10" x-text="r.column_sources ? Object.entries(r.column_sources).map(([c,v])=>c+': '+ (v||['?']).join('|')).join('; ') : '—'"></td>
-                                    </tr>
-                                </template>
-                            </tbody>
-                        </table></div>
-                    </div>
-                </template>
-            </div>
-        </template>
-        <template x-if="payload && !payload.in_active_universe">
-            <div class="u-muted-11">No row-level lineage was stored for this stock; only the declared source spec exists (<span class="mono">/api/lineage/{{ s.sid }}</span>).</div>
-        </template>
-    </div>
-</div>
-</div> {# end data tab #}
-{% endif %}
 
 {# ════════════════════════════════════════════ #}
 {# ───────────── MANAGEMENT TAB ─────────────── #}
