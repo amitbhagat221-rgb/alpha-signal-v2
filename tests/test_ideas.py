@@ -41,6 +41,7 @@ def test_model_ranks_are_within_tier(monkeypatch):
     df = pd.DataFrame({"sid": ["a", "b", "c"], "rank": [1, 2, 1], "cap_tier": ["MID", "MID", "SMALL"]})
     monkeypatch.setattr(pb.views, "picks", lambda gated=True: df)
     monkeypatch.setattr(pb.views, "latest_pick_date", lambda: "2026-10-09")
+    monkeypatch.setattr(pb.views, "tier_sizes", lambda d=None: {"MID": 2, "SMALL": 1})     # the one denominator
     m = pb.model_ranks()["by_sid"]
     assert m["b"] == {"rank": 2, "n": 2, "pct": 1.0, "tier": "MID"} and m["c"]["n"] == 1
 
@@ -101,7 +102,7 @@ def test_stock_chips_shape(monkeypatch):
     monkeypatch.setattr(say_do, "load", lambda: [{"sid": "S", "verdict": "mixed", "summary": "s"}])
     c = pb.stock_chips("S")
     assert c["lynch"]["label"] == "Fast growers" and c["say_do"]["label"] == "Mixed record"
-    assert c["playbooks"] == ["Breakouts", "Red-flag set"]
+    assert c["playbooks"] == ["Breakouts", "Avoid"]
 
 
 def test_pages_render_and_old_urls_redirect(tmp_path, monkeypatch):
