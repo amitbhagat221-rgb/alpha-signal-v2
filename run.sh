@@ -109,13 +109,20 @@ case "$JOB" in
                         # Each part is resumable and returns at once when it has nothing left; remove the
                         # cron lines when both report nothing to fetch.
         harvest_lock
+        # Declare the backfill to the health report (checks/feeds.py BACKFILL_MARKER): row counts of
+        # steps that read the backfilled history jump while it runs, and the 04:00 report comes after
+        # the 21:00 window ends. The marker holds the epoch of the last window start/end; it
+        # ages out on its own (BACKFILL_LINGER_H) once these cron lines are removed.
+        backfill_mark() { [ -n "${DRY:-}" ] || date -u +%s > "$ROOT/output/backfill_active"; }
+        backfill_mark
         END=$((SECONDS + ${2:-240} * 60))
         left() { echo $(( (END - SECONDS) / 60 )); }
         # pre-2020 prices (legacy NSE archive). Starts where corporate_actions start (2018-03):
         # older prices cannot be adjusted for splits and bonuses until earlier actions are loaded.
         [ "$(left)" -gt 5 ] && logged cron_nse_legacy run python -m sources.nse --legacy --start 2018-03-01 --end 2019-12-31 --budget-min "$(left)"
         # named >1% holders: every XBRL filing since 2016, largest stocks first
-        [ "$(left)" -gt 5 ] && logged cron_bse_shp_backfill run python -m sources.bse_shp --universe --quarters 0 --budget-min "$(left)" ;;
+        [ "$(left)" -gt 5 ] && logged cron_bse_shp_backfill run python -m sources.bse_shp --universe --quarters 0 --budget-min "$(left)"
+        backfill_mark ;;
     screener_schedules) # 3rd + 4th of Jan/Apr/Jul/Oct 20:30 UTC — Screener '+'-row breakdowns
                         # (Intangible Assets etc., annual items): ~9 h for the universe, so two
                         # resumable 5-hour night windows per quarter, clear of every other job

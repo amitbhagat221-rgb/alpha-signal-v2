@@ -84,6 +84,11 @@ def _normalize(sid, suffix, hist_df):
     """Convert yfinance history into stock_prices rows."""
     rows = []
     for ts, row in hist_df.iterrows():
+        # A bar with no volume is no trade: Yahoo pads illiquid REITs/InvITs and suspended names with
+        # flat zero-volume bars. They are not prices, and a batch of only those trips the stock_prices
+        # write contract (not_all_zero volume), which failed this step on 2026-10-10 (29 rows).
+        if pd.isna(row["Volume"]) or int(row["Volume"]) == 0:
+            continue
         rows.append({
             "sid": sid,
             "date": ts.date().isoformat(),
@@ -91,7 +96,7 @@ def _normalize(sid, suffix, hist_df):
             "high": float(row["High"]) if pd.notna(row["High"]) else None,
             "low":  float(row["Low"]) if pd.notna(row["Low"]) else None,
             "close": float(row["Close"]),
-            "volume": int(row["Volume"]) if pd.notna(row["Volume"]) else None,
+            "volume": int(row["Volume"]),
             "source": f"yfinance{suffix}",
         })
     return rows
@@ -124,7 +129,10 @@ def compute(limit=None, days=DEFAULT_DAYS, dry_run=False):
         for suffix in (".NS", ".BO"):
             hist = got[suffix].get(ticker + suffix)
             if hist is not None:
-                rows.extend(_normalize(sid, suffix, hist))
+                got_rows = _normalize(sid, suffix, hist)
+                if not got_rows:                        # only no-trade bars on this suffix: try the next
+                    continue
+                rows.extend(got_rows)
                 sids_with_data += 1
                 by_suffix[suffix] += 1
                 break

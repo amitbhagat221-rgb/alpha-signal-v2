@@ -281,6 +281,15 @@ PIPELINE = {
 #   data_freq:  how often the underlying data changes (daily/quarterly/annual)
 #   frequency:  how often this step runs (daily/weekly/monthly)
 
+# Steps and run.sh jobs whose failure never pages (health severity is capped at WARN,
+# however many days it has failed): {step_name: why, in plain words}. Declared here, next to the
+# steps, so no check hard-codes a name. A step on this list must not feed the morning picks.
+NON_PAGING_STEPS = {
+    "datamodel_sync": "plan 0017 v3 shadow job (run.sh morning, after the email): mirrors the legacy tables into the v3 tables; no pick reads them yet",
+    "datamodel_reconcile": "plan 0017 v3 shadow job (run.sh morning, after the email): old-vs-new parity record; no pick reads it",
+    "fetch_prices_fallback": "gap-fill for the few stocks NSE files lack (REITs, InvITs, BSE-only); the main price feed is fetch_bhavcopy, a gap shows as stale prices on those names only",
+}
+
 PIPELINE_STEPS = [
     # ── Data Sources ──
     {"name": "fetch_macro_market", "module": "sources.macro_yfinance", "function": "compute", "critical": False,
@@ -874,6 +883,7 @@ FILE_OUTPUTS = [
         "virtual_table": "_file_duckdb_replica",
         "glob":          "data/alpha_signal.duckdb",
         "freshness_field": None,       # binary file — mtime-anchored, not JSON-parsed
+        "optional":      "cockpit falls back to SQLite reads when the replica is missing",
         "source":        "tools/duckdb_refresh.py (run.sh morning cron tail, non-fatal)",
         "data_freq":     "daily",
         "frequency":     "daily",
