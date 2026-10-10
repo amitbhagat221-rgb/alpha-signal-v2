@@ -1,8 +1,8 @@
 """
 Alpha Signal v2 — Mutual Fund metrics + composite scorer.
 
-Pure compute from `mf_nav_history` + Nifty50 benchmark NAV derived from
-`stock_prices`. Writes:
+Pure compute from `mf_nav_history` + the NIFTY 50 price index from
+`nse_index_history` (equity categories only). Writes:
   - mf_metrics            (point-in-time returns + risk + scorer)
   - mf_calendar_returns   (per-year returns)
   - mf_rolling_returns    (monthly anchors, 3Y/5Y CAGR + beats-category flag)
@@ -77,47 +77,39 @@ def clean_nav_series(df, date_col: str = "nav_date", nav_col: str = "nav",
     return d
 
 
-# ─── Benchmark NAV — Nifty 50 proxy derived from stock_prices ────────────────
+# ─── Benchmark NAV — the real NIFTY 50 index from nse_index_history ──────────
+
+BENCH_INDEX = "NIFTY 50"
+BENCH_LABEL = "Nifty 50 (price index)"
+
+_EQUITY_BENCH_PREFIXES = ("equity /", "equity schemes", "index / equity", "index funds - equity",
+                          "exchange traded funds (etfs) - equity")
+
+
+def has_equity_benchmark(category: str | None) -> bool:
+    """True only for equity categories: a Nifty 50 spread means nothing for a debt, liquid,
+    hybrid, arbitrage, gold, overseas or fund-of-funds scheme (every one of those spellings
+    - 'Debt / Liquid', 'Income/Debt Oriented ...', 'Hybrid Schemes - ...' - answers False)."""
+    return (category or "").strip().lower().startswith(_EQUITY_BENCH_PREFIXES)
 
 
 def _build_benchmark_nav() -> pd.DataFrame:
-    """Derive a large-cap PROXY "NAV" series — NOT a real Nifty 50 index level.
+    """The NIFTY 50 PRICE index level (`nse_index_history`, from 2019-01-01), rebased to 100.
 
-    We don't have Nifty 50 index level (or TRI) ingested, so this synthesises
-    a stand-in from `stock_prices`: AVG(close) across TODAY's top 50 LARGE-tier
-    stocks by market_cap_cr, applied across the FULL historical date range.
-    Three honest caveats this proxy carries (audit MF-F6):
-      - CURRENT-constituent, not point-in-time — today's top-50 list is used
-        for every historical date, so index-reconstitution effects (a stock
-        that fell out of the top 50 years ago) aren't reflected.
-      - PRICE-WEIGHTED, not cap-weighted — a plain average of raw close prices
-        means a high-price stock (e.g. ₹5,000) moves the average more than a
-        similar-market-cap but lower-price stock, the same critique long
-        leveled at the (also price-weighted) Dow Jones Industrial Average.
-      - PRICE-RETURN, not total-return — dividends aren't reinvested, so this
-        proxy understates its own true return by the large-cap dividend yield
-        (~1-1.3%/yr), which OVERSTATES every fund's bench_spread_* by that
-        same amount vs a real Nifty 50 TRI comparison.
-    Real NIFTY TRI ingestion is a HUMAN TASK (external data source), not fixed
-    here. Cockpit labels this "vs large-cap proxy", not "vs Nifty".
+    Replaces the old stand-in (price-weighted average close of today's top-50 stocks) that
+    read -12.2% for both 2022 and 2024 and made funds beat "the market" by 50 points.
+    Honest caveats: it is the price index, not the TRI (no TRI series is ingested), so a
+    fund's spread is overstated by about the large-cap dividend yield (~1.2%/yr); and there
+    is no benchmark before 2019 (those years show no benchmark, not a made-up one).
 
     Returns DataFrame with columns: ['date', 'bench_nav'] sorted by date.
     """
-    df = read_sql("""
-        WITH top50 AS (
-            SELECT sid FROM stocks
-            WHERE cap_tier = 'LARGE'
-            ORDER BY COALESCE(market_cap_cr, 0) DESC
-            LIMIT 50
-        )
-        SELECT sp.date, AVG(sp.close) AS bench_nav
-        FROM stock_prices sp
-        JOIN top50 t ON sp.sid = t.sid
-        GROUP BY sp.date
-        ORDER BY sp.date
-    """)
+    df = read_sql("SELECT trade_date AS date, close AS bench_nav FROM nse_index_history "
+                  "WHERE index_symbol = ? AND close > 0 ORDER BY trade_date", params=[BENCH_INDEX])
     if df.empty:
         return df
+    df["bench_nav"] = 100.0 * df["bench_nav"] / df["bench_nav"].iloc[0]
+    return df
     # Rebase to 100 on the first date so it's interpretable
     df["bench_nav"] = 100.0 * df["bench_nav"] / df["bench_nav"].iloc[0]
     return df
@@ -522,7 +514,7 @@ def compute(dry_run: bool = False, scheme: str | None = None) -> int:
         print(f"Benchmark: {len(bench):,} days, "
               f"{bench['date'].iloc[0]} → {bench['date'].iloc[-1]}")
     else:
-        print("Benchmark: empty (no LARGE-cap stock prices) — bench_spread_* will be NULL")
+        print("Benchmark: empty (no NIFTY 50 in nse_index_history) — bench_spread_* will be NULL")
 
     # Universe — schemes with enough NAV history to score
     # Score TRUSTED schemes only — wound-up / segregated / interval / bonus / anomalous
@@ -566,6 +558,7 @@ def compute(dry_run: bool = False, scheme: str | None = None) -> int:
     calendar_rows = []
     n_skipped_short = 0
     nav_groups = dict(list(nav_all.groupby("scheme_code")))
+    master_cat = dict(zip(master["scheme_code"], master["category_norm"]))
 
     for code in master["scheme_code"]:
         sub = nav_groups.get(code)
@@ -578,7 +571,8 @@ def compute(dry_run: bool = False, scheme: str | None = None) -> int:
         if len(sub) < 30:
             n_skipped_short += 1
             continue
-        m = _compute_one_scheme(sub[["nav_date", "nav"]].copy(), bench)
+        eq = has_equity_benchmark(master_cat.get(code))     # no Nifty spread for debt / hybrid / etc.
+        m = _compute_one_scheme(sub[["nav_date", "nav"]].copy(), bench if eq else None)
         if m is None:
             n_skipped_short += 1
             continue
@@ -589,7 +583,7 @@ def compute(dry_run: bool = False, scheme: str | None = None) -> int:
         for rr in _rolling_returns(sub[["nav_date", "nav"]].copy()):
             rr["scheme_code"] = code
             rolling_rows.append(rr)
-        for cr in _calendar_returns(sub[["nav_date", "nav"]].copy(), bench):
+        for cr in _calendar_returns(sub[["nav_date", "nav"]].copy(), bench if eq else None):
             cr["scheme_code"] = code
             calendar_rows.append(cr)
 

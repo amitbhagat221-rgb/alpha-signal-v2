@@ -125,12 +125,12 @@ table.mini a.link { color:var(--accent); }
     <div class="mf-stat">
         <div class="mf-stat-label">1Y return</div>
         <div class="mf-stat-value num {{ m.ret_1y|tone }}">{{ m.ret_1y|pct(1, signed=True) }}</div>
-        {% if m.bench_spread_1y is not none and not i.is_debt %}<div class="mf-stat-sub">{{ m.bench_spread_1y|pct(1, signed=True) }} vs large-cap proxy</div>{% endif %}
+        {% if m.bench_spread_1y is not none and i.has_bench %}<div class="mf-stat-sub">{{ m.bench_spread_1y|pct(1, signed=True) }} vs Nifty 50</div>{% endif %}
     </div>
     <div class="mf-stat">
         <div class="mf-stat-label">3Y CAGR</div>
         <div class="mf-stat-value num {{ m.ret_3y_cagr|tone }}">{{ m.ret_3y_cagr|pct(1, signed=True) }}</div>
-        {% if m.bench_spread_3y is not none and not i.is_debt %}<div class="mf-stat-sub">{{ m.bench_spread_3y|pct(1, signed=True) }} vs large-cap proxy</div>{% endif %}
+        {% if m.bench_spread_3y is not none and i.has_bench %}<div class="mf-stat-sub">{{ m.bench_spread_3y|pct(1, signed=True) }} vs Nifty 50</div>{% endif %}
     </div>
     <div class="mf-stat">
         <div class="mf-stat-label">5Y CAGR</div>
@@ -179,13 +179,13 @@ table.mini a.link { color:var(--accent); }
             {% if cal %}
             <div class="table-wrap">
             <table class="mini">
-                <thead><tr><th>Year</th><th class="num">Fund</th>{% if not i.is_debt %}<th class="num">Large-cap proxy</th><th class="num">Spread (pts)</th>{% endif %}</tr></thead>
+                <thead><tr><th>Year</th><th class="num">Fund</th>{% if i.has_bench %}<th class="num">Nifty 50 (price)</th><th class="num">Spread (pts)</th>{% endif %}</tr></thead>
                 <tbody>
                 {% for c in cal %}
                 <tr>
                     <td>{{ c.year }}</td>
                     <td class="num {{ c.ret_pct|tone }}">{{ c.ret_pct|pct(1, signed=True) }}</td>
-                    {% if not i.is_debt %}
+                    {% if i.has_bench %}
                     <td class="num">{{ c.bench_ret_pct|pct(1, signed=True) }}</td>
                     <td class="num">{% if c.ret_pct is not none and c.bench_ret_pct is not none %}{{ (c.ret_pct - c.bench_ret_pct)|signed(1) }}{% else %}—{% endif %}</td>
                     {% endif %}
@@ -294,14 +294,13 @@ table.mini a.link { color:var(--accent); }
                 <tr><td>Last seen in AMFI</td><td>{{ i.last_seen or '—' }}</td></tr>
                 <tr><td>AUM</td><td class="num">{{ i.aum_cr|crore if i.aum_cr else '— (not ingested)' }}</td></tr>
                 <tr><td>Expense ratio</td><td class="num">{{ i.expense_ratio|pct(3) if i.expense_ratio else '— (not ingested)' }}</td></tr>
-                <tr><td>Benchmark</td><td>{{ i.benchmark or '— (large-cap proxy used, see note)' }}</td></tr>
+                <tr><td>Benchmark</td><td>{{ i.benchmark or '— (Nifty 50 price index used, see note)' }}</td></tr>
             </table>
             </div>
             <p class="mf-note">
                 Sources: scheme master and daily NAV via AMFI <code>NAVAll.txt</code>; historical NAV via mfapi.in.
-                The large-cap proxy is the current-constituent, price-weighted average close of today's top-50 LARGE-tier
-                stocks in <code>stock_prices</code>, price-return basis (not a Nifty 50 TRI; overstates fund spreads by about 1-1.3%/yr).
-                It is not shown against debt funds.
+                The benchmark is the Nifty 50 price index from <code>nse_index_history</code> (available from 2019; not the TRI, so
+                spreads are overstated by about the 1-1.3%/yr large-cap dividend yield). It is shown only for equity funds, not debt, hybrid, arbitrage, gold or overseas funds.
             </p>
         </div>
     </div>
