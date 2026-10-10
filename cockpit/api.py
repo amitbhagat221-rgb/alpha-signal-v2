@@ -1404,7 +1404,7 @@ def get_multibagger_overview(limit=60):
     return _multibagger_payload(db.scalar("SELECT MAX(snapshot_date) FROM multibagger_scores"), limit)
 
 
-@_persisted_cache(3600, name="multibagger_overview")
+@_persisted_cache(3600, name="multibagger_overview_v2")
 def _multibagger_payload(snap, limit=60):
     """Multibagger watchlist — the SEPARATE 3-stage funnel (plan 0008), kept OUT
     of daily_picks. Returns the small-cap regime banner, the gate funnel, and the
@@ -1447,14 +1447,9 @@ def _multibagger_payload(snap, limit=60):
     hurdle_fails = _tally("hurdle_fail",
                           (rows["passed_gates"] == 1) & (rows["passed_hurdles"] == 0))
 
-    # ── regime banner: stored (scoring-time) value + live EMA context ──
+    # regime: the stored (scoring-time) value only; the live regime panel is on Today
     regime = rows["smallcap_regime"].iloc[0]
     favorable = int(rows["regime_favorable"].iloc[0]) if pd.notna(rows["regime_favorable"].iloc[0]) else None
-    try:
-        from scoring.regime_smallcap import classify
-        reg_detail = classify()
-    except Exception:
-        reg_detail = {}
 
     tier_counts = (surv["cap_tier"].value_counts().to_dict() if not surv.empty else {})
 
@@ -1477,7 +1472,6 @@ def _multibagger_payload(snap, limit=60):
         "market_guard_active": (market_dd is not None and market_dd <= -0.20),
         "regime": regime,
         "regime_favorable": favorable,
-        "regime_detail": reg_detail,
         "funnel": {"universe": n_uni, "passed_gates": n_gates, "survived": n_surv},
         "gate_fails": gate_fails,
         "hurdle_fails": hurdle_fails,
