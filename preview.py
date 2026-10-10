@@ -27,7 +27,8 @@ import os
 COMPARE = {
     "main": {
         "/": "/",
-        "/#actions": "/actions",
+        # Today replaces the live Morning Brief ("/") and Action Queue ("/actions"): the banner
+        # opens "/"; the Action Queue is at /actions on the live cockpit.
         "/stocks": "/explorer",
         "/markets": "/news",
         "/markets#industries": "/sectors",

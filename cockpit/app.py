@@ -18,7 +18,7 @@ from preview import PreviewReadOnly, add_redirects
 
 import config
 import views
-from cockpit import api, pages
+from cockpit import api, pages, today
 from cockpit._shared import COCKPIT_STATIC, COCKPIT_TEMPLATES, make_templates, nav_model, prewarm
 from cockpit_ops.api import get_model_overview
 
@@ -45,7 +45,7 @@ def _prewarm_cache():
     # Stage 2 split (2026-05-26).
     prewarm([
         ("top_picks",          lambda: api.get_top_picks()),
-        ("action_candidates",  lambda: api.get_action_candidates()),
+        ("today",              lambda: today.build()),
         ("model_portfolio",    lambda: api.get_model_portfolio()),
         ("news_pool_168",      lambda: api._get_news_pool(hours=168)),
         ("news_pool_720",      lambda: api._get_news_pool(hours=720)),
@@ -147,7 +147,7 @@ def _coming(request: Request, page_id: str):
 
 @app.get("/", response_class=HTMLResponse)
 def today_page(request: Request):
-    return _coming(request, "today")
+    return templates.TemplateResponse(request, "today.html", {"page": "today", "t": today.build()})
 
 
 @app.get("/stocks", response_class=HTMLResponse)
@@ -171,72 +171,6 @@ def book_page(request: Request):
 
 
 add_redirects(app, pages.REDIRECTS)
-
-
-# Cockpit v2: this URL now redirects (pages.REDIRECTS); the function below is kept, undecorated, as the data function for Today.
-def morning_brief(request: Request):
-    regime = api.get_regime()
-    picks = api.get_top_picks(top=5)
-    pick_date = api.latest_pick_date()
-    stock_count = views.pick_count(pick_date)
-    # Only the stocks that entered or left the published picks; rank movers
-    # (UPGRADE/DOWNGRADE, thousands a day) are not news on the brief.
-    changes = api.get_changes()
-    entries = [c for c in changes if c.get("change_type") == "ENTRY" and c.get("sid")]
-    exits = [c for c in changes if c.get("change_type") == "EXIT" and c.get("sid")]
-    change_date = max((c.get("change_date") or "" for c in changes), default="")
-    earnings = api.get_earnings_upcoming()
-
-    # Enrich each pick with price metrics + analyst consensus + dossier —
-    # one batched query per source for all 15 picks, not 4 queries per pick.
-    sids = [s["sid"] for stocks in picks.values() for s in stocks]
-    pm = api.get_stock_price_metrics_batch(sids)
-    ac = api.get_analyst_consensus_batch(sids)
-    dominant = api.get_dominant_signal_batch(sids)
-    for tier, stocks in picks.items():
-        for stock in stocks:
-            sid = stock["sid"]
-            stock["pm"] = pm.get(sid, {})
-            stock["ac"] = ac.get(sid, {})
-            stock["dossier"] = api.get_dossier(sid)
-            stock["dominant_signal"] = dominant.get(sid, "")
-
-    # Market pulse
-    sectors = api.get_group_overview("sector")
-    tailwinds = sum(1 for s in sectors if s.get("macro_signal") in ("TAILWIND", "FAVORABLE"))
-    headwinds = sum(1 for s in sectors if s.get("macro_signal") in ("HEADWIND", "ADVERSE"))
-
-    return templates.TemplateResponse(request, "morning_brief.html", {
-        "regime": regime, "picks": picks, "pick_date": pick_date,
-        "stock_count": stock_count, "entries": entries, "exits": exits,
-        "change_date": change_date, "earnings": earnings,
-        "tailwinds": tailwinds, "headwinds": headwinds,
-        "page": "brief",
-    })
-
-
-# Cockpit v2: this URL now redirects (pages.REDIRECTS); the function below is kept, undecorated, as the data function for Today.
-def actions(request: Request, all: int = 0):
-    # Copy, don't mutate: get_action_candidates() hands back its cached dicts
-    # and handlers now run concurrently in the threadpool.
-    action_data = {k: [dict(s) for s in v] if isinstance(v, list) else v
-                   for k, v in api.get_action_candidates().items()}
-    # Price and target per candidate: two batched queries (the dossier and
-    # insider per-stock loads were never rendered).
-    show_all = bool(all)
-    for sec in ("buy", "exit"):
-        action_data[sec + "_shown"] = len(action_data[sec]) if show_all else min(len(action_data[sec]), api.ACTION_CAP)
-        action_data[sec] = action_data[sec][:action_data[sec + "_shown"]]
-    sids = [s.get("sid") for sec in ("buy", "watch", "exit") for s in action_data.get(sec, [])]
-    pm = api.get_stock_price_metrics_batch(sids)
-    ac = api.get_analyst_consensus_batch(sids)
-    for section in ["buy", "watch", "exit"]:
-        for stock in action_data.get(section, []):
-            stock["pm"] = pm.get(stock.get("sid"), {})
-            stock["ac"] = ac.get(stock.get("sid"), {})
-    return templates.TemplateResponse(request, "action_queue.html", {
-        "page": "actions", "actions": action_data, "show_all": show_all,
-    })
 
 
 # Cockpit v2: this URL now redirects (pages.REDIRECTS); the function below is kept, undecorated, as the data function for Stocks.
