@@ -24,8 +24,10 @@
 
 {# Real data behind a tap/hover: the shared tooltip popover, not a native title="" #}
 {% macro tip(text) -%}
-<span class="tooltip-wrap" x-data="{ open: false }"><button type="button" class="tooltip-trigger" @mouseenter="open = true" @mouseleave="open = false"
-  @click="open = !open" @click.outside="open = false" aria-label="More info">i</button><span x-show="open" x-cloak class="tooltip-popover">{{ text }}</span></span>
+{# Hover shows it on hover-capable devices; a click or tap pins it (a second click unpins); outside click / Escape closes. #}
+<span class="tooltip-wrap" x-data="{ hov: false, pin: false }" @click.outside="pin = false" @keydown.escape.window="pin = false; hov = false"><button type="button" class="tooltip-trigger"
+  @mouseenter="if (matchMedia('(hover: hover)').matches) hov = true" @mouseleave="hov = false"
+  @click="pin = !pin" :aria-expanded="hov || pin" aria-label="More info">i</button><span x-show="hov || pin" x-cloak class="tooltip-popover">{{ text }}</span></span>
 {%- endmacro %}
 
 {% macro grade_tag(g) -%}
