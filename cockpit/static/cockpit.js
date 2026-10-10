@@ -167,3 +167,28 @@ function searchApp(base) {
     /* tab_bar changes the hash with history.pushState, which fires no event: a light poll catches it. */
     document.addEventListener('DOMContentLoaded', () => { if (document.querySelector('.preview-banner')) { syncLiveLink(); setInterval(syncLiveLink, 500); } });
 })();
+
+
+// Keep every info popover on screen. `.tooltip-popover` is centred on its icon by CSS; near the
+// left or right edge (any phone, the right-hand rail on desktop) that pushes it off screen.
+// After a popover opens (hover, tap, focus), shift it sideways just enough to sit 8px inside the
+// viewport. Fixed-position popovers (`.pop-fixed`) place themselves and are skipped.
+(function () {
+    function clamp(p) {
+        p.style.marginLeft = '';
+        const r = p.getBoundingClientRect();
+        if (!r.width) return;
+        let shift = 0;
+        if (r.left < 8) shift = 8 - r.left;
+        else if (r.right > window.innerWidth - 8) shift = (window.innerWidth - 8) - r.right;
+        if (shift) p.style.marginLeft = shift + 'px';
+    }
+    function settle(e) {
+        const host = e.target && e.target.closest && e.target.closest('.tooltip-wrap, .hover-tip, .tooltip-host');
+        if (!host) return;
+        // Alpine toggles x-show after this handler; measure on the next frames.
+        requestAnimationFrame(() => requestAnimationFrame(() =>
+            host.querySelectorAll('.tooltip-popover:not(.pop-fixed)').forEach(clamp)));
+    }
+    ['mouseover', 'click', 'focusin', 'touchend'].forEach(t => document.addEventListener(t, settle, true));
+})();
