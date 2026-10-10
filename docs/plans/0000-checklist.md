@@ -6,6 +6,8 @@ _Numbering: [ADR 0015](../decisions/0015-track-numbering-and-rename.md) (tracks)
 
 ## Next 3 (active priorities)
 
+- ✅ **[Plan 0023](0023-dynamic-option-setups.md) — dynamic option setups RUN 2026-10-10: all 6 pre-registered rules FAIL** (premium, trend, skew, stress, positioning, macro; skip/half rules worse every year). The 0.05-delta strike already adapts to volatility, and the static rule earns most in the 'scary' quintiles. The static plan-0022 rule stands. Side fix: `sources/fno_iv.py` thin-weekly fallback (+495 NIFTY IV days).
+
 - ⏳ **[Plan 0022](0022-option-premium-paper-book.md) — option-premium paper book, Phases 1+2 BUILT 2026-10-10 ([ADR 0067](../decisions/0067-option-premium-paper-book.md) proposed); recording forward.** First trade NIFTY exp 2026-10-13 (sold 23000 CE + 21950 PE, 13.60 pts × 65). Next: ① read the 2026-10-14 03:30 morning settlement (`python -m option_book --show`, ops `/options`) · ② Amit logs in via `/kite/login` before 15:20 IST on 10-13 (SENSEX) and 10-15 (NIFTY) → first `option_live_quotes` rows (`output/kite_quotes.log`) · ③ daily-email line (`output/email_sender.py:_build_html`) · pass bar after 25 trades (plan §3).
 
 - ✅ **Secrets out of the v1 folder DONE 2026-10-10 (Amit: "why are we still using the v1 folder")** — values verified identical by hash, all 11 vars resolve from a clean env through the `run.sh` preamble, 479 tests pass; first scheduled proof = tomorrow 03:30 morning run + 05:30 secrets_backup. v2-owned `~/.config/alpha-signal/secrets.env` (600, outside git), loaded once in `run.sh`; backup, messages, docs and the CLAUDE.md rule updated. v1's file is not edited. Kite keys go in the new file. Not in scope: the shared venv (`~/alpha-signal/venv`, used by systemd units + hooks).

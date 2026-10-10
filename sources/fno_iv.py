@@ -181,13 +181,17 @@ def _rollup_iv_one(sym_df, trade_date):
     elig = [(e, d) for e, d in dated if d >= MIN_DAYS_NEAR]
     if not elig:
         return None
-    target = min(elig, key=lambda x: abs(x[1] - TARGET_DAYS))[0]
-    days_target = (date.fromisoformat(target) - date.fromisoformat(trade_date)).days
-
-    g_target = sym_df[sym_df["expiry_date"] == target]
-    atm_iv, F, n_strikes = _atm_iv_for_expiry(g_target, trade_date)
-    if not np.isfinite(atm_iv):
+    # The expiry closest to TARGET_DAYS that inverts: a thin weekly next to the target
+    # (2019–21: a handful of strikes with OI) must not drop the whole day when the
+    # monthly a week away is liquid (2026-10-10: 495 NIFTY days were missing this way).
+    for target, _ in sorted(elig, key=lambda x: abs(x[1] - TARGET_DAYS)):
+        g_target = sym_df[sym_df["expiry_date"] == target]
+        atm_iv, F, n_strikes = _atm_iv_for_expiry(g_target, trade_date)
+        if np.isfinite(atm_iv):
+            break
+    else:
         return None
+    days_target = (date.fromisoformat(target) - date.fromisoformat(trade_date)).days
     skew = _skew_25d(g_target, trade_date, F)
 
     # Term structure: near vs far ATM IV (positive = inverted curve = stress)
@@ -209,13 +213,14 @@ def _rollup_iv_one(sym_df, trade_date):
     }
 
 
-def compute_iv_for_date(trade_date):
-    """Invert the IV surface for every underlying on `trade_date` → fno_iv_history.
-    INSERT OR REPLACE. Returns rows written."""
+def compute_iv_for_date(trade_date, symbols=None):
+    """Invert the IV surface for every underlying on `trade_date` (or only `symbols`)
+    → fno_iv_history. INSERT OR REPLACE. Returns rows written."""
+    sym_sql = f" AND symbol IN ({','.join('?' * len(symbols))})" if symbols else ""
     df = read_sql(
         "SELECT sid, symbol, expiry_date, strike, option_type, underlying_price, settle "
-        "FROM fno_bhav WHERE trade_date = ? AND instrument_type IN ('STO','IDO') AND settle > 0",
-        params=(trade_date,),
+        "FROM fno_bhav WHERE trade_date = ? AND instrument_type IN ('STO','IDO') AND settle > 0" + sym_sql,
+        params=(trade_date, *(symbols or ())),
     )
     if df.empty:
         return 0

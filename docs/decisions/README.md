@@ -99,3 +99,4 @@ Status key: **A** accepted · **P→N** partly superseded by N · **S→N** supe
 | 0065 | [Live tiers, display and inputs use the backtest's own computations; price factors carry a full-market reading](0065-live-tiers-are-the-backtest-tiers.md) | A (plan 0020) |
 | 0066 | [Credentials live in `~/.config/alpha-signal/secrets.env`, outside the repo](0066-secrets-in-v2-config-file.md) | P (replaces the v1-file rule of 0007) |
 | 0067 | [Option premium: a forward paper book on one rule, shared code with the backtest, manual Kite logins](0067-option-premium-paper-book.md) | P (plan 0022) |
+| 0068 | [No dynamic filters on the option strangle: the delta rule already adapts](0068-no-dynamic-filters-on-option-strangle.md) | P (plan 0023; builds on 0067) |
