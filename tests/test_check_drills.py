@@ -321,6 +321,82 @@ def test_system_check_fires(code):
     assert all(group == [] for group in report.issues(_clean())), "the clean state must be silent"
 
 
+# ───────────────────────────── re-graded paths (2026-10-10) ─────────────────────────────
+# The severity of each lower grade is decided in the check; these prove the lower path
+# still fires, and that the full-severity path next to it still pages.
+
+def _fired(state):
+    return [i for group in report.issues(state) for i in group]
+
+
+def test_a_shadow_job_failing_for_days_is_a_warning_not_a_page():
+    from config import NON_PAGING_STEPS
+    step = next(iter(NON_PAGING_STEPS))
+    pipe = {"last_run_date": TODAY, "last_run_status": "FAILED", "n_steps": 3,
+            "failed_steps_today": [{"step": step, "error": "boom", "at": "t"}],
+            "failed_streaks": [{"step": step, "days": 9, "sample_error": "boom"}]}
+    (i,) = _fired(_clean(pipeline=pipe))
+    assert (i["code"], i["target"], i["severity"]) == ("PIPELINE_STEP", step, WARN)
+    pipe["failed_streaks"][0]["step"] = pipe["failed_steps_today"][0]["step"] = "fetch_x"
+    (i,) = _fired(_clean(pipeline=pipe))
+    assert i["severity"] == CRITICAL                              # any other step on a streak still pages
+
+
+def test_non_paging_steps_name_real_steps():
+    import feeds
+    from config import NON_PAGING_STEPS, PIPELINE_STEPS
+    known = {s["name"] for s in PIPELINE_STEPS} | {step for logs in feeds._run_sh_logs().values() for step, _ in logs}
+    run_sh = (db.PROJECT_ROOT / "run.sh").read_text()
+    for name, why in NON_PAGING_STEPS.items():
+        assert why and (name in known or f"logged {name} " in run_sh), f"{name} is not a step or a run.sh job"
+
+
+def test_an_empty_table_of_a_feed_not_on_the_picks_path_is_graded_down(monkeypatch):
+    import feeds
+    monkeypatch.setitem(feeds.FEEDS, "_t_probation", {"status": "probation", "writes": ["_t_prob_tbl"]})
+    monkeypatch.setitem(feeds.FEEDS, "_t_candidate", {"status": "candidate", "writes": ["_t_cand_tbl"]})
+    assert checks.empty_table_severity("_t_prob_tbl") == WARN
+    assert checks.empty_table_severity("_t_cand_tbl") == checks.INFO
+    monkeypatch.setitem(feeds.FEEDS, "_t_prod", {"status": "production", "writes": ["_t_prob_tbl"]})
+    assert checks.empty_table_severity("_t_prob_tbl") == CRITICAL   # one production writer = on the path
+    assert checks.empty_table_severity("_file_duckdb_replica") == WARN   # optional file: readers fall back
+    assert checks.empty_table_severity("_file_dossiers") == CRITICAL
+    (i,) = _fired(_clean(tables={"fresh": 4, "stale": [], "outdated": [], "empty": ["_file_duckdb_replica"]}))
+    assert (i["code"], i["severity"]) == ("TABLE_EMPTY", WARN)
+
+
+def test_a_volume_spike_is_info_only_while_a_backfill_is_declared(tmp_path, monkeypatch):
+    import time
+    from checks import feeds as cf
+    spike = {"fetch_x": {"stable": True, "ratio": 20.0, "last": 4000, "median": 200.0}}
+    marker = tmp_path / "backfill_active"
+    monkeypatch.setattr(cf, "BACKFILL_MARKER", marker)
+    assert not cf.backfill_active()                                       # no marker
+    (i,) = _fired(_clean(feeds=_feed(volume=spike)))
+    assert (i["code"], i["severity"]) == ("FEED_VOLUME", WARN)
+    marker.write_text(str(int(time.time()) - 3600))
+    assert cf.backfill_active()
+    (i,) = _fired(_clean(feeds=_feed(volume=spike)))
+    assert (i["code"], i["severity"]) == ("FEED_VOLUME", checks.INFO)
+    marker.write_text(str(int(time.time()) - 30 * 3600))                  # window long over: back to WARN
+    assert not cf.backfill_active()
+    (i,) = _fired(_clean(feeds=_feed(volume=spike)))
+    assert i["severity"] == WARN
+    monkeypatch.setitem(spike["fetch_x"], "ratio", 0.1)                   # a drop is never excused by a backfill
+    marker.write_text(str(int(time.time())))
+    (i,) = _fired(_clean(feeds=_feed(volume=spike)))
+    assert i["severity"] == CRITICAL
+
+
+def test_yfinance_fallback_drops_no_trade_bars():
+    from sources import yfinance_prices as yp
+    idx = pd.to_datetime(["2026-10-07", "2026-10-08", "2026-10-09"])
+    h = pd.DataFrame({"Open": 1.0, "High": 1.0, "Low": 1.0, "Close": 1.0, "Volume": [0, float("nan"), 120]}, index=idx)
+    rows = yp._normalize("S", ".BO", h)
+    assert [r["date"] for r in rows] == ["2026-10-09"] and rows[0]["volume"] == 120
+    assert yp._normalize("S", ".BO", h.iloc[:2]) == []
+
+
 # ───────────────────────────── no check without a drill ─────────────────────────────
 
 def test_every_check_has_a_drill():
