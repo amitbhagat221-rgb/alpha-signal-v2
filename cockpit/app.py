@@ -49,6 +49,7 @@ def _prewarm_cache():
         ("model_portfolio",    lambda: api.get_model_portfolio()),
         ("news_pool_168",      lambda: api._get_news_pool(hours=168)),
         ("news_pool_720",      lambda: api._get_news_pool(hours=720)),
+        ("sector_call",        lambda: api.get_sector_call()),
         ("portfolio_bundle",   lambda: api.get_portfolio_bundle()),
         ("multibagger",        lambda: api.get_multibagger_overview()),
     ])
@@ -98,41 +99,6 @@ templates.env.filters["slidify"] = _slidify
 templates.env.filters["sentences"] = _sentences
 
 
-# Build a URL on the current request preserving all query params except one,
-# which gets set/unset. Used by /news for chip/tab/pagination links so each
-# action keeps the rest of the user's filter state. Pass value="" to drop a key.
-from urllib.parse import urlencode
-def _url_keep(key, value):
-    req = _current_request.get()
-    if req is None:
-        return f"?{key}={value}" if value not in ("", None) else "?"
-    params = dict(req.query_params)
-    # Reset pagination whenever any non-"page" filter changes
-    if key != "page":
-        params.pop("page", None)
-    if value in ("", None, 0):
-        params.pop(key, None)
-    else:
-        params[key] = str(value)
-    base = req.url.path
-    return f"{base}?{urlencode(params)}" if params else base
-templates.env.globals["url_keep"] = _url_keep
-
-# Track current request for url_keep — set by a tiny middleware.
-import contextvars
-_current_request: "contextvars.ContextVar[Request | None]" = contextvars.ContextVar(
-    "current_request", default=None
-)
-
-@app.middleware("http")
-async def _bind_request(request: Request, call_next):
-    token = _current_request.set(request)
-    try:
-        return await call_next(request)
-    finally:
-        _current_request.reset(token)
-
-
 # ── Page Routes ──
 # Cockpit v2 site map: cockpit/pages.py (PAGES = the rail, REDIRECTS = the retired URLs).
 # Today, Stocks, Markets, Ideas and Book are placeholders until their page group fills them:
@@ -156,8 +122,34 @@ def stocks_page(request: Request):
 
 
 @app.get("/markets", response_class=HTMLResponse)
-def markets_page(request: Request):
-    return _coming(request, "markets")
+def markets_page(request: Request, sector: str = "", industry: str = ""):
+    """Markets: Today (the editor's 3 stories + one sector call), Themes, Industries (the
+    industry library + the reference table), Search (a partial, below). ?industry= and
+    ?sector= open that group's detail on the Industries tab."""
+    industry_list = api.get_group_list("industry")
+    sector_list = api.get_group_list("sector")
+    detail = None
+    if industry and industry in industry_list:
+        detail = _group_detail("industry", industry)
+    elif sector and sector in sector_list:
+        detail = _group_detail("sector", sector)
+    today = dt.date.today().isoformat()
+    return templates.TemplateResponse(request, "markets.html", {
+        "page": "markets", "entry": next(p for p in pages.PAGES if p["id"] == "markets"),
+        "today": today, "start_tab": "industries" if detail else "today",
+        "call": api.get_sector_call(), **api.get_news_front(),
+        "industries": api.get_industry_rotation(), "industry_list": industry_list,
+        "detail": detail, "pick_date": api.latest_pick_date(),
+        "sources": [n for n, _ in api.search_news(page_size=1)["sources"]],
+    })
+
+
+@app.get("/partial/news-search", response_class=HTMLResponse)
+def partial_news_search(request: Request, q: str = "", theme: str = "", source: str = "",
+                        hours: int = 168, page: int = 1):
+    """The Search tab's results (words, theme, source, age), fetched into the tab."""
+    return templates.TemplateResponse(request, "_news_search.html", {
+        "s": api.search_news(q=q.strip(), theme=theme, source=source, hours=hours, page=page)})
 
 
 @app.get("/ideas", response_class=HTMLResponse)
@@ -308,7 +300,7 @@ def portfolio(request: Request):
 
 
 def _group_detail(by, name):
-    """The /sectors detail pane for one industry (with its parent sector's macro
+    """The Markets > Industries detail pane for one industry (with its parent sector's macro
     and regulatory context) or one sector — also served as the stock page's lazy
     industry card."""
     parent = api.get_industry_parent_sector(name) if by == "industry" else None
@@ -327,38 +319,10 @@ def _group_detail(by, name):
     }
 
 
-# Cockpit v2: this URL now redirects (pages.REDIRECTS); the function below is kept, undecorated, as the data function for Markets (Industries).
-def sectors(request: Request, sector: str = "", industry: str = ""):
-    # Industry-first overview (drill-down primary); sectors as grouping
-    industries_data = api.get_group_overview("industry")
-    industry_list = api.get_group_list("industry")
-    sector_list = api.get_group_list("sector")
-
-    detail = None
-    if industry and industry in industry_list:
-        detail = _group_detail("industry", industry)
-    elif sector and sector in sector_list:
-        # Back-compat: ?sector=X falls back to sector-level detail
-        detail = _group_detail("sector", sector)
-
-    digest = api.get_sector_digest()
-
-    return templates.TemplateResponse(request, "sectors.html", {
-        "page": "sectors",
-        "industries": industries_data,
-        "industry_list": industry_list,
-        "sector_list": sector_list,
-        "selected_industry": industry,
-        "selected_sector": sector,
-        "detail": detail,
-        "digest": digest,
-    })
-
-
 @app.get("/partial/industry-card/{industry}", response_class=HTMLResponse)
 def partial_industry_card(request: Request, industry: str, sid: str = ""):
     """Full industry dossier fragment, lazy-loaded into the stock page's Sector
-    tab. Renders the SAME shared _industry_detail.html partial that /sectors uses
+    tab. Renders the SAME shared _industry_detail.html partial that Markets > Industries uses
     (metric strip, conviction bar, Overview/Players/Trends/Our-Picks sub-tabs,
     thesis, value chain, competitive landscape, picks, macro, regulatory) — so the
     stock page shows identical full detail, no drift."""
@@ -376,7 +340,7 @@ def partial_sector_card(request: Request, sector: str, sid: str = ""):
     """Compact sector dossier fragment, lazy-loaded into the stock page's Sector
     tab (sector context attached to every stock). Peers (with this stock
     highlighted) + our model's top/bottom + macro drivers + recent regulatory,
-    plus a link to the full /sectors page."""
+    plus a link to the full Markets industry page."""
     return templates.TemplateResponse(request, "_sector_card.html", {
         "sector": sector,
         "sid": sid,
@@ -517,64 +481,12 @@ def api_mf_search(q: str = "", limit: int = 10):
     return api.get_mf_search(q, limit=limit)
 
 
-# Cockpit v2: this URL now redirects (pages.REDIRECTS); the function below is kept, undecorated, as the data function for Markets.
-def news_editor_page(request: Request):
-    """Plan 0021: today's three items, the 7 themes, the week's radar and sectors."""
-    return templates.TemplateResponse(request, "news.html", {
-        "page": "news", **api.get_news_front(),
-        "today": dt.date.today().isoformat(),
-    })
-
-
 @app.get("/markets/theme/{theme_id}", response_class=HTMLResponse)
 def news_theme_page(request: Request, theme_id: str):
     theme = api.get_news_theme(theme_id)
     if theme is None:
         raise HTTPException(status_code=404, detail="No such theme")
     return templates.TemplateResponse(request, "news_theme.html", {"page": "markets", "t": theme})
-
-
-# Cockpit v2: this URL now redirects (pages.REDIRECTS); the function below is kept, undecorated, as the data function for Markets (Search).
-def news_page(
-    request: Request,
-    topic: str = "",
-    tier: int = 0,
-    q: str = "",
-    sentiment: str = "",
-    confidence: str = "",
-    hours: int = 168,
-    sort: str = "smart",
-    page: int = 1,
-    theme: str = "",
-):
-    """Flagship news feed: topic tabs, search, sentiment/confidence/tier filters,
-    sort modes, server-side pagination. Single-page render, no SPA."""
-    feed = api.get_news_feed(
-        topic=(topic or None),
-        tier=(tier if tier else None),
-        q=(q or None),
-        sentiment=(sentiment or None),
-        confidence=(confidence or None),
-        hours=hours,
-        sort=sort,
-        page=page,
-        page_size=24,
-        theme=(theme or None),
-    )
-    return templates.TemplateResponse(request, "news_all.html", {
-        "page": "news",
-        "feed": feed,
-        "themes": api.get_news_themes(),
-        "theme": theme,
-        "topic": topic,
-        "active_tier": tier,
-        "q": q,
-        "active_sentiment": sentiment,
-        "active_confidence": confidence,
-        "active_hours": hours,
-        "active_sort": sort,
-        "active_page": page,
-    })
 
 
 # NOTE: /system moved to cockpit_ops (port 3001) during Stage 2 split.

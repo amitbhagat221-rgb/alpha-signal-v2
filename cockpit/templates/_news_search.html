@@ -1,0 +1,20 @@
+{# Markets > Search results (cockpit/app.py partial_news_search). Plain text, newest first. #}
+{% if s.rows %}
+<div class="mono u-muted-11" style="margin-bottom: 6px;">{{ "{:,}".format(s.total) }} headline{{ '' if s.total == 1 else 's' }}{% if s.q %} matching "{{ s.q }}"{% endif %}, newest first · page {{ s.page }} of {{ s.total_pages }}</div>
+{% for r in s.rows %}
+<div class="mk-hit">
+    <a class="h" href="{{ r.url }}" target="_blank" rel="noopener noreferrer">{{ r.headline }}</a>
+    {% if r.one_liner %}<div class="u-muted-11">{{ r.one_liner }}</div>{% endif %}
+    <div class="mono u-muted-11">{{ r.source }} · {{ r.day|short_date }} ({{ r.age }}){% if r.theme_id %} · <a class="ns-back" href="/markets/theme/{{ r.theme_id }}">{{ r.theme_title }}</a>{% endif %}</div>
+    {% if r.tickers %}<div>{% for t in r.tickers %}<a class="mk-tk" href="/stocks/{{ t.sid|urlencode }}">{{ t.ticker }}</a>{% endfor %}</div>{% endif %}
+</div>
+{% endfor %}
+{% if s.total_pages > 1 %}
+<div class="mk-pager">
+    {% if s.page > 1 %}<button type="button" data-page="{{ s.page - 1 }}">&larr; Newer</button>{% else %}<span></span>{% endif %}
+    {% if s.page < s.total_pages %}<button type="button" data-page="{{ s.page + 1 }}">Older &rarr;</button>{% endif %}
+</div>
+{% endif %}
+{% else %}
+<div class="ns-text">No headlines match{% if s.q %} "{{ s.q }}"{% endif %} in this window. Try fewer words, a longer period or another source.</div>
+{% endif %}

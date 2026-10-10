@@ -1,13 +1,13 @@
 {# Compact sector-context dossier, lazy-loaded into the stock page's "Sector" tab. #}
 {# Server-rendered via /partial/sector-card/{sector}?sid=XXX. Reuses the same #}
-{# sector data behind /sectors, with the current stock highlighted among peers. #}
+{# sector data behind Markets, with the current stock highlighted among peers. #}
 
 <div class="card" style="margin-bottom:16px; border-left:4px solid var(--accent); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
     <div>
         <div style="font-size:11px; text-transform:uppercase; letter-spacing:.5px; color:var(--text-muted);">Sector context</div>
         <div style="font-size:18px; font-weight:700;">{{ sector }}</div>
     </div>
-    <a href="/sectors?sector={{ sector|urlencode }}#per-sector" style="font-size:12px; color:var(--accent); text-decoration:none; font-weight:600;">Open full sector dossier →</a>
+    <a href="/markets?sector={{ sector|urlencode }}#industries" style="font-size:12px; color:var(--accent); text-decoration:none; font-weight:600;">Open full sector dossier →</a>
 </div>
 
 {# Peers — where this stock sits among sector names by market cap, with our model rank #}
