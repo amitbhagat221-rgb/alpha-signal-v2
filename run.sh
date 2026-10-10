@@ -32,14 +32,19 @@ logged() {         # logged <step_name> <cmd...>: run a cron-only job and record
     local step="$1"; shift  # (review F3: cron jobs wrote no log row, so a dead one — the Screener
                             # harvest at 2448/2448 failures, BSE at 8/8 day errors — was invisible)
     if [ -n "${DRY:-}" ]; then echo "+ [pipeline_log ← $step]"; "$@"; return; fi
-    local t0 rc run_id; t0=$(date +%Y-%m-%dT%H:%M:%S)
+    local t0 rc run_id errf; t0=$(date +%Y-%m-%dT%H:%M:%S)
     run_id="$step:$(date -u +%Y%m%dT%H%M%S):$$"   # plan 0018: every python process of this job
-    ALPHA_STEP="$step" ALPHA_RUN_ID="$run_id" "$@"; rc=$?   # logs to run_events under this run_id
+    # tee a copy of the job's output (stderr folded in, as every cron line already does) so a
+    # failure records its real error line, not just "exit 1"; the cron log is unchanged
+    errf=$(mktemp /tmp/alpha_logged.XXXXXX 2>/dev/null) || errf=/dev/null
+    ALPHA_STEP="$step" ALPHA_RUN_ID="$run_id" "$@" 2>&1 | tee "$errf"; rc=${PIPESTATUS[0]}   # logs to run_events under this run_id
     python -c 'import sys; from pipeline import log_step; import runlog; ok = sys.argv[2] == "0"
+line = None if ok else runlog.log_error_line(sys.argv[6])
 log_step(sys.argv[1], "SUCCESS" if ok else "FAILED", started=sys.argv[3],
-         error=None if ok else f"exit {sys.argv[2]} (python -m runlog events --run {sys.argv[5]})")
-runlog.exit_code(sys.argv[5], sys.argv[1], sys.argv[2], started=sys.argv[3])' \
-        "$step" "$rc" "$t0" "$JOB" "$run_id" >/dev/null || echo "[warn] could not log $step to pipeline_log"
+         error=None if ok else runlog.failure_message(sys.argv[2], sys.argv[5], line))
+runlog.exit_code(sys.argv[5], sys.argv[1], sys.argv[2], started=sys.argv[3], last_line=line)' \
+        "$step" "$rc" "$t0" "$JOB" "$run_id" "$errf" >/dev/null || echo "[warn] could not log $step to pipeline_log"
+    [ "$errf" != /dev/null ] && rm -f "$errf"
     return $rc
 }
 

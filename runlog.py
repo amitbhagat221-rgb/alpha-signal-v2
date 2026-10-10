@@ -491,11 +491,55 @@ def note(message, level="INFO", **detail):
     _emit("note", level, message=message, detail=detail or None)
 
 
-def exit_code(run_id, step, rc, started=None):
-    """run.sh `logged`: the job's shell exit code, under the same run_id."""
+_ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+_EXC_LINE = re.compile(r"^(?:[A-Za-z_][\w.]*\.)?[A-Za-z_]\w*(?:Error|Exception|Violation|Interrupt|Exit)\b[:(]?")
+_BAD_WORDS = re.compile(r"error|exception|failed|fatal|not started|refus|blocked|only [\d.]+ ?[GM]B free|stopped|abort|denied",
+                        re.I)
+
+
+def last_error_line(text, max_len=300):
+    """The line of a job's output that says WHY it failed: the exception line closing a
+    traceback, else the last line that reads like an error ("only 9.6 GB free on the DB disk",
+    "KeyError: 'shareholding_filing'"), else the last line. None for empty output.
+    run.sh `logged` feeds it the job's output tail so pipeline_log carries the cause, not just
+    "exit 1"."""
+    lines = [_ANSI.sub("", ln).strip() for ln in str(text or "").splitlines()]
+    lines = [ln for ln in lines if ln][-80:]
+    if not lines:
+        return None
+    pick = (next((ln for ln in reversed(lines) if _EXC_LINE.match(ln)), None)
+            or next((ln for ln in reversed(lines) if _BAD_WORDS.search(ln)), None)
+            or lines[-1])
+    return pick if len(pick) <= max_len else pick[:max_len - 1] + "\u2026"
+
+
+def log_error_line(path):
+    """last_error_line of the last 64 KB of a job's captured output file (None if unreadable)."""
+    try:
+        with open(path, "rb") as f:
+            f.seek(0, 2)
+            f.seek(max(0, f.tell() - 65536))
+            return last_error_line(f.read().decode("utf-8", "replace"))
+    except (OSError, TypeError):
+        return None
+
+
+def failure_message(rc, run_id, line=None):
+    """pipeline_log.error_message for a cron job that exited non-zero: the real error line
+    first (health shows the first 200 characters), then where the run's events are. Without
+    a line it is the old "exit N (...)" text."""
+    where = f"python -m runlog events --run {run_id}"
+    return f"{line} (exit {rc}; {where})" if line else f"exit {rc} ({where})"
+
+
+def exit_code(run_id, step, rc, started=None, last_line=None):
+    """run.sh `logged`: the job's shell exit code, under the same run_id. `last_line` = the
+    error line from the job's output (last_error_line), kept in the event's detail."""
     _ctx.update(run_id=run_id, step=step, feed=feed_for(step))
-    _emit("run_exit", "INFO" if str(rc) == "0" else "ERROR", message=f"exit {rc}",
-          detail={"rc": int(rc), "started": started})
+    detail = {"rc": int(rc), "started": started}
+    if last_line:
+        detail["last_line"] = last_line
+    _emit("run_exit", "INFO" if str(rc) == "0" else "ERROR", message=f"exit {rc}", detail=detail)
 
 
 def prune(days=RETENTION_DAYS):
