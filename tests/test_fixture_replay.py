@@ -135,13 +135,20 @@ def _sev(row, code):
     return [v["severity"] for v in feed_verdicts([row]) if v["code"] == code]
 
 
-def test_volume_and_reconcile_verdicts():
+def test_volume_and_reconcile_verdicts(monkeypatch):
+    # hermetic: run.sh backfill writes output/backfill_active, which turns a spike into INFO (91f317b);
+    # the test must not depend on whether a backfill window is open on this machine
+    monkeypatch.setattr("checks.feeds.backfill_active", lambda *a, **k: False)
     band = lambda ratio, stable=True: {"x": {"last": 1, "median": 1.0, "ratio": ratio, "stable": stable, "n": 30}}
     assert _sev(_row(volume=band(0.45)), "FEED_VOLUME_DROP") == ["WARN"]
     assert _sev(_row(volume=band(0.10)), "FEED_VOLUME_DROP") == ["CRITICAL"]
     assert _sev(_row(tier="T2", volume=band(0.10)), "FEED_VOLUME_DROP") == ["WARN"]
     assert _sev(_row(volume=band(0.10, stable=False)), "FEED_VOLUME_DROP") == []
     assert _sev(_row(volume=band(4.0)), "FEED_VOLUME_SPIKE") == ["WARN"]
+    monkeypatch.setattr("checks.feeds.backfill_active", lambda *a, **k: True)
+    assert _sev(_row(volume=band(4.0)), "FEED_VOLUME_SPIKE") == ["INFO"]      # a declared backfill: expected
+    assert _sev(_row(volume=band(0.10)), "FEED_VOLUME_DROP") == ["CRITICAL"]  # a drop still alarms
+    monkeypatch.setattr("checks.feeds.backfill_active", lambda *a, **k: False)
     assert _sev(_row(reconcile={"status": "FAIL", "detail": "{}"}), "FEED_RECONCILE_FAIL") == ["CRITICAL"]
     assert _sev(_row(tier="T2", reconcile={"status": "FAIL", "detail": "{}"}), "FEED_RECONCILE_FAIL") == ["WARN"]
     assert _sev(_row(reconcile={"status": "PASS", "detail": "{}"}), "FEED_RECONCILE_FAIL") == []
