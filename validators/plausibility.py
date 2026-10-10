@@ -214,6 +214,32 @@ def pt_implausible_sql(pt_col, close_col) -> str:
     return f"({pt_col} > {hi} * {close_col} OR {pt_col} < {lo} * {close_col})"
 
 
+def pt_outside_range(mean, low, high) -> bool:
+    """True when an average target sits outside the low-high range it was published with.
+
+    Part of the same stored-target rule (an average cannot lie outside its own range);
+    a missing bound is no evidence either way."""
+    try:
+        m = float(mean)
+    except (TypeError, ValueError):
+        return False
+    if m != m:
+        return False
+    for bound, outside in ((low, lambda b: m < b), (high, lambda b: m > b)):
+        try:
+            b = float(bound)
+        except (TypeError, ValueError):
+            continue
+        if b == b and outside(b):
+            return True
+    return False
+
+
+def pt_outside_range_sql(mean_col, low_col, high_col) -> str:
+    """The same predicate in SQL (NULL bounds never trigger it)."""
+    return f"({mean_col} < {low_col} OR {mean_col} > {high_col})"
+
+
 def record_pt_plausibility_fail(sid, snapshot_date, reason, source_table="consensus_signals"):
     """Record a per-sid gate_2_plausibility=0 verdict for an implausible PT.
 

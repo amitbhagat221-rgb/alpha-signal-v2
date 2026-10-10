@@ -31,6 +31,7 @@ import argparse
 import os
 import smtplib
 import sys
+import time
 import urllib.request
 from datetime import date
 from email.mime.multipart import MIMEMultipart
@@ -257,7 +258,13 @@ def main():
                         help="List every check by question, with what it means and its status now")
     args = parser.parse_args()
 
+    # Progress first: a silent start looks like a hang (the ops page serves the same facts
+    # from its 6h slow-table memo, which db.data_health now keeps on disk for this process too).
+    t0 = time.time()
+    print("gathering health facts (read-only, slow-table counts reused from the last scan)...",
+          file=sys.stderr, flush=True)
     state = gather()
+    print(f"  gathered in {time.time() - t0:.0f}s", file=sys.stderr, flush=True)
 
     # Always print terminal version
     print(format_catalog(state) if args.catalog else format_terminal(state))

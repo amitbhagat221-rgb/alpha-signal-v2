@@ -1155,8 +1155,40 @@ _SLOW_SCAN_TTL = 6 * 3600
 _slow_scans: dict = {}
 
 
+def _slow_scan_file():
+    """Where the slow-table counts are remembered across processes (beside the DB)."""
+    return Path(DB_PATH).parent / ".slow_scan_cache.json"
+
+
+def _load_slow_scans():
+    """Merge the on-disk memo into `_slow_scans`: a fresh CLI process (tools.health_report,
+    /catchup) reuses the counts the cockpit or the last run measured instead of recounting
+    48M-row tables (>5 min under a heavy writer, 2026-10-10). Missing / unreadable = no memo."""
+    import json
+    try:
+        disk = json.loads(_slow_scan_file().read_text())
+        for tbl, (ts, count, stock_count) in disk.items():
+            if tbl not in _slow_scans or _slow_scans[tbl][0] < ts:
+                _slow_scans[tbl] = (ts, (count, stock_count))
+    except (OSError, ValueError, TypeError):
+        pass
+
+
+def _save_slow_scans():
+    import json
+    try:
+        data = {t: [ts, c, sc] for t, (ts, (c, sc)) in _slow_scans.items()}
+        tmp = _slow_scan_file().with_suffix(".tmp")
+        tmp.write_text(json.dumps(data))
+        tmp.replace(_slow_scan_file())
+    except OSError:
+        pass                                    # the memo is an optimisation, never a failure
+
+
 def _data_health_impl(slow_ttl=0):
     meta = table_step_meta()
+    if slow_ttl:
+        _load_slow_scans()
 
     # Dynamic codebase lineage scan
     refs = get_db_references()
@@ -1175,6 +1207,7 @@ def _data_health_impl(slow_ttl=0):
         except Exception:
             universe_size = 0
         scanned = {}
+        new_slow = False
         for tbl in tables:
             # The date range is always read live (freshness verdicts depend on it, ~1-3 s
             # even on the big tables); only the row / sid counts are remembered.
@@ -1196,6 +1229,10 @@ def _data_health_impl(slow_ttl=0):
             scanned[tbl] = (count, earliest, latest, date_span, stock_count)
             if _time_module.time() - t_scan > _SLOW_SCAN_S:
                 _slow_scans[tbl] = (_time_module.time(), (count, stock_count))
+                new_slow = True
+
+    if slow_ttl and new_slow:
+        _save_slow_scans()
 
     for tbl in tables:
         count, earliest, latest, date_span, stock_count = scanned[tbl]

@@ -26,7 +26,7 @@ violating (`critical_pct`, default 10; `warn_pct`, default 1; below = INFO).
 from checks.ranges import PICKABLE_TIERS
 from checks import CRITICAL, WARN
 from checks import model
-from validators.plausibility import pt_implausible_sql
+from validators.plausibility import pt_implausible_sql, pt_outside_range_sql
 
 # Every stored analyst target next to the latest close; {bad} is the rule being counted.
 _TARGETS_SQL = """
@@ -35,7 +35,7 @@ _TARGETS_SQL = """
         WHERE (sid, date) IN (SELECT sid, MAX(date) FROM stock_prices GROUP BY sid)
     ),
     judged AS (
-        SELECT ac.sid, ac.price_target AS pt, lp.close, ({bad}) AS bad
+        SELECT ac.sid, ac.price_target AS pt, lp.close, COALESCE({bad}, 0) AS bad
         FROM analyst_consensus ac JOIN latest_px lp ON ac.sid = lp.sid
         WHERE ac.has_analyst_data = 1 AND ac.price_target IS NOT NULL AND lp.close > 0
     )
@@ -165,15 +165,17 @@ CHECKS = [
         "table": "analyst_consensus",
         "column": "price_target",
         "theme": "correct",
-        "message": "Analyst price targets that cannot be real: more than 3x, or under a third of, the share price",
-        "why": "A broker call from before a split or a crash, or Yahoo garbage for a thinly covered small cap. "
+        "message": "Analyst price targets that cannot be real: more than 3x, or under a third of, the share price, or an average outside its own low-high range",
+        "why": "A broker call from before a split or a crash, or Yahoo garbage for a thinly covered small cap; or an "
+               "average written by one source next to a range from another (178 rows, 2026-10). "
                "The upside shown for that stock is wrong.",
         "fix": "Both writers refuse these (the Yahoo sweep and the broker aggregate share "
                "validators.plausibility.PT_CLOSE_RATIO), so a few rows mean a price moved since the last write: "
                "`python -m sources.moneycontrol_recos --aggregate-only` rebuilds. Many rows mean a writer lost its gate.",
         "critical_pct": 10,
         "warn_pct": 0.5,
-        "sql": _TARGETS_SQL.format(bad=pt_implausible_sql("ac.price_target", "lp.close")),
+        "sql": _TARGETS_SQL.format(bad=pt_implausible_sql("ac.price_target", "lp.close") + " OR "
+                                       + pt_outside_range_sql("ac.price_target", "ac.price_target_low", "ac.price_target_high")),
     },
     {
         "code": "ANALYST_TARGET_IS_PRICE",
