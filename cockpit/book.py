@@ -90,9 +90,12 @@ def left_flag(info, pick_date):
     return f"left top picks {d.day} {d:%b}"
 
 
-def held_status(left_top, below_exit):
-    """(word, colour) for a held name: in the top picks, held inside the band, or below the sell line.
+def held_status(left_top, below_exit, ranked=True):
+    """(word, colour) for a held name: in the top picks, held inside the band, below the sell line,
+    or not ranked today (no rank, so neither inside the band nor below the line).
     The colour is never the only signal; the word says the same."""
+    if not ranked:
+        return ("Not ranked today", "amber")
     if not left_top:
         return ("In top picks", "green")
     return ("Below sell line", "red") if below_exit else ("Held in band", "amber")
@@ -123,13 +126,14 @@ def get_book():
             "pt_upside_pct": _num(r.get("pt_upside_median_pct")), "n_analysts": _num(r.get("n_analysts"), int),
             "left_top": left_flag(hist.get(r["sid"]), pick_date),
         })
-        out[-1]["below_exit"] = out[-1]["rank"] is None or out[-1]["rank"] > exit_rank
-        out[-1]["status"] = held_status(out[-1]["left_top"], out[-1]["below_exit"])
+        out[-1]["below_exit"] = out[-1]["rank"] is not None and out[-1]["rank"] > exit_rank
+        out[-1]["status"] = held_status(out[-1]["left_top"], out[-1]["below_exit"], out[-1]["rank"] is not None)
         out[-1]["tier_size"] = sizes.get(r["cap_tier"])
     out.sort(key=lambda x: -x["weight_pct"])
     return {
         "asof": sb["asof_date"], "pick_date": pick_date, "rows": out, "n": len(out),
         "n_left": sum(1 for r in out if r["left_top"]), "n_below_exit": sum(r["below_exit"] for r in out),
+        "n_unranked": sum(r["rank"] is None for r in out),
         "exit_rank": exit_rank,
         "tier_pct": _by_display(sb["tier_weights"]), "top_n": {t: _top_n(t) for t in views.display_tiers()},
         "unproven": views.unproven_tiers(),

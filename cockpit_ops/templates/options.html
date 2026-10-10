@@ -60,7 +60,7 @@
       <td>{{ t.underlying }}</td><td>{{ t.entry_date }}</td><td>{{ t.expiry }}</td>
       <td>{{ "%.0f"|format(t.short_call) }} CE {{ t.call_entry }} · {{ "%.0f"|format(t.short_put) }} PE {{ t.put_entry }}</td>
       <td>{{ "%.2f"|format(t.credit_pts) }} × {{ t.lot }} = ₹{{ "{:,.0f}".format(t.credit_pts * t.lot) }}</td>
-      <td>₹{{ "{:,.0f}".format(t.margin_rs) }} <span class="ob-muted">{{ t.margin_source }}</span></td>
+      <td>₹{{ "{:,.0f}".format(t.margin_rs) }} <span class="ob-muted">{{ {"12pct": "estimate: 12% of notional", "kite": "Kite quote"}.get(t.margin_source, t.margin_source) }}</span></td>
       {% if t.status == 'SETTLED' %}
       <td>settled at {{ "{:,.2f}".format(t.settle_index) }}</td>
       <td class="{% if t.net_rs > 0 %}ob-ok{% else %}ob-bad{% endif %}">₹{{ "{:+,.0f}".format(t.net_rs) }} ({{ "%+.2f"|format(100 * t.ret_on_margin) }}%)</td>

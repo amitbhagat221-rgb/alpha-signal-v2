@@ -74,7 +74,8 @@
 <div class="card" style="margin-bottom: 16px; border-left: 4px solid var(--amber);">
     <b>{{ book.n_left }} of {{ book.n }} held names are no longer in today's top picks.</b>
     <span class="bk-sub">{% if book.n_below_exit %}{{ book.n_below_exit }} {{ 'is' if book.n_below_exit == 1 else 'are' }} below the sell line (rank {{ book.exit_rank }}) today and
-        go if they stay there; the rest stay until they cross it.{% else %}None is below the sell line (rank {{ book.exit_rank }}), so none is due to be sold.{% endif %}</span>
+        go if they stay there; the rest stay until they cross it.{% else %}None is below the sell line (rank {{ book.exit_rank }}), so none is due to be sold.{% endif %}
+        {% if book.n_unranked %}{{ book.n_unranked }} {{ 'has' if book.n_unranked == 1 else 'have' }} no rank today ("Not ranked today"); that is not a sell signal by itself.{% endif %}</span>
 </div>
 {% endif %}
 
@@ -201,7 +202,7 @@
     <h2 class="section-title">By tier and window</h2>
     <p class="section-desc">Average forward return in %, weekday pick days only. Rows with fewer than {{ track.min_dates }} pick days are dimmed.
         Windows are trading days:
-        {% for w in s.windows_status %}{{ w.window_days }}{% if w.status != 'live' %} ({% if w.first_outcome_eta %}first results about {{ w.first_outcome_eta }}{% else %}maturing{% endif %}){% endif %}{% if not loop.last %}, {% endif %}{% endfor %}.</p>
+        {% for w in s.windows_status %}{{ w.window_days }}{% if w.status != 'live' %} ({% if w.first_outcome_eta %}first results about {{ w.first_outcome_eta|short_date }}{% else %}maturing{% endif %}){% endif %}{% if not loop.last %}, {% endif %}{% endfor %}.</p>
     <div class="table-wrap">
     <table class="bk-tbl" style="min-width: 760px;">
         <thead><tr>
