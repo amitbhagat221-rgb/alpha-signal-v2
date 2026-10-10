@@ -2,6 +2,7 @@
    Data: cockpit/book.py. Tabs: pages.py (book, zerodha, risk, track-record). #}
 {% extends "base.html" %}
 {% from "_components.html" import tab_bar, tier_pill, unproven_pill %}
+{% from "_pb_macros.html" import th %}
 {% block title %}{{ page_title("Book") }}{% endblock %}
 
 {% block content %}
@@ -82,35 +83,35 @@
 </div>
 {% endif %}
 
-<div class="card" style="padding: 0; overflow: hidden;">
+<div class="card" style="padding: 0; overflow: hidden;" x-data="pbList()">
     <div class="table-wrap">
     <table class="bk-tbl">
         <thead><tr>
-            <th>Stock</th><th class="bk-hide-sm">Tier</th>
-            <th class="num">Weight %</th>
-            <th class="num bk-hide-sm">Score /100</th>
-            <th class="num">Rank</th>
-            <th class="num">Upside to target %</th>
-            <th class="bk-hide-sm">Status</th>
+            {{ th('Stock') }}{{ th('Tier', 'bk-hide-sm') }}
+            {{ th('Weight %', 'num') }}
+            {{ th('Score /100', 'num bk-hide-sm') }}
+            {{ th('Rank', 'num') }}
+            {{ th('Upside to target %', 'num') }}
+            {{ th('Status', 'bk-hide-sm') }}
         </tr></thead>
         <tbody>
         {% for r in book.rows %}
-        <tr>
-            <td><a href="/stocks/{{ r.sid }}">{{ r.ticker }}</a><div class="bk-sub bk-hide-sm">{{ r.name }}</div>
+        <tr data-row>
+            <td data-v="{{ r.ticker|lower }}"><a href="/stocks/{{ r.sid }}">{{ r.ticker }}</a><div class="bk-sub bk-hide-sm">{{ r.name }}</div>
                 <div class="bk-only-sm" style="display: none;">{{ tier_pill(r.cap_tier) }} <span class="pill pill-{{ r.status[1] }}">{{ r.status[0] }}</span></div></td>
-            <td class="bk-hide-sm">{{ tier_pill(r.cap_tier) }}</td>
+            <td class="bk-hide-sm" data-v="{{ display_tiers().index(r.cap_tier) if r.cap_tier in display_tiers() else '' }}">{{ tier_pill(r.cap_tier) }}</td>
             <td class="num">{{ r.weight_pct|pct(1) }}</td>
             <td class="num bk-hide-sm {{ 'score-green' if r.score is not none and r.score >= 70 else ('score-amber' if r.score is not none and r.score >= 50 else 'score-red') }}">{{ r.score if r.score is not none else '—' }}</td>
-            <td class="num {{ 'score-red' if r.below_exit else '' }}">{{ ('#' ~ r.rank) if r.rank is not none else '—' }}{% if r.rank is not none %}<div class="bk-sub bk-hide-sm">of {{ r.tier_size|count }}</div>{% endif %}</td>
-            <td class="num {{ r.pt_upside_pct|tone(zero='score-red') }}">{{ r.pt_upside_pct|pct(0, signed=True) }}{% if r.n_analysts %}<div class="bk-sub">{{ r.n_analysts }} analyst{{ '' if r.n_analysts == 1 else 's' }}</div>{% endif %}</td>
-            <td class="bk-hide-sm"><span class="pill pill-{{ r.status[1] }}">{{ r.status[0] }}</span>{% if r.left_top %}<div class="bk-sub">{{ r.left_top }}</div>{% endif %}</td>
+            <td class="num {{ 'score-red' if r.below_exit else '' }}" data-v="{{ r.rank if r.rank is not none else '' }}">{{ ('#' ~ r.rank) if r.rank is not none else '—' }}{% if r.rank is not none %}<div class="bk-sub bk-hide-sm">of {{ r.tier_size|count }}</div>{% endif %}</td>
+            <td class="num {{ r.pt_upside_pct|tone(zero='score-red') }}" data-v="{{ r.pt_upside_pct if r.pt_upside_pct is not none else '' }}">{{ r.pt_upside_pct|pct(0, signed=True) }}{% if r.n_analysts %}<div class="bk-sub">{{ r.n_analysts }} analyst{{ '' if r.n_analysts == 1 else 's' }}</div>{% endif %}</td>
+            <td class="bk-hide-sm" data-v="{{ r.status[0]|lower }}"><span class="pill pill-{{ r.status[1] }}">{{ r.status[0] }}</span>{% if r.left_top %}<div class="bk-sub">{{ r.left_top }}</div>{% endif %}</td>
         </tr>
         {% endfor %}
         </tbody>
     </table>
     </div>
 </div>
-<p class="bk-sub" style="margin-top: 8px;">Weights as of {{ book.asof|short_date }}; score, rank and status as of {{ book.pick_date|short_date }}. Rank is within the tier. Upside is to the median target = the middle of the analysts' 12-month targets. Today's picks: <a href="/" style="color: var(--accent);">Today</a>.</p>
+<p class="bk-sub" style="margin-top: 8px;">Weights as of {{ book.asof|short_date }}; score, rank and status as of {{ book.pick_date|short_date }}. Click a column heading to sort. Rank is within the tier. Upside is to the median target = the middle of the analysts' 12-month targets. Today's picks: <a href="/" style="color: var(--accent);">Today</a>.</p>
 {% else %}
 <div class="card"><p class="u-muted">No sized book yet. It is built each morning after the daily picks; check back after the next run.</p></div>
 {% endif %}
@@ -125,7 +126,11 @@
         <div><div class="bk-lbl">Invested</div><div class="bk-big mono">{{ z.cost|inr }}</div></div>
         <div><div class="bk-lbl">Unrealised gain</div><div class="bk-big mono {{ z.pnl|tone }}">{{ z.pnl|inr }} <span style="font-size: 14px;">{{ z.pnl_pct|pct(1, signed=True) }}</span></div></div>
         <div><div class="bk-lbl">Last day</div><div class="bk-big mono {{ z.day|tone }}">{{ z.day|inr }} <span style="font-size: 14px;">{{ z.day_pct|pct(2, signed=True) }}</span></div></div>
+        <div><div class="bk-lbl">Expected 1-year price return</div><div class="bk-big mono {{ z.er.er|tone(zero='score-red') }}">{{ z.er.er|pct(1, signed=True) }}</div></div>
     </div>
+    <p class="bk-note">Expected return: value-weighted upside to the {{ z.er_basis }}, {{ z.er.n }} of {{ z.n }} holdings covered ({{ z.er.cover_pct|pct(0) }} of the account's value), the same rule as the
+        model book ({{ z.book_er|pct(1, signed=True) }}). Holdings with no target (ETFs, the gold bond, stocks no analyst covers) count as no opinion; counted at 0% instead, the account is
+        <b class="mono">{{ z.er.er_all|pct(1, signed=True) }}</b>. No dividends: a guide, not a forecast.</p>
     <p class="bk-note"><b>{{ z.n }} holdings</b>: {{ z.n_stocks }} stocks the model ranks, {{ z.n_other }} ETFs or bonds it does not.
         Of the stocks, {{ z.n_top }} are in the top fifth of their tier today, {{ z.n_bottom }} in the bottom fifth{% if z.n_unranked %}, {{ z.n_unranked }} not ranked today{% endif %}.</p>
     <p class="bk-note">Snapshot from Kite at {{ z.snapshot_time }} on {{ z.asof|long_date }}; model ranks as of {{ z.pick_date|short_date }}.
@@ -142,38 +147,41 @@
     {% endif %}
 </div>
 
-<div class="card" style="padding: 0; overflow: hidden;">
+<div class="card" style="padding: 0; overflow: hidden;" x-data="pbList()">
     <div class="table-wrap">
     <table class="bk-tbl">
         <thead><tr>
-            <th>Holding</th><th class="bk-hide-sm">Tier</th>
-            <th class="num">Value</th>
-            <th class="num bk-hide-sm">Weight %</th>
-            <th class="num">Gain %</th>
-            <th class="num bk-hide-sm">Last day %</th>
-            <th class="num">Rank</th>
-            <th class="bk-hide-sm">Model's view</th>
+            {{ th('Holding') }}{{ th('Tier', 'bk-hide-sm') }}
+            {{ th('Value', 'num') }}
+            {{ th('Weight %', 'num bk-hide-sm') }}
+            {{ th('Gain %', 'num') }}
+            {{ th('Last day %', 'num bk-hide-sm') }}
+            {{ th('Upside to target %', 'num bk-hide-sm') }}
+            {{ th('Rank', 'num') }}
+            {{ th("Model's view", 'bk-hide-sm') }}
         </tr></thead>
         <tbody>
         {% for r in z.rows %}
-        <tr>
-            <td>{% if r.sid %}<a href="/stocks/{{ r.sid }}">{{ r.ticker }}</a>{% else %}<b>{{ r.ticker }}</b>{% endif %}
+        <tr data-row>
+            <td data-v="{{ r.ticker|lower }}">{% if r.sid %}<a href="/stocks/{{ r.sid }}">{{ r.ticker }}</a>{% else %}<b>{{ r.ticker }}</b>{% endif %}
                 <div class="bk-sub bk-hide-sm">{{ r.quantity|count }} at {{ r.avg_price|inr(2) }}, now {{ r.last_price|inr(2) }}</div>
                 <div class="bk-only-sm" style="display: none;"><span class="pill pill-{{ r.view[1] }}">{{ r.view[0] }}</span></div></td>
-            <td class="bk-hide-sm">{% if r.cap_tier %}{{ tier_pill(r.cap_tier, true) }}{% else %}<span class="u-muted">—</span>{% endif %}</td>
-            <td class="num mono">{{ r.value|inr }}</td>
+            <td class="bk-hide-sm" data-v="{{ display_tiers().index(r.cap_tier) if r.cap_tier in display_tiers() else '' }}">{% if r.cap_tier %}{{ tier_pill(r.cap_tier, true) }}{% else %}<span class="u-muted">—</span>{% endif %}</td>
+            <td class="num mono" data-v="{{ r.value }}">{{ r.value|inr }}</td>
             <td class="num bk-hide-sm">{{ r.weight_pct|pct(1) }}</td>
-            <td class="num {{ r.pnl_pct|tone }}">{{ r.pnl_pct|pct(1, signed=True) }}<div class="bk-sub">{{ r.pnl|inr }}</div></td>
+            <td class="num {{ r.pnl_pct|tone }}" data-v="{{ r.pnl_pct if r.pnl_pct is not none else '' }}">{{ r.pnl_pct|pct(1, signed=True) }}<div class="bk-sub">{{ r.pnl|inr }}</div></td>
             <td class="num bk-hide-sm {{ r.day_pct|tone }}">{{ r.day_pct|pct(2, signed=True) }}</td>
-            <td class="num">{{ ('#' ~ r.rank|count) if r.rank is not none else '—' }}{% if r.rank is not none %}<div class="bk-sub">of {{ r.tier_size|count }}</div>{% endif %}</td>
-            <td class="bk-hide-sm"><span class="pill pill-{{ r.view[1] }}">{{ r.view[0] }}</span>{% if r.score is not none %}<div class="bk-sub">score {{ r.score }}/100</div>{% endif %}</td>
+            <td class="num bk-hide-sm {{ r.pt_upside_pct|tone(zero='score-red') }}" data-v="{{ r.pt_upside_pct if r.pt_upside_pct is not none else '' }}">{{ r.pt_upside_pct|pct(0, signed=True) }}{% if r.n_analysts %}<div class="bk-sub">{{ r.n_analysts }} analyst{{ '' if r.n_analysts == 1 else 's' }}</div>{% endif %}</td>
+            <td class="num" data-v="{{ r.rank_pct if r.rank_pct is not none else '' }}">{{ ('#' ~ r.rank|count) if r.rank is not none else '—' }}{% if r.rank is not none %}<div class="bk-sub">of {{ r.tier_size|count }}</div>{% endif %}</td>
+            <td class="bk-hide-sm" data-v="{{ r.score if r.score is not none else '' }}"><span class="pill pill-{{ r.view[1] }}">{{ r.view[0] }}</span>{% if r.score is not none %}<div class="bk-sub">score {{ r.score }}/100</div>{% endif %}</td>
         </tr>
         {% endfor %}
         </tbody>
     </table>
     </div>
 </div>
-<p class="bk-sub" style="margin-top: 8px;">Value and gain at Kite's last price (unrealised, before tax and charges). Weight is the share of the account's value. Rank is within the tier, from the model's daily ranking; the top and bottom fifth are the first and last 20% of the tier. ETFs and gold bonds are outside the model's universe.</p>
+<p class="bk-sub" style="margin-top: 8px;">Value and gain at Kite's last price (unrealised, before tax and charges). Weight is the share of the account's value. Rank is within the tier, from the model's daily ranking; the top and bottom fifth are the first and last 20% of the tier.
+    Click a column heading to sort: Rank sorts by place in the tier (so tiers compare), Model's view by score. Upside is to the median analyst target from the latest close. ETFs and gold bonds are outside the model's universe.</p>
 {% else %}
 <div class="card"><p class="u-muted">No Zerodha snapshot yet. It is taken when you log in to Kite.</p></div>
 {% endif %}

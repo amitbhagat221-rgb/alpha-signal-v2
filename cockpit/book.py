@@ -169,6 +169,20 @@ def model_view(in_book, in_universe, rank, tier_size, top_n):
     return ("Middle of tier", "muted")
 
 
+def expected_return(rows):
+    """The account's expected ~1-year price return, by the model book's rule (api.get_sized_book):
+    value-weighted upside to the median analyst target over the holdings that HAVE a target
+    (no target = no opinion, not 0%). Also the same sum with uncovered value at 0%.
+    rows: [{value, pt_upside_pct}] -> {er, n, cover_pct, er_all} (er None when nothing is covered)."""
+    total = sum(r["value"] for r in rows)
+    cov = [r for r in rows if r["pt_upside_pct"] is not None and r["value"]]
+    cov_v = sum(r["value"] for r in cov)
+    wu = sum(r["value"] * r["pt_upside_pct"] for r in cov)
+    return {"er": round(wu / cov_v, 1) if cov_v else None, "n": len(cov),
+            "cover_pct": round(cov_v * 100 / total, 0) if total else None,
+            "er_all": round(wu / total, 1) if total and cov_v else None}
+
+
 @_ttl_cache(60)
 def get_zerodha():
     """The latest Kite snapshot of the real demat holdings, each with the model's view; None before the first."""
@@ -183,6 +197,7 @@ def get_zerodha():
     sb = api.get_sized_book() or {"rows": []}
     book_sids = {r["sid"] for r in sb["rows"]}
     total = float((h["quantity"] * h["last_price"]).sum()) or 1.0
+    ac = api.get_analyst_consensus_batch([s for s in h["sid"].dropna()])
     rows = []
     for r in h.to_dict("records"):
         sid = r["sid"]
@@ -198,6 +213,9 @@ def get_zerodha():
             "day_pct": _num(r["day_change_pct"]),
             "rank": rank, "tier_size": sizes.get(tier), "in_book": sid in book_sids,
             "score": None if t is None else int(round(t["final_score"] * 100)),
+            "rank_pct": None if rank is None or not sizes.get(tier) else round(rank * 100 / sizes[tier], 1),
+            "pt_upside_pct": _num(ac.get(sid, {}).get("pt_upside_median_pct")) if sid else None,
+            "n_analysts": _num(ac.get(sid, {}).get("total_analysts"), int) if sid else None,
             "view": model_view(sid in book_sids, sid is not None, rank, sizes.get(tier),
                                _top_n(tier) if tier in config.TIERS else 0),
         })
@@ -217,6 +235,8 @@ def get_zerodha():
         "n_top": sum(w in ("In model book", "In top picks", "Top fifth of tier") for w in words),
         "n_bottom": words.count("Bottom fifth of tier"), "n_unranked": words.count("Not ranked today"),
         "login_page": config.KITE_LOGIN_PAGE, "unproven": views.unproven_tiers(),
+        "er": expected_return(rows), "er_basis": "median analyst price target",
+        "book_er": sb.get("expected_return_1y"),
     }
 
 

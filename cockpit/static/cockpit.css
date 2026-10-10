@@ -1641,3 +1641,10 @@ body.is-preview .main-content { padding-top: 52px; }
 .hm-s2, .hm-key.hm-s2 { background: color-mix(in srgb, var(--amber) 28%, transparent); }
 .hm-s1, .hm-key.hm-s1 { background: color-mix(in srgb, var(--red) 28%, transparent); }
 .hm-na,  .hm-key.hm-na  { background: var(--bg-card-hover); color: var(--text-secondary); }
+
+/* sortable column headers (_pb_macros.th + pbList() in cockpit.js): Playbooks, /book */
+.pb-sort { all: unset; cursor: pointer; text-transform: inherit; letter-spacing: inherit; white-space: nowrap; }
+.pb-sort:hover, .pb-sort:focus-visible { color: var(--text-primary); }
+.pb-sort:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
+th[aria-sort="ascending"] .pb-sort::after { content: " ▲"; font-size: 10px; }
+th[aria-sort="descending"] .pb-sort::after { content: " ▼"; font-size: 10px; }

@@ -114,3 +114,12 @@ def test_kite_holdings_rows_map_tickers_and_add_t1():
     df = kite_holdings.rows_from_holdings(h, {"RADICO": "RADC"}, "2026-10-10", "2026-10-10T10:15:00+00:00")
     assert df["tradingsymbol"].tolist() == ["RADICO", "GOLDBEES"]
     assert df["quantity"].tolist() == [50, 588] and df["sid"].tolist()[0] == "RADC" and df["sid"].isna().tolist()[1]
+
+
+def test_zerodha_expected_return_is_value_weighted_over_covered():
+    """Same rule as the model book: weight by value over holdings with a target; uncovered = no opinion.
+    er_all shows the same sum with the uncovered value at 0%."""
+    rows = [{"value": 300.0, "pt_upside_pct": 10.0}, {"value": 100.0, "pt_upside_pct": -10.0},
+            {"value": 600.0, "pt_upside_pct": None}]
+    assert book.expected_return(rows) == {"er": 5.0, "n": 2, "cover_pct": 40.0, "er_all": 2.0}
+    assert book.expected_return([{"value": 5.0, "pt_upside_pct": None}])["er"] is None

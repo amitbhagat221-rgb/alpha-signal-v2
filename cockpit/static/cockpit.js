@@ -219,3 +219,46 @@ function searchApp(base) {
     }
     ['mouseover', 'click', 'focusin', 'touchend'].forEach(t => document.addEventListener(t, settle, true));
 })();
+
+// Filter, tile-filter and sort for a list of [data-row] elements inside the component
+// (x-data="pbList()"; headers from _pb_macros.th). Playbooks and /book; a cell's data-v overrides its text as the sort key.
+function pbList() {
+    const val = c => {
+        const t = (c.dataset.v ?? c.textContent).trim().replace(/[−–]/g, '-').replace(/,/g, '');
+        if (!t || t === '—' || t === '-') return null;
+        const m = t.match(/^[+-]?\d+(\.\d+)?/);
+        return m ? parseFloat(m[0]) : t.toLowerCase();
+    };
+    return {
+        q: '', f: '', shown: null,
+        rows() { return [...this.$root.querySelectorAll('[data-row]')]; },
+        init() { this.shown = this.rows().length; },
+        toggle(k) { this.f = this.f === k ? '' : k; this.apply(); },
+        apply() {
+            const q = this.q.trim().toLowerCase();
+            let n = 0;
+            for (const r of this.rows()) {
+                const ok = (!q || r.textContent.toLowerCase().includes(q)) && (!this.f || (r.dataset.k || '').split(' ').includes(this.f));
+                r.hidden = !ok;
+                if (ok) n++;
+            }
+            this.shown = n;
+        },
+        sort(th) {
+            const dir = th.getAttribute('aria-sort') === 'ascending' ? -1 : 1;
+            th.closest('tr').querySelectorAll('th').forEach(h => h.setAttribute('aria-sort', 'none'));
+            th.setAttribute('aria-sort', dir === 1 ? 'ascending' : 'descending');
+            const i = th.cellIndex, rows = this.rows();
+            if (!rows.length) return;
+            const body = rows[0].parentNode;
+            const key = new Map(rows.map(r => [r, val(r.cells[i])]));
+            rows.sort((a, b) => {
+                const x = key.get(a), y = key.get(b);
+                if (x === null || y === null) return (x === null) - (y === null);
+                const c = typeof x === 'number' && typeof y === 'number' ? x - y : String(x).localeCompare(String(y));
+                return c * dir;
+            });
+            rows.forEach(r => body.appendChild(r));
+        },
+    };
+}
