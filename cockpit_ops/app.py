@@ -24,7 +24,7 @@ from starlette.middleware.gzip import GZipMiddleware
 
 from webauth import LoginRequired
 from preview import PreviewReadOnly, add_redirects
-from cockpit._shared import COCKPIT_STATIC, make_templates, nav_model, prewarm
+from cockpit._shared import CachedStatic, COCKPIT_STATIC, make_templates, nav_model, prewarm
 from cockpit_ops import api, pages
 
 OPS_DIR = Path(__file__).resolve().parent
@@ -37,7 +37,7 @@ app.add_middleware(GZipMiddleware, minimum_size=1024)
 app.add_middleware(LoginRequired, app_name="Ops console")  # webauth.py — password login (review F5)
 app.add_middleware(PreviewReadOnly)                        # preview.py — refuses writes when COCKPIT_PREVIEW=1
 # Shared static assets from the main cockpit. No need to duplicate CSS/JS.
-app.mount("/static", StaticFiles(directory=COCKPIT_STATIC), name="static")
+app.mount("/static", CachedStatic(directory=COCKPIT_STATIC), name="static")   # cache rules: _shared.CachedStatic
 
 # Ops pages first, then cockpit/templates for the shared base.html /
 # _components.html / _icons.html (single copies — the ops forks went stale).

@@ -380,6 +380,23 @@ def make_templates(dirs, nav=None, role="main"):
     return templates
 
 
+from fastapi.staticfiles import StaticFiles as _StaticFiles
+
+
+class CachedStatic(_StaticFiles):
+    """/static with explicit cache rules. A file referenced with ?v=<mtime> (asset_version /
+    asset_url / vendor) is immutable and cached for a year; anything without ?v= is
+    revalidated on every load. Without these headers browsers cached the untagged
+    cockpit.js heuristically for days after a deploy, so a page could run new template code
+    against an old script and every chart stayed blank (2026-10-10)."""
+
+    async def get_response(self, path, scope):
+        resp = await super().get_response(path, scope)
+        versioned = b"v=" in (scope.get("query_string") or b"")
+        resp.headers["Cache-Control"] = "public, max-age=31536000, immutable" if versioned else "no-cache"
+        return resp
+
+
 def prewarm(warmers, label="cache-warm", max_workers=4):
     """Background-warm expensive caches in PARALLEL so wall-clock matches the
     slowest single warmer rather than the sum. `warmers` is [(name, fn), ...].

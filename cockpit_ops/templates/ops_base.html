@@ -8,7 +8,7 @@
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23ef4444'/%3E%3Ctext x='16' y='22' font-size='20' text-anchor='middle' fill='white' font-family='sans-serif' font-weight='700'%3E%E2%9A%99%3C/text%3E%3C/svg%3E">
     {# Installable app (plan 0019): manifest + icons + a service worker; the worker registers only over HTTPS. #}
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content">
-    <script src="/static/lazy-tab.js"></script>
+    <script src="/static/lazy-tab.js?v={{ asset_version('lazy-tab.js') }}"></script>
     <style>.lazy-err { padding: 12px 16px; background: var(--red-bg); border-left: 3px solid var(--red); border-radius: 6px; font-size: 12px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }</style>
     <link rel="manifest" href="/static/boardroom/manifest.webmanifest">
     <meta name="theme-color" content="#0a0a0f">

@@ -21,14 +21,14 @@ from preview import PreviewReadOnly, add_redirects
 import config
 import views
 from cockpit import api, book, model, pages, today, stocks as stocks_data
-from cockpit._shared import COCKPIT_STATIC, COCKPIT_TEMPLATES, make_templates, nav_model, prewarm
+from cockpit._shared import CachedStatic, COCKPIT_STATIC, COCKPIT_TEMPLATES, make_templates, nav_model, prewarm
 
 app = FastAPI(title="Alpha Signal Cockpit")
 # Gzip every response > 1KB (the long pages are 100s of KB of HTML).
 app.add_middleware(GZipMiddleware, minimum_size=1024)
 app.add_middleware(LoginRequired, app_name="Cockpit")     # webauth.py — password login (review F5)
 app.add_middleware(PreviewReadOnly)                       # preview.py — refuses writes when COCKPIT_PREVIEW=1
-app.mount("/static", StaticFiles(directory=COCKPIT_STATIC), name="static")
+app.mount("/static", CachedStatic(directory=COCKPIT_STATIC), name="static")   # cache rules: _shared.CachedStatic
 
 templates = make_templates([COCKPIT_TEMPLATES], nav=nav_model(pages.PAGES, pages.OTHER_APP, pages.BRAND))
 
