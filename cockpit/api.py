@@ -438,49 +438,6 @@ def get_financial_management(sid):
     return r
 
 
-def get_portfolio_analytics(portfolio_data, regime):
-    """A11: Portfolio-level analytics."""
-    all_stocks = [s for stocks in portfolio_data.values() for s in stocks]
-
-    if not all_stocks:
-        return {}
-
-    # Sector allocation
-    sector_weights = {}
-    for s in all_stocks:
-        sec = s.get("sector", "Unknown")
-        sector_weights[sec] = sector_weights.get(sec, 0) + s.get("weight", 0)
-    sector_alloc = sorted(sector_weights.items(), key=lambda x: -x[1])
-
-    # Expected return from analyst consensus
-    upsides = []
-    ac_by_sid = get_analyst_consensus_batch([s["sid"] for s in all_stocks])
-    for s in all_stocks:
-        ac = ac_by_sid.get(s["sid"], {})
-        if ac.get("pt_upside_pct") is not None:
-            upsides.append(ac["pt_upside_pct"])
-
-    avg_upside = round(sum(upsides) / len(upsides), 1) if upsides else None
-    avg_score = round(sum(s.get("final_score", 0) for s in all_stocks) / len(all_stocks) * 100, 0) if all_stocks else 0
-
-    # Universe average score
-    univ = db.scalar("SELECT AVG(final_score) FROM daily_picks WHERE pick_date = ?", [latest_pick_date()])
-    univ_avg = round(univ * 100, 0) if univ else 0
-
-    return {
-        "sector_allocation": sector_alloc,
-        "expected_return": avg_upside,
-        "stocks_with_targets": len(upsides),
-        "avg_score": avg_score,
-        "universe_avg_score": univ_avg,
-        "score_premium": avg_score - univ_avg,
-        "total_stocks": len(all_stocks),
-        "top3_weight": sum(s.get("weight", 0) for s in sorted(all_stocks, key=lambda x: -x.get("weight", 0))[:3]),
-        # Plan 0005 Phase F: Barra-style risk decomp
-        "risk_decomp": get_risk_decomposition([s["sid"] for s in all_stocks]),
-    }
-
-
 def get_risk_decomposition(sids):
     """Barra-style portfolio risk decomposition for a given pick set.
 
@@ -1193,21 +1150,23 @@ def get_sized_book():
     tier_w = rows.groupby("cap_tier")["weight"].sum()
     hrp = config.PORTFOLIO["hrp"]
 
-    # Expected ~1Y return = book-weighted analyst-consensus PT upside, renormalised
-    # over COVERED names (uncovered = no opinion, not 0% — small-caps are often
-    # uncovered). Same source (get_analyst_consensus → pt_upside_pct, ADR-0037
-    # cleaned) the /portfolio "Expected Return" stat uses, so the two agree; here
-    # it's weight-weighted rather than the page's equal-weight. Analyst PTs are
-    # ~12-month targets → a ~1-year expected PRICE return (excludes dividends).
+    # Expected ~1Y return = book-weighted upside to the MEDIAN analyst target, renormalised
+    # over COVERED names (uncovered = no opinion, not 0%; small-caps are often uncovered).
+    # The median, not the average: the stored average sits outside the low-high range for
+    # 178 of 910 stocks. Targets are ~12-month, so this is a ~1-year PRICE return (no dividends).
     cov_w, cov_wu, cov_n = 0.0, 0.0, 0
     ac_by_sid = get_analyst_consensus_batch(rows["sid"].tolist())
+    pt_up, pt_n = [], []
     for r in rows.itertuples():
         ac = ac_by_sid.get(r.sid, {})
-        up = ac.get("pt_upside_pct")
+        up = ac.get("pt_upside_median_pct")
+        pt_up.append(up)
+        pt_n.append(ac.get("total_analysts"))
         if up is not None and r.weight:
             cov_w += r.weight
             cov_wu += r.weight * up
             cov_n += 1
+    rows["pt_upside_median_pct"], rows["n_analysts"] = pt_up, pt_n
     er_1y = round(cov_wu / cov_w, 1) if cov_w else None
 
     return {
@@ -1222,51 +1181,11 @@ def get_sized_book():
         "top_sectors": [(s, round(v * 100, 0)) for s, v in sector_w.head(4).items()],
         "cap_stock_pct": round(hrp["max_stock_weight"] * 100, 0),
         "cap_sector_pct": round(hrp["max_sector_weight"] * 100, 0),
-        "expected_return_1y": er_1y,                          # weighted PT upside, %
+        "expected_return_1y": er_1y,                          # weighted median-PT upside, %
+        "er_basis": "median analyst price target",
         "er_coverage_n": cov_n,                               # names with a target
         "er_coverage_weight_pct": round(cov_w * 100, 0),      # % of book weight covered
     }
-
-
-@_persisted_cache(60, name="get_portfolio_bundle")
-def get_portfolio_bundle():
-    """Single cacheable bundle for /portfolio render — picks + per-stock enrichment
-    + analytics in one disk slot, so first-click after restart is fast even though
-    we'd otherwise loop ~30 stocks × 2 API calls. 2026-05-25 perf pass."""
-    regime = get_regime()
-    portfolio_data = get_model_portfolio()
-    sids = [s["sid"] for stocks in portfolio_data.values() for s in stocks]
-    ac_by_sid = get_analyst_consensus_batch(sids)
-    pm_by_sid = get_stock_price_metrics_batch(sids)
-    for stocks in portfolio_data.values():
-        for s in stocks:
-            ac = ac_by_sid.get(s["sid"], {})
-            pm = pm_by_sid.get(s["sid"], {})
-            s["pt_upside"] = ac.get("pt_upside_pct")
-            s["price"] = pm.get("close_price")
-            s["return_1m"] = pm.get("return_1m")
-            s["price_target"] = ac.get("price_target")
-    analytics = get_portfolio_analytics(portfolio_data, regime)
-    return {"regime": regime, "portfolio": portfolio_data, "analytics": analytics,
-            "sized_book": get_sized_book()}
-
-
-@_persisted_cache(60, name="get_model_portfolio")
-def get_model_portfolio():
-    """Model portfolio: top 10 published picks per pickable tier, equal-weighted
-    within the tier's regime allocation → {tier.lower(): [stock dicts]}."""
-    regime = get_regime()
-    result = {}
-    for tier in views.pickable_tiers():
-        key = tier.lower()
-        alloc = regime.get(f"alloc_{key}", 0.33)
-        stocks = get_top_picks(tier=tier, top=10)
-        if stocks:
-            weight_per = (alloc * 100) / len(stocks)
-            for s in stocks:
-                s["weight"] = round(weight_per, 1)
-        result[key] = stocks
-    return result
 
 
 def _conviction_verdicts(surv):
@@ -2349,10 +2268,15 @@ def get_news_feed(
 # Built 2026-05-29. The factor model is hypothesis; pick_outcomes is the
 # realization: what live picks actually did, per tier × window.
 
+# Pick dates that fall on a weekend are the screener re-running on stale prices: not trading days.
+_OUTCOME_WEEKDAYS = "CAST(strftime('%w', pick_date) AS INTEGER) NOT IN (0, 6)"
+
+
 @_persisted_cache(300, name="get_pick_outcomes_summary")
 def get_pick_outcomes_summary(top_n=10):
     """Returns aggregate stats per (tier, window) for all picks AND for the top-N
-    portfolio (the actual tradable subset).
+    portfolio (the actual tradable subset). Weekday pick dates only; returns use the
+    unadjusted closes in pick_outcomes.
 
     Shape:
     {
@@ -2377,7 +2301,7 @@ def get_pick_outcomes_summary(top_n=10):
     base = read_sql(
         "SELECT sid, pick_date, window_days, cap_tier, rank_at_pick, "
         "       fwd_return_pct, bench_return_pct, excess_return_pct, bench_index "
-        "FROM pick_outcomes"
+        f"FROM pick_outcomes WHERE {_OUTCOME_WEEKDAYS}"
     )
     bench_max = db.scalar(
         "SELECT MAX(trade_date) FROM nse_index_history WHERE index_symbol='NIFTY 50'"
@@ -2452,11 +2376,11 @@ def get_pick_outcomes_summary(top_n=10):
     # Rank-decile analysis at the headline (positional) horizon.
     rank_deciles = []
     deciles_df = read_sql(
-        """
+        f"""
         WITH ranked AS (
             SELECT cap_tier, fwd_return_pct, excess_return_pct,
                    NTILE(10) OVER (PARTITION BY pick_date, cap_tier ORDER BY rank_at_pick) AS d
-            FROM pick_outcomes WHERE window_days = ?
+            FROM pick_outcomes WHERE window_days = ? AND {_OUTCOME_WEEKDAYS}
         )
         SELECT cap_tier, d AS decile, COUNT(*) n,
                AVG(fwd_return_pct) avg_fwd,
@@ -2478,13 +2402,13 @@ def get_pick_outcomes_summary(top_n=10):
     # Time series of avg top-N fwd return per pick_date at the headline horizon
     time_series = []
     ts_df = read_sql(
-        """
+        f"""
         SELECT pick_date, cap_tier,
                AVG(fwd_return_pct) avg_fwd,
                AVG(excess_return_pct) avg_excess,
                COUNT(*) n
         FROM pick_outcomes
-        WHERE window_days = ? AND rank_at_pick <= ?
+        WHERE window_days = ? AND rank_at_pick <= ? AND {_OUTCOME_WEEKDAYS}
         GROUP BY pick_date, cap_tier
         ORDER BY pick_date, cap_tier
         """,

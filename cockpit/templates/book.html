@@ -1,0 +1,276 @@
+{# /book - what do I hold (on paper), how risky is it, is it making money?
+   Data: cockpit/book.py. Tabs: pages.py (book, risk, track-record). #}
+{% extends "base.html" %}
+{% from "_components.html" import tab_bar %}
+{% block title %}{{ page_title("Book") }}{% endblock %}
+
+{% block content %}
+<style>
+.bk-line { display: flex; flex-wrap: wrap; gap: 6px 22px; align-items: baseline; }
+.bk-big { font-size: 22px; font-weight: 700; }
+.bk-lbl { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
+.bk-sub { font-size: 12px; color: var(--text-muted); line-height: 1.5; }
+.bk-note { font-size: 12px; color: var(--text-secondary); line-height: 1.55; margin: 10px 0 0; }
+.bk-tbl { width: 100%; border-collapse: collapse; font-size: 12px; min-width: 620px; }
+.bk-tbl th { font-size: 11px; color: var(--text-muted); text-align: left; padding: 6px; white-space: nowrap; text-transform: uppercase; letter-spacing: 0.4px; }
+.bk-tbl th.num { text-align: right; }
+.bk-tbl td { padding: 7px 6px; border-top: 1px solid var(--border); vertical-align: top; }
+.bk-tbl a { color: var(--text-primary); text-decoration: none; font-weight: 600; }
+.bk-tbl tr.muted td { opacity: 0.5; }
+.bk-bar { height: 6px; border-radius: 3px; background: var(--border); min-width: 40px; flex: 1; }
+.bk-bar > div { height: 100%; border-radius: 3px; background: var(--accent); }
+.bk-row { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; font-size: 12px; }
+.bk-row .name { width: 150px; flex-shrink: 0; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bk-row .val { width: 70px; flex-shrink: 0; text-align: right; }
+.bk-tilt .track { flex: 1; height: 5px; border-radius: 3px; background: var(--border); position: relative; min-width: 40px; }
+.bk-tilt .mid { position: absolute; left: 50%; top: -1px; bottom: -1px; width: 1px; background: var(--text-muted); opacity: 0.5; }
+.bk-tilt .fill { position: absolute; top: 0; bottom: 0; border-radius: 3px; }
+.bk-tilt .fill.pos { left: 50%; background: var(--green); } .bk-tilt .fill.neg { right: 50%; background: var(--amber); }
+.bk-verdict { display: flex; gap: 10px; align-items: baseline; padding: 8px 0; border-top: 1px solid var(--border); font-size: 13px; }
+.bk-verdict:first-of-type { border-top: 0; }
+.bk-verdict .pill { min-width: 62px; text-align: center; }
+.bk-caveats { margin: 0; padding-left: 18px; font-size: 12px; color: var(--text-secondary); line-height: 1.6; }
+.bk-details > summary { cursor: pointer; font-size: 12px; font-weight: 600; color: var(--accent); padding: 8px 0; }
+.bk-decile { display: grid; grid-template-columns: repeat(10, minmax(0, 1fr)); gap: 4px; margin-top: 6px; }
+.bk-decile > div { padding: 6px 2px; border-radius: 6px; text-align: center; font-size: 11px; color: var(--text-muted); background: var(--bg-card-hover); }
+.bk-decile > div.up { background: var(--green-bg); color: var(--green); }
+.bk-decile > div.down { background: var(--red-bg); color: var(--red); }
+.bk-decile b { display: block; font-size: 12px; }
+.bk-ts svg { width: 100%; height: 80px; }
+.bk-ts .up { fill: var(--green); opacity: 0.75; } .bk-ts .down { fill: var(--red); opacity: 0.75; }
+.bk-ts line { stroke: var(--border-accent); stroke-width: 0.5; }
+@media (max-width: 768px) { .bk-hide-sm { display: none; } .bk-only-sm { display: block !important; margin-top: 3px; line-height: 2; } .bk-tbl { min-width: 0; } .bk-tbl th, .bk-tbl td { padding: 6px 3px; } .bk-tbl th { font-size: 10px; letter-spacing: 0; } .bk-only-sm .pill { padding: 1px 5px; font-size: 10px; } .bk-decile { grid-template-columns: repeat(5, minmax(0, 1fr)); } .bk-row .name { width: 110px; } }
+</style>
+
+{% macro tier_pill(tier) -%}<span class="pill" style="color: {{ tier|tier_color }};">{{ tier }}</span>{%- endmacro %}
+{% set pill_for = {'beat': 'green', 'lagged': 'red', 'mixed': 'amber', 'early': 'muted', 'none': 'muted'} %}
+{% set verdict_word = {'beat': 'Beat', 'lagged': 'Lagged', 'mixed': 'Mixed', 'early': 'Too early', 'none': 'No data'} %}
+
+<h1 class="section-title">Book</h1>
+<p class="section-desc">What you hold on paper, how risky it is, and whether the picks are making money. Nothing here is deployed.</p>
+
+<div x-data="{ tab: '{{ tabs[0][0] }}', loaded: { '{{ tabs[0][0] }}': true } }" x-cloak>
+{{ tab_bar(tabs) }}
+
+{# ────────────── THE BOOK ────────────── #}
+<div x-show="tab === 'book'" x-cloak>
+{% if book %}
+<div class="card" style="margin-bottom: 16px; border-left: 4px solid var(--accent);">
+    <div class="bk-line">
+        <div>
+            <div class="bk-lbl">Expected 1-year price return</div>
+            <div class="bk-big mono {{ book.expected_return_pct|tone(zero='score-red') }}">{{ book.expected_return_pct|pct(1, signed=True) }}</div>
+        </div>
+        <div class="bk-sub">Position-weighted upside to the {{ book.er_basis }}, {{ book.er_names }} of {{ book.n }} names covered
+            ({{ book.er_weight_pct|pct(0) }} of the book), as of {{ book.pick_date }}. One to five analysts per name, and no dividends:
+            a guide, not a forecast.</div>
+    </div>
+    <p class="bk-note"><b>{{ book.n }} names</b>, rebuilt each morning (latest {{ book.asof }}).
+        {% for t, w in book.tier_pct.items() %}{{ t }} <span class="mono">{{ w|pct(0) }}</span>{% if not loop.last %} &middot; {% endif %}{% endfor %}
+        of the book by weight, {{ book.top_n.values()|first }} names per tier.</p>
+    <p class="bk-note">{{ book.band }}</p>
+</div>
+
+{% if book.n_left %}
+<div class="card" style="margin-bottom: 16px; border-left: 4px solid var(--amber);">
+    <b>{{ book.n_left }} of {{ book.n }} held names are no longer in today's top picks.</b>
+    <span class="bk-sub">{% if book.n_below_exit %}{{ book.n_below_exit }} {{ 'is' if book.n_below_exit == 1 else 'are' }} below the sell line (rank {{ book.exit_rank }}) today and
+        go if they stay there; the rest stay until they cross it.{% else %}None is below the sell line (rank {{ book.exit_rank }}), so none is due to be sold.{% endif %}</span>
+</div>
+{% endif %}
+
+<div class="card" style="padding: 0; overflow: hidden;">
+    <div class="table-wrap">
+    <table class="bk-tbl">
+        <thead><tr>
+            <th>Stock</th><th class="bk-hide-sm">Tier</th>
+            <th class="num">Weight %</th>
+            <th class="num">Score /100</th>
+            <th class="num">Rank</th>
+            <th class="num">Upside to target %</th>
+            <th class="bk-hide-sm">Status</th>
+        </tr></thead>
+        <tbody>
+        {% for r in book.rows %}
+        <tr>
+            <td><a href="/stocks/{{ r.sid }}">{{ r.ticker }}</a><div class="bk-sub bk-hide-sm">{{ r.name }}</div>
+                <div class="bk-only-sm" style="display: none;">{{ tier_pill(r.cap_tier) }} {% if r.left_top %}<span class="pill {{ 'pill-red' if r.below_exit else 'pill-amber' }}">{{ r.left_top }}</span>{% else %}<span class="pill pill-green">in top picks</span>{% endif %}</div></td>
+            <td class="bk-hide-sm">{{ tier_pill(r.cap_tier) }}</td>
+            <td class="num">{{ r.weight_pct|pct(1) }}</td>
+            <td class="num {{ 'score-green' if r.score is not none and r.score >= 70 else ('score-amber' if r.score is not none and r.score >= 50 else 'score-red') }}">{{ r.score if r.score is not none else '—' }}</td>
+            <td class="num {{ 'score-red' if r.below_exit else '' }}">{{ ('#' ~ r.rank) if r.rank is not none else '—' }}</td>
+            <td class="num {{ r.pt_upside_pct|tone(zero='score-red') }}">{{ r.pt_upside_pct|pct(0, signed=True) }}{% if r.n_analysts %}<div class="bk-sub">{{ r.n_analysts }} analyst{{ '' if r.n_analysts == 1 else 's' }}</div>{% endif %}</td>
+            <td class="bk-hide-sm">{% if r.left_top %}<span class="pill {{ 'pill-red' if r.below_exit else 'pill-amber' }}">{{ r.left_top }}</span>{% else %}<span class="pill pill-green">in top picks</span>{% endif %}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+</div>
+<p class="bk-sub" style="margin-top: 8px;">Weights as of {{ book.asof }}; score, rank and status as of {{ book.pick_date }}. Rank is within the tier. Upside is to the median target = the middle of the analysts' 12-month targets. Today's picks: <a href="/" style="color: var(--accent);">Today</a>.</p>
+{% else %}
+<div class="card"><p class="u-muted">No sized book yet. It is built each morning after the daily picks; check back after the next run.</p></div>
+{% endif %}
+</div>
+
+{# ────────────── RISK ────────────── #}
+<div x-show="tab === 'risk'" x-cloak>
+{% if risk %}
+<div class="card" style="margin-bottom: 16px; border-left: 4px solid var(--accent);">
+    <div class="bk-lbl">Where the book is concentrated (as of {{ risk.asof }})</div>
+    <p style="margin: 6px 0 0; font-size: 14px; line-height: 1.5;">{{ risk.summary }}</p>
+</div>
+
+<div class="grid-2" style="margin-bottom: 16px;">
+    <div class="card">
+        <div class="bk-lbl" style="margin-bottom: 10px;">Share of the book by sector (%)</div>
+        {% for sector, w in risk.sectors %}
+        <div class="bk-row"><span class="name" title="{{ sector }}">{{ sector }}</span>
+            <div class="bk-bar"><div style="width: {{ [w * 100 / risk.cap_sector_pct, 100]|min }}%;"></div></div>
+            <span class="val mono">{{ w|pct(0) }}</span></div>
+        {% endfor %}
+        <div class="bk-sub">Bar full = the {{ risk.cap_sector_pct|pct(0) }} sector limit.</div>
+    </div>
+    <div class="card">
+        <div class="bk-lbl" style="margin-bottom: 10px;">Share of the book by tier (%)</div>
+        {% for t, w in risk.tier_pct.items() %}
+        <div class="bk-row"><span class="name">{{ t }}</span>
+            <div class="bk-bar"><div style="width: {{ w }}%; background: {{ t|tier_color }};"></div></div>
+            <span class="val mono">{{ w|pct(0) }}</span></div>
+        {% endfor %}
+        <div class="bk-lbl" style="margin: 14px 0 6px;">Biggest risk contributors (% of book risk)</div>
+        {% for r in book.rows|sort(attribute='risk_pct', reverse=True) %}{% if loop.index <= 3 %}
+        <div class="bk-row"><span class="name"><a href="/stocks/{{ r.sid }}" style="color: var(--text-primary);">{{ r.ticker }}</a></span>
+            <div class="bk-bar"><div style="width: {{ r.risk_pct * 4 }}%;"></div></div>
+            <span class="val mono">{{ r.risk_pct|pct(0) }}</span></div>
+        {% endif %}{% endfor %}
+    </div>
+</div>
+
+<div class="card">
+    <details class="bk-details">
+        <summary>Details: style lean, effective positions, how the weights are set</summary>
+        <div class="bk-lbl" style="margin: 8px 0;">Style lean of the {{ risk.n_picks }} held names against all stocks (z-score; equal-weighted)</div>
+        {% for t in risk.tilts %}
+        <div class="bk-row bk-tilt"><span class="name">{{ t.label|capitalize }}</span>
+            <span class="val mono">{{ t.z|signed(2) }}</span>
+            <div class="track"><div class="mid"></div><div class="fill {{ 'pos' if t.z >= 0 else 'neg' }}" style="width: {{ [(t.z|abs) * 33, 100]|min / 2 }}%;"></div></div>
+            <span class="bk-sub" style="width: 70px;">{{ t.magnitude }}</span></div>
+        {% else %}
+        <div class="u-muted">No style data for this date.</div>
+        {% endfor %}
+        <p class="bk-note">0 is the average stock. Beyond 0.5 either way is strong, 0.25 to 0.5 moderate. A strong lean toward one style means the book is partly a bet on that style, not only on stock picking.</p>
+        <p class="bk-note"><b>Effective positions {{ risk.effective_n }} of {{ risk.n }}</b>: the book behaves like that many equal positions (close to {{ risk.n }} means no name dominates).
+            <b>Sector concentration index {{ risk.hhi|count }}</b> (sum of squared sector shares, 0 to 10,000; above 1,500 is concentrated, above 2,500 highly so).
+            Largest stock {{ risk.max_stock_pct|pct(1) }} against a {{ risk.cap_stock_pct|pct(0) }} limit; largest sector {{ risk.max_sector_pct|pct(1) }} against {{ risk.cap_sector_pct|pct(0) }}.</p>
+        <p class="bk-note">Weights come from hierarchical risk parity (López de Prado): risk is shared across clusters of stocks that move together, with no return forecast as an input, then tilted toward higher scores under the limits above.
+            Risk shares use the last two years of daily prices.</p>
+    </details>
+</div>
+{% else %}
+<div class="card"><p class="u-muted">No sized book yet, so no risk to show.</p></div>
+{% endif %}
+</div>
+
+{# ────────────── TRACK RECORD ────────────── #}
+<div x-show="tab === 'track-record'" x-cloak>
+{% set s = track.summary %}
+<div class="card" style="margin-bottom: 16px; border-left: 4px solid var(--accent);">
+    <div class="bk-lbl">Did the top {{ track.top_n }} of each tier beat the tier? (picks to {{ track.last_pick_date or '—' }})</div>
+    <div style="margin-top: 6px;">
+    {% for v in track.verdicts %}
+    <div class="bk-verdict"><span class="pill pill-{{ pill_for[v.verdict] }}">{{ verdict_word[v.verdict] }}</span><span>{{ v.text }}</span></div>
+    {% endfor %}
+    </div>
+    <ul class="bk-caveats" style="margin-top: 10px;">
+        <li>These are picks made <b>before the {{ track.model_change_text }} model change</b>: the first read on the current weights is about {{ track.first_read.strftime('%-d %b') }}.</li>
+        <li>Returns use <b>unadjusted closing prices</b>, so a split or bonus can distort a single name.</li>
+        <li>Pick days overlap (a stock stays in the basket for days), so read the sign and size, not a t-stat.</li>
+        {% if track.bench_stale %}<li>The index benchmark is {{ s.bench_staleness_days }} days old (latest {{ s.bench_max_date }}); the newest picks have no excess return yet.</li>{% endif %}
+    </ul>
+</div>
+
+<div class="card" style="margin-bottom: 16px;">
+    <h2 class="section-title">By tier and window</h2>
+    <p class="section-desc">Average forward return in %, weekday pick days only. Rows with fewer than {{ track.min_dates }} pick days are dimmed.
+        Windows are trading days:
+        {% for w in s.windows_status %}{{ w.window_days }}{% if w.status != 'live' %} ({% if w.first_outcome_eta %}first results about {{ w.first_outcome_eta }}{% else %}maturing{% endif %}){% endif %}{% if not loop.last %}, {% endif %}{% endfor %}.</p>
+    <div class="table-wrap">
+    <table class="bk-tbl" style="min-width: 760px;">
+        <thead><tr>
+            <th>Tier</th><th class="num">Window (trading days)</th><th class="num">Pick days</th>
+            <th class="num">Top {{ track.top_n }} (%)</th><th class="num">Whole ranked tier (%)</th><th class="num">Difference (pp)</th>
+            <th class="num">Top {{ track.top_n }} hit rate (%)</th><th class="num">Top {{ track.top_n }} vs index (%)</th>
+        </tr></thead>
+        <tbody>
+        {% for row in s.by_window_tier if row.scope == 'all' %}
+            {% set top = s.by_window_tier | selectattr('cap_tier', 'equalto', row.cap_tier) | selectattr('window_days', 'equalto', row.window_days) | rejectattr('scope', 'equalto', 'all') | first %}
+            <tr class="{{ 'muted' if row.n_dates < track.min_dates }}">
+                <td>{{ tier_pill(row.cap_tier) }}</td>
+                <td class="num">{{ row.window_days }}</td>
+                <td class="num">{{ row.n_dates }}</td>
+                <td class="num {{ (top.avg_fwd if top else none)|tone }}">{{ (top.avg_fwd if top else none)|signed(2) }}</td>
+                <td class="num {{ row.avg_fwd|tone }}">{{ row.avg_fwd|signed(2) }}</td>
+                <td class="num {{ ((top.avg_fwd - row.avg_fwd) if top else none)|tone }}">{{ ((top.avg_fwd - row.avg_fwd) if top else none)|signed(2) }}</td>
+                <td class="num">{{ (top.hit_rate if top else none)|pct(0) }}</td>
+                <td class="num {{ (top.avg_excess if top else none)|tone }}">{{ (top.avg_excess if top else none)|signed(2) }}</td>
+            </tr>
+        {% else %}
+            <tr><td colspan="8" class="u-muted" style="padding: 16px;">No matured pick outcomes yet.</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+</div>
+
+<div class="card" style="margin-bottom: 16px;">
+    <h2 class="section-title">Does a better rank earn more? ({{ s.headline_window }} trading days)</h2>
+    <p class="section-desc">Average forward return in % by rank decile within each tier: decile 1 = best ranked, 10 = worst. The model works if the left side beats the right.</p>
+    {% for tier in pickable_tiers() %}
+        {% set deciles = s.rank_deciles | selectattr('cap_tier', 'equalto', tier) | list %}
+        {% if deciles %}
+        {% set d1 = deciles[0].avg_fwd %}{% set d10 = deciles[-1].avg_fwd %}
+        <div style="margin-bottom: 12px;">
+            <div class="bk-sub">{{ tier_pill(tier) }} best minus worst decile:
+                <b class="mono {{ ((d1 - d10) if d1 is not none and d10 is not none else none)|tone }}">{{ ((d1 - d10) if d1 is not none and d10 is not none else none)|signed(2) }} pp</b></div>
+            <div class="bk-decile">
+                {% for d in deciles %}<div class="{{ 'up' if d.avg_fwd is not none and d.avg_fwd > 0 else ('down' if d.avg_fwd is not none and d.avg_fwd < 0 else '') }}">D{{ d.decile }}<b class="mono">{{ d.avg_fwd|signed(1) }}</b></div>{% endfor %}
+            </div>
+        </div>
+        {% endif %}
+    {% else %}
+        <div class="u-muted">No decile data yet.</div>
+    {% endfor %}
+</div>
+
+<div class="card">
+    <h2 class="section-title">Top {{ track.top_n }} basket, by pick day ({{ s.headline_window }} trading days)</h2>
+    <p class="section-desc">Each bar is one weekday's basket, average forward return in %. Green gained, red lost.</p>
+    <div class="grid-3">
+    {% for tier in pickable_tiers() %}
+        {% set ts = s.time_series | selectattr('cap_tier', 'equalto', tier) | list %}
+        {% set values = ts | map(attribute='avg_fwd_top_n') | reject('none') | list %}
+        <div class="bk-ts">
+            <div class="bk-sub" style="display: flex; justify-content: space-between;"><span>{{ tier_pill(tier) }}</span>
+                <span class="mono">avg {{ ((values|sum)/(values|length))|signed(2) if values else '—' }}% over {{ ts|length }} pick days</span></div>
+            <svg viewBox="0 0 200 80" preserveAspectRatio="none" role="img" aria-label="{{ tier }} top {{ track.top_n }} basket forward return per pick day">
+                {% if values %}
+                {% set vmax = (values | map('abs') | max) or 1 %}
+                {% set bw = 200.0 / (ts|length or 1) %}
+                {% for r in ts %}{% if r.avg_fwd_top_n is not none %}
+                    {% set h = ((r.avg_fwd_top_n | abs) / vmax) * 38 %}{% set x = loop.index0 * bw + 0.4 %}
+                    {% if r.avg_fwd_top_n >= 0 %}<rect class="up" x="{{ "%.2f"|format(x) }}" y="{{ 40 - h }}" width="{{ "%.2f"|format(bw - 0.8) }}" height="{{ h }}"/>
+                    {% else %}<rect class="down" x="{{ "%.2f"|format(x) }}" y="40" width="{{ "%.2f"|format(bw - 0.8) }}" height="{{ h }}"/>{% endif %}
+                {% endif %}{% endfor %}
+                <line x1="0" y1="40" x2="200" y2="40"/>
+                {% endif %}
+            </svg>
+            <div class="bk-sub" style="display: flex; justify-content: space-between;"><span class="mono">{{ ts[0].pick_date if ts else '—' }}</span><span class="mono">{{ ts[-1].pick_date if ts else '—' }}</span></div>
+        </div>
+    {% endfor %}
+    </div>
+</div>
+</div>
+
+</div>
+{% endblock %}
