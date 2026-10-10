@@ -438,7 +438,7 @@ CATEGORIES = [   # key, label, the rule, how Lynch read it
 ]
 
 
-@_persisted_cache(3600, name="playbook_categories")
+@_persisted_cache(3600, name="playbook_categories_v2")
 def categories():
     """Every non-financial stock with three years of statements, in ONE of Lynch's six
     kinds (first rule that matches, in CATEGORIES order)."""
@@ -483,7 +483,8 @@ def categories():
             tiers[r["tier"]] = tiers.get(r["tier"], 0) + 1
         out.append({"key": key, "label": label, "rule": rule, "reading": reading, "n": len(rows),
                     "tier_counts": tiers, "examples": rows[:CATEGORY_EXAMPLES]})
-    return {"categories": out, "n": sum(c["n"] for c in out)}
+    return {"categories": out, "n": sum(c["n"] for c in out),
+            "by_sid": {r["sid"]: key for key, rows in members.items() for r in rows}}      # the stock page's chip
 
 
 # ═══════════════════════════ 8. Market cycle ═══════════════════════════

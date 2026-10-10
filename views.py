@@ -136,7 +136,7 @@ def pick_data(row, sid=None, pick_date=None):
     out = {"score": int(round(100 * cov)),
            "word": "Complete" if complete else "Partial",
            "meaning": ("every factor that applies to this stock had a value" if complete else
-                       "ranked on the factors that had values; the rest were left out, not counted as zero"),
+                       "ranked on the factors that had values; a missing factor counts as the middle of its tier (50)"),
            "colour": "green" if complete else "amber",
            "price_days": None if row.get("price_rows") is None else int(row["price_rows"]),
            "quarters": None if row.get("fundamental_coverage") is None else int(round(8 * float(row["fundamental_coverage"]))),
