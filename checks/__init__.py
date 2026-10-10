@@ -280,13 +280,26 @@ def run(only=None, theme=None):
 def empty_table_severity(table):
     """Severity of an EMPTY table. A quarantine mirror that is empty is clean (OK);
     a table registered `may_be_empty` is a feature not live yet (INFO); anything
-    else is a producer that wrote 0 rows where rows are expected (CRITICAL)."""
+    else is a producer that wrote 0 rows where rows are expected (CRITICAL) -- unless
+    the table is not on the picks path, which its producer declares:
+      - every feed that writes it is still a candidate / wanted (not scheduled): INFO;
+      - every feed that writes it is on probation (scheduled, not yet trusted): WARN;
+      - a file output marked `optional` in config.FILE_OUTPUTS (readers fall back): WARN."""
     from tables import TABLES
     e = TABLES.get(table, {})
     if e.get("kind") == "QUARANTINE":
         return OK
     if e.get("may_be_empty"):
         return INFO
+    from config import FILE_OUTPUTS
+    if any(f["virtual_table"] == table and f.get("optional") for f in FILE_OUTPUTS):
+        return WARN
+    import feeds
+    status = {f["status"] for f in feeds.FEEDS.values() if table in (f.get("writes") or [])}
+    if status and status <= set(feeds.DISCOVERY):
+        return INFO
+    if status and "production" not in status and "degraded" not in status:
+        return WARN
     return CRITICAL
 
 
