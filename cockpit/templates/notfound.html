@@ -1,0 +1,10 @@
+{# The cockpit's 404 page: the usual shell, one sentence, where to go next. #}
+{% extends "base.html" %}
+{% block title %}{{ page_title("Not found") }}{% endblock %}
+{% block content %}
+<h1 class="section-title">{{ heading }}</h1>
+<div class="card">
+    <p class="section-desc">{{ message }}</p>
+    <p class="u-muted-11"><a href="/stocks">Search the stock list</a> or <a href="/">go to Today</a>.</p>
+</div>
+{% endblock %}

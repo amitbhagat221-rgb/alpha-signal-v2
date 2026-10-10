@@ -49,7 +49,7 @@
     <div style="flex: 1; min-width: 280px;">
         <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
             <h1 class="stock-ticker">{{ s.ticker }}</h1>
-            {{ tier_pill(s.cap_tier) }}{% if s.cap_tier == 'MICRO' %} {{ tip('no picks', 'Micro: an illiquid, data-thin slice of the market. It is never ranked.') }}{% endif %}
+            {{ tier_pill(s.cap_tier) }}{% if s.cap_tier == 'MICRO' %} <span class="pill pill-muted hover-tip" tabindex="0">No picks<span class="tooltip-popover" role="tooltip">Micro: an illiquid, data-thin slice of the market. It is never ranked.</span></span>{% endif %}
             {{ unproven_pill(s.cap_tier) }}
             {% if s.in_book %}{{ book_pill() }}{% endif %}
             {% if not in_ranking and s.cap_tier != 'MICRO' %}<span class="pill pill-amber hover-tip" tabindex="0">Not in today's ranking<span class="tooltip-popover" role="tooltip">This stock has no score on the latest ranking date ({{ latest_pick|short_date }}); the figures below may be older.</span></span>{% endif %}
@@ -92,7 +92,7 @@
     {% endif %}
     {% endfor %}
     {% if pm.get("price_gap") %}
-    <span class="pill pill-amber hover-tip" tabindex="0">Price history has a gap ({{ pm.price_gap["from"]|short_date }} &rarr; {{ pm.price_gap["to"]|short_date }})<span class="tooltip-popover" role="tooltip">No prices for {{ pm.price_gap["days"] }} days inside the last year, so the 6M and 1Y returns are not shown.</span></span>
+    <span class="pill pill-amber hover-tip" tabindex="0">Price history has a gap ({{ pm.price_gap["from"]|long_date }} &rarr; {{ pm.price_gap["to"]|long_date }})<span class="tooltip-popover" role="tooltip">No prices for {{ pm.price_gap["days"] }} days inside the last year, so the 6M and 1Y returns are not shown.</span></span>
     {% elif pm.get("returns_incomplete") %}
     <span class="pill pill-amber">Price history incomplete</span>
     {% endif %}
@@ -179,9 +179,10 @@
     </div>
 </div>
 
-<div class="stock-cols">
+<div class="stock-cols{{ '' if in_ranking else ' stock-cols-one' }}">
 
-{# LEFT: the score, then the data behind it #}
+{# LEFT: the score, then the data behind it (only a ranked stock has one) #}
+{% if in_ranking %}
 <div>
     {% if in_ranking %}
     <div class="card u-mb16">
@@ -231,13 +232,14 @@
     </div>
     {% endif %}
 </div>
+{% endif %}
 
 {# RIGHT: news, earnings, the write-up #}
 <div>
     <div class="card u-mb16">
         <div class="section-title">News</div>
         {% if s.get("news") %}
-        <div class="section-desc">Latest articles that name {{ s.name }}{% if s.get("sentiment_7d") is not none %}; 7-day sentiment <span class="mono {% if s.sentiment_7d > 0.1 %}score-green{% elif s.sentiment_7d < -0.1 %}score-red{% endif %}">{{ s.sentiment_7d|signed(2) }}</span> (VADER, -1 to +1){% if s.get("articles_7d") %} over {{ s.articles_7d|int }} articles{% endif %}{% endif %}.</div>
+        <div class="section-desc">Latest articles that name {{ s.name }}{% if s.get("sentiment_7d") is not none %}; 7-day sentiment <span class="mono {% if s.sentiment_7d > 0.1 %}score-green{% elif s.sentiment_7d < -0.1 %}score-red{% endif %}">{{ s.sentiment_7d|signed(2) }}</span> (VADER, -1 to +1){% if s.get("articles_7d") %} over {{ s.articles_7d|int }} article{{ '' if s.articles_7d|int == 1 else 's' }}{% endif %}{% endif %}.</div>
         {% for article in s.get("news", []) %}
         <div class="news-row">
             <div class="news-t">{% if article.url %}<a href="{{ article.url }}" target="_blank" rel="noopener">{{ article.title }}</a>{% else %}{{ article.title }}{% endif %}</div>
@@ -460,7 +462,7 @@
     <div class="card u-mb16">
         <div class="section-title">Sell-side Price Target</div>
         <div style="padding: 10px 12px; border-radius: 8px; background: var(--amber-bg); border-left: 3px solid var(--amber); font-size: 12px; color: var(--text-secondary);">
-            No analyst price target available from yfinance for this stock. This is common for SMALL caps where no sell-side broker publishes targets.
+            No analyst price target available from yfinance for this stock. This is common for {{ s.cap_tier|tier_word }} stocks, where no sell-side broker publishes targets.
         </div>
     </div>
     {% else %}
@@ -518,8 +520,10 @@
         <div class="metric-card">
             <div class="metric-label">Forward EPS</div>
             <div class="metric-value">{{ ac.forward_eps|inr(2) }}</div>
-            {% if pm.get("close_price") %}
+            {% if pm.get("close_price") and ac.forward_eps > 0 %}
             <div class="metric-context">Forward P/E: {{ "%.1f"|format(pm.close_price / ac.forward_eps) }}x</div>
+            {% elif pm.get("close_price") %}
+            <div class="metric-context">Forward P/E: n/m (negative earnings)</div>
             {% endif %}
         </div>
         {% endif %}
@@ -875,30 +879,30 @@
     {% endif %}
     {% endif %}
     {% if ins.get("trades") %}
-    <table style="width: 100%; font-size: 12px; border-collapse: collapse;">
+    <div class="table-wrap"><table style="width: 100%; font-size: 12px; border-collapse: collapse;">
         <thead>
             <tr style="text-align: left; color: var(--text-muted); font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px;">
-                <th style="padding: 6px 0;">Date</th>
-                <th style="padding: 6px 0;">Person</th>
-                <th style="padding: 6px 0;">Type</th>
-                <th style="padding: 6px 0; text-align: right;">Shares</th>
-                <th style="padding: 6px 0; text-align: right;">Value (Lakh)</th>
+                <th style="padding: 6px 10px 6px 0; white-space: nowrap;">Date</th>
+                <th style="padding: 6px 10px 6px 0; white-space: nowrap;">Person</th>
+                <th style="padding: 6px 10px 6px 0; white-space: nowrap;">Type</th>
+                <th style="padding: 6px 0 6px 14px; text-align: right; white-space: nowrap;">Shares</th>
+                <th style="padding: 6px 0 6px 14px; text-align: right; white-space: nowrap;">Value (Lakh)</th>
             </tr>
         </thead>
         <tbody>
         {% for t in ins.trades[:10] %}
         <tr style="border-top: 1px solid var(--border);">
-            <td class="mono" style="padding: 8px 0; color: var(--text-muted);">{{ t.trade_date }}</td>
+            <td class="mono" style="padding: 8px 10px 8px 0; color: var(--text-muted); white-space: nowrap;">{{ t.trade_date }}</td>
             <td class="u-cell">{{ t.person_category }}</td>
             <td style="padding: 8px 6px; font-weight: 600;
                 {% if t.transaction_type == 'Buy' %}color: var(--green);
                 {% elif t.transaction_type == 'Sell' %}color: var(--red);{% endif %}">{{ t.transaction_type }}</td>
-            <td class="mono" style="padding: 8px 0; text-align: right;">{% if t.shares %}{{ "{:,.0f}".format(t.shares) }}{% endif %}</td>
-            <td class="mono" style="padding: 8px 0; text-align: right;">{% if t.value_lakhs %}{{ t.value_lakhs|inr(0) }}{% endif %}</td>
+            <td class="mono" style="padding: 8px 0 8px 14px; text-align: right; white-space: nowrap;">{% if t.shares %}{{ "{:,.0f}".format(t.shares) }}{% endif %}</td>
+            <td class="mono" style="padding: 8px 0 8px 14px; text-align: right; white-space: nowrap;">{% if t.value_lakhs %}{{ t.value_lakhs|inr(0) }}{% endif %}</td>
         </tr>
         {% endfor %}
         </tbody>
-    </table>
+    </table></div>
     {% endif %}
 </div>
 {% endif %}
@@ -919,30 +923,30 @@
 <div class="card">
     <div class="section-title">Bulk &amp; Block Deals</div>
     <div class="section-desc">Large institutional trades reported to NSE.</div>
-    <table style="width: 100%; font-size: 12px; border-collapse: collapse;">
+    <div class="table-wrap"><table style="width: 100%; font-size: 12px; border-collapse: collapse;">
         <thead>
             <tr style="text-align: left; color: var(--text-muted); font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px;">
-                <th style="padding: 6px 0;">Date</th>
-                <th style="padding: 6px 0;">Client</th>
-                <th style="padding: 6px 0;">Type</th>
-                <th style="padding: 6px 0; text-align: right;">Quantity</th>
-                <th style="padding: 6px 0; text-align: right;">Price</th>
+                <th style="padding: 6px 10px 6px 0; white-space: nowrap;">Date</th>
+                <th style="padding: 6px 10px 6px 0; white-space: nowrap;">Client</th>
+                <th style="padding: 6px 10px 6px 0; white-space: nowrap;">Type</th>
+                <th style="padding: 6px 0 6px 14px; text-align: right; white-space: nowrap;">Quantity</th>
+                <th style="padding: 6px 0 6px 14px; text-align: right; white-space: nowrap;">Price</th>
             </tr>
         </thead>
         <tbody>
         {% for d in s.bulk_deals[:10] %}
         <tr style="border-top: 1px solid var(--border);">
-            <td class="mono" style="padding: 8px 0; color: var(--text-muted);">{{ d.deal_date }}</td>
+            <td class="mono" style="padding: 8px 10px 8px 0; color: var(--text-muted); white-space: nowrap;">{{ d.deal_date }}</td>
             <td class="u-cell">{{ d.client_name[:40] }}</td>
             <td style="padding: 8px 6px; font-weight: 600;
                 {% if d.buy_sell == 'BUY' or d.buy_sell == 'B' %}color: var(--green);
                 {% elif d.buy_sell == 'SELL' or d.buy_sell == 'S' %}color: var(--red);{% endif %}">{{ d.buy_sell }}</td>
-            <td class="mono" style="padding: 8px 0; text-align: right;">{{ "{:,.0f}".format(d.quantity) }}</td>
-            <td class="mono" style="padding: 8px 0; text-align: right;">{{ d.price|inr(0) }}</td>
+            <td class="mono" style="padding: 8px 0 8px 14px; text-align: right; white-space: nowrap;">{{ "{:,.0f}".format(d.quantity) }}</td>
+            <td class="mono" style="padding: 8px 0 8px 14px; text-align: right; white-space: nowrap;">{{ d.price|inr(0) }}</td>
         </tr>
         {% endfor %}
         </tbody>
-    </table>
+    </table></div>
 </div>
 {% endif %}
 
@@ -1348,15 +1352,22 @@ const baseOpts = () => ({ responsive: true, maintainAspectRatio: false, scales: 
 const axisTitle = (text) => ({ display: true, text, font: { size: 10 } });
 
 async function initPriceChart(tf) {
-    const dayMap = { '1m': 22, '3m': 65, '6m': 130, '1y': 250, '3y': 750 };   // trading days
+    const dayMap = { '1m': 31, '3m': 92, '6m': 183, '1y': 366, '3y': 1096 };   // calendar days
     const resp = await fetch(`/api/prices-extended/${SID}?days=${dayMap[tf] || 365}`);
-    const data = await resp.json();
-    if (!data.length) return;
+    const rows = await resp.json();
+    if (!rows.length) return;
     await loadChart();
+    // a hole in the history (> 45 days) becomes a null point: the line breaks instead of a vertical cliff
+    const data = [];
+    rows.forEach((r, i) => {
+        if (i && (Date.parse(r.date) - Date.parse(rows[i - 1].date)) / 864e5 > 45)
+            data.push({ date: '(no prices)', close: null, volume: null });
+        data.push(r);
+    });
     const line = (label, v, color) => ({ label, data: data.map(() => v), borderColor: color, borderDash: [4, 4], borderWidth: 1, pointRadius: 0, fill: false, yAxisID: 'y' });
     const ds = [
         { label: 'Close (adjusted, ₹)', data: data.map(d => d.close), borderColor: cssVar('--blue'), backgroundColor: tint('--blue', 8),
-          fill: true, borderWidth: 1.5, pointRadius: 0, tension: 0.1, yAxisID: 'y' },
+          fill: true, borderWidth: 1.5, pointRadius: 0, tension: 0.1, spanGaps: false, yAxisID: 'y' },
         { label: 'Volume (M)', data: data.map(d => d.volume / 1e6), backgroundColor: tint('--accent', 30), type: 'bar', yAxisID: 'y1' },
     ];
     if (PM.high) ds.push(line('52W high', PM.high, cssVar('--green')));
@@ -1370,7 +1381,7 @@ async function initPriceChart(tf) {
 
 async function initDeliveryChart() {
     drawn.delivery = true;
-    const resp = await fetch(`/api/prices-extended/${SID}?days=90`);
+    const resp = await fetch(`/api/prices-extended/${SID}?days=130`);
     const data = await resp.json();
     if (!data.length) return;
     await loadChart();
@@ -1414,16 +1425,22 @@ async function initInsiderChart() {
 
 async function initForecastChart() {
     const data = EMBEDDED.forecasts;
-    const ds = [];
-    if (data.price_target && data.price_target.length)
-        ds.push({ label: 'Price target (₹)', data: data.price_target.map(d => ({ x: d.date, y: d.value })), borderColor: cssVar('--blue'), backgroundColor: tint('--blue', 10), tension: 0.2, yAxisID: 'y' });
-    if (data.eps && data.eps.length)
-        ds.push({ label: 'EPS (₹)', data: data.eps.map(d => ({ x: d.date, y: d.value })), borderColor: cssVar('--green'), backgroundColor: tint('--green', 10), tension: 0.2, yAxisID: 'y1' });
-    if (!ds.length) return;
+    const pts = k => (data[k] || []).map(d => ({ x: d.date, y: d.value }));
+    const pt = pts('price_target'), eps = pts('eps');
+    if (!pt.length && !eps.length) return;
     await loadChart();
-    const o = baseOpts(); o.scales.x.type = 'category';
-    o.scales.y.position = 'left'; o.scales.y.title = axisTitle('Price target (₹)');
-    o.scales.y1 = { ...baseScales().y, position: 'right', grid: { display: false }, title: axisTitle('EPS (₹)') };
+    // x-axis = the union of the dates that have data, so the axis ends where the data does
+    const labels = [...new Set([...pt, ...eps].map(p => p.x))].sort();
+    const ds = [];
+    if (pt.length) ds.push({ label: 'Price target (₹)', data: pt, borderColor: cssVar('--blue'), backgroundColor: tint('--blue', 10), tension: 0.2, yAxisID: 'y' });
+    if (eps.length) ds.push({ label: 'EPS (₹)', data: eps, borderColor: cssVar('--green'), backgroundColor: tint('--green', 10), tension: 0.2, yAxisID: pt.length ? 'y1' : 'y' });
+    const o = baseOpts(); o.scales.x.type = 'category'; o.scales.x.labels = labels;
+    if (pt.length) {
+        o.scales.y.position = 'left'; o.scales.y.title = axisTitle('Price target (₹)');
+        if (eps.length) o.scales.y1 = { ...baseScales().y, position: 'right', grid: { display: false }, title: axisTitle('EPS (₹)') };
+    } else {
+        o.scales.y.title = axisTitle('EPS (₹)');
+    }
     makeChart('forecastChart', { type: 'line', data: { datasets: ds }, options: o });
 }
 
@@ -1437,6 +1454,7 @@ function initConsensusCharts() { once('forecast', initForecastChart); }
 <style>
 .stock-cols { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 16px; }
 @media (max-width: 768px) { .stock-cols { grid-template-columns: minmax(0, 1fr); } }
+.stock-cols-one { grid-template-columns: minmax(0, 1fr); }
 .conv-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
 .conv-head .section-title { margin-bottom: 0; }
 .conv-score { font-size: 28px; font-weight: 800; }

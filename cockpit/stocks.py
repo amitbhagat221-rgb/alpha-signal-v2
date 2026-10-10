@@ -149,7 +149,7 @@ def screen(params):
     if tier in u["tiers"]:
         rows = [r for r in rows if r["tier"] == tier]
     if not unranked and tier not in unpick:       # the default view is exactly the ranked stocks
-        rows = [r for r in rows if r["ranked"]]
+        rows = [r for r in rows if r["ranked"] or (book and r["book"])]      # a held name stays visible even when unranked today
     if sector:
         rows = [r for r in rows if r["sector"] == sector]
     if book:
@@ -202,6 +202,7 @@ def screen(params):
             "n_gate": sum(not r["ranked"] and r["tier"] not in unpick for r in u["rows"]),
             "unproven": views.unproven_tiers(),
             "n_book": sum(r["book"] for r in u["rows"]),
+            "n_book_unranked": sum(r["book"] and not r["ranked"] for r in u["rows"]),
             "n_flagged": sum(r["flagged"] and r["ranked"] for r in u["rows"]),
             "sorts": SORTS,
             "default_view": not (chosen["tier"] or unranked or sector or book or flagged or q)}

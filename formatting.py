@@ -35,7 +35,10 @@ def pct(x, decimals=1, signed=False, scale=1):
     v = _num(x)
     if v is None:
         return DASH
-    return f"{v * scale:{'+' if signed else ''}.{decimals}f}%"
+    out = f"{v * scale:{'+' if signed else ''}.{decimals}f}"
+    if float(out) == 0:                      # rounds to zero: "0%", never "-0%"
+        out = out.lstrip("+-")
+    return out + "%"
 
 
 def inr(x, decimals=0, group=True):
@@ -43,7 +46,8 @@ def inr(x, decimals=0, group=True):
     v = _num(x)
     if v is None:
         return DASH
-    return f"₹{v:{',' if group else ''}.{decimals}f}"
+    body = f"{abs(v):{',' if group else ''}.{decimals}f}"
+    return f"-₹{body}" if v < 0 and float(body.replace(",", "")) != 0 else f"₹{body}"
 
 
 def crore(cr):
@@ -75,6 +79,16 @@ def short_date(x):
     return f"{d.day} {d:%b}"
 
 
+def long_date(x):
+    """'2026-10-05' -> '5 Oct 2026'; missing / not a date -> DASH."""
+    import datetime as _dt
+    try:
+        d = _dt.date.fromisoformat(str(x)[:10])
+    except ValueError:
+        return DASH
+    return f"{d.day} {d:%b %Y}"
+
+
 def month_text(ym):
     """'2026-09' (or a full ISO date) -> 'Sep 2026'; not a month -> the text as given."""
     import datetime as _dt
@@ -91,7 +105,7 @@ def count(x):
     return DASH if v is None else f"{round(v):,}"
 
 
-FILTERS = {"count": count, "signed": signed, "pct": pct, "inr": inr, "crore": crore, "tone": tone, "short_date": short_date, "month_text": month_text}
+FILTERS = {"count": count, "signed": signed, "pct": pct, "inr": inr, "crore": crore, "tone": tone, "short_date": short_date, "long_date": long_date, "month_text": month_text}
 
 
 # VIX regime → colour name. One map for cockpit, change feed and email; the

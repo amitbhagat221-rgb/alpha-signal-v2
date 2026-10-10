@@ -238,10 +238,31 @@ def _entity_key(name):
     return " ".join(words)
 
 
+_NAME_FILLER = {"ltd", "limited", "pvt", "private", "co", "company", "corp", "corporation", "inc", "the", "and",
+                "india", "indian", "industries", "industry", "pharma", "pharmaceutical", "pharmaceuticals",
+                "tech", "technologies", "technology", "laboratories", "labs", "enterprises", "holdings"}
+
+
+def _core_name(name):
+    """The significant words of a company name ("Sun Pharma Industries Ltd" and "Sun Pharmaceutical
+    Industries Limited" are both ('sun',)), so the exchange's spelling of the issuer matches ours."""
+    words = [w for w in _entity_key(name).split() if w not in _NAME_FILLER]
+    return tuple(words)
+
+
+def _is_company(client, me_core):
+    """True when `client` is the company itself: same significant words, or one is the start of the other."""
+    c = _core_name(client)
+    if not c or not me_core:
+        return False
+    n = min(len(c), len(me_core))
+    return c[:n] == me_core[:n]
+
+
 def get_bulk_deals(sid):
     """A6: Recent bulk/block deals for a stock. Rows where the client is the company itself
     (the exchange's own-stock leg) are dropped, and identical rows are shown once."""
-    me = _entity_key((db.one("SELECT name FROM stocks WHERE sid = ?", [sid]) or {}).get("name"))
+    me = _core_name((db.one("SELECT name FROM stocks WHERE sid = ?", [sid]) or {}).get("name"))
     rows = db.rows(
         "SELECT client_name, buy_sell, quantity, price, deal_date, deal_type "
         "FROM bulk_deals WHERE sid = ? ORDER BY deal_date DESC, quantity DESC LIMIT 200",
@@ -249,7 +270,7 @@ def get_bulk_deals(sid):
     )
     seen, out = set(), []
     for r in rows:
-        if me and _entity_key(r["client_name"]) == me:
+        if me and _is_company(r["client_name"], me):
             continue
         k = (r["deal_date"], _entity_key(r["client_name"]), r["buy_sell"], r["quantity"], r["price"], r["deal_type"])
         if k in seen:
@@ -798,12 +819,15 @@ def get_stock_lineage(sid):
 
 def get_price_series_extended(sid, days=365):
     """Extended price series with OHLCV + delivery % for technicals tab.
-    NaN → None so FastAPI's JSON encoder doesn't 500 on sparse delivery_pct rows."""
+    `days` is a CALENDAR window ending at the stock's last price date (1M=31, 3M=92, 6M=183,
+    1Y=366, 3Y=1096), so a stock with a hole in its history shows the hole instead of
+    stretching the window back years. NaN -> None so FastAPI's JSON encoder doesn't 500."""
     newest_first = db.rows(
         "SELECT date, open, high, low, close, volume, delivery_pct "
         "FROM stock_prices WHERE sid = ? AND close > 0 "
-        "ORDER BY date DESC LIMIT ?",
-        [sid, days],
+        "AND date >= date((SELECT MAX(date) FROM stock_prices WHERE sid = ? AND close > 0), ?) "
+        "ORDER BY date DESC",
+        [sid, sid, f"-{int(days)} days"],
     )
     series = newest_first[::-1]  # chronological for the chart
     # split/bonus-adjusted like every return on the page: a 1:2 split is not a crash on the chart
