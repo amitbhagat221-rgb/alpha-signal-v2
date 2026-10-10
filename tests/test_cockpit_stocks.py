@@ -152,11 +152,13 @@ def test_stock_pages_render(monkeypatch, tmp_path):
     webauth.set_password("correct horse battery")
     client = TestClient(app, cookies={webauth.COOKIE: webauth.make_token()})
     r = client.get("/stocks?tier=MID&sort=score")
-    assert r.status_code == 200 and "Score /100" in r.text and "explorer" not in r.text.lower().replace("preview", "")
+    assert r.status_code == 200 and "Score /100" in r.text
     r = client.get("/stocks?q=zzzzzz-no-such")
     assert r.status_code == 200 and "No stock matches these filters" in r.text
     first = re.search(r'class="st-tk" href="/stocks/([^"]+)"', client.get("/stocks").text).group(1)
     page = client.get(f"/stocks/{first}").text
-    for tab in ("Overview", "Financials", "Ownership", "Analysts", "Forensic", "Price &amp; technicals", "Industry", "Management"):
-        assert f">{tab}</button>" in page, tab
-    assert "CONVICTION" not in page and "Consensus</button>" not in page and ">Data</button>" not in page
+    tabs = re.findall(r'class="tab-button"[^>]*>([^<]+)</button>', page)
+    assert tabs == ["Overview", "Financials", "Ownership", "Consensus", "Forensic", "Price &amp; Technicals", "Data", "Industry", "Management"]
+    assert "CONVICTION" not in page and "Analysts</button>" not in page
+    assert "The data behind this score" in page and "Data lineage" in page    # in the Data tab, once
+    assert page.count("The data behind this score") == 1
