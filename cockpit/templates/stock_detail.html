@@ -1375,6 +1375,21 @@ async function initPriceChart(tf) {
     const o = baseOpts();
     o.scales.y.position = 'left'; o.scales.y.title = axisTitle('Price (₹)');
     o.scales.y1 = { position: 'right', ticks: { font: { size: 10 } }, grid: { display: false }, title: axisTitle('Volume (M)') };
+    o.scales.x.ticks = { ...(o.scales.x.ticks || {}), autoSkip: true, maxTicksLimit: 12, maxRotation: 0 };
+    // Hover anywhere: date, close (and its day change), volume in shares, the 52W lines.
+    o.plugins = { ...(o.plugins || {}), crosshair: true, tooltip: { callbacks: {
+        title: items => fmtDay(items[0].label),
+        label: it => {
+            const r = data[it.dataIndex];
+            if (it.datasetIndex === 0) {
+                if (r.close == null) return ' No prices';
+                const prev = data[it.dataIndex - 1];
+                const chg = prev && prev.close ? ` (${r.close >= prev.close ? '+' : ''}${((r.close / prev.close - 1) * 100).toFixed(2)}%)` : '';
+                return ` Close ${fmtINR(r.close)}${chg}`;
+            }
+            if (it.dataset.type === 'bar') return ` Volume ${fmtShares(r.volume)}`;
+            return ` ${it.dataset.label} ${fmtINR(it.raw, 0)}`;
+        } } } };
     makeChart('priceChart', { type: 'line', data: { labels: data.map(d => d.date), datasets: ds }, options: o });
     if (!drawn.delivery) initDeliveryChart();
 }
@@ -1385,7 +1400,11 @@ async function initDeliveryChart() {
     const data = await resp.json();
     if (!data.length) return;
     await loadChart();
-    const o = baseOpts(); o.plugins = { legend: { display: false } }; o.scales.y.title = axisTitle('Delivery (% of volume)');
+    const o = baseOpts(); o.scales.y.title = axisTitle('Delivery (% of volume)');
+    o.scales.x.ticks = { ...(o.scales.x.ticks || {}), autoSkip: true, maxTicksLimit: 12, maxRotation: 0 };
+    o.plugins = { legend: { display: false }, crosshair: true, tooltip: { callbacks: {
+        title: items => fmtDay(items[0].label),
+        label: it => { const r = data[it.dataIndex]; return [` Delivery ${r.delivery_pct == null ? '—' : r.delivery_pct.toFixed(1) + '%'} of volume`, ` Volume ${fmtShares(r.volume)}`]; } } } };
     makeChart('deliveryChart', { type: 'line', data: { labels: data.map(d => d.date), datasets: [{
         label: 'Delivery %', data: data.map(d => d.delivery_pct), borderColor: cssVar('--amber'), backgroundColor: tint('--amber', 8),
         fill: true, borderWidth: 1.5, pointRadius: 0, tension: 0.2 }] }, options: o });

@@ -85,8 +85,35 @@ function chartTheme() {
     Object.assign(d.plugins.tooltip, {
         backgroundColor: cssVar('--bg-card'), borderColor: cssVar('--border-accent'), borderWidth: 1,
         titleColor: cssVar('--text-primary'), bodyColor: cssVar('--text-secondary'),
+        padding: 10, boxPadding: 4, titleFont: { weight: '600' },
     });
+    // Hover anywhere over a date, not exactly on a 1px line or a thin bar: one tooltip per x
+    // position with every series at that date, and a dot on the line being read.
+    d.interaction.mode = 'index';
+    d.interaction.intersect = false;
+    d.elements.point.hoverRadius = 4;
+    d.elements.point.hitRadius = 6;
+    if (!window.__crosshair) { Chart.register(CROSSHAIR); window.__crosshair = true; }
 }
+
+/* Opt-in vertical line at the hovered date: options.plugins.crosshair = true. */
+const CROSSHAIR = {
+    id: 'crosshair',
+    afterDatasetsDraw(chart, args, opts) {
+        if (!chart.options.plugins.crosshair) return;
+        const a = chart.tooltip && chart.tooltip.getActiveElements();
+        if (!a || !a.length) return;
+        const x = a[0].element.x, { top, bottom } = chart.chartArea, ctx = chart.ctx;
+        ctx.save(); ctx.beginPath(); ctx.moveTo(x, top); ctx.lineTo(x, bottom);
+        ctx.lineWidth = 1; ctx.setLineDash([3, 3]); ctx.strokeStyle = cssVar('--text-muted'); ctx.stroke(); ctx.restore();
+    },
+};
+
+/* Number helpers for chart tooltips (Indian grouping). */
+const fmtINR = (v, dp = 2) => v == null ? '—' : '₹' + Number(v).toLocaleString('en-IN', { minimumFractionDigits: dp, maximumFractionDigits: dp });
+const fmtShares = v => v == null ? '—' : v < 1e5 ? `${Number(v).toLocaleString('en-IN')} shares`
+    : `${(v / 1e6).toLocaleString('en-IN', { maximumFractionDigits: 2 })} M shares (${(v / 1e5).toLocaleString('en-IN', { maximumFractionDigits: 1 })} lakh)`;   // M matches the chart's volume axis
+const fmtDay = iso => { const t = Date.parse(iso); return isNaN(t) ? iso : new Date(t).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }); };
 
 /* loadChart() -> Promise<Chart>. Loads vendored Chart.js on first use, themed. */
 async function loadChart() {
