@@ -3,7 +3,7 @@
 
 {# Today: one question - is there anything to buy, sell or check? Data: cockpit/today.py (build). #}
 {% macro driver_text(drivers) -%}
-{%- for d in drivers %}{{ d.label }} <span class="mono">top {{ [100 - d.percentile, 1]|max }}%</span>{% if not loop.last %} &middot; {% endif %}{% endfor -%}
+{%- for d in drivers %}{{ d.label }} {% if d.inverted %}<span class="mono">lowest {{ [100 - d.percentile, 1]|max }}%</span> <span class="unit">(low scores well)</span>{% else %}<span class="mono">top {{ [100 - d.percentile, 1]|max }}%</span>{% endif %}{% if not loop.last %} &middot; {% endif %}{% endfor -%}
 {%- endmacro %}
 
 {% macro target_of(t) -%}
@@ -86,7 +86,7 @@
 {% endif %}
 
 {# ── checks ── #}
-<h2 class="section-title td-sec">Checks <span class="unit">book and top picks &middot; results due within 7 days</span></h2>
+<h2 class="section-title td-sec">Checks <span class="unit">book and top picks &middot; red flags, thin trading, results due within 7 days</span></h2>
 {% if t.checks %}
 <div class="td-list">
     {% for c in t.checks %}
@@ -100,7 +100,7 @@
     {% endfor %}
 </div>
 {% else %}
-<div class="card" style="padding: 12px 14px;"><span class="u-muted-11">Nothing to check: no forensic flag on a held or top-ranked name, and no results due in the next 7 days.</span></div>
+<div class="card" style="padding: 12px 14px;"><span class="u-muted-11">Nothing to check: no red flag or thin trading on a held or top-ranked name, and no results due in the next 7 days.</span></div>
 {% endif %}
 
 {# ── regime (the only regime panel on the trading side) ── #}
@@ -109,7 +109,9 @@
 <a href="/model#rules" class="card td-regime">
     <span class="regime-badge {{ g.color }}">{{ g.regime }}</span>
     <span>India VIX <span class="mono">{{ "%.1f"|format(g.vix_latest) }}</span> <span class="unit">pts, 20-day avg {{ "%.1f"|format(g.vix_20d_avg) }}</span></span>
-    <span>Allocation{% for tier in display_tiers() %} <span class="mono">{{ "%.0f"|format(g['alloc_' ~ (tier|lower)] * 100) }}</span><span class="unit">% {{ tier|tier_word|lower }}</span>{% if tier in t.unproven %} <span class="unit">(unproven)</span>{% endif %}{% if not loop.last %} /{% endif %}{% endfor %}</span>
+    <span>Regime target split{% for tier in display_tiers() %} <span class="mono">{{ "%.0f"|format(g['alloc_' ~ (tier|lower)] * 100) }}</span><span class="unit">% {{ tier|tier_word|lower }}</span>{% if not loop.last %} /{% endif %}{% endfor %}</span>
+    {% if t.book_split %}<span>Book now{% for tier, w in t.book_split.items() %} <span class="mono">{{ "%.0f"|format(w * 100) }}</span><span class="unit">% {{ tier|tier_word|lower }}{% if tier in t.unproven %} (unproven){% endif %}</span>{% if not loop.last %} /{% endif %}{% endfor %}
+        <span class="unit">&middot; sized by risk and rank, not by the regime split ({{ t.book_asof|short_date }})</span></span>{% endif %}
     <span class="unit">{{ g.updated_at|short_date }} &middot; rules &rarr;</span>
 </a>
 

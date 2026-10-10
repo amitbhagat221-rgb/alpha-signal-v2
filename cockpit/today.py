@@ -54,11 +54,26 @@ def headline(buys, sells, resizes, checks, has_prev=True):
     return "Nothing to do — the book is unchanged and nothing needs checking", True
 
 
-def build_checks(flags, due, meta, financial_sectors):
+def build_checks(flags, due, meta, financial_sectors, avoid=None, thin=None):
     """One line per issue. flags = views.forensic_flags, due = views.results_due, meta = {sid:
     {ticker, tier, sector, source}}. Altman Z distress is dropped for Financials (it does not apply
-    to banks and lenders); a Beneish flag stays."""
+    to banks and lenders); a Beneish flag stays. avoid = {sid: playbooks.avoid_list row} (the stock
+    page's "Avoid list" chip), thin = {sid: {adtv_cr, floor_cr, as_of}} for names trading below the
+    book's liquidity floor."""
     out = []
+    for sid, a in (avoid or {}).items():
+        m = meta.get(sid)
+        if m:
+            out.append({"kind": "avoid", "sid": sid, "ticker": m["ticker"], "tier": m["tier"], "source": m["source"],
+                        "text": f"On the Avoid list, {a['n_flags']} red flags",
+                        "why": "; ".join(f"{f['label']}: {f['detail']}" for f in a["flags"])})
+    for sid, t in (thin or {}).items():
+        m = meta.get(sid)
+        if m:
+            out.append({"kind": "liquidity", "sid": sid, "ticker": m["ticker"], "tier": m["tier"], "source": m["source"],
+                        "text": "Trades below the liquidity floor",
+                        "why": f"20-day median traded value is ₹{t['adtv_cr']:.2f} Cr a day (as of {t['as_of']}); "
+                               f"the book's floor is ₹{t['floor_cr']:.0f} Cr a day"})
     for sid, f in flags.items():
         m = meta.get(sid)
         if not m:
@@ -81,7 +96,8 @@ def build_checks(flags, due, meta, financial_sectors):
                     "text": f"Results {when}", "days": d["days"],
                     "why": f"board meets on {d['date']} to approve results; expect a price move, the model does not trade around it"})
     # results first by date, then forensic flags; stocks in the book before top picks
-    out.sort(key=lambda c: (c["kind"] != "results", c.get("days", 0), c["source"] != "in book", c["ticker"]))
+    order = {"results": 0, "avoid": 1, "forensic": 2, "liquidity": 3}
+    out.sort(key=lambda c: (order[c["kind"]], c.get("days", 0), c["source"] != "in book", c["ticker"]))
     return out
 
 
@@ -114,7 +130,14 @@ def _target(ac):
 
 def _drivers(drivers, labels):
     return [{"label": labels.get(d["factor"], d["factor"].replace("_", " ")),
-             "percentile": round(d["percentile"] * 100)} for d in drivers]
+             "percentile": round(d["percentile"] * 100), "inverted": d.get("inverted", False)} for d in drivers]
+
+
+def _adtv(sids, asof):
+    """{sid: 20-day median traded value in rupees}: portfolio_construction.adtv, the figure the
+    book's liquidity floor is applied to."""
+    from portfolio_construction import adtv
+    return adtv(sids, asof).to_dict() if sids else {}
 
 
 @_ttl_cache(120)
@@ -162,14 +185,23 @@ def build():
     for t, stocks in pub.items():
         for s in stocks:
             meta.setdefault(s["sid"], {"ticker": s["ticker"], "tier": t, "sector": s.get("sector"), "source": "top pick"})
+    avoid = {r["sid"]: r for r in playbooks.avoid_list()["rows"] if r["sid"] in meta}
+    floor = config.PORTFOLIO["hrp"]["min_adtv_inr"]
+    traded = _adtv(list(meta), pick_date)
+    thin = {sid: {"adtv_cr": v / 1e7, "floor_cr": floor / 1e7, "as_of": pick_date}
+            for sid, v in traded.items() if v < floor}
     checks = build_checks(views.forensic_flags(list(meta)), views.results_due(list(meta), RESULTS_DAYS),
-                          meta, config.SCREEN["financial_sectors"])
+                          meta, config.SCREEN["financial_sectors"], avoid=avoid, thin=thin)
     for c in checks:
         c["href"] = f"/stocks/{c['sid']}" + ("#forensic" if c["kind"] == "forensic" else "")
 
     picks = {t: [line(s["sid"], {"ticker": s["ticker"], "tier": t, "rank": s["rank"], "name": s.get("name")})
                  for s in pub.get(t, [])] for t in views.display_tiers()}
 
+    book_split = {}
+    for r in book_rows:
+        book_split[r["cap_tier"]] = book_split.get(r["cap_tier"], 0) + (r["weight"] or 0)
+    book_split = {t: book_split[t] for t in views.display_tiers() if t in book_split}
     prev_date = dates[1] if len(dates) > 1 else None
     prev_picks = views.picks(prev_date, gated=False).to_dict("records") if prev_date else []
     movers = rank_movers(cur_rows, prev_picks) if prev_date else {}
@@ -179,7 +211,7 @@ def build():
         "book_asof": book["asof"] if book else None, "prev_asof": prev["asof"] if prev else None,
         "book_n": len(book_rows), "has_book": bool(book),
         "buys": buy_rows, "sells": sell_rows, "resizes": resize_rows, "checks": checks,
-        "regime": api.get_regime(), "picks": picks, "movers": movers,
+        "regime": api.get_regime(), "book_split": book_split, "picks": picks, "movers": movers,
         "mover_count": sum(len(v) for v in movers.values()), "prev_pick_date": prev_date,
         "exit_rank": config.PORTFOLIO["hrp"]["rebalance"]["rank_exit"],
         "evidence": playbooks.evidence(), "unproven": views.unproven_tiers(),

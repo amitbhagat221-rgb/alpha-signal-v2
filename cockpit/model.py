@@ -29,7 +29,7 @@ MAX_ACTIONS = 3
 NO_OOS_SKILL = views.NO_OOS_SKILL
 
 BENCH_WORDS = {
-    "PROPOSED": "Candidate: strong in testing, waiting on a human decision to wire it.",
+    "PROPOSED": "Proposed: waiting on a human decision to wire it.",
     "LIBRARY": "Benched: computed and tested, below the bar to rank stocks.",
     "BLOCKED": "Blocked: the data or method has a problem.",
     "SUPERSEDED": "Replaced by another factor.",
@@ -234,6 +234,22 @@ def plain_note(text):
     return re.sub(r"\b[a-z][a-z0-9]*(?:_[a-z0-9]+)+\b", lambda m: m.group(0).replace("_", " "), text)
 
 
+def bench_note(state, best_t, data_status="READY"):
+    """The Library sentence for a benched factor, worded from its own evidence. A PROPOSED factor is
+    only 'strong' when its best tested t clears the promotion bar; one whose data is dropped or
+    contaminated is Blocked whatever its t says."""
+    if state == "PROPOSED":
+        if data_status in ("DROPPED", "BLOCKED"):
+            return "Blocked: data contaminated, cannot be promoted."
+        if best_t is None:
+            return "Proposed: no test result yet."
+        if abs(best_t) >= PROMOTION_BAR:
+            return (f"Proposed: best t {best_t:+.2f}, clears the {PROMOTION_BAR:g} bar; waiting on a human "
+                    f"decision to wire it.")
+        return f"Proposed: best t {best_t:+.2f}, below the {PROMOTION_BAR:g} bar."
+    return BENCH_WORDS.get(state, state)
+
+
 def library_rows(ev_rows):
     """Every registry factor: wired first, then candidates, benched, the rest; the note is
     built from the registry (description, computed state, weights), never typed by hand."""
@@ -251,14 +267,14 @@ def library_rows(ev_rows):
     rows = []
     for sid, f in factors.FACTORS.items():
         state = factors.status(sid)
+        b = best.get(sid)
         note = [_first_sentence(f.get("description"))]
         if state == "WIRED":
             note.append("Weights: " + ", ".join(f"{tier_word(t)} {w:+.2f}" for t, w in wired[sid]) + ".")
         else:
-            note.append(BENCH_WORDS.get(state, state))
-        if f.get("status", "READY") != "READY":
+            note.append(bench_note(state, b["t"] if b else None, f.get("status", "READY")))
+        if f.get("status", "READY") not in ("READY", state):
             note.append(f"Data {f['status'].lower()}: " + _first_sentence(f.get("status_reason"), 110))
-        b = best.get(sid)
         rows.append({
             "id": sid, "label": short_label(sid), "group": f.get("group") or f.get("family"),
             "state": state, "wired_in": [t for t, _ in wired.get(sid, [])],

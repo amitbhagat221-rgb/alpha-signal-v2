@@ -258,7 +258,7 @@ def pick_breakdown(sid, pick_date=None, _frames=None):
             "contributions": comps, "tier_top3": top3}
 
 def pick_drivers(sids, pick_date=None, n=2):
-    """{sid: [{factor, percentile}]}: the `n` factors that lift each stock's score most above a
+    """{sid: [{factor, percentile, inverted}]}: the `n` factors that lift each stock's score most above a
     neutral 50th-percentile result (contribution minus |w| x 0.5, from pick_breakdown, so it matches
     the stock page). `percentile` (0-1) is the standing within the tier in the direction that helps:
     a negative-weight factor at the 10th raw percentile reads 0.9. Factors the registry excludes for
@@ -270,7 +270,8 @@ def pick_drivers(sids, pick_date=None, n=2):
                  if c["eligible"] and c["tier_percentile"] is not None]
         comps.sort(key=lambda c: c["contribution"] - abs(c["weight"]) * config.MISSING_FACTOR_SCORE, reverse=True)
         out[sid] = [{"factor": c["factor"],
-                     "percentile": 1 - c["tier_percentile"] if c["weight"] < 0 else c["tier_percentile"]}
+                     "percentile": 1 - c["tier_percentile"] if c["weight"] < 0 else c["tier_percentile"],
+                     "inverted": c["weight"] < 0}
                     for c in comps[:n]
                     if c["contribution"] > abs(c["weight"]) * config.MISSING_FACTOR_SCORE]
     return out
@@ -424,6 +425,10 @@ def stock(sid):
         "SELECT final_score, rank, pick_date, cap_tier, eligible_coverage, weight_coverage, price_rows, "
         "fundamental_coverage FROM daily_picks WHERE sid = ? ORDER BY pick_date DESC LIMIT 1", [sid])
     s.update({k: v for k, v in pick.items() if k != "cap_tier"})      # stocks.cap_tier is the tier of record
+    # ...except for a stock ranked on the latest pick date in a pickable tier: it is counted in the
+    # tier it was ranked in everywhere (Stocks, Explorer, this page). A stale pick row never counts.
+    if (pick and pick.get("pick_date") == latest_pick_date() and pick.get("cap_tier") in pickable_tiers()):
+        s["cap_tier"] = pick["cap_tier"]
     s["data"] = pick_data(pick, sid, pick.get("pick_date")) if pick else None
     sig = signals(sid)
     if "f_score" in sig:
@@ -441,6 +446,13 @@ def stock(sid):
 # Returns are over TRADING days (rows), the one definition every surface uses:
 # 1m = 22, 3m = 65, 6m = 130, 1y = 252 sessions back. Rows with close <= 0 are skipped.
 RETURN_WINDOWS = (("1m", 22), ("3m", 65), ("6m", 130), ("1y", 252))
+# A return counts only when its rows really span that calendar window: the row N sessions back
+# must be dated within WINDOW_DAYS (+ slack for holidays) of the latest one, and no stretch of
+# more than GAP_DAYS (~10 trading days) without a price may sit inside the window. A stock
+# whose prices stop for two years would otherwise show "1Y +198%" over 3.5 years.
+WINDOW_DAYS = {"1m": 30, "3m": 91, "6m": 182, "1y": 365}
+WINDOW_SLACK_DAYS = 20
+GAP_DAYS = 14
 
 
 def latest_close(sids=None):
@@ -462,15 +474,31 @@ def _price_metrics(df):
     closes = ordered["close"]
     latest = closes.iloc[-1]
     result = {"close_price": round(latest, 2), "price_date": ordered["date"].iloc[-1]}
+    dates = pd.to_datetime(ordered["date"]).reset_index(drop=True)
+    closes = closes.reset_index(drop=True)
+    end = dates.iloc[-1]
+    gap_days = dates.diff().dt.days
     for label, offset in RETURN_WINDOWS:
         if len(closes) > offset:
             old = closes.iloc[-(offset + 1)]
-            if old > 0:
+            span = (end - dates.iloc[-(offset + 1)]).days
+            gaps_in = gap_days.iloc[-offset:]
+            if span > WINDOW_DAYS[label] + WINDOW_SLACK_DAYS or (len(gaps_in) and gaps_in.max() > GAP_DAYS):
+                result["returns_incomplete"] = True      # rows do not cover the window: no return
+            elif old > 0:
                 result[f"return_{label}"] = round((latest / old - 1) * 100, 1)
-    result["high_52w"] = round(closes.max(), 2)
-    result["low_52w"] = round(closes.min(), 2)
+    # 52-week range over the last 365 CALENDAR days, not over however many rows were read
+    year = closes[dates >= end - pd.Timedelta(days=365)]
+    result["high_52w"] = round(year.max(), 2)
+    result["low_52w"] = round(year.min(), 2)
     if result["high_52w"] > 0:
         result["pct_from_52w_high"] = round((latest / result["high_52w"] - 1) * 100, 1)
+    in_year = (dates >= end - pd.Timedelta(days=365)) | (dates.shift(-1) >= end - pd.Timedelta(days=365))
+    yg = gap_days[in_year & (gap_days > GAP_DAYS)]
+    if len(yg):
+        i = int(yg.idxmax())
+        result["price_gap"] = {"from": str(dates.iloc[i - 1].date()), "to": str(dates.iloc[i].date()),
+                               "days": int(yg.max())}
     if len(closes) >= 15:
         delta = closes.diff()
         gain = delta.where(delta > 0, 0.0)

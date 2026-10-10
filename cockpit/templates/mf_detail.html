@@ -208,25 +208,25 @@ table.mini a.link { color:var(--accent); }
                     <div class="score-comp-label">Return base · 0-50</div>
                     <div class="score-comp-pct num">{{ '%.1f' % m.score_3y_cagr_pct if m.score_3y_cagr_pct is not none else '—' }}</div>
                     <div class="score-comp-meta">3Y CAGR {{ m.ret_3y_cagr|pct }} · 6% → 5 pts, 15% → 30 pts, 25%+ → 50 pts</div>
-                    <div class="bar"><div style="width: {{ ((m.score_3y_cagr_pct|default(0))/50*100)|round }}%"></div></div>
+                    <div class="bar"><div style="width: {{ ((m.score_3y_cagr_pct or 0)/50*100)|round }}%"></div></div>
                 </div>
                 <div class="score-comp">
                     <div class="score-comp-label">Sharpe multiplier · 0.5-1.4×</div>
                     <div class="score-comp-pct num">{{ ('%.2f×' % m.score_sharpe_3y_pct) if m.score_sharpe_3y_pct is not none else '—' }}</div>
                     <div class="score-comp-meta">Sharpe 3Y {{ '%.2f' % m.sharpe_3y if m.sharpe_3y is not none else '—' }} · multiplies the return base</div>
-                    <div class="bar"><div style="width: {{ ((m.score_sharpe_3y_pct|default(0.5)-0.5)/0.9*100)|round }}%"></div></div>
+                    <div class="bar"><div style="width: {{ (((m.score_sharpe_3y_pct if m.score_sharpe_3y_pct is not none else 0.5)-0.5)/0.9*100)|round }}%"></div></div>
                 </div>
                 <div class="score-comp">
                     <div class="score-comp-label">Drawdown adj · -15 to +15</div>
                     <div class="score-comp-pct num">{{ m.score_max_dd_pct|signed(1) if m.score_max_dd_pct is not none else '—' }}</div>
                     <div class="score-comp-meta">Max DD {{ m.max_drawdown|pct }} · -50% → -15 pts, -5% → +10 pts</div>
-                    <div class="bar"><div style="width: {{ (((m.score_max_dd_pct|default(0))+15)/30*100)|round }}%"></div></div>
+                    <div class="bar"><div style="width: {{ (((m.score_max_dd_pct or 0)+15)/30*100)|round }}%"></div></div>
                 </div>
                 <div class="score-comp">
                     <div class="score-comp-label">Consistency adj · 0-15</div>
                     <div class="score-comp-pct num">{{ m.score_consistency_pct|signed(1) if m.score_consistency_pct is not none else '—' }}</div>
                     <div class="score-comp-meta">% of rolling 3Y windows beating the peer median · 50% → 5 pts, 90% → 15 pts</div>
-                    <div class="bar"><div style="width: {{ ((m.score_consistency_pct|default(0))/15*100)|round }}%"></div></div>
+                    <div class="bar"><div style="width: {{ ((m.score_consistency_pct or 0)/15*100)|round }}%"></div></div>
                 </div>
             </div>
             <p class="mf-note">Rank in {{ i.category_norm or 'this category' }}: <strong style="color:var(--text-primary);">{{ rank_text(rank) }}</strong>{% if m.as_of_date %} · scored {{ m.as_of_date }}{% endif %}.</p>

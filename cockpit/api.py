@@ -229,13 +229,34 @@ def get_stock_news(sid):
     return [{**r, "source": news_source_name(r["source"])} for r in keep[:5]]
 
 
+def _entity_key(name):
+    """A company name reduced to what identifies it: lower case, no punctuation, 'limited' =
+    'ltd', 'private' = 'pvt'."""
+    import re
+    alias = {"limited": "ltd", "private": "pvt"}
+    words = [alias.get(w, w) for w in re.sub(r"[^a-z0-9 ]", " ", (name or "").lower()).split()]
+    return " ".join(words)
+
+
 def get_bulk_deals(sid):
-    """A6: Recent bulk/block deals for a stock."""
-    return db.rows(
+    """A6: Recent bulk/block deals for a stock. Rows where the client is the company itself
+    (the exchange's own-stock leg) are dropped, and identical rows are shown once."""
+    me = _entity_key((db.one("SELECT name FROM stocks WHERE sid = ?", [sid]) or {}).get("name"))
+    rows = db.rows(
         "SELECT client_name, buy_sell, quantity, price, deal_date, deal_type "
-        "FROM bulk_deals WHERE sid = ? ORDER BY deal_date DESC LIMIT 10",
+        "FROM bulk_deals WHERE sid = ? ORDER BY deal_date DESC, quantity DESC LIMIT 200",
         [sid],
     )
+    seen, out = set(), []
+    for r in rows:
+        if me and _entity_key(r["client_name"]) == me:
+            continue
+        k = (r["deal_date"], _entity_key(r["client_name"]), r["buy_sell"], r["quantity"], r["price"], r["deal_type"])
+        if k in seen:
+            continue
+        seen.add(k)
+        out.append(r)
+    return out[:10]
 
 
 # regulatory_signals names two sectors differently from `stocks` — map both ways so
@@ -656,14 +677,15 @@ def get_heatmap_data():
     them, views.display_tiers), then the non-pickable tiers (MICRO) from `stocks` with score
     None: they are classified and their signals computed, but never ranked into daily_picks."""
     unpickable = views.unpickable_tiers()
-    ph = ",".join("?" * len(unpickable)) or "NULL"
-    df = read_sql(f"""
+    # One rule, shared with the Stocks page: a stock ranked today sits in the tier it was ranked in;
+    # the unpickable tiers (MICRO) hold only the stocks that are not ranked today.
+    df = read_sql("""
         SELECT dp.sid, s.ticker, s.name, dp.final_score as score, dp.cap_tier
         FROM daily_picks dp JOIN stocks s ON dp.sid = s.sid
         WHERE dp.pick_date = ?
-          AND s.cap_tier NOT IN ({ph})
         ORDER BY dp.cap_tier, dp.final_score DESC
-    """, params=[latest_pick_date(), *unpickable])
+    """, params=[latest_pick_date()])
+    ranked_today = set(df["sid"])
     result = {}
     for tier in views.display_tiers():
         tier_df = df[df["cap_tier"] == tier]
@@ -671,6 +693,7 @@ def get_heatmap_data():
     for tier in unpickable:
         rows = read_sql("SELECT sid, ticker, name, NULL AS score FROM stocks "
                         "WHERE cap_tier = ? ORDER BY ticker", params=[tier])
+        rows = rows[~rows["sid"].isin(ranked_today)]
         if not rows.empty:
             result[tier] = rows.to_dict("records")
     return result
@@ -2232,6 +2255,8 @@ def get_pick_outcomes_summary(top_n=10):
         if status == "maturing" and earliest_pick:
             try:  # first row appears ~w trading days (≈ w*7/5 calendar) after the earliest pick
                 eta = (_dt.fromisoformat(earliest_pick) + _td(days=round(w * 7 / 5))).date().isoformat()
+                if eta <= _dt.now().date().isoformat():      # a date already past is no forecast
+                    eta = None
             except Exception:
                 pass
         windows_status.append({"window_days": w, "n_dates": n_dates,
