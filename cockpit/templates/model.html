@@ -1,7 +1,7 @@
 {# /model - is the model working, and should I change anything?
    Data: cockpit/model.py. Tabs: pages.py (health, evidence, library, rules). #}
 {% extends "base.html" %}
-{% from "_components.html" import tab_bar, radio_group %}
+{% from "_components.html" import tab_bar, radio_group, unproven_pill %}
 {% block title %}{{ page_title("Model") }}{% endblock %}
 
 {% block content %}
@@ -28,6 +28,21 @@
 .md-bar > div { flex: 1; height: 6px; background: var(--bg-card-hover); border-radius: 3px; overflow: hidden; }
 .md-bar i { display: block; height: 100%; }
 .md-q { background: var(--bg-card); color: var(--text-primary); border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; font-size: 13px; min-width: 240px; }
+.md-ev { min-width: 760px; }
+.md-1st { display: none; margin-top: 3px; }
+@media (max-width: 768px) {
+    .md-ev { min-width: 0; }
+    .md-ev .md-2nd { display: none; }
+    .md-ev .md-1st { display: block; }
+    .md-ev .md-bar { min-width: 0; }
+    .md-ev td, .md-ev th { padding-left: 4px; padding-right: 4px; }
+    .md-ev .md-bar > div { display: none; }
+    .md-ev .pill { white-space: normal; display: inline-block; text-align: left; }
+    .md-ev { table-layout: fixed; width: 100%; }
+    .md-ev th { white-space: normal; }
+    .md-ev th:nth-child(1) { width: 36%; } .md-ev th:nth-child(2) { width: 24%; } .md-ev th:nth-child(3) { width: 40%; }
+    .md-lib-id { display: none; }
+}
 .md-tools { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
 @media (max-width: 768px) { .md-act { flex-wrap: wrap; } .md-link { margin-left: 74px; } .md-q { min-width: 0; flex: 1; } }
 </style>
@@ -64,7 +79,7 @@
 <div class="grid-3" style="margin-bottom: 16px;">
 {% for t in h.tiers %}
     <div class="card md-tier" style="border-left-color: {{ t.tier|tier_color }};">
-        <h3>{{ t.tier }}</h3>
+        <h3>{{ t.tier|tier_word }} {{ unproven_pill(t.tier) }}</h3>
         <div class="md-lbl" style="margin-bottom: 4px;">Picks against their tier</div>
         <div style="display: flex; gap: 8px; align-items: baseline; font-size: 13px; line-height: 1.5;">
             <span class="pill pill-{{ pill_for[t.verdict.verdict] }}">{{ verdict_word[t.verdict.verdict] }}</span>
@@ -79,11 +94,11 @@
 </div>
 
 <div class="card">
-    <div class="md-lbl">Data behind today's top picks (as of {{ h.coverage.pick_date }})</div>
+    <div class="md-lbl">Data behind today's top picks (as of {{ h.coverage.pick_date|short_date }})</div>
     <p class="md-note" style="margin-top: 6px;">
     {% if h.coverage.n_low %}
         <b>{{ h.coverage.n_low }} of {{ h.coverage.n }}</b> have under {{ h.coverage.threshold }}% of their factor weight backed by real values:
-        {% for p in h.coverage.low %}{{ p.ticker }} ({{ p.tier }}, {{ p.score }}%{% if p.missing %}, missing {{ p.missing|join(', ') }}{% endif %}){% if not loop.last %}; {% endif %}{% endfor %}.
+        {% for p in h.coverage.low %}{{ p.ticker }} ({{ p.tier|tier_word }}, {{ p.score }}%{% if p.missing %}, missing {{ p.missing|join(', ') }}{% endif %}){% if not loop.last %}; {% endif %}{% endfor %}.
     {% else %}
         All {{ h.coverage.n }} top picks have at least {{ h.coverage.threshold }}% of their factor weight backed by real values.
     {% endif %}
@@ -96,30 +111,30 @@
 <div x-show="tab === 'evidence'" x-cloak>
 <div class="card">
     <h2 class="section-title">Why each factor has its weight</h2>
-    <p class="section-desc">{{ counts }}, computed {{ evidence_meta.as_of or 'date unknown' }}. A bar is the factor's share of its tier's total weight;
+    <p class="section-desc">{{ counts }}, computed {{ evidence_meta.as_of|short_date if evidence_meta.as_of else 'date unknown' }}. A bar is the factor's share of its tier's total weight;
         a <span style="color: var(--red);">red bar</span> is an inverted factor (a low value scores high). Long-run t is the test of the factor's rank correlation with the next month's return:
         {{ promotion_bar }} is the bar to be considered, {{ multiple_test_bar }} is the bar once the many factors we tried are allowed for.
         Last-year IC is the same correlation over the latest 12 months (52 weeks for weekly factors); IC runs from -1 to 1 and 0.03 is typical for a working factor.</p>
     <div class="table-wrap">
-    <table class="md-tbl" style="min-width: 760px;">
+    <table class="md-tbl md-ev">
         <thead><tr>
-            <th>Factor</th><th>Weight (share of tier)</th><th class="num">Long-run t</th><th>Against the bars</th>
-            <th class="num">Last-year IC</th><th class="num">Long-run IC</th><th>Flag</th>
+            <th>Factor</th><th>Weight (share of tier)</th><th class="num">Long-run t</th><th class="md-2nd">Against the bars</th>
+            <th class="num md-2nd">Last-year IC</th><th class="num md-2nd">Long-run IC</th><th class="md-2nd">Flag</th>
         </tr></thead>
         <tbody>
         {% set ns = namespace(tier='') %}
         {% for r in evidence %}
             {% if r.tier != ns.tier %}{% set ns.tier = r.tier %}
-            <tr class="grp"><td colspan="7" style="color: {{ r.tier|tier_color }};">{{ r.tier }}</td></tr>
+            <tr class="grp"><td colspan="7" style="color: {{ r.tier|tier_color }};">{{ r.tier|tier_word }} {{ unproven_pill(r.tier) }}</td></tr>
             {% endif %}
             <tr>
-                <td>{{ r.label }}</td>
+                <td>{{ r.label }}{% if r.decayed %}<div class="md-1st"><span class="pill pill-amber">decaying</span></div>{% endif %}</td>
                 <td><div class="md-bar"><div><i style="width: {{ r.bar_pct }}%; background: {{ 'var(--red)' if r.inverted else (r.tier|tier_color) }};"></i></div><span class="mono">{{ r.weight|signed(2) }}</span></div></td>
-                <td class="num">{{ r.t|signed(2) }}{% if r.n_periods %}<div class="md-sub">{{ r.n_periods }} periods</div>{% endif %}</td>
-                <td><span class="pill pill-{{ ev_pill[r.verdict] }}">{{ r.verdict_words }}</span></td>
-                <td class="num">{{ r.ic_recent|signed(3) }}</td>
-                <td class="num">{{ r.ic_all|signed(3) }}</td>
-                <td>{% if r.decayed %}<span class="pill pill-amber">decaying</span>{% elif r.thin %}<span class="pill pill-muted">thin history</span>{% else %}<span class="md-sub">ok</span>{% endif %}</td>
+                <td class="num">{{ r.t|signed(2) }}{% if r.n_periods %}<div class="md-sub">{{ r.n_periods }} periods</div>{% endif %}<div class="md-1st"><span class="pill pill-{{ ev_pill[r.verdict] }}">{{ r.verdict_words }}</span></div></td>
+                <td class="md-2nd"><span class="pill pill-{{ ev_pill[r.verdict] }}">{{ r.verdict_words }}</span></td>
+                <td class="num md-2nd">{{ r.ic_recent|signed(3) }}</td>
+                <td class="num md-2nd">{{ r.ic_all|signed(3) }}</td>
+                <td class="md-2nd">{% if r.decayed %}<span class="pill pill-amber">decaying</span>{% elif r.thin %}<span class="pill pill-muted">thin history</span>{% else %}<span class="md-sub">ok</span>{% endif %}</td>
             </tr>
         {% else %}
             <tr><td colspan="7" class="u-muted" style="padding: 16px;">No wired factors.</td></tr>
@@ -148,10 +163,10 @@
         {% for f in library %}
             <tr data-s="{{ (f.label ~ ' ' ~ f.id ~ ' ' ~ (f.group or '') ~ ' ' ~ f.note)|lower }}"
                 x-show="(st === 'all' || st === '{{ f.state }}' || (st === 'other' && !['WIRED','PROPOSED','LIBRARY'].includes('{{ f.state }}'))) && (!q || $el.dataset.s.includes(q.toLowerCase()))">
-                <td><b>{{ f.label }}</b><div class="md-sub mono">{{ f.id }}{% if f.group %} &middot; {{ f.group }}{% endif %}</div></td>
+                <td><b>{{ f.label }}</b>{% if f.group %}<div class="md-sub">{{ f.group }}</div>{% endif %}</td>
                 <td><span class="pill pill-{{ 'green' if f.state == 'WIRED' else ('blue' if f.state == 'PROPOSED' else 'muted') }}">{{ {'WIRED': 'Wired', 'PROPOSED': 'Candidate', 'LIBRARY': 'Benched', 'BLOCKED': 'Blocked', 'SUPERSEDED': 'Replaced', 'CONTROL': 'Control'}.get(f.state, f.state) }}</span>
-                    {% if f.wired_in %}<div class="md-sub">{{ f.wired_in|join(', ') }}</div>{% endif %}</td>
-                <td class="num">{{ f.best_t|signed(2) }}{% if f.best_tier %}<div class="md-sub">{{ f.best_tier }}</div>{% endif %}</td>
+                    {% if f.wired_in %}<div class="md-sub">{% for t in f.wired_in %}{{ t|tier_word }}{% if not loop.last %}, {% endif %}{% endfor %}</div>{% endif %}</td>
+                <td class="num">{{ f.best_t|signed(2) }}{% if f.best_tier %}<div class="md-sub">{{ f.best_tier|tier_word }}</div>{% endif %}</td>
                 <td class="md-sub" style="min-width: 260px;">{{ f.note }}</td>
             </tr>
         {% endfor %}
@@ -165,17 +180,17 @@
 <div x-show="tab === 'rules'" x-cloak>
 <div class="card" style="margin-bottom: 16px;">
     <h2 class="section-title">Market regime sets the capital split</h2>
-    <p class="section-desc">The volatility index (India VIX, index points) picks the regime and the split of capital across tiers. Now: <b>{{ rules.regime or 'unknown' }}</b>, VIX {{ rules.vix|round(1) if rules.vix is not none else '—' }} points as of {{ rules.vix_asof or '—' }}.
+    <p class="section-desc">The volatility index (India VIX, index points) picks the regime and the split of capital across tiers. Now: <b>{{ rules.regime or 'unknown' }}</b>, VIX {{ rules.vix|round(1) if rules.vix is not none else '—' }} points as of {{ rules.vix_asof|short_date }}.
         The split is the guide in the daily email; the sized book itself is built by risk, so its tier weights differ a little (Book).</p>
     <div class="table-wrap">
     <table class="md-tbl">
-        <thead><tr><th>Regime</th><th>VIX range (points)</th>{% for t in pickable_tiers() %}<th class="num">{{ t|capitalize }} (% of capital)</th>{% endfor %}</tr></thead>
+        <thead><tr><th>Regime</th><th>VIX range (points)</th>{% for t in display_tiers() %}<th class="num">{{ t|tier_word }} (% of capital){% if t in rules.unproven %} <span class="unit">unproven</span>{% endif %}</th>{% endfor %}</tr></thead>
         <tbody>
         {% for r in rules.regimes %}
             <tr class="{{ 'on' if r.active }}">
                 <td><b class="mono">{{ r.name }}</b>{% if r.active %} <span class="pill pill-blue">now</span>{% endif %}</td>
                 <td class="mono">{{ r.vix_lo|round|int }} to {% if r.vix_hi >= 999 %}above{% else %}{{ r.vix_hi|round|int }}{% endif %}</td>
-                {% for t in pickable_tiers() %}<td class="num">{{ r.alloc[t]|pct(0) }}</td>{% endfor %}
+                {% for t in display_tiers() %}<td class="num">{{ r.alloc[t]|pct(0) }}</td>{% endfor %}
             </tr>
         {% endfor %}
         </tbody>
@@ -195,7 +210,9 @@
     </div>
     <p class="md-note">{{ rules.band }}</p>
     {% for line in rules.limits_note %}<p class="md-note">{{ line }}</p>{% endfor %}
-    <p class="md-note"><b>What is not proven:</b> no large-cap factor has shown out-of-sample skill (walk-forward test, Oct 2026), and the Avoid list's veto has not shown an edge (t 0.45, Oct 2026 audit). Treat both as hints, not rules.</p>
+    <p class="md-note"><b>What is not proven:</b>
+        {% for t, why in rules.unproven.items() %}in {{ t|tier_word }}, {{ why }}{% if not loop.last %}; {% endif %}{% endfor %}{% if rules.unproven %}; and {% endif %}{{ rules.evidence.veto_sentence }}.
+        Treat these as hints, not rules.</p>
 </div>
 </div>
 

@@ -3,14 +3,14 @@
 <div class="card" style="margin-top: 14px;">
     <div class="pb-head">
         <h2 class="section-title">Each screen held as a portfolio</h2>
-        {% if bt %}<div class="mono u-muted-11">{{ bt.first_month }} → {{ bt.last_month }} · run {{ bt.generated_at[:10] }}</div>{% endif %}
+        {% if bt %}<div class="mono u-muted-11">{{ bt.first_month|month_text }} → {{ bt.last_month|month_text }} · run {{ bt.generated_at|short_date }}</div>{% endif %}
     </div>
     <div class="section-desc">
         Every month each rule picks its stocks using only what was known that day, held at equal weight for a month, after trading costs.
-        “Tier average” is the average stock of the same size tier that month. Sleeves with under 12 months of history are greyed: too short to judge.
+        “Tier average” is the average stock of the same size tier that month. Screens with under 12 months of history are greyed: too short to judge.
     </div>
     {% if not bt %}
-    <div class="pb-note"><strong>No backtest has been run yet.</strong> Run <span class="mono">python -m tools.playbook_backtest</span>.</div>
+    <div class="pb-note"><strong>Backtest not available.</strong> The forward record below still builds day by day.</div>
     {% else %}
     <div class="pb-note">
         <strong>Read this before the numbers.</strong> The test covers at most one market cycle, uses only companies still listed today,
@@ -23,15 +23,15 @@
             <th>Tier average (%/yr)</th><th>Against tier (%/yr)</th><th>t-stat</th><th>Worst fall (%)</th></tr></thead>
         <tbody>
         {% for s in bt.sleeves %}{{ bt_row(s.label, s.rule, s.stats) }}{% endfor %}
-        {{ bt_row(bt.combined.label, 'every sleeve with enough names that month, equal sleeve weights; not a pick of the sleeves that did well', bt.combined.stats) }}
-        {{ bt_row('Red-flagged stocks (the Avoid list)', bt.flagged.rule ~ ' — a veto is worth having only if these lag their tier; they did not (unproven)', bt.flagged.stats, cost=False) }}
+        {{ bt_row(bt.combined.label, 'every screen with enough names that month, equal weights; not a pick of the screens that did well', bt.combined.stats) }}
+        {{ bt_row(bt.flagged.label, bt.flagged.rule ~ ' — a veto is worth having only if these lag their tier' ~ (': they did.' if ev.veto and ev.veto.edge else ': they did not (unproven).'), bt.flagged.stats, cost=False) }}
         </tbody>
     </table>
     </div>
     <div class="pb-foot">
         {% for s in bt.sleeves %}<div><strong style="color: var(--text-secondary);">{{ s.label }}:</strong> {{ s.caveat }}</div>{% endfor %}
         <div style="margin-top: 6px;">Costs per trade: {% for t, b in bt.costs_bps.items() %}{{ t }} {{ b }} bps{% if not loop.last %} · {% endif %}{% endfor %}.
-        A sleeve is held only in months with at least {{ bt.min_names }} names. Portfolio returns include dividends.
+        A screen is held only in months with at least {{ bt.min_names }} names. Portfolio returns include dividends.
         A t-stat beyond ±2 is unlikely to be chance on its own, but these are several tests on one short period.
 </div>
     </div>
@@ -40,16 +40,16 @@
 <div class="card" style="margin-top: 14px;">
     <h2 class="section-title">Forward record</h2>
     <div class="section-desc">
-        From today, each morning's members of every sleeve are stored as they were, before anyone knows what happens next.
+        From today, each morning's members of every screen are stored as they were, before anyone knows what happens next.
         This is the only evidence here that is free of hindsight and of the survivors-only problem; it needs time.
     </div>
     <div class="table-wrap pb-scroll">
     <table class="pb-table">
-        <thead><tr><th class="l">Sleeve</th><th>Days recorded</th><th>First day</th><th>Latest day</th><th>Stocks on the latest day</th></tr></thead>
+        <thead><tr><th class="l">Screen</th><th>Days recorded</th><th>First day</th><th>Latest day</th><th>Stocks on the latest day</th></tr></thead>
         <tbody>
         {% for x in d.record %}
-        <tr><td class="l strong">{{ x.sleeve }}</td><td class="mono">{{ x.days }}</td><td class="mono u-muted-11">{{ x.first }}</td>
-            <td class="mono u-muted-11">{{ x.last }}</td><td class="mono">{{ x.names }}</td></tr>
+        <tr><td class="l strong">{{ x.sleeve }}</td><td class="mono">{{ x.days }}</td><td class="mono u-muted-11">{{ x.first|short_date }}</td>
+            <td class="mono u-muted-11">{{ x.last|short_date }}</td><td class="mono">{{ x.names }}</td></tr>
         {% else %}<tr><td colspan="5" class="l u-muted-11">Nothing recorded yet — the first record is written after tomorrow's morning run.</td></tr>
         {% endfor %}
         </tbody>

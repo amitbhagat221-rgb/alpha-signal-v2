@@ -374,6 +374,8 @@ def make_templates(dirs, nav=None, role="main"):
     import views
     templates.env.globals["all_tiers"] = views.tiers
     templates.env.globals["pickable_tiers"] = views.pickable_tiers
+    templates.env.globals["display_tiers"] = views.display_tiers
+    templates.env.globals["unproven_tiers"] = views.unproven_tiers
     templates.env.filters.update(FILTERS)
     return templates
 

@@ -75,6 +75,15 @@ def short_date(x):
     return f"{d.day} {d:%b}"
 
 
+def month_text(ym):
+    """'2026-09' (or a full ISO date) -> 'Sep 2026'; not a month -> the text as given."""
+    import datetime as _dt
+    try:
+        return f"{_dt.date.fromisoformat(str(ym)[:7] + '-01'):%b %Y}"
+    except ValueError:
+        return DASH if ym in (None, "") else str(ym)
+
+
 def count(x):
     """A whole-number count with thousands grouped ("3,254"); a float count (rows_affected
     arrives as 3254.0) is rounded, never printed with a decimal. Missing -> "—"."""
@@ -82,7 +91,7 @@ def count(x):
     return DASH if v is None else f"{round(v):,}"
 
 
-FILTERS = {"count": count, "signed": signed, "pct": pct, "inr": inr, "crore": crore, "tone": tone, "short_date": short_date}
+FILTERS = {"count": count, "signed": signed, "pct": pct, "inr": inr, "crore": crore, "tone": tone, "short_date": short_date, "month_text": month_text}
 
 
 # VIX regime → colour name. One map for cockpit, change feed and email; the
@@ -109,7 +118,26 @@ def tier_color(tier):
     return TIER_STYLES.get(tier, ("", "var(--text-muted)"))[1]
 
 
-FILTERS.update({"tier_label": tier_label, "tier_color": tier_color})
+def tier_word(tier):
+    """The tier as one word for prose and pills on the main cockpit: Large / Mid / Small / Micro."""
+    return str(tier).title() if tier else DASH
+
+
+def rank_text(rank, n=None, tier=None):
+    """The one way a rank reads: "#1 of 100 in Large" ("#1 of 100" without a tier, "#1" without a
+    count). `n` is the number ranked in the tier (views.tier_sizes). Missing rank -> "not ranked"."""
+    r = _num(rank)
+    if r is None:
+        return "not ranked"
+    out = f"#{int(r)}"
+    if _num(n):
+        out += f" of {int(_num(n)):,}"
+    if tier:
+        out += f" in {tier_word(tier)}"
+    return out
+
+
+FILTERS.update({"tier_label": tier_label, "tier_color": tier_color, "tier_word": tier_word, "rank_text": rank_text})
 
 
 _MACRO_WORDS = {"iip": "IIP", "nondurables": "non-durables", "usdinr": "USD/INR", "vix": "VIX",

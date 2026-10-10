@@ -33,7 +33,7 @@ PAGES = [
      "icon": "sliders", "section": "Analysis", "short": "Model",
      "tabs": [("health", "Health"), ("evidence", "Evidence"), ("library", "Library"), ("rules", "Rules")]},
     {"path": "/mutual-funds", "id": "mutual-funds", "title": "Funds",
-     "subtitle": "~14k schemes · scored + ranked", "icon": "pie-chart", "section": "Funds", "short": "Funds"},
+     "subtitle": "Scored and ranked by category", "icon": "pie-chart", "section": "Funds", "short": "Funds"},
 ]
 
 # Redirects from the retired URLs (one list, applied in cockpit/app.py). (old path, target).

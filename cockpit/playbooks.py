@@ -31,6 +31,7 @@ from datetime import date, timedelta
 import pandas as pd
 
 import views
+from formatting import month_text
 from cockpit._shared import _persisted_cache
 from db import read_sql, scalar
 
@@ -536,23 +537,18 @@ def say_do():
 # ═══════════════════════════ 10. Portfolios ═══════════════════════════
 
 def portfolios():
-    """The sleeve backtest (tools/playbook_backtest.py → output/playbook_backtest.json) and
-    the state of the forward record. Read from disk: the backtest takes minutes, so it is
-    run from the command line, never on a page load."""
-    import json
-    from tools.playbook_backtest import OUTPUT_PATH
-    bt = json.loads(OUTPUT_PATH.read_text()) if OUTPUT_PATH.exists() else None
+    """The sleeve backtest (tools/playbook_backtest.py -> output/playbook_backtest.json, under the
+    Screens' own names) and the state of the forward record. Read from disk: the backtest takes
+    minutes, so it is never run on a page load."""
+    bt = _backtest()
     rec = read_sql("SELECT sleeve, COUNT(DISTINCT snapshot_date) AS days, MIN(snapshot_date) AS first, MAX(snapshot_date) AS last "
                    "FROM playbook_members GROUP BY sleeve")
     latest = read_sql("SELECT sleeve, COUNT(*) AS n FROM playbook_members WHERE snapshot_date = "
                       "(SELECT MAX(snapshot_date) FROM playbook_members) GROUP BY sleeve")
     names = dict(zip(latest["sleeve"], latest["n"]))
-    labels = {k: v["label"] for k, v in sleeves.SLEEVES.items()} | {"flagged": "Red-flag set"}
-    record = [{"sleeve": labels.get(r.sleeve, r.sleeve), "days": int(r.days), "first": r.first, "last": r.last,
+    record = [{"sleeve": SLEEVE_NAMES.get(r.sleeve, r.sleeve), "days": int(r.days), "first": r.first, "last": r.last,
                "names": int(names.get(r.sleeve, 0))} for r in rec.itertuples()]
     return {"backtest": bt, "record": record}
-
-
 
 
 # ═══════════════════════════ the Ideas page ═══════════════════════════
@@ -566,10 +562,26 @@ MIN_MONTHS = 12                  # a sleeve with fewer months of history is grey
 RANK_EDGE = 0.2                  # top / bottom fifth of a tier count as agreeing / conflicting with the screen
 
 
+# the sleeve behind each screen, under the screen's own name (Track record uses these, not sleeves.SLEEVES labels)
+SLEEVE_NAMES = {SCREEN_SLEEVE[k]: label for k, label in SCREENS} | {
+    "cloning_broad": "Superinvestors (any active individual)", "flagged": "Avoid"}
+SLEEVE_SUB = {"quality": "5-year rule"}          # the rule behind a name, shown beside it
+
+
 def _backtest():
+    """output/playbook_backtest.json with every sleeve under its Screens name, or None when absent."""
     import json
     from tools.playbook_backtest import OUTPUT_PATH
-    return json.loads(OUTPUT_PATH.read_text()) if OUTPUT_PATH.exists() else None
+    if not OUTPUT_PATH.exists():
+        return None
+    bt = json.loads(OUTPUT_PATH.read_text())
+    for sl in bt["sleeves"]:
+        sub = SLEEVE_SUB.get(sl["key"])
+        sl["label"] = SLEEVE_NAMES.get(sl["key"], sl.get("label"))
+        sl["rule"] = f"{sub}: {sl['rule']}" if sub else sl["rule"]
+    bt["combined"]["label"] = "All screens, equal weight, Avoid names removed"
+    bt["flagged"]["label"] = SLEEVE_NAMES["flagged"]
+    return bt
 
 
 def backtest_line(stats, label):
@@ -589,15 +601,48 @@ def backtest_line(stats, label):
             "months": stats["months"], "last": stats["last"], "verdict": verdict}
 
 
+def evidence():
+    """What the backtest says about the screens and the Avoid veto, in one place: Today's advisory
+    line and Model > Rules both read this, so no page types a result of its own.
+    {available, sentence (Today), veto_sentence (Model), beat: [names], n_screens, last, veto: {...}}.
+    Without the backtest file: available False and the plain words 'backtest not available'."""
+    bt = _backtest()
+    if not bt:
+        return {"available": False, "sentence": "Advisory: backtest not available.",
+                "veto_sentence": "the Avoid list's veto cannot be checked, backtest not available",
+                "beat": [], "n_screens": 0, "last": None, "veto": None}
+    lines = [backtest_line(sl["stats"], sl.get("label") or sl.get("key")) for sl in bt["sleeves"] if sl["stats"]]
+    beat = [l["label"] for l in lines if l["verdict"] == "beat its tier"]
+    last = month_text(bt.get("last_month"))
+    if beat:
+        sentence = (f"Advisory: {', '.join(beat)} beat{'s' if len(beat) == 1 else ''} the tier average after costs in the "
+                    f"backtest to {last}; the other screens have not.")
+    else:
+        sentence = f"Advisory: no screen has beaten its tier average after costs in the backtest to {last}."
+    v = bt["flagged"]["stats"]
+    veto = None
+    veto_sentence = "the Avoid list's veto has no backtest result"
+    if v:
+        # a veto earns its place only if the flagged stocks lag their tier by more than chance
+        edge = v["excess_ann"] < 0 and (v["t_stat"] or 0) <= -2
+        veto = {"edge": edge, "t": v["t_stat"], "months": v["months"], "last": month_text(v["last"]),
+                "net": v["net_ann"], "tier": v["bench_ann"]}
+        t = "n/a" if v["t_stat"] is None else f"{v['t_stat']:+.2f}"
+        veto_sentence = (f"the Avoid list's veto {'has' if edge else 'has not'} shown an edge "
+                         f"(flagged stocks vs their tier: t {t}, {v['months']} months to {month_text(v['last'])})")
+    return {"available": True, "sentence": sentence, "veto_sentence": veto_sentence, "beat": beat,
+            "n_screens": len(lines), "last": last, "veto": veto}
+
+
 def model_ranks():
     """{sid: {rank, n, pct, tier}} — each stock's place in its tier in the latest ranking
     (rank 1 = best; pct = rank / names in the tier), and the pick date it comes from."""
     df = views.picks(gated=False)
     if df.empty:
         return {"as_of": None, "by_sid": {}}
-    n = df.groupby("cap_tier")["rank"].transform("count")
-    by_sid = {r.sid: {"rank": int(r.rank), "n": int(k), "pct": round(r.rank / k, 3), "tier": r.cap_tier}
-              for r, k in zip(df.itertuples(), n)}
+    size = views.tier_sizes(views.latest_pick_date())
+    by_sid = {r.sid: {"rank": int(r.rank), "n": size[r.cap_tier], "pct": round(r.rank / size[r.cap_tier], 3), "tier": r.cap_tier}
+              for r in df.itertuples()}
     return {"as_of": views.latest_pick_date(), "by_sid": by_sid}
 
 
@@ -684,7 +729,8 @@ def avoid(ranks=None):
     ranks = ranks or model_ranks()
     rows = with_rank(d["rows"], ranks)
     return {**d, "rows": rows, "ranks_as_of": ranks["as_of"],
-            "line": backtest_line(bt["flagged"]["stats"], "Red-flagged stocks") if bt else None}
+            "line": backtest_line(bt["flagged"]["stats"], "Avoid") if bt else None,
+            "veto": evidence()["veto"]}
 
 
 def stock_chips(sid):
@@ -695,7 +741,7 @@ def stock_chips(sid):
     verdict = next((d for d in sd.load() if d.get("sid") == sid), None)
     members = read_sql("SELECT sleeve FROM playbook_members WHERE sid = ? AND snapshot_date = "
                        "(SELECT MAX(snapshot_date) FROM playbook_members)", params=[sid])
-    labels = {k: v["label"] for k, v in sleeves.SLEEVES.items()} | {"flagged": "Red-flag set"}
+    labels = SLEEVE_NAMES
     return {"lynch": {"key": cat[0], "label": cat[1]} if cat else None,
             "say_do": {"verdict": verdict["verdict"], "label": VERDICT_LABELS.get(verdict["verdict"], verdict["verdict"]),
                        "summary": verdict["summary"]} if verdict else None,

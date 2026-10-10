@@ -1,7 +1,7 @@
 {# /book - what do I hold (on paper), how risky is it, is it making money?
    Data: cockpit/book.py. Tabs: pages.py (book, risk, track-record). #}
 {% extends "base.html" %}
-{% from "_components.html" import tab_bar %}
+{% from "_components.html" import tab_bar, tier_pill, unproven_pill %}
 {% block title %}{{ page_title("Book") }}{% endblock %}
 
 {% block content %}
@@ -42,7 +42,6 @@
 @media (max-width: 768px) { .bk-hide-sm { display: none; } .bk-only-sm { display: block !important; margin-top: 3px; line-height: 2; } .bk-tbl { min-width: 0; } .bk-tbl th, .bk-tbl td { padding: 6px 3px; } .bk-tbl th { font-size: 10px; letter-spacing: 0; } .bk-only-sm .pill { padding: 1px 5px; font-size: 10px; } .bk-decile { grid-template-columns: repeat(5, minmax(0, 1fr)); } .bk-row .name { width: 110px; } }
 </style>
 
-{% macro tier_pill(tier) -%}<span class="pill" style="color: {{ tier|tier_color }};">{{ tier }}</span>{%- endmacro %}
 {% set pill_for = {'beat': 'green', 'lagged': 'red', 'mixed': 'amber', 'early': 'muted', 'none': 'muted'} %}
 {% set verdict_word = {'beat': 'Beat', 'lagged': 'Lagged', 'mixed': 'Mixed', 'early': 'Too early', 'none': 'No data'} %}
 
@@ -62,11 +61,11 @@
             <div class="bk-big mono {{ book.expected_return_pct|tone(zero='score-red') }}">{{ book.expected_return_pct|pct(1, signed=True) }}</div>
         </div>
         <div class="bk-sub">Position-weighted upside to the {{ book.er_basis }}, {{ book.er_names }} of {{ book.n }} names covered
-            ({{ book.er_weight_pct|pct(0) }} of the book), as of {{ book.pick_date }}. One to five analysts per name, and no dividends:
+            ({{ book.er_weight_pct|pct(0) }} of the book), as of {{ book.pick_date|short_date }}. One to five analysts per name, and no dividends:
             a guide, not a forecast.</div>
     </div>
-    <p class="bk-note"><b>{{ book.n }} names</b>, rebuilt each morning (latest {{ book.asof }}).
-        {% for t, w in book.tier_pct.items() %}{{ t }} <span class="mono">{{ w|pct(0) }}</span>{% if not loop.last %} &middot; {% endif %}{% endfor %}
+    <p class="bk-note"><b>{{ book.n }} names</b>, rebuilt each morning (latest {{ book.asof|short_date }}).
+        {% for t, w in book.tier_pct.items() %}{{ t|tier_word }} <span class="mono">{{ w|pct(0) }}</span>{% if t in book.unproven %} <span class="unit">(unproven)</span>{% endif %}{% if not loop.last %} &middot; {% endif %}{% endfor %}
         of the book by weight, {{ book.top_n.values()|first }} names per tier.</p>
     <p class="bk-note">{{ book.band }}</p>
 </div>
@@ -85,7 +84,7 @@
         <thead><tr>
             <th>Stock</th><th class="bk-hide-sm">Tier</th>
             <th class="num">Weight %</th>
-            <th class="num">Score /100</th>
+            <th class="num bk-hide-sm">Score /100</th>
             <th class="num">Rank</th>
             <th class="num">Upside to target %</th>
             <th class="bk-hide-sm">Status</th>
@@ -94,20 +93,20 @@
         {% for r in book.rows %}
         <tr>
             <td><a href="/stocks/{{ r.sid }}">{{ r.ticker }}</a><div class="bk-sub bk-hide-sm">{{ r.name }}</div>
-                <div class="bk-only-sm" style="display: none;">{{ tier_pill(r.cap_tier) }} {% if r.left_top %}<span class="pill {{ 'pill-red' if r.below_exit else 'pill-amber' }}">{{ r.left_top }}</span>{% else %}<span class="pill pill-green">in top picks</span>{% endif %}</div></td>
+                <div class="bk-only-sm" style="display: none;">{{ tier_pill(r.cap_tier) }} <span class="pill pill-{{ r.status[1] }}">{{ r.status[0] }}</span></div></td>
             <td class="bk-hide-sm">{{ tier_pill(r.cap_tier) }}</td>
             <td class="num">{{ r.weight_pct|pct(1) }}</td>
-            <td class="num {{ 'score-green' if r.score is not none and r.score >= 70 else ('score-amber' if r.score is not none and r.score >= 50 else 'score-red') }}">{{ r.score if r.score is not none else '—' }}</td>
-            <td class="num {{ 'score-red' if r.below_exit else '' }}">{{ ('#' ~ r.rank) if r.rank is not none else '—' }}</td>
+            <td class="num bk-hide-sm {{ 'score-green' if r.score is not none and r.score >= 70 else ('score-amber' if r.score is not none and r.score >= 50 else 'score-red') }}">{{ r.score if r.score is not none else '—' }}</td>
+            <td class="num {{ 'score-red' if r.below_exit else '' }}">{{ ('#' ~ r.rank) if r.rank is not none else '—' }}{% if r.rank is not none %}<div class="bk-sub bk-hide-sm">of {{ r.tier_size|count }}</div>{% endif %}</td>
             <td class="num {{ r.pt_upside_pct|tone(zero='score-red') }}">{{ r.pt_upside_pct|pct(0, signed=True) }}{% if r.n_analysts %}<div class="bk-sub">{{ r.n_analysts }} analyst{{ '' if r.n_analysts == 1 else 's' }}</div>{% endif %}</td>
-            <td class="bk-hide-sm">{% if r.left_top %}<span class="pill {{ 'pill-red' if r.below_exit else 'pill-amber' }}">{{ r.left_top }}</span>{% else %}<span class="pill pill-green">in top picks</span>{% endif %}</td>
+            <td class="bk-hide-sm"><span class="pill pill-{{ r.status[1] }}">{{ r.status[0] }}</span>{% if r.left_top %}<div class="bk-sub">{{ r.left_top }}</div>{% endif %}</td>
         </tr>
         {% endfor %}
         </tbody>
     </table>
     </div>
 </div>
-<p class="bk-sub" style="margin-top: 8px;">Weights as of {{ book.asof }}; score, rank and status as of {{ book.pick_date }}. Rank is within the tier. Upside is to the median target = the middle of the analysts' 12-month targets. Today's picks: <a href="/" style="color: var(--accent);">Today</a>.</p>
+<p class="bk-sub" style="margin-top: 8px;">Weights as of {{ book.asof|short_date }}; score, rank and status as of {{ book.pick_date|short_date }}. Rank is within the tier. Upside is to the median target = the middle of the analysts' 12-month targets. Today's picks: <a href="/" style="color: var(--accent);">Today</a>.</p>
 {% else %}
 <div class="card"><p class="u-muted">No sized book yet. It is built each morning after the daily picks; check back after the next run.</p></div>
 {% endif %}
@@ -117,7 +116,7 @@
 <div x-show="tab === 'risk'" x-cloak>
 {% if risk %}
 <div class="card" style="margin-bottom: 16px; border-left: 4px solid var(--accent);">
-    <div class="bk-lbl">Where the book is concentrated (as of {{ risk.asof }})</div>
+    <div class="bk-lbl">Where the book is concentrated (as of {{ risk.asof|short_date }})</div>
     <p style="margin: 6px 0 0; font-size: 14px; line-height: 1.5;">{{ risk.summary }}</p>
 </div>
 
@@ -125,7 +124,7 @@
     <div class="card">
         <div class="bk-lbl" style="margin-bottom: 10px;">Share of the book by sector (%)</div>
         {% for sector, w in risk.sectors %}
-        <div class="bk-row"><span class="name" title="{{ sector }}">{{ sector }}</span>
+        <div class="bk-row"><span class="name">{{ sector }}</span>
             <div class="bk-bar"><div style="width: {{ [w * 100 / risk.cap_sector_pct, 100]|min }}%;"></div></div>
             <span class="val mono">{{ w|pct(0) }}</span></div>
         {% endfor %}
@@ -134,7 +133,7 @@
     <div class="card">
         <div class="bk-lbl" style="margin-bottom: 10px;">Share of the book by tier (%)</div>
         {% for t, w in risk.tier_pct.items() %}
-        <div class="bk-row"><span class="name">{{ t }}</span>
+        <div class="bk-row"><span class="name">{{ t|tier_word }}{% if t in risk.unproven %} <span class="unit">(unproven)</span>{% endif %}</span>
             <div class="bk-bar"><div style="width: {{ w }}%; background: {{ t|tier_color }};"></div></div>
             <span class="val mono">{{ w|pct(0) }}</span></div>
         {% endfor %}
@@ -176,17 +175,25 @@
 <div x-show="tab === 'track-record'" x-cloak>
 {% set s = track.summary %}
 <div class="card" style="margin-bottom: 16px; border-left: 4px solid var(--accent);">
-    <div class="bk-lbl">Did the top {{ track.top_n }} of each tier beat the tier? (picks to {{ track.last_pick_date or '—' }})</div>
+    <div class="bk-lbl">Did the top {{ track.top_n }} of each tier beat the tier? (picks to {{ track.last_pick_date|short_date }})</div>
     <div style="margin-top: 6px;">
     {% for v in track.verdicts %}
     <div class="bk-verdict"><span class="pill pill-{{ pill_for[v.verdict] }}">{{ verdict_word[v.verdict] }}</span><span>{{ v.text }}</span></div>
     {% endfor %}
     </div>
+    {% if track.wide_verdicts %}
+    <div class="bk-lbl" style="margin-top: 12px;">The wider basket: top {{ track.wide_top_n }} of each tier</div>
+    <div style="margin-top: 4px;">
+    {% for v in track.wide_verdicts %}
+    <div class="bk-verdict"><span class="pill pill-{{ pill_for[v.verdict] }}">{{ verdict_word[v.verdict] }}</span><span>{{ v.text }}</span></div>
+    {% endfor %}
+    </div>
+    {% endif %}
     <ul class="bk-caveats" style="margin-top: 10px;">
         <li>These are picks made <b>before the {{ track.model_change_text }} model change</b>: the first read on the current weights is about {{ track.first_read.strftime('%-d %b') }}.</li>
         <li>Returns use <b>unadjusted closing prices</b>, so a split or bonus can distort a single name.</li>
         <li>Pick days overlap (a stock stays in the basket for days), so read the sign and size, not a t-stat.</li>
-        {% if track.bench_stale %}<li>The index benchmark is {{ s.bench_staleness_days }} days old (latest {{ s.bench_max_date }}); the newest picks have no excess return yet.</li>{% endif %}
+        {% if track.bench_stale %}<li>The index benchmark is {{ s.bench_staleness_days }} days old (latest {{ s.bench_max_date|short_date }}); the newest picks have no excess return yet.</li>{% endif %}
     </ul>
 </div>
 
@@ -226,12 +233,12 @@
 <div class="card" style="margin-bottom: 16px;">
     <h2 class="section-title">Does a better rank earn more? ({{ s.headline_window }} trading days)</h2>
     <p class="section-desc">Average forward return in % by rank decile within each tier: decile 1 = best ranked, 10 = worst. The model works if the left side beats the right.</p>
-    {% for tier in pickable_tiers() %}
+    {% for tier in display_tiers() %}
         {% set deciles = s.rank_deciles | selectattr('cap_tier', 'equalto', tier) | list %}
         {% if deciles %}
         {% set d1 = deciles[0].avg_fwd %}{% set d10 = deciles[-1].avg_fwd %}
         <div style="margin-bottom: 12px;">
-            <div class="bk-sub">{{ tier_pill(tier) }} best minus worst decile:
+            <div class="bk-sub">{{ tier_pill(tier, true) }} best minus worst decile:
                 <b class="mono {{ ((d1 - d10) if d1 is not none and d10 is not none else none)|tone }}">{{ ((d1 - d10) if d1 is not none and d10 is not none else none)|signed(2) }} pp</b></div>
             <div class="bk-decile">
                 {% for d in deciles %}<div class="{{ 'up' if d.avg_fwd is not none and d.avg_fwd > 0 else ('down' if d.avg_fwd is not none and d.avg_fwd < 0 else '') }}">D{{ d.decile }}<b class="mono">{{ d.avg_fwd|signed(1) }}</b></div>{% endfor %}
@@ -247,13 +254,13 @@
     <h2 class="section-title">Top {{ track.top_n }} basket, by pick day ({{ s.headline_window }} trading days)</h2>
     <p class="section-desc">Each bar is one weekday's basket, average forward return in %. Green gained, red lost.</p>
     <div class="grid-3">
-    {% for tier in pickable_tiers() %}
+    {% for tier in display_tiers() %}
         {% set ts = s.time_series | selectattr('cap_tier', 'equalto', tier) | list %}
         {% set values = ts | map(attribute='avg_fwd_top_n') | reject('none') | list %}
         <div class="bk-ts">
-            <div class="bk-sub" style="display: flex; justify-content: space-between;"><span>{{ tier_pill(tier) }}</span>
+            <div class="bk-sub" style="display: flex; justify-content: space-between;"><span>{{ tier_pill(tier, true) }}</span>
                 <span class="mono">avg {{ ((values|sum)/(values|length))|signed(2) if values else '—' }}% over {{ ts|length }} pick days</span></div>
-            <svg viewBox="0 0 200 80" preserveAspectRatio="none" role="img" aria-label="{{ tier }} top {{ track.top_n }} basket forward return per pick day">
+            <svg viewBox="0 0 200 80" preserveAspectRatio="none" role="img" aria-label="{{ tier|tier_word }} top {{ track.top_n }} basket forward return per pick day">
                 {% if values %}
                 {% set vmax = (values | map('abs') | max) or 1 %}
                 {% set bw = 200.0 / (ts|length or 1) %}
@@ -265,7 +272,7 @@
                 <line x1="0" y1="40" x2="200" y2="40"/>
                 {% endif %}
             </svg>
-            <div class="bk-sub" style="display: flex; justify-content: space-between;"><span class="mono">{{ ts[0].pick_date if ts else '—' }}</span><span class="mono">{{ ts[-1].pick_date if ts else '—' }}</span></div>
+            <div class="bk-sub" style="display: flex; justify-content: space-between;"><span class="mono">{{ ts[0].pick_date|short_date if ts else '—' }}</span><span class="mono">{{ ts[-1].pick_date|short_date if ts else '—' }}</span></div>
         </div>
     {% endfor %}
     </div>

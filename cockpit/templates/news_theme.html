@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_news_theme.html" import styles, heat_chip, sector_chips %}
+{% from "_news_theme.html" import styles, heat_chip, sector_chips, stale_chip %}
 {% block title %}{{ page_title("Markets") }}{% endblock %}
 
 {% block content %}
@@ -9,8 +9,9 @@
 
 <div class="ns-head" style="margin-top: 12px;">
     <h1 class="ns-h1">{{ t.title }}</h1>
-    <div>{% if t.status == 'retired' %}<span class="mono ns-chip" style="color: var(--text-muted); border-color: var(--text-muted);">Over for now</span> {% endif %}{{ heat_chip(t.heat) }}</div>
+    <div>{% if t.status == 'retired' %}<span class="mono ns-chip" style="color: var(--text-muted); border-color: var(--text-muted);">Over for now</span> {% endif %}{% if t.stale %}{{ stale_chip() }} {% endif %}{{ heat_chip(t.heat) }}</div>
 </div>
+{% if t.stale %}{% for s in t.since %}<div class="ns-since" style="margin-top: 8px;">Since the note: <a href="/markets#today">{{ s.headline }}</a></div>{% endfor %}{% endif %}
 <div class="mono u-muted-11">{{ t.n7 }} headline{{ '' if t.n7 == 1 else 's' }} this week · {{ t.n_total }} filed in all{% if t.updated_at %} · note of {{ t.updated_at|short_date }}{% endif %}</div>
 
 {% if not t.stands_now %}
@@ -34,7 +35,7 @@
 <div class="card">
 {% for h in t.timeline %}
     <div style="display: flex; gap: 12px; padding: 7px 0; {% if not loop.first %}border-top: 1px solid var(--border);{% endif %}">
-        <div class="mono u-muted-11" style="min-width: 78px;">{{ h.as_of }}</div>
+        <div class="mono u-muted-11" style="min-width: 78px;">{{ h.as_of|short_date }}</div>
         <div class="ns-text">{{ h.what_changed }}</div>
     </div>
 {% else %}
@@ -43,12 +44,12 @@
 </div>
 
 <div class="ns-sec-head"><h2 class="section-title">Headlines</h2></div>
-<div class="section-desc">Newest {{ t.articles|length }} of {{ t.n_total }} headlines (each story once), to {{ t.articles[0].day if t.articles else "—" }}.</div>
+<div class="section-desc">Newest {{ t.articles|length }} of {{ t.n_total }} headlines (each story once), to {{ t.articles[0].day|short_date if t.articles else "—" }}.</div>
 <div class="card">
 {% for a in t.articles %}
     <div style="padding: 7px 0; {% if not loop.first %}border-top: 1px solid var(--border);{% endif %}">
         <a href="{{ a.url }}" target="_blank" rel="noopener noreferrer" class="ns-text" style="color: var(--text-primary); text-decoration: none;">{{ a.title }}</a>
-        <div class="mono u-muted-11">{{ a.source }} · {{ a.day }}</div>
+        <div class="mono u-muted-11">{{ a.source }} · {{ a.day|short_date }}</div>
         {% if a.one_liner %}<div class="u-muted-11">{{ a.one_liner }}</div>{% endif %}
     </div>
 {% else %}

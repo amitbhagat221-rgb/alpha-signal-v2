@@ -1,16 +1,13 @@
 {% extends "base.html" %}
+{% from "_components.html" import tier_pill, unproven_pill, book_pill, data_pill, target_text %}
 
 {# Today: one question - is there anything to buy, sell or check? Data: cockpit/today.py (build). #}
 {% macro driver_text(drivers) -%}
 {%- for d in drivers %}{{ d.label }} <span class="mono">top {{ [100 - d.percentile, 1]|max }}%</span>{% if not loop.last %} &middot; {% endif %}{% endfor -%}
 {%- endmacro %}
 
-{% macro target_text(t) -%}
-{% if t %}<span class="{{ t.upside_pct|tone(zero='score-red') }} mono">{{ t.upside_pct|pct(0, signed=True) }}</span> <span class="unit">median target{% if t.analysts %}, {{ t.analysts|int }} analyst{{ "" if t.analysts|int == 1 else "s" }}{% endif %}</span>{% else %}<span class="unit">no analyst target</span>{% endif %}
-{%- endmacro %}
-
-{% macro data_pill(d) -%}
-{% if d %}<span class="pill pill-{{ d.colour }}">Data {{ d.score }}% &middot; {{ d.word }}</span>{% endif %}
+{% macro target_of(t) -%}
+{{ target_text(t.upside_pct if t else none, t.analysts if t else none) }}
 {%- endmacro %}
 
 {% block content %}
@@ -53,31 +50,31 @@
 <div class="card td-top {{ 'act' if n_act else ('check' if t.checks else '') }}">
     <h1>{{ t.headline }}</h1>
     <div class="td-sub">
-        {% if t.has_book %}Sized book of {{ t.book_n }} names, {{ t.book_asof }}{% if t.prev_asof %} vs {{ t.prev_asof }}{% endif %}.
+        {% if t.has_book %}Sized book of {{ t.book_n }} names, {{ t.book_asof|short_date }}{% if t.prev_asof %} vs {{ t.prev_asof|short_date }}{% endif %}.
         {% else %}No sized book has been built yet.{% endif %}
-        Advisory: no playbook sleeve has beaten its tier after costs yet.
+        {{ t.evidence.sentence }}
     </div>
 </div>
 
 {# ── buy / sell / resize ── #}
 {% if t.buys or t.sells or t.resizes %}
-<h2 class="section-title td-sec">Changes to the book <span class="unit">{{ t.book_asof }} &middot; weight = share of the book</span></h2>
-<p class="td-note">The book enters a name at the top 5 of its tier and sells only below rank {{ t.exit_rank }}, so one slot changes at a time.</p>
+<h2 class="section-title td-sec">Changes to the book <span class="unit">{{ t.book_asof|short_date }} &middot; weight = share of the book</span></h2>
+<p class="td-note">The book enters a name at the top {{ t.top_n }} of its tier and sells only below rank {{ t.exit_rank }}, so one slot changes at a time.</p>
 <div class="td-list">
     {% for kind, label, rows in (("buy", "Buy", t.buys), ("sell", "Sell", t.sells), ("resize", "Resize", t.resizes)) %}
     {% for r in rows %}
     <a href="{{ r.href }}" class="card td-row {{ kind }}">
         <div class="td-l1">
-            <div class="td-id"><span class="td-kind {{ kind }}">{{ label }}</span><span class="mono td-tick">{{ r.ticker }}</span><span class="pill">{{ r.tier }}</span></div>
+            <div class="td-id"><span class="td-kind {{ kind }}">{{ label }}</span><span class="mono td-tick">{{ r.ticker }}</span>{{ tier_pill(r.tier) }}</div>
             <span class="mono">{% if kind == 'resize' %}{{ (r.prev_weight * 100)|round(1) }}% &rarr; {{ (r.weight * 100)|round(1) }}%{% else %}{{ (r.weight * 100)|round(1) }}%{% endif %}</span>
         </div>
         <div class="td-l2">
             {% if kind == 'buy' %}
                 {% if r.drivers %}<span>{{ driver_text(r.drivers) }}</span>{% endif %}
-                {{ target_text(r.target) }}{{ data_pill(r.data) }}
+                {{ target_of(r.target) }}{{ data_pill(r.data) }}
             {% elif kind == 'sell' %}
-                <span>{% if r.now_rank %}Now #{{ r.now_rank|int }} in {{ r.now_tier or r.tier }}, below the book's hold line{% else %}No longer ranked in {{ r.tier }}{% endif %}</span>
-                {{ target_text(r.target) }}
+                <span>{% if r.now_rank %}Now {{ r.now_rank|rank_text(r.now_of, r.now_tier or r.tier) }}, below the book's hold line{% else %}No longer ranked in {{ r.tier|tier_word }}{% endif %}</span>
+                {{ target_of(r.target) }}
             {% else %}
                 <span>Weight moved by {{ ((r.weight - r.prev_weight) * 100)|abs|round(1) }} pp of the book</span>
             {% endif %}
@@ -95,7 +92,7 @@
     {% for c in t.checks %}
     <a href="{{ c.href }}" class="card td-row check">
         <div class="td-l1">
-            <div class="td-id"><span class="mono td-tick">{{ c.ticker }}</span><span class="pill">{{ c.tier }}</span><span style="font-weight:600;">{{ c.text }}</span></div>
+            <div class="td-id"><span class="mono td-tick">{{ c.ticker }}</span>{{ tier_pill(c.tier) }}<span style="font-weight:600;">{{ c.text }}</span></div>
             <span class="unit">{{ c.source }}</span>
         </div>
         <div class="td-why">{{ c.why }}</div>
@@ -112,31 +109,31 @@
 <a href="/model#rules" class="card td-regime">
     <span class="regime-badge {{ g.color }}">{{ g.regime }}</span>
     <span>India VIX <span class="mono">{{ "%.1f"|format(g.vix_latest) }}</span> <span class="unit">pts, 20-day avg {{ "%.1f"|format(g.vix_20d_avg) }}</span></span>
-    <span>Allocation <span class="mono">{{ "%.0f"|format(g.alloc_large * 100) }}</span><span class="unit">% large</span> / <span class="mono">{{ "%.0f"|format(g.alloc_mid * 100) }}</span><span class="unit">% mid</span> / <span class="mono">{{ "%.0f"|format(g.alloc_small * 100) }}</span><span class="unit">% small</span></span>
-    <span class="unit">{{ (g.updated_at or '')[:10] }} &middot; rules &rarr;</span>
+    <span>Allocation{% for tier in display_tiers() %} <span class="mono">{{ "%.0f"|format(g['alloc_' ~ (tier|lower)] * 100) }}</span><span class="unit">% {{ tier|tier_word|lower }}</span>{% if tier in t.unproven %} <span class="unit">(unproven)</span>{% endif %}{% if not loop.last %} /{% endif %}{% endfor %}</span>
+    <span class="unit">{{ g.updated_at|short_date }} &middot; rules &rarr;</span>
 </a>
 
 {# ── top picks ── #}
-<h2 class="section-title td-sec">Top picks <span class="unit">{{ t.pick_date }} &middot; score out of 100 &middot; ranked within each tier</span></h2>
+<h2 class="section-title td-sec">Top picks <span class="unit">{{ t.pick_date|short_date }} &middot; score out of 100 &middot; ranked within each tier</span></h2>
 <div class="td-tiers">
     {% for tier, rows in t.picks.items() %}
     <div class="card" style="padding: 0;">
         <div class="td-tier-h" style="border-left: 3px solid {{ tier|tier_color }};">
-            <span>{{ tier }} CAP</span>
-            {% if tier == 'LARGE' %}<span class="unit" style="color: var(--amber);">unproven: no factor with out-of-sample skill</span>{% endif %}
+            <span>{{ tier|tier_word }} <span class="unit">top {{ t.top_n }} of {{ t.tier_sizes.get(tier)|count }} ranked</span></span>
+            {{ unproven_pill(tier) }}
         </div>
         {% for r in rows %}
         <a href="{{ r.href }}" class="td-pick">
             <span class="rk mono">{{ r.rank|int }}</span>
-            <span><span class="mono td-tick">{{ r.ticker }}</span>{% if r.in_book %} <span class="pill pill-blue">in book</span>{% endif %}</span>
+            <span><span class="mono td-tick">{{ r.ticker }}</span>{% if r.in_book %} {{ book_pill() }}{% endif %}</span>
             <span class="mono sc {{ 'score-green' if r.score >= 0.7 else ('score-amber' if r.score >= 0.5 else 'score-red') }}">{{ (r.score * 100)|round|int }}<span class="unit">/100</span></span>
             <span class="sub">
                 {% if r.drivers %}<span>{{ driver_text(r.drivers) }}</span>{% endif %}
-                {{ target_text(r.target) }}{{ data_pill(r.data) }}
+                {{ target_of(r.target) }}{{ data_pill(r.data) }}
             </span>
         </a>
         {% else %}
-        <div class="u-muted-11" style="padding: 12px 14px;">No picks in this tier on {{ t.pick_date }}.</div>
+        <div class="u-muted-11" style="padding: 12px 14px;">No picks in {{ tier|tier_word }} on {{ t.pick_date|short_date }}.</div>
         {% endfor %}
     </div>
     {% endfor %}
@@ -150,7 +147,7 @@
     <div class="td-mv-body">
         {% for tier in t.picks %}{% if t.movers.get(tier) %}
         <div>
-            <div class="unit" style="margin-bottom:4px;">{{ tier }} &middot; places moved within the tier, {{ t.prev_pick_date }} to {{ t.pick_date }}, ranks in the top 20</div>
+            <div class="unit" style="margin-bottom:4px;">{{ tier|tier_word }} &middot; places moved within the tier, {{ t.prev_pick_date|short_date }} to {{ t.pick_date|short_date }}, ranks in the top 20</div>
             {% for m in t.movers[tier][:8] %}
             <a href="/stocks/{{ m.sid }}" class="r" style="text-decoration:none;color:inherit;">
                 <span class="mono">{{ m.ticker }}</span>

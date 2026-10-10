@@ -115,7 +115,7 @@ def test_say_do_and_chips(monkeypatch):
     monkeypatch.setattr(stocks.views, "native_rows", lambda *a, **k: [{"sleeve": "quality"}, {"sleeve": "flagged"}])
     c = stocks.stock_chips("X")
     assert [f["tone"] for f in c["flags"]] == ["red", "amber"] and "Heavy pledging" in c["flags"][0]["tip"]
-    assert [p["label"] for p in c["plays"]] == ["Quality"] and c["category"]["label"] == "Fast growers"
+    assert [p["label"] for p in c["plays"]] == ["Compounders"] and c["category"]["label"] == "Fast growers"
 
 
 def test_data_wording_is_the_neutral_fifty_rule():

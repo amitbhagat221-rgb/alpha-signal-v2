@@ -4,6 +4,11 @@
 <span class="mono ns-chip ns-heat ns-heat-{{ heat|lower }}">{{ label }}</span>
 {%- endmacro %}
 
+{# the one flag a theme carries when a newer Today story may supersede its weekly note (api.annotate_themes) #}
+{% macro stale_chip() -%}
+<span class="mono ns-chip ns-stale">Out of date, see today's story</span>
+{%- endmacro %}
+
 {% macro sector_chips(gains, loses) -%}
 {% for n in gains %}<a href="/markets?sector={{ n|urlencode }}#industries" class="ns-sec ns-up" aria-label="{{ n }} may gain">&#9650; {{ n }}</a>{% endfor %}
 {% for n in loses %}<a href="/markets?sector={{ n|urlencode }}#industries" class="ns-sec ns-down" aria-label="{{ n }} may lose">&#9660; {{ n }}</a>{% endfor %}
@@ -38,6 +43,7 @@
 .ns-src .ns-s { margin-top: 3px; overflow-wrap: anywhere; }
 .ns-src a { color: var(--text-secondary); text-decoration: none; position: relative; z-index: 2; }
 .ns-moved { color: var(--blue); border-color: var(--blue); }
+.ns-stale { color: var(--amber); border-color: var(--amber); }
 </style>
 {% endmacro %}
 

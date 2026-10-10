@@ -23,6 +23,8 @@ import os
 #   "/path"        the page, whatever tab is open
 #   "/path#tab"    that tab of the page (the banner script swaps the link when the
 #                  URL hash changes, since the server never sees the hash)
+#   "/path?k=v"    the page while its query has k=v (a toggle kept in the URL); the banner
+#                  script swaps the link when the query changes too
 # The old value may itself carry a hash ("/system#pipeline"). Query strings are carried over.
 COMPARE = {
     "main": {
@@ -34,12 +36,15 @@ COMPARE = {
         "/markets#industries": "/sectors",
         "/markets#search": "/news/all",
         "/ideas": "/playbooks",
-        "/ideas#screens": "/playbooks",          # strict compounders (the toggle) = live /multibagger
+        "/ideas?strict=1": "/multibagger",       # the Strict toggle of Compounders (state in the URL) = live /multibagger
+        "/ideas#screens": "/playbooks",
         "/ideas#avoid": "/playbooks",
         "/ideas#track-record": "/playbooks",
         "/book": "/portfolio",
         "/book#track-record": "/model/outcomes",
         "/model": "/model",
+        "/model#evidence": "/model#backtests",   # live tabs: weights, regime, gate, backtests, validation
+        "/model#rules": "/model#gate",
         "/mutual-funds": "/mutual-funds",
     },
     "ops": {
@@ -85,20 +90,26 @@ def compare_target(role, path):
             if path.startswith(new_prefix):
                 old = old_prefix + path[len(new_prefix):]
                 break
-    tabs = {k[len(path):]: v for k, v in table.items() if k.startswith(path + "#")}
+    tabs = {k[len(path):]: v for k, v in table.items() if k.startswith((path + "#", path + "?"))}
     return old, tabs
 
 
 def compare_links(role, path, query=""):
     """What the banner needs: the live URL of this page and of each of its tabs."""
     old, tabs = compare_target(role, path)
+    from urllib.parse import parse_qsl
+    have = set(parse_qsl(query))
+    for suffix, target in tabs.items():          # "?k=v" entries: the page with that toggle on
+        if suffix.startswith("?") and set(parse_qsl(suffix[1:])) <= have:
+            old, query = target, "&".join(f"{k}={v}" for k, v in parse_qsl(query) if (k, v) not in set(parse_qsl(suffix[1:])))
+            break
     base, qs = live_base(role), (f"?{query}" if query else "")
 
-    def full(target):
+    def full(target, keep_query=True):
         p, _, h = target.partition("#")
-        return f"{base}{p}{qs}" + (f"#{h}" if h else "")
+        return f"{base}{p}{qs if keep_query else ''}" + (f"#{h}" if h else "")
 
-    return {"url": full(old), "tabs": {h: full(t) for h, t in tabs.items()}}
+    return {"url": full(old), "tabs": {h: full(t, not h.startswith("?")) for h, t in tabs.items()}}
 
 
 def banner(role, request):

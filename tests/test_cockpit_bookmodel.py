@@ -68,7 +68,7 @@ def test_left_top_picks_flag():
 
 def test_allocation_flag_only_when_no_factor_clears_the_bar():
     none = {"n_proven": 0, "best_t": 2.8}
-    assert "LARGE gets 40%" in model.allocation_flag("LARGE", 0.4, "NORMAL", none)
+    assert "Large gets 40%" in model.allocation_flag("LARGE", 0.4, "NORMAL", none)
     assert "out-of-sample" in model.allocation_flag("LARGE", 0.4, "NORMAL", none)
     assert model.allocation_flag("SMALL", 0.3, "NORMAL", {"n_proven": 4, "best_t": 5.8}) is None
 

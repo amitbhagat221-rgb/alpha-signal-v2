@@ -1,6 +1,6 @@
 {% macro stock_cell(s) %}
 <a href="/stocks/{{ s.sid }}" class="pb-stock">{{ s.ticker }}</a>
-<div class="pb-name">{{ s.name }}{% if s.tier %} · {{ s.tier }}{% endif %}</div>
+<div class="pb-name">{{ s.name }}{% if s.tier %} · {{ s.tier|tier_word }}{% endif %}</div>
 {% endmacro %}
 
 {% macro num(x, d=1, suffix='', signed=False) %}{% if x is not none %}{{ ("{:" ~ ("+" if signed else "") ~ ",." ~ d ~ "f}").format(x) }}{{ suffix }}{% else %}—{% endif %}{% endmacro %}
@@ -21,14 +21,14 @@
 {# red-flag count from the avoid list, shown beside every screen #}
 {% macro flag_cell(n) %}{% if n %}{{ chip(n ~ (' flag' if n == 1 else ' flags'), 'var(--red)' if n >= 2 else 'var(--amber)') }}{% else %}<span class="u-muted-11">none</span>{% endif %}{% endmacro %}
 
-{# the stock's place in its tier in the model's latest ranking; green = top fifth (agrees), red = bottom fifth (conflicts).
-   data-v is the place as a share of the tier, so the column sorts across tiers #}
-{% macro rank_cell(s) %}<td class="mono" {% if s.rank is not none %}data-v="{{ (s.rank_pct * 100)|round(1) }}"{% endif %}>{% if s.rank is none %}<span class="u-muted-11" title="Not ranked by the model">—</span>{% elif s.agrees %}{{ chip('#' ~ s.rank ~ ' of ' ~ s.rank_n, 'var(--green)') }}{% elif s.conflicts %}{{ chip('#' ~ s.rank ~ ' of ' ~ s.rank_n, 'var(--red)') }}{% else %}#{{ s.rank }} of {{ s.rank_n }}{% endif %}</td>{% endmacro %}
+{# the stock's place in its tier in the model's latest ranking, in words as well as colour: "model agrees" = top fifth
+   of the tier (green), "model disagrees" = bottom fifth (red). data-v is the place as a share of the tier, so the column sorts across tiers #}
+{% macro rank_cell(s) %}<td class="mono" {% if s.rank is not none %}data-v="{{ (s.rank_pct * 100)|round(1) }}"{% endif %}>{% if s.rank is none %}<span class="u-muted-11">not ranked</span>{% elif s.agrees %}{{ chip(s.rank|rank_text(s.rank_n), 'var(--green)') }}<div class="u-muted-10">model agrees</div>{% elif s.conflicts %}{{ chip(s.rank|rank_text(s.rank_n), 'var(--red)') }}<div class="u-muted-10">model disagrees</div>{% else %}{{ s.rank|rank_text(s.rank_n) }}{% endif %}</td>{% endmacro %}
 
 {# one result line from the Portfolios backtest: after-costs return against the tier average #}
 {% macro result_line(l, tab_link=True) %}
 {% if l %}<div class="pb-note"><strong>{{ l.label }}: {{ l.net|pct(1) }}/yr after costs vs tier {{ l.tier|pct(1) }}/yr</strong>
-    (t {{ '%+.2f'|format(l.t) if l.t is not none else '—' }}, {{ l.months }} months to {{ l.last }}) — {{ l.verdict }}.
+    (t {{ '%+.2f'|format(l.t) if l.t is not none else '—' }}, {{ l.months }} months to {{ l.last|month_text }}) — {{ l.verdict }}.
     {% if tab_link %}<a href="#track-record" class="pb-clear" @click.prevent="tab = 'track-record'; loaded['track-record'] = true; history.pushState(null, '', '#track-record')">Track record</a>{% endif %}</div>
 {% else %}<div class="pb-note">No backtest result for this screen yet.</div>{% endif %}
 {% endmacro %}
@@ -45,7 +45,7 @@
 {% set short = st and st.months < 12 %}
 <tr{% if short %} class="pb-short"{% endif %}><td class="l"><span class="pb-stock">{{ label }}</span>{% if short %} <span class="pill pill-muted">{{ st.months }} months only</span>{% endif %}{% if sub %}<div class="pb-name" style="max-width: 420px; white-space: normal;">{{ sub }}</div>{% endif %}</td>
 {% if st %}
-    <td class="mono u-muted-11">{{ st.first }} → {{ st.last }}<br>{{ st.months }} months</td>
+    <td class="mono u-muted-11">{{ st.first|month_text }} → {{ st.last|month_text }}<br>{{ st.months }} months</td>
     <td class="mono">{{ num(st.avg_names, 0) }}</td>
     <td class="mono">{% if cost %}{{ st.gross_ann|pct(1, signed=True) }}{% else %}—{% endif %}</td>
     <td class="mono u-muted-11">{% if cost %}{{ st.cost_ann|pct(1) }}{% else %}—{% endif %}</td>
