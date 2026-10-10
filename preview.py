@@ -33,7 +33,9 @@ COMPARE = {
         "/markets#industries": "/sectors",
         "/markets#search": "/news/all",
         "/ideas": "/playbooks",
-        "/ideas#screens": "/multibagger",
+        "/ideas#screens": "/playbooks",          # strict compounders (the toggle) = live /multibagger
+        "/ideas#avoid": "/playbooks",
+        "/ideas#track-record": "/playbooks",
         "/book": "/portfolio",
         "/book#track-record": "/model/outcomes",
         "/model": "/model",

@@ -1,13 +1,13 @@
-{% from "_pb_macros.html" import stock_cell, num, chip, flag_cell, change_cell, investor, bt_row, th, list_tools with context %}
+{% from "_ideas_macros.html" import num, bt_row with context %}
 {% set bt = d.backtest %}
 <div class="card" style="margin-top: 14px;">
     <div class="pb-head">
-        <h2 class="section-title">Each playbook as a portfolio</h2>
+        <h2 class="section-title">Each screen held as a portfolio</h2>
         {% if bt %}<div class="mono u-muted-11">{{ bt.first_month }} → {{ bt.last_month }} · run {{ bt.generated_at[:10] }}</div>{% endif %}
     </div>
     <div class="section-desc">
-        Every month, each playbook's rule picks its stocks using only what was known that day; they are held at equal weight for a
-        month, after trading costs. “Tier average” is the average stock of the same size tier that month; “Index” is the Nifty Smallcap 250.
+        Every month each rule picks its stocks using only what was known that day, held at equal weight for a month, after trading costs.
+        “Tier average” is the average stock of the same size tier that month. Sleeves with under 12 months of history are greyed: too short to judge.
     </div>
     {% if not bt %}
     <div class="pb-note"><strong>No backtest has been run yet.</strong> Run <span class="mono">python -m tools.playbook_backtest</span>.</div>
@@ -15,25 +15,25 @@
     <div class="pb-note">
         <strong>Read this before the numbers.</strong> The test covers at most one market cycle, uses only companies still listed today,
         and the tier average is flattered by small companies that became big. It can show that a rule did not work in this period;
-        it cannot prove that one does. The rules were fixed before any return was looked at and have not been tuned.
+        it cannot prove that one does. The rules were fixed before any return was looked at.
     </div>
     <div class="table-wrap pb-scroll">
     <table class="pb-table">
-        <thead><tr><th class="l">Portfolio</th><th>Period</th><th>Stocks held</th><th>Before costs / yr</th><th>Costs / yr</th><th>After costs / yr</th>
-            <th>Tier average / yr</th><th>Index / yr</th><th>Against tier average</th><th>t-stat</th><th>Months ahead</th><th>Worst fall</th></tr></thead>
+        <thead><tr><th class="l">Portfolio</th><th>Period</th><th>Stocks held</th><th>Before costs (%/yr)</th><th>Costs (%/yr)</th><th>After costs (%/yr)</th>
+            <th>Tier average (%/yr)</th><th>Against tier (%/yr)</th><th>t-stat</th><th>Worst fall (%)</th></tr></thead>
         <tbody>
         {% for s in bt.sleeves %}{{ bt_row(s.label, s.rule, s.stats) }}{% endfor %}
         {{ bt_row(bt.combined.label, 'every sleeve with enough names that month, equal sleeve weights; not a pick of the sleeves that did well', bt.combined.stats) }}
-        {{ bt_row('Red-flagged stocks', bt.flagged.rule ~ ' — a veto is worth having only if these lag their tier', bt.flagged.stats, cost=False) }}
+        {{ bt_row('Red-flagged stocks (the Avoid list)', bt.flagged.rule ~ ' — a veto is worth having only if these lag their tier; they did not (unproven)', bt.flagged.stats, cost=False) }}
         </tbody>
     </table>
     </div>
     <div class="pb-foot">
         {% for s in bt.sleeves %}<div><strong style="color: var(--text-secondary);">{{ s.label }}:</strong> {{ s.caveat }}</div>{% endfor %}
         <div style="margin-top: 6px;">Costs per trade: {% for t, b in bt.costs_bps.items() %}{{ t }} {{ b }} bps{% if not loop.last %} · {% endif %}{% endfor %}.
-        A sleeve is held only in months with at least {{ bt.min_names }} names. The index is a price index (no dividends); portfolio returns include dividends.
+        A sleeve is held only in months with at least {{ bt.min_names }} names. Portfolio returns include dividends.
         A t-stat beyond ±2 is unlikely to be chance on its own, but these are several tests on one short period.
-        Superinvestors and say-vs-do have no history to test and appear only in the forward record below.</div>
+</div>
     </div>
     {% endif %}
 </div>

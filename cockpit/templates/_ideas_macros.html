@@ -1,6 +1,6 @@
 {% macro stock_cell(s) %}
-<a href="/explorer/{{ s.sid }}" class="pb-stock">{{ s.ticker }}</a>
-<div class="pb-name">{{ s.name }}</div>
+<a href="/stocks/{{ s.sid }}" class="pb-stock">{{ s.ticker }}</a>
+<div class="pb-name">{{ s.name }}{% if s.tier %} · {{ s.tier }}{% endif %}</div>
 {% endmacro %}
 
 {% macro num(x, d=1, suffix='', signed=False) %}{% if x is not none %}{{ ("{:" ~ ("+" if signed else "") ~ ",." ~ d ~ "f}").format(x) }}{{ suffix }}{% else %}—{% endif %}{% endmacro %}
@@ -18,8 +18,20 @@
     <button type="button" class="pb-clear" x-show="q || f" x-cloak @click="q = ''; f = ''; apply()">Clear</button>
 </div>{% endmacro %}
 
-{# red-flag count from the avoid list, shown beside every other screen #}
+{# red-flag count from the avoid list, shown beside every screen #}
 {% macro flag_cell(n) %}{% if n %}{{ chip(n ~ (' flag' if n == 1 else ' flags'), 'var(--red)' if n >= 2 else 'var(--amber)') }}{% else %}<span class="u-muted-11">none</span>{% endif %}{% endmacro %}
+
+{# the stock's place in its tier in the model's latest ranking; green = top fifth (agrees), red = bottom fifth (conflicts).
+   data-v is the place as a share of the tier, so the column sorts across tiers #}
+{% macro rank_cell(s) %}<td class="mono" {% if s.rank is not none %}data-v="{{ (s.rank_pct * 100)|round(1) }}"{% endif %}>{% if s.rank is none %}<span class="u-muted-11" title="Not ranked by the model">—</span>{% elif s.agrees %}{{ chip('#' ~ s.rank ~ ' of ' ~ s.rank_n, 'var(--green)') }}{% elif s.conflicts %}{{ chip('#' ~ s.rank ~ ' of ' ~ s.rank_n, 'var(--red)') }}{% else %}#{{ s.rank }} of {{ s.rank_n }}{% endif %}</td>{% endmacro %}
+
+{# one result line from the Portfolios backtest: after-costs return against the tier average #}
+{% macro result_line(l, tab_link=True) %}
+{% if l %}<div class="pb-note"><strong>{{ l.label }}: {{ l.net|pct(1) }}/yr after costs vs tier {{ l.tier|pct(1) }}/yr</strong>
+    (t {{ '%+.2f'|format(l.t) if l.t is not none else '—' }}, {{ l.months }} months to {{ l.last }}) — {{ l.verdict }}.
+    {% if tab_link %}<a href="#track-record" class="pb-clear" @click.prevent="tab = 'track-record'; loaded['track-record'] = true; history.pushState(null, '', '#track-record')">Track record</a>{% endif %}</div>
+{% else %}<div class="pb-note">No backtest result for this screen yet.</div>{% endif %}
+{% endmacro %}
 
 {% macro change_cell(h) %}
 {% if h.change == 'new' %}{{ chip('NEW', 'var(--blue)') }}
@@ -29,37 +41,6 @@
 {% else %}<span class="u-muted-11">–</span>{% endif %}
 {% endmacro %}
 
-{% macro investor(inv, index) %}
-<details class="pb-inv">
-    <summary>
-        <span class="mono pb-idx">{{ index }}</span>
-        <span class="pb-inv-name">{{ inv.name }}</span>
-        <span class="mono pb-sub">{{ inv.n }} stocks</span>
-        {% if inv.n_new %}{{ chip(inv.n_new ~ ' new', 'var(--blue)') }}{% endif %}
-        {% if inv.n_up %}{{ chip(inv.n_up ~ ' added', 'var(--accent)') }}{% endif %}
-        {% if inv.n_down %}{{ chip(inv.n_down ~ ' trimmed', 'var(--amber)') }}{% endif %}
-        {% if inv.below_1pct %}{{ chip(inv.below_1pct|length ~ ' below 1%', 'var(--text-muted)') }}{% endif %}
-    </summary>
-    <div class="table-wrap pb-scroll pb-inv-body">
-    {% if inv.filed_as %}<div class="pb-foot" style="margin: 0 0 6px;">Filed as: {{ inv.filed_as|join(' · ') }}</div>{% endif %}
-    <table class="pb-table">
-        <thead><tr><th class="l">Stock</th><th class="l">Tier</th><th>Holding</th><th class="c">Since last filing</th><th>Quarter</th></tr></thead>
-        <tbody>
-        {% for h in inv.holdings %}
-        <tr><td class="l">{{ stock_cell(h) }}</td><td class="l mono u-muted-11">{{ h.tier or '–' }}</td>
-            <td class="mono">{{ num(h.pct, 2, '%') }}</td><td class="c">{{ change_cell(h) }}</td>
-            <td class="mono u-muted-11">{{ h.quarter }}</td></tr>
-        {% endfor %}
-        </tbody>
-    </table>
-    {% if inv.below_1pct %}
-    <div class="pb-foot">No longer named above 1% (sold, or fell under the line):
-        {% for g in inv.below_1pct %}<a href="/explorer/{{ g.sid }}" class="mono" style="color: var(--text-secondary); text-decoration: none;">{{ g.ticker }}</a> <span class="mono">({{ num(g.pct, 2, '%') }} before)</span>{% if not loop.last %} · {% endif %}{% endfor %}
-    </div>
-    {% endif %}
-    </div>
-</details>
-{% endmacro %}
 {% macro bt_row(label, sub, st, cost=True) %}
 {% set short = st and st.months < 12 %}
 <tr{% if short %} class="pb-short"{% endif %}><td class="l"><span class="pb-stock">{{ label }}</span>{% if short %} <span class="pill pill-muted">{{ st.months }} months only</span>{% endif %}{% if sub %}<div class="pb-name" style="max-width: 420px; white-space: normal;">{{ sub }}</div>{% endif %}</td>
@@ -70,12 +51,10 @@
     <td class="mono u-muted-11">{% if cost %}{{ st.cost_ann|pct(1) }}{% else %}—{% endif %}</td>
     <td class="mono strong">{{ st.net_ann|pct(1, signed=True) }}</td>
     <td class="mono">{{ st.bench_ann|pct(1, signed=True) }}</td>
-    <td class="mono">{{ st.index_ann|pct(1, signed=True) }}</td>
     <td class="mono strong" style="color: {{ 'var(--green)' if st.excess_ann > 0 else 'var(--red)' }};">{{ st.excess_ann|pct(1, signed=True) }}</td>
     <td class="mono">{% if st.t_stat is not none %}{{ '%+.2f'|format(st.t_stat) }}{% else %}—{% endif %}</td>
-    <td class="mono">{{ st.hit_rate|pct(0) }}</td>
     <td class="mono">{{ st.max_drawdown|pct(0) }}</td>
 {% else %}
-    <td colspan="11" class="l u-muted-11">No month had enough names to hold.</td>
+    <td colspan="9" class="l u-muted-11">No month had enough names to hold.</td>
 {% endif %}</tr>
 {% endmacro %}

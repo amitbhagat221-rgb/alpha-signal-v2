@@ -162,7 +162,34 @@ def markets_page(request: Request):
 
 @app.get("/ideas", response_class=HTMLResponse)
 def ideas_page(request: Request):
-    return _coming(request, "ideas")
+    """Ideas: Screens (one table per chip, first chip rendered here) · Avoid · Track record."""
+    from cockpit import playbooks
+    entry = next(p for p in pages.PAGES if p["id"] == "ideas")
+    return templates.TemplateResponse(request, "ideas.html", {
+        "page": "ideas", "tabs": entry["tabs"], "screens": playbooks.SCREENS,
+        "d": playbooks.screen("insiders"), "r": playbooks.rules()})
+
+
+@app.get("/partial/ideas/screen/{key}", response_class=HTMLResponse)
+def ideas_screen(request: Request, key: str, strict: int = 0):
+    """One screen's table, fetched the first time its chip is opened."""
+    from cockpit import playbooks
+    if key not in dict(playbooks.SCREENS):
+        raise HTTPException(404, "unknown screen")
+    return templates.TemplateResponse(request, "_ideas_screen.html", {
+        "d": playbooks.screen(key, strict=bool(strict)), "r": playbooks.rules()})
+
+
+@app.get("/partial/ideas/avoid", response_class=HTMLResponse)
+def ideas_avoid(request: Request):
+    from cockpit import playbooks
+    return templates.TemplateResponse(request, "_ideas_avoid.html", {"d": playbooks.avoid(), "r": playbooks.rules()})
+
+
+@app.get("/partial/ideas/track", response_class=HTMLResponse)
+def ideas_track(request: Request):
+    from cockpit import playbooks
+    return templates.TemplateResponse(request, "_ideas_track.html", {"d": playbooks.portfolios(), "r": playbooks.rules()})
 
 
 @app.get("/book", response_class=HTMLResponse)
@@ -413,37 +440,6 @@ def model_outcomes_page(request: Request, n: int = 10):
 @app.get("/api/model/outcomes")
 def api_model_outcomes(n: int = 10):
     return api.get_pick_outcomes_summary(top_n=n)
-
-
-# Cockpit v2: this URL now redirects (pages.REDIRECTS); the function below is kept, undecorated, as the data function for Ideas.
-def multibagger_page(request: Request):
-    """Multibagger watchlist — the SEPARATE quality-gated funnel (plan 0008),
-    kept OUT of daily_picks. Honest framing: the gates are the product (a
-    junk-stripped watchlist); the ranking edge is validated weak/regime-dependent
-    (ADR 0039), surfaced via the regime banner."""
-    overview = api.get_multibagger_overview()
-    return templates.TemplateResponse(request, "multibagger.html", {
-        "page": "multibagger", "o": overview,
-    })
-
-
-# Cockpit v2: this URL now redirects (pages.REDIRECTS); the function below is kept, undecorated, as the data function for Ideas.
-def playbooks_page(request: Request):
-    """Investor Playbooks — filters, events and watchlists in the style of well-known
-    investors (avoid list, insider buying, compounders, superinvestor holdings).
-    Separate from daily_picks; each tab states its own rule."""
-    from cockpit import playbooks
-    return templates.TemplateResponse(request, "playbooks.html", {
-        "page": "playbooks", "d": playbooks.tab_data("avoid"), "r": playbooks.rules()})
-
-
-@app.get("/partial/playbooks/{tab}", response_class=HTMLResponse)
-def playbooks_tab(request: Request, tab: str):
-    """One playbook tab's body, fetched the first time the tab is opened."""
-    from cockpit import playbooks
-    if tab not in playbooks.TABS:
-        raise HTTPException(404, "unknown playbook tab")
-    return templates.TemplateResponse(request, f"_pb_{tab}.html", {"d": playbooks.tab_data(tab), "r": playbooks.rules()})
 
 
 # NOTE: /flow, /command, /system, /sql moved to cockpit_ops (port 3001)
