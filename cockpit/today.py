@@ -14,7 +14,7 @@ plain rows so tests need no database.
 
 import config
 import views
-from cockpit import api
+from cockpit import api, playbooks
 from cockpit._shared import _ttl_cache
 
 RESIZE_MIN = 0.01        # a weight moving by >= 1 pp of the book is a resize (below it: noise)
@@ -22,12 +22,6 @@ RESULTS_DAYS = 7
 MOVER_MIN = 5            # rank places, same threshold as the diff engine
 MOVER_TOP = 20           # only moves that touch the top 20 of a tier matter to a reader of picks
 TOP_N = 5                # picks shown per tier
-
-
-def tier_order():
-    """Pickable tiers, LARGE last: the tier with no factor that has out-of-sample skill."""
-    ts = views.pickable_tiers()
-    return [t for t in ts if t != "LARGE"] + [t for t in ts if t == "LARGE"]
 
 
 def diff_books(cur, prev, resize_min=RESIZE_MIN):
@@ -143,6 +137,7 @@ def build():
     top_sids = [s["sid"] for t in pub.values() for s in t]
     sids = list(dict.fromkeys([r["sid"] for r in book_rows] + top_sids + [r["sid"] for r in sells]))
     ac = api.get_analyst_consensus_batch(sids)
+    sizes = views.tier_sizes(pick_date)
     drivers = views.pick_drivers([r["sid"] for r in buys] + top_sids, pick_date)
 
     def line(sid, base):
@@ -150,7 +145,8 @@ def build():
         data = views.pick_data(rk) if rk else None
         return {**base, "sid": sid, "href": f"/stocks/{sid}", "target": _target(ac.get(sid)), "data": data,
                 "drivers": _drivers(drivers.get(sid, []), labels), "in_book": sid in in_book,
-                "score": rk.get("final_score"), "now_rank": rk.get("rank")}
+                "score": rk.get("final_score"), "now_rank": rk.get("rank"),
+                "now_of": sizes.get(rk.get("cap_tier"))}
 
     buy_rows = [line(r["sid"], {"ticker": r["ticker"], "tier": r["cap_tier"], "weight": r["weight"],
                                 "rank": r["rank"]}) for r in buys]
@@ -172,7 +168,7 @@ def build():
         c["href"] = f"/stocks/{c['sid']}" + ("#forensic" if c["kind"] == "forensic" else "")
 
     picks = {t: [line(s["sid"], {"ticker": s["ticker"], "tier": t, "rank": s["rank"], "name": s.get("name")})
-                 for s in pub.get(t, [])] for t in tier_order()}
+                 for s in pub.get(t, [])] for t in views.display_tiers()}
 
     prev_date = dates[1] if len(dates) > 1 else None
     prev_picks = views.picks(prev_date, gated=False).to_dict("records") if prev_date else []
@@ -186,4 +182,6 @@ def build():
         "regime": api.get_regime(), "picks": picks, "movers": movers,
         "mover_count": sum(len(v) for v in movers.values()), "prev_pick_date": prev_date,
         "exit_rank": config.PORTFOLIO["hrp"]["rebalance"]["rank_exit"],
+        "evidence": playbooks.evidence(), "unproven": views.unproven_tiers(),
+        "top_n": TOP_N, "tier_sizes": sizes,
     }

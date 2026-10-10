@@ -4,7 +4,7 @@ Alpha Signal Cockpit — data layer for Stocks (/stocks screener and the stock p
   universe()        every ranked stock (latest daily_picks) plus the unranked tiers, one row each
   screen(params)    filter + sort + page that universe, state read from the URL query
   stock_chips(sid)  the small facts the stock page shows as chips: red flags, avoid list,
-                    say-vs-do verdict, Lynch category, playbook memberships
+                    say-vs-do verdict, Lynch category, screen memberships
 
 Reads named view functions only (views.py, cockpit/api.py, cockpit/playbooks.py). Ranking facts
 come from daily_picks via views.picks (ungated: the screener lists every ranked stock, like the
@@ -24,10 +24,10 @@ from validators.plausibility import PT_CLOSE_RATIO
 
 PAGE_SIZE = 100
 
-# Short pill text for the playbook sleeves (sleeves.SLEEVES carries the long label).
-PLAY_SHORT = {"quality": "Quality", "deep_value": "Deep value", "breakouts": "Breakout",
-              "insiders": "Insider buying", "cloning": "Cloned", "cloning_broad": "Cloned"}
-# sleeves a stock shows as a "play" pill (the red-flag set is a flag, not a play)
+# Pill text for the screens: the Ideas chip names (playbooks.SLEEVE_NAMES), broad cloning under the same name.
+PLAY_SHORT = {k: playbooks.SLEEVE_NAMES[k] for k in ("quality", "deep_value", "breakouts", "insiders", "cloning")} | {
+    "cloning_broad": playbooks.SLEEVE_NAMES["cloning"]}
+# screens a stock shows as a pill (the Avoid screen is a flag, not a screen to buy from)
 PLAY_ORDER = ("quality", "deep_value", "breakouts", "insiders", "cloning", "cloning_broad")
 
 SORTS = {                      # key -> (label, default direction)
@@ -74,7 +74,7 @@ def universe():
     moves = _rank_changes(today, yesterday) if not today.empty else {}
     stocks = read_sql("SELECT sid, ticker, name, sector, cap_tier FROM stocks")
     ranked = {r.sid: r for r in today.itertuples()}
-    tier_size = today.groupby("cap_tier").size().to_dict() if not today.empty else {}
+    tier_size = views.tier_sizes(as_of) if as_of else {}
 
     close = {sid: c for sid, (c, _) in views.latest_close().items()}      # all sids: one grouped read, not 2,400 windows
     targets = {r["sid"]: r["price_target_median"] for r in views.native_rows(
@@ -120,7 +120,7 @@ def universe():
     for r in rows:
         r["flagged"] = bool(r["avoid"] or r["forensic"] or r["veto"])
     return {"as_of": as_of, "prev_date": dates[1] if len(dates) > 1 else None, "rows": rows,
-            "tiers": views.tiers(), "unpickable": views.unpickable_tiers(),
+            "tiers": views.display_tiers() + views.unpickable_tiers(), "unpickable": views.unpickable_tiers(),
             "sectors": sorted({r["sector"] for r in rows if r["sector"]})}
 
 
@@ -129,13 +129,14 @@ def _truthy(v):
 
 
 def screen(params):
-    """The screener for the URL query `params` (a mapping of strings): tier, micro, sector, book,
+    """The screener for the URL query `params` (a mapping of strings): tier, unranked, sector, book,
     flagged, q, sort, dir, page. Returns the page of rows plus everything the template needs to
     draw the controls and the links (state lives in the URL, nothing in the browser)."""
     u = universe()
     tier = (params.get("tier") or "").upper()
     sector, q = params.get("sector") or "", (params.get("q") or "").strip()
-    book, flagged, micro = _truthy(params.get("book")), _truthy(params.get("flagged")), _truthy(params.get("micro"))
+    book, flagged = _truthy(params.get("book")), _truthy(params.get("flagged"))
+    unranked = _truthy(params.get("unranked")) or _truthy(params.get("micro"))      # "micro" = the old name of the toggle
     sort = params.get("sort") if params.get("sort") in SORTS else "rank"
     direction = params.get("dir") if params.get("dir") in ("asc", "desc") else SORTS[sort][1]
     try:
@@ -147,8 +148,8 @@ def screen(params):
     rows = u["rows"]
     if tier in u["tiers"]:
         rows = [r for r in rows if r["tier"] == tier]
-    elif not micro:
-        rows = [r for r in rows if r["tier"] not in unpick]
+    if not unranked and tier not in unpick:       # the default view is exactly the ranked stocks
+        rows = [r for r in rows if r["ranked"]]
     if sector:
         rows = [r for r in rows if r["sector"] == sector]
     if book:
@@ -180,11 +181,11 @@ def screen(params):
     total = len(rows)
     pages = max(1, -(-total // PAGE_SIZE))
     page = min(page, pages)
-    chosen = {"tier": tier if tier in u["tiers"] else "", "micro": micro, "sector": sector, "book": book,
+    chosen = {"tier": tier if tier in u["tiers"] else "", "unranked": unranked, "sector": sector, "book": book,
               "flagged": flagged, "q": q, "sort": sort, "dir": direction}
     def link(**change):
         """The /stocks URL for the current state with `change` applied (page resets unless given)."""
-        state = {"tier": chosen["tier"], "micro": "1" if micro else "", "sector": sector, "book": "1" if book else "",
+        state = {"tier": chosen["tier"], "unranked": "1" if unranked else "", "sector": sector, "book": "1" if book else "",
                  "flagged": "1" if flagged else "", "q": q, "sort": sort if sort != "rank" else "",
                  "dir": direction if (sort != "rank" or direction != SORTS["rank"][1]) else ""}
         state.update({k: ("" if v is None else str(v)) for k, v in change.items()})
@@ -197,10 +198,13 @@ def screen(params):
             "total": total, "page": page, "pages": pages, "page_size": PAGE_SIZE, "chosen": chosen,
             "tiers": u["tiers"], "unpickable": sorted(unpick), "sectors": u["sectors"],
             "n_ranked": sum(r["ranked"] for r in u["rows"]), "n_unranked": sum(not r["ranked"] for r in u["rows"]),
+            "n_micro": sum(not r["ranked"] and r["tier"] in unpick for r in u["rows"]),
+            "n_gate": sum(not r["ranked"] and r["tier"] not in unpick for r in u["rows"]),
+            "unproven": views.unproven_tiers(),
             "n_book": sum(r["book"] for r in u["rows"]),
             "n_flagged": sum(r["flagged"] and r["ranked"] for r in u["rows"]),
             "sorts": SORTS,
-            "default_view": not (chosen["tier"] or micro or sector or book or flagged or q)}
+            "default_view": not (chosen["tier"] or unranked or sector or book or flagged or q)}
 
 
 def rank_move(sid):
@@ -240,7 +244,7 @@ def say_do_for(sid):
 
 def stock_chips(sid):
     """What the stock page's Overview shows as chips, each {label, tone, tip}: the red flags, the avoid
-    list, the say-vs-do verdict, the Lynch category and the playbook memberships. Chips never repeat
+    list, the say-vs-do verdict, the Lynch category and the screens it passes. Chips never repeat
     a number that has its own tab; they say which list the stock is on and why."""
     chips = {"flags": [], "plays": [], "category": None, "say_do": say_do_for(sid)}
     avoid = next((r for r in playbooks.avoid_list()["rows"] if r["sid"] == sid), None)
@@ -251,13 +255,13 @@ def stock_chips(sid):
         "SELECT sleeve FROM playbook_members WHERE sid = ? AND in_sleeve = 1 AND snapshot_date = "
         "(SELECT MAX(snapshot_date) FROM playbook_members)", [sid])}
     if "flagged" in members:
-        chips["flags"].append({"label": "Red-flag veto set", "tone": "amber",
-                               "tip": "A key resignation in 180 days, a distress-zone balance sheet or heavy promoter pledging"})
+        chips["flags"].append({"label": "Avoid screen", "tone": "amber",
+                               "tip": "On the Avoid screen: a key resignation in 180 days, a distress-zone balance sheet or heavy promoter pledging"})
     import sleeves
     for key in PLAY_ORDER:
         if key in members:
             chips["plays"].append({"label": PLAY_SHORT[key], "tone": "blue",
-                                   "tip": f"{sleeves.SLEEVES[key]['label']}: {sleeves.SLEEVES[key]['rule']}"})
+                                   "tip": f"{PLAY_SHORT[key]}: {sleeves.SLEEVES[key]['rule']}"})
     cat = playbooks.categories()
     key = (cat.get("by_sid") or {}).get(sid)
     if key:

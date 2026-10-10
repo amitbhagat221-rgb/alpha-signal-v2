@@ -99,3 +99,41 @@
     {% if s.body %}<div class="slide-body">{{ s.body }}</div>{% endif %}
 </div>
 {%- endmacro %}
+
+
+{# ─────────────── vocabulary (main cockpit pages) ───────────────
+   One wording for the things every page names. Import what you need:
+       {% from "_components.html" import tier_pill, book_pill, data_pill, target_text, tip %}
+   tier_pill   "Large" / "Mid" / "Small" (neutral pill), plus the "Unproven" marker when the tier has none
+               (views.unproven_tiers is the one source of that marker)
+   book_pill   "In book", always blue
+   data_pill   "Data 100%" (amber "Data 84% · Partial"), wording and thresholds from views.pick_data
+   target_text "Median target +30%" (whole percent) with the analyst count and a link-free tone
+   tip         visible text with a hover/focus popover (the native title="" is not used for data)
+#}
+{% macro tip(label, text, cls='') -%}
+<span class="hover-tip {{ cls }}" tabindex="0">{{ label }}<span class="tooltip-popover" role="tooltip">{{ text }}</span></span>
+{%- endmacro %}
+
+{% macro unproven_pill(tier) -%}
+{% set why = unproven_tiers().get(tier) %}{% if why %}<span class="pill pill-amber hover-tip" tabindex="0">Unproven<span class="tooltip-popover" role="tooltip">No factor in {{ tier|tier_word }} has out-of-sample skill: {{ why }}.</span></span>{% endif %}
+{%- endmacro %}
+
+{% macro tier_pill(tier, mark=False) -%}
+<span class="pill">{{ tier|tier_word }}</span>{% if mark %} {{ unproven_pill(tier) }}{% endif %}
+{%- endmacro %}
+
+{% macro book_pill() -%}<span class="pill pill-blue">In book</span>{%- endmacro %}
+
+{% macro data_pill(d) -%}
+{% if d %}<span class="pill pill-{{ d.colour }}">Data {{ d.score }}%{% if d.word != 'Complete' %} &middot; {{ d.word }}{% endif %}</span>{% endif %}
+{%- endmacro %}
+
+{% macro target_text(up, analysts=none) -%}
+{% if up is not none %}<span class="{{ up|tone(zero='score-red') }}">Median target <span class="mono">{{ up|pct(0, signed=True) }}</span></span>{% if analysts %} <span class="unit">{{ analysts|int }} analyst{{ '' if analysts|int == 1 else 's' }}</span>{% endif %}{% else %}<span class="unit">no analyst target</span>{% endif %}
+{%- endmacro %}
+
+{# the loading state of a lazily fetched tab: the same spinner row everywhere #}
+{% macro loading(what='') -%}
+<div class="lazy-loading" role="status"><span class="spinner" aria-hidden="true"></span>Loading{{ ' ' ~ what if what }}…</div>
+{%- endmacro %}

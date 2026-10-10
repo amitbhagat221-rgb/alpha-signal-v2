@@ -57,6 +57,41 @@ def unpickable_tiers():
     return [t for t in tiers() if t not in pickable_tiers()]
 
 
+# Tiers where a walk-forward test found no factor with out-of-sample skill (Oct 2026 audit).
+# THE one place the "unproven" marker comes from: Today, Stocks, Book and Model all read it
+# (unproven_tiers / is_unproven / display_tiers), none keeps its own list.
+NO_OOS_SKILL = {"LARGE": "a walk-forward test in Oct 2026 found no factor with out-of-sample skill"}
+UNPROVEN_WORD = "Unproven"
+
+
+def unproven_tiers():
+    """{tier: reason} for the pickable tiers whose ranking has shown no out-of-sample skill."""
+    ok = set(pickable_tiers())
+    return {t: why for t, why in NO_OOS_SKILL.items() if t in ok}
+
+
+def is_unproven(tier):
+    return tier in unproven_tiers()
+
+
+def display_tiers():
+    """The pickable tiers in the order every main page lists them: the tiers with evidence
+    first (config order), the unproven ones last (today MID, SMALL, LARGE)."""
+    bad = unproven_tiers()
+    ts = pickable_tiers()
+    return [t for t in ts if t not in bad] + [t for t in ts if t in bad]
+
+
+def tier_sizes(pick_date=None):
+    """{tier: stocks ranked in the tier} on `pick_date` (default: the latest), from daily_picks:
+    THE denominator of every "rank n of N". Stocks that failed the data gate have no row there,
+    so they never count."""
+    if pick_date is None:
+        pick_date = db.scalar("SELECT MAX(pick_date) FROM daily_picks")
+    return {r["cap_tier"]: int(r["n"]) for r in native_rows(
+        "SELECT cap_tier, COUNT(*) AS n FROM daily_picks WHERE pick_date = ? GROUP BY cap_tier", [pick_date])}
+
+
 # ═══════════════════════════ batch helpers ═══════════════════════════
 
 def sid_params(sids):
@@ -216,7 +251,7 @@ def pick_breakdown(sid, pick_date=None, _frames=None):
     top3 = d.sort_values("_rank").head(3).reindex(columns=["sid", "ticker", "_rank", "_final"]).rename(
         columns={"_rank": "rank", "_final": "final_score"}).to_dict("records")
     return {"as_of": pick_date, "sid": sid, "ticker": row.get("ticker"), "name": row.get("name"), "tier": tier,
-            "rank": row["_rank"], "tier_size": len(d), "final_score": row["_final"],
+            "rank": row["_rank"], "tier_size": tier_sizes(pick_date).get(tier) or len(d), "final_score": row["_final"],
             "base_score": base, "penalty": row.get("_penalty"), "weight_coverage": row.get("_weight_coverage"),
             "reproduces_stored_score": (stored is not None and stored == stored and base is not None
                                         and abs(base - stored) < 1e-9),
