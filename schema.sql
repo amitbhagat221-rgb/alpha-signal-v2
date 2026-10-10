@@ -1844,6 +1844,30 @@ CREATE TABLE IF NOT EXISTS shareholding_holders (
 );
 CREATE INDEX IF NOT EXISTS idx_shp_holders_name ON shareholding_holders(holder_name, end_date);
 
+-- Category totals per filing from the same BSE shareholding-pattern XBRL (sources/bse_shp.py):
+-- the history `shareholding` (Tickertape, ~2 years) does not have, back to Jun-2016.
+-- Append-only like shareholding_holders: a revision is a new row with a later filed_at.
+CREATE TABLE IF NOT EXISTS shareholding_categories (
+    sid               TEXT NOT NULL REFERENCES stocks(sid),
+    scrip_cd          INTEGER NOT NULL,
+    end_date          TEXT NOT NULL,             -- quarter end the filing describes
+    filed_at          TEXT NOT NULL,             -- BSE broadcast time of the filing (point in time)
+    promoter_pct      REAL CHECK(promoter_pct BETWEEN 0 AND 100),
+    public_pct        REAL CHECK(public_pct BETWEEN 0 AND 100),
+    foreign_inst_pct  REAL CHECK(foreign_inst_pct BETWEEN 0 AND 100),   -- institutions (foreign): FPIs, FVCIs
+    domestic_inst_pct REAL CHECK(domestic_inst_pct BETWEEN 0 AND 100),  -- institutions (domestic): MFs, insurers, banks, AIFs, PFs
+    mf_pct            REAL CHECK(mf_pct BETWEEN 0 AND 100),
+    insurance_pct     REAL CHECK(insurance_pct BETWEEN 0 AND 100),
+    retail_pct        REAL CHECK(retail_pct BETWEEN 0 AND 100),         -- resident individuals, share capital up to Rs 2 lakh
+    hni_pct           REAL CHECK(hni_pct BETWEEN 0 AND 100),            -- resident individuals above Rs 2 lakh
+    n_shareholders    INTEGER,                   -- all shareholders
+    n_retail          INTEGER,                   -- shareholders in retail_pct
+    total_shares      REAL,
+    source_url        TEXT,
+    fetched_at        TEXT NOT NULL,
+    PRIMARY KEY (sid, end_date, filed_at)
+);
+
 -- Forward record of the investor-playbook sleeves (sleeves.py): which stocks each sleeve
 -- held on each day, written after the morning run by tools/playbook_backtest --record.
 -- Append-only; the only evidence on the sleeves that is free of hindsight and survivorship.

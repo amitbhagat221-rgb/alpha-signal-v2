@@ -134,6 +134,45 @@ def test_bse_shp_parses_named_holders_from_xml_and_inline_xbrl():
     assert parse_holders("<html>blocked</html>") == []
 
 
+def _shp_total(key, when, shares, pct=None, holders=None):
+    out = _shp_ctx(key, when) + f'<in-bse-shp:NumberOfShares contextRef="{key}" unitRef="shares">{shares}</in-bse-shp:NumberOfShares>'
+    if pct is not None:
+        out += f'<in-bse-shp:ShareholdingAsAPercentageOfTotalNumberOfShares contextRef="{key}" unitRef="pure">{pct}</in-bse-shp:ShareholdingAsAPercentageOfTotalNumberOfShares>'
+    if holders is not None:
+        out += f'<in-bse-shp:NumberOfShareholders contextRef="{key}" unitRef="shares">{holders}</in-bse-shp:NumberOfShareholders>'
+    return out
+
+
+def test_bse_shp_parses_category_totals_in_both_taxonomies():
+    from sources.bse_shp import parse_categories, parse_holders
+    # 2016 taxonomy, keys "<Category>I": one Institutions total with the FPIs inside it; no
+    # insurance line (= 0); a holder with shares but no percentage gets shares / total
+    d = "2017-09-30"
+    old = (_shp_total("ShareholdingPatternI", d, 1000, 100, 5000) + _shp_total("ShareholdingOfPromoterAndPromoterGroupI", d, 600, 60)
+           + _shp_total("PublicShareholdingI", d, 400, 40, 4990) + _shp_total("InstitutionsI", d, 150, 15)
+           + _shp_total("InstitutionsForeignPortfolioInvestorI", d, 100, 10) + _shp_total("MutualFundsOrUtiI", d, 50, 5)
+           + _shp_total("IndividualShareholdersHoldingNominalShareCapitalUpToRsTwoLakhI", d, 200, 20, 4900)
+           + _shp_ctx("PAC_Public15", d)
+           + '<in-bse-shp:NameOfTheShareholder contextRef="D_PAC_Public15">Acting Together Pvt Ltd</in-bse-shp:NameOfTheShareholder>'
+           '<in-bse-shp:NumberOfShares contextRef="PAC_Public15" unitRef="shares">25</in-bse-shp:NumberOfShares>')
+    assert parse_categories(old) == {
+        "end_date": d, "promoter_pct": 60.0, "public_pct": 40.0, "foreign_inst_pct": 10.0, "domestic_inst_pct": 5.0,
+        "mf_pct": 5.0, "insurance_pct": 0.0, "retail_pct": 20.0, "hni_pct": None, "n_shareholders": 5000.0,
+        "n_retail": 4900.0, "total_shares": 1000.0}
+    assert parse_holders(old)[0]["pct"] == 2.5
+    # 2022 taxonomy, keys "<Category>_ContextI": foreign and domestic institutions filed apart;
+    # a category total without a percentage is shares / total too
+    d = "2025-06-30"
+    new = (_shp_total("ShareholdingPattern_ContextI", d, 2000, 100, 9000) + _shp_total("PublicShareholding_ContextI", d, 2000, 100)
+           + _shp_total("InstitutionsForeign_ContextI", d, 300, 15) + _shp_total("InstitutionsDomestic_ContextI", d, 500)
+           + _shp_total("MutualFundsOrUTI_ContextI", d, 400, 20) + _shp_total("InsuranceCompanies_ContextI", d, 100, 5))
+    got = parse_categories(new)
+    assert (got["promoter_pct"], got["foreign_inst_pct"], got["domestic_inst_pct"], got["mf_pct"], got["insurance_pct"]) == \
+        (0.0, 15.0, 25.0, 20.0, 5.0)
+    assert got["retail_pct"] is None and got["n_retail"] is None
+    assert parse_categories("<html>blocked</html>") is None
+
+
 def test_bse_shp_latest_quarter_end():
     from datetime import date
     from sources.bse_shp import latest_quarter_end

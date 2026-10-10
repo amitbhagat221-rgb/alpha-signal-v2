@@ -556,6 +556,8 @@ EVENT_SPECS = {
     "shareholding_holders": ("shareholding_holder",
                              "t.sid || '|' || t.end_date || '|' || t.filed_at || '|' || t.holder_category || '|' || t.holder_seq", "t.sid",
                              "t.end_date", "t.filed_at", "t.holder_category", {"sid", "fetched_at"}),
+    "shareholding_categories": ("shareholding_filing", "t.sid || '|' || t.end_date || '|' || t.filed_at", "t.sid",
+                                "t.end_date", "t.filed_at", "NULL", {"sid", "fetched_at"}),
 }
 
 

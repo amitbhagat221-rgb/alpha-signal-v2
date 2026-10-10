@@ -208,6 +208,15 @@ TABLES = {
         "depth": "XBRL filings from Jun-2016; latest quarter first, history backfilled on demand",
         "description": "Named holders above 1% per stock per quarter, as filed on BSE: promoters, mutual-fund schemes, FPIs, individuals. `filed_at` is the broadcast time (point-in-time); a revised filing adds rows with a later `filed_at`. Stocks with a BSE code only (2,199 of 2,448). Holder names are as filed — the same investor can appear under several spellings.",
     },
+    "shareholding_categories": {
+        "contract": {"max_null": {"promoter_pct": 0.0, "foreign_inst_pct": 0.0, "n_shareholders": 0.05},
+                     "not_all_zero": ["total_shares"]},
+        "kind": "RAW", "domain": "Fundamentals", "date_col": "end_date", "freq": "quarterly",
+        "source": "BSE shareholding-pattern XBRL (run.sh transcripts, Sunday; --reparse from the archive)",
+        "stale_days": 130,
+        "depth": "XBRL filings from Jun-2016, as deep as shareholding_holders",
+        "description": "Category totals per stock per filing, as filed on BSE: promoter, foreign and domestic institutions, mutual funds, insurance, small (≤ Rs 2 lakh) and large individuals, plus the number of shareholders and of small shareholders. `filed_at` is the broadcast time (point-in-time); a revision adds a row with a later `filed_at`. The deep history behind the ownership-flow factors; `shareholding` (Tickertape) holds only about two years.",
+    },
 
     # ── Trades & Corporate ──
     # BSE corporate-announcement event stream (--days 7 keep-current), refreshed by

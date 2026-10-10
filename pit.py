@@ -292,6 +292,40 @@ def pit_promoter_trend_4q(stocks, sh_pit):
     return pd.DataFrame(rows)
 
 
+OWNERSHIP_FLOWS = ("fii_qoq", "mf_qoq", "dii_qoq", "inst_breadth", "retail_holders_qoq")
+
+
+def pit_ownership_flows(shc, eval_date, max_age_days=140):
+    """Quarter-on-quarter ownership change from the BSE shareholding filings
+    (`shareholding_categories`), as the market could read them on eval_date: a filing
+    counts from its broadcast day (`filed_at`), and a revision replaces the quarter it
+    revises only from its own broadcast day.
+        fii_qoq / mf_qoq / dii_qoq   change in foreign-institution / mutual-fund /
+                                     domestic-institution holding, percentage points
+        inst_breadth                 how many of those three rose (0-3)
+        retail_holders_qoq           log change in the number of small (≤ Rs 2 lakh) holders
+    Needs the latest quarter no older than `max_age_days` and the quarter before it
+    70-120 days earlier (one quarter apart, no gap)."""
+    s = shc[shc["filed_at"].str[:10] <= eval_date.isoformat()]
+    s = s.sort_values(["sid", "end_date", "filed_at"]).drop_duplicates(["sid", "end_date"], keep="last")
+    g = s.groupby("sid")
+    last = g.tail(1).set_index("sid")
+    prev = s.drop(g.tail(1).index).groupby("sid").tail(1).set_index("sid")
+    j = last.join(prev, rsuffix="_p", how="inner")
+    end, end_p = pd.to_datetime(j["end_date"]), pd.to_datetime(j["end_date_p"])
+    gap = (end - end_p).dt.days
+    j = j[gap.between(70, 120) & ((pd.Timestamp(eval_date) - end).dt.days <= max_age_days)]
+    out = pd.DataFrame({
+        "fii_qoq": j["foreign_inst_pct"] - j["foreign_inst_pct_p"],
+        "mf_qoq": j["mf_pct"] - j["mf_pct_p"],
+        "dii_qoq": j["domestic_inst_pct"] - j["domestic_inst_pct_p"],
+    })
+    out["inst_breadth"] = (out > 0).sum(axis=1).where(out.notna().all(axis=1))
+    ok = (j["n_retail"] > 0) & (j["n_retail_p"] > 0)
+    out["retail_holders_qoq"] = np.log(j["n_retail"].where(ok) / j["n_retail_p"].where(ok))
+    return out.round(6).reset_index()
+
+
 def pit_macd_bullish(prices_pit):
     """MACD bullish state: 12-EMA − 26-EMA > 9-EMA-of-MACD. Binary 1/0.
     Needs ≥35 days of prices. Uses adj_close so a split inside the window
