@@ -500,9 +500,9 @@ FEEDS = {
     "kite_holdings": {
         "family": "prices", "status": "probation",
         "what": "Amit's actual Zerodha holdings, for /book's Zerodha tab beside the model book",
-        "modules": ["sources.kite_holdings"], "schedule": ["cron:kite_holdings"], "writes": ["broker_holdings"],
+        "modules": ["sources.kite_holdings"], "schedule": ["cron:kite_holdings"], "writes": ["broker_holdings", "broker_instrument_prices"],
         "hosts": ["kite"], "cadence": "trading_day",
-        "routes": [_r("kite_holdings", "primary", "kite", "kc.holdings() (read-only), also taken at the ops /kite/callback login")],
+        "routes": [_r("kite_holdings", "primary", "kite", "kc.holdings() + kc.historical_data day candles for non-universe holdings (read-only), also at the ops /kite/callback login")],
         "canary_waiver": "needs Amit's daily Kite login; a day without one keeps the last snapshot, dated on the page",
         "pit": "snapshot time", "tos": "Kite Connect subscription",
     },

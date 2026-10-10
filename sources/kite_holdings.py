@@ -13,20 +13,26 @@ Writes broker_holdings: one row per holding per snapshot day. A re-snapshot repl
 rows (a stock sold since the morning drops out). sid is the universe stock with that NSE ticker;
 ETFs and gold bonds have none (the universe excludes them).
 
+Writes broker_instrument_prices: daily closes of those non-universe holdings from Kite day candles
+(a year back on first sight, then from the last stored day), so /book can value the whole real
+book over the past year. Universe stocks need none: stock_prices has them, adjusted.
+
 Usage:
     python -m sources.kite_holdings          # cron 10:15 UTC weekdays (15:45 IST)
 """
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 import pandas as pd
 
-from db import get_db, insert_df, read_sql
+import runlog
+from db import get_db, insert_df, read_sql, upsert_df
 from sources import _http
 
 IST = ZoneInfo("Asia/Kolkata")
 BROKER = "zerodha"
+HISTORY_DAYS = 400       # first fetch: a year of trading days plus the year-start base
 
 
 def rows_from_holdings(holdings, ticker_sid, as_of, snapshot_at):
@@ -47,10 +53,14 @@ def rows_from_holdings(holdings, ticker_sid, as_of, snapshot_at):
     return pd.DataFrame(out)
 
 
-def snapshot(kc):
-    """Pull holdings with a live session and replace today's snapshot. Returns rows written."""
+def holdings(kc):
+    """The account's holdings: one read-only Kite call."""
     with _http.pace("kite"):
-        holdings = kc.holdings()
+        return kc.holdings()
+
+
+def snapshot(holdings):
+    """Replace today's snapshot with Kite `holdings()` records. Returns rows written."""
     now = datetime.now(IST)
     tick = read_sql("SELECT ticker, sid FROM stocks WHERE ticker IS NOT NULL")
     df = rows_from_holdings(holdings, dict(zip(tick["ticker"], tick["sid"])), now.date().isoformat(),
@@ -66,6 +76,41 @@ def snapshot(kc):
     return n
 
 
+def candle_rows(candles, tradingsymbol, exchange, fetched_at):
+    """Kite day candles → broker_instrument_prices rows (pure; tested)."""
+    return pd.DataFrame([{"tradingsymbol": tradingsymbol, "date": str(c["date"])[:10], "exchange": exchange,
+                          "close": float(c["close"]), "fetched_at": fetched_at} for c in candles if c.get("close")])
+
+
+def fetch_history(kc, holdings):
+    """Day closes for the non-universe holdings (sid None), from the day after the last stored one.
+    holdings: Kite `holdings()` records with an instrument_token. Returns rows written."""
+    tick = set(read_sql("SELECT ticker FROM stocks WHERE ticker IS NOT NULL")["ticker"])
+    last = dict(read_sql("SELECT tradingsymbol, MAX(date) AS d FROM broker_instrument_prices GROUP BY 1").values)
+    today, now = date.today(), datetime.now(timezone.utc).isoformat(timespec="seconds")
+    n, failed = 0, []
+    for h in holdings:
+        sym = h["tradingsymbol"]
+        if sym in tick or not h.get("instrument_token"):
+            continue
+        start = date.fromisoformat(last[sym]) + timedelta(days=1) if sym in last else today - timedelta(days=HISTORY_DAYS)
+        if start > today:
+            continue
+        try:
+            with _http.pace("kite"):
+                candles = kc.historical_data(h["instrument_token"], start.isoformat(), today.isoformat(), "day")
+            df = candle_rows(candles, sym, h.get("exchange"), now)
+            if not df.empty:
+                n += upsert_df(df, "broker_instrument_prices")
+        except Exception as e:                   # noqa: BLE001 — recorded in run_events, raised below
+            runlog.item_error("kite_holdings", sym, e)
+            failed.append(sym)
+    print(f"kite_holdings: {n} day closes for holdings outside the universe")
+    if failed:
+        raise RuntimeError(f"Kite day candles failed for {', '.join(failed)}")
+    return n
+
+
 def run():
     from sources.kite_pull import NoKiteSession, kite
     try:
@@ -74,7 +119,10 @@ def run():
         last = read_sql("SELECT MAX(as_of_date) AS d FROM broker_holdings")["d"].iloc[0]
         print(f"kite_holdings: no Kite login today; /book keeps the snapshot of {last}")
         return 0
-    return snapshot(kc)
+    h = holdings(kc)
+    n = snapshot(h)
+    fetch_history(kc, h)
+    return n
 
 
 if __name__ == "__main__":

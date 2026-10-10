@@ -2526,6 +2526,17 @@ CREATE TABLE IF NOT EXISTS broker_holdings (
     PRIMARY KEY (as_of_date, broker, tradingsymbol)
 );
 
+-- Daily closes of holdings outside the universe (ETFs, gold bonds) from Kite historical candles, so /book can
+-- value the real Zerodha book over the past year; universe stocks use stock_prices (adjusted) instead.
+CREATE TABLE IF NOT EXISTS broker_instrument_prices (
+    tradingsymbol  TEXT NOT NULL,
+    date           TEXT NOT NULL,            -- trading day (IST)
+    exchange       TEXT,
+    close          REAL NOT NULL,            -- Rs, as traded (Kite day candle; no dividend or SGB-interest adjustment)
+    fetched_at     TEXT NOT NULL,
+    PRIMARY KEY (tradingsymbol, date)
+);
+
 -- Option-premium paper book (plan 0022, option_book.py): one row per rule × underlying ×
 -- expiry, written on the entry day's close and settled in place at expiry. The forward
 -- record that decides whether the rule goes live.

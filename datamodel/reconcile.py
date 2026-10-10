@@ -52,6 +52,7 @@ RETIRED = {
     "option_live_quotes": "kept as-is: plan 0022 Kite 15:20 IST option snapshots on paper-book entry days",
     "option_paper_trades": "kept as-is: plan 0022 option paper book (forward record)",
     "broker_holdings": "kept as-is: Amit's real Zerodha holdings, Kite snapshots for /book (account data, not market data)",
+    "broker_instrument_prices": "kept as-is: Kite day closes of the non-universe Zerodha holdings (ETFs, gold bonds) for /book",
     "sqlite_sequence": "SQLite internal",
 }
 

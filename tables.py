@@ -65,6 +65,12 @@ TABLES = {
         "depth": "From 2026-10-10",
         "description": "Amit's actual demat holdings, one snapshot per day with a Kite login: quantity, average price, last price, unrealised P&L; sid set for universe stocks (ETFs and gold bonds have none). /book's Zerodha tab.",
     },
+    "broker_instrument_prices": {
+        "kind": "RAW", "domain": "Universe & Prices", "date_col": "date",
+        "source": "Zerodha Kite historical day candles (sources/kite_holdings, with each holdings snapshot)",
+        "depth": "About a year back from 2026-10-10, then daily on days with a Kite login",
+        "description": "Daily closes of the Zerodha holdings outside the universe (ETFs, gold bonds), as traded: /book's past-year comparison of the two books. Universe stocks use stock_prices.",
+    },
     "option_live_quotes": {
         "kind": "RAW", "domain": "Universe & Prices", "date_col": "trade_date", "freq": "weekly",
         "source": "Zerodha Kite quotes + basket margin (sources/kite_quotes, cron 09:50 UTC on entry days)",

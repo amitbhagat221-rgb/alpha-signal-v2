@@ -123,3 +123,26 @@ def test_zerodha_expected_return_is_value_weighted_over_covered():
             {"value": 600.0, "pt_upside_pct": None}]
     assert book.expected_return(rows) == {"er": 5.0, "n": 2, "cover_pct": 40.0, "er_all": 2.0}
     assert book.expected_return([{"value": 5.0, "pt_upside_pct": None}])["er"] is None
+
+
+def test_held_unchanged_values_todays_shares_back_in_time():
+    """Two holdings at 50/50 today: A doubled over the year, B flat. Holding today's shares back,
+    the book started at 0.5*(1/2) + 0.5*1 = 0.75 of today's value -> +33.3% over the year; the
+    contributions sum to it; a holding with no price at the year's start is left out and named."""
+    import pandas as pd
+    px = pd.DataFrame({"A": [50.0, 75.0, 100.0], "B": [10.0, 10.0, 10.0], "C": [None, 5.0, 5.0]},
+                      index=["2025-10-09", "2025-12-31", "2026-10-09"])
+    r = book.held_unchanged(px, {"A": 1.0, "B": 1.0, "C": 1.0}, "2025-12-31", "2025-10-09")
+    assert round(r["y1"], 1) == 33.3 and r["excluded"] == ["C"]
+    assert round(r["ytd"], 1) == round((1 / (0.5 * 0.75 + 0.5) - 1) * 100, 1)       # value 0.875 on 31 Dec -> 1.0 today
+    assert round(sum(r["contrib"].values()), 6) == round(r["y1"], 6) and r["contrib"]["B"] == 0
+    assert r["max_dd"] == 0 and r["path"].iloc[0] == 100
+
+
+def test_kite_candle_rows_take_the_trading_date():
+    from datetime import datetime, timedelta, timezone
+    from sources import kite_holdings
+    ist = timezone(timedelta(hours=5, minutes=30))
+    df = kite_holdings.candle_rows([{"date": datetime(2026, 10, 9, tzinfo=ist), "close": 15079.0},
+                                    {"date": datetime(2026, 10, 8, tzinfo=ist), "close": None}], "SGBAUG30", "BSE", "now")
+    assert df[["tradingsymbol", "date", "close"]].values.tolist() == [["SGBAUG30", "2026-10-09", 15079.0]]

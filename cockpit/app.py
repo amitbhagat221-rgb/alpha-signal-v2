@@ -194,8 +194,8 @@ def book_page(request: Request):
     """The HRP sized book, the real Zerodha holdings, risk and track record (tabs: book, zerodha, risk, track-record)."""
     return templates.TemplateResponse(request, "book.html", {
         "page": "book", "tabs": next(p["tabs"] for p in pages.PAGES if p["id"] == "book"),
-        "book": book.get_book(), "zerodha": book.get_zerodha(), "risk": book.get_risk(),
-        "track": book.get_track_record(),
+        "book": book.get_book(), "zerodha": book.get_zerodha(), "past_year": book.get_past_year(),
+        "risk": book.get_risk(), "track": book.get_track_record(),
     })
 
 

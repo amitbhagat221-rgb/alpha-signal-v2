@@ -227,7 +227,10 @@ def kite_callback(request_token: str = "", status: str = ""):
     try:                                            # each login refreshes /book's Zerodha tab; the login stands either way
         from sources import kite_holdings
         kc.set_access_token(data["access_token"])
-        kite_holdings.snapshot(kc)
+        h = kite_holdings.holdings(kc)
+        kite_holdings.snapshot(h)
+        import threading                            # the year of ETF / bond closes: ~2 s per instrument, off the redirect
+        threading.Thread(target=kite_holdings.fetch_history, args=(kc, h), daemon=True).start()
     except Exception as e:                          # noqa: BLE001 — the 15:45 IST cron retries
         import runlog
         runlog.item_error("kite_holdings", "login", e)

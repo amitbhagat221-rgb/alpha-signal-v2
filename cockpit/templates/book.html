@@ -43,6 +43,7 @@
 .bk-ts line { stroke: var(--border-accent); stroke-width: 0.5; }
 .bk-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 .bk-chips a { font-size: 12px; padding: 2px 8px; border: 1px solid var(--border); border-radius: 10px; color: var(--text-primary); text-decoration: none; }
+.bk-py-chart { position: relative; height: 260px; margin-top: 12px; }
 @media (max-width: 768px) { .bk-hide-sm { display: none; } .bk-only-sm { display: block !important; margin-top: 3px; line-height: 2; } .bk-tbl { min-width: 0; } .bk-tbl th, .bk-tbl td { padding: 6px 3px; } .bk-tbl th { font-size: 10px; letter-spacing: 0; } .bk-only-sm .pill { padding: 1px 5px; font-size: 10px; } .bk-decile { grid-template-columns: repeat(5, minmax(0, 1fr)); } .bk-row .name { width: 110px; } }
 </style>
 
@@ -146,6 +147,49 @@
     <div class="bk-chips">{% for r in z.book_not_held %}<a href="/stocks/{{ r.sid }}">{{ r.ticker or r.sid }}</a>{% endfor %}</div>
     {% endif %}
 </div>
+
+{% if past_year %}{% set py = past_year %}
+<div class="card" style="margin-bottom: 16px;" x-data="pastYearChart()" x-effect="tab === 'zerodha' && $nextTick(() => draw())">
+    <div class="bk-lbl">The past year with both books held unchanged ({{ py.y1_base|short_date }} {{ py.y1_base[:4] }} to {{ py.asof|short_date }} {{ py.asof[:4] }})</div>
+    <p class="bk-note" style="margin-top: 6px;"><b>A what-if, not what either book earned.</b> Each book keeps today's holdings in today's proportions all year.
+        The model picks partly on the past year's price strength (12-month momentum, how a stock took its results), so its line is flattered by construction;
+        your account is what you hold now, winners and losers alike.{% if book and book.ytd %} The paper book's actual return since it began on {{ book.ytd.start|short_date }}
+        is {{ book.ytd.pct|pct(1, signed=True) }} (The book tab).{% endif %}</p>
+    <div class="table-wrap" style="margin-top: 10px;">
+    <table class="bk-tbl" style="min-width: 0;">
+        <thead><tr>
+            <th></th><th class="num">This year %</th><th class="num">1 year %</th>
+            <th class="num bk-hide-sm">Volatility %</th><th class="num">Worst fall %</th><th class="num bk-hide-sm">Beta</th>
+        </tr></thead>
+        <tbody>
+        {% for r in py.rows %}
+        <tr class="{{ 'muted' if r.kind == 'index' }}">
+            <td><b>{{ r.label }}</b>{% if r.kind == 'book' %}<div class="bk-sub">{{ r.n }} holdings</div>{% endif %}</td>
+            <td class="num {{ r.ytd|tone }}">{{ r.ytd|pct(1, signed=True) }}</td>
+            <td class="num {{ r.y1|tone }}">{{ r.y1|pct(1, signed=True) }}</td>
+            <td class="num bk-hide-sm">{{ r.vol|pct(1) }}</td>
+            <td class="num score-red">{{ r.max_dd|pct(1) }}</td>
+            <td class="num bk-hide-sm mono">{{ '%.2f'|format(r.beta) if r.beta is not none else '—' }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    <div class="bk-py-chart"><canvas id="pastYearChart" role="img" aria-label="Value of 100 rupees in each book and index over the past year"></canvas></div>
+    <script type="application/json" id="pastYearData">{{ py.chart|tojson }}</script>
+    <div class="grid-2" style="margin-top: 10px;">
+    {% for r in py.rows if r.kind == 'book' %}
+        <div class="bk-sub"><b>{{ r.label }}</b>: biggest gains
+            {% for t, v in r.best %}{{ t }} <span class="mono score-green">{{ v|signed(1) }}</span>{% if not loop.last %}, {% endif %}{% else %}none{% endfor %};
+            biggest drags {% for t, v in r.worst %}{{ t }} <span class="mono score-red">{{ v|signed(1) }}</span>{% if not loop.last %}, {% endif %}{% else %}none{% endfor %}
+            (percentage points of the 1-year return){% if r.excluded %}; left out for lack of a year's prices: {{ r.excluded|join(', ') }}{% endif %}.</div>
+    {% endfor %}
+    </div>
+    <p class="bk-note">This year = from the {{ py.ytd_base|short_date }} close. Volatility is the yearly swing of daily returns; worst fall is the deepest drop from a high; beta 1 moves with
+        the NIFTY 50 (above 1 swings more). Stocks use prices adjusted for splits, bonuses and dividends; ETFs and the gold bond are Kite's traded closes (the gold bond trades thinly
+        on BSE and can sit well above or below gold); the indices are price indices, without dividends.</p>
+</div>
+{% endif %}
 
 <div class="card" style="padding: 0; overflow: hidden;" x-data="pbList()">
     <div class="table-wrap">
@@ -357,4 +401,66 @@
 </div>
 
 </div>
+<script>
+// The past-year card: growth of Rs 100 per book and index, drawn when the Zerodha tab first shows.
+function pastYearChart() {
+    return {
+        drawn: false,
+        async draw() {
+            if (this.drawn) return;
+            const el = document.getElementById('pastYearData');
+            if (!el) return;
+            const d = JSON.parse(el.textContent);
+            await loadChart();
+            this.drawn = true;
+            const pal = chartPalette(), muted = cssVar('--text-muted');
+            const style = (s, i) => s.kind === 'book'
+                ? { borderColor: pal[i], borderWidth: 2 }
+                : { borderColor: muted, borderWidth: 1.5, borderDash: i === 2 ? [] : [5, 4] };
+            const ytdAt = d.dates.findIndex(x => x > d.ytd_base);
+            const marks = {
+                id: 'pyMarks',
+                afterDatasetsDraw(chart) {
+                    const { ctx, chartArea: a, scales: { x, y } } = chart;
+                    ctx.save();
+                    ctx.font = '11px Inter, sans-serif';
+                    if (ytdAt > 0) {                               // 1 Jan: where "this year" starts
+                        const px = x.getPixelForValue(ytdAt);
+                        ctx.beginPath(); ctx.moveTo(px, a.top); ctx.lineTo(px, a.bottom);
+                        ctx.setLineDash([2, 3]); ctx.strokeStyle = muted; ctx.lineWidth = 1; ctx.stroke(); ctx.setLineDash([]);
+                        ctx.fillStyle = muted; ctx.fillText('1 Jan', px + 4, a.top + 10);
+                    }
+                    ctx.fillStyle = cssVar('--text-secondary');   // direct labels at the line ends, in text ink
+                    const ends = chart.data.datasets.map((ds, i) => ({ i, y: y.getPixelForValue(ds.data[ds.data.length - 1]) }))
+                        .sort((p, q) => p.y - q.y);
+                    for (let k = 1; k < ends.length; k++) ends[k].y = Math.max(ends[k].y, ends[k - 1].y + 13);
+                    for (const e of ends) {
+                        const ds = chart.data.datasets[e.i], v = ds.data[ds.data.length - 1];
+                        ctx.fillText(`${ds.label.replace('Your Zerodha book', 'Zerodha')} ${Math.round(v)}`, a.right + 6, e.y + 4);
+                    }
+                    ctx.restore();
+                },
+            };
+            makeChart('pastYearChart', {
+                type: 'line',
+                data: { labels: d.dates, datasets: d.series.map((s, i) => ({ label: s.label, data: s.values, pointRadius: 0, tension: 0.1, ...style(s, i) })) },
+                options: {
+                    responsive: true, maintainAspectRatio: false, layout: { padding: { right: 92 } },
+                    scales: { x: { ticks: { maxTicksLimit: window.innerWidth < 600 ? 3 : 6, maxRotation: 0, callback: (v, i) => fmtDay(d.dates[i]).split(' ').slice(2, 4).join(' ') }, grid: { display: false } },
+                              y: { ticks: { callback: v => v } } },
+                    plugins: {
+                        crosshair: true,
+                        legend: { display: true, position: 'top', align: 'start', labels: { boxWidth: 14, boxHeight: 2 } },
+                        tooltip: { callbacks: {
+                            title: items => fmtDay(d.dates[items[0].dataIndex]),
+                            label: c => ` ${c.dataset.label}: ₹${c.parsed.y.toFixed(1)} (${c.parsed.y >= 100 ? '+' : ''}${(c.parsed.y - 100).toFixed(1)}%)`,
+                        } },
+                    },
+                },
+                plugins: [marks],
+            });
+        },
+    };
+}
+</script>
 {% endblock %}

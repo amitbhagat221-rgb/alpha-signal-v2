@@ -240,6 +240,93 @@ def get_zerodha():
     }
 
 
+# ── the past year, both books held unchanged ────────────────────────────────────────
+
+PAST_YEAR_INDICES = ("NIFTY 50", "NIFTY 500")    # the reference lines; beta is to the first
+
+
+def held_unchanged(px, weights, ytd_base, y1_base):
+    """Today's book held unchanged (today's share counts) back over the past year.
+
+    px: prices, index = ISO trading dates (ascending, last = today's date T), one column per
+    holding, forward-filled. weights: {column: today's weight}. A holding with no price at
+    `y1_base` is left out (named in `excluded`) and the rest renormalised.
+    value(t) = sum w_i * P_i(t) / P_i(T): the book's value path, rebased to 100 at y1_base.
+    -> {path, ytd, y1, vol, max_dd, contrib {col: pp of the 1-year return}, excluded}"""
+    have = [c for c in weights if c in px.columns and pd.notna(px.at[y1_base, c])]
+    excluded = [c for c in weights if c not in have]
+    w = pd.Series({c: weights[c] for c in have})
+    w = w / w.sum()
+    rel = px.loc[y1_base:, have] / px[have].iloc[-1]            # P_i(t) / P_i(T)
+    value = rel.mul(w, axis=1).sum(axis=1)
+    path = value / value.iloc[0] * 100
+    daily = path.pct_change().dropna()
+    contrib = (w * (1 - rel.iloc[0]) / value.iloc[0] * 100)    # sums to the 1-year return
+    return {"path": path, "ytd": (path.iloc[-1] / path.at[ytd_base] - 1) * 100, "y1": path.iloc[-1] - 100,
+            "vol": float(daily.std() * 252 ** 0.5 * 100), "max_dd": float((path / path.cummax() - 1).min() * 100),
+            "contrib": contrib.to_dict(), "excluded": excluded}
+
+
+def _beta(path, bench):
+    r = pd.concat([path.pct_change(), bench.pct_change()], axis=1).dropna()
+    return float(r.iloc[:, 0].cov(r.iloc[:, 1]) / r.iloc[:, 1].var()) if len(r) > 20 else None
+
+
+@_ttl_cache(600)
+def get_past_year():
+    """The model book and the Zerodha book, each with today's mix held unchanged over the past
+    year, beside the NIFTY indices: YTD, 1 year, volatility, worst fall, beta, biggest gains and
+    drags, and the value paths for the chart. Stocks are adjusted closes (splits, bonuses,
+    dividends); ETFs and gold bonds are Kite closes as traded; indices are price indices.
+    None when there is no Zerodha snapshot or no index history."""
+    from signals._prices import apply_adjustments
+    z, sb = get_zerodha(), api.get_sized_book()
+    idx = db.read_sql(
+        f"SELECT index_symbol, trade_date, close FROM nse_index_history WHERE index_symbol IN "
+        f"({','.join('?' * len(PAST_YEAR_INDICES))}) AND trade_date >= date('now', '-430 days')",
+        params=list(PAST_YEAR_INDICES)).pivot(index="trade_date", columns="index_symbol", values="close").sort_index()
+    if not z or not sb or idx.empty:
+        return None
+    cal = idx.index                                              # trading days, from the index
+    T = cal[-1]
+    y1_base = cal[cal <= (date.fromisoformat(T) - timedelta(days=365)).isoformat()][-1]
+    ytd_base = cal[cal <= f"{int(T[:4]) - 1}-12-31"][-1]
+    books = {"Your Zerodha book": {(r["sid"] or r["ticker"]): r["value"] for r in z["rows"]},
+             "Model book": {r["sid"]: r["weight"] for r in sb["rows"]}}
+    names = {**{r["sid"]: r["ticker"] or r["sid"] for r in sb["rows"]}, **{(r["sid"] or r["ticker"]): r["ticker"] for r in z["rows"]}}
+    sids = sorted({r["sid"] for r in z["rows"] if r["sid"]} | {r["sid"] for r in sb["rows"]})   # universe stocks
+    ph = ",".join("?" * len(sids))
+    raw = db.read_sql(f"SELECT sid, date, close FROM stock_prices WHERE sid IN ({ph}) AND date >= ? ORDER BY sid, date",
+                      params=sids + [cal[0]])
+    adj = db.read_sql(f"SELECT sid, ex_date, factor FROM corporate_adjustments WHERE sid IN ({ph})", params=sids)
+    stock = apply_adjustments(raw, adj, T).pivot(index="date", columns="sid", values="adj_close")
+    other = db.read_sql("SELECT tradingsymbol, date, close FROM broker_instrument_prices WHERE date >= ?",
+                        params=[cal[0]]).pivot(index="date", columns="tradingsymbol", values="close")
+    px = pd.concat([stock, other], axis=1).sort_index().reindex(cal.union(stock.index).union(other.index)).ffill().reindex(cal)
+    out, paths = [], {}
+    for label, w in books.items():
+        r = held_unchanged(px, w, ytd_base, y1_base)
+        paths[label] = r["path"]
+        ranked = sorted(r["contrib"].items(), key=lambda kv: -kv[1])
+        out.append({"label": label, "kind": "book", "ytd": r["ytd"], "y1": r["y1"], "vol": r["vol"], "max_dd": r["max_dd"],
+                    "beta": _beta(r["path"], idx[PAST_YEAR_INDICES[0]].loc[y1_base:]),
+                    "n": len(w) - len(r["excluded"]), "excluded": [names.get(c, c) for c in r["excluded"]],
+                    "best": [(names.get(c, c), v) for c, v in ranked[:3] if v >= 0.05],      # rounds to +0.1 or more
+                    "worst": [(names.get(c, c), v) for c, v in ranked[::-1][:3] if v <= -0.05]})
+    for sym in PAST_YEAR_INDICES:
+        s = idx[sym].loc[y1_base:].ffill()
+        path = s / s.iloc[0] * 100
+        paths[sym] = path
+        daily = path.pct_change().dropna()
+        out.append({"label": sym, "kind": "index", "ytd": (s.iloc[-1] / s.at[ytd_base] - 1) * 100, "y1": path.iloc[-1] - 100,
+                    "vol": float(daily.std() * 252 ** 0.5 * 100), "max_dd": float((path / path.cummax() - 1).min() * 100),
+                    "beta": 1.0 if sym == PAST_YEAR_INDICES[0] else _beta(path, idx[PAST_YEAR_INDICES[0]].loc[y1_base:])})
+    return {"asof": T, "y1_base": y1_base, "ytd_base": ytd_base, "rows": out,
+            "chart": {"dates": list(cal[cal >= y1_base]), "ytd_base": ytd_base,
+                      "series": [{"label": k, "kind": "index" if k in PAST_YEAR_INDICES else "book",
+                                  "values": [round(float(v), 2) for v in p.values]} for k, p in paths.items()]}}
+
+
 def risk_summary(sectors, hhi, strong, max_stock, cap_stock, cap_sector):
     """The plain one-line summary above the Risk details."""
     word = "Concentrated" if hhi > 2500 else ("Moderately concentrated" if hhi > 1500 else "Well spread")
