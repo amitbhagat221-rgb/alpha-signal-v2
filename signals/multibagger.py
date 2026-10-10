@@ -28,7 +28,9 @@ Thresholds are research DEFAULTS — calibrate on the survivorship-corrected
 cohort panel (Phase 2). Validation is the cohort hit-rate, NOT rank-IC.
 
 Data realities (verified 2026-06-03):
-  • stocks.market_cap_cr is stored in RUPEES → ÷1e7 for crores.
+  • market cap (₹ crore) is scoring.segment.market_caps() = signals._fundamentals.market_caps,
+    the one market cap; NOT the stocks.market_cap_cr column (refreshed only by classify_micro_tier,
+    so a snapshot read it on a stale basis: CEMPRO 9,265 vs 19,328 Cr).
   • stocks.debt_to_equity / pe_ratio are empty → D/E & PE from Screener.
   • quarterly_income too shallow (43 sids ≥12q) → growth from ANNUAL Net profit.
 
@@ -46,6 +48,7 @@ import pandas as pd
 from config import EXCLUDED_FROM_PICKS, SCREEN
 from db import read_sql, upsert_df
 from scoring.regime_smallcap import classify as classify_smallcap_regime
+from scoring.segment import market_caps
 
 FINANCIAL_SECTORS = set(SCREEN["financial_sectors"])
 
@@ -119,12 +122,15 @@ def _load_universe():
     placeholders = ",".join("?" for _ in FINANCIAL_SECTORS)
     excluded = ",".join("?" for _ in EXCLUDED_FROM_PICKS)
     stocks = read_sql(
-        f"SELECT sid, name, sector, cap_tier, market_cap_cr "
+        f"SELECT sid, name, sector, cap_tier "
         f"FROM stocks WHERE sector NOT IN ({placeholders}) AND cap_tier NOT IN ({excluded})",
         params=[*FINANCIAL_SECTORS, *EXCLUDED_FROM_PICKS],
     )
-    stocks["mcap_cr"] = stocks["market_cap_cr"]
-    return stocks
+    caps = market_caps()
+    if len(caps) < 0.5 * len(stocks):
+        raise RuntimeError(f"multibagger: market cap for only {len(caps)} of {len(stocks)} stocks "
+                           "— stale prices or missing share counts")
+    return stocks.merge(caps, on="sid", how="left")      # no cap -> NaN -> fails the mcap hurdle
 
 
 def _load_shareholding():

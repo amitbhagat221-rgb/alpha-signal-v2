@@ -282,7 +282,7 @@ CREATE TABLE IF NOT EXISTS bulk_deals (
     price           REAL,
     deal_date       TEXT NOT NULL,
     fetched_at      TEXT DEFAULT (datetime('now')),
-    UNIQUE(symbol, client_name, deal_date, quantity)
+    UNIQUE(symbol, client_name, deal_date, deal_type, buy_sell, quantity)
 );
 
 CREATE TABLE IF NOT EXISTS capex_to_dep_scores (sid TEXT NOT NULL REFERENCES stocks(sid), snapshot_date TEXT NOT NULL, period_end TEXT, capex_to_dep REAL, PRIMARY KEY (sid, snapshot_date));

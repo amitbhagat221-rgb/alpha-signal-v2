@@ -30,3 +30,14 @@ def test_no_benchmark_means_no_spread_column_values():
     days = pd.bdate_range("2022-01-03", "2022-12-31")
     nav = pd.DataFrame({"nav_date": days, "nav": [10.0 + 0.001 * i for i in range(len(days))]})
     assert mm._calendar_returns(nav, None)[0]["bench_ret_pct"] is None
+
+
+def test_calendar_return_runs_from_prior_year_end_close():
+    days = pd.bdate_range("2021-12-01", "2022-12-31")
+    px = [100.0 if d.year == 2021 else 110.0 for d in days]
+    px = [p if d.year == 2021 else (110.0 if d < pd.Timestamp("2022-12-30") else 120.0) for p, d in zip(px, days)]
+    nav = pd.DataFrame({"nav_date": days, "nav": px})
+    bench = pd.DataFrame({"date": days, "bench_nav": px})
+    row = [r for r in mm._calendar_returns(nav, bench) if r["year"] == 2022][0]
+    # first-close-of-year would give ~9.1%; prior year-end (100) -> 120 is 20%
+    assert round(row["ret_pct"], 1) == 20.0 and round(row["bench_ret_pct"], 1) == 20.0
