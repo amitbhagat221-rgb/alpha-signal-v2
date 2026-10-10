@@ -18,13 +18,23 @@
 </div>
 {% endif %}
 
-<div class="card u-mb20" x-data="{ statusFilter: 'all', stepFilter: '' }">
+<div class="card u-mb20" x-data="{
+    statusFilter: 'all', stepFilter: '', page: 0, per: 30,
+    rows: [],
+    init() { this.rows = Array.from(this.$el.querySelectorAll('tbody tr')).map(t => [t.dataset.status, t.dataset.step]); },
+    get match() { const f = this.stepFilter.toLowerCase(); const out = [];
+        this.rows.forEach((r, i) => { if ((this.statusFilter === 'all' || this.statusFilter === r[0]) && (f === '' || r[1].includes(f))) out.push(i); });
+        return out; },
+    get pages() { return Math.max(1, Math.ceil(this.match.length / this.per)); },
+    get shown() { const p = Math.min(this.page, this.pages - 1); return new Set(this.match.slice(p * this.per, (p + 1) * this.per)); },
+    get cur() { return Math.min(this.page, this.pages - 1); }
+}" x-effect="statusFilter; stepFilter; page = 0">
     <h2 class="section-title">Pipeline Log (Last 7 Days)</h2>
     <div class="section-desc">
         One row per (date, step) showing the final state. Stale RUNNING rows from crashed
         runs are shown as ABORTED. Each pipeline step writes a RUNNING row on start and a
         SUCCESS/FAILED row on completion; only the final state is displayed here.
-        Showing the latest {{ [pipeline|length, 30]|min }} of {{ pipeline|length }} (date, step) rows.
+        Filters and search cover all {{ pipeline|length }} (date, step) rows; 30 are shown per page.
     </div>
     <div class="sy-filter">
         <div>
@@ -48,9 +58,9 @@
             <tr><th>Date</th><th>Step</th><th>Status</th><th class="num">Rows</th><th class="num">Time</th><th>Started</th><th>Error</th></tr>
         </thead>
         <tbody>
-            {% for row in pipeline[:30] %}
+            {% for row in pipeline %}
             <tr data-status="{{ row.status }}" data-step="{{ row.step_name|lower }}"
-                x-show="(statusFilter === 'all' || statusFilter === $el.dataset.status) && (stepFilter === '' || $el.dataset.step.includes(stepFilter.toLowerCase()))">
+                x-show="shown.has({{ loop.index0 }})">
                 <td class="mono">{{ row.run_date }}</td>
                 <td class="mono"><b>{{ row.step_name }}</b></td>
                 <td>
@@ -69,6 +79,12 @@
             {% endfor %}
         </tbody>
     </table>
+    </div>
+    <div class="u-muted" x-show="match.length === 0" x-cloak>No runs match this filter.</div>
+    <div class="sy-pager" x-show="match.length > per" x-cloak>
+        <button type="button" class="radio-btn" :disabled="cur === 0" @click="page = cur - 1">&larr; Newer</button>
+        <span class="mono u-muted-11" x-text="'Page ' + (cur + 1) + ' of ' + pages + ' · ' + match.length + ' rows'"></span>
+        <button type="button" class="radio-btn" :disabled="cur >= pages - 1" @click="page = cur + 1">Older &rarr;</button>
     </div>
     {% else %}
     <div class="u-muted">No pipeline runs in the last 7 days.</div>

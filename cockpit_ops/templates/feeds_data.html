@@ -130,7 +130,7 @@
     </div>
 
     <div class="table-wrap">
-    <table class="sy-table">
+    <table class="sy-table hs-table">
         <thead>
             <tr>
                 <th><span class="sr-only">Expand</span></th><th>Table</th><th>Score</th><th class="ctr">Grade</th><th class="ctr">Issues</th><th>Top issue / Status</th>
@@ -150,7 +150,7 @@
                 </td>
                 <td class="ctr"><b class="sy-tile-p">{{ t.grade }}</b></td>
                 <td class="ctr">{% if t.issue_count > 0 %}<b class="mono {{ 'c-red' if t.score < 60 else 'c-amber' }}">{{ t.issue_count }}</b>{% else %}<span class="c-green">&#10003;</span>{% endif %}</td>
-                <td class="small">{% if t.issues %}{{ t.issues[0].msg }}{% else %}<span class="c-green">All checks pass ({{ t.factors|length }} factors)</span>{% endif %}</td>
+                <td class="small hs-issue">{% if t.issues %}{{ t.issues[0].msg }}{% else %}<span class="c-green">All checks pass ({{ t.factors|length }} factors)</span>{% endif %}</td>
             </tr>
             <tr x-show="open" x-cloak class="sy-exp">
                 <td colspan="6" x-data="lazyTab('/feeds/data/{{ t.table|urlencode }}')" x-effect="if (open) load()">
