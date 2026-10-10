@@ -160,7 +160,9 @@ function searchApp(base) {
         const b = document.querySelector('.preview-banner'), a = document.getElementById('preview-live-link');
         if (!b || !a) return;
         let tabs = {}; try { tabs = JSON.parse(b.dataset.tabs || '{}'); } catch (e) {}
-        a.href = tabs[location.hash] || a.dataset.default;
+        /* "?k=v" keys are toggles kept in the URL query (preview.py COMPARE); they win over the hash */
+        const q = Object.keys(tabs).find(k => k[0] === '?' && new URLSearchParams(location.search).get(k.slice(1).split('=')[0]) === k.split('=')[1]);
+        a.href = tabs[q] || tabs[location.hash] || a.dataset.default;
     }
     /* tab_bar changes the hash with history.pushState, which fires no event: a light poll catches it. */
     document.addEventListener('DOMContentLoaded', () => { if (document.querySelector('.preview-banner')) { syncLiveLink(); setInterval(syncLiveLink, 500); } });

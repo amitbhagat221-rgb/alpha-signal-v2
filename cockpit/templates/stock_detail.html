@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_components.html" import tab_bar %}
+{% from "_components.html" import tab_bar, tier_pill, unproven_pill, book_pill, data_pill, tip, loading %}
 {% block title %}{{ page_title(stock.ticker) }}{% endblock %}
 
 {% block content %}
@@ -45,15 +45,11 @@
     <div style="flex: 1; min-width: 280px;">
         <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
             <h1 class="stock-ticker">{{ s.ticker }}</h1>
-            <span class="stock-badge tier-{{ s.cap_tier|lower }}" {% if s.cap_tier == 'MICRO' %}title="Micro: an illiquid, data-thin slice of the market. It is never ranked."{% endif %}>{{ s.cap_tier }}{% if s.cap_tier == 'MICRO' %} <span class="u-muted-10">· no picks</span>{% endif %}</span>
-            {% if not in_ranking and s.cap_tier != 'MICRO' %}<span class="stock-badge score-amber" title="This stock has no score on the latest ranking date ({{ latest_pick }}); the figures below may be older.">Not in today's ranking</span>{% endif %}
-            {% if s.data and in_ranking %}
-            <span class="stock-badge score-{{ s.data.colour }}"
-                  title="Share of the ranking's factor weight that had a real value for this stock: {{ s.data.meaning }}. Details under the score on Overview."
-                  style="display:inline-flex; align-items:center; gap:4px;">
-                Data {{ s.data.score }}% · {{ s.data.word }}
-            </span>
-            {% endif %}
+            {{ tier_pill(s.cap_tier) }}{% if s.cap_tier == 'MICRO' %} {{ tip('no picks', 'Micro: an illiquid, data-thin slice of the market. It is never ranked.') }}{% endif %}
+            {{ unproven_pill(s.cap_tier) }}
+            {% if s.in_book %}{{ book_pill() }}{% endif %}
+            {% if not in_ranking and s.cap_tier != 'MICRO' %}<span class="pill pill-amber hover-tip" tabindex="0">Not in today's ranking<span class="tooltip-popover" role="tooltip">This stock has no score on the latest ranking date ({{ latest_pick|short_date }}); the figures below may be older.</span></span>{% endif %}
+            {% if s.data and in_ranking %}{{ data_pill(s.data) }}{% endif %}
         </div>
         <div class="stock-name">{{ s.name }} &middot; <span style="color: var(--accent);">{{ s.sector }}</span>{% if s.industry %} &middot; {{ s.industry }}{% endif %}</div>
     </div>
@@ -64,7 +60,7 @@
             {% if pm.get("return_1m") is not none %}
             <span class="num {{ pm.return_1m|tone }}">{{ pm.return_1m|pct(1, signed=True) }}</span> 1M (adjusted) &middot;
             {% endif %}
-            close {{ pm.get("price_date", "—") }}
+            close {{ pm.get("price_date")|short_date }}
         </div>
         {% endif %}
     </div>
@@ -130,7 +126,7 @@
 
 {% if s.industry or s.sector %}
 <div x-show="tab === 'sector'" x-cloak>
-    <div x-ref="sectorBox"><div class="card u-muted">Loading industry detail…</div></div>
+    <div x-ref="sectorBox">{{ loading("industry detail") }}</div>
 </div>
 {% endif %}
 
@@ -144,33 +140,33 @@
 <div class="card u-mb16 verdict">
     {% if in_ranking %}
     <div class="verdict-line">
-        <strong>{{ s.ticker }} ranks {{ s.rank }} of {{ bd.tier_size if bd else '—' }} in {{ s.cap_tier|tier_label }}s</strong>, score
-        <span class="num">{{ (s.final_score * 100)|pct(0)|replace("%", "") }}</span>/100 as of {{ s.pick_date }}{% if rank_move is not none and rank_move != 0 %},
+        <strong>{{ s.ticker }} ranks {{ s.rank|rank_text(bd.tier_size if bd else none, s.cap_tier) }}</strong>, score
+        <span class="num">{{ (s.final_score * 100)|pct(0)|replace("%", "") }}</span>/100 as of {{ s.pick_date|short_date }}{% if rank_move is not none and rank_move != 0 %},
         <span class="{{ 'score-green' if rank_move > 0 else 'score-red' }}">{{ 'up' if rank_move > 0 else 'down' }} {{ rank_move|abs }} place{{ '' if rank_move|abs == 1 else 's' }}</span> since the previous ranking{% endif %}.
         {% if s.data %}Data <span class="num">{{ s.data.score }}%</span> ({{ s.data.word|lower }}).{% endif %}
-        {% if s.cap_tier == 'LARGE' %}<span class="u-muted">Large-cap ranks have shown no out-of-sample skill.</span>{% endif %}
+        {% if s.cap_tier in unproven_tiers() %}<span class="u-muted">{{ s.cap_tier|tier_word }} ranks have shown no out-of-sample skill.</span>{% endif %}
     </div>
     {% elif s.cap_tier == 'MICRO' %}
     <div class="verdict-line"><strong>{{ s.ticker }} is a micro cap and is not ranked.</strong> <span class="u-muted">Micro caps are illiquid and data-thin; the model never scores or picks them.</span></div>
     {% else %}
-    <div class="verdict-line"><strong>{{ s.ticker }} is not in today's ranking</strong> <span class="u-muted">(latest ranking {{ latest_pick }}); it may have failed the data gate, so older figures below can be stale.</span></div>
+    <div class="verdict-line"><strong>{{ s.ticker }} is not in today's ranking</strong> <span class="u-muted">(latest ranking {{ latest_pick|short_date }}); it may have failed the data gate, so older figures below can be stale.</span></div>
     {% endif %}
     {% if pt %}
     <div class="verdict-line">
         Analyst {{ pt_basis }} target <span class="num">{{ pt|inr(0) }}</span>{% if pt_up is not none %}
-        (<span class="num {{ pt_up|tone }}">{{ pt_up|pct(1, signed=True) }}</span> vs the latest close){% endif %}{% if pt_n %}, {{ pt_n }} analyst{{ '' if pt_n == 1 else 's' }}{% endif %}{% if pt_asof %}, refreshed {{ pt_asof }}{% endif %}.
+        (<span class="num {{ pt_up|tone }}">{{ pt_up|pct(0, signed=True) }}</span> vs the latest close){% endif %}{% if pt_n %}, {{ pt_n }} analyst{{ '' if pt_n == 1 else 's' }}{% endif %}{% if pt_asof %}, refreshed {{ pt_asof|short_date }}{% endif %}.
         <button type="button" class="link-btn" @click="tab = 'analysts'; loaded.analysts = true; history.pushState(null, '', '#analysts')">Analysts tab</button>
     </div>
     {% endif %}
     {% set ch = s.get("chips") or {} %}
     <div class="chips">
-        {% for c in ch.get("flags", []) %}<span class="pill pill-{{ c.tone }}" title="{{ c.tip }}">{{ c.label }}</span>{% endfor %}
-        {% if s.m_score_flag == 'LIKELY_MANIPULATOR' %}<span class="pill pill-red" title="Beneish M-score above the manipulation threshold; see the Forensic tab">Accounts flagged</span>{% endif %}
-        {% if s.z_score_flag == 'DISTRESS' and not s.is_financial %}<span class="pill pill-red" title="Altman Z-score in the distress zone; see the Forensic tab">Distress zone</span>{% endif %}
-        {% if sd %}<span class="pill pill-{{ sd.tone }}" title="Says vs does, from the latest two earnings calls ({{ sd.latest_call }}); see the Management tab">{{ sd.label }}</span>{% endif %}
-        {% if ch.get("category") %}<span class="pill pill-muted" title="{{ ch.category.tip }}">Business type: {{ ch.category.label }}</span>{% endif %}
-        {% for c in ch.get("plays", []) %}<span class="pill pill-blue" title="{{ c.tip }}">{{ c.label }}</span>{% endfor %}
-        {% if not (ch.get("flags") or ch.get("plays") or ch.get("category") or sd or s.m_score_flag == 'LIKELY_MANIPULATOR' or (s.z_score_flag == 'DISTRESS' and not s.is_financial)) %}<span class="u-muted-11">No red flags and on no playbook screen today.</span>{% endif %}
+        {% for c in ch.get("flags", []) %}<span class="pill pill-{{ c.tone }} hover-tip" tabindex="0">{{ c.label }}<span class="tooltip-popover" role="tooltip">{{ c.tip }}</span></span>{% endfor %}
+        {% if s.m_score_flag == 'LIKELY_MANIPULATOR' %}<span class="pill pill-red hover-tip" tabindex="0">Accounts flagged<span class="tooltip-popover" role="tooltip">Beneish M-score above the manipulation threshold; see the Forensic tab</span></span>{% endif %}
+        {% if s.z_score_flag == 'DISTRESS' and not s.is_financial %}<span class="pill pill-red hover-tip" tabindex="0">Distress zone<span class="tooltip-popover" role="tooltip">Altman Z-score in the distress zone; see the Forensic tab</span></span>{% endif %}
+        {% if sd %}<span class="pill pill-{{ sd.tone }} hover-tip" tabindex="0">{{ sd.label }}<span class="tooltip-popover" role="tooltip">Says vs does, from the latest two earnings calls ({{ sd.latest_call|short_date }}); see the Management tab</span></span>{% endif %}
+        {% if ch.get("category") %}<span class="pill pill-muted hover-tip" tabindex="0">Business type: {{ ch.category.label }}<span class="tooltip-popover" role="tooltip">{{ ch.category.tip }}</span></span>{% endif %}
+        {% for c in ch.get("plays", []) %}<span class="pill pill-blue hover-tip" tabindex="0">{{ c.label }}<span class="tooltip-popover" role="tooltip">{{ c.tip }}</span></span>{% endfor %}
+        {% if not (ch.get("flags") or ch.get("plays") or ch.get("category") or sd or s.m_score_flag == 'LIKELY_MANIPULATOR' or (s.z_score_flag == 'DISTRESS' and not s.is_financial)) %}<span class="u-muted-11">No red flags and on no screen today.</span>{% endif %}
     </div>
 </div>
 
@@ -184,7 +180,7 @@
             <h2 class="section-title">Score breakdown</h2>
             <span class="num conv-score {% if s.final_score >= 0.7 %}score-green{% elif s.final_score >= 0.5 %}score-amber{% else %}score-red{% endif %}">{{ (s.final_score * 100)|pct(0)|replace("%", "") }}<span class="unit">/100</span></span>
         </div>
-        <div class="section-desc">The {{ s.cap_tier }}-cap ranking score, rank {{ s.rank }} in tier, as of {{ s.pick_date }}. Each factor is the stock's percentile within its own tier; the points are what it added to the score.</div>
+        <div class="section-desc">The {{ s.cap_tier|tier_word }} ranking score, {{ s.rank|rank_text(bd.tier_size if bd else none, s.cap_tier) }}, as of {{ s.pick_date|short_date }}. Each factor is the stock's percentile within its own tier; the points are what it added to the score.</div>
         <div class="conviction-bar conv-bar">
             <div class="conviction-marker" style="left: {{ s.final_score * 100 }}%;"></div>
         </div>
@@ -230,25 +226,25 @@
     {% set d = s.data %}
     <div class="card u-mb16">
         <div class="section-title">The data behind this score</div>
-        <div class="section-desc">Each tier ranks on a fixed set of factors. A factor with no value for a stock counts as the middle of its tier (50), so thin data pulls the score toward the middle. The share below is how much of the factor weight was backed by a real value for {{ s.ticker }} on {{ s.pick_date }}. It says nothing about whether the stock is a good buy.</div>
+        <div class="section-desc">Each tier ranks on a fixed set of factors. A factor with no value for a stock counts as the middle of its tier (50), so thin data pulls the score toward the middle. The share below is how much of the factor weight was backed by a real value for {{ s.ticker }} on {{ s.pick_date|short_date }}. It says nothing about whether the stock is a good buy.</div>
         <div class="data-head">
-            <div class="data-big score-{{ d.colour }}">{{ d.score }}%</div>
+            <div class="data-big mono score-{{ d.colour }}">{{ d.score }}%</div>
             <div><div class="data-word score-{{ d.colour }}">{{ d.word }}</div><div class="u-muted-11">{{ d.meaning | capitalize }}.</div></div>
         </div>
         <div class="data-grid">
             {% if d.factors_applicable %}
             <div class="data-cell"><div class="data-k">Factors with a value</div>
-                <div class="data-v score-{{ d.colour }}">{{ d.factors_used }}<span class="u-muted-11"> of {{ d.factors_applicable }}</span></div>
+                <div class="data-v mono score-{{ d.colour }}">{{ d.factors_used }}<span class="u-muted-11"> of {{ d.factors_applicable }}</span></div>
                 <div class="u-muted-11">{% if d.missing %}Missing: {{ d.missing | join(', ') }}{% else %}Every factor this tier ranks on had a value.{% endif %}</div></div>
             {% endif %}
             {% if d.price_days is not none %}
             <div class="data-cell"><div class="data-k">Price history</div>
-                <div class="data-v">{{ "{:,}".format(d.price_days) }}<span class="u-muted-11"> trading days</span></div>
+                <div class="data-v mono">{{ "{:,}".format(d.price_days) }}<span class="u-muted-11"> trading days</span></div>
                 <div class="u-muted-11">The gate needs about three months.</div></div>
             {% endif %}
             {% if d.quarters is not none %}
             <div class="data-cell"><div class="data-k">Fundamentals</div>
-                <div class="data-v">{{ d.quarters }}<span class="u-muted-11"> of 8 quarters</span></div>
+                <div class="data-v mono">{{ d.quarters }}<span class="u-muted-11"> of 8 quarters</span></div>
                 <div class="u-muted-11">The gate needs four.</div></div>
             {% endif %}
         </div>

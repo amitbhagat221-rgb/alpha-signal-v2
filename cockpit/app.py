@@ -154,12 +154,13 @@ def partial_news_search(request: Request, q: str = "", theme: str = "", source: 
 
 
 @app.get("/ideas", response_class=HTMLResponse)
-def ideas_page(request: Request):
-    """Ideas: Screens (one table per chip, first chip rendered here) · Avoid · Track record."""
+def ideas_page(request: Request, strict: int = 0):
+    """Ideas: Screens (one table per chip, first chip rendered here) · Avoid · Track record.
+    ?strict=1 opens Compounders with the strict (multibagger gates) toggle on."""
     from cockpit import playbooks
     entry = next(p for p in pages.PAGES if p["id"] == "ideas")
     return templates.TemplateResponse(request, "ideas.html", {
-        "page": "ideas", "tabs": entry["tabs"], "screens": playbooks.SCREENS,
+        "page": "ideas", "tabs": entry["tabs"], "screens": playbooks.SCREENS, "strict": bool(strict),
         "d": playbooks.screen("insiders"), "r": playbooks.rules()})
 
 
@@ -182,7 +183,8 @@ def ideas_avoid(request: Request):
 @app.get("/partial/ideas/track", response_class=HTMLResponse)
 def ideas_track(request: Request):
     from cockpit import playbooks
-    return templates.TemplateResponse(request, "_ideas_track.html", {"d": playbooks.portfolios(), "r": playbooks.rules()})
+    return templates.TemplateResponse(request, "_ideas_track.html", {"d": playbooks.portfolios(), "r": playbooks.rules(),
+                                                                       "ev": playbooks.evidence()})
 
 
 @app.get("/book", response_class=HTMLResponse)
@@ -223,6 +225,7 @@ def stock_detail(request: Request, sid: str):
     detail["annual"] = api.get_annual_financials(sid)
     detail["forecasts"] = api.get_forecast_trend(sid)
     detail["sector_comp"] = api.get_sector_comparison(sid, detail.get("sector"))
+    detail["in_book"] = sid in {r["sid"] for r in (api.get_sized_book() or {}).get("rows", [])}
     detail["chips"] = stocks_data.stock_chips(sid)
     detail["rank_move"] = stocks_data.rank_move(sid)
     detail["tooltips"] = api.SIGNAL_TOOLTIPS
@@ -388,6 +391,7 @@ def news_theme_page(request: Request, theme_id: str):
     theme = api.get_news_theme(theme_id)
     if theme is None:
         raise HTTPException(status_code=404, detail="No such theme")
+    theme = api.annotate_themes([theme], api.get_news_today())[0]     # the same "out of date" flag as Markets > Themes
     return templates.TemplateResponse(request, "news_theme.html", {"page": "markets", "t": theme})
 
 

@@ -6,7 +6,6 @@
 <style>
 .mf-page { max-width: 1320px; }
 .mf-header { display:flex; justify-content:space-between; align-items:baseline; gap:12px; flex-wrap:wrap; margin-bottom:6px; }
-.mf-header h1 { font-size:22px; font-weight:700; margin:0; }
 .mf-header .meta { font-size:12px; color:var(--text-muted); }
 .mf-sub { font-size:12px; color:var(--text-muted); margin:0 0 14px; line-height:1.7; }
 .mf-na { color:var(--text-muted); font-size:11px; }
@@ -63,9 +62,9 @@
 <div class="mf-page" x-data="{ heatmapOpen: false, sel: [] }">
 
 <div class="mf-header">
-    <h1>Mutual Funds</h1>
+    <h1 class="section-title">Mutual funds</h1>
     <div class="meta">
-        <strong class="num" style="color:var(--text-primary);">{{ '{:,}'.format(bundle.total|default(0)) }}</strong> funds match{% if bundle.as_of %} · NAV as of {{ bundle.as_of }}{% endif %}
+        <strong class="num" style="color:var(--text-primary);">{{ '{:,}'.format(bundle.total|default(0)) }}</strong> funds match{% if bundle.as_of %} · NAV as of {{ bundle.as_of|short_date }}{% endif %}
     </div>
 </div>
 <p class="mf-sub">{{ score_note() }} Default order: best fund of each category first.</p>

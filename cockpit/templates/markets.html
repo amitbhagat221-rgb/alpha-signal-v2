@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% from "_components.html" import tab_bar %}
-{% from "_news_theme.html" import styles, heat_chip, sector_chips, source_links %}
+{% from "_news_theme.html" import styles, heat_chip, sector_chips, source_links, stale_chip %}
 {% block title %}{{ page_title("Markets") }}{% endblock %}
 
 {% block content %}
@@ -14,7 +14,6 @@
 .ns-card h3 a::after { content: ""; position: absolute; inset: 0; border-radius: 12px; }
 .ns-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .ns-meta { margin-top: 10px; font-size: 11px; color: var(--text-muted); }
-.ns-stale { color: var(--amber); border-color: var(--amber); }
 .mk-strip { margin: 0 0 4px; font-size: 13px; color: var(--text-secondary); line-height: 1.6; }
 .mk-strip a { color: var(--text-primary); font-weight: 600; text-decoration: none; }
 .mk-row { padding: 10px 0; border-top: 1px solid var(--border); }
@@ -109,7 +108,7 @@
 <div class="card ns-card">
     <div class="ns-head">
         <h3><a href="/markets/theme/{{ t.theme_id }}">{{ t.title }}</a></h3>
-        <div>{% if t.stale %}<span class="mono ns-chip ns-stale">Out of date, see today's story</span> {% elif t.moved and not moved_all %}<span class="mono ns-chip ns-moved">Moved this week</span> {% endif %}{{ heat_chip(t.heat) }}</div>
+        <div>{% if t.stale %}{{ stale_chip() }} {% elif t.moved and not moved_all %}<span class="mono ns-chip ns-moved">Moved this week</span> {% endif %}{{ heat_chip(t.heat) }}</div>
     </div>
     {% if t.stands_now %}
     {% for s in t.since %}<div class="ns-since">Since the note: <a href="#" @click.prevent="tab = 'today'; $nextTick(() => document.getElementById('today-{{ s.n }}').scrollIntoView())">{{ s.headline }}</a></div>{% endfor %}

@@ -50,8 +50,7 @@
 
         <div class="nav-section" style="margin-top: auto; padding-top: 24px;">
             <div class="nav-section-label">{{ nav.other.section }}</div>
-            <a href="{{ other_href() }}" class="nav-item"{% if nav.other.tooltip %}
-               title="{{ nav.other.tooltip }}"{% endif %}>
+            <a href="{{ other_href() }}" class="nav-item">
                 <span class="nav-icon">{{ icon(nav.other.icon) }}</span>
                 <span class="nav-text"><span class="nav-title">{{ nav.other.title }}</span><span class="nav-subtitle">{{ nav.other.subtitle }}</span></span>
             </a>
