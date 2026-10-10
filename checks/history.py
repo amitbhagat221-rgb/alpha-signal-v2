@@ -64,6 +64,24 @@ def read():
     return out
 
 
+def previous_firing():
+    """What was firing on the last recorded day before today: {"day": ISO date or None,
+    "firing": {issue id: CRITICAL | WARN}}. The ops page diffs it with today's issues
+    for its "since yesterday" line. Read-only."""
+    today = date.today().isoformat()
+    with db.get_db() as conn:
+        cid = _check_id(conn)
+        if cid is None:
+            return {"day": None, "firing": {}}
+        row = conn.execute("SELECT MAX(date) FROM check_results WHERE check_id = ? AND date < ?", [cid, today]).fetchone()
+        day = row[0] if row else None
+        if not day:
+            return {"day": None, "firing": {}}
+        rows = conn.execute("SELECT subject, status FROM check_results WHERE check_id = ? AND date = ? AND status IN (?, ?)",
+                            [cid, day, CRITICAL, WARN]).fetchall()
+    return {"day": day, "firing": {subject: status for subject, status in rows}}
+
+
 def record(rows):
     """Write today's [(subject, check code, status, n_bad)]; returns the row count."""
     today, now = date.today().isoformat(), datetime.now().isoformat(timespec="seconds")

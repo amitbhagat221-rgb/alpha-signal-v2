@@ -88,11 +88,11 @@ TABLES = {
     },
     "stock_prices_unlisted": {
         "kind": "RAW", "domain": "Universe & Prices", "date_col": "date",
-        "description": "Daily OHLCV + delivery for every NSE symbol that is NOT in `stocks` (delisted, merged, or outside our universe), from the same bhavcopy file as stock_prices. Keyed by exchange symbol. The survivorship-free half of the price history (plan 0020).",
+        "description": "Daily OHLCV + delivery for every NSE symbol that is NOT in `stocks` (delisted, merged, or outside our universe), from the same bhavcopy file as stock_prices. Keyed by exchange symbol. The survivorship-free half of the price history.",
     },
     "daily_snapshots_pit_unlisted": {
         "kind": "COMPUTED", "domain": "Backtest (PIT)", "date_col": "snapshot_date",
-        "description": "Price-only factors + 20-day label for every NSE symbol outside `stocks` (delisted, merged, never in the universe) at each panel anchor, keyed by symbol; tier estimated from traded value. tools/unlisted_panel.py; tools/backtest_pit's full-market evidence (plan 0020 §7).",
+        "description": "Price-only factors + 20-day label for every NSE symbol outside `stocks` (delisted, merged, never in the universe) at each panel anchor, keyed by symbol; tier estimated from traded value. Built by tools/unlisted_panel.py; the full-market evidence for the backtest.",
     },
     "stock_prices": {
         "contract": {"max_null": {"close": 0.02}, "not_all_zero": ["close", "volume"]},
@@ -321,7 +321,7 @@ TABLES = {
     "news_enriched": {"kind": "COMPUTED", "domain": "News & Sentiment", "date_col": "classified_at"},
     "news_themes": {
         "kind": "COMPUTED", "domain": "News & Sentiment", "date_col": "updated_at",
-        "description": "The standing themes of the News page (plan 0021): one row per theme in config.NEWS_THEMES with its current note. Rewritten about weekly by the news_theme task.",
+        "description": "The standing themes of the News page: one row per theme in config.NEWS_THEMES with its current note. Rewritten about weekly by the news_theme task.",
     },
     "news_theme_articles": {
         "kind": "COMPUTED", "domain": "News & Sentiment", "date_col": "assigned_on",
@@ -557,12 +557,12 @@ TABLES = {
     "portfolio_outcomes": {
         "kind": "COMPUTED", "domain": "Output", "date_col": "asof_date", "stale_days": 35,
         "depth": "Per (asof_date, window) — grows as books mature",
-        "description": "Track 3.3c realized-return head-to-head: each HRP book's close-to-close return at 20/63/126 trading-day windows under HRP weights vs equal-weight on the same names (the weighting edge) vs a tier-blended NIFTY benchmark. Evidence accumulating toward the §3.3c hard gate (HRP beats current portfolio by ≥1.5% risk-adjusted over 18-24mo). ADVISORY. Reuses tools/compute_pick_outcomes price logic.",
+        "description": "Realized-return head-to-head: each HRP book's close-to-close return at 20/63/126 trading-day windows under HRP weights vs equal-weight on the same names (the weighting edge) vs a tier-blended NIFTY benchmark. Evidence builds toward the gate for sizing by risk (HRP must beat the current portfolio by 1.5% risk-adjusted over 18-24 months). Advisory only.",
     },
     "portfolio_weights": {
         "kind": "COMPUTED", "domain": "Output", "date_col": "asof_date",
         "depth": "Snapshot per build date (asof_date)",
-        "description": "Track 3.3c sized book — HRP risk-parity weights × alpha tilt over the top picks_per_tier names, under per-stock / per-sector / ₹-ADTV liquidity caps. Carries marginal_risk_contrib (percent of portfolio variance per name). ADVISORY only (no capital deployed until rank-skill validates). Built daily after the screener (PIPELINE_STEPS) + backfilled across daily_picks history.",
+        "description": "Sized book — HRP risk-parity weights × alpha tilt over the top picks_per_tier names, under per-stock / per-sector / ₹-ADTV liquidity caps. Carries marginal_risk_contrib (percent of portfolio variance per name). ADVISORY only (no capital deployed until rank-skill validates). Built daily after the screener and backfilled across the pick history.",
     },
     "sector_briefs": {"kind": "COMPUTED", "domain": "Output", "date_col": "snapshot_date"},
     "sector_dossiers": {"kind": "COMPUTED", "domain": "Output", "date_col": "snapshot_date"},
@@ -571,12 +571,12 @@ TABLES = {
     "daily_snapshots_pit": {
         "kind": "COMPUTED", "domain": "Backtest (PIT)", "date_col": "snapshot_date", "mirror": True,
         "depth": "Monthly anchors from 2019-12 + Friday anchors; refreshed weekly by refresh_pit_panel",
-        "description": "v2 PIT reconstruction extending forward of the v1 archive. Computed by tools/reconstruct_pit.py with proper filing-lag discipline (75d annual / 60d quarterly / 21d shareholding). Adds m_score and z_score (forensic) which v1 lacks. Use for backtests in dates after 2026-02 where v1 stops.",
+        "description": "Point-in-time factor panel rebuilt by tools/reconstruct_pit.py with filing-lag discipline (75d annual / 60d quarterly / 21d shareholding): what each factor would have said on each past date, plus the forward-return label. Continues the frozen archive (daily_snapshots_pit_v1) after 2026-02 and adds the forensic m_score and z_score.",
     },
     "daily_snapshots_pit_v1": {
         "kind": "RAW", "domain": "Backtest (PIT)", "date_col": "snapshot_date", "mirror": True,
         "depth": "35 monthly dates (Apr 2023 → Feb 2026)",
-        "description": "Frozen v1 PIT reconstruction — 1,978 stocks × 35 monthly eval dates × 13 signals + precomputed fwd_return_20d. The canonical historical backtest dataset. Source for the C13b t-stats behind the factor weights (factors.SIGNAL_WEIGHTS). Imported via tools/import_v1_pit.py from /home/ubuntu/alpha-signal/data/backtest/reconstructed_signals.csv.",
+        "description": "Frozen archive of the first point-in-time panel: 1,978 stocks × 35 monthly dates × 13 factors + the 20-day forward return. Read-only history that the early factor tests were run on; the live panel is daily_snapshots_pit.",
     },
     "factor_horizon_gate": {"kind": "COMPUTED", "domain": "Backtest (PIT)", "date_col": None},
     "historical_universe": {"kind": "COMPUTED", "domain": "Backtest (PIT)", "date_col": "snapshot_date"},
@@ -586,7 +586,7 @@ TABLES = {
     "pit_ic_by_tier_v1": {
         "kind": "RAW", "domain": "Backtest (PIT)", "date_col": None, "mirror": True,
         "depth": "30 rows (10 signals × 3 tiers)",
-        "description": "Canonical IC / t-stat / verdict per signal × cap_tier from v1's 36-period validation. Source-of-truth for every weight in factors.SIGNAL_WEIGHTS. Read-only; new t-stats from v2 reconstruction will land in a separate pit_ic_by_tier_v2 table.",
+        "description": "Rank-IC, t-stat and verdict per factor × cap tier from the first 36-period validation. Read-only history; current evidence is in the factor-evidence tables.",
     },
     "pit_ic_by_tier_v2": {"kind": "COMPUTED", "domain": "Backtest (PIT)", "date_col": None},
     "pit_reconstruction_log": {"kind": "LOG", "domain": "Backtest (PIT)", "date_col": "finished_at"},
@@ -613,23 +613,23 @@ TABLES = {
         "kind": "QUARANTINE", "domain": "Pipeline", "date_col": "snapshot_date",
     },
     "external_anchors": {"kind": "RAW", "domain": "Pipeline", "date_col": "fetched_at",
-                         "description": "History only (ADR 0061): Gate 7's NSE-close anchors. The step that wrote it, "
+                         "description": "History only: NSE-close anchors of a retired gate. The step that wrote it, "
                                         "anchor_audit, never produced a verdict and was retired; tools/reconcile.py "
                                         "does the cross-source price check daily."},
     "forecast_history_quarantine": {"kind": "QUARANTINE", "domain": "Pipeline", "date_col": "date"},
     "health_score": {"kind": "COMPUTED", "domain": "Pipeline", "date_col": "snapshot_date",
-                     "description": "History only (ADR 0061): the retired UHS data-trust score per factor / table / "
-                                    "system / pick, 2026-05 → 2026-10-02. Nothing writes it; daily_picks.uhs_* hold "
+                     "description": "History only: the retired data-trust score per factor / table / "
+                                    "system / pick, 2026-05 → 2026-10-02. Nothing writes it; daily_picks.uhs_* columns hold "
                                     "the per-pick values of the same period."},
     "llm_usage": {"kind": "LOG", "domain": "Pipeline", "date_col": None},
     "llm_tasks": {
         "kind": "LOG", "domain": "Pipeline", "date_col": "created_at",
-        "depth": "The LLM work queue (plan 0016)",
+        "depth": "The LLM work queue",
         "description": "One row per unit of LLM work (a regulatory headline, a news article; later a dossier or brief). Queued by `python -m alpha_mcp.tasks enqueue <kind>`, leased by a worker over the alpha-work MCP (`claim`), and written only by `submit`, which validates the result server-side and ingests it through the producer's own save path. status: queued / claimed / done / invalid / failed. undo_json lets `rollback(kind, since)` restore what an ingest changed.",
     },
     "mcp_calls": {
         "kind": "LOG", "domain": "Pipeline", "date_col": "ts",
-        "depth": "Audit log of MCP tool calls (plan 0016)",
+        "depth": "Audit log of MCP tool calls",
         "description": "One row per alpha-research / alpha-ops / alpha-work MCP tool call: profile, role (ALPHA_MCP_ROLE), tool, a hash of the arguments, rows returned, latency in ms and any error. Written by a connection that may insert into this table and nothing else.",
     },
     "mf_holdings_quarantine": {"kind": "QUARANTINE", "domain": "Pipeline", "date_col": "as_of_date"},
@@ -638,25 +638,25 @@ TABLES = {
     },
     "feed_checks": {
         "kind": "LOG", "domain": "Pipeline", "date_col": "run_date", "freq": "daily",
-        "depth": "Per-feed canary / gate verdicts (append-only, plan 0018)",
+        "depth": "Per-feed canary / gate verdicts (append-only)",
         "description": "One row per feed check: canary (1-item live probe before the morning run), gate or reconcile. Status PASS/WARN/FAIL/ERROR, symptom class A-H, HTTP status, rows, bytes, shape fingerprint vs the accepted baseline, and a JSON detail with the gate results and any drift diff. Read by the ops Data Supply page and the health report's feed verdicts.",
     },
     "run_events": {
         "kind": "LOG", "domain": "Pipeline", "date_col": "ts", "freq": "daily",
-        "depth": "Structured run log, 90-day retention (plan 0018, runlog.py)",
+        "depth": "Structured run log, 90-day retention",
         "description": "One row per event of a step / cron / manual source run, keyed by run_id: run_start, request (failed or retried HTTP call with host, redacted URL, status, latency and a redacted response snippet), item_error, exception (exact file:line, symptom class, frames), summary, run_end (per-host request/status counters, retries, rows written per table, output tail), run_exit (shell exit code). Queried by the ops Data Supply page, `python -m runlog`, and agents over MCP.",
     },
     "market_events": {
         "contract": {"max_null": {"event_time": 0.0, "available_at": 0.0}},
         "kind": "RAW", "domain": "Trades & Corporate", "date_col": "fetched_at", "freq": "daily",
-        "depth": "Credit ratings from 2025-01, IPO listings from 2012, index changes 1996-2020 (plan 0018)",
-        "description": "One row per market event, all event streams in one table (plan 0017 `events` shape): type = credit_rating (NSE Reg-30 feed with the earlier rating, direction derived), ipo_listing (NSE past issues + anchor lock-in dates by rule), index_change (NSE inclusion/exclusion log). event_time = when it happened; available_at = when the market could know it (PIT); payload = the source row as JSON.",
+        "depth": "Credit ratings from 2025-01, IPO listings from 2012, index changes 1996-2020",
+        "description": "One row per market event, all event streams in one table: type = credit_rating (NSE Reg-30 feed with the earlier rating, direction derived), ipo_listing (NSE past issues + anchor lock-in dates by rule), index_change (NSE inclusion/exclusion log). event_time = when it happened; available_at = when the market could know it (PIT); payload = the source row as JSON.",
     },
     "analyst_estimates": {
         "contract": {"max_null": {"value": 0.05}},
         "kind": "RAW", "domain": "Fundamentals", "date_col": "last_seen_at", "freq": "weekly",
-        "depth": "Yahoo EPS estimate vs actual per report back to ~2007 (L/M), EPS trend snapshots from 2026-09 (plan 0018)",
-        "description": "Versioned analyst estimates (plan 0017 `estimates` shape): eps_estimate / eps_actual / eps_surprise_pct per earnings report (target_period = report date), and weekly EPS-trend snapshots (current and 7/30/60/90 days ago, revisions up/down, low/high, analyst count; target_period = Yahoo period label). available_at: the fetch time for snapshots; the report time for historical rows, labelled pit_unverified until the estimate's freeze-at-report is verified.",
+        "depth": "Yahoo EPS estimate vs actual per report back to ~2007 (L/M), EPS trend snapshots from 2026-09",
+        "description": "Versioned analyst estimates: eps_estimate / eps_actual / eps_surprise_pct per earnings report (target_period = report date), and weekly EPS-trend snapshots (current and 7/30/60/90 days ago, revisions up/down, low/high, analyst count; target_period = Yahoo period label). available_at: the fetch time for snapshots; the report time for historical rows, labelled pit_unverified until the estimate's freeze-at-report is verified.",
     },
     "pipeline_log": {
         "kind": "LOG", "domain": "Pipeline", "date_col": "run_date",
@@ -680,7 +680,7 @@ TABLES = {
     "trust_verdicts": {
         "kind": "COMPUTED", "domain": "Pipeline", "freq": "daily", "data_freq": "daily",
         "source": "the write-time gates (validators._verdicts.GATES: identity, plausibility) called by "
-                  "yfinance_analyst, banking_metrics, moneycontrol_recos, mf_holdings; the gate_3..7 columns are history (ADR 0061)",
+                  "yfinance_analyst, banking_metrics, moneycontrol_recos, mf_holdings; the gate_3..7 columns are history",
         "date_col": "snapshot_date",
     },
     # Rows mature on a 20d forward window (pick_outcomes join), so MAX(date) is
@@ -688,7 +688,7 @@ TABLES = {
     # lag and only alarms on true death (audit Data-F5).
     "uhs_calibration_log": {
         "kind": "COMPUTED", "domain": "Pipeline", "date_col": "pick_date", "stale_days": 45,
-        "description": "History only (ADR 0061): UHS score × forward return, never reached the 6 months it needed.",
+        "description": "History only: the retired trust score against forward return; it never reached the 6 months it needed.",
     },
 
     # ── Other ──
@@ -802,7 +802,7 @@ TABLES = {
     },
     "picks": {
         "kind": "COMPUTED", "domain": "Output", "date_col": None,
-        "description": 'Every ranked stock per run: tier, rank, score, selected, gate, UHS.',
+        "description": 'Every ranked stock per run: tier, rank, score, selected, gate.',
     },
     "pick_contributions": {
         "kind": "COMPUTED", "domain": "Output", "date_col": None,
@@ -826,7 +826,7 @@ TABLES = {
     },
     "check_results": {
         "kind": "COMPUTED", "domain": "Pipeline", "date_col": None,
-        "description": 'Check outcomes per subject/date: UHS, trust-gate pass counts, feed checks, data-model parity.',
+        "description": 'Check outcomes per subject and date: feed checks, health-check history, data-model parity.',
     },
     "row_issues": {
         "kind": "COMPUTED", "domain": "Pipeline", "date_col": None,

@@ -1,4 +1,4 @@
-"""Ops cockpit pages (G5): the /org cancel path, the /flow outside-the-DAG banner, the /system Data card colour."""
+"""Ops cockpit pages (G5): the /org cancel path, the /flow outside-the-DAG banner, the Feeds › Data card colour."""
 import re
 from pathlib import Path
 
@@ -8,7 +8,7 @@ ORG = Path(__file__).resolve().parent.parent / "cockpit_ops" / "templates" / "or
 def test_org_cancel_on_the_note_prompt_records_no_decision():
     """prompt() returns null on Cancel. The old code turned that into '' and still POSTed a Reject / Park."""
     src = ORG.read_text()
-    body = src[src.index("async decide(id, verdict)"): src.index("load(data)")]
+    body = src[src.index("async decide(id, verdict, option, optionText)"): src.index("load(data)")]
     assert "|| ''" not in body.split("prompt(")[1].split(";")[0]          # null is no longer folded into ''
     assert body.index("if (n === null) return;") < body.index("post('/api/org/decide'")   # abort before the POST
     assert "confirm('Approve" in body and body.index("confirm('Approve") < body.index("post('/api/org/decide'")
@@ -60,7 +60,7 @@ def _health_html(status, verdict):
                 "eligibility": []}
     summary = {"verdict": verdict, "total_rows": 10, "total_tables": 2, "db_size_mb": 5.0, "last_run": {},
                "kind_counts": {}, "fresh_counts": {"FRESH": 1, "STALE": 0, "OUTDATED": 1, "N/A": 0}}
-    return templates.env.get_template("system_tabs/health.html").render(overview=overview, summary=summary, health_scores=None)
+    return templates.env.get_template("feeds_data.html").render(overview=overview, summary=summary, health_scores=None)
 
 
 def test_system_data_card_colour_comes_from_the_gathered_verdict():
@@ -90,17 +90,6 @@ def test_model_validation_wired_rows_cover_every_weighted_pair(monkeypatch):
     assert out["meta"]["n_wired"] == total
 
 
-def test_factor_counts_are_one_definition(monkeypatch):
-    """/system Factors header, its funnel and /command all quote factor_counts(): the
-    header's validated is the funnel's (KEEP + WEAK), never a second rule."""
-    from cockpit_ops import api
-    summary = {"total": 105, "wired": 11, "funnel": {"validated": 64}}
-    monkeypatch.setattr(api, "get_factor_health", lambda: {"summary": summary, "factors": []})
-    assert api.factor_counts() == {"total": 105, "validated": 64, "wired": 11, "not_wired": 94}
-    src = Path(api.__file__).read_text()
-    assert '"validated": funnel["validated"]' in src and 'if r["in_model"]' not in src
-
-
 def test_cold_data_tab_returns_at_once_while_the_scan_runs_in_the_background(monkeypatch, tmp_path):
     import threading
     import time
@@ -116,7 +105,7 @@ def test_cold_data_tab_returns_at_once_while_the_scan_runs_in_the_background(mon
     monkeypatch.setattr(db, "db_summary", lambda: (gate.wait(10), {})[1])
     monkeypatch.setattr(api, "get_health_overview", lambda: None)
     t0 = time.time()
-    ctx = ops_app._system_tab_context("health")
+    ctx = ops_app._data_tab_context()
     assert time.time() - t0 < 2
     assert ctx["scan_running"] and ctx["health_scores"] is None and ctx["summary"] is None
     gate.set()

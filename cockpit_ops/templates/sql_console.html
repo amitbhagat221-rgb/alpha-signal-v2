@@ -1,5 +1,4 @@
 {% extends "ops_base.html" %}
-{% from "_components.html" import tab_bar %}
 
 {% block content %}
 
@@ -28,30 +27,21 @@
 .sql-table td { padding:8px 12px; font-family:'JetBrains Mono',monospace; max-width:400px; overflow:hidden;
                 text-overflow:ellipsis; white-space:nowrap; border-bottom:1px solid var(--border); }
 .sql-table td.is-null { color:var(--text-muted); font-style:italic; }
-.sql-schema { display:grid; grid-template-columns:repeat(auto-fill,minmax(min(320px,100%),1fr)); gap:10px; }
-.sql-tbl { padding:10px 12px; background:var(--bg-primary); border:1px solid var(--border); border-radius:8px; min-width:0; }
-.sql-tbl-h { display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; gap:8px; }
-.sql-tbl-name { background:none; border:none; color:var(--accent); font-family:'JetBrains Mono',monospace;
-                font-size:12px; font-weight:700; cursor:pointer; padding:0; text-align:left; overflow-wrap:anywhere; }
-.sql-tbl-n { font-size:10px; color:var(--text-muted); font-family:'JetBrains Mono',monospace; white-space:nowrap; }
-.sql-tbl-cols { font-size:10px; color:var(--text-secondary); font-family:'JetBrains Mono',monospace; line-height:1.4; overflow-wrap:anywhere; }
 </style>
 
-<h1 class="section-title">SQL Console</h1>
+<h1 class="section-title">SQL</h1>
 <div class="section-desc">
-    Read-only SQLite console. SELECT and WITH statements only — no INSERT/UPDATE/DELETE/DROP/etc.
-    Results capped to 500 rows. Query the live database directly.
+    Read-only SQLite console on the live database: SELECT and WITH only, results capped at 500 rows.
+    Table names, columns and ages are in <a href="/system#inventory" style="color: var(--accent);">Health › Inventory</a>.
 </div>
 
-{# Single Alpine component containing query box, results, schema browser. #}
+{# Single Alpine component containing query box and results. #}
 {# Inline x-data — no function lookups, no Alpine.data registration timing risks. #}
 {# initial_query goes through a JSON script tag rather than into x-data directly:
    tojson emits double quotes, and x-data is also double-quoted, so embedding it
    inline truncates the attribute and breaks Alpine init. #}
 <script type="application/json" id="sql-initial-query">{{ (initial_query | tojson) if initial_query else 'null' }}</script>
 <div x-data="{
-    tab: 'console',
-    loaded: { console: true },
     query: 'SELECT cap_tier, COUNT(*) as n FROM stocks GROUP BY cap_tier',
     loading: false,
     error: null,
@@ -59,10 +49,6 @@
     rows: [],
     rowCount: 0,
     hasResults: false,
-    schemaLoading: false,
-    schemaError: null,
-    schemaTables: [],
-    schemaAsOf: '',
     examples: [
         { label: 'Top 10 LARGE picks', sql: 'SELECT s.ticker, s.name, dp.final_score, dp.rank FROM daily_picks dp JOIN stocks s ON dp.sid = s.sid WHERE dp.cap_tier = \'LARGE\' AND dp.pick_date = (SELECT MAX(pick_date) FROM daily_picks) ORDER BY dp.rank LIMIT 10' },
         { label: 'Classifier status', sql: 'SELECT classifier_status, COUNT(*) as n FROM regulatory_events GROUP BY classifier_status ORDER BY n DESC' },
@@ -97,23 +83,6 @@
         } finally {
             this.loading = false;
         }
-    },
-
-    async loadSchema() {
-        if (this.schemaTables.length || this.schemaLoading) return;
-        this.schemaLoading = true;
-        this.schemaError = null;
-        try {
-            const resp = await fetch('/api/sql/schema');
-            if (!resp.ok) throw new Error('HTTP ' + resp.status);
-            const d = await resp.json();
-            this.schemaTables = d.tables || [];
-            this.schemaAsOf = d.as_of || '';
-        } catch (e) {
-            this.schemaError = 'Could not load the schema: ' + e.message;
-        } finally {
-            this.schemaLoading = false;
-        }
     }
 }" x-init="
     const _initEl = document.getElementById('sql-initial-query');
@@ -122,13 +91,7 @@
     if (_initial) { runQuery(); }
 ">
 
-    {{ tab_bar([
-        ('console', 'Console'),
-        ('schema',  'Schema'),
-    ]) }}
-
-    {# ────────── CONSOLE TAB ────────── #}
-    <div x-show="tab === 'console'" x-cloak>
+    <div>
 
     <!-- Query box -->
     <div class="card u-mb20">
@@ -209,34 +172,6 @@
     </div>
 
     </div>{# / console panel #}
-
-    {# ────────── SCHEMA TAB ────────── #}
-    <div x-show="tab === 'schema'" x-cloak>
-
-    <!-- Schema browser: fetched once, the first time this tab opens -->
-    <template x-if="loaded.schema">
-    <div class="card" x-init="loadSchema()">
-        <h2 class="section-title">Schema</h2>
-        <div class="section-desc">Click a table to load "SELECT * FROM &lt;table&gt; LIMIT 20" into the query box. Row counts: rows, as of <span x-text="schemaAsOf || 'the last data-health scan'"></span> (cached).</div>
-        <div x-show="schemaLoading" class="u-muted-11" role="status">Loading schema…</div>
-        <div x-show="schemaError" x-cloak class="sql-err"><div class="sql-err-m" x-text="schemaError"></div></div>
-        <div x-show="!schemaLoading && !schemaError && schemaTables.length === 0" x-cloak class="u-muted-11">No tables found.</div>
-        <div x-show="schemaTables.length" x-cloak class="sql-schema">
-            <template x-for="t in schemaTables" :key="t.name">
-                <div class="sql-tbl">
-                    <div class="sql-tbl-h">
-                        <button @click="query = 'SELECT * FROM ' + t.name + ' LIMIT 20'; tab = 'console'; history.pushState(null, '', '#console')"
-                                x-text="t.name" class="sql-tbl-name"></button>
-                        <span x-text="t.rows === null ? '—' : t.rows.toLocaleString() + ' rows'" class="sql-tbl-n"></span>
-                    </div>
-                    <div x-text="t.columns.join(', ')" class="sql-tbl-cols"></div>
-                </div>
-            </template>
-        </div>
-    </div>
-    </template>
-
-    </div>{# / schema panel #}
 
 </div>
 

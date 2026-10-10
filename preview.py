@@ -41,11 +41,14 @@ COMPARE = {
     },
     "ops": {
         "/system": "/system",
+        "/system#checks": "/system#checks",
+        "/system#inventory": "/system#inventory",
         "/feeds": "/feeds",
-        "/feeds#data": "/command",
+        "/feeds#data": "/system#health",            # the live Health page's Data tab
         "/flow": "/flow",
-        "/flow#pipeline-log": "/system#pipeline",
+        "/flow#pipeline-log": "/system#pipeline",   # the live Health page's Pipeline tab
         "/org": "/org",
+        "/org#memos": "/org#memos",
         "/options": "/options",
         "/sql": "/sql",
     },

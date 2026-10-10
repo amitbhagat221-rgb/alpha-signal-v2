@@ -68,79 +68,154 @@
 .fl-arrow { text-align:center; color:var(--text-muted); font-size:18px; margin:-8px 0; }
 @media (max-width: 767px) { .fl-dag-card { padding:12px; } }
 </style>
+<style>
+.fl-sum { font-size: 13px; color: var(--text-secondary); margin: 4px 0 12px; }
+.fl-sum b { color: var(--text-primary); } .fl-sum .c-bad { color: var(--red); }
+.fl-fail { display: block; padding: 8px 0; border-top: 1px solid var(--border); }
+.fl-fail:first-of-type { border-top: 0; }
+.fl-fail-h { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.fl-fail-h b.mono { color: var(--text-primary); }
+.fl-fail-e { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--red); overflow-wrap: anywhere; margin-top: 3px; line-height: 1.45; }
+.fl-fail-m { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+.fl-fail a { color: var(--accent); }
+.fl-stage > summary { list-style: none; cursor: pointer; display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+.fl-stage > summary::-webkit-details-marker { display: none; }
+.fl-stage > summary::before { content: "▸"; color: var(--text-muted); }
+.fl-stage[open] > summary::before { content: "▾"; }
+.fl-stage-ok { font-size: 11px; color: var(--green); }
+.fl-stage-bad { font-size: 11px; color: var(--red); font-weight: 700; }
+.fl-stage .fl-grid { margin-top: 12px; }
+.fl-showall { margin: 0 0 12px; }
+.fl-stage .fl-step, .fl-stage .fl-step * { min-width: 0; overflow-wrap: anywhere; }
+.fl-stage { min-width: 0; }
+.rerun-btn.fl-rerun-inline { width: auto; height: auto; padding: 3px 8px; font-size: 11px; color: var(--text-secondary); }
+.fl-link-inline { color: var(--accent); }
+@media (max-width: 767px) { .fl-head-r .fl-refresh { display: none; } }
+</style>
 
-{# Layer = the steps' module package (derived in cockpit_ops.api.get_flow_overview). Colours for the
-   known packages, muted for the rest. #}
+{# Stage = where the step sits in the morning run (cockpit_ops.api.STAGES), not its Python package. #}
 {% set phase_color = {
-    'Sources': 'var(--accent)',
-    'Signals': 'var(--green)',
-    'Scoring': 'var(--amber)',
-    'Output':  'var(--blue)',
+    'collect': 'var(--accent)',
+    'prepare': 'var(--blue)',
+    'signals': 'var(--green)',
+    'rank':    'var(--amber)',
+    'publish': 'var(--text-secondary)',
 } %}
 {% macro st_class(s) %}{% if s.last_status == 'SUCCESS' %}dag-ok{% elif s.last_status == 'FAILED' and s.critical %}dag-crit{% elif s.last_status in ('FAILED', 'ABORTED') %}dag-fail{% elif s.last_status == 'RUNNING' %}dag-run{% endif %}{% endmacro %}
+{% set n_bad = (failures|length) + (outside_failures|length) %}
 
 <div class="fl-head">
-    <h1 class="section-title">Pipeline Flow</h1>
+    <h1 class="section-title">Flow</h1>
     <div class="fl-head-r">
         <span id="flow-toast" class="mono fl-toast" role="status"></span>
-        <span id="flow-refresh-tick" class="mono u-muted-11">refreshing in 60s</span>
+        <span id="flow-refresh-tick" class="mono u-muted-11 fl-refresh">refreshing in 60s</span>
         <a href="/system" class="fl-link">Health &rarr;</a>
     </div>
 </div>
-<div class="section-desc">
-    {{ step_count }} steps that run daily at 03:30 UTC (09:00 IST), grouped by module package. Lines are the declared dataflow
-    ({{ n_blocking }} blocking step→step edges, {{ n_lagged }} lagged — the reader sees the previous run); hover a step to trace it.
-    Press <span class="mono">↻</span> on a step to rerun it; status colours update on the next auto-refresh.
+<div class="fl-sum" data-flow-summary>
+    The morning run, 03:30 UTC (09:00 IST): <b>{{ step_count }} steps</b> in {{ layers|length }} stages.
+    <b>{{ n_ok }}</b> succeeded last time{% if failures %}, <b class="c-bad">{{ failures|length }} failed</b>{% endif %}{% if n_never %}, {{ n_never }} never ran{% endif %}.
 </div>
 
-{# Failure banner: DAG steps, plus cron / datamodel jobs that log runs but are not DAG steps #}
+{# Failure banner: DAG steps, plus cron / datamodel jobs that log runs but are not DAG steps. The error shown is the real one. #}
 {% if failures or outside_failures %}
 <div class="card fl-banner" role="alert">
     <div class="fl-banner-h">
-        <div class="fl-banner-t">{{ (failures|length) + (outside_failures|length) }} RUN{{ '' if (failures|length) + (outside_failures|length) == 1 else 'S' }} NEED ATTENTION</div>
-        <div class="mono u-muted-11">tap a chip to jump to its card</div>
+        <div class="fl-banner-t">{{ n_bad }} RUN{{ '' if n_bad == 1 else 'S' }} NEED ATTENTION</div>
+        <div class="mono u-muted-11">the cause is the red line; the fix is on <a href="/system" class="fl-link-inline">Health</a></div>
     </div>
-    {% if failures %}
-    <div class="fl-chips">
-        {% for f in failures %}
-        <a href="#step-{{ f.name }}" class="fl-chip">
-            <b class="mono">{{ f.last_status }}</b>
-            <span class="mono">{{ f.name }}</span>
-            {% if f.last_error %}<small>— {{ f.last_error[:60] }}{% if f.last_error|length > 60 %}…{% endif %}</small>{% endif %}
-        </a>
-        {% endfor %}
+    {% for f in failures %}
+    <div class="fl-fail" data-failed-step="{{ f.name }}">
+        <div class="fl-fail-h">
+            <b class="mono">{{ f.name }}</b>
+            <span class="fl-st" style="--st: var(--red);">{{ f.last_status }}</span>
+            {% if f.critical %}<span class="fl-crit">CRITICAL · aborts the run on failure</span>{% endif %}
+            <span class="fl-fail-m">{{ f.last_run_date or '' }}</span>
+            <button type="button" class="rerun-btn mono fl-rerun-inline" data-step="{{ f.name }}" aria-label="Rerun {{ f.name }}">↻ Rerun</button>
+        </div>
+        {% if f.last_error %}<div class="fl-fail-e">{{ f.last_error }}</div>{% else %}<div class="fl-fail-m">No error text was recorded.</div>{% endif %}
     </div>
-    {% endif %}
+    {% endfor %}
     {% if outside_failures %}
     <div class="fl-banner-sub">Outside the daily DAG (cron and datamodel jobs; <a href="/system">see Health</a>)</div>
-    <div class="fl-chips">
-        {% for f in outside_failures %}
-        <a href="/system" class="fl-chip">
-            <b class="mono">{{ f.last_status }}</b>
-            <span class="mono">{{ f.name }}</span>
-            <small>{{ f.run_date or '' }}{% if f.last_error %} — {{ f.last_error[:60] }}{% if f.last_error|length > 60 %}…{% endif %}{% endif %}</small>
-        </a>
-        {% endfor %}
+    {% for f in outside_failures %}
+    <div class="fl-fail" data-failed-step="{{ f.name }}">
+        <div class="fl-fail-h">
+            <b class="mono">{{ f.name }}</b>
+            <span class="fl-st" style="--st: var(--red);">{{ f.last_status }}</span>
+            <span class="fl-fail-m">{{ f.run_date or '' }}</span>
+        </div>
+        {% if f.last_error %}<div class="fl-fail-e">{{ f.last_error }}</div>{% else %}<div class="fl-fail-m">No error text was recorded.</div>{% endif %}
     </div>
+    {% endfor %}
     {% endif %}
 </div>
 {% endif %}
 
 {% from "_components.html" import tab_bar %}
 
-{# Phones open on Detail (cards that stack); the DAG is a wide diagram. #}
-<div x-data="{ tab: (window.matchMedia('(max-width: 767px)').matches && !location.hash) ? 'detail' : 'dag', loaded: { dag: true, detail: true } }" x-cloak
-     @hashchange.window="if (location.hash.startsWith('#step-')) { tab = 'detail'; $nextTick(() => document.getElementById(location.hash.slice(1))?.scrollIntoView()); }">
+<div x-data="{ tab: 'stages', loaded: { stages: true, dag: true }, showAll: !window.matchMedia('(max-width: 767px)').matches }" x-cloak
+     @hashchange.window="if (location.hash.startsWith('#step-')) { tab = 'stages'; showAll = true; $nextTick(() => document.getElementById(location.hash.slice(1))?.scrollIntoView()); }">
 
 {{ tab_bar([
-    ('dag',    'DAG'),
-    ('detail', 'Detail'),
+    ('stages',       'Stages'),
+    ('dag',          'Dataflow'),
+    ('pipeline-log', 'Pipeline log'),
 ]) }}
 
+{# ────────── STAGES: the steps by stage; a phone shows the failed ones until "Show all" ────────── #}
+<div x-show="tab === 'stages'" x-cloak>
+<div class="fl-showall">
+    <button type="button" class="btn-secondary" @click="showAll = !showAll" x-text="showAll ? 'Show failed steps only' : 'Show all {{ step_count }} steps'" data-show-all></button>
+</div>
+{% for layer in layers %}
+<details class="card fl-layer fl-stage" style="--layer: {{ phase_color.get(layer.id, 'var(--text-muted)') }};"   :open="showAll || {{ 'true' if layer.n_failed else 'false' }}">
+    <summary>
+        <h2 class="fl-layer-t">{{ layer.name }}</h2>
+        <span class="mono fl-layer-d">{{ layer.desc }}</span>
+        <span class="mono u-muted-11">{{ layer.steps|length }} step{{ '' if layer.steps|length == 1 else 's' }}</span>
+        {% if layer.n_failed %}<span class="fl-stage-bad">{{ layer.n_failed }} failed</span>{% else %}<span class="fl-stage-ok">all succeeded</span>{% endif %}
+    </summary>
+    <div class="fl-grid">
+        {% for s in layer.steps %}
+        {% set status = s.last_status %}
+        {% set bad = status in ['FAILED', 'ABORTED'] %}
+        {% set status_color = 'var(--green)' if status == 'SUCCESS' else ('var(--red)' if bad else ('var(--amber)' if status == 'RUNNING' else 'var(--text-muted)')) %}
+        <div id="step-{{ s.name }}" class="fl-step" style="--st: {{ status_color }};" x-show="showAll || {{ 'true' if bad else 'false' }}">
+            <button type="button" class="rerun-btn mono" data-step="{{ s.name }}" aria-label="Rerun {{ s.name }}">↻ Rerun</button>
+            <a href="{{ '/sql?table=' ~ s.writes[0] if s.writes else '#step-' ~ s.name }}" class="fl-step-link">
+                <div class="fl-step-n">
+                    <b class="mono">{{ s.name }}</b>
+                    {% if s.critical %}<span class="fl-crit">CRITICAL · aborts the run on failure</span>{% endif %}
+                </div>
+                <div class="fl-mod">{{ s.module }}{% if s.frequency and s.frequency != 'daily' %} · <em>{{ s.frequency }}</em>{% endif %}</div>
+                {% if s.writes %}<div class="mono fl-writes">&rarr; <span>{{ s.writes|join(', ') }}</span></div>{% endif %}
+                {% if s.source %}<div class="fl-src">{{ s.source }}</div>{% endif %}
+                <div class="fl-foot">
+                    <span class="fl-st">{{ status or 'NEVER RUN' }}</span>
+                    {% if s.last_rows is not none and s.last_rows == s.last_rows %}<span class="mono u-muted-10">{{ "{:,.0f}".format(s.last_rows) }} rows{% if s.last_run_date %} · {{ s.last_run_date }}{% endif %}</span>{% endif %}
+                </div>
+                {% if s.last_error and bad %}<div class="mono fl-err">{{ s.last_error }}</div>{% endif %}
+            </a>
+            {% if s.upstream or s.downstream %}
+            <div class="mono fl-nb">
+                {% if s.upstream %}<div>&larr; {% for u in s.upstream %}<a href="#step-{{ u }}">{{ u }}</a>{% if not loop.last %}, {% endif %}{% endfor %}</div>{% endif %}
+                {% if s.downstream %}<div>&rarr; {% for d in s.downstream %}<a href="#step-{{ d }}">{{ d }}</a>{% if not loop.last %}, {% endif %}{% endfor %}</div>{% endif %}
+            </div>
+            {% endif %}
+        </div>
+        {% endfor %}
+    </div>
+</details>
+{% endfor %}
+</div>{# / stages panel #}
+
+{# ────────── DATAFLOW: the DAG, one column per stage ────────── #}
 <div x-show="tab === 'dag'" x-cloak>
+<div class="section-desc">Lines are the declared dataflow ({{ n_blocking }} blocking step→step edges, {{ n_lagged }} lagged: the reader sees the previous run). Hover a step to trace it. A wide diagram: best on a desk.</div>
 <div class="card fl-dag-card">
     <div class="fl-dag-h">
-        <h2 class="fl-dag-t">Live DAG</h2>
+        <h2 class="fl-dag-t">Last run</h2>
         <div class="mono fl-legend">
             <span><span class="fl-sw fl-sw-ok"></span>SUCCESS</span>
             <span><span class="fl-sw fl-sw-fail"></span>FAILED</span>
@@ -155,7 +230,7 @@
     <div id="flow-dag">
         <svg id="flow-edges" aria-hidden="true"></svg>
         {% for layer in layers %}
-        <div class="fl-col" style="--layer: {{ phase_color.get(layer.name, 'var(--text-muted)') }};">
+        <div class="fl-col" style="--layer: {{ phase_color.get(layer.id, 'var(--text-muted)') }};">
             <div class="fl-col-h">
                 <h3 class="fl-col-n">{{ layer.name }}</h3>
                 <span class="mono u-muted-10">{{ layer.steps|length }}</span>
@@ -174,57 +249,12 @@
 </div>
 </div>{# / dag panel #}
 
-<div x-show="tab === 'detail'" x-cloak>
-{% for layer in layers %}
-<div class="card fl-layer" style="--layer: {{ phase_color.get(layer.name, 'var(--text-muted)') }};">
-    <div class="fl-layer-h">
-        <div>
-            <h2 class="fl-layer-t">{{ layer.name }}</h2>
-            <div class="mono fl-layer-d">
-                {% if layer.name == 'Sources' %}fetch external data &rarr; raw tables
-                {% elif layer.name == 'Signals' %}raw tables &rarr; per-stock signals
-                {% elif layer.name == 'Scoring' %}signals + regime &rarr; daily picks
-                {% elif layer.name == 'Output' %}picks &rarr; snapshot, dossier, email
-                {% else %}{{ layer.name|lower }} modules
-                {% endif %}
-            </div>
-        </div>
-        <div class="mono u-muted-11">{{ layer.steps|length }} step{{ '' if layer.steps|length == 1 else 's' }}</div>
-    </div>
-
-    <div class="fl-grid">
-        {% for s in layer.steps %}
-        {% set status = s.last_status %}
-        {% set status_color = 'var(--green)' if status == 'SUCCESS' else ('var(--red)' if status in ['FAILED', 'ABORTED'] else ('var(--amber)' if status == 'RUNNING' else 'var(--text-muted)')) %}
-        <div id="step-{{ s.name }}" class="fl-step" style="--st: {{ status_color }};">
-            <button type="button" class="rerun-btn mono" data-step="{{ s.name }}" aria-label="Rerun {{ s.name }}">↻ Rerun</button>
-            <a href="{{ '/sql?table=' ~ s.writes[0] if s.writes else '#step-' ~ s.name }}" class="fl-step-link">
-                <div class="fl-step-n">
-                    <b class="mono">{{ s.name }}</b>
-                    {% if s.critical %}<span class="fl-crit">CRITICAL · aborts the run on failure</span>{% endif %}
-                </div>
-                <div class="fl-mod">{{ s.module }}{% if s.frequency and s.frequency != 'daily' %} · <em>{{ s.frequency }}</em>{% endif %}</div>
-                {% if s.writes %}<div class="mono fl-writes">&rarr; <span>{{ s.writes|join(', ') }}</span></div>{% endif %}
-                {% if s.source %}<div class="fl-src">{{ s.source }}</div>{% endif %}
-                <div class="fl-foot">
-                    <span class="fl-st">{{ status or 'NEVER RUN' }}</span>
-                    {% if s.last_rows is not none %}<span class="mono u-muted-10">{{ s.last_rows|count }} rows{% if s.last_finished_at %} · {{ s.last_finished_at[:10] }}{% endif %}</span>{% endif %}
-                </div>
-                {% if s.last_error %}<div class="mono fl-err">{{ s.last_error[:100] }}{% if s.last_error|length > 100 %}…{% endif %}</div>{% endif %}
-            </a>
-            {% if s.upstream or s.downstream %}
-            <div class="mono fl-nb">
-                {% if s.upstream %}<div>&larr; {% for u in s.upstream %}<a href="#step-{{ u }}">{{ u }}</a>{% if not loop.last %}, {% endif %}{% endfor %}</div>{% endif %}
-                {% if s.downstream %}<div>&rarr; {% for d in s.downstream %}<a href="#step-{{ d }}">{{ d }}</a>{% if not loop.last %}, {% endif %}{% endfor %}</div>{% endif %}
-            </div>
-            {% endif %}
-        </div>
-        {% endfor %}
-    </div>
+{# ────────── PIPELINE LOG: fetched on first open (/flow/tab/log) ────────── #}
+<div x-show="tab === 'pipeline-log'" x-cloak x-data="lazyTab('/flow/tab/log')" x-effect="if (tab === 'pipeline-log') load()">
+    <div class="u-muted-11" x-show="busy" role="status">Loading…</div>
+    <div class="lazy-err" x-show="err" x-cloak><span x-text="err"></span> <button type="button" class="btn-secondary" @click="load()">Retry</button></div>
+    <div x-html="html"></div>
 </div>
-{% if not loop.last %}<div class="fl-arrow" aria-hidden="true">▾</div>{% endif %}
-{% endfor %}
-</div>{# / detail panel #}
 
 </div>{# / tabs root #}
 
