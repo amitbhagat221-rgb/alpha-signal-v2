@@ -18,12 +18,12 @@ from preview import PreviewReadOnly, add_redirects
 
 import config
 import views
-from cockpit import api, pages
+from cockpit import api, pages, stocks as stocks_data
 from cockpit._shared import COCKPIT_STATIC, COCKPIT_TEMPLATES, make_templates, nav_model, prewarm
 from cockpit_ops.api import get_model_overview
 
 app = FastAPI(title="Alpha Signal Cockpit")
-# Gzip every response > 1KB — /explorer is 1.27MB of HTML (same as ops).
+# Gzip every response > 1KB (the long pages are 100s of KB of HTML).
 app.add_middleware(GZipMiddleware, minimum_size=1024)
 app.add_middleware(LoginRequired, app_name="Cockpit")     # webauth.py — password login (review F5)
 app.add_middleware(PreviewReadOnly)                       # preview.py — refuses writes when COCKPIT_PREVIEW=1
@@ -152,7 +152,9 @@ def today_page(request: Request):
 
 @app.get("/stocks", response_class=HTMLResponse)
 def stocks_page(request: Request):
-    return _coming(request, "stocks")
+    """The screener: every ranked stock in one sortable, filterable table; the state is the query string."""
+    return templates.TemplateResponse(request, "stocks.html", {
+        "page": "stocks", "s": stocks_data.screen(request.query_params)})
 
 
 @app.get("/markets", response_class=HTMLResponse)
@@ -239,14 +241,6 @@ def actions(request: Request, all: int = 0):
     })
 
 
-# Cockpit v2: this URL now redirects (pages.REDIRECTS); the function below is kept, undecorated, as the data function for Stocks.
-def explorer(request: Request):
-    tiers = api.get_heatmap_data()
-    return templates.TemplateResponse(request, "explorer.html", {
-        "page": "explorer", "tiers": tiers, "pick_date": api.latest_pick_date(),
-    })
-
-
 @app.get("/stocks/{sid}", response_class=HTMLResponse)
 def stock_detail(request: Request, sid: str):
     detail = api.get_stock_detail(sid)
@@ -264,7 +258,6 @@ def stock_detail(request: Request, sid: str):
     detail["insider_timeline"] = api.get_insider_timeline(sid)
     detail["news"] = api.get_stock_news(sid)
     detail["bulk_deals"] = api.get_bulk_deals(sid)
-    detail["regulatory"] = api.get_sector_regulatory(detail.get("sector"), n=8, material=True)
     detail["earnings"] = api.get_earnings_upcoming(sid)
     detail["dossier"] = api.get_dossier(sid)
     detail["management"] = api.get_management_score(sid)
@@ -274,6 +267,8 @@ def stock_detail(request: Request, sid: str):
     detail["annual"] = api.get_annual_financials(sid)
     detail["forecasts"] = api.get_forecast_trend(sid)
     detail["sector_comp"] = api.get_sector_comparison(sid, detail.get("sector"))
+    detail["chips"] = stocks_data.stock_chips(sid)
+    detail["rank_move"] = stocks_data.rank_move(sid)
     detail["tooltips"] = api.SIGNAL_TOOLTIPS
     detail["metric_tooltips"] = api.METRIC_TOOLTIPS
     detail["signal_descriptions"] = api.SIGNAL_DESCRIPTIONS

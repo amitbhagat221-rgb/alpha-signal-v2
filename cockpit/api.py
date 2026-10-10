@@ -198,16 +198,35 @@ def get_insider_signal_batch(sids):
     return out
 
 
+_NAME_SUFFIX = re.compile(r"\b(ltd|limited|inc|corp|corporation|co|company|pvt|private)\b\.?", re.I)
+
+
+def _names_company(text, name, ticker):
+    """True when `text` names the company: its full name (legal suffix dropped), the first two words of a
+    longer name, or its ticker in capitals. Keeps "Indian Bank launches..." and drops "...by Chandan
+    Taparia" for Chandan Healthcare, which the article matcher linked on a shared first word."""
+    clean = re.sub(r"\s+", " ", _NAME_SUFFIX.sub("", name or "")).strip(" .,&-")
+    words = clean.split()
+    keys = {clean, " ".join(words[:2])} - {""}
+    low = (text or "").lower()
+    if any(re.search(rf"(?<![A-Za-z]){re.escape(k.lower())}(?![A-Za-z])", low) for k in keys):
+        return True
+    return bool(ticker) and len(ticker) >= 3 and re.search(rf"(?<![A-Za-z]){re.escape(ticker)}(?![A-Za-z])", text or "") is not None
+
+
 def get_stock_news(sid):
-    """A5: Latest 5 news articles for a stock."""
+    """A5: the latest 5 news articles whose TITLE names the stock (the article matcher also links
+    on a shared word or a summary mention, so each candidate is checked against the company name)."""
+    me = db.one("SELECT name, ticker FROM stocks WHERE sid = ?", [sid])
     rows = db.rows(
         "SELECT na.title, na.source, na.published_at, na.url "
         "FROM news_articles na "
         "JOIN news_article_stocks nas ON na.article_id = nas.article_id "
-        "WHERE nas.sid = ? ORDER BY na.published_at DESC LIMIT 5",
+        "WHERE nas.sid = ? ORDER BY na.published_at DESC LIMIT 40",
         [sid],
     )
-    return [{**r, "source": news_source_name(r["source"])} for r in rows]
+    keep = [r for r in rows if _names_company(r["title"], me.get("name"), me.get("ticker"))]
+    return [{**r, "source": news_source_name(r["source"])} for r in keep[:5]]
 
 
 def get_bulk_deals(sid):
@@ -239,7 +258,7 @@ def get_sector_regulatory(sector, n=10, material=False):
     aliases = _REGULATORY_SECTOR_ALIASES.get(sector, [sector])
     rule = ("rs.magnitude IN ('major', 'moderate') AND rs.confidence IN ('high', 'medium')"
             if material else "rs.direction IS NOT NULL")
-    return db.rows(
+    rows = db.rows(
         f"SELECT re.event_id, re.published_at, re.title, rs.direction, rs.magnitude, "
         f"rs.time_horizon, rs.confidence, rs.ai_reasoning "
         f"FROM regulatory_events re "
@@ -247,8 +266,16 @@ def get_sector_regulatory(sector, n=10, material=False):
         f"WHERE rs.sector IN ({','.join('?' * len(aliases))}) AND {rule} "
         f"  AND julianday('now') - julianday(re.published_at) <= 90 "
         f"ORDER BY julianday(re.published_at) DESC LIMIT ?",
-        list(aliases) + [n],
+        list(aliases) + [n * 4],
     )
+    # one story is often filed under several event ids, or under both sector spellings: keep the newest of each title
+    seen, out = set(), []
+    for r in rows:
+        key = re.sub(r"\W+", " ", (r["title"] or "").lower()).strip()
+        if key not in seen:
+            seen.add(key)
+            out.append(r)
+    return out[:n]
 
 
 def get_earnings_upcoming(sid=None):
@@ -613,7 +640,7 @@ SIGNAL_DESCRIPTIONS = {
 
 # Tooltips for each fundamental metric on the Financials tab
 METRIC_TOOLTIPS = {
-    "market_cap": "Total market value = share price × shares outstanding. Large >20K Cr, Mid 5-20K Cr, Small <5K Cr.",
+    "market_cap": "Total market value = share price × shares outstanding. Tiers are by rank: Large = the 100 biggest, Mid = 101st to 250th, Small = the rest. Micro is an illiquid slice that is never ranked.",
     "pe_ratio": "Price-to-Earnings: How many years of current earnings the market prices in. Lower = cheaper. Compare within sector.",
     "earnings_yield": "Earnings/Price (inverse of P/E). Higher = cheaper. Handles negative earnings gracefully unlike P/E.",
     "de_ratio": "Debt-to-Equity: Total borrowings vs shareholder equity. <0.5 = conservative. >1.5 = highly leveraged.",
@@ -718,31 +745,6 @@ def get_dominant_signal_batch(sids):
                 parts.append(f"{name}: {val:.2f}")
         out[sid] = " | ".join(parts)
     return out
-
-
-def get_heatmap_data():
-    """Every ranked stock by tier (best score first), then the non-pickable tiers
-    (MICRO) from `stocks` with score None: they are classified and their signals
-    computed, but never ranked into daily_picks."""
-    unpickable = views.unpickable_tiers()
-    ph = ",".join("?" * len(unpickable)) or "NULL"
-    df = read_sql(f"""
-        SELECT dp.sid, s.ticker, s.name, dp.final_score as score, dp.cap_tier
-        FROM daily_picks dp JOIN stocks s ON dp.sid = s.sid
-        WHERE dp.pick_date = ?
-          AND s.cap_tier NOT IN ({ph})
-        ORDER BY dp.cap_tier, dp.final_score DESC
-    """, params=[latest_pick_date(), *unpickable])
-    result = {}
-    for tier in views.pickable_tiers():
-        tier_df = df[df["cap_tier"] == tier]
-        result[tier] = tier_df[["sid", "ticker", "name", "score"]].to_dict("records")
-    for tier in unpickable:
-        rows = read_sql("SELECT sid, ticker, name, NULL AS score FROM stocks "
-                        "WHERE cap_tier = ? ORDER BY ticker", params=[tier])
-        if not rows.empty:
-            result[tier] = rows.to_dict("records")
-    return result
 
 
 def search_stocks(query):

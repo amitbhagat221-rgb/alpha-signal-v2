@@ -1,0 +1,175 @@
+{# Stocks — the screener. One sortable, filterable table of every ranked stock; the state is the URL
+   (cockpit/stocks.py screen()). Server-rendered, 100 rows a page, no per-row JS or inline styles. #}
+{% extends "base.html" %}
+{% block title %}{{ page_title("Stocks") }}{% endblock %}
+{% block content %}
+{% set c = s.chosen %}
+{% set unranked_only = c.tier in s.unpickable %}
+
+<h1 class="section-title">Stocks</h1>
+<p class="section-desc">
+    {{ "{:,}".format(s.n_ranked) }} stocks ranked{% if s.as_of %} on <span class="mono">{{ s.as_of }}</span>{% endif %};
+    {{ "{:,}".format(s.n_unranked) }} others (micro caps, and stocks that failed the data gate) are not ranked.
+    {% if s.n_book %}{{ s.n_book }} are in the book, {% endif %}{{ s.n_flagged }} carry a red flag.
+</p>
+
+<form class="st-bar" method="get" action="/stocks" id="st-form" role="search">
+    <input class="st-q" type="search" name="q" value="{{ c.q }}" placeholder="Ticker or name" aria-label="Filter by ticker or name" autocomplete="off">
+    <select name="tier" aria-label="Tier">
+        <option value="">All ranked tiers</option>
+        {% for t in s.tiers %}<option value="{{ t }}" {{ 'selected' if c.tier == t }}>{{ t|tier_label }}{{ ' (not ranked)' if t in s.unpickable }}</option>{% endfor %}
+    </select>
+    <select name="sector" aria-label="Sector">
+        <option value="">All sectors</option>
+        {% for x in s.sectors %}<option value="{{ x }}" {{ 'selected' if c.sector == x }}>{{ x }}</option>{% endfor %}
+    </select>
+    <label class="st-chk"><input type="checkbox" name="book" value="1" {{ 'checked' if c.book }}> In the book</label>
+    <label class="st-chk"><input type="checkbox" name="flagged" value="1" {{ 'checked' if c.flagged }}> Flagged</label>
+    <label class="st-chk"><input type="checkbox" name="micro" value="1" {{ 'checked' if c.micro }}> Include micro (not ranked)</label>
+    <input type="hidden" name="sort" value="{{ c.sort }}"><input type="hidden" name="dir" value="{{ c.dir }}">
+    <noscript><button type="submit" class="st-go">Apply</button></noscript>
+    {% if not s.default_view %}<a class="st-reset" href="/stocks">Reset</a>{% endif %}
+</form>
+
+<div class="st-note">
+    Rank is the place within the stock's own tier (best first); ranks never compare across tiers.
+    In Large caps no factor has shown out-of-sample skill, so a high Large-cap rank is not evidence of an edge.
+    A factor with no value counts as neutral (50), so thin data pulls a score toward the middle.
+    {% if c.sort == 'score' and not c.tier %}<strong>Scores from different tiers are not comparable: pick one tier to sort by score.</strong>{% endif %}
+</div>
+
+<div class="st-count u-muted-11" aria-live="polite">
+    {{ "{:,}".format(s.total) }} stock{{ '' if s.total == 1 else 's' }}
+    {%- if s.total %} · showing {{ (s.page - 1) * s.page_size + 1 }}–{{ (s.page - 1) * s.page_size + s.rows|length }}{% endif %}
+    {%- if s.prev_date %} · rank change is against <span class="mono">{{ s.prev_date }}</span>{% endif %}
+</div>
+
+{% macro th(key, label, cls='') -%}
+{% set on = c.sort == key %}
+<th class="{{ cls }}" scope="col" aria-sort="{{ ('ascending' if c.dir == 'asc' else 'descending') if on else 'none' }}">
+    <a href="{{ s.link(sort=key, dir=(('asc' if c.dir == 'desc' else 'desc') if on else s.sorts[key][1])) }}" class="{{ 'on' if on }}">{{ label }}{% if on %}<span aria-hidden="true">{{ ' ↑' if c.dir == 'asc' else ' ↓' }}</span>{% endif %}</a>
+</th>
+{%- endmacro %}
+
+<div class="table-wrap">
+<table class="st-table">
+    <thead><tr>
+        {{ th('ticker', 'Stock', 'l') }}
+        <th class="l hide-m" scope="col">Tier</th>
+        <th class="l hide-m hide-t" scope="col">Sector</th>
+        {{ th('score', 'Score /100', 'num') }}
+        {{ th('rank', 'Rank', 'num') }}
+        {{ th('data', 'Data %', 'num hide-m') }}
+        {{ th('pt', 'Median target', 'num hide-m') }}
+        <th class="l hide-m" scope="col">Flags and screens</th>
+    </tr></thead>
+    <tbody>
+    {% for r in s.rows %}
+    <tr>
+        <td class="l">
+            <a class="st-tk" href="/stocks/{{ r.sid }}">{{ r.ticker }}</a>{% if r.book %} <span class="pill pill-green" title="In the sized book">Book</span>{% endif %}
+            <div class="st-nm">{{ r.name }}</div>
+            <div class="st-sub show-m">{{ r.tier|tier_label }}{% if r.avoid %} · <span class="score-red">Avoid list</span>{% elif r.forensic %} · <span class="score-amber">{{ r.forensic|join(', ') }}</span>{% endif %}</div>
+        </td>
+        <td class="l hide-m"><span class="st-tier" title="{{ r.tier|tier_label }}">{{ r.tier|tier_label|replace(' Cap', '') }}</span></td>
+        <td class="l hide-m hide-t st-soft">{{ r.sector or '—' }}</td>
+        {% if r.ranked %}
+        <td class="num st-score">{{ r.score }}</td>
+        <td class="num">{{ r.rank }}<span class="u-muted-10 hide-m"> / {{ r.tier_size }}</span>
+            {%- if r.change == 'new' %} <span class="u-muted-10">new</span>
+            {%- elif r.change %} <span class="st-chg {{ 'score-green' if r.change > 0 else 'score-red' }}" title="{{ 'Up' if r.change > 0 else 'Down' }} {{ r.change|abs }} place{{ '' if r.change|abs == 1 else 's' }} since {{ s.prev_date }}">{{ '▲' if r.change > 0 else '▼' }}{{ r.change|abs }}</span>{% endif %}</td>
+        <td class="num hide-m {{ 'score-green' if r.data_colour == 'green' else 'score-amber' }}">{{ r.data }}%</td>
+        {% else %}
+        <td class="num u-muted-11" colspan="3">not ranked</td>
+        {% endif %}
+        <td class="num hide-m {{ r.pt_up|tone if r.pt_up is not none }}"{% if r.analysts %} title="Median of {{ r.analysts }} analyst target{{ '' if r.analysts == 1 else 's' }}, against the latest close"{% endif %}>{{ r.pt_up|pct(0, signed=True) if r.pt_up is not none else '—' }}</td>
+        <td class="l hide-m st-pills">
+            {%- if r.avoid %}<span class="pill pill-red" title="Two or more red flags">Avoid list</span>{% endif -%}
+            {%- for f in r.forensic %}<span class="pill pill-amber" title="{{ 'Beneish M-score says the accounts look manipulated' if f == 'Accounts' else 'Altman Z-score puts the balance sheet in the distress zone' }}">{{ f }}</span>{% endfor -%}
+            {%- if r.veto and not r.avoid %}<span class="pill pill-amber" title="In the red-flag veto set">Veto</span>{% endif -%}
+            {%- for p in r.plays %}<span class="pill pill-blue" title="Passes the {{ p }} screen today">{{ p }}</span>{% endfor -%}
+        </td>
+    </tr>
+    {% else %}
+    <tr><td class="l st-empty" colspan="8">
+        No stock matches these filters.
+        {% if not c.micro and not c.tier and c.q %}Micro caps are hidden: <a href="{{ s.link(micro='1') }}">include them</a>.{% endif %}
+        <a href="/stocks">Reset filters</a>.
+    </td></tr>
+    {% endfor %}
+    </tbody>
+</table>
+</div>
+
+{% if s.pages > 1 %}
+<nav class="st-pager" aria-label="Pages">
+    {% if s.page > 1 %}<a href="{{ s.link(page=s.page - 1) }}" rel="prev">&larr; Previous</a>{% else %}<span class="off">&larr; Previous</span>{% endif %}
+    <span class="u-muted-11">Page {{ s.page }} of {{ s.pages }}</span>
+    {% if s.page < s.pages %}<a href="{{ s.link(page=s.page + 1) }}" rel="next">Next &rarr;</a>{% else %}<span class="off">Next &rarr;</span>{% endif %}
+</nav>
+{% endif %}
+
+<div class="st-foot u-muted-11">
+    Score is the within-tier ranking score as of the ranking date. Data % is the share of the ranking's factor weight that had a real value for the stock.
+    Median target is the median analyst target against the latest close (upside, percent); blank when no analyst covers the stock or the target looks implausible.
+    Flags: Avoid list = two or more red flags; Accounts and Distress come from the forensic scores (Distress is not used for lenders); Veto = the red-flag set the playbooks exclude.
+    Blue tags are the investor-playbook screens the stock passes today. In the book = held in the sized book.
+</div>
+
+<style>
+.st-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 4px 0 10px; padding: 8px 10px; background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; }
+.st-bar input[type=search], .st-bar select { height: 32px; padding: 0 10px; min-width: 0; background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border); border-radius: 6px; font-size: 13px; }
+.st-bar .st-q { flex: 1 1 160px; }
+.st-bar select { flex: 0 1 170px; }
+.st-bar input:focus, .st-bar select:focus { outline: none; border-color: var(--accent); }
+.st-chk { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary); white-space: nowrap; }
+.st-reset { font-size: 12px; color: var(--accent); text-decoration: none; }
+.st-go { height: 32px; padding: 0 14px; background: var(--accent); color: #fff; border: 0; border-radius: 6px; font-weight: 600; }
+.st-note { font-size: 12px; line-height: 1.5; color: var(--text-secondary); margin: 0 0 8px; }
+.st-count { margin-bottom: 6px; }
+.st-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.st-table th { padding: 8px 10px; font-size: 10px; text-transform: uppercase; letter-spacing: .5px; color: var(--text-muted); border-bottom: 1px solid var(--border); white-space: nowrap; font-weight: 600; }
+.st-table th.l, .st-table td.l { text-align: left; }
+.st-table th a { color: inherit; text-decoration: none; }
+.st-table th a:hover, .st-table th a.on { color: var(--accent); }
+.st-table td { padding: 9px 10px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+.st-table tbody tr:hover { background: var(--accent-soft); }
+.st-tk { font-family: 'JetBrains Mono', monospace; font-weight: 600; color: var(--text-primary); text-decoration: none; }
+.st-tk:hover { color: var(--accent); }
+.st-nm { font-size: 11px; color: var(--text-muted); max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.st-sub { font-size: 11px; color: var(--text-muted); }
+.st-soft { color: var(--text-secondary); font-size: 12px; }
+.st-tier { font-size: 11px; color: var(--text-secondary); }
+.st-score { font-weight: 700; font-size: 15px; }
+.st-chg { font-size: 11px; margin-left: 4px; }
+.st-pills .pill { margin-right: 4px; white-space: nowrap; }
+.st-empty { padding: 28px 10px !important; text-align: center !important; color: var(--text-muted); }
+.st-empty a { color: var(--accent); }
+.st-pager { display: flex; gap: 14px; align-items: center; justify-content: center; margin: 14px 0; font-size: 12px; }
+.st-pager a, .st-pager .off { padding: 5px 12px; border: 1px solid var(--border); border-radius: 6px; text-decoration: none; color: var(--text-primary); }
+.st-pager a:hover { border-color: var(--accent); }
+.st-pager .off { opacity: .35; }
+.st-foot { line-height: 1.6; margin-top: 8px; max-width: 900px; }
+.show-m { display: none; }
+@media (max-width: 1100px) { .hide-t { display: none; } }
+@media (max-width: 700px) {
+    .hide-m { display: none; }
+    .show-m { display: block; }
+    .st-table td, .st-table th { padding: 8px 6px; }
+    .st-nm { max-width: 46vw; }
+    .st-bar select { flex: 1 1 45%; }
+}
+</style>
+
+<script>
+// Filters apply as they change; the page is plain GET links and a form, so nothing here is needed to read it.
+(function () {
+    const f = document.getElementById('st-form'), q = f.elements.q;
+    let t;
+    f.addEventListener('change', () => f.requestSubmit());
+    q.addEventListener('input', () => { sessionStorage.setItem('st-typing', '1'); clearTimeout(t); t = setTimeout(() => f.requestSubmit(), 450); });
+    if (sessionStorage.getItem('st-typing') && q.value) { q.focus(); q.setSelectionRange(q.value.length, q.value.length); }
+    sessionStorage.removeItem('st-typing');
+})();
+</script>
+{% endblock %}
