@@ -146,7 +146,13 @@
 {# ════════════════════════════════════════════ #}
 <div x-show="tab === 'per-sector'" x-cloak>
 
+{% include "_industry_tiles.html" %}
+<div id="ind-dossier" style="scroll-margin-top: 70px;">
 {% include "_industry_detail.html" %}
+</div>
+{% if detail and selected_industry %}
+<script>(function(){var el=document.getElementById('ind-dossier');if(el&&location.hash==='#per-sector'){window.addEventListener('load',function(){setTimeout(function(){el.scrollIntoView({block:'start'});},150);});}})();</script>
+{% endif %}
 
 </div>{# / per-sector tab #}
 

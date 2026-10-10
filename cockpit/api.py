@@ -2579,10 +2579,16 @@ def get_industry_rotation():
     sector call's source, so there is no second copy."""
     tilt = {t["sector"]: t["sector_tilt"]
             for t in _sector_tilt_view(db.scalar("SELECT MAX(date) FROM stock_prices"))}
+    call = {r["sector"]: r for r in build_sector_call(
+        _sector_tilt_view(db.scalar("SELECT MAX(date) FROM stock_prices")), {})}
     rows = get_group_overview("industry")
     for r in rows:
         r["sector_tilt"] = tilt.get(r.get("sector"))
+        r["sector_lean"] = (call.get(r.get("sector")) or {}).get("lean", "none")   # the sector call's own verdict
     rows.sort(key=lambda r: (r["sector_tilt"] is None, -(r["sector_tilt"] or 0), -(r.get("avg_score") or 0)))
+    by_score = sorted(rows, key=lambda r: -(r["avg_score"] if r.get("avg_score") == r.get("avg_score") and r.get("avg_score") is not None else -1))
+    for i, r in enumerate(by_score):
+        r["score_rank"] = i      # position when the tile grid is ordered by score
     return rows
 
 

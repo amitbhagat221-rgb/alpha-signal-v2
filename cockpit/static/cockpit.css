@@ -1617,3 +1617,14 @@ body.is-preview .main-content { padding-top: 52px; }
     transition: opacity var(--t-fast) var(--ease-out);
 }
 .toast.show { opacity: 1; }
+
+/* heat-map colour scale + legend, shared by Explorer (stocks) and Sectors (industries) */
+.hm-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-bottom: 14px; font-size: 11px; color: var(--text-secondary); }
+.hm-legend span { display: inline-flex; align-items: center; gap: 5px; }
+.hm-key { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
+.hm-s5, .hm-key.hm-s5 { background: color-mix(in srgb, var(--green) 55%, transparent); }
+.hm-s4, .hm-key.hm-s4 { background: color-mix(in srgb, var(--green) 25%, transparent); }
+.hm-s3, .hm-key.hm-s3 { background: var(--border-accent); }
+.hm-s2, .hm-key.hm-s2 { background: color-mix(in srgb, var(--amber) 28%, transparent); }
+.hm-s1, .hm-key.hm-s1 { background: color-mix(in srgb, var(--red) 28%, transparent); }
+.hm-na,  .hm-key.hm-na  { background: var(--bg-card-hover); color: var(--text-secondary); }
