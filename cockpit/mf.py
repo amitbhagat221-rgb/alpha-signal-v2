@@ -23,7 +23,7 @@ from cockpit._shared import _persisted_cache
 #   - mf_category_stats  category medians/deciles
 
 
-@_persisted_cache(600, name="mf_universe_pool_v2")
+@_persisted_cache(600, name="mf_universe_pool_v3")
 def _mf_universe_pool():
     """Every active scheme joined to its LATEST mf_metrics row, plus an
     `investable` flag — the unfiltered pool that get_mf_universe_overview
@@ -42,7 +42,7 @@ def _mf_universe_pool():
                   sm.plan_type, sm.option_type,
                   m.nav, m.nav_date,
                   m.ret_1y, m.ret_3y_cagr, m.ret_5y_cagr,
-                  m.sharpe_1y, m.max_drawdown,
+                  m.sharpe_1y, m.sharpe_3y, m.max_drawdown,
                   m.composite_score, m.score_percentile, m.peer_rank_3y,
                   CASE WHEN (sm.data_quality IS NULL OR sm.data_quality = 'TRUSTED')
                         AND EXISTS (SELECT 1 FROM mf_nav_history n
@@ -63,6 +63,15 @@ def _mf_universe_pool():
     df.loc[scored, "cat_rank"] = grp.rank(ascending=False, method="min")
     df.loc[scored, "cat_n"] = grp.transform("count")
     return df
+
+
+def _usual_nav_date(nav_dates):
+    """The NAV date most funds carry (a handful of future-dated rows must not set the page's "as of"),
+    never later than today; None when there is none."""
+    from datetime import date
+    d = nav_dates.dropna().astype(str)
+    d = d[d <= date.today().isoformat()]
+    return None if d.empty else str(d.mode().max())
 
 
 def is_debt_category(category: str | None) -> bool:
@@ -171,7 +180,7 @@ def get_mf_universe_overview(category: str = None, amc: str = None,
         "n_pages":   (int(total) + page_size - 1) // page_size,
         "sort":      sort,
         "dir":       "asc" if ascending else "desc",
-        "as_of":     (str(hits["nav_date"].dropna().max()) if hits["nav_date"].notna().any() else None),
+        "as_of":     _usual_nav_date(hits["nav_date"]),
         "filters":   {"category": category, "amc": amc, "plan": plan, "option": option, "q": q},
     }
 
@@ -239,7 +248,7 @@ def get_mf_detail(scheme_code: str) -> dict | None:
     metrics_dict = db.one(
         "SELECT * FROM mf_metrics WHERE scheme_code = ? ORDER BY as_of_date DESC LIMIT 1",
         [scheme_code],
-    )
+    ) or {c: None for c in read_sql("SELECT * FROM mf_metrics WHERE 0").columns}      # no row: every field reads as missing
 
     calendar = read_sql(
         "SELECT year, ret_pct, bench_ret_pct FROM mf_calendar_returns "
@@ -310,15 +319,12 @@ def get_mf_peer_rank(scheme_code: str, top_n: int = 10) -> dict:
     if not category:
         return {"category": None, "peers": []}
 
-    peers = read_sql(
-        """SELECT sm.scheme_code, sm.scheme_name, sm.amc,
-                  m.composite_score, m.ret_3y_cagr, m.sharpe_3y
-           FROM mf_metrics m
-           JOIN mf_scheme_master sm ON sm.scheme_code = m.scheme_code
-           WHERE sm.category_norm = ? AND m.composite_score IS NOT NULL
-           ORDER BY m.composite_score DESC LIMIT ?""",
-        params=[category, top_n],
-    )
+    # Same pool and ordering as mf_category_rank (latest snapshot, active schemes), so
+    # "#3 of 33" on a fund page is the row the table shows and no scheme repeats.
+    pool = _mf_universe_pool()
+    pool = pool[(pool["category_norm"] == category) & pool["composite_score"].notna()]
+    peers = pool.sort_values("composite_score", ascending=False, kind="stable").head(top_n)[
+        ["scheme_code", "scheme_name", "amc", "composite_score", "ret_3y_cagr", "sharpe_3y"]]
     return {
         "category": category,
         "peers":    peers.replace({float("nan"): None}).to_dict("records"),
