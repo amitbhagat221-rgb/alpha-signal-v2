@@ -1,0 +1,28 @@
+[Unit]
+Description=Alpha Signal Cockpit PREVIEW of the v2 layout (read-only, FastAPI on port 3002)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/alpha-signal-v2/.claude/worktrees/cockpit-v2
+Environment=PATH=/home/ubuntu/alpha-signal/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=ALPHA_DB=/home/ubuntu/alpha-signal-v2/data/alpha_signal.db
+Environment=COCKPIT_CACHE_DIR=/home/ubuntu/alpha-signal-v2/data/.cockpit_cache_preview
+Environment=COCKPIT_PREVIEW=1
+Environment=COCKPIT_NO_PREWARM=1
+Environment=COCKPIT_MAIN_URL=https://preview.rendezvous-app.duckdns.org
+Environment=COCKPIT_OPS_URL=https://preview-ops.rendezvous-app.duckdns.org
+# Seed the preview cache from the live one (no overwrite) so the first page is not a cold compute.
+ExecStartPre=/bin/mkdir -p /home/ubuntu/alpha-signal-v2/data/.cockpit_cache_preview
+ExecStartPre=-/bin/cp -rn /home/ubuntu/alpha-signal-v2/data/.cockpit_cache/. /home/ubuntu/alpha-signal-v2/data/.cockpit_cache_preview/
+ExecStart=/home/ubuntu/alpha-signal/venv/bin/uvicorn cockpit.app:app --host 127.0.0.1 --port 3002
+Restart=on-failure
+RestartSec=5
+StandardOutput=append:/home/ubuntu/alpha-signal-v2/output/alpha-cockpit-preview.log
+StandardError=append:/home/ubuntu/alpha-signal-v2/output/alpha-cockpit-preview.log
+
+[Install]
+WantedBy=multi-user.target
