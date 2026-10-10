@@ -158,7 +158,8 @@ def test_stock_pages_render(monkeypatch, tmp_path):
     first = re.search(r'class="st-tk" href="/stocks/([^"]+)"', client.get("/stocks").text).group(1)
     page = client.get(f"/stocks/{first}").text
     tabs = re.findall(r'class="tab-button"[^>]*>([^<]+)</button>', page)
-    assert tabs == ["Overview", "Financials", "Ownership", "Consensus", "Forensic", "Price &amp; Technicals", "Data", "Industry", "Management"]
+    # Amit 2026-10-10: no Data tab; the analyst consensus lives on the Overview tab.
+    assert tabs == ["Overview", "Financials", "Ownership", "Forensic", "Price &amp; Technicals", "Industry", "Management"]
     assert "CONVICTION" not in page and "Analysts</button>" not in page
-    assert "The data behind this score" in page and "Data lineage" in page    # in the Data tab, once
-    assert page.count("The data behind this score") == 1
+    assert "tab === 'data'" not in page and "tab === 'consensus'" not in page
+    assert 'id="consensus"' in page and "Sell-side Price Target" in page
