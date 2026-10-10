@@ -458,7 +458,14 @@ TABLES = {
     "inventory_turnover_scores": {
         "kind": "COMPUTED", "domain": "Computed Signals", "date_col": "snapshot_date",
     },
-    "management_scores": {"kind": "COMPUTED", "domain": "Computed Signals", "date_col": "snapshot_date"},
+    # Monthly: `run.sh management` (3rd of the month 06:10 UTC) rewrites both management tables. Before it
+    # existed nothing scheduled them: the scorecards on the stock page sat at 2026-06-06 / 2026-06-09.
+    # 35 days = a month plus a skipped-day tolerance; a missed monthly run shows as STALE.
+    "management_scores": {
+        "kind": "COMPUTED", "domain": "Computed Signals", "date_col": "snapshot_date", "freq": "monthly",
+        "stale_days": 35, "source": "signals/management_quality.py (run.sh management, monthly)",
+        "data_freq": "monthly",
+    },
     "playbook_members": {
         "kind": "COMPUTED", "domain": "Computed Signals", "date_col": "snapshot_date", "freq": "daily",
         "source": "sleeves.py rules (run.sh morning → tools/playbook_backtest --record)",
@@ -466,7 +473,9 @@ TABLES = {
         "description": "Which stocks each investor-playbook sleeve held each day (breakouts, insiders, quality, deep_value) and the red-flag set. Append-only forward record for judging the sleeves without hindsight.",
     },
     "managerial_ability_scores": {
-        "kind": "COMPUTED", "domain": "Computed Signals", "date_col": "snapshot_date",
+        "kind": "COMPUTED", "domain": "Computed Signals", "date_col": "snapshot_date", "freq": "monthly",
+        "stale_days": 35, "source": "signals/managerial_ability.py (run.sh management, monthly)",
+        "data_freq": "monthly",
     },
     # Weekly (Sunday) fundamental screen. snapshot_date only advances on the weekly run,
     # so mid-week it's up to ~6d old; 10 tolerates a normal week + a holiday-shifted

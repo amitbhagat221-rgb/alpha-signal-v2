@@ -12,6 +12,7 @@
 0 4 * * * /home/ubuntu/alpha-signal-v2/run.sh health >> /home/ubuntu/alpha-signal-v2/output/health.log 2>&1
 30 4 1 * * /home/ubuntu/alpha-signal-v2/run.sh pt_snapshot >> /home/ubuntu/alpha-signal-v2/output/yf_snapshot.log 2>&1
 0 5 * * * /home/ubuntu/alpha-signal-v2/backup_db.sh >> /home/ubuntu/alpha-signal-v2/output/backup.log 2>&1
+10 6 3 * * /home/ubuntu/alpha-signal-v2/run.sh management >> /home/ubuntu/alpha-signal-v2/output/management.log 2>&1
 15 5 2 * * /home/ubuntu/alpha-signal-v2/run.sh backtest >> /home/ubuntu/alpha-signal-v2/output/backtest_refresh.log 2>&1
 20 4,12,20 * * * /home/ubuntu/alpha-signal-v2/run.sh screener_cookie >> /home/ubuntu/alpha-signal-v2/output/screener_keepalive.log 2>&1
 0 6 1,15 * * /home/ubuntu/alpha-signal-v2/run.sh screener_universe >> /home/ubuntu/alpha-signal-v2/output/screener_universe_refresh.log 2>&1

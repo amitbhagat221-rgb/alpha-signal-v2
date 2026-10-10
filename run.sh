@@ -140,6 +140,15 @@ case "$JOB" in
         run python -m tools.health_report --email --push ;;
     pt_snapshot)        # 1st of month — monthly analyst PT snapshot (episodic data, CLAUDE.md)
         logged cron_pt_snapshot run python -m sources.yfinance_analyst --snapshot ;;
+    management)         # 3rd of month 06:10 UTC — management scorecards for the stock page's Management tab
+                        # (management_scores, managerial_ability_scores: both were manual-only and sat four months
+                        # stale), then queue the say-vs-do reads for earnings calls that arrived since last month
+                        # (idempotent: a pair already queued is skipped; the llm_local drain does the reading).
+                        # Minutes of compute, one DB writer: takes the harvest lock so it never overlaps a harvest.
+        harvest_lock
+        logged cron_management_quality run python -m signals.management_quality
+        logged cron_managerial_ability run python -m signals.managerial_ability
+        logged cron_say_do_enqueue run python -m output.say_do --enqueue ;;
     backtest)           # 2nd of month — IC refresh
         logged cron_backtest run python -m tools.backtest_pit ;;
     expected_return)    # 1st of month
@@ -167,6 +176,6 @@ case "$JOB" in
         echo "Tickertape finished rc=$RC at $(date -u)"
         exit $RC ;;
     *)
-        echo "unknown job '$JOB' (morning forward canary estimates transcripts screener_schedules llm_local org watchdog health pt_snapshot backtest expected_return screener_cookie secrets_backup screener_universe tickertape)"
+        echo "unknown job '$JOB' (morning forward canary estimates transcripts screener_schedules llm_local org watchdog health pt_snapshot management backtest expected_return screener_cookie secrets_backup screener_universe tickertape)"
         exit 2 ;;
 esac
