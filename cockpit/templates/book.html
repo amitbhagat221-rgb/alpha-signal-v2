@@ -191,7 +191,7 @@
     {% endif %}
     <ul class="bk-caveats" style="margin-top: 10px;">
         <li>These are picks made <b>before the {{ track.model_change_text }} model change</b>: the first read on the current weights is about {{ track.first_read.strftime('%-d %b') }}.</li>
-        <li>Returns use <b>unadjusted closing prices</b>, so a split or bonus can distort a single name.</li>
+        <li>Returns are split-, bonus- and dividend-adjusted (the same label the backtest uses); the index benchmark is the price index, so excess is flattered by about the dividend yield.</li>
         <li>Pick days overlap (a stock stays in the basket for days), so read the sign and size, not a t-stat.</li>
         {% if track.bench_stale %}<li>The index benchmark is {{ s.bench_staleness_days }} days old (latest {{ s.bench_max_date|short_date }}); the newest picks have no excess return yet.</li>{% endif %}
     </ul>

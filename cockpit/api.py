@@ -2143,8 +2143,8 @@ _OUTCOME_WEEKDAYS = "CAST(strftime('%w', pick_date) AS INTEGER) NOT IN (0, 6)"
 @_persisted_cache(300, name="get_pick_outcomes_summary")
 def get_pick_outcomes_summary(top_n=10):
     """Returns aggregate stats per (tier, window) for all picks AND for the top-N
-    portfolio (the actual tradable subset). Weekday pick dates only; returns use the
-    unadjusted closes in pick_outcomes.
+    portfolio (the actual tradable subset). Weekday pick dates only; returns are the adjusted
+    label (pit.forward_returns) stored in pick_outcomes.
 
     Shape:
     {
