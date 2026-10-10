@@ -36,7 +36,7 @@ Green/red = financial direction only. Cards with actions get 4px left-border acc
 | `/explorer` | Heat map + table of all stocks |
 | `/explorer/{sid}` | **Stock Detail — 6 tabs (the main screen)** |
 | `/portfolio` | Model portfolio + analytics |
-| `/playbooks` | Investor Playbooks — ten tabs (avoid list, insider buying, compounders, superinvestors, breakouts, deep value, Lynch categories, say vs do, market cycle, all approaches); separate from daily picks, each tab states its rule; rules are constants in `cockpit/playbooks.py`, say-vs-do verdicts come from the `say_do` LLM kind (`output/say_do.py`) |
+| `/ideas` | Ideas, three tabs: Screens (chips: insider buying, compounders with a strict multibagger-gates toggle, superinvestors, breakouts, deep value; each with its backtest result line and the model rank in tier), Avoid (veto unproven), Track record (sleeve backtest + forward record). `/playbooks` and `/multibagger` redirect here. Data: `cockpit/playbooks.py`; Lynch category / say-vs-do / playbook chips for the stock page come from `playbooks.stock_chips(sid)`; the retired tabs and roadmap are in [playbooks.md](playbooks.md) |
 | `/sectors?industry=X` | Industry deep-dive (drill from 38 industries; sectors are visual grouping only — [ADR 0013](../decisions/0013-industry-not-sector-as-drill-unit.md)) |
 | `/system` | Pipeline health, freshness, rerun buttons |
 | `/flow` | Pipeline DAG view with rerun ([ADR 0008](../decisions/0008-cockpit-write-surface.md)) |

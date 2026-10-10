@@ -1,4 +1,4 @@
-"""Investor Playbooks (/playbooks) — the pure rules. Offline: no DB."""
+"""Investor playbook rules (cockpit/playbooks.py, shown on /ideas) — the pure rules. Offline: no DB."""
 import pandas as pd
 
 from cockpit import playbooks as pb
@@ -16,11 +16,6 @@ def test_names_normalise_and_followed_patterns_need_every_word():
     assert who("KEDIA SECURITIES PRIVATE LIMITED") == ["Vijay Kedia"]
     assert who("Ankush Kedia") == [], "a shared surname alone is not a match"
     assert who("RAMESH DAMANI") == ["Ramesh Damani"] and who("Radhakishan S Damani") == ["Radhakishan Damani"]
-
-
-def test_percentile_is_share_of_history_below():
-    assert pb._pctile([1, 2, 3, 4], 3) == 50
-    assert pb._pctile([], 3) is None and pb._pctile([1, 2], None) is None
 
 
 def test_own_history_value_is_free_of_share_counts(monkeypatch):
@@ -41,9 +36,8 @@ def test_own_history_value_is_free_of_share_counts(monkeypatch):
     assert v["vs_median"] == 0 and v["cheaper_than"] == 0 and v["pe"] == 20.0
 
 
-def test_roadmap_statuses_and_rules_are_exposed():
-    assert {s for _, _, s, _ in pb.ROADMAP} <= {"live", "partial", "not built"}
-    assert len(pb.CATEGORIES) == 6
+def test_categories_and_rules_are_exposed():
+    assert len(pb.CATEGORIES) == 6 and pb.rules()["ROCE_BAR"]
 
 
 # ─────────────────────────────── say vs do (output/say_do.py) ───────────────────────────────

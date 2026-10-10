@@ -1,0 +1,106 @@
+{% from "_ideas_macros.html" import stock_cell, num, chip, flag_cell, rank_cell, change_cell, result_line, th, list_tools with context %}
+{% set k = d.key %}
+<div class="card" style="margin-top: 14px;" x-data="pbList()">
+    {{ result_line(d.line) if k != 'strict' }}
+
+    {% if k == 'insiders' %}
+    <div class="pb-head"><h2 class="section-title">{{ d.rows|length }} stocks where insiders were net buyers</h2>
+        <div class="mono u-muted-11">last {{ r.INSIDER_DAYS }} days to {{ d.as_of or '—' }} · {{ d.n_clusters or 0 }} with several buyers</div></div>
+    <div class="section-desc">Promoters, directors and key managers buying with their own money: net purchases of at least ₹{{ r.INSIDER_MIN_CR|int }} crore, or {{ r.INSIDER_MIN_BUYERS }}+ different insiders. Several buyers is the stronger sign; one large buyer is often a holding company reshuffling.</div>
+    {% elif k == 'compounders' %}
+    <div class="pb-head"><h2 class="section-title">{{ d.n }} businesses pass the quality rule · {{ d.n_cheap }} cheap against their own history</h2>
+        <div class="mono u-muted-11">{% for t, c in d.tier_counts.items() %}{{ t }} {{ c }}{% if not loop.last %} · {% endif %}{% endfor %}</div></div>
+    <div class="section-desc">Return on capital of {{ r.ROCE_BAR }}%+ in {{ r.ROCE_MIN_HITS }} of the last {{ r.ROCE_YEARS }} years, no loss year, sales growing {{ r.SALES_CAGR_BAR }}%+ a year. Ordered by how cheap today's P/E is against the stock's own month-end history since {{ d.history_from or '2020' }}{% if d.n > d.rows|length %} (first {{ d.rows|length }} shown){% endif %}. One market cycle of history: a reason to look, not to buy.</div>
+    {% elif k == 'investors' %}
+    <div class="pb-head"><h2 class="section-title">{{ d.rows|length }} stocks where a followed investor or active individual just bought</h2>
+        <div class="mono u-muted-11">filings to {{ d.as_of or '—' }} · {{ d.n_stocks }} stocks covered</div></div>
+    <div class="section-desc">Start from what proven investors already own: stocks where one of {{ d.n_investors }} investors (followed names and individuals above 1% in {{ r.INVESTOR_MIN_STOCKS }}+ companies) newly appeared or added in the latest filing. {{ d.n_held - d.rows|length }} more held stocks are unchanged or have no earlier filing to compare.{% if d.n_stocks and d.n_with_prior < d.n_stocks %} The previous quarter is stored for {{ d.n_with_prior }} of {{ d.n_stocks }} stocks, so changes show only for those.{% endif %}</div>
+    {% elif k == 'breakouts' %}
+    <div class="pb-head"><h2 class="section-title">{{ d.rows|length }} stocks breaking out on good results</h2>
+        <div class="mono u-muted-11">as of {{ d.as_of }}</div></div>
+    <div class="section-desc">Results well received, delivery at least {{ r.BREAKOUT_DELIVERY_Z }} standard deviations above the stock's own norm, price in the top {{ (100 - r.BREAKOUT_POSITION * 100)|int }}% of its 52-week range, rising over 6 months. All four must hold; pickable tiers only. A short list is the screen working.</div>
+    {% elif k == 'deep' %}
+    <div class="pb-head"><h2 class="section-title">{{ d.rows|length }} stocks at or below book value · {{ d.n_clean }} with no red flag</h2>
+        <div class="mono u-muted-11">as of {{ d.as_of }}</div></div>
+    <div class="section-desc">Price at or below book, earnings at least {{ (r.DEEP_EARNINGS_YIELD * 100)|int }}% of the price, debt at most {{ r.DEEP_MAX_DEBT_TO_EQUITY }}× equity, non-financial. Cheap is usually cheap for a reason in India: read the red flags first.{% if d.n_suspect %} {{ d.n_suspect }} more matched but were dropped as implausible ratios (more likely a data error than a bargain).{% endif %}</div>
+    {% elif k == 'strict' %}
+    {% set s = d.strict %}
+    {% if not s.available %}
+    <div class="pb-empty">No multibagger run yet. The strict screen runs weekly (Sunday).</div>
+    {% else %}
+    <div class="pb-head"><h2 class="section-title">{{ d.rows|length }} strict compounders (multibagger gates)</h2>
+        <div class="mono u-muted-11">as of {{ s.as_of }}</div></div>
+    <div class="section-desc">{{ "{:,}".format(s.funnel.universe) }} stocks → {{ "{:,}".format(s.funnel.passed_gates) }} pass the safety gates → <strong>{{ s.funnel.survived }}</strong> pass the quality hurdles. This is a junk-stripped watchlist for 2–4 years, not a ranked forecast: the gates do the work and the order has no reliable edge, least of all in small-cap uptrends (<a href="/" class="pb-clear">regime on Today</a>). Not in the backtest below.</div>
+    {% endif %}
+    {% endif %}
+
+    {% if k != 'strict' or d.strict.available %}
+    {{ list_tools(d.rows|length, 'stocks') }}
+    <div class="table-wrap pb-scroll">
+    <table class="pb-table">
+        {% if k == 'insiders' %}
+        <thead><tr>{{ th('Stock','l') }}{{ th('Model rank','') }}{{ th('Buyers','c') }}{{ th('Bought (₹ cr)','') }}{{ th('Sold (₹ cr)','') }}{{ th('Net (₹ cr)','') }}{{ th('Last buy','') }}{{ th('Largest buyer','l') }}{{ th('Flags','c') }}</tr></thead>
+        <tbody>{% for s in d.rows %}
+        <tr data-row><td class="l">{{ stock_cell(s) }}</td>{{ rank_cell(s) }}
+            <td class="c">{% if s.cluster %}{{ chip(s.buyers ~ ' buyers', 'var(--blue)') }}{% else %}<span class="mono u-muted-11">1</span>{% endif %}</td>
+            <td class="mono">{{ num(s.bought_cr, 1) }}</td><td class="mono u-muted-11">{{ num(s.sold_cr, 1) }}</td><td class="mono strong">{{ num(s.net_cr, 1) }}</td>
+            <td class="mono u-muted-11">{{ s.last_buy }}</td><td class="l soft" style="min-width: 140px;">{{ s.top_buyer }}</td><td class="c">{{ flag_cell(s.flags) }}</td></tr>
+        {% else %}<tr><td colspan="9" class="l u-muted-11">No net insider buying in the window.</td></tr>{% endfor %}</tbody>
+        {% elif k == 'compounders' %}
+        <thead><tr>{{ th('Stock','l') }}{{ th('Model rank','') }}{{ th('Cheaper than (% of months)','') }}{{ th('P/E (×)','') }}{{ th('Below 52w high (%)','') }}{{ th('Years at the bar','') }}{{ th('Median return on capital (%)','') }}{{ th('Sales growth (%/yr)','') }}{{ th('Debt / equity','') }}{{ th('Flags','c') }}</tr></thead>
+        <tbody>{% for s in d.rows %}
+        <tr data-row><td class="l">{{ stock_cell(s) }}</td>{{ rank_cell(s) }}
+            <td class="mono strong">{% if s.cheaper_than is not none %}{{ s.cheaper_than }}%{% else %}–{% endif %}</td>
+            <td class="mono">{{ num(s.pe, 0, '×') }}</td><td class="mono">{{ num(s.from_high, 0, '%') }}</td>
+            <td class="mono">{{ s.hits }} / {{ r.ROCE_YEARS }}</td><td class="mono">{{ num(s.roce_median, 0, '%') }}</td>
+            <td class="mono">{{ num(s.sales_cagr, 0, '%') }}</td><td class="mono">{{ num(s.debt_to_equity, 2) }}</td><td class="c">{{ flag_cell(s.flags) }}</td></tr>
+        {% else %}<tr><td colspan="10" class="l u-muted-11">No business passes the rule.</td></tr>{% endfor %}</tbody>
+        {% elif k == 'investors' %}
+        <thead><tr>{{ th('Stock','l') }}{{ th('Model rank','') }}<th class="l">Holders above 1% and what changed since the last filing</th>{{ th('Flags','c') }}</tr></thead>
+        <tbody>{% for s in d.rows %}
+        <tr data-row><td class="l">{{ stock_cell(s) }}</td>{{ rank_cell(s) }}
+            <td class="l soft" style="line-height: 1.7; min-width: 240px;">{% for h in s.holders %}<div><strong style="color: var(--text-primary);">{{ h.who }}</strong> <span class="mono">{{ num(h.pct, 2, '%') }}</span> {{ change_cell(h) }}</div>{% endfor %}</td>
+            <td class="c">{{ flag_cell(s.flags) }}</td></tr>
+        {% else %}<tr><td colspan="4" class="l u-muted-11">No holder filings loaded yet.</td></tr>{% endfor %}</tbody>
+        {% elif k == 'breakouts' %}
+        <thead><tr>{{ th('Stock','l') }}{{ th('Model rank','') }}{{ th('Reaction to results (%)','') }}{{ th('Delivery vs own norm (σ)','') }}{{ th('Place in 52w range (%)','') }}{{ th('6-month move (%)','') }}{{ th('Flags','c') }}</tr></thead>
+        <tbody>{% for s in d.rows %}
+        <tr data-row><td class="l">{{ stock_cell(s) }}</td>{{ rank_cell(s) }}
+            <td class="mono">{{ s.reaction|pct(1, signed=True) }}</td><td class="mono strong">{{ num(s.delivery_z, 1, ' σ', signed=True) }}</td>
+            <td class="mono">{{ s.position|pct(0) }}</td><td class="mono">{{ s.mom_6m|pct(0, signed=True) }}</td><td class="c">{{ flag_cell(s.flags) }}</td></tr>
+        {% else %}<tr><td colspan="8" class="l u-muted-11">Nothing meets all four conditions today.</td></tr>{% endfor %}</tbody>
+        {% elif k == 'deep' %}
+        <thead><tr>{{ th('Stock','l') }}{{ th('Model rank','') }}{{ th('Price / book (×)','') }}{{ th('P/E (×)','') }}{{ th('Debt / equity','') }}{{ th('More cash than debt','c') }}{{ th('Flags','c') }}</tr></thead>
+        <tbody>{% for s in d.rows %}
+        <tr data-row><td class="l">{{ stock_cell(s) }}</td>{{ rank_cell(s) }}
+            <td class="mono strong">{{ num(s.price_to_book, 2, '×') }}</td><td class="mono">{{ num(s.pe, 1, '×') }}</td><td class="mono">{{ num(s.debt_to_equity, 2) }}</td>
+            <td class="c">{% if s.net_cash %}{{ chip('YES', 'var(--blue)') }}{% else %}<span class="u-muted-11">no</span>{% endif %}</td><td class="c">{{ flag_cell(s.flags) }}</td></tr>
+        {% else %}<tr><td colspan="8" class="l u-muted-11">Nothing meets the rule today.</td></tr>{% endfor %}</tbody>
+        {% else %}
+        <thead><tr>{{ th('Stock','l') }}{{ th('Model rank','') }}{{ th('Conviction','c') }}{{ th('Market cap (₹ cr)','') }}{{ th('Score (0–1)','') }}{{ th('ROIC (%)','') }}{{ th('Profit growth (%/yr)','') }}{{ th('Piotroski F (0–9)','') }}{{ th('Promoter (%)','') }}{{ th('Pledged (%)','') }}{{ th('Debt / equity','') }}{{ th('Flags','c') }}</tr></thead>
+        <tbody>{% for s in d.rows %}
+        <tr data-row><td class="l">{{ stock_cell(s) }}</td>{{ rank_cell(s) }}
+            <td class="c" data-v="{{ {'HOLD': 0, 'WATCH': 1, 'REVIEW': 2}.get(s.conviction, 3) }}">{% if s.conviction %}<span class="pill pill-{{ 'green' if s.conviction=='HOLD' else ('amber' if s.conviction=='WATCH' else 'red') }}" title="Drawdown {{ s.dd_pct|pct(0, scale=100) }} · sector momentum {{ s.sector_mom|pct(0, signed=True, scale=100) }} · relative strength {{ s.rel_strength|pct(0, signed=True, scale=100) }}">{{ s.conviction }}</span><div class="pb-name mono">{{ s.dd_pct|pct(0, scale=100) }} off high</div>{% else %}–{% endif %}</td>
+            <td class="mono">{{ s.mcap_cr|crore }}</td><td class="mono strong">{{ num(s.multibagger_score, 2) }}</td>
+            <td class="mono">{{ s.roic|pct(0, scale=100) }}</td><td class="mono">{{ s.pat_cagr_3y|pct(0, scale=100) }}</td><td class="mono">{{ num(s.f_score, 0) }}</td>
+            <td class="mono">{{ s.promoter_pct|pct(0) }}</td><td class="mono">{{ s.pledge_pct|pct(1) if s.pledge_pct is not none else '–' }}</td><td class="mono">{{ num(s.de_ratio, 2) }}</td><td class="c">{{ flag_cell(s.flags) }}</td></tr>
+        {% else %}<tr><td colspan="12" class="l u-muted-11">No stock passes every gate.</td></tr>{% endfor %}</tbody>
+        {% endif %}
+    </table>
+    </div>
+    <div class="pb-empty" x-show="shown === 0" x-cloak>Nothing matches that filter.</div>
+    {% endif %}
+
+    <div class="pb-foot">
+        {% if k == 'insiders' %}Source: NSE insider-trading disclosures (promoters, promoter group, directors, key managers); employee trades left out.
+        {% elif k == 'compounders' %}Return on capital = (profit before tax + interest) ÷ (equity + reserves + borrowings), annual statements; financials left out. The P/E history uses split- and bonus-adjusted month-end prices over the latest annual profit public at the time. The backtest line above uses a 5-year version of this rule.
+        {% elif k == 'investors' %}Source: BSE shareholding filings (holders above 1%); NSE-only stocks are not covered. A holder that drops under 1% disappears, so a missing name can be a trim or an exit. Followed investors are matched on the words of the filed name.
+        {% elif k == 'breakouts' %}Pickable tiers only. Delivery anomaly and the results reaction are the two factors with the strongest evidence in the model (small caps).
+        {% elif k == 'deep' %}P/B and P/E are the ranking's own factor values. Banks and other financials are left out (they often trade below book for ordinary reasons).
+        {% elif k == 'strict' and d.strict.available %}
+        <div><strong style="color: var(--text-secondary);">Conviction</strong> is a holding monitor, reviewed every 3–6 months, not a stop-loss: most eventual 3× winners fall 30%+ on the way. HOLD ({{ d.strict.conviction.get('HOLD', 0) }}): near its high or momentum intact, do nothing. WATCH ({{ d.strict.conviction.get('WATCH', 0) }}): in a 25–50% drawdown with mixed signals, monitor. REVIEW ({{ d.strict.conviction.get('REVIEW', 0) }}): deep, long underwater and sector turned down, so re-read the thesis; not an automatic sell{% if d.strict.guard_active %} (suppressed while small caps are in a bear market){% endif %}.</div>
+        <div>Gates: Beneish M-score clean · pledge ≤10% · debt/equity ≤0.5 · ROIC ≥18% · Piotroski F ≥6 · 3-year profit growth ≥20% · promoter ≥35% · market cap ₹1–20k cr. Buy a basket of 20–30 equal weights across sectors.</div>
+        {% endif %}
+        <div>Model rank = place in the stock's tier in the latest ranking{% if d.ranks_as_of %} ({{ d.ranks_as_of }}){% endif %}, #1 = best. Green: top fifth, the model agrees. Red: bottom fifth, the model disagrees. LARGE has no factor with out-of-sample skill, so a LARGE rank is context only. Flags = red flags on the Avoid tab.</div>
+    </div>
+</div>

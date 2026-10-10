@@ -1,5 +1,5 @@
 """
-Alpha Signal Cockpit — Investor Playbooks data layer (/playbooks).
+Alpha Signal Cockpit — Ideas data layer (/ideas: Screens · Avoid · Track record).
 
 Other ways to read the same raw data than the factor ranking: filters, events and
 watchlists in the style of well-known investors. None of these feed daily_picks and
@@ -13,8 +13,10 @@ lives here as a named constant.
   breakouts()       O'Neil / Minervini: good results, heavy delivery, price near its high
   deep_value()      Graham: at or below book, earning, little debt — with the red flags beside it
   categories()      Lynch: each business sorted into the six kinds he judged by different rules
-  market_cycle()    Marks: a handful of readings on where the market stands, no single score
   say_do()          Fisher: does management deliver what it told investors (LLM, output/say_do.py)
+
+The Ideas page reads screen(key) (one stock table per screen, each row joined to the model's rank
+in its tier), avoid_list() and portfolios(). The stock page reads stock_chips(sid).
 
 Factor values (earnings yield, book-to-price, delivery anomaly, announcement reaction…)
 come from the latest daily_snapshots_pit row — the same numbers the ranking uses.
@@ -438,10 +440,10 @@ CATEGORIES = [   # key, label, the rule, how Lynch read it
 ]
 
 
-@_persisted_cache(3600, name="playbook_categories_v2")
-def categories():
-    """Every non-financial stock with three years of statements, in ONE of Lynch's six
-    kinds (first rule that matches, in CATEGORIES order)."""
+@_persisted_cache(3600, name="playbook_category_members")
+def category_members():
+    """{category key: every member row} — every non-financial stock with three years of
+    statements, in ONE of Lynch's six kinds (first rule that matches, in CATEGORIES order)."""
     raw = read_sql("SELECT sid, period_end, line_item, value FROM fundamentals_screener WHERE period_type = 'annual' "
                    "AND line_item IN ('Sales', 'Net profit')")
     stocks, snap = _stocks(), _snapshot()["rows"]
@@ -474,6 +476,22 @@ def categories():
             continue
         ey = snap["earnings_yield"].get(sid)
         members[key].append({**_base(sid, stocks), "growth": round(growth), "pe": round(1 / ey, 1) if ey and ey > 0 else None})
+    return members
+
+
+def category_of(sid):
+    """The (key, label) of the Lynch category a stock sits in, or None (financials, short history)."""
+    labels = {k: label for k, label, *_ in CATEGORIES}
+    for key, rows in category_members().items():
+        if any(r["sid"] == sid for r in rows):
+            return key, labels[key]
+    return None
+
+
+@_persisted_cache(3600, name="playbook_categories_v2")
+def categories():
+    """The six kinds with their rule, reading, tier counts and a few examples each."""
+    members = category_members()
     tier_order = {t: i for i, t in enumerate(views.tiers())}
     out = []
     for key, label, rule, reading in CATEGORIES:
@@ -485,68 +503,6 @@ def categories():
                     "tier_counts": tiers, "examples": rows[:CATEGORY_EXAMPLES]})
     return {"categories": out, "n": sum(c["n"] for c in out),
             "by_sid": {r["sid"]: key for key, rows in members.items() for r in rows}}      # the stock page's chip
-
-
-# ═══════════════════════════ 8. Market cycle ═══════════════════════════
-
-def _pctile(series, value):
-    """Share of `series` below `value`, 0-100."""
-    s = pd.Series(series).dropna()
-    return None if s.empty or value is None or pd.isna(value) else round(float((s < value).mean()) * 100)
-
-
-@_persisted_cache(3600, name="playbook_cycle")
-def market_cycle():
-    """Readings on where the market stands, each against its own history. Deliberately no
-    combined score: Marks's point is to know roughly where you are, not to time it."""
-    readings = []
-
-    vix = read_sql("SELECT date, vix FROM vix_history ORDER BY date")
-    if not vix.empty:
-        now, p = float(vix["vix"].iloc[-1]), _pctile(vix["vix"], vix["vix"].iloc[-1])
-        readings.append({"label": "Fear (India VIX)", "value": f"{now:.1f}", "as_of": vix["date"].iloc[-1],
-                         "context": f"lower than on {100 - p}% of days since {vix['date'].iloc[0][:4]}",
-                         "reading": "Complacent — protection is cheap, surprises hurt more" if p <= 25
-                         else "Fearful — historically a better time to buy than to sell" if p >= 75 else "Ordinary"})
-
-    idx = read_sql("SELECT trade_date, close FROM nse_index_history WHERE index_symbol = 'NIFTY SMALLCAP 250' "
-                   "AND close > 0 ORDER BY trade_date")
-    if len(idx) > 200:
-        c = idx["close"]
-        dd = (c.iloc[-1] / c.max() - 1) * 100
-        vs200 = (c.iloc[-1] / c.tail(200).mean() - 1) * 100
-        readings.append({"label": "Small caps (Nifty Smallcap 250)", "value": f"{dd:+.0f}% from peak", "as_of": idx["trade_date"].iloc[-1],
-                         "context": f"{vs200:+.0f}% against its 200-day average; peak since {idx['trade_date'].iloc[0][:4]}",
-                         "reading": "At or near the high — optimism is in the price" if dd > -5
-                         else "In a deep drawdown — pessimism is in the price" if dd <= -20 else "Off the high"})
-
-    panel = read_sql("SELECT snapshot_date, cap_tier, mom_6m, book_to_price FROM daily_snapshots_pit")
-    if not panel.empty:
-        breadth = panel.dropna(subset=["mom_6m"]).groupby("snapshot_date")["mom_6m"].apply(lambda m: (m > 0).mean() * 100)
-        now, p = float(breadth.iloc[-1]), _pctile(breadth, breadth.iloc[-1])
-        readings.append({"label": "Breadth (stocks up over 6 months)", "value": f"{now:.0f}%", "as_of": breadth.index[-1],
-                         "context": f"higher than on {p}% of snapshots since {breadth.index[0][:4]}",
-                         "reading": "Almost everything is rising — late in an advance" if p >= 80
-                         else "Almost everything is falling — late in a decline" if p <= 20 else "Mixed"})
-        large = panel[(panel["cap_tier"] == "LARGE") & (panel["book_to_price"] > 0)]
-        btp = large.groupby("snapshot_date")["book_to_price"].median()
-        if len(btp) > 12:
-            now, p = float(btp.iloc[-1]), _pctile(btp, btp.iloc[-1])
-            readings.append({"label": "Large-cap valuation (median price-to-book)", "value": f"{1 / now:.1f}×", "as_of": btp.index[-1],
-                             "context": f"cheaper than on {p}% of snapshots since {btp.index[0][:4]}",
-                             "reading": "Expensive against its own recent history" if p <= 25
-                             else "Cheap against its own recent history" if p >= 75 else "Around its usual level"})
-
-    flows = read_sql("SELECT category, SUM(net_value_cr) AS net, MIN(flow_date) AS d0, MAX(flow_date) AS d1 FROM fii_dii_cash_flow "
-                     "WHERE flow_date >= ? GROUP BY category", params=[_since(30)])
-    for r in flows.itertuples():
-        who = "Foreign investors" if r.category.startswith("FII") else "Domestic institutions"
-        readings.append({"label": f"{who}, last 30 days", "value": f"{'+' if r.net >= 0 else '−'}₹{abs(r.net):,.0f} cr", "as_of": r.d1,
-                         "context": "net bought" if r.net > 0 else "net sold",
-                         "reading": "No history to compare against yet (flows stored since April 2026)"})
-
-    regime = views.regime() or {}
-    return {"readings": readings, "regime": regime.get("regime")}
 
 
 # ═══════════════════════════ 9. Say vs do ═══════════════════════════
@@ -597,39 +553,155 @@ def portfolios():
     return {"backtest": bt, "record": record}
 
 
-# ═══════════════════════════ the other approaches ═══════════════════════════
-
-# Every approach from the 2026-10-04 brainstorm, so the page says what is NOT here.
-ROADMAP = [
-    ("Avoid list / checklist", "Munger, Pabrai", "live", "Avoid list tab; the flag count also appears beside every other screen"),
-    ("Promoter and insider buying", "Event-driven", "live", "Insider buying tab"),
-    ("Compounders, bought when cheap", "Buffett, Munger", "live", "Compounders tab: quality rule, then price against the stock's own history"),
-    ("Cloning superinvestors", "Pabrai", "partial", "Superinvestors tab; buys and sells fill in as earlier filings load, and only stocks with a BSE listing are covered"),
-    ("Earnings + delivery breakouts", "O'Neil, Minervini", "live", "Breakouts tab"),
-    ("Net-nets / deep value", "Graham", "live", "Deep value tab, with red flags beside each name"),
-    ("Category rules", "Lynch", "live", "Categories tab"),
-    ("Market-cycle readings", "Marks, Druckenmiller", "partial", "Market cycle tab; history is short (one cycle), so read it as context, not a signal"),
-    ("Downside / upside card", "Pabrai", "partial", "Deep value shows price against book and net cash; a per-stock card on Stock Detail is not built"),
-    ("Management says vs does", "Fisher", "partial", "Say vs do tab; verdicts fill in as the LLM worker reads each pair of earnings calls (compounders, LARGE and MID first)"),
-    ("Portfolios and backtest", "—", "live", "Portfolios tab: each testable playbook held monthly after costs, plus the forward record"),
-    ("Position sizing overlay", "Thorp", "not built", "Applies to the other engines, not an idea source"),
-]
 
 
-# tab key -> producer. A tab's data is computed only when that tab is opened.
-TABS = {
-    "avoid": avoid_list, "insiders": insider_buying, "compounders": compounders, "investors": superinvestors,
-    "breakouts": breakouts, "deep": deep_value, "categories": categories, "saydo": say_do, "cycle": market_cycle,
-    "portfolios": portfolios,
-    "roadmap": lambda: [{"approach": a, "who": w, "status": s, "note": n} for a, w, s, n in ROADMAP],
-}
+# ═══════════════════════════ the Ideas page ═══════════════════════════
+
+# screen key -> label on the chip, and the sleeve whose backtest speaks for it
+SCREENS = [("insiders", "Insider buying"), ("compounders", "Compounders"), ("investors", "Superinvestors"),
+           ("breakouts", "Breakouts"), ("deep", "Deep value")]
+SCREEN_SLEEVE = {"insiders": "insiders", "compounders": "quality", "investors": "cloning",
+                 "breakouts": "breakouts", "deep": "deep_value"}
+MIN_MONTHS = 12                  # a sleeve with fewer months of history is greyed and called too short
+RANK_EDGE = 0.2                  # top / bottom fifth of a tier count as agreeing / conflicting with the screen
+
+
+def _backtest():
+    import json
+    from tools.playbook_backtest import OUTPUT_PATH
+    return json.loads(OUTPUT_PATH.read_text()) if OUTPUT_PATH.exists() else None
+
+
+def backtest_line(stats, label):
+    """The one result line of a sleeve: after-costs return against its tier average, with the
+    t-stat, months and a plain verdict. None when there is no backtest for it."""
+    if not stats:
+        return None
+    if stats["months"] < MIN_MONTHS:
+        verdict = "too short to judge"
+    elif stats["excess_ann"] > 0 and (stats["t_stat"] or 0) >= 2:
+        verdict = "beat its tier"
+    elif stats["excess_ann"] > 0:
+        verdict = "ahead of its tier, but not beyond chance"
+    else:
+        verdict = "did not beat its tier"
+    return {"label": label, "net": stats["net_ann"], "tier": stats["bench_ann"], "t": stats["t_stat"],
+            "months": stats["months"], "last": stats["last"], "verdict": verdict}
+
+
+def model_ranks():
+    """{sid: {rank, n, pct, tier}} — each stock's place in its tier in the latest ranking
+    (rank 1 = best; pct = rank / names in the tier), and the pick date it comes from."""
+    df = views.picks(gated=False)
+    if df.empty:
+        return {"as_of": None, "by_sid": {}}
+    n = df.groupby("cap_tier")["rank"].transform("count")
+    by_sid = {r.sid: {"rank": int(r.rank), "n": int(k), "pct": round(r.rank / k, 3), "tier": r.cap_tier}
+              for r, k in zip(df.itertuples(), n)}
+    return {"as_of": views.latest_pick_date(), "by_sid": by_sid}
+
+
+def with_rank(rows, ranks=None):
+    """Copies of `rows` with the model rank in the stock's tier and the red-flag count joined in."""
+    ranks = ranks or model_ranks()
+    flags = _flag_counts()
+    out = []
+    for r in rows:
+        m = ranks["by_sid"].get(r["sid"])
+        out.append({**r, "rank": m["rank"] if m else None, "rank_n": m["n"] if m else None,
+                    "rank_pct": m["pct"] if m else None,
+                    "agrees": bool(m and m["pct"] <= RANK_EDGE), "conflicts": bool(m and m["pct"] > 1 - RANK_EDGE),
+                    "flags": r["flags"] if "flags" in r else flags.get(r["sid"], 0)})
+    return out
+
+
+def _investor_stock_rows():
+    """superinvestors() flattened to one row per stock: who holds it above 1%, and what changed."""
+    d = superinvestors()
+    by = {}
+    for followed, group in ((True, d["followed"]), (False, d["investors"])):
+        for inv in group:
+            for h in inv["holdings"]:
+                r = by.setdefault(h["sid"], {"sid": h["sid"], "ticker": h["ticker"], "name": h["name"], "tier": h["tier"],
+                                             "sector": h.get("sector"), "holders": [], "followed": False})
+                r["holders"].append({"who": inv["name"], "pct": h["pct"], "change": h["change"], "delta": h["delta"]})
+                r["followed"] = r["followed"] or followed
+    rank = {"new": 0, "up": 1, "down": 2, "same": 3, "unknown": 4}
+    rows = list(by.values())
+    for r in rows:
+        r["holders"].sort(key=lambda h: (rank[h["change"]], -(h["pct"] or 0)))
+        r["n_buying"] = sum(h["change"] in ("new", "up") for h in r["holders"])
+    rows.sort(key=lambda r: (-r["n_buying"], not r["followed"], -len(r["holders"]), r["ticker"]))
+    return rows, d
+
+
+def strict_compounders():
+    """The multibagger gates as the strict version of Compounders: survivors of the gate funnel
+    with their HOLD / WATCH / REVIEW conviction. {available: False} before the first run."""
+    from cockpit import api
+    o = api.get_multibagger_overview()
+    if not o.get("available"):
+        return {"available": False}
+    return {"available": True, "as_of": o["snapshot_date"], "funnel": o["funnel"], "conviction": o["conviction_counts"],
+            "gate_fails": o["gate_fails"][:3], "guard_active": o["market_guard_active"],
+            "rows": [{**s, "ticker": s.get("ticker") or s["sid"], "tier": s["cap_tier"]} for s in o["survivors"]]}
+
+
+def screen(key, strict=False):
+    """One Ideas screen: its rows with model rank and flags, the backtest result line, and the
+    as-of dates. `strict` swaps Compounders for the multibagger gates."""
+    ranks = model_ranks()
+    bt = _backtest()
+    sleeve = {s["key"]: s for s in bt["sleeves"]} if bt else {}
+    label = dict(SCREENS)[key]
+    if key == "compounders" and strict:
+        d = strict_compounders()
+        return {"key": "strict", "label": "Strict compounders (multibagger gates)", "strict": d,
+                "rows": with_rank(d.get("rows", []), ranks), "ranks_as_of": ranks["as_of"],
+                "line": None, "as_of": d.get("as_of")}
+    d = {"insiders": insider_buying, "compounders": compounders, "investors": None,
+         "breakouts": breakouts, "deep": deep_value}[key]
+    extra = {}
+    if key == "investors":
+        every, inv = _investor_stock_rows()
+        rows = [r for r in every if r["n_buying"]]          # the action: someone newly appeared or added
+        extra = {"n_investors": len(inv["followed"]) + len(inv["investors"]), "n_with_prior": inv["n_with_prior"],
+                 "n_stocks": inv["n_stocks"], "n_held": len(every)}
+        as_of = inv["as_of"]
+    else:
+        d = d()
+        rows, as_of = d["rows"], d.get("as_of")
+        extra = {k: v for k, v in d.items() if k not in ("rows", "as_of")}
+    st = sleeve.get(SCREEN_SLEEVE[key])
+    return {"key": key, "label": label, "rows": with_rank(rows, ranks), "ranks_as_of": ranks["as_of"], "as_of": as_of,
+            "line": backtest_line(st["stats"], label) if st else None, "strict": None, **extra}
+
+
+def avoid(ranks=None):
+    """The avoid list with model ranks, and the veto's own backtest line."""
+    d = avoid_list()
+    bt = _backtest()
+    ranks = ranks or model_ranks()
+    rows = with_rank(d["rows"], ranks)
+    return {**d, "rows": rows, "ranks_as_of": ranks["as_of"],
+            "line": backtest_line(bt["flagged"]["stats"], "Red-flagged stocks") if bt else None}
+
+
+def stock_chips(sid):
+    """What the stock page shows as chips: Lynch category, say-vs-do verdict, and the playbook
+    screens the stock sits in today. Every part is None / [] when there is nothing to say."""
+    cat = category_of(sid)
+    from output import say_do as sd
+    verdict = next((d for d in sd.load() if d.get("sid") == sid), None)
+    members = read_sql("SELECT sleeve FROM playbook_members WHERE sid = ? AND snapshot_date = "
+                       "(SELECT MAX(snapshot_date) FROM playbook_members)", params=[sid])
+    labels = {k: v["label"] for k, v in sleeves.SLEEVES.items()} | {"flagged": "Red-flag set"}
+    return {"lynch": {"key": cat[0], "label": cat[1]} if cat else None,
+            "say_do": {"verdict": verdict["verdict"], "label": VERDICT_LABELS.get(verdict["verdict"], verdict["verdict"]),
+                       "summary": verdict["summary"]} if verdict else None,
+            "playbooks": [labels.get(x, x) for x in members["sleeve"]]}
 
 
 def rules():
-    """The numeric rule constants, shown in each tab's prose."""
+    """The numeric rule constants, shown in each screen's prose."""
     return {k: v for k, v in globals().items() if k.isupper() and isinstance(v, (int, float))}
-
-
-def tab_data(key):
-    """The data behind one /playbooks tab (KeyError for an unknown tab)."""
-    return TABS[key]()

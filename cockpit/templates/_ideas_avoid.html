@@ -1,0 +1,35 @@
+{% from "_ideas_macros.html" import stock_cell, num, chip, flag_cell, rank_cell, result_line, th, list_tools with context %}
+<div class="card" style="margin-top: 14px;" x-data="pbList()">
+    <div class="pb-note"><strong>Veto unproven.</strong>
+        {% if d.line %}Red-flagged stocks did not lag in the backtest: {{ d.line.net|pct(1) }}/yr against {{ d.line.tier|pct(1) }}/yr for their tier (t {{ '%+.2f'|format(d.line.t) if d.line.t is not none else '—' }}, {{ d.line.months }} months to {{ d.line.last }}).
+        {% else %}No backtest has been run for the red-flag set.{% endif %}
+        Use the list as a reason to read the filings, not as a sell signal.</div>
+    <div class="pb-head" style="margin-top: 12px;">
+        <h2 class="section-title">{{ d.rows|length }} stocks with {{ r.AVOID_MIN_FLAGS }} or more red flags</h2>
+        <div class="mono u-muted-11">as of {{ d.as_of }} · {{ d.n_any }} stocks carry at least one</div>
+    </div>
+    <div class="section-desc">Decide what not to own first. One flag alone is common and often harmless; several together rarely are. Tap a check to filter.</div>
+    <div class="pb-tiles">
+        {% for c in d.counts %}<button type="button" class="pb-tile" :class="{ on: f === '{{ c.key }}' }" :aria-pressed="f === '{{ c.key }}'" @click="toggle('{{ c.key }}')"><span class="mono v">{{ c.n_listed }}</span><span class="k">{{ c.label }} · {{ c.n }} in all</span></button>{% endfor %}
+    </div>
+    {{ list_tools(d.rows|length, 'stocks') }}
+    <div class="table-wrap pb-scroll">
+    <table class="pb-table">
+        <thead><tr>{{ th('Stock','l') }}{{ th('Model rank','') }}{{ th('Flags','c') }}<th class="l">What tripped</th></tr></thead>
+        <tbody>
+        {% for s in d.rows %}
+        <tr data-row data-k="{{ s.kinds|join(' ') }}"><td class="l">{{ stock_cell(s) }}</td>{{ rank_cell(s) }}
+            <td class="c">{{ chip(s.n_flags, 'var(--red)' if s.n_flags >= 3 else 'var(--amber)') }}</td>
+            <td class="l soft" style="line-height: 1.55;">{% for f in s.flags %}<div><strong style="color: var(--text-primary);">{{ f.label }}</strong> — {{ f.detail }}</div>{% endfor %}</td></tr>
+        {% else %}<tr><td colspan="4" class="l u-muted-11">No stock trips {{ r.AVOID_MIN_FLAGS }} checks today.</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    <div class="pb-empty" x-show="shown === 0" x-cloak>No stock matches that filter.</div>
+    <div class="pb-foot">
+        Checks: promoter pledge ≥ {{ r.PLEDGE_PCT }}% in the latest filing · accounts flagged as likely manipulated (Beneish M-score) ·
+        balance sheet in the distress zone (Altman Z, non-financials) · on the exchange's long-term or graded surveillance list ·
+        auditor, CFO, CEO or MD resigned in the last {{ r.RESIGNATION_DAYS }} days. Model rank: place in the stock's tier{% if d.ranks_as_of %} on {{ d.ranks_as_of }}{% endif %}.
+    </div>
+</div>

@@ -1,18 +1,20 @@
 {% extends "base.html" %}
-{% from "_components.html" import tab_bar %}
-{% block title %}{{ page_title("Investor Playbooks") }}{% endblock %}
+{% from "_components.html" import tab_bar, radio_group %}
+{% block title %}{{ page_title("Ideas") }}{% endblock %}
 
 {% block content %}
 <style>
-.tab-bar { flex-wrap: wrap; overflow-x: visible; }
-.tab-bar .tab-button { padding-left: 9px; padding-right: 9px; }
+.ideas-chips { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.ideas-chips .radio-group { display: flex; flex-wrap: wrap; margin: 0; }
+.ideas-strict { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary); cursor: pointer; }
 .pb-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
 .pb-table th { padding: 8px 6px; text-align: right; color: var(--text-muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; font-weight: 600; }
 .pb-table td { padding: 9px 6px; text-align: right; border-top: 1px solid var(--border); vertical-align: top; }
 .pb-table .l { text-align: left; } .pb-table .c { text-align: center; }
 .pb-table td.strong { font-weight: 700; color: var(--text-primary); }
 .pb-table td.soft { font-size: 11.5px; color: var(--text-secondary); }
-.pb-table td.mono { font-variant-numeric: tabular-nums; }
+.pb-table td.mono { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.pb-note + .pb-head, .pb-note + .pb-tools { margin-top: 14px; }
 .pb-sort { all: unset; cursor: pointer; text-transform: inherit; letter-spacing: inherit; white-space: nowrap; }
 .pb-sort:hover, .pb-sort:focus-visible { color: var(--text-primary); }
 .pb-sort:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
@@ -55,41 +57,33 @@ th[aria-sort="descending"] .pb-sort::after { content: " ▼"; font-size: 10px; }
 @media (max-width: 768px) { .pb-inv-body { padding-left: 6px; } .pb-inv-name { min-width: 0; } .pb-reading .k, .pb-reading .v { flex-basis: 100%; } .pb-q { min-width: 0; flex: 1; } }
 </style>
 
-<h1 class="section-title">Investor Playbooks</h1>
+<h1 class="section-title">Ideas</h1>
 <div class="section-desc">
-    Other ways to read the same data than the factor ranking: a filter, an event or a watchlist in the style of a
-    well-known investor. These are <strong>separate from your daily picks</strong> and none is a ranked forecast —
-    each tab states its rule. Tiers are shown, never mixed into one ranking.
+    Screens from outside the model: filters and watchlists in the style of well-known investors. They are <strong>separate from the daily picks</strong>
+    and none is a forecast. Every row shows where the model ranks the stock in its tier, so agreement and conflict are visible.
 </div>
 
-<div x-data="{ tab: 'avoid', loaded: { avoid: true } }" style="margin-top: 14px;">
-{{ tab_bar([('avoid', 'Avoid list'),
-            ('insiders', 'Insider buying'),
-            ('compounders', 'Compounders'),
-            ('investors', 'Superinvestors'),
-            ('breakouts', 'Breakouts'),
-            ('deep', 'Deep value'),
-            ('categories', 'Categories'),
-            ('saydo', 'Say vs do'),
-            ('cycle', 'Market cycle'),
-            ('portfolios', 'Portfolios'),
-            ('roadmap', 'All approaches')]) }}
+<div x-data="{ tab: 'screens', loaded: { screens: true }, screen: 'insiders', strict: false }" style="margin-top: 14px;">
+{{ tab_bar(tabs) }}
 
-{# The first tab is rendered here; every other tab is fetched from /partial/playbooks/<tab> the first time it opens. #}
-<div x-show="tab === 'avoid'" x-cloak>
-{% include "_pb_avoid.html" %}
+{# Screens is rendered here (first chip); every other chip and tab is fetched from /partial/ideas/<part> the first time it opens. #}
+<div x-show="tab === 'screens'" x-cloak>
+    <div class="ideas-chips" style="margin-top: 12px;">
+        {{ radio_group('screen', screens) }}
+        <label class="ideas-strict" x-show="screen === 'compounders'" x-cloak><input type="checkbox" x-model="strict"> Strict (multibagger gates)</label>
+    </div>
+    <div x-show="screen === 'insiders'">{% include "_ideas_screen.html" %}</div>
+    {% for key, label in screens[1:] %}
+    {% if key == 'compounders' %}
+    <div x-show="screen === 'compounders' && !strict" x-cloak x-effect="if (tab === 'screens' && screen === 'compounders' && !strict) pbLoad($el, 'screen/compounders')"><div class="pb-loading">Loading…</div></div>
+    <div x-show="screen === 'compounders' && strict" x-cloak x-effect="if (tab === 'screens' && screen === 'compounders' && strict) pbLoad($el, 'screen/compounders?strict=1')"><div class="pb-loading">Loading…</div></div>
+    {% else %}
+    <div x-show="screen === '{{ key }}'" x-cloak x-effect="if (tab === 'screens' && screen === '{{ key }}') pbLoad($el, 'screen/{{ key }}')"><div class="pb-loading">Loading…</div></div>
+    {% endif %}
+    {% endfor %}
 </div>
-<div x-show="tab === 'insiders'" x-cloak x-effect="if (tab === 'insiders') pbLoad($el, 'insiders')"><div class="pb-loading">Loading…</div></div>
-<div x-show="tab === 'compounders'" x-cloak x-effect="if (tab === 'compounders') pbLoad($el, 'compounders')"><div class="pb-loading">Loading…</div></div>
-<div x-show="tab === 'investors'" x-cloak x-effect="if (tab === 'investors') pbLoad($el, 'investors')"><div class="pb-loading">Loading…</div></div>
-<div x-show="tab === 'breakouts'" x-cloak x-effect="if (tab === 'breakouts') pbLoad($el, 'breakouts')"><div class="pb-loading">Loading…</div></div>
-<div x-show="tab === 'deep'" x-cloak x-effect="if (tab === 'deep') pbLoad($el, 'deep')"><div class="pb-loading">Loading…</div></div>
-<div x-show="tab === 'categories'" x-cloak x-effect="if (tab === 'categories') pbLoad($el, 'categories')"><div class="pb-loading">Loading…</div></div>
-<div x-show="tab === 'saydo'" x-cloak x-effect="if (tab === 'saydo') pbLoad($el, 'saydo')"><div class="pb-loading">Loading…</div></div>
-<div x-show="tab === 'cycle'" x-cloak x-effect="if (tab === 'cycle') pbLoad($el, 'cycle')"><div class="pb-loading">Loading…</div></div>
-<div x-show="tab === 'portfolios'" x-cloak x-effect="if (tab === 'portfolios') pbLoad($el, 'portfolios')"><div class="pb-loading">Loading…</div></div>
-<div x-show="tab === 'roadmap'" x-cloak x-effect="if (tab === 'roadmap') pbLoad($el, 'roadmap')"><div class="pb-loading">Loading…</div></div>
-
+<div x-show="tab === 'avoid'" x-cloak x-effect="if (tab === 'avoid') pbLoad($el, 'avoid')"><div class="pb-loading">Loading…</div></div>
+<div x-show="tab === 'track-record'" x-cloak x-effect="if (tab === 'track-record') pbLoad($el, 'track')"><div class="pb-loading">Loading…</div></div>
 </div>
 
 <script>
@@ -97,7 +91,7 @@ th[aria-sort="descending"] .pb-sort::after { content: " ▼"; font-size: 10px; }
 function pbLoad(el, key) {
     if (el.dataset.state) return;
     el.dataset.state = 'loading';
-    fetch('/partial/playbooks/' + key)
+    fetch('/partial/ideas/' + key)
         .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
         .then(h => { el.innerHTML = h; el.dataset.state = 'done'; })
         .catch(e => {
