@@ -221,7 +221,7 @@ def pipeline_verdicts(p):
         s = streak.get(step)
         out.append(verdict(f"PIPELINE_STEP:{step}", step, CRITICAL if s or step in crit else WARN, FAIL,
                            s["sample_error"] if s else today[step]["error"], code="PIPELINE_STEP",
-                           message=(f"{step} has failed {s['days']} days in a row" if s
+                           message=(f"{step} is failing and has not recovered" if s
                                     else f"{step} failed in the latest run")))
     return out
 

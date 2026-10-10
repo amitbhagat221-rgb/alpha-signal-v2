@@ -212,6 +212,13 @@ def _reconcile_detail(detail):
         return (detail or "")[:240]
 
 
+def probe_tally(rows):
+    """(n_pass, n_probed): feeds whose latest probe result passed, of those that have one.
+    The ONE count of "feed probes passing": Health's sentence and the Feeds tile both read it."""
+    done = [r["canary_last"]["status"] for r in rows if r.get("canary_last")]
+    return done.count("PASS"), len(done)
+
+
 def feed_verdicts(rows):
     """Verdict rows from feed_state() rows (plan 0018 §2.2 severities)."""
     import feeds

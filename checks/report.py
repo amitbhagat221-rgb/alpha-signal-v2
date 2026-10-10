@@ -24,6 +24,7 @@ Two kinds of check, one shape:
 from datetime import datetime
 
 from checks import CRITICAL, ERROR, INFO, OK, PASS, SEVERITY_RANK, THEMES, WARN, verdict
+from checks.feeds import probe_tally
 from checks.system import AREAS, FAMILY, SYSTEM_CHECKS  # noqa: F401  (FAMILY: re-exported for tests)
 
 STANDING_DAYS = 14           # a WARN firing this many days running is no longer news: decide
@@ -66,6 +67,7 @@ def gather():
 def conclude(state):
     """Add issues, tolerated, scorecard and summary to a gathered state."""
     state["issues"], state["tolerated"] = issues(state)
+    _one_streak(state)
     state["scorecard"] = scorecard(state["issues"], state)
     critical = sum(i["severity"] == CRITICAL for i in state["issues"])
     warn = len(state["issues"]) - critical
@@ -75,6 +77,18 @@ def conclude(state):
         text += f" ({standing} standing {STANDING_DAYS}+ days)"
     state["summary"] = {"critical": critical, "warn": warn, "standing": standing, "verdict": text}
     return state
+
+
+def _one_streak(state):
+    """One streak definition: the days an issue has been firing (`issue()["days"]`). The pipeline
+    detector only decides WHETHER a step is stuck; the number every surface prints (Health's
+    "day N", Flow's broken-steps table, the email) is the issue's, so they cannot differ."""
+    pipe = _ok(state, "pipeline")
+    if not pipe:
+        return
+    days = {i["id"]: i["days"] for i in state["issues"]}
+    for s in pipe.get("failed_streaks") or []:
+        s["days"] = days.get(f"PIPELINE_STEP:{s['step']}", s["days"])
 
 
 # ─────────────────────── State → verdicts ───────────────────────
@@ -180,6 +194,12 @@ def scorecard(actionable, state):
     return out
 
 
+def run_line(p):
+    """The latest run in one sentence. Health and Flow both print it, so the count cannot differ.
+    It counts what the run logged (DAG steps plus cron and datamodel jobs), not the DAG's declared steps."""
+    return f"run of {p['last_run_date']}: {p['n_steps'] - len(p['failed_steps_today'])} of {p['n_steps']} logged steps ok"
+
+
 def _facts(state):
     """Plain one-liners per question, from whatever gathered cleanly."""
     def part(key):
@@ -187,15 +207,14 @@ def _facts(state):
     out = {}
     p, w = part("pipeline"), part("watchdog")
     if p and p.get("last_run_date"):
-        out["ran"] = (f"run of {p['last_run_date']}: {p['n_steps'] - len(p['failed_steps_today'])} of {p['n_steps']} steps ok"
-                      + (f" · watchdog healed {w['healed']}" if w and w.get("healed") else ""))
+        out["ran"] = run_line(p) + (f" · watchdog healed {w['healed']}" if w and w.get("healed") else "")
     t, f = part("tables"), part("feeds")
     if t:
         n = t["fresh"] + len(t["stale"]) + len(t["outdated"])
         out["arrived"] = f"{t['fresh']} of {n} tracked tables fresh"
-        probes = [r["canary_last"]["status"] for r in (f or {}).get("rows", []) if r.get("canary_last")]
-        if probes:
-            out["arrived"] += f" · {probes.count('PASS')} of {len(probes)} feed probes pass"
+        n_pass, n_probed = probe_tally((f or {}).get("rows", []))
+        if n_probed:
+            out["arrived"] += f" · {n_pass} of {n_probed} feed probes pass"
     d = part("data")
     if d:
         vs = d["verdicts"]

@@ -316,14 +316,22 @@ def test_data_supply_page_renders(monkeypatch):
                         "status": "FAILED", "finished_at": now, "error_message": "boom"}})
     monkeypatch.setattr(CF, "_freshness", lambda: {"stock_prices": {"freshness": "OUTDATED", "age_days": 4,
                         "latest_date": "2026-01-01", "rows": 5}})
+    # Severity comes from the gathered health report: hand it the issues Health would list.
+    health = [{"severity": "CRITICAL", "code": "FEED_PROBE", "id": "FEED_CANARY_FAIL:nse_bhavcopy", "target": "nse_bhavcopy",
+               "message": "nse_bhavcopy (T1) probe failed", "detail": "shape: fields removed ['X']"},
+              {"severity": "WARN", "code": "PIPELINE_STEP", "id": "PIPELINE_STEP:fetch_bhavcopy", "target": "fetch_bhavcopy",
+               "message": "fetch_bhavcopy failed in the latest run", "detail": "boom"}]
+    monkeypatch.setattr(api, "_gathered_issues", lambda: (health, []))
     data = api.get_feed_overview.__wrapped__()
     assert data["summary"]["critical"] >= 1 and data["summary"]["drift"] == 1
     req = Request({"type": "http", "method": "GET", "path": "/feeds", "headers": [], "query_string": b"",
                    "server": ("t", 80), "scheme": "http", "root_path": ""})
     html = templates.env.get_template("feeds.html").render(request=req, page="feeds", **data)
-    for s in ("Feeds", "data-alarms", "working", "need a look", "broken", "nse_bhavcopy", "Health check failed",
+    for s in ("Feeds", "data-alarms", "working", "need a look", "broken", "nse_bhavcopy", "Probe failed",
               "fields removed", "New sources", "incident report"):
         assert s in html, s
     row = next(r for r in data["simple"] if r["feed"] == "nse_bhavcopy")
     assert row["state"] == "Broken" and row["check"] == "failed" and row["age_bad"]
+    assert "Last run failed" in row["problem_labels"]            # the step Health lists for this feed
+    assert data["summary"]["canary_pass"] == 0 and data["summary"]["canary_total"] == 2     # checks.feeds.probe_tally
     assert data["simple"][0]["state"] == "Broken", "broken feeds sort first"

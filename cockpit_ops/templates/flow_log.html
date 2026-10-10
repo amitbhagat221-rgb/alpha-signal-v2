@@ -4,14 +4,14 @@
 <div class="card sy-card st-critical">
     <h2 class="section-title sy-title sy-title-c">Currently broken steps</h2>
     <div class="section-desc">
-        Steps whose most-recent run failed AND have been failing for ≥2 days in a row.
-        Historical streaks that have since recovered are filtered out (see health_report streak query).
+        Steps whose latest run failed and that have been failing for 2 or more days. A step that has since
+        recovered is not listed. Day N is the number of days the issue has been firing, the same count Health shows.
     </div>
     <div class="table-wrap"><table class="sy-table">
-        <thead><tr><th>Step</th><th class="num">Days</th><th>Sample error</th></tr></thead>
+        <thead><tr><th>Step</th><th class="num">Failing since</th><th>Sample error</th></tr></thead>
         <tbody>
         {% for s in overview.pipeline_summary.failed_streaks %}
-        <tr><td class="mono"><b class="c-accent">{{ s.step }}</b></td><td class="num c-red"><b>{{ s.days }} d</b></td><td class="small">{{ s.sample_error }}</td></tr>
+        <tr><td class="mono"><b class="c-accent">{{ s.step }}</b></td><td class="num c-red"><b>day {{ s.days }}</b></td><td class="small">{{ s.sample_error }}</td></tr>
         {% endfor %}
         </tbody>
     </table></div>
