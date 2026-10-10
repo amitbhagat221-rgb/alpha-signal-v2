@@ -13,16 +13,17 @@
     {% for ind in industries %}
     {% set sc = ind.avg_score %}
     {% set sc100 = (sc * 100)|round|int if sc is not none and sc == sc else none %}
-    {% set band = 'hm-na' if sc100 is none else 'hm-s5' if sc >= 0.65 else 'hm-s4' if sc >= 0.5 else 'hm-s3' if sc >= 0.4 else 'hm-s2' if sc >= 0.3 else 'hm-s1' %}
+    {% set band = sc|score_band %}
     {% set lean = ind.sector_lean %}
+    {% set tile_sel = detail and (detail.name == ind.industry or (detail.kind == 'sector' and detail.name == ind.sector)) %}
     {% set top = (ind.top_3 or '').split(', ')[0] %}
     {% if loop.changed(ind.sector) %}
     <div class="it-sector" style="order: {{ loop.index * 2 - 1 }};" :style="byScore ? 'display:none' : 'order: {{ loop.index * 2 - 1 }}'">{{ ind.sector }}</div>
     {% endif %}
-    <a class="it-tile {{ band }}{% if detail and detail.name == ind.industry %} sel{% endif %}"
+    <a class="it-tile {{ band }}{% if tile_sel %} sel{% endif %}"
        href="/sectors?industry={{ ind.industry|urlencode }}#per-sector"
        style="order: {{ loop.index * 2 }};" :style="'order: ' + (byScore ? {{ ind.score_rank }} : {{ loop.index * 2 }})"
-       {% if detail and detail.name == ind.industry %}aria-current="true"{% endif %}
+       {% if tile_sel %}aria-current="true"{% endif %}
        data-tip="{{ ind.industry }} · {{ ind.sector }} · {{ ind.stocks }} stocks{% if sc100 is not none %} · score {{ sc100 }}/100 (market-cap weighted){% else %} · not ranked{% endif %}{% if ind.breadth_pct is not none and ind.breadth_pct == ind.breadth_pct %} · {{ ind.breadth_pct|round|int }}% of ranked stocks score 55+{% endif %} · sector call: {{ {'in': 'Lean in', 'away': 'Lean away'}.get(lean, 'No call') }}{% if ind.macro_signal and ind.macro_signal != 'UNKNOWN' %} · macro signal {{ ind.macro_signal|lower }}{% endif %}">
         <span class="it-name">{{ ind.industry }}</span>
         <span class="it-line">{{ ind.stocks }} stocks · {% if sc100 is not none %}score {{ sc100 }}/100{% else %}not ranked{% endif %}</span>
@@ -57,7 +58,7 @@
 .it-tile { position: relative; display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: 8px 10px; border-radius: 6px; text-decoration: none; color: var(--text-primary); }
 .it-tile:hover, .it-tile:focus-visible { outline: 1px solid var(--text-secondary); }
 .it-tile.sel { outline: 2px solid var(--accent); outline-offset: 1px; }
-.it-name { font-size: 13px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.it-name { font-size: 13px; font-weight: 700; line-height: 1.25; overflow-wrap: anywhere; }   /* the whole name, on up to 3 lines: a tap on a phone follows the link, so nothing may hide behind a hover */
 .it-line { font-size: 11px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .it-foot { display: flex; justify-content: space-between; gap: 6px; }
 .it-tile:hover::after, .it-tile:focus-visible::after { content: attr(data-tip); position: absolute; z-index: 100; left: 50%; bottom: calc(100% + 4px); transform: translateX(-50%);

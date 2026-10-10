@@ -1,4 +1,4 @@
-{% from "_components.html" import tab_bar, radio_group, slide_row %}
+{% from "_components.html" import tab_bar, radio_group, slide_row, tip %}
 {# When embedded on the stock page (embed=True), carry the sector CSS with us — #}
 {# those classes live in sectors.html's <style> and aren't on the stock page.   #}
 {# On /sectors, embed is unset and the page already loads _sector_styles.html.  #}
@@ -18,21 +18,25 @@
 </div>
 
 {% else %}
-{% set narr = detail.narrative %}
-{% set ind_match = industries | selectattr('industry', 'equalto', detail.name) | first %}
+{% set is_sector = detail.kind == 'sector' %}
+{% set narr = none if is_sector else detail.narrative %}
+{% set sector_industries = industries | selectattr('sector', 'equalto', detail.name) | list if is_sector else [] %}
+{% set ind_match = detail.overview if is_sector else (industries | selectattr('industry', 'equalto', detail.name) | first) %}
 {% set is_tail = ind_match and ind_match.macro_signal in ['TAILWIND', 'FAVORABLE'] %}
 {% set is_head = ind_match and ind_match.macro_signal in ['HEADWIND', 'ADVERSE'] %}
 
 <div class="card" style="margin-bottom: 14px; padding: 14px 18px;">
     <div class="ps-header">
         <h1>{{ detail.name }}</h1>
-        {% if detail.parent_sector %}
+        {% if is_sector %}
+        <span class="parent-tag">Sector view · {{ sector_industries|length }} {{ 'industry' if sector_industries|length == 1 else 'industries' }}</span>
+        {% elif detail.parent_sector %}
         <span class="parent-tag">Sector · {{ detail.parent_sector }}</span>
         {% endif %}
         {% if narr and narr._industry %}
         <span class="industry-tag">IIM industry · {{ narr._industry }}</span>
         {% endif %}
-        {% if ind_match and ind_match.macro_signal %}
+        {% if ind_match and ind_match.macro_signal and ind_match.macro_signal != 'UNKNOWN' %}
         <span class="macro-pill {{ 'tail' if is_tail else ('head' if is_head else 'neutral') }}">
             {{ ind_match.macro_signal }}
         </span>
@@ -41,11 +45,19 @@
         <a href="/sectors?industry={{ detail.name|urlencode }}#per-sector" style="margin-left:auto; font-size:12px; color:var(--accent); text-decoration:none; font-weight:600;">Open in Sectors →</a>
         {% else %}
         <div style="margin-left: auto;" class="ps-selector">
-            <select onchange="window.location.href = '/sectors?industry=' + encodeURIComponent(this.value) + '#per-sector'">
+            {% if is_sector %}
+            <select aria-label="Sector" onchange="window.location.href = '/sectors?sector=' + encodeURIComponent(this.value) + '#per-sector'">
+                {% for sec in sector_list %}
+                <option value="{{ sec }}" {% if sec == detail.name %}selected{% endif %}>{{ sec }}</option>
+                {% endfor %}
+            </select>
+            {% else %}
+            <select aria-label="Industry" onchange="window.location.href = '/sectors?industry=' + encodeURIComponent(this.value) + '#per-sector'">
                 {% for ind in industry_list %}
                 <option value="{{ ind }}" {% if ind == detail.name %}selected{% endif %}>{{ ind }}</option>
                 {% endfor %}
             </select>
+            {% endif %}
         </div>
         {% endif %}
     </div>
@@ -70,15 +82,12 @@
     {% if ind_match %}
     <div>
         <span class="sec-meta">Avg composite</span><br>
-        <span class="mono
-            {% if ind_match.avg_score >= 0.6 %}score-green
-            {% elif ind_match.avg_score >= 0.45 %}score-amber
-            {% else %}score-red{% endif %}" style="font-size: 16px; font-weight: 700;">
-            {{ ind_match.avg_score | pct(0, scale=100) | replace('%','') }}/100
+        <span class="mono {{ ind_match.avg_score|score_tone }}" style="font-size: 16px; font-weight: 700;">
+            {{ ind_match.avg_score | pct(0, scale=100) | replace('%','') }}<span class="unit">/100</span>
         </span>
     </div>
     <div>
-        <span class="sec-meta">Stocks · Breadth</span><br>
+        <span class="sec-meta">Stocks · Breadth (score 55+)</span><br>
         <span class="mono" style="font-size: 16px; font-weight: 700;">
             {{ ind_match.stocks }}<span style="font-size: 11px; color: var(--text-muted); margin-left: 4px;">stks ·</span>
             {{ ind_match.breadth_pct | pct(0) }}
@@ -95,7 +104,7 @@
 {% if ind_match %}
 <div class="card" style="margin-bottom: 14px; padding: 12px 18px;">
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-        <span class="section-title" style="margin-bottom: 0;">Where this industry stands</span>
+        <span class="section-title" style="margin-bottom: 0;">Where this {{ "sector" if is_sector else "industry" }} stands</span>
         <span class="mono u-muted-11">avg composite vs full universe</span>
     </div>
     <div class="conviction-bar" style="height: 10px; margin-bottom: 6px;">
@@ -110,7 +119,7 @@
 {# ── Sub-tabs ── #}
 <div x-data="{ sub: 'overview', sloaded: { overview: true } }">
 <div class="tab-bar" style="margin-bottom: 14px;">
-    {% for k, l in [('overview','Overview'), ('players','Players'), ('trends','Trends'), ('picks','Our Picks')] %}
+    {% for k, l in [('overview','Overview'), ('players','Players'), ('trends','Trends'), ('picks','Our Picks')] if not (is_sector and k == 'trends') %}
     <button class="tab-button" :class="{ active: sub === '{{ k }}' }"
             @click="sub = '{{ k }}'; sloaded['{{ k }}'] = true">{{ l }}</button>
     {% endfor %}
@@ -124,6 +133,28 @@
     <span style="font-size: 11px; font-weight: 700; letter-spacing: 1px; color: var(--accent);">INDUSTRY THESIS</span>
     <div class="thesis-head">{{ thesis.head }}</div>
     {% if thesis.body %}<div class="thesis-body">{{ thesis.body }}</div>{% endif %}
+</div>
+{% elif is_sector %}
+<div class="card" style="margin-bottom: 14px;">
+    <div class="section-title">Industries in {{ detail.name }}</div>
+    <div class="section-desc">Average model score out of 100 (market-cap weighted, as of {{ pick_date|short_date }}). Open one for its thesis, players and picks.</div>
+    <div class="table-wrap">
+    <table class="rot-table">
+        <thead><tr><th>Industry</th><th class="num">Score /100</th><th class="num">Stocks</th><th class="num">Breadth (score 55+)</th></tr></thead>
+        <tbody>
+        {% for ind in sector_industries %}
+        <tr>
+            <td><a class="rot-link" href="/sectors?industry={{ ind.industry|urlencode }}#per-sector">{{ ind.industry }}</a></td>
+            <td class="num {{ ind.avg_score|score_tone }}">{{ (ind.avg_score * 100)|round|int if ind.avg_score else '—' }}</td>
+            <td class="num">{{ ind.stocks }}</td>
+            <td class="num">{{ ind.breadth_pct|pct(0) }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="4" class="u-muted-11">No industries ranked in this sector yet.</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
 </div>
 {% elif not narr %}
 <div class="card" style="margin-bottom: 14px; border-left: 4px solid var(--amber); padding: 12px 16px;">
@@ -227,23 +258,21 @@
         Click ▸ to open the listed ones. Source: AI-curated narrative.
     </div>
     <div style="margin-top: 12px;">
-        <div class="pb-row" style="font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid var(--border-accent);">
+        <div class="pb-row pb-head">
             <span>Player</span><span>Share bar</span><span class="u-right">Share %</span><span class="u-right">Listed?</span><span class="u-right">Our score</span>
         </div>
         {% for p in cl.players %}
         <div class="pb-row">
             {% if p.sid %}
-              <a href="/stocks/{{ p.sid }}" class="ticker" style="text-decoration: none;">▸ {{ p.ticker or p.name }}</a>
+              <a href="/stocks/{{ p.sid }}" class="ticker ell" title="{{ p.name }}">▸ {{ p.ticker or p.name }}</a>
             {% else %}
-              <span style="color: var(--text-secondary);">{{ p.name }}<span style="color: var(--text-muted); font-size: 10px;"> {% if p.note %}· {{ p.note }}{% endif %}</span></span>
+              {% set full = p.name ~ (' · ' ~ p.note if p.note else '') %}
+              <span class="hover-tip ell-wrap" tabindex="0"><span class="ell pb-private">{{ p.name }}</span><span class="tooltip-popover" role="tooltip">{{ full }}</span></span>
             {% endif %}
             <div class="pb-track"><div class="pb-fill" style="width: {{ p.share_pct or 0 }}%;{% if not p.listed %} background: var(--text-muted);{% endif %}"></div></div>
             <span class="num" style="font-weight: 700;">{{ (p.share_pct or 0)|pct(1) }}</span>
             <span class="num" style="color: {{ 'var(--accent)' if p.listed else 'var(--text-muted)' }};">{{ 'Listed' if p.listed else 'Private' }}</span>
-            <span class="num
-                {% if p.final_score and p.final_score >= 0.7 %}score-green
-                {% elif p.final_score and p.final_score >= 0.5 %}score-amber
-                {% elif p.final_score and p.final_score > 0 %}score-red{% endif %}">
+            <span class="num {{ p.final_score|score_tone if p.final_score else '' }}">
                 {{ "%.0f"|format(p.final_score * 100) if p.final_score else '—' }}
             </span>
         </div>
@@ -265,19 +294,16 @@
     <div class="section-title">Listed players — market-cap share</div>
     <div class="section-desc">Share of LISTED universe only (denominator = full listed industry mcap). For true share that includes private players, see the card above.</div>
     <div style="margin-top: 12px;">
-        <div class="pb-row" style="font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid var(--border-accent);">
+        <div class="pb-row pb-head">
             <span>Ticker</span><span>Share bar</span><span class="u-right">Listed share %</span><span class="u-right">Mcap ₹cr</span><span class="u-right">Score</span>
         </div>
         {% for p in detail.top_players[:10] %}
         <div class="pb-row">
-            <a href="/stocks/{{ p.sid }}" class="ticker" style="text-decoration: none;">{{ p.ticker }}</a>
+            <a href="/stocks/{{ p.sid }}" class="ticker ell" title="{{ p.name }}">{{ p.ticker }}</a>
             <div class="pb-track"><div class="pb-fill" style="width: {{ p.share_pct }}%;"></div></div>
             <span class="num" style="font-weight: 700;">{{ p.share_pct|pct(1) }}</span>
             <span class="num">{{ "{:,.0f}".format(p.market_cap_cr) if p.market_cap_cr is not none else '—' }}</span>
-            <span class="num
-                {% if p.final_score >= 0.7 %}score-green
-                {% elif p.final_score >= 0.5 %}score-amber
-                {% elif p.final_score > 0 %}score-red{% endif %}">
+            <span class="num {{ p.final_score|score_tone if p.final_score else '' }}">
                 {{ "%.0f"|format(p.final_score * 100) if p.final_score else '—' }}
             </span>
         </div>
@@ -297,7 +323,7 @@
             <div class="kpi-li">
                 <span class="arrow {{ 'up' if kpi.direction == 'higher_is_better' else 'down' }}">{{ '↑' if kpi.direction == 'higher_is_better' else '↓' }}</span>
                 <strong style="color: var(--text-primary);">{{ kpi.name }}</strong>
-                <span class="u-muted">· {{ kpi.formula[:50] }}</span>
+                <span class="u-muted">· {{ kpi.formula }}</span>
             </div>
             {% endfor %}
         </div>
@@ -348,8 +374,8 @@
         {% for p in detail.picks.top[:8] %}
         <div class="pick-row">
             <a href="/stocks/{{ p.sid }}" class="ticker">{{ p.ticker }}</a>
-            <span class="name">{{ p.name[:22] }}</span>
-            <span class="score score-green">{{ p.final_score | pct(0, scale=100) | replace('%','') }}</span>
+            <span class="name" title="{{ p.name }}">{{ p.name }}</span>
+            <span class="score {{ p.final_score|score_tone }}">{{ p.final_score | pct(0, scale=100) | replace('%','') }}</span>
         </div>
         {% else %}<div class="u-muted-11">No scored names in this industry.</div>
         {% endfor %}
@@ -357,15 +383,15 @@
     </div>
     <div class="card">
         <div class="section-title">Avoid</div>
-        <div class="section-desc">Lowest composite scores within this industry.</div>
+        <div class="section-desc">Lowest composite scores within this {{ 'sector' if is_sector else 'industry' }}, among the names not already in the top list ({{ pick_date|short_date }}).</div>
         <div style="margin-top: 10px;">
         {% for p in detail.picks.bottom[:5] %}
         <div class="pick-row">
             <a href="/stocks/{{ p.sid }}" class="ticker">{{ p.ticker }}</a>
-            <span class="name">{{ p.name[:22] }}</span>
-            <span class="score score-red">{{ p.final_score | pct(0, scale=100) | replace('%','') }}</span>
+            <span class="name" title="{{ p.name }}">{{ p.name }}</span>
+            <span class="score {{ p.final_score|score_tone }}">{{ p.final_score | pct(0, scale=100) | replace('%','') }}</span>
         </div>
-        {% else %}<div class="u-muted-11">No scored names in this industry.</div>
+        {% else %}<div class="u-muted-11">{{ 'Every scored name is in the top list.' if detail.picks.top else 'No scored names in this ' ~ ('sector' if is_sector else 'industry') ~ '.' }}</div>
         {% endfor %}
         </div>
     </div>
@@ -375,9 +401,9 @@
         <div style="margin-top: 10px;">
         {% if detail.macro_contributors %}
             {% for m in detail.macro_contributors[:5] %}
-            <div class="pick-row" style="grid-template-columns: 1fr 50px 36px;">
+            <div class="pick-row" style="grid-template-columns: minmax(0, 1fr) auto 36px;">
                 <span style="color: var(--text-secondary); font-size: 11px;">{{ m.indicator_id | macro_label }}</span>
-                <span class="u-muted-10">{{ m.direction or '—' }}</span>
+                <span class="{{ 'score-green' if m.direction|int > 0 else ('score-red' if m.direction|int < 0 else 'u-muted') }}" style="font-size: 10px;">{{ '▲ a rise helps' if m.direction|int > 0 else ('▼ a rise hurts' if m.direction|int < 0 else '—') }}</span>
                 <span class="score">{{ m.weight | signed(2) }}</span>
             </div>
             {% endfor %}
@@ -393,7 +419,7 @@
             <div style="font-size: 11px; line-height: 1.5; padding: 5px 0; border-bottom: 1px solid var(--border);">
                 <span class="pdot {{ 'up' if r.direction == 'POSITIVE' else ('down' if r.direction == 'NEGATIVE' else 'flat') }}"></span>
                 <span class="mono" style="font-size: 10px; color: var(--text-muted);">{{ r.published_at[:10] }}</span>
-                <span style="margin-left: 4px;">{{ r.title[:65] }}</span>
+                <span style="margin-left: 4px;">{{ r.title }}</span>
             </div>
             {% endfor %}
         {% else %}<div class="u-muted-11">None.</div>{% endif %}

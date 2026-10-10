@@ -14,7 +14,7 @@
     </div>
     {{ list_tools(d.rows|length, 'stocks') }}
     <div class="table-wrap pb-scroll">
-    <table class="pb-table">
+    <table class="pb-table pb-stack">
         <thead><tr>{{ th('Stock','l') }}{{ th('Model rank','') }}{{ th('Flags','c') }}<th class="l">What tripped</th></tr></thead>
         <tbody>
         {% for s in d.rows %}

@@ -6,6 +6,18 @@
 <style>
 .pb-top { margin-top: 14px; }
 .tab-bar { flex-wrap: wrap; overflow-x: visible; }
+/* phone: one row that scrolls sideways instead of a 4-row sticky block */
+@media (max-width: 768px) { .tab-bar { flex-wrap: nowrap; overflow-x: auto; } }
+/* phone: each row of a .pb-stack table is a small card (stock, rank, flags on top; the long cell full width below) */
+@media (max-width: 600px) {
+    .pb-stack thead { display: none; }
+    .pb-stack, .pb-stack tbody { display: block; width: 100%; }
+    .pb-stack tr { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 4px 12px; padding: 10px 0; border-top: 1px solid var(--border); align-items: start; }
+    .pb-stack tr[hidden] { display: none; }
+    .pb-table.pb-stack td { display: block; border: 0; padding: 0; }
+    .pb-stack td.soft, .pb-stack td[colspan] { grid-column: 1 / -1; min-width: 0 !important; }
+    .pb-stack .pb-name { max-width: none; }
+}
 .tab-bar .tab-button { padding-left: 9px; padding-right: 9px; }
 .pb-card { margin-top: 14px; }
 .pb-filed { margin: 0 0 6px; }

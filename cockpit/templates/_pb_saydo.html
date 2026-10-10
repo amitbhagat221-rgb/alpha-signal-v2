@@ -10,7 +10,7 @@
     </div>
     {% if d.queued or not d.rows %}
     <div class="pb-note">
-        <strong>{% if d.queued %}{{ d.queued }} companies are still to be read.{% else %}No verdict file has been produced yet, so no management is shown.{% endif %}</strong>
+        <strong>{% if d.queued %}{{ d.queued }} {{ 'company is' if d.queued == 1 else 'companies are' }} still to be read.{% else %}No verdict file has been produced yet, so no management is shown.{% endif %}</strong>
         The reading is done by the LLM worker (05:07 and 14:37 UTC), after the daily jobs. Compounders, LARGE and MID companies with two recent call transcripts are covered.
     </div>
     {% endif %}
