@@ -23,12 +23,6 @@ def test_validation_reads_current_evidence_not_v1_csv():
         assert wired == sorted(wired, reverse=True)   # wired first
 
 
-def test_one_per_sid_keeps_newest():
-    from cockpit.api import _one_per_sid
-    out = _one_per_sid([{"sid": "A", "n": 1}, {"sid": "B"}, {"sid": "A", "n": 2}])
-    assert [e["sid"] for e in out] == ["A", "B"] and out[0]["n"] == 1
-
-
 def test_outcome_decile_cells_coloured_by_sign():
     from cockpit.app import templates
     html = templates.get_template("model_outcomes.html").render(

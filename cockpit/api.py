@@ -645,19 +645,6 @@ PIOTROSKI_FACTORS = [
 
 
 @_ttl_cache(60)
-def get_changes(days=1):
-    """Recent change events from the diff engine (computed live if the table is empty)."""
-    changes = views.changes(days)
-    if not changes:
-        try:
-            from output.diff_engine import compute_changes
-            return compute_changes()
-        except Exception:
-            return []
-    return changes
-
-
-@_ttl_cache(60)
 def get_regime():
     """Current VIX regime + allocation weights + display colour."""
     return views.regime() or {"regime": "UNKNOWN", "vix_latest": 0, "vix_20d_avg": 0,
@@ -678,46 +665,6 @@ def latest_pick_date():
     """MAX(pick_date) in daily_picks (None when empty) — the date every "today's
     picks" query in this module pins to."""
     return views.latest_pick_date()
-
-
-_DOMINANT_SIGNAL_SOURCES = [
-    ("consensus_signals", "consensus_signal", "Consensus"),
-    ("promoter_signals", "promoter_signal", "Promoter"),
-    ("piotroski_scores", "f_score", "Piotroski"),
-    ("accruals_scores", "accruals_signal", "Accruals"),
-    ("insider_signals", "score_impact", "Insider"),
-]
-
-
-@_ttl_cache(60)
-def get_dominant_signal_batch(sids):
-    """Strongest two signals per sid (display string under the ticker) →
-    {sid: "Consensus: 0.82 | Piotroski: 8/9"}; "" when the sid has none."""
-    values = {sid: {} for sid in views.sid_params(sids)[0]}
-    for table, col, label in _DOMINANT_SIGNAL_SOURCES:
-        try:
-            recs = views.latest_rows(table, f"[{col}]", sids)
-        except Exception:
-            continue
-        for r in recs:
-            try:
-                if r[col] is not None:
-                    values[r["sid"]][label] = float(r[col])
-            except (TypeError, ValueError):
-                pass
-
-    out = {}
-    for sid, signals in values.items():
-        # Top 2 signals by |value|
-        sorted_sigs = sorted(signals.items(), key=lambda x: abs(x[1]), reverse=True)
-        parts = []
-        for name, val in sorted_sigs[:2]:
-            if name == "Piotroski":
-                parts.append(f"{name}: {int(val)}/9")
-            else:
-                parts.append(f"{name}: {val:.2f}")
-        out[sid] = " | ".join(parts)
-    return out
 
 
 def get_heatmap_data():
@@ -1082,88 +1029,6 @@ def get_sector_comparison(sid, sector):
         base["avg_de"] = round(float(avg_de), 2)
 
     return base
-
-
-ACTION_CAP = 10   # cards shown before "show all" (the route slices; the candidates are complete)
-
-
-def _one_per_sid(events):
-    """Keep the first (newest) event per stock: a name that re-entered twice is one card."""
-    seen, out = set(), []
-    for e in events:
-        if e.get("sid") not in seen:
-            seen.add(e.get("sid"))
-            out.append(e)
-    return out
-
-
-@_persisted_cache(60, name="get_action_candidates")
-def get_action_candidates():
-    """Stocks categorized into Buy/Watch/Exit based on signals + changes."""
-    changes = get_changes(days=7)
-
-    buy, watch, exit_list = [], [], []
-
-    # Consider Buying: entered top picks recently + strong signals
-    entries = _one_per_sid([c for c in changes if c.get("change_type") == "ENTRY" and c.get("color") == "green"])
-    for e in entries:
-        sid = e.get("sid")
-        if not sid:
-            continue
-        detail = get_stock_detail(sid)
-        if detail:
-            buy.append({
-                "sid": sid, "ticker": detail.get("ticker", sid),
-                "name": detail.get("name", ""), "cap_tier": detail.get("cap_tier", ""),
-                "score": detail.get("final_score", 0), "rank": detail.get("rank"),
-                "reason": e.get("headline", ""),
-                "detail": e.get("detail", ""),
-                "change_date": e.get("change_date", ""),
-            })
-
-    # Consider Exiting: dropped from top picks
-    exits = _one_per_sid([c for c in changes if c.get("change_type") == "EXIT" and c.get("color") == "red"])
-    for e in exits:
-        sid = e.get("sid")
-        if not sid:
-            continue
-        detail = get_stock_detail(sid)
-        if detail:
-            exit_list.append({
-                "sid": sid, "ticker": detail.get("ticker", sid),
-                "name": detail.get("name", ""), "cap_tier": detail.get("cap_tier", ""),
-                "score": detail.get("final_score", 0),
-                "reason": e.get("headline", ""),
-                "detail": e.get("detail", ""),
-                "change_date": e.get("change_date", ""),
-            })
-
-    # Watch: forensic alerts on top picks
-    forensic_alerts = read_sql("""
-        SELECT fs.sid, s.ticker, s.name, dp.rank, dp.cap_tier, fs.m_score_flag, fs.z_score_flag
-        FROM forensic_scores fs
-        JOIN stocks s ON fs.sid = s.sid
-        JOIN daily_picks dp ON fs.sid = dp.sid
-        WHERE dp.pick_date = ?
-        AND dp.rank <= 20
-        AND (fs.m_score_flag = 'LIKELY_MANIPULATOR' OR fs.z_score_flag = 'DISTRESS')
-        ORDER BY dp.rank LIMIT 10
-    """, params=[latest_pick_date()])
-    for _, r in forensic_alerts.iterrows():
-        flags = []
-        if r.get("m_score_flag") == "LIKELY_MANIPULATOR":
-            flags.append("Beneish M-Score flagged")
-        if r.get("z_score_flag") == "DISTRESS":
-            flags.append("Altman Z-Score distress")
-        watch.append({
-            "sid": r["sid"], "ticker": r["ticker"], "name": r["name"],
-            "cap_tier": r["cap_tier"], "rank": r["rank"],
-            "reason": f"Forensic alert on Top {int(r['rank'])} {r['cap_tier']}",
-            "detail": "; ".join(flags),
-        })
-
-    return {"buy": buy, "watch": watch, "exit": exit_list,
-            "buy_total": len(entries), "exit_total": len(exits), "days": 7, "cap": ACTION_CAP}
 
 
 @_persisted_cache(60, name="get_sized_book")
