@@ -1,0 +1,71 @@
+{# Industry tile grid: one tile per industry, same colour scale as the Explorer heat map. #}
+{# Rows come from get_industry_rotation (= get_group_overview + the sector call's verdict), the Rotation tab's source. #}
+{% if industries %}
+<div x-data="{ byScore: false }">
+<div class="it-bar">
+    <span class="sec-meta">{{ industries|length }} industries, {{ pick_date|short_date }}. Open one for its detail below.</span>
+    <span class="it-toggle" role="group" aria-label="Order tiles">
+        <button type="button" :class="{ on: !byScore }" @click="byScore = false" :aria-pressed="(!byScore).toString()">By sector</button>
+        <button type="button" :class="{ on: byScore }" @click="byScore = true" :aria-pressed="byScore.toString()">By score</button>
+    </span>
+</div>
+<div class="it-grid">
+    {% for ind in industries %}
+    {% set sc = ind.avg_score %}
+    {% set sc100 = (sc * 100)|round|int if sc is not none and sc == sc else none %}
+    {% set band = 'hm-na' if sc100 is none else 'hm-s5' if sc >= 0.65 else 'hm-s4' if sc >= 0.5 else 'hm-s3' if sc >= 0.4 else 'hm-s2' if sc >= 0.3 else 'hm-s1' %}
+    {% set lean = ind.sector_lean %}
+    {% set top = (ind.top_3 or '').split(', ')[0] %}
+    {% if loop.changed(ind.sector) %}
+    <div class="it-sector" style="order: {{ loop.index * 2 - 1 }};" :style="byScore ? 'display:none' : 'order: {{ loop.index * 2 - 1 }}'">{{ ind.sector }}</div>
+    {% endif %}
+    <a class="it-tile {{ band }}{% if detail and detail.name == ind.industry %} sel{% endif %}"
+       href="/sectors?industry={{ ind.industry|urlencode }}#per-sector"
+       style="order: {{ loop.index * 2 }};" :style="'order: ' + (byScore ? {{ ind.score_rank }} : {{ loop.index * 2 }})"
+       {% if detail and detail.name == ind.industry %}aria-current="true"{% endif %}
+       data-tip="{{ ind.industry }} · {{ ind.sector }} · {{ ind.stocks }} stocks{% if sc100 is not none %} · score {{ sc100 }}/100 (market-cap weighted){% else %} · not ranked{% endif %}{% if ind.breadth_pct is not none and ind.breadth_pct == ind.breadth_pct %} · {{ ind.breadth_pct|round|int }}% of ranked stocks score 55+{% endif %} · sector call: {{ {'in': 'Lean in', 'away': 'Lean away'}.get(lean, 'No call') }}{% if ind.macro_signal and ind.macro_signal != 'UNKNOWN' %} · macro signal {{ ind.macro_signal|lower }}{% endif %}">
+        <span class="it-name">{{ ind.industry }}</span>
+        <span class="it-line">{{ ind.stocks }} stocks · {% if sc100 is not none %}score {{ sc100 }}/100{% else %}not ranked{% endif %}</span>
+        <span class="it-line">{% if ind.breadth_pct is not none and ind.breadth_pct == ind.breadth_pct %}{{ ind.breadth_pct|round|int }}% score 55+{% else %}no breadth{% endif %}</span>
+        <span class="it-line it-foot">
+            <span class="{{ 'score-green' if lean == 'in' else 'score-red' if lean == 'away' else '' }}" title="Sector call: {{ {'in': 'Lean in', 'away': 'Lean away'}.get(lean, 'No call') }}">{{ '▲' if lean == 'in' else '▼' if lean == 'away' else '–' }} sector</span>
+            {% if top %}<span class="mono">{{ top }}</span>{% endif %}
+        </span>
+    </a>
+    {% endfor %}
+</div>
+</div>
+<div class="hm-legend" aria-label="Industry tile colour legend">
+    <span><i class="hm-key hm-s5"></i>65+ top</span>
+    <span><i class="hm-key hm-s4"></i>50-64</span>
+    <span><i class="hm-key hm-s3"></i>40-49</span>
+    <span><i class="hm-key hm-s2"></i>30-39</span>
+    <span><i class="hm-key hm-s1"></i>below 30</span>
+    <span><i class="hm-key hm-na"></i>not ranked</span>
+</div>
+<div class="hm-legend it-note">
+    Tile colour = the industry's average model score out of 100 (market-cap weighted, as of {{ pick_date|short_date }}), on the Explorer's bands.
+    "% score 55+" = share of the industry's ranked stocks scoring 55 or more. &#9650; / &#9660; / – = the model's call on the parent sector (Lean in / Lean away / No call), the same call as Markets and Sectors > Today. The ticker is the industry's top-scored stock.
+</div>
+<style>
+.it-bar { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 6px 12px; margin-bottom: 8px; }
+.it-toggle { display: inline-flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.it-toggle button { background: transparent; color: var(--text-secondary); border: 0; padding: 5px 12px; font-size: 12px; cursor: pointer; font-family: inherit; }
+.it-toggle button.on { background: var(--bg-card-hover); color: var(--text-primary); font-weight: 600; }
+.it-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); gap: 6px; margin-bottom: 8px; }
+.it-sector { grid-column: 1 / -1; font-size: 11px; font-weight: 700; letter-spacing: .6px; text-transform: uppercase; color: var(--text-muted); margin-top: 8px; border-bottom: 1px solid var(--border); padding-bottom: 3px; }
+.it-tile { position: relative; display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: 8px 10px; border-radius: 6px; text-decoration: none; color: var(--text-primary); }
+.it-tile:hover, .it-tile:focus-visible { outline: 1px solid var(--text-secondary); }
+.it-tile.sel { outline: 2px solid var(--accent); outline-offset: 1px; }
+.it-name { font-size: 13px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.it-line { font-size: 11px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.it-foot { display: flex; justify-content: space-between; gap: 6px; }
+.it-tile:hover::after, .it-tile:focus-visible::after { content: attr(data-tip); position: absolute; z-index: 100; left: 50%; bottom: calc(100% + 4px); transform: translateX(-50%);
+    width: max-content; max-width: 260px; padding: 6px 10px; background: var(--bg-card); border: 1px solid var(--border-accent); border-radius: 8px; font-size: 12px;
+    font-weight: 400; line-height: 1.4; white-space: normal; pointer-events: none; box-shadow: 0 8px 24px rgba(0,0,0,.5); }
+@media (hover: none) { .it-tile:hover::after { display: none; } }
+@media (max-width: 600px) { .it-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+</style>
+{% else %}
+<div class="card u-muted" style="margin-bottom: 12px;">No industries ranked yet.</div>
+{% endif %}

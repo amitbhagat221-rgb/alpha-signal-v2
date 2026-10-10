@@ -54,9 +54,6 @@
 
 <style>
 .explorer-sub { margin: -8px 0 12px; font-size: 13px; }
-.hm-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-bottom: 14px; font-size: 11px; color: var(--text-secondary); }
-.hm-legend span { display: inline-flex; align-items: center; gap: 5px; }
-.hm-key { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
 .hm-stack { display: flex; flex-direction: column; gap: 20px; }
 .hm-card { padding: 16px; }
 .hm-head { margin-bottom: 12px; border-left: 3px solid var(--tier); padding-left: 12px; }
@@ -70,11 +67,5 @@
 .hm-tile:hover::after, .hm-tile:focus-visible::after { content: attr(data-tip); position: fixed; z-index: 100; transform: translate(-50%, -140%);
            padding: 6px 10px; background: var(--bg-card); border: 1px solid var(--border-accent); border-radius: 8px; font-size: 12px;
            font-weight: 400; line-height: 1.4; white-space: normal; max-width: 260px; pointer-events: none; box-shadow: 0 8px 24px rgba(0,0,0,.5); }
-.hm-s5, .hm-key.hm-s5 { background: color-mix(in srgb, var(--green) 55%, transparent); }
-.hm-s4, .hm-key.hm-s4 { background: color-mix(in srgb, var(--green) 25%, transparent); }
-.hm-s3, .hm-key.hm-s3 { background: var(--border-accent); }
-.hm-s2, .hm-key.hm-s2 { background: color-mix(in srgb, var(--amber) 28%, transparent); }
-.hm-s1, .hm-key.hm-s1 { background: color-mix(in srgb, var(--red) 28%, transparent); }
-.hm-na,  .hm-key.hm-na  { background: var(--bg-card-hover); color: var(--text-secondary); }
 </style>
 {% endblock %}

@@ -142,3 +142,20 @@ def test_restored_pages_render_with_their_tabs(clients):
 def test_playbook_tabs_match_producers():
     from cockpit import playbooks
     assert [k for k, _ in main_pages.PLAYBOOK_TABS] == list(playbooks.TABS)
+
+
+def test_industry_detail_tab_has_one_linked_tile_per_industry(clients):
+    import re
+    from urllib.parse import quote
+    from cockpit import api
+    main, _ = clients
+    inds = api.get_industry_rotation()
+    assert inds
+    html = main.get("/sectors?industry=" + quote(inds[0]["industry"])).text
+    tiles = re.findall(r'<a class="it-tile[^"]*"\s+href="([^"]+)"', html)
+    assert len(tiles) == len(inds)
+    for ind in inds:
+        assert f'href="/sectors?industry={quote(ind["industry"])}#per-sector"' in html
+        assert ind["industry"].replace("&", "&amp;") in html
+        assert f'{ind["stocks"]} stocks' in html
+    assert html.count('aria-current="true"') >= 1          # the opened industry's tile is marked
