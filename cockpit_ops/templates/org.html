@@ -4,40 +4,7 @@
 {# Boardroom (plan 0019): the agent org. Data: cockpit_ops.api.get_org_overview()
    = org.overview(). Memo text is model output over scraped facts: rendered escaped. #}
 
-{% macro val(v) -%}
-  {%- if v is string -%}{{ v }}
-  {%- elif v is mapping -%}
-    {%- for k, x in v.items() if x is not none and x != '' and x != [] -%}
-      <span class="og-k">{{ k|replace('_', ' ') }}</span> {{ val(x) }}{% if not loop.last %} <span class="og-dot">·</span> {% endif %}
-    {%- endfor -%}
-  {%- elif v is iterable -%}
-    <ul class="og-ul">{% for x in v %}<li>{{ val(x) }}</li>{% endfor %}</ul>
-  {%- else -%}{{ v }}{%- endif -%}
-{%- endmacro %}
-
-{# The plain-words block every memo opens with (house style): four questions, short answers. #}
-{% macro plain(e) -%}
-  {%- if e -%}
-  <div class="og-plain">
-    {% for k, q in [('what', 'What is happening?'), ('why', 'Why does it matter?'), ('do', 'What should you do?'), ('remember', 'What to remember')] if e[k] %}
-    <div class="og-plain-q">{{ q }}</div><div class="og-plain-a">{{ e[k] }}</div>
-    {% endfor %}
-    {% if e.like %}<div class="og-plain-like">{{ e.like }}</div>{% endif %}
-  </div>
-  {%- endif -%}
-{%- endmacro %}
-
-{# Real data behind a tap/hover: the shared tooltip popover, not a native title="" #}
-{% macro tip(text) -%}
-<span class="tooltip-wrap" x-data="{ open: false }"><button type="button" class="tooltip-trigger" @mouseenter="open = true" @mouseleave="open = false"
-  @click="open = !open" @click.outside="open = false" aria-label="More info">i</button><span x-show="open" x-cloak class="tooltip-popover">{{ text }}</span></span>
-{%- endmacro %}
-
-{% macro grade_tag(g) -%}
-  {%- if g and g.total is not none -%}
-    <span class="og-tag {% if g.total >= 7 %}og-good{% elif g.total >= 4 %}og-mid{% else %}og-bad{% endif %}">{{ g.total }}/8</span>{{ tip("Compliance grade, out of 8: grounded + actionable + in charter + calibrated.") }}
-  {%- else -%}<span class="og-tag og-none">ungraded</span>{{ tip("Not graded yet.") }}{%- endif -%}
-{%- endmacro %}
+{% from "_org_macros.html" import val, plain, tip, grade_tag %}
 
 {% block content %}
 <style>
@@ -168,12 +135,13 @@
   @media (max-width: 768px) {
     .og-tiles { grid-template-columns: 1fr 1fr; gap: 8px; margin: 8px 0 12px; }
     .og-tile { padding: 10px 12px; } .og-tile .n { font-size: 22px; }
+    .og-tile:not(:first-child), .og-intro.section-desc { display: none; }     /* phone: the inbox count, then the cards */
     .og-btn { min-height: 38px; padding: 6px 14px; }
     .og-btns { gap: 14px; }
     .og-btns .og-btn { flex: 1; text-align: center; min-height: 44px; }
     .og-btns .og-btn.ok { margin-right: 10px; }
     .og-more b { display: block; min-width: 0; }
-    .og-more span[style*="calc(100% - 130px)"] { max-width: 100% !important; }
+    .og-more span[style*="calc(100% - 130px)"], .og-val { max-width: 100% !important; }
     .og-runbar .og-meta { white-space: normal; margin-left: 0 !important; }
     body.og-chatmode .og-intro, body.og-chatmode .og-tiles, body.og-chatmode .og-runbar,
     body.og-chatmode .og-foot { display: none; }
@@ -209,11 +177,24 @@
   .og-plain-like { font-size: 13px; font-style: italic; color: var(--text-secondary); margin-top: 8px; }
   .og-pack p { margin: 4px 0; }
   .og-pack h4 { font-size: 11px; font-weight: 700; letter-spacing: 0.6px; text-transform: uppercase; color: var(--text-muted); margin: 16px 0 4px; }
+  .og-val { display: inline-block; max-width: calc(100% - 130px); } .og-detail-h { margin-top: 10px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.6px; }
+  .og-pad { padding: 8px 16px; } .og-link { color: var(--accent); }
+  .og-memo-count { margin: 4px 0 8px; }
+  .og-opts { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+  .og-opt { text-align: left; white-space: normal; line-height: 1.35; }
+  .og-opts + .og-btns .og-btn { flex: 0 1 auto; }
+  .og-settled { margin-top: 4px; padding: 4px 8px; border-left: 3px solid var(--amber); background: var(--amber-bg); color: var(--text-secondary); border-radius: 0 6px 6px 0; }
+  .og-packhead > summary { cursor: pointer; list-style: none; display: flex; flex-direction: column; gap: 4px; }
+  .og-packhead > summary::-webkit-details-marker { display: none; }
+  .og-packhead > summary::after { content: "Tap for the full pack"; font-size: 11px; color: var(--accent); }
+  .og-packhead[open] > summary::after { content: "Hide"; }
+  .og-ol { list-style: decimal; } .og-strong { color: var(--text-primary); }
+  .og-pager { display: flex; gap: 12px; align-items: center; justify-content: center; padding: 10px; font-size: 12px; }
+  .og-pager a { color: var(--accent); font-weight: 600; }
   .og-mt8 { margin-top: 8px; } .og-mt12 { margin-top: 12px; } .og-mt20 { margin-top: 20px; } .og-fs16 { font-size: 16px; }
 </style>
 
 {% set S = summary %}
-{% set pending_ids = (inbox|map(attribute='doc_id')|list) + (work_orders|selectattr('status', 'equalto', 'awaiting approval')|map(attribute='doc_id')|list) %}
 <h1 class="section-title og-intro">Boardroom</h1>
 <div class="section-desc og-intro">The fund as an org: you are the CEO, every other seat is an agent. Desk seats write memos on a schedule; builder seats change code when you start them. Nothing here moves a weight or a trade without your decision.</div>
 
@@ -228,39 +209,71 @@
 
 <div class="og-flash" role="status" x-show="flash" x-cloak x-text="flash"></div>
 
-{{ tab_bar([('inbox', 'Inbox'), ('outlook', 'Outlook & ideas'), ('chat', 'Chat'), ('work', 'Work'), ('pack', 'Board pack'), ('memos', 'Memos'), ('org', 'Employees & settings')]) }}
+{{ tab_bar([('inbox', 'Inbox'), ('outlook', 'Outlook & ideas'), ('chat', 'Chat'), ('work', 'Work'), ('memos', 'Memo archive'), ('org', 'Employees & settings')]) }}
 
-{# ═══════════════════════════ INBOX ═══════════════════════════ #}
+{# ═══════════════════════════ INBOX (with the board pack summary on top) ═══════════════════════════ #}
 <div x-show="tab === 'inbox'" x-cloak class="og-wrap">
-  <div class="og-mt12 section-desc">Asks and hypothesis cards raised by the seats. Approve, park or reject; the seats see your decision in their next brief.</div>
+  {% if board_pack %}
+  {% set P = board_pack.fields %}
+  <details class="og-pack og-mt12 og-packhead" data-board-pack>
+    <summary>
+      <span class="og-meta">Board pack · {{ board_pack.doc_date[:10] }}</span>
+      <span class="og-title">{{ P.headline }}</span>
+      {% if P.eli5 and P.eli5.do %}<span class="og-sub">{{ P.eli5.do }}</span>{% endif %}
+    </summary>
+    {{ plain(P.eli5) }}
+    <p class="og-mt8">{{ P.state_of_fund }}</p>
+    {% for label, key in [('Wins', 'wins'), ('Worries', 'worries'), ('Next week', 'next_week')] %}
+      {% if P[key] %}<h4>{{ label }}</h4>{{ val(P[key]) }}{% endif %}
+    {% endfor %}
+    {% if P.role_notes %}<h4>Seat notes</h4><ul class="og-ul">{% for n in P.role_notes %}<li><span class="og-k">{{ n.role }}</span> {{ n.note }}</li>{% endfor %}</ul>{% endif %}
+    <div class="u-muted-11 og-mt8">Written by the Chief of Staff; the Sunday pack is also emailed. Its call on each card is shown on the card.</div>
+  </details>
+  {% endif %}
+  <div class="og-mt12 section-desc">{{ inbox|length }} waiting, the pack's approve calls first. An ask with options has one button per option; Park and Reject apply to the whole ask. The seats see your decision in their next brief.</div>
   <div class="og-list">
   {% for i in inbox %}
     <div class="og-row" id="item-{{ i.doc_id }}" data-item="{{ i.doc_id }}">
       <div class="og-head">
         <span class="og-meta">#{{ i.doc_id }}</span>
         <span class="og-tag {% if i.type == 'ask' %}og-mid{% elif i.type == 'work_order' %}og-human{% else %}og-builder{% endif %}">{{ {'ask': 'ask', 'work_order': 'work order #' ~ i.fields.number}.get(i.type, 'hypothesis') }}</span>
+        {% if i.board %}<span class="og-tag {{ {'approve': 'og-good', 'reject': 'og-bad'}.get(i.board.recommendation, 'og-mid') }}" data-board-call>pack says {{ i.board.recommendation }}</span>{% endif %}
         {% if i.fields.urgency == 'now' %}<span class="og-tag og-bad">now</span>{% endif %}
         <span class="og-title">{{ i.title }}</span>
       </div>
       <div class="og-sub">
         <span class="og-k">from</span> {{ i.role_title }} <span class="og-dot">·</span> {{ i.doc_date }} <span class="og-dot">·</span> {{ i.age_days }}d old
+        {% if i.settled_by %}<div class="og-settled" data-settled><b>Possibly settled already</b> — named in {{ i.settled_by|join('; ') }}. Check, then decide or reject.</div>
+        {% elif i.stale %}<div class="og-settled" data-settled><b>Stale?</b> Waiting {{ i.age_days }} days. Decide, park or reject it.</div>{% endif %}
+        {% if i.board and i.board.why_now %}<div><span class="og-k">why now</span> {{ i.board.why_now }}</div>{% endif %}
         {% if i.type == 'work_order' %}
           <div>{{ i.fields.summary }}</div>
-          <ol class="og-ul" style="list-style: decimal;">{% for it in i.fields['items'] %}<li><b style="color: var(--text-primary);">{{ it.title }}</b> <span class="og-meta">{{ it.owner }} · {{ it.size }}</span><div>{{ it.what }}</div><div><span class="og-k">done when</span> {{ it.done_when }}</div></li>{% endfor %}</ol>
+          <ol class="og-ul og-ol">{% for it in i.fields['items'] %}<li><b class="og-strong">{{ it.title }}</b> <span class="og-meta">{{ it.owner }} · {{ it.size }}</span><div>{{ it.what }}</div><div><span class="og-k">done when</span> {{ it.done_when }}</div></li>{% endfor %}</ol>
           <div class="og-k">Approving does not start anything. It lets a Claude Code session run it: /work-order {{ i.fields.number }}</div>
         {% endif %}
-        {% if i.fields.recommendation %}<div><span class="og-k">recommends</span> {{ i.fields.recommendation }}</div>{% endif %}
-        {% if i.fields.options %}<div><span class="og-k">options</span> {{ i.fields.options|join(' / ') }}</div>{% endif %}
+        {% if i.fields.recommendation %}<div><span class="og-k">{{ i.role_title }} recommends</span> {{ i.fields.recommendation }}</div>{% endif %}
         {% if i.fields.rationale %}<div><span class="og-k">why</span> {{ i.fields.rationale }}</div>{% endif %}
         {% if i.fields.test %}<div><span class="og-k">test</span> {{ i.fields.test }}</div>{% endif %}
         {% if i.fields.data_needed %}<div><span class="og-k">data</span> {{ i.fields.data_needed }}</div>{% endif %}
         {% if i.fields.expected_sign %}<div><span class="og-k">expected sign</span> {{ i.fields.expected_sign }}</div>{% endif %}
       </div>
+      {% if i.option_list %}
+      <div class="og-opts" role="group" aria-label="Options for #{{ i.doc_id }}">
+        {% for o in i.option_list %}
+        <button class="og-btn ok og-opt" data-option="{{ o.i }}" @click="decide({{ i.doc_id }}, 'approve', {{ o.i }}, {{ o.text|tojson|forceescape }})">{{ o.text }}{% if o.recommended %} <span class="og-tag og-good">recommended</span>{% endif %}</button>
+        {% endfor %}
+      </div>
+      <div class="og-btns">
+        <button class="og-btn park" @click="decide({{ i.doc_id }}, 'park')">Park</button>
+        <button class="og-btn no" @click="decide({{ i.doc_id }}, 'reject')">Reject</button>
+      </div>
+      {% else %}
       <div class="og-btns">
         <button class="og-btn ok" @click="decide({{ i.doc_id }}, 'approve')">Approve</button>
         <button class="og-btn park" @click="decide({{ i.doc_id }}, 'park')">Park</button>
         <button class="og-btn no" @click="decide({{ i.doc_id }}, 'reject')">Reject</button>
       </div>
+      {% endif %}
     </div>
   {% else %}
     <div class="og-empty">Nothing is waiting for you.</div>
@@ -278,7 +291,8 @@
         <span class="og-title">{{ d.fields.item_title }}</span>
         <span class="og-meta">{{ d.doc_date }}</span>
       </div>
-      {% if d.fields.note %}<div class="og-sub">{{ d.fields.note }}</div>{% endif %}
+      {% if d.fields.option %}<div class="og-sub"><span class="og-k">chose</span> {{ d.fields.option }}</div>{% endif %}
+      {% if d.fields.note and not d.fields.option %}<div class="og-sub">{{ d.fields.note }}</div>{% endif %}
     </div>
   {% endfor %}
   </div>
@@ -486,39 +500,10 @@
   </div>
 </div>
 
-{# ═══════════════════════════ BOARD PACK ═══════════════════════════ #}
-<div x-show="tab === 'pack'" x-cloak>
-  {% if board_pack %}
-  {% set P = board_pack.fields %}
-  <div class="og-mt12 section-desc">Written by the Chief of Staff on {{ board_pack.doc_date }}. The Sunday pack is also emailed.</div>
-  <div class="og-pack">
-    <div class="og-fs16 og-title">{{ P.headline }}</div>
-    {{ plain(P.eli5) }}
-    <p class="og-mt8">{{ P.state_of_fund }}</p>
-    <h4>Decisions for you</h4>
-    {% for d in P.decisions %}
-      {% set verdict = decided.get(d.item_id|int) %}
-      <div style="margin: 4px 0;">
-        {% if d.item_id|int in pending_ids %}<a class="og-meta" href="#item-{{ d.item_id }}" @click.prevent="goItem({{ d.item_id|int }})">#{{ d.item_id }}</a>{% else %}<span class="og-meta">#{{ d.item_id }}</span>{% endif %}
-        <span class="og-tag og-mid">{{ d.recommendation }}</span>
-        {% if verdict %}<span class="og-tag {% if verdict == 'approve' %}og-good{% elif verdict == 'reject' %}og-bad{% else %}og-mid{% endif %}">you: {{ verdict }}d</span>
-        {% elif d.item_id|int in pending_ids %}<span class="og-tag og-human">waiting in your inbox</span>
-        {% else %}<span class="og-tag og-none">no longer open</span>{% endif %}
-        {{ d.why_now }}</div>
-    {% else %}<div class="og-none">None this week.</div>{% endfor %}
-    {% for label, key in [('Wins', 'wins'), ('Worries', 'worries'), ('Next week', 'next_week')] %}
-      {% if P[key] %}<h4>{{ label }}</h4>{{ val(P[key]) }}{% endif %}
-    {% endfor %}
-    {% if P.role_notes %}<h4>Seat notes</h4><ul class="og-ul">{% for n in P.role_notes %}<li><span class="og-k">{{ n.role }}</span> {{ n.note }}</li>{% endfor %}</ul>{% endif %}
-  </div>
-  {% else %}
-  <div class="og-mt12 og-list"><div class="og-empty">No board pack yet. The Chief of Staff writes one every Sunday.</div></div>
-  {% endif %}
-</div>
-
-{# ═══════════════════════════ MEMOS ═══════════════════════════ #}
+{# ═══════════════════════════ MEMO ARCHIVE ═══════════════════════════ #}
+{# Closed by default, one page at a time, bodies fetched when a row opens (/org/memo/<id>). #}
 <div x-show="tab === 'memos'" x-cloak class="og-wrap">
-  <div class="og-mt12 section-desc">What the desks wrote, newest first. The grade is from Compliance, a separate seat. Click a memo to read it.</div>
+  <div class="og-mt12 section-desc">Reference. What the desks wrote, newest first; open a row to read it. The grade is from Compliance, a separate seat. The decisions that need you are in the Inbox.</div>
   {% set F = memo_filter %}
   <form class="og-filter" method="get" action="/org#memos">
     <label>From <input type="date" name="mfrom" value="{{ F.mfrom }}"{% if F.first %} min="{{ F.first }}"{% endif %}></label>
@@ -533,36 +518,42 @@
       {% if F.active %}<a href="/org#memos">Clear</a>{% endif %}
     </span>
   </form>
-  <div class="u-muted-11" style="margin: 4px 0 8px;">
-    {% if F.active %}Showing {{ memos|length }} memo{{ 's' if memos|length != 1 }}{% if F.mfrom %} from {{ F.mfrom }}{% endif %}{% if F.mto %} to {{ F.mto }}{% endif %}{% if F.mrole %} · {{ F.mrole }}{% endif %}.{% if F.capped %} That is the limit for one page: narrow the dates to see the rest.{% endif %}
-    {% else %}Showing the newest {{ memos|length }} from the last 14 days.{% if F.first %} The first memo is from {{ F.first }}: pick dates to go back.{% endif %}{% endif %}
+  {% set per = memo_per_page %}
+  {% set pages = ((memos|length + per - 1) // per) or 1 %}
+  {% set pg = [mpage, pages]|min %}
+  {% set qs = '&'.join(((('mfrom=' ~ F.mfrom) if F.mfrom else ''), (('mto=' ~ F.mto) if F.mto else ''), (('mrole=' ~ F.mrole) if F.mrole else '')) | select | list) %}
+  <div class="u-muted-11 og-memo-count">
+    {% if memos %}Memos {{ (pg - 1) * per + 1 }}-{{ [pg * per, memos|length]|min }} of {{ memos|length }}{% if F.active %}{% if F.mfrom %} from {{ F.mfrom }}{% endif %}{% if F.mto %} to {{ F.mto }}{% endif %}{% if F.mrole %} · {{ F.mrole }}{% endif %}{% else %} from the last 14 days{% endif %}.{% if F.capped %} That is the limit for one filter: narrow the dates to see the rest.{% endif %}
+    {% if not F.active and F.first %} The first memo is from {{ F.first }}: pick dates to go back.{% endif %}{% endif %}
   </div>
   <div class="og-list">
-  {% for m in memos %}
+  {% for m in memos[(pg - 1) * per : pg * per] %}
     {% if loop.changed(m.doc_date[:10]) %}<div class="og-day">{{ m.doc_date[:10] }}</div>{% endif %}
-    <div class="og-row og-click">
+    <div class="og-row og-click" data-memo="{{ m.doc_id }}">
       <div class="og-head">
-        <span class="og-meta">{{ m.doc_date }}</span>
         <span class="og-tag og-desk">{{ m.role_title }}{% if m.fields.sector %} · {{ m.fields.sector }}{% endif %}</span>
         {% set v = m.fields.verdict or m.fields.platform_state or m.fields.view %}
         {% if v %}<span class="og-tag {% if v in ('green', 'within-limits', 'positive') %}og-good{% elif v in ('red', 'breach', 'negative') %}og-bad{% else %}og-mid{% endif %}">{{ v }}</span>{% endif %}
         {{ grade_tag(m.grade) }}
         <button type="button" class="og-title og-toggle" :aria-expanded="!!open['m{{ m.doc_id }}']" @click="open['m{{ m.doc_id }}'] = !open['m{{ m.doc_id }}']">{{ m.title }}</button>
       </div>
-      {% if m.fields.eli5 %}<div class="og-sub">{{ m.fields.eli5.what }} <b style="color: var(--text-primary); font-weight: 600;">{{ m.fields.eli5.do }}</b></div>{% endif %}
     </div>
-    <div class="og-more" x-show="open['m{{ m.doc_id }}']" x-cloak>
-      {{ plain(m.fields.eli5) }}
-      {% if m.fields.eli5 %}<div class="og-k" style="margin-top: 10px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.6px;">The detail</div>{% endif %}
-      {% for k, x in m.fields.items() if k not in ('role', 'period', 'as_of', 'headline', 'sector', 'verdict', 'platform_state', 'view', 'eli5', 'prompt_version') and x is not none and x != [] and x != '' %}
-        <div><b>{{ k|replace('_', ' ') }}</b><span style="display: inline-block; max-width: calc(100% - 130px);">{{ val(x) }}</span></div>
-      {% endfor %}
-      {% if m.grade and m.grade.issues %}<div><b>compliance notes</b><span style="display: inline-block; max-width: calc(100% - 130px);">{{ val(m.grade.issues) }}</span></div>{% endif %}
+    <div x-show="open['m{{ m.doc_id }}']" x-cloak x-data="lazyTab('/org/memo/{{ m.doc_id }}')" x-effect="if (open['m{{ m.doc_id }}']) load()">
+      <div class="u-muted-11 og-pad" x-show="busy" role="status">Loading…</div>
+      <div class="lazy-err" x-show="err" x-cloak><span x-text="err"></span> <button type="button" class="btn-secondary" @click="load()">Retry</button></div>
+      <div x-html="html"></div>
     </div>
   {% else %}
-    <div class="og-empty">{% if memo_filter.active %}No memos in that range. <a href="/org#memos" style="color: var(--accent);">Clear the filter</a>.{% else %}No memos yet. Desk seats run every day at 06:30 UTC.{% endif %}</div>
+    <div class="og-empty">{% if memo_filter.active %}No memos in that range. <a href="/org#memos" class="og-link">Clear the filter</a>.{% else %}No memos yet. Desk seats run every day at 06:30 UTC.{% endif %}</div>
   {% endfor %}
   </div>
+  {% if pages > 1 %}
+  <div class="og-pager">
+    {% if pg > 1 %}<a href="/org?{{ qs }}{{ '&' if qs }}mpage={{ pg - 1 }}#memos">&larr; Newer</a>{% endif %}
+    <span class="u-muted-11">Page {{ pg }} of {{ pages }}</span>
+    {% if pg < pages %}<a href="/org?{{ qs }}{{ '&' if qs }}mpage={{ pg + 1 }}#memos">Older &rarr;</a>{% endif %}
+  </div>
+  {% endif %}
 </div>
 
 {# ═══════════════════════════ EMPLOYEES & SETTINGS ═══════════════════════════ #}
@@ -731,28 +722,25 @@
       chats: {},
 
       flash: '',
-      goItem(id) {                       // a board-pack decision id -> its card in the inbox
-        this.tab = 'inbox'; this.loaded.inbox = true;
-        history.replaceState(null, '', '#inbox');
-        this.$nextTick(() => { const el = document.getElementById('item-' + id); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' }); });
-      },
-      async decide(id, verdict) {
+      async decide(id, verdict, option, optionText) {
         let note = '';
-        if (verdict === 'approve') {
+        if (option !== undefined) {         // one option of an ask: approve exactly that
+          if (!confirm('Choose for #' + id + ': ' + optionText + '? The seats see it in their next brief.')) return;
+        } else if (verdict === 'approve') {
           if (!confirm('Approve #' + id + '? The seats see it in their next brief.')) return;
         } else {
           const n = prompt((verdict === 'park' ? 'Park' : 'Reject') + ' #' + id + '. Note for the record (optional); Cancel keeps it open');
           if (n === null) return;          // Cancel = no decision
           note = n;
         }
-        const r = await post('/api/org/decide', { item_id: id, verdict: verdict, note: note });
+        const r = await post('/api/org/decide', option === undefined ? { item_id: id, verdict: verdict, note: note } : { item_id: id, verdict: 'approve', option: option, note: note });
         if (!r.ok) { alert(((await r.json()).error) || 'Could not record the decision'); return; }
         // take the card out in place: no reload, so the scroll position and the tab stay
         document.querySelectorAll('[data-item="' + id + '"]').forEach((el) => el.remove());
         document.querySelectorAll('[data-btns="' + id + '"]').forEach((el) => el.remove());
         const n = document.getElementById('og-inbox-n');
         if (n) { const left = Math.max(0, (parseInt(n.textContent, 10) || 0) - 1); n.textContent = left; n.className = 'n ' + (left ? 'og-mid' : 'og-good'); }
-        this.flash = '#' + id + ' ' + verdict + (verdict === 'approve' ? 'd' : 'ed') + '. Recorded.';
+        this.flash = '#' + id + ' ' + (option !== undefined ? 'chose: ' + optionText : verdict + (verdict === 'approve' ? 'd' : 'ed')) + '. Recorded.';
       },
 
       load(data) {                       // a seat's settings → the form

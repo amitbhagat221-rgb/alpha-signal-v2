@@ -23,6 +23,7 @@ python -m org run                         # what cron runs: every seat due today
 python -m org run --role cio --adhoc      # one seat now; leaves its scheduled period free
 python -m org inbox                       # asks + hypothesis cards awaiting the CEO
 python -m org decide 123 approve --note "go"
+python -m org decide 123 --option 1      # an ask with options: choose the second (implies approve)
 python -m org scorecard                   # per seat, 30 days: done, first-pass, grade, tokens
 python -m org board --send                # print / re-send the latest board pack
 python -m org work                        # work orders and their status

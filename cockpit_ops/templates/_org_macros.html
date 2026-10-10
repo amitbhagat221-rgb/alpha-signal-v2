@@ -1,0 +1,36 @@
+{# Shared by org.html and org_memo.html: memo rendering helpers. #}
+{% macro val(v) -%}
+  {%- if v is string -%}{{ v }}
+  {%- elif v is mapping -%}
+    {%- for k, x in v.items() if x is not none and x != '' and x != [] -%}
+      <span class="og-k">{{ k|replace('_', ' ') }}</span> {{ val(x) }}{% if not loop.last %} <span class="og-dot">·</span> {% endif %}
+    {%- endfor -%}
+  {%- elif v is iterable -%}
+    <ul class="og-ul">{% for x in v %}<li>{{ val(x) }}</li>{% endfor %}</ul>
+  {%- else -%}{{ v }}{%- endif -%}
+{%- endmacro %}
+
+{# The plain-words block every memo opens with (house style): four questions, short answers. #}
+{% macro plain(e) -%}
+  {%- if e -%}
+  <div class="og-plain">
+    {% for k, q in [('what', 'What is happening?'), ('why', 'Why does it matter?'), ('do', 'What should you do?'), ('remember', 'What to remember')] if e[k] %}
+    <div class="og-plain-q">{{ q }}</div><div class="og-plain-a">{{ e[k] }}</div>
+    {% endfor %}
+    {% if e.like %}<div class="og-plain-like">{{ e.like }}</div>{% endif %}
+  </div>
+  {%- endif -%}
+{%- endmacro %}
+
+{# Real data behind a tap/hover: the shared tooltip popover, not a native title="" #}
+{% macro tip(text) -%}
+<span class="tooltip-wrap" x-data="{ open: false }"><button type="button" class="tooltip-trigger" @mouseenter="open = true" @mouseleave="open = false"
+  @click="open = !open" @click.outside="open = false" aria-label="More info">i</button><span x-show="open" x-cloak class="tooltip-popover">{{ text }}</span></span>
+{%- endmacro %}
+
+{% macro grade_tag(g) -%}
+  {%- if g and g.total is not none -%}
+    <span class="og-tag {% if g.total >= 7 %}og-good{% elif g.total >= 4 %}og-mid{% else %}og-bad{% endif %}">{{ g.total }}/8</span>{{ tip("Compliance grade, out of 8: grounded + actionable + in charter + calibrated.") }}
+  {%- else -%}<span class="og-tag og-none">ungraded</span>{{ tip("Not graded yet.") }}{%- endif -%}
+{%- endmacro %}
+
