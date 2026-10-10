@@ -119,6 +119,22 @@ th[aria-sort="ascending"] .th-sort::after { content: " ▲"; font-size: 10px; } 
 .sy-fill-red { background: var(--red-bg); color: var(--red); } 
 .sy-pill-out { display: inline-block; font-size: 10px; padding: 2px 8px; border-radius: 4px; color: var(--c); border: 1px solid var(--c); font-weight: 700; letter-spacing: .5px; }
 .sy-wrap { max-width: 320px; overflow-wrap: anywhere; }
+.hs-table td.hs-issue { white-space: normal; }
+@media (max-width: 767px) {
+  /* Data Health Scores: one stacked card per table, nothing in a sideways scroll */
+  .hs-table, .hs-table tbody { display: block; }
+  .hs-table thead { display: none; }
+  .hs-table tbody { border-top: 1px solid var(--border); padding: 8px 0; }
+  .hs-table tbody > tr:first-child { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto auto; gap: 4px 10px; align-items: center; }
+  .hs-table tbody > tr:first-child > td { border: 0; padding: 0; min-width: 0; }
+  .hs-table tbody > tr:first-child > td:nth-child(2) { overflow-wrap: anywhere; }
+  .hs-table tbody > tr:first-child > td:nth-child(3) { grid-column: 2 / 5; grid-row: 2; }
+  .hs-table tbody > tr:first-child > td:nth-child(6) { grid-column: 2 / 5; grid-row: 3; }
+  .hs-table tr.sy-exp { display: block; }
+  .hs-table tr.sy-exp > td { display: block; padding: 8px 0; }
+}
+.sy-pager { display: flex; gap: 12px; align-items: center; justify-content: center; flex-wrap: wrap; margin-top: 12px; }
+.sy-pager button:disabled { opacity: .4; cursor: default; }
 .pipe-fail { color: var(--red); } .pipe-ok { color: var(--green); } .pipe-run { color: var(--amber); }
 
 /* Data Inventory (tab fetched on first open; behaviour in /static/inventory.js) */

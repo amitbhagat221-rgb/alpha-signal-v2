@@ -80,7 +80,9 @@
   .og-av-builder { background: linear-gradient(135deg, var(--text-muted), var(--border-accent)); }
   .og-chat { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
   .og-pane { display: flex; flex-direction: column; height: 100%; min-height: 0; }
-  .og-chathead { display: flex; gap: 10px; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--border); }
+  .og-chathead { display: flex; flex-wrap: wrap; gap: 8px 10px; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--border); }
+  .og-chathead .og-headtxt { flex: 1 1 140px; min-width: 140px; }
+  .og-chathead .og-btn { white-space: nowrap; }
   .og-msgs { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; padding: 16px; scroll-behavior: smooth; }
   .og-line { display: flex; gap: 8px; align-items: flex-start; max-width: 100%; }
   .og-line.og-me { justify-content: flex-end; }
@@ -126,7 +128,7 @@
   @container (max-width: 760px) {
     .og-chatwrap { grid-template-columns: 1fr; height: auto; }
     .og-seatlist { flex-direction: row; overflow-x: auto; overflow-y: hidden; }
-    .og-seat { flex: none; max-width: 190px; }
+    .og-seatlist > .og-seat { flex: none; max-width: 190px; }
     .og-chat { height: 72vh; }
     .og-fig { min-width: 0; }
     .og-chathead .og-seat-sub { display: none; }
@@ -148,7 +150,8 @@
     body.og-chatmode .tab-bar { margin-bottom: 8px; }
     .og-chatwrap { grid-template-columns: 1fr; height: auto; gap: 8px; margin-top: 0; }
     .og-seatlist { flex-direction: row; overflow-x: auto; overflow-y: hidden; padding: 4px; }
-    .og-seat { flex: none; max-width: 200px; padding: 6px 8px; }
+    .og-seatlist > .og-seat { flex: none; max-width: 200px; }
+    .og-seat { padding: 6px 8px; }
     .og-seat .og-av { width: 28px; height: 28px; font-size: 10px; }
     .og-chat { height: calc(100dvh - 232px); min-height: 320px; }
     .og-chathead { padding: 8px 12px; } .og-chathead .og-seat-sub { display: none; }
@@ -382,7 +385,7 @@
       <template x-if="chat.showHistory">
       <div class="og-pane">
         <div class="og-chathead">
-          <div style="min-width: 0; flex: 1;">
+          <div class="og-headtxt">
             <div class="og-title">Chat history</div>
             <div class="og-seat-sub" x-text="chat.convs.length + ' conversation' + (chat.convs.length === 1 ? '' : 's') + (chat.histAll ? ' with everyone' : ' with ' + chat.title)"></div>
           </div>
@@ -411,7 +414,7 @@
       <div class="og-pane">
         <div class="og-chathead">
           <span class="og-av" :class="'og-av-' + chat.type" x-text="initials(chat.title)"></span>
-          <div style="min-width: 0; flex: 1;">
+          <div class="og-headtxt">
             <div class="og-title" x-text="chat.title"></div>
             <div class="og-seat-sub" x-text="chat.model + (chat.web ? ' · web search' : '') + ' · ' + (chat.mission || '')"></div>
           </div>

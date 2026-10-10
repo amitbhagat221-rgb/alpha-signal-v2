@@ -3,7 +3,24 @@
 .inv-cols { max-width: 340px; max-height: 50vh; overflow: auto; white-space: normal; text-align: left; font-size: 11px; line-height: 1.5; }
 .inv-cols code { font-family: 'JetBrains Mono', monospace; } .inv-cols .pk { color: var(--amber); font-weight: 700; }
 .inv-cols .ty { color: var(--text-muted); margin-left: 6px; }
+.pop-fixed { position: fixed; bottom: auto; transform: none; max-width: calc(100vw - 16px); z-index: 200; }
+.pop-fixed::after { display: none; }
+.pop-wide { width: 340px; }
 </style>
+{# Popover model: tap or click toggles (pinned); hover also shows it on hover-capable devices; Escape, an outside click or a scroll closes it. position:fixed so the scrolling table wrapper never clips it. #}
+{% macro pop_data(w, hover) -%}
+{ hov: false, pin: false, top: 0, left: 0, w: {{ w }},
+  get show() { return this.hov || this.pin; },
+  place() { const r = $refs.t.getBoundingClientRect(), w = Math.min(this.w, innerWidth - 16);
+            this.left = Math.max(8, Math.min(r.left + r.width / 2 - w / 2, innerWidth - w - 8)); this.top = r.bottom + 8;
+            /* once drawn, measure and correct: below the icon, or above when there is no room; an animated ancestor re-bases position:fixed */
+            $nextTick(() => { const p = $refs.p; if (!p) return; const q = p.getBoundingClientRect(), h = q.height;
+              const dl = Math.max(8, Math.min(r.left + r.width / 2 - w / 2, innerWidth - w - 8));
+              const dt = (r.bottom + 8 + h > innerHeight - 8 && r.top - 8 - h > 8) ? r.top - 8 - h : r.bottom + 8;
+              this.left += dl - q.left; this.top += dt - q.top; }); },
+  tap() { this.place(); this.pin = !this.pin; },
+  close() { this.pin = false; this.hov = false; } }
+{%- endmacro %}
 <div class="card" data-inventory>
     <h2 class="section-title">Inventory</h2>
     <div class="section-desc">
@@ -69,11 +86,11 @@
                     <td data-key="produced_by" class="mono inv-faint">{{ row.produced_by or '—' }}</td>
                     <td data-key="consumed_count" class="num">
                         {{ row.consumed_count if row.consumed_count is defined else '—' }}
-                        {% if row.consumed_by %}<span class="tooltip-wrap" x-data="{ open: false }"><button type="button" class="tooltip-trigger" @click="open = !open" @click.outside="open = false" @mouseenter="open = true" @mouseleave="open = false" aria-label="Used by {{ row.table }}">i</button><span x-show="open" x-cloak class="tooltip-popover">{{ row.consumed_by }}</span></span>{% endif %}
+                        {% if row.consumed_by %}<span class="tooltip-wrap" x-data="{{ pop_data(240) }}" @click.outside="pin = false" @keydown.escape.window="close()" @scroll.window.capture="if (show) close()" @mouseenter="if (matchMedia('(hover: hover)').matches) { place(); hov = true }" @mouseleave="hov = false"><button type="button" class="tooltip-trigger" x-ref="t" @click="tap()" :aria-expanded="show" aria-label="Used by {{ row.table }}">i</button><span x-show="show" x-cloak class="tooltip-popover pop-fixed" :style="'left:' + left + 'px;top:' + top + 'px;width:' + Math.min(w, innerWidth - 16) + 'px'" x-ref="p">{{ row.consumed_by }}</span></span>{% endif %}
                     </td>
                     {% set tc = columns.get(row.table) %}
                     <td data-key="n_cols" class="num">
-                        {% if tc %}<span class="tooltip-wrap" x-data="{ open: false }"><button type="button" class="tooltip-trigger" style="width:auto;padding:0 6px;border-radius:10px" @click="open = !open" @click.outside="open = false" aria-label="Columns of {{ row.table }}">{{ tc.cols|length }}</button><span x-show="open" x-cloak class="tooltip-popover inv-cols">
+                        {% if tc %}<span class="tooltip-wrap" x-data="{{ pop_data(340) }}" @click.outside="pin = false" @keydown.escape.window="close()" @scroll.window.capture="if (show) close()"><button type="button" class="tooltip-trigger tooltip-count" x-ref="t" @click="tap()" :aria-expanded="show" aria-label="Columns of {{ row.table }}">{{ tc.cols|length }}</button><span x-show="show" x-cloak class="tooltip-popover inv-cols pop-fixed" :style="'left:' + left + 'px;top:' + top + 'px;width:' + Math.min(w, innerWidth - 16) + 'px'" x-ref="p">
                             {% for c in tc.cols %}<div><code class="{{ 'pk' if c.pk else '' }}">{{ c.name }}</code><span class="ty">{{ c.type }}{% if c.pk %} · key{% endif %}</span></div>{% endfor %}
                             {% for fk in tc.fks %}<div class="ty">{{ fk.col }} → {{ fk.ref }}</div>{% endfor %}
                         </span></span>{% else %}<span class="inv-faint">—</span>{% endif %}

@@ -14,6 +14,7 @@
   .ob-table { width: 100%; border-collapse: collapse; font-size: 12px; }
   .ob-table th { text-align: left; font-size: 10px; font-weight: 700; letter-spacing: 0.6px; text-transform: uppercase; color: var(--text-muted); padding: 8px; }
   .ob-table td { padding: 8px; border-top: 1px solid var(--border); font-family: 'JetBrains Mono', monospace; white-space: nowrap; }
+  .ob-table td.ob-wrap { white-space: normal; min-width: 160px; }
   .ob-scroll { overflow-x: auto; }
   .ob-rule td:first-child { color: var(--text-muted); font-family: inherit; width: 140px; }
   .ob-rule td { font-family: inherit; white-space: normal; }
@@ -60,13 +61,13 @@
       <td>{{ t.underlying }}</td><td>{{ t.entry_date }}</td><td>{{ t.expiry }}</td>
       <td>{{ "%.0f"|format(t.short_call) }} CE {{ t.call_entry }} · {{ "%.0f"|format(t.short_put) }} PE {{ t.put_entry }}</td>
       <td>{{ "%.2f"|format(t.credit_pts) }} × {{ t.lot }} = ₹{{ "{:,.0f}".format(t.credit_pts * t.lot) }}</td>
-      <td>₹{{ "{:,.0f}".format(t.margin_rs) }} <span class="ob-muted">{{ {"12pct": "estimate: 12% of notional", "kite": "Kite quote"}.get(t.margin_source, t.margin_source) }}</span></td>
+      <td class="ob-wrap">₹{{ "{:,.0f}".format(t.margin_rs) }} <span class="ob-muted">{{ {"12pct": "estimate: 12% of notional", "kite": "Kite quote"}.get(t.margin_source, t.margin_source) }}</span></td>
       {% if t.status == 'SETTLED' %}
       <td>settled at {{ "{:,.2f}".format(t.settle_index) }}</td>
-      <td class="{% if t.net_rs > 0 %}ob-ok{% else %}ob-bad{% endif %}">₹{{ "{:+,.0f}".format(t.net_rs) }} ({{ "%+.2f"|format(100 * t.ret_on_margin) }}%)</td>
+      <td class="ob-wrap {% if t.net_rs > 0 %}ob-ok{% else %}ob-bad{% endif %}">₹{{ "{:+,.0f}".format(t.net_rs) }} ({{ "%+.2f"|format(100 * t.ret_on_margin) }}%)</td>
       {% else %}
       <td class="ob-warn">open</td>
-      <td>{% if t.mark %}<span class="{% if t.mark.mtm_rs > 0 %}ob-ok{% else %}ob-bad{% endif %}">₹{{ "{:+,.0f}".format(t.mark.mtm_rs) }}</span> <span class="ob-muted">marked {{ t.mark.mark_date }}, index {{ "{:,.0f}".format(t.mark.index) }}</span>{% else %}—{% endif %}</td>
+      <td class="ob-wrap">{% if t.mark %}<span class="{% if t.mark.mtm_rs > 0 %}ob-ok{% else %}ob-bad{% endif %}">₹{{ "{:+,.0f}".format(t.mark.mtm_rs) }}</span> <span class="ob-muted">marked {{ t.mark.mark_date }}, index {{ "{:,.0f}".format(t.mark.index) }}</span>{% else %}—{% endif %}</td>
       {% endif %}
     </tr>
     {% endfor %}
