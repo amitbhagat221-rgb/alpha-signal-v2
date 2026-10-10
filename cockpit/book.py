@@ -19,6 +19,7 @@ import config
 import db
 import views
 from cockpit import api
+from formatting import tier_word
 from cockpit._shared import _ttl_cache
 
 # Every row in pick_outcomes was picked before this model change (3-4 Oct 2026).
@@ -31,6 +32,12 @@ STYLE_LABELS = {"Value": "cheap stocks", "Quality": "financially strong stocks",
                 "Growth": "analyst growth outlook", "Momentum": "recent price strength",
                 "Accruals": "earnings backed by cash", "Ownership": "promoter buying",
                 "Flow": "institutional buying"}
+
+
+def _by_display(by_tier):
+    """{tier: x} reordered the way every page lists tiers (views.display_tiers); tiers not in it keep their place after."""
+    order = views.display_tiers()
+    return {**{t: by_tier[t] for t in order if t in by_tier}, **{t: v for t, v in by_tier.items() if t not in order}}
 
 
 def _num(v, kind=float):
@@ -83,6 +90,14 @@ def left_flag(info, pick_date):
     return f"left top picks {d.day} {d:%b}"
 
 
+def held_status(left_top, below_exit):
+    """(word, colour) for a held name: in the top picks, held inside the band, or below the sell line.
+    The colour is never the only signal; the word says the same."""
+    if not left_top:
+        return ("In top picks", "green")
+    return ("Below sell line", "red") if below_exit else ("Held in band", "amber")
+
+
 @_ttl_cache(60)
 def get_book():
     """The held book, or None before the first build."""
@@ -95,6 +110,7 @@ def get_book():
     ranked = ranked.set_index("sid")[["rank", "final_score"]]
     hist = _history(rows["sid"].tolist(), pick_date)
     exit_rank = config.PORTFOLIO["hrp"]["rebalance"]["rank_exit"]
+    sizes = views.tier_sizes(pick_date)
     out = []
     for r in rows.to_dict("records"):
         t = ranked.loc[r["sid"]] if r["sid"] in ranked.index else None
@@ -108,12 +124,15 @@ def get_book():
             "left_top": left_flag(hist.get(r["sid"]), pick_date),
         })
         out[-1]["below_exit"] = out[-1]["rank"] is None or out[-1]["rank"] > exit_rank
+        out[-1]["status"] = held_status(out[-1]["left_top"], out[-1]["below_exit"])
+        out[-1]["tier_size"] = sizes.get(r["cap_tier"])
     out.sort(key=lambda x: -x["weight_pct"])
     return {
         "asof": sb["asof_date"], "pick_date": pick_date, "rows": out, "n": len(out),
         "n_left": sum(1 for r in out if r["left_top"]), "n_below_exit": sum(r["below_exit"] for r in out),
         "exit_rank": exit_rank,
-        "tier_pct": sb["tier_weights"], "top_n": {t: _top_n(t) for t in views.pickable_tiers()},
+        "tier_pct": _by_display(sb["tier_weights"]), "top_n": {t: _top_n(t) for t in views.display_tiers()},
+        "unproven": views.unproven_tiers(),
         "expected_return_pct": sb["expected_return_1y"], "er_basis": sb.get("er_basis"),
         "er_names": sb["er_coverage_n"], "er_weight_pct": sb["er_coverage_weight_pct"],
         "band": band_line(),
@@ -152,7 +171,7 @@ def get_risk():
         "effective_n": sb["effective_n"], "n": sb["n_names"],
         "max_stock_pct": sb["max_stock_pct"], "cap_stock_pct": sb["cap_stock_pct"],
         "max_sector_pct": sb["max_sector_pct"], "cap_sector_pct": sb["cap_sector_pct"],
-        "tier_pct": sb["tier_weights"],
+        "tier_pct": _by_display(sb["tier_weights"]), "unproven": views.unproven_tiers(),
     }
 
 
@@ -173,12 +192,12 @@ def tier_verdict(tier, top, whole, top_short=None, whole_short=None, top_n=10):
     -> {tier, verdict: beat | lagged | mixed | early | none, spread_pp, window, n_dates, text}"""
     if not top or not whole or top.get("avg_fwd") is None or whole.get("avg_fwd") is None:
         return {"tier": tier, "verdict": "none", "spread_pp": None, "window": None, "n_dates": 0,
-                "text": f"{tier}: no matured outcomes yet."}
+                "text": f"{tier_word(tier)}: no matured outcomes yet."}
     w, n = top["window_days"], top["n_dates"]
     spread = round(top["avg_fwd"] - whole["avg_fwd"], 1)
     if n < OUTCOME_MIN_DATES:
         return {"tier": tier, "verdict": "early", "spread_pp": spread, "window": w, "n_dates": n,
-                "text": f"{tier}: too early, only {n} pick days at {w} trading days."}
+                "text": f"{tier_word(tier)}: too early, only {n} pick days at {w} trading days."}
     short = None
     if top_short and whole_short and top_short.get("avg_fwd") is not None and whole_short.get("avg_fwd") is not None:
         short = top_short["avg_fwd"] - whole_short["avg_fwd"]
@@ -191,7 +210,7 @@ def tier_verdict(tier, top, whole, top_short=None, whole_short=None, top_n=10):
         what = (f"was {spread:+.1f} percentage points from the tier at {w} trading days but "
                 f"{short:+.1f} at 20 trading days" if short is not None else f"was {spread:+.1f} percentage points from the tier")
     return {"tier": tier, "verdict": verdict, "spread_pp": spread, "window": w, "n_dates": n,
-            "text": f"{tier}: top {top_n} {what}" + ("" if verdict == "mixed" else f" at {w} trading days")
+            "text": f"{tier_word(tier)}: top {top_n} {what}" + ("" if verdict == "mixed" else f" at {w} trading days")
                     + f" ({n} pick days, overlapping)."}
 
 
@@ -201,7 +220,7 @@ def tier_verdicts(summary):
     scope = f"top_{top_n}"
     return [tier_verdict(t, _cell(summary, t, w, scope), _cell(summary, t, w, "all"),
                          _cell(summary, t, 20, scope), _cell(summary, t, 20, "all"), top_n)
-            for t in views.pickable_tiers()]
+            for t in views.display_tiers()]
 
 
 def first_read_date():
@@ -209,10 +228,20 @@ def first_read_date():
     return MODEL_CHANGE + timedelta(days=round(20 * 7 / 5))
 
 
-def get_track_record(top_n=10):
+def lead_top_n():
+    """The basket Today and the Book actually trade: the smallest top-N across the pickable tiers."""
+    return min(_top_n(t) for t in views.pickable_tiers())
+
+
+WIDE_TOP_N = 10          # the wider basket shown second
+
+
+def get_track_record(top_n=None):
+    top_n = top_n or lead_top_n()
     s = api.get_pick_outcomes_summary(top_n=top_n)
     return {
         "summary": s, "top_n": top_n, "verdicts": tier_verdicts(s),
+        "wide_top_n": WIDE_TOP_N, "wide_verdicts": tier_verdicts(api.get_pick_outcomes_summary(top_n=WIDE_TOP_N)),
         "last_pick_date": max((r["pick_date"] for r in s["time_series"]), default=None),
         "min_dates": OUTCOME_MIN_DATES, "first_read": first_read_date(),
         "model_change_text": f"{MODEL_CHANGE_FIRST.day}-{MODEL_CHANGE.day} {MODEL_CHANGE:%b}",

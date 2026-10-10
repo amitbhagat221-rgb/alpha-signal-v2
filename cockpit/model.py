@@ -12,18 +12,21 @@ from the same outcomes as /book (`cockpit.book.tier_verdicts`).
   do_this_week()      the (at most 3) lines on top of Health (pure, tested)
 """
 
+import re
+
 import config
 import factors
 import views
-from cockpit import api, book
+from cockpit import api, book, playbooks
+from formatting import tier_word
 from cockpit._shared import _persisted_cache, _ttl_cache
 
 PROMOTION_BAR = 2.5          # |t| a factor needs to be considered (promotion review)
 MULTIPLE_TEST_BAR = 4.2      # |t| after allowing for ~270 hypotheses tried (Bonferroni; the 2.5 bar alone is not enough)
 LOW_DATA_PCT = 80            # a pick with less of its weight backed by real values than this is flagged
 MAX_ACTIONS = 3
-# Tiers where a walk-forward test found no factor with out-of-sample skill (Oct 2026 audit).
-NO_OOS_SKILL = {"LARGE": "a walk-forward test in Oct 2026 found no factor with out-of-sample skill"}
+# Tiers with no factor that has out-of-sample skill: the list lives in views (one source for every page).
+NO_OOS_SKILL = views.NO_OOS_SKILL
 
 BENCH_WORDS = {
     "PROPOSED": "Candidate: strong in testing, waiting on a human decision to wire it.",
@@ -89,7 +92,9 @@ def evidence_rows():
     ev = get_validation_evidence()
     decay = _decay()
     rows = []
-    for tier, tw in factors.weights().items():
+    wts = factors.weights()
+    for tier in [t for t in views.display_tiers() if t in wts] + [t for t in wts if t not in views.display_tiers()]:
+        tw = wts[tier]
         tier_ws = list(tw.values())
         for key, w in sorted(tw.items(), key=lambda kv: -abs(kv[1])):
             sid = factors.signal_for(key, tier)
@@ -126,9 +131,10 @@ def allocation_flag(tier, alloc, regime_name, ev):
     clears the multiple-testing bar; None when one does."""
     if ev["n_proven"]:
         return None
-    msg = (f"{tier} gets {alloc * 100:.0f}% in a {regime_name} market but none of its factors clears the "
+    msg = (f"{tier_word(tier)} gets {alloc * 100:.0f}% in a {regime_name} market but none of its factors clears the "
            f"{MULTIPLE_TEST_BAR:g} bar (best |t| {ev['best_t']:.1f})")
-    return msg + (f"; {NO_OOS_SKILL[tier]}." if tier in NO_OOS_SKILL else ".")
+    bad = views.unproven_tiers()
+    return msg + (f"; {bad[tier]}." if tier in bad else ".")
 
 
 def low_data_picks():
@@ -152,7 +158,7 @@ def do_this_week(decayed, streak, coverage, tiers, max_lines=MAX_ACTIONS):
     for r in decayed:
         days = f", flagged {streak + 1} days running" if streak else ""
         out.append({"kind": "review", "link": "evidence",
-                    "text": f"Review {r['label']} in {r['tier']}: its last-year IC is {r['ic_recent']:+.3f} "
+                    "text": f"Review {r['label']} in {tier_word(r['tier'])}: its last-year IC is {r['ic_recent']:+.3f} "
                             f"against {r['ic_all']:+.3f} long-run{days}."})
     if coverage["n_low"]:
         first = coverage["low"][0]
@@ -167,7 +173,7 @@ def do_this_week(decayed, streak, coverage, tiers, max_lines=MAX_ACTIONS):
     for t in tiers:
         if t["verdict"]["verdict"] == "lagged":
             out.append({"kind": "decide", "link": "evidence",
-                        "text": f"{t['tier']} picks lagged their tier ({t['verdict']['spread_pp']:+.1f} percentage points "
+                        "text": f"{tier_word(t['tier'])} picks lagged their tier ({t['verdict']['spread_pp']:+.1f} percentage points "
                                 f"at {t['verdict']['window']} trading days). Check its factors before adding capital."})
     return out[:max_lines]
 
@@ -179,15 +185,15 @@ def get_health(rows):
     verdicts = {v["tier"]: v for v in outcomes["verdicts"]}
     sb = api.get_sized_book() or {}
     tiers = []
-    for tier in views.pickable_tiers():
+    for tier in views.display_tiers():
         key = f"alloc_{tier.lower()}"
         alloc = regime.get(key)
         e = ev.get(tier, {"n_weights": 0, "best_t": 0.0, "n_proven": 0, "n_pass": 0})
         tiers.append({
-            "tier": tier, "alloc_pct": None if alloc is None else round(alloc * 100),
+            "tier": tier, "unproven": views.is_unproven(tier), "alloc_pct": None if alloc is None else round(alloc * 100),
             "split": {name: round(spec["alloc"][tier] * 100) for name, spec in config.REGIMES.items()},
             "book_pct": (sb.get("tier_weights") or {}).get(tier),
-            "verdict": verdicts.get(tier) or {"verdict": "none", "text": f"{tier}: no outcomes yet.", "spread_pp": None, "window": None},
+            "verdict": verdicts.get(tier) or {"verdict": "none", "text": f"{tier_word(tier)}: no outcomes yet.", "spread_pp": None, "window": None},
             "evidence": e,
             "flag": None if alloc is None else allocation_flag(tier, alloc, regime.get("regime", "current"), e),
         })
@@ -206,6 +212,26 @@ def _first_sentence(text, limit=170):
     text = text[: cut + 1] if 0 < cut < limit else text
     text = text if len(text) <= limit else text[: limit - 1].rsplit(" ", 1)[0] + "..."
     return text if text.endswith((".", "...")) or not text else text + "."
+
+
+# Registry descriptions name tables and columns; the page says them in words.
+_PLAIN_WORDS = (
+    ("macro_sector_signals_pit.macro_score", "sector macro score"),
+    ("macro_sector_signals_pit", "sector macro signals"),
+    ("fno_bhav settle prices", "F&O settlement prices"),
+    ("fno_bhav", "F&O settlement prices"),
+    ("forecast_history.price snapshots", "analyst forecast history"),
+    ("forecast_history", "analyst forecast history"),
+)
+
+
+def plain_note(text):
+    """A registry note in words: table names swapped for what they hold, a module reference in
+    brackets dropped, any other snake_case identifier spaced out."""
+    for raw, words in _PLAIN_WORDS:
+        text = text.replace(raw, words)
+    text = re.sub(r"\s*\((?:signals|pit)\.[a-z_]+\)", "", text)
+    return re.sub(r"\b[a-z][a-z0-9]*(?:_[a-z0-9]+)+\b", lambda m: m.group(0).replace("_", " "), text)
 
 
 def library_rows(ev_rows):
@@ -227,7 +253,7 @@ def library_rows(ev_rows):
         state = factors.status(sid)
         note = [_first_sentence(f.get("description"))]
         if state == "WIRED":
-            note.append("Weights: " + ", ".join(f"{t} {w:+.2f}" for t, w in wired[sid]) + ".")
+            note.append("Weights: " + ", ".join(f"{tier_word(t)} {w:+.2f}" for t, w in wired[sid]) + ".")
         else:
             note.append(BENCH_WORDS.get(state, state))
         if f.get("status", "READY") != "READY":
@@ -237,7 +263,7 @@ def library_rows(ev_rows):
             "id": sid, "label": short_label(sid), "group": f.get("group") or f.get("family"),
             "state": state, "wired_in": [t for t, _ in wired.get(sid, [])],
             "best_t": b["t"] if b else None, "best_tier": b["tier"] if b else None,
-            "cadence": f.get("cadence", "monthly"), "note": " ".join(n for n in note if n),
+            "cadence": f.get("cadence", "monthly"), "note": plain_note(" ".join(n for n in note if n)),
         })
     rows.sort(key=lambda r: (STATE_ORDER.get(r["state"], 9), -abs(r["best_t"] or 0)))
     return rows
@@ -248,7 +274,7 @@ def library_rows(ev_rows):
 def get_rules():
     p, hrp = config.PORTFOLIO, config.PORTFOLIO["hrp"]
     regime = views.regime() or {}
-    tier_picks = {t: config.TIERS[t]["picks"] for t in views.pickable_tiers()}
+    tier_picks = {t: config.TIERS[t]["picks"] for t in views.display_tiers()}
     same = len(set(tier_picks.values())) == 1
     return {
         "regimes": [{"name": n, "vix_lo": s["vix"][0], "vix_hi": s["vix"][1],
@@ -256,14 +282,15 @@ def get_rules():
                    for n, s in config.REGIMES.items()],
         "regime": regime.get("regime"), "vix": regime.get("vix_latest"), "vix_asof": (regime.get("updated_at") or "")[:10],
         "pick_line": (f"Top {next(iter(tier_picks.values()))} per tier ({sum(tier_picks.values())} names in all)" if same
-                      else "Top picks per tier: " + ", ".join(f"{t} {n}" for t, n in tier_picks.items())),
+                      else "Top picks per tier: " + ", ".join(f"{tier_word(t)} {n}" for t, n in tier_picks.items())),
+        "evidence": playbooks.evidence(), "unproven": views.unproven_tiers(),
         "limits": [
             ("Stocks per sector", f"at most {p['max_stocks_per_sector']}"),
             ("One stock in the sized book", f"at most {hrp['max_stock_weight'] * 100:.0f}% of the book"),
             ("One sector in the sized book", f"at most {hrp['max_sector_weight'] * 100:.0f}% of the book"),
             ("Liquidity floor", f"traded value at least {hrp['min_adtv_inr'] / 1e7:.0f} crore rupees a day"),
-            ("Trading cost used in tests", ", ".join(f"{t} {c} bps" for t, c in config.TRANSACTION_COSTS_BPS.items()
-                                                  if t in tier_picks) + " each way"),
+            ("Trading cost used in tests", ", ".join(f"{tier_word(t)} {config.TRANSACTION_COSTS_BPS[t]} bps" for t in tier_picks
+                                                  if t in config.TRANSACTION_COSTS_BPS) + " each way"),
         ],
         "band": book.band_line(),
         "limits_note": [
