@@ -224,6 +224,13 @@ def kite_callback(request_token: str = "", status: str = ""):
         _cache_token(data["access_token"])
     except Exception:                               # noqa: BLE001 — shown on the page, not raised
         return RedirectResponse("/options?kite=failed", status_code=303)
+    try:                                            # each login refreshes /book's Zerodha tab; the login stands either way
+        from sources import kite_holdings
+        kc.set_access_token(data["access_token"])
+        kite_holdings.snapshot(kc)
+    except Exception as e:                          # noqa: BLE001 — the 15:45 IST cron retries
+        import runlog
+        runlog.item_error("kite_holdings", "login", e)
     return RedirectResponse("/options?kite=ok", status_code=303)
 
 

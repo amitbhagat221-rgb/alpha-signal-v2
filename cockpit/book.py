@@ -1,17 +1,19 @@
 """
-Alpha Signal Cockpit - page data for /book (the sized book, its risk, its track record).
+Alpha Signal Cockpit - page data for /book (the sized book, the real Zerodha book, risk, track record).
 
 "The book" is the HRP-sized book in `portfolio_weights`, rebuilt each morning and
 banded (a held name stays until it drifts past the band). Reads named view functions
 and cockpit.api; the one query here asks when a held name last sat in the top picks.
 
   get_book()          the holdings + the one expected-return figure + the band line
+  get_zerodha()       the real demat holdings (broker_holdings snapshot), each with the model's view
   get_risk()          concentration and style, a plain one-line summary on top
   get_track_record()  realised outcomes, weekday pick dates only, a verdict per tier
   tier_verdicts()     the verdict rule (pure, tested); /model Health reads it too
 """
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 
@@ -140,6 +142,81 @@ def get_book():
         "expected_return_pct": sb["expected_return_1y"], "er_basis": sb.get("er_basis"),
         "er_names": sb["er_coverage_n"], "er_weight_pct": sb["er_coverage_weight_pct"],
         "band": band_line(),
+    }
+
+
+# ── the actual Zerodha book ─────────────────────────────────────────────────────────
+
+FIFTH = 0.2              # top / bottom fifth of the ranked tier
+IST = ZoneInfo("Asia/Kolkata")
+
+
+def model_view(in_book, in_universe, rank, tier_size, top_n):
+    """(word, colour) for a real holding: where the model ranks it inside its tier.
+    The colour is never the only signal; the word says the same."""
+    if in_book:
+        return ("In model book", "green")
+    if not in_universe:
+        return ("ETF or bond, not ranked", "muted")
+    if rank is None or not tier_size:
+        return ("Not ranked today", "amber")
+    if rank <= top_n:
+        return ("In top picks", "green")
+    if rank <= FIFTH * tier_size:
+        return ("Top fifth of tier", "green")
+    if rank > (1 - FIFTH) * tier_size:
+        return ("Bottom fifth of tier", "red")
+    return ("Middle of tier", "muted")
+
+
+@_ttl_cache(60)
+def get_zerodha():
+    """The latest Kite snapshot of the real demat holdings, each with the model's view; None before the first."""
+    h = db.read_sql(
+        "SELECT b.*, s.name, s.cap_tier AS stock_tier FROM broker_holdings b LEFT JOIN stocks s ON s.sid = b.sid "
+        "WHERE b.as_of_date = (SELECT MAX(as_of_date) FROM broker_holdings)")
+    if h.empty:
+        return None
+    pick_date = api.latest_pick_date()
+    ranked = views.picks(pick_date, gated=False).set_index("sid")[["rank", "final_score", "cap_tier"]]
+    sizes = views.tier_sizes(pick_date)
+    sb = api.get_sized_book() or {"rows": []}
+    book_sids = {r["sid"] for r in sb["rows"]}
+    total = float((h["quantity"] * h["last_price"]).sum()) or 1.0
+    rows = []
+    for r in h.to_dict("records"):
+        sid = r["sid"]
+        t = ranked.loc[sid] if sid in ranked.index else None
+        tier = (t["cap_tier"] if t is not None else r["stock_tier"]) if sid else None
+        rank = None if t is None else int(t["rank"])
+        value, cost = r["quantity"] * r["last_price"], r["quantity"] * r["average_price"]
+        rows.append({
+            "sid": sid, "ticker": r["tradingsymbol"], "name": r["name"] or r["tradingsymbol"], "cap_tier": tier,
+            "quantity": r["quantity"], "avg_price": r["average_price"], "last_price": r["last_price"],
+            "value": value, "weight_pct": round(value * 100 / total, 1),
+            "pnl": value - cost, "pnl_pct": (value / cost - 1) * 100 if cost else None,
+            "day_pct": _num(r["day_change_pct"]),
+            "rank": rank, "tier_size": sizes.get(tier), "in_book": sid in book_sids,
+            "score": None if t is None else int(round(t["final_score"] * 100)),
+            "view": model_view(sid in book_sids, sid is not None, rank, sizes.get(tier),
+                               _top_n(tier) if tier in config.TIERS else 0),
+        })
+    rows.sort(key=lambda x: -x["value"])
+    held = {r["sid"] for r in rows if r["sid"]}
+    cost = float((h["quantity"] * h["average_price"]).sum())
+    prev = float((h["quantity"] * h["close_price"]).sum())
+    words = [r["view"][0] for r in rows]
+    return {
+        "asof": h["as_of_date"].iloc[0], "pick_date": pick_date,
+        "snapshot_time": f"{datetime.fromisoformat(h['snapshot_at'].max()).astimezone(IST):%H:%M} IST",
+        "rows": rows, "n": len(rows), "n_stocks": len(held), "n_other": len(rows) - len(held),
+        "value": total, "cost": cost, "pnl": total - cost, "pnl_pct": (total / cost - 1) * 100 if cost else None,
+        "day": total - prev, "day_pct": (total / prev - 1) * 100 if prev else None,
+        "overlap": [r for r in rows if r["in_book"]], "n_book": len(book_sids),
+        "book_not_held": [r for r in sb["rows"] if r["sid"] not in held],
+        "n_top": sum(w in ("In model book", "In top picks", "Top fifth of tier") for w in words),
+        "n_bottom": words.count("Bottom fifth of tier"), "n_unranked": words.count("Not ranked today"),
+        "login_page": config.KITE_LOGIN_PAGE, "unproven": views.unproven_tiers(),
     }
 
 

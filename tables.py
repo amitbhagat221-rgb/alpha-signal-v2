@@ -59,6 +59,12 @@ TABLES = {
         "source": "NSE holiday-master via nselib (sources/nse_holidays, run.sh morning)",
         "description": "Exchange trading holidays per segment (FO, CM). Places the option paper book's entry days ahead of time.",
     },
+    "broker_holdings": {
+        "kind": "RAW", "domain": "Universe & Prices", "date_col": "as_of_date",
+        "source": "Zerodha Kite holdings (sources/kite_holdings, at the Kite login + cron 10:15 UTC weekdays)",
+        "depth": "From 2026-10-10",
+        "description": "Amit's actual demat holdings, one snapshot per day with a Kite login: quantity, average price, last price, unrealised P&L; sid set for universe stocks (ETFs and gold bonds have none). /book's Zerodha tab.",
+    },
     "option_live_quotes": {
         "kind": "RAW", "domain": "Universe & Prices", "date_col": "trade_date", "freq": "weekly",
         "source": "Zerodha Kite quotes + basket margin (sources/kite_quotes, cron 09:50 UTC on entry days)",

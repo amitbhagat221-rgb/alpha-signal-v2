@@ -497,6 +497,15 @@ FEEDS = {
         "canary_waiver": "one small list a day; option_book raises when it has no F&O rows",
         "pit": "published ahead for the year", "tos": "public exchange data",
     },
+    "kite_holdings": {
+        "family": "prices", "status": "probation",
+        "what": "Amit's actual Zerodha holdings, for /book's Zerodha tab beside the model book",
+        "modules": ["sources.kite_holdings"], "schedule": ["cron:kite_holdings"], "writes": ["broker_holdings"],
+        "hosts": ["kite"], "cadence": "trading_day",
+        "routes": [_r("kite_holdings", "primary", "kite", "kc.holdings() (read-only), also taken at the ops /kite/callback login")],
+        "canary_waiver": "needs Amit's daily Kite login; a day without one keeps the last snapshot, dated on the page",
+        "pit": "snapshot time", "tos": "Kite Connect subscription",
+    },
     "kite_option_quotes": {
         "family": "prices", "status": "probation",
         "what": "Live NIFTY/SENSEX option quotes + Kite margin at 15:20 IST on paper-book entry days (plan 0022)",

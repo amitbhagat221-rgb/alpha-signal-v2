@@ -2506,6 +2506,26 @@ CREATE TABLE IF NOT EXISTS option_live_quotes (
     PRIMARY KEY (trade_date, underlying, expiry, tradingsymbol)
 );
 
+-- Amit's actual Zerodha holdings (sources/kite_holdings): one row per holding per snapshot day,
+-- taken at the Kite login and after the close on days with a login. /book sets it beside the model book.
+CREATE TABLE IF NOT EXISTS broker_holdings (
+    as_of_date     TEXT NOT NULL,            -- IST date of the snapshot
+    broker         TEXT NOT NULL,            -- zerodha
+    tradingsymbol  TEXT NOT NULL,
+    exchange       TEXT,
+    isin           TEXT,
+    sid            TEXT,                     -- universe stock with that NSE ticker; NULL for ETFs / gold bonds
+    quantity       INTEGER NOT NULL,         -- settled + T1
+    t1_quantity    INTEGER,
+    average_price  REAL,                     -- Rs, Kite's average buy price
+    last_price     REAL,                     -- Rs at snapshot_at
+    close_price    REAL,                     -- Rs, previous close
+    day_change_pct REAL,
+    pnl            REAL,                     -- Rs, unrealised
+    snapshot_at    TEXT NOT NULL,
+    PRIMARY KEY (as_of_date, broker, tradingsymbol)
+);
+
 -- Option-premium paper book (plan 0022, option_book.py): one row per rule × underlying ×
 -- expiry, written on the entry day's close and settled in place at expiry. The forward
 -- record that decides whether the rule goes live.

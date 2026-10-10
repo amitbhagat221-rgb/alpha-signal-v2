@@ -161,6 +161,9 @@ case "$JOB" in
     kite_quotes)        # 09:50 UTC weekdays (15:20 IST) — live option quotes + Kite margin on paper-book
                         # entry days only (plan 0022); needs that day's Kite login, else FAILED with the link
         logged cron_kite_quotes run python -m sources.kite_quotes ;;
+    kite_holdings)      # 10:15 UTC weekdays (15:45 IST) — Amit's Zerodha holdings for /book, closing prices; a day
+                        # without a Kite login keeps the last snapshot (not a failure: the login is by hand)
+        logged cron_kite_holdings run python -m sources.kite_holdings ;;
     pt_snapshot)        # 1st of month — monthly analyst PT snapshot (episodic data, CLAUDE.md)
         logged cron_pt_snapshot run python -m sources.yfinance_analyst --snapshot ;;
     management)         # 3rd of month 06:10 UTC — management scorecards for the stock page's Management tab
@@ -199,6 +202,6 @@ case "$JOB" in
         echo "Tickertape finished rc=$RC at $(date -u)"
         exit $RC ;;
     *)
-        echo "unknown job '$JOB' (morning forward canary estimates transcripts screener_schedules llm_local org watchdog health pt_snapshot management kite_quotes backtest expected_return screener_cookie secrets_backup screener_universe tickertape)"
+        echo "unknown job '$JOB' (morning forward canary estimates transcripts screener_schedules llm_local org watchdog health pt_snapshot management kite_quotes kite_holdings backtest expected_return screener_cookie secrets_backup screener_universe tickertape)"
         exit 2 ;;
 esac

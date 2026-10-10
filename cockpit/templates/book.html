@@ -1,5 +1,5 @@
-{# /book - what do I hold (on paper), how risky is it, is it making money?
-   Data: cockpit/book.py. Tabs: pages.py (book, risk, track-record). #}
+{# /book - what do I hold (on paper and in Zerodha), how risky is it, is it making money?
+   Data: cockpit/book.py. Tabs: pages.py (book, zerodha, risk, track-record). #}
 {% extends "base.html" %}
 {% from "_components.html" import tab_bar, tier_pill, unproven_pill %}
 {% block title %}{{ page_title("Book") }}{% endblock %}
@@ -40,6 +40,8 @@
 .bk-ts svg { width: 100%; height: 80px; }
 .bk-ts .up { fill: var(--green); opacity: 0.75; } .bk-ts .down { fill: var(--red); opacity: 0.75; }
 .bk-ts line { stroke: var(--border-accent); stroke-width: 0.5; }
+.bk-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.bk-chips a { font-size: 12px; padding: 2px 8px; border: 1px solid var(--border); border-radius: 10px; color: var(--text-primary); text-decoration: none; }
 @media (max-width: 768px) { .bk-hide-sm { display: none; } .bk-only-sm { display: block !important; margin-top: 3px; line-height: 2; } .bk-tbl { min-width: 0; } .bk-tbl th, .bk-tbl td { padding: 6px 3px; } .bk-tbl th { font-size: 10px; letter-spacing: 0; } .bk-only-sm .pill { padding: 1px 5px; font-size: 10px; } .bk-decile { grid-template-columns: repeat(5, minmax(0, 1fr)); } .bk-row .name { width: 110px; } }
 </style>
 
@@ -47,7 +49,7 @@
 {% set verdict_word = {'beat': 'Beat', 'lagged': 'Lagged', 'mixed': 'Mixed', 'early': 'Too early', 'none': 'No data'} %}
 
 <h1 class="section-title">Book</h1>
-<p class="section-desc">What you hold on paper, how risky it is, and whether the picks are making money. Nothing here is deployed.</p>
+<p class="section-desc">What the model holds on paper, what your Zerodha account really holds, how risky the paper book is, and whether the picks are making money.</p>
 
 <div x-data="{ tab: '{{ tabs[0][0] }}', loaded: { '{{ tabs[0][0] }}': true } }" x-cloak>
 {{ tab_bar(tabs) }}
@@ -111,6 +113,69 @@
 <p class="bk-sub" style="margin-top: 8px;">Weights as of {{ book.asof|short_date }}; score, rank and status as of {{ book.pick_date|short_date }}. Rank is within the tier. Upside is to the median target = the middle of the analysts' 12-month targets. Today's picks: <a href="/" style="color: var(--accent);">Today</a>.</p>
 {% else %}
 <div class="card"><p class="u-muted">No sized book yet. It is built each morning after the daily picks; check back after the next run.</p></div>
+{% endif %}
+</div>
+
+{# ────────────── ZERODHA (the real account) ────────────── #}
+<div x-show="tab === 'zerodha'" x-cloak>
+{% if zerodha %}{% set z = zerodha %}
+<div class="card" style="margin-bottom: 16px; border-left: 4px solid var(--accent);">
+    <div class="bk-line">
+        <div><div class="bk-lbl">Value</div><div class="bk-big mono">{{ z.value|inr }}</div></div>
+        <div><div class="bk-lbl">Invested</div><div class="bk-big mono">{{ z.cost|inr }}</div></div>
+        <div><div class="bk-lbl">Unrealised gain</div><div class="bk-big mono {{ z.pnl|tone }}">{{ z.pnl|inr }} <span style="font-size: 14px;">{{ z.pnl_pct|pct(1, signed=True) }}</span></div></div>
+        <div><div class="bk-lbl">Last day</div><div class="bk-big mono {{ z.day|tone }}">{{ z.day|inr }} <span style="font-size: 14px;">{{ z.day_pct|pct(2, signed=True) }}</span></div></div>
+    </div>
+    <p class="bk-note"><b>{{ z.n }} holdings</b>: {{ z.n_stocks }} stocks the model ranks, {{ z.n_other }} ETFs or bonds it does not.
+        Of the stocks, {{ z.n_top }} are in the top fifth of their tier today, {{ z.n_bottom }} in the bottom fifth{% if z.n_unranked %}, {{ z.n_unranked }} not ranked today{% endif %}.</p>
+    <p class="bk-note">Snapshot from Kite at {{ z.snapshot_time }} on {{ z.asof|long_date }}; model ranks as of {{ z.pick_date|short_date }}.
+        It refreshes when you <a href="{{ z.login_page }}" style="color: var(--accent);">log in to Kite</a> and after the close on days you have logged in. Read-only: nothing here places an order.</p>
+</div>
+
+<div class="card" style="margin-bottom: 16px;">
+    <div class="bk-lbl">Overlap with the model book ({{ z.n_book }} names)</div>
+    <p style="margin: 6px 0 0; font-size: 14px; line-height: 1.5;">{% if z.overlap %}You hold {{ z.overlap|length }} of them:
+        {% for r in z.overlap %}<a href="/stocks/{{ r.sid }}" style="color: var(--text-primary); font-weight: 600;">{{ r.ticker }}</a>{% if not loop.last %}, {% endif %}{% endfor %}.{% else %}You hold none of them.{% endif %}</p>
+    {% if z.book_not_held %}
+    <div class="bk-sub" style="margin-top: 8px;">In the model book, not in your account:</div>
+    <div class="bk-chips">{% for r in z.book_not_held %}<a href="/stocks/{{ r.sid }}">{{ r.ticker or r.sid }}</a>{% endfor %}</div>
+    {% endif %}
+</div>
+
+<div class="card" style="padding: 0; overflow: hidden;">
+    <div class="table-wrap">
+    <table class="bk-tbl">
+        <thead><tr>
+            <th>Holding</th><th class="bk-hide-sm">Tier</th>
+            <th class="num">Value</th>
+            <th class="num bk-hide-sm">Weight %</th>
+            <th class="num">Gain %</th>
+            <th class="num bk-hide-sm">Last day %</th>
+            <th class="num">Rank</th>
+            <th class="bk-hide-sm">Model's view</th>
+        </tr></thead>
+        <tbody>
+        {% for r in z.rows %}
+        <tr>
+            <td>{% if r.sid %}<a href="/stocks/{{ r.sid }}">{{ r.ticker }}</a>{% else %}<b>{{ r.ticker }}</b>{% endif %}
+                <div class="bk-sub bk-hide-sm">{{ r.quantity|count }} at {{ r.avg_price|inr(2) }}, now {{ r.last_price|inr(2) }}</div>
+                <div class="bk-only-sm" style="display: none;"><span class="pill pill-{{ r.view[1] }}">{{ r.view[0] }}</span></div></td>
+            <td class="bk-hide-sm">{% if r.cap_tier %}{{ tier_pill(r.cap_tier, true) }}{% else %}<span class="u-muted">—</span>{% endif %}</td>
+            <td class="num mono">{{ r.value|inr }}</td>
+            <td class="num bk-hide-sm">{{ r.weight_pct|pct(1) }}</td>
+            <td class="num {{ r.pnl_pct|tone }}">{{ r.pnl_pct|pct(1, signed=True) }}<div class="bk-sub">{{ r.pnl|inr }}</div></td>
+            <td class="num bk-hide-sm {{ r.day_pct|tone }}">{{ r.day_pct|pct(2, signed=True) }}</td>
+            <td class="num">{{ ('#' ~ r.rank|count) if r.rank is not none else '—' }}{% if r.rank is not none %}<div class="bk-sub">of {{ r.tier_size|count }}</div>{% endif %}</td>
+            <td class="bk-hide-sm"><span class="pill pill-{{ r.view[1] }}">{{ r.view[0] }}</span>{% if r.score is not none %}<div class="bk-sub">score {{ r.score }}/100</div>{% endif %}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+</div>
+<p class="bk-sub" style="margin-top: 8px;">Value and gain at Kite's last price (unrealised, before tax and charges). Weight is the share of the account's value. Rank is within the tier, from the model's daily ranking; the top and bottom fifth are the first and last 20% of the tier. ETFs and gold bonds are outside the model's universe.</p>
+{% else %}
+<div class="card"><p class="u-muted">No Zerodha snapshot yet. It is taken when you log in to Kite.</p></div>
 {% endif %}
 </div>
 

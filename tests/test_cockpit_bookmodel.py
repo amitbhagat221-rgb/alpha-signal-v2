@@ -92,3 +92,25 @@ def test_library_covers_the_registry_wired_first_notes_from_registry():
     assert states[: len(factors.wired_signal_ids())] == ["WIRED"] * len(factors.wired_signal_ids())
     assert all("NOT wired" not in r["note"] for r in rows)
     assert all("Weights:" in r["note"] for r in rows if r["state"] == "WIRED")
+
+
+def test_zerodha_model_view_words():
+    """A real holding's status: in the model book, top picks, top / middle / bottom fifth, unranked, not in the universe."""
+    assert book.model_view(True, True, 30, 140, 5) == ("In model book", "green")
+    assert book.model_view(False, False, None, None, 0)[0] == "ETF or bond, not ranked"
+    assert book.model_view(False, True, None, 140, 5) == ("Not ranked today", "amber")
+    assert book.model_view(False, True, 5, 140, 5)[0] == "In top picks"
+    assert book.model_view(False, True, 28, 140, 5)[0] == "Top fifth of tier"
+    assert book.model_view(False, True, 70, 140, 5)[0] == "Middle of tier"
+    assert book.model_view(False, True, 113, 140, 5) == ("Bottom fifth of tier", "red")
+
+
+def test_kite_holdings_rows_map_tickers_and_add_t1():
+    from sources import kite_holdings
+    h = [{"tradingsymbol": "RADICO", "exchange": "BSE", "isin": "INE944F01028", "quantity": 40, "t1_quantity": 10,
+          "average_price": 2226.25, "last_price": 4562.4, "close_price": 4430.0, "day_change_percentage": 2.99, "pnl": 1.0},
+         {"tradingsymbol": "GOLDBEES", "quantity": 588, "average_price": 50.5, "last_price": 122.75},
+         {"tradingsymbol": "SOLD", "quantity": 0, "t1_quantity": 0}]
+    df = kite_holdings.rows_from_holdings(h, {"RADICO": "RADC"}, "2026-10-10", "2026-10-10T10:15:00+00:00")
+    assert df["tradingsymbol"].tolist() == ["RADICO", "GOLDBEES"]
+    assert df["quantity"].tolist() == [50, 588] and df["sid"].tolist()[0] == "RADC" and df["sid"].isna().tolist()[1]
