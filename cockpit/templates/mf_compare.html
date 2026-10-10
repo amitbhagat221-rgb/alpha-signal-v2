@@ -103,10 +103,10 @@
             ('Std dev 3Y (annualised)', 'std_3y', '{:.1f}%', False),
             ('Max drawdown', 'max_drawdown', '{:.1f}%', True),
             ('Recovery (days)', 'recovery_days', '{:,.0f}', False),
-            ('vs large-cap proxy, 1Y (pts)', 'bench_spread_1y', '{:+.1f}%', True),
-            ('vs large-cap proxy, 3Y (pts)', 'bench_spread_3y', '{:+.1f}%', True),
+            ('vs Nifty 50, 1Y (pts)', 'bench_spread_1y', '{:+.1f}%', True),
+            ('vs Nifty 50, 3Y (pts)', 'bench_spread_3y', '{:+.1f}%', True),
         ] %}
-        {% set any_debt = bundle.schemes|selectattr('info.is_debt')|list|length > 0 %}
+        {% set any_debt = bundle.schemes|rejectattr('info.has_bench')|list|length > 0 %}
         {% for label, key, fmt, higher_better in rows if not (any_debt and key.startswith('bench_')) %}
         {% set values = bundle.schemes|map(attribute='metrics.' ~ key)|list %}
         {% set numeric_vals = values|select('number')|list %}

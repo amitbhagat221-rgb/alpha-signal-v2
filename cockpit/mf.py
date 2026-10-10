@@ -67,9 +67,16 @@ def _mf_universe_pool():
 
 def is_debt_category(category: str | None) -> bool:
     """True for every debt-type category spelling ('Debt / Liquid',
-    'Income/Debt Oriented Schemes - ...'): the equity large-cap proxy is not a
+    'Income/Debt Oriented Schemes - ...'): the equity benchmark is not a
     benchmark for these."""
     return "debt" in (category or "").lower()
+
+
+def has_equity_benchmark(category: str | None) -> bool:
+    """True only for equity categories (see signals.mf_metrics.has_equity_benchmark): debt,
+    hybrid, arbitrage, gold, overseas and fund-of-funds schemes get no Nifty 50 spread."""
+    from signals.mf_metrics import has_equity_benchmark as _h
+    return _h(category)
 
 
 def mf_category_rank(scheme_code: str) -> tuple[int, int] | None:
@@ -234,6 +241,13 @@ def get_mf_detail(scheme_code: str) -> dict | None:
     calendar_list = calendar.replace({float("nan"): None}).to_dict("records")
 
     info_dict["is_debt"] = is_debt_category(info_dict.get("category_norm"))
+    info_dict["has_bench"] = has_equity_benchmark(info_dict.get("category_norm"))
+    if not info_dict["has_bench"]:      # rows computed before the guard existed carry a spread
+        for k in ("bench_spread_1y", "bench_spread_3y"):
+            if metrics_dict:
+                metrics_dict[k] = None
+        for c in calendar_list:
+            c["bench_ret_pct"] = None
     return {
         "info":     info_dict,
         "metrics":  metrics_dict,
@@ -374,6 +388,10 @@ def get_mf_compare(scheme_codes: list[str]) -> dict:
         i = info_by_code[code].replace({float("nan"): None}).to_dict()
         m = metrics_by_code.get(code)
         m = m.replace({float("nan"): None}).to_dict() if m is not None else {}
+        i["is_debt"] = is_debt_category(i.get("category_norm"))
+        i["has_bench"] = has_equity_benchmark(i.get("category_norm"))
+        if not i["has_bench"]:
+            m["bench_spread_1y"] = m["bench_spread_3y"] = None
         schemes.append({"info": i, "metrics": m, "cat_rank": mf_category_rank(code)})
 
     cats = sorted({s["info"].get("category_norm") for s in schemes if s["info"].get("category_norm")})

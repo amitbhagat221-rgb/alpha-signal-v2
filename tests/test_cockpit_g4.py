@@ -53,3 +53,13 @@ def test_news_source_names_cover_feed_ids():
     assert api.news_source_name("livemint_markets") == "Mint Markets"
     assert api.news_source_name("gnews_trade") == "Google News: Trade"
     assert api.news_source_name("unknown_feed") == "unknown_feed"
+
+
+def test_equity_benchmark_only_for_equity_categories():
+    for cat in ("Equity / Large Cap", "Equity Schemes - Flexi Cap Fund", "Index Funds - Equity Funds",
+                "Equity Schemes - ELSS- Tax Saver Fund"):
+        assert mf.has_equity_benchmark(cat), cat
+    for cat in ("Income/Debt Oriented Schemes - Banking and PSU Debt Fund", "Debt / Liquid",
+                "Hybrid Schemes - Aggressive Hybrid Fund", "Hybrid / Arbitrage", "FoF / Overseas",
+                "Exchange Traded Funds (ETFs) - Gold ETF", "Index Funds - Debt Funds", None):
+        assert not mf.has_equity_benchmark(cat), cat

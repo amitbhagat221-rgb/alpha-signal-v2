@@ -3,7 +3,7 @@ Alpha Signal v2 — Pick Outcomes Computation
 
 For every (sid, pick_date) in `daily_picks`, compute the realized close-to-
 close return over fixed forward windows (default 20/63/126 TRADING days ≈
-1mo / 3mo / 6mo) using `stock_prices.close`, plus the matching benchmark:
+1mo / 3mo / 6mo) using split/bonus/dividend-ADJUSTED closes (`pit.forward_returns`, the one label), plus the matching benchmark:
 
   cap_tier  → benchmark
   LARGE     → NIFTY 50
@@ -114,6 +114,95 @@ def _exit_trading(series_map, sid, entry_pos, window):
     return s.index[tgt], float(s.iloc[tgt])
 
 
+def trading_dates(prices):
+    """The market calendar: every date on which any stock traded."""
+    return pd.DatetimeIndex(sorted(pd.to_datetime(prices["date"].unique())))
+
+
+def _bench_at(bench_series, name, day):
+    """Index close on `day` (None if the index has no row that day)."""
+    s = bench_series.get(name)
+    if s is None or day not in s.index:
+        return None
+    return float(s.loc[day])
+
+
+def score_picks(picks, prices, adjustments, bench_series, windows, include_bench=True):
+    """Outcome rows for `picks` (sid, pick_date, cap_tier, rank, final_score).
+
+    Returns are `pit.forward_returns` (the one label: split/bonus/dividend-adjusted
+    closes, anchor-proximity guards). Picks are made before the open on pick_date from
+    the prior close, so eval_date = the last session BEFORE pick_date and the label's
+    entry (first session after eval_date) is the pick_date close. Pick dates that are not
+    a trading day (weekend/holiday screener runs copy the prior session) are dropped: one
+    pick date per trading day. The benchmark is the index close on the same entry and exit
+    sessions (the market calendar the label uses).
+    """
+    import pit
+    cal = trading_dates(prices)
+    picks = picks.copy()
+    picks["pick_date"] = pd.to_datetime(picks["pick_date"])
+    picks = picks[picks["pick_date"].isin(cal)]
+    if adjustments is not None and not adjustments.empty:
+        adj = pit._fully_adjusted(prices, adjustments)
+    else:
+        adj = prices.assign(adj_close=prices["close"])
+    adj = adj.assign(date=pd.to_datetime(adj["date"]))
+    adj_close = adj.pivot_table(index="date", columns="sid", values="adj_close", aggfunc="last")
+    horizons = tuple(int(w) for w in windows)
+    rows = []
+    for pdt, grp in picks.groupby("pick_date"):
+        i = int(cal.get_loc(pdt))
+        if i == 0:
+            continue
+        labels = pit.forward_returns(cal[i - 1].date(), prices, adjustments, horizons).set_index("sid")
+        for w in horizons:
+            col = f"fwd_return_{w}d"
+            if col not in labels or i + w >= len(cal):
+                continue
+            entry_dt, exit_dt = cal[i], cal[i + w]
+            for r in grp.itertuples():
+                ret = labels[col].get(r.sid)
+                if ret is None or pd.isna(ret):
+                    continue
+                fwd = 100.0 * float(ret)
+                bname = TIER_BENCHMARKS.get(r.cap_tier)
+                bret = None
+                if include_bench and bname:
+                    b0, b1 = _bench_at(bench_series, bname, entry_dt), _bench_at(bench_series, bname, exit_dt)
+                    if b0 and b1:
+                        bret = 100.0 * (b1 / b0 - 1.0)
+                p0 = adj_close.at[entry_dt, r.sid] if r.sid in adj_close.columns else None
+                p1 = adj_close.at[exit_dt, r.sid] if r.sid in adj_close.columns else None
+                rows.append({
+                    "sid": r.sid, "pick_date": pdt.strftime("%Y-%m-%d"), "window_days": w,
+                    "cap_tier": r.cap_tier,
+                    "rank_at_pick": int(r.rank) if pd.notna(r.rank) else None,
+                    "final_score": float(r.final_score) if pd.notna(r.final_score) else None,
+                    "entry_price": round(float(p0), 4) if p0 is not None and pd.notna(p0) else None,
+                    "exit_date": exit_dt.strftime("%Y-%m-%d"),
+                    "exit_price": round(float(p1), 4) if p1 is not None and pd.notna(p1) else None,
+                    "fwd_return_pct": round(fwd, 4),
+                    "bench_index": bname,
+                    "bench_return_pct": round(bret, 4) if bret is not None else None,
+                    "excess_return_pct": round(fwd - bret, 4) if bret is not None else None,
+                    "computed_at": datetime.now().isoformat(timespec="seconds"),
+                })
+    return pd.DataFrame(rows)
+
+
+def _drop_superseded_rows(started, since):
+    """Rows this run did not rewrite are old-basis rows (weekend/holiday pick dates, or
+    pairs the adjusted label now rejects): upsert never deletes, so remove them. Scoped to
+    the picks this run covered (`since`)."""
+    from db import get_db
+    with get_db() as conn:
+        cur = conn.execute("DELETE FROM pick_outcomes WHERE computed_at < ?"
+                           + (" AND pick_date >= ?" if since else ""),
+                           (started, since) if since else (started,))
+        return cur.rowcount
+
+
 def compute(windows=DEFAULT_WINDOWS, since=None, include_bench=True):
     where = "WHERE pick_date >= ?" if since else ""
     params = [since] if since else []
@@ -124,80 +213,34 @@ def compute(windows=DEFAULT_WINDOWS, since=None, include_bench=True):
         params=params,
     )
     if picks.empty:
-        print("⚠ no picks to score")
+        print("no picks to score")
         return 0
-    picks["pick_date"] = pd.to_datetime(picks["pick_date"])
 
-    price_panel = _load_price_panel()
-    if price_panel.empty:
+    started = datetime.now().isoformat(timespec="seconds")
+    import pit
+    raw = pit.load_raw({"prices", "adjustments"})
+    prices = raw["prices"][["sid", "date", "close"]]
+    if prices.empty:
         raise RuntimeError("stock_prices empty — cannot compute outcomes")
-    price_series = _build_series(price_panel)
 
     bench_panel = _load_bench_panel() if include_bench else pd.DataFrame()
     bench_series = _build_series(bench_panel) if not bench_panel.empty else {}
     bench_max = bench_panel.index.max() if not bench_panel.empty else None
     if bench_max is not None and bench_max.date() < datetime.now().date():
         stale_d = (datetime.now().date() - bench_max.date()).days
-        print(f"⚠ NIFTY benchmark latest = {bench_max.date()} ({stale_d}d stale) — "
+        print(f"NIFTY benchmark latest = {bench_max.date()} ({stale_d}d stale) — "
               f"recent picks will have NULL bench_return_pct until it matures")
 
-    out_rows = []
-
-    for window in windows:
-        scored = 0
-        for _, row in picks.iterrows():
-            sid = row["sid"]
-            entry_dt = row["pick_date"]
-            tier = row["cap_tier"]
-
-            entry = _entry(price_series, sid, entry_dt)
-            if entry is None:
-                continue
-            entry_pos, entry_used_dt, entry_close = entry
-            ex = _exit_trading(price_series, sid, entry_pos, window)
-            if ex is None:  # window not yet matured for this pick
-                continue
-            exit_dt, exit_close = ex
-
-            fwd_ret = 100.0 * (exit_close / entry_close - 1.0)
-
-            bench_ret = None
-            bench_name = TIER_BENCHMARKS.get(tier)
-            if include_bench and bench_name and bench_name in bench_series:
-                b_entry = _entry(bench_series, bench_name, entry_dt)
-                if b_entry is not None:
-                    b_ex = _exit_trading(bench_series, bench_name, b_entry[0], window)
-                    if b_ex is not None:
-                        bench_ret = 100.0 * (b_ex[1] / b_entry[2] - 1.0)
-            scored += 1
-
-            out_rows.append({
-                "sid": sid,
-                "pick_date": entry_dt.strftime("%Y-%m-%d"),
-                "window_days": int(window),
-                "cap_tier": tier,
-                "rank_at_pick": int(row["rank"]) if pd.notna(row["rank"]) else None,
-                "final_score": float(row["final_score"]) if pd.notna(row["final_score"]) else None,
-                "entry_price": round(entry_close, 4),
-                "exit_date": exit_dt.strftime("%Y-%m-%d"),
-                "exit_price": round(exit_close, 4),
-                "fwd_return_pct": round(fwd_ret, 4),
-                "bench_index": bench_name,
-                "bench_return_pct": round(bench_ret, 4) if bench_ret is not None else None,
-                "excess_return_pct": round(fwd_ret - bench_ret, 4) if bench_ret is not None else None,
-                "computed_at": datetime.now().isoformat(timespec="seconds"),
-            })
-
-        print(f"  window {window:>3}d: scored {scored:,} matured picks "
-              f"(of {len(picks):,} total)")
-
-    if not out_rows:
-        print("⚠ no outcomes computed (no mature picks?)")
-        return 0
-
-    out = pd.DataFrame(out_rows)
+    out = score_picks(picks, prices, raw["adjustments"], bench_series, windows, include_bench)
+    if out.empty:
+        raise RuntimeError("no pick outcomes computed (no mature trading-day picks?) — "
+                           "a producer that writes zero rows must raise")
+    print(f"  scored {len(out):,} outcomes over {out['pick_date'].nunique()} trading pick dates "
+          f"({picks['pick_date'].nunique()} pick dates in daily_picks)")
     n = upsert_df(out, "pick_outcomes")
-    print(f"✓ wrote/updated {n:,} pick_outcomes rows")
+    dropped = _drop_superseded_rows(started, since)
+    print(f"wrote/updated {n:,} pick_outcomes rows; removed {dropped:,} superseded rows "
+          f"(non-trading pick dates, pairs the adjusted label rejects)")
     return n
 
 
