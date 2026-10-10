@@ -503,6 +503,7 @@ body {
     color: var(--text-primary);
 }
 
+.tab-link { text-decoration: none; }
 .tab-button.active {
     color: var(--accent);
     border-bottom-color: var(--accent);

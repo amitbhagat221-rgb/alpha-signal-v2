@@ -36,7 +36,7 @@ def test_every_rail_entry_renders(clients):
 
 
 def test_site_map_order():
-    assert [p["title"] for p in main_pages.PAGES] == ["Today", "Stocks", "Markets", "Ideas", "Book", "Model", "Funds"]
+    assert [p["title"] for p in main_pages.PAGES] == ["Today", "Explorer", "Stocks", "Markets", "Sectors", "Investor Playbooks", "Book", "Model", "Funds"]
     assert [p["title"] for p in ops_pages.PAGES] == ["Health", "Feeds", "Flow", "Boardroom", "Options", "SQL"]
     for pages in (main_pages.PAGES, ops_pages.PAGES):                 # the bar holds at most 4 tabs
         assert sorted(p["mobile"] for p in pages if p.get("mobile")) == [1, 2, 3, 4]
@@ -44,10 +44,9 @@ def test_site_map_order():
 
 def test_retired_urls_redirect_to_a_page_that_renders(clients):
     main, ops = clients
-    expect = {"/actions": "/", "/explorer": "/stocks", "/explorer/REDY": "/stocks/REDY",
-              "/news": "/markets", "/news/all": "/markets#search", "/sectors": "/markets#industries",
-              "/sectors?industry=Banks": "/markets?industry=Banks#industries", "/multibagger": "/ideas",
-              "/playbooks": "/ideas", "/portfolio": "/book", "/model/outcomes": "/book#track-record"}
+    expect = {"/actions": "/", "/explorer/REDY": "/stocks/REDY",
+              "/news": "/markets", "/news/all": "/markets#search", "/multibagger": "/playbooks#strict",
+              "/ideas": "/playbooks", "/portfolio": "/book", "/model/outcomes": "/book#track-record"}
     for old, new in expect.items():
         r = main.get(old, follow_redirects=False)
         assert r.status_code in (301, 302) and r.headers["location"] == new, old
@@ -82,9 +81,10 @@ def test_compare_links(clients, monkeypatch):
     monkeypatch.setenv("COCKPIT_COMPARE_OPS_URL", "https://live-ops")
     assert preview.compare_links("main", "/book")["url"] == "http://live-main:3000/portfolio"
     assert preview.compare_links("main", "/stocks/REDY")["url"] == "http://live-main:3000/explorer/REDY"
-    m = preview.compare_links("main", "/markets", "industry=Banks")
-    assert m["url"] == "http://live-main:3000/news?industry=Banks"
-    assert m["tabs"]["#industries"] == "http://live-main:3000/sectors?industry=Banks"
+    assert preview.compare_links("main", "/markets")["tabs"]["#search"] == "http://live-main:3000/news/all"
+    for same in ("/explorer", "/sectors", "/playbooks"):                    # restored pages: identity
+        assert preview.compare_links("main", same)["url"] == f"http://live-main:3000{same}"
+    assert preview.compare_links("main", "/playbooks")["tabs"]["#strict"] == "http://live-main:3000/multibagger"
     assert preview.compare_links("main", "/")["url"] == "http://live-main:3000/"
     assert preview.compare_links("main", "/mutual-funds/123")["url"] == "http://live-main:3000/mutual-funds/123"
     assert preview.compare_links("ops", "/flow")["tabs"]["#pipeline-log"] == "https://live-ops/system#pipeline"
@@ -122,3 +122,23 @@ def test_prewarm_can_be_skipped(monkeypatch):
     _shared.prewarm([("x", lambda: called.append(1))])
     import time; time.sleep(0.2)
     assert not called
+
+
+def test_restored_pages_render_with_their_tabs(clients):
+    main, _ = clients
+    for path, tabs in (("/sectors", ["Today", "Industry Detail", "Rotation"]), ("/explorer", [])):
+        t = main.get(path).text
+        assert all(f">{x}</button>" in t for x in tabs), path
+    assert main.get("/sectors?industry=Banks").status_code == 200
+    assert "/stocks/" in main.get("/explorer").text and "/explorer/" not in main.get("/explorer").text.replace('href="/explorer"', "")
+    assert 'href="/sectors"' in main.get("/markets").text and ">Industries" in main.get("/markets").text
+    pb = main.get("/playbooks").text
+    assert [k for k, _ in main_pages.PLAYBOOK_TABS][0] == "avoid" and pb.count('class="tab-button"') == len(main_pages.PLAYBOOK_TABS)
+    for key, _label in main_pages.PLAYBOOK_TABS[1:]:
+        assert main.get(f"/partial/playbooks/{key}").status_code == 200, key
+    assert main.get("/partial/playbooks/nope").status_code == 404
+
+
+def test_playbook_tabs_match_producers():
+    from cockpit import playbooks
+    assert [k for k, _ in main_pages.PLAYBOOK_TABS] == list(playbooks.TABS)

@@ -320,7 +320,7 @@ table.mini a.link { color:var(--accent); }
                 <tr>
                     <td>{{ h.holding_rank }}</td>
                     <td>
-                        {% if h.sid %}<a class="link" href="/explorer/{{ h.sid }}">{{ h.instrument_name[:60] }}</a>{% else %}{{ h.instrument_name[:60] }}{% endif %}
+                        {% if h.sid %}<a class="link" href="/stocks/{{ h.sid }}">{{ h.instrument_name[:60] }}</a>{% else %}{{ h.instrument_name[:60] }}{% endif %}
                         {% if h.isin %}<div class="mf-stat-sub">{{ h.isin }}</div>{% endif %}
                     </td>
                     <td>{{ h.sector or '—' }}</td>

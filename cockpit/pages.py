@@ -14,18 +14,32 @@ template and one entry here.
                   A tab is deep-linked as /path#key.
 """
 
+# The Investor Playbooks tabs, in order (the first is rendered with the page, the rest are fetched
+# on first open; cockpit/playbooks.py TABS maps each key to its data).
+PLAYBOOK_TABS = [
+    ("avoid", "Avoid list"), ("insiders", "Insider buying"), ("compounders", "Compounders"),
+    ("strict", "Strict compounders"), ("investors", "Superinvestors"), ("breakouts", "Breakouts"),
+    ("deep", "Deep value"), ("categories", "Categories"), ("saydo", "Say vs do"),
+    ("cycle", "Market cycle"), ("portfolios", "Portfolios"), ("roadmap", "All approaches"),
+]
+
 PAGES = [
     {"path": "/", "id": "today", "title": "Today", "subtitle": "Read and act on today",
      "icon": "sun", "section": "Daily", "mobile": 1, "short": "Today",
      "also": ["brief", "actions"]},
+    {"path": "/explorer", "id": "explorer", "title": "Explorer", "subtitle": "Every stock on one heat map",
+     "icon": "bar-chart", "section": "Daily", "short": "Explorer"},
     {"path": "/stocks", "id": "stocks", "title": "Stocks", "subtitle": "Screen and open any stock",
-     "icon": "search", "section": "Daily", "mobile": 2, "short": "Stocks", "also": ["explorer"]},
-    {"path": "/markets", "id": "markets", "title": "Markets", "subtitle": "News, themes, industries",
-     "icon": "activity", "section": "Daily", "mobile": 3, "short": "Markets", "also": ["news", "sectors"],
-     "tabs": [("today", "Today"), ("themes", "Themes"), ("industries", "Industries"), ("search", "Search")]},
-    {"path": "/ideas", "id": "ideas", "title": "Ideas", "subtitle": "Screens and avoid list",
-     "icon": "compass", "section": "Analysis", "short": "Ideas", "also": ["playbooks", "multibagger"],
-     "tabs": [("screens", "Screens"), ("avoid", "Avoid"), ("track-record", "Track record")]},
+     "icon": "search", "section": "Daily", "mobile": 2, "short": "Stocks"},
+    {"path": "/markets", "id": "markets", "title": "Markets", "subtitle": "News and themes",
+     "icon": "activity", "section": "Daily", "mobile": 3, "short": "Markets", "also": ["news"],
+     "tabs": [("today", "Today"), ("themes", "Themes"), ("search", "Search")]},
+    {"path": "/sectors", "id": "sectors", "title": "Sectors", "subtitle": "Sector call, industries, rotation",
+     "icon": "layers", "section": "Daily", "short": "Sectors",
+     "tabs": [("heatmap", "Today"), ("per-sector", "Industry Detail"), ("rotation", "Rotation")]},
+    {"path": "/playbooks", "id": "playbooks", "title": "Investor Playbooks", "subtitle": "Screens in the style of known investors",
+     "icon": "compass", "section": "Analysis", "short": "Playbooks", "also": ["multibagger"],
+     "tabs": PLAYBOOK_TABS},
     {"path": "/book", "id": "book", "title": "Book", "subtitle": "Holdings, risk, results",
      "icon": "briefcase", "section": "Analysis", "mobile": 4, "short": "Book", "also": ["portfolio", "model-outcomes"],
      "tabs": [("book", "The book"), ("risk", "Risk"), ("track-record", "Track record")]},
@@ -41,14 +55,12 @@ PAGES = [
 # is carried over. A `#tab` in the target opens that tab on the new page.
 REDIRECTS = [
     ("/actions", "/"),
-    ("/explorer", "/stocks"),
     ("/explorer/{sid}", "/stocks/{sid}"),
     ("/news", "/markets"),
     ("/news/theme/{theme_id}", "/markets/theme/{theme_id}"),
     ("/news/all", "/markets#search"),
-    ("/sectors", "/markets#industries"),       # ?industry=X / ?sector=X ride along
-    ("/multibagger", "/ideas"),
-    ("/playbooks", "/ideas"),
+    ("/multibagger", "/playbooks#strict"),
+    ("/ideas", "/playbooks"),
     ("/portfolio", "/book"),
     ("/model/outcomes", "/book#track-record"),
 ]

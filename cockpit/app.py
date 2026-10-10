@@ -100,15 +100,7 @@ templates.env.filters["sentences"] = _sentences
 
 # ── Page Routes ──
 # Cockpit v2 site map: cockpit/pages.py (PAGES = the rail, REDIRECTS = the retired URLs).
-# Today, Stocks, Markets, Ideas and Book are placeholders until their page group fills them:
-# replace the body of the route with the real context and render the group's own template
-# (see coming.html for the tab layout and pages.py `tabs` for the tab keys).
-
-def _coming(request: Request, page_id: str):
-    """Placeholder page for a v2 destination that is still being built."""
-    entry = next(p for p in pages.PAGES if p["id"] == page_id)
-    return templates.TemplateResponse(request, "coming.html", {"page": page_id, "entry": entry})
-
+# Each page: a route here, its template, one entry in pages.py (`tabs` lists the page's tab keys).
 
 @app.get("/", response_class=HTMLResponse)
 def today_page(request: Request):
@@ -123,10 +115,29 @@ def stocks_page(request: Request):
 
 
 @app.get("/markets", response_class=HTMLResponse)
-def markets_page(request: Request, sector: str = "", industry: str = ""):
-    """Markets: Today (the editor's 3 stories + one sector call), Themes, Industries (the
-    industry library + the reference table), Search (a partial, below). ?industry= and
-    ?sector= open that group's detail on the Industries tab."""
+def markets_page(request: Request):
+    """Markets: Today (the editor's 3 stories + one sector call), Themes, Search (a partial,
+    below). The industries live on Sectors."""
+    return templates.TemplateResponse(request, "markets.html", {
+        "page": "markets", "entry": next(p for p in pages.PAGES if p["id"] == "markets"),
+        "today": dt.date.today().isoformat(), "start_tab": "today",
+        "call": api.get_sector_call(), **api.get_news_front(),
+        "sources": [n for n, _ in api.search_news(page_size=1)["sources"]],
+    })
+
+
+@app.get("/explorer", response_class=HTMLResponse)
+def explorer(request: Request):
+    """The heat map: every ranked stock as a tile, coloured by its within-tier score."""
+    return templates.TemplateResponse(request, "explorer.html", {
+        "page": "explorer", "tiers": api.get_heatmap_data(), "pick_date": api.latest_pick_date(),
+    })
+
+
+@app.get("/sectors", response_class=HTMLResponse)
+def sectors(request: Request, sector: str = "", industry: str = ""):
+    """Sectors: Today (the model's call per sector, the news view beside it), Industry Detail,
+    Rotation (all industries). ?industry=X / ?sector=X open that group's detail."""
     industry_list = api.get_group_list("industry")
     sector_list = api.get_group_list("sector")
     detail = None
@@ -134,14 +145,12 @@ def markets_page(request: Request, sector: str = "", industry: str = ""):
         detail = _group_detail("industry", industry)
     elif sector and sector in sector_list:
         detail = _group_detail("sector", sector)
-    today = dt.date.today().isoformat()
-    return templates.TemplateResponse(request, "markets.html", {
-        "page": "markets", "entry": next(p for p in pages.PAGES if p["id"] == "markets"),
-        "today": today, "start_tab": "industries" if detail else "today",
-        "call": api.get_sector_call(), **api.get_news_front(),
-        "industries": api.get_industry_rotation(), "industry_list": industry_list,
-        "detail": detail, "pick_date": api.latest_pick_date(),
-        "sources": [n for n, _ in api.search_news(page_size=1)["sources"]],
+    return templates.TemplateResponse(request, "sectors.html", {
+        "page": "sectors", "entry": next(p for p in pages.PAGES if p["id"] == "sectors"),
+        "front": api.get_sector_front(), "industries": api.get_industry_rotation(),
+        "industry_list": industry_list, "sector_list": sector_list,
+        "selected_industry": industry, "selected_sector": sector, "detail": detail,
+        "pick_date": api.latest_pick_date(),
     })
 
 
@@ -153,38 +162,29 @@ def partial_news_search(request: Request, q: str = "", theme: str = "", source: 
         "s": api.search_news(q=q.strip(), theme=theme, source=source, hours=hours, page=page)})
 
 
-@app.get("/ideas", response_class=HTMLResponse)
-def ideas_page(request: Request, strict: int = 0):
-    """Ideas: Screens (one table per chip, first chip rendered here) · Avoid · Track record.
-    ?strict=1 opens Compounders with the strict (multibagger gates) toggle on."""
+_PB_TEMPLATE = {"insiders": "_pb_screen", "compounders": "_pb_screen", "strict": "_pb_screen",
+                "breakouts": "_pb_screen", "deep": "_pb_screen"}     # every other tab: _pb_<tab>.html
+
+
+@app.get("/playbooks", response_class=HTMLResponse)
+def playbooks_page(request: Request):
+    """Investor Playbooks: filters, events and watchlists in the style of well-known investors,
+    one tab each (cockpit/pages.py lists them). Separate from daily_picks; each tab states its
+    rule, its backtest line and the model's rank for every stock."""
     from cockpit import playbooks
-    entry = next(p for p in pages.PAGES if p["id"] == "ideas")
-    return templates.TemplateResponse(request, "ideas.html", {
-        "page": "ideas", "tabs": entry["tabs"], "screens": playbooks.SCREENS, "strict": bool(strict),
-        "d": playbooks.screen("insiders"), "r": playbooks.rules()})
+    entry = next(p for p in pages.PAGES if p["id"] == "playbooks")
+    return templates.TemplateResponse(request, "playbooks.html", {
+        "page": "playbooks", "tabs": entry["tabs"], "d": playbooks.tab_data("avoid"), "r": playbooks.rules()})
 
 
-@app.get("/partial/ideas/screen/{key}", response_class=HTMLResponse)
-def ideas_screen(request: Request, key: str, strict: int = 0):
-    """One screen's table, fetched the first time its chip is opened."""
+@app.get("/partial/playbooks/{tab}", response_class=HTMLResponse)
+def playbooks_tab(request: Request, tab: str):
+    """One playbook tab's body, fetched the first time the tab is opened."""
     from cockpit import playbooks
-    if key not in dict(playbooks.SCREENS):
-        raise HTTPException(404, "unknown screen")
-    return templates.TemplateResponse(request, "_ideas_screen.html", {
-        "d": playbooks.screen(key, strict=bool(strict)), "r": playbooks.rules()})
-
-
-@app.get("/partial/ideas/avoid", response_class=HTMLResponse)
-def ideas_avoid(request: Request):
-    from cockpit import playbooks
-    return templates.TemplateResponse(request, "_ideas_avoid.html", {"d": playbooks.avoid(), "r": playbooks.rules()})
-
-
-@app.get("/partial/ideas/track", response_class=HTMLResponse)
-def ideas_track(request: Request):
-    from cockpit import playbooks
-    return templates.TemplateResponse(request, "_ideas_track.html", {"d": playbooks.portfolios(), "r": playbooks.rules(),
-                                                                       "ev": playbooks.evidence()})
+    if tab not in playbooks.TABS:
+        raise HTTPException(404, "unknown playbook tab")
+    return templates.TemplateResponse(request, f"{_PB_TEMPLATE.get(tab, '_pb_' + tab)}.html", {
+        "d": playbooks.tab_data(tab), "r": playbooks.rules(), "ev": playbooks.evidence()})
 
 
 @app.get("/book", response_class=HTMLResponse)
@@ -250,7 +250,7 @@ def stock_detail(request: Request, sid: str):
 
 
 def _group_detail(by, name):
-    """The Markets > Industries detail pane for one industry (with its parent sector's macro
+    """The Sectors > Industry Detail pane for one industry (with its parent sector's macro
     and regulatory context) or one sector — also served as the stock page's lazy
     industry card."""
     parent = api.get_industry_parent_sector(name) if by == "industry" else None
@@ -272,7 +272,7 @@ def _group_detail(by, name):
 @app.get("/partial/industry-card/{industry}", response_class=HTMLResponse)
 def partial_industry_card(request: Request, industry: str, sid: str = ""):
     """Full industry dossier fragment, lazy-loaded into the stock page's Sector
-    tab. Renders the SAME shared _industry_detail.html partial that Markets > Industries uses
+    tab. Renders the SAME shared _industry_detail.html partial that Sectors > Industry Detail uses
     (metric strip, conviction bar, Overview/Players/Trends/Our-Picks sub-tabs,
     thesis, value chain, competitive landscape, picks, macro, regulatory) — so the
     stock page shows identical full detail, no drift."""
@@ -290,7 +290,7 @@ def partial_sector_card(request: Request, sector: str, sid: str = ""):
     """Compact sector dossier fragment, lazy-loaded into the stock page's Sector
     tab (sector context attached to every stock). Peers (with this stock
     highlighted) + our model's top/bottom + macro drivers + recent regulatory,
-    plus a link to the full Markets industry page."""
+    plus a link to the full Sectors page."""
     return templates.TemplateResponse(request, "_sector_card.html", {
         "sector": sector,
         "sid": sid,

@@ -31,15 +31,11 @@ COMPARE = {
         "/": "/",
         # Today replaces the live Morning Brief ("/") and Action Queue ("/actions"): the banner
         # opens "/"; the Action Queue is at /actions on the live cockpit.
-        "/stocks": "/explorer",
+        "/stocks": "/explorer",                  # the new screener replaces the live heat map; /explorer, /sectors and
+                                                 # /playbooks are unchanged pages (identity: nothing to list)
         "/markets": "/news",
-        "/markets#industries": "/sectors",
         "/markets#search": "/news/all",
-        "/ideas": "/playbooks",
-        "/ideas?strict=1": "/multibagger",       # the Strict toggle of Compounders (state in the URL) = live /multibagger
-        "/ideas#screens": "/playbooks",
-        "/ideas#avoid": "/playbooks",
-        "/ideas#track-record": "/playbooks",
+        "/playbooks#strict": "/multibagger",     # the Strict compounders tab = the live multibagger page
         "/book": "/portfolio",
         "/book#track-record": "/model/outcomes",
         "/model": "/model",

@@ -1,15 +1,15 @@
 {% from "_components.html" import tab_bar, radio_group, slide_row %}
 {# When embedded on the stock page (embed=True), carry the sector CSS with us — #}
-{# those classes live in _sector_styles.html and aren't on the stock page.   #}
-{# On /markets, embed is unset and the page already loads _sector_styles.html.  #}
+{# those classes live in sectors.html's <style> and aren't on the stock page.   #}
+{# On /sectors, embed is unset and the page already loads _sector_styles.html.  #}
 {% if embed %}{% include "_sector_styles.html" %}{% endif %}
 {% if not detail %}
 <div class="card" style="padding: 18px; color: var(--text-muted); text-align: center;">
-    Pick an industry below, or open one from the reference table underneath.
+    Pick an industry below, or open one from the Rotation tab.
 </div>
 
 <div class="ps-selector" style="margin-top: 12px;">
-    <select onchange="window.location.href = '/markets?industry=' + encodeURIComponent(this.value) + '#industries'">
+    <select onchange="window.location.href = '/sectors?industry=' + encodeURIComponent(this.value) + '#per-sector'">
         <option value="">— pick an industry —</option>
         {% for ind in industry_list %}
         <option value="{{ ind }}">{{ ind }}</option>
@@ -38,10 +38,10 @@
         </span>
         {% endif %}
         {% if embed %}
-        <a href="/markets?industry={{ detail.name|urlencode }}#industries" style="margin-left:auto; font-size:12px; color:var(--accent); text-decoration:none; font-weight:600;">Open in Markets →</a>
+        <a href="/sectors?industry={{ detail.name|urlencode }}#per-sector" style="margin-left:auto; font-size:12px; color:var(--accent); text-decoration:none; font-weight:600;">Open in Sectors →</a>
         {% else %}
         <div style="margin-left: auto;" class="ps-selector">
-            <select onchange="window.location.href = '/markets?industry=' + encodeURIComponent(this.value) + '#industries'">
+            <select onchange="window.location.href = '/sectors?industry=' + encodeURIComponent(this.value) + '#per-sector'">
                 {% for ind in industry_list %}
                 <option value="{{ ind }}" {% if ind == detail.name %}selected{% endif %}>{{ ind }}</option>
                 {% endfor %}
@@ -233,7 +233,7 @@
         {% for p in cl.players %}
         <div class="pb-row">
             {% if p.sid %}
-              <a href="/explorer/{{ p.sid }}" class="ticker" style="text-decoration: none;">▸ {{ p.ticker or p.name }}</a>
+              <a href="/stocks/{{ p.sid }}" class="ticker" style="text-decoration: none;">▸ {{ p.ticker or p.name }}</a>
             {% else %}
               <span style="color: var(--text-secondary);">{{ p.name }}<span style="color: var(--text-muted); font-size: 10px;"> {% if p.note %}· {{ p.note }}{% endif %}</span></span>
             {% endif %}
@@ -270,7 +270,7 @@
         </div>
         {% for p in detail.top_players[:10] %}
         <div class="pb-row">
-            <a href="/explorer/{{ p.sid }}" class="ticker" style="text-decoration: none;">{{ p.ticker }}</a>
+            <a href="/stocks/{{ p.sid }}" class="ticker" style="text-decoration: none;">{{ p.ticker }}</a>
             <div class="pb-track"><div class="pb-fill" style="width: {{ p.share_pct }}%;"></div></div>
             <span class="num" style="font-weight: 700;">{{ p.share_pct|pct(1) }}</span>
             <span class="num">{{ "{:,.0f}".format(p.market_cap_cr) if p.market_cap_cr is not none else '—' }}</span>
@@ -347,7 +347,7 @@
         <div style="margin-top: 10px;">
         {% for p in detail.picks.top[:8] %}
         <div class="pick-row">
-            <a href="/explorer/{{ p.sid }}" class="ticker">{{ p.ticker }}</a>
+            <a href="/stocks/{{ p.sid }}" class="ticker">{{ p.ticker }}</a>
             <span class="name">{{ p.name[:22] }}</span>
             <span class="score score-green">{{ p.final_score | pct(0, scale=100) | replace('%','') }}</span>
         </div>
@@ -361,7 +361,7 @@
         <div style="margin-top: 10px;">
         {% for p in detail.picks.bottom[:5] %}
         <div class="pick-row">
-            <a href="/explorer/{{ p.sid }}" class="ticker">{{ p.ticker }}</a>
+            <a href="/stocks/{{ p.sid }}" class="ticker">{{ p.ticker }}</a>
             <span class="name">{{ p.name[:22] }}</span>
             <span class="score score-red">{{ p.final_score | pct(0, scale=100) | replace('%','') }}</span>
         </div>
