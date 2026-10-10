@@ -59,3 +59,14 @@ def test_broker_aggregate_leaves_yahoo_average_alone(conn):
         "SELECT sid, price_target, total_analysts, buy_pct FROM analyst_consensus")}
     assert rows["Y"] == (110, 7, 100.0)         # Yahoo's set intact, broker buy_pct added
     assert rows["M"] == (150, 1, 100.0)         # no Yahoo coverage: broker mean fills in
+
+
+def test_slow_scan_counts_survive_a_new_process(tmp_path, monkeypatch):
+    """health_report is a fresh process every time: the slow-table memo must come back from disk."""
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "x.db")
+    monkeypatch.setattr(db, "_slow_scans", {})
+    db._slow_scans["feature_values"] = (db._time_module.time(), (48_000_000, 2400))
+    db._save_slow_scans()
+    db._slow_scans.clear()
+    db._load_slow_scans()
+    assert db._slow_scans["feature_values"][1] == (48_000_000, 2400)
