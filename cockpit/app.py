@@ -18,9 +18,8 @@ from preview import PreviewReadOnly, add_redirects
 
 import config
 import views
-from cockpit import api, pages, today
+from cockpit import api, book, model, pages, today
 from cockpit._shared import COCKPIT_STATIC, COCKPIT_TEMPLATES, make_templates, nav_model, prewarm
-from cockpit_ops.api import get_model_overview
 
 app = FastAPI(title="Alpha Signal Cockpit")
 # Gzip every response > 1KB — /explorer is 1.27MB of HTML (same as ops).
@@ -46,11 +45,11 @@ def _prewarm_cache():
     prewarm([
         ("top_picks",          lambda: api.get_top_picks()),
         ("today",              lambda: today.build()),
-        ("model_portfolio",    lambda: api.get_model_portfolio()),
+        ("book",               lambda: book.get_book()),
+        ("model_page",         lambda: model.get_model()),
         ("news_pool_168",      lambda: api._get_news_pool(hours=168)),
         ("news_pool_720",      lambda: api._get_news_pool(hours=720)),
         ("sector_call",        lambda: api.get_sector_call()),
-        ("portfolio_bundle",   lambda: api.get_portfolio_bundle()),
         ("multibagger",        lambda: api.get_multibagger_overview()),
     ])
 
@@ -159,7 +158,11 @@ def ideas_page(request: Request):
 
 @app.get("/book", response_class=HTMLResponse)
 def book_page(request: Request):
-    return _coming(request, "book")
+    """The HRP sized book, its risk and its realised track record (tabs: book, risk, track-record)."""
+    return templates.TemplateResponse(request, "book.html", {
+        "page": "book", "tabs": next(p["tabs"] for p in pages.PAGES if p["id"] == "book"),
+        "book": book.get_book(), "risk": book.get_risk(), "track": book.get_track_record(),
+    })
 
 
 add_redirects(app, pages.REDIRECTS)
@@ -221,18 +224,6 @@ def stock_detail(request: Request, sid: str):
     })
 
 
-# Cockpit v2: this URL now redirects (pages.REDIRECTS); the function below is kept, undecorated, as the data function for Book.
-def portfolio(request: Request):
-    bundle = api.get_portfolio_bundle()
-    return templates.TemplateResponse(request, "portfolio.html", {
-        "page": "portfolio", "pick_date": api.latest_pick_date(),
-        "regime": bundle["regime"],
-        "portfolio": bundle["portfolio"],
-        "analytics": bundle["analytics"],
-        "sized_book": bundle.get("sized_book"),
-    })
-
-
 def _group_detail(by, name):
     """The Markets > Industries detail pane for one industry (with its parent sector's macro
     and regulatory context) or one sector — also served as the stock page's lazy
@@ -287,24 +278,10 @@ def partial_sector_card(request: Request, sector: str, sid: str = ""):
 
 @app.get("/model", response_class=HTMLResponse)
 def model_page(request: Request):
-    overview = get_model_overview()
+    """Is the model working and should I change anything? (tabs: health, evidence, library, rules)"""
     return templates.TemplateResponse(request, "model.html", {
-        "page": "model", **overview,
-    })
-
-
-# Cockpit v2: this URL now redirects (pages.REDIRECTS); the function below is kept, undecorated, as the data function for Book (Track record).
-def model_outcomes_page(request: Request, n: int = 10):
-    """Live equity curve — realized forward returns on actual picks.
-
-    The factor model is hypothesis; this page is the answer. Per-tier × window
-    summaries, rank-decile analysis, time-series of top-N basket returns.
-    """
-    summary = api.get_pick_outcomes_summary(top_n=n)
-    return templates.TemplateResponse(request, "model_outcomes.html", {
-        "page": "model-outcomes",
-        "summary": summary,
-        "top_n": n,
+        "page": "model", "tabs": next(p["tabs"] for p in pages.PAGES if p["id"] == "model"),
+        **model.get_model(),
     })
 
 

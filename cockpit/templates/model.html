@@ -1,144 +1,159 @@
+{# /model - is the model working, and should I change anything?
+   Data: cockpit/model.py. Tabs: pages.py (health, evidence, library, rules). #}
 {% extends "base.html" %}
-{% from "_components.html" import tab_bar, page_nav %}
+{% from "_components.html" import tab_bar, radio_group %}
 {% block title %}{{ page_title("Model") }}{% endblock %}
 
 {% block content %}
-
-{# One chip per status / verdict, by value. #}
-{% set status_pill = {'READY': 'green', 'PARTIAL': 'amber', 'MISSING': 'red', 'PROPOSED': 'blue', 'DEGRADED': 'amber', 'DROPPED': 'red'} %}
-{% set verdict_pill = {'KEEP': 'green', 'WEAK': 'amber', 'DROP': 'red'} %}
-
 <style>
-.mdl-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 8px; }
-.mdl-link { padding: 8px 16px; background: var(--bg-card-hover); color: var(--text-secondary); border-radius: 8px; text-decoration: none; font-size: 12px; font-weight: 600; white-space: nowrap; }
-.pill-accent { background: var(--accent-soft); color: var(--accent); }
-.mdl-label { font-size: 10px; font-weight: 600; letter-spacing: .5px; text-transform: uppercase; color: var(--text-muted); }
-.mdl-big { font-size: 22px; font-weight: 800; color: var(--text-primary); }
-.mdl-tier { background: var(--bg-card); border: 1px solid var(--border); border-left: 4px solid var(--border-accent); border-radius: 8px; padding: 16px; }
-.mdl-bar { height: 6px; background: var(--bg-card-hover); border-radius: 3px; overflow: hidden; }
-.mdl-bar > div { height: 100%; }
-.mdl-tbl { width: 100%; border-collapse: collapse; font-size: 12px; }
-.mdl-tbl th { color: var(--text-muted); text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .5px; padding: 8px 10px; border-bottom: 2px solid var(--border-accent); font-weight: 600; }
-.mdl-tbl th.num { text-align: right; }
-.mdl-tbl td { padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
-.mdl-tbl tr.active { background: var(--accent-soft); }
-.mdl-sort { all: unset; cursor: pointer; text-transform: inherit; letter-spacing: inherit; }
-.mdl-sort:hover, .mdl-sort:focus-visible { color: var(--text-primary); }
-th[aria-sort="ascending"] .mdl-sort::after { content: " \25B2"; }
-th[aria-sort="descending"] .mdl-sort::after { content: " \25BC"; }
-.mdl-grp > summary { cursor: pointer; padding: 10px 12px; background: var(--bg-card-hover); border-radius: 6px; font-size: 12px; font-weight: 700; letter-spacing: .8px; text-transform: uppercase; color: var(--accent); }
-.mdl-grp { margin-bottom: 8px; }
-.mdl-grp[open] > summary { margin-bottom: 4px; }
-.mdl-sub { color: var(--text-muted); font-size: 11px; margin-top: 2px; }
-.mdl-stat { padding: 10px 14px; background: var(--bg-card-hover); border-radius: 4px; min-width: 90px; }
-.mdl-ic { display: flex; gap: 6px; align-items: baseline; white-space: nowrap; }
-.mdl-ic > :first-child { color: var(--text-muted); font-size: 10px; width: 38px; }
+.md-lbl { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
+.md-sub { font-size: 12px; color: var(--text-muted); line-height: 1.5; }
+.md-note { font-size: 12px; color: var(--text-secondary); line-height: 1.55; margin: 8px 0 0; }
+.md-act { display: flex; gap: 10px; align-items: baseline; padding: 8px 0; border-top: 1px solid var(--border); font-size: 13px; line-height: 1.5; }
+.md-act:first-of-type { border-top: 0; }
+.md-act .pill { min-width: 64px; text-align: center; flex-shrink: 0; }
+.md-link { background: none; border: 0; color: var(--accent); cursor: pointer; font-size: 12px; white-space: nowrap; margin-left: auto; padding: 0; }
+.md-tier { border-left: 4px solid var(--border-accent); min-width: 0; }
+.md-tier h3 { margin: 0 0 8px; font-size: 14px; font-weight: 800; letter-spacing: 0.5px; }
+.md-kv { display: flex; justify-content: space-between; gap: 10px; font-size: 12px; padding: 4px 0; border-top: 1px solid var(--border); }
+.md-kv > span:first-child { color: var(--text-muted); }
+.md-flag { margin: 10px 0 0; padding: 8px 10px; border-radius: 6px; background: var(--amber-bg); color: var(--amber); font-size: 12px; line-height: 1.5; }
+.md-tbl { width: 100%; border-collapse: collapse; font-size: 12px; }
+.md-tbl th { color: var(--text-muted); text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .4px; padding: 8px 8px; border-bottom: 2px solid var(--border-accent); font-weight: 600; white-space: nowrap; }
+.md-tbl th.num { text-align: right; }
+.md-tbl td { padding: 7px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+.md-tbl tr.grp td { background: var(--bg-card-hover); font-weight: 800; letter-spacing: .5px; border-bottom: 0; }
+.md-tbl tr.on td { background: var(--accent-soft); }
+.md-bar { display: flex; align-items: center; gap: 8px; min-width: 130px; }
+.md-bar > div { flex: 1; height: 6px; background: var(--bg-card-hover); border-radius: 3px; overflow: hidden; }
+.md-bar i { display: block; height: 100%; }
+.md-q { background: var(--bg-card); color: var(--text-primary); border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; font-size: 13px; min-width: 240px; }
+.md-tools { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+@media (max-width: 768px) { .md-act { flex-wrap: wrap; } .md-link { margin-left: 74px; } .md-q { min-width: 0; flex: 1; } }
 </style>
 
-{{ page_nav([
-    ('/model',          'Backtest',      'model'),
-    ('/model/outcomes', 'Pick Outcomes', 'model-outcomes'),
-], page) }}
+{% set pill_for = {'beat': 'green', 'lagged': 'red', 'mixed': 'amber', 'early': 'muted', 'none': 'muted'} %}
+{% set verdict_word = {'beat': 'Beat', 'lagged': 'Lagged', 'mixed': 'Mixed', 'early': 'Too early', 'none': 'No data'} %}
+{% set ev_pill = {'proven': 'green', 'passes': 'blue', 'weak': 'muted', 'wrong': 'red', 'none': 'muted'} %}
+{% set act_pill = {'review': 'amber', 'data': 'amber', 'decide': 'blue'} %}
+{% set h = health %}
 
-<div class="mdl-head">
+<div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap;">
     <h1 class="section-title">Model</h1>
-    <a href="{{ ops_url('/system') }}" class="mdl-link">System &rarr;</a>
+    <a href="{{ ops_url('/system') }}" class="md-sub" style="color: var(--accent); text-decoration: none;">Pipeline and data health &rarr;</a>
 </div>
-<div class="section-desc">
-    The within-tier scoring model: signal weights per cap tier, the VIX regime that scales the per-tier
-    allocation, the portfolio guardrails, and the backtest evidence behind every weight.
-</div>
+<p class="section-desc">Is the model working, and should you change anything? It ranks stocks inside each size tier with {{ counts }}.</p>
 
-<div x-data="{ tab: 'weights', loaded: { weights: true } }" x-cloak>
+<div x-data="{ tab: '{{ tabs[0][0] }}', loaded: { '{{ tabs[0][0] }}': true } }" x-cloak>
+{{ tab_bar(tabs) }}
 
-{{ tab_bar([
-    ('weights',    'Weights'),
-    ('regime',     'Regime'),
-    ('gate',       'Portfolio Rules'),
-    ('backtests',  'Backtests'),
-    ('validation', 'Validation'),
-]) }}
-
-{# ────────── WEIGHTS TAB ────────── #}
-<div x-show="tab === 'weights'" x-cloak>
-<div class="card u-mb20">
-    <h2 class="section-title">Tier Models &mdash; Signal Weights</h2>
-    <div class="section-desc">Each tier scores stocks with its own weighted mix. A bar is the signal's share of the tier's total absolute weight. A negative weight <span style="color: var(--red);">inverts</span> the factor: a low percentile scores high.</div>
-
-    <div class="grid-3">
-    {% for tier_name, signals in tiers.items() %}
-        <div class="mdl-tier" style="border-left-color: {{ tier_name|tier_color }};">
-            <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 12px;">
-                <div style="font-size: 14px; font-weight: 800; letter-spacing: .5px;">{{ tier_name }}</div>
-                <div class="u-muted-11">{{ signals|length }} signal{{ '' if signals|length == 1 else 's' }}</div>
-            </div>
-            {% for s in signals %}
-            <div style="margin-bottom: 8px;">
-                <div style="display: flex; justify-content: space-between; gap: 8px; font-size: 12px; margin-bottom: 3px;">
-                    <span style="color: var(--text-secondary);">{{ s.signal }}{% if s.inverted %} <span class="pill pill-red">inverted</span>{% endif %}</span>
-                    <span class="mono" style="font-weight: 700;">{{ s.weight|signed(2) }}</span>
-                </div>
-                <div class="mdl-bar"><div style="width: {{ s.pct }}%; background: {{ 'var(--red)' if s.inverted else tier_name|tier_color }};"></div></div>
-            </div>
-            {% else %}
-            <div class="u-muted-11">No wired signals.</div>
-            {% endfor %}
-        </div>
+{# ────────────── HEALTH ────────────── #}
+<div x-show="tab === 'health'" x-cloak>
+<div class="card" style="margin-bottom: 16px; border-left: 4px solid var(--accent);">
+    <div class="md-lbl">Do this week</div>
+    <div style="margin-top: 6px;">
+    {% for a in h.actions %}
+    <div class="md-act"><span class="pill pill-{{ act_pill[a.kind] }}">{{ a.kind|capitalize }}</span><span>{{ a.text }}</span>
+        {% if a.link %}<button type="button" class="md-link" @click="tab = '{{ a.link }}'; loaded['{{ a.link }}'] = true; history.pushState(null, '', '#{{ a.link }}'); window.scrollTo(0, 0)">{{ 'Open ' ~ a.link }} &rarr;</button>{% endif %}</div>
     {% else %}
-        <div class="u-muted">No weights configured.</div>
+    <div class="md-act"><span class="pill pill-green">Clear</span><span>Nothing to change this week: no factor is decaying, every top pick has its data and every tier with capital has a factor above the bar.</span></div>
     {% endfor %}
     </div>
 </div>
-</div>
 
-{# ────────── REGIME TAB ────────── #}
-<div x-show="tab === 'regime'" x-cloak>
-{% if current_regime %}
-<div class="card" style="margin-bottom: 20px; border-left: 4px solid var(--accent);">
-    <div style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap;">
-        <div>
-            <div class="mdl-label">Current regime</div>
-            <div class="mdl-big mono">{{ current_regime.regime }}</div>
-        </div>
-        <div style="border-left: 1px solid var(--border); padding-left: 16px;">
-            <div class="mdl-label">India VIX (index pts)</div>
-            <div class="mdl-big mono">{{ "%.1f" | format(current_regime.vix_latest) if current_regime.vix_latest is not none else '—' }}</div>
-        </div>
-        {% for r in regimes if r.regime == current_regime.regime %}
-        <div style="border-left: 1px solid var(--border); padding-left: 16px;">
-            <div class="mdl-label">Allocation (% of book)</div>
-            <div class="mono" style="font-size: 16px; font-weight: 700;">
-                L {{ r.alloc_large|pct(0, scale=100) }} &middot; M {{ r.alloc_mid|pct(0, scale=100) }} &middot; S {{ r.alloc_small|pct(0, scale=100) }}
-            </div>
-        </div>
-        {% endfor %}
+<div class="grid-3" style="margin-bottom: 16px;">
+{% for t in h.tiers %}
+    <div class="card md-tier" style="border-left-color: {{ t.tier|tier_color }};">
+        <h3>{{ t.tier }}</h3>
+        <div class="md-lbl" style="margin-bottom: 4px;">Picks against their tier</div>
+        <div style="display: flex; gap: 8px; align-items: baseline; font-size: 13px; line-height: 1.5;">
+            <span class="pill pill-{{ pill_for[t.verdict.verdict] }}">{{ verdict_word[t.verdict.verdict] }}</span>
+            <span>{{ t.verdict.text.split(': ', 1)[1] if ': ' in t.verdict.text else t.verdict.text }}</span></div>
+        <div class="md-kv" style="margin-top: 10px;"><span>Capital split now ({{ h.regime }})</span><span class="mono">{{ t.alloc_pct|pct(0) }}</span></div>
+        <div class="md-kv"><span>Split by market regime</span><span class="mono">{% for name, v in t.split.items() %}{{ name[:1] }}{{ name[1:]|lower }} {{ v }}%{% if not loop.last %} &middot; {% endif %}{% endfor %}</span></div>
+        <div class="md-kv"><span>Sized book weight today</span><span class="mono">{{ t.book_pct|pct(0) }}</span></div>
+        <div class="md-kv"><span>Best factor evidence (|t|)</span><span class="mono">{{ t.evidence.best_t|round(1) }}</span></div>
+        <div class="md-kv"><span>Weights above the {{ multiple_test_bar }} bar</span><span class="mono">{{ t.evidence.n_proven }} of {{ t.evidence.n_weights }}</span></div>
     </div>
+{% endfor %}
 </div>
-{% endif %}
 
-<div class="card u-mb20">
-    <h2 class="section-title">Regime &rarr; Allocation</h2>
-    <div class="section-desc">The current VIX level decides how the portfolio is split across tiers. Lower VIX favours mid + small caps; higher VIX shifts to large.</div>
+<div class="card">
+    <div class="md-lbl">Data behind today's top picks (as of {{ h.coverage.pick_date }})</div>
+    <p class="md-note" style="margin-top: 6px;">
+    {% if h.coverage.n_low %}
+        <b>{{ h.coverage.n_low }} of {{ h.coverage.n }}</b> have under {{ h.coverage.threshold }}% of their factor weight backed by real values:
+        {% for p in h.coverage.low %}{{ p.ticker }} ({{ p.tier }}, {{ p.score }}%{% if p.missing %}, missing {{ p.missing|join(', ') }}{% endif %}){% if not loop.last %}; {% endif %}{% endfor %}.
+    {% else %}
+        All {{ h.coverage.n }} top picks have at least {{ h.coverage.threshold }}% of their factor weight backed by real values.
+    {% endif %}
+        A factor with no value counts as the middle of its tier, not zero.</p>
+    <p class="md-sub" style="margin-top: 8px;">Picks are judged on outcomes made before the {{ h.outcomes_note.model_change_text }} model change; the first read on the current weights is about {{ h.outcomes_note.first_read.strftime('%-d %b') }}. Full table: Book, Track record.</p>
+</div>
+</div>
+
+{# ────────────── EVIDENCE ────────────── #}
+<div x-show="tab === 'evidence'" x-cloak>
+<div class="card">
+    <h2 class="section-title">Why each factor has its weight</h2>
+    <p class="section-desc">{{ counts }}, computed {{ evidence_meta.as_of or 'date unknown' }}. A bar is the factor's share of its tier's total weight;
+        a <span style="color: var(--red);">red bar</span> is an inverted factor (a low value scores high). Long-run t is the test of the factor's rank correlation with the next month's return:
+        {{ promotion_bar }} is the bar to be considered, {{ multiple_test_bar }} is the bar once the many factors we tried are allowed for.
+        Last-year IC is the same correlation over the latest 12 months (52 weeks for weekly factors); IC runs from -1 to 1 and 0.03 is typical for a working factor.</p>
     <div class="table-wrap">
-    <table class="mdl-tbl">
-        <thead>
-            <tr><th>Regime</th><th>VIX range (pts)</th><th class="num">Large</th><th class="num">Mid</th><th class="num">Small</th></tr>
-        </thead>
+    <table class="md-tbl" style="min-width: 760px;">
+        <thead><tr>
+            <th>Factor</th><th>Weight (share of tier)</th><th class="num">Long-run t</th><th>Against the bars</th>
+            <th class="num">Last-year IC</th><th class="num">Long-run IC</th><th>Flag</th>
+        </tr></thead>
         <tbody>
-        {% for r in regimes %}
-            {% set is_active = current_regime and r.regime == current_regime.regime %}
-            <tr {% if is_active %}class="active"{% endif %}>
-                <td>
-                    <span class="mono" style="font-weight: 700; color: {{ 'var(--accent)' if is_active else 'var(--text-primary)' }};">{{ r.regime }}</span>
-                    {% if is_active %}<span class="pill pill-accent">ACTIVE</span>{% endif %}
-                </td>
-                <td class="mono" style="color: var(--text-secondary);">{{ "%.0f" | format(r.vix_lo) }} &ndash; {% if r.vix_hi >= 999 %}&infin;{% else %}{{ "%.0f" | format(r.vix_hi) }}{% endif %}</td>
-                <td class="num">{{ r.alloc_large|pct(0, scale=100) }}</td>
-                <td class="num">{{ r.alloc_mid|pct(0, scale=100) }}</td>
-                <td class="num">{{ r.alloc_small|pct(0, scale=100) }}</td>
+        {% set ns = namespace(tier='') %}
+        {% for r in evidence %}
+            {% if r.tier != ns.tier %}{% set ns.tier = r.tier %}
+            <tr class="grp"><td colspan="7" style="color: {{ r.tier|tier_color }};">{{ r.tier }}</td></tr>
+            {% endif %}
+            <tr>
+                <td>{{ r.label }}</td>
+                <td><div class="md-bar"><div><i style="width: {{ r.bar_pct }}%; background: {{ 'var(--red)' if r.inverted else (r.tier|tier_color) }};"></i></div><span class="mono">{{ r.weight|signed(2) }}</span></div></td>
+                <td class="num">{{ r.t|signed(2) }}{% if r.n_periods %}<div class="md-sub">{{ r.n_periods }} periods</div>{% endif %}</td>
+                <td><span class="pill pill-{{ ev_pill[r.verdict] }}">{{ r.verdict_words }}</span></td>
+                <td class="num">{{ r.ic_recent|signed(3) }}</td>
+                <td class="num">{{ r.ic_all|signed(3) }}</td>
+                <td>{% if r.decayed %}<span class="pill pill-amber">decaying</span>{% elif r.thin %}<span class="pill pill-muted">thin history</span>{% else %}<span class="md-sub">ok</span>{% endif %}</td>
             </tr>
         {% else %}
-            <tr><td colspan="5" class="u-muted">No regimes configured.</td></tr>
+            <tr><td colspan="7" class="u-muted" style="padding: 16px;">No wired factors.</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    <p class="md-note">Decaying = the last year is on the wrong side of zero or under a quarter of the long-run IC, and at least two standard errors below it. A review trigger, never an automatic change to a weight.
+        Costs: each tier's trading cost is under Rules; a net-of-cost test per factor is not shown here yet.</p>
+</div>
+</div>
+
+{# ────────────── LIBRARY ────────────── #}
+<div x-show="tab === 'library'" x-cloak>
+<div class="card" x-data="{ q: '', st: 'all' }">
+    <h2 class="section-title">All {{ library|length }} factors</h2>
+    <p class="section-desc">Wired ones (they rank stocks) first, then candidates, then the benched. Every note comes from the factor registry. Best t is the strongest long-run test across the three tiers.</p>
+    <div class="md-tools">
+        <input type="search" class="md-q" x-model="q" placeholder="Search factors..." aria-label="Search factors">
+        {{ radio_group('st', [('all', 'All'), ('WIRED', 'Wired'), ('PROPOSED', 'Candidates'), ('LIBRARY', 'Benched'), ('other', 'Other')]) }}
+    </div>
+    <div class="table-wrap">
+    <table class="md-tbl" style="min-width: 640px;">
+        <thead><tr><th>Factor</th><th>State</th><th class="num">Best t</th><th>Note</th></tr></thead>
+        <tbody>
+        {% for f in library %}
+            <tr data-s="{{ (f.label ~ ' ' ~ f.id ~ ' ' ~ (f.group or '') ~ ' ' ~ f.note)|lower }}"
+                x-show="(st === 'all' || st === '{{ f.state }}' || (st === 'other' && !['WIRED','PROPOSED','LIBRARY'].includes('{{ f.state }}'))) && (!q || $el.dataset.s.includes(q.toLowerCase()))">
+                <td><b>{{ f.label }}</b><div class="md-sub mono">{{ f.id }}{% if f.group %} &middot; {{ f.group }}{% endif %}</div></td>
+                <td><span class="pill pill-{{ 'green' if f.state == 'WIRED' else ('blue' if f.state == 'PROPOSED' else 'muted') }}">{{ {'WIRED': 'Wired', 'PROPOSED': 'Candidate', 'LIBRARY': 'Benched', 'BLOCKED': 'Blocked', 'SUPERSEDED': 'Replaced', 'CONTROL': 'Control'}.get(f.state, f.state) }}</span>
+                    {% if f.wired_in %}<div class="md-sub">{{ f.wired_in|join(', ') }}</div>{% endif %}</td>
+                <td class="num">{{ f.best_t|signed(2) }}{% if f.best_tier %}<div class="md-sub">{{ f.best_tier }}</div>{% endif %}</td>
+                <td class="md-sub" style="min-width: 260px;">{{ f.note }}</td>
+            </tr>
         {% endfor %}
         </tbody>
     </table>
@@ -146,201 +161,43 @@ th[aria-sort="descending"] .mdl-sort::after { content: " \25BC"; }
 </div>
 </div>
 
-{# ────────── PORTFOLIO RULES TAB ────────── #}
-<div x-show="tab === 'gate'" x-cloak>
+{# ────────────── RULES ────────────── #}
+<div x-show="tab === 'rules'" x-cloak>
+<div class="card" style="margin-bottom: 16px;">
+    <h2 class="section-title">Market regime sets the capital split</h2>
+    <p class="section-desc">The volatility index (India VIX, index points) picks the regime and the split of capital across tiers. Now: <b>{{ rules.regime or 'unknown' }}</b>, VIX {{ rules.vix|round(1) if rules.vix is not none else '—' }} points as of {{ rules.vix_asof or '—' }}.
+        The split is the guide in the daily email; the sized book itself is built by risk, so its tier weights differ a little (Book).</p>
+    <div class="table-wrap">
+    <table class="md-tbl">
+        <thead><tr><th>Regime</th><th>VIX range (points)</th>{% for t in pickable_tiers() %}<th class="num">{{ t|capitalize }} (% of capital)</th>{% endfor %}</tr></thead>
+        <tbody>
+        {% for r in rules.regimes %}
+            <tr class="{{ 'on' if r.active }}">
+                <td><b class="mono">{{ r.name }}</b>{% if r.active %} <span class="pill pill-blue">now</span>{% endif %}</td>
+                <td class="mono">{{ r.vix_lo|round|int }} to {% if r.vix_hi >= 999 %}above{% else %}{{ r.vix_hi|round|int }}{% endif %}</td>
+                {% for t in pickable_tiers() %}<td class="num">{{ r.alloc[t]|pct(0) }}</td>{% endfor %}
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+</div>
+
 <div class="card">
-    <h2 class="section-title">Portfolio Rules</h2>
-    <div class="section-desc">Hard caps applied after scoring to prevent concentration risk.</div>
+    <h2 class="section-title">Picks and limits</h2>
+    <p class="section-desc">{{ rules.pick_line }}, ranked only against stocks of the same tier.</p>
     <div class="table-wrap">
-    <table class="mdl-tbl">
+    <table class="md-tbl">
         <tbody>
-            <tr><td class="u-muted">Picks per tier (count)</td>
-                <td class="num">{% for t in pickable_tiers() %}{{ t[0] }} {{ portfolio.picks_per_tier[t] }}{% if not loop.last %} &middot; {% endif %}{% endfor %}</td></tr>
-            <tr><td class="u-muted">Max picks per day (count)</td><td class="num">{{ portfolio.max_daily_picks }}</td></tr>
-            <tr><td class="u-muted">Max stocks per sector (count)</td><td class="num">{{ portfolio.max_stocks_per_sector }}</td></tr>
-            <tr><td class="u-muted">Max weight per stock (% of book)</td><td class="num">{{ portfolio.max_stock_weight_pct }}%</td></tr>
-            <tr><td class="u-muted">Transaction cost (bps)</td>
-                <td class="num">{% for t in pickable_tiers() %}{{ t[0] }} {{ transaction_costs_bps[t] }}{% if not loop.last %} &middot; {% endif %}{% endfor %}</td></tr>
+        {% for k, v in rules.limits %}<tr><td class="md-sub" style="width: 45%;">{{ k }}</td><td>{{ v }}</td></tr>{% endfor %}
         </tbody>
     </table>
     </div>
+    <p class="md-note">{{ rules.band }}</p>
+    {% for line in rules.limits_note %}<p class="md-note">{{ line }}</p>{% endfor %}
+    <p class="md-note"><b>What is not proven:</b> no large-cap factor has shown out-of-sample skill (walk-forward test, Oct 2026), and the Avoid list's veto has not shown an edge (t 0.45, Oct 2026 audit). Treat both as hints, not rules.</p>
 </div>
 </div>
 
-{# ────────── BACKTESTS TAB (rendered on first open) ────────── #}
-<div x-show="tab === 'backtests'" x-cloak>
-<template x-if="loaded.backtests">
-<div>
-{% if backtest_roster %}
-<div class="card u-mb20">
-    <h2 class="section-title">Backtest Factor Roster</h2>
-    <div class="section-desc">
-        Every factor in the registry, grouped; open a group for its rows. Even DROP-verdict signals stay listed &mdash; economic regimes shift.
-        <b>READY</b> = in the point-in-time panel, backtestable today. <b>PROPOSED</b> = known, data available, not built yet.
-        Verdicts come from the same evidence as the Validation tab.
-    </div>
-
-    <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 16px;">
-        {% for st, n in backtest_roster.summary.items() if n %}
-        <div class="mdl-stat">
-            <div class="mdl-label">{{ st|title }}</div>
-            <div class="mono" style="font-size: 20px; font-weight: 800;">{{ n }}</div>
-        </div>
-        {% endfor %}
-        <div class="mdl-stat">
-            <div class="mdl-label">Total</div>
-            <div class="mono" style="font-size: 20px; font-weight: 800;">{{ backtest_roster.signals|length }}</div>
-        </div>
-    </div>
-
-    {% for grp in backtest_roster.groups %}
-    <details class="mdl-grp">
-        <summary>{{ grp.name }} <span class="u-muted-11" style="text-transform: none; letter-spacing: 0; font-weight: 500;">&middot; {{ grp.signals|length }} factor{{ '' if grp.signals|length == 1 else 's' }}</span></summary>
-        <div class="table-wrap">
-        <table class="mdl-tbl">
-            <thead><tr><th>Signal</th><th>Status</th><th class="num">History</th><th>Backtest (t-stat)</th></tr></thead>
-            <tbody>
-            {% for s in grp.signals %}
-            <tr>
-                <td>
-                    <div class="mono" style="font-weight: 700;">{{ s.signal }}</div>
-                    <div class="mdl-sub">{{ s.label }}{% if s.description %} &mdash; {{ s.description }}{% endif %}</div>
-                    {% if s.status_reason %}<div class="mdl-sub">{{ s.status_reason }}</div>{% endif %}
-                    <div class="mdl-sub">{{ s.source_tables|join(', ') }}{% if s.filing_lag %} &middot; lag {{ s.filing_lag }}{% endif %}</div>
-                </td>
-                <td><span class="pill pill-{{ status_pill.get(s.status, 'muted') }}">{{ s.status }}</span></td>
-                <td class="num">
-                    {% if s.max_dates and s.max_dates > 0 %}
-                        {{ s.max_dates }} dates
-                        {% if s.first_date and s.last_date %}<div class="mdl-sub">{{ s.first_date[:7] }} &rarr; {{ s.last_date[:7] }}</div>{% endif %}
-                    {% else %}<span class="u-muted">&mdash;</span><div class="mdl-sub">not in PIT</div>{% endif %}
-                </td>
-                <td>
-                    {% if s.ic_by_tier %}
-                        {% for tier in pickable_tiers() %}{% set ic = s.ic_by_tier.get(tier) %}{% if ic %}
-                        <div class="mdl-ic">
-                            <span class="mono">{{ tier }}</span>
-                            <span class="pill pill-{{ verdict_pill.get(ic.verdict, 'muted') }}">{{ ic.verdict or '—' }}</span>
-                            <span class="mono">{{ ic.t_stat|signed(2) if ic.t_stat is not none else '—' }}</span>
-                        </div>
-                        {% endif %}{% endfor %}
-                    {% elif s.v1_verdict_summary %}<div class="mdl-sub">{{ s.v1_verdict_summary }}</div>
-                    {% else %}<span class="u-muted">&mdash;</span>{% endif %}
-                </td>
-            </tr>
-            {% endfor %}
-            </tbody>
-        </table>
-        </div>
-    </details>
-    {% endfor %}
-
-    <div class="grid-2" style="margin-top: 20px;">
-        <div class="mdl-stat">
-            <div class="mdl-label" style="margin-bottom: 8px;">PIT tables (where the backtest dataset lives)</div>
-            {% for t in backtest_roster.pit_tables %}
-            <div style="margin: 6px 0; font-size: 12px;">
-                <span class="mono" style="font-weight: 700;">{{ t.table }}</span>
-                <span class="mono u-muted-11">&mdash; {{ "{:,}".format(t.rows or 0) }} rows{% if t.n_dates %} &middot; {{ t.n_dates }} dates{% endif %}{% if t.n_stocks %} &middot; {{ t.n_stocks }} sids{% endif %}{% if t.first_date %} &middot; {{ t.first_date[:10] }} &rarr; {{ t.last_date[:10] }}{% endif %}</span>
-            </div>
-            {% endfor %}
-        </div>
-        <div class="mdl-stat">
-            <div class="mdl-label" style="margin-bottom: 8px;">Response variable (the y in IC)</div>
-            <div style="font-size: 12px;">
-                <span class="mono" style="font-weight: 700;">{{ backtest_roster.response.variable }}</span>
-                <span class="u-muted"> &mdash; {{ backtest_roster.response.horizon_days }}-day forward return, computed from <span class="mono">{{ backtest_roster.response.computed_from }}</span></span>
-            </div>
-            {% for r in backtest_roster.response.available_in %}
-            <div class="u-muted-11" style="margin-top: 4px;"><span class="mono">{{ r.table }}</span>{% if r.rows %} ({{ "{:,}".format(r.rows) }} rows){% endif %} &mdash; {{ r.note }}</div>
-            {% endfor %}
-        </div>
-    </div>
 </div>
-{% else %}
-<div class="card u-muted">No backtest roster available.</div>
-{% endif %}
-</div>
-</template>
-</div>
-
-{# ────────── VALIDATION TAB ────────── #}
-<div x-show="tab === 'validation'" x-cloak>
-<template x-if="loaded.validation">
-<div class="card u-mb20" x-data="validationTable()">
-    <h2 class="section-title">Backtest &mdash; Signal Validation</h2>
-    <div class="section-desc">
-        Rank-IC evidence per factor and cap tier{% if validation.meta.as_of %}, computed {{ validation.meta.as_of }}{% endif %} &mdash; the same rows the Backtests roster and /system read.
-        <b>|t| &ge; 2.5</b> = KEEP (promotion bar), <b>1.5&ndash;2.5</b> = WEAK, below 1.5 = DROP. Rows with fewer than {{ validation.meta.min_periods }} periods carry no verdict.
-        Wired = the factor has a weight in that tier today.
-    </div>
-
-    {% if validation.rows %}
-    <div style="display: flex; gap: 8px; margin-bottom: 12px; align-items: center; flex-wrap: wrap;">
-        <button class="tab-button" :class="{ active: !all }" @click="all = false">Wired ({{ validation.meta.n_wired }})</button>
-        <button class="tab-button" :class="{ active: all }" @click="all = true">All ({{ validation.meta.n_rows }})</button>
-    </div>
-    <div class="table-wrap">
-    <table class="mdl-tbl">
-        <thead>
-            <tr>
-                <template x-for="c in cols" :key="c.key">
-                    <th :class="c.num ? 'num' : ''" :aria-sort="sortKey === c.key ? (sortDir > 0 ? 'ascending' : 'descending') : 'none'">
-                        <button class="mdl-sort" @click="sortBy(c.key)" x-text="c.label"></button>
-                    </th>
-                </template>
-            </tr>
-        </thead>
-        <tbody>
-            <template x-for="r in shown" :key="r.signal + r.cap_tier">
-                <tr :style="r.thin ? 'opacity:.55' : ''">
-                    <td class="mono" x-text="r.signal"></td>
-                    <td><span class="mono" :style="'color:' + tierColor[r.cap_tier]" x-text="r.cap_tier"></span></td>
-                    <td class="num" x-text="r.wired ? (r.weight > 0 ? '+' : '') + r.weight.toFixed(2) : '—'"></td>
-                    <td class="num" :style="'font-weight:700;color:' + tColor(r.t_stat)" x-text="fmt(r.t_stat, 2)"></td>
-                    <td class="num" x-text="fmt(r.mean_ic, 4)"></td>
-                    <td class="num" x-text="fmt(r.icir, 3)"></td>
-                    <td class="num" x-text="r.n_periods ?? '—'"></td>
-                    <td><span class="pill" :class="'pill-' + (verdictPill[r.verdict] || 'muted')" x-text="r.thin ? 'n too low' : (r.verdict || '—')"></span></td>
-                </tr>
-            </template>
-        </tbody>
-    </table>
-    </div>
-    {% else %}
-    <div class="u-muted">No validation evidence: pit_ic_by_tier_v2 returned no rows.</div>
-    {% endif %}
-</div>
-</template>
-</div>
-
-</div>{# / tabs root #}
-
-<script>
-function validationTable() {
-  const rows = {{ validation.rows|tojson }};
-  return {
-    rows, all: false, sortKey: null, sortDir: 1,
-    tierColor: {{ {'LARGE': 'LARGE'|tier_color, 'MID': 'MID'|tier_color, 'SMALL': 'SMALL'|tier_color}|tojson }},
-    verdictPill: {{ verdict_pill|tojson }},
-    cols: [
-      {key: 'signal', label: 'Signal'}, {key: 'cap_tier', label: 'Tier'},
-      {key: 'weight', label: 'Weight', num: true}, {key: 't_stat', label: 't-stat', num: true},
-      {key: 'mean_ic', label: 'Mean IC', num: true}, {key: 'icir', label: 'IC IR', num: true},
-      {key: 'n_periods', label: 'Periods', num: true}, {key: 'verdict', label: 'Verdict'},
-    ],
-    get shown() {
-      const k = this.sortKey, d = this.sortDir;
-      const base = this.all ? this.rows : this.rows.filter(r => r.wired);
-      if (!k) return base;   // server order: wired first, then |t|
-      const v = r => r[k] ?? (typeof r[k] === 'string' ? '' : -Infinity);
-      return [...base].sort((a, b) => (v(a) > v(b) ? 1 : v(a) < v(b) ? -1 : 0) * d);
-    },
-    sortBy(k) { this.sortDir = this.sortKey === k ? -this.sortDir : 1; this.sortKey = k; },
-    fmt(x, n) { return x == null ? '—' : x.toFixed(n); },
-    tColor(t) { t = Math.abs(t ?? 0); return t >= 2.5 ? 'var(--green)' : t >= 1.5 ? 'var(--amber)' : 'var(--text-muted)'; },
-  };
-}
-</script>
-
 {% endblock %}
