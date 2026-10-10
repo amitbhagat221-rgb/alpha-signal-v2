@@ -368,11 +368,22 @@ def aggregate_consensus():
     agg["has_analyst_data"] = (agg["total_analysts"] > 0).astype(int)
     agg["fetched_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    rows = upsert_df(
-        agg[["sid", "total_analysts", "buy_pct", "price_target",
-             "has_analyst_data", "fetched_at"]],
-        "analyst_consensus",
-    )
+    # Yahoo owns price_target / total_analysts wherever it published a range (pt_source
+    # 'yfinance'): its mean, median, high, low and analyst count are one consistent set.
+    # The broker mean used to overwrite the mean (and count) every day, leaving it outside
+    # its own low-high (178 rows, 2026-10-10). Here we add only buy_pct on those rows.
+    yahoo = set(read_sql("SELECT sid FROM analyst_consensus WHERE pt_source = 'yfinance' "
+                         "AND price_target_high IS NOT NULL")["sid"])
+    owned = agg["sid"].isin(yahoo)
+    rows = 0
+    if owned.any():
+        rows += upsert_df(agg.loc[owned, ["sid", "buy_pct"]], "analyst_consensus")
+    if (~owned).any():
+        rows += upsert_df(
+            agg.loc[~owned, ["sid", "total_analysts", "buy_pct", "price_target",
+                             "has_analyst_data", "fetched_at"]],
+            "analyst_consensus",
+        )
     print(f"aggregate_consensus: rebuilt {rows} rows in analyst_consensus.")
     return rows
 

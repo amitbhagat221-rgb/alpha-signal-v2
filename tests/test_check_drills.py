@@ -223,6 +223,15 @@ def _implausible_targets(conn):
     assert (v["status"], v["n_bad"], v["n_total"]) == (FAIL, 2, 4)
 
 
+def test_average_outside_its_own_range_is_caught(conn):
+    """Average 150 against a published 90-120 range: the same check fires (2026-10 incident)."""
+    conn.execute("INSERT INTO stock_prices (sid, date, close) VALUES ('X', ?, 100)", (TODAY,))
+    conn.execute("INSERT INTO analyst_consensus (sid, price_target, price_target_low, price_target_high, "
+                 "has_analyst_data, fetched_at) VALUES ('X', 150, 90, 120, 1, ?)", (TODAY,))
+    v = _fires("ANALYST_TARGET_IMPLAUSIBLE", conn)
+    assert (v["status"], v["n_bad"], v["n_total"]) == (FAIL, 1, 1)
+
+
 @drill("ANALYST_TARGET_IS_PRICE")
 def _targets_are_prices(conn):
     _targets(conn, {"A": 100.2, "B": 99.9, "C": 100.9, "D": 130.0})          # C is a real +0.9%

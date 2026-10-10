@@ -161,6 +161,15 @@ def _fetch_one(ticker, sid_for_gate=None):
     except Exception:
         pass
 
+    # An average outside the low-high range it came with is not a real average
+    # (same stored-target rule, validators.plausibility): keep the range and the
+    # median, drop the mean so displays fall back to the median.
+    from validators.plausibility import pt_outside_range
+    if pt_outside_range(tgt_mean, info.get("targetLowPrice"), info.get("targetHighPrice")):
+        print(f"  yfinance {ticker}: mean {tgt_mean} outside range "
+              f"{info.get('targetLowPrice')}-{info.get('targetHighPrice')}; mean dropped")
+        tgt_mean = None
+
     return {
         "target_mean":         float(tgt_mean) if tgt_mean is not None else None,
         "target_median":       float(info["targetMedianPrice"]) if info.get("targetMedianPrice") is not None else None,
