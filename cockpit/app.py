@@ -14,6 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.gzip import GZipMiddleware
 
 from webauth import LoginRequired
+from preview import PreviewReadOnly, add_redirects
 
 import config
 import views
@@ -25,6 +26,7 @@ app = FastAPI(title="Alpha Signal Cockpit")
 # Gzip every response > 1KB — /explorer is 1.27MB of HTML (same as ops).
 app.add_middleware(GZipMiddleware, minimum_size=1024)
 app.add_middleware(LoginRequired, app_name="Cockpit")     # webauth.py — password login (review F5)
+app.add_middleware(PreviewReadOnly)                       # preview.py — refuses writes when COCKPIT_PREVIEW=1
 app.mount("/static", StaticFiles(directory=COCKPIT_STATIC), name="static")
 
 templates = make_templates([COCKPIT_TEMPLATES], nav=nav_model(pages.PAGES, pages.OTHER_APP, pages.BRAND))
@@ -132,8 +134,46 @@ async def _bind_request(request: Request, call_next):
 
 
 # ── Page Routes ──
+# Cockpit v2 site map: cockpit/pages.py (PAGES = the rail, REDIRECTS = the retired URLs).
+# Today, Stocks, Markets, Ideas and Book are placeholders until their page group fills them:
+# replace the body of the route with the real context and render the group's own template
+# (see coming.html for the tab layout and pages.py `tabs` for the tab keys).
+
+def _coming(request: Request, page_id: str):
+    """Placeholder page for a v2 destination that is still being built."""
+    entry = next(p for p in pages.PAGES if p["id"] == page_id)
+    return templates.TemplateResponse(request, "coming.html", {"page": page_id, "entry": entry})
+
 
 @app.get("/", response_class=HTMLResponse)
+def today_page(request: Request):
+    return _coming(request, "today")
+
+
+@app.get("/stocks", response_class=HTMLResponse)
+def stocks_page(request: Request):
+    return _coming(request, "stocks")
+
+
+@app.get("/markets", response_class=HTMLResponse)
+def markets_page(request: Request):
+    return _coming(request, "markets")
+
+
+@app.get("/ideas", response_class=HTMLResponse)
+def ideas_page(request: Request):
+    return _coming(request, "ideas")
+
+
+@app.get("/book", response_class=HTMLResponse)
+def book_page(request: Request):
+    return _coming(request, "book")
+
+
+add_redirects(app, pages.REDIRECTS)
+
+
+# Cockpit v2: this URL now redirects (pages.REDIRECTS); the function below is kept, undecorated, as the data function for Today.
 def morning_brief(request: Request):
     regime = api.get_regime()
     picks = api.get_top_picks(top=5)
@@ -175,7 +215,7 @@ def morning_brief(request: Request):
     })
 
 
-@app.get("/actions", response_class=HTMLResponse)
+# Cockpit v2: this URL now redirects (pages.REDIRECTS); the function below is kept, undecorated, as the data function for Today.
 def actions(request: Request, all: int = 0):
     # Copy, don't mutate: get_action_candidates() hands back its cached dicts
     # and handlers now run concurrently in the threadpool.
@@ -199,7 +239,7 @@ def actions(request: Request, all: int = 0):
     })
 
 
-@app.get("/explorer", response_class=HTMLResponse)
+# Cockpit v2: this URL now redirects (pages.REDIRECTS); the function below is kept, undecorated, as the data function for Stocks.
 def explorer(request: Request):
     tiers = api.get_heatmap_data()
     return templates.TemplateResponse(request, "explorer.html", {
@@ -207,7 +247,7 @@ def explorer(request: Request):
     })
 
 
-@app.get("/explorer/{sid}", response_class=HTMLResponse)
+@app.get("/stocks/{sid}", response_class=HTMLResponse)
 def stock_detail(request: Request, sid: str):
     detail = api.get_stock_detail(sid)
     if not detail:
@@ -250,12 +290,12 @@ def stock_detail(request: Request, sid: str):
 
     from datetime import date as _date
     return templates.TemplateResponse(request, "stock_detail.html", {
-        "stock": detail, "page": "explorer", "latest_pick": api.latest_pick_date(),
+        "stock": detail, "page": "stocks", "latest_pick": api.latest_pick_date(),
         "today_iso": _date.today().isoformat(),
     })
 
 
-@app.get("/portfolio", response_class=HTMLResponse)
+# Cockpit v2: this URL now redirects (pages.REDIRECTS); the function below is kept, undecorated, as the data function for Book.
 def portfolio(request: Request):
     bundle = api.get_portfolio_bundle()
     return templates.TemplateResponse(request, "portfolio.html", {
@@ -287,7 +327,7 @@ def _group_detail(by, name):
     }
 
 
-@app.get("/sectors", response_class=HTMLResponse)
+# Cockpit v2: this URL now redirects (pages.REDIRECTS); the function below is kept, undecorated, as the data function for Markets (Industries).
 def sectors(request: Request, sector: str = "", industry: str = ""):
     # Industry-first overview (drill-down primary); sectors as grouping
     industries_data = api.get_group_overview("industry")
@@ -355,7 +395,7 @@ def model_page(request: Request):
     })
 
 
-@app.get("/model/outcomes", response_class=HTMLResponse)
+# Cockpit v2: this URL now redirects (pages.REDIRECTS); the function below is kept, undecorated, as the data function for Book (Track record).
 def model_outcomes_page(request: Request, n: int = 10):
     """Live equity curve — realized forward returns on actual picks.
 
@@ -375,7 +415,7 @@ def api_model_outcomes(n: int = 10):
     return api.get_pick_outcomes_summary(top_n=n)
 
 
-@app.get("/multibagger", response_class=HTMLResponse)
+# Cockpit v2: this URL now redirects (pages.REDIRECTS); the function below is kept, undecorated, as the data function for Ideas.
 def multibagger_page(request: Request):
     """Multibagger watchlist — the SEPARATE quality-gated funnel (plan 0008),
     kept OUT of daily_picks. Honest framing: the gates are the product (a
@@ -387,7 +427,7 @@ def multibagger_page(request: Request):
     })
 
 
-@app.get("/playbooks", response_class=HTMLResponse)
+# Cockpit v2: this URL now redirects (pages.REDIRECTS); the function below is kept, undecorated, as the data function for Ideas.
 def playbooks_page(request: Request):
     """Investor Playbooks — filters, events and watchlists in the style of well-known
     investors (avoid list, insider buying, compounders, superinvestor holdings).
@@ -477,7 +517,7 @@ def api_mf_search(q: str = "", limit: int = 10):
     return api.get_mf_search(q, limit=limit)
 
 
-@app.get("/news", response_class=HTMLResponse)
+# Cockpit v2: this URL now redirects (pages.REDIRECTS); the function below is kept, undecorated, as the data function for Markets.
 def news_editor_page(request: Request):
     """Plan 0021: today's three items, the 7 themes, the week's radar and sectors."""
     return templates.TemplateResponse(request, "news.html", {
@@ -486,15 +526,15 @@ def news_editor_page(request: Request):
     })
 
 
-@app.get("/news/theme/{theme_id}", response_class=HTMLResponse)
+@app.get("/markets/theme/{theme_id}", response_class=HTMLResponse)
 def news_theme_page(request: Request, theme_id: str):
     theme = api.get_news_theme(theme_id)
     if theme is None:
         raise HTTPException(status_code=404, detail="No such theme")
-    return templates.TemplateResponse(request, "news_theme.html", {"page": "news", "t": theme})
+    return templates.TemplateResponse(request, "news_theme.html", {"page": "markets", "t": theme})
 
 
-@app.get("/news/all", response_class=HTMLResponse)
+# Cockpit v2: this URL now redirects (pages.REDIRECTS); the function below is kept, undecorated, as the data function for Markets (Search).
 def news_page(
     request: Request,
     topic: str = "",

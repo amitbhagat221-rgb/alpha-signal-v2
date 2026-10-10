@@ -1,0 +1,24 @@
+{# Placeholder for a Cockpit v2 destination that is still being built (cockpit/app.py _coming).
+   Shows the page title, its tabs (pages.py `tabs`) and a "being built" note. A page group
+   replaces the route's render with its own template, which follows the same tab layout:
+   <div x-data="{ tab: '<first key>', loaded: { '<first key>': true } }"> {{ tab_bar(tabs) }} panels... </div> #}
+{% extends "base.html" %}
+{% from "_components.html" import tab_bar %}
+{% block content %}
+{% set tabs = entry.tabs or [] %}
+<h1 class="section-title">{{ entry.title }}</h1>
+<p class="section-desc">{{ entry.subtitle }}</p>
+
+{% if tabs %}
+<div x-data="{ tab: '{{ tabs[0][0] }}', loaded: { '{{ tabs[0][0] }}': true } }" x-cloak>
+    {{ tab_bar(tabs) }}
+    {% for key, label in tabs %}
+    <div x-show="tab === '{{ key }}'" x-cloak class="card">
+        <p class="u-muted-11">{{ label }} is being built. The live cockpit still has this today.</p>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<div class="card"><p class="u-muted-11">This page is being built. The live cockpit still has it today.</p></div>
+{% endif %}
+{% endblock %}

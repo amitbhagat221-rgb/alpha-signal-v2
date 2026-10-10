@@ -22,6 +22,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.gzip import GZipMiddleware
 
 from webauth import LoginRequired
+from preview import PreviewReadOnly, add_redirects
 from cockpit._shared import COCKPIT_STATIC, make_templates, nav_model, prewarm
 from cockpit_ops import api, pages
 
@@ -33,6 +34,7 @@ app = FastAPI(title="Alpha Signal Ops")
 # trip) this is the difference between 3-5s and sub-second download.
 app.add_middleware(GZipMiddleware, minimum_size=1024)
 app.add_middleware(LoginRequired, app_name="Ops console")  # webauth.py — password login (review F5)
+app.add_middleware(PreviewReadOnly)                        # preview.py — refuses writes when COCKPIT_PREVIEW=1
 # Shared static assets from the main cockpit. No need to duplicate CSS/JS.
 app.mount("/static", StaticFiles(directory=COCKPIT_STATIC), name="static")
 
@@ -343,7 +345,9 @@ def api_org_running():
     return {"running": api.org_running()}
 
 
-@app.get("/command", response_class=HTMLResponse)
+# Cockpit v2: /command is retired (pages.REDIRECTS sends it to /system). The function stays,
+# undecorated, as the data function for the Feeds page's Data tab (/command/tab/data below
+# is still served for it).
 def command_centre(request: Request):
     """Command centre — collapsible view of plans, factor library, data layer,
     pending actions. Updates whenever HANDOFF / plans / git change."""
@@ -357,6 +361,17 @@ def command_centre(request: Request):
 def command_tab_data(request: Request):
     """The Command Centre's Data Model tab as a partial, fetched on first open."""
     return templates.TemplateResponse(request, "command_data.html", api.get_command_centre())
+
+
+# Options paper book: placeholder in this branch. On merge keep master's real `options_page`
+# (route + options.html + option_book.page_data) and drop this one.
+@app.get("/options", response_class=HTMLResponse)
+def options_placeholder(request: Request):
+    entry = next(p for p in pages.PAGES if p["id"] == "options")
+    return templates.TemplateResponse(request, "coming.html", {"page": "options", "entry": entry})
+
+
+add_redirects(app, pages.REDIRECTS)
 
 
 @app.get("/sql", response_class=HTMLResponse)
