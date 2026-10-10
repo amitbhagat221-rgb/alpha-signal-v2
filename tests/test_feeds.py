@@ -321,7 +321,7 @@ def test_data_supply_page_renders(monkeypatch):
     req = Request({"type": "http", "method": "GET", "path": "/feeds", "headers": [], "query_string": b"",
                    "server": ("t", 80), "scheme": "http", "root_path": ""})
     html = templates.env.get_template("feeds.html").render(request=req, page="feeds", **data)
-    for s in ("Data Supply", "working", "need a look", "broken", "nse_bhavcopy", "Health check failed",
+    for s in ("Feeds", "data-alarms", "working", "need a look", "broken", "nse_bhavcopy", "Health check failed",
               "fields removed", "New sources", "incident report"):
         assert s in html, s
     row = next(r for r in data["simple"] if r["feed"] == "nse_bhavcopy")

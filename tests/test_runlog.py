@@ -200,3 +200,48 @@ def test_item_failed_records_the_detecting_line(_isolated_runlog):
     e = [x for x in runlog.events(step="fetch_banking_metrics") if x["event"] == "item_error"][0]
     assert e["symptom"] == "F" and e["location"].startswith("tests/test_runlog.py:")
     assert e["feed"] == "banking_metrics"
+
+
+# ─────────────────── the real error line reaches pipeline_log (run.sh `logged`) ───────────────────
+
+def test_last_error_line_finds_the_cause():
+    import runlog
+    tb = ("Traceback (most recent call last):\n  File \"x.py\", line 3, in f\n    row['shareholding_filing']\n"
+          "KeyError: 'shareholding_filing'\n")
+    assert runlog.last_error_line(tb) == "KeyError: 'shareholding_filing'"
+    disk = ("syncing 40 tables\ndatamodel sync not started: only 9.6 GB free on the DB disk (WAL 0.0 GB): stopped before "
+            "the disk fills; the next run resumes where this one left off\n")
+    assert runlog.last_error_line(disk).startswith("datamodel sync not started: only 9.6 GB free")
+    assert runlog.last_error_line("a\nb\n\x1b[31mlast words\x1b[0m\n") == "last words"      # no error words: the last line
+    assert runlog.last_error_line("") is None and runlog.last_error_line(None) is None
+    assert len(runlog.last_error_line("error " + "x" * 900)) == 300
+
+
+def test_failure_message_leads_with_the_error_and_keeps_the_pointer():
+    import runlog
+    msg = runlog.failure_message(1, "datamodel_sync:T:1", "only 9.6 GB free on the DB disk")
+    assert msg == "only 9.6 GB free on the DB disk (exit 1; python -m runlog events --run datamodel_sync:T:1)"
+    assert runlog.failure_message(1, "r:1") == "exit 1 (python -m runlog events --run r:1)"      # the old text, no output
+
+
+def test_run_sh_logged_records_the_failing_jobs_error_line(tmp_path):
+    """The real `logged` function from run.sh against a throwaway DB: exit code survives the tee,
+    the cron log still gets the output, and pipeline_log gets the cause."""
+    import re
+    import sqlite3
+    import subprocess
+    root = Path(__file__).resolve().parent.parent
+    src = (root / "run.sh").read_text()
+    fn = re.search(r"^logged\(\) \{.*?^\}\n", src, re.S | re.M).group(0)
+    dbp = tmp_path / "t.db"
+    env = {**os.environ, "ALPHA_DB": str(dbp), "PYTHONPATH": str(root)}
+    subprocess.run([sys.executable, "-c", "import db; db.init_db()"], cwd=root, env=env, check=True)
+    script = (f"cd {root}; JOB=test; {fn}\n"
+              "boom() { echo 'working'; echo \"OSError: [Errno 28] No space left on device\" >&2; return 7; }\n"
+              "logged fake_step boom; echo \"rc=$?\"\n"
+              "ok_job() { echo fine; }\nlogged fake_ok ok_job; echo \"rc=$?\"\n")
+    p = subprocess.run(["bash", "-c", script], env=env, capture_output=True, text=True, timeout=120)
+    assert "rc=7" in p.stdout and "rc=0" in p.stdout and "working" in p.stdout and "No space left" in p.stdout, p
+    rows = dict(sqlite3.connect(dbp).execute("SELECT step_name, error_message FROM pipeline_log").fetchall())
+    assert rows["fake_step"].startswith("OSError: [Errno 28] No space left on device (exit 7; python -m runlog events --run fake_step:")
+    assert rows["fake_ok"] is None

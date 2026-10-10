@@ -26,6 +26,12 @@
   .ds-cell { font-size: 12px; color: var(--text-secondary); }
   .ds-cell small { display: block; color: var(--text-muted); font-size: 11px; }
   .ds-bad { color: var(--red); }
+  .ds-alarms { display: flex; flex-direction: column; gap: 8px; margin: 0 0 16px; }
+  .ds-alarm { background: var(--bg-card); border: 1px solid var(--border); border-left: 4px solid var(--amber); border-radius: 8px; padding: 10px 14px; }
+  .ds-alarm-bad { border-left-color: var(--red); }
+  .ds-alarm-h { font-size: 13px; display: flex; gap: 8px; flex-wrap: wrap; align-items: baseline; color: var(--text-primary); }
+  .ds-alarm-f { margin-top: 4px; font-size: 11px; color: var(--text-secondary); line-height: 1.5; }
+  .ds-alarm-c { margin-top: 6px; font-size: 11.5px; color: var(--text-secondary); background: var(--bg-primary); border-radius: 6px; padding: 4px 8px; }
   .ds-more { padding: 12px 16px 16px 138px; background: var(--bg-primary); border-top: 1px solid var(--border); font-size: 12px; color: var(--text-secondary); line-height: 1.6; }
   .ds-more b { color: var(--text-muted); font-weight: 600; display: inline-block; min-width: 130px; }
   .ds-mono { font-family: 'JetBrains Mono', monospace; font-size: 11px; overflow-wrap: anywhere; }
@@ -44,11 +50,11 @@
 </style>
 
 {% set S = summary %}
-<div class="section-title">Data Supply</div>
-<div class="section-desc">Is every data source working? Each source gets a small health check at 02:45 UTC, before the morning run. Click a row for details.</div>
+<h1 class="section-title">Feeds</h1>
+<div class="section-desc">Is every data source working? Each gets a small live check at 02:45 UTC, before the morning run. The Data tab is the state of the tables they fill.</div>
 
 <div x-data="{ tab: 'feeds', loaded: { feeds: true }, open: {} }" x-cloak>
-{{ tab_bar([('feeds', 'Feeds'), ('new', 'New sources')]) }}
+{{ tab_bar([('feeds', 'Feeds'), ('data', 'Data'), ('new', 'New sources')]) }}
 
 {# ═══════════════════════════ FEEDS ═══════════════════════════ #}
 <div x-show="tab === 'feeds'" x-cloak>
@@ -59,6 +65,20 @@
     <div class="ds-tile"><div class="n ds-muted">{{ S.critical_no_backup }}</div><div class="l">critical sources with no backup (a known gap, not today's status)</div></div>
   </div>
 
+  {% if alarms %}
+  <div class="ds-alarms" data-alarms>
+    {% for a in alarms %}
+    <div class="ds-alarm {{ 'ds-alarm-bad' if a.severity == 'CRITICAL' else '' }}" data-alarm="{{ a.code }}">
+      <div class="ds-alarm-h"><b>{{ a.label }}</b> <span class="ds-tag {{ 'ds-broken' if a.severity == 'CRITICAL' else 'ds-look' }}">{{ a.n }} feed{{ '' if a.n == 1 else 's' }}</span>{% if a.detail %} <span class="ds-mono ds-muted">{{ a.detail }}</span>{% endif %}</div>
+      <div class="ds-alarm-f ds-mono">
+        {% for f in a.feeds %}{{ f }}{% if not a.detail and a.samples[f] %} <span class="ds-muted">({{ a.samples[f] }})</span>{% endif %}{% if not loop.last %} · {% endif %}{% endfor %}
+      </div>
+      {% if a.cause %}<div class="ds-alarm-c">{{ a.cause }}</div>{% endif %}
+      {% if a.note %}<div class="ds-alarm-c" data-backfill-note>{{ a.note }}</div>{% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
   <div class="ds-wrap">
   <div class="ds-head"><div>Status</div><div>Source</div><div>Health check</div><div>Latest data</div></div>
   <div class="ds-list">
@@ -92,6 +112,13 @@
   </div>
 </div>
 
+{# ═══════════════════════════ DATA (the state of the tables the feeds fill; fetched on first open) ═══════════════════════════ #}
+<div x-show="tab === 'data'" x-cloak x-data="lazyTab('/feeds/tab/data')" x-effect="if (tab === 'data') load()">
+  <div class="u-muted-11" x-show="busy" role="status">Loading…</div>
+  <div class="lazy-err" x-show="err" x-cloak><span x-text="err"></span> <button type="button" class="btn-secondary" @click="load()">Retry</button></div>
+  <div x-html="html"></div>
+</div>
+
 {# ═══════════════════════════ NEW SOURCES ═══════════════════════════ #}
 <div x-show="tab === 'new'" x-cloak>
   <div class="section-desc" style="margin-top: 12px;">Data sources we could add. Each was tested with a small live probe; nothing here feeds the picks yet.</div>
@@ -112,6 +139,6 @@
 </div>
 
 <div class="u-muted-11" style="margin-top: 20px;">
-  How it works: <span class="mono">docs/plans/0018-data-supply-strategy.md</span> · fixing a source: <span class="mono">docs/reference/feed-runbook.md</span> · raw data: <a href="/api/feeds" style="color: var(--text-secondary);">/api/feeds</a>
+  Reference: fixing a source is in <span class="mono">docs/reference/feed-runbook.md</span> · raw data <a href="/api/feeds" style="color: var(--text-secondary);">/api/feeds</a>
 </div>
 {% endblock %}

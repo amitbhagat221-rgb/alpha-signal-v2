@@ -44,7 +44,7 @@ _S = {
         "A step of the latest run ended in failure (a later successful re-run clears it), or the run died mid-step",
         "A failed step leaves its tables as they were yesterday; everything downstream reads old data. "
         f"The same step failing {FAILURE_STREAK_DAYS}+ days running is a broken source or a bug that will not heal itself.",
-        "Read the error, fix it, rerun the step from the ops Pipeline tab or `python pipeline.py --step <name>`. "
+        "Read the error, fix it, rerun the step (Rerun on the ops Flow page, or `python pipeline.py --step <name>`). "
         "For a streak: `python -m runlog bundle <feed>` shows the evidence.",
         f"CRITICAL when the morning email needs the step's output or it has failed {FAILURE_STREAK_DAYS}+ days running, else WARN"),
     "WATCHDOG": ("ran",

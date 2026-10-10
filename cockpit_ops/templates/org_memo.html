@@ -1,0 +1,10 @@
+{# One memo's body (fetched by the Boardroom archive): the plain-words block, then every field. #}
+{% from "_org_macros.html" import val, plain %}
+<div class="og-more og-memo-body">
+  {{ plain(m.fields.eli5) }}
+  {% if m.fields.eli5 %}<div class="og-k og-detail-h">The detail</div>{% endif %}
+  {% for k, x in m.fields.items() if k not in ('role', 'period', 'as_of', 'headline', 'sector', 'verdict', 'platform_state', 'view', 'eli5', 'prompt_version') and x is not none and x != [] and x != '' %}
+    <div><b>{{ k|replace('_', ' ') }}</b><span class="og-val">{{ val(x) }}</span></div>
+  {% endfor %}
+  {% if m.grade and m.grade.issues %}<div><b>compliance notes</b><span class="og-val">{{ val(m.grade.issues) }}</span></div>{% endif %}
+</div>

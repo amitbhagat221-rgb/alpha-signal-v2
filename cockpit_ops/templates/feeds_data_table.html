@@ -1,4 +1,4 @@
-{# One table's per-factor diagnostic, fetched when its row is expanded (/system/health/<table>). #}
+{# One table's per-factor diagnostic, fetched when its row is expanded (/feeds/data/<table>). #}
 <div class="sy-factors">
     {% for f in t.factors %}
     <div class="sy-factor {{ 'st-ok' if f.severity == 'ok' else ('st-warn' if f.severity == 'warn' else 'st-broken') }}">

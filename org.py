@@ -673,21 +673,52 @@ def work_status(number, status, note=None):
     return work_order(number)
 
 
-def decide(item_id, verdict, note=None):
+def _option(item, option):
+    """(index, text) of the ask option the CEO picked: an index into fields.options, or the exact text."""
+    opts = item["fields"].get("options") or []
+    if not opts:
+        raise ValueError(f"{item['doc_id']} has no options to choose from")
+    if isinstance(option, bool):
+        raise ValueError("option must be a position or the option's text")
+    try:
+        idx = int(option) if not isinstance(option, str) or option.strip().lstrip("-").isdigit() else opts.index(option)
+    except ValueError:
+        raise ValueError(f"option {option!r} is not one of this ask's {len(opts)} options") from None
+    if not 0 <= idx < len(opts):
+        raise ValueError(f"option {option!r} is not one of this ask's {len(opts)} options")
+    return idx, opts[idx]
+
+
+def decide(item_id, verdict, note=None, option=None):
     """Record the CEO's decision on an ask or a hypothesis card (a child org.decision;
-    deciding again supersedes the earlier decision)."""
+    deciding again supersedes the earlier decision). For an ask with options, `option` (its
+    position or text) says WHICH one: choosing an option is an approval of that option. The
+    choice is stored on the decision and written at the head of the note, which is what the
+    seats read in their next brief."""
+    if option is not None and verdict is None:
+        verdict = "approve"
     if verdict not in VERDICTS:
         raise ValueError(f"verdict must be one of {VERDICTS}")
     item = doc(item_id)
     if not item or item["type"] not in ITEM_TYPES or item["status"] != "valid":
         raise ValueError(f"{item_id} is not an open ask or hypothesis")
+    fields = {"verdict": verdict, "decided_by": "ceo", "item_type": item["type"], "item_title": item["title"],
+              "role": item["fields"].get("role"), "decided_at": _now()}
+    note = (note or "").strip()
+    if option is not None:
+        if verdict != "approve":
+            raise ValueError("an option is chosen with approve; park or reject the whole ask instead")
+        idx, text = _option(item, option)
+        fields.update(option=text, option_index=idx)
+        note = f"Chose: {text}" + (f". {note}" if note else "")
+    fields["note"] = note[:500]
     with get_db() as conn:
-        did, _ = save_doc(conn, "decision", f"doc{item['doc_id']}", f"{verdict}: {item['title']}",
-                          {"verdict": verdict, "note": (note or "")[:500], "decided_by": "ceo",
-                           "item_type": item["type"], "item_title": item["title"],
-                           "role": item["fields"].get("role"), "decided_at": _now()},
+        did, _ = save_doc(conn, "decision", f"doc{item['doc_id']}", f"{verdict}: {item['title']}", fields,
                           parent=item["doc_id"])
-    return {"item_id": item["doc_id"], "verdict": verdict, "decision_doc_id": did}
+    out = {"item_id": item["doc_id"], "verdict": verdict, "decision_doc_id": did}
+    if option is not None:
+        out["option"] = fields["option"]
+    return out
 
 
 # ═══════════════════════════ scorecard ═══════════════════════════
@@ -1034,8 +1065,9 @@ def main(argv=None):
     sub.add_parser("inbox")
     d = sub.add_parser("decide")
     d.add_argument("item_id", type=int)
-    d.add_argument("verdict", choices=VERDICTS)
+    d.add_argument("verdict", choices=VERDICTS, nargs="?", help="omit with --option (approve is implied)")
     d.add_argument("--note")
+    d.add_argument("--option", help="for an ask with options: its position (0 = first) or exact text; implies approve")
     b = sub.add_parser("board")
     b.add_argument("--send", action="store_true")
     sub.add_parser("scorecard")
@@ -1077,7 +1109,7 @@ def main(argv=None):
             print(f"#{i['doc_id']:<7} {i['type']:<10} {i['fields'].get('role', ''):<16} {i['age_days']}d  {i['title']}")
         return 0
     if a.cmd == "decide":
-        print(json.dumps(decide(a.item_id, a.verdict, a.note)))
+        print(json.dumps(decide(a.item_id, a.verdict, a.note, a.option)))
         return 0
     if a.cmd == "board":
         pack = next(iter(docs(["board_pack"], days=30, limit=1)), None)

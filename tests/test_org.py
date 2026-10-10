@@ -211,6 +211,48 @@ def test_memo_ingest_inbox_decide_and_rollback(q):
     assert org.docs(days=None) == [] and org.inbox() == []
 
 
+def _ask_with_options(q):
+    ask = {"ask": "Which way do we pull the failing weights", "options": ["Bench all eight now", "Wait for the re-test",
+           "Keep them"], "recommendation": "Wait for the re-test", "urgency": "this-week"}
+    tid = _queue(q)
+    out = q.submit([{"task_id": tid, "result": _triage(asks=[ask])}], worker="data-engineer")
+    assert out["counts"] == {"done": 1}, out
+    return org.inbox()[0]
+
+
+def test_decide_records_which_option_was_chosen(q):
+    item = _ask_with_options(q)
+    out = org.decide(item["doc_id"], "approve", "after lunch", option=1)
+    assert out["option"] == "Wait for the re-test" and org.inbox() == []
+    f = org.docs(["decision"])[0]["fields"]
+    assert f["verdict"] == "approve" and f["option"] == "Wait for the re-test" and f["option_index"] == 1
+    # the seats read the note in their next brief: the choice leads it
+    assert f["note"] == "Chose: Wait for the re-test. after lunch"
+    # an option alone implies approve; the exact text works too; deciding again supersedes
+    out = org.decide(item["doc_id"], None, option="Keep them")
+    assert out["verdict"] == "approve" and [d["fields"]["option"] for d in org.docs(["decision"])] == ["Keep them"]
+
+
+def test_decide_refuses_a_bad_option(q):
+    item = _ask_with_options(q)
+    for bad in (3, -1, "nope", True):
+        with pytest.raises(ValueError):
+            org.decide(item["doc_id"], "approve", option=bad)
+    with pytest.raises(ValueError):
+        org.decide(item["doc_id"], "reject", option=0)                    # an option is chosen with approve
+    assert len(org.inbox()) == 1 and org.docs(["decision"]) == []         # nothing was recorded
+    plain = org.decide(item["doc_id"], "park")                            # park/reject apply to the whole ask
+    assert "option" not in plain and org.docs(["decision"])[0]["fields"].get("option") is None
+
+
+def test_option_on_an_ask_without_options_is_refused(q):
+    tid = _queue(q)
+    q.submit([{"task_id": tid, "result": _triage()}], worker="data-engineer")        # the default ask has no options
+    ask = org.inbox()[0]
+    with pytest.raises(ValueError, match="no options"):
+        org.decide(ask["doc_id"], "approve", option=0)
+
+
 def test_grade_attaches_to_the_memo_and_feeds_the_scorecard(q):
     tid = _queue(q)
     q.submit([{"task_id": tid, "result": _triage()}], worker="data-engineer")
