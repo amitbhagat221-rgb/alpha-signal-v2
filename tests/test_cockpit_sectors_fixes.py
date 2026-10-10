@@ -8,7 +8,9 @@ from cockpit import api
 def test_score_bands_one_scale():
     assert formatting.score_band(0.58) == "hm-s4" and formatting.score_tone(0.58) == "score-green"
     assert formatting.score_band(0.66) == "hm-s5"
-    assert formatting.score_band(0.45) == "hm-s3" and formatting.score_tone(0.45) == "score-amber"
+    # text tone follows the tile colour: 40-49 neutral (grey tile), 30-39 amber, below 30 red
+    assert formatting.score_band(0.45) == "hm-s3" and formatting.score_tone(0.45) == ""
+    assert formatting.score_band(0.35) == "hm-s2" and formatting.score_tone(0.35) == "score-amber"
     assert formatting.score_tone(0.2) == "score-red"
     assert formatting.score_band(None) == "hm-na" and formatting.score_tone(float("nan")) == ""
 

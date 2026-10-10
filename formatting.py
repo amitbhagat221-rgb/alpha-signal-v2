@@ -105,8 +105,8 @@ def count(x):
     return DASH if v is None else f"{round(v):,}"
 
 
-SCORE_BANDS = ((0.65, "hm-s5", "score-green"), (0.5, "hm-s4", "score-green"), (0.4, "hm-s3", "score-amber"),
-               (0.3, "hm-s2", "score-red"), (float("-inf"), "hm-s1", "score-red"))   # the Explorer's bands: ONE set of cut-offs
+SCORE_BANDS = ((0.65, "hm-s5", "score-green"), (0.5, "hm-s4", "score-green"), (0.4, "hm-s3", ""),
+               (0.3, "hm-s2", "score-amber"), (float("-inf"), "hm-s1", "score-red"))   # the Explorer's bands: ONE set of cut-offs; text tone = tile colour (green · neutral · amber · red)
 
 
 def _band(x):

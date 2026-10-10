@@ -326,6 +326,11 @@ body {
 .regime-badge.normal { background: var(--blue); color: #fff; }
 .regime-badge.caution { background: var(--amber); color: #000; }
 .regime-badge.crisis { background: var(--red); color: #fff; }
+/* formatting.REGIME_COLORS hands templates a colour name (green/blue/amber/red): same look. */
+.regime-badge.green { background: var(--green); color: #000; }
+.regime-badge.blue { background: var(--blue); color: #fff; }
+.regime-badge.amber { background: var(--amber); color: #000; }
+.regime-badge.red { background: var(--red); color: #fff; }
 
 /* Cards */
 .card {
