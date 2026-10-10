@@ -16,7 +16,8 @@ feed_verdicts()  checks/ verdict rows. Severity follows the tier (plan 0018 §2.
                         CRITICAL, else WARN). "Stable" is self-calibrated: only steps whose own
                         history falls below 0.6× in ≤ 5% of runs are judged (news, corporate
                         actions, calendars … swing by nature and are skipped)
-  FEED_VOLUME_SPIKE     WARN — > 3× the median (duplicate writes, a changed unit of work)
+  FEED_VOLUME_SPIKE     WARN — > 3× the median (duplicate writes, a changed unit of work);
+                        INFO while a declared backfill is running (backfill_active())
   FEED_RECONCILE_FAIL   Gate 3 (tools/reconcile.py): this feed disagrees with an independent
                         source — T1 CRITICAL on FAIL, WARN on WARN
 
@@ -27,13 +28,30 @@ the same rule for the Data Supply page.
 """
 
 import json
+import time
 from datetime import datetime
+from pathlib import Path
 
 from checks import CRITICAL, FAIL, INFO, WARN, verdict
 
 MISSING_HOURS = {"T1": 36, "T2": 8 * 24}
 BAND_WINDOW, BAND_MIN_HISTORY, BAND_DROP, BAND_SPIKE, BAND_CRIT = 20, 10, 0.6, 3.0, 0.25
 STABLE_MAX_LOW_SHARE = 0.05
+
+# `run.sh backfill` writes the epoch of its latest window start/end here. A backfill loads history
+# that steps downstream of it then recompute, so their row counts jump: expected, not a duplicate
+# write. The 04:00 report comes after the 21:00 window ends, hence the linger.
+BACKFILL_MARKER = Path(__file__).resolve().parent.parent / "output" / "backfill_active"
+BACKFILL_LINGER_H = 26
+
+
+def backfill_active(now=None, marker=None):
+    """True while a declared backfill is running or ran in the last BACKFILL_LINGER_H hours."""
+    try:
+        at = float((marker or BACKFILL_MARKER).read_text().strip())
+    except (OSError, ValueError):
+        return False
+    return 0 <= (now or time.time()) - at <= BACKFILL_LINGER_H * 3600
 
 
 def volume_bands(steps):
@@ -223,6 +241,7 @@ def feed_verdicts(rows):
     """Verdict rows from feed_state() rows (plan 0018 §2.2 severities)."""
     import feeds
     out = []
+    backfilling = backfill_active()
     for r in rows:
         if r["status"] not in feeds.LIVE or r["tier"] not in ("T1", "T2"):
             continue
@@ -261,8 +280,9 @@ def feed_verdicts(rows):
                                    code="FEED_VOLUME_DROP",
                                    message=f"{name} ({tier}) wrote {b['ratio']:.0%} of its usual rows ({step})"))
             elif b["ratio"] > BAND_SPIKE:
-                out.append(verdict(f"FEED_VOLUME_SPIKE:{name}:{step}", name, WARN, FAIL,
-                                   f"{step}: {b['last']:,} rows vs median {b['median']:,.0f}",
+                out.append(verdict(f"FEED_VOLUME_SPIKE:{name}:{step}", name, INFO if backfilling else WARN, FAIL,
+                                   f"{step}: {b['last']:,} rows vs median {b['median']:,.0f}"
+                                   + (" (a declared backfill is running: expected)" if backfilling else ""),
                                    code="FEED_VOLUME_SPIKE",
                                    message=f"{name} ({tier}) wrote {b['ratio']:.1f}× its usual rows ({step})"))
         rec = r.get("reconcile")
