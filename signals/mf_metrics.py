@@ -258,6 +258,13 @@ def _safe(v):
 # ─── Calendar-year returns ───────────────────────────────────────────────────
 
 
+def _year_return(prior: pd.Series, this_year: pd.Series) -> float:
+    """Calendar-year return in %: prior year-end close -> this year-end close.
+    A first (partial) year has no prior close, so it runs from its first close."""
+    base = prior.iloc[-1] if len(prior) else this_year.iloc[0]
+    return (this_year.iloc[-1] / base - 1) * 100
+
+
 def _calendar_returns(nav: pd.DataFrame, bench: pd.DataFrame | None) -> list[dict]:
     """One row per calendar year per scheme — ret_pct + benchmark counterpart."""
     if len(nav) < 30:
@@ -272,16 +279,16 @@ def _calendar_returns(nav: pd.DataFrame, bench: pd.DataFrame | None) -> list[dic
         b = bench.copy()
         b["date"] = pd.to_datetime(b["date"])
         b["year"] = b["date"].dt.year
-        bg = b.groupby("year")
-        for y, sub in bg:
+        b = b.sort_values("date")
+        for y, sub in b.groupby("year"):
             if len(sub) > 30:
-                bench_by_year[y] = (sub["bench_nav"].iloc[-1] / sub["bench_nav"].iloc[0] - 1) * 100
+                bench_by_year[y] = _year_return(b["bench_nav"][b["year"] < y], sub["bench_nav"])
 
     out = []
     for year, sub in nav.groupby("year"):
         if len(sub) < 30:
             continue
-        ret = (sub["nav"].iloc[-1] / sub["nav"].iloc[0] - 1) * 100
+        ret = _year_return(nav["nav"][nav["year"] < year], sub["nav"])
         out.append({
             "year": int(year),
             "ret_pct": _safe(ret),
