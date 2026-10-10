@@ -9,6 +9,8 @@ Run: uvicorn cockpit.app:app --host 0.0.0.0 --port 3000 --reload
 
 import datetime as dt
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.exception_handlers import http_exception_handler
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.gzip import GZipMiddleware
@@ -199,11 +201,23 @@ def book_page(request: Request):
 add_redirects(app, pages.REDIRECTS)
 
 
+@app.exception_handler(StarletteHTTPException)
+async def _http_error(request: Request, exc: StarletteHTTPException):
+    """A 404 on a page URL is a cockpit page, not bare JSON; /api and /static keep the JSON error."""
+    if exc.status_code == 404 and not request.url.path.startswith(("/api", "/static", "/partial")):
+        return templates.TemplateResponse(request, "notfound.html", {
+            "page": "", "heading": "Page not found",
+            "message": "There is no page at this address."}, status_code=404)
+    return await http_exception_handler(request, exc)
+
+
 @app.get("/stocks/{sid}", response_class=HTMLResponse)
 def stock_detail(request: Request, sid: str):
     detail = api.get_stock_detail(sid)
     if not detail:
-        return HTMLResponse("<h1>Stock not found</h1>", status_code=404)
+        return templates.TemplateResponse(request, "notfound.html", {
+            "page": "stocks", "heading": "Stock not found",
+            "message": f"No stock with the id {sid}. Ids are the exchange tickers used on the Stocks page."}, status_code=404)
 
     # Enrich with all new data
     detail["pm"] = api.get_stock_price_metrics(sid)

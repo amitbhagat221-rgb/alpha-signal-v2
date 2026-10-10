@@ -11,7 +11,7 @@
 <p class="section-desc">
     {{ "{:,}".format(s.n_ranked) }} stocks ranked{% if s.as_of %} on <span class="mono">{{ s.as_of|short_date }}</span>{% endif %};
     {{ "{:,}".format(s.n_unranked) }} others are not ranked ({{ "{:,}".format(s.n_micro) }} micro caps, {{ "{:,}".format(s.n_gate) }} that failed the data gate).
-    {% if s.n_book %}{{ s.n_book }} are in the book, {% endif %}{{ s.n_flagged }} ranked stocks carry a red flag.
+    {% if s.n_book %}{{ s.n_book }} are in the book{% if s.n_book_unranked %} ({{ s.n_book - s.n_book_unranked }} ranked, {{ s.n_book_unranked }} not ranked today){% endif %}, {% endif %}{{ s.n_flagged }} ranked stocks carry a red flag.
 </p>
 
 <form class="st-bar" method="get" action="/stocks" id="st-form" role="search">
@@ -84,7 +84,7 @@
             {%- elif r.change %} <span class="st-chg {{ 'score-green' if r.change > 0 else 'score-red' }}" aria-label="{{ 'Up' if r.change > 0 else 'Down' }} {{ r.change|abs }} place{{ '' if r.change|abs == 1 else 's' }}">{{ '▲' if r.change > 0 else '▼' }}{{ r.change|abs }}</span>{% endif %}</td>
         <td class="num hide-m {{ 'score-green' if r.data_colour == 'green' else 'score-amber' }}">{{ r.data }}%</td>
         {% else %}
-        <td class="num u-muted-11" colspan="3">not ranked</td>
+        <td class="num u-muted-11" colspan="3">{{ 'not ranked today' if r.book else 'not ranked' }}</td>
         {% endif %}
         <td class="num hide-m {{ r.pt_up|tone if r.pt_up is not none }}">{{ r.pt_up|pct(0, signed=True) if r.pt_up is not none else '—' }}{% if r.analysts and r.pt_up is not none %}<div class="u-muted-10">{{ r.analysts }} analyst{{ '' if r.analysts == 1 else 's' }}</div>{% endif %}</td>
         <td class="l hide-m st-pills">
