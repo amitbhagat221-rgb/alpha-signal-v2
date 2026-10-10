@@ -150,7 +150,7 @@
 <div id="ind-dossier" style="scroll-margin-top: 70px;">
 {% include "_industry_detail.html" %}
 </div>
-{% if detail and selected_industry %}
+{% if detail %}
 <script>(function(){var el=document.getElementById('ind-dossier');if(el&&location.hash==='#per-sector'){window.addEventListener('load',function(){setTimeout(function(){el.scrollIntoView({block:'start'});},150);});}})();</script>
 {% endif %}
 
@@ -179,7 +179,7 @@
             <td><a class="rot-link" href="/sectors?industry={{ ind.industry|urlencode }}#per-sector">{{ ind.industry }}</a></td>
             <td class="rot-sector ns-hide-m">{{ ind.sector }}</td>
             <td class="num {{ ind.sector_tilt|tone }}">{{ ind.sector_tilt|signed(2) }}</td>
-            <td class="num {% if ind.avg_score is none %}{% elif ind.avg_score >= 0.6 %}score-green{% elif ind.avg_score >= 0.45 %}score-amber{% else %}score-red{% endif %}">{{ (ind.avg_score * 100)|round|int if ind.avg_score else '—' }}</td>
+            <td class="num {{ ind.avg_score|score_tone }}">{{ (ind.avg_score * 100)|round|int if ind.avg_score else '—' }}</td>
             <td class="num ns-hide-m">{{ ind.breadth_pct|pct(0) }}</td>
             <td class="ns-hide-m">{% if sig in ['TAILWIND', 'FAVORABLE'] %}<span class="pill pill-green">Tailwind</span>{% elif sig in ['HEADWIND', 'ADVERSE'] %}<span class="pill pill-red">Headwind</span>{% elif sig and sig != 'UNKNOWN' %}<span class="pill pill-muted">{{ sig|lower|capitalize }}</span>{% else %}—{% endif %}</td>
             <td class="num ns-hide-m">{{ ind.stocks }}</td>

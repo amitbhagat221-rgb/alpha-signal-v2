@@ -91,6 +91,28 @@ def count(x):
     return DASH if v is None else f"{round(v):,}"
 
 
+SCORE_BANDS = ((0.65, "hm-s5", "score-green"), (0.5, "hm-s4", "score-green"), (0.4, "hm-s3", "score-amber"),
+               (0.3, "hm-s2", "score-red"), (float("-inf"), "hm-s1", "score-red"))   # the Explorer's bands: ONE set of cut-offs
+
+
+def _band(x):
+    v = _num(x)
+    return None if v is None else next(b for b in SCORE_BANDS if v >= b[0])
+
+
+def score_band(x):
+    """A 0-1 model score -> its heat-map band class (hm-s5 ... hm-s1; hm-na when missing).
+    Tiles, Explorer, Rotation and the dossier all colour a score through this and score_tone."""
+    b = _band(x)
+    return "hm-na" if b is None else b[1]
+
+
+def score_tone(x):
+    """A 0-1 model score -> its text colour class on the same bands as score_band; "" when missing."""
+    b = _band(x)
+    return "" if b is None else b[2]
+
+
 FILTERS = {"count": count, "signed": signed, "pct": pct, "inr": inr, "crore": crore, "tone": tone, "short_date": short_date, "month_text": month_text}
 
 
@@ -137,7 +159,7 @@ def rank_text(rank, n=None, tier=None):
     return out
 
 
-FILTERS.update({"tier_label": tier_label, "tier_color": tier_color, "tier_word": tier_word, "rank_text": rank_text})
+FILTERS.update({"score_band": score_band, "score_tone": score_tone, "tier_label": tier_label, "tier_color": tier_color, "tier_word": tier_word, "rank_text": rank_text})
 
 
 _MACRO_WORDS = {"iip": "IIP", "nondurables": "non-durables", "usdinr": "USD/INR", "vix": "VIX",

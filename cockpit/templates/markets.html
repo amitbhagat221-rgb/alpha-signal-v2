@@ -99,7 +99,7 @@
 {# ════ THEMES ════ #}
 <div x-show="tab === 'themes'" x-cloak>
 <div class="ns-sec-head" style="margin-top: 14px;"><h2 class="section-title">The world in 7 themes</h2></div>
-<div class="section-desc">The same seven themes every day, one note each per week. Counts are headlines filed under each theme in the 7 days to {{ today|short_date }}.</div>
+<div class="section-desc">The same seven themes every day, one note each per week. Counts are headlines filed under each theme in the 7 days to {{ today|short_date }}, one per story however many outlets ran it: the same number the Search tab lists.</div>
 {% set moved_all = themes and (themes|selectattr('moved')|list|length == themes|length) %}
 <div class="ns-grid">
 {% for t in themes %}
@@ -119,7 +119,7 @@
     <div class="ns-text">{{ t.scope }}</div>
     <div class="ns-lab">No note yet</div>
     {% endif %}
-    <div class="ns-meta mono">{% if t.stands_now and t.updated_at %}Note of {{ t.updated_at|short_date }} · {% endif %}{{ t.n7 }} headline{{ '' if t.n7 == 1 else 's' }} in the 7 days to {{ today|short_date }}</div>
+    <div class="ns-meta mono">{% if t.stands_now and t.updated_at %}Note of {{ t.updated_at|short_date }} · {% endif %}{{ t.n7_listed }} headline{{ '' if t.n7_listed == 1 else 's' }} in the 7 days to {{ today|short_date }}</div>
 </div>
 {% else %}
 <div class="card"><div class="ns-text">No themes are set up.</div></div>

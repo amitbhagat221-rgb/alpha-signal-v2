@@ -37,7 +37,7 @@
         <div class="hm-grid">
             {% for stock in tier_stocks %}
             {%- set sc = stock.score -%}
-            <a href="/stocks/{{ stock.sid }}" class="hm-tile {{ 'hm-na' if sc is none else 'hm-s5' if sc >= 0.65 else 'hm-s4' if sc >= 0.5 else 'hm-s3' if sc >= 0.4 else 'hm-s2' if sc >= 0.3 else 'hm-s1' }}"
+            <a href="/stocks/{{ stock.sid }}" class="hm-tile {{ sc|score_band }}"
                data-tip="{{ stock.ticker }} · {{ stock.name }} · {{ 'not ranked' if sc is none else 'score ' ~ (sc * 100)|round|int ~ ' / 100' }}"
                aria-label="{{ stock.name }}, {{ 'not ranked' if sc is none else 'score ' ~ (sc * 100)|round|int ~ ' out of 100' }}">{{ stock.ticker }}</a>
             {% endfor %}

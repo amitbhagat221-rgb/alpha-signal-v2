@@ -1179,6 +1179,8 @@ table tbody tr:hover {
     background: var(--bg-card);
     border: 1px solid var(--border);
     margin: 0 0 14px 0;
+    flex-wrap: wrap;      /* a long set of buttons wraps inside the page width instead of widening it */
+    max-width: 100%;
 }
 .radio-btn {
     padding: 5px 12px;
@@ -1587,6 +1589,9 @@ select, input, textarea { max-width: 100%; }
    <span class="hover-tip" tabindex="0">label<span class="tooltip-popover" role="tooltip">full text</span></span>
    Shown on hover and keyboard focus; left-aligned so it stays on a 375px screen. */
 .hover-tip { position: relative; }
+/* one line cut with an ellipsis; the full text sits in a .hover-tip popover (or a title) */
+.ell { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hover-tip.ell-wrap { display: block; min-width: 0; }
 .hover-tip > .tooltip-popover { display: none; left: 0; transform: none; width: min(280px, 80vw); text-align: left; white-space: normal; }
 .hover-tip > .tooltip-popover::after { display: none; }
 .hover-tip:hover > .tooltip-popover, .hover-tip:focus > .tooltip-popover, .hover-tip:focus-within > .tooltip-popover { display: block; }

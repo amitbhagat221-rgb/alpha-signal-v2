@@ -73,7 +73,7 @@
             {% for m in macro_contributors[:6] %}
             <div style="display:flex; justify-content:space-between; font-size:12px; padding:3px 0; border-top:1px solid var(--border);">
                 <span>{{ m.indicator_id | macro_label }}</span>
-                <span class="mono {% if m.direction == 'positive' %}score-green{% elif m.direction == 'negative' %}score-red{% endif %}">{{ m.direction }} · weight {{ m.weight | signed(2) }}</span>
+                <span class="mono {% if m.direction|int > 0 %}score-green{% elif m.direction|int < 0 %}score-red{% endif %}">{{ '▲ a rise helps' if m.direction|int > 0 else ('▼ a rise hurts' if m.direction|int < 0 else '—') }} · weight {{ m.weight | signed(2) }}</span>
             </div>
             {% endfor %}
         {% else %}<div style="color:var(--text-muted); font-size:12px;">No macro mapping for this sector.</div>{% endif %}

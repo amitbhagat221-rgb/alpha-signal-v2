@@ -261,8 +261,9 @@ def _group_detail(by, name):
     industry card."""
     parent = api.get_industry_parent_sector(name) if by == "industry" else None
     context = parent if by == "industry" else name
+    overview = next((r for r in api.get_group_overview("sector") if r.get("sector") == name), None) if by == "sector" else None
     return {
-        "name": name,
+        "name": name, "kind": by, "overview": overview,
         "parent_sector": parent,
         "narrative": api.get_group_metadata(name),
         "top_players": api.get_group_top_players(by, name, n=10),
@@ -286,7 +287,7 @@ def partial_industry_card(request: Request, industry: str, sid: str = ""):
         "detail": _group_detail("industry", industry),
         "industries": api.get_group_overview("industry"),
         "industry_list": api.get_group_list("industry"),
-        "current_sid": sid,
+        "current_sid": sid, "pick_date": api.latest_pick_date(),
         "embed": True,
     })
 

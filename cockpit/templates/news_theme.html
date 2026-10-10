@@ -12,7 +12,7 @@
     <div>{% if t.status == 'retired' %}<span class="mono ns-chip" style="color: var(--text-muted); border-color: var(--text-muted);">Over for now</span> {% endif %}{% if t.stale %}{{ stale_chip() }} {% endif %}{{ heat_chip(t.heat) }}</div>
 </div>
 {% if t.stale %}{% for s in t.since %}<div class="ns-since" style="margin-top: 8px;">Since the note: <a href="/markets#today">{{ s.headline }}</a></div>{% endfor %}{% endif %}
-<div class="mono u-muted-11">{{ t.n7 }} headline{{ '' if t.n7 == 1 else 's' }} this week · {{ t.n_total }} filed in all{% if t.updated_at %} · note of {{ t.updated_at|short_date }}{% endif %}</div>
+<div class="mono u-muted-11">{{ t.n7_listed if t.n7_listed is defined else t.n7 }} headline{{ '' if (t.n7_listed if t.n7_listed is defined else t.n7) == 1 else 's' }} this week · {{ t.n_total }} filed in all{% if t.updated_at %} · note of {{ t.updated_at|short_date }}{% endif %}</div>
 
 {% if not t.stands_now %}
 <div class="card" style="margin-top: 14px;"><div class="ns-text">{{ t.scope }}</div><div class="ns-lab">No note yet</div></div>

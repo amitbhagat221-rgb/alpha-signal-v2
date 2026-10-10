@@ -1473,9 +1473,12 @@ def get_group_picks(by, name, top_n=10, bottom_n=5):
     )
     if df.empty:
         return {"top": [], "bottom": []}
+    # A small group (REITs: a handful of names) must not list a stock as both a top pick and an avoid:
+    # the avoid list is drawn from the names left after the top list.
+    rest = df.iloc[top_n:]
     return {
         "top":    df.head(top_n).to_dict("records"),
-        "bottom": df.tail(bottom_n).iloc[::-1].to_dict("records"),
+        "bottom": rest.tail(bottom_n).iloc[::-1].to_dict("records"),
     }
 
 
@@ -2136,12 +2139,15 @@ def get_news_feed(
     if q:
         q_lower = q.strip().lower()
         if q_lower:
+            # whole words, case-insensitive: "RBI" must not match "Carbide" or "orbit"; a plural still matches
+            pat = re.compile(r"(?<!\w)" + re.escape(q_lower) + r"(?:s|es)?(?!\w)")
+
             def _hit(c):
                 blob = " ".join([
                     c.get("headline") or "", c.get("summary") or "",
                     c.get("one_liner") or "", c.get("why_it_matters") or "",
                 ]).lower()
-                return q_lower in blob
+                return pat.search(blob) is not None
             filtered = [c for c in filtered if _hit(c)]
 
     # Sort
@@ -2405,7 +2411,10 @@ def get_news_today():
 def get_news_themes():
     """The 7 themes in fixed order, each with its note, headline counts and heat."""
     from sources import news_editor
-    return news_editor.themes()
+    # n7 (heat) counts every filed row; n7_listed is what the Search tab lists for the theme over the same
+    # 7 days (one row per story, however many outlets ran it), so a card and its search agree.
+    listed = get_news_feed(hours=168, page_size=1)["theme_counts"]
+    return [{**t, "n7_listed": listed.get(t["theme_id"], 0)} for t in news_editor.themes()]
 
 
 def get_news_theme(theme_id):
@@ -2480,7 +2489,7 @@ def _news_front_key():
     return re.sub(r"[^0-9A-Za-z]+", "_", f"{pd.Timestamp.now():%Y-%m-%d}|{r.get('d')}|{r.get('w')}|{r.get('t')}")
 
 
-@_persisted_cache(3600, name="news_front_v2")
+@_persisted_cache(3600, name="news_front_v3")
 def _news_front(key):
     today_ed = get_news_today()
     return {"today_ed": today_ed, "themes": annotate_themes(get_news_themes(), today_ed),
