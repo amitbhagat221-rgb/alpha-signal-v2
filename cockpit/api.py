@@ -2236,7 +2236,7 @@ _CONFIDENCE_RANK = {"high": 3, "medium": 2, "low": 1, None: 0}
 def get_news_feed(
     topic=None, tier=None, limit=80,
     q=None, sentiment=None, confidence=None,
-    hours=168, sort="smart", page=1, page_size=24, theme=None,
+    hours=168, sort="smart", page=1, page_size=24, theme=None, source=None,
 ):
     """Filter + sort + paginate over the cached news pool. `theme` = a plan-0021
     theme id: only the headlines the editor filed under it.
@@ -2266,9 +2266,15 @@ def get_news_feed(
         if th:
             theme_counts[th] = theme_counts.get(th, 0) + 1
 
+    source_counts = {}
+    for c in pool_in_window:
+        source_counts[c["source_label"]] = source_counts.get(c["source_label"], 0) + 1
+
     filtered = pool_in_window
     if theme:
         filtered = [c for c in filtered if members.get(c["id"]) == theme]
+    if source:
+        filtered = [c for c in filtered if c["source_label"] == source]
 
     if topic:
         def _topic_match(c):
@@ -2339,6 +2345,7 @@ def get_news_feed(
         },
         "topic_counts": topic_counts,
         "theme_counts": theme_counts,
+        "source_counts": source_counts,
         "topics": _NEWS_TOPICS,
         "n_enriched": sum(1 for c in pool_in_window if c["enriched"]),
         "n_with_image": sum(1 for c in pool_in_window if c.get("image_url")),
@@ -2628,13 +2635,144 @@ def _news_front_key():
     return re.sub(r"[^0-9A-Za-z]+", "_", f"{pd.Timestamp.now():%Y-%m-%d}|{r.get('d')}|{r.get('w')}|{r.get('t')}")
 
 
-@_persisted_cache(3600, name="news_front")
+@_persisted_cache(3600, name="news_front_v2")
 def _news_front(key):
-    return {"today_ed": get_news_today(), "themes": get_news_themes(),
+    today_ed = get_news_today()
+    return {"today_ed": today_ed, "themes": annotate_themes(get_news_themes(), today_ed),
             "week": get_news_week(), "radar": get_sector_radar()}
 
 
 def get_news_front():
-    """Everything /news shows, in one cached bundle keyed on the edition (the page is
-    editorial: it only changes when an edition is written; 1 h TTL for headline counts)."""
+    """Everything Markets shows from the news editor, in one cached bundle keyed on the
+    edition (the page is editorial: it only changes when an edition is written; 1 h TTL for
+    headline counts)."""
     return _news_front(_news_front_key())
+
+
+# ───────────── Markets v2: one sector call, theme freshness, news search ─────────────
+
+SECTOR_LEAN_MIN = 0.5   # |sector_tilt| (a z-score across the 11 sectors) from which the model leans
+
+
+def annotate_themes(themes, today_ed):
+    """Each theme with `since`: the Today stories filed under it that are newer than its
+    weekly note, as [{headline, n}] (n = the story's number in Today). A theme with any is
+    `stale`: its note predates a story that may supersede it."""
+    day = (today_ed or {}).get("day") or ""
+    items = (today_ed or {}).get("items") or []
+    out = []
+    for t in themes:
+        note_day = (t.get("updated_at") or "")[:10]
+        since = [{"headline": it["headline"], "n": i} for i, it in enumerate(items, 1)
+                 if it.get("theme") == t["theme_id"] and t.get("stands_now") and day > note_day]
+        out.append({**t, "since": since, "stale": bool(since)})
+    return out
+
+
+def build_sector_call(tilts, week):
+    """ONE verdict per sector, strongest model tilt first. `tilts` = [{sector, sector_tilt,
+    z_mom6, z_macro}] (signals.sector_tilt), `week` = the weekly news edition. The verdict is
+    the model's (the only sector number with backtest evidence); the news view rides along and,
+    where it points the other way, is shown beside it, labelled, never merged away.
+    lean: in | away | none.  agree: True / False / None (no news view, or no lean)."""
+    news = {}
+    for side, key in (("helps", "favour"), ("careful", "careful")):
+        for r in (week or {}).get(key) or []:
+            news[r["sector"]] = (side, r.get("reason") or "")
+    by = {t["sector"]: t for t in tilts}
+    rows = []
+    for sector in sorted(set(by) | set(news)):
+        t = by.get(sector, {})
+        tilt = t.get("sector_tilt")
+        tilt = None if tilt is None or tilt != tilt else float(tilt)
+        lean = "none" if tilt is None or abs(tilt) < SECTOR_LEAN_MIN else ("in" if tilt > 0 else "away")
+        n_side, n_reason = news.get(sector, (None, ""))
+        agree = None
+        if n_side and lean != "none":
+            agree = (lean == "in") == (n_side == "helps")
+        rows.append({
+            "sector": sector, "tilt": tilt, "lean": lean,
+            "verdict": {"in": "Lean in", "away": "Lean away", "none": "No call"}[lean],
+            "mom": t.get("z_mom6"), "macro": t.get("z_macro"),
+            "news": n_side, "news_reason": n_reason, "agree": agree,
+        })
+    rows.sort(key=lambda r: (r["tilt"] is None, -(r["tilt"] or 0), r["sector"]))
+    return rows
+
+
+@_persisted_cache(3600, name="sector_tilt_view")
+def _sector_tilt_view(price_date):
+    """The live per-sector tilt (signals.sector_tilt, the model's own number): one compute
+    per price date, about 12 s because it reads every close."""
+    from signals.sector_tilt import _per_sector_view
+    v = _per_sector_view()
+    return [{"sector": sec, **{k: (None if pd.isna(x) else round(float(x), 3)) for k, x in r.items()}}
+            for sec, r in v.iterrows()]
+
+
+def get_sector_call():
+    """The sector call for Markets > Today: build_sector_call over the live tilt and this
+    week's news view, with the date behind each and the tilt's production weight by tier."""
+    import factors
+    price_date = db.scalar("SELECT MAX(date) FROM stock_prices")
+    week = get_news_week()
+    rows = build_sector_call(_sector_tilt_view(price_date), week)
+    driver = {r["sector"]: r for r in get_sector_radar()}
+    for r in rows:
+        r["driver"] = (driver.get(r["sector"]) or {}).get("driver")
+    return {
+        "rows": rows, "lean_min": SECTOR_LEAN_MIN,
+        "price_date": price_date, "week_as_of": week.get("as_of"),
+        "macro_date": db.scalar("SELECT MAX(snapshot_date) FROM macro_sector_signals_pit"),
+        "weights": {t: w["sector_tilt"] for t, w in factors.SIGNAL_WEIGHTS.items() if w.get("sector_tilt")},
+    }
+
+
+def get_industry_rotation():
+    """Industries for the reference table: the parent sector's tilt first (strongest sector
+    on top), then the industry's own score. Rows from get_group_overview; tilt from the
+    sector call's source, so there is no second copy."""
+    tilt = {t["sector"]: t["sector_tilt"]
+            for t in _sector_tilt_view(db.scalar("SELECT MAX(date) FROM stock_prices"))}
+    rows = get_group_overview("industry")
+    for r in rows:
+        r["sector_tilt"] = tilt.get(r.get("sector"))
+    rows.sort(key=lambda r: (r["sector_tilt"] is None, -(r["sector_tilt"] or 0), -(r.get("avg_score") or 0)))
+    return rows
+
+
+def _article_tickers(article_ids):
+    """{article_id: [{ticker, sid}]} for the stocks the news tagger matched to each article,
+    largest company first."""
+    if not article_ids:
+        return {}
+    qs = ",".join("?" * len(article_ids))
+    out = {}
+    for r in db.rows(f"SELECT n.article_id, s.ticker, s.sid FROM news_article_stocks n "
+                     f"JOIN stocks s ON s.sid = n.sid WHERE n.article_id IN ({qs}) AND s.ticker IS NOT NULL "
+                     f"ORDER BY s.market_cap_cr DESC", list(article_ids)):
+        out.setdefault(str(r["article_id"]), []).append({"ticker": r["ticker"], "sid": r["sid"]})
+    return out
+
+
+def search_news(q="", theme="", source="", hours=168, page=1, page_size=20):
+    """Markets > Search: headlines, newest first, filtered by words, theme, source and age.
+    Each row has its tagged tickers (linked to the stock page) and its theme when the editor
+    filed it under one."""
+    feed = get_news_feed(q=(q or None), theme=(theme or None), source=(source or None),
+                         hours=hours, sort="recent", page=page, page_size=page_size)
+    tickers = _article_tickers([str(c["id"]) for c in feed["cards"]])
+    titles = {t["theme_id"]: t["title"] for t in get_news_themes()}
+    members = _theme_members()
+    rows = []
+    for c in feed["cards"]:
+        tid = members.get(str(c["id"]))
+        rows.append({"headline": c["headline"], "url": c["source_url"], "source": c["source_label"],
+                     "day": (c["published_at"] or "")[:10], "age": c["age_label"],
+                     "one_liner": c["one_liner"], "theme_id": tid, "theme_title": titles.get(tid),
+                     "tickers": tickers.get(str(c["id"]), [])[:4]})
+    return {"rows": rows, "total": feed["total"], "page": feed["page"], "total_pages": feed["total_pages"],
+            "sources": sorted(feed["source_counts"].items(), key=lambda kv: -kv[1]),
+            "themes": [(t["theme_id"], t["title"], feed["theme_counts"].get(t["theme_id"], 0))
+                       for t in get_news_themes()],
+            "hours": int(hours), "q": q, "theme": theme, "source": source}
