@@ -43,16 +43,27 @@ COMPARE = {
         "/mutual-funds": "/mutual-funds",
     },
     "ops": {
-        "/system": "/system",
+        # Live Health tabs: overview, checks, health (its "Data" tab), factors, pipeline, inventory.
+        "/system": "/system#overview",
+        "/system#overview": "/system#overview",
         "/system#checks": "/system#checks",
         "/system#inventory": "/system#inventory",
         "/feeds": "/feeds",
-        "/feeds#data": "/system#health",            # the live Health page's Data tab
+        "/feeds#feeds": "/feeds",
+        "/feeds#data": "/system#health",            # live Health > Data (the tab's key is "health")
+        "/feeds#new": "/feeds",                     # live /feeds carries the new-sources list
         "/flow": "/flow",
-        "/flow#pipeline-log": "/system#pipeline",   # the live Health page's Pipeline tab
+        "/flow#stages": "/flow",
+        "/flow#dag": "/flow",
+        "/flow#pipeline-log": "/system#pipeline",   # live Health > Pipeline
         "/org": "/org",
+        "/org#inbox": "/org#inbox",                 # live also has a separate Board pack tab (here it sits atop the Inbox)
+        "/org#outlook": "/org#outlook",
+        "/org#chat": "/org#chat",
+        "/org#work": "/org#work",
         "/org#memos": "/org#memos",
-        "/options": "/options",
+        "/org#org": "/org#org",
+        "/options": "/options",                     # placeholder on the preview: the live /options page
         "/sql": "/sql",
     },
 }
