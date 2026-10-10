@@ -130,7 +130,8 @@
             <tr>
                 <td>{{ r.label }}{% if r.decayed %}<div class="md-1st"><span class="pill pill-amber">decaying</span></div>{% endif %}</td>
                 <td><div class="md-bar"><div><i style="width: {{ r.bar_pct }}%; background: {{ 'var(--red)' if r.inverted else (r.tier|tier_color) }};"></i></div><span class="mono">{{ r.weight|signed(2) }}</span></div></td>
-                <td class="num">{{ r.t|signed(2) }}{% if r.n_periods %}<div class="md-sub">{{ r.n_periods }} periods</div>{% endif %}<div class="md-1st"><span class="pill pill-{{ ev_pill[r.verdict] }}">{{ r.verdict_words }}</span></div></td>
+                <td class="num">{{ r.t|signed(2) }}{% if r.n_periods %}<div class="md-sub">{{ r.n_periods }} periods</div>{% endif %}<div class="md-1st"><span class="pill pill-{{ ev_pill[r.verdict] }}">{{ r.verdict_words }}</span></div>
+                    <div class="md-1st md-sub">IC {{ r.ic_recent|signed(3) }} last year, {{ r.ic_all|signed(3) }} long-run</div></td>
                 <td class="md-2nd"><span class="pill pill-{{ ev_pill[r.verdict] }}">{{ r.verdict_words }}</span></td>
                 <td class="num md-2nd">{{ r.ic_recent|signed(3) }}</td>
                 <td class="num md-2nd">{{ r.ic_all|signed(3) }}</td>
@@ -149,7 +150,11 @@
 
 {# ────────────── LIBRARY ────────────── #}
 <div x-show="tab === 'library'" x-cloak>
-<div class="card" x-data="{ q: '', st: 'all' }">
+{% set lib_ns = namespace(items=[]) %}
+{% for f in library %}{% set lib_ns.items = lib_ns.items + [[(f.label ~ ' ' ~ f.id ~ ' ' ~ (f.group or '') ~ ' ' ~ f.note)|lower, f.state]] %}{% endfor %}
+<div class="card" x-data="{ q: '', st: 'all', items: {{ lib_ns.items|tojson|forceescape }},
+        match(s, state) { return (this.st === 'all' || this.st === state || (this.st === 'other' && !['WIRED','PROPOSED','LIBRARY'].includes(state))) && (!this.q || s.includes(this.q.toLowerCase())); },
+        get n() { return this.items.filter(i => this.match(i[0], i[1])).length; } }">
     <h2 class="section-title">All {{ library|length }} factors</h2>
     <p class="section-desc">Wired ones (they rank stocks) first, then candidates, then the benched. Every note comes from the factor registry. Best t is the strongest long-run test across the three tiers.</p>
     <div class="md-tools">
@@ -161,8 +166,7 @@
         <thead><tr><th>Factor</th><th>State</th><th class="num">Best t</th><th>Note</th></tr></thead>
         <tbody>
         {% for f in library %}
-            <tr data-s="{{ (f.label ~ ' ' ~ f.id ~ ' ' ~ (f.group or '') ~ ' ' ~ f.note)|lower }}"
-                x-show="(st === 'all' || st === '{{ f.state }}' || (st === 'other' && !['WIRED','PROPOSED','LIBRARY'].includes('{{ f.state }}'))) && (!q || $el.dataset.s.includes(q.toLowerCase()))">
+            <tr x-show="match(items[{{ loop.index0 }}][0], items[{{ loop.index0 }}][1])">
                 <td><b>{{ f.label }}</b>{% if f.group %}<div class="md-sub">{{ f.group }}</div>{% endif %}</td>
                 <td><span class="pill pill-{{ 'green' if f.state == 'WIRED' else ('blue' if f.state == 'PROPOSED' else 'muted') }}">{{ {'WIRED': 'Wired', 'PROPOSED': 'Candidate', 'LIBRARY': 'Benched', 'BLOCKED': 'Blocked', 'SUPERSEDED': 'Replaced', 'CONTROL': 'Control'}.get(f.state, f.state) }}</span>
                     {% if f.wired_in %}<div class="md-sub">{% for t in f.wired_in %}{{ t|tier_word }}{% if not loop.last %}, {% endif %}{% endfor %}</div>{% endif %}</td>
@@ -173,6 +177,7 @@
         </tbody>
     </table>
     </div>
+    <p class="md-sub" x-show="n === 0" x-cloak style="padding: 12px 0;">No factor matches<template x-if="q"><span> &ldquo;<span x-text="q"></span>&rdquo;</span></template> in this state. Clear the search or pick All.</p>
 </div>
 </div>
 

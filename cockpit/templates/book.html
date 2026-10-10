@@ -22,6 +22,7 @@
 .bk-row { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; font-size: 12px; }
 .bk-row .name { width: 150px; flex-shrink: 0; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bk-row .val { width: 70px; flex-shrink: 0; text-align: right; }
+.bk-tilt .name { white-space: normal; overflow: visible; text-overflow: clip; line-height: 1.3; }
 .bk-tilt .track { flex: 1; height: 5px; border-radius: 3px; background: var(--border); position: relative; min-width: 40px; }
 .bk-tilt .mid { position: absolute; left: 50%; top: -1px; bottom: -1px; width: 1px; background: var(--text-muted); opacity: 0.5; }
 .bk-tilt .fill { position: absolute; top: 0; bottom: 0; border-radius: 3px; }
@@ -211,7 +212,8 @@
             <th class="num">Top {{ track.top_n }} hit rate (%)</th><th class="num">Top {{ track.top_n }} vs index (%)</th>
         </tr></thead>
         <tbody>
-        {% for row in s.by_window_tier if row.scope == 'all' %}
+        {% set all_rows = s.by_window_tier | selectattr('scope', 'equalto', 'all') | list %}
+        {% for tier in display_tiers() %}{% for row in all_rows | selectattr('cap_tier', 'equalto', tier) | sort(attribute='window_days') %}
             {% set top = s.by_window_tier | selectattr('cap_tier', 'equalto', row.cap_tier) | selectattr('window_days', 'equalto', row.window_days) | rejectattr('scope', 'equalto', 'all') | first %}
             <tr class="{{ 'muted' if row.n_dates < track.min_dates }}">
                 <td>{{ tier_pill(row.cap_tier) }}</td>
@@ -223,9 +225,10 @@
                 <td class="num">{{ (top.hit_rate if top else none)|pct(0) }}</td>
                 <td class="num {{ (top.avg_excess if top else none)|tone }}">{{ (top.avg_excess if top else none)|signed(2) }}</td>
             </tr>
-        {% else %}
+        {% endfor %}{% endfor %}
+        {% if not all_rows %}
             <tr><td colspan="8" class="u-muted" style="padding: 16px;">No matured pick outcomes yet.</td></tr>
-        {% endfor %}
+        {% endif %}
         </tbody>
     </table>
     </div>

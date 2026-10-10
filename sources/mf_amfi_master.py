@@ -132,14 +132,102 @@ CATEGORY_MAP = {
 }
 
 
-def _normalise_category(raw: str) -> str:
+# AMFI has relabelled its categories more than once and old funds keep the label they were
+# filed under, so one family shows up as "Equity Scheme - X", "Equity Schemes - X",
+# "Hybrid Schemes - X", "Income/Debt Oriented Schemes - X" ... All spellings merge into one
+# compact label so peers, ranks and presets see one group.
+CATEGORY_MAP.update({
+    "Equity Schemes - Large Cap Fund":              "Equity / Large Cap",
+    "Equity Schemes - Large & Mid Cap Fund":        "Equity / Large & Mid Cap",
+    "Equity Schemes - Mid Cap Fund":                "Equity / Mid Cap",
+    "Equity Schemes - Small Cap Fund":              "Equity / Small Cap",
+    "Equity Schemes - Multi Cap Fund":              "Equity / Multi Cap",
+    "Equity Schemes - Flexi Cap Fund":              "Equity / Flexi Cap",
+    "Equity Schemes - ELSS- Tax Saver Fund":        "Equity / ELSS",
+    "Equity Schemes - Value Fund":                  "Equity / Value",
+    "Equity Schemes - Contra Fund":                 "Equity / Contra",
+    "Equity Schemes - Focused Fund":                "Equity / Focused",
+    "Equity Schemes - Dividend Yield Fund":         "Equity / Dividend Yield",
+    "Equity Schemes - Sectoral Fund":               "Equity / Sectoral-Thematic",
+    "Equity Schemes - Thematic Fund":               "Equity / Sectoral-Thematic",
+    "Hybrid Schemes - Aggressive Hybrid Fund":      "Hybrid / Aggressive",
+    "Hybrid Schemes - Arbitrage Fund":              "Hybrid / Arbitrage",
+    "Hybrid Schemes - Balanced Advantage Fund/ Dynamic Asset Allocation": "Hybrid / BAF",
+    "Hybrid Schemes - Balanced Hybrid Fund":        "Hybrid / Balanced",
+    "Hybrid Schemes - Conservative Hybrid Fund":    "Hybrid / Conservative",
+    "Hybrid Schemes - Equity Savings Fund":         "Hybrid / Equity Savings",
+    "Hybrid Schemes - Multi Asset Allocation Fund": "Hybrid / Multi-Asset",
+    "Income/Debt Oriented Schemes - 10-year Constant Maturity Gilt Fund": "Debt / Gilt 10Y",
+    "Income/Debt Oriented Schemes - Banking and PSU Debt Fund": "Debt / Banking & PSU",
+    "Income/Debt Oriented Schemes - Corporate Bond Fund":       "Debt / Corporate Bond",
+    "Income/Debt Oriented Schemes - Credit Risk Fund":          "Debt / Credit Risk",
+    "Income/Debt Oriented Schemes - Dynamic Term Fund":         "Debt / Dynamic Bond",
+    "Income/Debt Oriented Schemes - Fixed Term Plan":           "Debt / Other",
+    "Income/Debt Oriented Schemes - Floating Interest Rates Fund": "Debt / Floater",
+    "Income/Debt Oriented Schemes - Gilt Fund":                 "Debt / Gilt",
+    "Income/Debt Oriented Schemes - Liquid Fund":               "Debt / Liquid",
+    "Income/Debt Oriented Schemes - Long Term Fund":            "Debt / Long Duration",
+    "Income/Debt Oriented Schemes - Medium Term Fund":          "Debt / Medium Duration",
+    "Income/Debt Oriented Schemes - Medium to Long Term Fund":  "Debt / Medium-Long",
+    "Income/Debt Oriented Schemes - Money Market Fund":         "Debt / Money Market",
+    "Income/Debt Oriented Schemes - Other Debt Scheme":         "Debt / Other",
+    "Income/Debt Oriented Schemes - Sectoral Fund":             "Debt / Other",
+    "Income/Debt Oriented Schemes - Overnight Fund":            "Debt / Overnight",
+    "Income/Debt Oriented Schemes - Short Term Fund":           "Debt / Short Duration",
+    "Income/Debt Oriented Schemes - Ultra Short Term Fund":     "Debt / Ultra Short",
+    "Income/Debt Oriented Schemes - Ultra Short to Short Term Fund": "Debt / Ultra Short",
+    "Index Funds - Equity Funds":                   "Index / Equity",
+    "Index Funds - Debt Funds":                     "Index / Debt",
+    "Index Funds - Hybrid Fund":                    "Index / Hybrid",
+    "Exchange Traded Funds (ETFs) - Equity ETF":    "ETF / Equity",
+    "Exchange Traded Funds (ETFs) - Debt ETF":      "ETF / Debt",
+    "Exchange Traded Funds (ETFs) - Gold ETF":      "ETF / Gold",
+    "Exchange Traded Funds (ETFs) - Silver ETF":    "ETF / Silver",
+    "Exchange Traded Funds (ETFs) - Hybrid ETF":    "ETF / Hybrid",
+    "Exchange Traded Funds (ETFs) - ETFs investing overseas": "ETF / Overseas",
+    "Exchange Traded Funds (ETFs) - Other ETF":     "ETF / Other",
+    "Fund of Funds Scheme (Domestic) - Fund of Funds Scheme (Domestic)": "FoF / Domestic",
+    "Overseas Fund of Funds - Fund of Funds investing overseas":         "FoF / Overseas",
+    "Solution Oriented Scheme - Children’s Fund":  "Solution / Children",
+    "Children’s Fund - Childrens' Fund":           "Solution / Children",
+    "Solution Oriented Schemes ** - Retirement Fund": "Solution / Retirement",
+    "Life Cycle Funds - Life Cycle Fund with Maturity of 5 Years":  "Solution / Life Cycle",
+    "Life Cycle Funds - Life Cycle Fund with Maturity of 10 Years": "Solution / Life Cycle",
+    "Life Cycle Funds - Life Cycle Fund with Maturity of 15 Years": "Solution / Life Cycle",
+})
+
+# An index fund's category says "index", not what it tracks. A Nifty 50 spread and a peer rank
+# among Nifty trackers mean nothing for a NASDAQ 100 fund or a gilt/SDL target-maturity fund,
+# so those get their own groups, decided from the scheme name (the only place AMFI says it).
+_OVERSEAS_INDEX_RE = re.compile(
+    r"nasdaq|s&p\s*500|hang\s*seng|nikkei|\bfang\b|\bus\b|\bu\.s\.|world|global|overseas|"
+    r"international|developed|emerging|\bchina\b|\beurope|\bjapan|\btaiwan", re.I)
+_DEBT_INDEX_RE = re.compile(r"gilt|\bsdl\b|g-?sec|bond|\bibx\b|maturity|liquid|overnight|treasury", re.I)
+
+
+def _normalise_category(raw: str, name: str | None = None) -> str:
     if not raw:
         return None
     raw = raw.strip()
-    if raw in CATEGORY_MAP:
-        return CATEGORY_MAP[raw]
-    # Fall through — keep raw, lowercased family prefix for sortability
-    return raw
+    norm = CATEGORY_MAP.get(raw, raw)    # an unknown label keeps its raw text (test_mf_categories fails on it)
+    if norm == "Index / Equity" and name:
+        if _DEBT_INDEX_RE.search(name):
+            return "Index / Debt"
+        if _OVERSEAS_INDEX_RE.search(name):
+            return "Index / Overseas"
+    return norm
+
+
+def renormalise_master() -> int:
+    """Re-derive category_norm for every stored scheme from category_raw + name after the map
+    changed. One-column UPDATE on this producer's own table; returns rows changed."""
+    with get_db() as conn:
+        rows = conn.execute("SELECT scheme_code, category_raw, scheme_name, category_norm "
+                            "FROM mf_scheme_master").fetchall()
+        ups = [(n, r[0]) for r in rows if (n := _normalise_category(r[1], r[2])) != r[3]]
+        conn.executemany("UPDATE mf_scheme_master SET category_norm=? WHERE scheme_code=?", ups)
+        conn.commit()
+    return len(ups)
 
 
 def _parse_date(s: str) -> str | None:
@@ -223,7 +311,7 @@ def parse_navall(text: str) -> list[dict]:
                 "scheme_name":   scheme_name,
                 "amc":           current_amc,
                 "category_raw":  current_category_raw,
-                "category_norm": _normalise_category(current_category_raw),
+                "category_norm": _normalise_category(current_category_raw, scheme_name),
                 "plan_type":     _detect(detect_text, _PLAN_PATTERNS),
                 "option_type":   _detect(detect_text, _OPTION_PATTERNS),
                 "nav":           nav,

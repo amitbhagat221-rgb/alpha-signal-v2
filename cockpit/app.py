@@ -371,7 +371,7 @@ def mutual_funds_page(
 def mutual_fund_compare(request: Request, codes: str = ""):
     """Side-by-side compare. ?codes=A,B,C (2-5 scheme codes)."""
     scheme_codes = [c.strip() for c in (codes or "").split(",") if c.strip()]
-    bundle = api.get_mf_compare(scheme_codes) if scheme_codes else {"schemes": [], "categories_seen": []}
+    bundle = api.get_mf_compare(scheme_codes) if scheme_codes else {"schemes": [], "categories_seen": [], "unknown_codes": []}
     return templates.TemplateResponse(request, "mf_compare.html", {
         "page": "mutual-funds",
         "bundle": bundle,
