@@ -91,6 +91,7 @@ def mf_category_rank(scheme_code: str) -> tuple[int, int] | None:
 def get_mf_universe_overview(category: str = None, amc: str = None,
                               plan: str = None, option: str = None,
                               q: str = None, sort: str = "percentile",
+                              direction: str = None,
                               page: int = 1, page_size: int = 50,
                               include_non_investable: bool = False) -> dict:
     """Filterable + paginated universe browser. Returns dict with rows + facets + counts.
@@ -107,6 +108,8 @@ def get_mf_universe_overview(category: str = None, amc: str = None,
                        (>30 days old — matured FMPs, delisted plans). Default False.
     Sort: 'percentile' (default, within-category — audit MF-F2) / 'score' (absolute,
       cross-category) / 'ret_1y' / 'ret_3y' / 'sharpe_1y' / 'name'.
+    direction: 'asc' / 'desc' overrides the column's natural order (best first;
+      A→Z for name). Blanks stay last either way.
 
     Filters mirror the old SQL: prefix / substring matches are case-insensitive
     like SQLite's LIKE; plan/option compare upper-cased.
@@ -146,9 +149,13 @@ def get_mf_universe_overview(category: str = None, amc: str = None,
         "nav":       ("nav", False),
         "name":      ("scheme_name", True),
     }
-    col, ascending = sort_map.get(sort, sort_map["percentile"])
+    if sort not in sort_map:
+        sort = "percentile"
+    col, ascending = sort_map[sort]
+    if direction in ("asc", "desc"):
+        ascending = direction == "asc"
     # Ties (the first page is all percentile 100) break by absolute score.
-    by, asc = ([col, "composite_score"], [ascending, False]) if col != "composite_score" else ([col], [False])
+    by, asc = ([col, "composite_score"], [ascending, False]) if col != "composite_score" else ([col], [ascending])
     hits = df[keep].sort_values(by, ascending=asc, kind="mergesort", na_position="last")
     total = len(hits)
 
@@ -163,6 +170,7 @@ def get_mf_universe_overview(category: str = None, amc: str = None,
         "page_size": page_size,
         "n_pages":   (int(total) + page_size - 1) // page_size,
         "sort":      sort,
+        "dir":       "asc" if ascending else "desc",
         "as_of":     (str(hits["nav_date"].dropna().max()) if hits["nav_date"].notna().any() else None),
         "filters":   {"category": category, "amc": amc, "plan": plan, "option": option, "q": q},
     }

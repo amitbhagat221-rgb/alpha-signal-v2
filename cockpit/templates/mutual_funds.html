@@ -69,6 +69,7 @@
 </div>
 <p class="mf-sub">{{ score_note() }} Default order: best fund of each category first.</p>
 
+{% set dir_qs %}{% if dir_param %}&dir={{ dir_param }}{% endif %}{% endset %}
 {% set qs_keep %}{% if active_q %}&q={{ active_q|urlencode }}{% endif %}{% if active_category %}&category={{ active_category|urlencode }}{% endif %}{% if active_amc %}&amc={{ active_amc|urlencode }}{% endif %}{% if active_plan %}&plan={{ active_plan }}{% endif %}{% if active_option %}&option={{ active_option }}{% endif %}{% if show_all %}&show_all=1{% endif %}{% endset %}
 
 <form class="mf-toolbar" method="get" action="/mutual-funds">
@@ -90,7 +91,7 @@
         <option value="GROWTH" {% if active_option == 'GROWTH' %}selected{% endif %}>Growth</option>
         <option value="IDCW"   {% if active_option == 'IDCW' %}selected{% endif %}>IDCW</option>
     </select>
-    <input type="hidden" name="sort" value="{{ active_sort or 'percentile' }}">
+    <input type="hidden" name="sort" value="{{ active_sort or 'percentile' }}">{% if dir_param %}<input type="hidden" name="dir" value="{{ dir_param }}">{% endif %}
     {% if show_all %}<input type="hidden" name="show_all" value="1">{% endif %}
     <button class="mf-btn" type="submit">Filter</button>
     {% if active_category or active_amc or active_plan or active_option or active_q %}
@@ -101,9 +102,9 @@
         <span x-show="heatmapOpen" x-cloak>Hide heatmap</span>
     </button>
     {% if show_all %}
-    <a class="mf-toggle active" href="/mutual-funds?sort={{ active_sort or 'percentile' }}{{ qs_keep|replace('&show_all=1','') }}">Investable only</a>
+    <a class="mf-toggle active" href="/mutual-funds?sort={{ active_sort or 'percentile' }}{{ dir_qs }}{{ qs_keep|replace('&show_all=1','') }}">Investable only</a>
     {% else %}
-    <a class="mf-toggle" href="/mutual-funds?sort={{ active_sort or 'percentile' }}{{ qs_keep }}&show_all=1">Show all</a>
+    <a class="mf-toggle" href="/mutual-funds?sort={{ active_sort or 'percentile' }}{{ dir_qs }}{{ qs_keep }}&show_all=1">Show all</a>
     {% endif %}
 </form>
 <p class="mf-sub" style="margin-top:-6px;">
@@ -114,7 +115,7 @@
     {% for h in heatmap[:36] %}
     {% set ret = h.median_ret_3y %}
     <a class="mf-heatmap-tile {% if active_category == h.category_norm %}active{% endif %}"
-       href="/mutual-funds?category={{ h.category_norm|urlencode }}&sort={{ active_sort or 'percentile' }}{% if show_all %}&show_all=1{% endif %}">
+       href="/mutual-funds?category={{ h.category_norm|urlencode }}&sort={{ active_sort or 'percentile' }}{{ dir_qs }}{% if show_all %}&show_all=1{% endif %}">
         <div class="mf-cat-label">{{ h.category_norm }}</div>
         <div class="mf-cat-ret num {% if ret is not none and ret >= 8 %}score-green{% elif ret is not none and ret < 0 %}score-red{% endif %}">{{ ret|pct }}</div>
         <div class="mf-cat-meta">median 3Y CAGR · {{ h.scheme_count }} schemes</div>
@@ -142,9 +143,12 @@
 </div>
 
 {% macro sort_header(label, key, num=False) %}
+    {# Click the active column again to reverse it; another column starts in its natural order (best first, A→Z for name). #}
     {% set on = active_sort == key %}
-    <th class="{% if num %}num{% endif %}" aria-sort="{{ 'descending' if on and key != 'name' else 'ascending' if on else 'none' }}">
-        <a class="{% if on %}active{% endif %}" href="/mutual-funds?sort={{ key }}{{ qs_keep }}">{{ label }}{% if on %} {{ '↑' if key == 'name' else '↓' }}{% endif %}</a>
+    {% set next_dir = ('asc' if active_dir == 'desc' else 'desc') if on else none %}
+    <th class="{% if num %}num{% endif %}" aria-sort="{{ ('ascending' if active_dir == 'asc' else 'descending') if on else 'none' }}">
+        <a class="{% if on %}active{% endif %}" href="/mutual-funds?sort={{ key }}{% if next_dir %}&dir={{ next_dir }}{% endif %}{{ qs_keep }}"
+           aria-label="{{ label ~ (', sorted ' ~ ('ascending' if active_dir == 'asc' else 'descending') ~ ' — click to reverse' if on else ' — sort by this column') }}">{{ label }}{% if on %} {{ '↑' if active_dir == 'asc' else '↓' }}{% endif %}</a>
     </th>
 {% endmacro %}
 
@@ -192,7 +196,7 @@
 </div>
 
 {% if bundle.n_pages and bundle.n_pages > 1 %}
-{% set qs %}{{ qs_keep }}&sort={{ active_sort }}{% endset %}
+{% set qs %}{{ qs_keep }}&sort={{ active_sort }}{{ dir_qs }}{% endset %}
 <div class="pager">
     <a href="/mutual-funds?page={{ bundle.page - 1 }}{{ qs }}" class="{% if bundle.page <= 1 %}disabled{% endif %}">← Prev</a>
     <span class="info">Page {{ bundle.page }} / {{ bundle.n_pages }}</span>

@@ -327,11 +327,11 @@ def mutual_funds_page(
     category: str = None, amc: str = None,
     plan: str = None, option: str = None,
     q: str = None, sort: str = "percentile", page: int = 1,
-    show_all: int = 0,
+    show_all: int = 0, dir: str = None,
 ):
     bundle = api.get_mf_universe_overview(
         category=category, amc=amc, plan=plan, option=option,
-        q=q, sort=sort, page=page,
+        q=q, sort=sort, direction=dir, page=page,
         include_non_investable=bool(show_all),
     )
     heatmap = api.get_mf_category_heatmap(include_non_investable=bool(show_all))
@@ -340,7 +340,8 @@ def mutual_funds_page(
         "bundle": bundle, "heatmap": heatmap,
         "active_category": category, "active_amc": amc,
         "active_plan": plan, "active_option": option, "active_q": q,
-        "active_sort": sort, "active_page": page,
+        "active_sort": bundle["sort"], "active_dir": bundle["dir"],
+        "dir_param": dir if dir in ("asc", "desc") else None, "active_page": page,
         "show_all": show_all,
     })
 

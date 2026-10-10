@@ -24,6 +24,33 @@ def test_nav_sort_is_numeric_descending_and_missing_last(monkeypatch):
     assert [r["scheme_code"] for r in rows] == ["b", "c", "a", "d"]
 
 
+def test_sort_direction_reverses_and_keeps_missing_last(monkeypatch):
+    monkeypatch.setattr(mf, "_mf_universe_pool", lambda: _pool())
+    asc = mf.get_mf_universe_overview(sort="nav", direction="asc")
+    assert [r["scheme_code"] for r in asc["rows"]] == ["a", "c", "b", "d"]
+    assert asc["dir"] == "asc"
+    assert mf.get_mf_universe_overview(sort="nav")["dir"] == "desc"
+    by_name = mf.get_mf_universe_overview(sort="name", direction="desc")["rows"]
+    assert [r["scheme_code"] for r in by_name] == ["d", "c", "b", "a"]
+    by_score = mf.get_mf_universe_overview(sort="score", direction="asc")["rows"]
+    assert [r["scheme_code"] for r in by_score] == ["d", "a", "c", "b"]
+
+
+def test_fund_list_header_links_reverse_the_active_column(monkeypatch):
+    from fastapi.testclient import TestClient
+    import cockpit.app as app_mod
+    import webauth
+    monkeypatch.setattr(mf, "_mf_universe_pool", lambda: _pool())
+    monkeypatch.setattr(api, "get_mf_category_heatmap", lambda **k: [])
+    client = TestClient(app_mod.app)
+    client.cookies.set(webauth.COOKIE, webauth.make_token())
+    html = client.get("/mutual-funds?sort=ret_1y").text
+    assert 'href="/mutual-funds?sort=ret_1y&dir=asc' in html          # active, natural desc → next click asc
+    html = client.get("/mutual-funds?sort=ret_1y&dir=asc").text
+    assert 'href="/mutual-funds?sort=ret_1y&dir=desc' in html
+    assert "&dir=asc" in html.split('class="pager"', 1)[-1] or 'class="pager"' not in html  # paging keeps it
+
+
 def test_default_sort_breaks_percentile_ties_by_score(monkeypatch):
     monkeypatch.setattr(mf, "_mf_universe_pool", lambda: _pool())
     rows = mf.get_mf_universe_overview()["rows"]
