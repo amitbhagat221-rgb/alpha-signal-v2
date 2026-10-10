@@ -51,7 +51,7 @@
 
 {% set S = summary %}
 <h1 class="section-title">Feeds</h1>
-<div class="section-desc">Is every data source working? Each gets a small live check at 02:45 UTC, before the morning run. The Data tab is the state of the tables they fill.</div>
+<div class="section-desc">Is every data source working? Each gets a small live probe at 02:45 UTC, before the morning run. The Data tab is the state of the tables they fill. Broken = CRITICAL and Needs a look = WARN on Health: the same list, the same severity.</div>
 
 <div x-data="{ tab: 'feeds', loaded: { feeds: true }, open: {} }" x-cloak>
 {{ tab_bar([('feeds', 'Feeds'), ('data', 'Data'), ('new', 'New sources')]) }}
@@ -59,9 +59,10 @@
 {# ═══════════════════════════ FEEDS ═══════════════════════════ #}
 <div x-show="tab === 'feeds'" x-cloak>
   <div class="ds-tiles">
-    <div class="ds-tile"><div class="n ds-OK">{{ S.n_ok }}<span style="font-size: 14px; color: var(--text-muted);">/{{ S.live }}</span></div><div class="l">working</div></div>
-    <div class="ds-tile"><div class="n {% if S.n_look %}ds-look{% else %}ds-OK{% endif %}">{{ S.n_look }}</div><div class="l">need a look</div></div>
-    <div class="ds-tile"><div class="n {% if S.n_broken %}ds-broken{% else %}ds-OK{% endif %}">{{ S.n_broken }}</div><div class="l">broken</div></div>
+    <div class="ds-tile"><div class="n ds-OK">{{ S.n_ok }}<span style="font-size: 14px; color: var(--text-muted);">/{{ S.live }}</span></div><div class="l">feeds working</div></div>
+    <div class="ds-tile"><div class="n {% if S.n_look %}ds-look{% else %}ds-OK{% endif %}">{{ S.n_look }}</div><div class="l">need a look (WARN on Health)</div></div>
+    <div class="ds-tile"><div class="n {% if S.n_broken %}ds-broken{% else %}ds-OK{% endif %}">{{ S.n_broken }}</div><div class="l">broken (CRITICAL on Health)</div></div>
+    <div class="ds-tile" data-probe-tile><div class="n {% if S.canary_pass == S.canary_total %}ds-OK{% else %}ds-look{% endif %}">{{ S.canary_pass }}<span style="font-size: 14px; color: var(--text-muted);">/{{ S.canary_total }}</span></div><div class="l">feed probes pass (the count Health shows){% if S.no_probe %}; {{ S.no_probe }} feed{{ '' if S.no_probe == 1 else 's' }} ha{{ 's' if S.no_probe == 1 else 've' }} no probe{% endif %}</div></div>
     <div class="ds-tile"><div class="n ds-muted">{{ S.critical_no_backup }}</div><div class="l">critical sources with no backup (a known gap, not today's status)</div></div>
   </div>
 
@@ -80,7 +81,7 @@
   </div>
   {% endif %}
   <div class="ds-wrap">
-  <div class="ds-head"><div>Status</div><div>Source</div><div>Health check</div><div>Latest data</div></div>
+  <div class="ds-head"><div>Status</div><div>Source</div><div>Probe</div><div>Latest data</div></div>
   <div class="ds-list">
   {% for r in simple %}
     {% set cls = 'broken' if r.state == 'Broken' else ('look' if r.state == 'Needs a look' else 'OK') %}
@@ -94,7 +95,7 @@
         <div class="ds-what">{{ r.what }}</div>
         {% for p in r.problem_labels[:2] %}<div class="ds-prob">• {{ p }}</div>{% endfor %}
       </div>
-      <div class="ds-cell {% if r.check in ('failed', 'crashed') %}ds-bad{% endif %}" data-l="Health check">{{ r.check }}<small>{{ r.check_when }}</small></div>
+      <div class="ds-cell {% if r.check in ('failed', 'crashed') %}ds-bad{% endif %}" data-l="Probe">{{ r.check }}<small>{{ r.check_when }}</small></div>
       <div class="ds-cell {% if r.age_bad %}ds-bad{% endif %}" data-l="Latest data">{{ r.age or '—' }}{% if r.age and r.cadence %} · {{ r.cadence|replace('_', ' ') }}{% endif %}{% if r.age %}<small>{{ 'overdue' if r.age_bad else 'on schedule' }}</small>{% endif %}</div>
     </div>
     <div class="ds-more" x-show="open['{{ r.feed }}']" x-cloak>

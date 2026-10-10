@@ -522,6 +522,17 @@ def get_flow_overview():
     }
 
 
+def get_run_summary():
+    """The latest run as Health states it (checks.report.run_line over the gathered pipeline facts),
+    for Flow's header: {line, date, n_logged, n_ok}, or None when the report could not gather it."""
+    from checks import report
+    p = (get_health_overview().get("pipeline_summary") or {})
+    if not p.get("last_run_date"):
+        return None
+    return {"line": report.run_line(p), "date": p["last_run_date"], "n_logged": p["n_steps"],
+            "n_ok": p["n_steps"] - len(p["failed_steps_today"])}
+
+
 # ── Step rerun (UI button on /flow) ──────────────────────────────────────
 
 def rerun_step(step_name: str) -> dict:
@@ -800,6 +811,20 @@ def since_yesterday(issues, prev):
             "cleared": [{"id": k, "label": short(k)} for k in before if k not in now]}
 
 
+def factor_label(signal, labels=None):
+    """A factor's plain label (the main cockpit's get_factor_labels), never its internal id."""
+    if labels is None:
+        from cockpit.api import get_factor_labels
+        labels = get_factor_labels()
+    return labels.get(signal) or str(signal).replace("_", " ").capitalize()
+
+
+def _with_factor_labels(rows):
+    from cockpit.api import get_factor_labels
+    labels = get_factor_labels()
+    return [dict(r, label=factor_label(r["signal"], labels)) for r in rows]
+
+
 @_persisted_cache(300, name="get_health_overview")
 def get_health_overview(force=False):
     """The Health page: {as_of, verdict, verdict_severity, counts, scorecard (five questions), issues +
@@ -838,13 +863,13 @@ def get_health_overview(force=False):
         "watchdog": st["watchdog"],
         "pipeline_summary": st["pipeline"],
         # per-signal "who should have a score" vs "who lacks it" (plan 0005 Phase A)
-        "eligibility": db.rows(
+        "eligibility": _with_factor_labels(db.rows(
             "SELECT signal, "
             "       SUM(CASE WHEN eligible=1 THEN 1 ELSE 0 END) AS n_eligible, "
             "       SUM(CASE WHEN eligible=0 THEN 1 ELSE 0 END) AS n_ineligible "
             "FROM universe_eligibility "
             "WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM universe_eligibility) "
-            "GROUP BY signal ORDER BY signal"),
+            "GROUP BY signal ORDER BY signal")),
         "integrity": {status.lower() + "s": [r for r in integrity if r["integrity_status"] == status]
                       for status in ("FAIL", "WARN")},
     })
@@ -879,12 +904,13 @@ def _clean(o):
 
 
 _PLAIN = {   # verdict code → plain words for the page (the email keeps the precise codes)
-    "FEED_CANARY_FAIL": "Health check failed",
-    "FEED_CANARY_WARN": "Health check warning",
-    "FEED_CANARY_ERROR": "Health check crashed (our code)",
-    "FEED_CANARY_MISSING": "Health check hasn't run recently",
-    "FEED_RUN_FAILED": "Last run failed",
-    "FEED_OUTDATED": "Data is out of date",
+    "FEED_CANARY_FAIL": "Probe failed",
+    "FEED_CANARY_WARN": "Probe warning",
+    "FEED_CANARY_ERROR": "Probe crashed (our code)",
+    "FEED_CANARY_MISSING": "Probe hasn't run recently",
+    "PIPELINE_STEP": "Last run failed",
+    "TABLE_STALE": "Data is out of date",
+    "TABLE_EMPTY": "Table is empty",
     "FEED_VOLUME_DROP": "Wrote far fewer rows than usual",
     "FEED_VOLUME_SPIKE": "Wrote far more rows than usual",
     "FEED_RECONCILE_FAIL": "Disagrees with an independent source",
@@ -906,7 +932,7 @@ def _plain(r):
     r["state"] = {"CRITICAL": "Broken", "WARN": "Needs a look"}.get(r.get("health"), "OK")
     r["importance"] = {"T1": "Critical", "T2": "Normal"}.get(r.get("tier"), "")
     if not r.get("canary"):
-        r["check"] = "no check"
+        r["check"] = "no probe"
     elif not last:
         r["check"] = "not run yet"
     else:
@@ -976,38 +1002,59 @@ def group_feed_alarms(rows, backfill=None):
     return out
 
 
+def _gathered_issues():
+    """Health's issue lists (CRITICAL + WARN, and the INFO ones): the one source of every severity."""
+    ov = get_health_overview()
+    return ov["issues"], ov["tolerated"]
+
+
+def feed_issues(rows, gathered):
+    """{feed: [verdict-shaped issue]}: the gathered issues that belong to each feed, matched on the
+    feed's name (probe, row volume), the steps that run it (pipeline) and the tables it writes
+    (stale / empty). `gathered` = (actionable, tolerated). A tolerated (INFO) probe warning is kept:
+    the page shows it, so a warning next to an OK status does not read as a contradiction."""
+    import feeds
+    actionable, tolerated = gathered
+    by_target = {}
+    for r in rows:
+        if r["status"] not in feeds.LIVE:
+            continue
+        by_target.setdefault(("feed", r["feed"]), []).append(r["feed"])
+        for st in feeds.log_steps(r["feed"]):
+            by_target.setdefault(("step", st), []).append(r["feed"])
+        for t in (feeds.FEEDS[r["feed"]].get("writes") or []):
+            by_target.setdefault(("table", t), []).append(r["feed"])
+    kind = {"FEED_PROBE": "feed", "FEED_VOLUME": "feed", "PIPELINE_STEP": "step",
+            "TABLE_STALE": "table", "TABLE_EMPTY": "table"}
+    out = {}
+    for i in list(actionable) + [t for t in tolerated if t["id"].startswith("FEED_CANARY_WARN")]:
+        if i["code"] not in kind:
+            continue
+        specific = i["id"].split(":")[0]                       # FEED_CANARY_FAIL, FEED_VOLUME_SPIKE, ...
+        v = {"severity": i["severity"], "code": specific if specific in _PLAIN else i["code"],
+             "target": i["target"], "message": i["message"], "detail": i.get("detail") or ""}
+        for f in by_target.get((kind[i["code"]], i["target"]), []):
+            out.setdefault(f, []).append(v)
+    return out
+
+
 @_persisted_cache(300, name="get_feed_overview")
 def get_feed_overview():
     """Everything the /feeds page shows, from feeds.FEEDS + checks.feeds (one source
     of truth with the health report — the page and the email cannot disagree)."""
     import feeds
     from checks import CRITICAL, WARN
-    from checks.feeds import feed_state, feed_verdicts, registry_drift
+    from checks.feeds import feed_state, probe_tally, registry_drift
 
     rows = _clean(feed_state())
     drift = registry_drift()
-    verdicts = feed_verdicts(rows)
-    by_feed = {}
-    for v in verdicts:
-        by_feed.setdefault(v["target"], []).append(v)
+    # Severity comes from the gathered health report (checks.report.gather via get_health_overview):
+    # a feed is as bad as the worst issue Health lists for it (its probe, its volume, the step that
+    # runs it, the table it writes). This page decides nothing of its own.
+    mine = feed_issues(rows, _gathered_issues())
     sev_rank = {CRITICAL: 0, WARN: 1, "INFO": 2}
     for r in rows:
-        vs = list(by_feed.get(r["feed"], []))
-        # The page's dot is OVERALL health: canary/registry verdicts (the email's),
-        # plus the feed's last run and the freshness of what it writes (the email
-        # reports those through its pipeline/freshness verdicts).
-        live_feed = r["status"] in feeds.LIVE and r["tier"] in ("T1", "T2")
-        lr = r.get("last_run") or {}
-        if live_feed and lr.get("status") == "FAILED":
-            vs.append({"severity": WARN, "code": "FEED_RUN_FAILED", "target": r["feed"],
-                       "message": f"{r['feed']} last run FAILED ({lr.get('step_name')})",
-                       "detail": (lr.get("error_message") or "")[:200]})
-        wf = r.get("worst_freshness") or {}
-        if live_feed and wf.get("freshness") == "OUTDATED":
-            vs.append({"severity": WARN, "code": "FEED_OUTDATED", "target": r["feed"],
-                       "message": f"{r['feed']} writes {wf['table']}, OUTDATED ({wf.get('age_days')}d old)",
-                       "detail": ""})
-        vs.sort(key=lambda v: sev_rank.get(v["severity"], 3))
+        vs = sorted(mine.get(r["feed"], []), key=lambda v: sev_rank.get(v["severity"], 3))
         r["verdicts"] = vs
         r["health"] = vs[0]["severity"] if vs and vs[0]["severity"] in (CRITICAL, WARN) else "OK"
         last = r.get("canary_last") or {}
@@ -1035,6 +1082,7 @@ def get_feed_overview():
 
     live = [r for r in rows if r["status"] in feeds.LIVE]
     probed = [r for r in live if r["canary"]]
+    n_pass, n_probed = probe_tally(live)
     t1 = [r for r in live if r["tier"] == "T1"]
 
     def count(pred, rs=live):
@@ -1044,7 +1092,7 @@ def get_feed_overview():
         "live": len(live), "t1": len(t1), "t2": count(lambda r: r["tier"] == "T2"),
         "discovery": count(lambda r: r["status"] in feeds.DISCOVERY + ("probation",), rows),
         "retired": count(lambda r: r["status"] == "retired", rows),
-        "canary_total": len(probed), "canary_pass": count(lambda r: r["canary_status"] == "PASS", probed),
+        "canary_total": n_probed, "canary_pass": n_pass, "no_probe": len(live) - n_probed,
         "canary_fail": count(lambda r: r["canary_status"] in ("FAIL", "ERROR"), probed),
         "canary_warn": count(lambda r: r["canary_status"] == "WARN", probed),
         "drift": count(lambda r: (r.get("canary_last") or {}).get("symptom") == "D", probed),

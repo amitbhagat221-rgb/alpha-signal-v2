@@ -113,8 +113,10 @@
     </div>
 </div>
 <div class="fl-sum" data-flow-summary>
-    The morning run, 03:30 UTC (09:00 IST): <b>{{ step_count }} steps</b> in {{ layers|length }} stages.
-    <b>{{ n_ok }}</b> succeeded last time{% if failures %}, <b class="c-bad">{{ failures|length }} failed</b>{% endif %}{% if n_never %}, {{ n_never }} never ran{% endif %}.
+    The morning run, 03:30 UTC (09:00 IST), is defined as <b>{{ step_count }} steps</b> in {{ layers|length }} stages.
+    {% if run %}Latest run, {{ run.date }}: <b data-run-line>{{ run.n_ok }} of {{ run.n_logged }} logged steps ok</b>{% if n_never %}; {{ n_never }} defined step{{ '' if n_never == 1 else 's' }} never ran{% endif %}.
+    <span class="u-muted-11">The log also holds cron and datamodel jobs, so it counts more than the {{ step_count }} defined steps; Health counts the same {{ run.n_logged }}.</span>
+    {% elif n_never %}{{ n_never }} never ran.{% endif %}
 </div>
 
 {# Failure banner: DAG steps, plus cron / datamodel jobs that log runs but are not DAG steps. The error shown is the real one. #}

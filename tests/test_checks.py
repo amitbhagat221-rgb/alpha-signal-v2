@@ -280,7 +280,7 @@ def test_streak_replaces_the_single_failure():
                           "failed_steps_today": [{"step": "fetch_x", "error": "e", "at": "t"}],
                           "failed_streaks": [{"step": "fetch_x", "days": 3, "sample_error": "e"}]})
     (i,) = report.issues(st)[0]
-    assert (i["code"], i["severity"]) == ("PIPELINE_STEP", checks.CRITICAL) and "3 days in a row" in i["message"]
+    assert (i["code"], i["severity"]) == ("PIPELINE_STEP", checks.CRITICAL) and "has not recovered" in i["message"]
 
 
 def test_a_check_that_looks_at_nothing_is_reported(temp_db):

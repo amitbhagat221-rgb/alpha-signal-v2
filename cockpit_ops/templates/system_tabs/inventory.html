@@ -56,7 +56,7 @@
                     <td data-key="kind"><span class="pill {{ kind_cls }}">{{ row.kind }}</span></td>
                     <td data-key="rows" class="num inv-strong">{{ "{:,}".format(row.rows) }}</td>
                     <td data-key="stock_coverage_pct" class="num">
-                        {% if cov_pct is not none %}<b class="{{ cov_cls }}">{{ "{:,}".format(row.stock_count) }}</b> <span class="inv-faint">{{ cov_pct }}%</span>{% else %}<span class="inv-faint">—</span>{% endif %}
+                        {% if cov_pct is not none %}<b class="{{ cov_cls }}">{{ "{:,}".format(row.stock_count|int) }}</b> <span class="inv-faint">{{ cov_pct }}%</span>{% else %}<span class="inv-faint">—</span>{% endif %}
                     </td>
                     <td data-key="date_span" class="mono">{{ row.date_span if row.date_span and row.date_span != '—' else (row.depth or '—') }}</td>
                     <td data-key="latest_date" class="mono">{{ row.latest_date or '—' }}</td>

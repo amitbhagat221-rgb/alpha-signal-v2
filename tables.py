@@ -627,9 +627,9 @@ TABLES = {
                                         "does the cross-source price check daily."},
     "forecast_history_quarantine": {"kind": "QUARANTINE", "domain": "Pipeline", "date_col": "date"},
     "health_score": {"kind": "COMPUTED", "domain": "Pipeline", "date_col": "snapshot_date",
-                     "description": "History only: the retired data-trust score per factor / table / "
-                                    "system / pick, 2026-05 → 2026-10-02. Nothing writes it; daily_picks.uhs_* columns hold "
-                                    "the per-pick values of the same period."},
+                     "description": "History only: an older data score per factor / table / "
+                                    "system / pick, 2026-05 → 2026-10-02, replaced by each pick's Data coverage. Nothing writes it; "
+                                    "the old per-pick score columns in daily_picks hold the same period."},
     "llm_usage": {"kind": "LOG", "domain": "Pipeline", "date_col": None},
     "llm_tasks": {
         "kind": "LOG", "domain": "Pipeline", "date_col": "created_at",
@@ -697,7 +697,7 @@ TABLES = {
     # lag and only alarms on true death (audit Data-F5).
     "uhs_calibration_log": {
         "kind": "COMPUTED", "domain": "Pipeline", "date_col": "pick_date", "stale_days": 45,
-        "description": "History only: the retired trust score against forward return; it never reached the 6 months it needed.",
+        "description": "History only: the older per-pick score against forward return; it never reached the 6 months it needed.",
     },
 
     # ── Other ──
@@ -839,7 +839,7 @@ TABLES = {
     },
     "row_issues": {
         "kind": "COMPUTED", "domain": "Pipeline", "date_col": None,
-        "description": 'Rows rejected or flagged (quarantine, trust-gate failures, pull errors), with the row as JSON and a resolution slot.',
+        "description": 'Rows rejected or flagged (quarantine, failed data gates, pull errors), with the row as JSON and a resolution slot.',
     },
 }
 

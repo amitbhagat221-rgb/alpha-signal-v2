@@ -182,4 +182,93 @@ def test_inbox_renders_one_button_per_option(q):                                
            "work_orders": [], "decisions": [], "cio_queue": [], "memos": [], "memo_filter": {"mfrom": "", "mto": "", "mrole": "", "active": False, "capped": False, "quick": [], "first": None},
            "tree": [], "roles": [], "ideas": {}, "outlook": None, "running": False, "mpage": 1, "memo_per_page": 12, "decided": {}}
     html = templates.env.get_template("org.html").render(**ctx)
-    assert html.count('data-option="') == 3 and "Choose for #" in html and "decide(" in html
+    assert html.count('data-option="') == 3 and "Choose for " in html and "#' + id" not in html and "decide(" in html
+
+
+# ── phase 3: every ops page agrees with the one gathered report ──
+
+def _gathered(days_in_history=8):
+    from checks import report
+    from tests.test_checks import _state
+    st = _state(pipeline={"last_run_date": "2026-01-02", "last_run_status": "FAILED", "n_steps": 55,
+                          "failed_steps_today": [{"step": "fetch_x", "error": "e", "at": "t"}],
+                          "failed_streaks": [{"step": "fetch_x", "days": 4, "sample_error": "e"}]},
+                feeds={"rows": [{"feed": "a", "canary_last": {"status": "PASS"}}, {"feed": "b", "canary_last": {"status": "FAIL"}},
+                                {"feed": "c", "canary_last": None}], "verdicts": []},
+                history={"streaks": {"PIPELINE_STEP:fetch_x": days_in_history}, "last_fired": {}, "since": "2025-12-01"})
+    return report.conclude(st)
+
+
+def test_one_streak_number_for_health_and_flow():
+    """Health prints the issue's days; Flow's broken-steps table reads the same number (the detector's own count is not shown)."""
+    st = _gathered()
+    (issue,) = [i for i in st["issues"] if i["id"] == "PIPELINE_STEP:fetch_x"]
+    assert issue["days"] == 9 and st["pipeline"]["failed_streaks"][0]["days"] == issue["days"]
+    assert "days in a row" not in issue["message"]
+
+
+def test_run_line_and_probe_count_are_defined_once():
+    from checks import report
+    from checks.feeds import probe_tally
+    st = _gathered()
+    facts = {q["theme"]: q["facts"] for q in st["scorecard"]}
+    assert report.run_line(st["pipeline"]) in facts["ran"]
+    assert probe_tally(st["feeds"]["rows"]) == (1, 2) and "1 of 2 feed probes pass" in facts["arrived"]
+
+
+def test_flow_header_prints_health_run_line_and_defined_steps_as_a_different_noun(monkeypatch):
+    from checks import report
+    from cockpit_ops.app import templates
+    st = _gathered()
+    monkeypatch.setattr(api, "get_health_overview", lambda force=False: {"pipeline_summary": st["pipeline"]})
+    run = api.get_run_summary()
+    assert run["line"] == report.run_line(st["pipeline"]) and (run["n_ok"], run["n_logged"]) == (54, 55)
+    html = templates.env.get_template("flow.html").render(layers=[], failures=[], outside_failures=[], step_count=67,
+                                                            n_ok=66, n_never=0, run=run, page="flow", edges=[])
+    assert "54 of 55 logged steps ok" in html and "67 steps" in html and "66 succeeded" not in html
+
+
+def test_feed_severity_is_the_gathered_issue_severity():
+    rows = [{"feed": "yfinance_prices", "status": "live"}]
+    import feeds
+    name = next(iter(n for n, f in feeds.FEEDS.items() if f["status"] in feeds.LIVE and feeds.steps_of(n)))
+    step = feeds.steps_of(name)[0]
+    rows = [{"feed": name, "status": feeds.FEEDS[name]["status"]}]
+    crit = _issue("PIPELINE_STEP", step)
+    out = api.feed_issues(rows, ([crit], []))
+    assert out[name][0]["severity"] == "CRITICAL" and api._PLAIN[out[name][0]["code"]] == "Last run failed"
+
+
+def test_backticks_render_as_code_and_factor_ids_as_labels():
+    from cockpit_ops.app import _ticks
+    assert str(_ticks("run `run.sh canary` <now>")) == 'run <code class="mono">run.sh canary</code> &lt;now&gt;'
+    assert api.factor_label("announcement_car") != "announcement_car" and "_" not in api.factor_label("not_a_factor_id")
+
+
+def test_org_card_leads_with_the_subject_and_keeps_the_id_as_a_reference():
+    from pathlib import Path
+    src = (Path(api.__file__).parent / "templates" / "org.html").read_text()
+    head = src[src.index('<div class="og-row" id="item-'):]
+    head = head[:head.index('<div class="og-sub">')]
+    assert 'class="og-title">{{ i.title }}' in head and head.index("og-title") < head.index("ref {{ i.doc_id }}")
+    assert "#{{ i.doc_id }}" not in src and "title=" not in src.replace("x-text", "").replace("og-title", "").replace("chat.title", "")
+
+
+def test_inventory_coverage_is_an_integer_and_retired_wording_is_gone():
+    from pathlib import Path
+    import re
+    import tables
+    src = (Path(api.__file__).parent / "templates" / "system_tabs" / "inventory.html").read_text()
+    assert "row.stock_count|int" in src
+    text = " ".join(str(v) for e in tables.TABLES.values() for k, v in e.items() if k in ("description", "depth", "source"))
+    assert not re.search(r"C13b|\buhs_|trust[- ]gate", text, re.I)
+
+
+def test_compare_maps_every_ops_page_and_tab():
+    import preview
+    from cockpit_ops import pages
+    for p in pages.PAGES:
+        assert p["path"] in preview.COMPARE["ops"], p["path"]
+        for key, _ in p.get("tabs") or []:
+            assert f"{p['path']}#{key}" in preview.COMPARE["ops"], (p["path"], key)
+    assert preview.COMPARE["ops"]["/feeds#data"] == "/system#health"

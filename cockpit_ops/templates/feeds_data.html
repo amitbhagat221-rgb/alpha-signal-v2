@@ -17,7 +17,7 @@
         {% set elig_pct = (100 * e.n_eligible / total) if total else 0 %}
         {% set tone = 'st-ok' if elig_pct >= 90 else ('st-info-blue' if elig_pct >= 70 else ('st-warn' if elig_pct >= 40 else 'st-broken')) %}
         <div class="sy-tile {{ tone }}">
-            <div class="sy-tile-h"><span class="mono sy-tile-n">{{ e.signal }}</span><span class="mono sy-tile-p">{{ elig_pct|pct(0) }}</span></div>
+            <div class="sy-tile-h"><span class="sy-tile-n">{{ e.label or e.signal }}</span><span class="mono sy-tile-p">{{ elig_pct|pct(0) }}</span></div>
             <div class="sy-bar"><div style="width: {{ elig_pct }}%;"></div></div>
             <div class="u-muted-10"><b class="c-primary">{{ "{:,}".format(e.n_eligible) }}</b> eligible · {{ "{:,}".format(e.n_ineligible) }} ineligible</div>
         </div>

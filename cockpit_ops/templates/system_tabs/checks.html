@@ -22,8 +22,8 @@
     <div class="sy-cat st-{{ c.status|lower }}">
         <div class="sy-cat-m">{{ cat_mark[c.status] }}</div>
         <div class="sy-cat-b">
-            <div class="sy-cat-w"><b>Alerts when:</b> {{ c.when }}{% if c.n_checks %} <span class="u-muted">({{ c.n_checks }} checks)</span>{% endif %}</div>
-            <div class="sy-cat-y"><b>Why:</b> {{ c.why }}</div>
+            <div class="sy-cat-w"><b>Alerts when:</b> {{ c.when|ticks }}{% if c.n_checks %} <span class="u-muted">({{ c.n_checks }} checks)</span>{% endif %}</div>
+            <div class="sy-cat-y"><b>Why:</b> {{ c.why|ticks }}</div>
             <div class="sy-cat-c">
                 <span class="mono">{{ c.code }}</span> · severity: {{ c.severity }}
                 {% if c.failing %}<br><span class="sy-cat-now">now: {{ c.failing[:6] | join('; ') | truncate(220) }}</span>

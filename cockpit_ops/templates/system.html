@@ -69,7 +69,7 @@
     {% set S = overview.since %}
     <div class="sy-since" data-since>
         <details>
-            <summary>Since {{ S.day }}: <b>{{ S.new|length }} new</b> · {{ S.open|length }} still open · {{ S.cleared|length }} cleared<span class="sy-link">details</span></summary>
+            <summary>Since {{ S.day }}: <b>{{ S.new|length }} new</b> · {{ S.open|length }} still open · {{ S.cleared|length }} cleared <span class="sy-link">details</span></summary>
             {% if S.new %}<ul>{% for x in S.new %}<li><b>new</b> {{ x.label }}</li>{% endfor %}</ul>{% endif %}
             {% if S.cleared %}<ul>{% for x in S.cleared %}<li><b>cleared</b> {{ x.label }}</li>{% endfor %}</ul>{% endif %}
         </details>
@@ -94,7 +94,7 @@
     <div class="sy-grp" data-group="{{ g.key }}">
         <div class="sy-grp-h">
             <span class="pill {{ {'CRITICAL': 'pill-red', 'WARN': 'pill-amber'}.get(g.severity, 'pill-muted') }}">{{ g.severity }}</span>
-            <span class="sy-issue-m">{{ g.title }}</span>
+            <span class="sy-issue-m">{{ g.title|ticks }}</span>
         </div>
         {% if g.n == 1 %}
           {% set m = g.members[0] %}
@@ -114,8 +114,8 @@
         {% endif %}
         {% if g.cause %}<div class="sy-cause">{{ g.cause }}</div>{% endif %}
         {% if g.note %}<div class="sy-cause" data-backfill-note>{{ g.note }}</div>{% endif %}
-        <div class="sy-issue-w"><b>Do first:</b> {{ g.fix }}</div>
-        <details class="sy-why"><summary>Why it matters</summary><div>{{ g.why }}</div></details>
+        <div class="sy-issue-w"><b>Do first:</b> {{ g.fix|ticks }}</div>
+        <details class="sy-why"><summary>Why it matters</summary><div>{{ g.why|ticks }}</div></details>
         <div class="sy-issue-f">
             {% if g.days <= 1 %}<b class="sy-new">new today</b>{% elif g.standing %}<b class="sy-standing">standing, day {{ g.days }}: fix it, accept it, or delete the check</b>{% else %}day {{ g.days }}{% endif %}
             {% for m in g.members if m.drilldown_url %} · <a href="{{ m.drilldown_url }}" class="sy-link">{{ m.drilldown_label }}{% if g.n > 1 %} ({{ m.target }}){% endif %}</a>{% endfor %}
@@ -143,7 +143,7 @@
     <div x-show="open" x-cloak class="sy-fold-body">
         {% for issue in overview.tolerated %}
         <div class="sy-tol">
-            <span>{{ issue.message }}</span>
+            <span>{{ issue.message|ticks }}</span>
             {% if issue.detail %}<span class="mono"> · {{ issue.detail }}</span>{% endif %}
         </div>
         {% endfor %}

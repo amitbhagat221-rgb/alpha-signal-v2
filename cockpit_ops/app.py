@@ -14,6 +14,7 @@ Production: systemctl restart alpha-cockpit-ops
 """
 
 import json
+import re
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -42,6 +43,16 @@ app.mount("/static", StaticFiles(directory=COCKPIT_STATIC), name="static")
 # _components.html / _icons.html (single copies — the ops forks went stale).
 templates = make_templates([OPS_DIR / "templates"],
                            nav=nav_model(pages.PAGES, pages.OTHER_APP, pages.BRAND), role="ops")
+
+
+def _ticks(text):
+    """Escape a plain-words string and render its `backticked` parts as code, so a fix like
+    "run `run.sh canary`" reads as a command and not with raw backticks."""
+    from markupsafe import Markup, escape
+    return Markup(re.sub(r"`([^`]+)`", r'<code class="mono">\1</code>', str(escape(text if text is not None else ""))))
+
+
+templates.env.filters["ticks"] = _ticks
 
 
 @app.get("/api/search")
@@ -165,8 +176,12 @@ async def flow_tab_log(request: Request):
 @app.get("/flow", response_class=HTMLResponse)
 def flow_page(request: Request):
     overview = api.get_flow_overview()
+    try:
+        run = api.get_run_summary()
+    except Exception:                                 # noqa: BLE001 — the header degrades, the page still renders
+        run = None
     return templates.TemplateResponse(request, "flow.html", {
-        "page": "flow", **overview,
+        "page": "flow", "run": run, **overview,
     })
 
 
