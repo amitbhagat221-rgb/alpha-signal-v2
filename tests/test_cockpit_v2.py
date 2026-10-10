@@ -44,7 +44,7 @@ def test_site_map_order():
 
 def test_retired_urls_redirect_to_a_page_that_renders(clients):
     main, ops = clients
-    expect = {"/actions": "/#actions", "/explorer": "/stocks", "/explorer/REDY": "/stocks/REDY",
+    expect = {"/actions": "/", "/explorer": "/stocks", "/explorer/REDY": "/stocks/REDY",
               "/news": "/markets", "/news/all": "/markets#search", "/sectors": "/markets#industries",
               "/sectors?industry=Banks": "/markets?industry=Banks#industries", "/multibagger": "/ideas",
               "/playbooks": "/ideas", "/portfolio": "/book", "/model/outcomes": "/book#track-record"}

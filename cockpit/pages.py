@@ -17,8 +17,7 @@ template and one entry here.
 PAGES = [
     {"path": "/", "id": "today", "title": "Today", "subtitle": "Read and act on today",
      "icon": "sun", "section": "Daily", "mobile": 1, "short": "Today",
-     "also": ["brief", "actions"],
-     "tabs": [("brief", "Brief"), ("actions", "Actions")]},
+     "also": ["brief", "actions"]},
     {"path": "/stocks", "id": "stocks", "title": "Stocks", "subtitle": "Screen and open any stock",
      "icon": "search", "section": "Daily", "mobile": 2, "short": "Stocks", "also": ["explorer"]},
     {"path": "/markets", "id": "markets", "title": "Markets", "subtitle": "News, themes, industries",
@@ -41,7 +40,7 @@ PAGES = [
 # `{name}` in the old path is a path parameter that the target may reuse; the query string
 # is carried over. A `#tab` in the target opens that tab on the new page.
 REDIRECTS = [
-    ("/actions", "/#actions"),
+    ("/actions", "/"),
     ("/explorer", "/stocks"),
     ("/explorer/{sid}", "/stocks/{sid}"),
     ("/news", "/markets"),
