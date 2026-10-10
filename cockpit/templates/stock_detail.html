@@ -21,7 +21,11 @@
 {# ONE price target for the whole page: the median when the source gives one, else the mean,
    upside against the same latest close, basis and analyst count labelled wherever it shows. #}
 {% set pt_median = ac.get("price_target_median") %}
-{% set pt = pt_median or ac.get("price_target") %}
+{# The mean counts only when it sits inside the published low-high range (a stored mean outside it is a bad row). #}
+{% set pt_mean = ac.get("price_target") %}
+{% set pt_lo = ac.get("price_target_low") %}{% set pt_hi = ac.get("price_target_high") %}
+{% set pt_mean_ok = pt_mean and not ((pt_lo and pt_mean < pt_lo) or (pt_hi and pt_mean > pt_hi)) %}
+{% set pt = pt_median or (pt_mean if pt_mean_ok else none) %}
 {% set pt_up = (ac.get("pt_upside_median_pct") if pt_median else ac.get("pt_upside_pct")) if pt else none %}
 {% set pt_basis = "median" if pt_median else "mean" %}
 {% set pt_n = ac.get("total_analysts")|int if ac.get("total_analysts") else none %}
@@ -87,6 +91,11 @@
     </div>
     {% endif %}
     {% endfor %}
+    {% if pm.get("price_gap") %}
+    <span class="pill pill-amber hover-tip" tabindex="0">Price history has a gap ({{ pm.price_gap["from"]|short_date }} &rarr; {{ pm.price_gap["to"]|short_date }})<span class="tooltip-popover" role="tooltip">No prices for {{ pm.price_gap["days"] }} days inside the last year, so the 6M and 1Y returns are not shown.</span></span>
+    {% elif pm.get("returns_incomplete") %}
+    <span class="pill pill-amber">Price history incomplete</span>
+    {% endif %}
     {% if pm.get("rsi_14") is not none %}
     <div style="font-size: 12px;">
         <span class="u-muted">RSI:</span>
@@ -150,7 +159,7 @@
     {% elif s.cap_tier == 'MICRO' %}
     <div class="verdict-line"><strong>{{ s.ticker }} is a micro cap and is not ranked.</strong> <span class="u-muted">Micro caps are illiquid and data-thin; the model never scores or picks them.</span></div>
     {% else %}
-    <div class="verdict-line"><strong>{{ s.ticker }} is not in today's ranking</strong> <span class="u-muted">(latest ranking {{ latest_pick|short_date }}); it may have failed the data gate, so older figures below can be stale.</span></div>
+    <div class="verdict-line"><strong>{{ s.ticker }} is not in today's ranking</strong> <span class="u-muted">(latest ranking {{ latest_pick|short_date }}); older figures below can be stale.</span></div>
     {% endif %}
     {% if pt %}
     <div class="verdict-line">
@@ -202,7 +211,7 @@
                     {% else %}
                     {% set pc = c.tier_percentile * 100 %}
                     <span class="conv-pct"><span class="conv-pct-fill {{ 'conv-hi' if pc >= 65 else 'conv-mid' if pc >= 40 else 'conv-lo' }}" style="width: {{ pc|round|int }}%;"></span></span>
-                    <span class="num conv-pct-n">{{ pc|pct(0)|replace("%", "") }}</span>
+                    <span class="num conv-pct-n">{{ pc|pct(0)|replace("%", "") }}</span>{% if c.weight < 0 %} <span class="unit">(low scores well)</span>{% endif %}
                     {% endif %}
                 </td>
                 <td class="num conv-w">{{ c.weight|signed(2) }}</td>
@@ -252,8 +261,9 @@
 
     {% if dos.get("thesis") %}
     <div class="card u-mb16">
-        <div class="section-title">AI write-up <span class="u-muted-10">as of {{ dos.get("as_of") }}</span></div>
-        <div class="section-desc">May cite factors the model no longer uses. It carries no numbers; the score and target above are the facts.</div>
+        <div class="section-title">AI write-up <span class="u-muted-10">written {{ (dos.get("as_of") or "")[:10]|short_date }}</span></div>
+        <div class="section-desc">May cite factors the model no longer uses. It carries no numbers; the score and target above are the facts.
+            {% if (dos.get("as_of") or "")[:10] < (latest_pick or "") or not in_ranking %}<strong class="score-amber">Written {{ (dos.get("as_of") or "")[:10]|short_date }}, before the {{ latest_pick|short_date }} ranking{% if not in_ranking %} (this stock is not in it){% endif %}: any claim about its rank or position may be out of date.</strong>{% endif %}</div>
         <div class="dos-thesis">{{ dos.thesis }}</div>
         {% if dos.get("entry_strategy") %}<div class="u-muted-11 dos-entry"><strong>Entry:</strong> {{ dos.entry_strategy }}</div>{% endif %}
         {% for key, label, tone in [("bull_case", "Bull case", "green"), ("bear_case", "Bear case", "red")] %}
@@ -676,7 +686,7 @@
 {# ════════════════════════════════════════════ #}
 <div x-show="tab === 'consensus'" x-cloak>
 
-    {% if ac and ac.get("price_target") %}
+    {% if ac and pt %}
     {% set fetched_short = (ac.get("fetched_at") or "")[:10] %}
     {% set fetched_today = fetched_short == today_iso %}
     <div class="card u-mb16">
@@ -698,7 +708,7 @@
                     ({{ headline_upside|pct(1, signed=True) }})
                 </span>
                 {% endif %}
-                <span class="u-muted-10" style="margin-left: 6px;">{{ pt_basis }} of {{ pt_n if pt_n else "?" }} analysts, vs close {{ ac.get("current_price")|inr(2) }}</span>
+                <span class="u-muted-10" style="margin-left: 6px;">{{ pt_basis }}{% if pt_n %} of {{ pt_n }} analyst{{ "" if pt_n == 1 else "s" }}{% endif %}, vs close {{ ac.get("current_price")|inr(2) }}</span>
             </div>
         </div>
 
@@ -720,7 +730,7 @@
                 {{ tooltip("Analysts typically revise targets within 10 days of results, so proximity is a freshness hint.") }}
             </span>
             {% endif %}
-            {% if dpt is not none and dpt <= 30 and ac.get("pt_change_pct") is not none %}
+            {% if dpt is not none and dpt <= 30 and ac.get("pt_change_pct") is not none and pt_mean_ok %}
             <span class="u-muted">
                 PT moved
                 <span class="mono {{ ac.pt_change_pct|tone }}" style="font-weight: 600;">{{ ac.pt_change_pct|pct(1, signed=True) }}</span>
@@ -868,7 +878,7 @@
 {% if ac %}
 <div class="card u-mb16">
     <div class="section-title">Analyst Consensus</div>
-    <div class="section-desc">Aggregated forecasts from {{ pt_n if pt_n else "?" }} sell-side analysts covering this stock{% if pt_asof %}, refreshed {{ pt_asof }}{% endif %}.</div>
+    <div class="section-desc">Aggregated forecasts from {% if pt_n %}{{ pt_n }} sell-side analyst{{ "" if pt_n == 1 else "s" }}{% else %}the sell-side analysts{% endif %} covering this stock{% if pt_asof %}, refreshed {{ pt_asof }}{% endif %}.</div>
 
 
     <div class="metric-grid">
@@ -1241,7 +1251,7 @@
 {% set mdates = [] %}
 {% for x in (s.management, s.managerial_ability, s.financial_management) %}{% if x and x.get("snapshot_date") %}{% set _ = mdates.append(x.snapshot_date) %}{% endif %}{% endfor %}
 <div class="u-muted-11 u-mb16">
-    {% if mdates %}Scorecards as of <span class="mono">{{ mdates|max }}</span> · refreshed monthly.{% endif %}
+    {% if mdates %}Scorecards as of <span class="mono">{{ mdates|max|short_date }}</span> ({{ mgmt_age_days }} days ago){% if mgmt_age_days is not none and mgmt_age_days > mgmt_stale_days %}<span class="pill pill-amber" style="margin-left: 6px;">Out of date</span> they are rebuilt monthly and the last rebuild is overdue{% else %}, rebuilt monthly{% endif %}.{% endif %}
     {% if sd %}Says-vs-does read on <span class="mono">{{ sd.generated_at }}</span> from the calls of {{ sd.earlier_call }} and {{ sd.latest_call }}.{% endif %}
     A diagnostic view: none of these grades is a ranking factor.
 </div>

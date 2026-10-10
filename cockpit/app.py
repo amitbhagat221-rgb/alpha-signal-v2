@@ -243,9 +243,15 @@ def stock_detail(request: Request, sid: str):
         detail["approx_pe"] = round(1 / ey, 1)
 
     from datetime import date as _date
+    import tables as _tables
+    mdates = [x["snapshot_date"] for x in (detail.get("management"), detail.get("managerial_ability"),
+                                          detail.get("financial_management")) if x and x.get("snapshot_date")]
     return templates.TemplateResponse(request, "stock_detail.html", {
         "stock": detail, "page": "stocks", "latest_pick": api.latest_pick_date(),
         "today_iso": _date.today().isoformat(),
+        # the same stale_days the Health check and the Feeds grade use (tables.TABLES)
+        "mgmt_age_days": (_date.today() - _date.fromisoformat(max(mdates)[:10])).days if mdates else None,
+        "mgmt_stale_days": _tables.TABLES["management_scores"]["stale_days"],
     })
 
 
