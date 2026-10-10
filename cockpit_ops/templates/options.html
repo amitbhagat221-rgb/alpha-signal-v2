@@ -1,0 +1,87 @@
+{% extends "ops_base.html" %}
+
+{% block content %}
+<style>
+  .ob-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 12px; margin: 12px 0 20px; }
+  .ob-tile { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: 12px 16px; }
+  .ob-tile .n { font-size: 24px; font-weight: 800; font-family: 'JetBrains Mono', monospace; line-height: 1.1; }
+  .ob-tile .l { font-size: 12px; color: var(--text-secondary); margin-top: 4px; }
+  .ob-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: 12px 16px; margin-bottom: 16px; }
+  .ob-row { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: space-between; }
+  .ob-btn { display: inline-block; padding: 8px 16px; border-radius: 8px; background: var(--accent); color: #fff; font-weight: 700; font-size: 13px; text-decoration: none; }
+  .ob-ok { color: var(--green); } .ob-warn { color: var(--amber); } .ob-bad { color: var(--red); }
+  .ob-muted { color: var(--text-secondary); font-size: 12px; }
+  .ob-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .ob-table th { text-align: left; font-size: 10px; font-weight: 700; letter-spacing: 0.6px; text-transform: uppercase; color: var(--text-muted); padding: 8px; }
+  .ob-table td { padding: 8px; border-top: 1px solid var(--border); font-family: 'JetBrains Mono', monospace; white-space: nowrap; }
+  .ob-scroll { overflow-x: auto; }
+  .ob-rule td:first-child { color: var(--text-muted); font-family: inherit; width: 140px; }
+  .ob-rule td { font-family: inherit; white-space: normal; }
+</style>
+
+{% set S = summary %}
+<div class="section-title">Options Paper Book</div>
+<div class="section-desc">Plan 0022 forward test: the rule below is traded on paper from {{ first_entry }}, one lot each. No money is at risk. After {{ pass_bar_trades }} settled trades the pass bar decides whether it goes live.</div>
+
+<div class="ob-card ob-row">
+  <div>
+    {% if request.query_params.get('kite') == 'ok' %}<b class="ob-ok">Kite login done.</b>
+    {% elif request.query_params.get('kite') == 'failed' %}<b class="ob-bad">Kite login failed — try again.</b>
+    {% elif kite.logged_in_today %}<b class="ob-ok">Kite: logged in today.</b>
+    {% else %}<b class="ob-warn">Kite: not logged in today.</b>{% endif %}
+    <div class="ob-muted">Needed only on entry days, before 15:20 IST, for the live-quote snapshot. The session ends ~06:00 IST next day.</div>
+  </div>
+  <a class="ob-btn" href="/kite/login">Log in to Kite</a>
+</div>
+
+<div class="ob-tiles">
+  <div class="ob-tile"><div class="n">{{ S.settled }}<span style="font-size: 14px; color: var(--text-muted);">/{{ pass_bar_trades }}</span></div><div class="l">trades settled (pass bar at {{ pass_bar_trades }})</div></div>
+  <div class="ob-tile"><div class="n">{{ S.open }}</div><div class="l">open now</div></div>
+  <div class="ob-tile"><div class="n {% if S.net_rs > 0 %}ob-ok{% elif S.net_rs < 0 %}ob-bad{% endif %}">₹{{ "{:,.0f}".format(S.net_rs) }}</div><div class="l">net P&amp;L, settled, after costs</div></div>
+  <div class="ob-tile"><div class="n">{% if S.mean_pct is not none %}{{ "%+.2f"|format(S.mean_pct) }}%{% else %}—{% endif %}</div><div class="l">mean per trade, % of margin (backtest NIFTY {{ "%+.2f"|format(backtest.NIFTY.mean_pct) }}%)</div></div>
+  <div class="ob-tile"><div class="n {% if S.worst_pct is not none and S.worst_pct < backtest.SENSEX.worst_pct %}ob-bad{% endif %}">{% if S.worst_pct is not none %}{{ "%+.1f"|format(S.worst_pct) }}%{% else %}—{% endif %}</div><div class="l">worst trade (bar: not below the backtest's −8.9% / −7.6%)</div></div>
+  <div class="ob-tile"><div class="n">{% if S.slip_median_pct is not none %}{{ "%.1f"|format(S.slip_median_pct) }}%{% else %}—{% endif %}</div><div class="l">median slippage, live bid vs settle ({{ S.n_slip }} trades; bar 1%)</div></div>
+</div>
+
+{% if upcoming %}
+<div class="ob-card">
+  <b>Next entry days</b>
+  {% for u in upcoming %}<div class="ob-muted">{{ u.underlying }}: enter at the close on <b>{{ u.entry }}</b> for the {{ u.expiry }} expiry</div>{% endfor %}
+</div>
+{% endif %}
+
+<div class="ob-card ob-scroll">
+  <b>Trades</b>
+  {% if trades %}
+  <table class="ob-table">
+    <tr><th>Underlying</th><th>Entry</th><th>Expiry</th><th>Sold</th><th>Credit</th><th>Margin</th><th>Status</th><th>P&amp;L</th></tr>
+    {% for t in trades %}
+    <tr>
+      <td>{{ t.underlying }}</td><td>{{ t.entry_date }}</td><td>{{ t.expiry }}</td>
+      <td>{{ "%.0f"|format(t.short_call) }} CE {{ t.call_entry }} · {{ "%.0f"|format(t.short_put) }} PE {{ t.put_entry }}</td>
+      <td>{{ "%.2f"|format(t.credit_pts) }} × {{ t.lot }} = ₹{{ "{:,.0f}".format(t.credit_pts * t.lot) }}</td>
+      <td>₹{{ "{:,.0f}".format(t.margin_rs) }} <span class="ob-muted">{{ t.margin_source }}</span></td>
+      {% if t.status == 'SETTLED' %}
+      <td>settled at {{ "{:,.2f}".format(t.settle_index) }}</td>
+      <td class="{% if t.net_rs > 0 %}ob-ok{% else %}ob-bad{% endif %}">₹{{ "{:+,.0f}".format(t.net_rs) }} ({{ "%+.2f"|format(100 * t.ret_on_margin) }}%)</td>
+      {% else %}
+      <td class="ob-warn">open</td>
+      <td>{% if t.mark %}<span class="{% if t.mark.mtm_rs > 0 %}ob-ok{% else %}ob-bad{% endif %}">₹{{ "{:+,.0f}".format(t.mark.mtm_rs) }}</span> <span class="ob-muted">marked {{ t.mark.mark_date }}, index {{ "{:,.0f}".format(t.mark.index) }}</span>{% else %}—{% endif %}</td>
+      {% endif %}
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}<div class="ob-muted">No trades yet.</div>{% endif %}
+</div>
+
+<div class="ob-card">
+  <b>The rule (fixed 2026-10-10, plan 0022 §1)</b>
+  <table class="ob-table ob-rule">
+    <tr><td>Underlyings</td><td>NIFTY (Tuesday expiry) · SENSEX (Thursday expiry), 1 lot each</td></tr>
+    <tr><td>Trade</td><td>Sell one call and one put at about 0.05 delta (≈ 2–4% out of the money), no hedge</td></tr>
+    <tr><td>Entry / exit</td><td>At the close 2 trading sessions before expiry; held to expiry, cash-settled</td></tr>
+    <tr><td>Backtest</td><td>NIFTY {{ backtest.NIFTY.window }}: {{ backtest.NIFTY.trades }} trades, worst {{ backtest.NIFTY.worst_pct }}% of margin · SENSEX {{ backtest.SENSEX.window }}: {{ backtest.SENSEX.trades }} trades, worst {{ backtest.SENSEX.worst_pct }}%</td></tr>
+    <tr><td>Pass bar</td><td>After {{ pass_bar_trades }} trades: mean &gt; 0, no trade worse than the backtest's worst, median slippage ≤ 1%</td></tr>
+  </table>
+</div>
+{% endblock %}

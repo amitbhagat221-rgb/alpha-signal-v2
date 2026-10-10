@@ -6,6 +6,8 @@ Alpha Signal Ops (:3001) — the page list; the rail and mobile bar render from 
 PAGES = [
     {"path": "/org", "id": "org", "title": "Boardroom", "subtitle": "Agent org · inbox · memos",
      "icon": "briefcase", "section": "Fund", "mobile": 1, "short": "Board"},
+    {"path": "/options", "id": "options", "title": "Options Paper Book", "subtitle": "Plan 0022 · forward test",
+     "icon": "trending-up", "section": "Fund", "short": "Options"},
     {"path": "/system", "id": "system", "title": "Health Center", "subtitle": "Issues · data · factors · pipeline",
      "icon": "zap", "section": "Ops", "mobile": 2, "short": "Health"},
     {"path": "/flow", "id": "flow", "title": "Pipeline Flow", "subtitle": "Producer/consumer DAG",

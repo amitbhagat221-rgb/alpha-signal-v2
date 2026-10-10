@@ -280,7 +280,7 @@ def generate(snapshot_date=None, sectors=None, dry_run=False, limit=None):
     if not dry_run and not os.environ.get("ANTHROPIC_API_KEY"):
         raise RuntimeError(
             "ANTHROPIC_API_KEY not set — sector dossier generator cannot run. "
-            "Check run_pipeline.sh exports or systemd env."
+            "Check ~/.config/alpha-signal/secrets.env (loaded by run.sh)."
         )
 
     with get_db() as conn:

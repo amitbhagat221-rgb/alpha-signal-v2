@@ -7,7 +7,7 @@ Two auth paths, both end up populating ~/.cache/screener_cookie.json:
 
   (A) Auto-login from env vars — if your Screener account accepts
       username+password (separate from Google OAuth):
-          source ~/alpha-signal/run_pipeline.sh
+          source ~/.config/alpha-signal/secrets.env
           python -m sources.screener_pull --login
       Reads SCREENER_USERNAME and SCREENER_PASSWORD, POSTs to /login/,
       saves the resulting session cookie. Re-run anytime to refresh.
@@ -112,7 +112,7 @@ def do_login() -> tuple[bool, str]:
     if not user or not pwd:
         return False, (
             "SCREENER_USERNAME / SCREENER_PASSWORD not set in env. "
-            "Did you `source ~/alpha-signal/run_pipeline.sh`?"
+            "Did you `source ~/.config/alpha-signal/secrets.env`?"
         )
 
     s = requests.Session()

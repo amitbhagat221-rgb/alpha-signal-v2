@@ -9,24 +9,25 @@ not wired into `config.PIPELINE_STEPS` until verified. This is the one-time setu
    ₹500/mo subscription on top of your trading login). You get an **`api_key`**
    and **`api_secret`**. Set the app's **redirect URL** to anything (e.g.
    `https://127.0.0.1`) — the headless login parses the token out of the redirect.
-2. **Grab your TOTP secret** — when you set up the authenticator 2FA on Zerodha,
-   it shows a base32 secret string (the thing behind the QR). Save that; it lets
-   cron log in unattended (`pyotp` regenerates the 6-digit code each morning).
-3. **Add 5 exports to v1's `run_pipeline.sh`** (where all secrets live — never in
-   code or git):
+2. **Register the static IP** `140.245.248.166` (the Oracle VM) on the developer
+   console's profile page. SEBI: API orders from an unregistered IP are rejected
+   from 2026-04-01.
+3. **Add 2 exports to `~/.config/alpha-signal/secrets.env`** (where all secrets
+   live, mode 600 — never in code, git or chat):
    ```sh
    export KITE_API_KEY="..."
    export KITE_API_SECRET="..."
-   export KITE_USER_ID="ZXXXXX"        # your Zerodha client id
-   export KITE_PASSWORD="..."
-   export KITE_TOTP_SECRET="..."       # the base32 2FA seed
    ```
+   No password or TOTP seed: the daily login is done by hand (2026-10-10 decision —
+   Zerodha does not allow automated logins for trading; the one-tap morning login
+   doubles as the daily human permission to trade). The headless TOTP path in
+   `kite_pull` is for data-only use and is not used.
 
 ## What I do (once creds are in)
 
 ```sh
 source ~/alpha-signal/venv/bin/activate
-eval "$(grep '^export ' /home/ubuntu/alpha-signal/run_pipeline.sh)"
+. ~/.config/alpha-signal/secrets.env
 python -m sources.kite_pull --check-auth          # 1. proves the key + login work
 python -m sources.kite_pull --instruments         # 2. maps our SIDs → NSE tokens
 python -m sources.kite_pull --backfill-bars --universe fno --days 5   # 3. smoke

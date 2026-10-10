@@ -54,6 +54,17 @@ TABLES = {
         "contract": {"max_null": {"settle": 0.05}, "not_all_zero": ["settle", "underlying_price"]},
         "kind": "RAW", "domain": "Universe & Prices", "date_col": "trade_date", "stale_days": 6,
     },
+    "market_holidays": {
+        "kind": "RAW", "domain": "Universe & Prices", "date_col": None,
+        "source": "NSE holiday-master via nselib (sources/nse_holidays, run.sh morning)",
+        "description": "Exchange trading holidays per segment (FO, CM). Places the option paper book's entry days ahead of time.",
+    },
+    "option_live_quotes": {
+        "kind": "RAW", "domain": "Universe & Prices", "date_col": "trade_date", "freq": "weekly",
+        "source": "Zerodha Kite quotes + basket margin (sources/kite_quotes, cron 09:50 UTC on entry days)",
+        "depth": "From 2026-10-12 (plan 0022)",
+        "description": "Live NIFTY/SENSEX option quotes at 15:20 IST on paper-book entry days; chosen = 1 on the rule's two legs with Kite's basket margin.",
+    },
     "fno_iv_history": {
         "kind": "COMPUTED", "domain": "Universe & Prices", "date_col": "trade_date", "stale_days": 6,
     },
@@ -459,6 +470,12 @@ TABLES = {
         "kind": "COMPUTED", "domain": "Computed Signals", "date_col": "snapshot_date",
     },
     "management_scores": {"kind": "COMPUTED", "domain": "Computed Signals", "date_col": "snapshot_date"},
+    "option_paper_trades": {
+        "kind": "COMPUTED", "domain": "Output", "date_col": "entry_date", "freq": "weekly",
+        "source": "option_book.py (run.sh morning → python -m option_book --record)",
+        "depth": "From 2026-10-09 (forward record, plan 0022)",
+        "description": "Option-premium paper book: the pre-registered 0.05-delta strangle on NIFTY and SENSEX, entered 2 sessions before the weekly expiry, held to expiry. One row per underlying × expiry, settled in place.",
+    },
     "playbook_members": {
         "kind": "COMPUTED", "domain": "Computed Signals", "date_col": "snapshot_date", "freq": "daily",
         "source": "sleeves.py rules (run.sh morning → tools/playbook_backtest --record)",

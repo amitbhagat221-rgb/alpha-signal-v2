@@ -548,6 +548,52 @@ def pull_nse_indices(months=120):  # 10 years default
     return total
 
 
+def backfill_index_history(indices, start, end):
+    """Daily history for `indices` over [start, end] (ISO), monthly chunks, into
+    nse_index_history (INSERT OR IGNORE). For index levels older than the rolling
+    window, e.g. the F&O underlyings behind sources.fno_pull's legacy backfill.
+    Resumable: a month already holding ≥15 days is skipped. Raises if every month
+    it asked for came back empty."""
+    from nselib import capital_market as cm
+    s, e = date.fromisoformat(start), date.fromisoformat(end)
+    chunks, cur = [], s.replace(day=1)
+    while cur <= e:
+        nxt = (cur.replace(day=28) + timedelta(days=4)).replace(day=1)
+        chunks.append((max(cur, s), min(nxt - timedelta(days=1), e)))
+        cur = nxt
+    have = read_sql("SELECT index_symbol, substr(trade_date, 1, 7) AS m, COUNT(*) AS n FROM nse_index_history "
+                    "WHERE trade_date BETWEEN ? AND ? GROUP BY 1, 2", params=[start, end])
+    done = {(i, m) for i, m, n in zip(have.index_symbol, have.m, have.n) if n >= 15}
+    total = asked = answered = 0
+    for idx in indices:
+        n_idx = 0
+        for a, b in chunks:
+            if (idx, a.isoformat()[:7]) in done:
+                continue
+            asked += 1
+            with _http.pace("nse"):
+                df = cm.index_data(index=idx, from_date=a.strftime("%d-%m-%Y"), to_date=b.strftime("%d-%m-%Y"))
+            if df is None or df.empty:
+                continue
+            answered += 1
+            df.columns = [c.strip() for c in df.columns]
+            out = pd.DataFrame({
+                "index_symbol": idx,
+                "trade_date": pd.to_datetime(df["TIMESTAMP"].astype(str).str.strip(), format="%d-%b-%Y",
+                                             errors="coerce").dt.date.astype(str),
+                **{k: pd.to_numeric(df[v], errors="coerce") for k, v in (
+                    ("open", "OPEN_INDEX_VAL"), ("high", "HIGH_INDEX_VAL"), ("low", "LOW_INDEX_VAL"),
+                    ("close", "CLOSE_INDEX_VAL"), ("volume", "TRADED_QTY"), ("traded_value", "TURN_OVER"))},
+            })
+            out = out[out.trade_date != "NaT"]
+            n_idx += insert_df(out, "nse_index_history")
+        print(f"  {idx}: {n_idx} new rows ({start} → {end})")
+        total += n_idx
+    if asked and not answered:
+        raise RuntimeError(f"index history {start} → {end}: all {asked} monthly calls empty for {list(indices)}")
+    return total
+
+
 def compute_nse_indices():
     """Daily PIPELINE_STEPS wrapper — keep nse_index_history fresh with a short
     rolling window (the 120-month default is a one-off backfill, not a daily

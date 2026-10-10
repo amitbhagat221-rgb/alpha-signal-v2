@@ -41,7 +41,7 @@ rm -rf "$STAGE"; mkdir -p "$STAGE"
 
 # --- collect DR-critical VM-only files (preserve path + mode) ---
 FILES=(
-  /home/ubuntu/alpha-signal/run_pipeline.sh           # v1 — holds the real credentials
+  /home/ubuntu/.config/alpha-signal/secrets.env       # the credentials (since 2026-10-10)
   /home/ubuntu/.config/rclone/rclone.conf             # Drive OAuth token
   /home/ubuntu/.cache/screener_cookie.json            # Screener session (re-creatable via --login)
   /home/ubuntu/.config/alpha-signal/cockpit_auth.json # cockpit login: password HASH + session secret

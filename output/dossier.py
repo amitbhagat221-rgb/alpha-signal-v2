@@ -418,7 +418,7 @@ def generate(top=None, dry_run=False):
     if not dry_run and not os.environ.get("ANTHROPIC_API_KEY"):
         raise RuntimeError(
             "ANTHROPIC_API_KEY not set — dossier generator cannot run. "
-            "Check run_pipeline.sh exports or systemd env."
+            "Check ~/.config/alpha-signal/secrets.env (loaded by run.sh)."
         )
 
     # Get top picks per tier.

@@ -48,6 +48,9 @@ RETIRED = {
     "news_today": "kept as-is: plan 0021 daily edition",
     "news_week": "kept as-is: plan 0021 weekly edition",
     "mcp_calls": "kept as-is: plan 0016 MCP audit log (Ops)",
+    "market_holidays": "kept as-is: plan 0022 exchange holiday list (reference, places paper-book entry days)",
+    "option_live_quotes": "kept as-is: plan 0022 Kite 15:20 IST option snapshots on paper-book entry days",
+    "option_paper_trades": "kept as-is: plan 0022 option paper book (forward record)",
     "sqlite_sequence": "SQLite internal",
 }
 
