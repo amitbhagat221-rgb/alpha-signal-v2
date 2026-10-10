@@ -1348,7 +1348,7 @@ const baseOpts = () => ({ responsive: true, maintainAspectRatio: false, scales: 
 const axisTitle = (text) => ({ display: true, text, font: { size: 10 } });
 
 async function initPriceChart(tf) {
-    const dayMap = { '1m': 22, '3m': 65, '6m': 130, '1y': 365, '3y': 780 };
+    const dayMap = { '1m': 22, '3m': 65, '6m': 130, '1y': 250, '3y': 750 };   // trading days
     const resp = await fetch(`/api/prices-extended/${SID}?days=${dayMap[tf] || 365}`);
     const data = await resp.json();
     if (!data.length) return;
