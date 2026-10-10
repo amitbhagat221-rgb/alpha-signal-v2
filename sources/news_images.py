@@ -12,7 +12,7 @@ a local downsized copy.
 
 Setup (one-time):
   1. Get a free API key at https://www.pexels.com/api/
-  2. Add to ~/alpha-signal/run_pipeline.sh:  export PEXELS_API_KEY="..."
+  2. Add to ~/.config/alpha-signal/secrets.env:  export PEXELS_API_KEY="..."
   3. Run:  python -m sources.news_images
   4. Restart the cockpit so it picks up the new pool.
 
@@ -63,7 +63,7 @@ def _client_key():
     if not key:
         raise RuntimeError(
             "PEXELS_API_KEY not set. Get a free key at https://www.pexels.com/api/ "
-            "and add `export PEXELS_API_KEY=...` to ~/alpha-signal/run_pipeline.sh"
+            "and add `export PEXELS_API_KEY=...` to ~/.config/alpha-signal/secrets.env"
         )
     return key
 

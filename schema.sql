@@ -2472,3 +2472,72 @@ CREATE TABLE IF NOT EXISTS row_issues (
     resolution  TEXT,
     UNIQUE (dataset, row_key, rule, detected_at)
 );
+
+-- NSE trading holidays per segment (plan 0022): sources/nse_holidays from NSE holiday-master.
+-- The option paper book places its entry day "2 sessions before expiry" from the FO rows.
+CREATE TABLE IF NOT EXISTS market_holidays (
+    segment       TEXT NOT NULL,             -- FO (equity derivatives) | CM (equities)
+    holiday_date  TEXT NOT NULL,
+    description   TEXT,
+    fetched_at    TEXT DEFAULT (datetime('now')),
+    PRIMARY KEY (segment, holiday_date)
+);
+
+-- Live option quotes at 15:20 IST on paper-book entry days (plan 0022, sources/kite_quotes):
+-- the band around spot from Kite, chosen = 1 on the two legs the rule picks (with Kite's
+-- basket margin). Settle − live bid on the chosen legs is the measured slippage.
+CREATE TABLE IF NOT EXISTS option_live_quotes (
+    trade_date     TEXT NOT NULL,            -- IST session date
+    underlying     TEXT NOT NULL,            -- NIFTY | SENSEX
+    expiry         TEXT NOT NULL,
+    tradingsymbol  TEXT NOT NULL,
+    option_type    TEXT NOT NULL,            -- CE | PE
+    strike         REAL NOT NULL,
+    bid            REAL,
+    ask            REAL,
+    last           REAL,
+    oi             INTEGER,
+    volume         INTEGER,
+    spot           REAL,
+    delta          REAL,                     -- Black-76 |delta| from the live mid
+    chosen         INTEGER NOT NULL DEFAULT 0,
+    basket_margin  REAL,                     -- Kite margin for the 2-leg strangle, on chosen rows
+    snapshot_at    TEXT NOT NULL,
+    PRIMARY KEY (trade_date, underlying, expiry, tradingsymbol)
+);
+
+-- Option-premium paper book (plan 0022, option_book.py): one row per rule × underlying ×
+-- expiry, written on the entry day's close and settled in place at expiry. The forward
+-- record that decides whether the rule goes live.
+CREATE TABLE IF NOT EXISTS option_paper_trades (
+    rule_id          TEXT NOT NULL,
+    underlying       TEXT NOT NULL,
+    expiry           TEXT NOT NULL,
+    entry_date       TEXT NOT NULL,
+    forward          REAL,
+    lot              INTEGER,
+    short_call       REAL,
+    short_put        REAL,
+    call_entry       REAL,                   -- settle on the entry day
+    put_entry        REAL,
+    credit_pts       REAL,
+    entry_cost_pts   REAL,                   -- brokerage, charges, STT, slippage (option_book.leg_cost)
+    margin_rs        REAL,
+    margin_source    TEXT,                   -- kite | 12pct
+    status           TEXT NOT NULL,          -- OPEN | SETTLED
+    settle_index     REAL,
+    call_exit        REAL,
+    put_exit         REAL,
+    gross_pts        REAL,
+    net_pts          REAL,
+    net_rs           REAL,
+    ret_on_margin    REAL,
+    live_call_strike REAL,                   -- from option_live_quotes (15:20 IST), when captured
+    live_put_strike  REAL,
+    live_call_bid    REAL,
+    live_put_bid     REAL,
+    live_credit_pts  REAL,
+    recorded_at      TEXT,
+    settled_at       TEXT,
+    PRIMARY KEY (rule_id, underlying, expiry)
+);

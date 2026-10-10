@@ -112,8 +112,10 @@ FEEDS = {
         "family": "prices", "status": "production",
         "what": "Daily futures & options prices and open interest",
         "modules": ["sources.fno_pull"], "schedule": ["step:fetch_fno_bhav", "step:compute_fno_pcr"],
-        "writes": ["fno_bhav", "fno_pcr_history"], "hosts": ["nse"], "cadence": "trading_day",
-        "routes": [_r("nselib_fno_bhav", "primary", "nse", "nselib.derivatives.fno_bhav_copy (UDiFF)")],
+        "writes": ["fno_bhav", "fno_pcr_history"], "hosts": ["nse", "nse_archives"], "cadence": "trading_day",
+        "routes": [_r("nselib_fno_bhav", "primary", "nse", "nselib.derivatives.fno_bhav_copy (UDiFF)"),
+                   _r("nse_legacy_fo", "gap-fill", "nse_archives", "history before 2024-07-15: historical/DERIVATIVES "
+                      "fo{DD}{MMM}{YYYY}bhav.csv.zip — index options + futures only, index level from nse_index_history")],
         "serve_stale_days": 2, "canary": "fno_bhav",
         "pit": "trade date", "tos": "public exchange data",
         "fallback_plan": "nsearchives UDiFF / legacy fo{DD}{MMM}{YYYY}bhav.csv.zip direct (research 0005 ✅)",
@@ -481,7 +483,40 @@ FEEDS = {
     "nse_legacy_fo": {
         "family": "prices", "status": "candidate",
         "what": "Legacy F&O bhavcopy (pre-2025) → IV history backfill",
+        "notes": "2026-10-09: index options + futures 2019-01 → 2024-07-12 loaded into fno_bhav by "
+                 "`python -m sources.fno_pull --legacy` (run.sh backfill) for the option-premium study. "
+                 "Still a candidate for STOCK options (~30M rows; disk)",
         "probe": ("WORKS", "2026-09-28", "2015 file: 29k contracts with SETTLE_PR, OPEN_INT"), "ref": "research 0005 B3",
+    },
+    "nse_holidays": {
+        "family": "reference", "status": "probation",
+        "what": "Exchange trading-holiday list (F&O and equities), for the option paper book's entry days",
+        "modules": ["sources.nse_holidays"], "schedule": ["cron:morning"], "writes": ["market_holidays"],
+        "hosts": ["nse"], "cadence": "daily",
+        "routes": [_r("nse_holiday_master", "primary", "nse", "nselib trading_holiday_calendar → /api/holiday-master?type=trading")],
+        "canary_waiver": "one small list a day; option_book raises when it has no F&O rows",
+        "pit": "published ahead for the year", "tos": "public exchange data",
+    },
+    "kite_option_quotes": {
+        "family": "prices", "status": "probation",
+        "what": "Live NIFTY/SENSEX option quotes + Kite margin at 15:20 IST on paper-book entry days (plan 0022)",
+        "modules": ["sources.kite_quotes"], "schedule": ["cron:kite_quotes"], "writes": ["option_live_quotes"],
+        "hosts": ["kite"], "cadence": "weekly",
+        "routes": [_r("kite_quote", "primary", "kite", "kc.quote depth + basket_order_margins (account ML5851, read-only)")],
+        "canary_waiver": "needs Amit's daily Kite login; a missing login fails the job loudly (NoKiteSession)",
+        "pit": "snapshot time", "tos": "Kite Connect subscription",
+    },
+    "bse_fo_bhav": {
+        "family": "prices", "status": "probation",
+        "what": "BSE index options + futures (SENSEX, BANKEX) EOD, into fno_bhav beside NSE's",
+        "modules": ["sources.bse_fo"], "schedule": ["cron:morning"], "writes": ["fno_bhav"], "hosts": ["bse"],
+        "canary_waiver": "SENSEX only feeds the option paper book (plan 0022); option_book raises when an entry day's chain is missing",
+        "cadence": "trading_day",
+        "routes": [_r("bse_fo_udiff", "primary", "bse", "download/BhavCopy/Derivative/BhavCopy_BSE_FO_0_0_0_{YYYYMMDD}_F_0000.CSV (from ~2024-01-05)")],
+        "need": "SENSEX weekly expiry (BSE's side of one-weekly-per-exchange) for the option-premium study",
+        "notes": "2026-10-09: history 2024-01-05 → 2026-10-08 loaded (679 days); daily in run.sh morning since 2026-10-10. Missing day = HTTP 200 + HTML page. "
+                 "Older BSE file (to 2024-07-05) has no settle price or index level, not read",
+        "probe": ("WORKS", "2026-10-09", "UDiFF 2026-10-08 (696 SENSEX options) + 2024-01-11 (171); legacy 2023-08-04 zip served"),
     },
     "nse_slb": {
         "family": "prices", "status": "candidate",

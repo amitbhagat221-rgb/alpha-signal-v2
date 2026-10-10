@@ -66,7 +66,7 @@ sudo journalctl -u alpha-cockpit -n 100
 
 ## 4. The credentials
 
-Every external secret is an `export` line in **`/home/ubuntu/alpha-signal/run_pipeline.sh`** (v1's file; read-only for v2). If it is lost, every integration dies at the next cron tick. Keys present (values intentionally not here):
+Every external secret is an `export` line in **`/home/ubuntu/.config/alpha-signal/secrets.env`** (mode 600, outside git; loaded once by `run.sh`; moved out of v1's `run_pipeline.sh` on 2026-10-10, which is no longer read). If it is lost, every integration dies at the next cron tick. Keys present (values intentionally not here):
 
 | Key | Service | Reissue at |
 |---|---|---|
@@ -75,9 +75,11 @@ Every external secret is an `export` line in **`/home/ubuntu/alpha-signal/run_pi
 | `SCREENER_USERNAME` + `SCREENER_PASSWORD` | screener.in (the live session is the cookie JSON in `~/.cache/`) | screener.in |
 | `DATAGOV_API_KEY` | data.gov.in macro | data.gov.in/user/me |
 | `FINNHUB_API_KEY` | Finnhub (held warm; code paths dead-end) | finnhub.io |
+| `PEXELS_API_KEY` | news images | pexels.com/api |
+| `KITE_API_KEY` + `KITE_API_SECRET` *(when set)* | Zerodha Kite Connect app (static IP 140.245.248.166 registered) | developers.kite.trade |
 | `NTFY_TOPIC` *(optional)* | ntfy.sh phone push on CRITICAL | any string |
 
-These sit in a plaintext shell file. Move them to a secret manager, or at least an encrypted file (see §0 on `backup_secrets.sh`).
+These sit in a plaintext file readable only by `ubuntu`; `backup_secrets.sh` keeps an encrypted copy (see §0).
 
 ---
 
@@ -86,7 +88,7 @@ These sit in a plaintext shell file. Move them to a secret manager, or at least 
 1. **`config.py`**: `PIPELINE_STEPS` (order matters), `SCREEN` gates, `SIGNAL_WEIGHTS` (production; `_RETURN`/`_SHARPE` are non-production diagnostics), and `EXCLUDED_FROM_PICKS = ("MICRO",)`. Read ADR 0026 before touching the last one.
 2. **`scoring/screener.py`**: the critical step that writes `daily_picks`. If it raises, no dossiers or email go out. The pick gate is in `_pick_eligible` (ADR 0021 → 0024).
 3. **`db.py` + `schema.sql` + `tables.py`**: `init_db()` executes `schema.sql` (full DDL, regenerated from the live DB 2026-09-26), then `_COLUMN_MIGRATIONS`. A new column goes in `schema.sql` AND `_COLUMN_MIGRATIONS`; a new table in `schema.sql` AND `tables.TABLES` (`tests/test_tables.py` enforces it). CHECK-constraint changes need the table-recreate pattern (create `<t>__new`, copy, drop, rename).
-4. **`/home/ubuntu/alpha-signal/run_pipeline.sh`** (outside the repo): the credentials. See §4.
+4. **`/home/ubuntu/.config/alpha-signal/secrets.env`** (outside the repo): the credentials. See §4.
 
 ---
 

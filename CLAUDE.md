@@ -22,8 +22,8 @@ Everything else (memory, `_archive/`, slash commands, settings) — Claude handl
 
 **Environment**
 - Activate venv first: `source ~/alpha-signal/venv/bin/activate` (shared with v1)
-- v1 has no active cron, but v2 runs on its venv and reads its credentials — never touch `~/alpha-signal/`. All v2 work in `~/alpha-signal-v2/`
-- Credentials live in v1's `run_pipeline.sh` exports — never in code. v2 imports them at runtime via `eval "$(grep '^export ' /home/ubuntu/alpha-signal/run_pipeline.sh)"` (read-only, no execution of v1 body) — done once, in `run.sh`. Don't duplicate secrets anywhere.
+- v1 has no active cron, but v2 runs on its venv — never touch `~/alpha-signal/`. All v2 work in `~/alpha-signal-v2/`
+- Credentials live in `~/.config/alpha-signal/secrets.env` (mode 600, outside git; moved out of v1's `run_pipeline.sh` 2026-10-10) — never in code. Loaded once, in `run.sh`. Don't duplicate secrets anywhere; a new key is one `export` line in that file.
 - Every v2 cron line is `/home/ubuntu/alpha-signal-v2/run.sh <job> >> <log> 2>&1` (plan 0015): `run.sh` owns the `cd`, venv, credential import and harvest lock. Never add an inline cron one-liner — add a `case` to `run.sh` (the monthly snapshot cron once silently no-op'd for lack of a `cd`).
 
 **Architecture & Code**
@@ -53,7 +53,7 @@ Everything else (memory, `_archive/`, slash commands, settings) — Claude handl
 - A daily check must be able to fail today because the world changed, and prove it: every check has a fire drill in `tests/test_check_drills.py` (the suite fails without one). A rule that only breaks when code or a registry changes is a test, not a check. Factor checks read what the ranking used (`checks/model.py`, scope from `factors.SIGNAL_WEIGHTS`) — never hand-list factors in a check. Catalog capped at 30. The picks email runs the `picks` checks before sending and carries a banner when one fails. ADR 0060.
 - The per-pick number is `eligible_coverage`, worded only by `views.pick_data` ("Data 84% · Partial"); thresholds in `config.PICK_GATE`. UHS and gates 3–7 are retired (ADR 0061) — don't bring back a composite trust score. A stored analyst target is judged by ONE rule, `validators.plausibility.PT_CLOSE_RATIO`, at both writers and in the check.
 - Silent failures are the enemy. Producers MUST raise on missing env or 0 output (not write placeholders). `freshness_watchdog` covers DB tables AND file outputs via `config.FILE_OUTPUTS`.
-- Push: ntfy.sh — set `NTFY_TOPIC` env var in `~/alpha-signal/run_pipeline.sh` to enable phone push. Without it, URGENT email still fires on CRITICAL.
+- Push: ntfy.sh — set `NTFY_TOPIC` in `~/.config/alpha-signal/secrets.env` to enable phone push. Without it, URGENT email still fires on CRITICAL.
 
 **The org (plan 0019)**
 - Every agent seat is ONE `org.ROLES` entry. A desk seat = a charter in `.claude/routines/roles/` + a role-owned task kind in `alpha_mcp/org_kinds.py` (brief, schema, ingest); a builder seat = `.claude/agents/<id>.md`. `tests/test_org.py` enforces it. Desk seats write ONLY through `alpha-work.submit` into `documents` (`source='org'`): never give one a shell, a table write, or a path to weights / config / cron. Memo numbers must come from the brief (validator-enforced); doer and grader are different seats. Amit tunes a seat (schedule, model, directive, prompt) from the ops cockpit `/org` → read the effective seat with `org.seat(role)`, never `ROLES[role]` directly, and expect the charter / agent files to carry his uncommitted edits (don't revert them). Fixes he agrees with a seat in chat arrive as numbered work orders: run one with `/work-order N` (only if approved; `python -m org work N` shows it with the chat it came from). Runbook: [org.md](docs/reference/org.md)

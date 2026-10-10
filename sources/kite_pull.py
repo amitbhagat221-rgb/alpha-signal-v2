@@ -25,7 +25,7 @@ Kite reality that shapes this module:
   • Historical API rate limit ≈ 3 req/s; one call fetches a full date-range for
     one instrument+interval, so the whole F&O universe is ~220 calls (~1-2 min).
 
-Credentials (env, via v1 run_pipeline.sh exports — NEVER in code):
+Credentials (env, from ~/.config/alpha-signal/secrets.env via run.sh — NEVER in code):
     KITE_API_KEY, KITE_API_SECRET            — from the Connect dev app
     KITE_USER_ID, KITE_PASSWORD, KITE_TOTP_SECRET  — for unattended login
   (Alternatively, paste a fresh token: `--request-token <tok>`.)
@@ -60,11 +60,30 @@ TWOFA_URL = "https://kite.zerodha.com/api/twofa"
 
 # ─────────────────────────── Auth (the reusable hard part) ───────────────────────────
 
+SECRETS = os.path.expanduser("~/.config/alpha-signal/secrets.env")
+from config import KITE_LOGIN_PAGE as LOGIN_PAGE   # ops cockpit one-tap login (plan 0022)
+
+
+def _secret_from_file(name):
+    """`export NAME="value"` from the secrets file — for processes that did not start
+    through run.sh (the cockpit services), so the file stays the one copy."""
+    import re
+    try:
+        with open(SECRETS) as f:
+            for line in f:
+                m = re.match(rf'\s*export\s+{name}="?([^"\n]*)"?\s*$', line)
+                if m:
+                    return m.group(1)
+    except OSError:
+        pass
+    return None
+
+
 def _env(name):
-    v = os.environ.get(name)
+    v = os.environ.get(name) or _secret_from_file(name)
     if not v:
         raise RuntimeError(
-            f"{name} not set. Add Kite creds to v1 run_pipeline.sh exports "
+            f"{name} not set. Add Kite creds to ~/.config/alpha-signal/secrets.env "
             f"(KITE_API_KEY/API_SECRET/USER_ID/PASSWORD/TOTP_SECRET) — never in code.")
     return v
 
@@ -130,9 +149,15 @@ def _auto_request_token(api_key):
         "(open https://kite.trade/connect/login?api_key=<key>&v=3, log in, copy the token).")
 
 
-def kite(request_token=None):
+class NoKiteSession(RuntimeError):
+    """No Kite login today: the access token expires ~06:00 IST and is renewed by hand."""
+
+
+def kite(request_token=None, cached_only=False):
     """Return an authenticated KiteConnect. Uses today's cached token if present;
-    else exchanges a request_token (passed or auto-logged-in) for a new one."""
+    else exchanges a request_token (passed or auto-logged-in) for a new one.
+    `cached_only`: never log in — raise NoKiteSession when today's token is missing
+    (scheduled jobs: trading logins are done by hand, plan 0022)."""
     from kiteconnect import KiteConnect
     api_key = _env("KITE_API_KEY")
     kc = KiteConnect(api_key=api_key)
@@ -143,6 +168,8 @@ def kite(request_token=None):
         return kc
 
     if request_token is None:
+        if cached_only:
+            raise NoKiteSession(f"no Kite login today — log in at {LOGIN_PAGE}")
         request_token = _auto_request_token(api_key)
     with _http.pace("kite"):
         data = kc.generate_session(request_token, api_secret=_env("KITE_API_SECRET"))

@@ -169,7 +169,7 @@ def _get_client():
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     if not api_key:
         raise RuntimeError(
-            "ANTHROPIC_API_KEY not set. Run: source ~/alpha-signal/run_pipeline.sh"
+            "ANTHROPIC_API_KEY not set. Run: source ~/.config/alpha-signal/secrets.env"
         )
     import anthropic
     return anthropic.Anthropic(api_key=api_key)

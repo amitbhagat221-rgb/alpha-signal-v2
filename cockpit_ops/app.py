@@ -185,6 +185,48 @@ def flow_page(request: Request):
     })
 
 
+@app.get("/options", response_class=HTMLResponse)
+def options_page(request: Request):
+    """Option-premium paper book (plan 0022): the pre-registered rule, open and settled
+    paper trades, live-quote slippage, Kite login status. Data from option_book.page_data."""
+    import option_book
+    return templates.TemplateResponse(request, "options.html", {"page": "options", **option_book.page_data()})
+
+
+@app.get("/api/options")
+def api_options():
+    import option_book
+    return option_book.page_data()
+
+
+@app.get("/kite/login")
+def kite_login():
+    """One tap to Zerodha's login; Kite sends the browser back to /kite/callback."""
+    from fastapi.responses import RedirectResponse
+    from sources.kite_pull import _env
+    return RedirectResponse(f"https://kite.zerodha.com/connect/login?v=3&api_key={_env('KITE_API_KEY')}")
+
+
+@app.get("/kite/callback")
+def kite_callback(request_token: str = "", status: str = ""):
+    """Kite's redirect after login: exchange the one-time request_token for today's session
+    (cached for the 15:20 IST quote job). Read-only use; the token never reaches the page."""
+    from fastapi.responses import RedirectResponse
+    from kiteconnect import KiteConnect
+    from sources import _http
+    from sources.kite_pull import _cache_token, _env
+    if status != "success" or not request_token:
+        return RedirectResponse("/options?kite=failed", status_code=303)
+    try:                                            # the cached session is replaced only on success
+        kc = KiteConnect(api_key=_env("KITE_API_KEY"))
+        with _http.pace("kite"):
+            data = kc.generate_session(request_token, api_secret=_env("KITE_API_SECRET"))
+        _cache_token(data["access_token"])
+    except Exception:                               # noqa: BLE001 — shown on the page, not raised
+        return RedirectResponse("/options?kite=failed", status_code=303)
+    return RedirectResponse("/options?kite=ok", status_code=303)
+
+
 @app.get("/feeds", response_class=HTMLResponse)
 def feeds_page(request: Request):
     """Data Supply — feeds by family, canaries, resilience, discovery funnel,
@@ -385,14 +427,6 @@ async def api_org_run(request: Request):
 @app.get("/api/org/running")
 def api_org_running():
     return {"running": api.org_running()}
-
-
-# Options paper book: placeholder in this branch. On merge keep master's real `options_page`
-# (route + options.html + option_book.page_data) and drop this one.
-@app.get("/options", response_class=HTMLResponse)
-def options_placeholder(request: Request):
-    entry = next(p for p in pages.PAGES if p["id"] == "options")
-    return templates.TemplateResponse(request, "coming.html", {"page": "options", "entry": entry})
 
 
 add_redirects(app, pages.REDIRECTS)

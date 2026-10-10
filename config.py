@@ -155,6 +155,11 @@ REVENUE_PLAUSIBILITY = {
 
 # ── Portfolio Construction ──
 
+# Option paper book (plan 0022): the ops cockpit's one-tap Kite login (HTTPS, nginx → :3001).
+# Register OPS_HTTPS + "/kite/callback" as the Kite Connect app's redirect URL.
+OPS_HTTPS = "https://alpha.rendezvous-app.duckdns.org"
+KITE_LOGIN_PAGE = OPS_HTTPS + "/kite/login"
+
 PORTFOLIO = {
     "max_stocks_per_sector": 5,
     "max_stock_weight_pct": 5.0,

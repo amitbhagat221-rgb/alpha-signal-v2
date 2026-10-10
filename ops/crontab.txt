@@ -23,3 +23,5 @@
 0 8 * * 0-5 /home/ubuntu/alpha-signal-v2/run.sh backfill 320 >> /home/ubuntu/alpha-signal-v2/output/backfill.log 2>&1
 0 16 2-31 * * /home/ubuntu/alpha-signal-v2/run.sh backfill 250 >> /home/ubuntu/alpha-signal-v2/output/backfill.log 2>&1
 0 21 * * * /home/ubuntu/alpha-signal-v2/run.sh backfill 320 >> /home/ubuntu/alpha-signal-v2/output/backfill.log 2>&1
+# Option paper book (plan 0022): live quotes + Kite margin at 15:20 IST on entry days
+50 9 * * 1-5 /home/ubuntu/alpha-signal-v2/run.sh kite_quotes >> /home/ubuntu/alpha-signal-v2/output/kite_quotes.log 2>&1

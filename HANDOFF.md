@@ -1,19 +1,25 @@
 # HANDOFF
-Updated: 2026-10-08 | Branch: master (0 unpushed) | HEAD: 81655ca feat: news editor (plan 0021), investor playbooks + sleeve backtest, BSE SHP holders feed
+Updated: 2026-10-10 | Branch: master (0 unpushed before this commit) | HEAD: c158cd7 merge master into frontend-polish
 
 ## Left off
-The factor audit (plan 0020) is shipped and pushed (692ef44 code, b504ff3 docs, ADR 0062–0064): corrected inputs, new weights on all three tiers, a missing factor scores as neutral; every morning since 2026-10-05 ranks LARGE 101 / MID 140 / SMALL ~1,535. The evidence table still predates the 10-04 fixes (demergers, board-meeting result filings, neutral rule): the panel re-run started 2026-10-04 06:21 died at once on `database is locked` (`output/factor_audit_pass4.log`, `exit4=1`).
+Option-premium selling went from idea to a running forward test.
+- **Study:** on real prices 2019–2026 only the 0.05-delta strangle sold 2 sessions before expiry holds up. The pre-registered 1-session version, the event veto and the VIX veto all failed.
+- **Paper book:** `option_book.py` now records it daily (plan 0022, ADR 0067 proposed). First paper trade: NIFTY exp 2026-10-13, sold 23000 CE 5.85 + 21950 PE 7.75.
+- **Kite Connect:** live on Amit's account ML5851 (static IP 140.245.248.166).
+- **Secrets:** moved out of v1 into `~/.config/alpha-signal/secrets.env` (ADR 0066 proposed).
 
 ## Pick up here
-1. **Re-run the evidence pass outside the 02:45–05:45 UTC window** (nothing else writing): `python -m tools.reconstruct_pit` with every producer that reads `px` / `prices` / `close` / `base` / `bse_results` (list them from `factors.PIT_PRODUCERS`) and `--date` for each of the 204 `daily_snapshots_pit` anchors (~3 h), then `python -m tools.backtest_pit`, `python -m tools.multiple_testing`, `python -m tools.factor_audit --wired`. Compare with `docs/studies/promotion-review-2026-10.md`; no weight change without a review.
-2. **Act on the auditor's 2026-10-04 memo** (`python -m org scorecard`, Boardroom `/org`; 4 of 4 calls matched the re-run, drill 7 of 7): `stocks.market_cap_cr` holds rupees and is shown as crore (= work order 1, `python -m org work 1`), and `stocks.pe_ratio / pb_ratio / roe / debt_to_equity` are empty for every stock while `tables.py` says yfinance fills them. Fix or drop, then add each as a rule in `tools/dq_probes.py`. Next scheduled run Sunday 2026-10-11 06:30 UTC.
-3. **Next build, in order:** dead names in the panel ([plan 0020 §7](docs/plans/0020-factor-audit.md)) → feature-layer refactor + one label table + cadence fields ([study §5](docs/studies/factor-audit-2026-10.md)) → new LARGE factors (none proven; `iv_skew_25d` LARGE flagged by `FACTOR_DECAY`).
+1. **Wed 2026-10-14 after the 03:30 run:** check the first settlement with `python -m option_book --show` (or ops `/options`), and that `cron_bse_fo` / `cron_nse_holidays` / `cron_option_book` are SUCCESS in `pipeline_log`. 10-11 is the first morning run on the new secrets file, so check the 04:00 health email arrived.
+2. **Tue 10-13 and Thu 10-15, 09:50 UTC:** after Amit's `/kite/login`, `output/kite_quotes.log` should show the SENSEX then NIFTY snapshot and rows in `option_live_quotes` with `chosen = 1` and a basket margin. Amit must first set the Kite app's redirect URL to `https://alpha.rendezvous-app.duckdns.org/kite/callback`.
+3. **Add the paper-book line to the daily email:** `output/email_sender.py:_build_html`, a try/except block after `changes_html`, reading `option_book.page_data()["summary"]`.
 
 ## Watch out
-- **Long panel rebuilds lose to the morning run's lock.** `reconstruct_pit` holds no retry beyond the 30 s busy timeout: start it after ~06:00 UTC and finish before 02:45.
-- **The auditor's `top_action` was stale** ("finish the re-test of the eight weights", done 10-03 as ADR 0063): its brief lists past findings but not decisions taken since. Tune `.claude/routines/roles/dq-auditor.md` or add recent ADRs to `_build_dq_audit` in `alpha_mcp/org_kinds.py`.
-- **Shared tree again:** another session has uncommitted plan 0017 work (`datamodel/sync.py`, `schema.sql`, `tables.py`, `backup_db.sh`, `datamodel/retire.py`, a checklist line). Do not sweep it into a factor commit; this handoff commit stages only its own hunks.
-- `tools/session_classify*` stay untracked on purpose (INSERT OR REPLACE ratchet, 665eab8).
+- **SENSEX volume is in units on BSE.** `sources/bse_fo.py` divides by `NewBrdLotQty` to store lots like NSE. OI stays in units, as on NSE.
+- **A closed market has volume 0 and an empty order book in Kite quotes.** The rule (like the backtest) only uses strikes that traded that day, so `kite_quotes --force` on a weekend finds no strikes. Test with real sessions only.
+- **The live crontab holds non-v2 lines** (duckdns, project-rendezvous) that `ops/crontab.txt` does not. Never install `ops/crontab.txt` wholesale; append a line, and keep the order the same in both (`test_ops_files` compares order).
+- **`fno_bhav` gaps:** before 2024-07-15 it holds only index underlyings. 2021-03-30 and 2024-07-08…12 are missing (no legacy file; NSE's format switch).
+- **Untouched v1 copy:** v1's `run_pipeline.sh` still holds the old secrets, which nothing reads. Amit can delete those lines once the 10-11 runs are clean.
+- **Not in this commit:** the other session's uncommitted plan 0017 / cockpit-v2 work in `datamodel/sync.py`, `backup_db.sh`, `schema.sql` deletions, `tables.py` deletions, `tests/test_datamodel.py`, `tests/test_checks.py`, and the checklist's cockpit / audit bullets is left unstaged.
 
 ## Active plan
-docs/plans/0020-factor-audit.md (shipped; open: evidence re-run, R11, dead-names panel §7, refactor + backtest redesign) · docs/plans/0019-agent-org.md (Phase 2: tune charters from the first weekly memos) · docs/plans/0017-data-model-redesign.md (parity gaps, other session)
+docs/plans/0022-option-premium-paper-book.md (Phase 1+2 recording, pass bar after 25 trades) · docs/plans/0017-data-model-redesign.md (other session) · docs/plans/0020-factor-audit.md (close-out)

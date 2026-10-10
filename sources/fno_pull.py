@@ -30,6 +30,7 @@ Usage:
     python -m sources.fno_pull --date 29-05-2026          # single day (debug)
     python -m sources.fno_pull --daily                    # pipeline daily step
     python -m sources.fno_pull --pcr                       # (re)compute rollup
+    python -m sources.fno_pull --legacy --start 2019-01-01 --end 2024-07-12 --budget-min 50
 """
 
 import argparse
@@ -168,6 +169,113 @@ def backfill_fno_bhav(months=6):
         raise RuntimeError(
             f"fno_bhav backfill: all {n_err} NSE calls erred — endpoint unreachable")
     print(f"  backfill done: {total} rows · {n_ok} days loaded · {n_skip} skipped · {n_err} erred")
+    return total
+
+
+# ── Legacy archive (before the UDiFF files this table starts with, 2024-07) ──
+# One zip per trading day. Same contracts, older column names, and no underlying
+# price: index levels come from nse_index_history (except on expiry day, where an
+# option's SETTLE_PR already IS the index settlement, as in UDiFF). CONTRACTS is in
+# lots, the same unit as UDiFF TtlTradgVol. Index underlyings only: stock options
+# would add ~30M rows the option-selling study (docs/studies/option-premium-
+# feasibility-2026-10.md) does not need.
+LEGACY_FO_URL = "https://nsearchives.nseindia.com/content/historical/DERIVATIVES/{y}/{mmm}/fo{d:02d}{mmm}{y}bhav.csv.zip"
+LEGACY_INDEX = {"NIFTY": "NIFTY 50", "BANKNIFTY": "NIFTY BANK",
+                "FINNIFTY": "NIFTY FINANCIAL SERVICES", "MIDCPNIFTY": "NIFTY MIDCAP SELECT"}
+_LEGACY_TYPES = {"OPTIDX": "IDO", "FUTIDX": "IDF"}
+
+
+def parse_legacy_fo(content, index_close):
+    """A legacy fo…bhav.csv.zip → fno_bhav rows for LEGACY_INDEX underlyings.
+
+    `index_close` = {fno symbol: index close that day}; a symbol without one is
+    dropped (no underlying price is better than a wrong one)."""
+    import io
+    import zipfile
+    z = zipfile.ZipFile(io.BytesIO(content))
+    df = pd.read_csv(z.open(z.namelist()[0]))
+    df.columns = df.columns.str.strip()
+    df["SYMBOL"] = df["SYMBOL"].astype(str).str.strip()
+    df["INSTRUMENT"] = df["INSTRUMENT"].astype(str).str.strip()
+    df = df[df["INSTRUMENT"].isin(_LEGACY_TYPES) & df["SYMBOL"].isin(index_close)]
+    df = df[(df["OPEN_INT"] > 0) | (df["CONTRACTS"] > 0)]
+    if df.empty:
+        return pd.DataFrame()
+    out = pd.DataFrame({
+        "sid": None,
+        "symbol": df["SYMBOL"],
+        "instrument_type": df["INSTRUMENT"].map(_LEGACY_TYPES),
+        "expiry_date": pd.to_datetime(df["EXPIRY_DT"].astype(str).str.strip(), format="%d-%b-%Y").dt.date.astype(str),
+        "strike": pd.to_numeric(df["STRIKE_PR"], errors="coerce").fillna(0.0),
+        "option_type": df["OPTION_TYP"].astype(str).str.strip().replace({"": "XX", "nan": "XX"}),
+        "trade_date": pd.to_datetime(df["TIMESTAMP"].astype(str).str.strip().str.title(), format="%d-%b-%Y").dt.date.astype(str),
+        "close": pd.to_numeric(df["CLOSE"], errors="coerce"),
+        "settle": pd.to_numeric(df["SETTLE_PR"], errors="coerce"),
+        "underlying_price": df["SYMBOL"].map(index_close),
+        "oi": df["OPEN_INT"].astype("int64"),
+        "chg_oi": df["CHG_IN_OI"].astype("int64"),
+        "volume": df["CONTRACTS"].astype("int64"),
+        "num_trades": None,                         # not in the legacy file
+    })
+    return out
+
+
+def backfill_legacy(start, end, budget_min=None):
+    """Load the legacy F&O archive for [start, end] (index underlyings only) into
+    fno_bhav. Resumable: days that already hold index options are skipped; stops at
+    `budget_min`. Loads the index levels it needs into nse_index_history first.
+    Returns new rows."""
+    import runlog
+    from sources.nse import _is_trading_day
+    from sources.nselib_pull import backfill_index_history
+
+    backfill_index_history(list(LEGACY_INDEX.values()), start, end)   # skips months it holds
+    closes = read_sql("SELECT index_symbol, trade_date, close FROM nse_index_history WHERE index_symbol IN (%s) "
+                      "AND trade_date BETWEEN ? AND ?" % ",".join("?" * len(LEGACY_INDEX)),
+                      params=list(LEGACY_INDEX.values()) + [start, end])
+    by_day = {}
+    sym = {v: k for k, v in LEGACY_INDEX.items()}
+    for i, d, c in zip(closes.index_symbol, closes.trade_date, closes.close):
+        by_day.setdefault(d, {})[sym[i]] = c
+
+    have = set(read_sql("SELECT DISTINCT trade_date FROM fno_bhav WHERE instrument_type = 'IDO' "
+                        "AND trade_date BETWEEN ? AND ?", params=[start, end])["trade_date"])
+    s, e = date.fromisoformat(start), date.fromisoformat(end)
+    todo = [d for d in (s + timedelta(days=i) for i in range((e - s).days + 1))
+            if _is_trading_day(d) and d.isoformat() not in have]
+    print(f"NSE legacy F&O {start} → {end}: {len(todo)} weekdays not yet loaded ({len(have)} loaded)")
+    out_of_time = _http.time_budget("nse_archives", budget_min) if budget_min else (lambda: False)
+    total = n_days = n_bad = 0
+    for d in todo:
+        if out_of_time():
+            print(f"  stopped at the {budget_min:.0f}-min budget — rerun to resume")
+            break
+        if d.isoformat() not in by_day:             # no index level = market holiday (or a gap to report)
+            continue
+        url = LEGACY_FO_URL.format(y=d.year, mmm=d.strftime("%b").upper(), d=d.day)
+        try:
+            resp = _http.polite_get(url, timeout=40)
+            if resp is None:
+                runlog.item_failed("nse_legacy_fo", d.isoformat(), "no file on a day with an index close")
+                n_bad += 1
+                continue
+            df = parse_legacy_fo(resp.content, by_day[d.isoformat()])
+        except Exception as ex:                    # noqa: BLE001 — one bad day must not stop the range
+            n_bad += 1
+            runlog.item_error("nse_legacy_fo", d.isoformat(), ex)
+            continue
+        if df.empty:
+            n_bad += 1
+            runlog.item_failed("nse_legacy_fo", d.isoformat(), "0 index contracts in the file")
+            continue
+        total += insert_df(df, "fno_bhav", lock_retries=5)
+        runlog.item_ok()
+        n_days += 1
+        if n_days % 50 == 0:
+            print(f"  {d}: {n_days} days loaded, {total} rows", flush=True)
+    print(f"NSE legacy F&O: {n_days} days loaded, {total} new rows, {n_bad} bad days")
+    if todo and n_days == 0 and n_bad:
+        raise RuntimeError(f"legacy F&O: 0 of {len(todo)} days loaded ({n_bad} bad) — archive moved or blocked?")
     return total
 
 
@@ -323,7 +431,14 @@ def main():
     ap.add_argument("--date", type=str, help="single day dd-mm-yyyy (debug)")
     ap.add_argument("--daily", action="store_true", help="daily trailing-window fetch")
     ap.add_argument("--pcr", action="store_true", help="(re)compute PCR rollup for missing dates")
+    ap.add_argument("--legacy", action="store_true", help="legacy archive, index underlyings, --start/--end")
+    ap.add_argument("--start", default="2019-01-01")
+    ap.add_argument("--end", default="2024-07-12", help="last day before the UDiFF files (2024-07-15)")
+    ap.add_argument("--budget-min", type=float, help="stop after this many minutes (resumable)")
     args = ap.parse_args()
+
+    if args.legacy:
+        backfill_legacy(args.start, args.end, args.budget_min)
 
     if args.date:
         n = pull_fno_bhav(args.date)

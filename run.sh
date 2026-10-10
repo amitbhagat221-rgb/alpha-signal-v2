@@ -4,9 +4,9 @@
 #   run.sh <job>          run a job (crontab: one line per job, each redirecting to its log)
 #   DRY=1 run.sh <job>    print what would run
 #
-# One preamble for every job: repo dir, shared venv, credentials imported READ-ONLY
-# from v1's run_pipeline.sh exports (CLAUDE.md — never duplicate secrets), and the
-# email-sender variables. Harvesting jobs take the shared non-blocking harvest lock
+# One preamble for every job: repo dir, shared venv, credentials from the v2 secrets
+# file (~/.config/alpha-signal/secrets.env, mode 600, outside git — the ONE place they
+# live; CLAUDE.md), and the email-sender variables. Harvesting jobs take the shared non-blocking harvest lock
 # (no two harvesters at once) and skip the run if another holds it.
 set -u
 
@@ -15,9 +15,12 @@ cd "$ROOT" || { echo "FATAL: cd $ROOT failed"; exit 1; }
 # shellcheck disable=SC1091
 source /home/ubuntu/alpha-signal/venv/bin/activate
 
-V1_PIPELINE=/home/ubuntu/alpha-signal/run_pipeline.sh
-if [ -r "$V1_PIPELINE" ]; then
-    eval "$(grep '^export ' "$V1_PIPELINE")"
+SECRETS=/home/ubuntu/.config/alpha-signal/secrets.env
+if [ -r "$SECRETS" ]; then
+    # shellcheck disable=SC1090
+    . "$SECRETS"
+else
+    echo "[warn] $SECRETS not readable — jobs needing credentials will fail" >&2
 fi
 export GMAIL_USER="${ALPHA_SIGNAL_EMAIL:-}"
 export GMAIL_APP_PASSWORD="${ALPHA_SIGNAL_PASSWORD:-}"
@@ -76,6 +79,11 @@ case "$JOB" in
         # Forward record of the investor-playbook sleeves (sleeves.py): today's members, after the
         # pipeline so it reads today's factor values; a failure here never touches picks.
         logged playbook_members run python -m tools.playbook_backtest --record || echo "[warn] playbook_members record failed"
+        # Option-premium paper book (plan 0022): BSE SENSEX chain for the last week, the exchange
+        # holiday list, then the forward record (new entry days + settlements). Never touches picks.
+        logged cron_bse_fo run python -m sources.bse_fo --start "$(date -u -d '7 days ago' +%F)" || echo "[warn] bse_fo failed"
+        logged cron_nse_holidays run python -m sources.nse_holidays || echo "[warn] nse_holidays failed"
+        logged cron_option_book run python -m option_book --record || echo "[warn] option_book record failed"
         logged datamodel_sync run python -m datamodel.sync || echo "[warn] datamodel sync failed (v3 shadow only)"
         logged datamodel_reconcile run python -m datamodel.reconcile || echo "[warn] datamodel parity FAIL: python -m datamodel.reconcile --show"
         echo "Done $(date -u) (pipeline rc=$RC)"
@@ -150,6 +158,9 @@ case "$JOB" in
         run python -m tools.freshness_watchdog ;;
     health)             # 04:00 UTC — health email + push
         run python -m tools.health_report --email --push ;;
+    kite_quotes)        # 09:50 UTC weekdays (15:20 IST) — live option quotes + Kite margin on paper-book
+                        # entry days only (plan 0022); needs that day's Kite login, else FAILED with the link
+        logged cron_kite_quotes run python -m sources.kite_quotes ;;
     pt_snapshot)        # 1st of month — monthly analyst PT snapshot (episodic data, CLAUDE.md)
         logged cron_pt_snapshot run python -m sources.yfinance_analyst --snapshot ;;
     management)         # 3rd of month 06:10 UTC — management scorecards for the stock page's Management tab
@@ -188,6 +199,6 @@ case "$JOB" in
         echo "Tickertape finished rc=$RC at $(date -u)"
         exit $RC ;;
     *)
-        echo "unknown job '$JOB' (morning forward canary estimates transcripts screener_schedules llm_local org watchdog health pt_snapshot management backtest expected_return screener_cookie secrets_backup screener_universe tickertape)"
+        echo "unknown job '$JOB' (morning forward canary estimates transcripts screener_schedules llm_local org watchdog health pt_snapshot management kite_quotes backtest expected_return screener_cookie secrets_backup screener_universe tickertape)"
         exit 2 ;;
 esac
