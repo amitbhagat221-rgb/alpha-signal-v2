@@ -5,8 +5,8 @@
 {%- endmacro %}
 
 {% macro sector_chips(gains, loses) -%}
-{% for n in gains %}<a href="/sectors?sector={{ n|urlencode }}" class="ns-sec ns-up" aria-label="{{ n }} may gain">&#9650; {{ n }}</a>{% endfor %}
-{% for n in loses %}<a href="/sectors?sector={{ n|urlencode }}" class="ns-sec ns-down" aria-label="{{ n }} may lose">&#9660; {{ n }}</a>{% endfor %}
+{% for n in gains %}<a href="/markets?sector={{ n|urlencode }}#industries" class="ns-sec ns-up" aria-label="{{ n }} may gain">&#9650; {{ n }}</a>{% endfor %}
+{% for n in loses %}<a href="/markets?sector={{ n|urlencode }}#industries" class="ns-sec ns-down" aria-label="{{ n }} may lose">&#9660; {{ n }}</a>{% endfor %}
 {%- endmacro %}
 
 {% macro styles() %}

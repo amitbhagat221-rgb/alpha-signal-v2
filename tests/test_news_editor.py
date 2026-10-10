@@ -198,20 +198,16 @@ def test_news_pages_render(ne, tmp_path, monkeypatch):
     monkeypatch.setattr(webauth, "AUTH_FILE", tmp_path / "auth.json")
     webauth.set_password("correct horse battery")
     client = TestClient(app, cookies={webauth.COOKIE: webauth.make_token()})
-    # Cockpit v2 retired /news and /news/all (they redirect to /markets); their data functions
-    # live on until the Markets page replaces them, so render them on a bare app.
-    from fastapi import FastAPI
-    from cockpit import app as cockpit_app
-    old = FastAPI()
-    old.add_api_route("/news", cockpit_app.news_editor_page, methods=["GET"])
-    old.add_api_route("/news/all", cockpit_app.news_page, methods=["GET"])
-    legacy = TestClient(old)
+    # /news and /news/all redirect to Markets; the sector tilt (a 12 s compute over every close) is stubbed.
+    monkeypatch.setattr(api, "_sector_tilt_view", lambda d: [
+        {"sector": "Energy", "sector_tilt": 0.9, "z_mom6": 1.0, "z_macro": 0.8}])
+    legacy = client
 
     def clear():
         for f in (api.get_news_today, api.get_news_themes, api.get_news_week, api.get_sector_radar):
             f.cache_clear()
     clear()
-    page = legacy.get("/news")
+    page = legacy.get("/markets")
     assert page.status_code == 200 and "No weekly outlook has been written yet" in page.text and "No note yet" in page.text
     assert client.get("/markets/theme/nope").status_code == 404
 
@@ -224,11 +220,11 @@ def test_news_pages_render(ne, tmp_path, monkeypatch):
     week = {**WEEK, "radar": [{**WEEK["radar"][0], "refs": robots}, {**WEEK["radar"][0], "refs": robots}]}
     ne.ingest_week(ne.validate_week(week, p), p)
     clear()
-    page = legacy.get("/news")
+    page = legacy.get("/markets")
     assert page.status_code == 200
-    for needle in ("Oil keeps climbing", "Humanoid robots leave the lab", "/sectors?sector=Energy",
-                   "not a recommendation", "/news/theme/oil_energy", "/news/all"):
+    for needle in ("Oil keeps climbing", "Humanoid robots leave the lab", "/markets?sector=Energy",
+                   "not a recommendation", "/markets/theme/oil_energy", "/partial/news-search"):
         assert needle in page.text, needle
-    assert legacy.get("/news/all").status_code == 200
+    assert legacy.get("/partial/news-search?q=oil").status_code == 200
     deep = client.get("/markets/theme/oil_energy")
     assert deep.status_code == 200 and "Timeline" in deep.text and "Crude began to rise" in deep.text

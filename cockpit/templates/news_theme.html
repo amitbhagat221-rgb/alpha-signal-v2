@@ -1,11 +1,11 @@
 {% extends "base.html" %}
 {% from "_news_theme.html" import styles, heat_chip, sector_chips %}
-{% block title %}{{ page_title("News") }}{% endblock %}
+{% block title %}{{ page_title("Markets") }}{% endblock %}
 
 {% block content %}
 {{ styles() }}
 <div class="ns-wrap">
-<a href="/news" class="ns-back">&larr; Back to News</a>
+<a href="/markets#themes" class="ns-back">&larr; Back to Markets</a>
 
 <div class="ns-head" style="margin-top: 12px;">
     <h1 class="ns-h1">{{ t.title }}</h1>
@@ -55,6 +55,6 @@
     <div class="ns-text">No articles.</div>
 {% endfor %}
 </div>
-<div style="margin: 22px 0;"><a href="/news" class="ns-back">&larr; Back to News</a></div>
+<div style="margin: 22px 0;"><a href="/markets#themes" class="ns-back">&larr; Back to Markets</a></div>
 </div>
 {% endblock %}
