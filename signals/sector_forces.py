@@ -54,12 +54,13 @@ def _macro_force(snapshot_date: str) -> dict[str, dict]:
         drivers = json.loads(r["macro_drivers"] or "[]")
         if not drivers:
             continue
-        # Direction from majority sign of drivers with a parsed value
-        signs = [d.get("direction") for d in drivers if d.get("direction") in ("+", "-")]
-        if not signs:
-            direction = "neutral"
-        else:
-            direction = "+" if signs.count("+") >= signs.count("-") else "-"
+        # Direction from the majority sign of the real macro indicators. The "Regulatory"
+        # pseudo-driver carries an event COUNT (always positive) and belongs to the
+        # regulation force; counting it made every sector '+'. A tie is neutral.
+        signs = [d.get("direction") for d in drivers
+                 if d.get("direction") in ("+", "-") and d.get("driver") != "Regulatory"]
+        n_up, n_dn = signs.count("+"), signs.count("-")
+        direction = "+" if n_up > n_dn else "-" if n_dn > n_up else "neutral"
         # Magnitude maps off the sector's overall macro_score band
         score = r.get("macro_score")
         if score is None or pd.isna(score):
@@ -72,7 +73,7 @@ def _macro_force(snapshot_date: str) -> dict[str, dict]:
             magnitude = "weak"
         # Summary — top 2 drivers by absolute value
         scored = sorted(
-            [d for d in drivers if isinstance(d.get("value"), (int, float))],
+            [d for d in drivers if isinstance(d.get("value"), (int, float)) and d.get("driver") != "Regulatory"],
             key=lambda d: abs(d["value"]),
             reverse=True,
         )[:2]
