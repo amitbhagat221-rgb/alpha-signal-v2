@@ -1,22 +1,23 @@
 # HANDOFF
-Updated: 2026-10-10 | Branch: master (81 unpushed before this commit: the other session's cockpit-v2 go-live) | HEAD: ce3ed29 fix(cockpit): blank charts after a deploy
+Updated: 2026-10-10 | Branch: master (85 unpushed before this commit) | HEAD: a6ba433 test(checks): volume-spike verdict test no longer depends on a live backfill window
 
 ## Left off
-Plan 0023 tested six pre-registered dynamic filters on the option strangle (premium, trend, skew, stress, positioning, macro). All failed out of sample: the 0.05-delta strike already adapts to volatility, and the static rule earns most in the high-stress quintiles (ADR 0068 proposed). The static paper book (plan 0022, committed 71bb3b0) keeps recording. First trade: NIFTY exp 2026-10-13; next entries SENSEX Tue 10-13 and NIFTY Thu 10-15.
+Cockpit v2 is live: Today (book changes) · Explorer · Stocks screener · Markets · Sectors (38-industry tile grid) · Investor Playbooks · Book · Model · Funds, and ops Health/Feeds/Flow/Boardroom/Options. Two Playwright sweeps of every page × tab at 1440 + 375 came back clean, and stock charts now show date, close and volume on hover. Amit's "blank charts" were a stale cached `cockpit.js`, now fixed with `?v=` + cache rules (ce3ed29). The options paper book (plan 0022) keeps recording; plan 0023's dynamic filters all failed (ADR 0068).
 
 ## Pick up here
-1. **Wed 2026-10-14 after the 03:30 run:**
-   - first settlement: `python -m option_book --show` / ops `/options`;
-   - `cron_bse_fo` / `cron_nse_holidays` / `cron_option_book` SUCCESS in `pipeline_log`;
-   - the first live snapshot: `output/kite_quotes.log` from Tue 10-13 09:50 UTC, and `option_live_quotes` rows with `chosen = 1` (only if Amit logged in via `/kite/login` and set the Kite app redirect URL to `…/kite/callback`).
-2. **Paper-book line in the daily email:** `output/email_sender.py:_build_html`, a try/except block after `changes_html`, from `option_book.page_data()["summary"]`.
-3. **Kite minute bars on entry and hold days:** a forward collection for the one untested dynamic idea, intraday management (plan 0023 §5). Extend `sources/kite_quotes.py` or `sources/kite_pull.py --backfill-bars` for NIFTY/SENSEX options; a new table needs `schema.sql` + `tables.TABLES` + a feed entry.
+1. **Amit's open decisions from the cockpit QA** (checklist "Cockpit v2 LIVE", ①–⑥). The pick-changing one is the price-history gaps: 22 ranked stocks (KOV #1 SMALL; 7 share a 2023-10-25→2026-04-20 hole) feed `signals/residual_momentum.py:84`, which uses ROW windows. That needs an ISIN-keyed bhavcopy backfill plus a gap guard, run on a branch and approved before it ships. Also waiting: the `bulk_deals` cleanup (scratchpad `apply.sql` was refused by the classifier), the INDIANB coverage gate, single-flag THYROCARE, and weekend `daily_picks`.
+2. **Wed 2026-10-14 after the 03:30 run:**
+   - `python -m option_book --show` for the first NIFTY settlement.
+   - Check that `cron_bse_fo` / `cron_option_book` / `cron_management` (first run 11-03) are SUCCESS.
+   - If Amit used `/kite/login`, `option_live_quotes` should have `chosen = 1` rows.
+3. **Sunday 10-11 Yahoo run:** check that `analyst_consensus` refills the 179 NULLed averages and that `total_analysts` is Yahoo's count again (LODHA showed "1 analyst" vs 18 ratings). The check `ANALYST_TARGET_IMPLAUSIBLE` now also fails an average outside its own low–high range.
 
 ## Watch out
-- **`sources/fno_iv.py` now falls back to the next-closest expiry when the ~30-day one can't invert.** That added 495 NIFTY days (2019–21) to `fno_iv_history`. Any IV factor's PIT panel built before today lacks them; re-run `reconstruct_pit` for IV signals before trusting their evidence.
-- **`compute_iv` / `compute_pcr` backfills skip a date that has any row,** so a missing underlying on an otherwise-done date never self-heals. Use `compute_iv_for_date(d, symbols=[...])`. `compute_pcr_for_date` recomputes all symbols on the date.
-- **SENSEX `fno_iv_history` lacks 25 thin early-2024 days;** the readings treat them as "no signal".
-- **Not in this commit:** the other session's dirty `datamodel/*`, `backup_db.sh`, `schema.sql`/`tables.py`/`feeds.py` deletions, `tests/test_checks.py`, `tests/test_datamodel.py`, `anc.js`, `tools/nonlinear_benchmark.py`, plus their checklist lines.
+- **Every `/static` script or stylesheet needs `?v={{ asset_version(...) }}`** (`tests/test_static_cache.py`). An untagged file is served `no-cache`; before that fix, browsers ran new pages against days-old JS. Test in a stale-cache browser, not only a fresh one.
+- **Don't delete CSS you think is unused.** `tests/test_cockpit_css.py` fails when a template class has no rule; a v2 merge had pruned the industry dossier's 240 lines.
+- **`mf_scheme_master` categories were re-normalised 99→54 in place** (`sources/mf_amfi_master.renormalise_master`). Older `mf_metrics` snapshots keep the old labels.
+- **`daily_picks` has weekend/holiday rows** (morning cron runs daily). `pick_outcomes` now drops them; anything else counting pick dates must too.
+- **Not in this commit:** the plan-0017 session's dirty `datamodel/*`, `schema.sql`, `tables.py`, `feeds.py`, `backup_db.sh`, `tests/test_checks.py`, `tests/test_datamodel.py`; the non-linear-benchmark session's `tools/nonlinear_benchmark.py`, `docs/studies/nonlinear-benchmark-2026-10.md` and its checklist bullet; `anc.js`.
 
 ## Active plan
-docs/plans/0022-option-premium-paper-book.md (Phase 1+2 recording; pass bar after 25 trades) · docs/plans/0023-dynamic-option-setups.md (done: negative) · docs/plans/0017-data-model-redesign.md (other session)
+docs/plans/0022-option-premium-paper-book.md (recording; pass bar after 25 trades) · docs/plans/0020-factor-audit.md (close-out) · docs/plans/0017-data-model-redesign.md (other session)

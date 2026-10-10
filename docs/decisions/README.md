@@ -100,3 +100,5 @@ Status key: **A** accepted · **P→N** partly superseded by N · **S→N** supe
 | 0066 | [Credentials live in `~/.config/alpha-signal/secrets.env`, outside the repo](0066-secrets-in-v2-config-file.md) | P (replaces the v1-file rule of 0007) |
 | 0067 | [Option premium: a forward paper book on one rule, shared code with the backtest, manual Kite logins](0067-option-premium-paper-book.md) | P (plan 0022) |
 | 0068 | [No dynamic filters on the option strangle: the delta rule already adapts](0068-no-dynamic-filters-on-option-strangle.md) | P (plan 0023; builds on 0067) |
+| 0069 | [Cockpit v2: one fact, one home; Today trades the sized book](0069-cockpit-v2-site-map.md) | A (live 2026-10-10) |
+| 0070 | [Shadow, optional and not-yet-live jobs never page](0070-shadow-and-not-live-jobs-never-page.md) | A (extends 0059 / 0060) |
