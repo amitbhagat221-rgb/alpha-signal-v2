@@ -31,11 +31,14 @@ def test_one_per_sid_keeps_newest():
 
 def test_outcome_decile_cells_coloured_by_sign():
     from cockpit.app import templates
-    html = templates.get_template("model_outcomes.html").render(
-        page="model-outcomes", top_n=10, request=None,
-        summary={"windows_status": [], "by_window_tier": [], "headline_window": 63, "bench_staleness_days": 0,
-                 "time_series": [],
-                 "rank_deciles": [{"cap_tier": "LARGE", "decile": 1, "avg_fwd": -1.5},
-                                  {"cap_tier": "LARGE", "decile": 10, "avg_fwd": 2.0}]})
-    cells = re.findall(r'mo-decile-cell ([a-z]*)">\s*D(\d+)', html)
+    summary = {"windows_status": [], "by_window_tier": [], "headline_window": 63, "bench_staleness_days": 0,
+               "bench_max_date": None, "time_series": [],
+               "rank_deciles": [{"cap_tier": "LARGE", "decile": 1, "avg_fwd": -1.5},
+                                {"cap_tier": "LARGE", "decile": 10, "avg_fwd": 2.0}]}
+    track = {"summary": summary, "top_n": 10, "verdicts": [], "last_pick_date": None, "min_dates": 20,
+             "first_read": __import__("datetime").date(2026, 11, 1), "model_change_text": "3-4 Oct", "bench_stale": False}
+    html = templates.get_template("book.html").render(
+        page="book", request=None, tabs=[("book", "The book"), ("risk", "Risk"), ("track-record", "Track record")],
+        book=None, risk=None, track=track)
+    cells = re.findall(r'<div class="(up|down|)">D(\d+)<b', html)
     assert cells == [("down", "1"), ("up", "10")]
