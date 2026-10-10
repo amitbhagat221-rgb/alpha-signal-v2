@@ -7,7 +7,7 @@
             <div class="mono sy-factor-s">{{ f.score }}/100</div>
         </div>
         <div class="sy-factor-m">{{ f.message }}</div>
-        {% if f.fix %}<div class="sy-factor-x"><b>Fix:</b> {{ f.fix }}</div>{% endif %}
+        {% if f.fix %}<div class="sy-factor-x"><b>Fix:</b> {{ f.fix|ticks }}</div>{% endif %}
         {% if f.drill_sql %}<a href="/sql?q={{ f.drill_sql|urlencode }}" class="sy-drill">Drill &rarr; SQL Console</a>{% endif %}
     </div>
     {% else %}

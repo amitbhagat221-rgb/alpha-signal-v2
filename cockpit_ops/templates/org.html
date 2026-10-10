@@ -235,11 +235,11 @@
   {% for i in inbox %}
     <div class="og-row" id="item-{{ i.doc_id }}" data-item="{{ i.doc_id }}">
       <div class="og-head">
-        <span class="og-meta">#{{ i.doc_id }}</span>
         <span class="og-tag {% if i.type == 'ask' %}og-mid{% elif i.type == 'work_order' %}og-human{% else %}og-builder{% endif %}">{{ {'ask': 'ask', 'work_order': 'work order #' ~ i.fields.number}.get(i.type, 'hypothesis') }}</span>
         {% if i.board %}<span class="og-tag {{ {'approve': 'og-good', 'reject': 'og-bad'}.get(i.board.recommendation, 'og-mid') }}" data-board-call>pack says {{ i.board.recommendation }}</span>{% endif %}
         {% if i.fields.urgency == 'now' %}<span class="og-tag og-bad">now</span>{% endif %}
         <span class="og-title">{{ i.title }}</span>
+        <span class="og-meta og-ref">ref {{ i.doc_id }}</span>
       </div>
       <div class="og-sub">
         <span class="og-k">from</span> {{ i.role_title }} <span class="og-dot">·</span> {{ i.doc_date }} <span class="og-dot">·</span> {{ i.age_days }}d old
@@ -258,7 +258,7 @@
         {% if i.fields.expected_sign %}<div><span class="og-k">expected sign</span> {{ i.fields.expected_sign }}</div>{% endif %}
       </div>
       {% if i.option_list %}
-      <div class="og-opts" role="group" aria-label="Options for #{{ i.doc_id }}">
+      <div class="og-opts" role="group" aria-label="Options for {{ i.title }}">
         {% for o in i.option_list %}
         <button class="og-btn ok og-opt" data-option="{{ o.i }}" @click="decide({{ i.doc_id }}, 'approve', {{ o.i }}, {{ o.text|tojson|forceescape }})">{{ o.text }}{% if o.recommended %} <span class="og-tag og-good">recommended</span>{% endif %}</button>
         {% endfor %}
@@ -415,8 +415,8 @@
             <div class="og-title" x-text="chat.title"></div>
             <div class="og-seat-sub" x-text="chat.model + (chat.web ? ' · web search' : '') + ' · ' + (chat.mission || '')"></div>
           </div>
-          <button class="og-btn" :disabled="chat.busy || chat.messages.length < 2" @click="makeWorkOrder()" title="The employee writes down what you agreed as a numbered work order for your inbox">Make work order</button>
-          <button class="og-btn" :disabled="chat.busy" @click="loadHistory(false)" title="Earlier conversations with this employee">History</button>
+          <button class="og-btn" :disabled="chat.busy || chat.messages.length < 2" @click="makeWorkOrder()">Make work order</button>{{ tip("The employee writes down what you agreed as a numbered work order for your inbox.") }}
+          <button class="og-btn" :disabled="chat.busy" @click="loadHistory(false)">History</button>
           <button class="og-btn" :disabled="chat.busy" @click="newChat()">New</button>
         </div>
 
@@ -448,7 +448,7 @@
         </div>
 
         <div class="og-send">
-          <textarea rows="1" x-model="chat.input" :disabled="chat.busy" x-ref="box" placeholder="Message…" title="Enter to send, Shift+Enter for a new line"
+          <textarea rows="1" x-model="chat.input" :disabled="chat.busy" x-ref="box" placeholder="Message… (Enter sends, Shift+Enter new line)"
                     @input="$el.style.height = 'auto'; $el.style.height = Math.min($el.scrollHeight, 180) + 'px'"
                     @keydown.enter="if (!$event.shiftKey) { $event.preventDefault(); sendChat(); }"></textarea>
           <button class="og-btn ok" :disabled="chat.busy || !chat.input.trim()" @click="sendChat()">Send</button>
@@ -464,7 +464,7 @@
   <div class="og-mt12 section-desc">Work orders: fixes you agreed with an employee in chat, written down by them. You approve one in the inbox, then a Claude Code session runs it with <span class="mono">/work-order N</span>: builders work on a branch, the tests run, and the result is reported back here. Nothing starts on its own.</div>
   <div class="og-list">
   {% for w in work_orders %}
-    <div class="og-row og-click">
+    <div class="og-row og-click" data-wo="{{ w.doc_id }}">
       <div class="og-head">
         <span class="og-meta">#{{ w.number }}</span>
         <span class="og-tag {% if w.status == 'done' %}og-good{% elif w.status in ('rejected', 'cancelled', 'blocked') %}og-bad{% elif w.status == 'awaiting approval' %}og-mid{% else %}og-human{% endif %}">{{ w.status }}</span>
@@ -722,14 +722,16 @@
       chats: {},
 
       flash: '',
+      subject(id) { return (document.querySelector('[data-item="' + id + '"] .og-title, [data-wo="' + id + '"] .og-title')?.textContent || 'this item').trim(); },
       async decide(id, verdict, option, optionText) {
         let note = '';
+        const subj = this.subject(id);     // read before the card leaves the page
         if (option !== undefined) {         // one option of an ask: approve exactly that
-          if (!confirm('Choose for #' + id + ': ' + optionText + '? The seats see it in their next brief.')) return;
+          if (!confirm('Choose for "' + subj + '": ' + optionText + '? The seats see it in their next brief.')) return;
         } else if (verdict === 'approve') {
-          if (!confirm('Approve #' + id + '? The seats see it in their next brief.')) return;
+          if (!confirm('Approve "' + subj + '"? The seats see it in their next brief.')) return;
         } else {
-          const n = prompt((verdict === 'park' ? 'Park' : 'Reject') + ' #' + id + '. Note for the record (optional); Cancel keeps it open');
+          const n = prompt((verdict === 'park' ? 'Park' : 'Reject') + ' "' + subj + '". Note for the record (optional); Cancel keeps it open');
           if (n === null) return;          // Cancel = no decision
           note = n;
         }
@@ -740,7 +742,7 @@
         document.querySelectorAll('[data-btns="' + id + '"]').forEach((el) => el.remove());
         const n = document.getElementById('og-inbox-n');
         if (n) { const left = Math.max(0, (parseInt(n.textContent, 10) || 0) - 1); n.textContent = left; n.className = 'n ' + (left ? 'og-mid' : 'og-good'); }
-        this.flash = '#' + id + ' ' + (option !== undefined ? 'chose: ' + optionText : verdict + (verdict === 'approve' ? 'd' : 'ed')) + '. Recorded.';
+        this.flash = '"' + subj + '" ' + (option !== undefined ? 'chose: ' + optionText : verdict + (verdict === 'approve' ? 'd' : 'ed')) + '. Recorded.';
       },
 
       load(data) {                       // a seat's settings → the form
