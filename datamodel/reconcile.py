@@ -53,6 +53,7 @@ RETIRED = {
     "option_paper_trades": "kept as-is: plan 0022 option paper book (forward record)",
     "broker_holdings": "kept as-is: Amit's real Zerodha holdings, Kite snapshots for /book (account data, not market data)",
     "broker_instrument_prices": "kept as-is: Kite day closes of the non-universe Zerodha holdings (ETFs, gold bonds) for /book",
+    "intraday_files": "kept as-is: manifest of the Kite minute-bar Parquet archive (ADR 0072); the bars live in files, not tables",
     "sqlite_sequence": "SQLite internal",
 }
 

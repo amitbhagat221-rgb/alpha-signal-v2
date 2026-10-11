@@ -254,7 +254,8 @@ def test_option_on_an_ask_without_options_is_refused(q):
 
 
 def test_grade_attaches_to_the_memo_and_feeds_the_scorecard(q):
-    tid = _queue(q)
+    today = dt.date.today().isoformat()                 # the grader looks 8 days back: the fixed 2026-10-02 aged out on 10-11
+    tid = _queue(q, key=today, as_of=today)
     q.submit([{"task_id": tid, "result": _triage()}], worker="data-engineer")
     memo = org.docs(["data_triage"])[0]
     from alpha_mcp import org_kinds
