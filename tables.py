@@ -71,6 +71,12 @@ TABLES = {
         "depth": "About a year back from 2026-10-10, then daily on days with a Kite login",
         "description": "Daily closes of the Zerodha holdings outside the universe (ETFs, gold bonds), as traded: /book's past-year comparison of the two books. Universe stocks use stock_prices.",
     },
+    "intraday_files": {
+        "kind": "RAW", "domain": "Universe & Prices", "date_col": "written_at", "may_be_empty": True,
+        "source": "Zerodha Kite historical minute candles (sources/kite_bars, after each Kite login)",
+        "depth": "Bars from 2015 (Kite's minute depth); backfill started 2026-10-11",
+        "description": "Manifest of the Kite minute-bar Parquet archive (ADR 0072): one row per file with rows, days, first and last bar, size and the fetch day whose split basis its prices carry. The bars (sid, ts, close, volume) live in data/intraday/bars_1m/.",
+    },
     "option_live_quotes": {
         "kind": "RAW", "domain": "Universe & Prices", "date_col": "trade_date", "freq": "weekly",
         "source": "Zerodha Kite quotes + basket margin (sources/kite_quotes, cron 09:50 UTC on entry days)",

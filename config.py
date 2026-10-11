@@ -18,6 +18,9 @@ PROJECT_ROOT = Path(__file__).resolve().parent
 # migrations — plan 0017 stage 0). Unset = the live DB.
 DB_PATH = Path(os.environ.get("ALPHA_DB") or PROJECT_ROOT / "data" / "alpha_signal.db")
 SCHEMA_PATH = PROJECT_ROOT / "schema.sql"
+# Parquet archives (Kite minute bars, ADR 0072) live beside the DB, so ALPHA_DB in a worktree
+# moves them too and a worktree never grows a second, empty archive of its own.
+INTRADAY_DIR = Path(os.environ.get("ALPHA_INTRADAY") or DB_PATH.parent / "intraday")
 LOG_PATH = PROJECT_ROOT / "output" / "pipeline.log"
 
 # ── LLM work (plan 0016, ADR 0056) ──

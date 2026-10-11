@@ -7,7 +7,11 @@ true-intraday §3.2.3 microstructure factors that have NO daily substitute:
 (The other 6 §3.2.3 factors are daily-derivable from stock_prices — see
 signals/microstructure.py — so this is only needed for those 3.)
 
-⚠ STATUS: SCAFFOLD, PENDING LIVE CREDENTIALS. Written 2026-05-31 but NOT yet
+Now: the Kite login helpers (`kite()`, NoKiteSession) used by every Kite module. The minute
+bars are fetched by sources/kite_bars.py into Parquet (ADR 0072); the SQLite bar tables and
+aggregates below were never run and are superseded.
+
+⚠ STATUS (original scaffold): PENDING LIVE CREDENTIALS. Written 2026-05-31 but NOT yet
 verified against a live key, and deliberately NOT wired into config.PIPELINE_STEPS
 — a daily pipeline must not depend on an unverified producer (CLAUDE.md: silent
 failures are the enemy). Verify with `--check-auth` first, then `--instruments`,
@@ -19,9 +23,10 @@ Kite reality that shapes this module:
   • The access_token expires every morning (~06:00 IST). For unattended cron we
     auto-login with the account's TOTP 2FA secret (pyotp) and cache the token in
     a dated file so we log in at most once per day.
-  • Historical INTRADAY (minute) is only ~60 trading days rolling — these factors
-    are forward-accumulation, not backfillable deep. Set this up early to start
-    the 90-day clock.
+  • Historical minute bars for listed NSE stocks go back to 2015 (probed 2026-10-11:
+    RELIANCE / COFORGE / IFBIND full sessions every year 2015–2026, nothing 2013–14).
+    The 60-day limit is per REQUEST, not total depth — loop in chunks. Expired F&O
+    contracts and delisted stocks have no intraday history (survivors only).
   • Historical API rate limit ≈ 3 req/s; one call fetches a full date-range for
     one instrument+interval, so the whole F&O universe is ~220 calls (~1-2 min).
 

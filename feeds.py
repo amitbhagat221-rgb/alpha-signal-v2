@@ -399,13 +399,15 @@ FEEDS = {
 
     # ═══════════════ Discovery: research 0005 candidates (T3 until probation) ═══════════════
     "kite_intraday": {
-        "family": "prices", "status": "candidate",
-        "what": "Zerodha Kite intraday bars for 3 microstructure factors",
-        "modules": ["sources.kite_pull"], "schedule": [], "writes": [], "hosts": ["kite"],
-        "cadence": "trading_day", "routes": [_r("kite_connect", "primary", "kite", "Kite Connect historical API")],
-        "canary": None, "canary_waiver": "needs a paid account (plan 0018 D6)",
-        "probe": ("NEEDS ACCOUNT", "2026-09-28", "Kite ~₹500/mo incl. history (unconfirmed); Fyers free 1-min from 2017"),
-        "ref": "research 0005 B2",
+        "family": "prices", "status": "probation",
+        "what": "Every universe stock's 1-minute bars since 2015 (sid, ts, close, volume) into the Parquet archive, for the intraday factors (ADR 0072)",
+        "modules": ["sources.kite_bars", "sources.kite_pull"], "schedule": ["cron:kite_bars"], "writes": ["intraday_files"],
+        "hosts": ["kite"], "cadence": "weekly",
+        "routes": [_r("kite_connect", "primary", "kite", "kc.historical_data minute candles, 60 days per request, newest first (read-only)")],
+        "canary_waiver": "needs Amit's daily Kite login; a day without one fetches nothing and the backfill resumes after the next login",
+        "probe": ("WORKS", "2026-10-11", "minute bars from 2015 for RELIANCE / COFORGE / IFBIND; split-adjusted as of the fetch day"),
+        "pit": "bar time (prices on the fetch day's split basis)", "tos": "Kite Connect subscription",
+        "ref": "research 0005 B2 · ADR 0072",
     },
     "bse_shp_xbrl": {
         "family": "ownership", "status": "probation",

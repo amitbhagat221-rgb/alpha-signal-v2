@@ -42,9 +42,12 @@ Then wire `compute_fno_iv`-style daily step (`{"name":"fetch_kite_bars", ...}`) 
   (0600 perms); the headless TOTP login refreshes it once/day. If the undocumented
   web-login flow ever breaks, use `--request-token <tok>` (open
   `https://kite.trade/connect/login?api_key=<key>&v=3`, log in, copy from redirect).
-- **Intraday history is ~60 trading days rolling** — the 3 factors it feeds
-  (`volume_clock_concentration`, `tick_imbalance_5d`, `intraday_momentum_persistence`)
-  are forward-accumulation; ~90 days of nightly capture before backtest-grade.
+- **Minute history goes back to 2015** for listed NSE stocks (probed 2026-10-11, 3 stocks,
+  full sessions every year 2015–2026; nothing in 2013–14). The 60-day window is a
+  per-request limit, not total depth. No intraday history for expired F&O or delisted
+  stocks, so the 3 factors it feeds (`volume_clock_concentration`, `tick_imbalance_5d`,
+  `intraday_momentum_persistence`) backtest on survivors only. The full universe as raw
+  minute bars is ~1.1 bn rows (2.7 bn if every stock traded every minute since 2015) — aggregate per stock-day on fetch; never store the raw bars.
 - **Static IP** required by SEBI for API — Oracle VM already has one ✅.
 - The other 6 §3.2.3 microstructure factors are daily-derivable (no Kite) — see
   `signals/microstructure.py` (to be built).

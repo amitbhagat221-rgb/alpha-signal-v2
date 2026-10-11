@@ -46,7 +46,7 @@ SEVERITY_MEANING = {
 
 # The five questions. Every check belongs to exactly one (tests/test_checks.py).
 THEMES = {
-    "ran":     ("Did everything run?", "pipeline steps, cron jobs, the self-healing watchdog"),
+    "ran":     ("Did everything run?", "pipeline steps, cron jobs, the self-healing watchdog, free disk space"),
     "arrived": ("Did the data arrive?", "feeds, table freshness, how many stocks each source covers"),
     "correct": ("Is the data right?", "legal ranges, sources agreeing with each other, mis-mapped fields"),
     "picks":   ("Can today's picks be trusted?", "the factor inputs behind today's ranking, the ranking itself, the AI write-ups, the cockpit"),

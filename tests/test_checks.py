@@ -209,6 +209,7 @@ def _state(**parts):
                      "failed_steps_today": [], "failed_streaks": []},
         "tables": {"fresh": 5, "stale": [], "outdated": [], "empty": []},
         "watchdog": {"last_run": "2026-01-02T15:00:00", "age_hours": 1.0, "healed": 0, "failed": 0, "skipped": 0},
+        "disk": {"free_gb": 126.0, "total_gb": 193.0, "db_gb": 22.3, "wal_gb": 0.1},
         "feeds": {"rows": [], "verdicts": []},
         "data": {"verdicts": []},
         "integrity": {"n_picks": 100, "rows": []},

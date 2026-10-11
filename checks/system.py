@@ -36,6 +36,8 @@ ROOT = Path(__file__).resolve().parent.parent
 FAILURE_STREAK_DAYS = 2      # the same step failing this many days running = systemic
 WATCHDOG_MAX_AGE_H = 36      # the watchdog is a daily cron
 GATE_SILENT_DAYS = 7         # a write-time gate with no verdict for this long has stopped running
+DISK_BACKUP_ROOM = 1.25      # × DB size: the nightly backup writes a full VACUUM copy of the DB, then its gzip
+DISK_WARN_ROOM = 2.0         # × DB size: tonight's backup plus one long writer's WAL (32.5 GB on 2026-10-08)
 
 # code: (theme, when it alerts, why it matters, what to do first, how severe)
 _S = {
@@ -58,6 +60,15 @@ _S = {
         "A crashed check reports nothing, which looks the same as healthy.",
         "The evidence carries the exception; fix the checker before trusting that section.",
         "WARN"),
+    "DISK_LOW": ("ran",
+        f"The server's disk has less free space than {DISK_WARN_ROOM:g}x the database",
+        "A full disk fails every job at once, and the nightly backup is the first to go: it needs a full copy of the "
+        "database plus its gzip. On 2026-10-08 a long writer's WAL filled the disk; on 2026-10-11 old Claude "
+        "scratchpads held 52 GB of database copies.",
+        "`du -xh --max-depth=1 / | sort -rh | head` to find it. Usual suspects: database copies in /tmp/claude-*/ "
+        "(`run.sh sweep` clears week-old ones every Sunday), a large data/alpha_signal.db-wal from a long writer "
+        "(let it finish, it checkpoints), old logs.",
+        f"CRITICAL when free space is under {DISK_BACKUP_ROOM:g}x the database (tonight's backup cannot be written), else WARN"),
     # ── Did the data arrive? ──
     "TABLE_STALE": ("arrived",
         "A table is past its refresh limit",
@@ -262,6 +273,28 @@ def watchdog_verdicts(w):
         return [verdict("WATCHDOG", "freshness_watchdog", WARN, FAIL, f"last run {w['last_run'][:16]}",
                         code="WATCHDOG", message=f"The self-healing watchdog last ran {w['age_hours']:.0f} hours ago")]
     return []
+
+
+
+def disk_facts():
+    """Free space on the disk the database lives on, the database and its WAL (GiB, as `df -h`)."""
+    import shutil
+    path = Path(db.DB_PATH)
+    usage = shutil.disk_usage(path.parent)
+    size = lambda p: p.stat().st_size / 2**30 if p.exists() else 0.0   # noqa: E731
+    return {"free_gb": usage.free / 2**30, "total_gb": usage.total / 2**30,
+            "db_gb": size(path), "wal_gb": size(Path(f"{path}-wal"))}
+
+
+
+def disk_verdicts(d):
+    if d["free_gb"] >= d["db_gb"] * DISK_WARN_ROOM:
+        return []
+    need = d["db_gb"] * DISK_BACKUP_ROOM
+    return [verdict("DISK_LOW", "disk", CRITICAL if d["free_gb"] < need else WARN, FAIL,
+                    f"{d['free_gb']:.0f} GB free of {d['total_gb']:.0f}; database {d['db_gb']:.1f} GB, WAL {d['wal_gb']:.1f} GB",
+                    code="DISK_LOW",
+                    message=f"Only {d['free_gb']:.0f} GB of disk left (tonight's backup needs about {need:.0f} GB)")]
 
 
 
@@ -508,6 +541,7 @@ def decay_verdicts(f):
 AREAS = {   # key in the gathered state: (facts, verdicts)
     "pipeline":  (pipeline_facts,  pipeline_verdicts),
     "watchdog":  (watchdog_facts,  watchdog_verdicts),
+    "disk":      (disk_facts,      disk_verdicts),
     "tables":    (table_facts,     freshness_verdicts),
     "feeds":     (feed_facts,      feed_verdicts),
     "data":      (data_facts,      data_verdicts),

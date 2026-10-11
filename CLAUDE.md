@@ -42,6 +42,7 @@ Everything else (memory, `_archive/`, slash commands, settings) — Claude handl
 - Never run two harvester scripts simultaneously — doubles request rate, risks IP block
 - Never run two multi-hour DB writers at once (panel rebuild, `datamodel.sync`, backfills): on 2026-10-08 the WAL reached 32.5 GB and filled the disk. Message the other session first
 - In a git worktree `config.DB_PATH` points inside the worktree: set `ALPHA_DB=/home/ubuntu/alpha-signal-v2/data/alpha_signal.db`, or sqlite silently creates an empty DB there
+- Never copy the 22 GB DB into a scratchpad: read it with `sqlite3 -readonly` / `file:...?mode=ro`. A copy you truly need goes in a worktree and is deleted the same session (52 GB of forgotten copies filled the disk 2026-10-11; `run.sh sweep` clears week-old scratchpads, `DISK_LOW` pages)
 - Every external call goes through the host door (`sources/_http` + `hosts.HOSTS`: gap ≥2 s, headers, retries, budgets). Never `requests.get`/`sleep` for pacing in a module — declare the host
 - Smoke test with 3 stocks before any full run
 - `INSERT OR IGNORE` for append-only tables (insider_trades, bulk_deals, news_articles); column-level `db.upsert_df` for snapshot/state tables — never `INSERT OR REPLACE` there (it NULLs columns another producer owns, e.g. analyst_consensus)

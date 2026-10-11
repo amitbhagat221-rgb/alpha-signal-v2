@@ -17,7 +17,7 @@ Defined in `checks.THEMES`. Every check belongs to exactly one.
 
 | Question | What it covers |
 |---|---|
-| Did everything run? | pipeline steps, cron jobs, the self-healing watchdog |
+| Did everything run? | pipeline steps, cron jobs, the self-healing watchdog, free disk space |
 | Did the data arrive? | feeds, table freshness, how many stocks each source covers |
 | Is the data right? | legal ranges, sources agreeing with each other, mis-mapped fields |
 | Can today's picks be trusted? | the factor inputs behind today's ranking, the ranking itself, the AI write-ups, the cockpit |

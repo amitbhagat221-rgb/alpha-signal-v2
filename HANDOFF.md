@@ -1,23 +1,23 @@
 # HANDOFF
-Updated: 2026-10-10 | Branch: master (85 unpushed before this commit) | HEAD: a6ba433 test(checks): volume-spike verdict test no longer depends on a live backfill window
+Updated: 2026-10-11 | Branch: master (5 unpushed before this commit) | HEAD: 85affb0 feat(book): YTD return of the paper book beside the expected return
 
 ## Left off
-Cockpit v2 is live: Today (book changes) · Explorer · Stocks screener · Markets · Sectors (38-industry tile grid) · Investor Playbooks · Book · Model · Funds, and ops Health/Feeds/Flow/Boardroom/Options. Two Playwright sweeps of every page × tab at 1440 + 375 came back clean, and stock charts now show date, close and volume on hover. Amit's "blank charts" were a stale cached `cockpit.js`, now fixed with `?v=` + cache rules (ce3ed29). The options paper book (plan 0022) keeps recording; plan 0023's dynamic filters all failed (ADR 0068).
+The Kite minute-bar backfill (ADR 0072, `sources/kite_bars.py`) has been running since 20:06 UTC: 12/2,448 stocks, 12.2 M bars from 2015-02-02 in 38 MB. It stops at 23:50 UTC and resumes hourly after each of Amit's Kite logins, ~4–5 days in all. The server was cleaned the same session: 52 GB of scratchpad DB copies deleted, boot volume grown to 200 GB (126 GB free), 8 GB swap, journald capped. Also added: a `DISK_LOW` check, the Sunday `run.sh sweep`, an OCI "VM not reporting" email alarm, and a boot-volume backup plus a `monthly-3` policy.
 
 ## Pick up here
-1. **Amit's open decisions from the cockpit QA** (checklist "Cockpit v2 LIVE", ①–⑥). The pick-changing one is the price-history gaps: 22 ranked stocks (KOV #1 SMALL; 7 share a 2023-10-25→2026-04-20 hole) feed `signals/residual_momentum.py:84`, which uses ROW windows. That needs an ISIN-keyed bhavcopy backfill plus a gap guard, run on a branch and approved before it ships. Also waiting: the `bulk_deals` cleanup (scratchpad `apply.sql` was refused by the classifier), the INDIANB coverage gate, single-flag THYROCARE, and weekend `daily_picks`.
-2. **Wed 2026-10-14 after the 03:30 run:**
-   - `python -m option_book --show` for the first NIFTY settlement.
-   - Check that `cron_bse_fo` / `cron_option_book` / `cron_management` (first run 11-03) are SUCCESS.
-   - If Amit used `/kite/login`, `option_live_quotes` should have `chosen = 1` rows.
-3. **Sunday 10-11 Yahoo run:** check that `analyst_consensus` refills the 179 NULLed averages and that `total_analysts` is Yahoo's count again (LODHA showed "1 analyst" vs 18 ratings). The check `ANALYST_TARGET_IMPLAUSIBLE` now also fails an average outside its own low–high range.
+1. **Watch the backfill:** `python -m sources.kite_bars --status` and `output/kite_bars.log`. Contract rejections show as `item_error` in `python -m runlog bundle kite_intraday`. When it reports "nothing left", write the compaction step (`_staging/sid=*` → `month=YYYY-MM/part-0.parquet`, ADR 0072) and the `intraday_daily` summary table (VWAP, volume concentration, buy/sell imbalance, first and last 30-minute moves). Then the three blocked §3.2.3 factors in `factors.FACTORS`.
+2. **Kite dataset ② cost snapshot** (checklist "Kite data — 5 datasets"):
+   - `quote_snapshots`: `kc.quote` for the universe, 500 per call, 10:45 and 14:30 IST.
+   - Monthly `trade_charges` via `kc.get_virtual_contract_note`. Price buy and sell in **separate calls**: together they're taxed as intraday (STT 0.025% sell-only instead of delivery 0.1% each side).
+   - Then ③ circuit flag, ④ `kite_instruments`, ⑤ `broker_trades`.
+3. **Wed 2026-10-14 after the 03:30 run** (carried): `python -m option_book --show`; check `cron_bse_fo` / `cron_option_book` are SUCCESS and `option_live_quotes` has `chosen = 1` rows if Amit logged in. Still open from 10-10: Amit's cockpit-QA decisions ①–⑥, the price-history gaps feeding `signals/residual_momentum.py:84`.
 
 ## Watch out
-- **Every `/static` script or stylesheet needs `?v={{ asset_version(...) }}`** (`tests/test_static_cache.py`). An untagged file is served `no-cache`; before that fix, browsers ran new pages against days-old JS. Test in a stale-cache browser, not only a fresh one.
-- **Don't delete CSS you think is unused.** `tests/test_cockpit_css.py` fails when a template class has no rule; a v2 merge had pruned the industry dossier's 240 lines.
-- **`mf_scheme_master` categories were re-normalised 99→54 in place** (`sources/mf_amfi_master.renormalise_master`). Older `mf_metrics` snapshots keep the old labels.
-- **`daily_picks` has weekend/holiday rows** (morning cron runs daily). `pick_outcomes` now drops them; anything else counting pick dates must too.
-- **Not in this commit:** the plan-0017 session's dirty `datamodel/*`, `schema.sql`, `tables.py`, `feeds.py`, `backup_db.sh`, `tests/test_checks.py`, `tests/test_datamodel.py`; the non-linear-benchmark session's `tools/nonlinear_benchmark.py`, `docs/studies/nonlinear-benchmark-2026-10.md` and its checklist bullet; `anc.js`.
+- **Kite rewrites history for splits and bonuses, prices and volumes alike.** KOTAKBANK's raw close of 2133.3 on 2026-01-12 is 426.7 on Kite. Archive levels are on the basis of `intraday_files.fetched_on`; rescale with `corporate_actions` before comparing with `stock_prices`.
+- **Kite's cached token is good until midnight UTC (05:30 IST)** (`kite_pull._cached_token` keys on the UTC date). A later login gives the backfill fewer hours.
+- **Oracle halved the Always Free A1 allowance to 2 OCPU / 12 GB on 2026-06-15.** This 4 / 24 VM isn't billed (PAYG since 2026-03-19, no invoices), but **never terminate or recreate it**: a new one may be capped. Keep at most 5 boot-volume backups (1 manual + `monthly-3`), and don't use Bronze/Silver/Gold.
+- **`tests/test_org.py::test_grade_attaches_to_the_memo_and_feeds_the_scorecard` failed at 19:21 UTC (already the 12th in IST)** with no org code changed. Probably a UTC/IST date-boundary bug in the test; not verified.
+- **Not in this commit:** the other sessions' dirty files: plan-0017 `datamodel/*`, their hunks in `schema.sql` / `tables.py` / `feeds.py` / `tests/test_checks.py`, `backup_db.sh`, `cockpit/*`, `factors.py`, `pit.py`, ADR 0071 + `signals/consensus_beat.py`, `tools/{names_per_tier,large_reaudit,nonlinear_benchmark,session_classify}.py`, their checklist bullets, `anc.js`.
 
 ## Active plan
-docs/plans/0022-option-premium-paper-book.md (recording; pass bar after 25 trades) · docs/plans/0020-factor-audit.md (close-out) · docs/plans/0017-data-model-redesign.md (other session)
+ADR 0072 Kite archive (backfill running) · docs/plans/0022-option-premium-paper-book.md (recording) · docs/plans/0020-factor-audit.md (close-out) · docs/plans/0017-data-model-redesign.md (other session)

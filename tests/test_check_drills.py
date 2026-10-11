@@ -277,6 +277,7 @@ def _clean(**parts):
                      "failed_steps_today": [], "failed_streaks": []},
         "tables": {"fresh": 5, "stale": [], "outdated": [], "empty": []},
         "watchdog": {"last_run": TODAY + "T15:00:00", "age_hours": 1.0, "healed": 0, "failed": 0, "skipped": 0},
+        "disk": {"free_gb": 126.0, "total_gb": 193.0, "db_gb": 22.3, "wal_gb": 0.1},
         "feeds": {"rows": [], "verdicts": []},
         "data": {"verdicts": []},
         "integrity": {"n_picks": 100, "rows": []},
@@ -304,6 +305,7 @@ SYSTEM_DRILLS = {
                                       "failed_streaks": []}),
     "WATCHDOG": _clean(watchdog={"last_run": _day(3) + "T15:00:00", "age_hours": 72.0, "healed": 0, "failed": 0, "skipped": 0}),
     "HEALTH_CHECK_CRASHED": _clean(feeds={"error": "KeyError: 'x'"}),
+    "DISK_LOW": _clean(disk={"free_gb": 26.0, "total_gb": 145.0, "db_gb": 22.3, "wal_gb": 0.1}),   # 2026-10-11 morning
     "TABLE_STALE": _clean(tables={"fresh": 4, "stale": [("news_articles", 3.0, 2.0, "x")], "outdated": [], "empty": []}),
     "TABLE_EMPTY": _clean(tables={"fresh": 4, "stale": [], "outdated": [], "empty": ["daily_picks"]}),
     "FEED_PROBE": _clean(feeds=_feed(canary_last={"status": "FAIL", "symptom": "D",
@@ -336,6 +338,13 @@ def test_system_check_fires(code):
 
 def _fired(state):
     return [i for group in report.issues(state) for i in group]
+
+
+def test_low_disk_pages_only_when_tonights_backup_cannot_fit():
+    db_gb = 22.3                                              # backup needs ≈ 27.9 GB, warn below 44.6
+    sev = lambda free: [i["severity"] for i in _fired(_clean(disk={"free_gb": free, "total_gb": 193.0,   # noqa: E731
+                                                                   "db_gb": db_gb, "wal_gb": 0.0}))]
+    assert sev(26.0) == [CRITICAL] and sev(40.0) == [WARN] and sev(77.0) == []
 
 
 def test_a_shadow_job_failing_for_days_is_a_warning_not_a_page():

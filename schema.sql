@@ -2537,6 +2537,24 @@ CREATE TABLE IF NOT EXISTS broker_instrument_prices (
     PRIMARY KEY (tradingsymbol, date)
 );
 
+-- Kite minute-bar archive manifest (ADR 0072, sources/kite_bars.py): one row per Parquet file
+-- (or per stock with no bars). The bars themselves live in config.INTRADAY_DIR, not here.
+CREATE TABLE IF NOT EXISTS intraday_files (
+    dataset     TEXT NOT NULL,             -- bars_1m
+    kind        TEXT NOT NULL,             -- staging (one file per stock) | month | day
+    key         TEXT NOT NULL,             -- sid for staging, YYYY-MM for month, YYYY-MM-DD for day
+    path        TEXT,                      -- NULL when the stock has no bars on Kite
+    n_rows      INTEGER NOT NULL,
+    n_days      INTEGER NOT NULL,          -- trading days covered
+    first_ts    TEXT,                      -- UTC ISO
+    last_ts     TEXT,
+    bytes       INTEGER NOT NULL,
+    fetched_on  TEXT NOT NULL,             -- the basis of the prices: Kite adjusts history for splits as of this day
+    note        TEXT,
+    written_at  TEXT NOT NULL,
+    PRIMARY KEY (dataset, kind, key)
+);
+
 -- Option-premium paper book (plan 0022, option_book.py): one row per rule × underlying ×
 -- expiry, written on the entry day's close and settled in place at expiry. The forward
 -- record that decides whether the rule goes live.

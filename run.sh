@@ -161,6 +161,16 @@ case "$JOB" in
     kite_quotes)        # 09:50 UTC weekdays (15:20 IST) — live option quotes + Kite margin on paper-book
                         # entry days only (plan 0022); needs that day's Kite login, else FAILED with the link
         logged cron_kite_quotes run python -m sources.kite_quotes ;;
+    kite_bars)          # hourly :05, 03-22 UTC — Kite minute-bar backfill into the Parquet archive (ADR 0072). Runs
+                        # only while that day's Kite login is valid (by hand; the cached token is good until midnight
+                        # UTC) and starts no new stock after 23:50. Its OWN lock, not the harvest lock: Kite is a
+                        # separate host and the backfill would otherwise wait out the other harvesters' windows (ADR 0072).
+        if [ -z "${DRY:-}" ]; then
+            exec 202>/tmp/alpha_signal_kite.lock
+            flock -n 202 || { echo "kite_bars already running, exiting $(date -u)"; exit 0; }
+        fi
+        run python -m sources.kite_bars --has-session || { echo "no Kite login today — nothing to do"; exit 0; }
+        logged cron_kite_bars run python -m sources.kite_bars --backfill --until 23:50 ;;
     kite_holdings)      # 10:15 UTC weekdays (15:45 IST) — Amit's Zerodha holdings for /book, closing prices; a day
                         # without a Kite login keeps the last snapshot (not a failure: the login is by hand)
         logged cron_kite_holdings run python -m sources.kite_holdings ;;
@@ -187,6 +197,20 @@ case "$JOB" in
         logged cron_screener_cookie cookie_ok || {
             [ -n "${NTFY_TOPIC:-}" ] && run curl -s -H "Title: Screener cookie DEAD" -H "Priority: high" \
                 -d "Re-extract sessionid from browser into ~/.cache/screener_cookie.json" "https://ntfy.sh/$NTFY_TOPIC"; } ;;
+    sweep)              # Sunday 09:00 UTC — delete Claude session scratchpads nothing has touched for 7 days:
+                        # sessions copy the 22 GB DB there and never clean up (52 GB of copies, 2026-10-11;
+                        # DISK_LOW is the check). Touches no DB, takes no lock.
+        sweep_scratch() {
+            local d
+            for d in /tmp/claude-"$(id -u)"/-*/*-*-*-*-*/; do   # <project>/<session id>/ only
+                [ -d "$d" ] || continue
+                [ -n "$(find "$d" -mtime -7 -print -quit 2>/dev/null)" ] && continue   # used this week
+                echo "removing $(du -sh "$d" 2>/dev/null | cut -f1) ${d%/}"
+                run rm -rf -- "${d:?}"
+            done
+            df -h / | tail -1
+        }
+        logged cron_sweep sweep_scratch ;;
     secrets_backup)     # 05:30 UTC — GPG-encrypted VM-only secrets + wiring → Drive (review F13)
         logged cron_secrets_backup run "$ROOT/backup_secrets.sh" ;;
     screener_universe)  # 1st + 15th — Screener fundamentals harvest
@@ -202,6 +226,6 @@ case "$JOB" in
         echo "Tickertape finished rc=$RC at $(date -u)"
         exit $RC ;;
     *)
-        echo "unknown job '$JOB' (morning forward canary estimates transcripts screener_schedules llm_local org watchdog health pt_snapshot management kite_quotes kite_holdings backtest expected_return screener_cookie secrets_backup screener_universe tickertape)"
+        echo "unknown job '$JOB' (morning forward canary estimates transcripts screener_schedules llm_local org watchdog health pt_snapshot management kite_quotes kite_bars kite_holdings backtest expected_return screener_cookie sweep secrets_backup screener_universe tickertape)"
         exit 2 ;;
 esac
