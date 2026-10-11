@@ -136,6 +136,7 @@ class FakeConn:
     def __init__(self, sink):
         self.sink = sink
         self.total_changes = 0
+        self.rowcount = 0          # execute() returns self, read as a cursor
 
     def execute(self, sql, params=()):
         self.sink.append(("execute", " ".join(sql.split()), list(params)))
@@ -1814,10 +1815,76 @@ SNAP = json.loads(r"""
  },
  "mf_holdings_scrape.db": [
   [
+   "executemany",
+   "UPDATE mf_scheme_master SET etm_checked_at = datetime('now') WHERE scheme_code = ?",
+   [
+    [
+     "1001"
+    ],
+    [
+     "1002"
+    ]
+   ]
+  ],
+  [
+   "execute",
+   "INSERT OR REPLACE INTO mf_holdings_quarantine (scheme_code, as_of_date, holding_rank, instrument_type, sid, isin, instrument_name, sector, pct_of_aum, market_value_cr, _q_failed_gate, _q_reason, _q_quarantined_at) SELECT scheme_code, as_of_date, holding_rank, instrument_type, sid, isin, instrument_name, sector, pct_of_aum, market_value_cr, 'etm_mapping', ?, datetime('now') FROM mf_holdings WHERE scheme_code IN (?,?) AND as_of_date > ?",
+   [
+    "stamped with the scrape date, not the portfolio date",
+    "1001",
+    "1002",
+    "2026-08-31"
+   ]
+  ],
+  [
+   "execute",
+   "DELETE FROM mf_holdings WHERE scheme_code IN (?,?) AND as_of_date > ?",
+   [
+    "1001",
+    "1002",
+    "2026-08-31"
+   ]
+  ],
+  [
+   "execute",
+   "INSERT OR REPLACE INTO mf_sector_allocation_quarantine (scheme_code, as_of_date, sector, pct_of_aum, _q_failed_gate, _q_reason, _q_quarantined_at) SELECT scheme_code, as_of_date, sector, pct_of_aum, 'etm_mapping', ?, datetime('now') FROM mf_sector_allocation WHERE scheme_code IN (?,?) AND as_of_date > ?",
+   [
+    "stamped with the scrape date, not the portfolio date",
+    "1001",
+    "1002",
+    "2026-08-31"
+   ]
+  ],
+  [
+   "execute",
+   "DELETE FROM mf_sector_allocation WHERE scheme_code IN (?,?) AND as_of_date > ?",
+   [
+    "1001",
+    "1002",
+    "2026-08-31"
+   ]
+  ],
+  [
+   "execute",
+   "DELETE FROM mf_holdings WHERE scheme_code=? AND as_of_date=?",
+   [
+    "1001",
+    "2026-08-31"
+   ]
+  ],
+  [
    "execute",
    "DELETE FROM mf_sector_allocation WHERE scheme_code=? AND as_of_date=?",
    [
     "1001",
+    "2026-08-31"
+   ]
+  ],
+  [
+   "execute",
+   "DELETE FROM mf_holdings WHERE scheme_code=? AND as_of_date=?",
+   [
+    "1002",
     "2026-08-31"
    ]
   ],
@@ -1935,6 +2002,66 @@ SNAP = json.loads(r"""
      "Technology",
      6.25
     ]
+   ]
+  ],
+  [
+   "executemany",
+   "UPDATE mf_scheme_master SET etm_checked_at = datetime('now') WHERE scheme_code = ?",
+   [
+    [
+     "2001"
+    ]
+   ]
+  ],
+  [
+   "executemany",
+   "UPDATE mf_scheme_master SET etm_checked_at = datetime('now') WHERE scheme_code = ?",
+   [
+    [
+     "3001"
+    ]
+   ]
+  ],
+  [
+   "execute",
+   "INSERT OR REPLACE INTO mf_holdings_quarantine (scheme_code, as_of_date, holding_rank, instrument_type, sid, isin, instrument_name, sector, pct_of_aum, market_value_cr, _q_failed_gate, _q_reason, _q_quarantined_at) SELECT scheme_code, as_of_date, holding_rank, instrument_type, sid, isin, instrument_name, sector, pct_of_aum, market_value_cr, 'etm_mapping', ?, datetime('now') FROM mf_holdings WHERE scheme_code IN (?) AND as_of_date > ?",
+   [
+    "stamped with the scrape date, not the portfolio date",
+    "3001",
+    "2026-08-31"
+   ]
+  ],
+  [
+   "execute",
+   "DELETE FROM mf_holdings WHERE scheme_code IN (?) AND as_of_date > ?",
+   [
+    "3001",
+    "2026-08-31"
+   ]
+  ],
+  [
+   "execute",
+   "INSERT OR REPLACE INTO mf_sector_allocation_quarantine (scheme_code, as_of_date, sector, pct_of_aum, _q_failed_gate, _q_reason, _q_quarantined_at) SELECT scheme_code, as_of_date, sector, pct_of_aum, 'etm_mapping', ?, datetime('now') FROM mf_sector_allocation WHERE scheme_code IN (?) AND as_of_date > ?",
+   [
+    "stamped with the scrape date, not the portfolio date",
+    "3001",
+    "2026-08-31"
+   ]
+  ],
+  [
+   "execute",
+   "DELETE FROM mf_sector_allocation WHERE scheme_code IN (?) AND as_of_date > ?",
+   [
+    "3001",
+    "2026-08-31"
+   ]
+  ],
+  [
+   "execute",
+   "DELETE FROM mf_holdings WHERE scheme_code=? AND as_of_date=?",
+   [
+    "3001",
+    "2026-08-31"
    ]
   ],
   [

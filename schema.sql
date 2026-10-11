@@ -1017,7 +1017,7 @@ CREATE TABLE IF NOT EXISTS mf_scheme_master (
     last_seen        TEXT,
     active           INTEGER DEFAULT 1,
     fetched_at       TEXT
-, data_quality TEXT DEFAULT 'TRUSTED', quality_reason TEXT, etm_slug TEXT, etm_id INTEGER);
+, data_quality TEXT DEFAULT 'TRUSTED', quality_reason TEXT, etm_slug TEXT, etm_id INTEGER, etm_checked_at TEXT, groww_slug TEXT, groww_checked_at TEXT);
 CREATE INDEX IF NOT EXISTS idx_mf_master_active   ON mf_scheme_master(active);
 CREATE INDEX IF NOT EXISTS idx_mf_master_amc      ON mf_scheme_master(amc);
 CREATE INDEX IF NOT EXISTS idx_mf_master_cat      ON mf_scheme_master(category_norm);

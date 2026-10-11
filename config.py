@@ -425,11 +425,15 @@ PIPELINE_STEPS = [
      "reads": ["mf_calendar_returns", "mf_category_stats", "mf_metrics", "mf_nav_history", "mf_rolling_returns", "mf_scheme_master", "stock_prices", "stocks"],
      "writes": ["mf_calendar_returns", "mf_category_stats", "mf_metrics", "mf_rolling_returns"],
      "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
-    # Monthly: refresh top-N MF holdings via ETMoney scrape (AMFI's holdings data has 45d lag,
-    # monthly refresh is sufficient). Rate-limited at 2.5s/req with 30s pause every 100 reqs.
+    # Daily rotation (2026-10-10; was monthly top-100 only, which left every other fund frozen
+    # and new launches never fetched). Primary: Groww fund pages keyed by AMFI code
+    # (sources.mf_holdings_groww); fallback: ETMoney for funds Groww has no page for. Each
+    # re-checks funds not seen for 14 days, stalest first, within its host's budget_min.
     {"name": "scrape_mf_holdings", "module": "sources.mf_holdings_scrape",   "function": "compute", "critical": False,
-     "table": "mf_holdings",       "source": "ETMoney portfolio-details (public)", "data_freq": "monthly", "frequency": "monthly",
-     "reads": ["mf_holdings", "mf_metrics", "mf_scheme_master", "stocks"],
+     "table": "mf_holdings",       "source": "ETMoney portfolio-details (public)", "data_freq": "monthly", "frequency": "daily",
+     "reads": ["mf_holdings", "mf_metrics", "mf_nav_history", "mf_scheme_master", "stocks"],
+     "writes": ["mf_holdings", "mf_sector_allocation", "mf_scheme_master"],
+     "lagged_writes": ["mf_scheme_master"],   # only its own etm_* columns; earlier MF steps never read them
      "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
 
     # ── Sector signal history (monthly PIT accumulators, 2026-06) ──

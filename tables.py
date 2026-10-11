@@ -740,7 +740,11 @@ TABLES = {
         "depth": "One row per (category_norm, as_of_date)",
         "description": "Category aggregates — median 1Y/3Y/5Y returns, median Sharpe, top/bottom decile cuts. Powers the heatmap on /mutual-funds and peer-rank comparisons.",
     },
-    "mf_holdings": {"kind": "RAW", "domain": "Other", "date_col": "as_of_date", "quarantine": True},
+    # stale_days 50: as_of_date is the PORTFOLIO date (month-end), published ≤10 days later and
+    # picked up by Groww/ETMoney a little after, so the newest can be ~45 days old just before the
+    # next month lands. The step runs daily (2026-10-10), which alone would set a 3-day limit.
+    "mf_holdings": {"kind": "RAW", "domain": "Other", "date_col": "as_of_date", "quarantine": True,
+                    "stale_days": 50},
     "mf_metrics": {
         "kind": "COMPUTED", "domain": "Other", "date_col": "as_of_date",
         "depth": "One row per (scheme_code, as_of_date); recomputed monthly",
@@ -768,8 +772,8 @@ TABLES = {
     },
     "mf_sector_allocation": {
         "kind": "RAW", "domain": "Other", "freq": "monthly", "data_freq": "monthly",
-        "source": "Scraped with mf_holdings (fetch_mf_holdings step)", "date_col": "as_of_date",
-        "quarantine": True,
+        "source": "Scraped with mf_holdings (scrape_mf_holdings step)", "date_col": "as_of_date",
+        "quarantine": True, "stale_days": 50,   # same portfolio dates as mf_holdings
     },
 
     # ── File outputs (virtual tables from config.FILE_OUTPUTS) ──

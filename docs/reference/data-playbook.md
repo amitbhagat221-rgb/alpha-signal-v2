@@ -50,7 +50,8 @@ catalog further down are not repeated here.
 | NSE corporate announcements | `api/corporate-announcements?index=equities` | Latest 20–50; BSE stream (below) is the deep source |
 | AMFI NAVAll.txt | `GET amfiindia.com/spages/NAVAll.txt` | Today's NAV for all schemes, used by the daily MF step (see MF section) |
 | World Bank India | `api.worldbank.org/v2/country/IND/indicator/{code}?format=json` | 9–20y annual/quarterly (GDP, FX, FDI, M2) |
-| AMFI MF portfolio disclosure | monthly PDFs | ~5y but PDF-brittle; holdings come from the ETMoney scrape instead |
+| AMFI MF portfolio disclosure | `amfiindia.com/online-center/portfolio-disclosure` (Next.js page; its HTML embeds all 57 AMCs with `amc_monthly_portfolio_disclosure` links) | Link list only, no AMFI-hosted files. Each AMC posts a monthly Excel (SEBI MC 2024 cl. 5.1.1: ISIN, qty, value, % NAV, within 10 days; layout differs per AMC). Groww MF archive: 48 monthly files from Mar 2023, one sheet per scheme (verified 2026-10-10). Fetchers for all 57: github.com/subscriptionmanager26-png/fund-disclosures (MIT) |
+| Groww fund pages | `groww.in/mutual-funds/{name}-direct-growth`, `__NEXT_DATA__` | Full latest-month holdings (sum 100%, equity/debt/cash/MF units) + AMFI scheme_code; covers the AMCs ETMoney lacks (Groww, Taurus, NJ, Shriram, JioBlackRock, Unifi) and closed-end/suspended funds by slug. List: `groww.in/mf-sitemap.xml` (1,718 fund pages). `robots.txt` disallows `/v1/api/*`: use the pages, not the JSON API. Terms forbid copying into a database (verified 2026-10-10) |
 | Tier C (caveats) | AlphaVantage demo (25 calls/day), Twelve Data, SEBI SAST (HTML only), FMP (India patchy) | Not used |
 
 Paid sources: ranked options and costs are in [plan 0014](../plans/0014-data-acquisition-roadmap.md).
@@ -66,7 +67,9 @@ strip column whitespace on `KeyError: ' SYMBOL'` · treat 403 as a cookie proble
 |---|---|---|
 | yfinance smart-beta indices | Only NIFTY 50/500/MIDCAP 150 work | `nselib…index_data` |
 | SEBI insider-trade JSON | HTML only | NSE PIT API (now empty too, see Known issues) |
-| AMFI portfolio-disclosure URL | 404 | ETMoney holdings scrape |
+| AMFI portfolio-disclosure URL (old) | 404; the 2026 page is a link list to the AMCs (see the endpoint table) | AMC Excel files / Groww pages / ETMoney |
+| Kite Connect for fund portfolios | Only `mf_instruments`, `mf_holdings` (own units), orders, SIPs; no fund composition | Groww pages / AMC files |
+| Kuvera, Tickertape MF, mfdata.in for holdings | Kuvera: metadata only (holdings 404); Tickertape: VPN_BLOCKED from the VM; mfdata.in: 522 (2026-10-10) | Groww pages / AMC files |
 | BSE bulk-deals API | 0 entries | nselib bulk deals |
 | EODHD demo for India | 403 | skip |
 | Wayback Machine for NSE bulk.csv | 1 snapshot | nselib date-range |

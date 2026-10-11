@@ -69,9 +69,15 @@ HOSTS = {
 
     # ── Mutual funds ──
     # ETMoney soft-blocks faster steady-state scraping.
-    "etmoney": {"netlocs": ["www.etmoney.com"], "gap": 2.5,
+    # budget_min: the daily scrape_mf_holdings rotation (~165 due pages/day ≈ 8 min steady state)
+    "etmoney": {"netlocs": ["www.etmoney.com"], "gap": 2.5, "budget_min": 15,
                 "headers": {"User-Agent": BROWSER_UA, "Accept": "text/html,application/xhtml+xml",
                             "Accept-Language": "en-US,en;q=0.9"}},
+    # Groww fund PAGES only (robots.txt disallows /v1/api/*). budget_min: the daily mf_holdings
+    # rotation (~1,800 funds / 14 days ≈ 130 pages a day ≈ 8 min steady state; first pass ~5 days).
+    "groww": {"netlocs": ["groww.in"], "gap": 2.5, "budget_min": 20,
+              "headers": {"User-Agent": BROWSER_UA, "Accept": "text/html,application/xhtml+xml,application/xml",
+                          "Accept-Language": "en-US,en;q=0.9"}},
     "amfi": {"netlocs": ["www.amfiindia.com", "portal.amfiindia.com"]},
     "mfapi": {"netlocs": ["api.mfapi.in"]},
 

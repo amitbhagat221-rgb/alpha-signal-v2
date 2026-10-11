@@ -29,6 +29,7 @@ Usage:
     python -m sources.mf_holdings_scrape --scrape          # scrape all mapped schemes
     python -m sources.mf_holdings_scrape --limit 50        # smoke test
     python -m sources.mf_holdings_scrape --scheme 122639   # single scheme
+    python -m sources.mf_holdings_scrape --scrape --recheck-days 14 --max-minutes 15   # = the daily step
 """
 
 import argparse
@@ -69,10 +70,22 @@ SITEMAPS = [
     "https://www.etmoney.com/mf-regular-schemes-sitemap.xml",
 ]
 PORTFOLIO_SITEMAP = "https://www.etmoney.com/mf-regular-schemes-portfolio-details-sitemap.xml"
+# The Direct-plan sitemap answers a 199-byte 403 on some calls and 200 on the next
+# (2026-10-10); one miss used to drop every Direct page from the mapping silently.
+SITEMAP_TRIES = 3
+
+# Daily rotation (2026-10-10). The old monthly step re-fetched only the top 100 funds
+# by composite_score: the other ~2,200 stayed frozen at the 2026-05-28 bulk scrape and
+# funds launched since (no score yet, never mapped) were never fetched at all. Now every
+# run maps new schemes, then visits the least-recently-checked funds until the host
+# budget runs out; a fund is due again RECHECK_DAYS after its last check. ~2,300 non-debt
+# pages / 14 days ≈ 165 a day ≈ 8 min. Debt funds are skipped: ETMoney lists no stock
+# table for them (17 of 2,408 ever returned one).
+RECHECK_DAYS = 14
 
 
 def _ensure_columns():
-    """Add etm_slug / etm_id columns to mf_scheme_master if absent."""
+    """Add etm_slug / etm_id / etm_checked_at columns to mf_scheme_master if absent."""
     with get_db() as conn:
         cols = [r[1] for r in conn.execute("PRAGMA table_info(mf_scheme_master)").fetchall()]
         if "etm_slug" not in cols:
@@ -81,6 +94,9 @@ def _ensure_columns():
         if "etm_id" not in cols:
             conn.execute("ALTER TABLE mf_scheme_master ADD COLUMN etm_id INTEGER")
             print("  Added etm_id column")
+        if "etm_checked_at" not in cols:
+            conn.execute("ALTER TABLE mf_scheme_master ADD COLUMN etm_checked_at TEXT")
+            print("  Added etm_checked_at column")
 
 
 # ─────────────────────── Mapping: AMFI ↔ ETMoney ───────────────────────
@@ -106,19 +122,34 @@ def _normalise_etm_slug(slug: str) -> str:
     return re.sub(r"[^a-z0-9]", "", (slug or "").lower())
 
 
-def _identity_tokens(s: str) -> set[str]:
-    """Identity tokens — fund-name signature WITHOUT plan/option indicators.
-    'SBI CONTRA FUND - DIRECT PLAN - GROWTH' → {sbi, contra}
-    'sbi-contra-direct-plan-growth' → {sbi, contra}
-    Both sides match by 'who is this fund' rather than 'which variant'."""
-    raw = re.findall(r"[a-z0-9]+", (s or "").lower())
-    return {
-        t for t in raw
+def _identity_seq(s: str) -> list[str]:
+    """Identity tokens in name order — fund-name signature WITHOUT plan/option indicators.
+    'SBI CONTRA FUND - DIRECT PLAN - GROWTH' → [sbi, contra]
+    'sbi-contra-direct-plan-growth' → [sbi, contra]
+    Both sides match by 'who is this fund' rather than 'which variant'.
+    'Fund of Funds' reads as ETMoney's 'fof'; dotted acronyms join (T.I.G.E.R. → tiger)."""
+    s = (s or "").lower()
+    s = re.sub(r"\bfunds?\s+of\s+funds?\b", "fof", s)
+    s = re.sub(r"\b(?:[a-z]\.){2,}[a-z]?\b", lambda m: m.group(0).replace(".", ""), s)
+    return [
+        t for t in re.findall(r"[a-z0-9]+", s)
         if t not in _STOP_TOKENS
         and t not in _PLAN_TOKENS
         and t not in _OPTION_TOKENS
         and len(t) > 1
-    }
+    ]
+
+
+def _identity_tokens(s: str) -> set[str]:
+    return set(_identity_seq(s))
+
+
+def _identity_keys(s: str) -> set:
+    """The keys two names must share to be the same fund: the token SET (word order
+    differs between AMFI and ETMoney) and the tokens run together ('flexi cap' =
+    'flexicap', 'mid cap' = 'midcap'). Empty for a name with < 2 identity tokens."""
+    seq = _identity_seq(s)
+    return {frozenset(seq), "".join(seq)} if len(seq) >= 2 else set()
 
 
 def _plan_marker(s: str) -> str | None:
@@ -136,9 +167,13 @@ def fetch_etm_sitemap_urls() -> dict[str, tuple[str, int]]:
     out: dict[str, tuple[str, int]] = {}
     for url in SITEMAPS:
         print(f"  Fetching {url}…")
-        r = _get(url, timeout=30)
+        for _ in range(SITEMAP_TRIES):
+            r = _get(url, timeout=30)
+            if r.status_code == 200:
+                break
         if r.status_code != 200:
-            print(f"    HTTP {r.status_code} — skipping")
+            runlog.item_failed("etmoney sitemap", url, f"HTTP {r.status_code} on {SITEMAP_TRIES} tries",
+                               symptom="A")
             continue
         matches = re.findall(
             r"<loc>https://www\.etmoney\.com/mutual-funds/([^/<]+)/(\d+)</loc>",
@@ -148,116 +183,126 @@ def fetch_etm_sitemap_urls() -> dict[str, tuple[str, int]]:
             norm = _normalise_etm_slug(slug)
             out[norm] = (slug, int(etm_id))
         print(f"    {len(matches)} URLs (cumulative unique: {len(out)})")
+    if not out:
+        raise RuntimeError("no ETMoney sitemap could be read — cannot map schemes")
     return out
 
 
-def build_mapping(dry_run: bool = False) -> int:
-    """Match every AMFI scheme to its ETMoney URL.
+def _etm_index(etm: dict[str, tuple[str, int]]) -> dict:
+    """{identity key: [(slug, etm_id, plan), …]} over every sitemap URL (see _identity_keys);
+    plan is 'direct' / 'regular' / None from the slug."""
+    index: dict = {}
+    for slug, etm_id in etm.values():
+        for key in _identity_keys(slug):
+            index.setdefault(key, []).append((slug, etm_id, _plan_marker(slug)))
+    return index
 
-    Strategy (in order):
-      1. Exact normalised-name match (fast path for clean cases)
-      2. Token-set match — ETMoney tokens ⊂ AMFI tokens (after stop-word filter).
-         Handles the "fund/plan/option" word-order divergence that
-         substring-matching missed (e.g. SBI Contra, HDFC ELSS).
 
-    Stores result in mf_scheme_master.etm_slug / etm_id.
+def _match(amfi_name: str, index: dict, plan: str | None = None) -> tuple[str, int] | None:
+    """(etm_slug, etm_id) of the ETMoney page for one AMFI scheme, or None.
+
+    The names must be the SAME fund: equal identity-token sets, or equal once the
+    spaces go. The old rule — ETMoney tokens ⊆ AMFI tokens, longest first — mapped a
+    fund to any page whose name was a subset of its own: Canara Robeco Flexi Cap →
+    canara-robeco-income ('income' is a stop token), LIC MF Nifty Next 50 → the Nifty
+    50 fund, every closed-end 'Series N' → the open-ended fund, a PSU-bond index fund
+    → a Nifty 50 page (audit 2026-10-10). No page is better than another fund's.
+    A parenthetical is tried both kept ('UTI Focused Fund (30 stocks)') and dropped
+    ('… (erstwhile Bluechip Fund)').
+
+    Holdings are identical across plans, so the plan only picks between equal
+    candidates: `plan` (mf_scheme_master.plan_type — scheme_name no longer carries
+    it) or a Direct/Regular word in the name; unmarked → Regular (bare slug).
+    """
+    keys = _identity_keys(amfi_name) | _identity_keys(re.sub(r"\([^)]*\)", " ", amfi_name or ""))
+    cands = [c for k in keys for c in index.get(k, [])]
+    if not cands:
+        return None
+    want = (plan or "").lower() if (plan or "").upper() in ("DIRECT", "REGULAR") else None
+    want = want or _plan_marker(amfi_name) or "regular"
+    for slug, etm_id, slug_plan in sorted(cands):
+        if slug_plan == want or (want == "regular" and slug_plan is None):
+            return slug, etm_id
+    return min(cands)[:2]
+
+
+def build_mapping(dry_run: bool = False, only_unmapped: bool = False) -> int:
+    """Match every active AMFI scheme to its ETMoney page (`_match`) and store it
+    in mf_scheme_master.etm_slug / etm_id. `only_unmapped` (the daily path) maps
+    just the schemes without one — new launches, names a past sitemap miss left
+    behind. A full run also CLEARS a mapping the rule no longer supports, and when
+    a scheme's page changes to a different fund (or to none), the holdings taken
+    from the old page move to mf_holdings_quarantine and the scheme is re-checked
+    first on the next scrape.
     """
     _ensure_columns()
     print("Fetching ETMoney sitemaps…")
     etm = fetch_etm_sitemap_urls()
     print(f"\nTotal ETMoney MF URLs: {len(etm)}")
+    index = _etm_index(etm)
 
-    # Pre-tokenise ETM keys once; store (slug, etm_id, identity_tokens, plan).
-    # Identity tokens strip plan/option markers so 'sbi-contra-direct-plan-growth'
-    # and 'sbi-contra-fund' both yield {sbi, contra}; plan ('direct' or 'regular'
-    # or None) tracked separately.
-    etm_tokens: list[tuple[str, int, frozenset[str], str | None, int]] = []
-    for norm, (slug, etm_id) in etm.items():
-        toks = _identity_tokens(slug)
-        if len(toks) >= 2:
-            etm_tokens.append((slug, etm_id, frozenset(toks), _plan_marker(slug), len(toks)))
-    # Sort by token-count desc so longest (most specific) ETM key wins;
-    # within same length, prefer plan-bearing slugs (Direct over bare) so AMFI
-    # Direct schemes pick the direct slug.
-    etm_tokens.sort(key=lambda x: (x[4], 1 if x[3] else 0), reverse=True)
-
-    schemes = read_sql("""
-        SELECT scheme_code, scheme_name, plan_type, option_type
+    schemes = read_sql(f"""
+        SELECT scheme_code, scheme_name, plan_type, etm_slug
         FROM mf_scheme_master
         WHERE active = 1
           AND (data_quality IS NULL OR data_quality = 'TRUSTED')
+          {"AND etm_id IS NULL" if only_unmapped else ""}
     """)
-    print(f"Active TRUSTED AMFI schemes: {len(schemes)}")
+    print(f"Active TRUSTED AMFI schemes{' without a mapping' if only_unmapped else ''}: {len(schemes)}")
 
-    matches = []
-    n_exact = 0
-    n_token = 0
-    n_miss = 0
+    updates = []        # (etm_slug, etm_id, scheme_code); slug/id None = clear
+    moved_fund = []     # scheme_codes whose page is now a different fund, or none
+    for row in schemes.itertuples(index=False):
+        hit = _match(row.scheme_name, index, row.plan_type)
+        old = row.etm_slug if isinstance(row.etm_slug, str) else None
+        if (hit[0] if hit else None) == old:
+            continue
+        updates.append((hit[0] if hit else None, hit[1] if hit else None, row.scheme_code))
+        if old and not (hit and _identity_keys(hit[0]) & _identity_keys(old)):
+            moved_fund.append(row.scheme_code)
 
-    for _, row in schemes.iterrows():
-        scheme_code = row["scheme_code"]
-        amfi_name = row["scheme_name"]
-        amfi_norm = _normalise(amfi_name)
-
-        slug_id = None
-
-        # 1. Exact match on full normalised name
-        if amfi_norm in etm:
-            slug_id = etm[amfi_norm]
-            n_exact += 1
-        else:
-            # 2. Identity-token subset (ETM identity ⊆ AMFI identity).
-            #    Plan check: AMFI Direct prefers an ETM 'direct' slug; AMFI
-            #    Regular prefers a bare slug (no plan token in ETM). If no
-            #    plan-matched ETM exists, fall back to any subset match —
-            #    holdings are identical across plans so it's still correct.
-            amfi_toks = _identity_tokens(amfi_name)
-            # Pre-2013 AMFI names lack 'Direct'/'Regular' — those are legacy
-            # Regular plans, so default unmarked → 'regular'.
-            amfi_plan = _plan_marker(amfi_name) or "regular"
-            if amfi_toks:
-                best_plan = None
-                best_any = None
-                for slug, etm_id, etm_toks, etm_plan, n_toks in etm_tokens:
-                    if not (etm_toks <= amfi_toks):
-                        continue
-                    if best_any is None:
-                        best_any = (slug, etm_id)
-                    if etm_plan == amfi_plan and best_plan is None:
-                        best_plan = (slug, etm_id)
-                    # AMFI Regular ↔ ETM bare slug (no plan token)
-                    if amfi_plan == "regular" and etm_plan is None and best_plan is None:
-                        best_plan = (slug, etm_id)
-                    if best_plan:
-                        break
-                slug_id = best_plan or best_any
-                if slug_id:
-                    n_token += 1
-
-            if not slug_id:
-                n_miss += 1
-
-        if slug_id:
-            matches.append((slug_id[0], slug_id[1], scheme_code))
-
-    print(f"\nMatching results:")
-    print(f"  exact:         {n_exact}")
-    print(f"  token-subset:  {n_token}")
-    print(f"  no match:      {n_miss}")
-    print(f"  total mapped:  {len(matches)}")
-    print(f"  distinct ETM URLs: {len(set((m[0], m[1]) for m in matches))}")
+    moved = set(moved_fund)
+    n_new = sum(1 for u in updates if u[0] and u[2] not in moved)
+    n_cleared = sum(1 for u in updates if u[0] is None)
+    print(f"\nMatching results: {len(schemes) - len(updates)} unchanged · {n_new} newly mapped / same-fund "
+          f"slug updates · {len(moved_fund)} moved to another fund or none ({n_cleared} cleared)")
 
     if dry_run:
         print("--dry-run: not saving.")
         return 0
 
     with get_db() as conn:
-        cur = conn.executemany(
-            "UPDATE mf_scheme_master SET etm_slug = ?, etm_id = ? WHERE scheme_code = ?",
-            matches,
+        conn.executemany(
+            "UPDATE mf_scheme_master SET etm_slug = ?, etm_id = ?, etm_checked_at = NULL WHERE scheme_code = ?",
+            updates,
         )
-    print(f"\nWrote {len(matches)} mappings to mf_scheme_master.etm_slug / etm_id")
-    return len(matches)
+        n_q = _quarantine_holdings(conn, moved_fund, "etm mapping pointed at another fund's page")
+    print(f"\nWrote {len(updates)} mapping changes; {n_q} holding rows quarantined")
+    return len(updates)
+
+
+def _quarantine_holdings(conn, scheme_codes: list[str], reason: str, after: str | None = None) -> int:
+    """Move the mf_holdings / mf_sector_allocation rows of `scheme_codes` (only those
+    dated after `after`, if given) into the quarantine twins. Returns holding rows moved."""
+    n = 0
+    for i in range(0, len(scheme_codes), 500):
+        chunk = scheme_codes[i:i + 500]
+        marks = ",".join("?" * len(chunk)) + ")" + (" AND as_of_date > ?" if after else "")
+        args = [*chunk, after] if after else chunk
+        for table, cols in (
+            ("mf_holdings", "scheme_code, as_of_date, holding_rank, instrument_type, sid, isin, "
+                            "instrument_name, sector, pct_of_aum, market_value_cr"),
+            ("mf_sector_allocation", "scheme_code, as_of_date, sector, pct_of_aum"),
+        ):
+            cur = conn.execute(
+                f"""INSERT OR REPLACE INTO {table}_quarantine ({cols}, _q_failed_gate, _q_reason, _q_quarantined_at)
+                    SELECT {cols}, 'etm_mapping', ?, datetime('now') FROM {table} WHERE scheme_code IN ({marks}""",
+                [reason, *args],
+            )
+            if table == "mf_holdings":
+                n += cur.rowcount
+            conn.execute(f"DELETE FROM {table} WHERE scheme_code IN ({marks}", args)
+    return n
 
 
 # ─────────────────────── Holdings page parser ───────────────────────
@@ -361,9 +406,13 @@ def _parse_holdings_page(html: str) -> tuple[list[dict], list[dict], str | None]
                    for s, p in sorted(sectors_per_holding.items(), key=lambda x: -x[1])]
 
     # ── Disclosure date ──
-    m = re.search(r"(?:as\s+on|as\s+of|portfolio\s+as\s+on)\s+(\d{1,2}\s+\w+,?\s+\d{4})", html, re.I)
+    # ETMoney writes "as on Sep 30, 2026" (month first) in the section headers; the
+    # day-first pattern alone never matched it, so every row carried the scrape date.
+    # "as on" first: the AMC blurb says "AUM … as of March 31, 2026".
+    date_pat = r"\s+(\d{1,2}\s+[A-Za-z]+,?\s+\d{4}|[A-Za-z]+\s+\d{1,2},?\s+\d{4})"
+    m = re.search(r"as\s+on" + date_pat, html, re.I) or re.search(r"as\s+of" + date_pat, html, re.I)
     if m:
-        for fmt in ("%d %b %Y", "%d %B %Y"):
+        for fmt in ("%d %b %Y", "%d %B %Y", "%b %d %Y", "%B %d %Y"):
             try:
                 as_of = datetime.strptime(re.sub(r",", "", m.group(1)), fmt).date().isoformat()
                 break
@@ -413,43 +462,114 @@ def fetch_holdings(etm_slug: str, etm_id: int) -> tuple[list[dict], list[dict], 
 # ─────────────────────── Batch ingest ───────────────────────
 
 
-def scrape(limit: int | None = None, scheme: str | None = None,
-           top_score_first: bool = True, dry_run: bool = False,
-           skip_fresh_days: int = 0) -> int:
-    """Scrape ETMoney holdings for all mapped schemes. Returns rows written.
+def write_portfolio(sibling_codes: list[str], as_of_date: str, holdings: list[dict], sectors: list[dict],
+                    name_to_sid: dict, portfolio_dated: bool = True) -> tuple[int, int]:
+    """Write one fund's portfolio for every sibling AMFI scheme_code (Direct/Regular and
+    payout options share it) — the one write path for every holdings route. holdings:
+    [{rank, instrument_name, pct_of_aum, sector, market_value_cr, instrument_type?}]
+    (instrument_type defaults to EQUITY); sectors: [{sector, pct_of_aum}]. Returns
+    (holding rows, sector rows) written."""
+    all_holdings_rows = []
+    all_sector_rows = []
+    for sc in sibling_codes:
+        for h in holdings:
+            # Match each holding to our stocks.sid by name (best-effort).
+            sid = name_to_sid.get(_normalise(h["instrument_name"]))
+            all_holdings_rows.append((
+                sc, as_of_date, h["rank"],
+                h.get("instrument_type") or "EQUITY",
+                sid, None,                      # no per-holding ISIN on either page
+                h["instrument_name"],
+                h.get("sector"),
+                h["pct_of_aum"],
+                h.get("market_value_cr"),
+            ))
+        for sec in sectors:
+            all_sector_rows.append((sc, as_of_date, sec["sector"], sec["pct_of_aum"]))
 
-    If skip_fresh_days > 0, skip etm_ids that already have any sibling with
-    holdings newer than N days — useful for incremental runs after a remapping.
+    with get_db() as conn:
+        # Rows dated after the page's own portfolio date are scrape-date stamps (the
+        # date never parsed before 2026-10-10); left in place they outrank it.
+        if portfolio_dated:
+            _quarantine_holdings(conn, sibling_codes, "stamped with the scrape date, not the portfolio date",
+                                 after=as_of_date)
+        # Replace this portfolio date whole: a re-check of the same month with
+        # fewer holdings must not leave the old tail ranks behind.
+        for sc in sibling_codes:
+            conn.execute(
+                "DELETE FROM mf_holdings WHERE scheme_code=? AND as_of_date=?",
+                (sc, as_of_date),
+            )
+            conn.execute(
+                "DELETE FROM mf_sector_allocation WHERE scheme_code=? AND as_of_date=?",
+                (sc, as_of_date),
+            )
+        conn.executemany(
+            """INSERT OR REPLACE INTO mf_holdings
+               (scheme_code, as_of_date, holding_rank, instrument_type,
+                sid, isin, instrument_name, sector, pct_of_aum, market_value_cr)
+               VALUES (?,?,?,?,?,?,?,?,?,?)""",
+            all_holdings_rows,
+        )
+        if all_sector_rows:
+            conn.executemany(
+                """INSERT OR REPLACE INTO mf_sector_allocation
+                   (scheme_code, as_of_date, sector, pct_of_aum) VALUES (?,?,?,?)""",
+                all_sector_rows,
+            )
+    return len(all_holdings_rows), len(all_sector_rows)
+
+
+def _mark_checked(scheme_codes: list[str]) -> None:
+    """Stamp mf_scheme_master.etm_checked_at — the rotation order for the next run."""
+    if scheme_codes:
+        with get_db() as conn:
+            conn.executemany(
+                "UPDATE mf_scheme_master SET etm_checked_at = datetime('now') WHERE scheme_code = ?",
+                [(sc,) for sc in scheme_codes],
+            )
+
+
+def scrape(limit: int | None = None, scheme: str | None = None, dry_run: bool = False,
+           recheck_days: int = 0, max_minutes: float | None = None, without_groww: bool = False) -> int:
+    """Scrape ETMoney holdings for mapped non-debt schemes, least-recently-checked
+    first: never-checked first of all, funds with no holdings at all ahead of the rest (new
+    launches have no composite_score and would otherwise wait out the whole backlog), then
+    by composite_score. Returns funds written.
+
+    recheck_days > 0 skips funds checked within that many days; max_minutes stops
+    the run when the time is up (the rest continue next run); without_groww keeps to
+    funds the Groww route (the primary) has no page for.
     """
-    where = ["sm.etm_id IS NOT NULL", "sm.active = 1", "(sm.data_quality IS NULL OR sm.data_quality = 'TRUSTED')"]
+    where = ["sm.etm_id IS NOT NULL", "sm.active = 1", "(sm.data_quality IS NULL OR sm.data_quality = 'TRUSTED')",
+             "COALESCE(sm.category_norm, '') NOT LIKE 'Debt%'"]
     params: list = []
     if scheme:
         where = ["sm.scheme_code = ?"]
         params = [scheme]
-    if skip_fresh_days > 0:
-        where.append(
-            f"NOT EXISTS (SELECT 1 FROM mf_holdings h "
-            f"WHERE h.scheme_code = sm.scheme_code "
-            f"AND h.as_of_date >= date('now','-{skip_fresh_days} days'))"
-        )
+    elif without_groww:
+        where.append("COALESCE(sm.groww_slug, '') = ''")
+    having = ""
+    if recheck_days > 0:
+        having = (f"HAVING MAX(sm.etm_checked_at IS NULL) = 1 "
+                  f"OR MIN(sm.etm_checked_at) < datetime('now', '-{int(recheck_days)} days')")
 
-    # Prioritise by composite_score so the most-researched funds are covered first.
-    # Then dedupe by etm_id — many AMFI scheme variants share the same ETMoney URL
+    # Dedupe by etm_id — many AMFI scheme variants share the same ETMoney URL
     # (Direct + Regular + plan variants all have identical underlying holdings, so
     # we only need to fetch once per etm_id and propagate to siblings).
-    join_sql = "LEFT JOIN mf_metrics m ON sm.scheme_code = m.scheme_code" if top_score_first else ""
-    order_sql = "ORDER BY MAX(m.composite_score) DESC NULLS LAST" if top_score_first else ""
-
     schemes = read_sql(
         f"""SELECT sm.etm_id,
-                   GROUP_CONCAT(sm.scheme_code) AS sibling_codes,
+                   GROUP_CONCAT(DISTINCT sm.scheme_code) AS sibling_codes,
                    MIN(sm.etm_slug)             AS etm_slug,
                    MIN(sm.scheme_name)          AS scheme_name
             FROM mf_scheme_master sm
-            {join_sql}
+            LEFT JOIN mf_metrics m ON sm.scheme_code = m.scheme_code
             WHERE {' AND '.join(where)}
             GROUP BY sm.etm_id
-            {order_sql}""",
+            {having}
+            ORDER BY MAX(sm.etm_checked_at IS NULL) DESC,
+                     MIN(EXISTS (SELECT 1 FROM mf_holdings h WHERE h.scheme_code = sm.scheme_code)),
+                     MIN(sm.etm_checked_at), MAX(m.composite_score) DESC NULLS LAST""",
         params=params,
     )
     if limit:
@@ -476,8 +596,14 @@ def scrape(limit: int | None = None, scheme: str | None = None,
     name_to_sid = {_normalise(r["name"]): r["sid"] for _, r in stocks.iterrows()}
 
     consecutive_errors = 0
+    over_budget = _http.time_budget("etmoney", max_minutes)
 
     for i, row in enumerate(schemes.itertuples(index=False), 1):
+        if over_budget():
+            print(f"  budget of {max_minutes} min reached after {i - 1} funds — "
+                  f"rest continue next run (stalest-first)", flush=True)
+            break
+        sibling_codes = row.sibling_codes.split(",") if row.sibling_codes else []
         try:
             holdings, sectors, as_of = fetch_holdings(row.etm_slug, row.etm_id)
             consecutive_errors = 0
@@ -492,8 +618,10 @@ def scrape(limit: int | None = None, scheme: str | None = None,
             n_err += 1
             consecutive_errors += 1
             runlog.item_error("etmoney holdings", row.etm_slug, e)
+            _mark_checked(sibling_codes)
             continue
 
+        _mark_checked(sibling_codes)
         if not holdings:
             n_no_data += 1
             continue
@@ -546,50 +674,11 @@ def scrape(limit: int | None = None, scheme: str | None = None,
             print(f"  ⚠ identity_check failed for etm_id={row.etm_id}: {e}", file=sys.stderr)
 
         as_of_date = as_of or datetime.now().strftime("%Y-%m-%d")
-        sibling_codes = row.sibling_codes.split(",") if row.sibling_codes else []
 
-        # Match each holding to our stocks.sid by name (best-effort).
-        # Build holdings_rows for EVERY sibling AMFI scheme_code (same underlying
-        # fund holdings — Direct/Regular plans share portfolio).
-        all_holdings_rows = []
-        all_sector_rows = []
-        for sc in sibling_codes:
-            for h in holdings:
-                sid = name_to_sid.get(_normalise(h["instrument_name"]))
-                all_holdings_rows.append((
-                    sc, as_of_date, h["rank"],
-                    "EQUITY",                       # ETMoney portfolio-details = equity holdings
-                    sid, None,                      # isin not in scrape
-                    h["instrument_name"],
-                    h.get("sector"),
-                    h["pct_of_aum"],
-                    h.get("market_value_cr"),
-                ))
-            for s in sectors:
-                all_sector_rows.append((sc, as_of_date, s["sector"], s["pct_of_aum"]))
-
-        with get_db() as conn:
-            for sc in sibling_codes:
-                conn.execute(
-                    "DELETE FROM mf_sector_allocation WHERE scheme_code=? AND as_of_date=?",
-                    (sc, as_of_date),
-                )
-            conn.executemany(
-                """INSERT OR REPLACE INTO mf_holdings
-                   (scheme_code, as_of_date, holding_rank, instrument_type,
-                    sid, isin, instrument_name, sector, pct_of_aum, market_value_cr)
-                   VALUES (?,?,?,?,?,?,?,?,?,?)""",
-                all_holdings_rows,
-            )
-            if all_sector_rows:
-                conn.executemany(
-                    """INSERT OR REPLACE INTO mf_sector_allocation
-                       (scheme_code, as_of_date, sector, pct_of_aum) VALUES (?,?,?,?)""",
-                    all_sector_rows,
-                )
-
-        n_holdings_rows += len(all_holdings_rows)
-        n_sector_rows += len(all_sector_rows)
+        n_h, n_s = write_portfolio(sibling_codes, as_of_date, holdings, sectors, name_to_sid,
+                                   portfolio_dated=bool(as_of))
+        n_holdings_rows += n_h
+        n_sector_rows += n_s
         n_ok += 1
 
         if i % 25 == 0:
@@ -612,11 +701,21 @@ def scrape(limit: int | None = None, scheme: str | None = None,
     return n_ok
 
 
-def compute() -> int:
-    """PIPELINE_STEPS-friendly entry — incremental refresh."""
+def compute(max_minutes=_http.HOST_BUDGET) -> int:
+    """Daily pipeline step. Primary: the Groww route (sources.mf_holdings_groww). Fallback:
+    for funds Groww has no page for, map schemes that have no ETMoney page yet, then
+    re-check the funds due (RECHECK_DAYS), stalest first, until the host budget is spent.
+    Returns funds written by both routes."""
+    from sources import mf_holdings_groww
+    n_groww = mf_holdings_groww.compute()
     status()
-    # Re-fetch top-100 by score (monthly cadence is enough for AMFI-style 45d-lag data)
-    return scrape(limit=100, top_score_first=True)
+    try:
+        build_mapping(only_unmapped=True)
+    except RuntimeError as e:   # no sitemap readable — still refresh the funds already mapped
+        runlog.item_failed("etmoney sitemap", "mapping", str(e), symptom="A")
+    if max_minutes is _http.HOST_BUDGET:
+        max_minutes = _http.host("etmoney")[1]["budget_min"]
+    return n_groww + scrape(recheck_days=RECHECK_DAYS, max_minutes=max_minutes, without_groww=True)
 
 
 def status() -> None:
@@ -646,14 +745,17 @@ if __name__ == "__main__":
     p.add_argument("--scheme", help="Single scheme code (smoke test)")
     p.add_argument("--status", action="store_true", help="Report current ingest state")
     p.add_argument("--dry-run", action="store_true")
-    p.add_argument("--skip-fresh-days", type=int, default=0,
-                   help="Skip etm_ids whose holdings are newer than N days (incremental top-up)")
+    p.add_argument("--only-unmapped", action="store_true",
+                   help="--build-map: map only schemes without a page (leave existing mappings alone)")
+    p.add_argument("--recheck-days", type=int, default=0,
+                   help="Skip funds checked within N days (the pipeline uses RECHECK_DAYS)")
+    p.add_argument("--max-minutes", type=float, help="Stop after N minutes (the pipeline uses the host budget)")
     args = p.parse_args()
 
     if args.status or (not args.build_map and not args.scrape and not args.scheme):
         status()
     if args.build_map:
-        build_mapping(dry_run=args.dry_run)
+        build_mapping(dry_run=args.dry_run, only_unmapped=args.only_unmapped)
     if args.scrape or args.scheme:
-        scrape(limit=args.limit, scheme=args.scheme,
-               dry_run=args.dry_run, skip_fresh_days=args.skip_fresh_days)
+        scrape(limit=args.limit, scheme=args.scheme, dry_run=args.dry_run,
+               recheck_days=args.recheck_days, max_minutes=args.max_minutes)
