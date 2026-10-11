@@ -17,8 +17,8 @@ Method — daily-rebalanced NAV from the persisted `portfolio_weights` books:
     constant → isolates the weighting decision). Benchmark = the book's tier-weight
     blend of NIFTY 50 / Midcap 150 / Smallcap 250.
 
-Daily simple returns are clipped to ±0.5 (split-defense on raw closes — same rationale
-as signals/sector_momentum.py / the book covariance). Costs are EXCLUDED: both schemes
+Returns are from adjusted closes (2026-10-10; were raw closes) and still clipped to ±0.5
+as a last defense against a missing corporate action. Costs are EXCLUDED: both schemes
 hold the same names with similar turnover, so transaction costs roughly cancel in the
 HRP−EQW spread (noted; a cost-aware execution sim is paper_portfolio.py's job).
 
@@ -40,7 +40,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from db import read_sql
-from tools.compute_pick_outcomes import _load_price_panel, _load_bench_panel, TIER_BENCHMARKS
+from tools.compute_pick_outcomes import _load_bench_panel, TIER_BENCHMARKS
 
 RET_CLIP = (-0.5, 0.5)
 TRADING_DAYS = 252
@@ -88,7 +88,24 @@ def _turnover_and_cost(prev_w, target_w, day_rets, tier_of, cost_bps):
     return float(turnover), cost
 
 
-def compute_nav():
+def _adjusted_panel(sids, start):
+    """Wide adj_close panel (rows=date, cols=sid) for `sids` from `start`: split/bonus/
+    dividend-adjusted as of today (signals._prices.apply_adjustments), so a corporate
+    action is not a return."""
+    from signals._prices import apply_adjustments
+    marks = ",".join("?" * len(sids))
+    px = read_sql(f"SELECT sid, date, close FROM stock_prices WHERE close > 0 AND date >= ? "
+                  f"AND sid IN ({marks}) ORDER BY sid, date", params=[start, *sids])
+    adj = read_sql(f"SELECT sid, ex_date, factor FROM corporate_adjustments WHERE sid IN ({marks}) "
+                   f"ORDER BY sid, ex_date", params=list(sids))
+    px = apply_adjustments(px, adj, pd.Timestamp.today().date())
+    px["date"] = pd.to_datetime(px["date"])
+    return px.pivot_table(index="date", columns="sid", values="adj_close", aggfunc="last").sort_index()
+
+
+def compute_nav(since=None):
+    """Daily NAV series of the persisted books (see module doc). `since` (ISO date):
+    only trading days on/after it, held from the last book before it."""
     from config import TRANSACTION_COSTS_BPS
 
     books = read_sql("SELECT asof_date, sid, weight, cap_tier FROM portfolio_weights")
@@ -96,6 +113,11 @@ def compute_nav():
         print("⚠ no portfolio_weights — run `python -m portfolio_construction --backfill`")
         return None
     books["asof_date"] = pd.to_datetime(books["asof_date"])
+    if since:
+        before = books.loc[books["asof_date"] < pd.Timestamp(since), "asof_date"]
+        books = books[books["asof_date"] >= (before.max() if not before.empty else pd.Timestamp(since))]
+        if books.empty:
+            return None
     bw = {d: g.set_index("sid")["weight"] for d, g in books.groupby("asof_date")}
     btier = {d: g.set_index("sid")["cap_tier"] for d, g in books.groupby("asof_date")}
     book_dates = pd.DatetimeIndex(sorted(bw.keys()))
@@ -104,11 +126,13 @@ def compute_nav():
     # cost rather than falling back to the worst-case default.
     tier_lookup = books.sort_values("asof_date").groupby("sid")["cap_tier"].last()
 
-    price = _load_price_panel()
+    price = _adjusted_panel(sorted(books["sid"].unique()), book_dates[0].strftime("%Y-%m-%d"))
     # fill_method=None: a stock not priced on day t → NaN return (dropped that day),
     # not a fabricated 0% from forward-fill.
     rets = price.pct_change(fill_method=None).clip(*RET_CLIP)
     rets = rets[rets.index > book_dates[0]]   # start the day after the first book
+    if since:
+        rets = rets[rets.index >= pd.Timestamp(since)]
 
     bench_panel = _load_bench_panel()
     bench_rets = (bench_panel.pct_change(fill_method=None).clip(*RET_CLIP)

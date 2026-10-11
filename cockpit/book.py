@@ -5,7 +5,7 @@ Alpha Signal Cockpit - page data for /book (the sized book, the real Zerodha boo
 banded (a held name stays until it drifts past the band). Reads named view functions
 and cockpit.api; the one query here asks when a held name last sat in the top picks.
 
-  get_book()          the holdings + the one expected-return figure + the band line
+  get_book()          the holdings + the one expected-return figure + this year's return + the band line
   get_zerodha()       the real demat holdings (broker_holdings snapshot), each with the model's view
   get_risk()          concentration and style, a plain one-line summary on top
   get_track_record()  realised outcomes, weekday pick dates only, a verdict per tier
@@ -22,7 +22,7 @@ import db
 import views
 from cockpit import api
 from formatting import tier_word
-from cockpit._shared import _ttl_cache
+from cockpit._shared import _persisted_cache, _ttl_cache
 
 # Every row in pick_outcomes was picked before this model change (3-4 Oct 2026).
 MODEL_CHANGE_FIRST, MODEL_CHANGE = date(2026, 10, 3), date(2026, 10, 4)
@@ -142,7 +142,26 @@ def get_book():
         "expected_return_pct": sb["expected_return_1y"], "er_basis": sb.get("er_basis"),
         "er_names": sb["er_coverage_n"], "er_weight_pct": sb["er_coverage_weight_pct"],
         "band": band_line(),
+        "ytd": book_ytd(),
     }
+
+
+@_persisted_cache(3600, name="book_ytd_v1")
+def book_ytd():
+    """This calendar year's return of the paper book and of its index blend (tools.portfolio_nav:
+    each trading day earns the latest book built before it, adjusted closes, before costs; the blend
+    is NIFTY 50 / Midcap 150 / Smallcap 250 at the book's tier mix). None before the year's first
+    book has a trading day behind it. `start` is the first day counted: the book began 10 Apr 2026."""
+    from tools.portfolio_nav import compute_nav
+    r = compute_nav(since=f"{date.today().year}-01-01")
+    hrp = r["hrp"].dropna() if r else pd.Series(dtype=float)
+    if hrp.empty:
+        return None
+    bmk = r["bmk"].dropna()
+    return {"pct": round(float((1 + hrp).prod() - 1) * 100, 1),
+            "bench_pct": round(float((1 + bmk).prod() - 1) * 100, 1) if not bmk.empty else None,
+            "start": hrp.index.min().date().isoformat(), "end": hrp.index.max().date().isoformat(),
+            "n_days": len(hrp), "n_before_change": int((hrp.index < pd.Timestamp(MODEL_CHANGE)).sum())}
 
 
 # ── the actual Zerodha book ─────────────────────────────────────────────────────────

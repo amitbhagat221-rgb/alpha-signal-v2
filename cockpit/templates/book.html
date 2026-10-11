@@ -65,10 +65,21 @@
             <div class="bk-lbl">Expected 1-year price return</div>
             <div class="bk-big mono {{ book.expected_return_pct|tone(zero='score-red') }}">{{ book.expected_return_pct|pct(1, signed=True) }}</div>
         </div>
+        {% if book.ytd %}
+        <div>
+            <div class="bk-lbl">Return this year (YTD)</div>
+            <div class="bk-big mono {{ book.ytd.pct|tone }}">{{ book.ytd.pct|pct(1, signed=True) }}{% if book.ytd.bench_pct is not none %} <span class="u-muted" style="font-size: 14px; font-weight: 400;">market {{ book.ytd.bench_pct|pct(1, signed=True) }}</span>{% endif %}</div>
+        </div>
+        {% endif %}
         <div class="bk-sub">Position-weighted upside to the {{ book.er_basis }}, {{ book.er_names }} of {{ book.n }} names covered
             ({{ book.er_weight_pct|pct(0) }} of the book), as of {{ book.pick_date|short_date }}. One to five analysts per name, and no dividends:
             a guide, not a forecast.</div>
     </div>
+    {% if book.ytd %}
+    <p class="bk-note">Return this year: the paper book from its first trading day, {{ book.ytd.start|short_date }}, to {{ book.ytd.end|short_date }}, each day held at
+        that morning's weights, before trading costs. Market = NIFTY 50 / Midcap 150 / Smallcap 250 in the book's tier mix.{% if book.ytd.n_before_change %}
+        {{ book.ytd.n_before_change }} of its {{ book.ytd.n_days }} trading days were under the model before the 4 Oct change.{% endif %}</p>
+    {% endif %}
     <p class="bk-note"><b>{{ book.n }} names</b>, rebuilt each morning (latest {{ book.asof|short_date }}).
         {% for t, w in book.tier_pct.items() %}{{ t|tier_word }} <span class="mono">{{ w|pct(0) }}</span>{% if t in book.unproven %} <span class="unit">(unproven)</span>{% endif %}{% if not loop.last %} &middot; {% endif %}{% endfor %}
         of the book by weight, {{ book.top_n.values()|first }} names per tier.</p>
