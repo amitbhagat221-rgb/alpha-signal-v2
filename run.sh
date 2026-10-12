@@ -169,7 +169,10 @@ case "$JOB" in
             exec 202>/tmp/alpha_signal_kite.lock
             flock -n 202 || { echo "kite_bars already running, exiting $(date -u)"; exit 0; }
         fi
-        run python -m sources.kite_bars --has-session || { echo "no Kite login today — nothing to do"; exit 0; }
+        # the login probe is not a harvest: run it outside `python -m sources.*` so runlog opens no run for it
+        # (as `-m` it logged a FAILED run every hour without a login, false failures on the Feeds page)
+        run python -c 'import sys; from sources.kite_bars import has_session; sys.exit(0 if has_session() else 1)' \
+            || { echo "no Kite login today — nothing to do"; exit 0; }
         logged cron_kite_bars run python -m sources.kite_bars --backfill --until 23:50 ;;
     kite_holdings)      # 10:15 UTC weekdays (15:45 IST) — Amit's Zerodha holdings for /book, closing prices; a day
                         # without a Kite login keeps the last snapshot (not a failure: the login is by hand)

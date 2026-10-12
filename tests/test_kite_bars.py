@@ -40,6 +40,25 @@ def test_2015_placeholders_and_stray_prints_are_cleaned_but_a_real_zero_is_not()
         kb.validate(kb.to_frame("COFO", [dict(_bars(day)[0], close=0, volume=50)]))   # a zero WITH volume is not a placeholder
 
 
+def test_an_impossible_negative_volume_bar_is_dropped_and_counted():
+    bars = _bars(date(2026, 10, 9), n=3)
+    bars[1] = dict(bars[1], volume=-40)                                       # CORF, 2026-10-12
+    df = kb.to_frame("CORF", bars)
+    kb.validate(df)
+    assert len(df) == 2 and df.attrs["negative_volume_dropped"] == 1
+
+
+def test_reits_and_invits_are_left_out_by_rule():
+    c = sqlite3.connect(":memory:")
+    c.execute("CREATE TABLE stocks (sid, name, industry)")
+    c.executemany("INSERT INTO stocks VALUES (?,?,?)", [
+        ("EMBA", "Embassy Office Parks REIT", "REITs"), ("NHIT", "National Highways Infra Trust", "Real Estate Developers"),
+        ("IRBN", "IRB InvIT Fund", "Capital Markets & Exchanges"), ("RELI", "Reliance Industries", "Oil & Gas"),
+        ("TRUS", "Trustbank Ltd", "Banks"), ("NOIN", "No Industry Yet Ltd", None)])
+    kept = [r[0] for r in c.execute(f"SELECT sid FROM stocks WHERE {kb.NOT_TRUSTS} ORDER BY sid")]
+    assert kept == ["NOIN", "RELI", "TRUS"]                                   # a NULL industry is not a trust
+
+
 @pytest.mark.parametrize("break_it, expect", [
     (lambda d: pd.concat([d, d.iloc[[0]]]), "duplicate"),
     (lambda d: d.assign(close=d["close"].where(d.index != 1, 0)), "non-positive"),

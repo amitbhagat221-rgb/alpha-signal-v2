@@ -54,6 +54,10 @@ EMPTY_STOP = 2                  # this many empty chunks in a row = the stock ha
 RETRIES = 3                     # per chunk, each retry is another paced call (no sleeps)
 SESSION_OPEN, SESSION_CLOSE = dtime(9, 0), dtime(20, 0)   # IST; muhurat sessions run in the evening
 MAX_BARS_PER_DAY = 400          # 375 in a normal session
+# REITs and InvITs are income trusts, not stocks the model picks between: out of the intraday
+# research (Amit 2026-10-12). Matched by rule, not by a list — five InvITs carry other industries.
+NOT_TRUSTS = ("NOT (COALESCE(industry, '') = 'REITs' OR COALESCE(name, '') LIKE '%Trust' "
+              "OR COALESCE(name, '') LIKE '%InvIT%' OR COALESCE(name, '') LIKE '%REIT%')")   # NULL must not exclude
 
 SCHEMA = pa.schema([("sid", pa.string()), ("ts", pa.timestamp("s", tz="UTC")),
                     ("close", pa.int32()),          # paise
@@ -100,13 +104,19 @@ def to_frame(sid, bars):
     minute = ts.dt.floor("min")
     stray = (ts != minute) & minute.isin(set(minute[ts == minute]))
     df, minute = df[~stray], minute[~stray]
+    # A negative volume is impossible (CORF had one bar, 2026-10-12): that bar is dropped and
+    # counted in the stock's manifest note. Anything else wrong still fails the contract.
+    negative = df["volume"] < 0
+    df, minute = df[~negative], minute[~negative]
     out = pd.DataFrame({
         "sid": sid,
         "ts": minute.astype("datetime64[s, UTC]"),
         "close": (df["close"] * 100).round().astype("int32"),
         "volume": df["volume"].astype("int64"),
     })
-    return out.sort_values("ts").reset_index(drop=True)
+    out = out.sort_values("ts").reset_index(drop=True)
+    out.attrs["negative_volume_dropped"] = int(negative.sum())
+    return out
 
 
 # ─────────────────────────── files + manifest ───────────────────────────
@@ -152,7 +162,7 @@ def instrument_tokens(kc):
         inst = pd.DataFrame(kc.instruments("NSE"))
     eq = inst[inst["instrument_type"] == "EQ"]
     by_symbol = dict(zip(eq["tradingsymbol"], eq["instrument_token"]))
-    uni = read_sql("SELECT sid, ticker, cap_tier, market_cap_cr FROM stocks WHERE ticker IS NOT NULL "
+    uni = read_sql(f"SELECT sid, ticker, cap_tier, market_cap_cr FROM stocks WHERE ticker IS NOT NULL AND {NOT_TRUSTS} "
                    "ORDER BY market_cap_cr IS NULL, market_cap_cr DESC")
     out = []
     for r in uni.itertuples():
@@ -176,8 +186,9 @@ def _chunk(kc, token, lo, hi):
 
 
 def fetch_stock(kc, sid, token, end=None):
-    """All of a stock's minute bars, newest chunk first, until it had not listed yet."""
-    end = end or date.today()
+    """All of a stock's minute bars up to yesterday, newest chunk first, until it had not listed yet.
+    Today is left out: during market hours it is a partial session (the weekly forward fetch takes it)."""
+    end = end or date.today() - timedelta(days=1)
     frames, empty, hi = [], 0, end
     while hi >= START:
         lo = max(START, hi - timedelta(days=CHUNK_DAYS - 1))
@@ -193,6 +204,7 @@ def fetch_stock(kc, sid, token, end=None):
     if not frames:
         return to_frame(sid, [])
     df = pd.concat(frames, ignore_index=True).drop_duplicates("ts").sort_values("ts").reset_index(drop=True)
+    df.attrs["negative_volume_dropped"] = sum(f.attrs.get("negative_volume_dropped", 0) for f in frames)
     return df
 
 
@@ -238,7 +250,9 @@ def harvest(sids=None, until=None, budget_min=None):
             record("staging", sid, df, None, 0, note="no minute bars on Kite (suspended or illiquid)")
         else:
             path = STAGING / f"sid={sid}.parquet"
-            record("staging", sid, df, path, write_parquet(df, path))
+            neg = df.attrs.get("negative_volume_dropped", 0)
+            record("staging", sid, df, path, write_parquet(df, path),
+                   note=f"dropped {neg} negative-volume bar(s)" if neg else None)
             ok += 1
             rows += len(df)
             runlog.item_ok()
@@ -256,7 +270,7 @@ def status():
                   "MAX(last_ts) AS last, SUM(path IS NULL) AS empty FROM intraday_files WHERE dataset = ? "
                   "AND kind = 'staging'", params=[DATASET])
     r = df.iloc[0]
-    total = int(read_sql("SELECT COUNT(*) AS n FROM stocks WHERE ticker IS NOT NULL")["n"][0])
+    total = int(read_sql(f"SELECT COUNT(*) AS n FROM stocks WHERE ticker IS NOT NULL AND {NOT_TRUSTS}")["n"][0])
     print(f"{DATASET}: {int(r['stocks'] or 0)}/{total} stocks done ({int(r['empty'] or 0)} with no bars) · "
           f"{int(r['bars'] or 0):,} bars · {(r['bytes'] or 0) / 2**20:,.0f} MB · {r['first']} → {r['last']}")
 
