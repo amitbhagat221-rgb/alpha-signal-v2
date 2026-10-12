@@ -203,8 +203,14 @@ def test_news_pages_render(ne, tmp_path, monkeypatch):
         {"sector": "Energy", "sector_tilt": 0.9, "z_mom6": 1.0, "z_macro": 0.8}])
     legacy = client
 
+    # The Markets news bundle is also cached on disk and in memory, keyed on the edition dates.
+    # On a day the live DB's editions are all dated today, its key equals this test's, and a
+    # bundle another test rendered from the live DB was served here (2026-10-12): own cache dir.
+    from cockpit import _shared
+    monkeypatch.setattr(_shared, "_PERSISTED_CACHE_DIR", tmp_path / "cockpit_cache")
+
     def clear():
-        for f in (api.get_news_today, api.get_news_themes, api.get_news_week, api.get_sector_radar):
+        for f in (api.get_news_today, api.get_news_themes, api.get_news_week, api.get_sector_radar, api._news_front):
             f.cache_clear()
     clear()
     page = legacy.get("/markets")
