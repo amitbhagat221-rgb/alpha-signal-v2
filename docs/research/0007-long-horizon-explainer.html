@@ -1,0 +1,387 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Holding Stocks Longer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&display=swap">
+<style>
+/* Layout: one reading column. Background first, then each research question with "what it means for us", then next steps as cards. */
+:root {
+  --bg: #f4f7f8; --surface: #ffffff; --ink: #18232e; --muted: #536371; --line: #d6dfe4;
+  --accent: #0c6b67; --accent-soft: #dcefed;
+  --good: #1d7a3e; --good-soft: #e1f2e6;
+  --bad: #b23a2e; --bad-soft: #f8e3e0;
+  --warn: #9a6512; --warn-soft: #f7ecd8;
+  --display: "Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
+  --body: "Atkinson Hyperlegible", "Segoe UI", system-ui, sans-serif;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) { :root {
+  --bg: #111a21; --surface: #18242d; --ink: #e6eef2; --muted: #9fb0bc; --line: #2b3a45;
+  --accent: #4fc2bb; --accent-soft: #163a3a;
+  --good: #63c987; --good-soft: #17331f; --bad: #ef8a7e; --bad-soft: #3a1d1a;
+  --warn: #e3b25e; --warn-soft: #3a2c14; color-scheme: dark } }
+* { box-sizing: border-box }
+html { -webkit-text-size-adjust: 100% }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 17px/1.65 var(--body); padding-inline: 16px; padding-block: 40px 72px }
+main { max-width: 760px; margin: 0 auto; display: grid; gap: 52px }
+h1, h2, h3 { font-family: var(--display); line-height: 1.15; text-wrap: balance; margin: 0 }
+h1 { font-size: clamp(30px, 6vw, 44px); font-weight: 800 }
+h2 { font-size: 26px; font-weight: 800 }
+h3 { font-size: 19px; font-weight: 700 }
+p { margin: 0 }
+a { color: var(--accent) }
+em { font-style: italic }
+.eyebrow { font-size: 13px; letter-spacing: .08em; text-transform: uppercase; color: var(--accent); font-weight: 700 }
+section { display: grid; gap: 16px }
+main > *, section > *, header > * { min-width: 0 }
+.lede { font-size: 20px; line-height: 1.5 }
+.answer { background: var(--accent-soft); border-radius: 14px; padding: 20px 22px; display: grid; gap: 10px }
+.answer strong { color: var(--accent) }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 18px 20px; display: grid; gap: 12px; min-width: 0 }
+.meaning { border-left: 4px solid var(--accent); padding: 4px 0 4px 14px; display: grid; gap: 4px }
+.meaning b { color: var(--accent); font-size: 13px; letter-spacing: .06em; text-transform: uppercase }
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px }
+.stat { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px }
+.stat b { display: block; font-family: var(--display); font-size: 30px; font-variant-numeric: tabular-nums }
+.stat span { color: var(--muted); font-size: 14px }
+.table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 12px; background: var(--surface) }
+table { width: 100%; border-collapse: collapse; font-size: 16px; font-variant-numeric: tabular-nums }
+th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--line); vertical-align: top }
+th { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 700 }
+tr:last-child td { border-bottom: 0 }
+.band { display: grid; gap: 6px }
+.band-bar { display: grid; grid-template-columns: 24fr 32fr 44fr; min-height: 34px; border-radius: 8px; overflow: hidden; font-size: 13px; font-weight: 700 }
+.band-bar div { display: flex; align-items: center; justify-content: center; text-align: center; padding: 0 4px }
+.b-buy { background: var(--good-soft); color: var(--good) }
+.b-hold { background: var(--warn-soft); color: var(--warn) }
+.b-sell { background: var(--bad-soft); color: var(--bad) }
+.band-axis { display: grid; grid-template-columns: 24fr 32fr 44fr; gap: 4px; font-size: 12px; color: var(--muted) }
+.cards { display: grid; gap: 12px }
+.card { background: var(--surface); border: 1px solid var(--line); border-left: 6px solid var(--c); border-radius: 12px; padding: 16px 18px; display: grid; gap: 6px; min-width: 0 }
+.card.good { --c: var(--good) } .card.bad { --c: var(--bad) } .card.warn { --c: var(--warn) }
+.card p { color: var(--muted) }
+.card p.us { color: var(--ink) }
+.tag { justify-self: start; font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; padding: 2px 9px; border-radius: 99px; background: var(--s); color: var(--c) }
+.good .tag { --s: var(--good-soft) } .bad .tag { --s: var(--bad-soft) } .warn .tag { --s: var(--warn-soft) }
+.pill { font-weight: 700; white-space: nowrap }
+.pill.review { color: var(--warn) } .pill.none { color: var(--muted) }
+.dots { display: flex; flex-wrap: wrap; gap: 5px }
+.dots i { width: 13px; height: 13px; border-radius: 50%; background: var(--line) }
+.dots i.on { background: var(--accent) }
+.small { font-size: 14px; color: var(--muted) }
+ul, ol { margin: 0; padding-left: 22px; display: grid; gap: 8px }
+.donts { list-style: none; padding: 0 }
+.donts li { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 12px 16px; display: grid; gap: 2px }
+.donts li b::before { content: "✕  "; color: var(--bad) }
+.donts li span { color: var(--muted); font-size: 15px }
+.steps { list-style: none; padding: 0; display: grid; gap: 14px; counter-reset: step }
+.step { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 18px 20px; display: grid; gap: 10px; counter-increment: step; min-width: 0 }
+.step h3 { display: flex; gap: 12px; align-items: baseline }
+.step h3::before { content: counter(step); font-family: var(--display); font-weight: 800; color: var(--accent); font-size: 26px; min-width: 22px }
+.step dl { margin: 0; display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px }
+.step dt { font-weight: 700; color: var(--muted); font-size: 14px; text-transform: uppercase; letter-spacing: .05em; padding-top: 2px }
+.step dd { margin: 0 }
+@media (max-width: 520px) { .step dl { grid-template-columns: 1fr } .step dt { padding-top: 6px } }
+.gloss { display: grid; grid-template-columns: max-content 1fr; gap: 8px 16px }
+.gloss dt { font-weight: 700 } .gloss dd { margin: 0; color: var(--muted) }
+@media (max-width: 520px) { .gloss { grid-template-columns: 1fr } .gloss dd { margin-bottom: 6px } }
+footer { font-size: 14px; color: var(--muted); border-top: 1px solid var(--line); padding-top: 16px; display: grid; gap: 4px }
+</style>
+</head>
+<body>
+<main>
+
+  <header style="display:grid;gap:14px">
+    <div class="eyebrow">Research 0007 · plain-language version · 13 Oct 2026</div>
+    <h1>Holding stocks for 3–12 months: what we tried, what the research says, what we do next</h1>
+    <p class="lede">Our model picks good stocks but trades them far too often. We want to hold each pick for months instead of days. This page explains where we stand, what three rounds of outside research found, and the plan.</p>
+    <div class="answer">
+      <p><strong>Short answer.</strong> The research tells us clearly <em>how</em> to run a slow book: buy strictly, sell lazily, and don't react to price swings. It gives a few slow signals worth testing. It did <strong>not</strong> find any Indian investing style with an independently checked record that we could copy.</p>
+      <p>Our own best long-hold rule looks good (+18% a year above the small-cap index), but we can't yet tell it apart from luck. The next steps are about finding out, not about changing live picks.</p>
+    </div>
+  </header>
+
+  <!-- ───────────── BACKGROUND ───────────── -->
+  <section>
+    <div class="eyebrow">Background</div>
+    <h2>The problem: our book trades too much</h2>
+    <p>Today's paper book is rebuilt <strong>every day</strong>: buy a stock when it enters the top 5 of its size group, sell it when it falls below 8th. A stock is typically held for only <strong>5 trading days</strong>, and about 9% of the book changes every day. Every trade costs money (brokerage, STT, the bid-ask gap), and gains held under 12 months are taxed at 20% instead of 12.5%.</p>
+    <p>The model's signals were also chosen for how well they predict the <em>next month</em>. Some of them (like unusual delivery volume) work for a few weeks and then fade, so the ranking keeps changing and the book keeps trading.</p>
+  </section>
+
+  <section>
+    <h2>What we already tried: 48 slower rules (plan 0024)</h2>
+    <p>Last week we tested whether <em>holding longer</em> fixes this. We kept the same idea (buy high-ranked stocks) but slowed everything down, using a new "slow score" built only from signals that last for months. The rule works like this:</p>
+
+    <div class="panel">
+      <div class="band">
+        <div class="band-bar"><div class="b-buy">Buy</div><div class="b-hold">Hold</div><div class="b-sell">Sell</div></div>
+        <div class="band-axis"><span>top 10</span><span>rank 11–30</span><span>below 30 → sell (after the minimum hold)</span></div>
+      </div>
+      <p class="small">Example: buy only stocks in the top 10; once owned, keep them until they fall below rank 30. This gap between "buy" and "sell" is what stops the book from trading every time a rank wiggles.</p>
+    </div>
+
+    <p>There are five knobs on this rule. We tried every sensible setting, which made <strong>48 versions</strong> of it in each size group (large, mid, small):</p>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Knob</th><th>Settings tried</th><th>What it controls</th></tr></thead>
+      <tbody>
+        <tr><td>How often we review</td><td>monthly or quarterly</td><td>how often we're allowed to trade at all</td></tr>
+        <tr><td>How many stocks we hold</td><td>10, 15 or 20</td><td>the size of the "buy zone"</td></tr>
+        <tr><td>When we sell</td><td>below 2×, 3× or 4× that number (e.g. below 20, 30 or 40 for a 10-stock book)</td><td>the size of the "keep holding" zone</td></tr>
+        <tr><td>Which score</td><td>this month's score, or the average of the last 3 months</td><td>smoothing, so one noisy month doesn't trigger a trade</td></tr>
+        <tr><td>Minimum hold</td><td>none, 6 months or 12 months</td><td>12 months means every gain is taxed at the lower long-term rate</td></tr>
+      </tbody>
+    </table></div>
+    <p class="small">36 versions come from the first four knobs with a 6-month minimum hold; 12 more try no minimum hold and a 12-month one. Every version delays a sale by up to 42 days if that turns a short-term gain into a long-term one. Each was run on 52 months of data the model had never seen (June 2022 to October 2026), with real Zerodha costs and Indian tax, and compared with the tier's index fund.</p>
+
+    <h3>What happened</h3>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Size group</th><th>Best of the 48 rules</th><th>Beat the index by (after costs and tax)</th><th>How sure (t)</th></tr></thead>
+      <tbody>
+        <tr><td>Small caps</td><td>monthly · top 10 · sell below 30 · 3-month average · 12-month hold</td><td><b>+18.3% a year</b></td><td>1.81</td></tr>
+        <tr><td>Midcaps</td><td>monthly · top 15 · sell below 45 · 6-month hold</td><td>+5.2% a year</td><td>1.44</td></tr>
+        <tr><td>Large caps</td><td>quarterly · top 20 · sell below 80 · 6-month hold</td><td>+7.1% a year</td><td>1.26</td></tr>
+      </tbody>
+    </table></div>
+    <p>The good news: the slow rules do what they're meant to. The best small-cap rule held stocks for about 13 months, traded about 88% of the book a year (against 300–900% for a fast 5-in/8-out book), and 98% of its gains were taxed at the long-term rate.</p>
+    <p>The bad news: <strong>none of the three passed</strong> our "is it real?" test. Two reasons:</p>
+    <ul>
+      <li><strong>"t" is a measure of how sure we can be the result isn't luck.</strong> Roughly, 2 or more means probably real; below 2 could easily be chance. The best small-cap rule scored 1.81.</li>
+      <li><strong>We picked the best of 48 tries.</strong> If you ask 48 people to flip a coin ten times, someone will get 8 heads without any skill. The same happens with rules: even if none of the 48 had any real edge, the best one would still look decent by luck alone. So the bar for "the best of 48" is much higher than 2; our plan set it at about 3.5. On that basis every tier fails.</li>
+    </ul>
+    <p>Also, the same small-cap rule run on a second, equally reasonable slow score earned only <strong>+3.6% a year</strong>. A real edge shouldn't depend that much on a small choice. So for real money each tier's index is still the honest default. That's why we commissioned the research below.</p>
+  </section>
+
+  <!-- ───────────── HOW ───────────── -->
+  <section>
+    <div class="eyebrow">The research</div>
+    <h2>What we asked, and how it was checked</h2>
+    <p>We gave an AI research system a detailed brief with six questions:</p>
+    <ol>
+      <li>Which <strong>slow signals</strong> predict 3–12-month returns in Indian mid and small caps?</li>
+      <li>What <strong>new data</strong> (free or cheap) carries slow information?</li>
+      <li>Which <strong>famous investing styles</strong> (Coffee Can, QGLP, magic formula, CANSLIM…) have a real Indian track record?</li>
+      <li>Which <strong>warning signs</strong> should make us re-look at a stock we own?</li>
+      <li>How should a slow <strong>portfolio be built</strong> (buy and sell rules, tax timing)?</li>
+      <li>How do we <strong>test fairly</strong> when we only have 7 years of data?</li>
+    </ol>
+    <p>It ran three rounds. Each round searched the web, read papers, factsheets and reports, and pulled out every specific claim. The 25 most important claims per round were then checked by <strong>three separate reviewers</strong>; a claim was thrown out if two of the three disagreed.</p>
+    <div class="stats">
+      <div class="stat"><b>296</b><span>claims found</span></div>
+      <div class="stat"><b>75</b><span>checked three times</span></div>
+      <div class="stat"><b>56</b><span>survived</span></div>
+      <div class="stat"><b>19</b><span>thrown out</span></div>
+    </div>
+    <p class="small">The other 221 claims were never checked. We treat them as leads, not facts. Every source is cited in the detailed findings document.</p>
+  </section>
+
+  <!-- ───────────── FINDINGS ───────────── -->
+  <section>
+    <div class="eyebrow">Findings · question 5</div>
+    <h2>How to build a slow portfolio: the clearest answers</h2>
+    <div class="cards">
+      <div class="card good"><span class="tag">Strong evidence · top journals, US</span>
+        <h3>Buy strictly, sell lazily</h3>
+        <p>A gap between the buy rule and the sell rule (our "buy top 10, sell below 30") is the single best way to cut trading costs. It beats only trading cheap stocks and beats spreading trades out. Strategies that replace under about half their holdings a month usually still make money after costs.</p>
+        <p class="us"><b>For us:</b> our 48 rules already do this. Good. India's STT makes it matter even more than in the US.</p></div>
+      <div class="card good"><span class="tag">Strong evidence · top journals, US</span>
+        <h3>Move slowly toward the target, and trust slow signals more</h3>
+        <p>When trading costs money, the best policy is to move part of the way toward your ideal portfolio each time, and to give more weight to signals that stay true for months than to ones that fade in weeks.</p>
+        <p class="us"><b>For us:</b> drop fast signals (unusual delivery volume, the reaction to results) from the long-hold score. Our own data agrees: they add nothing at 6 months and make the ranking jumpy.</p></div>
+      <div class="card good"><span class="tag">Strong evidence · Journal of Finance 2023</span>
+        <h3>Don't sell because a price moved a lot</h3>
+        <p>In 783 professional fund portfolios, selling the biggest recent winners or losers lost about 0.7–1.5% a year compared with selling at random. Sells made on the company's own results day did better.</p>
+        <p class="us"><b>For us:</b> a warning sign should open a review, and the sale should come from the slow score dropping, not from a price move.</p></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="eyebrow">Findings · question 1</div>
+    <h2>Slow signals with some Indian evidence</h2>
+    <div class="cards">
+      <div class="card good"><span class="tag">Indian studies, small and old</span>
+        <h3>Piotroski score over 1 year</h3>
+        <p>A 9-point checklist of financial health (profitable, cash-generating, less debt, no new shares, improving margins…). Two Indian studies find higher scores lead to better 1-year returns. But the typical high-scorer only beat the market by 0.6%: a few big winners pull the average up.</p>
+        <p class="us"><b>For us:</b> matches our finding that Piotroski gets stronger at longer horizons. It's already in the model for mid and small caps.</p></div>
+      <div class="card good"><span class="tag">Indian working paper</span>
+        <h3>Profitable firms that don't keep issuing shares</h3>
+        <p>An IIM Ahmedabad paper (1995–2021) finds India's "quality" premium comes from high profitability and from firms that don't raise new equity or debt. Steady growth and safety added nothing.</p></div>
+      <div class="card good"><span class="tag">Indian peer-reviewed study</span>
+        <h3>Value and quality together, not quality alone</h3>
+        <p>On BSE stocks 2003–2020, buying quality alone didn't pay. Buying stocks that were both good quality and cheap did.</p>
+        <p class="us"><b>For us:</b> our own test agrees. Small caps that were cheap and high-return-on-capital did well; midcaps with steady high returns on capital did badly in every period since 2020 (see the <a href="../studies/winners-postmortem-2026-10.html">winners post-mortem</a>).</p></div>
+    </div>
+    <p class="small">All these figures are before costs and tax, look back at history, and come from small studies. They tell us what to test, not how much we'll make.</p>
+  </section>
+
+  <section>
+    <div class="eyebrow">Findings · question 3</div>
+    <h2>Famous investing styles: almost nothing proven</h2>
+    <div class="cards">
+      <div class="card bad"><span class="tag">Checked · the edge disappeared</span>
+        <h3>NSE factor indices (Quality 30, Low Volatility, Alpha 50…)</h3>
+        <p>These indices are published rules anyone can follow. Before launch, their back-tests showed 16–20% a year against about 13% for the Nifty. One peer-reviewed study tracked nine of them after launch (data to 2022): <strong>none earned a meaningful edge</strong>, and four got clearly worse than their back-tests. Most of NSE's headline numbers are its own back-tests, before fees.</p>
+        <p class="us"><b>For us:</b> the best Indian evidence that back-tests shrink once real money follows them. Expect ours to shrink too.</p></div>
+      <div class="card warn"><span class="tag">Not found</span>
+        <h3>Coffee Can, QGLP / 100x, Good &amp; Clean, magic formula, CANSLIM, Pabrai, Lynch, Buffett</h3>
+        <p>No independently checked Indian record turned up for any of them. That doesn't mean they fail; it means nobody has published proof we could verify. One unchecked blog figure puts the Ambit Coffee Can fund at 12.8% a year since 2017 against 11.9% for the Nifty 50, and behind it over the last 5 years.</p></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="eyebrow">Findings · question 4</div>
+    <h2>Warning signs on a stock we own</h2>
+    <p>No Indian study measured what happens 3–6 months after any of these events. Indian studies look at a few days around the news. So for now, each one is a reason to <strong>look again</strong> at the next monthly review, not to sell.</p>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Event</th><th>What we know</th><th>Do</th></tr></thead>
+      <tbody>
+        <tr><td>Promoter pledges more shares</td><td>Linked to sharp falls and weaker results later (India)</td><td><span class="pill review">Review</span></td></tr>
+        <tr><td>Credit rating cut</td><td>In India the price usually falls <em>before</em> the news. In Brazil, −25% over the next year. India 3–6 months: untested</td><td><span class="pill review">Review</span></td></tr>
+        <tr><td>Auditor or director resigns</td><td>Only news stories outside our data; our own test shows midcaps lag after resignations</td><td><span class="pill review">Review</span></td></tr>
+        <tr><td>Added to NSE surveillance list (ASM / GSM)</td><td>Effect lasts days; GSM limits trading</td><td><span class="pill review">Check liquidity</span></td></tr>
+        <tr><td>Related-party deals</td><td>On average not harmful in India; loans and guarantees to promoter companies are the worry</td><td><span class="pill review">Review if large</span></td></tr>
+        <tr><td>Profit running ahead of cash</td><td>Did <em>not</em> predict worse returns in India</td><td><span class="pill none">No action</span></td></tr>
+        <tr><td>"Fraud score" (Beneish) flag</td><td>Claim that flagged stocks do worse was thrown out; in our data it mostly flags fast growers</td><td><span class="pill none">No action</span></td></tr>
+        <tr><td>Big price drop or jump on its own</td><td>Selling on this loses money</td><td><span class="pill none">No action</span></td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <section>
+    <div class="eyebrow">Findings · question 2</div>
+    <h2>New data sources: mostly unanswered</h2>
+    <p>The research found almost nothing usable on audit qualifications, order books, segment data, employee counts, government tender wins, patents, export data or company-registry filings. For each we still don't know where to get the history, how far back it goes, or whether it predicts anything.</p>
+    <p>Two leads worth following up: NSE publishes many company filings in a structured machine-readable form (XBRL), including related-party deals, auditor changes and ratings. And a US study found companies whose annual report wording changes a lot later underperform; nobody has tested that in India.</p>
+  </section>
+
+  <section>
+    <div class="eyebrow">Findings · question 6</div>
+    <h2>Testing fairly with little history</h2>
+    <div class="panel">
+      <h3>We have fewer real results than it looks</h3>
+      <p>Our data has 83 monthly snapshots. But for a 6-month bet, a bet started in January and one started in February share 5 of their 6 months. So they aren't separate results. Counted honestly, we have about <strong>13 truly separate 6-month results</strong>, like 13 coin flips.</p>
+      <div class="dots" role="img" aria-label="83 months of data, of which only 13 are separate 6-month results">
+        <i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+      </div>
+      <p class="small">83 dots = 83 months. Only the 13 coloured ones are separate 6-month results.</p>
+    </div>
+    <ul>
+      <li><strong>The usual statistics are too confident here.</strong> The standard correction for overlapping results still says "95% sure" when the truth is closer to 80–90%. There are better methods made for this (and the shortcut of dividing by √6 was shown to be wrong).</li>
+      <li><strong>Picking the best of many rules needs its own test.</strong> Two standard ones exist, explained in step 1 below.</li>
+      <li><strong>Paper-trading our best rule can't prove it quickly.</strong> At its back-tested strength, it would need about <strong>5 years</strong> of live results to reach a t of 2. A 1–2-year paper test would almost surely end "can't tell". Only a much stronger edge could be confirmed in 1–2 years.</li>
+    </ul>
+  </section>
+
+  <!-- ───────────── DON'T ───────────── -->
+  <section>
+    <div class="eyebrow">Summary</div>
+    <h2>Things not to do</h2>
+    <ul class="donts">
+      <li><b>Don't trust a back-test's headline number</b><span>Ours, NSE's or a fund's: NSE's factor indices lost their back-tested edge once live.</span></li>
+      <li><b>Don't paper-trade "the best of the 48 rules" expecting an answer</b><span>It failed the luck test, and a 1–2-year trial can't confirm an edge of its size.</span></li>
+      <li><b>Don't sell just because a price moved a lot</b><span>It costs about 0.7–1.5% a year compared with selling at random.</span></li>
+      <li><b>Don't punish fast growers with the fraud score</b><span>No outside proof it works; in our data it sank Netweb before a +51% run.</span></li>
+      <li><b>Don't run a months-long book on weeks-long signals</b><span>They make the ranking flip-flop, so winners get sold early.</span></li>
+      <li><b>Don't build a "steady high return on capital" midcap book</b><span>It lost in every period since 2020 in our test. Pair quality with cheapness instead.</span></li>
+      <li><b>Don't expect large caps to beat the index</b><span>No signal we tested has a real edge there.</span></li>
+    </ul>
+  </section>
+
+  <!-- ───────────── NEXT ───────────── -->
+  <section>
+    <div class="eyebrow">Plan</div>
+    <h2>What we'll do next</h2>
+    <p>Seven steps, in order. Steps 1–5 only read data and write reports; nothing changes in the live picks unless Amit approves a change afterwards.</p>
+    <ol class="steps">
+      <li class="step">
+        <h3>Test whether our best rule is just luck</h3>
+        <dl>
+          <dt>What</dt><dd>Run two standard checks on the 48 rules we already tried.
+            <br><b>Deflated Sharpe ratio:</b> works out how good the best of 48 rules would look if none had any skill, and asks whether ours clears that. Our 48 rules are very similar to each other, so it first estimates how many <em>truly different</em> tries we made (fewer than 48).
+            <br><b>Probability of back-test overfitting:</b> cut the 52 months into 6–8 blocks. Many times over, pick the best rule using half the blocks, then see how it ranks on the other half. If the "winner" often lands in the bottom half, the choice was luck.</dd>
+          <dt>Why</dt><dd>The research says these two checks come before any paper-trading.</dd>
+          <dt>Decides</dt><dd>Is there anything worth paper-trading at all, or is the index the answer?</dd>
+          <dt>Effort</dt><dd>About a day.</dd>
+        </dl>
+      </li>
+      <li class="step">
+        <h3>Rebuild the long-hold book on slow signals only</h3>
+        <dl>
+          <dt>What</dt><dd>A new slow score from what actually lasted in our tests and the research: 6-month momentum (a rising share price), "cheap and good quality" together, and Piotroski. No delivery-volume or results-reaction signals. Then rerun the small and mid books after costs and tax, judged with the checks from step 1.</dd>
+          <dt>Why</dt><dd>The winners post-mortem found momentum is the most reliable trait of future winners and our model barely weights it.</dd>
+          <dt>Decides</dt><dd>Does a better slow score turn "+18% but maybe luck" into something we can trust?</dd>
+          <dt>Effort</dt><dd>A few days.</dd>
+        </dl>
+      </li>
+      <li class="step">
+        <h3>Re-test the fraud-score penalty on history back to 2016</h3>
+        <dl>
+          <dt>What</dt><dd>Rebuild the Beneish fraud score and the Altman distress score from yearly accounts back to 2016, and measure whether flagged stocks really did worse.</dd>
+          <dt>Why</dt><dd>Today it cuts a stock's score by 0.2, enough to send it to the bottom. It hit Netweb for growing fast, and outside research claiming it works was thrown out. The distress score looks more useful than the fraud score.</dd>
+          <dt>Decides</dt><dd>Keep the penalty, shrink it, or turn it into a "take a look" flag.</dd>
+          <dt>Effort</dt><dd>A few days.</dd>
+        </dl>
+      </li>
+      <li class="step">
+        <h3>Measure warning signs on our own data</h3>
+        <dl>
+          <dt>What</dt><dd>Using the BSE announcement history we already have (back to 2018, including delisted companies): what happened to the price 3 and 6 months after a rating cut, an auditor or CFO resignation, a surveillance-list entry, or a promoter selling a block? How often was the warning a false alarm?</dd>
+          <dt>Why</dt><dd>No Indian study answers this for our time frame.</dd>
+          <dt>Decides</dt><dd>Which warnings deserve an alert, and how serious each one is.</dd>
+          <dt>Effort</dt><dd>1–2 weeks.</dd>
+        </dl>
+      </li>
+      <li class="step">
+        <h3>Try "a warning means review, not sell" on the book</h3>
+        <dl>
+          <dt>What</dt><dd>Replay the small-cap book with the alerts from step 4. An alert opens a review at the next monthly check; the stock is sold only if its slow score has also dropped below the "keep holding" zone.</dd>
+          <dt>Why</dt><dd>To get protection from bad news without going back to daily trading.</dd>
+          <dt>Decides</dt><dd>How many extra trades the alerts cause, and whether they save or cost money.</dd>
+          <dt>Effort</dt><dd>About a week.</dd>
+        </dl>
+      </li>
+      <li class="step">
+        <h3>Get quarterly results back to 2018</h3>
+        <dl>
+          <dt>What</dt><dd>Our quarterly accounts only start in 2023. Collect quarterly results from BSE / NSE filings back to 2018.</dd>
+          <dt>Why</dt><dd>"Margins widening quarter on quarter" was the one promising business signal (it would have caught SSWL), but we only have 1½ years to test it on.</dd>
+          <dt>Decides</dt><dd>Whether that signal is real or a one-period fluke.</dd>
+          <dt>Effort</dt><dd>2–3 weeks; it's a new data feed.</dd>
+        </dl>
+      </li>
+      <li class="step">
+        <h3>Extend price signals back to the 1990s</h3>
+        <dl>
+          <dt>What</dt><dd>Rebuild price-only signals (momentum, volatility, distance from the 52-week high) from NSE daily files back to the 1990s, including companies that later delisted.</dd>
+          <dt>Why</dt><dd>More years means more separate results, and including delisted companies removes the flattering bias of only studying survivors.</dd>
+          <dt>Decides</dt><dd>Whether momentum's strength holds over 30 years, not just 7.</dd>
+          <dt>Effort</dt><dd>2–3 weeks.</dd>
+        </dl>
+      </li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>Words used on this page</h2>
+    <dl class="gloss">
+      <dt>Size group (tier)</dt><dd>Large = top 100 companies by market value, mid = 101–250, small = the rest. We only compare stocks within the same group.</dd>
+      <dt>Slow signal</dt><dd>Something about a company that predicts its share price months ahead, not just weeks.</dd>
+      <dt>t</dt><dd>How sure we are a result isn't luck. About 2 or more usually means real; below 2 could be chance; the bar goes up when you test many ideas.</dd>
+      <dt>Back-test</dt><dd>Running a rule on past data as if we had traded it. It always looks better than live trading.</dd>
+      <dt>Momentum</dt><dd>Stocks that rose over the last 6–12 months tend to keep rising for a while.</dd>
+      <dt>Piotroski score</dt><dd>A 0–9 checklist of financial health built from the yearly accounts.</dd>
+      <dt>STT</dt><dd>Securities transaction tax: about 0.1% on every delivery trade, unavoidable except by trading less.</dd>
+    </dl>
+  </section>
+
+  <footer>
+    <span>Detail and citations: docs/research/0007-long-horizon-findings.md · Plan 0024 results: docs/studies/long-horizon-2026-10.md</span>
+    <span>Companion page: <a href="../studies/winners-postmortem-2026-10.html">Why we missed Netweb, SSWL and Time Technoplast</a></span>
+  </footer>
+
+</main>
+</body>
+</html>

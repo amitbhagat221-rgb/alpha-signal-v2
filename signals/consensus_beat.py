@@ -25,7 +25,7 @@ version written later than the report is used as-is until capture-time history e
 The live path and pit.py:pit_cons_beat_rate_4q run this same function.
 
 Usage:
-    python -m signals.consensus_beat     # live compute + print stats
+    python -m signals.consensus_beat     # live compute + print stats (input via pit.load_raw)
 """
 
 from __future__ import annotations
@@ -33,8 +33,6 @@ from __future__ import annotations
 from datetime import date, timedelta
 
 import pandas as pd
-
-from db import read_sql
 
 WINDOW_DAYS = 400   # reports older than this do not count (≈ 4 quarters + filing slack)
 LAST_N = 4          # latest reports averaged
@@ -46,12 +44,11 @@ ESTIMATES_SQL = (f"SELECT sid, metric, target_period, value, fetched_at FROM ana
 
 
 def compute_cons_beat_rate_4q(
-    estimates: pd.DataFrame | None = None,
+    estimates: pd.DataFrame,
     as_of_date: str | None = None,
 ) -> pd.DataFrame:
+    """`estimates` = rows of ESTIMATES_SQL (pit.RAW_SQL['yahoo_eps']); signals/ never reads the DB."""
     cols = ["sid", "cons_beat_rate_4q"]
-    if estimates is None:
-        estimates = read_sql(ESTIMATES_SQL)
     if estimates is None or estimates.empty:
         return pd.DataFrame(columns=cols)
     as_of = as_of_date or date.today().isoformat()
@@ -73,7 +70,8 @@ def compute_cons_beat_rate_4q(
 
 
 if __name__ == "__main__":
-    res = compute_cons_beat_rate_4q()
+    import pit
+    res = compute_cons_beat_rate_4q(pit.load_raw(["yahoo_eps"])["yahoo_eps"])
     s = res["cons_beat_rate_4q"].dropna()
     print(f"cons_beat_rate_4q — {len(s):,} stocks with ≥{MIN_REPORTS} of the last {LAST_N} "
           f"reports in {WINDOW_DAYS}d")

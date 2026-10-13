@@ -19,6 +19,7 @@ import pandas as pd
 import factors
 from config import PICKABLE_TIERS, PORTFOLIO, SCREEN
 from config import MISSING_FACTOR_SCORE
+from config import FORENSIC
 from db import read_sql, get_db, upsert_df
 
 # The last production run's frames in this process ({date, inputs, scored, prices}) —
@@ -251,8 +252,9 @@ def score_universe(df, weights: dict = None, as_of=None):
         eligible_weight > 0, (weight_sums / eligible_weight).clip(upper=1.0), np.nan
     )   # ≤ 1: a stock with a value for a factor it is not eligible for is not "over-covered"
 
-    # Apply forensic penalty
-    df["penalty"] = df["penalty"].fillna(0)
+    # Forensic penalty: a score cut only while FORENSIC["score_penalty"] (off since 2026-10,
+    # ADR 0073 / plan 0025 2.3). The flags stay in forensic_scores as review prompts.
+    df["penalty"] = df["penalty"].fillna(0) if FORENSIC.get("score_penalty", True) else 0.0
     df["final_score"] = df["base_score"] + df["penalty"]
     df["final_score"] = df["final_score"].clip(lower=0)
 

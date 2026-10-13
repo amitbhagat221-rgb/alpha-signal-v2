@@ -76,6 +76,7 @@ Everything else (memory, `_archive/`, slash commands, settings) — Claude handl
 - A factor is ONE compute function called by both live and PIT: the screener takes every factor from `pit.features_at(today)` — the same code the backtest panel stores. Input hygiene (consolidated filter, Financials exclusion) lives INSIDE the compute function, never in a live-only loader
 - Register every factor ONCE in `factors.FACTORS` (compute producer, range, cadence, eligibility, bench, and — if wired — `weights: {tier: w}`). `BACKTEST_SIGNALS`, `FACTOR_LIBRARY`, `PIT_COLUMNS`, `SIGNAL_WEIGHTS`, lineage table reads etc. are derived — never hand-edit a list; `tests/test_factor_registry.py` enforces it. See ADRs 0017, 0052
 - New table → `schema.sql` AND `tables.TABLES` (`tests/test_tables.py` enforces it)
+- Judge a book (not a factor) on >= 20 names across 12 staggered start months (`tools/lh_timing_luck.py`): a single 10-name start swung +0.8 % vs +18.4 %/yr on the same rule (2026-10-13). Fast scores only via walk-forward `fast_select`; the live weights on history are in-sample
 - Don't give a factor `weights` until t-stat ≥ 1.5 on at least one cap tier, and never mechanically — see `docs/reference/signal-weights.md`
 - `reconstruct_pit.py` writes only the columns the requested signals produced — `--signal X` is safe on existing dates by construction. If you ever pad missing PIT_COLUMNS with NaN before the write, you'll wipe every untouched column on UPDATE — don't.
 

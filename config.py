@@ -137,6 +137,11 @@ FORENSIC = {
     "beneish_red": -1.78,      # above → likely manipulator
     "altman_distress": 1.10,   # below → distress zone
     "altman_grey": 2.60,       # below → grey zone
+    # Flags still computed and shown (forensic_scores, cockpit) as REVIEW prompts, but no longer cut
+    # the score: on 2019-26 history no MID/SMALL Beneish or Altman flag underperformed clean stocks
+    # at 6 months (plan 0025 task 2.3, tools/lh_forensic.py; ADR 0073), and the cut sank fast growers
+    # (NETWEB). True restores the −0.10/−0.20 cut.
+    "score_penalty": False,
 }
 
 # ── Revenue-plausibility hard exclusion (tier-agnostic) ──

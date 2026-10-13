@@ -11,11 +11,15 @@
 > look-ahead, pre-audit t-stats); production is the only scheme. `config.SIGNAL_WEIGHTS*` survive only as lazy read-only aliases for
 > cockpit/ + cockpit_ops/. References below to "`SIGNAL_WEIGHTS`" mean that derived view.
 
-| Tier | Production weights (2026-10-03, [ADR 0063](../decisions/0063-weights-on-corrected-evidence.md)) |
+| Tier | Production weights (2026-10-03, [ADR 0063](../decisions/0063-weights-on-corrected-evidence.md); MID 2026-10-13, [ADR 0074](../decisions/0074-good-enough-factor-admission-mid.md)) |
 |------|--------------------------------------------------|
 | LARGE | announcement_car 0.35 · iv_skew_25d 0.25 · asset_growth_yoy −0.20 · forward_looking_intensity 0.20 |
-| MID | iv_skew_25d 0.24 · residual_momentum_12_1 0.20 · piotroski 0.18 · consensus 0.16 · accruals −0.12 · announcement_car 0.10 |
+| MID | iv_skew_25d 0.147 · residual_momentum_12_1 0.125 · cons_beat_rate_4q 0.110 · piotroski 0.110 · consensus 0.103 · accruals −0.074 · announcement_car 0.066 · **grade B at half weight (ADR 0074):** debt_structure 0.053 · pcr_volume 0.053 · value_composite 0.053 · gold_beta 0.053 · fcf_yield 0.053 |
 | SMALL | delivery_anomaly_z 0.24 · announcement_car 0.22 · sector_tilt 0.14 · piotroski 0.14 · residual_momentum_12_1 0.14 · avg_delivery_pct_30d 0.12 |
+
+> **2026-10-13 changes.**
+> - **MID:** five grade-B factors at half weight, chosen by `tools/mid_reweight_0074.py`: training-history t 1.5–2.5, the same sign in both halves, |ρ| < 0.5 with wired factors. `mom_6m` was rejected as a near-copy of residual momentum (ρ 0.78). The seven ADR 0071 weights were rescaled ×0.735 so Σ|w| = 1. Whole-score check (in-sample): MID IC21 0.056 → 0.068 (t 3.68 → 4.97); top-20 book across 12 starts +16.3 → +18.3 %/yr.
+> - **All tiers:** the Beneish / Altman score cut is OFF (`config.FORENSIC["score_penalty"] = False`; plan 0025 2.3). Flags stay in `forensic_scores` as review prompts.
 
 > **Everything below this line predates the October 2026 factor audit.** The t-stats in the older sections were measured with today's tiers at every past date, an unadjusted return label and, for consensus, results known before publication (ADR 0062). The current evidence is `python -m tools.factor_audit --wired` and [promotion-review-2026-10.md](../studies/promotion-review-2026-10.md).
 

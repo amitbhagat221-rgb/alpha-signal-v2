@@ -28,7 +28,7 @@ Alpha Signal v2: daily factor-model stock picks for Indian equities (NSE univers
 Tiers: every stock has a cap tier (LARGE = top 100 by market cap, MID = 101-250, SMALL = the rest, MICRO = a carved-out
 illiquid slice that is never pickable). Ranking is ONLY within a tier: rank 1 LARGE and rank 1 SMALL are not comparable.
 
-Score: final_score = base_score (0-1) minus any forensic penalty. base_score is the weighted average of the stock's
+Score: final_score = base_score (0-1); the forensic penalty is off since 2026-10 (ADR 0073), forensic flags are review prompts. base_score is the weighted average of the stock's
 within-tier percentile on each WIRED factor (a negative weight inverts the percentile; a factor with no value counts as 0.5). pick_breakdown shows the exact
 per-factor contributions.
 

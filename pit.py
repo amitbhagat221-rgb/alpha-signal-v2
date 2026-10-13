@@ -1028,6 +1028,14 @@ def pit_max_lottery_21d(px_pit):
     return compute_max_lottery_21d(prices=px_pit)
 
 
+def pit_cons_beat_rate_4q(yahoo_eps, eval_date):
+    """Share of the last 4 results that beat the consensus EPS estimate, PIT — LARGE
+    re-audit 2026-10-10. yahoo_eps is already sliced to reports dated before eval_date
+    (_pit_input). Returns DataFrame[sid, cons_beat_rate_4q]."""
+    from signals.consensus_beat import compute_cons_beat_rate_4q
+    return compute_cons_beat_rate_4q(estimates=yahoo_eps, as_of_date=eval_date.isoformat())
+
+
 def pit_asset_growth_yoy(stocks, bs_pit):
     """Asset growth YoY % (CMA investment factor), PIT — audit Factor-F3 #3.
 
@@ -1398,6 +1406,9 @@ def _pit_input(ctx, raw, key, eval_date):
         # evidence was that window)
         cutoff = (eval_date - timedelta(days=ANNUAL_LAG)).isoformat()
         v = raw["fh"][raw["fh"]["date"] <= cutoff] if "fh" in raw else pd.DataFrame()
+    elif key == "yahoo_eps":
+        # a result is knowable after its report date: strictly before the anchor
+        v = raw["yahoo_eps"][raw["yahoo_eps"]["target_period"] < d]
     elif key == "acs":
         v = (raw["acs"][raw["acs"]["snapshot_date"] <= d]
              if "acs" in raw and not raw["acs"].empty else pd.DataFrame())
@@ -1585,10 +1596,16 @@ RAW_SQL = {
     "corp_actions": 'SELECT sid, ex_date, subject FROM corporate_actions WHERE ex_date IS NOT NULL AND sid IS NOT NULL ORDER BY sid, ex_date',
     "bse_results": f"SELECT sid, date(dt_tm) AS ann_date FROM bse_announcements WHERE {factors.RESULT_FILING_SQL} AND sid IS NOT NULL AND dt_tm IS NOT NULL ORDER BY sid, dt_tm",
     "bse_gov": lambda: _bse_gov_sql(),
+    "yahoo_eps": lambda: _yahoo_eps_sql(),
     "nlp": "SELECT sid, doc_date, available_date, net_tone, uncertainty_density, forward_looking_intensity FROM nlp_scores WHERE doc_type = 'transcript'",
 }
 RAW_OPTIONAL = ['acs', 'banking_metrics', 'bse_gov', 'bse_results', 'corp_actions', 'fno_iv', 'fno_pcr', 'nlp']   # empty frame when the table is absent/unreadable
 
+
+
+def _yahoo_eps_sql():
+    from signals.consensus_beat import ESTIMATES_SQL
+    return ESTIMATES_SQL + " ORDER BY sid, target_period"
 
 
 def _bse_gov_sql():

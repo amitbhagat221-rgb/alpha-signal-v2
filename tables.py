@@ -237,6 +237,13 @@ TABLES = {
         "depth": "XBRL filings from Jun-2016; latest quarter first, history backfilled on demand",
         "description": "Named holders above 1% per stock per quarter, as filed on BSE: promoters, mutual-fund schemes, FPIs, individuals. `filed_at` is the broadcast time (point-in-time); a revised filing adds rows with a later `filed_at`. Stocks with a BSE code only (2,199 of 2,448). Holder names are as filed — the same investor can appear under several spellings.",
     },
+    "quarterly_results_nse": {
+        "contract": {"max_null": {"revenue": 0.05, "pat": 0.05}, "not_all_zero": ["revenue"]},
+        "kind": "RAW", "domain": "Fundamentals", "date_col": "period_end", "freq": "quarterly",
+        "source": "NSE corporates-financial-results XBRL (sources/nse_results.py; one-off history backfill)",
+        "depth": "XBRL filings ~2017 → Dec-2024; quarterly_income (Tickertape) covers 2023 →",
+        "description": "The income statement of each quarterly result as filed on NSE: revenue, other income, finance costs, depreciation, profit before tax (before and after exceptional items), tax, profit and EPS, ₹ crore. Consolidated where filed, else standalone (`basis`). `filed_at` is the broadcast time (point in time); a revision is a later row. The history behind the quarterly margin and acceleration tests (plan 0025 5.1).",
+    },
     "shareholding_categories": {
         "contract": {"max_null": {"promoter_pct": 0.0, "foreign_inst_pct": 0.0, "n_shareholders": 0.05},
                      "not_all_zero": ["total_shares"]},

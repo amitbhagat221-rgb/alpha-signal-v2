@@ -54,6 +54,7 @@ RETIRED = {
     "broker_holdings": "kept as-is: Amit's real Zerodha holdings, Kite snapshots for /book (account data, not market data)",
     "broker_instrument_prices": "kept as-is: Kite day closes of the non-universe Zerodha holdings (ETFs, gold bonds) for /book",
     "intraday_files": "kept as-is: manifest of the Kite minute-bar Parquet archive (ADR 0072); the bars live in files, not tables",
+    "quarterly_results_nse": "kept as-is: NSE XBRL quarterly results 2017-24 (plan 0025 5.1); joins fundamentals once the history harvest finishes",
     "sqlite_sequence": "SQLite internal",
 }
 

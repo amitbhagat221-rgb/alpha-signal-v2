@@ -156,7 +156,7 @@ FACTORS = {
         "v1_verdict_summary": "DROP / WEAK / KEEP (t=2.81 SMALL)",
         "producer": "piotroski",
         "pit_range": (0, 9),
-        "weights": {"MID": 0.18, "SMALL": 0.14},  # t: M 3.63 · S 4.26 (26 anchors) — promotion review 2026-10-03 (docs/studies/promotion-review-2026-10.md), corrected panel
+        "weights": {"MID": 0.110, "SMALL": 0.14},  # t: M 3.63 · S 4.26 (26 anchors) — promotion review 2026-10-03 (docs/studies/promotion-review-2026-10.md), corrected panel · MID rescaled ×0.85 for cons_beat_rate_4q, ADR 0071
         "weight_key": "piotroski",
         "screener_col": "f_score",
         "family": "Quality",
@@ -183,7 +183,7 @@ FACTORS = {
         # clean t=−2.65 on THIS column (low accruals = cash-backed earnings → negative weight).
         # Until 2026-10-03 the weight was +0.22 on `accruals_signal`, a four-part blend with no
         # evidence of its own (MID t=0.59 on 8 anchors); the blend stays in the panel, unweighted.
-        "weights": {"MID": -0.12},  # t: M −1.92 on this column — promotion review 2026-10-03 (docs/studies/promotion-review-2026-10.md), corrected panel
+        "weights": {"MID": -0.074},  # t: M −1.92 on this column — promotion review 2026-10-03 (docs/studies/promotion-review-2026-10.md), corrected panel · MID rescaled ×0.85 for cons_beat_rate_4q, ADR 0071
         "weight_key": "accruals",
         "family": "Quality",
         "eligibility": {
@@ -631,7 +631,11 @@ FACTORS = {
         "cadence": "weekly",
         "producer": "fno_oi",
         "pit_range": (0, 20),
-        "bench": "LIBRARY",  # SMALL t=-1.69 WEAK (sensible bearish sign)
+        "weights": {"MID": 0.053},  # grade B under ADR 0074 (half weight; tools/mid_reweight_0074.py, 2026-10-13)
+        "eligibility": {
+            "description": "F&O stocks with an option-chain reading in the last 30 days",
+            "eligible_sql": "SELECT DISTINCT sid FROM fno_pcr_history WHERE sid IS NOT NULL AND trade_date >= date((SELECT MAX(trade_date) FROM fno_pcr_history), '-30 day')",
+        },
     },
     "max_pain_distance": {
         "label": "Max-Pain Distance",
@@ -690,7 +694,7 @@ FACTORS = {
         "cadence": "weekly",
         "producer": "fno_iv",
         "pit_range": (-0.5, 0.5),
-        "weights": {"LARGE": 0.25, "MID": 0.24},  # t: L 1.86 · M 4.06 — promotion review 2026-10-03 (docs/studies/promotion-review-2026-10.md), corrected panel
+        "weights": {"LARGE": 0.25, "MID": 0.147},  # t: L 1.86 · M 4.06 — promotion review 2026-10-03 (docs/studies/promotion-review-2026-10.md), corrected panel · MID rescaled ×0.85 for cons_beat_rate_4q, ADR 0071
         "family": "Options",
         "eligibility": {
             "description": "Stocks with a listed option chain: an implied-volatility row within a week of the newest one",
@@ -920,7 +924,7 @@ FACTORS = {
                          "NOTE: a live daily producer is NOT yet built — wiring requires one (see status).",
         "producer": "announcement_car",
         "pit_range": (-1, 1),
-        "weights": {"LARGE": 0.35, "MID": 0.10, "SMALL": 0.22},  # t: L 2.65 · M 1.88 · S 5.51 — promotion review 2026-10-03 (docs/studies/promotion-review-2026-10.md), corrected panel
+        "weights": {"LARGE": 0.35, "MID": 0.066, "SMALL": 0.22},  # t: L 2.65 · M 1.88 · S 5.51 — promotion review 2026-10-03 (docs/studies/promotion-review-2026-10.md), corrected panel · MID rescaled ×0.85 for cons_beat_rate_4q, ADR 0071
         "family": "Event",
         "eligibility": {
             "description": "Stocks with a BSE Result announcement in the trailing ~95d (the CAR staleness gate is 90d + window-close; names without a fresh print have no reading and must not be coverage-penalised for it)",
@@ -1127,7 +1131,7 @@ FACTORS = {
         "pit_range": (-300, 500),
         # weights set 2026-07-05 on t: L 1.62 · S 3.74, measured WITHOUT the filing lag. With it
         # (audit 2026-10): L 1.05 · S 2.98. LARGE is below the 1.5 bar → promotion review.
-        "weights": {"MID": 0.16},  # t: M 2.31 (L 0.11 and S 1.39 dropped) — promotion review 2026-10-03 (docs/studies/promotion-review-2026-10.md), corrected panel
+        "weights": {"MID": 0.103},  # t: M 2.31 (L 0.11 and S 1.39 dropped) — promotion review 2026-10-03 (docs/studies/promotion-review-2026-10.md), corrected panel · MID rescaled ×0.85 for cons_beat_rate_4q, ADR 0071
         "weight_key": "consensus",
         # Plan 0015 D1 (2026-09-27): the `consensus` weight now scores the quantity its
         # evidence was measured on — EPS revision (the screener's inline eps_revision_yoy,
@@ -1267,7 +1271,11 @@ FACTORS = {
         "status_reason": "Library tier — sub-|t|=1.5 on every tier in the 6-period backtest. Kept computed for re-test as PIT history extends.",
         "producer": "fcf_yield",
         "pit_range": (-2, 2),
-        "bench": "LIBRARY",  # best |t|=1.08 SMALL
+        "weights": {"MID": 0.053},  # grade B under ADR 0074 (half weight; tools/mid_reweight_0074.py, 2026-10-13)
+        "eligibility": {
+            "description": "Stocks with 4+ annual cash-flow statements, EX-Financials (3-yr median FCF needs a prior year)",
+            "eligible_sql": "SELECT sid FROM fundamentals_screener WHERE period_type = 'annual' AND line_item = 'Cash from Operating Activity' AND sid NOT IN (SELECT sid FROM stocks WHERE sector = 'Financials') GROUP BY sid HAVING COUNT(*) >= 4",
+        },
         "family": "Value",
     },
     "ccc": {
@@ -1412,7 +1420,11 @@ FACTORS = {
         "status_reason": "Library tier — debt maturity profile descriptor. Median 27% LT (Indian companies skew short-term); cross-section may need finer maturity buckets to find signal.",
         "producer": "debt_structure",
         "pit_range": (0, 1),
-        "bench": "LIBRARY",  # best |t|=1.15 LARGE
+        "weights": {"MID": 0.053},  # grade B under ADR 0074 (half weight; tools/mid_reweight_0074.py, 2026-10-13)
+        "eligibility": {
+            "description": "Stocks with annual borrowings ≥ ₹50 cr, EX-Financials (signals/debt_structure MIN_BORROWINGS_CR)",
+            "eligible_sql": "SELECT DISTINCT sid FROM fundamentals_screener WHERE period_type = 'annual' AND line_item = 'Borrowings' AND value >= 50 AND sid NOT IN (SELECT sid FROM stocks WHERE sector = 'Financials')",
+        },
     },
     "asset_tangibility": {
         "label": "Asset Tangibility (Net Block / Total)",
@@ -1502,8 +1514,11 @@ FACTORS = {
         "status_reason": "Within-tier rank, NaN-tolerant weighted average.",
         "producer": "value_composite",
         "pit_range": (0, 1),
-        "bench": "PROPOSED",
-        "weight_key": "value_composite",
+        "weights": {"MID": 0.053},  # grade B under ADR 0074 (half weight; tools/mid_reweight_0074.py, 2026-10-13)
+        "eligibility": {
+            "description": "Stocks with about a year of prices (position_52w; earnings_yield / book_to_price where statements exist)",
+            "eligible_sql": "SELECT sid FROM stock_prices WHERE close > 0 GROUP BY sid HAVING COUNT(*) >= 252",
+        },
     },
     "quality_composite": {
         "label": "Quality Composite",
@@ -1659,7 +1674,11 @@ FACTORS = {
         "status_reason": "Shipped 2026-06-02; re-backtested 2026-06-07 on deepened macro_history (40 monthly periods, was 23). LARGE t=+1.89 WEAK (CI [-0.21,3.85] straddles 0; firmed from +1.58), MID/SMALL DROP → benched.",
         "producer": "macro_betas",
         "pit_range": (-5, 5),
-        "bench": "LIBRARY",  # LARGE t=+1.89 WEAK (40 periods; safe-haven/gold-financier tilt; CI straddles 0)
+        "weights": {"MID": 0.053},  # grade B under ADR 0074 (half weight; tools/mid_reweight_0074.py, 2026-10-13)
+        "eligibility": {
+            "description": "Stocks with at least 120 daily returns overlapping the gold series (signals/macro_betas MIN_OBS)",
+            "eligible_sql": "SELECT sid FROM stock_prices WHERE close > 0 GROUP BY sid HAVING COUNT(*) >= 120",
+        },
     },
     "rate_beta": {
         "label": "Rate Beta (β vs 10Y G-Sec gilt ETF)",
@@ -1787,7 +1806,7 @@ FACTORS = {
                          "docs/studies/new-factors-2026-07.md.",
         "producer": "residual_momentum_12_1",
         "pit_range": (-5, 5),
-        "weights": {"MID": 0.20, "SMALL": 0.14},  # t: M 3.33 · S 3.98; the momentum representative (0.92 correlated with mom_12m_adj) — promotion review 2026-10-03 (docs/studies/promotion-review-2026-10.md), corrected panel
+        "weights": {"MID": 0.125, "SMALL": 0.14},  # t: M 3.33 · S 3.98; the momentum representative (0.92 correlated with mom_12m_adj) — promotion review 2026-10-03 (docs/studies/promotion-review-2026-10.md), corrected panel · MID rescaled ×0.85 for cons_beat_rate_4q, ADR 0071
         "family": "Momentum",
         "eligibility": {
             "description": "Stocks with about 13 months of prices (252 sessions)",
@@ -1819,6 +1838,36 @@ FACTORS = {
         "producer": "max_lottery_21d",
         "pit_range": (-1, 2),
         "bench": "LIBRARY",  # SMALL t=-3.47 KEEP, correct NEGATIVE sign, p_BY=0.2193 (closest-to-surviving of the batch); LARGE +1.84 WEAK but contrarian
+    },
+    "cons_beat_rate_4q": {
+        "label": "Consensus Beat Rate (last 4 results)",
+        "group": "Consensus",
+        "description": "Share of the last 4 quarterly results (≥3, within 400 days) whose reported "
+                       "EPS beat the analyst consensus estimate (Yahoo estimate-vs-actual history). "
+                       "Persistent earnings surprise / PEAD with a real consensus numerator. "
+                       "Expected IC POSITIVE.",
+        "source_columns": ["analyst_estimates.{eps_actual,eps_estimate} (source yahoo_calendar)"],
+        "filing_lag": "report date (strictly before eval); estimate pit_unverified",
+        "v1_verdict_summary": "(new — LARGE re-audit 2026-10-10)",
+        "status_reason": "Built 2026-10-10 from the LARGE re-audit (docs/studies/large-reaudit-2026-10-10.md, "
+                         "82 monthly anchors): MID t=+4.00 (since 2024-09 +2.98, halves agree), +2.39 after "
+                         "the MID wired factors (most correlated: residual momentum 0.25, consensus 0.22); "
+                         "SMALL +4.94 on 23% coverage; LARGE +0.89. Yahoo's past estimates are pit_unverified: "
+                         "2 pre/post-report pairs so far both moved <0.5%; re-check after the Oct-Nov 2026 "
+                         "results season.",
+        "producer": "cons_beat",
+        "pit_range": (0, 1),
+        "weights": {"MID": 0.110},  # t: M 4.52 backtest_pit (since 2024-09 2.98; 2.39 after the MID wired factors) — ADR 0071, docs/studies/large-reaudit-2026-10-10.md
+        "family": "Earnings surprise",
+        "eligibility": {
+            "description": "Stocks Yahoo covers: at least 3 reported results with an estimate in the last 400 days",
+            "eligible_sql": """
+                SELECT sid FROM analyst_estimates
+                WHERE source = 'yahoo_calendar' AND metric = 'eps_actual'
+                  AND target_period >= date('now', '-400 day') AND target_period < date('now')
+                GROUP BY sid HAVING COUNT(DISTINCT target_period) >= 3
+            """,
+        },
     },
 }
 
@@ -1873,6 +1922,7 @@ PIT_PRODUCERS = {
     "asset_growth":     {"fn": "pit_asset_growth_yoy", "inputs": ("stocks", "bs")},
     "residual_momentum_12_1": {"fn": "pit_residual_momentum_12_1", "inputs": ("px", "macro_hist", "eval_date")},
     "max_lottery_21d":  {"fn": "pit_max_lottery_21d", "inputs": ("px",)},
+    "cons_beat":        {"fn": "pit_cons_beat_rate_4q", "inputs": ("yahoo_eps", "eval_date")},
     "nlp":              {"fn": "pit_nlp_factors", "inputs": ("stocks", "nlp", "eval_date")},
     "pledge":           {"fn": "pit_pledge_quality", "inputs": ("stocks", "sh")},
     "promoter_trend":   {"fn": "pit_promoter_trend_4q", "inputs": ("stocks", "sh")},
@@ -1951,7 +2001,7 @@ INPUT_TABLES = {
     "macro_hist": ("macro_history",), "macro_map": ("macro_sector_map",),
     "fno_pcr": ("fno_pcr_history",), "fno_iv": ("fno_iv_history",),
     "corp_actions": ("corporate_actions",), "bse_results": ("bse_announcements",),
-    "bse_gov": ("bse_announcements",), "nlp": ("nlp_scores",),
+    "bse_gov": ("bse_announcements",), "nlp": ("nlp_scores",), "yahoo_eps": ("analyst_estimates",),
     "eval_date": (), "base": (),
 }
 

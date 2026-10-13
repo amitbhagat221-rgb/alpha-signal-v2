@@ -130,6 +130,9 @@ case "$JOB" in
         [ "$(left)" -gt 5 ] && logged cron_nse_legacy run python -m sources.nse --legacy --start 2018-03-01 --end 2019-12-31 --budget-min "$(left)"
         # named >1% holders: every XBRL filing since 2016, largest stocks first
         [ "$(left)" -gt 5 ] && logged cron_bse_shp_backfill run python -m sources.bse_shp --universe --quarters 0 --budget-min "$(left)"
+        # quarterly results XBRL 2017-04 → 2024-12 (plan 0025 5.1; feeds the winner-hunter data gate), largest first,
+        # resumable via output/nse_results_done.txt
+        [ "$(left)" -gt 5 ] && logged cron_nse_results_backfill run python -m sources.nse_results --universe --since 2017-04-01 --until 2024-12-31 --budget-min "$(left)"
         backfill_mark ;;
     screener_schedules) # 3rd + 4th of Jan/Apr/Jul/Oct 20:30 UTC — Screener '+'-row breakdowns
                         # (Intangible Assets etc., annual items): ~9 h for the universe, so two
@@ -188,6 +191,15 @@ case "$JOB" in
         logged cron_management_quality run python -m signals.management_quality
         logged cron_managerial_ability run python -m signals.managerial_ability
         logged cron_say_do_enqueue run python -m output.say_do --enqueue ;;
+    paper_sleeve)       # 2nd of month 06:40 UTC — ADR 0073 SMALL paper sleeve (paper only, no orders): refresh the
+                        # research scores (labels, growth features, slow_v2, walk-forward fast_select; all
+                        # read-only on the DB, ~20 min), then the monthly rebalance + kill-switch check.
+                        # Writes data/lh/, data/paper/small_sleeve.json, output/paper_sleeve/latest.{md,json}.
+        logged cron_paper_labels run python -m tools.lh_labels
+        logged cron_paper_growth run python -m tools.lh_growth
+        logged cron_paper_slow_v2 run python -m tools.lh_slow_v2 build
+        logged cron_paper_fast run python -m tools.lh_slow_model
+        logged cron_paper_sleeve run python -m tools.paper_sleeve rebalance ;;
     backtest)           # 2nd of month — IC refresh
         logged cron_backtest run python -m tools.backtest_pit ;;
     expected_return)    # 1st of month

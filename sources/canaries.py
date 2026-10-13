@@ -327,6 +327,20 @@ def bse_shp_xbrl():
                          ("has_promoter", any(h["promoter_type"] for h in holders), "a named promoter row")])
 
 
+def nse_results_xbrl():
+    from sources import nse_results
+    sess = _http.warm_session(nse_results.WARM_URL, headers=nse_results.HEADERS)
+    filings = nse_results.choose(nse_results.index(sess, "SSWL"), "2019-01-01", "2024-12-31")
+    if not filings:
+        return {"expect": "json", "records": None, "raw": b"", "http": None, "url": nse_results.INDEX_API}
+    f = sorted(filings, key=lambda x: x["end"])[-1]
+    r = _http.polite_request("GET", f["url"], check=False, retries=0, timeout=60)
+    vals = nse_results.parse(r.content.decode("utf-8", "replace"), f["start"], f["end"]) if r.status_code == 200 else None
+    return _resp(r, "xml", [vals] if vals else None, required=["revenue", "pbt", "pat"],
+                 checks=[("index_depth", len(filings) >= 12, f"{len(filings)} quarterly XBRL filings 2019-24"),
+                         ("revenue_positive", bool(vals and (vals.get("revenue") or 0) > 0), "revenue > 0")])
+
+
 def yahoo_estimates():
     import yfinance as yf
     with _http.pace("yahoo"):
@@ -347,5 +361,5 @@ CANARIES = {
     "macro_official": macro_official, "rss_news": rss_news, "regulatory_news": regulatory_news,
     "scrip_master": scrip_master, "amfi_nav": amfi_nav, "mf_holdings": mf_holdings,
     "nse_credit_ratings": nse_credit_ratings, "yahoo_estimates": yahoo_estimates,
-    "bse_shp_xbrl": bse_shp_xbrl,
+    "bse_shp_xbrl": bse_shp_xbrl, "nse_results_xbrl": nse_results_xbrl,
 }

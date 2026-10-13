@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Why We Missed Netweb</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&display=swap">
+<style>
+/* Layout: one reading column; three stock "case files", then a verdict table for the whole-market test. */
+:root {
+  --bg: #f4f7f8; --surface: #ffffff; --ink: #18232e; --muted: #536371; --line: #d6dfe4;
+  --accent: #0c6b67; --accent-soft: #dcefed;
+  --good: #1d7a3e; --good-soft: #e1f2e6;
+  --bad: #b23a2e; --bad-soft: #f8e3e0;
+  --warn: #9a6512; --warn-soft: #f7ecd8;
+  --display: "Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
+  --body: "Atkinson Hyperlegible", "Segoe UI", system-ui, sans-serif;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #111a21; --surface: #18242d; --ink: #e6eef2; --muted: #9fb0bc; --line: #2b3a45;
+  --accent: #4fc2bb; --accent-soft: #163a3a;
+  --good: #63c987; --good-soft: #17331f; --bad: #ef8a7e; --bad-soft: #3a1d1a;
+  --warn: #e3b25e; --warn-soft: #3a2c14; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #111a21; --surface: #18242d; --ink: #e6eef2; --muted: #9fb0bc; --line: #2b3a45;
+  --accent: #4fc2bb; --accent-soft: #163a3a;
+  --good: #63c987; --good-soft: #17331f; --bad: #ef8a7e; --bad-soft: #3a1d1a;
+  --warn: #e3b25e; --warn-soft: #3a2c14; color-scheme: dark }
+* { box-sizing: border-box }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 17px/1.6 var(--body); padding-inline: 16px; padding-block: 40px 64px }
+main { max-width: 720px; margin: 0 auto; display: grid; gap: 44px }
+h1, h2, h3 { font-family: var(--display); line-height: 1.15; text-wrap: balance; margin: 0 }
+h1 { font-size: clamp(30px, 6vw, 44px); font-weight: 800 }
+h2 { font-size: 25px; font-weight: 800 }
+h3 { font-size: 20px; font-weight: 800 }
+p { margin: 0 }
+.eyebrow { font-size: 13px; letter-spacing: .08em; text-transform: uppercase; color: var(--accent); font-weight: 700 }
+section { display: grid; gap: 16px }
+main > *, section > *, header > * { min-width: 0 }
+.lede { font-size: 20px; line-height: 1.5 }
+.answer { background: var(--accent-soft); border-radius: 14px; padding: 20px 22px; display: grid; gap: 8px }
+.answer strong { color: var(--accent) }
+.case { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 18px 20px; display: grid; gap: 12px; min-width: 0 }
+.case-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 14px }
+.ticker { font-size: 13px; letter-spacing: .08em; color: var(--muted); font-weight: 700 }
+.gain { font-family: var(--display); font-size: 26px; font-weight: 800; color: var(--good); font-variant-numeric: tabular-nums }
+.gain small { font-family: var(--body); font-size: 13px; font-weight: 400; color: var(--muted) }
+.why { display: grid; gap: 8px; padding-left: 0; list-style: none; margin: 0 }
+.why li { padding-left: 26px; position: relative }
+.why li::before { content: "→"; position: absolute; left: 4px; color: var(--accent); font-weight: 700 }
+.track { display: grid; gap: 6px }
+.track-label { font-size: 13px; color: var(--muted) }
+.track-row { display: grid; grid-template-columns: repeat(8, 1fr); gap: 4px; align-items: end; height: 70px }
+.track-row div { background: var(--accent); border-radius: 4px 4px 0 0; min-height: 3px }
+.track-row div.low { background: var(--bad) }
+.track-axis { display: grid; grid-template-columns: repeat(8, 1fr); gap: 4px; font-size: 11px; color: var(--muted); text-align: center; font-variant-numeric: tabular-nums }
+.common { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px }
+.common div { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; display: grid; gap: 4px }
+.common b { font-family: var(--display); font-size: 17px }
+.common span { color: var(--muted); font-size: 15px }
+.table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 12px; background: var(--surface) }
+table { width: 100%; border-collapse: collapse; font-size: 16px }
+th, td { text-align: left; padding: 11px 14px; border-bottom: 1px solid var(--line); vertical-align: top }
+th { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted) }
+tr:last-child td { border-bottom: 0 }
+.v { font-weight: 700; white-space: nowrap }
+.v.yes { color: var(--good) } .v.maybe { color: var(--warn) } .v.no { color: var(--muted) } .v.hurts { color: var(--bad) }
+.small { font-size: 14px; color: var(--muted) }
+ol { margin: 0; padding-left: 22px; display: grid; gap: 8px }
+footer { font-size: 14px; color: var(--muted); border-top: 1px solid var(--line); padding-top: 16px }
+</style>
+</head>
+<body>
+
+<main>
+  <header style="display:grid;gap:14px">
+    <div class="eyebrow">Winners post-mortem · plain-language version · 13 Oct 2026</div>
+    <h1>Why our model missed Netweb, SSWL and Time Technoplast</h1>
+    <p class="lede">Three stocks that ran hard while our model ranked them low. We looked at why, then checked whether the same pattern holds across every stock since 2019.</p>
+    <div class="answer">
+      <p><strong>Short answer.</strong> Our model is built to <em>avoid bad stocks</em>, not to <em>find winners</em>. One rule even punished Netweb for growing fast. Fast-growing sales on their own turned out <em>not</em> to predict winners. The trait the winners shared that really does predict is <strong>a share price that's already rising</strong> (momentum), and our model gives it little weight.</p>
+    </div>
+  </header>
+
+  <section>
+    <h2>The three cases</h2>
+
+    <article class="case">
+      <div class="case-head"><div><div class="ticker">NETWEB · SMALL</div><h3>Netweb Technologies</h3></div>
+        <div class="gain">+51% <small>in 6 months from April</small></div></div>
+      <p>In April it ranked <strong>2,158th out of 2,198</strong> small caps, almost dead last.</p>
+      <ul class="why">
+        <li><strong>A rule called it a likely fraud.</strong> Our "fraud score" (Beneish) treats fast sales growth as a warning sign. Netweb's revenue was growing 88–174% a year, so from April to August it got a −0.2 penalty, enough to drop any stock to the bottom.</li>
+        <li><strong>Without that penalty it would have ranked in the middle</strong> (about the 61st percentile), still not near the top, because nothing in our small-cap score rewards growth or a rising price much.</li>
+        <li>This isn't a one-off: <strong>1 in 5</strong> of the fastest-growing companies get flagged by this rule, against about 1 in 30 of companies with middling growth.</li>
+      </ul>
+    </article>
+
+    <article class="case">
+      <div class="case-head"><div><div class="ticker">SSWL · SMALL</div><h3>Steel Strips Wheels</h3></div>
+        <div class="gain">+120% <small>in 6 months</small></div></div>
+      <p>From January to April it sat in the bottom half of our ranking. No penalty; we simply didn't see it.</p>
+      <ul class="why">
+        <li><strong>The business was speeding up, quarter by quarter.</strong> Profit growth went −23% → −2% → 0% → <strong>+47%</strong>, and operating margin rose four quarters in a row (9.3% → 10.9%). It also announced an acquisition in April and new orders from December.</li>
+        <li><strong>We only look at yearly numbers.</strong> A one-off ₹516 cr gain back in March 2024 distorts them, so our system says profit growth is <strong>−2.7%</strong> while the latest quarter was +47%.</li>
+        <li>The price started rising in June (₹196 → ₹391 by October), before the July results confirmed it.</li>
+      </ul>
+    </article>
+
+    <article class="case">
+      <div class="case-head"><div><div class="ticker">TIMETECHNO · SMALL</div><h3>Time Technoplast</h3></div>
+        <div class="gain">+222% <small>in the year from April 2023</small></div></div>
+      <p>The big run was 2023–24. (In the last year it's down 20%: cash flow turned negative, it issued new shares and promoters are selling. So its middle rank today looks fair.)</p>
+      <ul class="why">
+        <li><strong>During the run, our score couldn't make up its mind.</strong> It jumped between the bottom and the top from one quarter to the next, so a book trading on it would have sold early.</li>
+        <li>The cause: almost half of our small-cap score comes from two fast signals (unusual delivery volume and the reaction to results), and they flip around.</li>
+        <li>What stayed high the whole way: its <strong>rising share price</strong>, falling debt and growing cash flow.</li>
+      </ul>
+      <div class="track" aria-label="Rank percentile each quarter, 2023 to 2024">
+        <div class="track-label">Where our score ranked it each quarter (taller = better)</div>
+        <div class="track-row">
+          <div style="height:27%"></div><div style="height:70%"></div><div class="low" style="height:4%"></div><div style="height:41%"></div><div style="height:72%"></div><div style="height:96%"></div><div class="low" style="height:16%"></div><div style="height:82%"></div>
+        </div>
+        <div class="track-axis"><span>Jan 23<br>27th</span><span>Apr 23<br>70th</span><span>Jul 23<br>4th</span><span>Oct 23<br>41st</span><span>Jan 24<br>72nd</span><span>Apr 24<br>96th</span><span>Jul 24<br>16th</span><span>Oct 24<br>82nd</span></div>
+      </div>
+    </article>
+  </section>
+
+  <section>
+    <h2>What the three have in common</h2>
+    <div class="common">
+      <div><b>Rising share price</b><span>All three had strong momentum. Our small-cap score gives it only 14% of the weight.</span></div>
+      <div><b>Heavily traded</b><span>All three ranked at the very bottom on "delivery %" (1st, 13th, 3rd percentile), which our model counts against a stock.</span></div>
+      <div><b>No "speeding up" signal</b><span>Nothing in the model notices a business accelerating: quarterly growth picking up or margins widening.</span></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Then we tested it on every stock since 2019</h2>
+    <p>Three stories prove nothing, so we rebuilt growth and quality from company accounts for every month from December 2019 and checked which ones actually predicted returns 3–12 months ahead.</p>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Idea</th><th>Did it predict winners?</th></tr></thead>
+      <tbody>
+        <tr><td>Rising share price over 6 months (momentum)</td><td><span class="v yes">Yes, strongly.</span> Top tenth beat the typical stock in its tier by about 15% over 6 months in small caps, 8% in midcaps.</td></tr>
+        <tr><td>Cheap <em>and</em> good quality, together (small caps)</td><td><span class="v yes">Yes.</span> Top tenth beat the typical small cap by about 21% over 12 months.</td></tr>
+        <tr><td>Margins widening quarter on quarter (midcaps)</td><td><span class="v maybe">Promising.</span> Top tenth beat the typical midcap by 13% over 6 months, but only 1½ years of data so far.</td></tr>
+        <tr><td>Fast yearly sales growth</td><td><span class="v no">No.</span> Already in the price; in small caps slightly negative.</td></tr>
+        <tr><td>Growth that is speeding up (yearly)</td><td><span class="v no">No.</span></td></tr>
+        <tr><td>Steady high return on capital, "Coffee Can" style (midcaps)</td><td><span class="v hurts">Lost money</span> in every period since 2020.</td></tr>
+        <tr><td>Fraud-score penalty</td><td><span class="v hurts">Hurts growers.</span> Outside research claiming it works was thrown out.</td></tr>
+      </tbody>
+    </table></div>
+    <p class="small">One more thing: our current score isn't blind to winners. They do rank above average on it, just not near the top. Only 15% of small-cap winners were in its top tenth.</p>
+  </section>
+
+  <section>
+    <h2>So what were we missing?</h2>
+    <ol>
+      <li><strong>Momentum is under-weighted.</strong> It's the most reliable sign of a future winner in our own data.</li>
+      <li><strong>Fast signals make the score flip-flop,</strong> so the book exits winners too early.</li>
+      <li><strong>The fraud-score penalty punishes growth</strong> and has no proof behind it.</li>
+    </ol>
+    <p>Not missing: plain sales growth. It sounds like the answer, but the data says it's already priced in.</p>
+  </section>
+
+  <section>
+    <h2>Next steps (nothing changes in live picks until approved)</h2>
+    <ol>
+      <li>Rebuild the long-hold book on slow signals only (momentum, cheap-and-good, Piotroski) and judge it after costs and tax.</li>
+      <li>Re-test the fraud-score penalty on history back to 2016, then shrink it or turn it into a "take a look" flag.</li>
+      <li>Get quarterly results back to 2018 to settle whether widening margins really work.</li>
+    </ol>
+  </section>
+
+  <footer style="display:grid;gap:4px"><span>Source: docs/studies/winners-postmortem-2026-10.md and tools/lh_growth.py (162 tests, 77 monthly snapshots, Dec 2019 – Oct 2026).</span><span>Companion page: <a href="../research/0007-long-horizon-explainer.html" style="color:var(--accent)">Holding stocks for 3–12 months: research and plan</a></span></footer>
+</main>
+</body>
+</html>

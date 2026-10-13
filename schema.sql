@@ -422,7 +422,7 @@ CREATE TABLE IF NOT EXISTS daily_snapshots_pit (
     mom_12m          REAL,
     m_score          REAL,
     z_score          REAL,
-    reconstructed_at TEXT DEFAULT (datetime('now')), promoter_trend_4q REAL, pledge_quality REAL, mom_composite REAL, macd_bullish INTEGER, position_52w REAL, avg_delivery_pct_30d REAL, delivery_anomaly_z REAL, fwd_return_20d REAL, roe REAL, roa REAL, debt_to_equity REAL, profit_margin REAL, revenue_growth_yoy REAL, eps_growth_yoy REAL, pt_revision_yoy REAL, eps_revision_yoy REAL, consensus_signal_combined REAL, value_composite REAL, quality_composite REAL, growth_composite REAL, pt_upside REAL, bulk_deal_signal REAL, short_selling_signal REAL, earnings_beat_rate REAL, news_volume_7d REAL, revenue_cv_5y REAL, relative_turnover REAL, relative_growth REAL, share_momentum REAL, ccc REAL, margin_slope REAL, wc_intensity REAL, interest_coverage REAL, roic REAL, fcf_yield REAL, roiic REAL, dso_change_yoy REAL, dio_change_yoy REAL, nwc_to_revenue REAL, sloan_accruals_full REAL, sga_to_revenue_change REAL, fcf_margin REAL, capex_to_dep REAL, goodwill_to_assets REAL, debt_structure REAL, asset_tangibility REAL, insider_score REAL, sentiment_7d REAL, accruals_signal REAL, promoter_signal REAL, forensic_penalty REAL, smart_money_score REAL, financial_signal REAL, financial_quality REAL, financial_recovery REAL, sector_momentum REAL, pcr_oi REAL, pcr_volume REAL, max_pain_distance REAL, oi_buildup_signal REAL, iv_skew_25d REAL, iv_term_structure REAL, iv_realised_spread REAL, iv_percentile_1y REAL, intraday_range_compression REAL, closing_strength_1m REAL, opening_gap_freq_1m REAL, vwap_deviation_5d REAL, bidask_spread_proxy REAL, kyle_lambda REAL, earnings_surprise_std REAL, pead_drift_60d REAL, corporate_action_density REAL, buyback_announcement_30d REAL, industry_id INTEGER, oil_beta REAL, metals_beta REAL, inr_beta REAL, gold_beta REAL, gross_profitability REAL, sector_tilt REAL, rate_beta REAL, credit_beta REAL, governance_resignation REAL, earnings_call_tone_qoq REAL, forward_looking_intensity REAL, uncertainty_word_density REAL, low_vol_252d REAL, st_reversal_21d REAL, asset_growth_yoy REAL, announcement_car REAL, residual_momentum_12_1 REAL, max_lottery_21d REAL,
+    reconstructed_at TEXT DEFAULT (datetime('now')), promoter_trend_4q REAL, pledge_quality REAL, mom_composite REAL, macd_bullish INTEGER, position_52w REAL, avg_delivery_pct_30d REAL, delivery_anomaly_z REAL, fwd_return_20d REAL, roe REAL, roa REAL, debt_to_equity REAL, profit_margin REAL, revenue_growth_yoy REAL, eps_growth_yoy REAL, pt_revision_yoy REAL, eps_revision_yoy REAL, consensus_signal_combined REAL, value_composite REAL, quality_composite REAL, growth_composite REAL, pt_upside REAL, bulk_deal_signal REAL, short_selling_signal REAL, earnings_beat_rate REAL, news_volume_7d REAL, revenue_cv_5y REAL, relative_turnover REAL, relative_growth REAL, share_momentum REAL, ccc REAL, margin_slope REAL, wc_intensity REAL, interest_coverage REAL, roic REAL, fcf_yield REAL, roiic REAL, dso_change_yoy REAL, dio_change_yoy REAL, nwc_to_revenue REAL, sloan_accruals_full REAL, sga_to_revenue_change REAL, fcf_margin REAL, capex_to_dep REAL, goodwill_to_assets REAL, debt_structure REAL, asset_tangibility REAL, insider_score REAL, sentiment_7d REAL, accruals_signal REAL, promoter_signal REAL, forensic_penalty REAL, smart_money_score REAL, financial_signal REAL, financial_quality REAL, financial_recovery REAL, sector_momentum REAL, pcr_oi REAL, pcr_volume REAL, max_pain_distance REAL, oi_buildup_signal REAL, iv_skew_25d REAL, iv_term_structure REAL, iv_realised_spread REAL, iv_percentile_1y REAL, intraday_range_compression REAL, closing_strength_1m REAL, opening_gap_freq_1m REAL, vwap_deviation_5d REAL, bidask_spread_proxy REAL, kyle_lambda REAL, earnings_surprise_std REAL, pead_drift_60d REAL, corporate_action_density REAL, buyback_announcement_30d REAL, industry_id INTEGER, oil_beta REAL, metals_beta REAL, inr_beta REAL, gold_beta REAL, gross_profitability REAL, sector_tilt REAL, rate_beta REAL, credit_beta REAL, governance_resignation REAL, earnings_call_tone_qoq REAL, forward_looking_intensity REAL, uncertainty_word_density REAL, low_vol_252d REAL, st_reversal_21d REAL, asset_growth_yoy REAL, announcement_car REAL, residual_momentum_12_1 REAL, max_lottery_21d REAL, cons_beat_rate_4q REAL,
     PRIMARY KEY (sid, snapshot_date)
 );
 CREATE INDEX IF NOT EXISTS idx_pit_date ON daily_snapshots_pit(snapshot_date);
@@ -2589,4 +2589,32 @@ CREATE TABLE IF NOT EXISTS option_paper_trades (
     recorded_at      TEXT,
     settled_at       TEXT,
     PRIMARY KEY (rule_id, underlying, expiry)
+);
+
+-- Quarterly results as filed on NSE (sources/nse_results.py, feed nse_results_xbrl): the income
+-- statement from each XBRL filing, ~2017 → Dec-2024 (2025+ moved to the integrated filing).
+-- Point in time: filed_at is the broadcast time; a revision is a new row with a later filed_at.
+-- ₹ crore except eps (₹). Append-only. Plan 0025 task 5.1 (quarterly history for margin tests).
+CREATE TABLE IF NOT EXISTS quarterly_results_nse (
+    sid                 TEXT NOT NULL REFERENCES stocks(sid),
+    symbol              TEXT NOT NULL,
+    period_start        TEXT NOT NULL,
+    period_end          TEXT NOT NULL,
+    basis               TEXT NOT NULL CHECK(basis IN ('consolidated', 'standalone')),
+    filed_at            TEXT NOT NULL,             -- NSE broadcast time (point in time)
+    audited             TEXT,
+    revenue             REAL,
+    other_income        REAL,
+    total_income        REAL,
+    finance_costs       REAL,
+    depreciation        REAL,
+    pbt_pre_exceptional REAL,
+    exceptional         REAL,
+    pbt                 REAL,
+    tax                 REAL,
+    pat                 REAL,
+    eps                 REAL,
+    source_url          TEXT,
+    fetched_at          TEXT NOT NULL,
+    PRIMARY KEY (sid, period_end, basis, filed_at)
 );

@@ -425,14 +425,21 @@ FEEDS = {
         "ref": "research 0005 A2",
     },
     "nse_results_xbrl": {
-        "family": "fundamentals", "status": "candidate",
+        "family": "fundamentals", "status": "probation",
         "what": "Quarterly results on filing day (first-reported, timestamped XBRL)",
+        "modules": ["sources.nse_results"], "schedule": ["cron:backfill"],
+        "writes": ["quarterly_results_nse"], "hosts": ["nse", "nse_archives"], "cadence": "quarterly",
+        "routes": [_r("nse_results_index", "primary", "nse", "corporates-financial-results (warm session) → XBRL .xml on nsearchives")],
+        "serve_stale_days": 400, "canary": "nse_results_xbrl",
+        "pit": "filed_at = NSE broadcast time; a revision is a later filed_at", "tos": "public exchange data",
+        "notes": "Promoted to probation 2026-10-13 on a 3-stock smoke (SSWL / TIMETECHNO / NETWEB match quarterly_income within 0.5 %). "
+                 "One-off history backfill 2017 → 2024 for plan 0025 5.1, in the temporary `run.sh backfill` windows (2025+ needs the integrated-filing route).",
         "need": "fix the up-to-a-month Tickertape lag; fallback for tickertape_fundamentals",
         "probe": ("WORKS", "2026-09-28", "corporates-financial-results XBRL ≤Dec-2024; 2025+ at integrated-filing-results"),
         "ref": "research 0005 A3",
     },
     "yahoo_earnings_history": {
-        "family": "estimates", "status": "probation",
+        "family": "estimates", "status": "production",
         "what": "Earnings surprises (estimate vs actual per result) and weekly EPS-estimate trends",
         "modules": ["sources.yahoo_estimates"], "schedule": ["cron:estimates"],
         "writes": ["analyst_estimates"], "hosts": ["yahoo"], "cadence": "weekly",
