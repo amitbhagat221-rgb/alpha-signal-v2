@@ -106,13 +106,16 @@ def to_frame(sid, bars):
     df, minute = df[~stray], minute[~stray]
     # A negative volume is impossible (CORF had one bar, 2026-10-12): that bar is dropped and
     # counted in the stock's manifest note. Anything else wrong still fails the contract.
-    negative = df["volume"] < 0
-    df, minute = df[~negative], minute[~negative]
+    # Kite sends volume UNSIGNED, so its -2 arrives as 18446744073709551614 (2**64 - 2) and
+    # `< 0` never fires on it: read the bits as signed first.
+    volume = pd.Series(df["volume"].to_numpy().astype("int64"), index=df.index)
+    negative = volume < 0
+    df, minute, volume = df[~negative], minute[~negative], volume[~negative]
     out = pd.DataFrame({
         "sid": sid,
         "ts": minute.astype("datetime64[s, UTC]"),
         "close": (df["close"] * 100).round().astype("int32"),
-        "volume": df["volume"].astype("int64"),
+        "volume": volume,
     })
     out = out.sort_values("ts").reset_index(drop=True)
     out.attrs["negative_volume_dropped"] = int(negative.sum())

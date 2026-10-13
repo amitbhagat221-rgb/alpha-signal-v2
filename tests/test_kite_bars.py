@@ -48,6 +48,16 @@ def test_an_impossible_negative_volume_bar_is_dropped_and_counted():
     assert len(df) == 2 and df.attrs["negative_volume_dropped"] == 1
 
 
+def test_kites_unsigned_minus_two_is_caught_too():
+    import numpy as np
+    bars = _bars(date(2015, 3, 13), n=3)
+    raw = pd.DataFrame(bars).astype({"volume": "uint64"})
+    raw.loc[1, "volume"] = np.uint64(2**64 - 2)                              # how Kite sent CORF's -2
+    df = kb.to_frame("CORF", raw.to_dict("records"))
+    kb.validate(df)
+    assert len(df) == 2 and df.attrs["negative_volume_dropped"] == 1 and (df["volume"] >= 0).all()
+
+
 def test_reits_and_invits_are_left_out_by_rule():
     c = sqlite3.connect(":memory:")
     c.execute("CREATE TABLE stocks (sid, name, industry)")
