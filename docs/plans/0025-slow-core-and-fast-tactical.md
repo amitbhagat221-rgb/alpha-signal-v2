@@ -116,13 +116,13 @@ Every score catches the top-5 % six-month SMALL winners at about chance (slow_v2
 ### Phase 7 — asymmetric sleeves (Amit 2026-10-13, after the doubler study: [doubler-study-2026-10.md](../studies/doubler-study-2026-10.md))
 - **Generic doubler model rejected:** logistic, test 2023-25, SMALL top-20 median excess +0.3 % vs the live model's +8.1 %.
 - **Three targeted tests**, each pre-registered in its tool's docstring before running. Each is judged by the ADR 0073 grade plus an asymmetry bar: top-20 P(double) ≥ 2× base, P(halve) ≤ base, median excess ≥ 0.
-- [ ] **7.1 Policy-capex theme momentum.**
+- [x] **7.1 Policy-capex theme momentum** (2026-10-13, `tools/theme_momentum.py`, [study](../studies/asymmetric-sleeves-2026-10.md)). SMALL book grade **B** (+25.5 %/yr after costs + tax, t 2.82, 12/12 starts ≥ +22.5 %, worst 12 months −9.9 %), but the asymmetry bar fails by a hair (P(double) 1.99× base vs 2.0×; halve 1.6 % vs 2.5 %, median +18.7 %) → not a sleeve candidate by the letter; the pre-registration did not cover "B without asymmetry" → **D5**. Post-hoc: order-win intensity is the engine (without it +10.1 %); the gate adds nothing. MID: C.
   - Inputs: industry momentum, sector policy score (`sector_policy_pit`, 2020+), order-win intensity (BSE "Award of Order / Receipt of Order" filings in the last 6 months, 2018+), position in the 52-week range.
   - Exit when industry momentum or the stock's 52-week position breaks.
 - [ ] **7.2 Turnarounds** (needs `quarterly_results_nse`).
   - Inputs: debt / assets falling two years running, latest-quarter profit turning positive or interest coverage crossing 1.5, a credible acquirer (BSE "Open Offer" / "Acquisition").
   - Price confirmation: 3-month momentum > 0.
-- [ ] **7.3 Mania exclusion screen** (an avoid list for every book).
+- [x] **7.3 Mania exclusion screen** (2026-10-13, `tools/mania_screen.py`): **fails, no screen.** Penny / forensic momentum names halve 1.6–1.8× more often with lower medians but HIGHER means (+34–37 % vs +21 %): two-sided lotteries, an avoid list would cut the winners.
   - Flags: price momentum with no fundamental change (revenue and profit growth ≤ 0), penny / low float, a preferential-warrant issue in the last 12 months (BSE "Preferential Issue"), forensic flags.
   - Test: do excluded names halve more often and earn a lower median?
 
@@ -130,6 +130,7 @@ Every score catches the top-5 % six-month SMALL winners at about chance (slow_v2
 - [ ] **D1** Slow core: if 2.2 passes → ADR + a worktree build of the monthly slow book; if not → SMALL/MID stay the index.
 - [ ] **D2** Tactical SMALL: if 3.2 passes → ADR + paper-trade sizing; if not → keep `fast_v1` as the screen only.
 - [ ] **D3** Capital split, only if D1 or D2 pass. Example shape: index core + slow satellite + small tactical sleeve.
+- [ ] **D5** Theme book (7.1): paper-only forward test beside the SMALL sleeve, or nothing. Weigh: idea in-sample; order filings ~5× after 2023; mostly short-term gains; a new pre-registration would be needed for the ungated variant.
 - [x] **D4 (merged live 2026-10-13, Amit: "approved")** Forensic score cut off (review flags); MID grade-B factors at half weight (ADR 0074); monthly `run.sh paper_sleeve` job + cron (2nd, 06:40 UTC). Cockpit caches cleared and both services restarted. Original item: Forensic penalty and accruals weight changes from 2.3 / 2.4 (these change live picks → worktree).
 
 ## Notes

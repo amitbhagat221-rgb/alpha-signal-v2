@@ -41,7 +41,11 @@ Decision (SMALL):  grade >= B AND asymmetry → a theme sleeve candidate (paper,
 Diagnostics (never decide): the asymmetry table for each input alone (gated), the score without orders / without
 policy, and the score without the gate; today's gated top 20 per tier.
 
-Usage: python -m tools.theme_momentum [asym|book|all]
+POST-HOC DIAGNOSTIC (added 2026-10-13 AFTER the results above; decides nothing): `diag` runs the PRIMARY book from
+the first start on the score without orders, without policy, the price-only score (ind_mom + pos_52w, gated) and the
+ungated score, to show whether the theme inputs add anything over momentum + the gate.
+
+Usage: python -m tools.theme_momentum [asym|book|all|diag]
 """
 
 import argparse
@@ -262,6 +266,35 @@ def books(d, S):
     return res, grades
 
 
+def diag(d, S):
+    """Post-hoc (see docstring): the PRIMARY book from the first start on ablated scores."""
+    import tools.lh_book as B
+    S = S.assign(price_only=d[["p_ind_mom", "p_pos_52w"]].fillna(0.5).mean(axis=1).where(d["gate"]))
+    meths = ["theme", "theme_no_orders", "theme_no_policy", "price_only", "theme_ungated"]
+    sc = pd.concat([d[["sid", "snapshot_date", "cap_tier"]].assign(method=m, score=S[m]) for m in meths],
+                   ignore_index=True).dropna(subset=["score"])
+    sc = sc[sc["snapshot_date"] >= START_FROM]
+    sc["pct_rank"] = sc.groupby(["method", "snapshot_date", "cap_tier"])["score"].rank(pct=True)
+    sc["oos"] = True
+    dd = V2 / "win_theme_diag"
+    dd.mkdir(parents=True, exist_ok=True)
+    sc.to_parquet(dd / "oos_scores.parquet", index=False)
+    if not (dd / "labels.parquet").exists():
+        os.symlink(LH / "labels.parquet", dd / "labels.parquet")
+    B.LH = dd
+    D = B.Data()
+    rows = []
+    for tier in TIERS:
+        bench = B.benchmark(D, tier)
+        for m in meths:
+            r, _ = B.simulate(D, tier, {**PRIMARY, "method": m}, bench)
+            rows.append(dict(tier=tier, score=m, **{k: r[k] for k in ("excess_cagr", "t_nw", "worst_12m_excess",
+                                                                       "turnover_pa", "avg_cash_share")}))
+    res = pd.DataFrame(rows)
+    res.to_csv(V2 / "theme_diag.csv", index=False)
+    print("POST-HOC DIAGNOSTIC (decides nothing):\n", res.round(4).to_string(index=False))
+
+
 def latest(d, S):
     a = d["snapshot_date"].max()
     t = d[d["snapshot_date"] == a].assign(s=S["theme"]).dropna(subset=["s"])
@@ -271,7 +304,7 @@ def latest(d, S):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("part", nargs="?", default="all", choices=["asym", "book", "all"])
+    ap.add_argument("part", nargs="?", default="all", choices=["asym", "book", "all", "diag"])
     part = ap.parse_args().part
     pd.set_option("display.width", 240)
     d = build()
@@ -280,6 +313,8 @@ def main():
     print(f"panel {len(d):,} rows, gated share {d['gate'].mean():.3f}; gated names per anchor (median) "
           f"{d[d['gate']].groupby(['snapshot_date', 'cap_tier']).size().groupby('cap_tier').median().to_dict()}")
     out = {}
+    if part == "diag":
+        return diag(d, S)
     if part in ("asym", "all"):
         A = asymmetry(d, S)
         A.to_csv(V2 / "theme_asymmetry.csv", index=False)
