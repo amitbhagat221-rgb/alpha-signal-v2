@@ -1,6 +1,6 @@
 # Plan 0025 — Two scores, two books: a slow core and a fast SMALL tactical book
 
-Status: **active** (proposed and executed 2026-10-13; phases 1-4 done, 5.2 done, phase 7.1 / 7.3 / 7.4 done 2026-10-13/14 (no deployment), 5.1 harvesting, 6.1 and 7.2 gated on data, 6.2 open; live changes merged 2026-10-13 on Amit's approval; long-hold rank shown in the cockpit 2026-10-14). Owner: Amit. Read-only research until Amit approves a verdict: no change to live weights, picks, the book, schema or cron.
+Status: **active** (2026-10-14: every research task closed — 5.1, 6.1, 6.2, 7.2 done; 4.2 parked; open: D3 and Amit's calls on the 5.1 promotion review and the 6.2 proposal. Proposed and executed 2026-10-13; phases 1-4 done, 5.2 done, phase 7.1 / 7.3 / 7.4 done 2026-10-13/14 (no deployment), 5.1 harvesting, 6.1 and 7.2 gated on data, 6.2 open; live changes merged 2026-10-13 on Amit's approval; long-hold rank shown in the cockpit 2026-10-14). Owner: Amit. Read-only research until Amit approves a verdict: no change to live weights, picks, the book, schema or cron.
 
 ## Why
 Plan 0024, the winners post-mortem and research 0007 ([unified summary](../research/0007-long-horizon-unified.html)) agree on three points:
@@ -81,7 +81,7 @@ So the work splits into **two scores and two books**. Neither replaces the other
 - [~] **4.2 Review-not-sell replay** (not run 2026-10-13: 4.1 found no event above noise, so the replay would measure noise; reopen after 5.2 adds delisted names) on the slow template book and the tactical book. An alert opens a review; exit only if the score is also outside the hold band. Measure extra turnover and the return delta. ~1 week.
 
 ### Phase 5 — weeks 5–10: more history
-- [~] **5.1 Quarterly results 2018+.** (2026-10-13: `sources/nse_results.py` built, feed `nse_results_xbrl` → probation, canary PASS, table `quarterly_results_nse`; universe harvest 2017-04 → 2024-12 queued behind the harvest lock, resumable via output/nse_results_done.txt)
+- [x] **5.1 Quarterly results 2018+.** (**DONE 2026-10-14, [study](../studies/quarterly-nse-2026-10.md), `tools/lh_quarterly_nse.py`: the MID `q_margin_chg` lead FAILS on 2020-26 (non-overlap t −0.12); SMALL quarterly growth LEVELS pass every period and Bonferroni — `q_ebitda_chg` t 3.85, `q_margin_chg` 3.54, `q_rev_yoy` 2.93 at 126 (exploratory: t 2.1–2.2 net of announcement_car + momentum); acceleration fails → SMALL promotion-review candidates, no weights.** Harvest at 1,575 stocks; gate READY 850 / 950 after the 2026-10-14 gate amendment.) (2026-10-13: `sources/nse_results.py` built, feed `nse_results_xbrl` → probation, canary PASS, table `quarterly_results_nse`; universe harvest 2017-04 → 2024-12 queued behind the harvest lock, resumable via output/nse_results_done.txt)
   - Sourcing probe of BSE/NSE XBRL results, canary on 3 stocks first, then a `feeds.FEEDS` candidate entry (data-playbook first).
   - Then re-test `q_margin_chg`, `q_rev_accel` and `q_profit_accel` on 6+ years.
   - ~2–3 weeks.
@@ -98,7 +98,7 @@ So the work splits into **two scores and two books**. Neither replaces the other
 ### Phase 6 — a winner hunter (Amit 2026-10-13: "can our new model find stocks like netweb sswl?" → "yes please")
 Every score catches the top-5 % six-month SMALL winners at about chance (slow_v2 top 20: 6.4 % vs 5 %).
 `slow_v2` bought TIMETECHNO (rank 10, Jan 2024); SSWL reached only the top 4–10 %; Netweb was never in a top 400.
-- [ ] **6.1 Winner-hunter test** (`tools/winner_hunter.py`, pre-registered 2026-10-13 in its docstring).
+- [x] **6.1 Winner-hunter test** (**DONE 2026-10-14: no hunter** — [study](../studies/winner-hunter-2026-10.md). T1 fails: top-20 hit rate 6.8 % vs 10 % bar, non-overlap t 0.90. T2 book grade C: +15.1 %/yr, t 2.03, 12/12 starts, DSR 0.985, but PBO 0.66 and worst 12 months −21 %. Best ranks: NETWEB 55, SSWL 100.) (`tools/winner_hunter.py`, pre-registered 2026-10-13 in its docstring).
   - **Score:** equal-weight percentiles of 6-month momentum, 52-week position, quarterly core-profit acceleration, latest-quarter revenue growth and core-margin change. No value or quality component.
   - **Gate:** revenue growth > 0 and momentum > 0. ₹1 cr liquidity floor; trusts and Financials excluded.
   - **T1 (purpose):** top-20 hit rate ≥ 10 % (2× chance) with non-overlap t ≥ 2.
@@ -106,7 +106,7 @@ Every score catches the top-5 % six-month SMALL winners at about chance (slow_v2
   - **Decision:** T1 + B → a small hunter sleeve; T1 only → watchlist; neither → no hunter.
   - **Gated:** `python -m tools.winner_hunter check` must say READY: ≥ 70 % of SMALL+MID with ≥ 8 quarters 2017-04 → 2022-12 in `quarterly_results_nse` (task 5.1 harvest).
 
-- [ ] **6.2 New listings** (Amit 2026-10-13, after ATHERENERG: Ather was invisible for its first 12 months; 13 % of the 529 missed doublers in [missed-winners-2019-2025.md](../studies/missed-winners-2019-2025.md) were new listings). Pre-registered spec, tool not written yet:
+- [x] **6.2 New listings** (**DONE 2026-10-14: grade B by the pre-registered top-10 rule → PROPOSE, not implemented** — [study](../studies/new-listings-2026-10.md), `tools/new_listings.py`. IC in the new-listing set 63: 0.123 (non-overlap t 3.09), 126: 0.134 (t 2.63), almost all from position vs the high since listing. Book top 10: +20.3 %/yr median, 12/12 starts, t 2.58 (1.83 after haircut), worst 12 months −12.1 %, DSR 0.986, PBO 0.686. **Conflicts with the ≥ 20-name book rule (CLAUDE.md / 2026-10-13): at 20 names +7.9–9.0 %, t ≈ 1.1** — lottery-shaped (10 of 225 names = 57 % of excess), one IPO cycle. ATHERENERG top 10 from Sep-25. ⏳ Amit: forward-test vs live change.) (Amit 2026-10-13, after ATHERENERG: Ather was invisible for its first 12 months; 13 % of the 529 missed doublers in [missed-winners-2019-2025.md](../studies/missed-winners-2019-2025.md) were new listings). Pre-registered spec, tool not written yet:
   - **Universe:** stocks listed < 12 months at the anchor (first price in `stock_prices`, 2010+), SMALL + MID, ₹1 cr floor.
   - **Score:** equal weight of the return since the first close after listing day 5 (skips the listing pop), position vs the high since listing, latest-quarter revenue growth (`quarterly_income` / `quarterly_results_nse`), and the sector's 6-month momentum.
   - **Tests:** (a) rank IC within the new-listing set at 63 / 126 sessions, non-overlap t; (b) a book: top 10 new listings, monthly, hold until month 12, then hand over to the normal tier rank. Judged across 12 starts vs the tier index, graded by ADR 0073.
@@ -120,7 +120,7 @@ Every score catches the top-5 % six-month SMALL winners at about chance (slow_v2
   - Inputs: industry momentum, sector policy score (`sector_policy_pit`, 2020+), order-win intensity (BSE "Award of Order / Receipt of Order" filings in the last 6 months, 2018+), position in the 52-week range.
   - Exit when industry momentum or the stock's 52-week position breaks.
 - [x] **7.4 Order-win intensity as a factor** — **fails (2026-10-14): SMALL IC 0.018 t 1.01, residual on momentum t −2.65; MID t 1.55. The 7.1 edge is the 2023-24 capex regime, not a factor. D5 = nothing.** (Amit 2026-10-14, after 7.1's ablation showed order wins are the theme book's engine). `tools/order_wins.py`, pre-registered in its docstring. If it holds → library factor + promotion review, and D5 paper-tracks the theme book; if not → D5 = nothing.
-- [ ] **7.2 Turnarounds** (needs `quarterly_results_nse`).
+- [x] **7.2 Turnarounds** (**DONE 2026-10-14: no turnaround sleeve** — [study](../studies/turnarounds-2026-10.md), `tools/turnarounds.py`. SMALL book grade C: −4.7 %/yr median across starts, 0/12 starts, worst 12 months −36.9 %; asymmetry fails (P(double) 1.52× base, halves 3.0 % vs 2.5 %, median +2.8 % / mean +24.9 %: the 7.3 two-sided lottery again); acquirer filings make it worse; MID C on ~2 names per anchor.) (needs `quarterly_results_nse`).
   - Inputs: debt / assets falling two years running, latest-quarter profit turning positive or interest coverage crossing 1.5, a credible acquirer (BSE "Open Offer" / "Acquisition").
   - Price confirmation: 3-month momentum > 0.
 - [x] **7.3 Mania exclusion screen** (2026-10-13, `tools/mania_screen.py`): **fails, no screen.** Penny / forensic momentum names halve 1.6–1.8× more often with lower medians but HIGHER means (+34–37 % vs +21 %): two-sided lotteries, an avoid list would cut the winners.
@@ -128,9 +128,9 @@ Every score catches the top-5 % six-month SMALL winners at about chance (slow_v2
   - Test: do excluded names halve more often and earn a lower median?
 
 ### Decisions for Amit (after phases 2–3)
-- [ ] **D1** Slow core: if 2.2 passes → ADR + a worktree build of the monthly slow book; if not → SMALL/MID stay the index.
-- [ ] **D2** Tactical SMALL: if 3.2 passes → ADR + paper-trade sizing; if not → keep `fast_v1` as the screen only.
-- [ ] **D3** Capital split, only if D1 or D2 pass. Example shape: index core + slow satellite + small tactical sleeve.
+- [x] **D1** (resolved 2026-10-13 by ADR 0073 + the paper sleeve, recorded 2026-10-14: 2.2 failed the strict bar, but the SMALL slow book graded B → `slow_v2` paper-traded in the SMALL sleeve; MID / LARGE stay the index; slow_v2 kept over slow_v3 and the blend by 2.5 / 2.6) Slow core: if 2.2 passes → ADR + a worktree build of the monthly slow book; if not → SMALL/MID stay the index.
+- [x] **D2** (resolved 2026-10-13 the same way: `fast_select` SMALL graded B → paper-traded beside `slow_v2` in the sleeve; `fast_v1` stays the live screen) Tactical SMALL: if 3.2 passes → ADR + paper-trade sizing; if not → keep `fast_v1` as the screen only.
+- [ ] **D3** Capital split, only if D1 or D2 pass. (2026-10-14: open until the paper sleeve has a forward record — first rebalance 2026-11-02; no real-money split before then.) Example shape: index core + slow satellite + small tactical sleeve.
 - [x] **D5** (resolved 2026-10-14 by 7.4's pre-registered rule: nothing — no paper tracking) Theme book (7.1): paper-only forward test beside the SMALL sleeve, or nothing. Weigh: idea in-sample; order filings ~5× after 2023; mostly short-term gains; a new pre-registration would be needed for the ungated variant.
 - [x] **D4 (merged live 2026-10-13, Amit: "approved")** Forensic score cut off (review flags); MID grade-B factors at half weight (ADR 0074); monthly `run.sh paper_sleeve` job + cron (2nd, 06:40 UTC). Cockpit caches cleared and both services restarted. Original item: Forensic penalty and accruals weight changes from 2.3 / 2.4 (these change live picks → worktree).
 
