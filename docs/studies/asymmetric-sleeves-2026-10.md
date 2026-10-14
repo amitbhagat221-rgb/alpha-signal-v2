@@ -85,3 +85,19 @@ Flagged names are compared with the unflagged "hot" names (top fifth of 6-month 
   - Penny and forensic-flagged momentum names do halve more often and have lower medians. They are two-sided lotteries: their mean is higher, because the big winners pay for the losers.
   - An avoid list would cut those winners too. BROAD would have removed 20 % of the 7.1 theme picks, and those picks earned a mean of +37.6 % against +26.3 % for the ones kept.
 - The forensic flag stays a review prompt, as ADR 0073 already has it.
+
+## 7.4 Order-win intensity as a factor (2026-10-14) — fails
+Pre-registered in [`tools/order_wins.py`](../../tools/order_wins.py) (`a9f8d72`). It tests whether the count of BSE order-win filings over the last 6 months predicts the return within the tier.
+
+| order_wins_6m at 126 sessions | SMALL | MID |
+|---|---|---|
+| mean IC / Newey-West t / non-overlap t | 0.018 / 1.01 / 0.93 | 0.037 / 1.55 / 1.22 |
+| IC 2019-22 · 2023-24 · 2025-26 | −0.011 · **+0.062** · +0.022 | +0.008 · **+0.095** · +0.013 |
+| beyond momentum + 52-week position (residual t) | **−2.65** | +2.31 |
+| industry-neutral t | −1.02 | +1.35 |
+| stocks with ≥ 1 filing | 8.8 % | 5.2 % |
+
+- **Bars:** SMALL fails all three. MID fails bar 1 (t 1.55 against 2.5). No variant (3m / 12m / change) clears Bonferroni.
+- **Verdict: no factor, so D5 = nothing.** Across the whole tier, order wins add nothing beyond momentum and industry. In SMALL, once momentum is controlled for, they point slightly the wrong way.
+- **Why the 7.1 book still looked strong:** its edge sits in the top tail of an interaction (policy sector × hot industry × order filer), and mostly in one regime. The 2023-24 capex boom carries the IC (+0.06 / +0.09) and the book's +55 % year. That is a theme that happened, not a repeatable factor.
+- **What would change this:** a second capex cycle that shows the same 2023-24 pattern out of sample. The tools are ready to re-run as is.

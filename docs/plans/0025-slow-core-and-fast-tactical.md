@@ -119,7 +119,7 @@ Every score catches the top-5 % six-month SMALL winners at about chance (slow_v2
 - [x] **7.1 Policy-capex theme momentum** (2026-10-13, `tools/theme_momentum.py`, [study](../studies/asymmetric-sleeves-2026-10.md)). SMALL book grade **B** (+25.5 %/yr after costs + tax, t 2.82, 12/12 starts ≥ +22.5 %, worst 12 months −9.9 %), but the asymmetry bar fails by a hair (P(double) 1.99× base vs 2.0×; halve 1.6 % vs 2.5 %, median +18.7 %) → not a sleeve candidate by the letter; the pre-registration did not cover "B without asymmetry" → **D5**. Post-hoc: order-win intensity is the engine (without it +10.1 %); the gate adds nothing. MID: C.
   - Inputs: industry momentum, sector policy score (`sector_policy_pit`, 2020+), order-win intensity (BSE "Award of Order / Receipt of Order" filings in the last 6 months, 2018+), position in the 52-week range.
   - Exit when industry momentum or the stock's 52-week position breaks.
-- [ ] **7.4 Order-win intensity as a factor** (Amit 2026-10-14, after 7.1's ablation showed order wins are the theme book's engine). `tools/order_wins.py`, pre-registered in its docstring. If it holds → library factor + promotion review, and D5 paper-tracks the theme book; if not → D5 = nothing.
+- [x] **7.4 Order-win intensity as a factor** — **fails (2026-10-14): SMALL IC 0.018 t 1.01, residual on momentum t −2.65; MID t 1.55. The 7.1 edge is the 2023-24 capex regime, not a factor. D5 = nothing.** (Amit 2026-10-14, after 7.1's ablation showed order wins are the theme book's engine). `tools/order_wins.py`, pre-registered in its docstring. If it holds → library factor + promotion review, and D5 paper-tracks the theme book; if not → D5 = nothing.
 - [ ] **7.2 Turnarounds** (needs `quarterly_results_nse`).
   - Inputs: debt / assets falling two years running, latest-quarter profit turning positive or interest coverage crossing 1.5, a credible acquirer (BSE "Open Offer" / "Acquisition").
   - Price confirmation: 3-month momentum > 0.
@@ -131,7 +131,7 @@ Every score catches the top-5 % six-month SMALL winners at about chance (slow_v2
 - [ ] **D1** Slow core: if 2.2 passes → ADR + a worktree build of the monthly slow book; if not → SMALL/MID stay the index.
 - [ ] **D2** Tactical SMALL: if 3.2 passes → ADR + paper-trade sizing; if not → keep `fast_v1` as the screen only.
 - [ ] **D3** Capital split, only if D1 or D2 pass. Example shape: index core + slow satellite + small tactical sleeve.
-- [ ] **D5** Theme book (7.1): paper-only forward test beside the SMALL sleeve, or nothing. Weigh: idea in-sample; order filings ~5× after 2023; mostly short-term gains; a new pre-registration would be needed for the ungated variant.
+- [x] **D5** (resolved 2026-10-14 by 7.4's pre-registered rule: nothing — no paper tracking) Theme book (7.1): paper-only forward test beside the SMALL sleeve, or nothing. Weigh: idea in-sample; order filings ~5× after 2023; mostly short-term gains; a new pre-registration would be needed for the ungated variant.
 - [x] **D4 (merged live 2026-10-13, Amit: "approved")** Forensic score cut off (review flags); MID grade-B factors at half weight (ADR 0074); monthly `run.sh paper_sleeve` job + cron (2nd, 06:40 UTC). Cockpit caches cleared and both services restarted. Original item: Forensic penalty and accruals weight changes from 2.3 / 2.4 (these change live picks → worktree).
 
 ## Notes
