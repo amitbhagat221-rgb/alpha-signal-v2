@@ -53,6 +53,12 @@ def _prewarm_cache():
         ("news_pool_720",      lambda: api._get_news_pool(hours=720)),
         ("sector_call",        lambda: api.get_sector_call()),
         ("multibagger",        lambda: api.get_multibagger_overview()),
+        ("explorer",           lambda: api.get_heatmap_data()),
+        ("stocks_screener",    lambda: stocks_data.screen({})),
+        ("sector_front",       lambda: api.get_sector_front()),
+        ("industry_rotation",  lambda: api.get_industry_rotation()),
+        ("group_lists",        lambda: (api.get_group_list("industry"), api.get_group_list("sector"))),
+        ("playbooks_avoid",    lambda: __import__("cockpit.playbooks", fromlist=["tab_data"]).tab_data("avoid")),
     ])
 
 

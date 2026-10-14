@@ -405,7 +405,8 @@ def prewarm(warmers, label="cache-warm", max_workers=4):
     SQLite is single-writer so unbounded parallelism doesn't help and can
     starve user requests; 4 workers is the sweet spot for our mix.
     COCKPIT_NO_PREWARM=1 skips it (the preview units: a second copy of the same warm-up
-    would double the DB load; their cache dir is seeded from the live one instead)."""
+    would double the DB load; their cache dir is seeded from the live one instead).
+    The list then re-runs every COCKPIT_REWARM_SECONDS (default 600; 0 = boot only)."""
     if _os.environ.get("COCKPIT_NO_PREWARM", "").strip() in ("1", "true", "yes"):
         return
     import threading
@@ -431,4 +432,19 @@ def prewarm(warmers, label="cache-warm", max_workers=4):
                     print(f"  [{label}] {name}: {dt:.1f}s")
         print(f"  [{label}] total wall-clock: {_time.time()-t0:.1f}s")
 
-    threading.Thread(target=_warm, daemon=True).start()
+    # Keep them warm, not just warm at boot. Many caches are keyed on the day's data (the
+    # price date, the pick date), so the first visit after the 03:30 morning run used to
+    # rebuild inline (Markets 47 s, 2026-10-14). Re-running the list every few minutes
+    # costs nothing for fresh entries and builds a new day's entry before anyone asks.
+    every = int(_os.environ.get("COCKPIT_REWARM_SECONDS", "600") or 0)
+
+    def _loop():
+        _warm()
+        while every > 0:
+            _time.sleep(every)
+            try:
+                _warm()
+            except Exception as e:  # noqa: BLE001 - a failed re-warm must never kill the thread
+                print(f"  [{label}] re-warm failed: {e}")
+
+    threading.Thread(target=_loop, daemon=True, name=f"prewarm:{label}").start()

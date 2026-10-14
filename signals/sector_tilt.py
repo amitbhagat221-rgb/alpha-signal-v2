@@ -170,10 +170,17 @@ def compute_sector_tilt(
 def _per_sector_view(as_of_date: str | None = None) -> pd.Series:
     """Diagnostic: the per-sector ensemble value (before mapping to stocks)."""
     date_clause = f"AND date <= '{as_of_date}'" if as_of_date else ""
-    prices = read_sql(
-        f"SELECT sid, date, close FROM stock_prices WHERE close > 0 {date_clause} "
-        f"ORDER BY sid, date"
-    )
+    # Only the last MOM_WINDOW + 1 closes per stock feed the basket momentum, so read just
+    # those — one primary-key seek per stock — instead of every close since 2010 (5M rows,
+    # ~25 s). Same rows reach _basket_momentum, so the view is unchanged.
+    import sqlite3
+    from config import DB_PATH
+    q = (f"SELECT sid, date, close FROM stock_prices WHERE sid = ? AND close > 0 {date_clause} "
+         f"ORDER BY date DESC LIMIT {MOM_WINDOW + 1}")
+    with sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True) as con:
+        sids = [r[0] for r in con.execute("SELECT sid FROM stocks WHERE sector IS NOT NULL")]
+        parts = [r for sid in sids for r in reversed(con.execute(q, [sid]).fetchall())]
+    prices = pd.DataFrame(parts, columns=["sid", "date", "close"])
     stocks = read_sql("SELECT sid, sector FROM stocks WHERE sector IS NOT NULL")
     sector_of = dict(zip(stocks["sid"], stocks["sector"]))
     mom = _basket_momentum(prices, sector_of)

@@ -76,6 +76,7 @@ def _prewarm_cache():
         ("pipeline_status",    lambda: api.get_pipeline_status()),
         ("feed_overview",      lambda: api.get_feed_overview()),
         ("org_overview",       lambda: api.get_org_overview()),
+        ("options_book",       lambda: __import__("option_book").page_data()),
     ], label="ops cache-warm")
 
 
