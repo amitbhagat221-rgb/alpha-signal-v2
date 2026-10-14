@@ -416,12 +416,20 @@ def ingest_news(out_dir):
         title, summary = src.iloc[0]["title"], src.iloc[0]["summary"]
         out = nc.normalize(obj, title, summary)
         with get_db() as conn:
+            # Column-level upsert: a whole-row replace would NULL image_url (another producer's column).
             conn.execute(
-                """INSERT OR REPLACE INTO news_enriched
+                """INSERT INTO news_enriched
                    (article_id, topics, primary_topic, one_liner, why_it_matters,
                     key_numbers, what_to_watch, confidence, sentiment, keywords,
                     classifier_status, classified_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))""",
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+                   ON CONFLICT(article_id) DO UPDATE SET
+                    topics = excluded.topics, primary_topic = excluded.primary_topic,
+                    one_liner = excluded.one_liner, why_it_matters = excluded.why_it_matters,
+                    key_numbers = excluded.key_numbers, what_to_watch = excluded.what_to_watch,
+                    confidence = excluded.confidence, sentiment = excluded.sentiment,
+                    keywords = excluded.keywords, classifier_status = excluded.classifier_status,
+                    classified_at = excluded.classified_at""",
                 (aid, out["topics"], out["primary_topic"], out["one_liner"],
                  out["why_it_matters"], out["key_numbers"], out["what_to_watch"],
                  out["confidence"], out["sentiment"], out["keywords"], out["classifier_status"]),
