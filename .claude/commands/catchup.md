@@ -11,3 +11,5 @@ Then in 4 short sentences:
 
 Flag if HANDOFF.md is older than 48 hours or git is dirty unexpectedly.
 Don't propose work yet — situation report only.
+
+This also runs automatically on every new session and `/clear` (`.claude/hooks/session_start.py` injects the health report, HANDOFF.md and git state). Typed by hand, re-run every step fresh.

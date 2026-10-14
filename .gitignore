@@ -124,6 +124,8 @@ cockpit/static/news_img/
 
 # MCP server registration (plan 0016): stdio only, no secrets
 !.mcp.json
+# project hooks (SessionStart auto-catchup); settings.local.json stays ignored
+!.claude/settings.json
 !ops/mcp.local.json
 !ops/llm_worker_local.sh
 # alpha_mcp.tasks file lock for the day's dossier JSON
