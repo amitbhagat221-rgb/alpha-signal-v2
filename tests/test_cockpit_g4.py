@@ -15,6 +15,8 @@ def _pool():
         "sharpe_1y": [1.0] * 4, "max_drawdown": [-1.0] * 4,
         "composite_score": [20.0, 40.0, 30.0, 10.0], "score_percentile": [100.0] * 4,
         "peer_rank_3y": [1] * 4, "investable": [1] * 4,
+        "subscription": ["Open", "Closed", "SIP only", None],
+        "closed_reason": [None, "New investments have been stopped for this fund.", None, None],
     })
 
 
@@ -49,6 +51,28 @@ def test_fund_list_header_links_reverse_the_active_column(monkeypatch):
     html = client.get("/mutual-funds?sort=ret_1y&dir=asc").text
     assert 'href="/mutual-funds?sort=ret_1y&dir=desc' in html
     assert "&dir=asc" in html.split('class="pager"', 1)[-1] or 'class="pager"' not in html  # paging keeps it
+
+
+def test_subscription_filter_and_column(monkeypatch):
+    """Funds closed to new money (HDFC Developed World FoF, 2026-10-14) can be hidden or listed alone."""
+    monkeypatch.setattr(mf, "_mf_universe_pool", lambda: _pool())
+    codes = lambda **k: sorted(r["scheme_code"] for r in mf.get_mf_universe_overview(**k)["rows"])
+    assert codes(invest="hide_closed") == ["a", "c", "d"]        # unknown status is not hidden
+    assert codes(invest="closed") == ["b", "c"]                  # closed + SIP-only
+    assert codes(invest="bogus") == ["a", "b", "c", "d"]
+    assert mf.subscription_label(0, 0) == "Closed" and mf.subscription_label(1.0, 1.0) == "Open"
+    assert mf.subscription_label(float("nan"), 1) is None
+
+    from fastapi.testclient import TestClient
+    import cockpit.app as app_mod
+    import webauth
+    monkeypatch.setattr(api, "get_mf_category_heatmap", lambda **k: [])
+    client = TestClient(app_mod.app)
+    client.cookies.set(webauth.COOKIE, webauth.make_token())
+    html = client.get("/mutual-funds?invest=closed").text
+    assert 'title="New investments have been stopped for this fund.">Closed</span>' in html
+    assert '<option value="closed" selected>' in html
+    assert 'href="/mutual-funds?sort=name&invest=closed' in html   # sorting keeps the filter
 
 
 def test_default_sort_breaks_percentile_ties_by_score(monkeypatch):

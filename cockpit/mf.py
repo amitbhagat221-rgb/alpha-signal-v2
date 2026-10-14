@@ -7,6 +7,8 @@ Functions are unchanged and re-exported from cockpit.api, so existing
 `api.get_mf_*` call sites keep resolving.
 """
 
+import pandas as pd
+
 import db
 from db import read_sql
 from cockpit._shared import _persisted_cache
@@ -23,7 +25,7 @@ from cockpit._shared import _persisted_cache
 #   - mf_category_stats  category medians/deciles
 
 
-@_persisted_cache(600, name="mf_universe_pool_v4")
+@_persisted_cache(600, name="mf_universe_pool_v5")
 def _mf_universe_pool():
     """Every active scheme joined to its LATEST mf_metrics row, plus an
     `investable` flag — the unfiltered pool that get_mf_universe_overview
@@ -34,7 +36,11 @@ def _mf_universe_pool():
     investable = data_quality is NULL/'TRUSTED' (not wound-up, segregated,
     interval, bonus, anomalous NAV) AND a NAV within the last 30 days (not a
     matured FMP / delisted plan). Rows come in rowid order so the stable sort
-    below breaks ties the way SQLite's scan did."""
+    below breaks ties the way SQLite's scan did.
+
+    subscription = whether the fund takes new money, from its Groww page
+    (sources.mf_holdings_groww): 'Open' / 'Closed' / 'SIP only' / 'Lump sum only',
+    None when unknown (no Groww page, or not checked yet)."""
     # Join to LATEST mf_metrics row per scheme (defensive — table should be clean
     # after the monthly compute, but stale rows from earlier runs can stick around).
     df = read_sql(
@@ -44,6 +50,7 @@ def _mf_universe_pool():
                   m.ret_1y, m.ret_3y_cagr, m.ret_5y_cagr,
                   m.sharpe_1y, m.sharpe_3y, m.max_drawdown,
                   m.composite_score, m.score_percentile, m.peer_rank_3y,
+                  sm.lumpsum_open, sm.sip_open, sm.closed_reason,
                   CASE WHEN (sm.data_quality IS NULL OR sm.data_quality = 'TRUSTED')
                         AND COALESCE(sm.category_norm, '') NOT LIKE 'ETF /%'
                         AND EXISTS (SELECT 1 FROM mf_nav_history n
@@ -57,6 +64,7 @@ def _mf_universe_pool():
            WHERE sm.active = 1
            ORDER BY sm.rowid"""
     )
+    df["subscription"] = [subscription_label(lump, sip) for lump, sip in zip(df["lumpsum_open"], df["sip_open"])]
     # "#k of N" inside the category, by the absolute composite_score (the same
     # ordering score_percentile is computed from in signals.mf_metrics).
     scored = df["composite_score"].notna()
@@ -64,6 +72,18 @@ def _mf_universe_pool():
     df.loc[scored, "cat_rank"] = grp.rank(ascending=False, method="min")
     df.loc[scored, "cat_n"] = grp.transform("count")
     return df
+
+
+def subscription_label(lumpsum_open, sip_open) -> str | None:
+    """'Open' / 'Closed' / 'SIP only' / 'Lump sum only' from the two Groww flags; None when unknown."""
+    if pd.isna(lumpsum_open) or pd.isna(sip_open):
+        return None
+    return {(1, 1): "Open", (0, 0): "Closed", (0, 1): "SIP only", (1, 0): "Lump sum only"}[(int(lumpsum_open), int(sip_open))]
+
+
+# ?invest= values on /mutual-funds: hide the funds that take no new money, or show only the
+# funds that refuse some of it. Funds with unknown status count as not closed.
+INVEST_FILTERS = {"hide_closed": "Hide closed funds", "closed": "Closed or restricted only"}
 
 
 def _usual_nav_date(nav_dates):
@@ -103,7 +123,8 @@ def get_mf_universe_overview(category: str = None, amc: str = None,
                               q: str = None, sort: str = "percentile",
                               direction: str = None,
                               page: int = 1, page_size: int = 50,
-                              include_non_investable: bool = False) -> dict:
+                              include_non_investable: bool = False,
+                              invest: str = None) -> dict:
     """Filterable + paginated universe browser. Returns dict with rows + facets + counts.
 
     Filters:
@@ -112,6 +133,8 @@ def get_mf_universe_overview(category: str = None, amc: str = None,
       plan       'DIRECT' / 'REGULAR'
       option     'GROWTH' / 'IDCW'
       q          free-text on scheme_name
+      invest     'hide_closed' (drop funds closed to new money) / 'closed' (only funds closed
+                 or restricted to SIP / lump sum); see INVEST_FILTERS
       include_non_investable  if True, include schemes that are NOT realistically
                        investable: data_quality != 'TRUSTED' (wound-up, segregated,
                        interval, bonus, anomalous NAV) OR latest NAV is stale
@@ -141,6 +164,10 @@ def get_mf_universe_overview(category: str = None, amc: str = None,
         keep &= df["option_type"] == option.upper()
     if q:
         keep &= df["scheme_name"].str.lower().str.contains(q.lower(), regex=False, na=False)
+    if invest == "hide_closed":
+        keep &= df["subscription"] != "Closed"
+    elif invest == "closed":
+        keep &= df["subscription"].isin(["Closed", "SIP only", "Lump sum only"])
 
     sort_map = {
         # Default (audit MF-F2): within-category percentile. The absolute
@@ -185,7 +212,8 @@ def get_mf_universe_overview(category: str = None, amc: str = None,
         "sort":      sort,
         "dir":       "asc" if ascending else "desc",
         "as_of":     _usual_nav_date(hits["nav_date"]),
-        "filters":   {"category": category, "amc": amc, "plan": plan, "option": option, "q": q},
+        "filters":   {"category": category, "amc": amc, "plan": plan, "option": option, "q": q,
+                      "invest": invest if invest in INVEST_FILTERS else None},
     }
 
 
@@ -255,6 +283,7 @@ def get_mf_detail(scheme_code: str) -> dict | None:
                   NULLIF(sm.plan_type, 'UNKNOWN') AS plan_type, NULLIF(sm.option_type, 'UNKNOWN') AS option_type, sm.isin_growth, sm.isin_div,
                   sm.aum_cr, sm.expense_ratio, sm.benchmark,
                   sm.data_quality, sm.quality_reason,
+                  sm.lumpsum_open, sm.sip_open, sm.closed_reason, sm.subscription_checked_at,
                   ms.inception_date, ms.has_full_history, sm.last_seen
            FROM mf_scheme_master sm
            LEFT JOIN mf_schemes ms ON sm.scheme_code = ms.scheme_code
@@ -283,6 +312,7 @@ def get_mf_detail(scheme_code: str) -> dict | None:
         c["partial"] = _calendar_partial(c["year"], span.get("first"), span.get("last"))
 
     info_dict["is_debt"] = is_debt_category(info_dict.get("category_norm"))
+    info_dict["subscription"] = subscription_label(info_dict.get("lumpsum_open"), info_dict.get("sip_open"))
     info_dict["has_bench"] = has_equity_benchmark(info_dict.get("category_norm"))
     if not info_dict["has_bench"]:      # rows computed before the guard existed carry a spread
         for k in ("bench_spread_1y", "bench_spread_3y"):

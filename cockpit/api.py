@@ -1345,7 +1345,7 @@ def _multibagger_payload(snap, limit=60):
 from cockpit.mf import (
     get_mf_universe_overview, get_mf_category_heatmap, get_mf_detail,
     get_mf_nav_series, get_mf_rolling_returns, get_mf_peer_rank,
-    get_mf_holdings, get_mf_compare, get_mf_search, is_debt_category,
+    get_mf_holdings, get_mf_compare, get_mf_search, is_debt_category, INVEST_FILTERS,
 )
 
 

@@ -98,8 +98,8 @@ import types
 from sources import mf_holdings_groww as mg
 
 
-def _page(code="151917", isin="INF0J8L01156", holdings=None):
-    data = {"scheme_code": code, "direct_scheme_code": code, "isin": isin, "holdings": holdings if holdings is not None else [
+def _page(code="151917", isin="INF0J8L01156", holdings=None, **extra):
+    data = {"scheme_code": code, "direct_scheme_code": code, "isin": isin, **extra, "holdings": holdings if holdings is not None else [
         {"company_name": "Torrent Pharmaceuticals Ltd", "nature_name": "EQUITY", "sector_name": "Healthcare",
          "instrument_name": "Equity", "market_value": 142.6, "corpus_per": 5.5, "portfolio_date": "2026-09-29T18:30:00.000Z"},
         {"company_name": "GOI 91 DAYS TBILL", "nature_name": "DEBT", "sector_name": "Financial",
@@ -112,13 +112,30 @@ def _page(code="151917", isin="INF0J8L01156", holdings=None):
 
 
 def test_groww_page_parse():
-    codes, isin, holdings, sectors, as_of = mg.parse_page(_page())
+    codes, isin, holdings, sectors, as_of, status = mg.parse_page(_page())
     assert codes == {"151917"} and isin == "INF0J8L01156"
+    assert status == {"lumpsum_open": None, "sip_open": None, "closed_reason": None}   # page silent → unknown
     assert as_of == "2026-09-30"                                   # IST midnight, not the UTC date
     assert [h["instrument_name"] for h in holdings] == ["HDFC Bank Ltd", "Torrent Pharmaceuticals Ltd", "GOI 91 DAYS TBILL"]
     tbill = holdings[2]
     assert tbill["instrument_type"] == "DEBT" and tbill["sector"] == "Treasury Bills"   # not Groww's "Financial"
     assert sectors == [{"sector": "Financial", "pct_of_aum": 7.8}, {"sector": "Healthcare", "pct_of_aum": 5.5}]
+
+
+def test_groww_subscription_status():
+    """HDFC Developed World FoF's page (2026-10-14): new money stopped at the fund level."""
+    stopped = mg.parse_page(_page(available_for_investment=False, lumpsum_allowed=False, sip_allowed=False,
+                                  blocked_reason="New investments have been stopped for this fund. "
+                                                 "You can explore similar funds below."))[5]
+    assert stopped == {"lumpsum_open": 0, "sip_open": 0,
+                       "closed_reason": "New investments have been stopped for this fund."}
+    assert mg.parse_page(_page(available_for_investment=True, lumpsum_allowed=True, sip_allowed=True))[5] == \
+        {"lumpsum_open": 1, "sip_open": 1, "closed_reason": None}
+    sip_only = mg.parse_page(_page(available_for_investment=True, lumpsum_allowed=False, sip_allowed=True))[5]
+    assert (sip_only["lumpsum_open"], sip_only["sip_open"]) == (0, 1)
+    # The fund-level switch overrides per-route flags.
+    assert mg.parse_page(_page(available_for_investment=False, lumpsum_allowed=True, sip_allowed=True))[5][
+        "lumpsum_open"] == 0
 
 
 def test_groww_slug_guess():
@@ -141,14 +158,16 @@ def test_groww_writes_only_the_fund_the_page_is(monkeypatch):
     monkeypatch.setattr(mg._http, "polite_request", lambda m, url, **k: types.SimpleNamespace(
         status_code=pages[url.rsplit("/", 1)[1]][0], text=pages[url.rsplit("/", 1)[1]][1]))
     monkeypatch.setattr(mg.runlog, "note", lambda *a, **k: None)
-    written, marks = [], []
+    written, marks, statuses = [], [], []
     monkeypatch.setattr(mg, "write_portfolio", lambda codes, as_of, h, s, n2s, **k: written.append((codes, as_of, len(h))) or (len(h), len(s)))
     monkeypatch.setattr(mg, "_mark", lambda codes, slug=None: marks.append((tuple(codes), slug)))
+    monkeypatch.setattr(mg, "_write_status", lambda codes, status: statuses.append(tuple(codes)))
 
     assert mg.scrape() == 1
     assert written == [(["151917", "151918"], "2026-09-30", 3)]
     assert (("999001",), mg.NO_PAGE) in marks and (("999002",), mg.NO_PAGE) in marks
     assert (("151917", "151918"), None) in marks
+    assert statuses == [("151917", "151918")]                 # only the page that is the fund
 
 
 def test_expected_portfolio_month():
@@ -173,9 +192,10 @@ def test_discover_links_renamed_fund_by_code(monkeypatch, tmp_path):
              "unknown-fund-direct-growth": _page(code="999999", isin="Z")}    # not in the master
     monkeypatch.setattr(mg._http, "polite_request", lambda m, url, **k: types.SimpleNamespace(
         status_code=200, text=pages[url.rsplit("/", 1)[1]]))
-    written, marks = [], []
+    written, marks, statuses = [], [], []
     monkeypatch.setattr(mg, "write_portfolio", lambda codes, as_of, h, s, n2s, **k: written.append(codes) or (0, 0))
     monkeypatch.setattr(mg, "_mark", lambda codes, slug=None: marks.append((tuple(codes), slug)))
+    monkeypatch.setattr(mg, "_write_status", lambda codes, status: statuses.append(tuple(codes)))
 
     assert mg.discover(list(pages) + ["y-fund-direct-growth"], name_to_sid={}) == 1
     assert written == [["151917", "151918"]]

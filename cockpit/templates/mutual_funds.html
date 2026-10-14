@@ -50,6 +50,8 @@
 .mf-scheme-name:hover { color:var(--accent); }
 .mf-amc { color:var(--text-muted); font-size:11px; margin-top:1px; }
 .mf-cat-cell { font-size:11px; color:var(--text-muted); }
+.mf-invest { white-space:nowrap; font-size:11px; }
+.mf-invest-open { color:var(--text-muted); }
 .mf-empty { text-align:center; padding:32px !important; color:var(--text-muted); }
 
 .pager { display:flex; gap:8px; align-items:center; margin-top:14px; justify-content:center; font-size:12px; }
@@ -70,7 +72,7 @@
 <p class="mf-sub">{{ score_note() }} Default order: best fund of each category first.</p>
 
 {% set dir_qs %}{% if dir_param %}&dir={{ dir_param }}{% endif %}{% endset %}
-{% set qs_keep %}{% if active_q %}&q={{ active_q|urlencode }}{% endif %}{% if active_category %}&category={{ active_category|urlencode }}{% endif %}{% if active_amc %}&amc={{ active_amc|urlencode }}{% endif %}{% if active_plan %}&plan={{ active_plan }}{% endif %}{% if active_option %}&option={{ active_option }}{% endif %}{% if show_all %}&show_all=1{% endif %}{% endset %}
+{% set qs_keep %}{% if active_q %}&q={{ active_q|urlencode }}{% endif %}{% if active_category %}&category={{ active_category|urlencode }}{% endif %}{% if active_amc %}&amc={{ active_amc|urlencode }}{% endif %}{% if active_plan %}&plan={{ active_plan }}{% endif %}{% if active_option %}&option={{ active_option }}{% endif %}{% if active_invest %}&invest={{ active_invest }}{% endif %}{% if show_all %}&show_all=1{% endif %}{% endset %}
 
 <form class="mf-toolbar" method="get" action="/mutual-funds">
     <input class="grow" name="q" type="text" placeholder="Search scheme name…" aria-label="Search scheme name" value="{{ active_q or '' }}">
@@ -91,10 +93,16 @@
         <option value="GROWTH" {% if active_option == 'GROWTH' %}selected{% endif %}>Growth</option>
         <option value="IDCW"   {% if active_option == 'IDCW' %}selected{% endif %}>IDCW</option>
     </select>
+    <select name="invest" aria-label="Open to new money" style="flex-basis:180px;">
+        <option value="">Open and closed funds</option>
+        {% for key, label in invest_filters.items() %}
+        <option value="{{ key }}" {% if active_invest == key %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+    </select>
     <input type="hidden" name="sort" value="{{ active_sort or 'percentile' }}">{% if dir_param %}<input type="hidden" name="dir" value="{{ dir_param }}">{% endif %}
     {% if show_all %}<input type="hidden" name="show_all" value="1">{% endif %}
     <button class="mf-btn" type="submit">Filter</button>
-    {% if active_category or active_amc or active_plan or active_option or active_q %}
+    {% if active_category or active_amc or active_plan or active_option or active_q or active_invest %}
     <a class="mf-clear" href="/mutual-funds{% if show_all %}?show_all=1{% endif %}">Clear</a>
     {% endif %}
     <button type="button" class="mf-toggle" :class="heatmapOpen && 'active'" :aria-pressed="heatmapOpen" @click="heatmapOpen = !heatmapOpen">
@@ -159,6 +167,7 @@
             <th><span style="position:absolute;left:-9999px;">Compare</span></th>
             {{ sort_header('Scheme', 'name') }}
             <th>Category</th>
+            <th title="Whether the fund accepts new investments (lump sum and SIP), from its Groww page, checked about every two weeks. Closed: no new lump sums or SIPs; hover a badge for the reason.">New money</th>
             {{ sort_header('NAV ₹', 'nav', num=True) }}
             {{ sort_header('1Y %', 'ret_1y', num=True) }}
             {{ sort_header('3Y CAGR %', 'ret_3y', num=True) }}
@@ -179,6 +188,12 @@
             <div class="mf-amc">{{ row.amc or '' }}{% if row.plan_type or row.option_type %} · {% endif %}{{ row.plan_type or '' }}{% if row.plan_type and row.option_type %}/{% endif %}{{ row.option_type or '' }}</div>
         </td>
         <td class="mf-cat-cell">{{ row.category_norm or '—' }}</td>
+        <td class="mf-invest">
+            {%- if row.subscription == 'Open' %}<span class="mf-invest-open">Open</span>
+            {%- elif row.subscription == 'Closed' %}<span class="pill pill-red" title="{{ row.closed_reason or 'Not accepting new investments' }}">Closed</span>
+            {%- elif row.subscription %}<span class="pill pill-amber" title="{{ row.closed_reason or row.subscription }}">{{ row.subscription }}</span>
+            {%- else %}<span class="mf-na" title="Not checked: no Groww page for this fund, or not visited yet">—</span>{% endif -%}
+        </td>
         <td class="num">{{ row.nav|inr(2) }}</td>
         <td class="num {% if row.ret_1y is not none and row.ret_1y >= 8 %}score-green{% elif row.ret_1y is not none and row.ret_1y < 0 %}score-red{% endif %}">{{ row.ret_1y|pct }}</td>
         <td class="num {% if row.ret_3y_cagr is not none and row.ret_3y_cagr >= 12 %}score-green{% elif row.ret_3y_cagr is not none and row.ret_3y_cagr < 0 %}score-red{% endif %}">{{ row.ret_3y_cagr|pct }}</td>
@@ -189,7 +204,7 @@
         <td class="num">{{ score_pill(row.composite_score) }}</td>
     </tr>
     {% else %}
-    <tr><td colspan="11" class="mf-empty">No schemes match your filters.</td></tr>
+    <tr><td colspan="12" class="mf-empty">No schemes match your filters.</td></tr>
     {% endfor %}
     </tbody>
 </table>

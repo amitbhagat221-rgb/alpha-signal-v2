@@ -776,7 +776,7 @@ TABLES = {
     "mf_scheme_master": {
         "kind": "RAW", "domain": "Other", "date_col": "fetched_at",
         "depth": "~14,364 active Indian MF schemes (refreshed weekly from AMFI NAVAll.txt)",
-        "description": "Authoritative MF universe from AMFI. One row per scheme: code, ISINs, name, AMC, raw + normalised category, plan_type (Direct/Regular), option_type (Growth/IDCW), last_seen, active flag.",
+        "description": "Authoritative MF universe from AMFI. One row per scheme: code, ISINs, name, AMC, raw + normalised category, plan_type (Direct/Regular), option_type (Growth/IDCW), last_seen, active flag. lumpsum_open / sip_open / closed_reason: whether the fund takes new money, from its Groww page (sources.mf_holdings_groww, every ~14 days; NULL = no Groww page or not yet checked).",
     },
     "mf_schemes": {
         "kind": "RAW", "domain": "Other", "date_col": "fetched_at",

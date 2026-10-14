@@ -78,13 +78,17 @@ FUND_ROWS_SQL = """
 """
 
 
+STATUS_COLUMNS = {"lumpsum_open": "INTEGER", "sip_open": "INTEGER", "closed_reason": "TEXT",
+                  "subscription_checked_at": "TEXT"}
+
+
 def _ensure_columns():
-    """Add groww_slug / groww_checked_at to mf_scheme_master if absent."""
+    """Add the Groww columns (slug, check stamp, subscription status) to mf_scheme_master if absent."""
     with get_db() as conn:
         cols = [r[1] for r in conn.execute("PRAGMA table_info(mf_scheme_master)").fetchall()]
-        for col in ("groww_slug", "groww_checked_at"):
+        for col, kind in {"groww_slug": "TEXT", "groww_checked_at": "TEXT", **STATUS_COLUMNS}.items():
             if col not in cols:
-                conn.execute(f"ALTER TABLE mf_scheme_master ADD COLUMN {col} TEXT")
+                conn.execute(f"ALTER TABLE mf_scheme_master ADD COLUMN {col} {kind}")
                 print(f"  Added {col} column")
 
 
@@ -200,7 +204,7 @@ def discover(slugs: list[str], max_minutes: float | None = None, name_to_sid: di
             unclaimed[slug] = {"reason": f"HTTP {getattr(r, 'status_code', None)}", "checked": date.today().isoformat()}
             continue
         try:
-            codes, isin, holdings, sectors, as_of = parse_page(r.text)
+            codes, isin, holdings, sectors, as_of, status = parse_page(r.text)
         except Exception as e:
             runlog.item_error("groww fund page", slug, e)
             continue
@@ -216,6 +220,7 @@ def discover(slugs: list[str], max_minutes: float | None = None, name_to_sid: di
         fund_codes = sorted(fund["scheme_code"])
         if holdings and as_of:
             write_portfolio(fund_codes, as_of, holdings, sectors, name_to_sid)
+        _write_status(fund_codes, status)
         _mark(fund_codes, slug)
         unclaimed.pop(slug, None)
         n_linked += 1
@@ -229,9 +234,10 @@ def _ist_date(stamp: str) -> str:
     return datetime.fromisoformat(stamp.replace("Z", "+00:00")).astimezone(IST).date().isoformat()
 
 
-def parse_page(html: str) -> tuple[set[str], str | None, list[dict], list[dict], str | None]:
-    """(scheme codes, ISIN, holdings, sector allocation, portfolio date) from a fund page.
-    Raises ValueError when the page has no fund data (shape drift, not a missing fund).
+def parse_page(html: str) -> tuple[set[str], str | None, list[dict], list[dict], str | None, dict]:
+    """(scheme codes, ISIN, holdings, sector allocation, portfolio date, subscription status)
+    from a fund page. Raises ValueError when the page has no fund data (shape drift, not a
+    missing fund).
 
     A stock row's sector is Groww's; any other row carries its instrument kind in the sector
     column ('Treasury Bills', 'Net Payables') — Groww tags T-bills 'Financial'. Sector
@@ -255,7 +261,29 @@ def parse_page(html: str) -> tuple[set[str], str | None, list[dict], list[dict],
             by_sector[sector] = by_sector.get(sector, 0) + h["corpus_per"]
     sectors = [{"sector": k, "pct_of_aum": round(v, 2)} for k, v in sorted(by_sector.items(), key=lambda x: -x[1])]
     dates = [h["portfolio_date"] for h in rows if h.get("portfolio_date")]
-    return codes, data.get("isin"), holdings, sectors, (_ist_date(max(dates)) if dates else None)
+    return (codes, data.get("isin"), holdings, sectors, (_ist_date(max(dates)) if dates else None),
+            subscription_status(data))
+
+
+def subscription_status(data: dict) -> dict:
+    """Whether the fund takes new money: {lumpsum_open, sip_open (1/0, None when the page does not
+    say), closed_reason}. Groww blocks a fund the AMC has suspended (the overseas FoFs at the RBI
+    limit: 'New investments have been stopped for this fund.'); available_for_investment = False
+    closes both routes whatever the per-route flags say."""
+    shut = data.get("available_for_investment") is False
+    flag = lambda key: None if data.get(key) is None else int(bool(data[key]) and not shut)
+    reason = (data.get("blocked_reason") or "").strip()
+    # Drop Groww's sales line ('... stopped for this fund. You can explore similar funds ...').
+    reason = re.split(r"(?<=\.)\s+You can explore", reason)[0] or None
+    return {"lumpsum_open": flag("lumpsum_allowed"), "sip_open": flag("sip_allowed"), "closed_reason": reason}
+
+
+def _write_status(codes: list[str], status: dict) -> None:
+    """Store a fund page's subscription status on every plan of the fund (a suspension is the fund's)."""
+    with get_db() as conn:
+        conn.executemany("UPDATE mf_scheme_master SET lumpsum_open = ?, sip_open = ?, closed_reason = ?, "
+                         "subscription_checked_at = datetime('now') WHERE scheme_code = ?",
+                         [(status["lumpsum_open"], status["sip_open"], status["closed_reason"], c) for c in codes])
 
 
 def _mark(codes: list[str], slug: str | None = None) -> None:
@@ -312,7 +340,7 @@ def scrape(limit: int | None = None, scheme: str | None = None, recheck_days: in
             _mark(f.codes)
             continue
         try:
-            codes, isin, holdings, sectors, as_of = parse_page(r.text)
+            codes, isin, holdings, sectors, as_of, status = parse_page(r.text)
         except Exception as e:
             n_err += 1
             runlog.item_error("groww fund page", f.slug, e)
@@ -325,6 +353,7 @@ def scrape(limit: int | None = None, scheme: str | None = None, recheck_days: in
                         slug=f.slug, page_codes=sorted(codes), fund_codes=f.codes)
             _mark(f.codes, NO_PAGE)
             continue
+        _write_status(f.codes, status)
         if not holdings or not as_of:
             n_empty += 1
             _mark(f.codes)

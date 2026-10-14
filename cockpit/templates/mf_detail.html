@@ -89,6 +89,17 @@ table.mini a.link { color:var(--accent); }
 </div>
 {% endif %}
 
+{% if i.subscription and i.subscription != 'Open' %}
+<div class="mf-warn" role="status">
+    <div style="font-weight:700; margin-bottom:4px;">
+        {% if i.subscription == 'Closed' %}Closed to new money: no new lump sums or SIPs
+        {% elif i.subscription == 'SIP only' %}No new lump sums: SIPs only
+        {% else %}No new SIPs: lump sums only{% endif %}
+    </div>
+    <div class="why">{{ i.closed_reason or '' }} From the fund's Groww page, checked {{ i.subscription_checked_at[:10]|short_date }}.</div>
+</div>
+{% endif %}
+
 <div class="mf-hero">
     <div class="mf-hero-left">
         <h1 class="mf-title">{{ i.scheme_name }}</h1>

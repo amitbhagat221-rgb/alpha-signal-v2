@@ -378,10 +378,10 @@ FEEDS = {
     },
     "mf_holdings": {
         "family": "funds", "status": "production",
-        "what": "Monthly mutual-fund portfolios: what each fund holds",
+        "what": "Monthly mutual-fund portfolios: what each fund holds; plus whether it takes new money (Groww page flags → mf_scheme_master.lumpsum_open / sip_open / closed_reason)",
         "modules": ["sources.mf_holdings_groww", "sources.mf_holdings_scrape", "sources.mf_holdings"],
         "schedule": ["step:scrape_mf_holdings"],
-        "writes": ["mf_holdings", "mf_sector_allocation"], "hosts": ["groww", "etmoney"], "cadence": "monthly",
+        "writes": ["mf_holdings", "mf_sector_allocation", "mf_scheme_master"], "hosts": ["groww", "etmoney"], "cadence": "monthly",
         "routes": [_r("groww_pages", "primary", "groww", "mf-sitemap → fund pages (__NEXT_DATA__), keyed by AMFI code"),
                    _r("etmoney_pages", "fallback", "etmoney", "funds Groww has no page for: portfolio-details pages"),
                    _r("csv_drop", "manual", None, "sources.mf_holdings --csv (AMC disclosure files)")],
