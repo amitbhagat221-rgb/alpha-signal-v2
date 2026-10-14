@@ -93,8 +93,8 @@
         <option value="GROWTH" {% if active_option == 'GROWTH' %}selected{% endif %}>Growth</option>
         <option value="IDCW"   {% if active_option == 'IDCW' %}selected{% endif %}>IDCW</option>
     </select>
-    <select name="invest" aria-label="Open to new money" style="flex-basis:180px;">
-        <option value="">Open and closed funds</option>
+    <select name="invest" aria-label="Subscription status" style="flex-basis:240px;">
+        <option value="">Subscription: all funds</option>
         {% for key, label in invest_filters.items() %}
         <option value="{{ key }}" {% if active_invest == key %}selected{% endif %}>{{ label }}</option>
         {% endfor %}
@@ -143,6 +143,7 @@
     <a class="mf-preset" href="/mutual-funds?category=Debt&plan=DIRECT&option=GROWTH&sort=percentile">Debt</a>
     <a class="mf-preset" href="/mutual-funds?category=Index&sort=percentile">Index</a>
     <a class="mf-preset" href="/mutual-funds?sort=ret_5y">Top 5Y</a>
+    <a class="mf-preset" href="/mutual-funds?invest=closed">Closed to new money</a>
     <span style="flex:1 1 auto;"></span>
     <button type="button" class="mf-btn" :disabled="sel.length < 2"
             @click="location.href = '/mutual-funds/compare?codes=' + sel.join(',')">
@@ -167,7 +168,7 @@
             <th><span style="position:absolute;left:-9999px;">Compare</span></th>
             {{ sort_header('Scheme', 'name') }}
             <th>Category</th>
-            <th title="Whether the fund accepts new investments (lump sum and SIP), from its Groww page, checked about every two weeks. Closed: no new lump sums or SIPs; hover a badge for the reason.">New money</th>
+            <th title="Whether the fund accepts new investments (lump sum and SIP), from its Groww page, checked about every two weeks. Closed: no new lump sums or SIPs; hover a badge for the reason.">Subscription</th>
             {{ sort_header('NAV ₹', 'nav', num=True) }}
             {{ sort_header('1Y %', 'ret_1y', num=True) }}
             {{ sort_header('3Y CAGR %', 'ret_3y', num=True) }}

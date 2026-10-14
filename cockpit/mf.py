@@ -83,7 +83,7 @@ def subscription_label(lumpsum_open, sip_open) -> str | None:
 
 # ?invest= values on /mutual-funds: hide the funds that take no new money, or show only the
 # funds that refuse some of it. Funds with unknown status count as not closed.
-INVEST_FILTERS = {"hide_closed": "Hide closed funds", "closed": "Closed or restricted only"}
+INVEST_FILTERS = {"hide_closed": "Subscription: hide closed", "closed": "Subscription: closed / restricted"}
 
 
 def _usual_nav_date(nav_dates):
