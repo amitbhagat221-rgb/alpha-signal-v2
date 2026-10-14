@@ -1,6 +1,6 @@
 # Plan 0025 — Two scores, two books: a slow core and a fast SMALL tactical book
 
-Status: **active** (proposed and executed 2026-10-13; phases 1-4 done, 5.2 done, 5.1 harvesting, 6.1 gated on data; live changes merged 2026-10-13 on Amit's approval). Owner: Amit. Read-only research until Amit approves a verdict: no change to live weights, picks, the book, schema or cron.
+Status: **active** (proposed and executed 2026-10-13; phases 1-4 done, 5.2 done, phase 7.1 / 7.3 / 7.4 done 2026-10-13/14 (no deployment), 5.1 harvesting, 6.1 and 7.2 gated on data, 6.2 open; live changes merged 2026-10-13 on Amit's approval; long-hold rank shown in the cockpit 2026-10-14). Owner: Amit. Read-only research until Amit approves a verdict: no change to live weights, picks, the book, schema or cron.
 
 ## Why
 Plan 0024, the winners post-mortem and research 0007 ([unified summary](../research/0007-long-horizon-unified.html)) agree on three points:

@@ -1,0 +1,702 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Options as Bets</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,500;8..60,600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a single reading column; part 1 teaches the bet, part 2 lets you play with it, part 3 maps every bet family, part 4 shows who wins. */
+:root{
+  --bg:#f6f7f9; --surface:#ffffff; --fg:#1b2230; --muted:#5b6678; --line:#d9dee6; --grid:#e8ecf1;
+  --accent:#1f5f7a; --accent-soft:#e3eff4;
+  --s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a; --s4:#6250d6;
+  --good:#2f7d4f; --good-soft:#dff0e6; --bad:#c23b3b; --bad-soft:#f8e1e1; --warn:#9a6a12; --warn-soft:#fbf1dc;
+  --display:"Source Serif 4", Georgia, "Times New Roman", serif;
+  --body:"IBM Plex Sans", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --mono:"IBM Plex Mono", "SFMono-Regular", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
+  --bg:#141922; --surface:#1c2330; --fg:#e6eaf0; --muted:#9aa5b5; --line:#2e3845; --grid:#273040;
+  --accent:#7fc0da; --accent-soft:#1d3440;
+  --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#9085e9;
+  --good:#7fd19a; --good-soft:#1e3328; --bad:#ef8e8e; --bad-soft:#3d2222; --warn:#e3b760; --warn-soft:#3a2f17;
+  color-scheme:dark }}
+:root[data-theme="dark"]{
+  --bg:#141922; --surface:#1c2330; --fg:#e6eaf0; --muted:#9aa5b5; --line:#2e3845; --grid:#273040;
+  --accent:#7fc0da; --accent-soft:#1d3440;
+  --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#9085e9;
+  --good:#7fd19a; --good-soft:#1e3328; --bad:#ef8e8e; --bad-soft:#3d2222; --warn:#e3b760; --warn-soft:#3a2f17;
+  color-scheme:dark }
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{background:var(--bg);color:var(--fg);font-family:var(--body);font-size:16.5px;line-height:1.62;margin:0}
+.wrap{max-width:920px;margin:0 auto;padding-block:24px 72px;padding-inline:16px}
+header.hero{display:grid;gap:12px;padding-block:8px 22px;border-bottom:1px solid var(--line)}
+.eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+h1{font-family:var(--display);font-weight:600;font-size:clamp(32px,5.4vw,48px);line-height:1.08;margin:0;text-wrap:balance}
+.lede{font-size:18.5px;color:var(--muted);max-width:64ch;margin:0}
+nav.toc{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:var(--bg);border-bottom:1px solid var(--line);margin-inline:-16px;padding-inline:16px}
+nav.toc ul{list-style:none;margin:0;padding:10px 0;display:flex;gap:4px 16px;flex-wrap:wrap;font-size:13px}
+@media (max-width:640px){nav.toc ul{flex-wrap:nowrap;overflow-x:auto;white-space:nowrap;scrollbar-width:none}nav.toc ul::-webkit-scrollbar{display:none}}
+nav.toc a{color:var(--muted);text-decoration:none;border-bottom:2px solid transparent}
+nav.toc a:hover,nav.toc a:focus-visible{color:var(--accent);border-bottom-color:var(--accent);outline:none}
+section{padding-block:40px 12px;border-bottom:1px solid var(--line);scroll-margin-top:48px}
+section:last-of-type{border-bottom:0}
+.part{font-family:var(--mono);font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--accent);margin-bottom:6px}
+h2{font-family:var(--display);font-weight:600;font-size:clamp(25px,3.6vw,34px);line-height:1.15;margin:0 0 8px;text-wrap:balance}
+h3{font-family:var(--display);font-size:21px;font-weight:600;margin:26px 0 8px;line-height:1.25}
+h4{font-size:15px;font-weight:600;margin:14px 0 4px}
+.sub{color:var(--muted);margin:0 0 18px;max-width:66ch;font-size:17px}
+p{max-width:66ch;margin:0 0 12px}
+ul,ol{max-width:66ch;padding-left:22px;margin:0 0 12px}
+li{margin-bottom:7px}
+b{font-weight:600}
+small,.small{font-size:13.5px;color:var(--muted)}
+code{font-family:var(--mono);font-size:.88em;background:var(--accent-soft);padding:1px 5px;border-radius:4px}
+.big-idea{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin:18px 0}
+.big-idea .q{font-family:var(--display);font-size:clamp(22px,3vw,28px);line-height:1.25;margin:0 0 10px;max-width:30ch}
+.tiles{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));margin:16px 0}
+.tile{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px 16px;min-width:0}
+.tile .k{font-family:var(--mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:6px}
+.tile .v{font-family:var(--display);font-size:28px;line-height:1.1;font-weight:600;margin-bottom:6px;font-variant-numeric:tabular-nums}
+.tile p{font-size:14.5px;color:var(--muted);margin:0}
+.tag{display:inline-block;font-family:var(--mono);font-size:11.5px;letter-spacing:.03em;padding:2px 8px;border-radius:4px;vertical-align:middle;background:var(--accent-soft);color:var(--accent);white-space:nowrap}
+.tag.good{background:var(--good-soft);color:var(--good)} .tag.bad{background:var(--bad-soft);color:var(--bad)} .tag.warn{background:var(--warn-soft);color:var(--warn)}
+.two{display:grid;gap:14px 22px;grid-template-columns:1fr 1fr;align-items:start}
+.two>*{min-width:0}
+@media (max-width:720px){.two{grid-template-columns:1fr}}
+figure{margin:14px 0;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px 12px 10px;min-width:0}
+figure .ft{font-weight:600;font-size:15px;margin:0 2px 2px}
+figure .fs{font-size:13.5px;color:var(--muted);margin:0 2px 8px}
+figure svg{width:100%;height:auto;display:block;overflow:visible}
+figcaption{font-size:13.5px;color:var(--muted);margin:8px 2px 0;line-height:1.5}
+.src{font-size:12.5px;color:var(--muted);margin-top:6px;line-height:1.5}
+.src a{color:var(--muted)}
+.legend{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:13px;color:var(--muted);margin:6px 2px 0}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.legend i{display:inline-block;width:14px;height:4px;border-radius:2px}
+.legend i.box{width:12px;height:12px;border-radius:3px}
+.chartwrap{position:relative}
+.tip{position:absolute;pointer-events:none;background:var(--fg);color:var(--bg);font-family:var(--mono);font-size:12px;padding:5px 8px;border-radius:6px;white-space:nowrap;transform:translate(-50%,-130%);opacity:0;transition:opacity .1s;z-index:2}
+.tbl{overflow-x:auto;margin:10px 0 18px;border:1px solid var(--line);border-radius:8px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:14px}
+th,td{padding:8px 10px;text-align:left;vertical-align:top;border-bottom:1px solid var(--line)}
+th{font-size:12px;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);font-weight:600;background:var(--bg)}
+tbody tr:last-child td{border-bottom:0}
+td.c,th.c{text-align:center}
+td.num{text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums;white-space:nowrap}
+.up{color:var(--good);font-weight:600} .down{color:var(--bad);font-weight:600} .flat{color:var(--muted)}
+.callout{background:var(--accent-soft);border-radius:10px;padding:14px 18px;margin:16px 0;max-width:72ch}
+.callout.warn{background:var(--warn-soft)} .callout.bad{background:var(--bad-soft)}
+.callout p:last-child{margin-bottom:0}
+/* dials */
+.dials{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));margin:14px 0}
+.dial{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px 16px;min-width:0}
+.dial .n{font-family:var(--mono);font-size:12px;color:var(--accent);letter-spacing:.06em;text-transform:uppercase}
+.dial h4{font-family:var(--display);font-size:19px;margin:2px 0 6px}
+.dial p{font-size:14.5px;margin:0 0 6px;color:var(--fg)}
+.dial .greek{font-size:12.5px;color:var(--muted)}
+/* calculator + explorer */
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 18px 14px;margin:16px 0}
+.controls{display:grid;gap:12px 18px;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));margin-bottom:12px}
+.ctrl{display:grid;gap:4px;min-width:0}
+.ctrl label{font-size:13px;color:var(--muted);display:flex;justify-content:space-between;gap:8px}
+.ctrl label b{color:var(--fg);font-family:var(--mono);font-weight:500}
+input[type=range]{width:100%;accent-color:var(--accent)}
+select,input[type=number]{font:inherit;font-size:15px;padding:7px 10px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--fg);width:100%}
+select:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.calc-out{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(160px,1fr))}
+.calc-out .tile .v{font-size:24px}
+.betcard{display:grid;gap:8px;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));margin:12px 0 4px}
+.bet{border:1px solid var(--line);border-radius:10px;padding:10px 12px;background:var(--bg);min-width:0}
+.bet .bq{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;font-family:var(--mono)}
+.bet .ba{font-size:15.5px;font-weight:600;margin:2px 0}
+.bet .bn{font-size:13px;color:var(--muted);font-family:var(--mono)}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 2px}
+.chip{font:inherit;font-size:13px;border:1px solid var(--line);background:var(--bg);color:var(--fg);padding:5px 10px;border-radius:999px;cursor:pointer}
+.chip:hover{border-color:var(--accent);color:var(--accent)}
+.chip:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.chip[aria-pressed=true]{background:var(--accent);color:var(--bg);border-color:var(--accent)}
+.legs{font-family:var(--mono);font-size:13px;color:var(--muted);margin:6px 0 0}
+.story{font-size:15px;margin:8px 0 0;max-width:72ch}
+/* family cards */
+.fam{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 20px;margin:16px 0}
+.fam-head{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 12px;margin-bottom:4px}
+.fam-head h3{margin:0}
+.fam .bet-line{font-family:var(--display);font-size:18.5px;line-height:1.35;margin:4px 0 12px;max-width:60ch}
+.fam .grid{display:grid;gap:10px 22px;grid-template-columns:1fr 1fr}
+@media (max-width:720px){.fam .grid{grid-template-columns:1fr}}
+.fam .grid>div{min-width:0}
+.fam h4{font-family:var(--mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:6px 0 4px;font-weight:500}
+.fam p,.fam li{font-size:15px}
+.fam ul{margin-bottom:6px}
+.verdict{margin-top:10px;padding-top:10px;border-top:1px dashed var(--line);font-size:15px}
+/* flow */
+.flow{display:grid;gap:10px;margin:14px 0}
+.fq{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 16px;display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr);gap:8px 18px;align-items:start}
+@media (max-width:640px){.fq{grid-template-columns:1fr}}
+.fq .qq{font-family:var(--display);font-size:18px;line-height:1.3}
+.fq .qq small{display:block;font-family:var(--body);margin-top:4px}
+.fq .aa{font-size:14.5px}
+.fq .aa div{margin-bottom:5px}
+.rules{counter-reset:r;display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(270px,1fr))}
+.rule{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px 16px;min-width:0}
+.rule::before{counter-increment:r;content:counter(r);font-family:var(--mono);font-size:12px;color:var(--accent);display:block;margin-bottom:2px}
+.rule b{display:block;margin-bottom:4px;font-size:15.5px}
+.rule p{font-size:14.5px;color:var(--muted);margin:0}
+.foot{color:var(--muted);font-size:13.5px;max-width:72ch;margin-top:26px}
+a{color:var(--accent)}
+a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+@media (prefers-reduced-motion:no-preference){html{scroll-behavior:smooth}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="hero">
+  <div class="eyebrow">Alpha Signal · options crash course and field guide · October 2026</div>
+  <h1>Options are bets. Learn the bet, not the instrument.</h1>
+  <p class="lede">Calls and puts are plumbing. What matters is what a position is betting on, and whether that bet is priced in your favour. This guide teaches that way of thinking with real NIFTY data, lets you play with every common strategy, then maps the whole options world by the bet it makes and who makes money from it.</p>
+</header>
+
+<nav class="toc" aria-label="Sections">
+  <ul>
+    <li><a href="#idea">The idea</a></li>
+    <li><a href="#dials">Seven bets</a></li>
+    <li><a href="#data">NIFTY data</a></li>
+    <li><a href="#explorer">Explorer</a></li>
+    <li><a href="#families">Bet families</a></li>
+    <li><a href="#choose">Choosing</a></li>
+    <li><a href="#pros">Who wins</a></li>
+    <li><a href="#rules">Ten rules</a></li>
+    <li><a href="#us">Alpha Signal</a></li>
+  </ul>
+</nav>
+
+<!-- ============ 1 ============ -->
+<section id="idea">
+  <div class="part">Part 1 · The crash course</div>
+  <h2>The one idea: an option price is a forecast</h2>
+  <div class="big-idea">
+    <p class="q">Every option price contains the market's forecast of how much the price will move. You make money only when you disagree with that forecast and turn out right.</p>
+    <p>This is why people are right about direction and still lose money on options. Being right is not enough. You have to be <b>more right than the price already assumed.</b></p>
+  </div>
+
+  <h3>A real example: the RBI decision on 7 October 2026</h3>
+  <p>On the evening of 6 October, NIFTY closed at 22,776. The 22,800 call cost 125.75 points and the 22,800 put cost 179. Buying both (a straddle) cost 304.75 points, which is <b>1.34% of the index</b>. That 1.34% is the market's forecast of how far NIFTY would move by the 13 October expiry.</p>
+  <div class="tiles">
+    <div class="tile"><div class="k">What the price forecast</div><div class="v">± 1.34%</div><p>The straddle's cost as a share of the index, for a week.</p></div>
+    <div class="tile"><div class="k">What happened on the day</div><div class="v">−0.76%</div><p>RBI raised rates by 0.25%, the first hike in four years. NIFTY fell 0.76%.</p></div>
+    <div class="tile"><div class="k">Who was right</div><div class="v">Neither, yet</div><p>Someone who bet "down" with a put spread made 49%. The straddle buyer made only 4%. The move was real, but smaller than the price had already assumed.</p></div>
+  </div>
+  <p class="src">Prices from the project's stored NSE bhavcopy settle prices (<code>fno_bhav</code>), replayed in research 0006.</p>
+
+  <h3>The rule of 16: turning VIX into an expected move</h3>
+  <p>India VIX is the market's forecast of NIFTY's yearly movement, in percent. There are about 256 trading days a year, and √256 = 16. So <b>VIX ÷ 16 ≈ the typical daily move</b>. Divide by about 7.2 for a week and 3.5 for a month. About two days in three should land inside that range if markets were "normal". Try it:</p>
+  <div class="panel">
+    <div class="controls">
+      <div class="ctrl"><label for="cv">India VIX <b id="cv-o">14</b></label><input id="cv" type="range" min="9" max="40" step="0.5" value="14"></div>
+      <div class="ctrl"><label for="cs">NIFTY level <b id="cs-o">22,500</b></label><input id="cs" type="range" min="15000" max="30000" step="50" value="22500"></div>
+    </div>
+    <div class="calc-out" id="calc-out"></div>
+  </div>
+  <p class="small">The rule uses √252 ≈ 15.9 in the calculator; 16 is the mental shortcut. Real markets break the "two days in three" assumption in a specific way, shown in part 3.</p>
+</section>
+
+<!-- ============ 2 ============ -->
+<section id="dials">
+  <div class="part">Part 1 · The crash course</div>
+  <h2>Seven bets hide inside every position</h2>
+  <p class="sub">Any option position, however many legs, is some mix of these seven bets. Professionals describe a trade by which bets it takes, not by its name. Traders call these "the Greeks"; the plain-English question comes first here, the Greek name in grey.</p>
+
+  <div class="dials">
+    <div class="dial"><div class="n">Bet 1</div><h4>Direction</h4><p>Do I make money if the market goes up, or down?</p><p class="greek">Delta. A bought call is +, a bought put is −, a straddle starts near 0.</p></div>
+    <div class="dial"><div class="n">Bet 2</div><h4>Size of the move</h4><p>Do I want a big move in either direction, or a quiet market?</p><p class="greek">Gamma. Option buyers want movement; option sellers want calm.</p></div>
+    <div class="dial"><div class="n">Bet 3</div><h4>Price of options</h4><p>Do I gain if options become more expensive (fear rises), or cheaper?</p><p class="greek">Vega. Buyers gain when implied volatility rises, even if the index does not move.</p></div>
+    <div class="dial"><div class="n">Bet 4</div><h4>Time</h4><p>Does each passing day pay me, or cost me?</p><p class="greek">Theta. The mirror image of bet 2: whoever wants movement pays rent each day it does not come.</p></div>
+    <div class="dial"><div class="n">Bet 5</div><h4>Shape (skew)</h4><p>Is downside protection priced too high or too low compared with upside bets?</p><p class="greek">Skew. On NIFTY, puts usually cost more than equally distant calls.</p></div>
+    <div class="dial"><div class="n">Bet 6</div><h4>Calendar (term structure)</h4><p>Is next week priced too high or too low compared with next month?</p><p class="greek">Term structure. Bought by calendar and diagonal spreads.</p></div>
+    <div class="dial"><div class="n">Bet 7</div><h4>Togetherness (correlation)</h4><p>Will the stocks in an index move together, or each go their own way?</p><p class="greek">Correlation. Traded by dispersion: index options against stock options.</p></div>
+  </div>
+
+  <div class="callout">
+    <p><b>The two that matter most are linked.</b> Bet 2 (size of move) and bet 4 (time) are two sides of one coin. If you own options, you pay a little every day (time) for the right to profit from a big move. If you sell options, you collect that daily rent and accept the risk of the big move. Almost every option strategy is a choice about which side of this coin to stand on, and at what price.</p>
+  </div>
+
+  <h3>The common strategies, described as bets</h3>
+  <p class="small">▲ = gains if this rises or happens · ▼ = gains if it falls or does not happen · ● = little exposure</p>
+  <div class="tbl"><table>
+    <thead><tr><th>Strategy</th><th class="c">Direction</th><th class="c">Big moves</th><th class="c">Options get pricier</th><th class="c">Time passing</th><th>In one line</th></tr></thead>
+    <tbody>
+      <tr><td>Buy a call</td><td class="c up">▲</td><td class="c up">▲</td><td class="c up">▲</td><td class="c down">▼</td><td>Up, soon, and by more than priced</td></tr>
+      <tr><td>Buy a put</td><td class="c down">▼</td><td class="c up">▲</td><td class="c up">▲</td><td class="c down">▼</td><td>Down, soon, and by more than priced</td></tr>
+      <tr><td>Sell a put</td><td class="c up">▲</td><td class="c down">▼</td><td class="c down">▼</td><td class="c up">▲</td><td>"It will not fall much"; you are the insurer</td></tr>
+      <tr><td>Covered call (own stock, sell call)</td><td class="c up">▲</td><td class="c down">▼</td><td class="c down">▼</td><td class="c up">▲</td><td>Swap the big upside for steady income</td></tr>
+      <tr><td>Bull call spread</td><td class="c up">▲</td><td class="c flat">●</td><td class="c flat">●</td><td class="c flat">●</td><td>A cheaper, capped bet on "up"</td></tr>
+      <tr><td>Long straddle / strangle</td><td class="c flat">●</td><td class="c up">▲</td><td class="c up">▲</td><td class="c down">▼</td><td>"Something big will happen, either way"</td></tr>
+      <tr><td>Short straddle / strangle</td><td class="c flat">●</td><td class="c down">▼</td><td class="c down">▼</td><td class="c up">▲</td><td>"Calmer than priced"; unlimited risk</td></tr>
+      <tr><td>Iron condor / iron fly</td><td class="c flat">●</td><td class="c down">▼</td><td class="c down">▼</td><td class="c up">▲</td><td>"Calmer than priced", with a loss cap</td></tr>
+      <tr><td>Long butterfly</td><td class="c flat">●</td><td class="c down">▼</td><td class="c flat">●</td><td class="c up">▲</td><td>"It will end right here"</td></tr>
+      <tr><td>Calendar spread</td><td class="c flat">●</td><td class="c down">▼</td><td class="c up">▲</td><td class="c up">▲</td><td>"Near term is overpriced versus later"</td></tr>
+      <tr><td>Risk reversal (buy call, sell put)</td><td class="c up">▲</td><td class="c flat">●</td><td class="c flat">●</td><td class="c flat">●</td><td>"Up", paid for by selling expensive downside protection</td></tr>
+      <tr><td>Protective put / collar</td><td class="c up">▲</td><td class="c up">▲</td><td class="c up">▲</td><td class="c down">▼</td><td>Own the stock, insure the downside</td></tr>
+      <tr><td>Far out-of-the-money put (tail hedge)</td><td class="c down">▼</td><td class="c up">▲</td><td class="c up">▲</td><td class="c down">▼</td><td>"A crash is more likely than priced"</td></tr>
+    </tbody>
+  </table></div>
+  <p class="small">The explorer in part 4 computes these bets in rupees for any strategy you pick.</p>
+</section>
+
+<!-- ============ 3 ============ -->
+<section id="data">
+  <div class="part">Part 1 · The crash course</div>
+  <h2>What eleven years of NIFTY data say about the central bet</h2>
+  <p class="sub">The biggest question in options is bet 2 against bet 4: is movement priced too high or too low? Here is the answer for NIFTY from this project's own stored data, June 2015 to September 2026.</p>
+
+  <figure id="c-vrp"><div class="ft">Movement priced by options versus movement that happened</div><div class="fs">India VIX at month end, and NIFTY's actual movement over the following month, both as yearly volatility in percent.</div><div class="chartwrap"></div><div class="legend"><span><i style="background:var(--s1)"></i>Priced (India VIX)</span><span><i style="background:var(--s2)"></i>Actual, next month</span></div><figcaption>The blue line sits above the orange line most of the time: options usually priced more movement than happened. The orange spike above blue is March 2020, when actual movement reached 88 against a VIX of 23 on 5 March.</figcaption><div class="src">Source: this project's <code>macro_history</code> (india_vix, nifty50), computed 2026-10-11. Actual = standard deviation of daily log returns over the next 21 sessions × √252.</div></figure>
+
+  <div class="tiles">
+    <div class="tile"><div class="k">Days options were overpriced</div><div class="v">80%</div><p>Share of 2,744 days when VIX was above the movement of the following month.</p></div>
+    <div class="tile"><div class="k">Average gap</div><div class="v">2.5 points</div><p>VIX averaged 16.5; actual movement averaged 14.1. That gap is the "insurance premium" option sellers collect.</p></div>
+    <div class="tile"><div class="k">Worst gap</div><div class="v">−64.5 points</div><p>5 March 2020: VIX 23.2, actual movement over the next month 87.8. A seller who ignored this lost years of premium.</p></div>
+  </div>
+
+  <figure id="c-years"><div class="ft">The gap, year by year</div><div class="fs">Average of (VIX − next month's actual movement), vol points. Positive = options were overpriced.</div><div class="chartwrap"></div><figcaption>* 2026 runs to September. Positive every single year, even 2020, because one terrible month is outweighed by eleven ordinary ones. The gap was smallest in 2024 and 2026, years with sharp shocks (the June 2024 election, the April 2026 US–Iran ceasefire).</figcaption></figure>
+
+  <h3>Why sellers usually win, and how they occasionally get destroyed</h3>
+  <p>Take each day's move and compare it with what the previous evening's VIX implied (VIX ÷ 16). If moves followed a normal bell curve, the bars would match.</p>
+  <figure id="c-tails"><div class="ft">Daily NIFTY moves, measured in "expected moves"</div><div class="fs">Share of days, 2015 to 2026 (2,739 days). "1×" means the move equalled VIX ÷ 16.</div><div class="chartwrap"></div><div class="legend"><span><i class="box" style="background:var(--s1)"></i>What actually happened</span><span><i class="box" style="background:var(--muted)"></i>What a normal bell curve predicts</span></div><figcaption>Two lessons in one chart. Most days are quieter than priced: 79% of days moved less than 1×, against 68% for a bell curve. That is the seller's steady income. But the extreme days are far more common than a bell curve allows. Moves above 4× happened on 4 days; a bell curve expects one such day every 60 years.</figcaption></figure>
+
+  <div class="tbl"><table>
+    <thead><tr><th>Day</th><th>What happened</th><th class="num">NIFTY move</th><th class="num">VIX the evening before</th><th class="num">Size in expected moves</th></tr></thead>
+    <tbody>
+      <tr><td>24 Aug 2015</td><td>China devaluation sell-off</td><td class="num">−5.9%</td><td class="num">17.1</td><td class="num">5.7×</td></tr>
+      <tr><td>20 Sep 2019</td><td>Surprise corporate tax cut</td><td class="num">+5.3%</td><td class="num">15.6</td><td class="num">5.3×</td></tr>
+      <tr><td>4 Jun 2024</td><td>Election result</td><td class="num">−5.9%</td><td class="num">20.9</td><td class="num">4.6×</td></tr>
+      <tr><td>12 Mar 2020</td><td>COVID crash</td><td class="num">−8.3%</td><td class="num">31.6</td><td class="num">4.4×</td></tr>
+      <tr><td>7 Apr 2025</td><td>US tariff shock</td><td class="num">−3.2%</td><td class="num">13.8</td><td class="num">3.8×</td></tr>
+      <tr><td>24 Feb 2022</td><td>Ukraine invasion</td><td class="num">−4.8%</td><td class="num">24.5</td><td class="num">3.2×</td></tr>
+    </tbody>
+  </table></div>
+  <div class="callout warn"><p><b>The whole of options trading in one sentence:</b> options are usually overpriced, so sellers earn a steady premium, but the market's worst days are much worse than the price assumes, so a seller who cannot survive those days eventually loses everything. Buyers lose a little most days and can win big on the rare ones. Who comes out ahead depends on the size of the premium against the size and frequency of the surprises, and on surviving long enough to collect.</p></div>
+</section>
+
+<!-- ============ 4 ============ -->
+<section id="explorer">
+  <div class="part">Part 2 · Play with it</div>
+  <h2>Strategy explorer</h2>
+  <p class="sub">Pick a strategy and move the sliders. The solid line is profit or loss <b>today</b> if NIFTY jumped to that level; the dashed line is the result <b>at expiry</b>. The cards underneath translate the position into its bets, in rupees for one lot of 65.</p>
+
+  <div class="panel">
+    <div class="ctrl" style="margin-bottom:10px"><label for="strat">Strategy</label><select id="strat"></select></div>
+    <div class="controls">
+      <div class="ctrl"><label for="ex-days">Days to expiry <b id="ex-days-o">7</b></label><input id="ex-days" type="range" min="1" max="60" step="1" value="7"></div>
+      <div class="ctrl"><label for="ex-iv">Implied volatility (VIX-like) <b id="ex-iv-o">14</b></label><input id="ex-iv" type="range" min="8" max="45" step="0.5" value="14"></div>
+      <div class="ctrl"><label for="ex-skew">Extra price of downside puts <b id="ex-skew-o">2</b></label><input id="ex-skew" type="range" min="0" max="8" step="0.5" value="2"></div>
+    </div>
+    <figure id="c-ex" style="margin:4px 0 0;background:var(--bg)"><div class="chartwrap"></div><div class="legend"><span><i style="background:var(--s1)"></i>Value today</span><span><i style="background:var(--muted)"></i>At expiry (dashed)</span></div></figure>
+    <div class="legs" id="ex-legs"></div>
+    <p class="story" id="ex-story"></p>
+    <div class="betcard" id="ex-bets"></div>
+    <p class="small" style="margin-top:8px">Prices use the Black-Scholes model at zero interest rate, NIFTY at 22,500, lot 65, strikes rounded to 50. "Extra price of downside puts" adds that many volatility points for every 5% a strike sits below the index, mimicking NIFTY's skew. Real prices differ; this is for building intuition.</p>
+  </div>
+
+  <h3>How fast options lose value with time</h3>
+  <figure id="c-decay"><div class="ft">Value of an at-the-money NIFTY call as expiry approaches</div><div class="fs">Model price in points, NIFTY at 22,500, implied volatility 14%, nothing else changes.</div><div class="chartwrap"></div><figcaption>Value falls slowly at first and fastest in the final week. That is why option sellers like short-dated options and buyers of short-dated options need the move to come quickly. It is also why India's weekly expiries attract so much trading.</figcaption></figure>
+</section>
+
+<!-- ============ 5 ============ -->
+<section id="families">
+  <div class="part">Part 3 · The map</div>
+  <h2>The bet families, one by one</h2>
+  <p class="sub">The whole options world, grouped by the bet being made. For each: the bet in one line, when it wins and loses, the usual strategies, who does it at scale, what the evidence says, and whether this project can do it.</p>
+  <div id="fam-list"></div>
+</section>
+
+<!-- ============ 6 ============ -->
+<section id="choose">
+  <div class="part">Part 3 · The map</div>
+  <h2>Choosing a trade: start from what you believe</h2>
+  <p class="sub">A professional never starts with "I want to trade a condor". They start with a belief that differs from the price, then pick the cheapest structure that expresses only that belief. Work down the questions.</p>
+  <div class="flow">
+    <div class="fq"><div class="qq">1 · Do I disagree with the market about direction?<small>And how strongly, and by when?</small></div><div class="aa"><div><b>Strong view, big move, soon:</b> buy a call or put.</div><div><b>Moderate view, or options look expensive:</b> a vertical spread (buy one, sell a further one to cut the cost).</div><div><b>Mild view, want income:</b> sell a put below the market (if bullish) or a covered call.</div></div></div>
+    <div class="fq"><div class="qq">2 · Do I disagree about how much it will move?<small>Compare your expected move with the straddle price or VIX ÷ 16.</small></div><div class="aa"><div><b>Bigger than priced:</b> buy a straddle or strangle.</div><div><b>Smaller than priced:</b> sell a strangle, an iron condor (capped) or an iron fly.</div><div><b>It will end near one level:</b> a butterfly.</div></div></div>
+    <div class="fq"><div class="qq">3 · Do I disagree about when?<small>Is the near-term option priced differently from the later one?</small></div><div class="aa"><div><b>Near-term too expensive (for example before an event):</b> calendar spread, sell near, buy far.</div><div><b>Event is not priced enough:</b> buy the expiry that contains the event.</div></div></div>
+    <div class="fq"><div class="qq">4 · Do I disagree about the shape?<small>Are downside puts too dear or too cheap compared with calls?</small></div><div class="aa"><div><b>Puts too expensive:</b> risk reversal (sell put, buy call) or a put ratio spread.</div><div><b>Crash protection too cheap:</b> buy far out-of-the-money puts.</div></div></div>
+    <div class="fq"><div class="qq">5 · Do I just want to change my portfolio's risk?<small>No view on the option price at all.</small></div><div class="aa"><div><b>Protect stocks I own:</b> protective put or collar.</div><div><b>Earn income on stocks I own:</b> covered call.</div></div></div>
+    <div class="fq"><div class="qq">6 · If no answer is "yes", do not trade options.<small>Without a disagreement with the price, you are paying costs to take a fair bet.</small></div><div class="aa"><div>At ₹54.91 per round trip on one NIFTY lot at ₹50 premium, costs alone are 1.7% of premium. A fair bet minus costs is a losing bet.</div></div></div>
+  </div>
+</section>
+
+<!-- ============ 7 ============ -->
+<section id="pros">
+  <div class="part">Part 4 · The professionals</div>
+  <h2>Who actually wins, and which bets they take</h2>
+  <p class="sub">Options are zero-sum before costs. In India, SEBI has measured both sides, and the professionals mostly win.</p>
+
+  <figure id="c-flow"><div class="ft">Gross profit and loss in Indian equity futures and options, 2023-24</div><div class="fs">₹ crore, before trading costs.</div><div class="chartwrap"></div><figcaption>Individuals lost about what professional desks and foreign funds gained. SEBI found 96% of proprietary desks' profit and 97% of foreign funds' profit came from algorithmic trading. Over FY22 to FY24, 93% of individuals lost money and about 1% made more than ₹1 lakh.</figcaption><div class="src">SEBI study, 23 Sep 2024: <a href="https://www.sebi.gov.in/media-and-notifications/press-releases/sep-2024/updated-sebi-study-reveals-93-of-individual-traders-incurred-losses-in-equity-fando-between-fy22-and-fy24-aggregate-losses-exceed-1-8-lakh-crores-over-three-years_86906.html">press release</a>; figures as reported by <a href="https://www.business-standard.com/amp/opinion/editorial/a-losing-proposition-odds-are-against-individuals-in-f-o-trading-124092401316_1.html">Business Standard</a>.</div></figure>
+
+  <div class="tbl"><table>
+    <thead><tr><th>Business</th><th>Main bets</th><th>How the money is made</th><th>Who, and how big</th></tr></thead>
+    <tbody>
+      <tr><td><b>Market making</b></td><td>None on purpose; they hedge every bet away</td><td>Earn the gap between buy and sell quotes millions of times a day</td><td>Jane Street $39.6 bn, HRT $12.3 bn, Citadel Securities $12.2 bn trading revenue in 2025 (all asset classes). Citadel says it handles about 30% of US listed options.</td></tr>
+      <tr><td><b>Insurance selling</b></td><td>Calm (▼ big moves), time (▲)</td><td>Collect premium; survive crashes through size limits</td><td>US option-based ETFs held about $245 bn at end-2025; JPMorgan's JEPI and JEPQ over $60 bn together. Prop desks in India.</td></tr>
+      <tr><td><b>Insurance buying</b></td><td>Big moves (▲), options get pricier (▲)</td><td>Lose a little for years, win big in crashes</td><td>Universa: 105% a year on capital spent on options, 2008 to 2019 (EY-audited, per Fortune). Tail-risk fund index +34.8% in 2020.</td></tr>
+      <tr><td><b>Relative value</b></td><td>Shape, calendar, togetherness</td><td>Own the cheap option, sell the dear one, hedge the rest</td><td>Capstone, about $13 bn (2026). Dispersion grew five-fold in four years.</td></tr>
+      <tr><td><b>Market structure</b></td><td>Predictable flows</td><td>Position ahead of forced trades, expiry-day flows</td><td>SEBI alleges Jane Street made ₹36,671 crore net in India, Jan 2023 to early 2025, mostly index options; Jane Street disputes it.</td></tr>
+    </tbody>
+  </table></div>
+  <figure id="c-who"><div class="ft">Who trades NSE index options</div><div class="fs">Share of premium turnover, June 2026.</div><div class="chartwrap"></div><figcaption>Proprietary desks are almost half the market. "Everyone else" (foreign funds, institutions and others) is derived as the remainder of 100%.</figcaption><div class="src">NSE Market Pulse, June 2026, as reported by <a href="https://tradingqna.com/t/nse-market-pulse-june-2026/195253">TradingQnA</a>.</div></figure>
+  <p class="src">Revenue: <a href="https://youngandcalculated.substack.com/p/jane-street-booked-396bn-in-2025">Young and Calculated</a> (citing Bloomberg and Reuters); <a href="https://www.citadelsecurities.com/what-we-do/options">Citadel Securities</a>. ETFs: <a href="https://www.indexologyblog.com/tag/options-based-etfs/">Indexology</a>, <a href="https://www.etf.com/sections/news/jepq-joins-big-leagues-options-income-etfs-surge">etf.com</a>. Universa: <a href="https://fortune.com/2023/08/05/black-swan-hedge-fund-mark-spitznagel-interview-taleb-credit-bubble">Fortune</a>. Tail index: <a href="https://www.hedgeco.net/news/?p=49743">HedgeCo</a>. Capstone: <a href="https://en.wikipedia.org/wiki/Capstone_Investment_Advisors">Wikipedia</a>. Dispersion: <a href="https://risk.net/markets/7959224/doubts-dog-equity-dispersion-as-market-grows-five-fold">Risk.net</a>. Jane Street: <a href="https://www.dtnext.in/news/business/sebi-bans-us-based-jane-street-from-securities-mkt-impounds-illegal-gains-of-rs-4843-crore-839094">Reuters via DTNext</a>.</p>
+
+  <h3>How people actually make millions in options</h3>
+  <ul>
+    <li><b>Volume times a tiny edge.</b> Market makers earn a fraction of a rupee per contract, millions of times a day, and hedge away the risk. This is where most of the money sits, and it needs speed and scale.</li>
+    <li><b>Patience with a cheap, convex bet.</b> Universa and Ackman paid small premiums for years or weeks, and were paid many times over when the crash came (Ackman: $27 million became $2.6 billion in three weeks). The skill is staying in through the losing years.</li>
+    <li><b>Steady premium with strict sizing.</b> Insurance sellers compound small gains; the ones who survive are the ones who size for the worst day, not the average day.</li>
+    <li><b>Being early on a mispricing nobody else is watching.</b> Dispersion and skew trades pay well until they become crowded.</li>
+  </ul>
+  <p>What almost never makes millions: buying short-dated calls and puts on a hunch. That is what about 97% of Indian individual traders do (SEBI FY26, via a secondary summary), and about 88% of them lose.</p>
+</section>
+
+<!-- ============ 8 ============ -->
+<section id="rules">
+  <div class="part">Part 4 · The professionals</div>
+  <h2>Ten rules professionals live by</h2>
+  <div class="rules">
+    <div class="rule"><b>Know your bet before your strategy.</b><p>Write down which of the seven bets you are taking and why the price is wrong. If you cannot, do not trade.</p></div>
+    <div class="rule"><b>Compare with the price, not with nothing.</b><p>"NIFTY will move 1%" is not a view. "NIFTY will move more than the 1.34% the straddle prices" is.</p></div>
+    <div class="rule"><b>Use the rule of 16.</b><p>VIX ÷ 16 is the daily move priced in. At VIX 14 that is about 0.9%, or about 200 NIFTY points at 22,500.</p></div>
+    <div class="rule"><b>Most days are quieter than priced.</b><p>79% of NIFTY days moved less than one expected move. That is the steady income for sellers.</p></div>
+    <div class="rule"><b>The worst days are far worse than priced.</b><p>Four NIFTY days since 2015 moved more than four expected moves; a bell curve allows one in 60 years. Size for those days.</p></div>
+    <div class="rule"><b>Size for survival.</b><p>The project's rule: at most one-third of capital as margin, so the worst historical week costs 12 to 15% of capital, not all of it.</p></div>
+    <div class="rule"><b>Every leg costs money.</b><p>A four-leg trade has eight orders round trip: 8 × ₹20 brokerage plus 18% GST is about ₹189 per lot before taxes and slippage.</p></div>
+    <div class="rule"><b>Caps are not free.</b><p>Buying protection 1% beyond sold strikes turned the project's winning strangle into a loser, with a worst week of −95% of margin.</p></div>
+    <div class="rule"><b>Visible events are already priced.</b><p>The project tested skipping the strangle before RBI, Budget and election days. The skipped weeks would have paid more, not less.</p></div>
+    <div class="rule"><b>Trade only what trades.</b><p>Use strikes with real volume. In stock options, exit two days before expiry to avoid physical delivery margins.</p></div>
+  </div>
+</section>
+
+<!-- ============ 9 ============ -->
+<section id="us">
+  <div class="part">Part 4 · The professionals</div>
+  <h2>Which bets Alpha Signal takes, and which it should not</h2>
+  <div class="tbl"><table>
+    <thead><tr><th>Bet family</th><th>Status in this project</th><th>Why</th></tr></thead>
+    <tbody>
+      <tr><td>Calm (insurance selling)</td><td><span class="tag good">Running on paper</span></td><td>0.05-delta NIFTY strangle, two days before expiry: 24.6% a year on margin in 2019 to 2026 backtests, worst week −8.9%. Forward test needs 25 trades.</td></tr>
+      <tr><td>Calm, capped</td><td><span class="tag warn">To test</span></td><td>Wider loss caps on the same strangle. Narrow caps failed.</td></tr>
+      <tr><td>Events</td><td><span class="tag warn">To test</span></td><td>Straddles before RBI, Budget and election days. The eleven-day replay looked good but was selection-biased.</td></tr>
+      <tr><td>Direction</td><td><span class="tag warn">To test</span></td><td>Bull call spreads on mid caps the stock model ranks highly; mid caps are the only tier with proven stock signals.</td></tr>
+      <tr><td>Crash protection</td><td><span class="tag">Worth testing</span></td><td>A small, steady put budget would lose a little most weeks and pay in exactly the weeks the strangle suffers.</td></tr>
+      <tr><td>Calendar and shape</td><td><span class="tag">Later</span></td><td>Testable on NIFTY back to 2019 from stored prices.</td></tr>
+      <tr><td>Togetherness (dispersion)</td><td><span class="tag">Later</span></td><td>Needs stock options back to 2019 (about 0.6 GB backfill) and high margin.</td></tr>
+      <tr><td>Market making, arbitrage, flow trading</td><td><span class="tag bad">Out of reach</span></td><td>Needs exchange-grade speed, the lowest costs, and intraday data.</td></tr>
+    </tbody>
+  </table></div>
+  <p class="foot">Data sources are listed under each chart and in the family cards. Charts from this project's database were computed read-only on 2026-10-11. External figures are mostly press reports of primary filings; firm revenues cover all asset classes. The explorer is a teaching model, not a pricing tool. Full research: <code>docs/research/0006-options-setup-identification.md</code>.</p>
+</section>
+</div>
+
+<script>
+(function(){
+const VRP = {"d": ["2015-06", "2015-07", "2015-08", "2015-09", "2015-10", "2015-11", "2015-12", "2016-01", "2016-02", "2016-03", "2016-04", "2016-05", "2016-06", "2016-07", "2016-08", "2016-09", "2016-10", "2016-11", "2016-12", "2017-01", "2017-02", "2017-03", "2017-04", "2017-05", "2017-06", "2017-07", "2017-08", "2017-09", "2017-10", "2017-11", "2017-12", "2018-01", "2018-02", "2018-03", "2018-04", "2018-05", "2018-06", "2018-07", "2018-08", "2018-09", "2018-10", "2018-11", "2018-12", "2019-01", "2019-02", "2019-03", "2019-04", "2019-05", "2019-06", "2019-07", "2019-08", "2019-09", "2019-10", "2019-11", "2019-12", "2020-01", "2020-02", "2020-03", "2020-04", "2020-05", "2020-06", "2020-07", "2020-08", "2020-09", "2020-10", "2020-11", "2020-12", "2021-01", "2021-02", "2021-03", "2021-04", "2021-05", "2021-06", "2021-07", "2021-08", "2021-09", "2021-10", "2021-11", "2021-12", "2022-01", "2022-02", "2022-03", "2022-04", "2022-05", "2022-06", "2022-07", "2022-08", "2022-09", "2022-10", "2022-11", "2022-12", "2023-01", "2023-02", "2023-03", "2023-04", "2023-05", "2023-06", "2023-07", "2023-08", "2023-09", "2023-10", "2023-11", "2023-12", "2024-01", "2024-02", "2024-03", "2024-04", "2024-05", "2024-06", "2024-07", "2024-08", "2024-09", "2024-10", "2024-11", "2024-12", "2025-01", "2025-02", "2025-03", "2025-04", "2025-05", "2025-06", "2025-07", "2025-08", "2025-09", "2025-10", "2025-11", "2025-12", "2026-01", "2026-02", "2026-03", "2026-04", "2026-05", "2026-06", "2026-07", "2026-08", "2026-09"], "vix": [16.9, 14.6, 24.6, 19.6, 17.9, 16.4, 13.9, 17.2, 20.2, 16.6, 16.5, 16.0, 16.3, 14.9, 13.2, 17.2, 14.6, 16.9, 15.5, 16.8, 13.8, 12.4, 10.9, 11.8, 11.7, 11.9, 11.9, 12.5, 12.4, 13.6, 12.7, 15.9, 13.8, 15.8, 12.4, 13.2, 12.9, 12.5, 12.6, 17.0, 19.8, 19.2, 16.0, 17.1, 18.3, 16.6, 21.8, 16.1, 14.9, 13.6, 16.3, 15.9, 16.3, 13.9, 11.7, 17.4, 23.2, 64.4, 34.0, 30.2, 29.1, 24.2, 22.8, 19.5, 24.8, 19.8, 21.1, 25.3, 28.1, 20.6, 23.0, 17.4, 13.1, 12.8, 14.5, 18.4, 17.4, 21.2, 16.2, 22.0, 28.6, 20.6, 19.4, 20.5, 21.8, 16.5, 18.7, 20.0, 15.8, 13.8, 14.9, 16.9, 14.0, 12.9, 10.9, 12.0, 10.8, 10.4, 12.1, 11.4, 11.8, 12.7, 14.5, 16.0, 15.6, 12.8, 12.9, 24.6, 13.8, 13.2, 13.4, 12.8, 15.6, 14.4, 14.4, 16.2, 13.9, 12.7, 18.2, 16.1, 12.8, 11.5, 11.8, 11.1, 12.1, 11.6, 9.5, 13.6, 13.7, 27.9, 18.5, 16.2, 13.6, 11.8, 11.2, 11.2], "rv": [13.7, 25.5, 19.9, 10.9, 11.4, 12.6, 18.0, 21.2, 17.1, 15.1, 14.7, 12.3, 9.1, 10.7, 13.9, 12.2, 18.5, 12.8, 9.7, 8.8, 9.5, 7.8, 9.4, 5.5, 7.3, 11.5, 10.1, 7.9, 8.3, 10.2, 7.9, 13.7, 14.3, 9.0, 9.6, 9.6, 7.5, 8.6, 15.1, 23.3, 11.1, 15.2, 9.6, 10.8, 10.2, 10.6, 18.3, 11.9, 11.9, 17.9, 25.3, 12.3, 8.2, 8.9, 12.6, 21.2, 80.9, 48.9, 33.5, 20.2, 15.0, 15.1, 19.4, 15.3, 13.8, 14.5, 25.3, 27.5, 19.9, 20.3, 12.6, 7.6, 9.3, 9.1, 9.6, 13.7, 16.4, 17.6, 17.1, 28.0, 19.8, 19.6, 23.1, 17.5, 12.3, 14.7, 14.3, 13.7, 9.6, 12.4, 11.8, 10.3, 13.5, 8.0, 8.7, 7.9, 8.6, 7.1, 9.2, 10.8, 7.1, 11.5, 15.5, 10.7, 11.3, 9.7, 10.8, 28.3, 8.9, 14.5, 11.6, 11.5, 16.0, 10.9, 14.8, 10.6, 11.8, 20.8, 17.6, 10.4, 7.3, 10.1, 7.3, 7.8, 7.6, 7.2, 13.3, 15.0, 25.6, 18.3, 13.4, 11.5, 12.3, 8.1, 10.0, 13.6]};
+const YEARS = [[2015,2.0],[2016,2.3],[2017,3.7],[2018,2.8],[2019,3.2],[2020,1.7],[2021,3.0],[2022,2.9],[2023,2.8],[2024,1.2],[2025,2.5],[2026,1.2]];
+const TAILS = {labels:['0–0.5×','0.5–1×','1–1.5×','1.5–2×','2–2.5×','2.5–3×','3–4×','over 4×'],
+  actual:[1299,863,380,129,40,18,6,4], normal:[1048.8,821.2,540.7,241.3,90.7,27.4,7.2,0.17], total:2739};
+const LOT=65, S0=22500;
+const css=v=>getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const inr=n=>(n<0?'−':'')+'₹'+Math.abs(Math.round(n)).toLocaleString('en-IN');
+const sgn=n=>(n>0?'+':n<0?'−':'')+'₹'+Math.abs(Math.round(n)).toLocaleString('en-IN');
+function niceStep(raw){const p=Math.pow(10,Math.floor(Math.log10(raw)));const f=raw/p;return (f<1.5?1:f<3.5?2:f<7.5?5:10)*p;}
+const el=(id)=>document.getElementById(id);
+
+/* ---------- rule of 16 calculator ---------- */
+function calc(){
+  const v=+el('cv').value, s=+el('cs').value; el('cv-o').textContent=v; el('cs-o').textContent=s.toLocaleString('en-IN');
+  const d=v/Math.sqrt(252), w=v/Math.sqrt(52), m=v/Math.sqrt(12);
+  const t=(k,pct,txt)=>`<div class="tile"><div class="k">${k}</div><div class="v">±${pct.toFixed(2)}%</div><p>${txt}</p></div>`;
+  el('calc-out').innerHTML=t('One day',d,`About ${Math.round(s*d/100).toLocaleString('en-IN')} NIFTY points`)+t('One week',w,`About ${Math.round(s*w/100).toLocaleString('en-IN')} points`)+t('One month',m,`About ${Math.round(s*m/100).toLocaleString('en-IN')} points`);
+}
+['cv','cs'].forEach(i=>el(i).addEventListener('input',calc));
+
+/* ---------- Black-Scholes (r = 0) ---------- */
+function ncdf(x){const t=1/(1+0.2316419*Math.abs(x));const d=0.3989423*Math.exp(-x*x/2);let p=d*t*(0.3193815+t*(-0.3565638+t*(1.781478+t*(-1.821256+t*1.330274))));return x>0?1-p:p;}
+function bs(type,S,K,T,vol){
+  if(type==='fut') return S;
+  if(T<=1e-9) return type==='call'?Math.max(S-K,0):Math.max(K-S,0);
+  const sd=vol*Math.sqrt(T), d1=(Math.log(S/K)+0.5*sd*sd)/sd, d2=d1-sd;
+  return type==='call'? S*ncdf(d1)-K*ncdf(d2) : K*ncdf(-d2)-S*ncdf(-d1);
+}
+function ivFor(K,S,iv,skew){ const below=Math.max(0,(S-K)/S); return Math.max(3,iv+skew*below/0.05)/100; }
+
+/* ---------- strategies ---------- */
+const r50=x=>Math.round(x/50)*50;
+const K=p=>r50(S0*(1+p/100));
+const STRATS=[
+ {g:'Direction',id:'lc',n:'Buy a call',legs:()=>[['call',K(0),1]],story:'Wins if NIFTY rises by more than the premium before expiry. Loses only the premium. Time and falling option prices hurt it.'},
+ {g:'Direction',id:'lp',n:'Buy a put',legs:()=>[['put',K(0),1]],story:'Wins if NIFTY falls by more than the premium. Loses only the premium.'},
+ {g:'Direction',id:'sp',n:'Sell a put (3% below)',legs:()=>[['put',K(-3),-1]],story:'You are the insurer: keep the premium unless NIFTY falls more than 3%. The loss below that keeps growing.'},
+ {g:'Direction',id:'bcs',n:'Bull call spread (ATM / +2%)',legs:()=>[['call',K(0),1],['call',K(2),-1]],story:'A cheaper bet on "up": profit capped at the 2% gap, loss capped at what you paid. Mostly a pure direction bet.'},
+ {g:'Direction',id:'bps',n:'Bear put spread (ATM / −2%)',legs:()=>[['put',K(0),1],['put',K(-2),-1]],story:'A capped bet on "down". The sold put pays for part of the bought one.'},
+ {g:'Direction',id:'rr',n:'Risk reversal (buy +3% call, sell −3% put)',legs:()=>[['call',K(3),1],['put',K(-3),-1]],story:'Bullish, paid for by selling downside protection, which on NIFTY is usually the expensive side. Also a bet on skew.'},
+ {g:'Owning the index',id:'cc',n:'Covered call (own NIFTY, sell +3% call)',legs:()=>[['fut',0,1],['call',K(3),-1]],story:'Own the index and sell away gains above 3% for income. What option-income funds like JEPI do.'},
+ {g:'Owning the index',id:'pp',n:'Protective put (own NIFTY, buy −3% put)',legs:()=>[['fut',0,1],['put',K(-3),1]],story:'Own the index and insure it below 3% down. The premium is the insurance cost.'},
+ {g:'Owning the index',id:'col',n:'Collar (own NIFTY, buy −3% put, sell +3% call)',legs:()=>[['fut',0,1],['put',K(-3),1],['call',K(3),-1]],story:'Insurance paid for by giving up gains above 3%. Locks the result into a band.'},
+ {g:'Size of move',id:'ls',n:'Long straddle (ATM call + put)',legs:()=>[['call',K(0),1],['put',K(0),1]],story:'"Something big will happen, I do not know which way." Needs a move bigger than the combined premium.'},
+ {g:'Size of move',id:'lstr',n:'Long strangle (±3%)',legs:()=>[['call',K(3),1],['put',K(-3),1]],story:'Cheaper than a straddle, but needs an even bigger move.'},
+ {g:'Size of move',id:'ss',n:'Short straddle',legs:()=>[['call',K(0),-1],['put',K(0),-1]],story:'"It will stay near here." Biggest premium, unlimited risk both ways.'},
+ {g:'Size of move',id:'sstr',n:'Short strangle (±3%)',legs:()=>[['call',K(3),-1],['put',K(-3),-1]],story:'"It will stay inside ±3%." This is the shape of the project’s paper trade, which uses strikes about 2 to 3% out.'},
+ {g:'Size of move',id:'ic',n:'Iron condor (sell ±3%, buy ±5%)',legs:()=>[['call',K(3),-1],['put',K(-3),-1],['call',K(5),1],['put',K(-5),1]],story:'The short strangle with a loss cap. Less premium, but a known worst case.'},
+ {g:'Size of move',id:'ifly',n:'Iron fly (sell ATM, buy ±3%)',legs:()=>[['call',K(0),-1],['put',K(0),-1],['call',K(3),1],['put',K(-3),1]],story:'A short straddle with caps. Big premium, capped loss, small sweet spot.'},
+ {g:'Size of move',id:'bf',n:'Long call butterfly (−2%, 2× ATM, +2%)',legs:()=>[['call',K(-2),1],['call',K(0),-2],['call',K(2),1]],story:'"It will finish right here." Cheap, and pays most if NIFTY ends exactly at the middle strike.'},
+ {g:'Time and shape',id:'cal',n:'Calendar (sell this week ATM call, buy one a month later)',legs:()=>[['call',K(0),-1,0],['call',K(0),1,28]],story:'Bets the near-term option is too expensive compared with the later one. Wins if NIFTY stays near the strike and if later options hold their price.'},
+ {g:'Time and shape',id:'prs',n:'Put ratio spread (buy 1 at −1%, sell 2 at −4%)',legs:()=>[['put',K(-1),1],['put',K(-4),-2]],story:'Mildly bearish and sells the expensive far puts to pay for it. Dangerous in a crash: below the far strike the loss grows.'},
+ {g:'Crash protection',id:'tail',n:'Tail hedge (buy a put 8% below)',legs:()=>[['put',K(-8),1]],story:'Costs very little and usually expires worthless. In a crash it can pay many times its cost. Try 30 days and raise the volatility to see why.'},
+];
+
+const sel=el('strat'); let lastG='';
+STRATS.forEach((s,i)=>{ if(s.g!==lastG){ const og=document.createElement('optgroup'); og.label=s.g; sel.appendChild(og); lastG=s.g; } sel.lastChild.appendChild(new Option(s.n,s.id)); });
+sel.value='sstr';
+
+function portfolio(legs,S,days,iv,skew,ivShift){
+  let v=0;
+  for(const [type,Kx,q,extra] of legs){
+    const T=Math.max(0,(days+(extra||0)))/365;
+    v+=q*bs(type,S,Kx,T,ivFor(Kx,S0,iv+(ivShift||0),skew));
+  }
+  return v;
+}
+function entryCost(legs,days,iv,skew){ return portfolio(legs,S0,days,iv,skew); }
+
+function explorer(){
+  const s=STRATS.find(x=>x.id===sel.value), legs=s.legs();
+  const days=+el('ex-days').value, iv=+el('ex-iv').value, skew=+el('ex-skew').value;
+  el('ex-days-o').textContent=days; el('ex-iv-o').textContent=iv; el('ex-skew-o').textContent=skew;
+  const isCal=legs.some(l=>l[3]);
+  const cost=entryCost(legs,days,iv,skew);
+  const pnlToday=S=>(portfolio(legs,S,days,iv,skew)-cost)*LOT;
+  const pnlExp=S=>(portfolio(legs,S,0,iv,skew)-cost)*LOT;
+  // legs text
+  el('ex-legs').textContent=legs.map(([t,k,q,e])=>{ if(t==='fut') return 'own NIFTY (1 lot)'; const p=bs(t,S0,k,(days+(e||0))/365,ivFor(k,S0,iv,skew)); return `${q>0?'buy':'sell'} ${Math.abs(q)>1?Math.abs(q)+'× ':''}${k.toLocaleString('en-IN')} ${t}${e?' (expires '+e+' days later)':''} @ ${p.toFixed(1)}`; }).join('  ·  ')+`  ·  net ${cost>=0?'paid':'received'} ${Math.abs(cost).toFixed(1)} pts = ${inr(Math.abs(cost)*LOT)}`;
+  el('ex-story').textContent=s.story+(isCal?' The dashed line is the value when the near option expires; the later option is still alive then.':'');
+  // bets
+  const dS=S0*0.01;
+  const delta=(portfolio(legs,S0+dS,days,iv,skew)-portfolio(legs,S0-dS,days,iv,skew))/2*LOT;
+  const big=((portfolio(legs,S0*1.02,days,iv,skew)+portfolio(legs,S0*0.98,days,iv,skew))/2-portfolio(legs,S0,days,iv,skew))*LOT;
+  const vega=(portfolio(legs,S0,days,iv,skew,1)-portfolio(legs,S0,days,iv,skew))*LOT;
+  const theta=days>1?(portfolio(legs,S0,days-1,iv,skew)-portfolio(legs,S0,days,iv,skew))*LOT:(portfolio(legs,S0,0,iv,skew)-portfolio(legs,S0,days,iv,skew))*LOT;
+  const word=(x,pos,neg,thr,lp,ln)=>Math.abs(x)<thr?'Barely cares':(Math.abs(x)<3*thr&&lp?(x>0?lp:ln):(x>0?pos:neg));
+  // range stats at expiry
+  const lo=S0*0.88, hi=S0*1.12; let mx=-1e18,mn=1e18; const be=[]; let prev=null;
+  for(let i=0;i<=480;i++){const S=lo+(hi-lo)*i/480, v=pnlExp(S); mx=Math.max(mx,v); mn=Math.min(mn,v); if(prev!==null && Math.sign(prev)!==Math.sign(v) && v!==0) be.push(S); prev=v;}
+  const open=(f)=>Math.abs(f(hi*1.3)-f(hi))>LOT*5 || Math.abs(f(lo*0.7)-f(lo))>LOT*5;
+  const upOpen=pnlExp(hi*1.3)>pnlExp(hi)+LOT*5, dnOpenLoss=pnlExp(lo*0.7)<pnlExp(lo)-LOT*5, upOpenLoss=pnlExp(hi*1.3)<pnlExp(hi)-LOT*5, dnOpenGain=pnlExp(lo*0.7)>pnlExp(lo)+LOT*5;
+  const maxP=(upOpen||dnOpenGain)?'unlimited':inr(mx), maxL=(dnOpenLoss||upOpenLoss)?'unlimited':inr(mn);
+  const card=(q,a,n)=>`<div class="bet"><div class="bq">${q}</div><div class="ba">${a}</div><div class="bn">${n}</div></div>`;
+  el('ex-bets').innerHTML=
+    card('Direction',word(delta,'Wants NIFTY up','Wants NIFTY down',1000,'Leans slightly up','Leans slightly down'),`${sgn(delta)} per 1% rise`)+
+    card('Size of move',word(big,'Wants big moves','Wants a quiet market',300),`${sgn(big)} from a 2% move either way`)+
+    card('Price of options',word(vega,'Gains if options get pricier','Gains if options get cheaper',100),`${sgn(vega)} per +1 vol point`)+
+    card('Time',word(theta,'Paid by time passing','Pays for time passing',50),`${sgn(theta)} per day`)+
+    card('At expiry',`Best ${maxP}<br>Worst ${maxL}`,be.length?`Break-even: ${be.map(x=>Math.round(x).toLocaleString('en-IN')).join(' and ')}`:'No break-even in ±12%');
+  drawPayoff(pnlToday,pnlExp);
+}
+function drawPayoff(fToday,fExp){
+  const host=document.querySelector('#c-ex .chartwrap'); const W=Math.max(300,host.clientWidth||600), H=W<520?240:290, m={l:W<520?52:64,r:12,t:12,b:34};
+  const lo=S0*0.9, hi=S0*1.1, n=200; const xs=[],a=[],b=[];
+  for(let i=0;i<=n;i++){const S=lo+(hi-lo)*i/n; xs.push(S); a.push(fToday(S)); b.push(fExp(S));}
+  let ymin=Math.min(...a,...b), ymax=Math.max(...a,...b); const pad=Math.max((ymax-ymin)*0.08,500); ymin-=pad; ymax+=pad;
+  const X=S=>m.l+(S-lo)/(hi-lo)*(W-m.l-m.r), Y=v=>m.t+(ymax-v)/(ymax-ymin)*(H-m.t-m.b), y0=Y(0);
+  const path=arr=>arr.map((v,i)=>(i?'L':'M')+X(xs[i]).toFixed(1)+' '+Y(v).toFixed(1)).join(' ');
+  let fp='M'+X(lo)+' '+y0, fn='M'+X(lo)+' '+y0; b.forEach((v,i)=>{fp+='L'+X(xs[i]).toFixed(1)+' '+Math.min(Y(v),y0).toFixed(1); fn+='L'+X(xs[i]).toFixed(1)+' '+Math.max(Y(v),y0).toFixed(1);}); fp+='L'+X(hi)+' '+y0+'Z'; fn+='L'+X(hi)+' '+y0+'Z';
+  let s=`<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Profit and loss of the selected strategy">`;
+  const nT=Math.max(3,Math.floor((H-m.t-m.b)/45)); const st=niceStep((ymax-ymin)/nT);
+  for(let v=Math.ceil(ymin/st)*st; v<=ymax; v+=st){ s+=`<line x1="${m.l}" x2="${W-m.r}" y1="${Y(v)}" y2="${Y(v)}" stroke="${css('--grid')}"/><text x="${m.l-6}" y="${Y(v)+4}" text-anchor="end" font-size="11" font-family="${css('--mono')}" fill="${css('--muted')}">${Math.abs(v)<1e-6?'0':inr(v)}</text>`; }
+  const xst=W<520?1000:500; for(let v=Math.ceil(lo/xst)*xst; v<=hi; v+=xst) s+=`<text x="${X(v)}" y="${H-m.b+16}" text-anchor="middle" font-size="11" font-family="${css('--mono')}" fill="${css('--muted')}">${v.toLocaleString('en-IN')}</text>`;
+  s+=`<path d="${fp}" fill="${css('--good')}" opacity=".14"/><path d="${fn}" fill="${css('--bad')}" opacity=".14"/>`;
+  s+=`<line x1="${m.l}" x2="${W-m.r}" y1="${y0}" y2="${y0}" stroke="${css('--muted')}" stroke-width="1.2"/>`;
+  s+=`<line x1="${X(S0)}" x2="${X(S0)}" y1="${m.t}" y2="${H-m.b}" stroke="${css('--muted')}" stroke-dasharray="2 4"/>`;
+  s+=`<path d="${path(b)}" fill="none" stroke="${css('--muted')}" stroke-width="2" stroke-dasharray="6 5"/>`;
+  s+=`<path d="${path(a)}" fill="none" stroke="${css('--s1')}" stroke-width="2.6" stroke-linejoin="round"/>`;
+  s+=`<text x="${(m.l+W-m.r)/2}" y="${H-4}" text-anchor="middle" font-size="11" fill="${css('--muted')}" font-family="${css('--body')}">NIFTY level (today 22,500)</text>`;
+  s+=`<rect class="hit" x="${m.l}" y="${m.t}" width="${W-m.l-m.r}" height="${H-m.t-m.b}" fill="transparent"/><circle class="dot" r="5" fill="${css('--s1')}" stroke="${css('--surface')}" stroke-width="2" opacity="0"/></svg>`;
+  host.innerHTML=s+'<div class="tip"></div>';
+  const svg=host.querySelector('svg'), tip=host.querySelector('.tip'), dot=host.querySelector('.dot'), hit=host.querySelector('.hit');
+  const mv=ev=>{const r=svg.getBoundingClientRect(); const px=(ev.clientX-r.left)/r.width*W; const S=Math.max(lo,Math.min(hi,lo+(px-m.l)/(W-m.l-m.r)*(hi-lo))); const v=fToday(S), e=fExp(S);
+    dot.setAttribute('cx',X(S)); dot.setAttribute('cy',Y(v)); dot.setAttribute('opacity',1); tip.textContent=`NIFTY ${Math.round(S).toLocaleString('en-IN')} · today ${sgn(v)} · expiry ${sgn(e)}`; tip.style.left=(X(S)/W*r.width)+'px'; tip.style.top=(Y(v)/H*r.height)+'px'; tip.style.opacity=1;};
+  hit.addEventListener('mousemove',mv); hit.addEventListener('touchmove',e=>mv(e.touches[0]),{passive:true}); hit.addEventListener('mouseleave',()=>{tip.style.opacity=0;dot.setAttribute('opacity',0);});
+}
+['strat','ex-days','ex-iv','ex-skew'].forEach(i=>el(i).addEventListener('input',explorer));
+
+/* ---------- generic charts ---------- */
+function lineChart(id){
+  const host=document.querySelector('#'+id+' .chartwrap'); const W=Math.max(300,host.clientWidth||700), H=W<520?230:280, m={l:36,r:10,t:10,b:28};
+  const n=VRP.d.length, all=VRP.vix.concat(VRP.rv), vmax=Math.ceil(Math.max(...all)/10)*10;
+  const X=i=>m.l+i/(n-1)*(W-m.l-m.r), Y=v=>m.t+(vmax-v)/vmax*(H-m.t-m.b);
+  let s=`<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="VIX versus actual volatility">`;
+  for(let v=0; v<=vmax; v+=20) s+=`<line x1="${m.l}" x2="${W-m.r}" y1="${Y(v)}" y2="${Y(v)}" stroke="${css('--grid')}"/><text x="${m.l-6}" y="${Y(v)+4}" text-anchor="end" font-size="11" font-family="${css('--mono')}" fill="${css('--muted')}">${v}</text>`;
+  const ystep=W<520?3:1; VRP.d.forEach((d,i)=>{ if(d.endsWith('-01') && (+d.slice(0,4))%ystep===0) s+=`<text x="${X(i)}" y="${H-8}" text-anchor="middle" font-size="11" font-family="${css('--mono')}" fill="${css('--muted')}">${d.slice(0,4)}</text>`; });
+  const p=arr=>arr.map((v,i)=>(i?'L':'M')+X(i).toFixed(1)+' '+Y(v).toFixed(1)).join(' ');
+  s+=`<path d="${p(VRP.rv)}" fill="none" stroke="${css('--s2')}" stroke-width="2"/><path d="${p(VRP.vix)}" fill="none" stroke="${css('--s1')}" stroke-width="2"/>`;
+  s+=`<rect class="hit" x="${m.l}" y="${m.t}" width="${W-m.l-m.r}" height="${H-m.t-m.b}" fill="transparent"/></svg>`;
+  host.innerHTML=s+'<div class="tip"></div>';
+  const svg=host.querySelector('svg'), tip=host.querySelector('.tip');
+  host.querySelector('.hit').addEventListener('mousemove',ev=>{const r=svg.getBoundingClientRect(); const px=(ev.clientX-r.left)/r.width*W; const i=Math.max(0,Math.min(n-1,Math.round((px-m.l)/(W-m.l-m.r)*(n-1)))); tip.textContent=`${VRP.d[i]} · VIX ${VRP.vix[i]} · actual ${VRP.rv[i]}`; tip.style.left=(X(i)/W*r.width)+'px'; tip.style.top=(Y(Math.max(VRP.vix[i],VRP.rv[i]))/H*r.height)+'px'; tip.style.opacity=1;});
+  host.querySelector('.hit').addEventListener('mouseleave',()=>tip.style.opacity=0);
+}
+function vbars(id,labels,series,opt){
+  const host=document.querySelector('#'+id+' .chartwrap'); const W=Math.max(300,host.clientWidth||700), H=opt.h||(W<520?220:250), m={l:40,r:8,t:18,b:opt.rot&&W<620?46:30};
+  const vals=series.flatMap(s=>s.v); const vmax=Math.max(...vals)*1.15, vmin=Math.min(0,...vals);
+  const Y=v=>m.t+(vmax-v)/(vmax-vmin)*(H-m.t-m.b); const gw=(W-m.l-m.r)/labels.length, nS=series.length, bw=Math.min(40,(gw-6)/nS);
+  let s=`<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${opt.aria}">`;
+  const st=niceStep((vmax-vmin)/4); for(let v=0; v<=vmax; v+=st) s+=`<line x1="${m.l}" x2="${W-m.r}" y1="${Y(v)}" y2="${Y(v)}" stroke="${css('--grid')}"/><text x="${m.l-6}" y="${Y(v)+4}" text-anchor="end" font-size="11" font-family="${css('--mono')}" fill="${css('--muted')}">${opt.tick(v)}</text>`;
+  labels.forEach((lab,i)=>{const cx=m.l+gw*i+gw/2; series.forEach((sr,k)=>{const v=sr.v[i]; const x=cx-(nS*bw)/2+k*bw+1; const h=Math.max(Y(0)-Y(v),v>0?1.5:0); s+=`<rect x="${x}" y="${Y(0)-h}" width="${bw-2}" height="${h}" rx="3" fill="${sr.c}"/>`; if(opt.lab && (W>=520||k===0)) s+=`<text x="${x+(bw-2)/2}" y="${Y(0)-h-5}" text-anchor="middle" font-size="${W<520?9.5:11}" font-family="${css('--mono')}" fill="${css('--fg')}">${opt.lab(v,k)}</text>`;});
+    const rot=opt.rot&&W<620; s+= rot?`<text transform="translate(${cx},${H-m.b+12}) rotate(40)" font-size="10.5" font-family="${css('--body')}" fill="${css('--muted')}">${lab}</text>`:`<text x="${cx}" y="${H-m.b+16}" text-anchor="middle" font-size="11.5" font-family="${css('--body')}" fill="${css('--muted')}">${lab}</text>`;});
+  s+=`<line x1="${m.l}" x2="${W-m.r}" y1="${Y(0)}" y2="${Y(0)}" stroke="${css('--muted')}"/></svg>`; host.innerHTML=s;
+}
+function hbar(id,items,opt){
+  const host=document.querySelector('#'+id+' .chartwrap'); const W=Math.max(300,host.clientWidth||600), compact=W<520, labH=compact?18:0, base=36, rowH=base+labH;
+  const m={l:compact?4:Math.min(opt.left||170,Math.round(W*0.4)),r:W<480?62:80,t:6,b:24}, H=m.t+m.b+rowH*items.length;
+  let vmin=Math.min(0,...items.map(d=>d.v)), vmax=Math.max(0,...items.map(d=>d.v)); const pad=(vmax-vmin)*0.05; vmax+=vmax>0?pad:0; vmin-=vmin<0?pad:0;
+  const X=v=>m.l+(v-vmin)/(vmax-vmin)*(W-m.l-m.r), x0=X(0);
+  let s=`<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${opt.aria}">`;
+  const nT=Math.max(2,Math.floor((W-m.l-m.r)/80)); const st=niceStep((vmax-vmin)/nT);
+  for(let v=Math.ceil(vmin/st)*st; v<=vmax+1e-9; v+=st) s+=`<line x1="${X(v)}" x2="${X(v)}" y1="${m.t}" y2="${H-m.b}" stroke="${css('--grid')}"/><text x="${X(v)}" y="${H-6}" text-anchor="middle" font-size="11" font-family="${css('--mono')}" fill="${css('--muted')}">${opt.tick(v)}</text>`;
+  items.forEach((d,i)=>{const top=m.t+i*rowH+4, y=top+labH+2, h=base-14, xa=Math.min(X(d.v),x0), w=Math.max(Math.abs(X(d.v)-x0),2), col=d.c||(d.v<0?css('--bad'):css('--good'));
+    s+= compact?`<text x="${m.l}" y="${top+12}" font-size="12.5" font-weight="500" font-family="${css('--body')}" fill="${css('--fg')}">${d.l}</text>`:`<text x="${m.l-10}" y="${y+h/2+4}" text-anchor="end" font-size="13" font-family="${css('--body')}" fill="${css('--fg')}">${d.l}</text>`;
+    s+=`<rect x="${xa}" y="${y}" width="${w}" height="${h}" rx="4" fill="${col}"/>`;
+    s+= d.v<0?`<text x="${xa+8}" y="${y+h/2+4}" font-size="12" font-weight="600" font-family="${css('--mono')}" fill="#ffffff">${opt.fmt(d.v)}</text>`:`<text x="${xa+w+6}" y="${y+h/2+4}" font-size="12" font-family="${css('--mono')}" fill="${css('--fg')}">${opt.fmt(d.v)}</text>`;});
+  s+=`<line x1="${x0}" x2="${x0}" y1="${m.t}" y2="${H-m.b}" stroke="${css('--muted')}" stroke-width="1.2"/></svg>`; host.innerHTML=s;
+}
+function stack(id,items){
+  const host=document.querySelector('#'+id+' .chartwrap'); const W=Math.max(280,host.clientWidth||560),H=140,m={l:4,r:4}; let x=m.l; const tw=W-m.l-m.r;
+  let s=`<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Share of premium turnover">`;
+  items.forEach(d=>{const w=tw*d.v/100, narrow=w<70, last=x+w>=W-m.r-1, lx=narrow&&last?x+w:x+w/2, la=narrow&&last?'end':'middle';
+    s+=`<rect x="${x+1}" y="14" width="${Math.max(w-2,1)}" height="54" rx="4" fill="${d.c}"/><text x="${x+w/2}" y="46" text-anchor="middle" font-size="${narrow?11.5:15}" font-weight="600" font-family="${css('--mono')}" fill="#ffffff">${narrow?Math.round(d.v)+'%':d.v.toFixed(1)+'%'}</text><text x="${lx}" y="92" text-anchor="${la}" font-size="13" font-family="${css('--body')}" fill="${css('--fg')}">${d.l}</text>${d.n?`<text x="${lx}" y="110" text-anchor="${la}" font-size="11.5" font-family="${css('--body')}" fill="${css('--muted')}">${d.n}</text>`:''}`; x+=w;});
+  host.innerHTML=s+'</svg>';
+}
+function decay(){
+  const host=document.querySelector('#c-decay .chartwrap'); const W=Math.max(300,host.clientWidth||700), H=W<520?200:240, m={l:44,r:12,t:10,b:30};
+  const days=[]; for(let d=60; d>=0; d--) days.push(d); const val=days.map(d=>bs('call',S0,S0,d/365,0.14));
+  const vmax=Math.ceil(Math.max(...val)/100)*100; const X=d=>m.l+(60-d)/60*(W-m.l-m.r), Y=v=>m.t+(vmax-v)/vmax*(H-m.t-m.b);
+  let s=`<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Time decay of an at-the-money call">`;
+  for(let v=0; v<=vmax; v+=100) s+=`<line x1="${m.l}" x2="${W-m.r}" y1="${Y(v)}" y2="${Y(v)}" stroke="${css('--grid')}"/><text x="${m.l-6}" y="${Y(v)+4}" text-anchor="end" font-size="11" font-family="${css('--mono')}" fill="${css('--muted')}">${v}</text>`;
+  [60,45,30,14,7,0].forEach(d=>{ s+=`<text x="${X(d)}" y="${H-10}" text-anchor="middle" font-size="11" font-family="${css('--mono')}" fill="${css('--muted')}">${d===0?'expiry':d+'d'}</text>`; });
+  s+=`<path d="${days.map((d,i)=>(i?'L':'M')+X(d).toFixed(1)+' '+Y(val[i]).toFixed(1)).join(' ')}" fill="none" stroke="${css('--s1')}" stroke-width="2.6"/>`;
+  [[30,'30 days: '],[7,'7 days: ']].forEach(([d,t])=>{const v=bs('call',S0,S0,d/365,0.14); s+=`<circle cx="${X(d)}" cy="${Y(v)}" r="4.5" fill="${css('--s1')}" stroke="${css('--surface')}" stroke-width="2"/><text x="${X(d)+8}" y="${Y(v)-8}" font-size="12" font-weight="600" font-family="${css('--body')}" fill="${css('--fg')}">${t}${Math.round(v)} pts</text>`;});
+  host.innerHTML=s+'</svg>';
+}
+
+/* ---------- family cards ---------- */
+const FAM=[
+ {t:'Direction',bet:'The price will go up (or down) by more than the option price assumes.',tags:[['Everyone','']],
+  win:'The move comes, in your direction, before expiry, and is bigger than the premium.',lose:'The move is too small, too late, or the wrong way. Being slightly right still loses.',
+  strat:['Buy a call or put (strong view, big move)','Vertical spreads (moderate view, or options look expensive)','Sell a put below the market (mild bullish view, want income)','Risk reversal (bullish, funded by selling expensive puts)'],
+  ex:['lc','bcs','sp','rr'],
+  who:'Everyone. Funds use options to express stock views with limited loss. About 97% of Indian individual traders mainly buy options (SEBI FY26, via a secondary summary).',
+  ev:'Option-market signals can predict stock returns in US data: when calls are expensive relative to puts, the stock tends to outperform by about 0.5% a week (Cremers and Weinbaum, 1996–2005, before costs). Later work shows much of this disappears in hard-to-borrow stocks. In this project, the price of downside protection (25-delta skew) predicts mid-cap returns with t = 4.10, the only option signal that survives strict testing.',
+  ind:'Stock options are monthly only and settle by physical delivery; exit two days before expiry. Many strikes barely trade.',
+  v:['warn','To test: bull call spreads on top-ranked mid caps.']},
+ {t:'Size of move (volatility level)',bet:'The market will move more (buy options) or less (sell options) than the option price assumes.',
+  win:'Seller: the market stays calmer than priced, which on NIFTY happened on 80% of days since 2015. Buyer: a big surprise arrives.',lose:'Seller: a shock day, which can cost months of premium in hours. Buyer: nothing happens and time eats the premium.',
+  strat:['Short strangle or straddle (calm, unlimited risk)','Iron condor or iron fly (calm, capped risk)','Long straddle or strangle (big move either way)','Butterfly (it will end right here)'],ex:['sstr','ic','ls','bf'],
+  who:'Sellers: option-income funds (about $245 bn in US option ETFs at end-2025), prop desks, many Indian retail sellers. Buyers: event traders, hedgers.',
+  ev:'Selling S&P 500 puts monthly earned 10.1% a year against 9.8% for the index, with 10.1% volatility against 15.3% (Cboe PUT index, 1986–2015, before costs). In this project, a 0.05-delta NIFTY strangle sold two days before expiry earned 24.6% a year on margin, 2019–2026, after modelled costs. The only cost-aware Indian academic study, on monthly contracts, found selling lost money after costs; we could read only its summary.',
+  ind:'NIFTY is one of the most liquid option markets in the world, with a weekly expiry every Tuesday. Bank Nifty is monthly only since November 2024.',
+  v:['good','Running on paper (the NIFTY strangle). Capped version to test.']},
+ {t:'Size of move, hedged (pure volatility)',bet:'Actual movement will beat the movement the option prices in, with direction removed by trading the index through the day.',
+  win:'Buy an option and keep re-hedging it with futures; you profit if NIFTY wiggles more than priced, regardless of direction.',lose:'It wiggles less than priced; hedging costs eat the edge.',
+  strat:['Delta-hedged options ("gamma scalping")','Volatility arbitrage across strikes','Variance swaps (banks, over the counter)'],ex:[],
+  who:'Market makers, volatility arbitrage funds, bank desks.',
+  ev:'This is the cleanest way to own the volatility risk premium shown in part 3, but it needs continuous hedging and very low costs. No public Indian study.',
+  ind:'Needs intraday prices and fast, cheap futures execution.',
+  v:['bad','Out of reach with end-of-day data.']},
+ {t:'Calendar (term structure)',bet:'Options for one expiry are mispriced compared with another expiry.',
+  win:'The near-term option you sold loses value faster than the later one you bought, usually because the market stays near the strike.',lose:'A big move, or the later option falls in price too.',
+  strat:['Calendar spread (sell near, buy far, same strike)','Diagonal spread (different strikes and expiries)','Weekly versus monthly trades'],ex:['cal'],
+  who:'Prop desks, volatility funds, some experienced individuals.',
+  ev:'In US data, when near-term implied volatility is high relative to longer-term, short-volatility returns are lower next day (Johnson, 1996–2013, spread of 0.29% to 1.81% across 18 markets, before costs). In this project, an inverted NIFTY term structure did not help as a filter: skipping those weeks lost 0.19% of margin per trade.',
+  ind:'Testable on NIFTY back to 2019 from stored prices. Stock options rarely have a liquid second month.',
+  v:['warn','Later: NIFTY only.']},
+ {t:'Shape (skew)',bet:'Downside protection is priced too high (or too low) compared with upside calls.',
+  win:'You sold the expensive side and bought the cheap side, and the market did not crash.',lose:'A crash: the puts you sold were expensive for a reason.',
+  strat:['Risk reversal (sell put, buy call)','Put ratio spread (buy one near put, sell two far puts)','Put spread versus call spread'],ex:['rr','prs'],
+  who:'Volatility funds and bank derivatives desks.',
+  ev:'US stocks with the steepest skew underperform by about 10.9% a year risk-adjusted (Xing, Zhang and Zhao, 1996–2005). This project found the opposite sign in Indian mid caps: expensive protection went with higher returns. Tilting the NIFTY strangle toward the cheap side by skew had no effect.',
+  ind:'NIFTY puts are usually dearer than equally distant calls. Single-stock skew is noisy because far strikes trade thinly.',
+  v:['warn','Later: NIFTY only.']},
+ {t:'Events',bet:'A dated announcement (RBI, Budget, election, results) will move the price more (or less) than the options price in.',
+  win:'Buyer: the surprise is bigger than priced. Seller: the announcement is a non-event and option prices collapse afterwards ("volatility crush").',lose:'The opposite.',
+  strat:['Straddle or strangle that expires just after the event','Calendar spread across the event','Short straddle into a well-priced event'],ex:['ls','cal'],
+  who:'Event-driven prop desks; many retail traders around Budget day.',
+  ev:'US: buying earnings straddles earned +3.3% before costs (Gao, Xing and Zhang) but −11.8% when bought at the ask and sold at the bid (Govindaraj and others, 1996–2011). India: in this project’s eleven-day replay, the straddle was up at the event close on 9 of 11 days, but those days were chosen because the market moved. Skipping the strangle on event weeks lost money: event weeks paid more premium.',
+  ind:'RBI meets about six times a year; Budget once; results season four times. NSE publishes about a month of upcoming board meetings.',
+  v:['warn','To test: straddles before every RBI, Budget and election day since 2019.']},
+ {t:'Togetherness (dispersion)',bet:'The stocks in an index will move more independently than the index options assume.',
+  win:'Stocks scatter: some up, some down. Single-stock options pay more than the index options cost.',lose:'Everything falls together, as in a crash. Correlation jumps and the trade loses on both sides.',
+  strat:['Sell index options, buy options on the member stocks','The reverse ("reverse dispersion") when correlation is unusually low'],ex:[],
+  who:'Large volatility hedge funds and bank desks. Trade press says the trade grew five-fold in four years to about $1 billion of exposure per volatility point.',
+  ev:'S&P 500 implied correlation fell near record lows around 7%, which made the trade crowded; some funds then switched to the reverse trade. No public Indian study.',
+  ind:'Would need NIFTY options plus options on its biggest members, with high margin on many legs.',
+  v:['warn','Later: needs stock options back to 2019 (about 0.6 GB).']},
+ {t:'Crash protection (tail)',bet:'A crash is more likely, or worse, than far out-of-the-money options assume.',
+  win:'A sudden crash: puts bought for very little can pay many times their cost. Universa’s hedges returned over 4,000% in March 2020.',lose:'No crash: a small loss almost every month, for years.',
+  strat:['Buy puts 8 to 20% out of the money, every month','Put spreads to cut cost','Hold as a small slice next to a portfolio'],ex:['tail','pp'],
+  who:'Universa, tail-risk funds, pension funds buying protection.',
+  ev:'Universa reports 105% a year on capital actually spent on options, 2008–2019 (EY-audited, per Fortune). Its example of 3.33% in the fund plus 96.67% in the S&P 500 compounded at 11.5% a year from 2008. The tail-risk fund index rose 34.8% in 2020. Part 3 shows why: NIFTY had four days above four expected moves since 2015.',
+  ind:'Far NIFTY strikes trade on the monthly series; weekly far strikes are thin.',
+  v:['warn','Worth testing as a small partner to the strangle.']},
+ {t:'Owning the asset (overlays)',bet:'No view on the option price; change the shape of a portfolio you already own.',
+  win:'Covered call: flat or slowly rising market, you earn extra income. Protective put: a fall, and you are insured.',lose:'Covered call: a big rally passes you by. Protective put: no fall, and the insurance cost is gone.',
+  strat:['Covered call','Protective put','Collar (buy put, sell call)','Buffered funds'],ex:['cc','pp','col'],
+  who:'Wealth managers, option-income ETFs (JEPI and JEPQ over $60 bn), pension funds. US buffer ETFs held about $87 bn in November 2025.',
+  ev:'Selling calls on the S&P 500 (Cboe BXM) matched the index from 1988 to 2006 with about two-thirds of the volatility; over longer periods it lagged (8.5% against 11.2% a year).',
+  ind:'Needs the underlying shares or futures; stock options settle physically.',
+  v:['','Possible later as an add-on to the stock book.']},
+ {t:'Arbitrage',bet:'Two prices for the same thing disagree.',
+  win:'You buy the cheap one and sell the dear one; the gap closes.',lose:'Costs or margin exceed the tiny gap; or one leg fails to fill.',
+  strat:['Put-call parity (conversions and reversals)','Box spreads (a loan made of options)','Cash-futures arbitrage'],ex:[],
+  who:'Arbitrage funds and market makers.',
+  ev:'Edges are fractions of a percent and close in seconds when markets are liquid.',
+  ind:'Indian arbitrage mutual funds run cash-futures arbitrage at scale; option arbitrage needs exchange-grade speed.',
+  v:['bad','Out of reach.']},
+ {t:'Market making',bet:'No market bet. Earn the gap between buy and sell prices and hedge everything else.',
+  win:'Many small trades every second, each earning a tiny spread.',lose:'A sudden jump before the hedge is placed; a faster competitor.',
+  strat:['Quote both sides on thousands of contracts','Hedge instantly with futures and other options'],ex:[],
+  who:'Jane Street ($39.6 bn trading revenue, 2025), Citadel Securities ($12.2 bn; about 30% of US listed options), Optiver, IMC, SIG, HRT.',
+  ev:'SEBI: proprietary desks made about ₹33,000 crore and foreign funds about ₹28,000 crore gross in Indian F&O in FY24, mostly through algorithms.',
+  ind:'Proprietary desks are about 47% of NSE index-option premium turnover (June 2026).',
+  v:['bad','Out of reach.']},
+];
+function families(){
+  const host=el('fam-list'); host.innerHTML=FAM.map((f,i)=>`
+    <article class="fam" id="fam-${i}">
+      <div class="fam-head"><h3>${f.t}</h3>${f.v[0]?`<span class="tag ${f.v[0]}">${f.v[0]==='good'?'Running':f.v[0]==='bad'?'Out of reach':'Testable'}</span>`:'<span class="tag">Possible</span>'}</div>
+      <p class="bet-line">${f.bet}</p>
+      <div class="grid">
+        <div><h4>Wins when</h4><p>${f.win}</p><h4>Loses when</h4><p>${f.lose}</p></div>
+        <div><h4>Usual strategies</h4><ul>${f.strat.map(s=>`<li>${s}</li>`).join('')}</ul>${f.ex.length?`<div class="chips">${f.ex.map(id=>`<button class="chip" data-s="${id}">Try: ${STRATS.find(s=>s.id===id).n}</button>`).join('')}</div>`:''}</div>
+        <div><h4>Who does it at scale</h4><p>${f.who}</p></div>
+        <div><h4>What the evidence says</h4><p>${f.ev}</p></div>
+      </div>
+      <div class="verdict"><b>India:</b> ${f.ind} <b>This project:</b> ${f.v[1]}</div>
+    </article>`).join('');
+  host.querySelectorAll('.chip').forEach(b=>b.addEventListener('click',()=>{ sel.value=b.dataset.s; explorer(); el('explorer').scrollIntoView(); }));
+}
+
+function renderAll(){
+  calc(); explorer(); decay();
+  lineChart('c-vrp');
+  vbars('c-years',YEARS.map(y=>y[0]===2026?'2026*':String(y[0]).slice(2)==='15'?'2015':String(y[0])),[{c:css('--s1'),v:YEARS.map(y=>y[1])}],{aria:'Gap by year',tick:v=>v.toFixed(0),lab:v=>v.toFixed(1),rot:true});
+  vbars('c-tails',TAILS.labels,[{c:css('--s1'),v:TAILS.actual.map(x=>x/TAILS.total*100)},{c:css('--muted'),v:TAILS.normal.map(x=>x/TAILS.total*100)}],{aria:'Daily moves versus normal',tick:v=>v.toFixed(0)+'%',lab:(v,k)=>v>=1?v.toFixed(0)+'%':v.toFixed(2)+'%',rot:true,h:W_TAILS()});
+  hbar('c-flow',[{l:'Individuals and others',v:-61000},{l:'Proprietary desks',v:33000},{l:'Foreign funds (FPIs)',v:28000}],{aria:'Gross profit by participant',left:160,fmt:v=>(v>0?'+':'−')+'₹'+Math.abs(v).toLocaleString('en-IN')+' cr',tick:v=>(v/1000).toFixed(0)+'k'});
+  stack('c-who',[{l:'Prop desks',v:46.8,c:css('--s1')},{l:'Individuals',v:40.5,c:css('--s2')},{l:'Everyone else',v:12.7,c:css('--s4'),n:'derived'}]);
+}
+function W_TAILS(){ return (document.querySelector('#c-tails .chartwrap').clientWidth||700)<520?240:270; }
+families(); renderAll();
+let rt; window.addEventListener('resize',()=>{clearTimeout(rt); rt=setTimeout(renderAll,150);});
+if(window.matchMedia) window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change',renderAll);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,378 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Who Wins in Options</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,500;8..60,600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one reading column; each business model = short explainer + one chart; numbers always carry a source line. */
+:root{
+  --bg:#f6f7f9; --surface:#ffffff; --fg:#1b2230; --muted:#5b6678; --line:#d9dee6; --grid:#e6eaf0;
+  --accent:#1f5f7a; --accent-soft:#e3eff4;
+  --s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a; --s4:#6250d6;
+  --good:#2f7d4f; --good-soft:#dff0e6; --bad:#c23b3b; --bad-soft:#f8e1e1; --warn:#9a6a12; --warn-soft:#fbf1dc;
+  --display:"Source Serif 4", Georgia, "Times New Roman", serif;
+  --body:"IBM Plex Sans", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --mono:"IBM Plex Mono", "SFMono-Regular", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
+  --bg:#141922; --surface:#1c2330; --fg:#e6eaf0; --muted:#9aa5b5; --line:#2e3845; --grid:#273040;
+  --accent:#7fc0da; --accent-soft:#1d3440;
+  --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#9085e9;
+  --good:#7fd19a; --good-soft:#1e3328; --bad:#ef8e8e; --bad-soft:#3d2222; --warn:#e3b760; --warn-soft:#3a2f17;
+  color-scheme:dark }}
+:root[data-theme="dark"]{
+  --bg:#141922; --surface:#1c2330; --fg:#e6eaf0; --muted:#9aa5b5; --line:#2e3845; --grid:#273040;
+  --accent:#7fc0da; --accent-soft:#1d3440;
+  --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#9085e9;
+  --good:#7fd19a; --good-soft:#1e3328; --bad:#ef8e8e; --bad-soft:#3d2222; --warn:#e3b760; --warn-soft:#3a2f17;
+  color-scheme:dark }
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font-family:var(--body);font-size:16.5px;line-height:1.6;margin:0}
+.wrap{max-width:900px;margin:0 auto;padding-block:24px 64px;padding-inline:16px}
+header.hero{display:grid;gap:10px;padding-block:8px 20px;border-bottom:1px solid var(--line)}
+.eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+h1{font-family:var(--display);font-weight:600;font-size:clamp(30px,5vw,44px);line-height:1.1;margin:0;text-wrap:balance}
+.lede{font-size:18px;color:var(--muted);max-width:66ch;margin:0}
+nav.toc{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:var(--bg);border-bottom:1px solid var(--line);margin-inline:-16px;padding-inline:16px}
+nav.toc ul{list-style:none;margin:0;padding:10px 0;display:flex;gap:4px 14px;flex-wrap:wrap;font-size:13px}
+@media (max-width:640px){nav.toc ul{flex-wrap:nowrap;overflow-x:auto;white-space:nowrap;-webkit-overflow-scrolling:touch;scrollbar-width:none}nav.toc ul::-webkit-scrollbar{display:none}}
+nav.toc a{color:var(--muted);text-decoration:none;border-bottom:2px solid transparent}
+nav.toc a:hover,nav.toc a:focus-visible{color:var(--accent);border-bottom-color:var(--accent);outline:none}
+section{padding-block:36px 10px;border-bottom:1px solid var(--line)}
+section:last-of-type{border-bottom:0}
+h2{font-family:var(--display);font-weight:600;font-size:clamp(24px,3.4vw,32px);line-height:1.15;margin:0 0 6px;text-wrap:balance}
+h3{font-family:var(--display);font-size:21px;font-weight:600;margin:0 0 6px}
+.sub{color:var(--muted);margin:0 0 16px;max-width:66ch}
+p{max-width:66ch;margin:0 0 12px}
+ul,ol{max-width:66ch;padding-left:22px;margin:0 0 12px}
+li{margin-bottom:7px}
+b{font-weight:600}
+.tiles{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));margin:16px 0}
+.tile{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px 16px;min-width:0}
+.tile .k{font-family:var(--mono);font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:6px}
+.tile .v{font-family:var(--display);font-size:28px;line-height:1.1;font-weight:600;margin-bottom:6px;font-variant-numeric:tabular-nums}
+.tile p{font-size:14.5px;color:var(--muted);margin:0}
+.tag{display:inline-block;font-family:var(--mono);font-size:11.5px;letter-spacing:.04em;padding:2px 8px;border-radius:4px;vertical-align:middle;background:var(--accent-soft);color:var(--accent)}
+.tag.good{background:var(--good-soft);color:var(--good)} .tag.bad{background:var(--bad-soft);color:var(--bad)} .tag.warn{background:var(--warn-soft);color:var(--warn)}
+.model{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:18px 20px;margin:18px 0}
+.model .meta{display:flex;flex-wrap:wrap;gap:8px;margin:4px 0 12px}
+.two{display:grid;gap:14px 22px;grid-template-columns:1fr 1fr;align-items:start}
+.two>*{min-width:0}
+@media (max-width:720px){.two{grid-template-columns:1fr}}
+.facts{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;font-size:14.5px;margin:8px 0 0}
+.facts dt{color:var(--muted)} .facts dd{margin:0;min-width:0}
+figure{margin:14px 0;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px 12px 8px;min-width:0}
+.model figure{background:var(--bg)}
+figure .ft{font-weight:600;font-size:15px;margin:0 2px 2px}
+figure .fs{font-size:13.5px;color:var(--muted);margin:0 2px 8px}
+figure svg{width:100%;height:auto;display:block;overflow:visible}
+figcaption{font-size:13.5px;color:var(--muted);margin:8px 2px 0;line-height:1.45}
+.src{font-size:12.5px;color:var(--muted);margin-top:6px}
+.src a{color:var(--muted)}
+.legend{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:13px;color:var(--muted);margin:6px 2px 0}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.legend i{display:inline-block;width:12px;height:12px;border-radius:3px}
+.chartwrap{position:relative}
+.tip{position:absolute;pointer-events:none;background:var(--fg);color:var(--bg);font-family:var(--mono);font-size:12px;padding:5px 8px;border-radius:6px;white-space:nowrap;transform:translate(-50%,-130%);opacity:0;transition:opacity .1s}
+.tbl{overflow-x:auto;margin:10px 0 18px;border:1px solid var(--line);border-radius:8px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:14px;min-width:640px}
+th,td{padding:8px 10px;text-align:left;vertical-align:top;border-bottom:1px solid var(--line)}
+th{font-size:12px;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);font-weight:600;background:var(--bg)}
+tbody tr:last-child td{border-bottom:0}
+.callout{background:var(--accent-soft);border-radius:8px;padding:12px 16px;margin:14px 0;max-width:70ch}
+.callout.warn{background:var(--warn-soft)}
+.callout p:last-child{margin-bottom:0}
+.dots{display:flex;gap:3px;flex-wrap:wrap;max-width:420px;margin:6px 0}
+.foot{color:var(--muted);font-size:13.5px;max-width:70ch;margin-top:26px}
+a{color:var(--accent)}
+a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+@media (prefers-reduced-motion:no-preference){html{scroll-behavior:smooth}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="hero">
+  <div class="eyebrow">A field guide · for Alpha Signal · October 2026</div>
+  <h1>Who wins in options, and how</h1>
+  <p class="lede">The professionals who make serious money in options run a handful of businesses: making markets, selling insurance, buying insurance, trading one volatility against another, and exploiting how the market is built. This page explains each one with real numbers, and shows where this project fits.</p>
+</header>
+
+<nav class="toc" aria-label="Sections">
+  <ul>
+    <li><a href="#money">Where the money goes</a></li>
+    <li><a href="#size">How big the market is</a></li>
+    <li><a href="#models">Five ways pros make money</a></li>
+    <li><a href="#map">The full map</a></li>
+    <li><a href="#us">Where we fit</a></li>
+  </ul>
+</nav>
+
+<section id="money">
+  <h2>Where the money goes</h2>
+  <p>Options are a zero-sum game before costs: every rupee one side makes, the other side loses. In India, SEBI has measured who is on which side. The answer is stark.</p>
+  <figure id="c-flow"><div class="ft">Gross profit and loss in Indian equity futures and options, 2023-24</div><div class="fs">₹ crore, before trading costs. Individuals' figure includes "others".</div><div class="chartwrap"></div><figcaption>The ₹61,000 crore individuals lost is almost exactly what professional desks and foreign funds made. SEBI found 96% of the proprietary desks' profit and 97% of the foreign funds' profit came from algorithmic trading.</figcaption><div class="src">Source: SEBI study, 23 Sep 2024, as reported by <a href="https://www.business-standard.com/amp/opinion/editorial/a-losing-proposition-odds-are-against-individuals-in-f-o-trading-124092401316_1.html">Business Standard</a> and <a href="https://wrightresearch.in/blog/sebi-futures-and-option-report-individual-traders-in-fandos-incur-rs-18-lakh-crore-loss-over-3-years">Wright Research</a>.</div></figure>
+
+  <div class="tiles">
+    <div class="tile"><div class="k">One firm in India</div><div class="v">₹36,671 cr</div><p>Net profit SEBI says Jane Street's group made in India from January 2023 to early 2025, almost all from index options (₹44,358 crore), partly offset by losses in futures and stocks. SEBI alleges manipulation; Jane Street disputes it.</p></div>
+    <div class="tile"><div class="k">Individuals who did well</div><div class="v">About 1%</div><p>Share of individual F&amp;O traders who made more than ₹1 lakh net over FY22 to FY24, after costs.</p></div>
+    <div class="tile"><div class="k">Individuals who lost</div><div class="v">88 to 93%</div><p>Every SEBI study since 2023 lands in this range. The latest, for FY26, says 87.7% lost and about 97% of traders mainly bought options.</p></div>
+  </div>
+  <p class="src">Sources: <a href="https://www.dtnext.in/news/business/sebi-bans-us-based-jane-street-from-securities-mkt-impounds-illegal-gains-of-rs-4843-crore-839094">Reuters via DTNext</a>; <a href="https://www.sebi.gov.in/media-and-notifications/press-releases/sep-2024/updated-sebi-study-reveals-93-of-individual-traders-incurred-losses-in-equity-fando-between-fy22-and-fy24-aggregate-losses-exceed-1-8-lakh-crores-over-three-years_86906.html">SEBI press release, Sep 2024</a>; <a href="https://www.businesstoday.in/markets/story/rs91685-cr-lost-88-of-individual-traders-lost-money-in-fy26-options-drove-92-of-losses-550474-2026-08-21">Business Today, FY26 study</a>; <a href="https://taxguru.in/?p=1072039">TaxGuru</a> (the 97% buying figure is from this secondary summary only).</p>
+</section>
+
+<section id="size">
+  <h2>How big the option market is</h2>
+  <p>India became the world's largest options market by number of contracts, mostly because NIFTY weekly contracts are small and cheap. Measured by premium paid, the money that actually changes hands, it is large but smaller than the US.</p>
+
+  <div class="two">
+    <figure id="c-global"><div class="ft">Options traded worldwide</div><div class="fs">Billions of contracts per year, all exchanges.</div><div class="chartwrap"></div><figcaption>Global option volume halved in 2025. FIA says the fall came mostly from Asia-Pacific equity options, which is SEBI's November 2024 rules shrinking India's weekly trading. 2024 is derived from FIA's 2025 total and its stated fall of 50.3%.</figcaption><div class="src">Source: <a href="https://www.fia.org/fia/articles/etd-volume-december-2025">FIA, December 2025 volume report</a>.</div></figure>
+    <figure id="c-who"><div class="ft">Who trades NSE index options</div><div class="fs">Share of premium turnover, June 2026.</div><div class="chartwrap"></div><figcaption>Proprietary trading desks are almost half of all index option trading on NSE. "Everyone else" (foreign funds, institutions and others) is the remainder of 100%, derived here, not reported.</figcaption><div class="src">Source: NSE Market Pulse, June 2026, as reported by <a href="https://tradingqna.com/t/nse-market-pulse-june-2026/195253">TradingQnA</a> and <a href="https://www.kotakneo.com/news/trading/nse-cash-market-turnover-23-month-high-june-foreign-investors-record-2026/">Kotak Neo</a>.</div></figure>
+  </div>
+
+  <div class="tiles">
+    <div class="tile"><div class="k">India, one quarter</div><div class="v">73%</div><p>Share of all futures and options contracts traded worldwide in Q1 2024 that were Indian equity index options.</p></div>
+    <div class="tile"><div class="k">India, one month of premium</div><div class="v">$150 bn</div><p>Premium paid on NSE options in March 2024, about 90% of it on index options. That was 61% of US index option premium.</p></div>
+    <div class="tile"><div class="k">US clearing house</div><div class="v">15.3 bn</div><p>Contracts cleared by the US OCC in 2025, futures included, a sixth record year in a row.</p></div>
+  </div>
+  <p class="src">Sources: <a href="https://fia.org/sites/default/files/2024-05/ETD%20Trends%20Q1%202024%20050724.pdf">FIA Q1 2024 trends</a>; <a href="https://www.fia.org/marketvoice/articles/premium-turnover-indian-options-hits-150-billion">FIA, premium turnover hits $150 billion</a>; <a href="https://annualreport.theocc.com/2025/a-message-from-leadership">OCC 2025 annual report</a>.</p>
+</section>
+
+<section id="models">
+  <h2>Five ways professionals make money in options</h2>
+  <p class="sub">Almost every successful options business is one of these five, or a mix. They differ in what they need: speed, capital, patience, or nerve.</p>
+
+  <article class="model" id="m1">
+    <h3>1 · Making the market</h3>
+    <div class="meta"><span class="tag good">Steadiest and biggest profits</span><span class="tag">Jane Street · Citadel Securities · Optiver · IMC · SIG · HRT</span></div>
+    <div class="two">
+      <div>
+        <p><b>What they do.</b> Quote a price to buy and a slightly higher price to sell on thousands of option contracts at once, all day. Every time someone trades with them they earn the small gap between those prices. Then they immediately hedge the risk away by trading the index, futures or other options.</p>
+        <p><b>Why it makes millions.</b> The gap is tiny, often a fraction of a rupee, but they do it millions of times a day. They are not betting on direction; they are a toll booth. Citadel Securities says it handles about 30% of all US listed option trades.</p>
+        <p><b>What it takes.</b> Microsecond technology, an exchange membership, the lowest fees, a pricing model for every option, and billions in capital. Not something an individual can copy.</p>
+      </div>
+      <figure id="c-mm"><div class="ft">Trading revenue of the biggest firms, 2025</div><div class="fs">US$ billion. All asset classes, not only options.</div><div class="chartwrap"></div><figcaption>Optiver reported €4.56 billion of net trading income, not shown because it is in euros. These are firm-wide numbers; options are a large share but not broken out. IMC's figure is from a single secondary source.</figcaption><div class="src">Sources: <a href="https://youngandcalculated.substack.com/p/jane-street-booked-396bn-in-2025">Young and Calculated</a> (citing Bloomberg and Reuters); <a href="https://www.citadelsecurities.com/what-we-do/options">Citadel Securities</a>.</div></figure>
+    </div>
+  </article>
+
+  <article class="model" id="m2">
+    <h3>2 · Selling insurance (short volatility)</h3>
+    <div class="meta"><span class="tag warn">Steady gains, rare large losses</span><span class="tag">Option-income funds · put-writing funds · many prop desks · this project's paper trade</span></div>
+    <div class="two">
+      <div>
+        <p><b>What they do.</b> Sell options, usually out-of-the-money puts or calls, and collect the premium. Most options expire worthless, so most months they keep it.</p>
+        <p><b>Why it works.</b> Buyers pay a little more than options are "worth" on average, because people pay extra to be protected, the way insurance premiums exceed average claims. That extra is called the volatility risk premium.</p>
+        <p><b>The danger.</b> A rare crash wipes out years of premium. LJM lost over 80% in three days in February 2018; XIV lost 96% in one evening. The survivors size small and cap their losses.</p>
+        <p><b>How big it is.</b> Option-based ETFs in the US held about $245 billion at end-2025. The biggest, JPMorgan's JEPI and JEPQ, held over $60 billion together, mostly by selling calls on stocks they own.</p>
+      </div>
+      <figure id="c-put"><div class="ft">Selling S&amp;P 500 puts every month versus owning the index</div><div class="fs">Cboe PUT index vs S&amp;P 500 with dividends, Jul 1986 to Dec 2015, % a year, gross of costs.</div><div class="chartwrap"></div><div class="legend"><span><i style="background:var(--s1)"></i>Put selling (PUT index)</span><span><i style="background:var(--s2)"></i>S&amp;P 500</span></div><figcaption>About the same return with a third less swing. A newer measure over a longer period puts PUT at 7.0% a year against 11.0% for the S&amp;P 500, so the advantage depends on the window.</figcaption><div class="src">Sources: <a href="https://www.cxoadvisory.com/equity-options/performance-of-cboe-putwrite-indexes">CXO Advisory</a>; <a href="https://www.dividend.com/options-and-income-channel/is-options-upside-becoming-capped/">Dividend.com</a>; <a href="https://www.indexologyblog.com/tag/options-based-etfs/">Indexology</a>; <a href="https://www.etf.com/sections/news/jepq-joins-big-leagues-options-income-etfs-surge">etf.com</a>.</div></figure>
+    </div>
+  </article>
+
+  <article class="model" id="m3">
+    <h3>3 · Buying insurance (long volatility and tail hedging)</h3>
+    <div class="meta"><span class="tag warn">Small losses most years, huge gains in crashes</span><span class="tag">Universa · tail-risk funds · Ackman 2020</span></div>
+    <div class="two">
+      <div>
+        <p><b>What they do.</b> The opposite of model 2. Buy far-out-of-the-money puts, usually on the S&amp;P 500, and keep buying them every month even though most expire worthless.</p>
+        <p><b>How they make millions.</b> In a crash those cheap puts can be worth 20 to 100 times what was paid. Universa reports a 105% average annual return on the capital it actually spent on options from 2008 to 2019, audited by EY. In March 2020 its hedges returned over 4,000%. Bill Ackman turned $27 million of credit protection into $2.6 billion in three weeks.</p>
+        <p><b>The catch.</b> It loses a little almost every year, so it only works as a small slice of a larger portfolio. Universa's own example: 3.33% in its fund and 96.67% in the S&amp;P 500 compounded at 11.5% a year from 2008. Most investors cannot stomach years of steady losses waiting for the crash.</p>
+      </div>
+      <figure id="c-shape"><div class="ft">The two shapes of volatility trading</div><div class="fs">Illustrative profit over ten years, not real data. One crash in year 7.</div><div class="chartwrap"></div><div class="legend"><span><i style="background:var(--s1)"></i>Selling insurance</span><span><i style="background:var(--s2)"></i>Buying insurance</span></div><figcaption>Seller: a smooth climb, then a cliff. Buyer: a slow bleed, then a spike. Over a full cycle either can win; which one does depends on how the premium compares with the crashes that actually happen.</figcaption></figure>
+    </div>
+    <div class="tiles">
+      <div class="tile"><div class="k">March 2020, long-vol funds</div><div class="v">+23.1%</div><p>The Cboe Eurekahedge long volatility fund index in one month, its best ever. The broad hedge fund index fell 4.4%.</p></div>
+      <div class="tile"><div class="k">2020, tail-risk funds</div><div class="v">+34.8%</div><p>Cboe Eurekahedge tail risk index for the year, after +51.6% in the first quarter alone.</p></div>
+    </div>
+    <p class="src">Sources: <a href="https://fortune.com/2023/08/05/black-swan-hedge-fund-mark-spitznagel-interview-taleb-credit-bubble">Fortune</a>; <a href="https://www.institutionalinvestor.com/article/2bswz8monky7s5k5w79j4/portfolio/if-you-used-this-hedging-strategy-youd-be-sleeping-at-night-right-now">Institutional Investor</a>; <a href="https://www.cnbc.com/2020/03/25/bill-ackman-exits-market-hedges-uses-2-billion-he-made-to-buy-more-stocks-including-hilton.html">CNBC</a>; <a href="https://hedgefundalpha.com/news/hedge-funds-returns-march-2020/">Hedge Fund Alpha</a>.</p>
+  </article>
+
+  <article class="model" id="m4">
+    <h3>4 · Trading one volatility against another (relative value)</h3>
+    <div class="meta"><span class="tag">Capstone · bank derivatives desks · multi-strategy hedge funds</span></div>
+    <p><b>What they do.</b> Instead of betting on whether markets will be calm or wild, they bet that one option is too expensive <em>relative to another</em>, and hold both sides so the overall market direction barely matters. Common versions:</p>
+    <ul>
+      <li><b>Dispersion.</b> Sell options on the index, buy options on the stocks inside it. Index options price in stocks moving together; when they move separately, the stock options pay more than the index options cost. Trade press says this trade grew five-fold in four years to about $1 billion of exposure per volatility point, and became crowded when the S&amp;P 500's implied correlation hit near-record lows around 7%.</li>
+      <li><b>Calendar trades.</b> Sell near-month options and buy later-month options when the near month looks too expensive, or the reverse.</li>
+      <li><b>Skew trades.</b> Sell expensive downside puts and buy cheaper upside calls, or the reverse, when protection is priced unusually high.</li>
+      <li><b>Volatility arbitrage.</b> Buy an option, then trade the underlying continuously to cancel its direction, so the only remaining bet is whether actual movement beats what the option priced.</li>
+    </ul>
+    <p><b>Who.</b> Capstone Investment Advisors, a specialist, managed about $8.7 billion in 2021 and is listed at about $13 billion in 2026. Large banks run dispersion books for their clients.</p>
+    <p><b>What it takes.</b> Accurate prices for hundreds of option series, cheap execution on many legs, and the ability to hedge during the day. Daily data alone cannot do most of these.</p>
+    <p class="src">Sources: <a href="https://risk.net/markets/7959224/doubts-dog-equity-dispersion-as-market-grows-five-fold">Risk.net</a>; <a href="https://www.hedgeweek.com/extreme-market-dispersion-prompts-hedge-funds-to-position-for-volatility-reversal/">Hedgeweek</a>; <a href="https://en.wikipedia.org/wiki/Capstone_Investment_Advisors">Wikipedia, Capstone</a>; <a href="https://www.psers.pa.gov:443/About/Board/Resolutions/Documents/2021/Capstone%20Commonwealth%20Fund%20-%20PUBLIC%20IM.pdf">PSERS document</a>.</p>
+  </article>
+
+  <article class="model" id="m5">
+    <h3>5 · Exploiting how the market is built</h3>
+    <div class="meta"><span class="tag bad">Large, and sometimes crosses legal lines</span><span class="tag">Expiry-day flows · index rebalances · large orders</span></div>
+    <p><b>What it is.</b> Knowing where predictable, forced trades will land, and positioning before them. Examples: buying or selling around index rebalances, around the huge expiry-day option activity in India, or around very large known orders.</p>
+    <p><b>The Indian example.</b> SEBI's July 2025 interim order says Jane Street made ₹44,358 crore in Indian index options while losing money in the stocks and futures it traded on the same days, and that the stock and futures trades were used to move the index in a direction that helped its option positions on expiry days. SEBI impounded ₹4,843 crore. Jane Street disputes the findings. Whatever the outcome, it shows how much money sat in India's weekly expiry structure, and why SEBI cut weekly contracts in November 2024.</p>
+    <p><b>Lesson for us.</b> Any historical study of Bank Nifty expiry days from 2023 to 2025 is contaminated by this activity.</p>
+    <p class="src">Sources: <a href="https://www.business-standard.com/amp/markets/news/sebi-bars-jane-street-orders-rs-4844-cr-disgorgement-market-manipulation-125070400081_1.html">Business Standard</a>; <a href="https://www.kotaksecurities.com/news/market-news/sebi-bars-jane-street">Kotak Securities</a>.</p>
+  </article>
+
+  <div class="callout">
+    <p><b>What about expert individual traders?</b> They exist, but there is no reliable count. In India, about 1% of individuals made over ₹1 lakh net in FY22 to FY24, and only 13% of individuals used any algorithm. The individuals who succeed usually run a small version of model 2 (selling defined-risk premium with strict sizing) or model 3 (occasional event bets), and treat it as a business with costs measured in rupees per trade. They do not out-trade the firms in models 1, 4 and 5.</p>
+  </div>
+</section>
+
+<section id="map">
+  <h2>The full map, in one table</h2>
+  <p class="sub">Every options strategy is one of a few underlying bets. Complicated shapes are mostly different ways of packaging these.</p>
+  <div class="tbl"><table>
+    <thead><tr><th>The bet</th><th>Typical strategies</th><th>Who does it at scale</th><th>Return shape</th><th>Can this project do it?</th></tr></thead>
+    <tbody>
+      <tr><td>Earn the bid-ask gap</td><td>Quote both sides all day, hedge instantly</td><td>Jane Street, Citadel Securities, Optiver, IMC, SIG</td><td>Steady, very high</td><td><span class="tag bad">No</span> needs exchange-grade speed</td></tr>
+      <tr><td>Options are overpriced on average</td><td>Short strangles, iron condors, put writing, covered calls</td><td>Option-income funds, prop desks</td><td>Smooth climb, rare cliff</td><td><span class="tag good">Yes</span> the current paper trade</td></tr>
+      <tr><td>Crashes are underpriced</td><td>Far-out puts held for years</td><td>Universa, tail-risk funds</td><td>Slow bleed, rare spike</td><td><span class="tag warn">Testable</span> costs money most years</td></tr>
+      <tr><td>A dated event will move more than priced</td><td>Straddles before RBI, Budget, results</td><td>Event-driven desks</td><td>Lumpy</td><td><span class="tag warn">Testable</span> idea 2 in the research</td></tr>
+      <tr><td>Direction</td><td>Bought calls or puts, vertical spreads</td><td>Everyone; funds use them to express stock views</td><td>Depends on skill</td><td><span class="tag warn">Testable</span> idea 3, mid caps only</td></tr>
+      <tr><td>Near and far months are mispriced</td><td>Calendars, diagonals</td><td>Prop desks, vol funds</td><td>Small, steady</td><td><span class="tag warn">NIFTY only</span> stock options too thin</td></tr>
+      <tr><td>Downside protection is mispriced versus upside</td><td>Risk reversals, ratio spreads</td><td>Vol funds, banks</td><td>Medium</td><td><span class="tag warn">NIFTY only</span></td></tr>
+      <tr><td>Stocks will move less together than priced</td><td>Dispersion</td><td>Banks, Capstone-type funds</td><td>Steady, with a crash risk</td><td><span class="tag warn">Later</span> needs stock options back to 2019</td></tr>
+      <tr><td>Actual movement beats priced movement</td><td>Delta-hedged options, gamma scalping</td><td>Vol arbitrage funds, market makers</td><td>Medium</td><td><span class="tag bad">No</span> needs intraday hedging</td></tr>
+      <tr><td>Same thing, two prices</td><td>Put-call parity, box spreads, cash-futures arbitrage</td><td>Arbitrage funds</td><td>Tiny, steady</td><td><span class="tag bad">No</span> margins too thin for retail costs</td></tr>
+      <tr><td>Forced flows are predictable</td><td>Rebalance and expiry-flow trades</td><td>HFT and prop firms</td><td>Large</td><td><span class="tag bad">No</span> speed and regulatory risk</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="us">
+  <h2>Where Alpha Signal fits</h2>
+  <figure id="c-need"><div class="ft">What each business needs, and what this project has</div><div class="fs">Rough scores from 0 (not needed) to 3 (essential). Own judgement, not measured data.</div><div class="chartwrap"></div><div class="legend"><span><i style="background:var(--s1)"></i>Speed</span><span><i style="background:var(--s2)"></i>Low cost per trade</span><span><i style="background:var(--s3)"></i>Intraday data and hedging</span><span><i style="background:var(--s4)"></i>Patience and sizing discipline</span></div><figcaption>Models 2 and 3 need patience and sizing, not speed. Those are the two this project can realistically run with end-of-day data and a Zerodha account.</figcaption></figure>
+
+  <ul>
+    <li><b>The project already runs model 2.</b> The NIFTY strangle paper trade has earned 24.6% a year on margin in its backtest. That is the same business as the option-income funds, done weekly on NIFTY.</li>
+    <li><b>Model 3 is the natural partner.</b> A small, steady budget for event straddles or far-out puts would lose a little most months and pay off in exactly the weeks the strangle suffers. That pairing is what Universa recommends to its own investors.</li>
+    <li><b>Model 4 is the realistic stretch.</b> NIFTY calendar and skew trades can be tested on stored daily prices back to 2019. Dispersion needs the stock-option backfill and higher margin.</li>
+    <li><b>Models 1 and 5 are out of reach</b> by design. They are where most of the money in India went, and they need speed and scale this project will never have.</li>
+  </ul>
+  <p class="foot">Numbers are from the sources linked under each chart, mostly secondary press reports of primary filings. Firm revenue figures cover all asset classes. The "two shapes" chart and the "what each business needs" chart are illustrations, not data.</p>
+</section>
+</div>
+
+<script>
+(function(){
+  const css=v=>getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+  function niceStep(raw){const p=Math.pow(10,Math.floor(Math.log10(raw)));const f=raw/p;return (f<1.5?1:f<3.5?2:f<7.5?5:10)*p;}
+  function tipSetup(host){const t=document.createElement('div');t.className='tip';host.appendChild(t);return t;}
+
+  // horizontal bars: items [{label, value, color}]
+  function hbar(id,opt){
+    const host=document.querySelector('#'+id+' .chartwrap');
+    const items=opt.items, W=Math.max(300,host.clientWidth||600), compact=W<520, labH=compact?18:0;
+    const rowH=(opt.rowH||38)+labH, m={l:compact?4:Math.min(opt.left||170,Math.round(W*0.4)),r:W<480?62:76,t:8,b:26}, H=m.t+m.b+rowH*items.length;
+    let vmin=Math.min(0,...items.map(d=>d.value)), vmax=Math.max(0,...items.map(d=>d.value));
+    const pad=(vmax-vmin)*0.05; vmax+=vmax>0?pad:0; vmin-=vmin<0?pad:0;
+    const X=v=>m.l+(v-vmin)/(vmax-vmin)*(W-m.l-m.r), x0=X(0);
+    let s=`<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${opt.aria}">`;
+    const nT=Math.max(2,Math.floor((W-m.l-m.r)/80)); const step=niceStep((vmax-vmin)/nT);
+    for(let v=Math.ceil(vmin/step)*step;v<=vmax+1e-9;v+=step){s+=`<line x1="${X(v)}" x2="${X(v)}" y1="${m.t}" y2="${H-m.b}" stroke="${css('--grid')}"/><text x="${X(v)}" y="${H-8}" text-anchor="middle" font-size="11" font-family="${css('--mono')}" fill="${css('--muted')}">${opt.tick(v)}</text>`;}
+    items.forEach((d,i)=>{
+      const top=m.t+i*rowH+4, y=top+labH+2, h=(opt.rowH||38)-14, xa=Math.min(X(d.value),x0), w=Math.max(Math.abs(X(d.value)-x0),2);
+      const col=d.color||(d.value<0?css('--bad'):css('--good'));
+      if(compact) s+=`<text x="${m.l}" y="${top+12}" text-anchor="start" font-size="12.5" font-weight="500" font-family="${css('--body')}" fill="${css('--fg')}">${d.label}</text>`;
+      else s+=`<text x="${m.l-10}" y="${y+h/2+4}" text-anchor="end" font-size="13" font-family="${css('--body')}" fill="${css('--fg')}">${d.label}</text>`;
+      s+=`<rect x="${xa}" y="${y}" width="${w}" height="${h}" rx="4" fill="${col}"/>`;
+      if(d.value<0){ s+=`<text x="${xa+8}" y="${y+h/2+4}" text-anchor="start" font-size="12" font-weight="600" font-family="${css('--mono')}" fill="#ffffff">${opt.fmt(d.value)}</text>`; }
+      else { s+=`<text x="${xa+w+6}" y="${y+h/2+4}" text-anchor="start" font-size="12" font-family="${css('--mono')}" fill="${css('--fg')}">${opt.fmt(d.value)}</text>`; }
+    });
+    s+=`<line x1="${x0}" x2="${x0}" y1="${m.t}" y2="${H-m.b}" stroke="${css('--muted')}" stroke-width="1.2"/></svg>`;
+    host.innerHTML=s;
+  }
+
+  // grouped vertical bars
+  function vbar(id,opt){
+    const host=document.querySelector('#'+id+' .chartwrap');
+    const {labels,series}=opt, W=Math.max(280,host.clientWidth||560), H=opt.height||250, m={l:44,r:10,t:16,b:40};
+    const vals=series.flatMap(s=>s.values); let vmax=Math.max(...vals)*1.15, vmin=0;
+    const Y=v=>m.t+(vmax-v)/(vmax-vmin)*(H-m.t-m.b);
+    const gw=(W-m.l-m.r)/labels.length, nS=series.length, bw=Math.min(54,(gw-24)/nS);
+    let s=`<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${opt.aria}">`;
+    const step=niceStep(vmax/4);
+    for(let v=0;v<=vmax;v+=step){s+=`<line x1="${m.l}" x2="${W-m.r}" y1="${Y(v)}" y2="${Y(v)}" stroke="${css('--grid')}"/><text x="${m.l-8}" y="${Y(v)+4}" text-anchor="end" font-size="11" font-family="${css('--mono')}" fill="${css('--muted')}">${opt.tick(v)}</text>`;}
+    labels.forEach((lab,i)=>{
+      const cx=m.l+gw*i+gw/2;
+      series.forEach((sr,k)=>{const v=sr.values[i];const x=cx-(nS*bw)/2+k*bw+1;s+=`<rect x="${x}" y="${Y(v)}" width="${bw-2}" height="${Y(0)-Y(v)}" rx="4" fill="${sr.color}"/><text x="${x+(bw-2)/2}" y="${Y(v)-6}" text-anchor="middle" font-size="12" font-family="${css('--mono')}" fill="${css('--fg')}">${opt.fmt(v)}</text>`;});
+      s+=`<text x="${cx}" y="${H-m.b+18}" text-anchor="middle" font-size="12.5" font-family="${css('--body')}" fill="${css('--muted')}">${lab}</text>`;
+    });
+    s+=`<line x1="${m.l}" x2="${W-m.r}" y1="${Y(0)}" y2="${Y(0)}" stroke="${css('--muted')}"/></svg>`;
+    host.innerHTML=s;
+  }
+
+  // stacked single bar (shares)
+  function stack(id,opt){
+    const host=document.querySelector('#'+id+' .chartwrap');
+    const W=Math.max(280,host.clientWidth||560),H=150,m={l:8,r:8}; let x=m.l; const tw=W-m.l-m.r;
+    let s=`<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${opt.aria}">`;
+    opt.items.forEach(d=>{const w=tw*d.value/100; s+=`<rect x="${x+1}" y="20" width="${Math.max(w-2,1)}" height="56" rx="4" fill="${d.color}"/>`;
+      const narrow=w<70, last=x+w>=W-m.r-1, lx=narrow&&last?x+w:x+w/2, la=narrow&&last?'end':'middle';
+      s+=`<text x="${x+w/2}" y="53" text-anchor="middle" font-size="${narrow?11.5:15}" font-weight="600" font-family="${css('--mono')}" fill="#ffffff">${narrow?Math.round(d.value)+'%':d.value.toFixed(1)+'%'}</text>`;
+      s+=`<text x="${lx}" y="100" text-anchor="${la}" font-size="13" font-family="${css('--body')}" fill="${css('--fg')}">${d.label}</text>`;
+      if(d.note) s+=`<text x="${lx}" y="118" text-anchor="${la}" font-size="11.5" font-family="${css('--body')}" fill="${css('--muted')}">${d.note}</text>`;
+      x+=w;});
+    s+='</svg>'; host.innerHTML=s;
+  }
+
+  // illustrative lines
+  function lines(id){
+    const host=document.querySelector('#'+id+' .chartwrap');
+    const W=Math.max(280,host.clientWidth||560),H=250,m={l:40,r:16,t:16,b:34};
+    const sell=[],buy=[]; let a=0,b=0;
+    for(let t=0;t<=120;t++){ // months
+      if(t>0){ a+=1.0; b-=0.55; }
+      if(t===84){ a-=70; b+=95; }
+      if(t===85){ a-=8; b+=12; }
+      sell.push(a); buy.push(b);
+    }
+    const all=sell.concat(buy), vmin=Math.min(...all)-5, vmax=Math.max(...all)+5;
+    const X=t=>m.l+t/120*(W-m.l-m.r), Y=v=>m.t+(vmax-v)/(vmax-vmin)*(H-m.t-m.b);
+    const path=arr=>arr.map((v,i)=>(i?'L':'M')+X(i).toFixed(1)+' '+Y(v).toFixed(1)).join(' ');
+    let s=`<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Illustrative profit shapes">`;
+    s+=`<line x1="${m.l}" x2="${W-m.r}" y1="${Y(0)}" y2="${Y(0)}" stroke="${css('--muted')}"/>`;
+    for(let yr=0;yr<=10;yr+=2){s+=`<text x="${X(yr*12)}" y="${H-12}" text-anchor="middle" font-size="11" font-family="${css('--mono')}" fill="${css('--muted')}">yr ${yr}</text>`;}
+    s+=`<text x="${m.l-6}" y="${Y(0)+4}" text-anchor="end" font-size="11" font-family="${css('--mono')}" fill="${css('--muted')}">0</text>`;
+    s+=`<path d="${path(sell)}" fill="none" stroke="${css('--s1')}" stroke-width="2.5"/><path d="${path(buy)}" fill="none" stroke="${css('--s2')}" stroke-width="2.5"/>`;
+    s+=`<text x="${X(84)+6}" y="${H-m.b-6}" text-anchor="start" font-size="12" font-weight="600" font-family="${css('--body')}" fill="${css('--fg')}">crash</text>`;
+    s+=`<line x1="${X(84)}" x2="${X(84)}" y1="${m.t+12}" y2="${H-m.b}" stroke="${css('--muted')}" stroke-dasharray="3 4"/>`;
+    s+='</svg>'; host.innerHTML=s;
+  }
+
+  // radar-free "needs" chart: grouped horizontal score bars
+  function needs(id){
+    const host=document.querySelector('#'+id+' .chartwrap');
+    const models=['1 Making the market','2 Selling insurance','3 Buying insurance','4 Relative value','5 Market structure','Alpha Signal today'];
+    const data=[[3,3,3,1],[0,2,0,3],[0,1,0,3],[1,3,2,2],[3,3,3,1],[0,1,0,3]];
+    const cols=[css('--s1'),css('--s2'),css('--s3'),css('--s4')];
+    const W=Math.max(300,host.clientWidth||600),compact=W<520,rowH=compact?62:52,m={l:compact?4:Math.min(170,Math.round(W*0.42)),r:20,t:6,b:24},H=m.t+m.b+rowH*models.length; const unit=(W-m.l-m.r)/12;
+    let s=`<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="What each business needs">`;
+    models.forEach((name,i)=>{const y=m.t+i*rowH+8+(compact?14:0); const isUs=i===models.length-1;
+      s+=`<text x="${compact?m.l:m.l-10}" y="${compact?y-2:y+20}" text-anchor="${compact?'start':'end'}" font-size="13" font-weight="${isUs?600:400}" font-family="${css('--body')}" fill="${css('--fg')}">${name}</text>`;
+      let x=m.l; data[i].forEach((v,k)=>{ s+=`<rect x="${x+1}" y="${y+4}" width="${Math.max(v*unit-2,0)}" height="26" rx="3" fill="${cols[k]}"/>`; x+=v*unit; });
+      if(isUs && W>520) s+=`<text x="${x+8}" y="${y+22}" font-size="11.5" font-family="${css('--body')}" fill="${css('--muted')}">has: patience, a cost model, end-of-day data</text>`;
+    });
+    s+='</svg>'; host.innerHTML=s;
+  }
+
+  function renderAll(){
+  hbar('c-flow',{aria:'Gross profit by participant FY24',left:150,items:[
+    {label:'Individuals and others',value:-61000},{label:'Proprietary desks',value:33000},{label:'Foreign funds (FPIs)',value:28000}],
+    fmt:v=>(v>0?'+':'−')+'₹'+Math.abs(v).toLocaleString('en-IN')+' cr',tick:v=>(v/1000).toFixed(0)+'k'});
+  vbar('c-global',{aria:'Global options contracts',labels:['2024','2025'],series:[{name:'Options',values:[178.4,88.65],color:css('--s1')}],fmt:v=>v.toFixed(1)+' bn',tick:v=>v.toFixed(0)});
+  stack('c-who',{aria:'NSE index option premium share',items:[
+    {label:'Prop desks',value:46.8,color:css('--s1')},{label:'Individuals',value:40.5,color:css('--s2')},{label:'Everyone else',value:12.7,color:css('--s4'),note:'derived'}]});
+  hbar('c-mm',{aria:'Trading revenue 2025',left:150,items:[
+    {label:'Jane Street',value:39.6,color:css('--s1')},{label:'Hudson River Trading',value:12.3,color:css('--s1')},{label:'Citadel Securities',value:12.2,color:css('--s1')},{label:'IMC',value:3.12,color:css('--s1')}],
+    fmt:v=>'$'+v.toFixed(1)+' bn',tick:v=>'$'+v.toFixed(0)});
+  vbar('c-put',{aria:'PUT index versus S&P 500',labels:['Return a year','Swing (volatility)'],series:[{name:'PUT',values:[10.1,10.1],color:css('--s1')},{name:'S&P 500',values:[9.8,15.3],color:css('--s2')}],fmt:v=>v.toFixed(1)+'%',tick:v=>v.toFixed(0)+'%'});
+  lines('c-shape');
+  needs('c-need');
+  }
+  renderAll();
+  let rt; window.addEventListener('resize',()=>{clearTimeout(rt);rt=setTimeout(renderAll,150);});
+  if(window.matchMedia) window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change',renderAll);
+})();
+</script>
+</body>
+</html>
