@@ -56,6 +56,13 @@ def sectors():
 def ensure_themes():
     """config.NEWS_THEMES is the list; the table holds each theme's note. A theme
     dropped from config is retired (its note and history stay)."""
+    # Every cockpit read comes through here: when the table already matches config there is nothing to
+    # write, and a write would queue behind any long DB writer (the Kite backfill) for up to 30 s.
+    have = {r["theme_id"]: (r["title"], r["scope"], r["status"])
+            for r in db.rows("SELECT theme_id, title, scope, status FROM news_themes")}
+    if all(have.get(tid) == (title, scope, "active") for tid, title, scope in config.NEWS_THEMES) and \
+            all(v[2] == "retired" for k, v in have.items() if k not in {t[0] for t in config.NEWS_THEMES}):
+        return
     with get_db() as conn:
         for tid, title, scope in config.NEWS_THEMES:
             conn.execute("INSERT INTO news_themes (theme_id, title, scope, status) VALUES (?, ?, ?, 'active') "
