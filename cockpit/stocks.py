@@ -33,6 +33,7 @@ PLAY_ORDER = ("quality", "deep_value", "breakouts", "insiders", "cloning", "clon
 SORTS = {                      # key -> (label, default direction)
     "rank": ("Rank in tier", "asc"), "score": ("Score", "desc"), "ticker": ("Stock", "asc"),
     "change": ("Rank change", "desc"), "data": ("Data", "desc"), "pt": ("Median target", "desc"),
+    "long": ("Long-hold rank", "asc"),
 }
 
 
@@ -85,6 +86,9 @@ def universe():
     forensic = {r.sid: (r.m_score_flag, r.z_score_flag) for r in forensic.itertuples()}
     avoid = playbooks.avoid_list()["flag_counts"]
     book = {r["sid"] for r in (api.get_sized_book() or {}).get("rows", [])}
+    sleeve = views.paper_sleeve()                                          # SMALL long-hold ranks, monthly (ADR 0073)
+    long_ranks = (sleeve.get("long_hold") or {}).get("ranks", {})
+    slow_held = {p["sid"] for p in sleeve.get("books", {}).get("slow", {}).get("positions", [])}
     plays, veto = {}, set()
     for r in views.native_rows(
             "SELECT sid, sleeve FROM playbook_members WHERE in_sleeve = 1 AND snapshot_date = "
@@ -110,6 +114,7 @@ def universe():
             "change": moves.get(s.sid) if p is not None else None,
             "data": data["score"] if data else None, "data_colour": data["colour"] if data else None,
             "book": s.sid in book,
+            "long": long_ranks.get(s.sid), "long_sleeve": s.sid in slow_held,
             "avoid": avoid.get(s.sid, 0) >= playbooks.AVOID_MIN_FLAGS,
             "forensic": [x for x, on in (("Accounts", accounts), ("Distress", distressed)) if on],
             "veto": s.sid in veto,
@@ -121,7 +126,8 @@ def universe():
         r["flagged"] = bool(r["avoid"] or r["forensic"] or r["veto"])
     return {"as_of": as_of, "prev_date": dates[1] if len(dates) > 1 else None, "rows": rows,
             "tiers": views.display_tiers() + views.unpickable_tiers(), "unpickable": views.unpickable_tiers(),
-            "sectors": sorted({r["sector"] for r in rows if r["sector"]})}
+            "sectors": sorted({r["sector"] for r in rows if r["sector"]}),
+            "long_hold": {k: v for k, v in (sleeve.get("long_hold") or {}).items() if k != "ranks"} | {"stale": sleeve.get("stale")}}
 
 
 def _truthy(v):
@@ -169,10 +175,10 @@ def screen(params):
         rows = sorted(rows, key=lambda r: r["ticker"], reverse=rev)
     else:
         key = {"score": "score", "data": "data", "pt": "pt_up",
-               "change": "change"}[sort]
+               "change": "change", "long": "long"}[sort]
 
         def val(r):
-            v = r[key]
+            v = r.get(key)
             return v if isinstance(v, (int, float)) else None     # 'new' has no number to sort on
         have = [r for r in rows if val(r) is not None]
         rest = [r for r in rows if val(r) is None]
@@ -205,6 +211,7 @@ def screen(params):
             "n_book_unranked": sum(r["book"] and not r["ranked"] for r in u["rows"]),
             "n_flagged": sum(r["flagged"] and r["ranked"] for r in u["rows"]),
             "sorts": SORTS,
+            "long_hold": u.get("long_hold") or {},
             "default_view": not (chosen["tier"] or unranked or sector or book or flagged or q)}
 
 

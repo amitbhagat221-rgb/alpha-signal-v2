@@ -160,6 +160,31 @@
     {% else %}
     <div class="verdict-line"><strong>{{ s.ticker }} is not in today's ranking</strong> <span class="u-muted">(latest ranking {{ latest_pick|short_date }}); older figures below can be stale.</span></div>
     {% endif %}
+    {# Two horizons, one layout (Amit 2026-10-14): the live daily rank and the monthly long-hold rank of the
+       SMALL paper sleeve (views.long_hold; ADR 0073 uses it in Small only). #}
+    {% if s.cap_tier != 'MICRO' %}
+    {% set lh = s.get("long_hold") %}
+    <div class="rank-pair">
+        <div class="rp-row">
+            <span class="rp-label">Today</span>
+            <span class="rp-rank num">{% if in_ranking %}{{ s.rank|rank_text(bd.tier_size if bd else none) }}{% else %}not ranked{% endif %}</span>
+            <span class="rp-note">daily &middot; held weeks to months{% if lh and 'tactical' in lh.books %} &middot; <strong>in the paper sleeve</strong> (tactical half){% endif %}</span>
+        </div>
+        <div class="rp-row">
+            <span class="rp-label hover-tip" tabindex="0">Long hold<span class="tooltip-popover" role="tooltip">The slow score: 6-month momentum, quality &times; value and Piotroski, refreshed once a month. The Small paper sleeve buys its top 20 and holds them at least 12 months (ADR 0073). Paper only, no orders.</span></span>
+            {% if lh %}
+            <span class="rp-rank num">{{ lh.rank|rank_text(lh.size) }}</span>
+            <span class="rp-note"><span class="{{ 'score-amber' if lh.stale else '' }}">{{ lh.score_date|month_text }}{% if lh.stale %}, stale: the monthly refresh was missed{% endif %}</span> &middot; held 6&ndash;12 months{% if 'slow' in lh.books %} &middot; <strong>in the paper sleeve</strong>{% endif %}</span>
+            {% elif s.cap_tier == 'SMALL' %}
+            <span class="rp-rank u-muted">not ranked</span>
+            <span class="rp-note">no long-hold score this month</span>
+            {% else %}
+            <span class="rp-rank u-muted">&mdash;</span>
+            <span class="rp-note">used in Small only; {{ s.cap_tier|tier_word }} tracks its index</span>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
     {% if pt %}
     <div class="verdict-line">
         Analyst {{ pt_basis }} target <span class="num">{{ pt|inr(0) }}</span>{% if pt_up is not none %}
@@ -1493,6 +1518,13 @@ function initConsensusCharts() { once('forecast', initForecastChart); }
 .lineage-toggle { display: flex; justify-content: space-between; align-items: center; width: 100%; background: none; border: 0; padding: 0; text-align: left; color: inherit; font: inherit; cursor: pointer; }
 .pt-src { text-transform: uppercase; letter-spacing: .5px; }
 .verdict-line { font-size: 14px; line-height: 1.6; margin-bottom: 6px; }
+.rank-pair { display: grid; grid-template-columns: max-content max-content 1fr; gap: 2px 14px; align-items: baseline;
+    margin: 4px 0 8px; padding: 8px 0 2px; border-top: 1px solid var(--border); font-size: 13px; }
+.rp-row { display: contents; }
+.rp-label { color: var(--text-secondary); }
+.rp-rank { font-weight: 700; text-align: left; }
+.rp-note { color: var(--text-muted); font-size: 12px; }
+@media (max-width: 520px) { .rank-pair { grid-template-columns: max-content 1fr; } .rp-note { grid-column: 1 / -1; margin: -2px 0 4px; } }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .data-head { display: flex; align-items: center; gap: 20px; margin: 14px 0; }
 .data-big { font-size: 44px; font-weight: 800; line-height: 1; }

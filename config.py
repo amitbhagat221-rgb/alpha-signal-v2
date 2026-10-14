@@ -917,4 +917,15 @@ FILE_OUTPUTS = [
         "frequency":     "daily",
         "producer":      "backup_db.sh",
     },
+    {
+        # ADR 0073 SMALL paper sleeve: both books' holdings + the SMALL long-hold ranking the cockpit shows
+        # (stock page, Stocks screener, /book → Paper sleeve). Monthly, 2nd 06:40 UTC (`run.sh paper_sleeve`).
+        "virtual_table": "_file_paper_sleeve",
+        "glob":          "output/paper_sleeve/latest.json",
+        "freshness_field": "long_hold",
+        "source":        "tools/paper_sleeve.py (run.sh paper_sleeve, monthly)",
+        "data_freq":     "monthly",
+        "frequency":     "monthly",
+        "producer":      "tools.paper_sleeve",
+    },
 ]

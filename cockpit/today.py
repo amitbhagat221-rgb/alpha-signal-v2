@@ -215,5 +215,21 @@ def build():
         "mover_count": sum(len(v) for v in movers.values()), "prev_pick_date": prev_date,
         "exit_rank": config.PORTFOLIO["hrp"]["rebalance"]["rank_exit"],
         "evidence": playbooks.evidence(), "unproven": views.unproven_tiers(),
-        "top_n": TOP_N, "tier_sizes": sizes,
+        "top_n": TOP_N, "tier_sizes": sizes, "sleeve_review": sleeve_review(),
     }
+
+
+SLEEVE_REVIEW_DAYS = 7
+
+
+def sleeve_review(today=None):
+    """The Small paper sleeve's latest monthly review (ADR 0073) while it is news — within
+    SLEEVE_REVIEW_DAYS of it — else None: {date, bought, sold, status}."""
+    sl = views.paper_sleeve(today)
+    r = sl.get("last_review")
+    if not r:
+        return None
+    from datetime import date as _date
+    if ((today or _date.today()) - _date.fromisoformat(r["date"])).days > SLEEVE_REVIEW_DAYS:
+        return None
+    return {**r, "status": sl["status"]}

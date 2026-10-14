@@ -85,6 +85,11 @@
 </div>
 {% endif %}
 
+{% if t.sleeve_review %}{% set sr = t.sleeve_review %}
+<p class="td-note">Small paper sleeve reviewed {{ sr.date|short_date }}: {{ sr.bought }} in, {{ sr.sold }} out{% if sr.status != 'ACTIVE' %}, <span class="score-red">paused by the kill switch</span>{% endif %}. Paper only.
+    <a href="/book#sleeve">See the sleeve &rarr;</a></p>
+{% endif %}
+
 {# ── checks ── #}
 <h2 class="section-title td-sec">Checks <span class="unit">book and top picks &middot; red flags, thin trading, results due within 7 days</span></h2>
 {% if t.checks %}

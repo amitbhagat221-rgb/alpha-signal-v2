@@ -44,6 +44,12 @@
 .bk-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 .bk-chips a { font-size: 12px; padding: 2px 8px; border: 1px solid var(--border); border-radius: 10px; color: var(--text-primary); text-decoration: none; }
 .bk-py-chart { position: relative; height: 260px; margin-top: 12px; }
+.sl-books { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.sl-title { font-size: 15px; font-weight: 700; }
+.sl-nav { margin-left: auto; text-align: right; }
+.sl-date { font-size: 18px; }
+.sl-tbl { min-width: 0; }
+@media (max-width: 900px) { .sl-books { grid-template-columns: 1fr; } }
 @media (max-width: 768px) { .bk-hide-sm { display: none; } .bk-only-sm { display: block !important; margin-top: 3px; line-height: 2; } .bk-tbl { min-width: 0; } .bk-tbl th, .bk-tbl td { padding: 6px 3px; } .bk-tbl th { font-size: 10px; letter-spacing: 0; } .bk-only-sm .pill { padding: 1px 5px; font-size: 10px; } .bk-decile { grid-template-columns: repeat(5, minmax(0, 1fr)); } .bk-row .name { width: 110px; } }
 </style>
 
@@ -239,6 +245,59 @@
     Click a column heading to sort: Rank sorts by place in the tier (so tiers compare), Model's view by score. Upside is to the median analyst target from the latest close. ETFs and gold bonds are outside the model's universe.</p>
 {% else %}
 <div class="card"><p class="u-muted">No Zerodha snapshot yet. It is taken when you log in to Kite.</p></div>
+{% endif %}
+</div>
+
+{# ────────────── PAPER SLEEVE (ADR 0073; views.paper_sleeve ← tools/paper_sleeve.py, monthly) ────────────── #}
+<div x-show="tab === 'sleeve'" x-cloak>
+{% set sl = sleeve %}
+{% if not sl %}
+<div class="card"><p class="bk-sub">The Small paper sleeve has not written a report yet (tools/paper_sleeve.py, 2nd of each month).</p></div>
+{% else %}
+{% set h = sl.latest %}
+<div class="card u-mb16">
+    <div class="bk-line">
+        <div><div class="bk-lbl">Sleeve vs Smallcap 250</div>
+            <div class="bk-big {{ (h.relative - 1)|tone }}">{{ (h.relative - 1)|pct(1, signed=True, scale=100) }}</div></div>
+        <div><div class="bk-lbl">Sleeve</div><div class="bk-big">{{ (h.combined - 1)|pct(1, signed=True, scale=100) }}</div></div>
+        <div><div class="bk-lbl">Index</div><div class="bk-big">{{ (h.bench - 1)|pct(1, signed=True, scale=100) }}</div></div>
+        <div><div class="bk-lbl">Status</div>
+            <div><span class="pill pill-{{ 'green' if sl.status == 'ACTIVE' else 'red' }} hover-tip" tabindex="0">{{ 'Active' if sl.status == 'ACTIVE' else 'Paused' }}<span class="tooltip-popover" role="tooltip">The kill switch pauses new buys when the sleeve trails the Smallcap 250 by 15% over 12 months, or by 20% from its best (ADR 0073).</span></span></div></div>
+        <div><div class="bk-lbl">Next review</div><div class="bk-big sl-date">{{ sl.next_review|short_date }}</div></div>
+    </div>
+    <p class="bk-sub">Paper only: no orders are placed. Since {{ sl.books.slow.positions[0].bought|long_date if sl.books.slow.positions else '—' }},
+        prices to {{ h.price_date|short_date }}; {{ (sl.notional * 2)|inr(0) }} split evenly between two books of 20 Small stocks, reviewed once a month.
+        {% if sl.stale %}<span class="score-amber">Stale: the monthly refresh was missed ({{ sl.age_days }} days old).</span>{% endif %}</p>
+</div>
+
+<div class="sl-books">
+{% for key, title, what in [('slow', 'Long hold', 'the slow score: momentum, quality × value, Piotroski'), ('tactical', 'Tactical', 'the fast score, walk-forward')] %}
+{% set b = sl.books[key] %}
+<div class="card">
+    <div class="bk-line"><div><div class="sl-title">{{ title }}</div><div class="bk-sub">{{ what }}</div></div>
+        <div class="sl-nav"><div class="bk-lbl">Value</div><div class="num">{{ b.nav|inr(0) }} <span class="{{ (b.nav / sl.notional - 1)|tone }}">({{ (b.nav / sl.notional - 1)|pct(1, signed=True, scale=100) }})</span></div></div></div>
+    <p class="bk-note">{{ b.rule }} Ranks are within {{ "{:,}".format(b.size) }} Small stocks, scores of {{ b.score_date|month_text }}.</p>
+    <div class="table-wrap">
+    <table class="bk-tbl sl-tbl">
+        <thead><tr><th scope="col">Stock</th><th scope="col" class="num bk-hide-sm">Bought</th><th scope="col" class="num">Rank then</th><th scope="col" class="num">Rank now</th><th scope="col" class="num">Since buy</th></tr></thead>
+        <tbody>
+        {% for p in b.positions %}
+        <tr><td><a href="/stocks/{{ p.sid }}">{{ p.ticker }}</a></td>
+            <td class="num bk-hide-sm">{{ p.bought|short_date }}</td>
+            <td class="num">#{{ p.rank_at_buy }}</td>
+            <td class="num">{% if p.rank_now %}#{{ p.rank_now }}{% else %}<span class="u-muted-11">unranked</span>{% endif %}</td>
+            <td class="num {{ p.ret|tone }}">{{ p.ret|pct(1, signed=True, scale=100) }}</td></tr>
+        {% else %}
+        <tr><td colspan="5" class="bk-sub">No holdings{% if sl.status != 'ACTIVE' %} (paused){% endif %}.</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+</div>
+{% endfor %}
+</div>
+<p class="bk-note">"Since buy" is after the 0.3% trading cost on each side, before tax. The long-hold rank of every Small stock is on the stock page and in
+    <a href="/stocks?tier=SMALL&amp;sort=long">Stocks, sorted by long hold</a>. Graded B in Small only (ADR 0073); Mid and Large track their indices.</p>
 {% endif %}
 </div>
 

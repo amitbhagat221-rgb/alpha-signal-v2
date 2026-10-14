@@ -197,11 +197,11 @@ def playbooks_tab(request: Request, tab: str):
 
 @app.get("/book", response_class=HTMLResponse)
 def book_page(request: Request):
-    """The HRP sized book, the real Zerodha holdings, risk and track record (tabs: book, zerodha, risk, track-record)."""
+    """The HRP sized book, the real Zerodha holdings, the Small paper sleeve, risk and track record (tabs: pages.py)."""
     return templates.TemplateResponse(request, "book.html", {
         "page": "book", "tabs": next(p["tabs"] for p in pages.PAGES if p["id"] == "book"),
         "book": book.get_book(), "zerodha": book.get_zerodha(), "past_year": book.get_past_year(),
-        "risk": book.get_risk(), "track": book.get_track_record(),
+        "risk": book.get_risk(), "track": book.get_track_record(), "sleeve": views.paper_sleeve(),
     })
 
 
@@ -249,6 +249,7 @@ def stock_detail(request: Request, sid: str):
     detail["in_book"] = sid in {r["sid"] for r in (api.get_sized_book() or {}).get("rows", [])}
     detail["chips"] = stocks_data.stock_chips(sid)
     detail["rank_move"] = stocks_data.rank_move(sid)
+    detail["long_hold"] = views.long_hold(sid)
     detail["tooltips"] = api.SIGNAL_TOOLTIPS
     detail["metric_tooltips"] = api.METRIC_TOOLTIPS
     detail["signal_descriptions"] = api.SIGNAL_DESCRIPTIONS

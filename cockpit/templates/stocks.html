@@ -63,6 +63,7 @@
         <th class="l hide-m hide-t" scope="col">Sector</th>
         {{ th('score', 'Score /100', 'num') }}
         {{ th('rank', 'Rank', 'num') }}
+        {{ th('long', 'Long hold', 'num hide-m') }}
         {{ th('data', 'Data %', 'num hide-m') }}
         {{ th('pt', 'Median target', 'num hide-m') }}
         <th class="l hide-m" scope="col">Flags and screens</th>
@@ -82,9 +83,14 @@
         <td class="num">#{{ r.rank }}<span class="u-muted-10 hide-m"> of {{ r.tier_size|count }}</span>
             {%- if r.change == 'new' %} <span class="u-muted-10">new</span>
             {%- elif r.change %} <span class="st-chg {{ 'score-green' if r.change > 0 else 'score-red' }}" aria-label="{{ 'Up' if r.change > 0 else 'Down' }} {{ r.change|abs }} place{{ '' if r.change|abs == 1 else 's' }}">{{ '▲' if r.change > 0 else '▼' }}{{ r.change|abs }}</span>{% endif %}</td>
+        {% else %}
+        <td class="num u-muted-11" colspan="2">{{ 'not ranked today' if r.book else 'not ranked' }}</td>
+        {% endif %}
+        <td class="num hide-m">{% if r.long %}#{{ r.long }}{% if r.long_sleeve %}<div class="u-muted-10">in sleeve</div>{% endif %}{% else %}<span class="u-muted-11">&mdash;</span>{% endif %}</td>
+        {% if r.ranked %}
         <td class="num hide-m {{ 'score-green' if r.data_colour == 'green' else 'score-amber' }}">{{ r.data }}%</td>
         {% else %}
-        <td class="num u-muted-11" colspan="3">{{ 'not ranked today' if r.book else 'not ranked' }}</td>
+        <td class="num hide-m u-muted-11">&mdash;</td>
         {% endif %}
         <td class="num hide-m {{ r.pt_up|tone if r.pt_up is not none }}">{{ r.pt_up|pct(0, signed=True) if r.pt_up is not none else '—' }}{% if r.analysts and r.pt_up is not none %}<div class="u-muted-10">{{ r.analysts }} analyst{{ '' if r.analysts == 1 else 's' }}</div>{% endif %}</td>
         <td class="l hide-m st-pills">
@@ -95,7 +101,7 @@
         </td>
     </tr>
     {% else %}
-    <tr><td class="l st-empty" colspan="8">
+    <tr><td class="l st-empty" colspan="9">
         No stock matches these filters.
         {% if not c.unranked and not c.tier and c.q %}Unranked stocks are hidden: <a href="{{ s.link(unranked='1') }}">include them</a>.{% endif %}
         <a href="/stocks">Reset filters</a>.
@@ -117,6 +123,7 @@
     Score is the within-tier ranking score as of the ranking date. Data % is the share of the ranking's factor weight that had a real value for the stock.
     Median target is the median analyst target against the latest close (upside, percent); blank when no analyst covers the stock or the target looks implausible.
     Flags: Avoid list = two or more red flags; Accounts (Beneish M-score says the accounts look manipulated) and Distress (Altman Z-score, not used for lenders) come from the forensic scores; Avoid screen = the red-flag set on the Avoid list tab of Investor Playbooks.
+    Long hold is the Small paper sleeve's monthly slow rank{% if s.long_hold.score_date %} ({{ s.long_hold.score_date|month_text }}, among {{ "{:,}".format(s.long_hold.size) }} Small stocks{% if s.long_hold.stale %}, <span class="score-amber">stale: the monthly refresh was missed</span>{% endif %}){% endif %}: the sleeve buys its top 20 and holds them at least 12 months. Small only, so Mid and Large show a dash; "in sleeve" = held by the sleeve now (paper, no orders).
     Blue tags are the Investor Playbooks screens the stock passes today. In book = held in the sized book. Unranked = micro caps, and stocks that failed the data gate.
 </div>
 

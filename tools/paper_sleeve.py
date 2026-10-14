@@ -218,10 +218,39 @@ def report(st):
                          f"₹{p['value']:,.0f} ({p['value'] / p['cost_basis'] - 1:+.1%})")
         lines.append("")
     (OUT / "latest.md").write_text("\n".join(lines))
-    (OUT / "latest.json").write_text(json.dumps(dict(status=st["status"], latest=h,
-                                                     books={k: list(b["positions"]) for k, b in st["books"].items()}),
-                                                indent=1))
+    (OUT / "latest.json").write_text(json.dumps(cockpit_view(st, names), indent=1))
     print("\n".join(lines))
+
+
+RULES = {"slow": "Buys the top 20 by the average of the last three monthly scores; sells only when the rank falls "
+                 "below 60 and the stock has been held 12 months.",
+         "tactical": "Buys the top 20; sells when the rank falls below 40. No minimum hold."}
+
+
+def cockpit_view(st, names):
+    """latest.json, the one file the cockpit reads (config.FILE_OUTPUTS `_file_paper_sleeve`): both books'
+    holdings with today's book rank, and the whole SMALL long-hold (slow book) ranking the stock page and the
+    Stocks screener show. The ranks are the ones the books act on (slow = 3-month average)."""
+    h = st["history"][-1]
+    rk = {k: ranks(k, h["date"]) for k in BOOKS}
+    books = {}
+    for k, b in st["books"].items():
+        anchor, r = rk[k]
+        pos = [dict(sid=sid, ticker=names.get(sid, sid), bought=p["bought"], rank_at_buy=p["rank_at_buy"],
+                    rank_now=None if r.get(sid) is None else int(r[sid]), value=round(p["value"], 2),
+                    ret=round(p["value"] / p["cost_basis"] - 1, 4))
+               for sid, p in sorted(b["positions"].items(), key=lambda kv: (kv[1]["bought"], kv[1]["rank_at_buy"]))]
+        books[k] = dict(nav=h["nav"][k], cash=round(b["cash"], 2), n=len(pos), size=len(r), score_date=anchor,
+                        rule=RULES[k], positions=pos)
+    d = pd.Timestamp(h["date"])
+    nxt = (d + pd.offsets.MonthBegin(1)) + pd.Timedelta(days=1)          # the cron runs on the 2nd
+    anchor, r = rk["slow"]
+    done = [t for t in st["trades"] if t["date"] == h["date"]]
+    review = dict(date=h["date"], bought=sum(t["side"] == "BUY" for t in done), sold=sum(t["side"] == "SELL" for t in done))
+    return dict(status=st["status"], latest=h, next_review=nxt.date().isoformat(), notional=NOTIONAL, bench=BENCH,
+                books=books, last_review=review,
+                long_hold=dict(tier="SMALL", score_date=anchor, computed=h["date"], size=len(r),
+                               ranks={sid: int(v) for sid, v in r.items()}))
 
 
 def main():

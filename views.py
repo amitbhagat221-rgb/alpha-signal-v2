@@ -705,6 +705,41 @@ def book_history(n=2):
     return out
 
 
+# ═══════════════════════════ paper sleeve (ADR 0073) ═══════════════════════════
+
+SLEEVE_FILE = PROJECT_ROOT / "output" / "paper_sleeve" / "latest.json"
+SLEEVE_STALE_DAYS = 40   # the job runs on the 2nd of each month; past this a monthly refresh was missed
+
+
+def paper_sleeve(today=None):
+    """The SMALL paper sleeve as tools/paper_sleeve.py last wrote it (config.FILE_OUTPUTS
+    `_file_paper_sleeve`), or {}: both books' holdings, the kill-switch status, and `long_hold`, the
+    whole SMALL long-hold (slow book) ranking. Adds `age_days` and `stale` (a monthly refresh missed).
+    Research output, never in the DB (plan 0025 rule 1)."""
+    try:
+        d = json.loads(SLEEVE_FILE.read_text())
+    except (OSError, json.JSONDecodeError):
+        return {}
+    if not d.get("long_hold"):
+        return {}
+    d["age_days"] = ((today or date.today()) - date.fromisoformat(d["long_hold"]["computed"])).days
+    d["stale"] = d["age_days"] > SLEEVE_STALE_DAYS
+    return d
+
+
+def long_hold(sid, sleeve=None):
+    """One stock's long-hold rank: {rank, size, score_date, stale, books}, `books` = the paper books
+    holding it ("slow", "tactical"). None when the stock has no long-hold rank (only SMALL is ranked:
+    ADR 0073 graded the slow book B in SMALL and C elsewhere) or the sleeve file is missing."""
+    sl = paper_sleeve() if sleeve is None else sleeve
+    lh = sl.get("long_hold") or {}
+    rank = (lh.get("ranks") or {}).get(sid)
+    if rank is None:
+        return None
+    books = [k for k, b in sl.get("books", {}).items() if any(p["sid"] == sid for p in b.get("positions", []))]
+    return {"rank": rank, "size": lh["size"], "score_date": lh["score_date"], "stale": sl["stale"], "books": books}
+
+
 def forensic_flags(sids):
     """{sid: {as_of, m_flag, z_flag}} from each stock's NEWEST forensic_scores row (the table keeps
     every snapshot, so an old flag must not outlive the latest clean row). Only stocks whose newest
