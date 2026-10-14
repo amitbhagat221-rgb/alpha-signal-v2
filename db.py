@@ -122,6 +122,8 @@ _COLUMN_MIGRATIONS = [
     ("shareholding", "n_shareholders", "INTEGER"),
     # 1 = Moneycontrol gave no call date; reco_date is the fetch date (plan 0018)
     ("broker_recommendations", "reco_date_imputed", "INTEGER"),
+    # consensus beat rate, last 4 results (LARGE re-audit 2026-10-10)
+    ("daily_snapshots_pit", "cons_beat_rate_4q", "REAL"),
 ]
 
 
