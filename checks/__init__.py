@@ -156,12 +156,14 @@ def coverage_checks():
                    "The gate is the table's `coverage` in tables.TABLES.",
             "critical_pct": 100 - severe_pct,
             "warn_pct": 100 - gap_pct,
+            # one sid-index seek per stock in the universe (NOT EXISTS), not a DISTINCT over the whole table
             "sql": f"""
                 SELECT
-                    (SELECT COUNT(*) FROM stocks WHERE sid NOT IN (SELECT DISTINCT sid FROM {tbl})) AS n_bad,
+                    (SELECT COUNT(*) FROM stocks
+                     WHERE NOT EXISTS (SELECT 1 FROM {tbl} t WHERE t.sid = stocks.sid)) AS n_bad,
                     (SELECT COUNT(*) FROM stocks) AS n_total,
                     (SELECT sid || ' (' || ticker || ', ' || cap_tier || ')' FROM stocks
-                     WHERE sid NOT IN (SELECT DISTINCT sid FROM {tbl}) LIMIT 1) AS sample
+                     WHERE NOT EXISTS (SELECT 1 FROM {tbl} t WHERE t.sid = stocks.sid) LIMIT 1) AS sample
             """,
         })
     return out
