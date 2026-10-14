@@ -2618,3 +2618,13 @@ CREATE TABLE IF NOT EXISTS quarterly_results_nse (
     fetched_at          TEXT NOT NULL,
     PRIMARY KEY (sid, period_end, basis, filed_at)
 );
+
+-- ── Scaling indexes (cockpit-scale, 2026-10-14): PROPOSED, NOT BUILT on the live DB ──
+-- Each makes one cockpit/ops query a range seek instead of a walk of the whole table (what the query is,
+-- and its measured cost, is in docs/reference/cockpit.md "Scaling"). Building one is a write to a live table:
+-- run them by hand, one at a time, with no other long DB writer (no Kite backfill, no panel rebuild):
+--     sqlite3 data/alpha_signal.db < <(sed -n '/^CREATE INDEX IF NOT EXISTS ix_scale_/p' schema.sql)
+-- Measured on scratch copies of the tables: 2.1 s, 2.1 s and 5.5 s (expect a few times that under a writer).
+CREATE INDEX IF NOT EXISTS ix_scale_bse_ann_dt      ON bse_announcements (dt_tm);          -- 2.6M rows: announcements since a date (Today, Avoid list)
+CREATE INDEX IF NOT EXISTS ix_scale_bse_ann_fetched ON bse_announcements (fetched_at);     -- 2.6M rows: freshness range (date_col); lower priority, 0.9 s a census pass
+CREATE INDEX IF NOT EXISTS ix_scale_mfnav_fetched   ON mf_nav_history (fetched_at);        -- 8.9M rows: freshness range (date_col)
