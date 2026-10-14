@@ -42,7 +42,7 @@ PAGES = [
      "tabs": PLAYBOOK_TABS},
     {"path": "/book", "id": "book", "title": "Book", "subtitle": "Holdings, risk, results",
      "icon": "briefcase", "section": "Analysis", "mobile": 4, "short": "Book", "also": ["portfolio", "model-outcomes"],
-     "tabs": [("book", "The book"), ("zerodha", "Zerodha"), ("sleeve", "Paper sleeve"), ("risk", "Risk"),
+     "tabs": [("book", "The book"), ("zerodha", "Zerodha"), ("sleeve", "Paper sleeve"), ("methods", "Ways to weight"), ("risk", "Risk"),
               ("track-record", "Track record")]},
     {"path": "/model", "id": "model", "title": "Model", "subtitle": "How the model is doing",
      "icon": "sliders", "section": "Analysis", "short": "Model",

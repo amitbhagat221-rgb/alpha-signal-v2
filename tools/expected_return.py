@@ -146,6 +146,13 @@ def _universe_size(tier):
                         params=[tier]).iloc[0]["n"])
 
 
+def alpha_per_z(tier):
+    """Annual alpha of a stock one score-z above its tier's average: the same Grinold chain as
+    run() (OOS shrink x composite IC x 20d dispersion x 12.6), per unit of z instead of the
+    top-k z-bar. The /book "Ways to weight" tab multiplies it by each name's capped z."""
+    return OOS_SHRINK[tier] * _composite_ic(tier)[0] * _cs_dispersion(tier) * PERIODS_PER_YEAR
+
+
 def _weighted_cost_bps(tier_w):
     return sum(tier_w[t]["w"] * TRANSACTION_COSTS_BPS[t] for t in tier_w)
 

@@ -1,0 +1,108 @@
+{# /book "Ways to weight" tab, fetched from /partial/book/methods the first time the tab opens.
+   Data: cockpit/book_methods.get_methods(). Charts are drawn by bookMethods() in book.html. #}
+{% if not m %}
+<div class="card"><p class="u-muted">No sized book or index history yet, so nothing to compare.</p></div>
+{% else %}
+<div x-data="bookMethods()" x-init="$nextTick(() => draw())">
+<script type="application/json" id="methodsData">{{ {'scatter': m.scatter, 'chart': m.chart, 'highlight': m.highlight}|tojson }}</script>
+
+<div class="card" style="margin-bottom: 16px;">
+    <div class="bk-lbl">The portfolios you would hold today: expected return and expected risk</div>
+    <p class="bk-note" style="margin-top: 6px;">Every method weights the same {{ m.grid|length }} names, today's model book, under the live book's caps:
+        long only, at most {{ m.cap_pct|round|int }}% in one stock and {{ m.sector_cap_pct|round|int }}% in one sector.
+        <b>Expected risk</b> comes from how the names moved over the last year ({{ m.now_start|short_date }} {{ m.now_start[:4] }} to {{ m.asof|short_date }} {{ m.asof[:4] }}).
+        <b>Expected return</b> for each stock is its market's assumed year
+        ({% for t, v in m.market.items() %}{{ t|tier_word }} {{ v|pct(1) }}{% if not loop.last %}, {% endif %}{% endfor %})
+        plus the model's edge: how far its score sits above its tier, times the edge the model's factors have shown, cut to
+        {% for t, v in m.shrink.items() %}{{ t|tier_word }} {{ (v * 100)|round|int }}%{% if not loop.last %}, {% endif %}{% endfor %}
+        of it because that is what held up out of sample.</p>
+    <div class="table-wrap" style="margin-top: 10px;">
+    <table class="bk-tbl" style="min-width: 0;">
+        <thead><tr>
+            <th>Method</th><th class="num">Return %</th><th class="num">Volatility %</th>
+            <th class="num">Sharpe</th><th class="num bk-hide-sm">Names</th><th class="num bk-hide-sm">Largest %</th>
+        </tr></thead>
+        <tbody>
+        {% for r in m.forward %}
+        <tr>
+            <td><button type="button" class="bk-m-pick" @click="toggle('{{ r.key }}')" :aria-pressed="on.includes('{{ r.key }}')">
+                    <span class="bk-m-sw" :style="swatch('{{ r.key }}')"></span><b>{{ r.label }}</b></button>
+                <div class="bk-sub bk-hide-sm">{{ r.blurb }}</div></td>
+            <td class="num mono">{{ r.e_ret|pct(1) }}</td>
+            <td class="num mono">{{ r.e_vol|pct(1) }}</td>
+            <td class="num mono">{{ '%.2f'|format(r.e_sharpe) if r.e_sharpe is not none else '—' }}</td>
+            <td class="num bk-hide-sm mono">{{ r.n_held }}</td>
+            <td class="num bk-hide-sm mono">{{ r.max_w|pct(1) }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    <p class="bk-sub" style="margin-top: 6px;">All three columns are expected, for the next year. Tap a method to mark it on both charts.</p>
+    <div class="bk-py-chart bk-m-chart"><canvas id="frontierChart" role="img" aria-label="Expected return against expected volatility for each method, the stocks and the efficient frontier"></canvas></div>
+    <p class="bk-note">The line is the efficient frontier: the most expected return for each level of expected swing, under the same caps. Grey dots are the stocks on their own.
+        Sharpe here is expected return divided by expected volatility, with no cash rate taken off. These are estimates: a year of moves stands in for future risk,
+        and the return forecast is mostly the market assumption, so the methods sit close together on it.</p>
+</div>
+
+<div class="card" style="margin-bottom: 16px;">
+    <div class="bk-lbl">What each portfolio holds today (% of the book)</div>
+    <p class="bk-note" style="margin-top: 6px;">Blank = under {{ m.show_pct }}%. Bold = at the {{ m.cap_pct|round|int }}% cap. Expected return and volatility are each stock's own, as used above.</p>
+    <div class="table-wrap" style="margin-top: 8px;">
+    <table class="bk-tbl bk-m-grid">
+        <thead><tr>
+            <th>Stock</th><th class="num">Exp. return %</th><th class="num">Exp. vol %</th>
+            {% for k in m.cols %}<th class="num">{{ m.short[k] }}</th>{% endfor %}
+        </tr></thead>
+        <tbody>
+        {% for g in m.grid %}
+        <tr>
+            <td><a href="/stocks/{{ g.sid }}">{{ g.ticker }}</a><div class="bk-sub">{{ g.tier|tier_word }} &middot; {{ g.sector }}</div></td>
+            <td class="num mono">{{ g.e_ret|pct(1) }}</td>
+            <td class="num mono">{{ g.vol|pct(0) }}</td>
+            {% for k in m.cols %}{% set v = g.w[k] %}
+            <td class="num mono{{ ' bk-m-cap' if v >= m.cap_pct - 0.05 }}">{{ '%.1f'|format(v) if v >= m.show_pct else '' }}</td>
+            {% endfor %}
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+</div>
+
+<div class="card">
+    <div class="bk-lbl">Check: each rule over the past year ({{ m.y1_base|short_date }} {{ m.y1_base[:4] }} to {{ m.asof|short_date }} {{ m.asof[:4] }})</div>
+    <p class="bk-note" style="margin-top: 6px;"><b>A what-if, not a forecast.</b> Each rule is fitted on the year before the chart
+        ({{ m.then_start|short_date }} {{ m.then_start[:4] }} to {{ m.y1_base|short_date }} {{ m.y1_base[:4] }}), bought at its start and held, with no rebalancing and no costs.
+        The names and their scores are today's, picked partly on this year's price strength, so every line is flattered and all of them beat the index;
+        compare the methods with each other, not with the index.{% if m.left_out %} Left out for lack of a year's prices before the chart: {{ m.left_out|join(', ') }}.{% endif %}</p>
+    <div class="table-wrap" style="margin-top: 10px;">
+    <table class="bk-tbl" style="min-width: 0;">
+        <thead><tr>
+            <th>Method</th><th class="num">This year %</th><th class="num">1 year %</th>
+            <th class="num bk-hide-sm">Volatility %</th><th class="num">Sharpe</th><th class="num bk-hide-sm">Worst fall %</th><th class="num bk-hide-sm">Beta</th>
+        </tr></thead>
+        <tbody>
+        {% for r in m.past %}
+        <tr class="{{ 'muted' if r.kind == 'index' }}">
+            <td>{% if r.kind == 'method' %}<button type="button" class="bk-m-pick" @click="toggle('{{ r.key }}')" :aria-pressed="on.includes('{{ r.key }}')">
+                    <span class="bk-m-sw" :style="swatch('{{ r.key }}')"></span><b>{{ r.label }}</b></button>{% else %}<b>{{ r.label }}</b>{% endif %}</td>
+            <td class="num {{ r.ytd|tone }}">{{ r.ytd|pct(1, signed=True) }}</td>
+            <td class="num {{ r.y1|tone }}">{{ r.y1|pct(1, signed=True) }}</td>
+            <td class="num bk-hide-sm">{{ r.vol|pct(1) }}</td>
+            <td class="num mono">{{ '%.2f'|format(r.sharpe) if r.sharpe is not none else '—' }}</td>
+            <td class="num bk-hide-sm score-red">{{ r.max_dd|pct(1) }}</td>
+            <td class="num bk-hide-sm mono">{{ '%.2f'|format(r.beta) if r.beta is not none else '—' }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    <div class="bk-py-chart bk-m-chart"><canvas id="methodsChart" role="img" aria-label="Value of 100 rupees under each weighting method over the past year"></canvas></div>
+    <p class="bk-note">"Hindsight" is max Sharpe fitted on the chart year itself: the best any rule could have done, and no one could have held it. The return-forecast rules
+        (Max Sharpe, Max return) use today's scores, so they share the picks' hindsight. The Zerodha tab's past-year card holds today's share counts back over the
+        year instead of buying at the start, so its model-book figure is lower; both are fair, they answer different questions. Sharpe = 1-year return / volatility.
+        Stocks use prices adjusted for splits, bonuses and dividends; the indices are price indices.</p>
+</div>
+</div>
+{% endif %}

@@ -195,6 +195,15 @@ def playbooks_tab(request: Request, tab: str):
         "d": playbooks.tab_data(tab), "r": playbooks.rules(), "ev": playbooks.evidence()})
 
 
+@app.get("/partial/book/{tab}", response_class=HTMLResponse)
+def book_tab(request: Request, tab: str):
+    """A /book tab body fetched the first time the tab is opened (the weighting methods are slow to fit)."""
+    if tab != "methods":
+        raise HTTPException(404, "unknown book tab")
+    from cockpit import book_methods
+    return templates.TemplateResponse(request, "_book_methods.html", {"m": book_methods.get_methods()})
+
+
 @app.get("/book", response_class=HTMLResponse)
 def book_page(request: Request):
     """The HRP sized book, the real Zerodha holdings, the Small paper sleeve, risk and track record (tabs: pages.py)."""
