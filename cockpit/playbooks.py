@@ -231,8 +231,13 @@ def _own_history_value(sids, annual):
         return {}
     sids, ph = views.sid_params(sids)
     floor = scalar("SELECT MIN(ex_date) FROM corporate_actions") or "2020-01-01"
+    # the last trading day of each month since `floor`: walk the distinct dates with one index seek each
+    # (about 250 a year), not a GROUP BY over every price row since then (millions)
     px = read_sql(f"SELECT sid, date, close FROM stock_prices WHERE close > 0 AND date >= ? AND sid IN ({ph}) "
-                  "AND date IN (SELECT MAX(date) FROM stock_prices WHERE date >= ? GROUP BY substr(date, 1, 7)) "
+                  "AND date IN (SELECT MAX(d) FROM (WITH RECURSIVE days(d) AS ("
+                  "SELECT MIN(date) FROM stock_prices WHERE date >= ? UNION ALL "
+                  "SELECT (SELECT MIN(date) FROM stock_prices WHERE date > d) FROM days WHERE d IS NOT NULL) "
+                  "SELECT d FROM days WHERE d IS NOT NULL) GROUP BY substr(d, 1, 7)) "
                   "ORDER BY sid, date", params=[floor, *sids, floor])
     adj = read_sql(f"SELECT sid, ex_date, factor FROM corporate_adjustments WHERE sid IN ({ph}) "
                    "AND (inds LIKE '%SPLIT%' OR inds LIKE '%BONUS%') ORDER BY sid, ex_date", params=list(sids))
@@ -283,6 +288,10 @@ def _adjusted_year(sids):
 
 _norm = sleeves.norm_name
 
+# shareholding_holders rows from a date (the one `?`) on, per stock in the universe, newest quarters only
+_HOLDERS_COLS = "h.sid AS sid, h.end_date AS end_date, h.filed_at AS filed_at, h.holder_name AS holder_name, h.pct AS pct"
+_HOLDERS_FROM = "(SELECT sid FROM stocks) s CROSS JOIN shareholding_holders h ON h.sid = s.sid AND h.end_date >= ?"
+
 
 @_persisted_cache(900, name="playbook_superinvestors_v2")
 def superinvestors():
@@ -290,12 +299,14 @@ def superinvestors():
     companies in each company's latest filing, with the change against the filing
     before it. Names are grouped on exact spelling after upper-casing and stripping
     punctuation — one person filed under two spellings shows as two."""
+    # Each read walks the stocks and seeks that stock's rows from the lookback date on (the primary key
+    # leads with sid, end_date): the quarters asked for, not the 1.6M-row table.
     h = read_sql(
-        "SELECT sid, end_date, filed_at, holder_name, pct FROM shareholding_holders "
-        "WHERE end_date >= ? AND holder_category LIKE ? AND promoter_type IS NULL",
+        f"SELECT {_HOLDERS_COLS} FROM {_HOLDERS_FROM} "
+        "WHERE h.holder_category LIKE ? AND h.promoter_type IS NULL",
         params=[_since(HOLDER_LOOKBACK_DAYS), f"%{_INDIVIDUAL}"])
-    filings = read_sql("SELECT sid, end_date, MAX(filed_at) AS filed_at FROM shareholding_holders "
-                       "WHERE end_date >= ? GROUP BY sid, end_date", params=[_since(HOLDER_LOOKBACK_DAYS)])
+    filings = read_sql("SELECT h.sid AS sid, h.end_date AS end_date, MAX(h.filed_at) AS filed_at "
+                       f"FROM {_HOLDERS_FROM} GROUP BY h.sid, h.end_date", params=[_since(HOLDER_LOOKBACK_DAYS)])
     if h.empty:
         return {"followed": [], "investors": [], "as_of": None, "n_stocks": 0, "n_with_prior": 0}
     stocks = _stocks()
@@ -346,8 +357,8 @@ def superinvestors():
 def _followed(quarters, has_prev, stocks):
     """FOLLOWED investors' holdings: every non-promoter filed name that carries all the
     words of one of the investor's patterns, summed per stock."""
-    h = read_sql("SELECT sid, end_date, filed_at, holder_name, pct FROM shareholding_holders "
-                 "WHERE end_date >= ? AND promoter_type IS NULL", params=[_since(HOLDER_LOOKBACK_DAYS)])
+    h = read_sql(f"SELECT {_HOLDERS_COLS} FROM {_HOLDERS_FROM} WHERE h.promoter_type IS NULL",
+                 params=[_since(HOLDER_LOOKBACK_DAYS)])
     latest = h.groupby(["sid", "end_date"])["filed_at"].transform("max")
     h = h[h["filed_at"] == latest]
     tokens = {n: set(_norm(n).split()) for n in h["holder_name"].unique()}
@@ -550,15 +561,19 @@ def _market_readings():
                          "reading": "At or near the high — optimism is in the price" if dd > -5
                          else "In a deep drawdown — pessimism is in the price" if dd <= -20 else "Off the high"})
 
-    panel = read_sql("SELECT snapshot_date, cap_tier, mom_6m, book_to_price FROM daily_snapshots_pit")
-    if not panel.empty:
-        breadth = panel.dropna(subset=["mom_6m"]).groupby("snapshot_date")["mom_6m"].apply(lambda m: (m > 0).mean() * 100)
+    # The share of stocks up over 6 months at each snapshot, counted inside SQLite (one row per snapshot comes
+    # back, not the 500k-row panel), and the LARGE tier's price-to-book rows only (an index seek).
+    breadth = read_sql("SELECT snapshot_date, AVG(CASE WHEN mom_6m > 0 THEN 1.0 ELSE 0.0 END) * 100 AS breadth "
+                       "FROM daily_snapshots_pit WHERE mom_6m IS NOT NULL GROUP BY snapshot_date "
+                       "ORDER BY snapshot_date").set_index("snapshot_date")["breadth"]
+    large = read_sql("SELECT snapshot_date, book_to_price FROM daily_snapshots_pit "
+                     "WHERE cap_tier = 'LARGE' AND book_to_price > 0")
+    if not breadth.empty:
         now, p = float(breadth.iloc[-1]), _pctile(breadth, breadth.iloc[-1])
         readings.append({"label": "Breadth (stocks up over 6 months)", "value": f"{now:.0f}%", "as_of": breadth.index[-1],
                          "context": f"higher than on {p}% of snapshots since {breadth.index[0][:4]}",
                          "reading": "Almost everything is rising — late in an advance" if p >= 80
                          else "Almost everything is falling — late in a decline" if p <= 20 else "Mixed"})
-        large = panel[(panel["cap_tier"] == "LARGE") & (panel["book_to_price"] > 0)]
         btp = large.groupby("snapshot_date")["book_to_price"].median()
         if len(btp) > 12:
             now, p = float(btp.iloc[-1]), _pctile(btp, btp.iloc[-1])
