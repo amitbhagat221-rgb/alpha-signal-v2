@@ -12,6 +12,10 @@ after the first `run`):
 
 Data readiness gate (`check`): `run` refuses to start until quarterly_results_nse covers >= 70 % of
 non-Financial SMALL + MID stocks with >= 8 quarters between 2017-04-01 and 2022-12-31.
+  Amended 2026-10-14 (Amit approved, before any `run`; the gate decides WHEN, not WHAT is tested):
+  the denominator counts only stocks whose first close is on or before 2021-01-31. A stock listed
+  later cannot have 8 quarters by 2022-12, so the original gate topped out near 63 % (160 of the
+  173 stocks short of 8 quarters first traded after 2021-01). Features, score, tests and bars unchanged.
 
 Quarterly inputs, point in time:
   2017-04 … 2024-12 quarters: quarterly_results_nse, known from `filed_at` (latest filing per quarter
@@ -71,6 +75,7 @@ LH = PROJECT_ROOT / "data" / "lh"
 V2 = LH / "v2"
 FLOOR = 1e7
 QLAG = 60
+LISTED_BY = "2021-01-31"   # gate denominator: listed early enough to have 8 quarters by 2022-12
 CASES = {"NETWE": "NETWEB", "STWH": "SSWL", "TIME": "TIMETECHNO", "ATHER": "ATHERENERG"}
 
 
@@ -80,8 +85,10 @@ def ro():
 
 def check(verbose=True):
     con = ro()
-    univ = pd.read_sql("SELECT sid FROM stocks WHERE cap_tier IN ('SMALL','MID') AND "
-                       "(sector IS NULL OR sector != 'Financials')", con)
+    univ = pd.read_sql("SELECT s.sid FROM stocks s JOIN (SELECT sid, MIN(date) AS first FROM stock_prices "
+                       "WHERE close > 0 GROUP BY sid) p ON p.sid = s.sid "
+                       "WHERE s.cap_tier IN ('SMALL','MID') AND (s.sector IS NULL OR s.sector != 'Financials') "
+                       "AND p.first <= ?", con, params=[LISTED_BY])
     q = pd.read_sql("SELECT sid, COUNT(DISTINCT period_end) AS n FROM quarterly_results_nse "
                     "WHERE period_end BETWEEN '2017-04-01' AND '2022-12-31' GROUP BY sid", con)
     con.close()
@@ -90,7 +97,7 @@ def check(verbose=True):
     ready = share >= 0.70
     if verbose:
         print(f"quarterly_results_nse: {int((have['n'] >= 8).sum())} of {len(have)} SMALL+MID non-Financial stocks "
-              f"have >= 8 quarters 2017-04 → 2022-12 ({share:.0%}; gate 70 %) → {'READY' if ready else 'NOT READY'}")
+              f"listed by {LISTED_BY} have >= 8 quarters 2017-04 → 2022-12 ({share:.0%}; gate 70 %) → {'READY' if ready else 'NOT READY'}")
     return ready, share
 
 
