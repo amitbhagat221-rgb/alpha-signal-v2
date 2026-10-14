@@ -58,7 +58,10 @@ def _prewarm_cache():
         ("sector_front",       lambda: api.get_sector_front()),
         ("industry_rotation",  lambda: api.get_industry_rotation()),
         ("group_lists",        lambda: (api.get_group_list("industry"), api.get_group_list("sector"))),
-        ("playbooks_avoid",    lambda: __import__("cockpit.playbooks", fromlist=["tab_data"]).tab_data("avoid")),
+        # every playbook tab (each lazy tab was 1-7 s on its first open), and the funds browser's pool
+        *[(f"playbook_{tab}", lambda tab=tab: __import__("cockpit.playbooks", fromlist=["tab_data"]).tab_data(tab))
+          for tab, _ in pages.PLAYBOOK_TABS],
+        ("funds",              lambda: (api.get_mf_universe_overview(), api.get_mf_category_heatmap())),
     ])
 
 

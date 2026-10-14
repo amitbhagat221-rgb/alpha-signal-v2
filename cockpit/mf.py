@@ -9,7 +9,7 @@ Functions are unchanged and re-exported from cockpit.api, so existing
 
 import db
 from db import read_sql
-from cockpit._shared import _persisted_cache
+from cockpit._shared import _persisted_cache, decimate
 
 
 # ── Mutual Fund research section (plan prfect-lets-add-a-zazzy-eich) ──
@@ -319,7 +319,9 @@ def get_mf_nav_series(scheme_code: str, days: int = None) -> list[dict]:
         )
     from signals.mf_metrics import clean_nav_series
     df = clean_nav_series(df).rename(columns={"nav_date": "date"})
-    return df.to_dict("records")
+    # 13 years of daily NAVs is 3,300 points on a ~1,000 px chart: the last year stays daily, the older
+    # years keep every peak and trough (cockpit._shared.decimate)
+    return decimate(df.to_dict("records"), lambda r: r["nav"])
 
 
 def get_mf_rolling_returns(scheme_code: str) -> list[dict]:
