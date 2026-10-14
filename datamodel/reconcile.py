@@ -16,21 +16,18 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from datamodel.sync import (EVENT_SPECS, FEATURE_SKIP, FEATURE_TABLES, MEMBERSHIP, SEC, TIER_TO_CLS, TODAY, cat_ensure, cat_ids,  # noqa: E402
+from datamodel.sync import (EVENT_SPECS, FEATURE_SKIP, FEATURE_TABLES, HISTORY_KEPT, MEMBERSHIP, SEC, TIER_TO_CLS, TODAY, cat_ensure, cat_ids,  # noqa: E402
                             coltypes, cols, connect, ensure_schema, exists, q, tx)
 
 NOW = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
 RTOL = 1e-9
 
-# legacy tables with no v3 target, and why (plan 0017 §3 / census)
+# legacy tables with no v3 target, and why (plan 0017 §3 / census). Dropped ones live in
+# data/history/legacy/ (datamodel/retire.py manifest): paper_* ×3, uhs_calibration_log, external_anchors (2026-10-08)
 RETIRED = {
     "event_calendar": "hand-loaded once 2026-07-11, no scheduled writer, no reader",
     "sector_policy_pit": "hindsight-curated list, no reader",
-    "paper_positions": "only writer is _archive/paper_portfolio.py", "paper_trades": "only writer is _archive/paper_portfolio.py",
-    "paper_nav_history": "only writer is _archive/paper_portfolio.py",
     "pit_ic_by_tier_v1": "same evidence is in pit_ic_by_tier_v2 source='v1_archive' → factor_tests",
-    "uhs_calibration_log": "pure join of pick_outcomes × daily_picks → a view over outcomes ⋈ picks",
-    "external_anchors": "copy of stock_prices; gate 7 can never fire (D4)",
     "signal_lineage": "2 of ~105 factors emit it (D3)",
     "vix_history": "copy of macro_history india_vix → series_values",
     "daily_changes": "derivable: picks of a run vs the previous run (a view)",
@@ -149,10 +146,11 @@ def checks(c):
     e_lv = lv("estimates", "entity_id, metric_id, target_period, source")
     ac = {x: ty for x, ty in coltypes(c, "analyst_consensus").items() if x not in ("sid", "fetched_at")}
     yield ("analyst_consensus", sum(_one(c, f"SELECT COUNT({x}) FROM analyst_consensus t JOIN entities e ON {SEC}=t.sid")[0] for x in ac),
-           *_one(c, f"SELECT COUNT(*) FROM {e_lv} WHERE source='analyst_consensus'"),
+           *_one(c, f"SELECT COUNT(*) FROM {e_lv} WHERE source='analyst_consensus' AND (value IS NOT NULL OR label IS NOT NULL)"),
            sum(_one(c, f"SELECT COALESCE(SUM({x}),0) FROM analyst_consensus t JOIN entities e ON {SEC}=t.sid")[0]
                for x, ty in ac.items() if ty in ("REAL", "INTEGER")),
-           *_one(c, f"SELECT SUM(value) FROM {e_lv} WHERE source='analyst_consensus'"), "non-null cells vs latest versions")
+           *_one(c, f"SELECT SUM(value) FROM {e_lv} WHERE source='analyst_consensus'"),
+           "non-null cells vs latest versions (a nulled cell is a NULL version)")
     yield ("forecast_history", *_one(c, f"SELECT COUNT(*) + COUNT(change) FROM forecast_history t JOIN entities e ON {SEC}=t.sid"),
            *_one(c, f"SELECT COUNT(*) FROM {e_lv} WHERE source='forecast_history'"),
            *_one(c, f"SELECT COALESCE(SUM(value),0) + COALESCE(SUM(change),0) FROM forecast_history t JOIN entities e ON {SEC}=t.sid"),
@@ -216,9 +214,11 @@ def checks(c):
         if t in MEMBERSHIP:
             old += _one(c, f"SELECT COUNT(*) FROM {t} t {ej} WHERE t.{dcol} IS NOT NULL")[0]
         new_ids = ",".join(map(str, fs.get(t, [-1])))
-        num_sum = " + ".join(f"COALESCE(SUM(t.{q(x)}),0)" for x in vals if ct[x] in ("REAL", "INTEGER")) or "0"
-        yield (t, old, *_one(c, f"SELECT COUNT(*) FROM feature_values WHERE feature_id IN ({new_ids})"), None, None,
-               f"{len(vals)} value cols{' + membership' if t in MEMBERSHIP else ''}; raw non-null cells")
+        # history only v3 keeps (the legacy row is overwritten): compare the slice the legacy table still holds
+        held = f" AND date IN (SELECT DISTINCT substr(t.{dcol}, 1, 10) FROM {t} t)" if t in HISTORY_KEPT else ""
+        yield (t, old, *_one(c, f"SELECT COUNT(*) FROM feature_values WHERE feature_id IN ({new_ids}){held}"), None, None,
+               f"{len(vals)} value cols{' + membership' if t in MEMBERSHIP else ''}; raw non-null cells"
+               + ("; legacy's current slice (v3 keeps the history)" if held else ""))
         if text_docs:
             yield (f"{t}.text", _one(c, f"SELECT {' + '.join(f'COUNT(t.{q(x)})' for x in sorted(text_docs))} FROM {t} t {ej} WHERE t.{dcol} IS NOT NULL")[0],
                    _one(c, f"SELECT COUNT(*) FROM documents WHERE type_id IN ({','.join(str(dts[t + '.' + x]) for x in text_docs)}) AND status <> 'superseded'")[0],
@@ -250,7 +250,8 @@ def checks(c):
     # research
     yield ("pit_ic_by_tier_v2+factor_horizon_gate",
            _one(c, "SELECT COUNT(*) FROM pit_ic_by_tier_v2")[0] + _one(c, "SELECT COUNT(*) FROM factor_horizon_gate")[0],
-           *_one(c, "SELECT COUNT(*) FROM factor_tests"), None, None, "")
+           *_one(c, "SELECT COUNT(*) FROM factor_tests WHERE attrs ->> '$.retired_at' IS NULL"), None, None,
+           "dropped upstream → kept, marked retired")
     # ops
     # Only the rows the sync has seen: its own SUCCESS row (and every cron job after it) is
     # logged after the sync read the table, so an unbounded count is always one ahead and this

@@ -591,10 +591,6 @@ TABLES = {
         "depth": "Growing daily (PIT archive)",
         "description": "Point-in-time archive of all signal values per stock. One row per stock per pick_date. Used for diff engine + signal time series + backtesting.",
     },
-    # Paper trading is not live yet: empty is expected (INFO, not a 0-row CRITICAL).
-    "paper_nav_history": {"kind": "COMPUTED", "domain": "Output", "date_col": None, "may_be_empty": True},
-    "paper_positions": {"kind": "STATE", "domain": "Output", "date_col": None, "may_be_empty": True},
-    "paper_trades": {"kind": "COMPUTED", "domain": "Output", "date_col": "trade_date", "may_be_empty": True},
     # ── Forward-return-window-bound tables ──
     # Producer runs daily, but MAX(pick_date) only advances once a pick has a COMPLETED
     # forward return — governed by the SHORTEST window, 20 trading days ≈ 28 calendar
@@ -663,10 +659,6 @@ TABLES = {
     "consensus_signals_quarantine": {
         "kind": "QUARANTINE", "domain": "Pipeline", "date_col": "snapshot_date",
     },
-    "external_anchors": {"kind": "RAW", "domain": "Pipeline", "date_col": "fetched_at",
-                         "description": "History only: NSE-close anchors of a retired gate. The step that wrote it, "
-                                        "anchor_audit, never produced a verdict and was retired; tools/reconcile.py "
-                                        "does the cross-source price check daily."},
     "forecast_history_quarantine": {"kind": "QUARANTINE", "domain": "Pipeline", "date_col": "date"},
     "health_score": {"kind": "COMPUTED", "domain": "Pipeline", "date_col": "snapshot_date",
                      "description": "History only: an older data score per factor / table / "
@@ -733,13 +725,6 @@ TABLES = {
         "source": "the write-time gates (validators._verdicts.GATES: identity, plausibility) called by "
                   "yfinance_analyst, banking_metrics, moneycontrol_recos, mf_holdings; the gate_3..7 columns are history",
         "date_col": "snapshot_date",
-    },
-    # Rows mature on a 20d forward window (pick_outcomes join), so MAX(date) is
-    # structurally ~1 month old even when the producer is healthy. 45d tolerates that
-    # lag and only alarms on true death (audit Data-F5).
-    "uhs_calibration_log": {
-        "kind": "COMPUTED", "domain": "Pipeline", "date_col": "pick_date", "stale_days": 45,
-        "description": "History only: the older per-pick score against forward return; it never reached the 6 months it needed.",
     },
 
     # ── Other ──

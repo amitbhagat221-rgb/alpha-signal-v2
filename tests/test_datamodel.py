@@ -74,6 +74,62 @@ def test_sync_fills_idempotent_and_versions(v3):
     assert open_tier == [("MID",)]
 
 
+def test_backfills_rewrites_and_removals_reach_the_mirror(v3):
+    """The changes a date window cannot see (2026-10-03..08 parity FAILs): a backfilled old price date, a deleted
+    price row, a PIT column rewritten in place on an old date, a nulled analyst target, a dropped IC row, and an
+    overwritten state row whose history only v3 keeps."""
+    path, sync = v3
+    c = sqlite3.connect(path)
+    c.executescript("""
+        INSERT INTO daily_snapshots_pit (sid, snapshot_date, cap_tier, close_price, reconstructed_at)
+            VALUES ('AAA', '2025-01-01', 'LARGE', 10, '2025-01-02 00:00:00');
+        INSERT INTO analyst_consensus (sid, total_analysts, price_target, fetched_at) VALUES ('AAA', 5, 120, '2026-08-01 00:00:00');
+        INSERT INTO pit_ic_by_tier_v2 (signal, cap_tier, n_periods, t_stat, source) VALUES ('roic', 'LARGE', 40, 2.1, 'v2_recompute');
+        INSERT INTO regime_state (regime, vix_latest, updated_at) VALUES ('NORMAL', 14, datetime('now', '-40 day'));
+    """)
+    c.commit()
+    assert sync.main([]) == 0                                    # first run: full
+    c.executescript("""
+        INSERT INTO stock_prices (sid, date, close, source) VALUES ('AAA', '2019-06-03', 10, 'legacy_bhavcopy');
+        DELETE FROM stock_prices WHERE sid = 'BBB';
+        UPDATE daily_snapshots_pit SET roe = 0.3 WHERE sid = 'AAA';
+        UPDATE analyst_consensus SET price_target = NULL WHERE sid = 'AAA';
+        DELETE FROM pit_ic_by_tier_v2;
+        UPDATE regime_state SET vix_latest = 15, updated_at = datetime('now', '-39 day');
+    """)
+    c.commit()
+    c.close()
+    assert sync.main([]) == 0                                    # incremental
+    assert _q(path, "SELECT date FROM bars_daily ORDER BY date") == [("2019-06-03",), (_q(path, "SELECT date('now','-1 day')")[0][0],)]
+    roe = _q(path, "SELECT f.date, f.value FROM feature_values f JOIN catalog k ON k.catalog_id=f.feature_id WHERE k.name='roe'")
+    assert roe == [("2025-01-01", 0.3)]
+    pt = _q(path, "SELECT e.value FROM estimates e JOIN catalog k ON k.catalog_id=e.metric_id WHERE k.name='ac.price_target' ORDER BY e.fetched_at")
+    assert pt == [(120.0,), (None,)]                             # the removal is a NULL version; 120 stays in history
+    assert _q(path, "SELECT attrs ->> '$.retired_at' IS NOT NULL FROM factor_tests") == [(1,)]
+    vix = _q(path, "SELECT f.value FROM feature_values f JOIN catalog k ON k.catalog_id=f.feature_id "
+                   "WHERE k.name='regime_state.vix_latest' ORDER BY f.date")
+    assert vix == [(14.0,), (15.0,)]                             # v3 keeps the day the legacy row overwrote
+
+    assert sync.main([]) == 0                                    # settled: a third run changes nothing
+    from datamodel import reconcile
+    fails = [r for r in reconcile.run(write=False) if r[1] == "FAIL"]
+    assert not fails, fails
+
+
+def test_stops_before_the_disk_fills(v3, monkeypatch):
+    """2026-10-08: a catch-up rewrite grew the WAL to 32 GB and filled the disk. Low free space stops the sync
+    cleanly, before it starts and between commits (the open transaction rolls back, no 'cannot rollback')."""
+    path, sync = v3
+    monkeypatch.setattr(sync, "MIN_FREE_BYTES", 1 << 62)
+    with pytest.raises(SystemExit, match="not started"):
+        sync.main([])
+    c = sync.connect()
+    with pytest.raises(RuntimeError, match="stopped before the disk fills"):
+        with sync.tx(c):
+            sync.breathe(c)
+    assert not c.in_transaction
+
+
 def test_reconcile_passes(v3):
     path, sync = v3
     sync.main([])

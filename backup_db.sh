@@ -94,4 +94,16 @@ if [ -f "$MF_DB" ]; then
         exit 1
     fi
 fi
+
+# Retired legacy tables (plan 0017 drop rule: datamodel/retire.py exports each to parquet before
+# the DROP). Write-once files: rclone copy only sends what the remote lacks, and nothing expires.
+LEGACY="/home/ubuntu/alpha-signal-v2/data/history/legacy"
+if [ -d "$LEGACY" ] && rclone listremotes 2>/dev/null | grep -q '^gdrive:'; then
+    if rclone copy "$LEGACY" "$REMOTE/history/legacy/" 2>&1; then
+        log "history/legacy synced -> $REMOTE/history/legacy"
+    else
+        log "history/legacy upload FAILED (files stay in $LEGACY)"
+        exit 1
+    fi
+fi
 log "done"

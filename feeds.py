@@ -636,7 +636,6 @@ NON_FEED_TABLES = {
     "policy_events": "hand-curated seed (28 rows), superseded by regulatory_events",
     "macro_sector_map": "hand-maintained sector map",
     "mf_schemes": "v1 MF table, superseded by mf_scheme_master",
-    "external_anchors": "anchor_audit tool output (plan 0017 D4: retire)",
 }
 
 

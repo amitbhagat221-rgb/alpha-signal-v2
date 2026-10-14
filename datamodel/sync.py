@@ -19,6 +19,7 @@ import argparse
 import hashlib
 import json
 import re
+import shutil
 import sqlite3
 import subprocess
 import sys
@@ -65,17 +66,46 @@ def tx(c):
         yield
         c.execute("COMMIT")
     except BaseException:
-        c.execute("ROLLBACK")
+        if c.in_transaction:
+            c.execute("ROLLBACK")
         raise
 
 
 CHUNK = 250_000
+# 2026-10-08: a catch-up rewrite grew the WAL to 32 GB and filled the disk — readers (cockpits, MCP servers, a
+# harvester) kept SQLite from recycling it. Between commits the sync folds the WAL back once it is big, and stops
+# cleanly before the disk gets near full.
+WAL_CHECKPOINT_BYTES = 2 << 30
+MIN_FREE_BYTES = 15 << 30
+
+
+def disk_problem(c):
+    """None, or why the sync must stop now. Tries a WAL checkpoint first when the WAL is big."""
+    wal = Path(str(DB_PATH) + "-wal")
+    size = wal.stat().st_size if wal.exists() else 0
+    if size > WAL_CHECKPOINT_BYTES:
+        c.execute("PRAGMA busy_timeout=5000")
+        try:
+            c.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        except sqlite3.Error:
+            pass
+        finally:
+            c.execute("PRAGMA busy_timeout=60000")
+        size = wal.stat().st_size if wal.exists() else 0
+    free = shutil.disk_usage(DB_PATH.parent).free
+    if free < MIN_FREE_BYTES:
+        return (f"only {free / 2**30:.1f} GB free on the DB disk (WAL {size / 2**30:.1f} GB; a long-lived reader keeps "
+                f"SQLite from recycling it): stopped before the disk fills; the next run resumes where this one left off")
+    return None
 
 
 def breathe(c):
     """Commit and reopen: called between slices so other writers (busy_timeout 30 s) never wait long on a backfill."""
     c.execute("COMMIT")
+    problem = disk_problem(c)
     c.execute("BEGIN IMMEDIATE")
+    if problem:
+        raise RuntimeError(problem)
 
 
 def chunked(c, src, alias, sql):
@@ -335,32 +365,87 @@ def sync_identifiers(c):
 
 # ─────────────────────────── bars ───────────────────────────
 
+def _same(a, b):
+    a, b = a or 0.0, b or 0.0
+    return abs(a - b) <= 1e-6 * max(1.0, abs(a), abs(b))   # loose enough for summation order, tight enough for a rewrite
+
+
+def _drift(c, old_sql, new_sql, nkey=1, keep_new_only=False):
+    """Keys whose aggregates differ between a legacy table and its mirror. Each SQL yields (key cols..., measures...);
+    a key on one side only is drift too (a backfill, or rows deleted upstream) unless keep_new_only."""
+    old = {r[:nkey]: r[nkey:] for r in c.execute(old_sql)}
+    new = {r[:nkey]: r[nkey:] for r in c.execute(new_sql)}
+    keys = old.keys() | (set() if keep_new_only else new.keys())
+    return sorted(k for k in keys if k not in old or k not in new or not all(_same(a, b) for a, b in zip(old[k], new[k])))
+
+
+def _rewrite_slices(c, keys, delete_sql, insert_sql, batch=40):
+    """Replace the mirror's rows for `keys` (tuples of 1-2 values, exposed as temp table _rs(k1, k2)) from the legacy table."""
+    n = 0
+    for i in range(0, len(keys), batch):
+        c.execute("DROP TABLE IF EXISTS temp._rs")
+        c.execute("CREATE TEMP TABLE _rs (k1, k2)")
+        c.executemany("INSERT INTO _rs VALUES (?, ?)", [(k[0], k[1] if len(k) > 1 else None) for k in keys[i:i + batch]])
+        c.execute(delete_sql)
+        n += c.execute(insert_sql).rowcount
+        breathe(c)
+    return n
+
+
+STOCK_BARS = "source NOT IN ('nse_index', 'historical_universe')"
+
+
 def sync_bars(c, full):
     w = "" if full else f"AND p.date >= date('{TODAY}', '-{WINDOW_DAYS} day')"
     wi = "" if full else f"AND p.trade_date >= date('{TODAY}', '-{WINDOW_DAYS} day')"
     upd = "open=excluded.open, high=excluded.high, low=excluded.low, close=excluded.close, prev_close=excluded.prev_close, " \
           "volume=excluded.volume, delivery_qty=excluded.delivery_qty, delivery_pct=excluded.delivery_pct, " \
           "trades=excluded.trades, turnover=excluded.turnover"
-    with tx(c):
-        n1 = chunked(c, "stock_prices", "p", f"""INSERT INTO bars_daily(entity_id, date, source, open, high, low, close, prev_close, volume,
+    stock_sql = f"""INSERT INTO bars_daily(entity_id, date, source, open, high, low, close, prev_close, volume,
                 delivery_qty, delivery_pct, trades, turnover, fetched_at)
             SELECT e.entity_id, p.date, COALESCE(p.source, 'unknown'), p.open, p.high, p.low, p.close, p.prev_close, p.volume,
                    p.delivered_qty, p.delivery_pct, p.num_trades, p.traded_value, '{NOW}'
-            FROM stock_prices p JOIN entities e ON {SEC}=p.sid WHERE true {w} /*RANGE*/
-            ON CONFLICT(entity_id, date, source) DO UPDATE SET {upd}""")
-        n2 = c.execute(f"""INSERT INTO bars_daily(entity_id, date, source, open, high, low, close, volume, turnover, fetched_at)
+            FROM stock_prices p /*JOIN*/ JOIN entities e ON {SEC}=p.sid WHERE true /*WHERE*/ /*RANGE*/
+            ON CONFLICT(entity_id, date, source) DO UPDATE SET {upd}"""
+    index_sql = f"""INSERT INTO bars_daily(entity_id, date, source, open, high, low, close, volume, turnover, fetched_at)
             SELECT e.entity_id, p.trade_date, 'nse_index', p.open, p.high, p.low, p.close, p.volume, p.traded_value, COALESCE(p.fetched_at, '{NOW}')
-            FROM nse_index_history p JOIN entities e ON e.kind='index' AND e.market='IN' AND e.key=p.index_symbol WHERE true {wi}
+            FROM nse_index_history p /*JOIN*/ JOIN entities e ON e.kind='index' AND e.market='IN' AND e.key=p.index_symbol WHERE true /*WHERE*/
             ON CONFLICT(entity_id, date, source) DO UPDATE SET open=excluded.open, high=excluded.high, low=excluded.low,
-               close=excluded.close, volume=excluded.volume, turnover=excluded.turnover""").rowcount
-        n3 = chunked(c, "fno_bhav", "p", f"""INSERT INTO derivative_bars(underlying_id, symbol, instrument, expiry, strike, option_type, date,
+               close=excluded.close, volume=excluded.volume, turnover=excluded.turnover"""
+    deriv_sql = f"""INSERT INTO derivative_bars(underlying_id, symbol, instrument, expiry, strike, option_type, date,
                 close, settle, underlying_price, oi, oi_change, volume, trades, fetched_at)
             SELECT e.entity_id, p.symbol, p.instrument_type, p.expiry_date, COALESCE(p.strike, 0), COALESCE(p.option_type, ''),
                    p.trade_date, p.close, p.settle, p.underlying_price, p.oi, p.chg_oi, p.volume, p.num_trades, COALESCE(p.fetched_at, '{NOW}')
-            FROM fno_bhav p LEFT JOIN entities e ON {SEC}=p.sid WHERE true {wi} /*RANGE*/
+            FROM fno_bhav p /*JOIN*/ LEFT JOIN entities e ON {SEC}=p.sid WHERE true /*WHERE*/ /*RANGE*/
             ON CONFLICT(symbol, instrument, expiry, strike, option_type, date) DO UPDATE SET close=excluded.close,
                settle=excluded.settle, underlying_price=excluded.underlying_price, oi=excluded.oi, oi_change=excluded.oi_change,
-               volume=excluded.volume, trades=excluded.trades""")
+               volume=excluded.volume, trades=excluded.trades"""
+    with tx(c):
+        n1 = chunked(c, "stock_prices", "p", stock_sql.replace("/*WHERE*/", w))
+        n2 = c.execute(index_sql.replace("/*WHERE*/", wi)).rowcount
+        n3 = chunked(c, "fno_bhav", "p", deriv_sql.replace("/*WHERE*/", wi))
+        # Dates the window cannot see: a backfill of old dates (pre-2020 prices, gap fills) or rows deleted upstream
+        # (phantom prices). Every legacy (date, source) whose totals differ from the mirror is rewritten whole.
+        stale = {}
+        if not full:
+            ks = _drift(c, f"""SELECT p.date, COALESCE(p.source, 'unknown'), COUNT(*), TOTAL(p.close), TOTAL(p.volume)
+                               FROM stock_prices p JOIN entities e ON {SEC}=p.sid GROUP BY 1, 2""",
+                        f"SELECT date, source, COUNT(*), TOTAL(close), TOTAL(volume) FROM bars_daily WHERE {STOCK_BARS} GROUP BY 1, 2", nkey=2)
+            stale["stock"] = (len(ks), _rewrite_slices(
+                c, ks, f"DELETE FROM bars_daily WHERE {STOCK_BARS} AND date IN (SELECT k1 FROM _rs) AND (date, source) IN (SELECT k1, k2 FROM _rs)",
+                stock_sql.replace("/*JOIN*/", "JOIN _rs ON p.date=_rs.k1 AND COALESCE(p.source, 'unknown')=_rs.k2")
+                         .replace("/*WHERE*/", "").replace("/*RANGE*/", "")))
+            ks = _drift(c, """SELECT p.trade_date, COUNT(*), TOTAL(p.close) FROM nse_index_history p
+                              JOIN entities e ON e.kind='index' AND e.market='IN' AND e.key=p.index_symbol GROUP BY 1""",
+                        "SELECT date, COUNT(*), TOTAL(close) FROM bars_daily WHERE source='nse_index' GROUP BY 1")
+            stale["index"] = (len(ks), _rewrite_slices(
+                c, ks, "DELETE FROM bars_daily WHERE source='nse_index' AND date IN (SELECT k1 FROM _rs)",
+                index_sql.replace("/*JOIN*/", "JOIN _rs ON p.trade_date=_rs.k1").replace("/*WHERE*/", "")))
+            # derivatives collapse futures on (strike, type), so counts never match by design: compare the dates held
+            ks = _drift(c, "SELECT trade_date, 1 FROM fno_bhav GROUP BY 1", "SELECT date, 1 FROM derivative_bars GROUP BY 1")
+            stale["derivative"] = (len(ks), _rewrite_slices(
+                c, ks, "DELETE FROM derivative_bars WHERE date IN (SELECT k1 FROM _rs)",
+                deriv_sql.replace("/*JOIN*/", "JOIN _rs ON p.trade_date=_rs.k1").replace("/*WHERE*/", "").replace("/*RANGE*/", "")))
         n4 = c.execute(f"""INSERT INTO bars_daily(entity_id, date, source, close, delivery_pct, attrs, fetched_at)
             SELECT COALESCE(e.entity_id, d.entity_id), h.snapshot_date, 'historical_universe', h.close, h.delivery_pct,
                    json_object('symbol', h.symbol, 'series', h.series, 'requested_date', h.requested_date), '{NOW}'
@@ -369,14 +454,18 @@ def sync_bars(c, full):
             WHERE COALESCE(e.entity_id, d.entity_id) IS NOT NULL
             ON CONFLICT(entity_id, date, source) DO UPDATE SET close=excluded.close, delivery_pct=excluded.delivery_pct,
                attrs=excluded.attrs""").rowcount if exists(c, "historical_universe") else 0
-    log(f"bars: stock {n1}, index {n2}, derivative {n3}, historical-universe {n4} rows upserted")
+    log(f"bars: stock {n1}, index {n2}, derivative {n3}, historical-universe {n4} rows upserted; drifted slices rewritten: "
+        + (", ".join(f"{k} {s} ({r} rows)" for k, (s, r) in stale.items()) or "none (full)"))
 
 
 # ─────────────────────────── versioned writes (series, fundamentals, estimates) ───────────────────────────
 
-def versioned(c, target, keys, inc="_vinc"):
+def versioned(c, target, keys, inc="_vinc", scope=None):
     """_vinc(keys..., value, [label,] available_at, fetched_at [, as_of]) → new version when value differs from the
-    key's latest version, else bump last_seen_at. Returns (new_versions, confirmed)."""
+    key's latest version, else bump last_seen_at. A key whose latest version holds a value but that is gone from
+    _vinc (the legacy cell was nulled or its row deleted) gets a NULL version: the removal is a revision, the old
+    value stays in history. `scope`: a key column; only keys whose scope value _vinc covers can be removed (other
+    writers share the table, e.g. estimates' monthly snapshots). Returns (new_versions, confirmed, removed)."""
     k = ", ".join(keys)
     on = " AND ".join(f"l.{x} IS i.{x}" for x in keys)
     has_label = "label" in cols(c, inc, "temp")
@@ -398,7 +487,14 @@ def versioned(c, target, keys, inc="_vinc"):
         FROM (SELECT {", ".join("l." + x for x in keys)}, l.fetched_at AS vf, i.fetched_at AS seen
               FROM {inc} i JOIN _vlatest l ON {on} WHERE ({same}) AND i.fetched_at > l.last_seen_at) AS x
         WHERE {" AND ".join(f"t.{x} IS x.{x}" for x in keys)} AND t.fetched_at = x.vf""").rowcount
-    return new, conf
+    c.execute(f"CREATE INDEX temp.{inc}_kix ON {inc}({k})")
+    held = "l.value IS NOT NULL" + (" OR l.label IS NOT NULL" if has_label else "")
+    in_scope = f"AND l.{scope} IN (SELECT DISTINCT {scope} FROM {inc})" if scope else ""
+    gone = c.execute(f"""INSERT OR IGNORE INTO {target}({k}, value, available_at, fetched_at, last_seen_at)
+        SELECT {", ".join("l." + x for x in keys)}, NULL, '{NOW}', '{NOW}', '{NOW}' FROM _vlatest l
+        WHERE ({held}) {in_scope} AND l.fetched_at < '{NOW}'
+          AND NOT EXISTS (SELECT 1 FROM {inc} i WHERE {on})""").rowcount
+    return new, conf, gone
 
 
 def sync_series(c):
@@ -442,8 +538,8 @@ def sync_series(c):
             sel.append(f"""SELECT k.catalog_id, m.trade_date, m.{x}, m.trade_date, COALESCE(m.fetched_at, '{NOW}') FROM fii_dii_positioning m
                 JOIN catalog k ON k.kind='series' AND k.name = 'fii_dii_pos.' || m.client_type || '.{x}'""")
         c.execute("CREATE TEMP TABLE _vinc AS " + " UNION ALL ".join(sel))
-        new, conf = versioned(c, "series_values", ["series_id", "date"])
-    log(f"series: {new} new versions, {conf} confirmed")
+        new, conf, gone = versioned(c, "series_values", ["series_id", "date"])
+    log(f"series: {new} new versions, {conf} confirmed, {gone} removed upstream")
 
 
 FACT_LAG = {"Q": 60, "A": 75, "H": 60, "TTM": 60}
@@ -477,8 +573,9 @@ def sync_fundamentals(c):
             JOIN catalog k ON k.kind='metric' AND k.name = 'screener.' || t.line_item""")
         c.execute("DROP TABLE IF EXISTS temp._vinc")
         c.execute("CREATE TEMP TABLE _vinc AS " + " UNION ALL ".join(sel))
-        new, conf = versioned(c, "fundamentals", ["entity_id", "metric_id", "period_end", "period_type", "basis", "source"])
-    log(f"fundamentals: {new} new versions, {conf} confirmed")
+        new, conf, gone = versioned(c, "fundamentals", ["entity_id", "metric_id", "period_end", "period_type", "basis", "source"],
+                                    scope="source")
+    log(f"fundamentals: {new} new versions, {conf} confirmed, {gone} removed upstream")
 
 
 def sync_estimates(c):
@@ -508,7 +605,7 @@ def sync_estimates(c):
                    WHERE t.change IS NOT NULL""")
         c.execute("DROP TABLE IF EXISTS temp._vinc")
         c.execute("CREATE TEMP TABLE _vinc AS " + " UNION ALL ".join(sel))
-        new, conf = versioned(c, "estimates", ["entity_id", "metric_id", "target_period", "source"])
+        new, conf, gone = versioned(c, "estimates", ["entity_id", "metric_id", "target_period", "source"], scope="source")
         # monthly snapshots are observations: every snapshot row is kept (as_of = the snapshot date)
         n_acs = 0
         for x in acs_num + acs_txt:
@@ -528,7 +625,7 @@ def sync_estimates(c):
             JOIN entities e ON {SEC}=a.sid JOIN catalog k ON k.kind='metric' AND k.name='ae.' || a.metric
             WHERE t.entity_id=e.entity_id AND t.metric_id=k.catalog_id AND t.target_period=a.target_period
               AND t.source='ae:' || a.source AND t.fetched_at=a.fetched_at AND t.last_seen_at < a.last_seen_at""")
-    log(f"estimates: {new} new versions, {conf} confirmed; snapshots +{n_acs}; yahoo +{n_ae}")
+    log(f"estimates: {new} new versions, {conf} confirmed, {gone} removed upstream; snapshots +{n_acs}; yahoo +{n_ae}")
 
 
 # ─────────────────────────── events ───────────────────────────
@@ -743,6 +840,73 @@ PLAIN_DATE_COLS = {"snapshot_date", "trade_date", "doc_date"}   # stored as YYYY
 MEMBERSHIP = {"daily_snapshots_pit": "in_universe", "daily_snapshots_pit_v1": "v1.in_universe"}
 
 
+NUM_TYPES = ("REAL", "INTEGER", "NUMERIC", "INT")
+# feature tables the legacy side overwrites in place (one live row) while the mirror keeps every day's slice:
+# their history exists only in v3, so a mirror date the legacy table no longer holds is kept, not dropped
+HISTORY_KEPT = {"regime_state"}
+
+
+def _feature_drift(c, t, ct, value_cols, split, dcol, dexpr, ej):
+    """Dates where, for any feature of table t, the legacy non-null cell count or numeric total differs from the
+    mirror's feature_values: per (column, split value, date), so a new or rewritten column is caught on old dates."""
+    fid_of, kind_of, member = {}, {}, None
+    for fid, spec in c.execute("SELECT catalog_id, spec FROM catalog WHERE kind='feature' AND json_extract(spec, '$.origin_table')=?", (t,)):
+        s = json.loads(spec)
+        if s.get("value_kind") == "membership":
+            member = fid
+        elif s.get("origin_column"):
+            sv = (s.get("split") or {}).get(split) if split else None
+            fid_of[(s["origin_column"], None if sv is None else str(sv))] = fid
+            kind_of[fid] = s.get("value_kind")
+    cols_ = [x for x in value_cols if ct[x] in NUM_TYPES or _classify_text(c, t, x)["text_kind"] != "text"]
+    aggs = [f"COUNT(t.{q(x)}), " + (f"TOTAL(t.{q(x)})" if ct[x] in NUM_TYPES else "0") for x in cols_]
+    if t in MEMBERSHIP:
+        aggs.append("COUNT(*), 0")
+    if not aggs:
+        return []
+    sv_expr = f"CAST(t.{split} AS TEXT)" if split else "NULL"
+    old = {}
+    for r in c.execute(f"SELECT {dexpr}, {sv_expr}, {', '.join(aggs)} FROM {t} t {ej} WHERE t.{dcol} IS NOT NULL GROUP BY 1, 2"):
+        d, sv = r[0], r[1]
+        if split and sv is None:      # rows with no split value are not mirrored (no feature name to file them under)
+            continue
+        for i, x in enumerate(cols_):
+            n, s = r[2 + 2 * i], r[3 + 2 * i]
+            if n:
+                fid = fid_of.get((x, sv), ("new", x, sv))   # a column/split with no feature yet: every date it holds is stale
+                o = old.setdefault((fid, d), [0, 0.0])
+                o[0] += n
+                o[1] += s
+        if t in MEMBERSHIP and member is not None:
+            o = old.setdefault((member, d), [0, 0.0])
+            o[0] += r[-2]
+    fids = list(fid_of.values()) + ([member] if member is not None else [])
+    new = {}
+    if fids:
+        for fid, d, n, s in c.execute(f"SELECT feature_id, date, COUNT(*), TOTAL(value) FROM feature_values "
+                                      f"WHERE feature_id IN ({','.join(map(str, fids))}) GROUP BY 1, 2"):
+            new[(fid, d)] = (n, s)
+    stale = set()
+    for key in old.keys() | (set() if t in HISTORY_KEPT else new.keys()):
+        o, nw = old.get(key), new.get(key)
+        if o is None or nw is None or o[0] != nw[0] or (kind_of.get(key[0]) == "num" and not _same(o[1], nw[1])):
+            stale.add(key[1])
+    return sorted(stale)
+
+
+def _replace_slice(c, fid, src, dexpr, eid, vexpr, run_id):
+    """Make feature `fid` on the dates in _dates equal the legacy rows `src` (a FROM … WHERE clause), touching only
+    what differs: a full delete-and-reinsert of an unchanged slice still writes every page to the WAL. Returns the
+    rows inserted or changed."""
+    c.execute(f"""DELETE FROM feature_values WHERE feature_id={fid} AND date IN (SELECT d FROM _dates)
+        AND (date, entity_id) NOT IN (SELECT {dexpr}, {eid} {src})""")
+    return c.execute(f"""INSERT INTO feature_values(feature_id, date, entity_id, value, run_id)
+        SELECT {fid}, {dexpr}, {eid}, {vexpr}, {run_id} {src}
+        ORDER BY 2, 3
+        ON CONFLICT(feature_id, date, entity_id) DO UPDATE SET value=excluded.value, run_id=excluded.run_id
+        WHERE feature_values.value IS NOT excluded.value""").rowcount
+
+
 def _fname(t, mode, col, split=None):
     base = col if mode == "bare" else (f"v1.{col}" if mode == "v1" else f"{t}.{col}")
     if split is not None:
@@ -813,9 +977,14 @@ def sync_features(c, run_id, full, since):
                 seen_fid = c.execute("SELECT catalog_id FROM catalog WHERE kind='feature' AND json_extract(spec, '$.origin_table')=? LIMIT 1", (t,)).fetchone()
                 if seen_fid is None:
                     c.execute(f"INSERT INTO _dates SELECT DISTINCT {dexpr} FROM {t} t WHERE t.{dcol} IS NOT NULL")
+                else:
+                    # plus dates whose cells differ from the mirror: a backfilled column, an in-place PIT rewrite
+                    # (reconstruct_pit UPDATEs rows without touching reconstructed_at), a deleted date
+                    stale = _feature_drift(c, t, ct, value_cols, split, dcol, dexpr, ej)
+                    c.executemany("INSERT INTO _dates VALUES (?)", [(d,) for d in stale])
             c.execute("DELETE FROM _dates WHERE d IS NULL")
             c.execute("CREATE INDEX temp._dates_ix ON _dates(d)")
-            n_dates = c.execute("SELECT COUNT(*) FROM _dates").fetchone()[0]
+            n_dates = c.execute("SELECT COUNT(DISTINCT d) FROM _dates").fetchone()[0]
             if n_dates == 0:
                 continue
             # plain date columns filter on the raw column (index-friendly); timestamp columns need the substr
@@ -850,21 +1019,14 @@ def sync_features(c, run_id, full, since):
                     fid = c.execute("SELECT catalog_id FROM catalog WHERE kind='feature' AND name=?", (fname,)).fetchone()[0]
                     if not c.execute("SELECT json_extract(spec,'$.origin_table') FROM catalog WHERE catalog_id=?", (fid,)).fetchone()[0]:
                         cat_set_spec(c, "feature", fname, {**cat_spec(c, "feature", fname), **fspec})
-                    c.execute(f"DELETE FROM feature_values WHERE feature_id={fid} AND date IN (SELECT d FROM _dates)")
                     sw = "" if sv is None else f"AND t.{split} = '{str(sv).replace(chr(39), chr(39) * 2)}'"
-                    n_rows += c.execute(f"""INSERT INTO feature_values(feature_id, date, entity_id, value, run_id)
-                        SELECT {fid}, {dexpr}, {eid}, {vexpr}, {run_id} FROM {t} t {ej} {dw} {sw} AND t.{q(col)} IS NOT NULL
-                        ORDER BY 2, 3
-                        ON CONFLICT(feature_id, date, entity_id) DO UPDATE SET value=excluded.value, run_id=excluded.run_id""").rowcount
+                    n_rows += _replace_slice(c, fid, f"FROM {t} t {ej} {dw} {sw} AND t.{q(col)} IS NOT NULL", dexpr, eid, vexpr, run_id)
                     breathe(c)
             if t in MEMBERSHIP:
                 fname = MEMBERSHIP[t]
                 cat_ensure(c, "feature", [fname], spec={fname: {"origin_table": t, "value_kind": "membership"}})
                 fid = c.execute("SELECT catalog_id FROM catalog WHERE kind='feature' AND name=?", (fname,)).fetchone()[0]
-                c.execute(f"DELETE FROM feature_values WHERE feature_id={fid} AND date IN (SELECT d FROM _dates)")
-                n_rows += c.execute(f"""INSERT INTO feature_values(feature_id, date, entity_id, value, run_id)
-                    SELECT {fid}, {dexpr}, {eid}, 1, {run_id} FROM {t} t {ej} {dw} AND true
-                    ON CONFLICT(feature_id, date, entity_id) DO UPDATE SET value=excluded.value, run_id=excluded.run_id""").rowcount
+                n_rows += _replace_slice(c, fid, f"FROM {t} t {ej} {dw} AND true", dexpr, eid, "1", run_id)
             # PIT panel tiers / v1 labels → classifications history under their own schemes
             for (tt, col), scheme in TIER_TO_CLS.items():
                 if tt != t:
@@ -974,7 +1136,9 @@ def sync_replay_docs(c, full):
 
 def sync_contributions(c, full):
     """Replay each frozen day through score_universe and keep its per-factor terms only when the rebuilt base score
-    matches daily_picks (weights of that day == today's weights). Σ contribution = base score, by construction."""
+    matches daily_picks (weights of that day == today's weights), stock by stock. Σ contribution = base score, by
+    construction: a factor with no value contributes |w| × MISSING_FACTOR_SCORE / Σ|w| (ADR 0064), the same term the
+    screener adds. A day today's weights cannot rebuild keeps the contributions written while they could."""
     import numpy as np
     import factors
     from scoring import screener
@@ -1001,40 +1165,36 @@ def sync_contributions(c, full):
         stored = pd.read_sql("SELECT sid, base_score FROM daily_picks WHERE pick_date=?", c, params=[d])
         m = scored[["sid", "base_score"]].merge(stored, on="sid", suffixes=("", "_stored"))
         both = m.dropna(subset=["base_score", "base_score_stored"])
-        match = float(np.isclose(both["base_score"], both["base_score_stored"], rtol=0, atol=1e-9).mean()) if len(both) else 0.0
+        ok = np.isclose(both["base_score"], both["base_score_stored"], rtol=0, atol=1e-9)
+        match = float(ok.mean()) if len(both) else 0.0
+        rebuilt = set(both.loc[ok, "sid"])
         rid = c.execute("SELECT run_id FROM runs WHERE kind='morning' AND as_of_date=?", (d,)).fetchone()
         if rid is None:
             continue
         with tx(c):
             c.execute("UPDATE runs SET attrs=json_set(COALESCE(attrs,'{}'), '$.contrib_match', ?) WHERE run_id=?", (round(match, 6), rid[0]))
-            c.execute("DELETE FROM pick_contributions WHERE run_id=?", (rid[0],))
             if match < 0.999:
                 skipped += 1
                 continue
+            c.execute("DELETE FROM pick_contributions WHERE run_id=?", (rid[0],))
             out = []
             for tier, tw in factors.SIGNAL_WEIGHTS.items():
-                sub = scored[scored["cap_tier"] == tier]
-                if sub.empty:
+                sub = scored[(scored["cap_tier"] == tier) & scored["sid"].isin(rebuilt)]
+                total = sum(abs(w) for w in tw.values())
+                if sub.empty or total <= 0:
                     continue
-                wsum = pd.Series(0.0, index=sub.index)
-                terms = {}
                 for sk, w in tw.items():
                     pc = f"{sk}_pctile"
-                    if pc not in sub:
-                        continue
-                    p = sub[pc]
-                    term = (abs(w) * (1.0 - p)) if w < 0 else (w * p)
-                    terms[sk] = (p, term, w)
-                    wsum = wsum + p.notna() * abs(w)
-                for sk, (p, term, w) in terms.items():
+                    p = sub[pc] if pc in sub else pd.Series(np.nan, index=sub.index)
+                    term = ((abs(w) * (1.0 - p)) if w < 0 else (w * p)).fillna(abs(w) * config.MISSING_FACTOR_SCORE)
                     col = factors.SCREENER_TIER_COLS.get((sk, tier), factors.SCREENER_COLS.get(sk))
                     raw = sub[col] if col in sub else pd.Series(np.nan, index=sub.index)
-                    for i in sub.index[p.notna() & (wsum > 0)]:
+                    for i in sub.index:
                         e = ent.get(sub.at[i, "sid"])
                         if e is None:
                             continue
-                        out.append((rid[0], e, fids[sk], _clean(float(raw[i])) if pd.notna(raw[i]) else None, float(p[i]), float(w),
-                                    float(term[i] / wsum[i])))
+                        out.append((rid[0], e, fids[sk], _clean(float(raw[i])) if pd.notna(raw[i]) else None,
+                                    float(p[i]) if pd.notna(p[i]) else None, float(w), float(term[i] / total)))
             c.executemany("""INSERT INTO pick_contributions VALUES (?,?,?,?,?,?,?) ON CONFLICT(run_id, entity_id, feature_id)
                 DO UPDATE SET raw=excluded.raw, pctile=excluded.pctile, weight=excluded.weight, contribution=excluded.contribution""", out)
             kept += 1
@@ -1063,7 +1223,16 @@ def sync_research(c):
             FROM factor_horizon_gate t JOIN catalog k ON k.kind='feature' AND k.name=t.signal WHERE true
             ON CONFLICT(feature_id, tier, horizon_days, method, source) DO UPDATE SET n=excluded.n, ic=excluded.ic, t_stat=excluded.t_stat,
                icir=excluded.icir, verdict=excluded.verdict, computed_at=excluded.computed_at, attrs=excluded.attrs""").rowcount
-    log(f"research: ic_by_tier {a}, horizon_gate {b}")
+        # a test the legacy table dropped (e.g. the plan 0020 audit removed superseded evidence) is kept as history,
+        # marked retired; the upsert above clears the mark if it ever comes back
+        gone = c.execute(f"""UPDATE factor_tests SET attrs = json_set(COALESCE(attrs, '{{}}'), '$.retired_at', '{NOW}')
+            WHERE attrs ->> '$.retired_at' IS NULL AND (
+              (method = 'ic_by_tier' AND NOT EXISTS (SELECT 1 FROM pit_ic_by_tier_v2 t JOIN catalog k ON k.kind='feature' AND k.name=t.signal
+                 WHERE k.catalog_id=factor_tests.feature_id AND t.cap_tier=factor_tests.tier AND COALESCE(t.source, '')=factor_tests.source))
+              OR (method = 'horizon_gate' AND NOT EXISTS (SELECT 1 FROM factor_horizon_gate t JOIN catalog k ON k.kind='feature' AND k.name=t.signal
+                 WHERE k.catalog_id=factor_tests.feature_id AND t.cap_tier=factor_tests.tier AND COALESCE(t.source, '')=factor_tests.source
+                   AND COALESCE(t.natural_horizon, 0)=factor_tests.horizon_days)))""").rowcount
+    log(f"research: ic_by_tier {a}, horizon_gate {b}, retired {gone}")
 
 
 # ─────────────────────────── ops ───────────────────────────
@@ -1298,6 +1467,9 @@ def main(argv=None):
     if bad:
         sys.exit(f"unknown step(s): {bad}")
     c = connect()
+    problem = disk_problem(c)
+    if problem:
+        sys.exit(f"datamodel sync not started: {problem}")
     ensure_schema(c)
     since = last_sync(c)
     full = a.full or since is None

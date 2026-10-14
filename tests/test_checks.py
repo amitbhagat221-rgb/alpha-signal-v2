@@ -115,9 +115,13 @@ def test_critical_tables_are_critical_step_outputs():
     assert not any(t.startswith("file:") for t in ct)
 
 
-def test_empty_table_policy_is_table_metadata():
+NOT_LIVE = {"kind": "COMPUTED", "domain": "Output", "date_col": None, "may_be_empty": True}   # a feature not live yet
+
+
+def test_empty_table_policy_is_table_metadata(monkeypatch):
+    monkeypatch.setitem(tables.TABLES, "future_feature", NOT_LIVE)
     assert checks.empty_table_severity("analyst_consensus_quarantine") == checks.OK
-    assert checks.empty_table_severity("paper_trades") == checks.INFO
+    assert checks.empty_table_severity("future_feature") == checks.INFO
     assert checks.empty_table_severity("daily_picks") == checks.CRITICAL
 
 
@@ -230,11 +234,12 @@ def test_a_clean_state_has_no_issues_and_a_green_scorecard():
     assert {r["status"] for r in card} == {"OK"}
 
 
-def test_issue_shape_order_and_tolerated_split():
+def test_issue_shape_order_and_tolerated_split(monkeypatch):
     from checks import report
+    monkeypatch.setitem(tables.TABLES, "future_feature", NOT_LIVE)
     st = _state(
         tables={"fresh": 4, "stale": [("news_articles", 3.0, 2.0, "sources/rss.py")], "outdated": [],
-                "empty": ["paper_trades"]},
+                "empty": ["future_feature"]},
         integrity={"n_picks": 100, "rows": [{"sid": "ABC", "integrity_status": "FAIL", "integrity_reasons": "pt mismatch"}]},
         watchdog={"last_run": None, "age_hours": None, "healed": 0, "failed": 0, "skipped": 0},
     )

@@ -481,18 +481,6 @@ CREATE TABLE IF NOT EXISTS event_calendar (
     PRIMARY KEY (sid, event_type, announce_date)
 );
 
-CREATE TABLE IF NOT EXISTS external_anchors (
-    datum_class       TEXT NOT NULL,         -- close / volume / delivery_pct / mf_ret_1y / mf_ret_3y_cagr
-    sid_or_segment    TEXT NOT NULL,         -- stocks.sid OR mf_scheme_master.scheme_code
-    anchor_value      REAL,
-    anchor_source     TEXT NOT NULL,         -- 'nse_bhavcopy' | 'bse_manual' | 'amc_factsheet'
-    anchor_date       TEXT NOT NULL,
-    notes             TEXT,
-    fetched_at        TEXT DEFAULT (datetime('now')),
-    PRIMARY KEY (datum_class, sid_or_segment, anchor_source, anchor_date)
-);
-CREATE INDEX IF NOT EXISTS idx_external_anchors_class ON external_anchors(datum_class, anchor_date);
-CREATE INDEX IF NOT EXISTS idx_external_anchors_date ON external_anchors(anchor_date);
 
 CREATE TABLE IF NOT EXISTS factor_horizon_gate (
     signal TEXT NOT NULL, cap_tier TEXT NOT NULL, source TEXT, cadence TEXT,
@@ -1223,55 +1211,8 @@ CREATE TABLE IF NOT EXISTS operating_margin_trend_scores (
 );
 CREATE INDEX IF NOT EXISTS idx_omtrend_date ON operating_margin_trend_scores(snapshot_date);
 
-CREATE TABLE IF NOT EXISTS paper_nav_history (
-    nav_date              TEXT PRIMARY KEY,
-    nav                   REAL NOT NULL,
-    cash                  REAL NOT NULL,
-    n_positions           INTEGER NOT NULL,
-    daily_return_pct      REAL,
-    cumulative_return_pct REAL,
-    drawdown_pct          REAL,
-    benchmark_nav         REAL,
-    benchmark_cumret      REAL,
-    spread_vs_benchmark   REAL
-);
-CREATE INDEX IF NOT EXISTS idx_paper_nav_date ON paper_nav_history(nav_date);
 
-CREATE TABLE IF NOT EXISTS paper_positions (
-    position_id      INTEGER PRIMARY KEY AUTOINCREMENT,
-    sid              TEXT NOT NULL,
-    cap_tier         TEXT NOT NULL,
-    sector           TEXT,
-    entry_date       TEXT NOT NULL,
-    entry_price      REAL NOT NULL,
-    entry_weight_pct REAL NOT NULL,
-    qty              REAL NOT NULL,
-    exit_date        TEXT,
-    exit_price       REAL,
-    rank_at_entry    INTEGER,
-    score_at_entry   REAL,
-    status           TEXT NOT NULL CHECK (status IN ('OPEN','CLOSED'))
-);
-CREATE INDEX IF NOT EXISTS idx_paper_positions_sid ON paper_positions(sid);
-CREATE INDEX IF NOT EXISTS idx_paper_positions_status ON paper_positions(status);
 
-CREATE TABLE IF NOT EXISTS paper_trades (
-    trade_id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    trade_date       TEXT NOT NULL,
-    sid              TEXT NOT NULL,
-    side             TEXT NOT NULL CHECK (side IN ('BUY','SELL')),
-    qty              REAL NOT NULL,
-    price            REAL NOT NULL,
-    gross_value      REAL NOT NULL,
-    cost_bps         REAL NOT NULL,
-    cost_amount      REAL NOT NULL,
-    net_value        REAL NOT NULL,
-    reason           TEXT NOT NULL,
-    position_id      INTEGER REFERENCES paper_positions(position_id),
-    rebalance_date   TEXT
-);
-CREATE INDEX IF NOT EXISTS idx_paper_trades_date ON paper_trades(trade_date);
-CREATE INDEX IF NOT EXISTS idx_paper_trades_sid ON paper_trades(sid);
 
 CREATE TABLE IF NOT EXISTS pick_outcomes (
     sid             TEXT NOT NULL,
@@ -2095,20 +2036,6 @@ CREATE TABLE IF NOT EXISTS trust_verdicts (
 CREATE INDEX IF NOT EXISTS idx_trust_verdicts_table_date ON trust_verdicts(source_table, snapshot_date);
 CREATE INDEX IF NOT EXISTS idx_trust_verdicts_verdict ON trust_verdicts(verdict_overall);
 
-CREATE TABLE IF NOT EXISTS uhs_calibration_log (
-    sid                TEXT NOT NULL,
-    pick_date          TEXT NOT NULL,
-    window_days        INTEGER NOT NULL,    -- 5, 20, 60 from pick_outcomes
-    fwd_return_pct     REAL,                -- realised forward return
-    uhs_score          INTEGER,             -- 0-100 score at pick_date
-    uhs_label          TEXT,                -- TRUSTED/PRELIMINARY/REVIEW/AVOID
-    uhs_worst_dim      TEXT,
-    cap_tier           TEXT,
-    written_at         TEXT DEFAULT (datetime('now')),
-    PRIMARY KEY (sid, pick_date, window_days)
-);
-CREATE INDEX IF NOT EXISTS idx_uhs_cal_pick_date ON uhs_calibration_log(pick_date);
-CREATE INDEX IF NOT EXISTS idx_uhs_cal_window_score ON uhs_calibration_log(window_days, uhs_score);
 
 CREATE TABLE IF NOT EXISTS universe_eligibility (
     sid             TEXT NOT NULL,
