@@ -458,7 +458,8 @@ def timeline(sid, since=None, conn=None):
     if {"bse_announcements", "nse_announcements"} <= set(df["source"]):
         day = df["date"].dt.normalize()
         bse_keys = set(zip(day[df["source"] == "bse_announcements"], df.loc[df["source"] == "bse_announcements", "category"]))
-        dup = (df["source"] == "nse_announcements") & [k in bse_keys for k in zip(day, df["category"])]
+        dup = (df["source"] == "nse_announcements") & pd.Series([k in bse_keys for k in zip(day, df["category"])],
+                                                                 index=df.index)
         df = df[~dup]
     df = df.dropna(subset=["date"])
     df["date"] = pd.to_datetime(df["date"])
