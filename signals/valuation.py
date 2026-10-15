@@ -503,15 +503,7 @@ def _peer_set_fin(pit_by, stocks, sid, st, last_pit):
     return d, f"{st['industry']} (all tiers, <{PARAMS['min_peers']} in {st['cap_tier']})"
 
 
-# ── write + CLI ──────────────────────────────────────────────────────────────
-
-def write(df):
-    """Column-level upsert into valuation_ranges (PK sid, as_of, method). Returns rows written."""
-    import db
-    if df is None or df.empty:
-        raise RuntimeError("valuation.write: nothing to write")
-    return db.upsert_df(df[COLUMNS].astype({"as_of": str}), "valuation_ranges")
-
+# ── CLI (print only; output/valuation.py writes, signals/ never imports db: invariant 1) ──────────────────────────────────────────────────────────────
 
 def _format(df):
     lines = []
@@ -530,7 +522,7 @@ def main():
     ap = argparse.ArgumentParser(description="Valuation football field")
     ap.add_argument("--sids", help="comma list of sids or tickers; default = every stock")
     ap.add_argument("--as-of", default=None)
-    ap.add_argument("--dry-run", action="store_true", help="print, do not write")
+    ap.add_argument("--dry-run", action="store_true", help="kept for compatibility: this module only prints")
     args = ap.parse_args()
     sids = None
     if args.sids:
@@ -544,7 +536,7 @@ def main():
     df = compute(sids, args.as_of)
     print(_format(df))
     if not args.dry_run:
-        print(f"\nwrote {write(df)} rows to valuation_ranges")
+        print("\nsignals.valuation only prints; write with `python -m output.valuation`")
 
 
 if __name__ == "__main__":

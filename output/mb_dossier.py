@@ -2,7 +2,7 @@
 Plan 0026 stage 4 — the multibagger deep-dive dossier for one of the 30 candidates.
 
 Runs as the `mb_dossier` kind on the LLM queue (alpha_mcp/tasks.py). This module builds the brief from
-`signals.mb_deepdive` (results trend, ownership timeline, peers, valuation ranges, 90-day headlines), validates
+`output.mb_deepdive` (results trend, ownership timeline, peers, valuation ranges, 90-day headlines), validates
 the answer and persists it to `mb_dossiers`. The existing `dossier` kind (daily picks) is untouched.
 
 Narrative fields carry NO raw numbers (CLAUDE.md): the structured inputs are numbers the model may reason
@@ -45,14 +45,14 @@ def _table(rows, cols):
 
 def as_of(sid):
     """The deep dive's as-of date: the newest reported quarter end (the dossier is refreshed quarterly)."""
-    from signals import mb_deepdive as mb
+    from output import mb_deepdive as mb
     trend = mb.results_trend(sid, 1)
     return trend[-1]["end_date"] if trend else dt.date.today().isoformat()
 
 
 def build_brief(sid):
     """(brief text, as_of) for one candidate, or None when there is no results history to reason over."""
-    from signals import mb_deepdive as mb
+    from output import mb_deepdive as mb
     st = db.one("SELECT sid, ticker, name, sector, industry, cap_tier, market_cap_cr FROM stocks WHERE sid = ?", [sid])
     inp = mb.brief_inputs(sid)
     if not st or not inp["results_trend"]:

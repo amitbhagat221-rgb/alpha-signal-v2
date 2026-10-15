@@ -29,7 +29,7 @@ live = pytest.mark.skipif(not _live(), reason="live DB not available (set ALPHA_
 @live
 @pytest.mark.parametrize("sid", REAL)
 def test_results_trend(sid):
-    from signals import mb_deepdive as mb
+    from output import mb_deepdive as mb
     t = mb.results_trend(sid)
     assert 4 <= len(t) <= 12 and [r["end_date"] for r in t] == sorted(r["end_date"] for r in t)
     assert all(r["source"] and r["end_date"] for r in t)
@@ -40,7 +40,7 @@ def test_results_trend(sid):
 @live
 @pytest.mark.parametrize("sid", REAL)
 def test_ownership_timeline(sid):
-    from signals import mb_deepdive as mb
+    from output import mb_deepdive as mb
     o = mb.ownership_timeline(sid)
     assert len(o) >= 8 and o[0]["end_date"] >= "2016"
     assert all(k in o[-1] for k in ("promoter_pct", "fii_pct", "dii_pct", "mf_pct", "retail_pct",
@@ -52,7 +52,7 @@ def test_ownership_timeline(sid):
 @live
 @pytest.mark.parametrize("sid", REAL)
 def test_peers(sid):
-    from signals import mb_deepdive as mb
+    from output import mb_deepdive as mb
     p = mb.peers(sid, k=8)
     assert p[0]["sid"] == sid and p[0]["is_self"] and 2 <= len(p) <= 9
     assert len({r["sid"] for r in p}) == len(p)
