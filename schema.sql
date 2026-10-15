@@ -1087,9 +1087,45 @@ CREATE TABLE IF NOT EXISTS multibagger_scores (
     interaction           REAL,                  -- growth × cheapness
     multibagger_score     REAL,                  -- final composite (survivors only)
     rank_in_tier          REAL, smallcap_regime TEXT, regime_favorable INTEGER,
+    -- the thesis score (plan 0026, ADR 0075): pond gates + five within-pond percentile parts
+    thesis_pond           INTEGER,               -- 1 = passed every safety gate
+    thesis_gate_fail      TEXT,                  -- failed gates, comma list
+    p_smallness           REAL,
+    p_cheapness           REAL,
+    p_price               REAL,
+    p_business            REAL,
+    p_tailwind            REAL,
+    thesis_score          REAL,                  -- mean of the five parts
+    thesis_rank           REAL,                  -- 1 = best, within the pond
+    thesis_stage          TEXT,                  -- 'pond' | 'top100'
+    adtv_cr               REAL,                  -- 126-session median traded value, ₹ crore
     PRIMARY KEY (sid, snapshot_date)
 );
 CREATE INDEX IF NOT EXISTS idx_multibagger_date ON multibagger_scores(snapshot_date);
+
+-- The multibagger desk's lists are decisions, not scores (plan 0026 2.2): written only by
+-- signals/mb_book.py from the cockpit or the CLI, never by the pipeline.
+CREATE TABLE IF NOT EXISTS multibagger_book (
+    sid          TEXT PRIMARY KEY REFERENCES stocks(sid),
+    status       TEXT NOT NULL CHECK(status IN ('candidate', 'held', 'dropped')),
+    since        TEXT NOT NULL,             -- date the sid entered its current status
+    thesis_line  TEXT,                      -- why this could 5x, one line, no numbers
+    entry_date   TEXT,                      -- held: the day it was bought
+    entry_price  REAL,
+    reason       TEXT NOT NULL,             -- the reason for the latest change
+    updated_at   TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS multibagger_book_log (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts           TEXT NOT NULL,
+    sid          TEXT NOT NULL,
+    action       TEXT NOT NULL,             -- add_candidate | hold | drop
+    from_status  TEXT,
+    to_status    TEXT NOT NULL,
+    reason       TEXT NOT NULL,
+    actor        TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_mb_book_log_sid ON multibagger_book_log(sid, ts);
 
 CREATE TABLE IF NOT EXISTS news_article_stocks (
     article_id      TEXT NOT NULL REFERENCES news_articles(article_id),

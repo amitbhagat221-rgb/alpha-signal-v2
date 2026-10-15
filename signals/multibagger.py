@@ -45,7 +45,7 @@ from datetime import date
 import numpy as np
 import pandas as pd
 
-from config import EXCLUDED_FROM_PICKS, SCREEN
+from config import EXCLUDED_FROM_PICKS, MB_THESIS, SCREEN
 from db import read_sql, upsert_df
 from scoring.regime_smallcap import classify as classify_smallcap_regime
 from scoring.segment import market_caps
@@ -304,6 +304,169 @@ def _build(stocks, scores, sh, growth, weights):
     return df
 
 
+# ───────────────── the thesis score (plan 0026 phase 2, ADR 0075) ─────────────────
+# ONE pure function shared by the live desk (compute) and the research backtest (tools/mb_thesis.score).
+
+PARTS = ["smallness", "cheapness", "price", "business", "tailwind"]
+CR = 1e7
+THESIS_COLS = ["thesis_pond", "thesis_gate_fail", "p_smallness", "p_cheapness", "p_price", "p_business",
+               "p_tailwind", "thesis_score", "thesis_rank", "thesis_stage", "adtv_cr"]
+
+
+def _pct(s):
+    return s.rank(pct=True)
+
+
+def liquidity_pond(f, adtv_min_cr=None):
+    """Buyable: ADTV (rupees) at or above the floor and outside the most liquid `adtv_rank_min` names."""
+    floor = MB_THESIS["adtv_min_cr"] if adtv_min_cr is None else adtv_min_cr
+    return (f["adtv"] >= floor * CR) & (f["adtv_rank"] > MB_THESIS["adtv_rank_min"])
+
+
+def thesis(frame, min_pond=0, adtv_min_cr=None):
+    """Thesis v1 on a per-stock frame at ONE date (index = stock id).
+
+    Required columns: adtv (rupees), adtv_rank, mcap_cr, bp, sp, ep, sales, mom_6m, pos_52w, industry.
+    Optional (a gate or part is skipped when its column is absent; NaN passes a pledge/GSM gate):
+      q_ebitda_chg, q_rev_yoy (business part), red_flag, pledge_pct, gsm, survivor, mcap_max (per-row cap;
+      default config.MB_THESIS['mcap_max_cr']).
+    Returns a frame on the same index: thesis_pond, thesis_gate_fail (comma list of failed gates, '' in
+    the pond), the five within-pond percentile parts (a missing part = the mean of the stock's other
+    parts), thesis_score (their mean) and thesis_rank (1 = best, within the pond).
+    min_pond: fewer pond names than this -> no scores (the backtest's early thin ponds)."""
+    t = MB_THESIS
+    f = frame
+    cap = f["mcap_max"] if "mcap_max" in f else t["mcap_max_cr"]
+    gates = {"adtv": f["adtv"] >= (t["adtv_min_cr"] if adtv_min_cr is None else adtv_min_cr) * CR,
+             "adtv_rank": f["adtv_rank"] > t["adtv_rank_min"],
+             "mcap": f["mcap_cr"] <= cap, "sales": f["sales"] > 0}
+    if "survivor" in f:
+        gates["survivor"] = f["survivor"].astype("boolean").fillna(False).astype(bool)
+    if "red_flag" in f:
+        gates["red_flag"] = ~f["red_flag"].astype("boolean").fillna(False).astype(bool)
+    if "pledge_pct" in f:
+        gates["pledge"] = ~(f["pledge_pct"] > t["pledge_max_pct"])
+    if "gsm" in f:
+        gates["gsm"] = ~f["gsm"].astype("boolean").fillna(False).astype(bool)
+    pond = pd.Series(True, index=f.index)
+    fail = pd.Series("", index=f.index)
+    for name, ok in gates.items():
+        ok = ok.astype(bool)
+        pond &= ok
+        fail = fail + np.where(ok, "", name + ",")
+    out = pd.DataFrame({"thesis_pond": pond, "thesis_gate_fail": fail.str.rstrip(",")}, index=f.index)
+    for c in PARTS + ["thesis_score", "thesis_rank"]:
+        out[c] = np.nan
+    pb = f[pond]
+    if len(pb) == 0 or len(pb) < min_pond:
+        return out
+    parts = pd.DataFrame(index=pb.index)
+    parts["smallness"] = _pct(-np.log(pb["mcap_cr"]))
+    parts["cheapness"] = pd.concat([_pct(pb["bp"]), _pct(pb["sp"]), _pct(pb["ep"])], axis=1).mean(axis=1)
+    parts["price"] = (_pct(pb["mom_6m"]) + _pct(pb["pos_52w"])) / 2
+    parts["business"] = (pd.concat([_pct(pb["q_ebitda_chg"]), _pct(pb["q_rev_yoy"])], axis=1).mean(axis=1)
+                         if {"q_ebitda_chg", "q_rev_yoy"} <= set(pb) else np.nan)
+    parts["tailwind"] = _pct(pb.groupby("industry")["mom_6m"].transform("median"))
+    row_mean = parts.mean(axis=1)
+    parts = parts.apply(lambda c: c.fillna(row_mean))
+    out.loc[pb.index, PARTS] = parts[PARTS].values
+    out.loc[pb.index, "thesis_score"] = parts.mean(axis=1)
+    out["thesis_rank"] = out["thesis_score"].rank(ascending=False, method="min")
+    return out
+
+
+def _price_features(as_of):
+    """[adtv, adtv_rank, mom_6m, pos_52w] per stock on split-adjusted prices (the backtest's definitions:
+    ADTV = 126-session median of raw close x volume; 52 weeks = the last 253 sessions)."""
+    from signals._prices import apply_adjustments
+    w, h = MB_THESIS["adtv_window"], 252
+    px = read_sql("SELECT sid, date, close, volume FROM stock_prices WHERE close > 0 AND date <= ? AND date >= ?",
+                  params=[as_of, (pd.Timestamp(as_of) - pd.Timedelta(days=450)).date().isoformat()])
+    adj = read_sql("SELECT sid, ex_date, factor, inds FROM corporate_adjustments")
+    px = apply_adjustments(px, adj, as_of)
+    px["tv"] = px["close"] * px["volume"]
+    P = px.pivot_table(index="date", columns="sid", values="adj_close", aggfunc="last").sort_index()
+    TV = px.pivot_table(index="date", columns="sid", values="tv", aggfunc="last").reindex(P.index)
+    P = P[P.notna().sum(axis=1) >= 0.5 * P.shape[1]]          # drop a partially loaded last day
+    TV = TV.reindex(P.index)
+    if len(P) < h + 1:
+        raise RuntimeError(f"multibagger thesis: only {len(P)} price sessions, need {h + 1}")
+    i = len(P) - 1
+    win, tvw = P.iloc[i - h:i + 1], TV.iloc[i - w + 1:i + 1]
+    ok = (win.notna().sum() >= 200) & P.iloc[i].notna() & (tvw.notna().mean() >= 0.5)
+    ids = ok[ok].index
+    f = pd.DataFrame(index=ids)
+    f["adtv"] = tvw.median()[ids]
+    f["adtv_rank"] = f["adtv"].rank(ascending=False)
+    f["mom_6m"] = P.iloc[i][ids] / P.iloc[i - 126][ids] - 1
+    f["pos_52w"] = P.iloc[i][ids] / win[ids].max()
+    return f, P.index[i]
+
+
+def _knowable_annuals(as_of):
+    """Latest annual Equity Share Capital + Reserves, Sales, Net profit knowable at as_of (period_end + lag)."""
+    items = ["Sales", "Net profit", "Equity Share Capital", "Reserves"]
+    f = read_sql("SELECT sid, period_end, line_item, value FROM fundamentals_screener WHERE period_type='annual' "
+                 f"AND line_item IN ({','.join('?' * len(items))})", params=items)
+    w = f.pivot_table(index=["sid", "period_end"], columns="line_item", values="value", aggfunc="last").reset_index()
+    w["known"] = pd.to_datetime(w["period_end"]) + pd.Timedelta(days=MB_THESIS["annual_lag_days"])
+    w = w[w["known"] <= pd.Timestamp(as_of)].sort_values(["sid", "period_end"])
+    return w.drop_duplicates("sid", keep="last").set_index("sid")
+
+
+def _red_flags(as_of):
+    """(sids with an auditor resignation / CIRP filing in the last year, date of the newest BSE announcement)."""
+    pats = MB_THESIS["red_flag_subcategories"]
+    cond = " OR ".join("subcategory LIKE ?" for _ in pats)
+    since = (pd.Timestamp(as_of) - pd.Timedelta(days=MB_THESIS["red_flag_days"])).date().isoformat()
+    b = read_sql(f"SELECT DISTINCT sid FROM bse_announcements WHERE sid IS NOT NULL AND substr(dt_tm,1,10) > ? "
+                 f"AND substr(dt_tm,1,10) <= ? AND ({cond})", params=[since, as_of, *pats])
+    last = read_sql("SELECT MAX(substr(dt_tm,1,10)) d FROM bse_announcements")["d"].iloc[0]
+    return set(b["sid"]), last
+
+
+def live_frame(as_of=None):
+    """The thesis input frame for today, one row per stock with a price history (live inputs, ADR 0075)."""
+    from db import get_db
+    from signals._quarterly import asof as q_asof, history as q_history
+    as_of = as_of if isinstance(as_of, str) else (as_of or date.today()).isoformat()
+    f, last_px = _price_features(as_of)
+    stocks = read_sql("SELECT sid, ticker, name, industry, cap_tier FROM stocks").set_index("sid")
+    f = f.join(stocks[["ticker", "name", "industry", "cap_tier"]])
+    f["mcap_cr"] = market_caps().set_index("sid")["mcap_cr"].reindex(f.index)
+    an = _knowable_annuals(as_of).reindex(f.index)
+    eq = an["Equity Share Capital"] + an["Reserves"]
+    f["bp"], f["sp"], f["ep"] = eq / f["mcap_cr"], an["Sales"] / f["mcap_cr"], an["Net profit"] / f["mcap_cr"]
+    f["sales"] = an["Sales"]
+    with get_db() as conn:
+        q = q_asof(q_history(conn), [as_of]).set_index("sid")
+    f["q_ebitda_chg"] = q["q_ebitda_chg"].reindex(f.index)
+    f["q_rev_yoy"] = q["q_rev_yoy"].reindex(f.index)
+    flagged, last_bse = _red_flags(as_of)
+    f["red_flag"] = f.index.isin(flagged)
+    f["pledge_pct"] = _load_shareholding().set_index("sid")["pledge_pct"].reindex(f.index)
+    gsm = read_sql("SELECT DISTINCT sid FROM surveillance_flags WHERE flag_type='GSM' AND flag_date = "
+                   "(SELECT MAX(flag_date) FROM surveillance_flags WHERE flag_type='GSM')")
+    f["gsm"] = f.index.isin(set(gsm["sid"]))
+    f.attrs.update(price_date=str(last_px), last_bse=last_bse)
+    return f
+
+
+def thesis_table(as_of=None):
+    """([sid, snapshot_date, THESIS_COLS] for every stock with a price history, the input frame)."""
+    f = live_frame(as_of)
+    t = thesis(f)
+    if not t["thesis_pond"].any():
+        raise RuntimeError("multibagger thesis: empty pond — inputs are broken (prices / market caps / fundamentals)")
+    out = t.rename(columns={p: f"p_{p}" for p in PARTS})
+    out["adtv_cr"] = f["adtv"] / CR
+    out["thesis_stage"] = np.where(out["thesis_rank"] <= MB_THESIS["top_n"], "top100",
+                                   np.where(out["thesis_pond"], "pond", None))
+    out["thesis_pond"] = out["thesis_pond"].astype(int)
+    out.insert(0, "snapshot_date", date.today().isoformat())
+    return out.reset_index(names="sid")[["sid", "snapshot_date"] + THESIS_COLS], f
+
+
 OUTPUT_COLS = [
     "sid", "snapshot_date", "cap_tier", "mcap_cr",
     "survived", "passed_gates", "gate_fail", "passed_hurdles", "hurdle_fail",
@@ -359,12 +522,25 @@ def compute(dry_run=False):
         top = out[out["survived"] == 1].nlargest(10, "multibagger_score")
         print("  Top candidates:", ", ".join(top["sid"].tolist()))
 
+    # ── the thesis score (plan 0026): a second set of columns, same table, same date ──
+    tt, frame = thesis_table()
+    n_pond, n_top = int(tt["thesis_pond"].sum()), int((tt["thesis_stage"] == "top100").sum())
+    print(f"Thesis: {len(tt)} priced stocks | {n_pond} in the pond | top {n_top} flagged "
+          f"(prices {frame.attrs['price_date']}, newest BSE announcement {frame.attrs['last_bse']})")
+
     if dry_run:
         print("Dry run — not saving.")
         return n_surv
 
     rows = upsert_df(out, "multibagger_scores")
-    print(f"Saved {rows} rows to multibagger_scores")
+    # stocks outside the old funnel's universe (financials, MICRO) get the thesis columns too; the old
+    # funnel columns say "did not pass" so the strict tab's counts stay NaN-free
+    extra = tt[~tt["sid"].isin(out["sid"])][["sid", "snapshot_date"]].merge(
+        frame[["cap_tier", "mcap_cr"]], left_on="sid", right_index=True, how="left")
+    if len(extra):
+        upsert_df(extra.assign(survived=0, passed_gates=0, passed_hurdles=0), "multibagger_scores")
+    upsert_df(tt, "multibagger_scores")
+    print(f"Saved {rows} rows to multibagger_scores (+ thesis columns for {len(tt)})")
     return rows
 
 

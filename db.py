@@ -125,6 +125,18 @@ _COLUMN_MIGRATIONS = [
     # consensus beat rate, last 4 results (LARGE re-audit 2026-10-10)
     ("daily_snapshots_pit", "cons_beat_rate_4q", "REAL"),
     ("daily_snapshots_pit", "q_ebitda_chg", "REAL"),
+    # multibagger thesis score (plan 0026, ADR 0075)
+    ("multibagger_scores", "thesis_pond", "INTEGER"),
+    ("multibagger_scores", "thesis_gate_fail", "TEXT"),
+    ("multibagger_scores", "p_smallness", "REAL"),
+    ("multibagger_scores", "p_cheapness", "REAL"),
+    ("multibagger_scores", "p_price", "REAL"),
+    ("multibagger_scores", "p_business", "REAL"),
+    ("multibagger_scores", "p_tailwind", "REAL"),
+    ("multibagger_scores", "thesis_score", "REAL"),
+    ("multibagger_scores", "thesis_rank", "REAL"),
+    ("multibagger_scores", "thesis_stage", "TEXT"),
+    ("multibagger_scores", "adtv_cr", "REAL"),
 ]
 
 
