@@ -256,7 +256,7 @@ def sync_entities(c):
             WHERE entities.name IS NOT excluded.name OR entities.attrs IS NOT excluded.attrs""")
         # every sid any legacy table references (orphans get an entity, flagged)
         for t in ("stock_prices", "daily_picks", "daily_snapshots_pit", "daily_snapshots_pit_v1", "bse_announcements",
-                  "market_events", "insider_trades", "fno_bhav", "mf_holdings", "pick_outcomes", "analyst_estimates", "historical_universe",
+                  "nse_announcements", "market_events", "insider_trades", "fno_bhav", "mf_holdings", "pick_outcomes", "analyst_estimates", "historical_universe",
                   "scrip_master"):
             if exists(c, t) and "sid" in cols(c, t):
                 c.execute(f"""INSERT OR IGNORE INTO entities(kind, key, attrs, created_at, updated_at)
@@ -638,6 +638,9 @@ def sync_estimates(c):
 EVENT_SPECS = {
     "bse_announcements": ("bse_announcement", "t.news_id", "t.sid", "t.dt_tm", "COALESCE(t.dissem_dt, t.dt_tm)",
                           "COALESCE(t.category, '') || '|' || COALESCE(t.subcategory, '')", {"news_id", "sid", "dt_tm", "category", "subcategory", "fetched_at"}),
+    "nse_announcements": ("nse_announcement", "t.seq_id", "t.sid", "t.an_dt", "COALESCE(t.dissem_dt, t.an_dt)",
+                          "COALESCE(t.category, '') || '|' || COALESCE(t.desc_category, '')",
+                          {"seq_id", "sid", "an_dt", "category", "desc_category", "fetched_at"}),
     "corporate_actions": ("corporate_action", "t.id", "t.sid", "COALESCE(t.ex_date, substr(t.fetched_at, 1, 10))", "COALESCE(t.ex_date, substr(t.fetched_at, 1, 10))",
                           "t.ind", {"id", "sid", "fetched_at"}),
     "insider_trades": ("insider_trade", "t.id", "t.sid", "t.trade_date", "t.trade_date", "t.transaction_type", {"id", "sid", "fetched_at"}),
