@@ -271,6 +271,24 @@ CREATE INDEX IF NOT EXISTS idx_bse_ann_cat   ON bse_announcements(category, subc
 CREATE INDEX IF NOT EXISTS idx_bse_ann_scrip ON bse_announcements(scrip_cd, dt_tm);
 CREATE INDEX IF NOT EXISTS idx_bse_ann_sid   ON bse_announcements(sid, dt_tm);
 
+-- NSE corporate announcements (plan 0026 task 4.0): the fallback while BSE's WAF blocks
+-- AnnSubCategoryGetData. Own table: NSE ids and `desc` taxonomy are not BSE's.
+CREATE TABLE IF NOT EXISTS nse_announcements (
+    seq_id         TEXT PRIMARY KEY,   -- NSE seq_id (stable unique announcement id)
+    symbol         TEXT,               -- NSE symbol
+    isin           TEXT,               -- sm_isin
+    sid            TEXT,               -- universe SID (ISIN via scrip_master, else symbol via stocks.ticker); NULL if unmapped
+    desc_category  TEXT,               -- NSE `desc` as filed
+    category       TEXT,               -- watch category (config.NSE_ANNOUNCEMENT_CATEGORIES)
+    subject        TEXT,               -- attchmntText
+    an_dt          TEXT,               -- announcement timestamp (event time)
+    dissem_dt      TEXT,               -- exchdisstime (NULL in old rows)
+    attachment_url TEXT,               -- attchmntFile
+    fetched_at     TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_nse_ann_sid ON nse_announcements(sid, an_dt);
+CREATE INDEX IF NOT EXISTS idx_nse_ann_cat ON nse_announcements(category, an_dt);
+
 CREATE TABLE IF NOT EXISTS bulk_deals (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     sid             TEXT NOT NULL REFERENCES stocks(sid),

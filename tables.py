@@ -269,6 +269,14 @@ TABLES = {
         "source": "BSE AnnSubCategoryGetData --days 7 (run.sh forward)",
         "date_col": "fetched_at", "stale_days": 5,
     },
+    # NSE corporate announcements, the BSE fallback (run.sh forward, --days 7). Same freshness
+    # reasoning as bse_announcements: anchor on fetched_at, 5 days tolerates a holiday cluster.
+    "nse_announcements": {
+        "contract": {"max_null": {"subject": 0.3, "an_dt": 0.05}},
+        "kind": "RAW", "domain": "Trades & Corporate", "freq": "daily", "data_freq": "daily",
+        "source": "NSE api/corporate-announcements --days 7 (run.sh forward)",
+        "date_col": "fetched_at", "stale_days": 5,
+    },
     "bulk_deals": {
         "contract": {"max_null": {"price": 0.05, "quantity": 0.05}, "not_all_zero": ["price", "quantity"]},
         "kind": "RAW", "domain": "Trades & Corporate", "date_col": "deal_date",

@@ -36,6 +36,7 @@ from db import scalar
 
 REF_SLUG = "stocks/reliance-industries-RELI"   # Tickertape slug of feeds.REF
 REF_TT_SID = "RELI"
+REF = "RELIANCE"
 
 
 def _resp(r, expect, records, **kw):
@@ -211,6 +212,17 @@ def bse_announcements():
             "checks": [("total_count", total > 0, f"ROWCNT={total}")]}
 
 
+def nse_announcements():
+    from sources import nse_announcements as na
+    s = _http.warm_session(na.WARM_URL, headers=na.HEADERS)
+    to = date.today()
+    rows = na.fetch_range(s, to - timedelta(days=30), to, symbol=REF)     # one symbol, 30 days
+    return {"expect": "json", "records": rows or None, "raw": json.dumps(rows[:20], default=str).encode(),
+            "http": 200 if rows else None, "url": f"{na.API} symbol={REF} 30d",
+            "required": ["seq_id", "symbol", "sm_isin", "desc", "attchmntText", "an_dt", "attchmntFile"],
+            "checks": [("depth", len(rows) >= 3, f"{len(rows)} {REF} announcements in 30 days")]}
+
+
 def corporate_actions():
     from nselib import capital_market as cm
     to = date.today()
@@ -356,7 +368,7 @@ CANARIES = {
     "tickertape_shareholding": tickertape_shareholding, "nse_insider": nse_insider,
     "nse_bulk_deals": nse_bulk_deals, "tickertape_analyst": tickertape_analyst,
     "yfinance_analyst": yfinance_analyst, "moneycontrol_recos": moneycontrol_recos,
-    "bse_announcements": bse_announcements, "corporate_actions": corporate_actions,
+    "bse_announcements": bse_announcements, "nse_announcements": nse_announcements, "corporate_actions": corporate_actions,
     "earnings_calendar": earnings_calendar, "macro_market": macro_market,
     "macro_official": macro_official, "rss_news": rss_news, "regulatory_news": regulatory_news,
     "scrip_master": scrip_master, "amfi_nav": amfi_nav, "mf_holdings": mf_holdings,
