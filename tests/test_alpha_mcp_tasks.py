@@ -205,7 +205,7 @@ def test_news_brief_kind_persists_and_undoes(qdb):
 
 
 def test_drain_order_puts_dossiers_first(qdb):
-    assert qdb.DRAIN_ORDER == ["dossier", "news_brief", "sector_dossier", "news_today", "news_theme", "news_week",
+    assert qdb.DRAIN_ORDER == ["dossier", "mb_dossier", "news_brief", "sector_dossier", "news_today", "news_theme", "news_week",
                                "news_enrich", "regulatory", "say_do"]
 
 

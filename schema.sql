@@ -1666,6 +1666,23 @@ CREATE TABLE IF NOT EXISTS sector_dossiers (
 );
 CREATE INDEX IF NOT EXISTS idx_sector_dossiers_date ON sector_dossiers(snapshot_date);
 
+-- Plan 0026 stage 4: the LLM deep-dive note on one of the 30 candidates (output/mb_dossier.py, queue kind mb_dossier).
+-- Narrative only, no raw numbers (validator-enforced); list fields are JSON arrays. as_of_date = newest reported quarter end.
+CREATE TABLE IF NOT EXISTS mb_dossiers (
+    sid                  TEXT NOT NULL REFERENCES stocks(sid),
+    as_of_date           TEXT NOT NULL,
+    thesis_line          TEXT NOT NULL,    -- why this could 5x, one sentence
+    thesis               TEXT NOT NULL,
+    bull                 TEXT NOT NULL,    -- JSON array of strings
+    bear                 TEXT NOT NULL,
+    catalysts            TEXT NOT NULL,
+    risks                TEXT NOT NULL,
+    what_would_break_it  TEXT NOT NULL,
+    validation           TEXT,             -- JSON {ok, violations}
+    created_at           TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (sid, as_of_date)
+);
+
 CREATE TABLE IF NOT EXISTS sector_force_breakdown (
     sector              TEXT NOT NULL,
     snapshot_date       TEXT NOT NULL,
