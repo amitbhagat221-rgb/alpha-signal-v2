@@ -239,7 +239,9 @@ TABLES = {
     },
     "quarterly_results_nse": {
         "contract": {"max_null": {"revenue": 0.05, "pat": 0.05}, "not_all_zero": ["revenue"]},
-        "kind": "RAW", "domain": "Fundamentals", "date_col": "period_end", "freq": "quarterly",
+        # no `freq`: a frozen history (the endpoint stops at Dec-2024), so no freshness benchmark — the
+        # "653 days stale" WARN of 2026-10-13..15 was this table judged as a live quarterly feed
+        "kind": "RAW", "domain": "Fundamentals", "date_col": "period_end",
         "source": "NSE corporates-financial-results XBRL (sources/nse_results.py; one-off history backfill)",
         "depth": "XBRL filings ~2017 → Dec-2024; quarterly_income (Tickertape) covers 2023 →",
         "description": "The income statement of each quarterly result as filed on NSE: revenue, other income, finance costs, depreciation, profit before tax (before and after exceptional items), tax, profit and EPS, ₹ crore. Consolidated where filed, else standalone (`basis`). `filed_at` is the broadcast time (point in time); a revision is a later row. The history behind the quarterly margin and acceleration tests (plan 0025 5.1).",

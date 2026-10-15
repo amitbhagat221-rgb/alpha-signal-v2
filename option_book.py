@@ -195,8 +195,10 @@ def settle_trade(tr, S):
     call_exit, put_exit = intrinsic("C", tr["short_call"], S), intrinsic("P", tr["short_put"], S)
     gross = tr["credit_pts"] - call_exit - put_exit
     net = gross - tr["entry_cost_pts"]
+    # entry_date rides along: the upsert's INSERT half checks NOT NULL before it becomes an update
+    # (the first settlement, 2026-10-14, failed on exactly that)
     return {"rule_id": tr["rule_id"], "underlying": tr["underlying"], "expiry": tr["expiry"],
-            "status": "SETTLED", "settle_index": S, "call_exit": call_exit, "put_exit": put_exit,
+            "entry_date": tr["entry_date"], "status": "SETTLED", "settle_index": S, "call_exit": call_exit, "put_exit": put_exit,
             "gross_pts": gross, "net_pts": net, "net_rs": net * tr["lot"],
             "ret_on_margin": net * tr["lot"] / tr["margin_rs"],
             "settled_at": datetime.now(timezone.utc).isoformat(timespec="seconds")}

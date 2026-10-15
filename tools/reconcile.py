@@ -90,7 +90,9 @@ def reconcile_prices(sample=PRICE_SAMPLE, seed=None):
 # in range and still hold the wrong thing — `interest` was operating expenses and
 # `depreciation` was dividends paid for months while only revenue was compared.
 FUND_FIELDS = [
-    ("quarterly_income", "revenue", "quarterly", ("Sales",), 1.0),
+    # Tickertape quarterly revenue is TOTAL income (operating revenue + other income); Screener's
+    # "Sales" is operating revenue only (INDP Jun-26: 2.74 + 8.58 = 11.32). Compare like with like.
+    ("quarterly_income", "revenue", "quarterly", ("Sales", "Other Income"), 1.0),
     ("quarterly_income", "operating_expenses", "quarterly", ("Expenses",), 1.0),
     ("quarterly_income", "pbt", "quarterly", ("Profit before tax",), 1.0),
     ("quarterly_income", "net_income", "quarterly", ("Net profit",), 1.0),

@@ -115,3 +115,10 @@ def test_the_auditor_is_a_weekly_read_only_seat():
     assert s["cadence"].startswith("weekly:") and s["graded_by"] == "compliance" and "dq_audit" in org_kinds.GRADED
     assert org.RUN_ORDER.index("dq-auditor") < org.RUN_ORDER.index("compliance")
     assert factors.SIGNAL_WEIGHTS                                                    # the probes read the registry
+
+
+def test_reconcile_revenue_is_total_income():
+    """Tickertape quarterly revenue = operating revenue + other income; Screener splits them
+    (INDP Jun-26: Sales 2.74 + Other Income 8.58 = 11.32). Comparing to Sales alone failed 20%."""
+    row = next(f for f in FUND_FIELDS if f[1] == "revenue")
+    assert set(row[3]) == {"Sales", "Other Income"}

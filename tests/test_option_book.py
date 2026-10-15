@@ -34,7 +34,7 @@ def test_strike_pick_takes_the_nearest_0_05_delta():
 
 
 def test_settlement_is_intrinsic_on_the_index():
-    tr = {"rule_id": "r", "underlying": "NIFTY", "expiry": "2026-10-13", "short_call": 23000.0,
+    tr = {"rule_id": "r", "underlying": "NIFTY", "expiry": "2026-10-13", "entry_date": "2026-10-09", "short_call": 23000.0,
           "short_put": 21950.0, "credit_pts": 13.6, "entry_cost_pts": 0.9, "lot": 65, "margin_rs": 176000.0}
     calm = ob.settle_trade(tr, 22500.0)
     assert calm["call_exit"] == 0 and calm["put_exit"] == 0
@@ -53,3 +53,16 @@ def test_slice_deltas_reads_a_chain_frame():
     F, deltas = ob.slice_deltas(pd.DataFrame(rows), "2026-10-09", "2026-10-13")
     assert 22400 < F < 22600
     assert {K for _, K in deltas["C"]} >= {23000.0} and {K for _, K in deltas["P"]} >= {22000.0}
+
+
+def test_settlement_row_carries_every_not_null_column():
+    """The settlement upsert's INSERT half is checked for NOT NULL before it turns into an
+    update: a row without entry_date failed the first real settlement (2026-10-14)."""
+    import re
+    from db import SCHEMA_PATH
+    ddl = re.search(r"CREATE TABLE IF NOT EXISTS option_paper_trades \((.*?)\n\);", SCHEMA_PATH.read_text(), re.S).group(1)
+    required = set(re.findall(r"^\s+(\w+)\s+\w+\s+NOT NULL", ddl, re.M))
+    tr = {"rule_id": "r", "underlying": "NIFTY", "expiry": "2026-10-13", "entry_date": "2026-10-09",
+          "short_call": 23000.0, "short_put": 21950.0, "credit_pts": 13.6, "entry_cost_pts": 0.9,
+          "lot": 65, "margin_rs": 176000.0}
+    assert required and required <= set(ob.settle_trade(tr, 22500.0)), required - set(ob.settle_trade(tr, 22500.0))
