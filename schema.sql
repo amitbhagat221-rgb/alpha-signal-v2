@@ -2547,3 +2547,18 @@ CREATE TABLE IF NOT EXISTS quarterly_results_nse (
     fetched_at          TEXT NOT NULL,
     PRIMARY KEY (sid, period_end, basis, filed_at)
 );
+
+-- plan 0026 phase 3: valuation football field (signals/valuation.py). One row per (stock, day, method);
+-- low/mid/high are Rs per share (NULL for reverse_dcf and for a method that does not apply, with the reason in basis).
+CREATE TABLE IF NOT EXISTS valuation_ranges (
+    sid                 TEXT NOT NULL REFERENCES stocks(sid),
+    as_of               TEXT NOT NULL,
+    method              TEXT NOT NULL,
+    low                 REAL,
+    mid                 REAL,
+    high                REAL,
+    basis               TEXT,
+    price               REAL,
+    implied_growth_10y  REAL,
+    PRIMARY KEY (sid, as_of, method)
+);

@@ -816,6 +816,7 @@ FEATURE_TABLES = {
     "nlp_scores": ("sid", "security", "doc_date", "doc_type", "prefix"),      # available_date is a value (date kind)
     "insider_signals": ("sid", "security", "snapshot_date", "signal_type", "prefix"),
     "playbook_members": ("sid", "security", "snapshot_date", "sleeve", "prefix"),
+    "valuation_ranges": ("sid", "security", "as_of", "method", "prefix"),       # plan 0026: one feature set per method
     "fno_iv_history": ("sid|symbol", "security|index", "trade_date", None, "prefix"),
     "fno_pcr_history": ("sid|symbol", "security|index", "trade_date", None, "prefix"),
     "universe_eligibility": ("sid", "security", "snapshot_date", "signal", "prefix"),
@@ -835,7 +836,7 @@ FEATURE_SKIP = {"computed_at", "reconstructed_at", "imported_at", "refreshed_at"
 TIER_TO_CLS = {("daily_snapshots_pit", "cap_tier"): "tier@pit", ("daily_snapshots_pit_v1", "cap_tier"): "tier@v1",
                ("daily_snapshots_pit_v1", "sector"): "sector@v1", ("daily_snapshots_pit_v1", "ticker"): "ticker@v1"}
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}")
-PLAIN_DATE_COLS = {"snapshot_date", "trade_date", "doc_date"}   # stored as YYYY-MM-DD (checked by reconcile parity)
+PLAIN_DATE_COLS = {"snapshot_date", "trade_date", "doc_date", "as_of"}   # stored as YYYY-MM-DD (checked by reconcile parity)
 # a row's existence is itself a fact where every value can be NULL (the PIT panel: "in the universe that day")
 MEMBERSHIP = {"daily_snapshots_pit": "in_universe", "daily_snapshots_pit_v1": "v1.in_universe"}
 
