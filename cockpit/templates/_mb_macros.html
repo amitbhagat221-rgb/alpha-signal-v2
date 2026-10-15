@@ -1,0 +1,95 @@
+{# Multibagger desk macros (plan 0026). Data: cockpit/multibagger.py. Styles: cockpit.css ".mb-*". Script: static/multibagger.js.
+   Dates: short_date in tables and cards, long_date only in the deep-dive header line. #}
+{% from "_components.html" import tier_pill %}
+
+{# a rupee price; d = decimals (a football field passes one precision for all its numbers), default one below Rs 100 #}
+{% macro rs(x, d=none) %}{% if x is none %}&mdash;{% else %}{{ x|inr(d if d is not none else (0 if x >= 100 else 1)) }}{% endif %}{% endmacro %}
+
+{# a multiple: 14.2x #}
+{% macro mult(x) %}{% if x is none %}&mdash;{% else %}{{ '%.1f'|format(x) }}x{% endif %}{% endmacro %}
+
+{# text with a hover / focus popover (the shared .hover-tip pattern, no native title) #}
+{% macro tipped(text, tip, cls='') %}<span class="hover-tip {{ cls }}" tabindex="0">{{ text }}<span class="tooltip-popover" role="tooltip">{{ tip }}</span></span>{% endmacro %}
+{% macro tipped_pill(text, tip, tone='muted', pct='') %}<span class="pill pill-{{ tone }} hover-tip" tabindex="0">{{ text }}{% if pct %} <span class="mono">{{ pct }}</span>{% endif %}<span class="tooltip-popover" role="tooltip">{{ tip }}</span></span>{% endmacro %}
+
+{# the stock column, as on /book: ticker bold, name under it, tier as a pill #}
+{% macro stock_cell(r, status=False) %}<div class="mb-stock-cell"><a class="mb-name mono" href="/multibagger/stock/{{ r.sid }}">{{ r.ticker or r.sid }}</a>
+    <span class="mb-sub">{{ r.name or r.sid }}</span><span>{{ tier_pill(r.cap_tier) }}{% if status %} {{ status_pill(r.status) }}{% endif %}</span></div>{% endmacro %}
+
+{# the five thesis parts as small bars (within-pond percentile, 0-100) #}
+{% macro parts_bars(parts, compact=False) %}
+<div class="mb-parts{{ ' compact' if compact }}" role="img" aria-label="Thesis parts, percentile within the pond: {% for p in parts %}{{ p.label }} {{ p.pct if p.pct is not none else 'n/a' }}{{ ', ' if not loop.last }}{% endfor %}">
+    {% for p in parts %}
+    <div class="mb-part hover-tip" tabindex="0">
+        <span class="mb-part-bar"><i style="height: {{ p.pct if p.pct is not none else 0 }}%"></i></span>
+        <span class="mb-part-lab">{{ p.label }}</span>
+        <span class="tooltip-popover" role="tooltip">{{ p.label }}: percentile {{ p.pct if p.pct is not none else 'n/a' }} within the pond</span>
+    </div>
+    {% endfor %}
+</div>
+{% endmacro %}
+
+{# a form button that opens an inline form and posts to /api/multibagger/<action>. #}
+{% macro act(action, sid, label, thesis=False, price=False, tone='') %}
+<div class="mb-act" x-data="mbAct()" data-action="{{ action }}" data-sid="{{ sid }}">
+    <button type="button" class="mb-btn {{ tone }}" @click="open = !open" :aria-expanded="open">{{ label }}</button>
+    <form class="mb-form" x-show="open" x-cloak @submit.prevent="submit()">
+        {% if thesis %}<label>One-line thesis (no numbers)
+            <input type="text" x-model="thesis" maxlength="240" required autocomplete="off"></label>{% endif %}
+        <label>Reason
+            <input type="text" x-model="reason" maxlength="400" required autocomplete="off"></label>
+        {% if price %}<label>Entry price in &#8377; (blank = last close)
+            <input type="text" inputmode="decimal" x-model="price" autocomplete="off"></label>{% endif %}
+        <div class="mb-form-row">
+            <button type="submit" class="mb-btn go" :disabled="busy">Confirm {{ label|lower }}</button>
+            <button type="button" class="mb-btn" @click="open = false">Cancel</button>
+        </div>
+        <div class="mb-err" x-show="err" x-text="err" role="alert"></div>
+    </form>
+    <span class="mb-done" x-show="done" x-text="done" role="status"></span>
+</div>
+{% endmacro %}
+
+{# the status pill of a name in the book #}
+{% macro status_pill(status) %}{% if status == 'held' %}<span class="pill pill-green">Held</span>{% elif status == 'candidate' %}<span class="pill pill-accent">Candidate</span>{% elif status == 'dropped' %}<span class="pill pill-muted">Dropped</span>{% endif %}{% endmacro %}
+
+{# the flags of a name (review prompts, ADR 0073: they do not cut a name) #}
+{% macro flag_pills(flags) %}{% for f in flags %}{{ tipped_pill(f.text, 'As of ' ~ (f.as_of|short_date), f.tone) }} {% endfor %}{% endmacro %}
+
+{# The football field. f = cockpit.multibagger._field(). large=True adds the value column and the basis list.
+   One precision for every number in the field (f.dec); the axis min / max print under the tracks. #}
+{% macro football(f, large=False) %}
+{% if f and f.axis %}
+{% set clipped = f.methods|selectattr('clipped')|list %}
+<div class="mb-ff{{ ' large' if large }}">
+    {% for m in f.methods if m.ok or large %}
+    <div class="mb-ff-row{{ ' na' if not m.ok }}{{ '' if large else ' hover-tip' }}"{% if not large %} tabindex="0"{% endif %}>
+        <span class="mb-ff-lab">{{ m.label }}</span>
+        <span class="mb-ff-track">
+            {% if m.ok %}<i class="mb-ff-bar{{ ' clipped' if m.clipped }}" style="left: {{ m.left }}%; width: {{ m.width }}%"></i><i class="mb-ff-mid" style="left: {{ m.mid_at }}%"></i>{% endif %}
+            <i class="mb-ff-px" style="left: {{ f.axis.price_at }}%"></i>
+        </span>
+        {% if large %}<span class="mb-ff-val mono">{% if m.ok %}{{ rs(m.low, f.dec) }} &ndash; {{ rs(m.high, f.dec) }}<span class="u-muted-11"> mid {{ rs(m.mid, f.dec) }}</span>{% else %}n/a{% endif %}</span>
+        {% else %}<span class="tooltip-popover" role="tooltip"><b>{{ m.label }}.</b> {{ m.basis }}</span>{% endif %}
+    </div>
+    {% endfor %}
+    <div class="mb-ff-axis"><span></span><span class="mb-ff-axisv mono"><span>{{ rs(f.axis.lo, f.dec) }}</span><span>{{ rs(f.axis.hi, f.dec) }}</span></span>{% if large %}<span></span>{% endif %}</div>
+</div>
+<div class="mb-ff-foot">
+    <span class="mb-ff-key mono"><i class="mb-ff-px static"></i> price {{ rs(f.price, f.dec) }}</span>
+    <span class="mb-ff-key"><i class="mb-ff-mid static"></i> method mid</span>
+    {% if clipped %}<span class="mb-ff-key">&rsaquo; runs past the axis</span>{% endif %}
+    {% if f.discount_pct is not none %}<span class="mono {{ f.discount_pct|tone(pos='score-red', neg='score-green') }}">price {{ f.discount_pct|pct(0, signed=True) }} vs the median method mid ({{ rs(f.median_mid, f.dec) }})</span>{% endif %}
+    {% if f.implied_growth_pct is not none %}{{ tipped('reverse DCF: price implies ' ~ f.implied_growth_pct|pct(1) ~ '/yr growth, fading to year 10', f.reverse_basis, 'mono') }}{% endif %}
+    <span class="u-muted-11">valuation as of {{ f.as_of|short_date }} &middot; &#8377; per share</span>
+</div>
+{% if large %}
+<dl class="mb-basis">
+    {% for m in f.methods %}<dt>{{ m.label }}</dt><dd>{{ m.basis }}</dd>{% endfor %}
+    {% if f.reverse_basis %}<dt>Reverse DCF</dt><dd>{{ f.reverse_basis }}</dd>{% endif %}
+</dl>
+{% endif %}
+{% else %}
+<div class="mb-empty">Valuation not computed yet{% if f %} for this name ({{ f.as_of|short_date }} rows have no usable method){% endif %}. It is built for the candidates and held names, and shows here once it has run.</div>
+{% endif %}
+{% endmacro %}

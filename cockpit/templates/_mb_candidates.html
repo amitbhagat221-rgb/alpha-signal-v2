@@ -1,0 +1,35 @@
+{# Multibagger > Candidates: the candidate + held table. Data: cockpit/multibagger.py candidates(). #}
+{% from "_mb_macros.html" import rs, parts_bars, act, status_pill, flag_pills, stock_cell, tipped %}
+{% from "_pb_macros.html" import th %}
+<div data-n-book="{{ d.n_book }}" data-max-book="{{ d.max_book }}" data-n-held="{{ d.n_held }}" data-max-held="{{ d.max_held }}">
+{% if not d.rows %}
+<div class="card mb-empty">No candidates yet &mdash; promote from the Funnel tab. A candidate carries a one-line thesis and the reason you picked it; up to {{ d.max_book }} candidates and held names in all.</div>
+{% else %}
+<p class="mb-sub">{{ d.n_book }} of {{ d.max_book }} places used ({{ d.n_held }} held). Thesis scores are from the run of {{ d.thesis_as_of|short_date if d.thesis_as_of else 'no run yet' }}. Position is the price against the median of the valuation methods' mids.</p>
+<div class="card mb-tablecard" x-data="pbList()">
+<div class="table-wrap"><table class="mb-tbl mb-stack">
+    <thead><tr>{{ th('Stock') }}<th>Thesis</th>{{ th('Score /100', 'num') }}<th>Parts</th>{{ th('Price vs field', 'num') }}<th>Flags</th>{{ th('Last event', 'num') }}<th>Actions</th></tr></thead>
+    <tbody>
+    {% for r in d.rows %}
+    <tr data-row>
+        <td class="mb-first" data-label="Stock">{{ stock_cell(r, status=True) }}</td>
+        <td class="mb-thesis" data-label="Thesis"><div>{{ r.thesis_line or '' }}<div class="u-muted-11">since <span class="mono">{{ r.since|short_date }}</span> &middot; {{ r.reason }}</div></div></td>
+        <td class="num mono" data-label="Score /100" data-v="{{ r.score if r.score is not none else '' }}"><div>{% if r.score is not none %}{{ r.score }}{% else %}{{ tipped('out of pond', 'Not in the latest run\'s pond', 'u-muted-11') }}{% endif %}</div></td>
+        <td data-label="Parts"><div>{{ parts_bars(r.parts, compact=True) }}</div></td>
+        <td class="num mono" data-label="Price vs field" data-v="{{ r.field.discount_pct if r.field and r.field.discount_pct is not none else '' }}"><div>
+            {% if r.field and r.field.discount_pct is not none %}<span class="{{ r.field.discount_pct|tone(pos='score-red', neg='score-green') }}">{{ r.field.discount_pct|pct(0, signed=True) }}</span>
+            <div class="u-muted-11">{{ rs(r.field.price, r.field.dec) }} on {{ r.field.as_of|short_date }}</div>
+            {% else %}<span class="u-muted-11">not computed yet</span>{% endif %}</div></td>
+        <td data-label="Flags"><div>{{ flag_pills(r.flags) }}{% if not r.flags %}<span class="u-muted-11">none</span>{% endif %}</div></td>
+        <td class="num mono" data-label="Last event" data-v="{{ r.last_event or '' }}"><div>{{ r.last_event|short_date if r.last_event else '&mdash;'|safe }}</div></td>
+        <td class="mb-actions" data-label="Actions">
+            {% if r.status == 'candidate' %}{{ act('hold', r.sid, 'Hold', price=True, tone='go') }}{% endif %}
+            {{ act('drop', r.sid, 'Drop') }}
+        </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+</table></div>
+</div>
+{% endif %}
+</div>

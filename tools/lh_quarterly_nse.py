@@ -51,8 +51,8 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from config import SCREEN  # noqa: E402
 from tools.backtest_pit import _aggregate, _compute_ic  # noqa: E402
-from tools.lh_growth import (HORIZONS, NW_LAG, PERIODS, QUARTER_F, QUARTERLY_LAG, TIERS,  # noqa: E402
-                             _div, nonoverlap_t, top_decile_excess)
+from signals._quarterly import QUARTER_F, asof, history  # noqa: E402  (plan 0026: one definition, shared with the live desk)
+from tools.lh_growth import HORIZONS, NW_LAG, PERIODS, TIERS, nonoverlap_t, top_decile_excess  # noqa: E402
 
 DB = PROJECT_ROOT / "data" / "alpha_signal.db"
 LH = PROJECT_ROOT / "data" / "lh"
@@ -64,46 +64,6 @@ def ro():
     return sqlite3.connect(f"file:{DB}?mode=ro", uri=True)
 
 
-def _features(q):
-    """lh_growth.quarterly_history's formulas on one (sid, src, basis) series per group."""
-    q = q.sort_values(["sid", "src", "basis", "period_end"]).reset_index(drop=True)
-    key = [q["sid"], q["src"], q["basis"]]
-    g = q.groupby(key)
-    ed = pd.to_datetime(q["period_end"])
-    lag4 = (ed - pd.to_datetime(g["period_end"].shift(4))).dt.days.between(350, 380)
-    q["margin"] = _div(q["ebitda"], q["revenue"])
-    q["q_rev_yoy"] = np.where(lag4, _div(q["revenue"], g["revenue"].shift(4)) - 1, np.nan)
-    q["q_ebitda_chg"] = np.where(lag4, _div(q["ebitda"] - g["ebitda"].shift(4), g["revenue"].shift(4)), np.nan)
-    q["q_margin_chg"] = np.where(lag4, q["margin"] - g["margin"].shift(4), np.nan)
-    g = q.groupby(key)
-    q["q_rev_accel"] = q["q_rev_yoy"] - g["q_rev_yoy"].shift(1)
-    q["q_profit_accel"] = q["q_ebitda_chg"] - g["q_ebitda_chg"].shift(1)
-    up = (q["q_margin_chg"] > 0).astype(float).where(q["q_margin_chg"].notna())
-    q["q_margin_streak"] = up.groupby(key).transform(lambda s: s.rolling(4, min_periods=4).sum())
-    return q
-
-
-def history(conn):
-    nse = pd.read_sql("SELECT sid, period_end, basis, filed_at, revenue, other_income, finance_costs, "
-                      "depreciation, pbt_pre_exceptional FROM quarterly_results_nse", conn)
-    nse = nse.dropna(subset=["filed_at"]).sort_values("filed_at")
-    nse = nse.drop_duplicates(["sid", "period_end", "basis"], keep="first")     # original filing only
-    nse["ebitda"] = (nse["pbt_pre_exceptional"] + nse["finance_costs"].fillna(0)
-                     + nse["depreciation"].fillna(0) - nse["other_income"].fillna(0))
-    nse["known"] = pd.to_datetime(nse["filed_at"].str[:10], errors="coerce")
-    nse["src"] = "nse"
-    tt = pd.read_sql("SELECT sid, end_date AS period_end, reporting, revenue, ebitda FROM quarterly_income "
-                     "WHERE end_date IS NOT NULL", conn)
-    tt["basis"] = np.where(tt["reporting"] == "consolidated", "consolidated", "standalone")
-    tt = tt.drop_duplicates(["sid", "period_end", "basis"], keep="last")
-    tt["known"] = pd.to_datetime(tt["period_end"]) + pd.Timedelta(days=QUARTERLY_LAG)
-    tt["src"] = "tt"
-    cols = ["sid", "period_end", "basis", "src", "known", "revenue", "ebitda"]
-    h = _features(pd.concat([nse[cols], tt[cols]], ignore_index=True).dropna(subset=["known"]))
-    h["pref"] = (h["src"] == "tt") * 2 + (h["basis"] == "standalone")          # 0 = NSE consolidated
-    return h
-
-
 def source_check(h):
     both = h[h["period_end"].between("2023-01-01", "2024-12-31")]
     out = {}
@@ -112,20 +72,6 @@ def source_check(h):
         if len(p) >= 30 and {"nse", "tt"} <= set(p.columns):
             out[c] = dict(n=len(p), spearman=round(float(stats.spearmanr(p["nse"], p["tt"])[0]), 3))
     return out
-
-
-def asof(h, anchors):
-    """Per anchor, the latest knowable quarter per sid; within that quarter the preferred source/basis."""
-    h = h.dropna(subset=["q_rev_yoy"]).sort_values(["sid", "known"])
-    rows = []
-    for a in anchors:
-        k = h[h["known"] <= pd.Timestamp(a)]
-        if k.empty:
-            continue
-        k = k.sort_values(["sid", "period_end", "pref"]).drop_duplicates(["sid", "period_end"], keep="first")
-        k = k.drop_duplicates("sid", keep="last")              # latest quarter (sorted by period_end)
-        rows.append(k.assign(snapshot_date=a)[["sid", "snapshot_date", "src"] + QUARTER_F])
-    return pd.concat(rows, ignore_index=True)
 
 
 def build():

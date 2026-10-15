@@ -91,6 +91,10 @@ def _fetch_page(session, frm, to, pageno):
               "strscrip": "", "strType": "C"}
     r = _http.polite_request("GET", API, session=session, check=False, retries=0,
                              params=params, timeout=30)
+    if r.status_code in (401, 403, 429):
+        # Akamai "Access Denied" HTML (since 2026-10-14 it blocks THIS endpoint, not the host).
+        # Name it, instead of letting r.json() raise a JSONDecodeError that hides the cause.
+        raise RuntimeError(f"BSE AnnSubCategoryGetData HTTP {r.status_code} (WAF block, not a format change)")
     j = r.json()
     if not isinstance(j, dict):
         return [], 0

@@ -271,6 +271,24 @@ CREATE INDEX IF NOT EXISTS idx_bse_ann_cat   ON bse_announcements(category, subc
 CREATE INDEX IF NOT EXISTS idx_bse_ann_scrip ON bse_announcements(scrip_cd, dt_tm);
 CREATE INDEX IF NOT EXISTS idx_bse_ann_sid   ON bse_announcements(sid, dt_tm);
 
+-- NSE corporate announcements (plan 0026 task 4.0): the fallback while BSE's WAF blocks
+-- AnnSubCategoryGetData. Own table: NSE ids and `desc` taxonomy are not BSE's.
+CREATE TABLE IF NOT EXISTS nse_announcements (
+    seq_id         TEXT PRIMARY KEY,   -- NSE seq_id (stable unique announcement id)
+    symbol         TEXT,               -- NSE symbol
+    isin           TEXT,               -- sm_isin
+    sid            TEXT,               -- universe SID (ISIN via scrip_master, else symbol via stocks.ticker); NULL if unmapped
+    desc_category  TEXT,               -- NSE `desc` as filed
+    category       TEXT,               -- watch category (config.NSE_ANNOUNCEMENT_CATEGORIES)
+    subject        TEXT,               -- attchmntText
+    an_dt          TEXT,               -- announcement timestamp (event time)
+    dissem_dt      TEXT,               -- exchdisstime (NULL in old rows)
+    attachment_url TEXT,               -- attchmntFile
+    fetched_at     TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_nse_ann_sid ON nse_announcements(sid, an_dt);
+CREATE INDEX IF NOT EXISTS idx_nse_ann_cat ON nse_announcements(category, an_dt);
+
 CREATE TABLE IF NOT EXISTS bulk_deals (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     sid             TEXT NOT NULL REFERENCES stocks(sid),
@@ -1069,9 +1087,45 @@ CREATE TABLE IF NOT EXISTS multibagger_scores (
     interaction           REAL,                  -- growth × cheapness
     multibagger_score     REAL,                  -- final composite (survivors only)
     rank_in_tier          REAL, smallcap_regime TEXT, regime_favorable INTEGER,
+    -- the thesis score (plan 0026, ADR 0075): pond gates + five within-pond percentile parts
+    thesis_pond           INTEGER,               -- 1 = passed every safety gate
+    thesis_gate_fail      TEXT,                  -- failed gates, comma list
+    p_smallness           REAL,
+    p_cheapness           REAL,
+    p_price               REAL,
+    p_business            REAL,
+    p_tailwind            REAL,
+    thesis_score          REAL,                  -- mean of the five parts
+    thesis_rank           REAL,                  -- 1 = best, within the pond
+    thesis_stage          TEXT,                  -- 'pond' | 'top100'
+    adtv_cr               REAL,                  -- 126-session median traded value, ₹ crore
     PRIMARY KEY (sid, snapshot_date)
 );
 CREATE INDEX IF NOT EXISTS idx_multibagger_date ON multibagger_scores(snapshot_date);
+
+-- The multibagger desk's lists are decisions, not scores (plan 0026 2.2): written only by
+-- signals/mb_book.py from the cockpit or the CLI, never by the pipeline.
+CREATE TABLE IF NOT EXISTS multibagger_book (
+    sid          TEXT PRIMARY KEY REFERENCES stocks(sid),
+    status       TEXT NOT NULL CHECK(status IN ('candidate', 'held', 'dropped')),
+    since        TEXT NOT NULL,             -- date the sid entered its current status
+    thesis_line  TEXT,                      -- why this could 5x, one line, no numbers
+    entry_date   TEXT,                      -- held: the day it was bought
+    entry_price  REAL,
+    reason       TEXT NOT NULL,             -- the reason for the latest change
+    updated_at   TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS multibagger_book_log (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts           TEXT NOT NULL,
+    sid          TEXT NOT NULL,
+    action       TEXT NOT NULL,             -- add_candidate | hold | drop
+    from_status  TEXT,
+    to_status    TEXT NOT NULL,
+    reason       TEXT NOT NULL,
+    actor        TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_mb_book_log_sid ON multibagger_book_log(sid, ts);
 
 CREATE TABLE IF NOT EXISTS news_article_stocks (
     article_id      TEXT NOT NULL REFERENCES news_articles(article_id),
@@ -1665,6 +1719,23 @@ CREATE TABLE IF NOT EXISTS sector_dossiers (
     PRIMARY KEY (sector, snapshot_date)
 );
 CREATE INDEX IF NOT EXISTS idx_sector_dossiers_date ON sector_dossiers(snapshot_date);
+
+-- Plan 0026 stage 4: the LLM deep-dive note on one of the 30 candidates (output/mb_dossier.py, queue kind mb_dossier).
+-- Narrative only, no raw numbers (validator-enforced); list fields are JSON arrays. as_of_date = newest reported quarter end.
+CREATE TABLE IF NOT EXISTS mb_dossiers (
+    sid                  TEXT NOT NULL REFERENCES stocks(sid),
+    as_of_date           TEXT NOT NULL,
+    thesis_line          TEXT NOT NULL,    -- why this could 5x, one sentence
+    thesis               TEXT NOT NULL,
+    bull                 TEXT NOT NULL,    -- JSON array of strings
+    bear                 TEXT NOT NULL,
+    catalysts            TEXT NOT NULL,
+    risks                TEXT NOT NULL,
+    what_would_break_it  TEXT NOT NULL,
+    validation           TEXT,             -- JSON {ok, violations}
+    created_at           TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (sid, as_of_date)
+);
 
 CREATE TABLE IF NOT EXISTS sector_force_breakdown (
     sector              TEXT NOT NULL,
@@ -2546,4 +2617,19 @@ CREATE TABLE IF NOT EXISTS quarterly_results_nse (
     source_url          TEXT,
     fetched_at          TEXT NOT NULL,
     PRIMARY KEY (sid, period_end, basis, filed_at)
+);
+
+-- plan 0026 phase 3: valuation football field (signals/valuation.py). One row per (stock, day, method);
+-- low/mid/high are Rs per share (NULL for reverse_dcf and for a method that does not apply, with the reason in basis).
+CREATE TABLE IF NOT EXISTS valuation_ranges (
+    sid                 TEXT NOT NULL REFERENCES stocks(sid),
+    as_of               TEXT NOT NULL,
+    method              TEXT NOT NULL,
+    low                 REAL,
+    mid                 REAL,
+    high                REAL,
+    basis               TEXT,
+    price               REAL,
+    implied_growth_10y  REAL,
+    PRIMARY KEY (sid, as_of, method)
 );

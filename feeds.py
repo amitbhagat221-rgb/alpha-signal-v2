@@ -258,6 +258,20 @@ FEEDS = {
         "pit": "dt_tm dissemination time", "tos": "public exchange data",
         "fallback_plan": "NSE corporate-announcements API",
     },
+    "nse_announcements": {
+        "family": "events", "status": "probation",
+        "what": "Every company announcement filed on NSE (orders, funding, resignations, ratings...), by watch category",
+        "modules": ["sources.nse_announcements"], "schedule": ["cron:forward"],
+        "writes": ["nse_announcements"], "hosts": ["nse"], "cadence": "daily",
+        "routes": [_r("nse_corp_announcements", "fallback", "nse",
+                      "api/corporate-announcements (replaces bse_announcements while BSE's Akamai WAF 403s it)")],
+        "serve_stale_days": 3, "canary": "nse_announcements",
+        "pit": "an_dt announcement time; dissem_dt exchange dissemination time", "tos": "public exchange data",
+        "need": "multibagger event watch (plan 0026 task 4.0)",
+        "notes": "Own table: NSE ids/taxonomy differ from BSE, governance + credit-rating factors read BSE. "
+                 "Category map = config.NSE_ANNOUNCEMENT_CATEGORIES. Depth to at least 2018-01.",
+        "probe": ("WORKS", "2026-10-15", "2 days 1,058 rows; 2018-01-01..03 351 rows"),
+    },
     "corporate_actions": {
         "family": "events", "status": "production",
         "what": "Splits, bonuses, dividends and buybacks, with their dates",

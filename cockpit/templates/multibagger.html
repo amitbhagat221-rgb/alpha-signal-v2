@@ -1,0 +1,23 @@
+{# /multibagger - the multibagger desk (plan 0026, ADR 0075): Funnel, Candidates, Held, Watch.
+   Data: cockpit/multibagger.py. Every tab is fetched from /partial/multibagger/<tab> on first open. Tabs: pages.py. #}
+{% extends "base.html" %}
+{% from "_components.html" import tab_bar, loading %}
+{% block title %}{{ page_title("Multibagger") }}{% endblock %}
+
+{% block content %}
+<script src="/static/multibagger.js?v={{ asset_version('multibagger.js') }}"></script>
+
+<h1 class="section-title">Multibagger desk</h1>
+<div class="section-desc">
+    Where to look, not a ranking that picks the winner. Safety gates keep a pond of small, buyable stocks; a thesis score
+    (smallness, cheapness, price, latest quarter, industry momentum) narrows it to a top 100; you pick up to 30 candidates
+    and up to 10 to hold, each with a reason. Separate from the daily model and its paper book.
+</div>
+
+<div x-data="{ tab: '{{ tabs[0][0] }}', loaded: { '{{ tabs[0][0] }}': true } }" x-cloak>
+{{ tab_bar(tabs, links=[("/multibagger/valuation", "Valuation")]) }}
+{% for key, lab in tabs %}
+<div x-show="tab === '{{ key }}'" x-cloak x-effect="if (tab === '{{ key }}') mbLoad($el, '{{ key }}')">{{ loading() }}</div>
+{% endfor %}
+</div>
+{% endblock %}

@@ -256,7 +256,7 @@ def sync_entities(c):
             WHERE entities.name IS NOT excluded.name OR entities.attrs IS NOT excluded.attrs""")
         # every sid any legacy table references (orphans get an entity, flagged)
         for t in ("stock_prices", "daily_picks", "daily_snapshots_pit", "daily_snapshots_pit_v1", "bse_announcements",
-                  "market_events", "insider_trades", "fno_bhav", "mf_holdings", "pick_outcomes", "analyst_estimates", "historical_universe",
+                  "nse_announcements", "market_events", "insider_trades", "fno_bhav", "mf_holdings", "pick_outcomes", "analyst_estimates", "historical_universe",
                   "scrip_master"):
             if exists(c, t) and "sid" in cols(c, t):
                 c.execute(f"""INSERT OR IGNORE INTO entities(kind, key, attrs, created_at, updated_at)
@@ -638,6 +638,9 @@ def sync_estimates(c):
 EVENT_SPECS = {
     "bse_announcements": ("bse_announcement", "t.news_id", "t.sid", "t.dt_tm", "COALESCE(t.dissem_dt, t.dt_tm)",
                           "COALESCE(t.category, '') || '|' || COALESCE(t.subcategory, '')", {"news_id", "sid", "dt_tm", "category", "subcategory", "fetched_at"}),
+    "nse_announcements": ("nse_announcement", "t.seq_id", "t.sid", "t.an_dt", "COALESCE(t.dissem_dt, t.an_dt)",
+                          "COALESCE(t.category, '') || '|' || COALESCE(t.desc_category, '')",
+                          {"seq_id", "sid", "an_dt", "category", "desc_category", "fetched_at"}),
     "corporate_actions": ("corporate_action", "t.id", "t.sid", "COALESCE(t.ex_date, substr(t.fetched_at, 1, 10))", "COALESCE(t.ex_date, substr(t.fetched_at, 1, 10))",
                           "t.ind", {"id", "sid", "fetched_at"}),
     "insider_trades": ("insider_trade", "t.id", "t.sid", "t.trade_date", "t.trade_date", "t.transaction_type", {"id", "sid", "fetched_at"}),
@@ -763,6 +766,8 @@ def sync_documents(c, full, since):
         ("news_briefs", "news_brief", ["brief_date"], None, "brief_date", lambda r: r.get("generated_at") or r.get("brief_date"), None, None, "generated_at"),
         ("sector_dossiers", "sector_dossier", ["sector", "snapshot_date"], ("sector", sct), "snapshot_date",
          lambda r: r.get("generated_at") or r.get("snapshot_date"), None, None, "generated_at"),
+        ("mb_dossiers", "mb_dossier", ["sid", "as_of_date"], ("sid", sec), "as_of_date",
+         lambda r: r.get("created_at") or r.get("as_of_date"), "thesis_line", "thesis", "created_at"),
         ("sector_metadata", "sector_metadata", ["sector", "source"], ("sector", sct), "generated_at",
          lambda r: r.get("generated_at"), "industry", "payload", "generated_at"),
     ]
@@ -820,6 +825,7 @@ FEATURE_TABLES = {
     "nlp_scores": ("sid", "security", "doc_date", "doc_type", "prefix"),      # available_date is a value (date kind)
     "insider_signals": ("sid", "security", "snapshot_date", "signal_type", "prefix"),
     "playbook_members": ("sid", "security", "snapshot_date", "sleeve", "prefix"),
+    "valuation_ranges": ("sid", "security", "as_of", "method", "prefix"),       # plan 0026: one feature set per method
     "fno_iv_history": ("sid|symbol", "security|index", "trade_date", None, "prefix"),
     "fno_pcr_history": ("sid|symbol", "security|index", "trade_date", None, "prefix"),
     "universe_eligibility": ("sid", "security", "snapshot_date", "signal", "prefix"),
@@ -839,7 +845,7 @@ FEATURE_SKIP = {"computed_at", "reconstructed_at", "imported_at", "refreshed_at"
 TIER_TO_CLS = {("daily_snapshots_pit", "cap_tier"): "tier@pit", ("daily_snapshots_pit_v1", "cap_tier"): "tier@v1",
                ("daily_snapshots_pit_v1", "sector"): "sector@v1", ("daily_snapshots_pit_v1", "ticker"): "ticker@v1"}
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}")
-PLAIN_DATE_COLS = {"snapshot_date", "trade_date", "doc_date"}   # stored as YYYY-MM-DD (checked by reconcile parity)
+PLAIN_DATE_COLS = {"snapshot_date", "trade_date", "doc_date", "as_of"}   # stored as YYYY-MM-DD (checked by reconcile parity)
 # a row's existence is itself a fact where every value can be NULL (the PIT panel: "in the universe that day")
 MEMBERSHIP = {"daily_snapshots_pit": "in_universe", "daily_snapshots_pit_v1": "v1.in_universe"}
 

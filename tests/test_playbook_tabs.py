@@ -133,4 +133,4 @@ def test_pages_render_and_old_urls_redirect(tmp_path, monkeypatch):
     assert c.get("/playbooks").status_code == 200
     assert c.get("/partial/playbooks/nope").status_code == 404
     assert c.get("/ideas").headers["location"] == "/playbooks"
-    assert c.get("/multibagger").headers["location"] == "/playbooks#strict"
+    assert c.get("/multibagger").status_code == 200            # its own page again (plan 0026), no redirect

@@ -269,6 +269,14 @@ TABLES = {
         "source": "BSE AnnSubCategoryGetData --days 7 (run.sh forward)",
         "date_col": "fetched_at", "stale_days": 5,
     },
+    # NSE corporate announcements, the BSE fallback (run.sh forward, --days 7). Same freshness
+    # reasoning as bse_announcements: anchor on fetched_at, 5 days tolerates a holiday cluster.
+    "nse_announcements": {
+        "contract": {"max_null": {"subject": 0.3, "an_dt": 0.05}},
+        "kind": "RAW", "domain": "Trades & Corporate", "freq": "daily", "data_freq": "daily",
+        "source": "NSE api/corporate-announcements --days 7 (run.sh forward)",
+        "date_col": "fetched_at", "stale_days": 5,
+    },
     "bulk_deals": {
         "contract": {"max_null": {"price": 0.05, "quantity": 0.05}, "not_all_zero": ["price", "quantity"]},
         "kind": "RAW", "domain": "Trades & Corporate", "date_col": "deal_date",
@@ -440,6 +448,11 @@ TABLES = {
     },
 
     # ── Computed Signals ──
+    "valuation_ranges": {
+        "kind": "COMPUTED", "domain": "Computed Signals", "date_col": "as_of",
+        "depth": "One row per stock, day and method (pe_band, pb_band, ev_ebitda_band, peer_pe, peer_ev_ebitda, dcf, reverse_dcf, analyst, range_52w)",
+        "description": "Valuation football field (plan 0026): per-share low/mid/high from each method, a basis string naming its inputs, the price, and the 10-year growth the price implies (reverse DCF). Display only, never a score.",
+    },
     "accruals_scores": {
         "kind": "COMPUTED", "domain": "Computed Signals", "date_col": "snapshot_date",
         "depth": "Latest snapshot per stock",
@@ -528,6 +541,20 @@ TABLES = {
         "kind": "COMPUTED", "domain": "Computed Signals", "date_col": "snapshot_date",
         "stale_days": 10,
     },
+    # The desk's lists are Amit's decisions (plan 0026 2.2): written only from the CLI / cockpit, never by a
+    # pipeline step, so no freshness clock; empty until the first candidate is added.
+    "multibagger_book": {
+        "kind": "STATE", "domain": "Computed Signals", "date_col": "updated_at", "may_be_empty": True,
+        "source": "signals/mb_book.py (CLI / cockpit, by hand)",
+        "depth": "One row per stock Amit has made a candidate (max 30 candidates + held, max 10 held)",
+        "description": "The multibagger desk's lists: candidate / held / dropped, since when, the one-line thesis, entry date and price, and the reason for the latest change. A decision log, not a score.",
+    },
+    "multibagger_book_log": {
+        "kind": "LOG", "domain": "Computed Signals", "date_col": "ts", "may_be_empty": True,
+        "source": "signals/mb_book.py (same transaction as every multibagger_book change)",
+        "depth": "One row per add / hold / drop",
+        "description": "Append-only history of the multibagger desk's lists: who changed which stock from which status to which, why, and when.",
+    },
     "nlp_scores": {"kind": "COMPUTED", "domain": "Computed Signals", "date_col": None},
     "nwc_to_revenue_scores": {
         "kind": "COMPUTED", "domain": "Computed Signals", "date_col": "snapshot_date",
@@ -615,6 +642,10 @@ TABLES = {
     },
     "sector_briefs": {"kind": "COMPUTED", "domain": "Output", "date_col": "snapshot_date"},
     "sector_dossiers": {"kind": "COMPUTED", "domain": "Output", "date_col": "snapshot_date"},
+    "mb_dossiers": {
+        "kind": "COMPUTED", "domain": "Output", "date_col": "as_of_date", "freq": "quarterly", "may_be_empty": True,
+        "description": "Plan 0026 stage-4 deep-dive notes on the multibagger candidates (thesis line, thesis, bull, bear, catalysts, risks, what would break it). Narrative only, no raw numbers; written by the mb_dossier queue kind.",
+    },
 
     # ── Backtest (PIT) ──
     "daily_snapshots_pit": {

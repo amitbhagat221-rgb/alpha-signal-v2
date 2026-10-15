@@ -78,22 +78,23 @@ import pandas as pd
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
+from config import MB_THESIS  # noqa: E402
+from signals.multibagger import PARTS, liquidity_pond, thesis  # noqa: E402
 from tools.lh_price_history import load  # noqa: E402
 from tools.lh_quarterly_nse import asof as q_asof, history as q_history  # noqa: E402
 
 DB = PROJECT_ROOT / "data" / "alpha_signal.db"
 V2 = PROJECT_ROOT / "data" / "lh" / "v2"
 CR = 1e7
-ADTV_MIN = 0.5 * CR
-MCAP_MAX_CR = 5_000
-ANNUAL_LAG = 150
+ADTV_MIN = MB_THESIS["adtv_min_cr"] * CR          # the gates live in config.MB_THESIS (ADR 0075)
+MCAP_MAX_CR = MB_THESIS["mcap_max_cr"]
+ANNUAL_LAG = MB_THESIS["annual_lag_days"]
 COST = 0.0031
 LTCG = 0.125
 TOP = 30
 BENCH = "NIFTY SMALLCAP 250"
 ANNUAL = ["Sales", "Net profit", "Profit before tax", "Interest", "Borrowings", "Equity Share Capital",
           "Reserves", "No. of Equity Shares"]
-PARTS = ["smallness", "cheapness", "price", "business", "tailwind"]
 
 
 def ro():
@@ -250,26 +251,16 @@ def score(df):
     out = []
     for a, g in df.groupby("anchor"):
         g = g.copy()
-        g["pond_a"] = (g["adtv"] >= ADTV_MIN) & (g["adtv_rank"] > 250)
+        g["pond_a"] = liquidity_pond(g, ADTV_MIN / CR)
         pa = g[g["pond_a"]]
         sa = (pct(-np.log(pa["adtv"])) + pct(pa["mom_6m"]) + pct(pa["pos_52w"])) / 3
         g.loc[pa.index, "score_a"] = sa
-        g["pond_b"] = (g["pond_a"] & g["survivor"] & (g["mcap_cr"] <= g["mcap_max"]) & (g["sales"] > 0)
-                       & ~g["red_flag"].astype("boolean").fillna(False).astype(bool))
-        pb = g[g["pond_b"]]
-        if len(pb) >= 100:
-            parts = pd.DataFrame(index=pb.index)
-            parts["smallness"] = pct(-np.log(pb["mcap_cr"]))
-            parts["cheapness"] = pd.concat([pct(pb["bp"]), pct(pb["sp"]), pct(pb["ep"])], axis=1).mean(axis=1)
-            parts["price"] = (pct(pb["mom_6m"]) + pct(pb["pos_52w"])) / 2
-            parts["business"] = pd.concat([pct(pb["q_ebitda_chg"]), pct(pb["q_rev_yoy"])], axis=1).mean(axis=1) \
-                if "q_ebitda_chg" in pb else np.nan
-            ind = pb.groupby("industry")["mom_6m"].transform("median")
-            parts["tailwind"] = pct(ind)
-            row_mean = parts.mean(axis=1)
-            parts = parts.apply(lambda c: c.fillna(row_mean))
-            g.loc[pb.index, PARTS] = parts[PARTS].values
-            g.loc[pb.index, "score_b"] = parts.mean(axis=1)
+        # arm B IS the live thesis (signals.multibagger.thesis): same gates, same parts, same fill rule
+        t = thesis(g, min_pond=100, adtv_min_cr=ADTV_MIN / CR)
+        g["pond_b"] = t["thesis_pond"]
+        if t["thesis_score"].notna().any():
+            g[PARTS] = t[PARTS]
+            g["score_b"] = t["thesis_score"]
             scale = g["mcap_scale"].iloc[0]
             g["old_funnel"] = (g["pond_a"] & g["survivor"] & (g["roce"] >= 0.18) & (g["de"] <= 0.5)
                                & g["mcap_cr"].between(1_000 * scale, 20_000 * scale) & (g["pat_cagr_3y"] >= 0.20))
