@@ -29,7 +29,7 @@ from db import BEST_EFFORT_STALE, data_health, get_db, read_sql, table_producer
 from config import PIPELINE_STEPS
 from pipeline import run_step
 
-# No-two-harvesters-at-once (CLAUDE.md): same lock file run.sh takes for its
+# Takes run.sh's harvest lock EXCLUSIVE (= every source; CLAUDE.md): same lock file run.sh takes for its
 # harvesting jobs (morning, forward, tickertape, screener_universe)
 # (audit Data-F8). Non-blocking — a heal re-run that can't get the lock is
 # skipped and logged rather than doubling request rate against an external API.

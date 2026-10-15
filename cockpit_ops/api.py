@@ -569,7 +569,7 @@ def rerun_step(step_name: str) -> dict:
         except (ValueError, TypeError):
             pass
 
-    # No-two-harvesters (CLAUDE.md): a rerun takes the same lock as run.sh harvesting jobs
+    # A rerun takes run.sh's harvest lock EXCLUSIVE (every source; CLAUDE.md), like the watchdog
     # and the watchdog. Refuse now if it is held; the child
     # re-takes it with `flock -n` for its whole run (plan 0015 D6).
     import fcntl

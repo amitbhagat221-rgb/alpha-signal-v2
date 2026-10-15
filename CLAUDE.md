@@ -34,7 +34,7 @@ Everything else (memory, `_archive/`, slash commands, settings) — Claude handl
 - LLM narrative fields (dossier thesis/bull/bear/catalysts/risks) carry no raw numbers — they hallucinate plausibly. Numbers live only in structured fields; `output/dossier.py` validates. Calendar tokens (Q1, FY25, H1) are fine
 
 **Data safety**
-- One harvester per host at a time, and never two multi-hour DB writers at once (a 32.5 GB WAL filled the disk 2026-10-08) — message the other session first
+- One harvest per source at a time (`run.sh harvest_lock <source…>`; different sources may run in parallel), and never two multi-hour DB writers at once (a 32.5 GB WAL filled the disk 2026-10-08) — message the other session first
 - Never copy the 22 GB DB: read it with `sqlite3 -readonly` / `file:...?mode=ro`. In a git worktree set `ALPHA_DB=/home/ubuntu/alpha-signal-v2/data/alpha_signal.db`, or sqlite silently creates an empty DB there
 - Every external call goes through the host door (`sources/_http` + `hosts.HOSTS`); never `requests.get` or `sleep` pacing in a module
 - Smoke test with 3 stocks before any full run

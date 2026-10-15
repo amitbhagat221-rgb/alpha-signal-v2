@@ -36,7 +36,7 @@ Every non-PASS canary carries a **symptom class**. Start from the class, then th
 5. Accept the new shape: `python -m tools.canary --accept <canary>`.
 6. Add an `INCIDENTS` line in `feeds.py`.
 
-**Run canaries by hand.** Always hold the lock, and never run two harvesters at once.
+**Run canaries by hand.** Always hold the lock, and never run two harvests on the same source at once.
 ```bash
 flock -n /tmp/alpha_signal_harvest.lock python -m tools.canary --feed nse_bhavcopy   # one feed
 flock -n /tmp/alpha_signal_harvest.lock python -m tools.canary --tier T1             # all critical

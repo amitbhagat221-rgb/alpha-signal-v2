@@ -33,7 +33,7 @@ From README.md, CLAUDE.md and docs/reference/architecture.md only:
   - Episodic data (analyst PTs) is snapshotted at its natural cadence, never daily.
   - A producer with 0 output is a failure, never a success.
   - LLM narrative contains no numbers.
-  - No two harvesters at once, and ≥2s per host.
+  - One harvest per source at a time (different sources in parallel), and ≥2s per host.
 - **Change scenarios,** from the change-locality list above.
 
 ## Step 2: derive the building blocks

@@ -14,7 +14,7 @@ Read `CLAUDE.md` (Data Operations, Health & observability) and `docs/reference/f
 ## Rules
 - Every data stream is a `feeds.FEEDS` entry; every external call goes through `sources/_http` and `hosts.HOSTS`.
   Never `requests.get` or `sleep` in a module.
-- Never run two harvesters at once. Check `ps -eo args | grep "[r]un.sh"` before any live fetch. Smoke on three
+- Never run two harvests on one source at once (`run.sh harvest_lock <source…>`). Check `ps -eo args | grep "[r]un.sh"` before any live fetch. Smoke on three
   items first: `python -m tools.canary --feed X`.
 - A `ContractViolation` means the gate worked. Fix the parser; never loosen a write contract to make a harvest pass.
 - Append-only tables use `INSERT OR IGNORE`; state tables use column-level `db.upsert_df`. Never `INSERT OR REPLACE`.

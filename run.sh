@@ -6,8 +6,9 @@
 #
 # One preamble for every job: repo dir, shared venv, credentials from the v2 secrets
 # file (~/.config/alpha-signal/secrets.env, mode 600, outside git — the ONE place they
-# live; CLAUDE.md), and the email-sender variables. Harvesting jobs take the shared non-blocking harvest lock
-# (no two harvesters at once) and skip the run if another holds it.
+# live; CLAUDE.md), and the email-sender variables. Harvesting jobs take the harvest lock for the
+# sources they hit (one harvest per source at a time; different sources run in parallel) and wait,
+# then log a skip, if another job holds one.
 set -u
 
 ROOT=/home/ubuntu/alpha-signal-v2
@@ -51,18 +52,37 @@ runlog.exit_code(sys.argv[5], sys.argv[1], sys.argv[2], started=sys.argv[3], las
     return $rc
 }
 
-harvest_lock() {   # shared with the watchdog heal runner and the cockpit rerun endpoint
-    [ -n "${DRY:-}" ] && { echo "+ flock -n /tmp/alpha_signal_harvest.lock"; return 0; }
+harvest_lock() {   # harvest_lock [source ...] — one harvest per source at a time (Amit 2026-10-15)
+    # With sources: the global lock SHARED + one exclusive lock per source, so jobs on different
+    # sources run side by side and two jobs on one source queue. No sources = every source: the
+    # global lock EXCLUSIVE (the morning pipeline, the canary, and — through the same file —
+    # the watchdog heal runner and the cockpit rerun endpoint). Sources are taken in sorted order
+    # so two jobs can never deadlock on each other.
+    local srcs w=${LOCK_WAIT_S:-7200} s fd
+    srcs=$(printf '%s\n' "$@" | sort -u | tr '\n' ' ')
+    if [ -n "${DRY:-}" ]; then
+        if [ $# -eq 0 ]; then echo "+ flock -x /tmp/alpha_signal_harvest.lock (every source)"
+        else echo "+ flock -s /tmp/alpha_signal_harvest.lock + per source: $srcs"; fi
+        return 0
+    fi
     exec 200>/tmp/alpha_signal_harvest.lock
-    # Wait for the job holding it (the morning run can still be going at 06:00 on the 1st),
-    # and if it never frees, record the skip: `exit 0` here made the 2026-10-01 Screener
-    # harvest vanish with no pipeline_log row.
-    flock -w "${LOCK_WAIT_S:-7200}" 200 || {
-        echo "another harvester held the lock for ${LOCK_WAIT_S:-7200}s — $JOB skipped $(date -u)"
-        python -c 'import sys; from pipeline import log_step
-log_step(sys.argv[1], "FAILED", error="skipped: harvest lock held by another job")' "cron_$JOB" \
-            || echo "[warn] could not log the skip to pipeline_log"
-        exit 1; }
+    if [ $# -eq 0 ]; then
+        flock -x -w "$w" 200 || harvest_skip "every source"
+    else
+        flock -s -w "$w" 200 || harvest_skip "every source (an all-sources job is running)"
+        for s in $srcs; do
+            exec {fd}>"/tmp/alpha_signal_harvest.$s.lock"
+            flock -x -w "$w" "$fd" || harvest_skip "$s"
+        done
+    fi
+}
+
+harvest_skip() {   # wait ran out: record the skip (`exit 0` here made the 2026-10-01 Screener harvest vanish)
+    echo "another harvester held the $1 lock for ${LOCK_WAIT_S:-7200}s — $JOB skipped $(date -u)"
+    python -c 'import sys; from pipeline import log_step
+log_step(sys.argv[1], "FAILED", error="skipped: harvest lock held by another job (" + sys.argv[2] + ")")' "cron_$JOB" "$1" \
+        || echo "[warn] could not log the skip to pipeline_log"
+    exit 1
 }
 
 JOB="${1:?usage: run.sh <job>}"
@@ -89,7 +109,7 @@ case "$JOB" in
         echo "Done $(date -u) (pipeline rc=$RC)"
         exit $RC ;;
     forward)            # 14:00 UTC — forward-only sources with no historical archive
-        harvest_lock
+        harvest_lock nse bse
         logged cron_nselib_daily_forward run python -m sources.nselib_pull --source daily_forward; echo "Exit code (nselib daily_forward): $?"
         # scrip_master must follow bse_announcements (it backfills sid on the new rows)
         logged cron_bse_announcements run python -m sources.bse_announcements --days 7; echo "Exit code (bse_announcements): $?"
@@ -103,7 +123,7 @@ case "$JOB" in
     transcripts)        # Sunday 07:00 UTC — concall transcripts for stocks that reported in the last
                         # 45 days (they appear 1-4 weeks after results), then their BSE filing dates
                         # (the look-ahead-safe availability) — plan 0018; orphaned since 2026-06-07
-        harvest_lock
+        harvest_lock screener bse
         logged cron_transcripts run python -m sources.transcripts_pull --reported-days 45 --min-analysts 1 --max-docs 2
         logged cron_transcripts_dates run python -m sources.transcripts_pull --backfill-filing-dates
         # score the new calls: forward_looking_intensity (wired, LARGE) reads nlp_scores, and nothing
@@ -116,7 +136,7 @@ case "$JOB" in
                         # job uses: 08:00 Sun-Fri, 16:00 (not the 1st), 21:00 UTC; `run.sh backfill <minutes>`.
                         # Each part is resumable and returns at once when it has nothing left; remove the
                         # cron lines when both report nothing to fetch.
-        harvest_lock
+        harvest_lock nse bse
         # Declare the backfill to the health report (checks/feeds.py BACKFILL_MARKER): row counts of
         # steps that read the backfilled history jump while it runs, and the 04:00 report comes after
         # the 21:00 window ends. The marker holds the epoch of the last window start/end; it
@@ -137,11 +157,11 @@ case "$JOB" in
     screener_schedules) # 3rd + 4th of Jan/Apr/Jul/Oct 20:30 UTC — Screener '+'-row breakdowns
                         # (Intangible Assets etc., annual items): ~9 h for the universe, so two
                         # resumable 5-hour night windows per quarter, clear of every other job
-        harvest_lock
+        harvest_lock screener
         logged cron_screener_schedules run python -m sources.screener_schedules --universe --budget-min 300 ;;
     estimates)          # Saturday 10:00 UTC — Yahoo EPS trend snapshots (covered stocks) + surprises
                         # for stocks that reported in the last 3 weeks (plan 0018)
-        harvest_lock
+        harvest_lock yahoo
         logged cron_estimates run python -m sources.yahoo_estimates --trend --covered
         logged cron_estimates_history run python -m sources.yahoo_estimates --history --reported-days 21 ;;
     llm_local)          # 05:07 + 14:37 UTC — catch-up drain of the llm_tasks queue (plan 0016): the
@@ -229,10 +249,10 @@ case "$JOB" in
     secrets_backup)     # 05:30 UTC — GPG-encrypted VM-only secrets + wiring → Drive (review F13)
         logged cron_secrets_backup run "$ROOT/backup_secrets.sh" ;;
     screener_universe)  # 1st + 15th — Screener fundamentals harvest
-        harvest_lock
+        harvest_lock screener
         logged cron_screener_universe run python -m sources.screener_pull --universe ;;
     tickertape)         # 1st of month 19:07 UTC — ~4h Tickertape fundamentals harvest
-        harvest_lock
+        harvest_lock tickertape
         run rm -f "$ROOT/output/tickertape_harvest_log.json"   # resume checkpoint → full cycle
         LOG="$ROOT/output/tickertape_$(date +%Y%m).log"
         tickertape_run() { python -m sources.tickertape >> "$LOG" 2>&1; }

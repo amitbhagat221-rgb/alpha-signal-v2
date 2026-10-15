@@ -464,7 +464,7 @@ Politeness is declared once per host in [`hosts.HOSTS`](../../hosts.py) (ADR 005
 - **Declared exceptions** are slower, never faster: Moneycontrol 12 s (2 s tripped the WAF), ETMoney 2.5 s, Screener 2.5–4 s jittered (Screener has banned accounts), BSE 2–3 s jittered.
 - **Headers** are the host's unless the caller passes a session (which carries its own) or explicit headers.
 - **Adding a source:** add its entry to `hosts.HOSTS` first. `tests/test_hosts.py` fails on any URL literal in `sources/` whose host isn't declared.
-- The gap is per process. Two harvesters in two processes still double the rate, so never run two at once.
+- The gap is per process. Two harvesters on one source in two processes still double its rate, so never run two on the same source at once (`run.sh harvest_lock <source…>`); harvesters on different sources may run in parallel.
 
 For batch operations: chunk + checkpoint every 200 items. Resume via a JSON state file.
 

@@ -26,7 +26,7 @@ python -m scoring.screener --dry-run --top 10
 python -m scoring.quality_gate
 python -m scoring.regime --dry-run
 
-# Data fetchers (one harvester at a time; 3-stock smoke test first)
+# Data fetchers (one harvest per source at a time (different sources may run in parallel); 3-stock smoke test first)
 python -m sources.macro_yfinance --days 7
 python -m sources.nse_bulk
 python -m sources.macro_gov

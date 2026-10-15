@@ -23,7 +23,7 @@ Read `CLAUDE.md` (Critical Rules, Backtest hygiene) and `docs/reference/signal-w
 - As-of is the master invariant: every input must have been knowable on the date. Check filing lags and
   `available_at`. If you cannot show it was knowable, the verdict is BLOCKED, not KEEP.
 - Rank within a tier, never across. Report t-stat, mean IC and periods per tier.
-- Smoke on three stocks before a full run. Never run two harvesters at once. External calls go through the host door.
+- Smoke on three stocks before a full run. Never run two harvests on one source at once. External calls go through the host door.
 - `venv`: `source ~/alpha-signal/venv/bin/activate`. Never touch `~/alpha-signal/`.
 - Tests: `pytest tests/test_factor_registry.py tests/test_invariant_ratchets.py` must pass.
 

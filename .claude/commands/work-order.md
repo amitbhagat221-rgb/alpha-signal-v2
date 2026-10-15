@@ -12,7 +12,7 @@ employees agreed in chat; he has approved it in the inbox.
    quant-researcher, data-engineer, backend-engineer, frontend-engineer or system-architect, with worktree isolation)
    and give it the item's title, what, where and done_when plus the relevant part of the chat. A size-S item you may do
    yourself. Every CLAUDE.md rule applies: no weight or production-default change, no cron or credential change, never
-   two harvesters, no write to the live DB beyond what the item names (ask first for a backfill).
+   two harvests on one source, no write to the live DB beyond what the item names (ask first for a backfill).
 5. Check each item against its `done_when`, then run the suite:
    `PYTHONPATH=.devlib python -m pytest -q -p no:cacheprovider tests/`.
 6. Report per item: done or not, files changed, how `done_when` was checked, test result. Do not commit or merge unless

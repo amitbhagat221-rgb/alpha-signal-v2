@@ -652,7 +652,7 @@ def bundle(feed, n_runs=5):
         "raw_responses": sorted(str(p.relative_to(ROOT)) for p in raw_dir.glob("*")) if f.get("canary") and raw_dir.exists() else [],
         "verify_with": ([f"flock -n /tmp/alpha_signal_harvest.lock python -m tools.canary --feed {feed}"]
                         + [f"python -m {m} --help   # then a 3-item smoke (--limit 3 / --sid …)" for m in f.get("modules") or []]),
-        "rules": ["never bypass captcha/auth/WAF", "never lower hosts.HOSTS politeness", "never run two harvesters at once",
+        "rules": ["never bypass captcha/auth/WAF", "never lower hosts.HOSTS politeness", "never run two harvests on one source at once",
                   "fix on a branch with a fixture + passing smoke; do not merge"],
     }
 

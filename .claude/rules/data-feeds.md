@@ -36,6 +36,11 @@ paths:
   - `forecast_history`: Tickertape year-end eps/revenue. Its `price` metric is the realized year-ahead close, not a PT — never ingest it (ADR 0045).
 - New PT-like producer: ask "is this episodic?" — if yes, a snapshot table at its natural cadence.
 
+**Harvest lock: one harvest per source (Amit 2026-10-15)**
+- A harvest job in `run.sh` names its sources: `harvest_lock nse bse`. Jobs on different sources run in parallel; two on one source queue (wait `LOCK_WAIT_S`, then a logged skip).
+- `harvest_lock` with no sources = every source, exclusive: the morning pipeline, the canary, `management`. The watchdog heal runner and the ops cockpit rerun take the same global file exclusively.
+- A new source-specific job adds its sources; a job hitting more than three sources takes every source.
+
 **Disk and long writers**
 - `run.sh sweep` clears week-old scratchpads; `DISK_LOW` pages. A DB copy you truly need goes in a worktree and is deleted the same session.
 - Long writers include panel rebuilds, `datamodel.sync` and backfills — one at a time.
