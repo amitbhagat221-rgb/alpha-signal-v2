@@ -89,13 +89,13 @@ Forensic flags show beside the name and do not cut it (ADR 0073).
 - [x] **1c.1 (DONE 2026-10-15: no mechanical stage rule passed — industry cap −2.0 pts in 2021–26 and more halvings; investor promotion −1.6 pts; floor ₹0.25 Cr +1.9 pts overall but loses 2016–20 under doubled costs. The top 100 holds 177 of 485 later 3x stocks vs 158 by chance; the top 30 holds 63 vs 47 → stage 3 is Amit's judgement on evidence cards, pre-sorted by the thesis score)** `tools/mb_funnel.py`, pre-registered in its docstring before the first run. F1 ≤ 4 names per industry; F2 top 100 with known-investor entries promoted into the 30; F3 = F2 + the cap; F4 liquidity floor ₹0.25 Cr, also under doubled costs. Plus stage capture: winners in the top 100 and in the 30, vs chance.
 
 ### Phase 2 — the pipeline and the lists (~3 days, worktree)
-- [ ] **2.1 Score.** Rewrite `signals/multibagger.py` to the thesis score (one compute function; the gates as data in `config`), monthly. Add new columns to `multibagger_scores` with column-level `db.upsert_df`; the old columns stay until plan 0017 retires them.
-- [ ] **2.2 The lists are decisions, not scores.**
+- [x] **2.1 (BUILT on `mb-desk`)** Score. Rewrite `signals/multibagger.py` to the thesis score (one compute function; the gates as data in `config`), monthly. Add new columns to `multibagger_scores` with column-level `db.upsert_df`; the old columns stay until plan 0017 retires them.
+- [x] **2.2 (BUILT on `mb-desk`: `output/mb_book.py`)** The lists are decisions, not scores.
   - New table `multibagger_book`: sid, status (`candidate` / `held` / `dropped`), since, thesis, entry price, reason.
   - Plus `multibagger_book_log`, append-only, so every add / promote / drop is kept.
   - Both go in `schema.sql` and `tables.TABLES`.
   - Written only from the cockpit or a CLI, never by the pipeline.
-- [ ] **2.3 Stage-3 evidence card and stage-4 deep-dive builders** (one function each, reading existing tables; the LLM dossier as a queue kind with the no-numbers validator).
+- [x] **2.3 (BUILT on `mb-desk`: `signals/mb_watch.card`, `output/mb_deepdive.py`, `output/mb_dossier.py` + kind `mb_dossier`)** Stage-3 evidence card and stage-4 deep-dive builders (one function each, reading existing tables; the LLM dossier as a queue kind with the no-numbers validator).
 - [ ] **2.4 Review packet.** At each quarterly review: the new top 100, what entered and left, and the conviction verdict for every held name. As an LLM kind `mb_review` on the `say_do` template, no numbers in the narrative, and an Amit approve step.
 
 ### Phase 3 — valuation football field (~4 days, worktree)
@@ -110,8 +110,8 @@ Forensic flags show beside the name and do not cut it (ADR 0073).
 - [x] **3.2 Golden test** (KEIN, GRSE, HDBK; KEIN P/E mid recomputed by hand) on 3 names, with a hand recompute of each method.
 
 ### Phase 4 — per-name watch (~1 week, worktree; depends on the BSE feed fix)
-- [ ] **4.0 Pre-req:** fix the `bse_announcements` canary (failing 2026-10-14/15) through the data-engineer seat. **Diagnosed 2026-10-15: BSE's Akamai WAF returns 403 on `AnnSubCategoryGetData/w` only (other BSE APIs answer from the same session); not bypassed.** Branch `worktree-agent-adfa93db58a021ea2` (39fa94f) only makes the error say "WAF block". Options: (a) another egress IP, (b) build `nse_announcements` (NSE `corporate-announcements` answers with date ranges; own table + route + canary, ~½ day) — Amit to choose.
-- [ ] **4.1 One timeline per stock** from existing tables. Category map in `config` (BSE subcategory → watch category, severity):
+- [x] **4.0 (NSE route BUILT on `mb-desk`: `sources/nse_announcements.py`, feed on probation, runs in `run.sh forward`; NSE goes back to 2018)** Pre-req: fix the `bse_announcements` canary (failing 2026-10-14/15) through the data-engineer seat. **Diagnosed 2026-10-15: BSE's Akamai WAF returns 403 on `AnnSubCategoryGetData/w` only (other BSE APIs answer from the same session); not bypassed.** Branch `worktree-agent-adfa93db58a021ea2` (39fa94f) only makes the error say "WAF block". Options: (a) another egress IP, (b) build `nse_announcements` (NSE `corporate-announcements` answers with date ranges; own table + route + canary, ~½ day) — Amit to choose.
+- [x] **4.1 (BUILT on `mb-desk`: `signals/mb_watch.timeline`, BSE + NSE)** One timeline per stock from existing tables. Category map in `config` (BSE subcategory → watch category, severity):
   - **Results:** `quarterly_income` + Screener quarterly, YoY / QoQ vs the thesis.
   - **Orders and deals:** BSE Award of Order, Acquisition, Open Offer, MoU.
   - **New money in:**
@@ -123,7 +123,7 @@ Forensic flags show beside the name and do not cut it (ADR 0073).
   - **Governance:** auditor / CFO / director resignations, change in management, clarifications, surveillance (ASM / GSM), credit ratings.
   - **Regulatory and sector:** `regulatory_events` for the stock's sector; industry momentum turn.
   - **News:** `news_article_stocks` (thin: 1,114 stocks tagged).
-- [ ] **4.2 Government / political link card** (context for a human, never a score; the doubler study found connection runs ended badly):
+- [~] **4.2 (BUILT except the electoral-bond file: `mb_watch.govt_links`)** Government / political link card (context for a human, never a score; the doubler study found connection runs ended badly):
   - (a) government / PSU / LIC / state holders in `shareholding_holders`;
   - (b) orders from government buyers (headline match: ministries, railways, defence, NHAI, PSU names);
   - (c) the ECI electoral-bond purchaser list (public, one-off 2024 file) → donor flag;
@@ -135,15 +135,15 @@ Forensic flags show beside the name and do not cut it (ADR 0073).
 - [ ] **4.4 Announcement PDFs** (D5): text for issue size, price and allottees of preferential / QIP / warrant issues; name resolution across SAST, bulk and holder lists so a new backer is one entity.
 
 ### Phase 5 — cockpit (~4 days, worktree → preview → Amit → merge)
-- [ ] **5.1 `/multibagger` comes back as its own rail page.** Remove the redirect in `pages.py` and update `tests/test_cockpit_v2.py` and `test_playbook_tabs.py`. Tabs:
+- [x] **5.1 (BUILT on `mb-desk`, design-reviewed, 769 tests pass)** `/multibagger` comes back as its own rail page.** Remove the redirect in `pages.py` and update `tests/test_cockpit_v2.py` and `test_playbook_tabs.py`. Tabs:
   - **Thesis:** rules, evidence, funnel counts, regime.
   - **Funnel:** stage counts (universe → pond → 100 → 30 → 10) and the top 100 as evidence cards, with a "promote to candidates" action.
   - **Candidates (30):** thesis line, score parts, valuation position, flags, last event; each opens the stage-4 deep dive.
   - **Held (10):** entry, return vs Smallcap 250, conviction HOLD / WATCH / REVIEW, days since last review.
   - **Watch:** event feed for the 30, filter by category and severity.
-- [ ] **5.2 New subpage `/multibagger/valuation`:** a grid of 30 mini football fields, sorted by where the price sits. `/multibagger/valuation/<sid>` is the full field with each method's basis, plus a link from the stock page.
+- [x] **5.2 (BUILT; deep dive at `/multibagger/stock/<sid>`)** New subpage `/multibagger/valuation`:** a grid of 30 mini football fields, sorted by where the price sits. `/multibagger/valuation/<sid>` is the full field with each method's basis, plus a link from the stock page.
 - [ ] **5.3 Retire the Playbooks "Strict compounders" tab** (D4), or relabel it as the old quality funnel.
-- [ ] **5.4 Checks:** Playwright at 1440 / 375, plus the design-review agent.
+- [x] **5.4 (design review: 25 findings fixed)** Checks: Playwright at 1440 / 375, plus the design-review agent.
 
 ## Decisions for Amit
 - [x] **D1 → ship as a labelled "where to look" list even if graded C** (Amit 2026-10-15). Was: If phase 1 grades the thesis C (fails the bar), still ship it as a labelled "where to look" list (the good-enough rule), or rework the thesis first?
@@ -177,3 +177,7 @@ Forensic flags show beside the name and do not cut it (ADR 0073).
   - Financials have no EV or DCF methods.
   - Gaps: the P/E band covers only ~2 years (`earnings_yield` PIT starts 2024-08) and EV/EBITDA ~8–9 quarters (`quarterly_income` 2023-09+). Owner earnings fall back to net profit when CFO + capex ≤ 0. The HDBK P/E band is distorted by the merger.
   - Also touched `datamodel/sync.py` (parity registration).
+- 2026-10-15, build: five branches merged into `mb-desk`. Integration fixes: `nse_announcements` registered as a v3 event source; signals/ no longer imports db (valuation writer → `output/valuation.py`, deep dive → `output/mb_deepdive.py`); held returns carry the entry price through splits.
+  - Production schema applied (additive: 5 empty tables + thesis columns).
+  - Still open: data writes need Amit's OK (the NSE backfill was blocked by the permission check); 4.3 alerts into the morning email / push; 4.4 announcement PDFs; the electoral-bond file; mb_book's live strict-tab side effect (financials + MICRO rows raise the strict tab's universe count).
+  - The backtest's market cap (`tools/mb_thesis.py`: annual shares carried through splits × raw close) differs from the live `market_caps()` basis (`.claude/rules/factors-backtest.md`); the live code uses `market_caps()`. Re-run the backtest on `market_caps()` history at the next re-test.
