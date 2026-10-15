@@ -1,6 +1,6 @@
 # Plan 0026 — Multibagger desk: thesis → 30 candidates → 10 held, valuation football field, per-name watch
 
-Status: **active 2026-10-15, BUILDING** (Amit: "build this please"; D1, D2, D5 answered; D3 money later; D4 shown in the preview). Branches: phase 2 lists + score, phase 4 watch, NSE announcements, deep-dive pieces → `mb-desk` → cockpit. Owner: Amit. Phase 1 is read-only research; phases 2–5 change the DB, the pipeline and the cockpit, so they are built on a worktree branch (`ALPHA_DB` set) and merged only after a preview.
+Status: **LIVE 2026-10-15** (merged + cockpit restarted; open items in the to-do) (Amit: "build this please"; D1, D2, D5 answered; D3 money later; D4 shown in the preview). Branches: phase 2 lists + score, phase 4 watch, NSE announcements, deep-dive pieces → `mb-desk` → cockpit. Owner: Amit. Phase 1 is read-only research; phases 2–5 change the DB, the pipeline and the cockpit, so they are built on a worktree branch (`ALPHA_DB` set) and merged only after a preview.
 
 ## Why
 Amit 2026-10-15: *"fundamentally revamp the multibagger page … a solid thesis basis the history and all our knowledge that can shortlist high quality likely candidates from the universe (with a little loose bar) … arrive at 30 candidates … 10 of these will be invested … all 30 will have a valuation football field page … closely followed for quarterly results, regulatory, sector … political backing, new funding … 1 new subpage called valuation."*
