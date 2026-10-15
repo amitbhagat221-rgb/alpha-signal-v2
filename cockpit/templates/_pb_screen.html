@@ -25,6 +25,7 @@
     <div class="section-desc">Price at or below book, earnings at least {{ (r.DEEP_EARNINGS_YIELD * 100)|int }}% of the price, debt at most {{ r.DEEP_MAX_DEBT_TO_EQUITY }}× equity, non-financial. Cheap is usually cheap for a reason in India: read the red flags first.{% if d.n_suspect %} {{ d.n_suspect }} more matched but were dropped as implausible ratios (more likely a data error than a bargain).{% endif %}</div>
     {% elif k == 'strict' %}
     {% set s = d.strict %}
+    <div class="pb-note"><strong>The multibagger desk has its own page.</strong> The thesis list, the 30 candidates, the 10 held and their valuation fields are on <a href="/multibagger" class="pb-clear">Multibagger</a>. This tab keeps the older quality-gate screen as it was.</div>
     {% if not s.available %}
     <div class="pb-empty">No multibagger run yet. The strict screen runs weekly (Sunday).</div>
     {% else %}

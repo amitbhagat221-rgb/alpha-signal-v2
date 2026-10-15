@@ -23,6 +23,10 @@ PLAYBOOK_TABS = [
     ("cycle", "Market cycle"), ("portfolios", "Portfolios"), ("roadmap", "All approaches"),
 ]
 
+# The multibagger desk's tabs (plan 0026): every tab is fetched from /partial/multibagger/<tab> on first open.
+# /multibagger/valuation and /multibagger/stock/<sid> are sub-pages under the same rail entry.
+MULTIBAGGER_TABS = [("funnel", "Funnel"), ("candidates", "Candidates"), ("held", "Held"), ("watch", "Watch")]
+
 PAGES = [
     {"path": "/", "id": "today", "title": "Today", "subtitle": "Read and act on today",
      "icon": "sun", "section": "Daily", "mobile": 1, "short": "Today",
@@ -38,8 +42,11 @@ PAGES = [
      "icon": "layers", "section": "Daily", "short": "Sectors",
      "tabs": [("heatmap", "Today"), ("per-sector", "Industry Detail"), ("rotation", "Rotation")]},
     {"path": "/playbooks", "id": "playbooks", "title": "Investor Playbooks", "subtitle": "Screens in the style of known investors",
-     "icon": "compass", "section": "Analysis", "short": "Playbooks", "also": ["multibagger"],
+     "icon": "compass", "section": "Analysis", "short": "Playbooks",
      "tabs": PLAYBOOK_TABS},
+    {"path": "/multibagger", "id": "multibagger", "title": "Multibagger", "subtitle": "Thesis list, candidates, held, valuation",
+     "icon": "trending-up", "section": "Analysis", "short": "Multibagger",
+     "tabs": MULTIBAGGER_TABS},
     {"path": "/book", "id": "book", "title": "Book", "subtitle": "Holdings, risk, results",
      "icon": "briefcase", "section": "Analysis", "mobile": 4, "short": "Book", "also": ["portfolio", "model-outcomes"],
      "tabs": [("book", "The book"), ("zerodha", "Zerodha"), ("sleeve", "Paper sleeve"), ("methods", "Ways to weight"), ("risk", "Risk"),
@@ -60,7 +67,6 @@ REDIRECTS = [
     ("/news", "/markets"),
     ("/news/theme/{theme_id}", "/markets/theme/{theme_id}"),
     ("/news/all", "/markets#search"),
-    ("/multibagger", "/playbooks#strict"),
     ("/ideas", "/playbooks"),
     ("/portfolio", "/book"),
     ("/model/outcomes", "/book#track-record"),

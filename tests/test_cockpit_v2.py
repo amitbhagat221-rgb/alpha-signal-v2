@@ -36,7 +36,7 @@ def test_every_rail_entry_renders(clients):
 
 
 def test_site_map_order():
-    assert [p["title"] for p in main_pages.PAGES] == ["Today", "Explorer", "Stocks", "Markets", "Sectors", "Investor Playbooks", "Book", "Model", "Funds"]
+    assert [p["title"] for p in main_pages.PAGES] == ["Today", "Explorer", "Stocks", "Markets", "Sectors", "Investor Playbooks", "Multibagger", "Book", "Model", "Funds"]
     assert [p["title"] for p in ops_pages.PAGES] == ["Health", "Feeds", "Flow", "Boardroom", "Options", "SQL"]
     for pages in (main_pages.PAGES, ops_pages.PAGES):                 # the bar holds at most 4 tabs
         assert sorted(p["mobile"] for p in pages if p.get("mobile")) == [1, 2, 3, 4]
@@ -45,7 +45,7 @@ def test_site_map_order():
 def test_retired_urls_redirect_to_a_page_that_renders(clients):
     main, ops = clients
     expect = {"/actions": "/", "/explorer/REDY": "/stocks/REDY",
-              "/news": "/markets", "/news/all": "/markets#search", "/multibagger": "/playbooks#strict",
+              "/news": "/markets", "/news/all": "/markets#search",
               "/ideas": "/playbooks", "/portfolio": "/book", "/model/outcomes": "/book#track-record"}
     for old, new in expect.items():
         r = main.get(old, follow_redirects=False)

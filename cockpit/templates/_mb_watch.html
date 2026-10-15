@@ -1,0 +1,39 @@
+{# Multibagger > Watch: the merged event feed of candidate + held names. Data: cockpit/multibagger.py watch(). #}
+<div>
+{% if not d.n_names %}
+<div class="card mb-empty">No names to watch yet &mdash; promote candidates from the Funnel tab and their filings, results, orders, ownership moves and ratings collect here.</div>
+{% else %}
+<div class="card" x-data="mbWatch()">
+    <div class="pb-tools">
+        <label class="mb-sel">Category <select x-model="cat" @change="apply()" aria-label="Category">
+            <option value="">All categories</option>
+            {% for key, lab in d.categories %}<option value="{{ key }}">{{ lab }}</option>{% endfor %}
+        </select></label>
+        <label class="mb-sel">Severity <select x-model="sev" @change="apply()" aria-label="Severity">
+            {% for key, lab in d.severities %}<option value="{{ {'low': 0, 'medium': 1, 'high': 2}[key] }}"{{ ' selected' if key == 'medium' }}>{{ lab }}</option>{% endfor %}
+        </select></label>
+        <span class="mono u-muted-11"><span x-text="shown"></span> of {{ d.n_rows }} events shown</span>
+    </div>
+    <p class="mb-sub">The last {{ d.days }} days across {{ d.n_names }} names, to {{ d.as_of|long_date }}. Headlines are copied as filed.</p>
+    {% if not d.rows %}
+    <div class="mb-empty">No events in the last {{ d.days }} days for these names.</div>
+    {% else %}
+    <div class="table-wrap"><table class="mb-tbl mb-stack">
+        <thead><tr><th>Date</th><th>Stock</th><th>Category</th><th>Severity</th><th>Event</th></tr></thead>
+        <tbody>
+        {% for r in d.rows %}
+        <tr data-row data-cat="{{ r.category }}" data-sev="{{ r.sev_rank }}">
+            <td class="mono" data-label="Date">{{ r.date|short_date }}</td>
+            <td data-label="Stock"><a class="mb-name" href="/multibagger/stock/{{ r.sid }}">{{ r.name }}</a></td>
+            <td data-label="Category">{{ r.category_label }}</td>
+            <td data-label="Severity"><span class="pill pill-{{ {'high': 'red', 'medium': 'amber', 'low': 'muted'}[r.severity] }}">{{ r.severity|capitalize }}</span></td>
+            <td class="mb-ev" data-label="Event">{% if r.url %}<a href="{{ r.url }}" target="_blank" rel="noopener noreferrer">{{ r.headline }}</a>{% else %}{{ r.headline }}{% endif %}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table></div>
+    <div class="mb-empty" x-show="shown === 0" x-cloak>No event matches these filters. Lower the severity to see more.</div>
+    {% endif %}
+</div>
+{% endif %}
+</div>

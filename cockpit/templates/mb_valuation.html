@@ -1,0 +1,40 @@
+{# /multibagger/valuation - a football field for each candidate and held name. Data: cockpit/multibagger.py valuation_page(). #}
+{% extends "base.html" %}
+{% from "_mb_macros.html" import football, rs, status_pill %}
+{% block title %}{{ page_title("Multibagger valuation") }}{% endblock %}
+
+{% block content %}
+<p class="mb-crumb"><a href="/multibagger">&larr; Multibagger desk</a></p>
+<h1 class="section-title">Valuation</h1>
+<div class="section-desc">
+    One bar per method, from its low to its high with a tick at its mid, and a vertical line at today's price. Methods: the stock's
+    own P/E, P/B and EV/EBITDA history, same-industry peers, a 10-year DCF, analyst targets and the 52-week range. Names are
+    sorted by the price against the median of the methods' mids, cheapest first. Hover or tap a bar for its basis; open a name
+    for the full field. Prices in &#8377; per share{% if d.as_of %}, valuation as of {{ d.as_of|long_date }}{% endif %}.
+</div>
+
+{% if not d.n_book %}
+<div class="card mb-empty">No candidates yet &mdash; promote from the Funnel tab on the <a href="/multibagger">Multibagger desk</a>. Every candidate and held name gets a field here.</div>
+{% elif not d.rows %}
+<div class="card mb-empty">Valuation not computed yet for the {{ d.n_book }} names in the book. It is built for the candidates and held names and shows here once it has run.</div>
+{% endif %}
+
+<div class="mb-vgrid">
+    {% for i in d.rows %}
+    <section class="card mb-vcard">
+        <header class="mb-card-head">
+            <div><a class="mb-name" href="/multibagger/stock/{{ i.sid }}">{{ i.name or i.sid }}</a>
+                <div class="mb-sub">{{ i.ticker or i.sid }} &middot; {{ i.cap_tier|tier_word }} {{ status_pill(i.status) }}</div></div>
+            <div class="mb-rank">{% if i.field.discount_pct is not none %}<b class="mono {{ i.field.discount_pct|tone(pos='score-red', neg='score-green') }}">{{ i.field.discount_pct|pct(0, signed=True) }}</b>
+                <span class="u-muted-10">vs median mid</span>{% endif %}</div>
+        </header>
+        {{ football(i.field) }}
+    </section>
+    {% endfor %}
+</div>
+
+{% if d.without and d.rows %}
+<h2 class="mb-h">No field yet</h2>
+<div class="card mb-empty">{% for i in d.without %}<a href="/multibagger/stock/{{ i.sid }}">{{ i.name or i.sid }}</a>{{ ', ' if not loop.last }}{% endfor %} &mdash; valuation not computed yet.</div>
+{% endif %}
+{% endblock %}

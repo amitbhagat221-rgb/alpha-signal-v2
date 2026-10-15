@@ -11,7 +11,7 @@ import datetime as dt
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exception_handlers import http_exception_handler
 from starlette.exceptions import HTTPException as StarletteHTTPException
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.gzip import GZipMiddleware
 
@@ -20,7 +20,7 @@ from preview import PreviewReadOnly, add_redirects
 
 import config
 import views
-from cockpit import api, book, model, pages, today, stocks as stocks_data
+from cockpit import api, book, model, multibagger, pages, today, stocks as stocks_data
 from cockpit._shared import CachedStatic, COCKPIT_STATIC, COCKPIT_TEMPLATES, make_templates, nav_model, prewarm
 
 app = FastAPI(title="Alpha Signal Cockpit")
@@ -53,6 +53,7 @@ def _prewarm_cache():
         ("news_pool_720",      lambda: api._get_news_pool(hours=720)),
         ("sector_call",        lambda: api.get_sector_call()),
         ("multibagger",        lambda: api.get_multibagger_overview()),
+        ("mb_desk",            lambda: (multibagger.funnel(), multibagger.candidates(), multibagger.watch())),
         ("explorer",           lambda: api.get_heatmap_data()),
         ("stocks_screener",    lambda: stocks_data.screen({})),
         ("sector_front",       lambda: api.get_sector_front()),
@@ -212,6 +213,72 @@ def book_page(request: Request):
         "book": book.get_book(), "zerodha": book.get_zerodha(), "past_year": book.get_past_year(),
         "risk": book.get_risk(), "track": book.get_track_record(), "sleeve": views.paper_sleeve(),
     })
+
+
+# ── Multibagger desk (plan 0026): Funnel, Candidates, Held, Watch; Valuation; the deep dive ──
+
+def _mb_tabs():
+    """The page's tabs with the list sizes in the labels ("Candidates 12/30")."""
+    c = multibagger.funnel_counts()
+    labels = {"candidates": f"Candidates {c['n_book']}/{c['max_book']}", "held": f"Held {c['n_held']}/{c['max_held']}"}
+    return [(k, labels.get(k, lab)) for k, lab in pages.MULTIBAGGER_TABS]
+
+
+@app.get("/multibagger", response_class=HTMLResponse)
+def multibagger_page(request: Request):
+    """The multibagger desk: the thesis funnel, the candidates, the held names and their event watch.
+    Every tab is fetched on first open (/partial/multibagger/<tab>); the first loads at once."""
+    return templates.TemplateResponse(request, "multibagger.html", {
+        "page": "multibagger", "tabs": _mb_tabs(), "grade": multibagger.GRADE})
+
+
+@app.get("/partial/multibagger/{tab}", response_class=HTMLResponse)
+def multibagger_tab(request: Request, tab: str):
+    if tab not in dict(pages.MULTIBAGGER_TABS):
+        raise HTTPException(404, "unknown multibagger tab")
+    data = {"funnel": multibagger.funnel, "candidates": multibagger.candidates,
+            "held": multibagger.held, "watch": multibagger.watch}[tab]()
+    return templates.TemplateResponse(request, f"_mb_{tab}.html", {"d": data})
+
+
+@app.get("/multibagger/valuation", response_class=HTMLResponse)
+def multibagger_valuation(request: Request):
+    """A football field for each candidate and held name, cheapest against its own field first."""
+    return templates.TemplateResponse(request, "mb_valuation.html", {"page": "multibagger", "d": multibagger.valuation_page()})
+
+
+@app.get("/multibagger/stock/{sid}", response_class=HTMLResponse)
+def multibagger_stock(request: Request, sid: str):
+    """Stage 4, the deep dive on one name."""
+    d = multibagger.deep_dive(sid)
+    if d is None:
+        return templates.TemplateResponse(request, "notfound.html", {
+            "page": "multibagger", "heading": "Stock not found",
+            "message": f"No stock with the id {sid}. Open a name from the Funnel or Candidates tab."}, status_code=404)
+    return templates.TemplateResponse(request, "mb_stock.html", {"page": "multibagger", "d": d})
+
+
+@app.post("/api/multibagger/{action}")
+async def multibagger_write(request: Request, action: str):
+    """promote {sid, thesis_line, reason} | hold {sid, reason, entry_price?} | drop {sid, reason}. The caps and rules
+    live in output/mb_book.py; a refusal comes back as 400 {"error": ...} for the form to show. Login and the
+    preview read-only guard are the middleware's."""
+    if action not in ("promote", "hold", "drop"):
+        raise HTTPException(404, "unknown action")
+    try:
+        body = await request.json()
+        sid = str(body.get("sid") or "").strip()
+        if not sid:
+            raise ValueError("sid is required")
+        if action == "promote":
+            multibagger.promote(sid, body.get("thesis_line"), body.get("reason"))
+        elif action == "hold":
+            multibagger.hold(sid, body.get("reason"), body.get("entry_price"))
+        else:
+            multibagger.drop(sid, body.get("reason"))
+    except (ValueError, TypeError, AttributeError) as e:
+        return JSONResponse({"error": str(e).removeprefix("mb_book: ")}, status_code=400)
+    return {"ok": True, "action": action, "sid": sid}
 
 
 add_redirects(app, pages.REDIRECTS)
