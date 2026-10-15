@@ -441,8 +441,12 @@ def sync_bars(c, full):
             stale["index"] = (len(ks), _rewrite_slices(
                 c, ks, "DELETE FROM bars_daily WHERE source='nse_index' AND date IN (SELECT k1 FROM _rs)",
                 index_sql.replace("/*JOIN*/", "JOIN _rs ON p.trade_date=_rs.k1").replace("/*WHERE*/", "")))
-            # derivatives collapse futures on (strike, type), so counts never match by design: compare the dates held
-            ks = _drift(c, "SELECT trade_date, 1 FROM fno_bhav GROUP BY 1", "SELECT date, 1 FROM derivative_bars GROUP BY 1")
+            # derivatives collapse futures on (strike, type): compare distinct grid keys per date, the same count
+            # datamodel.reconcile uses. Date presence alone missed late-loaded rows of a date already mirrored (BSE
+            # SENSEX/BANKEX options loaded after the 15-day window: 357,874 rows short, reconcile FAIL from 2026-10-09)
+            ks = _drift(c, """SELECT trade_date, COUNT(*) FROM (SELECT trade_date FROM fno_bhav GROUP BY symbol, instrument_type,
+                                  expiry_date, COALESCE(strike, 0), COALESCE(option_type, ''), trade_date) GROUP BY 1""",
+                        "SELECT date, COUNT(*) FROM derivative_bars GROUP BY 1")
             stale["derivative"] = (len(ks), _rewrite_slices(
                 c, ks, "DELETE FROM derivative_bars WHERE date IN (SELECT k1 FROM _rs)",
                 deriv_sql.replace("/*JOIN*/", "JOIN _rs ON p.trade_date=_rs.k1").replace("/*WHERE*/", "").replace("/*RANGE*/", "")))
@@ -1165,7 +1169,9 @@ def sync_contributions(c, full):
         stored = pd.read_sql("SELECT sid, base_score FROM daily_picks WHERE pick_date=?", c, params=[d])
         m = scored[["sid", "base_score"]].merge(stored, on="sid", suffixes=("", "_stored"))
         both = m.dropna(subset=["base_score", "base_score_stored"])
-        ok = np.isclose(both["base_score"], both["base_score_stored"], rtol=0, atol=1e-9)
+        # an empty read_sql / all-NULL column comes back object dtype, which np.isclose cannot take (a replay day with no
+        # daily_picks row, e.g. the pre-picks quarterly anchors) -> compare as float so "no overlap" is match 0.0
+        ok = np.isclose(both["base_score"].astype(float), both["base_score_stored"].astype(float), rtol=0, atol=1e-9)
         match = float(ok.mean()) if len(both) else 0.0
         rebuilt = set(both.loc[ok, "sid"])
         rid = c.execute("SELECT run_id FROM runs WHERE kind='morning' AND as_of_date=?", (d,)).fetchone()

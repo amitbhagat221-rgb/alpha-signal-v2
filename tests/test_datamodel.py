@@ -33,6 +33,7 @@ def v3(tmp_path, monkeypatch):
     from datamodel import sync
     monkeypatch.setattr(sync, "DB_PATH", path)
     monkeypatch.setattr(sync, "MF_DB", tmp_path / "mf.db")
+    sync.real_sync_contributions = sync.sync_contributions
     monkeypatch.setattr(sync, "sync_contributions", lambda c, full: 0)   # needs a pit_replay freeze; covered live
     return path, sync
 
@@ -155,3 +156,42 @@ def test_seed_from_snapshot(v3, tmp_path):
                        WHERE k.scheme='tier' AND e.key='BBB' ORDER BY k.valid_from""")
     assert rows[0][1:] == ("MICRO", "2020-01-01", rows[1][2]) and rows[1][1] == "SMALL" and rows[1][3] is None
 
+
+
+def test_contributions_skip_replay_day_without_daily_picks(v3, monkeypatch):
+    """Regression (datamodel_sync failed 2026-10-10..15): a pit_replay day with no daily_picks row reads back an
+    object-dtype base_score_stored; np.isclose raised TypeError. It must count as match 0.0 and skip the day."""
+    import json
+
+    from scoring import screener
+    path, sync = v3
+    monkeypatch.setattr(screener, "score_universe",
+                        lambda df, as_of=None: df.assign(base_score=0.5))
+    c = sqlite3.connect(path)
+    c.execute("INSERT INTO pit_replay_snapshots (sid, snapshot_date, inputs_json, output_json, frozen_at) VALUES (?,?,?,?,?)",
+              ("AAA", "2024-09-02", json.dumps({"cap_tier": "LARGE", "sid": "AAA"}), "{}", "2024-09-02"))
+    c.execute("INSERT INTO runs (kind, as_of_date, started_at, status) VALUES ('morning', '2024-09-02', '2024-09-02 00:00:00', 'ok')")
+    c.commit()
+    c.commit()
+    c.close()
+    c = sync.connect()
+    assert sync.real_sync_contributions(c, True) is not None
+    assert c.execute("SELECT COUNT(*) FROM pick_contributions").fetchone()[0] == 0
+    c.close()
+
+
+def test_late_loaded_derivative_rows_of_a_mirrored_date_are_picked_up(v3):
+    """Regression (reconcile fno_bhav FAIL from 2026-10-09): BSE SENSEX/BANKEX rows loaded later for dates already
+    mirrored sit outside the 15-day window and date presence alone saw no drift; per-date key counts do."""
+    path, sync = v3
+    c = sqlite3.connect(path)
+    ins = ("INSERT INTO fno_bhav (symbol, instrument_type, expiry_date, strike, option_type, trade_date, close) "
+           "VALUES (?, 'IDO', '2024-08-01', ?, 'CE', '2024-07-15', 1.0)")
+    c.execute(ins, ("NIFTY", 100.0))
+    c.commit()
+    assert sync.main([]) == 0
+    c.execute(ins, ("SENSEX", 200.0))                     # arrives after that date was mirrored
+    c.commit()
+    assert sync.main([]) == 0
+    assert _q(path, "SELECT COUNT(*) FROM derivative_bars WHERE date='2024-07-15'") == [(2,)]
+    c.close()
