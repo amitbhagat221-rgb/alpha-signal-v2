@@ -113,7 +113,9 @@ case "$JOB" in
         logged cron_nselib_daily_forward run python -m sources.nselib_pull --source daily_forward; echo "Exit code (nselib daily_forward): $?"
         # scrip_master must follow bse_announcements (it backfills sid on the new rows)
         logged cron_bse_announcements run python -m sources.bse_announcements --days 7; echo "Exit code (bse_announcements): $?"
-        logged cron_scrip_master run python -m sources.scrip_master;          echo "Exit code (scrip_master): $?"
+        # NSE route for announcements while BSE's WAF blocks AnnSubCategoryGetData (plan 0026 task 4.0)
+        logged cron_nse_announcements run python -m sources.nse_announcements --days 7; echo "Exit code (nse_announcements): $?"
+        logged cron_scrip_master run python -m sources.scrip_master;         echo "Exit code (scrip_master): $?"
         logged cron_nse_events run python -m sources.nse_events --ratings --days 10 --ipos; echo "Exit code (nse_events): $?" ;;
     canary)             # 02:45 UTC — 1-item live probe per feed before the morning run (plan 0018):
                         # T1 daily, T2 on Sundays; verdicts → feed_checks → health report

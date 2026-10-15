@@ -929,3 +929,79 @@ FILE_OUTPUTS = [
         "producer":      "tools.paper_sleeve",
     },
 ]
+
+
+# ── NSE corporate announcements -> multibagger event-watch categories (plan 0026 task 4.0) ──
+# NSE `desc` (lower-cased, exact) -> watch category. The BSE route will use the same category names:
+# results, order_win, acquisition, funding, credit_rating, management_change, auditor_resignation,
+# insolvency, shareholding_sast, pledge, clarification, other.
+NSE_ANNOUNCEMENT_CATEGORIES = {
+    "bagging/receiving of orders/contracts": "order_win",
+    "acquisition": "acquisition",
+    "scheme of arrangement": "acquisition",
+    "sale or disposal": "acquisition",
+    "other restructuring": "acquisition",
+    "open offer": "acquisition",
+    "demerger": "acquisition",
+    "preferential issue": "funding",
+    "raising of funds": "funding",
+    "allotment of securities": "funding",
+    "issue of securities": "funding",
+    "rights issue": "funding",
+    "monitoring agency report": "funding",
+    "statement of deviation(s) or variation(s) under reg. 32": "funding",
+    "credit rating": "credit_rating",
+    "credit rating- revision": "credit_rating",
+    "credit rating- new": "credit_rating",
+    "credit rating- others": "credit_rating",
+    "resignation of director/kmp/smp": "management_change",
+    "resignation": "management_change",
+    "appointment": "management_change",
+    "reappointment": "management_change",
+    "cessation": "management_change",
+    "change in management": "management_change",
+    "change in director(s)": "management_change",
+    "change in company secretary/compliance officer": "management_change",
+    "change in auditors": "auditor_resignation",
+    "corporate insolvency resolution process": "insolvency",
+    "disclosure under sebi takeover regulations": "shareholding_sast",
+    "financial result updates": "results",
+    "clarification - financial results": "clarification",
+    "clarification": "clarification",
+    "reply to clarification sought": "clarification",
+    "spurt in volume": "clarification",
+    "price movement": "clarification",
+    "news verification": "clarification",
+    "rumour verification - regulation 30(11)": "clarification",
+}
+# Descs that are explicitly "other" (listed so the coverage test knows they were looked at).
+NSE_ANNOUNCEMENT_OTHER_DESCS = (
+    "certificate under sebi (depositories and participants) regulations, 2018", "trading plan under pit",
+    "public announcement - buyback of shares", "copy of newspaper publication", "shareholders meeting",
+    "record date", "dividend", "esop/esos/esps", "allotment of esop/esps", "trading window",
+    "structural digital database", "corrigendum", "action(s) taken or orders passed",
+    "action(s) initiated or orders passed", "committee meeting updates", "meeting updates",
+    "monthly business updates", "amendment to aoa/moa", "book closure", "disclosure of material issue",
+    "revocation of suspension of securities", "integrated filing- governance", "name change",
+    "rescission/termination(s)", "options to purchase securities", "related party transactions",
+    "frauds/default by employees", "revised record date", "loss of share certificates", "product launch",
+    "capacity addition", "pendency of litigation(s)/dispute(s) or the outcome impacting the company",
+    "granting/withdrawal/surrender/cancellation/suspension of key licenses/ regulatory approvals",
+    "effect(s) on listed entity due to changed regulatory  framework applicable")
+# Generic descs hide the event in the subject text: re-classify those by keyword (first hit wins).
+NSE_ANNOUNCEMENT_GENERIC_DESCS = (
+    "updates", "general updates", "outcome of board meeting", "others", "press release",
+    "investor presentation", "analysts/institutional investor meet/con. call updates")
+NSE_ANNOUNCEMENT_TEXT_RULES = [
+    (r"financial results?|unaudited|audited .*results|quarter ended|half year ended|year ended", "results"),
+    (r"(receiv|secur|bagg|won|award|bags).{0,60}(order|contract|letter of (award|intent|acceptance))", "order_win"),
+    (r"preferential (issue|allot)|qualified institutions placement|\bqip\b|warrants?\b|fund ?raising|raising of funds|rights issue|allotment of (equity|shares|securities|non)", "funding"),
+    (r"credit rating|rating (action|assigned|reaffirm|revised)|\bcrisil\b|\bicra\b|care ratings|acuite|india ratings", "credit_rating"),
+    (r"auditor", "auditor_resignation"),
+    (r"resign|cessation|appointment of|change in (key|senior|management|director)|\bceo\b|\bcfo\b|managing director", "management_change"),
+    (r"insolvency|\bcirp\b|\bnclt\b|liquidation", "insolvency"),
+    (r"acqui(re|sition)|merger|amalgamation|demerger|slump sale|wholly owned subsidiary|joint venture|stake in", "acquisition"),
+    (r"pledge|invocation|encumbrance", "pledge"),
+    (r"substantial acquisition|takeover regulations|\bsast\b", "shareholding_sast"),
+    (r"clarification|clarifies", "clarification"),
+]
