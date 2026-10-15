@@ -929,3 +929,175 @@ FILE_OUTPUTS = [
         "producer":      "tools.paper_sleeve",
     },
 ]
+
+
+# ── Multibagger desk: per-name event watch (plan 0026 phase 4; signals/mb_watch.py) ──
+WATCH_CATEGORIES = ("results", "order_win", "acquisition", "funding", "credit_rating", "management_change",
+                    "auditor_resignation", "insolvency", "shareholding_sast", "pledge", "clarification", "other")
+WATCH_SEVERITY = {"low": 0, "medium": 1, "high": 2}
+
+# BSE `subcategory` (as filed) → (watch category, severity). Covers all 190 subcategories in
+# bse_announcements (2026-10-15), so the top 150 by count are all mapped; an unseen or NULL one falls to
+# ANNOUNCEMENT_DEFAULT. A second announcement source (NSE) plugs in by adding its own map here
+# (NSE_ANNOUNCEMENT_CATEGORIES) and a loader to signals.mb_watch._ANN_LOADERS; categories and severities are shared.
+_BSE_GROUPS = (
+    ("results", "medium", ("Financial Results", "Integrated Filing (Financial)")),
+    ("results", "low", ("Earnings Call Transcript", "Monthly Business Updates",
+                        "Half Yearly Report (SEBI Circular No. CIR/IMD/DF-1/67/2017)",
+                        "Limited Review Report", "Auditors Report", "Analyst / Investor Meet")),
+    ("order_win", "medium", ("Award of Order / Receipt of Order",)),
+    ("order_win", "low", ("Memorandum of Understanding /Agreements", "Agreement")),
+    ("acquisition", "high", ("Open Offer", "Public Announcement-Open Offer", "Amalgamation / Merger / Demerger",
+                             "Change in Management Control", "Delisting", "Public Announcement-Delisting",
+                             "Voluntary Delisting")),
+    ("acquisition", "medium", ("Acquisition", "Joint Venture", "Scheme of Arrangement", "Open Offer - Updates",
+                               "Diversification / Disinvestment", "Restructuring")),
+    ("acquisition", "low", ("Sale of shares", "Court Convened Meeting", "Post Offer Public Announcement",
+                            "Public Announcement")),
+    ("funding", "high", ("Preferential Issue", "Qualified Institutional Placement", "Raising of Funds")),
+    ("funding", "medium", ("Allotment of Warrants", "Issue of Securities", "Bonds / Right issue", "FCCBs",
+                           "Institutional Placement Programme", "Offer for Sale", "Capital Reduction")),
+    ("funding", "low", ("Allotment of Equity Shares", "Allotment of ESOP / ESPS",
+                        "Funds raising by issuance of Debt Securities by Large Entities",
+                        "Debt Securities", "Conversion of Securities", "Monitoring Agency Report",
+                        "Reg. 32 (1), (3) - Statement of Deviation & Variation", "Increase of Authorised Capital",
+                        "Annulment / Re-issue of forfeited shares")),
+    ("credit_rating", "medium", ("Credit Rating",)),
+    ("management_change", "high", ("Resignation of Chief Financial Officer (CFO)", "Resignation of Managing Director",
+                                   "Resignation of Chief Executive Officer (CEO)", "Resignation of Chairman",
+                                   "Resignation of Chairman and Managing Director")),
+    ("management_change", "medium", ("Change in Management", "Appointment of Chief Financial Officer (CFO)",
+                                     "Appointment of Managing Director", "Appointment of Chief Executive Officer (CEO)",
+                                     "Appointment of Chairman", "Appointment of Chairman and Managing Director",
+                                     "Appointment of Managing Director & CEO", "Demise")),
+    ("management_change", "low", ("Change in Directorate", "Resignation of Director",
+                                  "Resignation of Company Secretary / Compliance Officer",
+                                  "Appointment of Company Secretary / Compliance Officer", "Appointment of Director",
+                                  "Cessation", "Retirement")),
+    ("auditor_resignation", "high", ("Resignation of Statutory Auditors",)),
+    ("auditor_resignation", "medium", ("Change in Auditors",)),
+    ("auditor_resignation", "low", ("Appointment of Statutory Auditor/s",)),
+    ("insolvency", "high", ("Updates - Corporate Insolvency Resolution Process  (CIRP)",
+                            "Outcome of meeting of Committee of Creditors",
+                            "Liquidation - Corporate Insolvency Resolution Process  (CIRP)", "Winding-up",
+                            "Admission of application by Tribunal", "Approval of Resolution plan by Tribunal",
+                            "Rejection of Resolution pan by Tribunal",
+                            "Appointment of Interim Resolution Professional (IRP)",
+                            "Initiation of Corporate Insolvency Resolution Process (CIRP) by Financial Creditors",
+                            "Initiation of Corporate Insolvency Resolution Process (CIRP) by Corporate Applicant",
+                            "Corporate Debt Restructuring")),
+    ("insolvency", "medium", ("Intimation of meeting of Committee of Creditors", "Invitation of Resolution Plan",
+                              "Resolution Plans received by Resolution Professional",
+                              "Filing of Resolution plan with Tribunal", "List of Creditors",
+                              "Replacement of Interim Resolution Professional (IRP)",
+                              "Disclosures by listed entities of defaults on payment of interest/ repayment of principal amount for unlisted debt securities i.e. NCDs and NCRPS.")),
+    ("insolvency", "low", ("Quarterly Disclosures by listed entities of defaults on payment of interest/ repayment of principal amount on loans from banks / financial institutions and unlisted debt securities.",
+                           "Disclosures by listed entities of defaults on payment of interest/ repayment of principal amount for loans including revolving facilities like cash credit from banks / financial institutions.",
+                           "Disclosure of divergence in the asset classification and provisioning by banks")),
+    ("shareholding_sast", "medium", ("Disclosures under Reg. 29(1) of SEBI (SAST) Regulations, 2011",)),
+    ("shareholding_sast", "low", ("Shareholding", "Disclosures under Reg. 29(2) of SEBI (SAST) Regulations, 2011",
+                                  "Disclosures under Reg. 10(6) of SEBI (SAST) Regulations, 2011",
+                                  "Disclosures under Reg. 10(7) of SEBI (SAST) Regulations, 2011",
+                                  "Disclosures under Reg. 10(5) in respect of acquisition under Reg. 10(1)(a) of SEBI (SAST) Reg. 2011",
+                                  "Disclosures under Reg. 10(5) in respect of acquisition under Reg. 10(4)(f) of SEBI (SAST) Reg. 2011",
+                                  "Disclosures under Reg. 10(5) in respect of acquisition under Reg. 10(4)(e) of SEBI (SAST) Reg. 2011",
+                                  "Disclosures under Reg. 18(6) of SEBI (SAST) Regulations, 2011",
+                                  "Disclosures under Reg. 7(1) of SEBI (SAST) Regulations, 1997",
+                                  "Disclosures under Reg. 7(1A) of SEBI (SAST) Regulations, 1997",
+                                  "Disclosures under Reg. 7(3) of SEBI (SAST) Regulations, 1997",
+                                  "Disclosures under Reg.13(6) of SEBI (Prohibition of Insider Trading) Regulations, 1992",
+                                  "Disclosures under Reg.13(4A) of SEBI (Prohibition of Insider Trading) Regulations, 1992",
+                                  "Disclosures under Reg.13(4) of SEBI (Prohibition of Insider Trading) Regulations, 1992",
+                                  "Disclosures under Reg.13(4), 13(4A) of SEBI (Prohibition of Insider Trading) Regulations, 1992",
+                                  "Disclosure under Clause 35A of the Listing Agreement", "Disclosure of IDR Holding",
+                                  "Trading Plan under SEBI (PIT) Regulations, 2015")),
+    ("pledge", "medium", ("Disclosures under Reg. 31(1) and 31(2) of SEBI (SAST) Regulations, 2011",
+                          "Disclosure under Reg. 31(4) of SEBI (SAST) Regulation, 2011")),
+    ("clarification", "medium", ("Clarification",)),
+    ("other", "medium", ("Strikes /Lockouts / Disturbances", "Strike", "Buy back", "Public Announcement-Buyback",
+                         "Sub-division / Stock Split", "Bonus", "Consolidation of Shares",
+                         "Reg. 51 (1), (2) - Price Sensitive information / disclosure of event / Information")),
+    ("other", "low", ("General", "Board Meeting", "Newspaper Publication", "AGM", "Closure of Trading Window",
+                      "Reg. 39 (3) - Details of Loss of Certificate / Duplicate Certificate",
+                      "Certificate under Reg. 74 (5) of SEBI (DP) Regulations, 2018",
+                      "Outcome of Board Meeting", "Reg. 13(3) - Statement of Investor Complaints",
+                      "Press Release / Media Release",
+                      "Reg. 40 (10) - PCS Certificate for Transfer / Transmission / Transposition",
+                      "Reg. 7(3) – Compliance Certificate (RTA & Compliance Officer)",
+                      "Reg. 34 (1) Annual Report", "Postal Ballot", "Investor Presentation",
+                      "Reg.24(A)-Annual Secretarial Compliance", "Book Closure", "EGM", "Outcome without intimation",
+                      "Dividend", "Record Date",
+                      "Format of the Initial Disclosure to be made by an entity identified as a Large Corporate : Annexure A",
+                      "Meeting Updates", "Board Meeting Rescheduled",
+                      "Business Responsibility and Sustainability Reporting (BRSR)", "Book Closure / AGM",
+                      "Code of Conduct under SEBI (PIT) Regulations, 2015", "Dividend Updates",
+                      "Amendments to Memorandum & Articles of Association",
+                      "Format of the Annual Disclosure to be made by an entity identified as a LC : Annexure B2",
+                      "Format of the Annual Disclosure to be made by an entity identified as a LC : Annexure B1",
+                      "Change in Registered Office Address", "Revision of outcome", "Dividend/AGM",
+                      "57 (5) : intimation after the end of quarter", "New Listing",
+                      "Certificate under Reg. 54 (5) of SEBI (DP) Regulations, 1996", "Board Meeting Cancelled",
+                      "Press Release / Media Release (Revised)", "Date of payment of Dividend", "Change of Name",
+                      "Interest Rates Updates", "Change in Corporate Office Address", "Reg. 54 - Asset Cover details",
+                      "Intimation of Repayment of Commercial Paper (CP)",
+                      "Format of the Annual Disclosure to be made by an entity identified as a Large Corporate",
+                      "Reg. 57 (1) - Certificate of interest payment/Principal in case of NCD",
+                      "57 (4) : Prior intimation to the beginning  of the quarter", "Committee Meeting",
+                      "Post Buyback Public Announcement", "Certificate from CEO/CFO",
+                      "Reg. 50 (1) - Prior intimation about Board meeting under Regulation 50(1))",
+                      "Closure of Buy Back", "Daily Buy Back of equity shares",
+                      "Regulation 61(4) - PCS Certificate for Transfer / Transmission / Transposition",
+                      "Board Meeting Adjourned", "Reg. 52 (5) - Certificate from Debenture Trustee",
+                      "Integrated Filing (Governance)", "Board Meeting Postponed",
+                      "Reg. 57 (2) - Undertaking that documents & intimation submitted to Debenture trustee",
+                      "Half Yearly Communication - Debt Instruments", "Asset Liability Management (ALM) statement",
+                      "Reg. 50 (2) - Intimation to the Exchange about meeting under 50(2)", "Board Meeting Deferred",
+                      "Cancellation of Dividend", "Mutual Fund Scheme Summary Document",
+                      "Reg. 52 - Declaration for Audit Report/s with Unmodified Opinion(s)")),
+)
+BSE_ANNOUNCEMENT_CATEGORIES = {sub: (cat, sev) for cat, sev, subs in _BSE_GROUPS for sub in subs}
+ANNOUNCEMENT_DEFAULT = ("other", "low")
+
+# Government / PSU / LIC / state-body holders: upper-case substrings of shareholding_holders.holder_name.
+GOVT_HOLDER_PATTERNS = (
+    "PRESIDENT OF INDIA", "GOVERNOR OF", "GOVERNMENT OF", "GOVT OF", "LIFE INSURANCE CORPORATION",
+    "GENERAL INSURANCE CORPORATION", "NEW INDIA ASSURANCE", "UNITED INDIA INSURANCE", "ORIENTAL INSURANCE",
+    "INDUSTRIAL DEVELOPMENT CORPORATION", "STATE INDUSTRIAL", "SPECIFIED UNDERTAKING OF THE UNIT TRUST",
+    "SMALL INDUSTRIES DEVELOPMENT BANK", "IFCI", "NABARD", "RAILWAY",
+)
+# shareholding_holders filing sections that are government by definition.
+GOVT_HOLDER_CATEGORIES = ("CentralGovernmentOrStateGovernments",)
+# Headline keywords (upper-case, matched as substrings) for orders from government buyers.
+GOVT_BUYER_KEYWORDS = (
+    "MINISTRY", "GOVERNMENT OF", "GOVT", "RAILWAY", "INDIAN NAVY", "INDIAN ARMY", "INDIAN AIR FORCE", "COAST GUARD",
+    "DRDO", "NHAI", "NATIONAL HIGHWAYS", "BSNL", "MTNL", "ONGC", "NTPC", "NHPC", "SJVN", "POWER GRID", "POWERGRID",
+    "BHEL", "HINDUSTAN AERONAUTICS", "BHARAT ELECTRONICS", "COAL INDIA", "INDIAN OIL", "IOCL", "BPCL", "HPCL", "GAIL",
+    "NMDC", "JAL JEEVAN", "SMART CITY", "METRO RAIL", "DISCOM", "MUNICIPAL", "PUBLIC SECTOR", "PSU",
+)
+WATCH_HOLDER_MIN_PCT = 1.0        # a named holder at or above this % of equity is a timeline event
+WATCH_PROMOTER_MOVE_PTS = 1.0     # promoter / pledge / MF / FII holding change (percentage points) that is an event
+WATCH_DEAL_VALUE_CR = {"medium": 1.0, "high": 10.0}   # bulk / block / insider trade value (Rs crore) -> severity
+WATCH_NEWS_DAYS = 365             # news and sector-regulatory events in a timeline with no `since`
+
+# 15 investors widely known for Indian small caps before 2018 -> upper-case substrings matched against
+# shareholding_holders.holder_name. Copied verbatim from tools/mb_thesis_v2.py SI_NAMES (frozen 2026-10-15;
+# that tool is a pre-registration and is not edited). Only filings after 2016 are read.
+SUPERINVESTORS = {
+    "Ashish Kacholia": ["ASHISH KACHOLIA", "ASHISH RAMESHCHANDRA KACHOLIA", "BENGAL FINANCE & INVESTMENT"],
+    "Vijay Kedia": ["VIJAY KISHANLAL KEDIA", "VIJAY KEDIA", "KEDIA SECURITIES"],
+    "Dolly Khanna": ["DOLLY KHANNA", "RAJIV KHANNA"],
+    "Mukul Agrawal": ["MUKUL MAHAVIR AGRAWAL", "MUKUL AGRAWAL", "PARAM CAPITAL"],
+    "Porinju Veliyath": ["PORINJU", "EQUITY INTELLIGENCE INDIA"],
+    "Rakesh / Rekha Jhunjhunwala": ["RAKESH RADHEYSHYAM JHUNJHUNWALA", "REKHA RAKESH JHUNJHUNWALA",
+                                    "RAKESH JHUNJHUNWALA", "REKHA JHUNJHUNWALA", "RARE INVESTMENTS"],
+    "Radhakishan Damani": ["RADHAKISHAN SHIVKISHAN DAMANI", "RADHAKISHAN DAMANI", "DERIVE TRADING",
+                           "BRIGHT STAR INVESTMENTS"],
+    "Ramesh Damani": ["RAMESH SHRICHAND DAMANI", "RAMESH DAMANI"],
+    "Anil Kumar Goel": ["ANIL KUMAR GOEL", "SEEMA GOEL"],
+    "Ashish Dhawan": ["ASHISH DHAWAN"],
+    "Nemish Shah": ["NEMISH S SHAH", "NEMISH SHAH", "ENAM SECURITIES"],
+    "Akash Bhanshali": ["AKASH BHANSHALI", "AKASH PRAKASH BHANSHALI"],
+    "Satpal Khattar": ["SATPAL KHATTAR", "KHATTAR HOLDINGS"],
+    "Sunil Singhania": ["ABAKKUS", "SUNIL SINGHANIA"],
+    "Madhusudan Kela": ["MADHUSUDAN KELA", "MADHURI MADHUSUDAN KELA", "SINGULARITY"],
+}
