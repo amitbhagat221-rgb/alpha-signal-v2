@@ -5,7 +5,7 @@
 {% if not d.rows %}
 <div class="card mb-empty">Nothing held yet &mdash; hold a candidate from the Candidates tab (up to {{ d.max_held }}). Each hold is logged with your reason and the entry price.</div>
 {% else %}
-<p class="mb-sub">Return since entry is the last close against your entry price, with {{ d.bench }} over the same dates (to {{ d.bench_as_of|short_date }}). Prices are not adjusted for splits or bonuses since entry.</p>
+<p class="mb-sub">Return since entry is the last close against your entry price, with {{ d.bench }} over the same dates (to {{ d.bench_as_of|short_date }}). Your entry price is carried through any split or bonus since entry.</p>
 <div class="card mb-tablecard" x-data="pbList()">
 <div class="table-wrap"><table class="mb-tbl mb-stack">
     <thead><tr>{{ th('Stock') }}{{ th('Entry', 'num') }}{{ th('Return %', 'num') }}{{ th('Index %', 'num') }}{{ th('Conviction monitor') }}{{ th('Last decision', 'num') }}{{ th('Events since entry', 'num') }}<th>Action</th></tr></thead>

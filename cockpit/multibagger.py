@@ -389,6 +389,20 @@ def _bench(d=None):
     return (r.get("close"), r.get("trade_date")) if r else (None, None)
 
 
+def _split_factor(sid, since):
+    """Product of split / bonus factors with ex-date after `since` (corporate_adjustments: factor < 1 multiplies
+    pre-ex prices), so entry × factor is the entry price on today's share basis."""
+    if not since:
+        return 1.0
+    rows = _rows("SELECT factor FROM corporate_adjustments WHERE sid = ? AND ex_date > ? "
+                 "AND (inds LIKE '%SPLIT%' OR inds LIKE '%BONUS%')", [sid, since])
+    f = 1.0
+    for r in rows:
+        if r["factor"]:
+            f *= r["factor"]
+    return f
+
+
 def _ret(a, b):
     return None if not a or not b else round((b / a - 1) * 100, 1)
 
@@ -405,7 +419,8 @@ def held():
     for b in book:
         px, px_d = _price_on(b["sid"])
         b_entry, _ = _bench(b["entry_date"]) if b["entry_date"] else (None, None)
-        own, idx = _ret(b["entry_price"], px), _ret(b_entry, b_now)
+        entry_adj = b["entry_price"] * _split_factor(b["sid"], b["entry_date"]) if b["entry_price"] else None
+        own, idx = _ret(entry_adj, px), _ret(b_entry, b_now)
         ev = [e for e in _events(b["sid"]) if b["entry_date"] and e["date"] >= b["entry_date"] and e["sev_rank"] >= 1
               and e["source"] not in ("news_articles", "regulatory_events")]
         v = verdicts.get(b["sid"])
