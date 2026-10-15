@@ -95,7 +95,40 @@ def _load_bse(conn, sid, since):
     return out[COLUMNS]
 
 
-_ANN_LOADERS = {"bse": _load_bse}      # NSE: add "nse": _load_nse once nse_announcements + its map exist
+def _category_severity():
+    """NSE rows carry only a watch category; use the severity BSE gives that category most often."""
+    votes = {}
+    for cat, sev in config.BSE_ANNOUNCEMENT_CATEGORIES.values():
+        votes.setdefault(cat, {}).setdefault(sev, 0)
+        votes[cat][sev] += 1
+    return {c: max(v, key=v.get) for c, v in votes.items()}
+
+
+def _load_nse(conn, sid, since):
+    try:
+        df = _q(conn, "SELECT seq_id, an_dt, desc_category, category, subject, attachment_url "
+                      "FROM nse_announcements WHERE sid=?", (sid,))
+    except Exception:                       # table not created yet on this DB
+        return _frame([])
+    if df.empty:
+        return _frame([])
+    df["date"] = _ts(df["an_dt"])
+    if since is not None:
+        df = df[df["date"] >= since]
+    if df.empty:
+        return _frame([])
+    sev = _category_severity()
+    cat = df["category"].fillna(config.ANNOUNCEMENT_DEFAULT[0])
+    out = pd.DataFrame({"date": df["date"], "source": "nse_announcements", "category": cat,
+                        "severity": [sev.get(c, config.ANNOUNCEMENT_DEFAULT[1]) for c in cat],
+                        "headline": df["subject"].where(df["subject"].notna() & (df["subject"] != ""),
+                                                        df["desc_category"]),
+                        "url": df["attachment_url"]})
+    out["detail"] = [{"nse_desc": d, "seq_id": q} for d, q in zip(df["desc_category"], df["seq_id"])]
+    return out[COLUMNS]
+
+
+_ANN_LOADERS = {"bse": _load_bse, "nse": _load_nse}    # BSE blocked since 2026-10-13 (WAF); NSE keeps the feed alive
 
 
 # ── derived: results ────────────────────────────────────────────────────────────────────────────
@@ -421,6 +454,12 @@ def timeline(sid, since=None, conn=None):
     if not parts:
         return _frame([])
     df = pd.concat(parts, ignore_index=True)
+    # the same filing reaches both exchanges: drop an NSE row when BSE has that category on that day
+    if {"bse_announcements", "nse_announcements"} <= set(df["source"]):
+        day = df["date"].dt.normalize()
+        bse_keys = set(zip(day[df["source"] == "bse_announcements"], df.loc[df["source"] == "bse_announcements", "category"]))
+        dup = (df["source"] == "nse_announcements") & [k in bse_keys for k in zip(day, df["category"])]
+        df = df[~dup]
     df = df.dropna(subset=["date"])
     df["date"] = pd.to_datetime(df["date"])
     return df.sort_values("date", ascending=False, kind="stable").reset_index(drop=True)[COLUMNS]
