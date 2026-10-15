@@ -1883,7 +1883,9 @@ FACTORS = {
         "status_reason": "plan 0025 5.1 (docs/studies/quarterly-nse-2026-10.md, 77 monthly anchors): SMALL "
                          "126-session non-overlap t 3.85 (NW 6.12), sign held 2020-22 / 2023-24 / 2025-26, "
                          "Bonferroni pass; 2.14 net of announcement_car + momentum. MID / LARGE ~0. "
-                         "Promotion review 2026-10-15 (Amit: 'yes promote the strong candidate').",
+                         "Promotion review 2026-10-15 (docs/studies/promotion-q-ebitda-2026-10.md): factor gate PASS "
+                         "(SMALL t 4.44 on fwd_return_20d, halves agree, net of the wired SMALL factors 2.25) but "
+                         "the whole-score test FAILS (top-20 book +9.1 -> +7.9 %/yr, IC t 8.64 -> 8.34) -> LIBRARY.",
         "producer": "q_growth",
         "pit_range": (-100, 100),
         "bench": "LIBRARY",

@@ -28,6 +28,9 @@ anchor where the column has >= 50 SMALL values — as the live weights were set 
 Both weight sets are judged on the history they are measured on (in-sample for the whole-score step);
 the factor's own out-of-sample case is the 5.1 study's period split.
 
+Note 2026-10-15 (bug, not a bar): the first run stopped before any result — tools.lh_book opens
+PROJECT_ROOT/data/alpha_signal.db and ignores ALPHA_DB; the tool now points B.DB at ALPHA_DB.
+
 Usage: ALPHA_DB=... python -m tools.small_promote_q_ebitda
 """
 
@@ -133,6 +136,7 @@ def main():
         whole[name] = dict(ic21=round(per.mean(), 4), ic21_t=round(t_of(per), 2),
                            top_minus_bottom=round(tmb.mean(), 4), tmb_t=round(t_of(tmb), 2), anchors=len(per))
     import tools.lh_book as B
+    B.DB = Path(os.environ.get("ALPHA_DB", B.DB))   # lh_book ignores ALPHA_DB (worktree has no data/)
     starts = sorted(sc.loc[sc["snapshot_date"] >= "2022-06-01", "snapshot_date"].unique())
     starts = [s for s in starts if s[8:10] <= "07"][:12]
     rows = []
