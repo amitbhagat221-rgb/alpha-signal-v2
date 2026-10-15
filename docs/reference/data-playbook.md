@@ -69,7 +69,7 @@ strip column whitespace on `KeyError: ' SYMBOL'` · treat 403 as a cookie proble
 | SEBI insider-trade JSON | HTML only | NSE PIT API (now empty too, see Known issues) |
 | AMFI portfolio-disclosure URL (old) | 404; the 2026 page is a link list to the AMCs (see the endpoint table) | AMC Excel files / Groww pages / ETMoney |
 | Kite Connect for fund portfolios | Only `mf_instruments`, `mf_holdings` (own units), orders, SIPs; no fund composition | Groww pages / AMC files |
-| Kuvera, Tickertape MF, mfdata.in for holdings | Kuvera: metadata only (holdings 404); Tickertape: VPN_BLOCKED from the VM; mfdata.in: 522 (2026-10-10) | Groww pages / AMC files |
+| Kuvera, Tickertape MF, mfdata.in for holdings | Kuvera: metadata only (holdings 404) — but its scheme JSON carries `lump_available` / `sip_available`, used since 2026-10-14 as the new-money fallback (`sources/mf_subscription_kuvera.py`, ISIN via `mf.captnemo.in/kuvera/{ISIN}`); Tickertape: VPN_BLOCKED from the VM; mfdata.in: 522 (2026-10-10) | Groww pages / AMC files |
 | BSE bulk-deals API | 0 entries | nselib bulk deals |
 | EODHD demo for India | 403 | skip |
 | Wayback Machine for NSE bulk.csv | 1 snapshot | nselib date-range |

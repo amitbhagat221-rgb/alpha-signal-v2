@@ -78,6 +78,9 @@ HOSTS = {
     "groww": {"netlocs": ["groww.in"], "gap": 2.5, "budget_min": 20,
               "headers": {"User-Agent": BROWSER_UA, "Accept": "text/html,application/xhtml+xml,application/xml",
                           "Accept-Language": "en-US,en;q=0.9"}},
+    # Kuvera scheme JSON: subscription status for funds Groww has no page for (~100 funds every
+    # 14 days ≈ 10 lookups a day). mf.captnemo.in redirects an ISIN to api.kuvera.in's scheme JSON.
+    "kuvera": {"netlocs": ["mf.captnemo.in", "api.kuvera.in"], "gap": 2.0, "budget_min": 5},
     "amfi": {"netlocs": ["www.amfiindia.com", "portal.amfiindia.com"]},
     "mfapi": {"netlocs": ["api.mfapi.in"]},
 

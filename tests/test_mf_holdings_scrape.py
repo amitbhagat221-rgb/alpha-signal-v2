@@ -143,6 +143,48 @@ def test_groww_slug_guess():
     assert mg._guess_slug("Kotak Large & Mid Cap Fund") == "kotak-large-and-mid-cap-fund-direct-growth"
 
 
+def test_groww_slug_variants():
+    """Groww spells 'fund of fund' as 'fof' and 'off-shore' as 'offshore' (verified 2026-10-14)."""
+    assert mg._slug_variants("mirae-asset-nyse-fang-etf-fund-of-fund-direct-growth") == \
+        ["mirae-asset-nyse-fang-etf-fof-direct-growth"]
+    assert mg._slug_variants("icici-prudential-passive-multi-asset-fund-of-funds-direct-growth") == \
+        ["icici-prudential-passive-multi-asset-fof-direct-growth"]
+    assert mg._slug_variants("edelweiss-asean-equity-off-shore-fund-direct-growth") == \
+        ["edelweiss-asean-equity-offshore-fund-direct-growth"]
+    assert mg._slug_variants("hdfc-flexi-cap-fund-direct-growth") == []
+
+
+def test_groww_404_tries_the_fof_spelling(monkeypatch):
+    monkeypatch.setattr(mg, "_ensure_columns", lambda: None)
+    monkeypatch.setattr(mg, "funds", lambda scheme=None: pd.DataFrame([{
+        "amc": "NJ", "scheme_name": "NJ Fund of Fund", "codes": ["151917"], "isins": set(),
+        "slug": "nj-fund-of-fund-direct-growth", "never_checked": True, "last_checked": None,
+        "has_holdings": False, "score": None}]))
+    monkeypatch.setattr(mg, "read_sql", lambda q, params=None: pd.DataFrame({"sid": [], "name": []}))
+    pages = {"nj-fof-direct-growth": (200, _page())}
+    monkeypatch.setattr(mg._http, "polite_request", lambda m, url, **k: types.SimpleNamespace(
+        status_code=pages.get(url.rsplit("/", 1)[1], (404, ""))[0], text=pages.get(url.rsplit("/", 1)[1], (404, ""))[1]))
+    marks = []
+    monkeypatch.setattr(mg, "write_portfolio", lambda *a, **k: (3, 2))
+    monkeypatch.setattr(mg, "_mark", lambda codes, slug=None: marks.append((tuple(codes), slug)))
+    monkeypatch.setattr(mg, "_write_status", lambda codes, status: None)
+    assert mg.scrape() == 1
+    assert marks == [(("151917",), "nj-fof-direct-growth")]   # the spelling that worked is kept
+
+
+def test_kuvera_status_only_for_the_isin_asked():
+    from sources import mf_subscription_kuvera as kv
+    row = {"code": "MAFPD1-GR", "ISIN": "INF769K01HH0", "lump_available": "N", "sip_available": "Y"}
+    assert kv.parse([row], "INF769K01HH0") == {"lumpsum_open": 0, "sip_open": 1, "closed_reason": None}
+    assert kv.parse([row], "INF000000000") is None          # another scheme's JSON
+    assert kv.parse([], "INF769K01HH0") is None             # Kuvera does not list it
+    import pytest
+    with pytest.raises(ValueError):
+        kv.parse({"error": "x"}, "INF769K01HH0")            # shape drift is loud
+    with pytest.raises(ValueError):
+        kv.parse([{"ISIN": "INF769K01HH0"}], "INF769K01HH0")
+
+
 def test_groww_writes_only_the_fund_the_page_is(monkeypatch):
     fund = lambda name, codes, isins, slug: {"amc": "X", "scheme_name": name, "codes": codes, "isins": isins,
                                              "slug": slug, "never_checked": True, "last_checked": None,

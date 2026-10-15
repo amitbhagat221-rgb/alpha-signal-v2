@@ -168,7 +168,7 @@
             <th><span style="position:absolute;left:-9999px;">Compare</span></th>
             {{ sort_header('Scheme', 'name') }}
             <th>Category</th>
-            <th title="Whether the fund accepts new investments (lump sum and SIP), from its Groww page, checked about every two weeks. Closed: no new lump sums or SIPs; hover a badge for the reason.">Subscription</th>
+            <th title="Whether the fund accepts new investments (lump sum and SIP), from its Groww page (or Kuvera when Groww has none), checked about every two weeks. Closed: no new lump sums or SIPs; hover a badge for the reason.">Subscription</th>
             {{ sort_header('NAV ₹', 'nav', num=True) }}
             {{ sort_header('1Y %', 'ret_1y', num=True) }}
             {{ sort_header('3Y CAGR %', 'ret_3y', num=True) }}
@@ -193,7 +193,7 @@
             {%- if row.subscription == 'Open' %}<span class="mf-invest-open">Open</span>
             {%- elif row.subscription == 'Closed' %}<span class="pill pill-red" title="{{ row.closed_reason or 'Not accepting new investments' }}">Closed</span>
             {%- elif row.subscription %}<span class="pill pill-amber" title="{{ row.closed_reason or row.subscription }}">{{ row.subscription }}</span>
-            {%- else %}<span class="mf-na" title="Not checked: no Groww page for this fund, or not visited yet">—</span>{% endif -%}
+            {%- else %}<span class="mf-na" title="Unknown: on neither Groww nor Kuvera, or not checked yet">—</span>{% endif -%}
         </td>
         <td class="num">{{ row.nav|inr(2) }}</td>
         <td class="num {% if row.ret_1y is not none and row.ret_1y >= 8 %}score-green{% elif row.ret_1y is not none and row.ret_1y < 0 %}score-red{% endif %}">{{ row.ret_1y|pct }}</td>

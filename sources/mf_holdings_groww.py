@@ -135,6 +135,16 @@ def _guess_slug(name: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", s).strip("-") + "-direct-growth"
 
 
+def _slug_variants(slug: str) -> list[str]:
+    """Other spellings Groww uses for a slug that 404'd: 'fund of fund(s)' → 'fof'
+    (mirae-asset-nyse-fang-etf-fof-…, motilal-oswal-nasdaq-100-fof-…) and 'off-shore' → 'offshore'
+    (edelweiss-asean-equity-offshore-fund-…). Verified 2026-10-14 on 13 overseas FoFs."""
+    out = [slug]
+    for pattern, repl in ((r"fund-of-funds?(?=-)", "fof"), (r"off-shore", "offshore")):
+        out += [v for v in (re.sub(pattern, repl, s) for s in out) if v not in out]
+    return out[1:]
+
+
 def fetch_sitemap_slugs() -> list[str]:
     """Every fund-page slug in Groww's MF sitemap; raises when it cannot be read."""
     r = _http.polite_request("GET", SITEMAP, check=False, retries=2, timeout=30)
@@ -328,38 +338,44 @@ def scrape(limit: int | None = None, scheme: str | None = None, recheck_days: in
         if over_budget():
             print(f"  budget of {max_minutes} min reached after {i - 1} funds — rest continue next run", flush=True)
             break
-        r = _http.polite_request("GET", PAGE.format(slug=f.slug), check=False, timeout=30)
+        slug = f.slug
+        r = _http.polite_request("GET", PAGE.format(slug=slug), check=False, timeout=30)
         status = getattr(r, "status_code", None)
+        for alt in _slug_variants(f.slug) if status == 404 else []:
+            r_alt = _http.polite_request("GET", PAGE.format(slug=alt), check=False, timeout=30)
+            if getattr(r_alt, "status_code", None) == 200:
+                r, status, slug = r_alt, 200, alt
+                break
         if status == 404:
             n_none += 1
             _mark(f.codes, NO_PAGE)
             continue
         if status != 200:
             n_err += 1
-            runlog.item_failed("groww fund page", f.slug, f"HTTP {status}", symptom="A" if status == 403 else "B")
+            runlog.item_failed("groww fund page", slug, f"HTTP {status}", symptom="A" if status == 403 else "B")
             _mark(f.codes)
             continue
         try:
             codes, isin, holdings, sectors, as_of, status = parse_page(r.text)
         except Exception as e:
             n_err += 1
-            runlog.item_error("groww fund page", f.slug, e)
+            runlog.item_error("groww fund page", slug, e)
             _mark(f.codes)
             continue
         if not (codes & set(f.codes) or (isin and isin in f.isins)):
             # A guessed or name-matched slug that is really another fund's page.
             n_wrong += 1
-            runlog.note(f"groww page {f.slug} is scheme {sorted(codes)}, not {f.scheme_name}", "WARN",
-                        slug=f.slug, page_codes=sorted(codes), fund_codes=f.codes)
+            runlog.note(f"groww page {slug} is scheme {sorted(codes)}, not {f.scheme_name}", "WARN",
+                        slug=slug, page_codes=sorted(codes), fund_codes=f.codes)
             _mark(f.codes, NO_PAGE)
             continue
         _write_status(f.codes, status)
         if not holdings or not as_of:
             n_empty += 1
-            _mark(f.codes)
+            _mark(f.codes, None if slug == f.slug else slug)
             continue
         n_h, _ = write_portfolio(f.codes, as_of, holdings, sectors, name_to_sid)
-        _mark(f.codes)
+        _mark(f.codes, None if slug == f.slug else slug)   # keep a variant spelling that worked
         n_ok += 1
         n_rows += n_h
         if i % 25 == 0:

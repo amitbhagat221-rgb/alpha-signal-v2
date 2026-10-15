@@ -706,8 +706,12 @@ def compute(max_minutes=_http.HOST_BUDGET) -> int:
     for funds Groww has no page for, map schemes that have no ETMoney page yet, then
     re-check the funds due (RECHECK_DAYS), stalest first, until the host budget is spent.
     Returns funds written by both routes."""
-    from sources import mf_holdings_groww
+    from sources import mf_holdings_groww, mf_subscription_kuvera
     n_groww = mf_holdings_groww.compute()
+    try:   # new-money status for the funds Groww has no page for (writes no holdings)
+        mf_subscription_kuvera.compute()
+    except RuntimeError as e:
+        runlog.item_failed("kuvera scheme", "all", str(e), symptom="B")
     status()
     try:
         build_mapping(only_unmapped=True)

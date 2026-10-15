@@ -39,8 +39,8 @@ def _mf_universe_pool():
     below breaks ties the way SQLite's scan did.
 
     subscription = whether the fund takes new money, from its Groww page
-    (sources.mf_holdings_groww): 'Open' / 'Closed' / 'SIP only' / 'Lump sum only',
-    None when unknown (no Groww page, or not checked yet)."""
+    (sources.mf_holdings_groww) or, with no Groww page, Kuvera (sources.mf_subscription_kuvera):
+    'Open' / 'Closed' / 'SIP only' / 'Lump sum only', None when unknown."""
     # Join to LATEST mf_metrics row per scheme (defensive — table should be clean
     # after the monthly compute, but stale rows from earlier runs can stick around).
     df = read_sql(
@@ -283,7 +283,7 @@ def get_mf_detail(scheme_code: str) -> dict | None:
                   NULLIF(sm.plan_type, 'UNKNOWN') AS plan_type, NULLIF(sm.option_type, 'UNKNOWN') AS option_type, sm.isin_growth, sm.isin_div,
                   sm.aum_cr, sm.expense_ratio, sm.benchmark,
                   sm.data_quality, sm.quality_reason,
-                  sm.lumpsum_open, sm.sip_open, sm.closed_reason, sm.subscription_checked_at,
+                  sm.lumpsum_open, sm.sip_open, sm.closed_reason, sm.subscription_checked_at, sm.groww_slug,
                   ms.inception_date, ms.has_full_history, sm.last_seen
            FROM mf_scheme_master sm
            LEFT JOIN mf_schemes ms ON sm.scheme_code = ms.scheme_code

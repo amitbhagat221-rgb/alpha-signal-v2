@@ -96,7 +96,7 @@ table.mini a.link { color:var(--accent); }
         {% elif i.subscription == 'SIP only' %}No new lump sums: SIPs only
         {% else %}No new SIPs: lump sums only{% endif %}
     </div>
-    <div class="why">{{ i.closed_reason or '' }} From the fund's Groww page, checked {{ i.subscription_checked_at[:10]|short_date }}.</div>
+    <div class="why">{{ i.closed_reason or '' }} From the fund's {{ 'Groww page' if i.groww_slug else 'Kuvera listing' }}, checked {{ i.subscription_checked_at[:10]|short_date }}.</div>
 </div>
 {% endif %}
 
