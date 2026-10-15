@@ -611,6 +611,36 @@ def _undo_say_do(record):
         _locked_json_update(sd.OUTPUT_PATH, back)
 
 
+# ── mb_dossier (output/mb_dossier.py): plan 0026 stage 4, one task per candidate per latest reported quarter ──
+
+def _export_mb_dossier(days=None):
+    from output import mb_dossier as md
+    out = []
+    for sid in md.candidates():
+        built = md.build_brief(sid)
+        if built is None:
+            continue
+        tk = db.one("SELECT ticker FROM stocks WHERE sid = ?", [sid])["ticker"]
+        out.append((f"{sid}:{built[1]}", {"sid": sid, "ticker": tk, "brief": built[0], "_as_of": built[1]}, 7))
+    return out
+
+
+def _validate_mb_dossier_result(result, payload):
+    from output import mb_dossier as md
+    return md.validate(result)
+
+
+def _ingest_mb_dossier(clean, payload):
+    from output import mb_dossier as md
+    prior = md.persist(payload["sid"], payload["_as_of"], clean)
+    return {"sid": payload["sid"], "as_of": payload["_as_of"], "prior": prior}
+
+
+def _undo_mb_dossier(record):
+    from output import mb_dossier as md
+    md.undo(record["sid"], record["as_of"], record.get("prior"))
+
+
 # ═══════════════════════════ registry ═══════════════════════════
 
 _BRIEF_SCHEMA = {"type": "object", "description": "the JSON object the brief asks for"}
@@ -629,6 +659,15 @@ TASK_KINDS = {
                                                  "conviction", "action"]},
         "instructions": lambda: _BRIEF_INSTRUCTIONS,
         "batch": 5, "deadline_hours": 2, "default_days": None, "ledger_step": "dossier",
+    },
+    "mb_dossier": {
+        "export": _export_mb_dossier, "validate": _validate_mb_dossier_result,
+        "ingest": _ingest_mb_dossier, "undo": _undo_mb_dossier,
+        "schema": {**_BRIEF_SCHEMA, "required": ["thesis_line", "thesis", "bull", "bear", "catalysts", "risks",
+                                                 "what_would_break_it"]},
+        "instructions": lambda: _BRIEF_INSTRUCTIONS,
+        # one per claim: a brief is ~15-25 KB; claims above ~50 KB stall the worker
+        "batch": 1, "deadline_hours": None, "default_days": None, "ledger_step": "mb_dossier",
     },
     "news_brief": {
         "export": _export_news_brief, "validate": _validate_news_brief_result,
@@ -692,7 +731,7 @@ TASK_KINDS = {
 }
 # Worker drain order (plan §6): dossier → news_brief → sector_dossier → news_enrich → regulatory.
 # Phase 3 adds the first three kinds; within a kind, claim follows each task's priority.
-DRAIN_ORDER = [k for k in ("dossier", "news_brief", "sector_dossier", "news_today", "news_theme", "news_week",
+DRAIN_ORDER = [k for k in ("dossier", "mb_dossier", "news_brief", "sector_dossier", "news_today", "news_theme", "news_week",
                                     "news_enrich", "regulatory", "say_do")
                if k in TASK_KINDS]
 

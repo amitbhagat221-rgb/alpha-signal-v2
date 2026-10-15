@@ -187,6 +187,7 @@ def checks(c):
                                   ("regulatory_events", "regulatory_text", "event_id", "WHERE full_text IS NOT NULL AND full_text <> ''"),
                                   ("news_briefs", "news_brief", "brief_date", ""),
                                   ("sector_dossiers", "sector_dossier", "sector || '|' || snapshot_date", ""),
+                                  ("mb_dossiers", "mb_dossier", "sid || '|' || as_of_date", ""),
                                   ("sector_metadata", "sector_metadata", "sector || '|' || source", "")):
         if exists(c, t) and dtype in dt:
             yield (t, *_one(c, f"SELECT COUNT(DISTINCT {keys}) FROM {t} {extra}"),
