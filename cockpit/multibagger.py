@@ -245,7 +245,7 @@ def _last_event(sid):
 
 # ── Funnel: the top 100 as evidence cards ───────────────────────────────────────────────────────
 
-@_persisted_cache(3600, name="mb_funnel_cards")
+@_persisted_cache(3600, name="mb_funnel_cards_v2")
 def funnel_cards(snap):
     """The top-100 evidence cards of one thesis run, thesis_rank order. Keyed by the run date; cached on disk
     because each card reads a dozen tables (mb_watch.card)."""
@@ -316,6 +316,7 @@ def _field(sid, rows):
                 m["mid_at"] = round(_pos(m["mid"], lo, hi), 1)
                 m["clipped"] = m["high"] > hi
         f["axis"] = {"lo": lo, "hi": hi, "price_at": round(_pos(price, lo, hi), 1)}
+        f["dec"] = 0 if max([m["high"] for m in shown] + [price]) >= 100 else 1      # one precision per field
     return f
 
 
@@ -445,7 +446,7 @@ def watch(days=90):
     for b in book:
         for e in _events(b["sid"]):
             if e["date"] >= since:
-                rows.append({**e, "sid": b["sid"], "name": b["name"] or b["sid"], "status": b["status"],
+                rows.append({**e, "sid": b["sid"], "ticker": b["ticker"], "name": b["name"] or b["sid"], "status": b["status"],
                              "category_label": label(e["category"])})
     rows.sort(key=lambda r: (r["date"], r["sev_rank"]), reverse=True)
     cats = sorted({r["category"] for r in rows})

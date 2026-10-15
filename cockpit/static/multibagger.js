@@ -20,8 +20,9 @@ function mbCounts(el) {
     const root = el.querySelector('[data-n-book]');
     if (!root) return;
     document.querySelectorAll('.tab-button').forEach(b => {
-        if (/^Candidates/.test(b.textContent)) b.textContent = 'Candidates ' + root.dataset.nBook + '/' + root.dataset.maxBook;
-        if (/^Held/.test(b.textContent)) b.textContent = 'Held ' + root.dataset.nHeld + '/' + root.dataset.maxHeld;
+        const d = root.dataset;
+        if (/^Candidates/.test(b.textContent) && d.nBook && d.maxBook) b.textContent = 'Candidates ' + d.nBook + '/' + d.maxBook;
+        if (/^Held/.test(b.textContent) && d.nHeld && d.maxHeld) b.textContent = 'Held ' + d.nHeld + '/' + d.maxHeld;
     });
 }
 

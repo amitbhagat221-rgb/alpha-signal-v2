@@ -1,5 +1,5 @@
 {# Multibagger > Funnel: stage counts, why names missed the pond, the grade line, the top 100 as evidence cards. Data: cockpit/multibagger.py funnel(). #}
-{% from "_mb_macros.html" import rs, mult, parts_bars, act, status_pill, flag_pills %}
+{% from "_mb_macros.html" import rs, mult, tipped, tipped_pill, parts_bars, act, status_pill, flag_pills %}
 <div data-n-book="{{ d.n_book }}" data-max-book="{{ d.max_book }}" data-n-held="{{ d.n_held }}" data-max-held="{{ d.max_held }}">
 
 <div class="card mb-grade">
@@ -12,11 +12,11 @@
     <div class="mb-stage" role="listitem">
         <div class="mb-stage-n mono">{% if s.n is none %}&mdash;{% else %}{{ s.n|count }}{% endif %}</div>
         <div class="mb-stage-k">{{ s.label }}</div>
-        <div class="u-muted-10">{{ s.how }}</div>
+        <div class="u-muted-11">{{ s.how }}</div>
     </div>
     {% endfor %}
 </div>
-<p class="mb-sub">{% if d.as_of %}Counts for the thesis run of {{ d.as_of|long_date }}; candidates and held are today's lists.{% else %}The thesis has not run yet, so the first three counts are empty. Candidates and held are today's lists.{% endif %}</p>
+<p class="mb-sub">{% if d.as_of %}Counts for the thesis run of {{ d.as_of|short_date }}; candidates and held are today's lists.{% else %}The thesis has not run yet, so the first three counts are empty. Candidates and held are today's lists.{% endif %}</p>
 
 {% if d.as_of and d.gate_fail %}
 <details class="card mb-gates">
@@ -33,12 +33,12 @@
 {% if not d.as_of %}
 <div class="card mb-empty">No thesis run yet &mdash; it runs weekly. When it has, the names with the best thesis score appear here as evidence cards, best thesis score first, and each can be promoted to a candidate.</div>
 {% elif not d.cards %}
-<div class="card mb-empty">The run of {{ d.as_of|long_date }} has no names in its top group (the pond was too thin to rank).</div>
+<div class="card mb-empty">The run of {{ d.as_of|short_date }} has no names in its top group (the pond was too thin to rank).</div>
 {% else %}
-<h2 class="mb-h">Top {{ d.cards|length }} by thesis score <span class="u-muted-11">run of {{ d.as_of|long_date }} &middot; best first</span></h2>
+<h2 class="mb-h">Top {{ d.cards|length }} by thesis score <span class="u-muted-11">run of {{ d.as_of|short_date }} &middot; best first</span></h2>
 <div x-data="pbList()">
     <div class="pb-tools">
-        <input type="search" class="pb-q" x-model="q" @input="apply()" placeholder="Filter by name, industry or investor…" aria-label="Filter the top names">
+        <input type="search" class="pb-q" x-model="q" @input="apply()" placeholder="Filter name, industry, investor…" aria-label="Filter the top names">
         <span class="mono u-muted-11" x-show="q" x-cloak><span x-text="shown"></span> of {{ d.cards|length }} shown</span>
         <button type="button" class="pb-clear" x-show="q" x-cloak @click="q = ''; apply()">Clear</button>
     </div>
@@ -50,26 +50,26 @@
                 <a class="mb-name" href="/multibagger/stock/{{ c.sid }}">{{ c.name }}</a>
                 <div class="mb-sub">{{ c.ticker }} &middot; {{ c.cap_tier|tier_word }} &middot; {{ c.industry or 'no industry' }}</div>
             </div>
-            <div class="mb-rank"><b class="mono">#{{ c.thesis_rank|int }}</b><span class="u-muted-10">score {{ (c.thesis_score * 100)|round|int }}/100</span></div>
+            <div class="mb-rank"><b class="mono">#{{ c.thesis_rank|int }}</b><span class="u-muted-11 mono">score {{ (c.thesis_score * 100)|round|int }}/100</span></div>
         </header>
-        <div class="mb-facts mono">{{ c.mcap_cr|crore }} market cap &middot; trades {{ '%.1f'|format(c.adtv_cr) if c.adtv_cr is not none else '&mdash;'|safe }} Cr/day <span class="u-muted-10">({{ c.snapshot_date|short_date }})</span></div>
+        <div class="mb-facts mono">{{ c.mcap_cr|crore }} market cap &middot; trades {% if c.adtv_cr is not none %}&#8377;{{ '%.1f'|format(c.adtv_cr) }} Cr/day{% else %}&mdash;{% endif %} <span class="u-muted-11">({{ c.snapshot_date|short_date }})</span></div>
         {{ parts_bars(c.parts) }}
         <dl class="mb-evid">
             <dt>Known investors</dt>
-            <dd>{% for i in c.investors %}<span class="pill pill-accent" title="holder as filed: {{ i.holder_name }}, quarter to {{ i.end_date|long_date }}">{{ i.investor }} {{ i.pct|pct(1) }}{% if i.entered %} new{% endif %}</span> {% else %}<span class="u-muted-11">none in the last two filings</span>{% endfor %}</dd>
+            <dd>{% for i in c.investors %}{{ tipped_pill('★ ' ~ i.investor, 'Holder as filed: ' ~ i.holder_name ~ ', quarter to ' ~ (i.end_date|short_date) ~ (', new this quarter' if i.entered else ''), 'accent', (i.pct|pct(1)) ~ (' new' if i.entered else '')) }} {% else %}<span class="u-muted-11">none in the last two filings</span>{% endfor %}</dd>
             <dt>Latest results</dt>
             <dd>{% if c.results %}
-                <span class="mono">{{ c.results.period or (c.results.end_date|long_date) }}</span>:
-                revenue {{ c.results.revenue|crore }} <span class="mono {{ c.results.revenue_yoy_pct|tone }}">{{ c.results.revenue_yoy_pct|pct(1, signed=True) }}</span> on a year ago,
-                profit {{ c.results.pat|crore }} <span class="mono {{ c.results.pat_yoy_pct|tone }}">{{ c.results.pat_yoy_pct|pct(1, signed=True) }}</span>
+                <span class="mono">{{ c.results.period or (c.results.end_date|short_date) }}</span>:
+                revenue <span class="mono">{{ c.results.revenue|crore }}</span> <span class="mono {{ c.results.revenue_yoy_pct|tone }}">{{ c.results.revenue_yoy_pct|pct(1, signed=True) }}</span> on a year ago,
+                profit <span class="mono">{{ c.results.pat|crore }}</span> <span class="mono {{ c.results.pat_yoy_pct|tone }}">{{ c.results.pat_yoy_pct|pct(1, signed=True) }}</span>
                 {% else %}<span class="u-muted-11">no quarterly results on file</span>{% endif %}</dd>
             <dt>Last 90 days</dt>
-            <dd>{% for cat, n in c.events.items() %}<span class="pill pill-muted">{{ cat|replace('_', ' ')|capitalize }} {{ n }}</span> {% else %}<span class="u-muted-11">no filings or events</span>{% endfor %}</dd>
+            <dd>{% for cat, n in c.events.items() %}<span class="pill pill-muted">{{ cat|replace('_', ' ')|capitalize }} <span class="mono">{{ n }}</span></span> {% else %}<span class="u-muted-11">no filings or events</span>{% endfor %}</dd>
             <dt>Against its own history</dt>
             <dd>{% if c.valuation.pe is not none or c.valuation.pb is not none %}
-                P/E {{ mult(c.valuation.pe) }}{% if c.valuation.pe_percentile is not none %} <span class="u-muted-11">(above {{ c.valuation.pe_percentile|pct(0) }} of its own readings)</span>{% endif %}
-                &middot; P/B {{ mult(c.valuation.pb) }}{% if c.valuation.pb_percentile is not none %} <span class="u-muted-11">(above {{ c.valuation.pb_percentile|pct(0) }})</span>{% endif %}
-                <span class="u-muted-10">as of {{ c.valuation.as_of|short_date }}</span>
+                P/E <span class="mono">{{ mult(c.valuation.pe) }}</span>{% if c.valuation.pe_percentile is not none %} <span class="u-muted-11">(above <span class="mono">{{ c.valuation.pe_percentile|pct(0) }}</span> of its own readings)</span>{% endif %}
+                &middot; P/B <span class="mono">{{ mult(c.valuation.pb) }}</span>{% if c.valuation.pb_percentile is not none %} <span class="u-muted-11">(above <span class="mono">{{ c.valuation.pb_percentile|pct(0) }}</span>)</span>{% endif %}
+                <span class="u-muted-11">as of {{ c.valuation.as_of|short_date }}</span>
                 {% else %}<span class="u-muted-11">no usable P/E or P/B</span>{% endif %}</dd>
         </dl>
         <div class="mb-card-foot">

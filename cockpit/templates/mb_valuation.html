@@ -1,6 +1,6 @@
 {# /multibagger/valuation - a football field for each candidate and held name. Data: cockpit/multibagger.py valuation_page(). #}
 {% extends "base.html" %}
-{% from "_mb_macros.html" import football, rs, status_pill %}
+{% from "_mb_macros.html" import football, rs, status_pill, stock_cell %}
 {% block title %}{{ page_title("Multibagger valuation") }}{% endblock %}
 
 {% block content %}
@@ -10,7 +10,7 @@
     One bar per method, from its low to its high with a tick at its mid, and a vertical line at today's price. Methods: the stock's
     own P/E, P/B and EV/EBITDA history, same-industry peers, a 10-year DCF, analyst targets and the 52-week range. Names are
     sorted by the price against the median of the methods' mids, cheapest first. Hover or tap a bar for its basis; open a name
-    for the full field. Prices in &#8377; per share{% if d.as_of %}, valuation as of {{ d.as_of|long_date }}{% endif %}.
+    for the full field. Prices in &#8377; per share{% if d.as_of %}, valuation as of {{ d.as_of|short_date }}{% endif %}.
 </div>
 
 {% if not d.n_book %}
@@ -23,10 +23,9 @@
     {% for i in d.rows %}
     <section class="card mb-vcard">
         <header class="mb-card-head">
-            <div><a class="mb-name" href="/multibagger/stock/{{ i.sid }}">{{ i.name or i.sid }}</a>
-                <div class="mb-sub">{{ i.ticker or i.sid }} &middot; {{ i.cap_tier|tier_word }} {{ status_pill(i.status) }}</div></div>
+            {{ stock_cell(i, status=True) }}
             <div class="mb-rank">{% if i.field.discount_pct is not none %}<b class="mono {{ i.field.discount_pct|tone(pos='score-red', neg='score-green') }}">{{ i.field.discount_pct|pct(0, signed=True) }}</b>
-                <span class="u-muted-10">vs median mid</span>{% endif %}</div>
+                <span class="u-muted-11">vs median mid</span>{% endif %}</div>
         </header>
         {{ football(i.field) }}
     </section>

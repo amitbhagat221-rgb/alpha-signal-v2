@@ -1,6 +1,7 @@
 {# /multibagger/stock/<sid> - stage 4, the deep dive. Data: cockpit/multibagger.py deep_dive(). #}
 {% extends "base.html" %}
-{% from "_mb_macros.html" import football, rs, mult, parts_bars, act, status_pill, flag_pills %}
+{% from "_mb_macros.html" import football, rs, mult, parts_bars, act, status_pill, flag_pills, tipped, tipped_pill %}
+{% from "_components.html" import tier_pill %}
 {% block title %}{{ page_title(d.stock.name ~ " deep dive") }}{% endblock %}
 
 {% block content %}
@@ -10,12 +11,12 @@
 
 <header class="mb-dd-head">
     <h1 class="section-title">{{ d.stock.name }}</h1>
-    <div class="mb-sub">{{ d.stock.ticker }} &middot; {{ d.stock.cap_tier|tier_word }} &middot; {{ d.stock.industry or 'no industry' }} &middot; {{ d.stock.market_cap_cr|crore }} market cap
+    <div class="mb-sub">{{ d.stock.ticker }} &middot; {{ d.stock.cap_tier|tier_word }} &middot; {{ d.stock.industry or 'no industry' }} &middot; <span class="mono">{{ d.stock.market_cap_cr|crore }}</span> market cap
         {% if d.book %}&middot; {{ status_pill(d.book.status) }}{% endif %}</div>
     {% if d.thesis and d.thesis.thesis_score is not none %}
     <div class="mb-dd-score">
         <span class="mono"><b>{{ (d.thesis.thesis_score * 100)|round|int }}/100</b> thesis score{% if d.thesis.thesis_rank is not none %}, #{{ d.thesis.thesis_rank|int }} in the pond{% endif %}</span>
-        <span class="u-muted-10">run of {{ d.thesis.snapshot_date|long_date }}</span>
+        <span class="u-muted-11">run of {{ d.thesis.snapshot_date|long_date }}</span>
         {{ parts_bars(d.parts, compact=True) }}
     </div>
     {% else %}
@@ -45,7 +46,7 @@
         <div><h3 class="mb-h3">{{ title }}</h3><ul class="mb-list">{% for x in n[key] %}<li>{{ x }}</li>{% else %}<li class="u-muted-11">none given</li>{% endfor %}</ul></div>
         {% endfor %}
     </div>
-    <div class="u-muted-11">As of the quarter to {{ n.as_of_date|long_date }}; written {{ n.created_at|short_date }}.</div>
+    <div class="u-muted-11">As of the quarter to {{ n.as_of_date|short_date }}; written {{ n.created_at|short_date }}.</div>
     {% else %}
     <div class="mb-empty">No note yet. It is written after a name becomes a candidate and refreshed each quarter.</div>
     {% endif %}
@@ -59,7 +60,7 @@
     <div class="mb-charts">
         {% for key, title, unit in [('revenue', 'Revenue', '₹ Cr'), ('margin', 'EBITDA margin', '%')] %}
         <figure class="mb-chart"><figcaption>{{ title }} ({{ unit }})</figcaption>
-            <div class="mb-bars">{% for b in d.charts[key] %}<span class="mb-bar{{ ' neg' if b.neg }}" title="{{ b.end_date|month_text }}: {{ '%.1f'|format(b.value) if b.value is not none else 'n/a' }} {{ unit }}"><i style="height: {{ b.h }}%"></i></span>{% endfor %}</div>
+            <div class="mb-bars">{% for b in d.charts[key] %}<span class="mb-bar hover-tip{{ ' neg' if b.neg }}" tabindex="0"><i style="height: {{ b.h }}%"></i><span class="tooltip-popover" role="tooltip">{{ b.end_date|month_text }}: {{ '%.1f'|format(b.value) if b.value is not none else 'n/a' }} {{ unit }}</span></span>{% endfor %}</div>
             <div class="mb-bars-x"><span>{{ d.charts[key][0].end_date|month_text }}</span><span>{{ d.charts[key][-1].end_date|month_text }}</span></div>
         </figure>
         {% endfor %}
@@ -68,14 +69,14 @@
         <thead><tr><th>Quarter end</th><th class="num">Revenue &#8377; Cr</th><th class="num">Revenue YoY</th><th class="num">EBITDA &#8377; Cr</th><th class="num">Margin</th><th class="num">Profit &#8377; Cr</th><th class="num">Profit YoY</th><th>Source</th></tr></thead>
         <tbody>
         {% for r in d.trend|reverse %}
-        <tr><td>{{ r.end_date|long_date }}</td>
+        <tr><td class="mono">{{ r.end_date|month_text }}</td>
             <td class="num mono">{{ '{:,.0f}'.format(r.revenue) if r.revenue is not none else '—' }}</td>
             <td class="num mono {{ r.rev_yoy_pct|tone }}">{{ r.rev_yoy_pct|pct(1, signed=True) }}</td>
             <td class="num mono">{{ '{:,.0f}'.format(r.ebitda) if r.ebitda is not none else '—' }}</td>
             <td class="num mono">{{ r.ebitda_margin_pct|pct(1) }}</td>
             <td class="num mono">{{ '{:,.0f}'.format(r.pat) if r.pat is not none else '—' }}</td>
             <td class="num mono {{ r.pat_yoy_pct|tone }}">{{ r.pat_yoy_pct|pct(1, signed=True) }}</td>
-            <td class="u-muted-10">{{ r.source }}</td></tr>
+            <td class="u-muted-11">{{ r.source }}</td></tr>
         {% endfor %}
         </tbody>
     </table></div>
@@ -91,19 +92,19 @@
         <thead><tr><th>Quarter end</th><th class="num">Promoter %</th><th class="num">Pledged %</th><th class="num">Foreign %</th><th class="num">Domestic inst. %</th><th class="num">Mutual funds %</th><th class="num">Retail %</th><th class="num">Holders</th><th>Came in / left</th></tr></thead>
         <tbody>
         {% for r in d.own %}
-        <tr><td>{{ r.end_date|long_date }}</td>
+        <tr><td class="mono">{{ r.end_date|month_text }}</td>
             <td class="num mono">{{ r.promoter_pct|pct(1) }}</td><td class="num mono">{{ r.pledge_pct|pct(1) }}</td>
             <td class="num mono">{{ r.fii_pct|pct(1) }}</td><td class="num mono">{{ r.dii_pct|pct(1) }}</td>
             <td class="num mono">{{ r.mf_pct|pct(1) }}</td><td class="num mono">{{ r.retail_pct|pct(1) }}</td>
             <td class="num mono">{{ r.n_shareholders|count }}</td>
             <td class="mb-holders">
-                {% for h in r.entered %}<span class="pill {{ 'pill-accent' if h.investor else 'pill-green' }}" title="{{ 'Known investor ' ~ h.investor ~ '. ' if h.investor }}came in above 1 %">+ {{ h.name }} {{ h.pct|pct(1) }}</span> {% endfor %}
-                {% for h in r.exited %}<span class="pill {{ 'pill-accent' if h.investor else 'pill-red' }}" title="{{ 'Known investor ' ~ h.investor ~ '. ' if h.investor }}fell below 1 %">&minus; {{ h.name }} {{ h.pct|pct(1) }}</span> {% endfor %}
+                {% for h in r.entered %}{{ tipped_pill(('★ ' ~ h.investor ~ ' · ' if h.investor else '') ~ '+ ' ~ h.name, ('Known investor ' ~ h.investor ~ '. ' if h.investor else '') ~ 'Came in above 1 %', 'accent' if h.investor else 'green', h.pct|pct(1)) }} {% endfor %}
+                {% for h in r.exited %}{{ tipped_pill(('★ ' ~ h.investor ~ ' · ' if h.investor else '') ~ '− ' ~ h.name, ('Known investor ' ~ h.investor ~ '. ' if h.investor else '') ~ 'Fell below 1 %', 'accent' if h.investor else 'red', h.pct|pct(1)) }} {% endfor %}
             </td></tr>
         {% endfor %}
         </tbody>
     </table></div>
-    <div class="u-muted-11">Known investors (purple) are the frozen list in config.SUPERINVESTORS. Holder names are as filed.</div>
+    <div class="u-muted-11">Known investors (★, purple) are the frozen list in config.SUPERINVESTORS. Holder names are as filed.</div>
     {% else %}<div class="mb-empty">No shareholding filings on record for this name.</div>{% endif %}
 </section>
 
@@ -116,7 +117,7 @@
         <thead><tr><th>Date</th><th>Category</th><th>Severity</th><th>Event</th></tr></thead>
         <tbody>
         {% for e in d.events_shown %}
-        <tr><td class="mono">{{ e.date|long_date }}</td><td>{{ e.category|replace('_', ' ')|capitalize }}</td>
+        <tr><td class="mono">{{ e.date|short_date }}</td><td>{{ e.category|replace('_', ' ')|capitalize }}</td>
             <td><span class="pill pill-{{ {'high': 'red', 'medium': 'amber', 'low': 'muted'}[e.severity] }}">{{ e.severity|capitalize }}</span></td>
             <td class="mb-ev">{% if e.url %}<a href="{{ e.url }}" target="_blank" rel="noopener noreferrer">{{ e.headline }}</a>{% else %}{{ e.headline }}{% endif %}</td></tr>
         {% endfor %}
@@ -132,10 +133,10 @@
     {% set g = d.govt %}
     {% if g %}
     <h3 class="mb-h3">Government, PSU and LIC holders</h3>
-    {% if g.govt_holders %}<ul class="mb-list">{% for h in g.govt_holders %}<li>{{ h.holder_name }} <span class="mono">{{ h.pct|pct(2) }}</span> <span class="u-muted-11">quarter to {{ h.end_date|long_date }}{{ '' if h.in_latest_filing else ', not in the latest filing' }}</span></li>{% endfor %}</ul>
+    {% if g.govt_holders %}<ul class="mb-list">{% for h in g.govt_holders %}<li>{{ h.holder_name }} <span class="mono">{{ h.pct|pct(2) }}</span> <span class="u-muted-11">quarter to {{ h.end_date|short_date }}{{ '' if h.in_latest_filing else ', not in the latest filing' }}</span></li>{% endfor %}</ul>
     {% else %}<div class="mb-empty">No government holder on record.</div>{% endif %}
     <h3 class="mb-h3">Orders from government buyers <span class="u-muted-11">{{ g.n_govt_orders }} matched by headline keyword{{ ', newest 20 shown' if g.n_govt_orders > 20 }}</span></h3>
-    {% if g.govt_orders %}<ul class="mb-list">{% for o in g.govt_orders %}<li><span class="mono">{{ o.date|long_date }}</span> {% if o.url %}<a href="{{ o.url }}" target="_blank" rel="noopener noreferrer">{{ o.headline }}</a>{% else %}{{ o.headline }}{% endif %} <span class="u-muted-11">matched {{ o.matched|join(', ') }}</span></li>{% endfor %}</ul>
+    {% if g.govt_orders %}<ul class="mb-list">{% for o in g.govt_orders %}<li><span class="mono">{{ o.date|short_date }}</span> {% if o.url %}<a href="{{ o.url }}" target="_blank" rel="noopener noreferrer">{{ o.headline }}</a>{% else %}{{ o.headline }}{% endif %} <span class="u-muted-11">matched {{ o.matched|join(', ') }}</span></li>{% endfor %}</ul>
     {% else %}<div class="mb-empty">No order headline matched a government buyer.</div>{% endif %}
     <h3 class="mb-h3">Electoral-bond donor</h3>
     <div>{% if g.electoral_bond_donor.flag is none %}<span class="pill pill-muted">not loaded</span> <span class="u-muted-11">the Election Commission file has not been loaded, so this is unknown, not a no.</span>
@@ -145,14 +146,14 @@
 
 {# 7 ── peers #}
 <section class="card mb-sec" id="peers">
-    <h2 class="mb-h">7. Peers <span class="u-muted-11">same industry{% if d.peers %}, {{ d.peers[0].peer_basis }}{% endif %}; fundamentals from the stocks table{% if d.peers %} ({{ d.peers[0].fundamentals_as_of|long_date }}){% endif %}</span></h2>
+    <h2 class="mb-h">7. Peers <span class="u-muted-11">same industry{% if d.peers %}, {{ d.peers[0].peer_basis }}{% endif %}; fundamentals from the stocks table{% if d.peers %} ({{ d.peers[0].fundamentals_as_of|short_date }}){% endif %}</span></h2>
     {{ failed('peers') }}
     {% if d.peers %}
     <div class="table-wrap"><table class="mb-tbl">
         <thead><tr><th>Stock</th><th class="num">Market cap</th><th class="num">P/E</th><th class="num">P/B</th><th class="num">ROE %</th><th class="num">Revenue growth %</th><th class="num">6-month return %</th><th class="num">Thesis score /100</th></tr></thead>
         <tbody>
         {% for p in d.peers %}
-        <tr class="{{ 'mb-self' if p.is_self }}"><td><a class="mb-name" href="/multibagger/stock/{{ p.sid }}">{{ p.name }}</a> <span class="mb-sub">{{ p.ticker }} &middot; {{ p.cap_tier|tier_word }}</span></td>
+        <tr class="{{ 'mb-self' if p.is_self }}"><td><div class="mb-stock-cell"><a class="mb-name mono" href="/multibagger/stock/{{ p.sid }}">{{ p.ticker }}</a><span class="mb-sub">{{ p.name }}</span><span>{{ tier_pill(p.cap_tier) }}</span></div></td>
             <td class="num mono">{{ p.market_cap_cr|crore }}</td><td class="num mono">{{ mult(p.pe) }}</td><td class="num mono">{{ mult(p.pb) }}</td>
             <td class="num mono">{{ p.roe_pct|pct(1) }}</td><td class="num mono">{{ p.rev_growth_pct|pct(1) }}</td>
             <td class="num mono {{ p.ret_6m_pct|tone }}">{{ p.ret_6m_pct|pct(1, signed=True) }}</td>
@@ -160,7 +161,7 @@
         {% endfor %}
         </tbody>
     </table></div>
-    <div class="u-muted-11">6-month return as of {{ d.peers[0].as_of|long_date }}.</div>
+    {% if d.peers[0].as_of %}<div class="u-muted-11">6-month return as of {{ d.peers[0].as_of|short_date }}.</div>{% endif %}
     {% else %}<div class="mb-empty">No peers: the stock has no industry on record.</div>{% endif %}
 </section>
 
@@ -168,14 +169,14 @@
 <section class="card mb-sec" id="book">
     <h2 class="mb-h">8. Book status and log <span class="u-muted-11">{{ d.n_book }} of {{ d.max_book }} places used, {{ d.n_held }} of {{ d.max_held }} held</span></h2>
     {% if d.book and d.book.status in ('candidate', 'held') %}
-    <p>{{ status_pill(d.book.status) }} since {{ d.book.since|long_date }}. <span class="mb-line">{{ d.book.thesis_line }}</span>
-        {% if d.book.entry_date %}<br><span class="mono">Bought {{ d.book.entry_date|long_date }}{% if d.book.entry_price %} at {{ rs(d.book.entry_price) }}{% endif %}</span>{% endif %}</p>
+    <p>{{ status_pill(d.book.status) }} since {{ d.book.since|short_date }}. <span class="mb-line">{{ d.book.thesis_line }}</span>
+        {% if d.book.entry_date %}<br><span class="mono">Bought {{ d.book.entry_date|short_date }}{% if d.book.entry_price %} at {{ rs(d.book.entry_price) }}{% endif %}</span>{% endif %}</p>
     <div class="mb-actions-row">
         {% if d.book.status == 'candidate' %}{{ act('hold', d.stock.sid, 'Hold', price=True, tone='go') }}{% endif %}
         {{ act('drop', d.stock.sid, 'Drop') }}
     </div>
     {% elif d.book and d.book.status == 'dropped' %}
-    <p>{{ status_pill('dropped') }} on {{ d.book.since|long_date }}: {{ d.book.reason }}</p>
+    <p>{{ status_pill('dropped') }} on {{ d.book.since|short_date }}: {{ d.book.reason }}</p>
     <div class="mb-actions-row">{{ act('promote', d.stock.sid, 'Promote to candidates', thesis=True) }}</div>
     {% else %}
     <p class="mb-empty">Not in the book.</p>
@@ -184,7 +185,7 @@
     {% if d.log %}
     <div class="table-wrap"><table class="mb-tbl">
         <thead><tr><th>When</th><th>Action</th><th>From</th><th>To</th><th>Reason</th><th>By</th></tr></thead>
-        <tbody>{% for l in d.log %}<tr><td class="mono">{{ l.ts|long_date }}</td><td>{{ l.action|replace('_', ' ') }}</td><td>{{ l.from_status or '—' }}</td><td>{{ l.to_status }}</td><td>{{ l.reason }}</td><td>{{ l.actor }}</td></tr>{% endfor %}</tbody>
+        <tbody>{% for l in d.log %}<tr><td class="mono">{{ l.ts|short_date }}</td><td>{{ l.action|replace('_', ' ') }}</td><td>{{ l.from_status or '—' }}</td><td>{{ l.to_status }}</td><td>{{ l.reason }}</td><td>{{ l.actor }}</td></tr>{% endfor %}</tbody>
     </table></div>
     {% else %}<div class="mb-empty">No decision logged for this name yet.</div>{% endif %}
 </section>

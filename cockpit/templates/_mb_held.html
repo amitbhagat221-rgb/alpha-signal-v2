@@ -1,7 +1,7 @@
 {# Multibagger > Held: entry, return against NIFTY SMALLCAP 250, conviction monitor. Data: cockpit/multibagger.py held(). #}
-{% from "_mb_macros.html" import rs, act %}
+{% from "_mb_macros.html" import rs, act, stock_cell %}
 {% from "_pb_macros.html" import th, chip %}
-<div data-n-held="{{ d.n_held }}" data-max-held="{{ d.max_held }}" data-n-book="{{ d.n_book if d.n_book is defined else '' }}" data-max-book="">
+<div data-n-held="{{ d.n_held }}" data-max-held="{{ d.max_held }}" data-n-book="{{ d.n_book }}" data-max-book="{{ d.max_book }}">
 {% if not d.rows %}
 <div class="card mb-empty">Nothing held yet &mdash; hold a candidate from the Candidates tab (up to {{ d.max_held }}). Each hold is logged with your reason and the entry price.</div>
 {% else %}
@@ -12,18 +12,17 @@
     <tbody>
     {% for r in d.rows %}
     <tr data-row>
-        <td data-label="Stock"><a class="mb-name" href="/multibagger/stock/{{ r.sid }}">{{ r.name or r.sid }}</a>
-            <div class="mb-sub">{{ r.ticker or r.sid }} &middot; {{ r.cap_tier|tier_word }}</div></td>
-        <td class="num mono" data-label="Entry" data-v="{{ r.entry_date or '' }}">{{ r.entry_date|short_date if r.entry_date else '&mdash;'|safe }}<div class="u-muted-10">at {{ rs(r.entry_price) }}</div></td>
-        <td class="num mono" data-label="Return" data-v="{{ r.return_pct if r.return_pct is not none else '' }}"><span class="{{ r.return_pct|tone }}">{{ r.return_pct|pct(1, signed=True) }}</span>
-            <div class="u-muted-10">{{ rs(r.price) }} on {{ r.price_date|short_date }}</div></td>
-        <td class="num mono" data-label="Index" data-v="{{ r.bench_pct if r.bench_pct is not none else '' }}">{{ r.bench_pct|pct(1, signed=True) }}
-            {% if r.vs_bench_pts is not none %}<div class="u-muted-10 {{ r.vs_bench_pts|tone }}">{{ r.vs_bench_pts|signed(1) }} points</div>{% endif %}</td>
-        <td data-label="Monitor">{% if r.verdict %}{{ chip(r.verdict, 'var(--green)' if r.verdict == 'HOLD' else 'var(--amber)' if r.verdict == 'WATCH' else 'var(--red)') }}
-            <div class="u-muted-10">{{ r.drawdown_pct|pct(0) }} off its 13-month high, {{ r.months_underwater }} months underwater</div>
-            {% else %}<span class="u-muted-11">no price history</span>{% endif %}</td>
-        <td class="num mono" data-label="Last decision" data-v="{{ r.days_since_review if r.days_since_review is not none else '' }}">{% if r.days_since_review is not none %}{{ r.days_since_review }} days ago{% else %}&mdash;{% endif %}</td>
-        <td class="num mono" data-label="Events since entry" data-v="{{ r.events_since_entry if r.events_since_entry is not none else '' }}">{% if r.events_since_entry is not none %}{{ r.events_since_entry }}{% else %}&mdash;{% endif %}</td>
+        <td class="mb-first" data-label="Stock">{{ stock_cell(r) }}</td>
+        <td class="num mono" data-label="Entry" data-v="{{ r.entry_date or '' }}"><div>{{ r.entry_date|short_date if r.entry_date else '&mdash;'|safe }}<div class="u-muted-11">at {{ rs(r.entry_price) }}</div></div></td>
+        <td class="num mono" data-label="Return" data-v="{{ r.return_pct if r.return_pct is not none else '' }}"><div><span class="{{ r.return_pct|tone }}">{{ r.return_pct|pct(1, signed=True) }}</span>
+            <div class="u-muted-11">{{ rs(r.price) }} on {{ r.price_date|short_date }}</div></div></td>
+        <td class="num mono" data-label="Index" data-v="{{ r.bench_pct if r.bench_pct is not none else '' }}"><div>{{ r.bench_pct|pct(1, signed=True) }}
+            {% if r.vs_bench_pts is not none %}<div class="u-muted-11 {{ r.vs_bench_pts|tone }}">{{ r.vs_bench_pts|signed(1) }} points</div>{% endif %}</div></td>
+        <td data-label="Monitor"><div>{% if r.verdict %}{{ chip(r.verdict, 'var(--green)' if r.verdict == 'HOLD' else 'var(--amber)' if r.verdict == 'WATCH' else 'var(--red)') }}
+            <div class="u-muted-11"><span class="mono">{{ r.drawdown_pct|pct(0) }}</span> off its 13-month high, <span class="mono">{{ r.months_underwater }}</span> months underwater</div>
+            {% else %}<span class="u-muted-11">no price history</span>{% endif %}</div></td>
+        <td class="num mono" data-label="Last decision" data-v="{{ r.days_since_review if r.days_since_review is not none else '' }}"><div>{% if r.days_since_review is not none %}{{ r.days_since_review }} days ago{% else %}&mdash;{% endif %}</div></td>
+        <td class="num mono" data-label="Events since entry" data-v="{{ r.events_since_entry if r.events_since_entry is not none else '' }}"><div>{% if r.events_since_entry is not none %}{{ r.events_since_entry }}{% else %}&mdash;{% endif %}</div></td>
         <td class="mb-actions" data-label="Action">{{ act('drop', r.sid, 'Drop') }}</td>
     </tr>
     {% endfor %}

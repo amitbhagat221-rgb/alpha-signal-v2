@@ -253,3 +253,15 @@ def test_discount_sort_puts_the_cheapest_first(monkeypatch):
     monkeypatch.setattr(mb, "book_rows", lambda status=None: [{"sid": s, "status": "candidate"} for s in "ABC"])
     monkeypatch.setattr(mb, "valuation_fields", lambda sids: fields)
     assert [i["sid"] for i in mb.valuation_page()["rows"]] == ["B", "A", "C"]
+
+
+def test_tab_counts_never_blank_and_fields_print_their_axis(seeded):
+    seeded.post("/api/multibagger/promote", json={"sid": "AAA", "thesis_line": "x", "reason": "y"})
+    seeded.post("/api/multibagger/hold", json={"sid": "AAA", "reason": "y"})
+    for tab in ("candidates", "held"):
+        html = seeded.get(f"/partial/multibagger/{tab}").text
+        assert 'data-max-book="30"' in html and 'data-n-book="1"' in html, tab
+    val = seeded.get("/multibagger/valuation").text
+    assert "mb-ff-axisv" in val and "₹80 &ndash;" not in val             # axis line; no mixed precision
+    assert seeded.get("/multibagger/stock/AAA").text.count("Grade C") == 0
+    assert seeded.get("/partial/multibagger/funnel").text.count("Grade C") == 1
