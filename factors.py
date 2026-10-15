@@ -1869,6 +1869,26 @@ FACTORS = {
             """,
         },
     },
+    "q_ebitda_chg": {
+        "label": "Quarterly Profit Growth (YoY)",
+        "group": "Growth",
+        "description": "Latest quarter's operating profit minus the same quarter a year earlier, "
+                       "divided by the year-ago revenue. NSE XBRL quarters (2017-24, known at filing) "
+                       "and Tickertape quarters (2025+ / live), never mixed inside one comparison. "
+                       "Expected IC POSITIVE.",
+        "source_columns": ["quarterly_results_nse.{revenue,pbt_pre_exceptional,finance_costs,depreciation,other_income}",
+                           "quarterly_income.{revenue,ebitda}"],
+        "filing_lag": "NSE: filed_at (first filing); Tickertape: quarter end + 60 days",
+        "v1_verdict_summary": "(new — plan 0025 task 5.1, 2026-10-14)",
+        "status_reason": "plan 0025 5.1 (docs/studies/quarterly-nse-2026-10.md, 77 monthly anchors): SMALL "
+                         "126-session non-overlap t 3.85 (NW 6.12), sign held 2020-22 / 2023-24 / 2025-26, "
+                         "Bonferroni pass; 2.14 net of announcement_car + momentum. MID / LARGE ~0. "
+                         "Promotion review 2026-10-15 (Amit: 'yes promote the strong candidate').",
+        "producer": "q_growth",
+        "pit_range": (-100, 100),
+        "bench": "LIBRARY",
+        "family": "Growth",
+    },
 }
 
 
@@ -1923,6 +1943,7 @@ PIT_PRODUCERS = {
     "residual_momentum_12_1": {"fn": "pit_residual_momentum_12_1", "inputs": ("px", "macro_hist", "eval_date")},
     "max_lottery_21d":  {"fn": "pit_max_lottery_21d", "inputs": ("px",)},
     "cons_beat":        {"fn": "pit_cons_beat_rate_4q", "inputs": ("yahoo_eps", "eval_date")},
+    "q_growth":         {"fn": "pit_q_ebitda_chg", "inputs": ("stocks", "nse_q", "qi", "eval_date")},
     "nlp":              {"fn": "pit_nlp_factors", "inputs": ("stocks", "nlp", "eval_date")},
     "pledge":           {"fn": "pit_pledge_quality", "inputs": ("stocks", "sh")},
     "promoter_trend":   {"fn": "pit_promoter_trend_4q", "inputs": ("stocks", "sh")},
@@ -2002,6 +2023,7 @@ INPUT_TABLES = {
     "fno_pcr": ("fno_pcr_history",), "fno_iv": ("fno_iv_history",),
     "corp_actions": ("corporate_actions",), "bse_results": ("bse_announcements",),
     "bse_gov": ("bse_announcements",), "nlp": ("nlp_scores",), "yahoo_eps": ("analyst_estimates",),
+    "nse_q": ("quarterly_results_nse",),
     "eval_date": (), "base": (),
 }
 

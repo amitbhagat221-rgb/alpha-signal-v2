@@ -124,6 +124,7 @@ _COLUMN_MIGRATIONS = [
     ("broker_recommendations", "reco_date_imputed", "INTEGER"),
     # consensus beat rate, last 4 results (LARGE re-audit 2026-10-10)
     ("daily_snapshots_pit", "cons_beat_rate_4q", "REAL"),
+    ("daily_snapshots_pit", "q_ebitda_chg", "REAL"),
 ]
 
 

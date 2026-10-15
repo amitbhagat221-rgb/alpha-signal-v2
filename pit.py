@@ -1028,6 +1028,14 @@ def pit_max_lottery_21d(px_pit):
     return compute_max_lottery_21d(prices=px_pit)
 
 
+def pit_q_ebitda_chg(stocks, nse_q, qi_pit, eval_date):
+    """Quarterly profit growth YoY (plan 0025 5.1, promoted 2026-10-15): NSE filings known at
+    filed_at (strictly before eval_date, first filing only) + Tickertape quarters already
+    sliced by knowable_quarterly. Returns DataFrame[sid, q_ebitda_chg]."""
+    from signals.quarterly_growth import compute_q_ebitda_chg
+    return compute_q_ebitda_chg(stocks, nse_q, qi_pit, eval_date.isoformat())
+
+
 def pit_cons_beat_rate_4q(yahoo_eps, eval_date):
     """Share of the last 4 results that beat the consensus EPS estimate, PIT — LARGE
     re-audit 2026-10-10. yahoo_eps is already sliced to reports dated before eval_date
@@ -1597,6 +1605,7 @@ RAW_SQL = {
     "bse_results": f"SELECT sid, date(dt_tm) AS ann_date FROM bse_announcements WHERE {factors.RESULT_FILING_SQL} AND sid IS NOT NULL AND dt_tm IS NOT NULL ORDER BY sid, dt_tm",
     "bse_gov": lambda: _bse_gov_sql(),
     "yahoo_eps": lambda: _yahoo_eps_sql(),
+    "nse_q": lambda: _nse_q_sql(),
     "nlp": "SELECT sid, doc_date, available_date, net_tone, uncertainty_density, forward_looking_intensity FROM nlp_scores WHERE doc_type = 'transcript'",
 }
 RAW_OPTIONAL = ['acs', 'banking_metrics', 'bse_gov', 'bse_results', 'corp_actions', 'fno_iv', 'fno_pcr', 'nlp']   # empty frame when the table is absent/unreadable
@@ -1606,6 +1615,11 @@ RAW_OPTIONAL = ['acs', 'banking_metrics', 'bse_gov', 'bse_results', 'corp_action
 def _yahoo_eps_sql():
     from signals.consensus_beat import ESTIMATES_SQL
     return ESTIMATES_SQL + " ORDER BY sid, target_period"
+
+
+def _nse_q_sql():
+    from signals.quarterly_growth import NSE_SQL
+    return NSE_SQL
 
 
 def _bse_gov_sql():
