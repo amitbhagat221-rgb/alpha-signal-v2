@@ -54,7 +54,8 @@
         {% if r.drivers %}<div class="sd-hint-line">Macro: {{ r.macro_signal|lower|capitalize if r.macro_signal and r.macro_signal != 'UNKNOWN' else 'no read' }}{% if r.drivers %} &middot; {{ r.drivers }}{% endif %}</div>{% endif %}
         {% if r.picks %}
         <div class="sd-tickers">
-            {% for p in r.picks %}{{ p.ticker }}{% if not loop.last %}<span class="sd-tk-sep">&middot;</span>{% endif %}{% endfor %}
+            {# <wbr>: a break point between tickers — the joined list was one unbreakable word that overflowed 375 px (2026-10-15) #}
+            {% for p in r.picks %}{{ p.ticker }}{% if not loop.last %}<span class="sd-tk-sep">&middot;</span><wbr>{% endif %}{% endfor %}
         </div>
         {% endif %}
     </a>

@@ -853,26 +853,25 @@ def get_factor_labels():
 
 def get_quarterly_financials(sid):
     """10 quarters of income statement + TTM aggregates + YoY growth."""
-    df = read_sql(
-        "SELECT period, end_date, revenue, net_income, eps, ebitda, "
-        "operating_profit, pbt, operating_expenses "
-        "FROM quarterly_income WHERE sid = ? AND reporting = 'consolidated' "
-        "ORDER BY end_date DESC LIMIT 10",
-        params=[sid],
-    )
-    if df.empty:
-        df = read_sql(
-            "SELECT period, end_date, revenue, net_income, eps, ebitda, "
-            "operating_profit, pbt, operating_expenses "
-            "FROM quarterly_income WHERE sid = ? AND reporting = 'standalone' "
-            "ORDER BY end_date DESC LIMIT 10",
-            params=[sid],
-        )
+    sql = ("SELECT period, end_date, revenue, net_income, eps, ebitda, "
+           "operating_profit, pbt, operating_expenses "
+           "FROM quarterly_income WHERE sid = ? AND reporting = ? "
+           "ORDER BY end_date DESC LIMIT 10")
+    df = read_sql(sql, params=[sid, "consolidated"])
+    alt = read_sql(sql, params=[sid, "standalone"])
+    # Consolidated first, unless it stopped more than a quarter before standalone (24 stocks,
+    # 2026-10-15: HDB's consolidated ends 2025-03, standalone 2026-06 — the page showed stale quarters)
+    if df.empty or (not alt.empty and pd.Timestamp(alt["end_date"].max())
+                    - pd.Timestamp(df["end_date"].max()) > pd.Timedelta(days=100)):
+        df = alt
     if df.empty:
         return {"quarters": [], "ttm": {}, "yoy": {}}
 
-    # EBITDA = revenue − operating expenses (the stored column holds the same).
-    df["ebitda"] = df["revenue"] - df["operating_expenses"]
+    num = ["revenue", "net_income", "eps", "ebitda", "operating_profit", "pbt", "operating_expenses"]
+    df[num] = df[num].apply(pd.to_numeric, errors="coerce")   # an all-NULL column arrives as object
+    # EBITDA = revenue − operating expenses (the stored column holds the same); the stored
+    # value where operating expenses are missing (HDB's consolidated rows: 2026-10-15 500)
+    df["ebitda"] = (df["revenue"] - df["operating_expenses"]).fillna(df["ebitda"])
     df["ebitda_margin"] = (df["ebitda"] / df["revenue"] * 100).round(1)
     df["pat_margin"] = (df["net_income"] / df["revenue"] * 100).round(1)
 
