@@ -238,6 +238,21 @@ BACKTEST = {
 
 # ── Hosts (API politeness + LLM model ids) live in hosts.HOSTS (plan 0015 Phase 2) ──
 
+# ── Multibagger thesis (plan 0026, ADR 0075): the pond's safety gates, one place for live and backtest ──
+MB_THESIS = {
+    "mcap_max_cr": 5_000,          # live: the one market cap, no deflation; the backtest deflates it per anchor
+    "adtv_min_cr": 0.5,            # ADTV = 126-session median of close x volume, Rs crore
+    "adtv_window": 126,
+    "adtv_rank_min": 250,          # ADTV rank must be BELOW the 250 most liquid (LARGE / MID stand-in)
+    "pledge_max_pct": 50.0,        # live only (no pledge history); NaN passes
+    "annual_lag_days": 150,        # an annual statement is knowable at period_end + 150 days
+    "red_flag_days": 365,
+    "red_flag_subcategories": ["Resignation of Statutory Auditors", "%CIRP%"],   # LIKE patterns, % = wildcard
+    "top_n": 100,                  # stage 2: the top 100 by thesis_rank
+    "max_book": 30,                # candidates + held (stage 3), output/mb_book.py
+    "max_held": 10,                # stage 5
+}
+
 # ── Screener Filters ──
 
 SCREEN = {

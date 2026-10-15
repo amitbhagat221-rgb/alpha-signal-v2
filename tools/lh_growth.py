@@ -66,11 +66,12 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from config import SCREEN  # noqa: E402
 from signals._fundamentals import prefer_consolidated  # noqa: E402
+from signals._quarterly import QUARTER_F, QUARTERLY_LAG, div as _div  # noqa: E402,F401
 from tools.backtest_pit import _aggregate, _compute_ic  # noqa: E402
 
 DB = PROJECT_ROOT / "data" / "alpha_signal.db"
 LH = PROJECT_ROOT / "data" / "lh"
-ANNUAL_LAG, QUARTERLY_LAG = 150, 60
+ANNUAL_LAG = 150
 HORIZONS = (63, 126, 252)
 NW_LAG = {63: 3, 126: 6, 252: 12}
 TIERS = ("LARGE", "MID", "SMALL")
@@ -82,8 +83,6 @@ ITEMS = {"Sales": "sales", "Profit before tax": "pbt", "Other Income": "oi", "In
          "No. of Equity Shares": "shares"}
 ANNUAL_F = ["a_sales_g1", "a_sales_accel", "a_ebit_chg", "a_margin_chg", "a_sales_cagr3",
             "a_growth_consist", "a_roce", "a_roce_min5", "a_roe", "a_piotroski_lite"]
-QUARTER_F = ["q_rev_yoy", "q_rev_accel", "q_ebitda_chg", "q_profit_accel", "q_margin_chg",
-             "q_margin_streak"]
 INTER = {"x_growth_mom": ("a_sales_g1", "mom_6m"), "x_accel_mom": ("a_sales_accel", "mom_6m"),
          "x_margin_mom": ("a_margin_chg", "mom_6m"), "x_quality_value": ("a_roce", "book_to_price"),
          "x_qaccel_mom": ("q_rev_accel", "mom_6m")}
@@ -93,10 +92,6 @@ EBIT_F = {"a_ebit_chg", "a_margin_chg", "a_roce", "a_roce_min5", "a_piotroski_li
 
 def ro():
     return sqlite3.connect(f"file:{DB}?mode=ro", uri=True)
-
-
-def _div(a, b):
-    return np.where((b > 0) & np.isfinite(a) & np.isfinite(b), a / np.where(b > 0, b, 1), np.nan)
 
 
 def annual_history(conn):

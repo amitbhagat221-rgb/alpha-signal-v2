@@ -528,6 +528,20 @@ TABLES = {
         "kind": "COMPUTED", "domain": "Computed Signals", "date_col": "snapshot_date",
         "stale_days": 10,
     },
+    # The desk's lists are Amit's decisions (plan 0026 2.2): written only from the CLI / cockpit, never by a
+    # pipeline step, so no freshness clock; empty until the first candidate is added.
+    "multibagger_book": {
+        "kind": "STATE", "domain": "Computed Signals", "date_col": "updated_at", "may_be_empty": True,
+        "source": "signals/mb_book.py (CLI / cockpit, by hand)",
+        "depth": "One row per stock Amit has made a candidate (max 30 candidates + held, max 10 held)",
+        "description": "The multibagger desk's lists: candidate / held / dropped, since when, the one-line thesis, entry date and price, and the reason for the latest change. A decision log, not a score.",
+    },
+    "multibagger_book_log": {
+        "kind": "LOG", "domain": "Computed Signals", "date_col": "ts", "may_be_empty": True,
+        "source": "signals/mb_book.py (same transaction as every multibagger_book change)",
+        "depth": "One row per add / hold / drop",
+        "description": "Append-only history of the multibagger desk's lists: who changed which stock from which status to which, why, and when.",
+    },
     "nlp_scores": {"kind": "COMPUTED", "domain": "Computed Signals", "date_col": None},
     "nwc_to_revenue_scores": {
         "kind": "COMPUTED", "domain": "Computed Signals", "date_col": "snapshot_date",
