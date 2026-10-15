@@ -147,6 +147,11 @@ def harvest_stock(session, sid, symbol, since, until, skip_stored=True, limit=No
             continue
         try:
             r = _http.polite_get(f["url"], timeout=60)
+            if r is None:                                       # polite_get: 404 → None
+                # NSE lists filings whose XBRL file is gone: permanent, not a retryable error (it was an
+                # AttributeError on None, so the stock was never marked done — 240 a window, 2026-10-15)
+                runlog.item_failed(LABEL, f"{sid} {f['url']}", "XBRL file 404 on NSE (listed, not served)")
+                continue
             vals = parse(r.content.decode("utf-8", "replace"), f["start"], f["end"])
         except Exception as e:                                  # visible in run_events, not a print
             runlog.item_error(LABEL, f"{sid} {f['url']}", e)
@@ -224,7 +229,15 @@ def main():
 
     print(f"nse_results: {len(items)} stocks, quarters {a.since} → {a.until}"
           + (f", budget {a.budget_min:.0f} min" if a.budget_min else ""))
-    _http.run_harvester(items, fetch, write, flush_every=10, label=LABEL)
+    try:
+        _http.run_harvester(items, fetch, write, flush_every=10, label=LABEL)
+    finally:
+        # stocks that answered with no filings (and no error) are done too: write() only runs when a
+        # batch has rows, so the last 97 — new / SME / BSE-only names — were re-fetched every window
+        # and failed it with "0 of 97 returned data" (2026-10-15)
+        if pending_done:
+            with DONE_FILE.open("a") as f:
+                f.write("".join(f"{s}\n" for s in pending_done))
 
 
 if __name__ == "__main__":
