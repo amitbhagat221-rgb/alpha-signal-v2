@@ -222,3 +222,4 @@ Source: [research 0008 findings](../research/0008-multibagger-critique-findings.
   - **Candidates:** the top 30 were promoted as candidates (actor `claude`), and valuations were refreshed for the book.
   - **Pages:** `/multibagger/research` (list, sector filter) and `/multibagger/research/<sid>` (plain words, dated).
   - **Sectors:** hand-classified from the research in `output/mb_sectors.py`, because the vendor tags were wrong for about 1 in 6 names.
+- 2026-10-16, `mb_dossier` PARKED (Amit: "park it"). The deep research covers the same ground with cited numbers. Revisit it as a cheap quarterly refresh: re-read each new quarter and event against the dated research and flag what changed, from the Nov 2026 results season.
