@@ -3,7 +3,7 @@
 Status: **proposed, not urgent** (Amit 2026-10-16: "plan note (future, not urgent): forensic data audit by deep research"). Owner: Amit. Linked to plan [0026](0026-multibagger-desk.md) stage 4b ([research 0011](../research/0011-multibagger-deep-research-brief.md)).
 
 ## Why
-The stage-4b research agents read primary filings against our per-stock pack and found at least seven classes of data error our checks missed:
+The stage-4b research agents read primary filings against our per-stock pack and found at least ten classes of data error our checks missed:
 
 1. **Pre-demerger fundamentals.** BHIL #1, VERAN #10 and DCM #82 were scored on the whole company before its demerger.
 2. **Stale share counts.** IIAB #2 was 22× too small and AFI 10× too small; 22 pond stocks were affected.
@@ -12,6 +12,9 @@ The stage-4b research agents read primary filings against our per-stock pack and
 5. **Partial holder lists.** 279 filings in 246 stocks made holders appear to "exit" and "re-enter".
 6. **Wrong sector or industry tags**, which make the peer tables meaningless.
 7. **Mis-tagged events.** Companies file regulator orders under "Award of Order", and prices are left unadjusted for some splits and bonuses.
+8. **Annual profit inflated by one-offs.** Land-sale surplus (MUKA), a deferred-tax write-back (TNNP Rs 219 Cr) and exceptional gains (VSKI) feed the cheapness part through E/P.
+9. **Pending merger into a parent.** BRLE and TPLP will become slices of their parent, so "small" and "cheap" no longer describe what a holder will own.
+10. **Prices not adjusted for a bonus or split.** RSWM 2022, KOTY, REIN and HMA. Since 2025-07, 23 one-day falls of more than 40 % have no corporate adjustment within 5 days; 4 are pond stocks (GLOR, SADH, TAC, VMA). Some may be real crashes, so this needs a check, not an automatic gate.
 
 Classes 1, 2 and 4 are now gated in the thesis run (`signals/multibagger.data_checks`, config `MB_THESIS["data_checks"]`). Every class was found by an agent reading a filing, never by a health check. A recurring audit would catch new classes before they reach a score.
 

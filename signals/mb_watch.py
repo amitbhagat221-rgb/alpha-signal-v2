@@ -232,7 +232,7 @@ def _holders(conn, sid):
     h = h[h["filed_at"] == first].copy()
     h["key"] = h["holder_name"].map(_norm)
     h["investor"] = h["holder_name"].map(investor_of)
-    h["is_promoter"] = h["promoter_type"].notna()
+    h["is_promoter"] = h["key"].isin(set(h.loc[h["promoter_type"].notna(), "key"]))   # tagged in ANY filing
     # a holder can appear on several rows of one filing (several sections): keep the largest
     return h.sort_values("pct", ascending=False).drop_duplicates(["end_date", "key"]).sort_values("end_date")
 

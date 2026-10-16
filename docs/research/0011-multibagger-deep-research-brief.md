@@ -59,6 +59,7 @@
   2. Then call `https://www.nseindia.com/api/corporate-announcements?index=equities&symbol=<SYM>` (`index=sme` for SME-board stocks), `.../api/annual-reports?index=<equities|sme>&symbol=<SYM>` and `.../api/corporate-share-holdings-master?index=<…>&symbol=<SYM>`.
   3. Fetch `nsearchives.nseindia.com` PDFs with curl plus `-e https://www.nseindia.com/`; WebFetch times out on them.
   - SME companies report half-yearly, so the pack has no quarters for them.
+- **Schemes, swaps and mergers.** The valuation report, fairness opinion and scheme document usually sit on the company website's investor or scheme page, not among the exchange links. Read them for any share swap, merger or demerger, including the share count after the scheme.
 - **Rating rationales** are often attached to the BSE "Credit rating" filing; otherwise use the agency's site.
 - **Check NSE announcements for every stock, not only NSE-only names.** Some litigation, tax-order and raid disclosures are filed only on NSE (smoke test, MUKK). Use the cookie route above with `index=equities`.
 - **Prices on other dates:** `SELECT date, close FROM stock_prices WHERE sid = '<sid>' AND date BETWEEN …` (read-only).

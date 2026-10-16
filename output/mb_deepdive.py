@@ -91,13 +91,17 @@ def _named_holders(sid):
     """{end_date: {normalised name: (display name, pct)}} for non-promoter holders >= HOLDER_MIN_PCT, taken from the
     latest filing of each quarter end."""
     df = db.read_sql(
-        "SELECT h.end_date, h.holder_name, h.pct, h.holder_category FROM shareholding_holders h "
-        "WHERE h.sid = ? AND h.pct >= ? AND h.promoter_type IS NULL AND h.filed_at = "
+        "SELECT h.end_date, h.holder_name, h.pct, h.holder_category, h.promoter_type FROM shareholding_holders h "
+        "WHERE h.sid = ? AND h.pct >= ? AND h.filed_at = "
         "(SELECT MAX(filed_at) FROM shareholding_holders x WHERE x.sid = h.sid AND x.end_date = h.end_date)",
         [sid, HOLDER_MIN_PCT])
+    norm = lambda n: "".join(ch for ch in str(n).lower() if ch.isalnum())   # noqa: E731 - spelling varies by filing
+    promoters = {norm(n) for n in df.loc[df["promoter_type"].notna(), "holder_name"]}   # tagged in ANY filing
     out = {}
-    for r in df.to_dict("records"):
-        key = "".join(ch for ch in str(r["holder_name"]).lower() if ch.isalnum())   # spelling and spacing vary by filing
+    for r in df[df["promoter_type"].isna()].to_dict("records"):
+        key = norm(r["holder_name"])
+        if key in promoters:                      # a promoter whose tag is missing in this filing (ORBL Dec-2025)
+            continue
         out.setdefault(r["end_date"], {})[key] = (r["holder_name"].strip(), r["pct"])
     return out
 
