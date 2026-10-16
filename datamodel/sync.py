@@ -768,6 +768,8 @@ def sync_documents(c, full, since):
          lambda r: r.get("generated_at") or r.get("snapshot_date"), None, None, "generated_at"),
         ("mb_dossiers", "mb_dossier", ["sid", "as_of_date"], ("sid", sec), "as_of_date",
          lambda r: r.get("created_at") or r.get("as_of_date"), "thesis_line", "thesis", "created_at"),
+        ("mb_research", "mb_research", ["sid", "as_of_date"], ("sid", sec), "as_of_date",
+         lambda r: r.get("created_at") or r.get("as_of_date"), "verdict_reason", "report", "created_at"),
         ("sector_metadata", "sector_metadata", ["sector", "source"], ("sector", sct), "generated_at",
          lambda r: r.get("generated_at"), "industry", "payload", "generated_at"),
     ]

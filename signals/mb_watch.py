@@ -27,7 +27,7 @@ from signals import forensic
 COLUMNS = ["date", "source", "category", "severity", "headline", "detail", "url"]
 CARD_KEYS = ["sid", "name", "cap_tier", "industry", "as_of", "thesis", "known_investors", "results",
              "events_90d", "top_events_90d", "valuation_position", "forensic", "pledge", "promoter"]
-BSE_ATTACH = "https://www.bseindia.com/xml-data/corpfiling/AttachLive/"
+BSE_ATTACH = "https://www.bseindia.com/xml-data/corpfiling/AttachHis/"   # AttachLive 404s after ~2 weeks
 
 
 # ── plumbing ────────────────────────────────────────────────────────────────────────────────────

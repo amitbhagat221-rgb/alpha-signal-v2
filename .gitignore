@@ -133,3 +133,6 @@ output/*.json.lock
 
 # the Boardroom app icons are source, not output (plan 0019)
 !cockpit/static/boardroom/*.png
+
+# plan 0026 deep research: packs regenerate, results live in mb_research
+output/mb_research/

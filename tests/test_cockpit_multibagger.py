@@ -42,6 +42,16 @@ def _make_db(path, seeded):
         c.execute("INSERT INTO mb_dossiers (sid, as_of_date, thesis_line, thesis, bull, bear, catalysts, risks, what_would_break_it) "
                   "VALUES ('AAA','2026-06-30','A castings maker turning the corner.','Results recovered.',?,?,?,?,?)",
                   tuple('["%s"]' % w for w in ("Margins up", "Premium to peers", "New plant", "Single customer", "Margins roll over")))
+        import json as _json
+        c.execute("INSERT INTO mb_research (sid, as_of_date, verdict, verdict_reason, multibagger_case, case_reason, n_red_flags, "
+                  "n_high_flags, fields, report, model, created_at) VALUES ('AAA','2026-10-16','flag','Large sales to a promoter firm.',"
+                  "'plausible','Capacity doubles by FY28.',1,0,?,?,'test','2026-10-16')",
+                  (_json.dumps({"red_flags": [{"area": "related_party", "severity": "medium", "finding": "Sales to a promoter firm",
+                                               "date": "2026-08-01", "source_url": "https://example.com/ar.pdf"}],
+                                "red_flag_checks": {"auditor": "not_found"}, "catalysts_12m": ["New plant"],
+                                "what_would_break_it": ["Customer loss"], "unknowns": ["Order book size"],
+                                "sources": [{"n": 1, "url": "https://example.com/ar.pdf", "title": "Annual report FY26"}]}),
+                   "Full research report text."))
         for i, (end, rev, pat) in enumerate([("2025-06-30", 100, 8), ("2025-09-30", 110, 9), ("2025-12-31", 120, 10), ("2026-03-31", 125, 11),
                                               ("2026-06-30", 140, 15)]):
             c.execute("INSERT INTO quarterly_income (sid, period, end_date, reporting, revenue, ebitda, net_income) VALUES "
@@ -280,6 +290,8 @@ def test_exit_flags_fire_on_process_events(monkeypatch):
             return {"d": d}
         if "quarterly_income" in sql:
             return {"d": (date.today() - timedelta(days=400)).isoformat()}
+        if "corporate_adjustments" in sql:
+            return {"d": d}
         return {}
 
     def rows(sql, params=None):
@@ -295,6 +307,16 @@ def test_exit_flags_fire_on_process_events(monkeypatch):
     kinds = {x["text"].split(":")[0]: x["kind"] for x in f}
     texts = " | ".join(x["text"] for x in f)
     assert "auditor resigned" in texts and "GSM" in texts and "results overdue" in texts, texts
-    assert "pledge 62 %" in texts and "promoter down 7.0 pts" in texts, texts
+    assert "pledge 62 %" in texts and "promoter down 7.0 pts" in texts and "demerged" in texts, texts
     assert kinds == {"Exit": "exit", "Review": "review"}
     assert config.MB_EXITS["pledge_review_pct"] == 50.0
+
+
+def test_research_verdict_on_funnel_and_stock_page(seeded):
+    """Plan 0026 stage 4b: the loaded research verdict shows as a chip on the funnel card and a section on the stock page."""
+    funnel = seeded.get("/partial/multibagger/funnel").text
+    assert "Research: flagged" in funnel and "5x plausible" in funnel
+    page = seeded.get("/multibagger/stock/AAA").text
+    assert "Deep research" in page and "Sales to a promoter firm" in page and "Full research report text." in page
+    assert "Capacity doubles by FY28." in page and "Annual report FY26" in page
+    assert "Not researched yet" in seeded.get("/multibagger/stock/BBB").text

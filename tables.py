@@ -642,6 +642,10 @@ TABLES = {
     },
     "sector_briefs": {"kind": "COMPUTED", "domain": "Output", "date_col": "snapshot_date"},
     "sector_dossiers": {"kind": "COMPUTED", "domain": "Output", "date_col": "snapshot_date"},
+    "mb_research": {
+        "kind": "COMPUTED", "domain": "Output", "date_col": "as_of_date", "may_be_empty": True,   # on demand: no freshness benchmark
+        "description": "Plan 0026 stage-4b deep research on the multibagger top 100: red-flag verdict (clean/flag/reject), 5x case (strong/plausible/weak), the full verdict JSON and the compressed report. Written by output/mb_research.py --load from research-agent files (brief: docs/research/0011).",
+    },
     "mb_dossiers": {
         "kind": "COMPUTED", "domain": "Output", "date_col": "as_of_date", "freq": "quarterly", "may_be_empty": True,
         "description": "Plan 0026 stage-4 deep-dive notes on the multibagger candidates (thesis line, thesis, bull, bear, catalysts, risks, what would break it). Narrative only, no raw numbers; written by the mb_dossier queue kind.",

@@ -52,6 +52,33 @@
     {% endif %}
 </section>
 
+{# 2b ── deep research #}
+<section class="card mb-sec" id="research">
+    <h2 class="mb-h">Deep research <span class="u-muted-11">red-flag sweep and the 5x case, by a research agent from filings and the web (brief: research 0011)</span></h2>
+    {{ failed('research') }}
+    {% set r = d.research %}
+    {% if r %}
+    <p class="mb-line">{{ tipped_pill(r.word, r.verdict_reason, r.tone) }} {{ tipped_pill('5x case: ' ~ r.case, r.case_reason, 'accent' if r.case == 'strong' else 'muted') }}</p>
+    <p>{{ r.verdict_reason }}</p>
+    <p class="u-muted-11">{{ r.case_reason }}</p>
+    <h3 class="mb-h3">Red flags</h3>
+    <ul class="mb-list">{% for f in r.red_flags %}<li><span class="pill pill-{{ {'high': 'red', 'medium': 'amber'}.get(f.severity, 'muted') }}">{{ f.severity }}</span> <span class="u-muted-11">{{ f.area|replace('_', ' ') }}</span> {{ f.finding }}{% if f.date %} <span class="u-muted-11 mono">{{ f.date }}</span>{% endif %}{% if f.source_url and f.source_url.startswith('http') %} <a href="{{ f.source_url }}" target="_blank" rel="noopener">source</a>{% endif %}</li>{% else %}<li class="u-muted-11">none found</li>{% endfor %}</ul>
+    <div class="u-muted-11">Checks: {% for k, v in r.checks %}{{ k }} <b>{{ v|replace('_', ' ') }}</b>{{ ' · ' if not loop.last }}{% endfor %}</div>
+    <div class="mb-cols">
+        <div><h3 class="mb-h3">Catalysts, next 12 months</h3><ul class="mb-list">{% for x in r.catalysts %}<li>{{ x }}</li>{% else %}<li class="u-muted-11">none given</li>{% endfor %}</ul></div>
+        <div><h3 class="mb-h3">What would break it</h3><ul class="mb-list">{% for x in r.breaks %}<li>{{ x }}</li>{% else %}<li class="u-muted-11">none given</li>{% endfor %}</ul></div>
+        <div><h3 class="mb-h3">Could not establish</h3><ul class="mb-list">{% for x in r.unknowns %}<li>{{ x }}</li>{% else %}<li class="u-muted-11">none</li>{% endfor %}</ul></div>
+    </div>
+    <details><summary>Full report and {{ r.sources|length }} sources</summary>
+        <div class="mb-report">{{ r.report }}</div>
+        <ol class="mb-list">{% for s in r.sources %}<li>{% if s.url and s.url.startswith('http') %}<a href="{{ s.url }}" target="_blank" rel="noopener">{{ s.title or s.url }}</a>{% else %}{{ s.title or s.url }}{% endif %} <span class="u-muted-11">{{ s.type }} {{ s.date }}</span></li>{% endfor %}</ol>
+    </details>
+    <div class="u-muted-11">Researched {{ r.as_of|short_date }}{% if r.model %} by {{ r.model }}{% endif %}. Not a price target or a buy call; verdicts are pre-registered and checked against returns at 24 months.</div>
+    {% else %}
+    <div class="mb-empty">Not researched yet. The top 100 is researched in waves (research 0011).</div>
+    {% endif %}
+</section>
+
 {# 3 ── results #}
 <section class="card mb-sec" id="results">
     <h2 class="mb-h">3. Results, last {{ d.trend|length }} quarters <span class="u-muted-11">&#8377; crore, growth against the same quarter a year earlier</span></h2>

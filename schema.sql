@@ -1722,6 +1722,24 @@ CREATE INDEX IF NOT EXISTS idx_sector_dossiers_date ON sector_dossiers(snapshot_
 
 -- Plan 0026 stage 4: the LLM deep-dive note on one of the 30 candidates (output/mb_dossier.py, queue kind mb_dossier).
 -- Narrative only, no raw numbers (validator-enforced); list fields are JSON arrays. as_of_date = newest reported quarter end.
+-- Plan 0026 stage 4b: deep research on the thesis top 100 (output/mb_research.py, brief docs/research/0011).
+-- One row per stock per research date; fields = the full verdict.json, report = report.md.
+CREATE TABLE IF NOT EXISTS mb_research (
+    sid               TEXT NOT NULL REFERENCES stocks(sid),
+    as_of_date        TEXT NOT NULL,
+    verdict           TEXT NOT NULL,     -- clean | flag | reject
+    verdict_reason    TEXT NOT NULL,
+    multibagger_case  TEXT NOT NULL,     -- strong | plausible | weak
+    case_reason       TEXT NOT NULL,
+    n_red_flags       INTEGER NOT NULL,
+    n_high_flags      INTEGER NOT NULL,
+    fields            TEXT NOT NULL,     -- verdict.json
+    report            TEXT NOT NULL,     -- report.md
+    model             TEXT,
+    created_at        TEXT NOT NULL,
+    PRIMARY KEY (sid, as_of_date)
+);
+
 CREATE TABLE IF NOT EXISTS mb_dossiers (
     sid                  TEXT NOT NULL REFERENCES stocks(sid),
     as_of_date           TEXT NOT NULL,

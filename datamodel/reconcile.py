@@ -190,6 +190,7 @@ def checks(c):
                                   ("news_briefs", "news_brief", "brief_date", ""),
                                   ("sector_dossiers", "sector_dossier", "sector || '|' || snapshot_date", ""),
                                   ("mb_dossiers", "mb_dossier", "sid || '|' || as_of_date", ""),
+                                  ("mb_research", "mb_research", "sid || '|' || as_of_date", ""),
                                   ("sector_metadata", "sector_metadata", "sector || '|' || source", "")):
         if exists(c, t) and dtype in dt:
             yield (t, *_one(c, f"SELECT COUNT(DISTINCT {keys}) FROM {t} {extra}"),

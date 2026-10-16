@@ -9,6 +9,7 @@ One function per number, each reading the one module that owns it:
   results, ownership, peers    output/mb_deepdive.py
   valuation field              valuation_ranges (signals/valuation.py)
   dossier narrative            mb_dossiers (output/mb_dossier.py)
+  deep research                mb_research (output/mb_research.py, brief docs/research/0011)
   conviction verdict           cockpit.api._conviction_verdicts (a monitor, never an exit rule)
 
 Pages
@@ -280,6 +281,11 @@ def exit_flags(sid, card=None):
     if len(pr) == 3 and pr[2]["promoter_pct"] - pr[0]["promoter_pct"] > x["promoter_drop_pts"]:
         out.append({"text": f"Review: promoter down {pr[2]['promoter_pct'] - pr[0]['promoter_pct']:.1f} pts",
                     "tone": "amber", "as_of": pr[0]["end_date"], "kind": "review"})
+    dm = _one("SELECT MAX(ex_date) AS d FROM corporate_adjustments WHERE sid = ? AND inds LIKE '%DEMERGER%' AND ex_date >= ?",
+              [sid, (today - pd.Timedelta(days=x["demerger_days"])).isoformat()])
+    if dm and dm.get("d"):
+        out.append({"text": "Review: demerged, score uses pre-demerger results", "tone": "amber", "as_of": dm["d"],
+                    "kind": "review"})
     return out
 
 
@@ -314,11 +320,47 @@ def funnel_cards(snap):
 
 
 def funnel():
-    """Funnel tab: counts, gate tally, grade, and the cards with each name's current book status."""
+    """Funnel tab: counts, gate tally, grade, and the cards with each name's current book status and research verdict."""
     counts = funnel_counts()
     cards = funnel_cards(counts["as_of"]) if counts["as_of"] else []
     status = book_status([c["sid"] for c in cards])
-    return {**counts, "grade": GRADE, "cards": [{**c, "status": status.get(c["sid"])} for c in cards]}
+    res = research_verdicts()
+    return {**counts, "grade": GRADE, "n_researched": sum(c["sid"] in res for c in cards),
+            "cards": [{**c, "status": status.get(c["sid"]), "research": res.get(c["sid"])} for c in cards]}
+
+
+# ── Deep research (plan 0026 stage 4b) ──────────────────────────────────────────────────────────
+
+RESEARCH_TONE = {"clean": "green", "flag": "amber", "reject": "red"}
+RESEARCH_WORD = {"clean": "Research: clean", "flag": "Research: flagged", "reject": "Research: reject"}
+
+
+def research_verdicts():
+    """{sid: {verdict, multibagger_case, verdict_reason, as_of_date, n_high_flags, tone, word}}, newest per stock.
+    Not cached: it changes whenever a research wave is loaded."""
+    rows = _rows("SELECT r.sid, r.verdict, r.multibagger_case, r.verdict_reason, r.as_of_date, r.n_high_flags "
+                 "FROM mb_research r JOIN (SELECT sid, MAX(as_of_date) AS d FROM mb_research GROUP BY sid) m "
+                 "ON m.sid = r.sid AND m.d = r.as_of_date")
+    return {r["sid"]: {**r, "tone": RESEARCH_TONE.get(r["verdict"], "muted"), "word": RESEARCH_WORD.get(r["verdict"], r["verdict"])}
+            for r in rows}
+
+
+def research(sid):
+    """The newest deep research for one stock, shaped for the stock page, or None."""
+    if not _rows("SELECT 1 AS x FROM mb_research WHERE sid = ? LIMIT 1", [sid]):
+        return None
+    from output import mb_research
+    r = mb_research.latest(sid)
+    f = r["fields"]
+    sev = {"high": 0, "medium": 1, "low": 2}
+    return {"as_of": r["as_of_date"], "verdict": r["verdict"], "verdict_reason": r["verdict_reason"],
+            "case": r["multibagger_case"], "case_reason": r["case_reason"], "model": r.get("model"),
+            "tone": RESEARCH_TONE.get(r["verdict"], "muted"), "word": RESEARCH_WORD.get(r["verdict"], r["verdict"]),
+            "red_flags": sorted(f.get("red_flags") or [], key=lambda x: sev.get(x.get("severity"), 3)),
+            "checks": [(k.replace("_", " "), v) for k, v in (f.get("red_flag_checks") or {}).items()],
+            "business": f.get("business") or {}, "growth_drivers": f.get("growth_drivers") or [],
+            "catalysts": f.get("catalysts_12m") or [], "breaks": f.get("what_would_break_it") or [],
+            "unknowns": f.get("unknowns") or [], "sources": f.get("sources") or [], "report": r["report"]}
 
 
 # ── Valuation fields ────────────────────────────────────────────────────────────────────────────
@@ -577,7 +619,7 @@ def deep_dive(sid):
     for key, fn, args in (
             ("trend", mb_deepdive.results_trend, (sid, 12)), ("own", ownership, (sid,)),
             ("peers", mb_deepdive.peers, (sid, 8)), ("govt", _watch().govt_links, (sid,)),
-            ("events", _events, (sid,)), ("dossier", dossier, (sid,))):
+            ("events", _events, (sid,)), ("dossier", dossier, (sid,)), ("research", research, (sid,))):
         d[key], err = _section(fn, *args)
         if err:
             d["sections_failed"][key] = err
