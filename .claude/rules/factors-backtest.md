@@ -39,5 +39,8 @@ paths:
 - No `weights` until t ≥ 1.5 on at least one cap tier, never mechanically — `docs/reference/signal-weights.md`; run the multiple-testing haircut (ADR 0043) in every promotion review.
 - Judge a book (not a factor) on ≥ 20 names across 12 staggered start months (`tools/lh_timing_luck.py`): one 10-name start swung +0.8 % vs +18.4 %/yr on the same rule. Fast scores only via walk-forward `fast_select`; live weights on history are in-sample.
 
+**Hindsight inputs**
+- `policy_events` / `sector_policy_pit` is a hand-curated 2026 list (hindsight weights, outcomes as events): never in a backtest or a score — `tools/mb_thesis_v2.py` docstring, plan 0026 1b.
+
 **PIT writes**
 - `reconstruct_pit.py` writes only the columns the requested signals produced, so `--signal X` is safe on existing dates. Never pad missing `PIT_COLUMNS` with NaN before the write — the UPDATE would wipe every untouched column.
