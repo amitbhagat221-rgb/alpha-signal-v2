@@ -129,3 +129,16 @@ def test_file_round_trips_and_the_manifest_records_it(tmp_path, manifest):
     assert (row["key"], row["n_rows"], row["n_days"]) == ("RELI", 6, 2)
     assert row["fetched_on"] == date.today().isoformat()
     assert kb.done_sids() == {"RELI"}
+
+
+def test_a_name_kite_does_not_list_is_recorded_once_and_never_retried(tmp_path, manifest, monkeypatch):
+    """446 SME-board names made the hourly job log a FAILED run every hour (2026-10-16): they are
+    recorded in the manifest with a note and no file, and the next run has nothing left to fetch."""
+    monkeypatch.setattr(kb, "instrument_tokens", lambda kc: [("AAYU", "AAYUSHBULL", "SMALL", None)])
+    monkeypatch.setattr(kb, "kite", lambda cached_only=True: object())
+    monkeypatch.setattr(kb.runlog, "harvest_summary", lambda *a, **k: None)
+    assert kb.harvest() == (0, 0, 0)                                     # no error, no exception
+    row = db.read_sql("SELECT * FROM intraday_files").iloc[0]
+    assert (row["key"], row["path"], row["n_rows"]) == ("AAYU", None, 0)
+    assert "no NSE equity instrument" in row["note"]
+    assert kb.done_sids() == {"AAYU"}

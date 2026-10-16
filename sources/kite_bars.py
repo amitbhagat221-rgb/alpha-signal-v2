@@ -229,14 +229,17 @@ def harvest(sids=None, until=None, budget_min=None):
     if not todo:
         print(f"{LABEL}: nothing left to fetch", flush=True)
         return 0, 0, 0
-    ok = err = rows = 0
+    ok = err = rows = skipped = 0
     for i, (sid, ticker, tier, token) in enumerate(todo, 1):
         if deadline and datetime.now() >= deadline:
             print(f"{LABEL}: deadline reached after {i - 1} stocks", flush=True)
             break
         if token is None:
-            err += 1
-            runlog.item_failed(LABEL, sid, f"{ticker}: no NSE equity instrument on Kite", symptom="F")
+            # SME-board and other names Kite does not list as NSE equities: recorded as done with no
+            # file, so the hourly job stops retrying them (446 of them made it log a FAILED run every
+            # hour on 2026-10-16). A later listing is picked up by the weekly forward fetch, not here.
+            record("staging", sid, to_frame(sid, []), None, 0, note=f"{ticker}: no NSE equity instrument on Kite")
+            skipped += 1
             continue
         try:
             df = fetch_stock(kc, sid, token)
@@ -262,6 +265,8 @@ def harvest(sids=None, until=None, budget_min=None):
         if i % 10 == 0 or i == len(todo):
             print(f"  [{i}/{len(todo)}] {sid} {ticker} {tier}: {len(df):,} bars "
                   f"from {df['ts'].min():%Y-%m-%d}" if not df.empty else f"  [{i}/{len(todo)}] {sid}: none", flush=True)
+    if skipped:
+        print(f"{LABEL}: {skipped} stocks have no NSE equity instrument on Kite — recorded, not retried", flush=True)
     runlog.harvest_summary(LABEL, min(i, len(todo)), ok, err, rows)
     if ok == 0 and err > 0:
         raise RuntimeError(f"{LABEL}: {err} stocks failed and none was written")
