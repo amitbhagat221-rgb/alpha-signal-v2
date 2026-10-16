@@ -1,0 +1,65 @@
+{# /multibagger/research/<sid> - one stock's research in plain words. Data: cockpit/multibagger.py research_page(). #}
+{% extends "base.html" %}
+{% from "_mb_macros.html" import status_pill %}
+{% block title %}{{ page_title(d.stock.name ~ " research") }}{% endblock %}
+
+{% block content %}
+<p class="mb-crumb"><a href="/multibagger/research">&larr; All research</a> &middot; <a href="/multibagger/stock/{{ d.stock.sid }}">Numbers and charts</a></p>
+<h1 class="section-title">{{ d.stock.name }} <span class="mono u-muted-11">{{ d.stock.ticker }}</span> {% if d.status %}{{ status_pill(d.status) }}{% endif %}</h1>
+<div class="section-desc"><b>{{ d.sector or 'Sector not set' }}</b>{% if d.sub_sector %} &rsaquo; {{ d.sub_sector }}{% endif %} &middot; researched {{ d.as_of|short_date }}</div>
+
+<div class="mb-rs-boxes">
+    <section class="card mb-rs-box"><div class="u-muted-11">Verdict</div>
+        <div><span class="pill pill-{{ d.verdict_tone }} mb-rs-big">{{ d.verdict_word }}</span></div>
+        <p>{{ d.verdict_reason }}</p></section>
+    <section class="card mb-rs-box"><div class="u-muted-11">Could it grow 5x?</div>
+        <div><span class="pill pill-{{ d.case_tone }} mb-rs-big">{{ d.case_word }}</span></div>
+        <p>{{ d.case_reason }}</p></section>
+    <section class="card mb-rs-box"><div class="u-muted-11">Rank in the top 100</div>
+        <div class="mb-rs-big mono">{% if d.rank %}{{ d.rank }}{% else %}out{% endif %}
+            <span class="u-muted-11">was {{ d.thesis_rank or '&mdash;'|safe }} before research</span></div>
+        <p class="u-muted-11">{% if d.verdict == 'reject' %}Removed from the ranking because of a serious red flag.
+            {% else %}{{ d.n_integrity }} concern{{ '' if d.n_integrity == 1 else 's' }} about honesty or accounting and
+            {{ d.n_business }} business concern{{ '' if d.n_business == 1 else 's' }} cost {{ '%.3f'|format(d.penalty) }}
+            points{% if d.bonus %}; a possible 5x added {{ '%.3f'|format(d.bonus) }}{% endif %}.{% endif %}</p></section>
+</div>
+
+<section class="card mb-sec">
+    <h2 class="mb-h">What the company does</h2>
+    <p>{{ d.what_it_does or 'Not described.' }}</p>
+    {% if d.customers %}<p><b>Customers:</b> {{ d.customers }}</p>{% endif %}
+    {% if d.competitors %}<p><b>Competitors:</b> {{ d.competitors|join(', ') if d.competitors is not string else d.competitors }}</p>{% endif %}
+    {% if d.edge %}<p><b>What sets it apart:</b> {{ d.edge }}</p>{% endif %}
+</section>
+
+<section class="card mb-sec">
+    <h2 class="mb-h">What worries us</h2>
+    {% if d.flags %}
+    <ul class="mb-rs-flags">
+        {% for f in d.flags %}
+        <li><span class="pill pill-{{ f.sev_tone }}">{{ f.sev_word }}</span> <b>{{ f.area_word }}.</b> {{ f.finding }}
+            <span class="u-muted-11">{% if f.date %}{{ f.date }}{% endif %}{% if f.source_url and f.source_url.startswith('http') %} &middot; <a href="{{ f.source_url }}" target="_blank" rel="noopener">source</a>{% endif %}</span></li>
+        {% endfor %}
+    </ul>
+    {% else %}<p class="u-muted-11">Nothing found.</p>{% endif %}
+</section>
+
+<div class="mb-cols">
+    <section class="card mb-sec"><h2 class="mb-h">What could make it grow</h2>
+        <ul class="mb-list">{% for x in d.drivers %}<li>{{ x }}</li>{% else %}<li class="u-muted-11">Nothing specific.</li>{% endfor %}</ul></section>
+    <section class="card mb-sec"><h2 class="mb-h">What would break the story</h2>
+        <ul class="mb-list">{% for x in d.breaks %}<li>{{ x }}</li>{% else %}<li class="u-muted-11">Not given.</li>{% endfor %}</ul></section>
+    <section class="card mb-sec"><h2 class="mb-h">Watch in the next 12 months</h2>
+        <ul class="mb-list">{% for x in d.catalysts %}<li>{{ x }}</li>{% else %}<li class="u-muted-11">Nothing scheduled.</li>{% endfor %}</ul></section>
+    <section class="card mb-sec"><h2 class="mb-h">What we could not find out</h2>
+        <ul class="mb-list">{% for x in d.unknowns %}<li>{{ x }}</li>{% else %}<li class="u-muted-11">Nothing open.</li>{% endfor %}</ul></section>
+</div>
+
+<section class="card mb-sec">
+    <details><summary>Full report ({{ d.sources|length }} sources)</summary>
+        <div class="mb-report">{{ d.report }}</div>
+        <ol class="mb-list">{% for s in d.sources %}<li>{% if s.url and s.url.startswith('http') %}<a href="{{ s.url }}" target="_blank" rel="noopener">{{ s.title or s.url }}</a>{% else %}{{ s.title or s.url }}{% endif %} <span class="u-muted-11">{{ s.date or '' }}</span></li>{% endfor %}</ol>
+    </details>
+    <div class="u-muted-11">Researched {{ d.as_of|short_date }}{% if d.model %} by {{ d.model }}{% endif %} from company filings, exchange announcements, rating reports and the press. Not a price target or a buy call.</div>
+</section>
+{% endblock %}

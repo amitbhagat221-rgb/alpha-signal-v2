@@ -1737,6 +1737,8 @@ CREATE TABLE IF NOT EXISTS mb_research (
     report            TEXT NOT NULL,     -- report.md
     model             TEXT,
     created_at        TEXT NOT NULL,
+    sector            TEXT,              -- output/mb_sectors.py (from the research, not the vendor tag)
+    sub_sector        TEXT,
     PRIMARY KEY (sid, as_of_date)
 );
 

@@ -327,3 +327,13 @@ def test_research_verdict_on_funnel_and_stock_page(seeded):
     assert "Deep research" in page and "Sales to a promoter firm" in page and "Full research report text." in page
     assert "Capacity doubles by FY28." in page and "Annual report FY26" in page
     assert "Not researched yet" in seeded.get("/multibagger/stock/BBB").text
+
+
+def test_research_pages_plain_words(seeded):
+    """Plan 0026 4b: the research list ranks by the overlay and links each researched name to a plain-words page."""
+    page = seeded.get("/multibagger/research").text
+    assert "Research on the top 100" in page and "Some concerns" in page and "/multibagger/research/AAA" in page
+    one = seeded.get("/multibagger/research/AAA").text
+    assert "What worries us" in one and "Deals with promoter companies" in one and "Worth watching" in one
+    assert "5x is possible" in one and "Capacity doubles by FY28." in one and "Full research report text." in one
+    assert seeded.get("/multibagger/research/BBB").status_code == 404

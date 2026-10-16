@@ -96,3 +96,17 @@ def test_pack_real(sid):
               "## 12. Gaps"):
         assert h in p, h
     assert "AttachLive" not in p.split("## 7.")[0]          # filing links use the archive path that serves all
+
+
+def test_points_weigh_integrity_double_and_cap():
+    """Overlay: medium integrity 0.015, medium business 0.008, low 0.005 / 0.003; capped; 5x case adds points."""
+    from output import mb_research as r
+    from config import MB_THESIS
+    f = {"multibagger_case": "plausible", "red_flags": [
+        {"area": "related_party", "severity": "medium"}, {"area": "business", "severity": "medium"},
+        {"area": "audit", "severity": "low"}, {"area": "liquidity_debt", "severity": "low"}]}
+    pen, bon, n = r.points(f)
+    assert pen == round(0.015 + 0.008 + 0.005 + 0.003, 4) and bon == 0.04
+    assert n["integrity"] == {"medium": 1, "low": 1} and n["business"] == {"medium": 1, "low": 1}
+    many = {"multibagger_case": "weak", "red_flags": [{"area": "governance", "severity": "medium"}] * 50}
+    assert r.points(many)[0] == MB_THESIS["research_overlay"]["max_penalty"] and r.points(many)[1] == 0.0

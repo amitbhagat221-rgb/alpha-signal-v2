@@ -125,6 +125,9 @@ _COLUMN_MIGRATIONS = [
     # consensus beat rate, last 4 results (LARGE re-audit 2026-10-10)
     ("daily_snapshots_pit", "cons_beat_rate_4q", "REAL"),
     ("daily_snapshots_pit", "q_ebitda_chg", "REAL"),
+    # deep-research sector / sub-sector (plan 0026 4b)
+    ("mb_research", "sector", "TEXT"),
+    ("mb_research", "sub_sector", "TEXT"),
     # multibagger thesis score (plan 0026, ADR 0075)
     ("multibagger_scores", "thesis_pond", "INTEGER"),
     ("multibagger_scores", "thesis_gate_fail", "TEXT"),

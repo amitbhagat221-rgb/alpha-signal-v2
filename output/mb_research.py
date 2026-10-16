@@ -388,7 +388,86 @@ def load(sids=None):
                      "model": v.get("model"), "created_at": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")})
     if rows:
         db.upsert_df(pd.DataFrame(rows), "mb_research")
+        set_sectors()
     return done
+
+
+def set_sectors():
+    """Write sector / sub_sector (output/mb_sectors.py) onto every mb_research row; returns the sids with no entry."""
+    from output.mb_sectors import SECTORS
+    sids = [r["sid"] for r in db.rows("SELECT DISTINCT sid FROM mb_research")]
+    with db.get_db() as c:
+        for sid in sids:
+            if sid in SECTORS:
+                c.execute("UPDATE mb_research SET sector = ?, sub_sector = ? WHERE sid = ?", (*SECTORS[sid], sid))
+    return sorted(set(sids) - set(SECTORS))
+
+
+def points(fields):
+    """(penalty, bonus, detail) of one research verdict under config.MB_THESIS['research_overlay']."""
+    from config import MB_THESIS
+    o = MB_THESIS["research_overlay"]
+    n = {"integrity": {"medium": 0, "low": 0}, "business": {"medium": 0, "low": 0}}
+    for f in fields.get("red_flags") or []:
+        sev = f.get("severity")
+        if sev in ("medium", "low"):
+            n["integrity" if f.get("area") in o["integrity_areas"] else "business"][sev] += 1
+    raw = sum(o["flag_points"][s][g] * k for g, d in n.items() for s, k in d.items())
+    penalty = min(raw, o["max_penalty"])
+    bonus = o["case_points"].get(fields.get("multibagger_case"), 0.0)
+    return round(penalty, 4), bonus, n
+
+
+def overlay(snapshot=None):
+    """The research-adjusted ranking of the thesis top 100: thesis_score - flag points + 5x-case points; a reject is
+    out (research_rank NaN). Not researched -> thesis score unchanged, marked. Sorted best first."""
+    from config import MB_THESIS
+    snap = snapshot or db.one("SELECT MAX(snapshot_date) AS d FROM multibagger_scores WHERE thesis_rank IS NOT NULL")["d"]
+    th = db.read_sql("SELECT m.sid, m.thesis_rank, m.thesis_score, s.ticker, s.name FROM multibagger_scores m JOIN stocks s "
+                     "USING (sid) WHERE m.snapshot_date = ? AND m.thesis_rank <= ?", [snap, MB_THESIS["top_n"]])
+    rs = {r["sid"]: r for r in db.rows(
+        "SELECT r.sid, r.as_of_date, r.verdict, r.multibagger_case, r.verdict_reason, r.case_reason, r.fields, r.sector, "
+        "r.sub_sector FROM mb_research r JOIN (SELECT sid, MAX(as_of_date) AS d FROM mb_research GROUP BY sid) l "
+        "ON l.sid = r.sid AND l.d = r.as_of_date")}
+    out = []
+    for t in th.to_dict("records"):
+        r = rs.get(t["sid"])
+        row = {**t, "snapshot_date": snap, "researched": r is not None, "as_of_date": None, "verdict": None,
+               "multibagger_case": None, "verdict_reason": None, "case_reason": None, "sector": None, "sub_sector": None,
+               "penalty": 0.0, "bonus": 0.0, "n_integrity": 0, "n_business": 0}
+        if r:
+            f = json.loads(r["fields"])
+            pen, bon, n = points(f)
+            row.update({k: r[k] for k in ("as_of_date", "verdict", "multibagger_case", "verdict_reason", "case_reason",
+                                          "sector", "sub_sector")},
+                       penalty=pen, bonus=bon, n_integrity=n["integrity"]["medium"] + n["integrity"]["low"],
+                       n_business=n["business"]["medium"] + n["business"]["low"])
+        row["research_score"] = None if row["verdict"] == "reject" else t["thesis_score"] - row["penalty"] + row["bonus"]
+        out.append(row)
+    df = pd.DataFrame(out)
+    df["research_rank"] = df["research_score"].rank(ascending=False, method="first")
+    return df.sort_values(["research_rank", "thesis_rank"], na_position="last").reset_index(drop=True)
+
+
+def promote_top(n=None, actor="claude", dry_run=False):
+    """Make the overlay's top n the candidates (Amit 2026-10-16: "create your top 30 and make those as candidates").
+    Skips names already in the book; raises if the book has no room. Returns the sids promoted."""
+    from config import MB_THESIS
+    from output import mb_book
+    n = n or MB_THESIS["research_overlay"]["top_n"]
+    o = overlay()
+    top = o[o["research_rank"] <= n]
+    have = {r["sid"] for r in db.rows("SELECT sid FROM multibagger_book WHERE status IN ('candidate', 'held')")}
+    todo = [r for r in top.to_dict("records") if r["sid"] not in have]
+    if dry_run:
+        return [r["sid"] for r in todo]
+    for r in todo:
+        mb_book.add_candidate(
+            r["sid"], (r["case_reason"] or r["verdict_reason"] or "Research-adjusted top 30")[:300],
+            f"Research-adjusted rank {int(r['research_rank'])} of the thesis top 100 (thesis rank {int(r['thesis_rank'])}; "
+            f"research {r['verdict']}, 5x case {r['multibagger_case']}, researched {r['as_of_date']}). Amit 2026-10-16: "
+            "\"create your top 30 and make those as candidates\".", actor=actor)
+    return [r["sid"] for r in todo]
 
 
 def latest(sid):
@@ -412,6 +491,9 @@ def main():
     ap.add_argument("--show")
     ap.add_argument("--load", action="store_true")
     ap.add_argument("--status", action="store_true")
+    ap.add_argument("--sectors", action="store_true", help="write sector / sub_sector onto mb_research")
+    ap.add_argument("--overlay", action="store_true", help="print the research-adjusted ranking")
+    ap.add_argument("--promote", action="store_true", help="make the overlay's top 30 the candidates")
     ap.add_argument("--sids", help="comma-separated; default the thesis top 100")
     a = ap.parse_args()
     sids = a.sids.split(",") if a.sids else None
@@ -432,6 +514,16 @@ def main():
         st = status(sids or top100())
         print(pd.DataFrame(st).to_string(index=False))
         print({k: sum(r[k] for r in st) for k in ("pack", "report", "verdict", "loaded")})
+    elif a.sectors:
+        missing = set_sectors()
+        print("sectors written" + (f"; no entry in output/mb_sectors.py for: {missing}" if missing else ""))
+    elif a.overlay:
+        o = overlay()
+        cols = ["research_rank", "thesis_rank", "ticker", "sector", "verdict", "multibagger_case", "thesis_score",
+                "penalty", "bonus", "research_score"]
+        print(o[cols].round(3).to_string(index=False))
+    elif a.promote:
+        print("promoted:", promote_top())
     else:
         ap.print_help()
 

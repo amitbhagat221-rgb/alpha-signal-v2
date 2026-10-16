@@ -73,7 +73,7 @@
                 {% else %}<span class="u-muted-11">no usable P/E or P/B</span>{% endif %}</dd>
         </dl>
         <div class="mb-card-foot">
-            <div>{% if c.research %}{{ tipped_pill(c.research.word ~ ' · 5x ' ~ c.research.multibagger_case, c.research.verdict_reason ~ ' (researched ' ~ (c.research.as_of_date|short_date) ~ ')', c.research.tone) }} {% endif %}{{ flag_pills(c.flags) }}{% if not c.flags and not c.research %}<span class="u-muted-11">no forensic flags</span>{% endif %}</div>
+            <div>{% if c.research %}<a href="/multibagger/research/{{ c.sid }}">{{ tipped_pill(c.research.word ~ ' · 5x ' ~ c.research.multibagger_case, c.research.verdict_reason ~ ' (researched ' ~ (c.research.as_of_date|short_date) ~ ')', c.research.tone) }}</a> {% endif %}{{ flag_pills(c.flags) }}{% if not c.flags and not c.research %}<span class="u-muted-11">no forensic flags</span>{% endif %}</div>
             <div>{% if c.status %}{{ status_pill(c.status) }}{% else %}{{ act('promote', c.sid, 'Promote to candidates', thesis=True) }}{% endif %}</div>
         </div>
     </article>

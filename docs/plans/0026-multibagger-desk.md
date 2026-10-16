@@ -212,3 +212,13 @@ Source: [research 0008 findings](../research/0008-multibagger-critique-findings.
     - 4 names out on `shares`, 6 on `demerger`;
     - 14 names left the top 100 and 14 entered.
   - The forward paper books started that morning on the old ranking, whose top 30 held BHIL, IIAB and VERAN. They were restarted on the gated run (no marks had elapsed). The old state is kept as `data/paper/mb_books.superseded-2026-10-16-pre-data-gates.json`.
+- 2026-10-16, research overlay and the first 30 candidates (Amit: "bake in the qualitative finding into rankings … give me top 30 … make those as candidates"):
+  - **Rule** (`output/mb_research.overlay`, config `MB_THESIS["research_overlay"]`): research score = thesis score − flag points + 5x-case points.
+    - Per medium flag: 0.015 in integrity areas (related party, governance, audit, accounting, promoter, legal, disclosure, pledge, dilution), 0.008 for business ones.
+    - Per low flag: 0.005 integrity, 0.003 business.
+    - The penalty is capped at 0.15; a plausible 5x case adds 0.04 and a strong one 0.08.
+    - A reject is out of the ranking.
+    - This is judgement, not a backtest. It is checked forward with the research 0011 pre-registered comparison.
+  - **Candidates:** the top 30 were promoted as candidates (actor `claude`), and valuations were refreshed for the book.
+  - **Pages:** `/multibagger/research` (list, sector filter) and `/multibagger/research/<sid>` (plain words, dated).
+  - **Sectors:** hand-classified from the research in `output/mb_sectors.py`, because the vendor tags were wrong for about 1 in 6 names.

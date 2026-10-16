@@ -247,6 +247,23 @@ def multibagger_valuation(request: Request):
     return templates.TemplateResponse(request, "mb_valuation.html", {"page": "multibagger", "d": multibagger.valuation_page()})
 
 
+@app.get("/multibagger/research", response_class=HTMLResponse)
+def multibagger_research_list(request: Request):
+    """Every researched top-100 name in plain words, research-adjusted rank first (plan 0026 4b)."""
+    return templates.TemplateResponse(request, "mb_research_list.html", {"page": "multibagger", "d": multibagger.research_list()})
+
+
+@app.get("/multibagger/research/{sid}", response_class=HTMLResponse)
+def multibagger_research(request: Request, sid: str):
+    """One stock's deep research, dated, in plain words."""
+    d = multibagger.research_page(sid)
+    if d is None:
+        return templates.TemplateResponse(request, "notfound.html", {
+            "page": "multibagger", "heading": "No research for this stock",
+            "message": f"{sid} has not been researched. Open a name from the research list."}, status_code=404)
+    return templates.TemplateResponse(request, "mb_research.html", {"page": "multibagger", "d": d})
+
+
 @app.get("/multibagger/stock/{sid}", response_class=HTMLResponse)
 def multibagger_stock(request: Request, sid: str):
     """Stage 4, the deep dive on one name."""

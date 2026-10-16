@@ -15,7 +15,7 @@
 </div>
 
 <div x-data="{ tab: '{{ tabs[0][0] }}', loaded: { '{{ tabs[0][0] }}': true } }" x-cloak>
-{{ tab_bar(tabs, links=[("/multibagger/valuation", "Valuation")]) }}
+{{ tab_bar(tabs, links=[("/multibagger/research", "Research"), ("/multibagger/valuation", "Valuation")]) }}
 {% for key, lab in tabs %}
 <div x-show="tab === '{{ key }}'" x-cloak x-effect="if (tab === '{{ key }}') mbLoad($el, '{{ key }}')">{{ loading() }}</div>
 {% endfor %}

@@ -363,6 +363,85 @@ def research_verdicts():
             for r in rows}
 
 
+# plain words for the research pages (Amit 2026-10-16: "keep it very very very simple to understand")
+VERDICT_PLAIN = {"clean": ("No red flags found", "green"), "flag": ("Some concerns", "amber"),
+                 "reject": ("Avoid: serious red flag", "red")}
+CASE_PLAIN = {"strong": ("A real 5x path", "green"), "plausible": ("5x is possible", "accent"),
+              "weak": ("5x is unlikely", "muted")}
+SEVERITY_PLAIN = {"high": ("Serious", "red"), "medium": ("Worth watching", "amber"), "low": ("Minor", "muted")}
+AREA_PLAIN = {"governance": "Board and management", "related_party": "Deals with promoter companies",
+              "audit": "Auditor", "accounting": "Accounting", "promoter": "Promoters",
+              "legal_regulatory": "Legal and regulators", "disclosure": "Disclosure", "pledge": "Pledged shares",
+              "dilution": "New shares issued", "liquidity_debt": "Debt and cash", "business": "Business",
+              "other": "Other"}
+
+
+def _overlay():
+    from output import mb_research
+    return mb_research.overlay()
+
+
+def research_list():
+    """/multibagger/research: every researched top-100 name, research-adjusted rank first, rejects last."""
+    o = _overlay()
+    status = book_status(o["sid"].tolist())
+    rows = []
+    for r in o.to_dict("records"):
+        v, vt = VERDICT_PLAIN.get(r["verdict"], ("Not researched yet", "muted"))
+        c, ct = CASE_PLAIN.get(r["multibagger_case"], ("-", "muted"))
+        rows.append({**r, "verdict_word": v, "verdict_tone": vt, "case_word": c, "case_tone": ct,
+                     "status": status.get(r["sid"]),
+                     "research_rank": None if r["research_rank"] != r["research_rank"] else int(r["research_rank"]),
+                     "thesis_rank": int(r["thesis_rank"])})
+    sectors = {}
+    for r in rows:
+        if r["sector"]:
+            sectors[r["sector"]] = sectors.get(r["sector"], 0) + 1
+    from config import MB_THESIS
+    return {"rows": rows, "sectors": sorted(sectors.items(), key=lambda kv: (-kv[1], kv[0])),
+            "snapshot_date": rows[0]["snapshot_date"] if rows else None, "top_n": MB_THESIS["research_overlay"]["top_n"],
+            "n_researched": sum(r["researched"] for r in rows),
+            "counts": {k: sum(r["verdict"] == k for r in rows) for k in ("clean", "flag", "reject")}}
+
+
+def research_page(sid):
+    """/multibagger/research/<sid>: one stock's research in plain words, or None."""
+    st = _one("SELECT sid, ticker, name FROM stocks WHERE sid = ?", [sid])
+    if not st or not _rows("SELECT 1 AS x FROM mb_research WHERE sid = ? LIMIT 1", [sid]):
+        return None
+    from output import mb_research
+    r = mb_research.latest(sid)
+    f = r["fields"]
+    pen, bon, n = mb_research.points(f)
+    o = _overlay()
+    me = o[o["sid"] == sid]
+    rank = None if me.empty or me["research_rank"].isna().iloc[0] else int(me["research_rank"].iloc[0])
+    thesis = None if me.empty else int(me["thesis_rank"].iloc[0])
+    th = _one("SELECT thesis_rank, thesis_score FROM multibagger_scores WHERE sid = ? AND thesis_rank IS NOT NULL "
+              "ORDER BY snapshot_date DESC LIMIT 1", [sid])
+    sev = {"high": 0, "medium": 1, "low": 2}
+    flags = [{**x, "sev_word": SEVERITY_PLAIN.get(x.get("severity"), ("", "muted"))[0],
+              "sev_tone": SEVERITY_PLAIN.get(x.get("severity"), ("", "muted"))[1],
+              "area_word": AREA_PLAIN.get(x.get("area"), (x.get("area") or "").replace("_", " "))}
+             for x in sorted(f.get("red_flags") or [], key=lambda x: sev.get(x.get("severity"), 3))]
+    v, vt = VERDICT_PLAIN.get(r["verdict"], (r["verdict"], "muted"))
+    c, ct = CASE_PLAIN.get(r["multibagger_case"], (r["multibagger_case"], "muted"))
+    biz = f.get("business") or {}
+    return {"stock": st, "as_of": r["as_of_date"], "sector": r.get("sector"), "sub_sector": r.get("sub_sector"),
+            "verdict_word": v, "verdict_tone": vt, "verdict_reason": r["verdict_reason"], "verdict": r["verdict"],
+            "case_word": c, "case_tone": ct, "case_reason": r["case_reason"],
+            "what_it_does": biz.get("what_it_does"), "customers": biz.get("customers"),
+            "competitors": biz.get("competitors") or [], "edge": biz.get("edge"),
+            "drivers": [d.get("driver") if isinstance(d, dict) else str(d) for d in f.get("growth_drivers") or []],
+            "flags": flags, "breaks": f.get("what_would_break_it") or [], "catalysts": f.get("catalysts_12m") or [],
+            "unknowns": f.get("unknowns") or [], "sources": f.get("sources") or [], "report": r["report"],
+            "model": r.get("model"), "penalty": pen, "bonus": bon,
+            "n_integrity": n["integrity"]["medium"] + n["integrity"]["low"],
+            "n_business": n["business"]["medium"] + n["business"]["low"],
+            "rank": rank, "thesis_rank": thesis or (int(th["thesis_rank"]) if th.get("thesis_rank") else None),
+            "thesis_score": th.get("thesis_score"), "status": book_status([sid]).get(sid)}
+
+
 def research(sid):
     """The newest deep research for one stock, shaped for the stock page, or None."""
     if not _rows("SELECT 1 AS x FROM mb_research WHERE sid = ? LIMIT 1", [sid]):

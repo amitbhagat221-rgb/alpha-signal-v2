@@ -249,6 +249,19 @@ MB_THESIS = {
     "red_flag_days": 365,
     "red_flag_subcategories": ["Resignation of Statutory Auditors", "%CIRP%"],   # LIKE patterns, % = wildcard
     "top_n": 100,                  # stage 2: the top 100 by thesis_rank
+    # Research overlay (plan 0026 4b, Amit 2026-10-16: "bake in the qualitative finding into rankings"): the thesis
+    # score minus points per red flag (integrity areas weigh double) plus points for the 5x case; a reject is out.
+    # Judgement, not backtested: checked forward by the research30 comparison at 24 months (research 0011).
+    "research_overlay": {
+        "integrity_areas": ("governance", "related_party", "audit", "accounting", "promoter", "legal_regulatory",
+                            "disclosure", "pledge", "dilution"),
+        # per flag; sized so the cap rarely binds (non-reject raw penalty 2026-10-16: median 0.07, max 0.14) and one
+        # plausible 5x case (+0.04) offsets about 2.5 medium integrity flags. Thesis scores in the top 100 span ~0.2.
+        "flag_points": {"medium": {"integrity": 0.015, "business": 0.008}, "low": {"integrity": 0.005, "business": 0.003}},
+        "max_penalty": 0.15,
+        "case_points": {"strong": 0.08, "plausible": 0.04, "weak": 0.0},
+        "top_n": 30,
+    },
     # Input-integrity checks in the live run (plan 0026 4b; the deep research found 7 of the 2026-10-15 top 100 on
     # broken inputs, incl. #1 and #2): signals/multibagger.data_checks
     "data_checks": {

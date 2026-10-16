@@ -1819,3 +1819,12 @@ th[aria-sort="descending"] .pb-sort::after { content: " ▼"; font-size: 10px; }
     .mb-form { min-width: 0; }
 }
 .mb-exits { margin: 0 0 4px; display: flex; flex-wrap: wrap; gap: 4px; }
+/* multibagger research pages (plan 0026 4b) */
+.mb-rs-summary { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 0 0 12px; }
+.mb-rs-boxes { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin-bottom: 12px; }
+.mb-rs-box p { font-size: 13px; line-height: 1.5; margin: 8px 0 0; color: var(--text-secondary); }
+.mb-rs-big { font-size: 16px; font-weight: 700; margin-top: 4px; display: inline-block; }
+.mb-rs-flags { list-style: none; margin: 0; padding: 0; font-size: 13px; line-height: 1.55; }
+.mb-rs-flags li { padding: 8px 0; border-top: 1px solid var(--border); color: var(--text-secondary); }
+.mb-rs-flags li:first-child { border-top: 0; }
+.mb-rs-tbl td { font-size: 13px; }

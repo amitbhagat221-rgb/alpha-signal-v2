@@ -1,0 +1,56 @@
+{# /multibagger/research - every researched top-100 name in plain words. Data: cockpit/multibagger.py research_list(). #}
+{% extends "base.html" %}
+{% from "_mb_macros.html" import status_pill %}
+{% block title %}{{ page_title("Multibagger research") }}{% endblock %}
+
+{% block content %}
+<p class="mb-crumb"><a href="/multibagger">&larr; Multibagger desk</a></p>
+<h1 class="section-title">Research on the top 100</h1>
+<div class="section-desc">
+    A research agent read each company's filings and the news, looking for reasons <b>not</b> to own it, and judged whether
+    the share price could rise five-fold. The list is ranked by the thesis score adjusted for what it found:
+    each concern costs a little (dealings with promoters, accounting or auditor issues cost twice as much as business
+    worries), a possible 5x adds a little, and an "avoid" is removed. The top {{ d.top_n }} are the candidates.
+    Research is judgement, not a backtest; it will be checked against prices in 24 months.
+</div>
+
+<div class="mb-rs-summary">
+    <span class="pill pill-green">No red flags {{ d.counts.clean }}</span>
+    <span class="pill pill-amber">Some concerns {{ d.counts.flag }}</span>
+    <span class="pill pill-red">Avoid {{ d.counts.reject }}</span>
+    <span class="u-muted-11">{{ d.n_researched }} of {{ d.rows|length }} researched &middot; thesis run {{ d.snapshot_date|short_date }}</span>
+</div>
+
+<div x-data="{ sector: '' }">
+    <div class="pb-tools">
+        <label class="u-muted-11" for="mb-rs-sector">Sector</label>
+        <select id="mb-rs-sector" class="pb-q" x-model="sector">
+            <option value="">All sectors</option>
+            {% for s, n in d.sectors %}<option value="{{ s }}">{{ s }} ({{ n }})</option>{% endfor %}
+        </select>
+    </div>
+    <div class="card table-wrap">
+    <table class="mb-tbl mb-rs-tbl">
+        <thead><tr>
+            <th class="num">Rank</th><th>Company</th><th>Sector &rsaquo; what it makes</th>
+            <th>Verdict</th><th>Could it 5x?</th><th>Researched</th><th></th>
+        </tr></thead>
+        <tbody>
+        {% for r in d.rows %}
+        <tr x-show="!sector || sector === '{{ r.sector or '' }}'">
+            <td class="num mono">{% if r.research_rank %}<b>{{ r.research_rank }}</b>{% else %}&mdash;{% endif %}
+                <div class="u-muted-11">was {{ r.thesis_rank }}</div></td>
+            <td><a class="mb-name" href="/multibagger/research/{{ r.sid }}">{{ r.name }}</a>
+                <div class="mb-sub mono">{{ r.ticker }}</div></td>
+            <td>{{ r.sector or '&mdash;'|safe }}<div class="mb-sub">{{ r.sub_sector or '' }}</div></td>
+            <td><span class="pill pill-{{ r.verdict_tone }}">{{ r.verdict_word }}</span></td>
+            <td><span class="pill pill-{{ r.case_tone }}">{{ r.case_word }}</span></td>
+            <td class="mono">{{ r.as_of_date|short_date if r.as_of_date else '&mdash;'|safe }}</td>
+            <td>{% if r.status %}{{ status_pill(r.status) }}{% endif %}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+</div>
+{% endblock %}

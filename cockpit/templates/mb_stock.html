@@ -54,7 +54,7 @@
 
 {# 2b ── deep research #}
 <section class="card mb-sec" id="research">
-    <h2 class="mb-h">Deep research <span class="u-muted-11">red-flag sweep and the 5x case, by a research agent from filings and the web (brief: research 0011)</span></h2>
+    <h2 class="mb-h">Deep research {% if d.research %}<a class="u-muted-11" href="/multibagger/research/{{ d.stock.sid }}">plain-words page &rarr;</a>{% endif %} <span class="u-muted-11">red-flag sweep and the 5x case, by a research agent from filings and the web (brief: research 0011)</span></h2>
     {{ failed('research') }}
     {% set r = d.research %}
     {% if r %}
