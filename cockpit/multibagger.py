@@ -40,10 +40,13 @@ ACTOR = "cockpit"
 BENCH = "NIFTY SMALLCAP 250"
 
 # The grade line (ADR 0073 / 0075). The numbers are the ADR's, dated by its study.
-GRADE = {"grade": "C", "label": "Grade C — a shortlist for judgement (ADR 0075)",
-         "evidence": ("30-name book, realistic costs, Oct 2011 to Oct 2026 study: +12.7 %/yr, t 1.90, "
-                      "worst 12 months −33 % (multibagger-thesis-2026-10, 15 Oct 2026). "
-                      "A place to look, not a ranking that picks the winner."),
+GRADE = {"grade": "C", "label": "Grade C — a shortlist for judgement (ADR 0075, 0076)",
+         "evidence": ("Beats an equal-weight basket of the same small, cheap stocks by about 9 %/yr in a 2016–26 backtest "
+                      "that includes delisted stocks (+8.7 %/yr survivors, t 2.25; +9.6 %/yr full market, t 1.89), and the "
+                      "SMALLCAP 250 by +12.7 %/yr (t 1.90, worst 12 months −33 %). It does not clear a multiple-testing bar "
+                      "(deflated Sharpe 0.76 over 67 tries) and does not avoid blow-ups (full-market halving odds 0.72× the "
+                      "basket). Independent critique and our answer: research 0008, 16 Oct 2026. A place to look, measured "
+                      "live against the basket, not a ranking that picks the winner."),
          }
 
 # bar methods of the football field, in display order (label, what it is); the reverse DCF is not a bar, it is the line above
@@ -240,6 +243,44 @@ def _flags(card):
     return out
 
 
+@_ttl_cache(TTL)
+def _surveillance_date():
+    return _one("SELECT MAX(flag_date) AS d FROM surveillance_flags")
+
+
+def exit_flags(sid, card=None):
+    """Name exits by process, not price (ADR 0076, config.MB_EXITS): [{text, tone, as_of, kind}] where kind is
+    'exit' (leave at the next liquid session) or 'review' (decide within a week)."""
+    x, out, today = config.MB_EXITS, [], date.today()
+    ev = _events(sid)                                            # the cached 365-day timeline the card already built
+    since = (today - pd.Timedelta(days=x["auditor_days"])).isoformat()
+    aud = [e for e in ev if e["category"] == "auditor_resignation" and e["date"] >= since]
+    if aud:
+        out.append({"text": "Exit: auditor resigned", "tone": "red", "as_of": aud[0]["date"], "kind": "exit"})
+    last = _surveillance_date()
+    if last and last.get("d"):
+        g = _rows("SELECT flag_type FROM surveillance_flags WHERE sid = ? AND flag_date = ? AND flag_type IN ("
+                  + ",".join("?" * len(x["gsm_types"])) + ")", [sid, last["d"], *x["gsm_types"]])
+        if g:
+            out.append({"text": f"Exit: on the {g[0]['flag_type']} list", "tone": "red", "as_of": last["d"], "kind": "exit"})
+    q = _one("SELECT MAX(end_date) AS d FROM quarterly_income WHERE sid = ?", [sid])
+    if q and q.get("d"):
+        due = (pd.Timestamp(q["d"]) + pd.offsets.QuarterEnd(1) + pd.Timedelta(days=x["results_grace_days"])).date()
+        filed = [e for e in ev if e["category"] == "results"
+                 and e["source"] in ("bse_announcements", "nse_announcements") and e["date"] > q["d"]]
+        if today > due and not filed:
+            out.append({"text": "Exit: results overdue", "tone": "red", "as_of": due.isoformat(), "kind": "exit"})
+    p = ((card or {}).get("pledge") or {}).get("pledge_pct")
+    if p is not None and p > x["pledge_review_pct"]:
+        out.append({"text": f"Review: pledge {p:.0f} %", "tone": "amber", "as_of": card["pledge"].get("end_date"), "kind": "review"})
+    pr = _rows("SELECT end_date, promoter_pct FROM shareholding_categories WHERE sid = ? AND promoter_pct IS NOT NULL "
+               "ORDER BY end_date DESC LIMIT 3", [sid])
+    if len(pr) == 3 and pr[2]["promoter_pct"] - pr[0]["promoter_pct"] > x["promoter_drop_pts"]:
+        out.append({"text": f"Review: promoter down {pr[2]['promoter_pct'] - pr[0]['promoter_pct']:.1f} pts",
+                    "tone": "amber", "as_of": pr[0]["end_date"], "kind": "review"})
+    return out
+
+
 def _last_event(sid):
     ev = [e for e in _events(sid) if e["source"] not in ("news_articles", "regulatory_events")]
     return ev[0]["date"] if ev else None
@@ -247,7 +288,7 @@ def _last_event(sid):
 
 # ── Funnel: the top 100 as evidence cards ───────────────────────────────────────────────────────
 
-@_persisted_cache(3600, name="mb_funnel_cards_v2")
+@_persisted_cache(3600, name="mb_funnel_cards_v3")
 def funnel_cards(snap):
     """The top-100 evidence cards of one thesis run, thesis_rank order. Keyed by the run date; cached on disk
     because each card reads a dozen tables (mb_watch.card)."""
@@ -266,7 +307,7 @@ def funnel_cards(snap):
                     "parts": parts_of(r), "snapshot_date": snap, "investors": inv,
                     "results": res or None, "events": {k: v for k, v in (c.get("events_90d") or {}).items() if v},
                     "top_events": c.get("top_events_90d") or [], "valuation": c.get("valuation_position") or {},
-                    "flags": _flags(c), "card_as_of": c.get("as_of")})
+                    "flags": exit_flags(r["sid"], c) + _flags(c), "card_as_of": c.get("as_of")})
     return out
 
 
@@ -377,7 +418,8 @@ def candidates():
         t = th.get(b["sid"])
         c = _card(b["sid"]) if b["name"] else {}
         rows.append({**b, "cap": cap.get(b["sid"]), "thesis": t, "parts": parts_of(t), "score": None if not t or t["thesis_score"] is None
-                     else round(t["thesis_score"] * 100), "field": vf.get(b["sid"]), "flags": _flags(c),
+                     else round(t["thesis_score"] * 100), "field": vf.get(b["sid"]),
+                     "flags": (exit_flags(b["sid"], c) if b["name"] else []) + _flags(c),
                      "last_event": _last_event(b["sid"]) if b["name"] else None})
     return {"rows": rows, "n_book": len(book), "max_book": config.MB_THESIS["max_book"],
             "thesis_as_of": snapshot(), "n_held": sum(r["status"] == "held" for r in rows),
@@ -450,7 +492,8 @@ def held():
               and e["source"] not in ("news_articles", "regulatory_events")]
         v = verdicts.get(b["sid"])
         ts = log_ts.get(b["sid"])
-        rows.append({**b, "cap": cap.get(b["sid"]), "price": px, "price_date": px_d, "return_pct": own, "bench_pct": idx,
+        rows.append({**b, "cap": cap.get(b["sid"]), "exits": exit_flags(b["sid"], _card(b["sid"]) if b["name"] else None),
+                     "price": px, "price_date": px_d, "return_pct": own, "bench_pct": idx,
                      "vs_bench_pts": None if own is None or idx is None else round(own - idx, 1),
                      "verdict": v and v["verdict"], "drawdown_pct": v and round(v["drawdown"] * 100, 1),
                      "months_underwater": v and v["months_underwater"],

@@ -1218,3 +1218,13 @@ SUPERINVESTORS = {
     "Sunil Singhania": ["ABAKKUS", "SUNIL SINGHANIA"],
     "Madhusudan Kela": ["MADHUSUDAN KELA", "MADHURI MADHUSUDAN KELA", "SINGULARITY"],
 }
+
+# Plan 0026 / ADR 0076: name exits by process, not price (the reviewer's name kill, research 0008).
+# "exit": leave at the next liquid session; "review": decide within a week (our event study: 44-57 % false alarms).
+MB_EXITS = {
+    "auditor_days": 90,          # a statutory-auditor resignation filed within this many days -> exit
+    "gsm_types": ("GSM",),       # on the latest surveillance list -> exit (ESM is not in surveillance_flags yet)
+    "results_grace_days": 60,    # no results for the quarter after the latest one by its end + this -> exit
+    "pledge_review_pct": 50.0,   # promoter pledge above this -> review
+    "promoter_drop_pts": 5.0,    # promoter stake down more than this over the last two quarters -> review
+}

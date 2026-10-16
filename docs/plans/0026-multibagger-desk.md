@@ -88,6 +88,20 @@ Forensic flags show beside the name and do not cut it (ADR 0073).
 ### Phase 1c — test the funnel's mechanical rules (read-only, ~½ day)
 - [x] **1c.1 (DONE 2026-10-15: no mechanical stage rule passed — industry cap −2.0 pts in 2021–26 and more halvings; investor promotion −1.6 pts; floor ₹0.25 Cr +1.9 pts overall but loses 2016–20 under doubled costs. The top 100 holds 177 of 485 later 3x stocks vs 158 by chance; the top 30 holds 63 vs 47 → stage 3 is Amit's judgement on evidence cards, pre-sorted by the thesis score)** `tools/mb_funnel.py`, pre-registered in its docstring before the first run. F1 ≤ 4 names per industry; F2 top 100 with known-investor entries promoted into the 30; F3 = F2 + the cap; F4 liquidity floor ₹0.25 Cr, also under doubled costs. Plus stage capture: winners in the top 100 and in the 30, vs chance.
 
+### Phase 1d — answer the independent critique (Amit 2026-10-16: "complete all and prepare answer for the reviewer")
+Source: [research 0008 findings](../research/0008-multibagger-critique-findings.md). Answer: [response](../research/0008-multibagger-critique-response.md), [ADR 0076](../decisions/0076-multibagger-desk-after-independent-critique.md). The reviewer's pass bars are used as written (set before we ran anything); the answer goes to `docs/research/0008-multibagger-critique-response.md`.
+- [x] **1d.1 (PASS: +8.7 %/yr t 2.25 survivors; +9.6 %/yr t 1.89 full market incl. delisted)** EW-pond benchmark (reviewer test 1): top 30 vs the equal-weight pond, same costs, 12 starts. Bar: ≥ +5 %/yr median, t ≥ 1.5.
+- [x] **1d.2 (FAIL: DSR 0.764 at 67 trials, null variance; 0.888 observed var; 0.977 N_eff 7.5)** Honest DSR (test 3): every configuration ever run on this window, Bailey–López de Prado with skew and kurtosis, effective N from the trials' correlation. Bar: DSR ≥ 0.90.
+- [x] **1d.3 (FAIL: halving lift 0.72, ≤ 0.3x lift 1.01 → the tail claim is withdrawn)** Full-market tails (test 2): halving and ≤ 0.3x lifts, top 30 vs pond, price-only score incl. delisted. Bar: halving lift ≤ 0.7.
+- [x] **1d.4 (PASS: +12.7 → +11.0 %/yr)** Quarterly look-ahead audit (test 4): the Tickertape quarter lag 60 → 90 days. Bar: excess within 2 points.
+- [x] **1d.5 (PASS: ₹90 lakh +11.9 %/yr, ₹3 crore +10.4 %/yr)** Capacity stress (problem 3): the book at 3× and 10× the tested size. Bar: excess ≥ +5 %/yr at 3×.
+- [x] **1d.6 (PASS: 8–10 % more stocks per date; +8.6 %/yr over the pond, t 2.31)** Live-like pond (finding 4.1): the pond rebuilt on `market_caps()` history, no fundamentals requirement. Report pond size and the 1d.1 result on it.
+- [x] **1d.7 (both rejected: −0.8 / −1.6 pts)** Promoter overlay and cash-conversion gate (tests 5, 6), each under the phase 1b accept rule.
+- [x] **1d.8 (LIVE 2026-10-16: capacity column; paper books started, cron 2nd 06:50 UTC; valuation fixes recomputed for the top 100; process exit/review flags on Held, Candidates and Funnel)** Build:
+  - capacity cap (≤ 5 % of 20-day ADTV per name, shown per row);
+  - three forward paper books (EW pond / EW top 30 / Amit's 10) with the reviewer's kill rules;
+  - valuation fixes (cost of equity 16–20 % by size, EV/Sales for loss-makers, analyst targets only with ≥ 3 houses).
+
 ### Phase 2 — the pipeline and the lists (~3 days, worktree)
 - [x] **2.1 (BUILT on `mb-desk`)** Score. Rewrite `signals/multibagger.py` to the thesis score (one compute function; the gates as data in `config`), monthly. Add new columns to `multibagger_scores` with column-level `db.upsert_df`; the old columns stay until plan 0017 retires them.
 - [x] **2.2 (BUILT on `mb-desk`: `output/mb_book.py`)** The lists are decisions, not scores.

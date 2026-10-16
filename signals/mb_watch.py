@@ -216,7 +216,7 @@ def _filings(conn, sid):
     c = c.drop_duplicates("end_date")
     s = _q(conn, "SELECT end_date, pledge_pct, promoter_pct AS s_promoter FROM shareholding WHERE sid=?", (sid,))
     m = c.merge(s, on="end_date", how="outer").sort_values("end_date").reset_index(drop=True)
-    m["promoter_pct"] = m["promoter_pct"].fillna(m["s_promoter"])
+    m["promoter_pct"] = pd.to_numeric(m["promoter_pct"], errors="coerce").fillna(pd.to_numeric(m["s_promoter"], errors="coerce"))
     m["date"] = _ts(m["filed_at"]).fillna(pd.to_datetime(m["end_date"], errors="coerce"))
     return m.drop(columns="s_promoter")
 

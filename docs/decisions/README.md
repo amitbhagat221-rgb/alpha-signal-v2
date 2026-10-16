@@ -105,3 +105,4 @@ Status key: **A** accepted · **P→N** partly superseded by N · **S→N** supe
 | 0073 | [Deploy a book on "good enough" evidence, sized to the evidence](0073-good-enough-book-deployment.md) | A (2026-10-13; book deployment only, factor wiring stays under 0043 / 0063) |
 | 0074 | ["Good enough" factor admission in MID only (grade-B factors at half weight)](0074-good-enough-factor-admission-mid.md) | A (2026-10-13; amends 0043 for MID; LARGE/SMALL unchanged) |
 | 0075 | [The multibagger desk ranks a loose pond by an evidence-based thesis, not a quality funnel](0075-multibagger-thesis-replaces-quality-funnel.md) | A (2026-10-15; supersedes 0039's funnel, keeps only 0040's no-stop rule; plan 0026) |
+| 0076 | [Multibagger desk after the independent critique: tail claim withdrawn, capacity cap, three measured books](0076-multibagger-desk-after-independent-critique.md) | A (2026-10-16; amends 0075; research 0008) |

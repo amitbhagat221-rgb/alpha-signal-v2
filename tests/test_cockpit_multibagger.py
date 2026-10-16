@@ -265,3 +265,36 @@ def test_tab_counts_never_blank_and_fields_print_their_axis(seeded):
     assert "mb-ff-axisv" in val and "₹80 &ndash;" not in val             # axis line; no mixed precision
     assert seeded.get("/multibagger/stock/AAA").text.count("Grade C") == 0
     assert seeded.get("/partial/multibagger/funnel").text.count("Grade C") == 1
+
+
+def test_exit_flags_fire_on_process_events(monkeypatch):
+    """ADR 0076: auditor resignation / GSM / overdue results -> exit; pledge > 50 % / promoter -5 pts -> review."""
+    from datetime import date, timedelta
+    import config
+    d = (date.today() - timedelta(days=10)).isoformat()
+    ev = [{"category": "auditor_resignation", "date": d, "source": "bse_announcements"}]
+    monkeypatch.setattr(mb, "_events", lambda sid, days=365: ev)
+
+    def one(sql, params=None):
+        if "surveillance_flags" in sql:
+            return {"d": d}
+        if "quarterly_income" in sql:
+            return {"d": (date.today() - timedelta(days=400)).isoformat()}
+        return {}
+
+    def rows(sql, params=None):
+        if "surveillance_flags" in sql:
+            return [{"flag_type": "GSM"}]
+        if "shareholding_categories" in sql:
+            return [{"end_date": d, "promoter_pct": 40.0}, {"end_date": d, "promoter_pct": 44.0}, {"end_date": d, "promoter_pct": 47.0}]
+        return []
+    monkeypatch.setattr(mb, "_one", one)
+    monkeypatch.setattr(mb, "_surveillance_date", lambda: {"d": d})
+    monkeypatch.setattr(mb, "_rows", rows)
+    f = mb.exit_flags("X", {"pledge": {"pledge_pct": 62.0, "end_date": d}})
+    kinds = {x["text"].split(":")[0]: x["kind"] for x in f}
+    texts = " | ".join(x["text"] for x in f)
+    assert "auditor resigned" in texts and "GSM" in texts and "results overdue" in texts, texts
+    assert "pledge 62 %" in texts and "promoter down 7.0 pts" in texts, texts
+    assert kinds == {"Exit": "exit", "Review": "review"}
+    assert config.MB_EXITS["pledge_review_pct"] == 50.0

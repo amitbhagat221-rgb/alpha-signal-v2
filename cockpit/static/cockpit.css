@@ -1817,3 +1817,4 @@ th[aria-sort="descending"] .pb-sort::after { content: " ▼"; font-size: 10px; }
     .mb-stack td.mb-first::before, .mb-stack td.mb-actions::before { content: none; }
     .mb-form { min-width: 0; }
 }
+.mb-exits { margin: 0 0 4px; display: flex; flex-wrap: wrap; gap: 4px; }

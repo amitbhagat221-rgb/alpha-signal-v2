@@ -1,5 +1,5 @@
 {# Multibagger > Held: entry, return against NIFTY SMALLCAP 250, conviction monitor. Data: cockpit/multibagger.py held(). #}
-{% from "_mb_macros.html" import rs, act, stock_cell, cap_cell %}
+{% from "_mb_macros.html" import rs, act, stock_cell, cap_cell, flag_pills %}
 {% from "_mb_paper.html" import paper_panel %}
 {% from "_pb_macros.html" import th, chip %}
 <div data-n-held="{{ d.n_held }}" data-max-held="{{ d.max_held }}" data-n-book="{{ d.n_book }}" data-max-book="{{ d.max_book }}">
@@ -20,7 +20,7 @@
             <div class="u-muted-11">{{ rs(r.price) }} on {{ r.price_date|short_date }}</div></div></td>
         <td class="num mono" data-label="Index" data-v="{{ r.bench_pct if r.bench_pct is not none else '' }}"><div>{{ r.bench_pct|pct(1, signed=True) }}
             {% if r.vs_bench_pts is not none %}<div class="u-muted-11 {{ r.vs_bench_pts|tone }}">{{ r.vs_bench_pts|signed(1) }} points</div>{% endif %}</div></td>
-        <td data-label="Monitor"><div>{% if r.verdict %}{{ chip(r.verdict, 'var(--green)' if r.verdict == 'HOLD' else 'var(--amber)' if r.verdict == 'WATCH' else 'var(--red)') }}
+        <td data-label="Monitor"><div>{% if r.exits %}<div class="mb-exits">{{ flag_pills(r.exits) }}</div>{% endif %}{% if r.verdict %}{{ chip(r.verdict, 'var(--green)' if r.verdict == 'HOLD' else 'var(--amber)' if r.verdict == 'WATCH' else 'var(--red)') }}
             <div class="u-muted-11"><span class="mono">{{ r.drawdown_pct|pct(0) }}</span> off its 13-month high, <span class="mono">{{ r.months_underwater }}</span> months underwater</div>
             {% else %}<span class="u-muted-11">no price history</span>{% endif %}</div></td>
         <td class="num mono" data-label="Last decision" data-v="{{ r.days_since_review if r.days_since_review is not none else '' }}"><div>{% if r.days_since_review is not none %}{{ r.days_since_review }} days ago{% else %}&mdash;{% endif %}</div></td>
@@ -32,6 +32,6 @@
     </tbody>
 </table></div>
 </div>
-<p class="mb-sub"><b>Conviction monitor, not an exit rule.</b> HOLD: near its highs, or its industry and relative strength are intact. WATCH: in a drawdown with mixed signals. REVIEW: deep, long and weak against the industry while the small-cap market is not itself in a bear &mdash; reassess, never a mechanical sell (ADR 0040: stops eject winners). Events are medium severity and up, in filings, not news. Last decision is the newest line in the book's log. Capacity is {{ d.adv_share_pct }} % of a day's trading in the stock; a book of {{ d.book_text }} over {{ d.max_held }} names.</p>
+<p class="mb-sub"><b>Exits are by process, not price (ADR 0076):</b> red pills mean leave at the next liquid session (statutory-auditor resignation in 90 days, on the GSM list, results overdue); amber pills mean decide within a week (pledge above 50 %, promoter stake down more than 5 points in two quarters). <b>Conviction monitor, not an exit rule.</b> HOLD: near its highs, or its industry and relative strength are intact. WATCH: in a drawdown with mixed signals. REVIEW: deep, long and weak against the industry while the small-cap market is not itself in a bear &mdash; reassess, never a mechanical sell (ADR 0040: stops eject winners). Events are medium severity and up, in filings, not news. Last decision is the newest line in the book's log. Capacity is {{ d.adv_share_pct }} % of a day's trading in the stock; a book of {{ d.book_text }} over {{ d.max_held }} names.</p>
 {% endif %}
 </div>
