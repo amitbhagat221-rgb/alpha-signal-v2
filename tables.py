@@ -450,7 +450,7 @@ TABLES = {
     # ── Computed Signals ──
     "valuation_ranges": {
         "kind": "COMPUTED", "domain": "Computed Signals", "date_col": "as_of",
-        "depth": "One row per stock, day and method (pe_band, pb_band, ev_ebitda_band, peer_pe, peer_ev_ebitda, dcf, reverse_dcf, analyst, range_52w)",
+        "depth": "One row per stock, day and method (reverse_dcf, ev_ebitda_band, ev_sales, pe_band, pb_band, peer_ev_ebitda, peer_ev_sales, peer_pe, dcf, analyst, range_52w)",
         "description": "Valuation football field (plan 0026): per-share low/mid/high from each method, a basis string naming its inputs, the price, and the 10-year growth the price implies (reverse DCF). Display only, never a score.",
     },
     "accruals_scores": {

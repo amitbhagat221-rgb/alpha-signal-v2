@@ -89,24 +89,99 @@ def test_dcf_hand_computation_zero_growth_gap():
     assert v.dcf_value(-1, 1, 0.1, 0.14) is None
 
 
+def _coe(mcap=1000.0, adtv=5.0):
+    c = v.cost_of_equity(mcap, adtv)
+    return c, v._coe_text(c, mcap, adtv)
+
+
+def test_coe_curve_endpoints_and_log_midpoint():
+    assert v.cost_of_equity(20000, 5)["base"] == pytest.approx(0.14)
+    assert v.cost_of_equity(500000, 5)["base"] == pytest.approx(0.14)        # above the top: floor
+    assert v.cost_of_equity(500, 5)["base"] == pytest.approx(0.20)
+    assert v.cost_of_equity(300, 5)["base"] == pytest.approx(0.20)           # below the bottom: cap
+    assert v.cost_of_equity(np.sqrt(20000 * 500), 5)["base"] == pytest.approx(0.17)   # log-linear: geometric mid
+    c = v.cost_of_equity(500, 5)
+    assert (c["bear"], c["bull"]) == pytest.approx((0.21, 0.19))
+
+
+def test_coe_illiquid_adds_a_point_and_unknown_adtv_does_not():
+    assert v.cost_of_equity(500, 0.5)["base"] == pytest.approx(0.21)
+    assert v.cost_of_equity(500, 0.5)["illiquid"] and not v.cost_of_equity(500, 1.0)["illiquid"]
+    assert v.cost_of_equity(500, None)["base"] == pytest.approx(0.20)
+
+
 def test_dcf_bear_below_base_below_bull():
-    d, r = v._dcf_rows("X", "2026-01-01", 100.0, 10 * CR, 100.0, "test", 0.08, 0.15, 0.22)
+    c, txt = _coe()
+    d, r = v._dcf_rows("X", "2026-01-01", 100.0, 10 * CR, 100.0, "test", 0.08, 0.15, 0.22, c, txt)
     assert 0 < d["low"] < d["mid"] < d["high"]
     assert "growth bear/base/bull 8.0%/15.0%/22.0%" in d["basis"]
+    assert f"coe bear/base/bull {c['bear']:.1%}/{c['base']:.1%}/{c['bull']:.1%}" in d["basis"]
+
+
+def test_dcf_basis_names_terminal_share_and_flags_above_75pct():
+    # growth 6% for 10 years at a 14% coe: terminal is ~ 45% of the value; at 6% coe it is ~ 88%
+    assert 0.4 < v.dcf_parts(100.0, 1.0, 0.06, 0.14)[1] < 0.75
+    assert v.dcf_parts(100.0, 1.0, 0.06, 0.06)[1] > 0.75
+    c, txt = _coe()
+    d, _ = v._dcf_rows("X", "d", 100.0, 10 * CR, 100.0, "t", 0.06, 0.06, 0.06, c, txt)
+    assert "terminal value x " in d["basis"] and "low confidence" not in d["basis"]
+    lo = {**c, "bear": 0.07, "base": 0.06, "bull": 0.055}
+    d, _ = v._dcf_rows("X", "d", 100.0, 10 * CR, 100.0, "t", 0.06, 0.06, 0.06, lo, txt)
+    assert "low confidence" in d["basis"] and not np.isnan(d["mid"])     # the bar stays
 
 
 def test_reverse_dcf_round_trip():
-    oe, shares, coe = 250 * CR, 10 * CR, 0.14
-    for target in (100.0, 300.0, 700.0):
-        g = v.implied_growth(target, oe, shares, coe)
-        assert g is not None
-        assert v.dcf_value(oe, shares, g, coe) == pytest.approx(target, rel=1e-6)
-    assert v.implied_growth(1e9, oe, shares, coe) is None          # beyond reach: no answer, not a clamp
+    oe, shares = 250 * CR, 10 * CR
+    for mcap in (400.0, 3000.0, 40000.0):                      # size-based rates 20 % .. 14 %
+        coe = v.cost_of_equity(mcap, 5.0)["base"]
+        for target in (100.0, 300.0, 700.0):
+            g = v.implied_growth(target, oe, shares, coe)
+            assert g is not None
+            assert v.dcf_value(oe, shares, g, coe) == pytest.approx(target, rel=1e-6)
+    assert v.implied_growth(1e9, oe, shares, 0.14) is None          # beyond reach: no answer, not a clamp
 
 
 def test_reverse_dcf_row_carries_growth_not_a_bar():
-    d, r = v._dcf_rows("X", "2026-01-01", 400.0, 10 * CR, 250.0, "test", 0.08, 0.15, 0.22)
+    c, txt = _coe()
+    d, r = v._dcf_rows("X", "2026-01-01", 400.0, 10 * CR, 250.0, "test", 0.08, 0.15, 0.22, c, txt)
     assert np.isnan(r["mid"]) and 0 < r["implied_growth_10y"] < 0.8
+    assert f"{c['base']:.1%}" in r["basis"]                        # the rate used is named
+    # a higher (smaller-company) rate needs more growth to justify the same price
+    c2, txt2 = _coe(mcap=400.0)
+    _, r2 = v._dcf_rows("X", "2026-01-01", 400.0, 10 * CR, 250.0, "test", 0.08, 0.15, 0.22, c2, txt2)
+    assert r2["implied_growth_10y"] > r["implied_growth_10y"]
+
+
+def test_ev_sales_history_uses_revenue_and_loss_maker_still_prices():
+    qs = pd.date_range("2023-03-31", periods=12, freq="QE")
+    q = pd.DataFrame({"end_date": [d.date().isoformat() for d in qs], "ebitda": -10.0, "revenue": 250.0})
+    ann = pd.DataFrame({"Borrowings": [300.0], "Cash & Bank": [100.0]}, index=["2024-03-31"])
+    dates = pd.date_range("2024-01-01", "2025-12-31", freq="W")
+    pit = pd.DataFrame({"snapshot_date": [d.date().isoformat() for d in dates]})
+    adj = np.full(len(dates), 100.0)
+    assert len(v._ev_history(pit, 10 * CR, q, ann, adj)[0]) == 0           # EBITDA < 0: no EV/EBITDA multiple
+    mult, nq = v._ev_history(pit, 10 * CR, q, ann, adj, col="revenue", max_mult=100)
+    assert set(np.round(mult, 6)) == {1.2} and nq == 6                      # (1000 + 200) / TTM sales 1000
+    assert v.ev_to_price(1.2, 1000 * CR, 200 * CR, 10 * CR) == pytest.approx(100.0)
+
+
+def test_midcycle_median_of_three_annual_windows_needs_12_quarters():
+    qs = pd.date_range("2023-03-31", periods=12, freq="QE")
+    ebitda = [10] * 4 + [40] * 4 + [20] * 4                 # windows 40, 160, 80 -> median 80, latest TTM 80
+    q = pd.DataFrame({"end_date": [d.date().isoformat() for d in qs], "ebitda": [float(x) for x in ebitda]})
+    mid, label = v._midcycle(q, "ebitda")
+    assert mid == 80.0 and label.startswith("mid-cycle EBITDA")
+    q2 = pd.DataFrame({"end_date": q["end_date"], "ebitda": [10.0] * 8 + [30.0] * 4})   # windows 40, 40, 120 -> 40
+    assert v._midcycle(q2, "ebitda")[0] == 40.0 and v._ttm(q2, "ebitda")[0] == 120.0
+    short, label = v._midcycle(q2.tail(8), "ebitda")
+    assert short == 120.0 and label.startswith("TTM EBITDA")
+    assert v._midcycle(q2.tail(3), "ebitda") == (None, None)
+
+
+def test_method_order_reverse_dcf_first():
+    assert v.METHODS[0] == "reverse_dcf" and v.METHODS[-3:] == ("dcf", "analyst", "range_52w")
+    assert v.METHODS.index("ev_ebitda_band") < v.METHODS.index("ev_sales") < v.METHODS.index("pe_band")
+    assert v.METHODS.index("peer_ev_sales") < v.METHODS.index("peer_pe")
 
 
 def test_guard_rail_drops_absurd_mid_and_sorts():
@@ -132,7 +207,8 @@ def test_peer_set_falls_back_to_industry_when_tier_is_thin():
 # ── golden: 3 real names on the read-only DB ────────────────────────────────
 
 GOLDEN = {"KEIN": "MID industrial", "GRSE": "SMALL industrial", "HDBK": "LARGE financial"}
-NON_FIN = {"pe_band", "pb_band", "ev_ebitda_band", "peer_pe", "peer_ev_ebitda", "dcf", "reverse_dcf", "analyst", "range_52w"}
+NON_FIN = set(v.METHODS)
+assert len(v.METHODS) == 11
 
 
 @pytest.fixture(scope="module")
@@ -155,11 +231,17 @@ def test_golden_method_set_and_sanity(field):
         assert (live["mid"] <= 20 * live["price"]).all()
         assert g["basis"].str.len().gt(0).all()
     fin = field[field["sid"] == "HDBK"].set_index("method")
-    for m in ("ev_ebitda_band", "peer_ev_ebitda", "dcf", "reverse_dcf"):
+    for m in ("ev_ebitda_band", "peer_ev_ebitda", "ev_sales", "peer_ev_sales", "dcf", "reverse_dcf"):
         assert fin.loc[m, "basis"] == "n/a for financials" or fin.loc[m, "basis"].startswith("n/a for financials")
     ind = field[field["sid"] == "KEIN"].set_index("method")
     assert ind.loc["reverse_dcf", "implied_growth_10y"] > 0
     assert ind.loc["dcf", "mid"] > 0
+    assert ind.loc["ev_sales", "mid"] > 0 and "EV/Sales p10/50/90" in ind.loc["ev_sales", "basis"]
+    assert "mid-cycle EBITDA" in ind.loc["ev_ebitda_band", "basis"]
+    assert "terminal value x " in ind.loc["dcf", "basis"] and "size curve" in ind.loc["dcf", "basis"]
+    assert "size curve" in ind.loc["reverse_dcf", "basis"]
+    assert "analysts, fetched" in ind.loc["analyst", "basis"]
+    assert list(field[field["sid"] == "KEIN"]["method"]) == list(v.METHODS)       # display order
 
 
 @pytest.mark.skipif(not DB_PATH.exists(), reason="no production DB (set ALPHA_DB)")
@@ -177,3 +259,19 @@ def test_golden_range_52w_is_split_adjusted(field):
     r = field[(field["sid"] == "HDBK") & (field["method"] == "range_52w")].iloc[0]
     assert r["low"] < r["price"] < r["high"] * 1.0001        # HDFC Bank bonus-split inside the window must not break it
     assert r["high"] < 3 * r["price"]
+
+
+@pytest.mark.skipif(not DB_PATH.exists(), reason="no production DB (set ALPHA_DB)")
+def test_golden_analyst_needs_three_houses():
+    n = v._read("SELECT total_analysts n FROM analyst_consensus WHERE sid='KEIN'")["n"].iloc[0]
+    assert n >= v.PARAMS["min_analysts"]        # KEIN is covered; the rule itself is unit-tested below
+
+
+@pytest.mark.skipif(not DB_PATH.exists(), reason="no production DB (set ALPHA_DB)")
+def test_golden_thinly_covered_name_has_no_analyst_bar():
+    """IRF has one analyst in analyst_consensus: no bar, and the basis says why."""
+    n = v._read("SELECT total_analysts n FROM analyst_consensus WHERE sid='IRF'")
+    if n.empty or n["n"].iloc[0] is None or n["n"].iloc[0] >= v.PARAMS["min_analysts"]:
+        pytest.skip("IRF coverage changed; pick another thinly covered name")
+    r = v.compute(["IRF"]).set_index("method").loc["analyst"]
+    assert np.isnan(r["mid"]) and r["basis"].startswith("fewer than 3 analysts")

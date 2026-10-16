@@ -6,12 +6,17 @@ so a human sees where the price sits against several yardsticks. Structured numb
 only: `basis` names the inputs and their dates, it is never narrative. Not a factor,
 not a score, not ranked, nothing here moves a pick.
 
-  pe_band / pb_band / ev_ebitda_band  the stock's own 10th / 50th / 90th percentile multiple
+  pe_band / pb_band / ev_ebitda_band / ev_sales
+                                      the stock's own 10th / 50th / 90th percentile multiple
                                       over its history in daily_snapshots_pit, x its current metric
-  peer_pe / peer_ev_ebitda            25th / 50th / 75th percentile of the same-industry, same-tier
+                                      (EV/EBITDA x mid-cycle EBITDA: median of the last 3 annual windows when
+                                      >= 12 quarters exist; EV/Sales x TTM sales, the bar a loss-maker still has)
+  peer_pe / peer_ev_ebitda / peer_ev_sales
+                                      25th / 50th / 75th percentile of the same-industry, same-tier
                                       current multiples, x its metric
-  dcf                                 10-year owner-earnings DCF, bear / base / bull growth
-  analyst                             low / median / high price target (analyst_consensus)
+  dcf                                 10-year owner-earnings DCF, bear / base / bull growth, discounted at a
+                                      cost of equity that rises as the company shrinks (cost_of_equity())
+  analyst                             low / median / high price target (analyst_consensus), >= 3 analysts only
   range_52w                           low / high of the split-adjusted close over 252 sessions
   reverse_dcf                         NOT a bar: the starting growth the price implies (low/mid/high NULL);
                                       the number is `implied_growth_10y`
@@ -53,12 +58,20 @@ PARAMS = {
     "dcf_years": 10,
     "fade_to": 0.06,                 # growth at year 10
     "terminal_growth": 0.05,
-    "coe": {"bear": 0.15, "base": 0.14, "bull": 0.13},
+    # cost of equity by size (research 0008 s7): base_lo at/above big_cap_cr, base_hi at/below small_cap_cr,
+    # log-linear in market cap between; +illiquid_add when 20-day ADTV < illiquid_adtv_cr; bear/bull = +/- spread
+    "coe_curve": {"big_cap_cr": 20000.0, "small_cap_cr": 500.0, "base_lo": 0.14, "base_hi": 0.20,
+                  "illiquid_adtv_cr": 1.0, "illiquid_add": 0.01, "spread": 0.01, "adtv_sessions": 20},
+    "terminal_low_conf": 0.75,       # terminal value above this share of the DCF = low confidence (bar kept)
+    "min_analysts": 3,               # analyst targets need this many houses
+    "midcycle_quarters": 12,         # quarters needed for mid-cycle EBITDA (3 annual windows)
+    "max_ev_sales": 100.0,
     "growth_clip": (-0.05, 0.35),
     "sessions_52w": 252,
 }
-METHODS = ("pe_band", "pb_band", "ev_ebitda_band", "peer_pe", "peer_ev_ebitda",
-           "dcf", "reverse_dcf", "analyst", "range_52w")
+# display order: what the price implies first, then the cash-earnings yardsticks, then the sentiment ones
+METHODS = ("reverse_dcf", "ev_ebitda_band", "ev_sales", "pe_band", "pb_band", "peer_ev_ebitda", "peer_ev_sales",
+           "peer_pe", "dcf", "analyst", "range_52w")
 COLUMNS = ["sid", "as_of", "method", "low", "mid", "high", "basis", "price", "implied_growth_10y"]
 CRORE = 1e7
 
@@ -81,18 +94,42 @@ def fade_path(g0, years=None, fade_to=None):
     return [g0 + (fade_to - g0) * t / (years - 1) for t in range(years)]
 
 
-def dcf_value(oe0, shares, g0, coe):
-    """Per-share value of owner earnings `oe0` (Rs; last year's), growing along fade_path(g0)
-    for 10 years, then at the terminal growth, discounted at `coe`. None when oe0 or shares <= 0."""
+def cost_of_equity(mcap_cr, adtv_cr=None):
+    """{'bear','base','bull','illiquid'} cost of equity for a company of `mcap_cr` (Rs crore) trading `adtv_cr` a
+    day (20-day mean, Rs crore; None = unknown, no premium). Base runs from base_lo at >= big_cap_cr to base_hi at
+    <= small_cap_cr, log-linear in market cap; +illiquid_add below illiquid_adtv_cr; bear / bull = -/+ spread."""
+    c = PARAMS["coe_curve"]
+    frac = (np.log(c["big_cap_cr"]) - np.log(mcap_cr)) / (np.log(c["big_cap_cr"]) - np.log(c["small_cap_cr"]))
+    base = c["base_lo"] + (c["base_hi"] - c["base_lo"]) * min(max(float(frac), 0.0), 1.0)
+    illiquid = adtv_cr is not None and adtv_cr < c["illiquid_adtv_cr"]
+    if illiquid:
+        base += c["illiquid_add"]
+    return {"bear": base + c["spread"], "base": base, "bull": base - c["spread"], "illiquid": illiquid}
+
+
+def _coe_text(coe, mcap_cr, adtv_cr):
+    adtv = "n/a" if adtv_cr is None else f"{adtv_cr:.2f} cr"
+    return (f"coe bear/base/bull {coe['bear']:.1%}/{coe['base']:.1%}/{coe['bull']:.1%} "
+            f"(size curve: mcap {mcap_cr:,.0f} cr, ADTV {adtv}{', +1pt illiquid' if coe['illiquid'] else ''})")
+
+
+def dcf_parts(oe0, shares, g0, coe):
+    """(per-share value, terminal-value share of it) of owner earnings `oe0` (Rs; last year's), growing along
+    fade_path(g0) for 10 years, then at the terminal growth, discounted at `coe`. (None, None) when oe0 or
+    shares <= 0."""
     if not (oe0 > 0 and shares > 0) or coe <= PARAMS["terminal_growth"]:
-        return None
+        return None, None
     oe, pv = oe0, 0.0
     for t, g in enumerate(fade_path(g0), start=1):
         oe *= 1 + g
         pv += oe / (1 + coe) ** t
-    tv = oe * (1 + PARAMS["terminal_growth"]) / (coe - PARAMS["terminal_growth"])
-    pv += tv / (1 + coe) ** PARAMS["dcf_years"]
-    return pv / shares
+    tv = oe * (1 + PARAMS["terminal_growth"]) / (coe - PARAMS["terminal_growth"]) / (1 + coe) ** PARAMS["dcf_years"]
+    return (pv + tv) / shares, tv / (pv + tv)
+
+
+def dcf_value(oe0, shares, g0, coe):
+    """Per-share DCF value; None when it does not apply (see dcf_parts)."""
+    return dcf_parts(oe0, shares, g0, coe)[0]
 
 
 def implied_growth(price, oe0, shares, coe, lo=-0.30, hi=0.80):
@@ -183,7 +220,7 @@ def _annual(sids, as_of_str):
 
 def _quarters(sids, cutoff):
     """quarterly_income rows (consolidated preferred) with end_date <= cutoff."""
-    q = _read("SELECT sid, end_date, reporting, eps, ebitda FROM quarterly_income "
+    q = _read("SELECT sid, end_date, reporting, eps, ebitda, revenue FROM quarterly_income "
               f"WHERE sid IN {_in(sids)} AND end_date <= ? ORDER BY sid, end_date", (cutoff,))
     return prefer_consolidated(q)
 
@@ -195,6 +232,21 @@ def _ttm(qg, col):
         return None, None
     last4 = g.tail(4)
     return float(last4[col].sum()), last4["end_date"].iloc[-1]
+
+
+def _midcycle(qg, col):
+    """(metric, label): the median of the last 3 non-overlapping 4-quarter sums of `col` when >= midcycle_quarters
+    quarters exist, else the latest TTM. (None, None) without 4 quarters."""
+    ttm, end = _ttm(qg, col)
+    if ttm is None:
+        return None, None
+    name = col.upper()
+    g = qg.dropna(subset=[col]).sort_values("end_date")
+    n = PARAMS["midcycle_quarters"]
+    if len(g) < n:
+        return ttm, f"TTM {name} {ttm:.0f} cr (4q to {end})"
+    mid = float(np.median(g[col].to_numpy(dtype=float)[-n:].reshape(n // 4, 4).sum(axis=1)))
+    return mid, f"mid-cycle {name} {mid:.0f} cr (median of last {n // 4} annual windows to {end}; TTM {ttm:.0f} cr)"
 
 
 def _net_debt_cr(ann):
@@ -246,13 +298,14 @@ def _own_band(sid, as_of, method, mult, metric_ps, price, label, metric_basis):
                 f"{label} p10/50/90 {band[0]:.2f}/{band[1]:.2f}/{band[2]:.2f} over {len(mult)} snapshots x {metric_basis}", price)
 
 
-def _ev_history(pit, shares, qg, ann, adj_close):
-    """EV/EBITDA at each PIT date: (mcap + net debt) / TTM EBITDA with the 45- / 150-day lags.
+def _ev_history(pit, shares, qg, ann, adj_close, col="ebitda", max_mult=None):
+    """EV / TTM `col` (ebitda or revenue) at each PIT date: (mcap + net debt) / TTM with the 45- / 150-day lags.
     Returns (multiples array, n distinct TTM windows)."""
     if qg is None or ann is None or ann.empty or pit.empty:
         return np.array([]), 0
-    q = qg.dropna(subset=["ebitda"]).sort_values("end_date").copy()
-    q["ttm"] = q["ebitda"].rolling(4).sum()
+    max_mult = PARAMS["max_ev_multiple"] if max_mult is None else max_mult
+    q = qg.dropna(subset=[col]).sort_values("end_date").copy()
+    q["ttm"] = q[col].rolling(4).sum()
     q = q.dropna(subset=["ttm"])
     q = q[q["ttm"] > 0]
     q["avail"] = pd.to_datetime(q["end_date"]) + pd.Timedelta(days=PARAMS["quarter_lag_days"])
@@ -267,23 +320,28 @@ def _ev_history(pit, shares, qg, ann, adj_close):
                       suffixes=("", "_a")).dropna(subset=["ttm", "nd"])
     ev = m["adj"] * shares / CRORE + m["nd"]
     mult = (ev / m["ttm"]).to_numpy()
-    ok = (mult > 0) & (mult < PARAMS["max_ev_multiple"])
+    ok = (mult > 0) & (mult < max_mult)
     return mult[ok], int(m.loc[ok, "end_date"].nunique())
 
 
-def _dcf_rows(sid, as_of, price, shares, oe_cr, oe_label, g_ind, g_own, g_top):
-    """(dcf row, reverse_dcf row)."""
+def _dcf_rows(sid, as_of, price, shares, oe_cr, oe_label, g_ind, g_own, g_top, coe, coe_text):
+    """(dcf row, reverse_dcf row). `coe` = cost_of_equity() dict, `coe_text` = _coe_text(): both rows use it
+    (the reverse DCF at the base rate)."""
     gs = sorted(_clip_growth(g) for g in (g_ind, g_own, g_top))
-    coe = PARAMS["coe"]
     oe = oe_cr * CRORE
-    vals = [dcf_value(oe, shares, g, coe[k]) for g, k in zip(gs, ("bear", "base", "bull"))]
+    parts = [dcf_parts(oe, shares, g, coe[k]) for g, k in zip(gs, ("bear", "base", "bull"))]
+    vals, tv_share = [p[0] for p in parts], parts[1][1]
     basis = (f"OE {oe_cr:.0f} cr ({oe_label}); growth bear/base/bull {gs[0]:.1%}/{gs[1]:.1%}/{gs[2]:.1%} "
              f"(industry med / own / industry p75 3y sales CAGR, clipped) fading to {PARAMS['fade_to']:.0%} by yr 10; "
-             f"coe {coe['bear']:.0%}/{coe['base']:.0%}/{coe['bull']:.0%}; terminal {PARAMS['terminal_growth']:.0%}; shares {shares / CRORE:.2f} cr")
+             f"{coe_text}; terminal {PARAMS['terminal_growth']:.0%}; shares {shares / CRORE:.2f} cr")
+    if tv_share is not None:
+        basis += f"; terminal value x {tv_share:.0%} of the DCF"
+        if tv_share > PARAMS["terminal_low_conf"]:
+            basis += f" (low confidence: above {PARAMS['terminal_low_conf']:.0%})"
     ig = implied_growth(price, oe, shares, coe["base"])
     rev = _row(sid, as_of, "reverse_dcf", np.nan, np.nan, np.nan,
                (f"growth fading to {PARAMS['fade_to']:.0%} by yr 10 that equates base DCF to price {price:.2f}; "
-                f"OE {oe_cr:.0f} cr ({oe_label}); coe {coe['base']:.0%}") if ig is not None
+                f"OE {oe_cr:.0f} cr ({oe_label}); {coe_text}, base rate used") if ig is not None
                else f"price {price:.2f} outside the -30%..80% growth range", price, ig if ig is not None else np.nan)
     return _row(sid, as_of, "dcf", vals[0], vals[1], vals[2], basis, price), rev
 
@@ -316,14 +374,14 @@ def compute(sids=None, as_of=None):
 
     adjustments = _read(f"SELECT sid, ex_date, factor FROM corporate_adjustments WHERE sid IN {_in(targets)}")
     start = "2019-11-01"     # the first PIT snapshot: the EV/EBITDA history prices every snapshot date
-    px = _read(f"SELECT sid, date, close FROM stock_prices WHERE sid IN {_in(targets)} AND close > 0 "
+    px = _read(f"SELECT sid, date, close, volume FROM stock_prices WHERE sid IN {_in(targets)} AND close > 0 "
                "AND date >= ? AND date <= ? ORDER BY sid, date", (start, as_of))
     px = apply_adjustments(px, adjustments, as_of)
     pit_all = _read("SELECT sid, snapshot_date, close_price, earnings_yield, book_to_price FROM daily_snapshots_pit "
                     f"WHERE sid IN {_in(peer_sids)} AND snapshot_date <= ? ORDER BY sid, snapshot_date", (as_of,))
     pit_by = {s: g for s, g in pit_all.groupby("sid")}
     last_pit = pit_all["snapshot_date"].max()
-    ac = _read(f"SELECT sid, price_target, price_target_median, price_target_high, price_target_low, fetched_at "
+    ac = _read(f"SELECT sid, total_analysts, price_target, price_target_median, price_target_high, price_target_low, fetched_at "
                f"FROM analyst_consensus WHERE sid IN {_in(targets)}").set_index("sid") if live else pd.DataFrame()
 
     # peer universe: current P/E and EV/EBITDA per stock
@@ -332,7 +390,7 @@ def compute(sids=None, as_of=None):
         st = stocks.loc[s]
         if st["sector"] in FINANCIAL_SECTORS:
             continue
-        pe = ev = np.nan
+        pe = ev = evs = np.nan
         pg = pit_by.get(s)
         if pg is not None and pg["snapshot_date"].iloc[-1] == last_pit:
             e = pg["earnings_yield"].iloc[-1]
@@ -344,8 +402,13 @@ def compute(sids=None, as_of=None):
             m = (st["market_cap_cr"] + nd) / eb
             if 0 < m < PARAMS["max_ev_multiple"]:
                 ev = m
-        peer_rows.append((s, st["industry"], st["cap_tier"], pe, ev, _sales_cagr(annual.get(s))))
-    peers = pd.DataFrame(peer_rows, columns=["sid", "industry", "cap_tier", "pe", "ev", "g3"])
+        sl = _ttm(qby[s], "revenue")[0] if s in qby else None
+        if sl and sl > 0 and nd is not None and st["market_cap_cr"] and st["market_cap_cr"] > 0:
+            m = (st["market_cap_cr"] + nd) / sl
+            if 0 < m < PARAMS["max_ev_sales"]:
+                evs = m
+        peer_rows.append((s, st["industry"], st["cap_tier"], pe, ev, evs, _sales_cagr(annual.get(s))))
+    peers = pd.DataFrame(peer_rows, columns=["sid", "industry", "cap_tier", "pe", "ev", "evs", "g3"])
 
     out = []
     pxby = {s: g for s, g in px.groupby("sid")}
@@ -386,25 +449,28 @@ def compute(sids=None, as_of=None):
             out.append({**_own_band(sid, as_of, "pb_band", (1 / btp["book_to_price"]).to_numpy(), bvps, price, "P/B",
                                     f"BVPS {bvps:.2f} (book_to_price x close, {btp['snapshot_date'].iloc[-1]})"), "price": price})
 
-        # ev_ebitda_band + peer_ev_ebitda
+        # ev_ebitda_band (x mid-cycle EBITDA) + peer_ev_ebitda (x TTM, like its peers) + ev_sales + peer_ev_sales
         if is_fin:
-            N("ev_ebitda_band", "n/a for financials")
-            N("peer_ev_ebitda", "n/a for financials")
+            for m in ("ev_ebitda_band", "peer_ev_ebitda", "ev_sales", "peer_ev_sales"):
+                N(m, "n/a for financials")
         else:
-            if not (ebitda and ebitda > 0) or nd is None or not shares > 0:
-                N("ev_ebitda_band", "n/a: TTM EBITDA <= 0 or no balance sheet")
-                N("peer_ev_ebitda", "n/a: TTM EBITDA <= 0 or no balance sheet")
+            no_bs = nd is None or not shares > 0
+            adj = None if no_bs else _adj_at(g, pit)
+            mid_eb, mid_label = _midcycle(qg, "ebitda") if qg is not None else (None, None)
+            if not (mid_eb and mid_eb > 0) or no_bs:
+                N("ev_ebitda_band", "n/a: mid-cycle / TTM EBITDA <= 0 or no balance sheet")
             else:
-                adj = _adj_at(g, pit)
                 mult, nq = _ev_history(pit, shares, qg, ann, adj)
                 if nq < PARAMS["min_quarters"] or len(mult) < PARAMS["min_hist"]:
                     N("ev_ebitda_band", "insufficient history")
                 else:
                     band = percentiles(mult, PARAMS["band_pcts"])
-                    vals = [ev_to_price(m, ebitda * CRORE, nd * CRORE, shares) for m in band]
-                    R("ev_ebitda_band", *vals,
-                      f"EV/EBITDA p10/50/90 {band[0]:.1f}/{band[1]:.1f}/{band[2]:.1f} over {len(mult)} snapshots/{nq}q x TTM EBITDA "
-                      f"{ebitda:.0f} cr (4q to {eb_end}), net debt {nd:.0f} cr (FY {nd_end})")
+                    R("ev_ebitda_band", *[ev_to_price(m, mid_eb * CRORE, nd * CRORE, shares) for m in band],
+                      f"EV/EBITDA p10/50/90 {band[0]:.1f}/{band[1]:.1f}/{band[2]:.1f} over {len(mult)} snapshots/{nq}q x "
+                      f"{mid_label}, net debt {nd:.0f} cr (FY {nd_end})")
+            if not (ebitda and ebitda > 0) or no_bs:
+                N("peer_ev_ebitda", "n/a: TTM EBITDA <= 0 or no balance sheet")
+            else:
                 pr, scope = _peer_set(peers, sid, st, "ev")
                 if len(pr) < 3:
                     N("peer_ev_ebitda", f"insufficient peers ({len(pr)})")
@@ -412,6 +478,26 @@ def compute(sids=None, as_of=None):
                     band = percentiles(pr["ev"], PARAMS["peer_pcts"])
                     R("peer_ev_ebitda", *[ev_to_price(m, ebitda * CRORE, nd * CRORE, shares) for m in band],
                       f"peer EV/EBITDA p25/50/75 {band[0]:.1f}/{band[1]:.1f}/{band[2]:.1f} n={len(pr)} {scope} x TTM EBITDA {ebitda:.0f} cr, net debt {nd:.0f} cr")
+            sales, sales_end = _ttm(qg, "revenue") if qg is not None else (None, None)
+            if not (sales and sales > 0) or no_bs:
+                N("ev_sales", "n/a: TTM sales missing or <= 0, or no balance sheet")
+                N("peer_ev_sales", "n/a: TTM sales missing or <= 0, or no balance sheet")
+            else:
+                mult, nq = _ev_history(pit, shares, qg, ann, adj, col="revenue", max_mult=PARAMS["max_ev_sales"])
+                if nq < PARAMS["min_quarters"] or len(mult) < PARAMS["min_hist"]:
+                    N("ev_sales", "insufficient history")
+                else:
+                    band = percentiles(mult, PARAMS["band_pcts"])
+                    R("ev_sales", *[ev_to_price(m, sales * CRORE, nd * CRORE, shares) for m in band],
+                      f"EV/Sales p10/50/90 {band[0]:.2f}/{band[1]:.2f}/{band[2]:.2f} over {len(mult)} snapshots/{nq}q x "
+                      f"TTM sales {sales:.0f} cr (4q to {sales_end}), net debt {nd:.0f} cr (FY {nd_end})")
+                pr, scope = _peer_set(peers, sid, st, "evs")
+                if len(pr) < 3:
+                    N("peer_ev_sales", f"insufficient peers ({len(pr)})")
+                else:
+                    band = percentiles(pr["evs"], PARAMS["peer_pcts"])
+                    R("peer_ev_sales", *[ev_to_price(m, sales * CRORE, nd * CRORE, shares) for m in band],
+                      f"peer EV/Sales p25/50/75 {band[0]:.2f}/{band[1]:.2f}/{band[2]:.2f} n={len(pr)} {scope} x TTM sales {sales:.0f} cr, net debt {nd:.0f} cr")
 
         # peer_pe
         if eps is None or eps <= 0:
@@ -440,14 +526,20 @@ def compute(sids=None, as_of=None):
         else:
             gi = float(np.median(pg["g3"]))
             gt = float(np.percentile(pg["g3"], 75))
-            d, r = _dcf_rows(sid, as_of, price, shares, oe, oe_label, gi, g_own, gt)
+            adtv = _adtv_cr(g)
+            coe = cost_of_equity(st["market_cap_cr"], adtv)
+            d, r = _dcf_rows(sid, as_of, price, shares, oe, oe_label, gi, g_own, gt, coe,
+                             _coe_text(coe, st["market_cap_cr"], adtv))
             d["basis"] += f"; sales CAGR own {g_own:.1%}"
             out += [d, r]
 
-        # analyst
+        # analyst (needs >= min_analysts houses behind the target)
         a = ac.loc[sid] if (live and sid in ac.index) else None
+        n_an = None if a is None or pd.isna(a["total_analysts"]) else int(a["total_analysts"])
         if a is None:
             N("analyst", "n/a: no analyst targets" if live else "n/a: live only")
+        elif n_an is None or n_an < PARAMS["min_analysts"]:
+            N("analyst", f"fewer than {PARAMS['min_analysts']} analysts ({'count unknown' if n_an is None else n_an})")
         else:
             mid = a["price_target_median"] if pd.notna(a["price_target_median"]) else a["price_target"]
             if pd.isna(mid):
@@ -455,7 +547,7 @@ def compute(sids=None, as_of=None):
             else:
                 lo = a["price_target_low"] if pd.notna(a["price_target_low"]) else mid
                 hi = a["price_target_high"] if pd.notna(a["price_target_high"]) else mid
-                R("analyst", lo, mid, hi, f"analyst price target low/median/high, fetched {str(a['fetched_at'])[:10]}")
+                R("analyst", lo, mid, hi, f"analyst price target low/median/high, {n_an} analysts, fetched {str(a['fetched_at'])[:10]}")
 
         # 52-week range
         w = g.tail(PARAMS["sessions_52w"])
@@ -467,8 +559,17 @@ def compute(sids=None, as_of=None):
     if not out:
         raise RuntimeError("valuation.compute produced no rows")
     df = pd.DataFrame(out)[COLUMNS]
+    df["_s"], df["_m"] = df["sid"].map({t: i for i, t in enumerate(targets)}), df["method"].map({m: i for i, m in enumerate(METHODS)})
+    df = df.sort_values(["_s", "_m"], kind="stable").drop(columns=["_s", "_m"]).reset_index(drop=True)
     df["implied_growth_10y"] = df.groupby("sid")["implied_growth_10y"].transform("max")
     return df
+
+
+def _adtv_cr(g):
+    """20-session mean of raw close x volume, Rs crore; None when the window has no volume."""
+    w = g.tail(PARAMS["coe_curve"]["adtv_sessions"])
+    tv = (w["close"] * w["volume"]).dropna()
+    return float(tv.mean() / CRORE) if len(tv) else None
 
 
 def _adj_at(g, pit):

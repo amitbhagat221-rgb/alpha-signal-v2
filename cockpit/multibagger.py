@@ -45,10 +45,11 @@ GRADE = {"grade": "C", "label": "Grade C — a shortlist for judgement (ADR 0075
                       "A place to look, not a ranking that picks the winner."),
          }
 
-# bar methods of the football field, in display order (label, what it is)
-METHODS = [("pe_band", "Own P/E band"), ("pb_band", "Own P/B band"), ("ev_ebitda_band", "Own EV/EBITDA band"),
-           ("peer_pe", "Peer P/E"), ("peer_ev_ebitda", "Peer EV/EBITDA"), ("dcf", "DCF, bear to bull"),
-           ("analyst", "Analyst targets"), ("range_52w", "52-week range")]
+# bar methods of the football field, in display order (label, what it is); the reverse DCF is not a bar, it is the line above
+METHODS = [("ev_ebitda_band", "Own EV/EBITDA band"), ("ev_sales", "Own EV/Sales band"), ("pe_band", "Own P/E band"),
+           ("pb_band", "Own P/B band"), ("peer_ev_ebitda", "Peer EV/EBITDA"), ("peer_ev_sales", "Peer EV/Sales"),
+           ("peer_pe", "Peer P/E"), ("dcf", "DCF, bear to bull"), ("analyst", "Analyst targets"),
+           ("range_52w", "52-week range")]
 VALUE_METHODS = {m for m, _ in METHODS if m != "range_52w"}     # the 52-week range is a price range, not a value
 PARTS = [("p_smallness", "Small"), ("p_cheapness", "Cheap"), ("p_price", "Price"),
          ("p_business", "Business"), ("p_tailwind", "Industry")]
