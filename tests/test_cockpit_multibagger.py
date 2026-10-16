@@ -337,3 +337,12 @@ def test_research_pages_plain_words(seeded):
     assert "What worries us" in one and "Deals with promoter companies" in one and "Worth watching" in one
     assert "5x is possible" in one and "Capacity doubles by FY28." in one and "Full research report text." in one
     assert seeded.get("/multibagger/research/BBB").status_code == 404
+
+
+def test_research_borderline_mark(seeded, monkeypatch):
+    """Amit 2026-10-16: borderline verdicts are marked for his call on the list and the page."""
+    from output import mb_research
+    monkeypatch.setitem(mb_research.BORDERLINE, "AAA", "Rests on one judgement.")
+    assert "Borderline: your call" in seeded.get("/multibagger/research").text
+    page = seeded.get("/multibagger/research/AAA").text
+    assert "Borderline: your call" in page and "Rests on one judgement." in page

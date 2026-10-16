@@ -32,6 +32,22 @@ Classes 1, 2 and 4 are now gated in the thesis run (`signals/multibagger.data_ch
 - The first monthly sample has run.
 - Every class found has a health check, or an explicit "not worth a check" note.
 
+## Fix at the source (agreed by Amit 2026-10-16)
+The desk gates (classes 1, 2 and 4) protect only the multibagger thesis. These fixes reach the main model too:
+- [ ] **Market caps from a stale vendor share count.** 22 pond names were affected (IIAB 22×, FIS 10.6×, AFI 10×). `signals/_fundamentals.market_caps` / `shares_and_book` set live tiers, the MICRO carve-out and `stocks.market_cap_cr`, so daily picks can be affected.
+  - Cross-check against the latest filed `shareholding_categories.total_shares`, adjusted for later splits and bonuses.
+  - Build it on a worktree branch and measure the change in picks; merge only on Amit's OK.
+- [ ] **Industry tags.** The vendor tags were wrong for about 1 in 6 researched names. They feed the thesis "industry momentum" part and every peer table.
+  - Add NSE's four-level industry classification as a feed (`feeds.FEEDS` entry, canary on 3 stocks).
+  - Until then, the desk shows research sectors (`output/mb_sectors.py`).
+- [ ] **Gates or checks for the rest:**
+  - stale annuals (OMXA, KAMI, ADVAN);
+  - annual profit inflated by one-offs (other income or a tax credit as a large share of profit; feeds E/P);
+  - pending mergers into a parent (scheme filings);
+  - price falls of more than 40 % with no corporate adjustment;
+  - event severity (read the auditor-resignation reason; "order win" text needs the PDF, plan 0026 4.4).
+- [ ] **Partial holder lists in other consumers.** The fix is in `output/mb_deepdive` and `signals/mb_watch`. Check whether smart-money and promoter signals compare consecutive holder lists the same way.
+
 ## To-do
 - [ ] Brief for the field-check agent (reuse `output/mb_research.pack`; one row per field).
 - [ ] `data_audit` table (`schema.sql` and `tables.TABLES`), plus a loader with validation.

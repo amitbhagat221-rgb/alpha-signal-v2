@@ -400,7 +400,7 @@ def research_list():
     from config import MB_THESIS
     return {"rows": rows, "sectors": sorted(sectors.items(), key=lambda kv: (-kv[1], kv[0])),
             "snapshot_date": rows[0]["snapshot_date"] if rows else None, "top_n": MB_THESIS["research_overlay"]["top_n"],
-            "n_researched": sum(r["researched"] for r in rows),
+            "n_researched": sum(r["researched"] for r in rows), "n_borderline": sum(bool(r["borderline"]) for r in rows),
             "counts": {k: sum(r["verdict"] == k for r in rows) for k in ("clean", "flag", "reject")}}
 
 
@@ -439,7 +439,8 @@ def research_page(sid):
             "n_integrity": n["integrity"]["medium"] + n["integrity"]["low"],
             "n_business": n["business"]["medium"] + n["business"]["low"],
             "rank": rank, "thesis_rank": thesis or (int(th["thesis_rank"]) if th.get("thesis_rank") else None),
-            "thesis_score": th.get("thesis_score"), "status": book_status([sid]).get(sid)}
+            "thesis_score": th.get("thesis_score"), "status": book_status([sid]).get(sid),
+            "borderline": mb_research.BORDERLINE.get(sid)}
 
 
 def research(sid):

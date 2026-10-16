@@ -18,6 +18,7 @@
     <span class="pill pill-green">No red flags {{ d.counts.clean }}</span>
     <span class="pill pill-amber">Some concerns {{ d.counts.flag }}</span>
     <span class="pill pill-red">Avoid {{ d.counts.reject }}</span>
+    <span class="pill pill-blue">Borderline {{ d.n_borderline }}</span>
     <span class="u-muted-11">{{ d.n_researched }} of {{ d.rows|length }} researched &middot; thesis run {{ d.snapshot_date|short_date }}</span>
 </div>
 
@@ -43,7 +44,8 @@
             <td><a class="mb-name" href="/multibagger/research/{{ r.sid }}">{{ r.name }}</a>
                 <div class="mb-sub mono">{{ r.ticker }}</div></td>
             <td>{{ r.sector or '&mdash;'|safe }}<div class="mb-sub">{{ r.sub_sector or '' }}</div></td>
-            <td><span class="pill pill-{{ r.verdict_tone }}">{{ r.verdict_word }}</span></td>
+            <td><span class="pill pill-{{ r.verdict_tone }}">{{ r.verdict_word }}</span>{% if r.borderline %}
+                <div><a class="pill pill-blue" href="/multibagger/research/{{ r.sid }}">Borderline: your call</a></div>{% endif %}</td>
             <td><span class="pill pill-{{ r.case_tone }}">{{ r.case_word }}</span></td>
             <td class="mono">{{ r.as_of_date|short_date if r.as_of_date else '&mdash;'|safe }}</td>
             <td>{% if r.status %}{{ status_pill(r.status) }}{% endif %}</td>

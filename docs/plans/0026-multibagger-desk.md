@@ -157,13 +157,24 @@ Source: [research 0008 findings](../research/0008-multibagger-critique-findings.
   - **Watch:** event feed for the 30, filter by category and severity.
 - [x] **5.2 (BUILT; deep dive at `/multibagger/stock/<sid>`)** New subpage `/multibagger/valuation`:** a grid of 30 mini football fields, sorted by where the price sits. `/multibagger/valuation/<sid>` is the full field with each method's basis, plus a link from the stock page.
 - [ ] **5.3 Retire the Playbooks "Strict compounders" tab** (D4), or relabel it as the old quality funnel.
+
+**Stage 4b: deep research follow-ups (added 2026-10-16)**
+- [x] **4b.0 (DONE 2026-10-16)** All 100 of the gated top 100 researched; plain-words pages; research-adjusted ranking; its top 30 promoted to candidates; sectors from the research.
+- [ ] **4b.1 Red-flag gate reads NSE too.** The auditor-resignation / CIRP gate (`signals/multibagger._red_flags`) reads only `bse_announcements`, and BSE has been blocked since 2026-10-13. Add `nse_announcements`.
+- [ ] **4b.2 Research for newcomers.** The weekly re-rank brings unresearched names into the top 100. Research them in small batches, or only once they would reach the research-adjusted top 30. Re-run `python -m output.mb_research --packs` first.
+- [ ] **4b.3 Quarterly research refresh** (the parked `mb_dossier`): after each results season, re-read the new quarter and events against the dated research and flag what changed. From Nov 2026.
+- [ ] **4b.4 Borderline verdicts: Amit's call.** 15 names are marked in `output/mb_research.BORDERLINE` and shown as "Borderline: your call" on the research pages. A changed verdict is re-loaded, and the candidates follow the ranking.
+- [ ] **4b.5 Visual check of the research pages at 375 px** on a throwaway test instance (the live site needs a login).
+- [ ] **4b.6 Research overlay forward check.** In Oct 2028, compare the research-adjusted top 30 with the thesis top 30 and with the rejected names, survivorship-free (research 0011's pre-registered test).
 - [x] **5.4 (design review: 25 findings fixed)** Checks: Playwright at 1440 / 375, plus the design-review agent.
 
 ## Decisions for Amit
 - [x] **D1 → ship as a labelled "where to look" list even if graded C** (Amit 2026-10-15). Was: If phase 1 grades the thesis C (fails the bar), still ship it as a labelled "where to look" list (the good-enough rule), or rework the thesis first?
 - [x] **D2 → Amit picks the 10 from the 30**, using the thesis note, the field and the timeline; each pick is logged with a reason (Amit 2026-10-15). Was: How the 10 are chosen: Amit picks from the 30 using the thesis notes and the field, or mechanically the top 10 by score with ≤ 2 per industry?
 - [ ] **D3 (Amit: "will review later")** 10 names is more concentrated than ADR 0040's 20–30 (and plan 0025 6.2 found a 10-name book lottery-shaped). Paper first for one review cycle, then real money; or real money at once with a per-name cap?
-- [ ] **D4** Retire the Playbooks "Strict compounders" tab?
+- [ ] **D4** Retire the Playbooks "Strict compounders" tab? (Amit 2026-10-16: open, he decides later.)
+- [ ] **D7 Amit picks his 10 from the 30 candidates** (Amit 2026-10-16: "i'll pick top 10 later"). Hold them on the Candidates tab; the "your 10" paper book then follows them.
+- [x] **D8 → reject only on SUBSTANTIVE regulator orders** (Amit 2026-10-16). Substantive means a finding of fraud, insider trading, fund diversion, financial misstatement or manipulation, or a market ban. A procedural fine (late disclosure, a related-party approval lapse, a warning) is medium. PRPF and GYSC moved from reject to flag; the top 30 did not change.
 - [x] **D5 → "anything and everything that helps"** (Amit 2026-10-15): government holders and orders, the electoral-bond file, LLM news read, and announcement-PDF parsing are all in scope, as context cards only. Was: OK to load the ECI electoral-bond file and show a government / political link card as context?
 
 - [x] **D6 → a pre-registered forward test (2026-10-16, the reviewer's round-2 verdict).** The fundamental parts add +0.0 %/yr over a price-only score on survivors (t 0.39), and the two top 30s share only 4 of 30 names. Fourth paper book `price30` started 2026-10-16. After 24 months, the five-part top 30 minus the price-only 30: > +3 points keeps the five-part score; < −3 switches the desk to price-only; within ±3 the simpler price-only score wins (`config.MB_THESIS["kill"]["d6_pts"]`, `tools/mb_paper.py`, tested). Until then the live score stays five-part.

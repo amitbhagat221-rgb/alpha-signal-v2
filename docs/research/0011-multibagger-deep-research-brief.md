@@ -144,7 +144,7 @@
 - **reject** if and only if there is at least one high-severity flag; a high flag cannot sit under flag or clean. A regulator order that is stayed or under appeal still counts as high; only one set aside or quashed is downgraded. When in doubt whether an item is high, rate it medium and explain. High severity means:
   - an auditor resignation or qualification citing concerns, or a going-concern doubt;
   - a default, IBC proceedings or an invoked pledge;
-  - SEBI, ED, CBI or police economic-offences action on the company or its promoters, including through a group company;
+  - SEBI, ED, CBI or police economic-offences action on the company or its promoters, including through a group company, when it is SUBSTANTIVE: a finding of fraud (PFUTP), insider trading, fund diversion, financial misstatement or market manipulation, or a market ban (Amit 2026-10-16). A procedural order (late or missed disclosure, related-party approval or reporting lapse, board-composition or LODR fine, administrative warning) is medium;
   - a tax authority's fraud-type finding (GST Section 74 fake-invoice credit, income-tax undisclosed income) that is material (≥ Rs 5 Cr or ≥ 5 % of net worth) and has not been set aside;
   - a material fact missing from an offer document;
   - related-party flows that look like leakage;

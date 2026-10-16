@@ -1828,3 +1828,4 @@ th[aria-sort="descending"] .pb-sort::after { content: " ▼"; font-size: 10px; }
 .mb-rs-flags li { padding: 8px 0; border-top: 1px solid var(--border); color: var(--text-secondary); }
 .mb-rs-flags li:first-child { border-top: 0; }
 .mb-rs-tbl td { font-size: 13px; }
+.mb-rs-borderline { font-size: 13px; line-height: 1.5; margin-bottom: 12px; color: var(--text-secondary); }

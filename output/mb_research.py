@@ -392,6 +392,27 @@ def load(sids=None):
     return done
 
 
+# Verdicts that sit on the reject / flag line, for Amit to decide (Amit 2026-10-16: "i'll decide, mark them as
+# borderline somewhere"). The verdict stands until he changes it; the reason says which way it could go.
+BORDERLINE = {
+    "RENA": "Reject rests on a Rs 10.7 Cr purchase of preference shares from the promoter, about 0.7 % of net worth; small enough to call a flag.",
+    "FLY": "Reject rests on reading related-party advances as leakage; if they are benign, it is a flag.",
+    "ARRO": "Reject rests on reading the promoter-family supplier as leakage; on the 'when in doubt, medium' rule it would be a flag.",
+    "ZURI": "Reject rests on a group company's SEBI settlement over misstatements; the listed company itself was not named.",
+    "THEM": "Reject rests on circumstantial evidence about promoter-owned distributors' unpaid dues.",
+    "VENR": "Reject rests on technology bought from promoter-linked firms with no valuation report seen; one would make it a flag.",
+    "KIDI": "Reject rests on promoter LLP capital and advances that were mostly returned within each year.",
+    "IRIC": "Reject rests on the seller of a business being an insider not declared as a related party; the company may argue he is not senior management.",
+    "DOLP": "Reject rests on a SEBI insider-trading order matched to the MD by name and directorship, not by PAN.",
+    "GYSC": "Moved from reject to flag under the substantive-only SEBI rule: late disclosure of loan defaults and a promoter arrest.",
+    "PRPF": "Moved from reject to flag under the substantive-only SEBI rule: a related party reported as unrelated.",
+    "IGPT": "Flag, but the Rs 230 Cr London property in a subsidiary could be leakage; if so, reject.",
+    "ARAI": "Flag, but the money stuck in the sold-off UAE associate could be read as leakage; if so, reject.",
+    "HMA": "Flag, but a CBI preliminary enquiry and tax searches were rated medium; a stricter reading is reject.",
+    "KRYS": "Reject for promoter-linked loans; separately, a promoter police case left out of the IPO document was rated medium.",
+}
+
+
 def set_sectors():
     """Write sector / sub_sector (output/mb_sectors.py) onto every mb_research row; returns the sids with no entry."""
     from output.mb_sectors import SECTORS
@@ -442,6 +463,7 @@ def overlay(snapshot=None):
                                           "sector", "sub_sector")},
                        penalty=pen, bonus=bon, n_integrity=n["integrity"]["medium"] + n["integrity"]["low"],
                        n_business=n["business"]["medium"] + n["business"]["low"])
+        row["borderline"] = BORDERLINE.get(t["sid"])
         row["research_score"] = None if row["verdict"] == "reject" else t["thesis_score"] - row["penalty"] + row["bonus"]
         out.append(row)
     df = pd.DataFrame(out)
