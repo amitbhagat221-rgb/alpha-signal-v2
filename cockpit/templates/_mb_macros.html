@@ -50,6 +50,13 @@
 </div>
 {% endmacro %}
 
+{# capacity (output/mb_capacity.py): the most the desk can hold in a name at max_adv_share of its 20-day median
+   traded value, and a red pill when the per-name amount of the book is above it. c = row.cap, d = the tab's data. #}
+{% macro cap_cell(c, d) %}{% if c %}<div><span class="mono">max {{ c.max_text }}</span>
+    <div class="u-muted-11">at {{ d.adv_share_pct }} % of a day's trading</div>
+    {% if c.too_big %}{{ tipped_pill('Too big', 'A ' ~ d.book_text ~ ' book over ' ~ c.names ~ ' names puts ' ~ c.per_name_text ~ ' in this stock, ' ~ (('%.1f'|format(c.share_pct) ~ ' %') if c.share_pct is not none else 'more than all') ~ ' of a day\'s trading (median of the last 20 sessions: ' ~ c.adv_text ~ '). The cap is ' ~ d.adv_share_pct ~ ' %.', 'red') }}{% endif %}</div>
+    {% else %}<span class="u-muted-11">no trading data</span>{% endif %}{% endmacro %}
+
 {# the status pill of a name in the book #}
 {% macro status_pill(status) %}{% if status == 'held' %}<span class="pill pill-green">Held</span>{% elif status == 'candidate' %}<span class="pill pill-accent">Candidate</span>{% elif status == 'dropped' %}<span class="pill pill-muted">Dropped</span>{% endif %}{% endmacro %}
 

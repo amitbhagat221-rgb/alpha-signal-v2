@@ -251,6 +251,22 @@ MB_THESIS = {
     "top_n": 100,                  # stage 2: the top 100 by thesis_rank
     "max_book": 30,                # candidates + held (stage 3), output/mb_book.py
     "max_held": 10,                # stage 5
+    # Capacity (research 0008 problem 3): a position may be at most this share of a name's 20-session median
+    # traded value; book_inr is the desk's assumed money (CEO decision D3), split over max_book / max_held names.
+    "max_adv_share": 0.05,
+    "adv_window": 20,
+    "book_inr": 3_000_000,         # Rs 30 lakh
+    # Forward paper books (tools/mb_paper.py, research 0008 section 6): pond, top30 and amit10 from day one.
+    "paper_top_n": 30,
+    "kill": {
+        "months_to_judge": 24,     # the score and human kills wait this long
+        "score_pts": -5.0,         # top30 minus pond, cumulative return points
+        "human_pts": -10.0,        # amit10 minus top30
+        "hit_up": 0.50,            # a name counts as a hit when up at least this much
+        "risk_excess": -0.35,      # rolling 12-month top30 return minus the benchmark's -> halt new buying
+        "capacity_share": 0.10,    # any held / top30 name above this share of its 20-day ADTV -> stop adding
+        "warn_fraction": 0.5,      # warn at this fraction of a threshold
+    },
 }
 
 # ── Screener Filters ──
@@ -942,6 +958,18 @@ FILE_OUTPUTS = [
         "data_freq":     "monthly",
         "frequency":     "monthly",
         "producer":      "tools.paper_sleeve",
+    },
+    {
+        # Plan 0026 1d.8: the multibagger desk's three forward paper books and their kill rules (Held tab panel).
+        # Monthly, 2nd 06:50 UTC (`run.sh mb_paper`). Absent until Amit runs `run.sh mb_paper start`.
+        "virtual_table": "_file_mb_paper",
+        "glob":          "output/mb_paper/latest.json",
+        "freshness_field": "asof",
+        "optional":      "paper books are started by hand; the Held tab shows an empty state until then",
+        "source":        "tools/mb_paper.py (run.sh mb_paper, monthly)",
+        "data_freq":     "monthly",
+        "frequency":     "monthly",
+        "producer":      "tools.mb_paper",
     },
 ]
 

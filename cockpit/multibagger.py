@@ -32,6 +32,7 @@ import pandas as pd
 
 import config
 import db
+from output import mb_capacity
 from cockpit._shared import _persisted_cache, _ttl_cache
 
 TTL = 300
@@ -354,20 +355,34 @@ def valuation_page():
 
 # ── Candidates / Held / Watch ───────────────────────────────────────────────────────────────────
 
+def capacity_for(book):
+    """{sid: capacity block} for book rows: the per-name amount is book_inr / max_held for a held name and
+    book_inr / max_book for a candidate (output.mb_capacity). Texts are prepared here, not in the template."""
+    cfg, out = config.MB_THESIS, {}
+    for max_names, status in ((cfg["max_book"], "candidate"), (cfg["max_held"], "held")):
+        sids = [b["sid"] for b in book if b["status"] == status]
+        for sid, c in (mb_capacity.capacity(_rows, sids, max_names) if sids else {}).items():
+            out[sid] = {**c, "max_text": mb_capacity.inr_short(c["max_inr"]), "per_name_text": mb_capacity.inr_short(c["per_name_inr"]),
+                        "adv_text": mb_capacity.inr_short(c["adv_inr"]), "share_pct": None if c["share"] is None else round(c["share"] * 100, 1),
+                        "names": max_names}
+    return out
+
+
 def candidates():
     book = book_rows()
     sids = tuple(b["sid"] for b in book)
-    th, vf = thesis_rows(sids), valuation_fields(sids)
+    th, vf, cap = thesis_rows(sids), valuation_fields(sids), capacity_for(book)
     rows = []
     for b in book:
         t = th.get(b["sid"])
         c = _card(b["sid"]) if b["name"] else {}
-        rows.append({**b, "thesis": t, "parts": parts_of(t), "score": None if not t or t["thesis_score"] is None
+        rows.append({**b, "cap": cap.get(b["sid"]), "thesis": t, "parts": parts_of(t), "score": None if not t or t["thesis_score"] is None
                      else round(t["thesis_score"] * 100), "field": vf.get(b["sid"]), "flags": _flags(c),
                      "last_event": _last_event(b["sid"]) if b["name"] else None})
     return {"rows": rows, "n_book": len(book), "max_book": config.MB_THESIS["max_book"],
             "thesis_as_of": snapshot(), "n_held": sum(r["status"] == "held" for r in rows),
-            "max_held": config.MB_THESIS["max_held"]}
+            "max_held": config.MB_THESIS["max_held"], "book_text": mb_capacity.inr_short(config.MB_THESIS["book_inr"]),
+            "adv_share_pct": round(config.MB_THESIS["max_adv_share"] * 100)}
 
 
 @_ttl_cache(900)
@@ -409,6 +424,13 @@ def _ret(a, b):
     return None if not a or not b else round((b / a - 1) * 100, 1)
 
 
+def paper_books():
+    """The three forward paper books and their kill rules as tools/mb_paper.py last wrote them ({} before the
+    first `run.sh mb_paper start`). One reader: views.mb_paper."""
+    import views
+    return views.mb_paper()
+
+
 def held():
     """The held names: return since entry against NIFTY SMALLCAP 250 over the same dates, the conviction verdict
     (monitor only), days since the last logged decision and events since entry (medium and up)."""
@@ -417,6 +439,7 @@ def held():
     log_ts = {r["sid"]: r["ts"] for r in _rows(
         "SELECT sid, MAX(ts) AS ts FROM multibagger_book_log GROUP BY sid")} if book else {}
     b_now, b_now_d = _bench()
+    cap = capacity_for(book)
     rows, today = [], date.today()
     for b in book:
         px, px_d = _price_on(b["sid"])
@@ -427,7 +450,7 @@ def held():
               and e["source"] not in ("news_articles", "regulatory_events")]
         v = verdicts.get(b["sid"])
         ts = log_ts.get(b["sid"])
-        rows.append({**b, "price": px, "price_date": px_d, "return_pct": own, "bench_pct": idx,
+        rows.append({**b, "cap": cap.get(b["sid"]), "price": px, "price_date": px_d, "return_pct": own, "bench_pct": idx,
                      "vs_bench_pts": None if own is None or idx is None else round(own - idx, 1),
                      "verdict": v and v["verdict"], "drawdown_pct": v and round(v["drawdown"] * 100, 1),
                      "months_underwater": v and v["months_underwater"],
@@ -435,7 +458,9 @@ def held():
                      "events_since_entry": len(ev) if b["entry_date"] else None})
     return {"rows": rows, "n_held": len(rows), "max_held": config.MB_THESIS["max_held"], "bench": BENCH,
             "n_book": len(book_rows()), "max_book": config.MB_THESIS["max_book"],
-            "bench_as_of": b_now_d}
+            "bench_as_of": b_now_d, "book_inr": config.MB_THESIS["book_inr"],
+            "book_text": mb_capacity.inr_short(config.MB_THESIS["book_inr"]),
+            "adv_share_pct": round(config.MB_THESIS["max_adv_share"] * 100), "paper": paper_books()}
 
 
 def watch(days=90):

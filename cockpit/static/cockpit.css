@@ -1706,6 +1706,13 @@ th[aria-sort="descending"] .pb-sort::after { content: " ▼"; font-size: 10px; }
 
 /* tables */
 .mb-tablecard { padding: 0; overflow: hidden; margin-top: 8px; }
+/* Held tab > Paper books panel (_mb_paper.html) */
+.mb-paper { margin-bottom: 12px; padding: 12px 16px; }
+.mb-paper-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; margin-bottom: 4px; }
+.mb-paper-title { font-size: 14px; font-weight: 600; color: var(--text-primary); }
+.mb-paper-stale { color: var(--amber); }
+.mb-paper-halt { color: var(--red); }
+.mb-kills { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 4px; }
 .mb-tbl { width: 100%; border-collapse: collapse; font-size: 12px; }
 .mb-tbl th { font-size: 11px; color: var(--text-muted); text-align: left; padding: 8px; white-space: nowrap; text-transform: uppercase; letter-spacing: 0.4px; font-weight: 600; }
 .mb-tbl th.num, .mb-tbl td.num { text-align: right; }

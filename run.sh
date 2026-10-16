@@ -222,6 +222,11 @@ case "$JOB" in
         logged cron_paper_slow_v2 run python -m tools.lh_slow_v2 build
         logged cron_paper_fast run python -m tools.lh_slow_model
         logged cron_paper_sleeve run python -m tools.paper_sleeve rebalance ;;
+    mb_paper)           # 2nd of month 06:50 UTC — plan 0026 1d.8, the multibagger desk's three forward paper books
+                        # and their kill rules (paper only, read-only on the DB, no external calls: no harvest lock).
+                        # `run.sh mb_paper` = mark; `run.sh mb_paper start` once by hand; `status` rewrites the report.
+                        # Writes data/paper/mb_books.json, output/mb_paper/latest.{md,json}.
+        logged cron_mb_paper run python -m tools.mb_paper "${2:-mark}" ;;
     backtest)           # 2nd of month — IC refresh
         logged cron_backtest run python -m tools.backtest_pit ;;
     expected_return)    # 1st of month
