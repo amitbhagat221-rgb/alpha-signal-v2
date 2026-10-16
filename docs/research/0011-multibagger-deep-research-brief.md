@@ -60,6 +60,7 @@
   3. Fetch `nsearchives.nseindia.com` PDFs with curl plus `-e https://www.nseindia.com/`; WebFetch times out on them.
   - SME companies report half-yearly, so the pack has no quarters for them.
 - **Rating rationales** are often attached to the BSE "Credit rating" filing; otherwise use the agency's site.
+- **Check NSE announcements for every stock, not only NSE-only names.** Some litigation, tax-order and raid disclosures are filed only on NSE (smoke test, MUKK). Use the cookie route above with `index=equities`.
 - **Prices on other dates:** `SELECT date, close FROM stock_prices WHERE sid = '<sid>' AND date BETWEEN …` (read-only).
 
 ## Known pack artefacts (not findings)
@@ -67,6 +68,11 @@
 - **Basis.** Annual and quarterly figures are consolidated where the company reports consolidated results, standalone otherwise. Filings may show the other basis, so say which one you cite.
 - **Share count.** Market cap and per-share values use our latest share count, which can miss a recent preferential allotment or warrant conversion. Check the latest count in filings when it matters.
 - **Bulk deals.** A bulk deal whose client is the company's own name is a feed artefact. High-frequency trading firms' same-day buy and sell round trips are not ownership changes.
+- **Revenue and profit lines.** Quarterly revenue can include other income or bullion and trading sales, and quarterly profit can be the owners' share rather than group PAT. Check against the filed result before quoting growth.
+- **"Order win" events.** They come from the exchange subcategory "Award of Order / Receipt of Order". Companies also file regulator orders there (a pollution-board closure, a GST demand), so open the PDF before calling it an order win.
+- **Promoter holding drops.** A drop can be an IPO or a promoter-to-public reclassification, not a sale.
+- **SME stocks** (NSE Emerge / BSE SME) report half-yearly. Quarterly rows from before a company began quarterly filing are half-year figures split in two, so ignore their year-on-year growth. On NSE use `index=sme`, since `index=equities` returns nothing.
+- **Sector and industry tags can be wrong** (a denim mill tagged paper, silver contacts tagged retail). Then the peer table and peer valuation bands are meaningless; say so and use real peers.
 - **Clarifications.** "Clarification sought" events link to the generic BSE stock page; find the company's reply among its filings.
 
 ## Report sections (`report.md`)
@@ -134,7 +140,7 @@
 ```
 
 **Verdict rules:**
-- **reject** requires at least one high-severity flag. High severity means:
+- **reject** if and only if there is at least one high-severity flag; a high flag cannot sit under flag or clean. A regulator order that is stayed or under appeal still counts as high; only one set aside or quashed is downgraded. When in doubt whether an item is high, rate it medium and explain. High severity means:
   - an auditor resignation or qualification citing concerns, or a going-concern doubt;
   - a default, IBC proceedings or an invoked pledge;
   - SEBI, ED, CBI or police economic-offences action on the company or its promoters, including through a group company;

@@ -1231,4 +1231,6 @@ MB_EXITS = {
     "promoter_drop_pts": 5.0,    # promoter stake down more than this over the last two quarters -> review
     "demerger_days": 365,        # demerged within this many days -> review: the thesis score reads pre-demerger
                                  # fundamentals against the post-demerger price (BHIL #1 on 2026-10-15)
+    "shares_mismatch": 1.3,      # market cap from the latest filed total shares off by more than this factor from the
+                                 # thesis market cap -> review: stale share count (IIAB #2 was 22x too small, 2026-10-15)
 }

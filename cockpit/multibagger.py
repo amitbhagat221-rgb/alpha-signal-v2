@@ -286,6 +286,18 @@ def exit_flags(sid, card=None):
     if dm and dm.get("d"):
         out.append({"text": "Review: demerged, score uses pre-demerger results", "tone": "amber", "as_of": dm["d"],
                     "kind": "review"})
+    sh = _one("SELECT end_date, total_shares FROM shareholding_categories WHERE sid = ? AND total_shares > 0 "
+              "ORDER BY end_date DESC LIMIT 1", [sid])
+    mc = _one("SELECT m.mcap_cr, p.close FROM multibagger_scores m JOIN stock_prices p ON p.sid = m.sid AND p.date = "
+              "(SELECT MAX(date) FROM stock_prices WHERE sid = m.sid AND date <= m.snapshot_date) WHERE m.sid = ? AND m.mcap_cr > 0 "
+              "ORDER BY m.snapshot_date DESC LIMIT 1", [sid])
+    if sh.get("total_shares") and mc.get("mcap_cr") and mc.get("close"):
+        adj = _one("SELECT EXP(SUM(LN(factor))) AS f FROM corporate_adjustments WHERE sid = ? AND ex_date > ? AND "
+                   "(inds LIKE '%SPLIT%' OR inds LIKE '%BONUS%') AND factor > 0", [sid, sh["end_date"]])
+        r = sh["total_shares"] / (adj.get("f") or 1.0) * mc["close"] / 1e7 / mc["mcap_cr"]   # bonus after the filing
+        if r > x["shares_mismatch"] or r < 1 / x["shares_mismatch"]:
+            out.append({"text": f"Review: share count off {r:.1f}x vs filing", "tone": "amber", "as_of": sh["end_date"],
+                        "kind": "review"})
     return out
 
 

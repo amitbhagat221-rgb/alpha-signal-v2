@@ -265,7 +265,15 @@ def _ev_ownership(conn, sid, since):
     if not h.empty:
         fdate = dict(zip(f["end_date"], f["date"]))
         ends = sorted(h["end_date"].unique())
-        for pe, ce in zip(ends[:-1], ends[1:]):
+        n_named = h[~h["is_promoter"]].groupby("end_date")["key"].nunique()
+        pairs, last = [], None
+        for e in ends:                    # skip a partial holder list (< 60 % of the last full one's named holders)
+            if last is not None and n_named.get(last, 0) >= 3 and n_named.get(e, 0) < 0.6 * n_named.get(last, 0):
+                continue
+            if last is not None:
+                pairs.append((last, e))
+            last = e
+        for pe, ce in pairs:
             a, b = h[h["end_date"] == pe], h[h["end_date"] == ce]
             dt = fdate.get(ce)
             if dt is None or pd.isna(dt):

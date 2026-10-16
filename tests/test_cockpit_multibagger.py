@@ -292,6 +292,10 @@ def test_exit_flags_fire_on_process_events(monkeypatch):
             return {"d": (date.today() - timedelta(days=400)).isoformat()}
         if "corporate_adjustments" in sql:
             return {"d": d}
+        if "total_shares" in sql:
+            return {"end_date": d, "total_shares": 2.0e9}
+        if "m.mcap_cr" in sql:
+            return {"mcap_cr": 400.0, "close": 40.0}          # filing says 2e9 x 40 / 1e7 = 8,000 Cr: 20x
         return {}
 
     def rows(sql, params=None):
@@ -308,6 +312,7 @@ def test_exit_flags_fire_on_process_events(monkeypatch):
     texts = " | ".join(x["text"] for x in f)
     assert "auditor resigned" in texts and "GSM" in texts and "results overdue" in texts, texts
     assert "pledge 62 %" in texts and "promoter down 7.0 pts" in texts and "demerged" in texts, texts
+    assert "share count off 20.0x" in texts, texts
     assert kinds == {"Exit": "exit", "Review": "review"}
     assert config.MB_EXITS["pledge_review_pct"] == 50.0
 

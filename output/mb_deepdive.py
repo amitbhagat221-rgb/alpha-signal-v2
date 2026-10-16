@@ -15,6 +15,8 @@ import pandas as pd
 import db
 
 HOLDER_MIN_PCT = 1.0
+PARTIAL_SHARE = 0.6     # a filing naming < 60 % of the previous filing's >= 1 % holders is a partial list (279 such
+                        # filings in 246 stocks, 2024+): comparing it makes holders "exit" and "re-enter"
 
 
 def _has_table(name):
@@ -117,13 +119,14 @@ def ownership_timeline(sid):
         d = r["end_date"]
         cur = holders.get(d, {})
         entered = exited = []
-        if prev is not None and prev in holders:
+        partial = prev is not None and len(holders.get(prev, {})) >= 3 and len(cur) < PARTIAL_SHARE * len(holders[prev])
+        if prev is not None and prev in holders and not partial:
             entered = [{"name": v[0], "pct": _f(v[1])} for k, v in cur.items() if k not in holders[prev]]
             exited = [{"name": v[0], "pct": _f(v[1])} for k, v in holders[prev].items() if k not in cur]
         out.append({**{k: (_f(v) if k.endswith("_pct") else v) for k, v in r.items()},
                     "n_shareholders": None if r["n_shareholders"] != r["n_shareholders"] else r["n_shareholders"],
                     "pledge_pct": _f(pledge.get(d)), "entered": entered, "exited": exited})
-        prev = d if d in holders else prev
+        prev = d if d in holders and not partial else prev     # a partial holder list is skipped, not compared
     return out
 
 

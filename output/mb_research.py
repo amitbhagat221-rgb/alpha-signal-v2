@@ -32,6 +32,7 @@ ANNUAL_ITEMS = ["Sales", "Net profit", "Cash from Operating Activity", "Cash fro
 # BSE filings worth reading, by subcategory pattern → (label, how many of the newest to list)
 DOC_KINDS = [
     ("Reg. 34 (1) Annual Report%", "Annual report", 3),
+    ("Earnings Call Transcript%", "Earnings call transcript", 6),
     ("Investor Presentation%", "Investor presentation", 4),
     ("Analyst / Investor Meet%", "Analyst / investor meet (concall transcripts often filed here)", 8),
     ("Credit Rating%", "Credit rating", 5),
@@ -103,6 +104,24 @@ def warnings(sid, quarters, valuation, price):
                  "most quarterly figures, every valuation range and the thesis cheapness / latest-quarter parts use "
                  "the PRE-demerger company. Establish what the remaining company is and its own revenue / profit; "
                  "judge the stock on that, not on sections 1–4.")
+    sh = db.one("SELECT end_date, total_shares FROM shareholding_categories WHERE sid = ? AND total_shares > 0 "
+                "ORDER BY end_date DESC LIMIT 1", [sid])
+    mc = db.one("SELECT mcap_cr FROM multibagger_scores WHERE sid = ? AND mcap_cr > 0 ORDER BY snapshot_date DESC LIMIT 1", [sid])
+    if sh and mc and price:
+        adj = db.one("SELECT EXP(SUM(LN(factor))) AS f FROM corporate_adjustments WHERE sid = ? AND ex_date > ? AND "
+                     "(inds LIKE '%SPLIT%' OR inds LIKE '%BONUS%') AND factor > 0", [sid, sh["end_date"]])
+        sh = {**sh, "total_shares": sh["total_shares"] / ((adj or {}).get("f") or 1.0)}   # a 1:1 bonus after the filing doubles it
+        ratio = sh["total_shares"] * price / 1e7 / mc["mcap_cr"]
+        if ratio > 1.3 or ratio < 1 / 1.3:
+            w.append(f"SHARE COUNT: the latest shareholding filing ({sh['end_date']}) shows {sh['total_shares']:,.0f} shares, "
+                     f"a market cap of Rs {sh['total_shares'] * price / 1e7:,.0f} Cr, {ratio:.2f}x our Rs "
+                     f"{mc['mcap_cr']:,.0f} Cr. Our market cap, per-share values and the thesis small / cheap parts use a "
+                     "stale share count (merger, allotment, split). Verify the count and judge size and value on it.")
+    fy = db.one("SELECT MAX(period_end) AS d FROM fundamentals_screener WHERE sid = ? AND period_type = 'annual'", [sid])
+    if fy and fy["d"] and fy["d"] < str(dt.date.today() - dt.timedelta(days=550)):
+        w.append(f"STALE ANNUALS: our newest annual figures are for the year to {fy['d']}. Section 2 and every "
+                 "valuation range built on annual data (DCF, EV bands, net debt) are out of date: use the latest "
+                 "annual report instead.")
     for q in quarters:
         m = q.get("ebitda_margin_pct")
         if m is not None and (m > 60 or m < -100):
@@ -131,6 +150,13 @@ def annual(sid, years=10):
 def documents(sid):
     """{label: [{date, title, url}]} BSE filings worth reading, newest first."""
     out = {}
+    extra = db.rows("SELECT dt_tm, news_sub, headline, attachment FROM bse_announcements WHERE sid = ? AND "
+                    "subcategory NOT LIKE 'Reg. 34 (1) Annual Report%' AND (news_sub LIKE '%Annual Report%' OR "
+                    "headline LIKE '%Annual Report%') AND COALESCE(attachment, '') <> '' ORDER BY dt_tm DESC LIMIT 3", [sid])
+    if extra:                                     # annual reports filed under 'General' / 'AGM' (new listings do this)
+        out["Annual report (filed under AGM / general)"] = [
+            {"date": r["dt_tm"][:10], "title": (r["news_sub"] or r["headline"] or "")[:140], "url": BSE_ATTACH + r["attachment"]}
+            for r in extra]
     for pat, label, n in DOC_KINDS:
         rows = db.rows("SELECT dt_tm, news_sub, headline, attachment FROM bse_announcements WHERE sid = ? AND "
                        "subcategory LIKE ? AND COALESCE(attachment, '') <> '' ORDER BY dt_tm DESC LIMIT ?",
@@ -166,7 +192,7 @@ def gaps(sid, counts=None, docs=None, quarters=None):
                  "transcripts and credit-rating letters on nseindia.com or the company website yourself.")
     else:
         for label in ("Annual report", "Investor presentation", "Credit rating"):
-            if label not in docs:
+            if not any(k.startswith(label) for k in docs):
                 g.append(f"No {label.lower()} PDF among our BSE filings: look on the company website / NSE.")
     if not c["shareholding_filings"]:
         g.append("No shareholding pattern history: get promoter %, pledge and top holders from the latest filing.")
@@ -311,8 +337,8 @@ def validate(v, report=""):
             p.append(f"red_flags[{i}]: source_url required")
     if v["verdict"] == "reject" and not any(f.get("severity") == "high" for f in v["red_flags"]):
         p.append("reject needs at least one high-severity red flag")
-    if v["verdict"] == "clean" and any(f.get("severity") == "high" for f in v["red_flags"]):
-        p.append("clean cannot carry a high-severity red flag")
+    if v["verdict"] != "reject" and any(f.get("severity") == "high" for f in v["red_flags"]):
+        p.append("a high-severity red flag means reject (a stay or pending appeal does not downgrade it)")
     missing = [c for c in CHECKS if v["red_flag_checks"].get(c) not in CHECK_ANSWERS]
     if missing:
         p.append(f"red_flag_checks: {missing} must each be one of {CHECK_ANSWERS}")
