@@ -35,7 +35,18 @@ by liquidity at the book size, 12.5 % tax on realised gains), benchmark NIFTY SM
                       worst 12 months not worse by > 5 pts, T1 tails not worse by > 0.10); test 6 also reports
                       how many later 3x-in-3y stocks the gate removed vs its share of the pond.
 
-Usage: python -m tools.mb_critique [ew dsr tails lag capacity livepond promoter cashgate]   (default: all)
+ROUND 2 (2026-10-16, the reviewer's second reply; diagnostics, no new pass bars except where stated):
+  crash     name the worst 12-month window of top 30 vs the EW pond (arms A and B) and test the reviewer's
+            momentum-crash reading: is it among the pond's best 12-month windows, and did the pond's bottom
+            6-month-momentum quintile (at the window start) out-earn / triple more than in a typical window?
+            Also: on every backtest path, when would the paper books' risk kill (rolling 12-month top 30 minus
+            SMALLCAP 250 below −35 %) have fired, and what was the pond's 12-month return then.
+  fundinc   the fundamental parts' increment on survivors: the thesis top 30 minus a price-only top 30 scored
+            inside the same survivor pond (survivorship cancels to first order), with the reviewer's bias bound:
+            every delisting at twice the full-market pond's rate lands in the top 30 at its observed loss.
+
+Usage: python -m tools.mb_critique [ew dsr tails lag capacity livepond promoter cashgate crash fundinc]
+       (default: the round-1 tests)
 """
 
 import math
@@ -350,19 +361,129 @@ def t_dsr():
     OUT["dsr"] = res
 
 
+def _paths(frame, sc):
+    top, _, _ = book(frame, sc, keep=False)
+    ew, _, _ = book(frame, sc, n=5000, select=every, keep=False)
+    return top, ew
+
+
+def _fwd12(P, a, ids):
+    dates = P.index
+    i = dates.get_loc(a)
+    end = str((pd.Timestamp(a) + pd.DateOffset(years=1)).date())
+    k = int(np.searchsorted(dates, end))
+    fut = P.iloc[i + 1:k + 1][ids]
+    return fut.ffill().iloc[-1] / fut.iloc[0]
+
+
+def t_crash():
+    say("\n== round 2: the worst 12 months vs the pond — momentum crash? ==")
+    s = state()
+    df, P, bench = s["df"], s["P"], s["bench"]
+    a = df.copy()
+    a["pond_b"] = a["pond_a"]
+    res = {}
+    for arm, frame, sc in (("A full market, price-only", a, "score_a"), ("B survivors, thesis", df, "score_b")):
+        top, ew = _paths(frame, sc)
+        worst = []
+        for k in top:
+            t, p = top[k], ew[k].reindex(top[k].index)
+            r = (t.pct_change(12) - p.pct_change(12)).dropna()
+            worst.append((r.min(), r.idxmin(), k, p.pct_change(12).loc[r.idxmin()], p.pct_change(12).dropna()))
+        w, end, start_k, pond12, pond_all = min(worst, key=lambda x: x[0])
+        months = list(top[start_k].index)
+        begin = months[months.index(end) - 12]
+        pond_rank = float((pond_all <= pond12).mean())            # 1.0 = the pond's best 12 months on that path
+        g = frame[(frame["anchor"] == begin) & frame["pond_b"].fillna(False).astype(bool)].set_index("id")
+        q = pd.qcut(g["mom_6m"].rank(method="first"), 5, labels=False)
+        f = _fwd12(P, begin, list(g.index))
+        by_q = {int(k_): {"median_12m": float(f[q == k_].median() - 1), "share_2x": float((f[q == k_] >= 2).mean()),
+                          "share_3x": float((f[q == k_] >= 3).mean())} for k_ in range(5)}
+        typ = []                                                  # the bottom quintile's 12-month median in every window
+        for b_ in sorted(x for x in frame["anchor"].unique() if x[5:7] in ("01", "04", "07", "10")):
+            gg = frame[(frame["anchor"] == b_) & frame["pond_b"].fillna(False).astype(bool)].set_index("id")
+            if len(gg) < 100 or str((pd.Timestamp(b_) + pd.DateOffset(years=1)).date()) > P.index[-1]:
+                continue
+            qq = pd.qcut(gg["mom_6m"].rank(method="first"), 5, labels=False)
+            ff = _fwd12(P, b_, list(gg.index))
+            typ.append(float(ff[qq == 0].median() - 1) - float(ff[qq == 4].median() - 1))
+        spread = by_q[0]["median_12m"] - by_q[4]["median_12m"]
+        kills = []                                                # the paper books' risk kill on every path
+        for k in top:
+            t = top[k]
+            bb = bench.reindex(t.index).ffill()
+            ex = (t.pct_change(12) - bb.pct_change(12)).dropna()
+            pp = ew[k].reindex(t.index).pct_change(12)
+            for d in ex[ex < -0.35].index:
+                kills.append({"start": k, "month": d, "excess_vs_index": float(ex[d]), "pond_12m": float(pp[d])})
+        res[arm] = {"worst_vs_pond": float(w), "window": [begin, end], "start": start_k, "pond_12m": float(pond12),
+                    "pond_12m_rank_on_path": pond_rank, "momentum_quintiles_12m": by_q,
+                    "bottom_minus_top_quintile": spread, "bottom_minus_top_typical_median": float(np.median(typ)),
+                    "bottom_minus_top_typical_p90": float(np.quantile(typ, 0.9)), "risk_kill_firings": kills}
+        say(f"  {arm}: worst {w:+.1%} vs pond, window {begin} → {end} (start {start_k}); pond +{pond12:.0%} "
+            f"(percentile {pond_rank:.0%} of that path's 12-month windows)")
+        say(f"    pond by 6-month-momentum quintile at {begin}: " + ", ".join(
+            f"Q{k_ + 1} {v['median_12m']:+.0%} ({v['share_3x']:.0%} tripled)" for k_, v in by_q.items()))
+        say(f"    bottom − top quintile {spread:+.0%} vs typical {np.median(typ):+.0%} (90th pct {np.quantile(typ, 0.9):+.0%})")
+        months_k = sorted({x['month'] for x in kills})
+        say(f"    risk kill (top 30 − SMALLCAP 250 < −35 %) fires in {len(kills)} path-months: "
+            + (", ".join(f"{m}" for m in months_k[:8]) or "never")
+            + (f"; pond 12m then {np.median([x['pond_12m'] for x in kills]):+.0%} (median)" if kills else ""))
+    OUT["crash"] = res
+
+
+def t_fundinc():
+    say("\n== round 2: the fundamental parts' increment on survivors ==")
+    s = state()
+    df = s["df"].copy()
+    pond = df["pond_b"].fillna(False).astype(bool) & df["score_b"].notna()
+    pr = pd.Series(np.nan, index=df.index)
+    for _, g in df[pond].groupby("anchor"):
+        pr.loc[g.index] = ((v1.pct(-np.log(g["adtv"])) + v1.pct(g["mom_6m"]) + v1.pct(g["pos_52w"])) / 3).values
+    df["sc_price_surv"] = pr
+    th, _, _ = book(df, "score_b", keep=False)
+    po, _, _ = book(df, "sc_price_surv", keep=False)
+    rows = []
+    for k in th:
+        a_, b_ = th[k], po[k].reindex(th[k].index)
+        yrs = len(a_) / 12
+        ann = (a_.iloc[::12].pct_change() - b_.iloc[::12].pct_change()).dropna()
+        rows.append({"start": k, "thesis": a_.iloc[-1] ** (1 / yrs) - 1, "price_only": b_.iloc[-1] ** (1 / yrs) - 1,
+                     "t": ann.mean() / (ann.std() / math.sqrt(len(ann)))})
+    r = pd.DataFrame(rows)
+    r["inc"] = r["thesis"] - r["price_only"]
+    # the reviewer's bound: delistings at 2x the full-market pond's yearly rate, each at its observed loss
+    full = s["df"][s["df"]["pond_a"].fillna(False).astype(bool) & s["df"]["stopped3"].notna()]
+    yearly_rate = 1 - (1 - full["stopped3"].mean()) ** (1 / 3)
+    dead = full[full["stopped3"] == 1]
+    loss = float(1 - dead["y3"].median()) if len(dead) else 1.0
+    bound = 2 * yearly_rate * loss
+    res = {"thesis": float(r.thesis.median()), "price_only_survivors": float(r.price_only.median()),
+           "increment": float(r.inc.median()), "t": float(r.t.median()), "starts_positive": int((r.inc > 0).sum()),
+           "delist_rate_per_year": float(yearly_rate), "delist_median_loss": loss, "bias_bound_per_year": float(bound),
+           "increment_after_bound": float(r.inc.median() - bound)}
+    say(f"  thesis {res['thesis']:.1%} | price-only on the same survivors {res['price_only_survivors']:.1%} | "
+        f"increment {res['increment']:+.1%}/yr (t {res['t']:.2f}, {res['starts_positive']}/12 starts positive)")
+    say(f"  bias bound: full-market pond delists {yearly_rate:.1%}/yr at a median loss of {loss:.0%}; ×2 into the top 30 "
+        f"→ −{bound:.1%}/yr; increment after the bound {res['increment_after_bound']:+.1%}/yr")
+    OUT["fundinc"] = res
+
+
 TESTS = {"ew": t_ew, "tails": t_tails, "capacity": t_capacity, "lag": t_lag, "livepond": t_livepond,
-         "promoter": t_promoter, "cashgate": t_cashgate, "dsr": t_dsr}
+         "promoter": t_promoter, "cashgate": t_cashgate, "dsr": t_dsr, "crash": t_crash, "fundinc": t_fundinc}
+ROUND1 = ["ew", "tails", "capacity", "lag", "livepond", "promoter", "cashgate", "dsr"]
 
 
 def main():
-    want = sys.argv[1:] or list(TESTS)
+    want = sys.argv[1:] or ROUND1
     for k in want:                                           # dsr last: it counts every variant run before it
         if k != "dsr":
             TESTS[k]()
     if "dsr" in want:
         t_dsr()
-    pd.Series(OUT, dtype=object).to_json(V2 / "mbc_results.json", default_handler=str)
-    say(f"\nwrote {V2 / 'mbc_results.json'}")
+    name = "mbc_results.json" if set(want) & set(ROUND1) else "mbc_round2.json"
+    pd.Series(OUT, dtype=object).to_json(V2 / name, default_handler=str)
+    say(f"\nwrote {V2 / name}")
 
 
 if __name__ == "__main__":

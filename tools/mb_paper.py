@@ -21,7 +21,8 @@ Kill rules (research 0008 section 6), computed on every mark with value, thresho
 (ok / warn / kill, or early before they can be judged); thresholds are config.MB_THESIS["kill"]:
   score     after 24 months top30 trails pond by more than 5 points cumulative
   human     after 24 months amit10 trails top30 by more than 10 points, or fewer of its names are up 50 %+
-  risk      any rolling 12-month top30 return minus the benchmark's below -35 %: halt new buying
+  risk      any rolling 12-month top30 return minus the benchmark's below -35 %: halt new buying, unless the
+            pond itself rose more than 50 % in that window (momentum-crash exemption, research 0008 round 2)
   capacity  any amit10 / top30 position above 10 % of its 20-day ADTV: stop adding
 A kill never sells anything; risk and capacity kills stop BUYING in the paper books (the other kills are advice).
 The name-level process kills (auditor resignation, pledge, GSM...) stay with the Watch tab.
@@ -318,24 +319,37 @@ def evaluate(st, hist, adv):
             f"Amit 10 minus top 30, cumulative: {v:+.1f} points (kill below {kc['human_pts']:g}). Share of names up "
             f"{kc['hit_up'] * 100:.0f} %+: yours {hit_a * 100:.0f} % against {hit_t * 100:.0f} % for the top 30"
             + (" (below it is a kill)." if worse_hits else "."))
-    # risk kill: worst rolling 12-month excess of top30 over the benchmark
-    worst = None
+    # risk kill: worst rolling 12-month excess of top30 over the benchmark. Momentum-crash exemption (research 0008
+    # round 2: the backtest's worst window, Apr 2020 → Apr 2021, was a junk rally in which the pond rose +146 % and
+    # the lowest-momentum names led): a window in which the pond itself rose more than `risk_crash_pond_up` does not halt.
+    worst, worst_all, crash = None, None, None
     for i in range(len(hist)):
         js = [j for j in range(i) if months_between(hist[j]["date"], hist[i]["date"]) >= 12]
         if js:
             j = js[-1]
             ex = (hist[i]["nav"]["top30"] / hist[j]["nav"]["top30"]) - (hist[i]["bench"] / hist[j]["bench"])
+            pond_up = hist[i]["nav"]["pond"] / hist[j]["nav"]["pond"] - 1
+            worst_all = ex if worst_all is None else min(worst_all, ex)
+            if pond_up > kc["risk_crash_pond_up"]:
+                if ex < kc["risk_excess"] and (crash is None or ex < crash[0]):
+                    crash = (ex, pond_up, hist[i]["date"])
+                continue
             worst = ex if worst is None else min(worst, ex)
-    if worst is None:
+    if worst_all is None:
         add("risk", "Risk", None, kc["risk_excess"], "ok", "ok",
             f"Worst rolling 12-month return of the top 30 minus {BENCH}; halts new buying below "
             f"{kc['risk_excess'] * 100:.0f} %. Needs 12 months of history; now {months}.")
     else:
-        v = round(worst * 100, 1)
-        s = _state(worst, kc["risk_excess"], kc["risk_excess"] * wf)
+        w = worst if worst is not None else 0.0
+        v = round(w * 100, 1)
+        s = _state(w, kc["risk_excess"], kc["risk_excess"] * wf)
+        note = ("" if crash is None else
+                f" Exempt: the window to {crash[2]} reached {crash[0] * 100:+.1f} points while the pond itself rose "
+                f"{crash[1] * 100:+.0f} % — a momentum crash (junk rally), not a halt.")
         add("risk", "Risk", v, kc["risk_excess"] * 100, s, {"ok": "ok", "warn": "watch", "kill": "KILL"}[s],
             f"Worst rolling 12-month top 30 minus {BENCH}: {v:+.1f} points; halts new buying below "
-            f"{kc['risk_excess'] * 100:.0f}%. A redesign review, never a forced sale into a lower circuit.")
+            f"{kc['risk_excess'] * 100:.0f}% unless the pond rose more than {kc['risk_crash_pond_up'] * 100:.0f} % in "
+            f"the same window. A redesign review, never a forced sale into a lower circuit.{note}")
     # capacity kill: the biggest position as a share of its 20-day ADTV
     worst_share, worst_sid, unknown = None, None, 0
     for k in ("top30", "amit10"):

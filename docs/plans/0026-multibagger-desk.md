@@ -166,6 +166,8 @@ Source: [research 0008 findings](../research/0008-multibagger-critique-findings.
 - [ ] **D4** Retire the Playbooks "Strict compounders" tab?
 - [x] **D5 → "anything and everything that helps"** (Amit 2026-10-15): government holders and orders, the electoral-bond file, LLM news read, and announcement-PDF parsing are all in scope, as context cards only. Was: OK to load the ECI electoral-bond file and show a government / political link card as context?
 
+- [ ] **D6 (new, research 0008 round 2)** The fundamental parts add +0.0 %/yr over a price-only score on survivors (t 0.39). Keep the five-part score (no return cost; it carries the cards' reading) or simplify to price-only (smallness · 6-month momentum · 52-week position)? Default: keep, judged by the forward books.
+
 ## Done when
 - The phase 1 verdict and its ADR are written.
 - The thesis score runs monthly.
@@ -195,3 +197,4 @@ Source: [research 0008 findings](../research/0008-multibagger-critique-findings.
   - Production schema applied (additive: 5 empty tables + thesis columns).
   - Still open: data writes need Amit's OK (the NSE backfill was blocked by the permission check); 4.3 alerts into the morning email / push; 4.4 announcement PDFs; the electoral-bond file; mb_book's live strict-tab side effect (financials + MICRO rows raise the strict tab's universe count).
   - The backtest's market cap (`tools/mb_thesis.py`: annual shares carried through splits × raw close) differs from the live `market_caps()` basis (`.claude/rules/factors-backtest.md`); the live code uses `market_caps()`. Re-run the backtest on `market_caps()` history at the next re-test.
+- 2026-10-16, critique round 2 (`tools/mb_critique.py crash fundinc`): the −60 % worst window vs the pond is the Apr 2020 → Apr 2021 momentum crash (pond +146 %, bottom momentum quintile +142 % vs top +69 %), so the paper books' risk kill gained a momentum-crash exemption (`risk_crash_pond_up` 0.50). The fundamental parts add +0.0 %/yr over a price-only score on the same survivors → D6. The promoter test ran on 2020 starts (PIT data from 2019-12).

@@ -96,3 +96,41 @@ The desk stays grade C. Its label now says why.
 If you have a second round, the questions we would most like challenged are these:
 - Is the full-market price-only result (+9.6 %/yr, t 1.89, but a −60 % worst year against the pond) better read as momentum-crash risk than as an edge?
 - What would you accept as evidence for or against the fundamental parts, given that no delisted fundamentals are available?
+
+---
+
+## Round 2 (2026-10-16, after the reviewer's second reply)
+
+Code: `python -m tools.mb_critique crash fundinc` → `data/lh/v2/mbc_round2.json`.
+
+**1. The −60 % worst 12 months against the pond is a momentum crash. You were right.**
+- **The window:** April 2020 → April 2021 (the full-market price-only book, April 2016 start).
+- **The pond** rose +146 % in it, its best 12 months on that path.
+- **Ranked by 6-month momentum at the start**, the pond's fifths earned:
+
+  | 6-month momentum fifth | 12-month return | share that tripled |
+  |---|---|---|
+  | bottom | +142 % | 33 % |
+  | 2nd | +134 % | |
+  | 3rd | +116 % | |
+  | 4th | +83 % | |
+  | top | +69 % | 21 % |
+
+  Bottom minus top was +72 points; in a typical window it is −18 (90th percentile +3). That is Daniel & Moskowitz (2016) after a bear bottom.
+- **The risk kill would have fired** in exactly that month (April 2021, pond +139 %). We adopted your exemption: the paper books' risk kill now halts new buying only if the pond itself did not rise more than 50 % in the same window (`config.MB_THESIS["kill"]["risk_crash_pond_up"]`, tested).
+- **The label** now names momentum-crash risk as the forward risk to carry.
+- **The survivors-thesis book's worst window** (−21 %, March 2025 → March 2026, pond +2 %) is not a crash, and the risk kill never fires on its paths.
+
+**2. The capacity pass:** agreed. It runs inside the same square-root model. The adopted cap (≤ 5 % of 20-day traded value, stop adding at 10 %, desk ≤ ₹3 crore) is the control. The test only says costs do not eat the edge before the cap binds.
+
+**3. The promoter test's window:** stated now. It ran on starts January–December 2020, because `promoter_trend_4q` exists only from December 2019 in our point-in-time panel. So its baseline (+18.9 %/yr excess) is the later, stronger window, not the 2016–26 headline (+12.7 %). Its rejection compares like with like.
+
+**4. Evidence for the fundamental parts.** We ran your first route, and the answer is uncomfortable:
+- On the same survivor pond, the full thesis earned 25.8 %/yr; a price-only score (smallness by liquidity, 6-month momentum, 52-week position) earned 25.3 %/yr.
+- **The fundamental parts' increment is +0.0 %/yr** (t 0.39, positive in 6 of 12 starts).
+- **Your bias bound:** the full-market pond delists 3.0 %/yr, but the median delisted pond stock ended near its entry price (mergers and buyouts more than collapses). So at twice the rate the bound is about 0. Even assuming total losses (−6 %/yr), it can only lower an increment that is already zero.
+- **Reading:** the return edge over the pond is size + momentum + nearness to the 52-week high. Cheapness, the latest quarter and industry momentum add nothing measurable to returns. On survivors they cut the halving rate (0.28 vs 0.59), but that is the claim we could not verify with delisted names.
+- **What we did:** we keep the five-part score live for now. It costs nothing in return; the fundamental parts carry the human stage's reading of each card; and the forward books will show it. The cockpit label says the edge is the price parts.
+- **For the investor:** whether to simplify to the price-only score is a decision (plan 0026 D6). The forward pond / top-30 / held books are the clean test you named.
+
+**5. Industry look-ahead and restated Screener figures:** still open, as you said, and not worth fixing at this size.

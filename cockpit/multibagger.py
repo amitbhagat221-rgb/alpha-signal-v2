@@ -45,8 +45,10 @@ GRADE = {"grade": "C", "label": "Grade C — a shortlist for judgement (ADR 0075
                       "that includes delisted stocks (+8.7 %/yr survivors, t 2.25; +9.6 %/yr full market, t 1.89), and the "
                       "SMALLCAP 250 by +12.7 %/yr (t 1.90, worst 12 months −33 %). It does not clear a multiple-testing bar "
                       "(deflated Sharpe 0.76 over 67 tries) and does not avoid blow-ups (full-market halving odds 0.72× the "
-                      "basket). Independent critique and our answer: research 0008, 16 Oct 2026. A place to look, measured "
-                      "live against the basket, not a ranking that picks the winner."),
+                      "basket). The return edge comes from the price parts (size, momentum, 52-week position): on the same "
+                      "survivors the fundamental parts add about 0 %/yr. Forward risk: a momentum crash in a junk rally (Apr 2020 → "
+                      "Apr 2021 it fell 60 points behind the basket while the basket rose 146 %). Independent critique and our answer: research 0008, "
+                      "16 Oct 2026. A place to look, measured live against the basket, not a ranking that picks the winner."),
          }
 
 # bar methods of the football field, in display order (label, what it is); the reverse DCF is not a bar, it is the line above

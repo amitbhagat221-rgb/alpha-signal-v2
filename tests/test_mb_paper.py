@@ -266,6 +266,16 @@ def test_risk_kill_halts_new_buying():
     assert _kill(k, "risk")["state"] == "ok" and not mb_paper.halted(k)
 
 
+def test_risk_kill_exempts_a_momentum_crash():
+    """Research 0008 round 2: a junk rally (pond +60 %) in which the top 30 lags the index by 40 points is not a halt."""
+    nav = {"pond": lambda i: 1.0 if i < 12 else 1.6, "top30": lambda i: 1.0 if i < 12 else 1.2, "amit10": lambda i: 1.0}
+    k = mb_paper.evaluate(_state(), _hist(14, nav, bench=lambda i: 1.0 if i < 12 else 1.6), {})
+    r = _kill(k, "risk")
+    assert r["state"] == "ok" and not mb_paper.halted(k) and "momentum crash" in r["detail"]
+    calm = {"pond": lambda i: 1.0 if i < 12 else 1.1, "top30": lambda i: 1.0 if i < 12 else 0.6, "amit10": lambda i: 1.0}
+    assert _kill(mb_paper.evaluate(_state(), _hist(14, calm), {}), "risk")["state"] == "kill"     # pond +10 %: no exemption
+
+
 def test_capacity_kill_on_share_of_adtv():
     pos = lambda v: {"X": dict(entry_date="d", invested=v, proceeds=0.0, value=v, last_date="d", last_close=1)}
     hist = _hist(3, {"pond": lambda i: 1.0, "top30": lambda i: 1.0, "amit10": lambda i: 1.0})
