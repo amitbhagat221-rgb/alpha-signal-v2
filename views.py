@@ -727,6 +727,25 @@ def paper_sleeve(today=None):
     return d
 
 
+MB_PAPER_FILE = PROJECT_ROOT / "output" / "mb_paper" / "latest.json"
+MB_PAPER_STALE_DAYS = 40   # monthly job, 2nd of each month; past this a refresh was missed
+
+
+def mb_paper(today=None):
+    """The multibagger desk's three paper books (pond, top30, amit10) and their kill rules as tools/mb_paper.py
+    last wrote them (config.FILE_OUTPUTS `_file_mb_paper`), or {} before they are started. Adds `age_days` and
+    `stale`. Research output, never in the DB."""
+    try:
+        d = json.loads(MB_PAPER_FILE.read_text())
+    except (OSError, json.JSONDecodeError):
+        return {}
+    if not d.get("asof") or not d.get("books"):
+        return {}
+    d["age_days"] = ((today or date.today()) - date.fromisoformat(d["asof"])).days
+    d["stale"] = d["age_days"] > MB_PAPER_STALE_DAYS
+    return d
+
+
 def long_hold(sid, sleeve=None):
     """One stock's long-hold rank: {rank, size, score_date, stale, books}, `books` = the paper books
     holding it ("slow", "tactical"). None when the stock has no long-hold rank (only SMALL is ranked:

@@ -1,0 +1,33 @@
+{# Multibagger > Held: the three forward paper books and their kill rules. Data: views.mb_paper() <- tools/mb_paper.py
+   (config.FILE_OUTPUTS `_file_mb_paper`). Plan 0026 1d.8, research 0008 section 6. #}
+{% from "_mb_macros.html" import tipped_pill %}
+{% macro paper_panel(p) %}
+<div class="card mb-paper" id="mb-paper">
+    <div class="mb-paper-head"><span class="mb-paper-title">Paper books</span>
+        {% if p %}<span class="mb-sub">since <span class="mono">{{ p.start|short_date }}</span> &middot; <span class="mono">{{ p.months }}</span> months &middot; priced to <span class="mono">{{ p.price_date|short_date }}</span>
+            &middot; each book {{ p.book_text }}{% if p.stale %} &middot; <b class="mb-paper-stale">monthly refresh missed</b>{% endif %}</span>{% endif %}</div>
+    {% if not p %}
+    <p class="mb-empty">Paper books not started &mdash; run <code>run.sh mb_paper start</code></p>
+    {% else %}
+    <div class="table-wrap"><table class="mb-tbl mb-stack">
+        <thead><tr><th>Book</th><th class="num">NAV since start</th><th class="num">{{ p.bench }}</th><th class="num">vs index</th><th class="num">Names</th></tr></thead>
+        <tbody>
+        {% for b in p.books %}
+        <tr>
+            <td class="mb-first" data-label="Book"><div><b>{{ b.label }}</b><div class="u-muted-11">{{ b.rule }}</div></div></td>
+            <td class="num mono" data-label="NAV since start"><div><span class="{{ b.ret_pct|tone }}">{{ b.ret_pct|pct(1, signed=True) }}</span><div class="u-muted-11">{{ b.nav_text }}</div></div></td>
+            <td class="num mono" data-label="{{ p.bench }}"><div>{{ p.bench_ret_pct|pct(1, signed=True) }}</div></td>
+            <td class="num mono" data-label="vs index"><div><span class="{{ b.vs_bench_pts|tone }}">{{ b.vs_bench_pts|signed(1) }} points</span></div></td>
+            <td class="num mono" data-label="Names"><div>{{ b.n }}{% if b.note %}<div class="u-muted-11">{{ b.note }}</div>{% endif %}</div></td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table></div>
+    <div class="mb-kills">
+        {% for k in p.kills %}{{ tipped_pill(k.label ~ ': ' ~ k.state_text, k.detail, {'ok': 'green', 'warn': 'amber', 'kill': 'red', 'early': 'muted'}[k.state]) }} {% endfor %}
+    </div>
+    {% if p.halted %}<p class="mb-sub mb-paper-halt">New buying is halted in the paper books (risk or capacity kill). Nothing is sold because of a kill; review the rule.</p>{% endif %}
+    <p class="mb-sub">Pond: every name that passed the safety gates, equal weight. Top 30: the 30 best thesis ranks. Amit 10: the names you hold, bought and sold at the close of the day the book changes. Pond and top 30 are rebuilt each year on the anniversary. Costs are charged at the book size. Kill rules are signals to review, not automatic sales.</p>
+    {% endif %}
+</div>
+{% endmacro %}

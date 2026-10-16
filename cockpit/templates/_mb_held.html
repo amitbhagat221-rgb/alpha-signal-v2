@@ -1,14 +1,16 @@
 {# Multibagger > Held: entry, return against NIFTY SMALLCAP 250, conviction monitor. Data: cockpit/multibagger.py held(). #}
-{% from "_mb_macros.html" import rs, act, stock_cell %}
+{% from "_mb_macros.html" import rs, act, stock_cell, cap_cell %}
+{% from "_mb_paper.html" import paper_panel %}
 {% from "_pb_macros.html" import th, chip %}
 <div data-n-held="{{ d.n_held }}" data-max-held="{{ d.max_held }}" data-n-book="{{ d.n_book }}" data-max-book="{{ d.max_book }}">
+{{ paper_panel(d.paper) }}
 {% if not d.rows %}
 <div class="card mb-empty">Nothing held yet &mdash; hold a candidate from the Candidates tab (up to {{ d.max_held }}). Each hold is logged with your reason and the entry price.</div>
 {% else %}
 <p class="mb-sub">Return since entry is the last close against your entry price, with {{ d.bench }} over the same dates (to {{ d.bench_as_of|short_date }}). Your entry price is carried through any split or bonus since entry.</p>
 <div class="card mb-tablecard" x-data="pbList()">
 <div class="table-wrap"><table class="mb-tbl mb-stack">
-    <thead><tr>{{ th('Stock') }}{{ th('Entry', 'num') }}{{ th('Return %', 'num') }}{{ th('Index %', 'num') }}{{ th('Conviction monitor') }}{{ th('Last decision', 'num') }}{{ th('Events since entry', 'num') }}<th>Action</th></tr></thead>
+    <thead><tr>{{ th('Stock') }}{{ th('Entry', 'num') }}{{ th('Return %', 'num') }}{{ th('Index %', 'num') }}{{ th('Conviction monitor') }}{{ th('Last decision', 'num') }}{{ th('Events since entry', 'num') }}{{ th('Capacity', 'num') }}<th>Action</th></tr></thead>
     <tbody>
     {% for r in d.rows %}
     <tr data-row>
@@ -23,12 +25,13 @@
             {% else %}<span class="u-muted-11">no price history</span>{% endif %}</div></td>
         <td class="num mono" data-label="Last decision" data-v="{{ r.days_since_review if r.days_since_review is not none else '' }}"><div>{% if r.days_since_review is not none %}{{ r.days_since_review }} days ago{% else %}&mdash;{% endif %}</div></td>
         <td class="num mono" data-label="Events since entry" data-v="{{ r.events_since_entry if r.events_since_entry is not none else '' }}"><div>{% if r.events_since_entry is not none %}{{ r.events_since_entry }}{% else %}&mdash;{% endif %}</div></td>
+        <td class="num" data-label="Capacity" data-v="{{ r.cap.max_inr if r.cap else '' }}">{{ cap_cell(r.cap, d) }}</td>
         <td class="mb-actions" data-label="Action">{{ act('drop', r.sid, 'Drop') }}</td>
     </tr>
     {% endfor %}
     </tbody>
 </table></div>
 </div>
-<p class="mb-sub"><b>Conviction monitor, not an exit rule.</b> HOLD: near its highs, or its industry and relative strength are intact. WATCH: in a drawdown with mixed signals. REVIEW: deep, long and weak against the industry while the small-cap market is not itself in a bear &mdash; reassess, never a mechanical sell (ADR 0040: stops eject winners). Events are medium severity and up, in filings, not news. Last decision is the newest line in the book's log.</p>
+<p class="mb-sub"><b>Conviction monitor, not an exit rule.</b> HOLD: near its highs, or its industry and relative strength are intact. WATCH: in a drawdown with mixed signals. REVIEW: deep, long and weak against the industry while the small-cap market is not itself in a bear &mdash; reassess, never a mechanical sell (ADR 0040: stops eject winners). Events are medium severity and up, in filings, not news. Last decision is the newest line in the book's log. Capacity is {{ d.adv_share_pct }} % of a day's trading in the stock; a book of {{ d.book_text }} over {{ d.max_held }} names.</p>
 {% endif %}
 </div>
