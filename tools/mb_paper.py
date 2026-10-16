@@ -37,6 +37,7 @@ Usage:
 
 import argparse
 import json
+import math
 import os
 import sqlite3
 import sys
@@ -58,8 +59,10 @@ BOOKS = {
     "pond": dict(label="Pond", rule="Every name that passed the safety gates, equal weight. No score."),
     "top30": dict(label="Top 30", rule="The 30 best thesis ranks, equal weight."),
     "amit10": dict(label="Amit 10", rule="The names you hold, equal weight; cash while there are none."),
+    "price30": dict(label="Price-only 30", rule="The 30 best on price parts alone (smallness by liquidity, 6-month "
+                    "momentum, 52-week position), equal weight. The D6 control (research 0008 round 2)."),
 }
-YEARLY = ("pond", "top30")
+YEARLY = ("pond", "top30", "price30")
 
 
 # ── reading the DB ──────────────────────────────────────────────────────────────────────────────
@@ -100,6 +103,21 @@ def latest_scores():
         raise SystemExit(f"mb_paper: the {snap} run has an empty pond")
     sids = [r["sid"] for r in pond]
     return snap, sids, sids[:MB_THESIS["paper_top_n"]]
+
+
+def price_top(snap, pond):
+    """The price-only top N inside the same pond: mean of the pond percentile of −log ADTV (weight 1/3) and the
+    thesis price part p_price (6-month momentum + 52-week position, weight 2/3) — the backtest's price-only
+    survivors score (tools/mb_critique.py fundinc)."""
+    rows = read(f"SELECT sid, adtv_cr, p_price FROM multibagger_scores WHERE snapshot_date = ? AND sid IN ({_in(len(pond))})",
+                [snap, *pond])
+    ok = [r for r in rows if r["adtv_cr"] and r["adtv_cr"] > 0 and r["p_price"] is not None]
+    if not ok:
+        raise SystemExit(f"mb_paper: the {snap} run has no adtv_cr / p_price for the price-only book")
+    n = len(ok)
+    small = {r["sid"]: (i + 1) / n for i, r in enumerate(sorted(ok, key=lambda r: math.log(r["adtv_cr"]), reverse=True))}
+    score = {r["sid"]: (small[r["sid"]] + 2 * r["p_price"]) / 3 for r in ok}
+    return sorted(score, key=lambda sid: (-score[sid], sid))[:MB_THESIS["paper_top_n"]]
 
 
 def held_sids():
@@ -266,8 +284,10 @@ def _context(st, extra, asof):
 
 # ── kill rules ──────────────────────────────────────────────────────────────────────────────────
 
-def _cum(hist, k):
-    return hist[-1]["nav"][k] / hist[0]["nav"][k] - 1
+def _cum(hist, k, since=None):
+    """Cumulative return of book k from the first history row that has it (and is on or after `since`)."""
+    rows = [h for h in hist if k in h["nav"] and (since is None or h["date"] >= since)]
+    return rows[-1]["nav"][k] / rows[0]["nav"][k] - 1 if rows else 0.0
 
 
 def _hit_rate(book):
@@ -319,6 +339,22 @@ def evaluate(st, hist, adv):
             f"Amit 10 minus top 30, cumulative: {v:+.1f} points (kill below {kc['human_pts']:g}). Share of names up "
             f"{kc['hit_up'] * 100:.0f} %+: yours {hit_a * 100:.0f} % against {hit_t * 100:.0f} % for the top 30"
             + (" (below it is a kill)." if worse_hits else "."))
+    # D6 (research 0008 round 2, pre-registered 2026-10-16): after 24 months of the price-only book, the five-part
+    # top 30 minus the price-only 30 (cumulative, from the price-only book's start) decides: > +3 points keeps the
+    # five-part score; < -3 switches the desk to price-only; within ±3 the simpler price-only score wins.
+    d6s = st.get("book_start", {}).get("price30")
+    if d6s is not None:
+        m6, d = months_between(d6s, hist[-1]["date"]), MB_THESIS["kill"]["d6_pts"]
+        if m6 < kc["months_to_judge"]:
+            add("d6", "D6", None, d, "early", f"too early ({m6} months)",
+                f"Five-part top 30 vs the price-only 30 from {d6s}: after {kc['months_to_judge']} months a gap above "
+                f"+{d:g} points keeps the five-part score, below -{d:g} switches to price-only, and within ±{d:g} the "
+                f"simpler price-only score wins. Now {m6} months.")
+        else:
+            v = round((_cum(hist, "top30", d6s) - _cum(hist, "price30", d6s)) * 100, 1)
+            verdict = "keep five-part" if v > d else "switch to price-only" if v < -d else "tie: price-only"
+            add("d6", "D6", v, d, "ok" if v > d else "warn", verdict,
+                f"Five-part top 30 minus price-only 30 since {d6s}: {v:+.1f} points (decision bar ±{d:g}).")
     # risk kill: worst rolling 12-month excess of top30 over the benchmark. Momentum-crash exemption (research 0008
     # round 2: the backtest's worst window, Apr 2020 → Apr 2021, was a junk rally in which the pond rose +146 % and
     # the lowest-momentum names led): a window in which the pond itself rose more than `risk_crash_pond_up` does not halt.
@@ -410,14 +446,15 @@ def start(asof):
     if STATE.exists():
         raise SystemExit(f"mb_paper: {STATE} exists — the books are already started")
     snap, pond, top = latest_scores()
+    price = price_top(snap, pond)
     held = held_sids()
     bench = bench_level(asof)
     st = dict(created=date.today().isoformat(), start=asof, score_date=snap, book_inr=MB_THESIS["book_inr"],
               bench_start=bench[0], bench_start_date=bench[1], last_rebalance={k: asof for k in YEARLY},
               books={k: dict(cash=float(MB_THESIS["book_inr"]), positions={}, closed=[]) for k in BOOKS},
-              history=[], trades=[], skipped={})
+              history=[], trades=[], skipped={}, book_start={k: asof for k in BOOKS})
     ctx = _context(st, set(pond) | set(held), asof)
-    for k, targets in (("pond", pond), ("top30", top), ("amit10", held)):
+    for k, targets in (("pond", pond), ("top30", top), ("amit10", held), ("price30", price)):
         st["skipped"][k] = rebalance_to(st, k, targets, ctx, asof, "start")
     for k in ("pond", "top30"):
         if not st["books"][k]["positions"]:
@@ -431,15 +468,22 @@ def start(asof):
 def mark(asof):
     st = load_state()
     snap, pond, top = latest_scores()
+    price = price_top(snap, pond)
     held = held_sids()
     bench = bench_level(asof)
     revalue(st, asof)
     ctx = _context(st, set(pond) | set(held), asof)
+    for k in BOOKS:                                   # a book added after the start (price30, 2026-10-16) starts now
+        if k not in st["books"]:
+            st["books"][k] = dict(cash=float(st["book_inr"]), positions={}, closed=[])
+            st.setdefault("book_start", {})[k] = asof
+            st["last_rebalance"][k] = asof
+            st["skipped"][k] = rebalance_to(st, k, price if k == "price30" else [], ctx, asof, "start")
     px_date = max((d for d, _ in ctx["px"].values()), default=asof)
     pre = _with_row(st["history"], _row(st, asof, px_date, bench))
     stop = halted(evaluate(st, pre, ctx["adv"]))
     why = "yearly rebuild"
-    for k, targets in (("pond", pond), ("top30", top)):
+    for k, targets in (("pond", pond), ("top30", top), ("price30", price)):
         if months_between(st["last_rebalance"][k], asof) >= 12:
             st["skipped"][k] = rebalance_to(st, k, targets, ctx, asof, why, halt_buys=stop)
             st["last_rebalance"][k] = asof

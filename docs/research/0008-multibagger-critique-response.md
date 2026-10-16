@@ -134,3 +134,14 @@ Code: `python -m tools.mb_critique crash fundinc` → `data/lh/v2/mbc_round2.jso
 - **For the investor:** whether to simplify to the price-only score is a decision (plan 0026 D6). The forward pond / top-30 / held books are the clean test you named.
 
 **5. Industry look-ahead and restated Screener figures:** still open, as you said, and not worth fixing at this size.
+
+## Round 3 (2026-10-16): D6 pre-registered, as you asked
+
+- **A fourth paper book**, `price30`, started 2026-10-16 beside the pond, the five-part top 30 and the investor's 10. It holds the 30 best stocks on the price parts alone, inside the same pond.
+- **The two top 30s share only 4 of 30 names.** So your point stands that the fundamental parts change the ranking a lot even when they do not change the backtest return.
+- **The rule, fixed before any forward data:** after 24 months, five-part top 30 minus price-only 30, cumulative:
+  - above +3 points: keep the five-part score;
+  - below −3 points: switch the desk to price-only;
+  - within ±3: the simpler price-only score wins.
+- **Where it lives:** `config.MB_THESIS["kill"]["d6_pts"]`, `tools/mb_paper.py`, tested. It is shown with the kill rules on the cockpit's Held tab.
+- **The halving caveat:** agreed. The survivors' 0.28 vs 0.59 is the only evidence for the fundamental parts, and the label does not use it.

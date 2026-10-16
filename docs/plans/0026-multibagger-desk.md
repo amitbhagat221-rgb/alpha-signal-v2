@@ -166,7 +166,7 @@ Source: [research 0008 findings](../research/0008-multibagger-critique-findings.
 - [ ] **D4** Retire the Playbooks "Strict compounders" tab?
 - [x] **D5 → "anything and everything that helps"** (Amit 2026-10-15): government holders and orders, the electoral-bond file, LLM news read, and announcement-PDF parsing are all in scope, as context cards only. Was: OK to load the ECI electoral-bond file and show a government / political link card as context?
 
-- [ ] **D6 (new, research 0008 round 2)** The fundamental parts add +0.0 %/yr over a price-only score on survivors (t 0.39). Keep the five-part score (no return cost; it carries the cards' reading) or simplify to price-only (smallness · 6-month momentum · 52-week position)? Default: keep, judged by the forward books.
+- [x] **D6 → a pre-registered forward test (2026-10-16, the reviewer's round-2 verdict).** The fundamental parts add +0.0 %/yr over a price-only score on survivors (t 0.39), and the two top 30s share only 4 of 30 names. Fourth paper book `price30` started 2026-10-16. After 24 months, the five-part top 30 minus the price-only 30: > +3 points keeps the five-part score; < −3 switches the desk to price-only; within ±3 the simpler price-only score wins (`config.MB_THESIS["kill"]["d6_pts"]`, `tools/mb_paper.py`, tested). Until then the live score stays five-part.
 
 ## Done when
 - The phase 1 verdict and its ADR are written.

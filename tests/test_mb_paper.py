@@ -71,8 +71,9 @@ def _make_db(path):
         c.execute("INSERT INTO stocks (sid, ticker, name, cap_tier) VALUES (?,?,?, 'SMALL')", (s, s, f"{s} Ltd"))
     # thesis run of 2025-09-30: all five in the pond, ranked AAA..EEE
     for i, s in enumerate(SIDS):
-        c.execute("INSERT INTO multibagger_scores (sid, snapshot_date, thesis_pond, thesis_score, thesis_rank, thesis_stage) "
-                  "VALUES (?, '2025-09-30', 1, ?, ?, 'top100')", (s, 1 - i / 10, i + 1))
+        # price parts run the other way (EEE best on price, smallest by liquidity) so the price-only book differs
+        c.execute("INSERT INTO multibagger_scores (sid, snapshot_date, thesis_pond, thesis_score, thesis_rank, thesis_stage, "
+                  "adtv_cr, p_price) VALUES (?, '2025-09-30', 1, ?, ?, 'top100', ?, ?)", (s, 1 - i / 10, i + 1, 5.0 - i, 0.2 + i / 5))
     # prices: flat Rs 100 (AAA grows 1 %/month, EEE falls 2 %/month); CCC splits 1:2 on 2026-03-10 (close halves, factor 0.5)
     for d in _weekdays(date(2025, 9, 1), date(2026, 12, 4)):
         m = (d.year - 2025) * 12 + d.month - 9
@@ -115,7 +116,8 @@ def _hold(path, sid, on=True):
 def test_start_buys_equal_weights_and_refuses_twice(books, capsys):
     rep = mb_paper.start("2025-10-01")
     st = json.loads(mb_paper.STATE.read_text())
-    assert {k: len(b["positions"]) for k, b in st["books"].items()} == {"pond": 5, "top30": 3, "amit10": 0}
+    assert {k: len(b["positions"]) for k, b in st["books"].items()} == {"pond": 5, "top30": 3, "amit10": 0, "price30": 3}
+    assert set(st["books"]["price30"]["positions"]) == {"CCC", "DDD", "EEE"}                 # best on price parts alone
     for sid, p in st["books"]["pond"]["positions"].items():
         assert p["value"] == pytest.approx(1_000_000 / 5 * (1 - 0.001), rel=1e-6)          # 10 bps cost
     assert set(st["books"]["top30"]["positions"]) == {"AAA", "BBB", "CCC"}                  # best three ranks
@@ -149,7 +151,7 @@ def test_fourteen_months_split_follow_the_book_and_yearly_rebuild(books):
     assert [c["sid"] for c in st["books"]["amit10"]["closed"]] == ["EEE"] and st["books"]["amit10"]["closed"][0]["ret"] < 0
     assert set(st["books"]["amit10"]["positions"]) == {"AAA"}
     # the yearly rebuild ran at the first mark a full year on
-    assert st["last_rebalance"] == {"pond": "2026-10-01", "top30": "2026-10-01"}
+    assert st["last_rebalance"] == {"pond": "2026-10-01", "top30": "2026-10-01", "price30": "2026-10-01"}
     assert any(t["why"] == "yearly rebuild" for t in st["trades"])
     # the books: top30 (AAA, BBB, CCC) beats the pond (which holds the falling EEE), both against the index
     by = {b["key"]: b for b in rep["books"]}
@@ -172,7 +174,7 @@ def test_status_rewrites_the_report_without_trading(books):
     mb_paper.status(None)
     assert json.loads(mb_paper.STATE.read_text()) == before
     rep = json.loads((mb_paper.OUT / "latest.json").read_text())
-    assert rep["asof"] == "2025-11-03" and [b["key"] for b in rep["books"]] == ["pond", "top30", "amit10"]
+    assert rep["asof"] == "2025-11-03" and [b["key"] for b in rep["books"]] == ["pond", "top30", "amit10", "price30"]
     assert (mb_paper.OUT / "latest.md").read_text().startswith("# Multibagger paper books")
 
 
@@ -274,6 +276,33 @@ def test_risk_kill_exempts_a_momentum_crash():
     assert r["state"] == "ok" and not mb_paper.halted(k) and "momentum crash" in r["detail"]
     calm = {"pond": lambda i: 1.0 if i < 12 else 1.1, "top30": lambda i: 1.0 if i < 12 else 0.6, "amit10": lambda i: 1.0}
     assert _kill(mb_paper.evaluate(_state(), _hist(14, calm), {}), "risk")["state"] == "kill"     # pond +10 %: no exemption
+
+
+def test_d6_decides_after_24_months_with_a_three_point_bar():
+    """Research 0008 round 2: five-part top 30 vs price-only 30; > +3 keeps, < -3 switches, within ±3 price-only wins."""
+    st = _state()
+    st["book_start"] = {"price30": "2024-01-02"}
+    mk = lambda gap: {"pond": lambda i: 1.0, "top30": lambda i: 1 + 0.002 * i * gap, "amit10": lambda i: 1.0,
+                      "price30": lambda i: 1.0}
+    d6 = lambda gap, n=24: _kill(mb_paper.evaluate(st, _hist(n, mk(gap)), {}), "d6")
+    assert d6(1, n=12)["state"] == "early"
+    assert d6(1)["state_text"] == "keep five-part"                       # +4.8 points
+    assert d6(-1)["state_text"] == "switch to price-only"                # -4.8 points
+    assert d6(0.2)["state_text"] == "tie: price-only"                    # +1.0 point
+
+
+def test_mark_adds_the_price_only_book_to_an_older_state(books):
+    mb_paper.start("2025-10-01")
+    st = json.loads(mb_paper.STATE.read_text())
+    for k in ("price30",):                                               # a state written before price30 existed
+        st["books"].pop(k), st["last_rebalance"].pop(k, None), st["book_start"].pop(k, None)
+        for h in st["history"]:
+            h["nav"].pop(k, None)
+    mb_paper.STATE.write_text(json.dumps(st))
+    rep = mb_paper.mark("2025-11-03")
+    st = json.loads(mb_paper.STATE.read_text())
+    assert len(st["books"]["price30"]["positions"]) == 3 and st["book_start"]["price30"] == "2025-11-03"
+    assert any(b["key"] == "price30" for b in rep["books"]) and _kill(rep["kills"], "d6")["state"] == "early"
 
 
 def test_capacity_kill_on_share_of_adtv():

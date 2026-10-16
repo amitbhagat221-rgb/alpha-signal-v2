@@ -264,6 +264,7 @@ MB_THESIS = {
         "human_pts": -10.0,        # amit10 minus top30
         "hit_up": 0.50,            # a name counts as a hit when up at least this much
         "risk_excess": -0.35,      # rolling 12-month top30 return minus the benchmark's -> halt new buying
+        "d6_pts": 3.0,               # D6: five-part top 30 vs price-only 30 after 24 months; within ±3 price-only wins
         "risk_crash_pond_up": 0.50,  # ... unless the pond rose more than this in that window (momentum crash, research 0008 round 2)
         "capacity_share": 0.10,    # any held / top30 name above this share of its 20-day ADTV -> stop adding
         "warn_fraction": 0.5,      # warn at this fraction of a threshold
