@@ -61,6 +61,7 @@
 {% macro football(f, large=False) %}
 {% if f and f.axis %}
 {% set clipped = f.methods|selectattr('clipped')|list %}
+{% if f.implied_growth_pct is not none %}<div class="mb-ff-foot">{{ tipped('reverse DCF: price implies ' ~ f.implied_growth_pct|pct(1) ~ '/yr growth, fading to year 10', f.reverse_basis, 'mono') }}</div>{% endif %}
 <div class="mb-ff{{ ' large' if large }}">
     {% for m in f.methods if m.ok or large %}
     <div class="mb-ff-row{{ ' na' if not m.ok }}{{ '' if large else ' hover-tip' }}"{% if not large %} tabindex="0"{% endif %}>
@@ -80,13 +81,12 @@
     <span class="mb-ff-key"><i class="mb-ff-mid static"></i> method mid</span>
     {% if clipped %}<span class="mb-ff-key">&rsaquo; runs past the axis</span>{% endif %}
     {% if f.discount_pct is not none %}<span class="mono {{ f.discount_pct|tone(pos='score-red', neg='score-green') }}">price {{ f.discount_pct|pct(0, signed=True) }} vs the median method mid ({{ rs(f.median_mid, f.dec) }})</span>{% endif %}
-    {% if f.implied_growth_pct is not none %}{{ tipped('reverse DCF: price implies ' ~ f.implied_growth_pct|pct(1) ~ '/yr growth, fading to year 10', f.reverse_basis, 'mono') }}{% endif %}
     <span class="u-muted-11">valuation as of {{ f.as_of|short_date }} &middot; &#8377; per share</span>
 </div>
 {% if large %}
 <dl class="mb-basis">
-    {% for m in f.methods %}<dt>{{ m.label }}</dt><dd>{{ m.basis }}</dd>{% endfor %}
     {% if f.reverse_basis %}<dt>Reverse DCF</dt><dd>{{ f.reverse_basis }}</dd>{% endif %}
+    {% for m in f.methods %}<dt>{{ m.label }}</dt><dd>{{ m.basis }}</dd>{% endfor %}
 </dl>
 {% endif %}
 {% else %}
