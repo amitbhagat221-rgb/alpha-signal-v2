@@ -249,6 +249,14 @@ MB_THESIS = {
     "red_flag_days": 365,
     "red_flag_subcategories": ["Resignation of Statutory Auditors", "%CIRP%"],   # LIKE patterns, % = wildcard
     "top_n": 100,                  # stage 2: the top 100 by thesis_rank
+    # Input-integrity checks in the live run (plan 0026 4b; the deep research found 7 of the 2026-10-15 top 100 on
+    # broken inputs, incl. #1 and #2): signals/multibagger.data_checks
+    "data_checks": {
+        "shares_tol": 1.3,             # filed shares x close vs our market cap: filing larger -> use it; smaller -> gate out
+        "filing_max_age_days": 200,    # only a shareholding filing this recent is trusted as the share count
+        "demerger_days": 450,          # a demerger this recent: annual before it -> gate out; else blank the quarter part
+        "revenue_tol": 1.25,           # latest quarter's results-table revenue vs Screener sales -> blank the quarter part
+    },
     "max_book": 30,                # candidates + held (stage 3), output/mb_book.py
     "max_held": 10,                # stage 5
     # Capacity (research 0008 problem 3): a position may be at most this share of a name's 20-session median
@@ -1231,6 +1239,8 @@ MB_EXITS = {
     "promoter_drop_pts": 5.0,    # promoter stake down more than this over the last two quarters -> review
     "demerger_days": 365,        # demerged within this many days -> review: the thesis score reads pre-demerger
                                  # fundamentals against the post-demerger price (BHIL #1 on 2026-10-15)
+    "revenue_mismatch": 1.25,    # latest quarter's revenue in quarterly_income vs Screener Sales off by more than this
+                                 # factor -> review: a one-off gain counted as revenue (THEM 2.1x on 2026-10-15)
     "shares_mismatch": 1.3,      # market cap from the latest filed total shares off by more than this factor from the
                                  # thesis market cap -> review: stale share count (IIAB #2 was 22x too small, 2026-10-15)
 }

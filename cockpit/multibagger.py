@@ -286,6 +286,12 @@ def exit_flags(sid, card=None):
     if dm and dm.get("d"):
         out.append({"text": "Review: demerged, score uses pre-demerger results", "tone": "amber", "as_of": dm["d"],
                     "kind": "review"})
+    rq = _one("SELECT q.end_date, q.revenue, f.value AS sales FROM quarterly_income q JOIN fundamentals_screener f ON f.sid = q.sid "
+                  "AND f.period_type = 'quarterly' AND f.line_item = 'Sales' AND f.period_end = q.end_date WHERE q.sid = ? "
+                  "ORDER BY q.end_date DESC, CASE q.reporting WHEN 'consolidated' THEN 0 ELSE 1 END LIMIT 1", [sid])
+    if rq.get("revenue") and rq.get("sales") and not (1 / x["revenue_mismatch"] <= rq["revenue"] / rq["sales"] <= x["revenue_mismatch"]):
+        out.append({"text": f"Review: quarter revenue {rq['revenue'] / rq['sales']:.1f}x the filed sales", "tone": "amber",
+                    "as_of": rq["end_date"], "kind": "review"})
     sh = _one("SELECT end_date, total_shares FROM shareholding_categories WHERE sid = ? AND total_shares > 0 "
               "ORDER BY end_date DESC LIMIT 1", [sid])
     mc = _one("SELECT m.mcap_cr, p.close FROM multibagger_scores m JOIN stock_prices p ON p.sid = m.sid AND p.date = "

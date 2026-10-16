@@ -122,6 +122,14 @@ def warnings(sid, quarters, valuation, price):
         w.append(f"STALE ANNUALS: our newest annual figures are for the year to {fy['d']}. Section 2 and every "
                  "valuation range built on annual data (DCF, EV bands, net debt) are out of date: use the latest "
                  "annual report instead.")
+    rq = db.one("SELECT q.end_date, q.revenue, f.value AS sales FROM quarterly_income q JOIN fundamentals_screener f ON f.sid = q.sid "
+                  "AND f.period_type = 'quarterly' AND f.line_item = 'Sales' AND f.period_end = q.end_date WHERE q.sid = ? "
+                  "ORDER BY q.end_date DESC, CASE q.reporting WHEN 'consolidated' THEN 0 ELSE 1 END LIMIT 1", [sid])
+    if rq and rq["revenue"] and rq["sales"] and not (1 / 1.25 <= rq["revenue"] / rq["sales"] <= 1.25):
+        w.append(f"QUARTER REVENUE: for the quarter to {rq['end_date']} our results table shows revenue Rs "
+                 f"{rq['revenue']:,.1f} Cr but Screener's sales are Rs {rq['sales']:,.1f} Cr "
+                 f"({rq['revenue'] / rq['sales']:.2f}x). A one-off gain or other income is probably counted as revenue, "
+                 "which inflates section 3 and the thesis latest-quarter part. Read the filed result.")
     for q in quarters:
         m = q.get("ebitda_margin_pct")
         if m is not None and (m > 60 or m < -100):

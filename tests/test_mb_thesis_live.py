@@ -77,6 +77,8 @@ def _frame(n=8, **over):
     ("red_flag", True, "red_flag"),
     ("pledge_pct", 50.1, "pledge"),
     ("gsm", True, "gsm"),
+    ("demerger_stale", True, "demerger"),               # plan 0026 4b data checks (live only)
+    ("shares_conflict", True, "shares"),
 ])
 def test_each_gate_fails_with_its_reason(col, bad, reason):
     f = _frame()
@@ -235,3 +237,27 @@ def test_bad_input_changes_nothing(book):
     with pytest.raises(ValueError, match="already candidate"):
         mb_book.add_candidate("S00", "line", "again")
     assert len(_log(book)) == 1 and len(mb_book.list_book()) == 1
+
+
+def _live():
+    try:
+        return bool(db.DB_PATH.exists() and db.one("SELECT 1 AS x FROM corporate_adjustments WHERE sid = 'BHIL' AND inds LIKE '%DEMERGER%'"))
+    except Exception:
+        return False
+
+
+@pytest.mark.skipif(not _live(), reason="live DB not available (set ALPHA_DB)")
+def test_data_checks_catch_the_known_broken_inputs():
+    """Plan 0026 4b: the 2026-10-15 top 100 carried 7 names on broken inputs (deep research). The gate must catch
+    each: demerged with a pre-demerger annual -> out; filing shows ~10-22x more shares -> market cap from the filing;
+    a bonus or split after the filing is not a conflict; a one-off counted as quarter revenue -> quarter part blanked."""
+    sids = ["BHIL", "VERAN", "IIAB", "AFI", "MWL", "MOLD", "THEM"]
+    f = pd.DataFrame({"mcap_cr": [169.0, 402.0, 354.0, 35.0, 1205.0, 576.0, 980.0]}, index=sids)
+    end = pd.Series("2026-03-31", index=sids)
+    c = mb.data_checks(f, end, "2026-10-16")
+    assert c.loc["BHIL", "demerger_stale"] and c.loc["VERAN", "demerger_stale"]
+    assert c.loc["IIAB", "mcap_source"] == "filing" and c.loc["IIAB", "mcap_cr"] > 5000          # out of the small pond
+    assert c.loc["AFI", "mcap_source"] == "filing" and 250 < c.loc["AFI", "mcap_cr"] < 450
+    assert not c.loc[["MWL", "MOLD"], "shares_conflict"].any()                                   # split / bonus after filing
+    assert (c.loc[["MWL", "MOLD"], "mcap_source"] == "market_caps").all()
+    assert c.loc["THEM", "q_unreliable"] and not c.loc["MOLD", "q_unreliable"]

@@ -199,3 +199,16 @@ Source: [research 0008 findings](../research/0008-multibagger-critique-findings.
   - The backtest's market cap (`tools/mb_thesis.py`: annual shares carried through splits × raw close) differs from the live `market_caps()` basis (`.claude/rules/factors-backtest.md`); the live code uses `market_caps()`. Re-run the backtest on `market_caps()` history at the next re-test.
 - 2026-10-16, critique round 2 (`tools/mb_critique.py crash fundinc`): the −60 % worst window vs the pond is the Apr 2020 → Apr 2021 momentum crash (pond +146 %, bottom momentum quintile +142 % vs top +69 %), so the paper books' risk kill gained a momentum-crash exemption (`risk_crash_pond_up` 0.50). The fundamental parts add +0.0 %/yr over a price-only score on the same survivors → D6. The promoter test ran on 2020 starts (PIT data from 2019-12).
 - 2026-10-16, stage 4b deep research (Amit: "lets do a heavy 100 but create a structure first"): `output/mb_research.py` builds a per-stock pack of what the DB already holds (+ direct BSE `AttachHis` PDF links and a gaps list) so research agents fetch only what is missing; brief [research 0011](../research/0011-multibagger-deep-research-brief.md); results in `mb_research`, shown as a verdict chip on the funnel cards and a section on the stock page. The red-flag verdict and 5x case are pre-registered against 24-month forward returns. Found while building: 3 of the top 100 (BHIL #1, VERAN #10, DCM #82) are scored on pre-demerger fundamentals against post-demerger prices → review flag `demerger_days`; the thesis score itself is unchanged pending Amit's call (exclude recent demergers from the pond, or rebase).
+- 2026-10-16, data gate in the thesis run (Amit: "recompute the 7 names … fix it at the source"):
+  - `signals/multibagger.data_checks` (config `MB_THESIS["data_checks"]`) runs inside `live_frame`.
+    - **Filing shows more shares:** if the latest recent shareholding filing (adjusted for later splits and bonuses) shows more than 1.3× our shares, the market cap comes from the filing.
+    - **Filing shows fewer shares:** gate `shares`.
+    - **Demerger in the last 450 days with a pre-demerger annual:** gate `demerger`.
+    - **Recent demerger, or results-table revenue ≠ Screener sales by more than 1.25×:** the quarter part is blanked, so the missing part counts as the mean of the others.
+  - The gates are optional `thesis()` columns, so the backtest is unchanged.
+  - Re-run 2026-10-16:
+    - pond 752;
+    - 22 market caps corrected from filings;
+    - 4 names out on `shares`, 6 on `demerger`;
+    - 14 names left the top 100 and 14 entered.
+  - The forward paper books started that morning on the old ranking, whose top 30 held BHIL, IIAB and VERAN. They were restarted on the gated run (no marks had elapsed). The old state is kept as `data/paper/mb_books.superseded-2026-10-16-pre-data-gates.json`.
