@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}{{ page_title("Macro") }}{% endblock %}
+
+{% block content %}
+<style>
+.macro-host { margin: 0 -4px; }
+.macro-host iframe { display: block; width: 100%; height: calc(100vh - 120px); min-height: 520px; border: 0; border-radius: 12px; background: #0b0d17; }
+@media (max-width: 768px) { .macro-host { margin: 0 -12px; } .macro-host iframe { height: calc(100vh - 190px); border-radius: 0; } }
+</style>
+<h1 class="section-title">Macro</h1>
+<div class="macro-host">
+  <iframe id="macro-frame" title="Macro framework and today's brief" src="/macro/frame{{ '?as_of=' ~ as_of if as_of else '' }}"></iframe>
+</div>
+<script>
+  // the frame owns the reading position; keep the address bar in step so a link opens the same chapter and date
+  (function () {
+    const f = document.getElementById('macro-frame');
+    if (location.hash) f.src = f.getAttribute('src') + location.hash;
+    window.addEventListener('message', e => {
+      if (e.origin !== location.origin || !e.data || e.data.macro !== 1) return;
+      const q = e.data.asOf && e.data.asOf !== e.data.latest ? '?as_of=' + e.data.asOf : '';
+      history.replaceState(null, '', '/macro' + q + (e.data.hash || ''));
+    });
+  })();
+</script>
+{% endblock %}

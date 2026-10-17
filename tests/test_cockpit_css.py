@@ -8,14 +8,14 @@ import re
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 TEMPLATE_DIRS = [ROOT / "cockpit" / "templates", ROOT / "cockpit_ops" / "templates"]
-STYLESHEETS = [ROOT / "cockpit" / "static" / "cockpit.css"]
+STYLESHEETS = [ROOT / "cockpit" / "static" / "cockpit.css", ROOT / "cockpit" / "static" / "macro.css"]
 
 # Used in class="" but deliberately without a rule: JS/Alpine hooks, prefixes completed by
 # Jinja (`pill-{{ tone }}`), state keys parsed out of :class objects, semantic markers.
 UNSTYLED_OK = {
-    "byScore", "cur", "dark", "ds-", "ex-band-", "ex-meter-", "ex-pill-", "ex-pos-", "ex-tl-", "f", "filter", "h-", "heatmapOpen", "i", "it-note", "loading",
-    "ns-heat-", "null", "o", "og-", "og-av-", "og-memo-body", "og-ref", "pill-", "score-", "st-",
-    "statusFilter", "tab", "tf", "verdict",
+    "byScore", "cur", "dark", "door-pro", "ds-", "ex-band-", "ex-meter-", "ex-pill-", "ex-pos-", "ex-tl-", "f", "filter", "g-", "h-", "heatmapOpen", "i", "it-note", "l-", "loading",
+    "nav-prev", "ns-heat-", "null", "o", "og-", "og-av-", "og-memo-body", "og-ref", "pill-", "rc-", "score-", "st-",
+    "statusFilter", "tab", "tf", "toc-g-", "verdict",
 }
 
 

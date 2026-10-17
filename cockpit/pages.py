@@ -38,6 +38,8 @@ PAGES = [
     {"path": "/markets", "id": "markets", "title": "Markets", "subtitle": "News and themes",
      "icon": "activity", "section": "Daily", "mobile": 3, "short": "Markets", "also": ["news"],
      "tabs": [("today", "Today"), ("themes", "Themes"), ("search", "Search")]},
+    {"path": "/macro", "id": "macro", "title": "Macro", "subtitle": "Frameworks and today's brief",
+     "icon": "globe", "section": "Daily", "short": "Macro"},
     {"path": "/sectors", "id": "sectors", "title": "Sectors", "subtitle": "Sector call, industries, rotation",
      "icon": "layers", "section": "Daily", "short": "Sectors",
      "tabs": [("heatmap", "Today"), ("per-sector", "Industry Detail"), ("rotation", "Rotation")]},

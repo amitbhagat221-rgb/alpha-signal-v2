@@ -227,6 +227,11 @@ case "$JOB" in
                         # `run.sh mb_paper` = mark; `run.sh mb_paper start` once by hand; `status` rewrites the report.
                         # Writes data/paper/mb_books.json, output/mb_paper/latest.{md,json}.
         logged cron_mb_paper run python -m tools.mb_paper "${2:-mark}" ;;
+    macro_desk)         # daily 05:45 UTC — plan 0028, the /macro page's brief: four lights, regime, unusual moves, risk
+                        # radar, point-in-time, into desk_snapshots (after the morning run and the 05:07 LLM drain; no
+                        # external calls, no harvest lock). `run.sh macro_desk rbi red "..."` sets the RBI stance,
+                        # `run.sh macro_desk note FILE.json` saves the written note (validated: no figures in prose).
+        logged cron_macro_desk run python -m output.macro_desk "${2:-run}" "${@:3}" ;;
     backtest)           # 2nd of month — IC refresh
         logged cron_backtest run python -m tools.backtest_pit ;;
     expected_return)    # 1st of month

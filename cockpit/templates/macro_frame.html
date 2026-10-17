@@ -1,0 +1,61 @@
+{# The macro page's own document (plan 0028), shown inside /macro's frame so its styles never touch the cockpit's.
+   m = cockpit/macro.page(as_of): every part is the newest archived version on or before m.as_of. #}
+{% from "_macro_start.html" import start %}
+{% from "_macro_brief.html" import brief %}
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Macro · as of {{ m.as_of }}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/macro.css?v={{ asset_version('macro.css') }}">
+</head>
+<body class="macro-frame">
+<nav class="topnav" id="topnav">
+  <a href="#start" data-nav="start">Start</a>
+  <a href="#in-1" data-nav="india">India<small>{{ m.n_india }}</small></a>
+  <a href="#gl-1" data-nav="global">Global<small>{{ m.n_global }}</small></a>
+  <a href="#sy-1" data-nav="synthesis">Synthesis<small>{{ m.n_synth }}</small></a>
+  <a href="#today" data-nav="today">{{ "Today's brief" if m.is_latest else "Brief" }}</a>
+  <a href="#archive" data-nav="archive">Archive</a>
+  <a href="#deeper" data-nav="deeper">Deeper</a>
+  <label class="asof">As of <select id="asof" aria-label="View the page as it read on a past date">
+    {% for d in m.dates %}<option value="{{ d }}"{% if d == m.brief.date %} selected{% endif %}>{{ d }}{% if loop.first %} · today{% endif %}</option>{% endfor %}
+  </select></label>
+</nav>
+<div class="wrap" style="padding:0 24px">
+  {{ start(m) }}
+  <div class="learn-wrap" data-view="learn-shell">
+    <aside class="toc"><div class="toc-h">Your progress</div><div class="toc-bar"><i id="toc-bar"></i></div><div class="toc-list">
+      {% for g in m.toc %}<div class="toc-g toc-g-{{ g.track | lower }}">{{ g.name }}</div>
+      {% for c in g["items"] %}<a class="toc-i" href="#{{ c.id }}" data-ch="{{ c.id }}"><span class="toc-n">{{ c.num }}</span><span class="toc-t">{{ c.title }}</span><span class="toc-d">✓</span></a>{% endfor %}{% endfor %}
+    </div></aside>
+    <div>{% for c in m.chapters %}{{ c.html | safe }}{% endfor %}</div>
+  </div>
+  {{ brief(m) }}
+  <article class="brief" data-view="archive">
+    <div class="ch-kicker">Archive · every brief is kept with its date</div>
+    <h1 class="ch-title">Past briefs</h1>
+    <p class="b-p">Nothing is overwritten. Every daily run stores a dated brief, and the "As of" filter opens the whole page as it read that day. Briefs before the page went live were rebuilt from data dated on or before each date.</p>
+    <div class="fig"><table class="dotgrid"><thead><tr><th></th>{% for a in m.dotgrid %}<th class="dg-d"><a href="?as_of={{ a.date }}#today">{{ a.date[5:] }}</a></th>{% endfor %}</tr></thead><tbody>
+      {% for name in ["Oil", "US rates and the dollar", "Flows and positioning", "The RBI"] %}{% set i = loop.index0 %}<tr><td>{{ name }}</td>{% for a in m.dotgrid %}<td class="dg-c"><span class="gdot g-{{ a.colours[i] }}" title="{{ name }}, {{ a.date }}: {{ a.colours[i] }}"></span></td>{% endfor %}</tr>{% endfor %}
+      <tr><td>Regime</td>{% for a in m.dotgrid %}<td class="dg-c tiny reg">{{ a.regime }}</td>{% endfor %}</tr>
+    </tbody></table><div class="fig-cap">The last {{ m.dotgrid | length }} briefs. Click a date to open the page as of that day.</div></div>
+    <h2 class="b-h">Everything archived, by part</h2>
+    <div class="fig"><table class="b-table"><thead><tr><th>Part</th><th>Updates</th><th class="num">Items</th><th>Dates archived</th></tr></thead><tbody>
+      {% for c in m.cadence %}<tr><td>{{ c.label }}</td><td>{{ c.cadence }}</td><td class="num mono">{{ c["items"] }}</td><td class="mono">{% if c.last %}{{ c.first }}{% if c.last != c.first %} → {{ c.last }}{% endif %} ({{ c.days }}){% else %}none yet{% endif %}</td></tr>{% endfor %}
+    </tbody></table></div>
+    <h2 class="b-h">Every archived brief</h2>
+    <div class="fig"><table class="b-table"><thead><tr><th>Date</th><th>Lights</th><th class="num">Brent</th><th class="num">US 10y</th><th class="num">FII, 20 sessions</th><th class="num">Nifty</th><th>Regime</th></tr></thead><tbody>
+      {% for a in m.archive %}<tr><td class="mono"><a href="?as_of={{ a.date }}#today">{{ a.date }}</a></td><td>{% for c in a.colours %}<span class="gdot g-{{ c }}"></span>{% endfor %}</td>
+      <td class="num mono">{{ a.brent }}</td><td class="num mono">{{ a.us10y }}</td><td class="num mono">{{ a.fii20 }}</td><td class="num mono">{{ a.nifty }}</td><td>{{ a.regime }}</td></tr>{% endfor %}
+    </tbody></table></div>
+  </article>
+  {% if m.deeper %}{{ m.deeper.html | safe }}{% endif %}
+</div>
+<script>window.MACRO = {{ {"ids": m.chapter_ids, "latest": m.latest, "asOf": m.as_of} | tojson }};</script>
+<script src="/static/macro.js?v={{ asset_version('macro.js') }}"></script>
+</body>
+</html>

@@ -21,7 +21,7 @@ from preview import PreviewReadOnly, add_redirects
 import config
 import views
 from cockpit import api
-from cockpit import explainer as explainer_view, book, model, multibagger, pages, today, stocks as stocks_data
+from cockpit import explainer as explainer_view, book, macro, model, multibagger, pages, today, stocks as stocks_data
 from cockpit._shared import CachedStatic, COCKPIT_STATIC, COCKPIT_TEMPLATES, make_templates, nav_model, prewarm
 
 app = FastAPI(title="Alpha Signal Cockpit")
@@ -134,6 +134,24 @@ def markets_page(request: Request):
         "call": api.get_sector_call(), **api.get_news_front(),
         "sources": [n for n, _ in api.search_news(page_size=1)["sources"]],
     })
+
+
+@app.get("/macro", response_class=HTMLResponse)
+def macro_page(request: Request, as_of: str | None = None):
+    """Macro (plan 0028): the India and global frameworks, today's brief and its archive. The page itself is
+    /macro/frame, framed so its own stylesheet never touches the cockpit's."""
+    return templates.TemplateResponse(request, "macro.html", {"page": "macro", "as_of": macro._valid_date(as_of)})
+
+
+@app.get("/macro/frame", response_class=HTMLResponse)
+def macro_frame(request: Request, as_of: str | None = None):
+    """Every part of the macro page as it read on as_of (default: the newest brief), from desk_snapshots."""
+    m = macro.page(as_of)
+    if m is None:
+        return templates.TemplateResponse(request, "notfound.html", {
+            "page": "macro", "heading": "No macro brief archived yet",
+            "message": "Run `run.sh macro_desk` to write the first brief."}, status_code=404)
+    return templates.TemplateResponse(request, "macro_frame.html", {"m": m})
 
 
 @app.get("/explorer", response_class=HTMLResponse)

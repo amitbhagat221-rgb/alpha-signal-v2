@@ -374,8 +374,8 @@ TABLES = {
         "description": "Which theme each headline was filed under by the daily edition (NULL = read, fits no theme).",
     },
     "desk_snapshots": {
-        "kind": "COMPUTED", "domain": "News & Sentiment", "date_col": "snapshot_date",
-        "description": "Append-only dated archive of every part of the Markets / macro page (brief, hot spots, chapters, regime, house view, playbooks, external readings) and of the industry explainers; the cockpit's As-of filter reads it.",
+        "kind": "COMPUTED", "domain": "News & Sentiment", "date_col": "snapshot_date", "freq": "daily",
+        "description": "Append-only dated archive of every part of the macro page (daily brief from `run.sh macro_desk`, its written note, the RBI stance, hot spots, chapters, regime, house view, playbooks, external readings) and of the industry explainers; the cockpit's As-of filter reads it.",
     },
     "news_theme_history": {
         "kind": "COMPUTED", "domain": "News & Sentiment", "date_col": "as_of",

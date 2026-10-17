@@ -1,0 +1,76 @@
+{# The macro page's brief for one date (plan 0028). m = cockpit/macro.page(as_of). Every figure comes from the computed
+   brief (output/macro_desk.py); the written note carries no figures and shows the date it was written. #}
+{% macro chips(names, cls) %}{% for n in names[:6] %}<a class="ind {{ cls }}" target="_top" href="/sectors?industry={{ n | urlencode }}#per-sector" title="Open the {{ n }} industry page">{{ n }}</a>{% endfor %}{% if names | length > 6 %} <span class="more">+{{ names | length - 6 }} more</span>{% endif %}{% endmacro %}
+{% macro chlink(id, label) %}<a class="chlink" href="#{{ id }}">{{ label }}</a>{% endmacro %}
+
+{% macro brief(m) %}
+{% set b = m.brief %}
+<article class="brief" data-view="today">
+  {% if not m.is_latest %}<div class="snapbar">Viewing the archived brief for <b>{{ b.date }}</b>{% if b.data_date %}, data to {{ b.data_date }}{% endif %}. <a href="?as_of={{ m.latest }}#today">Back to today →</a></div>{% endif %}
+  <div class="ch-kicker">{% if m.is_latest %}Today's brief{% else %}Brief as of {{ b.date }}{% endif %} · data to {{ b.data_date or b.date }} · about five minutes</div>
+  <h1 class="ch-title">{% if m.note %}{{ m.note.title }}{% else %}The four lights on {{ b.date }}{% endif %}</h1>
+  {% if m.note %}
+  <div class="verdict">{{ m.note.verdict }}</div>
+  <div class="snapnote">Written {{ m.note.date }}{% if m.note.stale %} · <b class="stale">more than a week old: read the lights below, they are current</b>{% endif %}</div>
+  {% else %}
+  <div class="fig-cap">No verdict was written for this date. Everything below is recomputed from data dated on or before {{ b.date }}.</div>
+  {% endif %}
+  <div class="snapnote">{% if m.prev %}Since the previous brief ({{ m.prev.date }}):
+    {% set changed = [] %}{% for l in m.lights if l.was %}{% set _ = changed.append(l.title ~ " " ~ l.was ~ " → " ~ l.colour) %}{% endfor %}
+    {{ changed | join(", ") if changed else "no light changed colour" }}.{% endif %} <a href="#archive">All past briefs →</a></div>
+
+  <h2 class="b-h">1 · The regime <span class="b-sub">Mechanism: {{ chlink("sy-1", "Regimes") }}</span></h2>
+  <div class="season-now"><span class="pill-season">{{ b.regime or "n/a" }}</span> {{ m.regime_line | capitalize }}{% if b.regime_month %}, on IIP and CPI published by {{ b.date }} (data to {{ b.regime_month }}){% endif %}.</div>
+
+  <h2 class="b-h">2 · The four lights</h2>
+  <div class="lights">{% for l in m.lights %}
+    <div class="light l-{{ l.colour }}"><div class="light-top"><span class="dot"></span><b>{{ l.title }}</b>{% if l.was %}<span class="chg">was {{ l.was }} on {{ l.was_date }}</span>{% endif %}</div>
+      <div class="light-r"><a class="rd" href="#{{ l.chart }}" title="Open the chapter">{{ l.reading | safe }}</a></div>
+      <div class="light-m">{{ l.meaning }}</div>
+      <div class="light-c">Mechanism: {% for id, lab in l.chapters %}{{ chlink(id, lab) }}{% if not loop.last %} · {% endif %}{% endfor %} · Source: <a class="xl" href="{{ l.src[1] }}" target="_blank" rel="noopener">{{ l.src[0] }}</a></div></div>
+  {% endfor %}</div>
+
+  {% if m.hot %}
+  <h2 class="b-h">Hot spots <span class="b-sub">as written {{ m.hot.date }} · Mechanism: {{ chlink("gl-9", "Hot spots") }}</span></h2>
+  <div class="hotstrip">{% for h in m.hot.rows %}<span class="hs {{ h.cls }}">{{ h.name }} · {{ h.state }}</span>{% endfor %}</div>
+  {% if m.hot.early %}<div class="tiny">The earliest hot-spot note is {{ m.hot.date }}, after this brief's date.</div>{% endif %}
+  {% endif %}
+
+  <h2 class="b-h">3 · What changed</h2>
+  {% if b.news %}
+  <div class="newsd">{% for n in b.news %}<div class="nd-i"><b>{{ n.headline }}</b><span>{{ n.what }}</span>{% if n.so_what %}<span class="nd-so">{{ n.so_what }}</span>{% endif %}</div>{% endfor %}</div>
+  <div class="tiny">The news desk's edition of {{ b.news_day }} · <a target="_top" href="/markets">all news on Markets →</a></div>
+  {% endif %}
+  {% if m.movers %}
+  <table class="b-table"><thead><tr><th>Biggest unusual moves, {{ b.data_date }}</th><th class="num">Move</th><th>How unusual</th><th>Who it helps or hurts</th></tr></thead><tbody>
+  {% for r in m.movers %}<tr><td><b>{{ r.label }}</b></td><td class="num mono {{ 'pos' if r.up else 'neg' }}">{{ r.move }}</td>
+    <td><div class="zbar"><i class="{{ 'zp' if r.z > 0 else 'zn' }}" style="width:{{ '%.0f' | format(r.zw) }}%"></i></div><div class="tiny mono">{{ r.zs }}</div></td>
+    <td>{% if r.helps %}<span class="tag-h">helps</span>{{ chips(r.helps, "h") }}{% endif %}{% if r.hurts %} <span class="tag-x">hurts</span>{{ chips(r.hurts, "x") }}{% endif %}{% if r.reads %}<span class="tag-m">reads it</span>{{ chips(r.reads, "m") }}{% endif %}{% if r.mixed and not (r.helps or r.hurts) %}<span class="tag-m">watch</span>{{ chips(r.mixed, "m") }}{% endif %}</td></tr>{% endfor %}
+  </tbody></table>
+  <div class="tiny">σ compares the move with the series' normal daily move over the past year. Industry links open the cockpit's industry pages.</div>
+  {% endif %}
+  <div class="season-now ctx">Nifty {{ m.context.nifty }} · USD/INR {{ m.context.usdinr }} · India VIX {{ m.context.vix }}{% if m.context.fii_last %} · last session FIIs {{ m.context.fii_last }}, DIIs {{ m.context.dii_last }} ({{ b.flows_date }}){% endif %}</div>
+
+  {% if m.note %}
+  <h2 class="b-h">4 · Who wins and who loses right now <span class="b-sub">written {{ m.note.date }}</span></h2>
+  <div class="winlose"><div><div class="wl-h win">Doing better in this setup</div>
+    {% for name, why, ch in m.note.winners %}<div class="sec-i win"><b>{{ name }}</b><span>{{ why }} · {{ chlink(ch, "why") }}</span></div>{% endfor %}</div>
+  <div><div class="wl-h lose">Under pressure</div>
+    {% for name, why, ch in m.note.losers %}<div class="sec-i lose"><b>{{ name }}</b><span>{{ why }} · {{ chlink(ch, "why") }}</span></div>{% endfor %}</div></div>
+  <h2 class="b-h">5 · What's coming</h2>
+  <div class="coming">{% for when, what in m.note.coming %}<div><b>{{ when }}</b><span>{{ what }}</span></div>{% endfor %}</div>
+  {% endif %}
+
+  {% if b.radar %}
+  <h2 class="b-h">6 · Risk radar</h2>
+  <div class="radar-c">{% for r in b.radar %}<div class="rc rc-{{ r.colour }}" title="{{ r.rule }}"><span class="rr-dot"></span><b>{{ r.name }}</b><span class="tiny">{{ r.reading }}</span></div>{% endfor %}</div>
+  <div class="tiny">Hover a row for its rule. Thresholds are fixed; readings are computed for {{ b.date }}.</div>
+  {% endif %}
+
+  {% if b.notes %}
+  <h2 class="b-h">The news desk's storylines <span class="b-sub">note of {{ b.note_date }}</span></h2>
+  <div class="themes">{% for n in b.notes %}<div class="theme"><div class="th-h">{{ n.theme }}</div><div class="th-now">{{ n.now }}</div>{% if n.changed %}<div class="th-chg"><b>What changed.</b> {{ n.changed }}</div>{% endif %}</div>{% endfor %}</div>
+  {% endif %}
+  <div class="ch-nav"><a class="nav-prev" href="#sy-3">← The daily routine</a><a class="nav-next" href="#deeper">Go deeper →</a></div>
+</article>
+{% endmacro %}
