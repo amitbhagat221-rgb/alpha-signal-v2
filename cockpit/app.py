@@ -20,7 +20,8 @@ from preview import PreviewReadOnly, add_redirects
 
 import config
 import views
-from cockpit import api, book, model, multibagger, pages, today, stocks as stocks_data
+from cockpit import api
+from cockpit import explainer as explainer_view, book, model, multibagger, pages, today, stocks as stocks_data
 from cockpit._shared import CachedStatic, COCKPIT_STATIC, COCKPIT_TEMPLATES, make_templates, nav_model, prewarm
 
 app = FastAPI(title="Alpha Signal Cockpit")
@@ -377,17 +378,31 @@ def _group_detail(by, name):
     parent = api.get_industry_parent_sector(name) if by == "industry" else None
     context = parent if by == "industry" else name
     overview = next((r for r in api.get_group_overview("sector") if r.get("sector") == name), None) if by == "sector" else None
+    narrative = api.get_group_metadata(name)
+    explainer = (narrative or {}).get("explainer") if by == "industry" else None
+    regulatory = api.get_sector_regulatory(context, n=10 if not explainer else 40) if context else []
+    medians = explainer_view.industry_financial_medians(name) if by == "industry" else {}
+    industry_regulatory = (explainer_view.filter_regulatory(regulatory, explainer.get("regulatory_keywords"))[:8]
+                           if explainer else [])
     return {
         "name": name, "kind": by, "overview": overview,
         "parent_sector": parent,
-        "narrative": api.get_group_metadata(name),
+        "narrative": narrative,
+        "explainer": explainer,
+        # the explainer's computed parts (plan 0016 P5): SVG geometry, dial readings,
+        # the industry's financial medians, parent-sector events filtered to the industry
+        "ex": explainer_view.view(explainer) if explainer else None,
+        "dials": explainer_view.dial_readings(explainer.get("dials") or []) if explainer else [],
+        "medians": medians,
+        "cheat_rows": explainer_view.cheat_rows(explainer.get("cheat_sheet"), medians) if explainer else [],
+        "industry_regulatory": industry_regulatory,
         "top_players": api.get_group_top_players(by, name, n=10),
         **({"competitive_landscape": api.get_industry_competitive_landscape(name)}
            if by == "industry" else {}),
         "picks": api.get_group_picks(by, name, top_n=10, bottom_n=5),
         "factor_means": api.get_group_factor_means(by, name),
         "macro_contributors": api.get_sector_macro_contributors(context) if context else [],
-        "regulatory": api.get_sector_regulatory(context, n=10) if context else [],
+        "regulatory": regulatory[:10],
     }
 
 

@@ -393,9 +393,24 @@ def fetch_one(client, key: str, by: str = "industry", dry_run: bool = False) -> 
     return payload
 
 
+# Keys another producer owns inside the same payload (tools/sector_explainer.py, ADR 0078).
+# A story refresh must carry them over, never drop them.
+_KEEP_KEYS = ("explainer", "explainer_generated_at", "explainer_usage")
+
+
 def save_payload(sector: str, industry: str, payload: dict, source: str = "auto"):
-    """Upsert sector_metadata row."""
+    """Upsert sector_metadata row, keeping the explainer block if the row has one."""
     with get_db() as conn:
+        prior = conn.execute("SELECT payload FROM sector_metadata WHERE sector = ? AND source = ?",
+                             (sector, source)).fetchone()
+        if prior:
+            try:
+                old = json.loads(prior[0])
+            except (TypeError, json.JSONDecodeError):
+                old = {}
+            for k in _KEEP_KEYS:
+                if k in old and k not in payload:
+                    payload[k] = old[k]
         conn.execute(
             """INSERT INTO sector_metadata (sector, industry, source, generated_at, payload)
                VALUES (?, ?, ?, datetime('now'), ?)

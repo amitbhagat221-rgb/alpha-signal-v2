@@ -1,0 +1,692 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chemicals & Specialty, explained</title>
+<meta name="description" content="Mockup of a cockpit sector-explainer page: twelve cards that take a reader from zero to fluent on one industry.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --accent: #8b5cf6; --accent-soft: rgba(139,92,246,0.14); --accent-glow: rgba(139,92,246,0.35);
+    --bg-primary: #0a0a0f; --bg-card: #12121a; --bg-card-hover: #1a1a28;
+    --border: #1e1e2e; --border-accent: #2a2a3e;
+    --text-primary: #ececf2; --text-secondary: #b0b2c4; --text-muted: #8e90ac;
+    --green: #22c55e; --green-bg: rgba(34,197,94,0.08);
+    --amber: #f59e0b; --amber-bg: rgba(245,158,11,0.08);
+    --red: #ef4444; --red-bg: rgba(239,68,68,0.08);
+    --blue: #3b82f6; --blue-bg: rgba(59,130,246,0.08);
+    /* chart series, validated on the dark surface */
+    --s-specialty: #8b5cf6; --s-commodity: #d97706; --s-gray: #3a3a4e; --s-gray-text: #8e90ac;
+    --mono: 'JetBrains Mono', ui-monospace, monospace;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body { margin: 0; background: var(--bg-primary); color: var(--text-primary); font-family: Inter, ui-sans-serif, system-ui, sans-serif; font-size: 15px; line-height: 1.55; }
+  a { color: var(--accent); text-decoration: none; }
+  .mono { font-family: var(--mono); }
+
+  /* top bar */
+  .topbar { position: sticky; top: 0; z-index: 20; background: rgba(10,10,15,0.9); backdrop-filter: blur(8px); border-bottom: 1px solid var(--border); padding: 10px 24px; display: flex; align-items: center; gap: 14px; }
+  .crumb { color: var(--text-muted); font-size: 13px; }
+  .crumb b { color: var(--text-primary); font-weight: 600; }
+  .tag { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; padding: 3px 8px; border-radius: 999px; border: 1px solid var(--border-accent); color: var(--text-muted); }
+  .tag.mock { border-color: var(--amber); color: var(--amber); background: var(--amber-bg); }
+  .topbar .right { margin-left: auto; font-size: 12px; color: var(--text-muted); }
+
+  /* layout */
+  .wrap { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 32px; max-width: 1240px; margin: 0 auto; padding: 24px; }
+  nav.side { position: sticky; top: 64px; align-self: start; font-size: 13px; }
+  nav.side .h { font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--text-muted); margin: 0 0 8px 10px; }
+  nav.side a { display: flex; gap: 8px; padding: 6px 10px; border-radius: 8px; color: var(--text-secondary); border-left: 2px solid transparent; }
+  nav.side a:hover, nav.side a.on { background: var(--accent-soft); color: var(--text-primary); border-left-color: var(--accent); }
+  nav.side a .n { font-family: var(--mono); color: var(--text-muted); width: 18px; font-size: 12px; }
+  nav.side .progress { height: 3px; background: var(--border); border-radius: 2px; margin: 10px 10px 0; overflow: hidden; }
+  nav.side .progress i { display: block; height: 100%; width: 0; background: var(--accent); }
+  main { min-width: 0; }
+
+  /* hero */
+  .hero { padding: 8px 0 24px; border-bottom: 1px solid var(--border); margin-bottom: 28px; }
+  .hero .kicker { font-size: 12px; letter-spacing: .1em; text-transform: uppercase; color: var(--text-muted); }
+  .hero h1 { font-size: 34px; margin: 6px 0 6px; letter-spacing: -0.02em; font-weight: 800; }
+  .hero .one { font-size: 18px; color: var(--text-secondary); max-width: 760px; }
+  .kpis { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin-top: 20px; }
+  .kpi { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; }
+  .kpi .l { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .08em; }
+  .kpi .v { font-size: 24px; font-weight: 700; font-family: var(--mono); margin-top: 2px; }
+  .kpi .s { font-size: 12px; color: var(--text-secondary); margin-top: 2px; }
+  .kpi.warn { border-color: rgba(245,158,11,0.4); }
+  .kpi .v.sm { font-size: 16px; font-family: Inter, sans-serif; }
+
+  /* cards */
+  section.card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 16px; padding: 24px 26px; margin-bottom: 22px; scroll-margin-top: 70px; }
+  .card .q { display: flex; align-items: baseline; gap: 12px; }
+  .card .q .num { font-family: var(--mono); font-size: 12px; color: var(--accent); background: var(--accent-soft); padding: 3px 8px; border-radius: 6px; }
+  .card h2 { font-size: 22px; margin: 0; letter-spacing: -0.01em; }
+  .card .ask { color: var(--text-muted); font-size: 13px; margin: 4px 0 16px 0; }
+  .card p { margin: 0 0 12px; color: var(--text-secondary); max-width: 78ch; }
+  .card p strong { color: var(--text-primary); }
+  .sowhat { margin-top: 16px; padding: 12px 14px; border-left: 3px solid var(--accent); background: var(--accent-soft); border-radius: 0 10px 10px 0; font-size: 14px; }
+  .sowhat b { color: var(--accent); font-weight: 600; margin-right: 6px; }
+  .analogy { margin-top: 12px; padding: 12px 14px; border-radius: 10px; border: 1px dashed var(--border-accent); font-size: 14px; color: var(--text-secondary); }
+  .analogy b { color: var(--text-primary); }
+  .fig { margin: 16px 0; }
+  .fig .cap { font-size: 12px; color: var(--text-muted); margin-top: 6px; }
+  .legend { display: flex; gap: 16px; font-size: 12px; color: var(--text-secondary); margin: 6px 0; }
+  .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
+
+  /* tables */
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .08em; font-weight: 600; }
+  td:first-child { color: var(--text-primary); font-weight: 500; }
+  td { color: var(--text-secondary); }
+  tr:hover td { background: var(--bg-card-hover); }
+  .pill { display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+  .pill.up { color: var(--green); background: var(--green-bg); }
+  .pill.down { color: var(--red); background: var(--red-bg); }
+  .pill.mixed { color: var(--amber); background: var(--amber-bg); }
+  .pill.neutral { color: var(--text-muted); background: rgba(142,144,172,0.1); }
+  .pill.yes { color: var(--green); background: var(--green-bg); }
+  .pill.some { color: var(--amber); background: var(--amber-bg); }
+  .pill.no { color: var(--text-muted); background: rgba(142,144,172,0.1); }
+  .dots { font-family: var(--mono); letter-spacing: 2px; color: var(--accent); }
+  .dots .off { color: var(--border-accent); }
+
+  /* three doors */
+  .doors { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+  .door { border: 1px solid var(--border-accent); border-radius: 12px; padding: 14px; background: var(--bg-primary); }
+  .door h4 { margin: 0 0 4px; font-size: 15px; }
+  .door .sub { font-size: 12px; color: var(--text-muted); margin-bottom: 8px; }
+  .door ul { margin: 0 0 10px; padding-left: 18px; color: var(--text-secondary); font-size: 13px; }
+  .meter { height: 8px; background: var(--border); border-radius: 4px; overflow: hidden; }
+  .meter i { display: block; height: 100%; background: var(--accent); border-radius: 4px; }
+  .door .ml { font-size: 11px; color: var(--text-muted); margin-top: 4px; display: flex; justify-content: space-between; }
+
+  /* kitchen flow */
+  .flow { display: grid; grid-template-columns: repeat(5, 1fr); gap: 0; align-items: stretch; position: relative; }
+  .station { position: relative; border: 1px solid var(--border-accent); background: var(--bg-primary); border-radius: 12px; padding: 12px; margin-right: 18px; min-height: 150px; }
+  .station:last-child { margin-right: 0; }
+  .station::after { content: "›"; position: absolute; right: -16px; top: 50%; transform: translateY(-58%); color: var(--accent); font-size: 26px; font-weight: 700; }
+  .station:last-child::after { content: none; }
+  .station .k { font-family: var(--mono); font-size: 11px; color: var(--accent); }
+  .station h4 { margin: 2px 0 4px; font-size: 14px; }
+  .station .what { font-size: 12px; color: var(--text-secondary); }
+  .station .who { font-size: 12px; color: var(--text-muted); margin-top: 8px; border-top: 1px dashed var(--border); padding-top: 6px; }
+  .station.india { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  .bands { display: grid; grid-template-columns: repeat(5, 1fr); gap: 18px; margin-top: 10px; }
+  .band { height: 26px; border-radius: 6px; font-size: 11px; display: flex; align-items: center; justify-content: center; letter-spacing: .06em; text-transform: uppercase; }
+  .band.in { background: var(--accent-soft); color: var(--accent); border: 1px solid var(--accent); }
+  .band.cn { background: var(--red-bg); color: var(--red); border: 1px solid rgba(239,68,68,0.4); }
+  .band.off { border: 1px dashed var(--border-accent); color: var(--text-muted); }
+  .bandlabel { font-size: 11px; color: var(--text-muted); margin: 8px 0 2px; text-transform: uppercase; letter-spacing: .08em; }
+
+  /* end markets */
+  .markets { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+  .mk { border: 1px solid var(--border); border-radius: 12px; padding: 12px; background: var(--bg-primary); }
+  .mk h4 { margin: 0 0 2px; font-size: 14px; }
+  .mk .b { font-size: 12px; color: var(--text-muted); }
+  .mk .d { font-size: 13px; color: var(--text-secondary); margin-top: 8px; }
+  .mk .d::before { content: "moves with · "; color: var(--accent); font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
+
+  /* waterfall */
+  .twoup { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  svg text { font-family: Inter, sans-serif; fill: var(--text-secondary); }
+  svg .mono { font-family: var(--mono); }
+  svg .axis { stroke: var(--border-accent); stroke-width: 1; }
+  svg .grid { stroke: var(--border); stroke-width: 1; }
+  .lines { display: grid; grid-template-columns: 1fr auto; gap: 6px 14px; font-size: 14px; align-items: center; }
+  .lines .k { color: var(--text-primary); }
+  .lines .k small { display: block; color: var(--text-muted); font-size: 12px; }
+
+  /* clock */
+  .clockrow { display: grid; grid-template-columns: 300px 1fr; gap: 24px; align-items: start; }
+  .hands { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 14px; }
+  .hand { border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; background: var(--bg-primary); }
+  .hand .t { font-size: 13px; font-weight: 600; }
+  .hand .r { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+  .timeline { position: relative; margin: 18px 0 6px; padding-left: 0; }
+  .timeline::before { content: ""; position: absolute; left: 7px; top: 6px; bottom: 6px; width: 2px; background: var(--border-accent); }
+  .tl { position: relative; padding-left: 26px; margin-bottom: 10px; font-size: 14px; color: var(--text-secondary); }
+  .tl::before { content: ""; position: absolute; left: 2px; top: 6px; width: 12px; height: 12px; border-radius: 50%; background: var(--bg-card); border: 2px solid var(--border-accent); }
+  .tl.boom::before { border-color: var(--green); } .tl.bust::before { border-color: var(--red); } .tl.now::before { border-color: var(--accent); background: var(--accent); box-shadow: 0 0 0 4px var(--accent-soft); }
+  .tl b { color: var(--text-primary); font-family: var(--mono); font-size: 13px; margin-right: 6px; }
+
+  /* lead-time dot chart */
+  .rule3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 14px 0; }
+  .r3 { border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; background: var(--bg-primary); display: flex; gap: 10px; align-items: center; }
+  .r3 .ck { width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; font-weight: 700; font-size: 14px; flex: none; }
+  .r3 .ck.y { background: var(--green-bg); color: var(--green); border: 1px solid rgba(34,197,94,0.4); }
+  .r3 .ck.n { background: var(--red-bg); color: var(--red); border: 1px solid rgba(239,68,68,0.4); }
+  .r3 .t { font-size: 13px; font-weight: 600; }
+  .r3 .s { font-size: 12px; color: var(--text-muted); }
+  .call { border: 1px solid var(--accent); background: var(--accent-soft); border-radius: 12px; padding: 16px 18px; margin-top: 14px; }
+  .call .h { font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--accent); }
+  .call .v { font-size: 20px; font-weight: 700; margin: 4px 0 8px; }
+  .call ul { margin: 0; padding-left: 18px; color: var(--text-secondary); font-size: 14px; }
+  .kill { margin-top: 12px; }
+  .kill li::marker { color: var(--red); }
+
+  /* quote */
+  .quote { font-size: 17px; line-height: 1.6; color: var(--text-primary); border-left: 3px solid var(--accent); padding: 4px 0 4px 18px; margin: 10px 0; max-width: 80ch; }
+  .readtime { font-size: 12px; color: var(--text-muted); font-family: var(--mono); }
+
+  /* glossary */
+  dl { display: grid; grid-template-columns: 200px 1fr; gap: 8px 16px; font-size: 14px; margin: 0; }
+  dt { color: var(--text-primary); font-weight: 600; }
+  dd { margin: 0; color: var(--text-secondary); }
+
+  .srcnote { font-size: 12px; color: var(--text-muted); border-top: 1px solid var(--border); padding-top: 10px; margin-top: 16px; }
+  .build { background: var(--bg-primary); border: 1px dashed var(--border-accent); border-radius: 12px; padding: 14px 16px; font-size: 13px; color: var(--text-secondary); }
+  .build .l { color: var(--accent); font-family: var(--mono); font-size: 12px; }
+
+  /* table-view toggle for the radar */
+  details summary { cursor: pointer; color: var(--text-muted); font-size: 12px; }
+
+  @media (max-width: 900px) {
+    .wrap { grid-template-columns: 1fr; padding: 16px; gap: 16px; }
+    nav.side { position: static; display: flex; flex-wrap: wrap; gap: 4px; }
+    nav.side .h, nav.side .progress { display: none; }
+    nav.side a { padding: 4px 8px; font-size: 12px; border-left: 0; }
+    .kpis { grid-template-columns: repeat(2, 1fr); }
+    .doors, .markets, .twoup, .clockrow, .rule3, .hands { grid-template-columns: 1fr; }
+    .flow { grid-template-columns: 1fr; }
+    .station { margin-right: 0; margin-bottom: 22px; }
+    .station::after { content: "⌄"; right: auto; left: 50%; top: auto; bottom: -24px; transform: translateX(-50%); }
+    .bands { grid-template-columns: 1fr; gap: 6px; }
+    dl { grid-template-columns: 1fr; }
+    .hero h1 { font-size: 26px; }
+    .topbar { padding: 8px 12px; }
+    .topbar .right, .topbar .tag:not(.mock) { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <span class="crumb">Sectors › Materials › <b>Chemicals &amp; Specialty</b> › Explained</span>
+  <span class="tag mock">Mockup</span>
+  <span class="tag">plan 0016 P5 · sector_narrative</span>
+  <span class="right">as of 2026-10-16 · model numbers from the research MCP · sector figures approximate, to be verified</span>
+</div>
+
+<div class="wrap">
+<nav class="side" id="nav">
+  <div class="h">Twelve cards</div>
+  <a href="#c1"><span class="n">1</span>Tea-stall version</a>
+  <a href="#c2"><span class="n">2</span>The kitchen</a>
+  <a href="#c3"><span class="n">3</span>Who buys and why</a>
+  <a href="#c4"><span class="n">4</span>Rupee to profit</a>
+  <a href="#c5"><span class="n">5</span>The clock</a>
+  <a href="#c6"><span class="n">6</span>Wiring diagram</a>
+  <a href="#c7"><span class="n">7</span>Bottlenecks</a>
+  <a href="#c8"><span class="n">8</span>The rulebook</a>
+  <a href="#c9"><span class="n">9</span>Five forces</a>
+  <a href="#c10"><span class="n">10</span>Results cheat sheet</a>
+  <a href="#c11"><span class="n">11</span>Cross-intelligence</a>
+  <a href="#c12"><span class="n">12</span>Tell a friend</a>
+  <a href="#gl"><span class="n">§</span>Glossary</a>
+  <a href="#build"><span class="n">⚙</span>How it is built</a>
+  <div class="progress"><i id="prog"></i></div>
+</nav>
+
+<main>
+  <div class="hero">
+    <div class="kicker">Industry explainer · Materials · 318 stocks</div>
+    <h1>Chemicals &amp; Specialty</h1>
+    <div class="one">Companies that buy something cheap and messy from a refinery or a mine, cook it in a reactor, and sell something purer to the people who make paint, medicine, pesticide and plastic.</div>
+    <div class="kpis">
+      <div class="kpi"><div class="l">Model score</div><div class="v">47<span style="font-size:14px;color:var(--text-muted)">/100</span></div><div class="s">market-cap weighted · 24th of 38 industries</div></div>
+      <div class="kpi"><div class="l">Breadth</div><div class="v">39%</div><div class="s">of ranked names score 55+</div></div>
+      <div class="kpi"><div class="l">Cycle clock</div><div class="v sm" style="color:var(--green)">Early up-cycle</div><div class="s">volumes back, prices capped · 2 of 3 signs</div></div>
+      <div class="kpi warn"><div class="l">Macro signal</div><div class="v sm" style="color:var(--amber)">Neutral ⚠</div><div class="s">built on steel, coal, cement: wrong dials for chemicals</div></div>
+      <div class="kpi"><div class="l">Top 3 today</div><div class="v sm mono">YASHO · GUJALKALI · COMSYN</div><div class="s">within-tier ranks, research MCP</div></div>
+    </div>
+  </div>
+
+  <!-- ───────── Card 1 ───────── -->
+  <section class="card" id="c1">
+    <div class="q"><span class="num">01</span><h2>The tea-stall version</h2></div>
+    <div class="ask">What does this industry actually do, in one breath?</div>
+    <p>You never buy from these companies. You buy the paint, the medicine, the pesticide, the fridge, the shirt. <strong>They sell to the people who make those.</strong> There are three kinds of chemicals business inside the 318 names, and they behave like three different sectors. The first question for any name is: which door is it behind?</p>
+    <div class="doors">
+      <div class="door">
+        <h4>1 · Commodity</h4>
+        <div class="sub">Sold by the tonne. Price set by the world. The company is a price taker.</div>
+        <ul><li>Caustic soda, soda ash, PVC, phenol, methanol</li><li>Gujarat Alkalies, DCM Shriram, Deepak Nitrite's phenol</li></ul>
+        <div class="meter"><i style="width:25%"></i></div><div class="ml"><span>profit the company keeps</span><span>low</span></div>
+      </div>
+      <div class="door">
+        <h4>2 · Specialty</h4>
+        <div class="sub">Sold for what it does, not what it weighs. Two or three makers per molecule.</div>
+        <ul><li>Refrigerant gases, crop-protection ingredients, pigments, flavours</li><li>SRF, Navin Fluorine, Vinati, Atul, Aarti</li></ul>
+        <div class="meter"><i style="width:58%"></i></div><div class="ml"><span>profit the company keeps</span><span>medium</span></div>
+      </div>
+      <div class="door">
+        <h4>3 · Contract manufacturing</h4>
+        <div class="sub">You make a Western company's patented molecule for them, for years.</div>
+        <ul><li>CSM / CDMO contracts, multi-year, slow to win and slow to lose</li><li>PI Industries, Navin's CDMO arm, Anupam Rasayan</li></ul>
+        <div class="meter"><i style="width:85%"></i></div><div class="ml"><span>profit the company keeps</span><span>high</span></div>
+      </div>
+    </div>
+    <div class="analogy"><b>Analogy.</b> Door 1 sells rice by the sack at mandi price. Door 2 sells a spice mix people ask for by name. Door 3 is a chef cooking another restaurant's secret recipe under a five-year contract.</div>
+    <div class="sowhat"><b>So what for the stock</b>A commodity name is a bet on a price. A specialty name is a bet on volume in a niche. A contract name is a bet on contracts, and it falls hardest when one is lost.</div>
+  </section>
+
+  <!-- ───────── Card 2 ───────── -->
+  <section class="card" id="c2">
+    <div class="q"><span class="num">02</span><h2>The kitchen</h2></div>
+    <div class="ask">Who stands where between raw material and final product, and where do Indian listed companies stand?</div>
+    <p>Picture a kitchen with five stations. Ingredients enter at one end, a finished dish leaves at the other. <strong>Indian listed chemicals companies mostly stand at stations 3 and 4, the middle of the kitchen.</strong> China stands at every station, at larger scale.</p>
+    <div class="fig">
+      <div class="flow">
+        <div class="station"><div class="k">STATION 1</div><h4>Ingredients</h4><div class="what">Crude oil, natural gas, salt, sulphur, fluorspar, phosphate rock, power</div><div class="who">ONGC, Coal India, importers · China for fluorspar</div></div>
+        <div class="station"><div class="k">STATION 2</div><h4>Refineries &amp; crackers</h4><div class="what">Crude becomes building blocks: benzene, ethylene, propylene, chlorine, caustic</div><div class="who">Reliance, IOC, GAIL, OPaL, chlor-alkali plants</div></div>
+        <div class="station india"><div class="k">STATION 3</div><h4>Intermediates</h4><div class="what">Building blocks become hundreds of in-between molecules</div><div class="who">Deepak Nitrite, Aarti, Atul, Bodal, Jubilant Ingrevia</div></div>
+        <div class="station india"><div class="k">STATION 4</div><h4>Actives &amp; specialties</h4><div class="what">Intermediates become the ingredient that does the job</div><div class="who">SRF, Navin, PI, UPL, Vinati, Sudarshan, Fine Organics</div></div>
+        <div class="station"><div class="k">STATION 5</div><h4>Final product maker</h4><div class="what">Paint, pesticide, medicine, fabric, pipe, fridge</div><div class="who">Asian Paints, Sun Pharma, Bayer, Maruti, textile mills</div></div>
+      </div>
+      <div class="bandlabel">Who stands where</div>
+      <div class="bands">
+        <div class="band off">India imports</div><div class="band off">Reliance, PSUs</div><div class="band in">India listed</div><div class="band in">India listed</div><div class="band off">Customers</div>
+      </div>
+      <div class="bands" style="margin-top:6px">
+        <div class="band cn">China</div><div class="band cn">China</div><div class="band cn">China</div><div class="band cn">China</div><div class="band off">World</div>
+      </div>
+      <div class="cap">Roughly half of India's chemical output comes out of Gujarat, around Dahej, Ankleshwar and Vapi, because that is where the port, the salt, the power and the effluent plants are. Geography is a cost line here.</div>
+    </div>
+    <div class="sowhat"><b>So what for the stock</b>A shock at station 1 or 2 lands straight on the margins at stations 3 and 4. When Reliance raises benzene or China cuts fluorspar, the listed names feel it a month later.</div>
+  </section>
+
+  <!-- ───────── Card 3 ───────── -->
+  <section class="card" id="c3">
+    <div class="q"><span class="num">03</span><h2>Who buys and why</h2></div>
+    <div class="ask">Which end markets pull demand, and what moves each of them?</div>
+    <p>Demand for chemicals is <strong>borrowed demand</strong>. The sector grows when its customers grow. Each tile is a customer industry and the one thing that moves it.</p>
+    <div class="markets">
+      <div class="mk"><h4>Farming</h4><div class="b">pesticide actives and intermediates</div><div class="d">monsoon, crop prices, farmer cash, global crop-protection inventories</div></div>
+      <div class="mk"><h4>Pharma</h4><div class="b">intermediates, key starting materials, solvents</div><div class="d">generic volumes, US FDA approvals, China+1 sourcing</div></div>
+      <div class="mk"><h4>Paints &amp; coatings</h4><div class="b">pigments, resins, titanium dioxide, solvents</div><div class="d">housing, repainting, auto production</div></div>
+      <div class="mk"><h4>Textiles</h4><div class="b">dyes and dye intermediates</div><div class="d">garment exports, cotton prices</div></div>
+      <div class="mk"><h4>Plastics &amp; construction</h4><div class="b">PVC, caustic, additives</div><div class="d">real estate, pipes, water schemes</div></div>
+      <div class="mk"><h4>Auto &amp; cooling</h4><div class="b">refrigerant gases, polymers, fluids</div><div class="d">car and AC sales, Kigali gas quotas</div></div>
+      <div class="mk"><h4>FMCG &amp; personal care</h4><div class="b">surfactants, flavours, oleochemicals</div><div class="d">rural consumption, palm oil price</div></div>
+      <div class="mk"><h4>Electronics &amp; energy</h4><div class="b">fluoropolymers, battery and solar chemicals</div><div class="d">EV and solar build-out</div></div>
+    </div>
+    <div class="sowhat"><b>So what for the stock</b>"Paints demand is weak" or "Bayer is destocking" is a chemicals earnings signal one quarter early. Card 11 turns this into a watch-list.</div>
+  </section>
+
+  <!-- ───────── Card 4 ───────── -->
+  <section class="card" id="c4">
+    <div class="q"><span class="num">04</span><h2>How a rupee becomes profit</h2></div>
+    <div class="ask">Which P&amp;L lines matter here and which can you ignore? Is depreciation a big deal? Capex? Working capital?</div>
+    <p>The whole P&amp;L is one idea: <strong>spread</strong>. Selling price minus raw material cost. Everything else is the cost of running the reactor. Below, ₹100 of sales walks down to profit for a typical commodity name and a typical specialty name. The figures are illustrative mid-cycle shapes, not any one company.</p>
+    <div class="fig twoup">
+      <div>
+        <div class="legend"><span><i style="background:var(--s-commodity)"></i>Commodity, ₹100 of sales</span></div>
+        <svg viewBox="0 0 440 230" width="100%" role="img" aria-label="Waterfall: commodity chemicals, 100 rupees of sales to 5 rupees of profit">
+          <g class="mono" font-size="10">
+            <line class="grid" x1="40" x2="430" y1="190" y2="190"/>
+            <line class="grid" x1="40" x2="430" y1="100" y2="100"/>
+            <text x="8" y="194">0</text><text x="8" y="104">50</text><text x="2" y="24">100</text>
+          </g>
+          <!-- bars: x,y,w,h ; scale 1.7px per rupee, base y=190 -->
+          <g>
+            <rect x="48" y="20" width="44" height="170" rx="4" fill="var(--s-commodity)"><title>Sales ₹100</title></rect>
+            <rect x="104" y="20" width="44" height="119" rx="4" fill="var(--s-gray)"><title>Raw materials ₹70 (crude or gas derived, salt, sulphur)</title></rect>
+            <rect x="160" y="139" width="44" height="51" rx="4" fill="var(--s-commodity)"><title>Gross margin ₹30</title></rect>
+            <rect x="216" y="139" width="44" height="17" rx="4" fill="var(--s-gray)"><title>Power and fuel ₹10</title></rect>
+            <rect x="272" y="156" width="44" height="14" rx="4" fill="var(--s-gray)"><title>People, freight, effluent, maintenance ₹8</title></rect>
+            <rect x="328" y="170" width="44" height="20" rx="4" fill="var(--s-commodity)"><title>EBITDA ₹12</title></rect>
+            <rect x="384" y="170" width="44" height="12" rx="4" fill="var(--s-gray)"><title>Depreciation ₹5 and interest ₹2</title></rect>
+            <rect x="384" y="182" width="44" height="8" rx="4" fill="var(--s-commodity)"><title>Profit ₹5</title></rect>
+          </g>
+          <g font-size="11" text-anchor="middle">
+            <text x="70" y="208">Sales</text><text x="126" y="208">Raw mat.</text><text x="182" y="208">Gross</text><text x="238" y="208">Power</text><text x="294" y="208">Other</text><text x="350" y="208">EBITDA</text><text x="406" y="208">Dep+int</text>
+            <text x="406" y="224" fill="var(--text-primary)" font-weight="600">→ Profit</text>
+          </g>
+          <g class="mono" font-size="11" text-anchor="middle" fill="var(--text-primary)">
+            <text x="70" y="14">100</text><text x="126" y="14">−70</text><text x="182" y="133">30</text><text x="238" y="133">−10</text><text x="294" y="150">−8</text><text x="350" y="164">12</text><text x="406" y="164">−7 → 5</text>
+          </g>
+        </svg>
+      </div>
+      <div>
+        <div class="legend"><span><i style="background:var(--s-specialty)"></i>Specialty, ₹100 of sales</span></div>
+        <svg viewBox="0 0 440 230" width="100%" role="img" aria-label="Waterfall: specialty chemicals, 100 rupees of sales to 16 rupees of profit">
+          <g class="mono" font-size="10">
+            <line class="grid" x1="40" x2="430" y1="190" y2="190"/>
+            <line class="grid" x1="40" x2="430" y1="100" y2="100"/>
+            <text x="8" y="194">0</text><text x="8" y="104">50</text><text x="2" y="24">100</text>
+          </g>
+          <g>
+            <rect x="48" y="20" width="44" height="170" rx="4" fill="var(--s-specialty)"><title>Sales ₹100</title></rect>
+            <rect x="104" y="20" width="44" height="88" rx="4" fill="var(--s-gray)"><title>Raw materials ₹52</title></rect>
+            <rect x="160" y="108" width="44" height="82" rx="4" fill="var(--s-specialty)"><title>Gross margin ₹48</title></rect>
+            <rect x="216" y="108" width="44" height="10" rx="4" fill="var(--s-gray)"><title>Power and fuel ₹6</title></rect>
+            <rect x="272" y="118" width="44" height="29" rx="4" fill="var(--s-gray)"><title>People, R&amp;D, effluent, freight ₹17</title></rect>
+            <rect x="328" y="147" width="44" height="43" rx="4" fill="var(--s-specialty)"><title>EBITDA ₹25</title></rect>
+            <rect x="384" y="147" width="44" height="15" rx="4" fill="var(--s-gray)"><title>Depreciation ₹7 and interest ₹2</title></rect>
+            <rect x="384" y="162" width="44" height="28" rx="4" fill="var(--s-specialty)"><title>Profit ₹16</title></rect>
+          </g>
+          <g font-size="11" text-anchor="middle">
+            <text x="70" y="208">Sales</text><text x="126" y="208">Raw mat.</text><text x="182" y="208">Gross</text><text x="238" y="208">Power</text><text x="294" y="208">Other</text><text x="350" y="208">EBITDA</text><text x="406" y="208">Dep+int</text>
+            <text x="406" y="224" fill="var(--text-primary)" font-weight="600">→ Profit</text>
+          </g>
+          <g class="mono" font-size="11" text-anchor="middle" fill="var(--text-primary)">
+            <text x="70" y="14">100</text><text x="126" y="14">−52</text><text x="182" y="102">48</text><text x="238" y="102">−6</text><text x="294" y="112">−17</text><text x="350" y="141">25</text><text x="406" y="141">−9 → 16</text>
+          </g>
+        </svg>
+      </div>
+    </div>
+    <div class="fig">
+      <div class="legend" style="margin-bottom:8px"><span>Does this line matter for this sector?</span></div>
+      <div class="lines">
+        <div class="k">Gross margin (the spread)<small>Tells you the state of the cycle before anything else does</small></div><span class="pill yes">✓ The number</span>
+        <div class="k">Depreciation<small>Plants are expensive and depreciate from day one; a new plant takes 2 to 3 years to fill, so margins fall while the future improves</small></div><span class="pill yes">✓ Unusually yes</span>
+        <div class="k">Capex and asset turn<small>Sales per rupee of plant. Indian specialty ≈ 1.0 to 1.5; China ≈ 2. That gap is the China problem in one number</small></div><span class="pill yes">✓ Second only to spread</span>
+        <div class="k">Working capital<small>Exports mean 60 to 90 day receivables; 90 to 120 inventory days is normal. Destocking shows here first</small></div><span class="pill yes">✓ Yes</span>
+        <div class="k">Power and fuel<small>5 to 10% of sales for most; 50 to 60% of cost in chlor-alkali, where it is the whole story</small></div><span class="pill some">~ Depends on the door</span>
+        <div class="k">Interest<small>Matters only in a build phase or for a leveraged commodity name</small></div><span class="pill some">~ Sometimes</span>
+        <div class="k">Tax, other income<small>Nothing sector-specific</small></div><span class="pill no">— Ignore</span>
+      </div>
+    </div>
+    <div class="analogy"><b>Analogy.</b> A chemicals company is a dhaba whose profit depends almost entirely on the gap between the price of a thali and the price of atta and dal. The cook's salary and the gas cylinder matter, but the gap decides the year.</div>
+    <div class="sowhat"><b>So what for the stock</b>Read capital work in progress and the capex-to-depreciation ratio together: above two means building, near one means coasting. A builder with falling margins is often the better buy.</div>
+  </section>
+
+  <!-- ───────── Card 5 ───────── -->
+  <section class="card" id="c5">
+    <div class="q"><span class="num">05</span><h2>The clock</h2></div>
+    <div class="ask">Is it cyclical, what does one full cycle look like, and what time is it now?</div>
+    <p><strong>Yes, cyclical.</strong> Commodity chemicals move with price. Specialty moves with customer inventories. On top of both sits a slow structural tailwind: the world's wish to buy less from China.</p>
+    <div class="clockrow">
+      <div>
+        <svg viewBox="0 0 300 300" width="100%" role="img" aria-label="Cycle clock with four phases; the hand points to early up-cycle">
+          <defs><marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="var(--accent)"/></marker></defs>
+          <circle cx="150" cy="150" r="120" fill="none" stroke="var(--border-accent)" stroke-width="14"/>
+          <!-- phase arcs: boom (top-right), peak (right-bottom), bust (bottom-left), bottom (left-top) -->
+          <path d="M150,30 A120,120 0 0 1 270,150" fill="none" stroke="var(--green)" stroke-width="14" stroke-linecap="butt"><title>Boom: spreads widen, everyone announces capex</title></path>
+          <path d="M270,150 A120,120 0 0 1 150,270" fill="none" stroke="var(--amber)" stroke-width="14"><title>Peak: customers over-order, capex everywhere</title></path>
+          <path d="M150,270 A120,120 0 0 1 30,150" fill="none" stroke="var(--red)" stroke-width="14"><title>Bust: destocking plus new Chinese capacity, prices fall 30 to 50%</title></path>
+          <path d="M30,150 A120,120 0 0 1 150,30" fill="none" stroke="var(--s-gray)" stroke-width="14"><title>Bottom: volumes return, prices do not</title></path>
+          <g font-size="12" font-weight="600" text-anchor="middle">
+            <text x="212" y="96">Boom</text><text x="212" y="214">Peak</text><text x="88" y="214">Bust</text><text x="88" y="96">Bottom</text>
+          </g>
+          <g class="mono" font-size="10" text-anchor="middle">
+            <text x="212" y="110">2020–22</text><text x="212" y="228">2022</text><text x="88" y="228">2023–24</text><text x="88" y="110">2025</text>
+          </g>
+          <!-- hand: pointing to ~11 o'clock, between bottom and boom -->
+          <line x1="150" y1="150" x2="118" y2="52" stroke="var(--accent)" stroke-width="4" stroke-linecap="round" marker-end="url(#arrow)"/>
+          <circle cx="150" cy="150" r="7" fill="var(--accent)"/>
+          <text x="150" y="176" text-anchor="middle" font-size="11" fill="var(--text-primary)" font-weight="600">now: early up-cycle</text>
+          <text x="150" y="190" text-anchor="middle" font-size="10">Oct 2026</text>
+        </svg>
+      </div>
+      <div>
+        <div class="timeline">
+          <div class="tl"><b>2019</b>China shuts polluting plants. Indian prices firm up. The China+1 story is born.</div>
+          <div class="tl boom"><b>2020–22</b>Covid snarls supply, China rations factory power, then the 2022 Europe gas crisis makes European plants uneconomic. Specialty EBITDA margins touch the high twenties. Stocks re-rate to P/E in the forties and fifties.</div>
+          <div class="tl"><b>2022</b>The peak. Everyone orders too much for fear of shortages. Everyone announces capex.</div>
+          <div class="tl bust"><b>2023–24</b>Customers find their warehouses full and stop ordering. Chinese capacity built in the boom comes online and exports at any price. Product prices fall by a third to a half. Indian gross margins shrink 5 to 10 points. Stocks halve.</div>
+          <div class="tl"><b>2025</b>The bottom. Destocking ends, volumes return, prices do not. India extends anti-dumping duties. Europe closes capacity for good.</div>
+          <div class="tl now"><b>2026</b>Early recovery, volume-led not price-led. Phthalic anhydride duty extended, HFC duty extension recommended, five new anti-dumping probes, Bhavya Rasayan scheme and three chemical parks announced.</div>
+        </div>
+      </div>
+    </div>
+    <p style="margin-top:14px">Four hands to read the clock yourself. In the live page each hand is a computed value with its last reading.</p>
+    <div class="hands">
+      <div class="hand"><div class="t">1 · Chinese chemical export prices <span class="pill neutral">flat</span></div><div class="r">Rising means the cycle is turning up for real</div></div>
+      <div class="hand"><div class="t">2 · Indian gross margins, q/q <span class="pill up">▲ expanding</span></div><div class="r">Expanding means spread is back</div></div>
+      <div class="hand"><div class="t">3 · Inventory days, makers and customers <span class="pill up">▼ falling</span></div><div class="r">Falling means destocking is over</div></div>
+      <div class="hand"><div class="t">4 · Capex÷depreciation with asset turns <span class="pill mixed">◆ capex up, turns flat</span></div><div class="r">Both rising is a healthy build; capex up with turns down is how the next bust starts</div></div>
+    </div>
+    <div class="sowhat"><b>So what for the stock</b>Early up-cycle rewards volume businesses first and price businesses last. Commodity names need hand 1 to turn before they re-rate.</div>
+  </section>
+
+  <!-- ───────── Card 6 ───────── -->
+  <section class="card" id="c6">
+    <div class="q"><span class="num">06</span><h2>The wiring diagram</h2></div>
+    <div class="ask">Which macro and geopolitical dials move this sector, through which channel, in which direction?</div>
+    <p>One row per dial. The arrow says what a <strong>rise</strong> in the dial does to Indian chemicals. The dots say how much it matters. In the live page the right-most column is the dial's latest value from the macro feed.</p>
+    <table>
+      <thead><tr><th>Dial</th><th>Channel</th><th>A rise does…</th><th>Weight</th><th>Latest</th></tr></thead>
+      <tbody>
+        <tr><td>China producer and export prices</td><td>The ceiling on every Indian price</td><td><span class="pill up">▲ lifts the ceiling</span> the single most important dial</td><td><span class="dots">●●●</span></td><td class="mono">—</td></tr>
+        <tr><td>European gas price (TTF)</td><td>European competitors' cost</td><td><span class="pill up">▲ orders move to India</span></td><td><span class="dots">●●●</span></td><td class="mono">—</td></tr>
+        <tr><td>Crude oil and benzene</td><td>Raw material cost and product price, with a lag</td><td><span class="pill mixed">◆ squeeze for a quarter, then normal</span></td><td><span class="dots">●●<span class="off">●</span></span></td><td class="mono">—</td></tr>
+        <tr><td>USD/INR (weak rupee)</td><td>Export earnings</td><td><span class="pill mixed">◆ helps exporters, hurts importers</span></td><td><span class="dots">●●<span class="off">●</span></span></td><td class="mono">—</td></tr>
+        <tr><td>Container freight, Red Sea</td><td>Landed cost of Indian exports</td><td><span class="pill down">▼ hurts India more than China on Europe routes</span></td><td><span class="dots">●<span class="off">●●</span></span></td><td class="mono">—</td></tr>
+        <tr><td>US tariffs on China</td><td>China+1 sourcing</td><td><span class="pill mixed">◆ helps if India is spared</span></td><td><span class="dots">●●<span class="off">●</span></span></td><td class="mono">—</td></tr>
+        <tr><td>Monsoon and crop prices</td><td>Farm cash, pesticide demand</td><td><span class="pill up">▲ agrochem volumes two quarters later</span></td><td><span class="dots">●●<span class="off">●</span></span></td><td class="mono">—</td></tr>
+        <tr><td>Interest rates</td><td>Capex funding, housing and paints</td><td><span class="pill down">▼ slows build-outs and the paints chain</span></td><td><span class="dots">●<span class="off">●●</span></span></td><td class="mono">—</td></tr>
+        <tr><td>EU rules: REACH, PFAS limits, carbon border tax</td><td>Market access</td><td><span class="pill down">▼ hits fluorochemical exporters</span> carbon tax covers steel, cement, aluminium, fertiliser today, not organic chemicals</td><td><span class="dots">●●<span class="off">●</span></span></td><td class="mono">—</td></tr>
+        <tr><td>Kigali refrigerant phase-down</td><td>Quotas on HFC gases</td><td><span class="pill up">▲ turns a commodity into a licence</span> India freezes in 2028</td><td><span class="dots">●<span class="off">●●</span></span></td><td class="mono">—</td></tr>
+      </tbody>
+    </table>
+    <div class="sowhat"><b>So what for the stock</b>If you only track two dials, track Chinese export prices and the European gas price. They explain most of the last seven years. These two should replace steel, coal and cement in this industry's macro score.</div>
+  </section>
+
+  <!-- ───────── Card 7 ───────── -->
+  <section class="card" id="c7">
+    <div class="q"><span class="num">07</span><h2>Bottlenecks and key issues</h2></div>
+    <div class="ask">What stops it from growing faster, and what breaks it?</div>
+    <table>
+      <thead><tr><th>Bottleneck</th><th>Why it bites</th><th>Severity</th></tr></thead>
+      <tbody>
+        <tr><td>China's cost advantage</td><td>Scale, full integration from crude to active, cheaper power, patient state capital. India competes on niches, not on cost.</td><td><span class="pill down">structural</span></td></tr>
+        <tr><td>Import dependence at station 1</td><td>India imports more than half its PVC, nearly all its methanol, most of its fluorspar and much of its phosphoric acid. A shock upstream lands on Indian spreads.</td><td><span class="pill down">structural</span></td></tr>
+        <tr><td>Environment and effluent</td><td>Plant approvals take 2 to 3 years. Gujarat's pollution board can shut a cluster for weeks. Zero liquid discharge is a real capex line.</td><td><span class="pill mixed">recurring</span></td></tr>
+        <tr><td>Safety incidents</td><td>Fires and explosions in Gujarat plants are a recurring headline and a recurring shutdown.</td><td><span class="pill mixed">recurring</span></td></tr>
+        <tr><td>Customer qualification time</td><td>A contract customer takes 2 to 3 years to approve a plant. Protects incumbents, slows newcomers.</td><td><span class="pill neutral">two-sided</span></td></tr>
+        <tr><td>Capital intensity</td><td>Needs money before it earns money; a rate cycle or a funding freeze stalls it.</td><td><span class="pill mixed">cyclical</span></td></tr>
+        <tr><td>Hazardous logistics</td><td>Ports, tankers and rail for hazardous cargo are scarce outside Gujarat.</td><td><span class="pill neutral">slow-moving</span></td></tr>
+      </tbody>
+    </table>
+    <div class="sowhat"><b>So what for the stock</b>The first two never go away and set the ceiling on returns. The next two are the surprise risks worth a news alert per company.</div>
+  </section>
+
+  <!-- ───────── Card 8 ───────── -->
+  <section class="card" id="c8">
+    <div class="q"><span class="num">08</span><h2>The rulebook</h2></div>
+    <div class="ask">Who regulates it, what rule is live, and which rule is coming?</div>
+    <table>
+      <thead><tr><th>Regulator or rule</th><th>What it does</th><th>Why you care</th><th>Status</th></tr></thead>
+      <tbody>
+        <tr><td>Dept of Chemicals &amp; Petrochemicals</td><td>Policy, incentive schemes, chemical parks</td><td>Bhavya Rasayan and the three parks sit here</td><td><span class="pill up">new, Oct 2026</span></td></tr>
+        <tr><td>DGTR (anti-dumping authority)</td><td>Investigates dumping, recommends duties</td><td>A duty is a multi-year price floor for one product. Watch its dockets</td><td><span class="pill up">5 probes live</span></td></tr>
+        <tr><td>BIS quality control orders</td><td>Mandatory standards on imported chemicals</td><td>Works like a tariff without being one</td><td><span class="pill neutral">rolling</span></td></tr>
+        <tr><td>CPCB and state pollution boards</td><td>Emissions, effluent, closure orders</td><td>Shuts plants; the Gujarat board matters most</td><td><span class="pill neutral">always on</span></td></tr>
+        <tr><td>CIB&amp;RC, Insecticides Act</td><td>Registers pesticides</td><td>A registration is a moat for agrochem names</td><td><span class="pill neutral">always on</span></td></tr>
+        <tr><td>PESO</td><td>Explosives and hazardous storage licences</td><td>Licences gate capacity</td><td><span class="pill neutral">always on</span></td></tr>
+        <tr><td>Montreal Protocol, Kigali (via MoEFCC)</td><td>Refrigerant gas quotas</td><td>Converts refrigerants into a licensed business</td><td><span class="pill mixed">freeze 2028</span></td></tr>
+        <tr><td>EU REACH, PFAS proposals, carbon border tax</td><td>Access to the European market</td><td>The next big external risk for fluorochemicals</td><td><span class="pill down">coming</span></td></tr>
+        <tr><td>US FDA, indirectly</td><td>Pharma customers' plants</td><td>A customer's warning letter is your lost order</td><td><span class="pill neutral">indirect</span></td></tr>
+      </tbody>
+    </table>
+    <div class="srcnote">In the live page the Status column is fed by the regulatory event stream (direction, magnitude, horizon) already tagged per sector in the research MCP; the dated items here come from it as of 2026-10-16.</div>
+  </section>
+
+  <!-- ───────── Card 9 ───────── -->
+  <section class="card" id="c9">
+    <div class="q"><span class="num">09</span><h2>Porter's five forces</h2></div>
+    <div class="ask">Who keeps the profit: suppliers, buyers, rivals, new entrants, or substitutes?</div>
+    <p>Bigger area means <strong>more pressure on the company</strong>, so a smaller shape is the better business. Commodity names are squeezed from three sides at once; specialty and contract names mostly face regulators retiring their molecules.</p>
+    <div class="fig twoup">
+      <div>
+        <div class="legend"><span><i style="background:var(--s-commodity)"></i>Commodity</span><span><i style="background:var(--s-specialty)"></i>Specialty &amp; contract</span><span style="color:var(--text-muted)">scale 0 (none) to 3 (high)</span></div>
+        <svg viewBox="-50 0 440 300" width="100%" role="img" aria-label="Radar of five forces for commodity versus specialty chemicals">
+          <!-- pentagon axes, centre 170,150, radius 110; vertices at angles -90, -18, 54, 126, 198 -->
+          <g class="grid" fill="none">
+            <polygon points="170,40 274.6,116 234.6,239 105.4,239 65.4,116"/>
+            <polygon points="170,76.7 239.7,127.3 213.1,209.3 126.9,209.3 100.3,127.3"/>
+            <polygon points="170,113.3 204.9,138.7 191.5,179.7 148.5,179.7 135.1,138.7"/>
+            <line x1="170" y1="150" x2="170" y2="40"/><line x1="170" y1="150" x2="274.6" y2="116"/><line x1="170" y1="150" x2="234.6" y2="239"/><line x1="170" y1="150" x2="105.4" y2="239"/><line x1="170" y1="150" x2="65.4" y2="116"/>
+          </g>
+          <!-- commodity: rivalry 3, supplier 3, buyer 3, entrants 2, substitutes 1 -->
+          <polygon points="170,40 274.6,116 234.6,239 126.9,209.3 135.1,138.7" fill="var(--s-commodity)" fill-opacity="0.18" stroke="var(--s-commodity)" stroke-width="2"><title>Commodity: rivalry 3, supplier power 3, buyer power 3, new entrants 2, substitutes 1</title></polygon>
+          <!-- specialty: rivalry 2, supplier 2, buyer 1.5, entrants 1.5, substitutes 2 -->
+          <polygon points="170,76.7 239.7,127.3 202.3,216.7 137.7,216.7 100.3,127.3" fill="var(--s-specialty)" fill-opacity="0.18" stroke="var(--s-specialty)" stroke-width="2"><title>Specialty and contract: rivalry 2, supplier power 2, buyer power 1.5, new entrants 1.5, substitutes 2</title></polygon>
+          <g fill="var(--s-commodity)" stroke="var(--bg-card)" stroke-width="2"><circle cx="170" cy="40" r="5"/><circle cx="274.6" cy="116" r="5"/><circle cx="234.6" cy="239" r="5"/><circle cx="126.9" cy="209.3" r="5"/><circle cx="135.1" cy="138.7" r="5"/></g>
+          <g fill="var(--s-specialty)" stroke="var(--bg-card)" stroke-width="2"><circle cx="170" cy="76.7" r="5"/><circle cx="239.7" cy="127.3" r="5"/><circle cx="202.3" cy="216.7" r="5"/><circle cx="137.7" cy="216.7" r="5"/><circle cx="100.3" cy="127.3" r="5"/></g>
+          <g font-size="12" font-weight="600" fill="var(--text-primary)">
+            <text x="170" y="26" text-anchor="middle">Rivalry</text>
+            <text x="282" y="110" text-anchor="start">Supplier power</text>
+            <text x="238" y="258" text-anchor="middle">Buyer power</text>
+            <text x="104" y="258" text-anchor="middle">New entrants</text>
+            <text x="58" y="110" text-anchor="end">Substitutes</text>
+          </g>
+        </svg>
+        <details><summary>Table view</summary>
+          <table style="margin-top:8px"><thead><tr><th>Force</th><th>Commodity</th><th>Specialty &amp; contract</th></tr></thead>
+          <tbody><tr><td>Rivalry</td><td>3</td><td>2</td></tr><tr><td>Supplier power</td><td>3</td><td>2</td></tr><tr><td>Buyer power</td><td>3</td><td>1.5</td></tr><tr><td>New entrants</td><td>2</td><td>1.5</td></tr><tr><td>Substitutes</td><td>1</td><td>2</td></tr></tbody></table>
+        </details>
+      </div>
+      <div>
+        <table>
+          <thead><tr><th>Force</th><th>Why that score</th></tr></thead>
+          <tbody>
+            <tr><td>Rivalry</td><td>Commodity: the world price, set by China. Specialty: two or three makers per molecule.</td></tr>
+            <tr><td>Supplier power</td><td>Few feedstock sellers (Reliance, IOC, GAIL); China controls fluorspar.</td></tr>
+            <tr><td>Buyer power</td><td>Commodity buyers switch on price. Contract buyers take years to qualify a plant and sign for years.</td></tr>
+            <tr><td>New entrants</td><td>Capital, approvals and know-how are barriers, but China is a permanent entrant into any commodity.</td></tr>
+            <tr><td>Substitutes</td><td>Regulators retire molecules: HFC to HFO gases, PFAS bans, pesticide bans. Hits specialty more than commodity.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="sowhat"><b>So what for the stock</b>Commodity keeps little of the profit, specialty keeps some, contract keeps the most. That is why the market pays the most for contract names and why a lost contract is the worst single headline in this sector.</div>
+  </section>
+
+  <!-- ───────── Card 10 ───────── -->
+  <section class="card" id="c10">
+    <div class="q"><span class="num">10</span><h2>The results-call cheat sheet</h2></div>
+    <div class="ask">The eight numbers to read every quarter, with what good looks like.</div>
+    <p>In the live page the last column shows the company or industry median from the financials tables, coloured against the "good" band. Here it is a placeholder.</p>
+    <table>
+      <thead><tr><th>Number</th><th>What it tells you</th><th>What good looks like</th><th>Today</th></tr></thead>
+      <tbody>
+        <tr><td>Gross margin %</td><td>The state of the spread, so the state of the cycle</td><td>Expanding q/q; specialty above 45%, commodity above 25%</td><td class="mono">— live</td></tr>
+        <tr><td>EBITDA per kg or tonne</td><td>Pricing power stripped of volume</td><td>Stable or rising; falling while volumes rise means a price war</td><td class="mono">— live</td></tr>
+        <tr><td>Capacity utilisation</td><td>Whether new plants are filling</td><td>Above 70 to 75% on plants older than two years</td><td class="mono">— live</td></tr>
+        <tr><td>Asset turn on new capex</td><td>Return on the build</td><td>1.2 or better for specialty</td><td class="mono">— live</td></tr>
+        <tr><td>Capex ÷ depreciation</td><td>Build or coast</td><td>Above 2 while turns hold; a warning if turns fall</td><td class="mono">— live</td></tr>
+        <tr><td>Inventory and receivable days</td><td>Destocking or restocking</td><td>Inventory under 100 days and falling</td><td class="mono">— live</td></tr>
+        <tr><td>Export share, top-customer share</td><td>Rupee sensitivity, contract risk</td><td>Exports 40%+ is fine; one customer above 25% is a risk</td><td class="mono">— live</td></tr>
+        <tr><td>ROCE</td><td>Whether the whole thing earns its cost</td><td>Specialty 18%+ through a cycle, commodity 12%+</td><td class="mono">— live</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- ───────── Card 11 ───────── -->
+  <section class="card" id="c11">
+    <div class="q"><span class="num">11</span><h2>Cross-intelligence and the call</h2></div>
+    <div class="ask">What in other sectors and in the news leads this sector, by how long, and what is the call today?</div>
+    <p>Each dot is a signal from outside the sector, placed by <strong>how far ahead it speaks</strong>. The further right, the earlier the warning.</p>
+    <div class="fig">
+      <svg viewBox="0 0 760 250" width="100%" role="img" aria-label="Leading indicators placed by lead time in quarters">
+        <g class="mono" font-size="11">
+          <line class="axis" x1="60" x2="720" y1="220" y2="220"/>
+          <line class="grid" x1="60" x2="60" y1="20" y2="220"/><line class="grid" x1="280" x2="280" y1="20" y2="220"/><line class="grid" x1="500" x2="500" y1="20" y2="220"/><line class="grid" x1="720" x2="720" y1="20" y2="220"/>
+          <text x="60" y="240" text-anchor="middle">same quarter</text><text x="280" y="240" text-anchor="middle">1 quarter ahead</text><text x="500" y="240" text-anchor="middle">2 quarters ahead</text><text x="720" y="240" text-anchor="end">lead time →</text>
+        </g>
+        <g font-size="12" fill="var(--text-primary)">
+          <circle cx="60" cy="40" r="6" fill="var(--accent)"><title>DGTR dockets and duty extensions: immediate on announcement</title></circle><text x="74" y="44">DGTR dockets, duty extensions</text>
+          <circle cx="60" cy="70" r="6" fill="var(--accent)"><title>Gujarat pollution board closure orders: immediate, plant-level</title></circle><text x="74" y="74">Gujarat pollution board closures</text>
+          <circle cx="60" cy="100" r="6" fill="var(--accent)"><title>European gas price: immediate for orders, one quarter for margins</title></circle><line x1="60" x2="280" y1="100" y2="100" stroke="var(--accent)" stroke-width="2" stroke-dasharray="3 4"/><text x="294" y="104">European gas price (orders now, margins next quarter)</text>
+          <circle cx="280" cy="130" r="6" fill="var(--accent)"><title>Bayer, Syngenta, Corteva, BASF destocking commentary: one quarter</title></circle><text x="294" y="134">Bayer, Syngenta, Corteva, BASF destocking commentary</text>
+          <circle cx="280" cy="160" r="6" fill="var(--accent)"><title>Asian Paints and Berger volume commentary: one quarter for pigments and resins</title></circle><text x="294" y="164">Asian Paints, Berger volumes · Indian pharma and agrochem inventory days</text>
+          <circle cx="390" cy="190" r="6" fill="var(--accent)"><title>Chinese chemical export prices and PPI: one to two quarters</title></circle><line x1="280" x2="500" y1="190" y2="190" stroke="var(--accent)" stroke-width="2" stroke-dasharray="3 4"/><text x="514" y="194">China export prices and PPI</text>
+          <circle cx="500" cy="40" r="6" fill="var(--accent)"><title>Monsoon progress and kharif sowing: two quarters for agrochem</title></circle><text x="514" y="44">Monsoon, kharif sowing</text>
+        </g>
+      </svg>
+      <div class="cap">Hover a dot for the channel. In the live page each dot carries its latest reading and links to the news storyline that moved it.</div>
+    </div>
+    <p><strong>A simple rule for direction.</strong> Up-cycle = Chinese prices rising <em>and</em> Indian gross margins expanding <em>and</em> capex÷depreciation above 1.5 with asset turns rising. Two of three means early recovery. One of three means a false dawn.</p>
+    <div class="rule3">
+      <div class="r3"><div class="ck n">✕</div><div><div class="t">Chinese prices rising</div><div class="s">flat as of Oct 2026</div></div></div>
+      <div class="r3"><div class="ck y">✓</div><div><div class="t">Indian gross margins expanding</div><div class="s">on volume, not price</div></div></div>
+      <div class="r3"><div class="ck y">✓</div><div><div class="t">Capex restarting, turns holding</div><div class="s">2024's paused projects resuming</div></div></div>
+    </div>
+    <div class="call">
+      <div class="h">The call · 2026-10-16</div>
+      <div class="v">Early and uneven up-cycle. Prefer duty-protected and contract names over pure commodity until Chinese prices turn up.</div>
+      <ul>
+        <li>Model reading agrees with "not a boom": score 47/100, breadth 39%, 24th of 38 industries, macro NEUTRAL (on the wrong dials).</li>
+        <li>Duty protection is widening: phthalic anhydride extended, HFC extension recommended, five new probes, all dated late Sep to mid Oct 2026 in the regulatory feed.</li>
+      </ul>
+      <ul class="kill"><li><strong>What would change the call:</strong> a fresh wave of Chinese capacity in a core product · a European gas price collapse that reopens European plants · an EU PFAS ruling that hits fluorochemicals.</li></ul>
+    </div>
+  </section>
+
+  <!-- ───────── Card 12 ───────── -->
+  <section class="card" id="c12">
+    <div class="q"><span class="num">12</span><h2>Tell a friend</h2></div>
+    <div class="ask">The 60-second version you can repeat without notes.</div>
+    <div class="readtime">≈ 60 seconds aloud</div>
+    <div class="quote">Chemical companies buy messy stuff from refineries and mines, cook it, and sell cleaner stuff to the people who make paint, medicine, pesticide and plastic. Their profit is one gap: selling price minus raw material. China sets the selling price for most of the world, so when China is weak and exporting cheap, Indian margins get squeezed, and when China cuts supply or Europe's gas gets expensive, Indian margins fatten. From 2020 to 2022 that gap was huge and the stocks went crazy. In 2023 and 2024 the gap collapsed and the stocks halved. Now volumes are back but prices are not, so it is early recovery. The companies that do best own a niche molecule or make someone else's secret recipe under a long contract. The ones that do worst sell by the tonne. Look at gross margin and new-plant asset turns, and watch Chinese export prices and the European gas price.</div>
+  </section>
+
+  <!-- ───────── Glossary ───────── -->
+  <section class="card" id="gl">
+    <div class="q"><span class="num">§</span><h2>Glossary</h2></div>
+    <div class="ask">Every term used above, in one line each.</div>
+    <dl>
+      <dt>Spread</dt><dd>Selling price minus raw material cost. The sector's one big number.</dd>
+      <dt>Gross margin</dt><dd>Spread as a share of sales. Sales minus raw materials, divided by sales.</dd>
+      <dt>EBITDA</dt><dd>Earnings before interest, tax, depreciation and amortisation. Profit from running the plant, before paying for the plant or the loan.</dd>
+      <dt>Depreciation</dt><dd>The yearly charge that spreads a plant's cost over its life. It starts the day the plant opens, whether or not it is full.</dd>
+      <dt>Capex</dt><dd>Capital expenditure: money spent building or expanding plants.</dd>
+      <dt>Capital work in progress (CWIP)</dt><dd>Plants under construction, not yet depreciating. Tomorrow's capacity.</dd>
+      <dt>Asset turn</dt><dd>Sales per rupee of plant. 1.2 means ₹1.20 of yearly sales for every ₹1 of plant.</dd>
+      <dt>Working capital</dt><dd>Money tied up in inventory and unpaid customer bills, minus unpaid supplier bills.</dd>
+      <dt>Inventory days</dt><dd>How many days of sales sit in stock. Rising means customers have stopped buying.</dd>
+      <dt>Destocking</dt><dd>Customers running down their own stock instead of ordering. Orders fall even if end demand does not.</dd>
+      <dt>ROCE</dt><dd>Return on capital employed: operating profit divided by the money invested in the business.</dd>
+      <dt>Price taker</dt><dd>A seller who must accept the world price because its product is identical to everyone else's.</dd>
+      <dt>CSM / CDMO</dt><dd>Custom synthesis manufacturing, or contract development and manufacturing: making another company's molecule under contract.</dd>
+      <dt>Chlor-alkali, ECU</dt><dd>Splitting salt water with electricity into caustic soda and chlorine. ECU is the price of one unit of both together. Power is half the cost.</dd>
+      <dt>Fluorspar</dt><dd>The mineral all fluorine chemistry starts from. China mines most of it.</dd>
+      <dt>Anti-dumping duty, DGTR</dt><dd>A tariff on imports sold below fair price. DGTR is the Indian body that investigates and recommends it.</dd>
+      <dt>BIS quality control order (QCO)</dt><dd>A rule that an imported chemical must meet an Indian standard before it can be sold, which blocks cheap imports.</dd>
+      <dt>Kigali, HFC</dt><dd>The global treaty phasing down HFC refrigerant gases. Each country gets a shrinking quota; India's freeze starts 2028.</dd>
+      <dt>REACH</dt><dd>The EU's chemical registration rule. Every substance sold in Europe must be registered with safety data.</dd>
+      <dt>PFAS</dt><dd>"Forever chemicals", a family that includes many fluoropolymers. The EU is considering broad limits.</dd>
+      <dt>Carbon border tax (CBAM)</dt><dd>An EU charge on the carbon in imported goods. Covers steel, cement, aluminium, fertiliser, electricity and hydrogen today.</dd>
+      <dt>TTF</dt><dd>The Dutch gas price that Europe's chemical plants pay. High TTF makes Europe uneconomic.</dd>
+      <dt>PPI</dt><dd>Producer price index: the price factories sell at. China's chemical PPI is the world's price ceiling.</dd>
+      <dt>China+1</dt><dd>Buyers adding a second supplier outside China, often in India.</dd>
+      <dt>Model score, breadth</dt><dd>Our ranking: the market-cap weighted average score of the industry's stocks, and the share of its ranked stocks scoring 55 or more.</dd>
+    </dl>
+  </section>
+
+  <!-- ───────── How it is built ───────── -->
+  <section class="card" id="build">
+    <div class="q"><span class="num">⚙</span><h2>How this page would be built</h2></div>
+    <div class="ask">Which parts are written once per industry, and which are computed every day.</div>
+    <div class="build">
+      <p><span class="l">Written once per industry, refreshed quarterly</span> by the <span class="mono">sector_narrative</span> task (plan 0016 P5): cards 1, 2, 3, 7, 8, 9, 12 and the glossary, plus the prose of 4, 5, 6, 11. Stored as structured fields in the narrative table, with no raw numbers in the prose (the dossier rule). The LLM fills a fixed schema: three doors, five stations, end-market tiles, wiring rows, five-force scores, cheat-sheet rows with "good" bands, lead-time dots.</p>
+      <p><span class="l">Computed daily from the DB</span>: the hero strip (score, breadth, rank, macro signal, top 3) from the ranking tables; the four clock hands and the three-of-three rule from financials and the macro feed; the Latest column of the wiring table from <span class="mono">macro_contributors</span>, once this industry gets its own dials; the Status column of the rulebook and the dated items in card 5 from the regulatory event stream; the Today column of the cheat sheet from <span class="mono">stock_financials</span> medians.</p>
+      <p><span class="l">Open question</span>: Chemicals needs its own macro contributors (crude or benzene, USD/INR, a China producer price series, European gas) before the macro signal on this page means anything. Today it inherits steel, coal, cement, copper, aluminium and gold from Materials, and the Materials narrative in the MCP is cement's.</p>
+    </div>
+  </section>
+</main>
+</div>
+
+<script>
+  // side-nav highlight + reading progress
+  const links = [...document.querySelectorAll('#nav a')];
+  const secs = links.map(a => document.querySelector(a.getAttribute('href'))).filter(Boolean);
+  const prog = document.getElementById('prog');
+  function onScroll() {
+    const y = window.scrollY + 90;
+    let on = 0;
+    secs.forEach((s, i) => { if (s.offsetTop <= y) on = i; });
+    links.forEach((a, i) => a.classList.toggle('on', i === on));
+    const h = document.documentElement;
+    prog.style.width = Math.min(100, 100 * window.scrollY / (h.scrollHeight - h.clientHeight)) + '%';
+  }
+  document.addEventListener('scroll', onScroll, { passive: true }); onScroll();
+</script>
+</body>
+</html>

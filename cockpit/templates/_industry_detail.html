@@ -20,11 +20,14 @@
 {% else %}
 {% set is_sector = detail.kind == 'sector' %}
 {% set narr = none if is_sector else detail.narrative %}
+{% set ex = none if is_sector else detail.explainer %}
+{% set exv = detail.ex %}
 {% set sector_industries = industries | selectattr('sector', 'equalto', detail.name) | list if is_sector else [] %}
 {% set ind_match = detail.overview if is_sector else (industries | selectattr('industry', 'equalto', detail.name) | first) %}
 {% set is_tail = ind_match and ind_match.macro_signal in ['TAILWIND', 'FAVORABLE'] %}
 {% set is_head = ind_match and ind_match.macro_signal in ['HEADWIND', 'ADVERSE'] %}
 
+{# ── Header ── #}
 <div class="card" style="margin-bottom: 14px; padding: 14px 18px;">
     <div class="ps-header">
         <h1>{{ detail.name }}</h1>
@@ -33,12 +36,10 @@
         {% elif detail.parent_sector %}
         <span class="parent-tag">Sector · {{ detail.parent_sector }}</span>
         {% endif %}
-        {% if narr and narr._industry %}
-        <span class="industry-tag">IIM industry · {{ narr._industry }}</span>
-        {% endif %}
         {% if ind_match and ind_match.macro_signal and ind_match.macro_signal != 'UNKNOWN' %}
-        <span class="macro-pill {{ 'tail' if is_tail else ('head' if is_head else 'neutral') }}">
-            {{ ind_match.macro_signal }}
+        <span class="macro-pill {{ 'tail' if is_tail else ('head' if is_head else 'neutral') }}"
+              {% if ex %}title="The parent sector's macro signal. This industry's own dials are in card 6 and the Picks & signals tab."{% endif %}>
+            {{ ind_match.macro_signal }}{% if ex %} · sector dials{% endif %}
         </span>
         {% endif %}
         {% if embed %}
@@ -61,13 +62,21 @@
         </div>
         {% endif %}
     </div>
+    {% if narr %}
+    <div class="ex-dates">
+        {% if ex %}Explainer written <b>{{ (narr.explainer_generated_at or '')[:10] }}</b> · {% endif %}
+        story written <b>{{ (narr._generated_at or '')[:10] }}</b> (its figures are the story's, not the model's) ·
+        model numbers as of <b>{{ pick_date|short_date }}</b>
+        {% if ind_match %}· {{ ind_match.stocks }} stocks ranked{% endif %}
+    </div>
+    {% endif %}
 </div>
 
 {# ── Metric strip ── #}
 <div class="card" style="padding: 12px 18px; margin-bottom: 14px; display: flex; flex-wrap: wrap; gap: 28px; align-items: center;">
     {% if narr and narr.industry_size_inr_cr %}
     <div>
-        <span class="sec-meta">Industry size</span><br>
+        <span class="sec-meta">Industry size · story</span><br>
         <span class="mono" style="font-size: 16px; font-weight: 700;">
             ₹{{ "{:,.1f}".format(narr.industry_size_inr_cr / 100000) }}<span style="font-size: 11px; color: var(--text-muted); margin-left: 3px;">L cr</span>
         </span>
@@ -75,7 +84,7 @@
     {% endif %}
     {% if narr and narr.industry_cagr_pct %}
     <div>
-        <span class="sec-meta">Forward CAGR</span><br>
+        <span class="sec-meta">Forward CAGR · story</span><br>
         <span class="mono score-green" style="font-size: 16px; font-weight: 700;">↑ {{ narr.industry_cagr_pct }}%</span>
     </div>
     {% endif %}
@@ -98,6 +107,13 @@
         <span class="sec-meta">Tracked players</span><br>
         <span class="mono" style="font-size: 16px; font-weight: 700;">{{ detail.top_players | length }}</span>
     </div>
+    {% if ex %}
+    <div>
+        <span class="sec-meta">Cycle clock · explainer</span><br>
+        <span class="ex-clock-pos ex-pos-{{ ex.clock.position }}">{{ ex.clock.position_label }}</span>
+        <span class="sec-meta">{{ ex.clock.position_detail }}</span>
+    </div>
+    {% endif %}
 </div>
 
 {# ── Conviction bar ── #}
@@ -117,55 +133,315 @@
 {% endif %}
 
 {# ── Sub-tabs ── #}
+{% set has_numbers = (not is_sector) and (ex or (narr and narr.segments)) %}
 <div x-data="{ sub: 'overview', sloaded: { overview: true } }">
 <div class="tab-bar" style="margin-bottom: 14px;">
-    {% for k, l in [('overview','Overview'), ('players','Players'), ('trends','Trends'), ('picks','Our Picks')] if not (is_sector and k == 'trends') %}
+    {% for k, l in [('overview', 'Understand' if ex else 'Overview'), ('numbers', 'Numbers'), ('players', 'Players'), ('picks', 'Picks & signals')] if not (k == 'numbers' and not has_numbers) %}
     <button class="tab-button" :class="{ active: sub === '{{ k }}' }"
             @click="sub = '{{ k }}'; sloaded['{{ k }}'] = true">{{ l }}</button>
     {% endfor %}
 </div>
 
 
+{# ═══════════════════ Understand / Overview ═══════════════════ #}
 <div x-show="sub === 'overview'" x-cloak>
-{% if narr and narr.summary %}
+{% if ex %}
+{# ── the twelve-card explainer (plan 0016 P5; design: docs/research/0013-industry-detail-merged-mockup.html) ── #}
+{% macro waterfall(w, cls) %}
+<svg viewBox="0 0 {{ w.w }} {{ w.h }}" width="100%" role="img" aria-label="Waterfall: {{ w.name }}, 100 rupees of sales to {{ w.profit|round|int }} rupees of profit" class="ex-svg">
+    <g class="ex-mono" font-size="10">
+        <line class="ex-grid" x1="40" x2="{{ w.w - 10 }}" y1="190" y2="190"/>
+        <line class="ex-grid" x1="40" x2="{{ w.w - 10 }}" y1="105" y2="105"/>
+        <text x="8" y="194">0</text><text x="8" y="109">50</text><text x="2" y="24">100</text>
+    </g>
+    {% for b in w.bars %}
+    <rect x="{{ b.x }}" y="{{ b.y }}" width="{{ b.w }}" height="{{ b.h if b.h > 2 else 2 }}" rx="4" class="{{ 'ex-wf-' ~ cls if b.kind == 'keep' else 'ex-wf-cut' }}"><title>{{ b.tip }}</title></rect>
+    <text x="{{ b.cx }}" y="{{ b.label_y }}" text-anchor="middle" font-size="11" class="ex-mono ex-wf-val">{{ b.value }}</text>
+    <text x="{{ b.cx }}" y="208" text-anchor="middle" font-size="10" class="ex-wf-lbl">{{ b.label }}</text>
+    {% endfor %}
+</svg>
+{% endmacro %}
+{% set rb_status = {'always': 'neutral', 'live': 'up', 'new': 'up', 'coming': 'down'} %}
+
+<div class="ex-jump">
+    <a href="#ex-c1">1 Tea-stall</a><a href="#ex-c2">2 Kitchen</a><a href="#ex-c3">3 Who buys</a><a href="#ex-c4">4 Rupee to profit</a><a href="#ex-c5">5 Clock</a><a href="#ex-c6">6 Wiring</a><a href="#ex-c7">7 Bottlenecks</a><a href="#ex-c8">8 Rulebook</a><a href="#ex-c9">9 Five forces</a><a href="#ex-c12">12 Tell a friend</a><a href="#ex-gl">Glossary</a>
+    <span class="ex-jump-note">Cards 10 and 11 are the Numbers and Picks &amp; signals tabs.</span>
+</div>
+
+{# Card 1 #}
+<div class="card ex-card" id="ex-c1">
+    <div class="ex-q"><span class="ex-num">01</span><h2>The tea-stall version</h2></div>
+    <div class="ex-ask">What does this industry actually do, in one breath?</div>
+    <p class="ex-p"><strong>{{ ex.one_liner }}</strong></p>
+    <div class="ex-doors">
+        {% for d in ex.doors %}
+        <div class="ex-door">
+            <h4>{{ loop.index }} · {{ d.name }}</h4>
+            <div class="ex-door-sub">{{ d.sub }}</div>
+            <div class="ex-door-ex">
+                {% for t in d.examples %}<a class="ticker" href="/stocks/{{ t }}">{{ t }}</a>{% if not loop.last %} · {% endif %}{% endfor %}
+            </div>
+            <div class="ex-meter"><i class="ex-meter-{{ d.profit_kept }}"></i></div>
+            <div class="ex-meter-l"><span>profit the company keeps</span><span>{{ d.profit_kept }}</span></div>
+            <div class="ex-door-blurb">{{ d.blurb }}</div>
+        </div>
+        {% endfor %}
+    </div>
+    <div class="ex-analogy"><b>Analogy.</b> {{ ex.door_analogy }}</div>
+    <div class="ex-sowhat"><b>So what for the stock</b>{{ ex.door_so_what }}</div>
+</div>
+
+{# Card 2 #}
+<div class="card ex-card" id="ex-c2">
+    <div class="ex-q"><span class="ex-num">02</span><h2>The kitchen</h2></div>
+    <div class="ex-ask">Who stands where between raw material and final product, and where do Indian listed companies stand?</div>
+    <div class="ex-flow">
+        {% for s in ex.kitchen.stations %}
+        {% set band = ex.kitchen.bands[loop.index0] if ex.kitchen.bands|length > loop.index0 else none %}
+        <div class="ex-station {{ 'ex-station-india' if band and band.kind == 'india' else '' }}">
+            <div class="ex-k">STATION {{ loop.index }}</div>
+            <h4>{{ s.name }}</h4>
+            <div class="ex-what">{{ s.what }}</div>
+            <div class="ex-who">{{ s.who }}</div>
+        </div>
+        {% endfor %}
+    </div>
+    <div class="ex-bandlabel">Who stands where{% if ex.kitchen.rival %} · and where {{ ex.kitchen.rival }} stands{% endif %}</div>
+    <div class="ex-bands">
+        {% for b in ex.kitchen.bands %}<div class="ex-band ex-band-{{ b.kind }}">{{ b.label }}</div>{% endfor %}
+    </div>
+    {% if ex.kitchen.rival %}
+    <div class="ex-bands" style="margin-top: 6px;">
+        {% for b in ex.kitchen.bands %}<div class="ex-band {{ 'ex-band-rival' if b.kind != 'other' or loop.index < 5 else 'ex-band-other' }}">{{ ex.kitchen.rival if (b.kind != 'other' or loop.index < 5) else 'World' }}</div>{% endfor %}
+    </div>
+    {% endif %}
+    <div class="ex-cap">{{ ex.kitchen.note }}</div>
+    <div class="ex-sowhat"><b>So what for the stock</b>{{ ex.kitchen.so_what }}</div>
+</div>
+
+{# Card 3 #}
+<div class="card ex-card" id="ex-c3">
+    <div class="ex-q"><span class="ex-num">03</span><h2>Who buys and why</h2></div>
+    <div class="ex-ask">Which end markets pull demand, and what moves each of them?</div>
+    <div class="ex-markets">
+        {% for m in ex.end_markets %}
+        <div class="ex-mk"><h4>{{ m.name }}</h4><div class="ex-mk-b">{{ m.buys }}</div><div class="ex-mk-d">{{ m.moves_with }}</div></div>
+        {% endfor %}
+    </div>
+    <div class="ex-sowhat"><b>So what for the stock</b>{{ ex.end_markets_so_what }}</div>
+</div>
+
+{# Card 4 #}
+<div class="card ex-card" id="ex-c4">
+    <div class="ex-q"><span class="ex-num">04</span><h2>How a rupee becomes profit</h2></div>
+    <div class="ex-ask">Which P&amp;L lines matter here and which can you ignore? Is depreciation a big deal? Capex? Working capital?</div>
+    <p class="ex-p">₹100 of sales walks down to profit for the two business types. The shapes are illustrative mid-cycle shapes from the explainer, not any one company's accounts.</p>
+    <div class="ex-twoup">
+        <div>
+            <div class="ex-legend"><span><i class="ex-sw-a"></i>{{ exv.waterfall_a.name }}, ₹100 of sales</span></div>
+            {{ waterfall(exv.waterfall_a, 'a') }}
+        </div>
+        <div>
+            <div class="ex-legend"><span><i class="ex-sw-b"></i>{{ exv.waterfall_b.name }}, ₹100 of sales</span></div>
+            {{ waterfall(exv.waterfall_b, 'b') }}
+        </div>
+    </div>
+    <div class="ex-cap">Input = {{ exv.waterfall_a.input_label }} · Opex = {{ exv.waterfall_a.opex_label }} · Dep+int = depreciation and interest. Hover a bar for the rupee amount.</div>
+    <div class="ex-legend" style="margin-top: 10px;"><span>Does this line matter for this industry?</span></div>
+    <div class="ex-lines">
+        {% for l in ex.pnl.lines %}
+        <div class="ex-line-k">{{ l.line }}<small>{{ l.why }}</small></div>
+        <span class="ex-pill ex-pill-{{ {'yes': 'yes', 'some': 'some'}.get(l.matters, 'no') }}">{{ {'yes': '✓ Yes', 'some': '~ Sometimes'}.get(l.matters, '— Ignore') }}</span>
+        {% endfor %}
+    </div>
+    <div class="ex-analogy"><b>Analogy.</b> {{ ex.pnl.analogy }}</div>
+    <div class="ex-sowhat"><b>So what for the stock</b>{{ ex.pnl.so_what }}</div>
+</div>
+
+{# Card 5 #}
+<div class="card ex-card" id="ex-c5">
+    <div class="ex-q"><span class="ex-num">05</span><h2>The clock</h2></div>
+    <div class="ex-ask">Is it cyclical, what does one full cycle look like, and what time is it now?</div>
+    <p class="ex-p"><strong>{{ ex.clock.is_cyclical }}</strong></p>
+    <div class="ex-clockrow">
+        <div>
+            <svg viewBox="0 0 300 300" width="100%" role="img" aria-label="Cycle clock; the hand points to {{ ex.clock.position_label }}" class="ex-svg">
+                <defs><marker id="ex-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" class="ex-hand-fill"/></marker></defs>
+                <circle cx="150" cy="150" r="120" fill="none" class="ex-ring-base" stroke-width="14"/>
+                <path d="M150,30 A120,120 0 0 1 270,150" fill="none" class="ex-ring-boom" stroke-width="14"><title>{{ ex.clock.phases[0].what }}</title></path>
+                <path d="M270,150 A120,120 0 0 1 150,270" fill="none" class="ex-ring-peak" stroke-width="14"><title>{{ ex.clock.phases[1].what }}</title></path>
+                <path d="M150,270 A120,120 0 0 1 30,150" fill="none" class="ex-ring-bust" stroke-width="14"><title>{{ ex.clock.phases[2].what }}</title></path>
+                <path d="M30,150 A120,120 0 0 1 150,30" fill="none" class="ex-ring-bottom" stroke-width="14"><title>{{ ex.clock.phases[3].what }}</title></path>
+                <g font-size="12" font-weight="600" text-anchor="middle" class="ex-svg-text">
+                    <text x="212" y="96">{{ ex.clock.phases[0].name }}</text><text x="212" y="214">{{ ex.clock.phases[1].name }}</text><text x="88" y="214">{{ ex.clock.phases[2].name }}</text><text x="88" y="96">{{ ex.clock.phases[3].name }}</text>
+                </g>
+                <g font-size="10" text-anchor="middle" class="ex-mono ex-svg-muted">
+                    <text x="212" y="110">{{ ex.clock.phases[0].years }}</text><text x="212" y="228">{{ ex.clock.phases[1].years }}</text><text x="88" y="228">{{ ex.clock.phases[2].years }}</text><text x="88" y="110">{{ ex.clock.phases[3].years }}</text>
+                </g>
+                <line x1="150" y1="150" x2="{{ exv.clock.x2 }}" y2="{{ exv.clock.y2 }}" class="ex-hand" stroke-width="4" stroke-linecap="round" marker-end="url(#ex-arrow)"/>
+                <circle cx="150" cy="150" r="7" class="ex-hand-fill"/>
+                <text x="150" y="176" text-anchor="middle" font-size="11" font-weight="600" class="ex-svg-text">now: {{ ex.clock.position_label|lower }}</text>
+                <text x="150" y="190" text-anchor="middle" font-size="10" class="ex-svg-muted">{{ pick_date|short_date }}</text>
+            </svg>
+        </div>
+        <div>
+            <div class="ex-timeline">
+                {% for t in ex.clock.timeline %}
+                <div class="ex-tl ex-tl-{{ t.tone }}"><b>{{ t.when }}</b>{{ t.what }}</div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+    <p class="ex-p" style="margin-top: 14px;">Four hands to read the clock yourself. The readings are the explainer's as of the date it was written.</p>
+    <div class="ex-hands">
+        {% for h in ex.clock.hands %}
+        <div class="ex-hand-card"><div class="ex-hand-t">{{ loop.index }} · {{ h.name }} <span class="ex-pill ex-pill-{{ h.tone }}">{{ {'up': '▲', 'down': '▼', 'mixed': '◆'}.get(h.tone, '') }} {{ h.reading }}</span></div><div class="ex-hand-r">{{ h.meaning }}</div></div>
+        {% endfor %}
+    </div>
+    <div class="ex-sowhat"><b>So what for the stock</b>{{ ex.clock.so_what }}</div>
+</div>
+
+{# Card 6 #}
+<div class="card ex-card" id="ex-c6">
+    <div class="ex-q"><span class="ex-num">06</span><h2>The wiring diagram</h2></div>
+    <div class="ex-ask">Which macro and geopolitical dials move this industry, through which channel, in which direction?</div>
+    <p class="ex-p">One row per dial. The arrow says what a <strong>rise</strong> in the dial does to this industry; the dots say how much it matters. Latest = the reading from our macro feed where the dial maps to one of its series.</p>
+    <div class="table-wrap">
+    <table class="ex-table">
+        <thead><tr><th>Dial</th><th>Channel</th><th>A rise does…</th><th>Weight</th><th class="num">Latest</th></tr></thead>
+        <tbody>
+        {% for d in detail.dials %}
+        <tr>
+            <td>{{ d.name }}</td>
+            <td>{{ d.channel }}</td>
+            <td><span class="ex-pill ex-pill-{{ d.direction }}">{{ {'up': '▲', 'down': '▼'}.get(d.direction, '◆') }} {{ d.rise_does }}</span></td>
+            <td><span class="ex-dots">{% for i in range(3) %}<i class="{{ 'on' if i < (d.weight|int) else 'off' }}">●</i>{% endfor %}</span></td>
+            <td class="num mono">{% if d.latest_value is not none %}{{ "{:,.2f}".format(d.latest_value) }}<br><span class="ex-tiny">{{ d.indicator_id|macro_label }} · {{ d.latest_date }}</span>{% else %}<span class="u-muted">—</span>{% endif %}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    <div class="ex-sowhat"><b>So what for the stock</b>{{ ex.dials_so_what }}</div>
+</div>
+
+{# Card 7 #}
+<div class="card ex-card" id="ex-c7">
+    <div class="ex-q"><span class="ex-num">07</span><h2>Bottlenecks and key issues</h2></div>
+    <div class="ex-ask">What stops it from growing faster, and what breaks it?</div>
+    <div class="table-wrap">
+    <table class="ex-table">
+        <thead><tr><th>Bottleneck</th><th>Why it bites</th><th>Severity</th></tr></thead>
+        <tbody>
+        {% for b in ex.bottlenecks %}
+        <tr><td>{{ b.name }}</td><td>{{ b.why }}</td><td><span class="ex-pill ex-pill-{{ {'structural': 'down', 'recurring': 'mixed', 'cyclical': 'mixed'}.get(b.severity, 'neutral') }}">{{ b.severity }}</span></td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    <div class="ex-sowhat"><b>So what for the stock</b>{{ ex.bottlenecks_so_what }}</div>
+</div>
+
+{# Card 8 #}
+<div class="card ex-card" id="ex-c8">
+    <div class="ex-q"><span class="ex-num">08</span><h2>The rulebook</h2></div>
+    <div class="ex-ask">Who regulates it, what rule is live, and which rule is coming?</div>
+    <div class="table-wrap">
+    <table class="ex-table">
+        <thead><tr><th>Regulator or rule</th><th>What it does</th><th>Why you care</th><th>Status</th></tr></thead>
+        <tbody>
+        {% for r in ex.rulebook %}
+        <tr><td>{{ r.body }}</td><td>{{ r.what }}</td><td>{{ r.why }}</td><td><span class="ex-pill ex-pill-{{ rb_status.get(r.status, 'neutral') }}">{{ r.status }}</span></td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    <div class="ex-cap">Dated regulatory events for this industry are on the Picks &amp; signals tab.</div>
+</div>
+
+{# Card 9 #}
+<div class="card ex-card" id="ex-c9">
+    <div class="ex-q"><span class="ex-num">09</span><h2>Porter's five forces</h2></div>
+    <div class="ex-ask">Who keeps the profit: suppliers, buyers, rivals, new entrants, or substitutes?</div>
+    <p class="ex-p">Bigger area means <strong>more pressure on the company</strong>, so a smaller shape is the better business.</p>
+    <div class="ex-twoup">
+        <div>
+            <div class="ex-legend"><span><i class="ex-sw-a"></i>{{ ex.forces.a_name }}</span><span><i class="ex-sw-b"></i>{{ ex.forces.b_name }}</span><span class="u-muted">scale 0 (none) to 3 (high)</span></div>
+            <svg viewBox="-50 0 440 300" width="100%" role="img" aria-label="Radar of five forces for {{ ex.forces.a_name }} versus {{ ex.forces.b_name }}" class="ex-svg">
+                <g class="ex-grid" fill="none">
+                    {% for r in exv.radar.rings %}<polygon points="{{ r }}"/>{% endfor %}
+                    {% for ax in exv.radar.axes %}<line x1="170" y1="150" x2="{{ ax[0] }}" y2="{{ ax[1] }}"/>{% endfor %}
+                </g>
+                <polygon points="{{ exv.radar.a }}" class="ex-radar-a" stroke-width="2"><title>{{ ex.forces.a_name }}</title></polygon>
+                <polygon points="{{ exv.radar.b }}" class="ex-radar-b" stroke-width="2"><title>{{ ex.forces.b_name }}</title></polygon>
+                <g class="ex-dot-a">{% for p in exv.radar.a_pts %}<circle cx="{{ p[0] }}" cy="{{ p[1] }}" r="5"/>{% endfor %}</g>
+                <g class="ex-dot-b">{% for p in exv.radar.b_pts %}<circle cx="{{ p[0] }}" cy="{{ p[1] }}" r="5"/>{% endfor %}</g>
+                <g font-size="12" font-weight="600" class="ex-svg-text">
+                    {% for l in exv.radar.labels %}<text x="{{ l.x }}" y="{{ l.y }}" text-anchor="{{ l.anchor }}">{{ l.text }}</text>{% endfor %}
+                </g>
+            </svg>
+        </div>
+        <div class="table-wrap">
+            <table class="ex-table">
+                <thead><tr><th>Force</th><th class="num">{{ ex.forces.a_name }}</th><th class="num">{{ ex.forces.b_name }}</th><th>Why that score</th></tr></thead>
+                <tbody>
+                {% for key, label in exv.forces %}
+                <tr><td>{{ label }}</td><td class="num mono">{{ ex.forces.scores[key][0] }}</td><td class="num mono">{{ ex.forces.scores[key][1] }}</td><td>{{ ex.forces.why[key] }}</td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    <div class="ex-sowhat"><b>So what for the stock</b>{{ ex.forces.so_what }}</div>
+</div>
+
+{# Card 12 #}
+<div class="card ex-card" id="ex-c12">
+    <div class="ex-q"><span class="ex-num">12</span><h2>Tell a friend</h2></div>
+    <div class="ex-ask">The sixty-second version you can repeat without notes.</div>
+    <div class="ex-quote">{{ ex.tell_a_friend }}</div>
+</div>
+
+{# Notes from the written story (v1 trend bullets, dated) #}
+{% if narr.trend_bullets %}
+<div class="card ex-card">
+    <div class="ex-q"><span class="ex-num">§</span><h2>Notes from the written story</h2></div>
+    <div class="ex-ask">Dated bullets from the story written on {{ (narr._generated_at or '')[:10] }}. Their figures are the story's own, not the model's.</div>
+    <div class="ex-notes">
+        {% for kind, label in [('industry_size', 'Size & growth'), ('structural_shifts', 'Structural shifts'), ('regulatory', 'Regulatory'), ('headwinds', 'Headwinds'), ('india_specific', 'India tailwinds')] %}
+        {% for b in narr.trend_bullets.get(kind, []) %}
+        <div class="ex-note"><span class="ex-chip">{{ label }}</span>{{ b }}</div>
+        {% endfor %}
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+
+{# Glossary #}
+<div class="card ex-card" id="ex-gl">
+    <div class="ex-q"><span class="ex-num">§</span><h2>Glossary</h2></div>
+    <div class="ex-ask">Every term used above, in one line each.</div>
+    <dl class="ex-gl">
+        {% for g in ex.glossary %}<dt>{{ g.term }}</dt><dd>{{ g.def }}</dd>{% endfor %}
+    </dl>
+</div>
+
+{% elif narr %}
+{# ── no explainer yet: the written story, nothing collapsed ── #}
+{% if narr.summary %}
 {% set thesis = narr.summary | slidify %}
 <div class="card thesis-card" style="margin-bottom: 14px; border-left: 4px solid var(--accent); padding: 14px 18px;">
     <span style="font-size: 11px; font-weight: 700; letter-spacing: 1px; color: var(--accent);">INDUSTRY THESIS</span>
     <div class="thesis-head">{{ thesis.head }}</div>
     {% if thesis.body %}<div class="thesis-body">{{ thesis.body }}</div>{% endif %}
 </div>
-{% elif is_sector %}
-<div class="card" style="margin-bottom: 14px;">
-    <div class="section-title">Industries in {{ detail.name }}</div>
-    <div class="section-desc">Average model score out of 100 (market-cap weighted, as of {{ pick_date|short_date }}). Open one for its thesis, players and picks.</div>
-    <div class="table-wrap">
-    <table class="rot-table">
-        <thead><tr><th>Industry</th><th class="num">Score /100</th><th class="num">Stocks</th><th class="num">Breadth (score 55+)</th></tr></thead>
-        <tbody>
-        {% for ind in sector_industries %}
-        <tr>
-            <td><a class="rot-link" href="/sectors?industry={{ ind.industry|urlencode }}#per-sector">{{ ind.industry }}</a></td>
-            <td class="num {{ ind.avg_score|score_tone }}">{{ (ind.avg_score * 100)|round|int if ind.avg_score else '—' }}</td>
-            <td class="num">{{ ind.stocks }}</td>
-            <td class="num">{{ ind.breadth_pct|pct(0) }}</td>
-        </tr>
-        {% else %}
-        <tr><td colspan="4" class="u-muted-11">No industries ranked in this sector yet.</td></tr>
-        {% endfor %}
-        </tbody>
-    </table>
-    </div>
-</div>
-{% elif not narr %}
-<div class="card" style="margin-bottom: 14px; border-left: 4px solid var(--amber); padding: 12px 16px;">
-    <span class="u-muted-11">
-        ⚠ Structured narrative not generated for this industry. Run
-        <code style="font-size: 11px;">python -m tools.sector_narrative_fetcher --sector "{{ detail.name }}"</code>.
-    </span>
-</div>
 {% endif %}
+<div class="card" style="margin-bottom: 14px; border-left: 4px solid var(--amber); padding: 12px 16px;">
+    <span class="u-muted-11">⚠ The twelve-card explainer has not been written for this industry yet:
+    <code style="font-size: 11px;">python -m tools.sector_explainer --industry "{{ detail.name }}" --print-prompt</code>, answer it, then <code style="font-size: 11px;">--ingest</code>.</span>
+</div>
 
-{% if narr and narr.value_chain %}
+{% if narr.value_chain %}
 <div class="card" style="margin-bottom: 14px;">
     <div class="section-title">How it works · 5-stage value chain</div>
     <div class="section-desc">Left → right: how value moves through the industry.</div>
@@ -182,7 +458,7 @@
 </div>
 {% endif %}
 
-{% if narr and narr.drivers %}
+{% if narr.drivers %}
 <div class="card" style="margin-bottom: 14px;">
     <div class="section-title">What moves the P&amp;L</div>
     <div class="section-desc">Top revenue levers, cost lines that hurt, and structural growth runways.</div>
@@ -205,48 +481,132 @@
 </div>
 {% endif %}
 
-{% if narr and (narr.cyclicality or narr.regulators or narr.india_specific) %}
-<details class="card" style="padding: 0; margin-bottom: 14px; overflow: hidden;">
-    <summary style="cursor: pointer; padding: 12px 18px; font-size: 11px; font-weight: 700; letter-spacing: 0.6px; text-transform: uppercase; color: var(--text-muted); list-style: none;">
-        ▸ More context — cyclicality · regulators · India-specific
-    </summary>
-    <div style="padding: 0 18px 16px 18px;">
-        {% if narr.cyclicality %}
-        <div class="section-title" style="margin-top: 6px;">Cyclicality</div>
-        <div class="section-desc">How the up- and down-phases play out in this industry.</div>
-        <div class="slide-stack" style="margin-top: 8px;">
-            {% for s in narr.cyclicality | sentences(6) %}
-            {{ slide_row(s) }}
-            {% endfor %}
+{% if narr.cyclicality %}
+<div class="card" style="margin-bottom: 14px;">
+    <div class="section-title">Cyclicality</div>
+    <div class="section-desc">How the up- and down-phases play out in this industry.</div>
+    <p class="ex-p" style="margin-top: 8px;">{{ narr.cyclicality }}</p>
+</div>
+{% endif %}
+{% if narr.regulators %}
+<div class="card" style="margin-bottom: 14px;">
+    <div class="section-title">Regulators</div>
+    <div class="section-desc">Who controls what.</div>
+    <div class="slide-stack" style="margin-top: 8px;">
+        {% for r in narr.regulators %}
+        <div class="slide-row">
+            <div class="slide-head">{{ r.body }}</div>
+            <div class="slide-body">{{ r.what }}</div>
         </div>
-        {% endif %}
-        {% if narr.regulators %}
-        <div class="section-title" style="margin-top: 16px;">Regulators</div>
-        <div class="section-desc">Who controls what.</div>
-        <div class="slide-stack" style="margin-top: 8px;">
-            {% for r in narr.regulators %}
-            <div class="slide-row">
-                <div class="slide-head">{{ r.body }}</div>
-                <div class="slide-body">{{ r.what }}</div>
-            </div>
-            {% endfor %}
-        </div>
-        {% endif %}
-        {% if narr.india_specific %}
-        <div class="section-title" style="margin-top: 16px;">India-specific factors</div>
-        <div class="section-desc">Quirks of the Indian market that shape competitive dynamics.</div>
-        <div class="slide-stack" style="margin-top: 8px;">
-            {% for b in narr.india_specific %}
-            {{ slide_row(b, slidify=True) }}
-            {% endfor %}
-        </div>
-        {% endif %}
+        {% endfor %}
     </div>
-</details>
+</div>
+{% endif %}
+{% if narr.india_specific %}
+<div class="card" style="margin-bottom: 14px;">
+    <div class="section-title">India-specific factors</div>
+    <div class="section-desc">Quirks of the Indian market that shape competitive dynamics.</div>
+    <div class="slide-stack" style="margin-top: 8px;">
+        {% for b in narr.india_specific %}
+        {{ slide_row(b, slidify=True) }}
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+{% if narr.trend_bullets %}
+<div class="card" style="margin-bottom: 14px;">
+    <div class="section-title">Market trends</div>
+    <div class="section-desc">Dated bullets from the story written on {{ (narr._generated_at or '')[:10] }}.</div>
+    <div class="ex-notes" style="margin-top: 8px;">
+        {% for kind, label in [('industry_size', 'Size & growth'), ('structural_shifts', 'Structural shifts'), ('regulatory', 'Regulatory'), ('headwinds', 'Headwinds'), ('india_specific', 'India tailwinds')] %}
+        {% for b in narr.trend_bullets.get(kind, []) %}
+        <div class="ex-note"><span class="ex-chip">{{ label }}</span>{{ b }}</div>
+        {% endfor %}
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+
+{% elif is_sector %}
+<div class="card" style="margin-bottom: 14px;">
+    <div class="section-title">Industries in {{ detail.name }}</div>
+    <div class="section-desc">Average model score out of 100 (market-cap weighted, as of {{ pick_date|short_date }}). Open one for its explainer, players and picks.</div>
+    <div class="table-wrap">
+    <table class="rot-table">
+        <thead><tr><th>Industry</th><th class="num">Score /100</th><th class="num">Stocks</th><th class="num">Breadth (score 55+)</th></tr></thead>
+        <tbody>
+        {% for ind in sector_industries %}
+        <tr>
+            <td><a class="rot-link" href="/sectors?industry={{ ind.industry|urlencode }}#per-sector">{{ ind.industry }}</a></td>
+            <td class="num {{ ind.avg_score|score_tone }}">{{ (ind.avg_score * 100)|round|int if ind.avg_score else '—' }}</td>
+            <td class="num">{{ ind.stocks }}</td>
+            <td class="num">{{ ind.breadth_pct|pct(0) }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="4" class="u-muted-11">No industries ranked in this sector yet.</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+</div>
+{% else %}
+<div class="card" style="margin-bottom: 14px; border-left: 4px solid var(--amber); padding: 12px 16px;">
+    <span class="u-muted-11">
+        ⚠ No written story for this industry yet. Run
+        <code style="font-size: 11px;">python -m tools.sector_narrative_fetcher --industry "{{ detail.name }}"</code>, then the explainer.
+    </span>
+</div>
 {% endif %}
 </div>{# / overview sub #}
 
 
+{# ═══════════════════ Numbers ═══════════════════ #}
+{% if has_numbers %}
+<div x-show="sub === 'numbers'" x-cloak>
+{% if ex %}
+<div class="card ex-card" id="ex-c10">
+    <div class="ex-q"><span class="ex-num">10</span><h2>The results-call cheat sheet</h2></div>
+    <div class="ex-ask">The eight numbers to read every quarter, with what good looks like. Today = the median of this industry's listed names from their latest annual filings{% if detail.medians._as_of %} (to {{ detail.medians._as_of }}, {{ detail.medians._stocks }} stocks with filings){% endif %}.</div>
+    <div class="table-wrap">
+    <table class="ex-table">
+        <thead><tr><th>Number</th><th>What it tells you</th><th>What good looks like</th><th class="num">Today · industry median</th></tr></thead>
+        <tbody>
+        {% for c in detail.cheat_rows %}
+        <tr>
+            <td>{{ c.metric }}</td><td>{{ c.tells }}</td><td>{{ c.good }}</td>
+            <td class="num mono">{% if c.today %}{{ c.today }}<br><span class="ex-tiny">{{ c.label }} · {{ c.n }} stocks</span>{% else %}<span class="u-muted" title="No matching line in the filings we hold">—</span>{% endif %}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+</div>
+{% endif %}
+{% if narr and narr.segments %}
+<div class="card">
+    <div class="section-title">Segments &amp; KPIs</div>
+    <div class="section-desc">How investors split the industry and which metrics matter per slice (from the written story).</div>
+    <div class="seg-list" style="margin-top: 12px;">
+        {% for seg in narr.segments[:8] %}
+        <div class="seg-chip">
+            <div class="seg-name">{{ seg.name }}</div>
+            {% for kpi in seg['kpis'][:4] %}
+            <div class="kpi-li">
+                <span class="arrow {{ 'up' if kpi.direction == 'higher_is_better' else 'down' }}">{{ '↑' if kpi.direction == 'higher_is_better' else '↓' }}</span>
+                <strong style="color: var(--text-primary);">{{ kpi.name }}</strong>
+                <span class="u-muted">· {{ kpi.formula }}</span>
+            </div>
+            {% endfor %}
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+</div>{# / numbers sub #}
+{% endif %}
+
+
+{# ═══════════════════ Players ═══════════════════ #}
 <div x-show="sub === 'players'" x-cloak>
 {% if detail.competitive_landscape and detail.competitive_landscape.players %}
 {% set cl = detail.competitive_landscape %}
@@ -255,7 +615,7 @@
     <div class="section-desc">
         Share basis: <strong>{{ cl.share_basis }}</strong>{% if cl.as_of %} · as of {{ cl.as_of }}{% endif %}.
         Includes non-listed players (state-owned, foreign subsidiaries, Tata-group unlisted, etc.).
-        Click ▸ to open the listed ones. Source: AI-curated narrative.
+        Click ▸ to open the listed ones. Source: the written story.
     </div>
     <div style="margin-top: 12px;">
         <div class="pb-row pb-head">
@@ -310,65 +670,14 @@
         {% endfor %}
     </div>
 </div>
-
-{% if narr and narr.segments %}
-<div class="card">
-    <div class="section-title">Segments &amp; KPIs</div>
-    <div class="section-desc">How investors split the industry + which metrics matter per slice.</div>
-    <div class="seg-list" style="margin-top: 12px;">
-        {% for seg in narr.segments[:8] %}
-        <div class="seg-chip">
-            <div class="seg-name">{{ seg.name }}</div>
-            {% for kpi in seg['kpis'][:4] %}
-            <div class="kpi-li">
-                <span class="arrow {{ 'up' if kpi.direction == 'higher_is_better' else 'down' }}">{{ '↑' if kpi.direction == 'higher_is_better' else '↓' }}</span>
-                <strong style="color: var(--text-primary);">{{ kpi.name }}</strong>
-                <span class="u-muted">· {{ kpi.formula }}</span>
-            </div>
-            {% endfor %}
-        </div>
-        {% endfor %}
-    </div>
-</div>
-{% endif %}
 </div>{# / players sub #}
 
 
-<div x-show="sub === 'trends'" x-cloak>
-{% if narr and narr.trend_bullets %}
-<div class="card">
-    <div class="section-title">Market trends</div>
-    <div class="section-desc">Switch category. Each row: headline first, supporting evidence below.</div>
-    <div x-data="{ tcat: 'industry_size' }" style="margin-top: 12px;">
-        {{ radio_group('tcat', [
-            ('industry_size',     'Size & growth'),
-            ('structural_shifts', 'Structural shifts'),
-            ('regulatory',        'Regulatory'),
-            ('headwinds',         'Headwinds'),
-            ('india_specific',    'India tailwinds'),
-        ]) }}
-        {% for kind in ['industry_size', 'structural_shifts', 'regulatory', 'headwinds', 'india_specific'] %}
-        {% set bullets = narr.trend_bullets.get(kind) %}
-        <div x-show="tcat === '{{ kind }}'" x-cloak class="trend-box" style="padding: 14px 18px;">
-            {% if bullets %}
-            <div class="slide-stack spaced">
-                {% for b in bullets %}{{ slide_row(b, slidify=True) }}{% endfor %}
-            </div>
-            {% else %}<div style="color: var(--text-muted); font-style: italic;">No bullets in this category.</div>{% endif %}
-        </div>
-        {% endfor %}
-    </div>
-</div>
-{% else %}
-<div class="card" style="padding: 18px; color: var(--text-muted);">No trend bullets — narrative not generated yet.</div>
-{% endif %}
-</div>{# / trends sub #}
-
-
+{# ═══════════════════ Picks & signals ═══════════════════ #}
 <div x-show="sub === 'picks'" x-cloak>
-<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px;">
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; margin-bottom: 14px;">
     <div class="card">
-        <div class="section-title">Top picks · in this industry</div>
+        <div class="section-title">Top picks · in this {{ 'sector' if is_sector else 'industry' }}</div>
         <div class="section-desc">Sorted by composite. Click to drill.</div>
         <div style="margin-top: 10px;">
         {% for p in detail.picks.top[:8] %}
@@ -395,6 +704,7 @@
         {% endfor %}
         </div>
     </div>
+    {% if not ex %}
     <div class="card">
         <div class="section-title">Macro contributors</div>
         <div class="section-desc">Indicators driving the parent sector's macro signal.</div>
@@ -417,7 +727,7 @@
         {% if detail.regulatory %}
             {% for r in detail.regulatory[:5] %}
             <div style="font-size: 11px; line-height: 1.5; padding: 5px 0; border-bottom: 1px solid var(--border);">
-                <span class="pdot {{ 'up' if r.direction == 'POSITIVE' else ('down' if r.direction == 'NEGATIVE' else 'flat') }}"></span>
+                <span class="pdot {{ 'up' if r.direction|int > 0 else ('down' if r.direction|int < 0 else 'flat') }}"></span>
                 <span class="mono" style="font-size: 10px; color: var(--text-muted);">{{ r.published_at[:10] }}</span>
                 <span style="margin-left: 4px;">{{ r.title }}</span>
             </div>
@@ -425,7 +735,87 @@
         {% else %}<div class="u-muted-11">None.</div>{% endif %}
         </div>
     </div>
+    {% endif %}
 </div>
+
+{% if ex %}
+{# Card 11 #}
+<div class="card ex-card" id="ex-c11">
+    <div class="ex-q"><span class="ex-num">11</span><h2>Cross-intelligence and the call</h2></div>
+    <div class="ex-ask">What in other industries and in the news leads this one, by how long, and what is the call?</div>
+    <p class="ex-p">Each dot is a signal from outside the industry, placed by <strong>how far ahead it speaks</strong>. The further right, the earlier the warning. Hover a dot for the channel.</p>
+    <svg viewBox="0 0 760 {{ exv.lead.h }}" width="100%" role="img" aria-label="Leading indicators placed by lead time in quarters" class="ex-svg">
+        <g class="ex-mono" font-size="11">
+            <line class="ex-axis" x1="60" x2="720" y1="{{ exv.lead.h - 30 }}" y2="{{ exv.lead.h - 30 }}"/>
+            {% for x in [60, 280, 500, 700] %}<line class="ex-grid" x1="{{ x }}" x2="{{ x }}" y1="20" y2="{{ exv.lead.h - 30 }}"/>{% endfor %}
+            <text x="60" y="{{ exv.lead.h - 10 }}" text-anchor="middle" class="ex-svg-muted">same quarter</text>
+            <text x="280" y="{{ exv.lead.h - 10 }}" text-anchor="middle" class="ex-svg-muted">1 quarter ahead</text>
+            <text x="500" y="{{ exv.lead.h - 10 }}" text-anchor="middle" class="ex-svg-muted">2 quarters ahead</text>
+            <text x="700" y="{{ exv.lead.h - 10 }}" text-anchor="middle" class="ex-svg-muted">3+</text>
+        </g>
+        <g font-size="12" class="ex-svg-text">
+            {% for d in exv.lead.dots %}
+            <circle cx="{{ d.x }}" cy="{{ d.y }}" r="6" class="ex-hand-fill"><title>{{ d.channel }}</title></circle>
+            <text x="{{ d.x + 14 if d.q < 2 else d.x - 14 }}" y="{{ d.y + 4 }}" {% if d.q >= 2 %}text-anchor="end"{% endif %}>{{ d.name }}</text>
+            {% endfor %}
+        </g>
+    </svg>
+    <p class="ex-p"><strong>A simple rule for direction.</strong> {{ ex.rule.text }}</p>
+    <div class="ex-rule3">
+        {% for s in ex.rule.signs %}
+        <div class="ex-r3"><div class="ex-ck {{ 'ex-ck-y' if s.ok else 'ex-ck-n' }}">{{ '✓' if s.ok else '✕' }}</div><div><div class="ex-r3-t">{{ s.name }}</div><div class="ex-r3-s">{{ s.note }}</div></div></div>
+        {% endfor %}
+    </div>
+    <div class="ex-call">
+        <div class="ex-call-h">The call · explainer of {{ (narr.explainer_generated_at or '')[:10] }} · model {{ pick_date|short_date }}</div>
+        <div class="ex-call-v">{{ ex.call.headline }}</div>
+        <ul>
+            {% for p in ex.call.points %}<li>{{ p }}</li>{% endfor %}
+            {% if ind_match %}<li>Model reading today: score {{ ind_match.avg_score | pct(0, scale=100) | replace('%','') }}/100, {{ ind_match.breadth_pct | pct(0) }} of ranked names score 55+{% if ind_match.score_rank %}, {{ ind_match.score_rank }}th of {{ industries|length }} industries{% endif %}.</li>{% endif %}
+        </ul>
+        <ul class="ex-kill"><li><strong>What would change the call:</strong> {{ ex.call.would_change | join(' · ') }}</li></ul>
+    </div>
+</div>
+
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px;">
+    <div class="card">
+        <div class="section-title">Industry dials · live readings</div>
+        <div class="section-desc">The wiring table of card 6 with today's value where the dial maps to a macro series we hold. Dials without a series need a feed.</div>
+        <div style="margin-top: 10px;">
+        {% for d in detail.dials %}
+        <div class="pick-row" style="grid-template-columns: minmax(0, 1fr) auto 90px;">
+            <span style="color: var(--text-secondary); font-size: 11px;">{{ d.name }}</span>
+            <span class="ex-pill ex-pill-{{ d.direction }}" style="font-size: 10px;">{{ {'up': '▲', 'down': '▼'}.get(d.direction, '◆') }} rise {{ 'helps' if d.direction == 'up' else ('hurts' if d.direction == 'down' else 'mixed') }}</span>
+            <span class="score mono" style="font-size: 11px;">{% if d.latest_value is not none %}{{ "{:,.2f}".format(d.latest_value) }}{% else %}<span class="u-muted" title="no feed yet">no feed</span>{% endif %}</span>
+        </div>
+        {% endfor %}
+        </div>
+    </div>
+    <div class="card">
+        <div class="section-title">Recent regulatory · this industry</div>
+        <div class="section-desc">Classified events from the parent sector's feed that mention this industry (matched on the explainer's keywords), last 90 days.</div>
+        <div style="margin-top: 10px;">
+        {% if detail.industry_regulatory %}
+            {% for r in detail.industry_regulatory[:8] %}
+            <div style="font-size: 11px; line-height: 1.5; padding: 5px 0; border-bottom: 1px solid var(--border);">
+                <span class="pdot {{ 'up' if r.direction|int > 0 else ('down' if r.direction|int < 0 else 'flat') }}"></span>
+                <span class="mono" style="font-size: 10px; color: var(--text-muted);">{{ r.published_at[:10] }}</span>
+                <span style="margin-left: 4px;">{{ r.title }}</span>
+            </div>
+            {% endfor %}
+        {% else %}
+            <div class="u-muted-11">No event in the last 90 days mentions this industry. The parent sector's latest:</div>
+            {% for r in detail.regulatory[:3] %}
+            <div style="font-size: 11px; line-height: 1.5; padding: 5px 0; border-bottom: 1px solid var(--border); opacity: 0.7;">
+                <span class="mono" style="font-size: 10px; color: var(--text-muted);">{{ r.published_at[:10] }}</span>
+                <span style="margin-left: 4px;">{{ r.title }}</span>
+            </div>
+            {% endfor %}
+        {% endif %}
+        </div>
+    </div>
+</div>
+{% endif %}
 </div>{# / picks sub #}
 
 </div>{# / sub x-data #}

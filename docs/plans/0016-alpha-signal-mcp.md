@@ -221,6 +221,8 @@ Rough size: P1 1 session · P2 1–2 · P3 1–2 · P4 1 · P5 1.
 - Multi-user auth.
 
 ## Implementation notes
+- **2026-10-16 — P5 `sector_narrative` delivered as the industry explainer (ADR 0078).** `tools/sector_explainer.py` (`--print-prompt` / `--ingest` for the subscription route, API route as fallback), `cockpit/explainer.py` (SVG geometry, financial medians, dial readings, keyword-filtered regulatory), `_industry_detail.html` re-laid as Understand · Numbers · Players · Picks & signals. The `sector_narrative` queue kind itself is not built: the explainer is a per-industry artefact written by a session, not a daily task. `tools/sector_narrative_fetcher.py` stays (its v1 story is still read).
+
 - 2026-09-27: facts in §2 checked against the routines and headless docs. The inventory of the 7 LLM call paths and the read surface is from a read-only audit; spot-checked are `regulatory_events` status counts (11,526 pending, 71 `haiku_passed_sonnet_failed`), the `views` functions and `db.safe_read_sql`. `mcp` 1.27.1 (FastMCP) is already in the venv.
 - **2026-09-28:** sequencing with plan 0017 agreed (header). Phase 1 waits for plan 0017 stage 0 (`ALPHA_DB`; fixtures off the live DB). Added the plan-0017 fit rules: tools go through `views.py`, `llm_tasks` is Ops, one `ingest` per kind.
 - **2026-09-30:** D1–D6 decided (§9). Local executor only, so phase 4 shrinks to the cron schedule + audit. API paths are kept behind `config.LLM_WORK["executor"]`. Full backlog drain. The next step is still plan 0017 stage 0.
