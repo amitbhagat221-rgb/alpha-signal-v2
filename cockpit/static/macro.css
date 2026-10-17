@@ -596,3 +596,53 @@ body.macro-frame .wrap > article, body.macro-frame .learn-wrap { padding-top: 18
   .ch-sec blockquote { font-size: 16px; }
 }
 .feedt { font-weight: 600; color: var(--text-primary); }
+
+/* ── one type scale, matched to the cockpit (Amit 2026-10-17: "font size gets uneven at some places … proper use of
+   space … merge style with the overall theme"). Cockpit: UI 13–14px, card titles 19px, labels 11–12.5px. Long-form
+   prose here is 15px/1.7; leads get the primary colour, not a bigger size; prose lines stop at about 72 characters.
+   Last in the file on purpose: it replaces the mockup's mixed sizes (14.5–18px prose, 21–40px headings). ── */
+body.macro-frame {
+  --fs-prose: 15px; --lh-prose: 1.7; --fs-callout: 14.5px; --fs-small: 13px; --fs-label: 11px;
+  --fs-h1: 26px; --fs-h2: 19px; --fs-h3: 16px; --measure: 72ch;
+  font-size: var(--fs-prose); line-height: var(--lh-prose); letter-spacing: -0.005em;
+  -webkit-font-smoothing: antialiased; font-feature-settings: 'cv11', 'ss01', 'ss03';
+}
+body.macro-frame .ch-kicker { font-size: var(--fs-label); letter-spacing: .1em; margin-bottom: 8px; line-height: 1.6; }
+body.macro-frame .ch-title { font-size: var(--fs-h1); line-height: 1.25; font-weight: 800; letter-spacing: -0.015em; margin: 0 0 18px; max-width: 32ch; }
+body.macro-frame .start-title { font-size: 30px; line-height: 1.2; }
+body.macro-frame .ch-h2, body.macro-frame .b-h { font-size: var(--fs-h2); line-height: 1.35; font-weight: 700; margin: 34px 0 12px; }
+body.macro-frame .sc-t { font-size: var(--fs-h3); line-height: 1.4; }
+/* prose: one size everywhere */
+body.macro-frame .ch-hook p, body.macro-frame .ch-body p, body.macro-frame .ch-sec p, body.macro-frame .ch-sec li,
+body.macro-frame .b-p, body.macro-frame .sc-body p, body.macro-frame .seeit p, body.macro-frame .ch-sowhat p,
+body.macro-frame .ch-sowhat li, body.macro-frame .season-now, body.macro-frame .start-sub {
+  font-size: var(--fs-prose); line-height: var(--lh-prose); max-width: var(--measure);
+}
+body.macro-frame .ch-hook p { color: var(--text-primary); margin: 0 0 14px; }
+body.macro-frame .ch-hook p:first-child::first-letter { font-size: inherit; }
+body.macro-frame .ch-sec p, body.macro-frame .ch-body p, body.macro-frame .b-p { margin: 0 0 14px; color: var(--text-secondary); }
+body.macro-frame .ch-sec ul, body.macro-frame .ch-sec ol, body.macro-frame .ch-sowhat ul { margin: 4px 0 16px; padding-left: 22px; max-width: var(--measure); }
+body.macro-frame .ch-sec li, body.macro-frame .ch-sowhat li { margin: 6px 0; padding-left: 2px; }
+body.macro-frame .ch-sec li::marker, body.macro-frame .ch-sowhat li::marker, body.macro-frame .ch-tldr li::marker { color: var(--accent); }
+body.macro-frame .ch-sec blockquote, body.macro-frame .sc-body blockquote { font-size: 16px; line-height: 1.55; max-width: 60ch; margin: 20px 0; }
+/* callouts: one step smaller, one box style */
+body.macro-frame .ch-tldr, body.macro-frame .seeit, body.macro-frame .ch-sowhat, body.macro-frame .verdict { max-width: calc(var(--measure) + 36px); }
+body.macro-frame .ch-tldr li, body.macro-frame .verdict, body.macro-frame .sc-lesson { font-size: var(--fs-callout); line-height: 1.65; }
+body.macro-frame .verdict { padding: 14px 18px; }
+body.macro-frame .seeit p, body.macro-frame .ch-sowhat p, body.macro-frame .ch-sowhat li { font-size: var(--fs-callout); }
+body.macro-frame .sw-h, body.macro-frame .seeit-h, body.macro-frame .ch-words-h, body.macro-frame .hb-h { font-size: var(--fs-label); letter-spacing: .1em; text-transform: uppercase; font-weight: 700; }
+/* history cards: same prose size as the chapter, a little tighter */
+body.macro-frame .story-card { padding: 18px 0; gap: 18px; }
+body.macro-frame .sc-body p { font-size: var(--fs-prose); margin: 0 0 10px; }
+body.macro-frame .sc-when { font-size: var(--fs-small); }
+/* small print */
+body.macro-frame .fig-cap, body.macro-frame .light-c, body.macro-frame .tiny, body.macro-frame .snapnote { font-size: 12.5px; line-height: 1.55; }
+body.macro-frame .light-r { font-size: var(--fs-callout); } body.macro-frame .light-m { font-size: 13.5px; }
+body.macro-frame .b-table td, body.macro-frame .b-table th { font-size: 13.5px; }
+/* the reading column: figures may go full width, text keeps its measure */
+body.macro-frame .chapter, body.macro-frame .brief { max-width: 920px; }
+@media (max-width: 600px) {
+  body.macro-frame { --fs-prose: 15px; --fs-callout: 14px; --fs-h1: 23px; --fs-h2: 18px; --measure: 100%; }
+  body.macro-frame .start-title { font-size: 24px; }
+  body.macro-frame .ch-h2, body.macro-frame .b-h { margin-top: 28px; }
+}

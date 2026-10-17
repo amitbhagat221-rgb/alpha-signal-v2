@@ -286,6 +286,61 @@ def validate_explainer(ex, tickers=None):
     return errs
 
 
+# ── the long-form layer (Amit 2026-10-17: "prose too thin … diagrams explained in a very detailed way") ──
+# ex["deep"][card] = {"story": html, "read": html}: the story before the card's diagram, how to read it after.
+# Card 12 (tell a friend) keeps its sixty-second version. Same hard rule: no digits except years.
+DEEP_CARDS = {"c1": "doors", "c2": "kitchen", "c3": "who buys", "c4": "rupee to profit", "c5": "the clock",
+              "c6": "wiring diagram", "c7": "bottlenecks", "c8": "rulebook", "c9": "five forces",
+              "c10": "results-call cheat sheet", "c11": "cross-intelligence and the call"}
+DEEP_TAGS = {"p", "b", "strong", "em", "i", "ul", "ol", "li", "blockquote", "br"}
+DEEP_MIN_WORDS = {"story": 180, "read": 110}
+
+
+def validate_deep(deep):
+    """Errors in the long-form layer (empty = valid)."""
+    if not isinstance(deep, dict):
+        return ["deep is not an object"]
+    errs = []
+    for card in DEEP_CARDS:
+        d = deep.get(card)
+        if not isinstance(d, dict):
+            errs.append(f"deep.{card}: missing")
+            continue
+        for part, need in DEEP_MIN_WORDS.items():
+            html = d.get(part)
+            if not isinstance(html, str) or not html.strip():
+                errs.append(f"deep.{card}.{part}: missing")
+                continue
+            bad_tags = {t.lower() for t in re.findall(r"</?([a-zA-Z0-9]+)\b", html)} - DEEP_TAGS
+            if bad_tags:
+                errs.append(f"deep.{card}.{part}: tags not allowed {sorted(bad_tags)}")
+            text = re.sub(r"<[^>]+>", " ", html)
+            if len(text.split()) < need:
+                errs.append(f"deep.{card}.{part}: {len(text.split())} words, at least {need}")
+            if prose_digits(text):
+                errs.append(f"deep.{card}.{part}: digits in prose {prose_digits(text)[:3]}")
+    extra = set(deep) - set(DEEP_CARDS)
+    if extra:
+        errs.append(f"deep: unknown cards {sorted(extra)}")
+    return errs
+
+
+def ingest_deep(industry, deep):
+    """Merge a validated long-form layer into the industry's current explainer and save it (archived)."""
+    errs = validate_deep(deep)
+    if errs:
+        raise ValueError(f"{industry}: " + "; ".join(errs[:10]))
+    row = db.one("SELECT payload FROM sector_metadata WHERE sector = ? AND source = 'auto'", [industry])
+    ex = (json.loads(row["payload"]) if row else {}).get("explainer")
+    if not ex:
+        raise ValueError(f"{industry}: no explainer to extend")
+    ex = {**ex, "deep": deep}
+    errs = validate_explainer(ex)
+    if errs:
+        raise ValueError(f"{industry}: " + "; ".join(errs[:10]))
+    save_explainer(industry, ex)
+
+
 # ── generation ────────────────────────────────────────────────────────────────
 
 def _v1_payload(industry):
@@ -398,6 +453,8 @@ def main(argv=None):
     ap.add_argument("--industry", action="append", help="industry name; repeatable")
     ap.add_argument("--all", action="store_true", help="every industry in INDUSTRY_LIST")
     ap.add_argument("--skip-existing", action="store_true", help="skip industries that already have an explainer")
+    ap.add_argument("--ingest-deep", metavar="FILE", help="merge a long-form layer {card: {story, read}} into --industry's explainer")
+    ap.add_argument("--check-deep", metavar="FILE", help="validate a long-form layer file without saving")
     ap.add_argument("--workers", type=int, default=3)
     ap.add_argument("--dry-run", action="store_true", help="print the JSON, do not write")
     ap.add_argument("--print-prompt", action="store_true", help="print the prompt for --industry and exit")
@@ -421,6 +478,20 @@ def main(argv=None):
             n_ok += 1
         print(f"restored {n_ok} of {len(arch)}{' (dry run)' if args.dry_run else ''}")
         return 0 if n_ok == len(arch) else 1
+
+    if args.check_deep or args.ingest_deep:
+        with open(args.check_deep or args.ingest_deep, encoding="utf-8") as fh:
+            deep = json.load(fh)
+        if args.check_deep:
+            errs = validate_deep(deep)
+            words = sum(len(re.sub(r"<[^>]+>", " ", d.get(p, "")).split()) for d in deep.values() if isinstance(d, dict) for p in ("story", "read"))
+            print("\n".join(f"  ✗ {e}" for e in errs) if errs else f"  ✓ valid, {words} words")
+            return 1 if errs else 0
+        if not args.industry or len(args.industry) != 1:
+            ap.error("--ingest-deep takes exactly one --industry")
+        ingest_deep(args.industry[0], deep)
+        print(f"  ✓ {args.industry[0]}: long-form layer saved")
+        return 0
 
     if args.missing:
         for k in industries_without_explainer(INDUSTRY_LIST):

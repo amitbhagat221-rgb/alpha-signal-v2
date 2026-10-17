@@ -108,6 +108,18 @@ templates.env.filters["slidify"] = _slidify
 templates.env.filters["sentences"] = _sentences
 
 
+def _paragraphs(text, per=3):
+    """Split one long block into paragraphs of about `per` sentences (Tell a friend was a single wall of text)."""
+    if not isinstance(text, str) or not text.strip():
+        return []
+    import re as _re
+    parts = [p for p in _re.split(r"(?<=[.!?])\s+(?=[A-Z(₹\"'])", text.strip()) if p.strip()]
+    return [" ".join(parts[i:i + per]) for i in range(0, len(parts), per)]
+
+
+templates.env.filters["paragraphs"] = _paragraphs
+
+
 def _markdown(text):
     """Report text → HTML (CommonMark + tables). Raw HTML in the text stays escaped (research text comes from an
     agent and the web); a citation "[3]" links to the page's source #src-3."""

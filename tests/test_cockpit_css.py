@@ -13,7 +13,7 @@ STYLESHEETS = [ROOT / "cockpit" / "static" / "cockpit.css", ROOT / "cockpit" / "
 # Used in class="" but deliberately without a rule: JS/Alpine hooks, prefixes completed by
 # Jinja (`pill-{{ tone }}`), state keys parsed out of :class objects, semantic markers.
 UNSTYLED_OK = {
-    "byScore", "cur", "dark", "door-pro", "ds-", "ex-band-", "ex-meter-", "ex-pill-", "ex-pos-", "ex-tl-", "f", "filter", "g-", "h-", "heatmapOpen", "i", "it-note", "l-", "loading",
+    "byScore", "cur", "dark", "door-pro", "ds-", "ex-band-", "ex-deep-", "ex-meter-", "ex-pill-", "ex-pos-", "ex-tl-", "f", "filter", "g-", "h-", "heatmapOpen", "i", "it-note", "l-", "loading",
     "nav-prev", "ns-heat-", "null", "o", "og-", "og-av-", "og-memo-body", "og-ref", "pill-", "rc-", "score-", "st-",
     "statusFilter", "tab", "tf", "toc-g-", "verdict",
 }

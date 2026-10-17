@@ -1,4 +1,7 @@
 {% from "_components.html" import tab_bar, radio_group, slide_row, tip %}
+{# The long-form layer of the explainer (Amit 2026-10-17): per card, "the story" before the diagram and "how to read
+   this" after it. Validated HTML from tools/sector_explainer.validate_deep (allowed tags only, no figures in prose). #}
+{% macro deep(ex, card, part) %}{% set d = (ex.deep or {}).get(card) if ex else none %}{% if d and d.get(part) %}<div class="ex-deep ex-deep-{{ part }}">{% if part == 'read' %}<div class="ex-deep-h">How to read this</div>{% endif %}{{ d[part] | safe }}</div>{% endif %}{% endmacro %}
 {# When embedded on the stock page (embed=True), carry the sector CSS with us — #}
 {# those classes live in sectors.html's <style> and aren't on the stock page.   #}
 {# On /sectors, embed is unset and the page already loads _sector_styles.html.  #}
@@ -173,6 +176,7 @@
     <div class="ex-q"><span class="ex-num">01</span><h2>The tea-stall version</h2></div>
     <div class="ex-ask">What does this industry actually do, in one breath?</div>
     <p class="ex-p"><strong>{{ ex.one_liner }}</strong></p>
+    {{ deep(ex, 'c1', 'story') }}
     <div class="ex-doors">
         {% for d in ex.doors %}
         <div class="ex-door">
@@ -187,6 +191,7 @@
         </div>
         {% endfor %}
     </div>
+    {{ deep(ex, 'c1', 'read') }}
     <div class="ex-analogy"><b>Analogy.</b> {{ ex.door_analogy }}</div>
     <div class="ex-sowhat"><b>So what for the stock</b>{{ ex.door_so_what }}</div>
 </div>
@@ -195,6 +200,7 @@
 <div class="card ex-card" id="ex-c2">
     <div class="ex-q"><span class="ex-num">02</span><h2>The kitchen</h2></div>
     <div class="ex-ask">Who stands where between raw material and final product, and where do Indian listed companies stand?</div>
+    {{ deep(ex, 'c2', 'story') }}
     <div class="ex-flow">
         {% for s in ex.kitchen.stations %}
         {% set band = ex.kitchen.bands[loop.index0] if ex.kitchen.bands|length > loop.index0 else none %}
@@ -215,6 +221,7 @@
         {% for b in ex.kitchen.bands %}<div class="ex-band {{ 'ex-band-rival' if b.kind != 'other' or loop.index < 5 else 'ex-band-other' }}">{{ ex.kitchen.rival if (b.kind != 'other' or loop.index < 5) else 'World' }}</div>{% endfor %}
     </div>
     {% endif %}
+    {{ deep(ex, 'c2', 'read') }}
     <div class="ex-cap">{{ ex.kitchen.note }}</div>
     <div class="ex-sowhat"><b>So what for the stock</b>{{ ex.kitchen.so_what }}</div>
 </div>
@@ -223,11 +230,13 @@
 <div class="card ex-card" id="ex-c3">
     <div class="ex-q"><span class="ex-num">03</span><h2>Who buys and why</h2></div>
     <div class="ex-ask">Which end markets pull demand, and what moves each of them?</div>
+    {{ deep(ex, 'c3', 'story') }}
     <div class="ex-markets">
         {% for m in ex.end_markets %}
         <div class="ex-mk"><h4>{{ m.name }}</h4><div class="ex-mk-b">{{ m.buys }}</div><div class="ex-mk-d">{{ m.moves_with }}</div></div>
         {% endfor %}
     </div>
+    {{ deep(ex, 'c3', 'read') }}
     <div class="ex-sowhat"><b>So what for the stock</b>{{ ex.end_markets_so_what }}</div>
 </div>
 
@@ -235,6 +244,7 @@
 <div class="card ex-card" id="ex-c4">
     <div class="ex-q"><span class="ex-num">04</span><h2>How a rupee becomes profit</h2></div>
     <div class="ex-ask">Which P&amp;L lines matter here and which can you ignore? Is depreciation a big deal? Capex? Working capital?</div>
+    {{ deep(ex, 'c4', 'story') }}
     <p class="ex-p">₹100 of sales walks down to profit for the two business types. The shapes are illustrative mid-cycle shapes from the explainer, not any one company's accounts.</p>
     <div class="ex-twoup">
         <div>
@@ -254,6 +264,7 @@
         <span class="ex-pill ex-pill-{{ {'yes': 'yes', 'some': 'some'}.get(l.matters, 'no') }}">{{ {'yes': '✓ Yes', 'some': '~ Sometimes'}.get(l.matters, '— Ignore') }}</span>
         {% endfor %}
     </div>
+    {{ deep(ex, 'c4', 'read') }}
     <div class="ex-analogy"><b>Analogy.</b> {{ ex.pnl.analogy }}</div>
     <div class="ex-sowhat"><b>So what for the stock</b>{{ ex.pnl.so_what }}</div>
 </div>
@@ -263,6 +274,7 @@
     <div class="ex-q"><span class="ex-num">05</span><h2>The clock</h2></div>
     <div class="ex-ask">Is it cyclical, what does one full cycle look like, and what time is it now?</div>
     <p class="ex-p"><strong>{{ ex.clock.is_cyclical }}</strong></p>
+    {{ deep(ex, 'c5', 'story') }}
     <div class="ex-clockrow">
         <div>
             <svg viewBox="0 0 300 300" width="100%" role="img" aria-label="Cycle clock; the hand points to {{ ex.clock.position_label }}" class="ex-svg">
@@ -298,6 +310,7 @@
         <div class="ex-hand-card"><div class="ex-hand-t">{{ loop.index }} · {{ h.name }} <span class="ex-pill ex-pill-{{ h.tone }}">{{ {'up': '▲', 'down': '▼', 'mixed': '◆'}.get(h.tone, '') }} {{ h.reading }}</span></div><div class="ex-hand-r">{{ h.meaning }}</div></div>
         {% endfor %}
     </div>
+    {{ deep(ex, 'c5', 'read') }}
     <div class="ex-sowhat"><b>So what for the stock</b>{{ ex.clock.so_what }}</div>
 </div>
 
@@ -305,6 +318,7 @@
 <div class="card ex-card" id="ex-c6">
     <div class="ex-q"><span class="ex-num">06</span><h2>The wiring diagram</h2></div>
     <div class="ex-ask">Which macro and geopolitical dials move this industry, through which channel, in which direction?</div>
+    {{ deep(ex, 'c6', 'story') }}
     <p class="ex-p">One row per dial. The arrow says what a <strong>rise</strong> in the dial does to this industry; the dots say how much it matters. Latest = the reading from our macro feed where the dial maps to one of its series.</p>
     <div class="table-wrap">
     <table class="ex-table">
@@ -322,6 +336,7 @@
         </tbody>
     </table>
     </div>
+    {{ deep(ex, 'c6', 'read') }}
     <div class="ex-sowhat"><b>So what for the stock</b>{{ ex.dials_so_what }}</div>
 </div>
 
@@ -329,6 +344,7 @@
 <div class="card ex-card" id="ex-c7">
     <div class="ex-q"><span class="ex-num">07</span><h2>Bottlenecks and key issues</h2></div>
     <div class="ex-ask">What stops it from growing faster, and what breaks it?</div>
+    {{ deep(ex, 'c7', 'story') }}
     <div class="table-wrap">
     <table class="ex-table">
         <thead><tr><th>Bottleneck</th><th>Why it bites</th><th>Severity</th></tr></thead>
@@ -339,6 +355,7 @@
         </tbody>
     </table>
     </div>
+    {{ deep(ex, 'c7', 'read') }}
     <div class="ex-sowhat"><b>So what for the stock</b>{{ ex.bottlenecks_so_what }}</div>
 </div>
 
@@ -346,6 +363,7 @@
 <div class="card ex-card" id="ex-c8">
     <div class="ex-q"><span class="ex-num">08</span><h2>The rulebook</h2></div>
     <div class="ex-ask">Who regulates it, what rule is live, and which rule is coming?</div>
+    {{ deep(ex, 'c8', 'story') }}
     <div class="table-wrap">
     <table class="ex-table">
         <thead><tr><th>Regulator or rule</th><th>What it does</th><th>Why you care</th><th>Status</th></tr></thead>
@@ -356,6 +374,7 @@
         </tbody>
     </table>
     </div>
+    {{ deep(ex, 'c8', 'read') }}
     <div class="ex-cap">Dated regulatory events for this industry are on the Picks &amp; signals tab.</div>
 </div>
 
@@ -363,6 +382,7 @@
 <div class="card ex-card" id="ex-c9">
     <div class="ex-q"><span class="ex-num">09</span><h2>Porter's five forces</h2></div>
     <div class="ex-ask">Who keeps the profit: suppliers, buyers, rivals, new entrants, or substitutes?</div>
+    {{ deep(ex, 'c9', 'story') }}
     <p class="ex-p">Bigger area means <strong>more pressure on the company</strong>, so a smaller shape is the better business.</p>
     <div class="ex-twoup">
         <div>
@@ -392,6 +412,7 @@
             </table>
         </div>
     </div>
+    {{ deep(ex, 'c9', 'read') }}
     <div class="ex-sowhat"><b>So what for the stock</b>{{ ex.forces.so_what }}</div>
 </div>
 
@@ -399,7 +420,7 @@
 <div class="card ex-card" id="ex-c12">
     <div class="ex-q"><span class="ex-num">12</span><h2>Tell a friend</h2></div>
     <div class="ex-ask">The sixty-second version you can repeat without notes.</div>
-    <div class="ex-quote">{{ ex.tell_a_friend }}</div>
+    <div class="ex-quote">{% for para in ex.tell_a_friend | paragraphs %}<p>{{ para }}</p>{% endfor %}</div>
 </div>
 
 {# Notes from the written story (v1 trend bullets, dated) #}
@@ -567,6 +588,7 @@
 <div class="card ex-card" id="ex-c10">
     <div class="ex-q"><span class="ex-num">10</span><h2>The results-call cheat sheet</h2></div>
     <div class="ex-ask">The eight numbers to read every quarter, with what good looks like. Today = the median of this industry's listed names from their latest annual filings{% if detail.medians._as_of %} (to {{ detail.medians._as_of }}, {{ detail.medians._stocks }} stocks with filings){% endif %}.</div>
+    {{ deep(ex, 'c10', 'story') }}
     <div class="table-wrap">
     <table class="ex-table">
         <thead><tr><th>Number</th><th>What it tells you</th><th>What good looks like</th><th class="num">Today · industry median</th></tr></thead>
@@ -580,6 +602,7 @@
         </tbody>
     </table>
     </div>
+    {{ deep(ex, 'c10', 'read') }}
 </div>
 {% endif %}
 {% if narr and narr.segments %}
@@ -743,6 +766,7 @@
 <div class="card ex-card" id="ex-c11">
     <div class="ex-q"><span class="ex-num">11</span><h2>Cross-intelligence and the call</h2></div>
     <div class="ex-ask">What in other industries and in the news leads this one, by how long, and what is the call?</div>
+    {{ deep(ex, 'c11', 'story') }}
     <p class="ex-p">Each dot is a signal from outside the industry, placed by <strong>how far ahead it speaks</strong>. The further right, the earlier the warning. Hover a dot for the channel.</p>
     <svg viewBox="0 0 760 {{ exv.lead.h }}" width="100%" role="img" aria-label="Leading indicators placed by lead time in quarters" class="ex-svg">
         <g class="ex-mono" font-size="11">
@@ -760,6 +784,7 @@
             {% endfor %}
         </g>
     </svg>
+    {{ deep(ex, 'c11', 'read') }}
     <p class="ex-p"><strong>A simple rule for direction.</strong> {{ ex.rule.text }}</p>
     <div class="ex-rule3">
         {% for s in ex.rule.signs %}
