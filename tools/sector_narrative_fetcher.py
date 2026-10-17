@@ -54,36 +54,10 @@ SECTOR_INDUSTRY_MAP = {
     "Real Estate":             "Real Estate",
 }
 
-# Full 25-industry list (matches tools/classify_industries.INDUSTRIES_BY_SECTOR).
+# Every industry, in taxonomy order: derived from tools/classify_industries (one list, edited there).
 # Default unit of work going forward.
-INDUSTRY_LIST = [
-    # Energy
-    "Oil & Gas",
-    # Materials
-    "Cement", "Iron & Steel", "Chemicals & Specialty", "Mining & Minerals",
-    "Paper, Wood & Forest Products",
-    # Industrials
-    "Capital Goods & Industrial Machinery", "Logistics & Transport", "Aviation",
-    "Defence & Aerospace", "Construction & Engineering", "Industrial Services & Misc",
-    # Consumer Discretionary
-    "Automobiles", "Auto Components", "Hospitality & Hotels", "Retail",
-    "E-Commerce", "Consumer Durables",
-    # Consumer Staples
-    "FMCG", "Food & Beverages", "Personal Care & Household Products",
-    # Health Care
-    "Pharmaceuticals", "Hospitals & Diagnostics", "Medical Devices",
-    # Financials
-    "Banks", "NBFCs / Finance", "Asset Management", "Insurance",
-    "Capital Markets & Exchanges",
-    # IT
-    "IT Services & ITeS", "Software Products & SaaS",
-    # Communication Services
-    "Telecom", "Media & Entertainment",
-    # Utilities
-    "Power Generation", "Power T&D", "Gas Utilities",
-    # Real Estate
-    "Real Estate Developers", "REITs",
-]
+from tools.classify_industries import INDUSTRIES_BY_SECTOR as _BY_SECTOR  # noqa: E402
+INDUSTRY_LIST = [ind for inds in _BY_SECTOR.values() for ind in inds]
 
 
 PROMPT_TEMPLATE = """You are a sector analyst building a structured Indian-equity sector narrative for a one-person hedge fund's research cockpit. The output drives a UI page that anyone should grok in 90 seconds.

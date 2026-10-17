@@ -70,6 +70,7 @@ INDUSTRIES = [
     "Retail",
     "Software Products & SaaS",
     "Telecom",
+    "Textiles & Apparel",    # 2026-10-17 (tools/industry_review.py); sorts last, so no existing code moves
 ]
 INDUSTRY_CODES = {name: i for i, name in enumerate(sorted(INDUSTRIES), start=1)}
 
