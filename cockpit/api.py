@@ -820,7 +820,7 @@ def get_stock_lineage(sid):
 def get_price_series_extended(sid, days=365):
     """Extended price series with OHLCV + delivery % for technicals tab.
     `days` is a CALENDAR window ending at the stock's last price date (1M=31, 3M=92, 6M=183,
-    1Y=366, 3Y=1096), so a stock with a hole in its history shows the hole instead of
+    1Y=366, 3Y=1096, 5Y=1827, Max=36500), so a stock with a hole in its history shows the hole instead of
     stretching the window back years. NaN -> None so FastAPI's JSON encoder doesn't 500."""
     newest_first = db.rows(
         "SELECT date, open, high, low, close, volume, delivery_pct "
