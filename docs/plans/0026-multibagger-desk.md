@@ -234,3 +234,7 @@ Source: [research 0008 findings](../research/0008-multibagger-critique-findings.
   - **Pages:** `/multibagger/research` (list, sector filter) and `/multibagger/research/<sid>` (plain words, dated).
   - **Sectors:** hand-classified from the research in `output/mb_sectors.py`, because the vendor tags were wrong for about 1 in 6 names.
 - 2026-10-16, `mb_dossier` PARKED (Amit: "park it"). The deep research covers the same ground with cited numbers. Revisit it as a cheap quarterly refresh: re-read each new quarter and event against the dated research and flag what changed, from the Nov 2026 results season.
+- 2026-10-17, quality-dip test (Amit: "did we miss out on high quality beaten down stocks"): FAIL, pre-registered in `tools/mb_quality_dip.py` → [study](../studies/quality-dip-2026-10.md).
+  - The rule: 3-year ROCE ≥ 15 %, D/E ≤ 0.5, a profit, ≤ 60 % of the 3-year high, P/B at or below its own 3-year median.
+  - Results: 3x lift 1.00; halving 0.44× the pond's; the 30-name book −10.3 %/yr against the equal-weight pond in all 12 starts.
+  - No lens is added and the thesis is unchanged.
