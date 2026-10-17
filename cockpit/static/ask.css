@@ -109,6 +109,8 @@
 .ask-dots i:nth-child(2) { animation-delay: 0.15s; }
 .ask-dots i:nth-child(3) { animation-delay: 0.3s; }
 @keyframes ask-dot { 0%, 80%, 100% { opacity: 0.25; transform: scale(0.8); } 40% { opacity: 1; transform: none; } }
+.ask-status { flex-wrap: wrap; }
+.ask-note { flex-basis: 100%; font-style: italic; color: var(--text-muted); font-size: 11.5px; padding-left: 23px; overflow-wrap: anywhere; }
 .ask-err { font-size: 12px; color: var(--red); padding: 8px 4px; }
 
 .ask-empty { padding: 18px 4px; display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }

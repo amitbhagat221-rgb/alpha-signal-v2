@@ -114,3 +114,29 @@ def test_the_doc_type_does_not_collide_with_another_org_document():
             used |= set(re.findall(r'["\']org\.(\w+)["\']', p.read_text()))
     assert "assistant" not in used
     assert 'save_doc(conn, "assistant"' in (ROOT / "ask.py").read_text()
+
+
+def test_text_written_before_a_lookup_is_a_note_not_the_answer(monkeypatch, tmp_path):
+    """PONNIERODE 2026-10-17: "Need depreciation recent and announcements about capex." showed as the reply."""
+    import org_chat
+
+    def ev(e):
+        return json.dumps({"type": "stream_event", "event": e}) + "\n"
+    lines = [json.dumps({"type": "system", "subtype": "init", "session_id": "s1"}) + "\n",
+             ev({"type": "message_start"}),
+             ev({"type": "content_block_delta", "delta": {"type": "text_delta", "text": "Need depreciation."}}),
+             ev({"type": "content_block_start", "content_block": {"type": "tool_use", "name": "mcp__alpha-research__sql"}}),
+             ev({"type": "message_start"}),
+             ev({"type": "content_block_delta", "delta": {"type": "text_delta", "text": "Capex is small."}}),
+             json.dumps({"type": "result", "session_id": "s1", "usage": {}}) + "\n"]
+
+    class Proc:
+        stdout = iter(lines)
+        def poll(self): return 0
+        def wait(self, timeout=None): return 0
+    monkeypatch.setattr(org_chat.subprocess, "Popen", lambda *a, **k: Proc())
+    out = list(org_chat.cli_stream(["claude"], "{}", None, tmp_path, 60))
+    info = out[-1][1]
+    assert ("tool", "research.sql") in out
+    assert info["notes"] == ["Need depreciation."] and info["answer"].strip() == "Capex is small."
+    assert "Need depreciation." in info["text"]                       # the seat chat still sees everything

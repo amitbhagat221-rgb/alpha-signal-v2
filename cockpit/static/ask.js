@@ -20,7 +20,7 @@
     const S = {
         open: false, loaded: false, conv: null, fresh: false, messages: [], busy: false, pending: false,
         model: store.get('ask.model') || 'sonnet', models: { sonnet: 'Fast', opus: 'Deep' },
-        selection: '', status: '', poll: null,
+        selection: '', status: '', note: '', poll: null,
     };
     const $ = (sel, root) => (root || document).querySelector(sel);
     const esc = (t) => String(t == null ? '' : t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -108,24 +108,32 @@
             const tools = (m.tools || []).length
                 ? '<div class="ask-tools" title="' + esc(m.tools.join(', ')) + '">Looked up: ' +
                   esc([...new Set(m.tools)].slice(0, 6).join(', ')) + (new Set(m.tools).size > 6 ? '…' : '') + '</div>' : '';
-            el.innerHTML = tools + '<div class="ask-bub ask-md">' + toHtml(m, m.final !== false) + '</div>' +
+            el.innerHTML = tools + (m.text ? '<div class="ask-bub ask-md">' + toHtml(m, m.final !== false) + '</div>' : '') +
                 (m.final !== false && m.text ? '<div class="ask-meta">' + esc(when(m.at)) +
                  ' <button type="button" class="ask-link" data-act="copy">Copy</button></div>' : '');
         }
         return el;
     }
     function scroll() { msgs.scrollTop = msgs.scrollHeight; }
+    function statusNode() {          // "working" line: shown for as long as a turn runs, with the latest note
+        const st = document.createElement('div');
+        st.className = 'ask-status';
+        st.innerHTML = '<span class="ask-dots"><i></i><i></i><i></i></span><span class="ask-st"></span>';
+        $('.ask-st', st).textContent = S.status;
+        if (S.note) {
+            const n = document.createElement('div');
+            n.className = 'ask-note'; n.textContent = S.note.length > 220 ? S.note.slice(0, 220) + '…' : S.note;
+            st.appendChild(n);
+        }
+        return st;
+    }
     function render() {
         msgs.innerHTML = '';
         if (!S.messages.length && !S.pending) {
             msgs.appendChild(empty());
         }
         S.messages.forEach((m, i) => msgs.appendChild(msgNode(m, i)));
-        if (S.status) {
-            const st = document.createElement('div');
-            st.className = 'ask-status'; st.innerHTML = '<span class="ask-dots"><i></i><i></i><i></i></span>' + esc(S.status);
-            msgs.appendChild(st);
-        }
+        if (S.status) msgs.appendChild(statusNode());
         draw(); scroll();
     }
     function empty() {
@@ -238,7 +246,8 @@
             const i = S.messages.indexOf(reply), old = msgs.querySelector('[data-i="' + i + '"]');
             if (old) old.replaceWith(msgNode(reply, i)); else render();
             const st = $('.ask-status', msgs);
-            if (st) { if (S.status) st.lastChild.textContent = S.status; else st.remove(); }
+            if (st) st.remove();
+            if (S.status) msgs.appendChild(statusNode());
             if (msgs.scrollHeight - msgs.scrollTop - msgs.clientHeight < 160) scroll();
         };
         try {
@@ -265,8 +274,15 @@
                     if (!line.startsWith('data: ')) continue;
                     const ev = JSON.parse(line.slice(6));
                     if (ev.t === 'start') { S.conv = ev.conv; }
-                    else if (ev.t === 'delta') { ensure().text += ev.text; S.status = ''; paint(); }
-                    else if (ev.t === 'tool') { ensure().tools.push(ev.name); S.status = 'Looking up ' + ev.name + '…'; paint(true); }
+                    else if (ev.t === 'delta') {
+                        const m = ensure(); m.text += ev.text;
+                        S.status = m.text.trim() ? 'Writing…' : S.status; paint();
+                    } else if (ev.t === 'tool') {      // what was written before a lookup was a note, not the answer
+                        const m = ensure();
+                        if (m.text.trim()) S.note = m.text.trim();
+                        m.text = ''; m.tools.push(ev.name);
+                        S.status = 'Looking up ' + ev.name + '…'; paint(true);
+                    }
                     else if (ev.t === 'error') { const m = ensure(); m.text = m.text || ('*(no reply: ' + ev.error + ')*'); }
                 }
             }
@@ -274,7 +290,7 @@
             const m = ensure(); m.text = m.text || ('*(no reply: ' + e.message + ')*');
         }
         if (reply) { reply.final = true; reply.at = new Date().toISOString(); }
-        S.busy = false; S.status = '';
+        S.busy = false; S.status = ''; S.note = '';
         render();
     }
 

@@ -272,7 +272,9 @@ def _turn(role, message, session_id):
 def cli_stream(cmd, mcp_config, session_id, cwd, timeout):
     """Run one `claude -p` turn (cmd without its output flags) with `mcp_config` (JSON text) and
     stream it: yield ("delta", text) / ("tool", name) events, then ("end", info) with
-    {session_id, text, tools, error, usage, model}. Shared by the seat chat and the page assistant."""
+    {session_id, text, answer, notes, tools, error, usage, model}. Shared by the seat chat and the page assistant.
+    text is everything written; answer is only what came after the last tool call, and notes are the
+    pieces written before a tool call (the model thinking aloud between lookups)."""
     Path(cwd).mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile("w", suffix=".json", prefix="org_chat_", delete=False) as f:
         f.write(mcp_config)
@@ -284,7 +286,8 @@ def cli_stream(cmd, mcp_config, session_id, cwd, timeout):
     env.setdefault("HOME", str(Path.home()))
     proc = subprocess.Popen(cmd, cwd=cwd, env=env, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                             text=True, bufsize=1)
-    info = {"session_id": session_id, "text": "", "tools": [], "error": None, "usage": None, "model": None}
+    info = {"session_id": session_id, "text": "", "answer": "", "notes": [], "tools": [], "error": None,
+            "usage": None, "model": None}
     started = dt.datetime.now()
     try:
         for line in proc.stdout:
@@ -307,9 +310,13 @@ def cli_stream(cmd, mcp_config, session_id, cwd, timeout):
                 elif e.get("type") == "content_block_start" and (e.get("content_block") or {}).get("type") == "tool_use":
                     name = (e["content_block"].get("name") or "").replace("mcp__alpha-", "").replace("__", ".")
                     info["tools"].append(name)
+                    if info["answer"].strip():
+                        info["notes"].append(info["answer"].strip())
+                    info["answer"] = ""
                     yield "tool", name
                 elif e.get("type") == "content_block_delta" and (e.get("delta") or {}).get("type") == "text_delta":
                     info["text"] += e["delta"]["text"]
+                    info["answer"] += e["delta"]["text"]
                     yield "delta", e["delta"]["text"]
             elif t == "rate_limit_event":
                 org.note_subscription(ev.get("rate_limit_info"))
@@ -321,7 +328,7 @@ def cli_stream(cmd, mcp_config, session_id, cwd, timeout):
                 if ev.get("is_error"):
                     info["error"] = str(ev.get("result"))[:300]
                 elif not info["text"]:
-                    info["text"] = str(ev.get("result") or "")
+                    info["text"] = info["answer"] = str(ev.get("result") or "")
                     yield "delta", info["text"]
     finally:
         proc.wait(timeout=10) if proc.poll() is None else None

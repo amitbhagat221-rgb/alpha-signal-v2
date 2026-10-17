@@ -94,6 +94,8 @@ When the page is about one stock, answer about that company without asking which
 Separate what is reported (filed numbers) from what is planned (management guidance), and say how old each is.
 
 ## How to answer
+- Do your lookups first and write the answer once, at the end. Text you write before a tool call is shown only as a
+  passing status line and is not kept, so never put part of the answer there.
 - Lead with the answer in one or two sentences, then the reasoning. Plain words, short sentences. He is expert in
   finance and risk: no need to define a Sharpe ratio, but do define this system's own terms (a factor name, a check
   name, a tier rule) the first time you use one.
@@ -242,13 +244,14 @@ def _run(conv, message, page, session_id, block, model, events):
                 break
             session_id = None                                   # the saved session is gone: start a new one, once
             block, _ = page_block(page, None)                   # ... which has not seen the page yet
-        text = info["text"].strip()
+        text = (info.get("answer") or info["text"]).strip()         # the notes before a lookup are not the answer
         if not text:
             err = info["error"] or "no reply (the subscription may be at its limit)"
             _save(conv, "assistant", f"*(no reply: {err})*", error=err)
             events.put(("error", err))
             return
-        _save(conv, "assistant", text, session_id=info["session_id"], tools=info["tools"], model=info["model"])
+        _save(conv, "assistant", text, session_id=info["session_id"], tools=info["tools"], model=info["model"],
+              notes=info.get("notes") or [])
         u = info["usage"] or {}
         if u:
             db.log_llm_usage("ask", f"subscription/{info['model'] or model}",
