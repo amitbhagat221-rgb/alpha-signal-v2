@@ -1193,6 +1193,22 @@ CREATE TABLE IF NOT EXISTS news_theme_history (
     PRIMARY KEY (theme_id, as_of)
 );
 
+-- Dated archive of every editorial and computed part of the Markets / macro page and the industry explainers
+-- (plan 0028). Append-only: nothing is overwritten. A changed payload for the same date becomes a new version;
+-- the cockpit's "As of" filter reads the latest version on or before the chosen date (output/desk_archive.py).
+CREATE TABLE IF NOT EXISTS desk_snapshots (
+    snapshot_date   TEXT NOT NULL,              -- the date the content describes (YYYY-MM-DD)
+    part            TEXT NOT NULL,              -- brief | hotspots | chapter | industry_explainer | regime | house_view | playbook | external
+    item            TEXT NOT NULL DEFAULT '',   -- chapter id, industry name, ...; '' for page-level parts
+    version         INTEGER NOT NULL DEFAULT 1,
+    payload         TEXT NOT NULL,              -- JSON
+    sources         TEXT,                       -- JSON array of {title, url}
+    method          TEXT NOT NULL DEFAULT 'live' CHECK(method IN ('live', 'retrospective', 'manual')),
+    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (snapshot_date, part, item, version)
+);
+CREATE INDEX IF NOT EXISTS idx_desk_snapshots_part ON desk_snapshots(part, item, snapshot_date);
+
 -- The daily edition: the three things that matter today.
 CREATE TABLE IF NOT EXISTS news_today (
     day             TEXT PRIMARY KEY,

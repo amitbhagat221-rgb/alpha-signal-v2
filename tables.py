@@ -373,6 +373,10 @@ TABLES = {
         "kind": "COMPUTED", "domain": "News & Sentiment", "date_col": "assigned_on",
         "description": "Which theme each headline was filed under by the daily edition (NULL = read, fits no theme).",
     },
+    "desk_snapshots": {
+        "kind": "COMPUTED", "domain": "News & Sentiment", "date_col": "snapshot_date",
+        "description": "Append-only dated archive of every part of the Markets / macro page (brief, hot spots, chapters, regime, house view, playbooks, external readings) and of the industry explainers; the cockpit's As-of filter reads it.",
+    },
     "news_theme_history": {
         "kind": "COMPUTED", "domain": "News & Sentiment", "date_col": "as_of",
         "description": "One row per theme-note rewrite: the timeline shown on the theme page.",

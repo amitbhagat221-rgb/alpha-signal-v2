@@ -374,6 +374,9 @@ def save_explainer(industry, ex):
         payload["explainer_generated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         if usage:
             payload["explainer_usage"] = usage
+        # every version is also kept in the dated archive (plan 0028): sector_metadata holds the current one only
+        from output import desk_archive
+        desk_archive.save("industry_explainer", ex, payload["explainer_generated_at"][:10], item=industry, method="manual", conn=conn)
         if row:
             conn.execute("UPDATE sector_metadata SET payload = ? WHERE sector = ? AND source = 'auto'",
                          [json.dumps(payload, ensure_ascii=False), industry])

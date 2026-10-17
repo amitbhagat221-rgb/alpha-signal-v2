@@ -43,6 +43,7 @@ RETIRED = {
     "news_theme_articles": "kept as-is: plan 0021 headline-to-theme links",
     "news_theme_history": "kept as-is: plan 0021 theme timeline",
     "news_today": "kept as-is: plan 0021 daily edition",
+    "desk_snapshots": "kept as-is: plan 0028 dated archive of the Markets / macro page and industry explainers",
     "news_week": "kept as-is: plan 0021 weekly edition",
     "mcp_calls": "kept as-is: plan 0016 MCP audit log (Ops)",
     "market_holidays": "kept as-is: plan 0022 exchange holiday list (reference, places paper-book entry days)",
