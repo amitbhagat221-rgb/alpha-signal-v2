@@ -17,10 +17,11 @@
     <span class="mb-sub">{{ r.name or r.sid }}</span><span>{{ tier_pill(r.cap_tier) }}{% if status %} {{ status_pill(r.status) }}{% endif %}</span></div>{% endmacro %}
 
 {# the five thesis parts as small bars (within-pond percentile, 0-100) #}
-{% macro parts_bars(parts, compact=False) %}
-<div class="mb-parts{{ ' compact' if compact }}" role="img" aria-label="Thesis parts, percentile within the pond: {% for p in parts %}{{ p.label }} {{ p.pct if p.pct is not none else 'n/a' }}{{ ', ' if not loop.last }}{% endfor %}">
+{% macro parts_bars(parts, compact=False, values=False) %}
+<div class="mb-parts{{ ' compact' if compact }}{{ ' valued' if values }}" role="img" aria-label="Thesis parts, percentile within the pond: {% for p in parts %}{{ p.label }} {{ p.pct if p.pct is not none else 'n/a' }}{{ ', ' if not loop.last }}{% endfor %}">
     {% for p in parts %}
     <div class="mb-part hover-tip" tabindex="0">
+        {% if values %}<span class="mb-part-val mono">{{ p.pct if p.pct is not none else '–' }}</span>{% endif %}
         <span class="mb-part-bar"><i style="height: {{ p.pct if p.pct is not none else 0 }}%"></i></span>
         <span class="mb-part-lab">{{ p.label }}</span>
         <span class="tooltip-popover" role="tooltip">{{ p.label }}: percentile {{ p.pct if p.pct is not none else 'n/a' }} within the pond</span>
@@ -63,39 +64,82 @@
 {# the flags of a name (review prompts, ADR 0073: they do not cut a name) #}
 {% macro flag_pills(flags) %}{% for f in flags %}{{ tipped_pill(f.text, 'As of ' ~ (f.as_of|short_date), f.tone) }} {% endfor %}{% endmacro %}
 
-{# The football field. f = cockpit.multibagger._field(). large=True adds the value column and the basis list.
-   One precision for every number in the field (f.dec); the axis min / max print under the tracks. #}
-{% macro football(f, large=False) %}
+{# The compact football field (the Valuation list, the stock overview). f = cockpit.multibagger._field().
+   One precision for every number in the field (f.dec); round tick values print under the tracks. #}
+{% macro football(f, implied=True) %}
 {% if f and f.axis %}
 {% set clipped = f.methods|selectattr('clipped')|list %}
-{% if f.implied_growth_pct is not none %}<div class="mb-ff-foot">{{ tipped('reverse DCF: price implies ' ~ f.implied_growth_pct|pct(1) ~ '/yr growth, fading to year 10', f.reverse_basis, 'mono') }}</div>{% endif %}
-<div class="mb-ff{{ ' large' if large }}">
-    {% for m in f.methods if m.ok or large %}
-    <div class="mb-ff-row{{ ' na' if not m.ok }}{{ '' if large else ' hover-tip' }}"{% if not large %} tabindex="0"{% endif %}>
+<div class="mb-ff">
+    {% for m in f.methods if m.ok %}
+    <div class="mb-ff-row hover-tip" tabindex="0">
         <span class="mb-ff-lab">{{ m.label }}</span>
         <span class="mb-ff-track">
+            {% for t in f.axis.ticks %}<i class="mb-ff-tick" style="left: {{ t.at }}%"></i>{% endfor %}
+            <i class="mb-ff-bar{{ ' clipped' if m.clipped }}" style="left: {{ m.left }}%; width: {{ m.width }}%"></i><i class="mb-ff-mid" style="left: {{ m.mid_at }}%"></i>
+            <i class="mb-ff-px" style="left: {{ f.axis.price_at }}%"></i>
+        </span>
+        <span class="tooltip-popover" role="tooltip"><b>{{ m.label }}:</b> {{ rs(m.low, f.dec) }} &ndash; {{ rs(m.high, f.dec) }}, mid {{ rs(m.mid, f.dec) }}</span>
+    </div>
+    {% endfor %}
+    <div class="mb-ff-axis"><span></span><span class="mb-ff-ticks mono">{% for t in f.axis.ticks %}<span style="left: {{ t.at }}%">{{ rs(t.v, f.dec) }}</span>{% endfor %}</span></div>
+</div>
+<div class="mb-ff-foot">
+    <span class="mb-ff-key"><i class="mb-ff-px static"></i> price {{ rs(f.price, f.dec) }}</span>
+    <span class="mb-ff-key"><i class="mb-ff-mid static"></i> middle of the range</span>
+    {% if clipped %}<span class="mb-ff-key">&rsaquo; runs past the scale</span>{% endif %}
+    {{ discount_text(f) }}
+    {% if implied and f.implied_growth_pct is not none %}{{ tipped('The price implies ' ~ f.implied_growth_pct|pct(1) ~ ' a year of growth (reverse DCF)', f.reverse_basis or '', 'mb-tip') }}{% endif %}
+</div>
+{% else %}
+<div class="mb-empty">Valuation not computed yet{% if f %} for this name ({{ f.as_of|short_date }} rows have no usable method){% endif %}. It is built for the candidates and held names, and shows here once it has run.</div>
+{% endif %}
+{% endmacro %}
+
+{# "The price is 4 % below the middle of the methods (₹198)" in plain words, green when below #}
+{% macro discount_text(f) %}{% if f and f.discount_pct is not none %}<span class="{{ f.discount_pct|tone(pos='score-red', neg='score-green') }}">The price is <span class="mono">{{ f.discount_pct|abs|pct(0) }}</span> {{ 'below' if f.discount_pct < 0 else 'above' }} the middle of the methods ({{ rs(f.median_mid, f.dec) }})</span>{% endif %}{% endmacro %}
+
+{# The full football field on the Valuation subpage: methods in groups, each with a plain-words line, a scale
+   with round ticks and the price flagged on it, the computed basis folded away. groups = _valuation_tab(). #}
+{% macro field_full(f, groups) %}
+{% if f and f.axis %}
+<div class="mbf" role="table" aria-label="Value range per method, rupees per share">
+    <div class="mbf-row mbf-scale" role="row">
+        <span class="mbf-lab u-muted-11" role="columnheader">Method</span>
+        <span class="mbf-track mbf-ticklabs mono" role="columnheader">
+            {% for t in f.axis.ticks %}<span style="left: {{ t.at }}%">{{ rs(t.v, f.dec) }}</span>{% endfor %}
+            <span class="mbf-pxflag" style="left: {{ f.axis.price_at }}%">price {{ rs(f.price, f.dec) }}</span>
+        </span>
+        <span class="mbf-val u-muted-11" role="columnheader">Low &ndash; high</span>
+    </div>
+    {% for g in groups %}
+    <div class="mbf-group" role="row"><span role="cell">{{ g.title }}</span></div>
+    {% for m in g.methods %}
+    <div class="mbf-row{{ ' na' if not m.ok }}" role="row">
+        <span class="mbf-lab" role="rowheader"><b>{{ m.label }}</b><span class="mbf-plain">{{ m.plain }}</span></span>
+        <span class="mbf-track" role="cell">
+            {% for t in f.axis.ticks %}<i class="mb-ff-tick" style="left: {{ t.at }}%"></i>{% endfor %}
             {% if m.ok %}<i class="mb-ff-bar{{ ' clipped' if m.clipped }}" style="left: {{ m.left }}%; width: {{ m.width }}%"></i><i class="mb-ff-mid" style="left: {{ m.mid_at }}%"></i>{% endif %}
             <i class="mb-ff-px" style="left: {{ f.axis.price_at }}%"></i>
         </span>
-        {% if large %}<span class="mb-ff-val mono">{% if m.ok %}{{ rs(m.low, f.dec) }} &ndash; {{ rs(m.high, f.dec) }}<span class="u-muted-11"> mid {{ rs(m.mid, f.dec) }}</span>{% else %}n/a{% endif %}</span>
-        {% else %}<span class="tooltip-popover" role="tooltip"><b>{{ m.label }}.</b> {{ m.basis }}</span>{% endif %}
+        <span class="mbf-val" role="cell">{% if m.ok %}<span class="mono">{{ rs(m.low, f.dec) }} &ndash; {{ rs(m.high, f.dec) }}</span>
+            <span class="mbf-mid">middle <span class="mono">{{ rs(m.mid, f.dec) }}</span></span>{% else %}<span class="u-muted-11">not available</span>{% endif %}</span>
     </div>
     {% endfor %}
-    <div class="mb-ff-axis"><span></span><span class="mb-ff-axisv mono"><span>{{ rs(f.axis.lo, f.dec) }}</span><span>{{ rs(f.axis.hi, f.dec) }}</span></span>{% if large %}<span></span>{% endif %}</div>
+    {% endfor %}
 </div>
 <div class="mb-ff-foot">
-    <span class="mb-ff-key mono"><i class="mb-ff-px static"></i> price {{ rs(f.price, f.dec) }}</span>
-    <span class="mb-ff-key"><i class="mb-ff-mid static"></i> method mid</span>
-    {% if clipped %}<span class="mb-ff-key">&rsaquo; runs past the axis</span>{% endif %}
-    {% if f.discount_pct is not none %}<span class="mono {{ f.discount_pct|tone(pos='score-red', neg='score-green') }}">price {{ f.discount_pct|pct(0, signed=True) }} vs the median method mid ({{ rs(f.median_mid, f.dec) }})</span>{% endif %}
-    <span class="u-muted-11">valuation as of {{ f.as_of|short_date }} &middot; &#8377; per share</span>
+    <span class="mb-ff-key"><i class="mb-ff-px static"></i> today's price</span>
+    <span class="mb-ff-key"><i class="mb-ff-mid static"></i> middle of each range</span>
+    {% if f.methods|selectattr('clipped')|list %}<span class="mb-ff-key">&rsaquo; the range runs past the scale</span>{% endif %}
+    <span>&#8377; per share, as of {{ f.as_of|short_date }}</span>
 </div>
-{% if large %}
-<dl class="mb-basis">
-    {% if f.reverse_basis %}<dt>Reverse DCF</dt><dd>{{ f.reverse_basis }}</dd>{% endif %}
-    {% for m in f.methods %}<dt>{{ m.label }}</dt><dd>{{ m.basis }}</dd>{% endfor %}
-</dl>
-{% endif %}
+<details class="mbf-calc">
+    <summary>How each range was calculated</summary>
+    <dl class="mb-basis">
+        {% if f.reverse_basis %}<dt>Reverse DCF</dt><dd>{{ f.reverse_basis }}</dd>{% endif %}
+        {% for m in f.methods %}<dt>{{ m.label }}</dt><dd>{{ m.basis }}</dd>{% endfor %}
+    </dl>
+</details>
 {% else %}
 <div class="mb-empty">Valuation not computed yet{% if f %} for this name ({{ f.as_of|short_date }} rows have no usable method){% endif %}. It is built for the candidates and held names, and shows here once it has run.</div>
 {% endif %}

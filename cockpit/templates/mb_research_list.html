@@ -41,11 +41,11 @@
         <tr x-show="!sector || sector === '{{ r.sector or '' }}'">
             <td class="num mono">{% if r.research_rank %}<b>{{ r.research_rank }}</b>{% else %}&mdash;{% endif %}
                 <div class="u-muted-11">was {{ r.thesis_rank }}</div></td>
-            <td><a class="mb-name" href="/multibagger/research/{{ r.sid }}">{{ r.name }}</a>
+            <td><a class="mb-name" href="/multibagger/stock/{{ r.sid }}/research">{{ r.name }}</a>
                 <div class="mb-sub mono">{{ r.ticker }}</div></td>
             <td>{{ r.sector or '&mdash;'|safe }}<div class="mb-sub">{{ r.sub_sector or '' }}</div></td>
             <td><span class="pill pill-{{ r.verdict_tone }}">{{ r.verdict_word }}</span>{% if r.borderline %}
-                <div><a class="pill pill-blue" href="/multibagger/research/{{ r.sid }}">Borderline: your call</a></div>{% endif %}</td>
+                <div><a class="pill pill-blue" href="/multibagger/stock/{{ r.sid }}/research">Borderline: your call</a></div>{% endif %}</td>
             <td><span class="pill pill-{{ r.case_tone }}">{{ r.case_word }}</span></td>
             <td class="mono">{{ r.as_of_date|short_date if r.as_of_date else '&mdash;'|safe }}</td>
             <td>{% if r.status %}{{ status_pill(r.status) }}{% endif %}</td>

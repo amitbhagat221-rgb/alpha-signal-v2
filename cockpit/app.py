@@ -11,7 +11,7 @@ import datetime as dt
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exception_handlers import http_exception_handler
 from starlette.exceptions import HTTPException as StarletteHTTPException
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.gzip import GZipMiddleware
 
@@ -106,6 +106,22 @@ def _sentences(text, max_slides=5):
 
 templates.env.filters["slidify"] = _slidify
 templates.env.filters["sentences"] = _sentences
+
+
+def _markdown(text):
+    """Report text → HTML (CommonMark + tables). Raw HTML in the text stays escaped (research text comes from an
+    agent and the web); a citation "[3]" links to the page's source #src-3."""
+    import re as _re
+    from markdown_it import MarkdownIt
+    from markupsafe import Markup
+    if not isinstance(text, str) or not text.strip():
+        return Markup("")
+    html = MarkdownIt("commonmark", {"html": False}).enable("table").render(text)
+    html = _re.sub(r"\[(\d{1,3})\](?![^<]*</a>)", r'<a class="mb-cite" href="#src-\1">[\1]</a>', html)
+    return Markup(html)
+
+
+templates.env.filters["markdown"] = _markdown
 
 
 # ── Page Routes ──
@@ -272,26 +288,37 @@ def multibagger_research_list(request: Request):
     return templates.TemplateResponse(request, "mb_research_list.html", {"page": "multibagger", "d": multibagger.research_list()})
 
 
-@app.get("/multibagger/research/{sid}", response_class=HTMLResponse)
-def multibagger_research(request: Request, sid: str):
-    """One stock's deep research, dated, in plain words."""
-    d = multibagger.research_page(sid)
-    if d is None:
-        return templates.TemplateResponse(request, "notfound.html", {
-            "page": "multibagger", "heading": "No research for this stock",
-            "message": f"{sid} has not been researched. Open a name from the research list."}, status_code=404)
-    return templates.TemplateResponse(request, "mb_research.html", {"page": "multibagger", "d": d})
+@app.get("/multibagger/research/{sid}")
+def multibagger_research(sid: str):
+    """Retired 2026-10-17: the research is a subpage of the stock page now."""
+    return RedirectResponse(f"/multibagger/stock/{sid}/research", status_code=301)
 
 
-@app.get("/multibagger/stock/{sid}", response_class=HTMLResponse)
-def multibagger_stock(request: Request, sid: str):
-    """Stage 4, the deep dive on one name."""
-    d = multibagger.deep_dive(sid)
+def _mb_stock(request: Request, sid: str, tab: str):
+    try:
+        d = multibagger.stock_page(sid, tab)
+    except KeyError:
+        raise HTTPException(404, "unknown multibagger stock tab") from None
     if d is None:
         return templates.TemplateResponse(request, "notfound.html", {
             "page": "multibagger", "heading": "Stock not found",
             "message": f"No stock with the id {sid}. Open a name from the Funnel or Candidates tab."}, status_code=404)
-    return templates.TemplateResponse(request, "mb_stock.html", {"page": "multibagger", "d": d})
+    return templates.TemplateResponse(request, f"mb_stock_{tab}.html", {"page": "multibagger", "d": d, "h": d["head"],
+                                                                         "t": d["t"]})
+
+
+@app.get("/multibagger/stock/{sid}", response_class=HTMLResponse)
+def multibagger_stock(request: Request, sid: str):
+    """The multibagger stock page: an overview, with valuation, research, results, ownership, events, peers and
+    the book as subpages (/multibagger/stock/<sid>/<tab>)."""
+    return _mb_stock(request, sid, "overview")
+
+
+@app.get("/multibagger/stock/{sid}/{tab}", response_class=HTMLResponse)
+def multibagger_stock_tab(request: Request, sid: str, tab: str):
+    if tab == "overview":
+        return RedirectResponse(f"/multibagger/stock/{sid}", status_code=301)
+    return _mb_stock(request, sid, tab)
 
 
 @app.post("/api/multibagger/{action}")

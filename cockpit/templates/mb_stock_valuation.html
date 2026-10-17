@@ -1,0 +1,24 @@
+{# /multibagger/stock/<sid>/valuation — the full football field, methods grouped and explained. #}
+{% extends "_mb_stock_layout.html" %}
+{% from "_mb_macros.html" import field_full, discount_text, rs %}
+{% block sub %}
+{% set f = t.field %}
+{% if f and f.axis %}
+<div class="mbs-tiles mbs-tiles-top">
+    <div class="card mbs-tile"><div class="mbs-tile-k">Today's price</div><div class="mbs-tile-v mono">{{ rs(f.price, f.dec) }}</div>
+        <div class="u-muted-11">as of {{ f.as_of|short_date }}</div></div>
+    {% if f.median_mid is defined and f.median_mid is not none %}
+    <div class="card mbs-tile"><div class="mbs-tile-k">Middle of the methods</div><div class="mbs-tile-v mono">{{ rs(f.median_mid, f.dec) }}</div>
+        <div>{{ discount_text(f) }}</div></div>{% endif %}
+    {% if f.implied_growth_pct is not none %}
+    <div class="card mbs-tile"><div class="mbs-tile-k">Growth the price implies</div><div class="mbs-tile-v"><span class="mono">{{ f.implied_growth_pct|pct(1) }}</span> a year</div>
+        <div class="u-muted-11">for the next ten years, slowing to the long-run rate; from a reverse DCF</div></div>{% endif %}
+    <div class="card mbs-tile"><div class="mbs-tile-k">Methods with a value</div><div class="mbs-tile-v"><span class="mono">{{ f.n_methods }}</span> of {{ f.methods|length }}</div>
+        <div class="u-muted-11">the 52-week range is shown but left out of the middle</div></div>
+</div>
+{% endif %}
+<section class="card mb-sec">
+    <h2 class="mb-h">What each method says the stock is worth <span class="u-muted-11">&#8377; per share; the bar runs from low to high</span></h2>
+    {{ field_full(f, t.groups) }}
+</section>
+{% endblock %}

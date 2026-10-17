@@ -1,0 +1,27 @@
+{# /multibagger/stock/<sid>/peers — the same industry, by size. #}
+{% extends "_mb_stock_layout.html" %}
+{% from "_mb_macros.html" import mult %}
+{% from "_components.html" import tier_pill %}
+{% block sub %}
+{% set ps = t.peers %}
+<section class="card mb-sec">
+    <h2 class="mb-h">Peers <span class="u-muted-11">same industry{% if ps %}, {{ ps[0].peer_basis }}; fundamentals as of {{ ps[0].fundamentals_as_of|short_date }}{% endif %}</span></h2>
+    {% if t.failed %}<div class="mb-err">This section could not be built: {{ t.failed }}</div>{% endif %}
+    {% if ps %}
+    <div class="table-wrap"><table class="mb-tbl">
+        <thead><tr><th>Stock</th><th class="num">Market cap</th><th class="num">P/E</th><th class="num">P/B</th><th class="num">ROE %</th><th class="num">Revenue growth %</th><th class="num">6-month return %</th><th class="num">Thesis score /100</th></tr></thead>
+        <tbody>
+        {% for p in ps %}
+        <tr class="{{ 'mb-self' if p.is_self }}"><td><div class="mb-stock-cell"><a class="mb-name mono" href="/multibagger/stock/{{ p.sid }}">{{ p.ticker }}</a><span class="mb-sub">{{ p.name }}</span><span>{{ tier_pill(p.cap_tier) }}</span></div></td>
+            <td class="num mono">{{ p.market_cap_cr|crore }}</td><td class="num mono">{{ mult(p.pe) }}</td><td class="num mono">{{ mult(p.pb) }}</td>
+            <td class="num mono">{{ p.roe_pct|pct(1) }}</td><td class="num mono">{{ p.rev_growth_pct|pct(1) }}</td>
+            <td class="num mono {{ p.ret_6m_pct|tone }}">{{ p.ret_6m_pct|pct(1, signed=True) }}</td>
+            <td class="num mono">{% if p.thesis_score is not none %}{{ (p.thesis_score * 100)|round|int }}{% else %}&mdash;{% endif %}</td></tr>
+        {% endfor %}
+        </tbody>
+    </table></div>
+    {% if ps[0].as_of %}<div class="u-muted-11">6-month return as of {{ ps[0].as_of|short_date }}.</div>{% endif %}
+    {% for g in h.groups if g.kind == 'industry' %}<p><a class="mbs-more" href="{{ g.href }}">The whole {{ g.name }} industry on Sectors &rarr;</a></p>{% endfor %}
+    {% else %}<div class="mb-empty">No peers: the stock has no industry on record.</div>{% endif %}
+</section>
+{% endblock %}

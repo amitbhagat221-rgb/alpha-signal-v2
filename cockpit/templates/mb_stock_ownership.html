@@ -1,0 +1,45 @@
+{# /multibagger/stock/<sid>/ownership — shareholding per quarter, named holders in and out, government links. #}
+{% extends "_mb_stock_layout.html" %}
+{% from "_mb_macros.html" import tipped_pill %}
+{% block sub %}
+<section class="card mb-sec">
+    <h2 class="mb-h">Who owns it <span class="u-muted-11">% of equity per quarter-end filing; named holders above 1 % who came in or left</span></h2>
+    {% if t.failed_own %}<div class="mb-err">This section could not be built: {{ t.failed_own }}</div>{% endif %}
+    {% if t.own %}
+    <div class="table-wrap"><table class="mb-tbl">
+        <thead><tr><th>Quarter end</th><th class="num">Promoter %</th><th class="num">Pledged %</th><th class="num">Foreign %</th><th class="num">Domestic inst. %</th><th class="num">Mutual funds %</th><th class="num">Retail %</th><th class="num">Holders</th><th>Came in / left</th></tr></thead>
+        <tbody>
+        {% for r in t.own %}
+        <tr><td class="mono">{{ r.end_date|month_text }}</td>
+            <td class="num mono">{{ r.promoter_pct|pct(1) }}</td><td class="num mono">{{ r.pledge_pct|pct(1) }}</td>
+            <td class="num mono">{{ r.fii_pct|pct(1) }}</td><td class="num mono">{{ r.dii_pct|pct(1) }}</td>
+            <td class="num mono">{{ r.mf_pct|pct(1) }}</td><td class="num mono">{{ r.retail_pct|pct(1) }}</td>
+            <td class="num mono">{{ r.n_shareholders|count }}</td>
+            <td class="mb-holders">
+                {% for h2 in r.entered %}{{ tipped_pill(('★ ' ~ h2.investor ~ ' · ' if h2.investor else '') ~ '+ ' ~ h2.name, ('Known investor ' ~ h2.investor ~ '. ' if h2.investor else '') ~ 'Came in above 1 %', 'accent' if h2.investor else 'green', h2.pct|pct(1)) }} {% endfor %}
+                {% for h2 in r.exited %}{{ tipped_pill(('★ ' ~ h2.investor ~ ' · ' if h2.investor else '') ~ '− ' ~ h2.name, ('Known investor ' ~ h2.investor ~ '. ' if h2.investor else '') ~ 'Fell below 1 %', 'accent' if h2.investor else 'red', h2.pct|pct(1)) }} {% endfor %}
+            </td></tr>
+        {% endfor %}
+        </tbody>
+    </table></div>
+    <div class="u-muted-11">Known investors (★, purple) are the frozen list in config.SUPERINVESTORS. Holder names are as filed.</div>
+    {% else %}<div class="mb-empty">No shareholding filings on record for this name.</div>{% endif %}
+</section>
+
+<section class="card mb-sec">
+    <h2 class="mb-h">Government and political links <span class="u-muted-11">context for a human, never a score</span></h2>
+    {% if t.failed_govt %}<div class="mb-err">This section could not be built: {{ t.failed_govt }}</div>{% endif %}
+    {% set g = t.govt %}
+    {% if g %}
+    <h3 class="mb-h3">Government, PSU and LIC holders</h3>
+    {% if g.govt_holders %}<ul class="mb-list">{% for x in g.govt_holders %}<li>{{ x.holder_name }} <span class="mono">{{ x.pct|pct(2) }}</span> <span class="u-muted-11">quarter to {{ x.end_date|short_date }}{{ '' if x.in_latest_filing else ', not in the latest filing' }}</span></li>{% endfor %}</ul>
+    {% else %}<div class="mb-empty">No government holder on record.</div>{% endif %}
+    <h3 class="mb-h3">Orders from government buyers <span class="u-muted-11">{{ g.n_govt_orders }} matched by headline keyword{{ ', newest 20 shown' if g.n_govt_orders > 20 }}</span></h3>
+    {% if g.govt_orders %}<ul class="mb-list">{% for o in g.govt_orders %}<li><span class="mono">{{ o.date|short_date }}</span> {% if o.url %}<a href="{{ o.url }}" target="_blank" rel="noopener noreferrer">{{ o.headline }}</a>{% else %}{{ o.headline }}{% endif %} <span class="u-muted-11">matched {{ o.matched|join(', ') }}</span></li>{% endfor %}</ul>
+    {% else %}<div class="mb-empty">No order headline matched a government buyer.</div>{% endif %}
+    <h3 class="mb-h3">Electoral-bond donor</h3>
+    <div>{% if g.electoral_bond_donor.flag is none %}<span class="pill pill-muted">not loaded</span> <span class="u-muted-11">the Election Commission file has not been loaded, so this is unknown, not a no.</span>
+    {% else %}<span class="pill pill-{{ 'amber' if g.electoral_bond_donor.flag else 'muted' }}">{{ 'Donor' if g.electoral_bond_donor.flag else 'Not a donor' }}</span>{% endif %}</div>
+    {% else %}<div class="mb-empty">Government links could not be read.</div>{% endif %}
+</section>
+{% endblock %}

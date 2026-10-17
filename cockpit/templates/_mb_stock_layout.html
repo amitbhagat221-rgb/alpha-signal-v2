@@ -1,0 +1,42 @@
+{# The multibagger stock page and its subpages: /multibagger/stock/<sid>[/<tab>]. Data: cockpit/multibagger.py
+   stock_page() — h = the header (stock_head), t = the open subpage's data. Each mb_stock_<tab>.html extends this. #}
+{% extends "base.html" %}
+{% from "_mb_macros.html" import status_pill, flag_pills, tipped_pill %}
+{% from "_components.html" import tier_pill %}
+{% set st = h.stock %}
+{% block title %}{{ page_title(st.name ~ " · " ~ (h.tabs|selectattr(0, 'equalto', d.tab)|first)[1]) }}{% endblock %}
+
+{% block content %}
+<div x-data @mb-book-changed.window="location.reload()">
+<script src="/static/multibagger.js?v={{ asset_version('multibagger.js') }}"></script>
+<p class="mb-crumb"><a href="/multibagger">&larr; Multibagger desk</a> &middot; <a href="/multibagger/valuation">Valuation of the book</a> &middot; <a href="/multibagger/research">All research</a></p>
+
+<header class="mbs-head">
+    <div class="mbs-title-row">
+        <h1 class="mbs-name">{{ st.name }}</h1>
+        {% if h.book %}{{ status_pill(h.book.status) }}{% endif %}
+    </div>
+    <div class="mbs-meta">
+        <span class="mono">{{ st.ticker }}</span>
+        {{ tier_pill(st.cap_tier) }}
+        <span><span class="mono">{{ st.market_cap_cr|crore }}</span> market cap</span>
+        {% if h.thesis and h.thesis.thesis_score is not none %}<span class="mbs-score">Thesis <b class="mono">{{ (h.thesis.thesis_score * 100)|round|int }}</b>/100{% if h.thesis.thesis_rank is not none %}, #{{ h.thesis.thesis_rank|int }} in the pond{% endif %}</span>{% endif %}
+        {% if h.research %}{{ tipped_pill(h.research.word, h.research.verdict_reason, h.research.tone) }}{% endif %}
+        {{ flag_pills(h.flags) }}
+    </div>
+    <nav class="mbs-links" aria-label="Elsewhere in the cockpit">
+        <a class="mbs-link" href="/stocks/{{ st.sid }}">Stock page &rarr;</a>
+        {% for g in h.groups %}<a class="mbs-link" href="{{ g.href }}"><span class="mbs-link-k">{{ g.kind|capitalize }}</span> {{ g.name }} &rarr;</a>{% endfor %}
+        {% if not h.groups and (st.industry or st.sector) %}<span class="u-muted-11">{{ st.industry or st.sector }}</span>{% endif %}
+    </nav>
+</header>
+
+<nav class="tab-bar mbs-tabs" aria-label="{{ st.name }} subpages">
+    {% for key, label in h.tabs %}
+    <a class="tab-button tab-link{{ ' active' if key == d.tab }}" href="/multibagger/stock/{{ st.sid }}{{ '' if key == 'overview' else '/' ~ key }}"{% if key == d.tab %} aria-current="page"{% endif %}>{{ label }}</a>
+    {% endfor %}
+</nav>
+
+{% block sub %}{% endblock %}
+</div>
+{% endblock %}

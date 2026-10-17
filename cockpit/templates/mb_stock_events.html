@@ -1,0 +1,20 @@
+{# /multibagger/stock/<sid>/events — the last 12 months of filings, medium severity and up. #}
+{% extends "_mb_stock_layout.html" %}
+{% block sub %}
+<section class="card mb-sec">
+    <h2 class="mb-h">Events, last 12 months <span class="u-muted-11">medium severity and up{% if t.n_all > t.events|length %} ({{ t.events|length }} of {{ t.n_all }}){% endif %}; headlines as filed</span></h2>
+    {% if t.failed %}<div class="mb-err">This section could not be built: {{ t.failed }}</div>{% endif %}
+    {% if t.events %}
+    <div class="table-wrap"><table class="mb-tbl">
+        <thead><tr><th>Date</th><th>Category</th><th>Severity</th><th>Event</th></tr></thead>
+        <tbody>
+        {% for e in t.events %}
+        <tr><td class="mono">{{ e.date|short_date }}</td><td>{{ e.category|replace('_', ' ')|capitalize }}</td>
+            <td><span class="pill pill-{{ {'high': 'red', 'medium': 'amber', 'low': 'muted'}[e.severity] }}">{{ e.severity|capitalize }}</span></td>
+            <td class="mb-ev">{% if e.url %}<a href="{{ e.url }}" target="_blank" rel="noopener noreferrer">{{ e.headline }}</a>{% else %}{{ e.headline }}{% endif %}</td></tr>
+        {% endfor %}
+        </tbody>
+    </table></div>
+    {% else %}<div class="mb-empty">No medium or high severity events in the last 12 months.</div>{% endif %}
+</section>
+{% endblock %}

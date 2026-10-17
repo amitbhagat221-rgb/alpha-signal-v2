@@ -115,8 +115,9 @@ def seeded(tmp_path, monkeypatch):
     mb.clear_caches()
 
 
+STOCK_PAGES = ["/multibagger/stock/AAA" + ("" if k == "overview" else "/" + k) for k, _ in mb.STOCK_TABS]
 PAGES = ["/multibagger", "/partial/multibagger/funnel", "/partial/multibagger/candidates", "/partial/multibagger/held",
-         "/partial/multibagger/watch", "/multibagger/valuation", "/multibagger/stock/AAA"]
+         "/partial/multibagger/watch", "/multibagger/valuation", *STOCK_PAGES]
 
 
 def _visible(html):
@@ -149,11 +150,13 @@ def test_every_route_renders_with_empty_tables(empty):
     assert "No candidates yet" in empty.get("/multibagger/valuation").text
     d = empty.get("/multibagger/stock/AAA").text
     assert "Valuation not computed yet" in d and "No note yet" in d and "Not in the book" in d
-    assert "not loaded" in d                                         # the electoral-bond flag
+    assert "not loaded" in empty.get("/multibagger/stock/AAA/ownership").text      # the electoral-bond flag
 
 
 def test_unknown_stock_and_tab(empty):
     assert empty.get("/multibagger/stock/NOPE").status_code == 404
+    assert empty.get("/multibagger/stock/NOPE/valuation").status_code == 404
+    assert empty.get("/multibagger/stock/AAA/nope").status_code == 404
     assert empty.get("/partial/multibagger/nope").status_code == 404
     assert empty.post("/api/multibagger/nope", json={}).status_code == 404
 
@@ -229,17 +232,41 @@ def test_writes_need_a_login_and_are_refused_in_preview(seeded, monkeypatch):
     assert r.status_code == 403 and "read-only" in r.json()["error"]
 
 
-def test_deep_dive_sections_in_order(seeded):
+def test_stock_page_is_an_overview_with_subpages(seeded):
+    """Amit 2026-10-17: the deep dive is an overview plus real subpages, each with the same header, the subpage tabs
+    and links to the main stock page; each section lives on one subpage."""
     seeded.post("/api/multibagger/promote", json={"sid": "AAA", "thesis_line": "Castings recovery", "reason": "r"})
+    pages = {k: seeded.get(u).text for (k, _), u in zip(mb.STOCK_TABS, STOCK_PAGES)}
+    for k, html in pages.items():
+        assert 'href="/stocks/AAA"' in html and "Alpha Castings" in html, k
+        assert all(f'href="{u}"' in html for u in STOCK_PAGES), k                  # every subpage tab, on every page
+        assert html.count('class="tab-button tab-link active"') == 1, k            # one subpage tab is open
+    ov = pages["overview"]
+    assert "A castings maker turning the corner." in ov and "Margins roll over" in ov and "Single customer" in ov
+    assert "Castings recovery" in ov and "Full valuation" in ov and "Full research" in ov
+    assert "Indian Railways" in pages["ownership"] and "not loaded" in pages["ownership"]
+    assert "No shareholding filings on record" in pages["ownership"]
+    assert "Castings recovery" in pages["book"] and "add candidate" in pages["book"]
+    assert "Results, last" in pages["results"] and "Peers" in pages["peers"] and "Events, last 12 months" in pages["events"]
+    r = seeded.get("/multibagger/stock/AAA/overview", follow_redirects=False)
+    assert r.status_code == 301 and r.headers["location"] == "/multibagger/stock/AAA"
+
+
+def test_industry_and_sector_links_only_for_known_groups(seeded, monkeypatch):
+    from cockpit import api
+    monkeypatch.setattr(api, "get_group_list", lambda kind: {"industry": ["Castings"], "sector": []}[kind])
     html = seeded.get("/multibagger/stock/AAA").text
-    heads = ["1. Valuation football field", "2. The note", "3. Results", "4. Ownership", "5. Event timeline",
-             "6. Government and political links", "7. Peers", "8. Book status and log"]
-    pos = [html.index(h) for h in heads]
-    assert pos == sorted(pos)
-    assert "A castings maker turning the corner." in html and "Margins roll over" in html and "Single customer" in html
-    assert "Indian Railways" in html and 'href="/stocks/AAA"' in html and "not loaded" in html
-    assert "Castings recovery" in html and "add candidate" in html
-    assert "No shareholding filings on record" in html
+    assert 'href="/sectors?industry=Castings#per-sector"' in html
+    assert "/sectors?sector=" not in html                                  # Industrials is not a known sector here
+
+
+def test_research_report_renders_as_text_with_linked_citations():
+    from cockpit.app import _markdown
+    html = str(_markdown("## 1. Verdict\n\n- **Flag.** Sales rose [1] and fell [12].\n\n<script>x()</script>"))
+    assert "<h2>1. Verdict</h2>" in html and "<strong>Flag.</strong>" in html and "<li>" in html
+    assert '<a class="mb-cite" href="#src-1">[1]</a>' in html and 'href="#src-12"' in html
+    assert "<script>" not in html and "&lt;script&gt;" in html                 # raw HTML from the report stays text
+    assert str(_markdown(None)) == ""
 
 
 def test_football_geometry():
@@ -272,7 +299,7 @@ def test_tab_counts_never_blank_and_fields_print_their_axis(seeded):
         html = seeded.get(f"/partial/multibagger/{tab}").text
         assert 'data-max-book="30"' in html and 'data-n-book="1"' in html, tab
     val = seeded.get("/multibagger/valuation").text
-    assert "mb-ff-axisv" in val and "₹80 &ndash;" not in val             # axis line; no mixed precision
+    assert "mb-ff-ticks" in val and "₹80.0" not in val and "₹80 &ndash; ₹130" in val   # ticks; one precision per field
     assert seeded.get("/multibagger/stock/AAA").text.count("Grade C") == 0
     assert seeded.get("/partial/multibagger/funnel").text.count("Grade C") == 1
 
@@ -324,19 +351,23 @@ def test_research_verdict_on_funnel_and_stock_page(seeded):
     funnel = seeded.get("/partial/multibagger/funnel").text
     assert "Research: flagged" in funnel and "5x plausible" in funnel
     page = seeded.get("/multibagger/stock/AAA").text
-    assert "Deep research" in page and "Sales to a promoter firm" in page and "Full research report text." in page
-    assert "Capacity doubles by FY28." in page and "Annual report FY26" in page
+    assert "Research: flagged" in page and "Sales to a promoter firm" in page and "Capacity doubles by FY28." in page
+    sub = seeded.get("/multibagger/stock/AAA/research").text
+    assert "Full research report text." in sub and "Annual report FY26" in sub and 'id="src-1"' in sub
     assert "Not researched yet" in seeded.get("/multibagger/stock/BBB").text
+    assert "Not researched yet" in seeded.get("/multibagger/stock/BBB/research").text
 
 
 def test_research_pages_plain_words(seeded):
     """Plan 0026 4b: the research list ranks by the overlay and links each researched name to a plain-words page."""
     page = seeded.get("/multibagger/research").text
-    assert "Research on the top 100" in page and "Some concerns" in page and "/multibagger/research/AAA" in page
+    assert "Research on the top 100" in page and "Some concerns" in page and "/multibagger/stock/AAA/research" in page
+    old = seeded.get("/multibagger/research/AAA", follow_redirects=False)                # the retired URL
+    assert old.status_code == 301 and old.headers["location"] == "/multibagger/stock/AAA/research"
     one = seeded.get("/multibagger/research/AAA").text
     assert "What worries us" in one and "Deals with promoter companies" in one and "Worth watching" in one
     assert "5x is possible" in one and "Capacity doubles by FY28." in one and "Full research report text." in one
-    assert seeded.get("/multibagger/research/BBB").status_code == 404
+    assert "Auditor" in one and "not found" in one                                      # the red-flag checks
 
 
 def test_research_borderline_mark(seeded, monkeypatch):
@@ -344,5 +375,5 @@ def test_research_borderline_mark(seeded, monkeypatch):
     from output import mb_research
     monkeypatch.setitem(mb_research.BORDERLINE, "AAA", "Rests on one judgement.")
     assert "Borderline: your call" in seeded.get("/multibagger/research").text
-    page = seeded.get("/multibagger/research/AAA").text
+    page = seeded.get("/multibagger/stock/AAA/research").text
     assert "Borderline: your call" in page and "Rests on one judgement." in page

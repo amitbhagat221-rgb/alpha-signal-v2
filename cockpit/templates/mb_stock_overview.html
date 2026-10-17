@@ -1,0 +1,109 @@
+{# /multibagger/stock/<sid> — the overview: score, valuation, research, the note, book, latest results. #}
+{% extends "_mb_stock_layout.html" %}
+{% from "_mb_macros.html" import football, discount_text, parts_bars, rs, act, status_pill, tipped_pill %}
+{% set base = "/multibagger/stock/" ~ h.stock.sid %}
+{% block sub %}
+<div class="mbs-grid">
+<div class="mbs-col">
+    <section class="card mbs-card">
+        <div class="mbs-card-head"><h2 class="mb-h">Thesis score</h2>
+            {% if h.thesis %}<span class="u-muted-11">run of {{ h.thesis.snapshot_date|short_date }}</span>{% endif %}</div>
+        {% if h.thesis and h.thesis.thesis_score is not none %}
+        <div class="mbs-score-row">
+            <div class="mbs-big"><span class="mono">{{ (h.thesis.thesis_score * 100)|round|int }}</span><span class="mbs-big-of">/100</span>
+                {% if h.thesis.thesis_rank is not none %}<div class="u-muted-11">#{{ h.thesis.thesis_rank|int }} in the pond</div>{% endif %}</div>
+            {{ parts_bars(h.parts, values=True) }}
+        </div>
+        <p class="u-muted-11">Each bar is the stock's percentile within the pond on one part of the thesis: small, cheap, price trend, business quality and industry tailwind.</p>
+        {% else %}<div class="mb-empty">Not in the latest thesis run's pond, or no run yet.</div>{% endif %}
+    </section>
+
+    <section class="card mbs-card">
+        <div class="mbs-card-head"><h2 class="mb-h">Valuation</h2><a class="mbs-more" href="{{ base }}/valuation">Full valuation &rarr;</a></div>
+        {% set f = t.field %}
+        {% if f and f.axis %}
+        <div class="mbs-tiles">
+            <div class="mbs-tile"><div class="mbs-tile-k">Price</div><div class="mbs-tile-v mono">{{ rs(f.price, f.dec) }}</div></div>
+            {% if f.median_mid is defined and f.median_mid is not none %}<div class="mbs-tile"><div class="mbs-tile-k">Middle of the methods</div><div class="mbs-tile-v mono">{{ rs(f.median_mid, f.dec) }}</div></div>{% endif %}
+            {% if f.implied_growth_pct is not none %}<div class="mbs-tile"><div class="mbs-tile-k">Growth the price implies</div><div class="mbs-tile-v"><span class="mono">{{ f.implied_growth_pct|pct(0) }}</span> a year</div></div>{% endif %}
+        </div>
+        {% endif %}
+        {{ football(f, implied=False) }}
+    </section>
+
+    <section class="card mbs-card">
+        <div class="mbs-card-head"><h2 class="mb-h">The note</h2><span class="u-muted-11">written by the model from the tables; it carries no numbers</span></div>
+        {% if t.failed_dossier %}<div class="mb-err">This section could not be built: {{ t.failed_dossier }}</div>{% endif %}
+        {% set n = t.dossier %}
+        {% if n %}
+        <p class="mb-line">{{ n.thesis_line }}</p>
+        <p>{{ n.thesis }}</p>
+        <div class="mb-cols">
+            {% for key, title in [('bull', 'Bull case'), ('bear', 'Bear case'), ('catalysts', 'Catalysts'), ('risks', 'Risks'), ('what_would_break_it', 'What would break it')] %}
+            <div><h3 class="mb-h3">{{ title }}</h3><ul class="mb-list">{% for x in n[key] %}<li>{{ x }}</li>{% else %}<li class="u-muted-11">none given</li>{% endfor %}</ul></div>
+            {% endfor %}
+        </div>
+        <div class="u-muted-11">As of the quarter to {{ n.as_of_date|short_date }}; written {{ n.created_at|short_date }}.</div>
+        {% else %}<div class="mb-empty">No note yet. It is written after a name becomes a candidate and refreshed each quarter.</div>{% endif %}
+    </section>
+</div>
+
+<div class="mbs-col">
+    <section class="card mbs-card">
+        <div class="mbs-card-head"><h2 class="mb-h">Research</h2>{% if h.research %}<a class="mbs-more" href="{{ base }}/research">Full research &rarr;</a>{% endif %}</div>
+        {% if h.research_err %}<div class="mb-err">This section could not be built: {{ h.research_err }}</div>{% endif %}
+        {% set r = h.research %}
+        {% if r %}
+        <p class="mbs-pills">{{ tipped_pill(r.word, r.verdict_reason, r.tone) }} {{ tipped_pill('5x case: ' ~ r.case, r.case_reason, 'accent' if r.case == 'strong' else 'muted') }}</p>
+        <p>{{ r.verdict_reason }}</p>
+        {% if r.red_flags %}
+        <h3 class="mb-h3">Top concerns</h3>
+        <ul class="mbs-flags">{% for f in r.red_flags[:3] %}<li><span class="pill pill-{{ {'high': 'red', 'medium': 'amber'}.get(f.severity, 'muted') }}">{{ {'high': 'Serious', 'medium': 'Worth watching', 'low': 'Minor'}.get(f.severity, f.severity) }}</span> {{ f.finding }}</li>{% endfor %}</ul>
+        {% if r.red_flags|length > 3 %}<a class="mbs-more" href="{{ base }}/research">{{ r.red_flags|length - 3 }} more &rarr;</a>{% endif %}
+        {% endif %}
+        <div class="u-muted-11">Researched {{ r.as_of|short_date }}.</div>
+        {% else %}<div class="mb-empty">Not researched yet. The top 100 is researched in waves (research 0011).</div>{% endif %}
+    </section>
+
+    <section class="card mbs-card">
+        <div class="mbs-card-head"><h2 class="mb-h">Book</h2><a class="mbs-more" href="{{ base }}/book">Book and log &rarr;</a></div>
+        {% set b = h.book %}
+        {% if b and b.status in ('candidate', 'held') %}
+        <p>{{ status_pill(b.status) }} since {{ b.since|short_date }}.</p>
+        <p>{{ b.thesis_line }}</p>
+        {% if b.entry_date %}<p class="mono">Bought {{ b.entry_date|short_date }}{% if b.entry_price %} at {{ rs(b.entry_price) }}{% endif %}</p>{% endif %}
+        <div class="mb-actions-row">{% if b.status == 'candidate' %}{{ act('hold', h.stock.sid, 'Hold', price=True, tone='go') }}{% endif %}{{ act('drop', h.stock.sid, 'Drop') }}</div>
+        {% elif b and b.status == 'dropped' %}
+        <p>{{ status_pill('dropped') }} on {{ b.since|short_date }}: {{ b.reason }}</p>
+        <div class="mb-actions-row">{{ act('promote', h.stock.sid, 'Promote to candidates', thesis=True) }}</div>
+        {% else %}
+        <p class="mb-empty">Not in the book.</p>
+        <div class="mb-actions-row">{{ act('promote', h.stock.sid, 'Promote to candidates', thesis=True) }}</div>
+        {% endif %}
+    </section>
+
+    <section class="card mbs-card">
+        <div class="mbs-card-head"><h2 class="mb-h">Latest results</h2><a class="mbs-more" href="{{ base }}/results">All quarters &rarr;</a></div>
+        {% set q = t.latest %}
+        {% if q %}
+        <div class="mbs-tiles">
+            <div class="mbs-tile"><div class="mbs-tile-k">Revenue, quarter to {{ q.end_date|month_text }}</div><div class="mbs-tile-v"><span class="mono">{{ '{:,.0f}'.format(q.revenue) if q.revenue is not none else '—' }}</span> <span class="u-muted-11">&#8377; Cr</span></div>
+                <div><span class="mono {{ q.rev_yoy_pct|tone }}">{{ q.rev_yoy_pct|pct(1, signed=True) }}</span> <span class="u-muted-11">on a year ago</span></div></div>
+            <div class="mbs-tile"><div class="mbs-tile-k">Profit</div><div class="mbs-tile-v"><span class="mono">{{ '{:,.0f}'.format(q.pat) if q.pat is not none else '—' }}</span> <span class="u-muted-11">&#8377; Cr</span></div>
+                <div><span class="mono {{ q.pat_yoy_pct|tone }}">{{ q.pat_yoy_pct|pct(1, signed=True) }}</span> <span class="u-muted-11">on a year ago</span></div></div>
+        </div>
+        <div class="mb-charts">
+            {% for key, title, unit in [('revenue', 'Revenue', '₹ Cr'), ('margin', 'Operating margin', '%')] %}
+            {% if t.charts[key] %}
+            <figure class="mb-chart"><figcaption>{{ title }} ({{ unit }}), last {{ t.charts[key]|length }} quarters</figcaption>
+                <div class="mb-bars">{% for b in t.charts[key] %}<span class="mb-bar hover-tip{{ ' neg' if b.neg }}" tabindex="0"><i style="height: {{ b.h }}%"></i><span class="tooltip-popover" role="tooltip">{{ b.end_date|month_text }}: {{ '%.1f'|format(b.value) if b.value is not none else 'n/a' }} {{ unit }}</span></span>{% endfor %}</div>
+                <div class="mb-bars-x"><span>{{ t.charts[key][0].end_date|month_text }}</span><span>{{ t.charts[key][-1].end_date|month_text }}</span></div>
+            </figure>
+            {% endif %}
+            {% endfor %}
+        </div>
+        {% else %}<div class="mb-empty">No quarterly results on file for this name.</div>{% endif %}
+    </section>
+</div>
+</div>
+{% endblock %}

@@ -18,7 +18,7 @@ Pages
   held()              the held names against NIFTY SMALLCAP 250
   watch()             merged event feed for every candidate and held name
   valuation_page()    football fields for every candidate and held name, sorted by price vs the field
-  deep_dive(sid)      stage 4: every section for one name
+  stock_page(sid, tab) stage 4: the stock page's header plus one subpage (STOCK_TABS)
 
 The tables are empty until Amit approves the first data run, so every function returns an empty shape
 (never raises on a missing table, column or row) and the template shows the empty state.
@@ -58,6 +58,29 @@ METHODS = [("ev_ebitda_band", "Own EV/EBITDA band"), ("ev_sales", "Own EV/Sales 
            ("peer_pe", "Peer P/E"), ("dcf", "DCF, bear to bull"), ("analyst", "Analyst targets"),
            ("range_52w", "52-week range")]
 VALUE_METHODS = {m for m, _ in METHODS if m != "range_52w"}     # the 52-week range is a price range, not a value
+# What each method asks, in plain words (the computed basis string stays one click away on the page).
+METHOD_PLAIN = {
+    "ev_ebitda_band": "What the whole business is worth at the enterprise-value-to-operating-profit multiples this stock "
+                      "has traded at itself (low = its cheapest tenth, mid = its usual, high = its richest tenth).",
+    "ev_sales": "The same, using enterprise value to sales: useful when profits swing.",
+    "pe_band": "Its own usual price-to-earnings range, applied to the last four quarters' earnings per share.",
+    "pb_band": "Its own usual price-to-book range, applied to today's book value per share.",
+    "peer_ev_ebitda": "What it would be worth at the operating-profit multiples of other companies of its size in its "
+                      "industry (low = the cheaper quarter of peers, high = the richer quarter).",
+    "peer_ev_sales": "The same peer comparison on sales.",
+    "peer_pe": "The same peer comparison on earnings.",
+    "dcf": "The cash it is expected to earn, discounted back to today, under a slow, a middle and a fast growth path.",
+    "analyst": "Sell-side price targets, shown only when at least three analysts cover the stock.",
+    "range_52w": "Where the price itself has traded over the last year. A price range, not a value: it is left out "
+                 "of the median.",
+}
+METHOD_GROUPS = [("Against its own history", ("ev_ebitda_band", "ev_sales", "pe_band", "pb_band")),
+                 ("Against similar companies", ("peer_ev_ebitda", "peer_ev_sales", "peer_pe")),
+                 ("From its cash flows", ("dcf",)),
+                 ("From the market", ("analyst", "range_52w"))]
+# The multibagger stock page and its subpages: /multibagger/stock/<sid>[/<key>], in tab order.
+STOCK_TABS = [("overview", "Overview"), ("valuation", "Valuation"), ("research", "Research"), ("results", "Results"),
+              ("ownership", "Ownership"), ("events", "Events"), ("peers", "Peers"), ("book", "Book")]
 PARTS = [("p_smallness", "Small"), ("p_cheapness", "Cheap"), ("p_price", "Price"),
          ("p_business", "Business"), ("p_tailwind", "Industry")]
 SEVERITIES = [("high", "High only"), ("medium", "Medium and up"), ("low", "All")]
@@ -435,6 +458,7 @@ def research_page(sid):
             "drivers": [d.get("driver") if isinstance(d, dict) else str(d) for d in f.get("growth_drivers") or []],
             "flags": flags, "breaks": f.get("what_would_break_it") or [], "catalysts": f.get("catalysts_12m") or [],
             "unknowns": f.get("unknowns") or [], "sources": f.get("sources") or [], "report": r["report"],
+            "checks": [(k.replace("_", " "), v) for k, v in (f.get("red_flag_checks") or {}).items()],
             "model": r.get("model"), "penalty": pen, "bonus": bon,
             "n_integrity": n["integrity"]["medium"] + n["integrity"]["low"],
             "n_business": n["business"]["medium"] + n["business"]["low"],
@@ -465,6 +489,22 @@ def research(sid):
 
 def _pos(x, lo, hi):
     return max(0.0, min(100.0, (x - lo) / (hi - lo) * 100)) if hi > lo else 50.0
+
+
+def _ticks(lo, hi, n=6):
+    """About n round values inside (lo, hi): steps of 1, 2, 2.5 or 5 times a power of ten."""
+    import math
+    if not hi > lo:
+        return []
+    raw = (hi - lo) / n
+    mag = 10 ** math.floor(math.log10(raw))
+    step = next(m * mag for m in (1, 2, 2.5, 5, 10) if m * mag >= raw)
+    v = math.ceil(lo / step) * step
+    out = []
+    while v < hi:
+        out.append(round(v, 6))
+        v += step
+    return out
 
 
 def _field(sid, rows):
@@ -500,7 +540,8 @@ def _field(sid, rows):
                 m["width"] = round(max(_pos(m["high"], lo, hi) - m["left"], 0.8), 1)
                 m["mid_at"] = round(_pos(m["mid"], lo, hi), 1)
                 m["clipped"] = m["high"] > hi
-        f["axis"] = {"lo": lo, "hi": hi, "price_at": round(_pos(price, lo, hi), 1)}
+        f["axis"] = {"lo": lo, "hi": hi, "price_at": round(_pos(price, lo, hi), 1),
+                     "ticks": [{"v": v, "at": round(_pos(v, lo, hi), 1)} for v in _ticks(lo, hi)]}
         f["dec"] = 0 if max([m["high"] for m in shown] + [price]) >= 100 else 1      # one precision per field
     return f
 
@@ -707,33 +748,102 @@ def _section(fn, *a):
         return None, f"{type(e).__name__}: {e}"
 
 
-def deep_dive(sid):
-    """Stage 4, every section for one name (None when the sid is not in the universe)."""
+# ── The stock page and its subpages (Amit 2026-10-17: subpages, links to the stock page and its sector) ────────
+
+def _group_links(st):
+    """Links to the stock's industry and sector on /sectors, only for groups that page knows."""
+    from urllib.parse import quote
+    from cockpit import api
+    out = []
+    for kind, val in (("industry", st.get("industry")), ("sector", st.get("sector"))):
+        try:
+            known = bool(val) and val in api.get_group_list(kind)
+        except Exception:            # noqa: BLE001 - a missing group list hides the link, the page still renders
+            known = False
+        if known:
+            out.append({"kind": kind, "name": val, "href": f"/sectors?{kind}={quote(val)}#per-sector"})
+    return out
+
+
+def stock_head(sid):
+    """What every subpage shows on top: the stock, its links, book status, thesis score, research verdict, flags."""
     st = _one("SELECT sid, ticker, name, sector, industry, cap_tier, market_cap_cr FROM stocks WHERE sid = ?", [sid])
     if not st:
         return None
-    from output import mb_deepdive
-    d = {"stock": st, "sections_failed": {}}
-    for key, fn, args in (
-            ("trend", mb_deepdive.results_trend, (sid, 12)), ("own", ownership, (sid,)),
-            ("peers", mb_deepdive.peers, (sid, 8)), ("govt", _watch().govt_links, (sid,)),
-            ("events", _events, (sid,)), ("dossier", dossier, (sid,)), ("research", research, (sid,))):
-        d[key], err = _section(fn, *args)
-        if err:
-            d["sections_failed"][key] = err
-    d["field"] = valuation_fields((sid,)).get(sid)
-    d["thesis"] = thesis_rows((sid,)).get(sid)
-    d["parts"] = parts_of(d["thesis"])
-    d["card"], err = _section(_card, sid)
-    d["flags"] = _flags(d["card"])
+    thesis = thesis_rows((sid,)).get(sid)
+    card, _ = _section(_card, sid)
+    res, res_err = _section(research, sid)
     b = _one("SELECT status, since, thesis_line, entry_date, entry_price, reason FROM multibagger_book WHERE sid = ?", [sid])
-    d["book"], d["log"] = (b or None), book_log(sid)
-    d["trend"] = d["trend"] or []
-    d["charts"] = {"revenue": _bars(d["trend"], "revenue"), "margin": _bars(d["trend"], "ebitda_margin_pct")}
-    d["n_book"], d["max_book"] = len(book_rows()), config.MB_THESIS["max_book"]
-    d["n_held"], d["max_held"] = sum(1 for r in book_rows() if r["status"] == "held"), config.MB_THESIS["max_held"]
-    d["events_shown"] = [e for e in (d["events"] or []) if e["sev_rank"] >= 1][:60]
-    return d
+    return {"stock": st, "groups": _group_links(st), "thesis": thesis, "parts": parts_of(thesis),
+            "flags": _flags(card), "book": b or None, "research": res, "research_err": res_err,
+            "tabs": STOCK_TABS}
+
+
+def _valuation_tab(sid):
+    f = valuation_fields((sid,)).get(sid)
+    groups = []
+    if f:
+        by = {m["key"]: m for m in f["methods"]}
+        for title, keys in METHOD_GROUPS:
+            groups.append({"title": title, "methods": [{**by[k], "plain": METHOD_PLAIN[k]} for k in keys if k in by]})
+    return {"field": f, "groups": groups}
+
+
+def _results_tab(sid):
+    from output import mb_deepdive
+    trend, err = _section(mb_deepdive.results_trend, sid, 12)
+    trend = trend or []
+    return {"trend": trend, "charts": {"revenue": _bars(trend, "revenue"), "margin": _bars(trend, "ebitda_margin_pct")},
+            "failed": err}
+
+
+def _ownership_tab(sid):
+    own, e1 = _section(ownership, sid)
+    govt, e2 = _section(_watch().govt_links, sid)
+    return {"own": own, "govt": govt, "failed_own": e1, "failed_govt": e2}
+
+
+def _events_tab(sid):
+    ev, err = _section(_events, sid)
+    return {"events": [e for e in (ev or []) if e["sev_rank"] >= 1][:60], "n_all": len(ev or []), "failed": err}
+
+
+def _peers_tab(sid):
+    from output import mb_deepdive
+    peers, err = _section(mb_deepdive.peers, sid, 8)
+    return {"peers": peers, "failed": err}
+
+
+def _book_tab(sid):
+    rows = book_rows()
+    return {"log": book_log(sid), "n_book": len(rows), "max_book": config.MB_THESIS["max_book"],
+            "n_held": sum(1 for r in rows if r["status"] == "held"), "max_held": config.MB_THESIS["max_held"]}
+
+
+def _overview_tab(sid):
+    note, err = _section(dossier, sid)
+    res = _results_tab(sid)
+    return {"field": valuation_fields((sid,)).get(sid), "dossier": note, "failed_dossier": err,
+            "charts": {k: v[-8:] for k, v in res["charts"].items()}, "latest": (res["trend"] or [None])[-1]}
+
+
+def _research_tab(sid):
+    return {"r": research_page(sid)}
+
+
+_TAB_DATA = {"overview": _overview_tab, "valuation": _valuation_tab, "research": _research_tab,
+             "results": _results_tab, "ownership": _ownership_tab, "events": _events_tab, "peers": _peers_tab,
+             "book": _book_tab}
+
+
+def stock_page(sid, tab="overview"):
+    """One subpage of the multibagger stock page: {head, tab, t}, or None when the sid is not in the universe.
+    Raises KeyError for an unknown tab."""
+    fn = _TAB_DATA[tab]
+    head = stock_head(sid)
+    if head is None:
+        return None
+    return {"head": head, "tab": tab, "t": fn(sid)}
 
 
 # ── Writes (output.mb_book owns the rules and the caps) ─────────────────────────────────────────

@@ -29,3 +29,4 @@ anthropic==0.86.0
 # vaderSentiment     # sentiment signal
 # xgboost            # D18 per-segment model
 # shap==0.51.0       # SHAP explanations (already installed)
+markdown-it-py>=3.0        # cockpit: the research report renders as formatted text

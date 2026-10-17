@@ -1,0 +1,29 @@
+{# /multibagger/stock/<sid>/book — the name's place in the 30/10 book, the actions and the decision log. #}
+{% extends "_mb_stock_layout.html" %}
+{% from "_mb_macros.html" import act, status_pill, rs %}
+{% block sub %}
+{% set b = h.book %}
+<section class="card mb-sec">
+    <h2 class="mb-h">Book status and log <span class="u-muted-11">{{ t.n_book }} of {{ t.max_book }} places used, {{ t.n_held }} of {{ t.max_held }} held</span></h2>
+    {% if b and b.status in ('candidate', 'held') %}
+    <p>{{ status_pill(b.status) }} since {{ b.since|short_date }}. <span class="mb-line">{{ b.thesis_line }}</span>
+        {% if b.entry_date %}<br><span class="mono">Bought {{ b.entry_date|short_date }}{% if b.entry_price %} at {{ rs(b.entry_price) }}{% endif %}</span>{% endif %}</p>
+    <div class="mb-actions-row">
+        {% if b.status == 'candidate' %}{{ act('hold', h.stock.sid, 'Hold', price=True, tone='go') }}{% endif %}
+        {{ act('drop', h.stock.sid, 'Drop') }}
+    </div>
+    {% elif b and b.status == 'dropped' %}
+    <p>{{ status_pill('dropped') }} on {{ b.since|short_date }}: {{ b.reason }}</p>
+    <div class="mb-actions-row">{{ act('promote', h.stock.sid, 'Promote to candidates', thesis=True) }}</div>
+    {% else %}
+    <p class="mb-empty">Not in the book.</p>
+    <div class="mb-actions-row">{{ act('promote', h.stock.sid, 'Promote to candidates', thesis=True) }}</div>
+    {% endif %}
+    {% if t.log %}
+    <div class="table-wrap"><table class="mb-tbl">
+        <thead><tr><th>When</th><th>Action</th><th>From</th><th>To</th><th>Reason</th><th>By</th></tr></thead>
+        <tbody>{% for l in t.log %}<tr><td class="mono">{{ l.ts|short_date }}</td><td>{{ l.action|replace('_', ' ') }}</td><td>{{ l.from_status or '—' }}</td><td>{{ l.to_status }}</td><td>{{ l.reason }}</td><td>{{ l.actor }}</td></tr>{% endfor %}</tbody>
+    </table></div>
+    {% else %}<div class="mb-empty">No decision logged for this name yet.</div>{% endif %}
+</section>
+{% endblock %}

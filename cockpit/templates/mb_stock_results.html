@@ -1,0 +1,33 @@
+{# /multibagger/stock/<sid>/results — the last 12 quarters. #}
+{% extends "_mb_stock_layout.html" %}
+{% block sub %}
+<section class="card mb-sec">
+    <h2 class="mb-h">Results, last {{ t.trend|length }} quarters <span class="u-muted-11">&#8377; crore; growth against the same quarter a year earlier</span></h2>
+    {% if t.failed %}<div class="mb-err">This section could not be built: {{ t.failed }}</div>{% endif %}
+    {% if t.trend %}
+    <div class="mb-charts">
+        {% for key, title, unit in [('revenue', 'Revenue', '₹ Cr'), ('margin', 'Operating margin', '%')] %}
+        <figure class="mb-chart"><figcaption>{{ title }} ({{ unit }})</figcaption>
+            <div class="mb-bars">{% for b in t.charts[key] %}<span class="mb-bar hover-tip{{ ' neg' if b.neg }}" tabindex="0"><i style="height: {{ b.h }}%"></i><span class="tooltip-popover" role="tooltip">{{ b.end_date|month_text }}: {{ '%.1f'|format(b.value) if b.value is not none else 'n/a' }} {{ unit }}</span></span>{% endfor %}</div>
+            <div class="mb-bars-x"><span>{{ t.charts[key][0].end_date|month_text }}</span><span>{{ t.charts[key][-1].end_date|month_text }}</span></div>
+        </figure>
+        {% endfor %}
+    </div>
+    <div class="table-wrap"><table class="mb-tbl">
+        <thead><tr><th>Quarter end</th><th class="num">Revenue &#8377; Cr</th><th class="num">Revenue YoY</th><th class="num">EBITDA &#8377; Cr</th><th class="num">Margin</th><th class="num">Profit &#8377; Cr</th><th class="num">Profit YoY</th><th>Source</th></tr></thead>
+        <tbody>
+        {% for r in t.trend|reverse %}
+        <tr><td class="mono">{{ r.end_date|month_text }}</td>
+            <td class="num mono">{{ '{:,.0f}'.format(r.revenue) if r.revenue is not none else '—' }}</td>
+            <td class="num mono {{ r.rev_yoy_pct|tone }}">{{ r.rev_yoy_pct|pct(1, signed=True) }}</td>
+            <td class="num mono">{{ '{:,.0f}'.format(r.ebitda) if r.ebitda is not none else '—' }}</td>
+            <td class="num mono">{{ r.ebitda_margin_pct|pct(1) }}</td>
+            <td class="num mono">{{ '{:,.0f}'.format(r.pat) if r.pat is not none else '—' }}</td>
+            <td class="num mono {{ r.pat_yoy_pct|tone }}">{{ r.pat_yoy_pct|pct(1, signed=True) }}</td>
+            <td class="u-muted-11">{{ r.source }}</td></tr>
+        {% endfor %}
+        </tbody>
+    </table></div>
+    {% else %}<div class="mb-empty">No quarterly results on file for this name.</div>{% endif %}
+</section>
+{% endblock %}
