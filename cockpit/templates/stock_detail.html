@@ -1121,6 +1121,8 @@
             <button class="tf-button" :class="{ active: tf === '6m' }" @click="tf = '6m'; initPriceChart('6m')">6M</button>
             <button class="tf-button" :class="{ active: tf === '1y' }" @click="tf = '1y'; initPriceChart('1y')">1Y</button>
             <button class="tf-button" :class="{ active: tf === '3y' }" @click="tf = '3y'; initPriceChart('3y')">3Y</button>
+            <button class="tf-button" :class="{ active: tf === '5y' }" @click="tf = '5y'; initPriceChart('5y')">5Y</button>
+            <button class="tf-button" :class="{ active: tf === 'max' }" @click="tf = 'max'; initPriceChart('max')">Max</button>
         </div>
     </div>
     <div style="position: relative; height: 320px; margin-top: 16px;">
@@ -1377,7 +1379,7 @@ const baseOpts = () => ({ responsive: true, maintainAspectRatio: false, scales: 
 const axisTitle = (text) => ({ display: true, text, font: { size: 10 } });
 
 async function initPriceChart(tf) {
-    const dayMap = { '1m': 31, '3m': 92, '6m': 183, '1y': 366, '3y': 1096 };   // calendar days
+    const dayMap = { '1m': 31, '3m': 92, '6m': 183, '1y': 366, '3y': 1096, '5y': 1827, 'max': 36500 };   // calendar days; max = all history
     const resp = await fetch(`/api/prices-extended/${SID}?days=${dayMap[tf] || 365}`);
     const rows = await resp.json();
     if (!rows.length) return;

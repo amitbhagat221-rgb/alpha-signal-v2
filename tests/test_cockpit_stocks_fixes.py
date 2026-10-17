@@ -24,3 +24,11 @@ def test_price_window_is_calendar_days(monkeypatch):
     monkeypatch.setattr(api.db, "rows", lambda sql, params=None: seen.setdefault("sql", sql) and seen.setdefault("params", params) and [])
     api.get_price_series_extended("X", days=366)
     assert "-366 days" in seen["params"] and "LIMIT" not in seen["sql"]
+
+
+def test_price_chart_offers_5y_and_max():
+    """Amit 2026-10-17: the stock page price chart has 5Y and Max beside 1M-3Y; Max asks for all history."""
+    import pathlib
+    t = (pathlib.Path(__file__).parent.parent / "cockpit" / "templates" / "stock_detail.html").read_text()
+    assert "initPriceChart('5y')\">5Y</button>" in t and "initPriceChart('max')\">Max</button>" in t
+    assert "'5y': 1827" in t and "'max': 36500" in t
