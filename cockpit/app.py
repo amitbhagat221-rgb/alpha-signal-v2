@@ -22,7 +22,7 @@ import config
 import views
 from cockpit import api
 from cockpit import explainer as explainer_view, book, macro, model, multibagger, pages, today, stocks as stocks_data
-from cockpit._shared import CachedStatic, COCKPIT_STATIC, COCKPIT_TEMPLATES, make_templates, nav_model, prewarm
+from cockpit._shared import CachedStatic, COCKPIT_STATIC, COCKPIT_TEMPLATES, add_ask_routes, make_templates, nav_model, prewarm
 
 app = FastAPI(title="Alpha Signal Cockpit")
 # Gzip every response > 1KB (the long pages are 100s of KB of HTML).
@@ -344,6 +344,7 @@ async def multibagger_write(request: Request, action: str):
     return {"ok": True, "action": action, "sid": sid}
 
 
+add_ask_routes(app)                          # the "Ask" panel on every page (ask.py)
 add_redirects(app, pages.REDIRECTS)
 
 

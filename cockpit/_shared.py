@@ -448,3 +448,42 @@ def prewarm(warmers, label="cache-warm", max_workers=4):
                 print(f"  [{label}] re-warm failed: {e}")
 
     threading.Thread(target=_loop, daemon=True, name=f"prewarm:{label}").start()
+
+
+def add_ask_routes(app):
+    """The "Ask" assistant's endpoints (ask.py), registered on both apps: the panel in base.html
+    is on every page of either cockpit. The assistant reads; it cannot change anything."""
+    from fastapi import Request
+    from fastapi.responses import JSONResponse, StreamingResponse
+
+    def call(fn, *a):
+        try:
+            return fn(*a)
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+
+    @app.get("/api/ask")
+    def api_ask_history(conv: str = None):
+        """One conversation: the most recent, or ?conv=."""
+        import ask
+        return call(ask.history, conv or None)
+
+    @app.get("/api/ask/conversations")
+    def api_ask_conversations():
+        import ask
+        return call(ask.conversations)
+
+    @app.post("/api/ask")
+    async def api_ask(request: Request):
+        """One turn: {"message", "page": {url, title, text, selection}, "conv", "new", "model"}.
+        The reply streams as server-sent events (start / delta / tool / done / error)."""
+        import ask
+        body = await request.json()
+        try:
+            gen = ask.stream(body.get("message"), body.get("page") or {}, body.get("conv") or None,
+                             bool(body.get("new")), body.get("model"))
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        # text/event-stream is exempt from the gzip middleware, so chunks reach the browser as they are written
+        return StreamingResponse(gen, media_type="text/event-stream",
+                                 headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})

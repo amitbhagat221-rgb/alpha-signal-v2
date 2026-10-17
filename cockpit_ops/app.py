@@ -24,7 +24,7 @@ from starlette.middleware.gzip import GZipMiddleware
 
 from webauth import LoginRequired
 from preview import PreviewReadOnly, add_redirects
-from cockpit._shared import CachedStatic, COCKPIT_STATIC, make_templates, nav_model, prewarm
+from cockpit._shared import CachedStatic, COCKPIT_STATIC, add_ask_routes, make_templates, nav_model, prewarm
 from cockpit_ops import api, pages
 
 OPS_DIR = Path(__file__).resolve().parent
@@ -440,6 +440,7 @@ def api_org_running():
     return {"running": api.org_running()}
 
 
+add_ask_routes(app)                          # the "Ask" panel on every page (ask.py)
 add_redirects(app, pages.REDIRECTS)
 
 
