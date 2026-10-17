@@ -568,3 +568,6 @@ body.macro-frame .wrap > article, body.macro-frame .learn-wrap { padding-top: 18
   body.macro-frame .rc { grid-template-columns: 14px 1fr; } body.macro-frame .rr-rule { grid-column: 2; }
   body.macro-frame .light-c, body.macro-frame .b-sub { overflow-wrap: anywhere; }
 }
+.hot-sum { margin: 8px 0 4px; font-size: 14px; }
+.hot-notes { margin: 4px 0 0; font-size: 13.5px; color: var(--text-secondary); } .hot-notes summary { cursor: pointer; color: var(--accent); }
+.hot-notes .hn { padding: 6px 0; border-top: 1px dashed var(--border); } .hot-notes .hn b { color: var(--text-primary); }

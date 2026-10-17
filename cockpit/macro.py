@@ -43,9 +43,9 @@ HOT_CLASS = {"escalating": "esc", "elevated": "elv", "easing": "eas", "calm": "c
 # what each part is, how often it changes and how it is made: the Start page's cadence table and the archive
 CADENCE = [
     ("brief", "Today's brief: lights, regime, unusual moves, risk radar", "Daily, about 11:15 IST", "computed from our database after the morning data run"),
-    ("brief_note", "The verdict, winners and losers, what's coming", "When written; flagged after a week", "written by hand, no figures in the prose"),
+    ("brief_note", "The verdict, winners and losers, what's coming", "Daily, with the brief", "written by the desk from the day's computed facts and news; no figures in the prose"),
     ("rbi", "The RBI's stance", "When the RBI acts", "set by hand from the decision"),
-    ("hotspots", "Hot spots and the heat matrix", "Weekly", "written and web-checked, sources linked"),
+    ("hotspots", "Hot spots", "Weekly", "re-rated by the desk from the week's news; the heat matrix moves with the monthly chapter"),
     ("regime", "Regime clock", "Daily, moving with each IIP and CPI release", "computed, point-in-time"),
     ("chapter", "Framework chapters, charts and history blocks", "Monthly", "written and web-checked; charts rebuilt with the version"),
     ("deeper", "The Deeper shelf", "Monthly", "rebuilt with the chapters"),
@@ -135,7 +135,8 @@ def page(as_of=None):
     note = None
     if note_row:
         age = (dt.date.fromisoformat(bdate) - dt.date.fromisoformat(note_row["snapshot_date"])).days
-        note = {**note_row["payload"], "date": note_row["snapshot_date"], "age": age, "stale": age > NOTE_STALE_DAYS}
+        note = {**note_row["payload"], "date": note_row["snapshot_date"], "age": age, "stale": age > NOTE_STALE_DAYS,
+                "by_desk": bool(note_row["payload"].get("written_by"))}
     hot = A.latest("hotspots", as_of=view) or A.latest("hotspots")
     chapters = A.latest_all("chapter", as_of=view)
     deeper = A.latest("deeper", as_of=view) or A.latest("deeper")
@@ -164,7 +165,9 @@ def page(as_of=None):
                     "fii_last": rupee(b.get("fii_last")) if b.get("fii_last") is not None else None,
                     "dii_last": rupee(b.get("dii_last")) if b.get("dii_last") is not None else None},
         "hot": ({"date": hot["snapshot_date"], "early": hot["snapshot_date"] > view,
-                 "rows": [{"name": n, "state": s, "cls": HOT_CLASS.get(s, "elv")} for n, s in hot["payload"].get("rows", [])]} if hot else None),
+                 "rows": [{"name": n, "state": s, "cls": HOT_CLASS.get(s, "elv"), "note": (hot["payload"].get("notes") or {}).get(n)}
+                          for n, s in hot["payload"].get("rows", [])],
+                 "summary": hot["payload"].get("summary"), "by_desk": bool(hot["payload"].get("written_by"))} if hot else None),
         "chapters": [{"id": c["id"], "html": _chapter(c, view), "date": c["snapshot_date"], "early": c["early"]} for c in ordered],
         "chapter_ids": [c["id"] for c in ordered],
         "n_india": sum(c["payload"].get("track") == "India" for c in ordered),

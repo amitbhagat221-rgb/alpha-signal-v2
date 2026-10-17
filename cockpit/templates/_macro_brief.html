@@ -11,7 +11,7 @@
   <h1 class="ch-title">{% if m.note %}{{ m.note.title }}{% else %}The four lights on {{ b.date }}{% endif %}</h1>
   {% if m.note %}
   <div class="verdict">{{ m.note.verdict }}</div>
-  <div class="snapnote">Written {{ m.note.date }}{% if m.note.stale %} · <b class="stale">more than a week old: read the lights below, they are current</b>{% endif %}</div>
+  <div class="snapnote">Written {{ m.note.date }}{% if m.note.by_desk %} by the macro desk from the computed facts below{% endif %}{% if m.note.stale %} · <b class="stale">more than a week old: read the lights below, they are current</b>{% endif %}</div>
   {% else %}
   <div class="fig-cap">No verdict was written for this date. Everything below is recomputed from data dated on or before {{ b.date }}.</div>
   {% endif %}
@@ -32,7 +32,10 @@
 
   {% if m.hot %}
   <h2 class="b-h">Hot spots <span class="b-sub">as written {{ m.hot.date }} · Mechanism: {{ chlink("gl-9", "Hot spots") }}</span></h2>
-  <div class="hotstrip">{% for h in m.hot.rows %}<span class="hs {{ h.cls }}">{{ h.name }} · {{ h.state }}</span>{% endfor %}</div>
+  <div class="hotstrip">{% for h in m.hot.rows %}<span class="hs {{ h.cls }}"{% if h.note %} title="{{ h.note }}"{% endif %}>{{ h.name }} · {{ h.state }}</span>{% endfor %}</div>
+  {% if m.hot.summary %}<p class="b-p hot-sum">{{ m.hot.summary }}</p>{% endif %}
+  {% if m.hot.rows | selectattr("note") | list %}<details class="hot-notes"><summary>What changed in each</summary>
+    {% for h in m.hot.rows if h.note %}<div class="hn"><b>{{ h.name }}</b> <span class="hs {{ h.cls }}">{{ h.state }}</span> {{ h.note }}</div>{% endfor %}</details>{% endif %}
   {% if m.hot.early %}<div class="tiny">The earliest hot-spot note is {{ m.hot.date }}, after this brief's date.</div>{% endif %}
   {% endif %}
 

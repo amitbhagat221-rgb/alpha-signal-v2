@@ -154,7 +154,9 @@ Producers after the change: `news_today` → brief (daily), `news_theme` unchang
 
 Implementation notes:
 - Chapters, hot spots and the Deeper shelf are stored as finished HTML from the v5.2 build; their charts refresh with each monthly version, not daily (the mockup's cadence table claimed daily chart refresh; the live Start page states what is real).
-- Still by hand: the written note, the RBI stance, the weekly hot spots, the monthly chapter rebuild (the generator in `docs/research/0014-macro-mockup-src/` is not yet a module). Next: a `brief_note` LLM kind on the subscription worker, a hot-spots kind, then the monthly chapter rebuild as `run.sh`.
+- 2026-10-17 (Amit: "agreed go ahead"): the written note and the hot spots are now desk kinds on the subscription worker. `macro_note` (daily) writes title, verdict, winners/losers and what's coming from the day's computed facts, the news edition and storylines, yesterday's note and the release calendar; `macro_hotspots` re-rates the six hot spots weekly from the news since the last note. Both validated (word caps, no figures, chapter ids from the list, exact hot-spot names) and saved through `desk_archive.save` with `written_by`. `run.sh macro_desk` = compute, then `macro_desk write` (fails the step if a note was due and none was written). First live note 2026-10-17 (v2; the hand-written v1 kept).
+- Android (same day): the frame is sized in script to the visible height (Android's 100vh ignored the address bar), a 4×2 phone nav, charts at a readable size scrolling sideways, the chapter strip shows only the current track.
+- Still by hand: the RBI stance, and the monthly chapter rebuild. The chapters cannot just be recomputed: their prose carries dated facts and web sources fused with the computed numbers ("record 96.88 on 2026-07-24", events, ~20 sources checked 2026-10-17), so a blind recompute would leave words contradicting fresh numbers. The rebuild needs the prose and the computed facts separated first (proposal to Amit 2026-10-17).
 
 ## Phases (each ships something visible the same session)
 

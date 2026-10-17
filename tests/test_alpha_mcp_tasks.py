@@ -134,7 +134,8 @@ def test_queue_status_and_kinds_spec(qdb):
     qs = qdb.queue_status()["kinds"]
     assert qs["regulatory"]["counts"] == {"queued": 2}
     spec = qdb.kinds_spec()
-    assert spec["drain_order"][-6:] == ["news_today", "news_theme", "news_week", "news_enrich", "regulatory", "say_do"]
+    assert spec["drain_order"][-8:] == ["news_today", "news_theme", "news_week", "macro_note", "macro_hotspots", "news_enrich",
+                                        "regulatory", "say_do"]
     assert spec["kinds"]["regulatory"]["claimable"] == 2 and "Financials" in spec["kinds"]["regulatory"]["instructions"]
 
 
@@ -206,7 +207,7 @@ def test_news_brief_kind_persists_and_undoes(qdb):
 
 def test_drain_order_puts_dossiers_first(qdb):
     assert qdb.DRAIN_ORDER == ["dossier", "mb_dossier", "news_brief", "sector_dossier", "news_today", "news_theme", "news_week",
-                               "news_enrich", "regulatory", "say_do"]
+                               "macro_note", "macro_hotspots", "news_enrich", "regulatory", "say_do"]
 
 
 def test_news_rollback_when_there_was_no_prior_row(qdb):

@@ -82,3 +82,46 @@ def test_latest_all_falls_back_to_the_earliest_version(desk):
     early = A.latest_all("chapter", as_of="2026-10-01", conn=c)["in-4"]
     assert early["snapshot_date"] == "2026-10-17" and early["early"]
     assert [d for d, _ in A.history("brief", conn=c)] == ["2026-10-05", "2026-10-17"]
+
+
+GOOD_NOTE = {"title": "The squeeze continues",
+             "verdict": ("Oil sits near its spring high and US yields near their record, so pressure from outside has not eased. "
+                         "The RBI is tightening to hold the rupee. Foreign investors keep selling while domestic funds absorb it. "
+                         "The signpost for a turn is shipping through Hormuz, and a softer reading on US inflation."),
+             "winners": [["IT exporters", "earn in dollars", "in-4"], ["Defence", "policy priority", "in-4"], ["Upstream oil", "higher price", "in-4"]],
+             "losers": [["FMCG", "oil shocks hurt margins", "in-4"], ["Airlines", "fuel is the biggest cost", "in-4"], ["Paints", "crude-linked inputs", "in-4"]],
+             "coming": [["End of October", "IIP for September."], ["Mid-November", "CPI for October."], ["Next RBI meeting", "Another rise or a pause?"]]}
+
+
+def test_desk_note_validator_and_round_trip(desk):
+    payload = {"day": "2026-10-18", "chapters": [{"id": "in-4", "title": "t"}]}
+    clean = macro_desk.validate_note_result(GOOD_NOTE, payload)
+    assert clean["written_by"].startswith("the macro desk")
+    for bad, why in ((({**GOOD_NOTE, "verdict": GOOD_NOTE["verdict"] + " Brent is at 110."}), "figures"),
+                     ({**GOOD_NOTE, "winners": GOOD_NOTE["winners"][:2]}, "three or four"),
+                     ({**GOOD_NOTE, "losers": [["FMCG", "hurt", "zz-9"]] * 3}, "not in `chapters`")):
+        with pytest.raises(ValueError, match=why):
+            macro_desk.validate_note_result(bad, payload)
+    rec = macro_desk.ingest_note(clean, payload)
+    assert A.latest("brief_note")["payload"]["written_by"] and rec["version"] == 1
+    macro_desk.undo_note(rec)
+    assert A.latest("brief_note")["snapshot_date"] == "2026-10-17"
+
+
+def test_hotspots_due_weekly_and_validated(desk):
+    c = sqlite3.connect(desk)
+    c.executescript("CREATE TABLE news_today (day TEXT, items TEXT); CREATE TABLE news_themes (theme_id TEXT, title TEXT);"
+                    "CREATE TABLE news_theme_history (theme_id TEXT, as_of TEXT, stands_now TEXT, what_changed TEXT);")
+    c.execute("INSERT INTO news_today VALUES ('2026-10-20', ?)", ('[{"headline": "Tankers hit", "what": "Two ships struck."}]',))
+    c.commit()
+    assert macro_desk.hotspots_payload("2026-10-22", conn=c) is None                 # under a week since 2026-10-17
+    p = macro_desk.hotspots_payload("2026-10-24", conn=c)
+    assert p["last_written"] == "2026-10-17" and "Tankers hit" in p["news_since"]["untrusted_text"]
+    ok = {"hotspots": [{"name": "Iran war and Hormuz", "state": "escalating", "note": "Tanker attacks resumed near the strait."}],
+          "summary": "Only the Gulf moved this week."}
+    clean = macro_desk.validate_hotspots_result(ok, p)
+    assert clean["rows"] == [["Iran war and Hormuz", "escalating"]]
+    with pytest.raises(ValueError, match="exactly these names"):
+        macro_desk.validate_hotspots_result({**ok, "hotspots": [{**ok["hotspots"][0], "name": "Gulf"}]}, p)
+    with pytest.raises(ValueError, match="one of"):
+        macro_desk.validate_hotspots_result({**ok, "hotspots": [{**ok["hotspots"][0], "state": "hot"}]}, p)

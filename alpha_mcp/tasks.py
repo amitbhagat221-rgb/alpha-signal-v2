@@ -651,6 +651,11 @@ def _ne():
     return news_editor
 
 
+def _md():
+    from output import macro_desk
+    return macro_desk
+
+
 TASK_KINDS = {
     "dossier": {
         "export": _export_dossier, "validate": _validate_dossier_result,
@@ -721,6 +726,21 @@ TASK_KINDS = {
         "schema": _ne().WEEK_SCHEMA, "instructions": lambda: _ne().WEEK_INSTRUCTIONS,
         "batch": 1, "deadline_hours": 12, "default_days": None, "ledger_step": "news_desk",
     },
+    # The macro desk (plan 0028, output/macro_desk.py): the brief's written note daily, the hot spots weekly.
+    "macro_note": {
+        "export": lambda days=None: _md().export_note(days), "validate": lambda r, p: _md().validate_note_result(r, p),
+        "ingest": lambda c, p: _md().ingest_note(c, p), "undo": lambda rec: _md().undo_note(rec),
+        "schema": {"type": "object", "required": ["title", "verdict", "winners", "losers", "coming"]},
+        "instructions": lambda: _md().NOTE_INSTRUCTIONS,
+        "batch": 1, "deadline_hours": 6, "default_days": None, "ledger_step": "macro_desk",
+    },
+    "macro_hotspots": {
+        "export": lambda days=None: _md().export_hotspots(days), "validate": lambda r, p: _md().validate_hotspots_result(r, p),
+        "ingest": lambda c, p: _md().ingest_hotspots(c, p), "undo": lambda rec: _md().undo_hotspots(rec),
+        "schema": {"type": "object", "required": ["hotspots", "summary"]},
+        "instructions": lambda: _md().HOTSPOTS_INSTRUCTIONS,
+        "batch": 1, "deadline_hours": 24, "default_days": None, "ledger_step": "macro_desk",
+    },
     "news_enrich": {
         "export": _export_news, "validate": _validate_news,
         "ingest": _ingest_news, "undo": _undo_news,
@@ -732,7 +752,7 @@ TASK_KINDS = {
 # Worker drain order (plan §6): dossier → news_brief → sector_dossier → news_enrich → regulatory.
 # Phase 3 adds the first three kinds; within a kind, claim follows each task's priority.
 DRAIN_ORDER = [k for k in ("dossier", "mb_dossier", "news_brief", "sector_dossier", "news_today", "news_theme", "news_week",
-                                    "news_enrich", "regulatory", "say_do")
+                                    "macro_note", "macro_hotspots", "news_enrich", "regulatory", "say_do")
                if k in TASK_KINDS]
 
 # Desk-role kinds (plan 0019): each carries "role" and is visible only to a worker
