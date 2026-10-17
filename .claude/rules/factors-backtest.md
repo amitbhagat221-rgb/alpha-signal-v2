@@ -30,7 +30,7 @@ paths:
 - A weight sits on the column its evidence was measured on.
 
 **Prices and shares on one basis (ADR 0065)**
-- Market cap is `signals._fundamentals.market_caps` (live tiers, backtest tiers, MICRO carve-out, `stocks.market_cap_cr` in ₹ crore). Per-share values come from `shares_and_book`; returns from adjusted prices (`pit.forward_returns` is the one label). Never divide a vendor share count by a raw close.
+- Market cap is `signals._fundamentals.market_caps` (live tiers, backtest tiers, MICRO carve-out, `stocks.market_cap_cr` in ₹ crore). Per-share values come from `shares_and_book`; returns from adjusted prices (`pit.forward_returns` is the one label). Never divide a vendor share count by a raw close. The vendor share count goes stale after mergers, allotments and splits (22 pond names on 2026-10-16, IIAB 22×): cross-check filed `shareholding_categories.total_shares` — `signals/multibagger.data_checks`, plan 0027.
 
 **Financials (ADR 0048)**
 - Financials rank through the MAIN screener with generic weights, not a sub-model. `accruals` + `piotroski` are INELIGIBLE for Financials in `eligibility/registry.py`, so `eligible_coverage` renormalizes. `financial_signal_scores` is display-only (within-financials IC t 0.73). A mis-wired eligibility once silently dropped every MID Financial from `daily_picks`.

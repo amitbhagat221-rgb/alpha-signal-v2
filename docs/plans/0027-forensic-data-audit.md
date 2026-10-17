@@ -1,6 +1,6 @@
 # Plan 0027 — Forensic data audit by research agents
 
-Status: **proposed, not urgent** (Amit 2026-10-16: "plan note (future, not urgent): forensic data audit by deep research"). Owner: Amit. Linked to plan [0026](0026-multibagger-desk.md) stage 4b ([research 0011](../research/0011-multibagger-deep-research-brief.md)).
+Status: **active** — "Fix at the source" agreed (Amit 2026-10-16: "agreed with dataproblems"); the monthly audit sampler itself stays not urgent ("plan note (future, not urgent)"). Decision record: [ADR 0077](../decisions/0077-multibagger-research-overlay-and-data-gate.md). Owner: Amit. Linked to plan [0026](0026-multibagger-desk.md) stage 4b ([research 0011](../research/0011-multibagger-deep-research-brief.md)).
 
 ## Why
 The stage-4b research agents read primary filings against our per-stock pack and found at least eleven classes of data error our checks missed:
