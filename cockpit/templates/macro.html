@@ -3,19 +3,37 @@
 
 {% block content %}
 <style>
-.macro-host { margin: 0 -4px; }
-.macro-host iframe { display: block; width: 100%; height: calc(100vh - 120px); min-height: 520px; border: 0; border-radius: 12px; background: #0b0d17; }
-@media (max-width: 768px) { .macro-host { margin: 0 -12px; } .macro-host iframe { height: calc(100vh - 190px); border-radius: 0; } }
+.macro-host iframe { display: block; width: 100%; height: calc(100vh - 120px); min-height: 360px; border: 0; border-radius: 12px; background: #0b0d17; }
+/* phones: the frame is the page. Search and heading give way, the outer page never scrolls, and the frame is sized
+   in script to the visible height (Android's 100vh ignores the address bar, which hid the end of the page) */
+@media (max-width: 768px) {
+  .mobile-search, .macro-title { display: none !important; }
+  html.macro-page, html.macro-page body { overflow: hidden; height: 100%; overscroll-behavior: none; }
+  html.macro-page .main-content { padding: 0 !important; }
+  .macro-host iframe { border-radius: 0; height: calc(100dvh - 64px); }
+}
 </style>
-<h1 class="section-title">Macro</h1>
+<h1 class="section-title macro-title">Macro</h1>
 <div class="macro-host">
   <iframe id="macro-frame" title="Macro framework and today's brief" src="/macro/frame{{ '?as_of=' ~ as_of if as_of else '' }}"></iframe>
 </div>
 <script>
-  // the frame owns the reading position; keep the address bar in step so a link opens the same chapter and date
   (function () {
     const f = document.getElementById('macro-frame');
+    document.documentElement.classList.add('macro-page');
     if (location.hash) f.src = f.getAttribute('src') + location.hash;
+    // fit the frame between its top and the bottom tab bar (phones) or the window's bottom (desktop)
+    function fit() {
+      const vh = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+      const bar = document.querySelector('.mobile-tabs');
+      const barTop = bar && getComputedStyle(bar).display !== 'none' ? bar.getBoundingClientRect().top : vh - 16;
+      f.style.height = Math.max(320, Math.min(vh, barTop) - f.getBoundingClientRect().top) + 'px';
+    }
+    fit();
+    window.addEventListener('resize', fit);
+    window.addEventListener('orientationchange', () => setTimeout(fit, 250));
+    if (window.visualViewport) window.visualViewport.addEventListener('resize', fit);
+    // the frame owns the reading position; keep the address bar in step so a link opens the same chapter and date
     window.addEventListener('message', e => {
       if (e.origin !== location.origin || !e.data || e.data.macro !== 1) return;
       const q = e.data.asOf && e.data.asOf !== e.data.latest ? '?as_of=' + e.data.asOf : '';

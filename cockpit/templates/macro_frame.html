@@ -18,19 +18,19 @@
   <a href="#in-1" data-nav="india">India<small>{{ m.n_india }}</small></a>
   <a href="#gl-1" data-nav="global">Global<small>{{ m.n_global }}</small></a>
   <a href="#sy-1" data-nav="synthesis">Synthesis<small>{{ m.n_synth }}</small></a>
-  <a href="#today" data-nav="today">{{ "Today's brief" if m.is_latest else "Brief" }}</a>
+  <a href="#today" data-nav="today">{% if m.is_latest %}<span class="nav-long">Today's brief</span><span class="nav-short">Brief</span>{% else %}Brief{% endif %}</a>
   <a href="#archive" data-nav="archive">Archive</a>
   <a href="#deeper" data-nav="deeper">Deeper</a>
-  <label class="asof">As of <select id="asof" aria-label="View the page as it read on a past date">
-    {% for d in m.dates %}<option value="{{ d }}"{% if d == m.brief.date %} selected{% endif %}>{{ d }}{% if loop.first %} · today{% endif %}</option>{% endfor %}
+  <label class="asof"><span class="asof-t">As of</span> <select id="asof" aria-label="View the page as it read on a past date">
+    {% for d in m.dates %}<option value="{{ d }}"{% if d == m.brief.date %} selected{% endif %}>{{ d }}</option>{% endfor %}
   </select></label>
 </nav>
 <div class="wrap" style="padding:0 24px">
   {{ start(m) }}
   <div class="learn-wrap" data-view="learn-shell">
     <aside class="toc"><div class="toc-h">Your progress</div><div class="toc-bar"><i id="toc-bar"></i></div><div class="toc-list">
-      {% for g in m.toc %}<div class="toc-g toc-g-{{ g.track | lower }}">{{ g.name }}</div>
-      {% for c in g["items"] %}<a class="toc-i" href="#{{ c.id }}" data-ch="{{ c.id }}"><span class="toc-n">{{ c.num }}</span><span class="toc-t">{{ c.title }}</span><span class="toc-d">✓</span></a>{% endfor %}{% endfor %}
+      {% for g in m.toc %}<div class="toc-g toc-g-{{ g.track | lower }}" data-track="{{ g.track }}">{{ g.name }}</div>
+      {% for c in g["items"] %}<a class="toc-i" href="#{{ c.id }}" data-ch="{{ c.id }}" data-track="{{ g.track }}"><span class="toc-n">{{ c.num }}</span><span class="toc-t">{{ c.title }}</span><span class="toc-d">✓</span></a>{% endfor %}{% endfor %}
     </div></aside>
     <div>{% for c in m.chapters %}{{ c.html | safe }}{% endfor %}</div>
   </div>

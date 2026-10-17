@@ -63,8 +63,8 @@
 
   {% if b.radar %}
   <h2 class="b-h">6 · Risk radar</h2>
-  <div class="radar-c">{% for r in b.radar %}<div class="rc rc-{{ r.colour }}" title="{{ r.rule }}"><span class="rr-dot"></span><b>{{ r.name }}</b><span class="tiny">{{ r.reading }}</span></div>{% endfor %}</div>
-  <div class="tiny">Hover a row for its rule. Thresholds are fixed; readings are computed for {{ b.date }}.</div>
+  <div class="radar-c">{% for r in b.radar %}<div class="rc rc-{{ r.colour }}" title="{{ r.rule }}"><span class="rr-dot"></span><b>{{ r.name }}</b><span class="tiny">{{ r.reading }}</span><span class="rr-rule">{{ r.rule }}</span></div>{% endfor %}</div>
+  <div class="tiny">Thresholds are fixed; readings are computed for {{ b.date }}.</div>
   {% endif %}
 
   {% if b.notes %}

@@ -31,15 +31,30 @@
       store.add(h);
       nav = h === 'pro' ? 'start' : (h.startsWith('in-') ? 'india' : h.startsWith('gl-') ? 'global' : 'synthesis');
       document.querySelectorAll('.toc-i').forEach(a => a.classList.toggle('on', a.dataset.ch === h));
+      const cur = document.querySelector(`.toc-i[data-ch="${h}"]`), toc = document.querySelector('.toc');
+      if (cur && toc) toc.dataset.track = cur.dataset.track;   // phones show only this track's chapters
     } else {
       (document.querySelector(`[data-view="${h}"]`) || document.querySelector('[data-view="start"]')).classList.add('show');
       nav = h.startsWith('deeper') ? 'deeper' : (h === 'today' ? 'today' : (h === 'archive' ? 'archive' : 'start'));
     }
     document.querySelectorAll('#topnav a').forEach(a => a.classList.toggle('on', a.dataset.nav === nav));
     paint();
+    markWide();
     window.scrollTo(0, 0);
     tellParent(h);
   }
+  // a chart wider than a phone scrolls sideways inside its figure; say so once under it
+  function markWide() {
+    document.querySelectorAll('[data-view].show .fig').forEach(f => {
+      const wide = f.scrollWidth > f.clientWidth + 4;
+      f.classList.toggle('scrollx', wide);
+      if (wide && !f.querySelector(':scope > .swipe-hint')) {
+        const h = document.createElement('div'); h.className = 'swipe-hint'; h.textContent = 'Swipe the chart sideways to see all of it →';
+        f.appendChild(h);
+      }
+    });
+  }
+  window.addEventListener('resize', markWide);
   window.addEventListener('hashchange', route);
   const sel = document.getElementById('asof');
   if (sel) sel.addEventListener('change', e => {

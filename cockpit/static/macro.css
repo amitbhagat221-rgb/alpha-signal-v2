@@ -531,3 +531,40 @@ body.macro-frame { background: var(--bg-primary); }
 /* inside the cockpit frame there is no topbar: the nav sticks to the top */
 body.macro-frame .topnav { top: 0; }
 body.macro-frame .wrap > article, body.macro-frame .learn-wrap { padding-top: 18px; }
+
+/* phones (Android first, plan 0028): a 4×2 nav that shows every view and the As-of picker without sideways
+   scrolling; charts keep a readable size and scroll sideways inside their figure; touch has no hover */
+.nav-long { display: inline; } .nav-short { display: none; }
+.rr-rule { display: block; grid-column: 3; color: var(--text-muted); font-size: 11.5px; }
+.fig.scrollx { position: relative; }
+.swipe-hint { display: none; }
+@media (max-width: 600px) {
+  body.macro-frame { font-size: 15px; -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+  body.macro-frame .wrap { padding: 0 14px !important; }
+  body.macro-frame .topnav { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0; padding: 0 4px; overflow: visible; }
+  body.macro-frame .topnav a { padding: 9px 2px !important; font-size: 13.5px; text-align: center; white-space: nowrap; }
+  body.macro-frame .topnav .nav-long { display: none; } body.macro-frame .topnav .nav-short { display: inline; }
+  body.macro-frame .asof { margin: 0; padding: 4px 2px; justify-content: center; }
+  body.macro-frame .asof .asof-t { display: none; }
+  body.macro-frame .asof select { width: 100%; min-width: 0; padding: 6px 4px; font-size: 12.5px; text-align: center; -webkit-appearance: none; appearance: none;
+    background-image: linear-gradient(45deg, transparent 50%, var(--text-muted) 50%), linear-gradient(135deg, var(--text-muted) 50%, transparent 50%);
+    background-position: right 6px center, right 2px center; background-size: 4px 4px; background-repeat: no-repeat; padding-right: 12px; }
+  body.macro-frame .ch-hook p { font-size: 16.5px; line-height: 1.6; } body.macro-frame .ch-body p, body.macro-frame .b-p { font-size: 15px; line-height: 1.65; }
+  body.macro-frame .ch-sowhat { font-size: 15px; }
+  body.macro-frame .verdict { font-size: 16px; line-height: 1.6; padding: 12px 14px; }
+  body.macro-frame .ch-title { font-size: 24px; } body.macro-frame .start-title { font-size: 26px; }
+  body.macro-frame .ch-kicker { font-size: 11px; }
+  body.macro-frame .fig { overflow-x: auto; -webkit-overflow-scrolling: touch; overscroll-behavior-x: contain; }
+  body.macro-frame svg.chart, body.macro-frame .fig > svg[viewBox^="0 0 76"] { min-width: 640px; }
+  body.macro-frame .fig.scrollx .swipe-hint { display: block; position: sticky; left: 0; font-size: 11.5px; color: var(--text-muted); margin: 2px 0 0; }
+  body.macro-frame .toc { padding-top: 8px; } body.macro-frame .toc-h, body.macro-frame .toc-bar { display: none; }
+  body.macro-frame .toc-list { flex-wrap: wrap; align-items: center; gap: 4px; overflow: visible; }
+  body.macro-frame .toc-g, body.macro-frame .toc-i { display: none; }
+  body.macro-frame .toc-g { margin: 0 6px 0 0; width: 100%; }
+  body.macro-frame .toc[data-track="Prologue"] [data-track="Prologue"], body.macro-frame .toc[data-track="India"] [data-track="India"],
+  body.macro-frame .toc[data-track="Global"] [data-track="Global"], body.macro-frame .toc[data-track="Synthesis"] [data-track="Synthesis"] { display: block; }
+  body.macro-frame .toc-i[data-track] { padding: 4px 0; min-width: 34px; text-align: center; border: 1px solid var(--border); border-radius: 8px; }
+  body.macro-frame .toc-i.on { border-color: var(--accent); }
+  body.macro-frame .rc { grid-template-columns: 14px 1fr; } body.macro-frame .rr-rule { grid-column: 2; }
+  body.macro-frame .light-c, body.macro-frame .b-sub { overflow-wrap: anywhere; }
+}
