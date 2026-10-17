@@ -46,6 +46,14 @@ Green/red = financial direction only. Cards with actions get 4px left-border acc
 
 `/news` is written top-down by an editor (`sources/news_editor.py`), not a feed: Today (the newest daily edition, 3 items with source links), the world in 7 fixed themes (compact cards), On the radar and Sectors to watch (the weekly edition: early signs, sectors the news helps / to be careful with), and a collapsed sector-flow table. `/news/theme/{theme_id}` is the theme page (note, what could happen next, stocks, timeline, sources; retired themes render, unknown id is 404). `/news/all` is the old searchable feed. Data: `api.get_news_today()`, `get_news_themes()`, `get_news_theme(id)`, `get_news_week()`, `get_sector_radar()`. Stocks on a theme are counted from its headlines; the LLM names none. Shared bits in `_news_theme.html`. Each block has an empty state.
 
+## Ask: the assistant on every page (2026-10-17)
+
+A ✦ Ask button (bottom right; the `a` key; or the "Ask about this" pill on selected text) opens a side panel on every page of both cockpits (`base.html` loads `static/ask.js` + `ask.css`). Each question is sent with the page: address, title, the visible text of `<main>` (resent only when it changed) and the selection. The server is `ask.py` (routes from `cockpit/_shared.add_ask_routes`, on both apps): one `claude -p` turn per message on the subscription, streamed with `org_chat.cli_stream` (shared with the Boardroom chat). Fast = Sonnet, Deep = Opus.
+
+- **Read-only by construction:** the alpha-research + alpha-ops MCP tools (`sql` reaches every table and view), WebSearch/WebFetch, and Read/Grep/Glob under the repo only. A single `Read(/<repo>/**)` allow rule scopes all three file tools; never allow `Grep`/`Glob` bare, they would then search any path (`tests/test_ask.py`). No shell, no edits.
+- **Transcripts** are `org.assistant` documents (never `org.ask`: that type is the seats' questions to the CEO). The turn runs in its own thread, so a reply finishes and is saved when you leave the page; the panel shows "still answering" on the next page and picks it up. Usage is logged to `llm_usage` as step `ask`.
+- The panel reopens on the next page if it was open (desktop only). On screens ≥1100px the page makes room for it.
+
 ## Stock Detail (6 tabs)
 
 Header (always visible): ticker, price, date, cap tier + action + conviction badges, 52W range bar, 1M/3M/6M/1Y returns + RSI.

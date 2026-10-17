@@ -51,5 +51,8 @@
     </main>
 
     <script src="/static/cockpit.js?v={{ asset_version('cockpit.js') }}"></script>
+    {# The "Ask" assistant panel on every page of both apps (ask.js; server ask.py). #}
+    <link rel="stylesheet" href="/static/ask.css?v={{ asset_version('ask.css') }}">
+    <script src="/static/ask.js?v={{ asset_version('ask.js') }}"></script>
 </body>
 </html>

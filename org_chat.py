@@ -259,28 +259,36 @@ If nothing concrete was agreed, return an empty `items` list and say what is sti
 
 
 def _turn(role, message, session_id):
-    """Run one CLI turn; yield ("delta", text) / ("tool", name) events, then ("end", info)."""
+    """Run one CLI turn as the seat; yield ("delta", text) / ("tool", name) events, then ("end", info)."""
     s = org.seat(role)
-    CHAT_DIR.mkdir(parents=True, exist_ok=True)
     tools = "WebSearch,WebFetch" if s.get("web") else ""
-    with tempfile.NamedTemporaryFile("w", suffix=".json", prefix=f"org_chat_{role}_", delete=False) as f:
-        f.write(_mcp_config(role))
-        cfg = f.name
     cmd = [org.CLAUDE_BIN, "-p", message, "--model", s.get("model") or "sonnet",
-           "--system-prompt", system_prompt(role), "--mcp-config", cfg, "--strict-mcp-config", "--tools", tools,
+           "--system-prompt", system_prompt(role), "--strict-mcp-config", "--tools", tools,
            "--allowedTools", "mcp__alpha-research__*", "mcp__alpha-ops__*", *(tools.split(",") if tools else []),
-           "--permission-mode", "dontAsk", "--output-format", "stream-json", "--verbose", "--include-partial-messages"]
+           "--permission-mode", "dontAsk"]
+    yield from cli_stream(cmd, _mcp_config(role), session_id, CHAT_DIR, TURN_TIMEOUT_S)
+
+
+def cli_stream(cmd, mcp_config, session_id, cwd, timeout):
+    """Run one `claude -p` turn (cmd without its output flags) with `mcp_config` (JSON text) and
+    stream it: yield ("delta", text) / ("tool", name) events, then ("end", info) with
+    {session_id, text, tools, error, usage, model}. Shared by the seat chat and the page assistant."""
+    Path(cwd).mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile("w", suffix=".json", prefix="org_chat_", delete=False) as f:
+        f.write(mcp_config)
+        cfg = f.name
+    cmd = [*cmd, "--mcp-config", cfg, "--output-format", "stream-json", "--verbose", "--include-partial-messages"]
     if session_id:
         cmd += ["--resume", session_id]
     env = {k: v for k, v in os.environ.items() if k not in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")}
     env.setdefault("HOME", str(Path.home()))
-    proc = subprocess.Popen(cmd, cwd=CHAT_DIR, env=env, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+    proc = subprocess.Popen(cmd, cwd=cwd, env=env, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                             text=True, bufsize=1)
     info = {"session_id": session_id, "text": "", "tools": [], "error": None, "usage": None, "model": None}
     started = dt.datetime.now()
     try:
         for line in proc.stdout:
-            if (dt.datetime.now() - started).total_seconds() > TURN_TIMEOUT_S:
+            if (dt.datetime.now() - started).total_seconds() > timeout:
                 info["error"] = "timed out"
                 proc.kill()
                 break
