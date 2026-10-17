@@ -15,7 +15,8 @@ Inputs:
     ANTHROPIC_API_KEY       env var (load via ~/.config/alpha-signal/secrets.env)
 
 Writes back:
-    stocks.industry         one of the 25-industry list
+    stocks.industry         one of the industries below, then tools/industry_review.py's
+                            reviewed corrections are re-applied (they always win)
 
 Usage:
     python -m tools.classify_industries                 # all stocks
@@ -65,6 +66,7 @@ INDUSTRIES_BY_SECTOR = {
         "Retail",
         "E-Commerce",
         "Consumer Durables",
+        "Textiles & Apparel",     # added 2026-10-17: mills, yarn, fabric, garments (tools/industry_review.py)
     ],
     "Consumer Staples": [
         "FMCG",
@@ -138,6 +140,8 @@ Stocks to classify:
 Return ONLY a JSON array of {{"ticker": "...", "industry": "..."}} objects, in the same order.
 - The "industry" field MUST exactly match one of the allowed industries listed above.
 - For ambiguous companies, pick the industry that captures their primary revenue source.
+- Textile mills, yarn, fibre, fabric, home textiles and garment makers are "Textiles & Apparel" (never paper,
+  chemicals or retail); a brand whose business is mainly its own store chain is "Retail".
 - Holding companies / conglomerates: classify by the operating business with the largest revenue contribution.
 - No commentary. No markdown fences. Just the JSON array."""
 
@@ -169,6 +173,8 @@ Stocks to classify:
 Return ONLY a JSON array of {{"ticker": "...", "industry": "..."}} objects, in the same order.
 - The "industry" field MUST exactly match one industry name from the list above (e.g. "E-Commerce", "Banks", "Automobiles").
 - For ambiguous companies, pick the industry that captures their primary revenue source.
+- Textile mills, yarn, fibre, fabric, home textiles and garment makers → Textiles & Apparel; a brand whose
+  business is mainly its own store chain → Retail.
 - Examples to guide:
     - Zomato / Eternal → E-Commerce
     - Swiggy → E-Commerce
@@ -348,6 +354,9 @@ def main():
 
     n_ind, n_sec = _write_industries(all_updates, sync_sector=args.from_scratch)
     print(f"\nDone. {n_ind} industry updates, {n_sec} sector updates, {total_failed} failed/skipped.")
+    # the human-reviewed corrections always win over a fresh model pick (tools/industry_review.py)
+    from tools import industry_review
+    print(f"Re-applied {len(industry_review.apply())} reviewed industry corrections.")
 
     # Coverage summary
     print("\n=== Coverage summary (industry counts per sector) ===")
