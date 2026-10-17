@@ -3,7 +3,7 @@ Alpha Signal v2 — industry explainer (narrative v2, plan 0016 P5)
 
 The twelve-card "explain this industry to a newcomer" block that the Sectors ›
 Industry Detail pane renders (docs/research/0013-industry-detail-merged-mockup.html
-is the design; all 38 explainers are archived in docs/research/0013-industry-explainers.json, a deliberate exception to the repo-wide *.json ignore). One `explainer` object per industry, stored INSIDE the existing
+is the design; all 39 explainers are archived in docs/research/0013-industry-explainers.json, a deliberate exception to the repo-wide *.json ignore). One `explainer` object per industry, stored INSIDE the existing
 sector_metadata payload (key `explainer`, plus `explainer_generated_at`), so the
 v1 fields (value_chain, segments, competitive_landscape …) stay as they are.
 

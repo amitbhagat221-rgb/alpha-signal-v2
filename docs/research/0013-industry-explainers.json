@@ -28200,5 +28200,717 @@
     }
    ]
   }
+ },
+ "Textiles & Apparel": {
+  "generated_at": "2026-10-17T14:26:59",
+  "explainer": {
+   "one_liner": "Indian textile companies turn cotton and synthetic fibre into yarn, fabric, towels, bedsheets and clothes, and sell most of it to big Western retailers and Indian shoppers.",
+   "doors": [
+    {
+     "name": "Fibre and yarn makers",
+     "sub": "Sell yarn or synthetic fibre by the kilo to other mills; price set by the market",
+     "examples": [
+      "VTL",
+      "FILATEX",
+      "SANATHAN",
+      "ALOKINDS"
+     ],
+     "profit_kept": "low",
+     "blurb": "A bet on the gap between cotton or polyester cost and yarn price."
+    },
+    {
+     "name": "Export makers",
+     "sub": "Make towels, bedsheets and garments to order for Western retailers' own labels",
+     "examples": [
+      "WELSPUNLIV",
+      "ICIL",
+      "GOKEX",
+      "PGIL"
+     ],
+     "profit_kept": "medium",
+     "blurb": "A bet on Western shoppers, trade deals and the rupee."
+    },
+    {
+     "name": "Integrated mills",
+     "sub": "Own the chain from yarn to finished fabric or garment, so one margin feeds the next",
+     "examples": [
+      "KPRMILL",
+      "ARVIND",
+      "TRIDENT",
+      "JINDWORLD"
+     ],
+     "profit_kept": "medium",
+     "blurb": "A bet on running full mills cheaply across the whole chain."
+    },
+    {
+     "name": "Brands and technical textiles",
+     "sub": "Sell under their own name or make engineered fabric for industry",
+     "examples": [
+      "PAGEIND",
+      "GARFIBRES"
+     ],
+     "profit_kept": "high",
+     "blurb": "A bet on pricing power that commodity mills never have."
+    }
+   ],
+   "door_analogy": "Think of a dhaba chain. Some people grow and sell the wheat, some bake rotis to order for a big restaurant, a few own the whole kitchen, and one famous brand sells its own thali at a premium.",
+   "door_so_what": "The further a company sits from raw fibre and the closer to its own brand, the more of each rupee it keeps.",
+   "kitchen": {
+    "stations": [
+     {
+      "name": "Fibre",
+      "what": "Cotton is grown and ginned; polyester and viscose are made from oil and wood pulp",
+      "who": "Farmers and the Cotton Corporation of India; Filatex and Sanathan for synthetic fibre"
+     },
+     {
+      "name": "Spinning",
+      "what": "Fibre is twisted into yarn on spindles",
+      "who": "Vardhman, KPR Mill, Trident and hundreds of small mills"
+     },
+     {
+      "name": "Fabric and processing",
+      "what": "Yarn is woven or knitted, then dyed and finished",
+      "who": "Arvind, Jindal Worldwide, Alok; China dominates world fabric"
+     },
+     {
+      "name": "Making up",
+      "what": "Fabric is cut and stitched into garments, towels and bedsheets",
+      "who": "Welspun Living, Indo Count, Gokaldas; Bangladesh and Vietnam compete hard"
+     },
+     {
+      "name": "Brand and shelf",
+      "what": "The product is branded and sold to the shopper",
+      "who": "Western retailers for exports; Page and Indian brands at home"
+     }
+    ],
+    "bands": [
+     {
+      "label": "Fibre makers",
+      "kind": "india"
+     },
+     {
+      "label": "Indian spinners",
+      "kind": "india"
+     },
+     {
+      "label": "China's fabric",
+      "kind": "rival"
+     },
+     {
+      "label": "Bangladesh, Vietnam",
+      "kind": "rival"
+     },
+     {
+      "label": "Global retailers",
+      "kind": "other"
+     }
+    ],
+    "rival": "China, with Bangladesh and Vietnam in garments",
+    "note": "Spinning clusters sit near the cotton belt in Tamil Nadu, Gujarat, Maharashtra and Punjab. Garment and home-textile hubs are Tiruppur, Panipat, Karur and Bengaluru. India is strong in yarn and home textiles but loses on garments, where cheaper labour and duty-free access helped Bangladesh.",
+    "so_what": "Indian listed names are strongest upstream and in home textiles, so their fortunes swing with cotton prices and Western orders."
+   },
+   "end_markets": [
+    {
+     "name": "US home-furnishing retailers",
+     "buys": "Towels, bedsheets, rugs",
+     "moves_with": "US housing activity and tariffs on Indian goods"
+    },
+    {
+     "name": "US and European apparel brands",
+     "buys": "T-shirts, denim, knitwear made to order",
+     "moves_with": "Their store inventories and China plus one sourcing"
+    },
+    {
+     "name": "UK retailers",
+     "buys": "Garments and home textiles",
+     "moves_with": "The new India-UK trade pact"
+    },
+    {
+     "name": "Indian shoppers",
+     "buys": "Innerwear, ethnic wear, everyday clothes",
+     "moves_with": "Rural and urban spending, wedding season"
+    },
+    {
+     "name": "Other mills in India and abroad",
+     "buys": "Cotton and synthetic yarn",
+     "moves_with": "Chinese and Bangladeshi demand for yarn"
+    },
+    {
+     "name": "Industrial buyers",
+     "buys": "Fishing nets, sports fabric, agricultural textiles",
+     "moves_with": "Aquaculture, infrastructure and farm spending"
+    },
+    {
+     "name": "Government and uniforms",
+     "buys": "Uniform and defence fabric",
+     "moves_with": "Tender cycles"
+    }
+   ],
+   "end_markets_so_what": "Most listed exporters depend heavily on a few large US retailers, so a US tariff or a US inventory glut hits them fast.",
+   "pnl": {
+    "walk": {
+     "input_label": "Cotton and fibre",
+     "opex_label": "Power, wages, freight",
+     "a": {
+      "name": "Fibre and yarn makers",
+      "input": 68,
+      "opex": 18,
+      "dep_int": 6
+     },
+     "b": {
+      "name": "Brands and technical textiles",
+      "input": 40,
+      "opex": 36,
+      "dep_int": 5
+     }
+    },
+    "lines": [
+     {
+      "line": "Raw material (cotton, polyester)",
+      "matters": "yes",
+      "why": "The biggest cost; a swing in cotton moves profit more than anything else"
+     },
+     {
+      "line": "Power and fuel",
+      "matters": "yes",
+      "why": "Spinning runs day and night; state power tariffs decide who is competitive"
+     },
+     {
+      "line": "Employee cost",
+      "matters": "some",
+      "why": "Small for spinners, large for garment makers who stitch by hand"
+     },
+     {
+      "line": "Working capital",
+      "matters": "yes",
+      "why": "Cotton is bought in one season and stocked for months, so inventory ties up cash"
+     },
+     {
+      "line": "Capex / asset turn",
+      "matters": "yes",
+      "why": "New spindles and looms are costly; a mill that runs below capacity loses money"
+     },
+     {
+      "line": "Depreciation",
+      "matters": "some",
+      "why": "Heavy for mills that just expanded, light for brands"
+     },
+     {
+      "line": "Interest",
+      "matters": "yes",
+      "why": "Working-capital loans make weak mills fragile when margins fall"
+     },
+     {
+      "line": "Export incentives",
+      "matters": "some",
+      "why": "Duty rebates on exports can be the difference between a profit and a loss"
+     }
+    ],
+    "analogy": "A spinner is like a sugar mill: buy the crop once a year, store it, process it and hope the selling price holds.",
+    "so_what": "For mills, watch the spread between cotton cost and yarn price; for brands, watch volume and discounting."
+   },
+   "clock": {
+    "is_cyclical": "Yes. The industry follows the cotton price and the stocking and destocking of Western retailers, with trade policy setting where orders go.",
+    "phases": [
+     {
+      "name": "Boom",
+      "years": "2021–22",
+      "what": "Retailers restocked after Covid and shifted orders away from China; yarn prices hit records"
+     },
+     {
+      "name": "Peak",
+      "years": "2022",
+      "what": "Cotton spiked, mills bought at the top and margins peaked"
+     },
+     {
+      "name": "Bust",
+      "years": "2022–23",
+      "what": "Western retailers sat on unsold stock, cotton crashed and mills booked inventory losses"
+     },
+     {
+      "name": "Bottom",
+      "years": "2023–24",
+      "what": "Thin margins, slow orders and idle spindles across small mills"
+     }
+    ],
+    "position": "early_up",
+    "position_label": "early up-cycle",
+    "position_detail": "tariffs eased, orders still rebuilding",
+    "timeline": [
+     {
+      "when": "2020",
+      "what": "The Covid lockdown shut mills and export orders vanished for months.",
+      "tone": "bust"
+     },
+     {
+      "when": "2021–22",
+      "what": "Restocking and China plus one sourcing sent orders and yarn prices to records.",
+      "tone": "boom"
+     },
+     {
+      "when": "2022–23",
+      "what": "Cotton crashed and Western retailers cut orders to clear stock, hurting every mill.",
+      "tone": "bust"
+     },
+     {
+      "when": "2024",
+      "what": "Unrest in Bangladesh pushed some garment orders to Indian makers.",
+      "tone": "neutral"
+     },
+     {
+      "when": "2025",
+      "what": "The US placed steep tariffs on Indian goods; exporters cut prices and lost orders to rivals.",
+      "tone": "bust"
+     },
+     {
+      "when": "2026",
+      "what": "The US cut its tariff under an interim deal, the UK pact brought duty-free access, and the EU deal was concluded. Yarn margins recovered as synthetic fibre got dearer.",
+      "tone": "now"
+     }
+    ],
+    "hands": [
+     {
+      "name": "Cotton price",
+      "reading": "high and firm",
+      "tone": "up",
+      "meaning": "Rising cotton lifts spinners' prices but squeezes garment and home-textile makers"
+     },
+     {
+      "name": "US orders to India",
+      "reading": "recovering slowly",
+      "tone": "mixed",
+      "meaning": "A rebound in US orders is the trigger for exporters' earnings"
+     },
+     {
+      "name": "Yarn spread",
+      "reading": "wider than last year",
+      "tone": "up",
+      "meaning": "A wider gap between yarn and cotton means fatter spinning margins"
+     },
+     {
+      "name": "Rupee",
+      "reading": "firmer this month",
+      "tone": "down",
+      "meaning": "A stronger rupee cuts what exporters earn per dollar"
+     }
+    ],
+    "so_what": "The worst is behind the industry, but a full recovery needs US orders to come back, not just lower tariffs."
+   },
+   "dials": [
+    {
+     "name": "Rupee vs dollar",
+     "channel": "Export earnings in rupees",
+     "rise_does": "A weaker rupee lifts exporters' margins",
+     "direction": "up",
+     "weight": 3,
+     "indicator_id": "usdinr"
+    },
+    {
+     "name": "US tariffs on India",
+     "channel": "Price gap against Bangladesh and Vietnam",
+     "rise_does": "Higher tariffs push US orders to rivals",
+     "direction": "down",
+     "weight": 3,
+     "indicator_id": null
+    },
+    {
+     "name": "Cotton price",
+     "channel": "Raw material cost",
+     "rise_does": "Helps spinners briefly, hurts garment makers",
+     "direction": "mixed",
+     "weight": 3,
+     "indicator_id": null
+    },
+    {
+     "name": "Crude oil",
+     "channel": "Polyester and nylon feedstock cost",
+     "rise_does": "Raises synthetic fibre cost, helps cotton yarn",
+     "direction": "mixed",
+     "weight": 2,
+     "indicator_id": "brent_crude"
+    },
+    {
+     "name": "India's exports",
+     "channel": "Overall export momentum",
+     "rise_does": "More orders and fuller mills",
+     "direction": "up",
+     "weight": 2,
+     "indicator_id": "india_exports"
+    },
+    {
+     "name": "Clothing inflation",
+     "channel": "Domestic pricing power",
+     "rise_does": "Brands can raise prices at home",
+     "direction": "up",
+     "weight": 1,
+     "indicator_id": "cpi_clothing_footwear"
+    },
+    {
+     "name": "Interest rates",
+     "channel": "Working-capital loans",
+     "rise_does": "Raises the cost of carrying cotton stock",
+     "direction": "down",
+     "weight": 2,
+     "indicator_id": "india_money_rate"
+    },
+    {
+     "name": "Factory output",
+     "channel": "Domestic manufacturing activity",
+     "rise_does": "Signals stronger domestic demand",
+     "direction": "up",
+     "weight": 1,
+     "indicator_id": "iip_manufacturing"
+    }
+   ],
+   "dials_so_what": "If you track only two, track US tariffs on India and the rupee: together they decide whether Indian exporters win orders.",
+   "bottlenecks": [
+    {
+     "name": "Fragmented small mills",
+     "why": "Thousands of small units compete on price, so no one holds margin in a downturn.",
+     "severity": "structural"
+    },
+    {
+     "name": "Pricier fibre than China",
+     "why": "Indian synthetic fibre and quality rules on imports keep input costs above China's, hurting garment makers.",
+     "severity": "structural"
+    },
+    {
+     "name": "Low cotton yields",
+     "why": "Indian farms grow less cotton per acre than rivals, so a bad monsoon spikes the price.",
+     "severity": "recurring"
+    },
+    {
+     "name": "Small garment units",
+     "why": "Most garment makers are too small to win the giant orders Bangladesh and Vietnam take.",
+     "severity": "slow"
+    },
+    {
+     "name": "US customer concentration",
+     "why": "A few large US retailers buy most of the home textiles, so one buyer's mood moves a whole stock.",
+     "severity": "two-sided"
+    },
+    {
+     "name": "Cash stuck in cotton",
+     "why": "Mills must buy cotton in season and hold it for months, which strains weak balance sheets.",
+     "severity": "cyclical"
+    }
+   ],
+   "bottlenecks_so_what": "Scale and cheap inputs decide survival; the integrated mills with strong balance sheets come out of each bust stronger.",
+   "rulebook": [
+    {
+     "body": "Cotton Corporation of India and the minimum support price",
+     "what": "Buys cotton from farmers when prices fall below the support level",
+     "why": "Sets a floor under domestic cotton, so Indian cotton can cost more than global cotton",
+     "status": "always"
+    },
+    {
+     "body": "Duty on imported cotton",
+     "what": "A customs duty on cotton imports, sometimes waived",
+     "why": "When it is waived mills can import cheaper cotton and margins improve",
+     "status": "live"
+    },
+    {
+     "body": "Quality Control Orders on fibre",
+     "what": "Mandatory standards on imported polyester and viscose",
+     "why": "Protect fibre makers but raise costs for downstream mills",
+     "status": "live"
+    },
+    {
+     "body": "Export duty rebates (RoDTEP, RoSCTL)",
+     "what": "Refund embedded taxes on exported textiles and garments",
+     "why": "A thin-margin exporter's profit can depend on them",
+     "status": "always"
+    },
+    {
+     "body": "PLI scheme for textiles",
+     "what": "Pays incentives for new man-made fibre and technical textile capacity",
+     "why": "Rewards scale investments and shapes who expands",
+     "status": "live"
+    },
+    {
+     "body": "PM MITRA textile parks",
+     "what": "Large integrated parks with shared infrastructure",
+     "why": "Lowers costs for firms that set up there",
+     "status": "live"
+    },
+    {
+     "body": "US reciprocal tariff",
+     "what": "The tariff the US charges on Indian goods",
+     "why": "Decides whether US retailers buy from India or its rivals",
+     "status": "live"
+    },
+    {
+     "body": "India-UK trade pact",
+     "what": "Duty-free entry for Indian textiles into the UK",
+     "why": "Puts Indian makers level with Bangladesh in the UK",
+     "status": "new"
+    },
+    {
+     "body": "India-EU trade agreement",
+     "what": "Will remove EU duties on Indian textiles and apparel once ratified",
+     "why": "Opens Europe on equal terms with duty-free rivals",
+     "status": "coming"
+    }
+   ],
+   "regulatory_keywords": [
+    "textile",
+    "textiles",
+    "apparel",
+    "garment",
+    "readymade garments",
+    "cotton",
+    "cotton yarn",
+    "yarn",
+    "spinning",
+    "denim",
+    "home textiles",
+    "man-made fibre",
+    "polyester",
+    "viscose",
+    "rodtep",
+    "rosctl",
+    "pm mitra",
+    "quality control order",
+    "technical textiles",
+    "cotton corporation"
+   ],
+   "forces": {
+    "a_name": "Fibre and yarn makers",
+    "b_name": "Brands and technical textiles",
+    "scores": {
+     "rivalry": [
+      3,
+      1
+     ],
+     "supplier": [
+      2,
+      1
+     ],
+     "buyer": [
+      3,
+      1
+     ],
+     "entrants": [
+      2,
+      1
+     ],
+     "substitutes": [
+      1,
+      1
+     ]
+    },
+    "why": {
+     "rivalry": "Yarn is a commodity sold by thousands of mills; brands and engineered fabrics compete on name and know-how.",
+     "supplier": "Cotton follows the crop and support prices; brands buy finished fabric and can switch mills.",
+     "buyer": "Yarn buyers shop on price; a branded product's shopper pays for the name.",
+     "entrants": "A small mill is cheap to start; a trusted brand or a technical product takes years.",
+     "substitutes": "Cotton and polyester substitute for each other, but clothes themselves have no substitute."
+    },
+    "so_what": "Profit sits with the brands and specialists; commodity spinners keep only what the cotton cycle allows."
+   },
+   "cheat_sheet": [
+    {
+     "metric": "Gross margin",
+     "tells": "The spread between fibre cost and selling price",
+     "good": "Spinners above 35%; brands above 55%",
+     "metric_key": "gross_margin_pct"
+    },
+    {
+     "metric": "Operating margin",
+     "tells": "Profit after power, wages and freight",
+     "good": "Spinners 12%+, exporters 12–15%, brands 18%+",
+     "metric_key": "ebitda_margin_pct"
+    },
+    {
+     "metric": "Inventory days",
+     "tells": "How much cotton and stock the mill carries",
+     "good": "Under 100 days for mills; under 120 for brands",
+     "metric_key": "inventory_days"
+    },
+    {
+     "metric": "Receivable days",
+     "tells": "How fast customers pay",
+     "good": "Under 60 days",
+     "metric_key": "receivable_days"
+    },
+    {
+     "metric": "Power and fuel cost",
+     "tells": "Energy efficiency of the mill",
+     "good": "Below 10% of sales",
+     "metric_key": "power_fuel_pct"
+    },
+    {
+     "metric": "Employee cost",
+     "tells": "Labour intensity",
+     "good": "Under 10% for spinners; under 20% for garment makers",
+     "metric_key": "employee_cost_pct"
+    },
+    {
+     "metric": "Debt to operating profit",
+     "tells": "Whether the mill survives a bust",
+     "good": "Below 2x",
+     "metric_key": "debt_to_ebitda"
+    },
+    {
+     "metric": "Sales growth",
+     "tells": "Whether volume or just cotton price is driving revenue",
+     "good": "Ahead of the change in cotton price, with volume up",
+     "metric_key": "sales_growth_pct"
+    }
+   ],
+   "lead_indicators": [
+    {
+     "name": "US retailers' inventory levels",
+     "lead_quarters": 2,
+     "channel": "Lean shelves mean fresh orders for exporters"
+    },
+    {
+     "name": "US imports of textiles from India",
+     "lead_quarters": 1,
+     "channel": "Shows order flow before company results"
+    },
+    {
+     "name": "Global cotton price",
+     "lead_quarters": 1,
+     "channel": "Sets raw material cost and inventory gains or losses"
+    },
+    {
+     "name": "Monsoon and cotton sowing",
+     "lead_quarters": 2,
+     "channel": "Decides the size of the next cotton crop"
+    },
+    {
+     "name": "Crude oil price",
+     "lead_quarters": 1,
+     "channel": "Moves polyester cost and the cotton-polyester balance"
+    },
+    {
+     "name": "China's yarn imports",
+     "lead_quarters": 1,
+     "channel": "China is a big buyer of Indian cotton yarn"
+    },
+    {
+     "name": "Rupee vs dollar",
+     "lead_quarters": 0,
+     "channel": "Changes exporters' rupee earnings immediately"
+    }
+   ],
+   "rule": {
+    "text": "An up-cycle needs three things together: open market access, Western retailers restocking, and Indian cotton no dearer than the world's.",
+    "signs": [
+     {
+      "name": "Market access",
+      "ok": true,
+      "note": "US tariff cut, UK pact live"
+     },
+     {
+      "name": "Western restocking",
+      "ok": false,
+      "note": "US orders still soft"
+     },
+     {
+      "name": "Competitive cotton",
+      "ok": false,
+      "note": "Indian cotton priced high"
+     }
+    ]
+   },
+   "call": {
+    "headline": "Cautiously positive. Prefer integrated mills and exporters with UK and European reach over pure US home-textile names until US orders clearly recover.",
+    "points": [
+     "Trade access has improved on three fronts: a lower US tariff, the UK pact and the concluded EU deal.",
+     "Spinning margins recovered as synthetic fibre got dearer, helping cotton yarn makers.",
+     "US orders were still falling into early 2026, so exporters' earnings lag the good news."
+    ],
+    "would_change": [
+     "A new US tariff increase or the interim deal collapsing.",
+     "A cotton price spike from a weak monsoon that mills cannot pass on.",
+     "A sharp rise in the rupee against the dollar."
+    ]
+   },
+   "tell_a_friend": "Indian textile companies turn cotton and synthetic fibre into yarn, fabric, towels, bedsheets and clothes. Most of the listed ones either sell yarn to other mills or make goods to order for big Western retailers, and a few sell their own brands. The yarn makers live and die by the cotton price. The exporters live by Western shopping and by trade rules. After a boom in 2021 and a painful bust in 2022 and 2023, the industry was hit again in 2025 when the US put steep tariffs on Indian goods. In 2026 things turned. The US cut its tariff, the UK deal brought duty-free access and the EU deal was concluded. Spinners' margins also recovered. The catch is that US orders have not fully come back yet. Brands and integrated mills keep the most profit; small commodity mills keep the least.",
+   "glossary": [
+    {
+     "term": "Spinning",
+     "def": "Twisting cotton or synthetic fibre into yarn."
+    },
+    {
+     "term": "Yarn",
+     "def": "The thread that is woven or knitted into fabric."
+    },
+    {
+     "term": "Man-made fibre",
+     "def": "Synthetic fibre such as polyester, nylon or viscose, made from oil or wood pulp."
+    },
+    {
+     "term": "Home textiles",
+     "def": "Towels, bedsheets, rugs and curtains."
+    },
+    {
+     "term": "Integrated mill",
+     "def": "A company that runs several stages, for example yarn to fabric to garment."
+    },
+    {
+     "term": "Technical textiles",
+     "def": "Engineered fabrics for industry, such as fishing nets, geotextiles and sportswear."
+    },
+    {
+     "term": "Contract manufacturer",
+     "def": "A maker that produces goods to order under the buyer's brand."
+    },
+    {
+     "term": "China plus one",
+     "def": "Western buyers adding a second sourcing country besides China."
+    },
+    {
+     "term": "Destocking",
+     "def": "Retailers selling down existing inventory instead of placing new orders."
+    },
+    {
+     "term": "Yarn spread",
+     "def": "The gap between the yarn selling price and the cotton cost per kilo; a spinner's margin."
+    },
+    {
+     "term": "Minimum support price",
+     "def": "The price at which the government buys cotton from farmers to protect them."
+    },
+    {
+     "term": "RoDTEP",
+     "def": "Remission of Duties and Taxes on Export Products: refunds of taxes built into exported goods."
+    },
+    {
+     "term": "RoSCTL",
+     "def": "Rebate of State and Central Taxes and Levies: the textile-specific export rebate."
+    },
+    {
+     "term": "Quality Control Order",
+     "def": "A government rule that imported goods must meet Indian standards; it can restrict cheap imports."
+    },
+    {
+     "term": "PLI scheme",
+     "def": "Production Linked Incentive: cash rewards for new manufacturing capacity and output."
+    },
+    {
+     "term": "PM MITRA",
+     "def": "Government-backed integrated textile parks with shared infrastructure."
+    },
+    {
+     "term": "Reciprocal tariff",
+     "def": "A tariff the US sets on a country's goods in response to that country's own duties."
+    },
+    {
+     "term": "Free trade agreement",
+     "def": "A pact between countries to cut or remove duties on each other's goods."
+    },
+    {
+     "term": "Working capital",
+     "def": "Cash tied up in stock and unpaid customer bills."
+    },
+    {
+     "term": "Operating margin",
+     "def": "Operating profit (EBITDA) as a share of sales."
+    }
+   ]
+  }
  }
 }
