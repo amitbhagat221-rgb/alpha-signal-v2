@@ -42,7 +42,12 @@
             <td class="num mono">{% if r.research_rank %}<b>{{ r.research_rank }}</b>{% else %}&mdash;{% endif %}
                 <div class="u-muted-11">was {{ r.thesis_rank }}</div></td>
             <td><a class="mb-name" href="/multibagger/stock/{{ r.sid }}/research">{{ r.name }}</a>
-                <div class="mb-sub mono">{{ r.ticker }}</div></td>
+                <div class="mb-sub mono">{{ r.ticker }}</div>
+                <nav class="mb-rs-links" aria-label="{{ r.name }} elsewhere">
+                    <a href="/multibagger/stock/{{ r.sid }}">Desk page &rarr;</a>
+                    <a href="/stocks/{{ r.sid }}">Stock page &rarr;</a>
+                    {% for g in r.links %}<a href="{{ g.href }}">{{ g.name }} &rarr;</a>{% endfor %}
+                </nav></td>
             <td>{{ r.sector or '&mdash;'|safe }}<div class="mb-sub">{{ r.sub_sector or '' }}</div></td>
             <td><span class="pill pill-{{ r.verdict_tone }}">{{ r.verdict_word }}</span>{% if r.borderline %}
                 <div><a class="pill pill-blue" href="/multibagger/stock/{{ r.sid }}/research">Borderline: your call</a></div>{% endif %}</td>

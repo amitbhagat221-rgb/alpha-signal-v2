@@ -408,8 +408,12 @@ def research_list():
     """/multibagger/research: every researched top-100 name, research-adjusted rank first, rejects last."""
     o = _overlay()
     status = book_status(o["sid"].tolist())
+    known = _known_groups()
+    groups = {g["sid"]: g for g in _rows("SELECT sid, industry, sector AS gics_sector FROM stocks")}
     rows = []
     for r in o.to_dict("records"):
+        g = groups.get(r["sid"], {})
+        r["links"] = _group_links({"industry": g.get("industry"), "sector": g.get("gics_sector")}, known)
         v, vt = VERDICT_PLAIN.get(r["verdict"], ("Not researched yet", "muted"))
         c, ct = CASE_PLAIN.get(r["multibagger_case"], ("-", "muted"))
         rows.append({**r, "verdict_word": v, "verdict_tone": vt, "case_word": c, "case_tone": ct,
@@ -750,19 +754,25 @@ def _section(fn, *a):
 
 # ── The stock page and its subpages (Amit 2026-10-17: subpages, links to the stock page and its sector) ────────
 
-def _group_links(st):
+def _known_groups():
+    """{kind: set of names} that /sectors can open; an unreadable list is empty (the links hide, pages render)."""
+    from cockpit import api
+    out = {}
+    for kind in ("industry", "sector"):
+        try:
+            out[kind] = set(api.get_group_list(kind))
+        except Exception:            # noqa: BLE001 - a missing group list hides the link, the page still renders
+            out[kind] = set()
+    return out
+
+
+def _group_links(st, known=None):
     """Links to the stock's industry and sector on /sectors, only for groups that page knows."""
     from urllib.parse import quote
-    from cockpit import api
-    out = []
-    for kind, val in (("industry", st.get("industry")), ("sector", st.get("sector"))):
-        try:
-            known = bool(val) and val in api.get_group_list(kind)
-        except Exception:            # noqa: BLE001 - a missing group list hides the link, the page still renders
-            known = False
-        if known:
-            out.append({"kind": kind, "name": val, "href": f"/sectors?{kind}={quote(val)}#per-sector"})
-    return out
+    known = known if known is not None else _known_groups()
+    return [{"kind": kind, "name": val, "href": f"/sectors?{kind}={quote(val)}#per-sector"}
+            for kind, val in (("industry", st.get("industry")), ("sector", st.get("sector")))
+            if val and val in known[kind]]
 
 
 def stock_head(sid):

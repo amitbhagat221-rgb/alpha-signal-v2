@@ -255,9 +255,10 @@ def test_stock_page_is_an_overview_with_subpages(seeded):
 def test_industry_and_sector_links_only_for_known_groups(seeded, monkeypatch):
     from cockpit import api
     monkeypatch.setattr(api, "get_group_list", lambda kind: {"industry": ["Castings"], "sector": []}[kind])
-    html = seeded.get("/multibagger/stock/AAA").text
-    assert 'href="/sectors?industry=Castings#per-sector"' in html
-    assert "/sectors?sector=" not in html                                  # Industrials is not a known sector here
+    for url in ("/multibagger/stock/AAA", "/multibagger/research"):             # the stock page and the research list
+        html = seeded.get(url).text
+        assert 'href="/sectors?industry=Castings#per-sector"' in html, url
+        assert "/sectors?sector=" not in html, url                              # Industrials is not a known sector here
 
 
 def test_research_report_renders_as_text_with_linked_citations():
@@ -362,6 +363,7 @@ def test_research_pages_plain_words(seeded):
     """Plan 0026 4b: the research list ranks by the overlay and links each researched name to a plain-words page."""
     page = seeded.get("/multibagger/research").text
     assert "Research on the top 100" in page and "Some concerns" in page and "/multibagger/stock/AAA/research" in page
+    assert 'href="/multibagger/stock/AAA"' in page and 'href="/stocks/AAA"' in page          # desk and stock page links
     old = seeded.get("/multibagger/research/AAA", follow_redirects=False)                # the retired URL
     assert old.status_code == 301 and old.headers["location"] == "/multibagger/stock/AAA/research"
     one = seeded.get("/multibagger/research/AAA").text
