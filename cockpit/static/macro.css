@@ -646,3 +646,27 @@ body.macro-frame .chapter, body.macro-frame .brief { max-width: 920px; }
   body.macro-frame .start-title { font-size: 24px; }
   body.macro-frame .ch-h2, body.macro-frame .b-h { margin-top: 28px; }
 }
+
+/* use the width (Amit 2026-10-18: "real estate is wasted"): on a wide frame the chapter prose flows into newspaper
+   columns of a readable width (one to three, the browser decides); headings, charts, quotes and boxes span the full
+   width; the history cards sit two to a row. Phones and laptops keep one column. */
+@media (min-width: 1250px) {
+  body.macro-frame .chapter, body.macro-frame .brief { max-width: none; }
+  body.macro-frame .ch-hook, body.macro-frame .ch-sec, body.macro-frame .seeit, body.macro-frame .ch-sowhat { columns: 26em 3; column-gap: 44px; column-rule: 1px solid var(--border); }
+  body.macro-frame .ch-hook p, body.macro-frame .ch-sec p, body.macro-frame .ch-sec li, body.macro-frame .seeit p,
+  body.macro-frame .ch-sowhat p, body.macro-frame .ch-sowhat li, body.macro-frame .ch-sec ul, body.macro-frame .ch-sec ol,
+  body.macro-frame .ch-sowhat ul { max-width: none; }
+  body.macro-frame .ch-sec li, body.macro-frame .ch-sowhat li { break-inside: avoid; }
+  body.macro-frame .ch-sec p, body.macro-frame .ch-hook p { orphans: 3; widows: 3; }
+  body.macro-frame .ch-h2, body.macro-frame .ch-sec .fig, body.macro-frame .ch-sec .extbox, body.macro-frame .ch-sec .hots,
+  body.macro-frame .ch-sec .flow4, body.macro-frame .ch-sec blockquote, body.macro-frame .sw-h, body.macro-frame .seeit-h { column-span: all; }
+  body.macro-frame .ch-sec blockquote { max-width: none; }
+  body.macro-frame .ch-tldr, body.macro-frame .seeit, body.macro-frame .ch-sowhat, body.macro-frame .verdict { max-width: none; }
+  body.macro-frame .ch-tldr ul { columns: 26em 2; column-gap: 44px; } body.macro-frame .ch-tldr li { break-inside: avoid; }
+  body.macro-frame .ch-title { max-width: 40ch; }
+  body.macro-frame .histblock.stories { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 34em), 1fr)); column-gap: 36px; }
+  body.macro-frame .histblock.stories .hb-h { grid-column: 1 / -1; }
+  body.macro-frame .histblock.stories .story-card:nth-of-type(2) { border-top: 0; }
+  body.macro-frame .sc-body p { max-width: none; }
+}
+@media (min-width: 1250px) { body.macro-frame .wrap, body.macro-frame .topnav { max-width: 1640px; } }

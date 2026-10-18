@@ -291,7 +291,7 @@ body {
 .main-content {
     margin-left: 232px;
     padding: 24px 32px;
-    max-width: 1400px;
+    max-width: 1760px;   /* was 1400: wide monitors left a third of the screen empty (Amit 2026-10-18) */
 }
 
 /* Regime Banner */
