@@ -194,6 +194,24 @@ def options_page(request: Request):
     return templates.TemplateResponse(request, "options.html", {"page": "options", **option_book.page_data()})
 
 
+@app.get("/resources", response_class=HTMLResponse)
+def resources_page(request: Request):
+    """Reference guides (cockpit_ops/resources.py), one per tab, each shown in a frame."""
+    from cockpit_ops import resources
+    return templates.TemplateResponse(request, "resources.html", {"page": "resources", "resources": resources.RESOURCES,
+                                                                  "tabs": resources.tabs()})
+
+
+@app.get("/resources/doc/{name}", response_class=HTMLResponse)
+def resources_doc(name: str):
+    """One guide's HTML, whitelisted by file name."""
+    from cockpit_ops import resources
+    html = resources.document(name)
+    if html is None:
+        return HTMLResponse("Not a known resource.", status_code=404)
+    return HTMLResponse(html)
+
+
 @app.get("/api/options")
 def api_options():
     import option_book

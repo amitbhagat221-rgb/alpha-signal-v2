@@ -37,7 +37,7 @@ def test_every_rail_entry_renders(clients):
 
 def test_site_map_order():
     assert [p["title"] for p in main_pages.PAGES] == ["Today", "Explorer", "Stocks", "Markets", "Macro", "Sectors", "Investor Playbooks", "Multibagger", "Book", "Model", "Funds"]
-    assert [p["title"] for p in ops_pages.PAGES] == ["Health", "Feeds", "Flow", "Boardroom", "Options", "SQL"]
+    assert [p["title"] for p in ops_pages.PAGES] == ["Health", "Feeds", "Flow", "Boardroom", "Options", "Resources", "SQL"]
     for pages in (main_pages.PAGES, ops_pages.PAGES):                 # the bar holds at most 4 tabs
         assert sorted(p["mobile"] for p in pages if p.get("mobile")) == [1, 2, 3, 4]
 

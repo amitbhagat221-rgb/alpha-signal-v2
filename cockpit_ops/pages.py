@@ -17,6 +17,9 @@ PAGES = [
      "icon": "briefcase", "section": "Fund", "mobile": 4, "short": "Board"},
     {"path": "/options", "id": "options", "title": "Options", "subtitle": "Paper book · forward test",
      "icon": "trending-up", "section": "Fund", "short": "Options"},
+    {"path": "/resources", "id": "resources", "title": "Resources", "subtitle": "Primers and guides",
+     "icon": "layers", "section": "More", "short": "Resources",
+     "tabs": [("options-primer", "Options primer"), ("options-bets", "Options as bets"), ("options-landscape", "Who wins in options")]},
     {"path": "/sql", "id": "sql", "title": "SQL", "subtitle": "Read-only queries",
      "icon": "terminal", "section": "More", "short": "SQL"},
 ]
