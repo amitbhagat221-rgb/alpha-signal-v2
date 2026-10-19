@@ -261,7 +261,7 @@ def test_contributions_that_no_longer_sum_are_dropped_only_from_days_not_rebuilt
 
 def test_parity_waits_for_rows_fetched_after_the_sync_but_still_catches_a_dropped_row(v3):
     """Regression (2026-10-19): a reconcile run at 19:04 counted the 14:00 forward harvest as missing from v3
-    (nse_announcements 4,120 → 3,804, surveillance_flags, short_selling, fii_dii series, ...). Rows fetched after the
+    (nse_announcements 4,120 → 3,804, surveillance_flags, short_selling, fii_dii series, quarantines, ...). Rows fetched after the
     sync are left out until the next one; a row the sync should have carried still fails."""
     path, sync = v3
     assert sync.main([]) == 0
@@ -269,12 +269,14 @@ def test_parity_waits_for_rows_fetched_after_the_sync_but_still_catches_a_droppe
     c.execute("INSERT INTO bulk_deals (sid, symbol, client_name, buy_sell, quantity, price, deal_date, fetched_at) "
               "VALUES ('AAA', 'AAA', 'Late Fund', 'BUY', 5, 99, date('now'), '2099-01-01T00:00:00')")
     c.execute("INSERT INTO fii_dii_cash_flow (flow_date, category, buy_value_cr, fetched_at) VALUES (date('now'), 'FII', 10.0, '2099-01-01 00:00:00')")
+    c.execute("INSERT INTO screener_pull_errors (sid, error_type, attempted_at) VALUES ('AAA', 'http', '2099-01-01 00:00:00')")
     c.commit()
     from datamodel import reconcile
     fails = [r for r in reconcile.run(write=False) if r[1] == "FAIL"]
     assert not fails, fails
     c.execute("UPDATE bulk_deals SET fetched_at = '2020-01-01 00:00:00' WHERE client_name = 'Late Fund'")   # seen, never carried
+    c.execute("UPDATE screener_pull_errors SET attempted_at = '2020-01-01 00:00:00'")
     c.commit()
     c.close()
-    fails = [r[0] for r in reconcile.run(write=False) if r[1] == "FAIL"]
-    assert fails == ["bulk_deals"], fails
+    fails = sorted(r[0] for r in reconcile.run(write=False) if r[1] == "FAIL")
+    assert fails == ["bulk_deals", "quarantine_mirrors(11)+screener_pull_errors"], fails

@@ -319,10 +319,15 @@ def checks(c):
            *_one(c, "SELECT COUNT(*) FROM check_results WHERE check_id IN (SELECT catalog_id FROM catalog WHERE kind='check' AND name LIKE 'feed\\_%' ESCAPE '\\')"),
            None, None, "distinct (kind, feed, route, day)")
     mirrors = [r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE '%\\_quarantine' ESCAPE '\\'")]
+    # the issue's detected_at is the legacy timestamp, so the same bound applies on both sides (2026-10-19: 308
+    # broker_recommendations quarantines at 19:51, after the 05:34 sync)
+    wm_ops = watermark(c, "ops")
     yield ("quarantine_mirrors(11)+screener_pull_errors",
-           sum(_one(c, f"SELECT COUNT(*) FROM {m}")[0] for m in mirrors) + _one(c, "SELECT COUNT(*) FROM screener_pull_errors")[0],
-           _one(c, "SELECT COUNT(*) FROM row_issues WHERE rule NOT LIKE 'trust:%'")[0] + _one(c, "SELECT COUNT(*) FROM mf.row_issues")[0],
-           None, None, "")
+           sum(_one(c, f"SELECT COUNT(*) FROM {m} WHERE NOT {late('_q_quarantined_at', wm_ops)}")[0] for m in mirrors)
+           + _one(c, f"SELECT COUNT(*) FROM screener_pull_errors WHERE NOT {late('attempted_at', wm_ops)}")[0],
+           _one(c, f"SELECT COUNT(*) FROM row_issues WHERE rule NOT LIKE 'trust:%' AND NOT {late('detected_at', wm_ops)}")[0]
+           + _one(c, f"SELECT COUNT(*) FROM mf.row_issues WHERE NOT {late('detected_at', wm_ops)}")[0],
+           None, None, wm_note(wm_ops).lstrip("; "))
     # mutual funds (mf.db)
     yield ("mf_scheme_master+mf_schemes", *_one(c, """SELECT COUNT(*) FROM (SELECT scheme_code FROM mf_scheme_master UNION SELECT scheme_code FROM mf_schemes
                UNION SELECT scheme_code FROM mf_nav_history UNION SELECT scheme_code FROM mf_holdings UNION SELECT scheme_code FROM mf_sector_allocation
