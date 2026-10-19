@@ -232,3 +232,32 @@ def test_mcp_pick_breakdown_is_the_views_function(tmpdb, monkeypatch):
     assert mine["tier_top3"][0]["sid"] == "A" and "rank(pct" not in Path(R.__file__).read_text()
     with pytest.raises(ValueError):
         R.pick_breakdown("ZZ", "2026-10-01")
+
+
+def test_breakdown_rank_is_the_published_rank(tmpdb, monkeypatch):
+    """REDY 2026-10-17: the MCP `stock` tool said LARGE rank 63, `pick_breakdown` said 71. The frozen screener frame
+    ranks before the data gate (it still counts stocks the gate dropped); daily_picks re-ranks after it and is what
+    every surface shows. Both tools now give the published rank; a gate-dropped stock has none."""
+    import json
+    import factors
+    from alpha_mcp import research as R
+    monkeypatch.setattr(factors, "SIGNAL_WEIGHTS", {"LARGE": {"momentum": 1.0}})
+    monkeypatch.setattr(factors, "weights", lambda scheme="SIGNAL_WEIGHTS": factors.SIGNAL_WEIGHTS)
+    monkeypatch.setattr(factors, "SCREENER_COLS", {"momentum": "mom"})
+    monkeypatch.setattr(factors, "SCREENER_TIER_COLS", {})
+    monkeypatch.setattr(R, "resolve_sid", lambda s: s)
+    day = "2026-10-17"
+    # GATED ranks 1 before the gate and is dropped by it, so REDY is 2 frozen, 1 published
+    _exec(tmpdb, "INSERT INTO pit_replay_snapshots VALUES (?,?,?,?,?,?,?)", [
+        (s, day, "LARGE", rk, sc, json.dumps({"ticker": s, "mom": m}), json.dumps({"base_score": sc}))
+        for s, rk, sc, m in [("GATED", 1, 0.9, 3.0), ("REDY", 2, 0.6, 2.0), ("LOW", 3, 0.1, 1.0)]])
+    _exec(tmpdb, "INSERT INTO stocks (sid, ticker, name, cap_tier) VALUES (?,?,?,?)",
+          [(s, s, s, "LARGE") for s in ("GATED", "REDY", "LOW")])
+    _exec(tmpdb, "INSERT INTO daily_picks (sid, pick_date, final_score, rank, cap_tier, integrity_status) "
+                 "VALUES (?,?,?,?,?,?)", [("REDY", day, 0.6, 1, "LARGE", "PASS"), ("LOW", day, 0.1, 2, "LARGE", "PASS")])
+    monkeypatch.setattr(R, "_latest_pick_date", lambda: day)
+    bd = R.pick_breakdown("REDY")
+    assert bd["rank"] == views.stock("REDY")["rank"] == 1
+    assert bd["tier_size"] == 2 and [t["sid"] for t in bd["tier_top3"]] == ["REDY", "LOW"]
+    assert bd["tier_top3"][0]["ticker"] == "REDY"
+    assert views.pick_breakdown("GATED", day)["rank"] is None
