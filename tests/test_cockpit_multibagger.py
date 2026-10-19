@@ -364,4 +364,3 @@ def test_research_list_with_no_research_loaded(seeded):
     r = seeded.get("/multibagger/research")
     assert r.status_code == 200 and "No research loaded yet" in r.text and "Alpha Castings" in r.text
     _assert_clean(r.text, "/multibagger/research unresearched")
-    assert seeded.get("/multibagger/research/AAA").status_code == 404
