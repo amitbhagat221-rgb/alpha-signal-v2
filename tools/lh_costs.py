@@ -35,7 +35,7 @@ import pandas as pd
 
 ROOT = Path(__file__).resolve().parent.parent
 DB = os.environ.get("ALPHA_DB") or str(ROOT / "data" / "alpha_signal.db")
-OUT = ROOT / "data" / "lh" / "costs.json"
+OUT = Path(os.environ.get("ALPHA_LH", ROOT / "data" / "lh")) / "costs.json"   # ALPHA_LH: a worktree has no data/
 BARS = ROOT / "data" / "intraday" / "bars_1m"
 FILLS = ROOT / "data" / "lh" / "fills_2026-10-12.json"   # the account's fills, saved by --calibrate
 
