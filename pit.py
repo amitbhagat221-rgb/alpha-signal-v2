@@ -217,12 +217,12 @@ def pit_earnings_yield(qi_pit, close_df):
     return earnings_yield(qi_pit, close_df)
 
 
-def pit_book_to_price(bs_pit, close_df, fund_pit, adjustments, eval_date):
+def pit_book_to_price(bs_pit, close_df, fund_pit, adjustments, filings, eval_date):
     """Owners' equity / (shares × close) as of eval_date, on one share basis
     (signals.book_to_price over signals._fundamentals.shares_and_book)."""
     from signals._fundamentals import shares_and_book
     from signals.book_to_price import book_to_price
-    return book_to_price(shares_and_book(bs_pit, fund_pit, adjustments, eval_date.isoformat()), close_df)
+    return book_to_price(shares_and_book(bs_pit, fund_pit, adjustments, eval_date.isoformat(), filings), close_df)
 
 
 def pit_position_52w(prices_pit, eval_date):
@@ -1376,7 +1376,7 @@ def pit_asset_tangibility(stocks, fund_pit):
     return _fund_factor("asset_tangibility", "asset_tangibility", stocks, fund_pit)
 
 
-def pit_fcf_yield(stocks, bs_pit, fund_pit, adjustments, close_df, eval_date):
+def pit_fcf_yield(stocks, bs_pit, fund_pit, adjustments, filings, close_df, eval_date):
     """3y median FCF (signals/fcf_yield.fcf_median, ₹ crore) / market cap (₹ crore,
     signals._fundamentals.market_caps — shares on the close's basis; this used the
     as-reported Screener count, so a split after the statement understated the cap)."""
@@ -1386,7 +1386,7 @@ def pit_fcf_yield(stocks, bs_pit, fund_pit, adjustments, close_df, eval_date):
     agg = fcf_median(fund_u)
     if agg.empty:
         return pd.DataFrame(columns=["sid", "fcf_yield"])
-    mc = market_caps(bs_pit, fund_pit, adjustments, close_df, eval_date.isoformat())
+    mc = market_caps(bs_pit, fund_pit, adjustments, close_df, eval_date.isoformat(), filings)
     mc = mc[mc["mcap_cr"] >= MIN_MARKET_CAP_CR]
     out = agg.merge(mc, on="sid", how="inner")
     out["fcf_yield"] = out["fcf"] / out["mcap_cr"]
@@ -1442,23 +1442,24 @@ def _pit_input(ctx, raw, key, eval_date):
 
 
 TIER_PRICE_MAX_AGE_DAYS = 30   # no close in this window = no market cap = not ranked
-TIER_INPUTS = ("bs", "fund_screener", "qi")
+TIER_INPUTS = ("bs", "fund_screener", "qi", "filed_shares")
 
 
 def tier_inputs(eval_date, raw, px_pit):
-    """DataFrame[sid, mcap_cr, adtv_cr, quarters] as of eval_date — everything the tier
+    """DataFrame[sid, mcap_cr, adtv_cr, quarters, shares_source] as of eval_date — everything the tier
     rule needs, for the backtest (tiers_at) and live (scoring.segment, the MICRO carve-out)
     alike: market cap = signals._fundamentals.market_caps on the last close within
-    TIER_PRICE_MAX_AGE_DAYS, 90-day average traded value (₹ crore), knowable quarters
+    TIER_PRICE_MAX_AGE_DAYS (share count cross-checked against the shareholding filings
+    broadcast by eval_date), 90-day average traded value (₹ crore), knowable quarters
     (one reporting basis per stock). `px_pit` = prices through eval_date with adj_close."""
     from signals._fundamentals import market_caps
-    cols = ["sid", "mcap_cr", "adtv_cr", "quarters"]
+    cols = ["sid", "mcap_cr", "adtv_cr", "quarters", "shares_source"]
     if px_pit.empty:            # an anchor before the price history starts: nobody has a market cap
         return pd.DataFrame(columns=cols)
     recent = px_pit[px_pit["date"] >= (eval_date - timedelta(days=90)).isoformat()]
     close = pit_close_price(recent[recent["date"] >= (eval_date - timedelta(days=TIER_PRICE_MAX_AGE_DAYS)).isoformat()])
     mc = market_caps(knowable_annual(raw["bs"], eval_date), knowable_screener(raw["fund_screener"], eval_date),
-                     raw["adjustments"], close, eval_date.isoformat())
+                     raw["adjustments"], close, eval_date.isoformat(), raw.get("filed_shares"))
     adtv = ((recent["close"] * recent["volume"]).groupby(recent["sid"]).mean() / 1e7).rename("adtv_cr")
     quarters = prefer_consolidated(knowable_quarterly(raw["qi"], eval_date)).groupby("sid").size().rename("quarters")
     out = mc.set_index("sid").join(adtv).join(quarters)
@@ -1585,6 +1586,7 @@ RAW_SQL = {
     "sh": 'SELECT sid, end_date, promoter_pct, pledge_pct, fii_pct, mf_pct, dii_pct, public_pct, insurance_pct, retail_hni_pct, other_pct FROM shareholding ORDER BY sid, end_date',
     "prices": 'SELECT sid, date, close, delivery_pct, volume FROM stock_prices WHERE close > 0 ORDER BY sid, date',
     "adjustments": 'SELECT sid, ex_date, factor, inds FROM corporate_adjustments ORDER BY sid, ex_date',
+    "filed_shares": 'SELECT sid, end_date, filed_at, total_shares FROM shareholding_categories WHERE total_shares > 0 ORDER BY sid, end_date, filed_at',
     "fh": "SELECT sid, metric, date, value, change FROM forecast_history WHERE metric = 'eps' AND value IS NOT NULL ORDER BY sid, metric, date",
     "acs": 'SELECT sid, snapshot_date, source, target_mean, target_median, n_analysts, recommendation_mean FROM analyst_consensus_snapshots WHERE target_mean IS NOT NULL ORDER BY sid, snapshot_date',
     "bulk": 'SELECT sid, deal_date, quantity, price, buy_sell, client_name, symbol FROM bulk_deals ORDER BY sid, deal_date',

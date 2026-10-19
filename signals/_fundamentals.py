@@ -78,6 +78,8 @@ RUPEES_PER_CRORE = 1e7
 SHARE_JUMP = 5.0          # a share count moving more than this in a year with no split / bonus is a bad row
 SHARE_AGREE = 1.5         # two readings further apart than this do not agree
 RESTATE_LAG_DAYS = 45     # the vendor restates its share count at the next monthly refetch after a split
+FILED_SHARES_TOL = 1.3    # the filed count and ours further apart than this: the filing's count stands
+FILED_MAX_AGE_DAYS = 200  # a shareholding filing for a quarter older than this is not the current count
 
 
 def _factor(events, lo, hi):
@@ -87,21 +89,51 @@ def _factor(events, lo, hi):
     return float(events.loc[(events["ex_date"] > lo) & (events["ex_date"] <= hi), "factor"].prod())
 
 
-def market_caps(bs, fund, adjustments, close, as_of):
-    """[sid, mcap_cr] as of `as_of`: the close × the share count on that close's basis
-    (shares_and_book). THE market cap — live tiers, backtest tiers, the MICRO carve-out,
-    fcf_yield and stocks.market_cap_cr (₹ crore) all read this. `close` = [sid, close_price]."""
-    mc = shares_and_book(bs, fund, adjustments, as_of).merge(close, on="sid")
+def _split_events(adjustments):
+    """{sid: split / bonus rows of corporate_adjustments} (a demerger changes the price, not the count)."""
+    if adjustments is None or adjustments.empty:
+        return {}
+    ev = adjustments[adjustments["inds"].str.contains("SPLIT|BONUS", na=False) & (adjustments["factor"] > 0)]
+    return {sid: g for sid, g in ev.groupby("sid")}
+
+
+def filed_shares(filings, adjustments, as_of, events=None):
+    """{sid: shares} as of `as_of` from the latest BSE shareholding filing (`filings` =
+    shareholding_categories [sid, end_date, filed_at, total_shares], unfiltered): the
+    filing broadcast by as_of (filed_at; a revision counts from its own broadcast) for the
+    newest quarter within FILED_MAX_AGE_DAYS, divided by the split / bonus factors that
+    went ex after that quarter end and by as_of — the count on as_of's close basis.
+    A Series; empty without filings."""
+    if filings is None or filings.empty:
+        return pd.Series(dtype=float)
+    as_of = str(as_of)[:10]
+    oldest = (pd.Timestamp(as_of) - pd.Timedelta(days=FILED_MAX_AGE_DAYS)).date().isoformat()
+    f = filings[(filings["filed_at"].astype(str).str[:10] <= as_of) & (filings["end_date"] >= oldest)
+                & (filings["end_date"] <= as_of) & (filings["total_shares"] > 0)]
+    f = f.sort_values(["sid", "end_date", "filed_at"]).drop_duplicates("sid", keep="last")
+    events = _split_events(adjustments) if events is None else events
+    return pd.Series({r.sid: r.total_shares / _factor(events.get(r.sid), r.end_date, as_of)
+                      for r in f.itertuples(index=False)}, dtype=float)
+
+
+def market_caps(bs, fund, adjustments, close, as_of, filings=None):
+    """[sid, mcap_cr, shares_source] as of `as_of`: the close × the share count on that
+    close's basis (shares_and_book). THE market cap — live tiers, backtest tiers, the MICRO
+    carve-out, fcf_yield, stocks.market_cap_cr (₹ crore) and the multibagger thesis all read
+    this. `close` = [sid, close_price]; `filings` = shareholding_categories (filed_shares)."""
+    mc = shares_and_book(bs, fund, adjustments, as_of, filings).merge(close, on="sid")
     mc["mcap_cr"] = mc["shares"] * mc["close_price"] / RUPEES_PER_CRORE
-    return mc.loc[mc["mcap_cr"] > 0, ["sid", "mcap_cr"]].reset_index(drop=True)
+    return mc.loc[mc["mcap_cr"] > 0, ["sid", "mcap_cr", "shares_source"]].reset_index(drop=True)
 
 
-def shares_and_book(bs, fund, adjustments, as_of):
-    """[sid, shares, book_equity_cr] as of `as_of` for every sid with a balance sheet:
-    a share count on the SAME basis as that day's close, and owners' equity.
+def shares_and_book(bs, fund, adjustments, as_of, filings=None):
+    """[sid, shares, book_equity_cr, shares_source] as of `as_of` for every sid with a
+    balance sheet: a share count on the SAME basis as that day's close, and owners' equity.
     `bs` = Tickertape annual balance sheets, `fund` = annual Screener rows for
     SHARE_ITEMS (both as-of filtered by the caller), `adjustments` = corporate_adjustments
-    [sid, ex_date, factor, inds] (unfiltered: a later split is a unit, not information).
+    [sid, ex_date, factor, inds] (unfiltered: a later split is a unit, not information),
+    `filings` = shareholding_categories (unfiltered: filed_shares keeps what was broadcast
+    by as_of).
 
     shares — the vendor restates shares_outstanding to the basis of its last fetch, so
       T = shares_outstanding × the split / bonus factors still to come after `as_of`
@@ -116,18 +148,23 @@ def shares_and_book(bs, fund, adjustments, as_of):
     corporate action (a bad row: KDDL 1.25 Cr → 1,744 Cr shares). Otherwise T stands —
     it also reflects actions our event table missed.
 
+    Last, the filed count F (filed_shares: the company's own quarterly filing) replaces
+    the result when the two disagree by more than FILED_SHARES_TOL×, either way. The
+    vendor count goes stale after allotments and mergers (IIAB 22× too few, AFI 10×) and
+    divides the count by a demerger's price factor (VEDL 2.7× too many; TREI, IGLY), and
+    the Screener statement is up to a year old. shares_source names the reading that
+    stands: 'vendor', 'statement' or 'filing'.
+
     book_equity_cr — Screener Equity Share Capital + Reserves when its latest statement
     is the balance sheet's period (owners' equity: Tickertape's total_equity includes
     minority interest, 23% of LARGE off by more than 5%), else total_equity."""
-    cols = ["sid", "shares", "book_equity_cr"]
+    cols = ["sid", "shares", "book_equity_cr", "shares_source"]
     if bs is None or bs.empty:
         return pd.DataFrame(columns=cols)
     as_of = str(as_of)
     recent = (pd.Timestamp(as_of) - pd.Timedelta(days=RESTATE_LAG_DAYS)).date().isoformat()
-    events = {}
-    if adjustments is not None and not adjustments.empty:
-        ev = adjustments[adjustments["inds"].str.contains("SPLIT|BONUS", na=False)]
-        events = {sid: g for sid, g in ev.groupby("sid")}
+    events = _split_events(adjustments)
+    filed = filed_shares(filings, adjustments, as_of, events).to_dict()
     stmt = {}
     if fund is not None and not fund.empty:
         wide = (fund[fund["line_item"].isin(SHARE_ITEMS)]
@@ -141,6 +178,7 @@ def shares_and_book(bs, fund, adjustments, as_of):
         y0, ev, st = g.iloc[-1], events.get(sid), stmt.get(sid)
         t_raw = y0["shares_outstanding"] * RUPEES_PER_CRORE
         shares = t_raw * _factor(ev, as_of, "9999") if t_raw > 0 else float("nan")
+        source = "vendor"
         equity = y0["total_equity"]
         if st is not None:
             prev = g.iloc[-2]["shares_outstanding"] * RUPEES_PER_CRORE if len(g) > 1 else float("nan")
@@ -153,10 +191,13 @@ def shares_and_book(bs, fund, adjustments, as_of):
             if s > 0 and not (shares > 0 and 1 / SHARE_AGREE <= shares / s <= SHARE_AGREE):
                 jumped = prev > 0 and not (1 / SHARE_JUMP <= t_raw / prev <= SHARE_JUMP)
                 if not shares > 0 or jumped or _factor(ev, recent, as_of) != 1.0:
-                    shares = s
+                    shares, source = s, "statement"
             if st["period_end"] == y0["end_date"]:
                 equity = st["Equity Share Capital"] + st["Reserves"]
-        rows.append((sid, shares, equity))
+        f = filed.get(sid, float("nan"))
+        if f > 0 and not (shares > 0 and 1 / FILED_SHARES_TOL <= shares / f <= FILED_SHARES_TOL):
+            shares, source = f, "filing"
+        rows.append((sid, shares, equity, source))
     return pd.DataFrame(rows, columns=cols)
 
 
