@@ -124,7 +124,8 @@ def pick_breakdown(stock: str, date: str | None = None) -> dict:
     weight). A factor with no value for the stock contributes as if the stock sat in the middle of its tier
     (tier_percentile is null). base_score = sum(contributions) / sum(|weights|). Rebuilt from the screener's
     frozen inputs for that date (pit_replay_snapshots); `reproduces_stored_score` checks it against the stored score.
-    Also lists the tier's top 3 for comparison. stock: sid or NSE ticker."""
+    rank (of tier_size) is the published within-tier rank, the same number `stock` and `picks` give (null when the
+    screener's data gate dropped the stock that day). Also lists the tier's published top 3. stock: sid or NSE ticker."""
     sid = resolve_sid(stock)
     date = date or _latest_pick_date()
     out = views.pick_breakdown(sid, date)   # the ONE breakdown, shared with the stock page

@@ -55,7 +55,14 @@ def sectors():
 
 def ensure_themes():
     """config.NEWS_THEMES is the list; the table holds each theme's note. A theme
-    dropped from config is retired (its note and history stay)."""
+    dropped from config is retired (its note and history stay). Producer side only
+    (the *_payload task builders and bootstrap): it writes, so a page never calls it.
+    Writes nothing when the table already matches config."""
+    want = {tid: (title, scope, "active") for tid, title, scope in config.NEWS_THEMES}
+    have = {r["theme_id"]: (r["title"], r["scope"], r["status"])
+            for r in db.rows("SELECT theme_id, title, scope, status FROM news_themes")}
+    if want.keys() <= have.keys() and all(v == want[tid] if tid in want else v[2] == "retired" for tid, v in have.items()):
+        return
     with get_db() as conn:
         for tid, title, scope in config.NEWS_THEMES:
             conn.execute("INSERT INTO news_themes (theme_id, title, scope, status) VALUES (?, ?, ?, 'active') "
@@ -65,9 +72,18 @@ def ensure_themes():
         conn.execute(f"UPDATE news_themes SET status = 'retired' WHERE theme_id NOT IN ({', '.join('?' * len(ids))})", ids)
 
 
+_THEME_COLS = ("theme_id", "title", "scope", "status", "updated_at") + NOTE_FIELDS + ("gains", "loses", "next_if")
+
+
 def _themes():
-    ensure_themes()
-    return db.rows("SELECT * FROM news_themes WHERE status = 'active' ORDER BY rowid")
+    """Every theme in config.NEWS_THEMES, in config order, with its stored note (empty
+    until one is written). Read-only: it used to call ensure_themes(), an INSERT, so
+    /sectors and /news waited 30 s on the lock and 500ed whenever a long writer
+    (datamodel.sync, 2026-10-18) held it. A read on a WAL DB never waits on a writer."""
+    stored = {r["theme_id"]: r for r in db.rows("SELECT * FROM news_themes")}
+    return [{**dict.fromkeys(_THEME_COLS), **stored.get(tid, {}),
+             "theme_id": tid, "title": title, "scope": scope, "status": "active"}
+            for tid, title, scope in config.NEWS_THEMES]
 
 
 # ═══════════════════════════ plain-language rules ═══════════════════════════
@@ -166,6 +182,7 @@ def _headline_lines(arts):
 def today_payload(since, until):
     """The daily task for headlines published in [since, until] that no edition has
     read yet, newest first; None when there are none. `until` is the edition's day."""
+    ensure_themes()
     arts = db.rows(
         f"SELECT na.article_id, na.title, na.summary FROM news_articles na "
         f"LEFT JOIN news_theme_articles ta ON ta.article_id = na.article_id "
@@ -287,6 +304,7 @@ _CAPS = {"stands_now": 30, "what_changed": 40, "why_it_matters": 50, "portfolio_
 def theme_payload(theme_id, until=None, force=False):
     """The note-rewrite task for one theme, or None when nothing new is filed under it
     or (unless `force`) its note is younger than theme_refresh_days."""
+    ensure_themes()
     until = until or _today()
     t = db.one("SELECT * FROM news_themes WHERE theme_id = ? AND status = 'active'", [theme_id])
     if not t or (not force and t["updated_at"] and t["updated_at"] > _shift(until, -CFG["theme_refresh_days"])):
@@ -428,6 +446,7 @@ def sector_flow(as_of=None):
 def week_payload(as_of=None, force=False):
     """The weekly-outlook task, or None when the last edition is younger than a week
     (unless `force`) or no theme has a note yet."""
+    ensure_themes()
     as_of = as_of or _today()
     last = db.scalar("SELECT MAX(as_of) FROM news_week")
     if not force and last and last > _shift(as_of, -CFG["week_refresh_days"]):

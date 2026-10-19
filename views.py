@@ -248,10 +248,23 @@ def pick_breakdown(sid, pick_date=None, _frames=None):
     base = num / den if den else None
     row = d[d["sid"] == sid].iloc[0]
     stored = row.get("_base_score")
-    top3 = d.sort_values("_rank").head(3).reindex(columns=["sid", "ticker", "_rank", "_final"]).rename(
-        columns={"_rank": "rank", "_final": "final_score"}).to_dict("records")
+    # rank and top 3 are the published ranking's (daily_picks), the rank every surface shows (stock page, the MCP
+    # `stock` tool, "rank n of tier_size"). The frozen frame's rank is the screener's BEFORE its data gate, which
+    # still counts the stocks the gate then dropped (REDY 2026-10-17: 71 there, 63 published). A stock the gate
+    # dropped has rank None. Only a date with no daily_picks rows for the tier falls back to the frozen rank.
+    pub = native_rows("SELECT sid, rank, final_score FROM daily_picks WHERE pick_date = ? AND cap_tier = ? "
+                      "ORDER BY rank", [pick_date, tier])
+    if pub:
+        tickers = dict(zip(d["sid"], d["ticker"])) if "ticker" in d.columns else {}
+        rank = next((r["rank"] for r in pub if r["sid"] == sid), None)
+        top3 = [{"sid": r["sid"], "ticker": tickers.get(r["sid"]), "rank": r["rank"], "final_score": r["final_score"]}
+                for r in pub[:3]]
+    else:
+        rank = row["_rank"]
+        top3 = d.sort_values("_rank").head(3).reindex(columns=["sid", "ticker", "_rank", "_final"]).rename(
+            columns={"_rank": "rank", "_final": "final_score"}).to_dict("records")
     return {"as_of": pick_date, "sid": sid, "ticker": row.get("ticker"), "name": row.get("name"), "tier": tier,
-            "rank": row["_rank"], "tier_size": tier_sizes(pick_date).get(tier) or len(d), "final_score": row["_final"],
+            "rank": rank, "tier_size": tier_sizes(pick_date).get(tier) or len(d), "final_score": row["_final"],
             "base_score": base, "penalty": row.get("_penalty"), "weight_coverage": row.get("_weight_coverage"),
             "reproduces_stored_score": (stored is not None and stored == stored and base is not None
                                         and abs(base - stored) < 1e-9),

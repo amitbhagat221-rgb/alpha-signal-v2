@@ -14,6 +14,12 @@
     Research is judgement, not a backtest; it will be checked against prices in 24 months.
 </div>
 
+{% if not d.rows %}
+<div class="card mb-empty">No thesis run yet &mdash; it runs weekly. The research list is the thesis top 100, so it fills in once the thesis has run and the research on those names is loaded.</div>
+{% else %}
+{% if not d.n_researched %}
+<div class="card mb-empty">No research loaded yet &mdash; the list below is the thesis ranking unchanged. Each name gets a verdict here once its research is loaded.</div>
+{% endif %}
 <div class="mb-rs-summary">
     <span class="pill pill-green">No red flags {{ d.counts.clean }}</span>
     <span class="pill pill-amber">Some concerns {{ d.counts.flag }}</span>
@@ -60,4 +66,5 @@
     </table>
     </div>
 </div>
+{% endif %}
 {% endblock %}

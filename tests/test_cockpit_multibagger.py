@@ -379,3 +379,21 @@ def test_research_borderline_mark(seeded, monkeypatch):
     assert "Borderline: your call" in seeded.get("/multibagger/research").text
     page = seeded.get("/multibagger/stock/AAA/research").text
     assert "Borderline: your call" in page and "Rests on one judgement." in page
+
+
+def test_research_list_empty_state(empty):
+    """/multibagger/research was a 500 (KeyError 'research_score') when the overlay had no rows; now the empty state."""
+    r = empty.get("/multibagger/research")
+    assert r.status_code == 200 and "No thesis run yet" in r.text
+    _assert_clean(r.text, "/multibagger/research empty")
+
+
+def test_research_list_with_no_research_loaded(seeded):
+    """A thesis run but an empty mb_research: the thesis ranking, marked as not researched yet."""
+    c = sqlite3.connect(seeded.dbpath)
+    c.execute("DELETE FROM mb_research")
+    c.commit()
+    c.close()
+    r = seeded.get("/multibagger/research")
+    assert r.status_code == 200 and "No research loaded yet" in r.text and "Alpha Castings" in r.text
+    _assert_clean(r.text, "/multibagger/research unresearched")

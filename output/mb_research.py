@@ -439,6 +439,11 @@ def points(fields):
     return round(penalty, 4), bonus, n
 
 
+OVERLAY_COLUMNS = ["sid", "thesis_rank", "thesis_score", "ticker", "name", "snapshot_date", "researched", "as_of_date",
+                   "verdict", "multibagger_case", "verdict_reason", "case_reason", "sector", "sub_sector", "penalty",
+                   "bonus", "n_integrity", "n_business", "borderline", "research_score"]
+
+
 def overlay(snapshot=None):
     """The research-adjusted ranking of the thesis top 100: thesis_score - flag points + 5x-case points; a reject is
     out (research_rank NaN). Not researched -> thesis score unchanged, marked. Sorted best first."""
@@ -466,7 +471,9 @@ def overlay(snapshot=None):
         row["borderline"] = BORDERLINE.get(t["sid"])
         row["research_score"] = None if row["verdict"] == "reject" else t["thesis_score"] - row["penalty"] + row["bonus"]
         out.append(row)
-    df = pd.DataFrame(out)
+    # no thesis run yet -> an empty frame that still has every column (the research page shows its empty state)
+    df = pd.DataFrame(out, columns=OVERLAY_COLUMNS) if not out else pd.DataFrame(out)
+    df["research_score"] = pd.to_numeric(df["research_score"], errors="coerce")
     df["research_rank"] = df["research_score"].rank(ascending=False, method="first")
     return df.sort_values(["research_rank", "thesis_rank"], na_position="last").reset_index(drop=True)
 
