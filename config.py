@@ -247,7 +247,22 @@ MB_THESIS = {
     "pledge_max_pct": 50.0,        # live only (no pledge history); NaN passes
     "annual_lag_days": 150,        # an annual statement is knowable at period_end + 150 days
     "red_flag_days": 365,
-    "red_flag_subcategories": ["Resignation of Statutory Auditors", "%CIRP%"],   # LIKE patterns, % = wildcard
+    # The red-flag gate (signals.multibagger.red_flag_events): kind -> SQL LIKE patterns (% = wildcard, case-blind)
+    # per exchange. BSE: `subcategory` as filed. NSE (BSE's WAF 403s it since 2026-10-13): `desc_category` as filed,
+    # plus the exact phrase in `subject` (a resignation filed under a generic desc). NSE's own `category` (the
+    # watch map + keyword rules) is NOT used: its insolvency text rule catches "acquisition through CIRP" or a
+    # subsidiary's liquidation, and "Change in Auditors" is mostly a rotation (BSE files it apart, not a flag).
+    "red_flags": {
+        "auditor_resignation": {
+            "bse_subcategory": ["Resignation of Statutory Auditors"],
+            "nse_desc": ["Resignation of Statutory Auditor%"],
+            "nse_subject": ["%resignation of statutory auditor%", "%resignation of the statutory auditor%",
+                            "%resignation of joint statutory auditor%"]},
+        "cirp": {
+            "bse_subcategory": ["%CIRP%"],
+            "nse_desc": ["Corporate Insolvency Resolution Process%"]},
+    },
+    "red_flag_dedupe_days": 2,     # the same filing on both exchanges: an NSE event within 2 days of BSE's is one event
     "top_n": 100,                  # stage 2: the top 100 by thesis_rank
     # Research overlay (plan 0026 4b, Amit 2026-10-16: "bake in the qualitative finding into rankings"): the thesis
     # score minus points per red flag (integrity areas weigh double) plus points for the 5x case; a reject is out.
@@ -1029,6 +1044,8 @@ NSE_ANNOUNCEMENT_CATEGORIES = {
     "change in director(s)": "management_change",
     "change in company secretary/compliance officer": "management_change",
     "change in auditors": "auditor_resignation",
+    "resignation of statutory auditor": "auditor_resignation",
+    "resignation of statutory auditors": "auditor_resignation",
     "corporate insolvency resolution process": "insolvency",
     "disclosure under sebi takeover regulations": "shareholding_sast",
     "financial result updates": "results",

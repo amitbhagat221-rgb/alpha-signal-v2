@@ -11,8 +11,8 @@ event, which has no filing, carries a "[derived] ..." label and its numbers in `
 opened `mode=ro`. Category maps and thresholds are data in `config` (BSE_ANNOUNCEMENT_CATEGORIES,
 SUPERINVESTORS, GOVT_*, WATCH_*).
 
-A second announcement source (NSE) plugs in by adding its category map to `config` and a loader to
-`_ANN_LOADERS` below (same output columns as `_load_bse`).
+Announcements come from BSE and NSE (`_ANN_LOADERS`; BSE's WAF 403s it since 2026-10-13): each source has its
+category map in `config` and a loader below (same output columns as `_load_bse`). `govt_links` reads both too.
 """
 import json
 import re
@@ -28,6 +28,8 @@ COLUMNS = ["date", "source", "category", "severity", "headline", "detail", "url"
 CARD_KEYS = ["sid", "name", "cap_tier", "industry", "as_of", "thesis", "known_investors", "results",
              "events_90d", "top_events_90d", "valuation_position", "forensic", "pledge", "promoter"]
 BSE_ATTACH = "https://www.bseindia.com/xml-data/corpfiling/AttachHis/"   # AttachLive 404s after ~2 weeks
+# NSE descs that match BSE's 'Memorandum of Understanding /Agreements' (read by govt_links with order wins)
+NSE_AGREEMENT_DESCS = ("memorandum of understanding/agreements", "agreements")
 
 
 # ── plumbing ────────────────────────────────────────────────────────────────────────────────────
@@ -118,7 +120,10 @@ def _load_nse(conn, sid, since):
     if df.empty:
         return _frame([])
     sev = _category_severity()
-    cat = df["category"].fillna(config.ANNOUNCEMENT_DEFAULT[0])
+    # the explicit desc map is applied at read time too, so a desc mapped after its rows were stored (e.g.
+    # "Resignation of Statutory Auditor", stored as "other" before 2026-10-19) is not left a low "other"
+    by_desc = df["desc_category"].fillna("").str.strip().str.lower().map(config.NSE_ANNOUNCEMENT_CATEGORIES)
+    cat = by_desc.fillna(df["category"]).fillna(config.ANNOUNCEMENT_DEFAULT[0])
     out = pd.DataFrame({"date": df["date"], "source": "nse_announcements", "category": cat,
                         "severity": [sev.get(c, config.ANNOUNCEMENT_DEFAULT[1]) for c in cat],
                         "headline": df["subject"].where(df["subject"].notna() & (df["subject"] != ""),
@@ -484,6 +489,8 @@ def govt_links(sid, conn=None):
         orders = _q(conn, "SELECT dt_tm, news_sub, headline, attachment FROM bse_announcements WHERE sid=? AND "
                           "subcategory IN ('Award of Order / Receipt of Order', 'Memorandum of Understanding /Agreements')",
                     (sid,))
+        nse = _q(conn, "SELECT an_dt, desc_category, category, subject, attachment_url FROM nse_announcements "
+                       "WHERE sid=?", (sid,))
     finally:
         if own:
             conn.close()
@@ -507,6 +514,18 @@ def govt_links(sid, conn=None):
             if kws:
                 govt_orders.append({"date": r.dt_tm[:10], "headline": r.news_sub or r.headline, "matched": kws,
                                     "url": BSE_ATTACH + r.attachment if r.attachment else None})
+    if not nse.empty:       # the NSE route (BSE blocked since 2026-10-13): order wins + MoUs / agreements, as BSE
+        desc = nse["desc_category"].fillna("").str.strip().str.lower()
+        cat = desc.map(config.NSE_ANNOUNCEMENT_CATEGORIES).fillna(nse["category"])
+        nse = nse[(cat == "order_win") | desc.isin(NSE_AGREEMENT_DESCS)]
+        bse_days = [pd.Timestamp(o["date"]) for o in govt_orders]
+        for r in nse.itertuples():
+            kws = [k for k in config.GOVT_BUYER_KEYWORDS if k in (r.subject or "").upper()]
+            d = pd.Timestamp(r.an_dt[:10])
+            # the same filing on both exchanges: keep BSE's row
+            if kws and not any(abs(d - b) <= pd.Timedelta(days=2) for b in bse_days):
+                govt_orders.append({"date": r.an_dt[:10], "headline": r.subject or r.desc_category, "matched": kws,
+                                    "url": r.attachment_url})
     govt_orders.sort(key=lambda d: d["date"], reverse=True)
     return {"sid": sid, "govt_holders": holders, "govt_orders": govt_orders[:20], "n_govt_orders": len(govt_orders),
             "electoral_bond_donor": {"flag": None, "basis": "not loaded"}}
