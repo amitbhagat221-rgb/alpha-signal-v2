@@ -17,7 +17,10 @@ feed_verdicts()  checks/ verdict rows. Severity follows the tier (plan 0018 §2.
                         history falls below 0.6× in ≤ 5% of runs are judged (news, corporate
                         actions, calendars … swing by nature and are skipped)
   FEED_VOLUME_SPIKE     WARN — > 3× the median (duplicate writes, a changed unit of work);
-                        INFO while a declared backfill is running (backfill_active())
+                        INFO while a declared backfill is running (backfill_active()). Self-
+                        calibrated the same way: a step whose own history spikes > 3× in more
+                        than 5% of runs has a periodic peak (news_desk: 1 daily edition, and on
+                        Mondays + 7 theme notes + the weekly edition = 9) and is not judged on spikes
   FEED_RECONCILE_FAIL   Gate 3 (tools/reconcile.py): this feed disagrees with an independent
                         source — T1 CRITICAL on FAIL, WARN on WARN
 
@@ -55,24 +58,27 @@ def backfill_active(now=None, marker=None):
 
 
 def volume_bands(steps):
-    """{step: {last, median, ratio, stable, n}} from each step's row-count history:
-    pipeline_log.rows_affected (months of history) and, for cron jobs, run_events
-    run_end rows. The latest run is judged against the median of the previous 20."""
+    """{step: {last, median, ratio, stable, spiky, n}} from each step's row-count history:
+    pipeline_log.rows_affected (months of history) or, for cron jobs that log no rows
+    there, run_events run_end rows — one source per step, in time order (a pipeline
+    step logs both, and the two tables' ids are unrelated, so mixing them double-counted
+    every run and interleaved them). The latest run is judged against the median of
+    the previous 20."""
     import pandas as pd
     from db import read_sql
     if not steps:
         return {}
     ph = ",".join("?" * len(steps))
-    hist = read_sql(f"""SELECT step_name AS step, id AS ord, rows_affected AS rows FROM pipeline_log
+    hist = read_sql(f"""SELECT step_name AS step, started_at AS t, id AS ord, rows_affected AS rows FROM pipeline_log
                         WHERE status = 'SUCCESS' AND rows_affected > 0 AND step_name IN ({ph})""", params=list(steps))
     try:
-        ev = read_sql(f"""SELECT step, id AS ord, rows FROM run_events
+        ev = read_sql(f"""SELECT step, ts AS t, id AS ord, rows FROM run_events
                           WHERE event = 'run_end' AND rows > 0 AND step IN ({ph})""", params=list(steps))
-        hist = pd.concat([hist, ev], ignore_index=True)
+        hist = pd.concat([hist, ev[~ev["step"].isin(set(hist["step"]))]], ignore_index=True)
     except Exception:                                   # noqa: BLE001 — run_events absent on a fresh DB
         pass
     out = {}
-    for step, g in hist.sort_values("ord").groupby("step"):
+    for step, g in hist.sort_values(["t", "ord"]).groupby("step"):
         r = g["rows"].astype(float).reset_index(drop=True)
         if len(r) <= BAND_MIN_HISTORY:
             continue
@@ -81,6 +87,7 @@ def volume_bands(steps):
         prior = ratio.iloc[:-1]
         out[step] = {"last": int(r.iloc[-1]), "median": float(med.iloc[-1]), "ratio": float(ratio.iloc[-1]),
                      "stable": bool(len(prior) >= BAND_MIN_HISTORY and (prior < BAND_DROP).mean() <= STABLE_MAX_LOW_SHARE),
+                     "spiky": bool((prior > BAND_SPIKE).mean() > STABLE_MAX_LOW_SHARE) if len(prior) else False,
                      "n": len(r)}
     return out
 
@@ -279,7 +286,7 @@ def feed_verdicts(rows):
                                    f"{step}: {b['last']:,} rows vs median {b['median']:,.0f}",
                                    code="FEED_VOLUME_DROP",
                                    message=f"{name} ({tier}) wrote {b['ratio']:.0%} of its usual rows ({step})"))
-            elif b["ratio"] > BAND_SPIKE:
+            elif b["ratio"] > BAND_SPIKE and not b.get("spiky"):
                 out.append(verdict(f"FEED_VOLUME_SPIKE:{name}:{step}", name, INFO if backfilling else WARN, FAIL,
                                    f"{step}: {b['last']:,} rows vs median {b['median']:,.0f}"
                                    + (" (a declared backfill is running: expected)" if backfilling else ""),

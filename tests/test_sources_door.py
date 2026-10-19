@@ -468,6 +468,9 @@ def test_moneycontrol_recos_compute(net, monkeypatch):
             "pdt_dis_nm": "HDFC Bank&nbsp;<span>INE040A01034, HDFCBANK, 500180</span>"}]
     net.route("GET", r"autosuggestion_solr\.php$", jresp(sug))
     net.route("GET", r"/india/stockpricequote/", resp(200, _MC_PAGE))
+    net.route("GET", r"moneycontrol\.com/$", resp(200, "<html></html>"))      # search-session warm-up
+    monkeypatch.setattr(mc, "_SEARCH_SESSION", None)
+    monkeypatch.setattr(mc, "_isin_of", lambda sid: None)
     monkeypatch.setattr(mc, "_ensure_schema", lambda: None)
     monkeypatch.setattr(mc, "read_sql", lambda q, params=None: pd.DataFrame({
         "sid": ["RELI", "HDBK"], "ticker": ["RELIANCE", "HDFCBANK"], "name": ["Reliance", "HDFC Bank"],
@@ -600,6 +603,18 @@ def test_scrip_master_build_rows(net, monkeypatch):
     check("scrip_master.requests", net.requests_view())
     gap_note(net, "assets.upstox.com")
     gap_note(net, "raw.githubusercontent.com")
+
+
+def test_scrip_master_supplement_url_and_failure_reach_run_events(net, monkeypatch):
+    """The 2026-09-28 'dead route' was the URL naming branch main (the mirror's branch is
+    master); a failed supplement is no longer print-only — it reaches run_events."""
+    from sources import scrip_master as sm
+    assert "/master/" in sm.LISTOFSCRIPS_URL and "/main/" not in sm.LISTOFSCRIPS_URL
+    net.route("GET", r"raw\.githubusercontent\.com/", resp(404, "404: Not Found"))
+    failed = []
+    monkeypatch.setattr(sm.runlog, "item_failed", lambda *a, **k: failed.append((a, k)))
+    assert sm.fetch_listofscrips() == {}
+    assert len(failed) == 1 and failed[0][1]["symptom"] == "B"
 
 
 # ───────────────────────────── RSS ─────────────────────────────
@@ -2263,7 +2278,25 @@ SNAP = json.loads(r"""
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
    },
    "method": "GET",
+   "params": null,
+   "timeout": 15,
+   "url": "https://www.moneycontrol.com/"
+  },
+  {
+   "allow_redirects": true,
+   "data": null,
+   "headers": {
+    "Accept": "*/*",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Connection": "keep-alive",
+    "Referer": "https://www.moneycontrol.com/",
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+   },
+   "method": "GET",
    "params": {
+    "callback": "suggest1",
+    "classic": "true",
     "format": "json",
     "query": "HDFCBANK",
     "type": 1
@@ -3826,7 +3859,7 @@ SNAP = json.loads(r"""
    "method": "GET",
    "params": null,
    "timeout": 60,
-   "url": "https://raw.githubusercontent.com/rohittihiro/BhavCopy_Equity_Database/main/ListOfScrips.csv"
+   "url": "https://raw.githubusercontent.com/rohittihiro/BhavCopy_Equity_Database/master/ListOfScrips.csv"
   }
  ],
  "scrip_master.rows": [

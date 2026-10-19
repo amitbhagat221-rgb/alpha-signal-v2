@@ -38,6 +38,7 @@ Usage:
     python -m sources.moneycontrol_recos --limit 10            # smoke test
     python -m sources.moneycontrol_recos                       # full universe
     python -m sources.moneycontrol_recos --discover-only       # populate stocks.mc_slug
+    python -m sources.moneycontrol_recos --discover-only --rediscover --sids A,B --dry-run   # re-check stored slugs
     python -m sources.moneycontrol_recos --aggregate-only      # rebuild analyst_consensus from existing recos
 """
 
@@ -95,6 +96,13 @@ MC_SLUG_OVERRIDES = {
     "DED":   None,
     "MER":   None,
     "PUNI":  None,
+    # Renamed companies, slug confirmed by the autosuggest ISIN on 2026-10-19 (the strict
+    # name rule, validators.identity_check.mc_name_matches, cannot see a rename)
+    "GHCH":  "/india/stockpricequote/chemicals/gujaratheavychemicals/GHC",          # GHCL = Gujarat Heavy Chemicals
+    "OSGL":  "/india/stockpricequote/fertilisers/oswalchemicalsfertilisers/OCF",    # Oswal Greentech, ex Oswal Chemicals
+    "JRE":   "/india/stockpricequote/miscellaneous/ebix/TE03",                      # Eraaya Lifespaces, ex Ebix Foods
+    "NHIT":  "/india/stockpricequote/miscellaneous/nhit/NHIT6531",                  # National Highways Infra Trust
+    "ILFE":  "/india/stockpricequote/constructioncontracting-civil/ilandfsengineeringconstructioncompany/MI50",
 }
 
 
@@ -135,77 +143,123 @@ def _ensure_schema():
 # ─────────────────────── Slug discovery ───────────────────────
 
 
-def _autosuggest(ticker):
-    """Use Moneycontrol's autosuggest to find the canonical slug for an NSE ticker.
+class SearchFailed(RuntimeError):
+    """The autosuggest call itself failed (WAF 403, timeout, not JSON) — unlike an
+    answered search with no confident match, this says nothing about the stock."""
 
-    Endpoint returns a JSON array of result records. Each record carries
-    company_name, sc_id, slug, sc_didcode, symbol (the NSE ticker), and more.
-    We require an EXACT symbol match before accepting a slug — the previous
-    "first /india/stockpricequote URL in response" heuristic mis-mapped 21%
-    of stocks (e.g. "IOC" → ITC, "ABB" → ABBW/Hitachi Energy, "BAJAJ-AUTO"
-    → Bajaj Finance) because the regex grabbed whatever URL appeared first.
-    """
-    params = {"query": ticker, "type": 1, "format": "json"}
+
+_SEARCH_SESSION = None
+
+
+def _search_session():
+    """Autosuggest sits behind Akamai: python-requests gets 403, a warmed chrome
+    session (hosts.HOSTS["moneycontrol"]["impersonate"]) gets 200 (probed 2026-10-19).
+    Quote pages are fetched without a session, so they are unaffected."""
+    global _SEARCH_SESSION
+    if _SEARCH_SESSION is None:
+        _SEARCH_SESSION = _http.warm_session("https://www.moneycontrol.com/")
+    return _SEARCH_SESSION
+
+
+def parse_suggestions(text):
+    """Autosuggest JSON(P) → [{slug, name, isin, symbol, bse}] (records without a
+    stock-quote slug dropped). The NSE symbol is not a top-level field: it sits in
+    pdt_dis_nm as "<Company Name>&nbsp;<span>ISIN, NSE_SYM, BSE_CODE</span>"."""
+    import json as _json
+    m = re.search(r"\[\s*\{.*\}\s*\]", (text or "").strip(), re.DOTALL)
+    if not m:
+        raise ValueError("no JSON array in the autosuggest response")
+    out = []
+    for rec in _json.loads(m.group(0)):
+        link = rec.get("link_src") or rec.get("seo_name") or rec.get("link") or ""
+        slug_m = re.search(r"(/india/stockpricequote/[a-z0-9-]+/[a-z0-9-]+/[A-Za-z0-9]+)", link)
+        if not slug_m:
+            continue
+        span = re.search(r"<span>([^<]+)</span>", rec.get("pdt_dis_nm") or "")
+        parts = [p.strip() for p in span.group(1).split(",")] if span else []
+        isin = parts[0].upper() if parts and re.fullmatch(r"IN[A-Z0-9]{10}", parts[0].upper()) else None
+        sym = (rec.get("symbol") or rec.get("nse_symbol") or (parts[1] if len(parts) >= 2 else "")).strip().upper()
+        out.append({"slug": slug_m.group(1), "name": rec.get("stock_name") or rec.get("name") or "",
+                    "isin": isin, "symbol": sym, "bse": parts[2] if len(parts) >= 3 else None})
+    return out
+
+
+def choose_suggestion(cands, ticker, name, isin=None):
+    """The ONE identity rule for a discovered slug → (slug or None, why).
+
+    - The stock's ISIN (scrip_master) on a record is decisive: that record, or —
+      when an exact-symbol record carries a DIFFERENT ISIN — nothing.
+    - Otherwise the record needs the exact NSE symbol AND a name that is this
+      company (validators.identity_check.mc_name_matches, the producer gate's rule).
+    The symbol alone was the whole check before: 46 stored slugs pointed at another
+    company (TRIDENT → Trent, ASHOKA → Ashok Leyland), and the gate's loose name
+    test (similarity ≥ 0.55) let their broker targets through (2026-10-19)."""
+    from validators.identity_check import mc_name_matches
+    want = (ticker or "").strip().upper()
+    if isin:
+        hit = [c for c in cands if c["isin"] == isin]
+        if hit:
+            return hit[0]["slug"], f"ISIN {isin} match ({hit[0]['name']})"
+        if any(c["symbol"] == want and c["isin"] for c in cands):
+            return None, f"symbol {want} answered with another ISIN"
+    for c in cands:
+        if c["symbol"] != want:
+            continue
+        slug_co = c["slug"].strip("/").split("/")[-2]
+        if mc_name_matches(name, c["name"]) or mc_name_matches(name, slug_co):
+            return c["slug"], f"symbol + name match ({c['name']})"
+        return None, f"symbol {want} matched but name '{c['name']}' is not '{name}'"
+    return None, f"no record with symbol {want}"
+
+
+def _autosuggest(ticker, name=None, isin=None):
+    """Moneycontrol autosuggest → (slug or None, why). Raises SearchFailed when the
+    search itself failed. Before 2026-05-25 the first URL in the response was taken
+    (21% mis-mapped: IOC → ITC, BAJAJ-AUTO → Bajaj Finance); see choose_suggestion."""
+    params = {"classic": "true", "query": ticker, "type": 1, "format": "json", "callback": "suggest1"}
     try:
-        r = polite_get(SEARCH_URL, params=params, timeout=TIMEOUT, retries=0)
-        if r is None or not r.text.strip():
-            return None
-        # Strip JSONP wrapper if present.
-        text = r.text.strip()
-        m = re.search(r"\[\s*\{.*\}\s*\]", text, re.DOTALL)
-        if not m:
-            return None
-        try:
-            import json as _json
-            results = _json.loads(m.group(0))
-        except ValueError:
-            return None
-        want = (ticker or "").strip().upper()
-        for rec in results:
-            slug = rec.get("link_src") or rec.get("seo_name") or rec.get("link") or ""
-            if not slug:
-                continue
-            slug_m = re.search(r"(/india/stockpricequote/[a-z0-9-]+/[a-z0-9-]+/[A-Z0-9]+)", slug)
-            if not slug_m:
-                continue
-            # Symbol extraction. Moneycontrol's autosuggest does NOT carry a
-            # top-level `symbol` / `nse_symbol` field — the prior code reading
-            # rec.get("symbol") was silently returning None for every probe
-            # (bug surfaced 2026-05-31 by Plan 0007 slug audit). The NSE
-            # ticker lives inside pdt_dis_nm as:
-            #     "<Company Name>&nbsp;<span>ISIN, NSE_SYM, BSE_CODE</span>"
-            # We extract the second comma-separated value in the span.
-            sym = (rec.get("symbol") or rec.get("nse_symbol") or "").strip().upper()
-            if not sym:
-                dis = rec.get("pdt_dis_nm") or ""
-                m_span = re.search(r"<span>([^<]+)</span>", dis)
-                if m_span:
-                    parts = [p.strip() for p in m_span.group(1).split(",")]
-                    if len(parts) >= 2:
-                        sym = parts[1].upper()
-            if not sym:
-                continue
-            if sym == want:
-                return slug_m.group(1)
-        return None
-    except Exception:
+        r = polite_get(SEARCH_URL, session=_search_session(), params=params, timeout=TIMEOUT, retries=0)
+        cands = parse_suggestions(r.text if r is not None else "")
+    except (*_http._REQ_ERRORS, ValueError) as e:
+        raise SearchFailed(f"autosuggest {ticker}: {type(e).__name__}: {e}") from e
+    return choose_suggestion(cands, ticker, name or ticker, isin)
+
+
+def _isin_of(sid):
+    """The stock's ISIN from scrip_master (Upstox), or None."""
+    try:
+        r = read_sql("SELECT isin FROM scrip_master WHERE sid = ? AND isin IS NOT NULL "
+                     "ORDER BY nse_symbol IS NULL, source = 'upstox' DESC LIMIT 1", params=[sid])
+        return r["isin"].iloc[0] if len(r) else None
+    except Exception:                                    # noqa: BLE001 — table absent on a fresh DB
         return None
 
 
-def discover_slug_for(sid, ticker):
-    # Curated overrides win over autosuggest — these are the SIDs where
-    # autosuggest is known to return the wrong entity (or nothing). Pin the
-    # verified slug (or None) and never re-probe. See MC_SLUG_OVERRIDES.
+def discover_slug_for(sid, ticker, name=None, *, clear_if_unmatched=False, dry_run=False):
+    """Find (and store) the stock's Moneycontrol slug. Returns the slug or None.
+
+    Curated overrides win (MC_SLUG_OVERRIDES: renames and known autosuggest traps).
+    An answered search without a confident match leaves the stored slug alone, or
+    sets it NULL with clear_if_unmatched (re-discovery: a wrong slug is worse than
+    none). A FAILED search (WAF, timeout) never touches the stored slug: it reaches
+    run_events and returns None."""
+    import runlog
     if sid in MC_SLUG_OVERRIDES:
         slug = MC_SLUG_OVERRIDES[sid]
+        if not dry_run:
+            with get_db() as conn:
+                conn.execute("UPDATE stocks SET mc_slug = ? WHERE sid = ?", (slug, sid))
+        return slug
+    try:
+        slug, why = _autosuggest(ticker, name, _isin_of(sid))
+    except SearchFailed as e:
+        runlog.item_failed("mc_discover", sid, str(e), symptom="A")
+        print(f"  [discover] {sid} {ticker}: search failed — {e}")
+        return None
+    print(f"  [discover] {sid} {ticker}: {slug or '—'} ({why})")
+    if (slug or clear_if_unmatched) and not dry_run:
         with get_db() as conn:
             conn.execute("UPDATE stocks SET mc_slug = ? WHERE sid = ?", (slug, sid))
-        return slug
-    slug = _autosuggest(ticker)
-    if not slug:
-        return None
-    with get_db() as conn:
-        conn.execute("UPDATE stocks SET mc_slug = ? WHERE sid = ?", (slug, sid))
     return slug
 
 
@@ -389,11 +443,13 @@ def aggregate_consensus():
 
 
 def compute(limit=None, ticker=None, discover_only=False, aggregate_only=False, dry_run=False,
-            max_minutes=_http.HOST_BUDGET):
+            max_minutes=_http.HOST_BUDGET, sids=None, rediscover=False):
     """Pipeline entry point. Visits stocks least-recently-checked first and
     stops after `max_minutes` (default: the host's budget_min; None = no budget,
     full sweep). Pacing is the host door's alone (12s per call) — no extra
-    sleeps between stocks."""
+    sleeps between stocks. `sids` restricts the run; `rediscover` ignores the
+    stored slug and searches again, setting it NULL when no record is
+    confidently this company (choose_suggestion)."""
     _ensure_schema()
 
     if aggregate_only:
@@ -404,6 +460,9 @@ def compute(limit=None, ticker=None, discover_only=False, aggregate_only=False, 
     if ticker:
         where = "WHERE ticker = ?"
         params = [ticker]
+    elif sids:
+        where = f"WHERE sid IN ({','.join('?' * len(sids))})"
+        params = list(sids)
     stocks = read_sql(
         f"SELECT sid, ticker, COALESCE(name, '') AS name, COALESCE(mc_slug, '') AS mc_slug "
         f"FROM stocks {where} ORDER BY mc_checked_at IS NOT NULL, mc_checked_at, sid",
@@ -432,10 +491,12 @@ def compute(limit=None, ticker=None, discover_only=False, aggregate_only=False, 
             print(f"  budget of {max_minutes} min reached after {i - 1} stocks — "
                   f"rest continue next run (stalest-first)", flush=True)
             break
-        checked.append(sid)
+        if not discover_only:          # a discovery pass fetches no recos: it must not
+            checked.append(sid)        # push the stock to the back of the fetch queue
         n_visited = i
-        if not slug:
-            slug = discover_slug_for(sid, ticker_str)
+        if not slug or rediscover:
+            slug = discover_slug_for(sid, ticker_str, name_str or None,
+                                     clear_if_unmatched=rediscover, dry_run=dry_run)
             if not slug:
                 no_slug += 1
 
@@ -540,12 +601,17 @@ if __name__ == "__main__":
                         help="Populate stocks.mc_slug; don't fetch recos")
     parser.add_argument("--aggregate-only", action="store_true",
                         help="Rebuild analyst_consensus from existing recos")
+    parser.add_argument("--sids", help="Comma-separated sids to restrict the run to")
+    parser.add_argument("--rediscover", action="store_true",
+                        help="Search again even where a slug is stored; NULL it when no confident match")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--max-minutes", type=float, default=None,
                         help=f"Time budget (pipeline uses {HOSTS['moneycontrol']['budget_min']}); "
                              "default: full sweep")
     args = parser.parse_args()
     compute(limit=args.limit, ticker=args.ticker,
+            sids=[s.strip() for s in args.sids.split(",") if s.strip()] if args.sids else None,
+            rediscover=args.rediscover,
             discover_only=args.discover_only,
             aggregate_only=args.aggregate_only,
             dry_run=args.dry_run,

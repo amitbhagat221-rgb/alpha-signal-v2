@@ -109,5 +109,5 @@ It keeps 30 days of failures under a 2 GB cap (plan 0018 D3). The last good resp
 
 ## Open items (2026-09-28)
 - **transcripts: orphan (H).** It has no step or cron since 2026-06-07. Schedule it weekly.
-- **scrip_master: dead fallback (B).** The ListOfScrips GitHub mirror returns 404; the Upstox primary is healthy.
+- ~~**scrip_master: dead fallback (B).**~~ Fixed 2026-10-19: the URL named branch `main`, the mirror's branch is `master`.
 - **15 of 17 T1 feeds are single-source** and serve stale data if the source dies. P3 builds the top 3 fallbacks: prices (full universe), Tickertape fundamentals, shareholding.

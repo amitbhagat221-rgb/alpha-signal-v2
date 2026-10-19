@@ -37,13 +37,14 @@ import json
 import sys
 from datetime import datetime, timezone
 
+import runlog
 from db import get_db, read_sql
 from sources import _http
 
 UPSTOX_URL = "https://assets.upstox.com/market-quote/instruments/exchange/complete.json.gz"
-LISTOFSCRIPS_URL = (
+LISTOFSCRIPS_URL = (   # the repo's branch is `master`: a .../main/ URL 404s (the 2026-09-28 "dead route")
     "https://raw.githubusercontent.com/rohittihiro/"
-    "BhavCopy_Equity_Database/main/ListOfScrips.csv"
+    "BhavCopy_Equity_Database/master/ListOfScrips.csv"
 )
 
 
@@ -120,8 +121,9 @@ def fetch_listofscrips():
             out[int(code)] = (isin, (row.get("Security Name") or "").strip(),
                               (row.get("Status") or "").strip())
         return out
-    except Exception as e:  # noqa: BLE001 — supplement only
+    except Exception as e:  # noqa: BLE001 — supplement only, but it must reach run_events
         print(f"  [warn] ListOfScrips supplement unavailable ({e}); continuing Upstox-only")
+        runlog.item_failed("listofscrips", LISTOFSCRIPS_URL, f"ListOfScrips supplement unavailable: {e}", symptom="B")
         return {}
 
 

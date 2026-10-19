@@ -173,6 +173,43 @@ def test_bse_shp_parses_category_totals_in_both_taxonomies():
     assert parse_categories("<html>blocked</html>") is None
 
 
+def test_bse_shp_keeps_quarterly_patterns_only():
+    """RBZ 2026-10-19: the listing-day pattern (Regulation 31(1)(a), dated 2023-12-22) was stored
+    next to the Dec-2023 quarter (2023-12-31) as a second quarter; 4,309 listing / restructuring
+    patterns were stored the same way (3,262 + 45 under (c), 989 + 13 under (a))."""
+    from sources.bse_shp import filed_under, is_quarterly
+    xml = '<in-bse-shp:ShareholdingPatternFiledUnder contextRef="MainD">Regulation 31 (1) (a)</in-bse-shp:ShareholdingPatternFiledUnder>'
+    ix = "<ix:nonNumeric name='in-bse-shp:ShareholdingPatternFiledUnder' contextRef='MainD'>Regulation 31 (1) (b)</ix:nonNumeric>"
+    assert filed_under(xml) == "Regulation 31 (1) (a)" and filed_under(ix) == "Regulation 31 (1) (b)"
+    assert not is_quarterly(xml, "2023-12-22")
+    assert not is_quarterly(xml.replace("(a)", "(c)"), "2025-03-31"), "restructuring pattern on a quarter end"
+    assert is_quarterly(ix, "2025-06-30")
+    assert is_quarterly("<no field/>", "2016-06-30") and not is_quarterly("<no field/>", "2016-07-14")
+
+
+def test_bse_shp_harvest_skips_listing_pattern(monkeypatch):
+    import sources.bse_shp as B
+    q = '<in-bse-shp:ShareholdingPatternFiledUnder contextRef="MainD">Regulation 31 (1) ({})</in-bse-shp:ShareholdingPatternFiledUnder>'
+
+    def filing(when, reg):
+        return (_shp_total("ShareholdingPatternI", when, 1000, 100, 50) + _shp_total("PublicShareholdingI", when, 250, 25)
+                + _shp_ctx("IndividualsOrHUF15", when)
+                + '<in-bse-shp:NameOfTheShareholder contextRef="D_IndividualsOrHUF15">A Promoter</in-bse-shp:NameOfTheShareholder>'
+                '<in-bse-shp:NumberOfShares contextRef="IndividualsOrHUF15" unitRef="shares">750</in-bse-shp:NumberOfShares>'
+                + q.format(reg))
+    files = {"u/q4": filing("2023-12-31", "b"), "u/list": filing("2023-12-22", "a"),
+             "u/restr": filing("2024-03-31", "c")}
+    index = [{"end_date": "2024-03-31", "filed_at": "2024-04-02T10:00:00", "url": "u/restr"},
+             {"end_date": "2023-12-31", "filed_at": "2024-01-20T15:58:00", "url": "u/q4"},
+             {"end_date": "2023-12-22", "filed_at": "2023-12-28T16:53:00", "url": "u/list"}]
+    monkeypatch.setattr(B, "fetch_index", lambda api, sc: index)
+    monkeypatch.setattr(B, "fetch_filing", lambda s, url, sc=None: files[url])
+    monkeypatch.setattr(B.runlog, "note", lambda *a, **k: None)
+    rows = B.harvest_stock(None, None, "RBZ", 544060, 10, skip_stored=False)
+    assert {(r["_table"], r["end_date"]) for r in rows} == {("shareholding_holders", "2023-12-31"),
+                                                           ("shareholding_categories", "2023-12-31")}
+
+
 def test_bse_shp_latest_quarter_end():
     from datetime import date
     from sources.bse_shp import latest_quarter_end

@@ -80,8 +80,7 @@ FEEDS = {
         "modules": ["sources.scrip_master"], "schedule": ["cron:forward"],
         "writes": ["scrip_master"], "hosts": ["upstox", "github_raw"], "cadence": "daily",
         "routes": [_r("upstox_instruments", "primary", "upstox", "complete.json.gz instrument master"),
-                   {**_r("bse_listofscrips", "fallback", "github_raw", "ListOfScrips.csv mirror"),
-                    "dead": "2026-09-28: GitHub mirror 404 (canary)"}],
+                   _r("bse_listofscrips", "fallback", "github_raw", "ListOfScrips.csv mirror (master branch)")],
         "canary": "scrip_master", "serve_stale_days": 30,
         "pit": "static map; delisted scrips kept", "tos": "public files",
     },
@@ -678,6 +677,15 @@ SYMPTOM_CLASSES = {
 
 INCIDENTS = [
     # (date, feed, class, symptom, cause, fix, ref)
+    ("2026-10-19", "moneycontrol_recos", "F", "46 stocks.mc_slug point at another company (TRIDENT → Trent, ASHOKA → Ashok "
+     "Leyland): their broker targets were another company's",
+     "slugs from the pre-2026-05-25 first-URL discovery; the producer gate's name test (similarity ≥ 0.55) passed them, "
+     "and autosuggest now 403s python-requests so nothing re-checked them",
+     "one strict rule validators.identity_check.mc_name_matches (gate + discovery + industry_audit); discovery needs "
+     "the ISIN or symbol + name, via a chrome session; --rediscover --sids; wrong rows quarantined", "fix-agent 2026-10-19"),
+    ("2026-10-19", "bse_shp_xbrl", "F", "RBZ had two Dec-2023 shareholding 'quarters' (2023-12-22 and 2023-12-31)",
+     "listing-day (Reg 31(1)(a)) and capital-restructuring (31(1)(c)) patterns stored as quarters",
+     "bse_shp.is_quarterly keeps 31(1)(b) only; the non-quarterly filings' rows deleted (CSV backup)", "fix-agent 2026-10-19"),
     ("2026-09-28", "banking_metrics", "D", "every quarantine write failed: no column _book_value_cr (found by the run log's output tail)",
      "quarantine_row passed the in-flight helper column to the mirror table",
      "quarantine_row drops underscore helper keys; write_verdicts failures now a run-log WARN", "plan 0018 run log"),
@@ -685,7 +693,8 @@ INCIDENTS = [
      "Screener h1 '&amp;' vs stocks.name 'and' — the normaliser kept 'amp'",
      "html.unescape + '&'→'and' in validators/identity_check._normalise_company_name", "plan 0018 run log"),
     ("2026-09-28", "scrip_master", "B", "fallback route ListOfScrips.csv returns 404 (first canary run)",
-     "third-party GitHub mirror removed", "OPEN — route marked dead; Upstox primary healthy; find a BSE-direct list",
+     "LISTOFSCRIPS_URL named branch main; the mirror's branch is master (it was never removed)",
+     "URL → .../master/ (7,407 rows); route revived 2026-10-19; a failed supplement now reaches run_events",
      "plan 0018 P0"),
     ("2026-09-28", "nse_legacy_bhavcopy", "F", "PREVCLOSE/CLOSE(t-1) factor = 1.0 on a 1:1 bonus",
      "legacy PREVCLOSE is unadjusted", "adjust via corporate_actions or HF adj_close", "research 0005"),

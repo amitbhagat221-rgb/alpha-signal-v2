@@ -33,7 +33,9 @@ persons-acting-in-concert section) gets shares / total shares.
 
 PIT: `filed_at` is the BSE broadcast time. A revised filing for the same quarter is a
 new set of rows with a later `filed_at`; read the latest `filed_at` at or before the
-as-of date. Append-only (INSERT OR IGNORE).
+as-of date. Append-only (INSERT OR IGNORE). Quarterly patterns only (Regulation 31(1)(b),
+is_quarterly): a listing-day or capital-restructuring pattern is dated its own day and
+read as an extra quarter (RBZ: 2023-12-22 next to 2023-12-31), so it is not stored.
 
 Coverage: stocks with a BSE scrip code (2,199 of 2,448). NSE-only names are not covered.
 
@@ -114,6 +116,30 @@ def _facts(text):
         name = a.get("name", "")
         if name.startswith("in-bse-shp:"):
             yield name.split(":", 1)[1], a.get("contextRef"), _TAG.sub("", value).strip()
+
+
+QUARTER_ENDS = ("03-31", "06-30", "09-30", "12-31")
+_FILED_UNDER = re.compile(r"ShareholdingPatternFiledUnder['\"]?[^>]*>([^<]*)")
+_REG_31_1_B = re.compile(r"31\s*\(\s*1\s*\)\s*\(\s*b\s*\)", re.I)
+
+
+def filed_under(text):
+    """The filing's `ShareholdingPatternFiledUnder` ("Regulation 31 (1) (b)"), or None."""
+    m = _FILED_UNDER.search(text or "")
+    return re.sub(r"\s+", " ", html.unescape(m.group(1))).strip() or None if m else None
+
+
+def is_quarterly(text, end_date):
+    """A quarterly pattern (SEBI LODR Regulation 31(1)(b)). The other two are not a
+    quarter: 31(1)(a) is the listing-day pattern and 31(1)(c) the one after a capital
+    restructuring, each dated its own day — RBZ's listing pattern (2023-12-22) sat next
+    to its Dec-2023 quarter (2023-12-31) as a second 'quarter', and a pattern dated a few
+    days after a quarter end broke the 70-120 day gap pit_ownership_flows needs. A filing
+    without the field (none seen) counts when it is dated a quarter end."""
+    fu = filed_under(text)
+    if fu:
+        return bool(_REG_31_1_B.search(fu))
+    return bool(end_date) and str(end_date)[5:10] in QUARTER_ENDS
 
 
 def _number(value):
@@ -305,7 +331,10 @@ def harvest_stock(api, files, sid, scrip_cd, quarters, skip_stored=True, errors=
     """Rows for the latest `quarters` XBRL filings of one stock that are not stored yet:
     named holders, and one category-totals row per filing (tagged `_table`).
     A filing that could not be fetched is appended to `errors` (when given)."""
-    filings = fetch_index(api, scrip_cd)[:quarters]
+    # an index row dated off a quarter end is a listing / restructuring pattern: it must
+    # not take the place of the latest quarter in `quarters` (the file is checked again below)
+    filings = [f for f in fetch_index(api, scrip_cd)
+               if not f["end_date"] or f["end_date"][5:10] in QUARTER_ENDS][:quarters]
     have = _stored(sid) if skip_stored else set()
     fetched_at = datetime.now().isoformat(timespec="seconds")
     rows = []
@@ -319,6 +348,11 @@ def harvest_stock(api, files, sid, scrip_cd, quarters, skip_stored=True, errors=
             runlog.item_error(LABEL, f"{sid} {f['url']}", e)
             if errors is not None:
                 errors.append(f["url"])
+            continue
+        end = (cats or {}).get("end_date") or (holders[0]["end_date"] if holders else f["end_date"])
+        if not is_quarterly(text, end):
+            runlog.note(f"{sid}: not a quarterly pattern ({filed_under(text) or 'dated ' + str(end)}), skipped",
+                        url=f["url"])
             continue
         if not holders:
             runlog.item_failed(LABEL, f"{sid} {f['url']}", "filing parsed to 0 named holders")
@@ -355,7 +389,10 @@ def reparse(chunk=2000):
         if not path.exists():
             n_missing += 1
             continue
-        cats = parse_categories(gzip.decompress(path.read_bytes()).decode("utf-8-sig", "replace"))
+        text = gzip.decompress(path.read_bytes()).decode("utf-8-sig", "replace")
+        cats = parse_categories(text)
+        if cats is not None and not is_quarterly(text, cats["end_date"]):
+            continue                                  # listing / restructuring pattern: not a quarter
         if cats is None:
             n_empty += 1
             runlog.item_failed(LABEL, f"{f.sid} {f.source_url}", "filing has no category totals")
