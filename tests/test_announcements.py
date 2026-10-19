@@ -123,7 +123,7 @@ def _kinds(conn, rows):
             _bse(conn, f"b{i}", "S", sub, "2026-06-01T10:00:00", title)
         else:
             _nse(conn, f"n{i}", "S", sub, title, "2026-10-15 10:00:00")
-    ev = A.events({k: FLAGS[k] for k in ("fraud", "default")}, conn=conn)
+    ev = A.events({k: FLAGS[k] for k in ("fraud", "default")}, conn)
     return {t: set(ev.loc[ev["headline"] == t, "kind"]) for _, _, t in rows}
 
 
@@ -208,9 +208,9 @@ def test_kind_dedupe_and_window(conn):
     _bse(conn, "b2", "T", "Initiation of Corporate Insolvency Resolution Process (CIRP) by Financial Creditors",
          "2026-10-11T10:00:00")
     _nse(conn, "n2", "T", "Corporate Insolvency Resolution Process", "x", "2026-10-12 10:00:00")   # other subcat, same kind
-    ev = A.events({"cirp": FLAGS["cirp"]}, since="2026-10-10", until="2026-10-19", conn=conn)
+    ev = A.events({"cirp": FLAGS["cirp"]}, conn, since="2026-10-10", until="2026-10-19")
     assert sorted(zip(ev["sid"], ev["source"])) == [("S", "bse_announcements"), ("T", "bse_announcements")]
-    assert A.events({"cirp": FLAGS["cirp"]}, since="2026-10-11", conn=conn).empty      # since is exclusive
+    assert A.events({"cirp": FLAGS["cirp"]}, conn, since="2026-10-11").empty      # since is exclusive
 
 
 def test_kind_spec_rejects_unknown_columns():

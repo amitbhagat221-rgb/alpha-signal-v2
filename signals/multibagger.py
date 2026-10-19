@@ -429,7 +429,8 @@ def red_flag_events(as_of, conn=None):
     > as_of - red_flag_days. The same filing on both exchanges is one event (BSE's row is kept)."""
     as_of = str(as_of)[:10]
     since = (pd.Timestamp(as_of) - pd.Timedelta(days=MB_THESIS["red_flag_days"])).date().isoformat()
-    return announcements.events(MB_THESIS["red_flags"], since=since, until=as_of, conn=conn)[RED_FLAG_COLS]
+    return announcements.events(MB_THESIS["red_flags"], read_sql if conn is None else conn, since=since,
+                                until=as_of)[RED_FLAG_COLS]
 
 
 def _red_flags(as_of):

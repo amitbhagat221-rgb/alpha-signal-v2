@@ -137,7 +137,7 @@ def red_flags(conn, kinds=None):
     MB_THESIS["red_flags"] through signals.announcements (BSE history + NSE live, ADR 0082). Since 2026-10-19
     the kinds include fraud and loan/debt default (Amit); `kinds` narrows them (e.g. the pre-2026-10-19 pair)."""
     spec = {k: v for k, v in MB_THESIS["red_flags"].items() if kinds is None or k in kinds}
-    b = announcements.events(spec, conn=conn).rename(columns={"date": "d"})[["sid", "d"]]
+    b = announcements.events(spec, conn).rename(columns={"date": "d"})[["sid", "d"]]
     return b.dropna()
 
 

@@ -26,7 +26,7 @@ into both arms. Columns (COLUMNS):
   attachment  BSE attachment GUID / NSE attachment URL
 
 `kind_sql(spec)` turns an event-kind spec ({"match": [{column: [LIKE, ...]}, ...], "exclude": [LIKE on title]})
-into a WHERE condition on those columns; `events(kinds, since, until)` returns one row per (filing, kind) —
+into a WHERE condition on those columns; `events(kinds, src, since, until)` returns one row per (filing, kind) —
 the multibagger red-flag gate (config.MB_THESIS["red_flags"]) live and in the backtest.
 """
 
@@ -108,24 +108,28 @@ def kind_sql(spec, alias="a"):
     return cond
 
 
-def read(query, params=None, conn=None):
-    if conn is None:
-        from db import read_sql
-        return read_sql(query, params)
-    return pd.read_sql_query(query, conn, params=params)
+def _reader(src):
+    """src: a DB connection, or a read function (sql, params) -> DataFrame such as db.read_sql (signals/ never
+    imports db itself — tests/test_invariant_ratchets.py)."""
+    if hasattr(src, "execute"):
+        return lambda q, p: pd.read_sql_query(q, src, params=p)
+    if callable(src):
+        return src
+    raise TypeError("announcements: pass a DB connection or a read function such as db.read_sql")
 
 
 EVENT_COLS = ["sid", "kind", "date", "source", "headline"]
 
 
-def events(kinds, since=None, until=None, conn=None):
-    """One row per (filing, kind) for the given kinds ({kind: spec}): [sid, kind, date (Timestamp), source,
+def events(kinds, src, since=None, until=None):
+    """One row per (filing, kind) for the given kinds ({kind: spec}), read through `src` (a DB connection or
+    db.read_sql): [sid, kind, date (Timestamp), source,
     headline (the title)], mapped sids only, newest first. since is exclusive, until inclusive (filing dates,
     YYYY-MM-DD). Beyond sql()'s same-subcategory dedupe, an NSE event is dropped when BSE has the same sid and KIND
     within DEDUPE_DAYS (a kind can span several BSE subcategories, e.g. the CIRP ones); BSE's row is kept — also
     when it falls just before `since` (read DEDUPE_DAYS earlier, dedupe, then cut). A BSE twin after `until` is not
     knowable at `until`, so it never drops an NSE event (point in time)."""
-    parts = []
+    read, parts = _reader(src), []
     lo = None if not since else (pd.Timestamp(str(since)[:10]) - pd.Timedelta(days=DEDUPE_DAYS)).date().isoformat()
     for kind, spec in kinds.items():
         where, params = ["a.sid IS NOT NULL", kind_sql(spec)], []
@@ -137,7 +141,7 @@ def events(kinds, since=None, until=None, conn=None):
             params.append(str(until)[:10])
         q = (f"SELECT a.sid, substr(a.dt_tm, 1, 10) AS date, a.source, a.title AS headline FROM ({sql()}) a "
              f"WHERE {' AND '.join(where)}")
-        parts.append(read(q, params, conn).assign(kind=kind))
+        parts.append(read(q, params).assign(kind=kind))
     ev = pd.concat(parts, ignore_index=True) if parts else pd.DataFrame(columns=EVENT_COLS)
     ev["date"] = pd.to_datetime(ev["date"])
     is_nse = ev["source"] == "nse_announcements"
