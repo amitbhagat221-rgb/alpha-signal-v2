@@ -115,13 +115,37 @@ def test_volume_band_self_calibrates(monkeypatch):
     import checks.feeds as CF
     stable = [2000] * 30 + [900]                          # a stable step suddenly at 45 %
     noisy = [100, 5, 300, 20, 1, 250, 8, 400, 30, 2] * 3 + [3]
-    hist = pd.DataFrame([("fetch_bhavcopy", i, r) for i, r in enumerate(stable)] +
-                        [("fetch_corp_actions", 100 + i, r) for i, r in enumerate(noisy)],
-                        columns=["step", "ord", "rows"])
+    hist = pd.DataFrame([("fetch_bhavcopy", f"2026-09-{i:02d}", i, r) for i, r in enumerate(stable)] +
+                        [("fetch_corp_actions", f"2026-09-{i:02d}", 100 + i, r) for i, r in enumerate(noisy)],
+                        columns=["step", "t", "ord", "rows"])
     monkeypatch.setattr("db.read_sql", lambda q, params=None: hist if "pipeline_log" in q else pd.DataFrame(columns=hist.columns))
     b = CF.volume_bands(["fetch_bhavcopy", "fetch_corp_actions"])
     assert b["fetch_bhavcopy"]["stable"] and round(b["fetch_bhavcopy"]["ratio"], 2) == 0.45
     assert not b["fetch_corp_actions"]["stable"], "noisy steps are never judged"
+
+
+def test_volume_band_periodic_peak_and_one_source_per_step(monkeypatch):
+    """news_desk 2026-10-19: 1 row a day, 9 on Mondays (daily edition + 7 theme notes + the
+    weekly edition) — a weekly peak, not a duplicate write. And a pipeline step's run_end
+    rows (run_events) are the same runs as its pipeline_log rows: never counted twice."""
+    import checks.feeds as CF
+    monkeypatch.setattr("checks.feeds.backfill_active", lambda *a, **k: False)
+    week = [9, 1, 1, 1, 1, 1, 1]
+    desk = (week * 4)[1:] + [9]                           # 28 days, the latest a Monday
+    pl = pd.DataFrame([("news_desk", f"2026-09-{i + 1:02d}T03:55:00", 20000 + i, r) for i, r in enumerate(desk)],
+                      columns=["step", "t", "ord", "rows"])
+    ev = pl.assign(ord=pl["ord"] - 19000, t=pl["t"] + ".000+00:00")             # same runs, unrelated ids
+    ev = pd.concat([ev, pd.DataFrame([("cron_x", f"2026-09-{i + 1:02d}", i, 100) for i in range(15)],
+                                     columns=ev.columns)], ignore_index=True)
+    monkeypatch.setattr("db.read_sql", lambda q, params=None: pl if "pipeline_log" in q else ev)
+    b = CF.volume_bands(["news_desk", "cron_x"])
+    assert b["news_desk"]["n"] == len(desk), "pipeline_log only: run_events rows of the same runs are dropped"
+    assert b["news_desk"]["spiky"] and round(b["news_desk"]["ratio"]) == 9
+    assert b["cron_x"]["n"] == 15, "a cron job without pipeline_log rows still uses run_events"
+    row = _row(tier="T2", volume={"news_desk": b["news_desk"]})
+    assert _sev(row, "FEED_VOLUME_SPIKE") == [], "a recurring peak is not a spike"
+    one_off = dict(b["news_desk"], spiky=False)
+    assert _sev(_row(tier="T2", volume={"news_desk": one_off}), "FEED_VOLUME_SPIKE") == ["WARN"]
 
 
 def _row(tier="T1", volume=None, reconcile=None):
