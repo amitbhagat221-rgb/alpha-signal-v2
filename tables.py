@@ -912,7 +912,7 @@ TABLES = {
     },
     "row_issues": {
         "kind": "COMPUTED", "domain": "Pipeline", "date_col": None,
-        "description": 'Rows rejected or flagged (quarantine, failed data gates, pull errors), with the row as JSON and a resolution slot.',
+        "description": 'Rows rejected or flagged (quarantine, failed data gates, pull errors), with the row as JSON. Open while resolved_at IS NULL; a fixed issue is closed (resolved_at + resolution), never deleted.',
     },
 }
 

@@ -315,7 +315,8 @@ def checks(c):
            *_one(c, f"SELECT COUNT(*) FROM check_results WHERE check_id={ck.get('uhs', -1)}"), None, None, "")
     yield ("trust_verdicts", *_one(c, "SELECT COUNT(*) FROM trust_verdicts"),
            _one(c, f"SELECT COUNT(*) FROM check_results WHERE check_id={ck.get('trust_gate', -1)}")[0]
-           + _one(c, "SELECT COUNT(*) FROM row_issues WHERE rule LIKE 'trust:%'")[0], None, None, "TRUSTED rows → check_results, others → row_issues")
+           + _one(c, "SELECT COUNT(*) FROM row_issues WHERE rule LIKE 'trust:%' AND resolved_at IS NULL")[0], None, None,
+           "TRUSTED rows → check_results, others → open row_issues (closed ones are history)")
     yield ("feed_checks", *_one(c, "SELECT COUNT(*) FROM (SELECT 1 FROM feed_checks GROUP BY check_kind, feed, COALESCE(route,''), run_date)"),
            *_one(c, "SELECT COUNT(*) FROM check_results WHERE check_id IN (SELECT catalog_id FROM catalog WHERE kind='check' AND name LIKE 'feed\\_%' ESCAPE '\\')"),
            None, None, "distinct (kind, feed, route, day)")
