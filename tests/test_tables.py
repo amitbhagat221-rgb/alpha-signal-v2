@@ -44,7 +44,10 @@ def test_entries_are_well_formed(schema_db):
 
 
 def test_derived_views():
-    assert db.BEST_EFFORT_STALE == {"insider_trades", "bars_daily", "regulatory_batches"}   # bars_daily: v3 shadow (ADR 0054); regulatory_batches: API fallback only (plan 0016)
+    assert db.BEST_EFFORT_STALE == {"insider_trades", "bars_daily"}   # bars_daily: v3 shadow (ADR 0054)
+    # regulatory_batches: API-fallback bookkeeping only (plan 0016) — untracked, not best-effort-stale
+    assert TABLES["regulatory_batches"]["date_col"] is None
+    assert db._compute_freshness(None, "daily", "regulatory_batches")[0] == "N/A"
     assert "stock_prices" in db.DUCKDB_MIRRORED_TABLES
     assert db.STALENESS_OVERRIDES["_file_duckdb_replica"] == 2
     assert all(f"{t}_quarantine" in TABLES for t in db.QUARANTINE_SOURCE_TABLES)
