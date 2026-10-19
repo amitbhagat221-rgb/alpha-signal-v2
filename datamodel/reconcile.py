@@ -71,9 +71,31 @@ def _close(a, b):
     return abs(a - b) <= RTOL * max(1.0, abs(a), abs(b))
 
 
+def watermark(c, step):
+    """Start time of the last successful sync that ran `step` (rows fetched after it are not in v3 yet), or None."""
+    best = None
+    for started, steps in c.execute("SELECT started_at, json_extract(attrs, '$.steps') FROM runs "
+                                    "WHERE kind='datamodel_sync' AND status='ok'"):
+        if (steps is None or step in steps.split(",")) and (best is None or started > best):
+            best = started
+    return best
+
+
+def late(col, wm):
+    """SQL: the legacy row was fetched after the sync read the table. Its rows wait for the next sync; they are left
+    out of both sides (by key on the v3 side), so a row the sync failed to carry still fails the next day. 2026-10-19:
+    a reconcile run at 19:04 counted the 14:00 forward harvest (nse_announcements +316, surveillance_flags +139, ...)
+    as missing from v3. fetched_at is stored both as 'YYYY-MM-DD HH:MM:SS' and ISO 'T'; compare normalised."""
+    if wm is None:
+        return "0"
+    return f"COALESCE(replace({col}, 'T', ' ') > '{wm.replace('T', ' ')}', 0)"
+
+
 def checks(c):
     """Yield (legacy_table, old_count, new_count, old_sum, new_sum, note)."""
     ids = lambda k: cat_ids(c, k)
+    wm_series, wm_events = watermark(c, "series"), watermark(c, "events")
+    wm_note = lambda wm: f"; rows fetched after the sync ({wm}) wait for the next one" if wm else ""
     # reference
     yield ("stocks", *_one(c, "SELECT COUNT(*) FROM stocks"),
            *_one(c, "SELECT COUNT(*) FROM entities e JOIN stocks s ON e.kind='security' AND e.market='IN' AND e.key=s.sid"), None, None,
@@ -110,18 +132,26 @@ def checks(c):
     # series / facts / estimates: latest version per key vs the legacy cells
     lv = lambda t, keys: f"""(SELECT x.* FROM {t} x JOIN (SELECT {keys}, MAX(fetched_at) mf FROM {t} GROUP BY {keys}) m
                               USING ({keys}) WHERE x.fetched_at = m.mf)"""
-    s_lv = lv("series_values", "series_id, date")
     old_n = old_s = 0
-    for x in ("value", "yoy_change", "mom_change"):
-        n, sm = _one(c, f"SELECT COUNT({x}), SUM({x}) FROM macro_history")
+    seen = lambda: f"NOT {late('fetched_at', wm_series)}"
+    late_keys = []                                   # (series name, date) of the legacy rows the sync has not read yet
+    for x, suf in (("value", ""), ("yoy_change", ".yoy"), ("mom_change", ".mom")):
+        n, sm = _one(c, f"SELECT COUNT({x}), SUM({x}) FROM macro_history WHERE {seen()}")
         old_n += n; old_s += sm or 0
-    for t, skip in (("fii_dii_cash_flow", {"flow_date", "category"}), ("fii_dii_positioning", {"trade_date", "client_type"})):
+        late_keys.append(f"SELECT 'macro.' || indicator_id || '{suf}' AS name, date AS d FROM macro_history WHERE NOT ({seen()})")
+    for t, skip, kcol, dcol, pre in (("fii_dii_cash_flow", {"flow_date", "category"}, "category", "flow_date", "fii_dii_cash"),
+                                     ("fii_dii_positioning", {"trade_date", "client_type"}, "client_type", "trade_date", "fii_dii_pos")):
         for x, ty in coltypes(c, t).items():
             if x not in skip and ty in ("REAL", "INTEGER"):
-                n, sm = _one(c, f"SELECT COUNT({x}), SUM({x}) FROM {t}")
+                n, sm = _one(c, f"SELECT COUNT({x}), SUM({x}) FROM {t} WHERE {seen()}")
                 old_n += n; old_s += sm or 0
+                late_keys.append(f"SELECT '{pre}.' || {kcol} || '.{x}' AS name, {dcol} AS d FROM {t} WHERE NOT ({seen()})")
+    s_lv = lv("series_values", "series_id, date")
+    if wm_series:
+        s_lv = f"""(SELECT * FROM {s_lv} WHERE (series_id, date) NOT IN (SELECT k.catalog_id, l.d FROM
+                   ({' UNION ALL '.join(late_keys)}) l JOIN catalog k ON k.kind='series' AND k.name=l.name))"""
     yield ("macro_history+fii_dii_cash_flow+fii_dii_positioning", old_n, *_one(c, f"SELECT COUNT(value) FROM {s_lv}"), old_s,
-           *_one(c, f"SELECT SUM(value) FROM {s_lv}"), "latest version per (series, date)")
+           *_one(c, f"SELECT SUM(value) FROM {s_lv}"), "latest version per (series, date)" + wm_note(wm_series))
     yield ("macro_indicator_meta", *_one(c, "SELECT COUNT(*) FROM macro_indicator_meta"),
            *_one(c, "SELECT COUNT(*) FROM catalog WHERE kind='series' AND json_extract(spec, '$.meta') IS NOT NULL"), None, None,
            "catalog series spec.meta")
@@ -170,12 +200,18 @@ def checks(c):
     et = ids("event_type")
     for t, spec in EVENT_SPECS.items():
         if exists(c, t):
-            yield (t, *_one(c, f"SELECT COUNT(*) FROM {t}"), *_one(c, f"SELECT COUNT(*) FROM events WHERE source='{t}' AND type_id={et[spec[0]]}"),
-                   None, None, "")
-    yield ("market_events", *_one(c, "SELECT COUNT(*) FROM market_events"),
+            wm = wm_events if "fetched_at" in cols(c, t) else None
+            lt = late("t.fetched_at", wm)
+            yield (t, *_one(c, f"SELECT COUNT(*) FROM {t} t WHERE NOT {lt}"),
+                   *_one(c, f"""SELECT COUNT(*) FROM events WHERE source='{t}' AND type_id={et[spec[0]]} AND source_key NOT IN
+                               (SELECT CAST({spec[1]} AS TEXT) FROM {t} t WHERE {lt} AND {spec[1]} IS NOT NULL)"""),
+                   None, None, wm_note(wm).lstrip("; "))
+    lt = late("fetched_at", wm_events)
+    yield ("market_events", *_one(c, f"SELECT COUNT(*) FROM market_events WHERE NOT {lt}"),
            *_one(c, "SELECT COUNT(*) FROM events WHERE source IN (SELECT DISTINCT source FROM market_events) "
-                    "AND type_id IN (SELECT catalog_id FROM catalog WHERE kind='event_type' AND name IN (SELECT DISTINCT type FROM market_events))"),
-           None, None, "")
+                    "AND type_id IN (SELECT catalog_id FROM catalog WHERE kind='event_type' AND name IN (SELECT DISTINCT type FROM market_events)) "
+                    f"AND (source, source_key) NOT IN (SELECT source, source_key FROM market_events WHERE {lt})"),
+           None, None, wm_note(wm_events).lstrip("; "))
     yield ("corporate_adjustments", *_one(c, f"SELECT COUNT(*) FROM corporate_adjustments t JOIN entities e ON {SEC}=t.sid"),
            *_one(c, f"SELECT COUNT(*) FROM events WHERE type_id={et['price_adjustment']}"),
            *_one(c, f"SELECT SUM(factor) FROM corporate_adjustments t JOIN entities e ON {SEC}=t.sid"),
@@ -284,10 +320,15 @@ def checks(c):
            *_one(c, "SELECT COUNT(*) FROM check_results WHERE check_id IN (SELECT catalog_id FROM catalog WHERE kind='check' AND name LIKE 'feed\\_%' ESCAPE '\\')"),
            None, None, "distinct (kind, feed, route, day)")
     mirrors = [r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE '%\\_quarantine' ESCAPE '\\'")]
+    # the issue's detected_at is the legacy timestamp, so the same bound applies on both sides (2026-10-19: 308
+    # broker_recommendations quarantines at 19:51, after the 05:34 sync)
+    wm_ops = watermark(c, "ops")
     yield ("quarantine_mirrors(11)+screener_pull_errors",
-           sum(_one(c, f"SELECT COUNT(*) FROM {m}")[0] for m in mirrors) + _one(c, "SELECT COUNT(*) FROM screener_pull_errors")[0],
-           _one(c, "SELECT COUNT(*) FROM row_issues WHERE rule NOT LIKE 'trust:%'")[0] + _one(c, "SELECT COUNT(*) FROM mf.row_issues")[0],
-           None, None, "")
+           sum(_one(c, f"SELECT COUNT(*) FROM {m} WHERE NOT {late('_q_quarantined_at', wm_ops)}")[0] for m in mirrors)
+           + _one(c, f"SELECT COUNT(*) FROM screener_pull_errors WHERE NOT {late('attempted_at', wm_ops)}")[0],
+           _one(c, f"SELECT COUNT(*) FROM row_issues WHERE rule NOT LIKE 'trust:%' AND NOT {late('detected_at', wm_ops)}")[0]
+           + _one(c, f"SELECT COUNT(*) FROM mf.row_issues WHERE NOT {late('detected_at', wm_ops)}")[0],
+           None, None, wm_note(wm_ops).lstrip("; "))
     # mutual funds (mf.db)
     yield ("mf_scheme_master+mf_schemes", *_one(c, """SELECT COUNT(*) FROM (SELECT scheme_code FROM mf_scheme_master UNION SELECT scheme_code FROM mf_schemes
                UNION SELECT scheme_code FROM mf_nav_history UNION SELECT scheme_code FROM mf_holdings UNION SELECT scheme_code FROM mf_sector_allocation

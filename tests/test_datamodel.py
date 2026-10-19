@@ -195,3 +195,88 @@ def test_late_loaded_derivative_rows_of_a_mirrored_date_are_picked_up(v3):
     assert sync.main([]) == 0
     assert _q(path, "SELECT COUNT(*) FROM derivative_bars WHERE date='2024-07-15'") == [(2,)]
     c.close()
+
+
+def test_producer_removals_and_shared_keys_reach_the_mirror(v3):
+    """Regression (parity FAIL from 2026-10-15): a cell the producer NULLed (MF bench_ret_pct for non-equity funds), outcome
+    rows it deleted (compute_pick_outcomes drops superseded rows), and two unresolved sids (mf_holdings verdicts carry
+    the scheme code) sharing a source_key all left v3 out of step: upserts never delete, and the trust subject dropped
+    the sid."""
+    path, sync = v3
+    c = sqlite3.connect(path)
+    c.executescript("""
+        INSERT INTO mf_calendar_returns (scheme_code, year, ret_pct, bench_ret_pct) VALUES ('119551', 2024, 10.0, 8.0), ('119551', 2025, 5.0, 4.0);
+        INSERT INTO pick_outcomes (sid, pick_date, window_days, cap_tier, fwd_return_pct) VALUES
+            ('AAA', date('now','-1 day'), 20, 'LARGE', 2.5), ('AAA', date('now','-1 day'), 63, 'LARGE', 4.0);
+        INSERT INTO portfolio_outcomes (asof_date, window_days, hrp_return_pct) VALUES (date('now','-1 day'), 20, 1.5), (date('now','-1 day'), 63, 3.0);
+        INSERT INTO trust_verdicts (sid, source_table, source_key, datum_class, snapshot_date, verdict_overall) VALUES
+            ('149329', 'mf_holdings', '{"etm_id":42303}', 'mf_holding', '2026-10-10', 'TRUSTED'),
+            ('149327', 'mf_holdings', '{"etm_id":42303}', 'mf_holding', '2026-10-10', 'TRUSTED'),
+            ('AAA', 'stock_prices', '{"date":"2026-10-09"}', 'close', '2026-10-10', 'TRUSTED');
+    """)
+    c.commit()
+    assert sync.main([]) == 0
+    from datamodel import reconcile
+    fails = [r for r in reconcile.run(write=False) if r[1] == "FAIL"]
+    assert not fails, fails                                      # the two schemes are two rows, not one
+    c.executescript("""
+        UPDATE mf_calendar_returns SET bench_ret_pct = NULL WHERE year = 2024;
+        DELETE FROM pick_outcomes WHERE window_days = 63;
+        DELETE FROM portfolio_outcomes WHERE window_days = 63;
+        UPDATE trust_verdicts SET verdict_overall = 'QUARANTINED' WHERE sid = 'AAA';
+    """)
+    c.commit()
+    c.close()
+    assert sync.main([]) == 0
+    m = sqlite3.connect(path.parent / "mf.db")
+    assert m.execute("SELECT win FROM fund_metrics WHERE metric='mf_calendar_returns.bench_ret_pct'").fetchall() == [("2025",)]
+    m.close()
+    assert _q(path, "SELECT horizon_days FROM outcomes ORDER BY 1") == [(20,), (20,)]
+    assert _q(path, """SELECT COUNT(*) FROM check_results r JOIN catalog k ON k.catalog_id=r.check_id
+                       WHERE k.name='trust_gate'""") == [(2,)]          # the verdict that left TRUSTED leaves no stale row
+    fails = [r for r in reconcile.run(write=False) if r[1] == "FAIL"]
+    assert not fails, fails
+
+
+def test_contributions_that_no_longer_sum_are_dropped_only_from_days_not_rebuilt(v3):
+    """Regression (parity FAIL from 2026-10-05): 2026-10-05..08 kept contributions from the pre-ADR-0064 split (a missing
+    factor left out, the rest renormalised), off by up to 0.158 from the base score, and today's weights can no longer
+    rebuild those days. Unbalanced stock-days of a kept day go; a day this sync rebuilt is left as written, so a fault
+    in today's split still fails parity."""
+    path, sync = v3
+    assert sync.main([]) == 0
+    c = sync.connect()
+    run_id, aaa = c.execute("SELECT run_id, entity_id FROM picks").fetchone()      # AAA, base_score 0.8
+    bbb = c.execute("SELECT entity_id FROM entities WHERE key='BBB'").fetchone()[0]  # no picks row that day
+    f1, f2 = (r[0] for r in c.execute("SELECT catalog_id FROM catalog WHERE kind='feature' LIMIT 2"))
+    rows = [(run_id, aaa, f1, None, 0.9, 0.5, 0.5), (run_id, aaa, f2, None, 0.6, 0.5, 0.3), (run_id, bbb, f1, None, 0.5, 1.0, 0.5)]
+    c.executemany("INSERT INTO pick_contributions VALUES (?,?,?,?,?,?,?)", rows)
+    assert sync._purge_unbalanced_contributions(c, {run_id}) == 0               # rebuilt today: untouched
+    assert sync._purge_unbalanced_contributions(c, set()) == 1                  # BBB has no picks row; AAA sums to 0.8
+    c.execute("UPDATE pick_contributions SET contribution = 0.2 WHERE entity_id = ? AND feature_id = ?", (aaa, f2))
+    assert sync._purge_unbalanced_contributions(c, set()) == 2                  # AAA now sums to 0.7
+    assert c.execute("SELECT COUNT(*) FROM pick_contributions").fetchone()[0] == 0
+    c.close()
+
+
+def test_parity_waits_for_rows_fetched_after_the_sync_but_still_catches_a_dropped_row(v3):
+    """Regression (2026-10-19): a reconcile run at 19:04 counted the 14:00 forward harvest as missing from v3
+    (nse_announcements 4,120 → 3,804, surveillance_flags, short_selling, fii_dii series, quarantines, ...). Rows fetched after the
+    sync are left out until the next one; a row the sync should have carried still fails."""
+    path, sync = v3
+    assert sync.main([]) == 0
+    c = sqlite3.connect(path)
+    c.execute("INSERT INTO bulk_deals (sid, symbol, client_name, buy_sell, quantity, price, deal_date, fetched_at) "
+              "VALUES ('AAA', 'AAA', 'Late Fund', 'BUY', 5, 99, date('now'), '2099-01-01T00:00:00')")
+    c.execute("INSERT INTO fii_dii_cash_flow (flow_date, category, buy_value_cr, fetched_at) VALUES (date('now'), 'FII', 10.0, '2099-01-01 00:00:00')")
+    c.execute("INSERT INTO screener_pull_errors (sid, error_type, attempted_at) VALUES ('AAA', 'http', '2099-01-01 00:00:00')")
+    c.commit()
+    from datamodel import reconcile
+    fails = [r for r in reconcile.run(write=False) if r[1] == "FAIL"]
+    assert not fails, fails
+    c.execute("UPDATE bulk_deals SET fetched_at = '2020-01-01 00:00:00' WHERE client_name = 'Late Fund'")   # seen, never carried
+    c.execute("UPDATE screener_pull_errors SET attempted_at = '2020-01-01 00:00:00'")
+    c.commit()
+    c.close()
+    fails = sorted(r[0] for r in reconcile.run(write=False) if r[1] == "FAIL")
+    assert fails == ["bulk_deals", "quarantine_mirrors(11)+screener_pull_errors"], fails

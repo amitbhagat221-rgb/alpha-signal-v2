@@ -1114,6 +1114,17 @@ def sync_decisions(c, full, sync_run):
             FROM portfolio_outcomes d JOIN runs r ON r.kind='morning' AND r.as_of_date=d.asof_date WHERE true
             ON CONFLICT(run_id, entity_id, horizon_days) DO UPDATE SET ret=excluded.ret, bench_ret=excluded.bench_ret,
                excess=excluded.excess, attrs=excluded.attrs, computed_at=excluded.computed_at""").rowcount
+        # outcomes the producer has since removed: compute_pick_outcomes deletes superseded rows (weekend/holiday pick
+        # dates, pairs the adjusted label rejects; 628534c, 2026-10-10) and the upserts above never delete
+        n_gone = c.execute(f"""DELETE FROM outcomes WHERE run_id IN (SELECT run_id FROM runs WHERE kind='morning')
+            AND entity_id IN (SELECT entity_id FROM entities WHERE kind='security') AND NOT EXISTS
+            (SELECT 1 FROM runs r JOIN entities e ON e.entity_id=outcomes.entity_id
+               JOIN pick_outcomes d ON d.sid=e.key AND d.pick_date=r.as_of_date AND d.window_days=outcomes.horizon_days
+             WHERE r.run_id=outcomes.run_id AND {SEC}=d.sid)""").rowcount
+        n_gone += c.execute("""DELETE FROM outcomes WHERE run_id IN (SELECT run_id FROM runs WHERE kind='morning')
+            AND entity_id = (SELECT entity_id FROM entities WHERE kind='portfolio' AND key='book') AND NOT EXISTS
+            (SELECT 1 FROM runs r JOIN portfolio_outcomes d ON d.asof_date=r.as_of_date AND d.window_days=outcomes.horizon_days
+             WHERE r.run_id=outcomes.run_id)""").rowcount
         # today's official run carries the code version and the regime it ran under
         sha, dirty = git_sha()
         regime = c.execute("SELECT json_object('regime', regime, 'vix_latest', vix_latest, 'vix_20d_avg', vix_20d_avg, 'alloc_large', alloc_large, "
@@ -1122,7 +1133,8 @@ def sync_decisions(c, full, sync_run):
                   "WHERE kind='morning' AND as_of_date=?", (sha, dirty, regime[0] if regime else "null", TODAY))
     n_r = sync_replay_docs(c, full)
     n_c = sync_contributions(c, full)
-    log(f"decisions: picks {n_p}, book {n_b}, outcomes {n_o}+{n_po}, replay docs {n_r}, contributions {n_c}")
+    log(f"decisions: picks {n_p}, book {n_b}, outcomes {n_o}+{n_po} (-{n_gone} removed upstream), replay docs {n_r}, "
+        f"contributions {n_c}")
 
 
 def sync_replay_docs(c, full):
@@ -1162,6 +1174,7 @@ def sync_contributions(c, full):
     cat_ensure(c, "feature", list(factors.SIGNAL_WEIGHTS.get("LARGE", {})) + [k for t in factors.SIGNAL_WEIGHTS.values() for k in t])
     fids = cat_ids(c, "feature")
     kept = skipped = 0
+    rebuilt_runs = set()
     ent = _ent_map(c, "security")
     for d in todo:
         rows = pd.read_sql("SELECT sid, inputs_json FROM pit_replay_snapshots WHERE snapshot_date=?", c, params=[d])
@@ -1212,8 +1225,27 @@ def sync_contributions(c, full):
             c.executemany("""INSERT INTO pick_contributions VALUES (?,?,?,?,?,?,?) ON CONFLICT(run_id, entity_id, feature_id)
                 DO UPDATE SET raw=excluded.raw, pctile=excluded.pctile, weight=excluded.weight, contribution=excluded.contribution""", out)
             kept += 1
-    log(f"contributions: {kept} dates kept, {skipped} skipped (weights differed from today's), {len(dates) - len(todo)} unchanged")
+            rebuilt_runs.add(rid[0])
+    with tx(c):
+        purged = _purge_unbalanced_contributions(c, rebuilt_runs)
+    log(f"contributions: {kept} dates kept, {skipped} skipped (weights differed from today's), {len(dates) - len(todo)} unchanged, "
+        f"{purged} rows dropped from earlier days (their terms no longer summed to the base score)")
     return kept
+
+
+def _purge_unbalanced_contributions(c, rebuilt_runs, atol=1e-9):
+    """A day today's weights cannot rebuild keeps the contributions an earlier sync wrote, but only for the stocks whose
+    terms still sum to the stored base score. The 2026-10-05..08 rows were written before 7d7f5df (2026-10-14) by the
+    pre-ADR-0064 split, which left a missing factor out and renormalised the rest: every stock missing a factor was
+    off (up to 0.158) and stocks with no picks row were written too. Today's weights changed on 2026-10-13, so those
+    days are never rewritten and failed parity for good. Days rebuilt by this sync (`rebuilt_runs`) are left alone,
+    so a fault in today's split still fails parity. Returns the rows dropped."""
+    skip = ",".join(str(int(r)) for r in rebuilt_runs) or "-1"
+    return c.execute(f"""DELETE FROM pick_contributions WHERE (run_id, entity_id) IN (
+        SELECT x.run_id, x.entity_id FROM (SELECT run_id, entity_id, SUM(contribution) s FROM pick_contributions
+                                           WHERE run_id NOT IN ({skip}) GROUP BY run_id, entity_id) x
+        LEFT JOIN picks p ON p.run_id = x.run_id AND p.entity_id = x.entity_id
+        WHERE p.attrs ->> '$.base_score' IS NULL OR ABS(x.s - (p.attrs ->> '$.base_score')) > {atol})""").rowcount
 
 
 # ─────────────────────────── research ───────────────────────────
@@ -1330,8 +1362,13 @@ def sync_ops(c, full):
                checked_at=excluded.checked_at""").rowcount
         tvc = [x for x in cols(c, "trust_verdicts") if x not in ("sid", "source_table", "source_key", "datum_class", "snapshot_date",
                                                                   "verdict_overall", "computed_at")]
+        # Rebuilt whole (it is all re-upserted daily anyway), so a verdict that left TRUSTED leaves no stale row.
+        # A sid with no security entity (mf_holdings verdicts carry the scheme code) keeps the sid in the subject: two
+        # schemes on one ETMoney page share a source_key and collapsed into one row (parity off by 2 from 2026-10-15).
+        c.execute(f"DELETE FROM check_results WHERE check_id={ck['trust_gate']}")
         n_ck += c.execute(f"""INSERT INTO check_results(check_id, subject, entity_id, date, status, score, detail, checked_at)
-            SELECT {ck['trust_gate']}, t.source_table || '|' || t.source_key || '|' || t.datum_class, COALESCE(e.entity_id, 0),
+            SELECT {ck['trust_gate']}, t.source_table || '|' || t.source_key || '|' || t.datum_class
+                   || CASE WHEN e.entity_id IS NULL THEN '|' || t.sid ELSE '' END, COALESCE(e.entity_id, 0),
                    t.snapshot_date, t.verdict_overall, NULL, {jobj("t.", tvc)}, COALESCE(t.computed_at, '{NOW}')
             FROM trust_verdicts t LEFT JOIN entities e ON {SEC}=t.sid WHERE t.verdict_overall = 'TRUSTED'
             ON CONFLICT(check_id, subject, entity_id, date) DO UPDATE SET status=excluded.status, detail=excluded.detail,
@@ -1420,7 +1457,28 @@ def sync_mf(c, full):
                 SELECT 'fund', scheme_code, 'mf_calendar_returns.{x}', CAST(year AS TEXT), year || '-12-31', {x}
                 FROM mf_calendar_returns WHERE {x} IS NOT NULL
                 ON CONFLICT(subject_kind, subject, metric, win, as_of) DO UPDATE SET value=excluded.value""").rowcount
-    log(f"mf.db: nav {n_nav}, holdings {n_h}, metrics {n_m}")
+        n_gone = _drop_gone_fund_metrics(c)
+    log(f"mf.db: nav {n_nav}, holdings {n_h}, metrics {n_m}, metrics removed upstream {n_gone}")
+
+
+# fund_metrics source tables: (table, subject kind, subject col, as_of SQL on the legacy row, win SQL, key cols)
+MF_METRIC_TABLES = (("mf_metrics", "fund", "scheme_code", "x.as_of_date", "''", {"scheme_code", "as_of_date"}),
+                    ("mf_rolling_returns", "fund", "scheme_code", "x.anchor_date", "''", {"scheme_code", "anchor_date"}),
+                    ("mf_category_stats", "category", "category_norm", "x.as_of_date", "''", {"category_norm", "as_of_date"}),
+                    ("mf_calendar_returns", "fund", "scheme_code", "x.year || '-12-31'", "CAST(x.year AS TEXT)", {"scheme_code", "year"}))
+
+
+def _drop_gone_fund_metrics(c):
+    """fund_metrics mirrors the legacy cells: the upserts above only ever add or overwrite, so a cell the producer has
+    since NULLed or a row it deleted kept its old value here. 2026-10 (0964cfe): calendar-year bench_ret_pct went NULL
+    for the 16,899 non-equity fund-years and fund_metrics kept every one (parity FAIL from 2026-10-15)."""
+    n = 0
+    for t, kind, subj, asof, win, keys in MF_METRIC_TABLES:
+        vals = [x for x in cols(c, t) if x not in keys]
+        cell = "CASE f.metric " + " ".join(f"WHEN '{t}.{x}' THEN x.{q(x)}" for x in vals) + " END" if vals else "NULL"
+        n += c.execute(f"""DELETE FROM mf.fund_metrics AS f WHERE f.subject_kind='{kind}' AND f.metric LIKE '{t}.%' AND NOT EXISTS
+            (SELECT 1 FROM {t} x WHERE x.{subj}=f.subject AND {asof}=f.as_of AND {win}=f.win AND {cell} IS NOT NULL)""").rowcount
+    return n
 
 
 # ─────────────────────────── history seed from an older snapshot ───────────────────────────
