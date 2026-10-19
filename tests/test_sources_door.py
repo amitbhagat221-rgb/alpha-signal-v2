@@ -602,6 +602,18 @@ def test_scrip_master_build_rows(net, monkeypatch):
     gap_note(net, "raw.githubusercontent.com")
 
 
+def test_scrip_master_supplement_url_and_failure_reach_run_events(net, monkeypatch):
+    """The 2026-09-28 'dead route' was the URL naming branch main (the mirror's branch is
+    master); a failed supplement is no longer print-only — it reaches run_events."""
+    from sources import scrip_master as sm
+    assert "/master/" in sm.LISTOFSCRIPS_URL and "/main/" not in sm.LISTOFSCRIPS_URL
+    net.route("GET", r"raw\.githubusercontent\.com/", resp(404, "404: Not Found"))
+    failed = []
+    monkeypatch.setattr(sm.runlog, "item_failed", lambda *a, **k: failed.append((a, k)))
+    assert sm.fetch_listofscrips() == {}
+    assert len(failed) == 1 and failed[0][1]["symptom"] == "B"
+
+
 # ───────────────────────────── RSS ─────────────────────────────
 
 def test_rss_fetch_news(net, monkeypatch):
@@ -3826,7 +3838,7 @@ SNAP = json.loads(r"""
    "method": "GET",
    "params": null,
    "timeout": 60,
-   "url": "https://raw.githubusercontent.com/rohittihiro/BhavCopy_Equity_Database/main/ListOfScrips.csv"
+   "url": "https://raw.githubusercontent.com/rohittihiro/BhavCopy_Equity_Database/master/ListOfScrips.csv"
   }
  ],
  "scrip_master.rows": [
