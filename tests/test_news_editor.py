@@ -175,9 +175,34 @@ def test_weekly_edition_needs_a_note_and_whitelisted_sectors(ne):
 def test_themes_follow_config(ne, monkeypatch):
     ne.ensure_themes()
     monkeypatch.setattr(config, "NEWS_THEMES", config.NEWS_THEMES[:6])
-    assert len(ne.themes()) == 6
+    assert len(ne.themes()) == 6                        # the read follows config without writing
+    assert db.scalar("SELECT COUNT(*) FROM news_themes WHERE status = 'retired'") == 0
+    ne.ensure_themes()                                  # the producer side retires the dropped theme
     assert db.scalar("SELECT status FROM news_themes WHERE theme_id = ?", [config.NEWS_THEMES[-1][0]]) == "active"
     assert db.scalar("SELECT COUNT(*) FROM news_themes WHERE status = 'retired'") == 1
+
+
+def test_theme_reads_never_wait_on_a_writer(ne):
+    """2026-10-18: every /sectors request 500ed after the 30 s lock wait while datamodel.sync wrote, because reading
+    the themes called ensure_themes() (an INSERT). The read side is read-only now, and ensure_themes() writes nothing
+    when the table already matches config, so neither waits on another connection's write lock."""
+    import sqlite3
+    import time
+    blank = ne.themes()                                  # an empty table works too: config order, no notes yet
+    ne.ensure_themes()
+    writer = sqlite3.connect(db.DB_PATH)
+    writer.execute("BEGIN IMMEDIATE")                    # a long writer holds the write lock
+    writer.execute("UPDATE stocks SET name = name")
+    try:
+        t = time.monotonic()
+        got = ne.themes()
+        ne.ensure_themes()
+        assert time.monotonic() - t < 5
+    finally:
+        writer.rollback()
+        writer.close()
+    assert [x["theme_id"] for x in got] == [x[0] for x in config.NEWS_THEMES] == [x["theme_id"] for x in blank]
+    assert all(x["status"] == "active" and x["stands_now"] is None for x in got)
 
 
 def test_kinds_are_registered_in_drain_order(ne):
