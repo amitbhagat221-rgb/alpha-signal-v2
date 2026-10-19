@@ -15,13 +15,32 @@ from config import SCREEN
 FINANCIAL_SECTORS = set(SCREEN["financial_sectors"])
 
 
+STALE_BASIS_DAYS = 100    # consolidated whose latest quarter ends more than this before standalone's is stale
+
+
 def prefer_consolidated(qi):
-    """Consolidated rows where a sid has any, standalone otherwise. Idempotent."""
+    """One reporting basis per sid: consolidated rows, unless the sid's latest consolidated
+    quarter ends more than STALE_BASIS_DAYS before its latest standalone one — then the
+    standalone rows. Without a consolidated row, standalone. A one-quarter lag (the
+    consolidated print arriving after the standalone) keeps consolidated.
+
+    Point in time by construction: the caller passes the as-of slice (pit.knowable_quarterly),
+    so the choice at each date uses only the quarters knowable then — the live screener and
+    the backtest call this one function. The vendor stopped refreshing consolidated for 24
+    stocks (HDB, FCTL, UCBK …: consolidated to 2025-03, standalone to 2026-06) and every
+    TTM factor read a year-old trailing year. Idempotent. Dates: `end_date`, else `period_end`."""
     if qi is None or qi.empty or "reporting" not in qi.columns:
         return qi
-    has_consol = set(qi.loc[qi["reporting"] == "consolidated", "sid"])
-    keep = (qi["sid"].isin(has_consol) & (qi["reporting"] == "consolidated")) | ~qi["sid"].isin(has_consol)
-    return qi[keep]
+    is_c = qi["reporting"] == "consolidated"
+    col = next((c for c in ("end_date", "period_end") if c in qi.columns), None)
+    if col is None:
+        use_c = pd.Series(True, index=pd.Index(qi.loc[is_c, "sid"].unique()))
+    else:
+        d = pd.to_datetime(qi[col], errors="coerce")
+        c_last = d[is_c].groupby(qi.loc[is_c, "sid"]).max()
+        s_last = d[~is_c].groupby(qi.loc[~is_c, "sid"]).max().reindex(c_last.index)
+        use_c = ~((s_last - c_last).dt.days > STALE_BASIS_DAYS)
+    return qi[qi["sid"].isin(use_c.index[use_c.astype(bool)]) == is_c]
 
 
 def quarters(qi_g, skip=0, n=4):
