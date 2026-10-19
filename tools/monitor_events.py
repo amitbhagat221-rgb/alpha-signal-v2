@@ -40,6 +40,8 @@ import pandas as pd
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
+from signals import announcements  # noqa: E402  (BSE history + NSE live, ADR 0082)
+
 DB = PROJECT_ROOT / "data" / "alpha_signal.db"
 LH = PROJECT_ROOT / "data" / "lh"
 OUT = LH / "v2"
@@ -74,9 +76,9 @@ def run():
     lab["prior_month_pct"] = lab.groupby("sid")["fwd_next_anchor"].shift(1)
 
     ev = []
-    ann = pd.read_sql("SELECT sid, date(dt_tm) AS d, subcategory, lower(headline) AS h FROM bse_announcements "
-                      "WHERE sid IS NOT NULL AND dt_tm IS NOT NULL AND (subcategory IN (%s) OR subcategory='Credit Rating')"
-                      % ",".join("?" * sum(len(v) for v in SUBCAT.values())), con,
+    ph = ",".join("?" * sum(len(v) for v in SUBCAT.values()))
+    ann = pd.read_sql(f"SELECT sid, date(dt_tm) AS d, subcategory, lower(headline) AS h FROM ({announcements.sql()}) a "
+                      f"WHERE sid IS NOT NULL AND dt_tm IS NOT NULL AND (subcategory IN ({ph}) OR subcategory='Credit Rating')", con,
                       params=[x for v in SUBCAT.values() for x in v])
     for name, subs in SUBCAT.items():
         ev.append(ann[ann["subcategory"].isin(subs)].assign(event=name)[["sid", "d", "event"]])

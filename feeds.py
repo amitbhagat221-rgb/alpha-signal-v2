@@ -247,28 +247,19 @@ FEEDS = {
     },
 
     # ═══════════════════════════════ Events & documents ═══════════════════════════════
-    "bse_announcements": {
-        "family": "events", "status": "production",
-        "what": "Every company announcement filed on BSE (results, resignations, ratings…)",
-        "modules": ["sources.bse_announcements"], "schedule": ["cron:forward"],
-        "writes": ["bse_announcements"], "hosts": ["bse_api", "bse"], "cadence": "daily",
-        "routes": [_r("bse_ann_api", "primary", "bse_api", "AnnSubCategoryGetData/w (curl_cffi chrome TLS)")],
-        "serve_stale_days": 3, "canary": "bse_announcements",
-        "pit": "dt_tm dissemination time", "tos": "public exchange data",
-        "fallback_plan": "NSE corporate-announcements API",
-    },
     "nse_announcements": {
-        "family": "events", "status": "probation",
-        "what": "Every company announcement filed on NSE (orders, funding, resignations, ratings...), by watch category",
+        "family": "events", "status": "production",
+        "what": "Every company announcement filed on NSE (results, orders, resignations, ratings...) — the live disclosure source",
         "modules": ["sources.nse_announcements"], "schedule": ["cron:forward"],
         "writes": ["nse_announcements"], "hosts": ["nse"], "cadence": "daily",
-        "routes": [_r("nse_corp_announcements", "fallback", "nse",
-                      "api/corporate-announcements (replaces bse_announcements while BSE's Akamai WAF 403s it)")],
+        "routes": [_r("nse_corp_announcements", "primary", "nse", "api/corporate-announcements")],
         "serve_stale_days": 3, "canary": "nse_announcements",
         "pit": "an_dt announcement time; dissem_dt exchange dissemination time", "tos": "public exchange data",
-        "need": "multibagger event watch (plan 0026 task 4.0)",
-        "notes": "Own table: NSE ids/taxonomy differ from BSE, governance + credit-rating factors read BSE. "
-                 "Category map = config.NSE_ANNOUNCEMENT_CATEGORIES. Depth to at least 2018-01.",
+        "need": "multibagger event watch (plan 0026 task 4.0); since 2026-10-19 every announcement reader (ADR 0082)",
+        "notes": "Own table (NSE ids/taxonomy differ from BSE). Readers go through signals.announcements: BSE "
+                 "history + this feed, mapped to BSE's taxonomy by config.NSE_BSE_EQUIVALENT (watch categories: "
+                 "config.NSE_ANNOUNCEMENT_CATEGORIES). Rows from 2026-10-09; depth to at least 2018-01 if backfilled.",
+        "fallback_plan": "BSE AnnSubCategoryGetData if BSE's WAF lets this server back in (feed bse_announcements)",
         "probe": ("WORKS", "2026-10-15", "2 days 1,058 rows; 2018-01-01..03 351 rows"),
     },
     "corporate_actions": {
@@ -627,6 +618,14 @@ FEEDS = {
     },
 
     # ═══════════════════════════════ Retired / dead ends ═══════════════════════════════
+    "bse_announcements": {
+        "family": "events", "status": "retired",
+        "what": "Every company announcement filed on BSE — route dropped; the table is kept as history (2018-01 → 2026-10-12)",
+        "modules": ["sources.bse_announcements"], "writes": ["bse_announcements"],
+        "routes": [_r("bse_ann_api", "primary", "bse_api", "AnnSubCategoryGetData/w (curl_cffi chrome TLS)")],
+        "probe": ("DEAD", "2026-10-13", "HTTP 403 from api.bseindia.com (Akamai WAF) every day since 2026-10-13"),
+        "ref": "ADR 0082 → nse_announcements; readers: signals.announcements (BSE history + NSE live)",
+    },
     "data_gov_in": {
         "family": "macro", "status": "retired",
         "what": "data.gov.in macro API", "probe": ("DEAD", "2026-09-27", "gateway 502s; datasets stopped 2023-24"),
@@ -710,6 +709,10 @@ INCIDENTS = [
      "source abandoned", "MoSPI API + OEA Excel", "11c6631"),
     ("2026-09-26", "amfi_nav", "D", "NAV parse gap 08-19 → 09-25", "AMFI added Plan;Option columns",
      "parser fix + refill via AMFI history report", "checklist 2026-09-27"),
+    ("2026-10-13", "bse_announcements", "A", "403 from api.bseindia.com on AnnSubCategoryGetData, daily",
+     "Akamai WAF blocks this server (chrome TLS impersonation no longer passes)",
+     "route dropped (Amit 2026-10-19): nse_announcements is the live source; readers via signals.announcements",
+     "ADR 0082"),
     ("2026-09-19", "bse_announcements", "A", "403 from api.bseindia.com", "Akamai TLS-fingerprint gate",
      "hosts bse_api impersonate=chrome", "0642a6a"),
     ("2026-09-27", "screener_fundamentals", "C", "exports fail, homepage shows login link only",

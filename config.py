@@ -247,22 +247,42 @@ MB_THESIS = {
     "pledge_max_pct": 50.0,        # live only (no pledge history); NaN passes
     "annual_lag_days": 150,        # an annual statement is knowable at period_end + 150 days
     "red_flag_days": 365,
-    # The red-flag gate (signals.multibagger.red_flag_events): kind -> SQL LIKE patterns (% = wildcard, case-blind)
-    # per exchange. BSE: `subcategory` as filed. NSE (BSE's WAF 403s it since 2026-10-13): `desc_category` as filed,
-    # plus the exact phrase in `subject` (a resignation filed under a generic desc). NSE's own `category` (the
-    # watch map + keyword rules) is NOT used: its insolvency text rule catches "acquisition through CIRP" or a
-    # subsidiary's liquidation, and "Change in Auditors" is mostly a rotation (BSE files it apart, not a flag).
+    # The red-flag gate (signals.multibagger.red_flag_events, live; tools.mb_thesis.red_flags, backtest): kind ->
+    # signals.announcements.kind_sql spec on BSE's taxonomy — BSE history and NSE live rows mapped through
+    # NSE_BSE_EQUIVALENT (ADR 0082). A clause = {column: [SQL LIKE, % = wildcard, case-blind]}; any clause matches,
+    # `exclude` (on the one-line title) vetoes. NSE's own watch `category` is NOT used: its insolvency text rule
+    # catches "acquisition through CIRP", and "Change in Auditors" is mostly a rotation (not a flag).
     "red_flags": {
-        "auditor_resignation": {
-            "bse_subcategory": ["Resignation of Statutory Auditors"],
-            "nse_desc": ["Resignation of Statutory Auditor%"],
-            "nse_subject": ["%resignation of statutory auditor%", "%resignation of the statutory auditor%",
-                            "%resignation of joint statutory auditor%"]},
-        "cirp": {
-            "bse_subcategory": ["%CIRP%"],
-            "nse_desc": ["Corporate Insolvency Resolution Process%"]},
+        "auditor_resignation": {"match": [{"subcategory": ["Resignation of Statutory Auditors"]}]},
+        "cirp": {"match": [{"subcategory": ["%CIRP%"]}]},
+        # Amit 2026-10-19 "add fraud/default as red flags". BSE files a Reg 30 fraud under 'General' (no
+        # subcategory of its own); NSE under "Frauds/Default by employees" / "Fraud/Default/Arrest" (-> General).
+        # Excluded: the company as a victim of impersonation / cyber fraud, a bank reporting a borrower's fraud,
+        # clarifications of news, "account not classified as fraud", insurance recoveries.
+        "fraud": {"match": [{"subcategory": ["General"], "title": ["%fraud%", "%arrest of%", "%arrested%"]}],
+                  "exclude": ["%clarif%", "%news item%", "%news article%", "%media report%", "%not classified%",
+                              "%no fraud%", "%cyber%", "%phishing%", "%fishing%", "%in the name of%", "%caution%",
+                              "%alert%", "%fake%", "%imperson%", "%scam%", "%misuse%", "%borrowal fraud%",
+                              "%fraud of bank%", "%to rbi%", "%to the rbi%", "%declaration of fraud to%",
+                              "%insurance claim%", "%inadvertent%", "%preventive%", "%no connection%",
+                              "%fraud control%", "%fraud management%", "%anti-fraud%", "%cardiac%"]},
+        # A loan / debt default: BSE's event disclosures (filed when a default passes 30 days), and the same
+        # disclosure filed under 'General' on either exchange. Excluded: the QUARTERLY C2 statement (filed every
+        # quarter, often nil), cures ("made good", regularised), "no default" / repayment-on-time intimations.
+        "default": {"match": [{"subcategory": ["Disclosures by listed entities of defaults on payment%"]},
+                              {"subcategory": ["General"],
+                               "title": ["%default in payment%", "%default in the payment of principal%",
+                                         "%default in the payment of interest%", "%default in repayment%",
+                                         "%default on payment%", "%defaults on payment%", "%defaults in payment%",
+                                         "%defaults of payment%", "%default in servicing%", "%intimation of default%",
+                                         "%disclosure of default%", "%about default%"]}],
+                    "exclude": ["%quarterly disclosure%", "%quarter ended%", "%for the quarter%", "%for quarter%",
+                                "%clarif%", "%no default%", "%not default%", "%not in default%",
+                                "%nil default%", "% nil %", "%(nil)%", "%made good%", "%regularis%", "%regulariz%",
+                                "%cured%", "%intimation of repayment%", "%timely payment%", "%timely repayment%",
+                                "%payment made%"]},
     },
-    "red_flag_dedupe_days": 2,     # the same filing on both exchanges: an NSE event within 2 days of BSE's is one event
+    # the same filing on both exchanges (an NSE event within signals.announcements.DEDUPE_DAYS of BSE's) is one event
     "top_n": 100,                  # stage 2: the top 100 by thesis_rank
     # Research overlay (plan 0026 4b, Amit 2026-10-16: "bake in the qualitative finding into rankings"): the thesis
     # score minus points per red flag (integrity areas weigh double) plus points for the 5x case; a reject is out.
@@ -678,7 +698,7 @@ PIPELINE_STEPS = [
      "critical": False,
      "table": "universe_eligibility", "source": "eligibility/registry.py — 8 signals × universe",
      "data_freq": "daily",         "frequency": "daily",
-     "reads": ["analyst_consensus", "annual_balance_sheet", "annual_cash_flow", "bse_announcements", "bulk_deals", "forecast_history", "quarterly_income", "shareholding", "stock_prices", "stocks", "universe_eligibility"],
+     "reads": ["analyst_consensus", "annual_balance_sheet", "annual_cash_flow", "bse_announcements", "bulk_deals", "forecast_history", "nse_announcements", "quarterly_income", "shareholding", "stock_prices", "stocks", "universe_eligibility"],
      "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
 
     {"name": "regime_update",      "module": "scoring.regime",      "function": "compute",  "critical": False,
@@ -698,7 +718,7 @@ PIPELINE_STEPS = [
 
     {"name": "screener",           "module": "scoring.screener",    "function": "compute",  "critical": True,
      "table": "daily_picks",       "source": "all signals",         "data_freq": "daily",   "frequency": "daily",
-     "reads": ["analyst_consensus", "annual_balance_sheet", "annual_cash_flow", "bse_announcements", "bulk_deals", "consensus_signals", "corporate_adjustments", "daily_picks", "fno_iv_history", "forecast_history", "fundamentals_screener", "macro_history", "macro_sector_map", "macro_sector_signals_pit", "nlp_scores", "quarterly_income", "shareholding", "shareholding_categories", "stock_prices", "stocks", "universe_eligibility"],
+     "reads": ["analyst_consensus", "annual_balance_sheet", "annual_cash_flow", "bse_announcements", "bulk_deals", "consensus_signals", "corporate_adjustments", "daily_picks", "fno_iv_history", "forecast_history", "fundamentals_screener", "macro_history", "macro_sector_map", "macro_sector_signals_pit", "nlp_scores", "nse_announcements", "quarterly_income", "shareholding", "shareholding_categories", "stock_prices", "stocks", "universe_eligibility"],
      "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
 
     # Track 3.3c — HRP position sizing. Turns the within-tier ranked daily_picks
@@ -829,7 +849,7 @@ PIPELINE_STEPS = [
     {"name": "refresh_pit_panel",  "module": "tools.reconstruct_pit", "function": "refresh", "critical": False,
      "table": "daily_snapshots_pit", "source": "all PIT producers over recent anchors",
      "data_freq": "weekly",        "frequency": "weekly",
-     "reads": ["accruals_scores", "analyst_consensus_snapshots", "annual_balance_sheet", "annual_cash_flow", "banking_metrics", "bse_announcements", "bulk_deals", "consensus_signals", "corporate_actions", "corporate_adjustments", "daily_picks", "daily_snapshots", "daily_snapshots_pit", "fno_iv_history", "fno_pcr_history", "forecast_history", "forensic_scores", "fundamentals_screener", "insider_trades", "macro_history", "macro_sector_map", "macro_sector_signals_pit", "news_article_stocks", "news_articles", "nlp_scores", "piotroski_scores", "pit_reconstruction_log", "promoter_signals", "quarterly_income", "regulatory_events", "regulatory_signals", "sector_briefs", "shareholding", "short_selling_data", "smart_money_scores", "stock_prices", "stocks", "universe_eligibility"],
+     "reads": ["accruals_scores", "analyst_consensus_snapshots", "annual_balance_sheet", "annual_cash_flow", "banking_metrics", "bse_announcements", "bulk_deals", "consensus_signals", "corporate_actions", "corporate_adjustments", "daily_picks", "daily_snapshots", "daily_snapshots_pit", "fno_iv_history", "fno_pcr_history", "forecast_history", "forensic_scores", "fundamentals_screener", "insider_trades", "macro_history", "macro_sector_map", "macro_sector_signals_pit", "news_article_stocks", "news_articles", "nlp_scores", "nse_announcements", "piotroski_scores", "pit_reconstruction_log", "promoter_signals", "quarterly_income", "regulatory_events", "regulatory_signals", "sector_briefs", "shareholding", "short_selling_data", "smart_money_scores", "stock_prices", "stocks", "universe_eligibility"],
      "writes": ["daily_snapshots_pit", "macro_sector_signals_pit", "pit_reconstruction_log"],
      "lagged_writes": ["macro_sector_signals_pit"],
      "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
@@ -1086,6 +1106,72 @@ NSE_ANNOUNCEMENT_TEXT_RULES = [
     (r"pledge|invocation|encumbrance", "pledge"),
     (r"substantial acquisition|takeover regulations|\bsast\b", "shareholding_sast"),
     (r"clarification|clarifies", "clarification"),
+]
+# NSE row -> its BSE-equivalent (category, subcategory), so one reader (signals.announcements) serves BSE history
+# (bse_announcements, 2018-01 -> 2026-10-12; route dropped, ADR 0082) and NSE live (nse_announcements) in BSE's
+# taxonomy. First match wins; within a rule every listed field must match (any of its SQL LIKE patterns,
+# case-blind), `not_subject` vetoes. Only what clearly corresponds is mapped; an unmatched row keeps a NULL
+# subcategory. Left unmapped on purpose (2026-10-19 data): "Resignation of Director/KMP/SMP" (a pointer filed beside
+# the detailed "Resignation" row — mapping both double-counts), "Change in Auditors" (NSE files rotations there;
+# BSE's rare "Change in Auditors" weighs 3 in governance_resignation), "Appointment", "Change in Company
+# Secretary/Compliance Officer", "Allotment of Securities", "Disclosure under SEBI Takeover Regulations" (one NSE
+# desc, several BSE subcategories), "Financial Result Updates", "Shareholders meeting", "Action(s) taken or orders
+# passed", "Pendency of Litigation(s)...", "Delay/default in the payment of fines/penalties/dues etc. to authority".
+_RESIGN = ["Resignation"]
+NSE_BSE_EQUIVALENT = [
+    # auditor resignations first, on any desc (a generic desc can carry one: "General Updates", "Cessation")
+    {"desc": ["Resignation of Statutory Auditor%"], "bse": ("Company Update", "Resignation of Statutory Auditors")},
+    {"subject": ["%resignation of statutory auditor%", "%resignation of the statutory auditor%",
+                 "%resignation of joint statutory auditor%"],
+     "bse": ("Company Update", "Resignation of Statutory Auditors")},
+    # the NSE financial-results submission is BSE's category 'Result'
+    {"desc": ["Outcome of Board Meeting"], "subject": ["%submitted to the exchange, the financial result%"],
+     "bse": ("Result", "Financial Results")},
+    {"desc": ["Outcome of Board Meeting"], "bse": ("Board Meeting", "Outcome of Board Meeting")},
+    {"desc": ["Integrated Filing- Financial"], "bse": ("Integrated Filing", "Integrated Filing (Financial)")},
+    # a detailed resignation: the role named in the subject picks BSE's subcategory (governance_resignation weights)
+    {"desc": _RESIGN, "subject": ["%chief financial officer%", "%(CFO)%", "% CFO %"],
+     "bse": ("Company Update", "Resignation of Chief Financial Officer (CFO)")},
+    {"desc": _RESIGN, "subject": ["%chairman and managing director%", "%chairman & managing director%"],
+     "bse": ("Company Update", "Resignation of Chairman and Managing Director")},
+    {"desc": _RESIGN, "subject": ["%managing director%"], "not_subject": ["%whole%time director%"],
+     "bse": ("Company Update", "Resignation of Managing Director")},
+    {"desc": _RESIGN, "subject": ["%chief executive officer%", "%(CEO)%", "% CEO %"],
+     "bse": ("Company Update", "Resignation of Chief Executive Officer (CEO)")},
+    {"desc": _RESIGN, "subject": ["%chairman%", "%chairperson%"], "not_subject": ["%vice chair%", "%vice-chair%"],
+     "bse": ("Company Update", "Resignation of Chairman")},
+    {"desc": _RESIGN, "subject": ["%company secretary%", "%compliance officer%"],
+     "bse": ("Company Update", "Resignation of Company Secretary / Compliance Officer")},
+    {"desc": _RESIGN, "subject": ["%director%"], "bse": ("Company Update", "Resignation of Director")},
+    {"desc": ["Cessation"], "bse": ("Company Update", "Cessation")},
+    {"desc": ["Retirement"], "bse": ("Company Update", "Retirement")},
+    {"desc": ["Demise"], "bse": ("Company Update", "Demise")},
+    {"desc": ["Change in Management"], "bse": ("Company Update", "Change in Management")},
+    {"desc": ["Change in Director(s)"], "bse": ("Company Update", "Change in Directorate")},
+    {"desc": ["Corporate Insolvency Resolution Process%"],
+     "bse": ("Company Update", "Updates - Corporate Insolvency Resolution Process  (CIRP)")},
+    {"desc": ["Credit Rating%"], "bse": ("Company Update", "Credit Rating")},
+    {"desc": ["Bagging/Receiving of orders/contracts"], "bse": ("Company Update", "Award of Order / Receipt of Order")},
+    {"desc": ["Memorandum of Understanding/Agreements"],
+     "bse": ("Company Update", "Memorandum of Understanding /Agreements")},
+    {"desc": ["Acquisition"], "bse": ("Company Update", "Acquisition")},
+    {"desc": ["Scheme of Arrangement"], "bse": ("Company Update", "Scheme of Arrangement")},
+    {"desc": ["Amalgamation/Merger", "Demerger"], "bse": ("Corp. Action", "Amalgamation / Merger / Demerger")},
+    {"desc": ["Open offer"], "bse": ("Company Update", "Open Offer")},
+    {"desc": ["Delisting"], "bse": ("Company Update", "Delisting")},
+    {"desc": ["Preferential issue"], "bse": ("Company Update", "Preferential Issue")},
+    {"desc": ["Qualified Institutional Placement"], "bse": ("Company Update", "Qualified Institutional Placement")},
+    {"desc": ["Raising of funds"], "bse": ("Company Update", "Raising of Funds")},
+    {"desc": ["Monitoring Agency Report"], "bse": ("Company Update", "Monitoring Agency Report")},
+    {"desc": ["Clarification", "Spurt in Volume", "Price movement", "News Verification",
+              "Rumour Verification%", "Reply to clarification sought"], "bse": ("Company Update", "Clarification")},
+    {"desc": ["Press Release"], "bse": ("Company Update", "Press Release / Media Release")},
+    {"desc": ["Investor Presentation"], "bse": ("Company Update", "Investor Presentation")},
+    {"desc": ["Analysts/Institutional Investor Meet/Con. Call Updates"], "bse": ("Company Update", "Analyst / Investor Meet")},
+    {"desc": ["Copy of Newspaper Publication"], "bse": ("Company Update", "Newspaper Publication")},
+    # NSE's catch-alls and its Reg 30 fraud / default descs: BSE files all of these under 'General'
+    {"desc": ["General Updates", "Updates", "Fraud/Default/Arrest", "Frauds/Default by employees"],
+     "bse": ("Company Update", "General")},
 ]
 # ── Multibagger desk: per-name event watch (plan 0026 phase 4; signals/mb_watch.py) ──
 WATCH_CATEGORIES = ("results", "order_win", "acquisition", "funding", "credit_rating", "management_change",

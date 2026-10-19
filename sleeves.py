@@ -27,6 +27,7 @@ import pandas as pd
 from config import PICKABLE_TIERS
 from pit import INSIDER_DISCLOSURE_DAYS
 from db import read_sql
+from signals import announcements   # BSE history + NSE live (ADR 0082)
 
 # ── breakouts (O'Neil / Minervini) ──
 BREAKOUT_DELIVERY_Z = 1.0       # delivery anomaly, standard deviations above the stock's own norm
@@ -244,7 +245,7 @@ def load_context(since=None):
     trades = read_sql(f"SELECT sid, person, transaction_type AS side, value_lakhs, trade_date FROM insider_trades "
                       f"WHERE person_category IN ({ph}) AND transaction_type IN ('Buy', 'Sell') AND value_lakhs > 0",
                       params=list(INSIDER_CATEGORIES))
-    resign = read_sql(f"SELECT sid, substr(dt_tm, 1, 10) AS d FROM bse_announcements WHERE sid IS NOT NULL "
+    resign = read_sql(f"SELECT sid, substr(dt_tm, 1, 10) AS d FROM ({announcements.sql()}) a WHERE sid IS NOT NULL "
                       f"AND subcategory IN ({','.join('?' * len(RESIGNATIONS))})", params=list(RESIGNATIONS))
     pledge = read_sql("SELECT sid, end_date, pledge_pct FROM shareholding WHERE pledge_pct IS NOT NULL")
     stocks = read_sql("SELECT sid, sector FROM stocks")

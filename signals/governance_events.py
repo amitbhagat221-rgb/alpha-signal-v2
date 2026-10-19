@@ -1,5 +1,6 @@
 """
-Alpha Signal v2 — Governance/forensic event factors off the BSE announcement stream.
+Alpha Signal v2 — Governance/forensic event factors off the announcement stream (BSE history to 2026-10-12 +
+NSE live, one taxonomy via signals.announcements — ADR 0082).
 
 `governance_resignation` — weighted trailing-365d density of senior-officer and
 auditor resignation/cessation events. The BSE `subcategory` IS the signal here (no
@@ -19,11 +20,13 @@ Injectable frame so the live path and the PIT path
 (pit.py:pit_governance_resignation) run identical logic. Stock-
 agnostic; no sector exclusion (governance events apply to every sector incl. financials).
 
-Coverage caveat: the BSE stream reaches ~90% of the universe; the ~10% NSE-only names
-never appear here, so they score 0 (treated as "no flag" — a real exit we can't see is
-mis-scored clean). Acceptable for a candidate; most large/liquid names are BSE-listed.
+Coverage caveat: the BSE history reaches ~90% of the universe; until 2026-10-09 the ~10% NSE-only
+names never appear, so they score 0 (treated as "no flag"). From 2026-10-09 NSE rows count too: a
+detailed NSE "Resignation" maps by the role it names, "Cessation" to Cessation; the NSE pointer row
+"Resignation of Director/KMP/SMP", SMP / other-officer exits and "Change in Auditors" are not mapped
+(config.NSE_BSE_EQUIVALENT).
 
-Reads:  bse_announcements (resignation/cessation subcategories)
+Reads:  bse_announcements + nse_announcements (resignation/cessation subcategories)
 Returns: DataFrame[sid, governance_resignation]
 
 Usage:
@@ -37,6 +40,7 @@ from datetime import date, timedelta
 import pandas as pd
 
 from db import read_sql
+from signals import announcements as ann_stream
 
 # Subcategory → forensic-seniority weight. Auditor exit is the strongest red flag;
 # CFO next; MD/CEO/Chairman = leadership instability; director/CS/cessation = churn.
@@ -57,6 +61,16 @@ WINDOW_DAYS = 365
 INTENSITY_CLIP = (0.0, 12.0)   # cap pathological churn; most non-zero values are 1–4
 
 
+def events_sql(as_of_date=None):
+    """[sid, subcategory, ev_date] of the weighted subcategories — BSE history + NSE live in BSE's taxonomy
+    (signals.announcements; an NSE resignation maps to the subcategory of the role it names). The ONE input
+    query of the live path and the PIT frame (pit.RAW_SQL["bse_gov"])."""
+    subcats = ", ".join("'" + s.replace("'", "''") + "'" for s in RESIGNATION_WEIGHTS)
+    dc = f" AND date(dt_tm) <= '{as_of_date}'" if as_of_date else ""
+    return (f"SELECT sid, subcategory, date(dt_tm) AS ev_date FROM ({ann_stream.sql()}) a "
+            f"WHERE sid IS NOT NULL AND dt_tm IS NOT NULL AND subcategory IN ({subcats}){dc}")
+
+
 def compute_governance_resignation(
     announcements: pd.DataFrame | None = None,
     universe_sids: list | None = None,
@@ -65,7 +79,7 @@ def compute_governance_resignation(
     """Weighted trailing-365d senior-resignation intensity per sid, as of as_of_date.
 
     `announcements` is injectable for PIT — a frame with [sid, subcategory, ev_date]
-    (or raw `dt_tm`); the live path loads it from bse_announcements filtered ≤ as_of.
+    (or raw `dt_tm`); the live path loads it with events_sql() filtered ≤ as_of.
     If `universe_sids` is given, the result is reindexed to the full universe with 0
     for names that had no qualifying event (so the backtest gets the flagged-vs-
     unflagged contrast, not just the gradient among flagged names).
@@ -75,12 +89,7 @@ def compute_governance_resignation(
     lo = (date.fromisoformat(eval_iso) - timedelta(days=WINDOW_DAYS)).isoformat()
 
     if announcements is None:
-        subcats = ", ".join("'" + s.replace("'", "''") + "'" for s in RESIGNATION_WEIGHTS)
-        dc = f"AND date(dt_tm) <= '{as_of_date}'" if as_of_date else ""
-        announcements = read_sql(
-            f"SELECT sid, subcategory, date(dt_tm) AS ev_date FROM bse_announcements "
-            f"WHERE sid IS NOT NULL AND dt_tm IS NOT NULL "
-            f"AND subcategory IN ({subcats}) {dc}")
+        announcements = read_sql(events_sql(as_of_date))
 
     if announcements is None or len(announcements) == 0:
         out = pd.DataFrame(columns=cols)

@@ -1604,7 +1604,8 @@ RAW_SQL = {
     "fno_iv": 'SELECT sid, trade_date, atm_iv, iv_skew_25d, iv_term_structure FROM fno_iv_history WHERE sid IS NOT NULL ORDER BY sid, trade_date',
     "prices_ohlc": 'SELECT sid, date, open, high, low, close, volume FROM stock_prices WHERE close > 0 ORDER BY sid, date',
     "corp_actions": 'SELECT sid, ex_date, subject FROM corporate_actions WHERE ex_date IS NOT NULL AND sid IS NOT NULL ORDER BY sid, ex_date',
-    "bse_results": f"SELECT sid, date(dt_tm) AS ann_date FROM bse_announcements WHERE {factors.RESULT_FILING_SQL} AND sid IS NOT NULL AND dt_tm IS NOT NULL ORDER BY sid, dt_tm",
+    # announcement streams: BSE history + NSE live (signals.announcements, ADR 0082); keys keep their old names
+    "bse_results": f"SELECT sid, date(dt_tm) AS ann_date FROM ({factors.ANNOUNCEMENTS_SQL}) a WHERE {factors.RESULT_FILING_SQL} AND sid IS NOT NULL AND dt_tm IS NOT NULL ORDER BY sid, dt_tm",
     "bse_gov": lambda: _bse_gov_sql(),
     "yahoo_eps": lambda: _yahoo_eps_sql(),
     "nse_q": lambda: _nse_q_sql(),
@@ -1625,11 +1626,8 @@ def _nse_q_sql():
 
 
 def _bse_gov_sql():
-    from signals.governance_events import RESIGNATION_WEIGHTS
-    subcats = ", ".join("'" + s.replace("'", "''") + "'" for s in RESIGNATION_WEIGHTS)
-    return (f"SELECT sid, subcategory, date(dt_tm) AS ev_date FROM bse_announcements "
-            f"WHERE sid IS NOT NULL AND dt_tm IS NOT NULL AND subcategory IN ({subcats}) "
-            f"ORDER BY sid, dt_tm")
+    from signals.governance_events import events_sql
+    return events_sql() + " ORDER BY sid, ev_date"
 
 
 # Per-date inputs (factors.PIT_PRODUCERS "inputs") → the raw frames they slice.

@@ -21,6 +21,7 @@ from pathlib import Path
 import pandas as pd
 
 import db
+from signals import announcements
 
 ROOT = Path(__file__).resolve().parent / "mb_research"
 BSE_ATTACH = "https://www.bseindia.com/xml-data/corpfiling/AttachHis/"   # serves new and archived filings
@@ -29,7 +30,7 @@ MAX_PACK_BYTES = 90_000
 ANNUAL_ITEMS = ["Sales", "Net profit", "Cash from Operating Activity", "Cash from Investing Activity",
                 "Equity Share Capital", "Reserves", "Borrowings", "Gross Block", "Capital Work in Progress",
                 "Trade receivables", "Inventories", "No. of Equity Shares", "Other Income"]
-# BSE filings worth reading, by subcategory pattern → (label, how many of the newest to list)
+# Filings worth reading (BSE history + NSE live, BSE's taxonomy), by subcategory pattern → (label, how many of the newest to list)
 DOC_KINDS = [
     ("Reg. 34 (1) Annual Report%", "Annual report", 3),
     ("Earnings Call Transcript%", "Earnings call transcript", 6),
@@ -155,23 +156,26 @@ def annual(sid, years=10):
                              for c in ANNUAL_ITEMS if c in w.columns}} for i in w.index]
 
 
+def _doc(r):
+    url = r["attachment"] if r["source"] == "nse_announcements" else BSE_ATTACH + r["attachment"]
+    return {"date": r["dt_tm"][:10], "title": (r["title"] or "")[:140], "url": url}
+
+
 def documents(sid):
-    """{label: [{date, title, url}]} BSE filings worth reading, newest first."""
+    """{label: [{date, title, url}]} filings worth reading, newest first: BSE history + NSE live in BSE's
+    taxonomy (signals.announcements, ADR 0082). An NSE attachment is a full URL; a BSE one a GUID."""
     out = {}
-    extra = db.rows("SELECT dt_tm, news_sub, headline, attachment FROM bse_announcements WHERE sid = ? AND "
-                    "subcategory NOT LIKE 'Reg. 34 (1) Annual Report%' AND (news_sub LIKE '%Annual Report%' OR "
-                    "headline LIKE '%Annual Report%') AND COALESCE(attachment, '') <> '' ORDER BY dt_tm DESC LIMIT 3", [sid])
+    ann = f"FROM ({announcements.sql()}) a WHERE sid = ? AND COALESCE(attachment, '') <> ''"
+    extra = db.rows(f"SELECT source, dt_tm, title, attachment {ann} AND COALESCE(subcategory, '') NOT LIKE "
+                    "'Reg. 34 (1) Annual Report%' AND (news_sub LIKE '%Annual Report%' OR headline LIKE '%Annual Report%') "
+                    "ORDER BY dt_tm DESC LIMIT 3", [sid])
     if extra:                                     # annual reports filed under 'General' / 'AGM' (new listings do this)
-        out["Annual report (filed under AGM / general)"] = [
-            {"date": r["dt_tm"][:10], "title": (r["news_sub"] or r["headline"] or "")[:140], "url": BSE_ATTACH + r["attachment"]}
-            for r in extra]
+        out["Annual report (filed under AGM / general)"] = [_doc(r) for r in extra]
     for pat, label, n in DOC_KINDS:
-        rows = db.rows("SELECT dt_tm, news_sub, headline, attachment FROM bse_announcements WHERE sid = ? AND "
-                       "subcategory LIKE ? AND COALESCE(attachment, '') <> '' ORDER BY dt_tm DESC LIMIT ?",
+        rows = db.rows(f"SELECT source, dt_tm, title, attachment {ann} AND subcategory LIKE ? ORDER BY dt_tm DESC LIMIT ?",
                        [sid, pat, n])
         if rows:
-            out[label] = [{"date": r["dt_tm"][:10], "title": (r["news_sub"] or r["headline"] or "")[:140],
-                           "url": BSE_ATTACH + r["attachment"]} for r in rows]
+            out[label] = [_doc(r) for r in rows]
     return out
 
 
@@ -183,7 +187,8 @@ def _counts(sid):
         "news_1y": one("SELECT COUNT(*) AS n FROM news_article_stocks s JOIN news_articles a USING(article_id) "
                        "WHERE s.sid = ? AND a.published_at >= date('now', '-365 day')"),
         "transcripts": one("SELECT COUNT(*) AS n FROM transcripts WHERE sid = ?"),
-        "ratings": one("SELECT COUNT(*) AS n FROM bse_announcements WHERE sid = ? AND subcategory LIKE 'Credit Rating%'"),
+        "nse_filings": one("SELECT COUNT(*) AS n FROM nse_announcements WHERE sid = ?"),
+        "ratings": one(f"SELECT COUNT(*) AS n FROM ({announcements.sql()}) a WHERE sid = ? AND subcategory LIKE 'Credit Rating%'"),
         "analysts": one("SELECT MAX(total_analysts) AS n FROM analyst_consensus WHERE sid = ?"),
         "insider_trades": one("SELECT COUNT(*) AS n FROM insider_trades WHERE sid = ?"),
         "mf_holdings": one("SELECT COUNT(*) AS n FROM mf_holdings WHERE sid = ?"),
@@ -195,7 +200,7 @@ def gaps(sid, counts=None, docs=None, quarters=None):
     c = counts or _counts(sid)
     docs = documents(sid) if docs is None else docs
     g = []
-    if not c["bse_filings"]:
+    if not c["bse_filings"] and not c.get("nse_filings"):
         g.append("No BSE filings on file (likely NSE-only): find the annual report, investor presentation, concall "
                  "transcripts and credit-rating letters on nseindia.com or the company website yourself.")
     else:
@@ -284,7 +289,7 @@ def pack(sid):
     ev = [{"date": str(r.date)[:10], "category": r.category, "severity": r.severity,
            "headline": (r.headline or "")[:150], "url": r.url} for r in tl.itertuples()]
     s += ["## 7. Medium/high-severity events, past 2 years [db: signals.mb_watch.timeline]", _md(ev), ""]
-    s += ["## 8. Government links [db: shareholding_holders / bse_announcements]",
+    s += ["## 8. Government links [db: shareholding_holders / bse_announcements + nse_announcements]",
           f"- Government holders (latest): {[(h['holder_name'], h['pct'], h['end_date']) for h in gl['govt_holders']]}",
           f"- Government-buyer orders found: {gl['n_govt_orders']}",
           _md(gl["govt_orders"][:10], ["date", "headline", "matched", "url"]),
@@ -292,12 +297,12 @@ def pack(sid):
     s += ["## 9. Peers, same industry and tier [db: peers]",
           _md(mb.peers(sid, 8), ["ticker", "name", "market_cap_cr", "pe", "pb", "roe_pct", "rev_growth_pct",
                                  "ret_6m_pct", "thesis_score"]), ""]
-    s += ["## 10. Filings on file — open these PDFs directly (BSE archive links)"]
+    s += ["## 10. Filings on file — open these PDFs directly (BSE archive / NSE links)"]
     if docs:
         for label, rows in docs.items():
             s += [f"**{label}**", _md(rows, ["date", "title", "url"]), ""]
     else:
-        s += ["_none: no BSE filings with attachments on file_", ""]
+        s += ["_none: no BSE / NSE filings with attachments on file_", ""]
     s += ["## 11. Coverage counts [db]", ", ".join(f"{k} {v}" for k, v in counts.items()), ""]
     s += ["## 12. Gaps — research these", *[f"- {x}" for x in gaps(sid, counts, docs, q)], ""]
     text = "\n".join(s)

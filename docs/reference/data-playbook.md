@@ -47,7 +47,7 @@ catalog further down are not repeated here.
 | NSE FII/DII cash flow | `GET nseindia.com/api/fiidiiTradeReact` (cookie warm) | Today only → forward-accumulated in `fii_dii_cash_flow` since 2026-04-30 |
 | NSE ASM / GSM / F&O ban | `api/reportASM` (cookie warm); `derivatives.fno_security_in_ban_period` | Today only → `surveillance_flags` |
 | NSE bulk deals (today) | `archives.nseindia.com/content/equities/bulk.csv` | Daily fresh hit; nselib does history |
-| NSE corporate announcements | `api/corporate-announcements?index=equities` | Latest 20–50; BSE stream (below) is the deep source |
+| NSE corporate announcements | `api/corporate-announcements?index=equities&from_date&to_date` | The LIVE disclosure source since 2026-10-19 (feed `nse_announcements`, ADR 0082); ~500 rows/trading day, depth to 2018-01 |
 | AMFI NAVAll.txt | `GET amfiindia.com/spages/NAVAll.txt` | Today's NAV for all schemes, used by the daily MF step (see MF section) |
 | World Bank India | `api.worldbank.org/v2/country/IND/indicator/{code}?format=json` | 9–20y annual/quarterly (GDP, FX, FDI, M2) |
 | AMFI MF portfolio disclosure | `amfiindia.com/online-center/portfolio-disclosure` (Next.js page; its HTML embeds all 57 AMCs with `amc_monthly_portfolio_disclosure` links) | Link list only, no AMFI-hosted files. Each AMC posts a monthly Excel (SEBI MC 2024 cl. 5.1.1: ISIN, qty, value, % NAV, within 10 days; layout differs per AMC). Groww MF archive: 48 monthly files from Mar 2023, one sheet per scheme (verified 2026-10-10). Fetchers for all 57: github.com/subscriptionmanager26-png/fund-disclosures (MIT) |
@@ -326,6 +326,7 @@ For each source: **what it gives**, **endpoint**, **PIT/live access**, **histori
 
 | Field | Value |
 |---|---|
+| **⚠ Status (2026-10-19)** | **Route dropped (ADR 0082).** AnnSubCategoryGetData answers HTTP 403 (Akamai WAF) to this server since 2026-10-13. `bse_announcements` is frozen history, 2018-01-01 → 2026-10-12. Live filings come from NSE (`nse_announcements`, below the endpoint table); every reader goes through `signals/announcements.py`, which maps NSE rows onto BSE's category/subcategory (`config.NSE_BSE_EQUIVALENT`) and drops an NSE copy of a BSE filing (same sid and subcategory within 2 days). |
 | **What** | The full BSE corporate-disclosure feed — every announcement (Result, Board Meeting, Credit Rating, Pledge/SAST, Resignation, Buyback, Corp. Action, AGM/EGM, Company Update) with **exact timestamps**, category/subcategory, BSE's own `CRITICALNEWS` materiality flag, disclosure-latency (`TimeDiff`), `QUARTER_ID`, and attachment flags (PDF / Investor PPT / audio-video). A whole new *event-driven* data category. |
 | **Endpoint** | `https://api.bseindia.com/BseIndiaAPI/api/AnnSubCategoryGetData/w` — **unofficial** (the public bseindia.com site's own backend). Params: `pageno, strCat=-1, subcategory=-1, strPrevDate=YYYYMMDD, strToDate=YYYYMMDD, strSearch=P, strscrip='', strType=C`. Response `{"Table":[rows], "Table1":[{"ROWCNT":<total>}]}`, 50 rows/page. |
 | **PIT access** | `DT_TM` is the look-ahead-safe event time. The all-scrip/all-category "firehose" returns **ONE day per call** (multi-day ranges silently return 0) → harvest day-by-day. |
@@ -333,7 +334,7 @@ For each source: **what it gives**, **endpoint**, **PIT/live access**, **histori
 | **v2 depth** | `bse_announcements` — backfilling 2018→present (~700/day × ~250 trading days/yr). `sid` column is NULL until the deferred BSE-scrip-master ↔ ISIN ↔ ticker map is built (`stocks` has no ISIN). |
 | **Gotchas** | (1) **Endpoint is `AnnSubCategoryGetData`, NOT `AnnGetData`** (the latter returns "No Record Found"). (2) Single-day only for the firehose. (3) **Warm the cookie** — GET `bseindia.com/corporates/ann.html` first; browser UA + Referer/Origin required. (4) Same IP-block risk as the PDF harvester — ≥1.5s between pages, single-threaded. (5) Unofficial: BSE can rename params without notice (already did once). (6) **ToS:** fine for personal research; the *real-time feed* is what BSE licenses — get a licensed feed before any commercial redistribution. |
 | **Rate limit** | ≥1.5s between pages; warmed session; never parallel with the transcript/PDF harvester (shares the BSE IP-block surface). |
-| **Used by** | (planned) PEAD announce-dates, transcript look-ahead fix, credit-rating-change factor, promoter-pledge events, auditor/KMP-resignation forensic, governance signals (`critical_news` + `time_diff`), free forward earnings calendar (Board Meeting agenda). Harvester: `sources/bse_announcements.py`. |
+| **Used by** | `announcement_car` + `pead` result dates (`factors.RESULT_FILING_SQL`), `governance_resignation`, the multibagger red-flag gate (auditor resignation, CIRP, fraud, default — `config.MB_THESIS["red_flags"]`), playbook resignation flags, research packs, transcript look-ahead fix. All read BSE history + NSE live through `signals/announcements.py`. Harvester (manual only now): `sources/bse_announcements.py`. |
 
 ---
 

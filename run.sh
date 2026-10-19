@@ -109,11 +109,10 @@ case "$JOB" in
         echo "Done $(date -u) (pipeline rc=$RC)"
         exit $RC ;;
     forward)            # 14:00 UTC — forward-only sources with no historical archive
-        harvest_lock nse bse
+        harvest_lock nse
         logged cron_nselib_daily_forward run python -m sources.nselib_pull --source daily_forward; echo "Exit code (nselib daily_forward): $?"
-        # scrip_master must follow bse_announcements (it backfills sid on the new rows)
-        logged cron_bse_announcements run python -m sources.bse_announcements --days 7; echo "Exit code (bse_announcements): $?"
-        # NSE route for announcements while BSE's WAF blocks AnnSubCategoryGetData (plan 0026 task 4.0)
+        # Corporate announcements: NSE is the live source. The BSE route (sources.bse_announcements) is dropped —
+        # BSE's WAF 403s this server since 2026-10-13; bse_announcements stays as history (ADR 0082)
         logged cron_nse_announcements run python -m sources.nse_announcements --days 7; echo "Exit code (nse_announcements): $?"
         logged cron_scrip_master run python -m sources.scrip_master;         echo "Exit code (scrip_master): $?"
         logged cron_nse_events run python -m sources.nse_events --ratings --days 10 --ipos; echo "Exit code (nse_events): $?" ;;

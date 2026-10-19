@@ -23,6 +23,7 @@ from datetime import date
 import numpy as np
 import pandas as pd
 
+from signals import announcements as ann_stream   # BSE history + NSE live (ADR 0082)
 from signals.announcement_car import NIFTY_ID, _car_one, _nifty_asof
 
 CAR_CLIP = (-0.5, 0.5)   # a multi-day abnormal return beyond ±50% is almost always a data error
@@ -117,7 +118,7 @@ def _verify_against_announcement_car(n_check: int = 20) -> bool:
     check_sids = ref["sid"].tolist()[:n_check]
 
     announcements = read_sql(
-        "SELECT sid, date(dt_tm) AS event_date FROM bse_announcements "
+        f"SELECT sid, date(dt_tm) AS event_date FROM ({ann_stream.sql()}) a "
         "WHERE category='Result' AND sid IS NOT NULL AND dt_tm IS NOT NULL "
         f"AND sid IN ({','.join('?' * len(check_sids))}) ORDER BY sid, dt_tm",
         tuple(check_sids))

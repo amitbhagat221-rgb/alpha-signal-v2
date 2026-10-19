@@ -63,6 +63,9 @@ Bug fixes after the first run (2026-10-15, code only, no rule changed): the T1 p
   or bonus after the period end shrank the cap (KAMDHENU ₹101 Cr vs ₹1,072 Cr); shares are now carried
   to the anchor through corporate_adjustments split/bonus factors. The "industry" part is renamed
   "tailwind" (its column overwrote the industry name in the output; scores were unaffected).
+Rule change 2026-10-19 (Amit: "add fraud/default as red flags"), labelled as a change, not a fix: the red-flag
+  gate reads MB_THESIS["red_flags"] through signals.announcements, the live gate's rule — auditor resignation,
+  CIRP, a Reg 30 fraud filing, a loan/debt default disclosure (BSE history + NSE live, ADR 0082).
 
 Usage:  python -m tools.mb_thesis [--reuse]
 """
@@ -79,6 +82,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from config import MB_THESIS  # noqa: E402
+from signals import announcements  # noqa: E402
 from signals.multibagger import PARTS, liquidity_pond, thesis  # noqa: E402
 from tools.lh_price_history import load  # noqa: E402
 from tools.lh_quarterly_nse import asof as q_asof, history as q_history  # noqa: E402
@@ -128,10 +132,12 @@ def latest_annual(w, anchor):
     return k.drop_duplicates("sid", keep="last").set_index("sid")
 
 
-def red_flags(conn):
-    b = pd.read_sql("SELECT sid, substr(dt_tm,1,10) AS d FROM bse_announcements WHERE sid IS NOT NULL AND "
-                    "(subcategory = 'Resignation of Statutory Auditors' OR subcategory LIKE '%CIRP%')", conn)
-    b["d"] = pd.to_datetime(b["d"], errors="coerce")
+def red_flags(conn, kinds=None):
+    """[sid, d] of every red-flag filing — the live gate's rule (signals.multibagger.red_flag_events):
+    MB_THESIS["red_flags"] through signals.announcements (BSE history + NSE live, ADR 0082). Since 2026-10-19
+    the kinds include fraud and loan/debt default (Amit); `kinds` narrows them (e.g. the pre-2026-10-19 pair)."""
+    spec = {k: v for k, v in MB_THESIS["red_flags"].items() if kinds is None or k in kinds}
+    b = announcements.events(spec, conn=conn).rename(columns={"date": "d"})[["sid", "d"]]
     return b.dropna()
 
 

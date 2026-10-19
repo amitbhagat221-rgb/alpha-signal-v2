@@ -257,20 +257,19 @@ TABLES = {
     },
 
     # ── Trades & Corporate ──
-    # BSE corporate-announcement event stream (--days 7 keep-current), refreshed by
-    # run.sh forward (14:00 UTC, wired 2026-06-13). No business-date column
-    # among the DATE_COLS candidates (dt_tm isn't one) → freshness anchors on
-    # fetched_at, which advances on any day the refresh inserts a NEW filing. The
-    # whole-BSE firehose files most calendar days, but a weekend + adjacent holiday
-    # can go quiet; 5 tolerates that, still flags a stalled cron within a few days.
+    # BSE corporate-announcement event stream: a FROZEN history since the route was dropped (ADR 0082;
+    # BSE's WAF 403s this server from 2026-10-13). No `freq` / `stale_days`, so no freshness benchmark —
+    # judged as a live daily feed it would go TABLE_STALE forever (cf. quarterly_results_nse). Readers
+    # combine it with nse_announcements through signals.announcements.
     "bse_announcements": {
         "contract": {"max_null": {"headline": 0.3, "dt_tm": 0.05}},
-        "kind": "RAW", "domain": "Trades & Corporate", "freq": "daily", "data_freq": "daily",
-        "source": "BSE AnnSubCategoryGetData --days 7 (run.sh forward)",
-        "date_col": "fetched_at", "stale_days": 5,
+        "kind": "RAW", "domain": "Trades & Corporate", "date_col": "fetched_at",
+        "source": "BSE AnnSubCategoryGetData (route dropped 2026-10-19; history kept)",
+        "depth": "2018-01-01 → 2026-10-12 (frozen)",
+        "description": "Every corporate announcement filed on BSE from 2018-01 to 2026-10-12: headline, subject, BSE category and subcategory, the dt_tm event time and the PDF attachment. Frozen history: the live disclosure source is nse_announcements, and readers combine both in BSE's taxonomy (signals.announcements).",
     },
-    # NSE corporate announcements, the BSE fallback (run.sh forward, --days 7). Same freshness
-    # reasoning as bse_announcements: anchor on fetched_at, 5 days tolerates a holiday cluster.
+    # NSE corporate announcements, the live disclosure source (run.sh forward, --days 7). No business-date
+    # column among the DATE_COLS candidates → anchor on fetched_at; 5 days tolerates a holiday cluster.
     "nse_announcements": {
         "contract": {"max_null": {"subject": 0.3, "an_dt": 0.05}},
         "kind": "RAW", "domain": "Trades & Corporate", "freq": "daily", "data_freq": "daily",

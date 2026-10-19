@@ -49,6 +49,7 @@ from config import EXCLUDED_FROM_PICKS, MB_THESIS, SCREEN
 from db import read_sql, upsert_df
 from scoring.regime_smallcap import classify as classify_smallcap_regime
 from scoring.segment import market_caps
+from signals import announcements
 
 FINANCIAL_SECTORS = set(SCREEN["financial_sectors"])
 
@@ -420,40 +421,15 @@ RED_FLAG_COLS = ["sid", "kind", "date", "source", "headline"]
 
 
 def red_flag_events(as_of, conn=None):
-    """Auditor-resignation / CIRP filings in the `red_flag_days` up to as_of, one row per event:
-    [sid, kind, date (Timestamp), source, headline], newest first. Kinds and each exchange's patterns are
-    MB_THESIS["red_flags"]; BSE `bse_announcements` and NSE `nse_announcements` (BSE's WAF 403s it since
-    2026-10-13, so new filings arrive only on NSE).
+    """Red-flag filings (auditor resignation, CIRP, fraud, loan/debt default) in the `red_flag_days` up to as_of,
+    one row per event: [sid, kind, date (Timestamp), source, headline], newest first. Kinds are
+    MB_THESIS["red_flags"], read through signals.announcements: BSE history (`bse_announcements`, to 2026-10-12)
+    and NSE live (`nse_announcements`), one taxonomy (ADR 0082). tools.mb_thesis.red_flags uses the same rule.
     Point in time: an event counts only when its filing date (BSE dt_tm, NSE an_dt) is <= as_of and
-    > as_of - red_flag_days. The same filing reaches both exchanges: an NSE event is dropped when BSE has the
-    same sid and kind within `red_flag_dedupe_days` (BSE's row is kept)."""
-    q = read_sql if conn is None else (lambda sql, params: pd.read_sql_query(sql, conn, params=params))
+    > as_of - red_flag_days. The same filing on both exchanges is one event (BSE's row is kept)."""
     as_of = str(as_of)[:10]
     since = (pd.Timestamp(as_of) - pd.Timedelta(days=MB_THESIS["red_flag_days"])).date().isoformat()
-    parts = []
-    for kind, p in MB_THESIS["red_flags"].items():
-        if p.get("bse_subcategory"):
-            cond = " OR ".join("subcategory LIKE ?" for _ in p["bse_subcategory"])
-            parts.append(q("SELECT sid, substr(dt_tm,1,10) AS date, COALESCE(NULLIF(news_sub,''), headline) AS headline "
-                           "FROM bse_announcements WHERE sid IS NOT NULL AND substr(dt_tm,1,10) > ? "
-                           f"AND substr(dt_tm,1,10) <= ? AND ({cond})",
-                           [since, as_of, *p["bse_subcategory"]]).assign(kind=kind, source="bse_announcements"))
-        nse = [("desc_category", x) for x in p.get("nse_desc", [])] + [("subject", x) for x in p.get("nse_subject", [])]
-        if nse:
-            cond = " OR ".join(f"{c} LIKE ?" for c, _ in nse)
-            parts.append(q("SELECT sid, substr(an_dt,1,10) AS date, COALESCE(NULLIF(subject,''), desc_category) AS headline "
-                           "FROM nse_announcements WHERE sid IS NOT NULL AND substr(an_dt,1,10) > ? "
-                           f"AND substr(an_dt,1,10) <= ? AND ({cond})",
-                           [since, as_of, *[x for _, x in nse]]).assign(kind=kind, source="nse_announcements"))
-    ev = pd.concat(parts, ignore_index=True) if parts else pd.DataFrame(columns=RED_FLAG_COLS)
-    ev["date"] = pd.to_datetime(ev["date"])
-    is_nse = ev["source"] == "nse_announcements"
-    if is_nse.any() and (~is_nse).any():
-        n = ev[is_nse].reset_index().merge(ev.loc[~is_nse, ["sid", "kind", "date"]], on=["sid", "kind"],
-                                            suffixes=("", "_bse"))
-        tol = pd.Timedelta(days=MB_THESIS["red_flag_dedupe_days"])
-        ev = ev.drop(index=n.loc[(n["date"] - n["date_bse"]).abs() <= tol, "index"].unique())
-    return ev.sort_values(["date", "sid"], ascending=[False, True]).reset_index(drop=True)[RED_FLAG_COLS]
+    return announcements.events(MB_THESIS["red_flags"], since=since, until=as_of, conn=conn)[RED_FLAG_COLS]
 
 
 def _red_flags(as_of):

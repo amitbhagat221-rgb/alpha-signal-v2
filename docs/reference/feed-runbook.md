@@ -59,10 +59,10 @@ python -m tools.canary --list                                                   
 ## Run log: where exactly did it fail?
 Every step, cron job and manual `python -m sources.x` run has a `run_id`, and its events are in `run_events`.
 ```bash
-python -m runlog runs --feed bse_announcements            # recent runs: status, errors, warnings, rows
-python -m runlog events --feed bse_announcements --level ERROR --since 24h
+python -m runlog runs --feed nse_announcements            # recent runs: status, errors, warnings, rows
+python -m runlog events --feed nse_announcements --level ERROR --since 24h
 python -m runlog events --run '<run_id>'                   # the whole run, in order
-python -m runlog bundle bse_announcements                  # incident bundle (add --json for agents)
+python -m runlog bundle nse_announcements                  # incident bundle (add --json for agents)
 ```
 Each failure event carries:
 - the **symptom class**

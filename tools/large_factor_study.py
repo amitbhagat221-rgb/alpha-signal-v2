@@ -60,7 +60,7 @@ def load():
     A = px.pivot(index="date", columns="sid", values="adj_close").sort_index()
     V = px.pivot(index="date", columns="sid", values="volume").reindex(A.index)
     sh = read_sql("SELECT sid, end_date, fii_pct, mf_pct, dii_pct FROM shareholding ORDER BY sid, end_date")
-    res = read_sql(f"SELECT sid, date(dt_tm) AS d FROM bse_announcements WHERE "
+    res = read_sql(f"SELECT sid, date(dt_tm) AS d FROM ({pit.factors.ANNOUNCEMENTS_SQL}) a WHERE "
                    f"{pit.factors.RESULT_FILING_SQL} AND sid IS NOT NULL AND dt_tm IS NOT NULL")
     ind = read_sql("SELECT sid, industry, sector FROM stocks")
     ind["grp"] = ind["industry"].fillna(ind["sector"])
