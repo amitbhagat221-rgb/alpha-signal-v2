@@ -1381,12 +1381,32 @@ def sync_ops(c, full):
             ON CONFLICT(check_id, subject, entity_id, date) DO UPDATE SET status=excluded.status, score=excluded.score,
                detail=excluded.detail, checked_at=excluded.checked_at""").rowcount
         # row issues: failing trust verdicts, quarantine mirrors, Screener pull errors
+        # A trust issue is open while its subject's legacy verdict is still that verdict. Once the verdict is TRUSTED,
+        # changed, or gone, the open row is closed (resolved_at), never deleted, so the history stays. A verdict that
+        # goes bad again opens a new row; one still bad but re-computed (new computed_at) keeps its open row.
+        n_closed = c.execute(f"""UPDATE row_issues SET resolved_at = '{NOW}',
+                   resolution = COALESCE((SELECT 'trust:' || t.verdict_overall FROM trust_verdicts t
+                                          WHERE t.sid = row_issues.row_key ->> '$[0]' AND t.source_table = row_issues.dataset
+                                            AND t.source_key = row_issues.row_key ->> '$[1]'
+                                            AND t.datum_class = row_issues.row_key ->> '$[2]'
+                                            AND t.snapshot_date = row_issues.row_key ->> '$[3]'), 'trust:gone')
+            WHERE rule LIKE 'trust:%' AND resolved_at IS NULL
+              AND NOT EXISTS (SELECT 1 FROM trust_verdicts t
+                              WHERE t.sid = row_issues.row_key ->> '$[0]' AND t.source_table = row_issues.dataset
+                                AND t.source_key = row_issues.row_key ->> '$[1]' AND t.datum_class = row_issues.row_key ->> '$[2]'
+                                AND t.snapshot_date = row_issues.row_key ->> '$[3]'
+                                AND 'trust:' || t.verdict_overall = row_issues.rule)""").rowcount
         tv = cols(c, "trust_verdicts")
-        n_ri = c.execute(f"""INSERT OR IGNORE INTO row_issues(dataset, row_key, rule, severity, payload, detected_at)
-            SELECT source_table, json_array(sid, source_key, datum_class, snapshot_date), 'trust:' || verdict_overall,
-                   CASE verdict_overall WHEN 'QUARANTINED' THEN 'quarantine' ELSE 'review' END, {jobj("", tv)},
-                   COALESCE(computed_at, snapshot_date)
-            FROM trust_verdicts WHERE verdict_overall <> 'TRUSTED'""").rowcount
+        # ON CONFLICT: a closed row with this very detected_at is the same legacy verdict back again → reopen it.
+        n_ri = c.execute(f"""INSERT INTO row_issues(dataset, row_key, rule, severity, payload, detected_at)
+            SELECT t.source_table, json_array(t.sid, t.source_key, t.datum_class, t.snapshot_date), 'trust:' || t.verdict_overall,
+                   CASE t.verdict_overall WHEN 'QUARANTINED' THEN 'quarantine' ELSE 'review' END, {jobj("t.", tv)},
+                   COALESCE(t.computed_at, t.snapshot_date)
+            FROM trust_verdicts t WHERE t.verdict_overall <> 'TRUSTED'
+              AND NOT EXISTS (SELECT 1 FROM row_issues r WHERE r.dataset = t.source_table AND r.resolved_at IS NULL
+                                AND r.row_key = json_array(t.sid, t.source_key, t.datum_class, t.snapshot_date)
+                                AND r.rule = 'trust:' || t.verdict_overall)
+            ON CONFLICT(dataset, row_key, rule, detected_at) DO UPDATE SET resolved_at = NULL, resolution = NULL""").rowcount
         for mirror in [r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE '%\\_quarantine' ESCAPE '\\'")]:
             src = mirror[:-len("_quarantine")]
             mc = cols(c, mirror)
@@ -1401,7 +1421,8 @@ def sync_ops(c, full):
             SELECT 'fundamentals_screener', json_array(sid, id), COALESCE(error_type, 'error'), 'error',
                    json_object('ticker', ticker, 'error_message', error_message, 'http_status', http_status), COALESCE(attempted_at, '{NOW}')
             FROM screener_pull_errors""").rowcount
-    log(f"ops: step_runs +{n_sr} (+{n_rc} reconstruct, +{n_llm} llm), check_results {n_ck}, row_issues +{n_ri}")
+    log(f"ops: step_runs +{n_sr} (+{n_rc} reconstruct, +{n_llm} llm), check_results {n_ck}, row_issues +{n_ri} "
+        f"({n_closed} trust issues closed)")
 
 
 # ─────────────────────────── mf.db ───────────────────────────

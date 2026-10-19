@@ -280,3 +280,63 @@ def test_parity_waits_for_rows_fetched_after_the_sync_but_still_catches_a_droppe
     c.close()
     fails = sorted(r[0] for r in reconcile.run(write=False) if r[1] == "FAIL")
     assert fails == ["bulk_deals", "quarantine_mirrors(11)+screener_pull_errors"], fails
+
+
+def test_trust_issue_closes_when_verdict_turns_trusted_and_reopens_as_a_new_row(v3):
+    """Amit 2026-10-19 "close trust issue rows": row_issues was insert-only, so a QUARANTINED verdict that went back to
+    TRUSTED left its issue open forever. Now the sync closes it (resolved_at, kept as history), a verdict that goes bad
+    again opens a new row, a still-bad verdict re-computed keeps its one open row, and parity counts open rows only."""
+    path, sync = v3
+    from datamodel import reconcile
+    trust = "SELECT rule, resolved_at IS NULL, resolution FROM row_issues WHERE rule LIKE 'trust:%' ORDER BY issue_id"
+
+    def step(sql):
+        c = sqlite3.connect(path)
+        c.executescript(sql)
+        c.commit()
+        c.close()
+        assert sync.main([]) == 0
+        fails = [r for r in reconcile.run(write=False) if r[1] == "FAIL"]
+        assert not fails, fails
+
+    step("""INSERT INTO trust_verdicts (sid, source_table, source_key, datum_class, snapshot_date, verdict_overall, computed_at)
+            VALUES ('AAA', 'stock_prices', '{"date":"2026-10-09"}', 'close', '2026-10-10', 'QUARANTINED', '2026-10-10 05:00:00'),
+                   ('BBB', 'stock_prices', '{"date":"2026-10-09"}', 'close', '2026-10-10', 'PENDING_REVIEW', '2026-10-10 05:00:00')""")
+    assert _q(path, trust) == [("trust:QUARANTINED", 1, None), ("trust:PENDING_REVIEW", 1, None)]
+
+    # still bad, re-computed by another gate: no second open row (it used to add one per computed_at)
+    step("UPDATE trust_verdicts SET computed_at = '2026-10-11 05:00:00' WHERE sid = 'AAA'")
+    assert _q(path, trust) == [("trust:QUARANTINED", 1, None), ("trust:PENDING_REVIEW", 1, None)]
+
+    # quarantine -> trusted closes the row; a verdict row that is gone closes too
+    step("""UPDATE trust_verdicts SET verdict_overall = 'TRUSTED', computed_at = '2026-10-12 05:00:00' WHERE sid = 'AAA';
+            DELETE FROM trust_verdicts WHERE sid = 'BBB'""")
+    assert _q(path, trust) == [("trust:QUARANTINED", 0, "trust:TRUSTED"), ("trust:PENDING_REVIEW", 0, "trust:gone")]
+
+    # trusted -> quarantined again opens a NEW row; the closed one stays as history
+    step("UPDATE trust_verdicts SET verdict_overall = 'QUARANTINED', computed_at = '2026-10-13 05:00:00' WHERE sid = 'AAA'")
+    assert _q(path, trust) == [("trust:QUARANTINED", 0, "trust:TRUSTED"), ("trust:PENDING_REVIEW", 0, "trust:gone"),
+                               ("trust:QUARANTINED", 1, None)]
+    assert _q(path, "SELECT detected_at FROM row_issues WHERE rule LIKE 'trust:%' AND resolved_at IS NULL") == [("2026-10-13 05:00:00",)]
+
+
+def test_trust_parity_counts_open_issues_only(v3):
+    """A closed trust issue is history, not a mirror of a live verdict: counting it would fail parity for good."""
+    path, sync = v3
+    from datamodel import reconcile
+    c = sqlite3.connect(path)
+    c.execute("""INSERT INTO trust_verdicts (sid, source_table, source_key, datum_class, snapshot_date, verdict_overall)
+                 VALUES ('AAA', 'stock_prices', '{"date":"2026-10-09"}', 'close', '2026-10-10', 'TRUSTED')""")
+    c.commit()
+    assert sync.main([]) == 0
+    c.execute("""INSERT INTO row_issues (dataset, row_key, rule, severity, detected_at, resolved_at, resolution)
+                 VALUES ('stock_prices', '["AAA","{}","close","2026-10-01"]', 'trust:QUARANTINED', 'quarantine',
+                         '2026-10-01', '2026-10-02', 'trust:TRUSTED')""")
+    c.commit()
+    status = {r[0]: r[1] for r in reconcile.run(write=False)}
+    assert status["trust_verdicts"] == "PASS"
+    c.execute("UPDATE row_issues SET resolved_at = NULL WHERE rule LIKE 'trust:%'")       # a stale open row is caught
+    c.commit()
+    c.close()
+    status = {r[0]: r[1] for r in reconcile.run(write=False)}
+    assert status["trust_verdicts"] == "FAIL"
