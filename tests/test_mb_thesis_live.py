@@ -78,7 +78,6 @@ def _frame(n=8, **over):
     ("pledge_pct", 50.1, "pledge"),
     ("gsm", True, "gsm"),
     ("demerger_stale", True, "demerger"),               # plan 0026 4b data checks (live only)
-    ("shares_conflict", True, "shares"),
 ])
 def test_each_gate_fails_with_its_reason(col, bad, reason):
     f = _frame()
@@ -249,15 +248,42 @@ def _live():
 @pytest.mark.skipif(not _live(), reason="live DB not available (set ALPHA_DB)")
 def test_data_checks_catch_the_known_broken_inputs():
     """Plan 0026 4b: the 2026-10-15 top 100 carried 7 names on broken inputs (deep research). The gate must catch
-    each: demerged with a pre-demerger annual -> out; filing shows ~10-22x more shares -> market cap from the filing;
-    a bonus or split after the filing is not a conflict; a one-off counted as quarter revenue -> quarter part blanked."""
+    each: demerged with a pre-demerger annual -> out; a one-off counted as quarter revenue -> quarter part blanked.
+    The share counts (filing ~10-22x more shares; a bonus or split after the filing is not a conflict) are the
+    shared market cap's job now: test_shared_market_cap_takes_the_filed_share_count."""
     sids = ["BHIL", "VERAN", "IIAB", "AFI", "MWL", "MOLD", "THEM"]
-    f = pd.DataFrame({"mcap_cr": [169.0, 402.0, 354.0, 35.0, 1205.0, 576.0, 980.0]}, index=sids)
+    f = pd.DataFrame({"mcap_cr": [169.0, 402.0, 6000.0, 340.0, 1205.0, 576.0, 980.0],
+                      "shares_source": [None, None, "filing", "filing", "vendor", "statement", None]}, index=sids)
     end = pd.Series("2026-03-31", index=sids)
     c = mb.data_checks(f, end, "2026-10-16")
     assert c.loc["BHIL", "demerger_stale"] and c.loc["VERAN", "demerger_stale"]
-    assert c.loc["IIAB", "mcap_source"] == "filing" and c.loc["IIAB", "mcap_cr"] > 5000          # out of the small pond
-    assert c.loc["AFI", "mcap_source"] == "filing" and 250 < c.loc["AFI", "mcap_cr"] < 450
-    assert not c.loc[["MWL", "MOLD"], "shares_conflict"].any()                                   # split / bonus after filing
+    assert (c.loc[["IIAB", "AFI"], "mcap_source"] == "filing").all()
     assert (c.loc[["MWL", "MOLD"], "mcap_source"] == "market_caps").all()
+    assert (c["mcap_cr"] == f["mcap_cr"]).all()
     assert c.loc["THEM", "q_unreliable"] and not c.loc["MOLD", "q_unreliable"]
+
+
+@pytest.mark.skipif(not _live(), reason="live DB not available (set ALPHA_DB)")
+def test_shared_market_cap_takes_the_filed_share_count():
+    """The 2026-10-16 broken share counts through the one market cap (signals._fundamentals.market_caps) on the
+    live rows: IIAB / AFI read from the filing (22x / 10x more shares than the vendor); MWL / MOLD (a bonus or
+    split after the filing) keep a non-filing count."""
+    from signals._fundamentals import SHARE_ITEMS, market_caps
+    sids = ["IIAB", "AFI", "MWL", "MOLD"]
+    q = ",".join("?" * len(sids))
+    as_of = "2026-10-16"
+    bs = db.read_sql(f"SELECT sid, end_date, shares_outstanding, total_equity FROM annual_balance_sheet "
+                     f"WHERE sid IN ({q}) AND end_date <= '2026-03-31'", params=sids)
+    fund = db.read_sql(f"SELECT sid, period_end, line_item, value FROM fundamentals_screener WHERE period_type = 'annual' "
+                       f"AND sid IN ({q}) AND period_end <= '2026-03-31' AND line_item IN ({','.join('?' * len(SHARE_ITEMS))})",
+                       params=[*sids, *SHARE_ITEMS])
+    adj = db.read_sql(f"SELECT sid, ex_date, factor, inds FROM corporate_adjustments WHERE sid IN ({q})", params=sids)
+    filings = db.read_sql(f"SELECT sid, end_date, filed_at, total_shares FROM shareholding_categories "
+                          f"WHERE sid IN ({q}) AND total_shares > 0", params=sids)
+    close = db.read_sql(f"SELECT p.sid, p.close AS close_price FROM stock_prices p JOIN (SELECT sid, MAX(date) d "
+                        f"FROM stock_prices WHERE sid IN ({q}) AND date <= ? AND close > 0 GROUP BY sid) l "
+                        f"ON l.sid = p.sid AND l.d = p.date", params=[*sids, as_of])
+    mc = market_caps(bs, fund, adj, close, as_of, filings).set_index("sid")
+    assert mc.loc["IIAB", "shares_source"] == "filing" and mc.loc["IIAB", "mcap_cr"] > 5000     # out of the small pond
+    assert mc.loc["AFI", "shares_source"] == "filing" and 250 < mc.loc["AFI", "mcap_cr"] < 450
+    assert (mc.loc[["MWL", "MOLD"], "shares_source"] != "filing").all()

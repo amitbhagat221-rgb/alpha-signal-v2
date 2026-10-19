@@ -58,10 +58,11 @@ def _rank_tiers(tiers=None):
 
 
 def inputs(t=None):
-    """pit.tier_inputs as of t (default today) from the DB: [sid, mcap_cr, adtv_cr, quarters].
-    Market cap = signals._fundamentals.market_caps (KDDL: both vendors carried 1,744 Cr
-    shares for FY26, 1,400x the real count; the old two-source check passed it as
-    "corroborated" and ranked a ₹5,000 Cr company in LARGE)."""
+    """pit.tier_inputs as of t (default today) from the DB: [sid, mcap_cr, adtv_cr, quarters,
+    shares_source]. Market cap = signals._fundamentals.market_caps (KDDL: both vendors
+    carried 1,744 Cr shares for FY26, 1,400x the real count; the old two-source check passed
+    it as "corroborated" and ranked a ₹5,000 Cr company in LARGE), its share count checked
+    against the latest shareholding filing (IIAB: the vendor count was 22x too small)."""
     import pit
     t = pd.Timestamp(t or date.today()).date()
     raw = pit.load_raw(set(pit.TIER_INPUTS) | {"adjustments"})
@@ -72,8 +73,8 @@ def inputs(t=None):
 
 
 def market_caps(t=None):
-    """DataFrame[sid, mcap_cr] as of t (see inputs)."""
-    return inputs(t)[["sid", "mcap_cr"]]
+    """DataFrame[sid, mcap_cr, shares_source] as of t (see inputs)."""
+    return inputs(t)[["sid", "mcap_cr", "shares_source"]]
 
 
 def carve(tiers, ti):

@@ -255,6 +255,9 @@ def _xlsx():
 def test_screener_pull_main(net, monkeypatch, tmp_path):
     from sources import screener_pull as sp
     _screener_cookie(monkeypatch, tmp_path)
+    # the fixture's quarters are fixed dates that age into "stale": the standalone re-check
+    # (sp._fresher_view) has its own test in tests/test_reporting_basis.py
+    monkeypatch.setattr(sp, "STALE_VIEW_DAYS", 10 ** 6)
     page = '<form><button formaction="/user/company/export/42/">Export</button></form>'
     net.route("GET", r"/company/TCS/consolidated/$", resp(200, page))
     net.route("GET", r"/company/INFY/consolidated/$", resp(404, "nope"))

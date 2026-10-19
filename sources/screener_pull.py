@@ -227,7 +227,11 @@ def parse_shareholders(html: str) -> list[tuple[str, int]]:
     return out
 
 
-def fetch_export(s: requests.Session, ticker: str) -> tuple[bytes, str]:
+VIEWS = ("consolidated", "standalone")
+STALE_VIEW_DAYS = 200     # a consolidated export whose newest quarter ends this long ago: check standalone
+
+
+def fetch_export(s: requests.Session, ticker: str, views=VIEWS) -> tuple[bytes, str]:
     """Download Excel export for a single stock. Returns (xlsx_bytes, basis).
 
     Two-step: GET the company page to find the per-stock export form action
@@ -240,10 +244,8 @@ def fetch_export(s: requests.Session, ticker: str) -> tuple[bytes, str]:
     Raises PermissionError on cookie expiry, RuntimeError on parse failures.
     """
     last_err = None
-    for view, page_url in [
-        ("consolidated", COMPANY_CONSOLIDATED_URL.format(ticker=ticker)),
-        ("standalone", COMPANY_URL.format(ticker=ticker)),
-    ]:
+    urls = {"consolidated": COMPANY_CONSOLIDATED_URL, "standalone": COMPANY_URL}
+    for view, page_url in [(v, urls[v].format(ticker=ticker)) for v in views]:
         page = _req("GET", page_url, s, timeout=15, allow_redirects=False)
         if page.status_code in (301, 302):
             loc = page.headers.get("location", "")
@@ -451,6 +453,8 @@ def pull_one(s: requests.Session, sid: str, ticker: str, dry_run: bool = False) 
     if long_df.empty:
         log_error(sid, ticker, "empty", "parser produced 0 rows")
         return 0
+    if view == "consolidated":
+        long_df = _fresher_view(s, sid, ticker, long_df)
 
     quarters = long_df.loc[long_df["period_type"] == "quarterly", "period_end"].nunique()
     annuals = long_df.loc[long_df["period_type"] == "annual", "period_end"].nunique()
@@ -473,6 +477,37 @@ def pull_one(s: requests.Session, sid: str, ticker: str, dry_run: bool = False) 
             conn.executemany("UPDATE shareholding SET n_shareholders = ? WHERE sid = ? AND end_date = ?",
                              [(n, sid, d) for d, n in shp])
     return upsert_df(long_df, "fundamentals_screener")
+
+
+def _newest(long_df):
+    """Newest period_end in an export (quarterly or annual), as a Timestamp (NaT when none)."""
+    return pd.to_datetime(long_df["period_end"], errors="coerce").max()
+
+
+def _fresher_view(s, sid, ticker, consolidated):
+    """The standalone export instead of a stale consolidated one — the rule
+    signals._fundamentals.prefer_consolidated applies to Tickertape's quarters: a company
+    that stopped filing consolidated (HDB, FCTL, UCBK: Screener's consolidated page froze at
+    FY25) keeps a consolidated page, and every annual factor read its year-old statements.
+    Only an export whose newest period ends STALE_VIEW_DAYS before today pays the extra fetch;
+    standalone replaces it when its newest period is more than STALE_BASIS_DAYS newer."""
+    from signals._fundamentals import STALE_BASIS_DAYS
+    newest = _newest(consolidated)
+    if pd.notna(newest) and (pd.Timestamp.today() - newest).days <= STALE_VIEW_DAYS:
+        return consolidated
+    try:
+        xls, _ = fetch_export(s, ticker, views=("standalone",))
+        alt = parse_export(xls, sid)
+    except PermissionError:
+        raise
+    except Exception as e:     # the consolidated rows still go in; the miss is recorded
+        runlog.item_error("screener", f"{sid}/{ticker} standalone check", e)
+        return consolidated
+    if alt.empty:
+        return consolidated
+    if pd.isna(newest) or (_newest(alt) - newest).days > STALE_BASIS_DAYS:
+        return alt
+    return consolidated
 
 
 def get_targets(args) -> pd.DataFrame:

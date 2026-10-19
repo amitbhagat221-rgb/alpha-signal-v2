@@ -280,8 +280,7 @@ MB_THESIS = {
     # Input-integrity checks in the live run (plan 0026 4b; the deep research found 7 of the 2026-10-15 top 100 on
     # broken inputs, incl. #1 and #2): signals/multibagger.data_checks
     "data_checks": {
-        "shares_tol": 1.3,             # filed shares x close vs our market cap: filing larger -> use it; smaller -> gate out
-        "filing_max_age_days": 200,    # only a shareholding filing this recent is trusted as the share count
+        # the share-count check lives in the shared market cap: signals._fundamentals.FILED_SHARES_TOL (plan 0027)
         "demerger_days": 450,          # a demerger this recent: annual before it -> gate out; else blank the quarter part
         "revenue_tol": 1.25,           # latest quarter's results-table revenue vs Screener sales -> blank the quarter part
     },
@@ -462,9 +461,9 @@ PIPELINE_STEPS = [
     # 1st, with ±10% hysteresis (scoring/segment.py). Before this nothing re-tiered:
     # cap_tier was a one-time April 2026 load. MICRO carve-out stays in classify_micro_tier.
     {"name": "segment_tiers", "module": "scoring.segment", "function": "compute", "critical": False,
-     "table": "stocks", "source": "stock_prices + fundamentals_screener + annual_balance_sheet + corporate_adjustments",
+     "table": "stocks", "source": "stock_prices + fundamentals_screener + annual_balance_sheet + corporate_adjustments + shareholding_categories",
      "data_freq": "monthly", "frequency": "monthly",
-     "reads": ["annual_balance_sheet", "corporate_adjustments", "fundamentals_screener", "stock_prices", "stocks"],
+     "reads": ["annual_balance_sheet", "corporate_adjustments", "fundamentals_screener", "quarterly_income", "shareholding_categories", "stock_prices", "stocks"],
      "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
 
     {"name": "fetch_news",         "module": "sources.rss",          "function": "compute", "critical": False,
@@ -699,7 +698,7 @@ PIPELINE_STEPS = [
 
     {"name": "screener",           "module": "scoring.screener",    "function": "compute",  "critical": True,
      "table": "daily_picks",       "source": "all signals",         "data_freq": "daily",   "frequency": "daily",
-     "reads": ["analyst_consensus", "annual_balance_sheet", "annual_cash_flow", "bse_announcements", "bulk_deals", "consensus_signals", "corporate_adjustments", "daily_picks", "fno_iv_history", "forecast_history", "fundamentals_screener", "macro_history", "macro_sector_map", "macro_sector_signals_pit", "nlp_scores", "quarterly_income", "shareholding", "stock_prices", "stocks", "universe_eligibility"],
+     "reads": ["analyst_consensus", "annual_balance_sheet", "annual_cash_flow", "bse_announcements", "bulk_deals", "consensus_signals", "corporate_adjustments", "daily_picks", "fno_iv_history", "forecast_history", "fundamentals_screener", "macro_history", "macro_sector_map", "macro_sector_signals_pit", "nlp_scores", "quarterly_income", "shareholding", "shareholding_categories", "stock_prices", "stocks", "universe_eligibility"],
      "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
 
     # Track 3.3c — HRP position sizing. Turns the within-tier ranked daily_picks
@@ -841,7 +840,7 @@ PIPELINE_STEPS = [
     {"name": "classify_micro_tier","module": "tools.classify_micro_tier", "function": "reclassify", "critical": False,
      "table": "stocks",            "source": "pit.tier_inputs: stock_prices + statements + corporate_adjustments",
      "data_freq": "daily",         "frequency": "daily",
-     "reads": ["annual_balance_sheet", "corporate_adjustments", "fundamentals_screener", "quarterly_income", "stock_prices", "stocks"],
+     "reads": ["annual_balance_sheet", "corporate_adjustments", "fundamentals_screener", "quarterly_income", "shareholding_categories", "stock_prices", "stocks"],
      "lagged_reads": ["stocks@fetch_broker_recos"]},
 
     # ── Background / non-blocking section ──

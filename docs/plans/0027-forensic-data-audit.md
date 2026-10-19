@@ -34,9 +34,10 @@ Classes 1, 2 and 4 are now gated in the thesis run (`signals/multibagger.data_ch
 
 ## Fix at the source (agreed by Amit 2026-10-16)
 The desk gates (classes 1, 2 and 4) protect only the multibagger thesis. These fixes reach the main model too:
-- [ ] **Market caps from a stale vendor share count.** 22 pond names were affected (IIAB 22×, FIS 10.6×, AFI 10×). `signals/_fundamentals.market_caps` / `shares_and_book` set live tiers, the MICRO carve-out and `stocks.market_cap_cr`, so daily picks can be affected.
+- [x] **Market caps from a stale vendor share count.** 22 pond names were affected (IIAB 22×, FIS 10.6×, AFI 10×). `signals/_fundamentals.market_caps` / `shares_and_book` set live tiers, the MICRO carve-out and `stocks.market_cap_cr`, so daily picks can be affected.
   - Cross-check against the latest filed `shareholding_categories.total_shares`, adjusted for later splits and bonuses.
   - Build it on a worktree branch and measure the change in picks; merge only on Amit's OK.
+  - Done 2026-10-19 (Amit: "picks changing are fine"): see Implementation notes.
 - [ ] **Industry tags.** The vendor tags were wrong for about 1 in 6 researched names. They feed the thesis "industry momentum" part and every peer table.
   - Add NSE's four-level industry classification as a feed (`feeds.FEEDS` entry, canary on 3 stocks).
   - Until then, the desk shows research sectors (`output/mb_sectors.py`).
@@ -53,3 +54,8 @@ The desk gates (classes 1, 2 and 4) protect only the multibagger thesis. These f
 - [ ] `data_audit` table (`schema.sql` and `tables.TABLES`), plus a loader with validation.
 - [ ] A health check for each class found so far that is not yet gated: stale annuals, partial holder lists, industry tags, unadjusted splits.
 - [ ] Monthly sampler and cron (`run.sh`), only after Amit agrees the cost.
+
+## Implementation notes
+- **2026-10-19 — stale consolidated quarters (Amit: "fix these data issues"; "picks changing are fine").** 24 stocks (HDB, FCTL, UCBK …) had consolidated quarters ending 181–456 days before their standalone ones, and every TTM factor read the old consolidated year. `signals._fundamentals.prefer_consolidated` now keeps consolidated only when its latest quarter is within `STALE_BASIS_DAYS` (100) of the latest standalone, per stock, on the as-of slice it is handed. Live and backtest share it, so it is point in time. The annual path has the same fault one level up: Screener's consolidated page froze at FY25 for the same names. `sources/screener_pull` re-checks standalone when a consolidated export's newest period is over 200 days old; this takes effect at the next monthly Screener harvest. Measured today: no tier or top-20 change; E/P, Piotroski, accruals and value_composite moved for the 19 of 24 names in the screener universe (the other 5 are MICRO).
+- **2026-10-19 — one share count.** `signals._fundamentals.filed_shares` gives the latest BSE shareholding filing broadcast by the as-of date (`filed_at`), for a quarter at most 200 days old. Splits and bonuses after the quarter end are applied; demergers are not. `shares_and_book` / `market_caps` use it instead of the vendor or Screener count when the two are more than 1.3× apart, in either direction, and record `shares_source`. Live tiers, the MICRO carve-out, `stocks.market_cap_cr`, `book_to_price`, `fcf_yield` and the backtest (`pit.tiers_at`) all read it through `pit.TIER_INPUTS` and the `filed_shares` raw frame. `multibagger.data_checks` drops its own copy and with it the "fewer shares" gate: the cases checked had the filing right (VEDL, TREI, IGLY: the vendor divided the count by the demerger factor). On 2026-10-19, 45 of 2,136 stocks with a recent filing disagreed by more than 1.3× (38 with more shares filed, 7 with fewer). The measured tier and pick changes are in the commit message. The stored panel (`daily_snapshots_pit`) still carries the old tiers and values until a full `tools.reconstruct_pit` rebuild (206 anchors, about 115 s each).
+

@@ -350,8 +350,6 @@ def thesis(frame, min_pond=0, adtv_min_cr=None):
         gates["gsm"] = ~f["gsm"].astype("boolean").fillna(False).astype(bool)
     if "demerger_stale" in f:              # live only (data_checks): fundamentals predate a demerger
         gates["demerger"] = ~f["demerger_stale"].astype("boolean").fillna(False).astype(bool)
-    if "shares_conflict" in f:             # live only (data_checks): the filed share count is smaller than ours
-        gates["shares"] = ~f["shares_conflict"].astype("boolean").fillna(False).astype(bool)
     pond = pd.Series(True, index=f.index)
     fail = pd.Series("", index=f.index)
     for name, ok in gates.items():
@@ -468,34 +466,26 @@ def _red_flags(as_of):
 
 def data_checks(f, annual_end, as_of):
     """Input-integrity checks on the live frame (plan 0026 4b). Returns a frame on f's index:
-      mcap_cr          corrected market cap (the filing's when it shows > shares_tol x more shares than ours)
-      mcap_source      'filing' where corrected, else 'market_caps'
-      shares_conflict  the filing shows > shares_tol x FEWER shares: which count is right is unknown -> gate out
+      mcap_cr          the market cap as given (signals._fundamentals.market_caps, whose share count already
+                       defers to the latest shareholding filing when the vendor's disagrees, either way)
+      mcap_source      'filing' where the filed share count set it, else 'market_caps'
       demerger_stale   demerged within demerger_days and the knowable annual ends before the demerger -> gate out
       q_unreliable     the quarter part cannot be trusted (recent demerger: year-ago base straddles it; or the latest
                        quarter's results-table revenue disagrees with Screener sales by > revenue_tol) -> blanked
-    f needs mcap_cr; annual_end is the knowable annual period_end per sid (Series)."""
+    f needs mcap_cr (and shares_source from market_caps, optional); annual_end is the knowable annual period_end
+    per sid (Series).
+
+    The share-count check moved to the shared market cap (plan 0027, 2026-10-19), so the live tiers, the MICRO
+    carve-out, stocks.market_cap_cr and this thesis read one count. Its "fewer shares" gate went with it: the
+    filing now stands in both directions, and the cases checked on 2026-10-19 had the filing right (VEDL, TREI,
+    IGLY: the vendor divided the count by a demerger's price factor; RNB: the vendor counted a split twice)."""
     c = MB_THESIS["data_checks"]
     asof = pd.Timestamp(as_of)
     out = pd.DataFrame(index=f.index)
-    out["mcap_cr"], out["mcap_source"] = f["mcap_cr"], "market_caps"
-    out["shares_conflict"] = out["demerger_stale"] = out["q_unreliable"] = False
-    # ── shares: latest recent filing x the raw close, after later splits / bonuses ──
-    sh = read_sql("SELECT sid, end_date, total_shares FROM shareholding_categories WHERE total_shares > 0 AND end_date <= ? "
-                  "AND end_date >= ?", params=[as_of, (asof - pd.Timedelta(days=c["filing_max_age_days"])).date().isoformat()])
-    sh = sh.sort_values("end_date").drop_duplicates("sid", keep="last").set_index("sid")
-    px = read_sql("SELECT p.sid, p.close FROM stock_prices p JOIN (SELECT sid, MAX(date) AS d FROM stock_prices WHERE date <= ? "
-                  "AND close > 0 GROUP BY sid) l ON l.sid = p.sid AND l.d = p.date", params=[as_of]).set_index("sid")["close"]
-    adj = read_sql("SELECT sid, ex_date, factor FROM corporate_adjustments WHERE (inds LIKE '%SPLIT%' OR inds LIKE '%BONUS%') "
-                   "AND factor > 0 AND ex_date <= ?", params=[as_of])
-    if len(sh):
-        a = adj.merge(sh[["end_date"]], left_on="sid", right_index=True)
-        fac = a[a["ex_date"] > a["end_date"]].groupby("sid")["factor"].prod()
-        filed = (sh["total_shares"] / fac.reindex(sh.index).fillna(1.0) * px.reindex(sh.index) / 1e7).reindex(f.index)
-        ratio = filed / f["mcap_cr"]
-        up, down = ratio > c["shares_tol"], ratio < 1 / c["shares_tol"]
-        out.loc[up, "mcap_cr"], out.loc[up, "mcap_source"] = filed[up], "filing"
-        out["shares_conflict"] = down.fillna(False).astype(bool)
+    out["mcap_cr"] = f["mcap_cr"]
+    src = f["shares_source"] if "shares_source" in f else pd.Series(None, index=f.index, dtype=object)
+    out["mcap_source"] = np.where(src == "filing", "filing", "market_caps")
+    out["demerger_stale"] = out["q_unreliable"] = False
     # ── demergers ──
     dm = read_sql("SELECT sid, MAX(ex_date) AS ex_date FROM corporate_adjustments WHERE inds LIKE '%DEMERGER%' AND ex_date <= ? "
                   "AND ex_date > ? GROUP BY sid", params=[as_of, (asof - pd.Timedelta(days=c["demerger_days"])).date().isoformat()])
@@ -524,12 +514,13 @@ def live_frame(as_of=None):
     f, last_px = _price_features(as_of)
     stocks = read_sql("SELECT sid, ticker, name, industry, cap_tier FROM stocks").set_index("sid")
     f = f.join(stocks[["ticker", "name", "industry", "cap_tier"]])
-    f["mcap_cr"] = market_caps().set_index("sid")["mcap_cr"].reindex(f.index)
+    caps = market_caps().set_index("sid")
+    f["mcap_cr"] = caps["mcap_cr"].reindex(f.index)
+    f["shares_source"] = caps["shares_source"].reindex(f.index)
     an = _knowable_annuals(as_of).reindex(f.index)
     chk = data_checks(f, an["period_end"], as_of)
-    f["mcap_vendor_cr"] = f["mcap_cr"]
-    f[["mcap_cr", "mcap_source", "shares_conflict", "demerger_stale", "q_unreliable"]] = chk[
-        ["mcap_cr", "mcap_source", "shares_conflict", "demerger_stale", "q_unreliable"]]
+    f[["mcap_cr", "mcap_source", "demerger_stale", "q_unreliable"]] = chk[
+        ["mcap_cr", "mcap_source", "demerger_stale", "q_unreliable"]]
     eq = an["Equity Share Capital"] + an["Reserves"]
     f["bp"], f["sp"], f["ep"] = eq / f["mcap_cr"], an["Sales"] / f["mcap_cr"], an["Net profit"] / f["mcap_cr"]
     f["sales"] = an["Sales"]
