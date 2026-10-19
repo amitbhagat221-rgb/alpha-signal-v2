@@ -22,15 +22,14 @@ READ-ONLY. Output: the disagreement table (proposed industry = the set's first m
 Usage:  python -m tools.industry_audit [--csv PATH]
 """
 import argparse
-import re
 import sys
-from difflib import SequenceMatcher
 from pathlib import Path
 
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from db import read_sql  # noqa: E402
+from validators.identity_check import mc_name_matches  # noqa: E402
 
 TEX = "Textiles & Apparel"
 CAP = "Capital Goods & Industrial Machinery"
@@ -111,33 +110,21 @@ MC_ACCEPTS = {
     **{c: ("Retail", "E-Commerce") for c in ("retailing", "retail", "speciality-retailers", "fooddrug-retailing")},
 }
 
-_STRIP = re.compile(r"\b(ltd|limited|the|co|company|corporation|corp|and)\b")
-
-
-def _norm(x):
-    return re.sub(r"[^a-z0-9]", "", _STRIP.sub("", str(x).lower()))
-
-
 def slug_matches(name, token):
-    """The slug's company token is this stock: one starts the other, or they are close (renames fail here)."""
-    n = _norm(name)
-    tokens = [_norm(re.sub(r"^the", "", x)) for x in str(token).split("-")]      # "thetatapowercompany", "irctc-…"
-    return any(_same(n, t) for t in tokens if t)
-
-
-def _same(n, t):
-    if not n:
-        return False
-    k = min(len(n), len(t), 6)
-    return n[:k] == t[:k] and (n.startswith(t) or t.startswith(n) or SequenceMatcher(None, n, t).ratio() >= 0.6) \
-        or SequenceMatcher(None, n, t).ratio() >= 0.88       # TRIDENT → "trent" (0.83) must fail
+    """The slug's company token is this stock — the producer gate's own rule
+    (validators.identity_check.mc_name_matches), so the audit and the gate agree.
+    Renames fail here; a hand-verified one in MC_SLUG_OVERRIDES counts as verified."""
+    return mc_name_matches(name, token)
 
 
 def audit():
     s = read_sql("SELECT sid, ticker, name, sector, industry, cap_tier, market_cap_cr, mc_slug FROM stocks")
     parts = s["mc_slug"].fillna("").str.extract(r"^/india/stockpricequote/([^/]+)/([^/]+)/")
     s["mc_cat"], s["mc_co"] = parts[0], parts[1]
-    s["slug_ok"] = [isinstance(c, str) and slug_matches(n, c) for n, c in zip(s["name"], s["mc_co"])]
+    from sources.moneycontrol_recos import MC_SLUG_OVERRIDES
+    pinned = {sid for sid, slug in MC_SLUG_OVERRIDES.items() if slug}
+    s["slug_ok"] = [isinstance(c, str) and (sid in pinned or slug_matches(n, c))
+                    for sid, n, c in zip(s["sid"], s["name"], s["mc_co"])]
     s["accepts"] = [MC_ACCEPTS.get(c) if ok else None for c, ok in zip(s["mc_cat"], s["slug_ok"])]
     s["disagree"] = [a is not None and ind not in a for a, ind in zip(s["accepts"], s["industry"])]
     s["proposed"] = [a[0] if d else None for a, d in zip(s["accepts"], s["disagree"])]

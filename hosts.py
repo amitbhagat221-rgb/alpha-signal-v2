@@ -57,7 +57,10 @@ HOSTS = {
                                "Accept-Language": "en-US,en;q=0.5"}},
     # 2 s tripped the Moneycontrol WAF; the Referer pin matters, and the autosuggest
     # endpoint 403s unless Accept advertises JSON. Daily run is budgeted, stalest-first.
-    "moneycontrol": {"netlocs": ["www.moneycontrol.com"], "gap": 12.0, "budget_min": 90,
+    # impersonate: by 2026-10-19 autosuggest 403s python-requests outright (Akamai) and
+    # answers a warmed chrome session — only slug discovery uses a session; quote pages
+    # are fetched session-less and keep these headers.
+    "moneycontrol": {"netlocs": ["www.moneycontrol.com"], "gap": 12.0, "budget_min": 90, "impersonate": "chrome",
                      "headers": {"User-Agent": ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
                                                 "AppleWebKit/537.36 (KHTML, like Gecko) "
                                                 "Chrome/120.0.0.0 Safari/537.36"),

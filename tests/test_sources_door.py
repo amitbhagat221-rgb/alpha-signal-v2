@@ -468,6 +468,9 @@ def test_moneycontrol_recos_compute(net, monkeypatch):
             "pdt_dis_nm": "HDFC Bank&nbsp;<span>INE040A01034, HDFCBANK, 500180</span>"}]
     net.route("GET", r"autosuggestion_solr\.php$", jresp(sug))
     net.route("GET", r"/india/stockpricequote/", resp(200, _MC_PAGE))
+    net.route("GET", r"moneycontrol\.com/$", resp(200, "<html></html>"))      # search-session warm-up
+    monkeypatch.setattr(mc, "_SEARCH_SESSION", None)
+    monkeypatch.setattr(mc, "_isin_of", lambda sid: None)
     monkeypatch.setattr(mc, "_ensure_schema", lambda: None)
     monkeypatch.setattr(mc, "read_sql", lambda q, params=None: pd.DataFrame({
         "sid": ["RELI", "HDBK"], "ticker": ["RELIANCE", "HDFCBANK"], "name": ["Reliance", "HDFC Bank"],
@@ -2275,7 +2278,25 @@ SNAP = json.loads(r"""
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
    },
    "method": "GET",
+   "params": null,
+   "timeout": 15,
+   "url": "https://www.moneycontrol.com/"
+  },
+  {
+   "allow_redirects": true,
+   "data": null,
+   "headers": {
+    "Accept": "*/*",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Connection": "keep-alive",
+    "Referer": "https://www.moneycontrol.com/",
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+   },
+   "method": "GET",
    "params": {
+    "callback": "suggest1",
+    "classic": "true",
     "format": "json",
     "query": "HDFCBANK",
     "type": 1

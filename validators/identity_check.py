@@ -127,6 +127,47 @@ def _normalise_company_name(s: str) -> str:
     return re.sub(r"[^a-z0-9]", "", s)
 
 
+_MC_STRIP = re.compile(r"\b(ltd|limited|the|co|company|corporation|corp|and)\b")
+
+
+def _mc_norm(s: str) -> str:
+    s = html.unescape(str(s or "")).lower().replace("&", " and ")
+    return re.sub(r"[^a-z0-9]", "", _MC_STRIP.sub(" ", s))
+
+
+def _mc_same(n: str, t: str) -> bool:
+    from difflib import SequenceMatcher
+    if not n or not t:
+        return False
+    if n == t:                                    # "T T Ltd" → 'tt'
+        return True
+    if len(t) < 3:
+        return False
+    k = min(len(n), len(t), 6)
+    ratio = SequenceMatcher(None, n, t).ratio()
+    return (n[:k] == t[:k] and (n.startswith(t) or t.startswith(n) or ratio >= 0.6)) or ratio >= 0.88
+
+
+def mc_name_matches(name: str, company: str) -> bool:
+    """Is a Moneycontrol company token (the slug's company segment, or an autosuggest
+    record's name) this stock's company? The ONE rule for discovery, the producer gate
+    and tools.industry_audit.
+
+    The same first letters (up to 6) AND one name starting the other or a 0.6
+    similarity, else a 0.88 similarity. The old gate (substring or similarity ≥ 0.55)
+    passed TRIDENT → 'trent' (0.67) and ASHOKA → 'ashokleyland': 46 slugs carried
+    another company's broker targets (2026-10-19). A leading 'the' is tried with and
+    without ('thetatapowercompany', but 'thermax' is not 'rmax'). Renamed companies
+    fail here by design: pin them in MC_SLUG_OVERRIDES after an ISIN check."""
+    n = _mc_norm(name)
+    for part in [company] + str(company or "").split("-"):
+        t = _mc_norm(part)
+        variants = {t} | ({t[3:]} if t.startswith("the") and len(t) > 6 else set())
+        if any(_mc_same(n, v) for v in variants if v):
+            return True
+    return False
+
+
 def _mc_slug_company(slug: str) -> str:
     """Company segment of a Moneycontrol slug URL.
 
@@ -197,14 +238,16 @@ def _verify_moneycontrol(sid: str, payload, expected_name: Optional[str] = None,
         return IdentityVerdict("UNRESOLVED", sid, url,
                                 "moneycontrol needs expected_name (stocks.name) to verify")
 
-    slug_co = _normalise_company_name(_mc_slug_company(url))
+    raw_co = _mc_slug_company(url)
+    slug_co = _normalise_company_name(raw_co)
     name_n = _normalise_company_name(expected_name)
     if not slug_co or not name_n:
         return IdentityVerdict("UNRESOLVED", expected_name, url,
                                 "slug company segment or name normalises to empty")
-    name_in = slug_co in name_n or name_n in slug_co
     ratio = SequenceMatcher(None, slug_co, name_n).ratio()
-    if name_in or ratio >= 0.55:
+    # mc_name_matches, not "substring or ratio ≥ 0.55": that passed TRIDENT → 'trent'
+    # (0.67) and 45 more wrong-company slugs (2026-10-19)
+    if mc_name_matches(expected_name, raw_co):
         return IdentityVerdict("PASS", expected_name, url,
                                 f"slug '{slug_co}' matches name (ratio={ratio:.2f})")
     return IdentityVerdict("WRONG_ENTITY", expected_name, url,

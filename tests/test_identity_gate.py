@@ -291,3 +291,72 @@ def test_quarantine_row_drops_helper_columns(monkeypatch):
     quarantine_row("banking_metrics", {"sid": "BJAT", "gnpa": 1.2, "_book_value_cr": 9.0}, "BJAT",
                    "banking_metric", IdentityVerdict("WRONG_ENTITY", "x", "y", "r"))
     assert seen["row"] == {"sid": "BJAT", "gnpa": 1.2}
+
+
+# ─────────── 2026-10-19: 46 wrong-company Moneycontrol slugs ───────────
+
+MC_WRONG = [  # (stocks.name, slug company) — each carried another company's broker targets
+    ("Trident Ltd", "trent"), ("Ashoka Buildcon Ltd", "ashokleyland"), ("Ashiana Housing Ltd", "asianpaints"),
+    ("A B Cotspin India Ltd", "abbottindia"), ("Carysil Ltd", "crisil"), ("KSE Ltd", "bselimited"),
+    ("Borosil Scientific Ltd", "borosilrenewablesltd"), ("Kriti Industries (India) Limited", "kritinutrients"),
+    ("Godavari Biorefineries Ltd", "godawaripowerispat"), ("Aditya Birla Capital Ltd", "tatacapital"),
+]
+MC_RIGHT = [
+    ("Thermax Limited", "thermax"), ("T T Ltd", "tt"), ("Larsen & Toubro Ltd", "larsentoubro"),
+    ("Mahindra & Mahindra Ltd", "mahindramahindra"), ("Reliance Industries Ltd", "relianceindustries"),
+    ("Tata Power Company Ltd", "thetatapowercompany"), ("Bharti Airtel Ltd", "bhartiairtel"),
+]
+
+
+def test_mc_name_rule_rejects_the_wrong_company_slugs():
+    from validators.identity_check import mc_name_matches
+    assert [p for p in MC_WRONG if mc_name_matches(*p)] == []
+    assert [p for p in MC_RIGHT if not mc_name_matches(*p)] == []
+
+
+def test_moneycontrol_gate_quarantines_trident_on_trent_page():
+    """The producer gate passed TRIDENT's recos read off Trent's page (ratio 0.67 ≥ 0.55)."""
+    v = _verify_moneycontrol("TRIE", "/india/stockpricequote/retail/trent/T04",
+                             expected_name="Trident Ltd", expected_url_segment="TRIE")
+    assert v.status == "WRONG_ENTITY"
+
+
+def _sugg(name, isin, sym, slug):
+    return {"slug": slug, "name": name, "isin": isin, "symbol": sym, "bse": None}
+
+
+def test_discovery_needs_isin_or_symbol_plus_name():
+    from sources.moneycontrol_recos import choose_suggestion, parse_suggestions
+    text = ('suggest1([{"link_src":"https://www.moneycontrol.com/india/stockpricequote/retail/trent/T04",'
+            '"pdt_dis_nm":"Trent&nbsp;<span>INE849A01020, TRENT, 500251</span>","stock_name":"Trent"},'
+            '{"link_src":"https://www.moneycontrol.com/india/stockpricequote/textiles-spinning/trident/TI16",'
+            '"pdt_dis_nm":"Trident&nbsp;<span>INE064C01022, TRIDENT, 521064</span>","stock_name":"Trident"}])')
+    cands = parse_suggestions(text)
+    assert [c["symbol"] for c in cands] == ["TRENT", "TRIDENT"] and cands[1]["isin"] == "INE064C01022"
+    assert choose_suggestion(cands, "TRIDENT", "Trident Ltd")[0].endswith("/trident/TI16")
+    assert choose_suggestion(cands, "TRIDENT", "Trident Ltd", "INE064C01022")[0].endswith("/trident/TI16")
+    # exact symbol but another company's name → nothing (a wrong slug is worse than none)
+    odd = [_sugg("Ashok Leyland", None, "ASHOKA", "/india/stockpricequote/auto-lcvshcvs/ashokleyland/AL")]
+    assert choose_suggestion(odd, "ASHOKA", "Ashoka Buildcon Ltd")[0] is None
+    # the ISIN decides: a renamed company is found, a symbol on another ISIN is refused
+    renamed = [_sugg("Ebix Foods", "INE128C01010", "EBIX", "/india/stockpricequote/miscellaneous/ebix/TE03")]
+    assert choose_suggestion(renamed, "EBIX", "Eraaya Lifespaces Ltd", "INE128C01010")[0].endswith("/ebix/TE03")
+    assert choose_suggestion(renamed, "EBIX", "Ebix Foods Ltd", "INE000X01010")[0] is None
+
+
+def test_failed_search_never_clears_a_stored_slug(monkeypatch):
+    import runlog
+    from sources import moneycontrol_recos as mc
+    monkeypatch.setattr(mc, "_isin_of", lambda sid: None)
+
+    def boom(*a, **k):
+        raise mc.SearchFailed("403")
+
+    def no_db():
+        raise AssertionError("a failed search must not write")
+    monkeypatch.setattr(mc, "_autosuggest", boom)
+    monkeypatch.setattr(mc, "get_db", no_db)
+    failed = []
+    monkeypatch.setattr(runlog, "item_failed", lambda *a, **k: failed.append(a))
+    assert mc.discover_slug_for("TRIE", "TRIDENT", "Trident Ltd", clear_if_unmatched=True) is None
+    assert len(failed) == 1
