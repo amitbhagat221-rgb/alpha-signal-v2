@@ -201,17 +201,6 @@ def moneycontrol_recos():
 
 # ─────────────────────────────── Events ───────────────────────────────
 
-def bse_announcements():
-    from sources.bse_announcements import WARM_URL, _fetch_page
-    s = _http.warm_session(WARM_URL, headers=HOSTS["bse_api"]["headers"])
-    day = str(_latest("bse_announcements", "dt_tm"))[:10].replace("-", "")   # a day we know has filings
-    rows, total = _fetch_page(s, day, day, 1)        # single day: the API returns 0 for date RANGES
-    return {"expect": "json", "records": rows or None, "raw": json.dumps(rows[:20], default=str).encode(), "http": 200 if rows else None,
-            "url": f"api.bseindia.com AnnSubCategoryGetData {day} page 1",
-            "required": ["NEWSID", "SCRIP_CD", "NEWSSUB", "DT_TM", "ATTACHMENTNAME", "SUBCATNAME"],
-            "checks": [("total_count", total > 0, f"ROWCNT={total}")]}
-
-
 def nse_announcements():
     from sources import nse_announcements as na
     s = _http.warm_session(na.WARM_URL, headers=na.HEADERS)
@@ -368,7 +357,7 @@ CANARIES = {
     "tickertape_shareholding": tickertape_shareholding, "nse_insider": nse_insider,
     "nse_bulk_deals": nse_bulk_deals, "tickertape_analyst": tickertape_analyst,
     "yfinance_analyst": yfinance_analyst, "moneycontrol_recos": moneycontrol_recos,
-    "bse_announcements": bse_announcements, "nse_announcements": nse_announcements, "corporate_actions": corporate_actions,
+    "nse_announcements": nse_announcements, "corporate_actions": corporate_actions,
     "earnings_calendar": earnings_calendar, "macro_market": macro_market,
     "macro_official": macro_official, "rss_news": rss_news, "regulatory_news": regulatory_news,
     "scrip_master": scrip_master, "amfi_nav": amfi_nav, "mf_holdings": mf_holdings,

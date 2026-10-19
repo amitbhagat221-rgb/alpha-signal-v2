@@ -1,9 +1,10 @@
 """
 Alpha Signal v2 — NSE corporate announcements (feed nse_announcements; plan 0026 task 4.0).
 
-The fallback route for BSE's AnnSubCategoryGetData, which Akamai has 403'd since 2026-10-13. Its own
-table (`nse_announcements`): NSE's ids and `desc` taxonomy are not BSE's, and the governance and
-credit-rating factors read `bse_announcements`, so rows are never mixed.
+The live disclosure source since the BSE route was dropped (Akamai 403s AnnSubCategoryGetData since 2026-10-13;
+ADR 0082). Its own table (`nse_announcements`): NSE's ids and `desc` taxonomy are not BSE's. Readers never query
+it raw for factors: signals/announcements.py unions it with the BSE history, mapped onto BSE's category /
+subcategory (config.NSE_BSE_EQUIVALENT), and drops an NSE copy of a BSE filing.
 
 ENDPOINT (unofficial — the nseindia.com site's own backend; NSE needs the cookie warm on the home page):
     GET https://www.nseindia.com/api/corporate-announcements

@@ -29,7 +29,7 @@ Injectable frames so the live path and the PIT path
 decided by the backtest.
 
 Reads:  quarterly_income, stock_prices, macro_history(nifty50), corporate_actions,
-        bse_announcements (category='Result')
+        bse_announcements + nse_announcements (factors.RESULT_FILING_SQL, ADR 0082)
 Returns: DataFrame[sid, earnings_surprise_std, pead_drift_60d,
                    corporate_action_density, buyback_announcement_30d]
 
@@ -46,7 +46,7 @@ from datetime import date, timedelta
 import numpy as np
 import pandas as pd
 
-from factors import RESULT_FILING_SQL
+from factors import ANNOUNCEMENTS_SQL, RESULT_FILING_SQL
 from db import read_sql
 
 ANNOUNCE_LAG_DAYS = 45        # period_end → announcement-date PROXY (fallback when no BSE match)
@@ -141,7 +141,7 @@ def compute_pead(
     if announcements is None:
         dc = f"AND date(dt_tm) <= '{as_of_date}'" if as_of_date else ""
         announcements = read_sql(
-            f"SELECT sid, date(dt_tm) AS ann_date FROM bse_announcements "
+            f"SELECT sid, date(dt_tm) AS ann_date FROM ({ANNOUNCEMENTS_SQL}) a "
             f"WHERE {RESULT_FILING_SQL} AND sid IS NOT NULL AND dt_tm IS NOT NULL {dc} "
             f"ORDER BY sid, dt_tm")
 

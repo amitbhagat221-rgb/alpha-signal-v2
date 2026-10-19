@@ -50,6 +50,7 @@ from scipy import stats
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
+from signals import announcements  # noqa: E402  (BSE history + NSE live, ADR 0082)
 from tools.backtest_pit import _compute_ic, _newey_west_se  # noqa: E402
 from tools.lh_growth import nonoverlap_t  # noqa: E402
 from tools.theme_momentum import ORDER_SUB, TIERS, build  # noqa: E402
@@ -70,7 +71,7 @@ def panel():
     lab = pd.read_parquet(LH / "labels.parquet", columns=["sid", "snapshot_date"] + [f"fwd_{h}" for h in HORIZONS])
     d = d.merge(lab, on=["sid", "snapshot_date"], how="left")
     con = sqlite3.connect(f"file:{DB}?mode=ro", uri=True)
-    od = pd.read_sql("SELECT sid, substr(dt_tm, 1, 10) AS d FROM bse_announcements "
+    od = pd.read_sql(f"SELECT sid, substr(dt_tm, 1, 10) AS d FROM ({announcements.sql()}) a "
                      "WHERE subcategory = ? AND sid IS NOT NULL AND dt_tm IS NOT NULL", con, params=[ORDER_SUB])
     con.close()
     parts = []

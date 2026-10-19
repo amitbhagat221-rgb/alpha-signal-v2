@@ -68,14 +68,17 @@ must not import this module at load time (its legacy weight aliases are lazy).
 import numpy as np
 
 import config
+from signals.announcements import sql as _announcements_sql
 
-# A quarterly-result print in bse_announcements. Most companies file it under category
+# A quarterly-result print in the announcement stream (signals.announcements: BSE history + NSE live in BSE's
+# taxonomy — the NSE results submission maps to category 'Result', ADR 0082). Most companies file it under category
 # 'Result'; many large ones (Bank of Baroda, PNB, Canara, Coal India, LIC …) file it as the
 # outcome of the board meeting. Counting only 'Result' left the earnings-window factor
 # empty for them, and six large banks fell out of the 2026-10-04 picks on coverage.
 RESULT_FILING_SQL = ("(category = 'Result' OR (subcategory = 'Outcome of Board Meeting' AND "
                      "(lower(headline) LIKE '%financial result%' OR lower(headline) LIKE '%unaudited%' "
                      "OR lower(headline) LIKE '%audited financial%')))")
+ANNOUNCEMENTS_SQL = _announcements_sql()     # subquery body: BSE history + NSE live (signals/announcements.py)
 
 FACTORS = {
 
@@ -906,7 +909,7 @@ FACTORS = {
                        "needing no analyst consensus (which we lack PIT); PEAD hypothesis: a big "
                        "positive CAR keeps drifting → expected IC POSITIVE. Staleness gate 90d "
                        "(one reporting quarter); NULL when no qualifying recent print.",
-        "source_columns": ["bse_announcements.{sid,dt_tm,category=Result}", "stock_prices.close (adj)", "macro_history.nifty50"],
+        "source_columns": ["bse_announcements.{sid,dt_tm,category=Result}", "nse_announcements.{sid,an_dt,desc_category,subject}", "stock_prices.close (adj)", "macro_history.nifty50"],
         "filing_lag": "0d (dt_tm event-time anchor; CAR window must close ≤ eval)",
         "v1_verdict_summary": "(new — Plan 0002 §3.2.5, PEAD-via-CAR; audit Factor-F3 sanctioned next candidate)",
         "status_reason": "Shipped + backtested 2026-07-05 (PEAD-via-CAR, the sanctioned next step after "
@@ -929,7 +932,7 @@ FACTORS = {
         "eligibility": {
             "description": "Stocks with a BSE Result announcement in the trailing ~95d (the CAR staleness gate is 90d + window-close; names without a fresh print have no reading and must not be coverage-penalised for it)",
             "eligible_sql": """
-                SELECT DISTINCT sid FROM bse_announcements
+                SELECT DISTINCT sid FROM (""" + ANNOUNCEMENTS_SQL + """) a
                 WHERE """ + RESULT_FILING_SQL + """ AND sid IS NOT NULL AND dt_tm IS NOT NULL
                   AND date(dt_tm) >= date('now', '-95 day') AND date(dt_tm) <= date('now')
             """,
@@ -942,7 +945,7 @@ FACTORS = {
                        "resignation/cessation events from the BSE announcement stream "
                        "(auditor 3.0 / CFO 2.5 / MD-CEO-Chairman 2.0 / director-CS-cessation 1.0). "
                        "Higher = more governance instability. Dual-use forensic red-flag.",
-        "source_columns": ["bse_announcements.{sid,subcategory,dt_tm}"],
+        "source_columns": ["bse_announcements.{sid,subcategory,dt_tm}", "nse_announcements.{sid,an_dt,desc_category,subject}"],
         "filing_lag": "0d (dt_tm event-time anchor)",
         "v1_verdict_summary": "(new — ADR 0042 BSE event stream)",
         "status_reason": "Shipped 2026-06-13 (ADR 0042). Backtest 46 monthly periods (2018+ BSE depth): "
@@ -2026,8 +2029,10 @@ INPUT_TABLES = {
     "insider_trades": ("insider_trades",), "banking_metrics": ("banking_metrics",),
     "macro_hist": ("macro_history",), "macro_map": ("macro_sector_map",),
     "fno_pcr": ("fno_pcr_history",), "fno_iv": ("fno_iv_history",),
-    "corp_actions": ("corporate_actions",), "bse_results": ("bse_announcements",),
-    "bse_gov": ("bse_announcements",), "nlp": ("nlp_scores",), "yahoo_eps": ("analyst_estimates",),
+    "corp_actions": ("corporate_actions",),
+    # BSE history + NSE live through signals.announcements (ADR 0082); the keys keep their historical names
+    "bse_results": ("bse_announcements", "nse_announcements"),
+    "bse_gov": ("bse_announcements", "nse_announcements"), "nlp": ("nlp_scores",), "yahoo_eps": ("analyst_estimates",),
     "nse_q": ("quarterly_results_nse",),
     "eval_date": (), "base": (),
 }

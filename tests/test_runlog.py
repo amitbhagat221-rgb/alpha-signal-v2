@@ -110,7 +110,7 @@ def test_event_caps_prevent_floods(_isolated_runlog, monkeypatch):
 def _child(tmp_path, body, db):
     script = tmp_path / "child.py"
     script.write_text(textwrap.dedent(body))
-    env = {**os.environ, "ALPHA_STEP": "cron_bse_announcements", "ALPHA_RUN_ID": "cron_bse_announcements:T:1",
+    env = {**os.environ, "ALPHA_STEP": "cron_nse_announcements", "ALPHA_RUN_ID": "cron_nse_announcements:T:1",
            "ALPHA_RUNLOG_DB": str(db), "PYTHONPATH": str(ROOT)}
     return subprocess.run([sys.executable, str(script)], cwd=ROOT, env=env, capture_output=True, text=True)
 
@@ -124,10 +124,10 @@ def test_cron_child_logs_uncaught_exception(tmp_path, _isolated_runlog):
         parse([{}])
     """, _isolated_runlog)
     assert p.returncode == 1 and "KeyError" in p.stderr, "the original traceback still reaches the cron log"
-    ev = _events(_isolated_runlog, run_id="cron_bse_announcements:T:1")
+    ev = _events(_isolated_runlog, run_id="cron_nse_announcements:T:1")
     assert [e["event"] for e in ev] == ["run_start", "exception", "run_end"]
     exc = ev[1]
-    assert exc["feed"] == "bse_announcements" and exc["error_type"] == "KeyError" and exc["symptom"] == "D"
+    assert exc["feed"] == "nse_announcements" and exc["error_type"] == "KeyError" and exc["symptom"] == "D"
     frames = json.loads(exc["detail"])["frames"]
     assert frames[-1]["func"] == "parse" and "NEWSID" in frames[-1]["code"]
     assert ev[2]["error_type"] == "FAILED"

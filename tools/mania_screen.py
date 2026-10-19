@@ -52,6 +52,7 @@ import pandas as pd
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
+from signals import announcements  # noqa: E402  (BSE history + NSE live, ADR 0082)
 from tools.theme_momentum import FLOOR_INR, TIERS, build, scores  # noqa: E402
 
 DB = PROJECT_ROOT / "data" / "alpha_signal.db"
@@ -70,7 +71,7 @@ def flags(d):
                      con, params=anchors)
     raw = pd.read_sql("SELECT sid, date, close FROM stock_prices WHERE close > 0 AND date >= '2019-11-01'", con)
     sh = pd.read_sql("SELECT sid, filed_at, promoter_pct FROM shareholding_categories WHERE filed_at IS NOT NULL", con)
-    pr = pd.read_sql(f"SELECT sid, substr(dt_tm, 1, 10) AS d FROM bse_announcements WHERE sid IS NOT NULL AND "
+    pr = pd.read_sql(f"SELECT sid, substr(dt_tm, 1, 10) AS d FROM ({announcements.sql()}) a WHERE sid IS NOT NULL AND "
                      f"subcategory IN ({','.join('?' * len(PREF_SUBS))})", con, params=list(PREF_SUBS))
     con.close()
     gf = pd.read_parquet(LH / "growth_features.parquet", columns=["sid", "snapshot_date", "a_sales_g1", "a_ebit_chg"])

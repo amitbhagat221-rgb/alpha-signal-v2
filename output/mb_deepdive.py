@@ -13,6 +13,7 @@ Rs crore for money, percent for percentages (growth and margin are percent, e.g.
 import pandas as pd
 
 import db
+from signals import announcements
 
 HOLDER_MIN_PCT = 1.0
 PARTIAL_SHARE = 0.6     # a filing naming < 60 % of the previous filing's >= 1 % holders is a partial list (279 such
@@ -189,14 +190,16 @@ def latest_valuation(sid):
 
 
 def headlines(sid, days=90, limit=40):
-    """Last `days` days of BSE announcement headlines: [{date, category, subcategory, headline}] newest first,
-    routine filings (trading window, newspaper ads, RTA certificates) dropped; headline text is third-party."""
+    """Last `days` days of announcement headlines (BSE history + NSE live, signals.announcements):
+    [{date, category, subcategory, headline}] newest first, routine filings (trading window, newspaper ads, RTA
+    certificates) dropped; an NSE row with no BSE equivalent shows its own desc as subcategory. Text is third-party."""
     rows = db.rows(
-        "SELECT substr(dt_tm, 1, 10) AS date, category, subcategory, COALESCE(news_sub, headline) AS headline "
-        "FROM bse_announcements WHERE sid = ? AND dt_tm >= date('now', ?) "
+        "SELECT substr(dt_tm, 1, 10) AS date, category, COALESCE(subcategory, filed_as) AS subcategory, "
+        f"title AS headline FROM ({announcements.sql()}) a WHERE sid = ? AND dt_tm >= date('now', ?) "
         "AND COALESCE(subcategory, '') NOT LIKE 'Closure of Trading Window%' "
         "AND COALESCE(subcategory, '') NOT LIKE 'Newspaper Publication%' "
         "AND COALESCE(subcategory, '') NOT LIKE 'Certificate under Reg. 74%' "
+        "AND COALESCE(filed_as, '') NOT LIKE 'Certificate under SEBI (Depositories%' AND COALESCE(filed_as, '') <> 'Trading Window' "
         "ORDER BY dt_tm DESC LIMIT ?", [sid, f"-{int(days)} days", limit])
     return [{**r, "headline": (r["headline"] or "")[:160]} for r in rows]
 

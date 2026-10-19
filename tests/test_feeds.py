@@ -133,7 +133,7 @@ def test_canary_job_is_wired():
 
 def test_tiers_are_derived():
     t = feeds.tiers(refresh=True)
-    for must in ("nse_bhavcopy", "tickertape_fundamentals", "tickertape_shareholding", "bse_announcements",
+    for must in ("nse_bhavcopy", "tickertape_fundamentals", "tickertape_shareholding", "nse_announcements",
                  "fno_bhav", "fno_iv", "corporate_actions", "tickertape_analyst"):
         assert t[must] == "T1", f"{must} feeds a wired factor / the email — must derive T1, got {t[must]}"
     for name, f in feeds.FEEDS.items():
@@ -172,7 +172,7 @@ def test_every_canary_is_declared_and_used():
 
 
 def test_log_steps_parse_run_sh():
-    assert feeds.log_steps("bse_announcements") == ["cron_bse_announcements"]
+    assert feeds.log_steps("nse_announcements") == ["cron_nse_announcements"]
     assert feeds.log_steps("nse_market_daily") == ["cron_nselib_daily_forward"]
     assert feeds.log_steps("tickertape_fundamentals") == ["cron_tickertape"]
     assert feeds.log_steps("nse_bhavcopy") == ["fetch_bhavcopy"]
@@ -335,3 +335,20 @@ def test_data_supply_page_renders(monkeypatch):
     assert "Last run failed" in row["problem_labels"]            # the step Health lists for this feed
     assert data["summary"]["canary_pass"] == 0 and data["summary"]["canary_total"] == 2     # checks.feeds.probe_tally
     assert data["simple"][0]["state"] == "Broken", "broken feeds sort first"
+
+
+# ─────────────────────────────── the dropped BSE announcements route (ADR 0082) ───────────────────────────────
+
+def test_bse_announcements_route_is_retired_and_its_table_is_history():
+    f = feeds.FEEDS["bse_announcements"]
+    assert f["status"] == "retired" and feeds.tier("bse_announcements") is None
+    assert not f.get("schedule") and not f.get("canary")
+    from sources.canaries import CANARIES
+    assert "bse_announcements" not in CANARIES
+    run_sh = (ROOT / "run.sh").read_text()
+    assert "python -m sources.bse_announcements" not in run_sh and "cron_bse_announcements" not in run_sh
+    assert all(m != "sources.bse_announcements" for _, m in feeds._run_sh_logs().get("forward", []))
+    t = TABLES["bse_announcements"]                 # frozen history: no freshness benchmark to go stale against
+    assert t["kind"] == "RAW" and not t.get("freq") and not t.get("stale_days")
+    n = feeds.FEEDS["nse_announcements"]
+    assert n["status"] == "production" and feeds.tier("nse_announcements") == "T1"

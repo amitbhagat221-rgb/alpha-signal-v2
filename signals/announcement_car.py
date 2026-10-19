@@ -14,7 +14,7 @@ proxy that needs no consensus: a big positive CAR = the print beat the market's
 priced-in expectation. PEAD says that beat keeps drifting for weeks.
 
 Construction (per sid, as of eval_date):
-  - Announcement dates: `bse_announcements`, category='Result', real `dt_tm`,
+  - Announcement dates: `bse_announcements` + `nse_announcements` (factors.ANNOUNCEMENTS_SQL), category='Result', real `dt_tm`,
     sid-joined (the exact ~85%-coverage stream the PEAD work established). Only
     dt_tm ≤ eval_date is visible (look-ahead safe; reuses pead._announce_dates_by_sid).
   - Pick the MOST RECENT qualifying announcement: dt_tm within STALE_DAYS calendar
@@ -48,7 +48,7 @@ END date ≤ eval_date. Injectable frames so the live path and the PIT path
 inside the 3-day window would otherwise manufacture a fake CAR). Sector-agnostic
 — every sector reports results incl. financials; tier segmentation is at backtest.
 
-Reads:  bse_announcements (category='Result'), stock_prices (close),
+Reads:  bse_announcements + nse_announcements (factors.RESULT_FILING_SQL), stock_prices (close),
         macro_history (nifty50)
 Returns: DataFrame[sid, announcement_car]
 
@@ -64,7 +64,7 @@ from datetime import date, timedelta
 import numpy as np
 import pandas as pd
 
-from factors import RESULT_FILING_SQL
+from factors import ANNOUNCEMENTS_SQL, RESULT_FILING_SQL
 from db import read_sql
 from signals._prices import load_prices
 from signals.pead import _announce_dates_by_sid
@@ -164,7 +164,7 @@ def compute_announcement_car(
     if announcements is None:
         dc = f"AND date(dt_tm) <= '{as_of_date}'" if as_of_date else ""
         announcements = read_sql(
-            f"SELECT sid, date(dt_tm) AS ann_date FROM bse_announcements "
+            f"SELECT sid, date(dt_tm) AS ann_date FROM ({ANNOUNCEMENTS_SQL}) a "
             f"WHERE {RESULT_FILING_SQL} AND sid IS NOT NULL AND dt_tm IS NOT NULL {dc} "
             f"ORDER BY sid, dt_tm")
     if prices is None:

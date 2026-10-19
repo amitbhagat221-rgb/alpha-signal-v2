@@ -24,7 +24,7 @@ same. Strict compounders is the multibagger funnel. The stock page reads stock_c
 Factor values (earnings yield, book-to-price, delivery anomaly, announcement reaction…)
 come from the latest daily_snapshots_pit row — the same numbers the ranking uses.
 
-Reads: stocks, shareholding, forensic_scores, surveillance_flags, bse_announcements,
+Reads: stocks, shareholding, forensic_scores, surveillance_flags, bse_announcements + nse_announcements,
 insider_trades, fundamentals_screener, stock_prices, shareholding_holders.
 """
 
@@ -37,6 +37,7 @@ import views
 from formatting import month_text
 from cockpit._shared import _persisted_cache
 from db import read_sql, scalar
+from signals import announcements   # BSE history + NSE live (ADR 0082)
 
 # ── rules (shown on the page from these values) ──
 # The portfolio rules live in sleeves.py so the backtest tests exactly what the page shows.
@@ -135,7 +136,7 @@ def avoid_list():
         add(r.sid, "surveillance", f"under exchange {SURVEILLANCE[r.flag_type]}" + (f", {r.stage}" if r.stage and len(str(r.stage)) > 2 else ""))
 
     resign = read_sql(
-        f"SELECT sid, subcategory, MAX(substr(dt_tm, 1, 10)) AS d FROM bse_announcements "
+        f"SELECT sid, subcategory, MAX(substr(dt_tm, 1, 10)) AS d FROM ({announcements.sql()}) a "
         f"WHERE subcategory IN ({','.join('?' * len(RESIGNATIONS))}) AND dt_tm >= ? AND sid IS NOT NULL "
         "GROUP BY sid, subcategory", params=[*RESIGNATIONS, _since(RESIGNATION_DAYS)])
     for r in resign.itertuples():

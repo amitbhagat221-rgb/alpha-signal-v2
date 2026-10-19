@@ -1,6 +1,11 @@
 """
 Alpha Signal v2 — BSE corporate-announcement EVENT-STREAM harvester.
 
+STATUS 2026-10-19: route dropped, feed retired (ADR 0082). BSE's WAF 403s this server since 2026-10-13, so this
+module is no longer scheduled; `bse_announcements` is frozen history (2018-01 -> 2026-10-12) and the live source
+is sources/nse_announcements.py. Readers combine both through signals/announcements.py. Kept for a manual run
+if BSE lets this server back in.
+
 Harvests the full BSE corporate-announcements feed — exchange-verified, timestamped,
 survivorship-complete (delisted names included), depth back to 2018 — into the
 `bse_announcements` table. ONE new data category (event-driven) that seeds several

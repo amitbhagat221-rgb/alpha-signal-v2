@@ -96,6 +96,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from config import SCREEN  # noqa: E402
 from signals._prices import apply_adjustments  # noqa: E402
 from tools.lh_growth import asof  # noqa: E402
+from signals import announcements  # noqa: E402  (BSE history + NSE live, ADR 0082)
 
 DB = PROJECT_ROOT / "data" / "alpha_signal.db"
 LH = PROJECT_ROOT / "data" / "lh"
@@ -193,8 +194,8 @@ def build(only=None):
     st = pd.read_sql("SELECT sid, name, sector, industry FROM stocks", con)
     px = pd.read_sql("SELECT sid, date, close, volume FROM stock_prices WHERE close > 0 AND date >= '2019-06-01'", con)
     adj = pd.read_sql("SELECT sid, ex_date, factor, inds FROM corporate_adjustments", con)
-    acq = pd.read_sql("SELECT sid, substr(dt_tm, 1, 10) AS d FROM bse_announcements WHERE subcategory IN (%s) "
-                      "AND sid IS NOT NULL AND dt_tm IS NOT NULL" % ",".join("?" * len(ACQ_SUB)), con, params=list(ACQ_SUB))
+    acq = pd.read_sql(f"SELECT sid, substr(dt_tm, 1, 10) AS d FROM ({announcements.sql()}) a WHERE subcategory IN "
+                      f"({','.join('?' * len(ACQ_SUB))}) AND sid IS NOT NULL AND dt_tm IS NOT NULL", con, params=list(ACQ_SUB))
     ann = annual(con)
     q = quarterly(con)
     con.close()

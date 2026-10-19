@@ -63,6 +63,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from signals._prices import apply_adjustments  # noqa: E402
+from signals import announcements  # noqa: E402  (BSE history + NSE live, ADR 0082)
 
 DB = PROJECT_ROOT / "data" / "alpha_signal.db"
 LH = PROJECT_ROOT / "data" / "lh"
@@ -86,7 +87,7 @@ def build():
     px = pd.read_sql("SELECT sid, date, close, volume FROM stock_prices WHERE close > 0 AND date >= '2018-09-01'", con)
     adj = pd.read_sql("SELECT sid, ex_date, factor, inds FROM corporate_adjustments", con)
     pol = pd.read_sql("SELECT sector, snapshot_date, policy_score FROM sector_policy_pit", con)
-    od = pd.read_sql("SELECT sid, substr(dt_tm, 1, 10) AS d FROM bse_announcements "
+    od = pd.read_sql(f"SELECT sid, substr(dt_tm, 1, 10) AS d FROM ({announcements.sql()}) a "
                      "WHERE subcategory = ? AND sid IS NOT NULL AND dt_tm IS NOT NULL", con, params=[ORDER_SUB])
     con.close()
 
