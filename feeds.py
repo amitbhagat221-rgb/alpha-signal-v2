@@ -677,6 +677,15 @@ SYMPTOM_CLASSES = {
 
 INCIDENTS = [
     # (date, feed, class, symptom, cause, fix, ref)
+    ("2026-10-19", "moneycontrol_recos", "F", "46 stocks.mc_slug point at another company (TRIDENT → Trent, ASHOKA → Ashok "
+     "Leyland): their broker targets were another company's",
+     "slugs from the pre-2026-05-25 first-URL discovery; the producer gate's name test (similarity ≥ 0.55) passed them, "
+     "and autosuggest now 403s python-requests so nothing re-checked them",
+     "one strict rule validators.identity_check.mc_name_matches (gate + discovery + industry_audit); discovery needs "
+     "the ISIN or symbol + name, via a chrome session; --rediscover --sids; wrong rows quarantined", "fix-agent 2026-10-19"),
+    ("2026-10-19", "bse_shp_xbrl", "F", "RBZ had two Dec-2023 shareholding 'quarters' (2023-12-22 and 2023-12-31)",
+     "listing-day (Reg 31(1)(a)) and capital-restructuring (31(1)(c)) patterns stored as quarters",
+     "bse_shp.is_quarterly keeps 31(1)(b) only; the non-quarterly filings' rows deleted (CSV backup)", "fix-agent 2026-10-19"),
     ("2026-09-28", "banking_metrics", "D", "every quarantine write failed: no column _book_value_cr (found by the run log's output tail)",
      "quarantine_row passed the in-flight helper column to the mirror table",
      "quarantine_row drops underscore helper keys; write_verdicts failures now a run-log WARN", "plan 0018 run log"),
