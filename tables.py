@@ -409,7 +409,7 @@ TABLES = {
         "source": "sources/macro_official.py (MoSPI IIP + OEA core YoY → v1 thresholds)",
         "date_col": "snapshot_date",
         "depth": "One label snapshot per weekly macro run (2026-09-27 →); a 2026-04-09 v1 snapshot before",
-        "description": "Per-indicator STRONG/IMPROVING/STABLE/DETERIORATING labels (+ macro_overall) from the latest official IIP and core-sector YoY. signals/macro.py reads the latest snapshot into sector scores. Indicators older than 150 days get no label.",
+        "description": "Per-indicator STRONG/IMPROVING/STABLE/DETERIORATING labels (+ macro_overall) from the latest official IIP and core-sector YoY. Indicators older than 150 days get no label. No longer feeds sector scores: since 2026-10-20 signals/macro.py runs pit.pit_macro_sector (macro_history × macro_sector_map), the PIT twin's engine.",
     },
     "macro_sector_map": {
         "kind": "RAW", "domain": "Macro", "freq": "monthly", "data_freq": "static",
@@ -420,7 +420,7 @@ TABLES = {
     "macro_sector_signals": {
         "kind": "COMPUTED", "domain": "Macro", "date_col": "snapshot_date",
         "depth": "Latest snapshot per sector",
-        "description": "Sector-level macro and regulatory scores (one row per sector). Combines macro indicator changes + AI-classified regulatory events.",
+        "description": "Sector-level macro and regulatory scores (one row per stocks sector per day). macro_score = pit.pit_macro_sector (the same engine as macro_sector_signals_pit) on a 0-100 display scale, 50 + 10 x score; regulatory detail appended by signals/regulatory.py.",
     },
     "sector_analyst_breadth_pit": {"kind": "COMPUTED", "domain": "Macro", "date_col": "snapshot_date"},
     "sector_force_breakdown": {"kind": "COMPUTED", "domain": "Macro", "date_col": "snapshot_date"},

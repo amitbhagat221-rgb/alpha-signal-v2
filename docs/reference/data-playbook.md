@@ -190,7 +190,7 @@ For each source: **what it gives**, **endpoint**, **PIT/live access**, **histori
 | **Historical access** | New bases only: IIP/core Apr-2023 →, CPI Jan-2025 →. Older bases (IIP 2011-12, CPI 2012) are separate series — never splice levels; use the published YoY. |
 | **Gotchas** | (1) Both hosts need a browser TLS client (`hosts` `impersonate`): python-requests fails with `UNSAFE_LEGACY_RENEGOTIATION_DISABLED`. (2) MoSPI `limit` > 200 → error; CPI filtered by division still returns the whole subtree (668 rows/month) — take page 1 and keep `group is None`. (3) MoSPI names "Mining & Quarrying" / "Electricity, Gas, …" — mapped to `iip_mining` / `iip_electricity`. (4) OEA file name carries the release date — scrape the page. (5) All three rebased in 2026 (IIP/WPI 2022-23, CPI 2024). |
 | **Not covered** | GST (gst.gov.in is an Angular app; monthly PDFs with unstable names) and bank credit growth — `macro_indicators` omits them rather than invent values (v1 hard-coded credit_growth = 11.5%). |
-| **Used by** | `sources/macro_official.py` (via `macro_gov.compute`) → `macro_history`, `macro_indicators` → `signals/macro.py` (display-only sector macro scores). Not used by `sector_tilt` (yfinance series). |
+| **Used by** | `sources/macro_official.py` (via `macro_gov.compute`) → `macro_history`, `macro_indicators` (labels; no sector consumer since 2026-10-20). Sector macro scores — live `signals/macro.py`, PIT and `sector_tilt` — all come from `pit.pit_macro_sector` over the yfinance series in `macro_sector_map`. |
 | **Dead** | data.gov.in (`api.data.gov.in`): gateway 502 / 60 s timeouts since ≥2026-07, and its IIP/CPI/core/GST resources stopped updating Feb-2023…Jul-2024. |
 
 ### FRED — Cross-border / US macro
