@@ -57,6 +57,16 @@ def test_fund_nav_card_shows_the_newest_nav_not_the_metrics_nav(monkeypatch, tmp
     assert "daily to 2026-10-19" in html
 
 
+def test_book_states_the_real_analyst_range():
+    from cockpit import book
+    b = book.get_book()
+    if not b:
+        return
+    n = [r["n_analysts"] for r in b["rows"] if r["pt_upside_pct"] is not None and r["n_analysts"]]
+    assert b["analysts_range"] == ((min(n), max(n)) if n else None)
+    assert "One to five analysts" not in (COCKPIT_TEMPLATES / "book.html").read_text()
+
+
 def test_ownership_card_shows_mfs_and_insurers_inside_dii():
     src = (COCKPIT_TEMPLATES / "stock_detail.html").read_text()
     row = src[src.index('("Promoter", "promoter_pct"'):].split("]", 1)[0]

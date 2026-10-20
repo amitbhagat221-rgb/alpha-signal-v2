@@ -84,7 +84,7 @@
         </div>
         {% endif %}
         <div class="bk-sub">Position-weighted upside to the {{ book.er_basis }}, {{ book.er_names }} of {{ book.n }} names covered
-            ({{ book.er_weight_pct|pct(0) }} of the book), as of {{ book.pick_date|short_date }}. One to five analysts per name, and no dividends:
+            ({{ book.er_weight_pct|pct(0) }} of the book), as of {{ book.pick_date|short_date }}.{% if book.analysts_range %} {{ book.analysts_range[0] }} to {{ book.analysts_range[1] }} analysts per name, and no dividends:{% else %} No dividends:{% endif %}
             a guide, not a forecast.</div>
     </div>
     {% if book.ytd %}
