@@ -70,7 +70,9 @@ def _prewarm_cache():
     prewarm([
         ("data_freshness",     lambda: api.get_data_freshness()),
         ("db_summary",         lambda: api.get_db_summary()),
-        ("data_health_scores", lambda: api.get_data_health_scores(force=False)),
+        # scores every column of every table (~4.5 min on 5M-row tables): at boot and then every 6 hours,
+        # not every re-warm cycle (a visit past the 5 min cache refreshes it in the background anyway)
+        ("data_health_scores", lambda: api.get_data_health_scores(force=False), 6 * 3600),
         ("flow_overview",      lambda: api.get_flow_overview()),
         ("health_overview",    lambda: api.get_health_overview()),
         ("pipeline_status",    lambda: api.get_pipeline_status()),

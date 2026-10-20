@@ -65,6 +65,10 @@ COMPARE = {
         "/org#memos": "/org#memos",
         "/org#org": "/org#org",
         "/options": "/options",                     # placeholder on the preview: the live /options page
+        "/resources": "/resources",
+        "/resources#options-primer": "/resources#options-primer",
+        "/resources#options-bets": "/resources#options-bets",
+        "/resources#options-landscape": "/resources#options-landscape",
         "/sql": "/sql",
     },
 }

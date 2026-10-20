@@ -14,6 +14,7 @@ plain rows so tests need no database.
 
 import config
 import views
+from db import get_db
 from cockpit import api, playbooks
 from cockpit._shared import _ttl_cache
 
@@ -146,10 +147,23 @@ def _drivers(drivers, labels):
 
 
 def _adtv(sids, asof):
-    """{sid: 20-day median traded value in rupees}: portfolio_construction.adtv, the figure the
-    book's liquidity floor is applied to."""
-    from portfolio_construction import adtv
-    return adtv(sids, asof).to_dict() if sids else {}
+    """{sid: 20-day median traded value in rupees}: the figure the book's liquidity floor is applied to
+    (portfolio_construction.adtv, which is the pipeline's and reads every close the sids ever had).
+    Same rows by construction: each sid's newest ADTV_WINDOW sessions with close and volume above zero
+    on or before `asof`, one primary-key seek per sid, median of close x volume."""
+    if not sids:
+        return {}
+    import numpy as np
+    from portfolio_construction import ADTV_WINDOW
+    q = ("SELECT close, volume FROM stock_prices WHERE sid = ? AND date <= ? AND close > 0 AND volume > 0 "
+         "ORDER BY date DESC LIMIT ?")
+    out = {}
+    with get_db() as conn:
+        for sid in dict.fromkeys(sids):
+            rows = conn.execute(q, [sid, asof, ADTV_WINDOW]).fetchall()
+            if rows:
+                out[sid] = float(np.median([c * v for c, v in rows]))
+    return out
 
 
 @_ttl_cache(120)

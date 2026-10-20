@@ -113,28 +113,34 @@ def native_rows(sql, params=()):
 def latest_rows(table, cols, sids, order_col="snapshot_date", n=1, where=None):
     """The newest `n` rows per sid (by `order_col`) for every sid in `sids`, as
     record dicts with a leading `sid` key — the batched form of
-    `... WHERE sid = ? ORDER BY <order_col> DESC LIMIT n`."""
+    `... WHERE sid = ? ORDER BY <order_col> DESC LIMIT n`.
+
+    One index seek per sid (the table needs an index leading with sid, as every
+    caller's primary key does), not a window over every row those sids ever had:
+    the cost is n rows per stock, not the stock's whole history. Rows come back
+    sorted by sid, each sid's newest first."""
     sids, ph = sid_params(sids)
     if not sids:
         return []
-    extra = f"AND ({where})" if where else ""
-    return native_rows(
-        f"SELECT sid, {cols} FROM ("
-        f"  SELECT sid, {cols}, ROW_NUMBER() OVER ("
-        f"    PARTITION BY sid ORDER BY [{order_col}] DESC) AS _rn"
-        f"  FROM [{table}] WHERE sid IN ({ph}) {extra}"
-        f") WHERE _rn <= {int(n)}",
-        sids,
-    )
+    extra = f" AND ({where})" if where else ""
+    one = (f"SELECT * FROM (SELECT sid, {cols} FROM [{table}] WHERE sid = ?{extra} "
+           f"ORDER BY [{order_col}] DESC LIMIT {int(n)})")
+    out = []
+    for i in range(0, len(sids), 200):                      # compound SELECT / variable limits
+        part = sids[i:i + 200]
+        out += native_rows(" UNION ALL ".join([one] * len(part)), part)
+    out.sort(key=lambda r: r["sid"])                        # stable: each sid keeps its newest-first order
+    return out
 
 
 def latest_per_sid(table, cols):
     """Every sid's newest row (by snapshot_date) of `table` as a DataFrame
-    [sid, *cols]; `cols` may carry `AS` aliases."""
+    [sid, *cols]; `cols` may carry `AS` aliases. One primary-key seek per stock in the
+    universe (the table's sid column references stocks), not a GROUP BY over the history."""
     return read_sql(
-        f"SELECT sid, {', '.join(cols)} FROM [{table}] "
-        f"WHERE (sid, snapshot_date) IN "
-        f"(SELECT sid, MAX(snapshot_date) FROM [{table}] GROUP BY sid)"
+        f"SELECT t.sid AS sid, {', '.join(cols)} FROM (SELECT sid FROM stocks) s "
+        f"CROSS JOIN [{table}] t ON t.sid = s.sid AND t.snapshot_date = "
+        f"(SELECT MAX(snapshot_date) FROM [{table}] WHERE sid = s.sid)"
     )
 
 
@@ -471,9 +477,10 @@ GAP_DAYS = 14
 def latest_close(sids=None):
     """{sid: (close, date)} for the newest stock_prices row per sid (all sids if None)."""
     if sids is None:
-        rows = native_rows(
-            "SELECT sid, close, date FROM stock_prices "
-            "WHERE (sid, date) IN (SELECT sid, MAX(date) FROM stock_prices GROUP BY sid)")
+        rows = native_rows(         # one primary-key seek per stock, not a GROUP BY over every close since 2010
+            "SELECT p.sid AS sid, p.close AS close, p.date AS date FROM (SELECT sid FROM stocks) s "
+            "CROSS JOIN stock_prices p ON p.sid = s.sid AND p.date = "
+            "(SELECT MAX(date) FROM stock_prices WHERE sid = s.sid)")
     else:
         rows = latest_rows("stock_prices", "close, date", sids, order_col="date")
     return {r["sid"]: (r["close"], r["date"]) for r in rows}

@@ -27,6 +27,10 @@ Fields (only `kind`, `domain`, `date_col` are always present):
                  cover SME, harvester drops a series), not fixed by the next cron.
     best_effort  upstream can legitimately carry no fresh data — staleness is a
                  WARN, never a heal-streak CRITICAL, and the watchdog skips heals
+    big          OVER 200k ROWS: tests/test_cockpit_scaling.py fails any cockpit page query that
+                 full-scans it or reads >100k of its rows (a page's cost must depend on what it
+                 shows, not on the history). The same test fails when a table grows past 200k
+                 rows without the flag.
     quarantine   gets a <table>_quarantine mirror (Trust Pipeline, Plan 0007)
     may_be_empty an EMPTY table is expected (a feature not live yet): the health
                  report shows INFO instead of the 0-row CRITICAL (checks.empty_table_severity;
@@ -51,6 +55,7 @@ TABLES = {
     # and a holiday adjacent to the weekend stretches it to ≈5-6d. 6 tolerates
     # that cluster yet still flags a genuinely stalled fetcher inside a week.
     "fno_bhav": {
+        "big": True,
         "contract": {"max_null": {"settle": 0.05}, "not_all_zero": ["settle", "underlying_price"]},
         "kind": "RAW", "domain": "Universe & Prices", "date_col": "trade_date", "stale_days": 6,
     },
@@ -116,14 +121,17 @@ TABLES = {
         "description": "NSE's list of symbol changes (old symbol, new symbol, date). Links a renamed stock's earlier price rows, stored under the old symbol, to its sid.",
     },
     "stock_prices_unlisted": {
+        "big": True,
         "kind": "RAW", "domain": "Universe & Prices", "date_col": "date",
         "description": "Daily OHLCV + delivery for every NSE symbol that is NOT in `stocks` (delisted, merged, or outside our universe), from the same bhavcopy file as stock_prices. Keyed by exchange symbol. The survivorship-free half of the price history.",
     },
     "daily_snapshots_pit_unlisted": {
+        "big": True,
         "kind": "COMPUTED", "domain": "Backtest (PIT)", "date_col": "snapshot_date",
         "description": "Price-only factors + 20-day label for every NSE symbol outside `stocks` (delisted, merged, never in the universe) at each panel anchor, keyed by symbol; tier estimated from traded value. Built by tools/unlisted_panel.py; the full-market evidence for the backtest.",
     },
     "stock_prices": {
+        "big": True,
         "contract": {"max_null": {"close": 0.02}, "not_all_zero": ["close", "volume"]},
         "kind": "RAW", "domain": "Universe & Prices", "date_col": "date", "coverage": (95.0, 80.0),
         "mirror": True,
@@ -136,6 +144,7 @@ TABLES = {
         "description": "Universe of investable stocks (2,448 NSE-listed, ETFs excluded). Tickers, company names, sectors, market cap tiers (LARGE/MID/SMALL), and yfinance fundamentals (P/E, ROE, D/E). Single source of truth — every other table joins on `sid`.",
     },
     "universe_eligibility": {
+        "big": True,
         "kind": "COMPUTED", "domain": "Universe & Prices", "date_col": "snapshot_date",
     },
     # Mirrored from macro_history.india_vix by sources.macro_yfinance._sync_vix_history.
@@ -208,6 +217,7 @@ TABLES = {
     # structurally absent — coverage gap lowered 90→85, severe at 70 still catches a
     # real regression.
     "fundamentals_screener": {
+        "big": True,
         "contract": {"max_null": {"value": 0.6}},
         "kind": "RAW", "domain": "Fundamentals", "freq": "weekly", "data_freq": "biweekly",
         "source": "Screener.in Premium (cron `screener_pull --universe`, 1st + 15th 06:00 UTC)", "date_col": "fetched_at",
@@ -229,6 +239,7 @@ TABLES = {
         "description": "Quarterly shareholding pattern from Tickertape — promoter %, FII %, MF %, DII %, public %, pledge %, insurance %. Each stock has ~6 trailing quarters at the time it was last fetched, so the calendar span across the table looks much wider than the per-stock depth. Powers promoter signal (QoQ change).",
     },
     "shareholding_holders": {
+        "big": True,
         "contract": {"max_null": {"shares": 0.0, "pct": 0.2}, "not_all_zero": ["shares"]},
         # The newest end_date is the last quarter end until the next quarter's filings land
         # (~21 days after it ends) and the Sunday run picks them up: up to ~125 days old.
@@ -262,6 +273,7 @@ TABLES = {
     # judged as a live daily feed it would go TABLE_STALE forever (cf. quarterly_results_nse). Readers
     # combine it with nse_announcements through signals.announcements.
     "bse_announcements": {
+        "big": True,
         "contract": {"max_null": {"headline": 0.3, "dt_tm": 0.05}},
         "kind": "RAW", "domain": "Trades & Corporate", "date_col": "fetched_at",
         "source": "BSE AnnSubCategoryGetData (route dropped 2026-10-19; history kept)",
@@ -460,6 +472,7 @@ TABLES = {
         "description": "Valuation football field (plan 0026): per-share low/mid/high from each method, a basis string naming its inputs, the price, and the 10-year growth the price implies (reverse DCF). Display only, never a score.",
     },
     "accruals_scores": {
+        "big": True,
         "kind": "COMPUTED", "domain": "Computed Signals", "date_col": "snapshot_date",
         "depth": "Latest snapshot per stock",
         "description": "Cash flow accruals + balance sheet accruals + earnings persistence per stock. Measures whether reported earnings are backed by cash. Powers the accruals signal.",
@@ -474,6 +487,7 @@ TABLES = {
         "kind": "COMPUTED", "domain": "Computed Signals", "date_col": "snapshot_date",
     },
     "consensus_signals": {
+        "big": True,
         "kind": "COMPUTED", "domain": "Computed Signals", "date_col": "snapshot_date",
         "quarantine": True, "mirror": True,
         "depth": "Latest snapshot per stock",
@@ -494,6 +508,7 @@ TABLES = {
         "kind": "COMPUTED", "domain": "Computed Signals", "date_col": "snapshot_date",
     },
     "forensic_scores": {
+        "big": True,
         "kind": "COMPUTED", "domain": "Computed Signals", "date_col": "snapshot_date",
         "depth": "Latest snapshot per stock",
         "description": "Beneish M-Score (earnings manipulation detector, 6-factor) + Altman Z'' (bankruptcy predictor, emerging market variant) per stock. Used as a forensic penalty in the screener.",
@@ -505,6 +520,7 @@ TABLES = {
         "kind": "COMPUTED", "domain": "Computed Signals", "date_col": "snapshot_date",
     },
     "insider_signals": {
+        "big": True,
         "kind": "COMPUTED", "domain": "Computed Signals", "date_col": "snapshot_date",
         "depth": "25 months reconstructed",
         "description": "Computed monthly insider buying/selling signal per stock derived from `insider_trades`. 25 months of history reconstructed for backtesting + the current month.",
@@ -575,6 +591,7 @@ TABLES = {
         "description": "9-factor Piotroski F-Score per stock — profitability (3), leverage (3), efficiency (3). Range 0-9. Computed from quarterly_income + annual_balance_sheet + annual_cash_flow.",
     },
     "promoter_signals": {
+        "big": True,
         "kind": "COMPUTED", "domain": "Computed Signals", "date_col": "snapshot_date",
         "coverage": (90.0, 70.0),
         "depth": "Latest snapshot per stock",
@@ -587,6 +604,7 @@ TABLES = {
         "kind": "COMPUTED", "domain": "Computed Signals", "date_col": "snapshot_date",
     },
     "sentiment_scores": {
+        "big": True,
         "kind": "COMPUTED", "domain": "Computed Signals", "date_col": "snapshot_date",
         "depth": "7-day rolling per stock",
         "description": "VADER sentiment scores from news articles, aggregated to per-stock 7-day windows.",
@@ -595,12 +613,14 @@ TABLES = {
         "kind": "COMPUTED", "domain": "Computed Signals", "date_col": "snapshot_date",
     },
     "share_momentum_scores": {
+        "big": True,
         "kind": "COMPUTED", "domain": "Computed Signals", "date_col": "snapshot_date",
     },
     "sloan_accruals_full_scores": {
         "kind": "COMPUTED", "domain": "Computed Signals", "date_col": "snapshot_date",
     },
     "smart_money_scores": {
+        "big": True,
         "kind": "COMPUTED", "domain": "Computed Signals", "date_col": "snapshot_date",
         "coverage": (95.0, 80.0),
         "depth": "Latest snapshot per stock",
@@ -617,11 +637,13 @@ TABLES = {
         "description": "Output of the diff engine — what changed today vs yesterday. ENTRY/EXIT/UPGRADE/DOWNGRADE/SIGNAL_FIRED/REGIME_CHANGE events.",
     },
     "daily_picks": {
+        "big": True,
         "kind": "COMPUTED", "domain": "Output", "date_col": "pick_date", "mirror": True,
         "depth": "Latest pick_date snapshot",
         "description": "Daily output of the screener — every stock with its final_score, rank within tier, base_score, and forensic_adj. The ranked universe.",
     },
     "daily_snapshots": {
+        "big": True,
         "kind": "COMPUTED", "domain": "Output", "date_col": "snapshot_date",
         "depth": "Growing daily (PIT archive)",
         "description": "Point-in-time archive of all signal values per stock. One row per stock per pick_date. Used for diff engine + signal time series + backtesting.",
@@ -632,6 +654,7 @@ TABLES = {
     # (the 5d window was dropped 2026-06-01). 35 tolerates that lag + a holiday
     # cluster, yet still flags a genuinely stalled producer in ~5wk.
     "pick_outcomes": {
+        "big": True,
         "kind": "COMPUTED", "domain": "Output", "date_col": "pick_date", "stale_days": 35,
         "mirror": True,
     },
@@ -659,6 +682,7 @@ TABLES = {
 
     # ── Backtest (PIT) ──
     "daily_snapshots_pit": {
+        "big": True,
         "kind": "COMPUTED", "domain": "Backtest (PIT)", "date_col": "snapshot_date", "mirror": True,
         "depth": "Monthly anchors from 2019-12 + Friday anchors; refreshed weekly by refresh_pit_panel",
         "description": "Point-in-time factor panel rebuilt by tools/reconstruct_pit.py with filing-lag discipline (75d annual / 60d quarterly / 21d shareholding): what each factor would have said on each past date, plus the forward-return label. Continues the frozen archive (daily_snapshots_pit_v1) after 2026-02 and adds the forensic m_score and z_score.",
@@ -681,6 +705,7 @@ TABLES = {
     "pit_ic_by_tier_v2": {"kind": "COMPUTED", "domain": "Backtest (PIT)", "date_col": None},
     "pit_reconstruction_log": {"kind": "LOG", "domain": "Backtest (PIT)", "date_col": "finished_at"},
     "pit_replay_snapshots": {
+        "big": True,
         "kind": "COMPUTED", "domain": "Backtest (PIT)", "date_col": "snapshot_date",
     },
 
@@ -703,7 +728,7 @@ TABLES = {
         "kind": "QUARANTINE", "domain": "Pipeline", "date_col": "snapshot_date",
     },
     "forecast_history_quarantine": {"kind": "QUARANTINE", "domain": "Pipeline", "date_col": "date"},
-    "health_score": {"kind": "COMPUTED", "domain": "Pipeline", "date_col": "snapshot_date",
+    "health_score": {"big": True, "kind": "COMPUTED", "domain": "Pipeline", "date_col": "snapshot_date",
                      "description": "History only: an older data score per factor / table / "
                                     "system / pick, 2026-05 → 2026-10-02, replaced by each pick's Data coverage. Nothing writes it; "
                                     "the old per-pick score columns in daily_picks hold the same period."},
@@ -755,6 +780,7 @@ TABLES = {
     # (were un-benchmarked). All three are written as a side effect of pipeline steps
     # whose `table` is another table, so they carry their own freq here.
     "signal_lineage": {
+        "big": True,
         "kind": "COMPUTED", "domain": "Pipeline", "freq": "daily", "data_freq": "daily",
         "source": "db.emit_lineage from signal modules", "date_col": "snapshot_date",
     },
@@ -764,6 +790,7 @@ TABLES = {
         "description": "Internal SQLite table tracking AUTOINCREMENT counters. Not user-facing.",
     },
     "trust_verdicts": {
+        "big": True,
         "kind": "COMPUTED", "domain": "Pipeline", "freq": "daily", "data_freq": "daily",
         "source": "the write-time gates (validators._verdicts.GATES: identity, plausibility) called by "
                   "yfinance_analyst, banking_metrics, moneycontrol_recos, mf_holdings; the gate_3..7 columns are history",
@@ -784,7 +811,7 @@ TABLES = {
     # stale_days 50: as_of_date is the PORTFOLIO date (month-end), published ≤10 days later and
     # picked up by Groww/ETMoney a little after, so the newest can be ~45 days old just before the
     # next month lands. The step runs daily (2026-10-10), which alone would set a 3-day limit.
-    "mf_holdings": {"kind": "RAW", "domain": "Other", "date_col": "as_of_date", "quarantine": True,
+    "mf_holdings": {"big": True, "kind": "RAW", "domain": "Other", "date_col": "as_of_date", "quarantine": True,
                     "stale_days": 50},
     # as_of_date is the run day (compute_mf_metrics, daily since 2026-10-20), so 3 days = two missed runs.
     "mf_metrics": {
@@ -793,11 +820,13 @@ TABLES = {
         "description": "Per-scheme returns + risk snapshot. 1Y/3Y/5Y/10Y CAGR, Sharpe, Sortino, max drawdown, peer rank, plus composite_score (0-100 within category) with 4-way breakdown (3Y CAGR / Sharpe 3Y / max DD / rolling consistency).",
     },
     "mf_nav_history": {
+        "big": True,
         "kind": "RAW", "domain": "Other", "date_col": "fetched_at",
         "depth": "~13y daily NAV per scheme (mfapi.in backfill) + ongoing daily (AMFI)",
         "description": "Per-scheme NAV time series. PK (scheme_code, nav_date). Bootstrap fills via mfapi.in; daily incremental via AMFI NAVAll.txt.",
     },
     "mf_rolling_returns": {
+        "big": True,
         # Rewritten daily by compute_mf_metrics, but its date is the newest monthly ANCHOR (the 1st), so it ages
         # ~31 days before the next month's anchor lands (on the first run with a NAV dated in that month).
         "kind": "COMPUTED", "domain": "Other", "date_col": "anchor_date", "stale_days": 38,
@@ -830,6 +859,7 @@ TABLES = {
     # legacy tables and reconciled daily (datamodel/reconcile.py → check_results). Timeless for the
     # freshness scan except bars_daily (a stalled sync shows there); parity is the health signal.
     "bars_daily": {
+        "big": True,
         "kind": "COMPUTED", "domain": "Universe & Prices", "date_col": "date", "freq": "daily", "stale_days": 6,
         "best_effort": True,
         "description": "Daily OHLCV for securities and indices (v3; mirror of stock_prices + nse_index_history, source in the PK).",
@@ -851,14 +881,17 @@ TABLES = {
         "description": 'External ids per entity over time: NSE symbol, Tickertape slug, Moneycontrol slug, BSE scrip, ISIN.',
     },
     "derivative_bars": {
+        "big": True,
         "kind": "COMPUTED", "domain": "Universe & Prices", "date_col": None,
         "description": "F&O EOD grid (mirror of fno_bhav; strike 0 / option_type '' for futures).",
     },
     "series_values": {
+        "big": True,
         "kind": "COMPUTED", "domain": "Macro", "date_col": None,
         "description": 'Entity-less observations (macro, FII/DII flows), versioned: a revision appends a row (fetched_at + last_seen_at).',
     },
     "events": {
+        "big": True,
         "kind": "COMPUTED", "domain": "Trades & Corporate", "date_col": None,
         "description": 'Point-in-time occurrences (BSE announcements, corporate actions, insider trades, bulk deals, short selling, surveillance, earnings dates, regulatory/policy events, news, broker recos, market events) with event_time, available_at and a JSON payload.',
     },
@@ -867,18 +900,22 @@ TABLES = {
         "description": 'An event about several entities (news → stocks).',
     },
     "documents": {
+        "big": True,
         "kind": "COMPUTED", "domain": "News & Sentiment", "date_col": None,
         "description": 'Source texts and model outputs (transcripts, news classifications, regulatory labels, briefs, sector dossiers, free-text feature attributes); numbers only in `fields`.',
     },
     "fundamentals": {
+        "big": True,
         "kind": "COMPUTED", "domain": "Fundamentals", "date_col": None,
         "description": 'Reported company facts (statements, Screener line items, bank metrics, shareholding pattern), versioned; available_at = period_end + filing lag.',
     },
     "estimates": {
+        "big": True,
         "kind": "COMPUTED", "domain": "Fundamentals", "date_col": None,
         "description": 'Forward-looking opinions (PTs, EPS/revenue estimates, recos), versioned; the monthly snapshot is a view.',
     },
     "feature_values": {
+        "big": True,
         "kind": "COMPUTED", "domain": "Computed Signals", "date_col": None,
         "description": 'Every derived number: feature × date × entity, slice-replaced per (feature, date); enums are catalog-declared codes.',
     },
@@ -887,6 +924,7 @@ TABLES = {
         "description": 'One row per run (morning, watchdog, reconstruct, …) with git sha and attrs; decisions hang off run_id.',
     },
     "picks": {
+        "big": True,
         "kind": "COMPUTED", "domain": "Output", "date_col": None,
         "description": 'Every ranked stock per run: tier, rank, score, selected, gate.',
     },
@@ -899,6 +937,7 @@ TABLES = {
         "description": 'HRP book weights per run.',
     },
     "outcomes": {
+        "big": True,
         "kind": "COMPUTED", "domain": "Output", "date_col": None,
         "description": 'Forward returns per run × entity (a security, or the book) × horizon.',
     },
@@ -911,6 +950,7 @@ TABLES = {
         "description": 'One row per step attempt within a run (pipeline, watchdog heals, endpoint audits, PIT reconstructions, LLM batches).',
     },
     "check_results": {
+        "big": True,
         "kind": "COMPUTED", "domain": "Pipeline", "date_col": None,
         "description": 'Check outcomes per subject and date: feed checks, health-check history, data-model parity.',
     },

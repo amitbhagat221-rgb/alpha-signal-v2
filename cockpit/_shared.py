@@ -200,6 +200,30 @@ def _persisted_cache(ttl_seconds, name=None, max_entries=128):
     return decorator
 
 
+CHART_MAX_POINTS = 800        # what a chart API returns at most: the screen is ~1,000 px wide
+CHART_KEEP_RECENT = 250       # ...and the newest year of it is always every point
+
+
+def decimate(rows, value, limit=CHART_MAX_POINTS, keep_recent=CHART_KEEP_RECENT):
+    """`rows` (chronological list of dicts) cut to at most ~`limit` rows for a chart, so a payload
+    depends on the screen and not on how long a series has become. The newest `keep_recent` rows
+    (a year of trading days) and the very first row are always kept; older rows are cut to the
+    lowest and highest `value(row)` of each stretch, so every peak and trough still draws.
+    Returned rows are real rows, never averages. Under the limit, `rows` is returned untouched."""
+    n = len(rows)
+    if n <= limit:
+        return rows
+    head, tail = rows[:-keep_recent], rows[-keep_recent:]
+    stretches = max(1, (limit - len(tail) - 1) // 2)
+    size = -(-len(head) // stretches)
+    keep = {0}
+    for i in range(0, len(head), size):
+        idx = range(i, min(i + size, len(head)))
+        keep.add(min(idx, key=lambda j: value(head[j])))
+        keep.add(max(idx, key=lambda j: value(head[j])))
+    return [head[j] for j in sorted(keep)] + tail
+
+
 def safe_json_records(data):
     """Convert a DataFrame (or an existing list of record dicts) into JSON-safe
     dicts. Single source of truth for cockpit payload coercion — previously
@@ -406,7 +430,10 @@ def prewarm(warmers, label="cache-warm", max_workers=4):
     starve user requests; 4 workers is the sweet spot for our mix.
     COCKPIT_NO_PREWARM=1 skips it (the preview units: a second copy of the same warm-up
     would double the DB load; their cache dir is seeded from the live one instead).
-    The list then re-runs every COCKPIT_REWARM_SECONDS (default 600; 0 = boot only)."""
+    The list then re-runs every COCKPIT_REWARM_SECONDS (default 600; 0 = boot only).
+    A warmer may be `(name, fn, every_s)`: it then re-runs at most every `every_s` seconds. Use it for a
+    census that scans whole tables (the Data tab's health scores take ~4.5 minutes): re-warmed every ten
+    minutes it kept a second reader on the DB for nearly half of every cycle."""
     if _os.environ.get("COCKPIT_NO_PREWARM", "").strip() in ("1", "true", "yes"):
         return
     import threading
@@ -420,10 +447,18 @@ def prewarm(warmers, label="cache-warm", max_workers=4):
         except Exception as e:
             return name, _time.time() - t, str(e)
 
+    last_run = {}
+
+    def _due(name, every_s):
+        return every_s is None or _time.time() - last_run.get(name, 0.0) >= every_s
+
     def _warm():
         t0 = _time.time()
+        todo = [(w[0], w[1]) for w in warmers if _due(w[0], w[2] if len(w) > 2 else None)]
+        for n, _ in todo:
+            last_run[n] = t0
         with cf.ThreadPoolExecutor(max_workers=max_workers) as ex:
-            futures = [ex.submit(_warm_one, n, f) for n, f in warmers]
+            futures = [ex.submit(_warm_one, n, f) for n, f in todo]
             for fut in cf.as_completed(futures):
                 name, dt, err = fut.result()
                 if err:

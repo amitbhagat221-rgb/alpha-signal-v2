@@ -605,14 +605,16 @@ def rerun_step(step_name: str) -> dict:
 def get_data_health_scores(force=False):
     """Comprehensive per-table data health from health.compute_db_health().
 
-    Pass force=True to recompute now. Otherwise served from a 5-minute
+    Pass force=True to recompute now. Otherwise served from a 6-hour
     _persisted_cache: an expired entry is returned stale and refreshed in the
     background (health.py's own cache recomputed inline — ~40s on the first
     /system hit after it lapsed)."""
     return _data_health_scores(_force=bool(force))
 
 
-@_persisted_cache(300, name="get_data_health_scores")
+# Six hours, not five minutes: the scores read every column of every table (~4.5 min on the 5M-row tables), and
+# the tables change once a day. A stale entry is still served at once and refreshed in the background.
+@_persisted_cache(6 * 3600, name="get_data_health_scores")
 def _data_health_scores():
     from health import compute_db_health
     # This layer owns the TTL, so each (re)compute is a real one.
