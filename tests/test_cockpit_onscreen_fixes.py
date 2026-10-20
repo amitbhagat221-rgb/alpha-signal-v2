@@ -55,3 +55,24 @@ def test_fund_nav_card_shows_the_newest_nav_not_the_metrics_nav(monkeypatch, tmp
     html = client.get("/mutual-funds/1").text
     assert "90.35" in html and "as of 2026-10-19" in html and "returns and score to 2026-10-08" in html
     assert "daily to 2026-10-19" in html
+
+
+def test_options_page_writes_a_loss_as_minus_rupees(monkeypatch, tmp_path):
+    import option_book
+    import webauth
+    from fastapi.testclient import TestClient
+    from cockpit_ops.app import app
+    data = option_book.page_data()
+    base = {"underlying": "SENSEX", "entry_date": "2026-10-19", "expiry": "2026-10-22", "short_call": 75600,
+            "call_entry": 23.35, "short_put": 72200, "put_entry": 20.65, "credit_pts": 44.0, "lot": 20,
+            "margin_rs": 177450, "margin_source": "kite"}
+    data["trades"] = [{**base, "status": "OPEN", "mark": {"mtm_rs": -57.0, "mark_date": "2026-10-19", "index": 73853}},
+                      {**base, "status": "SETTLED", "settle_index": 74315.61, "net_rs": -930.0, "ret_on_margin": -0.0056}]
+    data["summary"] = {**data["summary"], "n_slip": 1, "slip_median_pct": -1.0}
+    monkeypatch.setattr(option_book, "page_data", lambda: data)
+    monkeypatch.delenv("COCKPIT_PREVIEW", raising=False)
+    monkeypatch.setattr(webauth, "AUTH_FILE", tmp_path / "auth.json")
+    webauth.set_password("correct horse battery")
+    html = TestClient(app, cookies={webauth.COOKIE: webauth.make_token()}).get("/options").text
+    assert "-₹57" in html and "-₹930" in html and "₹-" not in html and "₹+" not in html
+    assert "(1 trade; bar 1%)" in html
