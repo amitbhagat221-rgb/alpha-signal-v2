@@ -164,6 +164,7 @@ FACTORS = {
         "screener_col": "f_score",
         "family": "Quality",
         "eligibility": {
+            "not_for_sectors": ["Financials"],   # structurally N/A: the coverage backstop leaves it out
             "description": "Stocks with ≥2 annual periods (YoY F-score baseline), EX-Financials (F-score components are non-financial-firm constructs — mirrors lineage.py sector_exclusions)",
             "eligible_sql": """
                 SELECT sid FROM annual_balance_sheet
@@ -190,6 +191,7 @@ FACTORS = {
         "weight_key": "accruals",
         "family": "Quality",
         "eligibility": {
+            "not_for_sectors": ["Financials"],   # structurally N/A: the coverage backstop leaves it out
             "description": "Stocks with annual_balance_sheet + annual_cash_flow, EX-Financials (banks have no operating accruals — mirrors lineage.py sector_exclusions / config.financial_sectors)",
             "eligible_sql": """
                 SELECT DISTINCT abs.sid FROM annual_balance_sheet abs
@@ -930,11 +932,18 @@ FACTORS = {
         "weights": {"LARGE": 0.35, "MID": 0.066, "SMALL": 0.22},  # t: L 2.65 · M 1.88 · S 5.51 — promotion review 2026-10-03 (docs/studies/promotion-review-2026-10.md), corrected panel · MID rescaled ×0.85 for cons_beat_rate_4q, ADR 0071
         "family": "Event",
         "eligibility": {
-            "description": "Stocks with a BSE Result announcement in the trailing ~95d (the CAR staleness gate is 90d + window-close; names without a fresh print have no reading and must not be coverage-penalised for it)",
+            # Exactly the prints the factor can measure (signals/announcement_car): within STALE_DAYS (90)
+            # AND its [-1,+1] window closed, i.e. two price days on/after the print. The old 95-day rule was
+            # wider than the factor, so every results season the prior print aged past 90 days before the new
+            # one's window closed and the name counted as "eligible but missing": LARGE banks (35 % of LARGE
+            # weight) fell out of daily_picks 2026-10-14..20 (tests/test_screener_gate.py).
+            "description": "Stocks with a Result print in the trailing 90d whose [-1,+1] window has closed (the factor's own staleness and look-ahead rules; a name between its stale print and the new print's window close has no reading and must not be coverage-penalised for it)",
             "eligible_sql": """
-                SELECT DISTINCT sid FROM (""" + ANNOUNCEMENTS_SQL + """) a
-                WHERE """ + RESULT_FILING_SQL + """ AND sid IS NOT NULL AND dt_tm IS NOT NULL
-                  AND date(dt_tm) >= date('now', '-95 day') AND date(dt_tm) <= date('now')
+                SELECT DISTINCT a.sid FROM (""" + ANNOUNCEMENTS_SQL + """) a
+                WHERE """ + RESULT_FILING_SQL + """ AND a.sid IS NOT NULL AND a.dt_tm IS NOT NULL
+                  AND date(a.dt_tm) >= date('now', '-90 day') AND date(a.dt_tm) <= date('now')
+                  AND (SELECT COUNT(*) FROM stock_prices p WHERE p.sid = a.sid AND p.close > 0
+                       AND p.date >= date(a.dt_tm) AND p.date <= date('now')) >= 2
             """,
         },
     },
@@ -1276,6 +1285,7 @@ FACTORS = {
         "pit_range": (-2, 2),
         "weights": {"MID": 0.053},  # grade B under ADR 0074 (half weight; tools/mid_reweight_0074.py, 2026-10-13)
         "eligibility": {
+            "not_for_sectors": ["Financials"],   # structurally N/A: the coverage backstop leaves it out
             "description": "Stocks with 4+ annual cash-flow statements, EX-Financials (3-yr median FCF needs a prior year)",
             "eligible_sql": "SELECT sid FROM fundamentals_screener WHERE period_type = 'annual' AND line_item = 'Cash from Operating Activity' AND sid NOT IN (SELECT sid FROM stocks WHERE sector = 'Financials') GROUP BY sid HAVING COUNT(*) >= 4",
         },
@@ -1425,6 +1435,7 @@ FACTORS = {
         "pit_range": (0, 1),
         "weights": {"MID": 0.053},  # grade B under ADR 0074 (half weight; tools/mid_reweight_0074.py, 2026-10-13)
         "eligibility": {
+            "not_for_sectors": ["Financials"],   # structurally N/A: the coverage backstop leaves it out
             "description": "Stocks with annual borrowings ≥ ₹50 cr, EX-Financials (signals/debt_structure MIN_BORROWINGS_CR)",
             "eligible_sql": "SELECT DISTINCT sid FROM fundamentals_screener WHERE period_type = 'annual' AND line_item = 'Borrowings' AND value >= 50 AND sid NOT IN (SELECT sid FROM stocks WHERE sector = 'Financials')",
         },
@@ -1781,6 +1792,7 @@ FACTORS = {
         "weights": {"LARGE": -0.20},  # t: L −2.37, low asset growth does better (sign matches the prior) — promotion review 2026-10-03 (docs/studies/promotion-review-2026-10.md), corrected panel
         "family": "Growth",
         "eligibility": {
+            "not_for_sectors": ["Financials"],   # structurally N/A: the coverage backstop leaves it out
             "description": "Non-financial stocks with two annual balance sheets",
             "eligible_sql": """
                 SELECT sid FROM annual_balance_sheet WHERE total_assets > 0 AND sid NOT IN (SELECT sid FROM stocks WHERE sector = 'Financials') GROUP BY sid HAVING COUNT(*) >= 2
@@ -2203,6 +2215,10 @@ SCREENER_INPUT_COLS = (
 )
 # Plan 0005 eligibility: weight_key → {description, eligible_sql}.
 SIGNAL_ELIGIBILITY = {f["weight_key"]: f["eligibility"] for f in FACTORS.values() if "eligibility" in f}
+# weight_key → sectors the factor is structurally N/A for (declared in code, so the screener's
+# weight_coverage backstop stays independent of the universe_eligibility snapshot).
+SIGNAL_NOT_FOR_SECTORS = {k: frozenset(e["not_for_sectors"]) for k, e in SIGNAL_ELIGIBILITY.items()
+                          if e.get("not_for_sectors")}
 
 
 def signal_for(weight_key, tier=None):

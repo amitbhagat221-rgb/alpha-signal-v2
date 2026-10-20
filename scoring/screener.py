@@ -188,6 +188,10 @@ def score_universe(df, weights: dict = None, as_of=None):
     weight_sums = pd.Series(0.0, index=df.index)
     tier_total_weight = pd.Series(0.0, index=df.index)
     eligible_weight = pd.Series(0.0, index=df.index)
+    #   • applicable_weight  : tier total minus factors structurally N/A for the stock's sector
+    #                          (factors.SIGNAL_NOT_FOR_SECTORS — code, not the eligibility snapshot)
+    applicable_weight = pd.Series(0.0, index=df.index)
+    sector = df["sector"] if "sector" in df.columns else pd.Series(None, index=df.index, dtype=object)
 
     # Load today's eligibility snapshot, pivot to wide (sid × signal). Missing
     # (sid, signal) defaults to ELIGIBLE=1 (back-compat for signals not yet
@@ -201,6 +205,11 @@ def score_universe(df, weights: dict = None, as_of=None):
         # contribute to coverage but don't shrink the sum.
         total_weight = sum(abs(w) for w in tier_weights.values())
         tier_total_weight.loc[tier_mask] = total_weight
+        applicable_weight.loc[tier_mask] = total_weight
+        for signal_key, weight in tier_weights.items():
+            not_for = factors.SIGNAL_NOT_FOR_SECTORS.get(signal_key)
+            if not_for:
+                applicable_weight.loc[tier_mask & sector.isin(not_for)] -= abs(weight)
 
         for signal_key, weight in tier_weights.items():
             pctile_col = f"{signal_key}_pctile"
@@ -238,10 +247,13 @@ def score_universe(df, weights: dict = None, as_of=None):
     df["base_score"] = np.where(
         weight_sums > 0, (scores + (tier_total_weight - weight_sums) * MISSING_FACTOR_SCORE) / tier_total_weight, np.nan)
 
-    # weight_coverage = covered / TIER TOTAL (legacy semantics, unchanged).
-    # A LARGE cap missing consensus drops to 0.6 regardless of why.
+    # weight_coverage = covered / the tier weight that APPLIES to the stock's sector (the legacy
+    # backstop). A missing factor counts against it whatever the reason, except one that can never
+    # exist for the sector (accruals, Piotroski, asset growth … for Financials): a LARGE bank's
+    # ceiling was 0.8, so a bank between results prints (no announcement_car, 0.35) sat at 0.45
+    # and fell out of daily_picks 2026-10-14..20. Same as the tier total for every other stock.
     df["weight_coverage"] = np.where(
-        tier_total_weight > 0, weight_sums / tier_total_weight, np.nan
+        applicable_weight > 0, (weight_sums / applicable_weight).clip(upper=1.0), np.nan
     )
 
     # eligible_coverage = covered / ELIGIBLE (new — plan 0005 Phase A).
@@ -273,7 +285,7 @@ def score_universe(df, weights: dict = None, as_of=None):
 # views.pick_data describes a pick's data against the same numbers.
 from config import PICK_GATE
 MIN_ELIGIBLE_COVERAGE = PICK_GATE["min_eligible_coverage"]      # share of the SID's ELIGIBLE signal weight that produced output
-MIN_WEIGHT_COVERAGE = PICK_GATE["min_weight_coverage"]          # share of TIER TOTAL weight (legacy floor — defence in depth)
+MIN_WEIGHT_COVERAGE = PICK_GATE["min_weight_coverage"]          # share of the tier weight that applies to the sector (legacy floor — defence in depth)
 MIN_PRICE_ROWS = PICK_GATE["min_price_rows"]                    # ≈3 months of trading days
 MIN_FUNDAMENTAL_COVERAGE = PICK_GATE["min_fundamental_coverage"]  # 4 of 8 quarterly_income rows (INPUT-side, added 2026-05-24)
 # Plan 0005 Phase A.5 (2026-05-24): primary gate switched to eligible_coverage.
