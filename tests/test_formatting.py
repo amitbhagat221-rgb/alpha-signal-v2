@@ -21,6 +21,7 @@ def test_pct_inr_crore():
     assert inr(1234567.5, 1) == "₹1,234,567.5"
     assert crore(250000) == "₹2.5L Cr"
     assert crore(12345.6) == "₹12,346 Cr"
+    assert crore(-23) == "-₹23 Cr" and crore(-250000) == "-₹2.5L Cr" and crore(-0.2) == "₹0 Cr"   # a loss
 
 
 def test_missing_values_dash():
