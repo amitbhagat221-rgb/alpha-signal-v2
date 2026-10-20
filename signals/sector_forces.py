@@ -54,15 +54,20 @@ def _macro_force(snapshot_date: str) -> dict[str, dict]:
         drivers = json.loads(r["macro_drivers"] or "[]")
         if not drivers:
             continue
-        # Direction from the majority sign of the real macro indicators. The "Regulatory"
-        # pseudo-driver carries an event COUNT (always positive) and belongs to the
-        # regulation force; counting it made every sector '+'. A tie is neutral.
-        signs = [d.get("direction") for d in drivers
-                 if d.get("direction") in ("+", "-") and d.get("driver") != "Regulatory"]
-        n_up, n_dn = signs.count("+"), signs.count("-")
-        direction = "+" if n_up > n_dn else "-" if n_dn > n_up else "neutral"
-        # Magnitude maps off the sector's overall macro_score band
+        # Direction from the sector's macro score (signals/macro.py labels: ≥55 favourable,
+        # <45 headwind). A driver's sign is the raw move, not its effect — US 10Y up is a
+        # headwind for Financials — so the majority sign is only the fallback when there
+        # is no score. The "Regulatory" pseudo-driver carries an event COUNT (always
+        # positive) and belongs to the regulation force; it never counts. A tie is neutral.
         score = r.get("macro_score")
+        if score is not None and not pd.isna(score):
+            direction = "+" if score >= 55 else "-" if score < 45 else "neutral"
+        else:
+            signs = [d.get("direction") for d in drivers
+                     if d.get("direction") in ("+", "-") and d.get("driver") != "Regulatory"]
+            n_up, n_dn = signs.count("+"), signs.count("-")
+            direction = "+" if n_up > n_dn else "-" if n_dn > n_up else "neutral"
+        # Magnitude maps off the sector's overall macro_score band
         if score is None or pd.isna(score):
             magnitude = None
         elif score >= 70 or score < 30:

@@ -19,7 +19,7 @@ from cockpit._shared import _persisted_cache, decimate
 # browser) and mf_detail.html (per-scheme deep-dive). Data layer:
 #   - mf_scheme_master   AMFI universe (~14k schemes, refreshed weekly)
 #   - mf_nav_history     daily NAV per scheme (AMFI daily + mfapi.in backfill)
-#   - mf_metrics         per-scheme returns/risk/composite_score (monthly recompute)
+#   - mf_metrics         per-scheme returns/risk/composite_score (daily recompute, after the NAV fetch)
 #   - mf_rolling_returns 3Y/5Y rolling CAGR sampled monthly per scheme
 #   - mf_calendar_returns per-year returns table
 #   - mf_category_stats  category medians/deciles
@@ -42,7 +42,7 @@ def _mf_universe_pool():
     (sources.mf_holdings_groww) or, with no Groww page, Kuvera (sources.mf_subscription_kuvera):
     'Open' / 'Closed' / 'SIP only' / 'Lump sum only', None when unknown."""
     # Join to LATEST mf_metrics row per scheme (defensive — table should be clean
-    # after the monthly compute, but stale rows from earlier runs can stick around).
+    # after the daily compute, but stale rows from earlier runs can stick around).
     df = read_sql(
         """SELECT sm.scheme_code, sm.scheme_name, sm.amc, sm.category_norm,
                   NULLIF(sm.plan_type, 'UNKNOWN') AS plan_type, NULLIF(sm.option_type, 'UNKNOWN') AS option_type,
@@ -321,7 +321,7 @@ def get_mf_detail(scheme_code: str) -> dict | None:
         for c in calendar_list:
             c["bench_ret_pct"] = None
     # The NAV card shows the newest NAV fetched (daily), not the NAV the metrics were last computed on
-    # (mf_metrics is recomputed less often: the card read ₹87.66 on 8 Oct while 19 Oct had ₹90.35).
+    # (mf_metrics can lag a day when its step fails: the monthly card read ₹87.66 on 8 Oct while 19 Oct had ₹90.35).
     latest = db.one("SELECT nav_date, nav FROM mf_nav_history WHERE scheme_code = ? AND nav > 0 "
                     "ORDER BY nav_date DESC LIMIT 1", [scheme_code]) or {}
     return {

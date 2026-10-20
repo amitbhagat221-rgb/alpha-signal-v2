@@ -391,6 +391,15 @@ NON_PAGING_STEPS = {
     "fetch_prices_fallback": "gap-fill for the few stocks NSE files lack (REITs, InvITs, BSE-only); the main price feed is fetch_bhavcopy, a gap shows as stale prices on those names only",
 }
 
+# Steps and run.sh jobs that will never run again: {step_name: {since, ref, why, feed?}}. Their old
+# failures are history, not an alert: Health drops them from PIPELINE_STEP and the ops Flow page shows
+# them as "retired (since, ref)". A row logged under one AFTER `since` means something still schedules
+# it (RETIRED_STEP_RAN, WARN). `feed`, when set, is the feeds.FEEDS entry retired with it.
+RETIRED_STEPS = {
+    "cron_bse_announcements": {"since": "2026-10-19", "ref": "ADR 0082", "feed": "bse_announcements",
+                               "why": "BSE's WAF 403s this server since 2026-10-13; run.sh forward no longer runs it (NSE is the live source)"},
+}
+
 PIPELINE_STEPS = [
     # ── Data Sources ──
     {"name": "fetch_macro_market", "module": "sources.macro_yfinance", "function": "compute", "critical": False,
@@ -504,7 +513,7 @@ PIPELINE_STEPS = [
      "lagged_reads": ["mf_scheme_master@classify_mf_quality", "stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
     # Weekly: classify data quality — flag wound-up / segregated / interval / bonus / anomalous schemes
     # so they don't pollute the universe browser, scorer, or category stats. Runs AFTER master refresh
-    # so new schemes get classified; metric-based ANOMALOUS flags get picked up on the next monthly
+    # so new schemes get classified; metric-based ANOMALOUS flags get picked up on the next daily
     # metrics recompute (the classifier reads from mf_metrics if present).
     {"name": "classify_mf_quality","module": "sources.mf_data_quality",      "function": "compute", "critical": False,
      "table": "mf_scheme_master",  "source": "name patterns + NAV jumps", "data_freq": "weekly", "frequency": "weekly",
@@ -515,22 +524,8 @@ PIPELINE_STEPS = [
      "table": "mf_nav_history",    "source": "AMFI NAVAll.txt",       "data_freq": "daily",  "frequency": "daily",
      "reads": ["mf_nav_history", "mf_scheme_master", "stocks"],
      "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
-    # Monthly: recompute returns + risk + scorer + rolling-returns + category aggregates.
-    {"name": "compute_mf_metrics", "module": "signals.mf_metrics",           "function": "compute", "critical": False,
-     "table": "mf_metrics",        "source": "mf_nav_history + Nifty50 benchmark", "data_freq": "monthly", "frequency": "monthly",
-     "reads": ["mf_calendar_returns", "mf_category_stats", "mf_metrics", "mf_nav_history", "mf_rolling_returns", "mf_scheme_master", "stock_prices", "stocks"],
-     "writes": ["mf_calendar_returns", "mf_category_stats", "mf_metrics", "mf_rolling_returns"],
-     "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
-    # Daily rotation (2026-10-10; was monthly top-100 only, which left every other fund frozen
-    # and new launches never fetched). Primary: Groww fund pages keyed by AMFI code
-    # (sources.mf_holdings_groww); fallback: ETMoney for funds Groww has no page for. Each
-    # re-checks funds not seen for 14 days, stalest first, within its host's budget_min.
-    {"name": "scrape_mf_holdings", "module": "sources.mf_holdings_scrape",   "function": "compute", "critical": False,
-     "table": "mf_holdings",       "source": "ETMoney portfolio-details (public)", "data_freq": "monthly", "frequency": "daily",
-     "reads": ["mf_holdings", "mf_metrics", "mf_nav_history", "mf_scheme_master", "stocks"],
-     "writes": ["mf_holdings", "mf_sector_allocation", "mf_scheme_master"],
-     "lagged_writes": ["mf_scheme_master"],   # only its own etm_* columns; earlier MF steps never read them
-     "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
+    # compute_mf_metrics (returns, risk, score) and scrape_mf_holdings (which reads its scores) are listed
+    # after fetch_nse_indices: the metrics need the same session's NIFTY 50 as the NAVs.
 
     # ── Sector signal history (monthly PIT accumulators, 2026-06) ──
     # Start the clock on at-entry sector signals so they're backtestable in ~12mo.
@@ -682,9 +677,9 @@ PIPELINE_STEPS = [
      "lagged_reads": ["nse_index_history@fetch_nse_indices", "stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
 
     {"name": "signal_macro",       "module": "signals.macro",       "function": "compute",  "critical": False,
-     "table": "macro_sector_signals", "source": "macro_indicators", "data_freq": "monthly", "frequency": "daily",
-     "reads": ["macro_indicators", "macro_sector_signals"],
-     "lagged_reads": ["macro_sector_signals@signal_regulatory"]},
+     "table": "macro_sector_signals", "source": "macro_history × macro_sector_map (pit.pit_macro_sector)", "data_freq": "daily", "frequency": "daily",
+     "reads": ["macro_history", "macro_sector_map", "macro_sector_signals", "stocks"],
+     "lagged_reads": ["macro_sector_signals@signal_regulatory", "stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
 
     {"name": "signal_regulatory", "module": "signals.regulatory",  "function": "compute",  "critical": False,
      "table": "macro_sector_signals", "source": "regulatory_events + regulatory_signals (AI classified)",
@@ -742,6 +737,30 @@ PIPELINE_STEPS = [
      "table": "nse_index_history", "source": "NSE index history (nselib)",
      "data_freq": "daily",         "frequency": "daily",
      "reads": []},
+
+    # Mutual funds: returns + risk + score + rolling returns + category aggregates from every NAV
+    # (fetch_mf_nav_daily) and the NIFTY 50 benchmark (fetch_nse_indices, the same session), so both are
+    # blocking reads. Daily since 2026-10-20 (was monthly: the score froze while NAVs moved). Full
+    # recompute ~3 min / ~2.7 GB for ~5,700 scored schemes, so no incremental path. mf_metrics and
+    # mf_category_stats keep the first computed day of each month plus the latest day
+    # (signals.mf_metrics.prune_month), so a daily run does not add a row set per day.
+    {"name": "compute_mf_metrics", "module": "signals.mf_metrics",           "function": "compute", "critical": False,
+     "table": "mf_metrics",        "source": "mf_nav_history + NIFTY 50 (nse_index_history)", "data_freq": "daily", "frequency": "daily",
+     "reads": ["mf_calendar_returns", "mf_category_stats", "mf_metrics", "mf_nav_history", "mf_rolling_returns", "mf_scheme_master", "nse_index_history", "stocks"],
+     "writes": ["mf_calendar_returns", "mf_category_stats", "mf_metrics", "mf_rolling_returns"],
+     "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
+    # Daily rotation (2026-10-10; was monthly top-100 only, which left every other fund frozen
+    # and new launches never fetched). Primary: Groww fund pages keyed by AMFI code
+    # (sources.mf_holdings_groww); fallback: ETMoney for funds Groww has no page for. Each
+    # re-checks funds not seen for 14 days, stalest first, within its host's budget_min.
+    # Listed after compute_mf_metrics: it reads today's scores (blocking), and compute_mf_metrics reads the
+    # mf_scheme_master this step writes lagged, so a lagged mf_metrics read here would be a cycle.
+    {"name": "scrape_mf_holdings", "module": "sources.mf_holdings_scrape",   "function": "compute", "critical": False,
+     "table": "mf_holdings",       "source": "ETMoney portfolio-details (public)", "data_freq": "monthly", "frequency": "daily",
+     "reads": ["mf_holdings", "mf_metrics", "mf_nav_history", "mf_scheme_master", "stocks"],
+     "writes": ["mf_holdings", "mf_sector_allocation", "mf_scheme_master"],
+     "lagged_writes": ["mf_scheme_master"],   # only its own etm_* columns; earlier MF steps never read them
+     "lagged_reads": ["stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
 
     # Live equity curve — realized forward returns on every daily_picks row.
     # Runs after screener (today's picks land first) but needs ≥20 trading days
@@ -861,6 +880,16 @@ PIPELINE_STEPS = [
      "table": "stocks",            "source": "pit.tier_inputs: stock_prices + statements + corporate_adjustments",
      "data_freq": "daily",         "frequency": "daily",
      "reads": ["annual_balance_sheet", "corporate_adjustments", "fundamentals_screener", "quarterly_income", "shareholding_categories", "stock_prices", "stocks"],
+     "lagged_reads": ["stocks@fetch_broker_recos"]},
+
+    # Multibagger valuation football fields (plan 0026): every field rebuilt on the latest close for the
+    # candidate / held names plus the newest thesis run's top 100 (~100-130 names, ~15 s). Was hand-run
+    # only and froze at 2026-10-15 while prices moved on. Display only (no pick reads it), so it sits
+    # after the email; after refresh_pit_panel so a Sunday sees the refreshed band history.
+    {"name": "compute_valuation_ranges", "module": "output.valuation", "function": "compute", "critical": False,
+     "table": "valuation_ranges",  "source": "stock_prices + daily_snapshots_pit + quarterly_income + fundamentals_screener + analyst_consensus",
+     "data_freq": "daily",         "frequency": "daily",
+     "reads": ["analyst_consensus", "corporate_adjustments", "daily_snapshots_pit", "fundamentals_screener", "multibagger_book", "multibagger_scores", "quarterly_income", "stock_prices", "stocks", "valuation_ranges"],
      "lagged_reads": ["stocks@fetch_broker_recos"]},
 
     # ── Background / non-blocking section ──

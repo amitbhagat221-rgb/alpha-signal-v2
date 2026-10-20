@@ -325,6 +325,39 @@ def test_recovered_step_is_not_a_failure(temp_db):
     assert (p["n_steps"], p["last_run_status"]) == (2, "FAILED")
 
 
+def test_a_retired_step_is_history_until_it_runs_again(temp_db, monkeypatch):
+    """config.RETIRED_STEPS: a retired step's failure streak is not PIPELINE_STEP and the ops log labels it
+    retired; a row after its retirement date is RETIRED_STEP_RAN (something still schedules it)."""
+    import config
+    import views
+    from checks import system
+    today = date.today()
+    since = (today - timedelta(days=1)).isoformat()
+    monkeypatch.setitem(config.RETIRED_STEPS, "cron_gone", {"since": since, "ref": "ADR 0000", "why": "w"})
+    days = [(today - timedelta(days=d)).isoformat() for d in (1, 2, 3)]
+    conn = sqlite3.connect(temp_db)
+    conn.executemany("INSERT INTO pipeline_log (run_date, step_name, status, started_at, finished_at, error_message) "
+                     "VALUES (?, ?, 'FAILED', ? || 'T14:00:00', ? || 'T14:01:00', 'boom')",
+                     [(d, n, d, d) for d in days for n in ("cron_gone", "cron_live")])
+    conn.commit()
+    p = system.pipeline_facts(1)
+    assert [s["step"] for s in p["failed_streaks"]] == ["cron_live"] and p["retired_ran"] == []
+    assert {v["code"] for v in system.pipeline_verdicts(p)} == {"PIPELINE_STEP"}
+    gone = [r for r in views.pipeline_status(7) if r["step_name"] == "cron_gone"]
+    assert gone and all(r["retired"] == f"retired ({since}, ADR 0000)" for r in gone)
+
+    conn.execute("INSERT INTO pipeline_log (run_date, step_name, status, started_at, finished_at) "
+                 "VALUES (?, 'cron_gone', 'SUCCESS', ? || 'T14:00:00', ? || 'T14:01:00')", [today.isoformat()] * 3)
+    conn.commit()
+    conn.close()
+    p = system.pipeline_facts(1)
+    (r,) = p["retired_ran"]
+    assert (r["step"], r["n_runs"]) == ("cron_gone", 1)
+    (v,) = [v for v in system.pipeline_verdicts(p) if v["code"] == "RETIRED_STEP_RAN"]
+    assert (v["target"], v["severity"]) == ("cron_gone", checks.WARN)
+    assert views.retired_label("cron_gone", today.isoformat()) is None   # a run after retirement is a real run
+
+
 def test_pick_gate_has_one_definition():
     """The screener's thresholds and the words a pick's data is described in come
     from config.PICK_GATE (ADR 0061)."""

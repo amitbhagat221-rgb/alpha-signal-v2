@@ -698,7 +698,19 @@ def pipeline_status(days=7):
     for r in steps:
         if r["status"] == "RUNNING" and r["started_at"] and r["started_at"] < cutoff:
             r["status"] = "ABORTED"
+        label = retired_label(r["step_name"], r["run_date"])
+        if label:
+            r["retired"] = label
     return steps
+
+
+def retired_label(step, run_date=None):
+    """'retired (2026-10-19, ADR 0082)' for a run of a step in config.RETIRED_STEPS on or before
+    its retirement date, else None. A run after that date is a real run (RETIRED_STEP_RAN warns)."""
+    r = config.RETIRED_STEPS.get(step)
+    if r is None or (run_date and str(run_date) > r["since"]):
+        return None
+    return f"retired ({r['since']}, {r['ref']})"
 
 
 def step_status():

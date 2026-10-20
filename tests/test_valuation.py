@@ -275,3 +275,31 @@ def test_golden_thinly_covered_name_has_no_analyst_bar():
         pytest.skip("IRF coverage changed; pick another thinly covered name")
     r = v.compute(["IRF"]).set_index("method").loc["analyst"]
     assert np.isnan(r["mid"]) and r["basis"].startswith("fewer than 3 analysts")
+
+
+def test_daily_step_rebuilds_the_desk_after_prices(monkeypatch):
+    """valuation_ranges froze at 2026-10-15 with no producer: a daily step after the price fetch now rebuilds every
+    desk name, and the table has a freshness limit so TABLE_STALE fires if it stops."""
+    import config
+    import graph
+    from output import valuation as ov
+    from tables import TABLES
+    s = {x["name"]: x for x in config.PIPELINE_STEPS}["compute_valuation_ranges"]
+    assert s["frequency"] == "daily" and s["table"] == "valuation_ranges" and s["module"] == "output.valuation"
+    order = graph.order(config.PIPELINE_STEPS)
+    for writer in ("fetch_bhavcopy", "compute_corporate_adjustments"):
+        assert order.index(writer) < order.index("compute_valuation_ranges"), writer
+    assert TABLES["valuation_ranges"]["stale_days"] == 4
+    seen = {}
+
+    def fake_compute(sids, as_of=None):
+        seen["sids"] = sids
+        return pd.DataFrame({"sid": sids, "as_of": "2026-10-19", "method": "range_52w", "low": 1.0, "mid": 2.0,
+                             "high": 3.0, "basis": "b", "price": 2.0, "implied_growth_10y": np.nan})
+    monkeypatch.setattr(ov, "desk_sids", lambda: ["AAA", "BBB"])
+    monkeypatch.setattr(ov.v, "compute", fake_compute)
+    monkeypatch.setattr(ov, "write", lambda df: len(df))
+    assert ov.compute() == 2 and seen["sids"] == ["AAA", "BBB"]
+    monkeypatch.setattr(ov, "desk_sids", lambda: [])
+    with pytest.raises(RuntimeError):
+        ov.compute()

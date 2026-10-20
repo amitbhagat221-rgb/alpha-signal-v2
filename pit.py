@@ -1081,6 +1081,11 @@ def pit_macro_sector(macro_history_pit, macro_sector_map, sectors_list, eval_dat
 
     For each sector: weighted sum of indicator changes (latest - 90d_prior).
     Normalized to ±10 range.
+
+    The ONE macro engine: the PIT twin (tools/reconstruct_pit → macro_sector_signals_pit),
+    the sector_tilt macro leg and the live Sectors read (signals/macro.py →
+    macro_sector_signals) all call this. A scored row's `drivers` lists the indicator
+    moves behind it, largest effect first, for display.
     """
     if macro_history_pit.empty or macro_sector_map.empty:
         return [{"sector": s, "macro_score": None, "n_macro_indicators": 0} for s in sectors_list]
@@ -1129,8 +1134,13 @@ def pit_macro_sector(macro_history_pit, macro_sector_map, sectors_list, eval_dat
             continue
         # Mean weighted change, scaled to a small range (typical pct_change is 1-20)
         score = float(valid.mean() / 10.0)
+        used = sub.dropna(subset=["weighted_change"])
+        used = used.loc[used["weighted_change"].abs().sort_values(ascending=False).index]
+        drivers = [{"indicator_id": r.indicator_id, "pct_change": round(float(r.pct_change), 2),
+                    "direction": int(r.direction), "weight": float(r.weight)}
+                   for r in used.itertuples()]
         out.append({"sector": sector, "macro_score": round(score, 3),
-                    "n_macro_indicators": int(len(valid))})
+                    "n_macro_indicators": int(len(valid)), "drivers": drivers})
     return out
 
 

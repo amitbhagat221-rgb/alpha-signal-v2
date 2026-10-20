@@ -22,5 +22,14 @@ def test_regulatory_count_does_not_make_a_headwind_sector_positive(monkeypatch):
     assert _force(monkeypatch, d, 41.7)["direction"] == "-"
 
 
+def test_direction_is_the_score_not_the_raw_move(monkeypatch):
+    # US 10Y and VIX rising are headwinds for Financials although both moves are '+'
+    d = [{"driver": "us_10y", "value": 8.4, "unit": "%", "direction": "+", "raw": "+8.4% in 90d (headwind)"},
+         {"driver": "india_vix", "value": 31.9, "unit": "%", "direction": "+", "raw": "+31.9% in 90d (headwind)"},
+         {"driver": "bank_nifty", "value": -3.9, "unit": "%", "direction": "-", "raw": "-3.9% in 90d (headwind)"}]
+    assert _force(monkeypatch, d, 37.4)["direction"] == "-"
+    assert _force(monkeypatch, d, 50.0)["direction"] == "neutral"
+
+
 def test_only_regulatory_driver_is_neutral(monkeypatch):
     assert _force(monkeypatch, [REG], None)["direction"] == "neutral"
