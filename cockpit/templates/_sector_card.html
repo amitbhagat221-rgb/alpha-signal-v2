@@ -18,7 +18,7 @@
     <table style="width:100%; font-size:12px; border-collapse:collapse;">
         <thead><tr style="color:var(--text-muted); text-align:left;">
             <th style="padding:4px 6px;">Company</th>
-            <th style="padding:4px 6px; text-align:right;"">Market cap</th>
+            <th style="padding:4px 6px; text-align:right;">Market cap</th>
             <th style="padding:4px 6px; text-align:right;">Share</th>
             <th style="padding:4px 6px; text-align:right;">Our rank</th>
         </tr></thead>
@@ -31,7 +31,7 @@
                 </td>
                 <td style="padding:5px 6px; text-align:right;" class="mono">{{ p.market_cap_cr | crore }}</td>
                 <td style="padding:5px 6px; text-align:right;" class="mono">{{ p.share_pct | pct(1) }}</td>
-                <td style="padding:5px 6px; text-align:right;" class="mono">{% if p.rank %}#{{ p.rank }}{% else %}—{% endif %}</td>
+                <td style="padding:5px 6px; text-align:right;" class="mono">{% if p.rank is not none %}#{{ p.rank }} <span style="color:var(--text-muted); font-size:10px;">{{ p.cap_tier | tier_label }}</span>{% else %}<span style="color:var(--text-muted);" title="Not in today's ranking">—</span>{% endif %}</td>
             </tr>
         {% endfor %}
         </tbody>

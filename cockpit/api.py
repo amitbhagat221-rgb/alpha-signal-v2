@@ -1425,7 +1425,8 @@ def get_group_overview(by):
     for _, r in top_n.iterrows():
         top_by.setdefault(r[col], []).append(r["ticker"])
     df["top_3"] = df[col].map(lambda g: ", ".join(top_by.get(g, [])))
-    return df.to_dict("records")
+    # No ranked stock / no macro read → None, not NaN ("0" score, "nan" macro signal on screen).
+    return df.astype(object).where(df.notna(), None).to_dict("records")
 
 
 def get_group_list(by):
@@ -1451,8 +1452,7 @@ def get_group_top_players(by, name, n=10):
     df = read_sql(
         f"""
         SELECT s.sid, s.ticker, s.name, s.market_cap_cr,
-               COALESCE(dp.final_score, 0) AS final_score,
-               COALESCE(dp.rank, NULL)     AS rank
+               dp.final_score, dp.rank, dp.cap_tier
         FROM stocks s
         LEFT JOIN daily_picks dp
           ON dp.sid = s.sid
@@ -1477,7 +1477,10 @@ def get_group_top_players(by, name, n=10):
         df["share_pct"] = (100.0 * df["market_cap_cr"] / total_listed).round(1)
     else:
         df["share_pct"] = 0.0
-    return df.to_dict("records")
+    df["rank"] = df["rank"].astype("Int64")       # NULLs made it float ("#3.0")
+    # A stock not ranked today has no score or rank: None, not NaN (NaN is truthy in Jinja,
+    # so `{% if p.rank %}` printed "#nan").
+    return df.astype(object).where(df.notna(), None).to_dict("records")
 
 
 def get_group_picks(by, name, top_n=10, bottom_n=5):
