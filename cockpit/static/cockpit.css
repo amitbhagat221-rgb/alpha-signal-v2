@@ -869,6 +869,11 @@ body {
 
 .tf-button:hover { color: var(--text-secondary); }
 .tf-button.active { background: var(--accent); color: white; }
+/* seven buttons are 388 px wide at 14 px padding: on a phone they pushed the page sideways */
+@media (max-width: 480px) {
+    .tf-selector { max-width: 100%; flex-wrap: wrap; }
+    .tf-button { padding: 6px 9px; }
+}
 
 /* Placeholder screens */
 .placeholder {
