@@ -55,9 +55,10 @@ def crore(cr):
     v = _num(cr)
     if v is None:
         return DASH
-    if v >= 100_000:
-        return f"₹{v / 100_000:.1f}L Cr"
-    return f"₹{v:,.0f} Cr"
+    a = abs(v)
+    body = f"{a / 100_000:.1f}L Cr" if a >= 100_000 else f"{a:,.0f} Cr"
+    # a loss reads -₹23 Cr (was ₹-23 Cr); one that rounds to zero carries no sign
+    return f"-₹{body}" if v < 0 and body not in ("0 Cr", "0.0L Cr") else f"₹{body}"
 
 
 def tone(x, pos="score-green", neg="score-red", zero=""):

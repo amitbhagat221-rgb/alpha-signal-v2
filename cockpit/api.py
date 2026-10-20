@@ -695,8 +695,9 @@ def latest_pick_date():
 
 def get_heatmap_data():
     """Every ranked stock by tier (best score first; tiers in the order every page lists
-    them, views.display_tiers), then the non-pickable tiers (MICRO) from `stocks` with score
-    None: they are classified and their signals computed, but never ranked into daily_picks."""
+    them, views.display_tiers) then that tier's stocks not ranked today (score None), then the
+    non-pickable tiers (MICRO) from `stocks` with score None: they are classified and their
+    signals computed, but never ranked into daily_picks."""
     unpickable = views.unpickable_tiers()
     # One rule, shared with the Stocks page: a stock ranked today sits in the tier it was ranked in;
     # the unpickable tiers (MICRO) hold only the stocks that are not ranked today.
@@ -707,10 +708,16 @@ def get_heatmap_data():
         ORDER BY dp.cap_tier, dp.final_score DESC
     """, params=[latest_pick_date()])
     ranked_today = set(df["sid"])
+    # A stock of a ranked tier missing from today's ranking (HDFC Bank on 2026-10-20) keeps a grey
+    # "not ranked" tile at the end of its tier, so it does not vanish from the map.
+    missing = read_sql("SELECT sid, ticker, name, cap_tier FROM stocks ORDER BY ticker")
+    missing = missing[~missing["sid"].isin(ranked_today)]
     result = {}
     for tier in views.display_tiers():
         tier_df = df[df["cap_tier"] == tier]
-        result[tier] = tier_df[["sid", "ticker", "name", "score"]].to_dict("records")
+        result[tier] = (tier_df[["sid", "ticker", "name", "score"]].to_dict("records")
+                        + [{**r, "score": None} for r in
+                           missing.loc[missing["cap_tier"] == tier, ["sid", "ticker", "name"]].to_dict("records")])
     for tier in unpickable:
         rows = read_sql("SELECT sid, ticker, name, NULL AS score FROM stocks "
                         "WHERE cap_tier = ? ORDER BY ticker", params=[tier])
@@ -1425,7 +1432,8 @@ def get_group_overview(by):
     for _, r in top_n.iterrows():
         top_by.setdefault(r[col], []).append(r["ticker"])
     df["top_3"] = df[col].map(lambda g: ", ".join(top_by.get(g, [])))
-    return df.to_dict("records")
+    # No ranked stock / no macro read → None, not NaN ("0" score, "nan" macro signal on screen).
+    return df.astype(object).where(df.notna(), None).to_dict("records")
 
 
 def get_group_list(by):
@@ -1451,8 +1459,7 @@ def get_group_top_players(by, name, n=10):
     df = read_sql(
         f"""
         SELECT s.sid, s.ticker, s.name, s.market_cap_cr,
-               COALESCE(dp.final_score, 0) AS final_score,
-               COALESCE(dp.rank, NULL)     AS rank
+               dp.final_score, dp.rank, dp.cap_tier
         FROM stocks s
         LEFT JOIN daily_picks dp
           ON dp.sid = s.sid
@@ -1477,7 +1484,10 @@ def get_group_top_players(by, name, n=10):
         df["share_pct"] = (100.0 * df["market_cap_cr"] / total_listed).round(1)
     else:
         df["share_pct"] = 0.0
-    return df.to_dict("records")
+    df["rank"] = df["rank"].astype("Int64")       # NULLs made it float ("#3.0")
+    # A stock not ranked today has no score or rank: None, not NaN (NaN is truthy in Jinja,
+    # so `{% if p.rank %}` printed "#nan").
+    return df.astype(object).where(df.notna(), None).to_dict("records")
 
 
 def get_group_picks(by, name, top_n=10, bottom_n=5):

@@ -132,7 +132,9 @@ def get_book():
         out[-1]["status"] = held_status(out[-1]["left_top"], out[-1]["below_exit"], out[-1]["rank"] is not None)
         out[-1]["tier_size"] = sizes.get(r["cap_tier"])
     out.sort(key=lambda x: -x["weight_pct"])
+    covered = [r["n_analysts"] for r in out if r["pt_upside_pct"] is not None and r["n_analysts"]]
     return {
+        "analysts_range": (min(covered), max(covered)) if covered else None,
         "asof": sb["asof_date"], "pick_date": pick_date, "rows": out, "n": len(out),
         "n_left": sum(1 for r in out if r["left_top"]), "n_below_exit": sum(r["below_exit"] for r in out),
         "n_unranked": sum(r["rank"] is None for r in out),

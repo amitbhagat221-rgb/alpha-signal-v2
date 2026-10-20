@@ -6,6 +6,7 @@
 
 {% set i = detail.info %}
 {% set m = detail.metrics or {} %}
+{% set ln = detail.latest_nav or {} %}
 {% set cal = detail.calendar %}
 {% set rank = detail.cat_rank %}
 
@@ -130,8 +131,8 @@ table.mini a.link { color:var(--accent); }
 <div class="mf-grid">
     <div class="mf-stat">
         <div class="mf-stat-label">NAV</div>
-        <div class="mf-stat-value num">{{ m.nav|inr(2) }}</div>
-        <div class="mf-stat-sub">as of {{ m.nav_date or '—' }}</div>
+        <div class="mf-stat-value num">{{ ln.nav|inr(2) }}</div>
+        <div class="mf-stat-sub">as of {{ ln.nav_date or '—' }}{% if m.nav_date and ln.nav_date and m.nav_date != ln.nav_date %} · returns and score to {{ m.nav_date }}{% endif %}</div>
     </div>
     <div class="mf-stat">
         <div class="mf-stat-label">1Y return</div>
@@ -173,7 +174,7 @@ table.mini a.link { color:var(--accent); }
 
     <div x-show="tab=='performance'">
         <div class="chart-wrap">
-            <div class="chart-title">NAV, rebased to 100 at the start of history (₹ NAV, daily to {{ m.nav_date or '—' }})</div>
+            <div class="chart-title">NAV, rebased to 100 at the start of history (₹ NAV, daily to {{ ln.nav_date or '—' }})</div>
             <div class="chart-canvas"><canvas id="navChart" role="img" aria-label="NAV rebased to 100"></canvas></div>
         </div>
         <div class="chart-wrap">

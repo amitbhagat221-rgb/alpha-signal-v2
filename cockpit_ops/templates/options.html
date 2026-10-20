@@ -42,7 +42,7 @@
   <div class="ob-tile"><div class="n {% if S.net_rs > 0 %}ob-ok{% elif S.net_rs < 0 %}ob-bad{% endif %}">₹{{ "{:,.0f}".format(S.net_rs) }}</div><div class="l">net P&amp;L, settled, after costs</div></div>
   <div class="ob-tile"><div class="n">{% if S.mean_pct is not none %}{{ "%+.2f"|format(S.mean_pct) }}%{% else %}—{% endif %}</div><div class="l">mean per trade, % of margin (backtest NIFTY {{ "%+.2f"|format(backtest.NIFTY.mean_pct) }}%)</div></div>
   <div class="ob-tile"><div class="n {% if S.worst_pct is not none and S.worst_pct < backtest.SENSEX.worst_pct %}ob-bad{% endif %}">{% if S.worst_pct is not none %}{{ "%+.1f"|format(S.worst_pct) }}%{% else %}—{% endif %}</div><div class="l">worst trade (bar: not below the backtest's −8.9% / −7.6%)</div></div>
-  <div class="ob-tile"><div class="n">{% if S.slip_median_pct is not none %}{{ "%.1f"|format(S.slip_median_pct) }}%{% else %}—{% endif %}</div><div class="l">median slippage, live bid vs settle ({{ S.n_slip }} trades; bar 1%)</div></div>
+  <div class="ob-tile"><div class="n">{% if S.slip_median_pct is not none %}{{ "%.1f"|format(S.slip_median_pct) }}%{% else %}—{% endif %}</div><div class="l">median slippage, live bid vs settle ({{ S.n_slip }} trade{{ '' if S.n_slip == 1 else 's' }}; bar 1%)</div></div>
 </div>
 
 {% if upcoming %}
@@ -65,10 +65,10 @@
       <td class="ob-wrap">₹{{ "{:,.0f}".format(t.margin_rs) }} <span class="ob-muted">{{ {"12pct": "estimate: 12% of notional", "kite": "Kite quote"}.get(t.margin_source, t.margin_source) }}</span></td>
       {% if t.status == 'SETTLED' %}
       <td>settled at {{ "{:,.2f}".format(t.settle_index) }}</td>
-      <td class="ob-wrap {% if t.net_rs > 0 %}ob-ok{% else %}ob-bad{% endif %}">₹{{ "{:+,.0f}".format(t.net_rs) }} ({{ "%+.2f"|format(100 * t.ret_on_margin) }}%)</td>
+      <td class="ob-wrap {% if t.net_rs > 0 %}ob-ok{% else %}ob-bad{% endif %}">{{ '+' if t.net_rs > 0 else '' }}{{ t.net_rs|inr }} ({{ "%+.2f"|format(100 * t.ret_on_margin) }}%)</td>
       {% else %}
       <td class="ob-warn">open</td>
-      <td class="ob-wrap">{% if t.mark %}<span class="{% if t.mark.mtm_rs > 0 %}ob-ok{% else %}ob-bad{% endif %}">₹{{ "{:+,.0f}".format(t.mark.mtm_rs) }}</span> <span class="ob-muted">marked {{ t.mark.mark_date }}, index {{ "{:,.0f}".format(t.mark.index) }}</span>{% else %}—{% endif %}</td>
+      <td class="ob-wrap">{% if t.mark %}<span class="{% if t.mark.mtm_rs > 0 %}ob-ok{% else %}ob-bad{% endif %}">{{ '+' if t.mark.mtm_rs > 0 else '' }}{{ t.mark.mtm_rs|inr }}</span> <span class="ob-muted">marked {{ t.mark.mark_date }}, index {{ "{:,.0f}".format(t.mark.index) }}</span>{% else %}—{% endif %}</td>
       {% endif %}
     </tr>
     {% endfor %}

@@ -320,9 +320,15 @@ def get_mf_detail(scheme_code: str) -> dict | None:
                 metrics_dict[k] = None
         for c in calendar_list:
             c["bench_ret_pct"] = None
+    # The NAV card shows the newest NAV fetched (daily), not the NAV the metrics were last computed on
+    # (mf_metrics is recomputed less often: the card read ₹87.66 on 8 Oct while 19 Oct had ₹90.35).
+    latest = db.one("SELECT nav_date, nav FROM mf_nav_history WHERE scheme_code = ? AND nav > 0 "
+                    "ORDER BY nav_date DESC LIMIT 1", [scheme_code]) or {}
     return {
         "info":     info_dict,
         "metrics":  metrics_dict,
+        "latest_nav": latest if latest.get("nav_date") else {"nav": metrics_dict.get("nav"),
+                                                              "nav_date": metrics_dict.get("nav_date")},
         "calendar": calendar_list,
         "cat_rank": mf_category_rank(scheme_code),
     }

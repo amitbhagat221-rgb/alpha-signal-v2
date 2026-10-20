@@ -29,7 +29,8 @@
         <h2 class="tier-header hm-head">
             {{ tier_name }} CAP {{ unproven_pill(tier_name) }}
             <span class="hm-count">
-                ({{ tier_stocks|length }} stocks)
+                {% set n_unranked = tier_stocks|selectattr('score', 'none')|list|length %}
+                ({{ tier_stocks|length }} stocks{% if tier_name in pickable_tiers() and n_unranked %}, {{ n_unranked }} not ranked today{% endif %})
                 {% if tier_name not in pickable_tiers() %}{% if tier_name == 'MICRO' %} · ADTV&lt;₹1Cr + (mcap&lt;₹500Cr OR Piot≤3 OR &lt;4q){% endif %} · never ranked{% endif %}
             </span>
         </h2>

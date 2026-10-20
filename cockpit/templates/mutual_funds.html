@@ -66,7 +66,7 @@
 <div class="mf-header">
     <h1 class="section-title">Mutual funds</h1>
     <div class="meta">
-        <strong class="num" style="color:var(--text-primary);">{{ '{:,}'.format(bundle.total|default(0)) }}</strong> funds match{% if bundle.as_of %} · NAV as of {{ bundle.as_of|short_date }}{% endif %}
+        <strong class="num" style="color:var(--text-primary);">{{ '{:,}'.format(bundle.total|default(0)) }}</strong> funds match{% if bundle.as_of %} · NAV, returns and scores as of {{ bundle.as_of|short_date }}{% endif %}
     </div>
 </div>
 <p class="mf-sub">{{ score_note() }} Default order: best fund of each category first.</p>

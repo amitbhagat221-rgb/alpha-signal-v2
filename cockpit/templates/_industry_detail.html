@@ -120,7 +120,7 @@
 </div>
 
 {# ── Conviction bar ── #}
-{% if ind_match %}
+{% if ind_match and ind_match.avg_score is not none %}
 <div class="card" style="margin-bottom: 14px; padding: 12px 18px;">
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
         <span class="section-title" style="margin-bottom: 0;">Where this {{ "sector" if is_sector else "industry" }} stands</span>
