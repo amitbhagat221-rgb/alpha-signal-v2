@@ -36,3 +36,22 @@ def test_sell_reason_names_the_rule_that_sold():
     assert sell_reason(12, 8, 5e7, 1e7) == "rank"            # below the hold line
     assert sell_reason(3, 8, 0.92e7, 1e7) == "liquidity"     # VISAKAIND 2026-10-20: #3 but thin
     assert sell_reason(3, 8, 5e7, 1e7) == "screen"
+
+
+def test_fund_nav_card_shows_the_newest_nav_not_the_metrics_nav(monkeypatch, tmp_path):
+    import webauth
+    from fastapi.testclient import TestClient
+    from cockpit import app as app_mod
+    from tests.test_cockpit_qa_display import NULL_METRICS, _fund
+    monkeypatch.delenv("COCKPIT_PREVIEW", raising=False)
+    monkeypatch.setattr(webauth, "AUTH_FILE", tmp_path / "auth.json")
+    webauth.set_password("correct horse battery")
+    client = TestClient(app_mod.app, cookies={webauth.COOKIE: webauth.make_token()})
+    fund = _fund({**NULL_METRICS, "nav": 87.66, "nav_date": "2026-10-08"})
+    fund["latest_nav"] = {"nav": 90.35, "nav_date": "2026-10-19"}
+    monkeypatch.setattr(app_mod.api, "get_mf_detail", lambda code: fund)
+    monkeypatch.setattr(app_mod.api, "get_mf_peer_rank", lambda code: {"category": None, "peers": []})
+    monkeypatch.setattr(app_mod.api, "get_mf_holdings", lambda code: {"top": [], "sectors": [], "as_of_date": None})
+    html = client.get("/mutual-funds/1").text
+    assert "90.35" in html and "as of 2026-10-19" in html and "returns and score to 2026-10-08" in html
+    assert "daily to 2026-10-19" in html
