@@ -682,9 +682,9 @@ PIPELINE_STEPS = [
      "lagged_reads": ["nse_index_history@fetch_nse_indices", "stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
 
     {"name": "signal_macro",       "module": "signals.macro",       "function": "compute",  "critical": False,
-     "table": "macro_sector_signals", "source": "macro_indicators", "data_freq": "monthly", "frequency": "daily",
-     "reads": ["macro_indicators", "macro_sector_signals"],
-     "lagged_reads": ["macro_sector_signals@signal_regulatory"]},
+     "table": "macro_sector_signals", "source": "macro_history × macro_sector_map (pit.pit_macro_sector)", "data_freq": "daily", "frequency": "daily",
+     "reads": ["macro_history", "macro_sector_map", "macro_sector_signals", "stocks"],
+     "lagged_reads": ["macro_sector_signals@signal_regulatory", "stocks@classify_micro_tier", "stocks@fetch_broker_recos"]},
 
     {"name": "signal_regulatory", "module": "signals.regulatory",  "function": "compute",  "critical": False,
      "table": "macro_sector_signals", "source": "regulatory_events + regulatory_signals (AI classified)",

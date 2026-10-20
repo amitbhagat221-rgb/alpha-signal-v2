@@ -1,11 +1,26 @@
 """
-Alpha Signal v2 — Macro Sector Signal
+Alpha Signal v2 — Macro Sector Signal (the live Sectors read)
 
-Maps 22 macro indicators to sector scores using a rules table.
-Signal → Score: STRONG=80, IMPROVING=65, STABLE=50, DETERIORATING=30.
-Per-sector score = average of mapped indicator scores.
+One engine, two tables: the per-sector score is `pit.pit_macro_sector` — the same
+function the PIT twin (`macro_sector_signals_pit`, tools/reconstruct_pit.py) and the
+wired sector_tilt factor's macro leg use — run on `macro_history` as of today with
+`macro_sector_map` (indicator → sector, direction, weight; 90-day moves of daily
+market series). This step only puts that score in display form:
 
-Reads: macro_indicators (latest snapshot; produced by sources/macro_official.py)
+    display score = clip(50 + DISPLAY_SCALE × pit score, 0, 100)
+    label         = TAILWIND ≥ 70 · FAVORABLE ≥ 55 · NEUTRAL ≥ 45 · HEADWIND ≥ 30 · ADVERSE
+
+(pit score +0.5 → FAVORABLE, −0.5 → HEADWIND: roughly the top and bottom quarter of
+its history). It used to be a second model — monthly official labels in
+`macro_indicators` through a hard-coded sector map — whose only inputs for
+Financials, Information Technology and Communication Services were GST and credit
+growth. Those two have no feed (dropped, not faked, on 2026-09-27), so from 2026-09-28
+those three sectors had no macro row and signals/regulatory.py wrote them UNKNOWN.
+
+Every GICS sector in `stocks` gets a row; a sector the engine cannot score is a
+run_events item failure, and no sector scored at all raises.
+
+Reads:  macro_history, macro_sector_map, stocks
 Writes: macro_sector_signals
 
 Usage:
@@ -18,39 +33,12 @@ from datetime import date
 
 import pandas as pd
 
+import runlog
 from db import read_sql, upsert_df
 
-# Signal label → numeric score
-SIGNAL_SCORES = {
-    "STRONG": 80,
-    "IMPROVING": 65,
-    "STABLE": 50,
-    "DETERIORATING": 30,
-}
+DISPLAY_SCALE = 10      # display points per unit of pit_macro_sector's score
 
-# Sector → which indicators drive it
-SECTOR_MAP = {
-    "Automobiles":              ["iip_manufacturing", "credit_growth", "gst"],
-    "Auto Components":          ["iip_manufacturing", "credit_growth"],
-    "Capital Goods":            ["iip_capital_goods", "core_cement", "core_steel"],
-    "Cement":                   ["core_cement", "iip_manufacturing"],
-    "Chemicals":                ["iip_manufacturing", "core_fertilizers"],
-    "Communication Services":   ["gst"],
-    "Construction":             ["core_cement", "core_steel", "credit_growth"],
-    "Consumer Discretionary":   ["iip_consumer_durables", "gst", "credit_growth"],
-    "Consumer Staples":         ["iip_consumer_nondurables", "gst"],
-    "Energy":                   ["core_crude_oil", "core_natural_gas", "core_refinery"],
-    "Financials":               ["credit_growth", "gst"],
-    "Financial Services":       ["credit_growth", "gst"],
-    "Health Care":              ["iip_manufacturing", "gst"],
-    "Industrials":              ["iip_capital_goods", "core_cement", "core_steel", "credit_growth"],
-    "Information Technology":   ["gst"],
-    "Materials":                ["core_steel", "core_coal", "iip_mining", "core_cement"],
-    "Real Estate":              ["core_cement", "core_steel", "credit_growth"],
-    "Utilities":                ["core_electricity", "core_coal"],
-}
 
-# Sector signal labels based on score
 def _sector_signal(score):
     if score >= 70: return "TAILWIND"
     if score >= 55: return "FAVORABLE"
@@ -59,48 +47,58 @@ def _sector_signal(score):
     return "ADVERSE"
 
 
-def compute(dry_run=False):
-    """Compute macro sector signals from indicator data."""
-    # Latest snapshot only: macro_indicators keeps one row per (indicator, snapshot_date)
-    # and an unfiltered read would let an older label overwrite a newer one.
-    indicators = read_sql("SELECT indicator, signal, detail FROM macro_indicators "
-                          "WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM macro_indicators)")
+def display_score(pit_score):
+    """pit_macro_sector's signed score on the Sectors page's 0–100 scale (50 = no tilt)."""
+    return round(min(100.0, max(0.0, 50.0 + DISPLAY_SCALE * float(pit_score))), 1)
 
-    if indicators.empty:
-        print("No macro indicators found.")
-        return 0
 
-    # Build indicator → score lookup
-    ind_scores = {}
-    ind_details = {}
-    for _, row in indicators.iterrows():
-        label = row["signal"]
-        ind_scores[row["indicator"]] = SIGNAL_SCORES.get(label, 50)
-        ind_details[row["indicator"]] = row.get("detail", "")
+def _detail(drivers):
+    """'bank_nifty: +4.1% in 90d (tailwind) | us_10y: +3.0% in 90d (headwind)' — the raw
+    move first (signals/sector_briefs parses it), then what it means for the sector."""
+    parts = []
+    for d in drivers:
+        effect = d["pct_change"] * d["direction"]
+        word = "tailwind" if effect > 0 else "headwind" if effect < 0 else "flat"
+        parts.append(f"{d['indicator_id']}: {d['pct_change']:+.1f}% in 90d ({word})")
+    return " | ".join(parts)
 
-    today = date.today().isoformat()
+
+def sector_reads(macro_hist, macro_map, sectors, as_of):
+    """DataFrame[sector, macro_score, macro_signal, macro_detail] for `sectors` as of
+    `as_of` — pit_macro_sector in display form. A sector it cannot score is left out."""
+    from pit import pit_macro_sector
+    hist = macro_hist[macro_hist["date"] <= as_of.isoformat()]
     rows = []
-
-    for sector, inds in SECTOR_MAP.items():
-        scores = [ind_scores[i] for i in inds if i in ind_scores]
-        if not scores:
+    for r in pit_macro_sector(hist, macro_map, sectors, as_of):
+        if r["macro_score"] is None:
             continue
+        score = display_score(r["macro_score"])
+        rows.append({"sector": r["sector"], "macro_score": score,
+                     "macro_signal": _sector_signal(score),
+                     "macro_detail": _detail(r["drivers"])[:500]})
+    return pd.DataFrame(rows, columns=["sector", "macro_score", "macro_signal", "macro_detail"])
 
-        macro_score = round(sum(scores) / len(scores), 1)
-        signal = _sector_signal(macro_score)
-        detail = " | ".join(ind_details.get(i, i) for i in inds if i in ind_scores)
 
-        rows.append({
-            "sector": sector,
-            "snapshot_date": today,
-            "macro_score": macro_score,
-            "macro_signal": signal,
-            "macro_detail": detail[:500],
-        })
+def compute(dry_run=False, as_of=None):
+    """Score every stocks sector from macro history and save to macro_sector_signals."""
+    as_of = as_of or date.today()
+    from pit import RAW_SQL
+    macro_hist = read_sql(RAW_SQL["macro_hist"])
+    macro_map = read_sql(RAW_SQL["macro_map"])
+    sectors = sorted(read_sql("SELECT DISTINCT sector FROM stocks WHERE sector IS NOT NULL")["sector"])
+    if macro_map.empty or not sectors:
+        raise RuntimeError("signal_macro: macro_sector_map or stocks.sector is empty — nothing to score")
 
-    df = pd.DataFrame(rows)
+    df = sector_reads(macro_hist, macro_map, sectors, as_of)
+    if df.empty:
+        raise RuntimeError(f"signal_macro: no sector scored as of {as_of} — macro_history has no "
+                           f"90-day moves for the macro_sector_map indicators")
+    for s in sorted(set(sectors) - set(df["sector"])):
+        runlog.item_failed("signal_macro", s, "no macro reading: none of its macro_sector_map "
+                           "indicators has a 90-day move in macro_history")
+    df.insert(1, "snapshot_date", as_of.isoformat())
 
-    print(f"Macro Sector: {len(df)} sectors scored")
+    print(f"Macro Sector: {len(df)} of {len(sectors)} sectors scored")
     for _, r in df.iterrows():
         print(f"  {r['sector']:30s} {r['macro_score']:5.1f}  {r['macro_signal']}")
 
