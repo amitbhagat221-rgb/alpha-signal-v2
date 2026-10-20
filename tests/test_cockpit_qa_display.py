@@ -142,10 +142,12 @@ def test_explorer_and_stocks_agree_on_tier_counts():
     heat = api.get_heatmap_data()
     u = stocks.universe()
     for tier in views.display_tiers():
-        assert len(heat[tier]) == sum(r["ranked"] and r["tier"] == tier for r in u["rows"]), tier
+        ranked = sum(s["score"] is not None for s in heat[tier])
+        assert ranked == sum(r["ranked"] and r["tier"] == tier for r in u["rows"]), tier
+        assert len(heat[tier]) == sum(r["tier"] == tier for r in u["rows"]), tier     # + grey "not ranked today"
     for tier in views.unpickable_tiers():
         assert len(heat.get(tier, [])) == sum(not r["ranked"] and r["tier"] == tier for r in u["rows"]), tier
-    ranked_sids = {s["sid"] for t in views.display_tiers() for s in heat[t]}
+    ranked_sids = {s["sid"] for t in views.display_tiers() for s in heat[t] if s["score"] is not None}
     assert not ranked_sids & {s["sid"] for t in views.unpickable_tiers() for s in heat.get(t, [])}
 
 

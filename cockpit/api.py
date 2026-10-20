@@ -695,8 +695,9 @@ def latest_pick_date():
 
 def get_heatmap_data():
     """Every ranked stock by tier (best score first; tiers in the order every page lists
-    them, views.display_tiers), then the non-pickable tiers (MICRO) from `stocks` with score
-    None: they are classified and their signals computed, but never ranked into daily_picks."""
+    them, views.display_tiers) then that tier's stocks not ranked today (score None), then the
+    non-pickable tiers (MICRO) from `stocks` with score None: they are classified and their
+    signals computed, but never ranked into daily_picks."""
     unpickable = views.unpickable_tiers()
     # One rule, shared with the Stocks page: a stock ranked today sits in the tier it was ranked in;
     # the unpickable tiers (MICRO) hold only the stocks that are not ranked today.
@@ -707,10 +708,16 @@ def get_heatmap_data():
         ORDER BY dp.cap_tier, dp.final_score DESC
     """, params=[latest_pick_date()])
     ranked_today = set(df["sid"])
+    # A stock of a ranked tier missing from today's ranking (HDFC Bank on 2026-10-20) keeps a grey
+    # "not ranked" tile at the end of its tier, so it does not vanish from the map.
+    missing = read_sql("SELECT sid, ticker, name, cap_tier FROM stocks ORDER BY ticker")
+    missing = missing[~missing["sid"].isin(ranked_today)]
     result = {}
     for tier in views.display_tiers():
         tier_df = df[df["cap_tier"] == tier]
-        result[tier] = tier_df[["sid", "ticker", "name", "score"]].to_dict("records")
+        result[tier] = (tier_df[["sid", "ticker", "name", "score"]].to_dict("records")
+                        + [{**r, "score": None} for r in
+                           missing.loc[missing["cap_tier"] == tier, ["sid", "ticker", "name"]].to_dict("records")])
     for tier in unpickable:
         rows = read_sql("SELECT sid, ticker, name, NULL AS score FROM stocks "
                         "WHERE cap_tier = ? ORDER BY ticker", params=[tier])
