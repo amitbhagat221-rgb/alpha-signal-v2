@@ -156,6 +156,13 @@
 </div>
 {% endif %}
 
+{# Retired jobs (config.RETIRED_STEPS): their last run is history, shown muted and never counted as a failure. #}
+{% if retired_steps %}
+<div class="fl-sum u-muted-11" data-retired-steps>
+    {% for r in retired_steps %}<span class="mono" data-retired-step="{{ r.name }}" title="{{ r.why }}"><b>{{ r.name }}</b> {{ r.label }}{% if r.run_date %} · last ran {{ r.run_date }}{% endif %}</span>{% if not loop.last %} · {% endif %}{% endfor %}
+</div>
+{% endif %}
+
 {% from "_components.html" import tab_bar %}
 
 <div x-data="{ tab: 'stages', loaded: { stages: true, dag: true }, showAll: !window.matchMedia('(max-width: 767px)').matches }" x-cloak

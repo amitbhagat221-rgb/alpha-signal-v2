@@ -391,6 +391,15 @@ NON_PAGING_STEPS = {
     "fetch_prices_fallback": "gap-fill for the few stocks NSE files lack (REITs, InvITs, BSE-only); the main price feed is fetch_bhavcopy, a gap shows as stale prices on those names only",
 }
 
+# Steps and run.sh jobs that will never run again: {step_name: {since, ref, why, feed?}}. Their old
+# failures are history, not an alert: Health drops them from PIPELINE_STEP and the ops Flow page shows
+# them as "retired (since, ref)". A row logged under one AFTER `since` means something still schedules
+# it (RETIRED_STEP_RAN, WARN). `feed`, when set, is the feeds.FEEDS entry retired with it.
+RETIRED_STEPS = {
+    "cron_bse_announcements": {"since": "2026-10-19", "ref": "ADR 0082", "feed": "bse_announcements",
+                               "why": "BSE's WAF 403s this server since 2026-10-13; run.sh forward no longer runs it (NSE is the live source)"},
+}
+
 PIPELINE_STEPS = [
     # ── Data Sources ──
     {"name": "fetch_macro_market", "module": "sources.macro_yfinance", "function": "compute", "critical": False,

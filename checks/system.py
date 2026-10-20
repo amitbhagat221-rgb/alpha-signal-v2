@@ -49,7 +49,15 @@ _S = {
         "Read the error, fix it, rerun the step (Rerun on the ops Flow page, or `python pipeline.py --step <name>`). "
         "For a streak: `python -m runlog bundle <feed>` shows the evidence. A shadow job or gap-fill (WARN) can wait for the week.",
         f"CRITICAL when the morning email needs the step's output or it has failed {FAILURE_STREAK_DAYS}+ days running, else WARN. "
-        "Always WARN for a step in config.NON_PAGING_STEPS (a v3 shadow job or a gap-fill the picks do not depend on)"),
+        "Always WARN for a step in config.NON_PAGING_STEPS (a v3 shadow job or a gap-fill the picks do not depend on). "
+        "Never for a step in config.RETIRED_STEPS: its old failures are history"),
+    "RETIRED_STEP_RAN": ("ran",
+        "A step declared retired (config.RETIRED_STEPS) logged a run after its retirement date",
+        "A retired job was dropped on purpose (a dead source, a one-off that finished). If it runs again, a crontab "
+        "line, a run.sh job or a script still schedules it, and its failures are hidden from the step check.",
+        "Find what started it (`crontab -l`, run.sh, the run_id in the evidence) and remove it. If the step is "
+        "meant to come back, delete its config.RETIRED_STEPS entry so the step check watches it again.",
+        "WARN"),
     "WATCHDOG": ("ran",
         f"The self-healing watchdog has not run in the last {WATCHDOG_MAX_AGE_H} hours",
         "The watchdog re-runs the producers of stale tables every day; without it silent failures pile up.",
@@ -154,8 +162,9 @@ def pipeline_facts(since_days=1):
     """The latest run in its FINAL state (views.pipeline_status: a step that failed
     and then succeeded on a re-run is a success; a run that died mid-step is
     ABORTED) + the steps failing several days running."""
+    from config import RETIRED_STEPS
     out = {"last_run_date": None, "last_run_status": None, "n_steps": 0,
-           "failed_steps_today": [], "failed_streaks": []}
+           "failed_steps_today": [], "failed_streaks": [], "retired_ran": retired_runs()}
     last_date = db.scalar("SELECT MAX(run_date) FROM pipeline_log")
     if last_date is None:
         return out
@@ -180,7 +189,8 @@ def pipeline_facts(since_days=1):
         ({"step": r["step_name"], "at": r["started_at"],
           "error": (r["error_message"] or ("the run died before this step finished"
                                            if r["status"] == "ABORTED" else ""))[:200]}
-         for r in today + late_cron if r["status"] in ("FAILED", "ABORTED")),
+         for r in today + late_cron
+         if r["status"] in ("FAILED", "ABORTED") and r["step_name"] not in RETIRED_STEPS),
         key=lambda f: f["at"] or "")
 
     # Failure streaks: same step failing N+ days in a row AND not yet recovered.
@@ -218,17 +228,37 @@ def pipeline_facts(since_days=1):
     out["failed_streaks"] = [
         {"step": r["step_name"], "days": int(r["n_days"]), "sample_error": (r["sample_error"] or "")[:200]}
         for _, r in streaks.iterrows()
-        if r["step_name"] not in _exempt and not r["step_name"].startswith("endpoint_audit_")
+        if r["step_name"] not in _exempt and r["step_name"] not in RETIRED_STEPS
+        and not r["step_name"].startswith("endpoint_audit_")
     ]
     out["last_run_status"] = "FAILED" if out["failed_steps_today"] else "SUCCESS"
     return out
+
+
+def retired_runs():
+    """Steps in config.RETIRED_STEPS that logged a run AFTER their retirement date — a pipeline_log
+    row (run_date) or a run_events row (ts) — newest first: [{step, since, ref, last, n_runs, run_id}]."""
+    from config import RETIRED_STEPS
+    out = []
+    for step, r in RETIRED_STEPS.items():
+        logged = db.rows("SELECT MAX(COALESCE(started_at, run_date)) AS last, COUNT(DISTINCT run_date) AS n "
+                         "FROM pipeline_log WHERE step_name = ? AND run_date > ?", [step, r["since"]])[0]
+        events = db.rows("SELECT MAX(ts) AS last, COUNT(DISTINCT run_id) AS n, MAX(run_id) AS run_id "
+                         "FROM run_events WHERE step = ? AND substr(ts, 1, 10) > ?", [step, r["since"]])[0]
+        if logged["n"] or events["n"]:
+            out.append({"step": step, "since": r["since"], "ref": r["ref"],
+                        "last": max(filter(None, [logged["last"], events["last"]])),
+                        "n_runs": max(logged["n"] or 0, events["n"] or 0), "run_id": events["run_id"]})
+    return sorted(out, key=lambda x: x["last"], reverse=True)
 
 
 
 def pipeline_verdicts(p):
     """A step whose FINAL state is failed pages when it is critical
     (checks.critical_steps); a streak always pages. Except a step in
-    config.NON_PAGING_STEPS (a shadow job, a gap-fill): WARN however long it fails."""
+    config.NON_PAGING_STEPS (a shadow job, a gap-fill): WARN however long it fails. A step in
+    config.RETIRED_STEPS never reaches here (pipeline_facts drops it); one that ran after its
+    retirement date warns (RETIRED_STEP_RAN)."""
     from checks import critical_steps
     from config import NON_PAGING_STEPS
     crit = critical_steps()
@@ -242,6 +272,12 @@ def pipeline_verdicts(p):
                            s["sample_error"] if s else today[step]["error"], code="PIPELINE_STEP",
                            message=(f"{step} is failing and has not recovered" if s
                                     else f"{step} failed in the latest run")))
+    for r in p.get("retired_ran") or []:
+        out.append(verdict(f"RETIRED_STEP_RAN:{r['step']}", r["step"], WARN, FAIL,
+                           f"last run {r['last'][:16]}, {r['n_runs']} run(s) since it was retired on {r['since']} ({r['ref']})"
+                           + (f"; run_id {r['run_id']}" if r.get("run_id") else ""),
+                           code="RETIRED_STEP_RAN",
+                           message=f"{r['step']} was retired on {r['since']} ({r['ref']}) but ran again"))
     return out
 
 

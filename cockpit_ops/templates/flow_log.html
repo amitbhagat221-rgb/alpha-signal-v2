@@ -59,12 +59,13 @@
         </thead>
         <tbody>
             {% for row in pipeline %}
-            <tr data-status="{{ row.status }}" data-step="{{ row.step_name|lower }}"
+            <tr data-status="{{ 'RETIRED' if row.retired else row.status }}" data-step="{{ row.step_name|lower }}"
                 x-show="shown.has({{ loop.index0 }})">
                 <td class="mono">{{ row.run_date }}</td>
                 <td class="mono"><b>{{ row.step_name }}</b></td>
                 <td>
-                    {% if row.status == 'SUCCESS' %}<span class="pipe-ok">&#10003; {{ row.status }}</span>
+                    {% if row.retired %}<span class="c-muted" title="{{ row.status }} at the time; the job will not run again">{{ row.retired }}</span>
+                    {% elif row.status == 'SUCCESS' %}<span class="pipe-ok">&#10003; {{ row.status }}</span>
                     {% elif row.status == 'FAILED' %}<span class="pipe-fail">&#10007; {{ row.status }}</span>
                     {% elif row.status == 'RUNNING' %}<span class="pipe-run">&#9679; {{ row.status }}</span>
                     {% elif row.status == 'ABORTED' %}<span class="c-muted">&#9888; ABORTED</span>
@@ -74,7 +75,7 @@
                 <td class="num">{% if row.duration_sec %}{{ "%.1f"|format(row.duration_sec) }} s{% else %}<span class="u-muted">—</span>{% endif %}</td>
                 <td class="mono c-muted">{% if row.started_at %}{{ row.started_at[11:19] }}{% endif %}</td>
                 {# red only for a run that did not finish: a SUCCESS row keeps a muted note #}
-                <td class="small sy-wrap {{ 'c-red' if row.status in ('FAILED', 'ABORTED') else 'c-muted' }}">{{ (row.error_message or '')[:200] }}</td>
+                <td class="small sy-wrap {{ 'c-red' if row.status in ('FAILED', 'ABORTED') and not row.retired else 'c-muted' }}">{{ (row.error_message or '')[:200] }}</td>
             </tr>
             {% endfor %}
         </tbody>
