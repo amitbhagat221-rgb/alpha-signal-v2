@@ -48,7 +48,7 @@ Which step or table is CRITICAL is derived, not listed: a step pages when the mo
 3. It has a **fire drill** in `tests/test_check_drills.py` that breaks what it guards and proves the check notices.
 4. It looks at rows. A check whose scope is empty is reported (`CHECK_VACUOUS`), never passed.
 
-The catalog is capped at 30 checks (24 today). A new one replaces one or earns its place.
+The catalog is capped at 30 checks (25 today). A new one replaces one or earns its place.
 
 ## Where a check lives
 
@@ -66,6 +66,11 @@ the ranking) and take their scope from `factors.SIGNAL_WEIGHTS`. They compare to
 
 One issue per fact: a failing step absorbs its own stale table and the watchdog heal that failed with it
 (`report.fold`). A step that failed and then succeeded on a re-run is a success.
+
+A step that will never run again (a dead source, a finished one-off) is declared once in `config.RETIRED_STEPS`
+(since, ADR, why, and the retired feed if any). Its old failures are history: no `PIPELINE_STEP`, and the ops Flow
+page shows "retired (since, ADR)" instead of FAILED. If it logs a run after that date, `RETIRED_STEP_RAN` warns:
+something still schedules it.
 
 ## The code, one job per module
 

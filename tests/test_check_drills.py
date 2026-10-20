@@ -303,6 +303,11 @@ SYSTEM_DRILLS = {
     "PIPELINE_STEP": _clean(pipeline={"last_run_date": TODAY, "last_run_status": "FAILED", "n_steps": 3,
                                       "failed_steps_today": [{"step": "fetch_x", "error": "boom", "at": "t"}],
                                       "failed_streaks": []}),
+    "RETIRED_STEP_RAN": _clean(pipeline={"last_run_date": TODAY, "last_run_status": "SUCCESS", "n_steps": 3,
+                                         "failed_steps_today": [], "failed_streaks": [],
+                                         "retired_ran": [{"step": "cron_bse_announcements", "since": "2026-10-19",
+                                                          "ref": "ADR 0082", "last": TODAY + "T14:00:17", "n_runs": 1,
+                                                          "run_id": "cron_bse_announcements:x"}]}),
     "WATCHDOG": _clean(watchdog={"last_run": _day(3) + "T15:00:00", "age_hours": 72.0, "healed": 0, "failed": 0, "skipped": 0}),
     "HEALTH_CHECK_CRASHED": _clean(feeds={"error": "KeyError: 'x'"}),
     "DISK_LOW": _clean(disk={"free_gb": 26.0, "total_gb": 145.0, "db_gb": 22.3, "wal_gb": 0.1}),   # 2026-10-11 morning
@@ -367,6 +372,20 @@ def test_non_paging_steps_name_real_steps():
     run_sh = (db.PROJECT_ROOT / "run.sh").read_text()
     for name, why in NON_PAGING_STEPS.items():
         assert why and (name in known or f"logged {name} " in run_sh), f"{name} is not a step or a run.sh job"
+
+
+def test_retired_steps_are_unscheduled_and_name_their_retired_feed():
+    """config.RETIRED_STEPS: nothing in the code still runs a retired step (the crontab is the daily
+    check's job, RETIRED_STEP_RAN), and a feed-backed one names a feed that is itself retired."""
+    import feeds
+    from config import PIPELINE_STEPS, RETIRED_STEPS
+    run_sh = (db.PROJECT_ROOT / "run.sh").read_text()
+    for name, r in RETIRED_STEPS.items():
+        assert r["why"] and r["ref"] and date.fromisoformat(r["since"]), name
+        assert name not in {s["name"] for s in PIPELINE_STEPS}, f"{name} is retired but still a pipeline step"
+        assert f"logged {name} " not in run_sh, f"{name} is retired but run.sh still runs it"
+        if r.get("feed"):
+            assert feeds.FEEDS[r["feed"]]["status"] == "retired", f"{name}: feed {r['feed']} is not retired"
 
 
 def test_an_empty_table_of_a_feed_not_on_the_picks_path_is_graded_down(monkeypatch):

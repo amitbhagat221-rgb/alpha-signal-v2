@@ -506,12 +506,18 @@ def get_flow_overview():
                 "last_error": (real_error(r.get("error_message"))["error"] or r.get("error_message")),
                 "run_date": r.get("run_date")}
                for n, r in sorted(status_by_step.items())
-               if n not in in_dag and r.get("status") in ("FAILED", "ABORTED")
+               if n not in in_dag and r.get("status") in ("FAILED", "ABORTED") and not r.get("retired")
                and str(r.get("run_date") or "") >= cutoff]
+    # Retired jobs (config.RETIRED_STEPS) will never run again: their last row is history, not a failure.
+    from config import RETIRED_STEPS
+    retired = [{"name": n, "label": status_by_step[n]["retired"], "why": RETIRED_STEPS[n]["why"],
+                "last_status": status_by_step[n].get("status"), "run_date": status_by_step[n].get("run_date")}
+               for n in sorted(RETIRED_STEPS) if (status_by_step.get(n) or {}).get("retired")]
     all_steps = [s for layer in layered for s in layer["steps"]]
     return {
         "layers": layered,
         "outside_failures": outside,
+        "retired_steps": retired,
         "step_count": len(all_steps),
         "n_ok": sum(1 for s in all_steps if s["last_status"] == "SUCCESS"),
         "n_never": sum(1 for s in all_steps if not s["last_status"]),
