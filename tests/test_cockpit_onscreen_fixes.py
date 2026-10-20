@@ -57,6 +57,13 @@ def test_fund_nav_card_shows_the_newest_nav_not_the_metrics_nav(monkeypatch, tmp
     assert "daily to 2026-10-19" in html
 
 
+def test_ownership_card_shows_mfs_and_insurers_inside_dii():
+    src = (COCKPIT_TEMPLATES / "stock_detail.html").read_text()
+    row = src[src.index('("Promoter", "promoter_pct"'):].split("]", 1)[0]
+    assert row.index('"dii_pct"') < row.index('"mf_pct"') < row.index('"insurance_pct"') < row.index('"retail_hni_pct"')
+    assert '"of which MFs"' in row and '"Mutual Funds"' not in row
+
+
 def test_options_page_writes_a_loss_as_minus_rupees(monkeypatch, tmp_path):
     import option_book
     import webauth

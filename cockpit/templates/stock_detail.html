@@ -851,10 +851,12 @@
 <div class="card u-mb16">
     <div class="section-title">Current Ownership ({{ sh.get("end_date", "")[:10] }})</div>
     <div class="section-desc">Latest quarter shareholding pattern with QoQ change indicators.</div>
-    {% for label, key, color in [("Promoter", "promoter_pct", "accent"), ("FII", "fii_pct", "blue"), ("Mutual Funds", "mf_pct", "green"), ("DII", "dii_pct", "amber"), ("Insurance", "insurance_pct", "blue"), ("Retail/HNI", "retail_hni_pct", "green")] %}
+    {# Mutual funds and insurance are PART of DII (promoter + FII + DII + retail + other = 100), so they sit
+       under it as "of which" rows; listed side by side they summed to ~113%. #}
+    {% for label, key, color in [("Promoter", "promoter_pct", "accent"), ("FII", "fii_pct", "blue"), ("DII", "dii_pct", "amber"), ("of which MFs", "mf_pct", "green"), ("of which insurers", "insurance_pct", "blue"), ("Retail/HNI", "retail_hni_pct", "green")] %}
     {% if sh.get(key) is not none %}
     <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 10px;">
-        <span style="width: 110px; font-size: 12px; color: var(--text-muted); font-weight: 600;">{{ label }}</span>
+        <span style="width: 110px; font-size: 12px; color: var(--text-muted); font-weight: 600;{% if label.startswith('of which') %} padding-left: 12px; font-weight: 400;{% endif %}">{{ label }}</span>
         <div style="flex: 1; height: 8px; border-radius: 4px; background: var(--border);">
             <div style="height: 100%; border-radius: 4px; width: {{ sh[key] }}%; background: var(--{{ color }});"></div>
         </div>
@@ -1456,7 +1458,7 @@ async function initShareholdingChart() {
     const mk = (label, key, c) => ({ label, data: q.map(r => r[key]), borderColor: cssVar(c), backgroundColor: tint(c, 40), fill: true, tension: 0.2 });
     const o = baseOpts(); o.scales.y.beginAtZero = true; o.scales.y.title = axisTitle('% of shares');
     makeChart('shareholdingChart', { type: 'line', data: { labels: q.map(r => r.end_date.slice(0, 10)), datasets: [
-        mk('Promoter', 'promoter_pct', '--accent'), mk('FII', 'fii_pct', '--blue'), mk('Mutual funds', 'mf_pct', '--green'), mk('DII', 'dii_pct', '--amber')] }, options: o });
+        mk('Promoter', 'promoter_pct', '--accent'), mk('FII', 'fii_pct', '--blue'), mk('Mutual funds (part of DII)', 'mf_pct', '--green'), mk('DII', 'dii_pct', '--amber')] }, options: o });
 }
 
 async function initInsiderChart() {
