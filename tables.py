@@ -452,8 +452,10 @@ TABLES = {
     },
 
     # ── Computed Signals ──
+    # Daily step compute_valuation_ranges. as_of is the last price session, so Monday reads Friday (3 d);
+    # 4 tolerates a Friday holiday and is one day past stock_prices' own limit, so a price outage pages there first.
     "valuation_ranges": {
-        "kind": "COMPUTED", "domain": "Computed Signals", "date_col": "as_of",
+        "kind": "COMPUTED", "domain": "Computed Signals", "date_col": "as_of", "stale_days": 4,
         "depth": "One row per stock, day and method (reverse_dcf, ev_ebitda_band, ev_sales, pe_band, pb_band, peer_ev_ebitda, peer_ev_sales, peer_pe, dcf, analyst, range_52w)",
         "description": "Valuation football field (plan 0026): per-share low/mid/high from each method, a basis string naming its inputs, the price, and the 10-year growth the price implies (reverse DCF). Display only, never a score.",
     },
@@ -775,8 +777,8 @@ TABLES = {
         "description": "Yearly returns table for the bar chart on the detail page. PK (scheme_code, year).",
     },
     "mf_category_stats": {
-        "kind": "COMPUTED", "domain": "Other", "date_col": "as_of_date",
-        "depth": "One row per (category_norm, as_of_date)",
+        "kind": "COMPUTED", "domain": "Other", "date_col": "as_of_date", "stale_days": 3,
+        "depth": "One row per (category_norm, as_of_date); daily, keeping the first day of each month plus the latest",
         "description": "Category aggregates — median 1Y/3Y/5Y returns, median Sharpe, top/bottom decile cuts. Powers the heatmap on /mutual-funds and peer-rank comparisons.",
     },
     # stale_days 50: as_of_date is the PORTFOLIO date (month-end), published ≤10 days later and
@@ -784,9 +786,10 @@ TABLES = {
     # next month lands. The step runs daily (2026-10-10), which alone would set a 3-day limit.
     "mf_holdings": {"kind": "RAW", "domain": "Other", "date_col": "as_of_date", "quarantine": True,
                     "stale_days": 50},
+    # as_of_date is the run day (compute_mf_metrics, daily since 2026-10-20), so 3 days = two missed runs.
     "mf_metrics": {
-        "kind": "COMPUTED", "domain": "Other", "date_col": "as_of_date",
-        "depth": "One row per (scheme_code, as_of_date); recomputed monthly",
+        "kind": "COMPUTED", "domain": "Other", "date_col": "as_of_date", "stale_days": 3,
+        "depth": "One row per (scheme_code, as_of_date); recomputed daily, keeping the first day of each month plus the latest",
         "description": "Per-scheme returns + risk snapshot. 1Y/3Y/5Y/10Y CAGR, Sharpe, Sortino, max drawdown, peer rank, plus composite_score (0-100 within category) with 4-way breakdown (3Y CAGR / Sharpe 3Y / max DD / rolling consistency).",
     },
     "mf_nav_history": {
@@ -795,7 +798,9 @@ TABLES = {
         "description": "Per-scheme NAV time series. PK (scheme_code, nav_date). Bootstrap fills via mfapi.in; daily incremental via AMFI NAVAll.txt.",
     },
     "mf_rolling_returns": {
-        "kind": "COMPUTED", "domain": "Other", "date_col": "anchor_date",
+        # Rewritten daily by compute_mf_metrics, but its date is the newest monthly ANCHOR (the 1st), so it ages
+        # ~31 days before the next month's anchor lands (on the first run with a NAV dated in that month).
+        "kind": "COMPUTED", "domain": "Other", "date_col": "anchor_date", "stale_days": 38,
         "depth": "Monthly anchors (~60 per scheme), 3Y + 5Y rolling CAGR each",
         "description": "Rolling 3Y and 5Y CAGR sampled on the first business day of each month, plus a flag for whether the rolling window beat category median. Drives the rolling-returns charts + the consistency component of composite_score.",
     },

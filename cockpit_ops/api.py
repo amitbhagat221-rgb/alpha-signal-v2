@@ -411,7 +411,7 @@ STAGE_OF = {
     "compute_corporate_adjustments": "prepare", "compute_fno_pcr": "prepare", "compute_fno_iv": "prepare",
     "segment_tiers": "prepare", "classify_micro_tier": "prepare", "classify_mf_quality": "prepare",
     "classify_news": "prepare", "classify_regulatory": "prepare", "compute_mf_metrics": "prepare",
-    "refresh_pit_panel": "prepare",
+    "refresh_pit_panel": "prepare", "compute_valuation_ranges": "signals",
     "sector_analyst_breadth": "signals", "sector_sentiment_breadth": "signals", "sector_policy": "signals",
     "compute_financial_signal": "signals", "compute_sector_briefs": "signals", "compute_sector_momentum": "signals",
     "compute_sector_forces": "signals",

@@ -63,3 +63,33 @@ def test_page_beyond_the_end_lands_on_last_page(monkeypatch):
     monkeypatch.setattr(mf, "_mf_universe_pool", lambda: pool)
     out = mf.get_mf_universe_overview(sort="name", page=99, page_size=2)
     assert out["page"] == 3 and len(out["rows"]) == 1
+
+
+def test_prune_month_keeps_first_day_and_latest():
+    """Daily recompute (2026-10-20): within today's month only the first computed day and today survive;
+    earlier months are untouched."""
+    import sqlite3
+    c = sqlite3.connect(":memory:")
+    c.execute("CREATE TABLE mf_metrics (scheme_code TEXT, as_of_date TEXT, PRIMARY KEY (scheme_code, as_of_date))")
+    days = ["2026-09-01", "2026-09-28", "2026-10-01", "2026-10-10", "2026-10-19", "2026-10-20"]
+    c.executemany("INSERT INTO mf_metrics VALUES (?, ?)", [(s, d) for d in days for s in ("A", "B")])
+    assert mm.prune_month(c, "mf_metrics", "2026-10-20") == 4
+    left = [r[0] for r in c.execute("SELECT DISTINCT as_of_date FROM mf_metrics ORDER BY 1")]
+    assert left == ["2026-09-01", "2026-09-28", "2026-10-01", "2026-10-20"]
+    assert mm.prune_month(c, "mf_metrics", "2026-10-20") == 0          # idempotent re-run the same day
+    assert mm.prune_month(c, "mf_metrics", "2026-11-02") == 0          # first run of a month deletes nothing
+
+
+def test_mf_metrics_step_is_daily_and_runs_after_nav_and_benchmark():
+    import config
+    import db
+    import graph
+    from tables import TABLES
+    s = {x["name"]: x for x in config.PIPELINE_STEPS}["compute_mf_metrics"]
+    assert s["frequency"] == "daily" and "nse_index_history" in s["reads"] and "mf_nav_history" in s["reads"]
+    order = graph.order(config.PIPELINE_STEPS)
+    for writer in ("fetch_mf_nav_daily", "fetch_nse_indices"):
+        assert order.index(writer) < order.index("compute_mf_metrics"), writer
+    for t in ("mf_metrics", "mf_category_stats", "mf_rolling_returns"):
+        assert db.table_producer(t)["frequency"] == "daily", t
+    assert TABLES["mf_metrics"]["stale_days"] == 3 and TABLES["mf_rolling_returns"]["stale_days"] > 31
