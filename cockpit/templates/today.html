@@ -73,7 +73,10 @@
                 {% if r.drivers %}<span>{{ driver_text(r.drivers) }}</span>{% endif %}
                 {{ target_of(r.target) }}{{ data_pill(r.data) }}
             {% elif kind == 'sell' %}
-                <span>{% if r.now_rank %}Now {{ r.now_rank|rank_text(r.now_of, r.now_tier or r.tier) }}, below the book's hold line{% else %}No longer ranked in {{ r.tier|tier_word }}{% endif %}</span>
+                <span>{% if not r.now_rank %}No longer ranked in {{ r.tier|tier_word }}
+                {%- elif r.reason == 'liquidity' %}Still {{ r.now_rank|rank_text(r.now_of, r.now_tier or r.tier) }}, but trades {% if r.adtv_cr is not none %}₹{{ '%.2f'|format(r.adtv_cr) }} Cr a day, {% endif %}below the book's ₹{{ '%g'|format(r.floor_cr) }} Cr floor
+                {%- elif r.reason == 'screen' %}Still {{ r.now_rank|rank_text(r.now_of, r.now_tier or r.tier) }}, but failed the book's price-history screen
+                {%- else %}Now {{ r.now_rank|rank_text(r.now_of, r.now_tier or r.tier) }}, below the book's hold line (rank {{ t.exit_rank }}){% endif %}</span>
                 {{ target_of(r.target) }}
             {% else %}
                 <span>Weight moved by {{ ((r.weight - r.prev_weight) * 100)|abs|round(1) }} pp of the book</span>

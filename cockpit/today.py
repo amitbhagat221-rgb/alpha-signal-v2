@@ -120,6 +120,18 @@ def rank_movers(cur, prev, top=MOVER_TOP, min_move=MOVER_MIN):
     return out
 
 
+def sell_reason(now_rank, exit_rank, adtv_inr, floor_inr):
+    """Why the book sold a name, from the book's two sell rules (portfolio_construction._build_banded):
+    'rank' = no longer ranked, or ranked below `exit_rank`; 'liquidity' = 20-day median traded value
+    under the ADTV floor (immediate, whatever the rank); 'screen' = still ranked inside the band and
+    liquid, so it failed the other investability test (price history)."""
+    if now_rank is None or now_rank > exit_rank:
+        return "rank"
+    if adtv_inr is not None and adtv_inr < floor_inr:
+        return "liquidity"
+    return "screen"
+
+
 def _target(ac):
     """Median analyst target upside (never the mean: it can sit outside the low-high range)."""
     up = (ac or {}).get("pt_upside_median_pct")
@@ -187,9 +199,14 @@ def build():
             meta.setdefault(s["sid"], {"ticker": s["ticker"], "tier": t, "sector": s.get("sector"), "source": "top pick"})
     avoid = {r["sid"]: r for r in playbooks.avoid_list()["rows"] if r["sid"] in meta}
     floor = config.PORTFOLIO["hrp"]["min_adtv_inr"]
-    traded = _adtv(list(meta), pick_date)
+    traded = _adtv(list(dict.fromkeys(list(meta) + [r["sid"] for r in sell_rows])), pick_date)
+    exit_rank = config.PORTFOLIO["hrp"]["rebalance"]["rank_exit"]
+    for r in sell_rows:     # a name sold while still inside the band went for liquidity, not rank
+        r["reason"] = sell_reason(r["now_rank"], exit_rank, traded.get(r["sid"]), floor)
+        r["adtv_cr"] = traded[r["sid"]] / 1e7 if traded.get(r["sid"]) is not None else None
+        r["floor_cr"] = floor / 1e7
     thin = {sid: {"adtv_cr": v / 1e7, "floor_cr": floor / 1e7, "as_of": pick_date}
-            for sid, v in traded.items() if v < floor}
+            for sid, v in traded.items() if v < floor and sid in meta}
     checks = build_checks(views.forensic_flags(list(meta)), views.results_due(list(meta), RESULTS_DAYS),
                           meta, config.SCREEN["financial_sectors"], avoid=avoid, thin=thin)
     for c in checks:
@@ -213,7 +230,7 @@ def build():
         "buys": buy_rows, "sells": sell_rows, "resizes": resize_rows, "checks": checks,
         "regime": api.get_regime(), "book_split": book_split, "picks": picks, "movers": movers,
         "mover_count": sum(len(v) for v in movers.values()), "prev_pick_date": prev_date,
-        "exit_rank": config.PORTFOLIO["hrp"]["rebalance"]["rank_exit"],
+        "exit_rank": exit_rank,
         "evidence": playbooks.evidence(), "unproven": views.unproven_tiers(),
         "top_n": TOP_N, "tier_sizes": sizes, "sleeve_review": sleeve_review(),
     }
