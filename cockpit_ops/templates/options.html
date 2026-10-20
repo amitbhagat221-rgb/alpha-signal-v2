@@ -18,6 +18,11 @@
   .ob-scroll { overflow-x: auto; }
   .ob-rule td:first-child { color: var(--text-muted); font-family: inherit; width: 140px; }
   .ob-rule td { font-family: inherit; white-space: normal; }
+  .ob-cap { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; }
+  .ob-cap input { width: 150px; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg-input, var(--bg-card)); color: var(--text-primary); font-family: 'JetBrains Mono', monospace; font-size: 14px; }
+  .ob-table td.ob-scaled { font-weight: 700; }
+  tr.ob-trade:hover td { background: var(--bg-hover, rgba(255,255,255,0.02)); }
+  .ob-cap-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 12px; margin-top: 12px; }
 </style>
 
 {% set S = summary %}
@@ -45,6 +50,26 @@
   <div class="ob-tile"><div class="n">{% if S.slip_median_pct is not none %}{{ "%.1f"|format(S.slip_median_pct) }}%{% else %}—{% endif %}</div><div class="l">median slippage, live bid vs settle ({{ S.n_slip }} trade{{ '' if S.n_slip == 1 else 's' }}; bar 1%)</div></div>
 </div>
 
+{% set one_lot_capital = (trades|map(attribute='margin_rs')|max) if trades else 0 %}
+{% if trades %}
+<div class="ob-card" id="ob-capital" data-default="{{ "%.0f"|format(one_lot_capital) }}">
+  <div class="ob-cap">
+    <b>At your capital</b>
+    <label class="ob-muted" for="ob-cap-input">Margin capital (₹)</label>
+    <input id="ob-cap-input" type="number" min="0" step="10000" value="{{ "%.0f"|format(one_lot_capital) }}" inputmode="numeric">
+    <a href="#" id="ob-cap-reset" class="ob-muted" style="color: var(--accent);">reset to one lot</a>
+  </div>
+  <div class="ob-muted" style="margin-top: 6px;">Each trade is re-sized to as many whole lots as this capital's margin covers (default ₹{{ "{:,.0f}".format(one_lot_capital) }} = one lot of the costliest trade, what the paper book uses). P&amp;L scales per lot, costs included; brokerage is per order, so this slightly overstates costs at size. NIFTY and SENSEX positions are both open at the Tuesday close, so running both at full size needs this capital twice for that hour.</div>
+  <div class="ob-cap-tiles">
+    <div class="ob-tile"><div class="n" id="ob-cap-lots">—</div><div class="l">lots per trade (by each trade's margin)</div></div>
+    <div class="ob-tile"><div class="n" id="ob-cap-net">—</div><div class="l">net P&amp;L, settled, after costs</div></div>
+    <div class="ob-tile"><div class="n" id="ob-cap-ret">—</div><div class="l">settled P&amp;L as % of capital</div></div>
+    <div class="ob-tile"><div class="n" id="ob-cap-open">—</div><div class="l">open trades, marked</div></div>
+    <div class="ob-tile"><div class="n ob-bad" id="ob-cap-worst">—</div><div class="l">one backtest-worst trade (−{{ "%.1f"|format(-backtest.NIFTY.worst_pct) }}% of margin) would lose</div></div>
+  </div>
+</div>
+{% endif %}
+
 {% if upcoming %}
 <div class="ob-card">
   <b>Next entry days</b>
@@ -56,9 +81,9 @@
   <b>Trades</b>
   {% if trades %}
   <table class="ob-table">
-    <tr><th>Underlying</th><th>Entry</th><th>Expiry</th><th>Sold</th><th>Credit</th><th>Margin</th><th>Status</th><th>P&amp;L</th></tr>
+    <tr><th>Underlying</th><th>Entry</th><th>Expiry</th><th>Sold</th><th>Credit</th><th>Margin</th><th>Status</th><th>P&amp;L (1 lot)</th><th>At your capital</th></tr>
     {% for t in trades %}
-    <tr>
+    <tr class="ob-trade" data-margin="{{ "%.2f"|format(t.margin_rs) }}" data-status="{{ t.status }}" data-pnl="{% if t.status == 'SETTLED' %}{{ "%.2f"|format(t.net_rs) }}{% elif t.mark %}{{ "%.2f"|format(t.mark.mtm_rs) }}{% endif %}">
       <td>{{ t.underlying }}</td><td>{{ t.entry_date }}</td><td>{{ t.expiry }}</td>
       <td>{{ "%.0f"|format(t.short_call) }} CE {{ t.call_entry }} · {{ "%.0f"|format(t.short_put) }} PE {{ t.put_entry }}</td>
       <td>{{ "%.2f"|format(t.credit_pts) }} × {{ t.lot }} = ₹{{ "{:,.0f}".format(t.credit_pts * t.lot) }}</td>
@@ -70,6 +95,7 @@
       <td class="ob-warn">open</td>
       <td class="ob-wrap">{% if t.mark %}<span class="{% if t.mark.mtm_rs > 0 %}ob-ok{% else %}ob-bad{% endif %}">{{ '+' if t.mark.mtm_rs > 0 else '' }}{{ t.mark.mtm_rs|inr }}</span> <span class="ob-muted">marked {{ t.mark.mark_date }}, index {{ "{:,.0f}".format(t.mark.index) }}</span>{% else %}—{% endif %}</td>
       {% endif %}
+      <td class="ob-wrap ob-scaled">—</td>
     </tr>
     {% endfor %}
   </table>
@@ -86,4 +112,42 @@
     <tr><td>Pass bar</td><td>After {{ pass_bar_trades }} trades: mean &gt; 0, no trade worse than the backtest's worst, median slippage ≤ 1%</td></tr>
   </table>
 </div>
+<script>
+(function () {
+  var box = document.getElementById('ob-capital');
+  if (!box) return;
+  var input = document.getElementById('ob-cap-input'), def = parseFloat(box.dataset.default) || 0, KEY = 'ob-capital';
+  var rows = Array.prototype.slice.call(document.querySelectorAll('tr.ob-trade'));
+  function inr(x) { var s = Math.round(Math.abs(x)).toLocaleString('en-IN'); return (x < 0 ? '−₹' : '₹') + s; }
+  function signed(x) { return (x > 0 ? '+' : '') + inr(x); }
+  function cls(el, x) { el.classList.remove('ob-ok', 'ob-bad'); if (x > 0) el.classList.add('ob-ok'); else if (x < 0) el.classList.add('ob-bad'); }
+  function render() {
+    var cap = parseFloat(input.value); if (!(cap >= 0)) cap = 0;
+    var settled = 0, open = 0, nOpen = 0, lotsSeen = [];
+    rows.forEach(function (r) {
+      var m = parseFloat(r.dataset.margin), lots = m > 0 ? Math.floor(cap / m + 1e-9) : 0, cell = r.querySelector('.ob-scaled');
+      var pnl = r.dataset.pnl === '' ? null : parseFloat(r.dataset.pnl);
+      lotsSeen.push(lots);
+      if (pnl === null) { cell.textContent = lots + (lots === 1 ? ' lot' : ' lots'); return; }
+      var v = pnl * lots;
+      cell.textContent = lots + (lots === 1 ? ' lot · ' : ' lots · ') + signed(v);
+      cls(cell, v);
+      if (r.dataset.status === 'SETTLED') settled += v; else { open += v; nOpen++; }
+    });
+    var lo = Math.min.apply(null, lotsSeen), hi = Math.max.apply(null, lotsSeen);
+    document.getElementById('ob-cap-lots').textContent = lo === hi ? String(lo) : lo + '–' + hi;
+    var n = document.getElementById('ob-cap-net'); n.textContent = signed(settled); cls(n, settled);
+    var ret = document.getElementById('ob-cap-ret'); ret.textContent = cap > 0 ? ((settled >= 0 ? '+' : '') + (100 * settled / cap).toFixed(2) + '%') : '—'; cls(ret, settled);
+    var o = document.getElementById('ob-cap-open'); o.textContent = nOpen ? signed(open) : '—'; cls(o, open);
+    document.getElementById('ob-cap-worst').textContent = inr(-cap * {{ "%.4f"|format(-backtest.NIFTY.worst_pct / 100) }});
+    try { if (cap === def) localStorage.removeItem(KEY); else localStorage.setItem(KEY, String(cap)); } catch (e) {}
+  }
+  var q = new URLSearchParams(location.search).get('capital'), saved = null;
+  try { saved = localStorage.getItem(KEY); } catch (e) {}
+  if (q && parseFloat(q) >= 0) input.value = parseFloat(q); else if (saved && parseFloat(saved) >= 0) input.value = parseFloat(saved);
+  input.addEventListener('input', render);
+  document.getElementById('ob-cap-reset').addEventListener('click', function (e) { e.preventDefault(); input.value = def; render(); });
+  render();
+})();
+</script>
 {% endblock %}
