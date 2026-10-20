@@ -26,7 +26,7 @@ from formatting import macro_label
 
 # Cache decorators + JSON coercion live in cockpit/_shared.py so cockpit_ops
 # can import them without pulling in this 3,000-LOC module.
-from cockpit._shared import _ttl_cache, _persisted_cache, safe_json_records
+from cockpit._shared import _ttl_cache, _persisted_cache, safe_json_records, decimate
 
 
 # ═══════════════════════════════════════════════════
@@ -846,7 +846,8 @@ def get_price_series_extended(sid, days=365):
             df[col] = views.adjusted_closes(df[["date", col]].rename(columns={col: "close"}), adj)["close"].values
         df = df.astype(object).where(df.notna(), None)
         series = df.to_dict("records")
-    return series
+    # the page asks for at most 1,096 days (about 750 points: all kept); a longer request is cut to ~800
+    return decimate(series, lambda r: r["close"] or 0)
 
 
 def get_factor_labels():

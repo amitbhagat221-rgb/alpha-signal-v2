@@ -810,9 +810,10 @@ def _table_date_range(conn, tbl):
         candidates = DATE_COLS
     for col in candidates:
         try:
-            sql_min, sql_max = conn.execute(
-                f"SELECT MIN([{col}]), MAX([{col}]) FROM [{tbl}] WHERE [{col}] IS NOT NULL"
-            ).fetchone()
+            # Two statements, not one: SQLite answers a lone MIN() or MAX() with one index seek, but
+            # `SELECT MIN(x), MAX(x)` reads the whole table (13.6M rows of fno_bhav: 1.8 s). Both ignore NULLs.
+            sql_min = conn.execute(f"SELECT MIN([{col}]) FROM [{tbl}]").fetchone()[0]
+            sql_max = conn.execute(f"SELECT MAX([{col}]) FROM [{tbl}]").fetchone()[0]
         except Exception:
             continue
 
@@ -1165,7 +1166,9 @@ def table_step_meta():
 
 # A table whose row / sid-coverage count takes more than _SLOW_SCAN_S seconds (feature_values
 # 48M rows, fno_bhav, bse_announcements, derivative_bars: ~140 of the ~158 s a full scan took)
-# is recounted at most every _SLOW_SCAN_TTL seconds by the cockpit callers (cache_ttl > 0).
+# is recounted at most every _SLOW_SCAN_TTL seconds by the cockpit callers (cache_ttl > 0). A table
+# flagged `big` in tables.TABLES is always in this class, so a count that was quick at 300k rows is not
+# redone every pass at 3M.
 # Its date range — what freshness is judged on — is still read on every scan, so a health
 # verdict is never stale. The watchdog (cache_ttl=0) always recounts everything.
 _SLOW_SCAN_S = 2.0
@@ -1245,7 +1248,7 @@ def _data_health_impl(slow_ttl=0):
                     f"SELECT COUNT(DISTINCT sid) FROM [{tbl}]"
                 ).fetchone()[0] or 0
             scanned[tbl] = (count, earliest, latest, date_span, stock_count)
-            if _time_module.time() - t_scan > _SLOW_SCAN_S:
+            if _time_module.time() - t_scan > _SLOW_SCAN_S or TABLES.get(tbl, {}).get("big"):   # a big table is remembered however fast today's count was: it only grows
                 _slow_scans[tbl] = (_time_module.time(), (count, stock_count))
                 new_slow = True
 

@@ -69,6 +69,26 @@ Header (always visible): ticker, price, date, cap tier + action + conviction bad
 
 Tooltip system: 20px button (not 10px icon), Alpine popover (hover + click), 280px card. Every metric and signal has one.
 
+## Scaling (2026-10-14)
+
+A page's cost depends on what it shows (N rows, a date window, one stock), not on how much history or how many
+stocks the DB holds. `stock_prices` reaching 5M rows made Markets read every close to use the last 127 (20 s).
+
+- Patterns: a latest row per stock is one primary-key seek (`views.latest_rows`, `views.latest_close`, `views.latest_per_sid`); a
+  window is a date bound the table's index can serve; an aggregate is computed in SQL; a chart API returns at most
+  ~800 points (`cockpit._shared.decimate`: the newest year every point, older years keep every peak and trough).
+- Guard: `tests/test_cockpit_scaling.py` renders every route, partial, API and prewarm function of both apps against the
+  live DB (read-only, cold cache, SQL captured with `EXPLAIN QUERY PLAN` and a VM-step count) and fails on a full
+  scan of a table flagged `big: True` in `tables.TABLES`, on a read of 15M VM steps from one, or on 100k+ rows pulled
+  out of one. Exceptions are the `ALLOW` list in that file, each with its reason. It also fails when a table passes
+  200k rows without the flag. `capture_all()` returns every statement with plan, rows and ms: the audit table.
+- Heavy monitoring (the Data tab's health scores, ~4.5 min) re-warms every 6 h, not every 10 min: `prewarm` takes
+  `(name, fn, every_s)`.
+- Proposed indexes (in `schema.sql`, named `ix_scale_*`, NOT built on the live DB): `bse_announcements(dt_tm)`,
+  `bse_announcements(fetched_at)`, `mf_nav_history(fetched_at)`. Build by hand, one at a time, with no other long writer.
+  They sit above schema.sql's "Data model v3" marker: `datamodel.sync` (morning run) re-runs everything below it on
+  the live DB, so a statement placed there would be built unasked. No code needs them: the guard passes without them.
+
 ## Files
 
 | File | Purpose |

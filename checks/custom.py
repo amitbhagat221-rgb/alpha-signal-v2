@@ -31,8 +31,8 @@ from validators.plausibility import pt_implausible_sql, pt_outside_range_sql
 # Every stored analyst target next to the latest close; {bad} is the rule being counted.
 _TARGETS_SQL = """
     WITH latest_px AS (
-        SELECT sid, close FROM stock_prices
-        WHERE (sid, date) IN (SELECT sid, MAX(date) FROM stock_prices GROUP BY sid)
+        SELECT a.sid AS sid, (SELECT close FROM stock_prices WHERE sid = a.sid ORDER BY date DESC LIMIT 1) AS close
+        FROM (SELECT DISTINCT sid FROM analyst_consensus) a
     ),
     judged AS (
         SELECT ac.sid, ac.price_target AS pt, lp.close, COALESCE({bad}, 0) AS bad
@@ -139,9 +139,12 @@ CHECKS = [
                "(or teach tools/compute_corporate_adjustments.py the wording it missed) and rerun that step.",
         "severity": WARN,
         "sql": """
-            WITH recent AS (
-                SELECT sid, date, close, LAG(close) OVER (PARTITION BY sid ORDER BY date) AS prev
-                FROM stock_prices WHERE date >= (SELECT date(MAX(date), '-12 day') FROM stock_prices) AND close > 0
+            WITH window_px AS MATERIALIZED (     -- the 12 days first (date index); LAG over the table walked all 5M rows
+                SELECT sid, date, close FROM stock_prices
+                WHERE date >= (SELECT date(MAX(date), '-12 day') FROM stock_prices) AND close > 0
+            ),
+            recent AS (
+                SELECT sid, date, close, LAG(close) OVER (PARTITION BY sid ORDER BY date) AS prev FROM window_px
             ),
             judged AS (
                 SELECT r.sid, r.date, r.close / r.prev AS move,
