@@ -18,7 +18,10 @@ Pass 1 computes per-scheme raw metrics + rolling returns. Pass 2 computes
 category medians + percentile ranks + composite score (needs all-schemes-
 in-category to be done before ranking).
 
-Monthly cron via PIPELINE_STEPS step `compute_mf_metrics`.
+Daily via PIPELINE_STEPS step `compute_mf_metrics` (after the NAV and NIFTY 50 fetches; was monthly
+until 2026-10-20). A full recompute takes ~3 min, so every run recomputes every scheme. History:
+mf_metrics and mf_category_stats keep the first computed day of each month plus the latest day
+(prune_month), so a daily run replaces yesterday's row set instead of adding one per day.
 
 Usage:
     python -m signals.mf_metrics                 # full recompute
@@ -692,7 +695,26 @@ def compute(dry_run: bool = False, scheme: str | None = None) -> int:
         n_cat = upsert_df(write_cat, "mf_category_stats")
         print(f"Wrote {n_cat} rows to mf_category_stats")
 
+    if not scheme:      # a single-scheme smoke test writes one fund: it must never prune the full sets
+        with get_db() as _c:
+            for t in ("mf_metrics", "mf_category_stats"):
+                n_p = prune_month(_c, t, as_of_date)
+                if n_p:
+                    print(f"Pruned {n_p} rows of earlier days this month from {t}")
+            _c.commit()
+
     return n_m
+
+
+def prune_month(conn, table, as_of_date):
+    """Delete `table`'s rows dated after the first computed day of as_of_date's month and before as_of_date:
+    the month keeps its first day (what the monthly run used to leave) and the latest. Returns rows deleted.
+    The v3 mirror drops the same cells on its next sync (datamodel.sync._drop_gone_fund_metrics)."""
+    month = as_of_date[:7]
+    return conn.execute(
+        f"DELETE FROM {table} WHERE substr(as_of_date, 1, 7) = ? AND as_of_date < ? AND as_of_date > "
+        f"(SELECT MIN(as_of_date) FROM {table} WHERE substr(as_of_date, 1, 7) = ?)",
+        (month, as_of_date, month)).rowcount
 
 
 if __name__ == "__main__":

@@ -238,3 +238,4 @@ Source: [research 0008 findings](../research/0008-multibagger-critique-findings.
   - The rule: 3-year ROCE ≥ 15 %, D/E ≤ 0.5, a profit, ≤ 60 % of the 3-year high, P/B at or below its own 3-year median.
   - Results: 3x lift 1.00; halving 0.44× the pond's; the 30-name book −10.3 %/yr against the equal-weight pond in all 12 starts.
   - No lens is added and the thesis is unchanged.
+- 2026-10-20, valuation fields refresh daily (Amit: "fix stale valuation"): pipeline step `compute_valuation_ranges` (after the email; `output.valuation.compute`) rebuilds every field on the latest close for the candidate / held names plus the newest thesis top 100, ~11 s for 102 names. It froze at 15 Oct with no producer. `valuation_ranges` stale_days 4.
