@@ -352,6 +352,20 @@ For each source: **what it gives**, **endpoint**, **PIT/live access**, **histori
 | **Module** | `sources/bse_shp.py` · canary `bse_shp_xbrl` · weekly in `run.sh transcripts` (`--due --budget-min 180`). |
 | **Not built** | Retail (≤₹2L) holder counts from the same file; NSE route for the 249 NSE-only stocks. |
 
+---
+
+### Hugging Face index-option minute bars — NIFTY / SENSEX (one-off, 2026-10-21)
+
+| Field | Value |
+|---|---|
+| **What** | 1-minute OHLC of every listed strike of each NIFTY and SENSEX expiry for the ~6–9 sessions before it (monthlies longer), plus 1-minute index spot. The only intraday option history we have (Kite has none for expired contracts). |
+| **Source** | `huggingface.co/datasets/thetrademarkk/india-index-options-1m` (mirror `codepyx23/india-index-options-1m`): `options/{SYM}/{EXPIRY}.parquet`, `index/{SYM}.parquet`. **Licence CC BY-NC 4.0: research use only — never commercial, never redistributed.** |
+| **Archive** | `config.INTRADAY_DIR/options_1m/{SYM}/{EXPIRY}.parquet` — `ts` (IST), `trading_day`, `symbol`, `expiry`, `strike`, `option_type`, `open/high/low/close` (₹ as traded), `volume_contracts`; `options_1m/index/{SYM}.parquet` — `ts`, `trading_day`, `symbol`, OHLC. Manifest: `intraday_files` dataset `options_1m`, kind `expiry` (key `SYM/EXPIRY`) or `index`; the note holds the source sha256, the fno_bhav check and the cleaning counts. Read: `sources.hf_options_1m.load("NIFTY", "2025-07-03")`. |
+| **Coverage** | Loaded 2026-10-21: NIFTY 267 expiries 2021-05-27 → 2026-08-04, SENSEX 148 expiries 2023-08-11 → 2026-07-30 (~111 M bars, ~900 MB); index spot NIFTY 2021-05-24 → 2026-07-02 and SENSEX. Weekly expiries in fno_bhav with no source file: NIFTY 6, SENSEX 10 (`--status` lists them). Two source files are near-empty stubs (`status=stub`). |
+| **Quirks** | (1) Some files (all of 2021–2023, some later) hold every row twice → exact duplicates dropped. (2) 2025+ files add zero-volume LTP snapshots stamped after 15:30 → dropped. A few traded bars stamped 09:14 or 15:31–15:41 → dropped and counted (`stray_rows`); more than 1 % of a file = a stamping bug, the file is rejected. (3) Diwali muhurat evenings (2021-11-04, 2022-10-24, 2023-11-12, 2024-11-01: a day whose first bar is ≥ 17:00) keep their 17:00–20:00 bars. (4) All-zero placeholder bars (the 2024-05-18 Saturday session) → dropped. (5) `volume` is in units → ÷ lot (`option_book.lot_size`, overridden per day when fno_bhav's contract count says another known lot); ~0.5 % of pre-2025 bars are not a lot multiple (one unit over), so `volume_contracts` is a float. (6) `open_interest` is broken from 2025 (65 % zeros, rest ~1 % of true) → not kept; OI comes from `fno_bhav`. (7) The index has a 09:07 pre-open bar (kept) and zero volume (dropped). Option coverage is partial: far strikes are sparse or absent. |
+| **Check** | NSE's option close is the 15:00–15:30 VWAP: per file, the volume-weighted typical price of the 15:00–15:29 bars vs `fno_bhav.close` on every file day fno_bhav has (SENSEX expiry days excluded — those fno_bhav rows are broken). Match = within max(2 %, ₹0.10); under 90 % = `status=suspect` (kept, logged to run_events). Daily volume vs fno_bhav contracts is in `vol_ratio` (1.000 = lot right). SENSEX before 2024-01 is `unvalidated` (fno_bhav's SENSEX history starts 2024-01-05). |
+| **Module** | `sources/hf_options_1m.py` (`--smoke`, `--backfill`, `--status`); feed `hf_index_options_1m`, host `huggingface`. Each download is staged, size + sha256 checked against the listing's LFS hash and read with pyarrow only after its schema passes. Re-runs skip files whose source hash is unchanged. |
+
 ## Cross-Cutting Principles
 
 ### Filing-lag rules (PIT discipline)
