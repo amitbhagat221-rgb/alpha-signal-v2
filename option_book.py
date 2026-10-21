@@ -54,7 +54,24 @@ LOT_SIZES = {
 }
 
 
-def lot_size(underlying, d):
+# A contract keeps the lot it was LISTED with, so near a revision the table above (by trade date) is
+# wrong for contracts listed earlier. These are the expiries whose lot differs from LOT_SIZES at the
+# entry day, read off the 1-minute ingest (note `lot=`, checked against fno_bhav contract counts,
+# 2026-10-21): old-lot contracts still trading after a revision. Add a row when a revision lands.
+CONTRACT_LOTS = {
+    ("NIFTY", "2021-07-01"): 75, ("NIFTY", "2021-07-08"): 75, ("NIFTY", "2021-07-15"): 75,
+    ("NIFTY", "2021-07-22"): 75,        # 75 → 50 revision; these weeklies were listed at 75
+    ("NIFTY", "2024-12-26"): 25,        # 25 → 75 revision; listed at 25 (traded at 25 until expiry)
+    ("NIFTY", "2025-01-30"): 25,        # monthly listed long before the revision
+    ("NIFTY", "2025-12-30"): 75,        # 75 → 65 revision; listed at 75
+    ("SENSEX", "2025-01-28"): 10,       # 10 → 20 revision; monthly listed at 10
+}
+
+
+def lot_size(underlying, d, expiry=None):
+    """Units per lot for a trade on date `d`. Pass `expiry` (ISO) to get the contract's own lot."""
+    if expiry is not None and (underlying, expiry) in CONTRACT_LOTS:
+        return CONTRACT_LOTS[(underlying, expiry)]
     sizes = LOT_SIZES[underlying]
     lot = sizes[0][1]
     for since, n in sizes:
@@ -172,7 +189,7 @@ def open_trade(underlying, t, expiry):
     F, deltas = d
     k = nearest(deltas, RULE["delta"])
     px = {(("C" if o == "CE" else "P"), s): v for o, s, v in zip(sl.option_type, sl.strike, sl.settle)}
-    lot = lot_size(underlying, t)
+    lot = lot_size(underlying, t, expiry)
     call, put = px[("C", k["C"])], px[("P", k["P"])]
     row = {"rule_id": RULE["id"], "underlying": underlying, "expiry": expiry, "entry_date": t,
            "forward": F, "lot": lot, "short_call": k["C"], "short_put": k["P"],
