@@ -40,3 +40,11 @@ A variant **replaces** the naked rule in the paper book only if, against the bas
 3. its mean per trade stays > 0 in each of 2021–23 and 2024–26.
 
 If several pass, the one with the higher annual P&L wins; ties go to the simpler variant. If none passes, the paper rule stays naked and the sizing is set by worst case (B). The winner is then run once through the 2015–2026 stress model (`tools/option_premium_backtest`), and its worst stress trade is reported before any real-money decision.
+
+## Addendum, 2026-10-21 (before any result was seen): which stop level?
+Amit: "figure out for the strangle what should have been the stop loss that protects us against the worst case but keeps the profit as well". This is a parameter search, so it is **exploratory** and reported separately; it does not change the decision rule above.
+
+- **Grid (naked strangle, per leg, gap-through fills as above):** premium stop k × entry price, k ∈ {1.5, 2, 2.5, 3, 4, 5, 7, 10}; index stop at d % from a short strike, d ∈ {0, 0.25, 0.5, 1.0} (0 = strike touched); one combination per family is enough: the best premium stop with the best index stop, whichever triggers first.
+- **Selection, walk-forward:** choose on NIFTY 2021-05 → 2023-12 only, then report the chosen stop untouched on 2024-01 → 2026-08 (NIFTY) and on all SENSEX (never used to choose). Selection criterion, fixed now: the stop with the **highest annual P&L at the ₹3.5 L worst-case budget (sizing B)**, which rewards cutting the tail (more lots fit the budget) and penalises whipsaw (lost wins); ties go to the wider stop.
+- **Reported for every grid point, both halves:** annual P&L (sizing A and B), worst trade, max drawdown, trigger rate, whipsaw rate (stopped trades that would have expired worthless), and the P&L given up versus no stop. The frontier (worst trade vs annual P&L) is shown as a chart.
+- **Verdict:** the chosen stop is recommended only if, on the unseen 2024–26 half, its worst trade is at most half the no-stop worst and it keeps at least 70 % of the no-stop annual P&L at equal worst-case budget, the same bar as the main rule. Otherwise the answer is "no stop level does both on unseen data", stated plainly.
