@@ -9,7 +9,10 @@ Same rows as sources.fno_pull writes for NSE, for SENSEX's weekly expiry (BSE's
 side of SEBI's one-weekly-expiry-per-exchange rule):
   • index options + futures only (IDO / IDF), contracts with OI or volume
   • volume in LOTS and OI in units, as in fno_bhav (BSE's TtlTradgVol is units: ÷ NewBrdLotQty)
-  • on expiry day an option's SttlmPric is the index settlement, as on NSE
+  • on expiry day an expiring contract's SttlmPric is the index settlement, as on NSE
+  • on expiry day BSE also puts the index settlement in ClsPric (NSE keeps the traded
+    close there): `close` comes from LastPric then, NULL when nothing traded. Before
+    this fix 43,361 expiry-day rows stored the index as the option's close (2026-10-21).
 
 A missing day comes back as HTTP 200 with an HTML page, so a body must start with
 `TradDt` to count as a file.
@@ -32,6 +35,14 @@ SYMBOLS = ("SENSEX", "BANKEX")
 FIRST_FILE = "2024-01-05"
 
 
+def expiry_close(cls, last, und, expiring):
+    """The traded close of each row. On expiry day BSE writes the index settlement into
+    ClsPric for the expiring contracts (a 69000 CE "closing" at 72026.15); their real
+    last trade is LastPric. NULL, never the index, when nothing traded."""
+    settled = expiring & ((cls - und).abs() < 0.005)
+    return cls.mask(settled, last.where(last > 0))
+
+
 def parse(content):
     """One BSE UDiFF CSV → fno_bhav rows for SYMBOLS (empty frame when nothing to keep)."""
     df = pd.read_csv(io.BytesIO(content))
@@ -43,17 +54,22 @@ def parse(content):
     if df.empty:
         return pd.DataFrame()
     lot = pd.to_numeric(df["NewBrdLotQty"], errors="coerce")
+    expiry = pd.to_datetime(df["XpryDt"]).dt.date.astype(str)
+    trade = pd.to_datetime(df["TradDt"]).dt.date.astype(str)
+    und = pd.to_numeric(df["UndrlygPric"], errors="coerce")
+    close = expiry_close(pd.to_numeric(df["ClsPric"], errors="coerce"),
+                         pd.to_numeric(df["LastPric"], errors="coerce"), und, expiry == trade)
     return pd.DataFrame({
         "sid": None,
         "symbol": df["TckrSymb"].astype(str).str.strip(),
         "instrument_type": df["FinInstrmTp"],
-        "expiry_date": pd.to_datetime(df["XpryDt"]).dt.date.astype(str),
+        "expiry_date": expiry,
         "strike": pd.to_numeric(df["StrkPric"], errors="coerce").fillna(0.0),
         "option_type": df["OptnTp"].astype(str).str.strip().replace({"": "XX", "nan": "XX"}),
-        "trade_date": pd.to_datetime(df["TradDt"]).dt.date.astype(str),
-        "close": pd.to_numeric(df["ClsPric"], errors="coerce"),
+        "trade_date": trade,
+        "close": close,
         "settle": pd.to_numeric(df["SttlmPric"], errors="coerce"),
-        "underlying_price": pd.to_numeric(df["UndrlygPric"], errors="coerce"),
+        "underlying_price": und,
         "oi": oi[df.index].astype("int64"),
         "chg_oi": pd.to_numeric(df["ChngInOpnIntrst"], errors="coerce").fillna(0).astype("int64"),
         "volume": (units[df.index] // lot).astype("int64"),
@@ -102,12 +118,50 @@ def backfill(start, end, budget_min=None):
     return total
 
 
+def write_expiry_close(df):
+    """Targeted UPDATE of `close` (fno_bhav + its derivative_bars mirror) for the expiring
+    contracts of one parsed file — the repair of the pre-2026-10-21 rows. Returns rows updated."""
+    from db import get_db
+    e = df[df["trade_date"] == df["expiry_date"]]
+    keys = [(None if pd.isna(c) else float(c), r.symbol, r.instrument_type, r.expiry_date, float(r.strike),
+             r.option_type, r.trade_date) for r, c in zip(e.itertuples(), e["close"])]
+    with get_db() as conn:
+        n = conn.executemany("UPDATE fno_bhav SET close = ? WHERE symbol = ? AND instrument_type = ? AND expiry_date = ? "
+                             "AND strike = ? AND option_type = ? AND trade_date = ?", keys).rowcount
+        conn.executemany("UPDATE derivative_bars SET close = ? WHERE symbol = ? AND instrument = ? AND expiry = ? "
+                         "AND strike = ? AND option_type = ? AND date = ?", keys)
+    return n
+
+
+def repair_close(days):
+    """Re-read the BSE file of each expiry day and rewrite its expiring rows' close. One door call per day."""
+    total = 0
+    for d in days:
+        resp = _http.polite_get(URL.format(ymd=d.replace("-", "")), timeout=40)
+        if resp is None or not resp.content.startswith(b"TradDt"):
+            print(f"  {d}: no file")
+            continue
+        total += write_expiry_close(parse(resp.content))
+    print(f"BSE F&O close repair: {total} rows over {len(days)} days")
+    if days and total == 0:
+        raise RuntimeError(f"BSE F&O close repair: 0 rows over {len(days)} days — URL moved or blocked?")
+    return total
+
+
 def main():
     ap = argparse.ArgumentParser(description="BSE index derivatives bhavcopy → fno_bhav")
     ap.add_argument("--start", default=FIRST_FILE)
     ap.add_argument("--end", default=(date.today() - timedelta(days=1)).isoformat())
     ap.add_argument("--budget-min", type=float)
+    ap.add_argument("--repair-close", action="store_true",
+                    help="re-read the expiry days in [start, end] whose close is NULL and restore it from LastPric")
     a = ap.parse_args()
+    if a.repair_close:
+        days = list(read_sql("SELECT DISTINCT trade_date FROM fno_bhav WHERE symbol IN ('SENSEX', 'BANKEX') "
+                             "AND trade_date = expiry_date AND close IS NULL AND trade_date BETWEEN ? AND ? ORDER BY 1",
+                             params=[a.start, a.end])["trade_date"])
+        repair_close(days)
+        return
     backfill(a.start, a.end, a.budget_min)
 
 

@@ -45,6 +45,10 @@ _TARGETS_SQL = """
     FROM judged
 """
 
+# An index option within a week of expiry may sit at most this share of the index above its
+# intrinsic value (OPTION_PRICE_IMPOSSIBLE).
+OPTION_TIME_VALUE_MAX = 0.30
+
 CHECKS = [
     # ═══════════════════════════════════════════════════════════════════
     # The models: today's ranking
@@ -155,6 +159,46 @@ CHECKS = [
             )
             SELECT COALESCE(SUM(bad), 0) AS n_bad, COUNT(DISTINCT sid) AS n_total,
                    (SELECT sid || ' on ' || date || ': ×' || ROUND(move, 2) FROM judged WHERE bad LIMIT 1) AS sample
+            FROM judged
+        """,
+    },
+
+    {
+        "code": "OPTION_PRICE_IMPOSSIBLE",
+        "table": "fno_bhav",
+        "column": "close",
+        "theme": "correct",
+        "message": "Index option prices that cannot be real: in the last week before expiry, more than "
+                   f"{OPTION_TIME_VALUE_MAX:.0%} of the index above the option's value at expiry",
+        "why": "A week from expiry an index option is worth its intrinsic value plus a little time value (a few % of "
+               "the index in a crash). A price far above that is the index level or a shifted column: BSE's expiry-day "
+               "file puts the index settlement in the close column, and 43,361 SENSEX/BANKEX rows stored a 69000 call "
+               "'closing' at 72026 (fixed 2026-10-21). The options paper book, the IV surface and the premium backtest "
+               "read these prices.",
+        "fix": "Look at the sample row's raw file; fix the producer (sources/bse_fo.py for SENSEX/BANKEX, "
+               "sources/fno_pull.py for NSE) and rewrite the rows with targeted UPDATEs.",
+        "severity": WARN,
+        # Last 14 days of the chain (date index). Settle on expiry day is the index settlement by
+        # convention (NSE and BSE), so settle is judged only before expiry. Bound 30%: NSE's history
+        # tops out at 22% (stale closes of untraded strikes), the BSE bug sat at ~100%.
+        "sql": f"""
+            WITH chain AS (
+                SELECT symbol, trade_date, expiry_date, strike, option_type, close, settle, underlying_price AS s,
+                       MAX(CASE WHEN option_type = 'CE' THEN underlying_price - strike
+                                ELSE strike - underlying_price END, 0) AS intrinsic
+                FROM fno_bhav
+                WHERE trade_date >= (SELECT date(MAX(trade_date), '-14 day') FROM fno_bhav)
+                  AND instrument_type = 'IDO' AND underlying_price > 0 AND trade_date >= date(expiry_date, '-7 day')
+            ),
+            judged AS (
+                SELECT *, (close - intrinsic > {OPTION_TIME_VALUE_MAX} * s
+                           OR (trade_date < expiry_date AND settle - intrinsic > {OPTION_TIME_VALUE_MAX} * s)) AS bad
+                FROM chain
+            )
+            SELECT COALESCE(SUM(bad), 0) AS n_bad, COUNT(*) AS n_total,
+                   (SELECT symbol || ' ' || strike || ' ' || option_type || ' expiring ' || expiry_date || ' on '
+                           || trade_date || ': close ' || close || ', settle ' || settle || ', index ' || s
+                    FROM judged WHERE bad LIMIT 1) AS sample
             FROM judged
         """,
     },

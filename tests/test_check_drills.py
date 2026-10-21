@@ -216,6 +216,27 @@ def _a_split_nobody_recorded(conn):
     assert (v["status"], v["n_bad"], v["n_total"]) == (FAIL, 1, 3) and "SPLIT" in v["sample"]
 
 
+@drill("OPTION_PRICE_IMPOSSIBLE")
+def _expiry_day_close_is_the_index(conn):
+    """BSE's expiry-day layout (2026-10-21): ClsPric of every expiring option = the index settlement."""
+    S = 74315.61
+    rows = [  # (strike, type, close, settle, trade_date, expiry)
+        (74300, "CE", 15.50, S, "2026-10-15", "2026-10-15"),       # fixed parser: the last trade, settle = index (legal)
+        (74400, "PE", S, S, "2026-10-15", "2026-10-15"),           # the bug: the index as the option's close
+        (69000, "CE", S, S, "2026-10-15", "2026-10-15"),           # the bug, deep in the money
+        (74000, "CE", 400.0, 380.0, "2026-10-13", "2026-10-15"),   # two days out, sane
+        (76000, "PE", 1700.0, 30000.0, "2026-10-13", "2026-10-15"),  # a shifted settle before expiry
+        (60000, "CE", 50000.0, 50000.0, "2025-01-02", "2025-01-02"),  # outside the 14-day window: not judged
+        (90000, "CE", None, S, "2026-10-15", "2026-10-15"),        # nothing traded: NULL close passes
+    ]
+    conn.executemany("INSERT INTO fno_bhav (symbol, instrument_type, strike, option_type, close, settle, trade_date, "
+                     "expiry_date, underlying_price) VALUES ('SENSEX', 'IDO', ?, ?, ?, ?, ?, ?, ?)",
+                     [r + (S,) for r in rows])
+    v = _fires("OPTION_PRICE_IMPOSSIBLE", conn)
+    assert (v["status"], v["n_bad"], v["n_total"], v["severity"]) == (FAIL, 3, 6, WARN)
+    assert "SENSEX" in v["sample"]
+
+
 @drill("ANALYST_TARGET_IMPLAUSIBLE")
 def _implausible_targets(conn):
     _targets(conn, {"HUGE": 900.0, "TINY": 10.0, "SANE": 120.0, "ON_PRICE": 100.0})

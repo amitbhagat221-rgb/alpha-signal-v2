@@ -1,7 +1,10 @@
 """Legacy F&O archive parser (sources.fno_pull.parse_legacy_fo) — offline, synthetic file."""
 
 import io
+import sqlite3
 import zipfile
+
+import pandas as pd
 
 from sources.fno_pull import parse_legacy_fo
 
@@ -63,3 +66,54 @@ def test_bse_udiff_volume_in_lots_oi_in_units():
     r = df.iloc[0]
     assert (r.symbol, r.instrument_type, r.option_type, r.strike) == ("SENSEX", "IDO", "PE", 72000.0)
     assert (r.volume, r.oi, r.underlying_price, r.expiry_date) == (30, 4000, 71593.24, "2026-10-15")
+
+
+# Expiry day, rows verbatim from BSE's 2026-10-15 file: ClsPric of every expiring contract
+# is the index settlement (74315.61); LastPric is the real last trade (bug fixed 2026-10-21).
+BSE_EXPIRY_HEADER = BSE_HEADER.rstrip("\n") + ",Rmks,Rsvd1,Rsvd2,Rsvd3,Rsvd4\n"
+BSE_EXPIRY_ROWS = [
+    "2026-10-15,2026-10-15,FO,BSE,IDO,1116190,,SENSEX,,2026-10-15,2026-10-15,74300.00,CE,SENSEX26O1574300CE,6.55,138.00,1.80,74315.61,15.50,8.50,74315.61,74315.61,4273680,3558040,514351260,38243046817410.00,4257929,F1,20,,,,,",
+    "2026-10-15,2026-10-15,FO,BSE,IDO,1107722,,SENSEX,,2026-10-15,2026-10-15,74400.00,PE,SENSEX26O1574400PE,1244.25,1412.80,83.70,74315.61,84.45,1683.25,74315.61,74315.61,761540,758840,35058320,2617347539531.00,619237,F1,20,,,,,",
+    "2026-10-15,2026-10-15,FO,BSE,IDO,1115854,,SENSEX,,2026-10-15,2026-10-15,76700.00,PE,SENSEX26O1576700PE,0.00,0.00,0.00,74315.61,0.00,4041.10,74315.61,74315.61,160,0,0,0.00,0,F1,20,,,,,",
+    "2026-10-15,2026-10-15,FO,BSE,IDO,863889,,SENSEX,,2026-10-29,2026-10-29,74100.00,CE,SENSEX26OCT74100CE,334.30,949.05,334.30,736.70,776.15,334.90,74315.61,736.70,1600,1080,5340,399843415.00,233,F1,20,,,,,",
+]
+
+
+def _bse_expiry_day():
+    from sources.bse_fo import parse
+    df = parse((BSE_EXPIRY_HEADER + "\n".join(BSE_EXPIRY_ROWS) + "\n").encode())
+    return df, df.set_index(["expiry_date", "strike", "option_type"])
+
+
+def test_bse_expiry_day_close_is_the_last_trade_not_the_index():
+    df, by = _bse_expiry_day()
+    assert by.loc[("2026-10-15", 74300.0, "CE"), "close"] == 15.50
+    assert by.loc[("2026-10-15", 74400.0, "PE"), "close"] == 84.45
+    assert pd.isna(by.loc[("2026-10-15", 76700.0, "PE"), "close"])        # nothing traded: NULL, never the index
+    assert by.loc[("2026-10-29", 74100.0, "CE"), "close"] == 736.70        # a contract not expiring keeps ClsPric
+    # settle keeps the NSE expiry-day convention (index settlement), the other columns are untouched
+    assert by.loc[("2026-10-15", 74300.0, "CE"), "settle"] == 74315.61
+    assert (df.underlying_price == 74315.61).all()
+    assert (df.close.dropna() < 0.5 * df.underlying_price[df.close.notna()]).all()
+
+
+def test_bse_expiry_close_repair_updates_only_close(tmp_path, monkeypatch):
+    import db
+    from sources.bse_fo import write_expiry_close
+    path = tmp_path / "t.db"
+    c = sqlite3.connect(path)
+    c.executescript(db.SCHEMA_PATH.read_text())
+    df, _ = _bse_expiry_day()
+    bad = df.assign(close=df.underlying_price.where(df.trade_date == df.expiry_date, df.close))
+    cols = ["symbol", "instrument_type", "expiry_date", "strike", "option_type", "trade_date", "close", "settle",
+            "underlying_price", "oi", "volume"]
+    c.executemany(f"INSERT INTO fno_bhav ({','.join(cols)}) VALUES ({','.join('?' * len(cols))})",
+                  bad[cols].astype(object).where(bad[cols].notna(), None).values.tolist())
+    c.commit()
+    monkeypatch.setattr(db, "DB_PATH", path)
+    assert write_expiry_close(df) == 3                                     # the three expiring rows
+    got = dict(((e, k, o), (cl, s, u, oi)) for e, k, o, cl, s, u, oi in c.execute(
+        "SELECT expiry_date, strike, option_type, close, settle, underlying_price, oi FROM fno_bhav"))
+    assert got[("2026-10-15", 74300.0, "CE")] == (15.5, 74315.61, 74315.61, 4273680)
+    assert got[("2026-10-15", 76700.0, "PE")][0] is None
+    assert got[("2026-10-29", 74100.0, "CE")][0] == 736.70
