@@ -27,6 +27,18 @@ def test_lot_sizes_follow_the_measured_history():
     assert ob.lot_size("SENSEX", "2026-10-13") == 20
 
 
+def test_contract_keeps_its_listing_lot_across_a_revision():
+    # NIFTY 25 → 75 revision: the 2024-12-26 weekly was listed at 25, entered 2024-12-24 (table says 25 then, 75 after)
+    assert ob.lot_size("NIFTY", "2024-12-26") == 75                       # by date alone: wrong for that contract
+    assert ob.lot_size("NIFTY", "2024-12-26", "2024-12-26") == 25
+    assert ob.lot_size("NIFTY", "2025-12-30", "2025-12-30") == 75         # 75 → 65: old contract keeps 75
+    assert ob.lot_size("NIFTY", "2025-12-30", "2026-01-06") == 65         # a contract listed after takes the new lot
+    assert ob.lot_size("NIFTY", "2021-07-05", "2021-07-08") == 75
+    assert ob.lot_size("SENSEX", "2025-01-24", "2025-01-28") == 10
+    assert ob.lot_size("SENSEX", "2025-01-01", "2025-01-03") == 10        # entered the day the table flips to 20
+    assert ob.lot_size("NIFTY", "2026-10-09", "2026-10-13") == 65          # paper-book contracts unchanged
+
+
 def test_strike_pick_takes_the_nearest_0_05_delta():
     deltas = {"C": [(0.12, 23200.0), (0.051, 23400.0), (0.02, 23600.0)],
               "P": [(0.08, 22000.0), (0.047, 21900.0), (0.03, 21800.0)]}
