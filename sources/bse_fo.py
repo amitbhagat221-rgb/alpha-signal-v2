@@ -78,14 +78,16 @@ def parse(content):
 
 
 def backfill(start, end, budget_min=None):
-    """Load [start, end] into fno_bhav. Resumable: days already holding SENSEX rows are
-    skipped. Raises when every day tried failed. Returns new rows."""
+    """Load [start, end] into fno_bhav. Resumable: days already holding SENSEX rows and
+    F&O holidays (market_holidays) are skipped — a run whose only new day was Dussehra
+    raised "0 of 1 days loaded" (2026-10-21). Raises when every day tried failed. Returns new rows."""
     import runlog
     have = set(read_sql("SELECT DISTINCT trade_date FROM fno_bhav WHERE symbol = 'SENSEX' "
                         "AND trade_date BETWEEN ? AND ?", params=[start, end])["trade_date"])
+    closed = set(read_sql("SELECT holiday_date FROM market_holidays WHERE segment = 'FO'")["holiday_date"])
     s, e = date.fromisoformat(max(start, FIRST_FILE)), date.fromisoformat(end)
     todo = [d for d in (s + timedelta(days=i) for i in range((e - s).days + 1))
-            if d.weekday() < 5 and d.isoformat() not in have]
+            if d.weekday() < 5 and d.isoformat() not in have | closed]
     print(f"BSE F&O {s} → {e}: {len(todo)} weekdays not yet loaded ({len(have)} loaded)")
     out_of_time = _http.time_budget("bse", budget_min) if budget_min else (lambda: False)
     total = n_days = n_bad = n_none = 0

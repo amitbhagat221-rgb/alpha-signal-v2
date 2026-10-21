@@ -7,7 +7,7 @@ import pytest
 
 import pit
 from tools import backtest_pit as bt
-from tools.compute_corporate_adjustments import parse_bonus_factor
+from tools.compute_corporate_adjustments import parse_bonus_factor, parse_split_factor
 
 
 def _prices(closes, sid="A", start="2026-01-01"):
@@ -29,6 +29,14 @@ def test_bonus_of_preference_shares_is_not_a_price_adjustment():
     assert parse_bonus_factor("Bonus 1:1") == 0.5
     assert parse_bonus_factor("Scheme Of Arrangement - Bonus Ncrps 4:1") is None
     assert parse_bonus_factor("Bonus Debentures 1:1") is None
+
+
+def test_consolidation_is_a_split_that_raises_old_prices():
+    """IFIB 2026-10: Re 1 → Rs 10 took the close from 13.83 to 138.30; with factor 10 that is no move."""
+    assert parse_split_factor("Consolidation Of Equity Shares From Re 1 Per Share To Rs 10 Per Share") == 10.0
+    px = _prices([13.83] * 10 + [138.30] * 20)
+    adj = pd.DataFrame({"sid": ["A"], "ex_date": [px["date"][10]], "factor": [10.0]})
+    assert abs(pit.pit_fwd_return_20d(date(2026, 1, 1), px, adj)["fwd_return_20d"].iloc[0]) < 1e-9
 
 
 def test_no_verdict_or_interval_on_a_handful_of_anchors():

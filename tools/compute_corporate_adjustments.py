@@ -4,7 +4,8 @@ and write a unified `corporate_adjustments` table.
 
 A factor < 1 represents the multiplier applied to PRE-event prices to make them
 comparable to post-event prices:
-  - SPLIT From Rs A To Rs B → factor = B/A
+  - SPLIT From Rs A To Rs B → factor = B/A (> 1 for a consolidation, Re 1 → Rs 10:
+    NSE lists those as plain "Consolidation Of Equity Shares", stored as OTHER)
   - BONUS N free per M held  → factor = M/(M+N)
   - DIVIDEND Rs D, close_pre  → factor = (close_pre - D)/close_pre
 
@@ -126,9 +127,11 @@ def compute(dry_run=False):
     _ensure_table()
 
     actions = read_sql(
-        "SELECT sid, ex_date, CASE WHEN ind = 'OTHER' THEN 'DEMERGER' ELSE ind END AS ind, subject "
+        "SELECT sid, ex_date, CASE WHEN ind = 'OTHER' AND lower(subject) LIKE '%consolidation of%' THEN 'SPLIT' "
+        "WHEN ind = 'OTHER' THEN 'DEMERGER' ELSE ind END AS ind, subject "
         "FROM corporate_actions "
-        "WHERE (ind IN ('SPLIT','BONUS','DIVIDEND') OR (ind = 'OTHER' AND lower(subject) LIKE '%demerger%')) "
+        "WHERE (ind IN ('SPLIT','BONUS','DIVIDEND') OR (ind = 'OTHER' AND (lower(subject) LIKE '%demerger%' "
+        "OR lower(subject) LIKE '%consolidation of%'))) "
         "AND sid IS NOT NULL ORDER BY sid, ex_date, ind"
     )
     prices = read_sql("SELECT sid, date, close FROM stock_prices WHERE close > 0")
@@ -187,7 +190,8 @@ def compute(dry_run=False):
             else:
                 continue
 
-        if factor is None or factor <= 0 or factor >= 1.0:
+        # Only a consolidation raises pre-event prices (VERZ 2025, IFIB 2026 read as ×9 jumps)
+        if factor is None or factor <= 0 or factor == 1.0 or (factor > 1.0 and ind != "SPLIT"):
             skipped["INVALID_FACTOR"] += 1
             continue
         parsed.append({"sid": sid, "ex_date": ex_date, "ind": ind,

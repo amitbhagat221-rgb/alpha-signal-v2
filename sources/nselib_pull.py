@@ -212,7 +212,7 @@ def pull_corporate_actions(months=24):
             # Classify
             sl = subject.lower()
             ind = (
-                "SPLIT" if "split" in sl else
+                "SPLIT" if "split" in sl or "consolidation of" in sl else
                 "BONUS" if "bonus" in sl else
                 "RIGHTS" if "right" in sl else
                 "BUYBACK" if "buy" in sl and "back" in sl else
