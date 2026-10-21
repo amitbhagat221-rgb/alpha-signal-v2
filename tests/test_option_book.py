@@ -35,6 +35,7 @@ def test_contract_keeps_its_listing_lot_across_a_revision():
     assert ob.lot_size("NIFTY", "2025-12-30", "2026-01-06") == 65         # a contract listed after takes the new lot
     assert ob.lot_size("NIFTY", "2021-07-05", "2021-07-08") == 75
     assert ob.lot_size("SENSEX", "2025-01-24", "2025-01-28") == 10
+    assert ob.lot_size("SENSEX", "2025-01-01", "2025-01-03") == 10        # entered the day the table flips to 20
     assert ob.lot_size("NIFTY", "2026-10-09", "2026-10-13") == 65          # paper-book contracts unchanged
 
 

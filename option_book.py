@@ -64,7 +64,8 @@ CONTRACT_LOTS = {
     ("NIFTY", "2024-12-26"): 25,        # 25 → 75 revision; listed at 25 (traded at 25 until expiry)
     ("NIFTY", "2025-01-30"): 25,        # monthly listed long before the revision
     ("NIFTY", "2025-12-30"): 75,        # 75 → 65 revision; listed at 75
-    ("SENSEX", "2025-01-28"): 10,       # 10 → 20 revision; monthly listed at 10
+    ("SENSEX", "2025-01-03"): 10,       # 10 → 20 revision; listed in Dec 2024 at 10 (table flips on 2025-01-01)
+    ("SENSEX", "2025-01-28"): 10,       # same revision; monthly listed at 10
 }
 
 
