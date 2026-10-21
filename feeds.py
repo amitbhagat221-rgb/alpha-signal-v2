@@ -542,7 +542,8 @@ FEEDS = {
         "routes": [_r("bse_fo_udiff", "primary", "bse", "download/BhavCopy/Derivative/BhavCopy_BSE_FO_0_0_0_{YYYYMMDD}_F_0000.CSV (from ~2024-01-05)")],
         "need": "SENSEX weekly expiry (BSE's side of one-weekly-per-exchange) for the option-premium study",
         "notes": "2026-10-09: history 2024-01-05 → 2026-10-08 loaded (679 days); daily in run.sh morning since 2026-10-10. Missing day = HTTP 200 + HTML page. "
-                 "Older BSE file (to 2024-07-05) has no settle price or index level, not read",
+                 "Older BSE file (to 2024-07-05) has no settle price or index level, not read. "
+                 "On expiry day ClsPric of an expiring contract is the index settlement: close comes from LastPric (2026-10-21)",
         "probe": ("WORKS", "2026-10-09", "UDiFF 2026-10-08 (696 SENSEX options) + 2024-01-11 (171); legacy 2023-08-04 zip served"),
     },
     "nse_slb": {
@@ -676,6 +677,14 @@ SYMPTOM_CLASSES = {
 
 INCIDENTS = [
     # (date, feed, class, symptom, cause, fix, ref)
+    ("2026-10-21", "bse_fo_bhav", "F", "every SENSEX/BANKEX contract on its expiry day had close = settle = the index "
+     "(43,361 rows, 2024-01-05 → 2026-10-15: a 69000 CE 'closing' at 72026.15)",
+     "BSE's expiry-day file puts the index settlement in ClsPric too (NSE keeps the traded close there); "
+     "sources/bse_fo.parse mapped ClsPric → close",
+     "parse takes LastPric (NULL when untraded) for an expiring contract whose ClsPric is the index; rows repaired by "
+     "targeted UPDATE (2026-10-15 from its file, the rest close → NULL; CSV backup in data/history/bugfix-2026-10-21; "
+     "`python -m sources.bse_fo --repair-close` restores the rest from BSE); settle = index kept (the NSE convention); "
+     "check OPTION_PRICE_IMPOSSIBLE. No consumer read the bad close", "fix-agent 2026-10-21"),
     ("2026-10-19", "moneycontrol_recos", "F", "46 stocks.mc_slug point at another company (TRIDENT → Trent, ASHOKA → Ashok "
      "Leyland): their broker targets were another company's",
      "slugs from the pre-2026-05-25 first-URL discovery; the producer gate's name test (similarity ≥ 0.55) passed them, "
