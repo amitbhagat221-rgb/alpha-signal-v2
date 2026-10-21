@@ -2587,10 +2587,12 @@ CREATE TABLE IF NOT EXISTS broker_instrument_prices (
 
 -- Kite minute-bar archive manifest (ADR 0072, sources/kite_bars.py): one row per Parquet file
 -- (or per stock with no bars). The bars themselves live in config.INTRADAY_DIR, not here.
+-- options_1m (sources/hf_options_1m.py, one-off 2026-10-21): HF index-option minute bars; the note
+-- holds the source sha256 and the VWAP check vs fno_bhav (status=ok|suspect|unvalidated).
 CREATE TABLE IF NOT EXISTS intraday_files (
-    dataset     TEXT NOT NULL,             -- bars_1m
-    kind        TEXT NOT NULL,             -- staging (one file per stock) | month | day
-    key         TEXT NOT NULL,             -- sid for staging, YYYY-MM for month, YYYY-MM-DD for day
+    dataset     TEXT NOT NULL,             -- bars_1m | daily_1m | options_1m
+    kind        TEXT NOT NULL,             -- staging (one file per stock) | month | day | daily; options_1m: expiry | index
+    key         TEXT NOT NULL,             -- sid for staging, YYYY-MM for month, YYYY-MM-DD for day; SYMBOL/EXPIRY | SYMBOL
     path        TEXT,                      -- NULL when the stock has no bars on Kite
     n_rows      INTEGER NOT NULL,
     n_days      INTEGER NOT NULL,          -- trading days covered

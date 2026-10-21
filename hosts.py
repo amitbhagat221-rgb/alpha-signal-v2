@@ -106,6 +106,10 @@ HOSTS = {
     # ── Reference files (fetched with the HTTP library's default headers) ──
     "upstox": {"netlocs": ["assets.upstox.com"], "headers": {}},
     "github_raw": {"netlocs": ["raw.githubusercontent.com"], "headers": {}},
+    # Hugging Face datasets (sources/hf_options_1m, a one-off): API listing + resolve/ downloads;
+    # resolve/ redirects to the LFS/xet CDN, paced as the same host.
+    "huggingface": {"netlocs": ["huggingface.co", "cdn-lfs.huggingface.co", "cdn-lfs.hf.co",
+                                "cdn-lfs-us-1.hf.co", "cas-bridge.xethub.hf.co"], "headers": {}},
 
     # ── LLM ── Claude model id by purpose. No call/spend cap exists yet; spend is
     # tracked per call in `llm_usage` (db.log_llm_usage). regulatory_deep is ~60% of

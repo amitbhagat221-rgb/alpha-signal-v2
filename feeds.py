@@ -415,6 +415,25 @@ FEEDS = {
         "pit": "bar time (prices on the fetch day's split basis)", "tos": "Kite Connect subscription",
         "ref": "research 0005 B2 · ADR 0072",
     },
+    "hf_index_options_1m": {
+        "family": "prices", "status": "probation",
+        "what": "1-minute OHLC of every NIFTY / SENSEX option strike for the ~6-9 sessions before each expiry "
+                "(2021+), plus 1-minute index spot — a one-off backfill into the intraday Parquet archive",
+        "modules": ["sources.hf_options_1m"], "schedule": ["manual"], "writes": ["intraday_files"],
+        "hosts": ["huggingface"], "cadence": "manual",
+        "routes": [_r("hf_trademarkk", "primary", "huggingface", "datasets/thetrademarkk/india-index-options-1m "
+                      "options/{SYM}/{EXPIRY}.parquet + index/{SYM}.parquet (sha256 = the listing's LFS oid)"),
+                   _r("hf_codepyx23_mirror", "fallback", "huggingface", "datasets/codepyx23/india-index-options-1m "
+                      "(same files, same hashes)")],
+        "canary": None, "canary_waiver": "one-off backfill of a static dataset; every file is hash-checked "
+                                         "against the listing and VWAP-checked against fno_bhav",
+        "pit": "bar time (IST); the dataset is a static snapshot, no revisions",
+        "tos": "CC BY-NC 4.0 — research use only, not commercial, not redistributed",
+        "notes": "Loaded 2026-10-21 (Amit approved). OI not kept (broken from 2025); volume ÷ lot = contracts. "
+                 "Coverage, quirks and the fno_bhav check: docs/reference/data-playbook.md",
+        "probe": ("WORKS", "2026-10-20", "15:00-15:30 VWAP of the minute bars matches fno_bhav close on 100 % of "
+                  "checked contract-days within max(2 %, ₹0.10); 2021-23 rows doubled; OI ~1 % of true from 2025"),
+    },
     "bse_shp_xbrl": {
         "family": "ownership", "status": "probation",
         "what": "Named holders above 1% of every stock (promoters, fund schemes, FPIs, individuals), from the exchange filing",
