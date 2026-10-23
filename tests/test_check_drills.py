@@ -237,6 +237,22 @@ def _expiry_day_close_is_the_index(conn):
     assert "SENSEX" in v["sample"]
 
 
+@drill("OPTIONS_LIVE")
+def _options_live_mismatch_and_failed_step(conn):
+    """plan 0029: a reconcile mismatch pages; a failed shadow step warns; a later success clears it."""
+    import options_live as ol
+    assert _fires("OPTIONS_LIVE", conn)["status"] == PASS                 # nothing yet: vacuous, tolerated
+    ol.put_state("step:buyback:NIFTY", {"date": TODAY, "status": "failed", "detail": "no Kite login", "mode": "shadow"}, "t")
+    v = _fires("OPTIONS_LIVE", conn)
+    assert (v["status"], v["severity"], v["n_bad"]) == (FAIL, WARN, 1) and "no Kite login" in v["sample"]
+    ol.put_state("reconcile", {"ok": False, "detail": "NIFTY26102726350CE: Kite 0, ledger -65"}, "t")
+    v = _fires("OPTIONS_LIVE", conn)
+    assert (v["status"], v["severity"], v["n_bad"]) == (FAIL, CRITICAL, 2) and "broker ≠ ledger" in v["sample"]
+    ol.put_state("reconcile", {"ok": True, "detail": "2 contract(s) match"}, "t")
+    ol.put_state("step:buyback:NIFTY", {"date": TODAY, "status": "ok", "detail": "flat", "mode": "shadow"}, "t")
+    assert _fires("OPTIONS_LIVE", conn)["status"] == PASS
+
+
 @drill("ANALYST_TARGET_IMPLAUSIBLE")
 def _implausible_targets(conn):
     _targets(conn, {"HUGE": 900.0, "TINY": 10.0, "SANE": 120.0, "ON_PRICE": 100.0})

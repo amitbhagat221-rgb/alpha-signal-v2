@@ -185,6 +185,28 @@ case "$JOB" in
     kite_quotes)        # 09:50 UTC weekdays (15:20 IST) — live option quotes + Kite margin on paper-book
                         # entry days only (plan 0022); needs that day's Kite login, else FAILED with the link
         logged cron_kite_quotes run python -m sources.kite_quotes ;;
+    options_live)       # plan 0029 — the live option book: run.sh options_live <step> [NIFTY|SENSEX]. Times and the
+                        # crontab lines: docs/plans/0029 "Runbook". Not a harvest (Kite is its own host): no harvest lock,
+                        # one lock per step so an overlapping cron line can never run the same step twice at once.
+        OL_STEP="${2:?usage: run.sh options_live <entry|buyback|closeall|record|mark|settle|reconcile|precheck|weekly> [NIFTY|SENSEX]}"
+        OL_U="${3:-}"
+        if [ -z "${DRY:-}" ]; then
+            exec 203>"/tmp/alpha_options_live.$OL_STEP.lock"
+            flock -n 203 || { echo "options_live $OL_STEP already running, exiting $(date -u)"; exit 0; }
+        fi
+        case "$OL_STEP:$OL_U" in
+            entry:NIFTY)  logged cron_options_live_entry_nifty run python -m options_live entry --underlying NIFTY ;;
+            entry:SENSEX) logged cron_options_live_entry_sensex run python -m options_live entry --underlying SENSEX ;;
+            buyback:*)    logged cron_options_live_buyback run python -m options_live buyback --underlying "${OL_U:-NIFTY}" ;;
+            closeall:*)   logged cron_options_live_closeall run python -m options_live closeall ;;
+            record:*)     logged cron_options_live_record run python -m options_live record ;;
+            mark:*)       logged cron_options_live_mark run python -m options_live mark ;;
+            settle:*)     logged cron_options_live_settle run python -m options_live settle ;;
+            reconcile:*)  logged cron_options_live_reconcile run python -m options_live reconcile ;;
+            precheck:*)   logged cron_options_live_precheck run python -m options_live precheck ;;
+            weekly:*)     logged cron_options_live_weekly run python -m options_live weekly ;;
+            *) echo "options_live: unknown step/underlying '$OL_STEP $OL_U'"; exit 2 ;;
+        esac ;;
     kite_bars)          # hourly :05, 03-22 UTC — Kite minute-bar backfill into the Parquet archive (ADR 0072). Runs
                         # only while that day's Kite login is valid (by hand; the cached token is good until midnight
                         # UTC) and starts no new stock after 23:50. Its OWN lock, not the harvest lock: Kite is a
@@ -278,6 +300,6 @@ case "$JOB" in
         echo "Tickertape finished rc=$RC at $(date -u)"
         exit $RC ;;
     *)
-        echo "unknown job '$JOB' (morning forward canary estimates transcripts screener_schedules llm_local org watchdog health pt_snapshot management kite_quotes kite_bars kite_holdings backtest expected_return screener_cookie sweep secrets_backup screener_universe tickertape)"
+        echo "unknown job '$JOB' (morning forward canary estimates transcripts screener_schedules llm_local org watchdog health pt_snapshot management kite_quotes kite_bars kite_holdings options_live backtest expected_return screener_cookie sweep secrets_backup screener_universe tickertape)"
         exit 2 ;;
 esac

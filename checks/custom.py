@@ -49,6 +49,11 @@ _TARGETS_SQL = """
 # intrinsic value (OPTION_PRICE_IMPOSSIBLE).
 OPTION_TIME_VALUE_MAX = 0.30
 
+def _options_live():
+    import options_live           # lazy: the check catalog must not import the Kite stack
+    return options_live.health_check()
+
+
 CHECKS = [
     # ═══════════════════════════════════════════════════════════════════
     # The models: today's ranking
@@ -201,6 +206,24 @@ CHECKS = [
                     FROM judged WHERE bad LIMIT 1) AS sample
             FROM judged
         """,
+    },
+
+    {
+        "code": "OPTIONS_LIVE",
+        "table": "option_live_settings",
+        "column": "value",
+        "theme": "ran",
+        "message": "The live option book (plan 0029): Kite positions differ from the ledger, or a live step failed",
+        "why": "The job sells option strangles through Kite. A position the ledger does not know is unmanaged risk "
+               "(the buy-back and Close-all only act on what the ledger holds); a failed entry, buy-back or settle "
+               "is a missed trade, a NIFTY leg left into expiry or a skipped SENSEX entry.",
+        "fix": "Open /options on the ops cockpit: the Live panel shows the last step results and the mismatch. "
+               "A mismatch already stopped entries: fix the position in Kite (or the ledger), then "
+               "`run.sh options_live reconcile` and Resume. A failed step: read its run in Flow; "
+               "a missing Kite login is the usual cause.",
+        "severity_text": "CRITICAL on a broker ≠ ledger mismatch, or on a failed step in approve / auto mode; WARN in shadow",
+        "may_be_empty": True,     # nothing to judge before the first shadow run
+        "fn": _options_live,
     },
 
     # ═══════════════════════════════════════════════════════════════════
