@@ -636,3 +636,52 @@ def test_settings_validation(conn):
         ol.set_setting("lots_cap", {"NIFTY": 41})
     with pytest.raises(ValueError):
         ol.set_setting("tag", "x")
+
+
+# ───────────────────────────── ops cockpit /options Live panel ─────────────────────────────
+
+@pytest.fixture
+def ops(conn, tmp_path, monkeypatch):
+    import webauth
+    from fastapi.testclient import TestClient
+    from cockpit_ops.app import app
+    monkeypatch.delenv("COCKPIT_PREVIEW", raising=False)
+    monkeypatch.setattr(webauth, "AUTH_FILE", tmp_path / "auth.json")
+    webauth.set_password("correct horse battery")
+    return TestClient(app, cookies={webauth.COOKIE: webauth.make_token()}), TestClient(app)
+
+
+def test_live_panel_renders_with_the_paper_book(ops):
+    authed, _ = ops
+    fake = FakeKite()
+    run("entry", fake, Clock(FRI, "15:12"), "NIFTY", mode="shadow")
+    html = authed.get("/options").text
+    assert 'id="live"' in html and "SHADOW · no orders" in html and "Open live legs" in html
+    assert "NIFTY261027" in html and "Live panel unavailable" not in html
+    assert authed.get("/api/options/live").json()["settings"]["mode"] == "shadow"
+
+
+def test_live_controls_need_the_cookie_and_the_confirm_word(ops, monkeypatch):
+    authed, anon = ops
+    assert anon.post("/api/options/live/kill", json={"on": True, "confirm": "STOP"}).status_code == 401
+    assert authed.post("/api/options/live/kill", json={"on": True}).status_code == 400
+    assert not ol.settings()["kill"]
+    assert authed.post("/api/options/live/kill", json={"on": True, "confirm": "STOP"}).json()["kill"] is True
+    assert ol.settings()["kill"] and ol.settings()["kill_reason"] == "Stopped on the cockpit"
+    ol.put_state("reconcile", {"ok": False, "detail": "x"}, "t")
+    assert authed.post("/api/options/live/kill", json={"on": False, "confirm": "RESUME"}).status_code == 409
+    ol.put_state("reconcile", {"ok": True}, "t")
+    assert authed.post("/api/options/live/kill", json={"on": False, "confirm": "RESUME"}).status_code == 200
+    assert not ol.settings()["kill"]
+    # settings: auto needs AUTO typed; a bad value is refused
+    assert authed.post("/api/options/live/settings", json={"key": "mode", "value": "auto", "confirm": "SAVE"}).status_code == 400
+    assert authed.post("/api/options/live/settings", json={"key": "lots_cap", "value": {"NIFTY": 99}, "confirm": "SAVE"}).status_code == 400
+    assert authed.post("/api/options/live/settings", json={"key": "lots_cap", "value": {"NIFTY": 2}, "confirm": "save"}).status_code == 200
+    assert ol.settings()["lots_cap"] == {"NIFTY": 2, "SENSEX": 1}
+    # close-all: typed confirm, then the job is spawned (patched here)
+    spawned = []
+    monkeypatch.setattr(ol, "spawn_closeall", lambda: spawned.append(1) or {"ok": True})
+    assert authed.post("/api/options/live/closeall", json={"confirm": "close"}).status_code == 400 and not spawned
+    assert authed.post("/api/options/live/closeall", json={"confirm": "CLOSE ALL"}).status_code == 200 and spawned
+    assert anon.post("/api/options/live/approve", json={"ticket_id": "x", "confirm": "APPROVE"}).status_code == 401
+    assert authed.post("/api/options/live/approve", json={"ticket_id": "x", "confirm": "APPROVE"}).status_code == 409
