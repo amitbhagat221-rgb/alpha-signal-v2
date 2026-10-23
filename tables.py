@@ -545,6 +545,23 @@ TABLES = {
         "depth": "From 2026-10-09 (forward record, plan 0022)",
         "description": "Option-premium paper book: the pre-registered 0.05-delta strangle on NIFTY and SENSEX, entered 2 sessions before the weekly expiry, held to expiry. One row per underlying × expiry, settled in place.",
     },
+    "option_live_trades": {
+        "kind": "COMPUTED", "domain": "Output", "date_col": "entry_date", "may_be_empty": True,
+        "source": "options_live.py (run.sh options_live entry / buyback / record / mark / settle)",
+        "depth": "From the first shadow entry (plan 0029)",
+        "description": "Live option ledger: one row per leg (underlying × expiry × contract × source shadow / live / manual), rebuilt from the fills in option_live_orders; marked, closed by the buy-back or settled at expiry.",
+    },
+    "option_live_orders": {
+        "kind": "LOG", "domain": "Output", "date_col": "trade_date", "may_be_empty": True,
+        "source": "options_live.py (every order, modify, cancel, fill, ticket and shadow fill)",
+        "depth": "From the first shadow entry (plan 0029)",
+        "description": "Append-only event log of the live option book: proposed legs, approval tickets, Kite orders and their re-prices, cancels, rejects, fills (Kite trade ids) and simulated shadow fills.",
+    },
+    "option_live_settings": {
+        "kind": "STATE", "domain": "Output", "date_col": "updated_at", "may_be_empty": True,
+        "source": "ops cockpit /options and python -m options_live set (settings); options_live steps (state)",
+        "description": "Overrides of config.OPTIONS_LIVE (mode, lot caps, buffer, loss limit, kill switch) plus the job's state: approvals, the rotation flag, the last reconcile and each step's last outcome.",
+    },
     "playbook_members": {
         "kind": "COMPUTED", "domain": "Computed Signals", "date_col": "snapshot_date", "freq": "daily",
         "source": "sleeves.py rules (run.sh morning → tools/playbook_backtest --record)",

@@ -193,7 +193,99 @@ def options_page(request: Request):
     """Option-premium paper book (plan 0022): the pre-registered rule, open and settled
     paper trades, live-quote slippage, Kite login status. Data from option_book.page_data."""
     import option_book
-    return templates.TemplateResponse(request, "options.html", {"page": "options", **option_book.page_data()})
+    return templates.TemplateResponse(request, "options.html", {"page": "options", **option_book.page_data(),
+                                                                **_live_panel()})
+
+
+def _live_panel():
+    """The plan 0029 Live panel's data; a failure shows on the panel, never breaks the paper book."""
+    try:
+        import options_live
+        return {"live": options_live.page_data(), "live_error": None}
+    except Exception as e:                          # noqa: BLE001
+        return {"live": None, "live_error": f"{type(e).__name__}: {e}"}
+
+
+# ── plan 0029: live option book controls. Every one is a POST that needs the session cookie
+# (checked here as well as by LoginRequired) and a confirm word the page asks for first. ──
+
+async def _live_body(request, word=None):
+    import webauth
+    if not webauth.valid_token(request.cookies.get(webauth.COOKIE)):
+        return None, JSONResponse({"error": "log in first"}, status_code=401)
+    try:
+        body = await request.json()
+    except ValueError:
+        body = {}
+    if word is not None and str(body.get("confirm", "")).strip().upper() != word:
+        return None, JSONResponse({"error": f"not confirmed: type {word}"}, status_code=400)
+    return body, None
+
+
+@app.get("/api/options/live")
+def api_options_live():
+    import options_live
+    return api._clean(options_live.page_data())
+
+
+@app.post("/api/options/live/kill")
+async def api_options_live_kill(request: Request):
+    """{"on": true, "confirm": "STOP"} stops new entries; {"on": false, "confirm": "RESUME"} resumes
+    (refused while the last reconcile is a mismatch)."""
+    import options_live
+    body, err = await _live_body(request)
+    if err:
+        return err
+    on = bool(body.get("on"))
+    word = "STOP" if on else "RESUME"
+    if str(body.get("confirm", "")).strip().upper() != word:
+        return JSONResponse({"error": f"not confirmed: type {word}"}, status_code=400)
+    rec = options_live.get_state("reconcile") or {}
+    if not on and rec.get("ok") is False:
+        return JSONResponse({"error": "the last reconcile found Kite ≠ ledger: fix it and run "
+                             "`run.sh options_live reconcile` first"}, status_code=409)
+    options_live.set_kill(on, "Stopped on the cockpit" if on else None, "cockpit")
+    return {"ok": True, "kill": on}
+
+
+@app.post("/api/options/live/settings")
+async def api_options_live_settings(request: Request):
+    """{"key": "mode", "value": "approve", "confirm": "SAVE"} — mode auto needs "AUTO"."""
+    import options_live
+    body, err = await _live_body(request)
+    if err:
+        return err
+    word = "AUTO" if body.get("key") == "mode" and body.get("value") == "auto" else "SAVE"
+    if str(body.get("confirm", "")).strip().upper() != word:
+        return JSONResponse({"error": f"not confirmed: type {word}"}, status_code=400)
+    try:
+        v = options_live.set_setting(body.get("key"), body.get("value"), by="cockpit")
+    except ValueError as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+    return {"ok": True, "key": body.get("key"), "value": v}
+
+
+@app.post("/api/options/live/approve")
+async def api_options_live_approve(request: Request):
+    """{"ticket_id": "...", "confirm": "APPROVE"}: the waiting entry places the ticket's orders."""
+    import options_live
+    body, err = await _live_body(request, "APPROVE")
+    if err:
+        return err
+    try:
+        return options_live.approve(str(body.get("ticket_id")), by="cockpit")
+    except ValueError as e:
+        return JSONResponse({"error": str(e)}, status_code=409)
+
+
+@app.post("/api/options/live/closeall")
+async def api_options_live_closeall(request: Request):
+    """{"confirm": "CLOSE ALL"}: Stop, then buy back every tagged leg now (own process)."""
+    import options_live
+    body, err = await _live_body(request, "CLOSE ALL")
+    if err:
+        return err
+    return options_live.spawn_closeall()
 
 
 @app.get("/resources", response_class=HTMLResponse)

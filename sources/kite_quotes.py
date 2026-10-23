@@ -41,8 +41,10 @@ def front_expiry(underlying, today):
     return e
 
 
-def snapshot_one(kc, underlying, exch, spot_key, today, expiry):
-    """Quote the band around spot for `expiry`, pick the rule's strikes, query margin → rows."""
+def live_chain(kc, underlying, exch, spot_key, expiry, band=ob.STRIKE_BAND):
+    """The live option chain for `expiry` within `band` of spot → (rows, spot). One row per
+    quoted strike: tradingsymbol, option_type, strike, bid, ask, last, mid, oi, volume, lot, freeze.
+    Shared with options_live (plan 0029), so the snapshot and the live book see one chain."""
     with _http.pace("kite"):
         ins = pd.DataFrame(kc.instruments(exch))
     ins = ins[(ins["name"] == underlying) & ins["instrument_type"].isin(["CE", "PE"])]
@@ -51,7 +53,7 @@ def snapshot_one(kc, underlying, exch, spot_key, today, expiry):
         raise RuntimeError(f"{underlying}: Kite lists no options for expiry {expiry}")
     with _http.pace("kite"):
         spot = kc.ltp([spot_key])[spot_key]["last_price"]
-    ins = ins[(ins["strike"] - spot).abs() <= ob.STRIKE_BAND * spot]
+    ins = ins[(ins["strike"] - spot).abs() <= band * spot]
     keys = [f"{exch}:{t}" for t in ins["tradingsymbol"]]
     quotes = {}
     for i in range(0, len(keys), 200):
@@ -62,22 +64,39 @@ def snapshot_one(kc, underlying, exch, spot_key, today, expiry):
         q = quotes.get(f"{exch}:{r.tradingsymbol}")
         if not q:
             continue
-        depth = q.get("depth") or {}
-        bid = (depth.get("buy") or [{}])[0].get("price") or None
-        ask = (depth.get("sell") or [{}])[0].get("price") or None
-        last = q.get("last_price")
+        bid, ask, last = touch(q)
         mid = (bid + ask) / 2 if bid and ask else last
         rows.append({"tradingsymbol": r.tradingsymbol, "option_type": r.instrument_type, "strike": float(r.strike),
                      "bid": bid, "ask": ask, "last": last, "mid": mid, "oi": q.get("oi"),
-                     "volume": q.get("volume") or 0, "lot": int(r.lot_size)})
-    df = pd.DataFrame(rows)
+                     "volume": q.get("volume") or 0, "lot": int(r.lot_size),
+                     "freeze": getattr(r, "freeze_quantity", None)})
+    return pd.DataFrame(rows), spot
+
+
+def touch(q):
+    """(bid, ask, last) from one Kite quote; a side with no order is None."""
+    depth = q.get("depth") or {}
+    bid = (depth.get("buy") or [{}])[0].get("price") or None
+    ask = (depth.get("sell") or [{}])[0].get("price") or None
+    return bid, ask, q.get("last_price")
+
+
+def pick(df, today, expiry):
+    """The rule's strikes on a live chain: option_book's 0.05-delta picker on the live mids
+    → (forward, {(cp, K): |delta|}, {'C': K, 'P': K}). Raises when the chain gives no deltas."""
     sl = df.rename(columns={"mid": "settle"})[["option_type", "strike", "settle", "volume"]]
     d = ob.slice_deltas(sl, today, expiry)
     if d is None:
-        raise RuntimeError(f"{underlying} {expiry}: live chain gave no usable deltas")
+        raise RuntimeError(f"{expiry}: live chain gave no usable deltas")
     F, deltas = d
     k = ob.nearest(deltas, ob.RULE["delta"])
-    dmap = {(cp, K): dl for cp in ("C", "P") for dl, K in deltas[cp]}
+    return F, {(cp, K): dl for cp in ("C", "P") for dl, K in deltas[cp]}, k
+
+
+def snapshot_one(kc, underlying, exch, spot_key, today, expiry):
+    """Quote the band around spot for `expiry`, pick the rule's strikes, query margin → rows."""
+    df, spot = live_chain(kc, underlying, exch, spot_key, expiry)
+    F, dmap, k = pick(df, today, expiry)
     df["delta"] = [dmap.get(("C" if o == "CE" else "P", s)) for o, s in zip(df.option_type, df.strike)]
     df["chosen"] = [int((o == "CE" and s == k["C"]) or (o == "PE" and s == k["P"]))
                     for o, s in zip(df.option_type, df.strike)]
@@ -91,7 +110,7 @@ def snapshot_one(kc, underlying, exch, spot_key, today, expiry):
     df["basket_margin"] = [margin if c else None for c in df.chosen]
     df["trade_date"], df["underlying"], df["expiry"], df["spot"] = today, underlying, expiry, spot
     df["snapshot_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
-    return df.drop(columns=["mid", "lot"]), legs, margin, spot
+    return df.drop(columns=["mid", "lot", "freeze"]), legs, margin, spot
 
 
 def run(force=False):

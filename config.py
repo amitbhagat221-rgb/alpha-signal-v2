@@ -168,6 +168,37 @@ REVENUE_PLAUSIBILITY = {
 OPS_HTTPS = "https://alpha.rendezvous-app.duckdns.org"
 KITE_LOGIN_PAGE = OPS_HTTPS + "/kite/login"
 
+# Option premium, live on Kite (plan 0029; options_live.py). These are the DEFAULTS: a row in
+# option_live_settings (written from the ops cockpit /options or `python -m options_live set`)
+# overrides a key without a deploy. Times are IST. Real orders only in mode approve / auto.
+OPTIONS_LIVE = {
+    "mode": "shadow",                      # off | shadow | approve | auto
+    "lots_cap": {"NIFTY": 1, "SENSEX": 1},
+    "lots_hard_max": 40,                   # no setting can raise a cap above this
+    "margin_buffer_rs": 50_000,            # kept free after sizing (expiry-day add-on, MTM)
+    "weekly_loss_limit_rs": 200_000,       # D4: realised loss this week (Mon-Sun) above it pauses entries
+    "kill": False,                         # Stop: no new entries (buy-backs and Close-all still run)
+    "adopt_manual_nifty": False,           # True: the Tuesday buy-back also closes Amit's own NIFTY legs of that expiry
+    "tag": "as0029",                       # Kite order tag on every order this job places (≤ 20 chars)
+    "chain_band": 0.08,                    # live chain fetched within ±8% of spot
+    "entry_earliest": "15:00",             # an entry never starts before this...
+    "entry_cutoff": "15:29",               # ...stops re-pricing here and cancels what is left
+    "approve_by": "15:25",                 # approve mode: a ticket not approved by now expires unplaced
+    "buyback_start": "15:05",
+    "buyback_final": "15:14",              # the buy-back's final aggressive limit
+    "buyback_end": "15:15",                # leftovers cancelled; NIFTY then expires normally, SENSEX skipped
+    "closeall_minutes": 5,                 # Close-all: re-price this long, the last minute aggressive
+    "reprice_every_s": 20,
+    "approval_poll_s": 10,
+    "min_sell_frac": 0.5,                  # a SELL is never re-priced below this share of its first mid
+    "max_buy_mult": 3.0,                   # a BUY is never re-priced above this multiple of its first ask...
+    "final_buy_pct": 0.25,                 # ...except the final limit: ask × (1 + pct) + ticks
+    "final_buy_ticks": 4,
+    "margin_freed_frac": 0.5,              # rotation gate: margin freed ≥ this share of the NIFTY entry margin
+    "freeze_qty": {"NIFTY": 1800, "SENSEX": 1000},   # units per order; fallback when the instruments carry none
+    "shadow_min_lots": 1,                  # shadow records at least this many lots even when margin is short
+}
+
 PORTFOLIO = {
     "max_stocks_per_sector": 5,
     "max_stock_weight_pct": 5.0,

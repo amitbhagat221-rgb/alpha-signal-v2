@@ -23,6 +23,18 @@
   .ob-table td.ob-scaled { font-weight: 700; }
   tr.ob-trade:hover td { background: var(--bg-hover, rgba(255,255,255,0.02)); }
   .ob-cap-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 12px; margin-top: 12px; }
+  .ol-live { border-color: var(--accent); }
+  .ol-sub { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
+  .ol-btns { display: flex; flex-wrap: wrap; gap: 8px; }
+  .ol-act, .ol-save { border: 0; cursor: pointer; font-family: inherit; }
+  .ol-btn-stop { background: var(--red); }
+  .ol-mode { display: inline-block; margin-left: 8px; padding: 2px 8px; border-radius: 6px; font-size: 11px; font-weight: 800; letter-spacing: 0.4px; background: var(--bg-hover, rgba(127,127,127,0.15)); }
+  .ol-mode-shadow { color: var(--text-secondary); }
+  .ol-mode-approve { color: var(--amber); }
+  .ol-mode-auto, .ol-mode-kill { color: #fff; background: var(--red); }
+  .ol-mode-off { color: var(--text-muted); }
+  .ol-set { margin-top: 8px; }
+  .ol-set select, .ol-set input[type=number] { padding: 6px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg-input, var(--bg-card)); color: var(--text-primary); font-size: 14px; width: 120px; }
 </style>
 
 {% set S = summary %}
@@ -39,6 +51,109 @@
     <div class="ob-muted">Needed only on entry days, before 15:20 IST, for the live-quote snapshot. The session ends ~06:00 IST next day.</div>
   </div>
   <a class="ob-btn" href="/kite/login">Log in to Kite</a>
+</div>
+
+{# ── plan 0029: the live book (options_live.page_data). Buttons POST with the session cookie after a confirm. ── #}
+<div class="ob-card ol-live" id="live">
+  {% if live_error %}
+  <b class="ob-bad">Live panel unavailable:</b> <span class="ob-muted">{{ live_error }}</span>
+  {% elif live %}
+  {% set L = live %}{% set st = L.settings %}
+  <div class="ob-row">
+    <div>
+      <b>Live book</b>
+      <span class="ol-mode {{ 'ol-mode-' ~ st.mode }}">{{ {"off": "OFF", "shadow": "SHADOW · no orders", "approve": "APPROVE · real orders after you tap", "auto": "AUTO · real orders"}[st.mode] }}</span>
+      {% if st.kill %}<span class="ol-mode ol-mode-kill">STOPPED</span>{% endif %}
+      <div class="ob-muted">Plan 0029. Caps NIFTY {{ st.lots_cap.NIFTY }} · SENSEX {{ st.lots_cap.SENSEX }} lot(s) · buffer ₹{{ "{:,.0f}".format(st.margin_buffer_rs) }} · weekly loss limit ₹{{ "{:,.0f}".format(st.weekly_loss_limit_rs) }}{% if st.adopt_manual_nifty %} · Tuesday buy-back also closes your own NIFTY legs{% endif %}.
+        {% if st.kill %}<br><b class="ob-bad">Entries stopped:</b> {{ st.kill_reason or "kill switch on" }}.{% endif %}</div>
+    </div>
+    <div class="ol-btns">
+      {% if st.kill %}<button class="ob-btn ol-act" data-url="/api/options/live/kill" data-body='{"on": false}' data-word="RESUME" data-ask="Resume new entries?">Resume</button>
+      {% else %}<button class="ob-btn ol-act ol-btn-stop" data-url="/api/options/live/kill" data-body='{"on": true}' data-word="STOP" data-ask="Stop: no new entries (buy-backs still run)?">Stop</button>{% endif %}
+      <button class="ob-btn ol-act ol-btn-stop" data-url="/api/options/live/closeall" data-body='{}' data-word="CLOSE ALL" data-type="1" data-ask="Close all: stop, then buy back EVERY tagged leg now at the ask. Type CLOSE ALL to confirm.">Close all</button>
+    </div>
+  </div>
+
+  {% if L.ticket %}{% set T = L.ticket %}
+  <div class="ol-sub">
+    <b>Ticket {{ T.underlying }} {{ T.expiry }}</b> <span class="ob-muted">({{ T.trade_date }}, {{ T.status }})</span>
+    <div class="ob-muted">{% for l in T.legs %}sell {{ l.quantity }} × {{ l.tradingsymbol }}{% if l.price %} at bid {{ l.price }}{% endif %}{% if not loop.last %} · {% endif %}{% endfor %}
+      {% if T.detail.margin_rs %} · margin ₹{{ "{:,.0f}".format(T.detail.margin_rs) }}{% endif %}</div>
+    {% if T.pending %}<button class="ob-btn ol-act" data-url="/api/options/live/approve" data-body='{"ticket_id": "{{ T.ticket_id }}"}' data-word="APPROVE" data-ask="Approve: place these orders now (limit at the bid, re-priced to 15:29)?">Approve</button>
+    <span class="ob-muted">before {{ st.approve_by }} IST, or nothing is placed.</span>{% endif %}
+  </div>
+  {% endif %}
+
+  <div class="ol-sub ob-muted">
+    Today: rotation {% if L.rotation %}<b class="{{ 'ob-ok' if L.rotation.ok else 'ob-bad' }}">{{ 'OK' if L.rotation.ok else 'FAILED' }}</b> — {{ L.rotation.detail }}{% else %}not run{% endif %}
+    · reconcile {% if L.reconcile %}<b class="{{ 'ob-ok' if L.reconcile.ok else ('ob-bad' if L.reconcile.ok == false else 'ob-warn') }}">{{ {True: 'clean', False: 'MISMATCH', None: 'not run'}[L.reconcile.ok] }}</b> {{ (L.reconcile.at or '')[:16] }} — {{ L.reconcile.detail }}{% else %}never run{% endif %}
+    · this week realised: shadow {{ L.week.shadow|inr }}, live {{ L.week.live|inr }}
+  </div>
+
+  <div class="ob-scroll ol-sub">
+    <b>Open live legs</b>
+    {% if L.open %}
+    <table class="ob-table">
+      <tr><th>Source</th><th>Contract</th><th>Expiry</th><th>Qty</th><th>Sold at</th><th>Mark</th><th>MTM</th><th>Margin</th></tr>
+      {% for l in L.open %}
+      <tr><td>{{ l.source }}</td><td>{{ l.tradingsymbol }}</td><td>{{ l.expiry }}</td><td>{{ l.net_qty }}</td>
+        <td>{{ "%.2f"|format(l.sell_avg) if l.sell_avg else "—" }}</td><td>{{ "%.2f"|format(l.mark_price) if l.mark_price is not none else "—" }}</td>
+        <td class="{% if l.mtm_rs and l.mtm_rs > 0 %}ob-ok{% elif l.mtm_rs and l.mtm_rs < 0 %}ob-bad{% endif %}">{{ l.mtm_rs|inr if l.mtm_rs is not none else "—" }}</td>
+        <td>{{ "₹{:,.0f}".format(l.mark_margin_rs or l.margin_rs) if (l.mark_margin_rs or l.margin_rs) else "—" }}</td></tr>
+      {% endfor %}
+    </table>
+    {% else %}<div class="ob-muted">Nothing open.</div>{% endif %}
+  </div>
+
+  <div class="ob-scroll ol-sub">
+    <b>Live trade history</b> <span class="ob-muted">realised after charges ·
+      {% for src, t in L.totals.items() %}{{ src }} {{ t.realised|inr }} ({{ t.n_closed }} leg{{ '' if t.n_closed == 1 else 's' }}){% if not loop.last %} · {% endif %}{% else %}none yet{% endfor %}
+      · paper book (below) ₹{{ "{:,.0f}".format(summary.net_rs) }}</span>
+    {% if L.history %}
+    <table class="ob-table">
+      <tr><th>Source</th><th>Contract</th><th>Expiry</th><th>Sold</th><th>Bought back / settled</th><th>Status</th><th>Net</th></tr>
+      {% for l in L.history %}
+      <tr><td>{{ l.source }}</td><td>{{ l.tradingsymbol }}</td><td>{{ l.expiry }}</td>
+        <td>{{ l.sell_qty }} @ {{ "%.2f"|format(l.sell_avg) if l.sell_avg else "—" }}</td>
+        <td>{% if l.status == 'SETTLED' %}index {{ "{:,.2f}".format(l.settle_index) }} → {{ "%.2f"|format(l.exit_price) }}{% else %}{{ l.buy_qty }} @ {{ "%.2f"|format(l.buy_avg) if l.buy_avg else "—" }}{% endif %}</td>
+        <td>{{ l.status }}</td><td class="{% if l.net_rs and l.net_rs > 0 %}ob-ok{% elif l.net_rs and l.net_rs < 0 %}ob-bad{% endif %}">{{ l.net_rs|inr if l.net_rs is not none else "—" }}</td></tr>
+      {% endfor %}
+    </table>
+    {% else %}<div class="ob-muted">No closed or settled legs yet.</div>{% endif %}
+  </div>
+
+  {% if L.steps %}
+  <div class="ob-scroll ol-sub">
+    <b>Last step results</b>
+    <table class="ob-table">
+      {% for s in L.steps %}<tr><td>{{ s.key }}</td><td>{{ s.date }}</td><td class="{{ {'ok': 'ob-ok', 'failed': 'ob-bad', 'skipped': 'ob-warn'}.get(s.status, '') }}">{{ s.status }}</td><td class="ob-wrap">{{ s.detail }}</td></tr>{% endfor %}
+    </table>
+  </div>
+  {% endif %}
+
+  <details class="ol-sub">
+    <summary><b>Settings</b> <span class="ob-muted">(stored in the DB; override config.OPTIONS_LIVE without a deploy)</span></summary>
+    <div class="ob-cap ol-set">
+      <label class="ob-muted">Mode <select id="ol-mode">{% for m in L.modes %}<option value="{{ m }}"{% if m == st.mode %} selected{% endif %}>{{ m }}</option>{% endfor %}</select></label>
+      <button class="ob-btn ol-save" data-key="mode" data-src="ol-mode" data-kind="str">Save mode</button>
+    </div>
+    <div class="ob-cap ol-set">
+      <label class="ob-muted">NIFTY lots <input id="ol-cap-NIFTY" type="number" min="0" max="{{ st.lots_hard_max }}" step="1" value="{{ st.lots_cap.NIFTY }}"></label>
+      <label class="ob-muted">SENSEX lots <input id="ol-cap-SENSEX" type="number" min="0" max="{{ st.lots_hard_max }}" step="1" value="{{ st.lots_cap.SENSEX }}"></label>
+      <button class="ob-btn ol-save" data-key="lots_cap" data-kind="caps">Save caps</button>
+    </div>
+    <div class="ob-cap ol-set">
+      <label class="ob-muted">Margin buffer ₹ <input id="ol-buf" type="number" min="0" step="10000" value="{{ "%.0f"|format(st.margin_buffer_rs) }}"></label>
+      <button class="ob-btn ol-save" data-key="margin_buffer_rs" data-src="ol-buf" data-kind="num">Save</button>
+      <label class="ob-muted">Weekly loss limit ₹ <input id="ol-loss" type="number" min="0" step="10000" value="{{ "%.0f"|format(st.weekly_loss_limit_rs) }}"></label>
+      <button class="ob-btn ol-save" data-key="weekly_loss_limit_rs" data-src="ol-loss" data-kind="num">Save</button>
+    </div>
+    <div class="ob-cap ol-set">
+      <label class="ob-muted"><input id="ol-adopt" type="checkbox"{% if st.adopt_manual_nifty %} checked{% endif %}> Tuesday buy-back also closes my own (untagged) NIFTY legs of that expiry</label>
+      <button class="ob-btn ol-save" data-key="adopt_manual_nifty" data-src="ol-adopt" data-kind="bool">Save</button>
+    </div>
+  </details>
+  {% endif %}
 </div>
 
 <div class="ob-tiles">
@@ -113,6 +228,42 @@
   </table>
 </div>
 <script>
+// plan 0029 Live panel: every control is a POST (session cookie, same origin) after a confirm step;
+// the server re-checks the confirm word, so a stray request without it is refused.
+(function () {
+  function send(url, body) {
+    fetch(url, {method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)})
+      .then(function (r) { return r.json().then(function (j) { return {ok: r.ok, j: j}; }); })
+      .then(function (x) { if (x.ok) location.reload(); else alert('Refused: ' + (x.j.error || 'error')); })
+      .catch(function (e) { alert('Failed: ' + e); });
+  }
+  function confirmWord(ask, word, typed) {
+    if (typed) { var t = prompt(ask); return t === null ? null : t; }
+    return confirm(ask) ? word : null;
+  }
+  Array.prototype.forEach.call(document.querySelectorAll('.ol-act'), function (b) {
+    b.addEventListener('click', function () {
+      var w = confirmWord(b.dataset.ask, b.dataset.word, b.dataset.type === '1');
+      if (w === null) return;
+      var body = JSON.parse(b.dataset.body || '{}'); body.confirm = w;
+      send(b.dataset.url, body);
+    });
+  });
+  Array.prototype.forEach.call(document.querySelectorAll('.ol-save'), function (b) {
+    b.addEventListener('click', function () {
+      var k = b.dataset.kind, v;
+      if (k === 'caps') v = {NIFTY: parseInt(document.getElementById('ol-cap-NIFTY').value, 10), SENSEX: parseInt(document.getElementById('ol-cap-SENSEX').value, 10)};
+      else if (k === 'num') v = parseFloat(document.getElementById(b.dataset.src).value);
+      else if (k === 'bool') v = document.getElementById(b.dataset.src).checked;
+      else v = document.getElementById(b.dataset.src).value;
+      var auto = b.dataset.key === 'mode' && v === 'auto';
+      var w = auto ? confirmWord('Mode AUTO places real orders with no approval. Type AUTO to confirm.', 'AUTO', true)
+                   : confirmWord('Save ' + b.dataset.key + ' = ' + JSON.stringify(v) + '?', 'SAVE', false);
+      if (w === null) return;
+      send('/api/options/live/settings', {key: b.dataset.key, value: v, confirm: w});
+    });
+  });
+})();
 (function () {
   var box = document.getElementById('ob-capital');
   if (!box) return;
