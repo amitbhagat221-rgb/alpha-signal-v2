@@ -92,13 +92,19 @@ def years(t0, t1):
     return (date.fromisoformat(t1) - date.fromisoformat(t0)).days / 365.0
 
 
-def leg_cost(price, side, lot, slip, d):
-    """Points per unit for trading one leg once (side = 'sell' | 'buy')."""
-    c = BROKERAGE_RS * (1 + GST) / lot
+def charges_pts(price, side, units, d):
+    """Points per unit of the broker, exchange and tax charges for one order of `units`
+    (side = 'sell' | 'buy'): brokerage per order, exchange charge + GST, STT on a sell,
+    stamp on a buy. No slippage — the live book (options_live) pays it in its fill prices."""
+    c = BROKERAGE_RS * (1 + GST) / units
     c += price * EXCHANGE * (1 + GST)
     c += price * (stt_sell(d) if side == "sell" else STAMP_BUY)
-    c += max(TICK, slip * price)
     return c
+
+
+def leg_cost(price, side, lot, slip, d):
+    """Points per unit for trading one leg once (side = 'sell' | 'buy'): charges + slippage."""
+    return charges_pts(price, side, lot, d) + max(TICK, slip * price)
 
 
 def intrinsic(cp, K, S):

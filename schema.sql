@@ -2683,3 +2683,85 @@ CREATE TABLE IF NOT EXISTS valuation_ranges (
     implied_growth_10y  REAL,
     PRIMARY KEY (sid, as_of, method)
 );
+
+-- options_live:begin  (plan 0029, options_live.py — options_live.ensure_tables() creates this block on a live DB)
+-- Settings and job state for the live option book: a key here overrides config.OPTIONS_LIVE (mode,
+-- lots_cap, margin_buffer_rs, weekly_loss_limit_rs, kill, adopt_manual_nifty) without a deploy; the
+-- other keys are state (kill_reason, approval:<ticket>, rotation:<date>, reconcile, step:<step>:<underlying>).
+CREATE TABLE IF NOT EXISTS option_live_settings (
+    key         TEXT PRIMARY KEY,
+    value       TEXT NOT NULL,                 -- JSON
+    updated_at  TEXT NOT NULL,                 -- UTC ISO
+    updated_by  TEXT                           -- cockpit | cli | <step>
+);
+
+-- Every order event of the live option book, append-only: proposed / ticket / approved / expired /
+-- place / modify / cancel / status / reject / error / fill / shadow_fill / seed. A `fill` carries Kite's
+-- trade_id (or 'order:<order_id>' for an order's own summary when its trades are not read yet); the
+-- ledger (option_live_trades) is rebuilt from these rows.
+CREATE TABLE IF NOT EXISTS option_live_orders (
+    event_id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    at               TEXT NOT NULL,            -- UTC ISO
+    trade_date       TEXT NOT NULL,            -- IST session date
+    step             TEXT,                     -- entry | buyback | closeall | record | ...
+    mode             TEXT,                     -- shadow | approve | auto (the mode the step ran in)
+    source           TEXT,                     -- shadow | live (tagged) | manual (Amit's own)
+    underlying       TEXT,
+    expiry           TEXT,
+    ticket_id        TEXT,
+    event            TEXT NOT NULL,
+    exchange         TEXT,
+    tradingsymbol    TEXT,
+    option_type      TEXT,                     -- CE | PE
+    strike           REAL,
+    lot              INTEGER,
+    transaction_type TEXT,                     -- SELL | BUY
+    variety          TEXT,                     -- regular | iceberg
+    quantity         INTEGER,                  -- units
+    price            REAL,
+    order_id         TEXT,
+    trade_id         TEXT,                     -- fills only; unique
+    status           TEXT,                     -- Kite order status
+    filled_qty       INTEGER,
+    avg_price        REAL,
+    detail           TEXT                      -- JSON / message
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_option_live_orders_trade ON option_live_orders(trade_id);
+CREATE INDEX IF NOT EXISTS idx_option_live_orders_leg ON option_live_orders(underlying, expiry, tradingsymbol);
+
+-- The live option ledger: one row per leg (underlying × expiry × contract × source), rebuilt from the
+-- fill events in option_live_orders; marked (mark), closed by a buy-back or settled at expiry (settle).
+-- net_qty = bought − sold (negative = short). ₹ amounts on the whole leg.
+CREATE TABLE IF NOT EXISTS option_live_trades (
+    underlying     TEXT NOT NULL,
+    expiry         TEXT NOT NULL,
+    tradingsymbol  TEXT NOT NULL,
+    source         TEXT NOT NULL,              -- shadow | live | manual
+    exchange       TEXT,
+    option_type    TEXT,
+    strike         REAL,
+    lot            INTEGER,
+    entry_date     TEXT,                       -- first fill (IST date)
+    ticket_id      TEXT,
+    sell_qty       INTEGER,
+    sell_avg       REAL,
+    buy_qty        INTEGER,
+    buy_avg        REAL,
+    net_qty        INTEGER,
+    n_orders       INTEGER,
+    charges_rs     REAL,                       -- brokerage, exchange charge, STT, stamp (option_book.charges_pts)
+    margin_rs      REAL,                       -- Kite basket margin of the strangle at entry (both legs carry it)
+    status         TEXT NOT NULL,              -- OPEN | CLOSED | SETTLED
+    settle_index   REAL,
+    exit_price     REAL,                       -- intrinsic at settlement
+    gross_rs       REAL,
+    net_rs         REAL,                       -- after charges; set when CLOSED or SETTLED
+    closed_at      TEXT,                       -- IST date the leg went flat or settled
+    mark_price     REAL,
+    mark_at        TEXT,
+    mtm_rs         REAL,                       -- open P&L at mark_price, after charges
+    mark_margin_rs REAL,                       -- Kite margin of the open legs at the mark (expiry-day add-on)
+    updated_at     TEXT,
+    PRIMARY KEY (underlying, expiry, tradingsymbol, source)
+);
+-- options_live:end
