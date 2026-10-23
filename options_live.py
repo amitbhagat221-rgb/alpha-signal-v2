@@ -1160,16 +1160,16 @@ def main(argv=None):
     ap.add_argument("args", nargs="*", help="set: <key> <json value>")
     ap.add_argument("--underlying", "-u")
     a = ap.parse_args(argv)
-    ensure_tables()
-    if a.step == "set":
-        key, raw = a.args
-        print(f"{key} = {set_setting(key, json.loads(raw), by='cli')}")
-        return 0
-    if a.step == "show":
+    if a.step == "show":                            # read-only, like plan: no table is created
         print(json.dumps(page_data(), default=str, indent=1))
         return 0
     if a.step == "plan":
         plan_only(make_ctx("plan"), (a.underlying or "NIFTY").upper())
+        return 0
+    ensure_tables()
+    if a.step == "set":
+        key, raw = a.args
+        print(f"{key} = {set_setting(key, json.loads(raw), by='cli')}")
         return 0
     if not runlog._ctx.get("run_id"):
         runlog.start(f"manual:options_live_{a.step}", module="options_live")
