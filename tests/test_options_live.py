@@ -685,3 +685,51 @@ def test_live_controls_need_the_cookie_and_the_confirm_word(ops, monkeypatch):
     assert authed.post("/api/options/live/closeall", json={"confirm": "CLOSE ALL"}).status_code == 200 and spawned
     assert anon.post("/api/options/live/approve", json={"ticket_id": "x", "confirm": "APPROVE"}).status_code == 401
     assert authed.post("/api/options/live/approve", json={"ticket_id": "x", "confirm": "APPROVE"}).status_code == 409
+
+
+# ───────────────────────────── testorder (one-off order-permission proof) ─────────────────────────────
+
+def _atm_call(fake):
+    spot = fake.spot["NSE:NIFTY 50"]
+    calls = [r for r in fake.ins["NFO"] if r["instrument_type"] == "CE" and str(r["expiry"]) == NIFTY_EXP]
+    return min(calls, key=lambda r: abs(r["strike"] - spot))["tradingsymbol"]
+
+
+def test_testorder_places_far_below_the_bid_then_cancels(conn):
+    fake = FakeKite()
+    res, ctx = run("testorder", fake, Clock(FRI, "10:30"), u="NIFTY")
+    assert res["status"] == "ok" and "cancelled" in res["detail"]
+    place = [c for c in fake.calls if c[0] == "place_order"]
+    assert len(place) == 1
+    kw = place[0][2]
+    sym = _atm_call(fake)
+    assert kw["tradingsymbol"] == sym and kw["transaction_type"] == "BUY" and kw["quantity"] == 65
+    assert kw["price"] <= fake.book[sym][0] * 0.5 + 1e-9                    # half the bid: cannot fill
+    assert "cancel_order" in fake.names() and not fake.pos                    # nothing bought
+    ev = events(conn)
+    assert list(ev.event) == ["place", "cancel", "status"] and set(ev.source) == {"test"}
+    assert ev.status.iloc[-1] == "CANCELLED"
+    assert ctx["sent"] and "test order OK" in ctx["sent"][-1][0]
+
+
+def test_testorder_reports_a_refusal_loudly(conn):
+    fake = FakeKite()
+    fake.reject_on_place.add(_atm_call(fake))
+    res, ctx = run("testorder", fake, Clock(FRI, "10:30"), u="NIFTY")
+    assert res["status"] == "failed" and "refused" in res["detail"]
+    assert "cancel_order" not in fake.names()
+    assert ctx["sent"][-1][1] is True and "REFUSED" in ctx["sent"][-1][0]
+
+
+def test_testorder_needs_a_login_and_respects_stop(conn):
+    res, ctx = run("testorder", NoKiteSession("no login"), Clock(FRI, "10:30"), u="NIFTY")
+    assert res["status"] == "skipped" and "log in" in ctx["sent"][-1][0]
+    fake = FakeKite()
+    res, _ = run("testorder", fake, Clock(FRI, "10:30"), u="NIFTY", kill=True)
+    assert res["status"] == "skipped" and "place_order" not in fake.names()
+
+
+def test_testorder_is_not_scheduled():
+    import pathlib
+    cron = pathlib.Path(__file__).resolve().parents[1].joinpath("ops", "options_live.cron").read_text()
+    assert "testorder" not in cron

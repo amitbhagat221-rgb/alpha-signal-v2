@@ -1056,16 +1056,77 @@ def plan_only(ctx, u):
     return p
 
 
+OPEN_STATES = ("OPEN", "OPEN PENDING", "VALIDATION PENDING", "PUT ORDER REQ RECEIVED", "TRIGGER PENDING",
+               "MODIFY PENDING", "MODIFY VALIDATION PENDING", "AMO REQ RECEIVED")
+
+
+def testorder(ctx, u="NIFTY"):
+    """One-off proof that this Kite app may place and cancel orders (Amit 2026-10-23): BUY 1 lot of the
+    front-expiry at-the-money call at half its bid — far below the market, so it cannot fill — and cancel it
+    at once. By hand only (not on cron), in any mode; Stop blocks it."""
+    if ctx["settings"].get("kill"):
+        return outcome(ctx, u, "skipped", "Stop is on")
+    if not has_session(ctx):
+        return outcome(ctx, u, "skipped", "no Kite login", f"test order not sent — log in to Kite first: {LOGIN_PAGE}")
+    m, e = MARKETS[u], kq.front_expiry(u, ctx["today"])
+    spot = call(ctx, "ltp", [m["spot"]])[m["spot"]]["last_price"]
+    calls = [l for l in option_instruments(ctx).values() if l["underlying"] == u and l["expiry"] == e and l["option_type"] == "CE"]
+    if not calls:
+        return outcome(ctx, u, "failed", f"no {u} {e} calls in Kite's instruments")
+    leg = min(calls, key=lambda l: abs(l["strike"] - spot))
+    bid, _, last = quotes(ctx, [leg])[leg["tradingsymbol"]]
+    ref = bid or last
+    if not ref or ref < 40 * TICK:                  # half of a price under ₹2 is too close to the market
+        return outcome(ctx, u, "failed", f"{leg['tradingsymbol']} has no usable price ({ref})")
+    px = round(max(TICK, math.floor(ref * 0.5 / TICK) * TICK), 2)
+    fields = dict(source="test", **_leg_fields(leg), transaction_type="BUY", variety="regular", quantity=leg["lot"], price=px)
+    ctx["may_write"] = True
+    try:
+        try:
+            oid = call(ctx, "place_order", variety="regular", exchange=leg["exchange"], tradingsymbol=leg["tradingsymbol"],
+                       transaction_type="BUY", quantity=leg["lot"], product="NRML", order_type="LIMIT", price=px,
+                       validity="DAY", tag=ctx["settings"]["tag"])
+        except Exception as ex:                     # noqa: BLE001 — the answer we came for: Kite refused the order
+            log_event(ctx, "error", **fields, detail=f"{type(ex).__name__}: {ex}")
+            return outcome(ctx, u, "failed", f"Kite refused the order: {type(ex).__name__}: {ex}",
+                           f"test order REFUSED by Kite — {type(ex).__name__}: {ex}. Orders from this app don't work yet.",
+                           urgent=True)
+        log_event(ctx, "place", **fields, order_id=oid)
+        ctx["wait"](2)
+        o = next((x for x in call(ctx, "orders") if x["order_id"] == oid), {})
+        if o.get("status") in OPEN_STATES:
+            call(ctx, "cancel_order", variety="regular", order_id=oid)
+            log_event(ctx, "cancel", **fields, order_id=oid)
+            ctx["wait"](2)
+            o = next((x for x in call(ctx, "orders") if x["order_id"] == oid), o)
+    finally:
+        ctx["may_write"] = False
+    status, filled, why = o.get("status"), o.get("filled_quantity") or 0, o.get("status_message") or ""
+    log_event(ctx, "status", **fields, order_id=oid, status=status, filled_qty=filled, detail=why or None)
+    what = f"BUY {leg['lot']} {leg['tradingsymbol']} @ ₹{px} (bid ₹{bid}), order {oid}"
+    if filled:
+        return outcome(ctx, u, "failed", f"{what} FILLED {filled} — unexpected",
+                       f"test order FILLED {filled} units of {leg['tradingsymbol']} — sell them in Kite", urgent=True)
+    if status == "CANCELLED":
+        return outcome(ctx, u, "ok", f"{what}: accepted by Kite, then cancelled",
+                       f"test order OK — Kite accepted and cancelled {leg['tradingsymbol']} (order {oid}). Orders work.")
+    if status == "REJECTED":
+        return outcome(ctx, u, "ok", f"{what}: accepted by Kite, rejected downstream: {why}",
+                       f"test order reached the exchange (so the app may place orders) but was rejected: {why}")
+    return outcome(ctx, u, "failed", f"{what}: still {status} after cancel — check Kite's Orders tab",
+                   f"test order {oid} is still {status} — cancel it in Kite's Orders tab", urgent=True)
+
+
 STEPS = {"entry": entry, "buyback": buyback, "closeall": closeall, "record": record, "mark": mark,
-         "settle": settle, "reconcile": reconcile, "precheck": precheck, "weekly": weekly}
-PER_UNDERLYING = ("entry", "buyback")
+         "settle": settle, "reconcile": reconcile, "precheck": precheck, "weekly": weekly, "testorder": testorder}
+PER_UNDERLYING = ("entry", "buyback", "testorder")
 
 
 def run_step(step, underlying=None, **ctx_kw):
     ensure_tables()
     ctx = make_ctx(step, **ctx_kw)
     if step in PER_UNDERLYING:
-        u = (underlying or ("NIFTY" if step == "buyback" else "")).upper()
+        u = (underlying or ("NIFTY" if step in ("buyback", "testorder") else "")).upper()
         if u not in MARKETS:
             raise SystemExit(f"--underlying must be one of {sorted(MARKETS)}")
         return STEPS[step](ctx, u)
