@@ -63,7 +63,8 @@ IST = ZoneInfo("Asia/Kolkata")
 MARKETS = {u: {"exchange": ex, "spot": key} for u, ex, key in kq.MARKETS}
 MODES = ("off", "shadow", "approve", "auto")
 LIVE_MODES = ("approve", "auto")
-EDITABLE = ("mode", "lots_cap", "margin_buffer_rs", "weekly_loss_limit_rs", "kill", "adopt_manual_nifty")
+EDITABLE = ("mode", "lots_cap", "margin_buffer_rs", "weekly_loss_limit_rs", "kill", "adopt_manual_nifty",
+            "vix_halt", "vix_halve")
 FINAL = ("COMPLETE", "CANCELLED", "REJECTED")
 WRITE_CALLS = ("place_order", "modify_order", "cancel_order")
 TICK = ob.TICK
@@ -144,6 +145,13 @@ def set_setting(key, value, by="cli"):
             raise ValueError(f"{key} must be a number ≥ 0")
     if key in ("kill", "adopt_manual_nifty") and not isinstance(value, bool):
         raise ValueError(f"{key} must be true or false")
+    if key in ("vix_halt", "vix_halve"):
+        if not isinstance(value, (int, float)) or isinstance(value, bool) or not 0 < value <= 100:
+            raise ValueError(f"{key} must be a VIX level between 0 and 100")
+        cur = settings()
+        halt, halve = (value, cur["vix_halve"]) if key == "vix_halt" else (cur["vix_halt"], value)
+        if halve > halt:
+            raise ValueError(f"vix_halve ({halve}) must not be above vix_halt ({halt})")
     put_state(key, value, by)
     return value
 
@@ -375,10 +383,14 @@ def week_realised(today, source):
 
 # ─────────────────────────── broker reads ───────────────────────────
 
-def basket_margin(ctx, legs_, lots):
-    orders = [{"exchange": l["exchange"], "tradingsymbol": l["tradingsymbol"], "transaction_type": "SELL",
-               "variety": "regular", "product": "NRML", "order_type": "MARKET", "quantity": int(lots * l["lot"]),
-               "price": 0, "trigger_price": 0} for l in legs_]
+def _order(exchange, sym, qty, side="SELL"):
+    return {"exchange": exchange, "tradingsymbol": sym, "transaction_type": side, "variety": "regular",
+            "product": "NRML", "order_type": "MARKET", "quantity": int(qty), "price": 0, "trigger_price": 0}
+
+
+def _basket_total(ctx, orders):
+    if not orders:
+        return 0.0
     m = call(ctx, "basket_order_margins", orders, consider_positions=False, mode="compact")
     total = (m.get("final") or m.get("initial") or {}).get("total")
     if total is None:
@@ -386,9 +398,104 @@ def basket_margin(ctx, legs_, lots):
     return float(total)
 
 
+def basket_margin(ctx, legs_, lots):
+    return _basket_total(ctx, [_order(l["exchange"], l["tradingsymbol"], lots * l["lot"]) for l in legs_])
+
+
+def peak_available(ctx, e, avail):
+    """Free margin on expiry day `e`, before the new trade. Kite checks only today's margin when the
+    order goes in; the peak comes later, after positions expiring before `e` have released theirs
+    (e.g. NIFTY legs expiring today, while SENSEX expires Thursday). So: today's free margin
+    + what those positions block (basket margin of all open option legs − of the ones still open on `e`)
+    − their settlement at today's index (intrinsic value of the short legs)
+    − the expiry-day extra of short legs that expire on `e` too.
+    No credit (returns `avail`) when a derivative position is not a NIFTY/SENSEX option or a long
+    leg expires before `e`: the release could not be worked out safely.
+    → {"available": ₹, "freed": ₹, "stay_extra": ₹, "note": text}"""
+    pos = {}
+    for p in call(ctx, "positions").get("net", []):
+        q = int(p.get("quantity") or 0)
+        if q and p.get("exchange") in ("NFO", "BFO"):
+            pos[p["tradingsymbol"]] = pos.get(p["tradingsymbol"], 0) + q
+    pos = {k: q for k, q in pos.items() if q}
+    none = {"available": avail, "freed": 0.0, "stay_extra": 0.0}
+    if not pos:
+        return none | {"note": "no open F&O positions"}
+    inst = option_instruments(ctx)
+    other = sorted(k for k in pos if k not in inst)
+    if other:
+        return none | {"note": f"no credit: {', '.join(other)} is not a NIFTY/SENSEX option"}
+    leave = {k: q for k, q in pos.items() if inst[k]["expiry"] < e}
+    stay = {k: q for k, q in pos.items() if k not in leave}
+    if any(q > 0 for q in leave.values()):
+        return none | {"note": "no credit: a long leg expires first"}
+    keys = {u: MARKETS[u]["spot"] for u in {inst[k]["underlying"] for k in pos}}
+    ltp = call(ctx, "ltp", sorted(keys.values()))
+    spot = {u: float(ltp[key]["last_price"]) for u, key in keys.items()}
+
+    def orders(d):
+        return [_order(inst[k]["exchange"], k, abs(q), "SELL" if q < 0 else "BUY") for k, q in d.items()]
+
+    def intrinsic(k):
+        i, S = inst[k], spot[inst[k]["underlying"]]
+        return max(0.0, S - i["strike"]) if i["option_type"] == "CE" else max(0.0, i["strike"] - S)
+
+    freed = 0.0
+    if leave:
+        settle = sum(abs(q) * intrinsic(k) for k, q in leave.items())
+        freed = max(0.0, _basket_total(ctx, orders(pos)) - _basket_total(ctx, orders(stay)) - settle)
+    stay_extra = sum(ob.EXPIRY_ELM_PCT * spot[inst[k]["underlying"]] * abs(q)
+                     for k, q in stay.items() if q < 0 and inst[k]["expiry"] == e)
+    return {"available": avail + freed - stay_extra, "freed": freed, "stay_extra": stay_extra,
+            "note": f"{len(leave)} leg(s) expire before {e} and free ₹{freed:,.0f}"
+                    + (f"; legs also expiring {e} add ₹{stay_extra:,.0f} that day" if stay_extra else "")}
+
+
 def available(ctx):
     m = call(ctx, "margins", "equity")
     return float(m["net"])
+
+
+def snapshot_margin(ctx):
+    """Kite's equity margin → state 'margin' for the Live panel: used (utilised debits: SPAN + exposure +
+    premium + M2M), free (net) and total (used + free)."""
+    m = call(ctx, "margins", "equity")
+    u, a = m.get("utilised") or {}, m.get("available") or {}
+    free, used = float(m["net"]), float(u.get("debits") or 0)
+    snap = {"at": _utc(), "free": free, "used": used, "total": free + used,
+            "span": float(u.get("span") or 0), "exposure": float(u.get("exposure") or 0),
+            "cash": float(a.get("cash") or 0) + float(a.get("intraday_payin") or 0),   # opening cash + today's pay-in
+            "collateral": float(a.get("collateral") or 0)}
+    put_state("margin", snap, ctx["step"])
+    return snap
+
+
+def india_vix(ctx):
+    """India VIX at entry → (level, where from): Kite's live quote, else the stored close if it is at most
+    vix_max_age_days old, else (None, why) — the VIX guard then halts the entry."""
+    try:
+        v = call(ctx, "ltp", ["NSE:INDIA VIX"])["NSE:INDIA VIX"]["last_price"]
+        if v:
+            return float(v), "Kite live"
+    except Exception as ex:                         # noqa: BLE001 — fall back to the stored close
+        print(f"options_live: no live India VIX ({type(ex).__name__}: {ex})")
+    df = read_sql("SELECT date, value FROM macro_history WHERE indicator_id = 'india_vix' AND value > 0 "
+                  "ORDER BY date DESC LIMIT 1")
+    if df.empty:
+        return None, "no India VIX stored"
+    d = df["date"].iloc[0]
+    if (date.fromisoformat(ctx["today"]) - date.fromisoformat(d)).days > ctx["settings"]["vix_max_age_days"]:
+        return None, f"last stored India VIX is from {d}"
+    return float(df["value"].iloc[0]), f"close {d}"
+
+
+def vix_guard(s, vix, lots):
+    """(lots, action): halt at VIX ≥ vix_halt or when VIX is unknown; half the lots (at least 1) above vix_halve."""
+    if vix is None or vix >= s["vix_halt"]:
+        return 0, "halt"
+    if vix > s["vix_halve"]:
+        return (max(1, lots // 2) if lots else 0), "halve"
+    return lots, "normal"
 
 
 def quotes(ctx, legs_):
@@ -612,24 +719,44 @@ def build_plan(ctx, u, e):
                       "ask": _clean(r.ask), "mid": _clean(r.mid), "delta": dmap.get((cp, k[cp])),
                       "freeze": int(r.freeze) if _clean(r.get("freeze")) else int(s["freeze_qty"][u])})
     per_lot = basket_margin(ctx, legs_, 1)
+    extra = ob.expiry_day_extra(F, legs_[0]["lot"])  # the expiry-day ELM per lot: size so the peak fits
     avail = available(ctx)
+    peak = peak_available(ctx, e, avail)
+    buf = s["margin_buffer_rs"]
     cap = int(s["lots_cap"].get(u, 0))
-    lots = size_lots(cap, avail, s["margin_buffer_rs"], per_lot)
+    # two checks: Kite takes the entry margin now; the expiry-day peak must fit what is free on `e`
+    lots = min(size_lots(cap, avail, buf, per_lot), size_lots(cap, peak["available"], buf, per_lot + extra))
+    vix, vix_src = india_vix(ctx)
+    lots_pre_vix = lots
+    lots, vix_action = vix_guard(s, vix, lots)
     margin = per_lot * lots
     while lots > 1:                                 # the margin at size, not per lot × lots
         margin = basket_margin(ctx, legs_, lots)
-        if margin <= avail - s["margin_buffer_rs"]:
+        if margin <= avail - buf and margin + extra * lots <= peak["available"] - buf:
             break
         lots -= 1
         margin = per_lot * lots
     return {"underlying": u, "expiry": e, "spot": spot, "forward": F, "legs": legs_, "margin_per_lot": per_lot,
-            "available": avail, "buffer": s["margin_buffer_rs"], "cap": cap, "lots": lots, "margin_rs": margin}
+            "available": avail, "peak_available": peak["available"], "freed_before_expiry": peak["freed"],
+            "peak_note": peak["note"], "buffer": buf, "cap": cap, "lots": lots, "margin_rs": margin,
+            "vix": vix, "vix_src": vix_src, "vix_action": vix_action, "lots_pre_vix": lots_pre_vix, "vix_halt": s["vix_halt"],
+            "expiry_extra_per_lot": extra, "expiry_margin_rs": margin + extra * lots}
+
+
+def _vix_text(p):
+    v = f"{p['vix']:.2f}" if p["vix"] is not None else "unknown"
+    return {"halt": f"India VIX {v} ({p['vix_src']}): no entry at VIX ≥ {p['vix_halt']:g} or unknown",
+            "halve": f"India VIX {v} ({p['vix_src']}): lots halved {p['lots_pre_vix']} → {p['lots']}",
+            "normal": f"India VIX {v}"}[p["vix_action"]]
 
 
 def _plan_text(p):
     return (f"{p['underlying']} {p['expiry']}: sell " + " + ".join(
         f"{l['tradingsymbol']} (bid {l['bid']}, ask {l['ask']}, Δ {l['delta']:.3f})" for l in p["legs"])
-        + f" × {p['lots']} lot(s) · margin ₹{p['margin_per_lot']:,.0f}/lot · available ₹{p['available']:,.0f}")
+        + f" × {p['lots']} lot(s) · margin ₹{p['margin_per_lot']:,.0f}/lot + ₹{p['expiry_extra_per_lot']:,.0f}/lot on expiry day"
+        + f" (₹{p['expiry_margin_rs']:,.0f} at size) · available ₹{p['available']:,.0f} now,"
+        + f" ₹{p['peak_available']:,.0f} on expiry day ({p['peak_note']})"
+        + f" · {_vix_text(p)}")
 
 
 def wait_for_approval(ctx, ticket_id):
@@ -702,17 +829,24 @@ def entry(ctx, u):
             return outcome(ctx, u, "skipped", f"rotation gate: {why}",
                            f"SENSEX entry skipped — rotation gate failed: {why}. NIFTY expires normally.", urgent=True)
     plan = build_plan(ctx, u, e)
+    if plan["vix_action"] == "halt":
+        return outcome(ctx, u, "skipped", f"VIX guard: {_vix_text(plan)}",
+                       f"{u} entry for {e} skipped — {_vix_text(plan)}.", urgent=True)
     ticket_id = f"{u}-{e}-{today}"
     for leg in plan["legs"]:
         log_event(ctx, "proposed", source=src, ticket_id=ticket_id, **_leg_fields(leg), transaction_type="SELL",
                   quantity=plan["lots"] * leg["lot"], price=leg["bid"],
-                  detail={k: plan[k] for k in ("lots", "cap", "margin_per_lot", "available", "buffer", "margin_rs", "spot", "forward")}
+                  detail={k: plan[k] for k in ("lots", "cap", "margin_per_lot", "available", "peak_available", "freed_before_expiry",
+                                               "buffer", "margin_rs", "spot", "forward",
+                                               "vix", "vix_action", "lots_pre_vix", "expiry_margin_rs")}
                   | {"delta": leg["delta"], "ask": leg["ask"], "mid": leg["mid"]})
     if plan["lots"] == 0:
         if mode != "shadow":
             return outcome(ctx, u, "skipped", "not enough margin",
-                           f"{u} entry skipped: not enough margin — available ₹{plan['available']:,.0f} less the "
-                           f"₹{plan['buffer']:,.0f} buffer is under ₹{plan['margin_per_lot']:,.0f} a lot.", urgent=True)
+                           f"{u} entry skipped: not enough margin for one lot — needs ₹{plan['margin_per_lot']:,.0f} now "
+                           f"(free ₹{plan['available']:,.0f}) and ₹{plan['margin_per_lot'] + plan['expiry_extra_per_lot']:,.0f} "
+                           f"on expiry day (free then ≈ ₹{plan['peak_available']:,.0f}), each after the "
+                           f"₹{plan['buffer']:,.0f} buffer.", urgent=True)
         plan["lots"] = int(s["shadow_min_lots"])
         plan["margin_rs"] = plan["margin_per_lot"] * plan["lots"]
         plan["margin_short"] = True
@@ -726,7 +860,7 @@ def entry(ctx, u):
         credit = sum((o["avg"] or 0) * o["filled"] for o in res.values())
         return outcome(ctx, u, "ok", _fills_text(res) + note,
                        f"{u} {e} sold (simulated at the bid): {_fills_text(res)} = ₹{credit:,.0f} credit, "
-                       f"margin ₹{plan['margin_rs']:,.0f}{note}.")
+                       f"margin ₹{plan['margin_rs']:,.0f}{note} · {_vix_text(plan)}.")
     if mode == "approve":
         log_event(ctx, "ticket", source=src, ticket_id=ticket_id, underlying=u, expiry=e,
                   detail={"lots": plan["lots"], "margin_rs": plan["margin_rs"], "legs": [l["tradingsymbol"] for l in plan["legs"]]})
@@ -753,7 +887,8 @@ def entry(ctx, u):
                        "Orders cancelled; no position.", urgent=True)
     credit = sum((o["avg"] or 0) * o["filled"] for o in res.values())
     return outcome(ctx, u, "ok", _fills_text(res),
-                   f"{u} {e} sold: {_fills_text(res)} = ₹{credit:,.0f} credit, margin ₹{plan['margin_rs']:,.0f}.")
+                   f"{u} {e} sold: {_fills_text(res)} = ₹{credit:,.0f} credit, margin ₹{plan['margin_rs']:,.0f} "
+                   f"(₹{plan['expiry_margin_rs']:,.0f} on expiry day) · {_vix_text(plan)}.")
 
 
 def _unbalanced(ctx, u, e, res, ticket_id):
@@ -875,6 +1010,7 @@ def record(ctx):
         client(ctx)
     except NoKiteSession:
         return outcome(ctx, "ALL", "idle", "no Kite login today: nothing to record")
+    snapshot_margin(ctx)
     tag = ctx["settings"]["tag"]
     inst = option_instruments(ctx)
     tagged = {str(o["order_id"]) for o in call(ctx, "orders") if tag in ([o.get("tag")] + list(o.get("tags") or []))}
@@ -952,6 +1088,7 @@ def mark(ctx):
             for r in rows:
                 if (r["underlying"], r["expiry"], r["source"]) == (u, e, src):
                     r["mark_margin_rs"] = m
+        snapshot_margin(ctx)
     if rows:
         upsert_df(pd.DataFrame(rows), "option_live_trades")
     total = sum(r["mtm_rs"] for r in rows)
@@ -1192,11 +1329,22 @@ def page_data():
             t["n_closed"] += 1
     states = _rows("SELECT key, value, updated_at FROM option_live_settings WHERE key LIKE 'step:%' ORDER BY updated_at DESC")
     today = datetime.now(IST).date().isoformat()
+    groups = {}                                     # one basket margin per (underlying, expiry, source), not per leg
+    for l in open_:
+        m = l.get("mark_margin_rs") or l.get("margin_rs")
+        if m:
+            groups[(l["underlying"], l["expiry"], l["source"])] = m
+    margin = get_state("margin")
+    if margin:
+        margin["at_ist"] = datetime.fromisoformat(margin["at"]).astimezone(IST).strftime("%a %d %b, %H:%M IST")
+        margin["free_after_buffer"] = margin["free"] - s["margin_buffer_rs"]
     return {"settings": s, "modes": MODES, "ticket": ticket, "open": open_, "history": hist, "totals": totals,
             "rotation": get_state(f"rotation:{today}"), "reconcile": get_state("reconcile"),
             "steps": [{"key": k[5:], **json.loads(v)} for k, v in zip(states.get("key", []), states.get("value", []))][:12],
             "week": {src: week_realised(today, src) for src in ("shadow", "live")},
-            "real_money": s["mode"] in LIVE_MODES}
+            "real_money": s["mode"] in LIVE_MODES,
+            "margin": margin, "margin_open": sum(groups.values()) if groups else None,
+            "margin_open_missing": sum(1 for l in open_ if not (l.get("mark_margin_rs") or l.get("margin_rs")))}
 
 
 def spawn_closeall():

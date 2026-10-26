@@ -44,6 +44,8 @@ STAMP_BUY = 0.00003             # stamp duty, buy side
 SLIP = 0.01                     # slippage, fraction of price per leg per side
 TICK = 0.05
 MARGIN_STRANGLE_PCT = 0.12      # of the forward, when no Kite margin was captured (Kite: 11.8% / 10.7%)
+EXPIRY_ELM_PCT = 0.02           # SEBI (Nov 2024): extra ELM on each short option on its own expiry day, of notional
+EXPOSURE_PCT = 0.02             # exposure margin on each short index option, every day, of notional (Kite: 2.0 %)
 
 # lot size from (first trade date it applies, lot). NIFTY measured from the legacy
 # archive's futures turnover 2019-01 → 2024-04 (75, then 50 from mid-2021), NSE circulars
@@ -311,6 +313,21 @@ BACKTEST = {"NIFTY": {"window": "2019-02 → 2026-10", "trades": 378, "mean_pct"
 PASS_BAR_TRADES = 25
 
 
+def expiry_day_extra(F, units, short_legs=2):
+    """₹ of extra margin a short position carries on its expiry day: EXPIRY_ELM_PCT of the notional
+    (index level × units) of each short leg. A strangle has two short legs."""
+    return EXPIRY_ELM_PCT * F * units * short_legs
+
+
+def margin_parts(margin_rs, F, units, short_legs=2):
+    """Split one lot's entry margin into SPAN + exposure, and add the expiry-day extra.
+    Exposure is EXPOSURE_PCT of each short leg's notional; SPAN is what is left of the quoted total."""
+    exposure = EXPOSURE_PCT * F * units * short_legs
+    extra = expiry_day_extra(F, units, short_legs)
+    return {"span_rs": margin_rs - exposure, "exposure_rs": exposure, "expiry_extra_rs": extra,
+            "expiry_margin_rs": margin_rs + extra}
+
+
 def page_data():
     """Everything the /options page shows (plan 0022). The page renders this, decides nothing."""
     from sources.kite_pull import TOKEN_CACHE
@@ -319,6 +336,9 @@ def page_data():
     trades = []
     for r in b.to_dict("records"):
         r = {k: (None if isinstance(v, float) and np.isnan(v) else v) for k, v in r.items()}
+        r["expiry_margin_rs"] = r["margin_rs"]
+        if r["margin_rs"] and r["forward"] and r["lot"]:
+            r.update(margin_parts(r["margin_rs"], r["forward"], r["lot"]))
         trades.append(r)
     settled = [t for t in trades if t["status"] == "SETTLED"]
     rets = [t["ret_on_margin"] for t in settled]

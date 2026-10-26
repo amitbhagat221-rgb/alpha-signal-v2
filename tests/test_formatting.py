@@ -1,7 +1,7 @@
 """formatting.py — must match the template/email formatting it replaced."""
 import math
 
-from formatting import DASH, crore, inr, pct, signed, tone
+from formatting import DASH, crore, inr, inr_short, pct, signed, tone
 
 
 def test_signed_matches_percent_format():
@@ -24,8 +24,15 @@ def test_pct_inr_crore():
     assert crore(-23) == "-₹23 Cr" and crore(-250000) == "-₹2.5L Cr" and crore(-0.2) == "₹0 Cr"   # a loss
 
 
+def test_inr_short_indian_units():
+    assert inr_short(950) == "₹950" and inr_short(0) == "₹0" and inr_short(-0.4) == "₹0"
+    assert inr_short(50_000) == "₹50 K" and inr_short(-2057) == "-₹2.06 K"
+    assert inr_short(172_308) == "₹1.72 L" and inr_short(200_000) == "₹2 L"
+    assert inr_short(12_500_000) == "₹1.25 Cr"
+
+
 def test_missing_values_dash():
-    for f in (signed, pct, inr, crore):
+    for f in (signed, pct, inr, inr_short, crore):
         assert f(None) == DASH and f(float("nan")) == DASH and f("x") == DASH
 
 

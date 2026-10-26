@@ -65,7 +65,9 @@ class FakeKite:
                 "strike": r["strike"], "tradingsymbol": r["tradingsymbol"], "lot_size": lot, "exchange": exchange})
             self.book[r["tradingsymbol"]] = [r["bid"], r["ask"], r["mid"]]
         self.spot["NSE:NIFTY 50" if underlying == "NIFTY" else "BSE:SENSEX"] = spot
+        self.spot.setdefault("NSE:INDIA VIX", 15.0)
         self.lots = {**getattr(self, "lots", {}), **{r["tradingsymbol"]: lot for r in self.ins[exchange]}}
+        self.exch = {**getattr(self, "exch", {}), **{r["tradingsymbol"]: exchange for r in self.ins[exchange]}}
 
     def _log(self, name, *a, **kw):
         self.calls.append((name, a, kw))
@@ -105,12 +107,14 @@ class FakeKite:
 
     def margins(self, segment=None):
         self._log("margins", segment)
-        return {"net": self.available - self._used()}
+        used = self._used()
+        return {"net": self.available - used, "utilised": {"debits": used, "span": 0.75 * used, "exposure": 0.25 * used},
+                "available": {"live_balance": 0.5 * self.available, "collateral": 0.5 * self.available}}
 
     def positions(self):
         self._log("positions")
-        return {"net": [{"tradingsymbol": s, "quantity": q, "overnight_quantity": 0, "average_price": self.book[s][2]}
-                        for s, q in self.pos.items()], "day": []}
+        return {"net": [{"tradingsymbol": s, "exchange": self.exch.get(s, "NFO"), "quantity": q, "overnight_quantity": 0,
+                         "average_price": self.book.get(s, [0, 0, 0])[2]} for s, q in self.pos.items()], "day": []}
 
     def trades(self):
         self._log("trades")
@@ -306,7 +310,7 @@ def test_shadow_entry_records_at_the_bid_and_never_places(conn):
     assert list(led.source) == ["shadow", "shadow"] and list(led.net_qty) == [-65, -65]
     bids = {s: fake.book[s][0] for s in led.tradingsymbol}
     assert dict(zip(led.tradingsymbol, led.sell_avg)) == bids
-    assert set(fake.names()) <= {"profile", "instruments", "ltp", "quote", "basket_order_margins", "margins"}
+    assert set(fake.names()) <= {"profile", "instruments", "ltp", "quote", "basket_order_margins", "margins", "positions"}
     assert ctx["sent"] and ctx["sent"][0][0].startswith("Options SHADOW:")
     with pytest.raises(RuntimeError, match="refused"):
         ol.call(ctx, "place_order", variety="regular")                    # the door itself refuses
@@ -354,7 +358,10 @@ def test_sizing_uses_kite_margin_and_cap(conn):
     fake = FakeKite(available=500_000.0, margin_per_lot=150_000.0)
     res, _ = run("entry", fake, Clock(FRI, "15:12"), "NIFTY", mode="auto", lots_cap={"NIFTY": 5}, margin_buffer_rs=100_000)
     assert res["status"] == "ok"
-    assert set(ledger(conn).net_qty) == {-2 * 65}                         # floor((500k − 100k) / 150k) = 2 < cap 5
+    # sized on the expiry-day peak: 150k + 2 % × F × 65 × 2 legs (≈ 67k) a lot → floor(400k / ≈217k) = 1 (entry margin alone: 2)
+    assert set(ledger(conn).net_qty) == {-65}
+    proposed = events(conn, "proposed").detail.iloc[0]
+    assert '"expiry_margin_rs"' in proposed
 
 
 def test_not_enough_margin_skips_in_a_real_mode(conn):
@@ -540,6 +547,53 @@ def test_sensex_without_a_nifty_position_enters(conn):
     fake = _tuesday_broker()
     res, _ = run("entry", fake, Clock(TUE, "15:17"), "SENSEX", mode="auto")
     assert res["status"] == "ok"
+
+
+def _manual_nifty(fake, lots=5):
+    """Amit's own (untagged) NIFTY strangle expiring today: far OTM, so it settles at zero."""
+    call = next(r["tradingsymbol"] for r in fake.ins["NFO"] if r["instrument_type"] == "CE" and r["strike"] >= 27000)
+    put = next(r["tradingsymbol"] for r in fake.ins["NFO"] if r["instrument_type"] == "PE" and r["strike"] <= 24600)
+    fake.pos.update({call: -65 * lots, put: -65 * lots})
+    return call, put
+
+
+def test_sensex_sizing_counts_margin_freed_by_nifty_expiring_first(conn):
+    # ₹15 L total; 5 manual NIFTY lots expiring today block ₹7.5 L → ₹7.5 L free at 15:17.
+    # SENSEX: ₹150 K a lot now, + 2 % × 84,000 × 20 × 2 = ₹67.2 K on Thursday.
+    # Now: (750 K − 50 K) / 150 K → 4. Thursday: NIFTY gone, (1.5 M − 50 K) / 217.2 K → 6. Sold: 4.
+    # (The old rule checked Thursday's peak against today's free margin: (750 K − 50 K) / 217.2 K → 3.)
+    fake = _tuesday_broker()
+    fake.available = 1_500_000.0
+    _manual_nifty(fake)
+    res, ctx = run("entry", fake, Clock(TUE, "15:17"), "SENSEX", mode="auto", margin_buffer_rs=50_000,
+                 lots_cap={"NIFTY": 15, "SENSEX": 15})
+    assert res["status"] == "ok", res
+    assert set(ledger(conn, "underlying = 'SENSEX'").net_qty) == {-80}
+    d = events(conn, "proposed").detail.iloc[0]
+    assert '"peak_available": 1500000' in d and '"freed_before_expiry": 750000' in d
+
+
+def test_sensex_sizing_gives_no_credit_for_a_position_it_cannot_value(conn):
+    fake = _tuesday_broker()
+    fake.available = 1_500_000.0
+    _manual_nifty(fake)
+    fake.pos["NIFTY26OCTFUT"] = 65                                        # a future: not a NIFTY/SENSEX option
+    res, _ = run("entry", fake, Clock(TUE, "15:17"), "SENSEX", mode="auto", margin_buffer_rs=50_000,
+                 lots_cap={"NIFTY": 15, "SENSEX": 15})
+    assert res["status"] == "ok" and set(ledger(conn, "underlying = 'SENSEX'").net_qty) == {-60}   # the old 3 lots
+
+
+def test_peak_available_adds_the_expiry_day_extra_of_legs_expiring_with_the_trade(conn):
+    fake = _tuesday_broker()
+    call, put = _manual_nifty(fake)
+    s_call = next(r["tradingsymbol"] for r in fake.ins["BFO"] if r["instrument_type"] == "CE" and r["strike"] >= 90000)
+    fake.pos[s_call] = -40                                                # 2 SENSEX lots of Thursday's expiry
+    ctx = ctx_for(fake, Clock(TUE, "15:17"))
+    p = ol.peak_available(ctx, SENSEX_EXP, 400_000.0)
+    assert p["freed"] == 750_000.0                                        # NIFTY's basket margin, nothing to settle
+    assert abs(p["stay_extra"] - 0.02 * 84_000 * 40) < 1e-6
+    assert abs(p["available"] - (400_000 + 750_000 - 0.02 * 84_000 * 40)) < 1e-6
+    assert ol.peak_available(ctx, NIFTY_EXP, 400_000.0)["freed"] == 0.0   # nothing expires before today
 
 
 def test_shadow_buyback_and_rotation(conn):
@@ -733,3 +787,63 @@ def test_testorder_is_not_scheduled():
     import pathlib
     cron = pathlib.Path(__file__).resolve().parents[1].joinpath("ops", "options_live.cron").read_text()
     assert "testorder" not in cron
+
+
+def test_live_panel_shows_margin_used_and_free(ops):
+    authed, _ = ops
+    html = authed.get("/options").text
+    assert "Not read yet" in html                                         # no Kite margin read so far
+    fake = FakeKite()
+    run("entry", fake, Clock(FRI, "15:12"), "NIFTY", mode="auto")
+    res, _ = run("mark", fake, Clock(FRI, "15:31"))
+    assert res["status"] == "ok"
+    m = ol.get_state("margin")
+    assert m["used"] > 0 and m["free"] == fake.available - m["used"] and m["total"] == fake.available
+    html = authed.get("/options").text
+    from formatting import inr_short
+    assert "used by your positions" in html and inr_short(m["used"]) in html and inr_short(m["free"]) in html
+    assert ol.page_data()["margin_open"] > 0
+
+
+# ───────────────────────────── VIX guard (Amit 2026-10-25) ─────────────────────────────
+
+def test_vix_guard_halves_the_lots_between_27_and_30(conn):
+    ol.set_setting("lots_cap", {"NIFTY": 4})
+    fake = FakeKite()
+    fake.spot["NSE:INDIA VIX"] = 28.0
+    res, _ = run("entry", fake, Clock(FRI, "15:12"), "NIFTY", mode="auto")
+    assert res["status"] == "ok"
+    assert set(ledger(conn, "source = 'live'").net_qty) == {-2 * 65}           # 4 → 2 lots
+    assert '"vix_action": "halve"' in events(conn, "proposed").detail.iloc[0]
+
+
+def test_vix_guard_halts_at_30_and_places_nothing(conn):
+    fake = FakeKite()
+    fake.spot["NSE:INDIA VIX"] = 30.0
+    res, ctx = run("entry", fake, Clock(FRI, "15:12"), "NIFTY", mode="auto")
+    assert res["status"] == "skipped" and "VIX guard" in res["detail"] and ctx["sent"][0][1]   # urgent push
+    assert "place_order" not in fake.names() and events(conn, "proposed").empty
+
+
+def test_vix_guard_unknown_vix_halts_but_a_recent_close_is_used(conn):
+    fake = FakeKite()
+    del fake.spot["NSE:INDIA VIX"]                                               # no live quote
+    res, _ = run("entry", fake, Clock(FRI, "15:12"), "NIFTY", mode="auto")
+    assert res["status"] == "skipped" and "no India VIX stored" in res["detail"]
+    conn.execute("INSERT INTO macro_history (indicator_id, date, value) VALUES ('india_vix', ?, 16.5)",
+                 ((FRI - timedelta(days=1)).isoformat(),))
+    conn.commit()
+    fake = FakeKite()
+    del fake.spot["NSE:INDIA VIX"]
+    res, _ = run("entry", fake, Clock(FRI, "15:12"), "NIFTY", mode="auto")
+    assert res["status"] == "ok"
+    assert '"vix": 16.5' in events(conn, "proposed").detail.iloc[0]
+
+
+def test_vix_settings_validation(conn):
+    with pytest.raises(ValueError):
+        ol.set_setting("vix_halve", 35)                                          # above the halt level
+    with pytest.raises(ValueError):
+        ol.set_setting("vix_halt", "high")
+    ol.set_setting("vix_halt", 32)
+    assert ol.settings()["vix_halt"] == 32

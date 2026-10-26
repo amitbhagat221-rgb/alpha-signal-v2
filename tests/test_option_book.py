@@ -78,3 +78,15 @@ def test_settlement_row_carries_every_not_null_column():
           "short_call": 23000.0, "short_put": 21950.0, "credit_pts": 13.6, "entry_cost_pts": 0.9,
           "lot": 65, "margin_rs": 176000.0}
     assert required and required <= set(ob.settle_trade(tr, 22500.0)), required - set(ob.settle_trade(tr, 22500.0))
+
+
+def test_expiry_day_extra_is_two_percent_of_each_short_legs_notional():
+    assert abs(ob.expiry_day_extra(73_124.0, 300) - 0.02 * 73_124.0 * 300 * 2) < 1e-6   # 15 SENSEX lots ≈ ₹8.77 L
+    assert ob.expiry_day_extra(25_800.0, 65, short_legs=1) == 0.02 * 25_800.0 * 65
+
+
+def test_margin_parts_split_span_exposure_and_expiry_extra():
+    p = ob.margin_parts(159_000.0, 22_600.0, 65)          # one NIFTY lot, Kite quote ₹1.59 L
+    assert abs(p["exposure_rs"] - 0.02 * 22_600 * 65 * 2) < 1e-6
+    assert abs(p["span_rs"] + p["exposure_rs"] - 159_000.0) < 1e-6
+    assert abs(p["expiry_margin_rs"] - (159_000.0 + p["expiry_extra_rs"])) < 1e-6

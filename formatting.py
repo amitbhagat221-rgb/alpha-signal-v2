@@ -50,6 +50,21 @@ def inr(x, decimals=0, group=True):
     return f"-₹{body}" if v < 0 and float(body.replace(",", "")) != 0 else f"₹{body}"
 
 
+def inr_short(x):
+    """₹ in Indian units, up to 2 decimals: ₹950 · ₹2.06 K · ₹1.72 L · ₹1.25 Cr · -₹2.06 K
+    (a no-break space before the unit, so ₹50 K never wraps)."""
+    v = _num(x)
+    if v is None:
+        return DASH
+    a = round(abs(v))
+    body = f"{a:.0f}"
+    for unit, div in (("Cr", 1e7), ("L", 1e5), ("K", 1e3)):
+        if a >= div:
+            body = f"{a / div:.2f}".rstrip("0").rstrip(".") + f"\u00a0{unit}"
+            break
+    return f"-₹{body}" if v < 0 and a else f"₹{body}"
+
+
 def crore(cr):
     """A ₹-crore amount: ₹1.2L Cr at/above a lakh crore, else ₹12,345 Cr."""
     v = _num(cr)
@@ -128,7 +143,7 @@ def score_tone(x):
     return "" if b is None else b[2]
 
 
-FILTERS = {"count": count, "signed": signed, "pct": pct, "inr": inr, "crore": crore, "tone": tone, "short_date": short_date, "long_date": long_date, "month_text": month_text}
+FILTERS = {"count": count, "signed": signed, "pct": pct, "inr": inr, "inr_short": inr_short, "crore": crore, "tone": tone, "short_date": short_date, "long_date": long_date, "month_text": month_text}
 
 
 # VIX regime → colour name. One map for cockpit, change feed and email; the

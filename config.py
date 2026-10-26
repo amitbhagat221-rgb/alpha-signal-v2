@@ -197,6 +197,10 @@ OPTIONS_LIVE = {
     "margin_freed_frac": 0.5,              # rotation gate: margin freed ≥ this share of the NIFTY entry margin
     "freeze_qty": {"NIFTY": 1800, "SENSEX": 1000},   # units per order; fallback when the instruments carry none
     "shadow_min_lots": 1,                  # shadow records at least this many lots even when margin is short
+    # VIX guard (Amit 2026-10-25), India VIX at entry: insurance, not a tested rule (option-risk-filters study)
+    "vix_halt": 30.0,                      # VIX ≥ this: no entry
+    "vix_halve": 27.0,                     # VIX above this (and below vix_halt): half the lots (at least 1)
+    "vix_max_age_days": 3,                 # no live quote: the stored close may be this old, else no entry
 }
 
 PORTFOLIO = {
