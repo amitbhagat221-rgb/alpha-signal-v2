@@ -97,9 +97,14 @@ class FakeKite:
                       "volume": 1000, "oi": 5000}
         return out
 
+    hedge = 0.5                                               # a basket with long wings: this share of the naked margin
+
     def basket_order_margins(self, orders, consider_positions=True, mode=None):
         self._log("basket_order_margins", orders)
-        total = sum(self.margin_per_lot / 2 * o["quantity"] / self.lots[o["tradingsymbol"]] for o in orders)
+        total = sum(self.margin_per_lot / 2 * o["quantity"] / self.lots[o["tradingsymbol"]]
+                    for o in orders if o["transaction_type"] == "SELL")
+        if any(o["transaction_type"] == "BUY" for o in orders):
+            total *= self.hedge
         return {"initial": {"total": total}, "final": {"total": total}}
 
     def _used(self):
@@ -847,3 +852,176 @@ def test_vix_settings_validation(conn):
         ol.set_setting("vix_halt", "high")
     ol.set_setting("vix_halt", 32)
     assert ol.settings()["vix_halt"] == 32
+
+
+# ───────────────────────────── protective wings (Amit 2026-10-28) ─────────────────────────────
+
+def _wing_syms(fake, p):
+    return {w["option_type"]: w["tradingsymbol"] for w in p["wings"]}
+
+
+def test_wing_strikes_are_the_offered_strikes_nearest_the_distance():
+    chain = pd.DataFrame(_chain("NIFTY", 25800.0, NIFTY_EXP, FRI.isoformat(), 50))
+    k = {"C": 26500.0, "P": 25100.0}
+    assert ol.wing_strikes(chain, k, 25800.0, 0) is None                      # off
+    w = ol.wing_strikes(chain, k, 25800.0, 1.75)                              # 1.75 % of 25,800 = 451.5 points
+    assert w == {"C": 26950.0, "P": 24650.0}
+    assert ol.wing_strikes(chain, k, 25800.0, 0.01) == {"C": 26550.0, "P": 25050.0}   # at least one strike out
+    chain.loc[(chain.option_type == "CE") & (chain.strike > 26500), "ask"] = None
+    with pytest.raises(RuntimeError, match="no offered CE"):
+        ol.wing_strikes(chain, k, 25800.0, 1.75)
+
+
+def test_wings_are_bought_first_and_lots_size_on_the_hedged_margin(conn):
+    # naked: 150 K + 2 % × F × 65 × 2 (≈ 67 K) a lot → floor(950 K / 217 K) = 4 lots.
+    # wings: Kite's basket is half (75 K) → floor(950 K / 142 K) = 6 lots.
+    fake = FakeKite()
+    res, ctx = run("entry", fake, Clock(FRI, "15:12"), "NIFTY", mode="auto", lots_cap={"NIFTY": 10}, wing_pct=1.75)
+    assert res["status"] == "ok", res
+    places = [c[2] for c in fake.calls if c[0] == "place_order"]
+    assert [p["transaction_type"] for p in places] == ["BUY", "BUY", "SELL", "SELL"]
+    led = ledger(conn).set_index("tradingsymbol")
+    assert sorted(led.net_qty) == [-390, -390, 390, 390]
+    short = {r.option_type: r.strike for r in led.itertuples() if r.net_qty < 0}
+    long_ = {r.option_type: r.strike for r in led.itertuples() if r.net_qty > 0}
+    assert long_["CE"] > short["CE"] and long_["PE"] < short["PE"]
+    d = events(conn, "proposed")
+    assert set(d.transaction_type) == {"BUY", "SELL"} and '"wing_pct": 1.75' in d.detail.iloc[0]
+    assert '"max_loss_per_lot"' in d.detail.iloc[0] and "wings" in ctx["sent"][-1][0]
+
+
+def test_no_wing_fill_means_no_sale_and_a_lone_wing_is_sold_back(conn):
+    fake = FakeKite()
+    ctx = ctx_for(fake, Clock(FRI, "15:12"), mode="auto", wing_pct=1.75)
+    w = _wing_syms(fake, ol.build_plan(ctx, "NIFTY", NIFTY_EXP))
+    fake.reject_on_place.add(w["PE"])                                         # the put wing is refused
+    res, ctx = run("entry", fake, Clock(FRI, "15:12"), "NIFTY")
+    assert res["status"] == "failed" and "wings not filled" in res["detail"] and ctx["sent"][-1][1]
+    sells = [c[2]["tradingsymbol"] for c in fake.calls if c[0] == "place_order" and c[2]["transaction_type"] == "SELL"]
+    assert sells == [w["CE"]]                                                 # only the call wing, sold back
+    assert all(q == 0 for q in fake.pos.values())
+
+
+def test_partly_filled_wings_cap_the_lots_sold(conn):
+    fake = FakeKite(liquidity=65)
+    looks = []
+    ctx = ctx_for(fake, Clock(FRI, "15:12"), mode="auto", wing_pct=1.75, lots_cap={"NIFTY": 3})
+    w = _wing_syms(fake, ol.build_plan(ctx, "NIFTY", NIFTY_EXP))
+
+    def put_wing_dries_up(f):                                                 # after the first fill no one offers it
+        if f.orders_:
+            looks.append(1)
+        if len(looks) >= 2:
+            f.book[w["PE"]][1] = None
+    fake.on_look = put_wing_dries_up
+    res, _ = run("entry", fake, Clock(FRI, "15:12"), "NIFTY")
+    assert res["status"] == "ok" and "wings filled for 1 of 3 lots" in res["detail"], res
+    pos = {s: q for s, q in fake.pos.items() if q}
+    assert pos[w["PE"]] == 65 and pos[w["CE"]] == 195
+    assert sorted(q for s, q in pos.items() if s not in w.values()) == [-65, -65]
+
+
+def test_tuesday_buyback_leaves_the_wings_and_sensex_still_enters(conn):
+    ol.set_setting("wing_pct", 1.75)
+    fake = _tuesday_broker()
+    _enter_nifty_friday(conn, fake, "auto")
+    assert len(ledger(conn, "underlying = 'NIFTY' AND net_qty > 0")) == 2
+    bb, _ = run("buyback", fake, Clock(TUE, "15:08"), "NIFTY")
+    assert bb["status"] == "ok", bb
+    nifty = ledger(conn, "underlying = 'NIFTY'")
+    assert set(nifty[nifty.net_qty < 0].status) == set() and set(nifty[nifty.net_qty > 0].status) == {"OPEN"}
+    assert ol.rotation_gate(ctx_for(fake, Clock(TUE, "15:16")))[0]            # long wings do not block SENSEX
+    res, _ = run("entry", fake, Clock(TUE, "15:17"), "SENSEX")
+    assert res["status"] == "ok", res
+    assert sorted(ledger(conn, "underlying = 'SENSEX'").net_qty) == [-20, -20, 20, 20]
+    d = events(conn, "proposed")
+    assert "no credit" not in d[d.underlying == "SENSEX"].detail.iloc[0]      # NIFTY's wings leave with nothing to hedge
+
+
+def test_settle_charges_stt_on_an_exercised_wing(conn):
+    fake = FakeKite()
+    run("entry", fake, Clock(FRI, "15:12"), "NIFTY", mode="shadow", wing_pct=1.75)
+    conn.execute("INSERT INTO fno_bhav (symbol, instrument_type, expiry_date, strike, option_type, trade_date, settle, "
+                 "underlying_price) VALUES ('NIFTY', 'IDO', ?, 25800, 'CE', ?, 0, 23000)", (NIFTY_EXP, NIFTY_EXP))
+    conn.commit()
+    st, _ = run("settle", fake, Clock(date(2026, 10, 28), "10:30"))
+    assert st["status"] == "ok"
+    led = ledger(conn)
+    put_w = led[(led.net_qty > 0) & (led.option_type == "PE")].iloc[0]
+    assert put_w.exit_price == put_w.strike - 23000
+    stt = ob.STT_EXERCISE * put_w.exit_price * put_w.net_qty
+    assert abs(put_w.net_rs - (put_w.gross_rs - put_w.charges_rs - stt)) < 1e-6
+    short_p = led[(led.net_qty < 0) & (led.option_type == "PE")].iloc[0]
+    assert abs(short_p.net_rs - (short_p.gross_rs - short_p.charges_rs)) < 1e-6     # no exercise STT on a short
+    width = short_p.strike - put_w.strike                                          # the loss stops at the wing
+    assert put_w.gross_rs + short_p.gross_rs >= -(width * 65) - 1e-6
+
+
+def test_wing_setting_validation(conn):
+    for bad in (-1, 6, "wide", True):
+        with pytest.raises(ValueError):
+            ol.set_setting("wing_pct", bad)
+    ol.set_setting("wing_pct", 1.75)
+    assert ol.settings()["wing_pct"] == 1.75
+
+
+def test_live_panel_shows_the_wings(ops):
+    authed, _ = ops
+    run("entry", FakeKite(), Clock(FRI, "15:12"), "NIFTY", mode="shadow", wing_pct=1.75)
+    html = authed.get("/options").text
+    assert "wings 1.75% beyond the sold strikes" in html and "bought " in html and 'id="ol-wing"' in html
+
+
+# ───────────────────────────── sizing choices card (Amit 2026-10-29) ─────────────────────────────
+
+def _quote(naked=150_000.0, winged=85_000.0, extra=60_000.0, crash_n=160_000.0, crash_w=25_000.0):
+    m = {"lot": 65, "extra": extra, "expiry": NIFTY_EXP,
+         "naked": {"margin": naked, "weekly": 900.0, "crash": crash_n},
+         "winged": {"margin": winged, "weekly": 450.0, "crash": crash_w}}
+    return {"wing_pct": 1.75, "markets": {"NIFTY": m, "SENSEX": dict(m, expiry=SENSEX_EXP)}}
+
+
+def test_sizing_choices_are_the_four_setups(conn):
+    s = {**ol.settings(), "lots_cap": {"NIFTY": 15, "SENSEX": 15}, "wing_pct": 0.0, "margin_buffer_rs": 50_000}
+    rows = {r["key"]: r for r in ol.sizing_choices(_quote(), 4_600_000, s)}
+    assert rows["A"]["caps"] == {"NIFTY": 15, "SENSEX": 15} and rows["A"]["current"]       # naked at today's caps
+    assert rows["B"]["per"]["NIFTY"]["lots"] == 8                                          # 30 % × 46 L / 1.6 L
+    assert rows["B"]["crash_pct"] <= 0.30 < rows["A"]["crash_pct"]
+    assert rows["C"]["per"]["NIFTY"]["lots"] == 15 and not rows["C"]["current"]
+    assert rows["D"]["per"]["NIFTY"]["lots"] == 26                                         # (46 L × 0.85 − 50 K) / 145 K
+    assert rows["D"]["wing_pct"] == 1.75 and rows["A"]["wing_pct"] == 0
+    assert abs(rows["D"]["weekly"] - 2 * 26 * 450.0) < 1e-6 and rows["D"]["crash"] == 26 * 25_000.0
+    big = {r["key"]: r for r in ol.sizing_choices(_quote(), 50_000_000, s)}
+    assert big["D"]["per"]["NIFTY"]["lots"] == s["lots_hard_max"]                          # a cap the settings accept
+    on = {r["key"]: r for r in ol.sizing_choices(_quote(), 4_600_000, {**s, "wing_pct": 1.75})}
+    assert on["C"]["current"] and not on["A"]["current"]
+    assert ol.sizing_choices(None, 4_600_000, s) == [] and ol.sizing_choices(_quote(), None, s) == []
+
+
+def _two_markets_friday():
+    fake = FakeKite()
+    fake.add_market("SENSEX", 84000.0, SENSEX_EXP, FRI, 20, 100, "BFO")
+    return fake
+
+
+def test_sizing_quote_reads_both_markets_naked_and_winged(conn):
+    fake = _two_markets_friday()
+    fake.place_order = None                                                    # read-only
+    res, _ = run("quote", fake, Clock(FRI, "15:01"))
+    assert res["status"] == "ok", res
+    q = ol.get_state("sizing_quote")
+    for u, lot in (("NIFTY", 65), ("SENSEX", 20)):
+        m = q["markets"][u]
+        assert m["lot"] == lot and m["winged"]["margin"] == fake.hedge * m["naked"]["margin"]
+        assert m["strikes"]["wing_C"] > m["strikes"]["C"] and m["strikes"]["wing_P"] < m["strikes"]["P"]
+        assert 0 < m["winged"]["crash"] < m["naked"]["crash"] and m["winged"]["weekly"] < m["naked"]["weekly"]
+        assert abs(m["extra"] - ob.expiry_day_extra(m["forward"], lot)) < 1e-6
+    assert q["wing_pct"] == 1.75 and ol.get_state("margin")["total"] == 1_000_000.0      # quoted with wings while off
+
+
+def test_live_panel_shows_the_sizing_choices(ops):
+    authed, _ = ops
+    run("quote", _two_markets_friday(), Clock(FRI, "15:01"))
+    html = authed.get("/options").text
+    assert "Sizing choices for the next entries" in html and html.count("ol-apply") >= 3
+    assert "Unprotected, today&#39;s caps" in html or "Unprotected, today's caps" in html

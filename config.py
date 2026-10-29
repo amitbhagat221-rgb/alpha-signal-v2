@@ -201,6 +201,10 @@ OPTIONS_LIVE = {
     "vix_halt": 30.0,                      # VIX ≥ this: no entry
     "vix_halve": 27.0,                     # VIX above this (and below vix_halt): half the lots (at least 1)
     "vix_max_age_days": 3,                 # no live quote: the stored close may be this old, else no entry
+    # Protective wings (Amit 2026-10-28): buy a CE / PE this % of spot beyond each short strike, BEFORE selling,
+    # so a weekly loss is capped and Kite's margin roughly halves (both sides needed). 0 = off; 1.75 planned.
+    "wing_pct": 0.0,
+    "wing_buy_s": 60,                      # the wings get this long to fill (final aggressive limit in the last third)
 }
 
 PORTFOLIO = {

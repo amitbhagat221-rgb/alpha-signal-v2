@@ -8,7 +8,10 @@ expiry, held to expiry) through Kite Connect, plus the Tuesday rotation: NIFTY i
 One step per cron line (`run.sh options_live <step> [NIFTY|SENSEX]`), each logged to run_events:
 
     entry      guards → front expiry → live chain ±8% → option_book's 0.05-delta strikes on live mids →
-               Kite basket margin per lot + available margin → lots → orders (or a shadow fill / a ticket)
+               Kite basket margin per lot + available margin → lots → orders (or a shadow fill / a ticket).
+               With wing_pct > 0 the wings (a CE / PE that % of spot beyond each short strike) are BOUGHT first,
+               the strangle is sold on the lots both wings filled, and the basket margin is the hedged one.
+               Long wings are never bought back: they block no margin and expire on their own.
     buyback    Tue: BUY back the tagged NIFTY legs expiring today; confirm flat + margin freed → rotation flag
     closeall   Stop + buy back every tagged leg now (the cockpit's Close-all)
     record     after the close: today's Kite trades (tagged and manual NIFTY/SENSEX option legs) → ledger
@@ -18,6 +21,8 @@ One step per cron line (`run.sh options_live <step> [NIFTY|SENSEX]`), each logge
     precheck   on a trading day with work to do and no Kite login: push "log in to Kite"
     weekly     the week's P&L push
     plan       read-only: what `entry` would do now (strikes, margin, lots). Writes nothing.
+    quote      read-only Kite: per-lot margin naked / winged etc. for the /options sizing choices
+               (also taken by every mark while logged in)
 
 Modes (config.OPTIONS_LIVE, overridden by option_live_settings): off · shadow (live quotes, simulated
 fills at the bid/ask, nothing sent) · approve (a ticket + push; orders only after Amit taps Approve on
@@ -64,7 +69,7 @@ MARKETS = {u: {"exchange": ex, "spot": key} for u, ex, key in kq.MARKETS}
 MODES = ("off", "shadow", "approve", "auto")
 LIVE_MODES = ("approve", "auto")
 EDITABLE = ("mode", "lots_cap", "margin_buffer_rs", "weekly_loss_limit_rs", "kill", "adopt_manual_nifty",
-            "vix_halt", "vix_halve")
+            "vix_halt", "vix_halve", "wing_pct")
 FINAL = ("COMPLETE", "CANCELLED", "REJECTED")
 WRITE_CALLS = ("place_order", "modify_order", "cancel_order")
 TICK = ob.TICK
@@ -152,6 +157,9 @@ def set_setting(key, value, by="cli"):
         halt, halve = (value, cur["vix_halve"]) if key == "vix_halt" else (cur["vix_halt"], value)
         if halve > halt:
             raise ValueError(f"vix_halve ({halve}) must not be above vix_halt ({halt})")
+    if key == "wing_pct":
+        if not isinstance(value, (int, float)) or isinstance(value, bool) or not 0 <= value <= 5:
+            raise ValueError("wing_pct must be a % of spot between 0 (off) and 5")
     put_state(key, value, by)
     return value
 
@@ -248,6 +256,11 @@ def log_event(ctx, event, **f):
                       f"VALUES ({', '.join('?' * len(cols))})", [_clean(row[k]) for k in cols]).rowcount
     runlog.count_write("option_live_orders", n)
     return n
+
+
+def _rs(x, sign=False):
+    """₹ with the sign in front: -₹930, +₹1,200 (never ₹-930)."""
+    return ("-" if x < 0 else "+" if sign and x > 0 else "") + f"₹{abs(x):,.0f}"
 
 
 def _leg_fields(leg):
@@ -399,7 +412,11 @@ def _basket_total(ctx, orders):
 
 
 def basket_margin(ctx, legs_, lots):
-    return _basket_total(ctx, [_order(l["exchange"], l["tradingsymbol"], lots * l["lot"]) for l in legs_])
+    """Kite's margin for `lots` of `legs_` (a leg's `side` is SELL unless it says BUY): long wings first,
+    as they are placed, so the basket carries the hedge benefit."""
+    legs_ = sorted(legs_, key=lambda l: l.get("side", "SELL") != "BUY")
+    return _basket_total(ctx, [_order(l["exchange"], l["tradingsymbol"], lots * l["lot"], l.get("side", "SELL"))
+                               for l in legs_])
 
 
 def peak_available(ctx, e, avail):
@@ -409,8 +426,9 @@ def peak_available(ctx, e, avail):
     + what those positions block (basket margin of all open option legs − of the ones still open on `e`)
     − their settlement at today's index (intrinsic value of the short legs)
     − the expiry-day extra of short legs that expire on `e` too.
-    No credit (returns `avail`) when a derivative position is not a NIFTY/SENSEX option or a long
-    leg expires before `e`: the release could not be worked out safely.
+    No credit (returns `avail`) when a derivative position is not a NIFTY/SENSEX option, or a long
+    leg expiring before `e` may hedge a short that stays (same index): the release could not be worked
+    out safely. A long wing leaving with its own shorts (Tuesday's NIFTY wings) is fine; its value is not credited.
     → {"available": ₹, "freed": ₹, "stay_extra": ₹, "note": text}"""
     pos = {}
     for p in call(ctx, "positions").get("net", []):
@@ -427,8 +445,9 @@ def peak_available(ctx, e, avail):
         return none | {"note": f"no credit: {', '.join(other)} is not a NIFTY/SENSEX option"}
     leave = {k: q for k, q in pos.items() if inst[k]["expiry"] < e}
     stay = {k: q for k, q in pos.items() if k not in leave}
-    if any(q > 0 for q in leave.values()):
-        return none | {"note": "no credit: a long leg expires first"}
+    if any(q > 0 and any(inst[s]["underlying"] == inst[k]["underlying"] and qs < 0 for s, qs in stay.items())
+           for k, q in leave.items()):
+        return none | {"note": "no credit: a long leg expires first while a short on its index stays"}
     keys = {u: MARKETS[u]["spot"] for u in {inst[k]["underlying"] for k in pos}}
     ltp = call(ctx, "ltp", sorted(keys.values()))
     spot = {u: float(ltp[key]["last_price"]) for u, key in keys.items()}
@@ -442,7 +461,7 @@ def peak_available(ctx, e, avail):
 
     freed = 0.0
     if leave:
-        settle = sum(abs(q) * intrinsic(k) for k, q in leave.items())
+        settle = sum(-q * intrinsic(k) for k, q in leave.items() if q < 0)
         freed = max(0.0, _basket_total(ctx, orders(pos)) - _basket_total(ctx, orders(stay)) - settle)
     stay_extra = sum(ob.EXPIRY_ELM_PCT * spot[inst[k]["underlying"]] * abs(q)
                      for k, q in stay.items() if q < 0 and inst[k]["expiry"] == e)
@@ -684,41 +703,79 @@ def already_entered(ctx, u, e, source):
         return "this expiry was already entered (or ticketed) — the order log has it"
     if source == "live":                            # a crash before the DB write: the broker's order book decides
         tag = ctx["settings"]["tag"]
-        mine = [o for o in call(ctx, "orders") if tag in ([o.get("tag")] + list(o.get("tags") or []))
-                and o.get("transaction_type") == "SELL" and str(o.get("tradingsymbol", "")).startswith(u)
-                and not (o.get("status") in ("CANCELLED", "REJECTED") and not o.get("filled_quantity"))]
+        orders = [o for o in call(ctx, "orders") if tag in ([o.get("tag")] + list(o.get("tags") or []))
+                  and str(o.get("tradingsymbol", "")).startswith(u)
+                  and not (o.get("status") in ("CANCELLED", "REJECTED") and not o.get("filled_quantity"))]
+        this = ({k for k, v in option_instruments(ctx).items() if v["expiry"] == e}
+                if any(o.get("transaction_type") == "BUY" for o in orders) else set())
+        # a SELL, or a BUY of this expiry (the wings bought just before the sale; a buy-back is an older expiry)
+        mine = [o for o in orders if o.get("transaction_type") == "SELL" or o.get("tradingsymbol") in this]
         if mine:
-            return f"{len(mine)} tagged {u} SELL order(s) already in today's Kite order book"
+            return f"{len(mine)} tagged {u} order(s) already in today's Kite order book"
     return None
 
 
 def rotation_gate(ctx):
-    """SENSEX may enter only when no NIFTY leg expiring today is still open (tagged, shadow, or
-    adopted manual) and, after a buy-back, its margin was seen freed. → (ok, why)."""
+    """SENSEX may enter only when no short NIFTY leg expiring today is still open (tagged, shadow, or
+    adopted manual) and, after a buy-back, its margin was seen freed. Long wings are left to expire:
+    they block no margin and carry no risk. → (ok, why)."""
     today, s = ctx["today"], ctx["settings"]
     srcs = [family(ctx)] + (["manual"] if s["adopt_manual_nifty"] and family(ctx) == "live" else [])
-    open_ = [l for l in legs("underlying = 'NIFTY' AND expiry = ? AND status = 'OPEN' AND net_qty != 0", [today])
+    open_ = [l for l in legs("underlying = 'NIFTY' AND expiry = ? AND status = 'OPEN' AND net_qty < 0", [today])
              if l["source"] in srcs]
     if open_:
-        return False, f"{len(open_)} NIFTY leg(s) expiring today still open: the buy-back did not finish"
+        return False, f"{len(open_)} short NIFTY leg(s) expiring today still open: the buy-back did not finish"
     r = get_state(f"rotation:{today}")
     if r is None:
         return True, "no NIFTY position expiring today"
     return bool(r.get("ok")), r.get("detail") or ""
 
 
-def build_plan(ctx, u, e):
+def wing_strikes(chain, k, spot, pct):
+    """{'C': K, 'P': K}: for each short strike, the strike with an offer nearest `pct` % of spot beyond it
+    (at least one strike out). None when pct is 0 (no wings). Raises when a side has no offered strike there."""
+    if not pct:
+        return None
+    out = {}
+    for cp, ot, sgn in (("C", "CE", 1), ("P", "PE", -1)):
+        c = chain[(chain.option_type == ot) & (sgn * (chain.strike - k[cp]) > 0)
+                  & (pd.to_numeric(chain.ask, errors="coerce").fillna(0) > 0)]
+        if c.empty:
+            raise RuntimeError(f"no offered {ot} beyond {k[cp]:,.0f} for the wing")
+        target = k[cp] + sgn * pct / 100 * spot
+        out[cp] = float(c.strike.iloc[(c.strike - target).abs().to_numpy().argmin()])
+    return out
+
+
+def pick_legs(ctx, u, e, wing_pct):
+    """The rule's strikes on the live chain → (F, spot, short legs, wing legs (empty when wing_pct is 0),
+    {'C', 'P'} short strikes, wing strikes or None)."""
     s, m = ctx["settings"], MARKETS[u]
     chain, spot = kq.live_chain(client(ctx), u, m["exchange"], m["spot"], e, band=s["chain_band"])
     F, dmap, k = kq.pick(chain, ctx["today"], e)
-    legs_ = []
-    for cp, ot in (("C", "CE"), ("P", "PE")):
-        r = chain[(chain.option_type == ot) & (chain.strike == k[cp])].iloc[0]
-        legs_.append({"underlying": u, "expiry": e, "exchange": m["exchange"], "tradingsymbol": r.tradingsymbol,
-                      "option_type": ot, "strike": float(r.strike), "lot": int(r.lot), "bid": _clean(r.bid),
-                      "ask": _clean(r.ask), "mid": _clean(r.mid), "delta": dmap.get((cp, k[cp])),
-                      "freeze": int(r.freeze) if _clean(r.get("freeze")) else int(s["freeze_qty"][u])})
-    per_lot = basket_margin(ctx, legs_, 1)
+
+    def leg(cp, K, side):
+        ot = "CE" if cp == "C" else "PE"
+        r = chain[(chain.option_type == ot) & (chain.strike == K)].iloc[0]
+        return {"underlying": u, "expiry": e, "exchange": m["exchange"], "tradingsymbol": r.tradingsymbol,
+                "option_type": ot, "strike": float(r.strike), "lot": int(r.lot), "bid": _clean(r.bid),
+                "ask": _clean(r.ask), "mid": _clean(r.mid), "delta": dmap.get((cp, K)), "side": side,
+                "freeze": int(r.freeze) if _clean(r.get("freeze")) else int(s["freeze_qty"][u])}
+
+    kw = wing_strikes(chain, k, spot, wing_pct)
+    return (F, spot, [leg(cp, k[cp], "SELL") for cp in ("C", "P")],
+            [leg(cp, kw[cp], "BUY") for cp in ("C", "P")] if kw else [], k, kw)
+
+
+def build_plan(ctx, u, e):
+    s = ctx["settings"]
+    F, spot, legs_, wings, k, kw = pick_legs(ctx, u, e, s["wing_pct"])
+    lot = legs_[0]["lot"]
+    credit = sum(l["bid"] or 0 for l in legs_)
+    wing_cost = sum(w["ask"] or 0 for w in wings)
+    # with wings the worst week is fixed: the wider spread, less the net credit (per lot, ₹)
+    max_loss = (max(kw["C"] - k["C"], k["P"] - kw["P"]) - credit + wing_cost) * lot if kw else None
+    per_lot = basket_margin(ctx, wings + legs_, 1)
     extra = ob.expiry_day_extra(F, legs_[0]["lot"])  # the expiry-day ELM per lot: size so the peak fits
     avail = available(ctx)
     peak = peak_available(ctx, e, avail)
@@ -731,12 +788,14 @@ def build_plan(ctx, u, e):
     lots, vix_action = vix_guard(s, vix, lots)
     margin = per_lot * lots
     while lots > 1:                                 # the margin at size, not per lot × lots
-        margin = basket_margin(ctx, legs_, lots)
+        margin = basket_margin(ctx, wings + legs_, lots)
         if margin <= avail - buf and margin + extra * lots <= peak["available"] - buf:
             break
         lots -= 1
         margin = per_lot * lots
-    return {"underlying": u, "expiry": e, "spot": spot, "forward": F, "legs": legs_, "margin_per_lot": per_lot,
+    return {"underlying": u, "expiry": e, "spot": spot, "forward": F, "legs": legs_, "wings": wings,
+            "wing_pct": s["wing_pct"], "credit_pts": credit, "wing_cost_pts": wing_cost, "max_loss_per_lot": max_loss,
+            "margin_per_lot": per_lot,
             "available": avail, "peak_available": peak["available"], "freed_before_expiry": peak["freed"],
             "peak_note": peak["note"], "buffer": buf, "cap": cap, "lots": lots, "margin_rs": margin,
             "vix": vix, "vix_src": vix_src, "vix_action": vix_action, "lots_pre_vix": lots_pre_vix, "vix_halt": s["vix_halt"],
@@ -750,10 +809,17 @@ def _vix_text(p):
             "normal": f"India VIX {v}"}[p["vix_action"]]
 
 
+def _wings_text(p):
+    if not p.get("wings"):
+        return ""
+    return (" after buying the wings " + " + ".join(f"{w['tradingsymbol']} (ask {w['ask']})" for w in p["wings"])
+            + f" ({p['wing_pct']:g}% beyond; worst week capped at ₹{p['max_loss_per_lot']:,.0f}/lot)")
+
+
 def _plan_text(p):
     return (f"{p['underlying']} {p['expiry']}: sell " + " + ".join(
         f"{l['tradingsymbol']} (bid {l['bid']}, ask {l['ask']}, Δ {l['delta']:.3f})" for l in p["legs"])
-        + f" × {p['lots']} lot(s) · margin ₹{p['margin_per_lot']:,.0f}/lot + ₹{p['expiry_extra_per_lot']:,.0f}/lot on expiry day"
+        + f" × {p['lots']} lot(s){_wings_text(p)} · margin ₹{p['margin_per_lot']:,.0f}/lot + ₹{p['expiry_extra_per_lot']:,.0f}/lot on expiry day"
         + f" (₹{p['expiry_margin_rs']:,.0f} at size) · available ₹{p['available']:,.0f} now,"
         + f" ₹{p['peak_available']:,.0f} on expiry day ({p['peak_note']})"
         + f" · {_vix_text(p)}")
@@ -833,12 +899,13 @@ def entry(ctx, u):
         return outcome(ctx, u, "skipped", f"VIX guard: {_vix_text(plan)}",
                        f"{u} entry for {e} skipped — {_vix_text(plan)}.", urgent=True)
     ticket_id = f"{u}-{e}-{today}"
-    for leg in plan["legs"]:
-        log_event(ctx, "proposed", source=src, ticket_id=ticket_id, **_leg_fields(leg), transaction_type="SELL",
-                  quantity=plan["lots"] * leg["lot"], price=leg["bid"],
+    for leg in plan["wings"] + plan["legs"]:
+        log_event(ctx, "proposed", source=src, ticket_id=ticket_id, **_leg_fields(leg), transaction_type=leg["side"],
+                  quantity=plan["lots"] * leg["lot"], price=leg["bid"] if leg["side"] == "SELL" else leg["ask"],
                   detail={k: plan[k] for k in ("lots", "cap", "margin_per_lot", "available", "peak_available", "freed_before_expiry",
                                                "buffer", "margin_rs", "spot", "forward",
-                                               "vix", "vix_action", "lots_pre_vix", "expiry_margin_rs")}
+                                               "vix", "vix_action", "lots_pre_vix", "expiry_margin_rs",
+                                               "wing_pct", "max_loss_per_lot")}
                   | {"delta": leg["delta"], "ask": leg["ask"], "mid": leg["mid"]})
     if plan["lots"] == 0:
         if mode != "shadow":
@@ -850,20 +917,23 @@ def entry(ctx, u):
         plan["lots"] = int(s["shadow_min_lots"])
         plan["margin_rs"] = plan["margin_per_lot"] * plan["lots"]
         plan["margin_short"] = True
-    for leg in plan["legs"]:
+    for leg in plan["wings"] + plan["legs"]:
         leg["qty"] = plan["lots"] * leg["lot"]
     if mode == "shadow":
+        res_w = shadow_fill(ctx, plan["wings"], "BUY", ticket_id) if plan["wings"] else {}
         res = shadow_fill(ctx, plan["legs"], "SELL", ticket_id)
         rebuild_ledger()
         _set_margin(u, e, "shadow", plan["margin_rs"])
         note = " (margin short: a live mode would have skipped)" if plan.get("margin_short") else ""
-        credit = sum((o["avg"] or 0) * o["filled"] for o in res.values())
-        return outcome(ctx, u, "ok", _fills_text(res) + note,
-                       f"{u} {e} sold (simulated at the bid): {_fills_text(res)} = ₹{credit:,.0f} credit, "
-                       f"margin ₹{plan['margin_rs']:,.0f}{note} · {_vix_text(plan)}.")
+        credit = _net_credit(res, res_w)
+        return outcome(ctx, u, "ok", _fills_text(res_w | res) + note,
+                       f"{u} {e} sold (simulated at the bid): {_fills_text(res)}"
+                       + (f", wings bought at the ask: {_fills_text(res_w)}" if res_w else "")
+                       + f" = ₹{credit:,.0f} net credit, margin ₹{plan['margin_rs']:,.0f}{note} · {_vix_text(plan)}.")
     if mode == "approve":
         log_event(ctx, "ticket", source=src, ticket_id=ticket_id, underlying=u, expiry=e,
-                  detail={"lots": plan["lots"], "margin_rs": plan["margin_rs"], "legs": [l["tradingsymbol"] for l in plan["legs"]]})
+                  detail={"lots": plan["lots"], "margin_rs": plan["margin_rs"],
+                          "legs": [l["tradingsymbol"] for l in plan["wings"] + plan["legs"]]})
         push(ctx, f"Approve {_plan_text(plan)} — tap Approve on the cockpit before {s['approve_by']} IST: {PAGE}", urgent=True)
         if not wait_for_approval(ctx, ticket_id):
             log_event(ctx, "expired", source=src, ticket_id=ticket_id, underlying=u, expiry=e,
@@ -874,6 +944,25 @@ def entry(ctx, u):
         if settings()["kill"]:
             return outcome(ctx, u, "skipped", "kill switch turned on after approval",
                            f"{u}: approved, but the kill switch is now on — nothing was placed.")
+    res_w, wing_note = {}, ""
+    if plan["wings"]:                               # wings first: Kite then blocks the hedged margin for the sale
+        start = ctx["now"]()
+        end = min(start + timedelta(seconds=s["wing_buy_s"]), _at(ctx, s["entry_cutoff"]))
+        res_w = work_orders(ctx, plan["wings"], "BUY", end, final_at=start + timedelta(seconds=s["wing_buy_s"] * 2 / 3),
+                            ticket_id=ticket_id, source="live")
+        lot = plan["legs"][0]["lot"]
+        hedged = min(o["filled"] for o in res_w.values()) // lot
+        if hedged == 0:
+            left = _unwind_wings(ctx, res_w, ticket_id)
+            rebuild_ledger()
+            return outcome(ctx, u, "failed", f"wings not filled ({_fills_text(res_w)}): strangle not sold",
+                           f"{u} entry: the wings did not fill ({_fills_text(res_w)}), so the strangle was not sold"
+                           + (f"; {left} wing unit(s) could not be sold back and stay open (they cost nothing more)" if left else "")
+                           + ".", urgent=True)
+        if hedged < plan["lots"]:
+            wing_note = f" (wings filled for {hedged} of {plan['lots']} lots: sold {hedged})"
+            for leg in plan["legs"]:
+                leg["qty"] = hedged * leg["lot"]
     res = work_orders(ctx, plan["legs"], "SELL", _at(ctx, s["entry_cutoff"]), ticket_id=ticket_id, source="live")
     rebuild_ledger()
     _set_margin(u, e, "live", plan["margin_rs"])
@@ -882,13 +971,32 @@ def entry(ctx, u):
     if len(set(filled)) > 1:
         return _unbalanced(ctx, u, e, res, ticket_id)
     if not any(filled):
+        left = _unwind_wings(ctx, res_w, ticket_id)
+        rebuild_ledger()
         return outcome(ctx, u, "failed", f"nothing filled by {s['entry_cutoff']}: {'; '.join(rejects) or 'no fill'}",
                        f"{u} entry: nothing filled by {s['entry_cutoff']} ({'; '.join(rejects) or 'no fill at the bid'}). "
-                       "Orders cancelled; no position.", urgent=True)
-    credit = sum((o["avg"] or 0) * o["filled"] for o in res.values())
-    return outcome(ctx, u, "ok", _fills_text(res),
-                   f"{u} {e} sold: {_fills_text(res)} = ₹{credit:,.0f} credit, margin ₹{plan['margin_rs']:,.0f} "
+                       "Orders cancelled; no position"
+                       + (f" ({left} wing unit(s) could not be sold back and stay open)" if left else "") + ".", urgent=True)
+    credit = _net_credit(res, res_w)
+    return outcome(ctx, u, "ok", _fills_text(res_w | res) + wing_note,
+                   f"{u} {e} sold: {_fills_text(res)}" + (f" after buying the wings {_fills_text(res_w)}" if res_w else "")
+                   + f" = ₹{credit:,.0f} net credit{wing_note}, margin ₹{plan['margin_rs']:,.0f} "
                    f"(₹{plan['expiry_margin_rs']:,.0f} on expiry day) · {_vix_text(plan)}.")
+
+
+def _net_credit(res, res_w):
+    return (sum((o["avg"] or 0) * o["filled"] for o in res.values())
+            - sum((o["avg"] or 0) * o["filled"] for o in res_w.values()))
+
+
+def _unwind_wings(ctx, res_w, ticket_id):
+    """Sell back the wings bought for a strangle that was not sold → units that stayed long (they just expire)."""
+    todo = [{**o["leg"], "qty": o["filled"]} for o in res_w.values() if o["filled"]]
+    if not todo:
+        return 0
+    end = min(ctx["now"]() + timedelta(seconds=45), _at(ctx, "15:29") + timedelta(seconds=55))
+    back = work_orders(ctx, todo, "SELL", end, ticket_id=ticket_id, source="live")
+    return sum(l["qty"] - back[l["tradingsymbol"]]["filled"] for l in todo)
 
 
 def _unbalanced(ctx, u, e, res, ticket_id):
@@ -967,19 +1075,19 @@ def buyback(ctx, u="NIFTY"):
             ctx["wait"](5)
     margin_ok = freed is None or expected <= 0 or freed >= s["margin_freed_frac"] * expected
     ok = flat and margin_ok
-    detail = (f"{_fills_text(res)}; flat={flat}" + (f", margin freed ₹{freed:,.0f} of ₹{expected:,.0f} expected" if freed is not None else ""))
+    detail = (f"{_fills_text(res)}; flat={flat}" + (f", margin freed {_rs(freed)} of ₹{expected:,.0f} expected" if freed is not None else ""))
     put_state(key, {"ok": ok, "flat": flat, "freed_rs": freed, "expected_rs": expected, "detail": detail,
                     "mode": ctx["mode"]}, ctx["step"])
     if ok:
         return outcome(ctx, u, "ok", detail, f"{u} buy-back done: {_fills_text(res)}"
-                       + (f", ₹{freed:,.0f} margin freed" if freed is not None else "") + " — SENSEX can enter.")
-    why = "still open: " + ", ".join(l["tradingsymbol"] for l in left) if left or not flat else f"margin freed only ₹{freed:,.0f}"
+                       + (f", {_rs(freed)} margin freed" if freed is not None else "") + " — SENSEX can enter.")
+    why = "still open: " + ", ".join(l["tradingsymbol"] for l in left) if left or not flat else f"margin freed only {_rs(freed)}"
     return outcome(ctx, u, "failed", detail, f"{u} buy-back incomplete ({why}). Leftovers cancelled; {u} expires "
                    "normally and the SENSEX entry will be skipped.", urgent=True)
 
 
 def closeall(ctx):
-    """Stop + buy back every open tagged (and shadow) short leg now."""
+    """Stop + buy back every open tagged (and shadow) short leg now. Long wings stay: they only gain."""
     s = ctx["settings"]
     set_kill(True, "Close-all", ctx["step"])
     todo = [l for l in legs("status = 'OPEN' AND net_qty < 0") if l["source"] in ("shadow", "live")]
@@ -1062,7 +1170,19 @@ def _pnl(l, price):
     return sv - bv + (l["net_qty"] or 0) * price
 
 
+def _quote_if_logged_in(ctx):
+    """The sizing quote rides on the mark step (10:00, 15:01 IST); a failure is logged, never fatal to the mark."""
+    if not has_session(ctx):
+        return None
+    try:
+        return sizing_quote(ctx)
+    except Exception as e:                          # noqa: BLE001
+        runlog.note(f"options_live: sizing quote failed ({type(e).__name__}: {e})", level="WARN")
+        return None
+
+
 def mark(ctx):
+    _quote_if_logged_in(ctx)
     open_ = legs("status = 'OPEN'")
     if not open_:
         return outcome(ctx, "ALL", "idle", "nothing open")
@@ -1081,10 +1201,13 @@ def mark(ctx):
     if live:
         groups = {}
         for l in open_:
-            if l["net_qty"] < 0:
+            if l["net_qty"]:
                 groups.setdefault((l["underlying"], l["expiry"], l["source"]), []).append(l)
         for (u, e, src), g in groups.items():
-            m = basket_margin(ctx, [{**l, "lot": -l["net_qty"]} for l in g], 1)
+            if not any(l["net_qty"] < 0 for l in g):    # only longs left: no margin
+                continue
+            m = basket_margin(ctx, [{**l, "lot": abs(l["net_qty"]), "side": "SELL" if l["net_qty"] < 0 else "BUY"}
+                                    for l in g], 1)
             for r in rows:
                 if (r["underlying"], r["expiry"], r["source"]) == (u, e, src):
                     r["mark_margin_rs"] = m
@@ -1092,7 +1215,7 @@ def mark(ctx):
     if rows:
         upsert_df(pd.DataFrame(rows), "option_live_trades")
     total = sum(r["mtm_rs"] for r in rows)
-    return outcome(ctx, "ALL", "ok", f"{len(rows)} of {len(open_)} open leg(s) marked at {how}: MTM ₹{total:,.0f}")
+    return outcome(ctx, "ALL", "ok", f"{len(rows)} of {len(open_)} open leg(s) marked at {how}: MTM {_rs(total)}")
 
 
 def settle(ctx):
@@ -1112,12 +1235,16 @@ def settle(ctx):
         for l in (x for x in todo if (x["underlying"], x["expiry"]) == (u, e)):
             exit_ = ob.intrinsic("C" if l["option_type"] == "CE" else "P", l["strike"], S)
             gross = _pnl(l, exit_)
+            # a long wing that finishes in the money is exercised: STT on its intrinsic value, in net_rs only
+            # (charges_rs stays the fills' charges, which rebuild_ledger recomputes)
+            stt = ob.STT_EXERCISE * exit_ * l["net_qty"] if l["net_qty"] > 0 else 0.0
             rows.append({**{k: l[k] for k in LEDGER_KEY}, "status": "SETTLED", "settle_index": S, "exit_price": exit_,
-                         "gross_rs": gross, "net_rs": gross - (l["charges_rs"] or 0), "closed_at": e, "updated_at": _utc()})
+                         "gross_rs": gross, "net_rs": gross - (l["charges_rs"] or 0) - stt, "closed_at": e,
+                         "updated_at": _utc()})
             net[l["source"]] = net.get(l["source"], 0) + rows[-1]["net_rs"]
         upsert_df(pd.DataFrame(rows), "option_live_trades")
         done.append(f"{u} {e}")
-        msgs.append(f"{u} {e} settled at {S:,.2f}: " + ", ".join(f"{k} ₹{v:+,.0f}" for k, v in sorted(net.items())))
+        msgs.append(f"{u} {e} settled at {S:,.2f}: " + ", ".join(f"{k} {_rs(v, True)}" for k, v in sorted(net.items())))
     stale = [w for w in waiting if date.fromisoformat(w.split()[1]) < date.fromisoformat(today) - timedelta(days=3)]
     detail = f"settled {done or 'nothing'}; waiting for the settlement price: {waiting or 'none'}"
     if stale:
@@ -1179,9 +1306,99 @@ def weekly(ctx):
     for l in week:
         by[l["source"]] = by.get(l["source"], 0) + (l["net_rs"] or 0)
     mtm = sum(l["mtm_rs"] or 0 for l in open_)
-    text = (f"week from {monday}: " + (", ".join(f"{k} ₹{v:+,.0f}" for k, v in sorted(by.items())) or "no closed legs")
-            + f"; {len(open_)} open leg(s), MTM ₹{mtm:+,.0f}")
+    text = (f"week from {monday}: " + (", ".join(f"{k} {_rs(v, True)}" for k, v in sorted(by.items())) or "no closed legs")
+            + f"; {len(open_)} open leg(s), MTM {_rs(mtm, True)}")
     return outcome(ctx, "ALL", "ok", text, f"weekly P&L — {text}")
+
+
+# ─────────────────────────── sizing choices (the /options card) ───────────────────────────
+
+SIZING = {
+    "wing_pct": 1.75,           # quoted when the setting is off (0), so C / D can be shown
+    "crash_gap": 0.139,         # the index gap of the crash column (2020-03-23)
+    "crash_budget": 0.30,       # B: lots within this share of the money in that crash (combined-book study)
+    "spare": 0.15,              # D: margin kept free beyond the buffer
+    "keep": {"NIFTY": 0.853, "SENSEX": 0.823},   # premium kept after losing weeks, before charges (backtest 2019-26)
+}
+
+
+def sizing_quote(ctx):
+    """Per lot, for each index's next entry: Kite's basket margin naked and with wings, the expiry-day
+    extra, credit at the bid, wing cost at the ask, entry charges, the expected week and the crash loss.
+    Read-only Kite calls; stored as state 'sizing_quote' for the Live panel."""
+    s, today = ctx["settings"], ctx["today"]
+    pct = s["wing_pct"] or SIZING["wing_pct"]
+    out = {}
+    for u in MARKETS:
+        e = due_expiry(u, today, ob.holidays()) or kq.front_expiry(u, today)
+        F, spot, legs_, wings, k, kw = pick_legs(ctx, u, e, pct)
+        lot = legs_[0]["lot"]
+        credit = sum(l["bid"] or 0 for l in legs_)
+        wing_cost = sum(w["ask"] or 0 for w in wings)
+
+        def charges(ls):
+            return sum(ob.leg_cost(l["bid"] if l["side"] == "SELL" else l["ask"], l["side"].lower(), lot, ob.SLIP, today)
+                       for l in ls if (l["bid"] if l["side"] == "SELL" else l["ask"])) * lot
+        hit = max(0.0, k["P"] - (1 - SIZING["crash_gap"]) * F)
+        kept = credit * lot * SIZING["keep"][u]
+        out[u] = {"expiry": e, "spot": spot, "forward": F, "lot": lot, "extra": ob.expiry_day_extra(F, lot),
+                  "strikes": {"C": k["C"], "P": k["P"], "wing_C": kw["C"], "wing_P": kw["P"]},
+                  "naked": {"margin": basket_margin(ctx, legs_, 1), "credit_rs": credit * lot,
+                            "weekly": kept - charges(legs_), "crash": (hit - credit) * lot},
+                  "winged": {"margin": basket_margin(ctx, wings + legs_, 1), "credit_rs": (credit - wing_cost) * lot,
+                             "weekly": kept - wing_cost * lot - charges(wings + legs_),
+                             "crash": (min(hit, k["P"] - kw["P"]) - credit + wing_cost) * lot}}
+    q = {"at": _utc(), "wing_pct": pct, "markets": out}
+    put_state("sizing_quote", q, ctx["step"])
+    snapshot_margin(ctx)                            # the money the choices are sized on, read at the same time
+    return q
+
+
+def sizing_choices(quote, capital, s):
+    """The four setups on `capital` (₹: cash + collateral), each applied to both indices:
+    A naked at today's caps · B naked within the crash budget · C winged at today's caps ·
+    D winged at the margin limit (spare kept, at most lots_hard_max). Lots also fit the expiry-day peak
+    after the buffer. The two trades never overlap, so a crash hits one index at a time."""
+    if not quote or not capital:
+        return []
+    wing_on = bool(s["wing_pct"])
+    spec = (("A", "naked", "cap", "Unprotected, today's caps"),
+            ("B", "naked", "budget", f"Unprotected, crash loss within {SIZING['crash_budget']:.0%} of your money"),
+            ("C", "winged", "cap", "Protected, today's caps"),
+            ("D", "winged", "margin", f"Protected, as many lots as margin allows ({SIZING['spare']:.0%} spare)"))
+    rows = []
+    for key, kind, rule, label in spec:
+        per = {}
+        for u, q in quote["markets"].items():
+            x = q[kind]
+            peak = x["margin"] + q["extra"]
+            fit = max(0, math.floor((capital * (1 - (SIZING["spare"] if rule == "margin" else 0)) - s["margin_buffer_rs"]) / peak))
+            if rule == "cap":
+                lots = min(int(s["lots_cap"].get(u, 0)), fit)
+            elif rule == "budget":
+                lots = min(fit, math.floor(SIZING["crash_budget"] * capital / x["crash"])) if x["crash"] > 0 else fit
+            else:
+                lots = fit
+            lots = min(lots, int(s["lots_hard_max"]))      # a cap the settings accept
+            per[u] = {"lots": lots, "weekly": lots * x["weekly"], "crash": lots * x["crash"], "peak": lots * peak}
+        crash = max(p["crash"] for p in per.values())
+        rows.append({"key": key, "kind": kind, "label": label, "per": per,
+                     "weekly": sum(p["weekly"] for p in per.values()), "crash": crash, "crash_pct": crash / capital,
+                     "wing_pct": quote["wing_pct"] if kind == "winged" else 0,
+                     "caps": {u: p["lots"] for u, p in per.items()},
+                     "current": (kind == "winged") == wing_on and all(
+                         p["lots"] == int(s["lots_cap"].get(u, 0)) for u, p in per.items())})
+    return rows
+
+
+def quote_step(ctx):
+    try:
+        client(ctx)
+    except NoKiteSession:
+        return outcome(ctx, "ALL", "idle", "no Kite login today: no sizing quote")
+    q = sizing_quote(ctx)
+    return outcome(ctx, "ALL", "ok", "sizing quote: " + ", ".join(
+        f"{u} naked ₹{m['naked']['margin']:,.0f} / winged ₹{m['winged']['margin']:,.0f} a lot" for u, m in q["markets"].items()))
 
 
 def plan_only(ctx, u):
@@ -1255,7 +1472,8 @@ def testorder(ctx, u="NIFTY"):
 
 
 STEPS = {"entry": entry, "buyback": buyback, "closeall": closeall, "record": record, "mark": mark,
-         "settle": settle, "reconcile": reconcile, "precheck": precheck, "weekly": weekly, "testorder": testorder}
+         "settle": settle, "reconcile": reconcile, "precheck": precheck, "weekly": weekly, "testorder": testorder,
+         "quote": quote_step}
 PER_UNDERLYING = ("entry", "buyback", "testorder")
 
 
@@ -1303,8 +1521,8 @@ def page_data():
     if not tk.empty:
         t = tk.iloc[0]
         ev = set(_rows("SELECT event FROM option_live_orders WHERE ticket_id = ?", [t.ticket_id])["event"])
-        prop = _rows("SELECT tradingsymbol, quantity, price, detail FROM option_live_orders WHERE ticket_id = ? "
-                     "AND event = 'proposed' ORDER BY event_id", [t.ticket_id])
+        prop = _rows("SELECT tradingsymbol, transaction_type, quantity, price, detail FROM option_live_orders "
+                     "WHERE ticket_id = ? AND event = 'proposed' ORDER BY event_id", [t.ticket_id])
         now = datetime.now(IST)
         h, m = map(int, s["approve_by"].split(":"))
         pending = not (ev & {"approved", "expired"}) and not get_state(f"approval:{t.ticket_id}") \
@@ -1313,8 +1531,8 @@ def page_data():
                   "status": "approved" if ("approved" in ev or get_state(f"approval:{t.ticket_id}")) else
                             "expired" if "expired" in ev else "pending" if pending else "lapsed",
                   "pending": pending, "detail": json.loads(t.detail) if t.detail else {},
-                  "legs": [{"tradingsymbol": r.tradingsymbol, "quantity": r.quantity, "price": _clean(r.price)}
-                           for r in prop.itertuples()]}
+                  "legs": [{"tradingsymbol": r.tradingsymbol, "side": r.transaction_type or "SELL",
+                            "quantity": r.quantity, "price": _clean(r.price)} for r in prop.itertuples()]}
     all_legs = legs()
     open_ = [l for l in all_legs if l["status"] == "OPEN"]
     hist = [l for l in all_legs if l["status"] != "OPEN"][::-1][:60]
@@ -1335,6 +1553,10 @@ def page_data():
         if m:
             groups[(l["underlying"], l["expiry"], l["source"])] = m
     margin = get_state("margin")
+    quote = get_state("sizing_quote")
+    if quote:
+        quote["at_ist"] = datetime.fromisoformat(quote["at"]).astimezone(IST).strftime("%a %d %b, %H:%M IST")
+    choices = sizing_choices(quote, (margin or {}).get("total"), s)
     if margin:
         margin["at_ist"] = datetime.fromisoformat(margin["at"]).astimezone(IST).strftime("%a %d %b, %H:%M IST")
         margin["free_after_buffer"] = margin["free"] - s["margin_buffer_rs"]
@@ -1344,6 +1566,7 @@ def page_data():
             "week": {src: week_realised(today, src) for src in ("shadow", "live")},
             "real_money": s["mode"] in LIVE_MODES,
             "margin": margin, "margin_open": sum(groups.values()) if groups else None,
+            "sizing": {"quote": quote, "choices": choices, "rules": SIZING},
             "margin_open_missing": sum(1 for l in open_ if not (l.get("mark_margin_rs") or l.get("margin_rs")))}
 
 

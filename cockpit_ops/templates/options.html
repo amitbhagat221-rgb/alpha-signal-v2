@@ -31,7 +31,8 @@
   .ol-live { border-color: var(--accent); }
   .ol-sub { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
   .ol-btns { display: flex; flex-wrap: wrap; gap: 8px; }
-  .ol-act, .ol-save { border: 0; cursor: pointer; font-family: inherit; }
+  .ol-act, .ol-save, .ol-apply { border: 0; cursor: pointer; font-family: inherit; }
+  .ol-cur td { background: var(--bg-hover, rgba(127,127,127,0.12)); }
   .ol-btn-stop { background: var(--red); }
   .ol-mode { display: inline-block; margin-left: 8px; padding: 2px 8px; border-radius: 6px; font-size: 11px; font-weight: 800; letter-spacing: 0.4px; background: var(--bg-hover, rgba(127,127,127,0.15)); }
   .ol-mode-shadow { color: var(--text-secondary); }
@@ -69,7 +70,7 @@
       <b>Live book</b>
       <span class="ol-mode {{ 'ol-mode-' ~ st.mode }}">{{ {"off": "OFF", "shadow": "SHADOW · no orders", "approve": "APPROVE · real orders after you tap", "auto": "AUTO · real orders"}[st.mode] }}</span>
       {% if st.kill %}<span class="ol-mode ol-mode-kill">STOPPED</span>{% endif %}
-      <div class="ob-muted">Plan 0029. Caps NIFTY {{ st.lots_cap.NIFTY }} · SENSEX {{ st.lots_cap.SENSEX }} lot(s) · buffer {{ st.margin_buffer_rs|inr_short }} · weekly loss limit {{ st.weekly_loss_limit_rs|inr_short }} · VIX guard: half the lots above {{ st.vix_halve }}, no entry at {{ st.vix_halt }} or more{% if st.adopt_manual_nifty %} · Tuesday buy-back also closes your own NIFTY legs{% endif %}.
+      <div class="ob-muted">Plan 0029. Caps NIFTY {{ st.lots_cap.NIFTY }} · SENSEX {{ st.lots_cap.SENSEX }} lot(s) · buffer {{ st.margin_buffer_rs|inr_short }} · weekly loss limit {{ st.weekly_loss_limit_rs|inr_short }} · VIX guard: half the lots above {{ st.vix_halve }}, no entry at {{ st.vix_halt }} or more · {% if st.wing_pct %}wings {{ st.wing_pct }}% beyond the sold strikes (bought first){% else %}no wings{% endif %}{% if st.adopt_manual_nifty %} · Tuesday buy-back also closes your own NIFTY legs{% endif %}.
         {% if st.kill %}<br><b class="ob-bad">Entries stopped:</b> {{ st.kill_reason or "kill switch on" }}.{% endif %}</div>
     </div>
     <div class="ol-btns">
@@ -82,7 +83,7 @@
   {% if L.ticket %}{% set T = L.ticket %}
   <div class="ol-sub">
     <b>Ticket {{ T.underlying }} {{ T.expiry }}</b> <span class="ob-muted">({{ T.trade_date }}, {{ T.status }})</span>
-    <div class="ob-muted">{% for l in T.legs %}sell {{ l.quantity }} × {{ l.tradingsymbol }}{% if l.price %} at bid {{ l.price }}{% endif %}{% if not loop.last %} · {% endif %}{% endfor %}
+    <div class="ob-muted">{% for l in T.legs %}{{ 'buy' if l.side == 'BUY' else 'sell' }} {{ l.quantity }} × {{ l.tradingsymbol }}{% if l.price %} at {{ 'ask' if l.side == 'BUY' else 'bid' }} {{ l.price }}{% endif %}{% if not loop.last %} · {% endif %}{% endfor %}
       {% if T.detail.margin_rs %} · margin {{ T.detail.margin_rs|inr_short }}{% endif %}</div>
     {% if T.pending %}<button class="ob-btn ol-act" data-url="/api/options/live/approve" data-body='{"ticket_id": "{{ T.ticket_id }}"}' data-word="APPROVE" data-ask="Approve: place these orders now (limit at the bid, re-priced to 15:29)?">Approve</button>
     <span class="ob-muted">before {{ st.approve_by }} IST, or nothing is placed.</span>{% endif %}
@@ -111,14 +112,38 @@
     {% endif %}
   </div>
 
+  {% set Z = L.sizing %}
+  <div class="ol-sub" id="ol-sizing">
+    <b>Sizing choices for the next entries</b>
+    {% if Z.choices %}{% set Q = Z.quote %}
+    <div class="ob-muted">On {{ M.total|inr_short }} (cash + collateral, Kite {{ M.at_ist }}). Margin per lot quoted {{ Q.at_ist }} for NIFTY {{ Q.markets.NIFTY.expiry }} (unprotected {{ Q.markets.NIFTY.naked.margin|inr_short }}, protected {{ Q.markets.NIFTY.winged.margin|inr_short }}) and SENSEX {{ Q.markets.SENSEX.expiry }} ({{ Q.markets.SENSEX.naked.margin|inr_short }} / {{ Q.markets.SENSEX.winged.margin|inr_short }}), each + {{ Q.markets.NIFTY.extra|inr_short }} on expiry day. Protected = wings {{ Q.wing_pct }}% beyond the sold strikes, bought first.
+      <b>Expected a week</b>: both indices, premium kept after losing weeks (backtest 2019–26) less charges; quoted days before entry, so entry-day premiums run a little lower.
+      <b>Crash</b>: a −{{ (100 * Z.rules.crash_gap)|round(1) }}% gap (2020-03-23) on one index while its trade is open (the two never overlap); the VIX guard covers a crash that builds up.</div>
+    <div class="ob-scroll">
+    <table class="ob-table">
+      <tr><th></th><th>Setup</th><th>NIFTY lots</th><th>SENSEX lots</th><th>Expected a week</th><th>Crash loss</th><th>Of your money</th><th></th></tr>
+      {% for c in Z.choices %}
+      <tr class="{{ 'ol-cur' if c.current else '' }}"><td><b>{{ c.key }}</b></td>
+        <td class="ob-wrap">{{ c.label }}{% if c.current %} <span class="ol-mode">NOW</span>{% endif %}</td>
+        <td>{{ c.per.NIFTY.lots }}</td><td>{{ c.per.SENSEX.lots }}</td><td class="ob-ok">{{ c.weekly|inr_short }}</td>
+        <td class="ob-bad">−{{ c.crash|inr_short }}</td>
+        <td class="{{ 'ob-bad' if c.crash_pct > Z.rules.crash_budget + 0.005 else 'ob-ok' }}">{{ (100 * c.crash_pct)|round|int }}%</td>
+        <td>{% if not c.current %}<button class="ob-btn ol-apply" data-key="{{ c.key }}" data-wing="{{ c.wing_pct }}" data-caps='{{ c.caps|tojson }}'>Apply</button>{% endif %}</td></tr>
+      {% endfor %}
+    </table>
+    </div>
+    <div class="ob-muted">Apply sets the wings and both lot caps; the next entry still sizes down on its own if Kite's margin then is higher.</div>
+    {% else %}<div class="ob-muted">No quote yet: it is taken at the 10:00 and 15:01 IST mark on a day you are logged in to Kite (or by hand: <code>run.sh options_live quote</code>).</div>{% endif %}
+  </div>
+
   <div class="ob-scroll ol-sub">
     <b>Open live legs</b>
     {% if L.open %}
     <table class="ob-table">
-      <tr><th>Source</th><th>Contract</th><th>Expiry</th><th>Qty</th><th>Sold at</th><th>Mark</th><th>MTM</th><th>Margin</th></tr>
+      <tr><th>Source</th><th>Contract</th><th>Expiry</th><th>Qty</th><th>Opened at</th><th>Mark</th><th>MTM</th><th>Margin</th></tr>
       {% for l in L.open %}
       <tr><td>{{ l.source }}</td><td>{{ l.tradingsymbol }}</td><td>{{ l.expiry }}</td><td>{{ l.net_qty }}</td>
-        <td>{{ "%.2f"|format(l.sell_avg) if l.sell_avg else "—" }}</td><td>{{ "%.2f"|format(l.mark_price) if l.mark_price is not none else "—" }}</td>
+        <td>{% if l.net_qty > 0 %}bought {{ "%.2f"|format(l.buy_avg) if l.buy_avg else "—" }}{% else %}sold {{ "%.2f"|format(l.sell_avg) if l.sell_avg else "—" }}{% endif %}</td><td>{{ "%.2f"|format(l.mark_price) if l.mark_price is not none else "—" }}</td>
         <td class="{% if l.mtm_rs and l.mtm_rs > 0 %}ob-ok{% elif l.mtm_rs and l.mtm_rs < 0 %}ob-bad{% endif %}">{{ l.mtm_rs|inr_short if l.mtm_rs is not none else "—" }}</td>
         <td>{{ (l.mark_margin_rs or l.margin_rs)|inr_short if (l.mark_margin_rs or l.margin_rs) else "—" }}</td></tr>
       {% endfor %}
@@ -132,11 +157,11 @@
       · paper book (below) {{ summary.net_rs|inr_short }}</span>
     {% if L.history %}
     <table class="ob-table">
-      <tr><th>Source</th><th>Contract</th><th>Expiry</th><th>Sold</th><th>Bought back / settled</th><th>Status</th><th>Net</th></tr>
+      <tr><th>Source</th><th>Contract</th><th>Expiry</th><th>Sold</th><th>Bought / settled</th><th>Status</th><th>Net</th></tr>
       {% for l in L.history %}
       <tr><td>{{ l.source }}</td><td>{{ l.tradingsymbol }}</td><td>{{ l.expiry }}</td>
-        <td>{{ l.sell_qty }} @ {{ "%.2f"|format(l.sell_avg) if l.sell_avg else "—" }}</td>
-        <td>{% if l.status == 'SETTLED' %}index {{ "{:,.2f}".format(l.settle_index) }} → {{ "%.2f"|format(l.exit_price) }}{% else %}{{ l.buy_qty }} @ {{ "%.2f"|format(l.buy_avg) if l.buy_avg else "—" }}{% endif %}</td>
+        <td>{% if l.sell_qty %}{{ l.sell_qty }} @ {{ "%.2f"|format(l.sell_avg) if l.sell_avg else "—" }}{% else %}—{% endif %}</td>
+        <td>{% if l.status == 'SETTLED' %}{% if l.buy_qty and not l.sell_qty %}wing {{ l.buy_qty }} @ {{ "%.2f"|format(l.buy_avg) if l.buy_avg else "—" }} · {% endif %}index {{ "{:,.2f}".format(l.settle_index) }} → {{ "%.2f"|format(l.exit_price) }}{% else %}{{ l.buy_qty }} @ {{ "%.2f"|format(l.buy_avg) if l.buy_avg else "—" }}{% endif %}</td>
         <td>{{ l.status }}</td><td class="{% if l.net_rs and l.net_rs > 0 %}ob-ok{% elif l.net_rs and l.net_rs < 0 %}ob-bad{% endif %}">{{ l.net_rs|inr_short if l.net_rs is not none else "—" }}</td></tr>
       {% endfor %}
     </table>
@@ -174,6 +199,10 @@
       <button class="ob-btn ol-save" data-key="vix_halve" data-src="ol-vix-halve" data-kind="num">Save</button>
       <label class="ob-muted">No entry at VIX ≥ <input id="ol-vix-halt" type="number" min="1" max="100" step="0.5" value="{{ st.vix_halt }}"></label>
       <button class="ob-btn ol-save" data-key="vix_halt" data-src="ol-vix-halt" data-kind="num">Save</button>
+    </div>
+    <div class="ob-cap ol-set">
+      <label class="ob-muted">Wings: buy a call / put this % of spot beyond each sold strike, before selling (0 = off) <input id="ol-wing" type="number" min="0" max="5" step="0.25" value="{{ st.wing_pct }}"></label>
+      <button class="ob-btn ol-save" data-key="wing_pct" data-src="ol-wing" data-kind="num">Save</button>
     </div>
     <div class="ob-cap ol-set">
       <label class="ob-muted"><input id="ol-adopt" type="checkbox"{% if st.adopt_manual_nifty %} checked{% endif %}> Tuesday buy-back also closes my own (untagged) NIFTY legs of that expiry</label>
@@ -329,6 +358,22 @@
                    : confirmWord('Save ' + b.dataset.key + ' = ' + JSON.stringify(v) + '?', 'SAVE', false);
       if (w === null) return;
       send('/api/options/live/settings', {key: b.dataset.key, value: v, confirm: w});
+    });
+  });
+  function post(body) {
+    return fetch('/api/options/live/settings', {method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)})
+      .then(function (r) { return r.json().then(function (j) { if (!r.ok) throw new Error(j.error || 'error'); return j; }); });
+  }
+  Array.prototype.forEach.call(document.querySelectorAll('.ol-apply'), function (b) {
+    b.addEventListener('click', function () {
+      var wing = parseFloat(b.dataset.wing), caps = JSON.parse(b.dataset.caps);
+      var ask = 'Apply setup ' + b.dataset.key + ': ' + (wing ? 'wings ' + wing + '% beyond the sold strikes' : 'no wings')
+              + ', lots NIFTY ' + caps.NIFTY + ' / SENSEX ' + caps.SENSEX + '?';
+      if (!confirm(ask)) return;
+      post({key: 'wing_pct', value: wing, confirm: 'SAVE'})
+        .then(function () { return post({key: 'lots_cap', value: caps, confirm: 'SAVE'}); })
+        .then(function () { location.reload(); })
+        .catch(function (e) { alert('Refused: ' + e.message); location.reload(); });
     });
   });
 })();
