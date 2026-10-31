@@ -33,6 +33,7 @@ CHARS_PER_TOKEN = 3          # conservative for JSON full of short keys and digi
 MAX_CHARS = MAX_TOKENS * CHARS_PER_TOKEN
 
 _READONLY = False
+_ORIGINAL = {}               # what install_readonly() replaced, for uninstall_readonly()
 
 
 # ═══════════════════════════ read-only wiring ═══════════════════════════
@@ -64,11 +65,27 @@ def install_readonly():
     import runlog
     original = db.get_db
     if original is not _ro_get_db:
+        _ORIGINAL.update(get_db=original, runlog_conn=runlog._conn)
         for mod in list(sys.modules.values()):
             if getattr(mod, "get_db", None) is original:
                 mod.get_db = _ro_get_db
     runlog._conn = _ro_runlog_conn
     _READONLY = True
+
+
+def uninstall_readonly():
+    """Undo install_readonly() in this process: every module copy of get_db and runlog's connection
+    go back to the originals. For the test suite only (tests/conftest.py): importing alpha_mcp.research
+    in one test must not leave every later test unable to write its own temp DB."""
+    global _READONLY
+    if not _READONLY:
+        return
+    import runlog
+    for mod in list(sys.modules.values()):
+        if getattr(mod, "get_db", None) is _ro_get_db:
+            mod.get_db = _ORIGINAL["get_db"]
+    runlog._conn = _ORIGINAL["runlog_conn"]
+    _READONLY = False
 
 
 def assert_readonly():

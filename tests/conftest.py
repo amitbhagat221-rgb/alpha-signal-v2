@@ -41,3 +41,14 @@ def _legacy_reads(request, monkeypatch):
     Moving the fixtures to the v3 tables is a prerequisite of the stage-1 drop commit."""
     if "v3" not in request.keywords:
         monkeypatch.setitem(config.DATA_MODEL, "decisions", "old")
+
+
+@pytest.fixture(autouse=True)
+def _writable_after_alpha_mcp():
+    """alpha_mcp.research / ops call _core.install_readonly() at import, which swaps get_db in every
+    loaded module (options_live included) for a read-only connection. The MCP servers are their own
+    processes; in the suite one `from alpha_mcp import research` would otherwise leave every later
+    test's db.get_db read-only (test_views → test_check_drills OPTIONS_LIVE drill, 2026-10-31)."""
+    yield
+    from alpha_mcp import _core
+    _core.uninstall_readonly()

@@ -112,3 +112,24 @@ def test_cap_and_jsonable():
     big = {"as_of": "x", "items": [{"k": "v" * 50} for _ in range(10_000)]}
     capped = cap(big, max_chars=20_000)
     assert len(str(capped)) < 25_000 and capped["truncated"]["lists_cut"] == ["items"]
+
+
+def test_uninstall_restores_every_get_db_copy_in_process(tmp_path, monkeypatch):
+    """The suite's conftest relies on this: after an MCP import, the next test can write its temp DB."""
+    import sqlite3
+    import db
+    import options_live as ol
+    from alpha_mcp import _core
+    path = tmp_path / "w.db"
+    c = sqlite3.connect(path)
+    c.execute("CREATE TABLE t (k)")
+    c.commit()
+    c.close()
+    monkeypatch.setattr(db, "DB_PATH", path)
+    _core.install_readonly()
+    assert ol.get_db is _core._ro_get_db and db.get_db is _core._ro_get_db
+    _core.uninstall_readonly()
+    assert ol.get_db is db.get_db and db.get_db is not _core._ro_get_db and not _core._READONLY
+    with ol.get_db() as g:
+        g.execute("INSERT INTO t VALUES (1)")
+    _core.uninstall_readonly()                       # idempotent
