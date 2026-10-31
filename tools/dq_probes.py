@@ -564,7 +564,7 @@ PLANTS = [
      lambda q: second_source(q) + rules(q), "quarterly_income.net_income"),
     # plan 0027 classes
     ("pre-demerger annuals", "a demerger dated yesterday for a stock whose annuals end before it",
-     "INSERT OR REPLACE INTO corporate_adjustments (sid, ex_date, factor, n_events, inds) SELECT sid, date('now', '-1 day'), 0.8, 1, 'DEMERGER' "
+     "INSERT INTO corporate_adjustments (sid, ex_date, factor, n_events, inds) SELECT sid, date('now', '-1 day'), 0.8, 1, 'DEMERGER' "
      "FROM annual_balance_sheet GROUP BY sid HAVING MAX(end_date) < date('now', '-1 day') LIMIT 3",
      rules, "annual_balance_sheet.end_date (0027 #1)"),
     ("vendor share count 22x too small", "the newest year's share count divided by 22 for 5 stocks",
