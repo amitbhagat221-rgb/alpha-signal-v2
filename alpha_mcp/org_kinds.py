@@ -216,6 +216,8 @@ def _validate(kind):
         problems += _evidence_problems(clean.get("evidence") or [], payload.get("role"))
         if kind == "org_dq_audit":
             problems += _dq_problems(clean, payload)
+        if kind == "org_code_sweep":
+            problems += _code_problems(clean, payload)
         if kind == "org_sector_view" and not _called(payload.get("role"), 45) & _STOCK_TOOLS:
             problems.append("an idea needs research: look the stock up first (alpha-research stock, dossier, "
                             "stock_news, stock_financials or pick_breakdown), then submit")
@@ -486,6 +488,11 @@ def _ingest(kind):
                 return {"inserted": [did], "superseded": sup}
             if kind == "org_dq_audit":
                 clean["score"] = _dq_score(clean, payload)
+            if kind == "org_code_sweep":        # subject and probe on each call, so the memo reads without the brief
+                brief = {f["finding_id"]: f for f in payload["facts"]["findings"]}
+                for call in clean.get("findings") or []:
+                    f = brief.get(call["finding_id"], {})
+                    call["subject"], call["probe"] = f.get("subject"), f.get("probe")
             did, sup = org.save_doc(conn, doc_type, key, clean.get("headline"),
                                     {**clean, "role": role, "period": payload.get("period"), **stamp,
                                      "as_of": payload.get("as_of"), **({"sector": payload["sector"]}
@@ -495,6 +502,10 @@ def _ingest(kind):
             superseded += sup
             if kind == "org_dq_audit":          # J3 (ADR 0085): a real fault touching the picks → a fix order to approve
                 wo = _draft_fix_order(conn, clean, payload, did)
+                if wo:
+                    inserted.append(wo)
+            if kind == "org_code_sweep":        # the same for clutter: dead / sticker calls → a Tier B order
+                wo = _draft_code_order(conn, clean, payload, did)
                 if wo:
                     inserted.append(wo)
             if sup:                 # a re-run replaced the memo: retire its undecided asks and cards too
@@ -682,6 +693,81 @@ def _build_dq_audit(day, key):
     }
     sets = {"findings": [r["finding_id"] for r in rows], "owners": org.builder_roles() + ["ceo"]}
     return [(key, _item("dq-auditor", key, day, facts, sets), 4)]
+
+
+def _build_code_sweep(day, key):
+    from tools import code_probes
+    out = code_probes.run()
+    earlier = org.docs(["code_sweep"], days=180)
+    first, kept = {}, {}
+    for d in sorted(earlier, key=lambda d: d["doc_date"]):
+        for c in d["fields"].get("findings") or []:
+            if c.get("subject"):
+                if c.get("call") in ("dead", "sticker"):
+                    first.setdefault(c["subject"], d["doc_date"])
+                if c.get("call") == "keep":
+                    kept[c["subject"]] = c.get("why")
+    rows = []
+    for f in out["findings"][:40]:
+        rows.append({"finding_id": f["id"], **{k: f[k] for k in ("probe", "subject", "claim", "evidence", "sticker_hits_90d")},
+                     "first_raised": first.get(f["subject"]), "kept_before": kept.get(f["subject"])})
+    facts = {
+        "scan": {"as_of": out["as_of"], "scanned": out["scanned"], "scope": out["scope"]},
+        "findings": rows,
+        "drill": _section(lambda: {k: v for k, v in code_probes.drill().items() if k != "results"}),
+        "your_record": [{"week": d["doc_date"], "verdict": d["fields"].get("verdict"),
+                         "calls": {c: sum(1 for x in d["fields"].get("findings") or [] if x.get("call") == c)
+                                   for c in ("dead", "sticker", "keep", "needs-more-data")}}
+                        for d in earlier[:6]],
+        "owners": {r: org.ROLES[r]["mission"] for r in org.builder_roles()},
+        "decided_recently": _recent_decisions(),
+    }
+    sets = {"findings": [r["finding_id"] for r in rows], "owners": org.builder_roles() + ["ceo"]}
+    return [(key, _item("code-janitor", key, day, facts, sets), 4)]
+
+
+def _code_problems(clean, payload):
+    """One call per brief finding, like the audit."""
+    listed = [f["finding_id"] for f in payload["facts"]["findings"]]
+    called = [f["finding_id"] for f in clean["findings"]]
+    if sorted(called) != sorted(listed):
+        missing = sorted(set(listed) - set(called))
+        return [f"give every finding in the brief exactly one call (missing: {missing[:8]}, "
+                f"repeated: {sorted({x for x in called if called.count(x) > 1})[:8]})"]
+    return []
+
+
+def _draft_code_order(conn, clean, payload, memo_id):
+    """ADR 0085 J3 for code: `dead` calls become deletion items, `sticker` calls become one-line
+    sticker items, in one Tier B work order awaiting the CEO, parented to the memo."""
+    brief = {f["finding_id"]: f for f in payload["facts"]["findings"]}
+    items = []
+    for c in clean.get("findings") or []:
+        f = brief.get(c["finding_id"]) or {}
+        subj = f.get("subject") or c["finding_id"]
+        if c.get("call") == "dead":
+            items.append({"title": f"Delete {subj}"[:160],
+                          "what": (f"{f.get('claim') or 'clutter'}. Evidence: {json.dumps(f.get('evidence') or {}, default=str)[:300]}. "
+                                   f"Remove it, and anything only it used; {c.get('why') or ''}")[:1200],
+                          "where": subj[:500], "done_when": "the suite is green, the catalog and the registries still agree, nothing references it"[:600],
+                          "owner": "backend-engineer", "size": "S"})
+        elif c.get("call") == "sticker":
+            items.append({"title": f"Sticker on {subj}"[:160],
+                          "what": (f"Add `runlog.note(\"sticker:{subj.replace('/', '.').removesuffix('.py')}\")` at the top of its entry "
+                                   f"point; nothing else changes. The janitor re-checks in 90 days (ADR 0085 J6). {c.get('why') or ''}")[:1200],
+                          "where": subj[:500], "done_when": "the line is in and the suite is green"[:600],
+                          "owner": "backend-engineer", "size": "S"})
+    if not items:
+        return None
+    builders = org.builder_roles()
+    wo = {"title": f"Clutter: {sum(1 for i in items if i['title'].startswith('Delete'))} deletion(s), "
+                   f"{sum(1 for i in items if i['title'].startswith('Sticker'))} sticker(s) — sweep {payload.get('as_of')}"[:160],
+          "summary": (f"Drafted by the server from the code-janitor's memo (ADR 0085). Tier B: approves itself in "
+                      f"{org.VETO_HOURS} h unless parked or rejected. {clean.get('top_action') or ''}")[:900],
+          "items": items[:12], "tier": "B"}
+    clean_wo = _check(work_order_schema(), wo, {"owners": builders}, "clutter order")
+    n = org.save_work_order("code-janitor", None, clean_wo, parent=memo_id, conn=conn)
+    return org.work_order_doc_id(n, conn=conn)
 
 
 def _book():
@@ -963,7 +1049,7 @@ def _build_scout(day, key):
     return [(key, _item("ai-scout", key, day, facts, {}), 5)]
 
 
-GRADED = ("data_triage", "dq_audit", "risk_note", "cio_review", "cio_outlook", "sector_view", "cto_review", "ai_scout")
+GRADED = ("data_triage", "dq_audit", "code_sweep", "risk_note", "cio_review", "cio_outlook", "sector_view", "cto_review", "ai_scout")
 
 
 def _build_grade(day, key):
@@ -1037,6 +1123,12 @@ _SPECS = {
                      proposed_fix=S(300), owner={"ref": "owners"}), 45),
         own_findings=A(O("title claim query n_bad", title=S(140), claim=S(400), query=S(2500),
                          n_bad={"type": "integer", "lo": 1, "hi": 10 ** 9}, touches=S(200)), 5),
+        top_action=S(300), asks=ASKS, evidence=EVIDENCE)),
+    "org_code_sweep": ("code-janitor", _build_code_sweep, O(
+        "headline eli5 verdict findings top_action",
+        headline=P(160), eli5=ELI5, verdict=E("clean", "clutter", "risk"),
+        findings=A(O("finding_id call why", finding_id={"ref": "findings"},
+                     call=E("dead", "sticker", "keep", "needs-more-data"), why=S(400)), 45),
         top_action=S(300), asks=ASKS, evidence=EVIDENCE)),
     "org_risk_note": ("risk-officer", _build_risk, O(
         "headline eli5 verdict flags book_comment",

@@ -177,6 +177,17 @@ ROLES = {
         "gate": "Proposes. Production code changes only after the CEO approves the ADR.",
         "graded_by": "ceo",
     },
+    "code-janitor": {
+        "title": "Code Janitor", "type": "desk", "reports_to": "cto",
+        "cadence": "weekly:sun", "model": "opus", "effort": "high", "kinds": ["org_code_sweep"],
+        "mission": "Find clutter and box it with the evidence: code nothing calls, tests that cannot fail, run.sh cases "
+                   "no cron schedules, steps that pass only on retry, duplicate helpers, switches stuck for months.",
+        "deliverable": "Weekly sweep: a call on every probe finding (dead, sticker, keep), the sticker evidence, "
+                       "and the one removal that matters most. The server drafts the Tier B work order.",
+        "measures": ["deletions not reverted within 30 days", "dead calls without evidence = 0", "clutter nobody had noticed"],
+        "gate": "Proposes only; a work order the CEO approves (or lets stand 48 h) makes the change (ADR 0085, 0086).",
+        "graded_by": "compliance",
+    },
     "ai-scout": {
         "title": "AI & Tools Scout", "type": "desk", "reports_to": "ceo",
         "cadence": "weekly:sun", "model": "sonnet", "kinds": ["org_ai_scout"], "web": True,
@@ -189,7 +200,7 @@ ROLES = {
 }
 
 # Doers first, then the grader, then the pack that summarises both.
-RUN_ORDER = ["data-engineer", "dq-auditor", "risk-officer", "sector-desk", "cio", "cto", "ai-scout", "compliance", "chief-of-staff"]
+RUN_ORDER = ["data-engineer", "dq-auditor", "code-janitor", "risk-officer", "sector-desk", "cio", "cto", "ai-scout", "compliance", "chief-of-staff"]
 DOW = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
 VERDICTS = ("approve", "reject", "park")
 
