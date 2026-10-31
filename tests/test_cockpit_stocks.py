@@ -76,14 +76,6 @@ def test_paging(monkeypatch, uni):
     assert stocks.screen({"page": "99"})["page"] == 3 and stocks.screen({"page": "x"})["page"] == 1
 
 
-def test_median_target_basis():
-    assert stocks._median_upside(120, 100) == 20.0
-    assert stocks._median_upside(None, 100) is None
-    assert stocks._median_upside(400, 100) is None          # outside PT_CLOSE_RATIO: Yahoo garbage, not a target
-    assert stocks._median_upside(20, 100) is None
-    assert stocks._median_upside(120, None) is None
-
-
 def test_rank_change_is_within_tier():
     import pandas as pd
     today = pd.DataFrame({"sid": ["A", "B", "C"], "cap_tier": ["MID", "MID", "SMALL"], "rank": [1, 2, 1]})

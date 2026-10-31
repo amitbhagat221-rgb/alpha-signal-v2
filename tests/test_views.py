@@ -121,9 +121,12 @@ def test_pipeline_status_marks_aborted_and_prefers_completion(tmpdb):
         (today, "b", "RUNNING", old),                                  # crashed → ABORTED
         (today, "c", "RUNNING", fresh),                                # genuinely running
         ("2020-01-01", "d", "FAILED", "2020-01-01T03:00:00"),          # outside 7 days
+        (today, "e", "RUNNING", old),                                  # a long step mid-run
     ])
+    _exec(tmpdb, "INSERT INTO pipeline_log (run_date, step_name, status, started_at, duration_sec) "
+                 "VALUES (?,?,?,?,?)", [("2020-01-02", "e", "SUCCESS", "2020-01-02T03:00:00", 5400)])
     st = {r["step_name"]: r["status"] for r in views.pipeline_status(7)}
-    assert st == {"a": "SUCCESS", "b": "ABORTED", "c": "RUNNING"}
+    assert st == {"a": "SUCCESS", "b": "ABORTED", "c": "RUNNING", "e": "RUNNING"}
     assert views.step_status()["d"]["status"] == "FAILED"          # all history for /flow
 
 

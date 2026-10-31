@@ -383,6 +383,9 @@ def compute(sids=None, as_of=None):
     last_pit = pit_all["snapshot_date"].max()
     ac = _read(f"SELECT sid, total_analysts, price_target, price_target_median, price_target_high, price_target_low, fetched_at "
                f"FROM analyst_consensus WHERE sid IN {_in(targets)}").set_index("sid") if live else pd.DataFrame()
+    if live:                      # every reader's target rule: rebased across later share changes, never stale
+        from views import target_basis
+        basis = target_basis(list(targets))
 
     # peer universe: current P/E and EV/EBITDA per stock
     peer_rows = []
@@ -541,13 +544,21 @@ def compute(sids=None, as_of=None):
         elif n_an is None or n_an < PARAMS["min_analysts"]:
             N("analyst", f"fewer than {PARAMS['min_analysts']} analysts ({'count unknown' if n_an is None else n_an})")
         else:
+            from validators.plausibility import pt_status
+            b = basis.get(sid, {})
+            f = b.get("factor", 1.0)
             mid = a["price_target_median"] if pd.notna(a["price_target_median"]) else a["price_target"]
-            if pd.isna(mid):
+            status = pt_status(mid * f, price, n_an, b.get("close_at_set")) if pd.notna(mid) else "none"
+            if status == "none":
                 N("analyst", "n/a: no analyst targets")
+            elif status in ("implausible", "stale"):
+                N("analyst", f"n/a: target {status} (set by {b.get('set_by')}, {mid * f:.0f} vs price {price:.0f})")
             else:
                 lo = a["price_target_low"] if pd.notna(a["price_target_low"]) else mid
                 hi = a["price_target_high"] if pd.notna(a["price_target_high"]) else mid
-                R("analyst", lo, mid, hi, f"analyst price target low/median/high, {n_an} analysts, fetched {str(a['fetched_at'])[:10]}")
+                R("analyst", lo * f, mid * f, hi * f,
+                  f"analyst price target low/median/high, {n_an} analysts, fetched {str(a['fetched_at'])[:10]}"
+                  + (f", rebased x{f:.3g} for a share change after it was set" if f != 1.0 else ""))
 
         # 52-week range
         w = g.tail(PARAMS["sessions_52w"])

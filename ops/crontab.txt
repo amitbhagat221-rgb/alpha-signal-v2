@@ -18,11 +18,6 @@
 0 6 1,15 * * /home/ubuntu/alpha-signal-v2/run.sh screener_universe >> /home/ubuntu/alpha-signal-v2/output/screener_universe_refresh.log 2>&1
 0 5 1 * * /home/ubuntu/alpha-signal-v2/run.sh expected_return >> /home/ubuntu/alpha-signal-v2/logs/expected_return_cron.log 2>&1
 30 5 * * * /home/ubuntu/alpha-signal-v2/run.sh secrets_backup >> /home/ubuntu/alpha-signal-v2/output/secrets_backup.log 2>&1
-# TEMPORARY (added 2026-10-04): history backfills (pre-2020 prices, named-holder filings since 2016) in
-# the windows no other job uses. Remove once output/backfill.log says both parts have nothing left.
-0 8 * * 0-5 /home/ubuntu/alpha-signal-v2/run.sh backfill 320 >> /home/ubuntu/alpha-signal-v2/output/backfill.log 2>&1
-0 16 2-31 * * /home/ubuntu/alpha-signal-v2/run.sh backfill 250 >> /home/ubuntu/alpha-signal-v2/output/backfill.log 2>&1
-0 21 * * * /home/ubuntu/alpha-signal-v2/run.sh backfill 320 >> /home/ubuntu/alpha-signal-v2/output/backfill.log 2>&1
 # Option paper book (plan 0022): live quotes + Kite margin at 15:20 IST on entry days
 50 9 * * 1-5 /home/ubuntu/alpha-signal-v2/run.sh kite_quotes >> /home/ubuntu/alpha-signal-v2/output/kite_quotes.log 2>&1
 # Actual Zerodha holdings for /book (also taken at each Kite login): closing prices on days with a login
@@ -42,6 +37,8 @@
 15 9 * * 1-5  /home/ubuntu/alpha-signal-v2/run.sh options_live precheck >> /home/ubuntu/alpha-signal-v2/output/options_live.log 2>&1
 30 9 * * 1-5  /home/ubuntu/alpha-signal-v2/run.sh options_live precheck >> /home/ubuntu/alpha-signal-v2/output/options_live.log 2>&1
 38 9 * * 1-5  /home/ubuntu/alpha-signal-v2/run.sh options_live buyback NIFTY >> /home/ubuntu/alpha-signal-v2/output/options_live.log 2>&1
+# 15:00 IST: SENSEX bought back only when NIFTY enters the same day (holiday weeks); else idle
+30 9 * * 1-5  /home/ubuntu/alpha-signal-v2/run.sh options_live buyback SENSEX >> /home/ubuntu/alpha-signal-v2/output/options_live.log 2>&1
 42 9 * * 1-5  /home/ubuntu/alpha-signal-v2/run.sh options_live entry NIFTY >> /home/ubuntu/alpha-signal-v2/output/options_live.log 2>&1
 47 9 * * 1-5  /home/ubuntu/alpha-signal-v2/run.sh options_live entry SENSEX >> /home/ubuntu/alpha-signal-v2/output/options_live.log 2>&1
 15 10 * * 1-5 /home/ubuntu/alpha-signal-v2/run.sh options_live record >> /home/ubuntu/alpha-signal-v2/output/options_live.log 2>&1
@@ -50,3 +47,5 @@
 31 9 * * 1-5  /home/ubuntu/alpha-signal-v2/run.sh options_live mark >> /home/ubuntu/alpha-signal-v2/output/options_live.log 2>&1
 0 6 * * 1-5   /home/ubuntu/alpha-signal-v2/run.sh options_live settle >> /home/ubuntu/alpha-signal-v2/output/options_live.log 2>&1
 10 6 * * 5    /home/ubuntu/alpha-signal-v2/run.sh options_live weekly >> /home/ubuntu/alpha-signal-v2/output/options_live.log 2>&1
+# TEMPORARY (2026-10-23): when NSE first publishes the day's price/index files — Monday 2026-10-26 only, 15:30-24:00 IST; remove after
+0,30 10-18 26 10 * /home/ubuntu/alpha-signal-v2/run.sh nse_publish_probe >> /home/ubuntu/alpha-signal-v2/output/nse_publish_probe_cron.log 2>&1

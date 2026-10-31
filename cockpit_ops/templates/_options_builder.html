@@ -1,0 +1,58 @@
+{# The strategy builder's markup (cockpit/static/options_strategy.js fills it). Included once per page,
+   inside an element the page passes to OptStrategy.mount. Its styles are in _options_styles.html. #}
+<div class="os-metrics">
+  <div><span class="os-ml">Max profit</span><span class="os-mv ob-ok" data-o="maxp">—</span></div>
+  <div><span class="os-ml">Profit left</span><span class="os-mv" data-o="left">—</span></div>
+  <div><span class="os-ml">Max loss</span><span class="os-mv ob-bad" data-o="maxl">—</span></div>
+  <div><span class="os-ml">POP · at the target</span><span class="os-mv" data-o="pop">—</span></div>
+</div>
+<div class="os-be"><span class="ob-muted">Breakevens at expiry</span> <b data-o="bes">—</b></div>
+<div class="ob-tabs" role="tablist">
+  <button type="button" class="ob-tab" data-tab="chart" role="tab">Payoff chart</button>
+  <button type="button" class="ob-tab" data-tab="table" role="tab">Payoff table</button>
+  <button type="button" class="ob-tab" data-tab="greeks" role="tab">Greeks</button>
+  <button type="button" class="ob-tab" data-tab="pnl" role="tab">P&amp;L table</button>
+</div>
+<div data-pane="chart">
+  <div class="os-legend">
+    <span data-o="oi-legend">—</span>
+    <span><span class="os-key-box" style="background: var(--red);"></span>call OI</span>
+    <span><span class="os-key-box" style="background: var(--green);"></span>put OI</span>
+    <span><span class="os-key" style="background: var(--green);"></span>on expiry</span>
+    <span><span class="os-key" style="background: var(--blue);"></span>on target date</span>
+  </div>
+  <div class="os-chart"><canvas data-o="chart" aria-label="Payoff chart"></canvas></div>
+  <div class="os-foot">Projected P&amp;L <b data-o="projected">—</b> <span class="ob-muted">at <span data-o="projected-at"></span> · click the chart to move the target</span></div>
+</div>
+<div data-pane="table" hidden>
+  <div class="os-opts">
+    <label>Target interval <select data-o="interval"></select></label>
+    <label><input type="checkbox" data-o="pct"> Show % <span data-o="pct-note"></span></label>
+  </div>
+  <div class="ob-scroll"><table class="ob-table os-table" data-o="table"></table></div>
+</div>
+<div data-pane="greeks" hidden>
+  <div class="os-opts"><label><input type="checkbox" data-o="mult" checked> Multiply by quantity</label>
+    <span class="ob-muted">Black-76 at the target index and date, each leg at its own IV; theta = the value lost in one day.</span></div>
+  <div class="ob-scroll"><table class="ob-table" data-o="greeks"></table></div>
+</div>
+<div data-pane="pnl" hidden>
+  <div class="ob-scroll"><table class="ob-table" data-o="pnl" style="margin-top: 10px;"></table></div>
+</div>
+<div class="os-sliders">
+  <div class="os-slider">
+    <div class="os-slider-h">
+      <span><span data-o="und">Index</span> target <a href="#" class="os-link" data-o="reset-s">Reset</a></span>
+      <span><span class="ob-muted" data-o="target-pct">0.00%</span>
+        <span class="os-step"><button type="button" data-o="minus" aria-label="Lower target">−</button><input type="number" data-o="target-in" inputmode="decimal" aria-label="Target index"><button type="button" data-o="plus" aria-label="Raise target">+</button></span></span>
+    </div>
+    <input type="range" data-o="target-range" aria-label="Target index slider">
+  </div>
+  <div class="os-slider">
+    <div class="os-slider-h">
+      <span>Date: <span data-o="dte">—</span> <a href="#" class="os-link" data-o="reset-t">Reset</a></span>
+      <span class="os-step"><button type="button" data-o="prev" aria-label="One day earlier">‹</button><input type="text" data-o="date-label" readonly style="width: 172px;" aria-label="Target date"><button type="button" data-o="next" aria-label="One day later">›</button></span>
+    </div>
+    <input type="range" data-o="date-range" aria-label="Target date slider">
+  </div>
+</div>

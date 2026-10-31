@@ -129,6 +129,31 @@ class FakeKite:
         self._log("orders")
         if self.on_look:
             self.on_look(self)
+        while True:
+            self._fill_open()
+            if not self._next_slices():
+                break
+        return [{k: v for k, v in o.items() if not k.startswith("_")} for o in self.orders_.values()]
+
+    def _next_slices(self):
+        """Kite's iceberg: our order id carries slice 1; each later slice is a NEW order (its own id,
+        parent_order_id = ours) placed once the previous slice completes."""
+        made = False
+        for o in list(self.orders_.values()):
+            ice = o.get("_ice")
+            if not ice or ice["left"] <= 0 or self.orders_[ice["last"]]["status"] != "COMPLETE":
+                continue
+            q = min(ice["leg"], ice["left"])
+            cid = f"O{next(_IDS)}"
+            self.orders_[cid] = {"order_id": cid, "parent_order_id": o["order_id"], "tradingsymbol": o["tradingsymbol"],
+                                 "transaction_type": o["transaction_type"], "quantity": q, "price": ice["price"],
+                                 "status": "OPEN", "filled_quantity": 0, "average_price": 0.0, "tag": o["tag"],
+                                 "tags": [o["tag"]], "variety": "iceberg"}
+            ice.update(left=ice["left"] - q, last=cid)
+            made = True
+        return made
+
+    def _fill_open(self):
         for o in self.orders_.values():
             if o["status"] != "OPEN":
                 continue
@@ -148,7 +173,6 @@ class FakeKite:
                                      "transaction_type": o["transaction_type"], "quantity": q, "average_price": px})
                 if o["filled_quantity"] == o["quantity"]:
                     o["status"] = "COMPLETE"
-        return [dict(o) for o in self.orders_.values()]
 
     # writes
     def place_order(self, variety, exchange, tradingsymbol, transaction_type, quantity, product, order_type,
@@ -160,20 +184,31 @@ class FakeKite:
         if tradingsymbol in self.reject_on_place:
             raise RuntimeError("InputException: insufficient margin")
         oid = f"O{next(_IDS)}"
+        first = iceberg_quantity if variety == "iceberg" else quantity
         self.orders_[oid] = {"order_id": oid, "tradingsymbol": tradingsymbol, "transaction_type": transaction_type,
-                             "quantity": quantity, "price": price, "status": "OPEN", "filled_quantity": 0,
+                             "quantity": first, "price": price, "status": "OPEN", "filled_quantity": 0,
                              "average_price": 0.0, "tag": tag, "tags": [tag], "variety": variety}
+        if variety == "iceberg":
+            assert iceberg_legs * iceberg_quantity >= quantity and iceberg_quantity < quantity
+            self.orders_[oid]["_ice"] = {"leg": iceberg_quantity, "left": quantity - first, "last": oid, "price": price}
         return oid
 
     def modify_order(self, variety, order_id, price=None, order_type=None, **kw):
         self._log("modify_order", order_id=order_id, price=price)
         self.orders_[order_id]["price"] = price
+        if self.orders_[order_id].get("_ice"):                # the working slice and the ones still to come
+            ice = self.orders_[order_id]["_ice"]
+            ice["price"] = price
+            self.orders_[ice["last"]]["price"] = price
         return order_id
 
     def cancel_order(self, variety, order_id, **kw):
         self._log("cancel_order", order_id=order_id)
         if self.orders_[order_id]["status"] == "OPEN":
             self.orders_[order_id]["status"] = "CANCELLED"
+        parent = self.orders_[self.orders_[order_id].get("parent_order_id") or order_id]
+        if parent.get("_ice"):                                # cancelling an iceberg stops the slices to come
+            parent["_ice"]["left"] = 0
         return order_id
 
 
@@ -714,10 +749,13 @@ def test_live_panel_renders_with_the_paper_book(ops):
     authed, _ = ops
     fake = FakeKite()
     run("entry", fake, Clock(FRI, "15:12"), "NIFTY", mode="shadow")
-    html = authed.get("/options").text
+    html = authed.get("/options/live").text
     assert 'id="live"' in html and "SHADOW · no orders" in html and "Open live legs" in html
     assert "NIFTY261027" in html and "Live panel unavailable" not in html
+    assert 'id="os-builder"' in html and "Payoff chart" in html                 # the builder opens on the open legs
     assert authed.get("/api/options/live").json()["settings"]["mode"] == "shadow"
+    book = authed.get("/options").text                                         # the paper book links to it
+    assert 'href="/options/live"' in book and "SHADOW · no orders" in book
 
 
 def test_live_controls_need_the_cookie_and_the_confirm_word(ops, monkeypatch):
@@ -796,7 +834,7 @@ def test_testorder_is_not_scheduled():
 
 def test_live_panel_shows_margin_used_and_free(ops):
     authed, _ = ops
-    html = authed.get("/options").text
+    html = authed.get("/options/live").text
     assert "Not read yet" in html                                         # no Kite margin read so far
     fake = FakeKite()
     run("entry", fake, Clock(FRI, "15:12"), "NIFTY", mode="auto")
@@ -804,7 +842,7 @@ def test_live_panel_shows_margin_used_and_free(ops):
     assert res["status"] == "ok"
     m = ol.get_state("margin")
     assert m["used"] > 0 and m["free"] == fake.available - m["used"] and m["total"] == fake.available
-    html = authed.get("/options").text
+    html = authed.get("/options/live").text
     from formatting import inr_short
     assert "used by your positions" in html and inr_short(m["used"]) in html and inr_short(m["free"]) in html
     assert ol.page_data()["margin_open"] > 0
@@ -968,8 +1006,8 @@ def test_wing_setting_validation(conn):
 def test_live_panel_shows_the_wings(ops):
     authed, _ = ops
     run("entry", FakeKite(), Clock(FRI, "15:12"), "NIFTY", mode="shadow", wing_pct=1.75)
-    html = authed.get("/options").text
-    assert "wings 1.75% beyond the sold strikes" in html and "bought " in html and 'id="ol-wing"' in html
+    html = authed.get("/options/live").text
+    assert "wings 1.75% beyond the sold strikes" in html and "bought " in html and "(1.75% wings)" in html   # the plan line
 
 
 # ───────────────────────────── sizing choices card (Amit 2026-10-29) ─────────────────────────────
@@ -988,9 +1026,9 @@ def test_sizing_choices_are_the_four_setups(conn):
     assert rows["B"]["per"]["NIFTY"]["lots"] == 8                                          # 30 % × 46 L / 1.6 L
     assert rows["B"]["crash_pct"] <= 0.30 < rows["A"]["crash_pct"]
     assert rows["C"]["per"]["NIFTY"]["lots"] == 15 and not rows["C"]["current"]
-    assert rows["D"]["per"]["NIFTY"]["lots"] == 26                                         # (46 L × 0.85 − 50 K) / 145 K
+    assert rows["D"]["per"]["NIFTY"]["lots"] == 29                                         # (46 L − 2.4 L − 50 K) / 145 K
     assert rows["D"]["wing_pct"] == 1.75 and rows["A"]["wing_pct"] == 0
-    assert abs(rows["D"]["weekly"] - 2 * 26 * 450.0) < 1e-6 and rows["D"]["crash"] == 26 * 25_000.0
+    assert abs(rows["D"]["weekly"] - 2 * 29 * 450.0) < 1e-6 and rows["D"]["crash"] == 29 * 25_000.0
     big = {r["key"]: r for r in ol.sizing_choices(_quote(), 50_000_000, s)}
     assert big["D"]["per"]["NIFTY"]["lots"] == s["lots_hard_max"]                          # a cap the settings accept
     on = {r["key"]: r for r in ol.sizing_choices(_quote(), 4_600_000, {**s, "wing_pct": 1.75})}
@@ -1022,6 +1060,311 @@ def test_sizing_quote_reads_both_markets_naked_and_winged(conn):
 def test_live_panel_shows_the_sizing_choices(ops):
     authed, _ = ops
     run("quote", _two_markets_friday(), Clock(FRI, "15:01"))
-    html = authed.get("/options").text
-    assert "Sizing choices for the next entries" in html and html.count("ol-apply") >= 3
-    assert "Unprotected, today&#39;s caps" in html or "Unprotected, today's caps" in html
+    html = authed.get("/options/live").text
+    assert "Sizing for the next entries" in html and "Your plan" in html and 'id="ol-sz-data"' in html
+    assert 'id="ol-sz-lots-NIFTY"' in html and 'id="ol-sz-lots-SENSEX"' in html and "Save plan" in html   # one form, prefilled
+    assert "Max lots for my margin" in html and "Crash-safe" in html and "ol-apply" not in html.split('id="ol-plan"')[1].split("</details>")[0]
+
+
+# ───────────────────────────── SENSEX buy-back on a NIFTY entry day (Amit 2026-10-29) ─────────────────────────────
+
+TUE3, THU5 = date(2026, 11, 3), date(2026, 11, 5)          # SENSEX entry / expiry; Tue 10 Nov is a holiday → NIFTY expires Mon 9 Nov,
+NIFTY_EXP9, SENSEX_EXP5 = "2026-11-09", "2026-11-05"       # so its entry falls on Thu 5 Nov, the SENSEX expiry
+
+
+def _holiday_week(conn, mode="auto"):
+    for sym, exp in (("NIFTY", NIFTY_EXP9), ("SENSEX", SENSEX_EXP5)):
+        conn.execute("INSERT INTO fno_bhav (symbol, instrument_type, expiry_date, strike, option_type, trade_date, settle, "
+                     "underlying_price, volume) VALUES (?, 'IDO', ?, 25000, 'CE', '2026-11-02', 10, 25800, 5)", (sym, exp))
+    conn.commit()
+    tue = FakeKite(underlying="SENSEX", spot=84000.0, expiry=SENSEX_EXP5, today=TUE3, lot=20, step=100, exchange="BFO")
+    res, _ = run("entry", tue, Clock(TUE3, "15:17"), "SENSEX", mode=mode)
+    assert res["status"] == "ok", res
+    thu = FakeKite(underlying="NIFTY", expiry=NIFTY_EXP9, today=THU5)
+    thu.add_market("SENSEX", 84000.0, SENSEX_EXP5, THU5, 20, 100, "BFO")
+    for sym, q in tue.pos.items():                                        # the SENSEX position carries into Thursday
+        thu.pos[sym] = q
+        thu.book[sym] = [0.05, 0.10, 0.05]
+    return thu
+
+
+def test_sensex_is_bought_back_when_nifty_enters_the_same_day(conn):
+    thu = _holiday_week(conn)
+    early, ctx = run("entry", thu, Clock(THU5, "15:12"), "NIFTY")         # before the buy-back: gated
+    assert early["status"] == "skipped" and "rotation gate" in early["detail"] and "SENSEX" in early["detail"]
+    bb, ctx = run("buyback", thu, Clock(THU5, "15:00"), "SENSEX")
+    assert bb["status"] == "ok", bb
+    assert set(ledger(conn, "underlying = 'SENSEX' AND net_qty < 0").status) == set()
+    assert ol.get_state(f"rotation:{THU5.isoformat()}:SENSEX")["ok"] and "NIFTY can enter" in ctx["sent"][-1][0]
+    res, _ = run("entry", thu, Clock(THU5, "15:12"), "NIFTY")
+    assert res["status"] == "ok", res
+    assert set(ledger(conn, f"underlying = 'NIFTY' AND expiry = '{NIFTY_EXP9}'").net_qty) == {-65}
+
+
+def test_sensex_is_held_to_expiry_on_a_normal_thursday(conn):
+    fake = _tuesday_broker()
+    res, _ = run("buyback", fake, Clock(date(2026, 10, 29), "15:00"), "SENSEX", mode="auto")
+    assert res["status"] == "idle" and "held to expiry" in res["detail"] and "place_order" not in fake.names()
+
+
+def test_precheck_asks_for_a_login_before_the_sensex_buyback(conn):
+    _holiday_week(conn)
+    res, ctx = run("precheck", NoKiteSession("x"), Clock(THU5, "14:45"))
+    assert res["status"] == "skipped" and "SENSEX buy-back (15:00)" in ctx["sent"][0][0] and "before 15:00" in ctx["sent"][0][0]
+
+
+# ───────────────────────────── Refresh from Kite (Amit 2026-10-29) ─────────────────────────────
+
+def test_refresh_from_kite_runs_the_quote_step_and_reports_the_new_margin(ops, monkeypatch):
+    import subprocess
+    authed, anon = ops
+    assert anon.post("/api/options/live/refresh", json={}).status_code == 401
+    calls = []
+
+    def fake_run(cmd, **kw):                                              # the step itself is tested above; here only the wiring
+        calls.append(cmd)
+        if len(calls) == 2:
+            ol.put_state("margin", {"at": "2026-10-29T10:00:00+00:00", "total": 4_900_000.0, "free": 1.0, "used": 1.0}, "test")
+        return subprocess.CompletedProcess(cmd, 0, stdout="no Kite login today: no sizing quote\n", stderr="")
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    r = authed.post("/api/options/live/refresh", json={})                # nothing written → said so, not a silent OK
+    assert r.status_code == 409 and "no Kite login" in r.json()["error"]
+    r = authed.post("/api/options/live/refresh", json={})
+    assert r.status_code == 200 and r.json()["margin"]["total"] == 4_900_000.0 and r.json()["quote_refreshed"] is False
+    assert all(c[-2:] == ["options_live", "quote"] and c[0].endswith("run.sh") for c in calls)
+
+
+def test_quote_step_reads_the_margin_even_when_the_quote_fails(conn, monkeypatch):
+    # 2026-10-29 02:00 IST: no offers on the SENSEX wing strikes → sizing_quote raised before the margin was read
+    def boom(ctx):
+        raise RuntimeError("no offered CE beyond 76,700 for the wing")
+    monkeypatch.setattr(ol, "sizing_quote", boom)
+    fake = FakeKite()
+    res, _ = run("quote", fake, Clock(FRI, "20:00"))
+    assert res["status"] == "skipped" and "the last one stays" in res["detail"]
+    assert ol.get_state("margin")["total"] == fake.available
+
+
+# ───────────────────────────── 2026-10-30: iceberg slices counted (controls) ─────────────────────────────
+
+def _friday_32_lots(conn):
+    """2026-10-30 replayed: 32 protected NIFTY lots = 2,080 units a leg, over the 1,800 freeze → icebergs of 2 × 1,040."""
+    fake = FakeKite(available=1e9, margin_per_lot=10_000.0)
+    res, ctx = run("entry", fake, Clock(FRI, "15:12"), "NIFTY", mode="auto", lots_cap={"NIFTY": 32}, wing_pct=1.75)
+    return fake, res, ctx
+
+
+def test_iceberg_wings_count_every_slice_and_the_full_strangle_is_sold(conn):
+    fake, res, _ = _friday_32_lots(conn)
+    assert res["status"] == "ok" and "wings filled for" not in res["detail"]
+    held = {s: q for s, q in fake.pos.items() if q}
+    assert sorted(held.values()) == [-2080, -2080, 2080, 2080]                 # 32 lots sold, 32 lots of wings
+    kids = [o for o in fake.orders_.values() if o.get("parent_order_id")]
+    assert len(kids) == 4 and all(o["quantity"] == 1040 for o in kids)          # every leg went as 2 slices
+
+
+def test_the_sale_is_sized_on_kite_positions_when_the_order_reading_is_short(conn, monkeypatch):
+    # the order loop misreads the wings (as on 2026-10-30); Kite's positions decide the lots sold, and a push says so
+    real = ol._combined
+    monkeypatch.setattr(ol, "_combined", lambda members, b: (lambda st, f, a: ("COMPLETE", min(f, 1040), a) if b["side"] == "BUY" else (st, f, a))(*real(members, b)))
+    fake, res, ctx = _friday_32_lots(conn)
+    assert res["status"] == "ok"
+    assert sorted(q for q in fake.pos.values() if q) == [-2080, -2080, 2080, 2080]
+    assert any("sized on Kite (32 lots)" in m for m, _ in ctx["sent"])
+
+
+def test_entry_check_stops_entries_when_kite_does_not_match(conn, monkeypatch):
+    # a short Kite holds that the sale did not account for: kill switch on, urgent push
+    real_held = ol._held
+
+    def lying(ctx, syms, before=None, expect=None, tries=4):
+        out = real_held(ctx, syms, before, expect, tries)
+        return {k: (v - 65 if v < 0 else v) for k, v in out.items()} if expect is None and before is not None else out
+    monkeypatch.setattr(ol, "_held", lying)
+    fake, res, ctx = _friday_32_lots(conn)
+    assert res["status"] == "failed" and "entry check failed" in res["detail"]
+    assert ol.settings()["kill"] is True and any(urgent for _, urgent in ctx["sent"])
+
+
+def test_reconcile_checks_the_shape_of_the_live_book(conn):
+    # clean 2-lot winged strangle: passes; spare wings are a note; an expired open leg stops entries
+    ol.set_setting("wing_pct", 1.75)
+    fake = FakeKite(available=1e9, margin_per_lot=10_000.0)
+    run("entry", fake, Clock(FRI, "15:12"), "NIFTY", mode="auto", lots_cap={"NIFTY": 2})
+    res, _ = run("reconcile", fake, Clock(FRI, "15:50"))
+    assert res["status"] == "ok" and "spare" not in res["detail"]
+    problems, notes = ol.shape_check(FRI.isoformat())
+    assert problems == [] and notes == []
+    later = (FRI + timedelta(days=30)).isoformat()                           # the same legs, a month on, never settled
+    problems, _ = ol.shape_check(later)
+    assert any("not settled after expiry" in p for p in problems)
+
+
+def test_reconcile_flags_unbalanced_shorts(conn):
+    fake = FakeKite(available=1e9, margin_per_lot=10_000.0)
+    run("entry", fake, Clock(FRI, "15:12"), "NIFTY", mode="auto", lots_cap={"NIFTY": 2}, wing_pct=0)
+    with ol.get_db() as c:                                                    # one short leg bought back by hand
+        sym = c.execute("SELECT tradingsymbol FROM option_live_trades WHERE option_type = 'CE' AND net_qty < 0").fetchone()[0]
+        c.execute("UPDATE option_live_trades SET net_qty = net_qty + 65 WHERE tradingsymbol = ?", (sym,))
+    problems, _ = ol.shape_check(FRI.isoformat())
+    assert any("short calls 65 ≠ short puts 130" in p for p in problems)
+
+
+def test_ledger_writes_wait_out_a_long_db_lock(conn, monkeypatch):
+    # 2026-10-30 06:00 UTC: settle died on "database is locked"; now it waits and writes
+    import sqlite3
+    tries = []
+    real = ol.upsert_df
+
+    def flaky(df, table):
+        tries.append(table)
+        if len(tries) < 3:
+            raise sqlite3.OperationalError("database is locked")
+        return real(df, table)
+    monkeypatch.setattr(ol, "upsert_df", flaky)
+    clock = Clock(FRI, "11:30")
+    ctx = ctx_for(FakeKite(), clock)
+    ol._write(ctx, [{"underlying": "NIFTY", "expiry": NIFTY_EXP, "tradingsymbol": "X", "source": "live", "status": "OPEN"}])
+    assert len(tries) == 3 and clock.waits == [30, 60]
+    monkeypatch.setattr(ol, "upsert_df", lambda df, table: (_ for _ in ()).throw(sqlite3.OperationalError("database is locked")))
+    with pytest.raises(sqlite3.OperationalError):
+        ol._write(ctx, [{"underlying": "NIFTY", "expiry": NIFTY_EXP, "tradingsymbol": "X", "source": "live", "status": "OPEN"}])
+
+
+def test_marks_skip_expired_legs_and_refuse_impossible_prices(conn):
+    fake = FakeKite(available=1e9, margin_per_lot=10_000.0)
+    run("entry", fake, Clock(FRI, "15:12"), "NIFTY", mode="auto", lots_cap={"NIFTY": 1}, wing_pct=0)
+    for sym in list(fake.book):                                               # the feed returns the index level
+        fake.book[sym] = [25800.0, 25800.0, 25800.0]
+    res, _ = run("mark", fake, Clock(FRI, "15:31"))
+    assert all((l["mtm_rs"] or 0) > -1e6 for l in ol.legs("status = 'OPEN'"))   # no −₹ crore marks
+    after = (date.fromisoformat(NIFTY_EXP) + timedelta(days=1))
+    res, _ = run("mark", fake, Clock(after, "10:00"))
+    assert res["status"] == "idle"                                            # expired: settle's job, not mark's
+
+
+def test_a_crashed_step_is_pushed_urgently(conn, monkeypatch):
+    sent = []
+    monkeypatch.setitem(ol.STEPS, "settle", lambda ctx: 1 / 0)
+    with pytest.raises(ZeroDivisionError):
+        ol.run_step("settle", push=lambda m, urgent=False: sent.append((m, urgent)))
+    assert sent and sent[0][1] is True and "CRASHED" in sent[0][0]
+
+
+def test_dear_wings_step_out_until_the_cap_fits_then_refuse():
+    # Amit 2026-10-30: the wings may cost at most 20-30 % of the credit; the protection is for a gap inside a calm
+    # window (0 of 530 guarded weeks reached a wing), so never pay a silly price for it.
+    chain = pd.DataFrame(_chain("NIFTY", 25800.0, NIFTY_EXP, FRI.isoformat(), 50))
+    k = {"C": 26500.0, "P": 25100.0}
+    plain = ol.wing_strikes(chain, k, 25800.0, 1.75)                          # {"C": 26950, "P": 24650}
+    credit = 20.0
+    assert ol.wing_strikes(chain, k, 25800.0, 1.75, credit=credit, max_share=0.30, max_pct=3.5) == plain   # fits: unchanged
+    # a thin wing strike quoted wide (SENSEX 2026-10-29: asks at 63 % of the credit): 8.00 asked on both wings
+    chain.loc[(chain.option_type == "CE") & (chain.strike == plain["C"]), "ask"] = 8.0
+    chain.loc[(chain.option_type == "PE") & (chain.strike == plain["P"]), "ask"] = 8.0
+    w = ol.wing_strikes(chain, k, 25800.0, 1.75, credit=credit, max_share=0.30, max_pct=3.5)
+    assert w == {"C": plain["C"] + 50, "P": plain["P"] - 50}                  # each side one offered strike out
+    asks = chain.set_index(["option_type", "strike"]).ask
+    assert asks[("CE", w["C"])] + asks[("PE", w["P"])] <= 0.30 * credit
+    # every strike up to 3.5 % out quoted wide: no entry
+    chain.loc[(chain.option_type == "CE") & (chain.strike > k["C"]), "ask"] = 8.0
+    chain.loc[(chain.option_type == "PE") & (chain.strike < k["P"]), "ask"] = 8.0
+    with pytest.raises(ol.WingsTooDear, match="80% of the credit"):
+        ol.wing_strikes(chain, k, 25800.0, 1.75, credit=credit, max_share=0.30, max_pct=3.5)
+
+
+def test_dear_wings_skip_the_entry_with_a_push(conn):
+    fake = FakeKite()
+    ctx = ctx_for(fake, Clock(FRI, "15:12"), mode="auto", wing_pct=1.75, wing_max_share_pct=30)
+    p = ol.build_plan(ctx, "NIFTY", NIFTY_EXP)
+    assert p["wing_share"] is not None and p["wing_share"] <= 0.30 and "of the credit, limit 30%" in ol._plan_text(p)
+    short = {l["option_type"]: l["strike"] for l in p["legs"]}
+    for r in fake.ins["NFO"]:                                                 # far strikes quoted wide: asks × 5
+        if (r["instrument_type"] == "CE" and r["strike"] >= short["CE"] + 150) or (r["instrument_type"] == "PE" and r["strike"] <= short["PE"] - 150):
+            fake.book[r["tradingsymbol"]][1] *= 5
+    res, ctx = run("entry", fake, Clock(FRI, "15:12"), "NIFTY", mode="auto", wing_pct=1.75, wing_max_share_pct=5)
+    assert res["status"] == "skipped" and "wings too dear" in res["detail"], res
+    assert not [c for c in fake.calls if c[0] == "place_order"]              # nothing placed
+    assert ctx["sent"][-1][1] and "Nothing placed" in ctx["sent"][-1][0]     # urgent push
+    assert ol.pick_legs(ctx, "NIFTY", NIFTY_EXP, 1.75, capped=False)[5] is not None   # the sizing quote still reports the plain wing
+    with pytest.raises(ValueError):
+        ol.set_setting("wing_max_share_pct", 3)
+    assert ol.set_setting("wing_max_share_pct", 25) == 25 and ol.settings()["wing_max_share_pct"] == 25
+
+
+def test_kill_switch_pressed_mid_entry_cancels_the_working_orders(conn):
+    # control (2026-10-30 gap list): the kill switch is re-read at every re-price; Stop pressed while the wings are
+    # being bought cancels them and sells nothing.
+    fake = FakeKite(liquidity=1)                                              # one unit a look: orders stay working
+    ctx = ctx_for(fake, Clock(FRI, "15:12"), mode="auto", wing_pct=1.75, lots_cap={"NIFTY": 2})
+    p = ol.build_plan(ctx, "NIFTY", NIFTY_EXP)
+    shorts = [l["tradingsymbol"] for l in p["legs"]]
+
+    def stop(f):                                                              # Amit presses Stop once the wings are out
+        if any(c[0] == "place_order" for c in f.calls):
+            ol.set_kill(True, "Stop on the cockpit", "cockpit")
+    fake.on_look = stop
+    res, ctx = run("entry", fake, Clock(FRI, "15:12"), "NIFTY")
+    assert res["status"] == "failed" and "kill switch" in res["detail"], res
+    assert [c for c in fake.calls if c[0] == "cancel_order"]                   # the working wing orders cancelled
+    assert not [c for c in fake.calls if c[0] == "place_order" and c[2]["tradingsymbol"] in shorts]   # nothing sold
+    assert ctx["sent"][-1][1] and "STOPPED" in ctx["sent"][-1][0]
+    assert not events(conn, "abort").empty and all(q == 0 for q in fake.pos.values())   # the unit that filled was sold back
+
+
+def test_kill_switch_pressed_while_planning_places_nothing(conn):
+    fake = FakeKite()
+    fake.on_look = lambda f: ol.set_kill(True, "Stop", "cockpit")            # already_entered looks at the order book, before the plan
+    res, ctx = run("entry", fake, Clock(FRI, "15:12"), "NIFTY", mode="auto", wing_pct=1.75, kill=False)
+    assert res["status"] == "skipped" and "while planning" in res["detail"]
+    assert not [c for c in fake.calls if c[0] == "place_order"]
+
+
+def test_a_crash_inside_the_order_loop_cancels_the_working_orders(conn):
+    fake = FakeKite()
+    ctx = ctx_for(fake, Clock(FRI, "15:12"), mode="auto", wing_pct=1.75)
+    w = _wing_syms(fake, ol.build_plan(fake and ctx, "NIFTY", NIFTY_EXP))
+
+    def kite_dies(f):                                                         # after the wings are placed, every look fails
+        if any(c[0] == "place_order" for c in f.calls):
+            for sym in w.values():
+                f.book[sym][1] += 5.0                                         # and nothing filled meanwhile
+            raise RuntimeError("Kite: connection reset")
+    fake.on_look = kite_dies
+    with pytest.raises(RuntimeError, match="connection reset"):
+        run("entry", fake, Clock(FRI, "15:12"), "NIFTY")
+    placed = [c[2]["tradingsymbol"] for c in fake.calls if c[0] == "place_order"]
+    cancelled = [c for c in fake.calls if c[0] == "cancel_order"]
+    assert sorted(placed) == sorted(w.values()) and len(cancelled) == 2         # both wing orders cancelled on the way out
+    d = events(conn, "cancel")
+    assert len(d) == 2 and all("crash" in x for x in d.detail)
+
+
+def test_mark_pushes_when_free_margin_is_short_of_the_expiry_day_extra(conn):
+    fake = FakeKite()
+    res, _ = run("entry", fake, Clock(FRI, "15:12"), "NIFTY", mode="auto", lots_cap={"NIFTY": 1})
+    assert res["status"] == "ok"
+    res, ctx = run("mark", fake, Clock(TUE, "10:00"))
+    assert "margin watch" not in res["detail"] and not any("margin watch" in m for m, _ in ctx["sent"])
+    fake.available = 10_000.0                                                  # cash withdrawn: below the ₹50 K buffer
+    res, ctx = run("mark", fake, Clock(TUE, "10:00"))
+    assert "margin watch" in res["detail"] and "safety buffer" in res["detail"]
+    assert ctx["sent"][-1][1] and "square off" in ctx["sent"][-1][0]
+    fake.available = 150_000.0 + 60_000.0                                      # free 60 K (the lot blocks 150 K): above the buffer, below the expiry-day extra (2 % × 2 legs ≈ 67 K)
+    res, ctx = run("mark", fake, Clock(TUE, "10:00"))
+    assert "expiry-day extra" in res["detail"]
+
+
+def test_health_flags_an_entry_day_whose_steps_never_ran(conn, monkeypatch):
+    ol.set_setting("mode", "auto", by="test")
+    monkeypatch.setattr(ol, "_health_now", lambda: datetime(2026, 10, 23, 20, 0, tzinfo=ol.IST))   # FRI evening: NIFTY was due
+    v = ol.health_check()
+    assert v["severity"] == "CRITICAL" and "entry:NIFTY did not run on 2026-10-23" in v["sample"] and v["n_bad"] == 3
+    for k in ("step:entry:NIFTY", "step:record:ALL", "step:reconcile:ALL"):
+        ol.put_state(k, {"date": FRI.isoformat(), "status": "ok", "detail": "x", "mode": "auto"}, "t")
+    assert ol.health_check()["n_bad"] == 0
+    monkeypatch.setattr(ol, "_health_now", lambda: datetime(2026, 10, 24, 9, 30, tzinfo=ol.IST))    # Saturday morning judges Friday
+    assert ol.health_check()["n_bad"] == 0
+    ol.set_setting("mode", "shadow", by="test")                               # shadow: silence is not money
+    ol.put_state("step:entry:NIFTY", {"date": "2026-10-16", "status": "ok", "detail": "x", "mode": "shadow"}, "t")
+    assert ol.health_check()["n_bad"] == 0

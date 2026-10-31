@@ -240,6 +240,38 @@ def pt_outside_range_sql(mean_col, low_col, high_col) -> str:
     return f"({mean_col} < {low_col} OR {mean_col} > {high_col})"
 
 
+# A target is shown as an upside only when it is plausible, current and more than one or two
+# opinions (2026-10-23). Fewer houses: the valuation football field's rule (ADR 0076), now
+# everywhere an upside shows; 276 of 941 targets (259 SMALL) have 1-2 analysts.
+PT_MIN_ANALYSTS = 3
+# The price moved more than half since the target was set: the call predates whatever moved it.
+PT_STALE_MOVE = 0.5
+PT_FIELDS = ("price_target", "price_target_median", "price_target_high", "price_target_low")
+
+
+def rebase_targets(row, factor):
+    """`row` with its PT_FIELDS × `factor` (views.target_basis): a target set before a split,
+    consolidation or demerger, on today's share basis."""
+    if not factor or factor == 1.0:
+        return row
+    return {**row, **{k: row[k] * factor for k in PT_FIELDS if row.get(k) is not None}}
+
+
+def pt_status(price_target, close, n_analysts, close_at_set=None) -> str:
+    """Whether a (rebased) target may be shown as an upside: 'ok', or why not —
+    'implausible' (PT_CLOSE_RATIO), 'stale' (the price moved more than PT_STALE_MOVE since
+    `close_at_set`, the close when the target was set) or 'thin' (fewer than PT_MIN_ANALYSTS)."""
+    if price_target is None or not close:
+        return "none"
+    if pt_implausible(price_target, close):
+        return "implausible"
+    if close_at_set and abs(close / close_at_set - 1) > PT_STALE_MOVE:
+        return "stale"
+    if not n_analysts or n_analysts < PT_MIN_ANALYSTS:
+        return "thin"
+    return "ok"
+
+
 def record_pt_plausibility_fail(sid, snapshot_date, reason, source_table="consensus_signals"):
     """Record a per-sid gate_2_plausibility=0 verdict for an implausible PT.
 

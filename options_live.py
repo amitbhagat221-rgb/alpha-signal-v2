@@ -12,7 +12,9 @@ One step per cron line (`run.sh options_live <step> [NIFTY|SENSEX]`), each logge
                With wing_pct > 0 the wings (a CE / PE that % of spot beyond each short strike) are BOUGHT first,
                the strangle is sold on the lots both wings filled, and the basket margin is the hedged one.
                Long wings are never bought back: they block no margin and expire on their own.
-    buyback    Tue: BUY back the tagged NIFTY legs expiring today; confirm flat + margin freed → rotation flag
+    buyback    Tue: BUY back the tagged NIFTY legs expiring today; confirm flat + margin freed → rotation flag.
+               SENSEX too, 15:00-15:07, but only on a day a NIFTY entry is due as well (holiday weeks);
+               otherwise SENSEX expires. The other index's entry waits for the rotation flag.
     closeall   Stop + buy back every tagged leg now (the cockpit's Close-all)
     record     after the close: today's Kite trades (tagged and manual NIFTY/SENSEX option legs) → ledger
     mark       open legs at live mids (fno_bhav settle without a login) + Kite margin of what is open
@@ -69,7 +71,7 @@ MARKETS = {u: {"exchange": ex, "spot": key} for u, ex, key in kq.MARKETS}
 MODES = ("off", "shadow", "approve", "auto")
 LIVE_MODES = ("approve", "auto")
 EDITABLE = ("mode", "lots_cap", "margin_buffer_rs", "weekly_loss_limit_rs", "kill", "adopt_manual_nifty",
-            "vix_halt", "vix_halve", "wing_pct")
+            "vix_halt", "vix_halve", "wing_pct", "wing_max_share_pct")
 FINAL = ("COMPLETE", "CANCELLED", "REJECTED")
 WRITE_CALLS = ("place_order", "modify_order", "cancel_order")
 TICK = ob.TICK
@@ -160,6 +162,9 @@ def set_setting(key, value, by="cli"):
     if key == "wing_pct":
         if not isinstance(value, (int, float)) or isinstance(value, bool) or not 0 <= value <= 5:
             raise ValueError("wing_pct must be a % of spot between 0 (off) and 5")
+    if key == "wing_max_share_pct":
+        if not isinstance(value, (int, float)) or isinstance(value, bool) or not 5 <= value <= 100:
+            raise ValueError("wing_max_share_pct must be a % of the credit between 5 and 100")
     put_state(key, value, by)
     return value
 
@@ -545,17 +550,64 @@ def broker_positions(ctx):
 
 # ─────────────────────────── the order loop ───────────────────────────
 
+def _members(orders, b, book):
+    """The Kite orders that carry book entry `b`. A regular order is itself. An ICEBERG is one exchange order per
+    slice: the order we placed carries the first slice and each later slice is a child order with its own id
+    (2026-10-30: 2,080 units went out as 1,040 + 1,040 and the second slice was missed, so 16 lots were sold
+    against 32 lots of wings). Children: parent_order_id = ours, else the same contract, side, tag and iceberg
+    variety placed after ours and before the next book entry of that contract."""
+    me = [o for o in orders if str(o["order_id"]) == b["order_id"]]
+    if b["variety"] != "iceberg":
+        return me
+    kids = [o for o in orders if str(o.get("parent_order_id") or "") == b["order_id"]]
+    if not kids:
+        tag, own, mine = b.get("tag"), {x["order_id"] for x in book if x["order_id"]}, _oid(b["order_id"])
+        later = [_oid(x["order_id"]) for x in book if x["order_id"] and x is not b and x["side"] == b["side"]
+                 and x["leg"]["tradingsymbol"] == b["leg"]["tradingsymbol"] and _oid(x["order_id"]) > mine]
+        upto = min(later) if later else None
+        kids = [o for o in orders if str(o["order_id"]) not in own and o.get("tradingsymbol") == b["leg"]["tradingsymbol"]
+                and o.get("transaction_type") == b["side"] and o.get("variety") == "iceberg"
+                and (not tag or tag in ([o.get("tag")] + list(o.get("tags") or [])))
+                and _oid(o["order_id"]) > mine and (upto is None or _oid(o["order_id"]) < upto)]
+    return me + kids
+
+
+def _oid(order_id):
+    """An order id as a number (Kite ids are numeric and rise with time); digits only for anything else."""
+    digits = "".join(ch for ch in str(order_id) if ch.isdigit())
+    return int(digits) if digits else 0
+
+
+def _combined(members, b):
+    """(status, filled, avg) of an order and its iceberg slices. Done only when every unit filled, or nothing
+    more can fill (rejected, or cancelled with no slice still working)."""
+    filled = sum(int(o.get("filled_quantity") or 0) for o in members)
+    value = sum(int(o.get("filled_quantity") or 0) * float(o.get("average_price") or 0) for o in members)
+    avg = value / filled if filled else None
+    if filled >= b["quantity"]:
+        return "COMPLETE", filled, avg
+    if any(o.get("status") not in FINAL for o in members):
+        return "OPEN", filled, avg
+    if any(o.get("status") == "REJECTED" for o in members) and not filled:
+        return "REJECTED", filled, avg
+    if b["variety"] == "iceberg" and not b.get("cancelled") and all(o.get("status") == "COMPLETE" for o in members):
+        return "OPEN", filled, avg                  # a slice filled; Kite places the next one (not done yet)
+    return ("CANCELLED" if filled < b["quantity"] else "COMPLETE"), filled, avg
+
+
 def _refresh(ctx, book):
     if not book:
         return
-    by_id = {str(o["order_id"]): o for o in call(ctx, "orders")}
+    orders = call(ctx, "orders")
     for b in book:
         if b["done"] or b["order_id"] is None:
             continue
-        o = by_id.get(b["order_id"])
-        if not o:
+        members = _members(orders, b, book)
+        if not members:
             continue
-        status, filled = o.get("status"), int(o.get("filled_quantity") or 0)
+        o = members[0]
+        status, filled, avg = _combined(members, b)
+        o = {**o, "average_price": avg, "filled_quantity": filled}
         if status != b["status"] or filled != b["filled"]:
             ev = "reject" if status == "REJECTED" else "partial" if 0 < filled < b["quantity"] and status not in FINAL else "status"
             log_event(ctx, ev, source=b["source"], ticket_id=b["ticket_id"], **_leg_fields(b["leg"]),
@@ -567,10 +619,34 @@ def _refresh(ctx, book):
             b["reject"] = o.get("status_message") or "rejected"
 
 
-def work_orders(ctx, legs_, side, deadline, final_at=None, ticket_id=None, source="live"):
+def _cancel_working(ctx, book, source, ticket_id, side, why):
+    """Cancel every slice still working (an iceberg's children too). Best effort: a Kite call that fails is
+    logged, never raised, so this also runs on the way out of a crash."""
+    try:
+        orders = call(ctx, "orders") if any(not b["done"] for b in book) else []
+    except Exception as e:                          # noqa: BLE001 — Kite down: cancel by the ids we hold
+        log_event(ctx, "error", source=source, ticket_id=ticket_id, detail=f"orders before cancel: {type(e).__name__}: {e}")
+        orders = []
+    for b in book:
+        if not b["done"]:
+            b["cancelled"] = True                   # an iceberg is then done once no slice is still working
+            working = [o for o in _members(orders, b, book) if o.get("status") not in FINAL] or [{"order_id": b["order_id"]}]
+            for o in working:                       # every slice still working, not just the first
+                try:
+                    call(ctx, "cancel_order", b["variety"], str(o["order_id"]))
+                    log_event(ctx, "cancel", source=source, ticket_id=ticket_id, **_leg_fields(b["leg"]),
+                              transaction_type=side, quantity=b["quantity"], order_id=str(o["order_id"]), detail=why)
+                except Exception as e:              # noqa: BLE001
+                    log_event(ctx, "error", source=source, ticket_id=ticket_id, **_leg_fields(b["leg"]),
+                              order_id=str(o["order_id"]), detail=f"cancel: {type(e).__name__}: {e}")
+
+
+def work_orders(ctx, legs_, side, deadline, final_at=None, ticket_id=None, source="live", abort_on_kill=False):
     """Place, re-price and finish LIMIT orders for `legs_` (each with `qty` units). Returns
     {tradingsymbol: {"filled": units, "avg": price, "rejects": [...]}} after cancelling what is
-    left at `deadline`. `final_at`: from then on a BUY goes at the final aggressive limit."""
+    left at `deadline`. `final_at`: from then on a BUY goes at the final aggressive limit.
+    `abort_on_kill` (an entry): the kill switch is re-read at every re-price; on → working orders are
+    cancelled and ctx["aborted"] is set. A crash inside the loop cancels the working orders before it is raised."""
     s = ctx["settings"]
     first = quotes(ctx, legs_)
     book = []
@@ -596,7 +672,7 @@ def work_orders(ctx, legs_, side, deadline, final_at=None, ticket_id=None, sourc
                     params.update(iceberg_legs=sl["legs"], iceberg_quantity=sl["leg_qty"])
                 b = {"leg": leg, "order_id": None, "quantity": sl["quantity"], "filled": 0, "avg": None, "done": False,
                      "status": None, "side": side, "variety": sl["variety"], "price": px, "source": source,
-                     "ticket_id": ticket_id}
+                     "ticket_id": ticket_id, "tag": s["tag"]}
                 try:
                     b["order_id"] = str(call(ctx, "place_order", **params))
                     log_event(ctx, "place", source=source, ticket_id=ticket_id, **_leg_fields(leg), transaction_type=side,
@@ -608,41 +684,42 @@ def work_orders(ctx, legs_, side, deadline, final_at=None, ticket_id=None, sourc
                               variety=sl["variety"], quantity=sl["quantity"], price=px, detail=b["reject"])
                 book.append(b)
         aggressive = bool(final_at and ctx["now"]() >= final_at)
-        while True:
+        why = "cut-off: leftover cancelled"
+        try:
+            while True:
+                _refresh(ctx, book)
+                if all(b["done"] for b in book) or ctx["now"]() >= deadline:
+                    break
+                if abort_on_kill and settings()["kill"]:   # control: Stop / Close-all pressed while the orders work
+                    ctx["aborted"] = True
+                    why = "kill switch turned on: working order cancelled"
+                    log_event(ctx, "abort", source=source, ticket_id=ticket_id, transaction_type=side, detail=why)
+                    break
+                ctx["wait"](max(1.0, min(s["reprice_every_s"], (deadline - ctx["now"]()).total_seconds())))
+                if ctx["now"]() >= deadline:
+                    break
+                if final_at and not aggressive and ctx["now"]() >= final_at:
+                    aggressive = True
+                open_ = [b for b in book if not b["done"]]
+                q = quotes(ctx, [b["leg"] for b in open_])
+                for b in open_:
+                    px = target_price(side, q.get(b["leg"]["tradingsymbol"], (None, None, None)), b["leg"]["_first"], s, aggressive)
+                    if px is None or abs(px - b["price"]) < TICK / 2:
+                        continue
+                    try:
+                        call(ctx, "modify_order", b["variety"], b["order_id"], price=px, order_type="LIMIT")
+                        log_event(ctx, "modify", source=source, ticket_id=ticket_id, **_leg_fields(b["leg"]), transaction_type=side,
+                                  variety=b["variety"], quantity=b["quantity"], price=px, order_id=b["order_id"],
+                                  detail="final aggressive limit" if aggressive and side == "BUY" else None)
+                        b["price"] = px
+                    except Exception as e:          # noqa: BLE001 — filled meanwhile, or the exchange refused the price
+                        log_event(ctx, "error", source=source, ticket_id=ticket_id, **_leg_fields(b["leg"]),
+                                  order_id=b["order_id"], detail=f"modify: {type(e).__name__}: {e}")
             _refresh(ctx, book)
-            if all(b["done"] for b in book) or ctx["now"]() >= deadline:
-                break
-            ctx["wait"](max(1.0, min(s["reprice_every_s"], (deadline - ctx["now"]()).total_seconds())))
-            if ctx["now"]() >= deadline:
-                break
-            if final_at and not aggressive and ctx["now"]() >= final_at:
-                aggressive = True
-            open_ = [b for b in book if not b["done"]]
-            q = quotes(ctx, [b["leg"] for b in open_])
-            for b in open_:
-                px = target_price(side, q.get(b["leg"]["tradingsymbol"], (None, None, None)), b["leg"]["_first"], s, aggressive)
-                if px is None or abs(px - b["price"]) < TICK / 2:
-                    continue
-                try:
-                    call(ctx, "modify_order", b["variety"], b["order_id"], price=px, order_type="LIMIT")
-                    log_event(ctx, "modify", source=source, ticket_id=ticket_id, **_leg_fields(b["leg"]), transaction_type=side,
-                              variety=b["variety"], quantity=b["quantity"], price=px, order_id=b["order_id"],
-                              detail="final aggressive limit" if aggressive and side == "BUY" else None)
-                    b["price"] = px
-                except Exception as e:              # noqa: BLE001 — filled meanwhile, or the exchange refused the price
-                    log_event(ctx, "error", source=source, ticket_id=ticket_id, **_leg_fields(b["leg"]),
-                              order_id=b["order_id"], detail=f"modify: {type(e).__name__}: {e}")
-        _refresh(ctx, book)
-        for b in book:
-            if not b["done"]:
-                try:
-                    call(ctx, "cancel_order", b["variety"], b["order_id"])
-                    log_event(ctx, "cancel", source=source, ticket_id=ticket_id, **_leg_fields(b["leg"]),
-                              transaction_type=side, quantity=b["quantity"], order_id=b["order_id"],
-                              detail="cut-off: leftover cancelled")
-                except Exception as e:              # noqa: BLE001
-                    log_event(ctx, "error", source=source, ticket_id=ticket_id, **_leg_fields(b["leg"]),
-                              order_id=b["order_id"], detail=f"cancel: {type(e).__name__}: {e}")
+        except Exception as e:                      # control: a crash must not leave DAY orders working at the exchange
+            _cancel_working(ctx, book, source, ticket_id, side, f"crash ({type(e).__name__}): working order cancelled")
+            raise
+        _cancel_working(ctx, book, source, ticket_id, side, why)
         _refresh(ctx, book)
     finally:
         ctx["may_write"] = False
@@ -715,41 +792,81 @@ def already_entered(ctx, u, e, source):
     return None
 
 
-def rotation_gate(ctx):
-    """SENSEX may enter only when no short NIFTY leg expiring today is still open (tagged, shadow, or
-    adopted manual) and, after a buy-back, its margin was seen freed. Long wings are left to expire:
-    they block no margin and carry no risk. → (ok, why)."""
+def _rot_key(u, today):
+    """State key of today's buy-back of `u` (NIFTY keeps the original key)."""
+    return f"rotation:{today}" if u == "NIFTY" else f"rotation:{today}:{u}"
+
+
+def _other(u):
+    return "SENSEX" if u == "NIFTY" else "NIFTY"
+
+
+def _buyback_window(s, u):
+    if u == "SENSEX":
+        w = s["sensex_buyback"]
+        return w["start"], w["final"], w["end"]
+    return s["buyback_start"], s["buyback_final"], s["buyback_end"]
+
+
+def rotation_gate(ctx, other="NIFTY"):
+    """An entry may go in only when no short leg of the `other` index expiring today is still open (tagged,
+    shadow, or adopted manual NIFTY) and, after a buy-back, its margin was seen freed. Long wings are left
+    to expire: they block no margin and carry no risk. → (ok, why)."""
     today, s = ctx["today"], ctx["settings"]
-    srcs = [family(ctx)] + (["manual"] if s["adopt_manual_nifty"] and family(ctx) == "live" else [])
-    open_ = [l for l in legs("underlying = 'NIFTY' AND expiry = ? AND status = 'OPEN' AND net_qty < 0", [today])
+    srcs = [family(ctx)] + (["manual"] if other == "NIFTY" and s["adopt_manual_nifty"] and family(ctx) == "live" else [])
+    open_ = [l for l in legs("underlying = ? AND expiry = ? AND status = 'OPEN' AND net_qty < 0", [other, today])
              if l["source"] in srcs]
     if open_:
-        return False, f"{len(open_)} short NIFTY leg(s) expiring today still open: the buy-back did not finish"
-    r = get_state(f"rotation:{today}")
+        return False, f"{len(open_)} short {other} leg(s) expiring today still open: the buy-back did not finish"
+    r = get_state(_rot_key(other, today))
     if r is None:
-        return True, "no NIFTY position expiring today"
+        return True, f"no {other} position expiring today"
     return bool(r.get("ok")), r.get("detail") or ""
 
 
-def wing_strikes(chain, k, spot, pct):
+class WingsTooDear(RuntimeError):
+    """The wings would cost more than wing_max_share_pct of the credit even wing_max_pct out: no entry."""
+
+
+def wing_strikes(chain, k, spot, pct, credit=None, max_share=None, max_pct=None):
     """{'C': K, 'P': K}: for each short strike, the strike with an offer nearest `pct` % of spot beyond it
-    (at least one strike out). None when pct is 0 (no wings). Raises when a side has no offered strike there."""
+    (at least one strike out). None when pct is 0 (no wings). Raises when a side has no offered strike there.
+    With `credit` (the shorts' bids) and `max_share`: while the two asks exceed max_share × credit, the dearer
+    wing steps one offered strike further out, never past `max_pct` % of spot beyond its short → WingsTooDear.
+    The protection is for a gap inside a calm window (0 of 530 guarded weeks reached a wing): pay little for it."""
     if not pct:
         return None
-    out = {}
+    offered, out = {}, {}
     for cp, ot, sgn in (("C", "CE", 1), ("P", "PE", -1)):
         c = chain[(chain.option_type == ot) & (sgn * (chain.strike - k[cp]) > 0)
                   & (pd.to_numeric(chain.ask, errors="coerce").fillna(0) > 0)]
         if c.empty:
             raise RuntimeError(f"no offered {ot} beyond {k[cp]:,.0f} for the wing")
+        c = c.assign(dist=sgn * (c.strike - k[cp])).sort_values("dist")   # nearest the short first
+        offered[cp] = list(zip(c.strike.astype(float), c.ask.astype(float), c.dist))
         target = k[cp] + sgn * pct / 100 * spot
         out[cp] = float(c.strike.iloc[(c.strike - target).abs().to_numpy().argmin()])
+    if not credit or not max_share:
+        return out
+    ask = {cp: next(a for K, a, _ in offered[cp] if K == out[cp]) for cp in out}
+    while (ask["C"] + ask["P"]) / credit > max_share:
+        can = {}
+        for cp in ("C", "P"):                       # the next offered strike out, if still within max_pct
+            nxt = [(K, a) for K, a, d in offered[cp] if d > abs(out[cp] - k[cp]) and d <= (max_pct or 100) / 100 * spot]
+            if nxt:
+                can[cp] = nxt[0]
+        if not can:
+            raise WingsTooDear(f"wings would cost {(ask['C'] + ask['P']) / credit:.0%} of the credit "
+                               f"(limit {max_share:.0%}) even {max_pct:g}% of spot beyond the sold strikes")
+        cp = max(can, key=lambda x: ask[x])         # step the dearer side
+        out[cp], ask[cp] = can[cp]
     return out
 
 
-def pick_legs(ctx, u, e, wing_pct):
+def pick_legs(ctx, u, e, wing_pct, capped=True):
     """The rule's strikes on the live chain → (F, spot, short legs, wing legs (empty when wing_pct is 0),
-    {'C', 'P'} short strikes, wing strikes or None)."""
+    {'C', 'P'} short strikes, wing strikes or None). `capped`: the wings' price cap (wing_max_share_pct)
+    applies; off for the sizing quote, which reports the plain distance."""
     s, m = ctx["settings"], MARKETS[u]
     chain, spot = kq.live_chain(client(ctx), u, m["exchange"], m["spot"], e, band=s["chain_band"])
     F, dmap, k = kq.pick(chain, ctx["today"], e)
@@ -762,8 +879,11 @@ def pick_legs(ctx, u, e, wing_pct):
                 "ask": _clean(r.ask), "mid": _clean(r.mid), "delta": dmap.get((cp, K)), "side": side,
                 "freeze": int(r.freeze) if _clean(r.get("freeze")) else int(s["freeze_qty"][u])}
 
-    kw = wing_strikes(chain, k, spot, wing_pct)
-    return (F, spot, [leg(cp, k[cp], "SELL") for cp in ("C", "P")],
+    shorts = [leg(cp, k[cp], "SELL") for cp in ("C", "P")]
+    credit = sum(l["bid"] or 0 for l in shorts)
+    kw = wing_strikes(chain, k, spot, wing_pct, credit=credit if capped else None,
+                      max_share=s["wing_max_share_pct"] / 100, max_pct=s["wing_max_pct"])
+    return (F, spot, shorts,
             [leg(cp, kw[cp], "BUY") for cp in ("C", "P")] if kw else [], k, kw)
 
 
@@ -795,6 +915,7 @@ def build_plan(ctx, u, e):
         margin = per_lot * lots
     return {"underlying": u, "expiry": e, "spot": spot, "forward": F, "legs": legs_, "wings": wings,
             "wing_pct": s["wing_pct"], "credit_pts": credit, "wing_cost_pts": wing_cost, "max_loss_per_lot": max_loss,
+            "wing_share": wing_cost / credit if wings and credit else None, "wing_max_share_pct": s["wing_max_share_pct"],
             "margin_per_lot": per_lot,
             "available": avail, "peak_available": peak["available"], "freed_before_expiry": peak["freed"],
             "peak_note": peak["note"], "buffer": buf, "cap": cap, "lots": lots, "margin_rs": margin,
@@ -813,7 +934,8 @@ def _wings_text(p):
     if not p.get("wings"):
         return ""
     return (" after buying the wings " + " + ".join(f"{w['tradingsymbol']} (ask {w['ask']})" for w in p["wings"])
-            + f" ({p['wing_pct']:g}% beyond; worst week capped at ₹{p['max_loss_per_lot']:,.0f}/lot)")
+            + f" ({p['wing_share']:.0%} of the credit, limit {p['wing_max_share_pct']:g}%; "
+            f"worst week capped at ₹{p['max_loss_per_lot']:,.0f}/lot)")
 
 
 def _plan_text(p):
@@ -889,12 +1011,15 @@ def entry(ctx, u):
     dup = already_entered(ctx, u, e, src)
     if dup:
         return outcome(ctx, u, "skipped", dup)
-    if u == "SENSEX":
-        ok, why = rotation_gate(ctx)
-        if not ok:
-            return outcome(ctx, u, "skipped", f"rotation gate: {why}",
-                           f"SENSEX entry skipped — rotation gate failed: {why}. NIFTY expires normally.", urgent=True)
-    plan = build_plan(ctx, u, e)
+    ok, why = rotation_gate(ctx, _other(u))        # the other index's legs expiring today must be bought back first
+    if not ok:
+        return outcome(ctx, u, "skipped", f"rotation gate: {why}",
+                       f"{u} entry skipped — rotation gate failed: {why}. {_other(u)} expires normally.", urgent=True)
+    try:
+        plan = build_plan(ctx, u, e)
+    except WingsTooDear as ex:                      # control: never pay a silly price for the protection
+        return outcome(ctx, u, "skipped", f"wings too dear: {ex}",
+                       f"{u} entry for {e} skipped — {ex}. Nothing placed; trade by hand if you want it.", urgent=True)
     if plan["vix_action"] == "halt":
         return outcome(ctx, u, "skipped", f"VIX guard: {_vix_text(plan)}",
                        f"{u} entry for {e} skipped — {_vix_text(plan)}.", urgent=True)
@@ -944,14 +1069,35 @@ def entry(ctx, u):
         if settings()["kill"]:
             return outcome(ctx, u, "skipped", "kill switch turned on after approval",
                            f"{u}: approved, but the kill switch is now on — nothing was placed.")
+    if settings()["kill"]:                          # control: re-read just before the first order (the plan took seconds of Kite calls)
+        return outcome(ctx, u, "skipped", "kill switch turned on while planning",
+                       f"{u} entry skipped: the kill switch went on while the plan was built — nothing was placed.")
     res_w, wing_note = {}, ""
+    syms = [l["tradingsymbol"] for l in plan["wings"] + plan["legs"]]
+    before = _held(ctx, syms)                       # control: what Kite holds before we trade (normally nothing)
     if plan["wings"]:                               # wings first: Kite then blocks the hedged margin for the sale
         start = ctx["now"]()
         end = min(start + timedelta(seconds=s["wing_buy_s"]), _at(ctx, s["entry_cutoff"]))
         res_w = work_orders(ctx, plan["wings"], "BUY", end, final_at=start + timedelta(seconds=s["wing_buy_s"] * 2 / 3),
-                            ticket_id=ticket_id, source="live")
+                            ticket_id=ticket_id, source="live", abort_on_kill=True)
         lot = plan["legs"][0]["lot"]
-        hedged = min(o["filled"] for o in res_w.values()) // lot
+        if ctx.get("aborted"):                      # control: Stop pressed while the wings were being bought
+            left = _unwind_wings(ctx, res_w, ticket_id)
+            rebuild_ledger()
+            return outcome(ctx, u, "failed", "stopped: kill switch turned on while buying the wings",
+                           f"{u} entry STOPPED by the kill switch while buying the wings ({_fills_text(res_w)}); the strangle "
+                           "was not sold" + (f"; {left} wing unit(s) could not be sold back and stay open" if left else "") + ".",
+                           urgent=True)
+        # control: the sale is sized from what Kite HOLDS after the wings, not from our reading of the orders
+        bought = _held(ctx, [w["tradingsymbol"] for w in plan["wings"]], before,
+                       expect={sym: o["filled"] for sym, o in res_w.items()})
+        hedged = min(min(bought.values()), plan["lots"] * lot) // lot
+        if any(bought[sym] != o["filled"] for sym, o in res_w.items()):
+            text = f"wings: the orders read {_fills_text(res_w)} but Kite holds {bought}; the sale is sized on Kite ({hedged} lots)"
+            log_event(ctx, "warn", source="live", ticket_id=ticket_id, underlying=u, expiry=e, detail=text)
+            push(ctx, f"{u} entry: {text}.")
+            for sym, o in res_w.items():            # the records follow Kite from here on
+                o["filled"] = bought[sym]
         if hedged == 0:
             left = _unwind_wings(ctx, res_w, ticket_id)
             rebuild_ledger()
@@ -963,13 +1109,19 @@ def entry(ctx, u):
             wing_note = f" (wings filled for {hedged} of {plan['lots']} lots: sold {hedged})"
             for leg in plan["legs"]:
                 leg["qty"] = hedged * leg["lot"]
-    res = work_orders(ctx, plan["legs"], "SELL", _at(ctx, s["entry_cutoff"]), ticket_id=ticket_id, source="live")
+    res = work_orders(ctx, plan["legs"], "SELL", _at(ctx, s["entry_cutoff"]), ticket_id=ticket_id, source="live", abort_on_kill=True)
     rebuild_ledger()
     _set_margin(u, e, "live", plan["margin_rs"])
     filled = [o["filled"] for o in res.values()]
     rejects = [r for o in res.values() for r in o["rejects"]]
     if len(set(filled)) > 1:
         return _unbalanced(ctx, u, e, res, ticket_id)
+    if ctx.get("aborted") and any(filled):          # control: stopped mid-sale; what did sell must still be a clean, covered position
+        sold = filled[0] // plan["legs"][0]["lot"]
+        bad = _entry_check(ctx, u, e, plan, before, sold, ticket_id, res_w)
+        return bad or outcome(ctx, u, "failed", f"stopped by the kill switch after {sold} of {plan['lots']} lots: {_fills_text(res)}",
+                              f"{u} {e} entry STOPPED by the kill switch after {sold} of {plan['lots']} lots sold ({_fills_text(res)}); "
+                              "the position is covered by its wings. Nothing more will be placed.", urgent=True)
     if not any(filled):
         left = _unwind_wings(ctx, res_w, ticket_id)
         rebuild_ledger()
@@ -978,10 +1130,52 @@ def entry(ctx, u):
                        "Orders cancelled; no position"
                        + (f" ({left} wing unit(s) could not be sold back and stay open)" if left else "") + ".", urgent=True)
     credit = _net_credit(res, res_w)
+    bad = _entry_check(ctx, u, e, plan, before, hedged if plan["wings"] else filled[0] // plan["legs"][0]["lot"], ticket_id, res_w)
+    if bad:
+        return bad
     return outcome(ctx, u, "ok", _fills_text(res_w | res) + wing_note,
                    f"{u} {e} sold: {_fills_text(res)}" + (f" after buying the wings {_fills_text(res_w)}" if res_w else "")
                    + f" = ₹{credit:,.0f} net credit{wing_note}, margin ₹{plan['margin_rs']:,.0f} "
                    f"(₹{plan['expiry_margin_rs']:,.0f} on expiry day) · {_vix_text(plan)}.")
+
+
+def _held(ctx, syms, before=None, expect=None, tries=4):
+    """Kite's net units in `syms` (minus `before`, when given). Positions can trail the fills by a moment: with
+    `expect`, re-read up to `tries` times until every symbol reaches it (or two reads agree)."""
+    if ctx["mode"] == "shadow":
+        return {}
+    last = None
+    for i in range(tries):
+        pos = broker_positions(ctx)
+        now = {sym: pos.get(sym, 0) - (before or {}).get(sym, 0) for sym in syms}
+        if expect is None or all(now[k] >= expect.get(k, 0) for k in syms) or now == last:
+            return now
+        last = now
+        ctx["wait"](2.0)
+    return now
+
+
+def _entry_check(ctx, u, e, plan, before, lots, ticket_id, res_w=None):
+    """Control after every entry, against Kite's positions: each short down by exactly lots × lot; each wing up by
+    exactly what our records say we bought (res_w) and at least the shorts it covers. A partly filled wing may
+    leave spare longs (by design); a position our records cannot explain (2026-10-30: records 1,040 units of wings,
+    Kite 2,080) stops new entries (kill switch) and pushes what is off, urgently → an outcome, else None."""
+    if ctx["mode"] == "shadow":
+        return None
+    want = {l["tradingsymbol"]: -lots * l["lot"] for l in plan["legs"]}
+    cover = {l["tradingsymbol"]: lots * l["lot"] for l in plan["wings"]}
+    want |= {sym: (res_w or {}).get(sym, {}).get("filled", q) for sym, q in cover.items()}
+    got = _held(ctx, list(want), before)
+    off = {sym: (got.get(sym, 0), q) for sym, q in want.items() if got.get(sym, 0) != q}
+    off |= {sym: (got.get(sym, 0), q) for sym, q in cover.items() if got.get(sym, 0) < q and sym not in off}
+    if not off:
+        return None
+    text = "; ".join(f"{sym}: Kite {g:+,} units, expected {w:+,}" for sym, (g, w) in sorted(off.items()))
+    log_event(ctx, "error", source="live", ticket_id=ticket_id, underlying=u, expiry=e, detail=f"entry check: {text}")
+    set_kill(True, f"entry check {u} {e}: {text}", ctx["step"])
+    return outcome(ctx, u, "failed", f"entry check failed: {text}",
+                   f"{u} {e} entry does NOT match the plan ({lots} lots): {text}. New entries are STOPPED. "
+                   f"Check the position in Kite now; Resume on the cockpit once it is put right.", urgent=True)
 
 
 def _net_credit(res, res_w):
@@ -1040,34 +1234,38 @@ def buyback(ctx, u="NIFTY"):
     s, today = ctx["settings"], ctx["today"]
     if ctx["mode"] == "off":
         return outcome(ctx, u, "idle", "mode is off")
-    # shadow touches only simulated legs; a real-money mode its tagged legs (+ Amit's, when adopted).
+    nxt = _other(u)
+    if u == "SENSEX" and not due_expiry("NIFTY", today, ob.holidays()):
+        return outcome(ctx, u, "idle", "SENSEX is held to expiry: no NIFTY entry today")
+    start, final, end = _buyback_window(s, u)
+    # shadow touches only simulated legs; a real-money mode its tagged legs (+ Amit's NIFTY, when adopted).
     # Only Close-all, pressed by hand, closes real legs whatever the mode.
-    srcs = ["shadow"] if ctx["mode"] == "shadow" else ["live"] + (["manual"] if s["adopt_manual_nifty"] else [])
+    srcs = ["shadow"] if ctx["mode"] == "shadow" else ["live"] + (["manual"] if u == "NIFTY" and s["adopt_manual_nifty"] else [])
     todo = [l for l in legs("underlying = ? AND expiry = ? AND status = 'OPEN' AND net_qty < 0", [u, today])
             if l["source"] in srcs]
     if not todo:
         return outcome(ctx, u, "idle", f"no {u} leg expiring today")
     now = ctx["now"]()
-    if not _at(ctx, s["buyback_start"]) <= now < _at(ctx, s["buyback_end"]):
-        return outcome(ctx, u, "skipped", f"outside the {s['buyback_start']}-{s['buyback_end']} window")
-    key = f"rotation:{today}"
+    if not _at(ctx, start) <= now < _at(ctx, end):
+        return outcome(ctx, u, "skipped", f"outside the {start}-{end} window")
+    key = _rot_key(u, today)
     try:
         client(ctx)
     except NoKiteSession:
         put_state(key, {"ok": False, "detail": "no Kite login: buy-back not done"}, ctx["step"])
         return outcome(ctx, u, "failed", "no Kite login today",
                        f"log in to Kite: {LOGIN_PAGE} — the {u} buy-back has not run. Re-run it before "
-                       f"{s['buyback_end']}, or {u} expires normally and SENSEX is skipped.", urgent=True)
+                       f"{end}, or {u} expires normally and {nxt} is skipped.", urgent=True)
     real = [l for l in todo if l["source"] != "shadow"]
     before = available(ctx) if real else None
     expected = sum({(l["source"], l["expiry"]): l["margin_rs"] or 0 for l in real}.values())
-    res = _close_legs(ctx, todo, _at(ctx, s["buyback_end"]), _at(ctx, s["buyback_final"]), f"buyback-{u}-{today}")
+    res = _close_legs(ctx, todo, _at(ctx, end), _at(ctx, final), f"buyback-{u}-{today}")
     left = [l for l in legs("underlying = ? AND expiry = ? AND status = 'OPEN' AND net_qty < 0", [u, today])
             if l["source"] in srcs]
     flat, freed = not left, None
     if real:
         pos = broker_positions(ctx)
-        flat = flat and all(pos.get(l["tradingsymbol"], 0) == 0 for l in real if l["source"] == "live" or s["adopt_manual_nifty"])
+        flat = flat and all(pos.get(l["tradingsymbol"], 0) == 0 for l in real if l["source"] == "live" or "manual" in srcs)
         for _ in range(3):                          # margin release can lag the fill by a few seconds
             freed = available(ctx) - before
             if expected <= 0 or freed >= s["margin_freed_frac"] * expected:
@@ -1080,10 +1278,10 @@ def buyback(ctx, u="NIFTY"):
                     "mode": ctx["mode"]}, ctx["step"])
     if ok:
         return outcome(ctx, u, "ok", detail, f"{u} buy-back done: {_fills_text(res)}"
-                       + (f", {_rs(freed)} margin freed" if freed is not None else "") + " — SENSEX can enter.")
+                       + (f", {_rs(freed)} margin freed" if freed is not None else "") + f" — {nxt} can enter.")
     why = "still open: " + ", ".join(l["tradingsymbol"] for l in left) if left or not flat else f"margin freed only {_rs(freed)}"
     return outcome(ctx, u, "failed", detail, f"{u} buy-back incomplete ({why}). Leftovers cancelled; {u} expires "
-                   "normally and the SENSEX entry will be skipped.", urgent=True)
+                   f"normally and the {nxt} entry will be skipped.", urgent=True)
 
 
 def closeall(ctx):
@@ -1157,10 +1355,30 @@ def record(ctx):
     return outcome(ctx, "ALL", "ok", f"{n_fill} new fill(s), {n_seed} manual position(s) adopted")
 
 
+MARK_MAX_SHARE = 0.2                                # a mark above 20 % of the strike is a data error, not a price
+DB_RETRIES = (30, 60, 120)                          # seconds between ledger-write attempts when the DB stays locked
+
+
+def _write(ctx, rows, table="option_live_trades"):
+    """upsert_df that retries a locked DB (a long writer can hold it past busy_timeout); the last failure raises."""
+    import sqlite3
+    for i, pause in enumerate((0,) + DB_RETRIES):
+        if pause:
+            print(f"options_live: DB locked, writing {table} again in {pause}s ({i}/{len(DB_RETRIES)})")
+            ctx["wait"](pause)
+        try:
+            return upsert_df(pd.DataFrame(rows), table)
+        except sqlite3.OperationalError as e:
+            if "locked" not in str(e) or i == len(DB_RETRIES):
+                raise
+
+
 def _fno_settle(u, e):
+    # never the expiry day's own row: there fno_bhav's settle column is the INDEX settlement (2026-10-30: the
+    # expired SENSEX legs were marked at 74,151.04 → MTM −₹4.45 Cr)
     df = _rows("SELECT option_type, strike, settle, trade_date FROM fno_bhav WHERE symbol = ? AND instrument_type = 'IDO' "
                "AND expiry_date = ? AND trade_date = (SELECT MAX(trade_date) FROM fno_bhav WHERE symbol = ? "
-               "AND instrument_type = 'IDO' AND expiry_date = ?)", [u, e, u, e])
+               "AND instrument_type = 'IDO' AND expiry_date = ? AND trade_date < expiry_date)", [u, e, u, e])
     return {(r.option_type, float(r.strike)): r.settle for r in df.itertuples()}
 
 
@@ -1183,7 +1401,7 @@ def _quote_if_logged_in(ctx):
 
 def mark(ctx):
     _quote_if_logged_in(ctx)
-    open_ = legs("status = 'OPEN'")
+    open_ = legs("status = 'OPEN' AND expiry >= ?", [ctx["today"]])   # an expired leg waits for settle, unmarked
     if not open_:
         return outcome(ctx, "ALL", "idle", "nothing open")
     live = has_session(ctx)
@@ -1195,6 +1413,9 @@ def mark(ctx):
         if px is None:
             px = _fno_settle(l["underlying"], l["expiry"]).get((l["option_type"], l["strike"]))
         if px is None:
+            continue
+        if px > MARK_MAX_SHARE * l["strike"]:       # no index option trades near its own strike
+            runlog.note(f"options_live mark: {l['tradingsymbol']} at {px} refused (> {MARK_MAX_SHARE:.0%} of the strike)", level="WARN")
             continue
         rows.append({**{k: l[k] for k in LEDGER_KEY}, "status": "OPEN", "mark_price": float(px), "mark_at": _utc(),
                      "mtm_rs": _pnl(l, float(px)) - (l["charges_rs"] or 0)})
@@ -1213,9 +1434,30 @@ def mark(ctx):
                     r["mark_margin_rs"] = m
         snapshot_margin(ctx)
     if rows:
-        upsert_df(pd.DataFrame(rows), "option_live_trades")
+        _write(ctx, rows)
     total = sum(r["mtm_rs"] for r in rows)
-    return outcome(ctx, "ALL", "ok", f"{len(rows)} of {len(open_)} open leg(s) marked at {how}: MTM {_rs(total)}")
+    watch = _margin_watch(ctx, open_) if live else None
+    return outcome(ctx, "ALL", "ok", f"{len(rows)} of {len(open_)} open leg(s) marked at {how}: MTM {_rs(total)}"
+                   + (f" · {watch}" if watch else ""))
+
+
+def _margin_watch(ctx, open_):
+    """Control, at every live mark: Kite's free margin against what the open live shorts need next — the safety
+    buffer now, and the expiry-day extra Zerodha blocks on their expiry (cash withdrawn, a manual trade, a margin
+    rise: otherwise RMS squares off one leg at market). Short → urgent push; → the text, else None."""
+    s = ctx["settings"]
+    shorts = [l for l in open_ if l["source"] == "live" and (l["net_qty"] or 0) < 0]
+    if not shorts:
+        return None
+    free = available(ctx)
+    extra = sum(ob.expiry_day_extra(l["strike"], -int(l["net_qty"]), short_legs=1) for l in shorts)   # strike ≈ index level
+    need = max(s["margin_buffer_rs"], extra)
+    if free >= need:
+        return None
+    why = (f"free margin ₹{free:,.0f} is below the ₹{s['margin_buffer_rs']:,.0f} safety buffer" if free < s["margin_buffer_rs"]
+           else f"free margin ₹{free:,.0f} is below the ₹{extra:,.0f} expiry-day extra the open shorts will need")
+    push(ctx, f"margin watch: {why}. Add funds or reduce before expiry day, or Zerodha may square off at market.", urgent=True)
+    return f"margin watch: {why}"
 
 
 def settle(ctx):
@@ -1242,7 +1484,7 @@ def settle(ctx):
                          "gross_rs": gross, "net_rs": gross - (l["charges_rs"] or 0) - stt, "closed_at": e,
                          "updated_at": _utc()})
             net[l["source"]] = net.get(l["source"], 0) + rows[-1]["net_rs"]
-        upsert_df(pd.DataFrame(rows), "option_live_trades")
+        _write(ctx, rows)
         done.append(f"{u} {e}")
         msgs.append(f"{u} {e} settled at {S:,.2f}: " + ", ".join(f"{k} {_rs(v, True)}" for k, v in sorted(net.items())))
     stale = [w for w in waiting if date.fromisoformat(w.split()[1]) < date.fromisoformat(today) - timedelta(days=3)]
@@ -1278,8 +1520,42 @@ def reconcile(ctx):
         return outcome(ctx, "ALL", "failed", f"broker ≠ ledger: {text}",
                        f"Kite positions do not match the ledger ({text}). Entries are stopped until it is fixed and "
                        "`run.sh options_live reconcile` passes.", urgent=True)
-    put_state("reconcile", {"ok": True, "at": _utc(), "date": today, "detail": f"{len(pos)} contract(s) match"}, ctx["step"])
-    return outcome(ctx, "ALL", "ok", f"{len(pos)} broker contract(s) match the ledger")
+    problems, notes = shape_check(today)
+    if problems:
+        text = "; ".join(problems)
+        put_state("reconcile", {"ok": False, "at": _utc(), "date": today, "detail": text}, ctx["step"])
+        set_kill(True, f"reconcile: {text}", ctx["step"])
+        return outcome(ctx, "ALL", "failed", f"position shape: {text}",
+                       f"The live position is not a clean strangle: {text}. Entries are stopped until it is put right "
+                       "and `run.sh options_live reconcile` passes.", urgent=True)
+    detail = f"{len(pos)} contract(s) match" + (f"; {'; '.join(notes)}" if notes else "")
+    put_state("reconcile", {"ok": True, "at": _utc(), "date": today, "detail": detail}, ctx["step"])
+    return outcome(ctx, "ALL", "ok", f"{len(pos)} broker contract(s) match the ledger" + (f"; {'; '.join(notes)}" if notes else ""))
+
+
+def shape_check(today):
+    """The live book's shape, every reconcile → (problems, notes). Problems: a leg past its expiry still open (settle
+    missed), short calls ≠ short puts for one expiry, a wing smaller than the short it covers. Notes: spare wings
+    (a partly filled wing, or 2026-10-30's misread iceberg: 2,080 wing units against 1,040 sold)."""
+    problems, notes = [], []
+    stale = legs("source = 'live' AND status = 'OPEN' AND expiry < ? AND net_qty != 0", [today])
+    if stale:
+        problems.append("not settled after expiry: " + ", ".join(sorted({f"{l['underlying']} {l['expiry']}" for l in stale}))
+                        + " (run `run.sh options_live settle`)")
+    book = {}
+    for l in legs("source = 'live' AND status = 'OPEN' AND expiry >= ? AND net_qty != 0", [today]):
+        side = book.setdefault((l["underlying"], l["expiry"]), {"CE": {"short": 0, "long": 0}, "PE": {"short": 0, "long": 0}})
+        side[l["option_type"]]["short" if l["net_qty"] < 0 else "long"] += abs(int(l["net_qty"]))
+    for (u, e), x in sorted(book.items()):
+        if x["CE"]["short"] != x["PE"]["short"]:
+            problems.append(f"{u} {e}: short calls {x['CE']['short']} ≠ short puts {x['PE']['short']} units")
+        winged = x["CE"]["long"] or x["PE"]["long"]
+        for ot in ("CE", "PE"):
+            if winged and x[ot]["long"] < x[ot]["short"]:
+                problems.append(f"{u} {e}: {ot} wing {x[ot]['long']} units covers only part of {x[ot]['short']} sold")
+            elif winged and x[ot]["long"] > x[ot]["short"]:
+                notes.append(f"{u} {e}: {x[ot]['long'] - x[ot]['short']} spare {ot} wing units (they only add protection)")
+    return problems, notes
 
 
 def precheck(ctx):
@@ -1289,12 +1565,15 @@ def precheck(ctx):
     due = [f"{u} entry" for u in MARKETS if due_expiry(u, ctx["today"], hol)]
     if legs("underlying = 'NIFTY' AND expiry = ? AND status = 'OPEN' AND net_qty < 0", [ctx["today"]]):
         due.insert(0, "NIFTY buy-back")
+    if "NIFTY entry" in due and legs("underlying = 'SENSEX' AND expiry = ? AND status = 'OPEN' AND net_qty < 0", [ctx["today"]]):
+        due.insert(0, "SENSEX buy-back (15:00)")
     if not due:
         return outcome(ctx, "ALL", "idle", "nothing due today")
     if has_session(ctx):
         return outcome(ctx, "ALL", "ok", f"logged in; due today: {', '.join(due)}")
     return outcome(ctx, "ALL", "skipped", f"no Kite login; due today: {', '.join(due)}",
-                   f"log in to Kite before 15:05 IST — today has the {', '.join(due)}: {LOGIN_PAGE}", urgent=True)
+                   f"log in to Kite before {'15:00' if any(x.startswith('SENSEX buy-back') for x in due) else '15:05'} IST "
+                   f"— today has the {', '.join(due)}: {LOGIN_PAGE}", urgent=True)
 
 
 def weekly(ctx):
@@ -1317,7 +1596,7 @@ SIZING = {
     "wing_pct": 1.75,           # quoted when the setting is off (0), so C / D can be shown
     "crash_gap": 0.139,         # the index gap of the crash column (2020-03-23)
     "crash_budget": 0.30,       # B: lots within this share of the money in that crash (combined-book study)
-    "spare": 0.15,              # D: margin kept free beyond the buffer
+    "spare_rs": 240_000,        # D: margin kept free beyond the buffer (Amit 2026-10-29: ₹2.4 L, not 15 %)
     "keep": {"NIFTY": 0.853, "SENSEX": 0.823},   # premium kept after losing weeks, before charges (backtest 2019-26)
 }
 
@@ -1331,7 +1610,7 @@ def sizing_quote(ctx):
     out = {}
     for u in MARKETS:
         e = due_expiry(u, today, ob.holidays()) or kq.front_expiry(u, today)
-        F, spot, legs_, wings, k, kw = pick_legs(ctx, u, e, pct)
+        F, spot, legs_, wings, k, kw = pick_legs(ctx, u, e, pct, capped=False)   # the quote reports the plain distance
         lot = legs_[0]["lot"]
         credit = sum(l["bid"] or 0 for l in legs_)
         wing_cost = sum(w["ask"] or 0 for w in wings)
@@ -1357,7 +1636,7 @@ def sizing_quote(ctx):
 def sizing_choices(quote, capital, s):
     """The four setups on `capital` (₹: cash + collateral), each applied to both indices:
     A naked at today's caps · B naked within the crash budget · C winged at today's caps ·
-    D winged at the margin limit (spare kept, at most lots_hard_max). Lots also fit the expiry-day peak
+    D winged at the margin limit (₹ spare kept, at most lots_hard_max). Lots also fit the expiry-day peak
     after the buffer. The two trades never overlap, so a crash hits one index at a time."""
     if not quote or not capital:
         return []
@@ -1365,14 +1644,14 @@ def sizing_choices(quote, capital, s):
     spec = (("A", "naked", "cap", "Unprotected, today's caps"),
             ("B", "naked", "budget", f"Unprotected, crash loss within {SIZING['crash_budget']:.0%} of your money"),
             ("C", "winged", "cap", "Protected, today's caps"),
-            ("D", "winged", "margin", f"Protected, as many lots as margin allows ({SIZING['spare']:.0%} spare)"))
+            ("D", "winged", "margin", f"Protected, as many lots as margin allows (₹{SIZING['spare_rs'] / 1e5:g} L spare)"))
     rows = []
     for key, kind, rule, label in spec:
         per = {}
         for u, q in quote["markets"].items():
             x = q[kind]
             peak = x["margin"] + q["extra"]
-            fit = max(0, math.floor((capital * (1 - (SIZING["spare"] if rule == "margin" else 0)) - s["margin_buffer_rs"]) / peak))
+            fit = max(0, math.floor((capital - (SIZING["spare_rs"] if rule == "margin" else 0) - s["margin_buffer_rs"]) / peak))
             if rule == "cap":
                 lots = min(int(s["lots_cap"].get(u, 0)), fit)
             elif rule == "budget":
@@ -1396,7 +1675,13 @@ def quote_step(ctx):
         client(ctx)
     except NoKiteSession:
         return outcome(ctx, "ALL", "idle", "no Kite login today: no sizing quote")
-    q = sizing_quote(ctx)
+    m = snapshot_margin(ctx)                        # first: after hours the quote can fail (no offers on the wing strikes)
+    try:
+        q = sizing_quote(ctx)
+    except Exception as e:                          # noqa: BLE001 — the margin is still fresh; the last quote stays
+        msg = f"margin ₹{m['total']:,.0f} read; sizing quote failed, the last one stays ({type(e).__name__}: {e})"
+        runlog.note(f"options_live: {msg}", level="WARN")
+        return outcome(ctx, "ALL", "skipped", msg)
     return outcome(ctx, "ALL", "ok", "sizing quote: " + ", ".join(
         f"{u} naked ₹{m['naked']['margin']:,.0f} / winged ₹{m['winged']['margin']:,.0f} a lot" for u, m in q["markets"].items()))
 
@@ -1484,24 +1769,65 @@ def run_step(step, underlying=None, **ctx_kw):
         u = (underlying or ("NIFTY" if step in ("buyback", "testorder") else "")).upper()
         if u not in MARKETS:
             raise SystemExit(f"--underlying must be one of {sorted(MARKETS)}")
-        return STEPS[step](ctx, u)
-    return STEPS[step](ctx)
+        return _loud(ctx, step, lambda: STEPS[step](ctx, u))
+    return _loud(ctx, step, lambda: STEPS[step](ctx))
+
+
+def _loud(ctx, step, fn):
+    """Run a step; a crash is pushed urgently before it is raised (2026-10-30: the settle step died on a locked DB
+    and only the log knew)."""
+    try:
+        return fn()
+    except Exception as e:
+        try:
+            push(ctx, f"step {step} CRASHED: {type(e).__name__}: {e}. Check `output/options_live.log`; "
+                      f"rerun with `run.sh options_live {step}`.", urgent=True)
+        except Exception:                           # noqa: BLE001 — the crash itself must still surface
+            pass
+        raise
 
 
 # ─────────────────────────── health, cockpit ───────────────────────────
 
+_health_now = None                                  # tests: a clock for the "due step did not run" check
+DUE_STEPS_AFTER = "15:55"                           # IST: by then an entry day's entry, record and reconcile have run
+
+
+def _due_missing(states, mode, now):
+    """Control: in a real-money mode, the steps an entry day owes (entry for each index due, record, reconcile) must
+    have left a state dated that day; silence (cron dead, VM down) otherwise looks like success. The day judged is
+    today after DUE_STEPS_AFTER, else the last session before today."""
+    if mode not in LIVE_MODES:
+        return []
+    hol = ob.holidays()
+    d = now.date()
+    if now.strftime("%H:%M") < DUE_STEPS_AFTER or not ob.is_session(d, hol):
+        d -= timedelta(days=1)
+        while not ob.is_session(d, hol):
+            d -= timedelta(days=1)
+    d = d.isoformat()
+    due = [u for u in MARKETS if due_expiry(u, d, hol)]
+    if not due:
+        return []
+    keys = [f"step:entry:{u}" for u in due] + ["step:record:ALL", "step:reconcile:ALL"]
+    return [f"{k[5:]} did not run on {d} (an entry day): cron or the VM was silent" for k in keys
+            if (states.get(k) or {}).get("date") != d]
+
+
 def health_check():
-    """OPTIONS_LIVE (checks/custom.py): broker ≠ ledger, or a live step that failed in the last 3
-    days and has not succeeded since. CRITICAL on a mismatch or in a real-money mode, else WARN."""
+    """OPTIONS_LIVE (checks/custom.py): broker ≠ ledger, a live step that failed in the last 3 days and has not
+    succeeded since, or (real-money modes) an entry day's step that never ran. CRITICAL on a mismatch, a missing
+    step, or a failure in a real-money mode, else WARN."""
     df = _rows("SELECT key, value FROM option_live_settings WHERE key = 'reconcile' OR key LIKE 'step:%'")
-    if df.empty:
-        return {"n_bad": 0, "n_total": 0}
     mode = settings()["mode"]
-    since = (datetime.now(IST).date() - timedelta(days=3)).isoformat()
-    bad, n, critical = [], 0, False
-    for k, v in zip(df["key"], df["value"]):
-        v = json.loads(v)
-        n += 1
+    now = _health_now() if _health_now else datetime.now(IST)
+    states = {k: json.loads(v) for k, v in zip(df.get("key", []), df.get("value", []))}
+    missing = _due_missing(states, mode, now)
+    if df.empty and not missing:
+        return {"n_bad": 0, "n_total": 0}
+    since = (now.date() - timedelta(days=3)).isoformat()
+    bad, n, critical = list(missing), len(states), bool(missing)
+    for k, v in states.items():
         if k == "reconcile":
             if v.get("ok") is False:
                 bad.append(f"broker ≠ ledger: {v.get('detail')}")
@@ -1509,7 +1835,7 @@ def health_check():
         elif v.get("status") == "failed" and (v.get("date") or "") >= since:
             bad.append(f"{k[5:]} failed {v.get('date')}: {v.get('detail')}")
             critical = critical or v.get("mode") in LIVE_MODES or mode in LIVE_MODES
-    return {"n_bad": len(bad), "n_total": n, "sample": " · ".join(bad[:3]) or None,
+    return {"n_bad": len(bad), "n_total": max(n, len(bad)), "sample": " · ".join(bad[:3]) or None,
             "severity": "CRITICAL" if critical else "WARN"}
 
 
@@ -1561,7 +1887,8 @@ def page_data():
         margin["at_ist"] = datetime.fromisoformat(margin["at"]).astimezone(IST).strftime("%a %d %b, %H:%M IST")
         margin["free_after_buffer"] = margin["free"] - s["margin_buffer_rs"]
     return {"settings": s, "modes": MODES, "ticket": ticket, "open": open_, "history": hist, "totals": totals,
-            "rotation": get_state(f"rotation:{today}"), "reconcile": get_state("reconcile"),
+            "rotation": get_state(_rot_key("NIFTY", today)) or get_state(_rot_key("SENSEX", today)),
+            "reconcile": get_state("reconcile"),
             "steps": [{"key": k[5:], **json.loads(v)} for k, v in zip(states.get("key", []), states.get("value", []))][:12],
             "week": {src: week_realised(today, src) for src in ("shadow", "live")},
             "real_money": s["mode"] in LIVE_MODES,

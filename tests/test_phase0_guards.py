@@ -21,6 +21,8 @@ def test_one_primary_producer_for_freshness_and_heal():
         assert meta[table]["step_name"] == p["name"] == _producer_for(table)[0]
     assert db.table_producer("analyst_consensus")["frequency"] == "weekly"   # not the monthly scrape
     assert db.table_producer("macro_history")["frequency"] == "daily"
+    # a step's own table beats a side write: the daily holdings scrape never moves fetched_at
+    assert db.table_producer("mf_scheme_master")["name"] == "fetch_mf_master"
 
 
 def test_quarantine_mirrors_have_no_pk_or_check():

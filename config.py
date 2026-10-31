@@ -187,6 +187,9 @@ OPTIONS_LIVE = {
     "buyback_start": "15:05",
     "buyback_final": "15:14",              # the buy-back's final aggressive limit
     "buyback_end": "15:15",                # leftovers cancelled; NIFTY then expires normally, SENSEX skipped
+    # SENSEX is bought back only on a day NIFTY enters too (holiday weeks put the NIFTY entry on a SENSEX
+    # expiry: 2026-11-05, 11-19, 12-24); otherwise it expires. Done before the 15:12 NIFTY entry.
+    "sensex_buyback": {"start": "15:00", "final": "15:06", "end": "15:07"},
     "closeall_minutes": 5,                 # Close-all: re-price this long, the last minute aggressive
     "reprice_every_s": 20,
     "approval_poll_s": 10,
@@ -205,6 +208,12 @@ OPTIONS_LIVE = {
     # so a weekly loss is capped and Kite's margin roughly halves (both sides needed). 0 = off; 1.75 planned.
     "wing_pct": 0.0,
     "wing_buy_s": 60,                      # the wings get this long to fill (final aggressive limit in the last third)
+    # The wings' price (Amit 2026-10-30: "max share of credit 20 to 30 %, lower is better"): at their asks the two wings
+    # may cost at most this % of the credit at the bids. Dearer (a thin strike quoted wide, 63 % seen on SENSEX
+    # 2026-10-29): the dearer wing steps one offered strike further out until the pair fits, never beyond
+    # wing_max_pct of spot past its short strike; still too dear → no entry, pushed.
+    "wing_max_share_pct": 30,
+    "wing_max_pct": 3.5,
 }
 
 PORTFOLIO = {
@@ -437,6 +446,14 @@ NON_PAGING_STEPS = {
 RETIRED_STEPS = {
     "cron_bse_announcements": {"since": "2026-10-19", "ref": "ADR 0082", "feed": "bse_announcements",
                                "why": "BSE's WAF 403s this server since 2026-10-13; run.sh forward no longer runs it (NSE is the live source)"},
+    # the temporary `run.sh backfill` job (2026-10-04), removed with its cron lines once every part had nothing left
+    "cron_bse_shp_backfill": {"since": "2026-10-23", "ref": "checklist: data health round 3",
+                              "why": "3,153 stocks done; the last 40 (GAIL, ATUL, …) each list filings BSE serves as HTTP 404, "
+                                     "so they never checkpoint and every window failed with 0 rows. Weekly cron_bse_shp --due stays"},
+    "cron_nse_legacy": {"since": "2026-10-23", "ref": "checklist: data health round 3",
+                        "why": "2018-03 → 2019-12 loaded (449 days); the 30 weekdays left have no archive file"},
+    "cron_nse_results_backfill": {"since": "2026-10-23", "ref": "checklist: data health round 3",
+                                  "why": "2017-04 → 2024-12 done (2,201 stocks, 0 left)"},
 }
 
 PIPELINE_STEPS = [

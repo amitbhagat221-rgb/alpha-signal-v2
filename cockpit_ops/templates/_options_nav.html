@@ -1,0 +1,12 @@
+{# The options pages' sub-navigation (plan 0029): the paper book, the calculator, the live book. #}
+<style>
+  .os-subnav { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 14px; }
+  .os-subnav a { padding: 6px 14px; border-radius: 8px; border: 1px solid var(--border); color: var(--text-secondary); font-size: 13px; font-weight: 700; text-decoration: none; }
+  .os-subnav a.os-subnav-on { background: var(--accent); border-color: var(--accent); color: #fff; }
+</style>
+<nav class="os-subnav" aria-label="Options pages">
+  <a href="/options" class="{{ 'os-subnav-on' if not sub else '' }}">Paper book</a>
+  <a href="/options/capital" class="{{ 'os-subnav-on' if sub == 'capital' else '' }}">At your capital</a>
+  <a href="/options/expected" class="{{ 'os-subnav-on' if sub == 'expected' else '' }}">Expected profit</a>
+  <a href="/options/live" class="{{ 'os-subnav-on' if sub == 'live' else '' }}">Live book</a>
+</nav>

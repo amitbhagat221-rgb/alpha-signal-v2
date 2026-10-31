@@ -26,7 +26,6 @@ violating (`critical_pct`, default 10; `warn_pct`, default 1; below = INFO).
 from checks.ranges import PICKABLE_TIERS
 from checks import CRITICAL, WARN
 from checks import model
-from validators.plausibility import pt_implausible_sql, pt_outside_range_sql
 
 # Every stored analyst target next to the latest close; {bad} is the rule being counted.
 _TARGETS_SQL = """
@@ -48,6 +47,28 @@ _TARGETS_SQL = """
 # An index option within a week of expiry may sit at most this share of the index above its
 # intrinsic value (OPTION_PRICE_IMPOSSIBLE).
 OPTION_TIME_VALUE_MAX = 0.30
+
+def _implausible_targets():
+    """ANALYST_TARGET_IMPLAUSIBLE on the targets a reader is shown: rebased across a later split,
+    consolidation or demerger (views.target_basis) before the PT_CLOSE_RATIO test, so a call Yahoo
+    never rebased (IFIB after its 2026-10-13 consolidation) is judged on today's share basis."""
+    import views
+    from validators.plausibility import pt_implausible, pt_outside_range
+    rows = views.native_rows("SELECT sid, price_target, price_target_low, price_target_high FROM analyst_consensus "
+                             "WHERE has_analyst_data = 1 AND price_target IS NOT NULL")
+    sids = [r["sid"] for r in rows]
+    close, basis = views.latest_close(sids), views.target_basis(sids)
+    bad, n = [], 0
+    for r in rows:
+        px = (close.get(r["sid"]) or (None,))[0]
+        if not px or px <= 0:
+            continue
+        n += 1
+        pt = r["price_target"] * basis.get(r["sid"], {}).get("factor", 1.0)
+        if pt_implausible(pt, px) or pt_outside_range(r["price_target"], r["price_target_low"], r["price_target_high"]):
+            bad.append((pt / px, f"{r['sid']}: target {pt:.1f} vs price {px:.1f}"))
+    return {"n_bad": len(bad), "n_total": n, "sample": max(bad)[1] if bad else None}
+
 
 def _options_live():
     import options_live           # lazy: the check catalog must not import the Kite stack
@@ -236,16 +257,17 @@ CHECKS = [
         "column": "price_target",
         "theme": "correct",
         "message": "Analyst price targets that cannot be real: more than 3x, or under a third of, the share price, or an average outside its own low-high range",
-        "why": "A broker call from before a split or a crash, or Yahoo garbage for a thinly covered small cap; or an "
-               "average written by one source next to a range from another (178 rows, 2026-10). "
-               "The upside shown for that stock is wrong.",
+        "why": "A broker call from before a crash, or Yahoo garbage for a thinly covered small cap; or an "
+               "average written by one source next to a range from another (178 rows, 2026-10). A call from "
+               "before a split, consolidation or demerger is judged rebased (views.target_basis), not flagged. "
+               "The cockpit already hides these; the weekly Yahoo sweep nulls them.",
         "fix": "Both writers refuse these (the Yahoo sweep and the broker aggregate share "
                "validators.plausibility.PT_CLOSE_RATIO), so a few rows mean a price moved since the last write: "
-               "`python -m sources.moneycontrol_recos --aggregate-only` rebuilds. Many rows mean a writer lost its gate.",
+               "`python -m sources.moneycontrol_recos --aggregate-only` rebuilds. Many rows mean a writer lost its gate. "
+               "A rebase gone wrong: check corporate_adjustments for the stock.",
         "critical_pct": 10,
         "warn_pct": 0.5,
-        "sql": _TARGETS_SQL.format(bad=pt_implausible_sql("ac.price_target", "lp.close") + " OR "
-                                       + pt_outside_range_sql("ac.price_target", "ac.price_target_low", "ac.price_target_high")),
+        "fn": _implausible_targets,
     },
     {
         "code": "ANALYST_TARGET_IS_PRICE",

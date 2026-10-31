@@ -76,7 +76,7 @@ STRESS_BUDGET = None                   # --stress-budget b: lots also limited so
 LOTS_MAX = 10_000                      # no cap by default (--lots-max): lot sizes changed 75 → 50 → 25 → 75 → 65
 VIX_HALT, VIX_HALVE = 30.0, 27.0
 NAKED = {"NIFTY": 0.099, "SENSEX": 0.111}
-WINGED = {"NIFTY": 0.057, "SENSEX": 0.058}
+WINGED_BASE = 0.04                     # + WING: winged entry margin as a share of notional
 ELM_FROM, ELM = "2024-11-20", 0.04
 WING = 0.0175
 STRESS = (0.139, 0.25)                 # stress at every entry: index −13.9 % gap (2020-03-23), SMALL book −25 %
@@ -131,7 +131,8 @@ def option_trades(underlying, structure, start):
 
 
 def all_trades(structure, start):
-    f = V2 / f"combined_trades_{structure}.parquet"
+    f = V2 / (f"combined_trades_{structure}.parquet" if structure == "strangle" or WING == 0.0175
+              else f"combined_trades_{structure}_w{WING:g}.parquet")
     if f.exists():
         t = pd.read_parquet(f)
         if t.entry.min() <= start:
@@ -202,7 +203,8 @@ def equity_path(m, days, idx):
 # ───────────────────────────── the combined book ─────────────────────────────
 
 def margin_per_lot(tr, structure):
-    pct = (WINGED if structure == "condor" else NAKED)[tr.underlying]
+    # winged: Kite 2026-10-29 quotes ≈ 4 % of notional + the wing width (1.25 → 5.3 %, 1.75 → 5.7 %, 3.5 → 7.5 %)
+    pct = WINGED_BASE + WING if structure == "condor" else NAKED[tr.underlying]
     if structure != "condor" and pd.notna(tr.vix):
         pct *= max(1.0, tr.vix / 16.0)
     if tr.entry >= ELM_FROM:
@@ -359,16 +361,18 @@ def main():
     ap.add_argument("--lots-max", type=int, default=LOTS_MAX)
     ap.add_argument("--tag", default="")
     ap.add_argument("--stress-budget", type=float, default=None)
+    ap.add_argument("--wing", type=float, default=WING, help="wing distance beyond the shorts, share of the forward")
     a = ap.parse_args()
     globals()["LOTS_MAX"] = a.lots_max
     globals()["STRESS_BUDGET"] = a.stress_budget
+    globals()["WING"] = a.wing
     out = []
     for w in (("L", "S") if a.window == "both" else (a.window,)):
         out.append(run(w, smoke=a.smoke))
     df = pd.concat(out, ignore_index=True)
     if not a.smoke:
         f = V2 / f"combined_results{a.tag}.csv"
-        df.assign(lots_max=a.lots_max, stress_budget=a.stress_budget).to_csv(f, index=False)
+        df.assign(lots_max=a.lots_max, stress_budget=a.stress_budget, wing=a.wing).to_csv(f, index=False)
         print(f"wrote {f}")
 
 

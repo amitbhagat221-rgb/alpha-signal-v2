@@ -25,4 +25,4 @@ paths:
 
 **Per-pick wording (ADR 0061)**
 - The per-pick number is `eligible_coverage`, worded only by `views.pick_data` ("Data 84% · Partial"); thresholds in `config.PICK_GATE`. UHS and gates 3–7 are retired.
-- A stored analyst target is judged by ONE check, `ANALYST_TARGET_IMPLAUSIBLE` (rules in `validators/plausibility.py`: `PT_CLOSE_RATIO` and the average inside its own low–high), applied at both writers and in the check.
+- A stored analyst target is judged by ONE check, `ANALYST_TARGET_IMPLAUSIBLE` (rules in `validators/plausibility.py`: `PT_CLOSE_RATIO` and the average inside its own low–high), applied at both writers and in the check, on targets rebased across later share changes; an upside shows only for `pt_status` "ok" (ADR 0083).

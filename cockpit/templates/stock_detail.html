@@ -188,7 +188,7 @@
     {% if pt %}
     <div class="verdict-line">
         Analyst {{ pt_basis }} target <span class="num">{{ pt|inr(0) }}</span>{% if pt_up is not none %}
-        (<span class="num {{ pt_up|tone }}">{{ pt_up|pct(0, signed=True) }}</span> vs the latest close){% endif %}{% if pt_n %}, {{ pt_n }} analyst{{ '' if pt_n == 1 else 's' }}{% endif %}{% if pt_asof %}, refreshed {{ pt_asof|short_date }}{% endif %}.
+        (<span class="num {{ pt_up|tone }}">{{ pt_up|pct(0, signed=True) }}</span> vs the latest close){% endif %}{% if pt_n %}, {{ pt_n }} analyst{{ '' if pt_n == 1 else 's' }}{% endif %}{% if pt_asof %}, refreshed {{ pt_asof|short_date }}{% endif %}.{% if ac.get("pt_note") %} <span class="u-muted-10">({{ ac.pt_note }})</span>{% endif %}
         <button type="button" class="link-btn" @click="document.getElementById('consensus').scrollIntoView({behavior: 'smooth'})">Analyst consensus below</button>
     </div>
     {% endif %}
@@ -333,6 +333,7 @@
                 </span>
                 {% endif %}
                 <span class="u-muted-10" style="margin-left: 6px;">{{ pt_basis }}{% if pt_n %} of {{ pt_n }} analyst{{ "" if pt_n == 1 else "s" }}{% endif %}, vs close {{ ac.get("current_price")|inr(2) }}</span>
+                {% if ac.get("pt_note") %}<div class="u-muted-10" style="margin-top: 2px;">{{ ac.pt_note|capitalize }}.</div>{% endif %}
             </div>
         </div>
 

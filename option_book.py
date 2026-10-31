@@ -328,6 +328,46 @@ def margin_parts(margin_rs, F, units, short_legs=2):
             "expiry_margin_rs": margin_rs + extra}
 
 
+WING_VIEW_PCT = 0.0175          # /options "Protected" tab: long wings this share of the forward beyond each short strike
+WINGED_BASE_PCT = 0.04          # Kite 2026-10-29: a winged strangle's entry margin ≈ 4 % of notional + the wing width
+
+
+def wing_view(r):
+    """The same paper trade with long wings WING_VIEW_PCT of the forward beyond each short strike, priced as the
+    book prices (entry-day settle + slippage and charges, intrinsic at expiry, STT on an exercised wing; open
+    trades at the latest settle) → {w_*} for the page, or {} when a side has no traded wing that day."""
+    if not (r.get("forward") and r.get("lot")):
+        return {}
+    F, lot = r["forward"], r["lot"]
+    sl = read_sql("SELECT option_type, strike, settle FROM fno_bhav WHERE symbol = ? AND instrument_type = 'IDO' "
+                  "AND trade_date = ? AND expiry_date = ? AND settle > 0", params=[r["underlying"], r["entry_date"], r["expiry"]])
+    calls = sl[(sl.option_type == "CE") & (sl.strike >= r["short_call"] + WING_VIEW_PCT * F)]
+    puts = sl[(sl.option_type == "PE") & (sl.strike <= r["short_put"] - WING_VIEW_PCT * F)]
+    if calls.empty or puts.empty:
+        return {}
+    kc, kp = float(calls.strike.min()), float(puts.strike.max())
+    pc, pp = float(calls[calls.strike == kc].settle.iloc[0]), float(puts[puts.strike == kp].settle.iloc[0])
+    cost = pc + pp + leg_cost(pc, "buy", lot, SLIP, r["entry_date"]) + leg_cost(pp, "buy", lot, SLIP, r["entry_date"])
+    width = max(kc - r["short_call"], r["short_put"] - kp)
+    entry = (WINGED_BASE_PCT + width / F) * F * lot
+    exposure = EXPOSURE_PCT * F * lot * 2
+    extra = expiry_day_extra(F, lot)
+    out = {"w_call": kc, "w_put": kp, "w_cost_pts": cost, "w_margin_rs": entry, "w_span_rs": entry - exposure,
+           "w_exposure_rs": exposure, "w_extra_rs": extra, "w_expiry_margin_rs": entry + extra,
+           "w_max_loss_rs": (width - r["credit_pts"] + r["entry_cost_pts"] + cost) * lot, "w_pnl": None}
+    if r["status"] == "SETTLED" and r.get("settle_index") is not None and r.get("net_rs") is not None:
+        pay = intrinsic("C", kc, r["settle_index"]) + intrinsic("P", kp, r["settle_index"])
+        out["w_pnl"] = r["net_rs"] + (pay - cost - STT_EXERCISE * pay) * lot
+    elif r.get("mark"):
+        now = read_sql("SELECT option_type, strike, settle FROM fno_bhav WHERE symbol = ? AND instrument_type = 'IDO' "
+                       "AND trade_date = ? AND expiry_date = ? AND ((option_type = 'CE' AND strike = ?) OR "
+                       "(option_type = 'PE' AND strike = ?))",
+                       params=[r["underlying"], r["mark"]["mark_date"], r["expiry"], kc, kp])
+        if len(now) == 2:
+            out["w_pnl"] = r["mark"]["mtm_rs"] + (float(now.settle.sum()) - cost) * lot
+    return out
+
+
 def page_data():
     """Everything the /options page shows (plan 0022). The page renders this, decides nothing."""
     from sources.kite_pull import TOKEN_CACHE
@@ -339,6 +379,7 @@ def page_data():
         r["expiry_margin_rs"] = r["margin_rs"]
         if r["margin_rs"] and r["forward"] and r["lot"]:
             r.update(margin_parts(r["margin_rs"], r["forward"], r["lot"]))
+        r.update(wing_view(r))
         trades.append(r)
     settled = [t for t in trades if t["status"] == "SETTLED"]
     rets = [t["ret_on_margin"] for t in settled]
@@ -365,6 +406,7 @@ def page_data():
                 break
     return {
         "rule": RULE, "first_entry": FIRST_ENTRY, "backtest": BACKTEST, "pass_bar_trades": PASS_BAR_TRADES,
+        "wing_view_pct": 100 * WING_VIEW_PCT,
         "trades": trades[::-1],
         "summary": {"n": len(trades), "open": len(trades) - len(settled), "settled": len(settled),
                     "wins": sum(1 for x in rets if x > 0),

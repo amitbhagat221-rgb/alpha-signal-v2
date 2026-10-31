@@ -23,7 +23,7 @@ paths:
 - New source: candidate entry + canary on 3 items first (`python -m tools.canary --feed X`). Fix loop: [feed-runbook](../../docs/reference/feed-runbook.md). Debug with `python -m runlog bundle <feed>`.
 - Failures must reach `run_events` (`runlog.py`): use `_http.run_harvester` + the door, or `runlog.item_error/item_failed` in a custom loop.
 - Raw tables on the T1 path declare a write `contract` in `tables.TABLES` (enforced in `db.insert_df/upsert_df`). Never loosen one to make a harvest pass. After a canary `--accept`, refresh replay fixtures (`python -m tools.canary --save-fixtures`).
-- The host door (`sources/_http` + `hosts.HOSTS`) owns gap ≥ 2 s, headers, retries and budgets — declare the host, never pace by hand.
+- The host door (`sources/_http` + `hosts.HOSTS`) owns gap ≥ 2 s, headers, retries and budgets — declare the host, never pace by hand. Passing `headers=` replaces the host's headers: merge `{**_http.host(url)[1]["headers"], …}` (nsearchives stalls a request without the browser UA).
 
 **Columns mean what they say**
 - A source column is named for what it holds, and its meaning is checked against a second source: a statement column a factor reads goes in `tools/reconcile.FUND_FIELDS` (ADR 0062 — Tickertape's "interest" was operating expenses for months).
@@ -35,6 +35,7 @@ paths:
   - `analyst_consensus_snapshots` (PK sid+date+source, MONTHLY, cron 1st 04:30 UTC): backtest + revision signals. Never write a daily row.
   - `forecast_history`: Tickertape year-end eps/revenue. Its `price` metric is the realized year-ahead close, not a PT — never ingest it (ADR 0045).
 - New PT-like producer: ask "is this episodic?" — if yes, a snapshot table at its natural cadence.
+- A target set before a split / consolidation / demerger is rebased by readers (`views.target_basis`); never store a rebased target (ADR 0083).
 
 **Harvest lock: one harvest per source (Amit 2026-10-15)**
 - A harvest job in `run.sh` names its sources: `harvest_lock nse bse`. Jobs on different sources run in parallel; two on one source queue (wait `LOCK_WAIT_S`, then a logged skip).

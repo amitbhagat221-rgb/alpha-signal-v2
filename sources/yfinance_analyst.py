@@ -218,6 +218,13 @@ def sweep_pt_plausibility(snapshot_date=None):
           AND {pt_implausible_sql("ac.price_target", "px.close")}
         """
     )
+    # a call from before a split / consolidation / demerger is rebased by every reader
+    # (views.target_basis): judge it on today's share basis, never null a target that is right
+    from validators.plausibility import pt_implausible
+    from views import target_basis
+    basis = target_basis(df["sid"].tolist())
+    df = df[[pt_implausible(r.price_target * basis.get(r.sid, {}).get("factor", 1.0), r.close)
+             for r in df.itertuples()]]
     n = 0
     for _, r in df.iterrows():
         ratio = r["price_target"] / r["close"]

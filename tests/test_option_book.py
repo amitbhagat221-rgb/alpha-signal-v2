@@ -90,3 +90,23 @@ def test_margin_parts_split_span_exposure_and_expiry_extra():
     assert abs(p["exposure_rs"] - 0.02 * 22_600 * 65 * 2) < 1e-6
     assert abs(p["span_rs"] + p["exposure_rs"] - 159_000.0) < 1e-6
     assert abs(p["expiry_margin_rs"] - (159_000.0 + p["expiry_extra_rs"])) < 1e-6
+
+
+def test_wing_view_prices_the_same_trade_with_wings(monkeypatch):
+    import pandas as pd
+    chain = pd.DataFrame({"option_type": ["CE", "CE", "CE", "PE", "PE", "PE"],
+                          "strike": [23000.0, 23400.0, 23450.0, 22000.0, 21600.0, 21550.0],
+                          "settle": [8.0, 3.0, 2.5, 9.0, 3.5, 3.0]})
+    monkeypatch.setattr(ob, "read_sql", lambda sql, params=None: chain)
+    r = {"underlying": "NIFTY", "entry_date": "2026-10-23", "expiry": "2026-10-27", "forward": 22500.0, "lot": 65,
+         "short_call": 23000.0, "short_put": 22000.0, "credit_pts": 17.0, "entry_cost_pts": 0.9, "status": "SETTLED",
+         "settle_index": 21000.0, "net_rs": -60_000.0}
+    w = ob.wing_view(r)
+    assert (w["w_call"], w["w_put"]) == (23400.0, 21600.0)        # first traded strikes 1.75 % (393.75 pts) beyond
+    cost, pay = w["w_cost_pts"], 21600.0 - 21000.0                 # the put wing finishes 600 in the money
+    assert cost > 3.0 + 3.5
+    assert abs(w["w_pnl"] - (-60_000.0 + (pay - cost - ob.STT_EXERCISE * pay) * 65)) < 1e-6
+    assert abs(w["w_margin_rs"] - (0.04 + 400 / 22500) * 22500 * 65) < 1e-6
+    assert w["w_expiry_margin_rs"] == w["w_margin_rs"] + ob.expiry_day_extra(22500.0, 65)
+    assert abs(w["w_max_loss_rs"] - (400 - 17.0 + 0.9 + cost) * 65) < 1e-6
+    assert ob.wing_view({**r, "forward": None}) == {}

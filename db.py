@@ -1120,6 +1120,10 @@ def table_producer(table_name):
     with the finest `frequency`; ties go to the first listed. Before this, freshness
     took the LAST writer and the watchdog the FIRST, so e.g. analyst_consensus was
     judged on the weekly yfinance cadence but healed by the monthly Tickertape step.
+    A step whose own `table` this is beats one that only lists it among its other
+    writes: scrape_mf_holdings (daily) fills a few etm_* columns of mf_scheme_master,
+    but only fetch_mf_master (weekly) moves its fetched_at — judged daily, it went STALE
+    every Thursday and the heal reran a step that could not fix it (2026-10-22).
     """
     from config import PIPELINE_STEPS
     from graph import writes
@@ -1129,6 +1133,7 @@ def table_producer(table_name):
     steps = [s for s in PIPELINE_STEPS if table_name in writes(s)]
     if not steps:
         return None
+    steps = [s for s in steps if s.get("table") == table_name] or steps
     return min(steps, key=lambda s: _CADENCE_RANK.get(s["frequency"], 9))  # min() is stable
 
 

@@ -1,0 +1,424 @@
+{% extends "ops_base.html" %}
+
+{% block content %}
+{% include "_options_styles.html" %}
+{% include "_options_nav.html" %}
+<style>
+  .oe-layout { display: grid; grid-template-columns: minmax(300px, 400px) minmax(0, 1fr); gap: 16px; align-items: start; }
+  .oe-layout > * { min-width: 0; }
+  @media (max-width: 960px) { .oe-layout { grid-template-columns: minmax(0, 1fr); } }
+  .oe-presets { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+  .oe-dates { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .oe-line { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 8px 0; border-top: 1px solid var(--border); font-size: 13px; }
+  .oe-in { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 13px; }
+  .oe-in th { text-align: right; font-size: 13px; padding: 6px 4px; }
+  .oe-in th:first-child, .oe-in td:first-child { text-align: left; color: var(--text-secondary); }
+  .oe-in td { padding: 6px 4px; border-top: 1px solid var(--border); vertical-align: top; }
+  .oe-line input, .oe-in input { width: 100%; max-width: 130px; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg-input, var(--bg-card)); color: var(--text-primary); font-family: 'JetBrains Mono', monospace; font-size: 13px; text-align: right; }
+  .oe-in td:not(:first-child) { text-align: right; }
+  input.oe-edited { border-color: var(--amber); }
+  input[readonly] { border-style: dashed; color: var(--text-secondary); }
+  .oe-d { font-size: 11px; color: var(--text-muted); margin-top: 3px; font-weight: 400; }
+  .oe-how { margin-top: 12px; font-size: 12px; color: var(--text-secondary); }
+  .oe-how summary { cursor: pointer; font-weight: 700; color: var(--text-primary); font-size: 13px; }
+  .oe-how li { margin: 6px 0; }
+  .oe-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+  .oe-tiles .ob-tile .n { font-size: 21px; }
+  .oe-chart { position: relative; height: 300px; margin-top: 10px; }
+  .oe-chart-sm { position: relative; height: 220px; margin-top: 10px; }
+  .oe-table td { white-space: normal; vertical-align: top; }
+  .oe-rates td:not(:first-child), .oe-rates th:not(:first-child) { text-align: right; }
+  .oe-replay { margin-top: 10px; padding: 10px 12px; border-radius: 8px; background: var(--bg-hover, rgba(127,127,127,0.08)); font-size: 13px; }
+</style>
+<div class="section-title">Expected profit</div>
+<div class="section-desc">One NIFTY and one SENSEX trade a week. A winning week keeps {{ d.keep_pct }}% of the credit, a loss week loses a multiple of it. Defaults come from the backtest and today's Kite quote; an edited box turns amber.</div>
+
+{% if d.error %}
+<div class="ob-card"><b class="ob-bad">Unavailable:</b> <span class="ob-muted">{{ d.error }}</span></div>
+{% else %}
+<script type="application/json" id="oe-data">{{ d|tojson }}</script>
+<div class="oe-layout" id="oe">
+  <div class="os-panel">
+    <div class="os-panel-h"><span>Assumptions</span><a href="#" class="os-link" id="oe-reset" style="font-size: 13px;">Reset to defaults</a></div>
+    <div class="oe-presets" id="oe-presets">
+      <button type="button" class="ob-tab" data-p="7">1 week</button>
+      <button type="button" class="ob-tab" data-p="30">1 month</button>
+      <button type="button" class="ob-tab" data-p="91">3 months</button>
+      <button type="button" class="ob-tab" data-p="182">6 months</button>
+      <button type="button" class="ob-tab" data-p="365">1 year</button>
+      <button type="button" class="ob-tab" data-p="1095">3 years</button>
+    </div>
+    <div class="oe-dates">
+      <label class="os-field">From <input type="date" id="oe-from"></label>
+      <label class="os-field">To <input type="date" id="oe-to"></label>
+    </div>
+    <div class="ob-tabs" role="tablist" id="oe-kind">
+      <button type="button" class="ob-tab" data-k="naked">Unprotected</button>
+      <button type="button" class="ob-tab" data-k="winged">Protected ({{ "%g"|format(d.wing_pct or 1.75) }}% wings)</button>
+    </div>
+    <div class="oe-line" style="margin-top: 10px;"><span>Capital (₹)<div class="oe-d" id="oe-cap-d"></div></span><input type="number" id="oe-capital" min="0" step="10000"></div>
+    <div class="oe-line"><span>Tax on profit (%)<div class="oe-d" id="oe-tax-d"></div></span><input type="number" id="oe-tax" min="0" max="50" step="0.1"></div>
+    <table class="oe-in">
+      <tr><th></th>{% for u in ['NIFTY', 'SENSEX'] %}<th>{{ u }}<div class="oe-d" data-h="{{ u }}"></div></th>{% endfor %}</tr>
+      {% for f, label, step in [('lots', 'Lots', 1), ('credit', 'Credit a lot (₹)', 10), ('nloss', 'Loss weeks', 0.1), ('loss', 'Average loss week (₹ a lot)', 100), ('ncrash', 'Crash weeks (−' ~ ("%.1f"|format(100 * d.crash_gap)) ~ '% gap)', 1)] %}
+      <tr><td>{{ label }}</td>{% for u in ['NIFTY', 'SENSEX'] %}<td><input type="number" min="0" step="{{ step }}" data-u="{{ u }}" data-f="{{ f }}" aria-label="{{ u }} {{ label }}"><div class="oe-d" data-d="{{ u }}:{{ f }}"></div></td>{% endfor %}</tr>
+      {% endfor %}
+    </table>
+    <details class="oe-how">
+      <summary>How the defaults are set</summary>
+      <ul id="oe-how"></ul>
+    </details>
+  </div>
+
+  <div>
+    <div class="os-panel">
+      <div class="oe-tiles">
+        <div class="ob-tile"><div class="n" id="oe-t-post">—</div><div class="l">expected profit after tax · <span id="oe-t-pre"></span> before</div></div>
+        <div class="ob-tile"><div class="n" id="oe-t-month">—</div><div class="l">a month, after tax</div></div>
+        <div class="ob-tile"><div class="n" id="oe-t-ret">—</div><div class="l">a year on capital, after tax</div></div>
+        <div class="ob-tile"><div class="n" id="oe-t-ploss">—</div><div class="l">chance the period ends in a loss</div></div>
+      </div>
+      <div class="ob-scroll"><table class="ob-table oe-rates" id="oe-week" style="margin-top: 12px;"></table></div>
+      <div class="ob-scroll"><table class="ob-table oe-rates" id="oe-rates" style="margin-top: 12px;"></table></div>
+      <div class="ob-muted" id="oe-rates-note" style="margin-top: 6px;"></div>
+      <div class="ob-scroll"><table class="ob-table oe-table" id="oe-table" style="margin-top: 12px;"></table></div>
+      <div class="ob-muted" id="oe-margin" style="margin-top: 6px;"></div>
+    </div>
+    <div class="os-panel">
+      <div class="os-panel-h"><span>The path</span><span class="ob-muted" style="font-weight: 400;">4,000 simulated runs, before tax</span></div>
+      <div class="oe-chart"><canvas id="oe-fan" aria-label="Cumulative P&amp;L over the period"></canvas></div>
+    </div>
+    <div class="os-panel">
+      <div class="os-panel-h"><span>Where the period can end</span><span class="ob-muted" style="font-weight: 400;" id="oe-hist-note"></span></div>
+      <div class="oe-chart-sm"><canvas id="oe-hist" aria-label="Distribution of the period's P&amp;L"></canvas></div>
+      <div class="oe-replay" id="oe-replay" hidden></div>
+    </div>
+    <div class="os-panel">
+      <div class="os-panel-h"><span>The backtest by year</span>
+        <span class="ob-tabs" id="oe-year-u" style="margin: 0;"><button type="button" class="ob-tab" data-yu="NIFTY">NIFTY</button><button type="button" class="ob-tab" data-yu="SENSEX">SENSEX</button></span></div>
+      <div class="ob-scroll"><table class="ob-table" id="oe-years" style="margin-top: 8px;"></table></div>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+<script src="{{ vendor('chart') }}"></script>
+<script src="/static/options_strategy.js?v={{ asset_version('options_strategy.js') }}"></script>
+<script>
+// Expected profit (plan 0029): deterministic expectation + a Monte Carlo of loss weeks over the chosen period.
+// Every input starts at its default (backtest + today's quote); edits are kept in this browser only.
+(function () {
+  var el = document.getElementById('oe-data');
+  if (!el) return;
+  var D = JSON.parse(el.textContent), O = OptStrategy, US = ['NIFTY', 'SENSEX'], KEY = 'oe-inputs';
+  var DAY = 86400e3, N_SIM = 4000;
+  function byId(id) { return document.getElementById(id); }
+  function iso(ms) { return new Date(ms).toISOString().slice(0, 10); }
+  function get() { try { return JSON.parse(localStorage.getItem(KEY) || '{}'); } catch (e) { return {}; } }
+  function save() { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) {} }
+  var S = get();                                  // only what was edited: {kind, from, to, capital, tax, NIFTY: {lots, ...}, ...}
+  var kind = S.kind || D.kind, yu = 'NIFTY', fan = null, hist = null;
+
+  function weeksIn(u, from, to) {                 // expiries of that weekday in [from, to], × the share of weeks traded
+    var a = Date.parse(from), b = Date.parse(to), dow = D.markets[u].expiry_dow, n = 0;
+    for (var t = a; t <= b; t += DAY) if (new Date(t).getUTCDay() === dow) n++;
+    return n;
+  }
+  function period() {
+    var from = S.from || D.today, to = S.to || iso(Date.parse(D.today) + 364 * DAY);
+    return {from: from, to: to, days: Math.max(1, (Date.parse(to) - Date.parse(from)) / DAY + 1)};
+  }
+  function defaults(u) {                          // the defaults for this period and protection
+    var m = D.markets[u], k = m[kind], P = period(), W = Math.round(weeksIn(u, P.from, P.to) * k.traded_share);
+    return {W: W, lots: m.lots, credit: Math.round(k.credit_rs), keep: D.keep_pct,
+            nloss: Math.round(10 * k.loss_per_year * W / 52) / 10, loss: lossLot(u), ncrash: 0};
+  }
+  function lossLot(u) {                           // default average loss week, ₹ a lot: the pooled share of the index × this lot's notional
+    var x = D.pooled[kind].loss_pct * D.markets[u].notional_rs, cap = D.markets[u][kind].max_loss_rs;
+    return Math.round(cap ? Math.min(x, cap) : x);
+  }
+  function sizeBy() { return S.sizeBy === 'capital' ? 'capital' : 'lots'; }   // whichever was typed last: lots or capital
+  function capital() {                            // Lots: what the lots need (the reverse of fitLots); Capital: what you type
+    return sizeBy() === 'lots' ? needed() : (S.capital !== undefined ? S.capital : (D.capital || 0));
+  }
+  function peakOf(u) { return val(u, 'lots') * peakLot(u); }
+  function needed() {                             // the two trades are never open together: the larger peak + the buffer
+    return (D.buffer_rs || 0) + Math.max.apply(null, US.map(peakOf));
+  }
+  function peakLot(u) { var k = D.markets[u][kind]; return k.margin_rs ? k.margin_rs + (D.markets[u].extra_rs || 0) : 0; }
+  function fitLots(u) {                           // by capital: as many lots as its peak margin allows after the buffer (the live entry's rule)
+    var p = peakLot(u);
+    return p > 0 ? Math.max(0, Math.min(D.lots_max || 1e9, Math.floor((capital() - (D.buffer_rs || 0)) / p + 1e-9))) : 0;
+  }
+  function val(u, f) {
+    if (f === 'lots' && sizeBy() === 'capital') return fitLots(u);
+    var e = (S[u] || {})[f]; return e === undefined ? defaults(u)[f] : e;
+  }
+
+  function inputs() {                             // write the current values + their short defaults into the boxes
+    var P = period();
+    byId('oe-from').value = P.from; byId('oe-to').value = P.to;
+    Array.prototype.forEach.call(document.querySelectorAll('#oe-presets [data-p]'), function (b) {
+      b.classList.toggle('ob-tab-on', P.from === D.today && Math.abs(P.days - parseInt(b.dataset.p, 10)) <= 1);
+    });
+    Array.prototype.forEach.call(document.querySelectorAll('#oe-kind [data-k]'), function (b) { b.classList.toggle('ob-tab-on', b.dataset.k === kind); });
+    var cap = byId('oe-capital'), tax = byId('oe-tax');
+    if (document.activeElement !== cap) cap.value = Math.round(capital());
+    cap.classList.toggle('oe-edited', sizeBy() === 'capital' && S.capital !== undefined);
+    if (document.activeElement !== tax) tax.value = S.tax !== undefined ? S.tax : D.tax_pct; tax.classList.toggle('oe-edited', S.tax !== undefined);
+    byId('oe-cap-d').textContent = sizeBy() === 'capital' ? 'you typed this: it sets the lots · Kite has ' + O.inr(D.capital)
+      : 'what these lots need (the larger peak margin + your ' + O.inr(D.buffer_rs) + ' buffer) · type one to set the lots';
+    byId('oe-tax-d').textContent = 'default ' + D.tax_pct + '%';
+    US.forEach(function (u) {
+      var df = defaults(u), m = D.markets[u], k = m[kind];
+      ['lots', 'credit', 'nloss', 'loss', 'ncrash'].forEach(function (f) {
+        var i = document.querySelector('input[data-u="' + u + '"][data-f="' + f + '"]'), auto = f === 'lots' && sizeBy() === 'capital', edited = !auto && (S[u] || {})[f] !== undefined;
+        if (document.activeElement !== i) i.value = val(u, f);
+        i.classList.toggle('oe-edited', edited);
+      });
+      function def(f, t) { document.querySelector('[data-d="' + u + ':' + f + '"]').textContent = t; }
+      def('lots', sizeBy() === 'capital' ? 'fits your capital' + (D.lots_max && val(u, 'lots') >= D.lots_max ? ' · max ' + D.lots_max : '') : 'default ' + df.lots);
+      def('credit', 'default ' + O.inr(df.credit));
+      def('nloss', 'default ' + df.nloss);
+      def('loss', 'default ' + O.inr(df.loss) + ' = ' + (100 * val(u, 'loss') / m.notional_rs).toFixed(2) + '% of the index');
+      def('ncrash', k.crash_rs ? O.inr(-k.crash_rs) + ' a lot each' : 'default 0');
+      document.querySelector('[data-h="' + u + '"]').textContent = 'lot ' + m.lot + ' · ' + df.W + ' weeks';
+    });
+  }
+
+  function orderCount(u, k, lots) {               // orders an entry takes: each leg sliced at the freeze quantity (options_live.slices)
+    var m = D.markets[u], units = lots * m.lot, legMax = Math.max(m.lot, Math.floor(m.freeze / m.lot) * m.lot);
+    return lots > 0 ? k.legs * Math.ceil(units / legMax) : 0;
+  }
+  function calc() {
+    var P = period(), tax = (S.tax !== undefined ? S.tax : D.tax_pct) / 100, cap = capital();
+    var rows = [], tot = {win: 0, loss: 0, crash: 0, brk: 0, net: 0, W: 0};
+    var sims = new Float64Array(N_SIM), maxW = 0, legs = [];
+    US.forEach(function (u) {
+      var k = D.markets[u][kind], W = defaults(u).W, lots = val(u, 'lots'), credit = val(u, 'credit'), keep = D.keep_pct / 100;
+      var nl = Math.min(val(u, 'nloss'), W), L = val(u, 'loss'), nc = Math.min(val(u, 'ncrash'), W - nl), crash = k.crash_rs || 0;
+      // a winning week keeps D.keep_pct of the credit
+      var win = (W - nl - nc) * keep * credit * lots, loss = -nl * L * lots, cr = -nc * crash * lots;   // L: ₹ a lot
+      var orders = orderCount(u, k, lots), brk = -W * orders * D.brokerage_rs, net = win + loss + cr + brk;
+      var peak = k.margin_rs ? lots * (k.margin_rs + (D.markets[u].extra_rs || 0)) : null;    // entry margin + expiry-day extra
+      rows.push({u: u, W: W, lots: lots, nl: nl, nc: nc, win: win, loss: loss, crash: cr, brk: brk, orders: orders, net: net, peak: peak,
+                 week: W ? net / W : 0});
+      tot.win += win; tot.loss += loss; tot.crash += cr; tot.brk += brk; tot.net += net; tot.W = Math.max(tot.W, W);
+      // each simulated loss week: a pooled backtest loss (share of the index) × this lot's notional, scaled to your average, capped at the wing
+      var pool = D.pooled[kind], notional = D.markets[u].notional_rs, base = pool.loss_pct * notional;
+      legs.push({W: W, p: W > nc ? nl / (W - nc) : 0, nc: nc, brk: orders * D.brokerage_rs, keep: keep * credit * lots, lots: lots,
+                 scale: base > 0 ? L / base : 1, capRs: k.max_loss_rs || Infinity, crash: crash * lots, notional: notional,
+                 losses: pool.losses_pct.length ? pool.losses_pct : [L / notional]});
+      maxW = Math.max(maxW, W);
+    });
+    // simulation: each leg's week w is a crash (the first nc weeks, placed at random), a loss (probability p) or a win
+    var path = [], q = [];
+    for (var w = 0; w < maxW; w++) path.push(new Float64Array(N_SIM));
+    var seed = 12345; function rnd() { seed = (seed * 1664525 + 1013904223) % 4294967296; return seed / 4294967296; }
+    for (var s = 0; s < N_SIM; s++) {
+      var cum = 0;
+      var crashAt = legs.map(function (g) { var a = {}; for (var c = 0; c < g.nc; c++) a[Math.floor(rnd() * g.W)] = 1; return a; });
+      for (w = 0; w < maxW; w++) {
+        legs.forEach(function (g, gi) {
+          if (w >= g.W) return;
+          cum -= g.brk;
+          if (crashAt[gi][w]) { cum -= g.crash; return; }
+          if (rnd() < g.p) { var x = g.losses[Math.floor(rnd() * g.losses.length)] * g.notional * g.scale; cum -= Math.min(x, g.capRs) * g.lots; }
+          else cum += g.keep;
+        });
+        path[w][s] = cum;
+      }
+      sims[s] = cum;
+    }
+    function pct(arr, p) { var a = Array.prototype.slice.call(arr).sort(function (x, y) { return x - y; }); return a[Math.min(a.length - 1, Math.floor(p * a.length))]; }
+    var sorted = Array.prototype.slice.call(sims).sort(function (a, b) { return a - b; });
+    var ploss = sorted.filter(function (x) { return x < 0; }).length / N_SIM;
+    var band = path.map(function (col) { var a = Array.prototype.slice.call(col).sort(function (x, y) { return x - y; }); return [a[Math.floor(0.1 * N_SIM)], a[Math.floor(0.5 * N_SIM)], a[Math.floor(0.9 * N_SIM)]]; });
+    return {P: P, tax: tax, cap: cap, rows: rows, tot: tot, sorted: sorted, ploss: ploss, p5: sorted[Math.floor(0.05 * N_SIM)], band: band, maxW: maxW};
+  }
+
+  function render() {
+    inputs();
+    var R = calc(), after = R.tot.net - Math.max(0, R.tot.net) * R.tax;
+    function put(id, v, txt) { var e = byId(id); e.textContent = txt; O.tone(e, v); }
+    put('oe-t-pre', R.tot.net, O.signed(R.tot.net));
+    put('oe-t-post', after, O.signed(after));
+    put('oe-t-month', after, O.signed(after / (R.P.days / 30.44)));
+    put('oe-t-ret', after, R.cap ? ((after >= 0 ? '+' : '') + (100 * after / R.cap * 365 / R.P.days).toFixed(1) + '%') : '—');
+    byId('oe-t-ploss').textContent = (100 * R.ploss).toFixed(1) + '%';
+    // one week = one NIFTY trade + one SENSEX trade: each row is that week's arithmetic, built from the inputs
+    var B = D.brokerage_rs, taxF = R.tot.net > 0 ? after / R.tot.net : 1, both = {credit: 0, kept: 0, brk: 0, exp: 0};
+    var col = R.rows.map(function (r) {
+      var m = D.markets[r.u], credit = val(r.u, 'credit') * r.lots, kept = D.keep_pct / 100 * credit, L = val(r.u, 'loss') * r.lots;
+      var crash = (m[kind].crash_rs || 0) * r.lots, p = r.W ? r.nl / r.W : 0, pc = r.W ? r.nc / r.W : 0, brk = r.orders * B;
+      var exp = (1 - p - pc) * kept - p * L - pc * crash - brk;          // = r.week (the per-index net ÷ its weeks)
+      both.credit += credit; both.kept += kept; both.brk += brk; both.exp += exp;
+      return {u: r.u, m: m, r: r, credit: credit, kept: kept, L: L, crash: crash, p: p, pc: pc, brk: brk, exp: exp};
+    });
+    function odds(x) { return x > 0 ? '1 in ' + O.num(1 / x, 1 / x < 10 ? 1 : 0) + ' (' + (100 * x).toFixed(1) + '%)' : 'none'; }
+    function tr(label, f, sum, cls) { return '<tr class="' + (cls || '') + '"><td>' + label + '</td>' + col.map(function (c) { return '<td>' + f(c) + '</td>'; }).join('') + '<td>' + (sum === undefined ? '' : sum) + '</td></tr>'; }
+    var w = '<tr><th>One week</th>' + col.map(function (c) { return '<th>' + c.u + ' trade</th>'; }).join('') + '<th>The week (both)</th></tr>'
+      + tr('Lots', function (c) { return c.r.lots + ' × ' + c.m.lot + ' = ' + O.num(c.r.lots * c.m.lot) + ' units'; })
+      + tr('Credit collected', function (c) { return O.inr(c.credit); }, O.inr(both.credit))
+      + tr('Kept if it wins (' + D.keep_pct + '%)', function (c) { return '<span class="ob-ok">' + O.signed(c.kept) + '</span>'; }, '<span class="ob-ok">' + O.signed(both.kept) + '</span>')
+      + tr('Chance it is a loss week', function (c) { return odds(c.p); })
+      + tr('Lost if it is', function (c) { return '<span class="ob-bad">' + O.inr(-c.L) + '</span>'; })
+      + (col.some(function (c) { return c.pc > 0; }) ? tr('Chance of a crash week · cost', function (c) { return odds(c.pc) + ' · <span class="ob-bad">' + O.inr(-c.crash) + '</span>'; }) : '')
+      + tr('Brokerage (' + col.map(function (c) { return c.r.orders; }).join(' + ') + ' orders)', function (c) { return O.inr(-c.brk); }, O.inr(-both.brk))
+      + tr('<b>Expected, the average week</b>', function (c) { return '<b class="' + (c.exp >= 0 ? 'ob-ok' : 'ob-bad') + '">' + O.signed(c.exp) + '</b>'; }, '<b class="' + (both.exp >= 0 ? 'ob-ok' : 'ob-bad') + '">' + O.signed(both.exp) + '</b>', 'os-total')
+      + tr('After tax', function (c) { return O.signed(c.exp * taxF); }, '<b>' + O.signed(both.exp * taxF) + '</b>');
+    byId('oe-week').innerHTML = w;
+    // the period, built from the same trades: each index's trades in the period × its average week
+    var months = R.P.days / 30.44, years = R.P.days / 365;
+    var rates = [['A month', 1 / months], ['A year', 1 / years], ['The whole period (' + Math.round(R.P.days) + ' days, ' + R.rows.map(function (r) { return r.W + ' ' + r.u; }).join(' + ') + ' trades)', 1]];
+    byId('oe-rates').innerHTML = '<tr><th>Over time</th><th>Before tax</th><th>After tax</th><th>% of capital, after tax</th></tr>' + rates.map(function (x) {
+      var pre = R.tot.net * x[1], post = after * x[1];
+      return '<tr><td>' + x[0] + '</td><td class="' + (pre >= 0 ? 'ob-ok' : 'ob-bad') + '">' + O.signed(pre) + '</td><td class="' + (post >= 0 ? 'ob-ok' : 'ob-bad') + '"><b>' + O.signed(post) + '</b></td><td>'
+        + (R.cap ? ((post >= 0 ? '+' : '') + (100 * post / R.cap).toFixed(2) + '%') : '—') + '</td></tr>';
+    }).join('');
+    var skip = R.rows.map(function (r) { return r.u + ' ' + r.W + ' of ' + weeksIn(r.u, R.P.from, R.P.to); }).join(', ');
+    var wkMonth = R.tot.net / months / (both.exp || 1);    // weeks of "the week (both)" a month is worth
+    byId('oe-rates-note').textContent = 'A month = ' + O.num(wkMonth, 2) + ' × the week above (' + O.signed(both.exp) + ' for one NIFTY + one SENSEX trade, ' + O.signed(both.exp * taxF) + ' after tax) = '
+      + O.signed(R.tot.net / months) + ' before tax. It is 4.35 weeks less the weeks the VIX guard sits out (in this period '
+      + R.rows.map(function (r) { return r.u + ' trades ' + r.W + ' of ' + weeksIn(r.u, R.P.from, R.P.to) + ' weeks'; }).join(', ') + '). Per trade: '
+      + col.map(function (c) { return c.u + ' ' + O.signed(c.exp); }).join(', ') + '.';
+    function cnt(n, w) { return '<br><span class="ob-muted">' + O.num(n, n % 1 ? 1 : 0) + ' week' + (n === 1 ? '' : 's') + (w ? ' · ' + O.signed(w) + ' a week' : '') + '</span>'; }
+    var h = '<tr><th></th><th>Winning weeks</th><th>Loss weeks</th><th>Crash weeks</th><th>Brokerage</th><th>Net</th></tr>';
+    R.rows.forEach(function (r) {
+      h += '<tr><td><b>' + r.u + '</b><br><span class="ob-muted">' + r.lots + ' lots · ' + r.W + ' weeks</span></td>'
+        + '<td class="ob-ok">' + O.signed(r.win) + cnt(r.W - r.nl - r.nc) + '</td>'
+        + '<td class="ob-bad">' + O.inr(r.loss) + cnt(r.nl) + '</td>'
+        + '<td class="' + (r.crash < 0 ? 'ob-bad' : '') + '">' + O.inr(r.crash) + cnt(r.nc) + '</td>'
+        + '<td>' + O.inr(r.brk) + '<br><span class="ob-muted">' + r.orders + ' orders a week</span></td>'
+        + '<td class="' + (r.net >= 0 ? 'ob-ok' : 'ob-bad') + '"><b>' + O.signed(r.net) + '</b><br><span class="ob-muted">' + O.signed(r.week) + ' a trade<br>' + O.signed(r.net * 30.44 / R.P.days) + ' a month</span></td></tr>';
+    });
+    h += '<tr class="os-total"><td>Total</td><td>' + O.signed(R.tot.win) + '</td><td>' + O.inr(R.tot.loss) + '</td><td>' + O.inr(R.tot.crash) + '</td><td>' + O.inr(R.tot.brk) + '</td><td>' + O.signed(R.tot.net) + '</td></tr>'
+      + '<tr><td colspan="5" class="ob-muted">Tax at ' + (100 * R.tax).toFixed(1) + '% on the profit</td><td class="ob-bad">' + O.inr(-Math.max(0, R.tot.net) * R.tax) + '</td></tr>'
+      + '<tr class="os-total"><td colspan="5">After tax</td><td class="' + (after >= 0 ? 'ob-ok' : 'ob-bad') + '">' + O.signed(after) + '</td></tr>';
+    byId('oe-table').innerHTML = h;
+    var pk = R.rows.filter(function (r) { return r.peak; }), mg = byId('oe-margin');
+    if (!pk.length) mg.innerHTML = '';
+    else {
+      var peak = Math.max.apply(null, pk.map(function (r) { return r.peak; })), need = peak + (D.buffer_rs || 0), have = D.capital || 0;
+      var parts = 'peak margin ' + pk.map(function (r) { return r.u + ' ' + O.inr(r.peak); }).join(' · ') + ' (the two trades are never open together, so the larger counts)';
+      mg.innerHTML = sizeBy() === 'lots'
+        ? 'These lots need ' + O.inr(need) + ' = ' + parts + ' + your ' + O.inr(D.buffer_rs) + ' buffer; the return % is on this. Kite holds ' + O.inr(have) + ' now: '
+          + (need > have ? '<b class="ob-bad">' + O.inr(need - have) + ' more needed</b>' : '<b class="ob-ok">enough (' + O.inr(have - need) + ' spare)</b>')
+        : 'At ' + O.inr(R.cap) + ': ' + parts + ' + the ' + O.inr(D.buffer_rs) + ' buffer = ' + O.inr(need) + ': '
+          + (need > R.cap ? '<b class="ob-bad">' + O.inr(need - R.cap) + ' short</b>' : '<b class="ob-ok">' + O.inr(R.cap - need) + ' spare</b>');
+    }
+    charts(R);
+    replay(R);
+    sources();
+  }
+
+  function charts(R) {
+    if (typeof Chart === 'undefined') return;
+    var cs = getComputedStyle(document.documentElement), G = cs.getPropertyValue('--green').trim(), Rd = cs.getPropertyValue('--red').trim(),
+        B = cs.getPropertyValue('--blue').trim(), Mu = cs.getPropertyValue('--text-muted').trim(), Bd = cs.getPropertyValue('--border').trim();
+    var labels = [], exp = [], lo = [], mid = [], hi = [], per = R.tot.net / Math.max(R.maxW, 1);
+    for (var w = 0; w < R.maxW; w++) { labels.push('wk ' + (w + 1)); exp.push(per * (w + 1)); lo.push(R.band[w][0]); mid.push(R.band[w][1]); hi.push(R.band[w][2]); }
+    var data = {labels: labels, datasets: [
+      {label: '8 in 10 runs (10th–90th percentile)', data: hi, borderWidth: 0, pointRadius: 0, fill: '+1', backgroundColor: 'rgba(59,130,246,0.15)'},
+      {label: '10th percentile', data: lo, borderWidth: 0, pointRadius: 0, fill: false},
+      {label: 'median', data: mid, borderColor: B, borderDash: [4, 4], borderWidth: 1.5, pointRadius: 0, fill: false},
+      {label: 'expected', data: exp, borderColor: G, borderWidth: 2, pointRadius: 0, fill: false}]};
+    var opts = {animation: false, maintainAspectRatio: false, interaction: {mode: 'index', intersect: false},
+      plugins: {legend: {labels: {color: Mu, filter: function (i) { return i.text !== '10th percentile'; }}},
+                tooltip: {callbacks: {label: function (it) { return it.dataset.label + ': ' + O.signed(it.parsed.y); }}}},
+      scales: {x: {ticks: {color: Mu, maxTicksLimit: 10}, grid: {display: false}},
+               y: {ticks: {color: Mu, callback: function (v) { return O.inr(v); }}, grid: {color: Bd}}}};
+    if (fan) { fan.data = data; fan.update('none'); } else fan = new Chart(byId('oe-fan'), {type: 'line', data: data, options: opts});
+    // histogram: 30 bins of the simulated period P&L
+    var a = R.sorted, mn = a[0], mx = a[a.length - 1], nb = 30, wd = (mx - mn) / nb || 1, cnt = new Array(nb).fill(0), lab = [], col = [];
+    a.forEach(function (x) { cnt[Math.min(nb - 1, Math.floor((x - mn) / wd))]++; });
+    for (var i = 0; i < nb; i++) { var c = mn + (i + 0.5) * wd; lab.push(O.inr(c)); col.push(c >= 0 ? G : Rd); }
+    var hd = {labels: lab, datasets: [{label: 'runs', data: cnt.map(function (c) { return 100 * c / a.length; }), backgroundColor: col}]};
+    var ho = {animation: false, maintainAspectRatio: false, plugins: {legend: {display: false}, tooltip: {callbacks: {label: function (it) { return it.parsed.y.toFixed(1) + '% of runs'; }}}},
+      scales: {x: {ticks: {color: Mu, maxTicksLimit: 8}, grid: {display: false}}, y: {ticks: {color: Mu, callback: function (v) { return v + '%'; }}, grid: {color: Bd}}}};
+    if (hist) { hist.data = hd; hist.update('none'); } else hist = new Chart(byId('oe-hist'), {type: 'bar', data: hd, options: ho});
+    byId('oe-hist-note').textContent = '1 in 20 worse than ' + O.signed(a[Math.floor(0.05 * a.length)]) + ' · median ' + O.signed(a[Math.floor(0.5 * a.length)]) + ' · 1 in 20 better than ' + O.signed(a[Math.floor(0.95 * a.length)]);
+  }
+
+  function replay(R) {                            // the chosen window, if the backtest covers it
+    var box = byId('oe-replay'), parts = [], any = false, found = {};
+    US.forEach(function (u) {
+      var k = D.markets[u][kind], wk = k.weeks.filter(function (x) { return x.expiry >= R.P.from && x.expiry <= R.P.to; });
+      if (!wk.length) return;
+      any = true;
+      var lots = val(u, 'lots'), credit = val(u, 'credit');
+      var net = wk.reduce(function (s, x) { return s + x.r * x.w * credit * lots; }, 0), nl = wk.filter(function (x) { return x.r <= 0; }).length;
+      found[u] = nl;
+      parts.push('<b>' + u + '</b> ' + wk.length + ' weeks, ' + nl + ' loss week' + (nl === 1 ? '' : 's') + ': <b class="' + (net >= 0 ? 'ob-ok' : 'ob-bad') + '">' + O.signed(net) + '</b>');
+    });
+    box.hidden = !any;
+    if (!any) return;
+    box.innerHTML = 'In the backtest, this window actually had: ' + parts.join(' · ') + ' (each week\'s result as a share of its credit × today\'s credit and your lots). '
+      + '<a href="#" class="os-link" id="oe-use">Use these loss weeks</a>';
+    byId('oe-use').addEventListener('click', function (e) {
+      e.preventDefault();
+      Object.keys(found).forEach(function (u) { S[u] = S[u] || {}; S[u].nloss = found[u]; });
+      save(); render();
+    });
+  }
+
+  function sources() {
+    var n = D.markets.NIFTY[kind], x = D.markets.SENSEX[kind], q = D.quote_at ? O.ist(Date.parse(D.quote_at)) : null;
+    function both(f) { return 'NIFTY ' + f(n, D.markets.NIFTY) + ' · SENSEX ' + f(x, D.markets.SENSEX); }
+    byId('oe-how').innerHTML = [
+      '<b>Weeks</b>: the period\'s Tuesday (NIFTY) and Thursday (SENSEX) expiries, less the weeks the VIX guard sits out (no entry at VIX ≥ ' + D.guard.halt + ').',
+      '<b>Lots</b>: your lot caps on the Live book. Size by Capital instead fits as many lots as each index\'s peak margin (entry + expiry-day extra) allows after your ' + O.inr(D.buffer_rs) + ' buffer, at most ' + D.lots_max + '; the two trades never overlap, so one capital carries both.',
+      '<b>Credit a lot</b>: ' + (q ? 'Kite\'s quote, ' + q : 'the backtest\'s last 8 weeks') + ': ' + both(function (k, m) { return O.inr(k.credit_rs) + ' (' + O.num(k.credit_rs / m.lot, 2) + ' pts × ' + m.lot + ')'; }) + '.'
+        + (kind === 'winged' && n.wing_share != null ? ' Protected = the unprotected quote less the wings at their typical cost, ' + both(function (k) { return Math.round(100 * k.wing_share) + '%'; })
+          + ' of the credit (last 8 entries); Kite\'s quote today says ' + both(function (k) { return Math.round(100 * k.wing_share_quote) + '%'; }) + ' (a week-ahead quote; untraded wing strikes carry wide asks).' : ''),
+      '<b>Winning week</b>: keeps ' + D.keep_pct + '% of the credit (the options expire worthless; slippage, STT and exchange charges take the rest).',
+      '<b>Loss weeks</b>: the backtest\'s rate, ' + both(function (k) { return O.num(k.loss_per_year, 2) + ' a year (' + Math.round(k.loss_per_year / 52 * k.n) + ' of ' + k.n + ' weeks since ' + k.first.slice(0, 7) + ')'; }) + ', scaled to the period.',
+      '<b>Average loss week</b>: both indices\' loss weeks pooled, as a share of the index: ' + D.pooled[kind].n + ' weeks averaging ' + (100 * D.pooled[kind].loss_pct).toFixed(2) + '% (alone: ' + both(function (k) { return (100 * k.loss_pct).toFixed(2) + '%'; }) + '; SENSEX has only 4 since 2024, one of them 0.92%). A lot of either index is about ' + O.inr(D.markets.NIFTY.notional_rs) + ' of index, so the same share is about the same ₹ a lot' + (kind === 'winged' ? '; the wings cap a week at ' + both(function (k) { return O.inr(k.max_loss_rs); }) + ' a lot' : '') + '. The simulation draws each loss from these pooled weeks.',
+      '<b>Crash weeks</b>: none by default (no backtest week gapped −' + (100 * D.crash_gap).toFixed(1) + '% with a trade open; the VIX guard sat out March 2020). Each costs the Live book\'s crash loss a lot.',
+      '<b>Brokerage</b>: ₹' + O.num(D.brokerage_rs, 1) + ' an order with GST, per order at your lots (orders split at the exchange freeze quantity).',
+      '<b>Tax</b>: ' + D.tax_pct + '% = the 30% slab + 4% cess (F&O is business income); a losing period pays none here (in real life the loss carries forward).'
+    ].map(function (t) { return '<li>' + t + '</li>'; }).join('');
+    var y = D.markets[yu][kind].years;
+    Array.prototype.forEach.call(document.querySelectorAll('#oe-year-u [data-yu]'), function (b) { b.classList.toggle('ob-tab-on', b.dataset.yu === yu); });
+    byId('oe-years').innerHTML = '<tr><th>Year</th><th>Weeks</th><th>Loss weeks</th><th>Average week (% of credit)</th><th>Worst week</th></tr>' + y.map(function (r) {
+      return '<tr><td>' + r.year + '</td><td>' + r.weeks + '</td><td class="' + (r.loss_weeks ? 'ob-bad' : '') + '">' + r.loss_weeks + '</td><td class="' + (r.kept >= 0 ? 'ob-ok' : 'ob-bad') + '">' + (100 * r.kept).toFixed(0) + '%</td><td>' + O.num(r.worst, 1) + '×</td></tr>';
+    }).join('');
+  }
+
+  // events
+  Array.prototype.forEach.call(document.querySelectorAll('#oe-presets [data-p]'), function (b) {
+    b.addEventListener('click', function () { S.from = D.today; S.to = iso(Date.parse(D.today) + (parseInt(b.dataset.p, 10) - 1) * DAY); US.forEach(function (u) { if (S[u]) { delete S[u].nloss; } }); save(); render(); });
+  });
+  ['oe-from', 'oe-to'].forEach(function (id) {
+    byId(id).addEventListener('change', function () { var v = byId(id).value; if (!v) return; S[id === 'oe-from' ? 'from' : 'to'] = v; if (period().days < 1) return; US.forEach(function (u) { if (S[u]) { delete S[u].nloss; } }); save(); render(); });
+  });
+  Array.prototype.forEach.call(document.querySelectorAll('#oe-kind [data-k]'), function (b) {
+    b.addEventListener('click', function () { kind = S.kind = b.dataset.k; US.forEach(function (u) { if (S[u]) { delete S[u].credit; delete S[u].keep; delete S[u].loss; } }); save(); render(); });
+  });
+  var timer = null;
+  function soon() { clearTimeout(timer); timer = setTimeout(function () { save(); render(); }, 250); }   // re-run as you type
+  // lots ⇄ capital: typing a capital fits the lots to it; typing lots makes the capital what they need
+  byId('oe-capital').addEventListener('input', function () {
+    var v = parseFloat(byId('oe-capital').value);
+    if (!(v >= 0)) return;
+    S.capital = v; S.sizeBy = 'capital'; soon();
+  });
+  byId('oe-tax').addEventListener('input', function () { var v = parseFloat(byId('oe-tax').value); if (v >= 0) S.tax = v; else delete S.tax; soon(); });
+  Array.prototype.forEach.call(document.querySelectorAll('input[data-u][data-f]'), function (i) {
+    i.addEventListener('input', function () {
+      var u = i.dataset.u, v = parseFloat(i.value);
+      if (i.dataset.f === 'lots' && sizeBy() === 'capital') {      // from capital back to lots: keep the other index at its fitted lots
+        US.forEach(function (x) { S[x] = S[x] || {}; S[x].lots = fitLots(x); });
+        S.sizeBy = 'lots';
+      }
+      S[u] = S[u] || {};
+      if (v >= 0) S[u][i.dataset.f] = v; else delete S[u][i.dataset.f];
+      soon();
+    });
+  });
+  Array.prototype.forEach.call(document.querySelectorAll('#oe-year-u [data-yu]'), function (b) { b.addEventListener('click', function () { yu = b.dataset.yu; sources(); }); });
+  byId('oe-reset').addEventListener('click', function (e) { e.preventDefault(); S = {}; kind = D.kind; save(); render(); });
+  render();
+})();
+</script>
+{% endblock %}

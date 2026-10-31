@@ -341,7 +341,7 @@ def build_units(main_mod, ops_mod, cm, co, fx):
         units.append(("main GET /api/mf-rolling", get(cm, f"/api/mf-rolling/{code}")))
 
     # ops cockpit
-    for p in ("/", "/system", "/feeds", "/flow", "/options", "/org", "/sql", "/command", "/api/options",
+    for p in ("/", "/system", "/feeds", "/flow", "/options", "/options/capital", "/options/expected", "/options/live", "/org", "/sql", "/command", "/api/options",
               "/api/feeds", "/api/org", "/api/health", "/api/health/overview", "/api/pipeline",
               "/api/runs", "/api/run-events", "/api/org/running", "/api/org/chats", "/api/org/conversations",
               "/api/org/house-style", "/feeds/tab/data", "/flow/tab/log", "/api/search?q=tata"):

@@ -451,7 +451,7 @@ OVERLAY_COLUMNS = ["sid", "thesis_rank", "thesis_score", "ticker", "name", "snap
 
 def overlay(snapshot=None):
     """The research-adjusted ranking of the thesis top 100: thesis_score - flag points + 5x-case points; a reject is
-    out (research_rank NaN). Not researched -> thesis score unchanged, marked. Sorted best first."""
+    out (research_rank NaN), and so is a name not researched yet (it waits for research). Sorted best first."""
     from config import MB_THESIS
     snap = snapshot or db.one("SELECT MAX(snapshot_date) AS d FROM multibagger_scores WHERE thesis_rank IS NOT NULL")["d"]
     th = db.read_sql("SELECT m.sid, m.thesis_rank, m.thesis_score, s.ticker, s.name FROM multibagger_scores m JOIN stocks s "
@@ -474,7 +474,10 @@ def overlay(snapshot=None):
                        penalty=pen, bonus=bon, n_integrity=n["integrity"]["medium"] + n["integrity"]["low"],
                        n_business=n["business"]["medium"] + n["business"]["low"])
         row["borderline"] = BORDERLINE.get(t["sid"])
-        row["research_score"] = None if row["verdict"] == "reject" else t["thesis_score"] - row["penalty"] + row["bonus"]
+        # not researched yet = no score: an unresearched name carries no flag points, so it must not outrank
+        # researched ones by default (2026-10-17: 9 of the 18 daily newcomers would have entered the top 30)
+        row["research_score"] = (None if row["verdict"] == "reject" or not row["researched"]
+                                 else t["thesis_score"] - row["penalty"] + row["bonus"])
         out.append(row)
     # no thesis run yet -> an empty frame that still has every column (the research page shows its empty state)
     df = pd.DataFrame(out, columns=OVERLAY_COLUMNS) if not out else pd.DataFrame(out)

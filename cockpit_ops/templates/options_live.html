@@ -1,0 +1,438 @@
+{% extends "ops_base.html" %}
+
+{% block content %}
+{% include "_options_styles.html" %}
+{% include "_options_nav.html" %}
+<style>
+  .ol-sz { margin-top: 10px; padding: 12px 14px; border-radius: 10px; border: 1px solid var(--accent); background: var(--bg-hover, rgba(127,127,127,0.06)); }
+  .ol-sz-h { font-weight: 800; font-size: 15px; margin-bottom: 4px; }
+  .ol-sz-in { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: end; margin-top: 10px; }
+  .ol-sz-in label { display: flex; flex-direction: column; gap: 4px; }
+  .ol-sz-in input { width: 170px; padding: 7px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg-input, var(--bg-card)); color: var(--text-primary); font-family: 'JetBrains Mono', monospace; font-size: 14px; text-align: right; }
+  .ol-sz-act { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; }
+  .ol-sz-apply { border: 0; cursor: pointer; font-family: inherit; }
+  .ol-sz-at { font-size: 11px; color: var(--text-muted); }
+  .ol-plan { margin-top: 10px; padding: 12px 14px; border-radius: 10px; background: var(--bg-hover, rgba(127,127,127,0.06)); font-size: 14px; display: grid; gap: 4px; }
+  .ol-ready { margin-top: 14px; }
+  .ol-ready summary { cursor: pointer; }
+  .ol-sz-in input.oe-edited { border-color: var(--amber); }
+</style>
+<div class="section-title">Live book</div>
+<div class="section-desc">Plan 0029: the strangle traded with real orders (or simulated, in shadow). Open legs below, the same strategy builder on them, Kite's margin, the sizing choices for the next entries, the history and the controls. Prices are the last mark (10:00 / 15:01 IST and 15:45, Kite mids on a day you are logged in), not a live feed.</div>
+
+{# ── the live book (options_live.page_data). Buttons POST with the session cookie after a confirm. ── #}
+<div class="ob-card ol-live" id="live">
+  {% if live_error %}
+  <b class="ob-bad">Live panel unavailable:</b> <span class="ob-muted">{{ live_error }}</span>
+  {% endif %}
+  {% if live %}
+  {% set L = live %}{% set st = L.settings %}
+  <div class="ob-row">
+    <div>
+      <b>Live book</b>
+      <span class="ol-mode {{ 'ol-mode-' ~ st.mode }}">{{ {"off": "OFF", "shadow": "SHADOW · no orders", "approve": "APPROVE · real orders after you tap", "auto": "AUTO · real orders"}[st.mode] }}</span>
+      {% if st.kill %}<span class="ol-mode ol-mode-kill">STOPPED</span>{% endif %}
+      <div class="ob-muted">Caps NIFTY {{ st.lots_cap.NIFTY }} · SENSEX {{ st.lots_cap.SENSEX }} lot(s) · buffer {{ st.margin_buffer_rs|inr_short }} · weekly loss limit {{ st.weekly_loss_limit_rs|inr_short }} · VIX guard: half the lots above {{ st.vix_halve }}, no entry at {{ st.vix_halt }} or more · {% if st.wing_pct %}wings {{ st.wing_pct }}% beyond the sold strikes (bought first, at most {{ "%g"|format(st.wing_max_share_pct) }}% of the credit){% else %}no wings{% endif %}{% if st.adopt_manual_nifty %} · Tuesday buy-back also closes your own NIFTY legs{% endif %}.
+        {% if st.kill %}<br><b class="ob-bad">Entries stopped:</b> {{ st.kill_reason or "kill switch on" }}.{% endif %}</div>
+      <div class="ob-muted" style="margin-top: 4px;">
+        {% if kite.logged_in_today %}<b class="ob-ok">Kite: logged in today.</b>{% else %}<b class="ob-warn">Kite: not logged in today.</b>{% endif %}
+        <a href="/kite/login" class="os-link">Log in to Kite</a></div>
+    </div>
+    <div class="ol-btns">
+      {% if st.kill %}<button class="ob-btn ol-act" data-url="/api/options/live/kill" data-body='{"on": false}' data-word="RESUME" data-ask="Resume new entries?">Resume</button>
+      {% else %}<button class="ob-btn ol-act ol-btn-stop" data-url="/api/options/live/kill" data-body='{"on": true}' data-word="STOP" data-ask="Stop: no new entries (buy-backs still run)?">Stop</button>{% endif %}
+      <button class="ob-btn ol-act ol-btn-stop" data-url="/api/options/live/closeall" data-body='{}' data-word="CLOSE ALL" data-type="1" data-ask="Close all: stop, then buy back EVERY tagged leg now at the ask. Type CLOSE ALL to confirm.">Close all</button>
+    </div>
+  </div>
+
+  {% if L.ticket %}{% set T = L.ticket %}
+  <div class="ol-sub">
+    <b>Ticket {{ T.underlying }} {{ T.expiry }}</b> <span class="ob-muted">({{ T.trade_date }}, {{ T.status }})</span>
+    <div class="ob-muted">{% for l in T.legs %}{{ 'buy' if l.side == 'BUY' else 'sell' }} {{ l.quantity }} × {{ l.tradingsymbol }}{% if l.price %} at {{ 'ask' if l.side == 'BUY' else 'bid' }} {{ l.price }}{% endif %}{% if not loop.last %} · {% endif %}{% endfor %}
+      {% if T.detail.margin_rs %} · margin {{ T.detail.margin_rs|inr_short }}{% endif %}</div>
+    {% if T.pending %}<button class="ob-btn ol-act" data-url="/api/options/live/approve" data-body='{"ticket_id": "{{ T.ticket_id }}"}' data-word="APPROVE" data-ask="Approve: place these orders now (limit at the bid, re-priced to 15:29)?">Approve</button>
+    <span class="ob-muted">before {{ st.approve_by }} IST, or nothing is placed.</span>{% endif %}
+  </div>
+  {% endif %}
+
+  <div class="ol-sub ob-muted">
+    Today: rotation {% if L.rotation %}<b class="{{ 'ob-ok' if L.rotation.ok else 'ob-bad' }}">{{ 'OK' if L.rotation.ok else 'FAILED' }}</b> — {{ L.rotation.detail }}{% else %}not run{% endif %}
+    · reconcile {% if L.reconcile %}<b class="{{ 'ob-ok' if L.reconcile.ok else ('ob-bad' if L.reconcile.ok == false else 'ob-warn') }}">{{ {True: 'clean', False: 'MISMATCH', None: 'not run'}[L.reconcile.ok] }}</b> {{ (L.reconcile.at or '')[:16] }} — {{ L.reconcile.detail }}{% else %}never run{% endif %}
+    · this week realised: shadow {{ L.week.shadow|inr_short }}, live {{ L.week.live|inr_short }}
+  </div>
+  {% endif %}
+</div>
+
+{% if live %}
+{% set L = live %}{% set st = L.settings %}{% set M = L.margin %}
+<script type="application/json" id="os-views">{{ views|tojson }}</script>
+<div class="os-grid" id="os-live">
+  <div class="os-left">
+    <div class="os-panel">
+      <div class="os-panel-h"><span>Open live legs</span><span class="ob-muted" style="font-weight: 400;">P&amp;L at the last mark</span></div>
+      {% if views %}
+      {% for v in views %}
+      <div class="ol-sub" data-view="{{ v.key }}">
+        <div class="ob-row"><b>{{ v.underlying }} {{ v.expiry }} · {{ v.source }}</b>
+          {% if views|length > 1 %}<button type="button" class="ob-tab" data-pick="{{ v.key }}">Show in the builder</button>{% endif %}</div>
+        {% for l in v.legs %}
+        <div class="os-leg">
+          <span class="{{ 'os-tag-s' if l.side < 0 else 'os-tag-b' }}">{{ 'S' if l.side < 0 else 'B' }}</span>
+          <span>{{ l.symbol }}</span>
+          <span class="{% if l.mtm_rs and l.mtm_rs > 0 %}ob-ok{% elif l.mtm_rs and l.mtm_rs < 0 %}ob-bad{% endif %}">{{ l.mtm_rs|inr_short if l.mtm_rs is not none else "—" }}</span>
+          <span class="os-sub ob-muted">{{ (l.qty / l.lot)|round|int if l.lot else l.qty }} lot{{ '' if l.lot and l.qty == l.lot else 's' }} ({{ l.qty }}) · avg {{ "%.2f"|format(l.entry) if l.entry else "—" }} · last {{ "%.2f"|format(l.now) if l.now is not none else "—" }}{% if l.iv %} · IV {{ "%.1f"|format(100 * l.iv) }}%{% endif %} · at the target <b data-leg="{{ v.key }}:{{ loop.index0 }}">—</b></span>
+        </div>
+        {% endfor %}
+        <div class="os-legs-total"><span>Total</span><span class="{% if v.mtm_rs > 0 %}ob-ok{% elif v.mtm_rs < 0 %}ob-bad{% endif %}">{{ v.mtm_rs|inr_short }}</span></div>
+        <div class="ob-muted" style="margin-top: 6px;">Marked {{ v.mark_at[:16].replace('T', ' ') if v.mark_at else '—' }} UTC, after charges ({{ v.cost_rs|inr_short }}){% if v.margin_rs %} · margin {{ v.margin_rs|inr_short }}{% endif %}.</div>
+      </div>
+      {% endfor %}
+      {% elif L.open %}
+      {# open legs with nothing net (bought back the same day) — the table shows them #}
+      <div class="ob-muted" style="margin-top: 8px;">Only flat legs: see the table below.</div>
+      {% else %}
+      <div class="ob-muted" style="margin-top: 8px;">Nothing open.</div>
+      {% for u in upcoming %}<div class="ob-muted">{{ u.underlying }}: next entry at the close on <b>{{ u.entry }}</b> for the {{ u.expiry }} expiry</div>{% endfor %}
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="os-panel os-main" id="os-builder">
+    {% if views %}
+    {% include "_options_builder.html" %}
+    {% else %}
+    <div class="os-panel-h">Strategy builder</div>
+    <div class="ob-muted" style="margin-top: 8px;">Opens on the live legs once a position is on. To try sizes on a past trade, use <a href="/options/capital" class="os-link" style="margin: 0;">At your capital</a>.</div>
+    {% endif %}
+  </div>
+
+  <div class="os-right">
+    <div class="os-panel">
+      <div class="os-panel-h">Summary</div>
+      <div style="margin-top: 6px;">
+        <div class="os-sum"><span>Reward / risk</span><span id="os-s-rr">—</span></div>
+        <div class="os-sum"><span>POP (at the target)</span><span id="os-s-pop">—</span></div>
+        <div class="os-sum"><span>Index at the mark</span><span id="os-s-spot">—</span></div>
+        <div class="os-sum"><span>Weekly loss limit left</span><span>{{ (st.weekly_loss_limit_rs + [L.week.live, 0]|min)|inr_short }}</span></div>
+        <div class="os-sum"><span>Realised this week (live)</span><span class="{% if L.week.live > 0 %}ob-ok{% elif L.week.live < 0 %}ob-bad{% endif %}">{{ L.week.live|inr_short }}</span></div>
+      </div>
+    </div>
+    <div class="os-panel">
+      <div class="os-panel-h">Funds &amp; margins</div>
+      {% if M %}
+      <div style="margin-top: 6px;">
+        <div class="os-sum"><span>Margin used by your positions</span><span>{{ M.used|inr_short }}</span></div>
+        <div class="os-sum"><span>· SPAN</span><span>{{ M.span|inr_short }}</span></div>
+        <div class="os-sum"><span>· exposure</span><span>{{ M.exposure|inr_short }}</span></div>
+        <div class="os-sum"><span>Free for new trades</span><span class="{{ 'ob-bad' if M.free_after_buffer < 0 else 'ob-ok' }}">{{ M.free|inr_short }}</span></div>
+        <div class="os-sum"><span>Free after the {{ st.margin_buffer_rs|inr_short }} buffer</span><span>{{ M.free_after_buffer|inr_short }}</span></div>
+        <div class="os-sum"><span>Total (cash {{ M.cash|inr_short }} + collateral {{ M.collateral|inr_short }})</span><span>{{ M.total|inr_short }}</span></div>
+        <div class="os-sum"><span>In use</span><span>{{ (100 * M.used / M.total)|round|int if M.total else 0 }}%</span></div>
+      </div>
+      <div class="ob-muted" style="margin-top: 4px;">From Kite, {{ M.at_ist }}.{% if L.margin_open %} The open legs need {{ L.margin_open|inr_short }} on their own{% if L.margin_open_missing %}; {{ L.margin_open_missing }} leg(s) have no margin yet{% endif %}.{% endif %}</div>
+      {% else %}
+      <div class="ob-muted" style="margin-top: 6px;">Not read yet. Kite's margin is read at the 10:00 and 15:01 IST mark and the 15:45 record, on a day you are logged in.{% if L.margin_open %} The open legs need {{ L.margin_open|inr_short }}.{% endif %}</div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+{% set Z = L.sizing %}
+<div class="ob-card" id="ol-sizing" style="margin-top: 16px;">
+  <b>Sizing for the next entries</b>
+  {% if Z.choices %}{% set Q = Z.quote %}
+  {% if x and not x.error and M %}
+  <script type="application/json" id="ol-sz-data">{{ {"x": x, "quote": Q, "margin": M, "buffer": st.margin_buffer_rs, "caps": st.lots_cap, "wing_on": st.wing_pct > 0, "crash_budget": Z.rules.crash_budget, "mode": st.mode}|tojson }}</script>
+  <div class="ol-sz" id="ol-plan">
+    <div class="ol-sz-h">Your plan <span class="ob-muted" id="ol-plan-state" style="font-weight: 400; font-size: 13px;"></span></div>
+    <div class="ol-sz-in">
+      <div class="ob-tabs" id="ol-sz-kind" style="margin: 0;">
+        <button type="button" class="ob-tab" data-k="winged">Protected ({{ "%g"|format(Q.wing_pct) }}% wings)</button>
+        <button type="button" class="ob-tab" data-k="naked">Unprotected</button>
+      </div>
+      <label class="ob-muted">NIFTY lots<input type="number" id="ol-sz-lots-NIFTY" min="0" max="{{ x.lots_max }}" step="1"></label>
+      <label class="ob-muted">SENSEX lots<input type="number" id="ol-sz-lots-SENSEX" min="0" max="{{ x.lots_max }}" step="1"></label>
+      <label class="ob-muted">Keep as safety cash (₹)<input type="number" id="ol-sz-safe" min="0" step="10000"></label>
+    </div>
+    <div class="ol-sz-in">
+      <label class="ob-muted">Zerodha margin (₹) <a href="#" class="os-link" id="ol-sz-kite" style="margin: 0;">Kite: {{ M.total|inr_short }}</a> <span class="ol-sz-at">{{ M.at_ist }}</span><input type="number" id="ol-sz-total" min="0" step="10000"></label>
+      <button type="button" class="ob-tab" id="ol-sz-refresh" title="Read the latest margin and margin-a-lot quote from Kite (read-only, no orders)">↻ Refresh from Kite</button>
+      <label class="ob-muted">Deploy (₹)<input type="number" id="ol-sz-dep" min="0" step="10000"></label>
+      <span class="ob-muted">Fill the lots:</span>
+      <button type="button" class="ob-tab" id="ol-sz-max">Max lots for my margin</button>
+      <button type="button" class="ob-tab" id="ol-sz-safe-fill">Crash-safe ({{ (100 * Z.rules.crash_budget)|round|int }}% of my money)</button>
+    </div>
+    <div class="ob-scroll"><table class="ob-table" id="ol-sz-table" style="margin-top: 8px;"></table></div>
+    <div class="ob-muted" id="ol-sz-check" style="margin-top: 4px;"></div>
+    <div class="ol-sz-act"><button type="button" class="ob-btn ol-sz-apply" id="ol-sz-apply">Save plan</button> <a href="#" class="os-link" id="ol-sz-undo">Discard changes</a> <span class="ob-muted" id="ol-sz-what"></span></div>
+    <details class="ol-ready">
+      <summary class="ob-muted">How this works</summary>
+      <ul class="ob-muted" style="margin: 6px 0 0; padding-left: 18px;">
+        <li>The next entries use the <b>saved</b> plan: protection, both lot caps and the safety cash (the margin buffer each entry keeps free). Unsaved boxes change nothing.</li>
+        <li>At entry the book still sizes down on its own if Kite's margin then, less the safety cash, fits fewer lots. The two trades are never open together, so one deployed amount carries both.</li>
+        <li>Zerodha margin is fetched from Kite ({{ M.at_ist }}: cash {{ M.cash|inr_short }} + collateral {{ M.collateral|inr_short }}; {{ M.used|inr_short }} in use now). Type any amount to try a hypothetical; deploy = margin − safety cash.</li>
+        <li>Peak margin a lot = Kite's quote ({{ Q.at_ist }}) + the expiry-day extra. Expected = the Expected profit page's model (99% kept in a winning week, the backtest's loss weeks, brokerage). Crash = a −{{ (100 * Z.rules.crash_gap)|round(1) }}% gap on one index while its trade is open.</li>
+        <li id="ol-sz-wings"></li>
+      </ul>
+    </details>
+  </div>
+  {% endif %}
+  {% else %}<div style="margin-top: 8px;">Your plan: <b>{{ 'protected (' ~ ("%g"|format(st.wing_pct)) ~ '% wings)' if st.wing_pct else 'unprotected' }}</b> · NIFTY <b>{{ st.lots_cap.NIFTY }}</b> / SENSEX <b>{{ st.lots_cap.SENSEX }}</b> lots · safety cash <b>{{ st.margin_buffer_rs|inr_short }}</b>.</div>
+  <div class="ob-muted">No quote yet: it is taken at the 10:00 and 15:01 IST mark on a day you are logged in to Kite (or by hand: <code>run.sh options_live quote</code>).</div>{% endif %}
+</div>
+
+<div class="ob-card ob-scroll">
+  <b>All open legs</b> <span class="ob-muted">(every source, with the basket margin)</span>
+  {% if L.open %}
+  <table class="ob-table">
+    <tr><th>Source</th><th>Contract</th><th>Expiry</th><th>Qty</th><th>Opened at</th><th>Mark</th><th>MTM</th><th>Margin</th></tr>
+    {% for l in L.open %}
+    <tr><td>{{ l.source }}</td><td>{{ l.tradingsymbol }}</td><td>{{ l.expiry }}</td><td>{{ l.net_qty }}</td>
+      <td>{% if l.net_qty > 0 %}bought {{ "%.2f"|format(l.buy_avg) if l.buy_avg else "—" }}{% else %}sold {{ "%.2f"|format(l.sell_avg) if l.sell_avg else "—" }}{% endif %}</td><td>{{ "%.2f"|format(l.mark_price) if l.mark_price is not none else "—" }}</td>
+      <td class="{% if l.mtm_rs and l.mtm_rs > 0 %}ob-ok{% elif l.mtm_rs and l.mtm_rs < 0 %}ob-bad{% endif %}">{{ l.mtm_rs|inr_short if l.mtm_rs is not none else "—" }}</td>
+      <td>{{ (l.mark_margin_rs or l.margin_rs)|inr_short if (l.mark_margin_rs or l.margin_rs) else "—" }}</td></tr>
+    {% endfor %}
+  </table>
+  {% else %}<div class="ob-muted">Nothing open.</div>{% endif %}
+</div>
+
+<div class="ob-card ob-scroll">
+  <b>Live trade history</b> <span class="ob-muted">realised after charges ·
+    {% for src, t in L.totals.items() %}{{ src }} {{ t.realised|inr_short }} ({{ t.n_closed }} leg{{ '' if t.n_closed == 1 else 's' }}){% if not loop.last %} · {% endif %}{% else %}none yet{% endfor %}
+    · paper book {{ summary.net_rs|inr_short }}</span>
+  {% if L.history %}
+  <table class="ob-table">
+    <tr><th>Source</th><th>Contract</th><th>Expiry</th><th>Sold</th><th>Bought / settled</th><th>Status</th><th>Net</th></tr>
+    {% for l in L.history %}
+    <tr><td>{{ l.source }}</td><td>{{ l.tradingsymbol }}</td><td>{{ l.expiry }}</td>
+      <td>{% if l.sell_qty %}{{ l.sell_qty }} @ {{ "%.2f"|format(l.sell_avg) if l.sell_avg else "—" }}{% else %}—{% endif %}</td>
+      <td>{% if l.status == 'SETTLED' %}{% if l.buy_qty and not l.sell_qty %}wing {{ l.buy_qty }} @ {{ "%.2f"|format(l.buy_avg) if l.buy_avg else "—" }} · {% endif %}index {{ "{:,.2f}".format(l.settle_index) }} → {{ "%.2f"|format(l.exit_price) }}{% else %}{{ l.buy_qty }} @ {{ "%.2f"|format(l.buy_avg) if l.buy_avg else "—" }}{% endif %}</td>
+      <td>{{ l.status }}</td><td class="{% if l.net_rs and l.net_rs > 0 %}ob-ok{% elif l.net_rs and l.net_rs < 0 %}ob-bad{% endif %}">{{ l.net_rs|inr_short if l.net_rs is not none else "—" }}</td></tr>
+    {% endfor %}
+  </table>
+  {% else %}<div class="ob-muted">No closed or settled legs yet.</div>{% endif %}
+</div>
+
+{% if L.steps %}
+<div class="ob-card ob-scroll">
+  <b>Last step results</b>
+  <table class="ob-table">
+    {% for s in L.steps %}<tr><td>{{ s.key }}</td><td>{{ s.date }}</td><td class="{{ {'ok': 'ob-ok', 'failed': 'ob-bad', 'skipped': 'ob-warn'}.get(s.status, '') }}">{{ s.status }}</td><td class="ob-wrap">{{ s.detail }}</td></tr>{% endfor %}
+  </table>
+</div>
+{% endif %}
+
+<details class="ob-card">
+  <summary><b>Other settings</b> <span class="ob-muted">(stored in the DB; override config.OPTIONS_LIVE without a deploy)</span></summary>
+  <div class="ob-muted ol-set">Lots, wings and safety cash are your plan, set under Sizing above.</div>
+  <div class="ob-cap ol-set">
+    <label class="ob-muted">Mode <select id="ol-mode">{% for m in L.modes %}<option value="{{ m }}"{% if m == st.mode %} selected{% endif %}>{{ m }}</option>{% endfor %}</select></label>
+    <button class="ob-btn ol-save" data-key="mode" data-src="ol-mode" data-kind="str">Save mode</button>
+  </div>
+  <div class="ob-cap ol-set">
+    <label class="ob-muted">Weekly loss limit ₹ <input id="ol-loss" type="number" min="0" step="10000" value="{{ "%.0f"|format(st.weekly_loss_limit_rs) }}"></label>
+    <button class="ob-btn ol-save" data-key="weekly_loss_limit_rs" data-src="ol-loss" data-kind="num">Save</button>
+  </div>
+  <div class="ob-cap ol-set">
+    <label class="ob-muted">Half the lots above VIX <input id="ol-vix-halve" type="number" min="1" max="100" step="0.5" value="{{ st.vix_halve }}"></label>
+    <button class="ob-btn ol-save" data-key="vix_halve" data-src="ol-vix-halve" data-kind="num">Save</button>
+    <label class="ob-muted">No entry at VIX ≥ <input id="ol-vix-halt" type="number" min="1" max="100" step="0.5" value="{{ st.vix_halt }}"></label>
+    <button class="ob-btn ol-save" data-key="vix_halt" data-src="ol-vix-halt" data-kind="num">Save</button>
+  </div>
+  <div class="ob-cap ol-set">
+    <label class="ob-muted">Wings may cost at most <input id="ol-wing-max" type="number" min="5" max="100" step="1" value="{{ "%g"|format(st.wing_max_share_pct) }}"> % of the credit</label>
+    <button class="ob-btn ol-save" data-key="wing_max_share_pct" data-src="ol-wing-max" data-kind="num">Save</button>
+    <span class="ob-muted">dearer: the dearer wing steps out one strike at a time, up to {{ "%g"|format(st.wing_max_pct) }}% of spot beyond the sold strike; still dearer: no entry, you get a push</span>
+  </div>
+  <div class="ob-cap ol-set">
+    <label class="ob-muted"><input id="ol-adopt" type="checkbox"{% if st.adopt_manual_nifty %} checked{% endif %}> Tuesday buy-back also closes my own (untagged) NIFTY legs of that expiry</label>
+    <button class="ob-btn ol-save" data-key="adopt_manual_nifty" data-src="ol-adopt" data-kind="bool">Save</button>
+  </div>
+</details>
+{% endif %}
+
+<script src="{{ vendor('chart') }}"></script>
+<script src="/static/options_strategy.js?v={{ asset_version('options_strategy.js') }}"></script>
+<script>
+// plan 0029 Live controls: every control is a POST (session cookie, same origin) after a confirm step;
+// the server re-checks the confirm word, so a stray request without it is refused.
+(function () {
+  function send(url, body) {
+    fetch(url, {method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)})
+      .then(function (r) { return r.json().then(function (j) { return {ok: r.ok, j: j}; }); })
+      .then(function (x) { if (x.ok) location.reload(); else alert('Refused: ' + (x.j.error || 'error')); })
+      .catch(function (e) { alert('Failed: ' + e); });
+  }
+  function confirmWord(ask, word, typed) {
+    if (typed) { var t = prompt(ask); return t === null ? null : t; }
+    return confirm(ask) ? word : null;
+  }
+  Array.prototype.forEach.call(document.querySelectorAll('.ol-act'), function (b) {
+    b.addEventListener('click', function () {
+      var w = confirmWord(b.dataset.ask, b.dataset.word, b.dataset.type === '1');
+      if (w === null) return;
+      var body = JSON.parse(b.dataset.body || '{}'); body.confirm = w;
+      send(b.dataset.url, body);
+    });
+  });
+  Array.prototype.forEach.call(document.querySelectorAll('.ol-save'), function (b) {
+    b.addEventListener('click', function () {
+      var k = b.dataset.kind, v;
+      if (k === 'caps') v = {NIFTY: parseInt(document.getElementById('ol-cap-NIFTY').value, 10), SENSEX: parseInt(document.getElementById('ol-cap-SENSEX').value, 10)};
+      else if (k === 'num') v = parseFloat(document.getElementById(b.dataset.src).value);
+      else if (k === 'bool') v = document.getElementById(b.dataset.src).checked;
+      else v = document.getElementById(b.dataset.src).value;
+      var auto = b.dataset.key === 'mode' && v === 'auto';
+      var w = auto ? confirmWord('Mode AUTO places real orders with no approval. Type AUTO to confirm.', 'AUTO', true)
+                   : confirmWord('Save ' + b.dataset.key + ' = ' + JSON.stringify(v) + '?', 'SAVE', false);
+      if (w === null) return;
+      send('/api/options/live/settings', {key: b.dataset.key, value: v, confirm: w});
+    });
+  });
+  function post(body) {
+    return fetch('/api/options/live/settings', {method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)})
+      .then(function (r) { return r.json().then(function (j) { if (!r.ok) throw new Error(j.error || 'error'); return j; }); });
+  }
+  Array.prototype.forEach.call(document.querySelectorAll('.ol-apply'), function (b) {
+    b.addEventListener('click', function () {
+      var wing = parseFloat(b.dataset.wing), caps = JSON.parse(b.dataset.caps);
+      var ask = 'Apply setup ' + b.dataset.key + ': ' + (wing ? 'wings ' + wing + '% beyond the sold strikes' : 'no wings')
+              + ', lots NIFTY ' + caps.NIFTY + ' / SENSEX ' + caps.SENSEX + '?';
+      if (!confirm(ask)) return;
+      post({key: 'wing_pct', value: wing, confirm: 'SAVE'})
+        .then(function () { return post({key: 'lots_cap', value: caps, confirm: 'SAVE'}); })
+        .then(function () { location.reload(); })
+        .catch(function (e) { alert('Refused: ' + e.message); location.reload(); });
+    });
+  });
+})();
+(function () {
+  // Your plan: one form, prefilled with the SAVED settings (protection, lot caps, safety cash = margin buffer).
+  // Edits stay local until Save plan; the quick fills only fill the boxes. Margin / deploy are for the checks.
+  var el = document.getElementById('ol-sz-data');
+  if (!el) return;
+  var Z = JSON.parse(el.textContent), X = Z.x, O = window.OptStrategy, US = ['NIFTY', 'SENSEX'];
+  var saved = {kind: Z.wing_on ? 'winged' : 'naked', lots: {NIFTY: Z.caps.NIFTY, SENSEX: Z.caps.SENSEX}, safe: Z.buffer};
+  var kind = saved.kind, lots = {NIFTY: saved.lots.NIFTY, SENSEX: saved.lots.SENSEX}, safe = saved.safe, total = Z.margin.total;
+  var DRAFT = 'ol-plan-draft';                    // unsaved edits carried across the reload after Refresh from Kite
+  try { var dr = JSON.parse(sessionStorage.getItem(DRAFT) || 'null'); sessionStorage.removeItem(DRAFT); if (dr) { kind = dr.kind; lots = dr.lots; safe = dr.safe; } } catch (e) {}
+  function $(id) { return document.getElementById(id); }
+  function peak(u, k) { var q = Z.quote.markets[u]; return q[k].margin + q.extra; }
+  function orders(u, k, n) { var m = X.markets[u], legMax = Math.max(m.lot, Math.floor(m.freeze / m.lot) * m.lot); return n > 0 ? m[k].legs * Math.ceil(n * m.lot / legMax) : 0; }
+  function week(u, k, n) { return n * X.markets[u][k].week_lot_rs - orders(u, k, n) * X.brokerage_rs; }
+  function month(u, k, n) { return week(u, k, n) * 52 * X.markets[u][k].traded_share / 12; }
+  function dep() { return Math.max(0, total - safe); }
+  function fit(u, k, money) { return Math.max(0, Math.min(X.lots_max, Math.floor(money / peak(u, k) + 1e-9))); }
+  function dirty() { return kind !== saved.kind || lots.NIFTY !== saved.lots.NIFTY || lots.SENSEX !== saved.lots.SENSEX || Math.round(safe) !== Math.round(saved.safe); }
+  function put(id, v) { if (document.activeElement !== $(id)) $(id).value = Math.round(v); }   // never under the cursor
+  function draw() {
+    put('ol-sz-total', total); put('ol-sz-safe', safe); put('ol-sz-dep', dep());
+    US.forEach(function (u) { put('ol-sz-lots-' + u, lots[u]); $('ol-sz-lots-' + u).classList.toggle('oe-edited', lots[u] !== saved.lots[u]); });
+    $('ol-sz-safe').classList.toggle('oe-edited', Math.round(safe) !== Math.round(saved.safe));
+    $('ol-sz-total').classList.toggle('oe-edited', Math.round(total) !== Math.round(Z.margin.total));
+    Array.prototype.forEach.call(document.querySelectorAll('#ol-sz-kind [data-k]'), function (b) {
+      b.classList.toggle('ob-tab-on', b.dataset.k === kind); b.classList.toggle('oe-edited', b.dataset.k === kind && kind !== saved.kind);
+    });
+    var rows = '', wk = 0, mo = 0, crash = 0, need = 0, short = [];
+    US.forEach(function (u) {
+      var p = peak(u, kind), n = lots[u], c = n * Z.quote.markets[u][kind].crash, f = fit(u, kind, dep());
+      wk += week(u, kind, n); mo += month(u, kind, n); crash = Math.max(crash, c); need = Math.max(need, n * p);
+      if (f < n) short.push(u + ' ' + f);
+      rows += '<tr><td><b>' + u + '</b></td><td><b>' + n + '</b> lots</td><td>' + O.inr(p) + '</td><td>' + O.inr(n * p) + '</td><td class="ob-ok">' + O.signed(week(u, kind, n)) + '</td><td class="ob-bad">' + O.inr(-c) + '</td></tr>';
+    });
+    var pct = total ? crash / total : 0;
+    $('ol-sz-table').innerHTML = '<tr><th></th><th>Lots</th><th>Peak margin a lot</th><th>Peak margin</th><th>Expected a trade</th><th>Crash loss</th></tr>' + rows
+      + '<tr class="os-total"><td>Both</td><td></td><td></td><td>' + O.inr(need) + '</td><td class="ob-ok">' + O.signed(wk) + ' a week<br><span class="ob-muted">' + O.signed(mo) + ' a month</span></td>'
+      + '<td class="' + (pct > Z.crash_budget + 0.005 ? 'ob-bad' : 'ob-ok') + '">' + O.inr(-crash) + '<br><span class="ob-muted">' + (100 * pct).toFixed(0) + '% of your money</span></td></tr>';
+    $('ol-sz-check').innerHTML = short.length
+      ? '<b class="ob-warn">These lots need ' + O.inr(need) + ' but you deploy ' + O.inr(dep()) + ': the entry will size down to ' + short.join(', ') + ' lots.</b>'
+      : 'Fits: needs ' + O.inr(need) + ' of the ' + O.inr(dep()) + ' you deploy (' + O.inr(dep() - need) + ' to spare).';
+    var d = dirty(), b = $('ol-sz-apply');
+    b.disabled = !d; b.style.opacity = d ? 1 : 0.5; $('ol-sz-undo').hidden = !d;
+    $('ol-plan-state').innerHTML = d ? '<b class="ob-warn">unsaved: the next entries still use the saved plan (' + (saved.kind === 'winged' ? 'protected' : 'unprotected') + ', ' + saved.lots.NIFTY + ' / ' + saved.lots.SENSEX + ' lots, ' + O.inr(saved.safe) + ' safety)</b>'
+      : '<span class="ob-ok">saved: the next entries use this</span>' + (Z.mode === 'auto' ? ' (mode AUTO, real orders)' : ' (mode ' + Z.mode.toUpperCase() + ')');
+    $('ol-sz-what').textContent = Math.round(total) !== Math.round(Z.margin.total) ? 'Hypothetical margin: Kite has ' + O.inr(Z.margin.total) + ' now.' : '';
+  }
+  US.forEach(function (u) {
+    $('ol-sz-lots-' + u).addEventListener('input', function () { var v = parseInt(this.value, 10); if (v >= 0) { lots[u] = Math.min(v, X.lots_max); draw(); } });
+  });
+  // margin = safety + deploy: typing the margin or the safety keeps the other and moves deploy; typing deploy moves the margin
+  $('ol-sz-total').addEventListener('input', function () { var v = parseFloat(this.value); if (v >= 0) { total = v; safe = Math.min(safe, total); draw(); } });
+  $('ol-sz-safe').addEventListener('input', function () { var v = parseFloat(this.value); if (v >= 0) { safe = v; total = Math.max(total, v); draw(); } });
+  $('ol-sz-dep').addEventListener('input', function () { var v = parseFloat(this.value); if (v >= 0) { total = safe + v; draw(); } });
+  $('ol-sz-kite').addEventListener('click', function (e) { e.preventDefault(); total = Z.margin.total; safe = Math.min(safe, total); draw(); });
+  Array.prototype.forEach.call(document.querySelectorAll('#ol-sz-kind [data-k]'), function (b) { b.addEventListener('click', function () { kind = b.dataset.k; draw(); }); });
+  $('ol-sz-max').addEventListener('click', function () { US.forEach(function (u) { lots[u] = fit(u, kind, dep()); }); draw(); });
+  $('ol-sz-safe-fill').addEventListener('click', function () {
+    US.forEach(function (u) { var c = Z.quote.markets[u][kind].crash; lots[u] = Math.min(fit(u, kind, dep()), c > 0 ? Math.floor(Z.crash_budget * total / c) : X.lots_max); });
+    draw();
+  });
+  $('ol-sz-refresh').addEventListener('click', function () {
+    var b = this; b.disabled = true; b.textContent = 'Reading Kite…';
+    try { sessionStorage.setItem(DRAFT, JSON.stringify({kind: kind, lots: lots, safe: safe})); } catch (e) {}
+    fetch('/api/options/live/refresh', {method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'}, body: '{}'})
+      .then(function (r) {
+        return r.json().catch(function () { return {}; }).then(function (j) {
+          if (r.status === 404) throw new Error('the cockpit has not been restarted since this button was added (HTTP 404)');
+          if (!r.ok) throw new Error(j.error || j.detail || 'HTTP ' + r.status);
+          return j;
+        });
+      })
+      .then(function (j) {
+        if (!j.quote_refreshed) alert('Margin refreshed from Kite. The margin-a-lot quote could not be re-read (outside market hours Kite has no offers on the wing strikes), so the last quote stays: '
+                                      + O.ist(Date.parse(j.quote_at)) + '.');
+        location.reload();
+      })
+      .catch(function (e) { try { sessionStorage.removeItem(DRAFT); } catch (x) {} alert('Could not refresh: ' + e.message); b.disabled = false; b.textContent = '↻ Refresh from Kite'; });
+  });
+  $('ol-sz-undo').addEventListener('click', function (e) { e.preventDefault(); kind = saved.kind; lots = {NIFTY: saved.lots.NIFTY, SENSEX: saved.lots.SENSEX}; safe = saved.safe; draw(); });
+  $('ol-sz-apply').addEventListener('click', function () {
+    var wing = kind === 'winged' ? Z.quote.wing_pct : 0;
+    if (!confirm('Save the plan: ' + (wing ? 'protected, wings ' + wing + '%' : 'unprotected (no wings)') + ', NIFTY ' + lots.NIFTY + ' / SENSEX ' + lots.SENSEX + ' lots, safety cash ' + O.inr(safe)
+                 + '?' + (Z.mode === 'auto' ? '\n\nMode is AUTO: the next entry places real orders with this.' : ''))) return;
+    function post(body) {
+      return fetch('/api/options/live/settings', {method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)})
+        .then(function (r) { return r.json().then(function (j) { if (!r.ok) throw new Error(j.error || 'error'); return j; }); });
+    }
+    post({key: 'wing_pct', value: wing, confirm: 'SAVE'})
+      .then(function () { return post({key: 'lots_cap', value: lots, confirm: 'SAVE'}); })
+      .then(function () { return post({key: 'margin_buffer_rs', value: Math.round(safe), confirm: 'SAVE'}); })
+      .then(function () { location.reload(); })
+      .catch(function (e) { alert('Refused: ' + e.message); location.reload(); });
+  });
+  $('ol-sz-wings').textContent = 'Protected credit = today\'s unprotected quote less the wings at their typical cost (' + US.map(function (u) {
+    return u + ' ' + Math.round(100 * X.markets[u].winged.wing_share) + '%'; }).join(', ') + ' of the credit, median of the last 8 entries); Kite\'s week-ahead quote has them at '
+    + US.map(function (u) { return u + ' ' + Math.round(100 * X.markets[u].winged.wing_share_quote) + '%'; }).join(', ') + ' (wing strikes that have not traded yet carry wide asks).';
+  draw();
+})();
+(function () {
+  // the strategy builder on one open (underlying, expiry, source) group; read-only, nothing is sent
+  var el = document.getElementById('os-views');
+  if (!el || !document.querySelector('#os-builder [data-o="chart"]')) return;
+  var V = JSON.parse(el.textContent), O = OptStrategy, key = V[0].key, B;
+  var MON = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+  function view() { return V.filter(function (v) { return v.key === key; })[0]; }
+  function strategy() {
+    var v = view(), p = v.expiry.split('-'), d = p[2] + ' ' + MON[parseInt(p[1], 10) - 1];
+    return {underlying: v.underlying, spot: v.spot, start: v.start, end: v.end, now: v.now, r: v.r, step: v.step,
+            atm_iv: v.atm_iv, oi: v.oi, oi_date: v.oi_date, cost_rs: v.cost_rs,
+            legs: v.legs.map(function (l) {
+              return {cp: l.cp, K: l.K, side: l.side, qty: l.qty, entry: l.entry, now: l.now, iv: l.iv,
+                      label: (l.lot ? Math.round(l.qty / l.lot) : l.qty) + ' × ' + d + ' ' + O.num(l.K) + ' ' + (l.cp === 'C' ? 'CE' : 'PE')};
+            })};
+  }
+  function onUpdate(s) {
+    s.legs.forEach(function (x, i) { var c = document.querySelector('[data-leg="' + key + ':' + i + '"]'); if (c) { c.textContent = O.signed(x.pnl); O.tone(c, x.pnl); } });
+    document.getElementById('os-s-pop').textContent = (100 * s.pop).toFixed(0) + '%';
+    document.getElementById('os-s-rr').textContent = isFinite(s.maxP) && isFinite(s.maxL) && s.maxL < 0 ? '1 : ' + (-s.maxL / s.maxP).toFixed(1) + ' (gain : loss)' : 'NA';
+    var v = view();
+    document.getElementById('os-s-spot').textContent = v.spot ? O.num(v.spot, 2) + ' · ' + O.ist(Date.parse(v.spot_at)) : '—';
+  }
+  B = O.mount(document.getElementById('os-builder'), {get: strategy, onUpdate: onUpdate,
+    pctBase: function () { return view().margin_rs || 0; }, pctLabel: 'margin'});
+  Array.prototype.forEach.call(document.querySelectorAll('[data-pick]'), function (b) {
+    b.addEventListener('click', function () { key = b.dataset.pick; B.refresh(false); });
+  });
+})();
+</script>
+{% endblock %}

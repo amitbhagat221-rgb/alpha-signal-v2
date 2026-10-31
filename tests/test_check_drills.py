@@ -269,6 +269,16 @@ def test_average_outside_its_own_range_is_caught(conn):
     assert (v["status"], v["n_bad"], v["n_total"]) == (FAIL, 1, 1)
 
 
+def test_a_target_from_before_a_consolidation_is_judged_rebased(conn):
+    """IFIB 2026-10: a 20 target set on Re 1 shares reads 200 after the Re 1 -> Rs 10 consolidation."""
+    conn.execute("INSERT INTO stock_prices (sid, date, close) VALUES ('X', ?, 14), ('X', ?, 130)", (_day(30), TODAY))
+    conn.execute("INSERT INTO analyst_consensus (sid, price_target, has_analyst_data, fetched_at, price_target_changed_at) "
+                 "VALUES ('X', 20, 1, ?, ?)", (TODAY, _day(30)))
+    conn.execute("INSERT INTO corporate_adjustments (sid, ex_date, factor, n_events, inds) VALUES ('X', ?, 10, 1, 'SPLIT')",
+                 (_day(10),))
+    assert _fires("ANALYST_TARGET_IMPLAUSIBLE", conn)["status"] == PASS
+
+
 @drill("ANALYST_TARGET_IS_PRICE")
 def _targets_are_prices(conn):
     _targets(conn, {"A": 100.2, "B": 99.9, "C": 100.9, "D": 130.0})          # C is a real +0.9%

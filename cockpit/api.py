@@ -67,10 +67,11 @@ def get_analyst_consensus_batch(sids):
     if not sids:
         return out
     cmp_by_sid = {sid: close for sid, (close, _) in views.latest_close(sids).items()}
+    basis = views.target_basis(sids)
     for r in views.native_rows(f"SELECT sid, {_CONSENSUS_COLS} FROM analyst_consensus WHERE sid IN ({ph})",
                                sids):
         sid = r.pop("sid")
-        out[sid] = _enrich_consensus(r, cmp_by_sid.get(sid))
+        out[sid] = _enrich_consensus(r, cmp_by_sid.get(sid), basis.get(sid))
     return out
 
 
@@ -84,8 +85,9 @@ def get_analyst_consensus(sid):
     return get_analyst_consensus_batch([sid]).get(sid, {})
 
 
-def _enrich_consensus(r, cmp):
-    """Derived A2 fields on one analyst_consensus row; `cmp` = latest close."""
+def _enrich_consensus(r, cmp, basis=None):
+    """Derived A2 fields on one analyst_consensus row; `cmp` = latest close, `basis` =
+    views.target_basis for the sid (rebase factor, when the target was set, the close then)."""
     # PT-freshness derived fields (added 2026-05-23)
     import json as _json
     from datetime import date as _date_, datetime as _dt_
@@ -130,19 +132,38 @@ def _enrich_consensus(r, cmp):
             r["rating_mix_periods"] = hist     # parsed for template
         except Exception:
             pass
-    # Compute upside vs current price (use median when available — robust to outliers)
+    # Compute upside vs current price (use median when available — robust to outliers).
+    # One rule for every surface (validators.plausibility.pt_status): a target set before a
+    # split / consolidation / demerger is rebased; an implausible one is never shown; a stale
+    # or thin one is shown as a target with the reason, but never as an upside.
     if cmp:
         if cmp > 0:
+            from validators.plausibility import PT_FIELDS, PT_MIN_ANALYSTS, pt_status, rebase_targets
             r["current_price"] = round(cmp, 2)
-            # Display guard: never surface an implausible PT (>3x / <0.33x the
-            # price = Yahoo garbage for thin-coverage small-caps). Mirrors the
-            # source guard in sources/yfinance_analyst.py so a leaked row can't
-            # reach the user as a confident "+3474%" target.
-            _pt = r.get("price_target")
-            if _pt and (_pt > 3 * cmp or _pt < 0.33 * cmp):
-                for _k in ("price_target", "price_target_median",
-                           "price_target_high", "price_target_low"):
+            basis = basis or {}
+            factor = basis.get("factor") or 1.0
+            if factor != 1.0:
+                r.update(rebase_targets(r, factor))
+                r["pt_rebased_factor"] = round(factor, 4)
+            r["pt_set_by"] = basis.get("set_by")
+            status = r["pt_status"] = pt_status(r.get("price_target"), cmp, r.get("total_analysts"),
+                                                basis.get("close_at_set"))
+            if status == "implausible":
+                for _k in PT_FIELDS:
                     r[_k] = None
+            n = r.get("total_analysts")
+            r["pt_note"] = {
+                "stale": f"set by {basis.get('set_by')}; the price has moved "
+                         f"{(cmp / basis['close_at_set'] - 1) * 100:+.0f}% since, so no upside is shown"
+                         if basis.get("close_at_set") else None,
+                "thin": f"{n or 'no'} analyst{'' if n == 1 else 's'}: too few for an upside "
+                        f"(needs {PT_MIN_ANALYSTS})",
+            }.get(status)
+            if factor != 1.0 and r.get("price_target"):
+                r["pt_note"] = "; ".join(filter(None, [
+                    f"rebased ×{factor:.3g} for a share change after the target was set", r["pt_note"]]))
+            if status != "ok":
+                return r
             if r.get("price_target"):
                 r["pt_upside_pct"] = round((r["price_target"] / cmp - 1) * 100, 1)
             if r.get("price_target_median"):

@@ -197,6 +197,51 @@ def options_page(request: Request):
                                                                 **_live_panel()})
 
 
+@app.get("/options/capital", response_class=HTMLResponse)
+def options_capital_page(request: Request):
+    """"At your capital": the strategy builder on any paper trade, re-sized to a capital amount
+    (payoff, table, greeks, P&L, margin), plus every trade of the book at that size."""
+    import option_book
+    import option_strategy
+    d = option_book.page_data()
+    return templates.TemplateResponse(request, "options_capital.html", {
+        "page": "options", "sub": "capital", **d, "views": [option_strategy.paper(r) for r in d["trades"]]})
+
+
+@app.get("/options/expected", response_class=HTMLResponse)
+def options_expected_page(request: Request):
+    """Expected profit over any period: the backtest's win / loss weeks (VIX guard on) on today's
+    credit and lot caps, every assumption editable on the page; the page simulates the range."""
+    import option_expected
+    try:
+        d = option_expected.page_data()
+    except Exception as e:                          # noqa: BLE001
+        d = {"error": f"{type(e).__name__}: {e}"}
+    return templates.TemplateResponse(request, "options_expected.html", {"page": "options", "sub": "expected", "d": d})
+
+
+@app.get("/options/live", response_class=HTMLResponse)
+def options_live_page(request: Request):
+    """The plan 0029 live book on its own page: open legs in the strategy builder, margin,
+    sizing choices, history, controls (the same POSTs as before)."""
+    import option_book
+    import option_strategy
+    ctx = _live_panel()
+    try:
+        views = option_strategy.live(ctx["live"]) if ctx["live"] else []
+    except Exception as e:                          # noqa: BLE001
+        views, ctx["live_error"] = [], f"{type(e).__name__}: {e}"
+    d = option_book.page_data()
+    try:                                            # the sizing suggester's expected week (same model as /options/expected)
+        import option_expected
+        x = option_expected.page_data()
+    except Exception as e:                          # noqa: BLE001
+        x = {"error": f"{type(e).__name__}: {e}"}
+    return templates.TemplateResponse(request, "options_live.html", {
+        "page": "options", "sub": "live", **ctx, "views": views, "kite": d["kite"], "upcoming": d["upcoming"],
+        "summary": d["summary"], "x": x})
+
+
 def _live_panel():
     """The plan 0029 Live panel's data; a failure shows on the panel, never breaks the paper book."""
     try:
@@ -276,6 +321,39 @@ async def api_options_live_approve(request: Request):
         return options_live.approve(str(body.get("ticket_id")), by="cockpit")
     except ValueError as e:
         return JSONResponse({"error": str(e)}, status_code=409)
+
+
+@app.post("/api/options/live/refresh")
+async def api_options_live_refresh(request: Request):
+    """Refresh from Kite: `run.sh options_live quote` (read-only Kite calls: margins and the per-lot basket
+    quote, no orders), so the plan form's margin is the latest. Needs today's Kite login."""
+    _, err = await _live_body(request)
+    if err:
+        return err
+    import subprocess
+    from starlette.concurrency import run_in_threadpool
+    import options_live
+    before = (options_live.get_state("margin") or {}).get("at")
+    q_before = (options_live.get_state("sizing_quote") or {}).get("at")
+    root = Path(__file__).resolve().parent.parent
+    try:
+        r = await run_in_threadpool(subprocess.run, [str(root / "run.sh"), "options_live", "quote"], cwd=root,
+                                    capture_output=True, text=True, timeout=150)
+    except subprocess.TimeoutExpired:
+        return JSONResponse({"error": "Kite did not answer within 150 s"}, status_code=504)
+    m = options_live.get_state("margin") or {}
+    if r.returncode != 0 or m.get("at") == before:
+        out = r.stdout + r.stderr
+        if "GetRmsLimits" in out or "Request not registered" in out:   # Zerodha's margin service (RMS) is shut overnight
+            why = "Zerodha's margin service is not answering (it is closed overnight); try again in market hours"
+        elif "no Kite login" in out or "NoKiteSession" in out:
+            why = "no Kite login today: log in to Kite first"
+        else:
+            why = " · ".join(out.strip().splitlines()[-2:]) or "nothing refreshed"
+        return JSONResponse({"error": why}, status_code=409)
+    q = options_live.get_state("sizing_quote") or {}
+    return {"ok": True, "margin": m, "quote_refreshed": q.get("at") != q_before, "quote_at": q.get("at"),
+            "note": None if q.get("at") != q_before else (r.stdout.strip().splitlines() or [""])[-1]}
 
 
 @app.post("/api/options/live/closeall")

@@ -565,6 +565,68 @@ def price_metrics(sids):
     return out
 
 
+# ═══════════════════════════ analyst targets ═══════════════════════════
+
+def target_basis(sids=None, today=None):
+    """{sid: {set_by, factor, close_at_set}} for every stored analyst target.
+
+    A target is quoted on the share basis of the day it was set, and Yahoo keeps serving an old
+    call unrebased after a consolidation or demerger (IFIB 20 = 200 after its 2026-10-13 Re 1 → Rs 10
+    consolidation; HEG 710 = 265 after its 2026-09-07 demerger). Readers multiply by `factor`
+    (validators.plausibility.rebase_targets) instead of the writers storing a rebased value, which
+    the next fetch of the stale value would overwrite.
+      set_by        the date the current target was in place by: the earlier of
+                    price_target_changed_at and the first monthly snapshot of the unchanged run
+                    (None when neither is known: factor 1, no staleness test)
+      factor        product of the split / bonus / consolidation / demerger factors
+                    (corporate_adjustments, dividends left out) with set_by < ex_date <= today
+      close_at_set  the last close on or before set_by, × factor (today's basis)"""
+    today = today or date.today().isoformat()
+    where, params = "", []
+    if sids is not None:
+        sids, ph = sid_params(sids)
+        if not sids:
+            return {}
+        where, params = f" AND sid IN ({ph})", sids
+    ac = native_rows("SELECT sid, price_target, price_target_changed_at FROM analyst_consensus "
+                     f"WHERE price_target > 0{where}", params)
+    if not ac:
+        return {}
+    keys = [r["sid"] for r in ac]
+    ph = ",".join("?" * len(keys))
+    seen = {}                                   # sid → {snapshot_date: [targets]}, newest first
+    for r in native_rows("SELECT sid, snapshot_date, target_mean FROM analyst_consensus_snapshots "
+                         f"WHERE sid IN ({ph}) AND target_mean > 0 ORDER BY sid, snapshot_date DESC", keys):
+        seen.setdefault(r["sid"], {}).setdefault(r["snapshot_date"], []).append(r["target_mean"])
+    events = {}
+    for r in native_rows("SELECT sid, ex_date, factor FROM corporate_adjustments "
+                         f"WHERE inds <> 'DIVIDEND' AND ex_date <= ? AND sid IN ({ph})", [today] + keys):
+        events.setdefault(r["sid"], []).append((r["ex_date"], r["factor"]))
+
+    out = {}
+    for r in ac:
+        pt, run_start = r["price_target"], None
+        for d, values in seen.get(r["sid"], {}).items():           # the unchanged run, newest back
+            if not any(abs(v / pt - 1) <= 0.005 for v in values):
+                break
+            run_start = d
+        known = [d for d in ((r["price_target_changed_at"] or "")[:10] or None, run_start) if d]
+        set_by = min(known) if known else None
+        factor = 1.0
+        for ex_date, f in events.get(r["sid"], []) if set_by else []:
+            if ex_date > set_by:
+                factor *= f
+        out[r["sid"]] = {"set_by": set_by, "factor": factor, "close_at_set": None}
+
+    dated = [(s, b["set_by"]) for s, b in out.items() if b["set_by"]]
+    one = "SELECT * FROM (SELECT sid, close FROM stock_prices WHERE sid = ? AND date <= ? AND close > 0 ORDER BY date DESC LIMIT 1)"
+    for i in range(0, len(dated), 200):                      # compound SELECT / variable limits
+        part = dated[i:i + 200]
+        for row in native_rows(" UNION ALL ".join([one] * len(part)), [v for p in part for v in p]):
+            out[row["sid"]]["close_at_set"] = row["close"] * out[row["sid"]]["factor"]
+    return out
+
+
 # ═══════════════════════════ regime / changes ═══════════════════════════
 
 def regime():
@@ -681,22 +743,36 @@ _STATUS_SQL = """
     FROM ranked WHERE rn = 1
     ORDER BY started_at DESC
 """
-RUNNING_STALE_AFTER = timedelta(minutes=5)
+# Steps run from seconds to many hours (fetch_broker_recos ~90 min, cron_kite_bars a day), so a
+# RUNNING row is presumed crashed only past twice the step's longest successful run, never sooner
+# than the floor. (A flat 5 minutes reported every long step as "the run died" while it ran.)
+RUNNING_STALE_FLOOR = timedelta(minutes=30)
+RUNNING_STALE_MULT = 2
+
+
+def _running_limits():
+    """{step_name: timedelta} — how long a RUNNING row may stay open before it reads ABORTED."""
+    longest = {r["step_name"]: r["s"] or 0 for r in db.rows(
+        "SELECT step_name, MAX(duration_sec) AS s FROM pipeline_log WHERE status = 'SUCCESS' GROUP BY step_name")}
+    return {k: max(RUNNING_STALE_FLOOR, timedelta(seconds=RUNNING_STALE_MULT * s)) for k, s in longest.items()}
 
 
 def pipeline_status(days=7):
     """One row per (run_date, step) — its FINAL state — newest first; `days`=None
     for all history. The runner logs a RUNNING row then a SUCCESS/FAILED row per
     attempt: a completion row wins over RUNNING, SUCCESS over FAILED. A RUNNING
-    row older than RUNNING_STALE_AFTER with no completion is a crashed run → ABORTED."""
+    row with no completion open longer than its step's limit (_running_limits) is a
+    crashed run → ABORTED."""
     if days is None:
         steps = db.rows(_STATUS_SQL.format(where=""))
     else:
         steps = db.rows(_STATUS_SQL.format(where="WHERE run_date >= date('now', ?)"),
                         [f"-{days} days"])
-    cutoff = (datetime.now() - RUNNING_STALE_AFTER).isoformat()
+    now = datetime.now()
+    limits = _running_limits() if any(r["status"] == "RUNNING" for r in steps) else {}
     for r in steps:
-        if r["status"] == "RUNNING" and r["started_at"] and r["started_at"] < cutoff:
+        if r["status"] == "RUNNING" and r["started_at"] and \
+                r["started_at"] < (now - limits.get(r["step_name"], RUNNING_STALE_FLOOR)).isoformat():
             r["status"] = "ABORTED"
         label = retired_label(r["step_name"], r["run_date"])
         if label:

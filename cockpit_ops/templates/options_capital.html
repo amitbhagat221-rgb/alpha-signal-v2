@@ -1,0 +1,264 @@
+{% extends "ops_base.html" %}
+
+{% block content %}
+{% include "_options_styles.html" %}
+{% include "_options_nav.html" %}
+<div class="section-title">At your capital</div>
+<div class="section-desc">Any paper trade of the book, re-sized to as many whole lots as your capital covers on expiry day (entry margin + the exchange's extra 2% per sold option). Move the target index and the date to see the P&amp;L before expiry; the greeks and the P&amp;L table follow the same point. Live, the Tuesday 15:08 NIFTY buy-back lets one pot carry both indices; the paper book holds both to the Tuesday close.</div>
+
+{% if not views %}
+<div class="ob-card ob-muted">No paper trades yet.</div>
+{% else %}
+<script type="application/json" id="os-views">{{ views|tojson }}</script>
+<script type="application/json" id="os-backtest">{{ backtest|tojson }}</script>
+<div class="os-grid" id="os-capital" data-wing="{{ "%g"|format(wing_view_pct) }}">
+  <div class="os-left">
+    <div class="os-panel">
+      <div class="os-panel-h">Setup</div>
+      <div class="ob-tabs" role="tablist" data-g="u">
+        {% for u in ['NIFTY', 'SENSEX'] %}{% if views|selectattr('underlying', 'equalto', u)|list %}<button type="button" class="ob-tab" data-u="{{ u }}">{{ u }}</button>{% endif %}{% endfor %}
+      </div>
+      <div class="ob-tabs" role="tablist" data-g="mode">
+        <button type="button" class="ob-tab" data-mode="naked">Unprotected</button>
+        <button type="button" class="ob-tab" data-mode="winged">Protected ({{ "%g"|format(wing_view_pct) }}% wings)</button>
+      </div>
+      <label class="os-field">Margin capital (₹)
+        <input type="number" id="os-cap" min="0" step="10000" inputmode="numeric"></label>
+      <div class="ob-muted" style="margin-top: 4px;"><a href="#" id="os-cap-reset" class="os-link" style="margin: 0;">reset to one lot</a> <span id="os-cap-one"></span></div>
+      <label class="os-field">Or lots
+        <input type="number" id="os-lots" min="1" step="1" inputmode="numeric"></label>
+      <div class="ob-muted" id="os-size-note" style="margin-top: 4px;"></div>
+      <label class="os-field">Trade
+        <select id="os-trade"></select></label>
+      <div class="os-warn" id="os-warn" hidden></div>
+    </div>
+    <div class="os-panel">
+      <div class="os-panel-h"><span id="os-legs-h">Positions</span><span class="ob-muted" style="font-weight: 400;">P&amp;L at the target</span></div>
+      <div id="os-legs" style="margin-top: 8px;"></div>
+      <div class="os-legs-total"><span>Total</span><span id="os-legs-total">—</span></div>
+      <div class="ob-muted" id="os-legs-note" style="margin-top: 8px;"></div>
+    </div>
+  </div>
+
+  <div class="os-panel os-main" id="os-builder">
+    {% include "_options_builder.html" %}
+  </div>
+
+  <div class="os-right">
+    <div class="os-panel">
+      <div class="os-panel-h">Summary</div>
+      <div style="margin-top: 6px;">
+        <div class="os-sum"><span>Lots</span><span id="os-s-lots">—</span></div>
+        <div class="os-sum"><span>Reward / risk</span><span id="os-s-rr">—</span></div>
+        <div class="os-sum"><span>POP (at the target)</span><span id="os-s-pop">—</span></div>
+        <div class="os-sum"><span>Premium collected</span><span id="os-s-credit">—</span></div>
+        <div class="os-sum"><span>Worst week</span><span class="ob-bad" id="os-s-worst">—</span></div>
+      </div>
+      <div class="ob-muted" id="os-s-worst-note" style="margin-top: 4px;"></div>
+    </div>
+    <div class="os-panel">
+      <div class="os-panel-h">Funds &amp; margins</div>
+      <div style="margin-top: 6px;">
+        <div class="os-sum"><span>SPAN · every day</span><span id="os-m-span">—</span></div>
+        <div class="os-sum"><span>Exposure · 2% per sold option</span><span id="os-m-exposure">—</span></div>
+        <div class="os-sum"><span>Entry margin</span><span id="os-m-entry">—</span></div>
+        <div class="os-sum"><span>Expiry-day extra · +2% per sold option</span><span id="os-m-extra">—</span></div>
+        <div class="os-sum"><span><b>Peak, on expiry day</b></span><span id="os-m-peak">—</span></div>
+        <div class="os-sum"><span>Spare at the peak</span><span id="os-m-spare">—</span></div>
+      </div>
+      <div class="ob-muted" id="os-m-note" style="margin-top: 4px;"></div>
+    </div>
+  </div>
+</div>
+
+<div class="ob-card" style="margin-top: 16px;">
+  <b>Every <span class="os-u-name"></span> trade at this size</b> <span class="ob-muted">— each re-sized by its own expiry-day margin; P&amp;L scales per lot, costs included (brokerage is per order, so this slightly overstates costs at size). Click a row to load it above.</span>
+  <div class="ob-cap-tiles">
+    <div class="ob-tile"><div class="n" id="os-h-lots">—</div><div class="l">lots per trade</div></div>
+    <div class="ob-tile"><div class="n" id="os-h-net">—</div><div class="l">net P&amp;L, settled, after costs</div></div>
+    <div class="ob-tile"><div class="n" id="os-h-ret">—</div><div class="l">settled P&amp;L as % of capital</div></div>
+    <div class="ob-tile"><div class="n" id="os-h-open">—</div><div class="l">open trades, marked</div></div>
+    <div class="ob-tile"><div class="n" id="os-h-wins">—</div><div class="l">settled trades that made money</div></div>
+  </div>
+  <div class="os-bars"><canvas id="os-h-chart" aria-label="P&amp;L per trade at this size"></canvas></div>
+  <div class="ob-scroll">
+    <table class="ob-table" id="os-h-table" style="margin-top: 10px;"></table>
+  </div>
+</div>
+{% endif %}
+
+<script src="{{ vendor('chart') }}"></script>
+<script src="/static/options_strategy.js?v={{ asset_version('options_strategy.js') }}"></script>
+<script>
+// "At your capital" (plan 0029): the page's own state (index, protection, capital, trade) → OptStrategy's strategy;
+// capital and protection keep the keys the old /options calculator used, so a saved amount carries over
+(function () {
+  var el = document.getElementById('os-views');
+  if (!el) return;
+  var V = JSON.parse(el.textContent), BT = JSON.parse(document.getElementById('os-backtest').textContent);
+  var O = OptStrategy, root = document.getElementById('os-capital'), q = new URLSearchParams(location.search);
+  var MON = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+  function get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+  function put(k, v) { try { if (v === null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch (e) {} }
+  function byId(id) { return document.getElementById(id); }
+  var us = V.map(function (v) { return v.underlying; }).filter(function (u, i, a) { return a.indexOf(u) === i; });
+  var u = q.get('u') || get('os-capital-u'); if (us.indexOf(u) < 0) u = us[0];
+  var mode = q.get('mode') || get('ob-capital-mode'); if (mode !== 'winged') mode = 'naked';
+  var pick = {}, cap = {}, lots = 1, shownLots = 1, view;
+  // size by capital (lots = what it covers) or by lots (capital = the peak margin they need); the last box typed in wins
+  var sizeBy = q.get('lots') ? 'lots' : (get('os-capital-sizeby') === 'lots' ? 'lots' : 'capital'), fixedLots = {};
+
+  function mine() { return V.filter(function (v) { return v.underlying === u; }); }
+  function M(v) { return (mode === 'winged' && v.legs_winged) ? 'winged' : 'naked'; }
+  function peak(v) { return (v['margin_' + M(v)] || {}).expiry_margin_rs || 0; }
+  function oneLot() { return mine().reduce(function (a, v) { return Math.max(a, peak(v)); }, 0); }
+  function capital() { var c = parseFloat(byId('os-cap').value); return c >= 0 ? c : 0; }
+  function exp(d) { var p = d.split('-'); return p[2] + ' ' + MON[parseInt(p[1], 10) - 1]; }
+
+  function strategy() {
+    var md = M(view), legs = view['legs_' + md];
+    return {underlying: view.underlying, spot: view.spot, start: view.start, end: view.end, now: view.now, r: view.r,
+            step: view.step, atm_iv: view.atm_iv, oi: view.oi, oi_date: view.oi_date,
+            cost_rs: view['cost_' + md] * view.lot * shownLots,
+            legs: legs.map(function (l) {
+              return {cp: l.cp, K: l.K, side: l.side, entry: l.entry, now: l.now, iv: l.iv, qty: view.lot * shownLots,
+                      label: shownLots + ' × ' + exp(view.expiry) + ' ' + O.num(l.K) + ' ' + (l.cp === 'C' ? 'CE' : 'PE')};
+            })};
+  }
+  function setup() {
+    view = mine().filter(function (v) { return v.key === pick[u]; })[0] || mine()[0];
+    pick[u] = view.key;
+    var p = peak(view), c;
+    if (sizeBy === 'lots') {
+      lots = fixedLots[u] || 1;
+      c = lots * p;
+      byId('os-cap').value = Math.ceil(c);
+    } else {
+      c = capital();
+      lots = p > 0 ? Math.floor(c / p + 1e-9) : 0;
+      byId('os-lots').value = lots || '';
+    }
+    shownLots = Math.max(lots, 1);
+    byId('os-size-note').textContent = sizeBy === 'lots'
+      ? 'Sizing by lots: the capital above is the peak margin ' + lots + ' lot' + (lots === 1 ? '' : 's') + ' need on this trade. Type a capital to size by capital again.'
+      : 'Sizing by capital: lots = as many as it covers. Type lots to size by lots instead.';
+    var w = byId('os-warn'), msgs = [];
+    if (!lots) msgs.push('Capital below one lot\'s peak margin (' + O.inr(p) + '): shown for one lot.');
+    if (mode === 'winged' && !view.legs_winged) msgs.push('No traded wing that day: shown unprotected.');
+    w.hidden = !msgs.length; w.textContent = msgs.join(' ');
+    var md = M(view), mg = view['margin_' + md] || {};
+    byId('os-s-lots').textContent = lots + ' × ' + view.lot + ' = ' + O.num(lots * view.lot) + ' units';
+    byId('os-s-credit').textContent = O.inr(view['legs_' + md].reduce(function (a, l) { return a - l.side * l.entry; }, 0) * view.lot * shownLots);
+    var worst = md === 'winged' ? -(view.max_loss_winged || 0) * shownLots : -c * (-BT[u].worst_pct / 100);
+    byId('os-s-worst').textContent = O.inr(worst);
+    byId('os-s-worst-note').textContent = md === 'winged' ? 'Capped by the wings: the most one week can lose at this size.'
+      : 'One backtest-worst week (' + BT[u].worst_pct + '% of margin, ' + BT[u].window + ') at this capital; unprotected, a gap can lose more.';
+    [['span', mg.span_rs], ['exposure', mg.exposure_rs], ['entry', (mg.span_rs || 0) + (mg.exposure_rs || 0)], ['extra', mg.expiry_extra_rs], ['peak', p]].forEach(function (x) {
+      byId('os-m-' + x[0]).textContent = O.inr((x[1] || 0) * shownLots);
+    });
+    var spare = byId('os-m-spare'); spare.textContent = O.inr(c - p * lots); O.tone(spare, c - p * lots);
+    byId('os-m-note').textContent = md === 'winged' ? 'Protected margin ≈ 4% of notional + the wing width (Kite 2026-10-29), + the expiry-day extra.'
+      : (view.margin_source === 'kite' ? 'Kite basket quote on the entry day' : 'No Kite quote that day: 12% of notional assumed') + '; SPAN = the quote less exposure. SPAN is recomputed through the day: keep spare for a move towards a strike.';
+    byId('os-cap-one').textContent = '(' + O.inr(oneLot()) + ')';
+    byId('os-legs-h').textContent = view.underlying + ' ' + exp(view.expiry) + ' · ' + (view.status === 'SETTLED' ? 'settled' : 'open');
+    byId('os-legs-note').textContent = 'Entered at the close ' + view.entry_date + ' (exchange settle prices); last price = '
+      + (view.status === 'SETTLED' ? 'the value at settlement, index ' + O.num(view.settle_index, 2) : 'the settle of ' + view.spot_date) + '.';
+    drawLegs(null);
+    history();
+  }
+  function drawLegs(s) {
+    var st = strategy(), tot = 0;
+    byId('os-legs').innerHTML = st.legs.map(function (l, i) {
+      var p = s ? s.legs[i].pnl : null; if (p !== null) tot += p;
+      return '<div class="os-leg"><span class="' + (l.side < 0 ? 'os-tag-s' : 'os-tag-b') + '">' + (l.side < 0 ? 'S' : 'B') + '</span><span>' + l.label + '</span>'
+        + '<span class="' + (p > 0.5 ? 'ob-ok' : p < -0.5 ? 'ob-bad' : '') + '">' + (p === null ? '—' : O.signed(p)) + '</span>'
+        + '<span class="os-sub ob-muted">entry ' + l.entry.toFixed(2) + (l.now !== null && l.now !== undefined ? ' · last ' + l.now.toFixed(2) : '') + (l.iv ? ' · IV ' + (100 * l.iv).toFixed(1) + '%' : '') + '</span></div>';
+    }).join('');
+    var t = byId('os-legs-total');
+    if (s) { t.textContent = O.signed(s.target); O.tone(t, s.target); }
+  }
+  var hchart = null;
+  function history() {
+    var c = capital(), rows = mine().slice().reverse(), settled = 0, open = 0, nOpen = 0, wins = 0, nSet = 0, seen = [], cum = 0, bars = [], line = [], labels = [];
+    var html = '<tr><th>Entry</th><th>Expiry</th><th>Sold</th><th>Lots</th><th>Margin at peak</th><th>Status</th><th>P&amp;L at this size</th><th>% of capital</th></tr>';
+    rows.forEach(function (v) {
+      var md = M(v), p = peak(v), n = sizeBy === 'lots' ? lots : p > 0 ? Math.floor(c / p + 1e-9) : 0, pl = v['pnl_' + md];
+      seen.push(n);
+      var val = pl === null || pl === undefined ? null : pl * n;
+      if (val !== null) { if (v.status === 'SETTLED') { settled += val; nSet++; if (val > 0) wins++; cum += val; } else { open += val; nOpen++; } }
+      labels.push(v.underlying + ' ' + exp(v.expiry)); bars.push(val === null ? 0 : val); line.push(v.status === 'SETTLED' ? cum : null);
+      var sold = v.legs_naked.map(function (l) { return O.num(l.K) + (l.cp === 'C' ? ' CE' : ' PE'); }).join(' · ');
+      html += '<tr class="ob-trade' + (v.key === view.key ? ' os-cur' : '') + '" data-key="' + v.key + '" style="cursor: pointer;"><td>' + v.entry_date + '</td><td>' + v.expiry + '</td><td>' + sold + '</td><td>' + n + '</td><td>' + O.inr(p * n) + '</td><td>' + (v.status === 'SETTLED' ? 'settled ' + O.num(v.settle_index) : '<span class="ob-warn">open</span>') + '</td>'
+        + '<td class="' + (val > 0.5 ? 'ob-ok' : val < -0.5 ? 'ob-bad' : '') + '">' + (val === null ? '—' : O.signed(val)) + '</td><td>' + (val === null || !c ? '—' : (100 * val / c).toFixed(2) + '%') + '</td></tr>';
+    });
+    byId('os-h-table').innerHTML = html;
+    Array.prototype.forEach.call(document.querySelectorAll('.os-u-name'), function (e) { e.textContent = u; });
+    var lo = Math.min.apply(null, seen), hi = Math.max.apply(null, seen);
+    byId('os-h-lots').textContent = lo === hi ? String(lo) : lo + '–' + hi;
+    var n1 = byId('os-h-net'); n1.textContent = O.signed(settled); O.tone(n1, settled);
+    var r1 = byId('os-h-ret'); r1.textContent = c ? ((settled >= 0 ? '+' : '') + (100 * settled / c).toFixed(2) + '%') : '—'; O.tone(r1, settled);
+    var o1 = byId('os-h-open'); o1.textContent = nOpen ? O.signed(open) : '—'; O.tone(o1, open);
+    byId('os-h-wins').textContent = nSet ? wins + ' / ' + nSet : '—';
+    if (typeof Chart === 'undefined') return;
+    var cs = getComputedStyle(document.documentElement), G = cs.getPropertyValue('--green').trim(), Rd = cs.getPropertyValue('--red').trim(), Mu = cs.getPropertyValue('--text-muted').trim(), Bd = cs.getPropertyValue('--border').trim(), Ac = cs.getPropertyValue('--accent').trim();
+    var data = {labels: labels, datasets: [
+      {type: 'bar', label: 'P&L at this size', data: bars, backgroundColor: bars.map(function (b) { return b >= 0 ? G : Rd; }), order: 2},
+      {type: 'line', label: 'Cumulative, settled', data: line, borderColor: Ac, pointRadius: 3, spanGaps: true, order: 1}]};
+    if (hchart) { hchart.data = data; hchart.update('none'); return; }
+    hchart = new Chart(byId('os-h-chart'), {data: data, options: {animation: false, maintainAspectRatio: false,
+      plugins: {legend: {labels: {color: Mu}}, tooltip: {callbacks: {label: function (it) { return it.dataset.label + ': ' + O.signed(it.parsed.y); }}}},
+      scales: {x: {ticks: {color: Mu}, grid: {display: false}}, y: {ticks: {color: Mu, callback: function (v) { return O.inr(v); }}, grid: {color: Bd}}}}});
+  }
+  function onUpdate(s) {
+    drawLegs(s);
+    byId('os-s-pop').textContent = (100 * s.pop).toFixed(0) + '%';
+    byId('os-s-rr').textContent = isFinite(s.maxP) && isFinite(s.maxL) && s.maxL < 0 ? '1 : ' + (-s.maxL / s.maxP).toFixed(1) + ' (gain : loss)' : 'NA';
+  }
+  function fillTrades() {
+    byId('os-trade').innerHTML = mine().map(function (v) {
+      return '<option value="' + v.key + '"' + (v.key === pick[u] ? ' selected' : '') + '>' + v.entry_date + ' → ' + v.expiry + ' · ' + (v.status === 'SETTLED' ? 'settled' : 'open') + '</option>';
+    }).join('');
+  }
+  function syncTabs() {
+    Array.prototype.forEach.call(root.querySelectorAll('[data-u]'), function (b) { b.classList.toggle('ob-tab-on', b.dataset.u === u); });
+    Array.prototype.forEach.call(root.querySelectorAll('[data-mode]'), function (b) { b.classList.toggle('ob-tab-on', b.dataset.mode === mode); });
+  }
+  function loadCap() {
+    var fromUrl = q.get('capital_' + u) || q.get('capital'), saved = get('ob-capital-' + u);
+    var c = cap[u] !== undefined ? cap[u] : fromUrl && parseFloat(fromUrl) >= 0 ? parseFloat(fromUrl) : saved && parseFloat(saved) >= 0 ? parseFloat(saved) : oneLot();
+    byId('os-cap').value = Math.round(c);
+    var nl = parseInt(q.get('lots_' + u) || q.get('lots') || get('os-capital-lots-' + u), 10);
+    if (fixedLots[u] === undefined && nl >= 1) fixedLots[u] = nl;
+    if (fixedLots[u]) byId('os-lots').value = fixedLots[u];
+  }
+  var B;
+  function all(keep) {
+    setup(); syncTabs();
+    if (B) B.refresh(keep); else B = O.mount(byId('os-builder'), {get: strategy, pctBase: capital, pctLabel: 'capital', onUpdate: onUpdate});
+    put('os-capital-u', u); put('ob-capital-mode', mode);
+  }
+  Array.prototype.forEach.call(root.querySelectorAll('[data-u]'), function (b) {
+    b.addEventListener('click', function () { u = b.dataset.u; loadCap(); fillTrades(); all(false); });
+  });
+  Array.prototype.forEach.call(root.querySelectorAll('[data-mode]'), function (b) {
+    b.addEventListener('click', function () { mode = b.dataset.mode; all(true); });
+  });
+  byId('os-cap').addEventListener('input', function () {
+    sizeBy = 'capital'; put('os-capital-sizeby', null);
+    cap[u] = capital(); put('ob-capital-' + u, Math.abs(cap[u] - oneLot()) < 1 ? null : String(cap[u])); all(true);
+  });
+  byId('os-lots').addEventListener('input', function () {
+    var n = parseInt(byId('os-lots').value, 10);
+    if (!(n >= 1)) return;
+    sizeBy = 'lots'; fixedLots[u] = n; put('os-capital-sizeby', 'lots'); put('os-capital-lots-' + u, String(n)); all(true);
+  });
+  byId('os-cap-reset').addEventListener('click', function (e) { e.preventDefault(); sizeBy = 'capital'; put('os-capital-sizeby', null); cap[u] = oneLot(); byId('os-cap').value = Math.round(cap[u]); put('ob-capital-' + u, null); all(true); });
+  byId('os-trade').addEventListener('change', function () { pick[u] = byId('os-trade').value; all(false); });
+  byId('os-h-table').addEventListener('click', function (e) {
+    var tr = e.target.closest('tr[data-key]'); if (!tr) return;
+    pick[u] = tr.dataset.key; fillTrades(); all(false); byId('os-builder').scrollIntoView({behavior: 'smooth', block: 'start'});
+  });
+  loadCap(); fillTrades(); all(false);
+})();
+</script>
+{% endblock %}

@@ -110,3 +110,18 @@ def test_points_weigh_integrity_double_and_cap():
     assert n["integrity"] == {"medium": 1, "low": 1} and n["business"] == {"medium": 1, "low": 1}
     many = {"multibagger_case": "weak", "red_flags": [{"area": "governance", "severity": "medium"}] * 50}
     assert r.points(many)[0] == MB_THESIS["research_overlay"]["max_penalty"] and r.points(many)[1] == 0.0
+
+
+def test_unresearched_names_are_not_ranked(monkeypatch):
+    """An unresearched name has no flag points, so it waits for research instead of outranking researched names."""
+    from output import mb_research as r
+    import pandas as pd
+    monkeypatch.setattr(r.db, "one", lambda sql, params=None: {"d": "2026-10-17"})
+    monkeypatch.setattr(r.db, "read_sql", lambda sql, params=None: pd.DataFrame(
+        {"sid": ["A", "B"], "thesis_rank": [1.0, 2.0], "thesis_score": [0.9, 0.8], "ticker": ["A", "B"], "name": ["A", "B"]}))
+    f = '{"red_flags": [{"area": "business", "severity": "medium"}], "multibagger_case": "weak"}'
+    monkeypatch.setattr(r.db, "rows", lambda sql, params=None: [
+        {"sid": "B", "as_of_date": "2026-10-16", "verdict": "flag", "multibagger_case": "weak", "verdict_reason": "x",
+         "case_reason": "y", "fields": f, "sector": "S", "sub_sector": "s"}])
+    o = r.overlay()
+    assert o.loc[o.sid == "B", "research_rank"].iloc[0] == 1 and o.loc[o.sid == "A", "research_rank"].isna().all()

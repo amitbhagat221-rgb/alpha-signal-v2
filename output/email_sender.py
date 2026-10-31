@@ -358,6 +358,17 @@ def _warning_banner(warnings):
     """
 
 
+def _unproven_note(why):
+    """The amber "Unproven" pill + its reason for a tier header (views.unproven_tiers), or ""."""
+    if not why:
+        return ""
+    return (f'<span style="background:{C_AMBER_BG};color:{C_AMBER};padding:2px 8px;'
+            f'border-radius:10px;font-size:11px;font-weight:700;margin-left:8px">'
+            f'{views.UNPROVEN_WORD}</span>'
+            f'<div style="color:{C_AMBER};font-size:12px;margin-top:4px">'
+            f'{why[:1].upper()}{why[1:]}. Treat these as a list, not a call.</div>')
+
+
 def _build_html(warnings=()):
     today_human = date.today().strftime("%A, %d %B %Y")
 
@@ -428,9 +439,10 @@ def _build_html(warnings=()):
     dossiers_by_sid = {sid: d for sid, (d, _, _) in views.dossier_index(max_age_days=0).items()
                        if is_publishable(d)}
 
-    # Per-tier sections, one per pickable tier (config.TIERS)
+    # Per-tier sections, one per pickable tier, in the cockpit's order (unproven tiers last)
     tier_blocks = []
-    for tier_key in views.pickable_tiers():
+    unproven = views.unproven_tiers()
+    for tier_key in views.display_tiers():
         tier_name = tier_label(tier_key)
         alloc = (regime or {}).get(f"alloc_{tier_key.lower()}")
         tier_picks = picks[picks["cap_tier"] == tier_key].head(TOP_N_PER_TIER.get(tier_key, 0))
@@ -445,6 +457,7 @@ def _build_html(warnings=()):
             f'border-radius:10px;font-size:11px;font-weight:700;margin-left:8px">'
             f'{alloc:.0%} alloc</span>' if alloc is not None else ""
         )
+        unproven_html = _unproven_note(unproven.get(tier_key))
         tier_blocks.append(f"""
         <div style="margin-top:18px;margin-bottom:6px">
           <span style="font-size:14px;font-weight:800;color:{C_TEXT};
@@ -452,6 +465,7 @@ def _build_html(warnings=()):
           <span style="color:{C_FAINT};font-size:12px;margin-left:6px">
             top {len(tier_picks)}</span>
           {alloc_html}
+          {unproven_html}
         </div>
         {cards}
         """)

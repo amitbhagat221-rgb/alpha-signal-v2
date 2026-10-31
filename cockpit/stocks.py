@@ -20,7 +20,6 @@ import views
 from db import read_sql
 from cockpit import api, playbooks
 from cockpit._shared import _ttl_cache
-from validators.plausibility import PT_CLOSE_RATIO
 
 PAGE_SIZE = 100
 
@@ -35,19 +34,6 @@ SORTS = {                      # key -> (label, default direction)
     "change": ("Rank change", "desc"), "data": ("Data", "desc"), "pt": ("Median target", "desc"),
     "long": ("Long-hold rank", "asc"),
 }
-
-
-def _median_upside(pt_median, close):
-    """% upside of the median analyst target over the latest close; None when there is no
-    target or it is implausible against the close (validators.plausibility.PT_CLOSE_RATIO)."""
-    try:
-        pt, px = float(pt_median), float(close)
-    except (TypeError, ValueError):
-        return None
-    lo, hi = PT_CLOSE_RATIO
-    if pt != pt or px != px or px <= 0 or pt <= 0 or pt > hi * px or pt < lo * px:
-        return None
-    return round((pt / px - 1) * 100, 1)
 
 
 def _rank_changes(today, yesterday):
@@ -78,10 +64,9 @@ def universe():
     tier_size = views.tier_sizes(as_of) if as_of else {}
 
     close = {sid: c for sid, (c, _) in views.latest_close().items()}      # all sids: one grouped read, not 2,400 windows
-    targets = {r["sid"]: r["price_target_median"] for r in views.native_rows(
-        "SELECT sid, price_target_median FROM analyst_consensus WHERE price_target_median IS NOT NULL")}
-    analysts = {r["sid"]: r["total_analysts"] for r in views.native_rows(
-        "SELECT sid, total_analysts FROM analyst_consensus WHERE price_target_median IS NOT NULL")}
+    # the stock page's own target rule (rebased, never implausible, stale or under 3 analysts)
+    targets = api.get_analyst_consensus_batch([r["sid"] for r in views.native_rows(
+        "SELECT sid FROM analyst_consensus WHERE price_target_median IS NOT NULL")])
     forensic = views.latest_per_sid("forensic_scores", ["m_score_flag", "z_score_flag"])
     forensic = {r.sid: (r.m_score_flag, r.z_score_flag) for r in forensic.itertuples()}
     avoid = playbooks.avoid_list()["flag_counts"]
@@ -119,8 +104,8 @@ def universe():
             "forensic": [x for x, on in (("Accounts", accounts), ("Distress", distressed)) if on],
             "veto": s.sid in veto,
             "plays": sorted(plays.get(s.sid, ())),
-            "pt_up": _median_upside(targets.get(s.sid), close.get(s.sid)),
-            "analysts": int(analysts[s.sid]) if analysts.get(s.sid) else None,
+            "pt_up": targets.get(s.sid, {}).get("pt_upside_median_pct"),
+            "analysts": int(targets[s.sid]["total_analysts"]) if targets.get(s.sid, {}).get("total_analysts") else None,
         })
     for r in rows:
         r["flagged"] = bool(r["avoid"] or r["forensic"] or r["veto"])

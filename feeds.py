@@ -452,13 +452,14 @@ FEEDS = {
     "nse_results_xbrl": {
         "family": "fundamentals", "status": "probation",
         "what": "Quarterly results on filing day (first-reported, timestamped XBRL)",
-        "modules": ["sources.nse_results"], "schedule": ["cron:backfill"],
+        "modules": ["sources.nse_results"], "schedule": ["manual"],
         "writes": ["quarterly_results_nse"], "hosts": ["nse", "nse_archives"], "cadence": "quarterly",
         "routes": [_r("nse_results_index", "primary", "nse", "corporates-financial-results (warm session) → XBRL .xml on nsearchives")],
         "serve_stale_days": 400, "canary": "nse_results_xbrl",
         "pit": "filed_at = NSE broadcast time; a revision is a later filed_at", "tos": "public exchange data",
         "notes": "Promoted to probation 2026-10-13 on a 3-stock smoke (SSWL / TIMETECHNO / NETWEB match quarterly_income within 0.5 %). "
-                 "One-off history backfill 2017 → 2024 for plan 0025 5.1, in the temporary `run.sh backfill` windows (2025+ needs the integrated-filing route).",
+                 "One-off history backfill 2017 → 2024 for plan 0025 5.1 done 2026-10-23 (2,201 stocks; the `run.sh backfill` job is retired). "
+                 "No forward schedule yet: 2025+ needs the integrated-filing route.",
         "need": "fix the up-to-a-month Tickertape lag; fallback for tickertape_fundamentals",
         "probe": ("WORKS", "2026-09-28", "corporates-financial-results XBRL ≤Dec-2024; 2025+ at integrated-filing-results"),
         "ref": "research 0005 A3",
@@ -499,8 +500,8 @@ FEEDS = {
         "family": "prices", "status": "candidate",
         "what": "Legacy NSE CM bhavcopy archive incl. delisted names (1994+), for a survivorship-free panel",
         "need": "plan 0014 D3 (floor corrected from ~2023)",
-        "notes": "2026-10-04: prices 2015-01 → 2019-12 are being loaded by `python -m sources.nse --legacy` "
-                 "(run.sh backfill; source='legacy_bhavcopy', universe rows → stock_prices, the rest → "
+        "notes": "2018-03 → 2019-12 loaded by `python -m sources.nse --legacy` (the `run.sh backfill` job, retired 2026-10-23; "
+                 "manual now; source='legacy_bhavcopy', universe rows → stock_prices, the rest → "
                  "stock_prices_unlisted). Still a candidate for the ISIN-keyed, pre-2015 survivorship panel",
         "probe": ("WORKS", "2026-09-28", "2015: ~715 of 1,510 symbols not in today's universe; PREVCLOSE is UNADJUSTED"),
         "ref": "research 0005 A1",

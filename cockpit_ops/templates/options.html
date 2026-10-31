@@ -1,47 +1,8 @@
 {% extends "ops_base.html" %}
 
 {% block content %}
-<style>
-  .ob-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 12px; margin: 12px 0 20px; }
-  .ob-tile { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: 12px 16px; }
-  .ob-tile .n { font-size: 24px; font-weight: 800; font-family: 'JetBrains Mono', monospace; line-height: 1.1; }
-  .ob-tile .l { font-size: 12px; color: var(--text-secondary); margin-top: 4px; }
-  .ob-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: 12px 16px; margin-bottom: 16px; }
-  .ob-row { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: space-between; }
-  .ob-btn { display: inline-block; padding: 8px 16px; border-radius: 8px; background: var(--accent); color: #fff; font-weight: 700; font-size: 13px; text-decoration: none; }
-  .ob-ok { color: var(--green); } .ob-warn { color: var(--amber); } .ob-bad { color: var(--red); }
-  .ob-muted { color: var(--text-secondary); font-size: 12px; }
-  .ob-table { width: 100%; border-collapse: collapse; font-size: 12px; }
-  .ob-table th { text-align: left; font-size: 10px; font-weight: 700; letter-spacing: 0.6px; text-transform: uppercase; color: var(--text-muted); padding: 8px; }
-  .ob-table td { padding: 8px; border-top: 1px solid var(--border); font-family: 'JetBrains Mono', monospace; white-space: nowrap; }
-  .ob-table td.ob-wrap { white-space: normal; min-width: 160px; }
-  .ob-scroll { overflow-x: auto; }
-  .ob-rule td:first-child { color: var(--text-muted); font-family: inherit; width: 140px; }
-  .ob-rule td { font-family: inherit; white-space: normal; }
-  .ob-cap { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; }
-  .ob-cap input { width: 150px; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg-input, var(--bg-card)); color: var(--text-primary); font-family: 'JetBrains Mono', monospace; font-size: 14px; }
-  .ob-table td.ob-scaled { font-weight: 700; }
-  tr.ob-trade:hover td { background: var(--bg-hover, rgba(255,255,255,0.02)); }
-  .ob-cap-box { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); }
-  .ob-cap-h { font-size: 15px; min-width: 64px; }
-  .ob-cap-sub { margin-top: 10px; }
-  .ob-cap-input { max-width: 100%; }
-  .ob-cap-reset { white-space: nowrap; }
-  .ob-cap-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 12px; margin-top: 12px; }
-  .ol-live { border-color: var(--accent); }
-  .ol-sub { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
-  .ol-btns { display: flex; flex-wrap: wrap; gap: 8px; }
-  .ol-act, .ol-save, .ol-apply { border: 0; cursor: pointer; font-family: inherit; }
-  .ol-cur td { background: var(--bg-hover, rgba(127,127,127,0.12)); }
-  .ol-btn-stop { background: var(--red); }
-  .ol-mode { display: inline-block; margin-left: 8px; padding: 2px 8px; border-radius: 6px; font-size: 11px; font-weight: 800; letter-spacing: 0.4px; background: var(--bg-hover, rgba(127,127,127,0.15)); }
-  .ol-mode-shadow { color: var(--text-secondary); }
-  .ol-mode-approve { color: var(--amber); }
-  .ol-mode-auto, .ol-mode-kill { color: #fff; background: var(--red); }
-  .ol-mode-off { color: var(--text-muted); }
-  .ol-set { margin-top: 8px; }
-  .ol-set select, .ol-set input[type=number] { padding: 6px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg-input, var(--bg-card)); color: var(--text-primary); font-size: 14px; width: 120px; }
-</style>
+{% include "_options_styles.html" %}
+{% include "_options_nav.html" %}
 
 {% set S = summary %}
 <div class="section-title">Options Paper Book</div>
@@ -59,156 +20,19 @@
   <a class="ob-btn" href="/kite/login">Log in to Kite</a>
 </div>
 
-{# ── plan 0029: the live book (options_live.page_data). Buttons POST with the session cookie after a confirm. ── #}
-<div class="ob-card ol-live" id="live">
-  {% if live_error %}
-  <b class="ob-bad">Live panel unavailable:</b> <span class="ob-muted">{{ live_error }}</span>
-  {% elif live %}
-  {% set L = live %}{% set st = L.settings %}
-  <div class="ob-row">
-    <div>
-      <b>Live book</b>
-      <span class="ol-mode {{ 'ol-mode-' ~ st.mode }}">{{ {"off": "OFF", "shadow": "SHADOW · no orders", "approve": "APPROVE · real orders after you tap", "auto": "AUTO · real orders"}[st.mode] }}</span>
-      {% if st.kill %}<span class="ol-mode ol-mode-kill">STOPPED</span>{% endif %}
-      <div class="ob-muted">Plan 0029. Caps NIFTY {{ st.lots_cap.NIFTY }} · SENSEX {{ st.lots_cap.SENSEX }} lot(s) · buffer {{ st.margin_buffer_rs|inr_short }} · weekly loss limit {{ st.weekly_loss_limit_rs|inr_short }} · VIX guard: half the lots above {{ st.vix_halve }}, no entry at {{ st.vix_halt }} or more · {% if st.wing_pct %}wings {{ st.wing_pct }}% beyond the sold strikes (bought first){% else %}no wings{% endif %}{% if st.adopt_manual_nifty %} · Tuesday buy-back also closes your own NIFTY legs{% endif %}.
-        {% if st.kill %}<br><b class="ob-bad">Entries stopped:</b> {{ st.kill_reason or "kill switch on" }}.{% endif %}</div>
-    </div>
-    <div class="ol-btns">
-      {% if st.kill %}<button class="ob-btn ol-act" data-url="/api/options/live/kill" data-body='{"on": false}' data-word="RESUME" data-ask="Resume new entries?">Resume</button>
-      {% else %}<button class="ob-btn ol-act ol-btn-stop" data-url="/api/options/live/kill" data-body='{"on": true}' data-word="STOP" data-ask="Stop: no new entries (buy-backs still run)?">Stop</button>{% endif %}
-      <button class="ob-btn ol-act ol-btn-stop" data-url="/api/options/live/closeall" data-body='{}' data-word="CLOSE ALL" data-type="1" data-ask="Close all: stop, then buy back EVERY tagged leg now at the ask. Type CLOSE ALL to confirm.">Close all</button>
-    </div>
+{# ── plan 0029: the live book has its own page (/options/live); this card says where it stands ── #}
+<div class="ob-card ol-live ob-row" id="live">
+  {% if live_error %}<div><b class="ob-bad">Live panel unavailable:</b> <span class="ob-muted">{{ live_error }}</span></div>
+  {% elif live %}{% set L = live %}{% set st = L.settings %}
+  <div>
+    <b>Live book</b>
+    <span class="ol-mode {{ 'ol-mode-' ~ st.mode }}">{{ {"off": "OFF", "shadow": "SHADOW · no orders", "approve": "APPROVE · real orders after you tap", "auto": "AUTO · real orders"}[st.mode] }}</span>
+    {% if st.kill %}<span class="ol-mode ol-mode-kill">STOPPED</span>{% endif %}
+    {% if L.ticket and L.ticket.pending %}<span class="ol-mode ol-mode-approve">TICKET WAITING</span>{% endif %}
+    {% set ns = namespace(mtm=0) %}{% for l in L.open %}{% set ns.mtm = ns.mtm + (l.mtm_rs or 0) %}{% endfor %}
+    <div class="ob-muted">{{ L.open|length }} open leg{{ '' if L.open|length == 1 else 's' }}{% if L.open %}, marked {{ ns.mtm|inr_short }}{% endif %} · this week realised live {{ L.week.live|inr_short }}{% if L.margin %} · margin used {{ L.margin.used|inr_short }} of {{ L.margin.total|inr_short }}{% endif %}</div>
   </div>
-
-  {% if L.ticket %}{% set T = L.ticket %}
-  <div class="ol-sub">
-    <b>Ticket {{ T.underlying }} {{ T.expiry }}</b> <span class="ob-muted">({{ T.trade_date }}, {{ T.status }})</span>
-    <div class="ob-muted">{% for l in T.legs %}{{ 'buy' if l.side == 'BUY' else 'sell' }} {{ l.quantity }} × {{ l.tradingsymbol }}{% if l.price %} at {{ 'ask' if l.side == 'BUY' else 'bid' }} {{ l.price }}{% endif %}{% if not loop.last %} · {% endif %}{% endfor %}
-      {% if T.detail.margin_rs %} · margin {{ T.detail.margin_rs|inr_short }}{% endif %}</div>
-    {% if T.pending %}<button class="ob-btn ol-act" data-url="/api/options/live/approve" data-body='{"ticket_id": "{{ T.ticket_id }}"}' data-word="APPROVE" data-ask="Approve: place these orders now (limit at the bid, re-priced to 15:29)?">Approve</button>
-    <span class="ob-muted">before {{ st.approve_by }} IST, or nothing is placed.</span>{% endif %}
-  </div>
-  {% endif %}
-
-  <div class="ol-sub ob-muted">
-    Today: rotation {% if L.rotation %}<b class="{{ 'ob-ok' if L.rotation.ok else 'ob-bad' }}">{{ 'OK' if L.rotation.ok else 'FAILED' }}</b> — {{ L.rotation.detail }}{% else %}not run{% endif %}
-    · reconcile {% if L.reconcile %}<b class="{{ 'ob-ok' if L.reconcile.ok else ('ob-bad' if L.reconcile.ok == false else 'ob-warn') }}">{{ {True: 'clean', False: 'MISMATCH', None: 'not run'}[L.reconcile.ok] }}</b> {{ (L.reconcile.at or '')[:16] }} — {{ L.reconcile.detail }}{% else %}never run{% endif %}
-    · this week realised: shadow {{ L.week.shadow|inr_short }}, live {{ L.week.live|inr_short }}
-  </div>
-
-  {% set M = L.margin %}
-  <div class="ol-sub">
-    <b>Margin</b>
-    {% if M %}
-    <div class="ob-cap-tiles">
-      <div class="ob-tile"><div class="n">{{ M.used|inr_short }}</div><div class="l">used by your positions (SPAN {{ M.span|inr_short }} + exposure {{ M.exposure|inr_short }})</div></div>
-      <div class="ob-tile"><div class="n {% if M.free_after_buffer < 0 %}ob-bad{% else %}ob-ok{% endif %}">{{ M.free|inr_short }}</div><div class="l">free for new trades ({{ M.free_after_buffer|inr_short }} after the {{ st.margin_buffer_rs|inr_short }} buffer)</div></div>
-      <div class="ob-tile"><div class="n">{{ M.total|inr_short }}</div><div class="l">total margin (cash {{ M.cash|inr_short }} + collateral {{ M.collateral|inr_short }})</div></div>
-      <div class="ob-tile"><div class="n">{{ (100 * M.used / M.total)|round|int if M.total else 0 }}%</div><div class="l">of total margin in use</div></div>
-    </div>
-    <div class="ob-muted" style="margin-top: 6px;">From Kite, {{ M.at_ist }} (read at the 10:00 and 15:01 IST mark and the 15:45 record, on days you are logged in).{% if L.margin_open %} The open legs below need {{ L.margin_open|inr_short }} on their own{% if L.margin_open_missing %}; {{ L.margin_open_missing }} leg(s) have no margin yet{% endif %}.{% endif %}</div>
-    {% else %}
-    <div class="ob-muted">Not read yet. Kite's margin is read at the 10:00 and 15:01 IST mark and the 15:45 record, on a day you are logged in.{% if L.margin_open %} The open legs below need {{ L.margin_open|inr_short }}.{% endif %}</div>
-    {% endif %}
-  </div>
-
-  {% set Z = L.sizing %}
-  <div class="ol-sub" id="ol-sizing">
-    <b>Sizing choices for the next entries</b>
-    {% if Z.choices %}{% set Q = Z.quote %}
-    <div class="ob-muted">On {{ M.total|inr_short }} (cash + collateral, Kite {{ M.at_ist }}). Margin per lot quoted {{ Q.at_ist }} for NIFTY {{ Q.markets.NIFTY.expiry }} (unprotected {{ Q.markets.NIFTY.naked.margin|inr_short }}, protected {{ Q.markets.NIFTY.winged.margin|inr_short }}) and SENSEX {{ Q.markets.SENSEX.expiry }} ({{ Q.markets.SENSEX.naked.margin|inr_short }} / {{ Q.markets.SENSEX.winged.margin|inr_short }}), each + {{ Q.markets.NIFTY.extra|inr_short }} on expiry day. Protected = wings {{ Q.wing_pct }}% beyond the sold strikes, bought first.
-      <b>Expected a week</b>: both indices, premium kept after losing weeks (backtest 2019–26) less charges; quoted days before entry, so entry-day premiums run a little lower.
-      <b>Crash</b>: a −{{ (100 * Z.rules.crash_gap)|round(1) }}% gap (2020-03-23) on one index while its trade is open (the two never overlap); the VIX guard covers a crash that builds up.</div>
-    <div class="ob-scroll">
-    <table class="ob-table">
-      <tr><th></th><th>Setup</th><th>NIFTY lots</th><th>SENSEX lots</th><th>Expected a week</th><th>Crash loss</th><th>Of your money</th><th></th></tr>
-      {% for c in Z.choices %}
-      <tr class="{{ 'ol-cur' if c.current else '' }}"><td><b>{{ c.key }}</b></td>
-        <td class="ob-wrap">{{ c.label }}{% if c.current %} <span class="ol-mode">NOW</span>{% endif %}</td>
-        <td>{{ c.per.NIFTY.lots }}</td><td>{{ c.per.SENSEX.lots }}</td><td class="ob-ok">{{ c.weekly|inr_short }}</td>
-        <td class="ob-bad">−{{ c.crash|inr_short }}</td>
-        <td class="{{ 'ob-bad' if c.crash_pct > Z.rules.crash_budget + 0.005 else 'ob-ok' }}">{{ (100 * c.crash_pct)|round|int }}%</td>
-        <td>{% if not c.current %}<button class="ob-btn ol-apply" data-key="{{ c.key }}" data-wing="{{ c.wing_pct }}" data-caps='{{ c.caps|tojson }}'>Apply</button>{% endif %}</td></tr>
-      {% endfor %}
-    </table>
-    </div>
-    <div class="ob-muted">Apply sets the wings and both lot caps; the next entry still sizes down on its own if Kite's margin then is higher.</div>
-    {% else %}<div class="ob-muted">No quote yet: it is taken at the 10:00 and 15:01 IST mark on a day you are logged in to Kite (or by hand: <code>run.sh options_live quote</code>).</div>{% endif %}
-  </div>
-
-  <div class="ob-scroll ol-sub">
-    <b>Open live legs</b>
-    {% if L.open %}
-    <table class="ob-table">
-      <tr><th>Source</th><th>Contract</th><th>Expiry</th><th>Qty</th><th>Opened at</th><th>Mark</th><th>MTM</th><th>Margin</th></tr>
-      {% for l in L.open %}
-      <tr><td>{{ l.source }}</td><td>{{ l.tradingsymbol }}</td><td>{{ l.expiry }}</td><td>{{ l.net_qty }}</td>
-        <td>{% if l.net_qty > 0 %}bought {{ "%.2f"|format(l.buy_avg) if l.buy_avg else "—" }}{% else %}sold {{ "%.2f"|format(l.sell_avg) if l.sell_avg else "—" }}{% endif %}</td><td>{{ "%.2f"|format(l.mark_price) if l.mark_price is not none else "—" }}</td>
-        <td class="{% if l.mtm_rs and l.mtm_rs > 0 %}ob-ok{% elif l.mtm_rs and l.mtm_rs < 0 %}ob-bad{% endif %}">{{ l.mtm_rs|inr_short if l.mtm_rs is not none else "—" }}</td>
-        <td>{{ (l.mark_margin_rs or l.margin_rs)|inr_short if (l.mark_margin_rs or l.margin_rs) else "—" }}</td></tr>
-      {% endfor %}
-    </table>
-    {% else %}<div class="ob-muted">Nothing open.</div>{% endif %}
-  </div>
-
-  <div class="ob-scroll ol-sub">
-    <b>Live trade history</b> <span class="ob-muted">realised after charges ·
-      {% for src, t in L.totals.items() %}{{ src }} {{ t.realised|inr_short }} ({{ t.n_closed }} leg{{ '' if t.n_closed == 1 else 's' }}){% if not loop.last %} · {% endif %}{% else %}none yet{% endfor %}
-      · paper book (below) {{ summary.net_rs|inr_short }}</span>
-    {% if L.history %}
-    <table class="ob-table">
-      <tr><th>Source</th><th>Contract</th><th>Expiry</th><th>Sold</th><th>Bought / settled</th><th>Status</th><th>Net</th></tr>
-      {% for l in L.history %}
-      <tr><td>{{ l.source }}</td><td>{{ l.tradingsymbol }}</td><td>{{ l.expiry }}</td>
-        <td>{% if l.sell_qty %}{{ l.sell_qty }} @ {{ "%.2f"|format(l.sell_avg) if l.sell_avg else "—" }}{% else %}—{% endif %}</td>
-        <td>{% if l.status == 'SETTLED' %}{% if l.buy_qty and not l.sell_qty %}wing {{ l.buy_qty }} @ {{ "%.2f"|format(l.buy_avg) if l.buy_avg else "—" }} · {% endif %}index {{ "{:,.2f}".format(l.settle_index) }} → {{ "%.2f"|format(l.exit_price) }}{% else %}{{ l.buy_qty }} @ {{ "%.2f"|format(l.buy_avg) if l.buy_avg else "—" }}{% endif %}</td>
-        <td>{{ l.status }}</td><td class="{% if l.net_rs and l.net_rs > 0 %}ob-ok{% elif l.net_rs and l.net_rs < 0 %}ob-bad{% endif %}">{{ l.net_rs|inr_short if l.net_rs is not none else "—" }}</td></tr>
-      {% endfor %}
-    </table>
-    {% else %}<div class="ob-muted">No closed or settled legs yet.</div>{% endif %}
-  </div>
-
-  {% if L.steps %}
-  <div class="ob-scroll ol-sub">
-    <b>Last step results</b>
-    <table class="ob-table">
-      {% for s in L.steps %}<tr><td>{{ s.key }}</td><td>{{ s.date }}</td><td class="{{ {'ok': 'ob-ok', 'failed': 'ob-bad', 'skipped': 'ob-warn'}.get(s.status, '') }}">{{ s.status }}</td><td class="ob-wrap">{{ s.detail }}</td></tr>{% endfor %}
-    </table>
-  </div>
-  {% endif %}
-
-  <details class="ol-sub">
-    <summary><b>Settings</b> <span class="ob-muted">(stored in the DB; override config.OPTIONS_LIVE without a deploy)</span></summary>
-    <div class="ob-cap ol-set">
-      <label class="ob-muted">Mode <select id="ol-mode">{% for m in L.modes %}<option value="{{ m }}"{% if m == st.mode %} selected{% endif %}>{{ m }}</option>{% endfor %}</select></label>
-      <button class="ob-btn ol-save" data-key="mode" data-src="ol-mode" data-kind="str">Save mode</button>
-    </div>
-    <div class="ob-cap ol-set">
-      <label class="ob-muted">NIFTY lots <input id="ol-cap-NIFTY" type="number" min="0" max="{{ st.lots_hard_max }}" step="1" value="{{ st.lots_cap.NIFTY }}"></label>
-      <label class="ob-muted">SENSEX lots <input id="ol-cap-SENSEX" type="number" min="0" max="{{ st.lots_hard_max }}" step="1" value="{{ st.lots_cap.SENSEX }}"></label>
-      <button class="ob-btn ol-save" data-key="lots_cap" data-kind="caps">Save caps</button>
-    </div>
-    <div class="ob-cap ol-set">
-      <label class="ob-muted">Margin buffer ₹ <input id="ol-buf" type="number" min="0" step="10000" value="{{ "%.0f"|format(st.margin_buffer_rs) }}"></label>
-      <button class="ob-btn ol-save" data-key="margin_buffer_rs" data-src="ol-buf" data-kind="num">Save</button>
-      <label class="ob-muted">Weekly loss limit ₹ <input id="ol-loss" type="number" min="0" step="10000" value="{{ "%.0f"|format(st.weekly_loss_limit_rs) }}"></label>
-      <button class="ob-btn ol-save" data-key="weekly_loss_limit_rs" data-src="ol-loss" data-kind="num">Save</button>
-    </div>
-    <div class="ob-cap ol-set">
-      <label class="ob-muted">Half the lots above VIX <input id="ol-vix-halve" type="number" min="1" max="100" step="0.5" value="{{ st.vix_halve }}"></label>
-      <button class="ob-btn ol-save" data-key="vix_halve" data-src="ol-vix-halve" data-kind="num">Save</button>
-      <label class="ob-muted">No entry at VIX ≥ <input id="ol-vix-halt" type="number" min="1" max="100" step="0.5" value="{{ st.vix_halt }}"></label>
-      <button class="ob-btn ol-save" data-key="vix_halt" data-src="ol-vix-halt" data-kind="num">Save</button>
-    </div>
-    <div class="ob-cap ol-set">
-      <label class="ob-muted">Wings: buy a call / put this % of spot beyond each sold strike, before selling (0 = off) <input id="ol-wing" type="number" min="0" max="5" step="0.25" value="{{ st.wing_pct }}"></label>
-      <button class="ob-btn ol-save" data-key="wing_pct" data-src="ol-wing" data-kind="num">Save</button>
-    </div>
-    <div class="ob-cap ol-set">
-      <label class="ob-muted"><input id="ol-adopt" type="checkbox"{% if st.adopt_manual_nifty %} checked{% endif %}> Tuesday buy-back also closes my own (untagged) NIFTY legs of that expiry</label>
-      <button class="ob-btn ol-save" data-key="adopt_manual_nifty" data-src="ol-adopt" data-kind="bool">Save</button>
-    </div>
-  </details>
+  <a class="ob-btn" href="/options/live">Open the live book →</a>
   {% endif %}
 </div>
 
@@ -222,48 +46,10 @@
 </div>
 
 {% if trades %}
-<div class="ob-card" id="ob-capital">
-  <b>At your capital</b>
-  <div class="ob-muted" style="margin-top: 6px;">One calculator per index. Each trade is re-sized to as many whole lots as that index's capital covers <b>on expiry day</b> (entry margin + the exchange's extra 2% per sold option); the margin tiles break that peak into SPAN, exposure and the expiry-day extra for the index's latest trade. P&amp;L scales per lot, costs included; brokerage is per order, so this slightly overstates costs at size. Live, the Tuesday 15:08 NIFTY buy-back lets one pot carry both; the paper book holds both to the Tuesday close.</div>
-  {% for u in ['NIFTY', 'SENSEX'] %}
-  {% set ut = trades|selectattr('underlying', 'equalto', u)|list %}
-  {% if ut %}
-  {% set up = ut|selectattr('span_rs', 'defined')|list %}
-  {% set lt = up[0] if up else ut[0] %}
-  {% set ns = namespace(d=0) %}{% for t in ut %}{% set ns.d = [ns.d, t.expiry_margin_rs or t.margin_rs or 0]|max %}{% endfor %}
-  {% set u_default = ns.d %}
-  <div class="ob-cap-box" data-u="{{ u }}" data-default="{{ "%.0f"|format(u_default) }}" data-worst="{{ "%.4f"|format(-backtest[u].worst_pct / 100) }}"
-       data-span="{{ "%.2f"|format(lt.span_rs or 0) }}" data-exposure="{{ "%.2f"|format(lt.exposure_rs or 0) }}"
-       data-extra="{{ "%.2f"|format(lt.expiry_extra_rs or 0) }}" data-peak="{{ "%.2f"|format(lt.expiry_margin_rs or lt.margin_rs) }}">
-    <div class="ob-cap">
-      <b class="ob-cap-h">{{ u }}</b>
-      <label class="ob-muted" for="ob-cap-input-{{ u }}">Margin capital (₹)</label>
-      <input id="ob-cap-input-{{ u }}" class="ob-cap-input" type="number" min="0" step="10000" value="{{ "%.0f"|format(u_default) }}" inputmode="numeric">
-      <a href="#" class="ob-muted ob-cap-reset" style="color: var(--accent);">reset to one lot ({{ u_default|inr_short }})</a>
-    </div>
-    {% if lt.span_rs is defined %}
-    <div class="ob-muted ob-cap-sub">Margin at this size — latest trade {{ lt.entry_date }} ({{ "%.0f"|format(lt.short_call) }} CE · {{ "%.0f"|format(lt.short_put) }} PE, index ≈ {{ "{:,.0f}".format(lt.forward) }}, {{ lt.lot }} units/lot; per lot: SPAN {{ (lt.span_rs or 0)|inr_short }} + exposure {{ (lt.exposure_rs or 0)|inr_short }} + expiry-day {{ (lt.expiry_extra_rs or 0)|inr_short }} = {{ (lt.expiry_margin_rs or lt.margin_rs)|inr_short }})</div>
-    {% endif %}
-    <div class="ob-cap-tiles">
-      <div class="ob-tile"><div class="n" data-k="lots-latest">—</div><div class="l">lots (latest trade)</div></div>
-      <div class="ob-tile"><div class="n" data-k="span">—</div><div class="l">SPAN · every day</div></div>
-      <div class="ob-tile"><div class="n" data-k="exposure">—</div><div class="l">exposure · 2% of notional per sold option</div></div>
-      <div class="ob-tile"><div class="n" data-k="entry">—</div><div class="l">entry margin · SPAN + exposure</div></div>
-      <div class="ob-tile"><div class="n" data-k="extra">—</div><div class="l">expiry-day extra · +2% per sold option</div></div>
-      <div class="ob-tile"><div class="n" data-k="peak">—</div><div class="l">peak margin on expiry day</div></div>
-      <div class="ob-tile"><div class="n" data-k="spare">—</div><div class="l">spare at the peak</div></div>
-    </div>
-    <div class="ob-muted ob-cap-sub">P&amp;L at this size — every {{ u }} trade in the book</div>
-    <div class="ob-cap-tiles">
-      <div class="ob-tile"><div class="n" data-k="lots">—</div><div class="l">lots per trade (by each trade's expiry-day margin)</div></div>
-      <div class="ob-tile"><div class="n" data-k="net">—</div><div class="l">net P&amp;L, settled, after costs</div></div>
-      <div class="ob-tile"><div class="n" data-k="ret">—</div><div class="l">settled P&amp;L as % of capital</div></div>
-      <div class="ob-tile"><div class="n" data-k="open">—</div><div class="l">open trades, marked</div></div>
-      <div class="ob-tile"><div class="n ob-bad" data-k="worst">—</div><div class="l">one backtest-worst trade (−{{ "%.1f"|format(-backtest[u].worst_pct) }}% of margin) would lose</div></div>
-    </div>
-  </div>
-  {% endif %}
-  {% endfor %}
+<div class="ob-card ob-row" id="ob-capital">
+  <div><b>At your capital</b>
+    <div class="ob-muted">Any trade of this book at your capital: lots, payoff chart and table, greeks, margin, and every trade re-sized.</div></div>
+  <a class="ob-btn" href="/options/capital">Open the calculator →</a>
 </div>
 {% endif %}
 
@@ -277,7 +63,7 @@
     <tr><td><b>Exposure</b></td><td>every day</td><td class="ob-wrap">2% of notional (index × units) per sold option: 2% × {{ "{:,.0f}".format(m.forward) }} × {{ m.lot }} × 2 legs</td><td>{{ m.exposure_rs|inr_short }}</td></tr>
     <tr><td><b>Entry margin</b></td><td>entry → day before expiry</td><td class="ob-wrap">SPAN + exposure{% if m.margin_source == '12pct' %} (no Kite quote this day: 12% of notional assumed){% endif %}</td><td>{{ m.margin_rs|inr_short }}</td></tr>
     <tr><td><b>Expiry-day extra (ELM)</b></td><td>expiry day only</td><td class="ob-wrap">SEBI (Nov 2024): another 2% of notional per sold option on its own expiry day: 2% × {{ "{:,.0f}".format(m.forward) }} × {{ m.lot }} × 2 legs. It is a block, not a charge: released after expiry, no P&amp;L.</td><td>{{ m.expiry_extra_rs|inr_short }}</td></tr>
-    <tr><td><b>Peak margin</b></td><td>expiry day</td><td class="ob-wrap">Entry margin + expiry-day extra. The calculator above and the live sizing use this. SPAN is recomputed through the day, so a big move towards a strike raises it further; keep spare margin for that.</td><td><b>{{ m.expiry_margin_rs|inr_short }}</b></td></tr>
+    <tr><td><b>Peak margin</b></td><td>expiry day</td><td class="ob-wrap">Entry margin + expiry-day extra. The At your capital calculator and the live sizing use this. SPAN is recomputed through the day, so a big move towards a strike raises it further; keep spare margin for that.</td><td><b>{{ m.expiry_margin_rs|inr_short }}</b></td></tr>
   </table>
 </div>
 {% endif %}
@@ -293,9 +79,9 @@
   <b>Trades</b>
   {% if trades %}
   <table class="ob-table">
-    <tr><th>Underlying</th><th>Entry</th><th>Expiry</th><th>Sold</th><th>Credit</th><th>Margin</th><th>Status</th><th>P&amp;L (1 lot)</th><th>At your capital</th></tr>
+    <tr><th>Underlying</th><th>Entry</th><th>Expiry</th><th>Sold</th><th>Credit</th><th>Margin</th><th>Status</th><th>P&amp;L (1 lot)</th></tr>
     {% for t in trades %}
-    <tr class="ob-trade" data-u="{{ t.underlying }}" data-margin="{{ "%.2f"|format(t.expiry_margin_rs or t.margin_rs) }}" data-status="{{ t.status }}" data-pnl="{% if t.status == 'SETTLED' %}{{ "%.2f"|format(t.net_rs) }}{% elif t.mark %}{{ "%.2f"|format(t.mark.mtm_rs) }}{% endif %}">
+    <tr class="ob-trade">
       <td>{{ t.underlying }}</td><td>{{ t.entry_date }}</td><td>{{ t.expiry }}</td>
       <td>{{ "%.0f"|format(t.short_call) }} CE {{ t.call_entry }} · {{ "%.0f"|format(t.short_put) }} PE {{ t.put_entry }}</td>
       <td>{{ "%.2f"|format(t.credit_pts) }} × {{ t.lot }} = {{ (t.credit_pts * t.lot)|inr_short }}</td>
@@ -307,7 +93,6 @@
       <td class="ob-warn">open</td>
       <td class="ob-wrap">{% if t.mark %}<span class="{% if t.mark.mtm_rs > 0 %}ob-ok{% else %}ob-bad{% endif %}">{{ '+' if t.mark.mtm_rs > 0 else '' }}{{ t.mark.mtm_rs|inr_short }}</span> <span class="ob-muted">marked {{ t.mark.mark_date }}, index {{ "{:,.0f}".format(t.mark.index) }}</span>{% else %}—{% endif %}</td>
       {% endif %}
-      <td class="ob-wrap ob-scaled">—</td>
     </tr>
     {% endfor %}
   </table>
@@ -325,111 +110,7 @@
   </table>
 </div>
 <script>
-// plan 0029 Live panel: every control is a POST (session cookie, same origin) after a confirm step;
-// the server re-checks the confirm word, so a stray request without it is refused.
-(function () {
-  function send(url, body) {
-    fetch(url, {method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)})
-      .then(function (r) { return r.json().then(function (j) { return {ok: r.ok, j: j}; }); })
-      .then(function (x) { if (x.ok) location.reload(); else alert('Refused: ' + (x.j.error || 'error')); })
-      .catch(function (e) { alert('Failed: ' + e); });
-  }
-  function confirmWord(ask, word, typed) {
-    if (typed) { var t = prompt(ask); return t === null ? null : t; }
-    return confirm(ask) ? word : null;
-  }
-  Array.prototype.forEach.call(document.querySelectorAll('.ol-act'), function (b) {
-    b.addEventListener('click', function () {
-      var w = confirmWord(b.dataset.ask, b.dataset.word, b.dataset.type === '1');
-      if (w === null) return;
-      var body = JSON.parse(b.dataset.body || '{}'); body.confirm = w;
-      send(b.dataset.url, body);
-    });
-  });
-  Array.prototype.forEach.call(document.querySelectorAll('.ol-save'), function (b) {
-    b.addEventListener('click', function () {
-      var k = b.dataset.kind, v;
-      if (k === 'caps') v = {NIFTY: parseInt(document.getElementById('ol-cap-NIFTY').value, 10), SENSEX: parseInt(document.getElementById('ol-cap-SENSEX').value, 10)};
-      else if (k === 'num') v = parseFloat(document.getElementById(b.dataset.src).value);
-      else if (k === 'bool') v = document.getElementById(b.dataset.src).checked;
-      else v = document.getElementById(b.dataset.src).value;
-      var auto = b.dataset.key === 'mode' && v === 'auto';
-      var w = auto ? confirmWord('Mode AUTO places real orders with no approval. Type AUTO to confirm.', 'AUTO', true)
-                   : confirmWord('Save ' + b.dataset.key + ' = ' + JSON.stringify(v) + '?', 'SAVE', false);
-      if (w === null) return;
-      send('/api/options/live/settings', {key: b.dataset.key, value: v, confirm: w});
-    });
-  });
-  function post(body) {
-    return fetch('/api/options/live/settings', {method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)})
-      .then(function (r) { return r.json().then(function (j) { if (!r.ok) throw new Error(j.error || 'error'); return j; }); });
-  }
-  Array.prototype.forEach.call(document.querySelectorAll('.ol-apply'), function (b) {
-    b.addEventListener('click', function () {
-      var wing = parseFloat(b.dataset.wing), caps = JSON.parse(b.dataset.caps);
-      var ask = 'Apply setup ' + b.dataset.key + ': ' + (wing ? 'wings ' + wing + '% beyond the sold strikes' : 'no wings')
-              + ', lots NIFTY ' + caps.NIFTY + ' / SENSEX ' + caps.SENSEX + '?';
-      if (!confirm(ask)) return;
-      post({key: 'wing_pct', value: wing, confirm: 'SAVE'})
-        .then(function () { return post({key: 'lots_cap', value: caps, confirm: 'SAVE'}); })
-        .then(function () { location.reload(); })
-        .catch(function (e) { alert('Refused: ' + e.message); location.reload(); });
-    });
-  });
-})();
-(function () {
-  // one calculator per index (.ob-cap-box): capital → lots, margin parts and P&L for that index's rows only
-  var boxes = Array.prototype.slice.call(document.querySelectorAll('.ob-cap-box'));
-  if (!boxes.length) return;
-  var rows = Array.prototype.slice.call(document.querySelectorAll('tr.ob-trade'));
-  function inr(x) {   // ₹ in K / L / Cr, as formatting.inr_short
-    var a = Math.round(Math.abs(x)), s = String(a), u = [[1e7, '\u00a0Cr'], [1e5, '\u00a0L'], [1e3, '\u00a0K']];
-    for (var i = 0; i < u.length; i++) if (a >= u[i][0]) { s = parseFloat((a / u[i][0]).toFixed(2)) + u[i][1]; break; }
-    return (x < 0 && a ? '−₹' : '₹') + s;
-  }
-  function signed(x) { return (x > 0 ? '+' : '') + inr(x); }
-  function cls(el, x) { el.classList.remove('ob-ok', 'ob-bad'); if (x > 0) el.classList.add('ob-ok'); else if (x < 0) el.classList.add('ob-bad'); }
-  var q = new URLSearchParams(location.search);
-  boxes.forEach(function (box) {
-    var u = box.dataset.u, d = box.dataset, KEY = 'ob-capital-' + u, def = parseFloat(d.default) || 0;
-    var input = box.querySelector('.ob-cap-input'), mine = rows.filter(function (r) { return r.dataset.u === u; });
-    function set(k, text, sign) { var el = box.querySelector('[data-k="' + k + '"]'); el.textContent = text; if (sign !== undefined) cls(el, sign); }
-    function render() {
-      var cap = parseFloat(input.value); if (!(cap >= 0)) cap = 0;
-      var peak = parseFloat(d.peak), n = peak > 0 ? Math.floor(cap / peak + 1e-9) : 0;
-      set('lots-latest', String(n));
-      set('span', inr(n * parseFloat(d.span)));
-      set('exposure', inr(n * parseFloat(d.exposure)));
-      set('entry', inr(n * (parseFloat(d.span) + parseFloat(d.exposure))));
-      set('extra', inr(n * parseFloat(d.extra)));
-      set('peak', inr(n * peak));
-      set('spare', inr(cap - n * peak));
-      var settled = 0, open = 0, nOpen = 0, lotsSeen = [];
-      mine.forEach(function (r) {
-        var m = parseFloat(r.dataset.margin), lots = m > 0 ? Math.floor(cap / m + 1e-9) : 0, cell = r.querySelector('.ob-scaled');
-        var pnl = r.dataset.pnl === '' ? null : parseFloat(r.dataset.pnl);
-        lotsSeen.push(lots);
-        if (pnl === null) { cell.textContent = lots + (lots === 1 ? ' lot' : ' lots'); return; }
-        var v = pnl * lots;
-        cell.textContent = lots + (lots === 1 ? ' lot · ' : ' lots · ') + signed(v);
-        cls(cell, v);
-        if (r.dataset.status === 'SETTLED') settled += v; else { open += v; nOpen++; }
-      });
-      var lo = Math.min.apply(null, lotsSeen), hi = Math.max.apply(null, lotsSeen);
-      set('lots', lo === hi ? String(lo) : lo + '–' + hi);
-      set('net', signed(settled), settled);
-      set('ret', cap > 0 ? ((settled >= 0 ? '+' : '') + (100 * settled / cap).toFixed(2) + '%') : '—', settled);
-      set('open', nOpen ? signed(open) : '—', open);
-      set('worst', inr(-cap * parseFloat(d.worst)));
-      try { if (cap === def) localStorage.removeItem(KEY); else localStorage.setItem(KEY, String(cap)); } catch (e) {}
-    }
-    var fromUrl = q.get('capital_' + u) || q.get('capital'), saved = null;
-    try { saved = localStorage.getItem(KEY); } catch (e) {}
-    if (fromUrl && parseFloat(fromUrl) >= 0) input.value = parseFloat(fromUrl); else if (saved && parseFloat(saved) >= 0) input.value = parseFloat(saved);
-    input.addEventListener('input', render);
-    box.querySelector('.ob-cap-reset').addEventListener('click', function (e) { e.preventDefault(); input.value = def; render(); });
-    render();
-  });
-})();
+// the Approve message links /options#live: the live book now has its own page
+if (location.hash === '#live') location.replace('/options/live');
 </script>
 {% endblock %}

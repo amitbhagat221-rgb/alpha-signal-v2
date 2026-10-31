@@ -133,28 +133,6 @@ case "$JOB" in
         # named >1% holders for stocks missing the latest quarter (filings land within ~21 days
         # of quarter end); budgeted and resumable, stalest first
         logged cron_bse_shp run python -m sources.bse_shp --due --budget-min 180 ;;
-    backfill)           # TEMPORARY (2026-10-04) — one-off history backfills in the windows no other
-                        # job uses: 08:00 Sun-Fri, 16:00 (not the 1st), 21:00 UTC; `run.sh backfill <minutes>`.
-                        # Each part is resumable and returns at once when it has nothing left; remove the
-                        # cron lines when both report nothing to fetch.
-        harvest_lock nse bse
-        # Declare the backfill to the health report (checks/feeds.py BACKFILL_MARKER): row counts of
-        # steps that read the backfilled history jump while it runs, and the 04:00 report comes after
-        # the 21:00 window ends. The marker holds the epoch of the last window start/end; it
-        # ages out on its own (BACKFILL_LINGER_H) once these cron lines are removed.
-        backfill_mark() { [ -n "${DRY:-}" ] || date -u +%s > "$ROOT/output/backfill_active"; }
-        backfill_mark
-        END=$((SECONDS + ${2:-240} * 60))
-        left() { echo $(( (END - SECONDS) / 60 )); }
-        # pre-2020 prices (legacy NSE archive). Starts where corporate_actions start (2018-03):
-        # older prices cannot be adjusted for splits and bonuses until earlier actions are loaded.
-        [ "$(left)" -gt 5 ] && logged cron_nse_legacy run python -m sources.nse --legacy --start 2018-03-01 --end 2019-12-31 --budget-min "$(left)"
-        # named >1% holders: every XBRL filing since 2016, largest stocks first
-        [ "$(left)" -gt 5 ] && logged cron_bse_shp_backfill run python -m sources.bse_shp --universe --quarters 0 --budget-min "$(left)"
-        # quarterly results XBRL 2017-04 → 2024-12 (plan 0025 5.1; feeds the winner-hunter data gate), largest first,
-        # resumable via output/nse_results_done.txt
-        [ "$(left)" -gt 5 ] && logged cron_nse_results_backfill run python -m sources.nse_results --universe --since 2017-04-01 --until 2024-12-31 --budget-min "$(left)"
-        backfill_mark ;;
     screener_schedules) # 3rd + 4th of Jan/Apr/Jul/Oct 20:30 UTC — Screener '+'-row breakdowns
                         # (Intangible Assets etc., annual items): ~9 h for the universe, so two
                         # resumable 5-hour night windows per quarter, clear of every other job
@@ -182,16 +160,20 @@ case "$JOB" in
         run python -m tools.freshness_watchdog ;;
     health)             # 04:00 UTC — health email + push
         run python -m tools.health_report --email --push ;;
+    nse_publish_probe)  # TEMPORARY (2026-10-23 → remove after 2026-10-26): when NSE first publishes today's
+                        # price / index files, every 30 min 15:30-24:00 IST. Three 200-byte requests, so no
+                        # harvest lock: queueing behind a harvest would distort the time it measures
+        run python -m tools.nse_publish_probe ;;
     kite_quotes)        # 09:50 UTC weekdays (15:20 IST) — live option quotes + Kite margin on paper-book
                         # entry days only (plan 0022); needs that day's Kite login, else FAILED with the link
         logged cron_kite_quotes run python -m sources.kite_quotes ;;
     options_live)       # plan 0029 — the live option book: run.sh options_live <step> [NIFTY|SENSEX]. Times and the
                         # crontab lines: docs/plans/0029 "Runbook". Not a harvest (Kite is its own host): no harvest lock,
                         # one lock per step so an overlapping cron line can never run the same step twice at once.
-        OL_STEP="${2:?usage: run.sh options_live <entry|buyback|closeall|record|mark|settle|reconcile|precheck|weekly> [NIFTY|SENSEX]}"
+        OL_STEP="${2:?usage: run.sh options_live <entry|buyback|closeall|record|mark|quote|settle|reconcile|precheck|weekly> [NIFTY|SENSEX]}"
         OL_U="${3:-}"
         if [ -z "${DRY:-}" ]; then
-            exec 203>"/tmp/alpha_options_live.$OL_STEP.lock"
+            exec 203>"/tmp/alpha_options_live.$OL_STEP${OL_U:+.$OL_U}.lock"   # per step AND index: a NIFTY entry still working must not silently skip the SENSEX one
             flock -n 203 || { echo "options_live $OL_STEP already running, exiting $(date -u)"; exit 0; }
         fi
         case "$OL_STEP:$OL_U" in
@@ -201,6 +183,7 @@ case "$JOB" in
             closeall:*)   logged cron_options_live_closeall run python -m options_live closeall ;;
             record:*)     logged cron_options_live_record run python -m options_live record ;;
             mark:*)       logged cron_options_live_mark run python -m options_live mark ;;
+            quote:*)      logged cron_options_live_quote run python -m options_live quote ;;   # read-only: Kite margin + per-lot quote (the cockpit's Refresh from Kite)
             settle:*)     logged cron_options_live_settle run python -m options_live settle ;;
             reconcile:*)  logged cron_options_live_reconcile run python -m options_live reconcile ;;
             precheck:*)   logged cron_options_live_precheck run python -m options_live precheck ;;
