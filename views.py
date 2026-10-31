@@ -348,7 +348,7 @@ def picks(pick_date=None, gated=True, tier=None, per_tier=None, snapshot=False):
     df = read_sql(
         f"SELECT {_PICK_COLS}{_SNAPSHOT_COLS if snapshot else ''} "
         f"FROM daily_picks dp JOIN stocks s ON dp.sid = s.sid {join} "
-        f"WHERE {' AND '.join(where)} ORDER BY dp.cap_tier, dp.rank",
+        f"WHERE {' AND '.join(where)} ORDER BY dp.cap_tier, dp.rank, dp.sid",
         params=params or None,
     )
     if per_tier is None or df.empty:
@@ -808,7 +808,7 @@ def book_history(n=2):
         rows = native_rows(
             "SELECT pw.sid, s.ticker, COALESCE(pw.name, s.name) AS name, pw.cap_tier, pw.sector, pw.rank, pw.weight "
             "FROM portfolio_weights pw LEFT JOIN stocks s ON pw.sid = s.sid "
-            "WHERE pw.asof_date = ? ORDER BY pw.weight DESC", [asof])
+            "WHERE pw.asof_date = ? ORDER BY pw.weight DESC, pw.sid", [asof])     # ties by sid (plan 0030)
         out.append({"asof": asof, "rows": rows})
     return out
 

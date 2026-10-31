@@ -33,10 +33,11 @@ def diff_books(cur, prev, resize_min=RESIZE_MIN):
         return [], [], []
     cur_by = {r["sid"]: r for r in cur}
     prev_by = {r["sid"]: r for r in prev}
-    buys = [r for s, r in cur_by.items() if s not in prev_by]
-    sells = [r for s, r in prev_by.items() if s not in cur_by]
-    resizes = [{**r, "prev_weight": prev_by[s]["weight"]} for s, r in cur_by.items()
-               if s in prev_by and round(abs((r["weight"] or 0) - (prev_by[s]["weight"] or 0)), 9) >= resize_min]
+    key = lambda r: (-(r.get("weight") or 0), r["sid"])      # noqa: E731  by weight, then sid: never the storage order (plan 0030)
+    buys = sorted((r for s, r in cur_by.items() if s not in prev_by), key=key)
+    sells = sorted((r for s, r in prev_by.items() if s not in cur_by), key=key)
+    resizes = sorted(({**r, "prev_weight": prev_by[s]["weight"]} for s, r in cur_by.items()
+                      if s in prev_by and round(abs((r["weight"] or 0) - (prev_by[s]["weight"] or 0)), 9) >= resize_min), key=key)
     return buys, sells, resizes
 
 

@@ -2766,6 +2766,12 @@ CREATE TABLE IF NOT EXISTS option_live_trades (
 );
 -- options_live:end
 
+-- Plan 0030: the compatibility views join picks/outcomes by entity; without these the planner
+-- walks entities × runs for a whole-table read (5.4 s measured 2026-10-31; 0.14 s with them).
+CREATE INDEX IF NOT EXISTS ix_picks_entity ON picks (entity_id, run_id);
+CREATE INDEX IF NOT EXISTS ix_outcomes_entity ON outcomes (entity_id, run_id);
+CREATE INDEX IF NOT EXISTS ix_book_weights_entity ON book_weights (entity_id, run_id);
+
 -- ── Data model v3 compatibility views (plan 0030, ADR 0084) ──
 -- Each reproduces a legacy table column for column from the v3 tables; datamodel/compat.py
 -- reads these bodies (the parity gate inlines them as CTEs) and the read helpers switch a

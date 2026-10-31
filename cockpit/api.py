@@ -1107,7 +1107,7 @@ def get_sized_book():
         "       pw.factor_score, pw.weight, pw.marginal_risk_contrib "
         "FROM portfolio_weights pw LEFT JOIN stocks s ON pw.sid = s.sid "
         "WHERE pw.asof_date = (SELECT MAX(asof_date) FROM portfolio_weights) "
-        "ORDER BY pw.weight DESC")
+        "ORDER BY pw.weight DESC, pw.sid")       # ties by sid, never the storage order (plan 0030)
     if rows.empty:
         return None
 

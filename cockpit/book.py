@@ -131,7 +131,7 @@ def get_book():
         out[-1]["below_exit"] = out[-1]["rank"] is not None and out[-1]["rank"] > exit_rank
         out[-1]["status"] = held_status(out[-1]["left_top"], out[-1]["below_exit"], out[-1]["rank"] is not None)
         out[-1]["tier_size"] = sizes.get(r["cap_tier"])
-    out.sort(key=lambda x: -x["weight_pct"])
+    out.sort(key=lambda x: (-x["weight_pct"], x["sid"]))      # ties by sid, never the storage order (plan 0030)
     covered = [r["n_analysts"] for r in out if r["pt_upside_pct"] is not None and r["n_analysts"]]
     return {
         "analysts_range": (min(covered), max(covered)) if covered else None,
