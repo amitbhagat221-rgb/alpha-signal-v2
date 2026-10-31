@@ -566,6 +566,21 @@ def doc(doc_id):
 
 ITEM_TYPES = ("ask", "hypothesis", "work_order")
 WORK_STATUSES = ("in_progress", "done", "blocked", "cancelled")
+WORK_TIERS = ("A", "B", "C")        # ADR 0086: A = the CEO every time; B = yes by default after VETO_HOURS; C = no approval
+VETO_HOURS = 48
+
+
+def work_order_tier(fields):
+    """An order's tier; one written before ADR 0086 (no tier) is Tier A."""
+    return fields.get("tier") if fields.get("tier") in WORK_TIERS else "A"
+
+
+def default_approval_at(fields):
+    """When a Tier B order approves itself (ISO), or None for the other tiers."""
+    if work_order_tier(fields) != "B" or not fields.get("created_at"):
+        return None
+    t = dt.datetime.fromisoformat(fields["created_at"][:19]) + dt.timedelta(hours=VETO_HOURS)
+    return t.isoformat(timespec="seconds")
 
 
 def _via_cio(d):
@@ -610,11 +625,16 @@ def inbox(days=90):
     that reports to the CEO, and cards from the CIO's reports that the CIO forwarded."""
     decided = {d["parent_doc_id"] for d in docs(["decision"], days=days)}
     forwarded = {t["parent_doc_id"] for t in docs(["triage"], days=days) if t["fields"].get("call") == "forward"}
+    now = _now()
     items = [d for d in docs(list(ITEM_TYPES), days=days)
-             if d["doc_id"] not in decided and (not _via_cio(d) or d["doc_id"] in forwarded)]
+             if d["doc_id"] not in decided and (not _via_cio(d) or d["doc_id"] in forwarded)
+             and not (d["type"] == "work_order" and (default_approval_at(d["fields"]) or "9") <= now)]   # self-approved: gone
     today = dt.date.today()
     for d in items:
         d["age_days"] = (today - dt.date.fromisoformat(d["doc_date"][:10])).days
+        if d["type"] == "work_order":
+            d["tier"] = work_order_tier(d["fields"])
+            d["auto_approve_at"] = default_approval_at(d["fields"])
     order = {"work_order": 0, "ask": 1, "hypothesis": 2}
     return sorted(items, key=lambda d: (d["fields"].get("urgency") != "now", order.get(d["type"], 3), d["doc_id"]))
 
@@ -630,16 +650,20 @@ def work_orders(days=180):
     rejected / parked (the CEO's decision) → in_progress / blocked / done / cancelled."""
     decided = {d["parent_doc_id"]: d["fields"] for d in docs(["decision"], days=days)}
     progress = {d["parent_doc_id"]: d["fields"] for d in docs(["progress"], days=days)}
-    out = []
+    out, now = [], _now()
     for d in docs(["work_order"], days=days):
         f, dec, prog = d["fields"], decided.get(d["doc_id"]), progress.get(d["doc_id"])
         status = (prog or {}).get("status") or {"approve": "approved", "reject": "rejected", "park": "parked"}.get(
             (dec or {}).get("verdict"), "awaiting approval")
+        note, updated = (prog or {}).get("note"), (prog or {}).get("at") or (dec or {}).get("decided_at")
+        auto = default_approval_at(f)
+        if status == "awaiting approval" and auto and auto <= now:        # ADR 0086: Tier B, nobody said no in time
+            status, note, updated = "approved", f"approved by default: Tier B, no veto within {VETO_HOURS} h (ADR 0086)", auto
         out.append({"number": f.get("number"), "doc_id": d["doc_id"], "date": d["doc_date"], "title": d["title"],
                     "role": f.get("role"), "conv": f.get("conv"), "summary": f.get("summary"),
                     "items": f.get("items") or [], "open_questions": f.get("open_questions") or [],
-                    "status": status, "note": (prog or {}).get("note"),
-                    "updated": (prog or {}).get("at") or (dec or {}).get("decided_at")})
+                    "tier": work_order_tier(f), "auto_approve_at": auto,
+                    "status": status, "note": note, "updated": updated})
     return out
 
 
@@ -647,15 +671,33 @@ def work_order(number):
     return next((w for w in work_orders() if w["number"] == int(number)), None)
 
 
-def save_work_order(role, conv, wo):
-    """Store a work order written by `role` in chat conversation `conv`; returns its number."""
-    with get_db() as conn:
+def save_work_order(role, conv, wo, parent=None, conn=None):
+    """Store a work order written by `role` in chat conversation `conv` (None when the server
+    drafted it from a memo, ADR 0085 J3; `parent` is then the memo); returns its number."""
+    def _save(conn):
         tid = _type_id(conn, "org.work_order")
         n = 1 + (conn.execute("SELECT COUNT(*) FROM documents WHERE source = 'org' AND type_id = ?",
                               (tid,)).fetchone()[0])
         save_doc(conn, "work_order", f"wo:{n}", wo["title"],
-                 {**wo, "number": n, "role": role, "conv": conv, "created_at": _now()})
-    return n
+                 {**wo, "number": n, "role": role, "conv": conv, "created_at": _now()}, parent=parent)
+        return n
+    if conn is not None:
+        return _save(conn)
+    with get_db() as conn:
+        return _save(conn)
+
+
+def work_order_doc_id(number, conn=None):
+    """The valid document behind work order `number`, or None."""
+    sql = ("SELECT doc_id FROM documents WHERE source = 'org' AND type_id = ? AND source_key = ? AND status = 'valid' "
+           "ORDER BY doc_id DESC LIMIT 1")
+    def _get(conn):
+        r = conn.execute(sql, (_type_id(conn, "org.work_order"), f"wo:{number}")).fetchone()
+        return r[0] if r else None
+    if conn is not None:
+        return _get(conn)
+    with get_db() as conn:
+        return _get(conn)
 
 
 def work_status(number, status, note=None):

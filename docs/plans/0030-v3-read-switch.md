@@ -1,0 +1,48 @@
+# Plan 0030 — Data model v3: switch the readers, then drop the old tables
+
+**Status:** approved 2026-10-31 — D1–D3 yes ([ADR 0084](../decisions/0084-v3-read-switch-go-stop-rule-no-new-tables.md); Amit: "yes to all please implement the plan"); stage 0 done the same day (notes below), stage 1 next on a worktree branch. Proposed 2026-10-23 (Amit: "yes write a short plan please").
+**Builds on:** [plan 0017](0017-data-model-redesign.md) (approved 2026-10-01, [ADR 0054](../decisions/0054-tables-grow-with-concepts.md)): its target schema (§2), mapping (§3), standard gate and rollback (§9) are unchanged. This plan only orders and bounds the part 0017 left open, the read side.
+
+## Where it stands (measured 2026-10-23)
+
+- **Write side done as a mirror.** All 24 v3 tables exist and fill nightly from the legacy tables (`datamodel/sync.py`), and `datamodel/reconcile.py` compares the two. The last 4 days (10-20 → 10-23) were 120 PASS · 29 RETIRED · 0 FAIL; 10-11 → 10-19 had 4–12 FAILs a day, all mirror drift, since fixed.
+- **Read side not started.** No production module reads a v3 table; only `datamodel/` and its tests do. About **290 code files** name at least one of the 120 mirrored legacy tables. The biggest are `stocks` (204 files), `stock_prices` (90), `daily_snapshots_pit` (58), `fundamentals_screener` (55), `quarterly_income` / `corporate_adjustments` (36), `shareholding` (34) and `daily_picks` (31).
+- **The mirror costs every day.** Sync takes about 11 min (max 17) and reconcile about 9 min (max 12) in the morning run. Both cockpits' Sectors page returns 500s while sync holds the write lock. The DB is 25.8 GB, holding old and new copies side by side (186 tables).
+- **Only 5 legacy tables dropped so far** (2026-10-08, exported to `data/history/legacy/`).
+- **The schema is growing again outside v3.** About 20 tables added since 2026-10-01 are marked "kept as-is" in reconcile, among them `desk_snapshots`, `multibagger_book(_log)`, 5 `news_theme*` / `news_today` / `news_week` tables, `option_*`, `quarterly_results_nse`, `symbol_changes`, `market_holidays` and `intraday_files`. This breaks 0017's "0 tables per new thing" criterion.
+
+## The switch, ordered by payoff
+
+Each stage keeps 0017's gate: parity for N days, readers moved one at a time behind `config.DATA_MODEL[<concept>]` (old/new), and identical ranks, email, health and cockpit HTML. Rollback is the same flag, and a stage's old tables are dropped ≥ 14 days after its switch, in a separate commit, after the Parquet export. Any stage that touches ranking is built on a worktree branch (`ALPHA_DB`) and merged only on Amit's OK.
+
+| # | Concept | Old readers to move | What it buys | Sessions |
+|---|---|---|---|---|
+| 0 | **Measure + policy** | — | Disk per v3 table (dbstat on the nightly backup, never the live DB); a reader inventory per concept (generated, committed in the notes below); D2 applied to the ~20 kept-as-is tables | 1 |
+| 1 | **Decisions** (`runs`, `picks`, `pick_contributions`, `outcomes`, `step_runs`) | `daily_picks` 31, `pipeline_log` 20, outcomes | One-query "why is this a pick" (`views.explain`, MCP `explain_pick`); old runs explain themselves | 2 |
+| 2 | **Company facts** (`fundamentals`, `estimates`) | `quarterly_income` 36, `shareholding` 34+14, `annual_*` 35, `fundamentals_screener` 55, `analyst_consensus` 22 | PIT by construction and revision history kept (overwrites lose it today); one home for the plan 0027 share-count fix | 2–3 |
+| 3 | **Events + documents** | announcements (BSE 28, NSE 18), news 24+14, regulatory 22+19, insider 19, bulk 17, corporate actions 21+36 | One `signals/announcements`-style reader per event type instead of per table | 2–3 |
+| 4 | **Features + Parquet** | `daily_snapshots_pit` 58 + the `*_scores` tables | Panel reads native; the biggest disk win | 3 |
+| 5 | **Bars + series** | `stock_prices` 90, `nse_index_history` 23, `fno_bhav` 21, macro | Source in the key; one price reader | 2 |
+| 6 | **Reference** | `stocks` 204 | `tier_asof` everywhere; last because it touches everything | 2 |
+
+**Review after stage 2.** If stages 1–2 paid off and the morning run is no slower, go on to 3–6. If not, stop the mirror for the concepts that are left (D1), drop their v3 tables after a Parquet export, and keep the legacy tables as the model for those concepts.
+
+## Decisions for Amit
+
+- **D1 — Go, with a stop rule.** Do stages 0–2, then review. A concept not switched within 8 weeks of its stage starting has its mirror stopped, so nothing is synced forever without a reader. *Proposed: yes.*
+- **D2 — New tables.** From now on a new dataset is a `catalog` row in an existing concept unless it is ops state (locks, ledgers, caches). The existing ~20 kept-as-is tables each get a target concept or a written "stays as-is" reason in stage 0. *Proposed: yes.*
+- **D3 — Ranking-affecting stages (2, 4, 5, 6) merge only on your OK**, after a measured identical-ranks gate on 3 dates. *Proposed: yes.*
+
+## Done when
+
+- Every one of the 120 mirrored legacy tables is either dropped (exported to `data/history/legacy/`, in the backup) or its mirror has been stopped by D1.
+- A test fails on any production read of a dropped table name.
+- The morning run is no slower than on 2026-10-23, and `datamodel_sync` / `datamodel_reconcile` are gone or cover only the concepts still mirrored.
+
+## Implementation notes
+
+- **2026-10-31 — stage 0 done (measure + policy).** Full tables in [0030-stage0-measurements.md](0030-stage0-measurements.md) (generated, read-only, dbstat on the live DB one b-tree at a time because the nightly backup is `VACUUM INTO` → gzip → Drive with no local uncompressed copy; nothing took over 54 s).
+  - **Reader inventory:** 132 distinct mirrored legacy tables, **311 production files** name at least one (`stocks` 220, `stock_prices` 89, `daily_snapshots_pit` 59, `fundamentals_screener` 54, `shareholding` 37, `quarterly_income` / `corporate_adjustments` 36, `bse_announcements` / `daily_picks` 30). Per concept (files overlap): Reference 5 tables / 224 files · Features 51 / 123 · Company facts 10 / 114 · Bars 3 / 111 · Events 17 / 96 · Decisions 5 / 42 · Ops 19 / ~35 · Documents 8 / ~35 · Series 3 / ~30 · mf.db 9 / ~25 · Research 2 / ~14.
+  - **Disk:** file 24.4 GiB, 0 freelist pages. The 24 v3 tables + indexes = **12.6 GiB, 51.5 % of the file**: `events` 4.77 GiB (3.6 table + 1.16 index, 4.66 M rows), `feature_values` 3.06 GiB (57.1 M rows), `derivative_bars` 2.21, `documents` 0.92, `bars_daily` 0.73, `picks` 0.36, `check_results` 0.30, `fundamentals` 0.28; the rest under 90 MB each. Largest legacy (table b-tree only): `bse_announcements` 1.70 GiB, `fno_bhav` 1.43, `transcripts` 0.77, `stock_prices` 0.46, `shareholding_holders` 0.33, `daily_snapshots_pit` 0.33. **The mirror is bigger than its sources** (`events` 2.8× `bse_announcements` from the JSON payload per row; `feature_values` 9× the panel + score tables in long form; `derivative_bars` 1.5× `fno_bhav`): stage 4's disk win only lands once legacy tables are dropped; today v3 is net +12.6 GiB. The stop rule (D1) exists for exactly this.
+  - **D2 applied to the tables added outside v3 since 2026-10-01** (by key and change rule, not by the plan that made them). Fold in (12): `news_today`, `news_week`, `news_themes`, `desk_snapshots` → Documents (one row per edition / theme note / dated page, kind in the catalog); `news_theme_articles` → `event_links`; `news_theme_history` → `events`; `symbol_changes` → `identifiers` (valid-from / valid-to); `market_holidays` → a calendar row in `catalog`; `quarterly_results_nse` → `fundamentals` source `nse_xbrl` (after its 2017–24 harvest finishes); `option_live_quotes` → `derivative_bars` source `kite`, 15:20 timestamp; `broker_instrument_prices` → `bars_daily` once `entities` carries non-universe instruments (same enabler as `stock_prices_unlisted`); `option_paper_trades` → `picks` + `outcomes` book `strangle`; `multibagger_book` → `picks` actor `amit` book `multibagger`, and `multibagger_book_log` disappears (Decisions is append-only by construction). Stay as Ops state (8, D2's exception): `option_live_settings` / `option_live_orders` / `option_live_trades` (the live book's switches and broker ledger; never reshape under a running trader), `broker_holdings` (account data), `intraday_files` (a Parquet manifest), `run_events`, `llm_tasks`, `llm_usage`, `mcp_calls`. The RETIRED dict in `datamodel/reconcile.py` is the register; each "kept as-is" line there is the written reason.
+- **Next:** stage 1 (Decisions: `daily_picks` 30 files, `pipeline_log` 21, `pick_outcomes` 11, `portfolio_weights` 13) on a worktree branch with `ALPHA_DB`, behind `config.DATA_MODEL["decisions"]`; its old tables drop ≥ 14 days after the switch.

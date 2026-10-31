@@ -618,3 +618,34 @@ def test_chat_history_lists_every_conversation_and_reopens_one(q):
         org_chat.history("cio", "nope")
     with pytest.raises(ValueError):
         org_chat.conversations("ceo")
+
+
+def test_a_tier_b_work_order_approves_itself_after_the_veto_window(q, monkeypatch):
+    """ADR 0086: Tier B is yes by default after VETO_HOURS unless the CEO parks or rejects it;
+    Tier A (and any order written before the ADR, which has no tier) waits for him."""
+    import datetime as dt
+    item = {"title": "Prune a test", "what": "Delete the test that cannot fail.", "done_when": "suite green",
+            "owner": "backend-engineer", "size": "S"}
+    b = org.save_work_order("dq-auditor", None, {"title": "Tier B", "summary": "Cleanup.", "items": [item], "tier": "B"})
+    a = org.save_work_order("dq-auditor", None, {"title": "Tier A", "summary": "Weights.", "items": [item], "tier": "A"})
+    legacy = org.save_work_order("dq-auditor", None, {"title": "No tier", "summary": "Old.", "items": [item]})
+    fresh = {w["number"]: w for w in org.work_orders()}
+    assert fresh[b]["status"] == "awaiting approval" and fresh[b]["tier"] == "B" and fresh[b]["auto_approve_at"]
+    assert fresh[a]["auto_approve_at"] is None and fresh[legacy]["tier"] == "A"
+    assert {i["fields"]["number"] for i in org.inbox() if i["type"] == "work_order"} == {a, b, legacy}
+    with pytest.raises(ValueError, match="approves it"):
+        org.work_status(b, "in_progress")
+    # the window passes with nobody saying no
+    later = (dt.datetime.utcnow() + dt.timedelta(hours=org.VETO_HOURS + 1)).isoformat(timespec="seconds")
+    monkeypatch.setattr(org, "_now", lambda: later)
+    w = {x["number"]: x for x in org.work_orders()}
+    assert w[b]["status"] == "approved" and "by default" in w[b]["note"]
+    assert w[a]["status"] == "awaiting approval" and w[legacy]["status"] == "awaiting approval"
+    assert {i["fields"]["number"] for i in org.inbox() if i["type"] == "work_order"} == {a, legacy}
+    assert org.work_status(b, "in_progress")["status"] == "in_progress"
+    # a veto inside the window holds
+    monkeypatch.setattr(org, "_now", lambda: dt.datetime.utcnow().isoformat(timespec="seconds"))
+    b2 = org.save_work_order("dq-auditor", None, {"title": "Tier B vetoed", "summary": "Cleanup.", "items": [item], "tier": "B"})
+    org.decide(org.work_order_doc_id(b2), "reject")
+    monkeypatch.setattr(org, "_now", lambda: later)
+    assert org.work_order(b2)["status"] == "rejected"

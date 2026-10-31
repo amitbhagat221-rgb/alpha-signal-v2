@@ -173,7 +173,8 @@ def all_checks():
     """Every data check: the custom semantic ones, then the derived range and
     coverage checks."""
     from checks.custom import CHECKS
-    return list(CHECKS) + range_checks() + coverage_checks()
+    from checks.faults import CHECKS as FAULT_CHECKS
+    return list(CHECKS) + list(FAULT_CHECKS) + range_checks() + coverage_checks()
 
 
 def range_counts(conn, table):

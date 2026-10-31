@@ -249,6 +249,52 @@ def _dq_problems(clean, payload):
     return out
 
 
+def work_order_schema():
+    """What a stored work order holds (org_chat.make_work_order and the audit's drafted fix order)."""
+    return O("title summary items", title=S(160), summary=S(900),
+             items=A(O("title what done_when owner size", title=S(160), what=S(1200), where=S(500),
+                       done_when=S(600), owner={"ref": "owners"}, size=E("S", "M", "L")), 12, 1),
+             open_questions=A(S(400), 8), tier=E(*org.WORK_TIERS))     # ADR 0086; absent = Tier A
+
+
+def _draft_fix_order(conn, clean, payload, memo_id):
+    """ADR 0085 J3: the findings the auditor called `real` with impact `picks` become one
+    work order, awaiting the CEO's approval, parented to the memo (a re-run retires it).
+    Returns the order's doc_id or None. The seat never writes this: the server does."""
+    brief = {f["finding_id"]: f for f in payload["facts"]["findings"]}
+    hits = [c for c in clean.get("findings") or []
+            if c.get("disposition") == "real" and c.get("impact") == "picks" and not brief.get(c["finding_id"], {}).get("known")]
+    if not hits:
+        return None
+    builders = org.builder_roles()
+    items = []
+    for c in hits[:12]:
+        f = brief[c["finding_id"]]
+        table = str(f.get("subject") or "?").split(".")[0]
+        items.append({
+            "title": f"Fix {f.get('subject') or c['finding_id']}"[:160],
+            "what": (f"{f.get('claim') or c.get('why') or 'the finding'} ({f.get('n_bad') or 0:,} of {f.get('n_total') or 0:,}). "
+                     f"First measure: quarantine the rows the finding's "
+                     f"query returns, re-run the screener for the latest pick date with them masked, and attach the pick "
+                     f"diff to this order. Then fix at the source so the next harvest writes the right value: "
+                     f"{c.get('proposed_fix') or 'the parser, mapping or backfill behind the column'}. Never hand-edit "
+                     f"the stored number.")[:1200],
+            "where": f"{table}; the query is on finding {c['finding_id']} of the dq-auditor memo of {payload.get('as_of')}"[:500],
+            "done_when": (f"the finding's query returns n_bad 0 (or under its bar) on the live DB and still does after "
+                          f"the next harvest of {table}; the pick diff is attached")[:600],
+            "owner": c.get("owner") if c.get("owner") in builders else "data-engineer",
+            "size": "M",
+        })
+    wo = {"title": f"Data faults touching the picks — audit {payload.get('as_of')}"[:160],
+          "summary": (f"Drafted by the server from the dq-auditor's memo (ADR 0085 J3): {len(items)} finding(s) the seat "
+                      f"called real and touching today's picks. Approve to run with /work-order; reject to drop. "
+                      f"{clean.get('top_action') or ''}")[:900],
+          "items": items, "tier": "B"}       # ADR 0086: a data fix with its pick diff measured first is Tier B
+    clean_wo = _check(work_order_schema(), wo, {"owners": builders}, "fix order")
+    n = org.save_work_order("dq-auditor", None, clean_wo, parent=memo_id, conn=conn)
+    return org.work_order_doc_id(n, conn=conn)
+
+
 REPRODUCES_AT = 0.5     # a finding reproduces when its query still shows at least this share of the count claimed
 
 
@@ -447,6 +493,10 @@ def _ingest(kind):
                                     model=model, doc_date=payload.get("as_of"))
             inserted.append(did)
             superseded += sup
+            if kind == "org_dq_audit":          # J3 (ADR 0085): a real fault touching the picks → a fix order to approve
+                wo = _draft_fix_order(conn, clean, payload, did)
+                if wo:
+                    inserted.append(wo)
             if sup:                 # a re-run replaced the memo: retire its undecided asks and cards too
                 tids = [org._type_id(conn, f"org.{t}") for t in org.ITEM_TYPES]
                 kids = [r[0] for r in conn.execute(

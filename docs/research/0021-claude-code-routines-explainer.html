@@ -1,0 +1,520 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Night Janitors</title>
+<meta name="description" content="A Finshots-style explainer: how the team that builds Claude Code lets Claude clean up its own codebases every day, what the twelve routines do, and why fewer than half the pull requests get merged.">
+<style>
+:root { color-scheme: light;
+  --surface: #fcfcfb; --surface-2: #f3f2ee; --line: #e2e1dc; --grid: #ebeae6;
+  --text: #0b0b0b; --text-2: #4f4e4a; --muted: #86847e;
+  --ink: #1b1b1b; --accent: #eb6834; --accent-2: #2a78d6; --ok: #2f9e5f; --bad: #d64545; --paper: #fff6d6;
+  --warn-bg: #fff4e5; --warn: #8a4b00; --card: #ffffff; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { color-scheme: dark;
+  --surface: #1a1a19; --surface-2: #232322; --line: #34332f; --grid: #2a2a28;
+  --text: #f0efec; --text-2: #c3c2b7; --muted: #8e8d86;
+  --ink: #f0efec; --accent: #ff7a45; --accent-2: #4b94ea; --ok: #4fc17f; --bad: #ef6a6a; --paper: #3a3420;
+  --warn-bg: #3a2a12; --warn: #f3c383; --card: #202020; } }
+:root[data-theme="dark"] { color-scheme: dark;
+  --surface: #1a1a19; --surface-2: #232322; --line: #34332f; --grid: #2a2a28;
+  --text: #f0efec; --text-2: #c3c2b7; --muted: #8e8d86;
+  --ink: #f0efec; --accent: #ff7a45; --accent-2: #4b94ea; --ok: #4fc17f; --bad: #ef6a6a; --paper: #3a3420;
+  --warn-bg: #3a2a12; --warn: #f3c383; --card: #202020; }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--surface); color: var(--text); font: 16px/1.6 Georgia, "Iowan Old Style", "Palatino Linotype", serif; }
+main { max-width: 760px; margin: 0 auto; padding: 28px 16px 72px; }
+.kicker { font: 600 12px/1 system-ui, sans-serif; letter-spacing: .12em; text-transform: uppercase; color: var(--accent); margin-bottom: 10px; }
+h1 { font-size: 34px; line-height: 1.15; margin: 0 0 10px; letter-spacing: -.01em; }
+h2 { font-size: 23px; line-height: 1.25; margin: 44px 0 10px; }
+h3 { font-size: 17px; margin: 22px 0 6px; font-family: system-ui, sans-serif; }
+p, li { color: var(--text-2); }
+p.lead { color: var(--text); font-size: 18px; }
+p.dek { font-family: system-ui, sans-serif; font-size: 14px; color: var(--muted); margin: 0 0 24px; }
+em.hl { font-style: normal; background: linear-gradient(transparent 60%, color-mix(in srgb, var(--accent) 35%, transparent) 60%); color: var(--text); }
+.fig { margin: 22px 0 6px; background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 14px 14px 10px; }
+.fig svg { width: 100%; height: auto; display: block; }
+.cap { font-family: system-ui, sans-serif; font-size: 13px; color: var(--muted); margin: 6px 2px 0; }
+.card { background: var(--surface-2); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; margin: 14px 0; }
+.card p { margin: 6px 0; }
+.sowhat { border-left: 4px solid var(--accent); padding: 8px 14px; margin: 18px 0; background: color-mix(in srgb, var(--accent) 7%, transparent); border-radius: 0 10px 10px 0; }
+.sowhat b { font-family: system-ui, sans-serif; font-size: 12px; letter-spacing: .1em; text-transform: uppercase; color: var(--accent); display: block; margin-bottom: 2px; }
+.sowhat p { margin: 4px 0; color: var(--text); }
+.janitors { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin: 16px 0; }
+.jan { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px 14px; }
+.jan svg { width: 100%; height: auto; display: block; margin-bottom: 6px; }
+.jan h4 { margin: 4px 0 2px; font: 600 15px/1.3 system-ui, sans-serif; color: var(--text); }
+.jan .tag { font: 600 11px/1 system-ui, sans-serif; letter-spacing: .08em; text-transform: uppercase; color: var(--accent-2); }
+.jan p { font-size: 14px; margin: 4px 0 0; }
+.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin: 12px 0; }
+.kpi { background: var(--surface-2); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; font-family: system-ui, sans-serif; }
+.kpi b { display: block; font-size: 26px; font-weight: 600; color: var(--text); }
+.kpi span { font-size: 12.5px; color: var(--text-2); }
+table { border-collapse: collapse; width: 100%; font: 14px/1.4 system-ui, sans-serif; margin: 10px 0; }
+th, td { padding: 7px 8px; text-align: left; border-bottom: 1px solid var(--grid); vertical-align: top; }
+th { color: var(--text-2); font-weight: 600; }
+dl { display: grid; grid-template-columns: max-content 1fr; gap: 8px 14px; font-family: system-ui, sans-serif; font-size: 14.5px; }
+dt { font-weight: 600; color: var(--text); }
+dd { margin: 0; color: var(--text-2); }
+.note { background: var(--warn-bg); color: var(--warn); border-radius: 10px; padding: 10px 14px; margin: 12px 0; font-family: system-ui, sans-serif; font-size: 14px; }
+.note p { color: inherit; margin: 4px 0; }
+.src { font-family: system-ui, sans-serif; font-size: 13.5px; }
+.src li { margin: 4px 0; }
+a { color: var(--accent-2); }
+.tail { border-top: 2px dashed var(--line); margin-top: 44px; padding-top: 16px; }
+/* svg shared */
+.ink { stroke: var(--ink); fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.fill { fill: var(--ink); }
+.acc { fill: var(--accent); } .acc2 { fill: var(--accent-2); } .okf { fill: var(--ok); } .badf { fill: var(--bad); }
+.paper { fill: var(--paper); stroke: var(--ink); stroke-width: 2; }
+.lbl { font: 600 12px system-ui, sans-serif; fill: var(--text); }
+.lbl2 { font: 12px system-ui, sans-serif; fill: var(--text-2); }
+.big { font: 700 22px system-ui, sans-serif; fill: var(--text); }
+.soft { fill: var(--surface-2); stroke: var(--line); }
+@media (max-width: 520px) { h1 { font-size: 28px; } dl { grid-template-columns: 1fr; gap: 2px 0; } dd { margin-bottom: 8px; } }
+</style>
+</head>
+<body>
+<main>
+
+<div class="kicker">Finshots-style explainer · 31 Oct 2026</div>
+<h1>The Night Janitors: how the Claude Code team lets Claude clean up after itself</h1>
+<p class="dek">About a 9-minute read. Written for anyone who has ever opened an old project folder and quietly closed it again.</p>
+
+<p class="lead">Every big software project has a junk drawer. Code nobody calls any more. Tests that pass no matter what. A switch that was supposed to be flipped "for a week" in 2024. Nobody cleans it because nobody gets promoted for cleaning it. This is the story of a team that hired a robot to do the cleaning, every single day, and what happened when they counted the results.</p>
+
+<h2>First, the mess</h2>
+
+<p>Picture a busy restaurant kitchen. During service everyone is cooking. Plates go out, orders come in, and a sauce pan gets shoved to the back of the stove "for later". Nobody has time to scrub it. By midnight the kitchen is a disaster, and yet tomorrow's service starts at 11.</p>
+
+<p>Software is exactly like that, except the pans never smell. A codebase is the full set of files a product is built from. Claude Code, the programming assistant made by Anthropic, is built from <em class="hl">six of them</em>: an iPhone app, an Android app, a desktop app, a web app, the command-line tool, and a toolkit for other developers. Each one is a kitchen. Each one accumulates pans.</p>
+
+<div class="fig">
+<svg viewBox="0 0 720 250" role="img" aria-label="Six app kitchens, each with a pile of dirty pans labelled dead code, flaky tests, old flags">
+  <defs><g id="pan"><ellipse cx="0" cy="0" rx="22" ry="8" class="soft" style="stroke:var(--ink);stroke-width:2"/><line x1="22" y1="0" x2="44" y2="-6" class="ink"/></g></defs>
+  <g transform="translate(20,20)">
+    <!-- six stoves -->
+    <g>
+      <rect x="0" y="120" width="100" height="70" rx="8" class="soft" style="stroke:var(--ink);stroke-width:2"/>
+      <text x="50" y="212" text-anchor="middle" class="lbl">iOS</text>
+      <use href="#pan" transform="translate(40,112)"/><use href="#pan" transform="translate(48,98)"/><use href="#pan" transform="translate(36,84)"/>
+      <text x="50" y="70" text-anchor="middle" class="lbl2">dead code</text>
+    </g>
+    <g transform="translate(115,0)">
+      <rect x="0" y="120" width="100" height="70" rx="8" class="soft" style="stroke:var(--ink);stroke-width:2"/>
+      <text x="50" y="212" text-anchor="middle" class="lbl">Android</text>
+      <use href="#pan" transform="translate(44,112)"/><use href="#pan" transform="translate(40,98)"/>
+      <text x="50" y="84" text-anchor="middle" class="lbl2">flaky tests</text>
+    </g>
+    <g transform="translate(230,0)">
+      <rect x="0" y="120" width="100" height="70" rx="8" class="soft" style="stroke:var(--ink);stroke-width:2"/>
+      <text x="50" y="212" text-anchor="middle" class="lbl">Desktop</text>
+      <use href="#pan" transform="translate(40,112)"/><use href="#pan" transform="translate(50,98)"/><use href="#pan" transform="translate(38,84)"/><use href="#pan" transform="translate(46,70)"/>
+      <text x="50" y="56" text-anchor="middle" class="lbl2">old flags</text>
+    </g>
+    <g transform="translate(345,0)">
+      <rect x="0" y="120" width="100" height="70" rx="8" class="soft" style="stroke:var(--ink);stroke-width:2"/>
+      <text x="50" y="212" text-anchor="middle" class="lbl">Web</text>
+      <use href="#pan" transform="translate(42,112)"/>
+      <text x="50" y="98" text-anchor="middle" class="lbl2">duplicates</text>
+    </g>
+    <g transform="translate(460,0)">
+      <rect x="0" y="120" width="100" height="70" rx="8" class="soft" style="stroke:var(--ink);stroke-width:2"/>
+      <text x="50" y="212" text-anchor="middle" class="lbl">CLI</text>
+      <use href="#pan" transform="translate(40,112)"/><use href="#pan" transform="translate(48,98)"/><use href="#pan" transform="translate(40,84)"/>
+      <text x="50" y="70" text-anchor="middle" class="lbl2">crashes</text>
+    </g>
+    <g transform="translate(575,0)">
+      <rect x="0" y="120" width="100" height="70" rx="8" class="soft" style="stroke:var(--ink);stroke-width:2"/>
+      <text x="50" y="212" text-anchor="middle" class="lbl">Agent SDK</text>
+      <use href="#pan" transform="translate(44,112)"/><use href="#pan" transform="translate(40,98)"/>
+      <text x="50" y="84" text-anchor="middle" class="lbl2">over-engineering</text>
+    </g>
+  </g>
+</svg>
+<p class="cap">Six kitchens, six piles of pans. Each pile is a kind of mess that builds up when everyone is busy shipping.</p>
+</div>
+
+<p>Here's the thing about these pans. None of them stop the restaurant from serving food. Dead code doesn't crash anything. A useless test still shows green. So the mess is <em>invisible</em> to customers and <em>boring</em> to engineers. That is the worst possible combination. It means it never gets done.</p>
+
+<h2>Then, a weird experiment</h2>
+
+<p>Boris Cherny is the engineer at Anthropic who created Claude Code. In mid-2026 he tried something he himself called "a weird experiment": what if Claude simply took over the day-to-day maintenance of the apps?</p>
+
+<p>The setup is almost comically simple. There is a Slack channel. (Slack is the office chat tool most tech companies live in.) The channel is called <em class="hl">proj-claude-maintains-apps</em>. In it, Claude is given a short, plain-English job description for each kind of cleaning. Not a 40-page prompt. Something closer to a note you'd leave for a new hire: "every day, open the iPhone app in the simulator, tap around until it crashes, and send me a fix."</p>
+
+<div class="fig">
+<svg viewBox="0 0 720 260" role="img" aria-label="A Slack channel where plain-English notes are posted and a robot reads them each morning">
+  <!-- chat window -->
+  <rect x="20" y="16" width="430" height="228" rx="14" class="soft" style="stroke:var(--ink);stroke-width:2"/>
+  <rect x="20" y="16" width="430" height="38" rx="14" class="fill" opacity=".08"/>
+  <text x="40" y="41" class="lbl"># proj-claude-maintains-apps</text>
+  <!-- messages -->
+  <g transform="translate(40,70)">
+    <circle cx="12" cy="12" r="12" class="acc2"/>
+    <text x="34" y="10" class="lbl">Boris</text>
+    <rect x="34" y="16" width="350" height="36" rx="8" class="paper"/>
+    <text x="44" y="39" class="lbl2">Every day: find code nothing calls. If unsure, add a log first.</text>
+  </g>
+  <g transform="translate(40,130)">
+    <circle cx="12" cy="12" r="12" class="acc2"/>
+    <text x="34" y="10" class="lbl">Boris</text>
+    <rect x="34" y="16" width="350" height="36" rx="8" class="paper"/>
+    <text x="44" y="39" class="lbl2">Every day: find tests that flip-flop in CI. Fix the root cause.</text>
+  </g>
+  <g transform="translate(40,190)">
+    <circle cx="12" cy="12" r="12" class="acc"/>
+    <text x="34" y="10" class="lbl">Claude</text>
+    <rect x="34" y="16" width="350" height="36" rx="8" class="soft" style="stroke:var(--ink);stroke-width:2"/>
+    <text x="44" y="39" class="lbl2">On it. 3 PRs opened. Logs added to 2 suspects, will re-check tomorrow.</text>
+  </g>
+  <!-- robot -->
+  <g transform="translate(520,60)">
+    <rect x="20" y="40" width="120" height="100" rx="18" class="soft" style="stroke:var(--ink);stroke-width:2"/>
+    <circle cx="58" cy="85" r="9" class="fill"/><circle cx="102" cy="85" r="9" class="fill"/>
+    <path d="M60 115 Q80 130 100 115" class="ink"/>
+    <line x1="80" y1="40" x2="80" y2="18" class="ink"/><circle cx="80" cy="12" r="6" class="acc"/>
+    <rect x="40" y="140" width="80" height="40" rx="8" class="soft" style="stroke:var(--ink);stroke-width:2"/>
+    <!-- broom -->
+    <line x1="150" y1="60" x2="175" y2="190" class="ink" style="stroke-width:3"/>
+    <path d="M160 185 L195 185 L185 215 L170 215 Z" class="acc"/>
+    <text x="80" y="210" text-anchor="middle" class="lbl2">reads the notes, cleans, reports back</text>
+  </g>
+</svg>
+<p class="cap">The whole "architecture": a Slack channel, a few plain-English notes, and Claude reporting back. The hard part was never the plumbing.</p>
+</div>
+
+<p>Each of these standing instructions is what Claude Code calls a <strong>routine</strong>. Think of a routine as a saved to-do that runs itself: a job description, the folder of code it is allowed to touch, and a trigger that says when to go. The trigger can be a clock ("every night"), a message from another system ("when the error monitor shouts"), or an event in the code repository ("when someone opens a pull request"). It runs on Anthropic's servers, so it keeps going when your laptop is shut. Anthropic has since started calling them "scheduled tasks" in the documentation, but the team still says routines.</p>
+
+<div class="sowhat"><b>So what</b>
+<p>The routines are not a new product feature the team invented for themselves. Anyone with a Claude Pro, Max, Team or Enterprise plan can create one with the <code>/schedule</code> command. What's notable is that the people who built the tool are now eating their own cooking, and publishing the numbers.</p></div>
+
+<h2>Meet the twelve janitors</h2>
+
+<p>Cherny's team runs about a dozen routines a day. Eleven have names that leaked into the press coverage. Each one has one job, like a specialist on a cleaning crew. Here they are, with what the jargon actually means.</p>
+
+<div class="janitors">
+
+<div class="jan">
+<svg viewBox="0 0 200 90" aria-hidden="true">
+  <rect x="20" y="22" width="80" height="52" rx="6" class="soft" style="stroke:var(--ink);stroke-width:2"/>
+  <line x1="30" y1="36" x2="80" y2="36" class="ink" opacity=".35"/><line x1="30" y1="48" x2="70" y2="48" class="ink" opacity=".35"/><line x1="30" y1="60" x2="85" y2="60" class="ink" opacity=".35"/>
+  <path d="M110 48 L150 48" class="ink" style="stroke-dasharray:4 4"/>
+  <text x="155" y="52" class="lbl2">?</text>
+  <circle cx="178" cy="48" r="10" class="badf" opacity=".9"/><line x1="173" y1="43" x2="183" y2="53" class="ink" style="stroke:#fff"/><line x1="183" y1="43" x2="173" y2="53" class="ink" style="stroke:#fff"/>
+</svg>
+<div class="tag">The headline act</div>
+<h4>Dead Code Removal</h4>
+<p><strong>Dead code</strong> is code that nothing ever calls any more. It costs nothing to run but everything to read: every new engineer wastes time wondering what it does. This janitor deletes code it can <em>prove</em> is unreachable. For code it merely <em>suspects</em>, it does something clever that we'll come back to.</p>
+</div>
+
+<div class="jan">
+<svg viewBox="0 0 200 90" aria-hidden="true">
+  <g transform="translate(30,45)"><circle r="18" class="okf"/><text x="0" y="5" text-anchor="middle" class="lbl" style="fill:#fff">PASS</text></g>
+  <g transform="translate(80,45)"><circle r="18" class="badf"/><text x="0" y="5" text-anchor="middle" class="lbl" style="fill:#fff">FAIL</text></g>
+  <g transform="translate(130,45)"><circle r="18" class="okf"/><text x="0" y="5" text-anchor="middle" class="lbl" style="fill:#fff">PASS</text></g>
+  <text x="170" y="50" class="big">?</text>
+</svg>
+<div class="tag">The coin-flipper catcher</div>
+<h4>Flaky-Test Fixer</h4>
+<p>A <strong>test</strong> is a tiny program that checks the real program still works. <strong>CI</strong> (continuous integration) is the robot that runs every test on every change. A <strong>flaky</strong> test passes on Monday and fails on Tuesday with no change in between, usually because of timing or shared state. Teams learn to ignore it, and then it hides a real failure. This janitor finds the root cause and fixes it.</p>
+</div>
+
+<div class="jan">
+<svg viewBox="0 0 200 90" aria-hidden="true">
+  <rect x="14" y="20" width="92" height="50" rx="6" class="soft" style="stroke:var(--ink);stroke-width:2"/>
+  <text x="60" y="50" text-anchor="middle" class="lbl" style="font-size:11px">assert true</text>
+  <text x="112" y="52" class="lbl2">always</text>
+  <g transform="translate(180,45)"><circle r="14" class="okf"/><text x="0" y="5" text-anchor="middle" class="lbl" style="fill:#fff">✓</text></g>
+</svg>
+<div class="tag">The fake-guard remover</div>
+<h4>Useless Test Pruner</h4>
+<p>Some tests cannot fail. They check that a function was called, or that one equals one. They give a warm green glow and protect nothing. This janitor deletes them, so the remaining green actually means something.</p>
+</div>
+
+<div class="jan">
+<svg viewBox="0 0 200 90" aria-hidden="true">
+  <rect x="30" y="32" width="60" height="26" rx="13" class="okf"/>
+  <circle cx="77" cy="45" r="10" style="fill:#fff"/>
+  <text x="100" y="50" class="lbl2">ON since 2024</text>
+  <path d="M60 70 L60 82" class="ink"/><text x="60" y="88" text-anchor="middle" class="lbl2" style="font-size:9px">remove switch</text>
+</svg>
+<div class="tag">The switch puller</div>
+<h4>Shipped-Feature Inliner</h4>
+<p>A <strong>feature flag</strong> is an on/off switch in the code that lets a team release a feature to 1% of users, then 10%, then everyone. Once it's at 100% the switch is pure clutter, and every switch doubles the number of paths to test. This janitor removes switches that have been fully on for ages and keeps only the "on" path.</p>
+</div>
+
+<div class="jan">
+<svg viewBox="0 0 200 90" aria-hidden="true">
+  <rect x="14" y="25" width="86" height="40" rx="6" class="paper"/>
+  <text x="57" y="50" text-anchor="middle" class="lbl2" style="font-size:11px">internal only</text>
+  <path d="M106 45 L118 45" class="ink"/>
+  <text x="122" y="38" class="lbl2">ship it</text><text x="122" y="60" class="lbl2">or bin it</text>
+</svg>
+<div class="tag">The attic clearer</div>
+<h4>Ant-only Shipper</h4>
+<p>"Ant" is Anthropic slang for an employee. Engineers build little features just for themselves, then forget them. This janitor looks at whether anyone actually uses each internal-only feature, and either ships it to everyone or deletes it. No more attic.</p>
+</div>
+
+<div class="jan">
+<svg viewBox="0 0 200 90" aria-hidden="true">
+  <rect x="20" y="25" width="50" height="40" rx="6" class="soft" style="stroke:var(--ink);stroke-width:2"/>
+  <rect x="80" y="25" width="50" height="40" rx="6" class="soft" style="stroke:var(--ink);stroke-width:2"/>
+  <text x="45" y="50" text-anchor="middle" class="lbl2">fetch()</text><text x="105" y="50" text-anchor="middle" class="lbl2">fetch2()</text>
+  <path d="M138 45 L155 45" class="ink"/>
+  <rect x="160" y="30" width="30" height="30" rx="6" class="acc2"/>
+</svg>
+<div class="tag">The twin merger</div>
+<h4>Dup Unifier</h4>
+<p>Two engineers, two years apart, write nearly the same helper. Now a bug fix in one misses the other. This janitor finds near-duplicates, including ones that drifted slightly apart, and merges them into one.</p>
+</div>
+
+<div class="jan">
+<svg viewBox="0 0 200 90" aria-hidden="true">
+  <path d="M20 20 L20 70 M30 30 L30 70 M40 40 L40 70 M50 50 L50 70 M60 60 L60 70" class="ink" opacity=".5"/>
+  <text x="70" y="68" class="lbl2">if (if (if (if</text>
+  <path d="M150 45 L165 45" class="ink"/>
+  <line x1="172" y1="45" x2="190" y2="45" class="ink" style="stroke-width:3"/>
+</svg>
+<div class="tag">The untangler</div>
+<h4>Logic Simplifier</h4>
+<p>Business rules pile up as "if this, then unless that, except when". This janitor flattens nested conditions into something a human can read in one pass.</p>
+</div>
+
+<div class="jan">
+<svg viewBox="0 0 200 90" aria-hidden="true">
+  <circle cx="45" cy="45" r="22" class="soft" style="stroke:var(--ink);stroke-width:2"/>
+  <path d="M35 45 L45 55 L60 35" class="ink" style="stroke:var(--ok);stroke-width:3"/>
+  <circle cx="110" cy="45" r="22" class="soft" style="stroke:var(--ink);stroke-width:2"/>
+  <text x="110" y="49" text-anchor="middle" class="lbl" style="fill:var(--bad);font-size:10px">off by 1</text>
+  <text x="145" y="50" class="lbl2">→ fixed</text>
+</svg>
+<div class="tag">The detective</div>
+<h4>Logic Bug Fixer</h4>
+<p>Some bugs don't crash anything; they quietly give the wrong answer. This janitor builds a model of what the complicated logic is <em>supposed</em> to do, compares it with what it actually does, and fixes the gap.</p>
+</div>
+
+<div class="jan">
+<svg viewBox="0 0 200 90" aria-hidden="true">
+  <rect x="30" y="60" width="140" height="14" rx="3" class="soft" style="stroke:var(--ink);stroke-width:2"/>
+  <rect x="45" y="44" width="110" height="14" rx="3" class="soft" style="stroke:var(--ink);stroke-width:2"/>
+  <rect x="60" y="28" width="80" height="14" rx="3" class="soft" style="stroke:var(--ink);stroke-width:2"/>
+  <rect x="75" y="12" width="50" height="14" rx="3" class="acc" opacity=".8"/>
+  <text x="196" y="24" text-anchor="end" class="lbl2" style="font-size:9px">too many</text>
+</svg>
+<div class="tag">The de-architect</div>
+<h4>Abstraction Improver</h4>
+<p>An <strong>abstraction</strong> is a layer that hides detail: a "Payment" class so you don't think about card networks. Useful until someone builds a layer on a layer on a layer for a thing used once. This janitor collapses over-engineered towers back to what the code needs.</p>
+</div>
+
+<div class="jan">
+<svg viewBox="0 0 200 90" aria-hidden="true">
+  <rect x="25" y="15" width="150" height="20" rx="4" class="soft" style="stroke:var(--ink);stroke-width:2"/><text x="100" y="29" text-anchor="middle" class="lbl2">screen</text>
+  <rect x="25" y="40" width="150" height="20" rx="4" class="soft" style="stroke:var(--ink);stroke-width:2"/><text x="100" y="54" text-anchor="middle" class="lbl2">logic</text>
+  <rect x="25" y="65" width="150" height="20" rx="4" class="soft" style="stroke:var(--ink);stroke-width:2"/><text x="100" y="79" text-anchor="middle" class="lbl2">database</text>
+  <path d="M150 25 C 190 25, 190 75, 150 75" class="ink" style="stroke:var(--bad);stroke-dasharray:4 3"/>
+</svg>
+<div class="tag">The traffic cop</div>
+<h4>Abstraction Police</h4>
+<p>Well-built software is layered: the screen talks to the logic, the logic talks to the database. A <strong>layer violation</strong> is a shortcut where the screen reaches straight into the database. It works today and breaks everything later. This janitor finds the shortcuts and reroutes them.</p>
+</div>
+
+<div class="jan">
+<svg viewBox="0 0 200 90" aria-hidden="true">
+  <rect x="70" y="8" width="44" height="76" rx="8" class="soft" style="stroke:var(--ink);stroke-width:2"/>
+  <rect x="76" y="16" width="32" height="56" rx="3" class="fill" opacity=".08"/>
+  <circle cx="88" cy="40" r="5" class="acc"/><circle cx="98" cy="60" r="5" class="acc"/><circle cx="82" cy="26" r="5" class="acc"/>
+  <text x="130" y="30" class="lbl2">tap</text><text x="130" y="48" class="lbl2">tap</text><text x="130" y="66" class="lbl2">tap… 💥</text>
+</svg>
+<div class="tag">The toddler</div>
+<h4>Crash Fuzzer</h4>
+<p><strong>Fuzzing</strong> means feeding a program random input to see what breaks. This janitor opens the real app in a simulator, no fake components, and taps around like a toddler with a phone until it crashes. Then it traces the crash back to its cause and writes the fix.</p>
+</div>
+
+<div class="jan">
+<svg viewBox="0 0 200 90" aria-hidden="true">
+  <text x="100" y="56" text-anchor="middle" class="big">12th</text>
+  <text x="100" y="76" text-anchor="middle" class="lbl2">unnamed in the coverage</text>
+</svg>
+<div class="tag">The mystery</div>
+<h4>Routine number twelve</h4>
+<p>Cherny said twelve. The reporting lists eleven. Possibly a docs updater, possibly a dependency bumper, both of which appear in Anthropic's own routine examples. We don't know, and this page won't guess.</p>
+</div>
+
+</div>
+
+<h2>The cleverest trick: log first, delete tomorrow</h2>
+
+<p>Back to the dead-code janitor, because it contains the single best idea in the whole experiment.</p>
+
+<p>Deleting dead code is scary. "Nothing calls this" is easy to say and hard to prove: code can be reached through a text string, a dynamic import, a scheduled job you forgot about. Humans deal with the fear by not deleting anything. Ever.</p>
+
+<p>Claude's routine deals with it differently. If it can <em>prove</em> code is unreachable, it deletes it. If it only <em>suspects</em>, it adds a single line of logging that shouts "I ran!" and walks away. The next day, it checks the logs. Silence? Now it has evidence, not a hunch, and the code goes.</p>
+
+<div class="fig">
+<svg viewBox="0 0 720 200" role="img" aria-label="Two-day timeline: day one adds a log line to suspected dead code; day two checks the logs and deletes if silent">
+  <line x1="40" y1="100" x2="680" y2="100" class="ink" style="stroke-width:3"/>
+  <!-- day 1 -->
+  <circle cx="160" cy="100" r="10" class="acc2"/>
+  <text x="160" y="40" text-anchor="middle" class="lbl">Day 1</text>
+  <rect x="80" y="50" width="160" height="34" rx="8" class="paper"/>
+  <text x="160" y="72" text-anchor="middle" class="lbl2">suspect code → add log("I ran!")</text>
+  <!-- night -->
+  <text x="360" y="92" text-anchor="middle" class="lbl2">24 hours of real users</text>
+  <path d="M250 125 Q360 160 470 125" class="ink" style="stroke-dasharray:5 5"/>
+  <text x="360" y="150" text-anchor="middle" class="lbl2" style="font-size:11px">…nothing…</text>
+  <!-- day 2 -->
+  <circle cx="560" cy="100" r="10" class="acc"/>
+  <text x="560" y="40" text-anchor="middle" class="lbl">Day 2</text>
+  <rect x="480" y="50" width="160" height="34" rx="8" class="paper"/>
+  <text x="560" y="72" text-anchor="middle" class="lbl2">log silent? → delete with evidence</text>
+  <!-- bins -->
+  <g transform="translate(540,160)"><rect x="0" y="6" width="40" height="30" rx="4" class="soft" style="stroke:var(--ink);stroke-width:2"/><rect x="-4" y="0" width="48" height="6" rx="2" class="fill"/></g>
+</svg>
+<p class="cap">Guessing becomes measuring. The routine turns "I think this is dead" into "nobody touched it for a day, here is the log to prove it".</p>
+</div>
+
+<div class="sowhat"><b>So what</b>
+<p>This is a general pattern, not a coding one. Before you remove anything you're unsure about, a report, a meeting, a data feed, instrument it for a cycle and let the silence make the case. It turns a judgment call into a data point.</p></div>
+
+<h2>The scoreboard</h2>
+
+<p>Here is where it stops being a cute story. Every routine ends by opening a <strong>pull request</strong>, or PR: a proposed change parked for review, never a direct edit to the live code. Each PR then goes through two gates: Claude Code's own automated review, then a human. Over the first few weeks the numbers looked like this.</p>
+
+<div class="kpis">
+<div class="kpi"><b>388</b><span>pull requests opened by the routines</span></div>
+<div class="kpi"><b>180</b><span>merged into the real code after both reviews</span></div>
+<div class="kpi"><b>208</b><span>closed without merging</span></div>
+<div class="kpi"><b>46%</b><span>merge rate</span></div>
+</div>
+
+<div class="fig">
+<svg viewBox="0 0 720 230" role="img" aria-label="Funnel: 388 PRs opened, pass Claude review and human review, 180 merged and 208 rejected">
+  <!-- funnel body -->
+  <path d="M40 30 L680 30 L560 110 L160 110 Z" class="soft" style="stroke:var(--ink);stroke-width:2"/>
+  <text x="360" y="62" text-anchor="middle" class="big">388 PRs opened</text>
+  <text x="360" y="90" text-anchor="middle" class="lbl2">by a dozen daily routines, six codebases</text>
+  <!-- gates -->
+  <rect x="200" y="118" width="320" height="26" rx="13" class="acc2"/>
+  <text x="360" y="136" text-anchor="middle" class="lbl" style="fill:#fff">Gate 1: Claude Code Review · Gate 2: a human</text>
+  <!-- outputs -->
+  <g transform="translate(150,165)">
+    <rect x="0" y="0" width="180" height="50" rx="10" class="okf" opacity=".9"/>
+    <text x="90" y="22" text-anchor="middle" class="lbl" style="fill:#fff">180 merged</text>
+    <text x="90" y="40" text-anchor="middle" class="lbl2" style="fill:#fff">46 % · into production</text>
+  </g>
+  <g transform="translate(390,165)">
+    <rect x="0" y="0" width="180" height="50" rx="10" class="badf" opacity=".85"/>
+    <text x="90" y="22" text-anchor="middle" class="lbl" style="fill:#fff">208 rejected</text>
+    <text x="90" y="40" text-anchor="middle" class="lbl2" style="fill:#fff">54 % · used to tune the note</text>
+  </g>
+  <path d="M300 144 L240 165 M420 144 L480 165" class="ink"/>
+</svg>
+<p class="cap">The funnel. Note that nothing skips the human gate, which is both the safety net and, as we'll see, the bottleneck.</p>
+</div>
+
+<h3>Is 46% good or bad?</h3>
+
+<p>Depends what you compare it to. If a junior engineer had 54% of their PRs thrown out, you'd have a word with them. But a junior engineer costs a salary and gets demoralised. A routine costs some compute and tries again tomorrow. The right comparison isn't "how many PRs were rejected", it's <em class="hl">"how much cleaning got done that otherwise would have been zero"</em>. On that measure, 180 merged cleanups in a few weeks across six codebases is a number no human team would have produced, because no human team would have been asked to.</p>
+
+<h3>What happens to the 208?</h3>
+
+<p>This is the second clever bit. When a PR misses, the team does <em>not</em> fix the code by hand. They edit the routine's instructions so that tomorrow's attempt is better. Cherny says this tuning can take a few days per routine. In other words, the team is training a cleaner, not doing the cleaning. Every rejection is a note in the job description, and the job description compounds.</p>
+
+<div class="fig">
+<svg viewBox="0 0 720 150" role="img" aria-label="Loop: routine runs, PR rejected, instructions edited, better PR tomorrow">
+  <g transform="translate(40,45)">
+    <rect x="0" y="0" width="140" height="56" rx="10" class="soft" style="stroke:var(--ink);stroke-width:2"/><text x="70" y="25" text-anchor="middle" class="lbl">Routine runs</text><text x="70" y="44" text-anchor="middle" class="lbl2">opens a PR</text>
+  </g>
+  <path d="M185 73 L225 73" class="ink"/><polygon points="225,68 235,73 225,78" class="fill"/>
+  <g transform="translate(240,45)">
+    <rect x="0" y="0" width="140" height="56" rx="10" class="soft" style="stroke:var(--ink);stroke-width:2"/><text x="70" y="25" text-anchor="middle" class="lbl">Human says no</text><text x="70" y="44" text-anchor="middle" class="lbl2">"too aggressive"</text>
+  </g>
+  <path d="M385 73 L425 73" class="ink"/><polygon points="425,68 435,73 425,78" class="fill"/>
+  <g transform="translate(440,45)">
+    <rect x="0" y="0" width="140" height="56" rx="10" class="paper"/><text x="70" y="25" text-anchor="middle" class="lbl">Edit the note</text><text x="70" y="44" text-anchor="middle" class="lbl2">not the code</text>
+  </g>
+  <path d="M580 73 C 650 73, 650 15, 110 15 C 60 15, 60 30, 100 44" class="ink" style="stroke-dasharray:5 4"/>
+  <polygon points="96,39 104,47 94,49" class="fill"/>
+  <text x="360" y="135" text-anchor="middle" class="lbl2">tomorrow's PR is better · repeat until the merge rate climbs</text>
+</svg>
+<p class="cap">The feedback loop. Rejections improve the instructions, so the same routine gets sharper every day without anyone touching code.</p>
+</div>
+
+<h2>The quieter routines on laptops</h2>
+
+<p>The Slack-channel janitors are the headline, but Anthropic's own tips page shows a second tier the Claude Code team runs locally, with a command called <code>/loop</code> that repeats a task every few minutes for up to three days. These aren't cleaners so much as a very patient assistant.</p>
+
+<table>
+<tr><th>Every</th><th>Job</th><th>In plain words</th></tr>
+<tr><td>5 min</td><td>babysit</td><td>Read reviewer comments on your open PRs, make the fixes, keep the branch up to date, nudge it to merge.</td></tr>
+<tr><td>30 min</td><td>slack-feedback</td><td>Scan Slack for user complaints or suggestions and turn each into a PR.</td></tr>
+<tr><td>1 hour</td><td>pr-pruner</td><td>Close PRs that have gone stale, so the queue stays honest.</td></tr>
+<tr><td>daily (cloud)</td><td>docs updater</td><td>Look at every PR shipped since yesterday and update the documentation to match, then post the diff to Slack.</td></tr>
+</table>
+
+<p>The documentation also lists the "starter" routines Anthropic suggests to everyone: nightly labelling of new issues, a draft fix when the error monitor fires, a checklist review when a PR opens, smoke checks after each deploy, and a weekly sweep for docs that mention changed functions.</p>
+
+<h2>Why this works, in three lines</h2>
+
+<div class="card">
+<p><strong>1. One job per janitor.</strong> "Clean the kitchen" fails. "Remove feature flags that have been fully on for 90 days" succeeds. Narrow, checkable, boring.</p>
+<p><strong>2. Always a draft, never a commit.</strong> Every routine ends in a PR a human can reject in two seconds. The safety net is what makes the autonomy affordable.</p>
+<p><strong>3. Tune the note, not the output.</strong> Fixing the code by hand teaches nothing. Editing the instruction compounds.</p>
+</div>
+
+<div class="note">
+<p><strong>A note on the sourcing.</strong> The twelve-routine list, the Slack channel and the 388/180 figures come from a LinkedIn post by Boris Cherny in August 2026, as reported by The Decoder and AI Insiders. We could not read the LinkedIn post directly, so the exact wording of each routine's instruction is not public. The <code>/loop</code> examples and the starter routines are from Anthropic's own pages. Nothing here is a verified Anthropic engineering write-up; it is the best public account as of 31 Oct 2026.</p>
+</div>
+
+<h2>What this means for Alpha Signal</h2>
+
+<p>We already run a version of this. Plan 0019 gave the project an agent org: a CEO (Amit), a CIO, a CTO and about a dozen seats, each owning a kind of recurring task that runs on the morning cron and files a memo. That is a routine with a job title.</p>
+
+<p>Three things from the janitor story are worth stealing:</p>
+
+<ul>
+<li><strong>The log-first delete.</strong> Our codebase has tools, tables and factors that may be dead (the <code>factor_library</code> bench, old study tools, retired <code>run.sh</code> cases). A seat that instruments a suspect for a week via <code>run_events</code>, then proposes the deletion as a PR with the silent log attached, fits the existing "silent failures are the enemy" rule exactly.</li>
+<li><strong>The useless-test pruner.</strong> We have a rule that every health check must be able to fail (ADR 0060). The same bar applied to <code>tests/</code> would be a one-line routine.</li>
+<li><strong>Measure the merge rate.</strong> The org already grades memos. Counting proposals merged versus rejected per seat, the way Cherny counts PRs, is the honest scorecard for whether a seat earns its tokens.</li>
+</ul>
+
+<div class="sowhat"><b>So what</b>
+<p>None of this requires new infrastructure. It requires writing three or four plain-English notes, each ending in "open a PR, never commit", and reading the rejections as instructions to edit the note.</p></div>
+
+<h2>Jargon buster</h2>
+<dl>
+<dt>Codebase</dt><dd>All the source files a product is built from. Claude Code has six.</dd>
+<dt>Routine / scheduled task</dt><dd>A saved Claude Code job: a prompt, the repositories it may touch, and a trigger (schedule, API call or GitHub event). Runs on Anthropic's servers.</dd>
+<dt>Pull request (PR)</dt><dd>A proposed change to the code, parked for review. "Merged" means accepted into the real code; "closed" means rejected.</dd>
+<dt>Merge rate</dt><dd>Merged PRs divided by PRs opened. Here 180 / 388 = 46%.</dd>
+<dt>CI</dt><dd>Continuous integration: the robot that runs every automated test on every proposed change.</dd>
+<dt>Flaky test</dt><dd>A test that passes and fails on the same code depending on timing or luck.</dd>
+<dt>Dead code</dt><dd>Code that nothing calls any more. Harmless to run, expensive to read.</dd>
+<dt>Feature flag</dt><dd>An on/off switch in the code used to release a feature gradually. Clutter once it's fully on.</dd>
+<dt>Abstraction</dt><dd>A layer that hides detail behind a simpler name. Good in moderation.</dd>
+<dt>Layer violation</dt><dd>A shortcut between layers that should not talk directly, e.g. the screen reading the database.</dd>
+<dt>Fuzzing</dt><dd>Feeding random input or random taps to a program to make it crash on purpose.</dd>
+<dt>Slack / Claude Tag</dt><dd>Slack is a workplace chat tool. Claude Tag is Claude running inside Slack, which is where these routines are driven from.</dd>
+<dt>Ant</dt><dd>Anthropic slang for an Anthropic employee. "Ant-only" means internal-only.</dd>
+</dl>
+
+<div class="tail">
+<h2 style="margin-top:0">Tail piece</h2>
+<p>There's an old joke that the most dangerous phrase in engineering is "I'll clean that up later". Later never has a date. What Cherny's experiment really did was give <em>later</em> a date: tomorrow, 2 a.m., every day, with a note to a robot that doesn't find the work boring. The code didn't get smarter. The calendar did.</p>
+</div>
+
+<h2>Sources</h2>
+<ul class="src">
+<li>The Decoder, 14 Aug 2026: <a href="https://the-decoder.com/claude-code-now-runs-daily-maintenance-on-anthropics-software-with-a-46-percent-merge-rate/">Claude Code now runs daily maintenance on Anthropic's software with a 46 percent merge rate</a> (routine list, Slack channel, 388 / 180).</li>
+<li>AI Insiders, 15 Aug 2026: <a href="https://aiinsiders.net/article/anthropics-claude-code-merges-46percent-of-its-own">Anthropic's Claude Code merges 46% of its own maintenance PRs</a>.</li>
+<li>Boris Cherny on X: <a href="https://x.com/bcherny/status/2088014489438621990">"A weird experiment I've been trying…" (proj-claude-maintains-apps)</a>.</li>
+<li>Anthropic support: <a href="https://support.claude.com/en/articles/14554000-claude-code-power-user-tips">Claude Code power user tips</a> (the <code>/loop</code> jobs and the docs updater).</li>
+<li>Claude Code docs: <a href="https://code.claude.com/docs/en/routines">Automate work with scheduled tasks</a> (triggers, plans, starter examples).</li>
+<li>Anthropic blog: <a href="https://claude.com/blog/introducing-routines-in-claude-code">Introducing routines in Claude Code</a>.</li>
+<li>Nelson Lee, Substack, 26 Jul 2026: <a href="https://nelsonxlee.substack.com/p/boris-cherny-runs-four-routines-on">Boris Cherny runs four routines on his code base every morning</a> (an outsider's reconstruction of the prompts; treated as colour, not fact).</li>
+</ul>
+
+</main>
+</body>
+</html>

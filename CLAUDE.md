@@ -50,6 +50,7 @@ Everything else (memory, `_archive/`, slash commands, settings) — Claude handl
 - Never `git commit --amend`, `git add .`, `git add -A`
 - Concurrent sessions share this tree: commit only your own files and hunks (`/handoff` steps 0, 4–5). Never stage, revert, stash, reset or checkout another session's uncommitted edits
 - Never `pkill -f "uvicorn cockpit.app"` — the pattern matches the prod systemd service
+- Approval tiers (ADR 0086): Tier A paths (live options, weights/config, `run.sh`/crontab, schema drops, data deletes) wait for Amit; everything else commits when the pre-push suite passes, Tier B work orders approve themselves after 48 h, and every plan decision carries its default and effect date
 
 **Graph-first lookup**
 - Before a cross-file grep/read sweep, query the graphify MCP (`mcp__graphify__*`) and read only the files it points to. Don't query it for a file you're about to edit

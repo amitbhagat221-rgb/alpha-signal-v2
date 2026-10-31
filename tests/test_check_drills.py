@@ -299,6 +299,19 @@ def _taxonomy(conn):
     assert _fires("REGULATORY_SECTOR_TAXONOMY_MISMATCH", conn)["status"] == FAIL
 
 
+@drill("DATA_FAULT_IN_PICK_INPUTS")
+def _stale_annual_feeding_the_ranking(conn):
+    """Plan 0027 #3: a stock whose newest annual is years older than its newest quarter (OMXA's
+    annuals stopped at FY2015). The daily check runs the pick-touching probe rules offline."""
+    _stocks(conn, n=2)
+    conn.execute("INSERT INTO annual_balance_sheet (sid, period, end_date, total_assets, shares_outstanding) "
+                 "VALUES ('S000', 'FY23', '2023-03-31', 100, 10)")
+    conn.execute("INSERT INTO quarterly_income (sid, period, end_date, revenue) VALUES ('S000', 'Q1FY27', ?, 50)", (TODAY,))
+    v = _fires("DATA_FAULT_IN_PICK_INPUTS", conn)
+    assert v["status"] == FAIL and v["severity"] == WARN and v["n_bad"] >= 1
+    assert "0027 #3" in (v["sample"] or "")
+
+
 @pytest.mark.parametrize("code", sorted(DATA_DRILLS))
 def test_data_check_fires(code, conn):
     DATA_DRILLS[code](conn)

@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hiring a Cleaning Crew</title>
+<meta name="description" content="Plain-words explainer: what a cleaning crew of routines would do for Alpha Signal, what runs on its own, what Amit does each week, and the six yes/no calls that are his.">
+<style>
+:root { color-scheme: light;
+  --surface: #fcfcfb; --surface-2: #f3f2ee; --line: #e2e1dc; --grid: #ebeae6;
+  --text: #0b0b0b; --text-2: #4f4e4a; --muted: #86847e;
+  --ink: #1b1b1b; --accent: #eb6834; --accent-2: #2a78d6; --ok: #2f9e5f; --bad: #d64545; --paper: #fff6d6; --card: #ffffff; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { color-scheme: dark;
+  --surface: #1a1a19; --surface-2: #232322; --line: #34332f; --grid: #2a2a28;
+  --text: #f0efec; --text-2: #c3c2b7; --muted: #8e8d86;
+  --ink: #f0efec; --accent: #ff7a45; --accent-2: #4b94ea; --ok: #4fc17f; --bad: #ef6a6a; --paper: #3a3420; --card: #202020; } }
+:root[data-theme="dark"] { color-scheme: dark;
+  --surface: #1a1a19; --surface-2: #232322; --line: #34332f; --grid: #2a2a28;
+  --text: #f0efec; --text-2: #c3c2b7; --muted: #8e8d86;
+  --ink: #f0efec; --accent: #ff7a45; --accent-2: #4b94ea; --ok: #4fc17f; --bad: #ef6a6a; --paper: #3a3420; --card: #202020; }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--surface); color: var(--text); font: 17px/1.65 Georgia, "Iowan Old Style", "Palatino Linotype", serif; }
+main { max-width: 720px; margin: 0 auto; padding: 28px 16px 72px; }
+.kicker { font: 600 12px/1 system-ui, sans-serif; letter-spacing: .12em; text-transform: uppercase; color: var(--accent); margin-bottom: 10px; }
+h1 { font-size: 34px; line-height: 1.15; margin: 0 0 10px; letter-spacing: -.01em; }
+h2 { font-size: 24px; line-height: 1.25; margin: 46px 0 10px; }
+p, li { color: var(--text-2); }
+p.lead { color: var(--text); font-size: 19px; }
+p.dek { font-family: system-ui, sans-serif; font-size: 14px; color: var(--muted); margin: 0 0 24px; }
+em.hl { font-style: normal; background: linear-gradient(transparent 60%, color-mix(in srgb, var(--accent) 35%, transparent) 60%); color: var(--text); }
+.fig { margin: 22px 0 6px; background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 14px 14px 10px; }
+.fig svg { width: 100%; height: auto; display: block; }
+.cap { font-family: system-ui, sans-serif; font-size: 13.5px; color: var(--muted); margin: 6px 2px 0; }
+.sowhat { border-left: 4px solid var(--accent); padding: 8px 14px; margin: 18px 0; background: color-mix(in srgb, var(--accent) 7%, transparent); border-radius: 0 10px 10px 0; }
+.sowhat b { font-family: system-ui, sans-serif; font-size: 12px; letter-spacing: .1em; text-transform: uppercase; color: var(--accent); display: block; margin-bottom: 2px; }
+.sowhat p { margin: 4px 0; color: var(--text); }
+.crew { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; margin: 16px 0; }
+.member { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px 14px; }
+.member svg { width: 100%; height: auto; display: block; margin-bottom: 6px; }
+.member h4 { margin: 4px 0 2px; font: 600 16px/1.3 system-ui, sans-serif; color: var(--text); }
+.member .tag { font: 600 11px/1 system-ui, sans-serif; letter-spacing: .08em; text-transform: uppercase; color: var(--accent-2); }
+.member p { font-size: 14.5px; margin: 6px 0 0; }
+.member p b { color: var(--text); }
+.decisions { list-style: none; padding: 0; margin: 14px 0; }
+.decisions li { display: grid; grid-template-columns: 44px 1fr; gap: 12px; align-items: start; background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; margin: 10px 0; }
+.decisions .n { font: 700 18px system-ui, sans-serif; color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); border-radius: 10px; width: 44px; height: 44px; display: grid; place-items: center; }
+.decisions b { color: var(--text); font-family: system-ui, sans-serif; font-size: 15.5px; }
+.decisions p { margin: 4px 0 0; font-size: 15px; }
+.decisions .rec { display: inline-block; font: 600 12px/1 system-ui, sans-serif; letter-spacing: .06em; text-transform: uppercase; padding: 5px 8px; border-radius: 6px; margin-top: 8px; color: #fff; background: var(--ok); }
+.decisions .rec.no { background: var(--bad); }
+.steps { counter-reset: s; list-style: none; padding: 0; margin: 12px 0; }
+.steps li { counter-increment: s; position: relative; padding: 8px 0 8px 48px; border-bottom: 1px dashed var(--line); }
+.steps li::before { content: counter(s); position: absolute; left: 0; top: 10px; width: 32px; height: 32px; border-radius: 50%; background: var(--accent-2); color: #fff; font: 700 15px/32px system-ui, sans-serif; text-align: center; }
+.steps li b { color: var(--text); font-family: system-ui, sans-serif; }
+code { font: 13.5px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--surface-2); padding: 1px 5px; border-radius: 4px; color: var(--text); }
+pre { font: 13.5px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--surface-2); border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; overflow-x: auto; color: var(--text); }
+dl { display: grid; grid-template-columns: max-content 1fr; gap: 8px 14px; font-family: system-ui, sans-serif; font-size: 14.5px; }
+dt { font-weight: 600; color: var(--text); } dd { margin: 0; color: var(--text-2); }
+.tail { border-top: 2px dashed var(--line); margin-top: 44px; padding-top: 16px; }
+a { color: var(--accent-2); }
+.ink { stroke: var(--ink); fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.fill { fill: var(--ink); } .acc { fill: var(--accent); } .acc2 { fill: var(--accent-2); } .okf { fill: var(--ok); } .badf { fill: var(--bad); }
+.paper { fill: var(--paper); stroke: var(--ink); stroke-width: 2; }
+.soft { fill: var(--surface-2); stroke: var(--line); }
+.lbl { font: 600 12px system-ui, sans-serif; fill: var(--text); }
+.lbl2 { font: 12px system-ui, sans-serif; fill: var(--text-2); }
+.big { font: 700 20px system-ui, sans-serif; fill: var(--text); }
+@media (max-width: 520px) { h1 { font-size: 28px; } dl { grid-template-columns: 1fr; gap: 2px 0; } dd { margin-bottom: 8px; } }
+</style>
+</head>
+<body>
+<main>
+
+<div class="kicker">Finshots-style explainer · 31 Oct 2026 · the simple version</div>
+<h1>Hiring a cleaning crew for Alpha Signal</h1>
+<p class="dek">About a 6-minute read. No jargon that isn't explained on the spot. Companion to <a href="0021-claude-code-routines-explainer.html">The Night Janitors</a>.</p>
+
+<p class="lead">The team that builds Claude Code lets Claude tidy their own software every night, and a human signs off each change. This page says what the same idea looks like for <em>our</em> system, who does what, and the six yes/no calls that only you can make.</p>
+
+<h2>The idea in one picture</h2>
+
+<p>Think of Alpha Signal as a house. Every day new stuff comes in: prices, filings, code, tables. Nobody cleans, because cleaning is boring and there is always something more urgent. So we hire a crew. The crew cannot throw anything away. It can only <em class="hl">put things in a box labelled "throw this?"</em> and leave the box at your door. You look inside once a week and say yes or no.</p>
+
+<div class="fig">
+<svg viewBox="0 0 720 230" role="img" aria-label="A house with clutter, a cleaning crew filling a box labelled throw this?, and Amit at the door saying yes or no">
+  <!-- house -->
+  <path d="M40 120 L130 50 L220 120 Z" class="soft" style="stroke:var(--ink);stroke-width:2"/>
+  <rect x="60" y="120" width="140" height="80" class="soft" style="stroke:var(--ink);stroke-width:2"/>
+  <text x="130" y="165" text-anchor="middle" class="lbl">Alpha Signal</text>
+  <text x="130" y="185" text-anchor="middle" class="lbl2">188 tables · 110 tools</text>
+  <!-- clutter bits -->
+  <circle cx="85" cy="135" r="4" class="acc"/><rect x="170" y="128" width="10" height="8" class="acc2"/><circle cx="110" cy="138" r="3" class="badf"/>
+  <!-- arrow -->
+  <path d="M230 160 L300 160" class="ink"/><polygon points="300,155 310,160 300,165" class="fill"/>
+  <!-- crew (3 robots) -->
+  <g transform="translate(320,100)">
+    <g><rect x="0" y="20" width="44" height="40" rx="10" class="soft" style="stroke:var(--ink);stroke-width:2"/><circle cx="14" cy="38" r="4" class="fill"/><circle cx="30" cy="38" r="4" class="fill"/><line x1="22" y1="20" x2="22" y2="10" class="ink"/><circle cx="22" cy="7" r="3" class="acc"/></g>
+    <g transform="translate(52,0)"><rect x="0" y="20" width="44" height="40" rx="10" class="soft" style="stroke:var(--ink);stroke-width:2"/><circle cx="14" cy="38" r="4" class="fill"/><circle cx="30" cy="38" r="4" class="fill"/><line x1="22" y1="20" x2="22" y2="10" class="ink"/><circle cx="22" cy="7" r="3" class="acc"/></g>
+    <g transform="translate(104,0)"><rect x="0" y="20" width="44" height="40" rx="10" class="soft" style="stroke:var(--ink);stroke-width:2"/><circle cx="14" cy="38" r="4" class="fill"/><circle cx="30" cy="38" r="4" class="fill"/><line x1="22" y1="20" x2="22" y2="10" class="ink"/><circle cx="22" cy="7" r="3" class="acc"/></g>
+    <text x="74" y="80" text-anchor="middle" class="lbl2">the crew (3 seats)</text>
+  </g>
+  <!-- box -->
+  <g transform="translate(500,120)">
+    <rect x="0" y="10" width="70" height="50" rx="4" class="paper"/>
+    <rect x="-4" y="4" width="78" height="8" rx="2" class="fill"/>
+    <text x="35" y="42" text-anchor="middle" class="lbl" style="font-size:11px">throw this?</text>
+  </g>
+  <!-- amit -->
+  <g transform="translate(612,70)">
+    <rect x="2" y="0" width="60" height="22" rx="11" class="okf"/>
+    <text x="32" y="15" text-anchor="middle" class="lbl" style="fill:#fff">yes / no</text>
+    <circle cx="32" cy="50" r="14" class="soft" style="stroke:var(--ink);stroke-width:2"/>
+    <path d="M8 125 Q8 72 32 72 Q56 72 56 125 Z" class="soft" style="stroke:var(--ink);stroke-width:2"/>
+    <text x="32" y="145" text-anchor="middle" class="lbl">you</text>
+  </g>
+</svg>
+<p class="cap">The crew finds. You decide. A session of Claude Code does the actual removal, on a side branch, after you say yes.</p>
+</div>
+
+<div class="sowhat"><b>The one rule</b>
+<p>Nothing is deleted, rewired or overwritten by the crew on its own. Ever. That rule is what makes it safe to let them run every day.</p></div>
+
+<h2>Meet the three crew members</h2>
+
+<p>In our system a "crew member" is a <strong>seat</strong>: a named job in the agent org we already run (the same org that produces the CIO review and the data-quality audit each week). Each seat gets a short written job description and a time slot. Here are the three we would add or extend.</p>
+
+<div class="crew">
+
+<div class="member">
+<svg viewBox="0 0 200 80" aria-hidden="true">
+  <rect x="20" y="18" width="110" height="44" rx="6" class="soft" style="stroke:var(--ink);stroke-width:2"/>
+  <line x1="30" y1="30" x2="120" y2="30" class="ink" opacity=".3"/><line x1="30" y1="40" x2="120" y2="40" class="ink" opacity=".3"/><line x1="30" y1="50" x2="120" y2="50" class="ink" opacity=".3"/>
+  <rect x="60" y="36" width="30" height="8" class="badf" opacity=".8"/>
+  <circle cx="160" cy="40" r="16" class="soft" style="stroke:var(--ink);stroke-width:2"/><line x1="172" y1="52" x2="186" y2="66" class="ink" style="stroke-width:3"/>
+</svg>
+<div class="tag">Build first</div>
+<h4>The Data Bug Fixer</h4>
+<p><b>Looks for:</b> numbers that are wrong while looking right. A share count 22 times too small. A company scored on figures from before it split in two. A quarter's sales that include a one-off windfall.</p>
+<p><b>Why first:</b> these move the picks. Garbage in, garbage out. We already have a weekly auditor that <em>finds</em> such things; this adds the eleven error types the research agents caught that it still misses, and turns each finding into a ready-to-approve fix.</p>
+</div>
+
+<div class="member">
+<svg viewBox="0 0 200 80" aria-hidden="true">
+  <rect x="20" y="20" width="60" height="40" rx="6" class="soft" style="stroke:var(--ink);stroke-width:2"/>
+  <text x="50" y="45" text-anchor="middle" class="lbl2" style="font-size:10px">old tool</text>
+  <path d="M90 40 L104 40" class="ink" style="stroke-dasharray:4 4"/>
+  <text x="110" y="44" class="lbl2" style="font-size:11px">? nobody calls it</text>
+</svg>
+<div class="tag">Build second</div>
+<h4>The Code Janitor</h4>
+<p><b>Looks for:</b> code nobody uses any more (110 tools, old study scripts, a temporary job that was due for removal last week), tests that cannot fail, settings stuck in one position for months, and two helpers that do the same thing.</p>
+<p><b>Why it matters:</b> clutter doesn't break anything. It wastes every future session's time reading it.</p>
+</div>
+
+<div class="member">
+<svg viewBox="0 0 200 80" aria-hidden="true">
+  <rect x="14" y="14" width="40" height="22" rx="4" class="soft" style="stroke:var(--ink);stroke-width:2"/>
+  <rect x="14" y="44" width="40" height="22" rx="4" class="soft" style="stroke:var(--ink);stroke-width:2"/>
+  <rect x="62" y="14" width="40" height="22" rx="4" class="soft" style="stroke:var(--ink);stroke-width:2"/>
+  <rect x="62" y="44" width="40" height="22" rx="4" class="soft" style="stroke:var(--ink);stroke-width:2"/>
+  <path d="M112 40 L134 40" class="ink"/><polygon points="134,35 142,40 134,45" class="fill"/>
+  <rect x="150" y="26" width="40" height="28" rx="4" class="acc2"/>
+  <text x="170" y="44" text-anchor="middle" class="lbl" style="fill:#fff;font-size:10px">one</text>
+</svg>
+<div class="tag">Build last</div>
+<h4>The Data Simplifier</h4>
+<p><b>Looks for:</b> tables nothing reads, two tables holding the same fact and disagreeing, and new tables created when an existing one would do. We have 188 tables; the redesign we approved maps them to 24.</p>
+<p><b>Why last:</b> the big move is already designed. It is waiting on three calls from you (below), not on a robot.</p>
+</div>
+
+</div>
+
+<h2>The clever bit: flag first, remove later</h2>
+
+<p>Removing things is scary. "Nobody uses this" is easy to say and hard to prove. So the crew never removes on a hunch. It <em class="hl">puts a sticker on the thing and waits two weeks</em>.</p>
+
+<p>For code, the sticker is a one-line note that writes "I ran!" to our event log whenever that code is used. Two weeks of silence is proof. For data, the sticker is a flag on the suspect number, plus a record of which stock picks would move if it were corrected. Only then does the correction go in. Yesterday's picks never change silently.</p>
+
+<div class="fig">
+<svg viewBox="0 0 720 170" role="img" aria-label="Timeline: week 0 put a sticker on the suspect, two weeks pass, week 2 check whether it was used, then remove or keep">
+  <line x1="40" y1="90" x2="680" y2="90" class="ink" style="stroke-width:3"/>
+  <circle cx="130" cy="90" r="10" class="acc2"/>
+  <text x="130" y="40" text-anchor="middle" class="lbl">Week 0</text>
+  <rect x="60" y="48" width="140" height="26" rx="8" class="paper"/><text x="130" y="66" text-anchor="middle" class="lbl2">put a sticker on it</text>
+  <text x="360" y="78" text-anchor="middle" class="lbl2">two weeks of normal running</text>
+  <path d="M220 115 Q360 150 500 115" class="ink" style="stroke-dasharray:5 5"/>
+  <circle cx="590" cy="90" r="10" class="acc"/>
+  <text x="590" y="40" text-anchor="middle" class="lbl">Week 2</text>
+  <rect x="468" y="48" width="240" height="26" rx="8" class="paper"/><text x="588" y="66" text-anchor="middle" class="lbl2">used? keep · silent? propose removal</text>
+</svg>
+<p class="cap">A guess becomes a measurement. This is the single idea from the Anthropic story most worth copying.</p>
+</div>
+
+<h2>How a week would go</h2>
+
+<div class="fig">
+<svg viewBox="0 0 720 210" role="img" aria-label="Weekly loop: Sunday crew scans and writes memo; Monday Amit reads for ten minutes and presses approve; every other week a half-hour session makes the change; Amit merges">
+  <g transform="translate(20,30)">
+    <rect x="0" y="0" width="150" height="110" rx="12" class="soft" style="stroke:var(--ink);stroke-width:2"/>
+    <text x="75" y="26" text-anchor="middle" class="lbl">Sunday, 12:00 IST</text>
+    <text x="75" y="50" text-anchor="middle" class="lbl2">crew scans</text>
+    <text x="75" y="68" text-anchor="middle" class="lbl2">writes a short memo</text>
+    <text x="75" y="96" text-anchor="middle" class="lbl" style="fill:var(--accent-2)">on its own</text>
+  </g>
+  <path d="M175 85 L205 85" class="ink"/><polygon points="205,80 213,85 205,90" class="fill"/>
+  <g transform="translate(218,30)">
+    <rect x="0" y="0" width="150" height="110" rx="12" class="soft" style="stroke:var(--ink);stroke-width:2"/>
+    <text x="75" y="26" text-anchor="middle" class="lbl">Monday</text>
+    <text x="75" y="50" text-anchor="middle" class="lbl2">you read the memo</text>
+    <text x="75" y="68" text-anchor="middle" class="lbl2" style="font-size:11px">press "make work order"</text>
+    <text x="75" y="96" text-anchor="middle" class="lbl" style="fill:var(--accent)">you · 10 min</text>
+  </g>
+  <path d="M373 85 L403 85" class="ink"/><polygon points="403,80 411,85 403,90" class="fill"/>
+  <g transform="translate(416,30)">
+    <rect x="0" y="0" width="150" height="110" rx="12" class="soft" style="stroke:var(--ink);stroke-width:2"/>
+    <text x="75" y="26" text-anchor="middle" class="lbl">Every other week</text>
+    <text x="75" y="50" text-anchor="middle" class="lbl2">one command makes</text>
+    <text x="75" y="68" text-anchor="middle" class="lbl2">the change, runs tests</text>
+    <text x="75" y="96" text-anchor="middle" class="lbl" style="fill:var(--accent)">you · 30 min</text>
+  </g>
+  <path d="M571 85 L601 85" class="ink"/><polygon points="601,80 609,85 601,90" class="fill"/>
+  <g transform="translate(612,55)">
+    <rect x="0" y="0" width="90" height="60" rx="12" class="okf"/>
+    <text x="45" y="26" text-anchor="middle" class="lbl" style="fill:#fff">you merge</text>
+    <text x="45" y="46" text-anchor="middle" class="lbl2" style="fill:#fff">done</text>
+  </g>
+  <text x="360" y="185" text-anchor="middle" class="lbl2">the pick-affecting data checks also run every morning with the pipeline and show up in the health email</text>
+</svg>
+<p class="cap">Your total time: about ten minutes on Monday, and a half-hour session roughly twice a month once the first backlog is cleared.</p>
+</div>
+
+<p>Three terms, since they appear above. A <strong>memo</strong> is the crew's weekly note: what it found, what it suggests, with the evidence. A <strong>work order</strong> is a numbered to-do you create by pressing one button on the memo; it is the only way a change gets made. <strong>Merge</strong> means accepting a finished change into the real system, which you do by hand.</p>
+
+<h2>Your six calls</h2>
+
+<p>These are the decisions nobody else can take. Each has my suggested answer. Say "yes to all" or change any one.</p>
+
+<ul class="decisions">
+<li><span class="n">1</span><div><b>Go, in this order: Data Bug Fixer, then Code Janitor, then Data Simplifier.</b><p>Picks first, clutter second, structure last.</p><span class="rec">Suggested: yes</span></div></li>
+<li><span class="n">2</span><div><b>Give it a short plan of its own (plan 0032).</b><p>So it has a status line and a "done when", instead of living inside two older plans.</p><span class="rec">Suggested: yes</span></div></li>
+<li><span class="n">3</span><div><b>When a data bug is confirmed and touches the picks, draft the work order automatically.</b><p>Today a work order appears only after you chat with a seat. This skips the chat for the clearest cases. You still approve every one.</p><span class="rec">Suggested: yes</span></div></li>
+<li><span class="n">4</span><div><b>Let the Code Janitor put its own "I ran!" stickers on code, unattended.</b><p>It halves your work orders, but it means a robot edits code on a side branch without you. Try the manual way for a month first.</p><span class="rec no">Suggested: not yet</span></div></li>
+<li><span class="n">5</span><div><b>Cadence and brain: crew memo every Sunday on the stronger model; pick-affecting data checks every morning.</b><p>Same settings as the data-quality auditor you already trust.</p><span class="rec">Suggested: yes</span></div></li>
+<li><span class="n">6</span><div><b>What counts as "dead": nothing refers to it, and two weeks of silence after the sticker. A removal you reverse within 30 days counts against the crew.</b><p>That last part is the scorecard: it is how we'd know whether the crew earns its keep, the same way Anthropic counts merged versus rejected changes.</p><span class="rec">Suggested: yes</span></div></li>
+</ul>
+
+<h2>Three older calls that are also waiting</h2>
+
+<p>These were already on your desk before today. Two of them gate parts of this plan.</p>
+
+<ul class="steps">
+<li><b>The table redesign (plan 0030, D1 to D3).</b> D1: go ahead, with a stop rule if a part isn't switched within 8 weeks. D2: from now on new data goes into an existing table, not a new one. D3: any step that could change rankings merges only on your OK, after a check that ranks are identical on three dates. All three suggested yes. The Data Simplifier is pointless until these are decided.</li>
+<li><b>"Fix at the source" leftovers (plan 0027).</b> The stale share counts that set 22 stocks' size tiers, three odd database indexes, and 28 shareholder rows dated 1982 to 2001. Saying yes to the Data Bug Fixer is saying yes to these being its first jobs.</li>
+<li><b>The intraday-factors merge.</b> Not gating anything here, but it changes live SMALL picks, so it stays your call.</li>
+</ul>
+
+<h2>What to do today, in order</h2>
+
+<ul class="steps">
+<li><b>Check Friday's first protected option trade.</b> The wings should have been bought first, and the number of lots sold should equal the lots both wings filled. Look at the Live page under /options/live, or:
+<pre>tail -60 output/options_live.log</pre></li>
+<li><b>Read the NSE timing probe.</b> It tells us whether the exchange now publishes prices early enough to move the evening fetch:
+<pre>python -m tools.nse_publish_probe --summary</pre></li>
+<li><b>Restart both cockpits</b> if last session's change didn't, so the analyst-target note shows on stock pages.</li>
+<li><b>Reply to the six calls above</b>, ideally with D1 to D3 in the same message. With a yes on call 1 alone, the Data Bug Fixer can be built this session.</li>
+</ul>
+
+<h2>Jargon buster</h2>
+<dl>
+<dt>Seat</dt><dd>A named job in our agent org, with a written job description and a time slot. The CIO review and the data-quality audit are seats.</dd>
+<dt>Probe</dt><dd>A small program that scans for one kind of problem and reports counts with evidence. The seat judges what the probe found; the probe never judges.</dd>
+<dt>Memo</dt><dd>The seat's weekly note, stored in the system and shown on the Boardroom page.</dd>
+<dt>Work order</dt><dd>A numbered, approved to-do. The only route by which anything gets changed.</dd>
+<dt>Branch</dt><dd>A side copy of the code where a change is made and tested before it touches the real thing.</dd>
+<dt>Merge</dt><dd>Accepting a finished branch into the real system. You do this by hand.</dd>
+<dt>Sticker</dt><dd>Our word on this page for the "log first, delete later" trick: a flag on a suspect, then two weeks of waiting for evidence.</dd>
+<dt>Picks</dt><dd>The daily ranked stock list the whole system exists to produce. "Touches the picks" is the highest-priority label a finding can get.</dd>
+</dl>
+
+<div class="tail">
+<h2 style="margin-top:0">Tail piece</h2>
+<p>Anthropic's lesson wasn't that the robot is a great cleaner. It was that cleaning finally had a date on the calendar and a human with a short list to say yes or no to. The crew does the boring part; you keep the only part that needs judgment.</p>
+</div>
+
+</main>
+</body>
+</html>

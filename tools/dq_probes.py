@@ -18,6 +18,12 @@ on the tables the factors read, every week:
                     (tools.factor_audit), and an independent recompute of the
                     factors that have a simple definition, against the frozen inputs
   rotation          one input table a week, profiled column by column
+  forensic          plan 0027: the error classes research agents found by reading filings
+                    (pre-demerger annuals, a vendor share count 22x out, annuals that stopped,
+                    a one-off counted as sales, a partial holder list, other income or a tax
+                    write-back inflating the year), as rules with a planted fault each. The
+                    ones that reach the ranking also run every morning (`daily()`, check
+                    DATA_FAULT_IN_PICK_INPUTS)
 
 A finding is a plain claim plus the SQL that shows it (`query`, returning n_bad and
 n_total), so anyone — the auditor seat, the server that checks its memo, Amit — can
@@ -180,6 +186,86 @@ WHERE date = (SELECT MAX(date) FROM stock_prices) AND source = 'bhavcopy'""", 0.
     ("impossible", "stocks.pe_ratio", "P/E, P/B and ROE are all empty for the stock",
      "SELECT COALESCE(SUM(pe_ratio IS NULL AND pb_ratio IS NULL AND roe IS NULL), 0) AS n_bad, COUNT(*) AS n_total FROM stocks",
      0.25, ["the pick email", "the stock page", "the MCP stock tool"]),
+    # plan 0027 (2026-10-31): the error classes the multibagger research agents found by reading
+    # filings, written as rules so they are checked every week instead of rediscovered. The
+    # numbers in the names are plan 0027's.
+    ("forensic", "annual_balance_sheet.end_date (0027 #1)",
+     "a stock demerged within 450 days is scored on annuals that end before the demerger",
+     """WITH dm AS (SELECT sid, MAX(ex_date) AS ex FROM corporate_adjustments WHERE inds LIKE '%DEMERGER%'
+                  AND ex_date <= date('now') AND ex_date >= date('now', '-450 day') GROUP BY sid),
+     a AS (SELECT sid, MAX(end_date) AS ae FROM annual_balance_sheet GROUP BY sid)
+SELECT COALESCE(SUM(ae IS NULL OR ae < ex), 0) AS n_bad, COUNT(*) AS n_total,
+       (SELECT GROUP_CONCAT(dm.sid || ' demerged ' || ex || ', annual to ' || COALESCE(ae, 'none'), '; ') FROM dm LEFT JOIN a USING (sid)
+        WHERE ae IS NULL OR ae < ex) AS sample
+FROM dm LEFT JOIN a USING (sid)""",
+     0.0, ["every annual factor for those stocks", "book_to_price", "the thesis gates"]),
+    ("forensic", "annual_balance_sheet.shares_outstanding (0027 #2)",
+     "the vendor share count for the stock's newest year is more than 2x away from Screener's",
+     """WITH v AS (SELECT sid, end_date, shares_outstanding AS s, ROW_NUMBER() OVER (PARTITION BY sid ORDER BY end_date DESC) AS rn
+                 FROM annual_balance_sheet WHERE shares_outstanding > 0),
+     sc AS (SELECT sid, period_end, value * 1e-7 AS n FROM fundamentals_screener
+            WHERE period_type = 'annual' AND line_item = 'No. of Equity Shares' AND value > 0),
+     j AS (SELECT v.sid, v.s / sc.n AS r FROM v JOIN sc ON sc.sid = v.sid AND sc.period_end = v.end_date WHERE v.rn = 1)
+SELECT COALESCE(SUM(r > 2 OR r < 0.5), 0) AS n_bad, COUNT(*) AS n_total,
+       (SELECT GROUP_CONCAT(sid || ' x' || ROUND(r, 1), '; ') FROM (SELECT * FROM j WHERE r > 2 OR r < 0.5 LIMIT 8)) AS sample FROM j""",
+     0.0, ["the tiers", "book_to_price", "market_cap_cr"]),
+    ("forensic", "annual_balance_sheet.end_date (0027 #3)",
+     "the stock's newest annual statement is more than 400 days older than its newest quarter",
+     """WITH a AS (SELECT sid, MAX(end_date) AS ae FROM annual_balance_sheet GROUP BY sid),
+     q AS (SELECT sid, MAX(end_date) AS qe FROM quarterly_income GROUP BY sid)
+SELECT COALESCE(SUM(julianday(qe) - julianday(ae) > 400), 0) AS n_bad, COUNT(*) AS n_total,
+       (SELECT GROUP_CONCAT(sid || ' annual to ' || ae || ', quarter to ' || qe, '; ')
+        FROM (SELECT * FROM a JOIN q USING (sid) WHERE julianday(qe) - julianday(ae) > 400 ORDER BY ae LIMIT 8)) AS sample
+FROM a JOIN q USING (sid)""",
+     0.03, ["every annual factor for those stocks", "piotroski", "accruals", "book_to_price"]),
+    ("forensic", "quarterly_income.revenue (0027 #4)",
+     "the newest quarter's revenue is more than 1.5x away from Screener's sales for the same quarter (a one-off or other income counted as sales)",
+     """WITH q AS (SELECT q.sid, q.end_date, q.revenue, f.value AS sales,
+                  ROW_NUMBER() OVER (PARTITION BY q.sid ORDER BY q.end_date DESC, CASE q.reporting WHEN 'consolidated' THEN 0 ELSE 1 END) AS rn
+           FROM quarterly_income q JOIN fundamentals_screener f ON f.sid = q.sid AND f.period_type = 'quarterly'
+                AND f.line_item = 'Sales' AND f.period_end = q.end_date WHERE f.value > 0 AND q.revenue > 0)
+SELECT COALESCE(SUM(revenue / sales > 1.5 OR revenue / sales < 1 / 1.5), 0) AS n_bad, COUNT(*) AS n_total,
+       (SELECT GROUP_CONCAT(sid || ' ' || end_date || ' x' || ROUND(revenue / sales, 2), '; ')
+        FROM (SELECT * FROM q WHERE rn = 1 AND (revenue / sales > 1.5 OR revenue / sales < 1 / 1.5) ORDER BY revenue / sales DESC LIMIT 8)) AS sample
+FROM q WHERE rn = 1""",
+     0.01, ["the quarterly growth inputs", "q_rev_yoy", "the thesis gates"]),
+    ("forensic", "shareholding_holders.holder_seq (0027 #5)",
+     "a shareholding filing lists fewer than half the holders of the filings on either side of it (holders would appear to exit and re-enter)",
+     """WITH f AS (SELECT sid, end_date, MAX(filed_at) AS filed_at FROM shareholding_holders GROUP BY sid, end_date),
+     c AS (SELECT h.sid, h.end_date, COUNT(*) AS n FROM shareholding_holders h
+           JOIN f ON f.sid = h.sid AND f.end_date = h.end_date AND f.filed_at = h.filed_at GROUP BY h.sid, h.end_date),
+     w AS (SELECT sid, end_date, n, LAG(n) OVER (PARTITION BY sid ORDER BY end_date) AS p,
+                  LEAD(n) OVER (PARTITION BY sid ORDER BY end_date) AS nx FROM c)
+SELECT COALESCE(SUM(p IS NOT NULL AND nx IS NOT NULL AND n < 0.5 * p AND n < 0.5 * nx), 0) AS n_bad, COUNT(*) AS n_total,
+       (SELECT GROUP_CONCAT(sid || ' ' || end_date || ' (' || n || ' vs ' || p || '/' || nx || ')', '; ')
+        FROM (SELECT * FROM w WHERE p IS NOT NULL AND nx IS NOT NULL AND n < 0.5 * p AND n < 0.5 * nx
+              AND end_date >= date('now', '-800 day') LIMIT 8)) AS sample
+FROM w WHERE end_date >= date('now', '-800 day')""",
+     0.0, ["retail holder growth", "smart_money", "the ownership page"]),
+    ("forensic", "fundamentals_screener.Other Income (0027 #8)",
+     "other income is larger than profit before tax and more than 3x the year before (a one-off feeding E/P)",
+     """WITH s AS (SELECT sid, period_end, MAX(CASE WHEN line_item = 'Other Income' THEN value END) AS oi,
+                  MAX(CASE WHEN line_item = 'Profit before tax' THEN value END) AS pbt
+           FROM fundamentals_screener WHERE period_type = 'annual' GROUP BY sid, period_end),
+     l AS (SELECT s.*, LAG(oi) OVER (PARTITION BY sid ORDER BY period_end) AS poi,
+                  ROW_NUMBER() OVER (PARTITION BY sid ORDER BY period_end DESC) AS rn FROM s JOIN stocks st USING (sid)
+           WHERE st.sector != 'Financials')
+SELECT COALESCE(SUM(oi > pbt AND oi > 3 * poi), 0) AS n_bad, COUNT(*) AS n_total,
+       (SELECT GROUP_CONCAT(sid || ' ' || period_end || ' other income ' || ROUND(oi) || ' vs PBT ' || ROUND(pbt), '; ')
+        FROM (SELECT * FROM l WHERE rn = 1 AND pbt > 0 AND poi > 0 AND oi > pbt AND oi > 3 * poi LIMIT 8)) AS sample
+FROM l WHERE rn = 1 AND pbt > 0 AND poi > 0 AND oi IS NOT NULL""",
+     0.0, ["ep_yield", "value_composite", "the cheapness part of the thesis"]),
+    ("forensic", "fundamentals_screener.Net profit (0027 #8)",
+     "net profit is more than 1.5x profit before tax (a tax write-back inflating the year)",
+     """WITH s AS (SELECT sid, period_end, MAX(CASE WHEN line_item = 'Net profit' THEN value END) AS np,
+                  MAX(CASE WHEN line_item = 'Profit before tax' THEN value END) AS pbt
+           FROM fundamentals_screener WHERE period_type = 'annual' GROUP BY sid, period_end),
+     l AS (SELECT *, ROW_NUMBER() OVER (PARTITION BY sid ORDER BY period_end DESC) AS rn FROM s)
+SELECT COALESCE(SUM(np > 1.5 * pbt), 0) AS n_bad, COUNT(*) AS n_total,
+       (SELECT GROUP_CONCAT(sid || ' ' || period_end || ' net ' || ROUND(np) || ' vs PBT ' || ROUND(pbt), '; ')
+        FROM (SELECT * FROM l WHERE rn = 1 AND pbt > 0 AND np > 1.5 * pbt LIMIT 8)) AS sample
+FROM l WHERE rn = 1 AND pbt > 0 AND np IS NOT NULL""",
+     0.0, ["ep_yield", "value_composite", "piotroski"]),
     # 2026-10-08: 721 calls fetched since June sat unscored; forward_looking_intensity read last quarter's call
     ("dates", "nlp_scores.doc_date", "a fetched earnings call older than 14 days has no language score",
      """SELECT COALESCE(SUM(n.sid IS NULL), 0) AS n_bad, COUNT(*) AS n_total FROM transcripts t
@@ -402,6 +488,28 @@ def run(seed=None):
     return {"as_of": date.today().isoformat(), "findings": findings, "scanned": scanned}
 
 
+def pick_rules():
+    """The rules whose hits reach today's ranking: a `touches` entry names a wired factor
+    (factors.SIGNAL_WEIGHTS) or the tiers. Run daily by the DATA_FAULT_IN_PICK_INPUTS check."""
+    import factors
+    wired = {k for tier in factors.SIGNAL_WEIGHTS.values() for k, w in tier.items() if w}
+    words = wired | {"the tiers"}
+    return [r for r in RULES if any(t in words or any(t.startswith(w) for w in wired) for t in r[5])]
+
+
+def daily(q=None):
+    """Findings of the pick-touching rules, for the morning health check → {n_bad, n_total, sample}:
+    n_bad = rules firing, n_total = rules run, sample = the worst one in words."""
+    q = q or reader()
+    hits = []
+    for probe, subject, claim, sql, max_share, touches in pick_rules():
+        r = q(sql).iloc[0]
+        n_bad, n_total = int(r["n_bad"] or 0), int(r["n_total"] or 0)
+        if n_bad and (not n_total or n_bad / n_total > max_share) and not KNOWN.get((probe, subject)):
+            hits.append((n_bad / n_total if n_total else 1.0, f"{subject}: {claim} ({n_bad:,} of {n_total:,})"))
+    return {"n_bad": len(hits), "n_total": len(pick_rules()), "sample": max(hits)[1] if hits else None}
+
+
 def check(query):
     """Re-run a finding's SQL on the live DB, read-only → (n_bad, n_total) or raises ValueError."""
     df, err = db.safe_read_sql(query, max_rows=5)
@@ -421,6 +529,10 @@ _SLICE = {
     "annual_cash_flow": "SELECT * FROM live.annual_cash_flow WHERE end_date >= date('now', '-800 day')",
     "fundamentals_screener": "SELECT * FROM live.fundamentals_screener WHERE period_end >= date('now', '-800 day')",
     "stock_prices": "SELECT * FROM live.stock_prices WHERE date >= date((SELECT MAX(date) FROM live.stock_prices), '-25 day')",
+    "shareholding_holders": "SELECT * FROM live.shareholding_holders WHERE end_date >= date('now', '-800 day')",
+    "transcripts": "SELECT sid, doc_type, doc_date, fetched_at, SUBSTR(raw_text, 1, 2100) AS raw_text FROM live.transcripts "
+                   "WHERE fetched_at >= date('now', '-120 day')",
+    "nlp_scores": "SELECT sid, doc_type, doc_date FROM live.nlp_scores WHERE doc_date >= date('now', '-400 day')",
 }
 
 # (name, what is planted, SQL that plants it, probe that must notice, subject it must name)
@@ -450,6 +562,40 @@ PLANTS = [
     ("inflated profit", "net profit multiplied by 100 for every stock",
      "UPDATE quarterly_income SET net_income = net_income * 100",
      lambda q: second_source(q) + rules(q), "quarterly_income.net_income"),
+    # plan 0027 classes
+    ("pre-demerger annuals", "a demerger dated yesterday for a stock whose annuals end before it",
+     "INSERT OR REPLACE INTO corporate_adjustments (sid, ex_date, factor, n_events, inds) SELECT sid, date('now', '-1 day'), 0.8, 1, 'DEMERGER' "
+     "FROM annual_balance_sheet GROUP BY sid HAVING MAX(end_date) < date('now', '-1 day') LIMIT 3",
+     rules, "annual_balance_sheet.end_date (0027 #1)"),
+    ("vendor share count 22x too small", "the newest year's share count divided by 22 for 5 stocks",
+     "UPDATE annual_balance_sheet SET shares_outstanding = shares_outstanding / 22 WHERE (sid, end_date) IN "
+     "(SELECT sid, MAX(end_date) FROM annual_balance_sheet GROUP BY sid LIMIT 5)",
+     rules, "annual_balance_sheet.shares_outstanding (0027 #2)"),
+    ("annuals stopped years ago", "every annual dated three years earlier for 100 stocks",
+     "UPDATE annual_balance_sheet SET end_date = date(end_date, '-3 year') WHERE sid IN (SELECT DISTINCT sid FROM annual_balance_sheet LIMIT 100)",
+     rules, "annual_balance_sheet.end_date (0027 #3)"),
+    ("one-off counted as sales", "the newest quarter's revenue doubled for 30 stocks",
+     "UPDATE quarterly_income SET revenue = revenue * 2 WHERE (sid, end_date) IN "
+     "(SELECT sid, MAX(end_date) FROM quarterly_income GROUP BY sid LIMIT 30)",
+     rules, "quarterly_income.revenue (0027 #4)"),
+    ("partial holder list", "the middle filing of three stripped to a single holder",
+     "DELETE FROM shareholding_holders WHERE (sid, end_date) IN "
+     "(SELECT sid, end_date FROM (SELECT sid, end_date, ROW_NUMBER() OVER (PARTITION BY sid ORDER BY end_date DESC) AS rn, "
+     "COUNT(*) OVER (PARTITION BY sid) AS k FROM (SELECT DISTINCT sid, end_date FROM shareholding_holders)) WHERE rn = 2 AND k >= 3 LIMIT 3) "
+     "AND rowid NOT IN (SELECT MIN(rowid) FROM shareholding_holders GROUP BY sid, end_date)",
+     rules, "shareholding_holders.holder_seq (0027 #5)"),
+    ("land-sale surplus", "other income set to twice profit before tax for 5 stocks' newest year",
+     "UPDATE fundamentals_screener SET value = 2 * (SELECT p.value FROM fundamentals_screener p WHERE p.sid = fundamentals_screener.sid "
+     "AND p.period_end = fundamentals_screener.period_end AND p.period_type = 'annual' AND p.line_item = 'Profit before tax') "
+     "WHERE period_type = 'annual' AND line_item = 'Other Income' AND (sid, period_end) IN (SELECT sid, MAX(period_end) FROM fundamentals_screener "
+     "WHERE period_type = 'annual' AND line_item = 'Profit before tax' AND value > 0 GROUP BY sid LIMIT 5)",
+     rules, "fundamentals_screener.Other Income (0027 #8)"),
+    ("tax write-back", "net profit set to 3x profit before tax for 5 stocks' newest year",
+     "UPDATE fundamentals_screener SET value = 3 * (SELECT p.value FROM fundamentals_screener p WHERE p.sid = fundamentals_screener.sid "
+     "AND p.period_end = fundamentals_screener.period_end AND p.period_type = 'annual' AND p.line_item = 'Profit before tax') "
+     "WHERE period_type = 'annual' AND line_item = 'Net profit' AND (sid, period_end) IN (SELECT sid, MAX(period_end) FROM fundamentals_screener "
+     "WHERE period_type = 'annual' AND line_item = 'Profit before tax' AND value > 0 GROUP BY sid LIMIT 5)",
+     rules, "fundamentals_screener.Net profit (0027 #8)"),
 ]
 
 

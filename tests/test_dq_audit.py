@@ -122,3 +122,24 @@ def test_reconcile_revenue_is_total_income():
     (INDP Jun-26: Sales 2.74 + Other Income 8.58 = 11.32). Comparing to Sales alone failed 20%."""
     row = next(f for f in FUND_FIELDS if f[1] == "revenue")
     assert set(row[3]) == {"Sales", "Other Income"}
+
+
+def test_a_real_finding_touching_the_picks_drafts_a_fix_order(q, rerun):  # noqa: F811
+    """ADR 0085 J3: the server, not the seat, turns `real` + `picks` into a work order awaiting
+    approval, parented to the memo; a finding without impact `picks` drafts nothing."""
+    memo = _memo({"F1": "real", "F2": "does-not-reproduce", "F3": "needs-more-data"})
+    memo["findings"][0].update(impact="picks", proposed_fix="re-map the column", owner="backend-engineer")
+    q.enqueue("org_dq_audit", items=[("2026-W41", {**PAYLOAD, "key": "2026-W41", "period": "2026-W41", "as_of": "2026-10-11"}, 4)])
+    (task,) = q.claim("org_dq_audit", worker="dq-auditor")
+    assert q.submit([{"task_id": task["task_id"], "result": memo}], worker="dq-auditor")["counts"] == {"done": 1}
+    (wo,) = [w for w in org.work_orders() if w["role"] == "dq-auditor"]
+    assert wo["status"] == "awaiting approval" and wo["conv"] is None
+    assert len(wo["items"]) == 1 and wo["items"][0]["owner"] == "backend-engineer"
+    assert "quarantine" in wo["items"][0]["what"] and "re-map the column" in wo["items"][0]["what"]
+    (memo_doc,) = org.docs(["dq_audit"])
+    assert org.docs(["work_order"])[0]["parent_doc_id"] == memo_doc["doc_id"]
+    # a memo with no pick-touching real finding drafts nothing more
+    q.enqueue("org_dq_audit", items=[("2026-W42", {**PAYLOAD, "key": "2026-W42", "period": "2026-W42", "as_of": "2026-10-18"}, 4)])
+    (task,) = q.claim("org_dq_audit", worker="dq-auditor")
+    q.submit([{"task_id": task["task_id"], "result": _memo({"F1": "real", "F2": "real", "F3": "real"})}], worker="dq-auditor")
+    assert len([w for w in org.work_orders() if w["role"] == "dq-auditor"]) == 1

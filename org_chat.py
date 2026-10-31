@@ -219,6 +219,10 @@ def make_work_order(role, conv=None):
 - `owner`: the builder seat that should do it, one of: {json.dumps(builders)}
 - `size`: S under an hour, M one session, L several sessions.
 - `summary`: two or three sentences on why, for the inbox.
+- `tier` (ADR 0086): "A" if ANY item touches live orders or options_live, factor weights or the model config
+  (SIGNAL_WEIGHTS, TIERS, PICK_GATE, MB_THESIS), deletes or overwrites stored data, run.sh or the crontab, secrets,
+  or could change the published picks; "B" otherwise (a data fix whose pick diff is measured first, code cleanup,
+  pages, probes, docs, charters). A Tier B order approves itself after 48 hours unless the CEO vetoes it.
 If nothing concrete was agreed, return an empty `items` list and say what is still open in `summary`."""
     s = org.seat(role)
     CHAT_DIR.mkdir(parents=True, exist_ok=True)
@@ -245,11 +249,7 @@ If nothing concrete was agreed, return an empty `items` list and say what is sti
             raise ValueError("the seat did not return a work order; try again") from None
     if not wo.get("items"):
         return {"ok": False, "reason": wo.get("summary") or "Nothing concrete has been agreed yet."}
-    schema = K.O("title summary items", title=K.S(160), summary=K.S(900),
-                 items=K.A(K.O("title what done_when owner size", title=K.S(160), what=K.S(1200), where=K.S(500),
-                               done_when=K.S(600), owner={"ref": "owners"}, size=K.E("S", "M", "L")), 12, 1),
-                 open_questions=K.A(K.S(400), 8))
-    clean = K._check(schema, wo, {"owners": list(builders)}, "work order")
+    clean = K._check(K.work_order_schema(), wo, {"owners": list(builders)}, "work order")
     n = org.save_work_order(role, h["conv"], clean)
     _save(role, h["conv"], "seat",
           f"Work order #{n} is in your inbox: **{clean['title']}** ({len(clean['items'])} "

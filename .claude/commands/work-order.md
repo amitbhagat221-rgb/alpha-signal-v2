@@ -5,7 +5,9 @@ employees agreed in chat; he has approved it in the inbox.
    size), the open questions, the status, and the chat it came from. Read the chat: it is the context for the items.
    If no number was given, run `python -m org work` and ask which one.
 2. If its status is not `approved`, `in_progress` or `blocked`, stop and say so. Amit approves work orders on the ops
-   cockpit `/org` inbox (or `python -m org decide <doc_id> approve`). Never approve one yourself.
+   cockpit `/org` inbox (or `python -m org decide <doc_id> approve`); a Tier B order shows `approved` on its own
+   48 h after it was written if he did not park or reject it (ADR 0086, the `note` says "by default"). Never
+   approve one yourself, and never change its tier.
 3. Add a bullet for it to `docs/plans/0000-checklist.md` (rule: checklist before work), then
    `python -m org work $ARGUMENTS --status in_progress`.
 4. Do the items in order. For each one, start its `owner` builder agent (Agent tool, `subagent_type` = the owner seat:

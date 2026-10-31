@@ -241,6 +241,7 @@
         <span class="og-tag {% if i.type == 'ask' %}og-mid{% elif i.type == 'work_order' %}og-human{% else %}og-builder{% endif %}">{{ {'ask': 'ask', 'work_order': 'work order #' ~ i.fields.number}.get(i.type, 'hypothesis') }}</span>
         {% if i.board %}<span class="og-tag {{ {'approve': 'og-good', 'reject': 'og-bad'}.get(i.board.recommendation, 'og-mid') }}" data-board-call>pack says {{ i.board.recommendation }}</span>{% endif %}
         {% if i.fields.urgency == 'now' %}<span class="og-tag og-bad">now</span>{% endif %}
+        {% if i.type == 'work_order' %}<span class="og-tag {{ 'og-good' if i.tier == 'B' else 'og-mid' }}">tier {{ i.tier }}{% if i.auto_approve_at %} · yes by default {{ i.auto_approve_at[:16].replace('T', ' ') }} UTC{% endif %}</span>{% endif %}
         <span class="og-title">{{ i.title }}</span>
         <span class="og-meta og-ref">ref {{ i.doc_id }}</span>
       </div>
@@ -252,7 +253,7 @@
         {% if i.type == 'work_order' %}
           <div>{{ i.fields.summary }}</div>
           <ol class="og-ul og-ol">{% for it in i.fields['items'] %}<li><b class="og-strong">{{ it.title }}</b> <span class="og-meta">{{ it.owner }} · {{ it.size }}</span><div>{{ it.what }}</div><div><span class="og-k">done when</span> {{ it.done_when }}</div></li>{% endfor %}</ol>
-          <div class="og-k">Approving does not start anything. It lets a Claude Code session run it: /work-order {{ i.fields.number }}</div>
+          <div class="og-k">Approving does not start anything. It lets a Claude Code session run it: /work-order {{ i.fields.number }}{% if i.auto_approve_at %}. Tier B: it approves itself at {{ i.auto_approve_at[:16].replace('T', ' ') }} UTC unless you Park or Reject it (ADR 0086){% endif %}</div>
         {% endif %}
         {% if i.fields.recommendation %}<div><span class="og-k">{{ i.role_title }} recommends</span> {{ i.fields.recommendation }}</div>{% endif %}
         {% if i.fields.rationale %}<div><span class="og-k">why</span> {{ i.fields.rationale }}</div>{% endif %}
