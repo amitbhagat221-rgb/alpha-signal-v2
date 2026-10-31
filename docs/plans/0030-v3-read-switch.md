@@ -25,6 +25,8 @@ Each stage keeps 0017's gate: parity for N days, readers moved one at a time beh
 | 5 | **Bars + series** | `stock_prices` 90, `nse_index_history` 23, `fno_bhav` 21, macro | Source in the key; one price reader | 2 |
 | 6 | **Reference** | `stocks` 204 | `tier_asof` everywhere; last because it touches everything | 2 |
 
+**Merge rule under ADR 0086 (added 2026-10-31).** Stages 1 and 3 are Tier B: they merge when the parity gate passes and the pre-push suite is green, no approval needed. Stages 2, 4, 5 and 6 are Tier A (D3): each merge is posted to the inbox with the measured identical-ranks result on 3 dates and the default "proposed: merge · takes effect 7 days after posting unless you say no". A stage whose gate did not pass is never posted. So the only way Amit becomes the bottleneck again is by saying no, and the only thing that stalls the plan is session time.
+
 **Review after stage 2.** If stages 1–2 paid off and the morning run is no slower, go on to 3–6. If not, stop the mirror for the concepts that are left (D1), drop their v3 tables after a Parquet export, and keep the legacy tables as the model for those concepts.
 
 ## Decisions for Amit
