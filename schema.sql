@@ -2765,3 +2765,57 @@ CREATE TABLE IF NOT EXISTS option_live_trades (
     PRIMARY KEY (underlying, expiry, tradingsymbol, source)
 );
 -- options_live:end
+
+-- ── Data model v3 compatibility views (plan 0030, ADR 0084) ──
+-- Each reproduces a legacy table column for column from the v3 tables; datamodel/compat.py
+-- reads these bodies (the parity gate inlines them as CTEs) and the read helpers switch a
+-- concept's readers to them when config.DATA_MODEL[<concept>] = 'new'. Keep names and column
+-- order identical to the legacy table: tests/test_datamodel_compat.py checks it.
+
+-- decisions: daily_picks (date column pick_date)
+CREATE VIEW IF NOT EXISTS v3_daily_picks AS
+SELECT e.key AS sid, r.as_of_date AS pick_date, p.score AS final_score, p.rank AS rank,
+       json_extract(p.attrs, '$.base_score') AS base_score,
+       json_extract(p.attrs, '$.sentiment_adj') AS sentiment_adj, json_extract(p.attrs, '$.insider_adj') AS insider_adj,
+       json_extract(p.attrs, '$.forensic_adj') AS forensic_adj, json_extract(p.attrs, '$.macro_adj') AS macro_adj,
+       json_extract(p.attrs, '$.piotroski_adj') AS piotroski_adj, json_extract(p.attrs, '$.accruals_adj') AS accruals_adj,
+       json_extract(p.attrs, '$.consensus_adj') AS consensus_adj, json_extract(p.attrs, '$.promoter_adj') AS promoter_adj,
+       json_extract(p.attrs, '$.smart_money_adj') AS smart_money_adj,
+       NULLIF(p.tier, '?') AS cap_tier, json_extract(p.attrs, '$.sector') AS sector,
+       json_extract(p.attrs, '$.weight_coverage') AS weight_coverage, json_extract(p.attrs, '$.price_rows') AS price_rows,
+       json_extract(p.attrs, '$.fundamental_coverage') AS fundamental_coverage,
+       json_extract(p.attrs, '$.eligible_coverage') AS eligible_coverage,
+       p.gate AS integrity_status, json_extract(p.attrs, '$.integrity_reasons') AS integrity_reasons,
+       p.uhs AS uhs_score, json_extract(p.attrs, '$.uhs_breakdown_json') AS uhs_breakdown_json,
+       json_extract(p.attrs, '$.uhs_label') AS uhs_label, json_extract(p.attrs, '$.uhs_worst_dim') AS uhs_worst_dim
+FROM picks p JOIN runs r ON r.run_id = p.run_id AND r.kind = 'morning' JOIN entities e ON e.entity_id = p.entity_id AND e.kind = 'security' AND e.market = 'IN';
+
+-- decisions: pick_outcomes (date column pick_date)
+CREATE VIEW IF NOT EXISTS v3_pick_outcomes AS
+SELECT e.key AS sid, r.as_of_date AS pick_date, o.horizon_days AS window_days,
+       json_extract(o.attrs, '$.cap_tier') AS cap_tier, json_extract(o.attrs, '$.rank_at_pick') AS rank_at_pick,
+       json_extract(o.attrs, '$.final_score') AS final_score, json_extract(o.attrs, '$.entry_price') AS entry_price,
+       o.end_date AS exit_date, json_extract(o.attrs, '$.exit_price') AS exit_price, o.ret AS fwd_return_pct,
+       json_extract(o.attrs, '$.bench_index') AS bench_index, o.bench_ret AS bench_return_pct,
+       o.excess AS excess_return_pct, o.computed_at AS computed_at
+FROM outcomes o JOIN runs r ON r.run_id = o.run_id AND r.kind = 'morning' JOIN entities e ON e.entity_id = o.entity_id AND e.kind = 'security' AND e.market = 'IN';
+
+-- decisions: portfolio_weights (date column asof_date)
+CREATE VIEW IF NOT EXISTS v3_portfolio_weights AS
+SELECT r.as_of_date AS asof_date, e.key AS sid, b.weight AS weight,
+       json_extract(b.attrs, '$.factor_score') AS factor_score,
+       json_extract(b.attrs, '$.marginal_risk_contrib') AS marginal_risk_contrib,
+       json_extract(b.attrs, '$.cap_tier') AS cap_tier, json_extract(b.attrs, '$.sector') AS sector,
+       json_extract(b.attrs, '$.name') AS name, json_extract(b.attrs, '$.rank') AS rank,
+       json_extract(b.attrs, '$.created_at') AS created_at
+FROM book_weights b JOIN runs r ON r.run_id = b.run_id AND r.kind = 'morning' JOIN entities e ON e.entity_id = b.entity_id AND e.kind = 'security' AND e.market = 'IN';
+
+-- decisions: portfolio_outcomes (date column asof_date)
+CREATE VIEW IF NOT EXISTS v3_portfolio_outcomes AS
+SELECT r.as_of_date AS asof_date, o.horizon_days AS window_days, o.ret AS hrp_return_pct,
+       json_extract(o.attrs, '$.eqw_return_pct') AS eqw_return_pct, o.bench_ret AS bench_return_pct,
+       json_extract(o.attrs, '$.hrp_vs_eqw_pct') AS hrp_vs_eqw_pct, o.excess AS hrp_excess_pct,
+       json_extract(o.attrs, '$.n_names') AS n_names, json_extract(o.attrs, '$.n_matured') AS n_matured,
+       o.computed_at AS computed_at
+FROM outcomes o JOIN runs r ON r.run_id = o.run_id AND r.kind = 'morning'
+JOIN entities e ON e.entity_id = o.entity_id AND e.kind = 'portfolio' AND e.key = 'book';

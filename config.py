@@ -18,6 +18,10 @@ PROJECT_ROOT = Path(__file__).resolve().parent
 # migrations — plan 0017 stage 0). Unset = the live DB.
 DB_PATH = Path(os.environ.get("ALPHA_DB") or PROJECT_ROOT / "data" / "alpha_signal.db")
 SCHEMA_PATH = PROJECT_ROOT / "schema.sql"
+# Data model v3 read switch (plan 0030, ADR 0084): per concept, "old" reads the legacy tables,
+# "new" reads the v3 compatibility views (datamodel/compat.py) through the db read helpers.
+# ALPHA_DM_DECISIONS=new flips a concept for one process (tests, the parity gate).
+DATA_MODEL = {"decisions": os.environ.get("ALPHA_DM_DECISIONS", "old")}
 # Parquet archives (Kite minute bars, ADR 0072) live beside the DB, so ALPHA_DB in a worktree
 # moves them too and a worktree never grows a second, empty archive of its own.
 INTRADAY_DIR = Path(os.environ.get("ALPHA_INTRADAY") or DB_PATH.parent / "intraday")

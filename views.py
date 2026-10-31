@@ -105,7 +105,7 @@ def native_rows(sql, params=()):
     pandas: in a multi-sid frame one sid's NULL turns every other sid's ints into
     floats ("12.0 analysts"), which single-sid reads never did."""
     with get_db() as conn:
-        cur = conn.execute(sql, params)
+        cur = conn.execute(db._v3(sql), params)
         cols = [d[0] for d in cur.description]
         return [dict(zip(cols, r)) for r in cur.fetchall()]
 
