@@ -104,6 +104,8 @@ def init_db():
     schema_sql = SCHEMA_PATH.read_text()
     with get_db() as conn:
         conn.executescript(schema_sql)
+        from datamodel import compat
+        compat.ensure_views(conn)            # plan 0030 compatibility views (idempotent)
     _ensure_columns()
     print(f"Database initialized: {DB_PATH}")
     print(f"Size: {DB_PATH.stat().st_size / 1024:.1f} KB")
@@ -308,10 +310,16 @@ def read_table(table_name, where=None, params=None, limit=None):
         return pd.read_sql_query(query, conn, params=params)
 
 
+def _v3(sql):
+    """Plan 0030: a switched concept's legacy names → its compatibility views (no-op by default)."""
+    from datamodel import compat
+    return compat.rewrite(sql)
+
+
 def read_sql(query, params=None):
     """Run arbitrary SQL and return a DataFrame."""
     with get_db() as conn:
-        return pd.read_sql_query(query, conn, params=params)
+        return pd.read_sql_query(_v3(query), conn, params=params)
 
 
 # ── DuckDB read-replica ──
@@ -1580,5 +1588,5 @@ def scalar(sql, params=None, default=None):
     """First column of the first row, or `default` when there is no row or the
     value is NULL. Replaces `read_sql(...).iloc[0]["x"] if not df.empty else d`."""
     with get_db() as conn:
-        row = conn.execute(sql, params or []).fetchone()
+        row = conn.execute(_v3(sql), params or []).fetchone()
     return default if row is None or row[0] is None else row[0]
