@@ -388,9 +388,13 @@ def _scratch_tree(tmp):
     (root / "config.py").write_text("DEBUG = False\n")
     (root / "a.py").write_text("def helper(x):\n" + "".join(f"    x = x + {i}\n" for i in range(9)) + "    return x\n")
     (root / "b.py").write_text("def other(y):\n    return y\n")
-    subprocess.run(["git", "init", "-q"], cwd=root, check=True)
-    subprocess.run(["git", "-c", "user.email=d@x", "-c", "user.name=d", "add", "."], cwd=root, check=True)
-    subprocess.run(["git", "-c", "user.email=d@x", "-c", "user.name=d", "commit", "-q", "-m", "seed"], cwd=root, check=True)
+    # A git hook exports GIT_DIR (absolute in a worktree): with it in the environment, `git init` here would
+    # re-target the hook's own repository and the "seed" commit would land on the real branch (it did, on
+    # the v3-facts worktree's pre-push, 2026-11-01). The scratch repo gets a clean environment.
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    subprocess.run(["git", "init", "-q"], cwd=root, check=True, env=env)
+    subprocess.run(["git", "-c", "user.email=d@x", "-c", "user.name=d", "add", "."], cwd=root, check=True, env=env)
+    subprocess.run(["git", "-c", "user.email=d@x", "-c", "user.name=d", "commit", "-q", "-m", "seed"], cwd=root, check=True, env=env)
     return root
 
 
