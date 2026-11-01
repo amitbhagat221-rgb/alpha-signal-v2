@@ -50,6 +50,7 @@ Everything else (memory, `_archive/`, slash commands, settings) — Claude handl
 - Never `git commit --amend`, `git add .`, `git add -A`
 - Concurrent sessions share this tree: commit only your own files and hunks (`/handoff` steps 0, 4–5). Never stage, revert, stash, reset or checkout another session's uncommitted edits
 - Never `pkill -f "uvicorn cockpit.app"` — the pattern matches the prod systemd service
+- A test or tool that runs `git init` / `commit` in a scratch directory drops `GIT_*` from its environment: the pre-push hook exports `GIT_DIR`, and in a worktree the scratch repo becomes the real branch (e810c08)
 - Approval tiers (ADR 0086): Tier A paths (live options, weights/config, `run.sh`/crontab, schema drops, data deletes) wait for Amit; everything else commits when the pre-push suite passes, Tier B work orders approve themselves after 48 h, and every plan decision carries its default and effect date
 
 **Graph-first lookup**
