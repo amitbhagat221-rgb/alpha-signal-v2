@@ -261,6 +261,14 @@ def work_order_schema():
              open_questions=A(S(400), 8), tier=E(*org.WORK_TIERS))     # ADR 0086; absent = Tier A
 
 
+def _impact(mask):
+    from tools import quarantine
+    return quarantine.impact(mask)
+
+
+IMPACT = _impact          # the re-rank with the rows masked (≈ 100 s on the live DB); tests swap it
+
+
 def _draft_fix_order(conn, clean, payload, memo_id):
     """ADR 0085 J3: the findings the auditor called `real` with impact `picks` become one
     work order, awaiting the CEO's approval, parented to the memo (a re-run retires it).
@@ -271,18 +279,47 @@ def _draft_fix_order(conn, clean, payload, memo_id):
     if not hits:
         return None
     builders = org.builder_roles()
-    items = []
+    # stage 2 (plan 0032): the stocks each finding names are quarantined, the screener re-ranked once
+    # with every such row masked, and the measured pick diff goes on the order before anyone fixes anything
+    from tools import quarantine
+    try:
+        known = {r[0] for r in conn.execute("SELECT sid FROM stocks")}
+    except Exception:                                # noqa: BLE001 — a test DB without the universe
+        known = set()
+    rows_of, mask = {}, {}
     for c in hits[:12]:
         f = brief[c["finding_id"]]
         table = str(f.get("subject") or "?").split(".")[0]
+        sids = quarantine.sids_from_sample(f.get("sample"), known)
+        rows_of[c["finding_id"]] = (table, sids)
+        for s in sids:
+            mask.setdefault(table, {}).setdefault(s, []).append(None)
+    imp, imp_err = None, None
+    if mask:
+        try:
+            imp = IMPACT(mask)
+        except Exception as e:                       # noqa: BLE001 — the order still drafts; the diff is measured by hand
+            imp_err = f"{type(e).__name__}: {str(e)[:160]}"
+    items = []
+    for c in hits[:12]:
+        f = brief[c["finding_id"]]
+        table, sids = rows_of[c["finding_id"]]
+        if imp and sids:
+            mv = [m for m in imp["moves"] if m["sid"] in sids]
+            measured = (f"Measured ({quarantine.summary(imp)}); this finding's stocks: "
+                        + ", ".join(f"{m['sid']} rank {m['rank_before']} → {m['rank_after']}" for m in mv[:12])
+                        + (f" … {len(mv) - 12} more" if len(mv) > 12 else "") + ".")
+        elif sids:
+            measured = f"The pick diff could not be measured when drafting ({imp_err}); run python -m tools.quarantine impact."
+        else:
+            measured = ("The finding names no stock ids, so nothing was quarantined; first measure: quarantine the rows its "
+                        "query returns (python -m tools.quarantine add) and run python -m tools.quarantine impact.")
         items.append({
             "title": f"Fix {f.get('subject') or c['finding_id']}"[:160],
             "what": (f"{f.get('claim') or c.get('why') or 'the finding'} ({f.get('n_bad') or 0:,} of {f.get('n_total') or 0:,}). "
-                     f"First measure: quarantine the rows the finding's "
-                     f"query returns, re-run the screener for the latest pick date with them masked, and attach the pick "
-                     f"diff to this order. Then fix at the source so the next harvest writes the right value: "
+                     f"{measured} Then fix at the source so the next harvest writes the right value: "
                      f"{c.get('proposed_fix') or 'the parser, mapping or backfill behind the column'}. Never hand-edit "
-                     f"the stored number.")[:1200],
+                     f"the stored number; release the quarantine rows when the query is clean.")[:1200],
             "where": f"{table}; the query is on finding {c['finding_id']} of the dq-auditor memo of {payload.get('as_of')}"[:500],
             "done_when": (f"the finding's query returns n_bad 0 (or under its bar) on the live DB and still does after "
                           f"the next harvest of {table}; the pick diff is attached")[:600],
@@ -291,11 +328,23 @@ def _draft_fix_order(conn, clean, payload, memo_id):
         })
     wo = {"title": f"Data faults touching the picks — audit {payload.get('as_of')}"[:160],
           "summary": (f"Drafted by the server from the dq-auditor's memo (ADR 0085 J3): {len(items)} finding(s) the seat "
-                      f"called real and touching today's picks. Approve to run with /work-order; reject to drop. "
-                      f"{clean.get('top_action') or ''}")[:900],
+                      f"called real and touching today's picks. "
+                      + (f"Measured with their rows masked: {quarantine.summary(imp)}. " if imp else "")
+                      + f"Approve to run with /work-order; reject to drop. {clean.get('top_action') or ''}")[:900],
           "items": items, "tier": "B"}       # ADR 0086: a data fix with its pick diff measured first is Tier B
     clean_wo = _check(work_order_schema(), wo, {"owners": builders}, "fix order")
     n = org.save_work_order("dq-auditor", None, clean_wo, parent=memo_id, conn=conn)
+    for c in hits[:12]:
+        f = brief[c["finding_id"]]
+        table, sids = rows_of[c["finding_id"]]
+        if sids:
+            ids = quarantine.add(table, sids, rule=str(f.get("subject"))[:120], reason=str(f.get("claim"))[:300],
+                                 finding_id=c["finding_id"], order_number=n, conn=conn)
+            if imp:
+                by = {m["sid"]: m for m in imp["moves"]}
+                for i, s in zip(ids, sorted({x for x in sids if x})):
+                    conn.execute("UPDATE data_quarantine SET impact_json = ? WHERE id = ? AND impact_json IS NULL",
+                                 (json.dumps(by.get(s)), i))
     return org.work_order_doc_id(n, conn=conn)
 
 
@@ -1145,6 +1194,7 @@ GRADED = ("data_triage", "dq_audit", "code_sweep", "arch_review", "risk_note", "
 
 def _build_grade(day, key):
     graded = {g["parent_doc_id"] for g in org.docs(["grade"], days=15)}
+    records = org.scorecard()            # stage 5 (plan 0032): the author's proposals accepted / rejected / reverted
     items = []
     for m in org.docs(list(GRADED), days=8, limit=120):
         if m["doc_id"] in graded:
@@ -1157,7 +1207,8 @@ def _build_grade(day, key):
         k = f"doc{m['doc_id']}"
         facts = {"author": {"role": role, "title": org.ROLES.get(role, {}).get("title"),
                             "mission": org.ROLES.get(role, {}).get("mission"),
-                            "gate": org.ROLES.get(role, {}).get("gate")},
+                            "gate": org.ROLES.get(role, {}).get("gate"),
+                            "orders_30d": (records.get(role) or {}).get("orders")},
                  "memo": memo, "brief_the_author_was_given": brief or {"unavailable": "brief not found"}}
         items.append((k, _item("compliance", k, day, facts, {}, graded_doc=m["doc_id"], graded_role=role,
                                graded_kind=m["type"]), 6))

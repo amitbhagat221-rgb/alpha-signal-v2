@@ -1,4 +1,4 @@
-# ADR 0087 — The architecture review runs weekly from probes, and a drafted work order's tier follows the path it touches
+# ADR 0089 — The architecture review runs weekly from probes, and a drafted work order's tier follows the path it touches
 
 **Status:** accepted 2026-11-01 (Amit: "build 8 and 9 and other functionality that system architect was supposed to do … run on a cadence and make it tiered"). Extends ADR 0085 (janitor routines) and ADR 0086 (approval tiers); plan [0032](../plans/0032-janitor-routines.md) stage 6.
 

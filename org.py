@@ -579,7 +579,8 @@ def doc(doc_id):
 
 
 ITEM_TYPES = ("ask", "hypothesis", "work_order")
-WORK_STATUSES = ("in_progress", "done", "blocked", "cancelled")
+WORK_STATUSES = ("in_progress", "done", "blocked", "cancelled", "reverted")   # reverted: undone after it ran (ADR 0085 J6)
+REVERT_WINDOW_DAYS = 30                                                        # a revert this soon counts against the seat
 WORK_TIERS = ("A", "B", "C")        # ADR 0086: A = the CEO every time; B = yes by default after VETO_HOURS; C = no approval
 VETO_HOURS = 48
 
@@ -721,7 +722,9 @@ def work_status(number, status, note=None):
     w = work_order(number)
     if not w:
         raise ValueError(f"no work order {number}")
-    if status != "cancelled" and w["status"] not in ("approved", "in_progress", "blocked"):
+    if status == "reverted" and w["status"] != "done":
+        raise ValueError(f"work order {number} is '{w['status']}': only a done order can be reverted")
+    if status not in ("cancelled", "reverted") and w["status"] not in ("approved", "in_progress", "blocked"):
         raise ValueError(f"work order {number} is '{w['status']}': the CEO approves it in the Boardroom inbox first")
     with get_db() as conn:
         save_doc(conn, "progress", f"wo:{w['number']}", status,
@@ -811,6 +814,23 @@ def scorecard(days=30):
     except Exception as e:                                  # a fresh DB without the queue tables
         if "no such table" not in str(e):
             raise
+    # stage 5 (plan 0032): what became of the seat's proposals — accepted (approved or further), rejected,
+    # reverted within REVERT_WINDOW_DAYS of being proposed (J6)
+    for w in work_orders(days):
+        c = card.get(w["role"])
+        if c is None:
+            continue
+        o = c.setdefault("orders", {"proposed": 0, "accepted": 0, "rejected": 0, "reverted": 0, "awaiting": 0})
+        o["proposed"] += 1
+        if w["status"] in ("approved", "in_progress", "blocked", "done", "reverted"):
+            o["accepted"] += 1
+        elif w["status"] == "rejected":
+            o["rejected"] += 1
+        elif w["status"] == "awaiting approval":
+            o["awaiting"] += 1
+        if w["status"] == "reverted" and (w.get("updated") or "9")[:10] <= (
+                dt.date.fromisoformat(w["date"][:10]) + dt.timedelta(days=REVERT_WINDOW_DAYS)).isoformat():
+            o["reverted"] += 1
     grades = {}
     for g in docs(["grade"], days=days):
         grades.setdefault(g["fields"].get("graded_role"), []).append(g["fields"].get("total") or 0)
