@@ -12,6 +12,7 @@ import steplog
 import views
 
 TODAY = date.today().isoformat()
+NOW = __import__('datetime').datetime.now().isoformat(timespec='seconds')
 YDAY = (date.today() - timedelta(days=1)).isoformat()
 
 
@@ -51,7 +52,7 @@ def test_readers_agree_under_both_flags_and_the_mirror_adds_nothing(conn, tmp_pa
     from checks import system
     for d, step, status, started, err in [(YDAY, "a", "RUNNING", f"{YDAY}T03:00:00", None), (YDAY, "a", "SUCCESS", f"{YDAY}T03:00:00", None),
                                           (YDAY, "b", "FAILED", f"{YDAY}T03:10:00", "boom"), (TODAY, "b", "FAILED", f"{TODAY}T03:10:00", "boom"),
-                                          (TODAY, "c", "RUNNING", "2020-01-01T03:00:00", None), (TODAY, "d", "RUNNING", f"{TODAY}T09:00:00", None)]:
+                                          (TODAY, "c", "RUNNING", "2020-01-01T03:00:00", None), (TODAY, "d", "RUNNING", NOW, None)]:   # d: open right now
         steplog.log(step, status, started=started, error=err, run_date=d, conn=conn)
     conn.commit()
     out = {}
