@@ -649,3 +649,21 @@ def test_a_tier_b_work_order_approves_itself_after_the_veto_window(q, monkeypatc
     org.decide(org.work_order_doc_id(b2), "reject")
     monkeypatch.setattr(org, "_now", lambda: later)
     assert org.work_order(b2)["status"] == "rejected"
+
+
+def test_scorecard_counts_a_seats_proposals_and_a_revert_within_30_days(q):
+    """Plan 0032 stage 5 (ADR 0085 J6): per seat, proposals accepted / rejected / reverted; only a done
+    order can be reverted, and a revert within 30 days of the proposal counts against the seat."""
+    wo = {"title": "Clutter: merge two copies", "summary": "s", "tier": "B",
+          "items": [{"title": "Merge", "what": "w", "done_when": "d", "owner": "backend-engineer", "size": "S"}]}
+    n1 = org.save_work_order("code-janitor", None, wo)
+    n2 = org.save_work_order("code-janitor", None, {**wo, "title": "Delete a tool"})
+    org.decide(org.work_order(n1)["doc_id"], "approve")
+    org.decide(org.work_order(n2)["doc_id"], "reject")
+    with pytest.raises(ValueError, match="only a done order"):
+        org.work_status(n1, "reverted")
+    org.work_status(n1, "in_progress")
+    org.work_status(n1, "done", "merged")
+    assert org.work_status(n1, "reverted", "broke the sector page")["status"] == "reverted"
+    card = org.scorecard()["code-janitor"]["orders"]
+    assert card == {"proposed": 2, "accepted": 1, "rejected": 1, "reverted": 1, "awaiting": 0}

@@ -65,7 +65,7 @@ ROLES = {
     },
     "chief-of-staff": {
         "title": "Chief of Staff", "type": "desk", "reports_to": "ceo",
-        "cadence": "weekly:sun", "model": "sonnet", "kinds": ["org_board_pack"],
+        "cadence": "weekly:sun", "model": "sonnet", "kinds": ["org_board_pack"], "enabled": False,     # dropped 2026-11-01 (ADR 0090): the inbox is the digest; re-enable from /org
         "mission": "Turn a week of desk memos into one page the CEO can act on.",
         "deliverable": "Weekly board pack: state of the fund, the decisions that need the CEO, wins, worries.",
         "measures": ["CEO decisions taken per pack", "nothing material missing from the pack"],
@@ -106,7 +106,7 @@ ROLES = {
     },
     "risk-officer": {
         "title": "Risk Officer", "type": "desk", "reports_to": "ceo",
-        "cadence": "daily", "model": "sonnet", "kinds": ["org_risk_note"],
+        "cadence": "weekly:sun", "model": "sonnet", "kinds": ["org_risk_note"],      # daily → weekly 2026-11-01 (ADR 0090)
         "mission": "Independent daily read of the book: concentration, churn, regime, data trust.",
         "deliverable": "Daily book note: verdict (within-limits / watch / breach) and flags.",
         "measures": ["cap breaches flagged the day they occur", "turnover per day vs baseline", "false-alarm rate"],
@@ -115,7 +115,7 @@ ROLES = {
     },
     "compliance": {
         "title": "Compliance", "type": "desk", "reports_to": "ceo",
-        "cadence": "daily", "model": "opus", "kinds": ["org_grade"],
+        "cadence": "weekly:sun", "model": "opus", "kinds": ["org_grade"],        # grades the week in one batch since 2026-11-01 (ADR 0090)
         "mission": "The independent grader: score every desk memo against the facts it was given.",
         "deliverable": "A grade per memo (grounded, actionable, in-charter, calibrated) with the issues found.",
         "measures": ["grades the CEO overturns", "memos graded within a day"],
@@ -193,7 +193,7 @@ ROLES = {
     },
     "ai-scout": {
         "title": "AI & Tools Scout", "type": "desk", "reports_to": "ceo",
-        "cadence": "weekly:sun", "model": "sonnet", "kinds": ["org_ai_scout"], "web": True,
+        "cadence": "weekly:sun", "model": "sonnet", "kinds": ["org_ai_scout"], "web": True, "enabled": False,   # dropped 2026-11-01 (ADR 0090)
         "mission": "Watch what is new in models, tools and data sources; own the LLM budget.",
         "deliverable": "Weekly brief: at most three recommendations, each with the gate that would prove it. Default: no change.",
         "measures": ["adopted recommendations with measured gain", "LLM usage trend", "ungated adoptions = 0"],
@@ -1099,6 +1099,17 @@ def deliver_all(day=None, force=False):
         send_pack = bool(pack) and (force or (pack["doc_date"][:10] == today and _sent(conn, pack["doc_id"])))
         urgent = [a for a in docs(["ask"], days=2) if a["fields"].get("urgency") == "now"
                   and a["doc_date"][:10] == today and _sent(conn, a["doc_id"])]
+    if not pack and dt.date.today().weekday() == 6:        # no chief-of-staff (ADR 0090): the Sunday nudge is the inbox itself
+        waiting = inbox()
+        with get_db() as conn:
+            fresh = [i for i in waiting if i["doc_date"][:10] == today]
+            if fresh and not conn.execute("SELECT 1 FROM documents WHERE source = 'org' AND source_key = ?",
+                                          (f"inbox{today}",)).fetchone():
+                save_doc(conn, "delivery", f"inbox{today}", "inbox nudge", {"n": len(waiting), "at": _now()})
+                kinds = ", ".join(f"{sum(1 for i in waiting if i['type'] == t)} {t.replace('_', ' ')}(s)"
+                                  for t in ("work_order", "ask", "hypothesis") if any(i["type"] == t for i in waiting))
+                out["inbox_push"] = send_ntfy(f"Boardroom: {len(waiting)} waiting ({kinds}); Tier B orders approve themselves in 48 h.",
+                                              click=BOARDROOM_URL)
     if send_pack:
         out["board_email"] = send_email(board_html(pack, inbox()), f"Alpha Signal board pack · {pack['doc_date'][:10]}")
         n = len(pack["fields"].get("decisions") or [])

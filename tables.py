@@ -737,6 +737,11 @@ TABLES = {
         "kind": "QUARANTINE", "domain": "Pipeline", "date_col": "end_date",
     },
     "annual_cash_flow_quarantine": {"kind": "QUARANTINE", "domain": "Pipeline", "date_col": "end_date"},
+    "data_quarantine": {
+        "kind": "QUARANTINE", "domain": "Pipeline", "date_col": "quarantined_at",
+        "depth": "Open rows until released",
+        "description": "Plan 0032 stage 2: stored rows the data-quality audit distrusts (table, sid, optional row key), masked from the screener's inputs in memory by tools/quarantine.py to measure a fault's pick impact before the fix; nothing is deleted.",
+    },
     "banking_metrics_quarantine": {"kind": "QUARANTINE", "domain": "Pipeline", "date_col": "fetched_at"},
     "broker_recommendations_quarantine": {
         "kind": "QUARANTINE", "domain": "Pipeline", "date_col": "fetched_at",

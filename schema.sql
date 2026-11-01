@@ -1547,6 +1547,24 @@ CREATE TABLE IF NOT EXISTS quarterly_income (
     PRIMARY KEY (sid, period, reporting)
 );
 
+-- plan 0032 stage 2 (tools/quarantine.py): rows the data-quality audit distrusts, masked from the
+-- screener's inputs in memory to measure a fault's pick impact before it is fixed. Ops state (D2).
+CREATE TABLE IF NOT EXISTS data_quarantine (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    table_name      TEXT NOT NULL,
+    sid             TEXT NOT NULL,
+    row_key         TEXT,                  -- JSON {column: value} narrowing to one row; NULL = every row of the sid
+    rule            TEXT,                  -- the dq_probes subject, e.g. 'quarterly_income.revenue (0027 #4)'
+    finding_id      TEXT,
+    reason          TEXT,
+    order_number    INTEGER,               -- the work order that carries the measured pick diff
+    quarantined_at  TEXT NOT NULL,
+    released_at     TEXT,
+    released_by     TEXT,
+    impact_json     TEXT                   -- the stock's rank before / after the mask, when measured
+);
+CREATE INDEX IF NOT EXISTS idx_data_quarantine_open ON data_quarantine (released_at, table_name, sid);
+
 CREATE TABLE IF NOT EXISTS quarterly_income_quarantine (
     sid             TEXT NOT NULL,
     period          TEXT NOT NULL,

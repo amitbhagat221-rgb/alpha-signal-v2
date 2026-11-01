@@ -652,6 +652,19 @@ def _item(role, key, day, facts, sets, **extra):
             "facts": facts, "_sets": sets}
 
 
+def _triage_has_news(issues):
+    """True when the health report carries an issue the last triage brief did not, or any
+    CRITICAL. Otherwise the memo would repeat yesterday's; the health email already says it."""
+    if any(i["severity"] == "CRITICAL" for i in issues):
+        return True
+    task = db.one("SELECT payload_json FROM llm_tasks WHERE kind = 'org_data_triage' AND status = 'done' "
+                  "ORDER BY done_at DESC LIMIT 1")
+    if not task:
+        return True
+    seen = {(i.get("code"), i.get("severity")) for i in (json.loads(task["payload_json"]).get("facts") or {}).get("issues") or []}
+    return any((i["code"], i["severity"]) not in seen for i in issues)
+
+
 def _build_triage(day, key):
     from tools.health_report import gather
     from alpha_mcp import tasks
@@ -659,6 +672,8 @@ def _build_triage(day, key):
     issues = [{"issue_id": f"I{i + 1}", "severity": x["severity"], "code": x["code"],
                "message": str(x["message"])[:300], "detail": str(x.get("detail") or "")[:400]}
               for i, x in enumerate(st["issues"][:40])]
+    if not _triage_has_news(issues):            # ADR 0090: the health email already lists the same issues every day
+        return []
     p, t = st.get("pipeline") or {}, st.get("tables") or {}
     facts = {
         "summary": st["summary"], "issues": issues,

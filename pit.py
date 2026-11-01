@@ -1714,6 +1714,8 @@ def features_at(t, columns, raw=None):
     producers = producers_for(columns)
     if raw is None:
         raw = load_raw(raw_keys_for(producers))
+    from tools import quarantine
+    raw = quarantine.mask_raw(raw)          # plan 0032 stage 2: distrusted rows masked while a quarantine is active
     df, _ = reconstruct_one_date(t, raw, producers)
     keep = [c for c in ("sid", "cap_tier", "snapshot_date", "close_price", *columns) if c in df.columns]
     return df[keep]

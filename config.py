@@ -23,7 +23,14 @@ SCHEMA_PATH = PROJECT_ROOT / "schema.sql"
 # ALPHA_DM_DECISIONS=new flips a concept for one process (tests, the parity gate).
 # decisions: "new" since 2026-10-31 (plan 0030 stage 1; gate: 30 dates of row parity, email / health /
 # checks / 20 cockpit pages identical under both flags). Set "old" to roll back.
-DATA_MODEL = {"decisions": os.environ.get("ALPHA_DM_DECISIONS", "new")}
+# steps: pipeline_log → runs ⋈ step_runs (steplog.py). "old" until the first morning run under the writer
+# shows parity (datamodel_reconcile `pipeline_log`) and the health report / Flow page read the same under both.
+DATA_MODEL = {"decisions": os.environ.get("ALPHA_DM_DECISIONS", "new"),
+              "steps": os.environ.get("ALPHA_DM_STEPS", "old")}
+# Plan 0032 stage 2: `data_quarantine` rows are masked from the screener's inputs in memory by
+# tools/quarantine.py to measure a fault's pick impact. apply_live = True masks them in the morning
+# run too (it changes the picks: Tier A, Amit's call); the measurement never needs it.
+QUARANTINE = {"apply_live": False}
 # Parquet archives (Kite minute bars, ADR 0072) live beside the DB, so ALPHA_DB in a worktree
 # moves them too and a worktree never grows a second, empty archive of its own.
 INTRADAY_DIR = Path(os.environ.get("ALPHA_INTRADAY") or DB_PATH.parent / "intraday")

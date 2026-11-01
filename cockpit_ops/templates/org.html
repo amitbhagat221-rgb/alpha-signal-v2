@@ -693,6 +693,7 @@
         {% if r.score.first_pass is not none %}<span>first pass {{ (r.score.first_pass * 100)|round|int }}%</span>{% endif %}
         {% if r.score.grade is not none %}<span>grade {{ r.score.grade }}/8 ({{ r.score.n_graded }})</span>{% endif %}
         {% if r.score.audit %}<span>calls right {{ r.score.audit.right }}/{{ r.score.audit.checked }}{{ tip("Its calls, checked against a re-run of each finding's query.") }}{% if r.score.audit.claimed_real_but_not %} · <span class="og-bad">{{ r.score.audit.claimed_real_but_not }} reported as real, not there</span>{% endif %}{% if r.score.audit.dismissed_but_real %} · <span class="og-bad">{{ r.score.audit.dismissed_but_real }} dismissed, real</span>{% endif %} · {{ r.score.audit.new_real }} new</span>{% endif %}
+        {% if r.score.orders %}<span>proposals {{ r.score.orders.proposed }} · accepted {{ r.score.orders.accepted }} · rejected {{ r.score.orders.rejected }}{% if r.score.orders.reverted %} · <span class="og-bad">{{ r.score.orders.reverted }} reverted within 30 days</span>{% endif %}{{ tip("Work orders the seat proposed in the last 30 days and what the CEO did with them. A revert within 30 days of the proposal counts against the seat (ADR 0085 J6).") }}</span>{% endif %}
         {% if r.score.tokens_out %}<span>{{ '{:,}'.format(r.score.tokens_out) }} tokens out</span>{% endif %}
         {% if r.latest %}<span>last memo {{ r.latest.date }}</span>{% endif %}
       </div>
