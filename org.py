@@ -170,12 +170,15 @@ ROLES = {
         "graded_by": "cto",
     },
     "system-architect": {
-        "title": "System Architect", "type": "builder", "reports_to": "cto",
+        "title": "System Architect", "type": "desk", "reports_to": "cto", "agent": True,
+        "cadence": "weekly:sat", "model": "opus", "effort": "high", "kinds": ["org_arch_review"],
         "mission": "Guard the seven building blocks and five invariants; write the ADR before the code.",
-        "deliverable": "An ADR + change-locality table for any structural change; a quarterly architecture review.",
-        "measures": ["change scenarios touching ≤2 places", "invariant ratchets never loosened"],
-        "gate": "Proposes. Production code changes only after the CEO approves the ADR.",
-        "graded_by": "ceo",
+        "deliverable": "Weekly review: a call on every architecture probe finding (fix, inline, keep, adr), the one fix that "
+                       "removes the most future work; an ADR + change-locality table for any structural change (as the builder).",
+        "measures": ["fixes not reverted within 30 days", "invariant ratchets never loosened", "change scenarios touching ≤2 places"],
+        "gate": "Proposes. A Tier B work order the CEO approves (or lets stand 48 h) makes a local fix; an ADR precedes any "
+                "structural change (ADR 0085, 0086).",
+        "graded_by": "compliance",
     },
     "code-janitor": {
         "title": "Code Janitor", "type": "desk", "reports_to": "cto",
@@ -200,7 +203,7 @@ ROLES = {
 }
 
 # Doers first, then the grader, then the pack that summarises both.
-RUN_ORDER = ["data-engineer", "dq-auditor", "code-janitor", "risk-officer", "sector-desk", "cio", "cto", "ai-scout", "compliance", "chief-of-staff"]
+RUN_ORDER = ["data-engineer", "dq-auditor", "code-janitor", "system-architect", "risk-officer", "sector-desk", "cio", "cto", "ai-scout", "compliance", "chief-of-staff"]
 DOW = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
 VERDICTS = ("approve", "reject", "park")
 

@@ -218,6 +218,8 @@ def _validate(kind):
             problems += _dq_problems(clean, payload)
         if kind == "org_code_sweep":
             problems += _code_problems(clean, payload)
+        if kind == "org_arch_review":
+            problems += _one_call_each(clean, payload)
         if kind == "org_sector_view" and not _called(payload.get("role"), 45) & _STOCK_TOOLS:
             problems.append("an idea needs research: look the stock up first (alpha-research stock, dossier, "
                             "stock_news, stock_financials or pick_breakdown), then submit")
@@ -488,7 +490,7 @@ def _ingest(kind):
                 return {"inserted": [did], "superseded": sup}
             if kind == "org_dq_audit":
                 clean["score"] = _dq_score(clean, payload)
-            if kind == "org_code_sweep":        # subject and probe on each call, so the memo reads without the brief
+            if kind in ("org_code_sweep", "org_arch_review"):   # subject and probe on each call: the memo reads without the brief
                 brief = {f["finding_id"]: f for f in payload["facts"]["findings"]}
                 for call in clean.get("findings") or []:
                     f = brief.get(call["finding_id"], {})
@@ -508,6 +510,8 @@ def _ingest(kind):
                 wo = _draft_code_order(conn, clean, payload, did)
                 if wo:
                     inserted.append(wo)
+            if kind == "org_arch_review":       # fix / inline calls → one order per tier
+                inserted += _draft_arch_order(conn, clean, payload, did)
             if sup:                 # a re-run replaced the memo: retire its undecided asks and cards too
                 tids = [org._type_id(conn, f"org.{t}") for t in org.ITEM_TYPES]
                 kids = [r[0] for r in conn.execute(
@@ -768,6 +772,93 @@ def _draft_code_order(conn, clean, payload, memo_id):
     clean_wo = _check(work_order_schema(), wo, {"owners": builders}, "clutter order")
     n = org.save_work_order("code-janitor", None, clean_wo, parent=memo_id, conn=conn)
     return org.work_order_doc_id(n, conn=conn)
+
+
+TIER_A_PATHS = ("options_live.py", "option_book.py", "option_strategy.py", "option_expected.py", "run.sh", "ops/crontab.txt",
+                "config.py", "factors.py", "schema.sql", "sources/kite")
+
+
+def tier_for(subject):
+    """ADR 0086: a work-order item on a Tier A path waits for the CEO; anything else is Tier B."""
+    path = str(subject or "").split(":")[0]
+    return "A" if any(path == t or path.startswith(t) for t in TIER_A_PATHS) else "B"
+
+
+def _build_arch_review(day, key):
+    from tools import arch_probes
+    out = arch_probes.run()
+    earlier = org.docs(["arch_review"], days=180)
+    kept, first = {}, {}
+    for d in sorted(earlier, key=lambda d: d["doc_date"]):
+        for c in d["fields"].get("findings") or []:
+            if c.get("subject"):
+                if c.get("call") == "keep":
+                    kept[c["subject"]] = c.get("why")
+                elif c.get("call") in ("fix", "inline"):
+                    first.setdefault(c["subject"], d["doc_date"])
+    rows = []
+    for f in out["findings"]:
+        if f["subject"] in kept:
+            continue                                        # a keep with a reason is never raised again
+        rows.append({"finding_id": f["id"], **{k: f[k] for k in ("probe", "subject", "claim", "evidence", "touches")},
+                     "first_raised": first.get(f["subject"])})
+    rows = rows[:40]
+    facts = {
+        "scan": {"as_of": out["as_of"], "scanned": out["scanned"], "scope": out["scope"], "shown": len(rows),
+                 "kept_before": len(kept)},
+        "findings": rows,
+        "drill": _section(lambda: {k: v for k, v in arch_probes.drill().items() if k != "results"}),
+        "your_record": [{"week": d["doc_date"], "verdict": d["fields"].get("verdict"),
+                         "calls": {c: sum(1 for x in d["fields"].get("findings") or [] if x.get("call") == c)
+                                   for c in ("fix", "inline", "keep", "adr", "needs-more-data")}} for d in earlier[:6]],
+        "owners": {r: org.ROLES[r]["mission"] for r in org.builder_roles()},
+        "decided_recently": _recent_decisions(),
+    }
+    sets = {"findings": [r["finding_id"] for r in rows], "owners": org.builder_roles() + ["ceo"]}
+    return [(key, _item("system-architect", key, day, facts, sets), 4)]
+
+
+def _one_call_each(clean, payload):
+    listed = [f["finding_id"] for f in payload["facts"]["findings"]]
+    called = [f["finding_id"] for f in clean["findings"]]
+    if sorted(called) != sorted(listed):
+        missing = sorted(set(listed) - set(called))
+        return [f"give every finding in the brief exactly one call (missing: {missing[:8]}, "
+                f"repeated: {sorted({x for x in called if called.count(x) > 1})[:8]})"]
+    return []
+
+
+def _draft_arch_order(conn, clean, payload, memo_id):
+    """`fix` and `inline` calls → one work order per tier (A waits for the CEO, B self-approves),
+    parented to the memo."""
+    brief = {f["finding_id"]: f for f in payload["facts"]["findings"]}
+    by_tier = {"A": [], "B": []}
+    for c in clean.get("findings") or []:
+        if c.get("call") not in ("fix", "inline"):
+            continue
+        f = brief.get(c["finding_id"]) or {}
+        subj = f.get("subject") or c["finding_id"]
+        by_tier[tier_for(subj)].append({
+            "title": (f"{'Inline' if c['call'] == 'inline' else 'Fix'} {subj}")[:160],
+            "what": (f"{f.get('claim') or 'the finding'}. Evidence: {json.dumps(f.get('evidence') or {}, default=str)[:300]}. "
+                     f"{c.get('why') or ''}")[:1200],
+            "where": subj[:500],
+            "done_when": "the suite is green and the probe no longer reports it (python -m tools.arch_probes)"[:600],
+            "owner": "backend-engineer", "size": "S"})
+    ids = []
+    for tier, items in by_tier.items():
+        if not items:
+            continue
+        wo = {"title": f"Architecture review {payload.get('as_of')}: {len(items)} fix(es), Tier {tier}"[:160],
+              "summary": (f"Drafted by the server from the system-architect's memo (ADR 0085). "
+                          + ("Tier A: waits for the CEO (it touches live orders, weights, config, cron or the schema). "
+                             if tier == "A" else f"Tier B: approves itself in {org.VETO_HOURS} h unless parked or rejected. ")
+                          + (clean.get("top_action") or ""))[:900],
+              "items": items[:12], "tier": tier}
+        clean_wo = _check(work_order_schema(), wo, {"owners": org.builder_roles()}, "architecture order")
+        n = org.save_work_order("system-architect", None, clean_wo, parent=memo_id, conn=conn)
+        ids.append(org.work_order_doc_id(n, conn=conn))
+    return ids
 
 
 def _book():
@@ -1049,7 +1140,7 @@ def _build_scout(day, key):
     return [(key, _item("ai-scout", key, day, facts, {}), 5)]
 
 
-GRADED = ("data_triage", "dq_audit", "code_sweep", "risk_note", "cio_review", "cio_outlook", "sector_view", "cto_review", "ai_scout")
+GRADED = ("data_triage", "dq_audit", "code_sweep", "arch_review", "risk_note", "cio_review", "cio_outlook", "sector_view", "cto_review", "ai_scout")
 
 
 def _build_grade(day, key):
@@ -1129,6 +1220,12 @@ _SPECS = {
         headline=P(160), eli5=ELI5, verdict=E("clean", "clutter", "risk"),
         findings=A(O("finding_id call why", finding_id={"ref": "findings"},
                      call=E("dead", "sticker", "keep", "needs-more-data"), why=S(400)), 45),
+        top_action=S(300), asks=ASKS, evidence=EVIDENCE)),
+    "org_arch_review": ("system-architect", _build_arch_review, O(
+        "headline eli5 verdict findings top_action",
+        headline=P(160), eli5=ELI5, verdict=E("sound", "drift", "breach"),
+        findings=A(O("finding_id call why", finding_id={"ref": "findings"},
+                     call=E("fix", "inline", "keep", "adr", "needs-more-data"), why=S(400)), 45),
         top_action=S(300), asks=ASKS, evidence=EVIDENCE)),
     "org_risk_note": ("risk-officer", _build_risk, O(
         "headline eli5 verdict flags book_comment",
