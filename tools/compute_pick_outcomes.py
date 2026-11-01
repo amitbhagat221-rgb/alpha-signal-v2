@@ -191,16 +191,14 @@ def score_picks(picks, prices, adjustments, bench_series, windows, include_bench
     return pd.DataFrame(rows)
 
 
-def _drop_superseded_rows(started, since):
+def _drop_superseded_rows(conn, started, since):
     """Rows this run did not rewrite are old-basis rows (weekend/holiday pick dates, or
     pairs the adjusted label now rejects): upsert never deletes, so remove them. Scoped to
     the picks this run covered (`since`)."""
-    from db import get_db
-    with get_db() as conn:
-        cur = conn.execute("DELETE FROM pick_outcomes WHERE computed_at < ?"
-                           + (" AND pick_date >= ?" if since else ""),
-                           (started, since) if since else (started,))
-        return cur.rowcount
+    cur = conn.execute("DELETE FROM pick_outcomes WHERE computed_at < ?"
+                       + (" AND pick_date >= ?" if since else ""),
+                       (started, since) if since else (started,))
+    return cur.rowcount
 
 
 def compute(windows=DEFAULT_WINDOWS, since=None, include_bench=True):
@@ -237,10 +235,16 @@ def compute(windows=DEFAULT_WINDOWS, since=None, include_bench=True):
                            "a producer that writes zero rows must raise")
     print(f"  scored {len(out):,} outcomes over {out['pick_date'].nunique()} trading pick dates "
           f"({picks['pick_date'].nunique()} pick dates in daily_picks)")
-    n = upsert_df(out, "pick_outcomes")
-    dropped = _drop_superseded_rows(started, since)
-    print(f"wrote/updated {n:,} pick_outcomes rows; removed {dropped:,} superseded rows "
-          f"(non-trading pick dates, pairs the adjusted label rejects)")
+    # Plan 0030: the same rows → runs + outcomes, same transaction (dual write until the
+    # stage-1 drop commit; datamodel_reconcile is the gate).
+    from db import get_db
+    from datamodel import decisions
+    with get_db() as conn:
+        n = upsert_df(out, "pick_outcomes", conn=conn)
+        dropped = _drop_superseded_rows(conn, started, since)
+        n_v3, dropped_v3 = decisions.write_pick_outcomes(conn, out, superseded_before=started, since=since)
+    print(f"wrote/updated {n:,} pick_outcomes rows ({n_v3:,} outcomes); removed {dropped:,} superseded rows "
+          f"({dropped_v3:,} outcomes) (non-trading pick dates, pairs the adjusted label rejects)")
     return n
 
 

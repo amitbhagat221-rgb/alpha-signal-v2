@@ -57,14 +57,8 @@ def _producer_for(table_name, row_produced_by=None):
 
 def _log_watchdog(table, action, status, error=None):
     """Append a row to pipeline_log so watchdog runs show alongside cron runs."""
-    now = datetime.now().isoformat(timespec="seconds")
-    with get_db() as conn:
-        conn.execute(
-            """INSERT INTO pipeline_log
-               (run_date, step_name, status, started_at, finished_at, error_message)
-               VALUES (date('now'), ?, ?, ?, ?, ?)""",
-            (f"watchdog_{table}_{action}", status, now, now, error),
-        )
+    import steplog
+    steplog.log(f"watchdog_{table}_{action}", status, started=datetime.now().isoformat(timespec="seconds"), error=error)
 
 
 def _report_coverage(coverage_gap, dry_run=False):
@@ -98,12 +92,13 @@ def _log_recoveries(df, dry_run=False):
     phantom "failed N consecutive days" CRITICAL until the old FAILED rows age
     out of the window. This closes that loop — symmetric with the heal-SUCCESS
     the scan already logs when it heals a table itself."""
+    import steplog
     latest = read_sql(
-        """
+        f"""
         WITH ranked AS (
             SELECT step_name, status,
                    ROW_NUMBER() OVER (PARTITION BY step_name ORDER BY id DESC) AS rn
-            FROM pipeline_log
+            FROM {steplog.source()}
             WHERE step_name LIKE 'watchdog_%\\_heal' ESCAPE '\\'
               AND status IN ('SUCCESS', 'FAILED')
         )

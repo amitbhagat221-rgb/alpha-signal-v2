@@ -736,7 +736,7 @@ _STATUS_SQL = """
                    ORDER BY CASE status WHEN 'SUCCESS' THEN 1 WHEN 'FAILED' THEN 2
                                         WHEN 'RUNNING' THEN 3 ELSE 4 END,
                             id DESC) AS rn
-        FROM pipeline_log {where}
+        FROM {source} {where}
     )
     SELECT run_date, step_name, status, rows_affected, duration_sec,
            error_message, started_at, finished_at
@@ -752,8 +752,9 @@ RUNNING_STALE_MULT = 2
 
 def _running_limits():
     """{step_name: timedelta} — how long a RUNNING row may stay open before it reads ABORTED."""
+    import steplog
     longest = {r["step_name"]: r["s"] or 0 for r in db.rows(
-        "SELECT step_name, MAX(duration_sec) AS s FROM pipeline_log WHERE status = 'SUCCESS' GROUP BY step_name")}
+        f"SELECT step_name, MAX(duration_sec) AS s FROM {steplog.source()} WHERE status = 'SUCCESS' GROUP BY step_name")}
     return {k: max(RUNNING_STALE_FLOOR, timedelta(seconds=RUNNING_STALE_MULT * s)) for k, s in longest.items()}
 
 
@@ -763,10 +764,11 @@ def pipeline_status(days=7):
     attempt: a completion row wins over RUNNING, SUCCESS over FAILED. A RUNNING
     row with no completion open longer than its step's limit (_running_limits) is a
     crashed run → ABORTED."""
+    import steplog
     if days is None:
-        steps = db.rows(_STATUS_SQL.format(where=""))
+        steps = db.rows(_STATUS_SQL.format(source=steplog.source(), where=""))
     else:
-        steps = db.rows(_STATUS_SQL.format(where="WHERE run_date >= date('now', ?)"),
+        steps = db.rows(_STATUS_SQL.format(source=steplog.source(), where="WHERE run_date >= date('now', ?)"),
                         [f"-{days} days"])
     now = datetime.now()
     limits = _running_limits() if any(r["status"] == "RUNNING" for r in steps) else {}

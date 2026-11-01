@@ -15,6 +15,7 @@ import pytest
 
 import checks
 import db
+from tests.v3seed import clear, seed
 import factors
 from checks import CRITICAL, FAIL, PASS, WARN, ranges, report
 from config import PICKABLE_TIERS
@@ -104,12 +105,12 @@ def _freeze(conn, days, tier=None, broken=None, mode="null"):
                     inputs[broken] = None if mode == "null" else 1.0
                 conn.execute("INSERT INTO pit_replay_snapshots (snapshot_date, sid, cap_tier, inputs_json, frozen_at) "
                              "VALUES (?, ?, ?, ?, 'x')", (_day(d), f"{t}{i:03d}", t, json.dumps(inputs)))
-    conn.execute("INSERT INTO daily_picks (sid, pick_date, cap_tier, final_score) VALUES ('S000', ?, 'LARGE', 0.5)", (TODAY,))
+    seed(conn, "daily_picks", [{"sid": "S000", "pick_date": TODAY, "cap_tier": "LARGE", "final_score": 0.5}])
 
 
 def _reset(conn):
     conn.execute("DELETE FROM pit_replay_snapshots")
-    conn.execute("DELETE FROM daily_picks")
+    clear(conn)
 
 
 @drill("FACTOR_INPUT")
@@ -151,14 +152,12 @@ def test_factor_input_notices_a_missing_freeze(conn):
 def _reshuffled(conn):
     sids = [f"S{i:03d}" for i in range(60)]
     tier = PICKABLE_TIERS[0]
-    for i, sid in enumerate(sids):
-        conn.execute("INSERT INTO daily_picks (sid, pick_date, cap_tier, final_score) VALUES (?, ?, ?, ?)",
-                     (sid, _day(1), tier, i / 60))
-        conn.execute("INSERT INTO daily_picks (sid, pick_date, cap_tier, final_score) VALUES (?, ?, ?, ?)",
-                     (sid, TODAY, tier, 1 - i / 60))             # the ranking turned upside down
+    seed(conn, "daily_picks", [{"sid": sid, "pick_date": _day(1), "cap_tier": tier, "final_score": i / 60} for i, sid in enumerate(sids)])
+    seed(conn, "daily_picks", [{"sid": sid, "pick_date": TODAY, "cap_tier": tier, "final_score": 1 - i / 60}
+                               for i, sid in enumerate(sids)])   # the ranking turned upside down
     v = _fires("PICKS_RESHUFFLED", conn)
     assert (v["status"], v["severity"]) == (FAIL, WARN) and tier in v["sample"]
-    conn.execute("UPDATE daily_picks SET final_score = 1 - final_score WHERE pick_date = ?", (TODAY,))
+    seed(conn, "daily_picks", [{"sid": sid, "pick_date": TODAY, "cap_tier": tier, "final_score": i / 60} for i, sid in enumerate(sids)])
     assert _fires("PICKS_RESHUFFLED", conn)["status"] == PASS
 
 
@@ -167,13 +166,12 @@ def _thin(conn):
     for tier in PICKABLE_TIERS:                           # 40 stocks a tier
         conn.executemany("INSERT INTO stocks (sid, ticker, name, sector, cap_tier) VALUES (?, ?, ?, 'Energy', ?)",
                          [(f"{tier}{i}", f"{tier}{i}", "x", tier) for i in range(40)])
-    rank = lambda tier, n: conn.executemany(
-        "INSERT INTO daily_picks (sid, pick_date, cap_tier, final_score) VALUES (?, ?, ?, 0.5)",
-        [(f"{tier}{i}", TODAY, tier) for i in range(n)])
+    rank = lambda tier, n: seed(conn, "daily_picks", [{"sid": f"{tier}{i}", "pick_date": TODAY, "cap_tier": tier, "final_score": 0.5}
+                                                      for i in range(n)])
     rank(PICKABLE_TIERS[0], 5)                            # 5 of 40 in one tier, nothing in the others
     v = _fires("DAILY_PICKS_COVERAGE_LOW", conn)
     assert (v["status"], v["severity"], v["n_bad"]) == (FAIL, CRITICAL, len(PICKABLE_TIERS))
-    conn.execute("DELETE FROM daily_picks")
+    clear(conn)
     for tier in PICKABLE_TIERS:
         rank(tier, 37)                                    # 37 of 40 ranked is not thin (a flat 100 was the old bar)
     assert _fires("DAILY_PICKS_COVERAGE_LOW", conn)["status"] == PASS

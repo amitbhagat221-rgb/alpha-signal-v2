@@ -80,23 +80,9 @@ STEP_SPECS = {s["name"]: s for s in PIPELINE_STEPS}
 
 def log_step(step_name: str, status: str, rows: int = None,
              started: str = None, error: str = None):
-    """Write a row to pipeline_log."""
-    now = datetime.now().isoformat(timespec="seconds")
-    duration = None
-    if started:
-        try:
-            t0 = datetime.fromisoformat(started)
-            duration = round((datetime.now() - t0).total_seconds(), 2)
-        except ValueError:
-            pass
-
-    with get_db() as conn:
-        conn.execute(
-            """INSERT INTO pipeline_log
-               (run_date, step_name, status, rows_affected, started_at, finished_at, duration_sec, error_message)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-            (date.today().isoformat(), step_name, status, rows, started, now, duration, error),
-        )
+    """Record a step attempt: pipeline_log and step_runs (steplog.log, plan 0030)."""
+    import steplog
+    steplog.log(step_name, status, rows=rows, started=started, error=error)
 
 
 UNDECLARED = {}   # step → {"reads": [...], "writes": [...]} seen at run time but not declared
@@ -110,8 +96,9 @@ def _check_declared(name, seen):
         spec = STEP_SPECS.get(name)
         if not spec or "reads" not in spec:
             return
-        declared_w = set(graph.writes(spec))
-        declared_r = set(spec["reads"]) | declared_w
+        from datamodel import compat
+        declared_w = {a for t in graph.writes(spec) for a in compat.aliases(t)}     # plan 0030: a view and its tables
+        declared_r = {a for t in spec["reads"] for a in compat.aliases(t)} | declared_w
         skip = graph.RUNNER_TABLES | {"pipeline_log"}
         r = sorted(seen["reads"] - declared_r - skip)
         w = sorted(seen["writes"] - declared_w - skip)
@@ -301,8 +288,9 @@ def _alert_critical(names):
     try:
         from db import read_sql
         from tools.health_report import send_email, send_ntfy
+        import steplog
         errs = read_sql(
-            "SELECT step_name, error_message FROM pipeline_log WHERE run_date = ? "
+            f"SELECT step_name, error_message FROM {steplog.source()} WHERE run_date = ? "
             "AND step_name IN ({}) AND status = 'FAILED' ORDER BY id".format(",".join("?" * len(names))),
             params=[date.today().isoformat(), *names])
         lines = [f"{r.step_name}: {(r.error_message or '')[:300]}" for r in errs.itertuples()] or names
@@ -318,10 +306,11 @@ def _alert_critical(names):
 
 def show_status(days: int = 1):
     """Print pipeline_log for recent runs."""
+    import steplog
     from db import read_sql
     df = read_sql(
         "SELECT run_date, step_name, status, rows_affected, duration_sec, error_message "
-        "FROM pipeline_log WHERE run_date >= date('now', ?) ORDER BY id",
+        f"FROM {steplog.source()} WHERE run_date >= date('now', ?) ORDER BY id",
         params=[f"-{days} days"],
     )
     if df.empty:

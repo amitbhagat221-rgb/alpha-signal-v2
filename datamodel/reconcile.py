@@ -58,6 +58,7 @@ RETIRED = {
     "quarterly_results_nse": "kept as-is: NSE XBRL quarterly results 2017-24 (plan 0025 5.1); joins fundamentals once the history harvest finishes",
     "multibagger_book": "kept as-is: plan 0026 the multibagger desk's candidate / held lists (Amit's decisions, written by hand)",
     "multibagger_book_log": "kept as-is: plan 0026 append-only history of every change to multibagger_book",
+    "data_quarantine": "kept as-is: plan 0032 stage 2 register of distrusted rows (tools/quarantine.py), Ops state",
     "sqlite_sequence": "SQLite internal",
 }
 
@@ -323,7 +324,8 @@ def checks(c):
     yield ("feed_checks", *_one(c, "SELECT COUNT(*) FROM (SELECT 1 FROM feed_checks GROUP BY check_kind, feed, COALESCE(route,''), run_date)"),
            *_one(c, "SELECT COUNT(*) FROM check_results WHERE check_id IN (SELECT catalog_id FROM catalog WHERE kind='check' AND name LIKE 'feed\\_%' ESCAPE '\\')"),
            None, None, "distinct (kind, feed, route, day)")
-    mirrors = [r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE '%\\_quarantine' ESCAPE '\\'")]
+    mirrors = [r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE '%\\_quarantine' ESCAPE '\\' "
+                                       "AND name <> 'data_quarantine'")]      # the plan 0032 register is not a write-contract mirror
     # the issue's detected_at is the legacy timestamp, so the same bound applies on both sides (2026-10-19: 308
     # broker_recommendations quarantines at 19:51, after the 05:34 sync)
     wm_ops = watermark(c, "ops")

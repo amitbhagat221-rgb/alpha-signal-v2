@@ -448,12 +448,14 @@ def compute(dry_run=False, top=None):
     # which leaves rows untouched if today's run drops a sid (gated out by
     # coverage). Without this, rank gaps + duplicate rank values from prior
     # runs accumulate in the table.
-    from db import get_db
+    # Plan 0030: the same rows go to runs + picks in the same transaction (dual write
+    # until the stage-1 drop commit; datamodel_reconcile is the gate).
+    from datamodel import decisions
     with get_db() as conn:
         conn.execute("DELETE FROM daily_picks WHERE pick_date = ?", (pick_date,))
-
-    rows = upsert_df(picks_out, "daily_picks")
-    print(f"\nSaved {rows} rows to daily_picks (date={pick_date})")
+        rows = upsert_df(picks_out, "daily_picks", conn=conn)
+        n_v3 = decisions.write_picks(conn, pick_date, picks_out)
+    print(f"\nSaved {rows} rows to daily_picks and {n_v3} to picks (date={pick_date})")
 
     return rows
 

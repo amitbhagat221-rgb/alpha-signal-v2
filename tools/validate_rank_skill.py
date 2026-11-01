@@ -16,10 +16,9 @@ Run:  python -m tools.validate_rank_skill
 """
 import argparse
 import math
-import sqlite3
 from datetime import date
 
-from config import DB_PATH as DB
+import db
 MIN_PERIODS = 6          # don't call anything "proven" on fewer independent windows than this
 
 
@@ -60,28 +59,27 @@ def _summary(spreads):
 
 
 def run(window_days):
-    db = sqlite3.connect(DB)
-    c = db.cursor()
-    tiers = [r[0] for r in c.execute(
+    # reads go through db.rows so the plan 0030 flag decides which table answers
+    tiers = [r["cap_tier"] for r in db.rows(
         "SELECT DISTINCT cap_tier FROM pick_outcomes WHERE window_days=? ORDER BY cap_tier",
-        (window_days,))]
+        [window_days])]
 
     print(f"\n=== DO TOP PICKS BEAT BOTTOM PICKS?  ({window_days}-day forward returns) ===\n")
     print("Spread = avg return of best-ranked decile MINUS worst-ranked decile.")
     print("Positive = the ranking works.  Around zero = the ranking is noise.\n")
 
     for tier in tiers:
-        dates = [r[0] for r in c.execute(
+        dates = [r["pick_date"] for r in db.rows(
             "SELECT DISTINCT pick_date FROM pick_outcomes WHERE window_days=? AND cap_tier=? ORDER BY pick_date",
-            (window_days, tier))]
+            [window_days, tier])]
 
         # spread on every date (overlapping) and on the independent subset
         per_date = {}
         for d in dates:
-            rows = c.execute(
+            rows = [(r["rank_at_pick"], r["fwd_return_pct"]) for r in db.rows(
                 "SELECT rank_at_pick, fwd_return_pct FROM pick_outcomes "
                 "WHERE window_days=? AND cap_tier=? AND pick_date=?",
-                (window_days, tier, d)).fetchall()
+                [window_days, tier, d])]
             dm = _decile_means(rows)
             if dm:
                 per_date[d] = dm[0] - dm[1]
@@ -115,7 +113,6 @@ def run(window_days):
 
     print("VERDICT GATE: invest in a tier only once its independent-view spread is")
     print("clearly positive (95% range above 0) on at least ~6 independent periods.\n")
-    db.close()
 
 
 if __name__ == "__main__":

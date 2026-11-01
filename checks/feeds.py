@@ -69,7 +69,8 @@ def volume_bands(steps):
     if not steps:
         return {}
     ph = ",".join("?" * len(steps))
-    hist = read_sql(f"""SELECT step_name AS step, started_at AS t, id AS ord, rows_affected AS rows FROM pipeline_log
+    import steplog
+    hist = read_sql(f"""SELECT step_name AS step, started_at AS t, id AS ord, rows_affected AS rows FROM {steplog.source()}
                         WHERE status = 'SUCCESS' AND rows_affected > 0 AND step_name IN ({ph})""", params=list(steps))
     try:
         ev = read_sql(f"""SELECT step, ts AS t, id AS ord, rows FROM run_events
@@ -122,8 +123,9 @@ def _latest_runs(names):
     if not names:
         return {}
     ph = ",".join("?" * len(names))
+    import steplog
     df = read_sql(f"""SELECT step_name, status, finished_at, started_at, rows_affected, error_message FROM (
-                        SELECT *, ROW_NUMBER() OVER (PARTITION BY step_name ORDER BY id DESC) rn FROM pipeline_log
+                        SELECT *, ROW_NUMBER() OVER (PARTITION BY step_name ORDER BY id DESC) rn FROM {steplog.source()}
                         WHERE step_name IN ({ph}) AND status IN ('SUCCESS', 'FAILED', 'COVERAGE_GAP', 'COVERAGE_SEVERE'))
                       WHERE rn = 1""", params=list(names))
     return {r["step_name"]: r for r in df.to_dict("records")}

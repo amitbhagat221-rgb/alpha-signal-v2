@@ -26,7 +26,7 @@ Plain functions over the step dicts (ADR 0004). Runner-owned tables
 """
 
 CADENCE_RANK = {"daily": 0, "weekly": 1, "monthly": 2, "quarterly": 3}
-RUNNER_TABLES = {"pipeline_log", "sqlite_sequence", "sqlite_master"}
+RUNNER_TABLES = {"pipeline_log", "runs", "step_runs", "sqlite_sequence", "sqlite_master"}   # the step log (steplog.py)
 EMAIL = "email"
 
 

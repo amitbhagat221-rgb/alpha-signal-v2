@@ -1439,9 +1439,10 @@ def db_summary():
     # Last successful pipeline run
     last_run = {"started_at": None, "run_date": None, "step_name": None, "status": None}
     try:
+        import steplog
         with get_db() as conn:
             row = conn.execute(
-                "SELECT run_date, step_name, status, started_at FROM pipeline_log "
+                f"SELECT run_date, step_name, status, started_at FROM {steplog.source()} "
                 "WHERE status IN ('SUCCESS','FAILED') ORDER BY started_at DESC LIMIT 1"
             ).fetchone()
             if row:

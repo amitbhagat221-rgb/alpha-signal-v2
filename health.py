@@ -153,7 +153,7 @@ def factor_completeness(tbl, count, dates, meta, profile, conn):
     if count == 0:
         return _factor("completeness", 0, "error", "Table is empty (0 rows)",
                        fix=f"Producer never ran. Check pipeline_log for {tbl}.",
-                       drill_sql=f"SELECT * FROM pipeline_log WHERE step_name LIKE '%{tbl.split('_')[0]}%' ORDER BY started_at DESC LIMIT 10",
+                       drill_sql=f"SELECT * FROM {__import__('steplog').source()} WHERE step_name LIKE '%{tbl.split('_')[0]}%' ORDER BY started_at DESC LIMIT 10",
                        weight=weight)
 
     if expected is None:

@@ -107,12 +107,11 @@ def build_sector_briefs(snapshot_date: str | None = None) -> int:
 
     If snapshot_date is None, anchors on the latest pick_date in daily_picks.
     """
-    with get_db() as conn:
-        if snapshot_date is None:
-            row = conn.execute("SELECT MAX(pick_date) FROM daily_picks").fetchone()
-            if not row or not row[0]:
-                raise RuntimeError("No daily_picks data — cannot compute sector briefs")
-            snapshot_date = row[0]
+    if snapshot_date is None:
+        import db
+        snapshot_date = db.scalar("SELECT MAX(pick_date) FROM daily_picks")      # through the read helper: plan 0030 views
+        if not snapshot_date:
+            raise RuntimeError("No daily_picks data — cannot compute sector briefs")
 
     # ── Universe scale ──
     base = read_sql("""

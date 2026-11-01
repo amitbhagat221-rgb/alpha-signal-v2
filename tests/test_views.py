@@ -8,6 +8,7 @@ import pytest
 import config
 import db
 import views
+from tests.v3seed import seed, v3_schema
 
 
 @pytest.fixture
@@ -34,6 +35,7 @@ def tmpdb(tmp_path, monkeypatch):
             status TEXT, rows_affected INTEGER, duration_sec REAL, error_message TEXT,
             started_at TEXT, finished_at TEXT);
     """)
+    v3_schema(c)                       # plan 0030: readers of daily_picks go through the v3 view
     c.commit()
     c.close()
     monkeypatch.setattr(db, "DB_PATH", path)
@@ -50,15 +52,14 @@ def _exec(path, sql, rows):
 def test_picks_one_gate(tmpdb):
     _exec(tmpdb, "INSERT INTO stocks (sid, ticker, cap_tier) VALUES (?,?,?)",
           [(s, s, "LARGE") for s in ("OK", "FAIL", "AVOID", "LEGACY", "WARN")])
-    _exec(tmpdb, "INSERT INTO daily_picks (sid, pick_date, final_score, rank, cap_tier, "
-                 "integrity_status, eligible_coverage) VALUES (?,?,?,?,?,?,?)", [
+    seed(tmpdb, "daily_picks", [dict(zip(("sid", "pick_date", "final_score", "rank", "cap_tier", "integrity_status", "eligible_coverage"), r)) for r in [
         ("OK", "2026-09-27", 0.9, 1, "LARGE", "PASS", 1.0),
         ("FAIL", "2026-09-27", 0.8, 2, "LARGE", "FAIL", 1.0),    # integrity FAIL → hidden
         ("AVOID", "2026-09-27", 0.7, 3, "LARGE", "PASS", 0.62),  # partial data → shown (the screener gated it)
         ("LEGACY", "2026-09-27", 0.6, 4, "LARGE", None, None),   # pre-integrity row → shown
         ("WARN", "2026-09-27", 0.5, 5, "LARGE", "WARN", 0.8),    # WARN is surfaced, not gated
         ("OK", "2026-09-26", 0.9, 1, "LARGE", "PASS", 1.0),
-    ])
+    ]])
     assert views.picks()["sid"].tolist() == ["OK", "AVOID", "LEGACY", "WARN"]
     assert views.picks(gated=False)["sid"].tolist() == ["OK", "FAIL", "AVOID", "LEGACY", "WARN"]
     assert views.picks("2026-09-26")["sid"].tolist() == ["OK"]
@@ -116,15 +117,20 @@ def test_pipeline_status_marks_aborted_and_prefers_completion(tmpdb):
     old = (now - timedelta(hours=2)).isoformat()
     fresh = now.isoformat()
     today = now.date().isoformat()
-    _exec(tmpdb, "INSERT INTO pipeline_log (run_date, step_name, status, started_at) VALUES (?,?,?,?)", [
-        (today, "a", "RUNNING", old), (today, "a", "SUCCESS", old),   # completion wins
-        (today, "b", "RUNNING", old),                                  # crashed → ABORTED
-        (today, "c", "RUNNING", fresh),                                # genuinely running
-        ("2020-01-01", "d", "FAILED", "2020-01-01T03:00:00"),          # outside 7 days
-        (today, "e", "RUNNING", old),                                  # a long step mid-run
-    ])
-    _exec(tmpdb, "INSERT INTO pipeline_log (run_date, step_name, status, started_at, duration_sec) "
-                 "VALUES (?,?,?,?,?)", [("2020-01-02", "e", "SUCCESS", "2020-01-02T03:00:00", 5400)])
+    import steplog
+    c = sqlite3.connect(tmpdb)
+    for d, step, status, started in [
+            (today, "a", "RUNNING", old), (today, "a", "SUCCESS", old),   # completion wins
+            (today, "b", "RUNNING", old),                                  # crashed → ABORTED
+            (today, "c", "RUNNING", fresh),                                # genuinely running
+            ("2020-01-01", "d", "FAILED", "2020-01-01T03:00:00"),          # outside 7 days
+            (today, "e", "RUNNING", old)]:                                 # a long step mid-run
+        steplog.log(step, status, started=started, run_date=d, conn=c)
+    steplog.log("e", "SUCCESS", started="2020-01-02T03:00:00", run_date="2020-01-02", conn=c)
+    c.execute("UPDATE pipeline_log SET duration_sec = 5400 WHERE run_date = '2020-01-02'")
+    c.execute("UPDATE step_runs SET attrs = json_set(attrs, '$.duration_sec', 5400) WHERE step = 'e' AND status = 'SUCCESS'")
+    c.commit()
+    c.close()
     st = {r["step_name"]: r["status"] for r in views.pipeline_status(7)}
     assert st == {"a": "SUCCESS", "b": "ABORTED", "c": "RUNNING", "e": "RUNNING"}
     assert views.step_status()["d"]["status"] == "FAILED"          # all history for /flow
@@ -256,8 +262,8 @@ def test_breakdown_rank_is_the_published_rank(tmpdb, monkeypatch):
         for s, rk, sc, m in [("GATED", 1, 0.9, 3.0), ("REDY", 2, 0.6, 2.0), ("LOW", 3, 0.1, 1.0)]])
     _exec(tmpdb, "INSERT INTO stocks (sid, ticker, name, cap_tier) VALUES (?,?,?,?)",
           [(s, s, s, "LARGE") for s in ("GATED", "REDY", "LOW")])
-    _exec(tmpdb, "INSERT INTO daily_picks (sid, pick_date, final_score, rank, cap_tier, integrity_status) "
-                 "VALUES (?,?,?,?,?,?)", [("REDY", day, 0.6, 1, "LARGE", "PASS"), ("LOW", day, 0.1, 2, "LARGE", "PASS")])
+    seed(tmpdb, "daily_picks", [dict(zip(("sid", "pick_date", "final_score", "rank", "cap_tier", "integrity_status"), r))
+                                for r in [("REDY", day, 0.6, 1, "LARGE", "PASS"), ("LOW", day, 0.1, 2, "LARGE", "PASS")]])
     monkeypatch.setattr(R, "_latest_pick_date", lambda: day)
     bd = R.pick_breakdown("REDY")
     assert bd["rank"] == views.stock("REDY")["rank"] == 1

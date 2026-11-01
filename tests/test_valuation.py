@@ -246,10 +246,16 @@ def test_golden_method_set_and_sanity(field):
 
 @pytest.mark.skipif(not DB_PATH.exists(), reason="no production DB (set ALPHA_DB)")
 def test_golden_pe_band_hand_recompute(field):
-    """KEIN: mid = median historical P/E x TTM EPS, recomputed here from the tables."""
-    ey = v._read("SELECT earnings_yield e FROM daily_snapshots_pit WHERE sid='KEIN' AND earnings_yield > 0")["e"]
-    q = v._read("SELECT eps FROM quarterly_income WHERE sid='KEIN' ORDER BY end_date DESC LIMIT 4")["eps"]
-    want = float(np.median(1 / ey)) * float(q.sum())
+    """KEIN: mid = median historical P/E x TTM EPS, recomputed here from the tables over the signal's own
+    window: snapshots up to the last price date and P/E under max_multiple (a replay snapshot dated after
+    the last price moved the all-rows median by 0.09 % on 2026-11-01 and blocked pushes)."""
+    as_of = str(v._read("SELECT MAX(date) d FROM stock_prices")["d"].iloc[0])
+    ey = v._read("SELECT earnings_yield e FROM daily_snapshots_pit WHERE sid='KEIN' AND earnings_yield > 0 "
+                 "AND snapshot_date <= ?", (as_of,))["e"]
+    pe = 1 / ey
+    pe = pe[pe < v.PARAMS["max_multiple"]]
+    q = v._read("SELECT eps FROM quarterly_income WHERE sid='KEIN' AND end_date <= ? ORDER BY end_date DESC LIMIT 4", (as_of,))["eps"]
+    want = float(np.median(pe)) * float(q.sum())
     got = field[(field["sid"] == "KEIN") & (field["method"] == "pe_band")]["mid"].iloc[0]
     assert got == pytest.approx(want, rel=1e-6)
 

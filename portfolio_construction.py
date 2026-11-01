@@ -714,10 +714,16 @@ def store(book):
     behind when a same-day rebuild changes the name set — then upserts."""
     asof = book["asof_date"].iloc[0]
     ph = ",".join("?" * len(book))
+    from datamodel import decisions
     with get_db() as conn:
         conn.execute(f"DELETE FROM portfolio_weights WHERE asof_date=? "
                      f"AND sid NOT IN ({ph})", [asof, *book["sid"].tolist()])
-        return upsert_df(book, "portfolio_weights", conn=conn)
+        n = upsert_df(book, "portfolio_weights", conn=conn)
+        # Plan 0030: the stored rows (created_at included) → runs + book_weights, same transaction
+        # (dual write until the stage-1 drop commit; datamodel_reconcile is the gate)
+        stored = pd.read_sql_query("SELECT * FROM portfolio_weights WHERE asof_date=?", conn, params=[asof])
+        decisions.write_book_weights(conn, asof, stored)
+        return n
 
 
 def backfill(since=None):

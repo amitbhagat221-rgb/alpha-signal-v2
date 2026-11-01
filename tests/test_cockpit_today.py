@@ -89,9 +89,6 @@ def tmpdb(tmp_path, monkeypatch):
         CREATE TABLE earnings_calendar (id INTEGER PRIMARY KEY, date TEXT, symbol TEXT, sid TEXT,
             name TEXT, purpose TEXT, bm_desc TEXT);
         INSERT INTO stocks VALUES ('A','AAA','A Ltd'),('B','BBB','B Ltd');
-        INSERT INTO portfolio_weights (asof_date, sid, weight, cap_tier, sector, rank) VALUES
-            ('2026-10-02','A',.5,'MID','X',1),('2026-10-02','B',.5,'MID','X',2),
-            ('2026-10-03','A',1.0,'MID','X',1);
         INSERT INTO forensic_scores VALUES ('A','2026-09-01',0,'LIKELY_MANIPULATOR',0,'DISTRESS',0),
             ('A','2026-10-01',0,'CLEAN',0,'SAFE',0),
             ('B','2026-09-01',0,'CLEAN',0,'SAFE',0),('B','2026-10-01',0,'LIKELY_MANIPULATOR',0,'GREY_ZONE',0);
@@ -99,6 +96,10 @@ def tmpdb(tmp_path, monkeypatch):
             ('2026-10-12','A','Financial Results'),('2026-10-14','A','Financial Results'),
             ('2026-10-13','B','Dividend'),('2026-10-30','B','Financial Results');
     """)
+    from tests.v3seed import seed, v3_schema
+    v3_schema(c)                       # plan 0030: book_history reads portfolio_weights through the v3 view
+    seed(c, "portfolio_weights", [dict(zip(("asof_date", "sid", "weight", "cap_tier", "sector", "rank"), r)) for r in
+                                  [("2026-10-02", "A", .5, "MID", "X", 1), ("2026-10-02", "B", .5, "MID", "X", 2), ("2026-10-03", "A", 1.0, "MID", "X", 1)]])
     c.commit()
     c.close()
     monkeypatch.setattr(db, "DB_PATH", path)

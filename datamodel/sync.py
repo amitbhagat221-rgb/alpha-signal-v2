@@ -33,6 +33,8 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import config  # noqa: E402
+from datamodel.decisions import git_sha  # noqa: E402
+from steplog import run_kind as _run_kind  # noqa: E402
 
 DB_PATH = config.DB_PATH
 MF_DB = DB_PATH.parent / "mf.db"
@@ -208,16 +210,6 @@ def sync_catalog(c):
 
 
 # ─────────────────────────── runs ───────────────────────────
-
-def git_sha():
-    try:
-        sha = subprocess.run(["git", "-C", str(ROOT), "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
-        dirty = subprocess.run(["git", "-C", str(ROOT), "status", "--porcelain", "--untracked-files=no"],
-                               capture_output=True, text=True).stdout.strip() != ""
-        return sha or None, int(dirty)
-    except Exception:
-        return None, None
-
 
 def start_sync_run(c):
     sha, dirty = git_sha()
@@ -1074,57 +1066,12 @@ def sync_features(c, run_id, full, since):
 # ─────────────────────────── decisions ───────────────────────────
 
 def sync_decisions(c, full, sync_run):
-    import factors  # noqa: F401
-    tiers = config.TIERS
-    sel_case = "CASE " + " ".join(f"WHEN d.cap_tier='{t}' THEN (d.rank <= {int(s.get('picks') or 0)})" for t, s in tiers.items()) + " ELSE 0 END"
-    dp = cols(c, "daily_picks")
-    attrs = [x for x in dp if x not in ("sid", "pick_date", "cap_tier", "rank", "final_score", "integrity_status", "uhs_score")]
-    win = "" if full else f"WHERE pick_date >= date('{TODAY}', '-{WINDOW_DAYS} day') OR pick_date NOT IN (SELECT as_of_date FROM runs WHERE kind='morning' AND EXISTS (SELECT 1 FROM picks p WHERE p.run_id=runs.run_id))"
+    """Since 2026-11-01 (plan 0030 stage 1 part 3) the producers write runs / picks / book_weights /
+    outcomes themselves (datamodel/decisions.py), so nothing is mirrored here and parity between the
+    legacy tables and v3 is the writers' gate. Left: the runs the replay docs hang off, today's run
+    provenance (code version, regime), the replay docs and the contributions."""
     with tx(c):
-        for src, dcol in (("daily_picks", "pick_date"), ("portfolio_weights", "asof_date"), ("pick_outcomes", "pick_date"),
-                          ("portfolio_outcomes", "asof_date"), ("pit_replay_snapshots", "snapshot_date")):
-            ensure_runs(c, "morning", f"SELECT DISTINCT {dcol} FROM {src}")
-        runs = "JOIN runs r ON r.kind='morning' AND r.as_of_date = d.pick_date"
-        c.execute("DROP TABLE IF EXISTS temp._pd")
-        c.execute(f"CREATE TEMP TABLE _pd AS SELECT DISTINCT pick_date AS d FROM daily_picks {win}")
-        c.execute("DELETE FROM picks WHERE run_id IN (SELECT r.run_id FROM runs r JOIN _pd ON r.kind='morning' AND r.as_of_date=_pd.d)")
-        n_p = c.execute(f"""INSERT INTO picks(run_id, entity_id, tier, rank, score, selected, gate, uhs, attrs)
-            SELECT r.run_id, e.entity_id, COALESCE(d.cap_tier, '?'), d.rank, d.final_score, {sel_case}, d.integrity_status, d.uhs_score,
-                   {jobj("d.", attrs)}
-            FROM daily_picks d {runs} JOIN entities e ON {SEC}=d.sid WHERE d.pick_date IN (SELECT d FROM _pd)""").rowcount
-        pw = [x for x in cols(c, "portfolio_weights") if x not in ("asof_date", "sid", "weight")]
-        c.execute("""DELETE FROM book_weights WHERE run_id IN (SELECT r.run_id FROM runs r WHERE r.kind='morning' AND r.as_of_date IN
-            (SELECT DISTINCT asof_date FROM portfolio_weights))""")
-        n_b = c.execute(f"""INSERT INTO book_weights(run_id, entity_id, weight, attrs)
-            SELECT r.run_id, e.entity_id, d.weight, {jobj("d.", pw)} FROM portfolio_weights d
-            JOIN runs r ON r.kind='morning' AND r.as_of_date=d.asof_date JOIN entities e ON {SEC}=d.sid""").rowcount
-        po = [x for x in cols(c, "pick_outcomes") if x not in ("sid", "pick_date", "window_days", "exit_date", "fwd_return_pct",
-                                                                 "bench_return_pct", "excess_return_pct", "computed_at")]
-        n_o = c.execute(f"""INSERT INTO outcomes(run_id, entity_id, horizon_days, start_date, end_date, ret, bench_ret, excess, attrs, computed_at)
-            SELECT r.run_id, e.entity_id, d.window_days, d.pick_date, d.exit_date, d.fwd_return_pct, d.bench_return_pct, d.excess_return_pct,
-                   {jobj("d.", po)}, COALESCE(d.computed_at, '{NOW}')
-            FROM pick_outcomes d JOIN runs r ON r.kind='morning' AND r.as_of_date=d.pick_date JOIN entities e ON {SEC}=d.sid WHERE true
-            ON CONFLICT(run_id, entity_id, horizon_days) DO UPDATE SET end_date=excluded.end_date, ret=excluded.ret,
-               bench_ret=excluded.bench_ret, excess=excluded.excess, attrs=excluded.attrs, computed_at=excluded.computed_at""").rowcount
-        pco = [x for x in cols(c, "portfolio_outcomes") if x not in ("asof_date", "window_days", "hrp_return_pct", "bench_return_pct",
-                                                                       "hrp_excess_pct", "computed_at")]
-        n_po = c.execute(f"""INSERT INTO outcomes(run_id, entity_id, horizon_days, start_date, ret, bench_ret, excess, attrs, computed_at)
-            SELECT r.run_id, (SELECT entity_id FROM entities WHERE kind='portfolio' AND key='book'), d.window_days, d.asof_date,
-                   d.hrp_return_pct, d.bench_return_pct, d.hrp_excess_pct, {jobj("d.", pco)}, COALESCE(d.computed_at, '{NOW}')
-            FROM portfolio_outcomes d JOIN runs r ON r.kind='morning' AND r.as_of_date=d.asof_date WHERE true
-            ON CONFLICT(run_id, entity_id, horizon_days) DO UPDATE SET ret=excluded.ret, bench_ret=excluded.bench_ret,
-               excess=excluded.excess, attrs=excluded.attrs, computed_at=excluded.computed_at""").rowcount
-        # outcomes the producer has since removed: compute_pick_outcomes deletes superseded rows (weekend/holiday pick
-        # dates, pairs the adjusted label rejects; 628534c, 2026-10-10) and the upserts above never delete
-        n_gone = c.execute(f"""DELETE FROM outcomes WHERE run_id IN (SELECT run_id FROM runs WHERE kind='morning')
-            AND entity_id IN (SELECT entity_id FROM entities WHERE kind='security') AND NOT EXISTS
-            (SELECT 1 FROM runs r JOIN entities e ON e.entity_id=outcomes.entity_id
-               JOIN pick_outcomes d ON d.sid=e.key AND d.pick_date=r.as_of_date AND d.window_days=outcomes.horizon_days
-             WHERE r.run_id=outcomes.run_id AND {SEC}=d.sid)""").rowcount
-        n_gone += c.execute("""DELETE FROM outcomes WHERE run_id IN (SELECT run_id FROM runs WHERE kind='morning')
-            AND entity_id = (SELECT entity_id FROM entities WHERE kind='portfolio' AND key='book') AND NOT EXISTS
-            (SELECT 1 FROM runs r JOIN portfolio_outcomes d ON d.asof_date=r.as_of_date AND d.window_days=outcomes.horizon_days
-             WHERE r.run_id=outcomes.run_id)""").rowcount
+        ensure_runs(c, "morning", "SELECT DISTINCT snapshot_date FROM pit_replay_snapshots")
         # today's official run carries the code version and the regime it ran under
         sha, dirty = git_sha()
         regime = c.execute("SELECT json_object('regime', regime, 'vix_latest', vix_latest, 'vix_20d_avg', vix_20d_avg, 'alloc_large', alloc_large, "
@@ -1133,8 +1080,7 @@ def sync_decisions(c, full, sync_run):
                   "WHERE kind='morning' AND as_of_date=?", (sha, dirty, regime[0] if regime else "null", TODAY))
     n_r = sync_replay_docs(c, full)
     n_c = sync_contributions(c, full)
-    log(f"decisions: picks {n_p}, book {n_b}, outcomes {n_o}+{n_po} (-{n_gone} removed upstream), replay docs {n_r}, "
-        f"contributions {n_c}")
+    log(f"decisions: replay docs {n_r}, contributions {n_c} (picks / book / outcomes are written by their producers)")
 
 
 def sync_replay_docs(c, full):
@@ -1187,7 +1133,7 @@ def sync_contributions(c, full):
             if col not in _META_COLS:
                 dfi[col] = pd.to_numeric(dfi[col], errors="coerce")
         scored = screener.score_universe(dfi.copy(), as_of=date.fromisoformat(d))
-        stored = pd.read_sql("SELECT sid, base_score FROM daily_picks WHERE pick_date=?", c, params=[d])
+        stored = pd.read_sql("SELECT sid, base_score FROM v3_daily_picks WHERE pick_date=?", c, params=[d])
         m = scored[["sid", "base_score"]].merge(stored, on="sid", suffixes=("", "_stored"))
         both = m.dropna(subset=["base_score", "base_score_stored"])
         # an empty read_sql / all-NULL column comes back object dtype, which np.isclose cannot take (a replay day with no
@@ -1283,19 +1229,14 @@ def sync_research(c):
 
 # ─────────────────────────── ops ───────────────────────────
 
-def _run_kind(step):
-    for p, k in (("watchdog_", "watchdog"), ("endpoint_audit_", "endpoint_audit")):
-        if step.startswith(p):
-            return k
-    return "morning"
-
-
 def sync_ops(c, full):
     with tx(c):
         # pipeline_log → runs + step_runs (terminal rows; a RUNNING row with no terminal twin is an orphan)
         last = c.execute("SELECT COALESCE(MAX(CAST(json_extract(attrs, '$.log_id') AS INTEGER)), 0) FROM step_runs "
                          "WHERE json_extract(attrs, '$.from')='pipeline_log'").fetchone()[0]
-        pl = pd.read_sql(f"SELECT * FROM pipeline_log WHERE id > {0 if full else last} ORDER BY id", c)
+        # always from the watermark, --full included: steplog.py writes the attempt itself with its log_id,
+        # so only rows a process on older code logged are left to carry (a full re-mirror would double them)
+        pl = pd.read_sql(f"SELECT * FROM pipeline_log WHERE id > {last} ORDER BY id", c)
         n_sr = 0
         if not pl.empty:
             term = pl[pl["status"] != "RUNNING"]
@@ -1407,7 +1348,7 @@ def sync_ops(c, full):
                                 AND r.row_key = json_array(t.sid, t.source_key, t.datum_class, t.snapshot_date)
                                 AND r.rule = 'trust:' || t.verdict_overall)
             ON CONFLICT(dataset, row_key, rule, detected_at) DO UPDATE SET resolved_at = NULL, resolution = NULL""").rowcount
-        for mirror in [r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE '%\\_quarantine' ESCAPE '\\'")]:
+        for mirror in [r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE '%\\_quarantine' ESCAPE '\\' AND name <> 'data_quarantine'")]:
             src = mirror[:-len("_quarantine")]
             mc = cols(c, mirror)
             pk = [r[1] for r in sorted(c.execute(f"PRAGMA table_info('{src}')"), key=lambda r: r[5]) if r[5] > 0] or [x for x in mc if not x.startswith("_q_")][:3]

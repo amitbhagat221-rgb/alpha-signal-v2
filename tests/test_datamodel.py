@@ -5,10 +5,13 @@ becomes a new version (the old one is kept), a re-tier closes the old tier row, 
 the parity check passes.
 """
 import sqlite3
+from datetime import date, timedelta
 
 import pytest
 
 import db
+
+YDAY = (date.today() - timedelta(days=1)).isoformat()
 
 
 @pytest.fixture()
@@ -28,6 +31,10 @@ def v3(tmp_path, monkeypatch):
         INSERT INTO daily_picks (sid, pick_date, final_score, rank, base_score, cap_tier, sector)
             VALUES ('AAA', date('now','-1 day'), 0.8, 1, 0.8, 'LARGE', 'IT');
     """)
+    # plan 0030 stage 1 part 3: the producers write picks / outcomes themselves; the sync no longer mirrors them
+    from datamodel import decisions
+    decisions.write_picks(conn, YDAY, [{"sid": "AAA", "pick_date": YDAY, "final_score": 0.8, "rank": 1, "base_score": 0.8,
+                                        "cap_tier": "LARGE", "sector": "IT"}])
     conn.commit()
     conn.close()
     from datamodel import sync
@@ -206,14 +213,18 @@ def test_producer_removals_and_shared_keys_reach_the_mirror(v3):
     c = sqlite3.connect(path)
     c.executescript("""
         INSERT INTO mf_calendar_returns (scheme_code, year, ret_pct, bench_ret_pct) VALUES ('119551', 2024, 10.0, 8.0), ('119551', 2025, 5.0, 4.0);
-        INSERT INTO pick_outcomes (sid, pick_date, window_days, cap_tier, fwd_return_pct) VALUES
-            ('AAA', date('now','-1 day'), 20, 'LARGE', 2.5), ('AAA', date('now','-1 day'), 63, 'LARGE', 4.0);
+        INSERT INTO pick_outcomes (sid, pick_date, window_days, cap_tier, fwd_return_pct, computed_at) VALUES
+            ('AAA', date('now','-1 day'), 20, 'LARGE', 2.5, 't1'), ('AAA', date('now','-1 day'), 63, 'LARGE', 4.0, 't1');
         INSERT INTO portfolio_outcomes (asof_date, window_days, hrp_return_pct) VALUES (date('now','-1 day'), 20, 1.5), (date('now','-1 day'), 63, 3.0);
         INSERT INTO trust_verdicts (sid, source_table, source_key, datum_class, snapshot_date, verdict_overall) VALUES
             ('149329', 'mf_holdings', '{"etm_id":42303}', 'mf_holding', '2026-10-10', 'TRUSTED'),
             ('149327', 'mf_holdings', '{"etm_id":42303}', 'mf_holding', '2026-10-10', 'TRUSTED'),
             ('AAA', 'stock_prices', '{"date":"2026-10-09"}', 'close', '2026-10-10', 'TRUSTED');
     """)
+    from datamodel import decisions
+    po = [{"sid": "AAA", "pick_date": YDAY, "window_days": w, "cap_tier": "LARGE", "fwd_return_pct": r, "computed_at": "t1"} for w, r in ((20, 2.5), (63, 4.0))]
+    decisions.write_pick_outcomes(c, po)
+    decisions.write_portfolio_outcomes(c, [{"asof_date": YDAY, "window_days": w, "hrp_return_pct": r} for w, r in ((20, 1.5), (63, 3.0))])
     c.commit()
     assert sync.main([]) == 0
     from datamodel import reconcile
@@ -225,6 +236,9 @@ def test_producer_removals_and_shared_keys_reach_the_mirror(v3):
         DELETE FROM portfolio_outcomes WHERE window_days = 63;
         UPDATE trust_verdicts SET verdict_overall = 'QUARANTINED' WHERE sid = 'AAA';
     """)
+    # the producer's rerun: window 20 recomputed, the 63-day rows superseded (compute_pick_outcomes); the book's 63 removed
+    decisions.write_pick_outcomes(c, [dict(po[0], computed_at="t2")], superseded_before="t2")
+    c.execute("DELETE FROM outcomes WHERE horizon_days = 63 AND entity_id = (SELECT entity_id FROM entities WHERE kind='portfolio')")
     c.commit()
     c.close()
     assert sync.main([]) == 0

@@ -142,8 +142,14 @@ def compute(windows=DEFAULT_WINDOWS):
         print("⚠ no matured books yet (need ≥1 window of forward prices)")
         return 0
     out = pd.DataFrame(rows)
-    n = upsert_df(out, "portfolio_outcomes")
-    print(f"✓ wrote/updated {n} portfolio_outcomes rows")
+    # Plan 0030: the same rows → runs + outcomes (book entity), same transaction (dual write
+    # until the stage-1 drop commit; datamodel_reconcile is the gate).
+    from db import get_db
+    from datamodel import decisions
+    with get_db() as conn:
+        n = upsert_df(out, "portfolio_outcomes", conn=conn)
+        n_v3 = decisions.write_portfolio_outcomes(conn, out)
+    print(f"✓ wrote/updated {n} portfolio_outcomes rows ({n_v3} outcomes)")
     return n
 
 

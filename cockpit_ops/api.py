@@ -561,8 +561,9 @@ def rerun_step(step_name: str) -> dict:
     if step_name not in valid:
         return {"ok": False, "error": f"unknown step: {step_name}"}
 
+    import steplog
     recent = db.scalar(
-        """SELECT started_at FROM pipeline_log
+        f"""SELECT started_at FROM {steplog.source()}
            WHERE step_name = ? AND status = 'RUNNING'
            ORDER BY id DESC LIMIT 1""",
         [step_name],
@@ -634,7 +635,8 @@ def _drilldown(issue):
     """('/sql?…', label) for an issue, or (None, None)."""
     code, target = issue["code"], issue["target"]
     if code.startswith("PIPELINE_"):
-        sql = ("SELECT run_date, status, started_at, error_message FROM pipeline_log "
+        import steplog
+        sql = (f"SELECT run_date, status, started_at, error_message FROM {steplog.source()} "
                f"WHERE step_name='{target}' ORDER BY id DESC LIMIT 20")
         return f"/sql?q={sql}", "Last 20 runs →"
     if code.startswith("FEED_"):

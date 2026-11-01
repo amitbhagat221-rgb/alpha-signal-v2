@@ -130,13 +130,8 @@ def _log_audit_result(endpoint, n_empty, n_eligible, sample_sid, n_errors=0, n_i
                + (f" + {n_errors} raised exceptions" if n_errors else "")
                + f" — sample: {sample_sid}")
         status = "FAILED"
-    with get_db() as conn:
-        conn.execute(
-            """INSERT INTO pipeline_log
-               (run_date, step_name, status, started_at, finished_at, error_message)
-               VALUES (date('now'), ?, ?, ?, ?, ?)""",
-            (f"endpoint_audit_{endpoint}", status, now, now, msg),
-        )
+    import steplog
+    steplog.log(f"endpoint_audit_{endpoint}", status, started=now, error=msg)
 
 
 def audit(sample_size=30, json_output=False):

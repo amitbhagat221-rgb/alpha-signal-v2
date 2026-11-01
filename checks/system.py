@@ -165,7 +165,8 @@ def pipeline_facts(since_days=1):
     from config import RETIRED_STEPS
     out = {"last_run_date": None, "last_run_status": None, "n_steps": 0,
            "failed_steps_today": [], "failed_streaks": [], "retired_ran": retired_runs()}
-    last_date = db.scalar("SELECT MAX(run_date) FROM pipeline_log")
+    import steplog
+    last_date = db.scalar(f"SELECT MAX(run_date) FROM {steplog.source()}")
     if last_date is None:
         return out
     out["last_run_date"] = last_date
@@ -196,12 +197,12 @@ def pipeline_facts(since_days=1):
     # Failure streaks: same step failing N+ days in a row AND not yet recovered.
     # A step that failed Mon+Tue but succeeded Wed is historical noise, not actionable.
     streaks = read_sql(
-        """
+        f"""
         WITH latest_status AS (
             SELECT step_name,
                    status,
                    ROW_NUMBER() OVER (PARTITION BY step_name ORDER BY id DESC) AS rn
-            FROM pipeline_log
+            FROM {steplog.source()}
             WHERE status IN ('SUCCESS', 'FAILED')
         ),
         currently_broken AS (
@@ -210,7 +211,7 @@ def pipeline_facts(since_days=1):
         SELECT pl.step_name,
                COUNT(DISTINCT pl.run_date) AS n_days,
                MAX(pl.error_message) AS sample_error
-        FROM pipeline_log pl
+        FROM {steplog.source()} pl
         JOIN currently_broken cb ON cb.step_name = pl.step_name
         WHERE pl.status = 'FAILED'
           AND pl.run_date >= date('now', ?)
@@ -238,11 +239,12 @@ def pipeline_facts(since_days=1):
 def retired_runs():
     """Steps in config.RETIRED_STEPS that logged a run AFTER their retirement date — a pipeline_log
     row (run_date) or a run_events row (ts) — newest first: [{step, since, ref, last, n_runs, run_id}]."""
+    import steplog
     from config import RETIRED_STEPS
     out = []
     for step, r in RETIRED_STEPS.items():
         logged = db.rows("SELECT MAX(COALESCE(started_at, run_date)) AS last, COUNT(DISTINCT run_date) AS n "
-                         "FROM pipeline_log WHERE step_name = ? AND run_date > ?", [step, r["since"]])[0]
+                         f"FROM {steplog.source()} WHERE step_name = ? AND run_date > ?", [step, r["since"]])[0]
         events = db.rows("SELECT MAX(ts) AS last, COUNT(DISTINCT run_id) AS n, MAX(run_id) AS run_id "
                          "FROM run_events WHERE step = ? AND substr(ts, 1, 10) > ?", [step, r["since"]])[0]
         if logged["n"] or events["n"]:
@@ -285,8 +287,9 @@ def pipeline_verdicts(p):
 def watchdog_facts():
     """Last watchdog run summary from pipeline_log."""
     out = {"last_run": None, "age_hours": None, "healed": 0, "failed": 0, "skipped": 0}
+    import steplog
     df = read_sql(
-        "SELECT step_name, status, started_at FROM pipeline_log "
+        f"SELECT step_name, status, started_at FROM {steplog.source()} "
         "WHERE step_name LIKE 'watchdog_%' "
         "ORDER BY started_at DESC LIMIT 100"
     )
@@ -527,12 +530,13 @@ def dossier_verdicts(d):
 
 def endpoint_facts():
     """The cockpit endpoint audits whose newest run did not pass."""
+    import steplog
     df = read_sql(
-        """
+        f"""
         SELECT step_name, status, error_message FROM (
             SELECT step_name, status, error_message,
                    ROW_NUMBER() OVER (PARTITION BY step_name ORDER BY id DESC) AS rn
-            FROM pipeline_log WHERE step_name LIKE 'endpoint_audit_%')
+            FROM {steplog.source()} WHERE step_name LIKE 'endpoint_audit_%')
         WHERE rn = 1 AND status != 'SUCCESS'
         """)
     return {"rows": [{"endpoint": r["step_name"][len("endpoint_audit_"):], "status": r["status"],

@@ -315,9 +315,9 @@ def test_recovered_step_is_not_a_failure(temp_db):
     from checks import system
     today = date.today().isoformat()
     conn = sqlite3.connect(temp_db)
-    rows = [("healed", "FAILED", "boom"), ("healed", "SUCCESS", None), ("broken", "FAILED", "boom")]
-    conn.executemany("INSERT INTO pipeline_log (run_date, step_name, status, started_at, finished_at, error_message) "
-                     f"VALUES ('{today}', ?, ?, '{today}T03:00:00', '{today}T03:01:00', ?)", rows)
+    import steplog
+    for step, status, err in [("healed", "FAILED", "boom"), ("healed", "SUCCESS", None), ("broken", "FAILED", "boom")]:
+        steplog.log(step, status, started=f"{today}T03:00:00", error=err, run_date=today, conn=conn)
     conn.commit()
     conn.close()
     p = system.pipeline_facts(1)
@@ -335,10 +335,11 @@ def test_a_retired_step_is_history_until_it_runs_again(temp_db, monkeypatch):
     since = (today - timedelta(days=1)).isoformat()
     monkeypatch.setitem(config.RETIRED_STEPS, "cron_gone", {"since": since, "ref": "ADR 0000", "why": "w"})
     days = [(today - timedelta(days=d)).isoformat() for d in (1, 2, 3)]
+    import steplog
     conn = sqlite3.connect(temp_db)
-    conn.executemany("INSERT INTO pipeline_log (run_date, step_name, status, started_at, finished_at, error_message) "
-                     "VALUES (?, ?, 'FAILED', ? || 'T14:00:00', ? || 'T14:01:00', 'boom')",
-                     [(d, n, d, d) for d in days for n in ("cron_gone", "cron_live")])
+    for d in days:
+        for n in ("cron_gone", "cron_live"):
+            steplog.log(n, "FAILED", started=f"{d}T14:00:00", error="boom", run_date=d, conn=conn)
     conn.commit()
     p = system.pipeline_facts(1)
     assert [s["step"] for s in p["failed_streaks"]] == ["cron_live"] and p["retired_ran"] == []
@@ -346,8 +347,7 @@ def test_a_retired_step_is_history_until_it_runs_again(temp_db, monkeypatch):
     gone = [r for r in views.pipeline_status(7) if r["step_name"] == "cron_gone"]
     assert gone and all(r["retired"] == f"retired ({since}, ADR 0000)" for r in gone)
 
-    conn.execute("INSERT INTO pipeline_log (run_date, step_name, status, started_at, finished_at) "
-                 "VALUES (?, 'cron_gone', 'SUCCESS', ? || 'T14:00:00', ? || 'T14:01:00')", [today.isoformat()] * 3)
+    steplog.log("cron_gone", "SUCCESS", started=f"{today.isoformat()}T14:00:00", run_date=today.isoformat(), conn=conn)
     conn.commit()
     conn.close()
     p = system.pipeline_facts(1)

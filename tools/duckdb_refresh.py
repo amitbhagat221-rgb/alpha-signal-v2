@@ -35,9 +35,11 @@ def refresh() -> dict:
     con.execute(f"ATTACH '{SQLITE_PATH}' AS s (TYPE sqlite, READ_ONLY)")
 
     per_table = {}
+    from datamodel import compat
     for tbl in MIRROR_TABLES:
         t_tbl = time.perf_counter()
-        con.execute(f'CREATE TABLE "{tbl}" AS SELECT * FROM s."{tbl}"')
+        # plan 0030: a switched concept's table is copied from its compatibility view, under the legacy name
+        con.execute(f'CREATE TABLE "{tbl}" AS SELECT * FROM s."{compat.resolve(tbl)}"')
         n = con.execute(f'SELECT COUNT(*) FROM "{tbl}"').fetchone()[0]
         per_table[tbl] = {"rows": n, "secs": round(time.perf_counter() - t_tbl, 2)}
 

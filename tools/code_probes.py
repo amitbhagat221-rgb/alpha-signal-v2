@@ -104,7 +104,8 @@ def _ran_recently(conn, stem, days=STICKER_DAYS):
     if conn is None:
         return 0
     try:
-        return conn.execute("SELECT COUNT(*) FROM pipeline_log WHERE run_date >= date('now', ?) AND "
+        import steplog
+        return conn.execute(f"SELECT COUNT(*) FROM {steplog.source()} WHERE run_date >= date('now', ?) AND "
                             "(step_name = ? OR step_name = ? OR step_name LIKE ?)",
                             (f"-{days} day", stem, f"cron_{stem}", f"%{stem}%")).fetchone()[0]
     except sqlite3.Error:
@@ -226,12 +227,14 @@ def flaky_steps(conn, days=FLAKY_DAYS):
     """Pipeline steps that FAILED and then SUCCEEDED on the same run date."""
     if conn is None:
         return []
+    import steplog
+    src = steplog.source()
     try:
-        rows = conn.execute("""
+        rows = conn.execute(f"""
             SELECT f.step_name, COUNT(DISTINCT f.run_date) AS days_flaky, MAX(f.run_date) AS last_day,
-                   COUNT(DISTINCT f.run_date) * 1.0 / NULLIF((SELECT COUNT(DISTINCT run_date) FROM pipeline_log
+                   COUNT(DISTINCT f.run_date) * 1.0 / NULLIF((SELECT COUNT(DISTINCT run_date) FROM {src}
                                                                WHERE step_name = f.step_name AND run_date >= date('now', ?)), 0) AS share
-            FROM pipeline_log f JOIN pipeline_log s ON s.step_name = f.step_name AND s.run_date = f.run_date
+            FROM {src} f JOIN {src} s ON s.step_name = f.step_name AND s.run_date = f.run_date
                  AND s.status = 'SUCCESS' AND s.id > f.id
             WHERE f.status = 'FAILED' AND f.run_date >= date('now', ?)
             GROUP BY f.step_name ORDER BY days_flaky DESC""", (f"-{days} day", f"-{days} day")).fetchall()

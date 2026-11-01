@@ -7,9 +7,9 @@ changes its SQL: when `config.DATA_MODEL[<concept>]` is "new", the read helpers 
 `db` (read_sql, rows, one, scalar) and `views.native_rows` rewrite the legacy name to
 the view name. Flip the flag back and every reader is on the legacy table again.
 
-Writers are not touched: the producers keep writing the legacy tables and
-`datamodel/sync.py` mirrors them, until the stage's drop commit (≥ 14 days after the
-switch, after a Parquet export).
+The producers of a switched concept write both sides (`datamodel/decisions.py`, in the
+legacy write's transaction) until the stage's drop commit (≥ 14 days after the writers
+moved, after a Parquet export); `datamodel_reconcile` is the gate between the two.
 
     python -m datamodel.compat --ensure      # create the views on config.DB_PATH (idempotent DDL; db.init_db does it too)
     python -m datamodel.gate decisions       # parity: legacy vs view on the newest dates
@@ -52,6 +52,22 @@ def body(view):
 
 
 CONCEPTS = tuple(VIEWS)
+
+# view → the v3 tables it reads: what the SQL tracer sees for a read through the view, and the
+# tables the legacy table's producer dual-writes (datamodel/decisions.py)
+BASES = {
+    "v3_daily_picks": ("runs", "picks", "entities"),
+    "v3_pick_outcomes": ("runs", "outcomes", "entities"),
+    "v3_portfolio_weights": ("runs", "book_weights", "entities"),
+    "v3_portfolio_outcomes": ("runs", "outcomes", "entities"),
+}
+
+
+def aliases(table):
+    """Every name a step's declared read or write of `table` can show up as in the SQL trace:
+    the table, its view and the v3 tables behind the view."""
+    v = view_name(table)
+    return {table} | ({v, *BASES[v]} if v else set())
 
 
 def legacy_tables(concept):
