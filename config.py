@@ -1126,6 +1126,17 @@ FILE_OUTPUTS = [
         "frequency":     "monthly",
         "producer":      "tools.mb_paper",
     },
+    {
+        # Paper books (Amit 2026-11-01): six strategies, ₹10 L each from June 2026, every weight option, for the
+        # Ops page /paper-books. Monthly after the paper sleeve's score refresh (`run.sh paper_books`).
+        "virtual_table": "_file_paper_books",
+        "glob":          "output/paper_books/latest.json",
+        "freshness_field": "computed",
+        "source":        "tools/paper_books.py (run.sh paper_books, monthly)",
+        "data_freq":     "monthly",
+        "frequency":     "monthly",
+        "producer":      "tools.paper_books",
+    },
 ]
 
 

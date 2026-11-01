@@ -64,6 +64,7 @@ COMPARE = {
         "/org#work": "/org#work",
         "/org#memos": "/org#memos",
         "/org#org": "/org#org",
+        "/paper-books": "/paper-books",
         "/options": "/options",                     # placeholder on the preview: the live /options page
         "/resources": "/resources",
         "/resources#options-primer": "/resources#options-primer",

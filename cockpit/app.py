@@ -257,11 +257,13 @@ def book_tab(request: Request, tab: str):
 
 @app.get("/book", response_class=HTMLResponse)
 def book_page(request: Request):
-    """The HRP sized book, the real Zerodha holdings, the Small paper sleeve, risk and track record (tabs: pages.py)."""
+    """The real Zerodha holdings and the published picks' track record (tabs: pages.py). The sized book,
+    Ways to weight, Risk and Paper sleeve tabs were dropped 2026-11-01; the strategies run as paper books on
+    the Ops console (/paper-books). `book` stays in the context: the Zerodha tab compares the account to it."""
     return templates.TemplateResponse(request, "book.html", {
         "page": "book", "tabs": next(p["tabs"] for p in pages.PAGES if p["id"] == "book"),
         "book": book.get_book(), "zerodha": book.get_zerodha(), "past_year": book.get_past_year(),
-        "risk": book.get_risk(), "track": book.get_track_record(), "sleeve": views.paper_sleeve(),
+        "track": book.get_track_record(),
     })
 
 

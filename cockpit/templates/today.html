@@ -90,7 +90,7 @@
 
 {% if t.sleeve_review %}{% set sr = t.sleeve_review %}
 <p class="td-note">Small paper sleeve reviewed {{ sr.date|short_date }}: {{ sr.bought }} in, {{ sr.sold }} out{% if sr.status != 'ACTIVE' %}, <span class="score-red">paused by the kill switch</span>{% endif %}. Paper only.
-    <a href="/book#sleeve">See the sleeve &rarr;</a></p>
+    <a href="{{ ops_url('/paper-books') }}">See the paper books &rarr;</a></p>
 {% endif %}
 
 {# ── checks ── #}

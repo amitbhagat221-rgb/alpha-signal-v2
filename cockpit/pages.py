@@ -49,10 +49,9 @@ PAGES = [
     {"path": "/multibagger", "id": "multibagger", "title": "Multibagger", "subtitle": "Thesis list, candidates, held, valuation",
      "icon": "trending-up", "section": "Analysis", "short": "Multibagger",
      "tabs": MULTIBAGGER_TABS},
-    {"path": "/book", "id": "book", "title": "Book", "subtitle": "Holdings, risk, results",
+    {"path": "/book", "id": "book", "title": "Book", "subtitle": "Your Zerodha account, the picks' track record",
      "icon": "briefcase", "section": "Analysis", "mobile": 4, "short": "Book", "also": ["portfolio", "model-outcomes"],
-     "tabs": [("book", "The book"), ("zerodha", "Zerodha"), ("sleeve", "Paper sleeve"), ("methods", "Ways to weight"), ("risk", "Risk"),
-              ("track-record", "Track record")]},
+     "tabs": [("zerodha", "Zerodha"), ("track-record", "Track record")]},   # the paper strategies: Ops /paper-books (2026-11-01)
     {"path": "/model", "id": "model", "title": "Model", "subtitle": "How the model is doing",
      "icon": "sliders", "section": "Analysis", "short": "Model",
      "tabs": [("health", "Health"), ("evidence", "Evidence"), ("library", "Library"), ("rules", "Rules")]},

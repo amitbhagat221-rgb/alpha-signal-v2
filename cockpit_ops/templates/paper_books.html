@@ -1,0 +1,217 @@
+{# /paper-books — six strategies as paper books of ₹10 lakh each from June 2026 (tools/paper_books.py, monthly).
+   Data: views.paper_books() ← output/paper_books/latest.json. Every weight option is precomputed; the switch is
+   client-side (the JSON is embedded once). No money is at risk anywhere on this page. #}
+{% extends "ops_base.html" %}
+{% block title %}{{ page_title("Paper books") }}{% endblock %}
+
+{% block content %}
+{% include "_options_styles.html" %}
+<style>
+  .pb-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin: 12px 0; }
+  .pb-tile { background: var(--bg-card-hover, rgba(255,255,255,0.03)); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; }
+  .pb-tile .n { font-size: 20px; font-weight: 800; font-family: 'JetBrains Mono', monospace; line-height: 1.1; }
+  .pb-tile .l { font-size: 11px; color: var(--text-secondary); margin-top: 3px; line-height: 1.35; }
+  .pb-head { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: baseline; }
+  .pb-head h2 { margin: 0; font-size: 17px; }
+  .pb-rule { font-size: 12px; color: var(--text-secondary); line-height: 1.55; margin: 6px 0 0; }
+  .pb-opts { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0 4px; }
+  .pb-opt { border: 1px solid var(--border); background: transparent; color: var(--text-secondary); padding: 6px 12px; border-radius: 8px; cursor: pointer; font: inherit; font-size: 12px; font-weight: 700; }
+  .pb-opt[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .pb-why { font-size: 12px; color: var(--text-secondary); line-height: 1.5; min-height: 18px; }
+  .pb-chart { position: relative; margin: 10px 0 4px; }
+  .pb-chart svg { width: 100%; height: 190px; display: block; overflow: visible; }
+  .pb-chart .grid line { stroke: var(--border); stroke-width: 1; }
+  .pb-chart .axis text { fill: var(--text-muted); font-size: 10px; font-family: 'JetBrains Mono', monospace; }
+  .pb-chart .book { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linejoin: round; }
+  .pb-chart .bench { fill: none; stroke: var(--text-muted); stroke-width: 2; stroke-dasharray: 5 4; stroke-linejoin: round; }
+  .pb-chart .dot { stroke: var(--bg-card); stroke-width: 2; }
+  .pb-chart .dot.book { fill: var(--accent); } .pb-chart .dot.bench { fill: var(--text-muted); }
+  .pb-chart .cross { stroke: var(--text-muted); stroke-width: 1; stroke-dasharray: 2 3; }
+  .pb-tip { position: absolute; pointer-events: none; background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; font-size: 11px; line-height: 1.5; font-family: 'JetBrains Mono', monospace; white-space: nowrap; box-shadow: 0 4px 14px rgba(0,0,0,0.25); display: none; z-index: 2; }
+  .pb-legend { display: flex; gap: 16px; font-size: 11px; color: var(--text-secondary); margin-top: 2px; }
+  .pb-legend i { display: inline-block; width: 16px; height: 0; border-top: 2px solid var(--accent); vertical-align: middle; margin-right: 6px; }
+  .pb-legend i.bench { border-top-style: dashed; border-top-color: var(--text-muted); }
+  .pb-hold { min-width: 0; } .pb-trades { margin-top: 4px; }
+  .pb-two { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 16px; }
+  .pb-sum td:first-child, .pb-sum th:first-child { font-family: inherit; }
+  .pb-sum td b { font-family: inherit; }
+  .pb-small { font-size: 11px; color: var(--text-muted); }
+  .pb-pos { color: var(--green); } .pb-neg { color: var(--red); }
+  .pb-details > summary { cursor: pointer; font-size: 12px; font-weight: 700; color: var(--accent); padding: 8px 0; }
+  .pb-eff li { margin: 4px 0; line-height: 1.5; }
+  .pb-def dt { font-weight: 700; font-size: 12px; margin-top: 8px; } .pb-def dd { margin: 2px 0 0; font-size: 12px; color: var(--text-secondary); line-height: 1.5; }
+  @media (max-width: 900px) { .pb-two { grid-template-columns: 1fr; } }
+  @media (max-width: 768px) { .pb-hide-sm { display: none; } .pb-tile .n { font-size: 17px; } }
+</style>
+
+<div class="section-title">Paper books</div>
+{% if not d %}
+<div class="section-desc">Six strategies, ₹10 lakh each, bought on paper in June 2026. No report yet: run <code class="mono">python -m tools.paper_books</code> once (monthly after the paper sleeve's score refresh) and this page fills.</div>
+{% else %}
+<div class="section-desc">Six strategies, <b>₹{{ (d.capital / 100000)|round|int }} lakh each</b>, bought on paper at the close of {{ d.start|short_date }} 2026 and marked at the close of {{ d.asof|long_date }}.
+  Each book is rebalanced once a month on the first trading day. Every trade pays Zerodha's real charges (STT 0.1 % each way, stamp, exchange, DP) plus half the bid-ask spread and
+  price impact for the stock's own liquidity; the tax line is 20.8 % short-term capital gains (every holding is under a year). No money is at risk.
+  {% if d.stale %}<span class="ob-bad">Stale: the monthly refresh was missed ({{ d.age_days }} days old).</span>{% endif %}</div>
+
+<div class="ob-card">
+  <div class="ob-row"><b>All six at a glance</b> <span class="ob-muted">default option of each book · {{ d.start|short_date }} → {{ d.asof|short_date }} · returns on ₹10 L</span></div>
+  <div class="ob-scroll"><table class="ob-table pb-sum" id="pb-summary">
+    <thead><tr><th>Book</th><th class="pb-hide-sm">Benchmark</th><th>Return</th><th>Index</th><th>Excess</th><th>Rotations</th><th class="pb-hide-sm">Turnover</th><th>STT</th><th class="pb-hide-sm">All costs</th><th>STCG if sold</th><th>After tax</th><th class="pb-hide-sm">Hit rate</th></tr></thead>
+    <tbody></tbody>
+  </table></div>
+  <p class="pb-small" style="margin: 8px 0 0;">Excess = return minus the benchmark. After tax = if every holding were sold today and the short-term gain taxed; a book under water pays no tax. Hit rate = share of names (closed and open) that are up.
+    Five months is one market window, not a verdict: the backtests behind each rule are quoted on its card.</p>
+</div>
+
+<div id="pb-books"></div>
+
+<div class="ob-card">
+  <b>What the window says about the model</b>
+  <ul class="pb-eff" id="pb-efficacy" style="margin: 8px 0 0; padding-left: 18px; font-size: 12px; color: var(--text-secondary);"></ul>
+</div>
+
+<div class="ob-card">
+  <b>How to read the numbers</b>
+  <dl class="pb-def" style="margin: 4px 0 0;">
+    <dt>Rotation</dt><dd>A monthly review at which the book traded (a name sold, a name bought, or both). The June start is not counted. Turnover is the value sold over the window as a share of the ₹10 L, so 200 % means the book replaced itself twice.</dd>
+    <dt>STT and all costs</dt><dd>Securities Transaction Tax is 0.1 % of every buy and every sell on delivery. "All costs" adds the other statutory charges (stamp duty on buys, exchange and SEBI fees, the per-sell DP charge), half the bid-ask spread and square-root price impact at the stock's own 20-day traded value (the cost model calibrated on the account's real fills, plan 0024). The NAV already carries all of it.</dd>
+    <dt>STCG</dt><dd>Short-term capital gains tax: 20 % plus the 4 % cess on the net gain of names held under 12 months, which is every name here. "Paid" is on gains already realised by sells; "if sold" adds today's unrealised gain. Realised losses offset realised gains; a net loss means no tax.</dd>
+    <dt>Benchmark</dt><dd>The tier's own NSE price index bought at the June close: NIFTY MIDCAP 150 for Mid books, NIFTY SMALLCAP 250 for Small and multibagger books, half each for the published-picks book. A price index carries no dividends while the books' prices do, so the excess is flattered by roughly one percent a year.</dd>
+    <dt>Weight options</dt><dd>Each card's buttons swap the score that ranks the stocks; the rule (how many names, when to sell) stays. The default is the pre-registered rule with the best 2019–26 walk-forward evidence, never the one that happens to lead this window. The walk-forward options (fast select, slow select, IC-weighted, blend) chose their factors from data before each month; slow v2 and fast v1 are fixed weights chosen in October 2026, so they have seen these months; "as published" is the cockpit's own daily record.</dd>
+  </dl>
+</div>
+
+<script id="pb-data" type="application/json">{{ d.books|tojson }}</script>
+<script>
+(function () {
+  const BOOKS = JSON.parse(document.getElementById('pb-data').textContent);
+  const ORDER = ['mid_slow', 'mid_fast', 'small_slow', 'small_fast', 'multibagger', 'published'];
+  const MAIN = {{ main_url('')|tojson }};
+  const fmtPct = (x, d = 1) => x == null ? '—' : (x * 100 >= 0 ? '+' : '') + (x * 100).toFixed(d) + '%';
+  const fmtInr = (x) => {
+    if (x == null) return '—';
+    const a = Math.abs(x), s = x < 0 ? '-' : '';
+    if (a >= 1e7) return s + '₹' + (a / 1e7).toFixed(2) + ' Cr';
+    if (a >= 1e5) return s + '₹' + (a / 1e5).toFixed(2) + ' L';
+    if (a >= 1e3) return s + '₹' + (a / 1e3).toFixed(1) + ' K';
+    return s + '₹' + a.toFixed(0);
+  };
+  const tone = (x) => x > 0 ? 'pb-pos' : (x < 0 ? 'pb-neg' : '');
+  const esc = (s) => String(s).replace(/[&<>"]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c]));
+  const shortDate = (iso) => { const d = new Date(iso + 'T00:00:00'); return d.toLocaleDateString('en-GB', {day: 'numeric', month: 'short'}); };
+  const monthsAhead = (h) => { let n = 0, t = 0; for (let i = 1; i < h.length; i++) { t++; if (h[i].nav / h[0].nav >= h[i].bench / h[0].bench) n++; } return [n, t]; };
+
+  function summary() {
+    const tb = document.querySelector('#pb-summary tbody');
+    tb.innerHTML = ORDER.map(k => {
+      const b = BOOKS[k], v = b.variants[b.default];
+      return `<tr><td><b>${esc(b.label)}</b><div class="pb-small">${esc(v.label)}</div></td><td class="pb-small pb-hide-sm">${esc(b.bench_label)}</td>
+        <td class="${tone(v.ret)}">${fmtPct(v.ret)}</td><td>${fmtPct(v.bench_ret)}</td><td class="${tone(v.excess)}"><b>${fmtPct(v.excess)}</b></td>
+        <td>${v.rotations}</td><td class="pb-hide-sm">${(v.turnover * 100).toFixed(0)}%</td><td>${fmtInr(v.costs.stt)}</td><td class="pb-hide-sm">${fmtInr(v.costs.total)}</td>
+        <td>${fmtInr(v.tax_if_sold)}</td><td class="${tone(v.ret_if_sold_after_tax)}">${fmtPct(v.ret_if_sold_after_tax)}</td><td class="pb-hide-sm">${(v.hit_rate * 100).toFixed(0)}%</td></tr>`;
+    }).join('');
+  }
+
+  function chart(el, v, benchLabel) {
+    const h = v.history, W = 640, H = 190, L = 44, R = 12, T = 12, B = 26;
+    const xs = h.map((_, i) => L + i * (W - L - R) / Math.max(h.length - 1, 1));
+    const book = h.map(p => p.nav / h[0].nav * 100), bench = h.map(p => p.bench / h[0].bench * 100);
+    const all = book.concat(bench); let lo = Math.min(...all), hi = Math.max(...all);
+    const pad = Math.max((hi - lo) * 0.12, 1); lo -= pad; hi += pad;
+    const y = (val) => T + (hi - val) / (hi - lo) * (H - T - B);
+    const path = (arr) => arr.map((val, i) => (i ? 'L' : 'M') + xs[i].toFixed(1) + ' ' + y(val).toFixed(1)).join(' ');
+    const ticks = [];
+    const step = (hi - lo) > 30 ? 10 : 5;
+    for (let t = Math.ceil(lo / step) * step; t <= hi; t += step) ticks.push(t);
+    const grid = ticks.map(t => `<line x1="${L}" x2="${W - R}" y1="${y(t).toFixed(1)}" y2="${y(t).toFixed(1)}"/>`).join('');
+    const ylab = ticks.map(t => `<text x="${L - 6}" y="${(y(t) + 3).toFixed(1)}" text-anchor="end">${t}</text>`).join('');
+    const xlab = h.map((p, i) => `<text x="${xs[i].toFixed(1)}" y="${H - 8}" text-anchor="${i === 0 ? 'start' : (i === h.length - 1 ? 'end' : 'middle')}">${esc(shortDate(p.date))}</text>`).join('');
+    const dots = (arr, cls) => arr.map((val, i) => `<circle class="dot ${cls}" cx="${xs[i].toFixed(1)}" cy="${y(val).toFixed(1)}" r="4"/>`).join('');
+    const last = h.length - 1;
+    el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Book value against its benchmark, both indexed to 100 at the start">
+      <g class="grid">${grid}</g><g class="axis">${ylab}${xlab}</g>
+      <line class="cross" x1="0" x2="0" y1="${T}" y2="${H - B}" style="display:none"/>
+      <path class="bench" d="${path(bench)}"/><path class="book" d="${path(book)}"/>
+      ${dots(bench, 'bench')}${dots(book, 'book')}
+      <text class="axis" x="${(xs[last] - 2).toFixed(1)}" y="${(y(book[last]) - 8).toFixed(1)}" text-anchor="end" style="fill: var(--text-primary); font-weight: 700; font-size: 11px;">${book[last].toFixed(1)}</text>
+      <text class="axis" x="${(xs[last] - 2).toFixed(1)}" y="${(y(bench[last]) + 14).toFixed(1)}" text-anchor="end" style="fill: var(--text-muted); font-size: 11px;">${bench[last].toFixed(1)}</text>
+      <rect x="${L}" y="${T}" width="${W - L - R}" height="${H - T - B}" fill="transparent"/>
+    </svg><div class="pb-tip"></div>
+    <div class="pb-legend"><span><i></i>Book (₹10 L = 100)</span><span><i class="bench"></i>${esc(benchLabel)}</span></div>`;
+    const svg = el.querySelector('svg'), tip = el.querySelector('.pb-tip'), cross = el.querySelector('.cross');
+    svg.addEventListener('mousemove', (e) => {
+      const r = svg.getBoundingClientRect(), mx = (e.clientX - r.left) / r.width * W;
+      let i = 0; for (let k = 1; k < xs.length; k++) if (Math.abs(xs[k] - mx) < Math.abs(xs[i] - mx)) i = k;
+      cross.setAttribute('x1', xs[i]); cross.setAttribute('x2', xs[i]); cross.style.display = '';
+      tip.style.display = 'block';
+      tip.innerHTML = `<b>${esc(shortDate(h[i].date))}</b><br>book ${fmtInr(h[i].nav)} (${book[i].toFixed(1)})<br>index ${bench[i].toFixed(1)}`;
+      const px = xs[i] / W * r.width; tip.style.left = Math.min(px + 12, r.width - tip.offsetWidth - 4) + 'px'; tip.style.top = '8px';
+    });
+    svg.addEventListener('mouseleave', () => { tip.style.display = 'none'; cross.style.display = 'none'; });
+  }
+
+  function card(k) {
+    const b = BOOKS[k];
+    const opts = b.option_order || Object.keys(b.variants);   // tojson sorts keys; the tool records the order
+    const el = document.createElement('div'); el.className = 'ob-card'; el.id = 'pb-' + k;
+    el.innerHTML = `<div class="pb-head"><h2>${esc(b.label)}</h2><span class="ob-muted">benchmark ${esc(b.bench_label)} · ${b.N}${k === 'published' ? ' + ' + b.N : ''} names</span></div>
+      <p class="pb-rule">${esc(b.rule)}</p>
+      <div class="pb-opts" role="group" aria-label="Weight options">${opts.map(o => `<button class="pb-opt" data-opt="${esc(o)}" aria-pressed="${o === b.default}">${esc(b.variants[o].label)}</button>`).join('')}</div>
+      <div class="pb-why"></div>
+      <div class="pb-grid"></div>
+      <div class="pb-two"><div><div class="pb-chart"></div></div><div><div class="pb-hold"></div></div></div>
+      <details class="pb-details"><summary>Every trade, month by month</summary><div class="ob-scroll pb-trades"></div></details>
+      <p class="pb-small" style="margin: 8px 0 0;"><b>What the backtests promised:</b> ${esc(b.evidence)}</p>`;
+    const render = (o) => {
+      const v = b.variants[o];
+      el.querySelectorAll('.pb-opt').forEach(btn => btn.setAttribute('aria-pressed', btn.dataset.opt === o));
+      el.querySelector('.pb-why').textContent = v.why || '';
+      const [ahead, months] = monthsAhead(v.history);
+      el.querySelector('.pb-grid').innerHTML = `
+        <div class="pb-tile"><div class="n ${tone(v.ret)}">${fmtPct(v.ret)}</div><div class="l">return · ${fmtInr(v.nav)} now, after all costs</div></div>
+        <div class="pb-tile"><div class="n">${fmtPct(v.bench_ret)}</div><div class="l">${esc(b.bench_label)}</div></div>
+        <div class="pb-tile"><div class="n ${tone(v.excess)}">${fmtPct(v.excess)}</div><div class="l">excess · ahead of the index in ${ahead} of ${months} months</div></div>
+        <div class="pb-tile"><div class="n">${v.rotations}</div><div class="l">rotations · ${v.buys} buys, ${v.sells} sells · turnover ${(v.turnover * 100).toFixed(0)}%</div></div>
+        <div class="pb-tile"><div class="n">${fmtInr(v.costs.stt)}</div><div class="l">STT · all costs ${fmtInr(v.costs.total)} (other charges ${fmtInr(v.costs.fees_other)}, spread and impact ${fmtInr(v.costs.spread_impact)})</div></div>
+        <div class="pb-tile"><div class="n">${fmtInr(v.tax_if_sold)}</div><div class="l">STCG if sold today · ${fmtInr(v.tax_realised)} already due on ${fmtInr(v.realised_gain)} realised</div></div>
+        <div class="pb-tile"><div class="n ${tone(v.ret_if_sold_after_tax)}">${fmtPct(v.ret_if_sold_after_tax)}</div><div class="l">after tax, if sold today</div></div>
+        <div class="pb-tile"><div class="n">${(v.hit_rate * 100).toFixed(0)}%</div><div class="l">names up · ${v.n} held now${v.cash > 5000 ? ', ' + fmtInr(v.cash) + ' in cash' : ''}</div></div>`;
+      chart(el.querySelector('.pb-chart'), v, b.bench_label);
+      const hold = v.holdings.slice().sort((a, c) => c.ret - a.ret);
+      el.querySelector('.pb-hold').innerHTML = `<div class="pb-small" style="margin-bottom: 4px;">Held now, best first</div><div class="ob-scroll"><table class="ob-table"><thead><tr><th>Name</th><th>Bought</th><th>Rank then</th><th>Value</th><th>Return</th></tr></thead><tbody>
+        ${hold.map(p => `<tr><td><a href="${MAIN}/stocks/${esc(p.sid)}" style="color: var(--text-primary); font-weight: 700;">${esc(p.ticker)}</a>${k === 'published' ? ' <span class="pb-small">' + esc(p.sleeve) + '</span>' : ''}</td><td>${esc(shortDate(p.bought))}</td><td>#${p.rank_at_buy}</td><td>${fmtInr(p.value)}</td><td class="${tone(p.ret)}">${fmtPct(p.ret)}</td></tr>`).join('') || '<tr><td colspan="5" class="pb-small">Nothing held.</td></tr>'}
+      </tbody></table></div>`;
+      const byDate = {};
+      v.trades.forEach(t => { (byDate[t.date] = byDate[t.date] || []).push(t); });
+      el.querySelector('.pb-trades').innerHTML = `<table class="ob-table"><thead><tr><th>Review</th><th>Bought</th><th>Sold (return on the name)</th></tr></thead><tbody>
+        ${Object.keys(byDate).sort().map(d => { const ts = byDate[d];
+          const buys = ts.filter(t => t.side === 'BUY').map(t => esc(nameOf(v, t.sid)) + ' #' + t.rank).join(', ');
+          const sells = ts.filter(t => t.side === 'SELL').map(t => `<span class="${tone(t.ret)}">${esc(nameOf(v, t.sid))} ${fmtPct(t.ret)}</span>`).join(', ');
+          return `<tr><td>${esc(shortDate(d))}<div class="pb-small">${ts.filter(t => t.side === 'BUY').length} in, ${ts.filter(t => t.side === 'SELL').length} out</div></td><td class="ob-wrap" style="font-family: inherit;">${buys || '—'}</td><td class="ob-wrap" style="font-family: inherit;">${sells || '—'}</td></tr>`; }).join('')}
+      </tbody></table>`;
+    };
+    el.querySelectorAll('.pb-opt').forEach(btn => btn.addEventListener('click', () => render(btn.dataset.opt)));
+    document.getElementById('pb-books').appendChild(el);
+    render(b.default);
+  }
+
+  const NAMES = {};
+  ORDER.forEach(k => Object.values(BOOKS[k].variants).forEach(v => v.holdings.forEach(p => { NAMES[p.sid] = p.ticker; })));
+  function nameOf(v, sid) { return NAMES[sid] || sid; }
+
+  function efficacy() {
+    const ul = document.getElementById('pb-efficacy');
+    ul.innerHTML = ORDER.map(k => {
+      const b = BOOKS[k], v = b.variants[b.default], vals = Object.values(b.variants);
+      const best = vals.reduce((a, c) => c.excess > a.excess ? c : a, vals[0]), worst = vals.reduce((a, c) => c.excess < a.excess ? c : a, vals[0]);
+      const [ahead, months] = monthsAhead(v.history);
+      const word = v.excess > 0.02 ? 'ahead of' : (v.excess < -0.02 ? 'behind' : 'level with');
+      return `<li><b>${esc(b.label)}</b>: ${word} its index by ${fmtPct(Math.abs(v.excess))} after costs (${ahead} of ${months} months ahead); across the ${vals.length} weight options the excess runs from ${fmtPct(worst.excess)} (${esc(worst.label)}) to ${fmtPct(best.excess)} (${esc(best.label)}), so the choice of weights moved the result by ${fmtPct(best.excess - worst.excess)} in five months.</li>`;
+    }).join('');
+  }
+
+  summary(); ORDER.forEach(card); efficacy();
+})();
+</script>
+{% endif %}
+{% endblock %}

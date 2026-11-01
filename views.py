@@ -856,6 +856,25 @@ def mb_paper(today=None):
     return d
 
 
+PAPER_BOOKS_FILE = PROJECT_ROOT / "output" / "paper_books" / "latest.json"
+PAPER_BOOKS_STALE_DAYS = 40   # monthly job after the paper sleeve's refresh; past this a refresh was missed
+
+
+def paper_books(today=None):
+    """The six paper books (₹10 L each from June 2026, every weight option) as tools/paper_books.py last wrote
+    them (config.FILE_OUTPUTS `_file_paper_books`), or {} before the first run. Adds `age_days` and `stale`.
+    Research output, never in the DB."""
+    try:
+        d = json.loads(PAPER_BOOKS_FILE.read_text())
+    except (OSError, json.JSONDecodeError):
+        return {}
+    if not d.get("asof") or not d.get("books"):
+        return {}
+    d["age_days"] = ((today or date.today()) - date.fromisoformat(d["computed"])).days
+    d["stale"] = d["age_days"] > PAPER_BOOKS_STALE_DAYS
+    return d
+
+
 def long_hold(sid, sleeve=None):
     """One stock's long-hold rank: {rank, size, score_date, stale, books}, `books` = the paper books
     holding it ("slow", "tactical"). None when the stock has no long-hold rank (only SMALL is ranked:

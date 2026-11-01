@@ -188,6 +188,15 @@ def flow_page(request: Request):
     })
 
 
+@app.get("/paper-books", response_class=HTMLResponse)
+def paper_books_page(request: Request):
+    """Six strategies as paper books of ₹10 lakh each from June 2026 (tools/paper_books.py, monthly): returns
+    against the right index, rotations, STT and other costs, short-term tax, every weight option precomputed.
+    The page renders from output/paper_books/latest.json (views.paper_books); the option switch is client-side."""
+    import views
+    return templates.TemplateResponse(request, "paper_books.html", {"page": "paper-books", "d": views.paper_books()})
+
+
 @app.get("/options", response_class=HTMLResponse)
 def options_page(request: Request):
     """Option-premium paper book (plan 0022): the pre-registered rule, open and settled

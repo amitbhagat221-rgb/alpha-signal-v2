@@ -15,6 +15,8 @@ PAGES = [
      "tabs": [("stages", "Stages"), ("dag", "Dataflow"), ("pipeline-log", "Pipeline log")]},
     {"path": "/org", "id": "org", "title": "Boardroom", "subtitle": "Decisions waiting, agents, memos",
      "icon": "briefcase", "section": "Fund", "mobile": 4, "short": "Board"},
+    {"path": "/paper-books", "id": "paper-books", "title": "Paper books", "subtitle": "Six strategies, ₹10 L each, since June 2026",
+     "icon": "briefcase", "section": "Fund", "short": "Paper"},
     {"path": "/options", "id": "options", "title": "Options", "subtitle": "Paper book · forward test",
      "icon": "trending-up", "section": "Fund", "short": "Options"},
     {"path": "/resources", "id": "resources", "title": "Resources", "subtitle": "Primers and guides",
