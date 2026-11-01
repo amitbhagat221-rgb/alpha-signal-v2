@@ -254,6 +254,10 @@ case "$JOB" in
         logged cron_screener_cookie cookie_ok || {
             [ -n "${NTFY_TOPIC:-}" ] && run curl -s -H "Title: Screener cookie DEAD" -H "Priority: high" \
                 -d "Re-extract sessionid from browser into ~/.cache/screener_cookie.json" "https://ntfy.sh/$NTFY_TOPIC"; } ;;
+    work_orders)        # 21:30 UTC — the unattended Tier B work-order runner (plan 0032 stage 7, ADR 0091):
+                        # approved Tier B orders, one worktree each, headless claude with a tool allowlist, the full
+                        # suite before a merge, a memo per order on the Boardroom. Pause: touch output/work_runner.off.
+        logged cron_work_orders run python -m tools.work_runner ;;
     sweep)              # Sunday 09:00 UTC — delete Claude session scratchpads nothing has touched for 7 days:
                         # sessions copy the 22 GB DB there and never clean up (52 GB of copies, 2026-10-11;
                         # DISK_LOW is the check). Touches no DB, takes no lock.
@@ -283,6 +287,6 @@ case "$JOB" in
         echo "Tickertape finished rc=$RC at $(date -u)"
         exit $RC ;;
     *)
-        echo "unknown job '$JOB' (morning forward canary estimates transcripts screener_schedules llm_local org watchdog health pt_snapshot management kite_quotes kite_bars kite_holdings options_live backtest expected_return screener_cookie sweep secrets_backup screener_universe tickertape)"
+        echo "unknown job '$JOB' (morning forward canary estimates transcripts screener_schedules llm_local org watchdog health pt_snapshot management kite_quotes kite_bars kite_holdings options_live backtest expected_return screener_cookie sweep secrets_backup screener_universe tickertape work_orders)"
         exit 2 ;;
 esac

@@ -113,3 +113,4 @@ Status key: **A** accepted · **P→N** partly superseded by N · **S→N** supe
 | 0088 | [Decisions and the step log: the producers write v3 themselves; the legacy tables drop on 2026-11-15](0088-decisions-writers-dual-write-step-log.md) | A (2026-11-01; refines 0084; plan 0030 stage 1 part 3) |
 | 0089 | [The architecture review runs weekly from probes; a drafted order's tier follows the path](0089-architecture-review-on-a-cadence.md) | A (2026-11-01; extends 0085 / 0086; plan 0032 stage 6) |
 | 0090 | [Org trim: the chief-of-staff and the AI scout are dropped, three seats run less often](0090-org-trim-two-seats-dropped-three-demoted.md) | A (2026-11-01; amends 0057; plan 0019 roster) |
+| 0091 | [Approved Tier B work orders run unattended at night, inside hard limits, each with a plain-words memo](0091-unattended-tier-b-runner.md) | A (2026-11-01; switches on what 0086 allowed; plan 0032 stage 7) |

@@ -849,7 +849,7 @@ def scorecard(days=30):
     return card
 
 
-MEMO_TYPES = sorted({k[4:] for s in ROLES.values() for k in s.get("kinds", [])} - {"grade"})
+MEMO_TYPES = sorted({k[4:] for s in ROLES.values() for k in s.get("kinds", [])} - {"grade"} | {"runner_memo"})   # + the unattended runner's (ADR 0091)
 
 
 def memos(since=None, until=None, role=None, limit=150):
