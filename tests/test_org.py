@@ -95,8 +95,8 @@ def test_org_job_is_wired_through_run_sh():
 
 def test_cadence(q):
     sunday, friday = dt.date(2026, 10, 4), dt.date(2026, 10, 2)
-    assert org.is_due("risk-officer", friday) and org.is_due("cio", sunday) and not org.is_due("cio", friday)
-    assert org.period_key("risk-officer", friday) == "2026-10-02"
+    assert org.is_due("data-engineer", friday) and org.is_due("cio", sunday) and not org.is_due("cio", friday)
+    assert org.period_key("data-engineer", friday) == "2026-10-02"           # the daily seat (risk-officer is weekly since ADR 0090)
     assert org.period_key("cio", friday) == org.period_key("cio", sunday) == "2026-W40"
 
 
@@ -284,13 +284,13 @@ def test_scheduled_period_is_queued_once_and_adhoc_leaves_it_free(q, monkeypatch
 
     def fake_build(kind, day, key):
         calls.append(key)
-        return [(key, {"role": "risk-officer", "key": key, "facts": {"n": len(calls)}, "_sets": {}}, 4)]
+        return [(key, {"role": "data-engineer", "key": key, "facts": {"n": len(calls)}, "_sets": {}}, 4)]
     monkeypatch.setattr(org_kinds, "build", fake_build)
-    day = dt.date(2026, 10, 2)
-    assert org.enqueue_role("risk-officer", day) == 1
-    assert org.enqueue_role("risk-officer", day) == 0 and calls == ["2026-10-02"]      # not rebuilt
-    assert org.enqueue_role("risk-officer", day, adhoc=True) == 1 and calls[-1].startswith("adhoc-")
-    assert org.enqueue_role("risk-officer", dt.date(2026, 10, 3)) == 1
+    day = dt.date(2026, 10, 2)                               # the daily seat (risk-officer is weekly since ADR 0090)
+    assert org.enqueue_role("data-engineer", day) == 1
+    assert org.enqueue_role("data-engineer", day) == 0 and calls == ["2026-10-02"]      # not rebuilt
+    assert org.enqueue_role("data-engineer", day, adhoc=True) == 1 and calls[-1].startswith("adhoc-")
+    assert org.enqueue_role("data-engineer", dt.date(2026, 10, 3)) == 1
 
 
 def test_desk_cards_go_through_the_cio_before_the_ceo(q):

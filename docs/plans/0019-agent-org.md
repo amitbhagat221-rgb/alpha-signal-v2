@@ -138,6 +138,8 @@ An agent that edits weights, config, cron or production code unattended. LLM out
 bus, a vector store, a framework. Agent-to-agent chat: seats talk through documents.
 
 ## Implementation notes
+
+- **2026-11-01 — roster trimmed ([ADR 0090](../decisions/0090-org-trim-two-seats-dropped-three-demoted.md)):** chief-of-staff and ai-scout disabled (re-enable from `/org`), risk-officer and compliance weekly, data-engineer only on a new health issue; 15 entries, 13 active. Added this autumn: dq-auditor (10-03), code-janitor (10-31), system-architect as a Saturday desk seat (11-01).
 - **2026-10-02:** built in one session. `org.py`, `alpha_mcp/org_kinds.py`, 8 charters in `.claude/routines/roles/`,
   5 builder agents in `.claude/agents/`, `run.sh org`, cockpit `/org`, `alpha-ops.org`, `tests/test_org.py`.
   `alpha_mcp/tasks.py` gained `kinds_for(worker)` (role-owned kinds) and `enqueue(items=...)`;
