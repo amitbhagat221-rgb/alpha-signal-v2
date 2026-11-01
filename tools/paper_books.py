@@ -17,9 +17,9 @@ Books (config BOOKS):
   published               the sixth book, added as the honest live record: the picks the cockpit actually
                           published on the anchor day (daily_picks, no hindsight): Mid top 10 + Small top 10,
                           ₹5 L each half; sell when a name falls below rank 20 in its tier.
-Weight options (OPTIONS, one score source each; the default is the PRE-REGISTERED rule the paper sleeve runs,
-never the one that happens to lead this window; each option's `why` quotes its 2022–26 book evidence):
-  slow   slow_v2 (default) · slow_select · slow_icw · blend
+Weight options (OPTIONS, one score source each; the default is the best-tested pre-registered rule (slow: slow_select by
+Amit's call; fast: fast_select), never the one that happens to lead this window; each option's `why` quotes its 2022–26 book evidence):
+  slow   slow_select (default, Amit 2026-11-01: the best-tested slow score) · slow_v2 (the sleeve's rule) · slow_icw · blend
   fast   fast_select (default) · fast_v1 (the frozen live weights on the panel) · published (daily_picks top N)
   multibagger / published   the basket size (10 / 20 / 30 and 10+10 / 5+5 / 20+20).
 
@@ -96,13 +96,13 @@ BOOKS = {
 # One score source per option. file/method = the research panels under data/lh; `published` = daily_picks.
 OPTIONS = {
     "slow": [
-        dict(key="slow_v2", label="Slow v2 (default)", file="v2/scores_all.parquet", method="slow_v2", avg3=True,
+        dict(key="slow_select", label="Slow select (default)", file="oos_scores.parquet", method="slow_select", avg3=True,
+             why="Walk-forward: each month the 8 factors with the strongest 126-day evidence so far, equal weight. The best "
+                 "slow score in the 2022–26 book test: SMALL +19.7 %/yr over the index (t 2.08), MID +5.5 %/yr (t 1.53)."),
+        dict(key="slow_v2", label="Slow v2 (sleeve rule)", file="v2/scores_all.parquet", method="slow_v2", avg3=True,
              why="The pre-registered sleeve rule (plan 0025): equal weights on 6-month momentum, ROCE × book-to-price "
                  "and Piotroski-lite, nothing fitted. Its own 2022–26 book: SMALL +7.9 %/yr over the index, t 1.19, up from "
                  "12 of 12 start months. Kept for simplicity, not because it tested best."),
-        dict(key="slow_select", label="Slow select", file="oos_scores.parquet", method="slow_select", avg3=True,
-             why="Walk-forward: each month the 8 factors with the strongest 126-day evidence so far, equal weight. The best "
-                 "slow score in the 2022–26 book test: SMALL +19.7 %/yr over the index (t 2.08), MID +5.5 %/yr (t 1.53)."),
         dict(key="slow_icw", label="Slow IC-weighted", file="oos_scores.parquet", method="slow_icw", avg3=True,
              why="Walk-forward: ~30 factors, each weighted by its past 126-day information coefficient. Best rank IC "
                  "across the whole tier (0.115) but a weak book at the top: SMALL +3.6 %/yr, t 0.73, worst year −25 %."),
