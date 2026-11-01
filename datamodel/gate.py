@@ -35,6 +35,7 @@ def check_table(conn, table, view, date_col, dates=3, whole=False, exact=False):
     typed = _cols(conn, table)
     cols = [c for c, _t in typed]
     collist = ", ".join(f"[{c}]" if exact or t != "REAL" else f"printf('%.10g', [{c}]) AS [{c}]" for c, t in typed)
+    whole = whole or date_col is None        # a table without a date column (analyst_consensus) is compared whole
     if whole:
         where, params = "1 = 1", []
     else:

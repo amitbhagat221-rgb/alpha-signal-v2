@@ -2843,3 +2843,181 @@ SELECT r.as_of_date AS asof_date, o.horizon_days AS window_days, o.ret AS hrp_re
        o.computed_at AS computed_at
 FROM outcomes o JOIN runs r ON r.run_id = o.run_id AND r.kind = 'morning'
 JOIN entities e ON e.entity_id = o.entity_id AND e.kind = 'portfolio' AND e.key = 'book';
+
+-- ── Company facts (plan 0030 stage 2): the latest version of every metric, pivoted back into the legacy shape. ──
+-- `period` is derived from the period end (JUN 2026 / FY 2026, exact on every stored row 2026-11-01); fetched_at is the
+-- version's last_seen_at (= the legacy fetched_at on every row checked); a NULL filing_date is one the sync replaced by the lag.
+
+-- facts: quarterly_income (date column end_date)
+CREATE VIEW IF NOT EXISTS v3_quarterly_income AS
+WITH latest AS (
+  SELECT f.entity_id, f.period_end, f.period_type, f.basis, k.name AS metric, f.value, f.fetched_at, f.last_seen_at,
+         ROW_NUMBER() OVER (PARTITION BY f.entity_id, f.metric_id, f.period_end, f.period_type, f.basis ORDER BY f.fetched_at DESC) AS rn
+  FROM fundamentals f JOIN catalog k ON k.catalog_id = f.metric_id WHERE f.source = 'quarterly_income')
+SELECT e.key AS sid,
+       UPPER(substr('JanFebMarAprMayJunJulAugSepOctNovDec', 1 + 3 * (CAST(strftime('%m', l.period_end) AS INTEGER) - 1), 3)) || ' ' || strftime('%Y', l.period_end) AS period,
+       l.period_end AS end_date,
+       l.basis AS reporting,
+       MAX(CASE WHEN l.metric = 'qi.revenue' THEN l.value END) AS revenue,
+       MAX(CASE WHEN l.metric = 'qi.operating_profit' THEN l.value END) AS operating_profit,
+       MAX(CASE WHEN l.metric = 'qi.net_income' THEN l.value END) AS net_income,
+       MAX(CASE WHEN l.metric = 'qi.eps' THEN l.value END) AS eps,
+       MAX(CASE WHEN l.metric = 'qi.operating_expenses' THEN l.value END) AS operating_expenses,
+       MAX(CASE WHEN l.metric = 'qi.pbt' THEN l.value END) AS pbt,
+       MAX(CASE WHEN l.metric = 'qi.tax_and_minority' THEN l.value END) AS tax_and_minority,
+       MAX(CASE WHEN l.metric = 'qi.ebitda' THEN l.value END) AS ebitda,
+       MAX(l.last_seen_at) AS fetched_at
+FROM latest l JOIN entities e ON e.entity_id = l.entity_id AND e.kind = 'security' AND e.market = 'IN'
+WHERE l.rn = 1 GROUP BY l.entity_id, l.period_end, l.period_type, l.basis;
+
+-- facts: annual_balance_sheet (date column end_date)
+CREATE VIEW IF NOT EXISTS v3_annual_balance_sheet AS
+WITH latest AS (
+  SELECT f.entity_id, f.period_end, f.period_type, f.basis, k.name AS metric, f.value, f.fetched_at, f.last_seen_at,
+         ROW_NUMBER() OVER (PARTITION BY f.entity_id, f.metric_id, f.period_end, f.period_type, f.basis ORDER BY f.fetched_at DESC) AS rn
+  FROM fundamentals f JOIN catalog k ON k.catalog_id = f.metric_id WHERE f.source = 'annual_balance_sheet')
+SELECT e.key AS sid,
+       'FY ' || strftime('%Y', l.period_end) AS period,
+       l.period_end AS end_date,
+       MAX(CASE WHEN l.metric = 'bs.total_assets' THEN l.value END) AS total_assets,
+       MAX(CASE WHEN l.metric = 'bs.total_equity' THEN l.value END) AS total_equity,
+       MAX(CASE WHEN l.metric = 'bs.total_debt' THEN l.value END) AS total_debt,
+       MAX(CASE WHEN l.metric = 'bs.current_assets' THEN l.value END) AS current_assets,
+       MAX(CASE WHEN l.metric = 'bs.current_liabilities' THEN l.value END) AS current_liabilities,
+       MAX(CASE WHEN l.metric = 'bs.cash_and_equivalents' THEN l.value END) AS cash_and_equivalents,
+       MAX(CASE WHEN l.metric = 'bs.receivables' THEN l.value END) AS receivables,
+       MAX(CASE WHEN l.metric = 'bs.retained_earnings' THEN l.value END) AS retained_earnings,
+       MAX(CASE WHEN l.metric = 'bs.net_ppe' THEN l.value END) AS net_ppe,
+       MAX(CASE WHEN l.metric = 'bs.total_liabilities' THEN l.value END) AS total_liabilities,
+       MAX(CASE WHEN l.metric = 'bs.shares_outstanding' THEN l.value END) AS shares_outstanding,
+       MAX(CASE WHEN l.metric = 'bs.long_term_debt' THEN l.value END) AS long_term_debt,
+       MAX(l.last_seen_at) AS fetched_at
+FROM latest l JOIN entities e ON e.entity_id = l.entity_id AND e.kind = 'security' AND e.market = 'IN'
+WHERE l.rn = 1 GROUP BY l.entity_id, l.period_end, l.period_type, l.basis;
+
+-- facts: annual_cash_flow (date column end_date)
+CREATE VIEW IF NOT EXISTS v3_annual_cash_flow AS
+WITH latest AS (
+  SELECT f.entity_id, f.period_end, f.period_type, f.basis, k.name AS metric, f.value, f.fetched_at, f.last_seen_at,
+         ROW_NUMBER() OVER (PARTITION BY f.entity_id, f.metric_id, f.period_end, f.period_type, f.basis ORDER BY f.fetched_at DESC) AS rn
+  FROM fundamentals f JOIN catalog k ON k.catalog_id = f.metric_id WHERE f.source = 'annual_cash_flow')
+SELECT e.key AS sid,
+       'FY ' || strftime('%Y', l.period_end) AS period,
+       l.period_end AS end_date,
+       MAX(CASE WHEN l.metric = 'cf.operating_cash_flow' THEN l.value END) AS operating_cash_flow,
+       MAX(CASE WHEN l.metric = 'cf.capex' THEN l.value END) AS capex,
+       MAX(CASE WHEN l.metric = 'cf.free_cash_flow' THEN l.value END) AS free_cash_flow,
+       MAX(CASE WHEN l.metric = 'cf.investing_cash_flow' THEN l.value END) AS investing_cash_flow,
+       MAX(CASE WHEN l.metric = 'cf.financing_cash_flow' THEN l.value END) AS financing_cash_flow,
+       MAX(CASE WHEN l.metric = 'cf.working_capital_change' THEN l.value END) AS working_capital_change,
+       MAX(CASE WHEN l.metric = 'cf.dividends_paid' THEN l.value END) AS dividends_paid,
+       MAX(CASE WHEN l.metric = 'cf.net_change_in_cash' THEN l.value END) AS net_change_in_cash,
+       MAX(l.last_seen_at) AS fetched_at
+FROM latest l JOIN entities e ON e.entity_id = l.entity_id AND e.kind = 'security' AND e.market = 'IN'
+WHERE l.rn = 1 GROUP BY l.entity_id, l.period_end, l.period_type, l.basis;
+
+-- facts: shareholding (date column end_date)
+CREATE VIEW IF NOT EXISTS v3_shareholding AS
+WITH latest AS (
+  SELECT f.entity_id, f.period_end, f.period_type, f.basis, k.name AS metric, f.value, f.fetched_at, f.last_seen_at,
+         ROW_NUMBER() OVER (PARTITION BY f.entity_id, f.metric_id, f.period_end, f.period_type, f.basis ORDER BY f.fetched_at DESC) AS rn
+  FROM fundamentals f JOIN catalog k ON k.catalog_id = f.metric_id WHERE f.source = 'shareholding')
+SELECT e.key AS sid,
+       l.period_end AS end_date,
+       MAX(CASE WHEN l.metric = 'sh.promoter_pct' THEN l.value END) AS promoter_pct,
+       MAX(CASE WHEN l.metric = 'sh.fii_pct' THEN l.value END) AS fii_pct,
+       MAX(CASE WHEN l.metric = 'sh.mf_pct' THEN l.value END) AS mf_pct,
+       MAX(CASE WHEN l.metric = 'sh.dii_pct' THEN l.value END) AS dii_pct,
+       MAX(CASE WHEN l.metric = 'sh.public_pct' THEN l.value END) AS public_pct,
+       MAX(CASE WHEN l.metric = 'sh.pledge_pct' THEN l.value END) AS pledge_pct,
+       MAX(CASE WHEN l.metric = 'sh.insurance_pct' THEN l.value END) AS insurance_pct,
+       MAX(CASE WHEN l.metric = 'sh.retail_hni_pct' THEN l.value END) AS retail_hni_pct,
+       MAX(CASE WHEN l.metric = 'sh.other_pct' THEN l.value END) AS other_pct,
+       MAX(l.last_seen_at) AS fetched_at,
+       CAST(MAX(CASE WHEN l.metric = 'sh.n_shareholders' THEN l.value END) AS INTEGER) AS n_shareholders
+FROM latest l JOIN entities e ON e.entity_id = l.entity_id AND e.kind = 'security' AND e.market = 'IN'
+WHERE l.rn = 1 GROUP BY l.entity_id, l.period_end, l.period_type, l.basis;
+
+-- facts: banking_metrics (date column period_end)
+CREATE VIEW IF NOT EXISTS v3_banking_metrics AS
+WITH latest AS (
+  SELECT f.entity_id, f.period_end, f.period_type, f.basis, k.name AS metric, f.value, f.fetched_at, f.last_seen_at,
+         ROW_NUMBER() OVER (PARTITION BY f.entity_id, f.metric_id, f.period_end, f.period_type, f.basis ORDER BY f.fetched_at DESC) AS rn
+  FROM fundamentals f JOIN catalog k ON k.catalog_id = f.metric_id WHERE f.source = 'banking_metrics')
+SELECT e.key AS sid,
+       l.period_end AS period_end,
+       l.period_type AS period_type,
+       MAX(CASE WHEN l.metric = 'bank.interest_earned' THEN l.value END) AS interest_earned,
+       MAX(CASE WHEN l.metric = 'bank.interest_expended' THEN l.value END) AS interest_expended,
+       MAX(CASE WHEN l.metric = 'bank.net_interest_income' THEN l.value END) AS net_interest_income,
+       MAX(CASE WHEN l.metric = 'bank.other_income' THEN l.value END) AS other_income,
+       MAX(CASE WHEN l.metric = 'bank.provisions' THEN l.value END) AS provisions,
+       MAX(CASE WHEN l.metric = 'bank.pre_provision_op_profit' THEN l.value END) AS pre_provision_op_profit,
+       MAX(CASE WHEN l.metric = 'bank.net_profit' THEN l.value END) AS net_profit,
+       MAX(CASE WHEN l.metric = 'bank.gross_npa_pct' THEN l.value END) AS gross_npa_pct,
+       MAX(CASE WHEN l.metric = 'bank.net_npa_pct' THEN l.value END) AS net_npa_pct,
+       MAX(CASE WHEN l.metric = 'bank.pcr_pct' THEN l.value END) AS pcr_pct,
+       MAX(CASE WHEN l.metric = 'bank.slippage_pct' THEN l.value END) AS slippage_pct,
+       MAX(CASE WHEN l.metric = 'bank.credit_cost_pct' THEN l.value END) AS credit_cost_pct,
+       MAX(CASE WHEN l.metric = 'bank.advances' THEN l.value END) AS advances,
+       MAX(CASE WHEN l.metric = 'bank.deposits' THEN l.value END) AS deposits,
+       MAX(CASE WHEN l.metric = 'bank.borrowings' THEN l.value END) AS borrowings,
+       MAX(CASE WHEN l.metric = 'bank.book_value_per_share' THEN l.value END) AS book_value_per_share,
+       MAX(CASE WHEN l.metric = 'bank.casa_pct' THEN l.value END) AS casa_pct,
+       MAX(CASE WHEN l.metric = 'bank.car_pct' THEN l.value END) AS car_pct,
+       MAX(CASE WHEN l.metric = 'bank.crar_pct' THEN l.value END) AS crar_pct,
+       MAX(CASE WHEN l.metric = 'bank.nim_pct' THEN l.value END) AS nim_pct,
+       MAX(CASE WHEN l.metric = 'bank.roa_pct' THEN l.value END) AS roa_pct,
+       MAX(CASE WHEN l.metric = 'bank.cost_of_funds_pct' THEN l.value END) AS cost_of_funds_pct,
+       MAX(CASE WHEN l.metric = 'bank.adj_book_per_share' THEN l.value END) AS adj_book_per_share,
+       NULLIF(l.basis, 'default') AS source,
+       MAX(l.last_seen_at) AS fetched_at
+FROM latest l JOIN entities e ON e.entity_id = l.entity_id AND e.kind = 'security' AND e.market = 'IN'
+WHERE l.rn = 1 GROUP BY l.entity_id, l.period_end, l.period_type, l.basis;
+
+-- facts: fundamentals_screener (date column period_end)
+CREATE VIEW IF NOT EXISTS v3_fundamentals_screener AS
+WITH latest AS (
+  SELECT f.entity_id, f.period_end, f.period_type, f.basis, k.name AS metric, f.value, f.fetched_at, f.last_seen_at, f.available_at,
+         ROW_NUMBER() OVER (PARTITION BY f.entity_id, f.metric_id, f.period_end, f.period_type, f.basis ORDER BY f.fetched_at DESC) AS rn
+  FROM fundamentals f JOIN catalog k ON k.catalog_id = f.metric_id WHERE f.source = 'fundamentals_screener')
+SELECT e.key AS sid, l.period_end AS period_end, l.period_type AS period_type, substr(l.metric, 10) AS line_item, l.value AS value,
+       CASE WHEN l.available_at = date(l.period_end, '+' || (CASE WHEN l.period_type IN ('annual', 'A') THEN 75 ELSE 60 END) || ' day')
+            THEN NULL ELSE l.available_at END AS filing_date,
+       l.last_seen_at AS fetched_at
+FROM latest l JOIN entities e ON e.entity_id = l.entity_id AND e.kind = 'security' AND e.market = 'IN'
+WHERE l.rn = 1;
+
+-- facts: analyst_consensus (date column None)
+CREATE VIEW IF NOT EXISTS v3_analyst_consensus AS
+WITH latest AS (
+  SELECT s.entity_id, k.name AS metric, s.value, s.label, s.fetched_at, s.last_seen_at,
+         ROW_NUMBER() OVER (PARTITION BY s.entity_id, s.metric_id ORDER BY s.fetched_at DESC) AS rn
+  FROM estimates s JOIN catalog k ON k.catalog_id = s.metric_id WHERE s.source = 'analyst_consensus' AND s.target_period = '12M')
+SELECT e.key AS sid,
+       CAST(MAX(CASE WHEN l.metric = 'ac.total_analysts' THEN l.value END) AS INTEGER) AS total_analysts,
+       MAX(CASE WHEN l.metric = 'ac.buy_pct' THEN l.value END) AS buy_pct,
+       MAX(CASE WHEN l.metric = 'ac.price_target' THEN l.value END) AS price_target,
+       MAX(CASE WHEN l.metric = 'ac.forward_eps' THEN l.value END) AS forward_eps,
+       MAX(CASE WHEN l.metric = 'ac.eps_growth_pct' THEN l.value END) AS eps_growth_pct,
+       MAX(CASE WHEN l.metric = 'ac.forward_revenue' THEN l.value END) AS forward_revenue,
+       MAX(CASE WHEN l.metric = 'ac.revenue_growth_pct' THEN l.value END) AS revenue_growth_pct,
+       CAST(MAX(CASE WHEN l.metric = 'ac.has_analyst_data' THEN l.value END) AS INTEGER) AS has_analyst_data,
+       MAX(l.last_seen_at) AS fetched_at,
+       MAX(CASE WHEN l.metric = 'ac.price_target_median' THEN l.value END) AS price_target_median,
+       MAX(CASE WHEN l.metric = 'ac.price_target_high' THEN l.value END) AS price_target_high,
+       MAX(CASE WHEN l.metric = 'ac.price_target_low' THEN l.value END) AS price_target_low,
+       MAX(CASE WHEN l.metric = 'ac.recommendation_key' THEN l.label END) AS recommendation_key,
+       MAX(CASE WHEN l.metric = 'ac.recommendation_mean' THEN l.value END) AS recommendation_mean,
+       CAST(MAX(CASE WHEN l.metric = 'ac.n_strong_buy' THEN l.value END) AS INTEGER) AS n_strong_buy,
+       CAST(MAX(CASE WHEN l.metric = 'ac.n_buy' THEN l.value END) AS INTEGER) AS n_buy,
+       CAST(MAX(CASE WHEN l.metric = 'ac.n_hold' THEN l.value END) AS INTEGER) AS n_hold,
+       CAST(MAX(CASE WHEN l.metric = 'ac.n_sell' THEN l.value END) AS INTEGER) AS n_sell,
+       CAST(MAX(CASE WHEN l.metric = 'ac.n_strong_sell' THEN l.value END) AS INTEGER) AS n_strong_sell,
+       MAX(CASE WHEN l.metric = 'ac.pt_source' THEN l.label END) AS pt_source,
+       MAX(CASE WHEN l.metric = 'ac.next_earnings_date' THEN l.label END) AS next_earnings_date,
+       MAX(CASE WHEN l.metric = 'ac.rating_mix_history' THEN l.label END) AS rating_mix_history,
+       MAX(CASE WHEN l.metric = 'ac.price_target_prev' THEN l.value END) AS price_target_prev,
+       MAX(CASE WHEN l.metric = 'ac.price_target_changed_at' THEN l.label END) AS price_target_changed_at
+FROM latest l JOIN entities e ON e.entity_id = l.entity_id AND e.kind = 'security' AND e.market = 'IN'
+WHERE l.rn = 1 GROUP BY l.entity_id;

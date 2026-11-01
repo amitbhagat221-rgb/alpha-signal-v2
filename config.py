@@ -25,8 +25,11 @@ SCHEMA_PATH = PROJECT_ROOT / "schema.sql"
 # checks / 20 cockpit pages identical under both flags). Set "old" to roll back.
 # steps: pipeline_log → runs ⋈ step_runs (steplog.py). "old" until the first morning run under the writer
 # shows parity (datamodel_reconcile `pipeline_log`) and the health report / Flow page read the same under both.
+# facts: Company facts (quarterly_income, annual_*, shareholding, banking_metrics, fundamentals_screener,
+# analyst_consensus) → views over fundamentals / estimates. Stage 2 is Tier A (ADR 0084 D3): "new" only on Amit's OK.
 DATA_MODEL = {"decisions": os.environ.get("ALPHA_DM_DECISIONS", "new"),
-              "steps": os.environ.get("ALPHA_DM_STEPS", "old")}
+              "steps": os.environ.get("ALPHA_DM_STEPS", "old"),
+              "facts": os.environ.get("ALPHA_DM_FACTS", "old")}
 # Plan 0032 stage 2: `data_quarantine` rows are masked from the screener's inputs in memory by
 # tools/quarantine.py to measure a fault's pick impact. apply_live = True masks them in the morning
 # run too (it changes the picks: Tier A, Amit's call); the measurement never needs it.

@@ -15,6 +15,9 @@ moved, after a Parquet export); `datamodel_reconcile` is the gate between the tw
     python -m datamodel.gate decisions       # parity: legacy vs view on the newest dates
 
 Stage 1 (Decisions): daily_picks, pick_outcomes, portfolio_weights, portfolio_outcomes.
+Stage 2 (Company facts): quarterly_income, annual_balance_sheet, annual_cash_flow, shareholding,
+banking_metrics, fundamentals_screener (fundamentals, the latest version of each metric pivoted back) and
+analyst_consensus (estimates); the flag is config.DATA_MODEL["facts"].
 pipeline_log stays legacy: step_runs holds terminal rows only (RUNNING rows are collapsed),
 so a view cannot reproduce it; its readers move by rewrite in stage 1 part 2.
 """
@@ -33,6 +36,15 @@ VIEWS = {
         "pick_outcomes": ("v3_pick_outcomes", "pick_date"),
         "portfolio_weights": ("v3_portfolio_weights", "asof_date"),
         "portfolio_outcomes": ("v3_portfolio_outcomes", "asof_date"),
+    },
+    "facts": {     # stage 2: Company facts (fundamentals / estimates); analyst_consensus has no date column (whole-table gate)
+        "quarterly_income": ("v3_quarterly_income", 'end_date'),
+        "annual_balance_sheet": ("v3_annual_balance_sheet", 'end_date'),
+        "annual_cash_flow": ("v3_annual_cash_flow", 'end_date'),
+        "shareholding": ("v3_shareholding", 'end_date'),
+        "banking_metrics": ("v3_banking_metrics", 'period_end'),
+        "fundamentals_screener": ("v3_fundamentals_screener", 'period_end'),
+        "analyst_consensus": ("v3_analyst_consensus", None),
     },
 }
 
@@ -60,6 +72,13 @@ BASES = {
     "v3_pick_outcomes": ("runs", "outcomes", "entities"),
     "v3_portfolio_weights": ("runs", "book_weights", "entities"),
     "v3_portfolio_outcomes": ("runs", "outcomes", "entities"),
+    "v3_quarterly_income": ("fundamentals", "catalog", "entities"),
+    "v3_annual_balance_sheet": ("fundamentals", "catalog", "entities"),
+    "v3_annual_cash_flow": ("fundamentals", "catalog", "entities"),
+    "v3_shareholding": ("fundamentals", "catalog", "entities"),
+    "v3_banking_metrics": ("fundamentals", "catalog", "entities"),
+    "v3_fundamentals_screener": ("fundamentals", "catalog", "entities"),
+    "v3_analyst_consensus": ("estimates", "catalog", "entities"),
 }
 
 
