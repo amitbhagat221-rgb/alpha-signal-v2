@@ -45,3 +45,4 @@ paths:
 **Disk and long writers**
 - `run.sh sweep` clears week-old scratchpads; `DISK_LOW` pages. A DB copy you truly need goes in a worktree and is deleted the same session.
 - Long writers include panel rebuilds, `datamodel.sync` and backfills — one at a time.
+- Decisions (`runs` / `picks` / `book_weights` / `outcomes`) and the step log are written by their producers (`datamodel/decisions.py`, `steplog.py`); never mirror a dual-written table back from its legacy twin, and build step-log SQL on `steplog.source()` (ADR 0088).
