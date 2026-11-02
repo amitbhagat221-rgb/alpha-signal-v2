@@ -71,7 +71,7 @@ MARKETS = {u: {"exchange": ex, "spot": key} for u, ex, key in kq.MARKETS}
 MODES = ("off", "shadow", "approve", "auto")
 LIVE_MODES = ("approve", "auto")
 EDITABLE = ("mode", "lots_cap", "margin_buffer_rs", "weekly_loss_limit_rs", "kill", "adopt_manual_nifty",
-            "vix_halt", "vix_halve", "wing_pct", "wing_max_share_pct")
+            "vix_halt", "vix_halve", "wing_pct", "wing_max_share_pct", "closeall_hold_below")
 FINAL = ("COMPLETE", "CANCELLED", "REJECTED")
 WRITE_CALLS = ("place_order", "modify_order", "cancel_order")
 TICK = ob.TICK
@@ -165,6 +165,11 @@ def set_setting(key, value, by="cli"):
     if key == "wing_max_share_pct":
         if not isinstance(value, (int, float)) or isinstance(value, bool) or not 5 <= value <= 100:
             raise ValueError("wing_max_share_pct must be a % of the credit between 5 and 100")
+    if key == "closeall_hold_below" and value is not None:
+        spots = {m["spot"] for m in MARKETS.values()}
+        if (not isinstance(value, dict) or set(value) - spots
+                or any(not isinstance(v, (int, float)) or isinstance(v, bool) or v <= 0 for v in value.values())):
+            raise ValueError(f"closeall_hold_below is {{spot key: level}} for {sorted(spots)}, or null")
     put_state(key, value, by)
     return value
 
@@ -1308,8 +1313,27 @@ def buyback(ctx, u="NIFTY"):
 
 
 def closeall(ctx):
-    """Stop + buy back every open tagged (and shadow) short leg now. Long wings stay: they only gain."""
+    """Stop + buy back every open tagged (and shadow) short leg now. Long wings stay: they only gain.
+    `closeall_hold_below` ({spot key: level}, one-shot, cleared by this run): when an index quotes below its
+    level the legs are HELD instead (2026-11-03: Amit's "if it gaps down 0.25 % or more don't close")."""
     s = ctx["settings"]
+    hold = s.get("closeall_hold_below")
+    if hold:
+        try:
+            client(ctx)
+        except NoKiteSession:
+            return outcome(ctx, "ALL", "failed", "no Kite login today",
+                           f"Close-all could not run: log in to Kite ({LOGIN_PAGE}) and press it again, or close in Kite by hand.",
+                           urgent=True)
+        set_setting("closeall_hold_below", None, by=ctx["step"])
+        px = {k: v.get("last_price") for k, v in call(ctx, "ltp", list(hold)).items()}
+        low = {k: (px[k], f) for k, f in hold.items() if px.get(k) is not None and px[k] < f}
+        if low:
+            text = "; ".join(f"{k} {p:,.2f} < {f:,.2f}" for k, (p, f) in low.items())
+            put_state("closeall_hold", {"at": _utc(), "date": ctx["today"], "quotes": px, "below": hold}, ctx["step"])
+            return outcome(ctx, "ALL", "skipped", f"holding: {text}",
+                           f"Close-all HELD: {text} (the gap-down case). The legs stay; the 15:08 buy-back takes them.")
+        runlog.note("options_live closeall: " + "; ".join(f"{k} {px.get(k)} ≥ {f:,.2f}" for k, f in hold.items()) + " — closing")
     set_kill(True, "Close-all", ctx["step"])
     todo = [l for l in legs("status = 'OPEN' AND net_qty < 0") if l["source"] in ("shadow", "live")]
     if not todo:

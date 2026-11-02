@@ -204,6 +204,7 @@ OPTIONS_LIVE = {
     # expiry: 2026-11-05, 11-19, 12-24); otherwise it expires. Done before the 15:12 NIFTY entry.
     "sensex_buyback": {"start": "15:00", "final": "15:06", "end": "15:07"},
     "closeall_minutes": 5,                 # Close-all: re-price this long, the last minute aggressive
+    "closeall_hold_below": None,           # one-shot {spot key: level}: Close-all holds instead when the index quotes below it
     "reprice_every_s": 20,
     "approval_poll_s": 10,
     "min_sell_frac": 0.5,                  # a SELL is never re-priced below this share of its first mid

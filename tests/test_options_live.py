@@ -1436,3 +1436,25 @@ def test_a_wing_sold_by_hand_is_booked_live_and_noted_not_a_mismatch(conn):
     ok, _ = run("reconcile", fake, Clock(FRI, "15:50"))
     assert ok["status"] == "ok" and "CE wing sold by hand (0 of 65" in ok["detail"] and not ol.settings()["kill"]
     assert "PE wing" not in ok["detail"]                                  # the untouched put wing is neither spare nor short
+
+
+def test_closeall_holds_on_a_gap_down_when_asked_once(conn):
+    fake = _tuesday_broker()
+    _enter_nifty_friday(conn, fake, "auto")
+    prev = fake.spot["NSE:NIFTY 50"]
+    floor = prev * (1 - 0.0025)
+    ol.set_setting("closeall_hold_below", {"NSE:NIFTY 50": floor}, by="test")
+    fake.spot["NSE:NIFTY 50"] = prev * 0.995                              # opens 0.5% down: hold
+    res, ctx = run("closeall", fake, Clock(TUE, "09:16"))
+    assert res["status"] == "skipped" and "holding" in res["detail"], res
+    assert not _placed(fake) and not ol.settings()["kill"] and "HELD" in ctx["sent"][-1][0]
+    assert ol.settings()["closeall_hold_below"] is None                   # one-shot: a later Close-all closes
+    ol.set_setting("closeall_hold_below", {"NSE:NIFTY 50": floor}, by="test")
+    fake.spot["NSE:NIFTY 50"] = prev                                      # flat open: close
+    res, _ = run("closeall", fake, Clock(TUE, "09:17"))
+    assert res["status"] == "ok" and len(_placed(fake)) == 2 and ol.settings()["kill"]
+    assert ol.settings()["closeall_hold_below"] is None
+    with pytest.raises(ValueError):
+        ol.set_setting("closeall_hold_below", {"NSE:NIFTY 50": -1})
+    with pytest.raises(ValueError):
+        ol.set_setting("closeall_hold_below", {"BSE:FOO": 100})
