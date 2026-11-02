@@ -34,11 +34,16 @@ Calibrated as in the feasibility study: strike distance and credit in units of V
 | Width (exp2) | Win % | Ann % margin | 1-in-100 day | Losing days of 2,301 | ≤ −10 % | ≤ −30 % | Worst day | Worst eats |
 |---|---|---|---|---|---|---|---|---|
 | 2.0σ | 95.5 | 11.1 | −7.6 % | 104 (4.5 %) | 15 | 2 | −45 % (2019-09-19, +8.4 %) | 4.1 years |
+| 2.5σ | 98.0 | 9.9 | −3.5 % | 45 (2.0 %) | 11 | 3 ≤ −20 % | −40 % (2019-09-19) | 4.0 years |
 | 3.0σ | 99.1 | 8.2 | +0.1 % | 20 (0.9 %) | 5 | 1 | −34 % (2019-09-19) | 4.1 years |
 
 - The worst days are the same days: the +8.4 % tax-cut rally (2019-09-19 → 23), 2015-08-20 (−6.7 %), 2020-03-05 and 03-09 (−7 to −8 %), 2016-02-29 (+5.5 %), 2018-10-03 (−5 %). A 3σ strike is 3 % away; a 7 % day goes through it as surely as through a 2σ strike, only with 1 % less intrinsic loss and half the premium banked beforehand.
 - **Worst-day loss divided by yearly income is 4.0–4.1 years at every width from 1.5σ to 3σ.** Moving the strikes out buys fewer small losses, not a better ratio of tail to income. That is the efficient-market result the predictability study (research 0019) found from the other direction.
 - By year the ordering holds: 3σ earns 2–8 %/yr less than 2σ in every year but 2016 and 2020, and its worst year-day is always 5–10 points milder.
+
+## And 2.5 sigma? (Amit, same day)
+
+On the chain 2.5σ looks like the sweet spot: 100 of 100 weeks won, ₹578 credit a lot, mean ₹627 a lot after costs (83 % of 2σ's ₹757, because 2σ's four losing weeks cost it ₹34 K a lot), strikes 2.7 % out, worst mark-to-market −0.45 %. In the model it is simply the midpoint: 9.9 %/yr (2σ 11.1, 3σ 8.2), 45 losing days of 2,301 (2σ 104, 3σ 20), 11 days under −10 % (15 / 5), worst day −40 % (−45 / −34), and the worst day still eats 4.0 years of income. For 16 lots: ≈ ₹9 K a week credit, ≈ ₹10 K expected after costs, a −3.5 % week ≈ 0, a March-2020 day ≈ −₹6 L. It is a fair middle, not a free lunch: the chain's 100 % is the same calm window, and the crash-day arithmetic is unchanged.
 
 ## What it means for the live book (16 lots, lot 65, ₹56 L)
 
