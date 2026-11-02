@@ -1368,3 +1368,71 @@ def test_health_flags_an_entry_day_whose_steps_never_ran(conn, monkeypatch):
     ol.set_setting("mode", "shadow", by="test")                               # shadow: silence is not money
     ol.put_state("step:entry:NIFTY", {"date": "2026-10-16", "status": "ok", "detail": "x", "mode": "shadow"}, "t")
     assert ol.health_check()["n_bad"] == 0
+
+
+# ───────────────────────────── hand trades on the live book (2026-11-02) ─────────────────────────────
+
+def _placed(fake):
+    return [c[2]["tradingsymbol"] for c in fake.calls if c[0] == "place_order"]
+
+
+def test_a_leg_closed_by_hand_in_kite_is_booked_live_and_not_bought_back_again(conn):
+    fake = _tuesday_broker()
+    _enter_nifty_friday(conn, fake, "auto")
+    ce = next(s for s, q in fake.pos.items() if q < 0 and s.endswith("CE"))
+    fake.trades_.append({"trade_id": "H1", "order_id": "HAND1", "tradingsymbol": ce, "transaction_type": "BUY",
+                         "quantity": 65, "average_price": 2.0})          # Amit buys the short call back in Kite, untagged
+    fake.pos[ce] = 0
+    bb, ctx = run("buyback", fake, Clock(TUE, "15:08"), "NIFTY")
+    assert bb["status"] == "ok", bb
+    assert ce not in _placed(fake) and len(_placed(fake)) == 1              # only the put is bought back
+    led = ledger(conn, "underlying = 'NIFTY'")
+    assert set(led.source) == {"live"} and set(led.status) == {"CLOSED"}    # one leg per contract, no manual row
+    assert led[led.tradingsymbol == ce].buy_avg.iloc[0] == 2.0
+    assert ol.rotation_gate(ctx_for(fake, Clock(TUE, "15:16")))[0]
+    ok, _ = run("reconcile", fake, Clock(TUE, "15:50"))
+    assert ok["status"] == "ok" and not ol.settings()["kill"]
+
+
+def test_every_leg_closed_by_hand_means_nothing_to_buy_back(conn):
+    fake = _tuesday_broker()
+    _enter_nifty_friday(conn, fake, "auto")
+    for i, (s, q) in enumerate(list(fake.pos.items())):
+        fake.trades_.append({"trade_id": f"H{i}", "order_id": f"HAND{i}", "tradingsymbol": s, "transaction_type": "BUY",
+                             "quantity": -q, "average_price": 1.0})
+        fake.pos[s] = 0
+    bb, ctx = run("buyback", fake, Clock(TUE, "15:08"), "NIFTY")
+    assert bb["status"] == "ok" and "closed by hand" in bb["detail"] and not _placed(fake)
+    assert ol.rotation_gate(ctx_for(fake, Clock(TUE, "15:16")))[0]
+    assert "can enter" in ctx["sent"][-1][0]
+
+
+def test_buyback_never_buys_more_than_kite_holds(conn):
+    fake = _tuesday_broker()
+    _enter_nifty_friday(conn, fake, "auto")
+    ce = next(s for s, q in fake.pos.items() if q < 0 and s.endswith("CE"))
+    fake.pos[ce] = 0                                                      # closed on a day with no login: the ledger still says short
+    bb, _ = run("buyback", fake, Clock(TUE, "15:08"), "NIFTY")
+    assert ce not in _placed(fake) and len(_placed(fake)) == 1
+    assert bb["status"] == "ok", bb                                       # the put was bought back; the call is not "left"
+    skip = events(conn, "skip")
+    assert list(skip.tradingsymbol) == [ce] and "Kite holds 0 short" in skip.detail.iloc[0]
+    bad, _ = run("reconcile", fake, Clock(TUE, "15:50"))                 # the stale row is reconcile's job, loudly
+    assert bad["status"] == "failed" and ol.settings()["kill"]
+
+
+def test_a_wing_sold_by_hand_is_booked_live_and_noted_not_a_mismatch(conn):
+    fake = FakeKite()
+    run("entry", fake, Clock(FRI, "15:12"), "NIFTY", mode="auto", wing_pct=1.75)
+    wing = next(s for s, q in fake.pos.items() if q > 0 and s.endswith("CE"))
+    fake.trades_.append({"trade_id": "W1", "order_id": "HANDW", "tradingsymbol": wing, "transaction_type": "SELL",
+                         "quantity": 65, "average_price": 1.5})          # the call wing sold at the open, untagged
+    fake.pos[wing] = 0
+    rec, _ = run("record", fake, Clock(FRI, "15:45"))
+    assert rec["status"] == "ok"
+    led = ledger(conn)
+    assert set(led.source) == {"live"}
+    assert led[led.tradingsymbol == wing].status.iloc[0] == "CLOSED"
+    ok, _ = run("reconcile", fake, Clock(FRI, "15:50"))
+    assert ok["status"] == "ok" and "CE wing sold by hand (0 of 65" in ok["detail"] and not ol.settings()["kill"]
+    assert "PE wing" not in ok["detail"]                                  # the untouched put wing is neither spare nor short

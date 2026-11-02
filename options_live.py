@@ -1217,6 +1217,17 @@ def _close_legs(ctx, legs_, deadline, final_at, label):
     """Buy back short legs: shadow legs simulated, real legs (live / adopted manual) as tagged orders."""
     sim = [l for l in legs_ if l["source"] == "shadow"]
     real = [l for l in legs_ if l["source"] != "shadow"]
+    if real:                                        # never buy more than Kite holds short: a leg closed by hand is skipped
+        pos = broker_positions(ctx)
+        for l in real:
+            held = max(0, -int(pos.get(l["tradingsymbol"], 0)))
+            if held < -int(l["net_qty"]):
+                log_event(ctx, "skip", source=l["source"], ticket_id=label, quantity=-int(l["net_qty"]) - held,
+                          transaction_type="BUY", **_leg_fields(l),
+                          detail=f"Kite holds {held} short, the ledger {-int(l['net_qty'])}: only what Kite holds is bought back")
+                l["net_qty"] = -held
+        real = [l for l in real if l["net_qty"] < 0]
+        legs_ = sim + real
     for l in legs_:
         l["qty"] = -int(l["net_qty"])
         l["freeze"] = int(ctx["settings"]["freeze_qty"].get(l["underlying"], 10 ** 9))
@@ -1257,6 +1268,16 @@ def buyback(ctx, u="NIFTY"):
                        f"log in to Kite: {LOGIN_PAGE} — the {u} buy-back has not run. Re-run it before "
                        f"{end}, or {u} expires normally and {nxt} is skipped.", urgent=True)
     real = [l for l in todo if l["source"] != "shadow"]
+    if real:                                        # a leg bought back by hand in Kite today is booked before we size
+        record_fills(ctx)
+        todo = [l for l in legs("underlying = ? AND expiry = ? AND status = 'OPEN' AND net_qty < 0", [u, today])
+                if l["source"] in srcs]
+        real = [l for l in todo if l["source"] != "shadow"]
+        if not todo:
+            put_state(key, {"ok": True, "flat": True, "freed_rs": None, "expected_rs": 0, "mode": ctx["mode"],
+                            "detail": "every short leg was closed by hand in Kite before the buy-back"}, ctx["step"])
+            return outcome(ctx, u, "ok", "nothing to buy back: closed by hand in Kite",
+                           f"{u} buy-back: every short leg was already closed by hand in Kite — {nxt} can enter.")
     before = available(ctx) if real else None
     expected = sum({(l["source"], l["expiry"]): l["margin_rs"] or 0 for l in real}.values())
     res = _close_legs(ctx, todo, _at(ctx, end), _at(ctx, final), f"buyback-{u}-{today}")
@@ -1265,7 +1286,9 @@ def buyback(ctx, u="NIFTY"):
     flat, freed = not left, None
     if real:
         pos = broker_positions(ctx)
-        flat = flat and all(pos.get(l["tradingsymbol"], 0) == 0 for l in real if l["source"] == "live" or "manual" in srcs)
+        # a leg Kite no longer holds short is not open, whatever a stale ledger row says (reconcile reports the gap)
+        left = [l for l in left if l["source"] == "shadow" or pos.get(l["tradingsymbol"], 0) < 0]
+        flat = not left and all(pos.get(l["tradingsymbol"], 0) == 0 for l in real if l["source"] == "live" or "manual" in srcs)
         for _ in range(3):                          # margin release can lag the fill by a few seconds
             freed = available(ctx) - before
             if expected <= 0 or freed >= s["margin_freed_frac"] * expected:
@@ -1297,6 +1320,11 @@ def closeall(ctx):
         return outcome(ctx, "ALL", "failed", "no Kite login today",
                        f"Close-all could not run: log in to Kite ({LOGIN_PAGE}) and press it again, or close in Kite by hand.",
                        urgent=True)
+    if any(l["source"] != "shadow" for l in todo):
+        record_fills(ctx)                           # a leg already closed by hand in Kite is not bought again
+        todo = [l for l in legs("status = 'OPEN' AND net_qty < 0") if l["source"] in ("shadow", "live")]
+        if not todo:
+            return outcome(ctx, "ALL", "ok", "nothing open", "Close-all: every tagged leg was already closed by hand. Kill switch is on.")
     end = ctx["now"]() + timedelta(minutes=s["closeall_minutes"])
     res = _close_legs(ctx, todo, end, end - timedelta(minutes=1), f"closeall-{ctx['today']}")
     left = [l for l in legs("status = 'OPEN' AND net_qty < 0") if l["source"] in ("shadow", "live")]
@@ -1309,30 +1337,41 @@ def closeall(ctx):
 
 # ─────────────────────────── record, mark, settle, reconcile ───────────────────────────
 
-def record(ctx):
-    """Today's Kite trades on NIFTY / SENSEX options → fill events (tagged = live, else manual);
-    then any manual position the ledger does not explain is adopted from Kite's positions."""
-    try:
-        client(ctx)
-    except NoKiteSession:
-        return outcome(ctx, "ALL", "idle", "no Kite login today: nothing to record")
-    snapshot_margin(ctx)
+def record_fills(ctx, inst=None):
+    """Today's Kite trades on NIFTY / SENSEX options → fill events, then the ledger is rebuilt. A fill is live
+    when its order carries our tag OR its contract is one the live book holds: a leg bought back or a wing sold
+    by hand in Kite is still OUR position, so the buy-back, shape check and P&L see one leg per contract. Any
+    other untagged fill is manual (Amit's own trades). → the number of new fill events."""
     tag = ctx["settings"]["tag"]
-    inst = option_instruments(ctx)
+    inst = inst or option_instruments(ctx)
     tagged = {str(o["order_id"]) for o in call(ctx, "orders") if tag in ([o.get("tag")] + list(o.get("tags") or []))}
     placed = _rows("SELECT order_id, source FROM option_live_orders WHERE event = 'place' AND trade_date = ?", [ctx["today"]])
     mine = dict(zip(placed.get("order_id", []), placed.get("source", [])))    # an adopted manual leg's buy-back stays manual
+    live_syms = {l["tradingsymbol"] for l in legs("source = 'live' AND expiry >= ?", [ctx["today"]])}
     n_fill = 0
     for t in call(ctx, "trades"):
         meta = inst.get(t.get("tradingsymbol"))
         if not meta:
             continue
         oid = str(t["order_id"])
-        src = mine.get(oid) or ("live" if oid in tagged else "manual")
+        src = mine.get(oid) or ("live" if oid in tagged or t["tradingsymbol"] in live_syms else "manual")
         n_fill += log_event(ctx, "fill", source=src, trade_id=str(t["trade_id"]),
                             order_id=oid, transaction_type=t["transaction_type"], quantity=int(t["quantity"]),
                             price=float(t["average_price"]), **meta, detail={"fill_timestamp": str(t.get("fill_timestamp"))})
     rebuild_ledger()
+    return n_fill
+
+
+def record(ctx):
+    """Today's Kite fills → the ledger (record_fills); then any manual position the ledger does not explain
+    is adopted from Kite's positions."""
+    try:
+        client(ctx)
+    except NoKiteSession:
+        return outcome(ctx, "ALL", "idle", "no Kite login today: nothing to record")
+    snapshot_margin(ctx)
+    inst = option_instruments(ctx)
+    n_fill = record_fills(ctx, inst)
     led = {}
     live_syms = set()
     for l in legs("source IN ('live', 'manual') AND expiry >= ?", [ctx["today"]]):
@@ -1536,25 +1575,39 @@ def reconcile(ctx):
 def shape_check(today):
     """The live book's shape, every reconcile → (problems, notes). Problems: a leg past its expiry still open (settle
     missed), short calls ≠ short puts for one expiry, a wing smaller than the short it covers. Notes: spare wings
-    (a partly filled wing, or 2026-10-30's misread iceberg: 2,080 wing units against 1,040 sold)."""
+    (a partly filled wing, or 2026-10-30's misread iceberg: 2,080 wing units against 1,040 sold) and a wing sold
+    by hand after entry (2026-11-02: the call wings sold at the open, the put wings mostly)."""
     problems, notes = [], []
     stale = legs("source = 'live' AND status = 'OPEN' AND expiry < ? AND net_qty != 0", [today])
     if stale:
         problems.append("not settled after expiry: " + ", ".join(sorted({f"{l['underlying']} {l['expiry']}" for l in stale}))
                         + " (run `run.sh options_live settle`)")
-    book = {}
-    for l in legs("source = 'live' AND status = 'OPEN' AND expiry >= ? AND net_qty != 0", [today]):
+    book, rows = {}, {}
+    for l in legs("source = 'live' AND status != 'SETTLED' AND expiry >= ?", [today]):
+        rows.setdefault((l["underlying"], l["expiry"], l["option_type"]), []).append(l)
+        if l["status"] != "OPEN" or not l["net_qty"]:
+            continue
         side = book.setdefault((l["underlying"], l["expiry"]), {"CE": {"short": 0, "long": 0}, "PE": {"short": 0, "long": 0}})
         side[l["option_type"]]["short" if l["net_qty"] < 0 else "long"] += abs(int(l["net_qty"]))
+    # a wing (the far strike of its side, when there are two) that carries sells was reduced by hand after entry
+    reduced = set()
+    for (u, e, ot), ls in rows.items():
+        if len(ls) >= 2:
+            wing = (max if ot == "CE" else min)(ls, key=lambda l: l["strike"])
+            if (wing["buy_qty"] or 0) and (wing["sell_qty"] or 0):
+                reduced.add((u, e, ot))
     for (u, e), x in sorted(book.items()):
         if x["CE"]["short"] != x["PE"]["short"]:
             problems.append(f"{u} {e}: short calls {x['CE']['short']} ≠ short puts {x['PE']['short']} units")
         winged = x["CE"]["long"] or x["PE"]["long"]
         for ot in ("CE", "PE"):
-            if winged and x[ot]["long"] < x[ot]["short"]:
-                problems.append(f"{u} {e}: {ot} wing {x[ot]['long']} units covers only part of {x[ot]['short']} sold")
-            elif winged and x[ot]["long"] > x[ot]["short"]:
-                notes.append(f"{u} {e}: {x[ot]['long'] - x[ot]['short']} spare {ot} wing units (they only add protection)")
+            long_, short = x[ot]["long"], x[ot]["short"]
+            if (u, e, ot) in reduced and long_ < short:
+                notes.append(f"{u} {e}: {ot} wing sold by hand ({long_} of {short} sold units still covered)")
+            elif winged and long_ < short:
+                problems.append(f"{u} {e}: {ot} wing {long_} units covers only part of {short} sold")
+            elif winged and long_ > short:
+                notes.append(f"{u} {e}: {long_ - short} spare {ot} wing units (they only add protection)")
     return problems, notes
 
 
