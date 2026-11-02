@@ -61,6 +61,20 @@ On the chain 2.5σ looks like the sweet spot: 100 of 100 weeks won, ₹578 credi
 - Per rupee of margin, 2σ earns 1.8× what 3σ earns and has the same tail ratio, so on the numbers 2σ plus wings and a lot cap beats 3σ naked. 3σ makes sense only if the goal is **never to see a weekly loss on a normal week**, and the price of that is roughly half the income.
 - A 3σ strike at ₹7 pays ₹20 brokerage a leg plus GST and slippage: at 16 lots the fixed costs are small, at 1–2 lots they take a third of the credit. Below ~5 lots 3σ is not worth trading.
 
+## Margin per lot by width, 32 lots (Amit, same day)
+
+Kite had no login on 2026-11-02, so only the live strikes have a Kite number (2026-10-30 quote, NIFTY 23500 CE / 22400 PE for 11-03, forward 23,021, lot 65): **₹1,61,596 a lot naked**, ₹84,743 winged at 1.75 %, expiry-day extra ₹59,854 (SEBI's 2 % per short leg). Of the naked figure ₹59,854 is the exposure margin (2 % of notional per short leg, the same at every strike) and ₹1,01,741 is SPAN. The 2.5σ and 3σ numbers are an estimate: the exchange's 16-scenario SPAN method priced on that day's live quotes, calibrated so the live strikes reproduce Kite's SPAN, with NSE's short-option minimum of 3 % of notional per short leg (₹89,782 a strangle) as the floor. **Check with `options_live quote` on the next login day.**
+
+| Width (strikes on 10-30) | Credit ₹/lot at bid | SPAN ₹/lot | Margin ₹/lot | Expiry-day peak ₹/lot | 32 lots entry | 32 lots peak | 32 lots credit / week |
+|---|---|---|---|---|---|---|---|
+| 2σ, live 23500 / 22400 (Kite) | 991 | 1,01,741 | 1,61,596 | 2,21,450 | ₹51.7 L | ₹70.9 L | ₹31.7 K |
+| 2.5σ, 23750 / 22300 (est.) | 552 | 86,471 → floor 89,782 | ≈ 1,49,600 | ≈ 2,09,500 | ≈ ₹47.9 L | ≈ ₹67.0 L | ₹17.7 K |
+| 3σ, 23900 / 22150 (est.) | 383 | 76,995 → floor 89,782 | ≈ 1,49,600 | ≈ 2,09,500 | ≈ ₹47.9 L | ≈ ₹67.0 L | ₹12.3 K |
+
+- Moving the strikes out saves little margin, about ₹12 K a lot (7 %), because the SPAN part hits the short-option minimum and the exposure margin and expiry-day extra do not move with the strike. Margin per lot is the same at 32 lots as at 1 (no hedge credit on a naked strangle).
+- On ₹56.2 L with the ₹2 L buffer, 32 naked lots do not fit at any width on expiry day (peak ₹67–71 L): 25 lots is the most at every width. Winged at 1.75 % (Kite ₹84,743 a lot, peak ₹1,44,597) fits 37.
+- Margin per rupee of credit: 2σ earns ₹991 on ₹1.62 L (0.61 % a week), 2.5σ ₹552 on ₹1.50 L (0.37 %), 3σ ₹383 on ₹1.50 L (0.26 %). The margin saving does not pay for the lost premium.
+
 ## Limits
 
 - No bid/ask: slippage is assumed max(₹0.05, 1 %) a leg. At ₹4–7 a far strike's real spread can be ₹0.10–0.20, which would push the 3σ cost share to 15–20 %.
