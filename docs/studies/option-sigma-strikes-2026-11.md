@@ -75,6 +75,22 @@ Kite had no login on 2026-11-02, so only the live strikes have a Kite number (20
 - On ₹56.2 L with the ₹2 L buffer, 32 naked lots do not fit at any width on expiry day (peak ₹67–71 L): 25 lots is the most at every width. Winged at 1.75 % (Kite ₹84,743 a lot, peak ₹1,44,597) fits 37.
 - Margin per rupee of credit: 2σ earns ₹991 on ₹1.62 L (0.61 % a week), 2.5σ ₹552 on ₹1.50 L (0.37 %), 3σ ₹383 on ₹1.50 L (0.26 %). The margin saving does not pay for the lost premium.
 
+## With crash wings (1.75 % beyond the shorts, as live) — payoff and margin (Amit, same day)
+
+Same three widths, long wings 1.75 % of the forward beyond each short, as the live book runs. Margin = Kite's winged figure (wing width + the 2 %-per-leg exposure margin; Kite quoted ₹84,743 on the live strikes on 10-30). Chain = real trades 2024-11 → 2026-10 (exp2); model = 2015–2024 replay with the loss capped at the wings.
+
+| Width, winged | Net credit ₹/lot (10-30 quotes) | Charges ₹/lot | Max loss ₹/lot | Margin ₹/lot | Chain: mean ₹/lot a week | Chain win % | Chain worst ₹/lot | Model ann % margin | Model worst day | Worst eats |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 2σ (live) | 676 (975 − 299) | 112 | 28,574 | 89,104 | 317 | 96 | −7,310 | 6.4 | −31 % | 4.8 years |
+| 2.5σ | 318 (552 − 234) | 109 | 28,932 | 89,104 | 261 | 99 | −7 | 3.9 | −31 % | 8.1 years |
+| 3σ | 192 (383 − 192) | 108 | 29,058 | 89,104 | 115 | 94 | −53 | 1.3 | −32 % | 24.8 years |
+
+- **Wings make the worst case the same at every width:** about ₹29 K a lot, ₹9.3 L on 32 lots, whether the shorts are at 2σ or 3σ, because the loss is capped by the wing distance, not the short distance. Margin is the same too: ₹89 K a lot, 32 lots = ₹28.5 L at entry and ₹47.7 L at the expiry-day peak, which fits ₹56.2 L (37 lots fit).
+- **What the width changes is only the premium left after the wings.** The wings cost ₹299 a lot at 2σ, ₹234 at 2.5σ and ₹192 at 3σ, but the shorts pay ₹975 / ₹552 / ₹383, so the net is ₹676 / ₹318 / ₹192. At 3σ the fixed charges (₹108 a lot for four legs) take more than half the net credit, 6 % of weeks lose a few rupees to charges, and the model earns 1.3 %/yr on margin against a 32 % cap: one bad day eats 25 years of income.
+- **So with wings on, moving the shorts out is a pure give-up.** 2σ winged on the chain: ₹317 a lot a week, worst −₹7.3 K (the 2026-05-08 week, 3.5 % down, the shorts breached but the wing never reached). 2.5σ winged: ₹261 a lot, no real losing week. 3σ winged: ₹115. On 32 lots that is ≈ ₹10 K / ₹8 K / ₹4 K a week expected, all with the same ₹9.3 L worst case and the same ₹47.7 L peak margin.
+
+Verdict: wings decide the worst case and the margin; the short width decides the income. Keep the shorts at 2σ (or 2.5σ if the four-a-year ₹7 K-a-lot weeks bother you) and leave the wings on. 3σ plus wings pays for the insurance twice.
+
 ## Limits
 
 - No bid/ask: slippage is assumed max(₹0.05, 1 %) a leg. At ₹4–7 a far strike's real spread can be ₹0.10–0.20, which would push the 3σ cost share to 15–20 %.
