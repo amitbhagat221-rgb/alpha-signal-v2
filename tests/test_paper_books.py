@@ -39,7 +39,7 @@ def test_buy_sell_rotation_costs_and_tax(toy):
     ranks = {sessions[0]: [("SMALL", {"AAA": 1, "BBB": 2, "CCC": 3}, 2, 4)],
              sessions[1]: [("SMALL", {"AAA": 1, "CCC": 2, "BBB": 5}, 2, 4)],
              sessions[2]: [("SMALL", {"AAA": 1, "CCC": 2, "BBB": 5}, 2, 4)]}
-    r = pb.simulate("toy", {}, ranks, prices, meta, set(), bench, sessions, sessions[-1], capital=100_000.0)
+    r, frozen = pb.simulate("toy", {}, ranks, prices, meta, set(), bench, sessions, sessions[-1], capital=100_000.0)
     sides = [(t["date"], t["side"], t["sid"]) for t in r["trades"]]
     assert sides[:2] == [(sessions[0], "BUY", "AAA"), (sessions[0], "BUY", "BBB")]
     assert (sessions[1], "SELL", "BBB") in sides and (sessions[1], "BUY", "CCC") in sides
@@ -57,19 +57,37 @@ def test_buy_sell_rotation_costs_and_tax(toy):
     assert r["ret"] == pytest.approx(r["nav"] / 100_000 - 1, abs=1e-4)
 
 
+def test_frozen_record_is_not_retraded_when_the_scores_change(toy):
+    """The first run freezes June–July; a later run with DIFFERENT June/July ranks keeps those trades and only
+    trades the new anchor."""
+    prices, meta, bench, sessions = toy
+    first = {sessions[0]: [("SMALL", {"AAA": 1, "BBB": 2, "CCC": 3}, 2, 4)], sessions[1]: [("SMALL", {"AAA": 1, "BBB": 2, "CCC": 3}, 2, 4)]}
+    r1, frozen = pb.simulate("toy", {}, first, prices, meta, set(), bench, sessions[:2], sessions[1], capital=100_000.0)
+    assert frozen["last_anchor"] == sessions[1] and {h["sid"] for h in r1["holdings"]} == {"AAA", "BBB"}
+    frozen = json.loads(json.dumps(frozen))                                       # as it comes back from the state file
+    changed = {sessions[0]: [("SMALL", {"CCC": 1, "BBB": 2, "AAA": 9}, 2, 4)],      # a rebuilt panel re-ranks June
+               sessions[1]: [("SMALL", {"CCC": 1, "BBB": 2, "AAA": 9}, 2, 4)],
+               sessions[2]: [("SMALL", {"AAA": 1, "CCC": 2, "BBB": 9}, 2, 4)]}
+    r2, frozen2 = pb.simulate("toy", {}, changed, prices, meta, set(), bench, sessions, sessions[2], capital=100_000.0, state=frozen)
+    june = [t for t in r2["trades"] if t["date"] == sessions[0]]
+    assert {t["sid"] for t in june} == {"AAA", "BBB"}                             # June stays as it was traded
+    assert [t["sid"] for t in r2["trades"] if t["date"] == sessions[2] and t["side"] == "SELL"] == ["BBB"]
+    assert frozen2["last_anchor"] == sessions[2] and len(frozen2["history"]) == 3
+
+
 def test_slow_rule_never_sells_inside_twelve_months(toy, monkeypatch):
     prices, meta, bench, sessions = toy
     monkeypatch.setitem(pb.BOOKS, "toy", dict(label="Toy", tier="SMALL", kind="slow", bench={"IDX": 1.0}, N=2, rule="", min_hold_m=12))
     ranks = {d: [("SMALL", {"AAA": 1, "BBB": 2, "CCC": 3} if d == sessions[0] else {"AAA": 1, "CCC": 2, "BBB": 50}, 2, 6)]
              for d in sessions}
-    r = pb.simulate("toy", {}, ranks, prices, meta, set(), bench, sessions, sessions[-1], capital=100_000.0)
+    r, _ = pb.simulate("toy", {}, ranks, prices, meta, set(), bench, sessions, sessions[-1], capital=100_000.0)
     assert r["sells"] == 0 and r["rotations"] == 0 and {h["sid"] for h in r["holdings"]} == {"AAA", "BBB"}
 
 
 def test_trusts_and_illiquid_names_are_never_bought(toy):
     prices, meta, bench, sessions = toy
     ranks = {d: [("SMALL", {"AAA": 1, "BBB": 2, "CCC": 3}, 2, 4)] for d in sessions}
-    r = pb.simulate("toy", {}, ranks, prices, meta, {"AAA"}, bench, sessions, sessions[-1], capital=100_000.0)
+    r, _ = pb.simulate("toy", {}, ranks, prices, meta, {"AAA"}, bench, sessions, sessions[-1], capital=100_000.0)
     assert {h["sid"] for h in r["holdings"]} == {"BBB", "CCC"}                    # the trust is skipped, the next rank fills
 
 

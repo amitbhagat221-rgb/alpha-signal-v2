@@ -32,6 +32,16 @@
   .pb-legend i { display: inline-block; width: 16px; height: 0; border-top: 2px solid var(--accent); vertical-align: middle; margin-right: 6px; }
   .pb-legend i.bench { border-top-style: dashed; border-top-color: var(--text-muted); }
   .pb-hold { min-width: 0; } .pb-trades { margin-top: 4px; }
+  .pb-ev { margin-top: 4px; }
+  .pb-evbox { margin-top: 12px; padding: 10px 12px; border: 1px dashed var(--border); border-radius: 10px; }
+  .pb-evgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; margin: 6px 0 8px; }
+  .pb-evsvg { width: 100%; height: 90px; display: block; margin: 4px 0 6px; }
+  .pb-evsvg .zero { stroke: var(--border); stroke-width: 1; }
+  .pb-evsvg rect.bt.up { fill: var(--text-muted); opacity: 0.45; } .pb-evsvg rect.bt.dn { fill: var(--text-muted); opacity: 0.25; }
+  .pb-evsvg rect.live.up { fill: var(--accent); } .pb-evsvg rect.live.dn { fill: var(--red); opacity: 0.8; }
+  .pb-evsvg .livemark { stroke: var(--accent); stroke-width: 1; stroke-dasharray: 3 3; }
+  .pb-evsvg .livelab { fill: var(--accent); font-size: 10px; font-weight: 700; }
+  .pb-evsvg .axis text { fill: var(--text-muted); font-size: 10px; font-family: 'JetBrains Mono', monospace; }
   .pb-two { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 16px; }
   .pb-sum td:first-child, .pb-sum th:first-child { font-family: inherit; }
   .pb-sum td b { font-family: inherit; }
@@ -52,11 +62,19 @@
   Each book is rebalanced once a month on the first trading day. Every trade pays Zerodha's real charges (STT 0.1 % each way, stamp, exchange, DP) plus half the bid-ask spread and
   price impact for the stock's own liquidity; the tax line is 20.8 % short-term capital gains (every holding is under a year). No money is at risk.
   {% if d.stale %}<span class="ob-bad">Stale: the monthly refresh was missed ({{ d.age_days }} days old).</span>{% endif %}</div>
+<div class="ob-card" style="border-left: 3px solid var(--amber);">
+  <b>Two views, read them differently.</b>
+  <div class="ob-muted" style="margin-top: 4px; line-height: 1.55;">The <b>money view</b> (tiles, chart, holdings) is one basket of 20 names: in Small caps over five months a random 20-name basket lands anywhere
+    between about −12 % and +16 %, so a few points between weight options is luck, not skill. The <b>evidence view</b> on each card judges the score on the <b>whole tier every month</b>
+    (1,500 names, not 20): does a higher score mean a higher return next month, and by how much does the top basket beat the tier on average? That series runs from the first
+    walk-forward month in 2022 to the last matured month, with the months since June 2026 marked as live, so you can see whether the live months look like the backtest.
+    {% if d.replay_until %}Months up to {{ d.replay_until|short_date }} were <b>replayed</b> on the research panels on {{ d.record_since|short_date }}; from the next anchor the record is <b>frozen</b> (each month's trades are written once and never recomputed).{% endif %}</div>
+</div>
 
 <div class="ob-card">
   <div class="ob-row"><b>All six at a glance</b> <span class="ob-muted">default option of each book · {{ d.start|short_date }} → {{ d.asof|short_date }} · returns on ₹10 L</span></div>
   <div class="ob-scroll"><table class="ob-table pb-sum" id="pb-summary">
-    <thead><tr><th>Book</th><th class="pb-hide-sm">Benchmark</th><th>Return</th><th>Index</th><th>Excess</th><th>Rotations</th><th class="pb-hide-sm">Turnover</th><th>STT</th><th class="pb-hide-sm">All costs</th><th>STCG if sold</th><th>After tax</th><th class="pb-hide-sm">Hit rate</th></tr></thead>
+    <thead><tr><th>Book</th><th class="pb-hide-sm">Benchmark</th><th>Return</th><th>Index</th><th>Excess</th><th>Rotations</th><th class="pb-hide-sm">Turnover</th><th>STT</th><th class="pb-hide-sm">All costs</th><th>STCG if sold</th><th>After tax</th><th class="pb-hide-sm">Hit rate</th><th>Score IC · t (months)</th><th>Live IC</th><th class="pb-hide-sm">Luck pct</th></tr></thead>
     <tbody></tbody>
   </table></div>
   <p class="pb-small" style="margin: 8px 0 0;">Excess = return minus the benchmark. After tax = if every holding were sold today and the short-term gain taxed; a book under water pays no tax. Hit rate = share of names (closed and open) that are up.
@@ -77,6 +95,8 @@
     <dt>STT and all costs</dt><dd>Securities Transaction Tax is 0.1 % of every buy and every sell on delivery. "All costs" adds the other statutory charges (stamp duty on buys, exchange and SEBI fees, the per-sell DP charge), half the bid-ask spread and square-root price impact at the stock's own 20-day traded value (the cost model calibrated on the account's real fills, plan 0024). The NAV already carries all of it.</dd>
     <dt>STCG</dt><dd>Short-term capital gains tax: 20 % plus the 4 % cess on the net gain of names held under 12 months, which is every name here. "Paid" is on gains already realised by sells; "if sold" adds today's unrealised gain. Realised losses offset realised gains; a net loss means no tax.</dd>
     <dt>Benchmark</dt><dd>The tier's own NSE price index bought at the June close: NIFTY MIDCAP 150 for Mid books, NIFTY SMALLCAP 250 for Small and multibagger books, half each for the published-picks book. A price index carries no dividends while the books' prices do, so the excess is flattered by roughly one percent a year.</dd>
+    <dt>Rank IC and "top 20 minus the tier"</dt><dd>Each month, every stock in the tier is scored and then its return to the next month is observed. The rank IC is the rank correlation between the two (0 = the score says nothing; 0.05 a month is a useful score; the t-statistic says how surely it is above zero given how many months there are). "Top N minus the tier" is the return of the N best-scored names that month minus the average of every name in the tier, in percentage points: the basket's edge before costs. This uses every name every month, so it is the measure to trust; one 20-name basket is not.</dd>
+    <dt>Luck percentile</dt><dd>The book's return compared with thousands of random baskets of the same size drawn from the same tier over the same window. The 50th percentile is an average dart throw; only a book past the 80th or so did something chance rarely does.</dd>
     <dt>Weight options</dt><dd>Each card's buttons swap the score that ranks the stocks; the rule (how many names, when to sell) stays. The default is the pre-registered rule with the strongest 2022–26 book evidence (slow select, fast select), never the one that happens to lead this window; each option's line quotes what it earned in the 2022–26 book test. The walk-forward options (fast select, slow select, IC-weighted, blend) chose their factors from data before each month; slow v2 and fast v1 are fixed weights chosen in October 2026, so they have seen these months; "as published" is the cockpit's own daily record.</dd>
   </dl>
 </div>
@@ -99,6 +119,8 @@
   const tone = (x) => x > 0 ? 'pb-pos' : (x < 0 ? 'pb-neg' : '');
   const esc = (s) => String(s).replace(/[&<>"]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c]));
   const shortDate = (iso) => { const d = new Date(iso + 'T00:00:00'); return d.toLocaleDateString('en-GB', {day: 'numeric', month: 'short'}); };
+  const evSummary = (e) => !e || !e.all || !e.all.months ? '—' : `${e.all.ic.toFixed(3)} · t ${e.all.t == null ? '—' : e.all.t.toFixed(1)} (${e.all.months})`;
+  const evLive = (e) => !e || !e.live || !e.live.months ? 'not yet' : `${e.live.ic.toFixed(3)} (${e.live.months} mo, ${(e.live.hit * 100).toFixed(0)}% up)`;
   const monthsAhead = (h) => { let n = 0, t = 0; for (let i = 1; i < h.length; i++) { t++; if (h[i].nav / h[0].nav >= h[i].bench / h[0].bench) n++; } return [n, t]; };
 
   function summary() {
@@ -108,7 +130,8 @@
       return `<tr><td><b>${esc(b.label)}</b><div class="pb-small">${esc(v.label)}</div></td><td class="pb-small pb-hide-sm">${esc(b.bench_label)}</td>
         <td class="${tone(v.ret)}">${fmtPct(v.ret)}</td><td>${fmtPct(v.bench_ret)}</td><td class="${tone(v.excess)}"><b>${fmtPct(v.excess)}</b></td>
         <td>${v.rotations}</td><td class="pb-hide-sm">${(v.turnover * 100).toFixed(0)}%</td><td>${fmtInr(v.costs.stt)}</td><td class="pb-hide-sm">${fmtInr(v.costs.total)}</td>
-        <td>${fmtInr(v.tax_if_sold)}</td><td class="${tone(v.ret_if_sold_after_tax)}">${fmtPct(v.ret_if_sold_after_tax)}</td><td class="pb-hide-sm">${(v.hit_rate * 100).toFixed(0)}%</td></tr>`;
+        <td>${fmtInr(v.tax_if_sold)}</td><td class="${tone(v.ret_if_sold_after_tax)}">${fmtPct(v.ret_if_sold_after_tax)}</td><td class="pb-hide-sm">${(v.hit_rate * 100).toFixed(0)}%</td>
+        <td>${evSummary(v.evidence)}</td><td>${evLive(v.evidence)}</td><td class="pb-hide-sm">${v.luck ? (v.luck.pct * 100).toFixed(0) + '%' : '—'}</td></tr>`;
     }).join('');
   }
 
@@ -150,6 +173,41 @@
     svg.addEventListener('mouseleave', () => { tip.style.display = 'none'; cross.style.display = 'none'; });
   }
 
+  function evidencePanel(el, v, b) {
+    const e = v.evidence, L = v.luck;
+    let luckText = '';
+    if (L) luckText = `<b>Luck check:</b> this book's ${fmtPct(v.ret)} sits at the <b>${(L.pct * 100).toFixed(0)}th percentile</b> of ${L.draws.toLocaleString()} random ${e ? e.N : b.N}-name baskets drawn from the same ${L.n_tier.toLocaleString()} names over the same window (their middle 80 % ran ${fmtPct(L.p10)} to ${fmtPct(L.p90)}). Below the 80th percentile the basket's result is within what chance alone produces.`;
+    if (!e || !e.all || !e.all.months) {
+      el.innerHTML = `<div class="pb-evbox"><div class="pb-small" style="margin-bottom: 4px;">IS THE SCORE WORKING? · whole-tier evidence</div>
+        <div class="ob-muted">Not measurable yet: the ranking needs a month of forward returns after each anchor, and this one has too few scored names or no matured month so far. ${luckText}</div></div>`;
+      return;
+    }
+    const a = e.all, bt = e.backtest, lv = e.live;
+    const W = 640, H = 90, L0 = 34, R = 6, T = 8, B = 18;
+    const ms = e.months, n = ms.length, bw = (W - L0 - R) / n;
+    const vmax = Math.max(1, ...ms.map(m => Math.abs(m.spread)));
+    const y0 = T + (H - T - B) / 2;
+    const bars = ms.map((m, i) => { const h = Math.abs(m.spread) / vmax * (H - T - B) / 2; const x = L0 + i * bw + 0.5;
+      const y = m.spread >= 0 ? y0 - h : y0; return `<rect class="${m.live ? 'live' : 'bt'} ${m.spread >= 0 ? 'up' : 'dn'}" x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${Math.max(bw - 1, 1).toFixed(1)}" height="${Math.max(h, 0.5).toFixed(1)}"><title>${esc(shortDate(m.anchor))} ${m.anchor.slice(0, 4)}: top ${e.N} minus tier ${m.spread >= 0 ? '+' : ''}${m.spread.toFixed(1)} pp, rank IC ${m.ic.toFixed(3)}${m.live ? ' (live)' : ''}</title></rect>`; }).join('');
+    const years = ms.map((m, i) => (i === 0 || m.anchor.slice(0, 4) !== ms[i - 1].anchor.slice(0, 4)) ? `<text x="${(L0 + i * bw).toFixed(1)}" y="${H - 4}">${m.anchor.slice(0, 4)}</text>` : '').join('');
+    const liveStart = ms.findIndex(m => m.live);
+    const liveMark = liveStart > 0 ? `<line class="livemark" x1="${(L0 + liveStart * bw).toFixed(1)}" x2="${(L0 + liveStart * bw).toFixed(1)}" y1="${T}" y2="${H - B}"/><text x="${(L0 + liveStart * bw + 3).toFixed(1)}" y="${T + 9}" class="livelab">live</text>` : '';
+    const say = (s) => `rank IC ${s.ic.toFixed(3)}${s.t == null ? '' : ', t ' + s.t.toFixed(1)}, positive in ${(s.hit * 100).toFixed(0)} % of months, top ${e.N} beat the tier by ${s.spread >= 0 ? '+' : ''}${s.spread.toFixed(2)} pp a month`;
+    const verdict = !lv.months ? 'No live month has matured yet.'
+      : (lv.ic > 0 && (!bt.months || lv.ic >= 0.5 * bt.ic) ? `The live months look like the backtest: the score is still ranking the tier.` : (lv.ic > 0 ? `The live months are positive but weaker than the backtest; watch.` : `The live months are negative: the score has not ranked the tier since June.`));
+    el.innerHTML = `<div class="pb-evbox">
+      <div class="pb-small" style="margin-bottom: 4px;">IS THE SCORE WORKING? · judged on the whole tier each month, ${esc(shortDate(a.first))} ${a.first.slice(0, 4)} → ${esc(shortDate(a.last))} ${a.last.slice(0, 4)}</div>
+      <div class="pb-evgrid">
+        <div class="pb-tile"><div class="n">${a.ic.toFixed(3)}</div><div class="l">rank IC, all ${a.months} months · t ${a.t == null ? '—' : a.t.toFixed(1)}</div></div>
+        <div class="pb-tile"><div class="n ${tone(a.spread)}">${a.spread >= 0 ? '+' : ''}${a.spread.toFixed(2)} pp</div><div class="l">top ${e.N} minus the tier, per month, all months</div></div>
+        <div class="pb-tile"><div class="n">${lv.months ? lv.ic.toFixed(3) : '—'}</div><div class="l">rank IC, live months (${lv.months})${lv.months ? ' · positive in ' + (lv.hit * 100).toFixed(0) + ' %' : ''}</div></div>
+        <div class="pb-tile"><div class="n ${lv.months ? tone(lv.spread) : ''}">${lv.months ? (lv.spread >= 0 ? '+' : '') + lv.spread.toFixed(2) + ' pp' : '—'}</div><div class="l">top ${e.N} minus the tier, per month, live</div></div>
+      </div>
+      <svg viewBox="0 0 ${W} ${H}" class="pb-evsvg" role="img" aria-label="Top basket minus tier, per month"><line class="zero" x1="${L0}" x2="${W - R}" y1="${y0}" y2="${y0}"/>${bars}${liveMark}<g class="axis">${years}</g></svg>
+      <div class="pb-small" style="line-height: 1.55;">${bt.months ? `<b>Backtest (${bt.months} months):</b> ${say(bt)}. ` : ''}${lv.months ? `<b>Live (${lv.months} months):</b> ${say(lv)}. ` : ''}<b>${verdict}</b>${e.in_sample_before ? ` Fixed weights chosen in October 2026: months before ${esc(shortDate(e.in_sample_before))} ${e.in_sample_before.slice(0, 4)} are in-sample.` : ''}
+      ${luckText ? '<br>' + luckText : ''}</div></div>`;
+  }
+
   function card(k) {
     const b = BOOKS[k];
     const opts = b.option_order || Object.keys(b.variants);   // tojson sorts keys; the tool records the order
@@ -160,6 +218,7 @@
       <div class="pb-why"></div>
       <div class="pb-grid"></div>
       <div class="pb-two"><div><div class="pb-chart"></div></div><div><div class="pb-hold"></div></div></div>
+      <div class="pb-ev"></div>
       <details class="pb-details"><summary>Every trade, month by month</summary><div class="ob-scroll pb-trades"></div></details>
       <p class="pb-small" style="margin: 8px 0 0;"><b>What the backtests promised:</b> ${esc(b.evidence)}</p>`;
     const render = (o) => {
@@ -177,6 +236,7 @@
         <div class="pb-tile"><div class="n ${tone(v.ret_if_sold_after_tax)}">${fmtPct(v.ret_if_sold_after_tax)}</div><div class="l">after tax, if sold today</div></div>
         <div class="pb-tile"><div class="n">${(v.hit_rate * 100).toFixed(0)}%</div><div class="l">names up · ${v.n} held now${v.cash > 5000 ? ', ' + fmtInr(v.cash) + ' in cash' : ''}</div></div>`;
       chart(el.querySelector('.pb-chart'), v, b.bench_label);
+      evidencePanel(el.querySelector('.pb-ev'), v, b);
       const hold = v.holdings.slice().sort((a, c) => c.ret - a.ret);
       el.querySelector('.pb-hold').innerHTML = `<div class="pb-small" style="margin-bottom: 4px;">Held now, best first</div><div class="ob-scroll"><table class="ob-table"><thead><tr><th>Name</th><th>Bought</th><th>Rank then</th><th>Value</th><th>Return</th></tr></thead><tbody>
         ${hold.map(p => `<tr><td><a href="${MAIN}/stocks/${esc(p.sid)}" style="color: var(--text-primary); font-weight: 700;">${esc(p.ticker)}</a>${k === 'published' ? ' <span class="pb-small">' + esc(p.sleeve) + '</span>' : ''}</td><td>${esc(shortDate(p.bought))}</td><td>#${p.rank_at_buy}</td><td>${fmtInr(p.value)}</td><td class="${tone(p.ret)}">${fmtPct(p.ret)}</td></tr>`).join('') || '<tr><td colspan="5" class="pb-small">Nothing held.</td></tr>'}

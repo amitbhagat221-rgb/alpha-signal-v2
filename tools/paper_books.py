@@ -34,9 +34,16 @@ gain per book (loss → no tax, carried); "tax if sold today" adds the unrealise
 Benchmark: the tier's price index (NIFTY MIDCAP 150 / NIFTY SMALLCAP 250; published = half each), bought at
 the first anchor. A price index carries no dividends, so the books' excess is flattered by ~1 %/yr.
 
+Frozen record (2026-11-02): the research panels are rebuilt every month and a rebuild moves past scores (a
+refresh changed 14 of the June top 20), so a replay is not a record. The first run replays June → the latest
+anchor and writes every month's trades to data/paper/paper_books.json; later runs load that state, trade only
+the anchors after the last frozen one, and mark the frozen positions to market. `replay_until` on the page says
+which months were replayed. --rebuild throws the record away (never on cron).
+
 Usage:
-  python -m tools.paper_books            # full run, writes output/paper_books/latest.{json,md}
-  python -m tools.paper_books --smoke    # one option per book, no write
+  python -m tools.paper_books            # mark + trade any new anchor, writes output/paper_books/latest.{json,md}
+  python -m tools.paper_books --smoke    # one option per book, no write, no state
+  python -m tools.paper_books --rebuild  # replay everything again from June (discards the frozen record)
 """
 
 from __future__ import annotations
@@ -61,6 +68,7 @@ from tools import lh_costs  # noqa: E402
 DB = Path(os.environ.get("ALPHA_DB", PROJECT_ROOT / "data" / "alpha_signal.db"))
 LH = Path(os.environ.get("ALPHA_LH", DB.parent / "lh"))
 OUT = PROJECT_ROOT / "output" / "paper_books"
+STATE = DB.parent / "paper" / "paper_books.json"     # the frozen record: every month's trades, written once
 
 START = "2026-06-01"             # the first anchor (Amit: "invested in June 2026")
 CAPITAL = 1_000_000.0
@@ -260,16 +268,25 @@ def trade_cost(value, adtv, price, tier, side):
                 spread_impact=value * (c["half_spread"] + c["impact"]) / 1e4)
 
 
-def simulate(book_key, opt, ranks_by_anchor, prices, meta, trusts, bench_levels, all_anchors, asof, capital=CAPITAL):
+def simulate(book_key, opt, ranks_by_anchor, prices, meta, trusts, bench_levels, all_anchors, asof, capital=CAPITAL,
+             state=None):
     """One book under one option. ranks_by_anchor: {anchor: [(sleeve, {sid: rank}, N, sell_rank)]} — a book is one
-    or two sleeves (published = Mid + Small halves)."""
+    or two sleeves (published = Mid + Small halves). `state` = the frozen record of earlier anchors (positions,
+    cash, trades, history, costs, realised, rotations): those months are not re-traded, only the anchors after
+    state['last_anchor'] are. Returns the result and the new frozen state."""
     sleeves = {s for a in ranks_by_anchor.values() for s, _, _, _ in a}
-    cash = {s: capital / len(sleeves) for s in sleeves}
-    pos = {}                      # sid -> dict(sleeve, units, cost_basis, bought, rank_at_buy, entry_close)
-    trades, history = [], []
-    costs = dict(total=0.0, stt=0.0, fees_other=0.0, spread_impact=0.0)
-    realised = 0.0
-    rotations = 0
+    if state:
+        cash, pos, trades, history = state["cash"], state["pos"], list(state["trades"]), list(state["history"])
+        costs, realised, rotations = dict(state["costs"]), state["realised"], state["rotations"]
+        todo = [a for a in all_anchors if a > state["last_anchor"]]
+    else:
+        cash = {s: capital / len(sleeves) for s in sleeves}
+        pos = {}                      # sid -> dict(sleeve, units, cost_basis, bought, rank_at_buy, entry_close)
+        trades, history = [], []
+        costs = dict(total=0.0, stt=0.0, fees_other=0.0, spread_impact=0.0)
+        realised = 0.0
+        rotations = 0
+        todo = list(all_anchors)
 
     def nav_at(d):
         v = sum(cash.values())
@@ -286,7 +303,7 @@ def simulate(book_key, opt, ranks_by_anchor, prices, meta, trusts, bench_levels,
             lvl += w * float(s.iloc[-1]) / float(bench_levels.loc[sym][bench_levels.loc[sym].index <= all_anchors[0]].iloc[-1])
         return lvl
 
-    for anchor in all_anchors:
+    for anchor in todo:
         acted = False
         for sid, p in pos.items():                     # mark to market first
             q = prices.at(sid, anchor)
@@ -341,9 +358,11 @@ def simulate(book_key, opt, ranks_by_anchor, prices, meta, trusts, bench_levels,
             rotations += 1
         history.append(dict(date=anchor, nav=round(nav_at(anchor)), bench=round(bench_at(anchor), 5)))
 
+    frozen = dict(cash=cash, pos=pos, trades=trades, history=history, costs=costs, realised=realised, rotations=rotations,
+                  last_anchor=max(all_anchors))
     # mark to the latest close
     final_nav = nav_at(asof)
-    history.append(dict(date=asof, nav=round(final_nav), bench=round(bench_at(asof), 5)))
+    history = history + [dict(date=asof, nav=round(final_nav), bench=round(bench_at(asof), 5))]
     unreal = 0.0
     holdings = []
     for sid, p in sorted(pos.items(), key=lambda kv: (kv[1]["sleeve"], kv[1]["rank_at_buy"])):
@@ -370,7 +389,119 @@ def simulate(book_key, opt, ranks_by_anchor, prices, meta, trusts, bench_levels,
         rotations=rotations, buys=len(buys), sells=len(sells),
         turnover=round(sum(t["value"] for t in sells) / capital, 4),
         hit_rate=round((closed_wins + open_wins) / max(len(sells) + len(holdings), 1), 4),
-        n=len(holdings), cash=round(sum(cash.values())), history=history, holdings=holdings, trades=trades)
+        n=len(holdings), cash=round(sum(cash.values())), history=history, holdings=holdings, trades=trades), frozen
+
+
+# ── evidence: judge the score on the whole tier every month, not on one 20-name basket ──────────
+
+NW_LAG = 3
+LUCK_DRAWS = 5000
+
+
+def load_labels():
+    """Monthly anchor → next-anchor forward return per stock (data/lh/labels.parquet, pit.forward_returns)."""
+    lb = pd.read_parquet(LH / "labels.parquet", columns=["sid", "snapshot_date", "cap_tier", "fwd_next_anchor"])
+    return lb.dropna(subset=["fwd_next_anchor"])
+
+
+_FULL = {}
+
+
+def _panel_all(file):
+    if file not in _FULL:
+        _FULL[file] = pd.read_parquet(LH / file, columns=["sid", "snapshot_date", "cap_tier", "method", "score"])
+    return _FULL[file]
+
+
+def score_series(book_key, opt, con, label_anchors):
+    """[(anchor, tier, Series score by sid)] for every anchor the option can score: the research panel for
+    slow / fast options (avg3 = mean of the last three anchors), daily_picks for 'published', the desk's
+    ranking for the multibagger book (score = -rank)."""
+    b = BOOKS[book_key]
+    out = []
+    if b["kind"] in ("slow", "fast") and opt.get("source") != "published":
+        sc = _panel_all(opt["file"])
+        sc = sc[(sc["method"] == opt["method"]) & (sc["cap_tier"] == b["tier"])]
+        wide = sc.pivot_table(index="sid", columns="snapshot_date", values="score")
+        if opt.get("avg3"):
+            wide = wide.T.rolling(3, min_periods=1).mean().T.where(wide.notna())
+        for a in wide.columns:
+            if a in label_anchors:
+                out.append((a, b["tier"], wide[a].dropna()))
+    else:
+        tiers = ("MID", "SMALL") if b["kind"] == "published" else ([b["tier"]] if b["tier"] else ["MB"])
+        if opt.get("source") == "published":
+            tiers = (b["tier"],)
+        for a in label_anchors:
+            if b["kind"] == "mb":
+                d, rk = mb_ranks(con, a)
+                if d is None or d > a:
+                    continue
+                out.append((a, "MB", pd.Series({sid: -r for sid, r in rk.items()})))
+            else:
+                if a < "2026-04-09":
+                    continue
+                for t in tiers:
+                    d, rk = published_ranks(con, t, a)
+                    if d is None or (pd.Timestamp(a) - pd.Timestamp(d)).days > 7:
+                        continue
+                    out.append((a, t, pd.Series({sid: -r for sid, r in rk.items()})))
+    return out
+
+
+def evidence(book_key, opt, con, labels, N, asof):
+    """Per month: rank IC of the score against next month's return over the whole tier, and the top-N
+    basket's return minus the tier's (percentage points). Summary over the backtest months and the live
+    months (anchors from START), Newey-West t on the IC."""
+    label_anchors = sorted(labels["snapshot_date"].unique())
+    rows = []
+    for a, tier, sc in score_series(book_key, opt, con, label_anchors):
+        lb = labels[labels["snapshot_date"] == a]
+        if tier != "MB":
+            lb = lb[lb["cap_tier"] == tier]
+        m = lb.set_index("sid")["fwd_next_anchor"].to_frame("fwd").join(sc.rename("score"), how="inner")
+        if len(m) < 30:
+            continue
+        ic = float(m["score"].rank().corr(m["fwd"].rank()))
+        top = m.sort_values("score", ascending=False).head(N)["fwd"].mean()
+        rows.append(dict(anchor=a, tier=tier, n=len(m), ic=round(ic, 4), spread=round(float(top - m["fwd"].mean()) * 100, 2)))
+    if not rows:
+        return None
+    df = pd.DataFrame(rows).groupby("anchor").agg(ic=("ic", "mean"), spread=("spread", "mean"), n=("n", "sum")).reset_index()
+    # the replay's live months start at the June anchor; 'as published' and the desk's own ranking have no
+    # backtest at all (nothing was recomputed), so every month of theirs is live
+    no_backtest = opt.get("source") == "published" or BOOKS[book_key]["kind"] in ("mb", "published")
+    df["live"] = True if no_backtest else (df["anchor"] >= START)
+    from tools.backtest_pit import _newey_west_se
+
+    def summ(x):
+        if x.empty:
+            return dict(months=0)
+        se = _newey_west_se(x["ic"].to_numpy(), NW_LAG) if len(x) > 2 else None
+        return dict(months=int(len(x)), ic=round(float(x["ic"].mean()), 4), t=None if not se else round(float(x["ic"].mean() / se), 2),
+                    hit=round(float((x["ic"] > 0).mean()), 3), spread=round(float(x["spread"].mean()), 2),
+                    first=x["anchor"].iloc[0], last=x["anchor"].iloc[-1])
+    in_sample = opt.get("key") in ("slow_v2", "fast_v1")
+    return dict(all=summ(df), backtest=summ(df[~df["live"]]), live=summ(df[df["live"]]),
+                months=[dict(anchor=r.anchor, ic=round(r.ic, 3), spread=round(r.spread, 2), live=bool(r.live)) for r in df.itertuples()],
+                in_sample_before="2026-10-01" if in_sample else None, N=N)
+
+
+def luck(book_ret, N, tier_sids, prices, start, asof):
+    """Where the book's return sits among LUCK_DRAWS random N-name baskets from the same tier over the same
+    window: the percentile, and the 10th / 90th percentile of those baskets."""
+    rets = []
+    for sid in tier_sids:
+        q0, q1 = prices.at(sid, start), prices.at(sid, asof)
+        if q0 and q1:
+            rets.append(q1[0] / q0[0] - 1)
+    rets = np.asarray(rets)
+    if len(rets) < N * 3:
+        return None
+    rng = np.random.default_rng(0)
+    sims = np.array([rets[rng.choice(len(rets), N, replace=False)].mean() for _ in range(LUCK_DRAWS)])
+    return dict(pct=round(float((sims < book_ret).mean()), 3), p10=round(float(np.quantile(sims, 0.1)), 4),
+                p90=round(float(np.quantile(sims, 0.9)), 4), mean=round(float(sims.mean()), 4), n_tier=int(len(rets)), draws=LUCK_DRAWS)
 
 
 def months_between(d0, d1):
@@ -406,21 +537,42 @@ def ranks_for(book_key, opt, con, all_anchors):
     return out, dates
 
 
-def run(smoke=False):
+def load_state(rebuild=False):
+    if rebuild or not STATE.exists():
+        return dict(created=date.today().isoformat(), replay_until=None, books={})
+    return json.loads(STATE.read_text())
+
+
+def run(smoke=False, rebuild=False):
     con = ro()
     asof = con.execute("SELECT MAX(date) FROM stock_prices").fetchone()[0]
     all_anchors = anchors()
+    st = load_state(rebuild) if not smoke else dict(created=date.today().isoformat(), replay_until=None, books={})
+    if st["replay_until"] is None:
+        st["replay_until"] = all_anchors[-1]          # the first run replays every anchor so far
     px, sessions, bench_levels = load_prices(con, asof)
     meta, trusts = stock_meta(con)
     prices = Prices(px, sessions)
+    labels = load_labels()
     books = {}
     for key, b in BOOKS.items():
         opts = OPTIONS[b["kind"]][:1] if smoke else OPTIONS[b["kind"]]
         variants = {}
         for opt in opts:
             rk, dates = ranks_for(key, opt, con, all_anchors)
-            res = simulate(key, opt, rk, prices, meta, trusts, bench_levels, all_anchors, asof)
-            res.update(key=opt["key"], label=opt["label"], why=opt.get("why", ""), score_dates=dates)
+            prior = st["books"].get(key, {}).get(opt["key"])
+            res, frozen = simulate(key, opt, rk, prices, meta, trusts, bench_levels, all_anchors, asof, state=prior)
+            st["books"].setdefault(key, {})[opt["key"]] = frozen
+            N = opt.get("N", b["N"])
+            res.update(key=opt["key"], label=opt["label"], why=opt.get("why", ""), score_dates=dates,
+                       evidence=evidence(key, opt, con, labels, N, asof))
+            first = rk[all_anchors[0]]
+            lucks = [luck(res["ret"], N, list(r.keys()), prices, all_anchors[0], asof) for _, r, _, _ in first]
+            lucks = [l for l in lucks if l]
+            res["luck"] = None if not lucks else dict(pct=round(float(np.mean([l["pct"] for l in lucks])), 3),
+                                                      p10=round(float(np.mean([l["p10"] for l in lucks])), 4),
+                                                      p90=round(float(np.mean([l["p90"] for l in lucks])), 4),
+                                                      n_tier=sum(l["n_tier"] for l in lucks), draws=LUCK_DRAWS)
             variants[opt["key"]] = res
             print(f"{key:12s} {opt['key']:12s} nav {res['nav']:>10,.0f}  ret {res['ret']:+.1%}  bench {res['bench_ret']:+.1%}  "
                   f"rot {res['rotations']}  stt ₹{res['costs']['stt']:,.0f}  tax(if sold) ₹{res['tax_if_sold']:,.0f}")
@@ -432,13 +584,20 @@ def run(smoke=False):
                           evidence=EVIDENCE[key], option_order=[o["key"] for o in opts], variants=variants)
     con.close()
     out = dict(asof=asof, start=all_anchors[0], anchors=all_anchors, capital=CAPITAL, stcg=STCG, stt=STT,
-               floor_inr=FLOOR_INR, computed=date.today().isoformat(), books=books,
-               notes=["Fills at the anchor close; no slippage beyond the modelled half-spread and impact.",
+               floor_inr=FLOOR_INR, computed=date.today().isoformat(), replay_until=st["replay_until"],
+               record_since=st["created"], books=books,
+               notes=["Evidence per option: every month the score is judged on the WHOLE tier (rank IC against the next "
+                      "month's return, and the top-N basket's return minus the tier's), from the first walk-forward month "
+                      "in 2022 to the last matured month; live months are the anchors from June 2026. Luck: the book's "
+                      "return against 5,000 random baskets of the same size from the same tier over the same window.",
+                      "Fills at the anchor close; no slippage beyond the modelled half-spread and impact.",
                       "Benchmarks are price indices (no dividends); the books' closes include dividends.",
                       "The slow and fast research panels were built in October 2026; fast_select / slow_select / slow_icw "
                       "/ blend are walk-forward (out of sample), slow_v2 and fast_v1 are fixed weights chosen in October "
                       "(in-sample for these months), and 'As published' is the cockpit's own record."])
     if not smoke:
+        STATE.parent.mkdir(parents=True, exist_ok=True)
+        STATE.write_text(json.dumps(st, indent=1, default=str))
         OUT.mkdir(parents=True, exist_ok=True)
         (OUT / "latest.json").write_text(json.dumps(out, indent=1, default=str))
         (OUT / "latest.md").write_text(markdown(out))
@@ -462,8 +621,9 @@ def markdown(out):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--smoke", action="store_true")
+    ap.add_argument("--rebuild", action="store_true", help="discard the frozen record and replay from June")
     a = ap.parse_args()
-    run(smoke=a.smoke)
+    run(smoke=a.smoke, rebuild=a.rebuild)
 
 
 if __name__ == "__main__":
