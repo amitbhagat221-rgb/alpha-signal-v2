@@ -240,6 +240,11 @@
     <button class="ob-btn ol-save" data-key="vix_halt" data-src="ol-vix-halt" data-kind="num">Save</button>
   </div>
   <div class="ob-cap ol-set">
+    <label class="ob-muted">Sell strikes <input id="ol-strike-sigma" type="number" min="0" max="4" step="0.5" value="{{ "%g"|format(st.strike_sigma or 0) }}"> sigma away</label>
+    <button class="ob-btn ol-save" data-key="strike_sigma" data-src="ol-strike-sigma" data-kind="num">Save</button>
+    <span class="ob-muted">0 = the 0.05-delta rule (about 2 sigma). 2.5 earns less and breaches less often; the next entry uses it</span>
+  </div>
+  <div class="ob-cap ol-set">
     <label class="ob-muted">Wings may cost at most <input id="ol-wing-max" type="number" min="5" max="100" step="1" value="{{ "%g"|format(st.wing_max_share_pct) }}"> % of the credit</label>
     <button class="ob-btn ol-save" data-key="wing_max_share_pct" data-src="ol-wing-max" data-kind="num">Save</button>
     <span class="ob-muted">dearer: the dearer wing steps out one strike at a time, up to {{ "%g"|format(st.wing_max_pct) }}% of spot beyond the sold strike; still dearer: no entry, you get a push</span>

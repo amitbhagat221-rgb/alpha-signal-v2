@@ -221,6 +221,7 @@ OPTIONS_LIVE = {
     # Protective wings (Amit 2026-10-28): buy a CE / PE this % of spot beyond each short strike, BEFORE selling,
     # so a weekly loss is capped and Kite's margin roughly halves (both sides needed). 0 = off; 1.75 planned.
     "wing_pct": 0.0,
+    "strike_sigma": 0,                     # 0: sell the 0.05-delta strikes; N: the strikes N x the at-the-money sigma away (ADR 0093)
     "wing_buy_s": 60,                      # the wings get this long to fill (final aggressive limit in the last third)
     # The wings' price (Amit 2026-10-30: "max share of credit 20 to 30 %, lower is better"): at their asks the two wings
     # may cost at most this % of the credit at the bids. Dearer (a thin strike quoted wide, 63 % seen on SENSEX

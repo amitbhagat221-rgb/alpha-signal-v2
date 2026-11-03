@@ -1569,3 +1569,33 @@ def test_morning_precheck_pages_only_for_open_shorts_and_not_on_a_holiday(conn, 
     monkeypatch.setattr(ob, "is_session", lambda d, hol: False)
     res, ctx = run("precheck", NoKiteSession("x"), Clock(TUE, "09:05"))
     assert res["status"] == "idle" and "holiday" in res["detail"]
+
+
+def test_strike_sigma_widens_the_sold_strikes_and_is_validated(conn):
+    fake = FakeKite()
+    res, _ = run("entry", fake, Clock(FRI, "15:12"), "NIFTY", mode="shadow")
+    assert res["status"] == "ok"
+    near = ledger(conn, "net_qty < 0").strike.tolist()
+    conn.execute("DELETE FROM option_live_trades"); conn.execute("DELETE FROM option_live_orders"); conn.commit()
+    ol.set_setting("strike_sigma", 2.5, by="test")
+    fake = FakeKite()
+    res, ctx = run("entry", fake, Clock(FRI, "15:12"), "NIFTY", mode="shadow")
+    assert res["status"] == "ok"
+    wide = ledger(conn, "net_qty < 0").strike.tolist()
+    assert min(wide) < min(near) and max(wide) > max(near)                 # further out on both sides
+    for bad in (1, 5, True, "x"):
+        with pytest.raises(ValueError):
+            ol.set_setting("strike_sigma", bad)
+    ol.set_setting("strike_sigma", 0, by="test")
+    assert ol.settings()["strike_sigma"] == 0
+
+
+def test_strike_sigma_matches_the_study_formula():
+    import math
+    from sources import kite_quotes as kq
+    fake = FakeKite()
+    rows = pd.DataFrame(_chain("NIFTY", 25800.0, NIFTY_EXP, FRI.isoformat(), 50))
+    rows["volume"] = 100
+    F, _, k = kq.pick(rows, FRI.isoformat(), NIFTY_EXP, sigma=2.5)
+    move = kq.atm_move(rows, F, FRI.isoformat(), NIFTY_EXP)
+    assert abs(k["C"] - F * math.exp(2.5 * move)) <= 50 and abs(k["P"] - F * math.exp(-2.5 * move)) <= 50

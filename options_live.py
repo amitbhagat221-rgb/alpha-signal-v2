@@ -71,7 +71,7 @@ MARKETS = {u: {"exchange": ex, "spot": key} for u, ex, key in kq.MARKETS}
 MODES = ("off", "shadow", "approve", "auto")
 LIVE_MODES = ("approve", "auto")
 EDITABLE = ("mode", "lots_cap", "margin_buffer_rs", "weekly_loss_limit_rs", "kill", "adopt_manual_nifty",
-            "vix_halt", "vix_halve", "wing_pct", "wing_max_share_pct", "closeall_hold_below")
+            "vix_halt", "vix_halve", "wing_pct", "wing_max_share_pct", "closeall_hold_below", "strike_sigma")
 FINAL = ("COMPLETE", "CANCELLED", "REJECTED")
 WRITE_CALLS = ("place_order", "modify_order", "cancel_order")
 TICK = ob.TICK
@@ -162,6 +162,9 @@ def set_setting(key, value, by="cli"):
     if key == "wing_pct":
         if not isinstance(value, (int, float)) or isinstance(value, bool) or not 0 <= value <= 5:
             raise ValueError("wing_pct must be a % of spot between 0 (off) and 5")
+    if key == "strike_sigma":
+        if not isinstance(value, (int, float)) or isinstance(value, bool) or not (value == 0 or 1.5 <= value <= 4):
+            raise ValueError("strike_sigma must be 0 (the 0.05-delta rule) or a width between 1.5 and 4")
     if key == "wing_max_share_pct":
         if not isinstance(value, (int, float)) or isinstance(value, bool) or not 5 <= value <= 100:
             raise ValueError("wing_max_share_pct must be a % of the credit between 5 and 100")
@@ -936,7 +939,7 @@ def pick_legs(ctx, u, e, wing_pct, capped=True):
     applies; off for the sizing quote, which reports the plain distance."""
     s, m = ctx["settings"], MARKETS[u]
     chain, spot = kq.live_chain(client(ctx), u, m["exchange"], m["spot"], e, band=s["chain_band"])
-    F, dmap, k = kq.pick(chain, ctx["today"], e)
+    F, dmap, k = kq.pick(chain, ctx["today"], e, sigma=s.get("strike_sigma") or 0)
 
     def leg(cp, K, side):
         ot = "CE" if cp == "C" else "PE"
@@ -981,7 +984,7 @@ def build_plan(ctx, u, e):
         lots -= 1
         margin = per_lot * lots
     return {"underlying": u, "expiry": e, "spot": spot, "forward": F, "legs": legs_, "wings": wings,
-            "wing_pct": s["wing_pct"], "credit_pts": credit, "wing_cost_pts": wing_cost, "max_loss_per_lot": max_loss,
+            "wing_pct": s["wing_pct"], "strike_sigma": s.get("strike_sigma") or 0, "credit_pts": credit, "wing_cost_pts": wing_cost, "max_loss_per_lot": max_loss,
             "wing_share": wing_cost / credit if wings and credit else None, "wing_max_share_pct": s["wing_max_share_pct"],
             "margin_per_lot": per_lot,
             "available": avail, "peak_available": peak["available"], "freed_before_expiry": peak["freed"],
@@ -1006,7 +1009,8 @@ def _wings_text(p):
 
 
 def _plan_text(p):
-    return (f"{p['underlying']} {p['expiry']}: sell " + " + ".join(
+    return (f"{p['underlying']} {p['expiry']}: {p['strike_sigma']:g} sigma strikes: sell " * bool(p.get("strike_sigma"))
+            + (f"{p['underlying']} {p['expiry']}: sell " if not p.get("strike_sigma") else "") + " + ".join(
         f"{l['tradingsymbol']} (bid {l['bid']}, ask {l['ask']}, Δ {l['delta']:.3f})" for l in p["legs"])
         + f" × {p['lots']} lot(s){_wings_text(p)} · margin ₹{p['margin_per_lot']:,.0f}/lot + ₹{p['expiry_extra_per_lot']:,.0f}/lot on expiry day"
         + f" (₹{p['expiry_margin_rs']:,.0f} at size) · available ₹{p['available']:,.0f} now,"

@@ -81,15 +81,43 @@ def touch(q):
     return bid, ask, q.get("last_price")
 
 
-def pick(df, today, expiry):
-    """The rule's strikes on a live chain: option_book's 0.05-delta picker on the live mids
-    → (forward, {(cp, K): |delta|}, {'C': K, 'P': K}). Raises when the chain gives no deltas."""
+def atm_move(df, F, today, expiry):
+    """The market's one-sigma move to expiry, σ·√T as a fraction of the forward: the mean of the call and put implied
+    vol at the strike nearest F (tools.option_sigma_study's definition, so the live strikes match the study's)."""
+    import math
+
+    import numpy as np
+
+    from sources.fno_iv import _invert_iv
+    T = ob.years(today, expiry)
+    ok = df[df["mid"] > 0]
+    both = set(ok[ok.option_type == "CE"].strike) & set(ok[ok.option_type == "PE"].strike)
+    if not both:
+        raise RuntimeError(f"{expiry}: no strike quoted on both sides for the at-the-money vol")
+    k0 = min(both, key=lambda k: abs(k - F))
+    ivs = [_invert_iv(float(ok[(ok.strike == k0) & (ok.option_type == o)].mid.iloc[0]), F, k0, T, cp)
+           for o, cp in (("CE", "C"), ("PE", "P"))]
+    iv = float(np.nanmean(ivs))
+    if not np.isfinite(iv) or iv <= 0:
+        raise RuntimeError(f"{expiry}: no usable at-the-money vol at {k0:g}")
+    return iv * math.sqrt(T)
+
+
+def pick(df, today, expiry, sigma=0):
+    """The rule's strikes on a live chain → (forward, {(cp, K): |delta|}, {'C': K, 'P': K}). `sigma` 0: option_book's
+    0.05-delta picker on the live mids. `sigma` N: the traded strike nearest F·exp(±N·σ√T). Raises when the chain gives
+    no deltas."""
     sl = df.rename(columns={"mid": "settle"})[["option_type", "strike", "settle", "volume"]]
     d = ob.slice_deltas(sl, today, expiry)
     if d is None:
         raise RuntimeError(f"{expiry}: live chain gave no usable deltas")
     F, deltas = d
     k = ob.nearest(deltas, ob.RULE["delta"])
+    if sigma:
+        import math
+        move = atm_move(df, F, today, expiry)
+        k = {cp: min((K for _, K in deltas[cp]), key=lambda K: abs(K - F * math.exp(sgn * sigma * move)))
+             for cp, sgn in (("C", 1), ("P", -1))}
     return F, {(cp, K): dl for cp in ("C", "P") for dl, K in deltas[cp]}, k
 
 
