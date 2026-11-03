@@ -115,8 +115,8 @@ def one(u, e, width, S=None, hol=None):
 
 
 def book(u, width, hol):
-    ex = read_sql("SELECT DISTINCT expiry_date e FROM fno_bhav WHERE symbol = ? AND instrument_type = 'IDO' AND expiry_date <= "
-                  "(SELECT MAX(trade_date) FROM fno_bhav WHERE symbol = ?) ORDER BY 1", params=[u, u]).e
+    ex = read_sql("SELECT DISTINCT expiry_date e FROM fno_bhav WHERE symbol = ? AND instrument_type = 'IDO' AND expiry_date >= '2019-01-01' "
+                  "AND expiry_date <= (SELECT MAX(trade_date) FROM fno_bhav WHERE symbol = ?) ORDER BY 1", params=[u, u]).e   # as pre-registered; older rows exist
     rows = [one(u, e, width, hol=hol) for e in ex]
     return pd.DataFrame([r for r in rows if r])
 
