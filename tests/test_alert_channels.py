@@ -23,6 +23,8 @@ def test_an_urgent_push_also_rings_the_phone(monkeypatch):
     assert len(calls) == 2
     ntfy, ring = calls
     assert ntfy[0] == "https://ntfy.sh/t" and ntfy[2]["Priority"] == "urgent" and "rotating_light" in ntfy[2]["Tags"]
+    for value in ntfy[2].values():                                        # 2026-11-03: a dash in the title killed every urgent push
+        value.encode("latin-1")
     assert ring[0].startswith("https://call.example/ring?msg=step%20closeall%20CRASHED") and ring[1] == "GET"
 
 

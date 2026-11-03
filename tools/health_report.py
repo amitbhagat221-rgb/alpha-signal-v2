@@ -234,7 +234,7 @@ def send_ntfy(text, urgent=False, click=None):
         return False
     url = f"https://ntfy.sh/{topic}"
     headers = {
-        "Title": "Alpha Signal v2" + (" — URGENT" if urgent else ""),
+        "Title": "Alpha Signal v2 URGENT" if urgent else "Alpha Signal v2",   # HTTP headers are latin-1: no dashes or rupee signs
         "Priority": "urgent" if urgent else "default",   # 5 = the loudest ntfy level: overrides DND, long vibration
         "Tags": "rotating_light,warning" if urgent else "information_source",
     }
@@ -248,6 +248,8 @@ def send_ntfy(text, urgent=False, click=None):
         ok = True
     except Exception as e:
         print(f"  ntfy push failed: {e}")
+        import runlog
+        runlog.note(f"ntfy push FAILED: {type(e).__name__}: {e}", level="ERROR")
     if urgent:
         ring_phone(text)                            # 2026-11-03: a priority-5 push sat on the server, the phone never rang
     return ok

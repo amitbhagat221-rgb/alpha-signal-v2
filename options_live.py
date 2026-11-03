@@ -553,6 +553,27 @@ def broker_positions(ctx):
     return out
 
 
+# ─────────────────────────── a stopped step cancels its orders (ADR 0093) ───────────────────────────
+
+class StepInterrupted(BaseException):
+    """SIGTERM / SIGINT / SIGHUP during an order step. A BaseException so no 'a rejected order is recorded' handler
+    swallows it. 2026-11-03: a stopped Close-all left its buy limit working and it filled afterwards. SIGKILL cannot be caught."""
+
+
+ORDER_STEPS = ("entry", "buyback", "closeall", "testorder")
+
+
+def _install_stop_signals():
+    import signal
+
+    def stop(signum, frame):
+        for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):      # the cancels must finish
+            signal.signal(sig, signal.SIG_IGN)
+        raise StepInterrupted(signal.Signals(signum).name)
+    for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+        signal.signal(sig, stop)
+
+
 # ─────────────────────────── preflight (ADR 0093) ───────────────────────────
 
 def preflight(ctx, legs_, allow_kill=False):
@@ -762,7 +783,7 @@ def work_orders(ctx, legs_, side, deadline, final_at=None, ticket_id=None, sourc
                         log_event(ctx, "error", source=source, ticket_id=ticket_id, **_leg_fields(b["leg"]),
                                   order_id=b["order_id"], detail=f"modify: {type(e).__name__}: {e}")
             _refresh(ctx, book)
-        except Exception as e:                      # control: a crash must not leave DAY orders working at the exchange
+        except (Exception, StepInterrupted) as e:   # control: a crash must not leave DAY orders working at the exchange
             _cancel_working(ctx, book, source, ticket_id, side, f"crash ({type(e).__name__}): working order cancelled")
             raise
         _cancel_working(ctx, book, source, ticket_id, side, why)
@@ -1696,6 +1717,11 @@ def precheck(ctx):
     if ctx["mode"] == "off":
         return outcome(ctx, "ALL", "idle", "mode is off")
     hol = ob.holidays()
+    if ctx["now"]().hour < 12:                      # 09:05: open shorts only, so an afternoon entry does not page in the morning
+        if not ob.is_session(date.fromisoformat(ctx["today"]), hol):
+            return outcome(ctx, "ALL", "idle", "market holiday")
+        if not legs("source = 'live' AND status = 'OPEN' AND net_qty < 0"):
+            return outcome(ctx, "ALL", "idle", "no open short leg this morning")
     due = [f"{u} entry" for u in MARKETS if due_expiry(u, ctx["today"], hol)]
     if legs("underlying = 'NIFTY' AND expiry = ? AND status = 'OPEN' AND net_qty < 0", [ctx["today"]]):
         due.insert(0, "NIFTY buy-back")
@@ -1910,6 +1936,8 @@ PER_UNDERLYING = ("entry", "buyback", "testorder")
 def run_step(step, underlying=None, **ctx_kw):
     ensure_tables()
     ctx = make_ctx(step, **ctx_kw)
+    if step in ORDER_STEPS:
+        _install_stop_signals()
     if step in PER_UNDERLYING:
         u = (underlying or ("NIFTY" if step in ("buyback", "testorder") else "")).upper()
         if u not in MARKETS:
@@ -1923,7 +1951,7 @@ def _loud(ctx, step, fn):
     and only the log knew)."""
     try:
         return fn()
-    except Exception as e:
+    except (Exception, StepInterrupted) as e:
         try:
             push(ctx, f"step {step} CRASHED: {type(e).__name__}: {e}. Check `output/options_live.log`; "
                       f"rerun with `run.sh options_live {step}`.", urgent=True)
@@ -2082,7 +2110,7 @@ def main(argv=None):
         runlog.start(f"manual:options_live_{a.step}", module="options_live")
     try:
         res = run_step(a.step, a.underlying)
-    except Exception as e:
+    except (Exception, StepInterrupted) as e:
         runlog.exception(e)
         runlog.end("FAILED", error=f"{type(e).__name__}: {e}")
         raise

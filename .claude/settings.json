@@ -8,7 +8,20 @@
             "type": "command",
             "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/session_start.py\"",
             "timeout": 120,
-            "statusMessage": "Catching up: health report, HANDOFF, git…"
+            "statusMessage": "Catching up: health report, HANDOFF, git\u2026"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/block_live_orders.py\"",
+            "timeout": 10,
+            "onFailure": "block"
           }
         ]
       }

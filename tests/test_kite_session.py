@@ -17,6 +17,9 @@ class _Stub:
     def set_access_token(self, tok):
         self.token = tok
 
+    def place_order(self, **kw):
+        return "PLACED"
+
     def profile(self):
         if self.token in _Stub.dead:
             raise TokenException("Incorrect `api_key` or `access_token`.")
@@ -61,3 +64,14 @@ def test_login_info_flags_a_login_before_0830_ist(cache):
     assert kp.login_info()["early"] is False
     cache.unlink()
     assert kp.login_info() is None
+
+
+def test_a_claude_session_cannot_write_to_the_broker(cache, monkeypatch):
+    _write(cache, "good")
+    _Stub.dead = set()
+    monkeypatch.setenv("CLAUDECODE", "1")
+    with pytest.raises(kp.ClaudeMayNotTrade):
+        kp.kite(cached_only=True).place_order(variety="regular")
+    assert kp.kite(cached_only=True).profile()["user_id"] == "FAKE"       # reads still work
+    monkeypatch.delenv("CLAUDECODE")
+    assert kp.kite(cached_only=True).place_order(variety="regular") == "PLACED"   # cron and the cockpit are untouched

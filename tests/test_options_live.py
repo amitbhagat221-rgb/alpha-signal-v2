@@ -1523,3 +1523,49 @@ def test_precheck_warns_when_the_login_was_before_0830(conn, monkeypatch):
     monkeypatch.setattr(ol, "login_info", lambda: {"date": TUE.isoformat(), "at": "2026-10-27T03:30:00+00:00", "early": False})
     res, ctx = run("precheck", fake, Clock(TUE, "09:05"))
     assert res["status"] == "ok"
+
+
+def test_a_stopped_order_step_cancels_its_working_order_and_alerts(conn):
+    fake = _tuesday_broker()
+    _enter_nifty_friday(conn, fake, "auto")
+    for sym, q in fake.pos.items():
+        fake.book[sym] = [0.05, 50.0, 0.05]                                # nobody sells at our price: the order keeps working
+
+    fired = []
+
+    def stop(f):                                                           # once: the real handler ignores further signals
+        if not fired and any(o["status"] == "OPEN" for o in f.orders_.values()):
+            fired.append(1)
+            raise ol.StepInterrupted("SIGTERM")
+    fake.on_look = stop
+    ctx = ctx_for(fake, Clock(TUE, "15:08"))
+    ctx["step"] = "buyback"
+    with pytest.raises(ol.StepInterrupted):
+        ol._loud(ctx, "buyback", lambda: ol.STEPS["buyback"](ctx, "NIFTY"))
+    assert "cancel_order" in fake.names() and not [o for o in fake.orders_.values() if o["status"] == "OPEN"]
+    assert ctx["sent"][-1][1] and "CRASHED: StepInterrupted" in ctx["sent"][-1][0]
+
+
+def test_a_real_signal_raises_step_interrupted():
+    import os
+    import signal
+    saved = {s: signal.getsignal(s) for s in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP)}
+    try:
+        ol._install_stop_signals()
+        with pytest.raises(ol.StepInterrupted):
+            os.kill(os.getpid(), signal.SIGTERM)
+            import time
+            time.sleep(1)
+    finally:
+        for sig, h in saved.items():
+            signal.signal(sig, h)
+
+
+def test_morning_precheck_pages_only_for_open_shorts_and_not_on_a_holiday(conn, monkeypatch):
+    res, ctx = run("precheck", NoKiteSession("x"), Clock(FRI, "09:05"), mode="auto")      # an entry day, nothing open
+    assert res["status"] == "idle" and not ctx["sent"]
+    fake = _tuesday_broker()
+    _enter_nifty_friday(conn, fake, "auto")
+    monkeypatch.setattr(ob, "is_session", lambda d, hol: False)
+    res, ctx = run("precheck", NoKiteSession("x"), Clock(TUE, "09:05"))
+    assert res["status"] == "idle" and "holiday" in res["detail"]

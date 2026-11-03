@@ -189,7 +189,7 @@ def test_memo_ingest_inbox_decide_and_rollback(q):
     memo = _triage(hypotheses=[])
     out = q.submit([{"task_id": tid, "result": memo}], worker="data-engineer")
     assert out["counts"] == {"done": 1}
-    memos = org.docs(["data_triage"])
+    memos = org.docs(["data_triage"], days=3650)                          # the fixture's memo is dated 2026-10-02
     assert len(memos) == 1 and memos[0]["title"] == memo["headline"] and memos[0]["fields"]["role"] == "data-engineer"
     box = org.inbox()
     assert [i["type"] for i in box] == ["ask"] and box[0]["parent_doc_id"] == memos[0]["doc_id"]
@@ -395,7 +395,7 @@ def test_builder_prompt_and_model_live_in_the_agent_file(q):
 def test_memo_is_stamped_with_the_prompt_version(q):
     tid = _queue(q)
     q.submit([{"task_id": tid, "result": _triage()}], worker="data-engineer")
-    assert org.docs(["data_triage"])[0]["fields"]["prompt_version"] == org.prompt_version("data-engineer")
+    assert org.docs(["data_triage"], days=3650)[0]["fields"]["prompt_version"] == org.prompt_version("data-engineer")
 
 
 def test_boardroom_api_saves_resets_and_refuses_bad_settings(q, monkeypatch):

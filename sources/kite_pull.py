@@ -199,6 +199,25 @@ class NoKiteSession(RuntimeError):
     """No Kite login today: Zerodha flushes sessions 06:00–07:30 IST; the day's token is taken by hand after 08:30."""
 
 
+WRITE_METHODS = ("place_order", "modify_order", "cancel_order", "exit_order", "convert_position", "place_gtt",
+                 "modify_gtt", "delete_gtt", "place_mf_order", "cancel_mf_order", "place_mf_sip", "modify_mf_sip", "cancel_mf_sip")
+
+
+class ClaudeMayNotTrade(RuntimeError):
+    """A broker write from inside a Claude Code session (2026-11-03)."""
+
+
+def _guard_writes(kc):
+    """Inside a Claude Code session (CLAUDECODE is set in its shells, never in cron or the cockpit service) every broker
+    write raises, however the code got here. Reads still work."""
+    if os.environ.get("CLAUDECODE"):
+        def refuse(*a, **kw):
+            raise ClaudeMayNotTrade("broker writes are refused inside a Claude session: only Amit and the scheduled jobs trade")
+        for name in WRITE_METHODS:
+            setattr(kc, name, refuse)
+    return kc
+
+
 def kite(request_token=None, cached_only=False):
     """Return an authenticated KiteConnect. Uses today's cached token if present;
     else exchanges a request_token (passed or auto-logged-in) for a new one.
@@ -219,7 +238,7 @@ def kite(request_token=None, cached_only=False):
             _drop_token(f"Kite rejected it: {e}")
             raise NoKiteSession(f"Kite rejected today's token (flushed, or a Kite logout) — log in again after "
                                 f"{SAFE_LOGIN_IST} IST at {LOGIN_PAGE}") from e
-        return kc
+        return _guard_writes(kc)
 
     if request_token is None:
         if cached_only:
@@ -229,7 +248,7 @@ def kite(request_token=None, cached_only=False):
         data = kc.generate_session(request_token, api_secret=_env("KITE_API_SECRET"))
     _cache_token(data["access_token"])
     kc.set_access_token(data["access_token"])
-    return kc
+    return _guard_writes(kc)
 
 
 # ─────────────────────────── Instrument map ───────────────────────────

@@ -18,6 +18,10 @@
 7. The rules themselves live in `docs/reference/zerodha-kite-constraints.md`; `tests/test_kite_constraints.py`
    keeps the catalogue and the code in step; a new live action is checked against §5 of that file first.
 
+8. Claude cannot trade. A PreToolUse hook (`.claude/hooks/block_live_orders.py`) blocks the order steps, the kill switch and the mode;
+   `kite_pull.kite()` refuses every broker write when `CLAUDECODE` is set. Cron and the cockpit service are not affected.
+9. A stopped order step (SIGTERM, SIGINT, SIGHUP) cancels its working orders and alerts (`StepInterrupted`). SIGKILL cannot be caught.
+
 ## Why
 2026-11-03: Amit logged in at 06:19 IST as the page asked; Zerodha flushed the session before 08:35; the 09:16
 Close-all cron trusted the cached token, crashed on its first call, and the one-shot hold rule was cleared
@@ -29,7 +33,7 @@ before the quote. The priority-5 push sat on the ntfy server; the phone never ra
 - Scheduled jobs can no longer "think" they are logged in. A dead token shows up at precheck, not mid-step.
 - Amit's one-time setup: ntfy app battery unrestricted + WebSocket + instant delivery; `ALERT_CALL_URL` in
   `secrets.env` (ntfy Pro X-Call, Twilio or CallMeBot).
-- Still to do (Tier A, Amit's go): a 09:05 IST precheck cron on trading days; the place-at-open AMO path with a
-  one-lot real test on a quiet day.
+- Still to do: Amit installs the 09:05 IST precheck cron line (the classifier blocks Claude from the crontab); the
+  place-at-open AMO path with a one-lot real test on a quiet day. Not one of these controls has run on a real order day yet.
 - Supersedes nothing; extends ADR 0086 (approval tiers): a crashed or missed scheduled action is NOT still
   authorised later — the numbers are shown and the user decides.
