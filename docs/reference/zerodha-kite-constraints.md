@@ -15,7 +15,7 @@ it does not prove each control works.
 | A new `generate_session` on the same api_key invalidates the previous token. One app, one session. | [Zerodha FAQ](https://support.zerodha.com/category/trading-and-markets/general-kite/kite-api/articles/kite-connect-api-faqs) | only the cockpit login mints a token; cron never logs in (`cached_only=True`) |
 | A master logout from Kite web (and, per users, a fresh browser login) can end the API session. | docs: user; forum | precheck re-proves the session before each action window; preflight proves it again before orders |
 | The exchange requires one manual login a day; automating login is discouraged by *staff*. | [forum 7773](https://kite.trade/forum/discussion/7773/kite-api-session-timeout-everyday) | the cockpit one-tap login; no TOTP automation on cron |
-| Margins / RMS endpoints fail at night (`GetRmsLimitsResponse Fail`, 02:16 IST 2026-11-03). One failure seen, cause not established. | this incident | preflight reads margin before orders; nothing stops a night-time quote step |
+| **Forum only, cause not confirmed:** `Get Rms Limits Entity Response ... Request not registered` is attributed to the beginning-of-day process. No official page found. Exact string `GetRmsLimitsResponse` not found on any source. Our logs: 01:59 IST 2026-10-30 and 02:16 IST 2026-11-03; the app still showed margin at 01:23 IST on 11-03. | [forum 4247, 2018](https://kite.trade/forum/discussion/4247/get-rms-limits-entity-response-request-not-registered), [Trading Q&A, 2020](https://tradingqna.com/t/error-in-kite-mobile-app/83195) | preflight reads margin before orders; nothing stops a night-time quote step |
 
 ## 2. Orders
 
@@ -31,10 +31,22 @@ it does not prove each control works.
 
 | Rule | Source | Control |
 |---|---|---|
-| F&O AMOs can be placed, modified and cancelled **15:45 → 09:11 IST** (current-month futures to 08:58). Blocked 09:10–15:45. | [support: AMO timings](https://support.zerodha.com/category/trading-and-markets/kite-web-and-mobile/articles/what-is-amo-and-when-can-we-place-it), [support: rejections](https://support.zerodha.com/category/trading-and-markets/alerts-and-nudges/kite-error-messages/articles/kite-order-rejections) | place-at-open path (planned): AMO placed the evening before or at the morning login |
-| **Market-type AMOs on index options are rejected** (impact cost); use LIMIT. Probably why Kite refused the Market order at about 01:30 on 2026-11-03; the rejection text was not captured. | [support: index option AMO rejection](https://support.zerodha.com/category/trading-and-markets/charts-and-orders/order/articles/index-options-amo-rejection) | place-at-open uses LIMIT at a price that fills at any realistic open |
+| **Official:** F&O AMOs can be placed, modified and cancelled **15:45 to 09:11 IST**, sent to the exchange at 09:15 (current-month futures to 08:58). **Not between 01:00 and 05:30 IST: scheduled maintenance.** So the real windows are 15:45 to 01:00 and 05:30 to 09:11. The rejections page gives 09:10 as the F&O cut-off, so treat 09:10 as the safe end. Pages carry no date. | [support: AMO timings](https://support.zerodha.com/category/trading-and-markets/charts-and-orders/order/articles/auto-amo), [support: rejections](https://support.zerodha.com/category/trading-and-markets/alerts-and-nudges/kite-error-messages/articles/kite-order-rejections) | place-at-open path (planned): LIMIT AMO placed before 01:00 or after 05:30, never in between |
+| **Official:** index option market AMOs are rejected (impact cost); use LIMIT, priced above the expected market for a buy. **Official:** in an AMO, orders with the GTT checkbox selected are not accepted. | [support: index option AMO rejection](https://support.zerodha.com/category/trading-and-markets/charts-and-orders/order/articles/index-options-amo-rejection), [support: AMO timings](https://support.zerodha.com/category/trading-and-markets/charts-and-orders/order/articles/auto-amo) | place-at-open uses LIMIT with no GTT flag |
 | API: `variety="amo"` (lower case); not for iceberg or cover orders; a pending AMO may still show variety `amo` after the exchange takes it, so cancel with `regular` if `amo` times out. | [forum 10912](https://kite.trade/forum/discussion/10912/not-able-to-place-amo-orders-using-kite-api), [forum 11742](https://kite.trade/forum/discussion/11742/error-in-cancelling-amo-orders) | place-at-open path; the order book is read back after placing |
 | An accepted order lives on Zerodha's side: a later token flush cannot touch it. | docs | the reason the place-at-open path exists |
+
+### GTTs and overnight, what is and is not sourced
+
+| Item | Status | Source |
+|---|---|---|
+| GTTs can be placed, cancelled or modified at any time; they trigger only in market hours, F&O contracts until 15:40 | **Official**, says nothing about maintenance | [support: GTT](https://support.zerodha.com/category/trading-and-markets/charts-and-orders/gtt/articles/what-is-the-good-till-triggered-gtt-feature) |
+| Buy OCO GTTs only in F&O; index F&O OCO only NRML | **Official** | same page |
+| F&O GTT validity: support says until the contract expires; the terms say pending GTTs are invalidated one day after expiry | **Official, the two pages differ** | [support: F&O GTT](https://support.zerodha.com/category/trading-and-markets/charts-and-orders/gtt/articles/gtt-fno), [GTT terms](https://zerodha.com/tos/gtt/) |
+| An overnight block on GTTs | **Not found.** Conflicts with "at any time", yet Kite appeared to refuse one at about 01:30 IST on 2026-11-03; exact message not captured | none |
+| Extra AMO or GTT limits on options expiring that day | **Not found** | none |
+| The 01:00 to 05:30 block applies to the Kite Connect API | **Not found.** Kite Connect order and GTT docs mention no window or maintenance; do not assume either way | [docs: orders](https://kite.trade/docs/connect/v3/orders/), [docs: GTT](https://kite.trade/docs/connect/v3/gtt/) |
+| Beginning-of-day process times | **Forum only, old and conflicting:** see the two threads | [forum 2524](https://kite.trade/forum/discussion/2524/trading-symbol-doesnt-exist), [forum 4655](https://kite.trade/forum/discussion/4655/can-not-login-to-https-kite-zerodha-com-for-two-days) |
 
 ## 4. Alerts (the ping that never arrived)
 
