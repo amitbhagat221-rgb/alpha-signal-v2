@@ -26,11 +26,46 @@
   .oo-leg input[type=number] { width: 100px; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg-input, var(--bg-card)); color: inherit; }
   .oo-sym { width: 16px; height: 16px; }
   .oo-lim { font-variant-numeric: tabular-nums; }
+  .oo-check { margin-bottom: 12px; padding: 14px; border-radius: 10px; border: 1px solid var(--border); }
+  .oo-check-over { border: 2px solid var(--red, #dc2626); }
+  .oo-check-watch { border: 2px solid var(--amber, #d97706); }
+  .oo-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px 16px; margin: 10px 0; }
+  .oo-fact { font-size: 13px; color: var(--text-muted); }
+  .oo-fact b { display: block; font-size: 16px; color: var(--text-primary, inherit); }
   .oo-acts { margin-top: 12px; display: flex; flex-wrap: wrap; gap: 8px; }
   .oo-status { margin-top: 8px; font-size: 13px; }
 </style>
 <div class="section-title">Orders by day</div>
 <div class="section-desc">Every order in your Zerodha order book, AMOs and hand trades included. It shows whether each one was accepted, filled, rejected or cancelled.</div>
+
+{% set C = d.check %}
+<div class="oo-check {{ 'oo-check-over' if C and C.groups and 'over' in C.groups|map(attribute='verdict') else 'oo-check-watch' if C and C.groups and 'watch' in C.groups|map(attribute='verdict') else '' }}">
+  <div class="ob-row"><b>Today's position check</b> <button class="ob-btn" id="oo-do-check" type="button">Check now</button></div>
+  <div class="oo-note">Runs at 10:00, 15:01 and 15:45. It reads Kite and places nothing.{% if C %} Last run {{ C.at[:16] }} UTC.{% endif %}</div>
+  {% if C and C.groups %}{% for g in C.groups %}
+  <div style="margin-top: 10px;"><b class="{{ {'over': 'oo-bad', 'watch': 'oo-wait', 'ok': 'oo-ok'}[g.verdict] }}">{{ g.underlying }} {{ g.expiry }}: {{ d.verdict_words[g.verdict] }}</b></div>
+  <div class="oo-grid">
+    <div class="oo-fact"><b>{{ "{:,.0f}".format(g.forward) }}</b>option-implied level</div>
+    <div class="oo-fact"><b>{{ "%.2f"|format(g.sigma_pct) }} %</b>move the market prices to expiry</div>
+    <div class="oo-fact"><b>₹{{ "{:,.0f}".format(g.keep_rs) }}</b>if it stays here to expiry</div>
+    <div class="oo-fact"><b>₹{{ "{:,.0f}".format(g.close_cost_rs) }}</b>cost to close now</div>
+    <div class="oo-fact"><b>₹{{ "{:,.0f}".format(g.tail_rs) }}</b>on a bad day, limit ₹{{ "{:,.0f}".format(g.limit_rs) }}</div>
+  </div>
+  <div class="oo-wrap"><table class="oo-table">
+    <thead><tr><th>Short</th><th class="oo-num">Units</th><th class="oo-num">Sold at</th><th class="oo-num">Ask now</th><th class="oo-num">Points away</th><th class="oo-num">z</th><th class="oo-num">Finish past strike</th></tr></thead>
+    <tbody>{% for s in g.shorts %}<tr><td>{{ s.tradingsymbol }}</td><td class="oo-num">{{ s.units }}</td><td class="oo-num">{{ "%.2f"|format(s.sold_at or 0) }}</td><td class="oo-num">{{ s.ask }}</td><td class="oo-num">{{ "{:,.0f}".format(s.points_away) }}</td><td class="oo-num">{{ "%.2f"|format(s.z) }}</td><td class="oo-num">{{ "%.0f"|format(100 * s.p_itm) }} %</td></tr>{% endfor %}</tbody>
+  </table></div>
+  <div class="oo-wrap"><table class="oo-table" style="margin-top: 8px;">
+    <thead><tr><th>Settles at</th><th class="oo-num">Move</th><th class="oo-num">If up</th><th class="oo-num">If down</th></tr></thead>
+    <tbody>{% for m in g.moves %}<tr><td>{{ m.sigma }} sigma</td><td class="oo-num">{{ "%.1f"|format(m.pct) }} %</td><td class="oo-num">₹{{ "{:,.0f}".format(m.up) }}</td><td class="oo-num">₹{{ "{:,.0f}".format(m.down) }}</td></tr>{% endfor %}</tbody>
+  </table></div>
+  {% if g.events %}<div class="oo-note" style="margin-top: 6px;">Before expiry: {{ g.events|join(', ') }}.</div>{% endif %}
+  <div style="margin-top: 8px; font-size: 14px;"><b>Your choices:</b> hold and accept the table above · close now, leaving ₹{{ "{:,.0f}".format(g.after_close_rs) }} on those legs · add wings about ₹{{ "{:,.0f}".format(g.wing_cost_rs) }}, which cap only beyond them · arm a close below for the next open ({{ 'AMO window open now' if C.amo_open else 'AMO window reopens ' ~ C.next_amo }}).</div>
+  {% endfor %}
+  <div class="oo-note" style="margin-top: 8px;">Facts, not a signal. Across 495 past weeks, closing early cut income and did not reliably cut the worst week, so closing is a choice about how much loss you will carry. A gap at the open is in the price before any close can fill.</div>
+  {% elif C %}<div class="ob-muted" style="margin-top: 8px;">No open short leg.</div>
+  {% else %}<div class="ob-muted" style="margin-top: 8px;">Not run yet. Log in to Kite and press Check now.</div>{% endif %}
+</div>
 
 {% set E = d.events %}
 {% if E.items %}
@@ -135,6 +170,13 @@
       });
     });
   }
+  var chk = document.getElementById('oo-do-check');
+  if (chk) chk.addEventListener('click', function () {
+    chk.disabled = true; chk.textContent = 'Checking...';
+    post('/api/options/orders/check').then(function (r) {
+      if (r.ok) location.reload(); else { window.alert((r.j && r.j.error) || 'failed'); chk.disabled = false; chk.textContent = 'Check now'; }
+    });
+  });
   act('oo-do-arm', '/api/options/orders/arm', 'ARM', function () {
     var legs = [];
     document.querySelectorAll('.oo-sym').forEach(function (c) {

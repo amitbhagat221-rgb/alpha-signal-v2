@@ -267,6 +267,19 @@ async def api_options_orders_refresh(request: Request):
     return err or options_live.refresh_orders()
 
 
+@app.post("/api/options/orders/check")
+async def api_options_orders_check(request: Request):
+    """Run the daily position check now. Reads Kite, places nothing."""
+    import options_live
+    _, err = await _live_body(request)
+    if err:
+        return err
+    try:
+        return {"ok": True, **options_live.run_position_check()}
+    except Exception as e:                          # noqa: BLE001 — shown on the page
+        return JSONResponse({"error": f"{type(e).__name__}: {e}"}, status_code=502)
+
+
 @app.post("/api/options/orders/arm")
 async def api_options_orders_arm(request: Request):
     """{"confirm": "ARM", "legs": [{tradingsymbol, limit}]}: the next Kite login inside the AMO window places the close."""

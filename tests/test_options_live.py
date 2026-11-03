@@ -1739,3 +1739,67 @@ def test_orders_page_shows_each_status_the_warning_and_the_arm_controls(ops, con
     for path in ("arm", "fire", "disarm", "refresh"):
         assert anon.post(f"/api/options/orders/{path}", json={}).status_code == 401
     assert authed.post("/api/options/orders/arm", json={"legs": []}).status_code == 400   # no confirm word
+
+
+# ───────────────────────────── the daily position check (ADR 0095) ─────────────────────────────
+
+def _leg(sym, ot, k, net, sold=None, bought=None):
+    return {"tradingsymbol": sym, "option_type": ot, "strike": float(k), "net_qty": net, "sell_qty": -net if sold else 0, "sell_avg": sold,
+            "buy_qty": net if bought else 0, "buy_avg": bought}
+
+
+def _chain_of(rows):
+    return pd.DataFrame([{"option_type": o, "strike": float(k), "bid": m, "ask": m, "mid": m} for o, k, m in rows])
+
+
+def test_position_math_replays_the_2026_11_02_close():
+    """The real settle prices of that evening, and the real 16-lot short strangle with the wings gone."""
+    chain = _chain_of([("CE", 23300, 91.15), ("PE", 23300, 62.65), ("CE", 23350, 65.75), ("PE", 23350, 86.35), ("CE", 23400, 46.35), ("PE", 23400, 114.5),
+                       ("CE", 23500, 21.15), ("PE", 23500, 188.0), ("CE", 23700, 4.0), ("PE", 22400, 2.65), ("PE", 22200, 1.2)])
+    legs_ = [_leg("23500CE", "CE", 23500, -1040, sold=6.5), _leg("22400PE", "PE", 22400, -1040, sold=8.3)]
+    r = ol.position_math(chain, legs_, "2026-11-02", "2026-11-03", 200_000)
+    assert 23_300 < r["forward"] < 23_360 and 0.7 < r["sigma_pct"] < 0.9
+    near = next(s for s in r["shorts"] if s["strike"] == 23500)
+    assert 0.7 < near["z"] < 1.1 and near["ask"] == 21.15
+    assert abs(r["keep_rs"] - 15392) < 1 and r["verdict"] == "over" and r["tail_rs"] < -200_000
+    assert abs(r["close_cost_rs"] - (21.15 + 2.65) * 1040) < 1
+    assert ol.position_math(chain, legs_, "2026-11-02", "2026-11-03", 300_000)["verdict"] == "watch"
+
+
+def test_wings_reduce_the_bad_day():
+    chain = _chain_of([("CE", 98, 6.0), ("PE", 98, 4.0), ("CE", 100, 5.0), ("PE", 100, 5.0), ("CE", 102, 4.0), ("PE", 102, 6.0),
+                       ("CE", 105, 1.0), ("PE", 95, 1.0), ("CE", 108, 0.5), ("PE", 92, 0.5)])
+    naked = [_leg("C", "CE", 105, -100, sold=2.0), _leg("P", "PE", 95, -100, sold=2.0)]
+    winged = naked + [_leg("WC", "CE", 108, 100, bought=0.5), _leg("WP", "PE", 92, 100, bought=0.5)]
+    a = ol.position_math(chain, naked, "2026-11-02", "2026-11-03", 10 ** 9)
+    b = ol.position_math(chain, winged, "2026-11-02", "2026-11-03", 10 ** 9)
+    assert b["moves"][2]["up"] > a["moves"][2]["up"]
+
+
+def test_poscheck_places_nothing_and_alerts_only_when_over_the_limit(conn):
+    fake = _tuesday_broker()
+    _enter_nifty_friday(conn, fake, "auto")
+    res, ctx = run("poscheck", fake, Clock(TUE, "10:00"), position_limit_rs=10 ** 8)
+    assert res["status"] == "ok" and "place_order" not in fake.names() and not ctx["sent"]
+    res, ctx = run("poscheck", fake, Clock(TUE, "10:00"), position_limit_rs=0)
+    if "OVER YOUR LIMIT" in res["detail"]:
+        assert ctx["sent"][-1][1]
+
+
+def test_poscheck_without_a_session_alerts_and_a_crash_does_not_stop_the_step(conn, monkeypatch):
+    fake = _tuesday_broker()
+    _enter_nifty_friday(conn, fake, "auto")
+    res, ctx = run("poscheck", NoKiteSession("x"), Clock(TUE, "10:00"))
+    assert res["status"] == "failed" and ctx["sent"][-1][1]
+    monkeypatch.setattr(ol, "position_math", lambda *a, **k: 1 / 0)
+    res, ctx = run("record", fake, Clock(TUE, "15:45"))
+    assert res["status"] == "ok" and "Position check failed" in ctx["sent"][-1][0] and ctx["sent"][-1][1]
+
+
+def test_orders_page_shows_the_position_check(ops, conn):
+    authed, _ = ops
+    fake = _tuesday_broker()
+    _enter_nifty_friday(conn, fake, "auto")
+    run("poscheck", fake, Clock(TUE, "10:00"))
+    html = authed.get("/options/orders").text
+    assert "position check" in html and "Your choices:" in html and "if it stays here to expiry" in html

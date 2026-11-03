@@ -71,7 +71,7 @@ MARKETS = {u: {"exchange": ex, "spot": key} for u, ex, key in kq.MARKETS}
 MODES = ("off", "shadow", "approve", "auto")
 LIVE_MODES = ("approve", "auto")
 EDITABLE = ("mode", "lots_cap", "margin_buffer_rs", "weekly_loss_limit_rs", "kill", "adopt_manual_nifty",
-            "vix_halt", "vix_halve", "wing_pct", "wing_max_share_pct", "closeall_hold_below", "strike_sigma")
+            "vix_halt", "vix_halve", "wing_pct", "wing_max_share_pct", "closeall_hold_below", "strike_sigma", "position_limit_rs")
 FINAL = ("COMPLETE", "CANCELLED", "REJECTED")
 WRITE_CALLS = ("place_order", "modify_order", "cancel_order")
 TICK = ob.TICK
@@ -147,7 +147,7 @@ def set_setting(key, value, by="cli"):
             if not isinstance(n, int) or isinstance(n, bool) or not 0 <= n <= OPTIONS_LIVE["lots_hard_max"]:
                 raise ValueError(f"lots_cap[{u}] must be a whole number 0-{OPTIONS_LIVE['lots_hard_max']}")
         value = {**settings()["lots_cap"], **value}
-    if key in ("margin_buffer_rs", "weekly_loss_limit_rs"):
+    if key in ("margin_buffer_rs", "weekly_loss_limit_rs", "position_limit_rs"):
         if not isinstance(value, (int, float)) or isinstance(value, bool) or value < 0:
             raise ValueError(f"{key} must be a number ≥ 0")
     if key in ("kill", "adopt_manual_nifty") and not isinstance(value, bool):
@@ -2171,7 +2171,114 @@ def _mark_and_check(ctx):
     res = mark(ctx)
     if (get_state("amo_arm") or {}).get("status") == "placed":      # the 10:00 mark doubles as a late check of a placed AMO
         amocheck(ctx)
+    _safe_poscheck(ctx)
     return res
+
+
+# ─────────────────────────── the daily position check (ADR 0095) ───────────────────────────
+
+TAIL_SIGMA = 1.65 * 1.25                            # the "bad day" of the check: a 95th percentile move, widened by a quarter
+
+
+def position_math(chain, legs_, today, expiry, limit):
+    """One expiry's open legs on a chain [option_type, strike, bid, ask, mid] → the facts for the decision. Reads nothing else.
+    σ = ATM straddle / (0.8 F) at the put-call parity forward, not the index close (2026-11-02: about 110 points apart).
+    A leg already closed is cash; the rest pays intrinsic. Facts, not a signal: exit rules did not pay (option-tail-rules-2026-11)."""
+    import numpy as np
+    from sources.fno_iv import _implied_forward
+    from statistics import NormalDist
+    ok = chain[chain["mid"] > 0]
+    ce, pe = ok[ok.option_type == "CE"].set_index("strike")["mid"], ok[ok.option_type == "PE"].set_index("strike")["mid"]
+    F, _ = _implied_forward(ce, pe, ob.years(today, expiry))
+    both = set(ce.index) & set(pe.index)
+    if F is None or not np.isfinite(F) or not both:
+        raise RuntimeError(f"{expiry}: no parity forward on this chain")
+    k0 = min(both, key=lambda k: abs(k - F))
+    sg = float(ce[k0] + pe[k0]) / (0.8 * F)
+    book = [l for l in legs_ if l["net_qty"]]
+    cash = sum((l["sell_qty"] or 0) * (l["sell_avg"] or 0) - (l["buy_qty"] or 0) * (l["buy_avg"] or 0) for l in legs_)
+
+    def at(S):
+        return cash + sum(l["net_qty"] * ob.intrinsic("C" if l["option_type"] == "CE" else "P", l["strike"], S) for l in book)
+
+    def row(strike, ot):
+        r = chain[(chain.strike == strike) & (chain.option_type == ot)]
+        return r.iloc[0] if not r.empty else None
+    shorts, close_cost, wing_cost = [], 0.0, 0.0
+    for l in book:
+        if l["net_qty"] >= 0:
+            continue
+        sgn = 1 if l["option_type"] == "CE" else -1
+        r, units = row(l["strike"], l["option_type"]), -int(l["net_qty"])
+        ask = float(r.ask) if r is not None and r.ask else (float(r.mid) if r is not None else None)
+        z = math.log(l["strike"] / F) * sgn / sg
+        close_cost += (ask or 0) * units
+        out = chain[(chain.option_type == l["option_type"]) & (sgn * (chain.strike - l["strike"]) > 0) & (chain["ask"] > 0)]
+        if not out.empty:
+            w = out.iloc[(((out.strike - l["strike"]).abs() - 0.0085 * F).abs()).to_numpy().argmin()]
+            wing_cost += float(w.ask) * units
+        shorts.append({"tradingsymbol": l["tradingsymbol"], "strike": l["strike"], "option_type": l["option_type"], "units": units, "ask": ask,
+                       "sold_at": l["sell_avg"], "points_away": sgn * (l["strike"] - F), "z": z, "p_itm": 1 - NormalDist().cdf(z)})
+    moves = [{"sigma": n, "pct": (math.exp(n * sg) - 1) * 100, "up": at(F * math.exp(n * sg)), "down": at(F * math.exp(-n * sg))} for n in (1, 2, 3)]
+    tail = min(at(F * math.exp(TAIL_SIGMA * sg)), at(F * math.exp(-TAIL_SIGMA * sg)))
+    zmin = min((s["z"] for s in shorts), default=None)
+    verdict = "over" if tail < -limit else "watch" if zmin is not None and zmin < 1 else "ok"
+    return {"expiry": expiry, "forward": F, "sigma_pct": sg * 100, "shorts": shorts, "cash_rs": cash, "keep_rs": at(F), "close_cost_rs": close_cost,
+            "after_close_rs": cash - close_cost if shorts else cash, "wing_cost_rs": wing_cost, "moves": moves, "tail_rs": tail, "limit_rs": limit, "z": zmin, "verdict": verdict}
+
+
+VERDICT_WORDS = {"ok": "Inside your limit", "watch": "Strike is close, loss still inside your limit", "over": "OVER YOUR LIMIT on a bad day"}
+
+
+def poscheck(ctx):
+    """Every open short, every market day: what it costs to close and what a bad day costs. Read-only, places nothing."""
+    open_ = legs("source = 'live' AND status = 'OPEN' AND net_qty != 0")
+    groups = sorted({(l["underlying"], l["expiry"]) for l in open_ if l["net_qty"] < 0})
+    if not groups:
+        put_state("position_check", {"at": _utc(), "date": ctx["today"], "groups": []}, ctx["step"])
+        return outcome(ctx, "ALL", "idle", "no open short leg")
+    try:
+        client(ctx)
+    except NoKiteSession:
+        return outcome(ctx, "ALL", "failed", "no live Kite session: position not checked",
+                       f"Position check could not run: log in to Kite: {LOGIN_PAGE}", urgent=True)
+    out, now, limit = [], ctx["now"](), ctx["settings"]["position_limit_rs"]
+    ev = {e["date"]: e for e in events_ahead(ctx["today"])["items"]}
+    for u, e in groups:
+        m = MARKETS[u]
+        chain, spot = kq.live_chain(client(ctx), u, m["exchange"], m["spot"], e, band=ctx["settings"]["chain_band"])
+        for c in ("bid", "ask", "mid"):
+            chain[c] = pd.to_numeric(chain[c], errors="coerce").fillna(0)
+        same = legs("source = 'live' AND underlying = ? AND expiry = ?", [u, e])
+        out.append({**position_math(chain, same, ctx["today"], e, limit), "underlying": u, "spot": spot,
+                    "events": [x["what"] + " " + d for d, x in ev.items() if d <= e]})
+    window = amo_window_open(now)
+    put_state("position_check", {"at": _utc(), "date": ctx["today"], "groups": out, "amo_open": window, "next_amo": next_amo_window(now)}, ctx["step"])
+    text = "; ".join(f"{g['underlying']} {g['expiry']}: {VERDICT_WORDS[g['verdict']]}, bad day {_rs(g['tail_rs'], True)}, close now {_rs(g['close_cost_rs'])}" for g in out)
+    over = any(g["verdict"] == "over" for g in out)
+    daily = now.strftime("%H:%M") >= "15:40"
+    return outcome(ctx, "ALL", "ok", text, f"Position check: {text}. Decide on {PAGE.replace('#live', '/orders')}" if over or daily else None, urgent=over)
+
+
+def _safe_poscheck(ctx):
+    """A check that fails must not stop the step it rides on."""
+    try:
+        poscheck(ctx)
+    except Exception as e:                          # noqa: BLE001 — reaches run_events and the phone
+        runlog.note(f"options_live poscheck failed ({type(e).__name__}: {e})", level="ERROR")
+        push(ctx, f"Position check failed: {type(e).__name__}: {e}", urgent=True)
+
+
+def _record_and_check(ctx):
+    res = record(ctx)
+    _safe_poscheck(ctx)
+    return res
+
+
+def run_position_check(**ctx_kw):
+    """The page's Check now. Reads Kite, places nothing."""
+    ensure_tables()
+    return poscheck(make_ctx("poscheck", **ctx_kw))
 
 
 def spawn_amo_if_armed():
@@ -2226,12 +2333,12 @@ def orders_page_data(day=None):
                       "open": sum(r["market_day"] == d and r["kind"] == "wait" for r in rows)} for d in days],
             "day": pick, "rows": [r for r in rows if r["market_day"] == pick], "arm": arm, "shorts": shorts, "last_read": last,
             "window_open": amo_window_open(now), "next_window": next_amo_window(now), "now": now.strftime("%H:%M"),
-            "login": login_info(), "safe_login": SAFE_LOGIN_IST, "mode": settings()["mode"], "events": events_ahead(today)}
+            "check": get_state("position_check"), "verdict_words": VERDICT_WORDS, "login": login_info(), "safe_login": SAFE_LOGIN_IST, "mode": settings()["mode"], "events": events_ahead(today)}
 
 
-STEPS = {"entry": entry, "buyback": buyback, "closeall": closeall, "record": record, "mark": _mark_and_check,
+STEPS = {"entry": entry, "buyback": buyback, "closeall": closeall, "record": _record_and_check, "mark": _mark_and_check,
          "settle": settle, "reconcile": reconcile, "precheck": precheck, "weekly": weekly, "testorder": testorder,
-         "quote": quote_step, "amo": amo, "amocheck": amocheck}
+         "quote": quote_step, "amo": amo, "amocheck": amocheck, "poscheck": poscheck}
 PER_UNDERLYING = ("entry", "buyback", "testorder")
 
 
