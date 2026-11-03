@@ -12,6 +12,8 @@
   .ol-sz-act { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; }
   .ol-sz-apply { border: 0; cursor: pointer; font-family: inherit; }
   .ol-sz-at { font-size: 11px; color: var(--text-muted); }
+  .ol-sz-trade { margin-top: 10px; font-size: 14px; }
+  .ol-sz-tr { padding: 8px 0; border-top: 1px solid var(--border); line-height: 1.5; }
   .ol-plan { margin-top: 10px; padding: 12px 14px; border-radius: 10px; background: var(--bg-hover, rgba(127,127,127,0.06)); font-size: 14px; display: grid; gap: 4px; }
   .ol-ready { margin-top: 14px; }
   .ol-ready summary { cursor: pointer; }
@@ -164,6 +166,7 @@
     </div>
     <div class="ob-scroll"><table class="ob-table" id="ol-sz-table" style="margin-top: 8px;"></table></div>
     <div class="ob-muted" id="ol-sz-check" style="margin-top: 4px;"></div>
+    <div class="ol-sz-trade" id="ol-sz-trade"></div>
     <div class="ol-sz-act"><button type="button" class="ob-btn ol-sz-apply" id="ol-sz-apply">Save plan</button> <a href="#" class="os-link" id="ol-sz-undo">Discard changes</a> <span class="ob-muted" id="ol-sz-what"></span></div>
     <details class="ol-ready">
       <summary class="ob-muted">How this works</summary>
@@ -352,6 +355,16 @@
     $('ol-sz-check').innerHTML = short.length
       ? '<b class="ob-warn">These lots need ' + O.inr(need) + ' but you deploy ' + O.inr(dep()) + ': the entry will size down to ' + short.join(', ') + ' lots.</b>'
       : 'Fits: needs ' + O.inr(need) + ' of the ' + O.inr(dep()) + ' you deploy (' + O.inr(dep() - need) + ' to spare).';
+    $('ol-sz-trade').innerHTML = US.map(function (u) {
+      var m = Z.quote.markets[u], n = lots[u];
+      if (!m.legs) return '';
+      var when = m.entry_day === new Date().toLocaleDateString('en-CA', {timeZone: 'Asia/Kolkata'}) ? 'today' : m.entry_day;
+      var both = m.legs.map(function (l) { return 'sell <b>' + l.tradingsymbol + '</b> at ' + l.bid; })
+        .concat(kind === 'winged' ? (m.wing_legs || []).map(function (l) { return 'buy ' + l.tradingsymbol + ' at ' + l.ask; }) : []).join(', ');
+      var net = m.credit_pts - (kind === 'winged' ? m.wing_cost_pts : 0);
+      return '<div class="ol-sz-tr"><b>' + u + '</b> at current prices, entry ' + when + ', expiry ' + m.expiry + ' (' + (m.sigma ? m.sigma + ' sigma' : '0.05 delta') + '): ' + both
+        + '. Credit ' + O.inr(net * m.lot * n) + ' on ' + n + ' lots, before charges.</div>';
+    }).join('') + (Z.quote.markets.NIFTY.legs ? '<div class="ob-muted">Strikes and prices are recalculated at entry, about 15:12 to 15:17, so they will differ. An entry on a later day will differ more.</div>' : '');
     var d = dirty(), b = $('ol-sz-apply');
     b.disabled = !d; b.style.opacity = d ? 1 : 0.5; $('ol-sz-undo').hidden = !d;
     $('ol-plan-state').innerHTML = d ? '<b class="ob-warn">unsaved: the next entries still use the saved plan (' + (saved.kind === 'winged' ? 'protected' : 'unprotected') + ', ' + saved.lots.NIFTY + ' / ' + saved.lots.SENSEX + ' lots, ' + O.inr(saved.safe) + ' safety)</b>'

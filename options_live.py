@@ -1795,7 +1795,12 @@ def sizing_quote(ctx):
                        for l in ls if (l["bid"] if l["side"] == "SELL" else l["ask"])) * lot
         hit = max(0.0, k["P"] - (1 - SIZING["crash_gap"]) * F)
         kept = credit * lot * SIZING["keep"][u]
+        def _show(ls):
+            return [{"tradingsymbol": l["tradingsymbol"], "side": l["side"], "bid": l["bid"], "ask": l["ask"],
+                     "delta": l["delta"]} for l in ls]
         out[u] = {"expiry": e, "spot": spot, "forward": F, "lot": lot, "extra": ob.expiry_day_extra(F, lot),
+                  "entry_day": ob.entry_day(e, ob.holidays()), "legs": _show(legs_), "wing_legs": _show(wings),
+                  "sigma": s.get("strike_sigma") or 0, "credit_pts": credit, "wing_cost_pts": wing_cost,
                   "strikes": {"C": k["C"], "P": k["P"], "wing_C": kw["C"], "wing_P": kw["P"]},
                   "naked": {"margin": basket_margin(ctx, legs_, 1), "credit_rs": credit * lot,
                             "weekly": kept - charges(legs_), "crash": (hit - credit) * lot},
