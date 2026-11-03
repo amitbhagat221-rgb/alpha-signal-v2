@@ -86,7 +86,13 @@ class FakeKite:
 
     def ltp(self, keys):
         self._log("ltp", keys)
-        return {k: {"last_price": self.spot[k]} for k in keys}
+        out = {}
+        for k in keys:
+            if k in self.spot:
+                out[k] = {"last_price": self.spot[k]}
+            else:
+                out[k] = {"last_price": self.book[k.split(":", 1)[1]][2]}
+        return out
 
     def quote(self, keys):
         self._log("quote", keys)
@@ -1110,7 +1116,7 @@ def test_sensex_is_held_to_expiry_on_a_normal_thursday(conn):
 def test_precheck_asks_for_a_login_before_the_sensex_buyback(conn):
     _holiday_week(conn)
     res, ctx = run("precheck", NoKiteSession("x"), Clock(THU5, "14:45"))
-    assert res["status"] == "skipped" and "SENSEX buy-back (15:00)" in ctx["sent"][0][0] and "before 15:00" in ctx["sent"][0][0]
+    assert res["status"] == "failed" and "SENSEX buy-back (15:00)" in ctx["sent"][0][0] and "before 15:00" in ctx["sent"][0][0]
 
 
 # ───────────────────────────── Refresh from Kite (Amit 2026-10-29) ─────────────────────────────
@@ -1458,3 +1464,62 @@ def test_closeall_holds_on_a_gap_down_when_asked_once(conn):
         ol.set_setting("closeall_hold_below", {"NSE:NIFTY 50": -1})
     with pytest.raises(ValueError):
         ol.set_setting("closeall_hold_below", {"BSE:FOO": 100})
+
+
+# ───────────────────────────── controls after 2026-11-03 (ADR 0093) ─────────────────────────────
+
+def test_buyback_preflight_blocks_when_kite_holds_more_short_than_the_ledger(conn):
+    fake = _tuesday_broker()
+    _enter_nifty_friday(conn, fake, "auto")
+    ce = next(s for s, q in fake.pos.items() if q < 0 and s.endswith("CE"))
+    fake.pos[ce] = -130                                                    # Kite: 2 lots short; ledger: 1 — unexplained
+    bb, ctx = run("buyback", fake, Clock(TUE, "15:08"), "NIFTY")
+    assert bb["status"] == "failed" and "more short than the ledger" in bb["detail"]
+    assert not _placed(fake) and ol.settings()["kill"] and ctx["sent"][-1][1]      # urgent, nothing placed
+
+
+def test_buyback_preflight_blocks_on_a_dead_session(conn):
+    fake = _tuesday_broker()
+    _enter_nifty_friday(conn, fake, "auto")
+    from kiteconnect.exceptions import TokenException
+    fake.profile = lambda: (_ for _ in ()).throw(TokenException("Incorrect `api_key` or `access_token`."))
+    bb, ctx = run("buyback", fake, Clock(TUE, "15:08"), "NIFTY")
+    assert bb["status"] == "failed" and "no live Kite session" in bb["detail"] and not _placed(fake)
+
+
+def test_closeall_keeps_the_hold_rule_when_the_quote_fails(conn):
+    fake = _tuesday_broker()
+    _enter_nifty_friday(conn, fake, "auto")
+    ol.set_setting("closeall_hold_below", {"NSE:NIFTY 50": 25000.0}, by="test")
+    real_ltp = fake.ltp
+    fake.ltp = lambda keys: (_ for _ in ()).throw(RuntimeError("TokenException: Incorrect `api_key` or `access_token`."))
+    with pytest.raises(RuntimeError):
+        run("closeall", fake, Clock(TUE, "09:16"))
+    assert ol.settings()["closeall_hold_below"] == {"NSE:NIFTY 50": 25000.0}  # 2026-11-03: it was cleared before the quote
+    assert not _placed(fake) and not ol.settings()["kill"]
+    fake.ltp = real_ltp
+    fake.spot["NSE:NIFTY 50"] = 24000.0                                     # below the level: the rule still holds
+    res, _ = run("closeall", fake, Clock(TUE, "09:17"))
+    assert res["status"] == "skipped" and "holding" in res["detail"] and not _placed(fake)
+
+
+def test_precheck_fails_loudly_when_legs_are_open_and_the_session_is_dead(conn):
+    fake = _tuesday_broker()
+    _enter_nifty_friday(conn, fake, "auto")
+    res, ctx = run("precheck", NoKiteSession("x"), Clock(TUE, "09:05"))
+    assert res["status"] == "failed" and "before 09:10" in ctx["sent"][0][0] and ctx["sent"][0][1]
+    ol._health_now = lambda: datetime.combine(TUE, datetime.min.time(), tzinfo=IST).replace(hour=9, minute=30)
+    h = ol.health_check()
+    ol._health_now = None
+    assert h["severity"] == "CRITICAL" and "precheck:ALL failed" in h["sample"]
+
+
+def test_precheck_warns_when_the_login_was_before_0830(conn, monkeypatch):
+    fake = _tuesday_broker()
+    _enter_nifty_friday(conn, fake, "auto")
+    monkeypatch.setattr(ol, "login_info", lambda: {"date": TUE.isoformat(), "at": "2026-10-27T00:49:07+00:00", "early": True})
+    res, ctx = run("precheck", fake, Clock(TUE, "09:05"))
+    assert res["status"] == "skipped" and "log in AGAIN after 08:30" in ctx["sent"][0][0]
+    monkeypatch.setattr(ol, "login_info", lambda: {"date": TUE.isoformat(), "at": "2026-10-27T03:30:00+00:00", "early": False})
+    res, ctx = run("precheck", fake, Clock(TUE, "09:05"))
+    assert res["status"] == "ok"

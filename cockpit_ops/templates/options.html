@@ -12,6 +12,7 @@
 <div class="ob-card ob-row">
   <div>
     {% if request.query_params.get('kite') == 'ok' %}<b class="ob-ok">Kite login done.</b>
+    {% elif request.query_params.get('kite') == 'early' %}<b class="ob-warn">Kite login done, but BEFORE 08:30 IST: Zerodha flushes sessions until ~07:30, so log in AGAIN after 08:30 (2026-11-03: a 06:19 login was dead by 08:35).</b>
     {% elif request.query_params.get('kite') == 'failed' %}<b class="ob-bad">Kite login failed — try again.</b>
     {% elif kite.logged_in_today %}<b class="ob-ok">Kite: logged in today.</b>
     {% else %}<b class="ob-warn">Kite: not logged in today.</b>{% endif %}

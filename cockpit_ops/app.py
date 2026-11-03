@@ -434,7 +434,9 @@ def kite_callback(request_token: str = "", status: str = ""):
     except Exception as e:                          # noqa: BLE001 — the 15:45 IST cron retries
         import runlog
         runlog.item_error("kite_holdings", "login", e)
-    return RedirectResponse("/options?kite=ok", status_code=303)
+    from sources.kite_pull import login_info
+    info = login_info()
+    return RedirectResponse("/options?kite=early" if info and info.get("early") else "/options?kite=ok", status_code=303)
 
 
 @app.get("/feeds", response_class=HTMLResponse)

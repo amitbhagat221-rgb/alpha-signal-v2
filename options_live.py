@@ -64,7 +64,7 @@ from config import OPS_HTTPS, OPTIONS_LIVE
 from db import SCHEMA_PATH, get_db, read_sql, upsert_df
 from sources import _http
 from sources import kite_quotes as kq
-from sources.kite_pull import LOGIN_PAGE, NoKiteSession
+from sources.kite_pull import LOGIN_PAGE, SAFE_LOGIN_IST, NoKiteSession, login_info
 
 IST = ZoneInfo("Asia/Kolkata")
 MARKETS = {u: {"exchange": ex, "spot": key} for u, ex, key in kq.MARKETS}
@@ -553,6 +553,47 @@ def broker_positions(ctx):
     return out
 
 
+# ─────────────────────────── preflight (ADR 0093) ───────────────────────────
+
+def preflight(ctx, legs_, allow_kill=False):
+    """Prove, before ANY order step places anything: a live Kite session (profile), the kill switch off (unless
+    the step is Close-all), Kite's margin readable, a quote for every leg, and no leg where Kite holds MORE short
+    than the ledger (a position we cannot explain). → None when clear, else (detail, push) and nothing is placed.
+    A leg Kite holds LESS short than the ledger is not blocked here: _close_legs buys only what Kite holds."""
+    s = ctx["settings"]
+    if s["kill"] and not allow_kill:
+        return f"kill switch on ({s['kill_reason']})", f"the kill switch is on ({s['kill_reason']}). Resume on the cockpit."
+    try:
+        call(ctx, "profile")
+    except Exception as e:                          # noqa: BLE001 — NoKiteSession, TokenException, network
+        return f"no live Kite session ({type(e).__name__}: {e})", f"no live Kite session: log in at {LOGIN_PAGE} and re-run."
+    try:
+        available(ctx)
+    except Exception as e:                          # noqa: BLE001
+        return f"Kite margin unreadable ({type(e).__name__}: {e})", "Kite's margin could not be read; nothing placed."
+    real = [l for l in legs_ if l.get("source", "live") != "shadow"]
+    if real:
+        syms = sorted({l["tradingsymbol"] for l in real})
+        try:
+            q = call(ctx, "ltp", [f"{l['exchange']}:{l['tradingsymbol']}" for l in real])
+        except Exception as e:                      # noqa: BLE001
+            return f"quotes unavailable ({type(e).__name__}: {e})", "Kite quotes unavailable for the legs; nothing placed."
+        dead = [sym for sym in syms if not any(k.endswith(":" + sym) and (v or {}).get("last_price") for k, v in q.items())]
+        if dead:
+            return f"no quote for {', '.join(dead)}", f"no quote for {', '.join(dead)}; nothing placed."
+        pos = broker_positions(ctx)
+        led = {}
+        for l in real:
+            led[l["tradingsymbol"]] = led.get(l["tradingsymbol"], 0) + int(l["net_qty"] or 0)
+        over = {sym: (pos.get(sym, 0), n) for sym, n in led.items() if n < 0 and pos.get(sym, 0) < n}
+        if over:
+            text = "; ".join(f"{sym}: Kite {p:+,}, ledger {n:+,}" for sym, (p, n) in sorted(over.items()))
+            set_kill(True, f"preflight: Kite holds more short than the ledger ({text})", ctx["step"])
+            return f"Kite holds more short than the ledger: {text}", (f"Kite holds MORE short than the ledger ({text}); "
+                                                                   "nothing placed and entries are stopped until reconcile passes.")
+    return None
+
+
 # ─────────────────────────── the order loop ───────────────────────────
 
 def _members(orders, b, book):
@@ -1013,6 +1054,9 @@ def entry(ctx, u):
         return outcome(ctx, u, "failed", "no Kite login today",
                        f"log in to Kite: {LOGIN_PAGE} — the {u} entry for {e} is skipped until you do "
                        f"(re-run before {s['entry_cutoff']}).", urgent=True)
+    bad = preflight(ctx, legs("source = 'live' AND status = 'OPEN' AND net_qty < 0"))
+    if bad:
+        return outcome(ctx, u, "failed", f"preflight: {bad[0]}", f"{u} entry NOT placed — {bad[1]}", urgent=True)
     dup = already_entered(ctx, u, e, src)
     if dup:
         return outcome(ctx, u, "skipped", dup)
@@ -1283,6 +1327,12 @@ def buyback(ctx, u="NIFTY"):
                             "detail": "every short leg was closed by hand in Kite before the buy-back"}, ctx["step"])
             return outcome(ctx, u, "ok", "nothing to buy back: closed by hand in Kite",
                            f"{u} buy-back: every short leg was already closed by hand in Kite — {nxt} can enter.")
+    if real:
+        bad = preflight(ctx, real, allow_kill=True)  # a buy-back is a close: it runs with the kill switch on
+        if bad:
+            put_state(key, {"ok": False, "detail": f"preflight: {bad[0]}"}, ctx["step"])
+            return outcome(ctx, u, "failed", f"preflight: {bad[0]}",
+                           f"{u} buy-back NOT placed — {bad[1]} Re-run `run.sh options_live buyback {u}` before {end}.", urgent=True)
     before = available(ctx) if real else None
     expected = sum({(l["source"], l["expiry"]): l["margin_rs"] or 0 for l in real}.values())
     res = _close_legs(ctx, todo, _at(ctx, end), _at(ctx, final), f"buyback-{u}-{today}")
@@ -1325,9 +1375,12 @@ def closeall(ctx):
             return outcome(ctx, "ALL", "failed", "no Kite login today",
                            f"Close-all could not run: log in to Kite ({LOGIN_PAGE}) and press it again, or close in Kite by hand.",
                            urgent=True)
-        set_setting("closeall_hold_below", None, by=ctx["step"])
         px = {k: v.get("last_price") for k, v in call(ctx, "ltp", list(hold)).items()}
-        low = {k: (px[k], f) for k, f in hold.items() if px.get(k) is not None and px[k] < f}
+        if any(px.get(k) is None for k in hold):
+            return outcome(ctx, "ALL", "failed", f"no quote for {[k for k in hold if px.get(k) is None]}: the hold rule stays",
+                           "Close-all could not quote the index; nothing placed, the hold rule stays. Re-run.", urgent=True)
+        set_setting("closeall_hold_below", None, by=ctx["step"])   # used once, only after a real quote
+        low = {k: (px[k], f) for k, f in hold.items() if px[k] < f}
         if low:
             text = "; ".join(f"{k} {p:,.2f} < {f:,.2f}" for k, (p, f) in low.items())
             put_state("closeall_hold", {"at": _utc(), "date": ctx["today"], "quotes": px, "below": hold}, ctx["step"])
@@ -1349,6 +1402,10 @@ def closeall(ctx):
         todo = [l for l in legs("status = 'OPEN' AND net_qty < 0") if l["source"] in ("shadow", "live")]
         if not todo:
             return outcome(ctx, "ALL", "ok", "nothing open", "Close-all: every tagged leg was already closed by hand. Kill switch is on.")
+        bad = preflight(ctx, [l for l in todo if l["source"] != "shadow"], allow_kill=True)
+        if bad:
+            return outcome(ctx, "ALL", "failed", f"preflight: {bad[0]}",
+                           f"Close-all NOT placed — {bad[1]} Press it again, or close in Kite by hand.", urgent=True)
     end = ctx["now"]() + timedelta(minutes=s["closeall_minutes"])
     res = _close_legs(ctx, todo, end, end - timedelta(minutes=1), f"closeall-{ctx['today']}")
     left = [l for l in legs("status = 'OPEN' AND net_qty < 0") if l["source"] in ("shadow", "live")]
@@ -1644,13 +1701,24 @@ def precheck(ctx):
         due.insert(0, "NIFTY buy-back")
     if "NIFTY entry" in due and legs("underlying = 'SENSEX' AND expiry = ? AND status = 'OPEN' AND net_qty < 0", [ctx["today"]]):
         due.insert(0, "SENSEX buy-back (15:00)")
+    open_live = legs("source = 'live' AND status = 'OPEN' AND net_qty < 0")
+    if open_live and not any("buy-back" in d for d in due):
+        due.append(f"{len(open_live)} open short leg(s) to mark / buy back")
     if not due:
         return outcome(ctx, "ALL", "idle", "nothing due today")
+    by = "15:00" if any(x.startswith("SENSEX buy-back") for x in due) else "15:05"
+    if ctx["now"]().hour < 12:                      # a morning precheck guards a morning action
+        by = "09:10"
+    info = login_info()
     if has_session(ctx):
+        if info and info.get("early"):
+            return outcome(ctx, "ALL", "skipped", f"logged in before {SAFE_LOGIN_IST} IST: Zerodha may flush it; due today: {', '.join(due)}",
+                           f"today's Kite login was before {SAFE_LOGIN_IST} IST and Zerodha flushes sessions until ~07:30: log in AGAIN "
+                           f"after {SAFE_LOGIN_IST} and before {by} IST — today has the {', '.join(due)}: {LOGIN_PAGE}", urgent=True)
         return outcome(ctx, "ALL", "ok", f"logged in; due today: {', '.join(due)}")
-    return outcome(ctx, "ALL", "skipped", f"no Kite login; due today: {', '.join(due)}",
-                   f"log in to Kite before {'15:00' if any(x.startswith('SENSEX buy-back') for x in due) else '15:05'} IST "
-                   f"— today has the {', '.join(due)}: {LOGIN_PAGE}", urgent=True)
+    return outcome(ctx, "ALL", "failed", f"no live Kite session; due today: {', '.join(due)}",
+                   f"NO live Kite session: log in before {by} IST (after {SAFE_LOGIN_IST}) — today has the {', '.join(due)}: {LOGIN_PAGE}",
+                   urgent=True)
 
 
 def weekly(ctx):
@@ -1982,6 +2050,9 @@ def spawn_closeall():
     root = Path(__file__).resolve().parent
     log = root / "output" / "options_live_closeall.log"
     log.parent.mkdir(parents=True, exist_ok=True)
+    with open(log, "a") as f:
+        f.write(f"=== cockpit Close-all pressed — {_utc()}\n")
+    put_state("closeall_spawn", {"at": _utc(), "log": str(log)}, "cockpit")
     subprocess.Popen([sys.executable, "-m", "options_live", "closeall"], cwd=root, stdout=open(log, "ab"),
                      stderr=subprocess.STDOUT, start_new_session=True,
                      env={**__import__("os").environ, "ALPHA_STEP": "cron_options_live_closeall"})

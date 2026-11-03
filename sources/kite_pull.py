@@ -20,9 +20,13 @@ then a small `--backfill-bars --universe fno --days 5` smoke before any full run
 Kite reality that shapes this module:
   • Kite Connect is a SEPARATE ₹500/mo dev-app subscription on top of the trading
     login. Create the app at developers.kite.trade → api_key + api_secret.
-  • The access_token expires every morning (~06:00 IST). For unattended cron we
-    auto-login with the account's TOTP 2FA secret (pyotp) and cache the token in
-    a dated file so we log in at most once per day.
+  • Zerodha flushes EVERY API session each morning at a time between ~06:00 and ~07:30 IST
+    (docs: "6 AM"; Zerodha staff: "around 7:30"; their advice: take the day's token at or after
+    08:30 IST). A login at 06:19 IST died before 08:35 on 2026-11-03 and the 09:16 close did
+    not run. So: the day's login is done by hand after 08:30, the token is cached in a dated
+    file (IST date), and kite() PROVES a cached token with a profile() call before handing it
+    out — a rejected token is deleted and reported as no session (ADR 0093). A session is
+    also killed by a Kite web/app logout and by a new generate_session on the same api_key.
   • Historical minute bars for listed NSE stocks go back to 2015 (probed 2026-10-11:
     RELIANCE / COFORGE / IFBIND full sessions every year 2015–2026, nothing 2013–14).
     The 60-day limit is per REQUEST, not total depth — loop in chunks. Expired F&O
@@ -93,13 +97,41 @@ def _env(name):
     return v
 
 
-def _cached_token():
-    """Return today's cached access_token, or None if absent/stale."""
+IST = __import__("zoneinfo").ZoneInfo("Asia/Kolkata")
+SAFE_LOGIN_IST = "08:30"                           # Zerodha's own advice: take the day's token at or after this
+
+
+def _ist_now():
+    return datetime.now(IST)
+
+
+def login_info():
+    """{"date": IST date, "at": UTC iso of the login, "early": logged in before 08:30 IST that day} for today's
+    cached token, else None. Never touches Kite."""
     try:
         import json
         with open(TOKEN_CACHE) as f:
             d = json.load(f)
-        if d.get("date") == date.today().isoformat() and d.get("access_token"):
+        if d.get("date") != _ist_now().date().isoformat() or not d.get("access_token"):
+            return None
+        at = d.get("at")
+        early = None
+        if at:
+            t = datetime.fromisoformat(at).astimezone(IST)
+            h, m = map(int, SAFE_LOGIN_IST.split(":"))
+            early = (t.hour, t.minute) < (h, m)
+        return {"date": d["date"], "at": at, "early": early}
+    except Exception:
+        return None
+
+
+def _cached_token():
+    """Return today's (IST) cached access_token, or None if absent/stale."""
+    try:
+        import json
+        with open(TOKEN_CACHE) as f:
+            d = json.load(f)
+        if d.get("date") == _ist_now().date().isoformat() and d.get("access_token"):
             return d["access_token"]
     except Exception:
         pass
@@ -109,8 +141,17 @@ def _cached_token():
 def _cache_token(tok):
     import json
     with open(TOKEN_CACHE, "w") as f:
-        json.dump({"date": date.today().isoformat(), "access_token": tok}, f)
+        json.dump({"date": _ist_now().date().isoformat(), "access_token": tok,
+                   "at": datetime.now(__import__("datetime").timezone.utc).isoformat()}, f)
     os.chmod(TOKEN_CACHE, 0o600)
+
+
+def _drop_token(why):
+    try:
+        os.remove(TOKEN_CACHE)
+    except FileNotFoundError:
+        pass
+    print(f"kite: cached token dropped ({why})")
 
 
 def _auto_request_token(api_key):
@@ -155,7 +196,7 @@ def _auto_request_token(api_key):
 
 
 class NoKiteSession(RuntimeError):
-    """No Kite login today: the access token expires ~06:00 IST and is renewed by hand."""
+    """No Kite login today: Zerodha flushes sessions 06:00–07:30 IST; the day's token is taken by hand after 08:30."""
 
 
 def kite(request_token=None, cached_only=False):
@@ -170,6 +211,14 @@ def kite(request_token=None, cached_only=False):
     tok = _cached_token()
     if tok:
         kc.set_access_token(tok)
+        from kiteconnect.exceptions import TokenException
+        try:                                        # a cached token is a session only when Kite says so
+            with _http.pace("kite"):
+                kc.profile()
+        except TokenException as e:
+            _drop_token(f"Kite rejected it: {e}")
+            raise NoKiteSession(f"Kite rejected today's token (flushed, or a Kite logout) — log in again after "
+                                f"{SAFE_LOGIN_IST} IST at {LOGIN_PAGE}") from e
         return kc
 
     if request_token is None:

@@ -234,19 +234,41 @@ def send_ntfy(text, urgent=False, click=None):
         return False
     url = f"https://ntfy.sh/{topic}"
     headers = {
-        "Title": "Alpha Signal v2",
-        "Priority": "urgent" if urgent else "default",
-        "Tags": "warning" if urgent else "information_source",
+        "Title": "Alpha Signal v2" + (" — URGENT" if urgent else ""),
+        "Priority": "urgent" if urgent else "default",   # 5 = the loudest ntfy level: overrides DND, long vibration
+        "Tags": "rotating_light,warning" if urgent else "information_source",
     }
     if click:
         headers["Click"] = click
     req = urllib.request.Request(url, data=text.encode("utf-8"), headers=headers, method="POST")
+    ok = False
     try:
         with urllib.request.urlopen(req, timeout=10) as resp:
             print(f"  ntfy push sent → {url} (HTTP {resp.status})")
-        return True
+        ok = True
     except Exception as e:
         print(f"  ntfy push failed: {e}")
+    if urgent:
+        ring_phone(text)                            # 2026-11-03: a priority-5 push sat on the server, the phone never rang
+    return ok
+
+
+def ring_phone(text):
+    """Second, louder channel for an urgent alert: ALERT_CALL_URL (secrets.env) is any GET webhook that rings the
+    phone — ntfy Pro's X-Call, a Twilio/CallMeBot URL — with `{text}` replaced by the url-encoded message. No-op
+    when unset (then the urgent ntfy push is the only alarm, and that proved not enough on 2026-11-03)."""
+    tmpl = os.environ.get("ALERT_CALL_URL")
+    if not tmpl:
+        print("  ALERT_CALL_URL not set — no phone call for this urgent alert.")
+        return False
+    from urllib.parse import quote
+    url = tmpl.replace("{text}", quote(text[:300]))
+    try:
+        with urllib.request.urlopen(urllib.request.Request(url, method="GET"), timeout=15) as resp:
+            print(f"  phone call requested (HTTP {resp.status})")
+        return True
+    except Exception as e:
+        print(f"  phone call failed: {e}")
         return False
 
 

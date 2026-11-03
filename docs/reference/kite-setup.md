@@ -51,3 +51,7 @@ Then wire `compute_fno_iv`-style daily step (`{"name":"fetch_kite_bars", ...}`) 
 - **Static IP** required by SEBI for API — Oracle VM already has one ✅.
 - The other 6 §3.2.3 microstructure factors are daily-derivable (no Kite) — see
   `signals/microstructure.py` (to be built).
+
+## Hard rules for live actions
+
+See [zerodha-kite-constraints.md](zerodha-kite-constraints.md) (ADR 0093): the day's login is taken **after 08:30 IST** (Zerodha flushes sessions 06:00–07:30), `kite()` proves a cached token with `profile()`, every order step runs `preflight()`, urgent alerts ring the phone via `ALERT_CALL_URL`.
