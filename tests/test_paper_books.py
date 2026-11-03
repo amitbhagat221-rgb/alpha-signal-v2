@@ -1,10 +1,11 @@
-"""Paper books (Amit 2026-11-01): six strategies of ₹10 L each from June 2026. The engine is tested on a tiny
+"""Paper books (Amit 2026-11-01, 2026-11-03): three models per tier + multibagger + published, ₹10 L each from June 2026. The engine is tested on a tiny
 synthetic market (no DB, no parquet): a buy at the first anchor, a sell on a rank fall, the costs split out with
 STT on its own, 20.8 % short-term tax only on a net gain, rotations counted from the second anchor. The page reads
 ONE file through views.paper_books (missing = {}, old = stale) and the Book page keeps only Zerodha + Track record."""
 import json
 from datetime import date
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -52,7 +53,7 @@ def test_buy_sell_rotation_costs_and_tax(toy):
     assert r["tax_realised"] == 0                                                 # a realised loss: no tax due
     assert r["unrealised_gain"] > 0 and r["tax_if_sold"] == pytest.approx(max(r["realised_gain"] + r["unrealised_gain"], 0) * 0.208, abs=1)
     assert r["bench_ret"] == pytest.approx(0.2)
-    assert len(r["history"]) == 4 and r["history"][-1]["date"] == sessions[-1]   # three anchors + the final mark
+    assert [h["date"] for h in r["history"]] == sessions                          # the last anchor IS the mark: no second row for it
     assert {h["sid"] for h in r["holdings"]} == {"AAA", "CCC"}
     assert r["ret"] == pytest.approx(r["nav"] / 100_000 - 1, abs=1e-4)
 
@@ -91,6 +92,13 @@ def test_trusts_and_illiquid_names_are_never_bought(toy):
     assert {h["sid"] for h in r["holdings"]} == {"BBB", "CCC"}                    # the trust is skipped, the next rank fills
 
 
+def test_a_mark_after_the_last_anchor_adds_one_row(toy):
+    prices, meta, bench, sessions = toy
+    ranks = {d: [("SMALL", {"AAA": 1, "BBB": 2, "CCC": 3}, 2, 4)] for d in sessions[:2]}
+    r, _ = pb.simulate("toy", {}, ranks, prices, meta, set(), bench, sessions[:2], sessions[2], capital=100_000.0)
+    assert [h["date"] for h in r["history"]] == sessions
+
+
 def test_trade_cost_splits_stt_from_the_rest():
     c = pb.trade_cost(50_000.0, 5e8, 100.0, "SMALL", "buy")
     assert c["stt"] == pytest.approx(50.0)
@@ -105,12 +113,44 @@ def test_months_between():
     assert pb.months_between("2025-10-13", "2026-10-13") == 12
 
 
-def test_every_book_has_options_and_a_default_that_is_first():
+def test_three_models_per_tier_and_no_more():
+    """Amit 2026-11-03: "have 3 models at max slow fast and blend". A tier book runs exactly one model; multibagger and
+    published keep at most three basket sizes, with the default first and their evidence written down."""
+    assert {b["kind"] for b in pb.BOOKS.values() if b["tier"] == "MID"} == {"slow", "fast", "blend"}
+    assert {b["kind"] for b in pb.BOOKS.values() if b["tier"] == "SMALL"} == {"slow", "fast", "blend"}
     for k, b in pb.BOOKS.items():
         opts = pb.OPTIONS[b["kind"]]
-        assert 3 <= len(opts) <= 4, k
-        assert "default" in opts[0]["label"]
-        assert k in pb.EVIDENCE
+        if b["kind"] in pb.MODEL_KINDS:
+            assert len(opts) == 1, k
+            assert opts[0]["file"] == pb.MODELS_FILE and b["sell"] > b["N"]
+        else:
+            assert len(opts) <= 3 and "default" in opts[0]["label"] and k in pb.EVIDENCE
+
+
+def test_blend_rule_is_the_midpoint_of_slow_and_fast():
+    s, f, m = pb.BOOKS["small_slow"], pb.BOOKS["small_fast"], pb.BOOKS["small_blend"]
+    assert m["sell"] == (s["sell"] + f["sell"]) / 2
+    assert m["min_hold_m"] == (s["min_hold_m"] + f.get("min_hold_m", 0)) / 2
+
+
+def test_model_select_bars_on_a_toy_factor_set():
+    """The bars: fdr drops a factor with one good t among many weak ones; the long-side test drops an IC that lives only
+    in the losers; carry-over of months and the newest-anchor fix live in tools.model_select.walk."""
+    from tools import model_select as ms
+    idx = [f"2024-{m:02d}-01" for m in range(1, 13)] + [f"2025-{m:02d}-01" for m in range(1, 13)]
+    rng = np.random.default_rng(0)
+    ic = {"real": pd.Series(0.05 + rng.normal(0, 0.01, 24), index=idx), "lucky": pd.Series(0.01 + rng.normal(0, 0.012, 24), index=idx)}
+    ic.update({f"noise{i}": pd.Series(rng.normal(0, 0.02, 24), index=idx) for i in range(40)})
+    train = set(idx)
+    st = ms.train_stats(ic, train, 1)
+    assert "real" in ms.by_pass(st) and all(not c.startswith("noise") for c in ms.by_pass(st))
+    winners = pd.DataFrame({"top": 0.02 + rng.normal(0, 0.005, 24), "bot": rng.normal(0, 0.005, 24)}, index=idx)
+    losers = pd.DataFrame({"top": rng.normal(0, 0.005, 24), "bot": -0.02 + rng.normal(0, 0.005, 24)}, index=idx)
+    assert ms.long_pass("real", st["real"], {"real": winners}, train, 1)
+    assert not ms.long_pass("real", st["real"], {"real": losers}, train, 1)      # the IC comes from avoiding losers only
+    half = pd.Series([0.05] * 12 + [-0.01] * 12, index=idx, dtype=float)
+    assert ms.stable_pass(ic["real"], train, 1.0) and not ms.stable_pass(half, train, 1.0)
+    assert set(ms.choose("old", st, ic, {}, train, 8, 1, {})) <= set(st)
 
 
 def test_views_reader(tmp_path, monkeypatch):
@@ -141,3 +181,10 @@ def test_ops_page_is_registered_and_listed():
     assert p["path"] == "/paper-books" and p["section"] == "Fund"
     from config import FILE_OUTPUTS
     assert any(f["virtual_table"] == "_file_paper_books" for f in FILE_OUTPUTS)
+
+
+def test_the_page_lists_every_book_from_the_tool():
+    """A hard-coded book list in the template silently dropped the Blend books."""
+    src = open(pb.PROJECT_ROOT / "cockpit_ops" / "templates" / "paper_books.html", encoding="utf-8").read()
+    assert "d.book_order" in src
+    assert not any(f"'{k}'" in src for k in pb.BOOKS if k not in ("published", "multibagger"))

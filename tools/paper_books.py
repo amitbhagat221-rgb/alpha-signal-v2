@@ -1,27 +1,23 @@
 """
-Paper Books — six strategies, ₹10 lakh each, started June 2026 and marked to the latest close.
+Paper Books — eight books, ₹10 lakh each, started June 2026 and marked to the latest close.
 (READ-ONLY on the DB; writes output/paper_books/latest.{json,md}. Paper only: no orders anywhere.)
 
 Amit 2026-11-01: "we have 5 strategies and we want to create a paper book on it 10 lakhs each … assuming the
 10 lakhs in each gets invested in June 2026 … returns till date, how many times we rotated, STT, STCG tax,
-an appropriate benchmark, best weights with 3-4 custom options."
+an appropriate benchmark." Amit 2026-11-03: "have 3 models at max slow fast and blend and use a better bar, do
+backtesting and select the three models" (tools/model_select.py, ADR 0095).
 
 Books (config BOOKS):
-  mid_slow / small_slow   the long-hold rule the paper sleeve runs (ADR 0073): buy the top N by the average of
-                          the last three monthly scores; sell only when the rank falls below 3N AND the name has
-                          been held 12 months. N = 20.
-  mid_fast / small_fast   the tactical rule: buy the top N by this month's score; sell when the rank falls below
-                          2N; no minimum hold. N = 20.
+  mid_slow / small_slow   Slow: top 20 by the average of the last three monthly scores; sold only below rank 60
+                          after 12 months held (ADR 0073's slow rule).
+  mid_fast / small_fast   Fast: top 20 by this month's score; sold below rank 40; no minimum hold.
+  mid_blend / small_blend Blend: the mean of the Slow and Fast scores; top 20; sold below rank 50 after 6 months held.
   multibagger             the desk's ranking as it stood each month: the old multibagger score (June–Sep 2026)
                           and the thesis rank from 2026-10-15; buy the top 10, sell below rank 30.
-  published               the sixth book, added as the honest live record: the picks the cockpit actually
-                          published on the anchor day (daily_picks, no hindsight): Mid top 10 + Small top 10,
-                          ₹5 L each half; sell when a name falls below rank 20 in its tier.
-Weight options (OPTIONS, one score source each; the default is the best-tested pre-registered rule (slow: slow_select by
-Amit's call; fast: fast_select), never the one that happens to lead this window; each option's `why` quotes its 2022–26 book evidence):
-  slow   slow_select (default, Amit 2026-11-01: the best-tested slow score) · slow_v2 (the sleeve's rule) · slow_icw · blend
-  fast   fast_select (default) · fast_v1 (the frozen live weights on the panel) · published (daily_picks top N)
-  multibagger / published   the basket size (10 / 20 / 30 and 10+10 / 5+5 / 20+20).
+  published               the honest live record: the picks the cockpit actually published on the anchor day
+                          (daily_picks, no hindsight): Mid top 10 + Small top 10, ₹5 L each half; sold below rank 20.
+The three models come from data/lh/model_select/models.parquet (tools.model_select --score). Multibagger and published
+keep a basket-size choice (10 / 20 / 30 and 10+10 / 5+5 / 20+20): that is not a model.
 
 Mechanics (the paper sleeve's): monthly anchors = the score panel's snapshot dates (first trading day of the
 month); fills at the anchor close; equal amounts per new buy (book value / N, capped by cash); total-return
@@ -78,54 +74,40 @@ STT = lh_costs.ZERODHA["stt"]
 MB_SWITCH = "2026-10-15"         # first multibagger_scores snapshot with a thesis_rank
 TIER_BENCH = {"MID": "NIFTY MIDCAP 150", "SMALL": "NIFTY SMALLCAP 250"}
 
+MODEL_KINDS = ("slow", "fast", "blend")
+MODELS_FILE = "model_select/models.parquet"       # the three models, tools.model_select --score
+SELECTION = LH / "model_select" / "results.json"  # the pre-registered test that chose them
+
+_MID, _SMALL = {"NIFTY MIDCAP 150": 1.0}, {"NIFTY SMALLCAP 250": 1.0}
+_SLOW_RULE = "Top 20 {} by the average of the last three monthly Slow scores. Sold only when the rank falls below 60 and the name has been held 12 months."
+_FAST_RULE = "Top 20 {} by this month's Fast score. Sold the month the rank falls below 40; the cash buys the best names not yet held."
+_BLEND_RULE = "Top 20 {} by the mean of the Slow and Fast scores this month. Sold when the rank falls below 50 and the name has been held 6 months."
 BOOKS = {
-    "mid_slow":   dict(label="Mid cap · Slow", tier="MID", kind="slow", bench={"NIFTY MIDCAP 150": 1.0}, N=20, min_hold_m=12,
-                       rule="Top 20 Mid caps by the average of the last three monthly slow scores. A name is sold only "
-                            "when its rank falls below 60 and it has been held 12 months, so the book barely turns over."),
-    "mid_fast":   dict(label="Mid cap · Fast", tier="MID", kind="fast", bench={"NIFTY MIDCAP 150": 1.0}, N=20,
-                       rule="Top 20 Mid caps by this month's fast score. A name is sold the month its rank falls "
-                            "below 40; the cash buys the best names not yet held."),
-    "small_slow": dict(label="Small cap · Slow", tier="SMALL", kind="slow", bench={"NIFTY SMALLCAP 250": 1.0}, N=20, min_hold_m=12,
-                       rule="Top 20 Small caps by the average of the last three monthly slow scores. Sold only below "
-                            "rank 60 after 12 months held. New buys need ₹1 crore a day of trading."),
-    "small_fast": dict(label="Small cap · Fast", tier="SMALL", kind="fast", bench={"NIFTY SMALLCAP 250": 1.0}, N=20,
-                       rule="Top 20 Small caps by this month's fast score, sold below rank 40. New buys need ₹1 crore "
-                            "a day of trading."),
-    "multibagger": dict(label="Multibagger · Best 10", tier=None, kind="mb", bench={"NIFTY SMALLCAP 250": 1.0}, N=10,
+    "mid_slow":    dict(label="Mid cap · Slow", tier="MID", kind="slow", bench=_MID, N=20, sell=60, min_hold_m=12, rule=_SLOW_RULE.format("Mid caps")),
+    "mid_fast":    dict(label="Mid cap · Fast", tier="MID", kind="fast", bench=_MID, N=20, sell=40, rule=_FAST_RULE.format("Mid caps")),
+    "mid_blend":   dict(label="Mid cap · Blend", tier="MID", kind="blend", bench=_MID, N=20, sell=50, min_hold_m=6, rule=_BLEND_RULE.format("Mid caps")),
+    "small_slow":  dict(label="Small cap · Slow", tier="SMALL", kind="slow", bench=_SMALL, N=20, sell=60, min_hold_m=12, rule=_SLOW_RULE.format("Small caps")),
+    "small_fast":  dict(label="Small cap · Fast", tier="SMALL", kind="fast", bench=_SMALL, N=20, sell=40, rule=_FAST_RULE.format("Small caps")),
+    "small_blend": dict(label="Small cap · Blend", tier="SMALL", kind="blend", bench=_SMALL, N=20, sell=50, min_hold_m=6, rule=_BLEND_RULE.format("Small caps")),
+    "multibagger": dict(label="Multibagger · Best 10", tier=None, kind="mb", bench=_SMALL, N=10,
                         rule="The desk's 10 best names each month: the multibagger score as published until September, "
                              "the five-part thesis rank from 15 October. Sold when the rank falls below 30."),
-    "published":  dict(label="Published picks · Mid 10 + Small 10", tier=None, kind="published",
-                       bench={"NIFTY MIDCAP 150": 0.5, "NIFTY SMALLCAP 250": 0.5}, N=10,
-                       rule="The picks the cockpit actually showed on the anchor morning (daily_picks): the top 10 Mid "
-                            "and top 10 Small, ₹5 lakh each half, no hindsight. Sold when a name falls below rank 20 "
-                            "in its tier."),
+    "published":   dict(label="Published picks · Mid 10 + Small 10", tier=None, kind="published",
+                        bench={"NIFTY MIDCAP 150": 0.5, "NIFTY SMALLCAP 250": 0.5}, N=10,
+                        rule="The picks the cockpit actually showed on the anchor morning (daily_picks): the top 10 Mid "
+                             "and top 10 Small, ₹5 lakh each half, no hindsight. Sold when a name falls below rank 20 "
+                             "in its tier."),
 }
 
-# One score source per option. file/method = the research panels under data/lh; `published` = daily_picks.
 OPTIONS = {
-    "slow": [
-        dict(key="slow_select", label="Slow select (default)", file="oos_scores.parquet", method="slow_select", avg3=True,
-             why="Walk-forward: each month the 8 factors with the strongest 126-day evidence so far, equal weight. The best "
-                 "slow score in the 2022–26 book test: SMALL +19.7 %/yr over the index (t 2.08), MID +5.5 %/yr (t 1.53)."),
-        dict(key="slow_v2", label="Slow v2 (sleeve rule)", file="v2/scores_all.parquet", method="slow_v2", avg3=True,
-             why="The pre-registered sleeve rule (plan 0025): equal weights on 6-month momentum, ROCE × book-to-price "
-                 "and Piotroski-lite, nothing fitted. Its own 2022–26 book: SMALL +7.9 %/yr over the index, t 1.19, up from "
-                 "12 of 12 start months. Kept for simplicity, not because it tested best."),
-        dict(key="slow_icw", label="Slow IC-weighted", file="oos_scores.parquet", method="slow_icw", avg3=True,
-             why="Walk-forward: ~30 factors, each weighted by its past 126-day information coefficient. Best rank IC "
-                 "across the whole tier (0.115) but a weak book at the top: SMALL +3.6 %/yr, t 0.73, worst year −25 %."),
-        dict(key="blend", label="Blend slow + fast", file="oos_scores.parquet", method="blend", avg3=True,
-             why="The mean of the walk-forward slow-select and fast-select scores."),
-    ],
-    "fast": [
-        dict(key="fast_select", label="Fast select (default)", file="oos_scores.parquet", method="fast_select",
-             why="Walk-forward: each month the 6 factors with the strongest 20-day evidence so far. Out of sample by "
-                 "construction; the paper sleeve's tactical book runs on it."),
-        dict(key="fast_v1", label="Fast v1 (frozen live weights)", file="v2/scores_all.parquet", method="fast_v1",
-             why="The production weights frozen in October 2026, applied to the panel. In-sample for these months."),
-        dict(key="published", label="As published (daily_picks)", source="published",
-             why="The ranks the cockpit showed on the anchor morning, whatever the weights were that day."),
-    ],
+    "slow": [dict(key="slow", label="Slow", file=MODELS_FILE, method="slow", avg3=True,
+                  why="Each month, from past data only: the factors that predicted 6-month returns with |t| ≥ 2.5 over at least "
+                      "24 months AND whose best-ranked fifth of stocks really beat the tier (the long-side test). At most 8, equal weight.")],
+    "fast": [dict(key="fast", label="Fast", file=MODELS_FILE, method="fast",
+                  why="Each month, from past data only: the factors that predicted next month's return and survive a multiple-testing "
+                      "correction across every factor tried (Benjamini-Yekutieli, 5 %). At most 6, equal weight.")],
+    "blend": [dict(key="blend", label="Blend", file=MODELS_FILE, method="blend",
+                   why="The mean of the Slow and Fast scores. Nothing is fitted: its holding rule is the midpoint of the other two.")],
     "mb": [dict(key="top10", label="Best 10 (default)", N=10, sell=30), dict(key="top20", label="Best 20", N=20, sell=50),
            dict(key="top30", label="Best 30", N=30, sell=70)],
     "published": [dict(key="10+10", label="Mid 10 + Small 10 (default)", N=10, sell=20),
@@ -133,21 +115,67 @@ OPTIONS = {
                   dict(key="20+20", label="Mid 20 + Small 20", N=20, sell=40)],
 }
 
-# What the backtests promised, in plain words, so the page can say whether the window is in line.
+# What the record says for the books that are not one of the three models.
 EVIDENCE = {
-    "mid_slow": "Plan 0024: Mid slow +5.2 %/yr over Midcap 150 after costs and tax (t 1.44) — weak. Apr–Oct 2026 "
-                "backtest book +3.7 % vs the index +9.6 %.",
-    "mid_fast": "Mid fast_select Apr–Oct 2026 backtest +15.1 % vs the index +9.6 %. Live top-10 picks Apr–Jul: −0.5 % vs "
-                "the tier at 63 days, hit rate 44 %.",
-    "small_slow": "Plan 0024: Small slow +18.3 %/yr over Smallcap 250 after costs and tax (t 1.81, fragile). Apr–Oct 2026 "
-                  "backtest book +23.9 % vs the index +18.7 %.",
-    "small_fast": "Plan 0025: the fast Small tactical book was the closest to passing (+12.2 %/yr, t 1.64). Apr–Oct 2026 "
-                  "backtest +31.8 % vs the index +18.7 %. Live top-10 picks Apr–Jul: +4.8 % over the tier, hit 58 %.",
     "multibagger": "Research 0008: top 30 vs the equal-weight pond +8.7 %/yr (t 2.25) on survivors; honest DSR fails. "
                    "The forward books (pond / top 30 / price-only 30) started 2026-10-16 and are judged at 24 months.",
     "published": "The Track record page's own numbers: published top-10 picks since April 2026, Small +4.8 % over the "
                  "tier at 63 days, Mid −0.5 %. This book is those picks held as money.",
 }
+# Facts the test's numbers alone do not show.
+MODEL_NOTES = {
+    "mid_fast": "No factor cleared the bar before May 2026, so this book's test is mostly cash. Since then it runs on one factor, "
+                "the consensus beat rate, whose estimates are not yet verified point-in-time, and more than a dozen names tie at "
+                "the top, so the choice among them is arbitrary.",
+    "mid_blend": "Before May 2026 the Fast half had no factors, so the test is mostly the Slow score on Blend's holding rule.",
+}
+BAR_LABELS = {"old": "Today's bar (|t| ≥ 2.5)", "fdr": "Multiple-testing bar", "long": "Long-side bar", "full": "All tests together"}
+CONTROL_LABELS = {"ctl_slow_v2": "Slow v2, fixed recipe", "ctl_slow_icw": "Slow IC-weighted, no bar",
+                  "ctl_blend": "The old blend", "ctl_fast_v1": "Fast v1, today's live weights"}
+
+
+def load_selection():
+    """The pre-registered test's result, for the page: one row per model and tier, and every bar side by side. Raises if
+    the test or the scores are missing: a page of models without their evidence is the failure this page exists to stop."""
+    r = json.loads(SELECTION.read_text())
+    latest = pd.read_csv(LH / "model_select" / "model_factors.csv")
+    latest = latest[latest["anchor"] == latest["anchor"].max()]
+    rows = {}
+    for tier in ("MID", "SMALL"):
+        for model, method in r["chosen"].items():
+            bk, g = r["books"][tier][method], r["grades"][tier][method]
+            names = []
+            f = latest[(latest["tier"] == tier) & (latest["method"] == model)]
+            if len(f):
+                names = [("−" if w < 0 else "") + c for c, w in json.loads(f["factors"].iloc[0]).items()]
+            if model == "blend":
+                names = ["the mean of Slow and Fast"]
+            rows[f"{tier.lower()}_{model}"] = dict(
+                tier=tier, model=model, excess=bk["excess_cagr"], t=bk["t"], worst=bk["worst_12m"], turnover=bk["turnover"], cost_bps=bk["costs_bps"],
+                months_no_score=bk["months_no_score"], grade=g["grade"], dsr=g["dsr"], pbo=g["pbo"], beat_years=g["beat_years"], n_years=g["n_years"],
+                beat_starts=g["beat_starts"], n_starts=g["n_starts"], holdout=r["holdout"].get(tier, {}).get(method, {}).get("excess"), factors=names)
+    bars = []
+    for model, chosen in (("slow", r["slow_bar"]), ("fast", r["fast_bar"])):
+        for bar in ("old", "fdr", "long", "full"):
+            m = f"{model}_{bar}"
+            bars.append(dict(model=model.capitalize(), label=BAR_LABELS[bar], chosen=bar == chosen, control=False,
+                             mid_x=r["books"]["MID"][m]["excess_cagr"], mid_t=r["books"]["MID"][m]["t"],
+                             small_x=r["books"]["SMALL"][m]["excess_cagr"], small_t=r["books"]["SMALL"][m]["t"]))
+    for m, label in CONTROL_LABELS.items():
+        bars.append(dict(model="Control", label=label, chosen=False, control=True,
+                         mid_x=r["books"]["MID"][m]["excess_cagr"], mid_t=r["books"]["MID"][m]["t"],
+                         small_x=r["books"]["SMALL"][m]["excess_cagr"], small_t=r["books"]["SMALL"][m]["t"]))
+    return dict(window=r["window"], computed=r["computed"], rows=rows, bars=bars)
+
+
+def model_evidence(key, sel):
+    """The card's 'what the test said' line for one of the three models, from the test's own numbers."""
+    x = sel["rows"][key]
+    held = "" if x["holdout"] is None else f" Held out from the decision, June to October 2026: {x['holdout'] * 100:+.1f} % over the index."
+    note = f" {MODEL_NOTES[key]}" if key in MODEL_NOTES else ""
+    return (f"Walk-forward test, June 2022 to June 2026, after costs and tax: {x['excess'] * 100:+.1f} %/yr over the index (t {x['t']:.2f}); "
+            f"ahead in {x['beat_years']} of {x['n_years']} calendar years and from {x['beat_starts']} of {x['n_starts']} start months; "
+            f"worst 12 months {x['worst'] * 100:+.1f} %. Grade {x['grade']}.{held}{note}")
 
 
 # ── reading ────────────────────────────────────────────────────────────────────────────────────
@@ -157,7 +185,7 @@ def ro():
 
 
 def anchors():
-    sc = pd.read_parquet(LH / "oos_scores.parquet", columns=["snapshot_date"])
+    sc = pd.read_parquet(LH / MODELS_FILE, columns=["snapshot_date"])
     return sorted(d for d in sc["snapshot_date"].unique() if d >= START)
 
 
@@ -362,7 +390,8 @@ def simulate(book_key, opt, ranks_by_anchor, prices, meta, trusts, bench_levels,
                   last_anchor=max(all_anchors))
     # mark to the latest close
     final_nav = nav_at(asof)
-    history = history + [dict(date=asof, nav=round(final_nav), bench=round(bench_at(asof), 5))]
+    if history[-1]["date"] != asof:             # on an anchor day the anchor's own row is the mark
+        history = history + [dict(date=asof, nav=round(final_nav), bench=round(bench_at(asof), 5))]
     unreal = 0.0
     holdings = []
     for sid, p in sorted(pos.items(), key=lambda kv: (kv[1]["sleeve"], kv[1]["rank_at_buy"])):
@@ -419,7 +448,7 @@ def score_series(book_key, opt, con, label_anchors):
     ranking for the multibagger book (score = -rank)."""
     b = BOOKS[book_key]
     out = []
-    if b["kind"] in ("slow", "fast") and opt.get("source") != "published":
+    if b["kind"] in MODEL_KINDS:
         sc = _panel_all(opt["file"])
         sc = sc[(sc["method"] == opt["method"]) & (sc["cap_tier"] == b["tier"])]
         wide = sc.pivot_table(index="sid", columns="snapshot_date", values="score")
@@ -429,9 +458,7 @@ def score_series(book_key, opt, con, label_anchors):
             if a in label_anchors:
                 out.append((a, b["tier"], wide[a].dropna()))
     else:
-        tiers = ("MID", "SMALL") if b["kind"] == "published" else ([b["tier"]] if b["tier"] else ["MB"])
-        if opt.get("source") == "published":
-            tiers = (b["tier"],)
+        tiers = ("MID", "SMALL") if b["kind"] == "published" else ["MB"]
         for a in label_anchors:
             if b["kind"] == "mb":
                 d, rk = mb_ranks(con, a)
@@ -470,7 +497,7 @@ def evidence(book_key, opt, con, labels, N, asof):
     df = pd.DataFrame(rows).groupby("anchor").agg(ic=("ic", "mean"), spread=("spread", "mean"), n=("n", "sum")).reset_index()
     # the replay's live months start at the June anchor; 'as published' and the desk's own ranking have no
     # backtest at all (nothing was recomputed), so every month of theirs is live
-    no_backtest = opt.get("source") == "published" or BOOKS[book_key]["kind"] in ("mb", "published")
+    no_backtest = BOOKS[book_key]["kind"] in ("mb", "published")
     df["live"] = True if no_backtest else (df["anchor"] >= START)
     from tools.backtest_pit import _newey_west_se
 
@@ -481,10 +508,9 @@ def evidence(book_key, opt, con, labels, N, asof):
         return dict(months=int(len(x)), ic=round(float(x["ic"].mean()), 4), t=None if not se else round(float(x["ic"].mean() / se), 2),
                     hit=round(float((x["ic"] > 0).mean()), 3), spread=round(float(x["spread"].mean()), 2),
                     first=x["anchor"].iloc[0], last=x["anchor"].iloc[-1])
-    in_sample = opt.get("key") in ("slow_v2", "fast_v1")
     return dict(all=summ(df), backtest=summ(df[~df["live"]]), live=summ(df[df["live"]]),
                 months=[dict(anchor=r.anchor, ic=round(r.ic, 3), spread=round(r.spread, 2), live=bool(r.live)) for r in df.itertuples()],
-                in_sample_before="2026-10-01" if in_sample else None, N=N)
+                in_sample_before=None, N=N)
 
 
 def luck(book_ret, N, tier_sids, prices, start, asof):
@@ -514,14 +540,9 @@ def ranks_for(book_key, opt, con, all_anchors):
     b = BOOKS[book_key]
     out, dates = {}, {}
     for a in all_anchors:
-        if b["kind"] in ("slow", "fast"):
-            N = b["N"]
-            sell = 3 * N if b["kind"] == "slow" else 2 * N
-            if opt.get("source") == "published":
-                d, rk = published_ranks(con, b["tier"], a)
-            else:
-                d, rk = a, panel_ranks(opt, b["tier"], a)
-            out[a] = [(b["tier"], rk, N, sell)]
+        if b["kind"] in MODEL_KINDS:
+            d, rk = a, panel_ranks(opt, b["tier"], a)
+            out[a] = [(b["tier"], rk, b["N"], b["sell"])]
         elif b["kind"] == "mb":
             d, rk = mb_ranks(con, a)
             out[a] = [("MB", rk, opt["N"], opt["sell"])]
@@ -554,6 +575,7 @@ def run(smoke=False, rebuild=False):
     meta, trusts = stock_meta(con)
     prices = Prices(px, sessions)
     labels = load_labels()
+    sel = load_selection()
     books = {}
     for key, b in BOOKS.items():
         opts = OPTIONS[b["kind"]][:1] if smoke else OPTIONS[b["kind"]]
@@ -581,20 +603,20 @@ def run(smoke=False, rebuild=False):
         books[key] = dict(label=b["label"], tier=b["tier"], kind=b["kind"], rule=b["rule"], bench=b["bench"],
                           bench_label=" / ".join(f"{int(w * 100)} % {s}" for s, w in b["bench"].items()) if len(b["bench"]) > 1
                           else next(iter(b["bench"])), N=b["N"], default=default, best_in_window=best,
-                          evidence=EVIDENCE[key], option_order=[o["key"] for o in opts], variants=variants)
+                          evidence=model_evidence(key, sel) if b["kind"] in MODEL_KINDS else EVIDENCE[key],
+                          grade=sel["rows"][key]["grade"] if b["kind"] in MODEL_KINDS else None, option_order=[o["key"] for o in opts], variants=variants)
     con.close()
     out = dict(asof=asof, start=all_anchors[0], anchors=all_anchors, capital=CAPITAL, stcg=STCG, stt=STT,
                floor_inr=FLOOR_INR, computed=date.today().isoformat(), replay_until=st["replay_until"],
-               record_since=st["created"], books=books,
+               record_since=st["created"], books=books, book_order=list(books), selection=sel,
                notes=["Evidence per option: every month the score is judged on the WHOLE tier (rank IC against the next "
                       "month's return, and the top-N basket's return minus the tier's), from the first walk-forward month "
                       "in 2022 to the last matured month; live months are the anchors from June 2026. Luck: the book's "
                       "return against 5,000 random baskets of the same size from the same tier over the same window.",
                       "Fills at the anchor close; no slippage beyond the modelled half-spread and impact.",
                       "Benchmarks are price indices (no dividends); the books' closes include dividends.",
-                      "The slow and fast research panels were built in October 2026; fast_select / slow_select / slow_icw "
-                      "/ blend are walk-forward (out of sample), slow_v2 and fast_v1 are fixed weights chosen in October "
-                      "(in-sample for these months), and 'As published' is the cockpit's own record."])
+                      "Slow, Fast and Blend choose their factors each month from earlier data only. The bars themselves were chosen "
+                      "on 2022-06 to 2026-06 (tools/model_select.py); June 2026 onward was held out of that decision."])
     if not smoke:
         STATE.parent.mkdir(parents=True, exist_ok=True)
         STATE.write_text(json.dumps(st, indent=1, default=str))

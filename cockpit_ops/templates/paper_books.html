@@ -1,5 +1,5 @@
 {# /paper-books — six strategies as paper books of ₹10 lakh each from June 2026 (tools/paper_books.py, monthly).
-   Data: views.paper_books() ← output/paper_books/latest.json. Every weight option is precomputed; the switch is
+   Data: views.paper_books() ← output/paper_books/latest.json. Every basket size is precomputed; the switch is
    client-side (the JSON is embedded once). No money is at risk anywhere on this page. #}
 {% extends "ops_base.html" %}
 {% block title %}{{ page_title("Paper books") }}{% endblock %}
@@ -58,21 +58,21 @@
 {% if not d %}
 <div class="section-desc">Six strategies, ₹10 lakh each, bought on paper in June 2026. No report yet: run <code class="mono">python -m tools.paper_books</code> once (monthly after the paper sleeve's score refresh) and this page fills.</div>
 {% else %}
-<div class="section-desc">Six strategies, <b>₹{{ (d.capital / 100000)|round|int }} lakh each</b>, bought on paper at the close of {{ d.start|short_date }} 2026 and marked at the close of {{ d.asof|long_date }}.
+<div class="section-desc">Three models per tier (Slow, Fast, Blend) plus Multibagger and the published picks, <b>₹{{ (d.capital / 100000)|round|int }} lakh each</b>, bought on paper at the close of {{ d.start|short_date }} 2026 and marked at the close of {{ d.asof|long_date }}.
   Each book is rebalanced once a month on the first trading day. Every trade pays Zerodha's real charges (STT 0.1 % each way, stamp, exchange, DP) plus half the bid-ask spread and
   price impact for the stock's own liquidity; the tax line is 20.8 % short-term capital gains (every holding is under a year). No money is at risk.
   {% if d.stale %}<span class="ob-bad">Stale: the monthly refresh was missed ({{ d.age_days }} days old).</span>{% endif %}</div>
 <div class="ob-card" style="border-left: 3px solid var(--amber);">
   <b>Two views, read them differently.</b>
   <div class="ob-muted" style="margin-top: 4px; line-height: 1.55;">The <b>money view</b> (tiles, chart, holdings) is one basket of 20 names: in Small caps over five months a random 20-name basket lands anywhere
-    between about −12 % and +16 %, so a few points between weight options is luck, not skill. The <b>evidence view</b> on each card judges the score on the <b>whole tier every month</b>
+    between about −12 % and +16 %, so a few points between two books over this window is luck, not skill. The <b>evidence view</b> on each card judges the score on the <b>whole tier every month</b>
     (1,500 names, not 20): does a higher score mean a higher return next month, and by how much does the top basket beat the tier on average? That series runs from the first
     walk-forward month in 2022 to the last matured month, with the months since June 2026 marked as live, so you can see whether the live months look like the backtest.
     {% if d.replay_until %}Months up to {{ d.replay_until|short_date }} were <b>replayed</b> on the research panels on {{ d.record_since|short_date }}; from the next anchor the record is <b>frozen</b> (each month's trades are written once and never recomputed).{% endif %}</div>
 </div>
 
 <div class="ob-card">
-  <div class="ob-row"><b>All six at a glance</b> <span class="ob-muted">default option of each book · {{ d.start|short_date }} → {{ d.asof|short_date }} · returns on ₹10 L</span></div>
+  <div class="ob-row"><b>All eight at a glance</b> <span class="ob-muted">{{ d.start|short_date }} → {{ d.asof|short_date }} · returns on ₹10 L</span></div>
   <div class="ob-scroll"><table class="ob-table pb-sum" id="pb-summary">
     <thead><tr><th>Book</th><th class="pb-hide-sm">Benchmark</th><th>Return</th><th>Index</th><th>Excess</th><th>Rotations</th><th class="pb-hide-sm">Turnover</th><th>STT</th><th class="pb-hide-sm">All costs</th><th>STCG if sold</th><th>After tax</th><th class="pb-hide-sm">Hit rate</th><th>Score IC · t (months)</th><th>Live IC</th><th class="pb-hide-sm">Luck pct</th></tr></thead>
     <tbody></tbody>
@@ -97,15 +97,41 @@
     <dt>Benchmark</dt><dd>The tier's own NSE price index bought at the June close: NIFTY MIDCAP 150 for Mid books, NIFTY SMALLCAP 250 for Small and multibagger books, half each for the published-picks book. A price index carries no dividends while the books' prices do, so the excess is flattered by roughly one percent a year.</dd>
     <dt>Rank IC and "top 20 minus the tier"</dt><dd>Each month, every stock in the tier is scored and then its return to the next month is observed. The rank IC is the rank correlation between the two (0 = the score says nothing; 0.05 a month is a useful score; the t-statistic says how surely it is above zero given how many months there are). "Top N minus the tier" is the return of the N best-scored names that month minus the average of every name in the tier, in percentage points: the basket's edge before costs. This uses every name every month, so it is the measure to trust; one 20-name basket is not.</dd>
     <dt>Luck percentile</dt><dd>The book's return compared with thousands of random baskets of the same size drawn from the same tier over the same window. The 50th percentile is an average dart throw; only a book past the 80th or so did something chance rarely does.</dd>
-    <dt>Weight options</dt><dd>Each card's buttons swap the score that ranks the stocks; the rule (how many names, when to sell) stays. The default is the pre-registered rule with the strongest 2022–26 book evidence (slow select, fast select), never the one that happens to lead this window; each option's line quotes what it earned in the 2022–26 book test. The walk-forward options (fast select, slow select, IC-weighted, blend) chose their factors from data before each month; slow v2 and fast v1 are fixed weights chosen in October 2026, so they have seen these months; "as published" is the cockpit's own daily record.</dd>
+    <dt>The three models</dt><dd><b>Slow</b> learns on 6-month returns and holds at least a year. <b>Fast</b> learns on next month's return and can sell any month. <b>Blend</b> is the mean of the two scores, held at least 6 months. Each month every model picks its factors again using only data from before that month.</dd>
+    <dt>The bar</dt><dd>The test a factor must pass to get into a model. Today's bar is |t| ≥ 2.5. The multiple-testing bar raises it to allow for how many factors were tried. The long-side bar also requires that the best-ranked fifth of stocks really beat the tier, because a book that only buys cannot earn an edge that lives in the losers.</dd>
+    <dt>Grade</dt><dd>ADR 0073's scale. B needs t ≥ 1.5, passing a luck test (DSR ≥ 0.90 or PBO ≤ 0.30), ahead in at least 3 of 5 calendar years and from at least 10 of 12 start months, with the worst 12 months no worse than −15 %. A is stricter. C is anything less: research only, the tier stays the index.</dd>
   </dl>
+</div>
+
+<div class="ob-card" id="pb-selection">
+  <b>How the three models were chosen</b>
+  <div class="ob-muted" style="margin: 4px 0 10px; line-height: 1.55;">A walk-forward backtest of four bars for choosing factors, {{ d.selection.window[0]|short_date }} 2022 to {{ d.selection.window[1]|short_date }} 2026, on 20-name books after costs and tax against the tier index. The decision rule was written and committed before any result: one bar per model, the same in both tiers, highest average t, and within 0.25 the stricter bar wins. June 2026 onward took no part in the decision.</div>
+  <div class="ob-scroll"><table class="ob-table">
+    <thead><tr><th>Model</th><th>Over index /yr</th><th>t</th><th>Years ahead</th><th>Start months ahead</th><th>Worst 12 m</th><th>Grade</th><th>Jun–Oct 2026, held out</th><th>Factors now</th></tr></thead>
+    <tbody>{% for k, r in d.selection.rows.items() %}<tr>
+      <td><b>{{ 'Mid' if r.tier == 'MID' else 'Small' }} · {{ r.model|capitalize }}</b></td>
+      <td class="{{ 'ob-good' if r.excess > 0 else 'ob-bad' }}">{{ '%+.1f'|format(r.excess * 100) }} %</td><td>{{ '%.2f'|format(r.t) }}</td>
+      <td>{{ r.beat_years }} of {{ r.n_years }}</td><td>{{ r.beat_starts }} of {{ r.n_starts }}</td><td>{{ '%+.1f'|format(r.worst * 100) }} %</td><td><b>{{ r.grade }}</b></td>
+      <td>{% if r.holdout is not none %}{{ '%+.1f'|format(r.holdout * 100) }} %{% else %}—{% endif %}</td>
+      <td class="pb-small ob-wrap">{{ r.factors|join(', ') }}</td></tr>{% endfor %}</tbody>
+  </table></div>
+  <details class="pb-details" style="margin-top: 10px;"><summary>Every bar and control, side by side</summary>
+    <div class="ob-scroll"><table class="ob-table">
+      <thead><tr><th>Model</th><th>Bar</th><th>Mid /yr</th><th>Mid t</th><th>Small /yr</th><th>Small t</th></tr></thead>
+      <tbody>{% for b in d.selection.bars %}<tr>
+        <td>{{ b.model }}</td><td>{% if b.chosen %}<b>{{ b.label }} · chosen</b>{% else %}{{ b.label }}{% endif %}</td>
+        <td class="{{ 'ob-good' if b.mid_x > 0 else 'ob-bad' }}">{{ '%+.1f'|format(b.mid_x * 100) }} %</td><td>{{ '%.2f'|format(b.mid_t) }}</td>
+        <td class="{{ 'ob-good' if b.small_x > 0 else 'ob-bad' }}">{{ '%+.1f'|format(b.small_x * 100) }} %</td><td>{{ '%.2f'|format(b.small_t) }}</td></tr>{% endfor %}</tbody>
+    </table></div>
+    <p class="pb-small" style="margin: 8px 0 0;">Controls were never selectable. Slow v2 and Fast v1 were chosen with these same years in view, so they have seen the test. Slow IC-weighted uses no bar at all.</p>
+  </details>
 </div>
 
 <script id="pb-data" type="application/json">{{ d.books|tojson }}</script>
 <script>
 (function () {
   const BOOKS = JSON.parse(document.getElementById('pb-data').textContent);
-  const ORDER = ['mid_slow', 'mid_fast', 'small_slow', 'small_fast', 'multibagger', 'published'];
+  const ORDER = {{ d.book_order|tojson }};   // tojson sorts dict keys; the tool records the order
   const MAIN = {{ main_url('')|tojson }};
   const fmtPct = (x, d = 1) => x == null ? '—' : (x * 100 >= 0 ? '+' : '') + (x * 100).toFixed(d) + '%';
   const fmtInr = (x) => {
@@ -127,7 +153,7 @@
     const tb = document.querySelector('#pb-summary tbody');
     tb.innerHTML = ORDER.map(k => {
       const b = BOOKS[k], v = b.variants[b.default];
-      return `<tr><td><b>${esc(b.label)}</b><div class="pb-small">${esc(v.label)}</div></td><td class="pb-small pb-hide-sm">${esc(b.bench_label)}</td>
+      return `<tr><td><b>${esc(b.label)}</b>${b.grade ? '<div class="pb-small">grade ' + esc(b.grade) + '</div>' : '<div class="pb-small">' + esc(v.label) + '</div>'}</td><td class="pb-small pb-hide-sm">${esc(b.bench_label)}</td>
         <td class="${tone(v.ret)}">${fmtPct(v.ret)}</td><td>${fmtPct(v.bench_ret)}</td><td class="${tone(v.excess)}"><b>${fmtPct(v.excess)}</b></td>
         <td>${v.rotations}</td><td class="pb-hide-sm">${(v.turnover * 100).toFixed(0)}%</td><td>${fmtInr(v.costs.stt)}</td><td class="pb-hide-sm">${fmtInr(v.costs.total)}</td>
         <td>${fmtInr(v.tax_if_sold)}</td><td class="${tone(v.ret_if_sold_after_tax)}">${fmtPct(v.ret_if_sold_after_tax)}</td><td class="pb-hide-sm">${(v.hit_rate * 100).toFixed(0)}%</td>
@@ -212,15 +238,15 @@
     const b = BOOKS[k];
     const opts = b.option_order || Object.keys(b.variants);   // tojson sorts keys; the tool records the order
     const el = document.createElement('div'); el.className = 'ob-card'; el.id = 'pb-' + k;
-    el.innerHTML = `<div class="pb-head"><h2>${esc(b.label)}</h2><span class="ob-muted">benchmark ${esc(b.bench_label)} · ${b.N}${k === 'published' ? ' + ' + b.N : ''} names</span></div>
+    el.innerHTML = `<div class="pb-head"><h2>${esc(b.label)}</h2><span class="ob-muted">benchmark ${esc(b.bench_label)} · ${b.N}${k === 'published' ? ' + ' + b.N : ''} names${b.grade ? ' · test grade ' + esc(b.grade) : ''}</span></div>
       <p class="pb-rule">${esc(b.rule)}</p>
-      <div class="pb-opts" role="group" aria-label="Weight options">${opts.map(o => `<button class="pb-opt" data-opt="${esc(o)}" aria-pressed="${o === b.default}">${esc(b.variants[o].label)}</button>`).join('')}</div>
+      ${opts.length > 1 ? `<div class="pb-opts" role="group" aria-label="Basket size">${opts.map(o => `<button class="pb-opt" data-opt="${esc(o)}" aria-pressed="${o === b.default}">${esc(b.variants[o].label)}</button>`).join('')}</div>` : ''}
       <div class="pb-why"></div>
       <div class="pb-grid"></div>
       <div class="pb-two"><div><div class="pb-chart"></div></div><div><div class="pb-hold"></div></div></div>
       <div class="pb-ev"></div>
       <details class="pb-details"><summary>Every trade, month by month</summary><div class="ob-scroll pb-trades"></div></details>
-      <p class="pb-small" style="margin: 8px 0 0;"><b>What the backtests promised:</b> ${esc(b.evidence)}</p>`;
+      <p class="pb-small" style="margin: 8px 0 0;"><b>${b.grade ? 'What the test said' : 'What the backtests promised'}:</b> ${esc(b.evidence)}</p>`;
     const render = (o) => {
       const v = b.variants[o];
       el.querySelectorAll('.pb-opt').forEach(btn => btn.setAttribute('aria-pressed', btn.dataset.opt === o));
@@ -266,7 +292,7 @@
       const best = vals.reduce((a, c) => c.excess > a.excess ? c : a, vals[0]), worst = vals.reduce((a, c) => c.excess < a.excess ? c : a, vals[0]);
       const [ahead, months] = monthsAhead(v.history);
       const word = v.excess > 0.02 ? 'ahead of' : (v.excess < -0.02 ? 'behind' : 'level with');
-      return `<li><b>${esc(b.label)}</b>: ${word} its index by ${fmtPct(Math.abs(v.excess))} after costs (${ahead} of ${months} months ahead); across the ${vals.length} weight options the excess runs from ${fmtPct(worst.excess)} (${esc(worst.label)}) to ${fmtPct(best.excess)} (${esc(best.label)}), so the choice of weights moved the result by ${fmtPct(best.excess - worst.excess)} in five months.</li>`;
+      return `<li><b>${esc(b.label)}</b>: ${word} its index by ${fmtPct(Math.abs(v.excess))} after costs (${ahead} of ${months} months ahead)${vals.length > 1 ? `; across the ${vals.length} basket sizes the excess runs from ${fmtPct(worst.excess)} (${esc(worst.label)}) to ${fmtPct(best.excess)} (${esc(best.label)})` : ''}.</li>`;
     }).join('');
   }
 

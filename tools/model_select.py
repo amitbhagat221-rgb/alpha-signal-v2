@@ -96,8 +96,8 @@ FLOOR_INR = 1e7
 RULES = {"slow": dict(reb="M", N=20, k=3, score="avg3", min_hold=12, defer=True, block="t"),
          "fast": dict(reb="M", N=20, k=2, score="raw", min_hold=0, defer=False, block="t"),
          "blend": dict(reb="M", N=20, k=2.5, score="raw", min_hold=6, defer=False, block="t")}
-# Filled in from the result of the pre-registered test; see docs/studies/model-select-2026-11.md
-SELECTED = {}
+# The result of the pre-registered test (2026-11-03, data/lh/model_select/results.json; docs/studies/model-select-2026-11.md)
+SELECTED = {"slow": "long", "fast": "fdr"}
 
 
 def log(*a):
@@ -206,6 +206,13 @@ def choose(bar, st, ic_tab, tails, train, K, lag, by_date):
 def walk(bars=BARS, tiers=TIERS, end=None):
     """Candidate scores for every (model, bar). Returns (scores, choices, IC records)."""
     df, cols, anchors, entry, _ = load()
+    # labels.parquet has no session count for the newest month until its next rebuild, and load() casts that NaN to a
+    # huge negative number, which would silently drop the newest anchor. Only that anchor's own position needs it, and
+    # the 126-session embargo keeps it far from any training month, so a 21-session estimate is safe.
+    entry = entry.copy()
+    for i in range(1, len(entry)):
+        if entry[i] < entry[i - 1]:
+            entry[i] = entry[i - 1] + 21
     frames, choices, recs = [], [], []
     for tier in tiers:
         tdf = df[df["cap_tier"] == tier]
@@ -385,10 +392,16 @@ def holdout(sc, tr, tiers, methods):
     con = sqlite3.connect(f"file:{DB}?mode=ro", uri=True)
     last = con.execute("SELECT MAX(date) FROM stock_prices").fetchone()[0]
     con.close()
-    anchors = sorted(a for a in sc["snapshot_date"].unique() if WINDOW[1] <= a < last)
-    if len(anchors) < 2:
+    anchors = sorted(a for a in sc["snapshot_date"].unique() if a < last)
+    i0 = anchors.index(WINDOW[1])
+    if len(anchors) - i0 < 2:
         return {}
-    D = load_data(sc, anchors[0], anchors[-1], tr)
+    # The 3-month average needs the months before the first buy, or June's basket would rest on June's score alone.
+    D = load_data(sc, anchors[i0 - 2], anchors[-1], tr)
+    for attr in ("anchors", "entry", "ret", "tier_of", "ew", "flags", "adtv", "price", "div", "tier_div_yield"):
+        setattr(D, attr, getattr(D, attr)[2:])
+    D.idx_level = {k: v[2:] for k, v in D.idx_level.items()}
+    D.rank = {k: v[2:] for k, v in D.rank.items()}
     out = {}
     for t in tiers:
         res, series = run_books(D, t, methods)
@@ -401,6 +414,7 @@ def main():
     ap.add_argument("--smoke", action="store_true")
     ap.add_argument("--reuse", action="store_true")
     ap.add_argument("--score", action="store_true")
+    ap.add_argument("--holdout", action="store_true", help="recompute only the hold-out in results.json (it never decides)")
     a = ap.parse_args()
     OUT.mkdir(parents=True, exist_ok=True)
     t0 = time.time()
@@ -418,6 +432,19 @@ def main():
         sc.to_parquet(OUT / "models.parquet", index=False)
         cho[cho["method"].isin(keep)].assign(method=lambda d: d["method"].map(keep)).to_csv(OUT / "model_factors.csv", index=False)
         log(f"wrote {OUT / 'models.parquet'}: {len(sc):,} rows to {sc['snapshot_date'].max()} in {time.time() - t0:.0f}s")
+        return
+
+    if a.holdout:
+        r = json.loads((OUT / "results.json").read_text())
+        sc = pd.read_parquet(OUT / "candidates.parquet")
+        ctl = controls()
+        ctl = ctl[ctl["cap_tier"].isin(TIERS) & (ctl["snapshot_date"] >= sc["snapshot_date"].min())]
+        pool = add_blend(pd.concat([sc, ctl[sc.columns]], ignore_index=True), r["chosen"]["slow"], r["chosen"]["fast"], "blend_chosen")
+        methods = [f"{m}_{b}" for m in MODELS for b in BARS] + list(CONTROL_RULES) + ["blend_chosen"]
+        r["holdout"] = holdout(pool, trusts(), TIERS, methods)
+        (OUT / "results.json").write_text(json.dumps(r, indent=1, default=str))
+        for t in TIERS:
+            log(t, {m: r["holdout"][t][m] for m in r["chosen"].values()})
         return
 
     tiers = ("SMALL",) if a.smoke else TIERS
