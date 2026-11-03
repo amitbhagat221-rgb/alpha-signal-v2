@@ -1970,8 +1970,8 @@ def market_day(ts, hol=None):
 
 def events_ahead(today):
     """Index-moving events in the next EVENTS_DAYS: results of the largest companies (earnings_calendar), and RBI / FOMC /
-    budget days from the study's lists. Each says whether it falls while an open short is held. A warning only: whether skipping
-    these weeks pays is untested for results, and the study's macro veto failed. 2026-11-02: RELI's 10-30 results moved NIFTY."""
+    budget days from the study's lists. Each says whether it falls while an open short is held. A warning only: weeks with top-10 results
+    moved no more than the options priced (docs/studies/option-tail-rules-2026-11.md), and the macro veto failed too. 2026-11-02: RELI's 10-30 results moved NIFTY."""
     end = (date.fromisoformat(today) + timedelta(days=EVENTS_DAYS)).isoformat()
     df = _rows("SELECT e.date, e.sid, s.ticker, s.name, s.market_cap_cr, e.purpose FROM earnings_calendar e JOIN "
                "(SELECT sid, ticker, name, market_cap_cr FROM stocks WHERE cap_tier = 'LARGE' AND market_cap_cr > 0 "

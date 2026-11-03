@@ -41,7 +41,7 @@
     <div class="oo-ev"><b>{{ e.date }}</b> <span>{{ e.what }}</span> <span class="oo-muted">{{ e.size }}</span>{% if e.in_hold %} <span class="oo-hold">while your short is open</span>{% endif %}</div>
   {% endfor %}
   </div>
-  <div class="oo-note" style="margin-top: 8px;">Results out after market hours move the index at the next open, so that session carries the risk. This is a warning, not a rule: nothing is blocked, and whether skipping these weeks pays has not been tested.</div>
+  <div class="oo-note" style="margin-top: 8px;">Results out after market hours move the index at the next open, so that session carries the risk. This is a warning, not a rule: nothing is blocked. In our 2026-11 test, weeks when a top-10 company reported moved no more than the options had priced, so skipping them is not supported.</div>
 </div>
 {% endif %}
 <div class="oo-note" style="margin-bottom: 10px;">Results checked for the {{ E.heavy_n }} largest companies, from NSE's calendar{% if E.calendar_at %}, last new date added {{ E.calendar_at }}{% endif %}. A date NSE has not listed yet will not show.{% if E.macro_end %} RBI, Fed and Budget dates are listed only to {{ E.macro_end }}, so later ones will not show.{% endif %}</div>

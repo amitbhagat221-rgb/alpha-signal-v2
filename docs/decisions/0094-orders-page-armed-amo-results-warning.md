@@ -20,6 +20,6 @@ rose 11.6 % on 11-02, inside the hold.
 ## Consequences
 - Untested on a real order. Unknown: whether an API AMO is accepted at 06:15, how high a limit Zerodha accepts, and whether an
   accepted AMO survives the token flush. A one-lot test decides these.
-- Whether skipping results weeks pays is untested: `earnings_calendar` starts 2026-04. The study's macro veto failed.
+- Skipping results weeks is not supported: `docs/studies/option-tail-rules-2026-11.md` found no larger move in priced σ. The study's macro veto failed too.
 - The RBI / Fed / Budget lists in `tools/option_premium_backtest.py` end 2026-10-28, so later macro dates do not show until extended.
 - The page field and the login trigger need an ops cockpit restart. A 09:20 `run.sh options_live amocheck` cron line is Amit's to add.
