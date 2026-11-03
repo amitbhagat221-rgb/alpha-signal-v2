@@ -61,17 +61,17 @@
   {% endif %}
   {% if d.rows %}
   <div class="oo-wrap"><table class="oo-table">
-    <thead><tr><th>Placed</th><th>Contract</th><th>Side</th><th class="oo-num">Filled / qty</th><th class="oo-num">Limit</th><th class="oo-num">Avg fill</th><th>Status</th><th>By</th></tr></thead>
+    <thead><tr><th>Status</th><th>Contract</th><th>Side</th><th class="oo-num">Filled / qty</th><th class="oo-num">Limit</th><th class="oo-num">Avg fill</th><th>Placed</th><th>By</th></tr></thead>
     <tbody>
     {% for r in d.rows %}
       <tr>
-        <td>{{ (r.placed_at or '')[:19] }}</td>
+        <td class="{{ {'ok': 'oo-ok', 'bad': 'oo-bad', 'muted': 'oo-muted', 'wait': 'oo-wait'}[r.kind] }}">{{ r.word }}{% if r.status_message and r.kind == 'bad' %}<div class="oo-note">{{ r.status_message }}</div>{% endif %}{% if r.from_ledger %}<div class="oo-note">from the fills we recorded</div>{% endif %}</td>
         <td>{{ r.tradingsymbol }} {% if r.is_amo %}<span class="oo-amo">AMO</span>{% endif %}</td>
         <td>{{ r.transaction_type }}</td>
         <td class="oo-num">{{ r.filled_quantity or 0 }} / {{ r.quantity }}</td>
         <td class="oo-num">{{ r.price if r.price else '' }}</td>
         <td class="oo-num">{{ "%.2f"|format(r.average_price) if r.average_price else '' }}</td>
-        <td class="{{ {'ok': 'oo-ok', 'bad': 'oo-bad', 'muted': 'oo-muted', 'wait': 'oo-wait'}[r.kind] }}">{{ r.word }}{% if r.status_message and r.kind == 'bad' %}<div class="oo-note">{{ r.status_message }}</div>{% endif %}{% if r.from_ledger %}<div class="oo-note">from the fills we recorded</div>{% endif %}</td>
+        <td>{{ (r.placed_at or '')[:19] }}</td>
         <td>{{ r.by }}</td>
       </tr>
     {% endfor %}
