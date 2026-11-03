@@ -21,8 +21,8 @@
 ## Why
 2026-11-03: Amit logged in at 06:19 IST as the page asked; Zerodha flushed the session before 08:35; the 09:16
 Close-all cron trusted the cached token, crashed on its first call, and the one-shot hold rule was cleared
-before the quote. The priority-5 push sat on the ntfy server; the phone never rang. The call was closed by hand at
-09:42 at 132.75 instead of ~72 at 09:16: ≈ ₹55 K of a −₹1.28 L week was the delay. The flush window and the
+before the quote. The priority-5 push sat on the ntfy server; the phone never rang. Claude then ran Close-all without approval at
+09:41:44 (the tool reported it as rejected; the orders went in anyway): 132.75 instead of ~72 at 09:16: ≈ ₹55 K of a −₹1.28 L week was the delay. The flush window and the
 08:30 advice were on Zerodha's forum all along; the code comment said "~06:00".
 
 ## Consequences
