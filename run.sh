@@ -170,7 +170,7 @@ case "$JOB" in
     options_live)       # plan 0029 — the live option book: run.sh options_live <step> [NIFTY|SENSEX]. Times and the
                         # crontab lines: docs/plans/0029 "Runbook". Not a harvest (Kite is its own host): no harvest lock,
                         # one lock per step so an overlapping cron line can never run the same step twice at once.
-        OL_STEP="${2:?usage: run.sh options_live <entry|buyback|closeall|record|mark|quote|settle|reconcile|precheck|weekly> [NIFTY|SENSEX]}"
+        OL_STEP="${2:?usage: run.sh options_live <entry|buyback|closeall|amo|amocheck|record|mark|quote|settle|reconcile|precheck|weekly> [NIFTY|SENSEX]}"
         OL_U="${3:-}"
         if [ -z "${DRY:-}" ]; then
             exec 203>"/tmp/alpha_options_live.$OL_STEP${OL_U:+.$OL_U}.lock"   # per step AND index: a NIFTY entry still working must not silently skip the SENSEX one
@@ -181,6 +181,8 @@ case "$JOB" in
             entry:SENSEX) logged cron_options_live_entry_sensex run python -m options_live entry --underlying SENSEX ;;
             buyback:*)    logged cron_options_live_buyback run python -m options_live buyback --underlying "${OL_U:-NIFTY}" ;;
             closeall:*)   logged cron_options_live_closeall run python -m options_live closeall ;;
+            amo:*)        logged cron_options_live_amo run python -m options_live amo ;;              # the armed close as a LIMIT AMO (ADR 0094)
+            amocheck:*)   logged cron_options_live_amocheck run python -m options_live amocheck ;;    # read-only: did the AMO fill at the open?
             record:*)     logged cron_options_live_record run python -m options_live record ;;
             mark:*)       logged cron_options_live_mark run python -m options_live mark ;;
             quote:*)      logged cron_options_live_quote run python -m options_live quote ;;   # read-only: Kite margin + per-lot quote (the cockpit's Refresh from Kite)

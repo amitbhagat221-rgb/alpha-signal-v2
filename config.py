@@ -203,6 +203,7 @@ OPTIONS_LIVE = {
     # SENSEX is bought back only on a day NIFTY enters too (holiday weeks put the NIFTY entry on a SENSEX
     # expiry: 2026-11-05, 11-19, 12-24); otherwise it expires. Done before the 15:12 NIFTY entry.
     "sensex_buyback": {"start": "15:00", "final": "15:06", "end": "15:07"},
+    "amo_confirm_s": 120,                  # the armed AMO: read Kite's order book back for up to this long
     "closeall_minutes": 5,                 # Close-all: re-price this long, the last minute aggressive
     "closeall_hold_below": None,           # one-shot {spot key: level}: Close-all holds instead when the index quotes below it
     "reprice_every_s": 20,

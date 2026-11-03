@@ -251,6 +251,55 @@ def options_live_page(request: Request):
         "summary": d["summary"], "x": x})
 
 
+@app.get("/options/orders", response_class=HTMLResponse)
+def options_orders_page(request: Request, day: str = ""):
+    """Every order by day, AMOs included: accepted, filled, rejected or cancelled; the armed close; results ahead (ADR 0094)."""
+    import options_live
+    return templates.TemplateResponse(request, "options_orders.html", {
+        "page": "options", "sub": "orders", "d": options_live.orders_page_data(day or None)})
+
+
+@app.post("/api/options/orders/refresh")
+async def api_options_orders_refresh(request: Request):
+    """Read Kite's order book into the page. Places nothing."""
+    import options_live
+    _, err = await _live_body(request)
+    return err or options_live.refresh_orders()
+
+
+@app.post("/api/options/orders/arm")
+async def api_options_orders_arm(request: Request):
+    """{"confirm": "ARM", "legs": [{tradingsymbol, limit}]}: the next Kite login inside the AMO window places the close."""
+    import options_live
+    body, err = await _live_body(request, "ARM")
+    if err:
+        return err
+    try:
+        return {"ok": True, "arm": options_live.arm_amo(body.get("legs") or [])}
+    except ValueError as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+
+
+@app.post("/api/options/orders/fire")
+async def api_options_orders_fire(request: Request):
+    """{"confirm": "FIRE"}: Kite is already logged in, place the armed close now, in its own process."""
+    import options_live
+    _, err = await _live_body(request, "FIRE")
+    if err:
+        return err
+    return {"ok": True, "spawned": options_live.spawn_amo_if_armed()}
+
+
+@app.post("/api/options/orders/disarm")
+async def api_options_orders_disarm(request: Request):
+    import options_live
+    _, err = await _live_body(request, "DISARM")
+    if err:
+        return err
+    options_live.disarm_amo()
+    return {"ok": True}
+
+
 def _live_panel():
     """The plan 0029 Live panel's data; a failure shows on the panel, never breaks the paper book."""
     try:
@@ -436,6 +485,13 @@ def kite_callback(request_token: str = "", status: str = ""):
         runlog.item_error("kite_holdings", "login", e)
     from sources.kite_pull import login_info
     info = login_info()
+    try:                                            # an armed close goes out now; the orders page shows it within 2 minutes
+        import options_live
+        if options_live.spawn_amo_if_armed():
+            return RedirectResponse("/options/orders?fired=1", status_code=303)
+    except Exception as e:                          # noqa: BLE001 — the login stands; the page shows it is still armed
+        import runlog
+        runlog.item_error("options_live", "amo after login", e)
     return RedirectResponse("/options?kite=early" if info and info.get("early") else "/options?kite=ok", status_code=303)
 
 

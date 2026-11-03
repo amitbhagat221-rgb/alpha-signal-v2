@@ -192,7 +192,7 @@ class FakeKite:
         oid = f"O{next(_IDS)}"
         first = iceberg_quantity if variety == "iceberg" else quantity
         self.orders_[oid] = {"order_id": oid, "tradingsymbol": tradingsymbol, "transaction_type": transaction_type,
-                             "quantity": first, "price": price, "status": "OPEN", "filled_quantity": 0,
+                             "quantity": first, "price": price, "status": "AMO REQ RECEIVED" if variety == "amo" else "OPEN", "filled_quantity": 0,
                              "average_price": 0.0, "tag": tag, "tags": [tag], "variety": variety}
         if variety == "iceberg":
             assert iceberg_legs * iceberg_quantity >= quantity and iceberg_quantity < quantity
@@ -1599,3 +1599,143 @@ def test_strike_sigma_matches_the_study_formula():
     F, _, k = kq.pick(rows, FRI.isoformat(), NIFTY_EXP, sigma=2.5)
     move = kq.atm_move(rows, F, FRI.isoformat(), NIFTY_EXP)
     assert abs(k["C"] - F * math.exp(2.5 * move)) <= 50 and abs(k["P"] - F * math.exp(-2.5 * move)) <= 50
+
+
+# ───────────────────────────── orders by day + the armed AMO (ADR 0094) ─────────────────────────────
+
+def _armed(conn, fake, limit=60.0):
+    _enter_nifty_friday(conn, fake, "auto")
+    ce = next(s for s, q in fake.pos.items() if q < 0 and s.endswith("CE"))
+    ol.arm_amo([{"tradingsymbol": ce, "limit": limit}])
+    return ce
+
+
+def _amo_orders(fake):
+    return [c[2] for c in fake.calls if c[0] == "place_order"]
+
+
+def test_login_inside_the_window_places_a_limit_amo_and_kite_confirms_it(conn):
+    fake = _tuesday_broker()
+    ce = _armed(conn, fake)
+    res, ctx = run("amo", fake, Clock(TUE, "06:18"))
+    assert res["status"] == "ok", res
+    o = _amo_orders(fake)
+    assert len(o) == 1 and o[0]["variety"] == "amo" and o[0]["order_type"] == "LIMIT" and o[0]["price"] == 60.0
+    assert o[0]["tradingsymbol"] == ce and o[0]["transaction_type"] == "BUY" and o[0]["quantity"] == 65
+    assert "confirmed by Kite" in ctx["sent"][-1][0] and not ctx["sent"][-1][1]
+    assert ol.get_state("amo_arm")["status"] == "placed"
+    assert pd.read_sql_query("SELECT status FROM option_kite_orders", conn).status.tolist() == ["AMO REQ RECEIVED"]
+    again, _ = run("amo", fake, Clock(TUE, "06:30"))                       # never twice
+    assert again["status"] == "idle" and len(_amo_orders(fake)) == 1
+
+
+@pytest.mark.parametrize("hhmm", ["01:00", "03:00", "05:29", "09:10", "12:00", "15:44"])
+def test_outside_zerodhas_window_nothing_is_placed_and_it_stays_armed(conn, hhmm):
+    fake = _tuesday_broker()
+    _armed(conn, fake)
+    res, ctx = run("amo", fake, Clock(TUE, hhmm))
+    assert res["status"] == "skipped" and not _amo_orders(fake) and ctx["sent"][-1][1]
+    assert ol.get_state("amo_arm")["status"] == "armed"
+
+
+@pytest.mark.parametrize("hhmm", ["00:59", "05:30", "09:09", "15:45", "23:30"])
+def test_inside_zerodhas_window(hhmm):
+    h, m = map(int, hhmm.split(":"))
+    assert ol.amo_window_open(datetime(2026, 11, 3, h, m, tzinfo=IST))
+
+
+def test_a_refused_amo_alerts_urgently_and_does_not_retry(conn):
+    fake = _tuesday_broker()
+    ce = _armed(conn, fake)
+    fake.reject_on_place.add(ce)
+    res, ctx = run("amo", fake, Clock(TUE, "06:18"))
+    assert res["status"] == "failed" and "REFUSED" in res["detail"] and ctx["sent"][-1][1]
+    assert ol.get_state("amo_arm")["status"] == "failed"
+    n = fake.names().count("place_order")
+    again, _ = run("amo", fake, Clock(TUE, "06:30"))
+    assert again["status"] == "idle" and fake.names().count("place_order") == n
+
+
+def test_an_amo_kite_rejects_in_the_book_alerts_urgently(conn):
+    fake = _tuesday_broker()
+    _armed(conn, fake)
+    real = fake.place_order
+
+    def place(**kw):
+        oid = real(**kw)
+        fake.orders_[oid].update(status="REJECTED", status_message="price out of range")
+        return oid
+    fake.place_order = place
+    res, ctx = run("amo", fake, Clock(TUE, "06:18"))
+    assert res["status"] == "failed" and "price out of range" in res["detail"] and ctx["sent"][-1][1]
+
+
+def test_amo_buys_only_what_kite_holds(conn):
+    fake = _tuesday_broker()
+    ce = _armed(conn, fake)
+    fake.pos[ce] = 0
+    fake.trades_.append({"trade_id": "H9", "order_id": "HANDX", "tradingsymbol": ce, "transaction_type": "BUY",
+                         "quantity": 65, "average_price": 2.0})
+    res, _ = run("amo", fake, Clock(TUE, "06:18"))
+    assert res["status"] == "ok" and not _amo_orders(fake) and ol.get_state("amo_arm") is None
+
+
+def test_amo_sizes_stay_under_the_freeze_in_whole_lots():
+    assert ol._amo_slices(4000, 65, 1800) == [1755, 1755, 490]
+    assert ol._amo_slices(1040, 65, 1800) == [1040]
+
+
+def test_arm_only_takes_open_short_legs(conn):
+    fake = _tuesday_broker()
+    _enter_nifty_friday(conn, fake, "auto")
+    with pytest.raises(ValueError):
+        ol.arm_amo([{"tradingsymbol": "NIFTYNOPE", "limit": 10}])
+    ce = next(s for s, q in fake.pos.items() if q < 0)
+    for bad in (0, -1, True, "x", None):
+        with pytest.raises(ValueError):
+            ol.arm_amo([{"tradingsymbol": ce, "limit": bad}])
+
+
+def test_amocheck_alerts_when_the_amo_did_not_fill(conn):
+    fake = _tuesday_broker()
+    _armed(conn, fake)
+    run("amo", fake, Clock(TUE, "06:18"))
+    res, ctx = run("amocheck", fake, Clock(TUE, "09:20"))
+    assert res["status"] == "failed" and "NOT FILLED" in ctx["sent"][-1][0] and ctx["sent"][-1][1]
+    for o in fake.orders_.values():
+        o.update(status="COMPLETE", filled_quantity=o["quantity"], average_price=60.0)
+    res, _ = run("amocheck", fake, Clock(TUE, "09:21"))
+    assert res["status"] == "ok" and ol.get_state("amo_arm") is None
+
+
+def test_market_day_puts_a_night_amo_on_the_next_session():
+    assert ol.market_day(datetime(2026, 11, 2, 23, 21, tzinfo=IST), set()) == "2026-11-03"
+    assert ol.market_day(datetime(2026, 11, 3, 1, 0, tzinfo=IST), set()) == "2026-11-03"
+    assert ol.market_day(datetime(2026, 11, 3, 10, 0, tzinfo=IST), set()) == "2026-11-03"
+    assert ol.market_day(datetime(2026, 11, 7, 11, 0, tzinfo=IST), set()) == "2026-11-09"
+
+
+def test_events_ahead_flags_a_heavyweights_results_and_the_open_hold(conn):
+    fake = _tuesday_broker()
+    _enter_nifty_friday(conn, fake, "auto")                                # short until NIFTY_EXP = 2026-10-27
+    conn.execute("INSERT OR IGNORE INTO stocks (sid, ticker, name, cap_tier, market_cap_cr) VALUES ('RELI', 'RELIANCE', 'Reliance Industries', 'LARGE', 1800000)")
+    conn.execute("INSERT OR IGNORE INTO stocks (sid, ticker, name, cap_tier, market_cap_cr) VALUES ('TINY', 'TINY', 'Tiny Ltd', 'SMALL', 500)")
+    for sid, d in (("RELI", "2026-10-26"), ("TINY", "2026-10-26"), ("RELI", "2026-12-20")):
+        conn.execute("INSERT INTO earnings_calendar (date, symbol, sid, company, purpose) VALUES (?, ?, ?, ?, 'Financial Results')", (d, sid, sid, sid))
+    conn.commit()
+    e = ol.events_ahead("2026-10-23")
+    results = [x for x in e["items"] if x["kind"] == "results"]
+    assert [x["what"] for x in results] == ["Reliance Industries results"] and results[0]["in_hold"] and results[0]["date"] == "2026-10-26"
+
+
+def test_orders_page_shows_each_status_the_warning_and_the_arm_controls(ops, conn):
+    authed, anon = ops
+    fake = _tuesday_broker()
+    ce = _armed(conn, fake)
+    run("amo", fake, Clock(TUE, "06:18"))
+    html = authed.get("/options/orders").text
+    assert "Orders by day" in html and ce in html and "AMO accepted, waiting for 09:15" in html and "Placed and confirmed by Kite" in html
+    assert "Results checked for the 15 largest companies" in html
+    for path in ("arm", "fire", "disarm", "refresh"):
+        assert anon.post(f"/api/options/orders/{path}", json={}).status_code == 401
+    assert authed.post("/api/options/orders/arm", json={"legs": []}).status_code == 400   # no confirm word

@@ -563,7 +563,7 @@ class StepInterrupted(BaseException):
     swallows it. 2026-11-03: a stopped Close-all left its buy limit working and it filled afterwards. SIGKILL cannot be caught."""
 
 
-ORDER_STEPS = ("entry", "buyback", "closeall", "testorder")
+ORDER_STEPS = ("entry", "buyback", "closeall", "testorder", "amo")
 
 
 def _install_stop_signals():
@@ -1931,9 +1931,302 @@ def testorder(ctx, u="NIFTY"):
                    f"test order {oid} is still {status} — cancel it in Kite's Orders tab", urgent=True)
 
 
-STEPS = {"entry": entry, "buyback": buyback, "closeall": closeall, "record": record, "mark": mark,
+# ─────────────────────────── orders by day and the armed AMO (ADR 0094) ───────────────────────────
+
+AMO_WINDOWS = (("15:45", "24:00"), ("00:00", "01:00"), ("05:30", "09:10"))   # Zerodha: 3:45 PM to 9:11 AM, not 1:00 to 5:30 AM
+STATUS_WORDS = {"AMO REQ RECEIVED": "AMO accepted, waiting for 09:15", "COMPLETE": "Filled", "OPEN": "Working",
+                "REJECTED": "Rejected", "CANCELLED": "Cancelled", "TRIGGER PENDING": "Waiting for trigger"}
+_ORDER_COLS = ("order_id", "exchange", "tradingsymbol", "transaction_type", "variety", "order_type", "product",
+               "quantity", "filled_quantity", "price", "average_price", "status", "tag")
+HEAVYWEIGHTS_N = 15     # the largest LARGE names by market cap: their results can move the index
+EVENTS_DAYS = 7         # how far ahead the warning looks; a weekly trade never holds longer
+
+
+def amo_window_open(now):
+    t = now.strftime("%H:%M")
+    return any(a <= t < b for a, b in AMO_WINDOWS)
+
+
+def next_amo_window(now):
+    t = now.strftime("%H:%M")
+    return "05:30" if "01:00" <= t < "05:30" else "15:45" if "09:10" <= t < "15:45" else "now"
+
+
+def market_day(ts, hol=None):
+    """The session an order belongs to: after 15:30, or on a day with no session, the next session."""
+    hol = ob.holidays() if hol is None else hol
+    d = ts.date()
+    if ts.strftime("%H:%M") >= "15:30" or not ob.is_session(d, hol):
+        d += timedelta(days=1)
+        while not ob.is_session(d, hol):
+            d += timedelta(days=1)
+    return d.isoformat()
+
+
+def events_ahead(today):
+    """Index-moving events in the next EVENTS_DAYS: results of the largest companies (earnings_calendar), and RBI / FOMC /
+    budget days from the study's lists. Each says whether it falls while an open short is held. A warning only: whether skipping
+    these weeks pays is untested for results, and the study's macro veto failed. 2026-11-02: RELI's 10-30 results moved NIFTY."""
+    end = (date.fromisoformat(today) + timedelta(days=EVENTS_DAYS)).isoformat()
+    df = _rows("SELECT e.date, e.sid, s.ticker, s.name, s.market_cap_cr, e.purpose FROM earnings_calendar e JOIN "
+               "(SELECT sid, ticker, name, market_cap_cr FROM stocks WHERE cap_tier = 'LARGE' AND market_cap_cr > 0 "
+               " ORDER BY market_cap_cr DESC LIMIT ?) s ON s.sid = e.sid "
+               "WHERE e.date BETWEEN ? AND ? AND e.purpose LIKE '%Financial Result%' ORDER BY e.date, s.market_cap_cr DESC",
+               [HEAVYWEIGHTS_N, today, end])
+    out = [] if df.empty else [{"date": r.date, "what": f"{r.name or r.ticker} results", "size": f"₹{r.market_cap_cr / 1e5:,.1f} L Cr market cap",
+                                "kind": "results"} for r in df.itertuples()]
+    try:
+        from tools.option_premium_backtest import BUDGET_DAYS, ELECTION_RESULT_DAYS, FOMC_DAYS, RBI_MPC_DAYS
+        names = (("RBI rate decision", RBI_MPC_DAYS), ("US Fed decision", FOMC_DAYS), ("Union Budget", BUDGET_DAYS), ("Election results", ELECTION_RESULT_DAYS))
+        macro_end = max(d for _, days in names for d in days)
+        out += [{"date": d, "what": n, "size": "", "kind": "macro"} for n, days in names for d in days if today <= d <= end]
+    except Exception:                               # noqa: BLE001 — the results part still shows
+        macro_end = None
+    shorts = legs("source = 'live' AND status = 'OPEN' AND net_qty < 0")
+    last_expiry = max((l["expiry"] for l in shorts), default=None)
+    for e in out:
+        e["in_hold"] = bool(last_expiry and e["date"] <= last_expiry)
+    stamp = _rows("SELECT MAX(added_date) AS d FROM earnings_calendar")
+    return {"items": sorted(out, key=lambda e: e["date"]), "days": EVENTS_DAYS, "heavy_n": HEAVYWEIGHTS_N, "macro_end": macro_end,
+            "calendar_at": stamp.d.iloc[0] if not stamp.empty else None, "has_shorts": bool(shorts)}
+
+
+def snapshot_orders(ctx):
+    """Kite's order book → option_kite_orders, every order including AMOs and hand trades → rows written."""
+    hol, rows = ob.holidays(), []
+    for o in call(ctx, "orders"):
+        ts = o.get("order_timestamp")
+        if isinstance(ts, str):
+            ts = datetime.fromisoformat(ts)
+        ts = ts.replace(tzinfo=IST) if ts is not None and ts.tzinfo is None else ts
+        rows.append({**{k: _clean(o.get(k)) for k in _ORDER_COLS}, "order_id": str(o["order_id"]),
+                     "market_day": market_day(ts or ctx["now"](), hol),
+                     "placed_at": ts.strftime("%Y-%m-%d %H:%M:%S") if ts else None,
+                     "status_message": _clean(o.get("status_message")), "captured_at": _utc()})
+    if rows:
+        upsert_df(pd.DataFrame(rows), "option_kite_orders")
+    return len(rows)
+
+
+def refresh_orders(**ctx_kw):
+    """The page's refresh → {ok, changed, at} or {ok: False, error}. Reads Kite, places nothing."""
+    ensure_tables()
+    ctx = make_ctx("orders", **ctx_kw)
+    q = "SELECT order_id, status, filled_quantity FROM option_kite_orders ORDER BY order_id"
+    before = _rows(q).to_dict("records")
+    try:
+        snapshot_orders(ctx)
+    except Exception as e:                          # noqa: BLE001 — shown on the page
+        return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+    return {"ok": True, "changed": _rows(q).to_dict("records") != before, "at": _utc()}
+
+
+def arm_amo(legs_, by="cockpit"):
+    """legs_ = [{tradingsymbol, limit}]: close these open SHORT live legs by LIMIT AMO at the next chance. It can only buy
+    back a short, so it can never open a position. Replaces any earlier arm."""
+    open_ = {l["tradingsymbol"]: l for l in legs("source = 'live' AND status = 'OPEN' AND net_qty < 0")}
+    out = []
+    for x in legs_:
+        sym, limit = x.get("tradingsymbol"), x.get("limit")
+        if sym not in open_:
+            raise ValueError(f"{sym} is not an open short live leg")
+        if not isinstance(limit, (int, float)) or isinstance(limit, bool) or limit <= 0:
+            raise ValueError(f"{sym}: the limit must be a price above 0")
+        out.append({"tradingsymbol": sym, "limit": round(round(float(limit) / TICK) * TICK, 2)})
+    if not out:
+        raise ValueError("pick at least one leg")
+    arm = {"id": _utc(), "at": _utc(), "by": by, "status": "armed", "legs": out}
+    put_state("amo_arm", arm, by)
+    return arm
+
+
+def disarm_amo(by="cockpit"):
+    put_state("amo_arm", None, by)
+
+
+def _amo_slices(qty, lot, freeze):
+    """Order sizes for an AMO: icebergs and auto-slicing are not available on AMOs, so whole lots up to the freeze quantity."""
+    step, out, left = max(lot, (int(freeze) // lot) * lot), [], int(qty)
+    while left > 0:
+        out.append(min(left, step))
+        left -= out[-1]
+    return out
+
+
+def amo(ctx):
+    """Place the armed close as LIMIT AMOs, read Kite's order book back for up to `amo_confirm_s`, say what happened.
+    Stays armed when the window is shut or preflight fails. Marked 'firing' BEFORE the first order and never retried by
+    itself, so a crash cannot place it twice."""
+    arm = get_state("amo_arm")
+    if not arm or arm.get("status") != "armed":
+        return outcome(ctx, "ALL", "idle", "nothing armed")
+    now = ctx["now"]()
+    if not amo_window_open(now):
+        return outcome(ctx, "ALL", "skipped", f"Zerodha's AMO window is shut at {now:%H:%M}; still armed",
+                       f"AMO NOT placed: Zerodha takes no AMOs at {now:%H:%M}. Still armed: log in again after "
+                       f"{next_amo_window(now)} IST: {LOGIN_PAGE}", urgent=True)
+    try:
+        client(ctx)
+        record_fills(ctx)
+    except Exception as e:                          # noqa: BLE001
+        return outcome(ctx, "ALL", "failed", f"no live Kite session ({type(e).__name__}: {e})",
+                       f"AMO NOT placed: no live Kite session. Still armed: log in again: {LOGIN_PAGE}", urgent=True)
+    by_sym = {l["tradingsymbol"]: l for l in legs("source = 'live' AND status = 'OPEN' AND net_qty < 0")}
+    todo = [(by_sym[x["tradingsymbol"]], x["limit"]) for x in arm["legs"] if x["tradingsymbol"] in by_sym]
+    if not todo:
+        disarm_amo(ctx["step"])
+        return outcome(ctx, "ALL", "ok", "the armed legs are already closed", "AMO not needed: the armed legs are already closed.")
+    bad = preflight(ctx, [l for l, _ in todo], allow_kill=True)
+    if bad:
+        return outcome(ctx, "ALL", "failed", f"preflight: {bad[0]}", f"AMO NOT placed: {bad[1]} Still armed: log in again.", urgent=True)
+    pos, book = broker_positions(ctx), call(ctx, "orders")
+    working = {o["tradingsymbol"] for o in book if o.get("transaction_type") == "BUY"
+               and o.get("status") in ("AMO REQ RECEIVED", "OPEN", "TRIGGER PENDING")}
+    put_state("amo_arm", {**arm, "status": "firing", "fired_at": _utc()}, ctx["step"])
+    s, ticket, placed, notes = ctx["settings"], f"amo-{arm['id']}", [], []
+    ctx["may_write"] = True
+    try:
+        for l, limit in todo:
+            sym, held = l["tradingsymbol"], max(0, -int(pos.get(l["tradingsymbol"], 0)))
+            qty = min(held, -int(l["net_qty"]))
+            if sym in working:                      # already has a working buy: never stack a second one
+                notes.append(f"{sym}: a buy order is already working, nothing added")
+                continue
+            if not qty:
+                notes.append(f"{sym}: Kite holds no short, nothing placed")
+                continue
+            for q in _amo_slices(qty, int(l["lot"]), s["freeze_qty"].get(l["underlying"], 10 ** 9)):
+                try:
+                    oid = str(call(ctx, "place_order", variety="amo", exchange=l["exchange"], tradingsymbol=sym,
+                                   transaction_type="BUY", quantity=q, product="NRML", order_type="LIMIT", price=limit,
+                                   validity="DAY", tag=s["tag"]))
+                except Exception as e:              # noqa: BLE001 — recorded and pushed below
+                    notes.append(f"{sym} {q} units REFUSED by Kite: {type(e).__name__}: {e}")
+                    log_event(ctx, "error", source="live", ticket_id=ticket, **_leg_fields(l), detail=f"amo: {type(e).__name__}: {e}")
+                    continue
+                placed.append(oid)
+                log_event(ctx, "place", source="live", ticket_id=ticket, **_leg_fields(l), transaction_type="BUY",
+                          variety="amo", quantity=q, price=limit, order_id=oid)
+    finally:
+        ctx["may_write"] = False
+    return _amo_confirm(ctx, arm, placed, notes)
+
+
+def _amo_confirm(ctx, arm, placed, notes):
+    """Kite's order book is the only proof: every placed order must read accepted or filled."""
+    deadline, seen = ctx["now"]() + timedelta(seconds=ctx["settings"]["amo_confirm_s"]), {}
+    while placed:
+        seen = {str(o["order_id"]): o for o in call(ctx, "orders") if str(o["order_id"]) in placed}
+        settled = len(seen) == len(placed) and all(o.get("status") not in ("PUT ORDER REQ RECEIVED", "VALIDATION PENDING", "OPEN PENDING")
+                                                   for o in seen.values())
+        if settled or ctx["now"]() >= deadline:
+            break
+        ctx["wait"](15)
+    snapshot_orders(ctx)
+    good = [o for o in seen.values() if o.get("status") in ("AMO REQ RECEIVED", "OPEN", "COMPLETE", "TRIGGER PENDING")]
+    bad = [f"{o['tradingsymbol']}: {o.get('status')} {o.get('status_message') or ''}".strip() for o in seen.values() if o not in good]
+    bad += [f"order {oid}: not in Kite's order book" for oid in placed if oid not in seen] + [n for n in notes if "REFUSED" in n]
+    text = "; ".join(f"{o['tradingsymbol']} {o['quantity']} @ limit {o['price']} {STATUS_WORDS.get(o.get('status'), o.get('status'))}"
+                     for o in good) or "no order accepted"
+    extra = [n for n in notes if "REFUSED" not in n]
+    put_state("amo_arm", {**arm, "status": "failed" if bad else "placed", "fired_at": _utc(), "order_ids": placed,
+                          "detail": "; ".join(bad + extra) or text}, ctx["step"])
+    if bad:
+        return outcome(ctx, "ALL", "failed", "; ".join(bad), f"AMO PROBLEM, act now: {'; '.join(bad)}. Accepted: {text}. "
+                       "Nothing retries by itself: close it in Kite or arm it again.", urgent=True)
+    return outcome(ctx, "ALL", "ok", text, f"AMO confirmed by Kite: {text}" + (f". {'; '.join(extra)}" if extra else "")
+                   + ". You can cancel it in Kite until about 09:10.")
+
+
+def amocheck(ctx):
+    """After 09:15: did the placed AMO fill? Read-only. Alerts when it did not, once it can know."""
+    arm = get_state("amo_arm")
+    if not arm or arm.get("status") != "placed":
+        return outcome(ctx, "ALL", "idle", "no placed AMO to check")
+    if ctx["now"]().strftime("%H:%M") < "09:16":
+        return outcome(ctx, "ALL", "idle", "before the open")
+    try:
+        client(ctx)
+        book = {str(o["order_id"]): o for o in call(ctx, "orders")}
+        snapshot_orders(ctx)
+    except Exception as e:                          # noqa: BLE001
+        return outcome(ctx, "ALL", "failed", f"cannot read Kite ({type(e).__name__}: {e})",
+                       f"Cannot check the AMO, no live Kite session. Look at Orders in the Kite app NOW, or log in: {LOGIN_PAGE}", urgent=True)
+    open_ = [book.get(i) or {"tradingsymbol": i, "status": "not in the order book"} for i in arm.get("order_ids", [])
+             if (book.get(i) or {}).get("status") != "COMPLETE"]
+    if open_:
+        text = "; ".join(f"{o['tradingsymbol']}: {STATUS_WORDS.get(o['status'], o['status'])}" for o in open_)
+        return outcome(ctx, "ALL", "failed", f"AMO not filled: {text}", f"AMO NOT FILLED after the open: {text}. "
+                       "The short is still open: act in Kite now.", urgent=True)
+    disarm_amo(ctx["step"])
+    return outcome(ctx, "ALL", "ok", "the AMO filled", "The AMO filled at the open.")
+
+
+def _mark_and_check(ctx):
+    res = mark(ctx)
+    if (get_state("amo_arm") or {}).get("status") == "placed":      # the 10:00 mark doubles as a late check of a placed AMO
+        amocheck(ctx)
+    return res
+
+
+def spawn_amo_if_armed():
+    """After a Kite login: an armed close goes out in its own process, so the login redirect does not wait. → spawned?"""
+    import os
+    import subprocess
+    from pathlib import Path
+    if (get_state("amo_arm") or {}).get("status") != "armed":
+        return False
+    root = Path(__file__).resolve().parent
+    log = root / "output" / "options_live_amo.log"
+    with open(log, "a") as f:
+        f.write(f"=== cockpit AMO step — {_utc()}\n")
+    subprocess.Popen([sys.executable, "-m", "options_live", "amo"], cwd=root, stdout=open(log, "ab"), stderr=subprocess.STDOUT,
+                     start_new_session=True, env={**os.environ, "ALPHA_STEP": "cron_options_live_amo"})
+    return True
+
+
+def orders_page_data(day=None):
+    """The /options/orders page. Reads only. Days before the first snapshot show the fills the ledger recorded."""
+    ensure_tables()
+    now = datetime.now(IST)
+    tag = settings()["tag"]
+    snap = _rows("SELECT * FROM option_kite_orders ORDER BY placed_at DESC, order_id DESC")
+    fills = _rows("SELECT MIN(substr(detail, instr(detail, 'fill_timestamp') + 18, 19)) AS placed_at, order_id, exchange, tradingsymbol, transaction_type, "
+                  "SUM(quantity) AS quantity, SUM(quantity) AS filled_quantity, SUM(quantity * price) / SUM(quantity) AS average_price, "
+                  "MAX(source) AS source FROM option_live_orders WHERE event = 'fill' AND trade_id NOT LIKE 'order:%' AND source != 'shadow' "
+                  "GROUP BY order_id ORDER BY placed_at DESC")          # Kite's fill time: a fill recorded after midnight keeps its own day
+    known = set(snap["order_id"]) if not snap.empty else set()
+    rows = [{k: _clean(v) for k, v in r.items()} for r in snap.to_dict("records")] if not snap.empty else []
+    if not fills.empty:
+        rows += [{**{k: _clean(v) for k, v in r.items()}, "status": "COMPLETE", "from_ledger": True, "market_day": str(r["placed_at"])[:10]}
+                 for r in fills.to_dict("records") if r["order_id"] not in known]
+    for r in rows:
+        st = r.get("status") or ""
+        partial = st != "COMPLETE" and (r.get("filled_quantity") or 0) > 0
+        r["word"] = f"Part filled, then {STATUS_WORDS.get(st, st).lower()}" if partial else STATUS_WORDS.get(st, st.title())
+        r["kind"] = "ok" if st == "COMPLETE" else "bad" if st == "REJECTED" else "muted" if st == "CANCELLED" else "wait"
+        r["is_amo"] = r.get("variety") == "amo"
+        r["by"] = "System" if r.get("tag") == tag else "Fill record" if r.get("from_ledger") else "Hand"
+    days = sorted({r["market_day"] for r in rows}, reverse=True)[:30]
+    today = now.date().isoformat()
+    pick = day if day in days else (market_day(now) if market_day(now) in days else days[0] if days else today)
+    arm = get_state("amo_arm") or None
+    shorts = legs("source = 'live' AND status = 'OPEN' AND net_qty < 0")
+    armed = {x["tradingsymbol"]: x["limit"] for x in (arm or {}).get("legs", [])} if arm and arm.get("status") == "armed" else {}
+    for l in shorts:
+        m = l.get("mark_price") or 0
+        l["suggest"] = armed.get(l["tradingsymbol"]) or round(round(max(m * 3, m + 10) / TICK) * TICK, 2)
+    last = snap["captured_at"].max() if not snap.empty else None
+    return {"days": [{"day": d, "n": sum(r["market_day"] == d for r in rows),
+                      "open": sum(r["market_day"] == d and r["kind"] == "wait" for r in rows)} for d in days],
+            "day": pick, "rows": [r for r in rows if r["market_day"] == pick], "arm": arm, "shorts": shorts, "last_read": last,
+            "window_open": amo_window_open(now), "next_window": next_amo_window(now), "now": now.strftime("%H:%M"),
+            "login": login_info(), "safe_login": SAFE_LOGIN_IST, "mode": settings()["mode"], "events": events_ahead(today)}
+
+
+STEPS = {"entry": entry, "buyback": buyback, "closeall": closeall, "record": record, "mark": _mark_and_check,
          "settle": settle, "reconcile": reconcile, "precheck": precheck, "weekly": weekly, "testorder": testorder,
-         "quote": quote_step}
+         "quote": quote_step, "amo": amo, "amocheck": amocheck}
 PER_UNDERLYING = ("entry", "buyback", "testorder")
 
 

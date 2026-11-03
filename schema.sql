@@ -2782,6 +2782,27 @@ CREATE TABLE IF NOT EXISTS option_live_trades (
     updated_at     TEXT,
     PRIMARY KEY (underlying, expiry, tradingsymbol, source)
 );
+-- Every order Kite's order book showed, one row per order, refreshed in place (ADR 0094). The orders-by-day page reads it.
+CREATE TABLE IF NOT EXISTS option_kite_orders (
+    order_id            TEXT PRIMARY KEY,
+    market_day          TEXT NOT NULL,             -- the session the order is for (an AMO placed at night: the next session)
+    placed_at           TEXT,                      -- Kite's order_timestamp, IST
+    exchange            TEXT,
+    tradingsymbol       TEXT,
+    transaction_type    TEXT,
+    variety             TEXT,
+    order_type          TEXT,
+    product             TEXT,
+    quantity            INTEGER,
+    filled_quantity     INTEGER,
+    price               REAL,
+    average_price       REAL,
+    status              TEXT,
+    status_message      TEXT,
+    tag                 TEXT,
+    captured_at         TEXT NOT NULL              -- UTC ISO of the last read from Kite
+);
+CREATE INDEX IF NOT EXISTS idx_option_kite_orders_day ON option_kite_orders(market_day);
 -- options_live:end
 
 -- Plan 0030: the compatibility views join picks/outcomes by entity; without these the planner

@@ -557,6 +557,12 @@ TABLES = {
         "depth": "From the first shadow entry (plan 0029)",
         "description": "Append-only event log of the live option book: proposed legs, approval tickets, Kite orders and their re-prices, cancels, rejects, fills (Kite trade ids) and simulated shadow fills.",
     },
+    "option_kite_orders": {
+        "kind": "STATE", "domain": "Output", "date_col": "market_day", "may_be_empty": True,
+        "source": "options_live.py (refreshed from Kite's order book by the /options/orders page and the amo step)",
+        "depth": "From 2026-11-03 (ADR 0094); earlier days show fills from option_live_orders on the page",
+        "description": "Every order Kite's order book showed, one row per order with its latest status, including AMOs and hand trades.",
+    },
     "option_live_settings": {
         "kind": "STATE", "domain": "Output", "date_col": "updated_at", "may_be_empty": True,
         "source": "ops cockpit /options and python -m options_live set (settings); options_live steps (state)",

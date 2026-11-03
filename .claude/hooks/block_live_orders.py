@@ -7,7 +7,9 @@ import re
 import sys
 
 BLOCKED = (
-    r"options_live\s+(?:--\S+\s+)*(entry|buyback|closeall|testorder)\b",   # run.sh options_live closeall, -m options_live entry
+    r"options_live\s+(?:--\S+\s+)*(entry|buyback|closeall|testorder|amo)\b",   # run.sh options_live closeall, -m options_live entry
+    r"/api/options/orders/(arm|fire)\b",                                   # arming or firing the AMO is Amit's
+    r"\b(arm_amo|spawn_amo_if_armed)\s*\(",
     r"/api/options/live/(closeall|approve|resume)\b",                      # the cockpit's order and resume buttons
     r"api\.kite\.trade/(orders|gtt)",                                      # Kite's order API directly
     r"\b(run_step|STEPS\[)\s*\(?\s*[\"'](entry|buyback|closeall|testorder)",

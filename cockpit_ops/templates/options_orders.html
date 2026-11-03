@@ -1,0 +1,149 @@
+{% extends "ops_base.html" %}
+
+{% block content %}
+{% include "_options_styles.html" %}
+{% include "_options_nav.html" %}
+<style>
+  .oo-days { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
+  .oo-day { padding: 5px 10px; border-radius: 8px; border: 1px solid var(--border); color: var(--text-secondary); font-size: 13px; text-decoration: none; }
+  .oo-day-on { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .oo-wrap { overflow-x: auto; }
+  .oo-table { width: 100%; border-collapse: collapse; font-size: 14px; min-width: 640px; }
+  .oo-table th, .oo-table td { padding: 8px 10px; border-bottom: 1px solid var(--border); text-align: left; white-space: nowrap; }
+  .oo-table td.oo-num, .oo-table th.oo-num { text-align: right; font-variant-numeric: tabular-nums; }
+  .oo-ok { color: var(--green, #16a34a); font-weight: 700; }
+  .oo-bad { color: var(--red, #dc2626); font-weight: 700; }
+  .oo-wait { color: var(--amber, #d97706); font-weight: 700; }
+  .oo-muted { color: var(--text-muted); }
+  .oo-note { white-space: normal; color: var(--text-muted); font-size: 12px; }
+  .oo-amo { font-size: 11px; font-weight: 800; padding: 1px 6px; border-radius: 6px; border: 1px solid var(--accent); color: var(--accent); }
+  .oo-box { margin-top: 12px; padding: 14px; border-radius: 10px; border: 1px solid var(--accent); }
+  .oo-warn { margin-bottom: 12px; padding: 14px; border-radius: 10px; border: 2px solid var(--amber, #d97706); }
+  .oo-ev { display: flex; flex-wrap: wrap; gap: 4px 12px; padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 14px; }
+  .oo-ev:last-of-type { border-bottom: 0; }
+  .oo-hold { font-size: 11px; font-weight: 800; padding: 1px 6px; border-radius: 6px; background: var(--amber, #d97706); color: #fff; }
+  .oo-leg { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; margin-top: 8px; }
+  .oo-leg input[type=number] { width: 100px; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg-input, var(--bg-card)); color: inherit; }
+  .oo-sym { width: 16px; height: 16px; }
+  .oo-lim { font-variant-numeric: tabular-nums; }
+  .oo-acts { margin-top: 12px; display: flex; flex-wrap: wrap; gap: 8px; }
+  .oo-status { margin-top: 8px; font-size: 13px; }
+</style>
+<div class="section-title">Orders by day</div>
+<div class="section-desc">Every order in your Zerodha order book, AMOs and hand trades included. It shows whether each one was accepted, filled, rejected or cancelled.</div>
+
+{% set E = d.events %}
+{% if E.items %}
+<div class="oo-warn">
+  <b class="oo-wait">Tread cautiously: {{ E["items"]|length }} index-moving event{{ 's' if E["items"]|length != 1 else '' }} in the next {{ E.days }} days</b>
+  <div style="margin-top: 6px;">
+  {% for e in E["items"] %}
+    <div class="oo-ev"><b>{{ e.date }}</b> <span>{{ e.what }}</span> <span class="oo-muted">{{ e.size }}</span>{% if e.in_hold %} <span class="oo-hold">while your short is open</span>{% endif %}</div>
+  {% endfor %}
+  </div>
+  <div class="oo-note" style="margin-top: 8px;">Results out after market hours move the index at the next open, so that session carries the risk. This is a warning, not a rule: nothing is blocked, and whether skipping these weeks pays has not been tested.</div>
+</div>
+{% endif %}
+<div class="oo-note" style="margin-bottom: 10px;">Results checked for the {{ E.heavy_n }} largest companies, from NSE's calendar{% if E.calendar_at %}, last new date added {{ E.calendar_at }}{% endif %}. A date NSE has not listed yet will not show.{% if E.macro_end %} RBI, Fed and Budget dates are listed only to {{ E.macro_end }}, so later ones will not show.{% endif %}</div>
+
+{% if request.query_params.get('fired') %}<div class="ob-card"><b>Placing the armed AMO now.</b> <span class="ob-muted">Wait up to 2 minutes: this page updates when Kite confirms it. Only trust the status below.</span></div>{% endif %}
+
+<div class="ob-card">
+  <div class="ob-row">
+    <div><b>Order book</b> <span class="ob-muted" id="oo-read">{% if d.last_read %}last read from Kite {{ d.last_read[:19] }} UTC{% else %}not read from Kite yet{% endif %}</span></div>
+    <a class="ob-btn" href="/kite/login">Log in to Kite</a>
+  </div>
+  <div class="oo-status" id="oo-live"></div>
+  {% if d.days %}
+  <div class="oo-days">
+    {% for x in d.days %}<a class="oo-day {{ 'oo-day-on' if x.day == d.day else '' }}" href="/options/orders?day={{ x.day }}">{{ x.day }} · {{ x.n }}{% if x.open %} · {{ x.open }} open{% endif %}</a>{% endfor %}
+  </div>
+  {% endif %}
+  {% if d.rows %}
+  <div class="oo-wrap"><table class="oo-table">
+    <thead><tr><th>Placed</th><th>Contract</th><th>Side</th><th class="oo-num">Filled / qty</th><th class="oo-num">Limit</th><th class="oo-num">Avg fill</th><th>Status</th><th>By</th></tr></thead>
+    <tbody>
+    {% for r in d.rows %}
+      <tr>
+        <td>{{ (r.placed_at or '')[:19] }}</td>
+        <td>{{ r.tradingsymbol }} {% if r.is_amo %}<span class="oo-amo">AMO</span>{% endif %}</td>
+        <td>{{ r.transaction_type }}</td>
+        <td class="oo-num">{{ r.filled_quantity or 0 }} / {{ r.quantity }}</td>
+        <td class="oo-num">{{ r.price if r.price else '' }}</td>
+        <td class="oo-num">{{ "%.2f"|format(r.average_price) if r.average_price else '' }}</td>
+        <td class="{{ {'ok': 'oo-ok', 'bad': 'oo-bad', 'muted': 'oo-muted', 'wait': 'oo-wait'}[r.kind] }}">{{ r.word }}{% if r.status_message and r.kind == 'bad' %}<div class="oo-note">{{ r.status_message }}</div>{% endif %}{% if r.from_ledger %}<div class="oo-note">from the fills we recorded</div>{% endif %}</td>
+        <td>{{ r.by }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  {% else %}
+  <div class="ob-muted" style="margin-top: 8px;">No orders recorded yet. This page fills in from your Kite order book once Kite is logged in.</div>
+  {% endif %}
+</div>
+
+<div class="ob-card oo-box" id="oo-arm">
+  <b>Close at the next open</b>
+  <div class="ob-muted" style="margin-top: 4px;">Buys back short legs with a limit AMO. It can only close a position, never open one. Once armed, your next Kite login inside Zerodha's AMO window places it. If Kite is already logged in, use Place now.</div>
+  <div class="ob-muted" style="margin-top: 4px;">AMO window now {{ d.now }} IST: <b>{{ 'open' if d.window_open else 'shut, reopens ' ~ d.next_window }}</b>. Zerodha takes F&amp;O AMOs 15:45 to 01:00 and 05:30 to 09:10.</div>
+  {% if d.arm and d.arm.status in ('placed', 'failed', 'firing') %}
+    <div class="oo-status"><b class="{{ 'oo-ok' if d.arm.status == 'placed' else 'oo-bad' if d.arm.status == 'failed' else 'oo-wait' }}">{{ {'placed': 'Placed and confirmed by Kite', 'failed': 'Problem: act now', 'firing': 'Placing or interrupted: check the order book'}[d.arm.status] }}</b>
+      <span class="ob-muted">{{ d.arm.detail or '' }}</span></div>
+  {% elif d.arm and d.arm.status == 'armed' %}
+    <div class="oo-status"><b class="oo-wait">Armed.</b> {% for x in d.arm.legs %}{{ x.tradingsymbol }} up to {{ x.limit }}{{ ', ' if not loop.last else '' }}{% endfor %}</div>
+  {% endif %}
+  {% if d.shorts %}
+    {% for l in d.shorts %}
+    <label class="oo-leg"><input type="checkbox" class="oo-sym" value="{{ l.tradingsymbol }}" checked> <span>{{ l.tradingsymbol }}, buy {{ -l.net_qty }}, last mark {{ l.mark_price or 'none' }}, limit</span>
+      <input type="number" step="0.05" min="0.05" class="oo-lim" data-sym="{{ l.tradingsymbol }}" value="{{ l.suggest }}"></label>
+    {% endfor %}
+    <div class="oo-note" style="margin-top: 8px;">The limit must be above the opening price or the order will not fill. Set too far above the market, Zerodha may reject it, so check the status after it is placed.</div>
+    <div class="oo-acts">
+      <button class="ob-btn" id="oo-do-arm" type="button">Arm</button>
+      {% if d.arm and d.arm.status == 'armed' %}<button class="ob-btn" id="oo-do-fire" type="button">Place now</button><button class="ob-btn" id="oo-do-disarm" type="button">Disarm</button>{% endif %}
+    </div>
+  {% else %}
+    <div class="ob-muted" style="margin-top: 8px;">No open short leg to close.</div>
+    {% if d.arm %}<div class="oo-acts"><button class="ob-btn" id="oo-do-disarm" type="button">Clear</button></div>{% endif %}
+  {% endif %}
+  <div class="oo-note" style="margin-top: 8px;">To cancel a placed AMO, use Orders in the Kite app before about 09:10. Log in again after {{ d.safe_login }} so this page can keep reading Kite.</div>
+</div>
+
+<script>
+(function () {
+  function post(url, body) {
+    return fetch(url, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body || {})})
+      .then(function (r) { return r.json().then(function (j) { return {ok: r.ok, j: j}; }); });
+  }
+  var live = document.getElementById('oo-live');
+  function refresh() {
+    post('/api/options/orders/refresh').then(function (r) {
+      if (r.ok && r.j.ok) { if (r.j.changed) location.reload(); live.textContent = ''; }
+      else { live.textContent = 'Not live: ' + ((r.j && r.j.error) || 'cannot read Kite') + '. Showing the last read.'; }
+    }).catch(function () { live.textContent = 'Not live: cannot reach the server.'; });
+  }
+  refresh();
+  setInterval(refresh, {{ 15000 if request.query_params.get('fired') or (d.arm and d.arm.status in ('firing', 'placed')) else 60000 }});
+  function act(id, url, word, body) {
+    var b = document.getElementById(id);
+    if (!b) return;
+    b.addEventListener('click', function () {
+      var typed = window.prompt('Type ' + word + ' to confirm');
+      if (!typed) return;
+      post(url, Object.assign({confirm: typed}, body ? body() : {})).then(function (r) {
+        if (r.ok) location.href = '/options/orders' + (word === 'FIRE' ? '?fired=1' : ''); else window.alert((r.j && r.j.error) || 'failed');
+      });
+    });
+  }
+  act('oo-do-arm', '/api/options/orders/arm', 'ARM', function () {
+    var legs = [];
+    document.querySelectorAll('.oo-sym').forEach(function (c) {
+      if (c.checked) legs.push({tradingsymbol: c.value, limit: parseFloat(document.querySelector('.oo-lim[data-sym="' + c.value + '"]').value)});
+    });
+    return {legs: legs};
+  });
+  act('oo-do-fire', '/api/options/orders/fire', 'FIRE');
+  act('oo-do-disarm', '/api/options/orders/disarm', 'DISARM');
+})();
+</script>
+{% endblock %}
