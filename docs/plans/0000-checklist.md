@@ -2,7 +2,7 @@
 
 _The scannable status board. **Plans are truth, this is the view.** Full session history → `git log` + `HANDOFF.md`; the "why" → `docs/decisions/`; weights rationale → `docs/reference/signal-weights.md`. Update via `/handoff`._
 _Glyphs: ✅ done · ⏳ in progress/next · 🚫 blocked · 💤 parked · ↔ cross-track link._
-_Numbering: [ADR 0015](../decisions/0015-track-numbering-and-rename.md) (tracks) + [ADR 0016](../decisions/0016-plan-numbering-fresh-start.md) (plans). Last updated: 2026-11-01._
+_Numbering: [ADR 0015](../decisions/0015-track-numbering-and-rename.md) (tracks) + [ADR 0016](../decisions/0016-plan-numbering-fresh-start.md) (plans). Last updated: 2026-11-04._
 
 ## Next 3 (active priorities)
 
