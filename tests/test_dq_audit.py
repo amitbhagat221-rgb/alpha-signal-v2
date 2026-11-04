@@ -1,6 +1,7 @@
 """The weekly data-quality audit (plan 0020 / plan 0019): the probes notice a planted
 fault, and the auditor seat's memo is checked against a re-run of each finding's query."""
 import sqlite3
+from datetime import date, timedelta
 
 import pytest
 
@@ -12,6 +13,8 @@ from tools import dq_probes
 from tools.reconcile import FUND_FIELDS
 
 from tests.test_org import EL, q  # noqa: F401  (the fresh-DB fixture)
+
+AS_OF = (date.today() - timedelta(days=3)).isoformat()   # org.docs reads the last 30 days: a fixed date expires
 
 
 def _reader(tmp_path, rows):
@@ -98,7 +101,7 @@ def test_a_call_that_does_not_match_the_rerun_is_on_the_record(q, rerun):  # noq
 
 
 def test_the_audit_memo_is_stored_with_its_score_and_feeds_the_scorecard(q, rerun):  # noqa: F811
-    q.enqueue("org_dq_audit", items=[("2026-W40", {**PAYLOAD, "key": "2026-W40", "period": "2026-W40", "as_of": "2026-10-04"}, 4)])
+    q.enqueue("org_dq_audit", items=[("2026-W40", {**PAYLOAD, "key": "2026-W40", "period": "2026-W40", "as_of": AS_OF}, 4)])
     (task,) = q.claim("org_dq_audit", worker="dq-auditor")
     out = q.submit([{"task_id": task["task_id"], "result": _memo({"F1": "real", "F2": "real", "F3": "needs-more-data"})}],
                    worker="dq-auditor")
@@ -129,7 +132,7 @@ def test_a_real_finding_touching_the_picks_drafts_a_fix_order(q, rerun):  # noqa
     approval, parented to the memo; a finding without impact `picks` drafts nothing."""
     memo = _memo({"F1": "real", "F2": "does-not-reproduce", "F3": "needs-more-data"})
     memo["findings"][0].update(impact="picks", proposed_fix="re-map the column", owner="backend-engineer")
-    q.enqueue("org_dq_audit", items=[("2026-W41", {**PAYLOAD, "key": "2026-W41", "period": "2026-W41", "as_of": "2026-10-11"}, 4)])
+    q.enqueue("org_dq_audit", items=[("2026-W41", {**PAYLOAD, "key": "2026-W41", "period": "2026-W41", "as_of": AS_OF}, 4)])
     (task,) = q.claim("org_dq_audit", worker="dq-auditor")
     assert q.submit([{"task_id": task["task_id"], "result": memo}], worker="dq-auditor")["counts"] == {"done": 1}
     (wo,) = [w for w in org.work_orders() if w["role"] == "dq-auditor"]
@@ -139,7 +142,7 @@ def test_a_real_finding_touching_the_picks_drafts_a_fix_order(q, rerun):  # noqa
     (memo_doc,) = org.docs(["dq_audit"])
     assert org.docs(["work_order"])[0]["parent_doc_id"] == memo_doc["doc_id"]
     # a memo with no pick-touching real finding drafts nothing more
-    q.enqueue("org_dq_audit", items=[("2026-W42", {**PAYLOAD, "key": "2026-W42", "period": "2026-W42", "as_of": "2026-10-18"}, 4)])
+    q.enqueue("org_dq_audit", items=[("2026-W42", {**PAYLOAD, "key": "2026-W42", "period": "2026-W42", "as_of": AS_OF}, 4)])
     (task,) = q.claim("org_dq_audit", worker="dq-auditor")
     q.submit([{"task_id": task["task_id"], "result": _memo({"F1": "real", "F2": "real", "F3": "real"})}], worker="dq-auditor")
     assert len([w for w in org.work_orders() if w["role"] == "dq-auditor"]) == 1
