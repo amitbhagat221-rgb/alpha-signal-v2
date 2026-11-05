@@ -219,9 +219,17 @@ def start_sync_run(c):
     return cur.lastrowid
 
 
-def last_sync(c):
-    r = c.execute("SELECT MAX(started_at) FROM runs WHERE kind='datamodel_sync' AND status='ok'").fetchone()
-    return r[0]
+def last_sync(c, step=None):
+    """Start time of the last successful sync that ran `step` (any step when None), or None. Per step, because a partial
+    sync must not move another step's starting point: on 2026-11-01 a `--only decisions` run did, and the next full sync
+    skipped the 31 Oct 14:00 harvest for good (556 nse_announcements, 125 surveillance_flags; ADR 0054). A run with no
+    recorded steps ran them all."""
+    best = None
+    for started, steps in c.execute("SELECT started_at, json_extract(attrs, '$.steps') FROM runs "
+                                    "WHERE kind='datamodel_sync' AND status='ok'"):
+        if (step is None or steps is None or step in steps.split(",")) and (best is None or started > best):
+            best = started
+    return best
 
 
 def ensure_runs(c, kind, date_sql, official=1):
@@ -1229,6 +1237,15 @@ def sync_research(c):
 
 # ─────────────────────────── ops ───────────────────────────
 
+def unmirrored_log(c, last):
+    """pipeline_log rows the step log does not hold yet: everything past the watermark, plus any terminal row below it.
+    steplog.py writes its attempts with their own log_id, so its first write jumped the watermark past 98 older rows
+    (2026-11-01) and they were never carried. A RUNNING row below the watermark is closed or was an orphan already."""
+    return pd.read_sql(f"""SELECT * FROM pipeline_log WHERE id > {last} OR (status <> 'RUNNING' AND id NOT IN
+        (SELECT CAST(json_extract(attrs, '$.log_id') AS INTEGER) FROM step_runs WHERE json_extract(attrs, '$.from')='pipeline_log'))
+        ORDER BY id""", c)
+
+
 def sync_ops(c, full):
     with tx(c):
         # pipeline_log → runs + step_runs (terminal rows; a RUNNING row with no terminal twin is an orphan)
@@ -1236,7 +1253,7 @@ def sync_ops(c, full):
                          "WHERE json_extract(attrs, '$.from')='pipeline_log'").fetchone()[0]
         # always from the watermark, --full included: steplog.py writes the attempt itself with its log_id,
         # so only rows a process on older code logged are left to carry (a full re-mirror would double them)
-        pl = pd.read_sql(f"SELECT * FROM pipeline_log WHERE id > {last} ORDER BY id", c)
+        pl = unmirrored_log(c, last)
         n_sr = 0
         if not pl.empty:
             term = pl[pl["status"] != "RUNNING"]
@@ -1486,6 +1503,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--full", action="store_true", help="rebuild every slice from all history")
     ap.add_argument("--only", default="", help="comma-separated subset of: " + ",".join(STEPS))
+    ap.add_argument("--since", help="resume from this date instead of each step's last run, once, to recover skipped rows")
     ap.add_argument("--seed-from", help="older DB snapshot to extend classification history from (with --seed-date)")
     ap.add_argument("--seed-date", help="the date that snapshot describes (YYYY-MM-DD)")
     a = ap.parse_args(argv)
@@ -1505,10 +1523,12 @@ def main(argv=None):
     if problem:
         sys.exit(f"datamodel sync not started: {problem}")
     ensure_schema(c)
-    since = last_sync(c)
-    full = a.full or since is None
+    since_any = last_sync(c)
+    full = a.full or since_any is None
+    # each step resumes from its own last run; --since overrides it once, to recover rows a past run skipped
+    since = {s: a.since or last_sync(c, s) for s in only}
     run_id = start_sync_run(c)
-    log(f"run {run_id} · {'FULL' if full else 'incremental since ' + since} · db={DB_PATH}")
+    log(f"run {run_id} · {'FULL' if full else 'incremental since ' + (a.since or since_any)} · db={DB_PATH}")
     t0 = time.time()
     status, err = "ok", None
     try:
@@ -1531,11 +1551,11 @@ def main(argv=None):
             elif s == "estimates":
                 sync_estimates(c)
             elif s == "events":
-                sync_events(c, full, since)
+                sync_events(c, full, since[s])
             elif s == "documents":
-                sync_documents(c, full, since)
+                sync_documents(c, full, since[s])
             elif s == "features":
-                sync_features(c, run_id, full, since)
+                sync_features(c, run_id, full, since[s])
             elif s == "decisions":
                 sync_decisions(c, full, run_id)
             elif s == "research":

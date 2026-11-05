@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from datamodel.sync import last_sync  # noqa: E402
 from datamodel.sync import (EVENT_SPECS, FEATURE_SKIP, FEATURE_TABLES, HISTORY_KEPT, MEMBERSHIP, SEC, TIER_TO_CLS, TODAY, cat_ensure, cat_ids,  # noqa: E402
                             coltypes, cols, connect, ensure_schema, exists, q, tx)
 
@@ -61,6 +62,7 @@ RETIRED = {
     "multibagger_book_log": "kept as-is: plan 0026 append-only history of every change to multibagger_book",
     "data_quarantine": "kept as-is: plan 0032 stage 2 register of distrusted rows (tools/quarantine.py), Ops state",
     "sqlite_sequence": "SQLite internal",
+    "sqlite_stat1": "SQLite internal: the planner statistics ANALYZE writes",
 }
 
 
@@ -78,12 +80,7 @@ def _close(a, b):
 
 def watermark(c, step):
     """Start time of the last successful sync that ran `step` (rows fetched after it are not in v3 yet), or None."""
-    best = None
-    for started, steps in c.execute("SELECT started_at, json_extract(attrs, '$.steps') FROM runs "
-                                    "WHERE kind='datamodel_sync' AND status='ok'"):
-        if (steps is None or step in steps.split(",")) and (best is None or started > best):
-            best = started
-    return best
+    return last_sync(c, step)
 
 
 def late(col, wm):
@@ -189,10 +186,10 @@ def checks(c):
                for x, ty in ac.items() if ty in ("REAL", "INTEGER")),
            *_one(c, f"SELECT SUM(value) FROM {e_lv} WHERE source='analyst_consensus'"),
            "non-null cells vs latest versions (a nulled cell is a NULL version)")
-    yield ("forecast_history", *_one(c, f"SELECT COUNT(*) + COUNT(change) FROM forecast_history t JOIN entities e ON {SEC}=t.sid"),
-           *_one(c, f"SELECT COUNT(*) FROM {e_lv} WHERE source='forecast_history'"),
+    yield ("forecast_history", *_one(c, f"SELECT COUNT(value) + COUNT(change) FROM forecast_history t JOIN entities e ON {SEC}=t.sid"),
+           *_one(c, f"SELECT COUNT(value) FROM {e_lv} WHERE source='forecast_history'"),
            *_one(c, f"SELECT COALESCE(SUM(value),0) + COALESCE(SUM(change),0) FROM forecast_history t JOIN entities e ON {SEC}=t.sid"),
-           *_one(c, f"SELECT SUM(value) FROM {e_lv} WHERE source='forecast_history'"), "value + change as two metrics")
+           *_one(c, f"SELECT SUM(value) FROM {e_lv} WHERE source='forecast_history'"), "non-null value + change vs latest versions (a nulled cell is a NULL version)")
     acs = [x for x in cols(c, "analyst_consensus_snapshots") if x not in ("sid", "snapshot_date", "source", "fetched_at")]
     yield ("analyst_consensus_snapshots",
            sum(_one(c, f"SELECT COUNT({x}) FROM analyst_consensus_snapshots t JOIN entities e ON {SEC}=t.sid")[0] for x in acs),
