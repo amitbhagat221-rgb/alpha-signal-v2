@@ -30,6 +30,7 @@ import pandas as pd
 import requests
 
 from db import get_db, read_sql
+import runlog
 
 DELAY_SEC = 2.0
 _MMM = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"]
@@ -150,6 +151,7 @@ def build(dates):
 
 
 def main():
+    runlog.note("sticker:tools.build_historical_universe")
     parser = argparse.ArgumentParser()
     parser.add_argument("--dates", default=None,
                         help="Comma-separated ISO dates (anchors + end). Default: built-in set.")

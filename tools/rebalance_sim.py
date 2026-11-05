@@ -374,6 +374,7 @@ def _sweep_label(rank_exit, drift_pp, halflife):
 
 
 def _to_md(df):
+    """Minimal DataFrame->markdown table (avoids the optional 'tabulate' dep)."""
     if df.empty:
         return "_(no rows)_"
     cols = list(df.columns)

@@ -27,12 +27,12 @@ Usage:
 
 import argparse
 import json
-import os
 import time
 from datetime import date, datetime
 
 from db import get_db, read_sql
 from hosts import HOSTS
+from sources.regulatory_classifier import _get_client   # the one Anthropic client
 
 # Latest production-grade Claude with web-search; sector content is structured
 # generation, not novel reasoning, so Sonnet over Opus for cost-efficiency.
@@ -137,16 +137,6 @@ Rules:
 - "competitive_landscape.players" MUST include private / unlisted majors — e.g. Air India in Aviation, BSNL in Telecom, NPCI in Payments, LIC's unlisted subsidiaries, IKEA, foreign banks, MNC unlisted arms. Set `listed: false` and `ticker: null` for these. The share_pct of all listed + unlisted players should reflect real industry concentration; do not normalise to 100% over listed-only.
 
 Return ONLY the JSON object."""
-
-
-def _get_client():
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if not api_key:
-        raise RuntimeError(
-            "ANTHROPIC_API_KEY not set. Run: source ~/.config/alpha-signal/secrets.env"
-        )
-    import anthropic
-    return anthropic.Anthropic(api_key=api_key)
 
 
 def _top_stocks_for_key(key: str, by: str = "industry", n: int = 8) -> str:

@@ -34,6 +34,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from config import PICKABLE_TIERS
 from db import read_sql, BACKTEST_SIGNALS
+import runlog
 
 OUT_DIR = PROJECT_ROOT / "data"
 TIERS = PICKABLE_TIERS
@@ -239,6 +240,7 @@ def save_json(tier, corr, n_per_col, threshold):
 
 
 def main():
+    runlog.note("sticker:tools.factor_correlation")
     parser = argparse.ArgumentParser()
     parser.add_argument("--tier", choices=list(TIERS) + ["all"], default="all")
     parser.add_argument("--threshold", type=float, default=0.6,

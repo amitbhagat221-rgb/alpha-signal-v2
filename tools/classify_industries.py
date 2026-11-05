@@ -27,12 +27,12 @@ Usage:
 
 import argparse
 import json
-import os
 import time
 from datetime import datetime
 
 from db import get_db, read_sql
 from hosts import HOSTS
+from sources.regulatory_classifier import _get_client   # the one Anthropic client
 
 HAIKU_MODEL = HOSTS["anthropic"]["models"]["industry_classify"]
 BATCH_SIZE = 25       # stocks per Haiku call — small payload, ~1 token / stock
@@ -106,16 +106,6 @@ INDUSTRIES_BY_SECTOR = {
 
 # Flatten for validation
 ALL_INDUSTRIES = {ind: sec for sec, inds in INDUSTRIES_BY_SECTOR.items() for ind in inds}
-
-
-def _get_client():
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if not api_key:
-        raise RuntimeError(
-            "ANTHROPIC_API_KEY not set. Run: source ~/.config/alpha-signal/secrets.env"
-        )
-    import anthropic
-    return anthropic.Anthropic(api_key=api_key)
 
 
 def _build_prompt(stocks_batch, sector):
