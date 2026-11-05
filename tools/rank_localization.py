@@ -29,22 +29,10 @@ from scipy.stats import ttest_ind
 
 from config import PICKABLE_TIERS
 from db import read_sql
+import runlog
+from tools.rebalance_sim import _to_md
 
 OUT_PATH = PROJECT_ROOT / "docs" / "studies" / "rank-localization-2026-07.md"
-
-
-def _to_md(df):
-    """Minimal DataFrame->markdown table (avoids the optional 'tabulate' dep)."""
-    if df.empty:
-        return "_(no rows)_"
-    cols = list(df.columns)
-    header = "| " + " | ".join(cols) + " |"
-    sep = "| " + " | ".join("---" for _ in cols) + " |"
-    body = "\n".join(
-        "| " + " | ".join("" if pd.isna(v) else str(v) for v in row) + " |"
-        for row in df.itertuples(index=False)
-    )
-    return "\n".join([header, sep, body])
 
 RANK_BUCKETS = [(1, 5), (6, 10), (11, 20), (21, 50)]
 TIERS = list(PICKABLE_TIERS)
@@ -206,6 +194,7 @@ def write_report(bucket_df, t_df, pit_summary, pit_per_anchor):
 
 
 def main():
+    runlog.note("sticker:tools.rank_localization")
     bucket_df, t_df = pick_outcomes_lens()
     pit_summary, pit_per_anchor = pit_proxy_lens()
 

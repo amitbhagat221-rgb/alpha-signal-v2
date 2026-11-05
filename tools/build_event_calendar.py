@@ -31,6 +31,7 @@ Usage:
 from __future__ import annotations
 
 from db import get_db, insert_df, read_sql
+import runlog
 from tools.sid_crosswalk import scrip_cd_to_sid
 
 _CREATE_SQL = """
@@ -97,6 +98,7 @@ def populate() -> dict:
 
 
 if __name__ == "__main__":
+    runlog.note("sticker:tools.build_event_calendar")
     counts = populate()
     print(f"event_calendar populated: {counts}")
     print(read_sql("SELECT event_type, COUNT(*) n FROM event_calendar GROUP BY event_type"))
