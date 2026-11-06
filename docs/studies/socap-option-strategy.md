@@ -143,6 +143,44 @@ On 3-Feb the +2.8 % gap had already happened at 09:15, and the index was back to
 3. **SOCAP wins much more often than our rebuild (84 % against 65 %).** What we cannot copy is probably the extra: filling inside the spread, size and timing, and the overnight book.
 4. **Neither window has a crash** (2021–26 minute data). Our rule's 2019–26 daily test includes March 2020. The rebuilt rule takes on new risk each morning but avoids overnight gaps, so a crash that gaps before the open would hurt it less than it hurts us.
 
+## Follow-up: a plain short strangle at 09:30 on expiry day (exploratory, not pre-registered)
+
+**Question (Amit):** "if you were to avoid a gap up or down and place order on 930 a short strangle does it earn anything"
+
+**Answer:** a little, but not enough.
+- Selling at 09:30 does avoid the overnight gap. It does not avoid the loss days: the worst losses come from moves during the day after 09:30.
+- On NIFTY no strike distance earns a reliable profit (t 1.5–1.9).
+- On SENSEX the far-out version (Δ 0.05) earns ₹230 a lot (t 2.64), but it lost money in 2026.
+- On the same weeks our live rule earns 2–4 times more, with a Sharpe of 3.6–4.5 against 0.1–1.5.
+
+Same data, costs and settlement as rule P, no hedge (`python -m tools.socap_backtest --naked out.csv`).
+
+| Index | Δ | Strikes from F (call / put) | Win % | Mean ₹/lot | Sharpe | t | Worst | Worst ÷ mean | ≈ % of margin a year | Credit kept |
+|---|---|---|---|---|---|---|---|---|---|---|
+| NIFTY | 0.05 | 1.2 % / 1.3 % | 95 | 157 | 0.78 | 1.82 | −18,298 | 116 | 5 | 44 % |
+| NIFTY | 0.15 | 0.7 % / 0.7 % | 80 | 258 | 0.63 | 1.57 | −28,368 | 110 | 8 | 20 % |
+| NIFTY | 0.40 | 0.2 % / 0.2 % | 66 | 453 | 0.67 | 1.90 | −33,333 | 74 | 13 | 10 % |
+| SENSEX | 0.05 | 1.3 % / 1.4 % | 94 | 230 | 1.52 | 2.64 | −7,769 | 34 | 7 | 58 % |
+| SENSEX | 0.15 | 0.7 % / 0.8 % | 80 | 290 | 0.74 | 1.41 | −14,877 | 51 | 7 | 18 % |
+| SENSEX | 0.40 | 0.2 % / 0.2 % | 62 | 61 | 0.08 | 0.15 | −19,259 | 314 | −1 | −1 % |
+
+The Δ 0.10 and Δ 0.25 rows fall between their neighbours.
+
+- **Our live rule (Δ 0.05, sold at the close two sessions earlier) on the same weeks:**
+  - NIFTY: ₹572 a lot, Sharpe 4.49, worst −₹10,008.
+  - SENSEX: ₹619 a lot, Sharpe 3.59, worst −₹11,050.
+- **Why ours earns more.** Most of a weekly option's time value runs off during the two nights before expiry. By 09:30 on expiry day, a NIFTY Δ 0.05 strangle collects only about ₹357 a lot, against about ₹1,100 for ours. Strikes 1.2 % away can still be crossed by an ordinary day's move.
+- **Gap days are not the problem.** The worst days had small opening gaps and then a large move during the day:
+
+  | Day | Opening gap | Move after 09:30 |
+  |---|---|---|
+  | NIFTY 2025-04-17 | −0.2 % | +2.4 % |
+  | NIFTY 2025-05-15 | +0.1 % | +1.9 % |
+  | NIFTY 2022-06-16 | +1.0 % | −3.1 % |
+
+- **After a gap above 1 %,** NIFTY Δ 0.05 won all 20 days (₹495 a lot on average), but SENSEX lost on average over its 7 such days. These samples are too small to build a rule on.
+- **Year by year:** NIFTY Δ 0.05 was positive every year but earned only ₹638 a lot in 2025. SENSEX was −₹5,668 in 2026.
+
 ## Limits
 
 - **Trade prices, not bid/ask.** Slippage is assumed (0.25 %, with 0.1 % and 1 % tested). The Kite quote capture since 2026-11 gives real spreads for a forward check.

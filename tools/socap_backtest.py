@@ -25,6 +25,7 @@ Interpretations where the pre-registration is silent (also in the study doc):
 Usage:
   python -m tools.socap_backtest --smoke                  # three expiry days, fills printed
   python -m tools.socap_backtest --report out.md          # everything in the pre-registration
+  python -m tools.socap_backtest --naked out.csv          # follow-up: unhedged 09:30 strangles (exploratory)
 """
 
 from __future__ import annotations
@@ -600,12 +601,38 @@ def report(df, vol, skipped):
     return "\n".join(L), m
 
 
+def naked_0930(deltas=(0.05, 0.10, 0.15, 0.25, 0.40)):
+    """Follow-up, exploratory (not pre-registered): an unhedged strangle sold at 09:30 on expiry day, so the
+    overnight gap is already behind it, at each |delta|; with the 09:15 opening gap against the previous close."""
+    rows = []
+    with _ro() as c:
+        for u, e, src in expiry_days(c):
+            d, _ = load_day(c, u, e, src)
+            f0 = forward_at(d, 9 * 60 + 30) if d is not None else None
+            if f0 is None:
+                continue
+            ix = index_minutes(src, u)
+            prev = ix[ix["trading_day"] < e]
+            gap = (d.idx_open915 / float(prev["close"].iloc[-1]) - 1) * 100 if len(prev) else np.nan
+            for dl in deltas:
+                r = run_day(d, f0, {**PRIMARY, "delta": dl, "h": 0.0})
+                if r is not None:
+                    rows.append({"u": u, "e": e, "delta": dl, "lot": d.lot, "F": f0[0], "S": d.S_settle, "gap": gap, **r})
+    df = pd.DataFrame(rows)
+    df["rs_lot"] = df["net"] * df["lot"]
+    return df
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[1])
     ap.add_argument("--smoke", action="store_true")
     ap.add_argument("--report")
     ap.add_argument("--csv")
+    ap.add_argument("--naked", help="follow-up: unhedged 09:30 strangles at five deltas, written to this CSV")
     a = ap.parse_args(argv)
+    if a.naked:
+        naked_0930().to_csv(a.naked, index=False)
+        return 0
     if a.smoke:
         df, vol, sk = build(limit=3, verbose=True)
         print(sk)
