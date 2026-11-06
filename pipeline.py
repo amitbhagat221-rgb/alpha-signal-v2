@@ -14,6 +14,7 @@ Usage:
 
 import argparse
 import importlib
+import json
 import logging
 import sys
 import time
@@ -21,6 +22,7 @@ import traceback
 
 import runlog
 from datetime import date, datetime
+from pathlib import Path
 
 from config import PIPELINE, LOG_PATH
 import db
@@ -78,11 +80,53 @@ STEP_SPECS = {s["name"]: s for s in PIPELINE_STEPS}
 
 # ── Pipeline engine ──
 
+LOG_STEP_WAIT_S = 900          # how long a step record waits out another writer before giving up
+UNLOGGED = Path(__file__).resolve().parent / "output" / "unlogged_steps.jsonl"
+
+
 def log_step(step_name: str, status: str, rows: int = None,
-             started: str = None, error: str = None):
-    """Record a step attempt: pipeline_log and step_runs (steplog.log, plan 0030)."""
+             started: str = None, error: str = None, wait_s: float = None):
+    """Record a step attempt: pipeline_log and step_runs (steplog.log, plan 0030).
+
+    A long writer can hold the database past sqlite's 30 s busy wait. On 2026-11-01 that made the record of a
+    skipped Screener harvest fail ("database is locked"), so the skip vanished and `fundamentals_screener` went
+    22 days stale before anything noticed. So a locked database is retried for up to LOG_STEP_WAIT_S; if it is
+    still locked, the record goes to output/unlogged_steps.jsonl and a FAILED one is pushed to the phone, then
+    the error is raised as before."""
+    import sqlite3
+    import time as _time
     import steplog
-    steplog.log(step_name, status, rows=rows, started=started, error=error)
+    deadline = _time.monotonic() + (LOG_STEP_WAIT_S if wait_s is None else wait_s)
+    pause = 5.0
+    while True:
+        try:
+            return steplog.log(step_name, status, rows=rows, started=started, error=error)
+        except sqlite3.OperationalError as e:
+            if "locked" not in str(e) and "busy" not in str(e):
+                raise
+            if _time.monotonic() + pause > deadline:
+                _unlogged(step_name, status, rows, started, error, str(e))
+                raise
+            _time.sleep(pause)
+            pause = min(pause * 2, 60.0)
+
+
+def _unlogged(step_name, status, rows, started, error, why):
+    """Last resort when the database stays locked: a file line, and a push for a failure."""
+    rec = {"at": datetime.now().isoformat(timespec="seconds"), "step": step_name, "status": status, "rows": rows,
+           "started": started, "error": error, "why_unlogged": why}
+    try:
+        UNLOGGED.parent.mkdir(parents=True, exist_ok=True)
+        with open(UNLOGGED, "a") as f:
+            f.write(json.dumps(rec) + "\n")
+    except OSError:
+        pass
+    if status == "FAILED":
+        try:
+            from tools.health_report import send_ntfy
+            send_ntfy(f"{step_name} FAILED and could not be logged (database locked): {str(error)[:160]}", urgent=True)
+        except Exception:                                   # noqa: BLE001  the file line is already written
+            pass
 
 
 UNDECLARED = {}   # step → {"reads": [...], "writes": [...]} seen at run time but not declared
