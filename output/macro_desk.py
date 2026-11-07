@@ -467,6 +467,29 @@ def write(deadline_min=20):
     return r
 
 
+LOCK_WAIT_S = 900       # the 05:45 run meets the morning datamodel sync, which holds the write lock for ~20 minutes
+
+
+def _wait_out_lock(fn, *args, wait_s=None, **kw):
+    """Run fn, retrying while another writer holds the database. From 2026-11-04 the 05:45 run met the morning
+    datamodel sync (05:35-06:00) every day, lost its desk_snapshots write to "database is locked" past sqlite's
+    30 s busy wait, and the macro page stopped updating. fn must be safe to repeat: run() writes in one
+    transaction, so a locked attempt leaves nothing behind."""
+    import sqlite3
+    import time
+    deadline = time.monotonic() + (LOCK_WAIT_S if wait_s is None else wait_s)
+    pause = 10.0
+    while True:
+        try:
+            return fn(*args, **kw)
+        except sqlite3.OperationalError as e:
+            if ("locked" not in str(e) and "busy" not in str(e)) or time.monotonic() + pause > deadline:
+                raise
+            print(f"  database locked by another writer, retrying in {pause:.0f}s", flush=True)
+            time.sleep(pause)
+            pause = min(pause * 2, 120.0)
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description="the macro page's daily brief (plan 0028)")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -476,11 +499,11 @@ def main(argv=None):
     w = sub.add_parser("write"); w.add_argument("--deadline-min", type=int, default=20); w.add_argument("--force", action="store_true")
     a = ap.parse_args(argv)
     if a.cmd == "run":
-        run(a.date, a.method)
+        _wait_out_lock(run, a.date, a.method)
     elif a.cmd == "write":
         from output import macro_desk as me      # the queue imports this module by name, not as __main__
         me.FORCE_NOTE = a.force
-        me.write(a.deadline_min)
+        _wait_out_lock(me.write, a.deadline_min)
     elif a.cmd == "rbi":
         A.save("rbi", {"colour": a.colour, "text": a.text}, a.date or dt.date.today().isoformat(), method="manual")
         print("RBI stance saved")
