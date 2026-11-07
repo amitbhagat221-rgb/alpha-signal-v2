@@ -114,5 +114,8 @@ Status key: **A** accepted · **P→N** partly superseded by N · **S→N** supe
 | 0089 | [The architecture review runs weekly from probes; a drafted order's tier follows the path](0089-architecture-review-on-a-cadence.md) | A (2026-11-01; extends 0085 / 0086; plan 0032 stage 6) |
 | 0090 | [Org trim: the chief-of-staff and the AI scout are dropped, three seats run less often](0090-org-trim-two-seats-dropped-three-demoted.md) | A (2026-11-01; amends 0057; plan 0019 roster) |
 | 0091 | [Approved Tier B work orders run unattended at night, inside hard limits, each with a plain-words memo](0091-unattended-tier-b-runner.md) | A (2026-11-01; switches on what 0086 allowed; plan 0032 stage 7) |
+| 0093 | [Live order controls: session truth, preflight, loud alarms, place-at-open](0093-live-order-controls-session-truth-preflight.md) | A (2026-11-03; plan 0029) |
+| 0094 | [Orders by day, a close armed for the next login, results warning](0094-orders-page-armed-amo-results-warning.md) | A (2026-11-03; plan 0029) |
 | 0095 | [Paper books run three models per tier: Slow, Fast, Blend, each under a bar chosen by a pre-registered test](0095-three-models-under-a-better-bar.md) | A (2026-11-03; supersedes 0092 §1–2) |
 | 0096 | [The unattended runner merges on "no new failures", and leaves data and ranking work to a session](0096-runner-gate-compares-to-a-clean-copy.md) | A (2026-11-05; amends 0091; plan 0032 stage 7) |
+| 0097 | [The daily position check: facts on every open short, no signal](0097-daily-position-check.md) | B (2026-11-04; plan 0029; read-only) |

@@ -1741,7 +1741,7 @@ def test_orders_page_shows_each_status_the_warning_and_the_arm_controls(ops, con
     assert authed.post("/api/options/orders/arm", json={"legs": []}).status_code == 400   # no confirm word
 
 
-# ───────────────────────────── the daily position check (ADR 0095) ─────────────────────────────
+# ───────────────────────────── the daily position check (ADR 0097) ─────────────────────────────
 
 def _leg(sym, ot, k, net, sold=None, bought=None):
     return {"tradingsymbol": sym, "option_type": ot, "strike": float(k), "net_qty": net, "sell_qty": -net if sold else 0, "sell_avg": sold,

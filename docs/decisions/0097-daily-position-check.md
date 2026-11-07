@@ -1,4 +1,6 @@
-# ADR 0095: The daily position check
+# ADR 0097: The daily position check
+
+_Renumbered from a second 0095 on 2026-11-07; code comments still say 0095 until the options_live.py comment is approved._
 
 **Date:** 2026-11-04 · **Status:** accepted · **Plan:** 0029
 
